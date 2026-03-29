@@ -1,6 +1,6 @@
 import { useState, useCallback, useMemo, useEffect, useRef } from 'react';
 import { useTimeSimulator } from '@/hooks/useTimeSimulator';
-import { useBinanceData, type KlineData } from '@/hooks/useBinanceData';
+import { useBinanceData, calcPreloadCandles, type KlineData } from '@/hooks/useBinanceData';
 import { usePersistedState, loadPersistedSimState, saveSimState, clearSimState } from '@/hooks/usePersistedState';
 import { TimeControl } from '@/components/TimeControl';
 import { CandlestickChart } from '@/components/CandlestickChart';
@@ -68,7 +68,7 @@ const Index = () => {
   const [positions, setPositions] = usePersistedState<Position[]>('positions', []);
   const [pendingOrders, setPendingOrders] = usePersistedState<PendingOrder[]>('pending_orders', []);
   const [tradeHistory, setTradeHistory] = usePersistedState<TradeRecord[]>('trade_history', []);
-  const [balance, setBalance] = usePersistedState('balance', 10000);
+  const [balance, setBalance] = usePersistedState('balance', 1_000_000);
   const [bottomTab, setBottomTab] = useState('positions');
 
   // Initialize time simulator with restored state if running
@@ -108,7 +108,11 @@ const Index = () => {
 
     (async () => {
       const anchorTime = persistedSim.historicalAnchorTime!;
-      const data = await fetchKlines(persistedSim.symbol, persistedSim.interval, anchorTime, 1500);
+      const preloadMs = 30 * 24 * 60 * 60 * 1000;
+      const preLoadStartTime = anchorTime - preloadMs;
+      const contextCandles = calcPreloadCandles(persistedSim.interval, 30);
+      const totalLimit = contextCandles + 1500;
+      const data = await fetchKlines(persistedSim.symbol, persistedSim.interval, preLoadStartTime, totalLimit);
 
       if (data.length > 0 && pendingOrders.length > 0) {
         // Calculate current sim time
@@ -205,12 +209,18 @@ const Index = () => {
   }, [visibleData.length]);
 
   const handleStart = useCallback(async (timestamp: number) => {
-    const data = await fetchKlines(symbol, interval, timestamp, 1500);
+    // Pre-load 30 days of context before the anchor time + forward data
+    const preloadMs = 30 * 24 * 60 * 60 * 1000;
+    const preLoadStartTime = timestamp - preloadMs;
+    const contextCandles = calcPreloadCandles(interval, 30);
+    const totalLimit = contextCandles + 1500; // context + forward buffer
+
+    const data = await fetchKlines(symbol, interval, preLoadStartTime, totalLimit);
     if (data.length > 0) {
       prevVisibleLenRef.current = 0;
       sim.startSimulation(timestamp);
       toast.success('时间机器已启动', {
-        description: `穿越到 ${new Date(timestamp).toISOString().slice(0, 19)} UTC`,
+        description: `已加载 ${contextCandles} 根前置K线 + 穿越到 ${new Date(timestamp).toISOString().slice(0, 19)} UTC`,
       });
     } else {
       toast.error('数据获取失败', { description: error || '请检查时间范围和交易对' });
@@ -225,8 +235,13 @@ const Index = () => {
       const fee = calcFee(currentPrice, order.quantity, false);
       const margin = (order.quantity * currentPrice) / order.leverage;
 
-      if (margin + fee > balance) {
-        toast.error('保证金不足');
+      const totalMargin = positions.reduce((sum, p) => sum + p.margin, 0);
+      const availableBalance = balance - totalMargin;
+
+      if (margin + fee > availableBalance) {
+        toast.error('可用余额不足', {
+          description: `需要 ${(margin + fee).toFixed(2)} USDT，可用 ${availableBalance.toFixed(2)} USDT`,
+        });
         return;
       }
 
