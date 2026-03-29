@@ -61,10 +61,9 @@ export function DrawingOverlay({
   // Force re-render when chart scrolls/zooms to update drawing positions
   useEffect(() => {
     if (!chart) return;
-    const sub = chart.timeScale().subscribeVisibleTimeRangeChange(() => {
-      forceUpdate(n => n + 1);
-    });
-    return () => { sub(); };
+    const handler = () => forceUpdate(n => n + 1);
+    chart.timeScale().subscribeVisibleTimeRangeChange(handler);
+    return () => { chart.timeScale().unsubscribeVisibleTimeRangeChange(handler); };
   }, [chart]);
 
   const getChartPoint = useCallback((e: ReactMouseEvent): DrawingPoint | null => {
