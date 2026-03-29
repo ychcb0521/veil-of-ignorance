@@ -29,16 +29,8 @@ interface Props {
 export function ChartToolbar({ activeTool, onToolChange, indicators, onIndicatorsChange, onClearDrawings }: Props) {
   const [showIndicatorPanel, setShowIndicatorPanel] = useState(false);
 
-  const toggleIndicator = (type: string) => {
-    const existing = indicators.find(i => i.type === type);
-    if (existing) {
-      onIndicatorsChange(indicators.filter(i => i.type !== type));
-    } else {
-      const preset = INDICATOR_PRESETS.find(p => p.type === type)!;
-      onIndicatorsChange([...indicators, {
-        type, period: preset.defaultPeriod, color: preset.color, enabled: true,
-      }]);
-    }
+  const removeIndicator = (type: string) => {
+    onIndicatorsChange(indicators.filter(i => i.type !== type));
   };
 
   const updatePeriod = (type: string, period: number) => {
