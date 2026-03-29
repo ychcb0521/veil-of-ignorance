@@ -94,7 +94,7 @@ export function ChartToolbar({ activeTool, onToolChange, indicators, onIndicator
           <span key={ind.type} className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-mono font-medium"
             style={{ background: `${ind.color}20`, color: ind.color }}>
             {ind.type} {ind.period}
-            <button onClick={() => toggleIndicator(ind.type)} className="hover:opacity-70">
+            <button onClick={() => removeIndicator(ind.type)} className="hover:opacity-70">
               <X className="w-2.5 h-2.5" />
             </button>
           </span>
