@@ -147,14 +147,11 @@ const Index = () => {
 
     (async () => {
       const anchorTime = persistedSim.historicalAnchorTime!;
-      const preloadMs = 30 * 24 * 60 * 60 * 1000;
-      const preLoadStartTime = anchorTime - preloadMs;
-      const contextCandles = calcPreloadCandles(persistedSim.interval, 30);
-      const totalLimit = contextCandles + 1500;
-      const data = await fetchKlines(persistedSim.symbol, persistedSim.interval, preLoadStartTime, totalLimit);
+      // For restore, use current sim time as anchor so we have data up to now
+      const currentSim = anchorTime + (Date.now() - persistedSim.realStartTime!) * persistedSim.speed;
+      const data = await initLoad(persistedSim.symbol, persistedSim.interval, currentSim);
 
       if (data.length > 0 && pendingOrders.length > 0) {
-        const currentSim = anchorTime + (Date.now() - persistedSim.realStartTime!) * persistedSim.speed;
         const offlineKlines = data.filter(k => k.time <= currentSim);
         const result = matchOrdersOffline(pendingOrders, offlineKlines, balance);
 
