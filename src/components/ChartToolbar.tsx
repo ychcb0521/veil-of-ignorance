@@ -1,7 +1,7 @@
 import { DRAWING_TOOLS, type DrawingToolType } from '@/hooks/useDrawing';
-import { INDICATOR_PRESETS, IMPLEMENTED_TYPES, type IndicatorConfig } from '@/hooks/useIndicators';
+import { type IndicatorConfig } from '@/hooks/useIndicators';
 import { IndicatorMenu } from './IndicatorMenu';
-import { useState, useRef, useEffect } from 'react';
+import { useState } from 'react';
 import {
   Ruler, TrendingUp, GitBranch, Square, Pen, Type, MapPin,
   BarChart3, Settings, LayoutGrid, CandlestickChart as CandleIcon,
