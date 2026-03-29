@@ -1,30 +1,39 @@
-import { useEffect, useRef, useMemo } from 'react';
+import { useEffect, useRef, useCallback } from 'react';
 import { createChart, IChartApi, ISeriesApi, CandlestickData, Time, PriceLineOptions, LineStyle } from 'lightweight-charts';
 import type { KlineData } from '@/hooks/useBinanceData';
 import { useDrawing } from '@/hooks/useDrawing';
 import { usePersistedState } from '@/hooks/usePersistedState';
 import type { IndicatorConfig } from '@/hooks/useIndicators';
-import { calcSMA, calcEMA, calcBOLL, calcRSI, calcMACD, calcATR, INDICATOR_PRESETS, IMPLEMENTED_TYPES } from '@/hooks/useIndicators';
+import { calcSMA, calcEMA, calcBOLL, calcRSI, calcMACD, calcATR, INDICATOR_PRESETS } from '@/hooks/useIndicators';
 import { ChartToolbar } from './ChartToolbar';
 import { DrawingOverlay } from './DrawingOverlay';
 
 interface Props {
   data: KlineData[];
   symbol: string;
+  /** Called when user scrolls near the left edge — parent should load older data */
+  onLoadOlder?: () => void;
+  loadingOlder?: boolean;
 }
 
-export function CandlestickChart({ data, symbol }: Props) {
+export function CandlestickChart({ data, symbol, onLoadOlder, loadingOlder }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const seriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
   const volumeRef = useRef<ISeriesApi<'Histogram'> | null>(null);
   const priceLineRef = useRef<any>(null);
-  // Track indicator line series refs for cleanup
   const indicatorSeriesRef = useRef<Map<string, ISeriesApi<'Line'>>>(new Map());
+
+  // Track previous data length to know if we prepended (older) or appended (new candle)
+  const prevDataLenRef = useRef(0);
+  const prevOldestRef = useRef<number>(0);
 
   const [indicators, setIndicators] = usePersistedState<IndicatorConfig[]>('indicators', []);
   const drawing = useDrawing();
 
+  // ============================================================
+  // Chart creation (once)
+  // ============================================================
   useEffect(() => {
     if (!containerRef.current) return;
 
@@ -98,9 +107,46 @@ export function CandlestickChart({ data, symbol }: Props) {
     };
   }, []);
 
+  // ============================================================
+  // Lazy-load trigger: subscribe to visible range changes
+  // When user scrolls near the left edge (logicalRange.from < 50),
+  // call onLoadOlder to fetch more historical data.
+  // ============================================================
+  useEffect(() => {
+    const chart = chartRef.current;
+    if (!chart || !onLoadOlder) return;
+
+    const handler = (range: { from: number; to: number } | null) => {
+      if (!range || loadingOlder) return;
+      // When the leftmost visible bar index is near 0, request more data
+      if (range.from < 50) {
+        onLoadOlder();
+      }
+    };
+
+    chart.timeScale().subscribeVisibleLogicalRangeChange(handler);
+    return () => chart.timeScale().unsubscribeVisibleLogicalRangeChange(handler);
+  }, [onLoadOlder, loadingOlder]);
+
+  // ============================================================
   // Update candle + volume data
+  // Smart: detect prepend vs append to preserve scroll position
+  // ============================================================
   useEffect(() => {
     if (!seriesRef.current || !volumeRef.current || data.length === 0) return;
+    const chart = chartRef.current;
+    if (!chart) return;
+
+    const currentOldest = data[0].time;
+    const wasPrepend = prevDataLenRef.current > 0
+      && data.length > prevDataLenRef.current
+      && currentOldest < prevOldestRef.current;
+
+    // Save current visible range before setting data (for scroll preservation)
+    let savedRange: { from: number; to: number } | null = null;
+    if (wasPrepend) {
+      savedRange = chart.timeScale().getVisibleLogicalRange();
+    }
 
     const candles: CandlestickData[] = data.map(d => ({
       time: (d.time / 1000) as Time,
@@ -116,6 +162,17 @@ export function CandlestickChart({ data, symbol }: Props) {
     seriesRef.current.setData(candles);
     volumeRef.current.setData(volumes);
 
+    // Preserve scroll position after prepending older data
+    // The new data added N bars to the left, so shift the visible range by N
+    if (wasPrepend && savedRange) {
+      const prependedCount = data.length - prevDataLenRef.current;
+      chart.timeScale().setVisibleLogicalRange({
+        from: savedRange.from + prependedCount,
+        to: savedRange.to + prependedCount,
+      });
+    }
+
+    // Update price line
     const lastCandle = data[data.length - 1];
     const isUp = lastCandle.close >= lastCandle.open;
     const color = isUp ? '#0ECB81' : '#F6465D';
@@ -127,11 +184,14 @@ export function CandlestickChart({ data, symbol }: Props) {
       price: lastCandle.close, color, lineWidth: 1,
       lineStyle: LineStyle.Dotted, axisLabelVisible: true, title: '',
     } as PriceLineOptions);
+
+    prevDataLenRef.current = data.length;
+    prevOldestRef.current = currentOldest;
   }, [data]);
 
-  // =====================================================================
-  // INDICATOR RENDERING: Add/remove/update line series for each indicator
-  // =====================================================================
+  // ============================================================
+  // INDICATOR RENDERING
+  // ============================================================
   useEffect(() => {
     const chart = chartRef.current;
     if (!chart || data.length === 0) return;
@@ -147,7 +207,6 @@ export function CandlestickChart({ data, symbol }: Props) {
 
       let lineData: { time: Time; value: number }[] = [];
 
-      // Calculate indicator values
       switch (ind.type) {
         case 'MA':
           lineData = calcSMA(data, ind.period).map(p => ({ time: (p.time / 1000) as Time, value: p.value }));
@@ -156,21 +215,15 @@ export function CandlestickChart({ data, symbol }: Props) {
           lineData = calcEMA(data, ind.period).map(p => ({ time: (p.time / 1000) as Time, value: p.value }));
           break;
         case 'BOLL': {
-          // BOLL produces 3 lines — we use 3 keys
           const boll = calcBOLL(data, ind.period);
           const keyUpper = `${key}_upper`;
           const keyLower = `${key}_lower`;
           activeKeys.add(keyUpper);
           activeKeys.add(keyLower);
-
-          const middleData = boll.map(b => ({ time: (b.time / 1000) as Time, value: b.middle }));
-          const upperData = boll.map(b => ({ time: (b.time / 1000) as Time, value: b.upper }));
-          const lowerData = boll.map(b => ({ time: (b.time / 1000) as Time, value: b.lower }));
-
-          ensureLineSeries(chart, key, ind.color || '#8B5CF6', middleData);
-          ensureLineSeries(chart, keyUpper, '#8B5CF640', upperData, 1);
-          ensureLineSeries(chart, keyLower, '#8B5CF640', lowerData, 1);
-          continue; // skip default handling
+          ensureLineSeries(chart, key, ind.color || '#8B5CF6', boll.map(b => ({ time: (b.time / 1000) as Time, value: b.middle })));
+          ensureLineSeries(chart, keyUpper, '#8B5CF640', boll.map(b => ({ time: (b.time / 1000) as Time, value: b.upper })), 1);
+          ensureLineSeries(chart, keyLower, '#8B5CF640', boll.map(b => ({ time: (b.time / 1000) as Time, value: b.lower })), 1);
+          continue;
         }
         case 'RSI':
           lineData = calcRSI(data, ind.period).map(p => ({ time: (p.time / 1000) as Time, value: p.value }));
@@ -182,13 +235,9 @@ export function CandlestickChart({ data, symbol }: Props) {
           activeKeys.add(keySignal);
           activeKeys.add(keyHist);
 
-          const macdData = macd.map(m => ({ time: (m.time / 1000) as Time, value: m.macd }));
-          const signalData = macd.map(m => ({ time: (m.time / 1000) as Time, value: m.signal }));
+          ensureLineSeries(chart, key, '#10B981', macd.map(m => ({ time: (m.time / 1000) as Time, value: m.macd })), 1, 'macd');
+          ensureLineSeries(chart, keySignal, '#EF4444', macd.map(m => ({ time: (m.time / 1000) as Time, value: m.signal })), 1, 'macd');
 
-          ensureLineSeries(chart, key, '#10B981', macdData, 1, 'macd');
-          ensureLineSeries(chart, keySignal, '#EF4444', signalData, 1, 'macd');
-
-          // Histogram as separate handling via existing series
           let histSeries = indicatorSeriesRef.current.get(keyHist);
           if (!histSeries) {
             histSeries = chart.addHistogramSeries({
@@ -216,7 +265,7 @@ export function CandlestickChart({ data, symbol }: Props) {
       }
     }
 
-    // Remove series that are no longer active
+    // Cleanup removed indicators
     for (const [existingKey, series] of indicatorSeriesRef.current.entries()) {
       if (!activeKeys.has(existingKey)) {
         try { chart.removeSeries(series); } catch {}
@@ -225,7 +274,6 @@ export function CandlestickChart({ data, symbol }: Props) {
     }
   }, [data, indicators]);
 
-  // Helper: create or update a line series
   function ensureLineSeries(
     chart: IChartApi, key: string, color: string,
     lineData: { time: Time; value: number }[],
@@ -293,13 +341,17 @@ export function CandlestickChart({ data, symbol }: Props) {
             </div>
           </>
         )}
+
+        {/* Loading older indicator */}
+        {loadingOlder && (
+          <span className="text-[10px] text-primary animate-pulse font-mono ml-auto">加载更早数据...</span>
+        )}
       </div>
 
       {/* Chart area with toolbars and drawing overlay */}
       <div className="flex-1 min-h-0 relative">
         <div ref={containerRef} className="absolute inset-0" style={{ left: 32 }} />
 
-        {/* Toolbar */}
         <ChartToolbar
           activeTool={drawing.activeDrawingTool}
           onToolChange={drawing.setActiveDrawingTool}
@@ -308,7 +360,6 @@ export function CandlestickChart({ data, symbol }: Props) {
           onClearDrawings={drawing.clearAllDrawings}
         />
 
-        {/* SVG Drawing Overlay */}
         <div className="absolute inset-0" style={{ left: 32 }}>
           <DrawingOverlay
             chart={chartRef.current}

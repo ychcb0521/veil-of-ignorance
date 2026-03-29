@@ -1,6 +1,6 @@
 import { useState, useCallback, useMemo, useEffect, useRef } from 'react';
 import { useTimeSimulator } from '@/hooks/useTimeSimulator';
-import { useBinanceData, calcPreloadCandles, type KlineData } from '@/hooks/useBinanceData';
+import { useBinanceData, type KlineData } from '@/hooks/useBinanceData';
 import { usePersistedState, loadPersistedSimState, saveSimState, clearSimState } from '@/hooks/usePersistedState';
 import { TimeControl } from '@/components/TimeControl';
 import { CandlestickChart } from '@/components/CandlestickChart';
@@ -121,7 +121,7 @@ const Index = () => {
     } : undefined
   );
 
-  const { allData, loading, error, fetchKlines, getVisibleData } = useBinanceData();
+  const { allData, loading, loadingOlder, error, initLoad, loadOlder, getVisibleData, reset } = useBinanceData();
 
   // Persist sim state
   useEffect(() => {
@@ -147,14 +147,11 @@ const Index = () => {
 
     (async () => {
       const anchorTime = persistedSim.historicalAnchorTime!;
-      const preloadMs = 30 * 24 * 60 * 60 * 1000;
-      const preLoadStartTime = anchorTime - preloadMs;
-      const contextCandles = calcPreloadCandles(persistedSim.interval, 30);
-      const totalLimit = contextCandles + 1500;
-      const data = await fetchKlines(persistedSim.symbol, persistedSim.interval, preLoadStartTime, totalLimit);
+      // For restore, use current sim time as anchor so we have data up to now
+      const currentSim = anchorTime + (Date.now() - persistedSim.realStartTime!) * persistedSim.speed;
+      const data = await initLoad(persistedSim.symbol, persistedSim.interval, currentSim);
 
       if (data.length > 0 && pendingOrders.length > 0) {
-        const currentSim = anchorTime + (Date.now() - persistedSim.realStartTime!) * persistedSim.speed;
         const offlineKlines = data.filter(k => k.time <= currentSim);
         const result = matchOrdersOffline(pendingOrders, offlineKlines, balance);
 
@@ -418,22 +415,17 @@ const Index = () => {
   }, [sim.currentSimulatedTime, sim.isRunning, currentPrice]);
 
   const handleStart = useCallback(async (timestamp: number) => {
-    const preloadMs = 30 * 24 * 60 * 60 * 1000;
-    const preLoadStartTime = timestamp - preloadMs;
-    const contextCandles = calcPreloadCandles(interval, 30);
-    const totalLimit = contextCandles + 1500;
-
-    const data = await fetchKlines(symbol, interval, preLoadStartTime, totalLimit);
+    const data = await initLoad(symbol, interval, timestamp);
     if (data.length > 0) {
       prevVisibleLenRef.current = 0;
       sim.startSimulation(timestamp);
       toast.success('时间机器已启动', {
-        description: `已加载 ${contextCandles} 根前置K线 + 穿越到 ${new Date(timestamp).toISOString().slice(0, 19)} UTC`,
+        description: `已加载 ${data.length} 根K线 · 向左拖动可加载更多历史数据`,
       });
     } else {
       toast.error('数据获取失败', { description: error || '请检查时间范围和交易对' });
     }
-  }, [symbol, interval, fetchKlines, sim, error]);
+  }, [symbol, interval, initLoad, sim, error]);
 
   // =====================================================================
   // PLACE ORDER: Handles all 9 order types
@@ -668,7 +660,7 @@ const Index = () => {
                 </div>
               </div>
             ) : (
-              <CandlestickChart data={visibleData} symbol={symbol.replace('USDT', '/USDT')} />
+              <CandlestickChart data={visibleData} symbol={symbol.replace('USDT', '/USDT')} onLoadOlder={loadOlder} loadingOlder={loadingOlder} />
             )}
           </div>
 
