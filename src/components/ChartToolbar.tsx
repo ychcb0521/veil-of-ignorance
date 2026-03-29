@@ -39,7 +39,7 @@ export function ChartToolbar({ activeTool, onToolChange, indicators, onIndicator
     return () => document.removeEventListener('mousedown', handler);
   }, []);
 
-  const toggleIndicator = (type: IndicatorType) => {
+  const toggleIndicator = (type: string) => {
     const existing = indicators.find(i => i.type === type);
     if (existing) {
       onIndicatorsChange(indicators.filter(i => i.type !== type));
