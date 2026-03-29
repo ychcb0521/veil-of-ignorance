@@ -97,7 +97,7 @@ export function ChartToolbar({ activeTool, onToolChange, indicators, onIndicator
       </div>
 
       {/* Right side: indicator buttons */}
-      <div className="absolute right-12 top-0 z-20 flex items-center gap-1 py-1.5 px-2" ref={panelRef}>
+      <div className="absolute right-12 top-0 z-20 flex items-center gap-1 py-1.5 px-2">
         <button
           onClick={() => setShowIndicatorPanel(!showIndicatorPanel)}
           className={`flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium transition-colors ${
@@ -119,52 +119,13 @@ export function ChartToolbar({ activeTool, onToolChange, indicators, onIndicator
           </span>
         ))}
 
-        {/* Indicator panel dropdown */}
-        {showIndicatorPanel && (
-          <div className="absolute right-0 top-full mt-1 w-64 rounded-lg border border-border shadow-xl overflow-hidden z-50"
-            style={{ background: 'hsl(var(--card))' }}>
-            <div className="px-3 py-2 border-b border-border flex items-center justify-between">
-              <span className="text-xs font-medium text-foreground">技术指标</span>
-              <button onClick={() => setShowIndicatorPanel(false)} className="text-muted-foreground hover:text-foreground">
-                <X className="w-3.5 h-3.5" />
-              </button>
-            </div>
-            <div className="max-h-[300px] overflow-y-auto">
-              {INDICATOR_PRESETS.map(preset => {
-                const active = indicators.find(i => i.type === preset.type);
-                return (
-                  <div key={preset.type}
-                    className="flex items-center justify-between px-3 py-2 hover:bg-accent/30 transition-colors">
-                    <button
-                      onClick={() => toggleIndicator(preset.type)}
-                      className="flex items-center gap-2 flex-1 text-left"
-                    >
-                      <span className="w-2 h-2 rounded-full" style={{ background: preset.color }} />
-                      <div>
-                        <div className="text-xs font-medium text-foreground">{preset.label}</div>
-                        <div className="text-[10px] text-muted-foreground">
-                          {preset.isOverlay ? '叠加指标' : '子图指标'}
-                        </div>
-                      </div>
-                    </button>
-                    {active && (
-                      <input
-                        type="number"
-                        value={active.period}
-                        onChange={e => updatePeriod(preset.type, parseInt(e.target.value) || preset.defaultPeriod)}
-                        className="w-12 px-1 py-0.5 rounded text-[10px] font-mono text-right bg-secondary border border-border text-foreground"
-                        onClick={e => e.stopPropagation()}
-                      />
-                    )}
-                    {!active && (
-                      <Plus className="w-3.5 h-3.5 text-muted-foreground" />
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        )}
+        {/* Full indicator menu (80+ items with search) */}
+        <IndicatorMenu
+          open={showIndicatorPanel}
+          onClose={() => setShowIndicatorPanel(false)}
+          indicators={indicators}
+          onIndicatorsChange={onIndicatorsChange}
+        />
       </div>
     </>
   );
