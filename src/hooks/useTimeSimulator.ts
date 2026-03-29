@@ -8,13 +8,19 @@ export interface TimeSimulatorState {
   speed: number;
 }
 
-export function useTimeSimulator() {
-  const [state, setState] = useState<TimeSimulatorState>({
-    isRunning: false,
-    historicalAnchorTime: null,
-    realStartTime: null,
-    currentSimulatedTime: Date.now(),
-    speed: 1,
+export function useTimeSimulator(initialState?: Partial<TimeSimulatorState>) {
+  const [state, setState] = useState<TimeSimulatorState>(() => {
+    const base: TimeSimulatorState = {
+      isRunning: false,
+      historicalAnchorTime: null,
+      realStartTime: null,
+      currentSimulatedTime: Date.now(),
+      speed: 1,
+    };
+    if (initialState) {
+      return { ...base, ...initialState };
+    }
+    return base;
   });
 
   const rafRef = useRef<number>();
@@ -38,7 +44,6 @@ export function useTimeSimulator() {
   const setSpeed = useCallback((speed: number) => {
     setState(prev => {
       if (!prev.isRunning || !prev.realStartTime || !prev.historicalAnchorTime) return prev;
-      // Re-anchor to avoid time jumps when changing speed
       const now = Date.now();
       const currentSim = prev.historicalAnchorTime + (now - prev.realStartTime) * prev.speed;
       return {
