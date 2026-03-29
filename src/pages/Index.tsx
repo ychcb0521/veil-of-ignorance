@@ -235,8 +235,13 @@ const Index = () => {
       const fee = calcFee(currentPrice, order.quantity, false);
       const margin = (order.quantity * currentPrice) / order.leverage;
 
-      if (margin + fee > balance) {
-        toast.error('保证金不足');
+      const totalMargin = positions.reduce((sum, p) => sum + p.margin, 0);
+      const availableBalance = balance - totalMargin;
+
+      if (margin + fee > availableBalance) {
+        toast.error('可用余额不足', {
+          description: `需要 ${(margin + fee).toFixed(2)} USDT，可用 ${availableBalance.toFixed(2)} USDT`,
+        });
         return;
       }
 
