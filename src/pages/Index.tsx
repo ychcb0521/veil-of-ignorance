@@ -68,7 +68,7 @@ const Index = () => {
   const [positions, setPositions] = usePersistedState<Position[]>('positions', []);
   const [pendingOrders, setPendingOrders] = usePersistedState<PendingOrder[]>('pending_orders', []);
   const [tradeHistory, setTradeHistory] = usePersistedState<TradeRecord[]>('trade_history', []);
-  const [balance, setBalance] = usePersistedState('balance', 10000);
+  const [balance, setBalance] = usePersistedState('balance', 1_000_000);
   const [bottomTab, setBottomTab] = useState('positions');
 
   // Initialize time simulator with restored state if running
