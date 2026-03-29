@@ -681,7 +681,7 @@ const Index = () => {
 
         <div className="w-[280px] border-l border-border shrink-0 overflow-y-auto">
           <OrderPanel currentPrice={currentPrice} onPlaceOrder={handlePlaceOrder}
-            disabled={!sim.isRunning || currentPrice === 0} />
+            disabled={!sim.isRunning || currentPrice === 0} symbol={symbol} />
         </div>
       </div>
     </div>
