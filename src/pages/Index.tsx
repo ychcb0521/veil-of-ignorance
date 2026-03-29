@@ -205,12 +205,18 @@ const Index = () => {
   }, [visibleData.length]);
 
   const handleStart = useCallback(async (timestamp: number) => {
-    const data = await fetchKlines(symbol, interval, timestamp, 1500);
+    // Pre-load 30 days of context before the anchor time + forward data
+    const preloadMs = 30 * 24 * 60 * 60 * 1000;
+    const preLoadStartTime = timestamp - preloadMs;
+    const contextCandles = calcPreloadCandles(interval, 30);
+    const totalLimit = contextCandles + 1500; // context + forward buffer
+
+    const data = await fetchKlines(symbol, interval, preLoadStartTime, totalLimit);
     if (data.length > 0) {
       prevVisibleLenRef.current = 0;
       sim.startSimulation(timestamp);
       toast.success('时间机器已启动', {
-        description: `穿越到 ${new Date(timestamp).toISOString().slice(0, 19)} UTC`,
+        description: `已加载 ${contextCandles} 根前置K线 + 穿越到 ${new Date(timestamp).toISOString().slice(0, 19)} UTC`,
       });
     } else {
       toast.error('数据获取失败', { description: error || '请检查时间范围和交易对' });
