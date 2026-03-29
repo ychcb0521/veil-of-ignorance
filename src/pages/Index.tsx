@@ -441,6 +441,29 @@ const Index = () => {
   const handlePlaceOrder = useCallback((order: PlaceOrderParams) => {
     const availableBalance = getAvailableBalance(balance, positions);
 
+    // =====================================================================
+    // BEST PRICE: simulate aggressive limit near current price
+    // Buy → slightly above current (eat ask), Sell → slightly below (eat bid)
+    // =====================================================================
+    if (order.priceSelection === 'BEST') {
+      const offset = currentPrice * 0.0001;
+      const bestPrice = order.side === 'LONG'
+        ? currentPrice * (1 + 0.0001)
+        : currentPrice * (1 - 0.0001);
+      // Treat as immediate fill at best price
+      const { fee, margin, position } = executeFill(bestPrice, order, false);
+      if (margin + fee > availableBalance) {
+        toast.error('可用余额不足', {
+          description: `需要 ${(margin + fee).toFixed(2)} USDT，可用 ${availableBalance.toFixed(2)} USDT`,
+        });
+        return;
+      }
+      setBalance(prev => prev - margin - fee);
+      setPositions(prev => [...prev, position]);
+      toast.success(`最优价成交: ${order.side === 'LONG' ? '开多' : '开空'} ${order.quantity.toFixed(6)} @ ${bestPrice.toFixed(2)}`);
+      return;
+    }
+
     // ---- MARKET ORDER: immediate fill ----
     if (order.type === 'MARKET') {
       const { fee, margin, position } = executeFill(currentPrice, order, false);
@@ -452,7 +475,7 @@ const Index = () => {
       }
       setBalance(prev => prev - margin - fee);
       setPositions(prev => [...prev, position]);
-      toast.success(`${order.side === 'LONG' ? '开多' : '开空'} ${order.quantity} @ ${currentPrice.toFixed(2)}`);
+      toast.success(`${order.side === 'LONG' ? '开多' : '开空'} ${order.quantity.toFixed(6)} @ ${currentPrice.toFixed(2)}`);
       return;
     }
 
@@ -658,7 +681,7 @@ const Index = () => {
 
         <div className="w-[280px] border-l border-border shrink-0 overflow-y-auto">
           <OrderPanel currentPrice={currentPrice} onPlaceOrder={handlePlaceOrder}
-            disabled={!sim.isRunning || currentPrice === 0} />
+            disabled={!sim.isRunning || currentPrice === 0} symbol={symbol} />
         </div>
       </div>
     </div>
