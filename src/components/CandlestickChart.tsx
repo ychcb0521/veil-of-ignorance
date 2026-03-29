@@ -3,8 +3,8 @@ import { createChart, IChartApi, ISeriesApi, CandlestickData, Time, PriceLineOpt
 import type { KlineData } from '@/hooks/useBinanceData';
 import { useDrawing } from '@/hooks/useDrawing';
 import { usePersistedState } from '@/hooks/usePersistedState';
-import type { IndicatorConfig, IndicatorType } from '@/hooks/useIndicators';
-import { calcSMA, calcEMA, calcBOLL, calcRSI, calcMACD, calcATR, calcCHOP, INDICATOR_PRESETS } from '@/hooks/useIndicators';
+import type { IndicatorConfig } from '@/hooks/useIndicators';
+import { calcSMA, calcEMA, calcBOLL, calcRSI, calcMACD, calcATR, INDICATOR_PRESETS, IMPLEMENTED_TYPES } from '@/hooks/useIndicators';
 import { ChartToolbar } from './ChartToolbar';
 import { DrawingOverlay } from './DrawingOverlay';
 

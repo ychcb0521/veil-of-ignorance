@@ -1,5 +1,5 @@
 import { DRAWING_TOOLS, type DrawingToolType } from '@/hooks/useDrawing';
-import { INDICATOR_PRESETS, type IndicatorConfig, type IndicatorType } from '@/hooks/useIndicators';
+import { INDICATOR_PRESETS, IMPLEMENTED_TYPES, type IndicatorConfig } from '@/hooks/useIndicators';
 import { useState, useRef, useEffect } from 'react';
 import {
   Ruler, TrendingUp, GitBranch, Square, Pen, Type, MapPin,
