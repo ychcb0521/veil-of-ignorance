@@ -121,7 +121,7 @@ const Index = () => {
     } : undefined
   );
 
-  const { allData, loading, error, fetchKlines, getVisibleData } = useBinanceData();
+  const { allData, loading, loadingOlder, error, initLoad, loadOlder, getVisibleData, reset } = useBinanceData();
 
   // Persist sim state
   useEffect(() => {
