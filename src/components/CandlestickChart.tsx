@@ -208,9 +208,6 @@ export function CandlestickChart({ data, symbol }: Props) {
         case 'ATR':
           lineData = calcATR(data, ind.period).map(p => ({ time: (p.time / 1000) as Time, value: p.value }));
           break;
-        case 'CHOP':
-          lineData = calcCHOP(data, ind.period).map(p => ({ time: (p.time / 1000) as Time, value: p.value }));
-          break;
       }
 
       if (lineData.length > 0) {

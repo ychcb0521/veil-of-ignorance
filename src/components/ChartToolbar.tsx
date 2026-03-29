@@ -51,7 +51,7 @@ export function ChartToolbar({ activeTool, onToolChange, indicators, onIndicator
     }
   };
 
-  const updatePeriod = (type: IndicatorType, period: number) => {
+  const updatePeriod = (type: string, period: number) => {
     onIndicatorsChange(indicators.map(i => i.type === type ? { ...i, period } : i));
   };
 
