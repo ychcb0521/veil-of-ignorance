@@ -415,22 +415,17 @@ const Index = () => {
   }, [sim.currentSimulatedTime, sim.isRunning, currentPrice]);
 
   const handleStart = useCallback(async (timestamp: number) => {
-    const preloadMs = 30 * 24 * 60 * 60 * 1000;
-    const preLoadStartTime = timestamp - preloadMs;
-    const contextCandles = calcPreloadCandles(interval, 30);
-    const totalLimit = contextCandles + 1500;
-
-    const data = await fetchKlines(symbol, interval, preLoadStartTime, totalLimit);
+    const data = await initLoad(symbol, interval, timestamp);
     if (data.length > 0) {
       prevVisibleLenRef.current = 0;
       sim.startSimulation(timestamp);
       toast.success('时间机器已启动', {
-        description: `已加载 ${contextCandles} 根前置K线 + 穿越到 ${new Date(timestamp).toISOString().slice(0, 19)} UTC`,
+        description: `已加载 ${data.length} 根K线 · 向左拖动可加载更多历史数据`,
       });
     } else {
       toast.error('数据获取失败', { description: error || '请检查时间范围和交易对' });
     }
-  }, [symbol, interval, fetchKlines, sim, error]);
+  }, [symbol, interval, initLoad, sim, error]);
 
   // =====================================================================
   // PLACE ORDER: Handles all 9 order types
