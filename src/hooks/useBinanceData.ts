@@ -9,15 +9,6 @@ export interface KlineData {
   volume: number;
 }
 
-const INTERVALS: Record<string, number> = {
-  '1m': 60_000,
-  '5m': 300_000,
-  '15m': 900_000,
-  '1h': 3_600_000,
-  '4h': 14_400_000,
-  '1d': 86_400_000,
-};
-
 export function useBinanceData() {
   const [allData, setAllData] = useState<KlineData[]>([]);
   const [loading, setLoading] = useState(false);
@@ -27,27 +18,40 @@ export function useBinanceData() {
     symbol: string,
     interval: string,
     startTime: number,
-    limit: number = 1000
+    limit: number = 1500
   ) => {
     setLoading(true);
     setError(null);
     try {
-      const url = `https://fapi.binance.com/fapi/v1/klines?symbol=${symbol}&interval=${interval}&startTime=${startTime}&limit=${limit}`;
-      const res = await fetch(url);
-      if (!res.ok) throw new Error(`API error: ${res.status}`);
-      const raw = await res.json();
+      // Fetch in batches to get enough data
+      const allKlines: KlineData[] = [];
+      let currentStart = startTime;
+      const batchSize = 1000;
+      const batches = Math.ceil(limit / batchSize);
 
-      const parsed: KlineData[] = raw.map((k: any[]) => ({
-        time: k[0],
-        open: parseFloat(k[1]),
-        high: parseFloat(k[2]),
-        low: parseFloat(k[3]),
-        close: parseFloat(k[4]),
-        volume: parseFloat(k[5]),
-      }));
+      for (let i = 0; i < batches; i++) {
+        const url = `https://fapi.binance.com/fapi/v1/klines?symbol=${symbol}&interval=${interval}&startTime=${currentStart}&limit=${Math.min(batchSize, limit - allKlines.length)}`;
+        const res = await fetch(url);
+        if (!res.ok) throw new Error(`API error: ${res.status}`);
+        const raw = await res.json();
 
-      setAllData(parsed);
-      return parsed;
+        const parsed: KlineData[] = raw.map((k: any[]) => ({
+          time: k[0],
+          open: parseFloat(k[1]),
+          high: parseFloat(k[2]),
+          low: parseFloat(k[3]),
+          close: parseFloat(k[4]),
+          volume: parseFloat(k[5]),
+        }));
+
+        allKlines.push(...parsed);
+
+        if (parsed.length < batchSize) break;
+        currentStart = parsed[parsed.length - 1].time + 1;
+      }
+
+      setAllData(allKlines);
+      return allKlines;
     } catch (e: any) {
       setError(e.message || 'Failed to fetch data');
       return [];
