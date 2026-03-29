@@ -118,7 +118,7 @@ export function PositionPanel({
                 {pendingOrders.map(order => (
                   <tr key={order.id} className="border-b border-border/30 hover:bg-accent/20">
                     <td className="px-3 py-2 text-muted-foreground">
-                      {order.type === 'LIMIT' ? '限价' : order.type === 'STOP_LIMIT' ? '止损限价' : '止损市价'}
+                      {{ LIMIT: '限价', POST_ONLY: '只做Maker', MARKET: '市价', LIMIT_TP_SL: '限价TP/SL', MARKET_TP_SL: '市价TP/SL', CONDITIONAL: '条件', TRAILING_STOP: '跟踪', TWAP: 'TWAP', SCALED: '分段' }[order.type] || order.type}
                     </td>
                     <td className={`px-3 py-2 font-bold ${order.side === 'LONG' ? 'trading-green' : 'trading-red'}`}>
                       {order.side === 'LONG' ? '多' : '空'}
