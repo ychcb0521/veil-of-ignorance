@@ -32,9 +32,6 @@ export function ChartToolbar({ activeTool, onToolChange, indicators, onIndicator
     onIndicatorsChange(indicators.filter(i => i.type !== type));
   };
 
-  const updatePeriod = (type: string, period: number) => {
-    onIndicatorsChange(indicators.map(i => i.type === type ? { ...i, period } : i));
-  };
 
   return (
     <>
