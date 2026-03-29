@@ -108,7 +108,11 @@ const Index = () => {
 
     (async () => {
       const anchorTime = persistedSim.historicalAnchorTime!;
-      const data = await fetchKlines(persistedSim.symbol, persistedSim.interval, anchorTime, 1500);
+      const preloadMs = 30 * 24 * 60 * 60 * 1000;
+      const preLoadStartTime = anchorTime - preloadMs;
+      const contextCandles = calcPreloadCandles(persistedSim.interval, 30);
+      const totalLimit = contextCandles + 1500;
+      const data = await fetchKlines(persistedSim.symbol, persistedSim.interval, preLoadStartTime, totalLimit);
 
       if (data.length > 0 && pendingOrders.length > 0) {
         // Calculate current sim time
