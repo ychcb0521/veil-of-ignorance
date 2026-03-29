@@ -660,7 +660,7 @@ const Index = () => {
                 </div>
               </div>
             ) : (
-              <CandlestickChart data={visibleData} symbol={symbol.replace('USDT', '/USDT')} />
+              <CandlestickChart data={visibleData} symbol={symbol.replace('USDT', '/USDT')} onLoadOlder={loadOlder} loadingOlder={loadingOlder} />
             )}
           </div>
 
