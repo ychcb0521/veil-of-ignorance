@@ -4,8 +4,7 @@ import { IndicatorMenu } from './IndicatorMenu';
 import { useState } from 'react';
 import {
   Ruler, TrendingUp, GitBranch, Square, Pen, Type, MapPin,
-  BarChart3, Settings, LayoutGrid, CandlestickChart as CandleIcon,
-  Plus, X, Trash2
+  BarChart3, X, Trash2
 } from 'lucide-react';
 
 const TOOL_ICONS: Record<string, React.ReactNode> = {
