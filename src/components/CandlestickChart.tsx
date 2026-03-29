@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { createChart, IChartApi, ISeriesApi, CandlestickData, Time } from 'lightweight-charts';
+import { createChart, IChartApi, ISeriesApi, CandlestickData, Time, PriceLineOptions, LineStyle } from 'lightweight-charts';
 import type { KlineData } from '@/hooks/useBinanceData';
 
 interface Props {
@@ -12,44 +12,48 @@ export function CandlestickChart({ data, symbol }: Props) {
   const chartRef = useRef<IChartApi | null>(null);
   const seriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
   const volumeRef = useRef<ISeriesApi<'Histogram'> | null>(null);
+  const priceLineRef = useRef<any>(null);
 
   useEffect(() => {
     if (!containerRef.current) return;
 
     const chart = createChart(containerRef.current, {
       layout: {
-        background: { color: 'transparent' },
-        textColor: 'hsl(220, 10%, 50%)',
+        background: { color: '#0B0E11' },
+        textColor: '#848E9C',
         fontFamily: "'JetBrains Mono', monospace",
         fontSize: 11,
       },
       grid: {
-        vertLines: { color: 'hsl(220, 15%, 10%)' },
-        horzLines: { color: 'hsl(220, 15%, 10%)' },
+        vertLines: { color: '#1B1F26' },
+        horzLines: { color: '#1B1F26' },
       },
       crosshair: {
         mode: 0,
-        vertLine: { color: 'hsl(43, 89%, 50%)', width: 1, style: 2 },
-        horzLine: { color: 'hsl(43, 89%, 50%)', width: 1, style: 2 },
+        vertLine: { color: '#F0B90B', width: 1, style: LineStyle.Dashed, labelBackgroundColor: '#F0B90B' },
+        horzLine: { color: '#F0B90B', width: 1, style: LineStyle.Dashed, labelBackgroundColor: '#363A45' },
       },
       rightPriceScale: {
-        borderColor: 'hsl(220, 15%, 15%)',
-        scaleMargins: { top: 0.1, bottom: 0.25 },
+        borderColor: '#1B1F26',
+        scaleMargins: { top: 0.05, bottom: 0.25 },
+        entireTextOnly: true,
       },
       timeScale: {
-        borderColor: 'hsl(220, 15%, 15%)',
+        borderColor: '#1B1F26',
         timeVisible: true,
         secondsVisible: false,
+        rightOffset: 5,
+        barSpacing: 8,
       },
     });
 
     const candleSeries = chart.addCandlestickSeries({
-      upColor: 'hsl(160, 72%, 43%)',
-      downColor: 'hsl(354, 91%, 62%)',
-      borderUpColor: 'hsl(160, 72%, 43%)',
-      borderDownColor: 'hsl(354, 91%, 62%)',
-      wickUpColor: 'hsl(160, 72%, 43%)',
-      wickDownColor: 'hsl(354, 91%, 62%)',
+      upColor: '#0ECB81',
+      downColor: '#F6465D',
+      borderUpColor: '#0ECB81',
+      borderDownColor: '#F6465D',
+      wickUpColor: '#0ECB81',
+      wickDownColor: '#F6465D',
     });
 
     const volumeSeries = chart.addHistogramSeries({
@@ -67,7 +71,10 @@ export function CandlestickChart({ data, symbol }: Props) {
 
     const handleResize = () => {
       if (containerRef.current) {
-        chart.applyOptions({ width: containerRef.current.clientWidth });
+        chart.applyOptions({
+          width: containerRef.current.clientWidth,
+          height: containerRef.current.clientHeight,
+        });
       }
     };
     const observer = new ResizeObserver(handleResize);
@@ -79,6 +86,7 @@ export function CandlestickChart({ data, symbol }: Props) {
     };
   }, []);
 
+  // Update data + price line
   useEffect(() => {
     if (!seriesRef.current || !volumeRef.current || data.length === 0) return;
 
@@ -94,32 +102,80 @@ export function CandlestickChart({ data, symbol }: Props) {
       time: (d.time / 1000) as Time,
       value: d.volume,
       color: d.close >= d.open
-        ? 'hsla(160, 72%, 43%, 0.3)'
-        : 'hsla(354, 91%, 62%, 0.3)',
+        ? 'rgba(14, 203, 129, 0.25)'
+        : 'rgba(246, 70, 93, 0.25)',
     }));
 
     seriesRef.current.setData(candles);
     volumeRef.current.setData(volumes);
+
+    // Update price line
+    const lastCandle = data[data.length - 1];
+    const isUp = lastCandle.close >= lastCandle.open;
+    const color = isUp ? '#0ECB81' : '#F6465D';
+
+    if (priceLineRef.current) {
+      seriesRef.current.removePriceLine(priceLineRef.current);
+    }
+
+    priceLineRef.current = seriesRef.current.createPriceLine({
+      price: lastCandle.close,
+      color,
+      lineWidth: 1,
+      lineStyle: LineStyle.Dotted,
+      axisLabelVisible: true,
+      title: '',
+    } as PriceLineOptions);
   }, [data]);
 
+  const last = data.length > 0 ? data[data.length - 1] : null;
+  const prev = data.length > 1 ? data[data.length - 2] : null;
+  const priceChange = last && prev ? last.close - prev.close : 0;
+  const priceChangePct = last && prev ? (priceChange / prev.close) * 100 : 0;
+  const isUp = last ? last.close >= last.open : true;
+
   return (
-    <div className="panel flex flex-col h-full">
-      <div className="flex items-center gap-3 px-4 py-2 border-b border-border">
-        <span className="font-mono text-sm font-semibold text-primary">{symbol}</span>
-        {data.length > 0 && (
+    <div className="flex flex-col h-full" style={{ background: '#0B0E11' }}>
+      {/* Price header bar - Binance style */}
+      <div className="flex items-center gap-6 px-4 py-2 border-b border-border">
+        <div className="flex items-center gap-2">
+          <span className="font-mono text-base font-bold text-foreground">{symbol}</span>
+          <span className="text-xs px-1.5 py-0.5 rounded bg-primary/10 text-primary font-medium">永续</span>
+        </div>
+
+        {last && (
           <>
-            <span className={`font-mono text-sm font-bold ${
-              data[data.length - 1].close >= data[data.length - 1].open
-                ? 'trading-green' : 'trading-red'
-            }`}>
-              {data[data.length - 1].close.toFixed(2)}
-            </span>
-            <span className="text-xs text-muted-foreground font-mono">
-              Vol {(data[data.length - 1].volume).toFixed(0)}
-            </span>
+            <div className="flex flex-col">
+              <span className={`font-mono text-xl font-bold ${isUp ? 'trading-green' : 'trading-red'}`}>
+                {last.close.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              </span>
+            </div>
+
+            <div className="grid grid-cols-4 gap-x-6 gap-y-0.5 text-xs font-mono">
+              <div>
+                <span className="text-muted-foreground">24h涨跌</span>
+                <span className={`ml-1.5 font-medium ${priceChange >= 0 ? 'trading-green' : 'trading-red'}`}>
+                  {priceChange >= 0 ? '+' : ''}{priceChange.toFixed(2)} ({priceChangePct >= 0 ? '+' : ''}{priceChangePct.toFixed(2)}%)
+                </span>
+              </div>
+              <div>
+                <span className="text-muted-foreground">最高</span>
+                <span className="ml-1.5 text-foreground">{last.high.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+              </div>
+              <div>
+                <span className="text-muted-foreground">最低</span>
+                <span className="ml-1.5 text-foreground">{last.low.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+              </div>
+              <div>
+                <span className="text-muted-foreground">成交量</span>
+                <span className="ml-1.5 text-foreground">{last.volume.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
+              </div>
+            </div>
           </>
         )}
       </div>
+
+      {/* Chart */}
       <div ref={containerRef} className="flex-1 min-h-0" />
     </div>
   );
