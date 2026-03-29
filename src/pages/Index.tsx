@@ -633,7 +633,7 @@ const Index = () => {
     <div className="h-screen flex flex-col overflow-hidden" style={{ background: '#0B0E11' }}>
       <header className="border-b border-border px-4 py-1.5 flex items-center justify-between shrink-0">
         <div className="flex items-center gap-4">
-          <h1 className="text-xs font-bold text-primary tracking-widest uppercase">⚡ Futures Sim</h1>
+          <h1 className="text-xs font-bold text-primary tracking-widest uppercase">⚡ 无知之幕</h1>
           <SymbolSelector symbol={symbol} interval={interval} onSymbolChange={setSymbol} onIntervalChange={setIntervalVal} />
         </div>
         {loading && <span className="text-[10px] text-primary animate-pulse font-mono">加载历史数据...</span>}
