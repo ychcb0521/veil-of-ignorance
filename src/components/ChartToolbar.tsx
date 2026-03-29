@@ -28,17 +28,6 @@ interface Props {
 
 export function ChartToolbar({ activeTool, onToolChange, indicators, onIndicatorsChange, onClearDrawings }: Props) {
   const [showIndicatorPanel, setShowIndicatorPanel] = useState(false);
-  const panelRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const handler = (e: MouseEvent) => {
-      if (panelRef.current && !panelRef.current.contains(e.target as Node)) {
-        setShowIndicatorPanel(false);
-      }
-    };
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
-  }, []);
 
   const toggleIndicator = (type: string) => {
     const existing = indicators.find(i => i.type === type);
