@@ -1,6 +1,6 @@
 import { useState, useCallback, useMemo, useEffect, useRef } from 'react';
 import { useTimeSimulator } from '@/hooks/useTimeSimulator';
-import { useBinanceData, calcPreloadCandles, type KlineData } from '@/hooks/useBinanceData';
+import { useBinanceData, type KlineData } from '@/hooks/useBinanceData';
 import { usePersistedState, loadPersistedSimState, saveSimState, clearSimState } from '@/hooks/usePersistedState';
 import { TimeControl } from '@/components/TimeControl';
 import { CandlestickChart } from '@/components/CandlestickChart';
