@@ -33,7 +33,8 @@ interface Props {
 }
 
 export function MobileChartView(props: Props) {
-  const [dateInput, setDateInput] = useState('2024-01-15 08:00:00');
+  const [selectedDate, setSelectedDate] = useState(() => new Date('2024-01-15T08:00:00Z'));
+  const [showPicker, setShowPicker] = useState(false);
   const baseCoin = props.symbol.replace('USDT', '');
 
   const formatSimTime = (ts: number) => {
@@ -42,9 +43,18 @@ export function MobileChartView(props: Props) {
     return d.toISOString().replace('T', ' ').slice(0, 19);
   };
 
+  const formatSelectedDate = () => {
+    const d = selectedDate;
+    return `${d.getUTCFullYear()}-${String(d.getUTCMonth()+1).padStart(2,'0')}-${String(d.getUTCDate()).padStart(2,'0')} ${String(d.getUTCHours()).padStart(2,'0')}:${String(d.getUTCMinutes()).padStart(2,'0')}`;
+  };
+
+  const handlePickerConfirm = (date: Date) => {
+    setSelectedDate(date);
+    setShowPicker(false);
+  };
+
   const handleStart = () => {
-    const ts = new Date(dateInput.replace(' ', 'T') + 'Z').getTime();
-    if (!isNaN(ts)) props.onStart(ts);
+    props.onStart(selectedDate.getTime());
   };
 
   const last = props.visibleData.length > 0 ? props.visibleData[props.visibleData.length - 1] : null;
