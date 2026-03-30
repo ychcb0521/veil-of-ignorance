@@ -188,9 +188,6 @@ export function CandlestickChart({ data, symbol, onLoadOlder, loadingOlder, trad
 
     if (!chart) return;
 
-    // Create VOL sub-pane
-    chart.createIndicator('VOL', false, { height: 60 });
-
     chartRef.current = chart;
 
     return () => {
