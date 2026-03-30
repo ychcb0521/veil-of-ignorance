@@ -498,6 +498,7 @@ const Index = () => {
         initialCapital={profile?.initial_capital ?? 1_000_000}
       />
     </div>
+  );
 };
 
 export default Index;
