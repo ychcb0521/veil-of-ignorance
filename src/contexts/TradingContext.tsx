@@ -12,6 +12,7 @@
 import React, { createContext, useContext, useCallback, useEffect, useRef, useMemo } from 'react';
 import { useTimeSimulator } from '@/hooks/useTimeSimulator';
 import { usePersistedState, loadPersistedSimState, saveSimState, clearSimState } from '@/hooks/usePersistedState';
+import { useAuth } from '@/contexts/AuthContext';
 import { toast } from 'sonner';
 import type { Position, PendingOrder, TradeRecord, OrderSide, OrderType, MarginMode } from '@/types/trading';
 import { calcFee, calcUnrealizedPnl } from '@/types/trading';
@@ -113,6 +114,9 @@ function executeFill(
 
 // ===== Provider =====
 export function TradingProvider({ children }: { children: React.ReactNode }) {
+  const { profile } = useAuth();
+  const initialCapital = profile?.initial_capital ?? 1_000_000;
+
   const persistedSim = useMemo(() => loadPersistedSimState(), []);
   const restoredRunning = persistedSim?.isRunning ?? false;
 
@@ -130,7 +134,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
   const [positionsMap, setPositionsMap] = usePersistedState<PositionsMap>('positions_map', {});
   const [ordersMap, setOrdersMap] = usePersistedState<OrdersMap>('orders_map', {});
   const [priceMap, setPriceMap] = usePersistedState<PriceMap>('price_map', {});
-  const [balance, setBalance] = usePersistedState('balance', 1_000_000);
+  const [balance, setBalance] = usePersistedState('balance', initialCapital);
   const [tradeHistory, setTradeHistory] = usePersistedState<TradeRecord[]>('trade_history', []);
 
   // Persist sim state
