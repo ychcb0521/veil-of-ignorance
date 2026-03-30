@@ -13,36 +13,7 @@ export type TriggerType = 'MARK' | 'LAST';
 export type CurrencyUnit = 'BASE' | 'USDT';
 export type UsdtInputMode = 'ORDER_VALUE' | 'INITIAL_MARGIN';
 
-// PlaceOrderParams is now defined in TradingContext
-// Local interface removed — using the shared one
 
-interface PlaceOrderParamsPlaceholder {
-  price: number;
-  stopPrice: number;
-  quantity: number;
-  leverage: number;
-  marginMode: MarginMode;
-  // New selector states
-  priceSelection: PriceSelection;
-  triggerType: TriggerType;
-  currencyUnit: CurrencyUnit;
-  usdtInputMode: UsdtInputMode;
-  inputAmount: number; // raw user input amount (interpreted based on unit/mode)
-  // Trailing stop
-  callbackRate?: number;
-  trailingExecType?: 'MARKET' | 'LIMIT';
-  trailingLimitPrice?: number;
-  // TWAP
-  twapDuration?: number;
-  twapInterval?: number;
-  // Conditional
-  conditionalExecType?: 'MARKET' | 'LIMIT';
-  conditionalLimitPrice?: number;
-  // Scaled
-  scaledCount?: number;
-  scaledStartPrice?: number;
-  scaledEndPrice?: number;
-}
 
 interface Props {
   currentPrice: number;
