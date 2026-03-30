@@ -19,35 +19,31 @@ export interface PendingOrder {
   id: string;
   side: OrderSide;
   type: OrderType;
-  price: number;          // limit price or 0 for market
-  stopPrice: number;      // trigger price for stop/TP-SL orders, 0 if N/A
+  price: number;
+  stopPrice: number;
   quantity: number;
   leverage: number;
   marginMode: MarginMode;
   status: OrderStatus;
-  createdAt: number;      // simulated timestamp
+  createdAt: number;
 
-  // === Trailing Stop fields ===
-  callbackRate?: number;       // callback rate in decimal (e.g. 0.01 = 1%)
-  trailingExecType?: 'MARKET' | 'LIMIT';  // execution type when triggered
-  trailingLimitPrice?: number; // limit price for trailing limit execution
-  peakPrice?: number;          // tracked peak for LONG trailing
-  troughPrice?: number;        // tracked trough for SHORT trailing
-  trailingActivated?: boolean; // whether trailing tracking has begun
+  callbackRate?: number;
+  trailingExecType?: 'MARKET' | 'LIMIT';
+  trailingLimitPrice?: number;
+  peakPrice?: number;
+  troughPrice?: number;
+  trailingActivated?: boolean;
 
-  // === TWAP fields ===
-  twapTotalQty?: number;       // total quantity to fill
-  twapFilledQty?: number;      // quantity already filled
-  twapInterval?: number;       // interval in ms between sub-orders
-  twapNextExecTime?: number;   // next execution time (simulated)
-  twapEndTime?: number;        // when TWAP ends
+  twapTotalQty?: number;
+  twapFilledQty?: number;
+  twapInterval?: number;
+  twapNextExecTime?: number;
+  twapEndTime?: number;
 
-  // === Conditional order fields ===
   conditionalExecType?: 'MARKET' | 'LIMIT';
   conditionalLimitPrice?: number;
 
-  // === Scaled order parent tracking ===
-  parentScaledId?: string;     // links sub-orders to parent scaled order
+  parentScaledId?: string;
 }
 
 export interface Position {
@@ -57,14 +53,16 @@ export interface Position {
   leverage: number;
   marginMode: MarginMode;
   margin: number;
+  /** For isolated positions: the segregated margin assigned to this position */
+  isolatedMargin?: number;
 }
 
 export interface TradeRecord {
   id: string;
   symbol: string;
   side: OrderSide;
-  type: OrderType;
-  action: 'OPEN' | 'CLOSE' | 'LIQUIDATION';
+  type: OrderType | 'FUNDING';
+  action: 'OPEN' | 'CLOSE' | 'LIQUIDATION' | 'FUNDING';
   entryPrice: number;
   exitPrice: number;
   quantity: number;
@@ -78,6 +76,10 @@ export interface TradeRecord {
 
 export const MAINTENANCE_MARGIN_RATE = 0.004; // 0.4%
 export const LIQUIDATION_FEE_RATE = 0.005;    // 0.5%
+export const FUNDING_RATE = 0.0001;           // 0.01% per 8h settlement
+
+// Funding settlement times in UTC hours
+export const FUNDING_HOURS = [0, 8, 16];
 
 /** Dynamic slippage for market/taker orders */
 export function calcSlippage(price: number, notionalValue: number, side: OrderSide): number {
@@ -97,11 +99,26 @@ export function calcUnrealizedPnl(pos: Position, currentPrice: number): number {
 
 export function calcROE(pos: Position, currentPrice: number): number {
   const pnl = calcUnrealizedPnl(pos, currentPrice);
-  return (pnl / pos.margin) * 100;
+  const effectiveMargin = pos.marginMode === 'isolated' && pos.isolatedMargin != null
+    ? pos.isolatedMargin : pos.margin;
+  return effectiveMargin > 0 ? (pnl / effectiveMargin) * 100 : 0;
 }
 
 export function calcLiquidationPrice(pos: Position): number {
   const maintenanceRate = 0.004;
+  if (pos.marginMode === 'isolated' && pos.isolatedMargin != null) {
+    // Isolated: liq price based on isolatedMargin
+    const margin = pos.isolatedMargin;
+    const notional = pos.entryPrice * pos.quantity;
+    if (pos.side === 'LONG') {
+      // margin + unrealizedPnl = maintenanceMargin => margin + (liqPrice - entry)*qty = maintenanceRate * liqPrice * qty
+      // liqPrice * qty - entry*qty + margin = maintenanceRate * liqPrice * qty
+      // liqPrice * qty * (1 - maintenanceRate) = entry*qty - margin
+      return (pos.entryPrice * pos.quantity - margin) / (pos.quantity * (1 - maintenanceRate));
+    }
+    return (pos.entryPrice * pos.quantity + margin) / (pos.quantity * (1 + maintenanceRate));
+  }
+  // Cross mode: approximate
   if (pos.side === 'LONG') {
     return pos.entryPrice * (1 - 1 / pos.leverage + maintenanceRate);
   }
@@ -124,3 +141,12 @@ export const ORDER_TYPE_INFO: { value: OrderType; label: string; desc: string }[
   { value: 'TWAP', label: '分时委托', desc: 'TWAP' },
   { value: 'SCALED', label: '分段订单', desc: 'Scaled Order' },
 ];
+
+/** Get price tick size based on price magnitude */
+export function getPriceStep(price: number): number {
+  if (price > 10000) return 0.1;
+  if (price > 1000) return 0.01;
+  if (price > 100) return 0.001;
+  if (price > 10) return 0.0001;
+  return 0.00001;
+}

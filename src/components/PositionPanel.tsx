@@ -1,7 +1,8 @@
+import { useState } from 'react';
 import type { Position, PendingOrder, TradeRecord } from '@/types/trading';
 import { calcUnrealizedPnl, calcROE, calcLiquidationPrice } from '@/types/trading';
 import type { PositionsMap, OrdersMap, PriceMap } from '@/contexts/TradingContext';
-import { X } from 'lucide-react';
+import { X, Plus } from 'lucide-react';
 
 interface Props {
   positionsMap: PositionsMap;
@@ -11,35 +12,50 @@ interface Props {
   activeSymbol: string;
   onClosePosition: (symbol: string, index: number) => void;
   onCancelOrder: (symbol: string, orderId: string) => void;
+  onAddIsolatedMargin?: (symbol: string, posIndex: number, amount: number) => void;
   activeTab: string;
   onTabChange: (tab: string) => void;
 }
 
 export function PositionPanel({
   positionsMap, ordersMap, tradeHistory, priceMap, activeSymbol,
-  onClosePosition, onCancelOrder, activeTab, onTabChange,
+  onClosePosition, onCancelOrder, onAddIsolatedMargin, activeTab, onTabChange,
 }: Props) {
-  // Flatten all positions across symbols
+  const [addMarginTarget, setAddMarginTarget] = useState<{ sym: string; idx: number } | null>(null);
+  const [addMarginAmount, setAddMarginAmount] = useState('');
+
   const allPositions: { symbol: string; position: Position; index: number }[] = [];
   for (const [sym, positions] of Object.entries(positionsMap)) {
     positions.forEach((pos, i) => allPositions.push({ symbol: sym, position: pos, index: i }));
   }
 
-  // Flatten all orders
   const allOrders: { symbol: string; order: PendingOrder }[] = [];
   for (const [sym, orders] of Object.entries(ordersMap)) {
     for (const o of orders) allOrders.push({ symbol: sym, order: o });
   }
 
+  // Separate funding records for display
+  const fundingRecords = tradeHistory.filter(t => t.action === 'FUNDING');
+  const tradeRecords = tradeHistory.filter(t => t.action !== 'FUNDING');
+
   const TABS = [
     { key: 'positions', label: '持仓', count: allPositions.length },
     { key: 'pending', label: '当前委托', count: allOrders.length },
-    { key: 'history', label: '历史记录', count: tradeHistory.length },
+    { key: 'history', label: '历史记录', count: tradeRecords.length },
+    { key: 'funding', label: '资金费', count: fundingRecords.length },
   ];
+
+  const handleSubmitMargin = () => {
+    if (!addMarginTarget || !onAddIsolatedMargin) return;
+    const amt = parseFloat(addMarginAmount);
+    if (isNaN(amt) || amt <= 0) return;
+    onAddIsolatedMargin(addMarginTarget.sym, addMarginTarget.idx, amt);
+    setAddMarginTarget(null);
+    setAddMarginAmount('');
+  };
 
   return (
     <div className="panel flex flex-col bg-card">
-      {/* Tabs */}
       <div className="flex gap-4 px-4 border-b border-border">
         {TABS.map(t => (
           <button
@@ -59,7 +75,6 @@ export function PositionPanel({
         ))}
       </div>
 
-      {/* Content */}
       <div className="overflow-x-auto min-h-[120px]">
         {activeTab === 'positions' && (
           allPositions.length === 0 ? (
@@ -81,6 +96,8 @@ export function PositionPanel({
                   const liq = calcLiquidationPrice(pos);
                   const isProfit = pnl >= 0;
                   const isActive = symbol === activeSymbol;
+                  const effectiveMargin = pos.marginMode === 'isolated' && pos.isolatedMargin != null
+                    ? pos.isolatedMargin : pos.margin;
                   return (
                     <tr key={`${symbol}-${i}`} className={`border-b border-border/30 hover:bg-accent/20 ${isActive ? '' : 'opacity-80'}`}>
                       <td className="px-3 py-2">
@@ -91,7 +108,7 @@ export function PositionPanel({
                         <span className={`font-bold ${pos.side === 'LONG' ? 'trading-green' : 'trading-red'}`}>
                           {pos.side === 'LONG' ? '多' : '空'} {pos.leverage}x
                         </span>
-                        <span className="text-muted-foreground ml-1 text-[10px]">
+                        <span className={`ml-1 text-[10px] ${pos.marginMode === 'isolated' ? 'text-amber-400' : 'text-muted-foreground'}`}>
                           {pos.marginMode === 'cross' ? '全仓' : '逐仓'}
                         </span>
                       </td>
@@ -99,7 +116,37 @@ export function PositionPanel({
                       <td className="px-3 py-2">{pos.entryPrice.toFixed(2)}</td>
                       <td className="px-3 py-2">{price > 0 ? price.toFixed(2) : '-'}</td>
                       <td className="px-3 py-2 text-destructive">{liq.toFixed(2)}</td>
-                      <td className="px-3 py-2">{pos.margin.toFixed(2)}</td>
+                      <td className="px-3 py-2">
+                        <div className="flex items-center gap-1">
+                          <span>{effectiveMargin.toFixed(2)}</span>
+                          {pos.marginMode === 'isolated' && onAddIsolatedMargin && (
+                            addMarginTarget?.sym === symbol && addMarginTarget?.idx === i ? (
+                              <span className="flex items-center gap-0.5">
+                                <input
+                                  type="number"
+                                  value={addMarginAmount}
+                                  onChange={e => setAddMarginAmount(e.target.value)}
+                                  onClick={e => e.stopPropagation()}
+                                  className="w-14 px-1 py-0.5 rounded text-[10px] bg-secondary border border-border text-foreground"
+                                  placeholder="金额"
+                                  autoFocus
+                                  onKeyDown={e => e.key === 'Enter' && handleSubmitMargin()}
+                                />
+                                <button onClick={handleSubmitMargin} className="text-primary text-[10px] font-bold">✓</button>
+                                <button onClick={() => setAddMarginTarget(null)} className="text-muted-foreground text-[10px]">✗</button>
+                              </span>
+                            ) : (
+                              <button
+                                onClick={(e) => { e.stopPropagation(); setAddMarginTarget({ sym: symbol, idx: i }); setAddMarginAmount(''); }}
+                                className="p-0.5 rounded hover:bg-accent text-primary"
+                                title="追加保证金"
+                              >
+                                <Plus className="w-3 h-3" />
+                              </button>
+                            )
+                          )}
+                        </div>
+                      </td>
                       <td className={`px-3 py-2 font-bold ${isProfit ? 'trading-green' : 'trading-red'}`}>
                         {isProfit ? '+' : ''}{pnl.toFixed(2)}
                       </td>
@@ -167,30 +214,75 @@ export function PositionPanel({
         )}
 
         {activeTab === 'history' && (
-          tradeHistory.length === 0 ? (
+          tradeRecords.length === 0 ? (
             <div className="px-4 py-6 text-center text-xs text-muted-foreground">暂无历史记录</div>
           ) : (
             <table className="w-full text-[11px] font-mono">
               <thead>
                 <tr className="text-muted-foreground border-b border-border">
-                  {['方向', '类型', '开仓价', '平仓价', '数量', '手续费', '盈亏'].map(h => (
+                  {['合约', '操作', '方向', '开仓价', '平仓价', '数量', '手续费', '滑点', '盈亏'].map(h => (
                     <th key={h} className="px-3 py-1.5 text-left font-medium whitespace-nowrap">{h}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
-                {tradeHistory.slice().reverse().map(t => (
+                {tradeRecords.slice().reverse().slice(0, 50).map(t => (
                   <tr key={t.id} className="border-b border-border/30">
+                    <td className="px-3 py-2 text-foreground">{t.symbol?.replace('USDT', '/USDT') || '-'}</td>
+                    <td className="px-3 py-2">
+                      <span className={`text-[10px] px-1 py-0.5 rounded ${
+                        t.action === 'LIQUIDATION' ? 'bg-destructive/20 text-destructive' :
+                        t.action === 'OPEN' ? 'bg-primary/20 text-primary' : 'bg-accent text-foreground'
+                      }`}>
+                        {t.action === 'LIQUIDATION' ? '💀爆仓' : t.action === 'OPEN' ? '开仓' : '平仓'}
+                      </span>
+                    </td>
                     <td className={`px-3 py-2 font-bold ${t.side === 'LONG' ? 'trading-green' : 'trading-red'}`}>
                       {t.side === 'LONG' ? '多' : '空'} {t.leverage}x
                     </td>
-                    <td className="px-3 py-2 text-muted-foreground">{t.type}</td>
                     <td className="px-3 py-2">{t.entryPrice.toFixed(2)}</td>
-                    <td className="px-3 py-2">{t.exitPrice.toFixed(2)}</td>
+                    <td className="px-3 py-2">{t.exitPrice > 0 ? t.exitPrice.toFixed(2) : '-'}</td>
                     <td className="px-3 py-2">{t.quantity.toFixed(4)}</td>
                     <td className="px-3 py-2 text-muted-foreground">{t.fee.toFixed(4)}</td>
+                    <td className="px-3 py-2 text-muted-foreground">{t.slippage > 0 ? t.slippage.toFixed(4) : '-'}</td>
                     <td className={`px-3 py-2 font-bold ${t.pnl >= 0 ? 'trading-green' : 'trading-red'}`}>
                       {t.pnl >= 0 ? '+' : ''}{t.pnl.toFixed(2)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )
+        )}
+
+        {activeTab === 'funding' && (
+          fundingRecords.length === 0 ? (
+            <div className="px-4 py-6 text-center text-xs text-muted-foreground">
+              暂无资金费记录 · 每 8 小时结算 (00:00, 08:00, 16:00 UTC)
+            </div>
+          ) : (
+            <table className="w-full text-[11px] font-mono">
+              <thead>
+                <tr className="text-muted-foreground border-b border-border">
+                  {['时间', '合约', '方向', '名义价值', '费率', '金额'].map(h => (
+                    <th key={h} className="px-3 py-1.5 text-left font-medium whitespace-nowrap">{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {fundingRecords.slice().reverse().slice(0, 50).map(t => (
+                  <tr key={t.id} className="border-b border-border/30">
+                    <td className="px-3 py-2 text-muted-foreground">
+                      {new Date(t.openTime).toLocaleString()}
+                    </td>
+                    <td className="px-3 py-2 text-foreground">{t.symbol?.replace('USDT', '/USDT')}</td>
+                    <td className={`px-3 py-2 font-bold ${t.side === 'LONG' ? 'trading-green' : 'trading-red'}`}>
+                      {t.side === 'LONG' ? '多' : '空'}
+                    </td>
+                    <td className="px-3 py-2">{(t.entryPrice * t.quantity).toFixed(2)}</td>
+                    <td className="px-3 py-2 text-muted-foreground">0.01%</td>
+                    <td className={`px-3 py-2 font-bold ${t.pnl >= 0 ? 'trading-green' : 'trading-red'}`}>
+                      {t.pnl >= 0 ? '+' : ''}{t.pnl.toFixed(4)}
                     </td>
                   </tr>
                 ))}

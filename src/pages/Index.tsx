@@ -7,6 +7,7 @@ import { loadPersistedSimState } from '@/hooks/usePersistedState';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { TimeControl } from '@/components/TimeControl';
 import { CandlestickChart } from '@/components/CandlestickChart';
+import { OrderBook } from '@/components/OrderBook';
 import { OrderPanel } from '@/components/OrderPanel';
 import { PositionPanel } from '@/components/PositionPanel';
 import { SymbolSelector } from '@/components/SymbolSelector';
@@ -69,6 +70,7 @@ const Index = () => {
     activeSymbolPositions, activeSymbolOrders,
     allPositions, allOrders, currentPrice, activeSymbols,
     handlePlaceOrder, handleClosePosition, handleCancelOrder,
+    handleAddIsolatedMargin,
     liquidationOpen, liquidationDetails, closeLiquidationModal,
   } = ctx;
 
@@ -454,10 +456,16 @@ const Index = () => {
               activeSymbol={activeSymbol}
               onClosePosition={handleClosePositionForSymbol}
               onCancelOrder={handleCancelOrderForSymbol}
+              onAddIsolatedMargin={handleAddIsolatedMargin}
               activeTab={bottomTab}
               onTabChange={setBottomTab}
             />
           </div>
+        </div>
+
+        {/* Order Book */}
+        <div className="w-[180px] border-l border-border shrink-0 overflow-hidden">
+          <OrderBook currentPrice={currentPrice} symbol={activeSymbol} />
         </div>
 
         <div className="w-[280px] border-l border-border shrink-0 overflow-y-auto">
