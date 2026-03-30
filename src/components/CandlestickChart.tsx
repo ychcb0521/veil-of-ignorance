@@ -100,6 +100,10 @@ const DARK_STYLES = {
         line: { show: true, style: LineType.Dashed, dashedValue: [4, 4] },
       },
     },
+    tooltip: {
+      showRule: 'follow_cross',
+      showType: 'standard',
+    },
   },
   xAxis: { show: true, tickText: { color: '#848E9C' } },
   yAxis: { show: true, tickText: { color: '#848E9C' } },
@@ -107,13 +111,19 @@ const DARK_STYLES = {
     show: true,
     horizontal: {
       show: true,
-      line: { color: '#F0B90B33', style: LineType.Dashed },
-      text: { color: '#FFFFFF', borderColor: '#F0B90B', backgroundColor: '#363A45' },
+      line: { show: true, color: '#F0B90B33', style: LineType.Dashed },
+      text: { show: true, color: '#FFFFFF', borderColor: '#F0B90B', backgroundColor: '#363A45' },
     },
     vertical: {
       show: true,
-      line: { color: '#F0B90B33', style: LineType.Dashed },
-      text: { color: '#FFFFFF', borderColor: '#F0B90B', backgroundColor: '#363A45' },
+      line: { show: true, color: '#F0B90B33', style: LineType.Dashed },
+      text: { show: true, color: '#FFFFFF', borderColor: '#F0B90B', backgroundColor: '#363A45' },
+    },
+  },
+  indicator: {
+    tooltip: {
+      showRule: 'follow_cross',
+      showType: 'standard',
     },
   },
   separator: { color: '#1B1F26' },
