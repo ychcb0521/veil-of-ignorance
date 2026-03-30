@@ -189,6 +189,8 @@ function CandlestickChartComponent({ data, symbol, onLoadOlder, loadingOlder, tr
   const chartRef = useRef<Chart | null>(null);
   const prevDataLenRef = useRef(0);
   const prevOldestRef = useRef<number>(0);
+  const prevNewestRef = useRef<number>(0);
+  const prevLastSigRef = useRef('');
 
   const [indicators, setIndicators] = usePersistedState<IndicatorConfig[]>('indicators', []);
   const [showIndicatorPanel, setShowIndicatorPanel] = useState(false);
@@ -245,9 +247,19 @@ function CandlestickChartComponent({ data, symbol, onLoadOlder, loadingOlder, tr
 
     const klineData = data.map(toKLineData);
     const currentOldest = data[0].time;
+    const lastCandle = klineData[klineData.length - 1];
+    const lastSig = `${lastCandle.timestamp}|${lastCandle.open}|${lastCandle.high}|${lastCandle.low}|${lastCandle.close}|${lastCandle.volume}`;
+
     const wasPrepend = prevDataLenRef.current > 0
       && data.length > prevDataLenRef.current
       && currentOldest < prevOldestRef.current;
+
+    const unchangedSnapshot =
+      data.length === prevDataLenRef.current
+      && currentOldest === prevOldestRef.current
+      && lastSig === prevLastSigRef.current;
+
+    if (unchangedSnapshot) return;
 
     if (wasPrepend) {
       // Older data prepended — feed older portion via applyMoreData
@@ -258,16 +270,20 @@ function CandlestickChartComponent({ data, symbol, onLoadOlder, loadingOlder, tr
       // Initial load
       chart.applyNewData(klineData, true);
     } else if (data.length > prevDataLenRef.current && data.length - prevDataLenRef.current <= 2) {
-      // New candle appended (sim tick) — update last candle
-      const lastCandle = klineData[klineData.length - 1];
+      // New candle appended (sim tick)
+      chart.updateData(lastCandle);
+    } else if (data.length === prevDataLenRef.current && lastCandle.timestamp === prevNewestRef.current) {
+      // Same bar evolving: only update last candle to keep crosshair/interaction state stable
       chart.updateData(lastCandle);
     } else {
-      // Data replaced (interval change, symbol change, etc.)
+      // Data replaced (symbol/interval/window replacement)
       chart.applyNewData(klineData, true);
     }
 
     prevDataLenRef.current = data.length;
     prevOldestRef.current = currentOldest;
+    prevNewestRef.current = lastCandle.timestamp as number;
+    prevLastSigRef.current = lastSig;
   }, [data]);
 
   // ============================================================
