@@ -339,10 +339,46 @@ const Index = () => {
     handleCancelOrder(symbol, orderId);
   }, [handleCancelOrder]);
 
+  const isMobile = useIsMobile();
+
+  // Mobile layout
+  if (isMobile) {
+    return (
+      <MobileLayout
+        symbol={activeSymbol}
+        interval={interval}
+        onSymbolChange={handleSymbolChange}
+        onIntervalChange={handleIntervalChange}
+        isRunning={sim.isRunning}
+        currentSimulatedTime={sim.currentSimulatedTime}
+        speed={sim.speed}
+        onStart={handleStart}
+        onStop={sim.stopSimulation}
+        onSetSpeed={sim.setSpeed}
+        visibleData={visibleData}
+        onLoadOlder={loadOlder}
+        loadingOlder={loadingOlder}
+        currentPrice={currentPrice}
+        disabled={!sim.isRunning || currentPrice === 0}
+        onPlaceOrder={handlePlaceOrderForActiveSymbol}
+        balance={balance}
+        positionsMap={positionsMap}
+        ordersMap={ordersMap}
+        priceMap={priceMap}
+        tradeHistory={tradeHistory}
+        activeSymbol={activeSymbol}
+        onClosePosition={handleClosePositionForSymbol}
+        onCancelOrder={handleCancelOrderForSymbol}
+      />
+    );
+  }
+
+  // Desktop layout
   return (
-    <div className="h-screen flex flex-col overflow-hidden" style={{ background: '#0B0E11' }}>
-      <header className="border-b border-border px-4 py-1.5 flex items-center justify-between shrink-0">
+    <div className="h-screen flex flex-col overflow-hidden bg-background">
+      <header className="border-b border-border px-4 py-1.5 flex items-center justify-between shrink-0 bg-card">
         <div className="flex items-center gap-4">
+          <ThemeToggle />
           <h1 className="text-xs font-bold text-primary tracking-widest uppercase">⚡ 无知之幕</h1>
           <SymbolSelector symbol={activeSymbol} interval={interval} onSymbolChange={handleSymbolChange} onIntervalChange={handleIntervalChange} />
         </div>
@@ -371,7 +407,7 @@ const Index = () => {
         <div className="flex-1 flex flex-col min-h-0 min-w-0">
           <div className="flex-1 min-h-0">
             {!sim.isRunning && visibleData.length === 0 ? (
-              <div className="h-full flex items-center justify-center" style={{ background: '#0B0E11' }}>
+              <div className="h-full flex items-center justify-center bg-background">
                 <div className="text-center space-y-3">
                   <div className="text-5xl">⏰</div>
                   <p className="text-sm text-muted-foreground">输入历史时间并点击「启动」开始复盘模拟</p>
