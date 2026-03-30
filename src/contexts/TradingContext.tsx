@@ -158,6 +158,8 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
   const [priceMap, setPriceMap] = usePersistedState<PriceMap>('price_map', {});
   const [balance, setBalance] = usePersistedState('balance', initialCapital);
   const [tradeHistory, setTradeHistory] = usePersistedState<TradeRecord[]>('trade_history', []);
+  const [pricePrecision, setPricePrecision] = useState(2);
+  const [quantityPrecision, setQuantityPrecision] = useState(3);
 
   // Liquidation modal state
   const [liquidationOpen, setLiquidationOpen] = useState(false);
