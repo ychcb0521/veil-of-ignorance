@@ -2,6 +2,10 @@ import { useState, useRef, useEffect } from 'react';
 import type { OrderSide, OrderType, MarginMode } from '@/types/trading';
 import { ORDER_TYPE_INFO } from '@/types/trading';
 import { ChevronDown, Check, Info } from 'lucide-react';
+import type { PlaceOrderParams } from '@/contexts/TradingContext';
+
+// Re-export for convenience
+export type { PlaceOrderParams };
 
 // === New selector types ===
 export type PriceSelection = 'MARKET' | 'LIMIT' | 'BEST';
@@ -9,9 +13,10 @@ export type TriggerType = 'MARK' | 'LAST';
 export type CurrencyUnit = 'BASE' | 'USDT';
 export type UsdtInputMode = 'ORDER_VALUE' | 'INITIAL_MARGIN';
 
-export interface PlaceOrderParams {
-  side: OrderSide;
-  type: OrderType;
+// PlaceOrderParams is now defined in TradingContext
+// Local interface removed — using the shared one
+
+interface PlaceOrderParamsPlaceholder {
   price: number;
   stopPrice: number;
   quantity: number;
