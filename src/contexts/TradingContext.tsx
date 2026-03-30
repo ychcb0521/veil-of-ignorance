@@ -113,6 +113,9 @@ function executeFill(
 
 // ===== Provider =====
 export function TradingProvider({ children }: { children: React.ReactNode }) {
+  const { profile } = useAuth();
+  const initialCapital = profile?.initial_capital ?? 1_000_000;
+
   const persistedSim = useMemo(() => loadPersistedSimState(), []);
   const restoredRunning = persistedSim?.isRunning ?? false;
 
@@ -128,6 +131,10 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
   const [activeSymbol, setActiveSymbol] = usePersistedState('symbol', persistedSim?.symbol ?? 'BTCUSDT');
   const [interval, setInterval] = usePersistedState('interval', persistedSim?.interval ?? '1m');
   const [positionsMap, setPositionsMap] = usePersistedState<PositionsMap>('positions_map', {});
+  const [ordersMap, setOrdersMap] = usePersistedState<OrdersMap>('orders_map', {});
+  const [priceMap, setPriceMap] = usePersistedState<PriceMap>('price_map', {});
+  const [balance, setBalance] = usePersistedState('balance', initialCapital);
+  const [tradeHistory, setTradeHistory] = usePersistedState<TradeRecord[]>('trade_history', []);
   const [ordersMap, setOrdersMap] = usePersistedState<OrdersMap>('orders_map', {});
   const [priceMap, setPriceMap] = usePersistedState<PriceMap>('price_map', {});
   const [balance, setBalance] = usePersistedState('balance', 1_000_000);
