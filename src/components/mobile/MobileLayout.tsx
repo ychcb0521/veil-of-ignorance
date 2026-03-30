@@ -1,12 +1,13 @@
 import { useState, useCallback } from 'react';
-import { MobileHeader } from './MobileHeader';
-import { MobileBottomBar } from './MobileBottomBar';
-import { MobileTradingDrawer } from './MobileTradingDrawer';
-import { CandlestickChart } from '@/components/CandlestickChart';
-import { AccountInfo } from '@/components/AccountInfo';
+import { MobileSearchView } from './MobileSearchView';
+import { MobileChartView } from './MobileChartView';
+import { MobileTradingView } from './MobileTradingView';
+import { usePersistedState } from '@/hooks/usePersistedState';
 import type { KlineData } from '@/hooks/useBinanceData';
 import type { PlaceOrderParams, PositionsMap, OrdersMap, PriceMap } from '@/contexts/TradingContext';
 import type { TradeRecord } from '@/types/trading';
+
+export type MobileView = 'Search' | 'Chart' | 'Trading';
 
 interface Props {
   // Symbol & interval
@@ -41,69 +42,63 @@ interface Props {
 }
 
 export function MobileLayout(props: Props) {
-  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [activeView, setActiveView] = usePersistedState<MobileView>('mobile_view', 'Search');
 
-  return (
-    <div className="h-screen flex flex-col overflow-hidden bg-background">
-      <MobileHeader
-        symbol={props.symbol}
-        interval={props.interval}
-        onSymbolChange={props.onSymbolChange}
-        onIntervalChange={props.onIntervalChange}
-        isRunning={props.isRunning}
-        currentSimulatedTime={props.currentSimulatedTime}
-        speed={props.speed}
-        onStart={props.onStart}
-        onStop={props.onStop}
-        onSetSpeed={props.onSetSpeed}
-      />
+  const handleSelectSymbol = useCallback((sym: string) => {
+    props.onSymbolChange(sym);
+    setActiveView('Chart');
+  }, [props.onSymbolChange]);
 
-      {/* Account info - compact */}
-      <div className="shrink-0">
-        <AccountInfo balance={props.balance} positionsMap={props.positionsMap} priceMap={props.priceMap} />
-      </div>
+  switch (activeView) {
+    case 'Search':
+      return (
+        <MobileSearchView
+          onSelectSymbol={handleSelectSymbol}
+          currentSymbol={props.symbol}
+        />
+      );
 
-      {/* Chart - full width */}
-      <div className="flex-1 min-h-0">
-        {!props.isRunning && props.visibleData.length === 0 ? (
-          <div className="h-full flex items-center justify-center bg-background">
-            <div className="text-center space-y-3 px-6">
-              <div className="text-4xl">⏰</div>
-              <p className="text-sm text-muted-foreground">输入历史时间并点击「启动」开始复盘模拟</p>
-            </div>
-          </div>
-        ) : (
-          <CandlestickChart
-            data={props.visibleData}
-            symbol={props.activeSymbol.replace('USDT', '/USDT')}
-            onLoadOlder={props.onLoadOlder}
-            loadingOlder={props.loadingOlder}
-          />
-        )}
-      </div>
+    case 'Chart':
+      return (
+        <MobileChartView
+          symbol={props.symbol}
+          interval={props.interval}
+          onIntervalChange={props.onIntervalChange}
+          onBack={() => setActiveView('Search')}
+          onTrade={() => setActiveView('Trading')}
+          isRunning={props.isRunning}
+          currentSimulatedTime={props.currentSimulatedTime}
+          speed={props.speed}
+          onStart={props.onStart}
+          onStop={props.onStop}
+          onSetSpeed={props.onSetSpeed}
+          visibleData={props.visibleData}
+          onLoadOlder={props.onLoadOlder}
+          loadingOlder={props.loadingOlder}
+          balance={props.balance}
+          positionsMap={props.positionsMap}
+          priceMap={props.priceMap}
+          currentPrice={props.currentPrice}
+        />
+      );
 
-      {/* Bottom bar */}
-      <MobileBottomBar
-        onOpenLong={() => setDrawerOpen(true)}
-        onOpenShort={() => setDrawerOpen(true)}
-      />
-
-      {/* Trading drawer */}
-      <MobileTradingDrawer
-        open={drawerOpen}
-        onOpenChange={setDrawerOpen}
-        currentPrice={props.currentPrice}
-        disabled={props.disabled}
-        symbol={props.symbol}
-        onPlaceOrder={props.onPlaceOrder}
-        positionsMap={props.positionsMap}
-        ordersMap={props.ordersMap}
-        tradeHistory={props.tradeHistory}
-        priceMap={props.priceMap}
-        activeSymbol={props.activeSymbol}
-        onClosePosition={props.onClosePosition}
-        onCancelOrder={props.onCancelOrder}
-      />
-    </div>
-  );
+    case 'Trading':
+      return (
+        <MobileTradingView
+          onBack={() => setActiveView('Chart')}
+          currentPrice={props.currentPrice}
+          disabled={props.disabled}
+          symbol={props.symbol}
+          onPlaceOrder={props.onPlaceOrder}
+          positionsMap={props.positionsMap}
+          ordersMap={props.ordersMap}
+          tradeHistory={props.tradeHistory}
+          priceMap={props.priceMap}
+          activeSymbol={props.activeSymbol}
+          onClosePosition={props.onClosePosition}
+          onCancelOrder={props.onCancelOrder}
+          balance={props.balance}
+        />
+      );
+  }
 }
