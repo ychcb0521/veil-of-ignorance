@@ -195,6 +195,40 @@ export function CandlestickChart({ data, symbol, onLoadOlder, loadingOlder, trad
   }, [data]);
 
   // ============================================================
+  // TRADE MARKERS on chart
+  // ============================================================
+  useEffect(() => {
+    if (!seriesRef.current || !tradeHistory || !rawSymbol || data.length === 0) return;
+
+    const symbolTrades = tradeHistory.filter(t => t.symbol === rawSymbol);
+    if (symbolTrades.length === 0) {
+      seriesRef.current.setMarkers([]);
+      return;
+    }
+
+    const markers: SeriesMarker<Time>[] = symbolTrades
+      .filter(t => {
+        const ts = t.action === 'OPEN' ? t.openTime : t.closeTime;
+        return ts > 0;
+      })
+      .map(t => {
+        const ts = t.action === 'OPEN' ? t.openTime : t.closeTime;
+        const isBuy = (t.action === 'OPEN' && t.side === 'LONG') || (t.action === 'CLOSE' && t.side === 'SHORT');
+        const isLiquidation = t.action === 'LIQUIDATION';
+        return {
+          time: (ts / 1000) as Time,
+          position: isBuy ? 'belowBar' as const : 'aboveBar' as const,
+          color: isLiquidation ? '#FF6B6B' : isBuy ? '#26a69a' : '#ef5350',
+          shape: isBuy ? 'arrowUp' as const : 'arrowDown' as const,
+          text: isLiquidation ? '💀' : isBuy ? 'B' : 'S',
+        };
+      })
+      .sort((a, b) => (a.time as number) - (b.time as number));
+
+    seriesRef.current.setMarkers(markers);
+  }, [tradeHistory, rawSymbol, data]);
+
+  // ============================================================
   // INDICATOR RENDERING
   // ============================================================
   useEffect(() => {
