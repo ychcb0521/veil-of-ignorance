@@ -140,7 +140,8 @@ export function MultiChartLayout({
         <div className="flex-1 min-h-0 grid grid-cols-2 grid-rows-2 gap-px" style={{ background: 'hsl(var(--border))' }}>
           <div className="bg-background min-h-0 overflow-hidden">
             <CandlestickChart data={mainData} symbol={`${mainSymbol} ${mainInterval}`} onLoadOlder={onLoadOlder}
-              loadingOlder={loadingOlder} tradeHistory={tradeHistory} rawSymbol={rawSymbol} />
+              loadingOlder={loadingOlder} tradeHistory={tradeHistory} rawSymbol={rawSymbol}
+              pricePrecision={pricePrecision} quantityPrecision={quantityPrecision} />
           </div>
           {[0, 1, 2].map(i => (
             <div key={i} className="bg-background min-h-0 overflow-hidden relative">
