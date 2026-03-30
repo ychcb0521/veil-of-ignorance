@@ -4,7 +4,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useBinanceData, type KlineData } from '@/hooks/useBinanceData';
 import { useBackgroundPrices } from '@/hooks/useBackgroundPrices';
 import { loadPersistedSimState } from '@/hooks/usePersistedState';
-import { usePersistedState } from '@/hooks/usePersistedState';
+import { usePersistedState, clearSimState } from '@/hooks/usePersistedState';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { TimeControl } from '@/components/TimeControl';
 import { CandlestickChart } from '@/components/CandlestickChart';
@@ -94,16 +94,15 @@ const Index = () => {
   const coolingOff = useCoolingOff();
   const hasRestoredRef = useRef(false);
   const persistedSim = useMemo(() => loadPersistedSimState(), []);
-  const restoredRunning = persistedSim?.isRunning ?? false;
+  const restoredActive = persistedSim?.status === 'playing' || persistedSim?.status === 'paused';
 
   useEffect(() => {
-    if (!restoredRunning || hasRestoredRef.current || !persistedSim) return;
+    if (!restoredActive || hasRestoredRef.current || !persistedSim) return;
     hasRestoredRef.current = true;
 
     (async () => {
-      const anchorTime = persistedSim.historicalAnchorTime!;
-      const currentSim = anchorTime + (Date.now() - persistedSim.realStartTime!) * persistedSim.speed;
-      const data = await initLoad(persistedSim.symbol, persistedSim.interval, currentSim);
+      const targetTime = persistedSim.currentSimulatedTime || persistedSim.historicalAnchorTime!;
+      const data = await initLoad(persistedSim.symbol, persistedSim.interval, targetTime);
       if (data.length > 0) {
         toast.info('已恢复模拟会话');
       }
@@ -349,13 +348,13 @@ const Index = () => {
     reset();
     prevVisibleLenRef.current = 0;
 
-    if (sim.isRunning) {
+    if (sim.status !== 'stopped') {
       const data = await initLoad(newSymbol, interval, sim.currentSimulatedTime);
       if (data.length > 0) {
         toast.info(`已切换到 ${newSymbol}`, { description: `加载 ${data.length} 根K线` });
       }
     }
-  }, [activeSymbol, sim.isRunning, sim.currentSimulatedTime, interval, initLoad, reset]);
+  }, [activeSymbol, sim.status, sim.currentSimulatedTime, interval, initLoad, reset]);
 
   const handleIntervalChange = useCallback(async (newInterval: string) => {
     if (newInterval === interval) return;
@@ -363,10 +362,10 @@ const Index = () => {
     reset();
     prevVisibleLenRef.current = 0;
 
-    if (sim.isRunning) {
+    if (sim.status !== 'stopped') {
       await initLoad(activeSymbol, newInterval, sim.currentSimulatedTime);
     }
-  }, [activeSymbol, interval, sim.isRunning, sim.currentSimulatedTime, initLoad, reset]);
+  }, [activeSymbol, interval, sim.status, sim.currentSimulatedTime, initLoad, reset]);
 
   const handleStart = useCallback(async (timestamp: number) => {
     const data = await initLoad(activeSymbol, interval, timestamp);
@@ -377,9 +376,33 @@ const Index = () => {
         description: `已加载 ${data.length} 根K线 · 向左拖动可加载更多历史数据`,
       });
     } else {
-      toast.error('数据获取失败', { description: error || '请检查时间范围和交易对' });
+      toast.error('数据获取失败', { description: '请检查时间范围和交易对' });
     }
-  }, [activeSymbol, interval, initLoad, sim, error]);
+  }, [activeSymbol, interval, initLoad, sim]);
+
+  // Stop: close all positions, cancel orders, reset
+  const handleStop = useCallback(() => {
+    // Close all positions at current prices
+    for (const [sym, positions] of Object.entries(positionsMap)) {
+      const price = priceMap[sym] || 0;
+      if (price <= 0) continue;
+      for (let i = positions.length - 1; i >= 0; i--) {
+        handleClosePosition(sym, i);
+      }
+    }
+    // Cancel all orders
+    for (const [sym, orders] of Object.entries(ordersMap)) {
+      for (const order of orders) {
+        handleCancelOrder(sym, order.id);
+      }
+    }
+    // Reset chart and sim
+    reset();
+    prevVisibleLenRef.current = 0;
+    clearSimState();
+    sim.stopSimulation();
+    toast.info('⏹ 模拟已停止，所有仓位已结算');
+  }, [positionsMap, ordersMap, priceMap, handleClosePosition, handleCancelOrder, reset, sim]);
 
   // Wrapper for OrderPanel
   const handlePlaceOrderForActiveSymbol = useCallback((order: PlaceOrderParams) => {
@@ -404,17 +427,19 @@ const Index = () => {
         interval={interval}
         onSymbolChange={handleSymbolChange}
         onIntervalChange={handleIntervalChange}
-        isRunning={sim.isRunning}
+        status={sim.status}
         currentSimulatedTime={sim.currentSimulatedTime}
         speed={sim.speed}
         onStart={handleStart}
-        onStop={sim.stopSimulation}
+        onPause={sim.pauseSimulation}
+        onResume={sim.resumeSimulation}
+        onStop={handleStop}
         onSetSpeed={sim.setSpeed}
         visibleData={visibleData}
         onLoadOlder={loadOlder}
         loadingOlder={loadingOlder}
         currentPrice={currentPrice}
-        disabled={!sim.isRunning || currentPrice === 0}
+        disabled={sim.status === 'stopped' || currentPrice === 0}
         onPlaceOrder={handlePlaceOrderForActiveSymbol}
         balance={balance}
         positionsMap={positionsMap}
@@ -454,8 +479,8 @@ const Index = () => {
       </header>
 
       <div className="shrink-0">
-        <TimeControl isRunning={sim.isRunning} currentSimulatedTime={sim.currentSimulatedTime}
-          speed={sim.speed} onStart={handleStart} onStop={sim.stopSimulation} onSetSpeed={sim.setSpeed} />
+        <TimeControl status={sim.status} currentSimulatedTime={sim.currentSimulatedTime}
+          speed={sim.speed} onStart={handleStart} onPause={sim.pauseSimulation} onResume={sim.resumeSimulation} onStop={handleStop} onSetSpeed={sim.setSpeed} />
       </div>
 
       <div className="shrink-0">
@@ -465,7 +490,7 @@ const Index = () => {
       <div className="flex-1 flex min-h-0 overflow-hidden">
         <div className="flex-1 flex flex-col min-h-0 min-w-0">
           <div className="flex-1 min-h-0 relative">
-            {!sim.isRunning && visibleData.length === 0 ? (
+            {sim.status === 'stopped' && visibleData.length === 0 ? (
               <div className="h-full flex items-center justify-center bg-background">
                 <div className="text-center space-y-3">
                   <div className="text-5xl">⏰</div>
@@ -481,7 +506,7 @@ const Index = () => {
                 onLoadOlder={loadOlder}
                 loadingOlder={loadingOlder}
                 tradeHistory={tradeHistory}
-                isRunning={sim.isRunning}
+                isRunning={sim.status !== 'stopped'}
                 currentSimulatedTime={sim.currentSimulatedTime}
                 mainInterval={interval}
               />
@@ -511,7 +536,7 @@ const Index = () => {
 
         <div className="w-[280px] border-l border-border shrink-0 overflow-y-auto">
           <OrderPanel currentPrice={currentPrice} onPlaceOrder={handlePlaceOrderForActiveSymbol}
-            disabled={!sim.isRunning || currentPrice === 0} symbol={activeSymbol}
+            disabled={sim.status === 'stopped' || currentPrice === 0} symbol={activeSymbol}
             coolingOff={coolingOff.isActive}
             coolingOffLabel={coolingOff.formatRemaining()}
             onOpenCoolingOff={() => setCoolingOffModalOpen(true)}

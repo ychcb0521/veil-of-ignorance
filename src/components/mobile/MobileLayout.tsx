@@ -6,20 +6,22 @@ import { usePersistedState } from '@/hooks/usePersistedState';
 import type { KlineData } from '@/hooks/useBinanceData';
 import type { PlaceOrderParams, PositionsMap, OrdersMap, PriceMap } from '@/contexts/TradingContext';
 import type { TradeRecord } from '@/types/trading';
+import type { TimeMachineStatus } from '@/hooks/useTimeSimulator';
 
 export type MobileView = 'Search' | 'Chart' | 'Trading';
 
 interface Props {
-  // Symbol & interval
   symbol: string;
   interval: string;
   onSymbolChange: (s: string) => void;
   onIntervalChange: (i: string) => void;
   // Sim
-  isRunning: boolean;
+  status: TimeMachineStatus;
   currentSimulatedTime: number;
   speed: number;
   onStart: (ts: number) => void;
+  onPause: () => void;
+  onResume: () => void;
   onStop: () => void;
   onSetSpeed: (s: number) => void;
   // Chart
@@ -66,10 +68,12 @@ export function MobileLayout(props: Props) {
           onIntervalChange={props.onIntervalChange}
           onBack={() => setActiveView('Search')}
           onTrade={() => setActiveView('Trading')}
-          isRunning={props.isRunning}
+          status={props.status}
           currentSimulatedTime={props.currentSimulatedTime}
           speed={props.speed}
           onStart={props.onStart}
+          onPause={props.onPause}
+          onResume={props.onResume}
           onStop={props.onStop}
           onSetSpeed={props.onSetSpeed}
           visibleData={props.visibleData}

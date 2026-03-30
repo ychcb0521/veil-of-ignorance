@@ -11,7 +11,7 @@
 
 import React, { createContext, useContext, useCallback, useEffect, useRef, useMemo, useState } from 'react';
 import { useTimeSimulator } from '@/hooks/useTimeSimulator';
-import { usePersistedState, loadPersistedSimState, saveSimState } from '@/hooks/usePersistedState';
+import { usePersistedState, loadPersistedSimState, saveSimState, clearSimState } from '@/hooks/usePersistedState';
 import { useAuth } from '@/contexts/AuthContext';
 import { toast } from 'sonner';
 import type { Position, PendingOrder, TradeRecord, OrderSide, OrderType, MarginMode } from '@/types/trading';
@@ -135,13 +135,14 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
   const initialCapital = profile?.initial_capital ?? 1_000_000;
 
   const persistedSim = useMemo(() => loadPersistedSimState(), []);
-  const restoredRunning = persistedSim?.isRunning ?? false;
+  const restoredStatus = persistedSim?.status ?? 'stopped';
 
   const sim = useTimeSimulator(
-    restoredRunning && persistedSim ? {
-      isRunning: true,
-      historicalAnchorTime: persistedSim.historicalAnchorTime,
-      realStartTime: persistedSim.realStartTime,
+    (restoredStatus === 'playing' || restoredStatus === 'paused') && persistedSim ? {
+      status: restoredStatus,
+      historicalAnchorTime: restoredStatus === 'playing' ? persistedSim.historicalAnchorTime : persistedSim.currentSimulatedTime,
+      realStartTime: restoredStatus === 'playing' ? Date.now() : persistedSim.realStartTime,
+      currentSimulatedTime: persistedSim.currentSimulatedTime,
       speed: persistedSim.speed,
     } : undefined
   );
@@ -161,17 +162,20 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
 
   // Persist sim state
   useEffect(() => {
-    if (sim.isRunning) {
+    if (sim.status !== 'stopped') {
       saveSimState({
-        isRunning: true,
+        status: sim.status,
         historicalAnchorTime: sim.historicalAnchorTime,
         realStartTime: sim.realStartTime,
+        currentSimulatedTime: sim.currentSimulatedTime,
         speed: sim.speed,
         symbol: activeSymbol,
         interval,
       });
+    } else {
+      clearSimState();
     }
-  }, [sim.isRunning, sim.historicalAnchorTime, sim.realStartTime, sim.speed, activeSymbol, interval]);
+  }, [sim.status, sim.historicalAnchorTime, sim.realStartTime, sim.currentSimulatedTime, sim.speed, activeSymbol, interval]);
 
   // Computed
   const activeSymbolPositions = useMemo(() => positionsMap[activeSymbol] || [], [positionsMap, activeSymbol]);
