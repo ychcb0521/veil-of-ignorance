@@ -1,5 +1,5 @@
 import { useEffect, useRef, useCallback } from 'react';
-import { createChart, IChartApi, ISeriesApi, CandlestickData, Time, PriceLineOptions, LineStyle } from 'lightweight-charts';
+import { createChart, IChartApi, ISeriesApi, CandlestickData, Time, PriceLineOptions, LineStyle, SeriesMarker } from 'lightweight-charts';
 import type { KlineData } from '@/hooks/useBinanceData';
 import { useDrawing } from '@/hooks/useDrawing';
 import { usePersistedState } from '@/hooks/usePersistedState';
@@ -7,6 +7,7 @@ import type { IndicatorConfig } from '@/hooks/useIndicators';
 import { calculateIndicator, INDICATOR_PRESETS } from '@/hooks/useIndicators';
 import { ChartToolbar } from './ChartToolbar';
 import { DrawingOverlay } from './DrawingOverlay';
+import type { TradeRecord } from '@/types/trading';
 
 interface Props {
   data: KlineData[];
@@ -14,9 +15,13 @@ interface Props {
   /** Called when user scrolls near the left edge — parent should load older data */
   onLoadOlder?: () => void;
   loadingOlder?: boolean;
+  /** Trade history for on-chart markers */
+  tradeHistory?: TradeRecord[];
+  /** Raw symbol name (e.g. BTCUSDT) for filtering trades */
+  rawSymbol?: string;
 }
 
-export function CandlestickChart({ data, symbol, onLoadOlder, loadingOlder }: Props) {
+export function CandlestickChart({ data, symbol, onLoadOlder, loadingOlder, tradeHistory, rawSymbol }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const seriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
@@ -188,6 +193,40 @@ export function CandlestickChart({ data, symbol, onLoadOlder, loadingOlder }: Pr
     prevDataLenRef.current = data.length;
     prevOldestRef.current = currentOldest;
   }, [data]);
+
+  // ============================================================
+  // TRADE MARKERS on chart
+  // ============================================================
+  useEffect(() => {
+    if (!seriesRef.current || !tradeHistory || !rawSymbol || data.length === 0) return;
+
+    const symbolTrades = tradeHistory.filter(t => t.symbol === rawSymbol);
+    if (symbolTrades.length === 0) {
+      seriesRef.current.setMarkers([]);
+      return;
+    }
+
+    const markers: SeriesMarker<Time>[] = symbolTrades
+      .filter(t => {
+        const ts = t.action === 'OPEN' ? t.openTime : t.closeTime;
+        return ts > 0;
+      })
+      .map(t => {
+        const ts = t.action === 'OPEN' ? t.openTime : t.closeTime;
+        const isBuy = (t.action === 'OPEN' && t.side === 'LONG') || (t.action === 'CLOSE' && t.side === 'SHORT');
+        const isLiquidation = t.action === 'LIQUIDATION';
+        return {
+          time: (ts / 1000) as Time,
+          position: isBuy ? 'belowBar' as const : 'aboveBar' as const,
+          color: isLiquidation ? '#FF6B6B' : isBuy ? '#26a69a' : '#ef5350',
+          shape: isBuy ? 'arrowUp' as const : 'arrowDown' as const,
+          text: isLiquidation ? '💀' : isBuy ? 'B' : 'S',
+        };
+      })
+      .sort((a, b) => (a.time as number) - (b.time as number));
+
+    seriesRef.current.setMarkers(markers);
+  }, [tradeHistory, rawSymbol, data]);
 
   // ============================================================
   // INDICATOR RENDERING

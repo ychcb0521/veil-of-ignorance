@@ -61,16 +61,28 @@ export interface Position {
 
 export interface TradeRecord {
   id: string;
+  symbol: string;
   side: OrderSide;
   type: OrderType;
+  action: 'OPEN' | 'CLOSE' | 'LIQUIDATION';
   entryPrice: number;
   exitPrice: number;
   quantity: number;
   leverage: number;
   pnl: number;
   fee: number;
+  slippage: number;
   openTime: number;
   closeTime: number;
+}
+
+export const MAINTENANCE_MARGIN_RATE = 0.004; // 0.4%
+export const LIQUIDATION_FEE_RATE = 0.005;    // 0.5%
+
+/** Dynamic slippage for market/taker orders */
+export function calcSlippage(price: number, notionalValue: number, side: OrderSide): number {
+  const slippageRate = 0.0005 + notionalValue / 10_000_000;
+  return side === 'LONG' ? price * (1 + slippageRate) : price * (1 - slippageRate);
 }
 
 export const TAKER_FEE = 0.0004;  // 0.04%

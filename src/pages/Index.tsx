@@ -13,9 +13,10 @@ import { SymbolSelector } from '@/components/SymbolSelector';
 import { AccountInfo } from '@/components/AccountInfo';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import { MobileLayout } from '@/components/mobile/MobileLayout';
+import { LiquidationModal } from '@/components/LiquidationModal';
 import { toast } from 'sonner';
 import type { PendingOrder, OrderType } from '@/types/trading';
-import { calcFee } from '@/types/trading';
+import { calcFee, calcSlippage } from '@/types/trading';
 
 // ===== Offline matching for restore =====
 function matchOrdersOffline(
@@ -68,6 +69,7 @@ const Index = () => {
     activeSymbolPositions, activeSymbolOrders,
     allPositions, allOrders, currentPrice, activeSymbols,
     handlePlaceOrder, handleClosePosition, handleCancelOrder,
+    liquidationOpen, liquidationDetails, closeLiquidationModal,
   } = ctx;
 
   const { allData, loading, loadingOlder, error, initLoad, loadOlder, getVisibleData, reset } = useBinanceData();
@@ -212,17 +214,32 @@ const Index = () => {
 
           if (triggered) {
             filledIds.push(order.id);
-            const fee = calcFee(fillPrice, order.quantity, isMaker);
-            const margin = (order.quantity * fillPrice) / order.leverage;
+            // Apply slippage for taker fills
+            let actualFillPrice = fillPrice;
+            let slippageAmount = 0;
+            if (!isMaker) {
+              const notional = fillPrice * order.quantity;
+              actualFillPrice = calcSlippage(fillPrice, notional, order.side);
+              slippageAmount = Math.abs(actualFillPrice - fillPrice) * order.quantity;
+            }
+            const fee = calcFee(actualFillPrice, order.quantity, isMaker);
+            const margin = (order.quantity * actualFillPrice) / order.leverage;
             setBalance(prev => prev - margin - fee);
             setPositionsMap(prev => ({
               ...prev,
               [activeSymbol]: [...(prev[activeSymbol] || []), {
-                side: order.side, entryPrice: fillPrice, quantity: order.quantity,
+                side: order.side, entryPrice: actualFillPrice, quantity: order.quantity,
                 leverage: order.leverage, marginMode: order.marginMode, margin,
               }],
             }));
-            toast.success(`委托成交: ${order.side === 'LONG' ? '开多' : '开空'} ${order.quantity} @ ${fillPrice.toFixed(2)}`);
+            setTradeHistory(prev => [...prev, {
+              id: crypto.randomUUID(), symbol: activeSymbol, side: order.side, type: order.type,
+              action: 'OPEN' as const, entryPrice: actualFillPrice, exitPrice: 0,
+              quantity: order.quantity, leverage: order.leverage,
+              pnl: 0, fee, slippage: slippageAmount,
+              openTime: sim.currentSimulatedTime, closeTime: 0,
+            }]);
+            toast.success(`委托成交: ${order.side === 'LONG' ? '开多' : '开空'} ${order.quantity} @ ${actualFillPrice.toFixed(2)}`);
           } else if (convertToLimit) {
             remaining.push(updatedOrder);
           } else {
@@ -263,16 +280,25 @@ const Index = () => {
             const filledSoFar = order.twapFilledQty || 0;
 
             if (filledSoFar + sliceQty <= totalQty + 0.0001 && now < endTime) {
-              const fee = calcFee(price, sliceQty, false);
-              const margin = (sliceQty * price) / order.leverage;
+              const notional = price * sliceQty;
+              const slippedPrice = calcSlippage(price, notional, order.side);
+              const slippageAmt = Math.abs(slippedPrice - price) * sliceQty;
+              const fee = calcFee(slippedPrice, sliceQty, false);
+              const margin = (sliceQty * slippedPrice) / order.leverage;
               setBalance(b => b - margin - fee);
               setPositionsMap(p => ({
                 ...p,
                 [symbol]: [...(p[symbol] || []), {
-                  side: order.side, entryPrice: price, quantity: sliceQty,
+                  side: order.side, entryPrice: slippedPrice, quantity: sliceQty,
                   leverage: order.leverage, marginMode: order.marginMode, margin,
                 }],
               }));
+              setTradeHistory(prev => [...prev, {
+                id: crypto.randomUUID(), symbol, side: order.side, type: 'TWAP' as OrderType,
+                action: 'OPEN' as const, entryPrice: slippedPrice, exitPrice: 0,
+                quantity: sliceQty, leverage: order.leverage,
+                pnl: 0, fee, slippage: slippageAmt, openTime: now, closeTime: 0,
+              }]);
               changed = true;
               return { ...order, twapFilledQty: filledSoFar + sliceQty, twapNextExecTime: order.twapNextExecTime! + intervalMs };
             } else {
@@ -415,7 +441,7 @@ const Index = () => {
                 </div>
               </div>
             ) : (
-              <CandlestickChart data={visibleData} symbol={activeSymbol.replace('USDT', '/USDT')} onLoadOlder={loadOlder} loadingOlder={loadingOlder} />
+              <CandlestickChart data={visibleData} symbol={activeSymbol.replace('USDT', '/USDT')} onLoadOlder={loadOlder} loadingOlder={loadingOlder} tradeHistory={tradeHistory} rawSymbol={activeSymbol} />
             )}
           </div>
 
@@ -439,6 +465,8 @@ const Index = () => {
             disabled={!sim.isRunning || currentPrice === 0} symbol={activeSymbol} />
         </div>
       </div>
+
+      <LiquidationModal open={liquidationOpen} onClose={closeLiquidationModal} details={liquidationDetails} />
     </div>
   );
 };
