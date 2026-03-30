@@ -543,6 +543,8 @@ const Index = () => {
             onOpenCoolingOff={() => setCoolingOffModalOpen(true)}
             priceProtection={priceProtection}
             onTogglePriceProtection={() => setPriceProtection(prev => !prev)}
+            pricePrecision={pricePrecision}
+            quantityPrecision={quantityPrecision}
           />
         </div>
       </div>
