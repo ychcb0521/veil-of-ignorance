@@ -208,6 +208,15 @@ export function CandlestickChart({ data, symbol, onLoadOlder, loadingOlder, trad
   }, [theme]);
 
   // ============================================================
+  // Price/Volume precision
+  // ============================================================
+  useEffect(() => {
+    const chart = chartRef.current;
+    if (!chart) return;
+    chart.setPriceVolumePrecision(pricePrecision, quantityPrecision);
+  }, [pricePrecision, quantityPrecision]);
+
+  // ============================================================
   // Feed data to chart when props change (v9 API)
   // ============================================================
   useEffect(() => {
