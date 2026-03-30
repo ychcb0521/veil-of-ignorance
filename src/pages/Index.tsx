@@ -280,16 +280,25 @@ const Index = () => {
             const filledSoFar = order.twapFilledQty || 0;
 
             if (filledSoFar + sliceQty <= totalQty + 0.0001 && now < endTime) {
-              const fee = calcFee(price, sliceQty, false);
-              const margin = (sliceQty * price) / order.leverage;
+              const notional = price * sliceQty;
+              const slippedPrice = calcSlippage(price, notional, order.side);
+              const slippageAmt = Math.abs(slippedPrice - price) * sliceQty;
+              const fee = calcFee(slippedPrice, sliceQty, false);
+              const margin = (sliceQty * slippedPrice) / order.leverage;
               setBalance(b => b - margin - fee);
               setPositionsMap(p => ({
                 ...p,
                 [symbol]: [...(p[symbol] || []), {
-                  side: order.side, entryPrice: price, quantity: sliceQty,
+                  side: order.side, entryPrice: slippedPrice, quantity: sliceQty,
                   leverage: order.leverage, marginMode: order.marginMode, margin,
                 }],
               }));
+              setTradeHistory(prev => [...prev, {
+                id: crypto.randomUUID(), symbol, side: order.side, type: 'TWAP' as OrderType,
+                action: 'OPEN' as const, entryPrice: slippedPrice, exitPrice: 0,
+                quantity: sliceQty, leverage: order.leverage,
+                pnl: 0, fee, slippage: slippageAmt, openTime: now, closeTime: 0,
+              }]);
               changed = true;
               return { ...order, twapFilledQty: filledSoFar + sliceQty, twapNextExecTime: order.twapNextExecTime! + intervalMs };
             } else {
