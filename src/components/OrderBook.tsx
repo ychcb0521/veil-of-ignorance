@@ -17,6 +17,7 @@ interface Props {
   currentPrice: number;
   symbol: string;
   previousPrice?: number;
+  pricePrecision?: number;
 }
 
 const DEPTH_LEVELS = 12;
