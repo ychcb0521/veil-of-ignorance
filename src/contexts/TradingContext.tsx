@@ -11,7 +11,7 @@
 
 import React, { createContext, useContext, useCallback, useEffect, useRef, useMemo, useState } from 'react';
 import { useTimeSimulator } from '@/hooks/useTimeSimulator';
-import { usePersistedState, loadPersistedSimState, saveSimState } from '@/hooks/usePersistedState';
+import { usePersistedState, loadPersistedSimState, saveSimState, clearSimState } from '@/hooks/usePersistedState';
 import { useAuth } from '@/contexts/AuthContext';
 import { toast } from 'sonner';
 import type { Position, PendingOrder, TradeRecord, OrderSide, OrderType, MarginMode } from '@/types/trading';
