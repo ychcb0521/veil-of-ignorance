@@ -144,6 +144,13 @@ export function MobileChartView(props: Props) {
         />
       )}
 
+      <MobileTimeframeSheet
+        open={showTimeframeSheet}
+        onClose={() => setShowTimeframeSheet(false)}
+        interval={props.interval}
+        onIntervalChange={props.onIntervalChange}
+      />
+
       {/* Price summary bar */}
       {last && (
         <div className="flex items-center gap-3 px-3 py-1 border-b border-border bg-card text-[10px] font-mono overflow-x-auto">
