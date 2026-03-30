@@ -37,7 +37,6 @@ export function MobileChartView(props: Props) {
   const [showPicker, setShowPicker] = useState(false);
   const [showTimeframeSheet, setShowTimeframeSheet] = useState(false);
   const baseCoin = props.symbol.replace('USDT', '');
-  const baseCoin = props.symbol.replace('USDT', '');
 
   const formatSimTime = (ts: number) => {
     if (!ts) return '--';
