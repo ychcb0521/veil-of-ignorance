@@ -2,8 +2,7 @@ import { Wallet, TrendingUp } from 'lucide-react';
 import type { Position } from '@/types/trading';
 import { calcUnrealizedPnl } from '@/types/trading';
 import type { PositionsMap, PriceMap } from '@/contexts/TradingContext';
-
-const INITIAL_CAPITAL = 1_000_000;
+import { useAuth } from '@/contexts/AuthContext';
 
 interface Props {
   balance: number;
