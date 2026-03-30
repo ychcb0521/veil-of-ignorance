@@ -5,8 +5,11 @@ import { useDrawing } from '@/hooks/useDrawing';
 import { usePersistedState } from '@/hooks/usePersistedState';
 import type { IndicatorConfig } from '@/hooks/useIndicators';
 import { calculateIndicator, INDICATOR_PRESETS } from '@/hooks/useIndicators';
-import { ChartToolbar } from './ChartToolbar';
+import { DrawingToolbar } from './DrawingToolbar';
 import { DrawingOverlay } from './DrawingOverlay';
+import { IndicatorMenu } from './IndicatorMenu';
+import { BarChart3, X } from 'lucide-react';
+import { useState } from 'react';
 import type { TradeRecord } from '@/types/trading';
 
 interface Props {
@@ -34,6 +37,8 @@ export function CandlestickChart({ data, symbol, onLoadOlder, loadingOlder, trad
   const prevOldestRef = useRef<number>(0);
 
   const [indicators, setIndicators] = usePersistedState<IndicatorConfig[]>('indicators', []);
+  const [showIndicatorPanel, setShowIndicatorPanel] = useState(false);
+  const [drawingsVisible, setDrawingsVisible] = useState(true);
   const drawing = useDrawing();
 
   // ============================================================
@@ -423,31 +428,63 @@ export function CandlestickChart({ data, symbol, onLoadOlder, loadingOlder, trad
 
       {/* Chart area with toolbars and drawing overlay */}
       <div className="flex-1 min-h-0 relative">
-        <div ref={containerRef} className="absolute inset-0" style={{ left: 32 }} />
+        <div ref={containerRef} className="absolute inset-0" style={{ left: 34 }} />
 
-        <ChartToolbar
+        <DrawingToolbar
           activeTool={drawing.activeDrawingTool}
           onToolChange={drawing.setActiveDrawingTool}
-          indicators={indicators}
-          onIndicatorsChange={setIndicators}
           onClearDrawings={drawing.clearAllDrawings}
+          drawingsVisible={drawingsVisible}
+          onToggleDrawingsVisible={() => setDrawingsVisible(!drawingsVisible)}
         />
 
-        <div className="absolute inset-0" style={{ left: 32 }}>
-          <DrawingOverlay
-            chart={chartRef.current}
-            series={seriesRef.current}
-            drawings={drawing.drawings}
-            activeTool={drawing.activeDrawingTool}
-            isDrawing={drawing.isDrawing}
-            currentDrawingRef={drawing.currentDrawingRef}
-            onStartDrawing={drawing.startDrawing}
-            onUpdateDrawing={drawing.updateDrawing}
-            onFinishDrawing={drawing.finishDrawing}
-            onAddBrush={drawing.addBrushDrawing}
-            onAddText={drawing.addTextDrawing}
-            onAddMarker={drawing.addMarkerDrawing}
+        {/* Right side: indicator buttons */}
+        <div className="absolute right-12 top-0 z-20 flex items-center gap-1 py-1.5 px-2">
+          <button
+            onClick={() => setShowIndicatorPanel(!showIndicatorPanel)}
+            className={`flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium transition-colors ${
+              showIndicatorPanel ? 'bg-primary/20 text-primary' : 'text-muted-foreground hover:text-foreground hover:bg-accent/50'
+            }`}
+          >
+            <BarChart3 className="w-3.5 h-3.5" />
+            <span>指标</span>
+          </button>
+
+          {indicators.map(ind => (
+            <span key={ind.type} className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-mono font-medium"
+              style={{ background: `${ind.color}20`, color: ind.color }}>
+              {ind.type} {ind.period}
+              <button onClick={() => setIndicators(indicators.filter(i => i.type !== ind.type))} className="hover:opacity-70">
+                <X className="w-2.5 h-2.5" />
+              </button>
+            </span>
+          ))}
+
+          <IndicatorMenu
+            open={showIndicatorPanel}
+            onClose={() => setShowIndicatorPanel(false)}
+            indicators={indicators}
+            onIndicatorsChange={setIndicators}
           />
+        </div>
+
+        <div className="absolute inset-0" style={{ left: 34 }}>
+          {drawingsVisible && (
+            <DrawingOverlay
+              chart={chartRef.current}
+              series={seriesRef.current}
+              drawings={drawing.drawings}
+              activeTool={drawing.activeDrawingTool}
+              isDrawing={drawing.isDrawing}
+              currentDrawingRef={drawing.currentDrawingRef}
+              onStartDrawing={drawing.startDrawing}
+              onUpdateDrawing={drawing.updateDrawing}
+              onFinishDrawing={drawing.finishDrawing}
+              onAddBrush={drawing.addBrushDrawing}
+              onAddText={drawing.addTextDrawing}
+              onAddMarker={drawing.addMarkerDrawing}
+            />
+          )}
         </div>
       </div>
     </div>

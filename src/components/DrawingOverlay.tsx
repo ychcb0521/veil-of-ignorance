@@ -100,7 +100,24 @@ export function DrawingOverlay({
       return;
     }
 
-    // Two-point tools: TrendLine, Rectangle, Measure, FibRetracement
+    // 3-click tools: LongPosition / ShortPosition
+    if (activeTool === 'LongPosition' || activeTool === 'ShortPosition') {
+      if (!isDrawing) {
+        onStartDrawing(point);
+        const rect = svgRef.current!.getBoundingClientRect();
+        const px = e.clientX - rect.left;
+        const py = e.clientY - rect.top;
+        setPreviewLine({ x1: px, y1: py, x2: px, y2: py });
+      } else {
+        // Each click adds a point; finishDrawing handles the 3-click logic
+        onFinishDrawing(point);
+        // If still drawing (less than 3 points), keep preview
+        // finishDrawing will clear isDrawing when done
+      }
+      return;
+    }
+
+    // Two-point tools: TrendLine, Rectangle, Measure, FibRetracement, etc.
     if (!isDrawing) {
       onStartDrawing(point);
       const rect = svgRef.current!.getBoundingClientRect();
@@ -242,6 +259,65 @@ export function DrawingOverlay({
               </g>
             );
           })}
+        </g>
+      );
+    }
+
+    // Long/Short Position tool rendering
+    if ((drawing.tool === 'LongPosition' || drawing.tool === 'ShortPosition') && drawing.positionData) {
+      const pd = drawing.positionData;
+      const entryY = priceToY(chart, series, pd.entryPrice);
+      const tpY = priceToY(chart, series, pd.takeProfitPrice);
+      const slY = priceToY(chart, series, pd.stopLossPrice);
+      if (entryY === null || tpY === null || slY === null) return null;
+
+      const left = Math.min(x1, x2);
+      const right = Math.max(x1, x2);
+      const width = Math.max(right - left, 120);
+
+      const isLong = pd.side === 'LONG';
+      const profitColor = isLong ? '#0ECB81' : '#F6465D';
+      const lossColor = isLong ? '#F6465D' : '#0ECB81';
+
+      return (
+        <g key={drawing.id}>
+          {/* TP zone */}
+          <rect x={left} y={Math.min(entryY, tpY)} width={width} height={Math.abs(tpY - entryY)}
+            fill={`${profitColor}25`} stroke={profitColor} strokeWidth={0.5} />
+          {/* SL zone */}
+          <rect x={left} y={Math.min(entryY, slY)} width={width} height={Math.abs(slY - entryY)}
+            fill={`${lossColor}25`} stroke={lossColor} strokeWidth={0.5} />
+          {/* Entry line */}
+          <line x1={left} y1={entryY} x2={left + width} y2={entryY}
+            stroke="#F0B90B" strokeWidth={1.5} />
+          {/* TP line */}
+          <line x1={left} y1={tpY} x2={left + width} y2={tpY}
+            stroke={profitColor} strokeWidth={1} strokeDasharray="4 2" />
+          {/* SL line */}
+          <line x1={left} y1={slY} x2={left + width} y2={slY}
+            stroke={lossColor} strokeWidth={1} strokeDasharray="4 2" />
+          {/* Labels */}
+          <foreignObject x={left + width + 4} y={entryY - 10} width={140} height={20}>
+            <div style={{ fontSize: 10, fontFamily: 'JetBrains Mono', color: '#F0B90B' }}>
+              入场 {pd.entryPrice.toFixed(2)}
+            </div>
+          </foreignObject>
+          <foreignObject x={left + width + 4} y={tpY - 10} width={180} height={20}>
+            <div style={{ fontSize: 10, fontFamily: 'JetBrains Mono', color: profitColor }}>
+              止盈 {pd.takeProfitPrice.toFixed(2)} ({pd.tpPct >= 0 ? '+' : ''}{pd.tpPct.toFixed(2)}%)
+            </div>
+          </foreignObject>
+          <foreignObject x={left + width + 4} y={slY - 10} width={180} height={20}>
+            <div style={{ fontSize: 10, fontFamily: 'JetBrains Mono', color: lossColor }}>
+              止损 {pd.stopLossPrice.toFixed(2)} ({pd.slPct >= 0 ? '+' : ''}{pd.slPct.toFixed(2)}%)
+            </div>
+          </foreignObject>
+          {/* R/R Ratio in center */}
+          <foreignObject x={left + 4} y={Math.min(tpY, slY, entryY) - 20} width={100} height={18}>
+            <div style={{ fontSize: 10, fontFamily: 'JetBrains Mono', color: 'hsl(var(--foreground))', fontWeight: 600 }}>
+              R/R: 1:{pd.rrRatio.toFixed(2)}
+            </div>
+          </foreignObject>
         </g>
       );
     }

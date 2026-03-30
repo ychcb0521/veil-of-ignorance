@@ -8,7 +8,9 @@ import { usePersistedState } from './usePersistedState';
 
 export type DrawingToolType =
   | 'TrendLine' | 'Rectangle' | 'Brush' | 'Text'
-  | 'Measure' | 'FibRetracement' | 'Marker' | null;
+  | 'Measure' | 'FibRetracement' | 'Marker'
+  | 'LongPosition' | 'ShortPosition'
+  | 'HorizontalLine' | 'VerticalLine' | null;
 
 export interface DrawingPoint {
   time: number;  // timestamp ms
@@ -31,6 +33,16 @@ export interface Drawing {
   };
   // Fib levels
   fibLevels?: number[];
+  // Long/Short position: 3 price levels
+  positionData?: {
+    entryPrice: number;
+    takeProfitPrice: number;
+    stopLossPrice: number;
+    side: 'LONG' | 'SHORT';
+    rrRatio: number;
+    tpPct: number;
+    slPct: number;
+  };
 }
 
 export const DRAWING_TOOLS: { type: DrawingToolType; icon: string; label: string; desc: string }[] = [
@@ -72,10 +84,44 @@ export function useDrawing() {
     }
   }, [isDrawing]);
 
+  // For LongPosition/ShortPosition: 3-click flow
+  const positionClickCount = useRef(0);
+
   const finishDrawing = useCallback((point: DrawingPoint) => {
     if (!currentDrawingRef.current) return;
-    setIsDrawing(false);
     const d = currentDrawingRef.current;
+
+    // 3-click tools: LongPosition / ShortPosition
+    if (d.tool === 'LongPosition' || d.tool === 'ShortPosition') {
+      if (d.points!.length < 3) {
+        d.points!.push(point);
+      }
+      if (d.points!.length < 3) return; // need more clicks
+
+      // Calculate position data from 3 points: entry, TP, SL
+      const entry = d.points![0].price;
+      const tp = d.points![1].price;
+      const sl = d.points![2].price;
+      const side = d.tool === 'LongPosition' ? 'LONG' : 'SHORT';
+      const risk = Math.abs(entry - sl);
+      const reward = Math.abs(tp - entry);
+      d.positionData = {
+        entryPrice: entry,
+        takeProfitPrice: tp,
+        stopLossPrice: sl,
+        side,
+        rrRatio: risk > 0 ? reward / risk : 0,
+        tpPct: ((tp - entry) / entry) * 100,
+        slPct: ((sl - entry) / entry) * 100,
+      };
+      setIsDrawing(false);
+      setDrawings(prev => [...prev, d as Drawing]);
+      currentDrawingRef.current = null;
+      positionClickCount.current = 0;
+      return;
+    }
+
+    setIsDrawing(false);
     if (d.points!.length === 1) d.points!.push(point);
     else d.points![1] = point;
 
