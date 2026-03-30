@@ -33,6 +33,16 @@ export interface Drawing {
   };
   // Fib levels
   fibLevels?: number[];
+  // Long/Short position: 3 price levels
+  positionData?: {
+    entryPrice: number;
+    takeProfitPrice: number;
+    stopLossPrice: number;
+    side: 'LONG' | 'SHORT';
+    rrRatio: number;
+    tpPct: number;
+    slPct: number;
+  };
 }
 
 export const DRAWING_TOOLS: { type: DrawingToolType; icon: string; label: string; desc: string }[] = [
