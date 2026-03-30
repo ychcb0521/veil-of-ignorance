@@ -48,6 +48,10 @@ interface TradingState {
   allPositions: { symbol: string; position: Position }[];
   allOrders: { symbol: string; order: PendingOrder }[];
   currentPrice: number;
+  pricePrecision: number;
+  quantityPrecision: number;
+  setPricePrecision: (v: number) => void;
+  setQuantityPrecision: (v: number) => void;
   activeSymbols: string[];
   handlePlaceOrder: (symbol: string, order: PlaceOrderParams) => void;
   handleClosePosition: (symbol: string, index: number) => void;
