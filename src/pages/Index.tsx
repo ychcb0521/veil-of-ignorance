@@ -536,7 +536,7 @@ const Index = () => {
 
         <div className="w-[280px] border-l border-border shrink-0 overflow-y-auto">
           <OrderPanel currentPrice={currentPrice} onPlaceOrder={handlePlaceOrderForActiveSymbol}
-            disabled={!sim.isRunning || currentPrice === 0} symbol={activeSymbol}
+            disabled={sim.status === 'stopped' || currentPrice === 0} symbol={activeSymbol}
             coolingOff={coolingOff.isActive}
             coolingOffLabel={coolingOff.formatRemaining()}
             onOpenCoolingOff={() => setCoolingOffModalOpen(true)}
