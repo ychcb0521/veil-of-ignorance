@@ -150,7 +150,7 @@ export function OrderPanel({ currentPrice, onPlaceOrder, disabled, symbol }: Pro
   const unitLabel = currencyUnit === 'BASE' ? baseCoin : 'USDT';
 
   return (
-    <div className="flex flex-col h-full" style={{ background: '#0B0E11' }}>
+    <div className="flex flex-col h-full bg-card">
       {/* Margin Mode + Leverage Header */}
       <div className="px-3 pt-3 pb-2 border-b border-border space-y-2.5">
         <div className="flex gap-1">
