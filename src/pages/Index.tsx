@@ -380,6 +380,30 @@ const Index = () => {
     }
   }, [activeSymbol, interval, initLoad, sim]);
 
+  // Stop: close all positions, cancel orders, reset
+  const handleStop = useCallback(() => {
+    // Close all positions at current prices
+    for (const [sym, positions] of Object.entries(positionsMap)) {
+      const price = priceMap[sym] || 0;
+      if (price <= 0) continue;
+      for (let i = positions.length - 1; i >= 0; i--) {
+        handleClosePosition(sym, i);
+      }
+    }
+    // Cancel all orders
+    for (const [sym, orders] of Object.entries(ordersMap)) {
+      for (const order of orders) {
+        handleCancelOrder(sym, order.id);
+      }
+    }
+    // Reset chart and sim
+    reset();
+    prevVisibleLenRef.current = 0;
+    clearSimState();
+    sim.stopSimulation();
+    toast.info('⏹ 模拟已停止，所有仓位已结算');
+  }, [positionsMap, ordersMap, priceMap, handleClosePosition, handleCancelOrder, reset, sim]);
+
   // Wrapper for OrderPanel
   const handlePlaceOrderForActiveSymbol = useCallback((order: PlaceOrderParams) => {
     handlePlaceOrder(activeSymbol, order);
