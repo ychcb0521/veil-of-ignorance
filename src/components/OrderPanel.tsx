@@ -18,11 +18,16 @@ export type UsdtInputMode = 'ORDER_VALUE' | 'INITIAL_MARGIN';
 interface Props {
   currentPrice: number;
   disabled: boolean;
-  symbol: string; // e.g. "BTCUSDT"
+  symbol: string;
   onPlaceOrder: (order: PlaceOrderParams) => void;
+  coolingOff?: boolean;
+  coolingOffLabel?: string;
+  onOpenCoolingOff?: () => void;
+  priceProtection?: boolean;
+  onTogglePriceProtection?: () => void;
 }
 
-export function OrderPanel({ currentPrice, onPlaceOrder, disabled, symbol }: Props) {
+export function OrderPanel({ currentPrice, onPlaceOrder, disabled, symbol, coolingOff, coolingOffLabel, onOpenCoolingOff, priceProtection, onTogglePriceProtection }: Props) {
   const baseCoin = symbol.replace('USDT', '') || 'BTC';
 
   const [orderType, setOrderType] = useState<OrderType>('MARKET');
@@ -118,8 +123,10 @@ export function OrderPanel({ currentPrice, onPlaceOrder, disabled, symbol }: Pro
   const leverageExceeded = leverage > maxAllowedLeverage && notionalValue > 0;
   const tierInfo = getLeverageTierInfo(notionalValue);
 
+  const orderDisabled = disabled || leverageExceeded || !!coolingOff;
+
   const handleOrder = (side: OrderSide) => {
-    if (disabled || effectiveQty <= 0 || leverageExceeded) return;
+    if (orderDisabled || effectiveQty <= 0) return;
     onPlaceOrder({
       side,
       type: orderType,
@@ -200,6 +207,23 @@ export function OrderPanel({ currentPrice, onPlaceOrder, disabled, symbol }: Pro
               </button>
             ))}
           </div>
+        </div>
+
+        {/* Price Protection + Cooling Off toggles */}
+        <div className="flex items-center justify-between text-[10px] pt-1">
+          {onTogglePriceProtection && (
+            <label className="flex items-center gap-1.5 cursor-pointer">
+              <input type="checkbox" checked={priceProtection ?? true} onChange={() => onTogglePriceProtection()}
+                className="w-3 h-3 rounded accent-primary" />
+              <span className="text-muted-foreground">价格保护</span>
+            </label>
+          )}
+          {onOpenCoolingOff && (
+            <button onClick={onOpenCoolingOff}
+              className="flex items-center gap-1 text-blue-400 hover:text-blue-300 transition-colors font-medium">
+              🧊 冷静期
+            </button>
+          )}
         </div>
       </div>
 
@@ -478,19 +502,26 @@ export function OrderPanel({ currentPrice, onPlaceOrder, disabled, symbol }: Pro
           </div>
         )}
 
+        {/* Cooling off countdown */}
+        {coolingOff && coolingOffLabel && (
+          <div className="flex items-center justify-center gap-1.5 py-1.5 rounded text-[10px] font-mono bg-blue-500/10 text-blue-400 border border-blue-500/20">
+            🧊 冷静期中: {coolingOffLabel}
+          </div>
+        )}
+
         {/* Action Buttons */}
         <div className="grid grid-cols-2 gap-2 pb-3">
-          <button onClick={() => handleOrder('LONG')} disabled={disabled || leverageExceeded}
+          <button onClick={() => handleOrder('LONG')} disabled={orderDisabled}
             className="btn-long disabled:opacity-30 text-xs py-2.5">
-            <div>开多 / Buy</div>
-            {(orderType === 'MARKET' || priceSelection === 'MARKET') && currentPrice > 0 && (
+            <div>{coolingOff ? '🧊 冷静中' : '开多 / Buy'}</div>
+            {!coolingOff && (orderType === 'MARKET' || priceSelection === 'MARKET') && currentPrice > 0 && (
               <div className="text-[10px] opacity-80 mt-0.5">{currentPrice.toFixed(2)}</div>
             )}
           </button>
-          <button onClick={() => handleOrder('SHORT')} disabled={disabled || leverageExceeded}
+          <button onClick={() => handleOrder('SHORT')} disabled={orderDisabled}
             className="btn-short disabled:opacity-30 text-xs py-2.5">
-            <div>开空 / Sell</div>
-            {(orderType === 'MARKET' || priceSelection === 'MARKET') && currentPrice > 0 && (
+            <div>{coolingOff ? '🧊 冷静中' : '开空 / Sell'}</div>
+            {!coolingOff && (orderType === 'MARKET' || priceSelection === 'MARKET') && currentPrice > 0 && (
               <div className="text-[10px] opacity-80 mt-0.5">{currentPrice.toFixed(2)}</div>
             )}
           </button>

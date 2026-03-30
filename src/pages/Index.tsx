@@ -4,6 +4,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useBinanceData, type KlineData } from '@/hooks/useBinanceData';
 import { useBackgroundPrices } from '@/hooks/useBackgroundPrices';
 import { loadPersistedSimState } from '@/hooks/usePersistedState';
+import { usePersistedState } from '@/hooks/usePersistedState';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { TimeControl } from '@/components/TimeControl';
 import { CandlestickChart } from '@/components/CandlestickChart';
@@ -17,10 +18,14 @@ import { ThemeToggle } from '@/components/ThemeToggle';
 import { MobileLayout } from '@/components/mobile/MobileLayout';
 import { LiquidationModal } from '@/components/LiquidationModal';
 import { AnalyticsPanel } from '@/components/AnalyticsPanel';
+import { CoolingOffModal, useCoolingOff } from '@/components/CoolingOffModal';
 import { toast } from 'sonner';
 import { BarChart3 } from 'lucide-react';
 import type { PendingOrder, OrderType } from '@/types/trading';
 import { calcFee, calcSlippage } from '@/types/trading';
+
+// Price protection threshold: reject conditional triggers if |last - mark| / mark > 2%
+const PRICE_PROTECTION_THRESHOLD = 0.02;
 
 // ===== Offline matching for restore =====
 function matchOrdersOffline(
@@ -84,6 +89,9 @@ const Index = () => {
 
   const [bottomTab, setBottomTab] = useState('positions');
   const [analyticsOpen, setAnalyticsOpen] = useState(false);
+  const [coolingOffModalOpen, setCoolingOffModalOpen] = useState(false);
+  const [priceProtection, setPriceProtection] = usePersistedState('price_protection', true);
+  const coolingOff = useCoolingOff();
   const hasRestoredRef = useRef(false);
   const persistedSim = useMemo(() => loadPersistedSimState(), []);
   const restoredRunning = persistedSim?.isRunning ?? false;
@@ -217,6 +225,23 @@ const Index = () => {
           }
 
           if (triggered) {
+            // === PRICE PROTECTION: anti-scam-wick check for conditional orders ===
+            const isConditionalType = ['MARKET_TP_SL', 'LIMIT_TP_SL', 'CONDITIONAL', 'TRAILING_STOP'].includes(order.type);
+            if (isConditionalType && priceProtection) {
+              // Use kline OHLC average as "mark price" proxy
+              const markPrice = (kline.open + kline.high + kline.low + kline.close) / 4;
+              const deviation = Math.abs(kline.close - markPrice) / markPrice;
+              if (deviation > PRICE_PROTECTION_THRESHOLD) {
+                // Reject trigger — price deviation too large (scam wick)
+                toast.warning(`⚠️ 价格保护已触发`, {
+                  description: `条件单 ${order.id.slice(0, 8)} 由于最新价与标记价格偏差 ${(deviation * 100).toFixed(2)}% > 2%，未被执行`,
+                  duration: 6000,
+                });
+                remaining.push(order);
+                continue;
+              }
+            }
+
             filledIds.push(order.id);
             // Apply slippage for taker fills
             let actualFillPrice = fillPrice;
@@ -486,7 +511,13 @@ const Index = () => {
 
         <div className="w-[280px] border-l border-border shrink-0 overflow-y-auto">
           <OrderPanel currentPrice={currentPrice} onPlaceOrder={handlePlaceOrderForActiveSymbol}
-            disabled={!sim.isRunning || currentPrice === 0} symbol={activeSymbol} />
+            disabled={!sim.isRunning || currentPrice === 0} symbol={activeSymbol}
+            coolingOff={coolingOff.isActive}
+            coolingOffLabel={coolingOff.formatRemaining()}
+            onOpenCoolingOff={() => setCoolingOffModalOpen(true)}
+            priceProtection={priceProtection}
+            onTogglePriceProtection={() => setPriceProtection(prev => !prev)}
+          />
         </div>
       </div>
 
@@ -496,6 +527,11 @@ const Index = () => {
         tradeHistory={tradeHistory} balance={balance}
         positionsMap={positionsMap} priceMap={priceMap}
         initialCapital={profile?.initial_capital ?? 1_000_000}
+      />
+      <CoolingOffModal
+        open={coolingOffModalOpen}
+        onClose={() => setCoolingOffModalOpen(false)}
+        onConfirm={(ms) => { coolingOff.activate(ms); toast.info('🧊 交易冷静期已开启', { description: '冷静期内无法开新仓位', duration: 5000 }); }}
       />
     </div>
   );
