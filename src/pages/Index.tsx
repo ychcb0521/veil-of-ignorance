@@ -77,6 +77,7 @@ const Index = () => {
     tradeHistory, setTradeHistory,
     activeSymbolPositions, activeSymbolOrders,
     allPositions, allOrders, currentPrice, activeSymbols,
+    pricePrecision, quantityPrecision, setPricePrecision, setQuantityPrecision,
     handlePlaceOrder, handleClosePosition, handleCancelOrder,
     handleAddIsolatedMargin,
     liquidationOpen, liquidationDetails, closeLiquidationModal,
