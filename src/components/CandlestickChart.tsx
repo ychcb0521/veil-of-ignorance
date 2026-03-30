@@ -4,7 +4,7 @@
  */
 
 import { useEffect, useRef, useCallback, useState } from 'react';
-import { init, dispose, CandleType, LineType, type Chart, type KLineData, type OverlayCreate } from 'klinecharts';
+import { init, dispose, CandleType, LineType, TooltipShowRule, TooltipShowType, type Chart, type KLineData, type OverlayCreate } from 'klinecharts';
 import type { KlineData } from '@/hooks/useBinanceData';
 import { useTheme } from '@/hooks/useTheme';
 import { DrawingToolbar } from './DrawingToolbar';
@@ -100,6 +100,10 @@ const DARK_STYLES = {
         line: { show: true, style: LineType.Dashed, dashedValue: [4, 4] },
       },
     },
+    tooltip: {
+      showRule: TooltipShowRule.FollowCross,
+      showType: TooltipShowType.Standard,
+    },
   },
   xAxis: { show: true, tickText: { color: '#848E9C' } },
   yAxis: { show: true, tickText: { color: '#848E9C' } },
@@ -107,13 +111,19 @@ const DARK_STYLES = {
     show: true,
     horizontal: {
       show: true,
-      line: { color: '#F0B90B33', style: LineType.Dashed },
-      text: { color: '#FFFFFF', borderColor: '#F0B90B', backgroundColor: '#363A45' },
+      line: { show: true, color: '#F0B90B33', style: LineType.Dashed },
+      text: { show: true, color: '#FFFFFF', borderColor: '#F0B90B', backgroundColor: '#363A45' },
     },
     vertical: {
       show: true,
-      line: { color: '#F0B90B33', style: LineType.Dashed },
-      text: { color: '#FFFFFF', borderColor: '#F0B90B', backgroundColor: '#363A45' },
+      line: { show: true, color: '#F0B90B33', style: LineType.Dashed },
+      text: { show: true, color: '#FFFFFF', borderColor: '#F0B90B', backgroundColor: '#363A45' },
+    },
+  },
+  indicator: {
+    tooltip: {
+      showRule: TooltipShowRule.FollowCross,
+      showType: TooltipShowType.Standard,
     },
   },
   separator: { color: '#1B1F26' },
@@ -145,6 +155,10 @@ const LIGHT_STYLES = {
         line: { show: true, style: LineType.Dashed, dashedValue: [4, 4] },
       },
     },
+    tooltip: {
+      showRule: TooltipShowRule.FollowCross,
+      showType: TooltipShowType.Standard,
+    },
   },
   xAxis: { show: true, tickText: { color: '#474D57' } },
   yAxis: { show: true, tickText: { color: '#474D57' } },
@@ -152,13 +166,19 @@ const LIGHT_STYLES = {
     show: true,
     horizontal: {
       show: true,
-      line: { color: '#B7BDC6', style: LineType.Dashed },
-      text: { color: '#1E2329', borderColor: '#B7BDC6', backgroundColor: '#F0F1F2' },
+      line: { show: true, color: '#B7BDC6', style: LineType.Dashed },
+      text: { show: true, color: '#1E2329', borderColor: '#B7BDC6', backgroundColor: '#F0F1F2' },
     },
     vertical: {
       show: true,
-      line: { color: '#B7BDC6', style: LineType.Dashed },
-      text: { color: '#1E2329', borderColor: '#B7BDC6', backgroundColor: '#F0F1F2' },
+      line: { show: true, color: '#B7BDC6', style: LineType.Dashed },
+      text: { show: true, color: '#1E2329', borderColor: '#B7BDC6', backgroundColor: '#F0F1F2' },
+    },
+  },
+  indicator: {
+    tooltip: {
+      showRule: TooltipShowRule.FollowCross,
+      showType: TooltipShowType.Standard,
     },
   },
   separator: { color: '#EAECEF' },
