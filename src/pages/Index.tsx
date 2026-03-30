@@ -1,5 +1,6 @@
 import { useState, useCallback, useMemo, useEffect, useRef } from 'react';
 import { useTradingContext, type PlaceOrderParams } from '@/contexts/TradingContext';
+import { useAuth } from '@/contexts/AuthContext';
 import { useBinanceData, type KlineData } from '@/hooks/useBinanceData';
 import { useBackgroundPrices } from '@/hooks/useBackgroundPrices';
 import { loadPersistedSimState } from '@/hooks/usePersistedState';
