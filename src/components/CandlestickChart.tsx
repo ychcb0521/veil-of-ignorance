@@ -3,7 +3,7 @@
  * Uses applyNewData / updateData / applyMoreData for data feeding.
  */
 
-import { useEffect, useRef, useCallback, useState } from 'react';
+import { useEffect, useRef, useCallback, useState, memo } from 'react';
 import { init, dispose, CandleType, LineType, TooltipShowRule, TooltipShowType, type Chart, type KLineData, type OverlayCreate } from 'klinecharts';
 import type { KlineData } from '@/hooks/useBinanceData';
 import { useTheme } from '@/hooks/useTheme';
@@ -184,11 +184,13 @@ const LIGHT_STYLES = {
   separator: { color: '#EAECEF' },
 };
 
-export function CandlestickChart({ data, symbol, onLoadOlder, loadingOlder, tradeHistory, rawSymbol, pricePrecision = 2, quantityPrecision = 3 }: Props) {
+function CandlestickChartComponent({ data, symbol, onLoadOlder, loadingOlder, tradeHistory, rawSymbol, pricePrecision = 2, quantityPrecision = 3 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<Chart | null>(null);
   const prevDataLenRef = useRef(0);
   const prevOldestRef = useRef<number>(0);
+  const prevNewestRef = useRef<number>(0);
+  const prevLastSigRef = useRef('');
 
   const [indicators, setIndicators] = usePersistedState<IndicatorConfig[]>('indicators', []);
   const [showIndicatorPanel, setShowIndicatorPanel] = useState(false);
@@ -245,9 +247,19 @@ export function CandlestickChart({ data, symbol, onLoadOlder, loadingOlder, trad
 
     const klineData = data.map(toKLineData);
     const currentOldest = data[0].time;
+    const lastCandle = klineData[klineData.length - 1];
+    const lastSig = `${lastCandle.timestamp}|${lastCandle.open}|${lastCandle.high}|${lastCandle.low}|${lastCandle.close}|${lastCandle.volume}`;
+
     const wasPrepend = prevDataLenRef.current > 0
       && data.length > prevDataLenRef.current
       && currentOldest < prevOldestRef.current;
+
+    const unchangedSnapshot =
+      data.length === prevDataLenRef.current
+      && currentOldest === prevOldestRef.current
+      && lastSig === prevLastSigRef.current;
+
+    if (unchangedSnapshot) return;
 
     if (wasPrepend) {
       // Older data prepended — feed older portion via applyMoreData
@@ -258,16 +270,20 @@ export function CandlestickChart({ data, symbol, onLoadOlder, loadingOlder, trad
       // Initial load
       chart.applyNewData(klineData, true);
     } else if (data.length > prevDataLenRef.current && data.length - prevDataLenRef.current <= 2) {
-      // New candle appended (sim tick) — update last candle
-      const lastCandle = klineData[klineData.length - 1];
+      // New candle appended (sim tick)
+      chart.updateData(lastCandle);
+    } else if (data.length === prevDataLenRef.current && lastCandle.timestamp === prevNewestRef.current) {
+      // Same bar evolving: only update last candle to keep crosshair/interaction state stable
       chart.updateData(lastCandle);
     } else {
-      // Data replaced (interval change, symbol change, etc.)
+      // Data replaced (symbol/interval/window replacement)
       chart.applyNewData(klineData, true);
     }
 
     prevDataLenRef.current = data.length;
     prevOldestRef.current = currentOldest;
+    prevNewestRef.current = lastCandle.timestamp as number;
+    prevLastSigRef.current = lastSig;
   }, [data]);
 
   // ============================================================
@@ -478,3 +494,37 @@ export function CandlestickChart({ data, symbol, onLoadOlder, loadingOlder, trad
     </div>
   );
 }
+
+function areChartPropsEqual(prev: Props, next: Props) {
+  const prevLen = prev.data.length;
+  const nextLen = next.data.length;
+
+  const prevFirst = prevLen > 0 ? prev.data[0].time : 0;
+  const nextFirst = nextLen > 0 ? next.data[0].time : 0;
+  const prevLast = prevLen > 0 ? prev.data[prevLen - 1] : null;
+  const nextLast = nextLen > 0 ? next.data[nextLen - 1] : null;
+
+  const sameDataShape =
+    prevLen === nextLen &&
+    prevFirst === nextFirst &&
+    (prevLast?.time ?? 0) === (nextLast?.time ?? 0) &&
+    (prevLast?.open ?? 0) === (nextLast?.open ?? 0) &&
+    (prevLast?.high ?? 0) === (nextLast?.high ?? 0) &&
+    (prevLast?.low ?? 0) === (nextLast?.low ?? 0) &&
+    (prevLast?.close ?? 0) === (nextLast?.close ?? 0) &&
+    (prevLast?.volume ?? 0) === (nextLast?.volume ?? 0);
+
+  return (
+    sameDataShape &&
+    prev.symbol === next.symbol &&
+    prev.loadingOlder === next.loadingOlder &&
+    prev.rawSymbol === next.rawSymbol &&
+    prev.pricePrecision === next.pricePrecision &&
+    prev.quantityPrecision === next.quantityPrecision &&
+    prev.tradeHistory === next.tradeHistory &&
+    prev.onLoadOlder === next.onLoadOlder
+  );
+}
+
+export const CandlestickChart = memo(CandlestickChartComponent, areChartPropsEqual);
+export default CandlestickChart;
