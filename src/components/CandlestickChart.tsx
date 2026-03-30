@@ -386,7 +386,7 @@ export function CandlestickChart({ data, symbol, onLoadOlder, loadingOlder, trad
               <div>
                 <span className="text-muted-foreground">24h涨跌</span>
                 <span className={`ml-1.5 font-medium ${priceChange >= 0 ? 'trading-green' : 'trading-red'}`}>
-                  {priceChange >= 0 ? '+' : ''}{priceChange.toFixed(2)} ({priceChangePct >= 0 ? '+' : ''}{priceChangePct.toFixed(2)}%)
+                  {priceChange >= 0 ? '+' : ''}{priceChange.toFixed(pricePrecision)} ({priceChangePct >= 0 ? '+' : ''}{priceChangePct.toFixed(2)}%)
                 </span>
               </div>
               <div>
