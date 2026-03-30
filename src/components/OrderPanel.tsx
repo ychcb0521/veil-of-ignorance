@@ -414,7 +414,7 @@ export function OrderPanel({ currentPrice, onPlaceOrder, disabled, symbol, cooli
                 const sp = parseFloat(scaledStartPrice) || 0;
                 const ep = parseFloat(scaledEndPrice) || 0;
                 const step = count > 1 ? (ep - sp) / (count - 1) : 0;
-                return `${count} 笔限价单，步长 ${step.toFixed(2)}，每笔 ${(effectiveQty / count).toFixed(4)}`;
+                return `${count} 笔限价单，步长 ${step.toFixed(pricePrecision)}，每笔 ${(effectiveQty / count).toFixed(quantityPrecision)}`;
               })()}
             </div>
           </>
