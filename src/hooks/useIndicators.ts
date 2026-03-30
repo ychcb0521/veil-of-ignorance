@@ -200,7 +200,7 @@ export function calcPSAR(data: KlineData[], step = 0.02, max = 0.2): IndicatorPo
 
 export function calcKeltnerChannels(data: KlineData[], period: number = 20): ChannelResult[] {
   const d = truncate(data, period);
-  const result = KeltnerChannels.calculate({
+  const result = (KeltnerChannels as any).calculate({
     maPeriod: period, atrPeriod: period, useTrueRange: true,
     high: d.map(x => x.high), low: d.map(x => x.low), close: d.map(x => x.close),
   });
