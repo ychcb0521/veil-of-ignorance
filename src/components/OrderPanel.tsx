@@ -502,19 +502,26 @@ export function OrderPanel({ currentPrice, onPlaceOrder, disabled, symbol, cooli
           </div>
         )}
 
+        {/* Cooling off countdown */}
+        {coolingOff && coolingOffLabel && (
+          <div className="flex items-center justify-center gap-1.5 py-1.5 rounded text-[10px] font-mono bg-blue-500/10 text-blue-400 border border-blue-500/20">
+            🧊 冷静期中: {coolingOffLabel}
+          </div>
+        )}
+
         {/* Action Buttons */}
         <div className="grid grid-cols-2 gap-2 pb-3">
-          <button onClick={() => handleOrder('LONG')} disabled={disabled || leverageExceeded}
+          <button onClick={() => handleOrder('LONG')} disabled={orderDisabled}
             className="btn-long disabled:opacity-30 text-xs py-2.5">
-            <div>开多 / Buy</div>
-            {(orderType === 'MARKET' || priceSelection === 'MARKET') && currentPrice > 0 && (
+            <div>{coolingOff ? '🧊 冷静中' : '开多 / Buy'}</div>
+            {!coolingOff && (orderType === 'MARKET' || priceSelection === 'MARKET') && currentPrice > 0 && (
               <div className="text-[10px] opacity-80 mt-0.5">{currentPrice.toFixed(2)}</div>
             )}
           </button>
-          <button onClick={() => handleOrder('SHORT')} disabled={disabled || leverageExceeded}
+          <button onClick={() => handleOrder('SHORT')} disabled={orderDisabled}
             className="btn-short disabled:opacity-30 text-xs py-2.5">
-            <div>开空 / Sell</div>
-            {(orderType === 'MARKET' || priceSelection === 'MARKET') && currentPrice > 0 && (
+            <div>{coolingOff ? '🧊 冷静中' : '开空 / Sell'}</div>
+            {!coolingOff && (orderType === 'MARKET' || priceSelection === 'MARKET') && currentPrice > 0 && (
               <div className="text-[10px] opacity-80 mt-0.5">{currentPrice.toFixed(2)}</div>
             )}
           </button>
