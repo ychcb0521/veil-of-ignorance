@@ -89,6 +89,9 @@ const Index = () => {
 
   const [bottomTab, setBottomTab] = useState('positions');
   const [analyticsOpen, setAnalyticsOpen] = useState(false);
+  const [coolingOffModalOpen, setCoolingOffModalOpen] = useState(false);
+  const [priceProtection, setPriceProtection] = usePersistedState('price_protection', true);
+  const coolingOff = useCoolingOff();
   const hasRestoredRef = useRef(false);
   const persistedSim = useMemo(() => loadPersistedSimState(), []);
   const restoredRunning = persistedSim?.isRunning ?? false;
