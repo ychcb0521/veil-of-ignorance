@@ -432,7 +432,7 @@ const Index = () => {
                 </div>
               </div>
             ) : (
-              <CandlestickChart data={visibleData} symbol={activeSymbol.replace('USDT', '/USDT')} onLoadOlder={loadOlder} loadingOlder={loadingOlder} />
+              <CandlestickChart data={visibleData} symbol={activeSymbol.replace('USDT', '/USDT')} onLoadOlder={loadOlder} loadingOlder={loadingOlder} tradeHistory={tradeHistory} rawSymbol={activeSymbol} />
             )}
           </div>
 
@@ -456,6 +456,8 @@ const Index = () => {
             disabled={!sim.isRunning || currentPrice === 0} symbol={activeSymbol} />
         </div>
       </div>
+
+      <LiquidationModal open={liquidationOpen} onClose={closeLiquidationModal} details={liquidationDetails} />
     </div>
   );
 };
