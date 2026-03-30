@@ -208,6 +208,23 @@ export function OrderPanel({ currentPrice, onPlaceOrder, disabled, symbol, cooli
             ))}
           </div>
         </div>
+
+        {/* Price Protection + Cooling Off toggles */}
+        <div className="flex items-center justify-between text-[10px] pt-1">
+          {onTogglePriceProtection && (
+            <label className="flex items-center gap-1.5 cursor-pointer">
+              <input type="checkbox" checked={priceProtection ?? true} onChange={() => onTogglePriceProtection()}
+                className="w-3 h-3 rounded accent-primary" />
+              <span className="text-muted-foreground">价格保护</span>
+            </label>
+          )}
+          {onOpenCoolingOff && (
+            <button onClick={onOpenCoolingOff}
+              className="flex items-center gap-1 text-blue-400 hover:text-blue-300 transition-colors font-medium">
+              🧊 冷静期
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Order Type Dropdown */}
