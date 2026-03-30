@@ -261,6 +261,8 @@ export function CandlestickChart({ data, symbol, onLoadOlder, loadingOlder, trad
 
 
   // ============================================================
+  // Feed data to chart when props change
+  // ============================================================
   useEffect(() => {
     const chart = chartRef.current;
     if (!chart || data.length === 0) return;
@@ -271,25 +273,19 @@ export function CandlestickChart({ data, symbol, onLoadOlder, loadingOlder, trad
       && data.length > prevDataLenRef.current
       && currentOldest < prevOldestRef.current;
 
-    if (wasPrepend && dataCallbackRef.current) {
-      // Feed older data via the DataLoader callback
-      const newCount = data.length - prevDataLenRef.current;
-      const olderData = klineData.slice(0, newCount);
-      dataCallbackRef.current(olderData, true);
-    } else if (prevDataLenRef.current === 0 && dataCallbackRef.current) {
+    if (wasPrepend) {
+      // Older data prepended — reload all data to include it
+      chart.applyNewData(klineData);
+    } else if (prevDataLenRef.current === 0) {
       // Initial load
-      dataCallbackRef.current(klineData, true);
+      chart.applyNewData(klineData);
     } else if (data.length > prevDataLenRef.current && data.length - prevDataLenRef.current <= 2) {
-      // New candle appended (sim tick) — use subscribeBar callback
+      // New candle appended (sim tick) — update last candle
       const lastCandle = klineData[klineData.length - 1];
-      if (subscribeCallbackRef.current) {
-        subscribeCallbackRef.current(lastCandle);
-      }
-    } else if (dataCallbackRef.current) {
+      chart.updateData(lastCandle);
+    } else {
       // Data replaced (interval change, etc.)
-      chart.resetData();
-      // Re-trigger the data loader
-      dataCallbackRef.current(klineData, true);
+      chart.applyNewData(klineData);
     }
 
     prevDataLenRef.current = data.length;
