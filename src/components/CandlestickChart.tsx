@@ -379,7 +379,7 @@ export function CandlestickChart({ data, symbol, onLoadOlder, loadingOlder, trad
           <>
             <div className="flex flex-col">
               <span className={`font-mono text-xl font-bold ${isUp ? 'trading-green' : 'trading-red'}`}>
-                {last.close.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                {last.close.toLocaleString(undefined, { minimumFractionDigits: pricePrecision, maximumFractionDigits: pricePrecision })}
               </span>
             </div>
             <div className="grid grid-cols-4 gap-x-6 gap-y-0.5 text-xs font-mono">
