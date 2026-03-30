@@ -21,7 +21,7 @@ interface Props {
   rawSymbol?: string;
 }
 
-export function CandlestickChart({ data, symbol, onLoadOlder, loadingOlder }: Props) {
+export function CandlestickChart({ data, symbol, onLoadOlder, loadingOlder, tradeHistory, rawSymbol }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const seriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
