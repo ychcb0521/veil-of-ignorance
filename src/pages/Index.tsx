@@ -214,17 +214,32 @@ const Index = () => {
 
           if (triggered) {
             filledIds.push(order.id);
-            const fee = calcFee(fillPrice, order.quantity, isMaker);
-            const margin = (order.quantity * fillPrice) / order.leverage;
+            // Apply slippage for taker fills
+            let actualFillPrice = fillPrice;
+            let slippageAmount = 0;
+            if (!isMaker) {
+              const notional = fillPrice * order.quantity;
+              actualFillPrice = calcSlippage(fillPrice, notional, order.side);
+              slippageAmount = Math.abs(actualFillPrice - fillPrice) * order.quantity;
+            }
+            const fee = calcFee(actualFillPrice, order.quantity, isMaker);
+            const margin = (order.quantity * actualFillPrice) / order.leverage;
             setBalance(prev => prev - margin - fee);
             setPositionsMap(prev => ({
               ...prev,
               [activeSymbol]: [...(prev[activeSymbol] || []), {
-                side: order.side, entryPrice: fillPrice, quantity: order.quantity,
+                side: order.side, entryPrice: actualFillPrice, quantity: order.quantity,
                 leverage: order.leverage, marginMode: order.marginMode, margin,
               }],
             }));
-            toast.success(`委托成交: ${order.side === 'LONG' ? '开多' : '开空'} ${order.quantity} @ ${fillPrice.toFixed(2)}`);
+            setTradeHistory(prev => [...prev, {
+              id: crypto.randomUUID(), symbol: activeSymbol, side: order.side, type: order.type,
+              action: 'OPEN' as const, entryPrice: actualFillPrice, exitPrice: 0,
+              quantity: order.quantity, leverage: order.leverage,
+              pnl: 0, fee, slippage: slippageAmount,
+              openTime: sim.currentSimulatedTime, closeTime: 0,
+            }]);
+            toast.success(`委托成交: ${order.side === 'LONG' ? '开多' : '开空'} ${order.quantity} @ ${actualFillPrice.toFixed(2)}`);
           } else if (convertToLimit) {
             remaining.push(updatedOrder);
           } else {
