@@ -16,7 +16,7 @@ import { MobileLayout } from '@/components/mobile/MobileLayout';
 import { LiquidationModal } from '@/components/LiquidationModal';
 import { toast } from 'sonner';
 import type { PendingOrder, OrderType } from '@/types/trading';
-import { calcFee } from '@/types/trading';
+import { calcFee, calcSlippage } from '@/types/trading';
 
 // ===== Offline matching for restore =====
 function matchOrdersOffline(
