@@ -118,7 +118,7 @@ export function CandlestickChart({ data, symbol, onLoadOlder, loadingOlder, trad
               line: {
                 show: true,
                 style: 'dashed' as const,
-                dashValue: [4, 4],
+                dashedValue: [4, 4],
               },
             },
           },
