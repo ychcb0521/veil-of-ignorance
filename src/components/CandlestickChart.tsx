@@ -383,7 +383,7 @@ export function CandlestickChart({ data, symbol, onLoadOlder, loadingOlder, trad
         <div
           ref={containerRef}
           className="absolute inset-0"
-          style={{ left: 34, backgroundColor: '#0B0E11' }}
+          style={{ left: 34, backgroundColor: theme === 'light' ? '#FFFFFF' : '#0B0E11' }}
         />
 
         <DrawingToolbar
