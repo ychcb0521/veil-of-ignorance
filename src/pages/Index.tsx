@@ -94,16 +94,15 @@ const Index = () => {
   const coolingOff = useCoolingOff();
   const hasRestoredRef = useRef(false);
   const persistedSim = useMemo(() => loadPersistedSimState(), []);
-  const restoredRunning = persistedSim?.isRunning ?? false;
+  const restoredActive = persistedSim?.status === 'playing' || persistedSim?.status === 'paused';
 
   useEffect(() => {
-    if (!restoredRunning || hasRestoredRef.current || !persistedSim) return;
+    if (!restoredActive || hasRestoredRef.current || !persistedSim) return;
     hasRestoredRef.current = true;
 
     (async () => {
-      const anchorTime = persistedSim.historicalAnchorTime!;
-      const currentSim = anchorTime + (Date.now() - persistedSim.realStartTime!) * persistedSim.speed;
-      const data = await initLoad(persistedSim.symbol, persistedSim.interval, currentSim);
+      const targetTime = persistedSim.currentSimulatedTime || persistedSim.historicalAnchorTime!;
+      const data = await initLoad(persistedSim.symbol, persistedSim.interval, targetTime);
       if (data.length > 0) {
         toast.info('已恢复模拟会话');
       }
