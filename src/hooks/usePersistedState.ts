@@ -1,9 +1,28 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { useAuth } from '@/contexts/AuthContext';
 
-const STORAGE_PREFIX = 'futures_sim_';
+/**
+ * User-scoped persisted state.
+ * All keys are prefixed with the current user's ID for data isolation.
+ */
+function getUserPrefix(): string {
+  // Try to get user id from localStorage auth session
+  try {
+    const storageKey = Object.keys(localStorage).find(k =>
+      k.startsWith('sb-') && k.endsWith('-auth-token')
+    );
+    if (storageKey) {
+      const data = JSON.parse(localStorage.getItem(storageKey) || '{}');
+      const userId = data?.user?.id;
+      if (userId) return `sim_${userId}_`;
+    }
+  } catch {}
+  return 'sim_anon_';
+}
 
 export function usePersistedState<T>(key: string, defaultValue: T): [T, (value: T | ((prev: T) => T)) => void] {
-  const fullKey = STORAGE_PREFIX + key;
+  const prefix = getUserPrefix();
+  const fullKey = prefix + key;
 
   const [state, setStateRaw] = useState<T>(() => {
     try {
@@ -29,7 +48,7 @@ export function usePersistedState<T>(key: string, defaultValue: T): [T, (value: 
   return [state, setState];
 }
 
-// Persist time simulator state
+// Persist time simulator state (user-scoped)
 export interface PersistedSimState {
   isRunning: boolean;
   historicalAnchorTime: number | null;
@@ -39,11 +58,13 @@ export interface PersistedSimState {
   interval: string;
 }
 
-const SIM_KEY = STORAGE_PREFIX + 'sim_state';
+function getSimKey(): string {
+  return getUserPrefix() + 'sim_state';
+}
 
 export function loadPersistedSimState(): PersistedSimState | null {
   try {
-    const raw = localStorage.getItem(SIM_KEY);
+    const raw = localStorage.getItem(getSimKey());
     if (raw) return JSON.parse(raw);
   } catch {}
   return null;
@@ -51,12 +72,12 @@ export function loadPersistedSimState(): PersistedSimState | null {
 
 export function saveSimState(state: PersistedSimState) {
   try {
-    localStorage.setItem(SIM_KEY, JSON.stringify(state));
+    localStorage.setItem(getSimKey(), JSON.stringify(state));
   } catch {}
 }
 
 export function clearSimState() {
   try {
-    localStorage.removeItem(SIM_KEY);
+    localStorage.removeItem(getSimKey());
   } catch {}
 }
