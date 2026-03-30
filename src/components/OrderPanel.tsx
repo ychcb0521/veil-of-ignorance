@@ -123,8 +123,10 @@ export function OrderPanel({ currentPrice, onPlaceOrder, disabled, symbol, cooli
   const leverageExceeded = leverage > maxAllowedLeverage && notionalValue > 0;
   const tierInfo = getLeverageTierInfo(notionalValue);
 
+  const orderDisabled = disabled || leverageExceeded || !!coolingOff;
+
   const handleOrder = (side: OrderSide) => {
-    if (disabled || effectiveQty <= 0 || leverageExceeded) return;
+    if (orderDisabled || effectiveQty <= 0) return;
     onPlaceOrder({
       side,
       type: orderType,
