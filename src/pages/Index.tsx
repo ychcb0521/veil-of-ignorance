@@ -7,6 +7,7 @@ import { loadPersistedSimState } from '@/hooks/usePersistedState';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { TimeControl } from '@/components/TimeControl';
 import { CandlestickChart } from '@/components/CandlestickChart';
+import { OrderBook } from '@/components/OrderBook';
 import { OrderPanel } from '@/components/OrderPanel';
 import { PositionPanel } from '@/components/PositionPanel';
 import { SymbolSelector } from '@/components/SymbolSelector';
