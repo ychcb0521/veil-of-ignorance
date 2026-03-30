@@ -77,8 +77,8 @@ export function CandlestickChart({ data, symbol, onLoadOlder, loadingOlder, trad
   const chartRef = useRef<Chart | null>(null);
   const prevDataLenRef = useRef(0);
   const prevOldestRef = useRef<number>(0);
-  const dataCallbackRef = useRef<((d: KLineData[], more?: boolean) => void) | null>(null);
-  const subscribeCallbackRef = useRef<((d: KLineData) => void) | null>(null);
+  const dataRef = useRef<KlineData[]>([]); // mirror of props data for use in callbacks
+  const initCallbackRef = useRef<((d: KLineData[], more?: boolean) => void) | null>(null);
 
   const [indicators, setIndicators] = usePersistedState<IndicatorConfig[]>('indicators', []);
   const [showIndicatorPanel, setShowIndicatorPanel] = useState(false);
@@ -152,24 +152,22 @@ export function CandlestickChart({ data, symbol, onLoadOlder, loadingOlder, trad
 
     if (!chart) return;
 
-    // Set up data loader for backward loading
+    // Set up data loader — feeds data from props via refs
     chart.setDataLoader({
       getBars: (params) => {
-        if (params.type === 'backward') {
-          // User scrolled left — request older data
+        if (params.type === 'init') {
+          // If data already available, feed immediately
+          if (dataRef.current.length > 0) {
+            params.callback(dataRef.current.map(toKLineData), true);
+          } else {
+            // Store callback for when data arrives later
+            initCallbackRef.current = params.callback;
+          }
+        } else if (params.type === 'backward') {
           if (onLoadOlder) onLoadOlder();
-          // Store the callback for when older data arrives
-          dataCallbackRef.current = params.callback;
-        } else if (params.type === 'init') {
-          // Initial data load — we feed from props
-          dataCallbackRef.current = params.callback;
+          // Store callback for older data
+          initCallbackRef.current = params.callback;
         }
-      },
-      subscribeBar: (params) => {
-        subscribeCallbackRef.current = params.callback;
-      },
-      unsubscribeBar: () => {
-        subscribeCallbackRef.current = null;
       },
     });
 
@@ -181,8 +179,7 @@ export function CandlestickChart({ data, symbol, onLoadOlder, loadingOlder, trad
     return () => {
       dispose(containerRef.current!);
       chartRef.current = null;
-      dataCallbackRef.current = null;
-      subscribeCallbackRef.current = null;
+      initCallbackRef.current = null;
     };
   }, []);
 
@@ -286,7 +283,10 @@ export function CandlestickChart({ data, symbol, onLoadOlder, loadingOlder, trad
 
 
   // ============================================================
+  // Feed data to chart when props change
+  // ============================================================
   useEffect(() => {
+    dataRef.current = data; // always keep ref in sync
     const chart = chartRef.current;
     if (!chart || data.length === 0) return;
 
@@ -296,25 +296,28 @@ export function CandlestickChart({ data, symbol, onLoadOlder, loadingOlder, trad
       && data.length > prevDataLenRef.current
       && currentOldest < prevOldestRef.current;
 
-    if (wasPrepend && dataCallbackRef.current) {
-      // Feed older data via the DataLoader callback
+    if (wasPrepend && initCallbackRef.current) {
+      // Older data prepended — feed via stored callback
       const newCount = data.length - prevDataLenRef.current;
       const olderData = klineData.slice(0, newCount);
-      dataCallbackRef.current(olderData, true);
-    } else if (prevDataLenRef.current === 0 && dataCallbackRef.current) {
-      // Initial load
-      dataCallbackRef.current(klineData, true);
-    } else if (data.length > prevDataLenRef.current && data.length - prevDataLenRef.current <= 2) {
-      // New candle appended (sim tick) — use subscribeBar callback
-      const lastCandle = klineData[klineData.length - 1];
-      if (subscribeCallbackRef.current) {
-        subscribeCallbackRef.current(lastCandle);
+      initCallbackRef.current(olderData, true);
+      initCallbackRef.current = null;
+    } else if (prevDataLenRef.current === 0) {
+      // Initial load — if init callback waiting, use it; otherwise resetData + re-trigger
+      if (initCallbackRef.current) {
+        initCallbackRef.current(klineData, true);
+        initCallbackRef.current = null;
+      } else {
+        // Force re-init by resetting and re-setting data loader
+        chart.resetData();
       }
-    } else if (dataCallbackRef.current) {
+    } else if (data.length > prevDataLenRef.current && data.length - prevDataLenRef.current <= 2) {
+      // New candle appended (sim tick) — resetData and reload all
+      // (v10 beta has no updateData, so we must reload)
+      chart.resetData();
+    } else {
       // Data replaced (interval change, etc.)
       chart.resetData();
-      // Re-trigger the data loader
-      dataCallbackRef.current(klineData, true);
     }
 
     prevDataLenRef.current = data.length;
