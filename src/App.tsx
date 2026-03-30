@@ -26,8 +26,8 @@ function AppRoutes() {
     );
   }
 
-  // Not authenticated → auth page
-  if (!user) {
+  // Not authenticated or email not confirmed → auth page
+  if (!user || !user.email_confirmed_at) {
     return (
       <Routes>
         <Route path="*" element={<AuthPage />} />
