@@ -121,7 +121,8 @@ export function MultiChartLayout({
         <div className="flex-1 min-h-0 grid grid-cols-2 gap-px" style={{ background: 'hsl(var(--border))' }}>
           <div className="bg-background min-h-0 overflow-hidden">
             <CandlestickChart data={mainData} symbol={`${mainSymbol} ${mainInterval}`} onLoadOlder={onLoadOlder}
-              loadingOlder={loadingOlder} tradeHistory={tradeHistory} rawSymbol={rawSymbol} />
+              loadingOlder={loadingOlder} tradeHistory={tradeHistory} rawSymbol={rawSymbol}
+              pricePrecision={pricePrecision} quantityPrecision={quantityPrecision} />
           </div>
           <div className="bg-background min-h-0 overflow-hidden relative">
             <SubChartIntervalSelector interval={subCharts[0].interval} onChange={v => handleSubIntervalChange(0, v)} />
