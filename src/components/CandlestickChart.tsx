@@ -191,6 +191,7 @@ function CandlestickChartComponent({ data, symbol, onLoadOlder, loadingOlder, tr
   const prevOldestRef = useRef<number>(0);
   const prevNewestRef = useRef<number>(0);
   const prevLastSigRef = useRef('');
+  const prevSymbolRef = useRef<string>(symbol);
 
   const [indicators, setIndicators] = usePersistedState<IndicatorConfig[]>('indicators', []);
   const [showIndicatorPanel, setShowIndicatorPanel] = useState(false);
@@ -199,6 +200,25 @@ function CandlestickChartComponent({ data, symbol, onLoadOlder, loadingOlder, tr
   const { theme } = useTheme();
 
   const activeIndicatorPanes = useRef<Map<string, string | null>>(new Map());
+
+  // ============================================================
+  // Clear overlays on symbol change to prevent cross-symbol pollution
+  // ============================================================
+  useEffect(() => {
+    const chart = chartRef.current;
+    if (!chart) return;
+
+    if (prevSymbolRef.current !== symbol) {
+      // Wipe all user-drawn overlays from the canvas
+      chart.removeOverlay();
+      // Reset data tracking refs so applyNewData fires cleanly for the new symbol
+      prevDataLenRef.current = 0;
+      prevOldestRef.current = 0;
+      prevNewestRef.current = 0;
+      prevLastSigRef.current = '';
+      prevSymbolRef.current = symbol;
+    }
+  }, [symbol]);
 
   // ============================================================
   // Chart creation (once)
