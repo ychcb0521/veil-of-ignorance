@@ -362,10 +362,10 @@ const Index = () => {
     reset();
     prevVisibleLenRef.current = 0;
 
-    if (sim.isRunning) {
+    if (sim.status !== 'stopped') {
       await initLoad(activeSymbol, newInterval, sim.currentSimulatedTime);
     }
-  }, [activeSymbol, interval, sim.isRunning, sim.currentSimulatedTime, initLoad, reset]);
+  }, [activeSymbol, interval, sim.status, sim.currentSimulatedTime, initLoad, reset]);
 
   const handleStart = useCallback(async (timestamp: number) => {
     const data = await initLoad(activeSymbol, interval, timestamp);
