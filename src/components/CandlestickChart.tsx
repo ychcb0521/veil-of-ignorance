@@ -84,6 +84,7 @@ export function CandlestickChart({ data, symbol, onLoadOlder, loadingOlder, trad
   const [showIndicatorPanel, setShowIndicatorPanel] = useState(false);
   const [drawingsVisible, setDrawingsVisible] = useState(true);
   const [activeDrawingTool, setActiveDrawingTool] = useState<string | null>(null);
+  const { theme } = useTheme();
 
   const activeIndicatorPanes = useRef<Map<string, string | null>>(new Map());
 
