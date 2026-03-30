@@ -1,12 +1,10 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
-import { useAuth } from '@/contexts/AuthContext';
+import { useState, useCallback, useRef } from 'react';
+import type { TimeMachineStatus } from './useTimeSimulator';
 
 /**
  * User-scoped persisted state.
- * All keys are prefixed with the current user's ID for data isolation.
  */
 function getUserPrefix(): string {
-  // Try to get user id from localStorage auth session
   try {
     const storageKey = Object.keys(localStorage).find(k =>
       k.startsWith('sb-') && k.endsWith('-auth-token')
@@ -50,9 +48,10 @@ export function usePersistedState<T>(key: string, defaultValue: T): [T, (value: 
 
 // Persist time simulator state (user-scoped)
 export interface PersistedSimState {
-  isRunning: boolean;
+  status: TimeMachineStatus;
   historicalAnchorTime: number | null;
   realStartTime: number | null;
+  currentSimulatedTime: number;
   speed: number;
   symbol: string;
   interval: string;
@@ -65,7 +64,15 @@ function getSimKey(): string {
 export function loadPersistedSimState(): PersistedSimState | null {
   try {
     const raw = localStorage.getItem(getSimKey());
-    if (raw) return JSON.parse(raw);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      // Migrate old format: isRunning -> status
+      if (parsed.isRunning !== undefined && parsed.status === undefined) {
+        parsed.status = parsed.isRunning ? 'playing' : 'stopped';
+        delete parsed.isRunning;
+      }
+      return parsed;
+    }
   } catch {}
   return null;
 }
