@@ -69,6 +69,7 @@ const Index = () => {
     activeSymbolPositions, activeSymbolOrders,
     allPositions, allOrders, currentPrice, activeSymbols,
     handlePlaceOrder, handleClosePosition, handleCancelOrder,
+    liquidationOpen, liquidationDetails, closeLiquidationModal,
   } = ctx;
 
   const { allData, loading, loadingOlder, error, initLoad, loadOlder, getVisibleData, reset } = useBinanceData();
