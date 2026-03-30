@@ -77,8 +77,6 @@ export function CandlestickChart({ data, symbol, onLoadOlder, loadingOlder, trad
   const chartRef = useRef<Chart | null>(null);
   const prevDataLenRef = useRef(0);
   const prevOldestRef = useRef<number>(0);
-  const dataCallbackRef = useRef<((d: KLineData[], more?: boolean) => void) | null>(null);
-  const subscribeCallbackRef = useRef<((d: KLineData) => void) | null>(null);
 
   const [indicators, setIndicators] = usePersistedState<IndicatorConfig[]>('indicators', []);
   const [showIndicatorPanel, setShowIndicatorPanel] = useState(false);
