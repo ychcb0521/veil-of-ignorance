@@ -100,7 +100,24 @@ export function DrawingOverlay({
       return;
     }
 
-    // Two-point tools: TrendLine, Rectangle, Measure, FibRetracement
+    // 3-click tools: LongPosition / ShortPosition
+    if (activeTool === 'LongPosition' || activeTool === 'ShortPosition') {
+      if (!isDrawing) {
+        onStartDrawing(point);
+        const rect = svgRef.current!.getBoundingClientRect();
+        const px = e.clientX - rect.left;
+        const py = e.clientY - rect.top;
+        setPreviewLine({ x1: px, y1: py, x2: px, y2: py });
+      } else {
+        // Each click adds a point; finishDrawing handles the 3-click logic
+        onFinishDrawing(point);
+        // If still drawing (less than 3 points), keep preview
+        // finishDrawing will clear isDrawing when done
+      }
+      return;
+    }
+
+    // Two-point tools: TrendLine, Rectangle, Measure, FibRetracement, etc.
     if (!isDrawing) {
       onStartDrawing(point);
       const rect = svgRef.current!.getBoundingClientRect();
