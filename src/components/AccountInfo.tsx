@@ -11,6 +11,9 @@ interface Props {
 }
 
 export function AccountInfo({ balance, positionsMap, priceMap }: Props) {
+  const { profile } = useAuth();
+  const initialCapital = profile?.initial_capital ?? 1_000_000;
+
   // Calculate global PnL across ALL symbols
   let totalPnl = 0;
   let totalMargin = 0;
@@ -28,8 +31,8 @@ export function AccountInfo({ balance, positionsMap, priceMap }: Props) {
 
   const equity = balance + totalPnl;
   const available = balance - totalMargin;
-  const totalReturn = equity - INITIAL_CAPITAL;
-  const totalReturnPct = (totalReturn / INITIAL_CAPITAL) * 100;
+  const totalReturn = equity - initialCapital;
+  const totalReturnPct = (totalReturn / initialCapital) * 100;
 
   return (
     <div className="flex items-center gap-5 px-4 py-1.5 text-[11px] font-mono border-b border-border" style={{ background: '#0B0E11' }}>
