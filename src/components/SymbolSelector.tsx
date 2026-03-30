@@ -155,22 +155,8 @@ export function SymbolSelector({ symbol, interval, onSymbolChange, onIntervalCha
         )}
       </div>
 
-      {/* Interval buttons */}
-      <div className="flex gap-0.5">
-        {INTERVALS.map(iv => (
-          <button
-            key={iv}
-            onClick={() => onIntervalChange(iv)}
-            className={`px-2 py-1 rounded text-xs font-mono transition-colors ${
-              interval === iv
-                ? 'bg-primary text-primary-foreground'
-                : 'bg-secondary text-secondary-foreground hover:bg-accent'
-            }`}
-          >
-            {iv}
-          </button>
-        ))}
-      </div>
+      {/* Timeframe selector */}
+      <TimeframeSelector interval={interval} onIntervalChange={onIntervalChange} />
     </div>
   );
 }
