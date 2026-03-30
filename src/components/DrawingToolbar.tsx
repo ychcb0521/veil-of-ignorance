@@ -1,9 +1,9 @@
 /**
- * TradingView-style left vertical drawing toolbar with flyout sub-menus
+ * TradingView-style left vertical drawing toolbar with flyout sub-menus.
+ * Now maps to klinecharts native overlay names.
  */
 
 import { useState, useRef, useEffect } from 'react';
-import type { DrawingToolType } from '@/hooks/useDrawing';
 import {
   Crosshair, MousePointer, Circle, Pencil,
   TrendingUp, Minus, ArrowRight, MoveHorizontal, MoveVertical, Columns,
@@ -15,9 +15,8 @@ import {
   Ruler, ZoomIn, Magnet, Lock, Eye, EyeOff, Trash2, PenLine
 } from 'lucide-react';
 
-// Tool group definition
 interface ToolItem {
-  id: DrawingToolType | string;
+  id: string | null;
   label: string;
   icon: React.ReactNode;
   disabled?: boolean;
@@ -45,44 +44,39 @@ const toolGroups: ToolGroup[] = [
     id: 'trendlines',
     items: [
       { id: 'TrendLine', label: '趋势线', icon: <TrendingUp size={ICON_SIZE} strokeWidth={ICON_STROKE} /> },
-      { id: 'TrendLine', label: '射线', icon: <ArrowRight size={ICON_SIZE} strokeWidth={ICON_STROKE} /> },
-      { id: 'TrendLine', label: '延长线', icon: <Minus size={ICON_SIZE} strokeWidth={ICON_STROKE} /> },
-      { id: 'HorizontalLine' as any, label: '水平线', icon: <MoveHorizontal size={ICON_SIZE} strokeWidth={ICON_STROKE} /> },
-      { id: 'VerticalLine' as any, label: '垂直线', icon: <MoveVertical size={ICON_SIZE} strokeWidth={ICON_STROKE} /> },
-      { id: 'TrendLine', label: '平行通道', icon: <Columns size={ICON_SIZE} strokeWidth={ICON_STROKE} /> },
+      { id: 'Ray', label: '射线', icon: <ArrowRight size={ICON_SIZE} strokeWidth={ICON_STROKE} /> },
+      { id: 'ExtendedLine', label: '延长线', icon: <Minus size={ICON_SIZE} strokeWidth={ICON_STROKE} /> },
+      { id: 'HorizontalLine', label: '水平线', icon: <MoveHorizontal size={ICON_SIZE} strokeWidth={ICON_STROKE} /> },
+      { id: 'VerticalLine', label: '垂直线', icon: <MoveVertical size={ICON_SIZE} strokeWidth={ICON_STROKE} /> },
+      { id: 'ParallelChannel', label: '平行通道', icon: <Columns size={ICON_SIZE} strokeWidth={ICON_STROKE} /> },
     ],
   },
   {
     id: 'fibonacci',
     items: [
       { id: 'FibRetracement', label: '斐波那契回调', icon: <GitBranch size={ICON_SIZE} strokeWidth={ICON_STROKE} /> },
-      { id: 'FibRetracement', label: '趋势扩展', icon: <Triangle size={ICON_SIZE} strokeWidth={ICON_STROKE} /> },
     ],
   },
   {
     id: 'shapes',
     items: [
       { id: 'Brush', label: '画笔', icon: <PenTool size={ICON_SIZE} strokeWidth={ICON_STROKE} /> },
-      { id: 'Brush', label: '高亮', icon: <Highlighter size={ICON_SIZE} strokeWidth={ICON_STROKE} /> },
       { id: 'Rectangle', label: '矩形', icon: <Square size={ICON_SIZE} strokeWidth={ICON_STROKE} /> },
-      { id: 'Rectangle', label: '椭圆', icon: <CircleIcon size={ICON_SIZE} strokeWidth={ICON_STROKE} /> },
-      { id: 'Rectangle', label: '三角形', icon: <TriangleIcon size={ICON_SIZE} strokeWidth={ICON_STROKE} /> },
-      { id: 'Brush', label: '路径', icon: <Spline size={ICON_SIZE} strokeWidth={ICON_STROKE} /> },
+      { id: 'Circle', label: '椭圆', icon: <CircleIcon size={ICON_SIZE} strokeWidth={ICON_STROKE} /> },
     ],
   },
   {
     id: 'annotations',
     items: [
       { id: 'Text', label: '文本', icon: <Type size={ICON_SIZE} strokeWidth={ICON_STROKE} /> },
-      { id: 'Text', label: '锚点文本', icon: <Tag size={ICON_SIZE} strokeWidth={ICON_STROKE} /> },
-      { id: 'Text', label: '价格标签', icon: <DollarSign size={ICON_SIZE} strokeWidth={ICON_STROKE} /> },
-      { id: 'Text', label: '气泡', icon: <MessageSquare size={ICON_SIZE} strokeWidth={ICON_STROKE} /> },
+      { id: 'Marker', label: '标记', icon: <Tag size={ICON_SIZE} strokeWidth={ICON_STROKE} /> },
+      { id: 'PriceLine', label: '价格标签', icon: <DollarSign size={ICON_SIZE} strokeWidth={ICON_STROKE} /> },
     ],
   },
   {
     id: 'patterns',
     items: [
-      { id: 'Marker', label: 'XABCD 形态', icon: <Shapes size={ICON_SIZE} strokeWidth={ICON_STROKE} />, disabled: true },
+      { id: null, label: 'XABCD 形态', icon: <Shapes size={ICON_SIZE} strokeWidth={ICON_STROKE} />, disabled: true },
     ],
   },
   {
@@ -96,8 +90,8 @@ const toolGroups: ToolGroup[] = [
 ];
 
 interface Props {
-  activeTool: DrawingToolType;
-  onToolChange: (tool: DrawingToolType) => void;
+  activeTool: string | null;
+  onToolChange: (tool: string | null) => void;
   onClearDrawings: () => void;
   drawingsVisible: boolean;
   onToggleDrawingsVisible: () => void;
@@ -111,7 +105,6 @@ export function DrawingToolbar({ activeTool, onToolChange, onClearDrawings, draw
   const [lockDrawings, setLockDrawings] = useState(false);
   const toolbarRef = useRef<HTMLDivElement>(null);
 
-  // Close flyout on outside click
   useEffect(() => {
     const handler = (e: MouseEvent) => {
       if (toolbarRef.current && !toolbarRef.current.contains(e.target as Node)) {
@@ -128,18 +121,14 @@ export function DrawingToolbar({ activeTool, onToolChange, onClearDrawings, draw
   };
 
   const handleGroupClick = (groupId: string) => {
-    if (openGroupId === groupId) {
-      setOpenGroupId(null);
-    } else {
-      setOpenGroupId(groupId);
-    }
+    setOpenGroupId(openGroupId === groupId ? null : groupId);
   };
 
   const handleSubItemClick = (groupId: string, itemIndex: number, item: ToolItem) => {
     setSelectedPerGroup(prev => ({ ...prev, [groupId]: itemIndex }));
     setOpenGroupId(null);
     if (!item.disabled) {
-      onToolChange(item.id as DrawingToolType);
+      onToolChange(item.id);
     }
   };
 
@@ -147,15 +136,14 @@ export function DrawingToolbar({ activeTool, onToolChange, onClearDrawings, draw
     const activeItem = getActiveItem(group);
     if (group.items.length <= 1) {
       if (!activeItem.disabled) {
-        onToolChange(activeTool === activeItem.id ? null : activeItem.id as DrawingToolType);
+        onToolChange(activeTool === activeItem.id ? null : activeItem.id);
       }
       return;
     }
-    // If already active, deactivate; otherwise activate & show flyout
     if (activeTool === activeItem.id) {
       onToolChange(null);
     } else if (!activeItem.disabled) {
-      onToolChange(activeItem.id as DrawingToolType);
+      onToolChange(activeItem.id);
     }
   };
 
@@ -165,7 +153,6 @@ export function DrawingToolbar({ activeTool, onToolChange, onClearDrawings, draw
       className="absolute left-0 top-0 bottom-0 z-20 flex flex-col items-center py-1.5 w-[34px]"
       style={{ background: 'hsl(var(--card) / 0.95)', borderRight: '1px solid hsl(var(--border))' }}
     >
-      {/* Tool groups */}
       <div className="flex flex-col items-center gap-0.5 flex-1">
         {toolGroups.map((group) => {
           const activeItem = getActiveItem(group);
@@ -175,7 +162,6 @@ export function DrawingToolbar({ activeTool, onToolChange, onClearDrawings, draw
 
           return (
             <div key={group.id} className="relative">
-              {/* Main button */}
               <button
                 className={`w-[30px] h-[30px] flex items-center justify-center rounded transition-colors relative group ${
                   isActive
@@ -186,7 +172,6 @@ export function DrawingToolbar({ activeTool, onToolChange, onClearDrawings, draw
                 onContextMenu={(e) => { e.preventDefault(); handleGroupClick(group.id); }}
               >
                 {activeItem.icon}
-                {/* Sub-menu arrow indicator */}
                 {hasSubmenu && (
                   <button
                     className="absolute bottom-0 right-0 w-[10px] h-[10px] flex items-center justify-center"
@@ -199,7 +184,6 @@ export function DrawingToolbar({ activeTool, onToolChange, onClearDrawings, draw
                 )}
               </button>
 
-              {/* Flyout sub-menu */}
               {isOpen && hasSubmenu && (
                 <div
                   className="absolute left-full top-0 ml-1 py-1 rounded-md shadow-xl border border-border min-w-[160px] z-50"
@@ -225,7 +209,6 @@ export function DrawingToolbar({ activeTool, onToolChange, onClearDrawings, draw
                 </div>
               )}
 
-              {/* Tooltip (only when flyout closed) */}
               {!isOpen && (
                 <div className="absolute left-full ml-2 top-1/2 -translate-y-1/2 hidden group-hover:flex items-center z-50 pointer-events-none">
                   <div className="px-2 py-1 rounded text-[10px] whitespace-nowrap border border-border"
@@ -239,49 +222,22 @@ export function DrawingToolbar({ activeTool, onToolChange, onClearDrawings, draw
         })}
       </div>
 
-      {/* Bottom utility buttons */}
       <div className="flex flex-col items-center gap-0.5 border-t border-border pt-1.5 mt-1">
-        <ToolbarButton
-          icon={<Ruler size={ICON_SIZE} strokeWidth={ICON_STROKE} />}
-          label="测量"
-          active={activeTool === 'Measure'}
-          onClick={() => onToolChange(activeTool === 'Measure' ? null : 'Measure')}
-        />
-        <ToolbarButton
-          icon={<ZoomIn size={ICON_SIZE} strokeWidth={ICON_STROKE} />}
-          label="放大"
-          onClick={() => {}}
-        />
-        <ToolbarButton
-          icon={<Magnet size={ICON_SIZE} strokeWidth={ICON_STROKE} />}
-          label="磁铁模式"
-          active={magnetMode}
-          onClick={() => setMagnetMode(!magnetMode)}
-        />
-        <ToolbarButton
-          icon={<PenLine size={ICON_SIZE} strokeWidth={ICON_STROKE} />}
-          label="保持绘图模式"
-          active={stayInDrawing}
-          onClick={() => setStayInDrawing(!stayInDrawing)}
-        />
-        <ToolbarButton
-          icon={<Lock size={ICON_SIZE} strokeWidth={ICON_STROKE} />}
-          label="锁定所有绘图"
-          active={lockDrawings}
-          onClick={() => setLockDrawings(!lockDrawings)}
-        />
+        <ToolbarButton icon={<Ruler size={ICON_SIZE} strokeWidth={ICON_STROKE} />} label="测量"
+          active={activeTool === 'Measure'} onClick={() => onToolChange(activeTool === 'Measure' ? null : 'Measure')} />
+        <ToolbarButton icon={<ZoomIn size={ICON_SIZE} strokeWidth={ICON_STROKE} />} label="放大" onClick={() => {}} />
+        <ToolbarButton icon={<Magnet size={ICON_SIZE} strokeWidth={ICON_STROKE} />} label="磁铁模式"
+          active={magnetMode} onClick={() => setMagnetMode(!magnetMode)} />
+        <ToolbarButton icon={<PenLine size={ICON_SIZE} strokeWidth={ICON_STROKE} />} label="保持绘图模式"
+          active={stayInDrawing} onClick={() => setStayInDrawing(!stayInDrawing)} />
+        <ToolbarButton icon={<Lock size={ICON_SIZE} strokeWidth={ICON_STROKE} />} label="锁定所有绘图"
+          active={lockDrawings} onClick={() => setLockDrawings(!lockDrawings)} />
         <ToolbarButton
           icon={drawingsVisible ? <Eye size={ICON_SIZE} strokeWidth={ICON_STROKE} /> : <EyeOff size={ICON_SIZE} strokeWidth={ICON_STROKE} />}
           label={drawingsVisible ? '隐藏所有绘图' : '显示所有绘图'}
-          active={!drawingsVisible}
-          onClick={onToggleDrawingsVisible}
-        />
-        <ToolbarButton
-          icon={<Trash2 size={ICON_SIZE} strokeWidth={ICON_STROKE} />}
-          label="清除所有绘图"
-          onClick={onClearDrawings}
-          variant="destructive"
-        />
+          active={!drawingsVisible} onClick={onToggleDrawingsVisible} />
+        <ToolbarButton icon={<Trash2 size={ICON_SIZE} strokeWidth={ICON_STROKE} />} label="清除所有绘图"
+          onClick={onClearDrawings} variant="destructive" />
       </div>
     </div>
   );

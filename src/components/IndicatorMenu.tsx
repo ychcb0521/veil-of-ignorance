@@ -1,11 +1,39 @@
 /**
- * IndicatorMenu — Full-catalogue searchable indicator panel
- * All indicators are now active — no "Coming Soon" labels.
+ * IndicatorMenu — Searchable indicator panel.
+ * Works with klinecharts native indicator system.
  */
 
 import { useState, useRef, useEffect, useMemo } from 'react';
 import { Search, X, Plus, Check } from 'lucide-react';
-import { INDICATOR_CATALOG, type IndicatorConfig, type IndicatorCatalogItem } from '@/hooks/useIndicators';
+import type { IndicatorConfig } from './CandlestickChart';
+
+export interface IndicatorCatalogItem {
+  id: string;
+  nameZh: string;
+  nameEn: string;
+  isOverlay: boolean;
+  defaultPeriod: number;
+  color: string;
+}
+
+export const INDICATOR_CATALOG: IndicatorCatalogItem[] = [
+  { id: 'MA',   nameZh: '移动平均线 (MA)',      nameEn: 'MA',   isOverlay: true,  defaultPeriod: 7,  color: '#F0B90B' },
+  { id: 'EMA',  nameZh: '指数移动平均线 (EMA)',  nameEn: 'EMA',  isOverlay: true,  defaultPeriod: 21, color: '#3B82F6' },
+  { id: 'WMA',  nameZh: '加权移动平均线 (WMA)',  nameEn: 'WMA',  isOverlay: true,  defaultPeriod: 20, color: '#FDBA74' },
+  { id: 'BOLL', nameZh: '布林带 (Bollinger)',     nameEn: 'BOLL', isOverlay: true,  defaultPeriod: 20, color: '#8B5CF6' },
+  { id: 'SAR',  nameZh: '抛物线转向 (SAR)',       nameEn: 'SAR',  isOverlay: true,  defaultPeriod: 2,  color: '#FACC15' },
+  { id: 'RSI',  nameZh: '相对强弱指标 (RSI)',     nameEn: 'RSI',  isOverlay: false, defaultPeriod: 14, color: '#F59E0B' },
+  { id: 'MACD', nameZh: 'MACD',                   nameEn: 'MACD', isOverlay: false, defaultPeriod: 12, color: '#10B981' },
+  { id: 'KDJ',  nameZh: '随机指数 (KDJ)',         nameEn: 'KDJ',  isOverlay: false, defaultPeriod: 14, color: '#A855F7' },
+  { id: 'ATR',  nameZh: '真实波动幅度 (ATR)',     nameEn: 'ATR',  isOverlay: false, defaultPeriod: 14, color: '#EF4444' },
+  { id: 'CCI',  nameZh: '顺势指标 (CCI)',         nameEn: 'CCI',  isOverlay: false, defaultPeriod: 20, color: '#94A3B8' },
+  { id: 'OBV',  nameZh: '能量潮 (OBV)',           nameEn: 'OBV',  isOverlay: false, defaultPeriod: 1,  color: '#A855F7' },
+  { id: 'ROC',  nameZh: '变化速率 (ROC)',         nameEn: 'ROC',  isOverlay: false, defaultPeriod: 12, color: '#FCD34D' },
+  { id: 'DMI',  nameZh: '趋向指标 (DMI)',         nameEn: 'DMI',  isOverlay: false, defaultPeriod: 14, color: '#FB923C' },
+  { id: 'WR',   nameZh: '威廉指标 (%R)',          nameEn: 'WR',   isOverlay: false, defaultPeriod: 14, color: '#FDA4AF' },
+  { id: 'TRIX', nameZh: 'TRIX',                   nameEn: 'TRIX', isOverlay: false, defaultPeriod: 15, color: '#2DD4BF' },
+  { id: 'VOL',  nameZh: '成交量 (VOL)',           nameEn: 'VOL',  isOverlay: false, defaultPeriod: 1,  color: '#6366F1' },
+];
 
 interface Props {
   open: boolean;
@@ -31,9 +59,7 @@ export function IndicatorMenu({ open, onClose, indicators, onIndicatorsChange }:
     if (!search.trim()) return INDICATOR_CATALOG;
     const q = search.toLowerCase();
     return INDICATOR_CATALOG.filter(
-      item => item.nameZh.toLowerCase().includes(q)
-        || item.nameEn.toLowerCase().includes(q)
-        || item.id.toLowerCase().includes(q)
+      item => item.nameZh.toLowerCase().includes(q) || item.nameEn.toLowerCase().includes(q) || item.id.toLowerCase().includes(q)
     );
   }, [search]);
 
@@ -43,12 +69,7 @@ export function IndicatorMenu({ open, onClose, indicators, onIndicatorsChange }:
       onIndicatorsChange(indicators.filter(i => i.type !== item.id));
       return;
     }
-    onIndicatorsChange([...indicators, {
-      type: item.id,
-      period: item.defaultPeriod,
-      color: item.color,
-      enabled: true,
-    }]);
+    onIndicatorsChange([...indicators, { type: item.id, period: item.defaultPeriod, color: item.color, enabled: true }]);
   };
 
   const updatePeriod = (id: string, period: number) => {
@@ -57,15 +78,11 @@ export function IndicatorMenu({ open, onClose, indicators, onIndicatorsChange }:
 
   if (!open) return null;
 
-  // Separate overlays and oscillators
   const overlays = filtered.filter(i => i.isOverlay);
   const oscillators = filtered.filter(i => !i.isOverlay);
 
   return (
-    <div
-      ref={panelRef}
-      className="absolute right-2 top-10 z-50 w-80 rounded-lg border border-border shadow-2xl overflow-hidden bg-card"
-    >
+    <div ref={panelRef} className="absolute right-2 top-10 z-50 w-80 rounded-lg border border-border shadow-2xl overflow-hidden bg-card">
       <div className="flex items-center justify-between px-3 py-2.5 border-b border-border">
         <span className="text-sm font-semibold text-foreground">技术指标</span>
         <button onClick={onClose} className="text-muted-foreground hover:text-foreground transition-colors">
