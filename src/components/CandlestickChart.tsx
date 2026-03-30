@@ -156,8 +156,8 @@ const LIGHT_STYLES = {
       },
     },
     tooltip: {
-      showRule: 'follow_cross' as const,
-      showType: 'standard' as const,
+      showRule: TooltipShowRule.FollowCross,
+      showType: TooltipShowType.Standard,
     },
   },
   xAxis: { show: true, tickText: { color: '#474D57' } },
