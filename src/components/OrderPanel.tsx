@@ -1,7 +1,7 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useMemo } from 'react';
 import type { OrderSide, OrderType, MarginMode } from '@/types/trading';
-import { ORDER_TYPE_INFO } from '@/types/trading';
-import { ChevronDown, Check, Info } from 'lucide-react';
+import { ORDER_TYPE_INFO, getMaxLeverageForNotional, getLeverageTierInfo } from '@/types/trading';
+import { ChevronDown, Check, Info, AlertTriangle } from 'lucide-react';
 import type { PlaceOrderParams } from '@/contexts/TradingContext';
 
 // Re-export for convenience
