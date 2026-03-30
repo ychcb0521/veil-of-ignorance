@@ -1,12 +1,11 @@
-import { ArrowLeft, Clock, Play, Pause, Calendar } from 'lucide-react';
+import { ArrowLeft, Clock, Play, Pause, Calendar, ChevronDown } from 'lucide-react';
 import { CandlestickChart } from '@/components/CandlestickChart';
 import type { KlineData } from '@/hooks/useBinanceData';
 import type { PositionsMap, PriceMap } from '@/contexts/TradingContext';
 import { useState } from 'react';
 import { WheelDateTimePicker } from './WheelPicker';
-
-const INTERVALS = ['1m', '5m', '15m', '1h', '4h', '1d'];
-const SPEED_OPTIONS = [1, 2, 5, 10, 30, 60];
+import { MobileTimeframeSheet } from './MobileTimeframeSheet';
+import { TIMEFRAME_LABELS } from '@/hooks/useTimeframePrefs';
 
 interface Props {
   symbol: string;
@@ -33,8 +32,10 @@ interface Props {
 }
 
 export function MobileChartView(props: Props) {
+  const SPEED_OPTIONS = [1, 2, 5, 10, 30, 60];
   const [selectedDate, setSelectedDate] = useState(() => new Date('2024-01-15T08:00:00Z'));
   const [showPicker, setShowPicker] = useState(false);
+  const [showTimeframeSheet, setShowTimeframeSheet] = useState(false);
   const baseCoin = props.symbol.replace('USDT', '');
 
   const formatSimTime = (ts: number) => {
@@ -87,21 +88,15 @@ export function MobileChartView(props: Props) {
         )}
       </div>
 
-      {/* Interval tabs */}
-      <div className="flex items-center gap-0.5 px-2 py-1 border-b border-border bg-card overflow-x-auto">
-        {INTERVALS.map(iv => (
-          <button
-            key={iv}
-            onClick={() => props.onIntervalChange(iv)}
-            className={`px-2.5 py-1 rounded text-xs font-mono transition-colors ${
-              props.interval === iv
-                ? 'bg-primary text-primary-foreground'
-                : 'text-muted-foreground hover:text-foreground'
-            }`}
-          >
-            {iv}
-          </button>
-        ))}
+      {/* Interval tabs - single button that opens bottom sheet */}
+      <div className="flex items-center gap-1 px-2 py-1 border-b border-border bg-card">
+        <button
+          onClick={() => setShowTimeframeSheet(true)}
+          className="flex items-center gap-1 px-2.5 py-1 rounded text-xs font-mono bg-primary text-primary-foreground"
+        >
+          {TIMEFRAME_LABELS[props.interval] || props.interval}
+          <ChevronDown className="w-3 h-3" />
+        </button>
       </div>
 
       {/* Time machine compact */}
@@ -148,6 +143,13 @@ export function MobileChartView(props: Props) {
           onCancel={() => setShowPicker(false)}
         />
       )}
+
+      <MobileTimeframeSheet
+        open={showTimeframeSheet}
+        onClose={() => setShowTimeframeSheet(false)}
+        interval={props.interval}
+        onIntervalChange={props.onIntervalChange}
+      />
 
       {/* Price summary bar */}
       {last && (

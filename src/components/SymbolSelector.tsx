@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { Search, ChevronDown, Check, Star } from 'lucide-react';
+import { TimeframeSelector } from './TimeframeSelector';
 
 // Fallback top-20 symbols if API fails
 const FALLBACK_SYMBOLS = [
@@ -14,7 +15,7 @@ interface SymbolInfo {
   displayName: string;
 }
 
-const INTERVALS = ['1m', '5m', '15m', '1h', '4h', '1d'];
+
 
 interface Props {
   symbol: string;
@@ -154,22 +155,8 @@ export function SymbolSelector({ symbol, interval, onSymbolChange, onIntervalCha
         )}
       </div>
 
-      {/* Interval buttons */}
-      <div className="flex gap-0.5">
-        {INTERVALS.map(iv => (
-          <button
-            key={iv}
-            onClick={() => onIntervalChange(iv)}
-            className={`px-2 py-1 rounded text-xs font-mono transition-colors ${
-              interval === iv
-                ? 'bg-primary text-primary-foreground'
-                : 'bg-secondary text-secondary-foreground hover:bg-accent'
-            }`}
-          >
-            {iv}
-          </button>
-        ))}
-      </div>
+      {/* Timeframe selector */}
+      <TimeframeSelector interval={interval} onIntervalChange={onIntervalChange} />
     </div>
   );
 }
