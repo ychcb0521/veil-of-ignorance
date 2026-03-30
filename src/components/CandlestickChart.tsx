@@ -391,7 +391,7 @@ export function CandlestickChart({ data, symbol, onLoadOlder, loadingOlder, trad
               </div>
               <div>
                 <span className="text-muted-foreground">最高</span>
-                <span className="ml-1.5 text-foreground">{last.high.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                <span className="ml-1.5 text-foreground">{last.high.toLocaleString(undefined, { minimumFractionDigits: pricePrecision })}</span>
               </div>
               <div>
                 <span className="text-muted-foreground">最低</span>
