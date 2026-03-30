@@ -406,8 +406,8 @@ export function OrderPanel({ currentPrice, onPlaceOrder, disabled, symbol, cooli
         {orderType === 'SCALED' && (
           <>
             <InputField label="子订单数" value={scaledCount} onChange={setScaledCount} placeholder="5" />
-            <InputField label="起始价 (USDT)" value={scaledStartPrice} onChange={setScaledStartPrice} placeholder={currentPrice.toFixed(2)} />
-            <InputField label="终点价 (USDT)" value={scaledEndPrice} onChange={setScaledEndPrice} placeholder={currentPrice.toFixed(2)} />
+            <InputField label="起始价 (USDT)" value={scaledStartPrice} onChange={setScaledStartPrice} placeholder={currentPrice.toFixed(pricePrecision)} />
+            <InputField label="终点价 (USDT)" value={scaledEndPrice} onChange={setScaledEndPrice} placeholder={currentPrice.toFixed(pricePrecision)} />
             <div className="text-[10px] text-muted-foreground px-1">
               {(() => {
                 const count = parseInt(scaledCount) || 5;
