@@ -376,9 +376,9 @@ const Index = () => {
         description: `已加载 ${data.length} 根K线 · 向左拖动可加载更多历史数据`,
       });
     } else {
-      toast.error('数据获取失败', { description: error || '请检查时间范围和交易对' });
+      toast.error('数据获取失败', { description: '请检查时间范围和交易对' });
     }
-  }, [activeSymbol, interval, initLoad, sim, error]);
+  }, [activeSymbol, interval, initLoad, sim]);
 
   // Wrapper for OrderPanel
   const handlePlaceOrderForActiveSymbol = useCallback((order: PlaceOrderParams) => {
