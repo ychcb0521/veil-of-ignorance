@@ -385,7 +385,7 @@ export function OrderPanel({ currentPrice, onPlaceOrder, disabled, symbol, cooli
               </div>
             </div>
             {condExecType === 'LIMIT' && (
-              <InputField label="限价 (USDT)" value={condLimitPrice} onChange={setCondLimitPrice} placeholder={currentPrice.toFixed(2)} />
+              <InputField label="限价 (USDT)" value={condLimitPrice} onChange={setCondLimitPrice} placeholder={currentPrice.toFixed(pricePrecision)} />
             )}
           </>
         )}
