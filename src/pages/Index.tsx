@@ -491,8 +491,13 @@ const Index = () => {
       </div>
 
       <LiquidationModal open={liquidationOpen} onClose={closeLiquidationModal} details={liquidationDetails} />
+      <AnalyticsPanel
+        open={analyticsOpen} onClose={() => setAnalyticsOpen(false)}
+        tradeHistory={tradeHistory} balance={balance}
+        positionsMap={positionsMap} priceMap={priceMap}
+        initialCapital={profile?.initial_capital ?? 1_000_000}
+      />
     </div>
-  );
 };
 
 export default Index;
