@@ -528,6 +528,11 @@ const Index = () => {
         positionsMap={positionsMap} priceMap={priceMap}
         initialCapital={profile?.initial_capital ?? 1_000_000}
       />
+      <CoolingOffModal
+        open={coolingOffModalOpen}
+        onClose={() => setCoolingOffModalOpen(false)}
+        onConfirm={(ms) => { coolingOff.activate(ms); toast.info('🧊 交易冷静期已开启', { description: '冷静期内无法开新仓位', duration: 5000 }); }}
+      />
     </div>
   );
 };
