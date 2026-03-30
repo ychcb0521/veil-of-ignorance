@@ -1,12 +1,11 @@
-import { ArrowLeft, Clock, Play, Pause, Calendar } from 'lucide-react';
+import { ArrowLeft, Clock, Play, Pause, Calendar, ChevronDown } from 'lucide-react';
 import { CandlestickChart } from '@/components/CandlestickChart';
 import type { KlineData } from '@/hooks/useBinanceData';
 import type { PositionsMap, PriceMap } from '@/contexts/TradingContext';
 import { useState } from 'react';
 import { WheelDateTimePicker } from './WheelPicker';
-
-const INTERVALS = ['1m', '5m', '15m', '1h', '4h', '1d'];
-const SPEED_OPTIONS = [1, 2, 5, 10, 30, 60];
+import { MobileTimeframeSheet } from './MobileTimeframeSheet';
+import { TIMEFRAME_LABELS } from '@/hooks/useTimeframePrefs';
 
 interface Props {
   symbol: string;
