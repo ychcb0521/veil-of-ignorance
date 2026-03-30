@@ -310,7 +310,7 @@ export function OrderPanel({ currentPrice, onPlaceOrder, disabled, symbol, cooli
             </div>
             <div className="relative">
               <input type="text" value={price} onChange={e => setPrice(e.target.value)}
-                placeholder={currentPrice.toFixed(2)}
+                placeholder={currentPrice.toFixed(pricePrecision)}
                 className="input-dark w-full text-right pr-14 text-xs" />
               <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] text-muted-foreground">USDT</span>
             </div>
