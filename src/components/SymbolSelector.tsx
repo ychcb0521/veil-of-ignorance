@@ -24,6 +24,7 @@ interface Props {
   interval: string;
   onSymbolChange: (s: string) => void;
   onIntervalChange: (i: string) => void;
+  onPrecisionChange?: (pricePrecision: number, quantityPrecision: number) => void;
 }
 
 export function SymbolSelector({ symbol, interval, onSymbolChange, onIntervalChange }: Props) {
