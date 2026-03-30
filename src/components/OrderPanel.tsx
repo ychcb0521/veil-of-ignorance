@@ -111,8 +111,12 @@ export function OrderPanel({ currentPrice, onPlaceOrder, disabled, symbol }: Pro
   }
 
   const fee = effectivePrice * effectiveQty * 0.0004;
+  const notionalValue = effectiveQty * effectivePrice;
 
-  const handleOrder = (side: OrderSide) => {
+  // Tiered leverage validation
+  const maxAllowedLeverage = getMaxLeverageForNotional(notionalValue);
+  const leverageExceeded = leverage > maxAllowedLeverage && notionalValue > 0;
+  const tierInfo = getLeverageTierInfo(notionalValue);
     if (disabled || effectiveQty <= 0) return;
     onPlaceOrder({
       side,
