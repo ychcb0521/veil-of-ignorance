@@ -13,6 +13,7 @@ import { SymbolSelector } from '@/components/SymbolSelector';
 import { AccountInfo } from '@/components/AccountInfo';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import { MobileLayout } from '@/components/mobile/MobileLayout';
+import { LiquidationModal } from '@/components/LiquidationModal';
 import { toast } from 'sonner';
 import type { PendingOrder, OrderType } from '@/types/trading';
 import { calcFee } from '@/types/trading';
