@@ -187,7 +187,110 @@ export function CandlestickChart({ data, symbol, onLoadOlder, loadingOlder, trad
   }, []);
 
   // ============================================================
-  // Feed data to chart when props change
+  // Theme reactivity — update klinecharts styles on theme change
+  // ============================================================
+  useEffect(() => {
+    const chart = chartRef.current;
+    if (!chart) return;
+
+    if (theme === 'light') {
+      chart.setStyles({
+        grid: {
+          show: true,
+          horizontal: { color: '#EAECEF' },
+          vertical: { color: '#EAECEF' },
+        },
+        candle: {
+          type: 'candle_solid',
+          bar: {
+            upColor: '#0ECB81',
+            downColor: '#F6465D',
+            upBorderColor: '#0ECB81',
+            downBorderColor: '#F6465D',
+            upWickColor: '#0ECB81',
+            downWickColor: '#F6465D',
+          },
+          priceMark: {
+            show: true,
+            last: {
+              show: true,
+              upColor: '#0ECB81',
+              downColor: '#F6465D',
+              line: { show: true, style: 'dashed' as const, dashedValue: [4, 4] },
+            },
+          },
+        },
+        xAxis: { show: true, tickText: { color: '#474D57' } },
+        yAxis: { show: true, tickText: { color: '#474D57' } },
+        crosshair: {
+          show: true,
+          horizontal: {
+            show: true,
+            line: { color: '#B7BDC6', style: 'dashed' as const },
+            text: { color: '#1E2329', borderColor: '#B7BDC6', backgroundColor: '#F0F1F2' },
+          },
+          vertical: {
+            show: true,
+            line: { color: '#B7BDC6', style: 'dashed' as const },
+            text: { color: '#1E2329', borderColor: '#B7BDC6', backgroundColor: '#F0F1F2' },
+          },
+        },
+        separator: { color: '#EAECEF' },
+        indicator: {
+          tooltip: { text: { color: '#474D57' } },
+        },
+      });
+    } else {
+      chart.setStyles({
+        grid: {
+          show: true,
+          horizontal: { color: '#1B1F26' },
+          vertical: { color: '#1B1F26' },
+        },
+        candle: {
+          type: 'candle_solid',
+          bar: {
+            upColor: '#0ECB81',
+            downColor: '#F6465D',
+            upBorderColor: '#0ECB81',
+            downBorderColor: '#F6465D',
+            upWickColor: '#0ECB81',
+            downWickColor: '#F6465D',
+          },
+          priceMark: {
+            show: true,
+            last: {
+              show: true,
+              upColor: '#0ECB81',
+              downColor: '#F6465D',
+              line: { show: true, style: 'dashed' as const, dashedValue: [4, 4] },
+            },
+          },
+        },
+        xAxis: { show: true, tickText: { color: '#848E9C' } },
+        yAxis: { show: true, tickText: { color: '#848E9C' } },
+        crosshair: {
+          show: true,
+          horizontal: {
+            show: true,
+            line: { color: '#F0B90B33', style: 'dashed' as const },
+            text: { color: '#FFFFFF', borderColor: '#F0B90B', backgroundColor: '#363A45' },
+          },
+          vertical: {
+            show: true,
+            line: { color: '#F0B90B33', style: 'dashed' as const },
+            text: { color: '#FFFFFF', borderColor: '#F0B90B', backgroundColor: '#363A45' },
+          },
+        },
+        separator: { color: '#1B1F26' },
+        indicator: {
+          tooltip: { text: { color: '#848E9C' } },
+        },
+      });
+    }
+  }, [theme]);
+
+
   // ============================================================
   useEffect(() => {
     const chart = chartRef.current;
