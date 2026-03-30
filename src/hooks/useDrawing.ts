@@ -8,7 +8,9 @@ import { usePersistedState } from './usePersistedState';
 
 export type DrawingToolType =
   | 'TrendLine' | 'Rectangle' | 'Brush' | 'Text'
-  | 'Measure' | 'FibRetracement' | 'Marker' | null;
+  | 'Measure' | 'FibRetracement' | 'Marker'
+  | 'LongPosition' | 'ShortPosition'
+  | 'HorizontalLine' | 'VerticalLine' | null;
 
 export interface DrawingPoint {
   time: number;  // timestamp ms
