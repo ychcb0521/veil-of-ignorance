@@ -2,6 +2,10 @@ import { useState, useRef, useEffect } from 'react';
 import type { OrderSide, OrderType, MarginMode } from '@/types/trading';
 import { ORDER_TYPE_INFO } from '@/types/trading';
 import { ChevronDown, Check, Info } from 'lucide-react';
+import type { PlaceOrderParams } from '@/contexts/TradingContext';
+
+// Re-export for convenience
+export type { PlaceOrderParams };
 
 // === New selector types ===
 export type PriceSelection = 'MARKET' | 'LIMIT' | 'BEST';
@@ -9,35 +13,7 @@ export type TriggerType = 'MARK' | 'LAST';
 export type CurrencyUnit = 'BASE' | 'USDT';
 export type UsdtInputMode = 'ORDER_VALUE' | 'INITIAL_MARGIN';
 
-export interface PlaceOrderParams {
-  side: OrderSide;
-  type: OrderType;
-  price: number;
-  stopPrice: number;
-  quantity: number;
-  leverage: number;
-  marginMode: MarginMode;
-  // New selector states
-  priceSelection: PriceSelection;
-  triggerType: TriggerType;
-  currencyUnit: CurrencyUnit;
-  usdtInputMode: UsdtInputMode;
-  inputAmount: number; // raw user input amount (interpreted based on unit/mode)
-  // Trailing stop
-  callbackRate?: number;
-  trailingExecType?: 'MARKET' | 'LIMIT';
-  trailingLimitPrice?: number;
-  // TWAP
-  twapDuration?: number;
-  twapInterval?: number;
-  // Conditional
-  conditionalExecType?: 'MARKET' | 'LIMIT';
-  conditionalLimitPrice?: number;
-  // Scaled
-  scaledCount?: number;
-  scaledStartPrice?: number;
-  scaledEndPrice?: number;
-}
+
 
 interface Props {
   currentPrice: number;
