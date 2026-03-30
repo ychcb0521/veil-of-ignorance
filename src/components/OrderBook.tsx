@@ -66,12 +66,13 @@ export function OrderBook({ currentPrice, symbol, previousPrice, pricePrecision:
 
   const step = useMemo(() => getPriceStep(currentPrice), [currentPrice]);
   const decimals = useMemo(() => {
+    if (propPrecision != null) return propPrecision;
     if (step >= 0.1) return 1;
     if (step >= 0.01) return 2;
     if (step >= 0.001) return 3;
     if (step >= 0.0001) return 4;
     return 5;
-  }, [step]);
+  }, [step, propPrecision]);
 
   const asks = useMemo(() => {
     if (currentPrice <= 0) return [];
