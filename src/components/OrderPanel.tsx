@@ -362,7 +362,7 @@ export function OrderPanel({ currentPrice, onPlaceOrder, disabled, symbol, cooli
               </div>
             </div>
             {trailingExecType === 'LIMIT' && (
-              <InputField label="限价 (USDT)" value={trailingLimitPrice} onChange={setTrailingLimitPrice} placeholder={currentPrice.toFixed(2)} />
+              <InputField label="限价 (USDT)" value={trailingLimitPrice} onChange={setTrailingLimitPrice} placeholder={currentPrice.toFixed(pricePrecision)} />
             )}
           </>
         )}
