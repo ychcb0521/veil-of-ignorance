@@ -427,17 +427,19 @@ const Index = () => {
         interval={interval}
         onSymbolChange={handleSymbolChange}
         onIntervalChange={handleIntervalChange}
-        isRunning={sim.isRunning}
+        status={sim.status}
         currentSimulatedTime={sim.currentSimulatedTime}
         speed={sim.speed}
         onStart={handleStart}
-        onStop={sim.stopSimulation}
+        onPause={sim.pauseSimulation}
+        onResume={sim.resumeSimulation}
+        onStop={handleStop}
         onSetSpeed={sim.setSpeed}
         visibleData={visibleData}
         onLoadOlder={loadOlder}
         loadingOlder={loadingOlder}
         currentPrice={currentPrice}
-        disabled={!sim.isRunning || currentPrice === 0}
+        disabled={sim.status === 'stopped' || currentPrice === 0}
         onPlaceOrder={handlePlaceOrderForActiveSymbol}
         balance={balance}
         positionsMap={positionsMap}
