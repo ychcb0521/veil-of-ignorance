@@ -494,3 +494,37 @@ function CandlestickChartComponent({ data, symbol, onLoadOlder, loadingOlder, tr
     </div>
   );
 }
+
+function areChartPropsEqual(prev: Props, next: Props) {
+  const prevLen = prev.data.length;
+  const nextLen = next.data.length;
+
+  const prevFirst = prevLen > 0 ? prev.data[0].time : 0;
+  const nextFirst = nextLen > 0 ? next.data[0].time : 0;
+  const prevLast = prevLen > 0 ? prev.data[prevLen - 1] : null;
+  const nextLast = nextLen > 0 ? next.data[nextLen - 1] : null;
+
+  const sameDataShape =
+    prevLen === nextLen &&
+    prevFirst === nextFirst &&
+    (prevLast?.time ?? 0) === (nextLast?.time ?? 0) &&
+    (prevLast?.open ?? 0) === (nextLast?.open ?? 0) &&
+    (prevLast?.high ?? 0) === (nextLast?.high ?? 0) &&
+    (prevLast?.low ?? 0) === (nextLast?.low ?? 0) &&
+    (prevLast?.close ?? 0) === (nextLast?.close ?? 0) &&
+    (prevLast?.volume ?? 0) === (nextLast?.volume ?? 0);
+
+  return (
+    sameDataShape &&
+    prev.symbol === next.symbol &&
+    prev.loadingOlder === next.loadingOlder &&
+    prev.rawSymbol === next.rawSymbol &&
+    prev.pricePrecision === next.pricePrecision &&
+    prev.quantityPrecision === next.quantityPrecision &&
+    prev.tradeHistory === next.tradeHistory &&
+    prev.onLoadOlder === next.onLoadOlder
+  );
+}
+
+export const CandlestickChart = memo(CandlestickChartComponent, areChartPropsEqual);
+export default CandlestickChart;
