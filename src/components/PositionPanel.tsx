@@ -1,25 +1,39 @@
 import type { Position, PendingOrder, TradeRecord } from '@/types/trading';
 import { calcUnrealizedPnl, calcROE, calcLiquidationPrice } from '@/types/trading';
+import type { PositionsMap, OrdersMap, PriceMap } from '@/contexts/TradingContext';
 import { X } from 'lucide-react';
 
 interface Props {
-  positions: Position[];
-  pendingOrders: PendingOrder[];
+  positionsMap: PositionsMap;
+  ordersMap: OrdersMap;
   tradeHistory: TradeRecord[];
-  currentPrice: number;
-  onClosePosition: (index: number) => void;
-  onCancelOrder: (id: string) => void;
+  priceMap: PriceMap;
+  activeSymbol: string;
+  onClosePosition: (symbol: string, index: number) => void;
+  onCancelOrder: (symbol: string, orderId: string) => void;
   activeTab: string;
   onTabChange: (tab: string) => void;
 }
 
 export function PositionPanel({
-  positions, pendingOrders, tradeHistory, currentPrice,
+  positionsMap, ordersMap, tradeHistory, priceMap, activeSymbol,
   onClosePosition, onCancelOrder, activeTab, onTabChange,
 }: Props) {
+  // Flatten all positions across symbols
+  const allPositions: { symbol: string; position: Position; index: number }[] = [];
+  for (const [sym, positions] of Object.entries(positionsMap)) {
+    positions.forEach((pos, i) => allPositions.push({ symbol: sym, position: pos, index: i }));
+  }
+
+  // Flatten all orders
+  const allOrders: { symbol: string; order: PendingOrder }[] = [];
+  for (const [sym, orders] of Object.entries(ordersMap)) {
+    for (const o of orders) allOrders.push({ symbol: sym, order: o });
+  }
+
   const TABS = [
-    { key: 'positions', label: '持仓', count: positions.length },
-    { key: 'pending', label: '当前委托', count: pendingOrders.length },
+    { key: 'positions', label: '持仓', count: allPositions.length },
+    { key: 'pending', label: '当前委托', count: allOrders.length },
     { key: 'history', label: '历史记录', count: tradeHistory.length },
   ];
 
@@ -48,25 +62,31 @@ export function PositionPanel({
       {/* Content */}
       <div className="overflow-x-auto min-h-[120px]">
         {activeTab === 'positions' && (
-          positions.length === 0 ? (
+          allPositions.length === 0 ? (
             <div className="px-4 py-6 text-center text-xs text-muted-foreground">暂无持仓</div>
           ) : (
             <table className="w-full text-[11px] font-mono">
               <thead>
                 <tr className="text-muted-foreground border-b border-border">
-                  {['方向', '数量', '开仓均价', '标记价', '强平价', '保证金', '未实现盈亏', 'ROE%', '操作'].map(h => (
+                  {['合约', '方向', '数量', '开仓均价', '标记价', '强平价', '保证金', '未实现盈亏', 'ROE%', '操作'].map(h => (
                     <th key={h} className="px-3 py-1.5 text-left font-medium whitespace-nowrap">{h}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
-                {positions.map((pos, i) => {
-                  const pnl = calcUnrealizedPnl(pos, currentPrice);
-                  const roe = calcROE(pos, currentPrice);
+                {allPositions.map(({ symbol, position: pos, index: i }) => {
+                  const price = priceMap[symbol] || 0;
+                  const pnl = calcUnrealizedPnl(pos, price);
+                  const roe = calcROE(pos, price);
                   const liq = calcLiquidationPrice(pos);
                   const isProfit = pnl >= 0;
+                  const isActive = symbol === activeSymbol;
                   return (
-                    <tr key={i} className="border-b border-border/30 hover:bg-accent/20">
+                    <tr key={`${symbol}-${i}`} className={`border-b border-border/30 hover:bg-accent/20 ${isActive ? '' : 'opacity-80'}`}>
+                      <td className="px-3 py-2">
+                        <span className="text-foreground font-medium">{symbol.replace('USDT', '')}</span>
+                        <span className="text-muted-foreground text-[10px] ml-0.5">/USDT</span>
+                      </td>
                       <td className="px-3 py-2">
                         <span className={`font-bold ${pos.side === 'LONG' ? 'trading-green' : 'trading-red'}`}>
                           {pos.side === 'LONG' ? '多' : '空'} {pos.leverage}x
@@ -77,7 +97,7 @@ export function PositionPanel({
                       </td>
                       <td className="px-3 py-2">{pos.quantity.toFixed(4)}</td>
                       <td className="px-3 py-2">{pos.entryPrice.toFixed(2)}</td>
-                      <td className="px-3 py-2">{currentPrice.toFixed(2)}</td>
+                      <td className="px-3 py-2">{price > 0 ? price.toFixed(2) : '-'}</td>
                       <td className="px-3 py-2 text-destructive">{liq.toFixed(2)}</td>
                       <td className="px-3 py-2">{pos.margin.toFixed(2)}</td>
                       <td className={`px-3 py-2 font-bold ${isProfit ? 'trading-green' : 'trading-red'}`}>
@@ -88,7 +108,7 @@ export function PositionPanel({
                       </td>
                       <td className="px-3 py-2">
                         <button
-                          onClick={() => onClosePosition(i)}
+                          onClick={() => onClosePosition(symbol, i)}
                           className="px-2 py-0.5 rounded text-[10px] font-medium bg-destructive/20 text-destructive hover:bg-destructive/30 transition-colors"
                         >
                           平仓
@@ -103,20 +123,24 @@ export function PositionPanel({
         )}
 
         {activeTab === 'pending' && (
-          pendingOrders.length === 0 ? (
+          allOrders.length === 0 ? (
             <div className="px-4 py-6 text-center text-xs text-muted-foreground">暂无委托</div>
           ) : (
             <table className="w-full text-[11px] font-mono">
               <thead>
                 <tr className="text-muted-foreground border-b border-border">
-                  {['类型', '方向', '价格', '触发价', '数量', '杠杆', '操作'].map(h => (
+                  {['合约', '类型', '方向', '价格', '触发价', '数量', '杠杆', '操作'].map(h => (
                     <th key={h} className="px-3 py-1.5 text-left font-medium whitespace-nowrap">{h}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
-                {pendingOrders.map(order => (
+                {allOrders.map(({ symbol, order }) => (
                   <tr key={order.id} className="border-b border-border/30 hover:bg-accent/20">
+                    <td className="px-3 py-2">
+                      <span className="text-foreground font-medium">{symbol.replace('USDT', '')}</span>
+                      <span className="text-muted-foreground text-[10px]">/USDT</span>
+                    </td>
                     <td className="px-3 py-2 text-muted-foreground">
                       {{ LIMIT: '限价', POST_ONLY: '只做Maker', MARKET: '市价', LIMIT_TP_SL: '限价TP/SL', MARKET_TP_SL: '市价TP/SL', CONDITIONAL: '条件', TRAILING_STOP: '跟踪', TWAP: 'TWAP', SCALED: '分段' }[order.type] || order.type}
                     </td>
@@ -129,7 +153,7 @@ export function PositionPanel({
                     <td className="px-3 py-2">{order.leverage}x</td>
                     <td className="px-3 py-2">
                       <button
-                        onClick={() => onCancelOrder(order.id)}
+                        onClick={() => onCancelOrder(symbol, order.id)}
                         className="p-0.5 rounded hover:bg-destructive/20 text-muted-foreground hover:text-destructive transition-colors"
                       >
                         <X className="w-3.5 h-3.5" />

@@ -1,18 +1,32 @@
 import { Wallet, TrendingUp } from 'lucide-react';
 import type { Position } from '@/types/trading';
 import { calcUnrealizedPnl } from '@/types/trading';
+import type { PositionsMap, PriceMap } from '@/contexts/TradingContext';
 
 const INITIAL_CAPITAL = 1_000_000;
 
 interface Props {
   balance: number;
-  positions: Position[];
-  currentPrice: number;
+  positionsMap: PositionsMap;
+  priceMap: PriceMap;
 }
 
-export function AccountInfo({ balance, positions, currentPrice }: Props) {
-  const totalPnl = positions.reduce((sum, pos) => sum + calcUnrealizedPnl(pos, currentPrice), 0);
-  const totalMargin = positions.reduce((sum, pos) => sum + pos.margin, 0);
+export function AccountInfo({ balance, positionsMap, priceMap }: Props) {
+  // Calculate global PnL across ALL symbols
+  let totalPnl = 0;
+  let totalMargin = 0;
+  let symbolCount = 0;
+
+  for (const [symbol, positions] of Object.entries(positionsMap)) {
+    const price = priceMap[symbol] || 0;
+    if (positions.length === 0) continue;
+    symbolCount++;
+    for (const pos of positions) {
+      totalPnl += calcUnrealizedPnl(pos, price);
+      totalMargin += pos.margin;
+    }
+  }
+
   const equity = balance + totalPnl;
   const available = balance - totalMargin;
   const totalReturn = equity - INITIAL_CAPITAL;
@@ -46,6 +60,12 @@ export function AccountInfo({ balance, positions, currentPrice }: Props) {
           {totalReturn >= 0 ? '+' : ''}{totalReturnPct.toFixed(2)}%
         </span>
       </div>
+      {symbolCount > 1 && (
+        <div>
+          <span className="text-muted-foreground">活跃合约 </span>
+          <span className="font-semibold text-primary">{symbolCount}</span>
+        </div>
+      )}
       <div className="ml-auto text-muted-foreground/60">
         初始资金: {INITIAL_CAPITAL.toLocaleString()} USDT
       </div>
