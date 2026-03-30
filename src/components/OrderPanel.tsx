@@ -25,6 +25,8 @@ interface Props {
   onOpenCoolingOff?: () => void;
   priceProtection?: boolean;
   onTogglePriceProtection?: () => void;
+  pricePrecision?: number;
+  quantityPrecision?: number;
 }
 
 export function OrderPanel({ currentPrice, onPlaceOrder, disabled, symbol, coolingOff, coolingOffLabel, onOpenCoolingOff, priceProtection, onTogglePriceProtection }: Props) {
