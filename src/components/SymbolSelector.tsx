@@ -146,7 +146,11 @@ export function SymbolSelector({ symbol, interval, onSymbolChange, onIntervalCha
                 filteredSymbols.map(s => (
                   <button
                     key={s.symbol}
-                    onClick={() => { onSymbolChange(s.symbol); setIsOpen(false); }}
+                    onClick={() => {
+                      onSymbolChange(s.symbol);
+                      if (onPrecisionChange) onPrecisionChange(s.pricePrecision, s.quantityPrecision);
+                      setIsOpen(false);
+                    }}
                     className={`w-full flex items-center justify-between px-3 py-1.5 text-xs hover:bg-accent/50 transition-colors ${
                       symbol === s.symbol ? 'bg-accent/30' : ''
                     }`}
