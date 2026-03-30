@@ -18,11 +18,16 @@ export type UsdtInputMode = 'ORDER_VALUE' | 'INITIAL_MARGIN';
 interface Props {
   currentPrice: number;
   disabled: boolean;
-  symbol: string; // e.g. "BTCUSDT"
+  symbol: string;
   onPlaceOrder: (order: PlaceOrderParams) => void;
+  coolingOff?: boolean;
+  coolingOffLabel?: string;
+  onOpenCoolingOff?: () => void;
+  priceProtection?: boolean;
+  onTogglePriceProtection?: () => void;
 }
 
-export function OrderPanel({ currentPrice, onPlaceOrder, disabled, symbol }: Props) {
+export function OrderPanel({ currentPrice, onPlaceOrder, disabled, symbol, coolingOff, coolingOffLabel, onOpenCoolingOff, priceProtection, onTogglePriceProtection }: Props) {
   const baseCoin = symbol.replace('USDT', '') || 'BTC';
 
   const [orderType, setOrderType] = useState<OrderType>('MARKET');
