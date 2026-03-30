@@ -125,7 +125,7 @@ const LIGHT_STYLES = {
     vertical: { color: '#EAECEF' },
   },
   candle: {
-    type: 'candle_solid' as const,
+    type: CandleType.CandleSolid,
     bar: {
       upColor: '#0ECB81',
       downColor: '#F6465D',
