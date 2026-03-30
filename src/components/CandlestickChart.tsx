@@ -286,6 +286,7 @@ export function CandlestickChart({ data, symbol, onLoadOlder, loadingOlder, trad
   // Feed data to chart when props change
   // ============================================================
   useEffect(() => {
+    dataRef.current = data; // always keep ref in sync
     const chart = chartRef.current;
     if (!chart || data.length === 0) return;
 
@@ -295,19 +296,28 @@ export function CandlestickChart({ data, symbol, onLoadOlder, loadingOlder, trad
       && data.length > prevDataLenRef.current
       && currentOldest < prevOldestRef.current;
 
-    if (wasPrepend) {
-      // Older data prepended — reload all data to include it
-      chart.applyNewData(klineData);
+    if (wasPrepend && initCallbackRef.current) {
+      // Older data prepended — feed via stored callback
+      const newCount = data.length - prevDataLenRef.current;
+      const olderData = klineData.slice(0, newCount);
+      initCallbackRef.current(olderData, true);
+      initCallbackRef.current = null;
     } else if (prevDataLenRef.current === 0) {
-      // Initial load
-      chart.applyNewData(klineData);
+      // Initial load — if init callback waiting, use it; otherwise resetData + re-trigger
+      if (initCallbackRef.current) {
+        initCallbackRef.current(klineData, true);
+        initCallbackRef.current = null;
+      } else {
+        // Force re-init by resetting and re-setting data loader
+        chart.resetData();
+      }
     } else if (data.length > prevDataLenRef.current && data.length - prevDataLenRef.current <= 2) {
-      // New candle appended (sim tick) — update last candle
-      const lastCandle = klineData[klineData.length - 1];
-      chart.updateData(lastCandle);
+      // New candle appended (sim tick) — resetData and reload all
+      // (v10 beta has no updateData, so we must reload)
+      chart.resetData();
     } else {
       // Data replaced (interval change, etc.)
-      chart.applyNewData(klineData);
+      chart.resetData();
     }
 
     prevDataLenRef.current = data.length;
