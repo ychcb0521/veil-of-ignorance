@@ -7,12 +7,14 @@ const FALLBACK_SYMBOLS = [
   'BTCUSDT','ETHUSDT','BNBUSDT','SOLUSDT','XRPUSDT','DOGEUSDT','ADAUSDT',
   'AVAXUSDT','DOTUSDT','LINKUSDT','MATICUSDT','LTCUSDT','UNIUSDT','ATOMUSDT',
   'APTUSDT','ARBUSDT','OPUSDT','SUIUSDT','SEIUSDT','TIAUSDT',
-].map(s => ({ symbol: s, baseAsset: s.replace('USDT',''), displayName: `${s.replace('USDT','')}/USDT` }));
+].map(s => ({ symbol: s, baseAsset: s.replace('USDT',''), displayName: `${s.replace('USDT','')}/USDT`, pricePrecision: 2, quantityPrecision: 3 }));
 
-interface SymbolInfo {
+export interface SymbolInfo {
   symbol: string;
   baseAsset: string;
   displayName: string;
+  pricePrecision: number;
+  quantityPrecision: number;
 }
 
 
@@ -22,9 +24,10 @@ interface Props {
   interval: string;
   onSymbolChange: (s: string) => void;
   onIntervalChange: (i: string) => void;
+  onPrecisionChange?: (pricePrecision: number, quantityPrecision: number) => void;
 }
 
-export function SymbolSelector({ symbol, interval, onSymbolChange, onIntervalChange }: Props) {
+export function SymbolSelector({ symbol, interval, onSymbolChange, onIntervalChange, onPrecisionChange }: Props) {
   const [availableSymbols, setAvailableSymbols] = useState<SymbolInfo[]>(FALLBACK_SYMBOLS);
   const [isLoading, setIsLoading] = useState(true);
   const [isOpen, setIsOpen] = useState(false);
@@ -48,11 +51,18 @@ export function SymbolSelector({ symbol, interval, onSymbolChange, onIntervalCha
             symbol: s.symbol,
             baseAsset: s.baseAsset,
             displayName: `${s.baseAsset}/USDT`,
+            pricePrecision: s.pricePrecision ?? 2,
+            quantityPrecision: s.quantityPrecision ?? 3,
           }))
           .sort((a: SymbolInfo, b: SymbolInfo) => a.baseAsset.localeCompare(b.baseAsset));
 
         if (filtered.length > 0) {
           setAvailableSymbols(filtered);
+          // Emit precision for current symbol
+          const current = filtered.find(s => s.symbol === symbol);
+          if (current && onPrecisionChange) {
+            onPrecisionChange(current.pricePrecision, current.quantityPrecision);
+          }
         }
       } catch (err) {
         console.error('Failed to fetch Binance exchangeInfo, using fallback list:', err);
@@ -136,7 +146,11 @@ export function SymbolSelector({ symbol, interval, onSymbolChange, onIntervalCha
                 filteredSymbols.map(s => (
                   <button
                     key={s.symbol}
-                    onClick={() => { onSymbolChange(s.symbol); setIsOpen(false); }}
+                    onClick={() => {
+                      onSymbolChange(s.symbol);
+                      if (onPrecisionChange) onPrecisionChange(s.pricePrecision, s.quantityPrecision);
+                      setIsOpen(false);
+                    }}
                     className={`w-full flex items-center justify-between px-3 py-1.5 text-xs hover:bg-accent/50 transition-colors ${
                       symbol === s.symbol ? 'bg-accent/30' : ''
                     }`}

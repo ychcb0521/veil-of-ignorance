@@ -58,6 +58,8 @@ interface Props {
   loadingOlder?: boolean;
   tradeHistory?: TradeRecord[];
   rawSymbol?: string;
+  pricePrecision?: number;
+  quantityPrecision?: number;
 }
 
 // Convert our KlineData to klinecharts KLineData
@@ -162,7 +164,7 @@ const LIGHT_STYLES = {
   separator: { color: '#EAECEF' },
 };
 
-export function CandlestickChart({ data, symbol, onLoadOlder, loadingOlder, tradeHistory, rawSymbol }: Props) {
+export function CandlestickChart({ data, symbol, onLoadOlder, loadingOlder, tradeHistory, rawSymbol, pricePrecision = 2, quantityPrecision = 3 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<Chart | null>(null);
   const prevDataLenRef = useRef(0);
@@ -204,6 +206,15 @@ export function CandlestickChart({ data, symbol, onLoadOlder, loadingOlder, trad
     if (!chart) return;
     chart.setStyles(theme === 'light' ? LIGHT_STYLES : DARK_STYLES);
   }, [theme]);
+
+  // ============================================================
+  // Price/Volume precision
+  // ============================================================
+  useEffect(() => {
+    const chart = chartRef.current;
+    if (!chart) return;
+    chart.setPriceVolumePrecision(pricePrecision, quantityPrecision);
+  }, [pricePrecision, quantityPrecision]);
 
   // ============================================================
   // Feed data to chart when props change (v9 API)
@@ -368,23 +379,23 @@ export function CandlestickChart({ data, symbol, onLoadOlder, loadingOlder, trad
           <>
             <div className="flex flex-col">
               <span className={`font-mono text-xl font-bold ${isUp ? 'trading-green' : 'trading-red'}`}>
-                {last.close.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                {last.close.toLocaleString(undefined, { minimumFractionDigits: pricePrecision, maximumFractionDigits: pricePrecision })}
               </span>
             </div>
             <div className="grid grid-cols-4 gap-x-6 gap-y-0.5 text-xs font-mono">
               <div>
                 <span className="text-muted-foreground">24h涨跌</span>
                 <span className={`ml-1.5 font-medium ${priceChange >= 0 ? 'trading-green' : 'trading-red'}`}>
-                  {priceChange >= 0 ? '+' : ''}{priceChange.toFixed(2)} ({priceChangePct >= 0 ? '+' : ''}{priceChangePct.toFixed(2)}%)
+                  {priceChange >= 0 ? '+' : ''}{priceChange.toFixed(pricePrecision)} ({priceChangePct >= 0 ? '+' : ''}{priceChangePct.toFixed(2)}%)
                 </span>
               </div>
               <div>
                 <span className="text-muted-foreground">最高</span>
-                <span className="ml-1.5 text-foreground">{last.high.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                <span className="ml-1.5 text-foreground">{last.high.toLocaleString(undefined, { minimumFractionDigits: pricePrecision })}</span>
               </div>
               <div>
                 <span className="text-muted-foreground">最低</span>
-                <span className="ml-1.5 text-foreground">{last.low.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                <span className="ml-1.5 text-foreground">{last.low.toLocaleString(undefined, { minimumFractionDigits: pricePrecision })}</span>
               </div>
               <div>
                 <span className="text-muted-foreground">成交量</span>

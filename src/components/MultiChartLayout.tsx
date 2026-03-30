@@ -18,6 +18,8 @@ interface Props {
   isRunning: boolean;
   currentSimulatedTime: number;
   mainInterval: string;
+  pricePrecision?: number;
+  quantityPrecision?: number;
 }
 
 interface SubChart {
@@ -29,6 +31,7 @@ interface SubChart {
 export function MultiChartLayout({
   mainData, mainSymbol, rawSymbol, onLoadOlder, loadingOlder,
   tradeHistory, isRunning, currentSimulatedTime, mainInterval,
+  pricePrecision, quantityPrecision,
 }: Props) {
   const [layout, setLayout] = useState<LayoutMode>('1x1');
   const [subCharts, setSubCharts] = useState<SubChart[]>([
@@ -111,13 +114,15 @@ export function MultiChartLayout({
       {layout === '1x1' ? (
         <div className="flex-1 min-h-0">
           <CandlestickChart data={mainData} symbol={mainSymbol} onLoadOlder={onLoadOlder}
-            loadingOlder={loadingOlder} tradeHistory={tradeHistory} rawSymbol={rawSymbol} />
+            loadingOlder={loadingOlder} tradeHistory={tradeHistory} rawSymbol={rawSymbol}
+            pricePrecision={pricePrecision} quantityPrecision={quantityPrecision} />
         </div>
       ) : layout === '1x2' ? (
         <div className="flex-1 min-h-0 grid grid-cols-2 gap-px" style={{ background: 'hsl(var(--border))' }}>
           <div className="bg-background min-h-0 overflow-hidden">
             <CandlestickChart data={mainData} symbol={`${mainSymbol} ${mainInterval}`} onLoadOlder={onLoadOlder}
-              loadingOlder={loadingOlder} tradeHistory={tradeHistory} rawSymbol={rawSymbol} />
+              loadingOlder={loadingOlder} tradeHistory={tradeHistory} rawSymbol={rawSymbol}
+              pricePrecision={pricePrecision} quantityPrecision={quantityPrecision} />
           </div>
           <div className="bg-background min-h-0 overflow-hidden relative">
             <SubChartIntervalSelector interval={subCharts[0].interval} onChange={v => handleSubIntervalChange(0, v)} />
@@ -126,7 +131,8 @@ export function MultiChartLayout({
             ) : (
               <CandlestickChart data={getVisibleSubData(subCharts[0].data)}
                 symbol={`${mainSymbol} ${subCharts[0].interval}`}
-                tradeHistory={tradeHistory} rawSymbol={rawSymbol} />
+                tradeHistory={tradeHistory} rawSymbol={rawSymbol}
+                pricePrecision={pricePrecision} quantityPrecision={quantityPrecision} />
             )}
           </div>
         </div>
@@ -134,7 +140,8 @@ export function MultiChartLayout({
         <div className="flex-1 min-h-0 grid grid-cols-2 grid-rows-2 gap-px" style={{ background: 'hsl(var(--border))' }}>
           <div className="bg-background min-h-0 overflow-hidden">
             <CandlestickChart data={mainData} symbol={`${mainSymbol} ${mainInterval}`} onLoadOlder={onLoadOlder}
-              loadingOlder={loadingOlder} tradeHistory={tradeHistory} rawSymbol={rawSymbol} />
+              loadingOlder={loadingOlder} tradeHistory={tradeHistory} rawSymbol={rawSymbol}
+              pricePrecision={pricePrecision} quantityPrecision={quantityPrecision} />
           </div>
           {[0, 1, 2].map(i => (
             <div key={i} className="bg-background min-h-0 overflow-hidden relative">
@@ -144,7 +151,8 @@ export function MultiChartLayout({
               ) : (
                 <CandlestickChart data={getVisibleSubData(subCharts[i].data)}
                   symbol={`${mainSymbol} ${subCharts[i].interval}`}
-                  tradeHistory={tradeHistory} rawSymbol={rawSymbol} />
+                  tradeHistory={tradeHistory} rawSymbol={rawSymbol}
+                  pricePrecision={pricePrecision} quantityPrecision={quantityPrecision} />
               )}
             </div>
           ))}

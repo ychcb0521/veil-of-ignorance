@@ -48,6 +48,10 @@ interface TradingState {
   allPositions: { symbol: string; position: Position }[];
   allOrders: { symbol: string; order: PendingOrder }[];
   currentPrice: number;
+  pricePrecision: number;
+  quantityPrecision: number;
+  setPricePrecision: (v: number) => void;
+  setQuantityPrecision: (v: number) => void;
   activeSymbols: string[];
   handlePlaceOrder: (symbol: string, order: PlaceOrderParams) => void;
   handleClosePosition: (symbol: string, index: number) => void;
@@ -154,6 +158,8 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
   const [priceMap, setPriceMap] = usePersistedState<PriceMap>('price_map', {});
   const [balance, setBalance] = usePersistedState('balance', initialCapital);
   const [tradeHistory, setTradeHistory] = usePersistedState<TradeRecord[]>('trade_history', []);
+  const [pricePrecision, setPricePrecision] = useState(2);
+  const [quantityPrecision, setQuantityPrecision] = useState(3);
 
   // Liquidation modal state
   const [liquidationOpen, setLiquidationOpen] = useState(false);
@@ -571,7 +577,8 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
     tradeHistory, setTradeHistory,
     activeSymbolPositions, activeSymbolOrders,
     allPositions, allOrders,
-    currentPrice, activeSymbols,
+    currentPrice, pricePrecision, quantityPrecision, setPricePrecision, setQuantityPrecision,
+    activeSymbols,
     handlePlaceOrder, handleClosePosition, handleCancelOrder,
     handleAddIsolatedMargin,
     fundingRate: FUNDING_RATE,

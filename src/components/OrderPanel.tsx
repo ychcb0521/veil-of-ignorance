@@ -25,9 +25,11 @@ interface Props {
   onOpenCoolingOff?: () => void;
   priceProtection?: boolean;
   onTogglePriceProtection?: () => void;
+  pricePrecision?: number;
+  quantityPrecision?: number;
 }
 
-export function OrderPanel({ currentPrice, onPlaceOrder, disabled, symbol, coolingOff, coolingOffLabel, onOpenCoolingOff, priceProtection, onTogglePriceProtection }: Props) {
+export function OrderPanel({ currentPrice, onPlaceOrder, disabled, symbol, coolingOff, coolingOffLabel, onOpenCoolingOff, priceProtection, onTogglePriceProtection, pricePrecision = 2, quantityPrecision = 3 }: Props) {
   const baseCoin = symbol.replace('USDT', '') || 'BTC';
 
   const [orderType, setOrderType] = useState<OrderType>('MARKET');
@@ -308,7 +310,7 @@ export function OrderPanel({ currentPrice, onPlaceOrder, disabled, symbol, cooli
             </div>
             <div className="relative">
               <input type="text" value={price} onChange={e => setPrice(e.target.value)}
-                placeholder={currentPrice.toFixed(2)}
+                placeholder={currentPrice.toFixed(pricePrecision)}
                 className="input-dark w-full text-right pr-14 text-xs" />
               <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] text-muted-foreground">USDT</span>
             </div>
@@ -360,7 +362,7 @@ export function OrderPanel({ currentPrice, onPlaceOrder, disabled, symbol, cooli
               </div>
             </div>
             {trailingExecType === 'LIMIT' && (
-              <InputField label="限价 (USDT)" value={trailingLimitPrice} onChange={setTrailingLimitPrice} placeholder={currentPrice.toFixed(2)} />
+              <InputField label="限价 (USDT)" value={trailingLimitPrice} onChange={setTrailingLimitPrice} placeholder={currentPrice.toFixed(pricePrecision)} />
             )}
           </>
         )}
@@ -383,7 +385,7 @@ export function OrderPanel({ currentPrice, onPlaceOrder, disabled, symbol, cooli
               </div>
             </div>
             {condExecType === 'LIMIT' && (
-              <InputField label="限价 (USDT)" value={condLimitPrice} onChange={setCondLimitPrice} placeholder={currentPrice.toFixed(2)} />
+              <InputField label="限价 (USDT)" value={condLimitPrice} onChange={setCondLimitPrice} placeholder={currentPrice.toFixed(pricePrecision)} />
             )}
           </>
         )}
@@ -404,15 +406,15 @@ export function OrderPanel({ currentPrice, onPlaceOrder, disabled, symbol, cooli
         {orderType === 'SCALED' && (
           <>
             <InputField label="子订单数" value={scaledCount} onChange={setScaledCount} placeholder="5" />
-            <InputField label="起始价 (USDT)" value={scaledStartPrice} onChange={setScaledStartPrice} placeholder={currentPrice.toFixed(2)} />
-            <InputField label="终点价 (USDT)" value={scaledEndPrice} onChange={setScaledEndPrice} placeholder={currentPrice.toFixed(2)} />
+            <InputField label="起始价 (USDT)" value={scaledStartPrice} onChange={setScaledStartPrice} placeholder={currentPrice.toFixed(pricePrecision)} />
+            <InputField label="终点价 (USDT)" value={scaledEndPrice} onChange={setScaledEndPrice} placeholder={currentPrice.toFixed(pricePrecision)} />
             <div className="text-[10px] text-muted-foreground px-1">
               {(() => {
                 const count = parseInt(scaledCount) || 5;
                 const sp = parseFloat(scaledStartPrice) || 0;
                 const ep = parseFloat(scaledEndPrice) || 0;
                 const step = count > 1 ? (ep - sp) / (count - 1) : 0;
-                return `${count} 笔限价单，步长 ${step.toFixed(2)}，每笔 ${(effectiveQty / count).toFixed(4)}`;
+                return `${count} 笔限价单，步长 ${step.toFixed(pricePrecision)}，每笔 ${(effectiveQty / count).toFixed(quantityPrecision)}`;
               })()}
             </div>
           </>
@@ -463,7 +465,7 @@ export function OrderPanel({ currentPrice, onPlaceOrder, disabled, symbol, cooli
         {/* Computed display */}
         {currencyUnit === 'USDT' && effectiveQty > 0 && (
           <div className="text-[10px] text-muted-foreground px-1">
-            ≈ {effectiveQty.toFixed(6)} {baseCoin}
+            ≈ {effectiveQty.toFixed(quantityPrecision)} {baseCoin}
             {usdtInputMode === 'INITIAL_MARGIN' && (
               <span className="ml-2">（仓位价值 ≈ {(effectiveQty * effectivePrice).toFixed(2)} USDT）</span>
             )}
@@ -515,14 +517,14 @@ export function OrderPanel({ currentPrice, onPlaceOrder, disabled, symbol, cooli
             className="btn-long disabled:opacity-30 text-xs py-2.5">
             <div>{coolingOff ? '🧊 冷静中' : '开多 / Buy'}</div>
             {!coolingOff && (orderType === 'MARKET' || priceSelection === 'MARKET') && currentPrice > 0 && (
-              <div className="text-[10px] opacity-80 mt-0.5">{currentPrice.toFixed(2)}</div>
+              <div className="text-[10px] opacity-80 mt-0.5">{currentPrice.toFixed(pricePrecision)}</div>
             )}
           </button>
           <button onClick={() => handleOrder('SHORT')} disabled={orderDisabled}
             className="btn-short disabled:opacity-30 text-xs py-2.5">
             <div>{coolingOff ? '🧊 冷静中' : '开空 / Sell'}</div>
             {!coolingOff && (orderType === 'MARKET' || priceSelection === 'MARKET') && currentPrice > 0 && (
-              <div className="text-[10px] opacity-80 mt-0.5">{currentPrice.toFixed(2)}</div>
+              <div className="text-[10px] opacity-80 mt-0.5">{currentPrice.toFixed(pricePrecision)}</div>
             )}
           </button>
         </div>

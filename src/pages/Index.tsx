@@ -77,6 +77,7 @@ const Index = () => {
     tradeHistory, setTradeHistory,
     activeSymbolPositions, activeSymbolOrders,
     allPositions, allOrders, currentPrice, activeSymbols,
+    pricePrecision, quantityPrecision, setPricePrecision, setQuantityPrecision,
     handlePlaceOrder, handleClosePosition, handleCancelOrder,
     handleAddIsolatedMargin,
     liquidationOpen, liquidationDetails, closeLiquidationModal,
@@ -460,7 +461,7 @@ const Index = () => {
         <div className="flex items-center gap-4">
           <ThemeToggle />
           <h1 className="text-xs font-bold text-primary tracking-widest uppercase">⚡ 无知之幕</h1>
-          <SymbolSelector symbol={activeSymbol} interval={interval} onSymbolChange={handleSymbolChange} onIntervalChange={handleIntervalChange} />
+          <SymbolSelector symbol={activeSymbol} interval={interval} onSymbolChange={handleSymbolChange} onIntervalChange={handleIntervalChange} onPrecisionChange={(pp, qp) => { setPricePrecision(pp); setQuantityPrecision(qp); }} />
         </div>
         <div className="flex items-center gap-3">
           {loading && <span className="text-[10px] text-primary animate-pulse font-mono">加载历史数据...</span>}
@@ -509,6 +510,8 @@ const Index = () => {
                 isRunning={sim.status !== 'stopped'}
                 currentSimulatedTime={sim.currentSimulatedTime}
                 mainInterval={interval}
+                pricePrecision={pricePrecision}
+                quantityPrecision={quantityPrecision}
               />
             )}
           </div>
@@ -531,7 +534,7 @@ const Index = () => {
 
         {/* Order Book */}
         <div className="w-[180px] border-l border-border shrink-0 overflow-hidden">
-          <OrderBook currentPrice={currentPrice} symbol={activeSymbol} />
+          <OrderBook currentPrice={currentPrice} symbol={activeSymbol} pricePrecision={pricePrecision} />
         </div>
 
         <div className="w-[280px] border-l border-border shrink-0 overflow-y-auto">
@@ -542,6 +545,8 @@ const Index = () => {
             onOpenCoolingOff={() => setCoolingOffModalOpen(true)}
             priceProtection={priceProtection}
             onTogglePriceProtection={() => setPriceProtection(prev => !prev)}
+            pricePrecision={pricePrecision}
+            quantityPrecision={quantityPrecision}
           />
         </div>
       </div>

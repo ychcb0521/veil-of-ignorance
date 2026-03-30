@@ -17,6 +17,7 @@ interface Props {
   currentPrice: number;
   symbol: string;
   previousPrice?: number;
+  pricePrecision?: number;
 }
 
 const DEPTH_LEVELS = 12;
@@ -35,7 +36,7 @@ function generateDepth(basePrice: number, step: number, levels: number, isBid: b
   return entries;
 }
 
-export function OrderBook({ currentPrice, symbol, previousPrice }: Props) {
+export function OrderBook({ currentPrice, symbol, previousPrice, pricePrecision: propPrecision }: Props) {
   const [seed, setSeed] = useState(0);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const prevPriceRef = useRef(currentPrice);
@@ -65,12 +66,13 @@ export function OrderBook({ currentPrice, symbol, previousPrice }: Props) {
 
   const step = useMemo(() => getPriceStep(currentPrice), [currentPrice]);
   const decimals = useMemo(() => {
+    if (propPrecision != null) return propPrecision;
     if (step >= 0.1) return 1;
     if (step >= 0.01) return 2;
     if (step >= 0.001) return 3;
     if (step >= 0.0001) return 4;
     return 5;
-  }, [step]);
+  }, [step, propPrecision]);
 
   const asks = useMemo(() => {
     if (currentPrice <= 0) return [];
