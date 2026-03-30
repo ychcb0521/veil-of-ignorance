@@ -4,7 +4,7 @@
  */
 
 import { useEffect, useRef, useCallback, useState } from 'react';
-import { init, dispose, CandleType, type Chart, type KLineData, type OverlayCreate } from 'klinecharts';
+import { init, dispose, CandleType, LineType, type Chart, type KLineData, type OverlayCreate } from 'klinecharts';
 import type { KlineData } from '@/hooks/useBinanceData';
 import { useTheme } from '@/hooks/useTheme';
 import { DrawingToolbar } from './DrawingToolbar';
