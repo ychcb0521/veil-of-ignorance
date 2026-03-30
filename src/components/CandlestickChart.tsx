@@ -1,6 +1,6 @@
 /**
- * KlineCharts v10 based candlestick chart with native drawing tools and indicators.
- * Uses setDataLoader pattern for data feeding.
+ * KlineCharts v9 based candlestick chart with native drawing tools and indicators.
+ * Uses applyNewData / updateData / applyMoreData for data feeding.
  */
 
 import { useEffect, useRef, useCallback, useState } from 'react';
@@ -72,13 +72,101 @@ function toKLineData(d: KlineData): KLineData {
   };
 }
 
+// Dark theme styles
+const DARK_STYLES = {
+  grid: {
+    show: true,
+    horizontal: { color: '#1B1F26' },
+    vertical: { color: '#1B1F26' },
+  },
+  candle: {
+    type: 'candle_solid' as const,
+    bar: {
+      upColor: '#0ECB81',
+      downColor: '#F6465D',
+      upBorderColor: '#0ECB81',
+      downBorderColor: '#F6465D',
+      upWickColor: '#0ECB81',
+      downWickColor: '#F6465D',
+    },
+    priceMark: {
+      show: true,
+      last: {
+        show: true,
+        upColor: '#0ECB81',
+        downColor: '#F6465D',
+        line: { show: true, style: 'dashed' as const, dashedValue: [4, 4] },
+      },
+    },
+  },
+  xAxis: { show: true, tickText: { color: '#848E9C' } },
+  yAxis: { show: true, tickText: { color: '#848E9C' } },
+  crosshair: {
+    show: true,
+    horizontal: {
+      show: true,
+      line: { color: '#F0B90B33', style: 'dashed' as const },
+      text: { color: '#FFFFFF', borderColor: '#F0B90B', backgroundColor: '#363A45' },
+    },
+    vertical: {
+      show: true,
+      line: { color: '#F0B90B33', style: 'dashed' as const },
+      text: { color: '#FFFFFF', borderColor: '#F0B90B', backgroundColor: '#363A45' },
+    },
+  },
+  separator: { color: '#1B1F26' },
+};
+
+// Light theme styles
+const LIGHT_STYLES = {
+  grid: {
+    show: true,
+    horizontal: { color: '#EAECEF' },
+    vertical: { color: '#EAECEF' },
+  },
+  candle: {
+    type: 'candle_solid' as const,
+    bar: {
+      upColor: '#0ECB81',
+      downColor: '#F6465D',
+      upBorderColor: '#0ECB81',
+      downBorderColor: '#F6465D',
+      upWickColor: '#0ECB81',
+      downWickColor: '#F6465D',
+    },
+    priceMark: {
+      show: true,
+      last: {
+        show: true,
+        upColor: '#0ECB81',
+        downColor: '#F6465D',
+        line: { show: true, style: 'dashed' as const, dashedValue: [4, 4] },
+      },
+    },
+  },
+  xAxis: { show: true, tickText: { color: '#474D57' } },
+  yAxis: { show: true, tickText: { color: '#474D57' } },
+  crosshair: {
+    show: true,
+    horizontal: {
+      show: true,
+      line: { color: '#B7BDC6', style: 'dashed' as const },
+      text: { color: '#1E2329', borderColor: '#B7BDC6', backgroundColor: '#F0F1F2' },
+    },
+    vertical: {
+      show: true,
+      line: { color: '#B7BDC6', style: 'dashed' as const },
+      text: { color: '#1E2329', borderColor: '#B7BDC6', backgroundColor: '#F0F1F2' },
+    },
+  },
+  separator: { color: '#EAECEF' },
+};
+
 export function CandlestickChart({ data, symbol, onLoadOlder, loadingOlder, tradeHistory, rawSymbol }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<Chart | null>(null);
   const prevDataLenRef = useRef(0);
   const prevOldestRef = useRef<number>(0);
-  const dataRef = useRef<KlineData[]>([]); // mirror of props data for use in callbacks
-  const initCallbackRef = useRef<((d: KLineData[], more?: boolean) => void) | null>(null);
 
   const [indicators, setIndicators] = usePersistedState<IndicatorConfig[]>('indicators', []);
   const [showIndicatorPanel, setShowIndicatorPanel] = useState(false);
@@ -95,81 +183,10 @@ export function CandlestickChart({ data, symbol, onLoadOlder, loadingOlder, trad
     if (!containerRef.current) return;
 
     const chart = init(containerRef.current, {
-      styles: {
-        grid: {
-          show: true,
-          horizontal: { color: '#1B1F26' },
-          vertical: { color: '#1B1F26' },
-        },
-        candle: {
-          type: 'candle_solid',
-          bar: {
-            upColor: '#0ECB81',
-            downColor: '#F6465D',
-            upBorderColor: '#0ECB81',
-            downBorderColor: '#F6465D',
-            upWickColor: '#0ECB81',
-            downWickColor: '#F6465D',
-          },
-          priceMark: {
-            show: true,
-            last: {
-              show: true,
-              upColor: '#0ECB81',
-              downColor: '#F6465D',
-              line: {
-                show: true,
-                style: 'dashed' as const,
-                dashedValue: [4, 4],
-              },
-            },
-          },
-        },
-        xAxis: {
-          show: true,
-          tickText: { color: '#848E9C' },
-        },
-        yAxis: {
-          show: true,
-          tickText: { color: '#848E9C' },
-        },
-        crosshair: {
-          show: true,
-          horizontal: {
-            show: true,
-            line: { color: '#F0B90B33', style: 'dashed' as const },
-            text: { color: '#FFFFFF', borderColor: '#F0B90B', backgroundColor: '#363A45' },
-          },
-          vertical: {
-            show: true,
-            line: { color: '#F0B90B33', style: 'dashed' as const },
-            text: { color: '#FFFFFF', borderColor: '#F0B90B', backgroundColor: '#363A45' },
-          },
-        },
-        separator: { color: '#1B1F26' },
-      },
+      styles: theme === 'light' ? LIGHT_STYLES : DARK_STYLES,
     });
 
     if (!chart) return;
-
-    // Set up data loader — feeds data from props via refs
-    chart.setDataLoader({
-      getBars: (params) => {
-        if (params.type === 'init') {
-          // If data already available, feed immediately
-          if (dataRef.current.length > 0) {
-            params.callback(dataRef.current.map(toKLineData), true);
-          } else {
-            // Store callback for when data arrives later
-            initCallbackRef.current = params.callback;
-          }
-        } else if (params.type === 'backward') {
-          if (onLoadOlder) onLoadOlder();
-          // Store callback for older data
-          initCallbackRef.current = params.callback;
-        }
-      },
-    });
 
     // Create VOL sub-pane
     chart.createIndicator('VOL', false, { height: 60 });
@@ -179,114 +196,22 @@ export function CandlestickChart({ data, symbol, onLoadOlder, loadingOlder, trad
     return () => {
       dispose(containerRef.current!);
       chartRef.current = null;
-      initCallbackRef.current = null;
     };
   }, []);
 
   // ============================================================
-  // Theme reactivity — update klinecharts styles on theme change
+  // Theme reactivity
   // ============================================================
   useEffect(() => {
     const chart = chartRef.current;
     if (!chart) return;
-
-    if (theme === 'light') {
-      chart.setStyles({
-        grid: {
-          show: true,
-          horizontal: { color: '#EAECEF' },
-          vertical: { color: '#EAECEF' },
-        },
-        candle: {
-          type: 'candle_solid',
-          bar: {
-            upColor: '#0ECB81',
-            downColor: '#F6465D',
-            upBorderColor: '#0ECB81',
-            downBorderColor: '#F6465D',
-            upWickColor: '#0ECB81',
-            downWickColor: '#F6465D',
-          },
-          priceMark: {
-            show: true,
-            last: {
-              show: true,
-              upColor: '#0ECB81',
-              downColor: '#F6465D',
-              line: { show: true, style: 'dashed' as const, dashedValue: [4, 4] },
-            },
-          },
-        },
-        xAxis: { show: true, tickText: { color: '#474D57' } },
-        yAxis: { show: true, tickText: { color: '#474D57' } },
-        crosshair: {
-          show: true,
-          horizontal: {
-            show: true,
-            line: { color: '#B7BDC6', style: 'dashed' as const },
-            text: { color: '#1E2329', borderColor: '#B7BDC6', backgroundColor: '#F0F1F2' },
-          },
-          vertical: {
-            show: true,
-            line: { color: '#B7BDC6', style: 'dashed' as const },
-            text: { color: '#1E2329', borderColor: '#B7BDC6', backgroundColor: '#F0F1F2' },
-          },
-        },
-        separator: { color: '#EAECEF' },
-      });
-    } else {
-      chart.setStyles({
-        grid: {
-          show: true,
-          horizontal: { color: '#1B1F26' },
-          vertical: { color: '#1B1F26' },
-        },
-        candle: {
-          type: 'candle_solid',
-          bar: {
-            upColor: '#0ECB81',
-            downColor: '#F6465D',
-            upBorderColor: '#0ECB81',
-            downBorderColor: '#F6465D',
-            upWickColor: '#0ECB81',
-            downWickColor: '#F6465D',
-          },
-          priceMark: {
-            show: true,
-            last: {
-              show: true,
-              upColor: '#0ECB81',
-              downColor: '#F6465D',
-              line: { show: true, style: 'dashed' as const, dashedValue: [4, 4] },
-            },
-          },
-        },
-        xAxis: { show: true, tickText: { color: '#848E9C' } },
-        yAxis: { show: true, tickText: { color: '#848E9C' } },
-        crosshair: {
-          show: true,
-          horizontal: {
-            show: true,
-            line: { color: '#F0B90B33', style: 'dashed' as const },
-            text: { color: '#FFFFFF', borderColor: '#F0B90B', backgroundColor: '#363A45' },
-          },
-          vertical: {
-            show: true,
-            line: { color: '#F0B90B33', style: 'dashed' as const },
-            text: { color: '#FFFFFF', borderColor: '#F0B90B', backgroundColor: '#363A45' },
-          },
-        },
-        separator: { color: '#1B1F26' },
-      });
-    }
+    chart.setStyles(theme === 'light' ? LIGHT_STYLES : DARK_STYLES);
   }, [theme]);
 
-
   // ============================================================
-  // Feed data to chart when props change
+  // Feed data to chart when props change (v9 API)
   // ============================================================
   useEffect(() => {
-    dataRef.current = data; // always keep ref in sync
     const chart = chartRef.current;
     if (!chart || data.length === 0) return;
 
@@ -296,28 +221,21 @@ export function CandlestickChart({ data, symbol, onLoadOlder, loadingOlder, trad
       && data.length > prevDataLenRef.current
       && currentOldest < prevOldestRef.current;
 
-    if (wasPrepend && initCallbackRef.current) {
-      // Older data prepended — feed via stored callback
+    if (wasPrepend) {
+      // Older data prepended — feed older portion via applyMoreData
       const newCount = data.length - prevDataLenRef.current;
       const olderData = klineData.slice(0, newCount);
-      initCallbackRef.current(olderData, true);
-      initCallbackRef.current = null;
+      chart.applyMoreData(olderData, true);
     } else if (prevDataLenRef.current === 0) {
-      // Initial load — if init callback waiting, use it; otherwise resetData + re-trigger
-      if (initCallbackRef.current) {
-        initCallbackRef.current(klineData, true);
-        initCallbackRef.current = null;
-      } else {
-        // Force re-init by resetting and re-setting data loader
-        chart.resetData();
-      }
+      // Initial load
+      chart.applyNewData(klineData, true);
     } else if (data.length > prevDataLenRef.current && data.length - prevDataLenRef.current <= 2) {
-      // New candle appended (sim tick) — resetData and reload all
-      // (v10 beta has no updateData, so we must reload)
-      chart.resetData();
+      // New candle appended (sim tick) — update last candle
+      const lastCandle = klineData[klineData.length - 1];
+      chart.updateData(lastCandle);
     } else {
-      // Data replaced (interval change, etc.)
-      chart.resetData();
+      // Data replaced (interval change, symbol change, etc.)
+      chart.applyNewData(klineData, true);
     }
 
     prevDataLenRef.current = data.length;
@@ -331,7 +249,8 @@ export function CandlestickChart({ data, symbol, onLoadOlder, loadingOlder, trad
     const chart = chartRef.current;
     if (!chart || !tradeHistory || !rawSymbol || data.length === 0) return;
 
-    chart.removeOverlay({ groupId: 'trade_markers' });
+    // v9: removeOverlay accepts id or no args
+    try { chart.removeOverlay('trade_markers'); } catch {}
 
     const symbolTrades = tradeHistory.filter(t => t.symbol === rawSymbol);
     for (const trade of symbolTrades) {
@@ -342,7 +261,7 @@ export function CandlestickChart({ data, symbol, onLoadOlder, loadingOlder, trad
 
       chart.createOverlay({
         name: 'simpleAnnotation',
-        groupId: 'trade_markers',
+        id: 'trade_markers',
         points: [{ timestamp: ts, value: price }],
         lock: true,
         extendData: isBuy ? '▲ B' : '▼ S',
@@ -384,11 +303,15 @@ export function CandlestickChart({ data, symbol, onLoadOlder, loadingOlder, trad
       }
     }
 
-    for (const [type] of activeIndicatorPanes.current.entries()) {
+    // Remove indicators that are no longer active
+    for (const [type, paneId] of activeIndicatorPanes.current.entries()) {
       if (!currentActive.has(type)) {
         try {
           const kcName = KLINE_INDICATOR_MAP[type] || type;
-          chart.removeIndicator({ name: kcName });
+          // v9 API: removeIndicator(paneId, name?)
+          if (paneId) {
+            chart.removeIndicator(paneId, kcName);
+          }
         } catch {}
         activeIndicatorPanes.current.delete(type);
       }
