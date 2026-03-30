@@ -456,10 +456,16 @@ const Index = () => {
               activeSymbol={activeSymbol}
               onClosePosition={handleClosePositionForSymbol}
               onCancelOrder={handleCancelOrderForSymbol}
+              onAddIsolatedMargin={handleAddIsolatedMargin}
               activeTab={bottomTab}
               onTabChange={setBottomTab}
             />
           </div>
+        </div>
+
+        {/* Order Book */}
+        <div className="w-[180px] border-l border-border shrink-0 overflow-hidden">
+          <OrderBook currentPrice={currentPrice} symbol={activeSymbol} />
         </div>
 
         <div className="w-[280px] border-l border-border shrink-0 overflow-y-auto">
