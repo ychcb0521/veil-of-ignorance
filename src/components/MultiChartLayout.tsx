@@ -18,6 +18,8 @@ interface Props {
   isRunning: boolean;
   currentSimulatedTime: number;
   mainInterval: string;
+  pricePrecision?: number;
+  quantityPrecision?: number;
 }
 
 interface SubChart {
