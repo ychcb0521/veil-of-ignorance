@@ -506,7 +506,7 @@ const Index = () => {
                 onLoadOlder={loadOlder}
                 loadingOlder={loadingOlder}
                 tradeHistory={tradeHistory}
-                isRunning={sim.isRunning}
+                isRunning={sim.status !== 'stopped'}
                 currentSimulatedTime={sim.currentSimulatedTime}
                 mainInterval={interval}
               />
