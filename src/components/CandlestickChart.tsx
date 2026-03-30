@@ -122,8 +122,8 @@ const DARK_STYLES = {
   },
   indicator: {
     tooltip: {
-      showRule: 'follow_cross',
-      showType: 'standard',
+      showRule: 'follow_cross' as const,
+      showType: 'standard' as const,
     },
   },
   separator: { color: '#1B1F26' },
