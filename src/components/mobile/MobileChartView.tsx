@@ -32,8 +32,11 @@ interface Props {
 }
 
 export function MobileChartView(props: Props) {
+  const SPEED_OPTIONS = [1, 2, 5, 10, 30, 60];
   const [selectedDate, setSelectedDate] = useState(() => new Date('2024-01-15T08:00:00Z'));
   const [showPicker, setShowPicker] = useState(false);
+  const [showTimeframeSheet, setShowTimeframeSheet] = useState(false);
+  const baseCoin = props.symbol.replace('USDT', '');
   const baseCoin = props.symbol.replace('USDT', '');
 
   const formatSimTime = (ts: number) => {
