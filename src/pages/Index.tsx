@@ -55,6 +55,7 @@ function matchOrdersOffline(
 }
 
 const Index = () => {
+  const { user, profile, signOut } = useAuth();
   const ctx = useTradingContext();
   const {
     sim, activeSymbol, setActiveSymbol, interval, setInterval: setIntervalVal,
