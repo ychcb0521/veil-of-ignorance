@@ -37,6 +37,8 @@ export function CandlestickChart({ data, symbol, onLoadOlder, loadingOlder, trad
   const prevOldestRef = useRef<number>(0);
 
   const [indicators, setIndicators] = usePersistedState<IndicatorConfig[]>('indicators', []);
+  const [showIndicatorPanel, setShowIndicatorPanel] = useState(false);
+  const [drawingsVisible, setDrawingsVisible] = useState(true);
   const drawing = useDrawing();
 
   // ============================================================
