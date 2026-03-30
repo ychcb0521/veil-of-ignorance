@@ -78,6 +78,35 @@ export const MAINTENANCE_MARGIN_RATE = 0.004; // 0.4%
 export const LIQUIDATION_FEE_RATE = 0.005;    // 0.5%
 export const FUNDING_RATE = 0.0001;           // 0.01% per 8h settlement
 
+// Tiered leverage limits (based on notional value in USDT)
+export const LEVERAGE_TIERS = [
+  { maxNotional: 50_000, maxLeverage: 125 },
+  { maxNotional: 250_000, maxLeverage: 50 },
+  { maxNotional: 1_000_000, maxLeverage: 20 },
+  { maxNotional: Infinity, maxLeverage: 10 },
+];
+
+/** Get max allowed leverage for a given notional value */
+export function getMaxLeverageForNotional(notional: number): number {
+  for (const tier of LEVERAGE_TIERS) {
+    if (notional <= tier.maxNotional) return tier.maxLeverage;
+  }
+  return 10;
+}
+
+/** Get leverage tier info string */
+export function getLeverageTierInfo(notional: number): { maxLeverage: number; tierLabel: string } {
+  for (const tier of LEVERAGE_TIERS) {
+    if (notional <= tier.maxNotional) {
+      const label = tier.maxNotional === Infinity
+        ? `> 1,000,000 USDT`
+        : `0 - ${tier.maxNotional.toLocaleString()} USDT`;
+      return { maxLeverage: tier.maxLeverage, tierLabel: label };
+    }
+  }
+  return { maxLeverage: 10, tierLabel: '> 1,000,000 USDT' };
+}
+
 // Funding settlement times in UTC hours
 export const FUNDING_HOURS = [0, 8, 16];
 
