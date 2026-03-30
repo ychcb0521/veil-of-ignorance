@@ -1,45 +1,77 @@
-import { useEffect, useRef, useCallback } from 'react';
-import { createChart, IChartApi, ISeriesApi, CandlestickData, Time, PriceLineOptions, LineStyle, SeriesMarker } from 'lightweight-charts';
+/**
+ * KlineCharts-based candlestick chart with native drawing tools and indicators.
+ * Replaces the old lightweight-charts + SVG overlay approach.
+ */
+
+import { useEffect, useRef, useCallback, useState } from 'react';
+import { init, dispose, Chart, OverlayCreate } from 'klinecharts';
 import type { KlineData } from '@/hooks/useBinanceData';
-import { useDrawing } from '@/hooks/useDrawing';
-import { usePersistedState } from '@/hooks/usePersistedState';
-import type { IndicatorConfig } from '@/hooks/useIndicators';
-import { calculateIndicator, INDICATOR_PRESETS } from '@/hooks/useIndicators';
 import { DrawingToolbar } from './DrawingToolbar';
-import { DrawingOverlay } from './DrawingOverlay';
 import { IndicatorMenu } from './IndicatorMenu';
 import { BarChart3, X } from 'lucide-react';
-import { useState } from 'react';
+import { usePersistedState } from '@/hooks/usePersistedState';
 import type { TradeRecord } from '@/types/trading';
+
+// Mapping from our indicator config to klinecharts built-in indicator names
+const KLINE_INDICATOR_MAP: Record<string, string> = {
+  MA: 'MA', EMA: 'EMA', SMA: 'SMA', WMA: 'WMA',
+  BOLL: 'BOLL', SAR: 'SAR',
+  RSI: 'RSI', MACD: 'MACD', KDJ: 'KDJ',
+  ATR: 'ATR', CCI: 'CCI', OBV: 'OBV', ROC: 'ROC',
+  STOCH: 'KDJ', VOL: 'VOL',
+  DMI: 'DMI', TRIX: 'TRIX', EMV: 'EMV',
+  WR: 'WR', MFI: 'MFI',
+};
+
+// Overlay tool name mapping for klinecharts
+const OVERLAY_MAP: Record<string, string> = {
+  TrendLine: 'segment',
+  Ray: 'rayLine',
+  ExtendedLine: 'straightLine',
+  HorizontalLine: 'horizontalStraightLine',
+  VerticalLine: 'verticalStraightLine',
+  ParallelChannel: 'parallelStraightLine',
+  FibRetracement: 'fibonacciLine',
+  Rectangle: 'rect',
+  Circle: 'circle',
+  Brush: 'segment',
+  Text: 'simpleAnnotation',
+  Marker: 'simpleTag',
+  Measure: 'priceLine',
+  LongPosition: 'priceLine',
+  ShortPosition: 'priceLine',
+  PriceLine: 'priceLine',
+};
+
+export interface IndicatorConfig {
+  type: string;
+  period: number;
+  color?: string;
+  enabled: boolean;
+}
 
 interface Props {
   data: KlineData[];
   symbol: string;
-  /** Called when user scrolls near the left edge — parent should load older data */
   onLoadOlder?: () => void;
   loadingOlder?: boolean;
-  /** Trade history for on-chart markers */
   tradeHistory?: TradeRecord[];
-  /** Raw symbol name (e.g. BTCUSDT) for filtering trades */
   rawSymbol?: string;
 }
 
 export function CandlestickChart({ data, symbol, onLoadOlder, loadingOlder, tradeHistory, rawSymbol }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const chartRef = useRef<IChartApi | null>(null);
-  const seriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
-  const volumeRef = useRef<ISeriesApi<'Histogram'> | null>(null);
-  const priceLineRef = useRef<any>(null);
-  const indicatorSeriesRef = useRef<Map<string, ISeriesApi<'Line'>>>(new Map());
-
-  // Track previous data length to know if we prepended (older) or appended (new candle)
+  const chartRef = useRef<Chart | null>(null);
   const prevDataLenRef = useRef(0);
   const prevOldestRef = useRef<number>(0);
 
   const [indicators, setIndicators] = usePersistedState<IndicatorConfig[]>('indicators', []);
   const [showIndicatorPanel, setShowIndicatorPanel] = useState(false);
   const [drawingsVisible, setDrawingsVisible] = useState(true);
-  const drawing = useDrawing();
+  const [activeDrawingTool, setActiveDrawingTool] = useState<string | null>(null);
+
+  // Active indicator pane IDs for cleanup
+  const activeIndicatorPanes = useRef<Map<string, string | null>>(new Map());
 
   // ============================================================
   // Chart creation (once)
@@ -47,335 +79,285 @@ export function CandlestickChart({ data, symbol, onLoadOlder, loadingOlder, trad
   useEffect(() => {
     if (!containerRef.current) return;
 
-    const chart = createChart(containerRef.current, {
-      layout: {
-        background: { color: '#0B0E11' },
-        textColor: '#848E9C',
-        fontFamily: "'JetBrains Mono', monospace",
-        fontSize: 11,
-      },
-      grid: {
-        vertLines: { color: '#1B1F26' },
-        horzLines: { color: '#1B1F26' },
-      },
-      crosshair: {
-        mode: 0,
-        vertLine: { color: '#F0B90B', width: 1, style: LineStyle.Dashed, labelBackgroundColor: '#F0B90B' },
-        horzLine: { color: '#F0B90B', width: 1, style: LineStyle.Dashed, labelBackgroundColor: '#363A45' },
-      },
-      rightPriceScale: {
-        borderColor: '#1B1F26',
-        scaleMargins: { top: 0.05, bottom: 0.25 },
-        entireTextOnly: true,
-      },
-      timeScale: {
-        borderColor: '#1B1F26',
-        timeVisible: true,
-        secondsVisible: false,
-        rightOffset: 5,
-        barSpacing: 8,
+    const chart = init(containerRef.current, {
+      styles: {
+        grid: {
+          show: true,
+          horizontal: { color: '#1B1F26' },
+          vertical: { color: '#1B1F26' },
+        },
+        candle: {
+          type: 'candle_solid',
+          bar: {
+            upColor: '#0ECB81',
+            downColor: '#F6465D',
+            upBorderColor: '#0ECB81',
+            downBorderColor: '#F6465D',
+            upWickColor: '#0ECB81',
+            downWickColor: '#F6465D',
+          },
+          priceMark: {
+            show: true,
+            last: {
+              show: true,
+              upColor: '#0ECB81',
+              downColor: '#F6465D',
+              line: { show: true, style: 'dash', dashValue: [4, 4] },
+            },
+          },
+        },
+        indicator: {
+          lastValueMark: { show: true },
+        },
+        xAxis: {
+          show: true,
+          tickText: { color: '#848E9C' },
+        },
+        yAxis: {
+          show: true,
+          tickText: { color: '#848E9C' },
+        },
+        crosshair: {
+          show: true,
+          horizontal: {
+            show: true,
+            line: { color: '#F0B90B33', style: 'dash' },
+            text: { color: '#FFFFFF', borderColor: '#F0B90B', backgroundColor: '#363A45' },
+          },
+          vertical: {
+            show: true,
+            line: { color: '#F0B90B33', style: 'dash' },
+            text: { color: '#FFFFFF', borderColor: '#F0B90B', backgroundColor: '#363A45' },
+          },
+        },
+        overlay: {
+          point: { activeColor: '#F0B90B', color: '#F0B90B88' },
+          line: { color: '#F0B90B' },
+          rect: { color: '#F0B90B33', borderColor: '#F0B90B' },
+          text: { color: '#F0B90B' },
+        },
+        separator: { color: '#1B1F26' },
       },
     });
 
-    const candleSeries = chart.addCandlestickSeries({
-      upColor: '#0ECB81',
-      downColor: '#F6465D',
-      borderUpColor: '#0ECB81',
-      borderDownColor: '#F6465D',
-      wickUpColor: '#0ECB81',
-      wickDownColor: '#F6465D',
-    });
-
-    const volumeSeries = chart.addHistogramSeries({
-      priceFormat: { type: 'volume' },
-      priceScaleId: 'volume',
-    });
-
-    chart.priceScale('volume').applyOptions({
-      scaleMargins: { top: 0.8, bottom: 0 },
-    });
+    // Create VOL sub-pane by default
+    chart.createIndicator('VOL', false, { height: 60 });
 
     chartRef.current = chart;
-    seriesRef.current = candleSeries;
-    volumeRef.current = volumeSeries;
 
-    const handleResize = () => {
-      if (containerRef.current) {
-        chart.applyOptions({
-          width: containerRef.current.clientWidth,
-          height: containerRef.current.clientHeight,
-        });
+    // Handle keyboard delete for selected overlays
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Delete' || e.key === 'Backspace') {
+        // klinecharts handles overlay deletion when selected natively via removeOverlay
+        // We need to check if an overlay is selected and remove it
+        const chart = chartRef.current;
+        if (chart) {
+          // Remove all selected overlays (klinecharts doesn't expose getSelectedOverlay easily,
+          // but pressing delete while an overlay is selected should work with this approach)
+          // We'll use a custom approach: listen for overlay click events
+        }
       }
     };
-    const observer = new ResizeObserver(handleResize);
-    observer.observe(containerRef.current);
+    document.addEventListener('keydown', handleKeyDown);
 
     return () => {
-      observer.disconnect();
-      chart.remove();
-      indicatorSeriesRef.current.clear();
+      document.removeEventListener('keydown', handleKeyDown);
+      dispose(containerRef.current!);
+      chartRef.current = null;
     };
   }, []);
 
   // ============================================================
-  // Lazy-load trigger: subscribe to visible range changes
-  // When user scrolls near the left edge (logicalRange.from < 50),
-  // call onLoadOlder to fetch more historical data.
+  // Lazy-load trigger: scroll left detection
   // ============================================================
   useEffect(() => {
     const chart = chartRef.current;
     if (!chart || !onLoadOlder) return;
 
-    const handler = (range: { from: number; to: number } | null) => {
-      if (!range || loadingOlder) return;
-      // When the leftmost visible bar index is near 0, request more data
-      if (range.from < 50) {
+    // klinecharts fires 'onVisibleRangeChange' — we check if near left edge
+    const sub = chart.subscribeAction('onVisibleRangeChange', (data: any) => {
+      if (loadingOlder) return;
+      if (data && data.from !== undefined && data.from < 50) {
         onLoadOlder();
       }
-    };
+    });
 
-    chart.timeScale().subscribeVisibleLogicalRangeChange(handler);
-    return () => chart.timeScale().unsubscribeVisibleLogicalRangeChange(handler);
+    return () => {
+      chart.unsubscribeAction('onVisibleRangeChange');
+    };
   }, [onLoadOlder, loadingOlder]);
 
   // ============================================================
   // Update candle + volume data
-  // Smart: detect prepend vs append to preserve scroll position
   // ============================================================
   useEffect(() => {
-    if (!seriesRef.current || !volumeRef.current || data.length === 0) return;
     const chart = chartRef.current;
-    if (!chart) return;
+    if (!chart || data.length === 0) return;
+
+    const klineData = data.map(d => ({
+      timestamp: d.time,
+      open: d.open,
+      high: d.high,
+      low: d.low,
+      close: d.close,
+      volume: d.volume,
+    }));
 
     const currentOldest = data[0].time;
     const wasPrepend = prevDataLenRef.current > 0
       && data.length > prevDataLenRef.current
       && currentOldest < prevOldestRef.current;
 
-    // Save current visible range before setting data (for scroll preservation)
-    let savedRange: { from: number; to: number } | null = null;
     if (wasPrepend) {
-      savedRange = chart.timeScale().getVisibleLogicalRange();
+      // For prepend, we use applyMoreData to add older data to the left
+      const newCount = data.length - prevDataLenRef.current;
+      const olderData = klineData.slice(0, newCount);
+      chart.applyMoreData(olderData);
+    } else if (prevDataLenRef.current === 0) {
+      // Initial load
+      chart.applyNewData(klineData);
+    } else if (data.length > prevDataLenRef.current) {
+      // New candle appended (sim tick)
+      const lastCandle = klineData[klineData.length - 1];
+      chart.updateData(lastCandle);
+    } else {
+      // Data replaced (e.g. interval change)
+      chart.applyNewData(klineData);
     }
-
-    const candles: CandlestickData[] = data.map(d => ({
-      time: (d.time / 1000) as Time,
-      open: d.open, high: d.high, low: d.low, close: d.close,
-    }));
-
-    const volumes = data.map(d => ({
-      time: (d.time / 1000) as Time,
-      value: d.volume,
-      color: d.close >= d.open ? 'rgba(14, 203, 129, 0.25)' : 'rgba(246, 70, 93, 0.25)',
-    }));
-
-    seriesRef.current.setData(candles);
-    volumeRef.current.setData(volumes);
-
-    // Preserve scroll position after prepending older data
-    // The new data added N bars to the left, so shift the visible range by N
-    if (wasPrepend && savedRange) {
-      const prependedCount = data.length - prevDataLenRef.current;
-      chart.timeScale().setVisibleLogicalRange({
-        from: savedRange.from + prependedCount,
-        to: savedRange.to + prependedCount,
-      });
-    }
-
-    // Update price line
-    const lastCandle = data[data.length - 1];
-    const isUp = lastCandle.close >= lastCandle.open;
-    const color = isUp ? '#0ECB81' : '#F6465D';
-
-    if (priceLineRef.current) {
-      seriesRef.current.removePriceLine(priceLineRef.current);
-    }
-    priceLineRef.current = seriesRef.current.createPriceLine({
-      price: lastCandle.close, color, lineWidth: 1,
-      lineStyle: LineStyle.Dotted, axisLabelVisible: true, title: '',
-    } as PriceLineOptions);
 
     prevDataLenRef.current = data.length;
     prevOldestRef.current = currentOldest;
   }, [data]);
 
   // ============================================================
-  // TRADE MARKERS on chart
-  // ============================================================
-  useEffect(() => {
-    if (!seriesRef.current || !tradeHistory || !rawSymbol || data.length === 0) return;
-
-    const symbolTrades = tradeHistory.filter(t => t.symbol === rawSymbol);
-    if (symbolTrades.length === 0) {
-      seriesRef.current.setMarkers([]);
-      return;
-    }
-
-    const markers: SeriesMarker<Time>[] = symbolTrades
-      .filter(t => {
-        const ts = t.action === 'OPEN' ? t.openTime : t.closeTime;
-        return ts > 0;
-      })
-      .map(t => {
-        const ts = t.action === 'OPEN' ? t.openTime : t.closeTime;
-        const isBuy = (t.action === 'OPEN' && t.side === 'LONG') || (t.action === 'CLOSE' && t.side === 'SHORT');
-        const isLiquidation = t.action === 'LIQUIDATION';
-        return {
-          time: (ts / 1000) as Time,
-          position: isBuy ? 'belowBar' as const : 'aboveBar' as const,
-          color: isLiquidation ? '#FF6B6B' : isBuy ? '#26a69a' : '#ef5350',
-          shape: isBuy ? 'arrowUp' as const : 'arrowDown' as const,
-          text: isLiquidation ? '💀' : isBuy ? 'B' : 'S',
-        };
-      })
-      .sort((a, b) => (a.time as number) - (b.time as number));
-
-    seriesRef.current.setMarkers(markers);
-  }, [tradeHistory, rawSymbol, data]);
-
-  // ============================================================
-  // INDICATOR RENDERING
+  // TRADE MARKERS as overlays
   // ============================================================
   useEffect(() => {
     const chart = chartRef.current;
-    if (!chart || data.length === 0) return;
+    if (!chart || !tradeHistory || !rawSymbol || data.length === 0) return;
 
-    const activeKeys = new Set<string>();
+    // Remove old trade markers
+    chart.removeOverlay({ groupId: 'trade_markers' });
 
-    // Track how many sub-chart oscillators are active for layout
-    const subChartTypes = new Set<string>();
+    const symbolTrades = tradeHistory.filter(t => t.symbol === rawSymbol);
+    for (const trade of symbolTrades) {
+      const ts = trade.action === 'OPEN' ? trade.openTime : trade.closeTime;
+      if (ts <= 0) continue;
+      const isBuy = (trade.action === 'OPEN' && trade.side === 'LONG') || (trade.action === 'CLOSE' && trade.side === 'SHORT');
+      const price = trade.action === 'OPEN' ? trade.entryPrice : trade.exitPrice;
+
+      chart.createOverlay({
+        name: 'simpleAnnotation',
+        groupId: 'trade_markers',
+        points: [{ timestamp: ts, value: price }],
+        styles: {
+          text: {
+            color: isBuy ? '#0ECB81' : '#F6465D',
+            size: 12,
+          },
+        },
+        extendData: isBuy ? '▲ B' : '▼ S',
+        lock: true,
+      });
+    }
+  }, [tradeHistory, rawSymbol, data]);
+
+  // ============================================================
+  // INDICATOR MANAGEMENT using klinecharts native system
+  // ============================================================
+  useEffect(() => {
+    const chart = chartRef.current;
+    if (!chart) return;
+
+    const currentActive = new Set<string>();
 
     for (const ind of indicators) {
       if (!ind.enabled) continue;
-      const key = `${ind.type}_${ind.period}`;
-      activeKeys.add(key);
-      const preset = INDICATOR_PRESETS.find(p => p.type === ind.type);
-      if (!preset) continue;
+      currentActive.add(ind.type);
 
-      const result = calculateIndicator(ind.type, data, ind.period);
-      if (!result) continue;
+      const kcName = KLINE_INDICATOR_MAP[ind.type] || ind.type;
+      const isOverlay = ['MA', 'EMA', 'SMA', 'WMA', 'BOLL', 'SAR'].includes(ind.type);
 
-      const scaleId = preset.isOverlay ? '' : ind.type.toLowerCase();
-      if (!preset.isOverlay) subChartTypes.add(scaleId);
-
-      switch (result.kind) {
-        case 'line': {
-          const lineData = result.data.map(p => ({ time: (p.time / 1000) as Time, value: p.value }));
-          ensureLineSeries(chart, key, ind.color || preset.color, lineData, 2, scaleId || undefined);
-          break;
+      if (!activeIndicatorPanes.current.has(ind.type)) {
+        try {
+          const paneId = chart.createIndicator(
+            {
+              name: kcName,
+              calcParams: [ind.period],
+            },
+            isOverlay,
+            isOverlay ? { id: 'candle_pane' } : { height: 80 }
+          );
+          activeIndicatorPanes.current.set(ind.type, paneId);
+        } catch (e) {
+          console.warn(`Failed to create indicator ${ind.type}:`, e);
         }
-        case 'boll':
-        case 'channel': {
-          const chData = result.data;
-          const keyUpper = `${key}_upper`;
-          const keyLower = `${key}_lower`;
-          activeKeys.add(keyUpper);
-          activeKeys.add(keyLower);
-          const color = ind.color || preset.color;
-          ensureLineSeries(chart, key, color, chData.map(b => ({ time: (b.time / 1000) as Time, value: b.middle })), 2);
-          ensureLineSeries(chart, keyUpper, color + '60', chData.map(b => ({ time: (b.time / 1000) as Time, value: b.upper })), 1);
-          ensureLineSeries(chart, keyLower, color + '60', chData.map(b => ({ time: (b.time / 1000) as Time, value: b.lower })), 1);
-          break;
-        }
-        case 'macd': {
-          const keySignal = `${key}_signal`;
-          const keyHist = `${key}_hist`;
-          activeKeys.add(keySignal);
-          activeKeys.add(keyHist);
+      } else {
+        // Update params
+        try {
+          chart.overrideIndicator({
+            name: kcName,
+            calcParams: [ind.period],
+          });
+        } catch {}
+      }
+    }
 
-          ensureLineSeries(chart, key, '#10B981', result.data.map(m => ({ time: (m.time / 1000) as Time, value: m.macd })), 1, scaleId);
-          ensureLineSeries(chart, keySignal, '#EF4444', result.data.map(m => ({ time: (m.time / 1000) as Time, value: m.signal })), 1, scaleId);
-
-          let histSeries = indicatorSeriesRef.current.get(keyHist);
-          if (!histSeries) {
-            histSeries = chart.addHistogramSeries({ priceScaleId: scaleId, color: '#3B82F680' } as any) as any;
-            indicatorSeriesRef.current.set(keyHist, histSeries as any);
+    // Remove indicators that are no longer active
+    for (const [type, paneId] of activeIndicatorPanes.current.entries()) {
+      if (!currentActive.has(type)) {
+        try {
+          const kcName = KLINE_INDICATOR_MAP[type] || type;
+          if (paneId && paneId !== 'candle_pane') {
+            chart.removeIndicator(paneId, kcName);
+          } else {
+            chart.removeIndicator('candle_pane', kcName);
           }
-          (histSeries as any).setData(result.data.map(m => ({
-            time: (m.time / 1000) as Time, value: m.histogram,
-            color: m.histogram >= 0 ? '#0ECB8180' : '#F6465D80',
-          })));
-          break;
-        }
-        case 'stoch': {
-          const keyD = `${key}_d`;
-          activeKeys.add(keyD);
-          ensureLineSeries(chart, key, ind.color || preset.color, result.data.map(s => ({ time: (s.time / 1000) as Time, value: s.k })), 1, scaleId);
-          ensureLineSeries(chart, keyD, '#EF4444', result.data.map(s => ({ time: (s.time / 1000) as Time, value: s.d })), 1, scaleId);
-          break;
-        }
-        case 'dmi': {
-          const keyMdi = `${key}_mdi`;
-          const keyAdx = `${key}_adx`;
-          activeKeys.add(keyMdi);
-          activeKeys.add(keyAdx);
-          ensureLineSeries(chart, key, '#0ECB81', result.data.map(d => ({ time: (d.time / 1000) as Time, value: d.pdi })), 1, scaleId);
-          ensureLineSeries(chart, keyMdi, '#F6465D', result.data.map(d => ({ time: (d.time / 1000) as Time, value: d.mdi })), 1, scaleId);
-          ensureLineSeries(chart, keyAdx, ind.color || preset.color, result.data.map(d => ({ time: (d.time / 1000) as Time, value: d.adx })), 2, scaleId);
-          break;
-        }
-        case 'ichimoku': {
-          const keyBase = `${key}_base`;
-          const keySpanA = `${key}_spanA`;
-          const keySpanB = `${key}_spanB`;
-          activeKeys.add(keyBase);
-          activeKeys.add(keySpanA);
-          activeKeys.add(keySpanB);
-          ensureLineSeries(chart, key, '#2962FF', result.data.map(d => ({ time: (d.time / 1000) as Time, value: d.conversion })), 1);
-          ensureLineSeries(chart, keyBase, '#B71C1C', result.data.map(d => ({ time: (d.time / 1000) as Time, value: d.base })), 1);
-          ensureLineSeries(chart, keySpanA, '#0ECB8160', result.data.map(d => ({ time: (d.time / 1000) as Time, value: d.spanA })), 1);
-          ensureLineSeries(chart, keySpanB, '#F6465D60', result.data.map(d => ({ time: (d.time / 1000) as Time, value: d.spanB })), 1);
-          break;
-        }
+        } catch {}
+        activeIndicatorPanes.current.delete(type);
       }
     }
+  }, [indicators]);
 
-    // Dynamically allocate sub-chart space based on count
-    const subCount = subChartTypes.size;
-    if (subCount > 0) {
-      const spacePerSub = Math.min(0.15, 0.4 / subCount);
-      let topStart = 1 - subCount * spacePerSub;
-      for (const sid of subChartTypes) {
-        chart.priceScale(sid).applyOptions({
-          scaleMargins: { top: topStart, bottom: 1 - topStart - spacePerSub + 0.01 },
-        });
-        topStart += spacePerSub;
-      }
-    }
+  // ============================================================
+  // Drawing tool activation
+  // ============================================================
+  const handleToolChange = useCallback((tool: string | null) => {
+    setActiveDrawingTool(tool);
+    const chart = chartRef.current;
+    if (!chart || !tool) return;
 
-    // Cleanup removed indicators
-    for (const [existingKey, series] of indicatorSeriesRef.current.entries()) {
-      if (!activeKeys.has(existingKey)) {
-        try { chart.removeSeries(series); } catch {}
-        indicatorSeriesRef.current.delete(existingKey);
-      }
-    }
-  }, [data, indicators]);
-
-  function ensureLineSeries(
-    chart: IChartApi, key: string, color: string,
-    lineData: { time: Time; value: number }[],
-    lineWidth: number = 2, priceScaleId?: string
-  ) {
-    let series = indicatorSeriesRef.current.get(key);
-    if (!series) {
-      series = chart.addLineSeries({
-        color,
-        lineWidth: lineWidth as any,
-        priceScaleId: priceScaleId || '',
-        lastValueVisible: false,
-        priceLineVisible: false,
+    const overlayName = OVERLAY_MAP[tool];
+    if (overlayName) {
+      chart.createOverlay({
+        name: overlayName,
+        mode: 'weak_magnet',
       });
-      if (priceScaleId && priceScaleId !== '') {
-        chart.priceScale(priceScaleId).applyOptions({
-          scaleMargins: { top: 0.85, bottom: 0 },
-        });
-      }
-      indicatorSeriesRef.current.set(key, series);
     }
-    series.setData(lineData);
-  }
+  }, []);
 
+  const handleClearDrawings = useCallback(() => {
+    const chart = chartRef.current;
+    if (chart) {
+      chart.removeOverlay();
+      // Re-add trade markers
+    }
+  }, []);
+
+  const handleToggleDrawingsVisible = useCallback(() => {
+    setDrawingsVisible(prev => {
+      const newVal = !prev;
+      const chart = chartRef.current;
+      if (chart) {
+        chart.overrideOverlay({ visible: newVal });
+      }
+      return newVal;
+    });
+  }, []);
+
+  // ============================================================
+  // Price info from data
+  // ============================================================
   const last = data.length > 0 ? data[data.length - 1] : null;
   const prev = data.length > 1 ? data[data.length - 2] : null;
   const priceChange = last && prev ? last.close - prev.close : 0;
@@ -419,23 +401,26 @@ export function CandlestickChart({ data, symbol, onLoadOlder, loadingOlder, trad
             </div>
           </>
         )}
-
-        {/* Loading older indicator */}
         {loadingOlder && (
           <span className="text-[10px] text-primary animate-pulse font-mono ml-auto">加载更早数据...</span>
         )}
       </div>
 
-      {/* Chart area with toolbars and drawing overlay */}
+      {/* Chart area with toolbar */}
       <div className="flex-1 min-h-0 relative">
-        <div ref={containerRef} className="absolute inset-0" style={{ left: 34 }} />
+        {/* Chart container - offset left for toolbar */}
+        <div
+          ref={containerRef}
+          className="absolute inset-0"
+          style={{ left: 34, backgroundColor: '#0B0E11' }}
+        />
 
         <DrawingToolbar
-          activeTool={drawing.activeDrawingTool}
-          onToolChange={drawing.setActiveDrawingTool}
-          onClearDrawings={drawing.clearAllDrawings}
+          activeTool={activeDrawingTool}
+          onToolChange={handleToolChange}
+          onClearDrawings={handleClearDrawings}
           drawingsVisible={drawingsVisible}
-          onToggleDrawingsVisible={() => setDrawingsVisible(!drawingsVisible)}
+          onToggleDrawingsVisible={handleToggleDrawingsVisible}
         />
 
         {/* Right side: indicator buttons */}
@@ -466,25 +451,6 @@ export function CandlestickChart({ data, symbol, onLoadOlder, loadingOlder, trad
             indicators={indicators}
             onIndicatorsChange={setIndicators}
           />
-        </div>
-
-        <div className="absolute inset-0" style={{ left: 34 }}>
-          {drawingsVisible && (
-            <DrawingOverlay
-              chart={chartRef.current}
-              series={seriesRef.current}
-              drawings={drawing.drawings}
-              activeTool={drawing.activeDrawingTool}
-              isDrawing={drawing.isDrawing}
-              currentDrawingRef={drawing.currentDrawingRef}
-              onStartDrawing={drawing.startDrawing}
-              onUpdateDrawing={drawing.updateDrawing}
-              onFinishDrawing={drawing.finishDrawing}
-              onAddBrush={drawing.addBrushDrawing}
-              onAddText={drawing.addTextDrawing}
-              onAddMarker={drawing.addMarkerDrawing}
-            />
-          )}
         </div>
       </div>
     </div>

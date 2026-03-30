@@ -1,9 +1,8 @@
-import { useState, useCallback, useEffect, useRef } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { CandlestickChart } from './CandlestickChart';
 import { LayoutGrid, Columns, Square } from 'lucide-react';
 import type { KlineData } from '@/hooks/useBinanceData';
 import type { TradeRecord } from '@/types/trading';
-import { useBinanceData } from '@/hooks/useBinanceData';
 
 type LayoutMode = '1x1' | '1x2' | '2x2';
 
@@ -32,15 +31,12 @@ export function MultiChartLayout({
   tradeHistory, isRunning, currentSimulatedTime, mainInterval,
 }: Props) {
   const [layout, setLayout] = useState<LayoutMode>('1x1');
-
-  // Sub-chart states (for slots 1, 2, 3 in multi-chart)
   const [subCharts, setSubCharts] = useState<SubChart[]>([
     { interval: '15m', data: [], loading: false },
     { interval: '1h', data: [], loading: false },
     { interval: '4h', data: [], loading: false },
   ]);
 
-  // Load data for sub-charts when layout changes or sim is running
   const loadSubChart = useCallback(async (index: number, interval: string) => {
     if (!isRunning) return;
     setSubCharts(prev => {
@@ -59,7 +55,7 @@ export function MultiChartLayout({
       const startTime = endTime - ms * 300;
 
       const res = await fetch(
-        `https://api.binance.com/api/v3/klines?symbol=${rawSymbol}&interval=${interval}&startTime=${startTime}&endTime=${endTime}&limit=300`
+        `https://fapi.binance.com/fapi/v1/klines?symbol=${rawSymbol}&interval=${interval}&startTime=${startTime}&endTime=${endTime}&limit=300`
       );
       const raw = await res.json();
       const data: KlineData[] = raw.map((k: any[]) => ({
@@ -79,7 +75,6 @@ export function MultiChartLayout({
     }
   }, [isRunning, currentSimulatedTime, rawSymbol]);
 
-  // Auto-load sub-charts when layout expands
   useEffect(() => {
     if (layout === '1x1' || !isRunning) return;
     const count = layout === '1x2' ? 1 : 3;
@@ -90,7 +85,6 @@ export function MultiChartLayout({
     }
   }, [layout, isRunning]);
 
-  // Filter sub-chart data by simulated time
   const getVisibleSubData = (data: KlineData[]) => {
     return data.filter(d => d.time <= currentSimulatedTime);
   };
@@ -99,11 +93,8 @@ export function MultiChartLayout({
     loadSubChart(index, newInterval);
   };
 
-  const chartCount = layout === '1x1' ? 1 : layout === '1x2' ? 2 : 4;
-
   return (
     <div className="h-full flex flex-col">
-      {/* Layout selector in top-right */}
       <div className="absolute right-2 top-1 z-30 flex items-center gap-0.5 bg-card/90 rounded px-1 py-0.5 border border-border/50">
         {([
           { mode: '1x1' as LayoutMode, icon: <Square className="w-3 h-3" />, label: '单图' },
