@@ -162,17 +162,20 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
 
   // Persist sim state
   useEffect(() => {
-    if (sim.isRunning) {
+    if (sim.status !== 'stopped') {
       saveSimState({
-        isRunning: true,
+        status: sim.status,
         historicalAnchorTime: sim.historicalAnchorTime,
         realStartTime: sim.realStartTime,
+        currentSimulatedTime: sim.currentSimulatedTime,
         speed: sim.speed,
         symbol: activeSymbol,
         interval,
       });
+    } else {
+      clearSimState();
     }
-  }, [sim.isRunning, sim.historicalAnchorTime, sim.realStartTime, sim.speed, activeSymbol, interval]);
+  }, [sim.status, sim.historicalAnchorTime, sim.realStartTime, sim.currentSimulatedTime, sim.speed, activeSymbol, interval]);
 
   // Computed
   const activeSymbolPositions = useMemo(() => positionsMap[activeSymbol] || [], [positionsMap, activeSymbol]);
