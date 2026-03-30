@@ -343,7 +343,16 @@ const Index = () => {
           <h1 className="text-xs font-bold text-primary tracking-widest uppercase">⚡ 无知之幕</h1>
           <SymbolSelector symbol={activeSymbol} interval={interval} onSymbolChange={handleSymbolChange} onIntervalChange={handleIntervalChange} />
         </div>
-        {loading && <span className="text-[10px] text-primary animate-pulse font-mono">加载历史数据...</span>}
+        <div className="flex items-center gap-3">
+          {loading && <span className="text-[10px] text-primary animate-pulse font-mono">加载历史数据...</span>}
+          <span className="text-[10px] text-muted-foreground font-mono truncate max-w-[120px]">{user?.email}</span>
+          <button
+            onClick={signOut}
+            className="text-[10px] text-muted-foreground hover:text-destructive font-medium transition-colors"
+          >
+            登出
+          </button>
+        </div>
       </header>
 
       <div className="shrink-0">
