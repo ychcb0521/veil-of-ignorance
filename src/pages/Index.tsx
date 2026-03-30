@@ -7,6 +7,7 @@ import { loadPersistedSimState } from '@/hooks/usePersistedState';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { TimeControl } from '@/components/TimeControl';
 import { CandlestickChart } from '@/components/CandlestickChart';
+import { MultiChartLayout } from '@/components/MultiChartLayout';
 import { OrderBook } from '@/components/OrderBook';
 import { OrderPanel } from '@/components/OrderPanel';
 import { PositionPanel } from '@/components/PositionPanel';
@@ -15,7 +16,9 @@ import { AccountInfo } from '@/components/AccountInfo';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import { MobileLayout } from '@/components/mobile/MobileLayout';
 import { LiquidationModal } from '@/components/LiquidationModal';
+import { AnalyticsPanel } from '@/components/AnalyticsPanel';
 import { toast } from 'sonner';
+import { BarChart3 } from 'lucide-react';
 import type { PendingOrder, OrderType } from '@/types/trading';
 import { calcFee, calcSlippage } from '@/types/trading';
 
