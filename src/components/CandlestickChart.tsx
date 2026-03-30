@@ -4,7 +4,7 @@ import type { KlineData } from '@/hooks/useBinanceData';
 import { useDrawing } from '@/hooks/useDrawing';
 import { usePersistedState } from '@/hooks/usePersistedState';
 import type { IndicatorConfig } from '@/hooks/useIndicators';
-import { calcSMA, calcEMA, calcBOLL, calcRSI, calcMACD, calcATR, INDICATOR_PRESETS } from '@/hooks/useIndicators';
+import { calculateIndicator, INDICATOR_PRESETS } from '@/hooks/useIndicators';
 import { ChartToolbar } from './ChartToolbar';
 import { DrawingOverlay } from './DrawingOverlay';
 
