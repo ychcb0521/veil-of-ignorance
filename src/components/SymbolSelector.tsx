@@ -7,12 +7,14 @@ const FALLBACK_SYMBOLS = [
   'BTCUSDT','ETHUSDT','BNBUSDT','SOLUSDT','XRPUSDT','DOGEUSDT','ADAUSDT',
   'AVAXUSDT','DOTUSDT','LINKUSDT','MATICUSDT','LTCUSDT','UNIUSDT','ATOMUSDT',
   'APTUSDT','ARBUSDT','OPUSDT','SUIUSDT','SEIUSDT','TIAUSDT',
-].map(s => ({ symbol: s, baseAsset: s.replace('USDT',''), displayName: `${s.replace('USDT','')}/USDT` }));
+].map(s => ({ symbol: s, baseAsset: s.replace('USDT',''), displayName: `${s.replace('USDT','')}/USDT`, pricePrecision: 2, quantityPrecision: 3 }));
 
-interface SymbolInfo {
+export interface SymbolInfo {
   symbol: string;
   baseAsset: string;
   displayName: string;
+  pricePrecision: number;
+  quantityPrecision: number;
 }
 
 
