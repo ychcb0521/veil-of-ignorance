@@ -70,6 +70,7 @@ const Index = () => {
     activeSymbolPositions, activeSymbolOrders,
     allPositions, allOrders, currentPrice, activeSymbols,
     handlePlaceOrder, handleClosePosition, handleCancelOrder,
+    handleAddIsolatedMargin,
     liquidationOpen, liquidationDetails, closeLiquidationModal,
   } = ctx;
 
