@@ -58,6 +58,8 @@ interface Props {
   loadingOlder?: boolean;
   tradeHistory?: TradeRecord[];
   rawSymbol?: string;
+  pricePrecision?: number;
+  quantityPrecision?: number;
 }
 
 // Convert our KlineData to klinecharts KLineData
