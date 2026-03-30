@@ -7,6 +7,7 @@ import { loadPersistedSimState } from '@/hooks/usePersistedState';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { TimeControl } from '@/components/TimeControl';
 import { CandlestickChart } from '@/components/CandlestickChart';
+import { MultiChartLayout } from '@/components/MultiChartLayout';
 import { OrderBook } from '@/components/OrderBook';
 import { OrderPanel } from '@/components/OrderPanel';
 import { PositionPanel } from '@/components/PositionPanel';
@@ -15,7 +16,9 @@ import { AccountInfo } from '@/components/AccountInfo';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import { MobileLayout } from '@/components/mobile/MobileLayout';
 import { LiquidationModal } from '@/components/LiquidationModal';
+import { AnalyticsPanel } from '@/components/AnalyticsPanel';
 import { toast } from 'sonner';
+import { BarChart3 } from 'lucide-react';
 import type { PendingOrder, OrderType } from '@/types/trading';
 import { calcFee, calcSlippage } from '@/types/trading';
 
@@ -80,8 +83,7 @@ const Index = () => {
   useBackgroundPrices();
 
   const [bottomTab, setBottomTab] = useState('positions');
-
-  // Auto-restore
+  const [analyticsOpen, setAnalyticsOpen] = useState(false);
   const hasRestoredRef = useRef(false);
   const persistedSim = useMemo(() => loadPersistedSimState(), []);
   const restoredRunning = persistedSim?.isRunning ?? false;
@@ -412,6 +414,10 @@ const Index = () => {
         </div>
         <div className="flex items-center gap-3">
           {loading && <span className="text-[10px] text-primary animate-pulse font-mono">加载历史数据...</span>}
+          <button onClick={() => setAnalyticsOpen(true)}
+            className="flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors">
+            <BarChart3 className="w-3 h-3" /> 数据归因
+          </button>
           <span className="text-[10px] text-muted-foreground font-mono truncate max-w-[120px]">{user?.email}</span>
           <button
             onClick={signOut}
@@ -433,7 +439,7 @@ const Index = () => {
 
       <div className="flex-1 flex min-h-0 overflow-hidden">
         <div className="flex-1 flex flex-col min-h-0 min-w-0">
-          <div className="flex-1 min-h-0">
+          <div className="flex-1 min-h-0 relative">
             {!sim.isRunning && visibleData.length === 0 ? (
               <div className="h-full flex items-center justify-center bg-background">
                 <div className="text-center space-y-3">
@@ -443,7 +449,17 @@ const Index = () => {
                 </div>
               </div>
             ) : (
-              <CandlestickChart data={visibleData} symbol={activeSymbol.replace('USDT', '/USDT')} onLoadOlder={loadOlder} loadingOlder={loadingOlder} tradeHistory={tradeHistory} rawSymbol={activeSymbol} />
+              <MultiChartLayout
+                mainData={visibleData}
+                mainSymbol={activeSymbol.replace('USDT', '/USDT')}
+                rawSymbol={activeSymbol}
+                onLoadOlder={loadOlder}
+                loadingOlder={loadingOlder}
+                tradeHistory={tradeHistory}
+                isRunning={sim.isRunning}
+                currentSimulatedTime={sim.currentSimulatedTime}
+                mainInterval={interval}
+              />
             )}
           </div>
 
@@ -475,6 +491,12 @@ const Index = () => {
       </div>
 
       <LiquidationModal open={liquidationOpen} onClose={closeLiquidationModal} details={liquidationDetails} />
+      <AnalyticsPanel
+        open={analyticsOpen} onClose={() => setAnalyticsOpen(false)}
+        tradeHistory={tradeHistory} balance={balance}
+        positionsMap={positionsMap} priceMap={priceMap}
+        initialCapital={profile?.initial_capital ?? 1_000_000}
+      />
     </div>
   );
 };

@@ -1,7 +1,7 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useMemo } from 'react';
 import type { OrderSide, OrderType, MarginMode } from '@/types/trading';
-import { ORDER_TYPE_INFO } from '@/types/trading';
-import { ChevronDown, Check, Info } from 'lucide-react';
+import { ORDER_TYPE_INFO, getMaxLeverageForNotional, getLeverageTierInfo } from '@/types/trading';
+import { ChevronDown, Check, Info, AlertTriangle } from 'lucide-react';
 import type { PlaceOrderParams } from '@/contexts/TradingContext';
 
 // Re-export for convenience
@@ -111,9 +111,15 @@ export function OrderPanel({ currentPrice, onPlaceOrder, disabled, symbol }: Pro
   }
 
   const fee = effectivePrice * effectiveQty * 0.0004;
+  const notionalValue = effectiveQty * effectivePrice;
+
+  // Tiered leverage validation
+  const maxAllowedLeverage = getMaxLeverageForNotional(notionalValue);
+  const leverageExceeded = leverage > maxAllowedLeverage && notionalValue > 0;
+  const tierInfo = getLeverageTierInfo(notionalValue);
 
   const handleOrder = (side: OrderSide) => {
-    if (disabled || effectiveQty <= 0) return;
+    if (disabled || effectiveQty <= 0 || leverageExceeded) return;
     onPlaceOrder({
       side,
       type: orderType,
@@ -457,16 +463,31 @@ export function OrderPanel({ currentPrice, onPlaceOrder, disabled, symbol }: Pro
           </div>
         </div>
 
+        {/* Leverage warning */}
+        {leverageExceeded && notionalValue > 0 && (
+          <div className="flex items-start gap-1.5 px-2 py-1.5 rounded text-[10px] bg-destructive/10 text-destructive border border-destructive/20">
+            <AlertTriangle className="w-3 h-3 mt-0.5 shrink-0" />
+            <span>名义价值 {notionalValue.toFixed(0)} USDT 超出当前 {leverage}x 杠杆上限（最高 {maxAllowedLeverage}x），请降低杠杆或减小仓位</span>
+          </div>
+        )}
+
+        {/* Tier info */}
+        {notionalValue > 0 && (
+          <div className="text-[9px] text-muted-foreground px-1">
+            当前层级: {tierInfo.tierLabel} · 最高 {tierInfo.maxLeverage}x
+          </div>
+        )}
+
         {/* Action Buttons */}
         <div className="grid grid-cols-2 gap-2 pb-3">
-          <button onClick={() => handleOrder('LONG')} disabled={disabled}
+          <button onClick={() => handleOrder('LONG')} disabled={disabled || leverageExceeded}
             className="btn-long disabled:opacity-30 text-xs py-2.5">
             <div>开多 / Buy</div>
             {(orderType === 'MARKET' || priceSelection === 'MARKET') && currentPrice > 0 && (
               <div className="text-[10px] opacity-80 mt-0.5">{currentPrice.toFixed(2)}</div>
             )}
           </button>
-          <button onClick={() => handleOrder('SHORT')} disabled={disabled}
+          <button onClick={() => handleOrder('SHORT')} disabled={disabled || leverageExceeded}
             className="btn-short disabled:opacity-30 text-xs py-2.5">
             <div>开空 / Sell</div>
             {(orderType === 'MARKET' || priceSelection === 'MARKET') && currentPrice > 0 && (
