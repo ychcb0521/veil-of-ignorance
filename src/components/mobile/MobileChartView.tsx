@@ -1,7 +1,8 @@
-import { ArrowLeft, Clock, Play, Pause, Calendar, ChevronDown } from 'lucide-react';
+import { ArrowLeft, Clock, Play, Pause, Square, Calendar, ChevronDown } from 'lucide-react';
 import { CandlestickChart } from '@/components/CandlestickChart';
 import type { KlineData } from '@/hooks/useBinanceData';
 import type { PositionsMap, PriceMap } from '@/contexts/TradingContext';
+import type { TimeMachineStatus } from '@/hooks/useTimeSimulator';
 import { useState } from 'react';
 import { WheelDateTimePicker } from './WheelPicker';
 import { MobileTimeframeSheet } from './MobileTimeframeSheet';
@@ -14,10 +15,12 @@ interface Props {
   onBack: () => void;
   onTrade: () => void;
   // Sim
-  isRunning: boolean;
+  status: TimeMachineStatus;
   currentSimulatedTime: number;
   speed: number;
   onStart: (ts: number) => void;
+  onPause: () => void;
+  onResume: () => void;
   onStop: () => void;
   onSetSpeed: (s: number) => void;
   // Chart
@@ -75,7 +78,6 @@ export function MobileChartView(props: Props) {
           <span className="text-sm font-bold font-mono text-foreground">{baseCoin}USDT</span>
           <span className="text-[9px] px-1 py-0.5 rounded bg-primary/10 text-primary">永续</span>
         </div>
-        {/* Price info */}
         {last && (
           <div className="text-right">
             <div className={`text-sm font-bold font-mono ${isUp ? 'trading-green' : 'trading-red'}`}>
@@ -88,7 +90,7 @@ export function MobileChartView(props: Props) {
         )}
       </div>
 
-      {/* Interval tabs - single button that opens bottom sheet */}
+      {/* Interval tabs */}
       <div className="flex items-center gap-1 px-2 py-1 border-b border-border bg-card">
         <button
           onClick={() => setShowTimeframeSheet(true)}
@@ -102,7 +104,7 @@ export function MobileChartView(props: Props) {
       {/* Time machine compact */}
       <div className="flex items-center gap-1.5 px-3 py-1.5 border-b border-border bg-card">
         <Clock className="w-3 h-3 text-primary shrink-0" />
-        {!props.isRunning ? (
+        {props.status === 'stopped' && (
           <>
             <button
               onClick={() => setShowPicker(true)}
@@ -115,7 +117,8 @@ export function MobileChartView(props: Props) {
               <Play className="w-3 h-3" /> 启动
             </button>
           </>
-        ) : (
+        )}
+        {props.status === 'playing' && (
           <>
             <span className="font-mono text-[10px] text-primary flex-1 truncate">{formatSimTime(props.currentSimulatedTime)}</span>
             <div className="flex items-center gap-0.5 shrink-0">
@@ -129,8 +132,22 @@ export function MobileChartView(props: Props) {
                 </button>
               ))}
             </div>
-            <button onClick={props.onStop} className="p-1 text-destructive">
+            <button onClick={props.onPause} className="p-1 text-yellow-400">
               <Pause className="w-3.5 h-3.5" />
+            </button>
+            <button onClick={props.onStop} className="p-1 text-destructive">
+              <Square className="w-3.5 h-3.5" />
+            </button>
+          </>
+        )}
+        {props.status === 'paused' && (
+          <>
+            <span className="font-mono text-[10px] text-yellow-400 flex-1 truncate animate-pulse">⏸ {formatSimTime(props.currentSimulatedTime)}</span>
+            <button onClick={props.onResume} className="btn-long flex items-center gap-1 text-[10px] px-2 py-1 shrink-0">
+              <Play className="w-3 h-3" /> 继续
+            </button>
+            <button onClick={props.onStop} className="p-1 text-destructive">
+              <Square className="w-3.5 h-3.5" />
             </button>
           </>
         )}
@@ -162,7 +179,7 @@ export function MobileChartView(props: Props) {
 
       {/* Chart */}
       <div className="flex-1 min-h-0">
-        {!props.isRunning && props.visibleData.length === 0 ? (
+        {props.status === 'stopped' && props.visibleData.length === 0 ? (
           <div className="h-full flex items-center justify-center">
             <div className="text-center space-y-2 px-6">
               <div className="text-3xl">⏰</div>
