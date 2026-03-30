@@ -465,7 +465,7 @@ export function OrderPanel({ currentPrice, onPlaceOrder, disabled, symbol, cooli
         {/* Computed display */}
         {currencyUnit === 'USDT' && effectiveQty > 0 && (
           <div className="text-[10px] text-muted-foreground px-1">
-            ≈ {effectiveQty.toFixed(6)} {baseCoin}
+            ≈ {effectiveQty.toFixed(quantityPrecision)} {baseCoin}
             {usdtInputMode === 'INITIAL_MARGIN' && (
               <span className="ml-2">（仓位价值 ≈ {(effectiveQty * effectivePrice).toFixed(2)} USDT）</span>
             )}
