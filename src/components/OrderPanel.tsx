@@ -517,7 +517,7 @@ export function OrderPanel({ currentPrice, onPlaceOrder, disabled, symbol, cooli
             className="btn-long disabled:opacity-30 text-xs py-2.5">
             <div>{coolingOff ? '🧊 冷静中' : '开多 / Buy'}</div>
             {!coolingOff && (orderType === 'MARKET' || priceSelection === 'MARKET') && currentPrice > 0 && (
-              <div className="text-[10px] opacity-80 mt-0.5">{currentPrice.toFixed(2)}</div>
+              <div className="text-[10px] opacity-80 mt-0.5">{currentPrice.toFixed(pricePrecision)}</div>
             )}
           </button>
           <button onClick={() => handleOrder('SHORT')} disabled={orderDisabled}
