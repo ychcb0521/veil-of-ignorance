@@ -69,7 +69,7 @@ export function AccountInfo({ balance, positionsMap, priceMap }: Props) {
         </div>
       )}
       <div className="ml-auto text-muted-foreground/60">
-        初始资金: {INITIAL_CAPITAL.toLocaleString()} USDT
+        初始资金: {initialCapital.toLocaleString()} USDT
       </div>
     </div>
   );
