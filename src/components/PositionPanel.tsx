@@ -38,7 +38,7 @@ export function PositionPanel({
   ];
 
   return (
-    <div className="panel flex flex-col" style={{ background: '#0B0E11' }}>
+    <div className="panel flex flex-col bg-card">
       {/* Tabs */}
       <div className="flex gap-4 px-4 border-b border-border">
         {TABS.map(t => (

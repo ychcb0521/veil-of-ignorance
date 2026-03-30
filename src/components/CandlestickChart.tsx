@@ -305,7 +305,7 @@ export function CandlestickChart({ data, symbol, onLoadOlder, loadingOlder }: Pr
   const isUp = last ? last.close >= last.open : true;
 
   return (
-    <div className="flex flex-col h-full" style={{ background: '#0B0E11' }}>
+    <div className="flex flex-col h-full bg-background">
       {/* Price header bar */}
       <div className="flex items-center gap-6 px-4 py-2 border-b border-border">
         <div className="flex items-center gap-2">

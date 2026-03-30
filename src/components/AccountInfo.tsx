@@ -35,7 +35,7 @@ export function AccountInfo({ balance, positionsMap, priceMap }: Props) {
   const totalReturnPct = (totalReturn / initialCapital) * 100;
 
   return (
-    <div className="flex items-center gap-5 px-4 py-1.5 text-[11px] font-mono border-b border-border" style={{ background: '#0B0E11' }}>
+    <div className="flex items-center gap-5 px-4 py-1.5 text-[11px] font-mono border-b border-border bg-card">
       <div className="flex items-center gap-1.5">
         <Wallet className="w-3 h-3 text-primary" />
         <span className="text-muted-foreground">总权益</span>
