@@ -12,7 +12,7 @@
 import React, { createContext, useContext, useCallback, useEffect, useRef, useMemo } from 'react';
 import { useTimeSimulator } from '@/hooks/useTimeSimulator';
 import { usePersistedState, loadPersistedSimState, saveSimState, clearSimState } from '@/hooks/usePersistedState';
-import { toast } from 'sonner';
+import { useAuth } from '@/contexts/AuthContext';
 import type { Position, PendingOrder, TradeRecord, OrderSide, OrderType, MarginMode } from '@/types/trading';
 import { calcFee, calcUnrealizedPnl } from '@/types/trading';
 
