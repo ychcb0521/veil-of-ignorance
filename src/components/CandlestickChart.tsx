@@ -4,7 +4,7 @@ import type { KlineData } from '@/hooks/useBinanceData';
 import { useDrawing } from '@/hooks/useDrawing';
 import { usePersistedState } from '@/hooks/usePersistedState';
 import type { IndicatorConfig } from '@/hooks/useIndicators';
-import { calcSMA, calcEMA, calcBOLL, calcRSI, calcMACD, calcATR, INDICATOR_PRESETS } from '@/hooks/useIndicators';
+import { calculateIndicator, INDICATOR_PRESETS } from '@/hooks/useIndicators';
 import { ChartToolbar } from './ChartToolbar';
 import { DrawingOverlay } from './DrawingOverlay';
 
@@ -198,6 +198,9 @@ export function CandlestickChart({ data, symbol, onLoadOlder, loadingOlder }: Pr
 
     const activeKeys = new Set<string>();
 
+    // Track how many sub-chart oscillators are active for layout
+    const subChartTypes = new Set<string>();
+
     for (const ind of indicators) {
       if (!ind.enabled) continue;
       const key = `${ind.type}_${ind.period}`;
@@ -205,63 +208,94 @@ export function CandlestickChart({ data, symbol, onLoadOlder, loadingOlder }: Pr
       const preset = INDICATOR_PRESETS.find(p => p.type === ind.type);
       if (!preset) continue;
 
-      let lineData: { time: Time; value: number }[] = [];
+      const result = calculateIndicator(ind.type, data, ind.period);
+      if (!result) continue;
 
-      switch (ind.type) {
-        case 'MA':
-          lineData = calcSMA(data, ind.period).map(p => ({ time: (p.time / 1000) as Time, value: p.value }));
+      const scaleId = preset.isOverlay ? '' : ind.type.toLowerCase();
+      if (!preset.isOverlay) subChartTypes.add(scaleId);
+
+      switch (result.kind) {
+        case 'line': {
+          const lineData = result.data.map(p => ({ time: (p.time / 1000) as Time, value: p.value }));
+          ensureLineSeries(chart, key, ind.color || preset.color, lineData, 2, scaleId || undefined);
           break;
-        case 'EMA':
-          lineData = calcEMA(data, ind.period).map(p => ({ time: (p.time / 1000) as Time, value: p.value }));
-          break;
-        case 'BOLL': {
-          const boll = calcBOLL(data, ind.period);
+        }
+        case 'boll':
+        case 'channel': {
+          const chData = result.data;
           const keyUpper = `${key}_upper`;
           const keyLower = `${key}_lower`;
           activeKeys.add(keyUpper);
           activeKeys.add(keyLower);
-          ensureLineSeries(chart, key, ind.color || '#8B5CF6', boll.map(b => ({ time: (b.time / 1000) as Time, value: b.middle })));
-          ensureLineSeries(chart, keyUpper, '#8B5CF640', boll.map(b => ({ time: (b.time / 1000) as Time, value: b.upper })), 1);
-          ensureLineSeries(chart, keyLower, '#8B5CF640', boll.map(b => ({ time: (b.time / 1000) as Time, value: b.lower })), 1);
-          continue;
-        }
-        case 'RSI':
-          lineData = calcRSI(data, ind.period).map(p => ({ time: (p.time / 1000) as Time, value: p.value }));
+          const color = ind.color || preset.color;
+          ensureLineSeries(chart, key, color, chData.map(b => ({ time: (b.time / 1000) as Time, value: b.middle })), 2);
+          ensureLineSeries(chart, keyUpper, color + '60', chData.map(b => ({ time: (b.time / 1000) as Time, value: b.upper })), 1);
+          ensureLineSeries(chart, keyLower, color + '60', chData.map(b => ({ time: (b.time / 1000) as Time, value: b.lower })), 1);
           break;
-        case 'MACD': {
-          const macd = calcMACD(data, ind.period);
+        }
+        case 'macd': {
           const keySignal = `${key}_signal`;
           const keyHist = `${key}_hist`;
           activeKeys.add(keySignal);
           activeKeys.add(keyHist);
 
-          ensureLineSeries(chart, key, '#10B981', macd.map(m => ({ time: (m.time / 1000) as Time, value: m.macd })), 1, 'macd');
-          ensureLineSeries(chart, keySignal, '#EF4444', macd.map(m => ({ time: (m.time / 1000) as Time, value: m.signal })), 1, 'macd');
+          ensureLineSeries(chart, key, '#10B981', result.data.map(m => ({ time: (m.time / 1000) as Time, value: m.macd })), 1, scaleId);
+          ensureLineSeries(chart, keySignal, '#EF4444', result.data.map(m => ({ time: (m.time / 1000) as Time, value: m.signal })), 1, scaleId);
 
           let histSeries = indicatorSeriesRef.current.get(keyHist);
           if (!histSeries) {
-            histSeries = chart.addHistogramSeries({
-              priceScaleId: 'macd',
-              color: '#3B82F680',
-            } as any) as any;
-            chart.priceScale('macd').applyOptions({ scaleMargins: { top: 0.85, bottom: 0 } });
+            histSeries = chart.addHistogramSeries({ priceScaleId: scaleId, color: '#3B82F680' } as any) as any;
             indicatorSeriesRef.current.set(keyHist, histSeries as any);
           }
-          (histSeries as any).setData(macd.map(m => ({
-            time: (m.time / 1000) as Time,
-            value: m.histogram,
+          (histSeries as any).setData(result.data.map(m => ({
+            time: (m.time / 1000) as Time, value: m.histogram,
             color: m.histogram >= 0 ? '#0ECB8180' : '#F6465D80',
           })));
-          continue;
-        }
-        case 'ATR':
-          lineData = calcATR(data, ind.period).map(p => ({ time: (p.time / 1000) as Time, value: p.value }));
           break;
+        }
+        case 'stoch': {
+          const keyD = `${key}_d`;
+          activeKeys.add(keyD);
+          ensureLineSeries(chart, key, ind.color || preset.color, result.data.map(s => ({ time: (s.time / 1000) as Time, value: s.k })), 1, scaleId);
+          ensureLineSeries(chart, keyD, '#EF4444', result.data.map(s => ({ time: (s.time / 1000) as Time, value: s.d })), 1, scaleId);
+          break;
+        }
+        case 'dmi': {
+          const keyMdi = `${key}_mdi`;
+          const keyAdx = `${key}_adx`;
+          activeKeys.add(keyMdi);
+          activeKeys.add(keyAdx);
+          ensureLineSeries(chart, key, '#0ECB81', result.data.map(d => ({ time: (d.time / 1000) as Time, value: d.pdi })), 1, scaleId);
+          ensureLineSeries(chart, keyMdi, '#F6465D', result.data.map(d => ({ time: (d.time / 1000) as Time, value: d.mdi })), 1, scaleId);
+          ensureLineSeries(chart, keyAdx, ind.color || preset.color, result.data.map(d => ({ time: (d.time / 1000) as Time, value: d.adx })), 2, scaleId);
+          break;
+        }
+        case 'ichimoku': {
+          const keyBase = `${key}_base`;
+          const keySpanA = `${key}_spanA`;
+          const keySpanB = `${key}_spanB`;
+          activeKeys.add(keyBase);
+          activeKeys.add(keySpanA);
+          activeKeys.add(keySpanB);
+          ensureLineSeries(chart, key, '#2962FF', result.data.map(d => ({ time: (d.time / 1000) as Time, value: d.conversion })), 1);
+          ensureLineSeries(chart, keyBase, '#B71C1C', result.data.map(d => ({ time: (d.time / 1000) as Time, value: d.base })), 1);
+          ensureLineSeries(chart, keySpanA, '#0ECB8160', result.data.map(d => ({ time: (d.time / 1000) as Time, value: d.spanA })), 1);
+          ensureLineSeries(chart, keySpanB, '#F6465D60', result.data.map(d => ({ time: (d.time / 1000) as Time, value: d.spanB })), 1);
+          break;
+        }
       }
+    }
 
-      if (lineData.length > 0) {
-        const scaleId = preset.isOverlay ? undefined : ind.type.toLowerCase();
-        ensureLineSeries(chart, key, ind.color || '#F0B90B', lineData, 2, scaleId);
+    // Dynamically allocate sub-chart space based on count
+    const subCount = subChartTypes.size;
+    if (subCount > 0) {
+      const spacePerSub = Math.min(0.15, 0.4 / subCount);
+      let topStart = 1 - subCount * spacePerSub;
+      for (const sid of subChartTypes) {
+        chart.priceScale(sid).applyOptions({
+          scaleMargins: { top: topStart, bottom: 1 - topStart - spacePerSub + 0.01 },
+        });
+        topStart += spacePerSub;
       }
     }
 
