@@ -116,6 +116,7 @@ export function OrderPanel({ currentPrice, onPlaceOrder, disabled, symbol }: Pro
   // Tiered leverage validation
   const maxAllowedLeverage = getMaxLeverageForNotional(notionalValue);
   const leverageExceeded = leverage > maxAllowedLeverage && notionalValue > 0;
+  const tierInfo = getLeverageTierInfo(notionalValue);
 
   const handleOrder = (side: OrderSide) => {
     if (disabled || effectiveQty <= 0 || leverageExceeded) return;

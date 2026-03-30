@@ -83,8 +83,7 @@ const Index = () => {
   useBackgroundPrices();
 
   const [bottomTab, setBottomTab] = useState('positions');
-
-  // Auto-restore
+  const [analyticsOpen, setAnalyticsOpen] = useState(false);
   const hasRestoredRef = useRef(false);
   const persistedSim = useMemo(() => loadPersistedSimState(), []);
   const restoredRunning = persistedSim?.isRunning ?? false;
