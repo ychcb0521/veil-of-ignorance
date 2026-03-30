@@ -150,27 +150,6 @@ export function CandlestickChart({ data, symbol, onLoadOlder, loadingOlder, trad
 
     if (!chart) return;
 
-    // Set up data loader for backward loading
-    chart.setDataLoader({
-      getBars: (params) => {
-        if (params.type === 'backward') {
-          // User scrolled left — request older data
-          if (onLoadOlder) onLoadOlder();
-          // Store the callback for when older data arrives
-          dataCallbackRef.current = params.callback;
-        } else if (params.type === 'init') {
-          // Initial data load — we feed from props
-          dataCallbackRef.current = params.callback;
-        }
-      },
-      subscribeBar: (params) => {
-        subscribeCallbackRef.current = params.callback;
-      },
-      unsubscribeBar: () => {
-        subscribeCallbackRef.current = null;
-      },
-    });
-
     // Create VOL sub-pane
     chart.createIndicator('VOL', false, { height: 60 });
 
@@ -179,8 +158,6 @@ export function CandlestickChart({ data, symbol, onLoadOlder, loadingOlder, trad
     return () => {
       dispose(containerRef.current!);
       chartRef.current = null;
-      dataCallbackRef.current = null;
-      subscribeCallbackRef.current = null;
     };
   }, []);
 
