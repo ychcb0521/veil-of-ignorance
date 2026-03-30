@@ -15,7 +15,7 @@ interface SymbolInfo {
   displayName: string;
 }
 
-const INTERVALS = ['1m', '5m', '15m', '1h', '4h', '1d'];
+
 
 interface Props {
   symbol: string;
