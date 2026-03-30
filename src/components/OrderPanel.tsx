@@ -29,7 +29,7 @@ interface Props {
   quantityPrecision?: number;
 }
 
-export function OrderPanel({ currentPrice, onPlaceOrder, disabled, symbol, coolingOff, coolingOffLabel, onOpenCoolingOff, priceProtection, onTogglePriceProtection }: Props) {
+export function OrderPanel({ currentPrice, onPlaceOrder, disabled, symbol, coolingOff, coolingOffLabel, onOpenCoolingOff, priceProtection, onTogglePriceProtection, pricePrecision = 2, quantityPrecision = 3 }: Props) {
   const baseCoin = symbol.replace('USDT', '') || 'BTC';
 
   const [orderType, setOrderType] = useState<OrderType>('MARKET');
