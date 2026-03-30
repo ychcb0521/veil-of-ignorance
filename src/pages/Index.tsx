@@ -4,6 +4,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useBinanceData, type KlineData } from '@/hooks/useBinanceData';
 import { useBackgroundPrices } from '@/hooks/useBackgroundPrices';
 import { loadPersistedSimState } from '@/hooks/usePersistedState';
+import { usePersistedState } from '@/hooks/usePersistedState';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { TimeControl } from '@/components/TimeControl';
 import { CandlestickChart } from '@/components/CandlestickChart';
@@ -17,10 +18,14 @@ import { ThemeToggle } from '@/components/ThemeToggle';
 import { MobileLayout } from '@/components/mobile/MobileLayout';
 import { LiquidationModal } from '@/components/LiquidationModal';
 import { AnalyticsPanel } from '@/components/AnalyticsPanel';
+import { CoolingOffModal, useCoolingOff } from '@/components/CoolingOffModal';
 import { toast } from 'sonner';
 import { BarChart3 } from 'lucide-react';
 import type { PendingOrder, OrderType } from '@/types/trading';
 import { calcFee, calcSlippage } from '@/types/trading';
+
+// Price protection threshold: reject conditional triggers if |last - mark| / mark > 2%
+const PRICE_PROTECTION_THRESHOLD = 0.02;
 
 // ===== Offline matching for restore =====
 function matchOrdersOffline(
