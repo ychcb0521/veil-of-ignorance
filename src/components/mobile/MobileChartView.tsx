@@ -89,21 +89,15 @@ export function MobileChartView(props: Props) {
         )}
       </div>
 
-      {/* Interval tabs */}
-      <div className="flex items-center gap-0.5 px-2 py-1 border-b border-border bg-card overflow-x-auto">
-        {INTERVALS.map(iv => (
-          <button
-            key={iv}
-            onClick={() => props.onIntervalChange(iv)}
-            className={`px-2.5 py-1 rounded text-xs font-mono transition-colors ${
-              props.interval === iv
-                ? 'bg-primary text-primary-foreground'
-                : 'text-muted-foreground hover:text-foreground'
-            }`}
-          >
-            {iv}
-          </button>
-        ))}
+      {/* Interval tabs - single button that opens bottom sheet */}
+      <div className="flex items-center gap-1 px-2 py-1 border-b border-border bg-card">
+        <button
+          onClick={() => setShowTimeframeSheet(true)}
+          className="flex items-center gap-1 px-2.5 py-1 rounded text-xs font-mono bg-primary text-primary-foreground"
+        >
+          {TIMEFRAME_LABELS[props.interval] || props.interval}
+          <ChevronDown className="w-3 h-3" />
+        </button>
       </div>
 
       {/* Time machine compact */}
