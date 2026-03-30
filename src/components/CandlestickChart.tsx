@@ -280,9 +280,6 @@ export function CandlestickChart({ data, symbol, onLoadOlder, loadingOlder, trad
           },
         },
         separator: { color: '#1B1F26' },
-        indicator: {
-          tooltip: { text: { color: '#848E9C' } },
-        },
       });
     }
   }, [theme]);
