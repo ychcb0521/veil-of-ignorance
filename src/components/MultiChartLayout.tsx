@@ -151,7 +151,8 @@ export function MultiChartLayout({
               ) : (
                 <CandlestickChart data={getVisibleSubData(subCharts[i].data)}
                   symbol={`${mainSymbol} ${subCharts[i].interval}`}
-                  tradeHistory={tradeHistory} rawSymbol={rawSymbol} />
+                  tradeHistory={tradeHistory} rawSymbol={rawSymbol}
+                  pricePrecision={pricePrecision} quantityPrecision={quantityPrecision} />
               )}
             </div>
           ))}
