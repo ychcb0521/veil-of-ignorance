@@ -348,13 +348,13 @@ const Index = () => {
     reset();
     prevVisibleLenRef.current = 0;
 
-    if (sim.isRunning) {
+    if (sim.status !== 'stopped') {
       const data = await initLoad(newSymbol, interval, sim.currentSimulatedTime);
       if (data.length > 0) {
         toast.info(`已切换到 ${newSymbol}`, { description: `加载 ${data.length} 根K线` });
       }
     }
-  }, [activeSymbol, sim.isRunning, sim.currentSimulatedTime, interval, initLoad, reset]);
+  }, [activeSymbol, sim.status, sim.currentSimulatedTime, interval, initLoad, reset]);
 
   const handleIntervalChange = useCallback(async (newInterval: string) => {
     if (newInterval === interval) return;
