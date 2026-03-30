@@ -51,11 +51,18 @@ export function SymbolSelector({ symbol, interval, onSymbolChange, onIntervalCha
             symbol: s.symbol,
             baseAsset: s.baseAsset,
             displayName: `${s.baseAsset}/USDT`,
+            pricePrecision: s.pricePrecision ?? 2,
+            quantityPrecision: s.quantityPrecision ?? 3,
           }))
           .sort((a: SymbolInfo, b: SymbolInfo) => a.baseAsset.localeCompare(b.baseAsset));
 
         if (filtered.length > 0) {
           setAvailableSymbols(filtered);
+          // Emit precision for current symbol
+          const current = filtered.find(s => s.symbol === symbol);
+          if (current && onPrecisionChange) {
+            onPrecisionChange(current.pricePrecision, current.quantityPrecision);
+          }
         }
       } catch (err) {
         console.error('Failed to fetch Binance exchangeInfo, using fallback list:', err);
