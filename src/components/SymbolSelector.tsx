@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { Search, ChevronDown, Check, Star } from 'lucide-react';
+import { TimeframeSelector } from './TimeframeSelector';
 
 // Fallback top-20 symbols if API fails
 const FALLBACK_SYMBOLS = [
