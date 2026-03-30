@@ -135,10 +135,6 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
   const [priceMap, setPriceMap] = usePersistedState<PriceMap>('price_map', {});
   const [balance, setBalance] = usePersistedState('balance', initialCapital);
   const [tradeHistory, setTradeHistory] = usePersistedState<TradeRecord[]>('trade_history', []);
-  const [ordersMap, setOrdersMap] = usePersistedState<OrdersMap>('orders_map', {});
-  const [priceMap, setPriceMap] = usePersistedState<PriceMap>('price_map', {});
-  const [balance, setBalance] = usePersistedState('balance', 1_000_000);
-  const [tradeHistory, setTradeHistory] = usePersistedState<TradeRecord[]>('trade_history', []);
 
   // Persist sim state
   useEffect(() => {
