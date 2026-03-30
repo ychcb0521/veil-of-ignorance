@@ -461,7 +461,7 @@ const Index = () => {
         <div className="flex items-center gap-4">
           <ThemeToggle />
           <h1 className="text-xs font-bold text-primary tracking-widest uppercase">⚡ 无知之幕</h1>
-          <SymbolSelector symbol={activeSymbol} interval={interval} onSymbolChange={handleSymbolChange} onIntervalChange={handleIntervalChange} />
+          <SymbolSelector symbol={activeSymbol} interval={interval} onSymbolChange={handleSymbolChange} onIntervalChange={handleIntervalChange} onPrecisionChange={(pp, qp) => { setPricePrecision(pp); setQuantityPrecision(qp); }} />
         </div>
         <div className="flex items-center gap-3">
           {loading && <span className="text-[10px] text-primary animate-pulse font-mono">加载历史数据...</span>}
