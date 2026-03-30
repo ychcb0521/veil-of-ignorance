@@ -5,8 +5,11 @@ import { useDrawing } from '@/hooks/useDrawing';
 import { usePersistedState } from '@/hooks/usePersistedState';
 import type { IndicatorConfig } from '@/hooks/useIndicators';
 import { calculateIndicator, INDICATOR_PRESETS } from '@/hooks/useIndicators';
-import { ChartToolbar } from './ChartToolbar';
+import { DrawingToolbar } from './DrawingToolbar';
 import { DrawingOverlay } from './DrawingOverlay';
+import { IndicatorMenu } from './IndicatorMenu';
+import { BarChart3, X } from 'lucide-react';
+import { useState } from 'react';
 import type { TradeRecord } from '@/types/trading';
 
 interface Props {
