@@ -6,6 +6,7 @@
 import { useEffect, useRef, useCallback, useState } from 'react';
 import { init, dispose, type Chart, type KLineData, type OverlayCreate } from 'klinecharts';
 import type { KlineData } from '@/hooks/useBinanceData';
+import { useTheme } from '@/hooks/useTheme';
 import { DrawingToolbar } from './DrawingToolbar';
 import { IndicatorMenu } from './IndicatorMenu';
 import { BarChart3, X } from 'lucide-react';
@@ -83,6 +84,7 @@ export function CandlestickChart({ data, symbol, onLoadOlder, loadingOlder, trad
   const [showIndicatorPanel, setShowIndicatorPanel] = useState(false);
   const [drawingsVisible, setDrawingsVisible] = useState(true);
   const [activeDrawingTool, setActiveDrawingTool] = useState<string | null>(null);
+  const { theme } = useTheme();
 
   const activeIndicatorPanes = useRef<Map<string, string | null>>(new Map());
 
@@ -185,7 +187,104 @@ export function CandlestickChart({ data, symbol, onLoadOlder, loadingOlder, trad
   }, []);
 
   // ============================================================
-  // Feed data to chart when props change
+  // Theme reactivity — update klinecharts styles on theme change
+  // ============================================================
+  useEffect(() => {
+    const chart = chartRef.current;
+    if (!chart) return;
+
+    if (theme === 'light') {
+      chart.setStyles({
+        grid: {
+          show: true,
+          horizontal: { color: '#EAECEF' },
+          vertical: { color: '#EAECEF' },
+        },
+        candle: {
+          type: 'candle_solid',
+          bar: {
+            upColor: '#0ECB81',
+            downColor: '#F6465D',
+            upBorderColor: '#0ECB81',
+            downBorderColor: '#F6465D',
+            upWickColor: '#0ECB81',
+            downWickColor: '#F6465D',
+          },
+          priceMark: {
+            show: true,
+            last: {
+              show: true,
+              upColor: '#0ECB81',
+              downColor: '#F6465D',
+              line: { show: true, style: 'dashed' as const, dashedValue: [4, 4] },
+            },
+          },
+        },
+        xAxis: { show: true, tickText: { color: '#474D57' } },
+        yAxis: { show: true, tickText: { color: '#474D57' } },
+        crosshair: {
+          show: true,
+          horizontal: {
+            show: true,
+            line: { color: '#B7BDC6', style: 'dashed' as const },
+            text: { color: '#1E2329', borderColor: '#B7BDC6', backgroundColor: '#F0F1F2' },
+          },
+          vertical: {
+            show: true,
+            line: { color: '#B7BDC6', style: 'dashed' as const },
+            text: { color: '#1E2329', borderColor: '#B7BDC6', backgroundColor: '#F0F1F2' },
+          },
+        },
+        separator: { color: '#EAECEF' },
+      });
+    } else {
+      chart.setStyles({
+        grid: {
+          show: true,
+          horizontal: { color: '#1B1F26' },
+          vertical: { color: '#1B1F26' },
+        },
+        candle: {
+          type: 'candle_solid',
+          bar: {
+            upColor: '#0ECB81',
+            downColor: '#F6465D',
+            upBorderColor: '#0ECB81',
+            downBorderColor: '#F6465D',
+            upWickColor: '#0ECB81',
+            downWickColor: '#F6465D',
+          },
+          priceMark: {
+            show: true,
+            last: {
+              show: true,
+              upColor: '#0ECB81',
+              downColor: '#F6465D',
+              line: { show: true, style: 'dashed' as const, dashedValue: [4, 4] },
+            },
+          },
+        },
+        xAxis: { show: true, tickText: { color: '#848E9C' } },
+        yAxis: { show: true, tickText: { color: '#848E9C' } },
+        crosshair: {
+          show: true,
+          horizontal: {
+            show: true,
+            line: { color: '#F0B90B33', style: 'dashed' as const },
+            text: { color: '#FFFFFF', borderColor: '#F0B90B', backgroundColor: '#363A45' },
+          },
+          vertical: {
+            show: true,
+            line: { color: '#F0B90B33', style: 'dashed' as const },
+            text: { color: '#FFFFFF', borderColor: '#F0B90B', backgroundColor: '#363A45' },
+          },
+        },
+        separator: { color: '#1B1F26' },
+      });
+    }
+  }, [theme]);
+
+
   // ============================================================
   useEffect(() => {
     const chart = chartRef.current;
@@ -381,7 +480,7 @@ export function CandlestickChart({ data, symbol, onLoadOlder, loadingOlder, trad
         <div
           ref={containerRef}
           className="absolute inset-0"
-          style={{ left: 34, backgroundColor: '#0B0E11' }}
+          style={{ left: 34, backgroundColor: theme === 'light' ? '#FFFFFF' : '#0B0E11' }}
         />
 
         <DrawingToolbar
