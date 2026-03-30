@@ -27,7 +27,7 @@ interface Props {
   onPrecisionChange?: (pricePrecision: number, quantityPrecision: number) => void;
 }
 
-export function SymbolSelector({ symbol, interval, onSymbolChange, onIntervalChange }: Props) {
+export function SymbolSelector({ symbol, interval, onSymbolChange, onIntervalChange, onPrecisionChange }: Props) {
   const [availableSymbols, setAvailableSymbols] = useState<SymbolInfo[]>(FALLBACK_SYMBOLS);
   const [isLoading, setIsLoading] = useState(true);
   const [isOpen, setIsOpen] = useState(false);
