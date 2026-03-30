@@ -1,5 +1,5 @@
 import { useEffect, useRef, useCallback } from 'react';
-import { createChart, IChartApi, ISeriesApi, CandlestickData, Time, PriceLineOptions, LineStyle } from 'lightweight-charts';
+import { createChart, IChartApi, ISeriesApi, CandlestickData, Time, PriceLineOptions, LineStyle, SeriesMarker } from 'lightweight-charts';
 import type { KlineData } from '@/hooks/useBinanceData';
 import { useDrawing } from '@/hooks/useDrawing';
 import { usePersistedState } from '@/hooks/usePersistedState';
@@ -7,6 +7,7 @@ import type { IndicatorConfig } from '@/hooks/useIndicators';
 import { calculateIndicator, INDICATOR_PRESETS } from '@/hooks/useIndicators';
 import { ChartToolbar } from './ChartToolbar';
 import { DrawingOverlay } from './DrawingOverlay';
+import type { TradeRecord } from '@/types/trading';
 
 interface Props {
   data: KlineData[];
@@ -14,6 +15,10 @@ interface Props {
   /** Called when user scrolls near the left edge — parent should load older data */
   onLoadOlder?: () => void;
   loadingOlder?: boolean;
+  /** Trade history for on-chart markers */
+  tradeHistory?: TradeRecord[];
+  /** Raw symbol name (e.g. BTCUSDT) for filtering trades */
+  rawSymbol?: string;
 }
 
 export function CandlestickChart({ data, symbol, onLoadOlder, loadingOlder }: Props) {
