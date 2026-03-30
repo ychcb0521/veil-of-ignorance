@@ -439,7 +439,7 @@ const Index = () => {
 
       <div className="flex-1 flex min-h-0 overflow-hidden">
         <div className="flex-1 flex flex-col min-h-0 min-w-0">
-          <div className="flex-1 min-h-0">
+          <div className="flex-1 min-h-0 relative">
             {!sim.isRunning && visibleData.length === 0 ? (
               <div className="h-full flex items-center justify-center bg-background">
                 <div className="text-center space-y-3">
@@ -449,7 +449,17 @@ const Index = () => {
                 </div>
               </div>
             ) : (
-              <CandlestickChart data={visibleData} symbol={activeSymbol.replace('USDT', '/USDT')} onLoadOlder={loadOlder} loadingOlder={loadingOlder} tradeHistory={tradeHistory} rawSymbol={activeSymbol} />
+              <MultiChartLayout
+                mainData={visibleData}
+                mainSymbol={activeSymbol.replace('USDT', '/USDT')}
+                rawSymbol={activeSymbol}
+                onLoadOlder={loadOlder}
+                loadingOlder={loadingOlder}
+                tradeHistory={tradeHistory}
+                isRunning={sim.isRunning}
+                currentSimulatedTime={sim.currentSimulatedTime}
+                mainInterval={interval}
+              />
             )}
           </div>
 
