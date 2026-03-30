@@ -109,11 +109,13 @@ export function MobileChartView(props: Props) {
         <Clock className="w-3 h-3 text-primary shrink-0" />
         {!props.isRunning ? (
           <>
-            <input
-              type="text" value={dateInput} onChange={e => setDateInput(e.target.value)}
-              placeholder="YYYY-MM-DD HH:mm:ss"
-              className="flex-1 input-dark text-[10px] py-1 px-2"
-            />
+            <button
+              onClick={() => setShowPicker(true)}
+              className="flex-1 flex items-center gap-1.5 px-2 py-1.5 rounded bg-secondary border border-border text-left"
+            >
+              <Calendar className="w-3 h-3 text-muted-foreground" />
+              <span className="font-mono text-[10px] text-foreground">{formatSelectedDate()}</span>
+            </button>
             <button onClick={handleStart} className="btn-long flex items-center gap-1 text-[10px] px-2 py-1 shrink-0">
               <Play className="w-3 h-3" /> 启动
             </button>
@@ -138,6 +140,14 @@ export function MobileChartView(props: Props) {
           </>
         )}
       </div>
+
+      {showPicker && (
+        <WheelDateTimePicker
+          initialDate={selectedDate}
+          onConfirm={handlePickerConfirm}
+          onCancel={() => setShowPicker(false)}
+        />
+      )}
 
       {/* Price summary bar */}
       {last && (
