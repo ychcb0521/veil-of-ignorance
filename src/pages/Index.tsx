@@ -532,7 +532,7 @@ const Index = () => {
 
         {/* Order Book */}
         <div className="w-[180px] border-l border-border shrink-0 overflow-hidden">
-          <OrderBook currentPrice={currentPrice} symbol={activeSymbol} />
+          <OrderBook currentPrice={currentPrice} symbol={activeSymbol} pricePrecision={pricePrecision} />
         </div>
 
         <div className="w-[280px] border-l border-border shrink-0 overflow-y-auto">
