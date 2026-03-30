@@ -135,13 +135,14 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
   const initialCapital = profile?.initial_capital ?? 1_000_000;
 
   const persistedSim = useMemo(() => loadPersistedSimState(), []);
-  const restoredRunning = persistedSim?.isRunning ?? false;
+  const restoredStatus = persistedSim?.status ?? 'stopped';
 
   const sim = useTimeSimulator(
-    restoredRunning && persistedSim ? {
-      isRunning: true,
-      historicalAnchorTime: persistedSim.historicalAnchorTime,
-      realStartTime: persistedSim.realStartTime,
+    (restoredStatus === 'playing' || restoredStatus === 'paused') && persistedSim ? {
+      status: restoredStatus,
+      historicalAnchorTime: restoredStatus === 'playing' ? persistedSim.historicalAnchorTime : persistedSim.currentSimulatedTime,
+      realStartTime: restoredStatus === 'playing' ? Date.now() : persistedSim.realStartTime,
+      currentSimulatedTime: persistedSim.currentSimulatedTime,
       speed: persistedSim.speed,
     } : undefined
   );
