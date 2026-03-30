@@ -1,8 +1,9 @@
-import { ArrowLeft, Clock, Play, Pause } from 'lucide-react';
+import { ArrowLeft, Clock, Play, Pause, Calendar } from 'lucide-react';
 import { CandlestickChart } from '@/components/CandlestickChart';
 import type { KlineData } from '@/hooks/useBinanceData';
 import type { PositionsMap, PriceMap } from '@/contexts/TradingContext';
 import { useState } from 'react';
+import { WheelDateTimePicker } from './WheelPicker';
 
 const INTERVALS = ['1m', '5m', '15m', '1h', '4h', '1d'];
 const SPEED_OPTIONS = [1, 2, 5, 10, 30, 60];
@@ -32,7 +33,8 @@ interface Props {
 }
 
 export function MobileChartView(props: Props) {
-  const [dateInput, setDateInput] = useState('2024-01-15 08:00:00');
+  const [selectedDate, setSelectedDate] = useState(() => new Date('2024-01-15T08:00:00Z'));
+  const [showPicker, setShowPicker] = useState(false);
   const baseCoin = props.symbol.replace('USDT', '');
 
   const formatSimTime = (ts: number) => {
@@ -41,9 +43,18 @@ export function MobileChartView(props: Props) {
     return d.toISOString().replace('T', ' ').slice(0, 19);
   };
 
+  const formatSelectedDate = () => {
+    const d = selectedDate;
+    return `${d.getUTCFullYear()}-${String(d.getUTCMonth()+1).padStart(2,'0')}-${String(d.getUTCDate()).padStart(2,'0')} ${String(d.getUTCHours()).padStart(2,'0')}:${String(d.getUTCMinutes()).padStart(2,'0')}`;
+  };
+
+  const handlePickerConfirm = (date: Date) => {
+    setSelectedDate(date);
+    setShowPicker(false);
+  };
+
   const handleStart = () => {
-    const ts = new Date(dateInput.replace(' ', 'T') + 'Z').getTime();
-    if (!isNaN(ts)) props.onStart(ts);
+    props.onStart(selectedDate.getTime());
   };
 
   const last = props.visibleData.length > 0 ? props.visibleData[props.visibleData.length - 1] : null;
@@ -98,11 +109,13 @@ export function MobileChartView(props: Props) {
         <Clock className="w-3 h-3 text-primary shrink-0" />
         {!props.isRunning ? (
           <>
-            <input
-              type="text" value={dateInput} onChange={e => setDateInput(e.target.value)}
-              placeholder="YYYY-MM-DD HH:mm:ss"
-              className="flex-1 input-dark text-[10px] py-1 px-2"
-            />
+            <button
+              onClick={() => setShowPicker(true)}
+              className="flex-1 flex items-center gap-1.5 px-2 py-1.5 rounded bg-secondary border border-border text-left"
+            >
+              <Calendar className="w-3 h-3 text-muted-foreground" />
+              <span className="font-mono text-[10px] text-foreground">{formatSelectedDate()}</span>
+            </button>
             <button onClick={handleStart} className="btn-long flex items-center gap-1 text-[10px] px-2 py-1 shrink-0">
               <Play className="w-3 h-3" /> 启动
             </button>
@@ -127,6 +140,14 @@ export function MobileChartView(props: Props) {
           </>
         )}
       </div>
+
+      {showPicker && (
+        <WheelDateTimePicker
+          initialDate={selectedDate}
+          onConfirm={handlePickerConfirm}
+          onCancel={() => setShowPicker(false)}
+        />
+      )}
 
       {/* Price summary bar */}
       {last && (
