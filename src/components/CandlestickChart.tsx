@@ -236,9 +236,6 @@ export function CandlestickChart({ data, symbol, onLoadOlder, loadingOlder, trad
           },
         },
         separator: { color: '#EAECEF' },
-        indicator: {
-          tooltip: { text: { color: '#474D57' } },
-        },
       });
     } else {
       chart.setStyles({
