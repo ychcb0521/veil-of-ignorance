@@ -1,10 +1,10 @@
 /**
- * KlineCharts-based candlestick chart with native drawing tools and indicators.
- * Replaces the old lightweight-charts + SVG overlay approach.
+ * KlineCharts v10 based candlestick chart with native drawing tools and indicators.
+ * Uses setDataLoader pattern for data feeding.
  */
 
 import { useEffect, useRef, useCallback, useState } from 'react';
-import { init, dispose, Chart, OverlayCreate } from 'klinecharts';
+import { init, dispose, type Chart, type KLineData, type OverlayCreate } from 'klinecharts';
 import type { KlineData } from '@/hooks/useBinanceData';
 import { DrawingToolbar } from './DrawingToolbar';
 import { IndicatorMenu } from './IndicatorMenu';
@@ -12,18 +12,18 @@ import { BarChart3, X } from 'lucide-react';
 import { usePersistedState } from '@/hooks/usePersistedState';
 import type { TradeRecord } from '@/types/trading';
 
-// Mapping from our indicator config to klinecharts built-in indicator names
+// Mapping from our indicator IDs to klinecharts built-in indicator names
 const KLINE_INDICATOR_MAP: Record<string, string> = {
   MA: 'MA', EMA: 'EMA', SMA: 'SMA', WMA: 'WMA',
   BOLL: 'BOLL', SAR: 'SAR',
   RSI: 'RSI', MACD: 'MACD', KDJ: 'KDJ',
   ATR: 'ATR', CCI: 'CCI', OBV: 'OBV', ROC: 'ROC',
   STOCH: 'KDJ', VOL: 'VOL',
-  DMI: 'DMI', TRIX: 'TRIX', EMV: 'EMV',
+  DMI: 'DMI', TRIX: 'TRIX',
   WR: 'WR', MFI: 'MFI',
 };
 
-// Overlay tool name mapping for klinecharts
+// Overlay tool name mapping for klinecharts built-in overlays
 const OVERLAY_MAP: Record<string, string> = {
   TrendLine: 'segment',
   Ray: 'rayLine',
@@ -59,18 +59,31 @@ interface Props {
   rawSymbol?: string;
 }
 
+// Convert our KlineData to klinecharts KLineData
+function toKLineData(d: KlineData): KLineData {
+  return {
+    timestamp: d.time,
+    open: d.open,
+    high: d.high,
+    low: d.low,
+    close: d.close,
+    volume: d.volume,
+  };
+}
+
 export function CandlestickChart({ data, symbol, onLoadOlder, loadingOlder, tradeHistory, rawSymbol }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<Chart | null>(null);
   const prevDataLenRef = useRef(0);
   const prevOldestRef = useRef<number>(0);
+  const dataCallbackRef = useRef<((d: KLineData[], more?: boolean) => void) | null>(null);
+  const subscribeCallbackRef = useRef<((d: KLineData) => void) | null>(null);
 
   const [indicators, setIndicators] = usePersistedState<IndicatorConfig[]>('indicators', []);
   const [showIndicatorPanel, setShowIndicatorPanel] = useState(false);
   const [drawingsVisible, setDrawingsVisible] = useState(true);
   const [activeDrawingTool, setActiveDrawingTool] = useState<string | null>(null);
 
-  // Active indicator pane IDs for cleanup
   const activeIndicatorPanes = useRef<Map<string, string | null>>(new Map());
 
   // ============================================================
@@ -102,12 +115,13 @@ export function CandlestickChart({ data, symbol, onLoadOlder, loadingOlder, trad
               show: true,
               upColor: '#0ECB81',
               downColor: '#F6465D',
-              line: { show: true, style: 'dash', dashValue: [4, 4] },
+              line: {
+                show: true,
+                style: 'dashed' as const,
+                dashValue: [4, 4],
+              },
             },
           },
-        },
-        indicator: {
-          lastValueMark: { show: true },
         },
         xAxis: {
           show: true,
@@ -121,108 +135,87 @@ export function CandlestickChart({ data, symbol, onLoadOlder, loadingOlder, trad
           show: true,
           horizontal: {
             show: true,
-            line: { color: '#F0B90B33', style: 'dash' },
+            line: { color: '#F0B90B33', style: 'dashed' as const },
             text: { color: '#FFFFFF', borderColor: '#F0B90B', backgroundColor: '#363A45' },
           },
           vertical: {
             show: true,
-            line: { color: '#F0B90B33', style: 'dash' },
+            line: { color: '#F0B90B33', style: 'dashed' as const },
             text: { color: '#FFFFFF', borderColor: '#F0B90B', backgroundColor: '#363A45' },
           },
-        },
-        overlay: {
-          point: { activeColor: '#F0B90B', color: '#F0B90B88' },
-          line: { color: '#F0B90B' },
-          rect: { color: '#F0B90B33', borderColor: '#F0B90B' },
-          text: { color: '#F0B90B' },
         },
         separator: { color: '#1B1F26' },
       },
     });
 
-    // Create VOL sub-pane by default
+    if (!chart) return;
+
+    // Set up data loader for backward loading
+    chart.setDataLoader({
+      getBars: (params) => {
+        if (params.type === 'backward') {
+          // User scrolled left — request older data
+          if (onLoadOlder) onLoadOlder();
+          // Store the callback for when older data arrives
+          dataCallbackRef.current = params.callback;
+        } else if (params.type === 'init') {
+          // Initial data load — we feed from props
+          dataCallbackRef.current = params.callback;
+        }
+      },
+      subscribeBar: (params) => {
+        subscribeCallbackRef.current = params.callback;
+      },
+      unsubscribeBar: () => {
+        subscribeCallbackRef.current = null;
+      },
+    });
+
+    // Create VOL sub-pane
     chart.createIndicator('VOL', false, { height: 60 });
 
     chartRef.current = chart;
 
-    // Handle keyboard delete for selected overlays
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Delete' || e.key === 'Backspace') {
-        // klinecharts handles overlay deletion when selected natively via removeOverlay
-        // We need to check if an overlay is selected and remove it
-        const chart = chartRef.current;
-        if (chart) {
-          // Remove all selected overlays (klinecharts doesn't expose getSelectedOverlay easily,
-          // but pressing delete while an overlay is selected should work with this approach)
-          // We'll use a custom approach: listen for overlay click events
-        }
-      }
-    };
-    document.addEventListener('keydown', handleKeyDown);
-
     return () => {
-      document.removeEventListener('keydown', handleKeyDown);
       dispose(containerRef.current!);
       chartRef.current = null;
+      dataCallbackRef.current = null;
+      subscribeCallbackRef.current = null;
     };
   }, []);
 
   // ============================================================
-  // Lazy-load trigger: scroll left detection
-  // ============================================================
-  useEffect(() => {
-    const chart = chartRef.current;
-    if (!chart || !onLoadOlder) return;
-
-    // klinecharts fires 'onVisibleRangeChange' — we check if near left edge
-    const sub = chart.subscribeAction('onVisibleRangeChange', (data: any) => {
-      if (loadingOlder) return;
-      if (data && data.from !== undefined && data.from < 50) {
-        onLoadOlder();
-      }
-    });
-
-    return () => {
-      chart.unsubscribeAction('onVisibleRangeChange');
-    };
-  }, [onLoadOlder, loadingOlder]);
-
-  // ============================================================
-  // Update candle + volume data
+  // Feed data to chart when props change
   // ============================================================
   useEffect(() => {
     const chart = chartRef.current;
     if (!chart || data.length === 0) return;
 
-    const klineData = data.map(d => ({
-      timestamp: d.time,
-      open: d.open,
-      high: d.high,
-      low: d.low,
-      close: d.close,
-      volume: d.volume,
-    }));
-
+    const klineData = data.map(toKLineData);
     const currentOldest = data[0].time;
     const wasPrepend = prevDataLenRef.current > 0
       && data.length > prevDataLenRef.current
       && currentOldest < prevOldestRef.current;
 
-    if (wasPrepend) {
-      // For prepend, we use applyMoreData to add older data to the left
+    if (wasPrepend && dataCallbackRef.current) {
+      // Feed older data via the DataLoader callback
       const newCount = data.length - prevDataLenRef.current;
       const olderData = klineData.slice(0, newCount);
-      chart.applyMoreData(olderData);
-    } else if (prevDataLenRef.current === 0) {
+      dataCallbackRef.current(olderData, true);
+    } else if (prevDataLenRef.current === 0 && dataCallbackRef.current) {
       // Initial load
-      chart.applyNewData(klineData);
-    } else if (data.length > prevDataLenRef.current) {
-      // New candle appended (sim tick)
+      dataCallbackRef.current(klineData, true);
+    } else if (data.length > prevDataLenRef.current && data.length - prevDataLenRef.current <= 2) {
+      // New candle appended (sim tick) — use subscribeBar callback
       const lastCandle = klineData[klineData.length - 1];
-      chart.updateData(lastCandle);
-    } else {
-      // Data replaced (e.g. interval change)
-      chart.applyNewData(klineData);
+      if (subscribeCallbackRef.current) {
+        subscribeCallbackRef.current(lastCandle);
+      }
+    } else if (dataCallbackRef.current) {
+      // Data replaced (interval change, etc.)
+      chart.resetData();
+      // Re-trigger the data loader
+      dataCallbackRef.current(klineData, true);
     }
 
     prevDataLenRef.current = data.length;
@@ -236,7 +229,6 @@ export function CandlestickChart({ data, symbol, onLoadOlder, loadingOlder, trad
     const chart = chartRef.current;
     if (!chart || !tradeHistory || !rawSymbol || data.length === 0) return;
 
-    // Remove old trade markers
     chart.removeOverlay({ groupId: 'trade_markers' });
 
     const symbolTrades = tradeHistory.filter(t => t.symbol === rawSymbol);
@@ -250,20 +242,14 @@ export function CandlestickChart({ data, symbol, onLoadOlder, loadingOlder, trad
         name: 'simpleAnnotation',
         groupId: 'trade_markers',
         points: [{ timestamp: ts, value: price }],
-        styles: {
-          text: {
-            color: isBuy ? '#0ECB81' : '#F6465D',
-            size: 12,
-          },
-        },
-        extendData: isBuy ? '▲ B' : '▼ S',
         lock: true,
-      });
+        extendData: isBuy ? '▲ B' : '▼ S',
+      } as OverlayCreate);
     }
   }, [tradeHistory, rawSymbol, data]);
 
   // ============================================================
-  // INDICATOR MANAGEMENT using klinecharts native system
+  // INDICATOR MANAGEMENT
   // ============================================================
   useEffect(() => {
     const chart = chartRef.current;
@@ -281,10 +267,7 @@ export function CandlestickChart({ data, symbol, onLoadOlder, loadingOlder, trad
       if (!activeIndicatorPanes.current.has(ind.type)) {
         try {
           const paneId = chart.createIndicator(
-            {
-              name: kcName,
-              calcParams: [ind.period],
-            },
+            { name: kcName, calcParams: [ind.period] },
             isOverlay,
             isOverlay ? { id: 'candle_pane' } : { height: 80 }
           );
@@ -293,26 +276,17 @@ export function CandlestickChart({ data, symbol, onLoadOlder, loadingOlder, trad
           console.warn(`Failed to create indicator ${ind.type}:`, e);
         }
       } else {
-        // Update params
         try {
-          chart.overrideIndicator({
-            name: kcName,
-            calcParams: [ind.period],
-          });
+          chart.overrideIndicator({ name: kcName, calcParams: [ind.period] });
         } catch {}
       }
     }
 
-    // Remove indicators that are no longer active
-    for (const [type, paneId] of activeIndicatorPanes.current.entries()) {
+    for (const [type] of activeIndicatorPanes.current.entries()) {
       if (!currentActive.has(type)) {
         try {
           const kcName = KLINE_INDICATOR_MAP[type] || type;
-          if (paneId && paneId !== 'candle_pane') {
-            chart.removeIndicator(paneId, kcName);
-          } else {
-            chart.removeIndicator('candle_pane', kcName);
-          }
+          chart.removeIndicator({ name: kcName });
         } catch {}
         activeIndicatorPanes.current.delete(type);
       }
@@ -329,10 +303,7 @@ export function CandlestickChart({ data, symbol, onLoadOlder, loadingOlder, trad
 
     const overlayName = OVERLAY_MAP[tool];
     if (overlayName) {
-      chart.createOverlay({
-        name: overlayName,
-        mode: 'weak_magnet',
-      });
+      chart.createOverlay({ name: overlayName, mode: 'weak_magnet' } as OverlayCreate);
     }
   }, []);
 
@@ -340,7 +311,6 @@ export function CandlestickChart({ data, symbol, onLoadOlder, loadingOlder, trad
     const chart = chartRef.current;
     if (chart) {
       chart.removeOverlay();
-      // Re-add trade markers
     }
   }, []);
 
@@ -356,7 +326,7 @@ export function CandlestickChart({ data, symbol, onLoadOlder, loadingOlder, trad
   }, []);
 
   // ============================================================
-  // Price info from data
+  // Price info
   // ============================================================
   const last = data.length > 0 ? data[data.length - 1] : null;
   const prev = data.length > 1 ? data[data.length - 2] : null;
@@ -408,7 +378,6 @@ export function CandlestickChart({ data, symbol, onLoadOlder, loadingOlder, trad
 
       {/* Chart area with toolbar */}
       <div className="flex-1 min-h-0 relative">
-        {/* Chart container - offset left for toolbar */}
         <div
           ref={containerRef}
           className="absolute inset-0"
