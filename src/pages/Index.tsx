@@ -465,6 +465,15 @@ const Index = () => {
         </div>
         <div className="flex items-center gap-3">
           {loading && <span className="text-[10px] text-primary animate-pulse font-mono">加载历史数据...</span>}
+          {visibleData.length > 0 && (
+            <span className="font-mono text-xs text-primary font-medium">
+              {(() => {
+                const ts = visibleData[visibleData.length - 1].time;
+                const d = new Date(ts);
+                return d.toISOString().replace('T', ' ').slice(0, 19) + ' UTC';
+              })()}
+            </span>
+          )}
           <button onClick={() => setAnalyticsOpen(true)}
             className="flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors">
             <BarChart3 className="w-3 h-3" /> 数据归因
