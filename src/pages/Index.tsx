@@ -510,6 +510,8 @@ const Index = () => {
                 isRunning={sim.status !== 'stopped'}
                 currentSimulatedTime={sim.currentSimulatedTime}
                 mainInterval={interval}
+                pricePrecision={pricePrecision}
+                quantityPrecision={quantityPrecision}
               />
             )}
           </div>
