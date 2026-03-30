@@ -225,6 +225,23 @@ const Index = () => {
           }
 
           if (triggered) {
+            // === PRICE PROTECTION: anti-scam-wick check for conditional orders ===
+            const isConditionalType = ['MARKET_TP_SL', 'LIMIT_TP_SL', 'CONDITIONAL', 'TRAILING_STOP'].includes(order.type);
+            if (isConditionalType && priceProtection) {
+              // Use kline OHLC average as "mark price" proxy
+              const markPrice = (kline.open + kline.high + kline.low + kline.close) / 4;
+              const deviation = Math.abs(kline.close - markPrice) / markPrice;
+              if (deviation > PRICE_PROTECTION_THRESHOLD) {
+                // Reject trigger — price deviation too large (scam wick)
+                toast.warning(`⚠️ 价格保护已触发`, {
+                  description: `条件单 ${order.id.slice(0, 8)} 由于最新价与标记价格偏差 ${(deviation * 100).toFixed(2)}% > 2%，未被执行`,
+                  duration: 6000,
+                });
+                remaining.push(order);
+                continue;
+              }
+            }
+
             filledIds.push(order.id);
             // Apply slippage for taker fills
             let actualFillPrice = fillPrice;
