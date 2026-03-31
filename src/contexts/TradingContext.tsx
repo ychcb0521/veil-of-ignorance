@@ -29,6 +29,8 @@ export interface CoinTimelineState {
   speed: number;
   historicalAnchorTime: number | null;
   realStartTime: number | null;
+  /** The original start time the user entered — never changes after start */
+  originTime: number | null;
 }
 
 export type PositionsMap = Record<string, Position[]>;
