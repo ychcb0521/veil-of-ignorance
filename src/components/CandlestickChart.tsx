@@ -10,7 +10,7 @@ import type { PendingOrder } from '@/types/trading';
 import { useTheme } from '@/contexts/ThemeContext';
 import { DrawingToolbar } from './DrawingToolbar';
 import { IndicatorMenu } from './IndicatorMenu';
-import { BarChart3, X } from 'lucide-react';
+import { BarChart3, X, ListOrdered } from 'lucide-react';
 import { usePersistedState } from '@/hooks/usePersistedState';
 import type { TradeRecord } from '@/types/trading';
 import { registerCustomIndicators, CUSTOM_INDICATOR_MAP } from '@/lib/customIndicators';
