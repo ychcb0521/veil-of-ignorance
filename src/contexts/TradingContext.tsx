@@ -61,6 +61,13 @@ interface TradingState {
   liquidationOpen: boolean;
   liquidationDetails: LiquidationDetails | undefined;
   closeLiquidationModal: () => void;
+  // Multi-Timeline Isolation
+  isTimeIsolated: boolean;
+  setIsTimeIsolated: (v: boolean) => void;
+  coinTimelines: Record<string, number>;
+  setCoinTimelines: (v: Record<string, number> | ((prev: Record<string, number>) => Record<string, number>)) => void;
+  totalPositionCount: number;
+  getEffectiveTime: (symbol?: string) => number;
 }
 
 export interface PlaceOrderParams {
