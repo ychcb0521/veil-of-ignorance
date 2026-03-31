@@ -468,7 +468,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
     }
 
     const effectiveCurrentPrice = symbolPrice;
-    const now = sim.currentSimulatedTime;
+    const now = getEffectiveTime(symbol);
 
     const recordOpen = (fillPrice: number, qty: number, side: OrderSide, fee: number, slippage: number) => {
       setTradeHistory(prev => [...prev, {
