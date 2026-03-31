@@ -892,6 +892,7 @@ const Index = () => {
           timeMode={timeMode}
           onSetTimeMode={setTimeMode}
           totalPositionCount={totalPositionCount}
+          originTime={activeCoinState.originTime}
         />
       </div>
 
