@@ -150,10 +150,10 @@ export function DrawingToolbar({ activeTool, onToolChange, onClearDrawings, draw
   return (
     <div
       ref={toolbarRef}
-      className="absolute left-0 top-0 bottom-0 z-20 flex flex-col items-center py-1.5 w-[34px]"
+      className="absolute left-0 top-0 bottom-0 z-20 flex flex-col items-center py-1.5 w-[34px] overflow-hidden"
       style={{ background: 'hsl(var(--card) / 0.95)', borderRight: '1px solid hsl(var(--border))' }}
     >
-      <div className="flex flex-col items-center gap-0.5 flex-1">
+      <div className="flex flex-col items-center gap-0.5 flex-1 min-h-0 overflow-y-auto overflow-x-hidden">
         {toolGroups.map((group) => {
           const activeItem = getActiveItem(group);
           const isActive = activeTool !== null && group.items.some(i => i.id === activeTool);
