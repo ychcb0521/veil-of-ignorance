@@ -201,7 +201,7 @@ export function OrderPanel({ currentPrice, onPlaceOrder, disabled, symbol, cooli
             {[1, 25, 50, 75, 100, 125].map(v => (
               <button
                 key={v} onClick={() => setLeverage(v)}
-                className={`text-[10px] font-mono px-1 rounded transition-colors ${
+                className={`text-[10px] font-mono px-1 rounded transition-all duration-75 ease-out active:scale-[0.95] ${
                   leverage === v ? 'text-primary' : 'text-muted-foreground hover:text-foreground'
                 }`}
               >
