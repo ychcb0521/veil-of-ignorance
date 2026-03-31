@@ -586,7 +586,7 @@ const Index = () => {
 
             if (filledSoFar + sliceQty <= totalQty + 0.0001 && now < endTime) {
               const notional = price * sliceQty;
-              const slippedPrice = calcSlippage(price, notional, order.side);
+              const slippedPrice = calcSlippage(price, notional, order.side); // TWAP: no kline volatility available
               const slippageAmt = Math.abs(slippedPrice - price) * sliceQty;
               const fee = calcFee(slippedPrice, sliceQty, false);
               const margin = (sliceQty * slippedPrice) / order.leverage;
