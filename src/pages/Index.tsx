@@ -233,10 +233,18 @@ const Index = () => {
         sim.syncReactState(simTime);
 
         // In isolated mode: continuously update the active coin's timeline
-        if (isTimeIsolatedRef.current) {
+        if (timeModeRef.current === 'isolated') {
           setCoinTimelines(prev => {
-            if (prev[activeSymbolRef.current] === simTime) return prev;
-            return { ...prev, [activeSymbolRef.current]: simTime };
+            const existing = prev[activeSymbolRef.current];
+            if (existing && existing.time === simTime) return prev;
+            return {
+              ...prev,
+              [activeSymbolRef.current]: {
+                ...(existing || { status: 'playing', speed: 1, historicalAnchorTime: null, realStartTime: null }),
+                time: simTime,
+                status: 'playing',
+              },
+            };
           });
         }
       }
