@@ -958,6 +958,7 @@ const Index = () => {
           onResume={handleResume}
           onStop={handleStop}
           onSetSpeed={handleSetSpeed}
+          onStopAllAndSwitchToSynced={handleStopAllAndSwitchToSynced}
           clockRef={clockRef}
           timeMode={timeMode}
           onSetTimeMode={handleSetTimeMode}
