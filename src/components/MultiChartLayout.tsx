@@ -1,4 +1,5 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, type MutableRefObject } from 'react';
+import type { ChartImperativeApi } from './CandlestickChart';
 import { CandlestickChart } from './CandlestickChart';
 import { LayoutGrid, Columns, Square } from 'lucide-react';
 import type { KlineData } from '@/hooks/useBinanceData';
