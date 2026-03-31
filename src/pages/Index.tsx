@@ -749,7 +749,7 @@ const Index = () => {
     } else {
       toast.error('数据获取失败', { description: '请检查时间范围和交易对' });
     }
-  }, [activeSymbol, interval, initLoad, sim, timeMode, isolatedBalances, profile]);
+  }, [activeSymbol, interval, initLoad, sim, timeMode, profile]);
 
   // ===== STATE GUARD: time mode switch =====
   const handleSetTimeMode = useCallback((newMode: 'synced' | 'isolated') => {
