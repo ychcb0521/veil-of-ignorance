@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Play, Pause, Square, Clock, Globe, Split, Lock } from 'lucide-react';
 import { formatUTC8 } from '@/lib/timeFormat';
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import type { TimeMachineStatus } from '@/hooks/useTimeSimulator';
 import type { TimeMode, CoinTimelinesMap } from '@/contexts/TradingContext';
 
@@ -21,6 +21,7 @@ interface Props {
   totalPositionCount?: number;
   originTime?: number | null;
   coinTimelines?: CoinTimelinesMap;
+  onSymbolChange?: (symbol: string) => void;
 }
 
 const SPEED_OPTIONS = [1, 2, 5, 10, 30, 60];
@@ -29,7 +30,7 @@ export function TimeControl({
   status, currentSimulatedTime, speed,
   onStart, onPause, onResume, onStop, onSetSpeed, clockRef,
   timeMode = 'synced', onSetTimeMode, totalPositionCount = 0,
-  originTime, coinTimelines = {},
+  originTime, coinTimelines = {}, onSymbolChange,
 }: Props) {
   const [dateInput, setDateInput] = useState('2024-01-15 16:00:00');
 
@@ -65,49 +66,76 @@ export function TimeControl({
 
   const ModeSelector = () => {
     if (!onSetTimeMode) return null;
+
+    const disabledReason = !canToggleMode
+      ? totalPositionCount > 0
+        ? `有 ${totalPositionCount} 笔持仓，需全部平仓后才能切换模式。`
+        : null // will show running coins list
+      : null;
+
+    const showRunningList = !canToggleMode && totalPositionCount === 0 && runningCoins.length > 0;
+
     return (
-      <TooltipProvider>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <div className="flex items-center gap-1 border-l border-border pl-3 ml-1">
-              {!canToggleMode && <Lock className="w-3 h-3 text-muted-foreground" />}
-              <button
-                onClick={() => canToggleMode && onSetTimeMode('synced')}
-                disabled={!canToggleMode}
-                className={`flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium transition-colors ${
-                  timeMode === 'synced'
-                    ? 'bg-primary/20 text-primary'
-                    : 'text-muted-foreground hover:text-foreground disabled:opacity-40'
-                }`}
-              >
-                <Globe className="w-3 h-3" /> 同步
-              </button>
-              <button
-                onClick={() => canToggleMode && onSetTimeMode('isolated')}
-                disabled={!canToggleMode}
-                className={`flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium transition-colors ${
-                  timeMode === 'isolated'
-                    ? 'bg-primary/20 text-primary'
-                    : 'text-muted-foreground hover:text-foreground disabled:opacity-40'
-                }`}
-              >
-                <Split className="w-3 h-3" /> 隔离
-              </button>
-            </div>
-          </TooltipTrigger>
-          <TooltipContent side="bottom" className="max-w-[260px]">
-            <p className="text-xs">
-              {canToggleMode
-                ? timeMode === 'synced'
-                  ? '同步模式：所有币种共用同一时间轴。'
-                  : '隔离模式：每个币种拥有独立时间轴，互不影响。'
-                : totalPositionCount > 0
-                  ? `有 ${totalPositionCount} 笔持仓，需全部平仓后才能切换模式。`
-                  : `有币种正在独立运行：${runningCoins.join(', ')}。请先停止所有运行。`}
-            </p>
-          </TooltipContent>
-        </Tooltip>
-      </TooltipProvider>
+      <Popover>
+        <PopoverTrigger asChild>
+          <div className="flex items-center gap-1 border-l border-border pl-3 ml-1 cursor-pointer">
+            {!canToggleMode && <Lock className="w-3 h-3 text-muted-foreground" />}
+            <button
+              onClick={(e) => { if (canToggleMode) { e.stopPropagation(); onSetTimeMode('synced'); } }}
+              className={`flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium transition-colors ${
+                timeMode === 'synced'
+                  ? 'bg-primary/20 text-primary'
+                  : 'text-muted-foreground hover:text-foreground disabled:opacity-40'
+              }`}
+            >
+              <Globe className="w-3 h-3" /> 同步
+            </button>
+            <button
+              onClick={(e) => { if (canToggleMode) { e.stopPropagation(); onSetTimeMode('isolated'); } }}
+              className={`flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium transition-colors ${
+                timeMode === 'isolated'
+                  ? 'bg-primary/20 text-primary'
+                  : 'text-muted-foreground hover:text-foreground disabled:opacity-40'
+              }`}
+            >
+              <Split className="w-3 h-3" /> 隔离
+            </button>
+          </div>
+        </PopoverTrigger>
+        {!canToggleMode && (
+          <PopoverContent side="bottom" className="w-72 p-3" align="start">
+            {disabledReason && <p className="text-xs text-muted-foreground">{disabledReason}</p>}
+            {showRunningList && (
+              <div className="space-y-2">
+                <p className="text-xs text-muted-foreground">
+                  无法切换至同步模式。以下币种正在独立运行：
+                </p>
+                <div className="flex flex-col gap-1">
+                  {runningCoins.map(sym => {
+                    const ct = coinTimelines[sym];
+                    const statusLabel = ct?.status === 'playing' ? '▶ 运行中' : '⏸ 已暂停';
+                    return (
+                      <button
+                        key={sym}
+                        onClick={() => onSymbolChange?.(sym)}
+                        className="flex items-center justify-between px-2 py-1.5 rounded text-xs hover:bg-accent transition-colors text-left group"
+                      >
+                        <span className="font-medium text-foreground group-hover:text-primary transition-colors">{sym}</span>
+                        <span className={`text-[10px] ${ct?.status === 'playing' ? 'text-green-400' : 'text-yellow-400'}`}>
+                          {statusLabel}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+                <p className="text-[10px] text-muted-foreground pt-1 border-t border-border">
+                  点击币种可跳转查看。请先停止所有运行后再切换模式。
+                </p>
+              </div>
+            )}
+          </PopoverContent>
+        )}
+      </Popover>
     );
   };
 
