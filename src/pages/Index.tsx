@@ -989,7 +989,7 @@ const Index = () => {
       </div>
 
       <div className="shrink-0">
-        <AccountInfo balance={balance} positionsMap={positionsMap} priceMap={priceMap} />
+        <AccountInfo balance={balance} positionsMap={positionsMap} priceMap={priceMap} timeMode={timeMode} isolatedBalances={isolatedBalances} activeSymbol={activeSymbol} />
       </div>
 
       <div className="flex-1 flex min-h-0 overflow-hidden">
