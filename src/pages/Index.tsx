@@ -919,8 +919,9 @@ const Index = () => {
           onSetSpeed={handleSetSpeed}
           clockRef={clockRef}
           timeMode={timeMode}
-          onSetTimeMode={setTimeMode}
+          onSetTimeMode={handleSetTimeMode}
           totalPositionCount={totalPositionCount}
+          coinTimelines={coinTimelines}
           originTime={activeCoinState.originTime}
         />
       </div>
