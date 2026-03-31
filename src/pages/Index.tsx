@@ -524,7 +524,7 @@ const Index = () => {
             let slippageAmount = 0;
             if (!isMaker) {
               const notional = fillPrice * order.quantity;
-              actualFillPrice = calcSlippage(fillPrice, notional, order.side);
+              actualFillPrice = calcSlippage(fillPrice, notional, order.side, { high: kline.high, low: kline.low, close: kline.close });
               slippageAmount = Math.abs(actualFillPrice - fillPrice) * order.quantity;
             }
             const fee = calcFee(actualFillPrice, order.quantity, isMaker);
