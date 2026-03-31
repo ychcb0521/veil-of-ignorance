@@ -605,9 +605,24 @@ const Index = () => {
           </div>
         </div>
 
-        {/* Order Book */}
-        <div className="w-[180px] border-l border-border shrink-0 overflow-hidden">
-          <OrderBook currentPrice={currentPrice} symbol={activeSymbol} pricePrecision={pricePrecision} />
+        {/* Order Book with collapse toggle */}
+        <div className={`border-l border-border shrink-0 overflow-hidden transition-all duration-300 ease-in-out flex flex-col ${isOrderBookOpen ? 'w-[180px]' : 'w-8'}`}>
+          <button
+            onClick={() => setIsOrderBookOpen(prev => !prev)}
+            className="flex items-center justify-center py-2 border-b border-border text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-colors shrink-0"
+            title={isOrderBookOpen ? '收起盘口' : '展开盘口'}
+          >
+            {isOrderBookOpen ? <PanelRightClose className="w-3.5 h-3.5" /> : <PanelRightOpen className="w-3.5 h-3.5" />}
+          </button>
+          {isOrderBookOpen ? (
+            <div className="flex-1 min-h-0 overflow-hidden">
+              <OrderBook currentPrice={currentPrice} symbol={activeSymbol} pricePrecision={pricePrecision} />
+            </div>
+          ) : (
+            <div className="flex-1 flex items-center justify-center">
+              <span className="text-[9px] text-muted-foreground font-medium writing-vertical" style={{ writingMode: 'vertical-rl' }}>盘口</span>
+            </div>
+          )}
         </div>
 
         <div className="w-[280px] border-l border-border shrink-0 overflow-y-auto">
