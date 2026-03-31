@@ -973,9 +973,6 @@ const Index = () => {
             currentPrice={currentPrice}
             disabled={activeCoinState.status === 'stopped' || currentPrice === 0}
             onPlaceOrder={handlePlaceOrderForActiveSymbol}
-            balance={balance}
-            positionsMap={positionsMap}
-            priceMap={priceMap}
             pricePrecision={pricePrecision}
             quantityPrecision={quantityPrecision}
             coolingOff={coolingOff.isActive}
