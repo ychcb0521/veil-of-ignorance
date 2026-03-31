@@ -239,5 +239,7 @@ export function useTimeSimulator(initialState?: Partial<PersistedTimeSim>) {
     resumeSimulation,
     stopSimulation,
     setSpeed,
+    getPersistedLiveTime,
+    clearPersistedLiveTime,
   };
 }
