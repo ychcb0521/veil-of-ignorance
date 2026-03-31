@@ -725,12 +725,6 @@ const Index = () => {
 
       if (timeMode === 'isolated') {
         const now = Date.now();
-        // Initialize sandbox balance for this symbol if not already set
-        const existingBal = isolatedBalances[activeSymbol];
-        if (existingBal === undefined || existingBal === 0) {
-          const sandboxCapital = profile?.initial_capital ?? 1_000_000;
-          setIsolatedBalances(prev => ({ ...prev, [activeSymbol]: sandboxCapital }));
-        }
         setCoinTimelines(prev => ({
           ...prev,
           [activeSymbol]: {
