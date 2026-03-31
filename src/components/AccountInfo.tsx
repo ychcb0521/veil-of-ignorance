@@ -56,7 +56,7 @@ export function AccountInfo({ balance, positionsMap, priceMap }: Props) {
         <span className="text-muted-foreground">已用保证金 </span>
         <span className="font-semibold text-foreground">{totalMargin.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
       </div>
-      <div>
+      <div className="shrink-0 whitespace-nowrap">
         <span className="text-muted-foreground">未实现盈亏 </span>
         <span className={`font-semibold ${totalPnl >= 0 ? 'trading-green' : 'trading-red'}`}>
           {totalPnl >= 0 ? '+' : ''}{totalPnl.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
