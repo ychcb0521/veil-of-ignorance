@@ -173,7 +173,7 @@ export function PositionPanel({
           allOrders.length === 0 ? (
             <div className="px-4 py-6 text-center text-xs text-muted-foreground">暂无委托</div>
           ) : (
-            <table className="w-full text-[11px] font-mono">
+            <table className="w-full text-[11px] font-mono tabular-nums">
               <thead>
                 <tr className="text-muted-foreground border-b border-border">
                   {['合约', '类型', '方向', '价格', '触发价', '数量', '杠杆', '操作'].map(h => (
