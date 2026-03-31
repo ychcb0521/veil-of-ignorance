@@ -454,7 +454,7 @@ export function OrderPanel({ currentPrice, onPlaceOrder, disabled, symbol, cooli
           <div className="flex gap-1 mt-1.5">
             {[25, 50, 75, 100].map(pct => (
               <button key={pct}
-                className="flex-1 py-0.5 rounded text-[10px] font-medium bg-secondary text-secondary-foreground hover:bg-accent transition-colors"
+                className="flex-1 py-0.5 rounded text-[10px] font-medium bg-secondary text-secondary-foreground hover:bg-accent transition-all duration-100 ease-out active:scale-[0.95]"
               >
                 {pct}%
               </button>
