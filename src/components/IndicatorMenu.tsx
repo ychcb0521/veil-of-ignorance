@@ -260,7 +260,7 @@ export function IndicatorMenu({ open, onClose, indicators, onIndicatorsChange }:
       <div className="flex items-center gap-1 px-3 py-1.5 border-b border-border overflow-x-auto">
         <button
           onClick={() => setCategoryFilter(null)}
-          className={`px-2 py-0.5 rounded text-[10px] font-medium transition-colors whitespace-nowrap ${
+          className={`px-2 py-0.5 rounded text-[10px] font-medium transition-all duration-100 ease-out active:scale-[0.95] whitespace-nowrap ${
             !categoryFilter ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'
           }`}
         >
