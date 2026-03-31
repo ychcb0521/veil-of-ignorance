@@ -245,7 +245,7 @@ export function OrderPanel({ currentPrice, onPlaceOrder, disabled, symbol, cooli
               <button
                 key={t.value}
                 onClick={() => { setOrderType(t.value); setDropdownOpen(false); }}
-                className={`w-full text-left px-3 py-2 text-xs hover:bg-accent/50 transition-colors flex items-center justify-between ${
+                className={`w-full text-left px-3 py-2 text-xs hover:bg-accent/50 transition-colors duration-100 ease-out flex items-center justify-between ${
                   orderType === t.value ? 'bg-accent/30 text-primary' : 'text-foreground'
                 }`}
               >
