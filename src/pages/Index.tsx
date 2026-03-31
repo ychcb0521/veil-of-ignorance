@@ -441,8 +441,9 @@ const Index = () => {
               break;
             }
             case 'MARKET_TP_SL': {
-              if (order.side === 'LONG' && kline.high >= order.stopPrice) { triggered = true; fillPrice = kline.close; isMaker = false; }
-              else if (order.side === 'SHORT' && kline.low <= order.stopPrice) { triggered = true; fillPrice = kline.close; isMaker = false; }
+              // Fix: use stopPrice as fill (the trigger level), NOT kline.close (look-ahead bias)
+              if (order.side === 'LONG' && kline.high >= order.stopPrice) { triggered = true; fillPrice = order.stopPrice; isMaker = false; }
+              else if (order.side === 'SHORT' && kline.low <= order.stopPrice) { triggered = true; fillPrice = order.stopPrice; isMaker = false; }
               break;
             }
             case 'LIMIT_TP_SL': {
