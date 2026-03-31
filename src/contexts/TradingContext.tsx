@@ -4,12 +4,16 @@
  * Manages:
  * - Global simulated clock (single source of truth)
  * - Multi-symbol positions & pending orders
- * - Wallet balance & trade history (with isolated account sandboxes)
- * - Liquidation engine (cross + isolated), fees, slippage
+ * - **Single global wallet balance** (1,000,000 USDT) — ALL symbols share one pool
+ * - Liquidation engine (cross + isolated margin modes), fees, slippage
  * - Funding rate engine (8h settlement)
  * 
  * ACCOUNTING IDENTITY (enforced at all times):
  *   Total Equity = Available Balance + Used Margin + Unrealized PnL
+ * 
+ * In isolated TIME mode, each symbol runs on its own timeline, but funds
+ * are deducted/credited from the single global balance in the order the
+ * user physically clicks (Real-world Sequential Ledger).
  */
 
 import React, { createContext, useContext, useCallback, useEffect, useRef, useMemo, useState } from 'react';
@@ -40,7 +44,8 @@ export type PositionsMap = Record<string, Position[]>;
 export type OrdersMap = Record<string, PendingOrder[]>;
 export type PriceMap = Record<string, number>;
 export type CoinTimelinesMap = Record<string, CoinTimelineState>;
-/** Isolated sandbox balances — one per symbol, only used in 'isolated' time mode */
+
+/** @deprecated kept for backward compat — always empty now */
 export type IsolatedBalancesMap = Record<string, number>;
 
 interface LiquidationDetails { lostAmount: number; liquidatedPositions: number; }
@@ -59,8 +64,9 @@ interface TradingState {
   setPriceMap: (v: PriceMap | ((prev: PriceMap) => PriceMap)) => void;
   balance: number;
   setBalance: (v: number | ((prev: number) => number)) => void;
-  /** Isolated sandbox balances per symbol (only meaningful in isolated mode) */
+  /** @deprecated always empty — single global balance is used */
   isolatedBalances: IsolatedBalancesMap;
+  /** @deprecated no-op */
   setIsolatedBalances: (v: IsolatedBalancesMap | ((prev: IsolatedBalancesMap) => IsolatedBalancesMap)) => void;
   tradeHistory: TradeRecord[];
   setTradeHistory: (v: TradeRecord[] | ((prev: TradeRecord[]) => TradeRecord[])) => void;
@@ -90,9 +96,9 @@ interface TradingState {
   totalPositionCount: number;
   getEffectiveTime: (symbol?: string) => number;
   getCoinState: (symbol: string) => CoinTimelineState | null;
-  /** Get the effective balance for a symbol (respects isolated/synced mode) */
+  /** Get the global balance (always the single pool) */
   getEffectiveBalance: (symbol: string) => number;
-  /** Get the effective available balance for a symbol */
+  /** Get available balance (global balance minus all cross margins) */
   getEffectiveAvailable: (symbol: string) => number;
 }
 
@@ -132,46 +138,17 @@ export function useTradingContext() {
 // ===== Helpers =====
 
 /**
- * Calculate available balance for a specific symbol, respecting time mode.
- * In synced mode: global balance minus all cross margins.
- * In isolated mode: symbol's sandbox balance minus that symbol's cross margins only.
+ * Calculate available balance — always from the single global pool.
+ * Available = balance - sum of all cross-margin positions across ALL symbols.
  */
-function calcAvailableForSymbol(
-  timeMode: TimeMode,
-  symbol: string,
-  globalBalance: number,
-  isolatedBalances: IsolatedBalancesMap,
-  positionsMap: PositionsMap,
-): number {
-  if (timeMode === 'synced') {
-    // Synced: all symbols share the global balance
-    let totalCrossMargin = 0;
-    for (const positions of Object.values(positionsMap)) {
-      for (const p of positions) {
-        if (p.marginMode === 'cross') totalCrossMargin += p.margin;
-      }
-    }
-    return globalBalance - totalCrossMargin;
-  } else {
-    // Isolated time mode: each symbol has its own sandbox balance
-    const bal = isolatedBalances[symbol] ?? 0;
-    let symbolCrossMargin = 0;
-    for (const p of (positionsMap[symbol] || [])) {
-      if (p.marginMode === 'cross') symbolCrossMargin += p.margin;
-    }
-    return bal - symbolCrossMargin;
-  }
-}
-
-/** Legacy helper for backward compat — synced mode only */
-function getAvailableBalance(balance: number, positionsMap: PositionsMap): number {
-  let totalMargin = 0;
+function calcAvailable(balance: number, positionsMap: PositionsMap): number {
+  let totalCrossMargin = 0;
   for (const positions of Object.values(positionsMap)) {
     for (const p of positions) {
-      if (p.marginMode === 'cross') totalMargin += p.margin;
+      if (p.marginMode === 'cross') totalCrossMargin += p.margin;
     }
   }
-  return balance - totalMargin;
+  return balance - totalCrossMargin;
 }
 
 function applySlippageIfTaker(price: number, quantity: number, side: OrderSide, isMaker: boolean): { fillPrice: number; slippage: number } {
@@ -239,17 +216,15 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
   const [timeMode, setTimeMode] = usePersistedState<TimeMode>('time_mode', 'synced');
   const [coinTimelines, setCoinTimelines] = usePersistedState<CoinTimelinesMap>('coin_timelines_v2', {});
 
-  // === Isolated Sandbox Balances ===
-  // Each symbol in isolated mode gets its own independent balance (initialCapital each)
-  const [isolatedBalances, setIsolatedBalances] = usePersistedState<IsolatedBalancesMap>('isolated_balances', {});
+  // Stub for backward compat — isolated balances no longer used
+  const emptyIsolatedBalances: IsolatedBalancesMap = {};
+  const setIsolatedBalancesNoop = useCallback((_v: IsolatedBalancesMap | ((prev: IsolatedBalancesMap) => IsolatedBalancesMap)) => {}, []);
 
   // Refs for latest values in callbacks
   const timeModeRef = useRef(timeMode);
-  const isolatedBalancesRef = useRef(isolatedBalances);
   useEffect(() => { timeModeRef.current = timeMode; }, [timeMode]);
-  useEffect(() => { isolatedBalancesRef.current = isolatedBalances; }, [isolatedBalances]);
 
-  // Total position count across all symbols (for the guard)
+  // Total position count across all symbols
   const totalPositionCount = useMemo(() => {
     let count = 0;
     for (const positions of Object.values(positionsMap)) count += positions.length;
@@ -269,17 +244,14 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
     return ct?.time ?? sim.currentSimulatedTime;
   }, [timeMode, coinTimelines, activeSymbol, sim.currentSimulatedTime]);
 
-  // Get effective balance for a symbol (mode-aware)
-  const getEffectiveBalance = useCallback((symbol: string): number => {
-    if (timeModeRef.current === 'synced') return balance;
-    return isolatedBalancesRef.current[symbol] ?? 0;
+  // Always return the single global balance
+  const getEffectiveBalance = useCallback((_symbol: string): number => {
+    return balance;
   }, [balance]);
 
-  // Get effective available balance for a symbol
-  const getEffectiveAvailable = useCallback((symbol: string): number => {
-    return calcAvailableForSymbol(
-      timeModeRef.current, symbol, balance, isolatedBalancesRef.current, positionsMap,
-    );
+  // Always return available from the single global pool
+  const getEffectiveAvailable = useCallback((_symbol: string): number => {
+    return calcAvailable(balance, positionsMap);
   }, [balance, positionsMap]);
 
   // Liquidation modal state
@@ -363,41 +335,6 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
     return Array.from(syms);
   }, [positionsMap, ordersMap]);
 
-  // ===== BALANCE MUTATION HELPERS (mode-aware) =====
-  /**
-   * Deduct amount from the correct balance (global or isolated sandbox).
-   * Returns false if insufficient funds.
-   */
-  const deductBalance = useCallback((symbol: string, amount: number): boolean => {
-    if (timeModeRef.current === 'synced') {
-      setBalance(prev => prev - amount);
-      return true;
-    } else {
-      const current = isolatedBalancesRef.current[symbol] ?? 0;
-      if (current < amount) return false;
-      setIsolatedBalances(prev => ({ ...prev, [symbol]: (prev[symbol] ?? 0) - amount }));
-      return true;
-    }
-  }, []);
-
-  /** Credit amount to the correct balance */
-  const creditBalance = useCallback((symbol: string, amount: number) => {
-    if (timeModeRef.current === 'synced') {
-      setBalance(prev => prev + amount);
-    } else {
-      setIsolatedBalances(prev => ({ ...prev, [symbol]: (prev[symbol] ?? 0) + amount }));
-    }
-  }, []);
-
-  /** Set balance to exact value for a symbol */
-  const setSymbolBalance = useCallback((symbol: string, value: number) => {
-    if (timeModeRef.current === 'synced') {
-      setBalance(value);
-    } else {
-      setIsolatedBalances(prev => ({ ...prev, [symbol]: value }));
-    }
-  }, []);
-
   // ===== FUNDING RATE ENGINE =====
   const lastFundingSlotRef = useRef<number>(-1);
 
@@ -430,12 +367,10 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
       const price = priceMap[sym] || 0;
       if (price <= 0 || positions.length === 0) continue;
 
-      let symbolFunding = 0;
       for (const pos of positions) {
         const notional = pos.quantity * price;
         const fee = notional * FUNDING_RATE;
         const amount = pos.side === 'LONG' ? -fee : fee;
-        symbolFunding += amount;
         totalFunding += amount;
         posCount++;
 
@@ -448,20 +383,11 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
           openTime: now, closeTime: now,
         });
       }
-
-      // Credit/debit to the correct account
-      if (symbolFunding !== 0) {
-        creditBalance(sym, symbolFunding);
-      }
     }
 
-    if (posCount > 0) {
-      // Note: creditBalance already applied per-symbol above.
-      // For synced mode, creditBalance calls setBalance multiple times,
-      // but React batches these. We need to avoid double-counting.
-      // Actually since creditBalance in synced mode modifies global balance,
-      // and we called it per-symbol, we need to NOT call it again.
-      // The per-symbol calls already handle synced mode correctly.
+    if (posCount > 0 && totalFunding !== 0) {
+      // Single global balance debit/credit
+      setBalance(prev => prev + totalFunding);
       setTradeHistory(prev => [...prev, ...fundingRecords]);
       const sign = totalFunding >= 0 ? '+' : '';
       toast.info(`💰 资金费率结算: ${sign}${totalFunding.toFixed(4)} USDT`, {
@@ -507,6 +433,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
           [sym]: (prev[sym] || []).filter((_, idx) => idx !== i),
         }));
 
+        // Isolated margin is lost — no change to global balance (it was already deducted at open)
         toast.error(`🚨 逐仓爆仓: ${sym} ${pos.side === 'LONG' ? '多' : '空'} ${pos.quantity}`, {
           description: `保证金 ${pos.isolatedMargin.toFixed(2)} USDT 已清零`,
           duration: 8000,
@@ -514,144 +441,77 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
       }
     }
 
-    // --- CROSS liquidation ---
-    // In isolated time mode, check cross liquidation per-symbol sandbox
-    if (timeModeRef.current === 'isolated') {
-      for (const [sym, positions] of Object.entries(positionsMap)) {
-        const price = priceMap[sym] || 0;
-        if (price <= 0) continue;
-        
-        let crossPnl = 0;
-        let crossMargin = 0;
-        let crossCount = 0;
-        
-        for (const pos of positions) {
-          if (pos.marginMode !== 'cross') continue;
-          crossPnl += calcUnrealizedPnl(pos, price);
-          crossMargin += pos.margin;
-          crossCount++;
-        }
-        
-        if (crossCount === 0) continue;
-        
-        const symBalance = isolatedBalancesRef.current[sym] ?? 0;
-        const crossEquity = symBalance + crossPnl;
-        const crossMaintenance = crossMargin * MAINTENANCE_MARGIN_RATE;
-        
-        if (crossEquity > crossMaintenance && crossEquity > 0) continue;
-        
-        // Liquidate this symbol's cross positions
-        const liqRecords: TradeRecord[] = [];
+    // --- CROSS liquidation: aggregate all cross positions globally ---
+    let crossUnrealizedPnl = 0;
+    let crossMargin = 0;
+    let crossPositionCount = 0;
+    for (const [sym, positions] of Object.entries(positionsMap)) {
+      const price = priceMap[sym] || 0;
+      if (price <= 0) continue;
+      for (const pos of positions) {
+        if (pos.marginMode !== 'cross') continue;
+        crossUnrealizedPnl += calcUnrealizedPnl(pos, price);
+        crossMargin += pos.margin;
+        crossPositionCount++;
+      }
+    }
+
+    if (crossPositionCount > 0) {
+      const crossEquity = balance + crossUnrealizedPnl;
+      const crossMaintenance = crossMargin * MAINTENANCE_MARGIN_RATE;
+
+      if (crossEquity <= crossMaintenance || crossEquity <= 0) {
+        liquidationCheckRef.current = true;
+
         let totalLoss = 0;
-        
-        for (const pos of positions) {
-          if (pos.marginMode !== 'cross') continue;
-          const pnl = calcUnrealizedPnl(pos, price);
-          const closeFee = calcFee(price, pos.quantity, false);
-          const liqFee = pos.quantity * price * LIQUIDATION_FEE_RATE;
-          totalLoss += Math.abs(Math.min(0, pnl - closeFee - liqFee)) + liqFee;
-          
-          liqRecords.push({
-            id: crypto.randomUUID(), symbol: sym, side: pos.side,
-            type: 'MARKET' as OrderType, action: 'LIQUIDATION' as const,
-            entryPrice: pos.entryPrice, exitPrice: price,
-            quantity: pos.quantity, leverage: pos.leverage,
-            pnl: pnl - closeFee - liqFee, fee: closeFee + liqFee, slippage: 0,
-            openTime: 0, closeTime: getEffectiveTime(sym),
-          });
-        }
-        
-        // Remove cross positions for this symbol
-        setPositionsMap(prev => ({
-          ...prev,
-          [sym]: (prev[sym] || []).filter(p => p.marginMode === 'isolated'),
-        }));
-        // Cancel this symbol's orders
-        setOrdersMap(prev => ({ ...prev, [sym]: [] }));
-        // Set sandbox balance to near-zero
-        setIsolatedBalances(prev => ({ ...prev, [sym]: Math.max(0, crossEquity * 0.05) }));
-        setTradeHistory(prev => [...prev, ...liqRecords]);
-        
-        setLiquidationDetails({ lostAmount: totalLoss, liquidatedPositions: crossCount });
-        setLiquidationOpen(true);
-        toast.error(`🚨 ${sym} 全仓爆仓！`, { duration: 10000 });
-      }
-    } else {
-      // Synced mode: aggregate all cross positions globally (original logic)
-      let crossUnrealizedPnl = 0;
-      let crossMargin = 0;
-      let crossPositionCount = 0;
-      for (const [sym, positions] of Object.entries(positionsMap)) {
-        const price = priceMap[sym] || 0;
-        if (price <= 0) continue;
-        for (const pos of positions) {
-          if (pos.marginMode !== 'cross') continue;
-          crossUnrealizedPnl += calcUnrealizedPnl(pos, price);
-          crossMargin += pos.margin;
-          crossPositionCount++;
-        }
-      }
+        const liqRecords: TradeRecord[] = [];
 
-      if (crossPositionCount > 0) {
-        const crossEquity = balance + crossUnrealizedPnl;
-        const crossMaintenance = crossMargin * MAINTENANCE_MARGIN_RATE;
+        for (const [sym, positions] of Object.entries(positionsMap)) {
+          const price = priceMap[sym] || 0;
+          if (price <= 0) continue;
 
-        if (crossEquity <= crossMaintenance || crossEquity <= 0) {
-          liquidationCheckRef.current = true;
+          for (const pos of positions) {
+            if (pos.marginMode !== 'cross') continue;
+            const pnl = calcUnrealizedPnl(pos, price);
+            const closeFee = calcFee(price, pos.quantity, false);
+            const liqFee = pos.quantity * price * LIQUIDATION_FEE_RATE;
+            totalLoss += Math.abs(Math.min(0, pnl - closeFee - liqFee)) + liqFee;
 
-          let totalLoss = 0;
-          const liqRecords: TradeRecord[] = [];
-
-          for (const [sym, positions] of Object.entries(positionsMap)) {
-            const price = priceMap[sym] || 0;
-            if (price <= 0) continue;
-
-            for (const pos of positions) {
-              if (pos.marginMode !== 'cross') continue;
-              const pnl = calcUnrealizedPnl(pos, price);
-              const closeFee = calcFee(price, pos.quantity, false);
-              const liqFee = pos.quantity * price * LIQUIDATION_FEE_RATE;
-              totalLoss += Math.abs(Math.min(0, pnl - closeFee - liqFee)) + liqFee;
-
-              liqRecords.push({
-                id: crypto.randomUUID(), symbol: sym, side: pos.side,
-                type: 'MARKET' as OrderType, action: 'LIQUIDATION' as const,
-                entryPrice: pos.entryPrice, exitPrice: price,
-                quantity: pos.quantity, leverage: pos.leverage,
-                pnl: pnl - closeFee - liqFee, fee: closeFee + liqFee, slippage: 0,
-                openTime: 0, closeTime: getEffectiveTime(sym),
-              });
-            }
+            liqRecords.push({
+              id: crypto.randomUUID(), symbol: sym, side: pos.side,
+              type: 'MARKET' as OrderType, action: 'LIQUIDATION' as const,
+              entryPrice: pos.entryPrice, exitPrice: price,
+              quantity: pos.quantity, leverage: pos.leverage,
+              pnl: pnl - closeFee - liqFee, fee: closeFee + liqFee, slippage: 0,
+              openTime: 0, closeTime: getEffectiveTime(sym),
+            });
           }
-
-          setPositionsMap(prev => {
-            const next: PositionsMap = {};
-            for (const [sym, positions] of Object.entries(prev)) {
-              const isolated = positions.filter(p => p.marginMode === 'isolated');
-              if (isolated.length > 0) next[sym] = isolated;
-            }
-            return next;
-          });
-          setOrdersMap({});
-          setBalance(Math.max(0, crossEquity * 0.05));
-          setTradeHistory(prev => [...prev, ...liqRecords]);
-
-          setLiquidationDetails({ lostAmount: totalLoss, liquidatedPositions: crossPositionCount });
-          setLiquidationOpen(true);
-          toast.error('🚨 全仓爆仓！所有全仓仓位已被强制平仓', { duration: 10000 });
-
-          setTimeout(() => { liquidationCheckRef.current = false; }, 2000);
         }
+
+        setPositionsMap(prev => {
+          const next: PositionsMap = {};
+          for (const [sym, positions] of Object.entries(prev)) {
+            const isolated = positions.filter(p => p.marginMode === 'isolated');
+            if (isolated.length > 0) next[sym] = isolated;
+          }
+          return next;
+        });
+        setOrdersMap({});
+        setBalance(Math.max(0, crossEquity * 0.05));
+        setTradeHistory(prev => [...prev, ...liqRecords]);
+
+        setLiquidationDetails({ lostAmount: totalLoss, liquidatedPositions: crossPositionCount });
+        setLiquidationOpen(true);
+        toast.error('🚨 全仓爆仓！所有全仓仓位已被强制平仓', { duration: 10000 });
+
+        setTimeout(() => { liquidationCheckRef.current = false; }, 2000);
       }
     }
   }, [priceMap, positionsMap, balance, sim.isRunning, sim.currentSimulatedTime]);
 
-  // ===== Place Order (with strict accounting enforcement) =====
+  // ===== Place Order (with strict accounting enforcement — single global pool) =====
   const handlePlaceOrder = useCallback((symbol: string, order: PlaceOrderParams) => {
-    const available = calcAvailableForSymbol(
-      timeModeRef.current, symbol,
-      balance, isolatedBalancesRef.current, positionsMap,
-    );
+    const available = calcAvailable(balance, positionsMap);
     const symbolPrice = priceMap[symbol] || 0;
     if (symbolPrice <= 0 && order.type === 'MARKET') {
       toast.error('无法获取当前价格'); return;
@@ -679,7 +539,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
         });
         return;
       }
-      deductBalance(symbol, requiredMargin);
+      setBalance(prev => prev - requiredMargin);
       setPositionsMap(prev => ({ ...prev, [symbol]: [...(prev[symbol] || []), position] }));
       recordOpen(position.entryPrice, order.quantity, order.side, fee, slippage);
       toast.success(`最优价成交: ${order.side === 'LONG' ? '开多' : '开空'} ${order.quantity.toFixed(6)} @ ${position.entryPrice.toFixed(2)}`);
@@ -696,7 +556,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
         });
         return;
       }
-      deductBalance(symbol, requiredMargin);
+      setBalance(prev => prev - requiredMargin);
       setPositionsMap(prev => ({ ...prev, [symbol]: [...(prev[symbol] || []), position] }));
       recordOpen(position.entryPrice, order.quantity, order.side, fee, slippage);
       toast.success(`${order.side === 'LONG' ? '开多' : '开空'} ${order.quantity.toFixed(6)} @ ${position.entryPrice.toFixed(2)}`);
@@ -768,9 +628,9 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
     };
     setOrdersMap(prev => ({ ...prev, [symbol]: [...(prev[symbol] || []), newOrder] }));
     toast.info('委托已挂出');
-  }, [balance, positionsMap, priceMap, getEffectiveTime, deductBalance]);
+  }, [balance, positionsMap, priceMap, getEffectiveTime]);
 
-  // ===== Close Position (mode-aware balance return) =====
+  // ===== Close Position — single global balance =====
   const handleClosePosition = useCallback((symbol: string, index: number) => {
     const symbolPositions = positionsMap[symbol] || [];
     const pos = symbolPositions[index];
@@ -787,8 +647,8 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
       ? pos.isolatedMargin + pnl - fee
       : pos.margin + pnl - fee;
 
-    // Credit the returned margin to the correct account
-    creditBalance(symbol, Math.max(0, returnedMargin));
+    // Credit to single global balance
+    setBalance(prev => prev + Math.max(0, returnedMargin));
     setPositionsMap(prev => ({
       ...prev,
       [symbol]: (prev[symbol] || []).filter((_, i) => i !== index),
@@ -802,7 +662,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
     toast(pnl >= 0 ? '盈利平仓 ✅' : '亏损平仓 ❌', {
       description: `${symbol} ${pnl >= 0 ? '+' : ''}${(pnl - fee).toFixed(2)} USDT`,
     });
-  }, [positionsMap, priceMap, getEffectiveTime, creditBalance]);
+  }, [positionsMap, priceMap, getEffectiveTime]);
 
   // ===== Cancel Order =====
   const handleCancelOrder = useCallback((symbol: string, orderId: string) => {
@@ -816,14 +676,11 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
   // ===== Add Isolated Margin (top-up) =====
   const handleAddIsolatedMargin = useCallback((symbol: string, posIndex: number, amount: number) => {
     if (amount <= 0) return;
-    const avail = calcAvailableForSymbol(
-      timeModeRef.current, symbol,
-      balance, isolatedBalancesRef.current, positionsMap,
-    );
+    const avail = calcAvailable(balance, positionsMap);
     const actual = Math.min(amount, avail);
     if (actual <= 0) { toast.error('可用余额不足'); return; }
 
-    deductBalance(symbol, actual);
+    setBalance(prev => prev - actual);
     setPositionsMap(prev => {
       const positions = [...(prev[symbol] || [])];
       const pos = positions[posIndex];
@@ -835,7 +692,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
       return { ...prev, [symbol]: positions };
     });
     toast.success(`已追加 ${actual.toFixed(2)} USDT 保证金`);
-  }, [balance, positionsMap, deductBalance]);
+  }, [balance, positionsMap]);
 
   const value: TradingState = {
     sim,
@@ -845,7 +702,8 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
     ordersMap, setOrdersMap,
     priceMap, setPriceMap,
     balance, setBalance,
-    isolatedBalances, setIsolatedBalances,
+    isolatedBalances: emptyIsolatedBalances,
+    setIsolatedBalances: setIsolatedBalancesNoop,
     tradeHistory, setTradeHistory,
     activeSymbolPositions, activeSymbolOrders,
     allPositions, allOrders,

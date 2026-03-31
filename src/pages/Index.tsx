@@ -81,7 +81,7 @@ const Index = () => {
     sim, activeSymbol, setActiveSymbol, interval, setInterval: setIntervalVal,
     positionsMap, setPositionsMap, ordersMap, setOrdersMap,
     priceMap, setPriceMap, balance, setBalance,
-    isolatedBalances, setIsolatedBalances,
+    isolatedBalances,
     tradeHistory, setTradeHistory,
     activeSymbolPositions, activeSymbolOrders,
     allPositions, allOrders, currentPrice, activeSymbols,
@@ -725,12 +725,6 @@ const Index = () => {
 
       if (timeMode === 'isolated') {
         const now = Date.now();
-        // Initialize sandbox balance for this symbol if not already set
-        const existingBal = isolatedBalances[activeSymbol];
-        if (existingBal === undefined || existingBal === 0) {
-          const sandboxCapital = profile?.initial_capital ?? 1_000_000;
-          setIsolatedBalances(prev => ({ ...prev, [activeSymbol]: sandboxCapital }));
-        }
         setCoinTimelines(prev => ({
           ...prev,
           [activeSymbol]: {
@@ -755,7 +749,7 @@ const Index = () => {
     } else {
       toast.error('数据获取失败', { description: '请检查时间范围和交易对' });
     }
-  }, [activeSymbol, interval, initLoad, sim, timeMode, isolatedBalances, profile]);
+  }, [activeSymbol, interval, initLoad, sim, timeMode, profile]);
 
   // ===== STATE GUARD: time mode switch =====
   const handleSetTimeMode = useCallback((newMode: 'synced' | 'isolated') => {
@@ -823,14 +817,14 @@ const Index = () => {
     setSyncedOriginTime(null);
     sim.stopSimulation();
     setCoinTimelines({});
-    setIsolatedBalances({}); // Wipe all sandbox accounts
+    // isolatedBalances removed — single global pool
     setTimeMode('synced');
 
     toast.success('已清除所有平行宇宙数据并切换到同步模式');
   }, [
     positionsMap, priceMap, handleClosePosition,
     ordersMap, handleCancelOrder, reset, sim,
-    setCoinTimelines, setTimeMode, setIsolatedBalances,
+    setCoinTimelines, setTimeMode,
   ]);
 
   const handleStop = useCallback(() => {
@@ -989,7 +983,7 @@ const Index = () => {
       </div>
 
       <div className="shrink-0">
-        <AccountInfo balance={balance} positionsMap={positionsMap} priceMap={priceMap} timeMode={timeMode} isolatedBalances={isolatedBalances} activeSymbol={activeSymbol} />
+        <AccountInfo balance={balance} positionsMap={positionsMap} priceMap={priceMap} timeMode={timeMode} activeSymbol={activeSymbol} />
       </div>
 
       <div className="flex-1 flex min-h-0 overflow-hidden">
