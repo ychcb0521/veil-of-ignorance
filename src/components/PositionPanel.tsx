@@ -261,7 +261,7 @@ export function PositionPanel({
               暂无资金费记录 · 每 8 小时结算 (00:00, 08:00, 16:00 UTC)
             </div>
           ) : (
-            <table className="w-full text-[11px] font-mono">
+            <table className="w-full text-[11px] font-mono tabular-nums">
               <thead>
                 <tr className="text-muted-foreground border-b border-border">
                   {['时间', '合约', '方向', '名义价值', '费率', '金额'].map(h => (

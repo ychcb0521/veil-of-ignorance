@@ -101,7 +101,7 @@ export function OrderBook({ currentPrice, symbol, previousPrice, pricePrecision:
   }
 
   return (
-    <div className="flex flex-col h-full text-[10px] font-mono select-none">
+    <div className="flex flex-col h-full text-[10px] font-mono tabular-nums select-none">
       {/* Header */}
       <div className="flex items-center justify-between px-2 py-1.5 border-b border-border">
         <span className="text-[10px] font-semibold text-foreground">盘口</span>
