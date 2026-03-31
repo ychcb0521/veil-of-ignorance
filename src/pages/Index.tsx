@@ -783,12 +783,22 @@ const Index = () => {
     }
   }, [timeMode, coinTimelines, totalPositionCount, setTimeMode, setCoinTimelines]);
 
+  // State for mode switch confirmation dialog
+  const [modeSwitchDialogOpen, setModeSwitchDialogOpen] = useState(false);
+
   const handleStopAllAndSwitchToSynced = useCallback(() => {
     if (timeMode !== 'isolated') {
       handleSetTimeMode('synced');
       return;
     }
+    // Show confirmation dialog
+    setModeSwitchDialogOpen(true);
+  }, [timeMode, handleSetTimeMode]);
 
+  const confirmStopAllAndSwitch = useCallback(() => {
+    setModeSwitchDialogOpen(false);
+
+    // Close all positions across all symbols
     for (const [sym, positions] of Object.entries(positionsMap)) {
       const price = priceMap[sym] || 0;
       if (price <= 0) continue;
@@ -797,12 +807,14 @@ const Index = () => {
       }
     }
 
+    // Cancel all orders
     for (const [sym, orders] of Object.entries(ordersMap)) {
       for (const order of orders) {
         handleCancelOrder(sym, order.id);
       }
     }
 
+    // Full state cleanup — garbage collection
     reset();
     prevVisibleLenRef.current = 0;
     cursorRef.current = 0;
@@ -811,21 +823,14 @@ const Index = () => {
     setSyncedOriginTime(null);
     sim.stopSimulation();
     setCoinTimelines({});
+    setIsolatedBalances({}); // Wipe all sandbox accounts
     setTimeMode('synced');
 
-    toast.success('已停止所有独立时间轴并切换到同步模式');
+    toast.success('已清除所有平行宇宙数据并切换到同步模式');
   }, [
-    timeMode,
-    handleSetTimeMode,
-    positionsMap,
-    priceMap,
-    handleClosePosition,
-    ordersMap,
-    handleCancelOrder,
-    reset,
-    sim,
-    setCoinTimelines,
-    setTimeMode,
+    positionsMap, priceMap, handleClosePosition,
+    ordersMap, handleCancelOrder, reset, sim,
+    setCoinTimelines, setTimeMode, setIsolatedBalances,
   ]);
 
   const handleStop = useCallback(() => {
