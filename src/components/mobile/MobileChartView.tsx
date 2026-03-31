@@ -37,7 +37,7 @@ interface Props {
 
 export function MobileChartView(props: Props) {
   const SPEED_OPTIONS = [1, 2, 5, 10, 30, 60];
-  const [selectedDate, setSelectedDate] = useState(() => new Date('2024-01-15T08:00:00Z'));
+  const [selectedDate, setSelectedDate] = useState(() => new Date('2024-01-15T00:00:00Z')); // 00:00 UTC = 08:00 UTC+8
   const [showPicker, setShowPicker] = useState(false);
   const [showTimeframeSheet, setShowTimeframeSheet] = useState(false);
   const baseCoin = props.symbol.replace('USDT', '');
@@ -45,8 +45,7 @@ export function MobileChartView(props: Props) {
   const formatSimTime = formatUTC8;
 
   const formatSelectedDate = () => {
-    const d = selectedDate;
-    return `${d.getUTCFullYear()}-${String(d.getUTCMonth()+1).padStart(2,'0')}-${String(d.getUTCDate()).padStart(2,'0')} ${String(d.getUTCHours()).padStart(2,'0')}:${String(d.getUTCMinutes()).padStart(2,'0')}`;
+    return formatUTC8(selectedDate.getTime()).slice(0, 16);
   };
 
   const handlePickerConfirm = (date: Date) => {

@@ -17,10 +17,11 @@ interface Props {
 const SPEED_OPTIONS = [1, 2, 5, 10, 30, 60];
 
 export function TimeControl({ status, currentSimulatedTime, speed, onStart, onPause, onResume, onStop, onSetSpeed }: Props) {
-  const [dateInput, setDateInput] = useState('2024-01-15 08:00:00');
+  const [dateInput, setDateInput] = useState('2024-01-15 16:00:00'); // UTC+8 default
 
   const handleStart = () => {
-    const ts = new Date(dateInput.replace(' ', 'T') + 'Z').getTime();
+    // Input is in UTC+8, convert to UTC timestamp by subtracting 8 hours
+    const ts = new Date(dateInput.replace(' ', 'T') + 'Z').getTime() - 8 * 3600_000;
     if (isNaN(ts)) return;
     onStart(ts);
   };
