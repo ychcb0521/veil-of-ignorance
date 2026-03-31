@@ -213,7 +213,7 @@ export function TimeControl({
               placeholder="YYYY-MM-DD HH:mm:ss"
               className="input-dark w-52 text-xs"
             />
-            <button onClick={handleStart} className="btn-long flex items-center gap-1.5 text-xs">
+            <button onClick={handleStart} className="btn-long flex items-center gap-1.5 text-xs active:scale-[0.97]">
               <Play className="w-3.5 h-3.5" /> 启动
             </button>
             {modeSelectorButtons}
