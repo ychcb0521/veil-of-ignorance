@@ -156,7 +156,7 @@
   }
 
   .btn-long {
-    @apply font-semibold py-2.5 px-4 rounded-md text-sm transition-all;
+    @apply font-semibold py-2.5 px-4 rounded-md text-sm transition-all duration-100 ease-out active:scale-[0.97];
     background: hsl(var(--trading-green));
     color: hsl(220 20% 4%);
   }
@@ -165,7 +165,7 @@
   }
 
   .btn-short {
-    @apply font-semibold py-2.5 px-4 rounded-md text-sm transition-all;
+    @apply font-semibold py-2.5 px-4 rounded-md text-sm transition-all duration-100 ease-out active:scale-[0.97];
     background: hsl(var(--trading-red));
     color: white;
   }
@@ -179,7 +179,7 @@
   }
 
   .input-dark {
-    @apply rounded-md border border-border px-3 py-2 text-sm font-mono transition-colors;
+    @apply rounded-md border border-border px-3 py-2 text-sm font-mono transition-colors duration-100 ease-out;
     background: hsl(var(--secondary));
     color: hsl(var(--foreground));
   }
@@ -196,10 +196,15 @@
   }
 
   .tab-inactive {
-    @apply border-b-2 border-transparent pb-2 text-sm font-medium;
+    @apply border-b-2 border-transparent pb-2 text-sm font-medium transition-colors duration-100 ease-out;
     color: hsl(var(--muted-foreground));
   }
   .tab-inactive:hover {
     color: hsl(var(--foreground));
+  }
+
+  /* Global press feedback for interactive elements */
+  .press-feedback {
+    @apply transition-transform duration-75 ease-out active:scale-[0.97];
   }
 }

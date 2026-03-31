@@ -61,7 +61,7 @@ export function PositionPanel({
           <button
             key={t.key}
             onClick={() => onTabChange(t.key)}
-            className={`py-2 text-xs font-medium border-b-2 transition-colors ${
+            className={`py-2 text-xs font-medium border-b-2 transition-all duration-100 ease-out active:scale-[0.97] ${
               activeTab === t.key
                 ? 'border-primary text-primary'
                 : 'border-transparent text-muted-foreground hover:text-foreground'

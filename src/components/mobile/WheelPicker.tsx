@@ -215,7 +215,7 @@ export function WheelDateTimePicker({ initialDate, onConfirm, onCancel }: WheelP
 
       {/* Drawer */}
       <div
-        className="relative bg-card rounded-t-2xl border-t border-border animate-in slide-in-from-bottom duration-300"
+        className="relative bg-card rounded-t-2xl border-t border-border animate-in slide-in-from-bottom duration-200"
         onClick={e => e.stopPropagation()}
       >
         {/* Header */}

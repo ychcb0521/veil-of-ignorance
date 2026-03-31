@@ -36,7 +36,7 @@ export function TimeframeSelector({ interval, onIntervalChange }: Props) {
         <button
           key={tf}
           onClick={() => onIntervalChange(tf)}
-          className={`px-2 py-1 rounded text-xs font-mono transition-colors ${
+          className={`px-2 py-1 rounded text-xs font-mono transition-all duration-100 ease-out active:scale-[0.95] ${
             interval === tf
               ? 'bg-primary text-primary-foreground'
               : 'bg-secondary text-secondary-foreground hover:bg-accent'
@@ -49,7 +49,7 @@ export function TimeframeSelector({ interval, onIntervalChange }: Props) {
       {/* Dropdown trigger */}
       <button
         onClick={() => setOpen(!open)}
-        className={`px-2 py-1 rounded text-xs font-mono transition-colors flex items-center gap-0.5 ${
+        className={`px-2 py-1 rounded text-xs font-mono transition-all duration-100 ease-out active:scale-[0.95] flex items-center gap-0.5 ${
           open ? 'bg-primary text-primary-foreground' : !isPinnedActive && interval ? 'bg-accent text-foreground' : 'bg-secondary text-secondary-foreground hover:bg-accent'
         }`}
       >
@@ -76,7 +76,7 @@ export function TimeframeSelector({ interval, onIntervalChange }: Props) {
               <button
                 key={tf}
                 onClick={() => editing ? togglePin(tf) : (() => { onIntervalChange(tf); setOpen(false); setEditing(false); })()}
-                className={`relative px-3 py-1.5 rounded text-xs font-mono border transition-colors ${
+                className={`relative px-3 py-1.5 rounded text-xs font-mono border transition-all duration-100 ease-out active:scale-[0.95] ${
                   interval === tf && !editing
                     ? 'border-primary bg-primary/10 text-primary'
                     : 'border-border bg-secondary text-foreground hover:bg-accent'
@@ -99,7 +99,7 @@ export function TimeframeSelector({ interval, onIntervalChange }: Props) {
               <button
                 key={tf}
                 onClick={() => editing ? togglePin(tf) : (() => { onIntervalChange(tf); setOpen(false); setEditing(false); })()}
-                className={`relative px-3 py-1.5 rounded text-xs font-mono border transition-colors ${
+                className={`relative px-3 py-1.5 rounded text-xs font-mono border transition-all duration-100 ease-out active:scale-[0.95] ${
                   interval === tf && !editing
                     ? 'border-primary bg-primary/10 text-primary'
                     : 'border-border bg-secondary text-foreground hover:bg-accent'

@@ -108,7 +108,7 @@ export function SymbolSelector({ symbol, interval, onSymbolChange, onIntervalCha
       <div className="relative" ref={dropdownRef}>
         <button
           onClick={() => setIsOpen(!isOpen)}
-          className="flex items-center gap-1.5 px-2.5 py-1.5 rounded text-xs font-medium bg-accent text-foreground hover:bg-accent/80 transition-colors"
+          className="flex items-center gap-1.5 px-2.5 py-1.5 rounded text-xs font-medium bg-accent text-foreground hover:bg-accent/80 transition-all duration-100 ease-out active:scale-[0.97]"
         >
           <span className="font-mono font-bold">{currentDisplay}</span>
           <ChevronDown className={`w-3.5 h-3.5 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
@@ -151,7 +151,7 @@ export function SymbolSelector({ symbol, interval, onSymbolChange, onIntervalCha
                       if (onPrecisionChange) onPrecisionChange(s.pricePrecision, s.quantityPrecision);
                       setIsOpen(false);
                     }}
-                    className={`w-full flex items-center justify-between px-3 py-1.5 text-xs hover:bg-accent/50 transition-colors ${
+                    className={`w-full flex items-center justify-between px-3 py-1.5 text-xs hover:bg-accent/50 transition-colors duration-100 ease-out ${
                       symbol === s.symbol ? 'bg-accent/30' : ''
                     }`}
                   >

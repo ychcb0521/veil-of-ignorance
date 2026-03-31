@@ -231,7 +231,7 @@ export function IndicatorMenu({ open, onClose, indicators, onIndicatorsChange }:
         <span className="text-sm font-semibold text-foreground">技术指标</span>
         <div className="flex items-center gap-2">
           <span className="text-[10px] text-muted-foreground">{supportedCount}/{INDICATOR_CATALOG.length} 已激活</span>
-          <button onClick={onClose} className="text-muted-foreground hover:text-foreground transition-colors">
+          <button onClick={onClose} className="text-muted-foreground hover:text-foreground transition-colors duration-100 ease-out active:scale-[0.9]">
             <X className="w-4 h-4" />
           </button>
         </div>
@@ -260,7 +260,7 @@ export function IndicatorMenu({ open, onClose, indicators, onIndicatorsChange }:
       <div className="flex items-center gap-1 px-3 py-1.5 border-b border-border overflow-x-auto">
         <button
           onClick={() => setCategoryFilter(null)}
-          className={`px-2 py-0.5 rounded text-[10px] font-medium transition-colors whitespace-nowrap ${
+          className={`px-2 py-0.5 rounded text-[10px] font-medium transition-all duration-100 ease-out active:scale-[0.95] whitespace-nowrap ${
             !categoryFilter ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'
           }`}
         >
@@ -270,7 +270,7 @@ export function IndicatorMenu({ open, onClose, indicators, onIndicatorsChange }:
           <button
             key={cat}
             onClick={() => setCategoryFilter(categoryFilter === cat ? null : cat)}
-            className={`px-2 py-0.5 rounded text-[10px] font-medium transition-colors whitespace-nowrap ${
+            className={`px-2 py-0.5 rounded text-[10px] font-medium transition-all duration-100 ease-out active:scale-[0.95] whitespace-nowrap ${
               categoryFilter === cat ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'
             }`}
           >
@@ -330,7 +330,7 @@ function IndicatorRow({ item, indicators, onToggle, onUpdatePeriod }: {
 
   return (
     <div
-      className="flex items-center justify-between px-3 py-2 hover:bg-accent/30 transition-colors cursor-pointer group"
+      className="flex items-center justify-between px-3 py-2 hover:bg-accent/30 transition-colors duration-100 ease-out cursor-pointer group"
       onClick={() => onToggle(item)}
     >
       <div className="flex items-center gap-2.5 flex-1 min-w-0">

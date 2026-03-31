@@ -173,7 +173,7 @@ export function OrderPanel({ currentPrice, onPlaceOrder, disabled, symbol, cooli
             <button
               key={m}
               onClick={() => setMarginMode(m)}
-              className={`flex-1 py-1 rounded text-xs font-medium transition-colors ${
+              className={`flex-1 py-1 rounded text-xs font-medium transition-all duration-100 ease-out active:scale-[0.97] ${
                 marginMode === m
                   ? 'bg-accent text-foreground'
                   : 'text-muted-foreground hover:text-foreground'
@@ -201,7 +201,7 @@ export function OrderPanel({ currentPrice, onPlaceOrder, disabled, symbol, cooli
             {[1, 25, 50, 75, 100, 125].map(v => (
               <button
                 key={v} onClick={() => setLeverage(v)}
-                className={`text-[10px] font-mono px-1 rounded transition-colors ${
+                className={`text-[10px] font-mono px-1 rounded transition-all duration-75 ease-out active:scale-[0.95] ${
                   leverage === v ? 'text-primary' : 'text-muted-foreground hover:text-foreground'
                 }`}
               >
@@ -233,7 +233,7 @@ export function OrderPanel({ currentPrice, onPlaceOrder, disabled, symbol, cooli
       <div className="px-3 pt-2 pb-1 relative" ref={dropdownRef}>
         <button
           onClick={() => setDropdownOpen(!dropdownOpen)}
-          className="w-full flex items-center justify-between px-2.5 py-1.5 rounded text-xs font-medium bg-accent text-foreground hover:bg-accent/80 transition-colors"
+          className="w-full flex items-center justify-between px-2.5 py-1.5 rounded text-xs font-medium bg-accent text-foreground hover:bg-accent/80 transition-all duration-100 ease-out active:scale-[0.98]"
         >
           <span>{selectedInfo.label} <span className="text-muted-foreground ml-1">{selectedInfo.desc}</span></span>
           <ChevronDown className={`w-3.5 h-3.5 transition-transform ${dropdownOpen ? 'rotate-180' : ''}`} />
@@ -245,7 +245,7 @@ export function OrderPanel({ currentPrice, onPlaceOrder, disabled, symbol, cooli
               <button
                 key={t.value}
                 onClick={() => { setOrderType(t.value); setDropdownOpen(false); }}
-                className={`w-full text-left px-3 py-2 text-xs hover:bg-accent/50 transition-colors flex items-center justify-between ${
+                className={`w-full text-left px-3 py-2 text-xs hover:bg-accent/50 transition-colors duration-100 ease-out flex items-center justify-between ${
                   orderType === t.value ? 'bg-accent/30 text-primary' : 'text-foreground'
                 }`}
               >
@@ -352,7 +352,7 @@ export function OrderPanel({ currentPrice, onPlaceOrder, disabled, symbol, cooli
               <div className="flex gap-1">
                 {(['MARKET', 'LIMIT'] as const).map(t => (
                   <button key={t} onClick={() => setTrailingExecType(t)}
-                    className={`flex-1 py-1 rounded text-[10px] font-medium transition-colors ${
+                    className={`flex-1 py-1 rounded text-[10px] font-medium transition-all duration-100 ease-out active:scale-[0.97] ${
                       trailingExecType === t ? 'bg-accent text-foreground' : 'text-muted-foreground hover:text-foreground'
                     }`}
                   >
@@ -375,7 +375,7 @@ export function OrderPanel({ currentPrice, onPlaceOrder, disabled, symbol, cooli
               <div className="flex gap-1">
                 {(['MARKET', 'LIMIT'] as const).map(t => (
                   <button key={t} onClick={() => setCondExecType(t)}
-                    className={`flex-1 py-1 rounded text-[10px] font-medium transition-colors ${
+                    className={`flex-1 py-1 rounded text-[10px] font-medium transition-all duration-100 ease-out active:scale-[0.97] ${
                       condExecType === t ? 'bg-accent text-foreground' : 'text-muted-foreground hover:text-foreground'
                     }`}
                   >
@@ -433,7 +433,7 @@ export function OrderPanel({ currentPrice, onPlaceOrder, disabled, symbol, cooli
                   { value: 'INITIAL_MARGIN' as UsdtInputMode, label: '初始保证金' },
                 ] as const).map(m => (
                   <button key={m.value} onClick={() => setUsdtInputMode(m.value)}
-                    className={`text-[9px] px-1.5 py-0.5 rounded transition-colors ${
+                    className={`text-[9px] px-1.5 py-0.5 rounded transition-all duration-100 ease-out active:scale-[0.95] ${
                       usdtInputMode === m.value
                         ? 'bg-primary/20 text-primary'
                         : 'text-muted-foreground hover:text-foreground'
@@ -454,7 +454,7 @@ export function OrderPanel({ currentPrice, onPlaceOrder, disabled, symbol, cooli
           <div className="flex gap-1 mt-1.5">
             {[25, 50, 75, 100].map(pct => (
               <button key={pct}
-                className="flex-1 py-0.5 rounded text-[10px] font-medium bg-secondary text-secondary-foreground hover:bg-accent transition-colors"
+                className="flex-1 py-0.5 rounded text-[10px] font-medium bg-secondary text-secondary-foreground hover:bg-accent transition-all duration-100 ease-out active:scale-[0.95]"
               >
                 {pct}%
               </button>
@@ -514,14 +514,14 @@ export function OrderPanel({ currentPrice, onPlaceOrder, disabled, symbol, cooli
         {/* Action Buttons */}
         <div className="grid grid-cols-2 gap-2 pb-3">
           <button onClick={() => handleOrder('LONG')} disabled={orderDisabled}
-            className="btn-long disabled:opacity-30 text-xs py-2.5">
+            className="btn-long disabled:opacity-30 disabled:cursor-not-allowed text-xs py-2.5">
             <div>{coolingOff ? '🧊 冷静中' : '开多 / Buy'}</div>
             {!coolingOff && (orderType === 'MARKET' || priceSelection === 'MARKET') && currentPrice > 0 && (
               <div className="text-[10px] opacity-80 mt-0.5">{currentPrice.toFixed(pricePrecision)}</div>
             )}
           </button>
           <button onClick={() => handleOrder('SHORT')} disabled={orderDisabled}
-            className="btn-short disabled:opacity-30 text-xs py-2.5">
+            className="btn-short disabled:opacity-30 disabled:cursor-not-allowed text-xs py-2.5">
             <div>{coolingOff ? '🧊 冷静中' : '开空 / Sell'}</div>
             {!coolingOff && (orderType === 'MARKET' || priceSelection === 'MARKET') && currentPrice > 0 && (
               <div className="text-[10px] opacity-80 mt-0.5">{currentPrice.toFixed(pricePrecision)}</div>
@@ -540,7 +540,7 @@ export function OrderPanel({ currentPrice, onPlaceOrder, disabled, symbol, cooli
           ]).map(item => (
             <button key={item.value}
               onClick={() => { setPriceSelection(item.value); setShowPriceSelector(false); }}
-              className="w-full flex items-center justify-between px-4 py-3 hover:bg-accent/30 transition-colors"
+              className="w-full flex items-center justify-between px-4 py-3 hover:bg-accent/30 transition-colors duration-100 ease-out"
             >
               <span className="text-sm text-foreground">{item.label}</span>
               {priceSelection === item.value && <Check className="w-4 h-4 text-primary" />}
@@ -662,7 +662,7 @@ function SelectorRow({ label, value, onClick }: { label: string; value: string; 
   return (
     <button
       onClick={onClick}
-      className="w-full flex items-center justify-between px-2 py-1 rounded text-[10px] hover:bg-accent/30 transition-colors"
+      className="w-full flex items-center justify-between px-2 py-1 rounded text-[10px] hover:bg-accent/30 transition-colors duration-100 ease-out active:scale-[0.98]"
     >
       <span className="text-muted-foreground">{label}</span>
       <span className="text-foreground flex items-center gap-0.5">

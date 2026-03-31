@@ -133,11 +133,11 @@ export function TimeControl({
         onClick={(e) => handleModeSwitchClick(e, 'synced')}
         title={blockedReason ? `当前不可切换：${blockedReason}` : '切换到同步模式'}
         aria-disabled={hasBlockingPositions || hasRunningCoins}
-        className={`flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium transition-all duration-200 ease-out ${
+        className={`flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium transition-all duration-100 ease-out active:scale-[0.97] ${
           timeMode === 'synced'
             ? 'bg-primary/20 text-primary'
             : showGuardLock
-              ? 'bg-secondary text-muted-foreground opacity-70 hover:bg-secondary'
+              ? 'bg-secondary text-muted-foreground opacity-50 cursor-not-allowed hover:bg-secondary'
               : 'text-muted-foreground hover:text-foreground hover:bg-accent'
         }`}
       >
@@ -147,11 +147,11 @@ export function TimeControl({
         onClick={(e) => handleModeSwitchClick(e, 'isolated')}
         title={hasBlockingPositions ? `当前不可切换：${blockedReason}` : '切换到隔离模式'}
         aria-disabled={hasBlockingPositions}
-        className={`flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium transition-all duration-200 ease-out ${
+        className={`flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium transition-all duration-100 ease-out active:scale-[0.97] ${
           timeMode === 'isolated'
             ? 'bg-primary/20 text-primary'
             : hasBlockingPositions
-              ? 'bg-secondary text-muted-foreground opacity-70 hover:bg-secondary'
+              ? 'bg-secondary text-muted-foreground opacity-50 cursor-not-allowed hover:bg-secondary'
               : 'text-muted-foreground hover:text-foreground hover:bg-accent'
         }`}
       >
@@ -166,7 +166,7 @@ export function TimeControl({
         <button
           key={s}
           onClick={() => onSetSpeed(s)}
-          className={`px-2 py-1 rounded text-xs font-mono transition-colors ${
+          className={`px-2 py-1 rounded text-xs font-mono transition-all duration-100 ease-out active:scale-[0.95] ${
             speed === s
               ? 'bg-primary text-primary-foreground'
               : 'bg-secondary text-secondary-foreground hover:bg-accent'
@@ -213,7 +213,7 @@ export function TimeControl({
               placeholder="YYYY-MM-DD HH:mm:ss"
               className="input-dark w-52 text-xs"
             />
-            <button onClick={handleStart} className="btn-long flex items-center gap-1.5 text-xs">
+            <button onClick={handleStart} className="btn-long flex items-center gap-1.5 text-xs active:scale-[0.97]">
               <Play className="w-3.5 h-3.5" /> 启动
             </button>
             {modeSelectorButtons}
@@ -223,10 +223,10 @@ export function TimeControl({
         {status === 'playing' && (
           <>
             <div className="flex items-center gap-2">
-              <button onClick={onPause} className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded bg-yellow-500/20 text-yellow-400 hover:bg-yellow-500/30 transition-colors font-medium">
+              <button onClick={onPause} className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded bg-yellow-500/20 text-yellow-400 hover:bg-yellow-500/30 transition-all duration-100 ease-out active:scale-[0.97] font-medium">
                 <Pause className="w-3.5 h-3.5" /> 暂停
               </button>
-              <button onClick={onStop} className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded bg-destructive/20 text-destructive hover:bg-destructive/30 transition-colors font-medium">
+              <button onClick={onStop} className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded bg-destructive/20 text-destructive hover:bg-destructive/30 transition-all duration-100 ease-out active:scale-[0.97] font-medium">
                 <Square className="w-3.5 h-3.5" /> 停止
               </button>
             </div>
@@ -239,10 +239,10 @@ export function TimeControl({
         {status === 'paused' && (
           <>
             <div className="flex items-center gap-2">
-              <button onClick={onResume} className="btn-long flex items-center gap-1.5 text-xs">
+              <button onClick={onResume} className="btn-long flex items-center gap-1.5 text-xs active:scale-[0.97]">
                 <Play className="w-3.5 h-3.5" /> 继续
               </button>
-              <button onClick={onStop} className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded bg-destructive/20 text-destructive hover:bg-destructive/30 transition-colors font-medium">
+              <button onClick={onStop} className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded bg-destructive/20 text-destructive hover:bg-destructive/30 transition-all duration-100 ease-out active:scale-[0.97] font-medium">
                 <Square className="w-3.5 h-3.5" /> 停止
               </button>
             </div>
@@ -257,7 +257,7 @@ export function TimeControl({
       {guardDialogOpen && (
         <Dialog open={guardDialogOpen} onOpenChange={handleDialogOpenChange}>
           <DialogContent
-            className="sm:max-w-md transition-all duration-200 ease-out"
+            className="sm:max-w-md"
             onClick={(e) => e.stopPropagation()}
             onPointerDown={(e) => e.stopPropagation()}
           >
@@ -276,7 +276,7 @@ export function TimeControl({
                     <button
                       key={sym}
                       onClick={(e) => handleJumpToCoin(e, sym)}
-                      className="flex items-center justify-between rounded-md border border-border bg-background px-3 py-2 text-left transition-all duration-200 ease-out hover:bg-accent"
+                      className="flex items-center justify-between rounded-md border border-border bg-background px-3 py-2 text-left transition-colors duration-100 ease-out hover:bg-accent active:scale-[0.98]"
                     >
                       <span className="text-sm font-medium text-foreground">{sym}</span>
                       <span className={`text-xs ${coinStatus === 'playing' ? 'text-primary' : 'text-muted-foreground'}`}>
@@ -292,7 +292,7 @@ export function TimeControl({
               <button
                 type="button"
                 onClick={() => setGuardDialogOpen(false)}
-                className="inline-flex items-center justify-center rounded-md border border-border bg-background px-4 py-2 text-sm font-medium text-foreground transition-all duration-200 ease-out hover:bg-accent"
+                className="inline-flex items-center justify-center rounded-md border border-border bg-background px-4 py-2 text-sm font-medium text-foreground transition-all duration-100 ease-out hover:bg-accent active:scale-[0.97]"
               >
                 取消
               </button>
@@ -300,7 +300,7 @@ export function TimeControl({
                 type="button"
                 onClick={(e) => void handleStopAllAndSwitch(e)}
                 disabled={isStoppingAll}
-                className="inline-flex items-center justify-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-all duration-200 ease-out hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
+                className="inline-flex items-center justify-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-all duration-100 ease-out hover:opacity-90 active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {isStoppingAll ? '处理中…' : '一键停止所有并切换'}
               </button>

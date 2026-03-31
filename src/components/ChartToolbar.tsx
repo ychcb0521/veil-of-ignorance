@@ -23,7 +23,7 @@ export function ChartToolbar({ activeTool, onToolChange, indicators, onIndicator
     <div className="absolute right-12 top-0 z-20 flex items-center gap-1 py-1.5 px-2">
       <button
         onClick={() => setShowIndicatorPanel(!showIndicatorPanel)}
-        className={`flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium transition-colors ${
+        className={`flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium transition-all duration-100 ease-out active:scale-[0.95] ${
           showIndicatorPanel ? 'bg-primary/20 text-primary' : 'text-muted-foreground hover:text-foreground hover:bg-accent/50'
         }`}
       >
