@@ -130,7 +130,8 @@ export function MultiChartLayout({
             <CandlestickChart data={mainData} symbol={`${mainSymbol} ${mainInterval}`} onLoadOlder={onLoadOlder}
               loadingOlder={loadingOlder} tradeHistory={tradeHistory} rawSymbol={rawSymbol}
               pricePrecision={pricePrecision} quantityPrecision={quantityPrecision}
-              pendingOrders={pendingOrders} onCancelOrder={onCancelOrder} />
+              pendingOrders={pendingOrders} onCancelOrder={onCancelOrder}
+              chartApiRef={chartApiRef} />
           </div>
           <div className="bg-background min-h-0 overflow-hidden relative">
             <SubChartIntervalSelector interval={subCharts[0].interval} onChange={v => handleSubIntervalChange(0, v)} />
