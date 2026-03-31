@@ -26,7 +26,9 @@ import { BarChart3, Wallet, PanelRightClose, PanelRightOpen } from 'lucide-react
 import type { PendingOrder, OrderType } from '@/types/trading';
 import { calcFee, calcSlippage } from '@/types/trading';
 import type { AssetState } from '@/types/assets';
-import { Dialog, DialogContent } from '@/components/ui/dialog';
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
+} from '@/components/ui/dialog';
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from '@/components/ui/resizable';
 
 // Price protection threshold: reject conditional triggers if |last - mark| / mark > 2%
@@ -79,6 +81,7 @@ const Index = () => {
     sim, activeSymbol, setActiveSymbol, interval, setInterval: setIntervalVal,
     positionsMap, setPositionsMap, ordersMap, setOrdersMap,
     priceMap, setPriceMap, balance, setBalance,
+    isolatedBalances, setIsolatedBalances,
     tradeHistory, setTradeHistory,
     activeSymbolPositions, activeSymbolOrders,
     allPositions, allOrders, currentPrice, activeSymbols,
@@ -88,6 +91,7 @@ const Index = () => {
     liquidationOpen, liquidationDetails, closeLiquidationModal,
     timeMode, setTimeMode, coinTimelines, setCoinTimelines,
     totalPositionCount, getEffectiveTime, getCoinState,
+    getEffectiveBalance, getEffectiveAvailable,
   } = ctx;
 
   const { allData, allDataRef, loading, loadingOlder, error, initLoad, loadOlder, getVisibleData, reset } = useBinanceData();
@@ -437,8 +441,9 @@ const Index = () => {
               break;
             }
             case 'MARKET_TP_SL': {
-              if (order.side === 'LONG' && kline.high >= order.stopPrice) { triggered = true; fillPrice = kline.close; isMaker = false; }
-              else if (order.side === 'SHORT' && kline.low <= order.stopPrice) { triggered = true; fillPrice = kline.close; isMaker = false; }
+              // Fix: use stopPrice as fill (the trigger level), NOT kline.close (look-ahead bias)
+              if (order.side === 'LONG' && kline.high >= order.stopPrice) { triggered = true; fillPrice = order.stopPrice; isMaker = false; }
+              else if (order.side === 'SHORT' && kline.low <= order.stopPrice) { triggered = true; fillPrice = order.stopPrice; isMaker = false; }
               break;
             }
             case 'LIMIT_TP_SL': {
@@ -453,7 +458,8 @@ const Index = () => {
             case 'CONDITIONAL': {
               const trigHit = (order.side === 'LONG' && kline.high >= order.stopPrice) || (order.side === 'SHORT' && kline.low <= order.stopPrice);
               if (trigHit) {
-                if (order.conditionalExecType === 'MARKET') { triggered = true; fillPrice = kline.close; isMaker = false; }
+                // Fix: use stopPrice for market execution, NOT kline.close
+                if (order.conditionalExecType === 'MARKET') { triggered = true; fillPrice = order.stopPrice; isMaker = false; }
                 else {
                   const lp = order.conditionalLimitPrice || order.price;
                   if (order.side === 'LONG' && kline.low <= lp) { triggered = true; fillPrice = lp; }
@@ -481,12 +487,14 @@ const Index = () => {
                 if (src.side === 'LONG') {
                   const peak = Math.max(src.peakPrice || 0, kline.high);
                   const triggerLevel = peak * (1 - rate);
-                  if (kline.low <= triggerLevel) { triggered = true; fillPrice = src.trailingExecType === 'LIMIT' ? (src.trailingLimitPrice || triggerLevel) : kline.close; isMaker = src.trailingExecType === 'LIMIT'; }
+                  // Fix: fill at triggerLevel, not kline.close
+                  if (kline.low <= triggerLevel) { triggered = true; fillPrice = src.trailingExecType === 'LIMIT' ? (src.trailingLimitPrice || triggerLevel) : triggerLevel; isMaker = src.trailingExecType === 'LIMIT'; }
                   else { convertToLimit = true; updatedOrder = { ...src, peakPrice: peak, trailingActivated: true }; }
                 } else {
                   const trough = Math.min(src.troughPrice || Infinity, kline.low);
                   const triggerLevel = trough * (1 + rate);
-                  if (kline.high >= triggerLevel) { triggered = true; fillPrice = src.trailingExecType === 'LIMIT' ? (src.trailingLimitPrice || triggerLevel) : kline.close; isMaker = src.trailingExecType === 'LIMIT'; }
+                  // Fix: fill at triggerLevel, not kline.close
+                  if (kline.high >= triggerLevel) { triggered = true; fillPrice = src.trailingExecType === 'LIMIT' ? (src.trailingLimitPrice || triggerLevel) : triggerLevel; isMaker = src.trailingExecType === 'LIMIT'; }
                   else { convertToLimit = true; updatedOrder = { ...src, troughPrice: trough, trailingActivated: true }; }
                 }
               }
@@ -717,6 +725,12 @@ const Index = () => {
 
       if (timeMode === 'isolated') {
         const now = Date.now();
+        // Initialize sandbox balance for this symbol if not already set
+        const existingBal = isolatedBalances[activeSymbol];
+        if (existingBal === undefined || existingBal === 0) {
+          const sandboxCapital = profile?.initial_capital ?? 1_000_000;
+          setIsolatedBalances(prev => ({ ...prev, [activeSymbol]: sandboxCapital }));
+        }
         setCoinTimelines(prev => ({
           ...prev,
           [activeSymbol]: {
@@ -728,7 +742,6 @@ const Index = () => {
             originTime: timestamp,
           },
         }));
-        // Start global sim as heartbeat (keeps isRunning=true for funding/liquidation engines)
         if (sim.status === 'stopped') {
           sim.startSimulation(timestamp);
         }
@@ -742,7 +755,7 @@ const Index = () => {
     } else {
       toast.error('数据获取失败', { description: '请检查时间范围和交易对' });
     }
-  }, [activeSymbol, interval, initLoad, sim, timeMode]);
+  }, [activeSymbol, interval, initLoad, sim, timeMode, isolatedBalances, profile]);
 
   // ===== STATE GUARD: time mode switch =====
   const handleSetTimeMode = useCallback((newMode: 'synced' | 'isolated') => {
@@ -770,12 +783,22 @@ const Index = () => {
     }
   }, [timeMode, coinTimelines, totalPositionCount, setTimeMode, setCoinTimelines]);
 
+  // State for mode switch confirmation dialog
+  const [modeSwitchDialogOpen, setModeSwitchDialogOpen] = useState(false);
+
   const handleStopAllAndSwitchToSynced = useCallback(() => {
     if (timeMode !== 'isolated') {
       handleSetTimeMode('synced');
       return;
     }
+    // Show confirmation dialog
+    setModeSwitchDialogOpen(true);
+  }, [timeMode, handleSetTimeMode]);
 
+  const confirmStopAllAndSwitch = useCallback(() => {
+    setModeSwitchDialogOpen(false);
+
+    // Close all positions across all symbols
     for (const [sym, positions] of Object.entries(positionsMap)) {
       const price = priceMap[sym] || 0;
       if (price <= 0) continue;
@@ -784,12 +807,14 @@ const Index = () => {
       }
     }
 
+    // Cancel all orders
     for (const [sym, orders] of Object.entries(ordersMap)) {
       for (const order of orders) {
         handleCancelOrder(sym, order.id);
       }
     }
 
+    // Full state cleanup — garbage collection
     reset();
     prevVisibleLenRef.current = 0;
     cursorRef.current = 0;
@@ -798,21 +823,14 @@ const Index = () => {
     setSyncedOriginTime(null);
     sim.stopSimulation();
     setCoinTimelines({});
+    setIsolatedBalances({}); // Wipe all sandbox accounts
     setTimeMode('synced');
 
-    toast.success('已停止所有独立时间轴并切换到同步模式');
+    toast.success('已清除所有平行宇宙数据并切换到同步模式');
   }, [
-    timeMode,
-    handleSetTimeMode,
-    positionsMap,
-    priceMap,
-    handleClosePosition,
-    ordersMap,
-    handleCancelOrder,
-    reset,
-    sim,
-    setCoinTimelines,
-    setTimeMode,
+    positionsMap, priceMap, handleClosePosition,
+    ordersMap, handleCancelOrder, reset, sim,
+    setCoinTimelines, setTimeMode, setIsolatedBalances,
   ]);
 
   const handleStop = useCallback(() => {
@@ -971,7 +989,7 @@ const Index = () => {
       </div>
 
       <div className="shrink-0">
-        <AccountInfo balance={balance} positionsMap={positionsMap} priceMap={priceMap} />
+        <AccountInfo balance={balance} positionsMap={positionsMap} priceMap={priceMap} timeMode={timeMode} isolatedBalances={isolatedBalances} activeSymbol={activeSymbol} />
       </div>
 
       <div className="flex-1 flex min-h-0 overflow-hidden">
@@ -1096,6 +1114,38 @@ const Index = () => {
         onClose={() => setCoolingOffModalOpen(false)}
         onConfirm={(durationMs) => { coolingOff.activate(durationMs); setCoolingOffModalOpen(false); }}
       />
+
+      {/* Mode Switch Confirmation Dialog */}
+      <Dialog open={modeSwitchDialogOpen} onOpenChange={setModeSwitchDialogOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>⚠️ 清除所有平行宇宙数据</DialogTitle>
+            <DialogDescription>
+              此操作将清除所有隔离模式下的独立账户数据（各币种的独立资金、持仓、挂单和历史记录），并合并为单一全局时间线。此操作不可撤销。
+            </DialogDescription>
+          </DialogHeader>
+          <div className="rounded-lg border border-border bg-card/60 p-3 text-xs text-muted-foreground space-y-1">
+            <div>• 所有独立沙盒账户将被销毁</div>
+            <div>• 所有未平仓位将被强制结算</div>
+            <div>• 所有挂单将被撤销</div>
+            <div>• 切换后使用全局共享账户</div>
+          </div>
+          <DialogFooter>
+            <button
+              onClick={() => setModeSwitchDialogOpen(false)}
+              className="inline-flex items-center justify-center rounded-md border border-border bg-background px-4 py-2 text-sm font-medium text-foreground transition-all duration-100 ease-out hover:bg-accent active:scale-[0.97]"
+            >
+              取消
+            </button>
+            <button
+              onClick={confirmStopAllAndSwitch}
+              className="inline-flex items-center justify-center rounded-md bg-destructive px-4 py-2 text-sm font-medium text-destructive-foreground transition-all duration-100 ease-out hover:opacity-90 active:scale-[0.97]"
+            >
+              确认清除并切换
+            </button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };

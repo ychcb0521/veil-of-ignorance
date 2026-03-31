@@ -1,7 +1,7 @@
 import { Wallet, TrendingUp, AlertTriangle } from 'lucide-react';
 import type { Position } from '@/types/trading';
 import { calcUnrealizedPnl, MAINTENANCE_MARGIN_RATE } from '@/types/trading';
-import type { PositionsMap, PriceMap } from '@/contexts/TradingContext';
+import type { PositionsMap, PriceMap, TimeMode, IsolatedBalancesMap } from '@/contexts/TradingContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { Progress } from '@/components/ui/progress';
 
@@ -9,9 +9,12 @@ interface Props {
   balance: number;
   positionsMap: PositionsMap;
   priceMap: PriceMap;
+  timeMode?: TimeMode;
+  isolatedBalances?: IsolatedBalancesMap;
+  activeSymbol?: string;
 }
 
-export function AccountInfo({ balance, positionsMap, priceMap }: Props) {
+export function AccountInfo({ balance, positionsMap, priceMap, timeMode = 'synced', isolatedBalances = {}, activeSymbol }: Props) {
   const { profile } = useAuth();
   const initialCapital = profile?.initial_capital ?? 1_000_000;
 
