@@ -757,7 +757,7 @@ const Index = () => {
       setCoinTimelines(prev => ({
         ...prev,
         [activeSymbol]: {
-          ...(prev[activeSymbol] || { speed: 1, historicalAnchorTime: null, realStartTime: null }),
+          ...(prev[activeSymbol] || { speed: 1, historicalAnchorTime: null, realStartTime: null, originTime: null }),
           status: 'stopped',
           time: 0,
         },
