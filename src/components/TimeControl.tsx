@@ -292,7 +292,7 @@ export function TimeControl({
               <button
                 type="button"
                 onClick={() => setGuardDialogOpen(false)}
-                className="inline-flex items-center justify-center rounded-md border border-border bg-background px-4 py-2 text-sm font-medium text-foreground transition-all duration-200 ease-out hover:bg-accent"
+                className="inline-flex items-center justify-center rounded-md border border-border bg-background px-4 py-2 text-sm font-medium text-foreground transition-all duration-100 ease-out hover:bg-accent active:scale-[0.97]"
               >
                 取消
               </button>
