@@ -175,7 +175,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
   const [liquidationDetails, setLiquidationDetails] = useState<LiquidationDetails | undefined>();
   const closeLiquidationModal = useCallback(() => setLiquidationOpen(false), []);
 
-  // Persist sim state
+  // Persist sim state (throttled via React state changes)
   useEffect(() => {
     if (sim.status !== 'stopped') {
       saveSimState({
@@ -191,6 +191,33 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
       clearSimState();
     }
   }, [sim.status, sim.historicalAnchorTime, sim.realStartTime, sim.currentSimulatedTime, sim.speed, activeSymbol, interval]);
+
+  // Force-save on page unload with the latest ref-based time
+  const simRef = useRef(sim);
+  simRef.current = sim;
+  const activeSymbolRef = useRef(activeSymbol);
+  activeSymbolRef.current = activeSymbol;
+  const intervalRef = useRef(interval);
+  intervalRef.current = interval;
+
+  useEffect(() => {
+    const handler = () => {
+      const s = simRef.current;
+      if (s.status === 'stopped') return;
+      const liveTime = s.currentTimeRef.current;
+      saveSimState({
+        status: s.status,
+        historicalAnchorTime: liveTime,
+        realStartTime: Date.now(),
+        currentSimulatedTime: liveTime,
+        speed: s.speed,
+        symbol: activeSymbolRef.current,
+        interval: intervalRef.current,
+      });
+    };
+    window.addEventListener('beforeunload', handler);
+    return () => window.removeEventListener('beforeunload', handler);
+  }, []);
 
   // Computed
   const activeSymbolPositions = useMemo(() => positionsMap[activeSymbol] || [], [positionsMap, activeSymbol]);
