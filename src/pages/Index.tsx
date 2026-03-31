@@ -995,9 +995,11 @@ const Index = () => {
 
       <AnalyticsPanel
         open={analyticsOpen}
-        onOpenChange={setAnalyticsOpen}
+        onClose={() => setAnalyticsOpen(false)}
         tradeHistory={tradeHistory}
         balance={balance}
+        positionsMap={positionsMap}
+        priceMap={priceMap}
         initialCapital={profile?.initial_capital ?? 1_000_000}
       />
 
