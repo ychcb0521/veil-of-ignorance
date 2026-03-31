@@ -523,7 +523,7 @@ const Index = () => {
           <h1 className="text-xs font-bold text-primary tracking-widest uppercase whitespace-nowrap shrink-0">⚡ 无知之幕</h1>
           <SymbolSelector symbol={activeSymbol} interval={interval} onSymbolChange={handleSymbolChange} onIntervalChange={handleIntervalChange} onPrecisionChange={(pp, qp) => { setPricePrecision(pp); setQuantityPrecision(qp); }} />
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 shrink-0">
           {loading && <span className="text-[10px] text-primary animate-pulse font-mono">加载历史数据...</span>}
           {visibleData.length > 0 && (
             <span className="font-mono text-xs text-primary font-medium">
