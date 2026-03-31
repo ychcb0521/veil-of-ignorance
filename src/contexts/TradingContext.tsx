@@ -561,7 +561,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
     };
     setOrdersMap(prev => ({ ...prev, [symbol]: [...(prev[symbol] || []), newOrder] }));
     toast.info('委托已挂出');
-  }, [balance, positionsMap, priceMap, sim.currentSimulatedTime]);
+  }, [balance, positionsMap, priceMap, getEffectiveTime]);
 
   // ===== Close Position =====
   const handleClosePosition = useCallback((symbol: string, index: number) => {
