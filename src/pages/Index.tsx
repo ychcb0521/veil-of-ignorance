@@ -139,7 +139,7 @@ const Index = () => {
   const headerClockRef = useRef<HTMLSpanElement>(null);   // header bar clock
   const lastReactFlushRef = useRef(0);   // throttle React setState
   const lastPersistRef = useRef(0);      // throttle localStorage
-  const isTimeIsolatedRef = useRef(isTimeIsolated);
+  const timeModeRef = useRef(timeMode);
   const activeSymbolRef = useRef(activeSymbol);
 
   // Keep refs in sync
