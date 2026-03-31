@@ -276,7 +276,7 @@ export function TimeControl({
                     <button
                       key={sym}
                       onClick={(e) => handleJumpToCoin(e, sym)}
-                      className="flex items-center justify-between rounded-md border border-border bg-background px-3 py-2 text-left transition-all duration-200 ease-out hover:bg-accent"
+                      className="flex items-center justify-between rounded-md border border-border bg-background px-3 py-2 text-left transition-colors duration-100 ease-out hover:bg-accent active:scale-[0.98]"
                     >
                       <span className="text-sm font-medium text-foreground">{sym}</span>
                       <span className={`text-xs ${coinStatus === 'playing' ? 'text-primary' : 'text-muted-foreground'}`}>
