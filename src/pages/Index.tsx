@@ -27,6 +27,7 @@ import type { PendingOrder, OrderType } from '@/types/trading';
 import { calcFee, calcSlippage } from '@/types/trading';
 import type { AssetState } from '@/types/assets';
 import { Dialog, DialogContent } from '@/components/ui/dialog';
+import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from '@/components/ui/resizable';
 
 // Price protection threshold: reject conditional triggers if |last - mark| / mark > 2%
 const PRICE_PROTECTION_THRESHOLD = 0.02;
