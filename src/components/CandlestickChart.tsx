@@ -696,7 +696,9 @@ function areChartPropsEqual(prev: Props, next: Props) {
     prev.pricePrecision === next.pricePrecision &&
     prev.quantityPrecision === next.quantityPrecision &&
     prev.tradeHistory === next.tradeHistory &&
-    prev.onLoadOlder === next.onLoadOlder
+    prev.onLoadOlder === next.onLoadOlder &&
+    prev.pendingOrders === next.pendingOrders &&
+    prev.onCancelOrder === next.onCancelOrder
   );
 }
 
