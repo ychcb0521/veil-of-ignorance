@@ -642,10 +642,9 @@ const Index = () => {
           {loading && <span className="text-[10px] text-primary animate-pulse font-mono">加载历史数据...</span>}
           {visibleData.length > 0 && (
             <span className="font-mono text-xs text-primary font-medium">
-              {(() => {
-                const ts = visibleData[visibleData.length - 1].time;
-                return formatUTC8(ts);
-              })()}
+              <span ref={headerClockRef}>
+                {formatUTC8(visibleData[visibleData.length - 1].time)}
+              </span>
             </span>
           )}
           <button onClick={() => setAssetsOpen(true)}
