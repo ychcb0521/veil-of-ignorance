@@ -71,6 +71,7 @@ export function useTimeSimulator(initialState?: Partial<PersistedTimeSim>) {
   });
 
   const lastFlushRef = useRef<number>(0);
+  const lastPersistRef = useRef<number>(0);
 
   // ---- Helpers to keep coreRef perfectly in sync ----
   const syncCore = (s: Partial<typeof coreRef.current>) => {
