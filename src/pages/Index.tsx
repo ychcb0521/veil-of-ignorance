@@ -487,7 +487,8 @@ const Index = () => {
                 if (src.side === 'LONG') {
                   const peak = Math.max(src.peakPrice || 0, kline.high);
                   const triggerLevel = peak * (1 - rate);
-                  if (kline.low <= triggerLevel) { triggered = true; fillPrice = src.trailingExecType === 'LIMIT' ? (src.trailingLimitPrice || triggerLevel) : kline.close; isMaker = src.trailingExecType === 'LIMIT'; }
+                  // Fix: fill at triggerLevel, not kline.close
+                  if (kline.low <= triggerLevel) { triggered = true; fillPrice = src.trailingExecType === 'LIMIT' ? (src.trailingLimitPrice || triggerLevel) : triggerLevel; isMaker = src.trailingExecType === 'LIMIT'; }
                   else { convertToLimit = true; updatedOrder = { ...src, peakPrice: peak, trailingActivated: true }; }
                 } else {
                   const trough = Math.min(src.troughPrice || Infinity, kline.low);
