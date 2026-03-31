@@ -6,7 +6,7 @@
 import { useEffect, useRef, useCallback, useState, memo } from 'react';
 import { init, dispose, CandleType, LineType, TooltipShowRule, TooltipShowType, type Chart, type KLineData, type OverlayCreate } from 'klinecharts';
 import type { KlineData } from '@/hooks/useBinanceData';
-import { useTheme } from '@/hooks/useTheme';
+import { useTheme } from '@/contexts/ThemeContext';
 import { DrawingToolbar } from './DrawingToolbar';
 import { IndicatorMenu } from './IndicatorMenu';
 import { BarChart3, X } from 'lucide-react';
