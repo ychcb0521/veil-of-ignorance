@@ -42,21 +42,21 @@ export function AccountInfo({ balance, positionsMap, priceMap }: Props) {
   const isMedRisk = marginRatio > 50;
 
   return (
-    <div className="flex items-center gap-5 px-4 py-1.5 text-[11px] font-mono border-b border-border bg-card">
-      <div className="flex items-center gap-1.5">
-        <Wallet className="w-3 h-3 text-primary" />
-        <span className="text-muted-foreground">总权益</span>
-        <span className="font-semibold text-foreground">{equity.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+    <div className="flex items-center gap-4 px-4 py-1.5 text-[11px] font-mono border-b border-border bg-card flex-wrap min-h-[28px]">
+      <div className="flex items-center gap-1.5 shrink-0">
+        <Wallet className="w-3 h-3 text-primary shrink-0" />
+        <span className="text-muted-foreground whitespace-nowrap">总权益</span>
+        <span className="font-semibold text-foreground whitespace-nowrap">{equity.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
       </div>
-      <div>
+      <div className="shrink-0 whitespace-nowrap">
         <span className="text-muted-foreground">可用余额 </span>
         <span className="font-semibold text-foreground">{available.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
       </div>
-      <div>
+      <div className="shrink-0 whitespace-nowrap">
         <span className="text-muted-foreground">已用保证金 </span>
         <span className="font-semibold text-foreground">{totalMargin.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
       </div>
-      <div>
+      <div className="shrink-0 whitespace-nowrap">
         <span className="text-muted-foreground">未实现盈亏 </span>
         <span className={`font-semibold ${totalPnl >= 0 ? 'trading-green' : 'trading-red'}`}>
           {totalPnl >= 0 ? '+' : ''}{totalPnl.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
@@ -82,8 +82,8 @@ export function AccountInfo({ balance, positionsMap, priceMap }: Props) {
         </div>
       )}
 
-      <div className="flex items-center gap-1">
-        <TrendingUp className="w-3 h-3 text-muted-foreground" />
+      <div className="flex items-center gap-1 shrink-0 whitespace-nowrap">
+        <TrendingUp className="w-3 h-3 text-muted-foreground shrink-0" />
         <span className="text-muted-foreground">收益率 </span>
         <span className={`font-semibold ${totalReturn >= 0 ? 'trading-green' : 'trading-red'}`}>
           {totalReturn >= 0 ? '+' : ''}{totalReturnPct.toFixed(2)}%
@@ -95,7 +95,7 @@ export function AccountInfo({ balance, positionsMap, priceMap }: Props) {
           <span className="font-semibold text-primary">{symbolCount}</span>
         </div>
       )}
-      <div className="ml-auto text-muted-foreground/60">
+      <div className="ml-auto text-muted-foreground/60 shrink-0 whitespace-nowrap">
         初始资金: {initialCapital.toLocaleString()} USDT
       </div>
     </div>

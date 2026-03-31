@@ -517,13 +517,13 @@ const Index = () => {
   // Desktop layout
   return (
     <div className="h-screen flex flex-col overflow-hidden bg-background">
-      <header className="border-b border-border px-4 py-1.5 flex items-center justify-between shrink-0 bg-card">
-        <div className="flex items-center gap-4">
+      <header className="border-b border-border px-4 py-1.5 flex items-center justify-between shrink-0 bg-card gap-2 min-h-[36px]">
+        <div className="flex items-center gap-4 min-w-0 shrink-0">
           <ThemeToggle />
-          <h1 className="text-xs font-bold text-primary tracking-widest uppercase">⚡ 无知之幕</h1>
+          <h1 className="text-xs font-bold text-primary tracking-widest uppercase whitespace-nowrap shrink-0">⚡ 无知之幕</h1>
           <SymbolSelector symbol={activeSymbol} interval={interval} onSymbolChange={handleSymbolChange} onIntervalChange={handleIntervalChange} onPrecisionChange={(pp, qp) => { setPricePrecision(pp); setQuantityPrecision(qp); }} />
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 shrink-0">
           {loading && <span className="text-[10px] text-primary animate-pulse font-mono">加载历史数据...</span>}
           {visibleData.length > 0 && (
             <span className="font-mono text-xs text-primary font-medium">
