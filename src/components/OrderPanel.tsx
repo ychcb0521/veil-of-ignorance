@@ -375,7 +375,7 @@ export function OrderPanel({ currentPrice, onPlaceOrder, disabled, symbol, cooli
               <div className="flex gap-1">
                 {(['MARKET', 'LIMIT'] as const).map(t => (
                   <button key={t} onClick={() => setCondExecType(t)}
-                    className={`flex-1 py-1 rounded text-[10px] font-medium transition-colors ${
+                    className={`flex-1 py-1 rounded text-[10px] font-medium transition-all duration-100 ease-out active:scale-[0.97] ${
                       condExecType === t ? 'bg-accent text-foreground' : 'text-muted-foreground hover:text-foreground'
                     }`}
                   >
