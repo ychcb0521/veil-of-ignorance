@@ -194,9 +194,9 @@ export function DrawingToolbar({ activeTool, onToolChange, onClearDrawings, draw
                     <button
                       key={idx}
                       onClick={() => handleSubItemClick(group.id, idx, item)}
-                      className={`w-full flex items-center gap-2.5 px-3 py-1.5 text-xs transition-colors ${
+                      className={`w-full flex items-center gap-2.5 px-3 py-1.5 text-xs transition-colors duration-100 ease-out ${
                         item.disabled
-                          ? 'opacity-40 cursor-not-allowed text-muted-foreground'
+                          ? 'opacity-50 cursor-not-allowed text-muted-foreground'
                           : activeTool === item.id && (selectedPerGroup[group.id] ?? 0) === idx
                             ? 'text-primary bg-primary/10'
                             : 'text-foreground hover:bg-accent/50'
