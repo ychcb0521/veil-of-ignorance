@@ -87,7 +87,7 @@ const Index = () => {
     liquidationOpen, liquidationDetails, closeLiquidationModal,
   } = ctx;
 
-  const { allData, loading, loadingOlder, error, initLoad, loadOlder, getVisibleData, reset } = useBinanceData();
+  const { allData, allDataRef, loading, loadingOlder, error, initLoad, loadOlder, getVisibleData, reset } = useBinanceData();
 
   // Background price polling for non-active symbols
   useBackgroundPrices();
