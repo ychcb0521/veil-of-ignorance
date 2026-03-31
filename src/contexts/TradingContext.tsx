@@ -61,6 +61,13 @@ interface TradingState {
   liquidationOpen: boolean;
   liquidationDetails: LiquidationDetails | undefined;
   closeLiquidationModal: () => void;
+  // Multi-Timeline Isolation
+  isTimeIsolated: boolean;
+  setIsTimeIsolated: (v: boolean) => void;
+  coinTimelines: Record<string, number>;
+  setCoinTimelines: (v: Record<string, number> | ((prev: Record<string, number>) => Record<string, number>)) => void;
+  totalPositionCount: number;
+  getEffectiveTime: (symbol?: string) => number;
 }
 
 export interface PlaceOrderParams {
@@ -169,6 +176,24 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
   const [tradeHistory, setTradeHistory] = usePersistedState<TradeRecord[]>('trade_history', []);
   const [pricePrecision, setPricePrecision] = useState(2);
   const [quantityPrecision, setQuantityPrecision] = useState(3);
+
+  // === Multi-Timeline Isolation ===
+  const [isTimeIsolated, setIsTimeIsolated] = usePersistedState('time_isolated', false);
+  const [coinTimelines, setCoinTimelines] = usePersistedState<Record<string, number>>('coin_timelines', {});
+
+  // Total position count across all symbols (for the guard)
+  const totalPositionCount = useMemo(() => {
+    let count = 0;
+    for (const positions of Object.values(positionsMap)) count += positions.length;
+    return count;
+  }, [positionsMap]);
+
+  // Get effective simulation time for a given symbol
+  const getEffectiveTime = useCallback((symbol?: string): number => {
+    const sym = symbol || activeSymbol;
+    if (!isTimeIsolated) return sim.currentSimulatedTime;
+    return coinTimelines[sym] ?? sim.currentSimulatedTime;
+  }, [isTimeIsolated, coinTimelines, activeSymbol, sim.currentSimulatedTime]);
 
   // Liquidation modal state
   const [liquidationOpen, setLiquidationOpen] = useState(false);
@@ -349,7 +374,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
           entryPrice: pos.entryPrice, exitPrice: price,
           quantity: pos.quantity, leverage: pos.leverage,
           pnl: pnl - closeFee - liqFee, fee: closeFee + liqFee, slippage: 0,
-          openTime: 0, closeTime: sim.currentSimulatedTime,
+          openTime: 0, closeTime: getEffectiveTime(sym),
         }]);
 
         // Remove this position — isolated margin is lost
@@ -407,7 +432,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
               entryPrice: pos.entryPrice, exitPrice: price,
               quantity: pos.quantity, leverage: pos.leverage,
               pnl: pnl - closeFee - liqFee, fee: closeFee + liqFee, slippage: 0,
-              openTime: 0, closeTime: sim.currentSimulatedTime,
+              openTime: 0, closeTime: getEffectiveTime(sym),
             });
           }
         }
@@ -443,7 +468,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
     }
 
     const effectiveCurrentPrice = symbolPrice;
-    const now = sim.currentSimulatedTime;
+    const now = getEffectiveTime(symbol);
 
     const recordOpen = (fillPrice: number, qty: number, side: OrderSide, fee: number, slippage: number) => {
       setTradeHistory(prev => [...prev, {
@@ -536,7 +561,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
     };
     setOrdersMap(prev => ({ ...prev, [symbol]: [...(prev[symbol] || []), newOrder] }));
     toast.info('委托已挂出');
-  }, [balance, positionsMap, priceMap, sim.currentSimulatedTime]);
+  }, [balance, positionsMap, priceMap, getEffectiveTime]);
 
   // ===== Close Position =====
   const handleClosePosition = useCallback((symbol: string, index: number) => {
@@ -565,12 +590,12 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
       id: crypto.randomUUID(), symbol, side: pos.side, type: 'MARKET' as OrderType,
       action: 'CLOSE' as const, entryPrice: pos.entryPrice, exitPrice: fillPrice,
       quantity: pos.quantity, leverage: pos.leverage,
-      pnl: pnl - fee, fee, slippage, openTime: 0, closeTime: sim.currentSimulatedTime,
+      pnl: pnl - fee, fee, slippage, openTime: 0, closeTime: getEffectiveTime(symbol),
     }]);
     toast(pnl >= 0 ? '盈利平仓 ✅' : '亏损平仓 ❌', {
       description: `${symbol} ${pnl >= 0 ? '+' : ''}${(pnl - fee).toFixed(2)} USDT`,
     });
-  }, [positionsMap, priceMap, sim.currentSimulatedTime]);
+  }, [positionsMap, priceMap, getEffectiveTime]);
 
   // ===== Cancel Order =====
   const handleCancelOrder = useCallback((symbol: string, orderId: string) => {
@@ -619,6 +644,10 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
     handleAddIsolatedMargin,
     fundingRate: FUNDING_RATE,
     liquidationOpen, liquidationDetails, closeLiquidationModal,
+    isTimeIsolated, setIsTimeIsolated,
+    coinTimelines, setCoinTimelines,
+    totalPositionCount,
+    getEffectiveTime,
   };
 
   return <TradingContext.Provider value={value}>{children}</TradingContext.Provider>;

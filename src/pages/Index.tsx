@@ -85,6 +85,8 @@ const Index = () => {
     handlePlaceOrder, handleClosePosition, handleCancelOrder,
     handleAddIsolatedMargin,
     liquidationOpen, liquidationDetails, closeLiquidationModal,
+    isTimeIsolated, setIsTimeIsolated, coinTimelines, setCoinTimelines,
+    totalPositionCount, getEffectiveTime,
   } = ctx;
 
   const { allData, allDataRef, loading, loadingOlder, error, initLoad, loadOlder, getVisibleData, reset } = useBinanceData();
@@ -118,9 +120,12 @@ const Index = () => {
 
   const iMs = useMemo(() => intervalToMs(interval), [interval]);
 
+  // Effective time for the active coin (isolation-aware)
+  const effectiveSimTime = useMemo(() => getEffectiveTime(activeSymbol), [getEffectiveTime, activeSymbol]);
+
   const visibleData = useMemo(
-    () => getVisibleData(sim.currentSimulatedTime, iMs),
-    [getVisibleData, sim.currentSimulatedTime, iMs]
+    () => getVisibleData(effectiveSimTime, iMs),
+    [getVisibleData, effectiveSimTime, iMs]
   );
 
   // ===== UNIFIED GAME LOOP =====
@@ -134,6 +139,12 @@ const Index = () => {
   const headerClockRef = useRef<HTMLSpanElement>(null);   // header bar clock
   const lastReactFlushRef = useRef(0);   // throttle React setState
   const lastPersistRef = useRef(0);      // throttle localStorage
+  const isTimeIsolatedRef = useRef(isTimeIsolated);
+  const activeSymbolRef = useRef(activeSymbol);
+
+  // Keep refs in sync
+  useEffect(() => { isTimeIsolatedRef.current = isTimeIsolated; }, [isTimeIsolated]);
+  useEffect(() => { activeSymbolRef.current = activeSymbol; }, [activeSymbol]);
 
   /** Throttle interval for React state flush (ms). Only for matching/liquidation engines. */
   const REACT_FLUSH_MS = 800;
@@ -220,6 +231,14 @@ const Index = () => {
       if (now - lastReactFlushRef.current >= REACT_FLUSH_MS) {
         lastReactFlushRef.current = now;
         sim.syncReactState(simTime);
+
+        // In isolated mode: continuously update the active coin's timeline
+        if (isTimeIsolatedRef.current) {
+          setCoinTimelines(prev => {
+            if (prev[activeSymbolRef.current] === simTime) return prev;
+            return { ...prev, [activeSymbolRef.current]: simTime };
+          });
+        }
       }
 
       // ⑥ Throttled localStorage persistence
@@ -520,17 +539,31 @@ const Index = () => {
   // ===== Symbol switch: reload chart data =====
   const handleSymbolChange = useCallback(async (newSymbol: string) => {
     if (newSymbol === activeSymbol) return;
+
+    // In isolated mode: save current coin's time before switching
+    if (isTimeIsolated && sim.status !== 'stopped') {
+      const currentTime = sim.currentTimeRef.current || sim.currentSimulatedTime;
+      setCoinTimelines(prev => ({ ...prev, [activeSymbol]: currentTime }));
+    }
+
     setActiveSymbol(newSymbol);
     reset();
     prevVisibleLenRef.current = 0;
+    cursorRef.current = 0;
+    gameLoopInitRef.current = false;
 
     if (sim.status !== 'stopped') {
-      const data = await initLoad(newSymbol, interval, sim.currentSimulatedTime);
+      // In isolated mode: restore the target coin's saved time; otherwise use global time
+      const targetTime = isTimeIsolated
+        ? (coinTimelines[newSymbol] ?? sim.currentSimulatedTime)
+        : sim.currentSimulatedTime;
+
+      const data = await initLoad(newSymbol, interval, targetTime);
       if (data.length > 0) {
         toast.info(`已切换到 ${newSymbol}`, { description: `加载 ${data.length} 根K线` });
       }
     }
-  }, [activeSymbol, sim.status, sim.currentSimulatedTime, interval, initLoad, reset]);
+  }, [activeSymbol, sim.status, sim.currentSimulatedTime, interval, initLoad, reset, isTimeIsolated, coinTimelines]);
 
   const handleIntervalChange = useCallback(async (newInterval: string) => {
     if (newInterval === interval) return;
@@ -667,7 +700,8 @@ const Index = () => {
 
       <div className="shrink-0">
         <TimeControl status={sim.status} currentSimulatedTime={sim.currentSimulatedTime}
-          speed={sim.speed} onStart={handleStart} onPause={sim.pauseSimulation} onResume={sim.resumeSimulation} onStop={handleStop} onSetSpeed={sim.setSpeed} clockRef={clockRef} />
+          speed={sim.speed} onStart={handleStart} onPause={sim.pauseSimulation} onResume={sim.resumeSimulation} onStop={handleStop} onSetSpeed={sim.setSpeed} clockRef={clockRef}
+          isTimeIsolated={isTimeIsolated} onToggleTimeIsolation={setIsTimeIsolated} totalPositionCount={totalPositionCount} />
       </div>
 
       <div className="shrink-0">
