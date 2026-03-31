@@ -6,10 +6,11 @@
 import { useEffect, useRef, useCallback, useState, memo } from 'react';
 import { init, dispose, CandleType, LineType, TooltipShowRule, TooltipShowType, type Chart, type KLineData, type OverlayCreate } from 'klinecharts';
 import type { KlineData } from '@/hooks/useBinanceData';
+import type { PendingOrder } from '@/types/trading';
 import { useTheme } from '@/contexts/ThemeContext';
 import { DrawingToolbar } from './DrawingToolbar';
 import { IndicatorMenu } from './IndicatorMenu';
-import { BarChart3, X } from 'lucide-react';
+import { BarChart3, X, ListOrdered } from 'lucide-react';
 import { usePersistedState } from '@/hooks/usePersistedState';
 import type { TradeRecord } from '@/types/trading';
 import { registerCustomIndicators, CUSTOM_INDICATOR_MAP } from '@/lib/customIndicators';
@@ -63,6 +64,8 @@ interface Props {
   rawSymbol?: string;
   pricePrecision?: number;
   quantityPrecision?: number;
+  pendingOrders?: PendingOrder[];
+  onCancelOrder?: (orderId: string) => void;
 }
 
 // Convert our KlineData to klinecharts KLineData
@@ -215,7 +218,7 @@ const LIGHT_STYLES = {
   separator: { color: '#EAECEF' },
 };
 
-function CandlestickChartComponent({ data, symbol, onLoadOlder, loadingOlder, tradeHistory, rawSymbol, pricePrecision = 2, quantityPrecision = 3 }: Props) {
+function CandlestickChartComponent({ data, symbol, onLoadOlder, loadingOlder, tradeHistory, rawSymbol, pricePrecision = 2, quantityPrecision = 3, pendingOrders, onCancelOrder }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<Chart | null>(null);
   const prevDataLenRef = useRef(0);
@@ -226,6 +229,7 @@ function CandlestickChartComponent({ data, symbol, onLoadOlder, loadingOlder, tr
 
   const [indicators, setIndicators] = usePersistedState<IndicatorConfig[]>('indicators', []);
   const [showIndicatorPanel, setShowIndicatorPanel] = useState(false);
+  const [showOrderLines, setShowOrderLines] = usePersistedState('show_order_lines', true);
   const [drawingsVisible, setDrawingsVisible] = useState(true);
   const [activeDrawingTool, setActiveDrawingTool] = useState<string | null>(null);
   const { theme } = useTheme();
@@ -392,8 +396,83 @@ function CandlestickChartComponent({ data, symbol, onLoadOlder, loadingOlder, tr
   }, [tradeHistory, rawSymbol, data]);
 
   // ============================================================
-  // INDICATOR MANAGEMENT
+  // PENDING ORDER LINES on chart
   // ============================================================
+  useEffect(() => {
+    const chart = chartRef.current;
+    if (!chart) return;
+
+    // Always clear previous order line overlays
+    try { chart.removeOverlay('order_lines'); } catch {}
+
+    if (!showOrderLines || !pendingOrders || pendingOrders.length === 0 || data.length === 0) return;
+
+    const lastTime = data[data.length - 1].time;
+
+    for (const order of pendingOrders) {
+      const displayPrice = order.price > 0 ? order.price : order.stopPrice;
+      if (displayPrice <= 0) continue;
+
+      const isLong = order.side === 'LONG';
+      const typeLabel = order.type === 'LIMIT' || order.type === 'POST_ONLY'
+        ? (isLong ? 'Limit Buy' : 'Limit Sell')
+        : order.type === 'MARKET_TP_SL' || order.type === 'LIMIT_TP_SL'
+        ? (isLong ? 'TP/SL Buy' : 'TP/SL Sell')
+        : order.type === 'CONDITIONAL'
+        ? (isLong ? 'Cond Buy' : 'Cond Sell')
+        : order.type === 'TRAILING_STOP'
+        ? (isLong ? 'Trail Buy' : 'Trail Sell')
+        : (isLong ? 'Buy' : 'Sell');
+
+      chart.createOverlay({
+        name: 'horizontalStraightLine',
+        id: 'order_lines',
+        points: [{ timestamp: lastTime, value: displayPrice }],
+        lock: true,
+        styles: {
+          line: {
+            style: 'dashed' as any,
+            dashedValue: [6, 4],
+            size: 1,
+            color: isLong ? '#0ECB8180' : '#F6465D80',
+          },
+          text: {
+            color: isLong ? '#0ECB81' : '#F6465D',
+            size: 10,
+            borderColor: isLong ? '#0ECB8140' : '#F6465D40',
+            backgroundColor: isLong ? '#0ECB8118' : '#F6465D18',
+          },
+        },
+        extendData: `${typeLabel} ${order.quantity.toFixed(4)} @ ${displayPrice.toFixed(pricePrecision)}`,
+      } as OverlayCreate);
+
+      // If there's also a stopPrice different from price (e.g. TP/SL orders), draw trigger line
+      if (order.stopPrice > 0 && order.price > 0 && order.stopPrice !== order.price) {
+        chart.createOverlay({
+          name: 'horizontalStraightLine',
+          id: 'order_lines',
+          points: [{ timestamp: lastTime, value: order.stopPrice }],
+          lock: true,
+          styles: {
+            line: {
+              style: 'dashed' as any,
+              dashedValue: [3, 3],
+              size: 1,
+              color: '#F0B90B60',
+            },
+            text: {
+              color: '#F0B90B',
+              size: 9,
+              borderColor: '#F0B90B40',
+              backgroundColor: '#F0B90B18',
+            },
+          },
+          extendData: `Trigger @ ${order.stopPrice.toFixed(pricePrecision)}`,
+        } as OverlayCreate);
+      }
+    }
+  }, [pendingOrders, showOrderLines, data, pricePrecision]);
+
   useEffect(() => {
     const chart = chartRef.current;
     if (!chart) return;
@@ -556,6 +635,18 @@ function CandlestickChartComponent({ data, symbol, onLoadOlder, loadingOlder, tr
             <span>指标</span>
           </button>
 
+          {/* Show order lines toggle */}
+          <button
+            onClick={() => setShowOrderLines(prev => !prev)}
+            className={`flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium transition-colors ${
+              showOrderLines ? 'bg-primary/20 text-primary' : 'text-muted-foreground hover:text-foreground hover:bg-accent/50'
+            }`}
+            title={showOrderLines ? '隐藏挂单线' : '显示挂单线'}
+          >
+            <ListOrdered className="w-3.5 h-3.5" />
+            <span>挂单</span>
+          </button>
+
           {indicators.map(ind => (
             <span key={ind.type} className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-mono font-medium whitespace-nowrap shrink-0"
               style={{ background: `${ind.color}20`, color: ind.color }}>
@@ -605,7 +696,9 @@ function areChartPropsEqual(prev: Props, next: Props) {
     prev.pricePrecision === next.pricePrecision &&
     prev.quantityPrecision === next.quantityPrecision &&
     prev.tradeHistory === next.tradeHistory &&
-    prev.onLoadOlder === next.onLoadOlder
+    prev.onLoadOlder === next.onLoadOlder &&
+    prev.pendingOrders === next.pendingOrders &&
+    prev.onCancelOrder === next.onCancelOrder
   );
 }
 

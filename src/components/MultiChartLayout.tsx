@@ -2,7 +2,7 @@ import { useState, useCallback, useEffect } from 'react';
 import { CandlestickChart } from './CandlestickChart';
 import { LayoutGrid, Columns, Square } from 'lucide-react';
 import type { KlineData } from '@/hooks/useBinanceData';
-import type { TradeRecord } from '@/types/trading';
+import type { TradeRecord, PendingOrder } from '@/types/trading';
 
 type LayoutMode = '1x1' | '1x2' | '2x2';
 
@@ -20,6 +20,8 @@ interface Props {
   mainInterval: string;
   pricePrecision?: number;
   quantityPrecision?: number;
+  pendingOrders?: PendingOrder[];
+  onCancelOrder?: (orderId: string) => void;
 }
 
 interface SubChart {
@@ -31,7 +33,7 @@ interface SubChart {
 export function MultiChartLayout({
   mainData, mainSymbol, rawSymbol, onLoadOlder, loadingOlder,
   tradeHistory, isRunning, currentSimulatedTime, mainInterval,
-  pricePrecision, quantityPrecision,
+  pricePrecision, quantityPrecision, pendingOrders, onCancelOrder,
 }: Props) {
   const [layout, setLayout] = useState<LayoutMode>('1x1');
   const [subCharts, setSubCharts] = useState<SubChart[]>([
@@ -115,14 +117,16 @@ export function MultiChartLayout({
         <div className="flex-1 min-h-0">
           <CandlestickChart data={mainData} symbol={mainSymbol} onLoadOlder={onLoadOlder}
             loadingOlder={loadingOlder} tradeHistory={tradeHistory} rawSymbol={rawSymbol}
-            pricePrecision={pricePrecision} quantityPrecision={quantityPrecision} />
+            pricePrecision={pricePrecision} quantityPrecision={quantityPrecision}
+            pendingOrders={pendingOrders} onCancelOrder={onCancelOrder} />
         </div>
       ) : layout === '1x2' ? (
         <div className="flex-1 min-h-0 grid grid-cols-2 gap-px" style={{ background: 'hsl(var(--border))' }}>
           <div className="bg-background min-h-0 overflow-hidden">
             <CandlestickChart data={mainData} symbol={`${mainSymbol} ${mainInterval}`} onLoadOlder={onLoadOlder}
               loadingOlder={loadingOlder} tradeHistory={tradeHistory} rawSymbol={rawSymbol}
-              pricePrecision={pricePrecision} quantityPrecision={quantityPrecision} />
+              pricePrecision={pricePrecision} quantityPrecision={quantityPrecision}
+              pendingOrders={pendingOrders} onCancelOrder={onCancelOrder} />
           </div>
           <div className="bg-background min-h-0 overflow-hidden relative">
             <SubChartIntervalSelector interval={subCharts[0].interval} onChange={v => handleSubIntervalChange(0, v)} />
@@ -141,7 +145,8 @@ export function MultiChartLayout({
           <div className="bg-background min-h-0 overflow-hidden">
             <CandlestickChart data={mainData} symbol={`${mainSymbol} ${mainInterval}`} onLoadOlder={onLoadOlder}
               loadingOlder={loadingOlder} tradeHistory={tradeHistory} rawSymbol={rawSymbol}
-              pricePrecision={pricePrecision} quantityPrecision={quantityPrecision} />
+              pricePrecision={pricePrecision} quantityPrecision={quantityPrecision}
+              pendingOrders={pendingOrders} onCancelOrder={onCancelOrder} />
           </div>
           {[0, 1, 2].map(i => (
             <div key={i} className="bg-background min-h-0 overflow-hidden relative">

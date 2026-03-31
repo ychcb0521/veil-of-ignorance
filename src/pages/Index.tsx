@@ -585,6 +585,8 @@ const Index = () => {
                 mainInterval={interval}
                 pricePrecision={pricePrecision}
                 quantityPrecision={quantityPrecision}
+                pendingOrders={activeSymbolOrders}
+                onCancelOrder={(orderId) => handleCancelOrder(activeSymbol, orderId)}
               />
             )}
           </div>
