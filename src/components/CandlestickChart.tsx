@@ -557,7 +557,7 @@ function CandlestickChartComponent({ data, symbol, onLoadOlder, loadingOlder, tr
           </button>
 
           {indicators.map(ind => (
-            <span key={ind.type} className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-mono font-medium"
+            <span key={ind.type} className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-mono font-medium whitespace-nowrap shrink-0"
               style={{ background: `${ind.color}20`, color: ind.color }}>
               {ind.type} {ind.period}
               <button onClick={() => setIndicators(indicators.filter(i => i.type !== ind.type))} className="hover:opacity-70">
