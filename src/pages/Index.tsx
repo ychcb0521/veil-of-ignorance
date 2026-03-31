@@ -8,7 +8,7 @@ import { loadPersistedSimState } from '@/hooks/usePersistedState';
 import { usePersistedState, clearSimState } from '@/hooks/usePersistedState';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { TimeControl } from '@/components/TimeControl';
-import { CandlestickChart } from '@/components/CandlestickChart';
+import { CandlestickChart, type ChartImperativeApi } from '@/components/CandlestickChart';
 import { MultiChartLayout } from '@/components/MultiChartLayout';
 import { OrderBook } from '@/components/OrderBook';
 import { OrderPanel } from '@/components/OrderPanel';
