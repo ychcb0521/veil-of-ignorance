@@ -549,9 +549,17 @@ const Index = () => {
     if (newSymbol === activeSymbol) return;
 
     // In isolated mode: save current coin's time before switching
-    if (isTimeIsolated && sim.status !== 'stopped') {
+    if (timeMode === 'isolated' && sim.status !== 'stopped') {
       const currentTime = sim.currentTimeRef.current || sim.currentSimulatedTime;
-      setCoinTimelines(prev => ({ ...prev, [activeSymbol]: currentTime }));
+      setCoinTimelines(prev => ({
+        ...prev,
+        [activeSymbol]: {
+          ...(prev[activeSymbol] || { historicalAnchorTime: null, realStartTime: null }),
+          status: sim.status as 'playing' | 'paused' | 'stopped',
+          time: currentTime,
+          speed: sim.speed,
+        },
+      }));
     }
 
     setActiveSymbol(newSymbol);
@@ -562,16 +570,15 @@ const Index = () => {
 
     if (sim.status !== 'stopped') {
       // In isolated mode: restore the target coin's saved time; otherwise use global time
-      const targetTime = isTimeIsolated
-        ? (coinTimelines[newSymbol] ?? sim.currentSimulatedTime)
-        : sim.currentSimulatedTime;
+      const coinState = timeMode === 'isolated' ? coinTimelines[newSymbol] : null;
+      const targetTime = coinState?.time ?? sim.currentSimulatedTime;
 
       const data = await initLoad(newSymbol, interval, targetTime);
       if (data.length > 0) {
         toast.info(`已切换到 ${newSymbol}`, { description: `加载 ${data.length} 根K线` });
       }
     }
-  }, [activeSymbol, sim.status, sim.currentSimulatedTime, interval, initLoad, reset, isTimeIsolated, coinTimelines]);
+  }, [activeSymbol, sim.status, sim.currentSimulatedTime, sim.speed, interval, initLoad, reset, timeMode, coinTimelines]);
 
   const handleIntervalChange = useCallback(async (newInterval: string) => {
     if (newInterval === interval) return;
