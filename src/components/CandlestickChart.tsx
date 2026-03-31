@@ -360,7 +360,7 @@ function CandlestickChartComponent({ data, symbol, onLoadOlder, loadingOlder, tr
       currentActive.add(ind.type);
 
       const kcName = KLINE_INDICATOR_MAP[ind.type] || ind.type;
-      const isOverlay = ['MA', 'EMA', 'SMA', 'WMA', 'BOLL', 'SAR'].includes(ind.type);
+      const isOverlay = OVERLAY_INDICATOR_IDS.has(ind.type);
 
       if (!activeIndicatorPanes.current.has(ind.type)) {
         try {
