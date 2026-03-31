@@ -55,6 +55,11 @@ export interface IndicatorConfig {
   enabled: boolean;
 }
 
+/** Imperative API exposed to parent for direct chart manipulation (bypasses React). */
+export interface ChartImperativeApi {
+  updateData: (candle: KLineData) => void;
+}
+
 interface Props {
   data: KlineData[];
   symbol: string;
@@ -66,6 +71,8 @@ interface Props {
   quantityPrecision?: number;
   pendingOrders?: PendingOrder[];
   onCancelOrder?: (orderId: string) => void;
+  /** Ref assigned with imperative chart API for direct candle pushing. */
+  chartApiRef?: React.MutableRefObject<ChartImperativeApi | null>;
 }
 
 // Convert our KlineData to klinecharts KLineData
@@ -218,7 +225,7 @@ const LIGHT_STYLES = {
   separator: { color: '#EAECEF' },
 };
 
-function CandlestickChartComponent({ data, symbol, onLoadOlder, loadingOlder, tradeHistory, rawSymbol, pricePrecision = 2, quantityPrecision = 3, pendingOrders, onCancelOrder }: Props) {
+function CandlestickChartComponent({ data, symbol, onLoadOlder, loadingOlder, tradeHistory, rawSymbol, pricePrecision = 2, quantityPrecision = 3, pendingOrders, onCancelOrder, chartApiRef }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<Chart | null>(null);
   const prevDataLenRef = useRef(0);
@@ -273,6 +280,15 @@ function CandlestickChartComponent({ data, symbol, onLoadOlder, loadingOlder, tr
 
     chartRef.current = chart;
 
+    // Expose imperative API for direct candle updates (bypasses React render)
+    if (chartApiRef) {
+      chartApiRef.current = {
+        updateData: (candle: KLineData) => {
+          chart.updateData(candle);
+        },
+      };
+    }
+
     // ResizeObserver for responsive container sizing
     const ro = new ResizeObserver((entries) => {
       for (const entry of entries) {
@@ -286,6 +302,7 @@ function CandlestickChartComponent({ data, symbol, onLoadOlder, loadingOlder, tr
 
     return () => {
       ro.disconnect();
+      if (chartApiRef) chartApiRef.current = null;
       dispose(containerRef.current!);
       chartRef.current = null;
     };

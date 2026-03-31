@@ -1,4 +1,5 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, type MutableRefObject } from 'react';
+import type { ChartImperativeApi } from './CandlestickChart';
 import { CandlestickChart } from './CandlestickChart';
 import { LayoutGrid, Columns, Square } from 'lucide-react';
 import type { KlineData } from '@/hooks/useBinanceData';
@@ -22,6 +23,7 @@ interface Props {
   quantityPrecision?: number;
   pendingOrders?: PendingOrder[];
   onCancelOrder?: (orderId: string) => void;
+  chartApiRef?: MutableRefObject<ChartImperativeApi | null>;
 }
 
 interface SubChart {
@@ -34,6 +36,7 @@ export function MultiChartLayout({
   mainData, mainSymbol, rawSymbol, onLoadOlder, loadingOlder,
   tradeHistory, isRunning, currentSimulatedTime, mainInterval,
   pricePrecision, quantityPrecision, pendingOrders, onCancelOrder,
+  chartApiRef,
 }: Props) {
   const [layout, setLayout] = useState<LayoutMode>('1x1');
   const [subCharts, setSubCharts] = useState<SubChart[]>([
@@ -118,7 +121,8 @@ export function MultiChartLayout({
           <CandlestickChart data={mainData} symbol={mainSymbol} onLoadOlder={onLoadOlder}
             loadingOlder={loadingOlder} tradeHistory={tradeHistory} rawSymbol={rawSymbol}
             pricePrecision={pricePrecision} quantityPrecision={quantityPrecision}
-            pendingOrders={pendingOrders} onCancelOrder={onCancelOrder} />
+            pendingOrders={pendingOrders} onCancelOrder={onCancelOrder}
+            chartApiRef={chartApiRef} />
         </div>
       ) : layout === '1x2' ? (
         <div className="flex-1 min-h-0 grid grid-cols-2 gap-px" style={{ background: 'hsl(var(--border))' }}>
@@ -126,7 +130,8 @@ export function MultiChartLayout({
             <CandlestickChart data={mainData} symbol={`${mainSymbol} ${mainInterval}`} onLoadOlder={onLoadOlder}
               loadingOlder={loadingOlder} tradeHistory={tradeHistory} rawSymbol={rawSymbol}
               pricePrecision={pricePrecision} quantityPrecision={quantityPrecision}
-              pendingOrders={pendingOrders} onCancelOrder={onCancelOrder} />
+              pendingOrders={pendingOrders} onCancelOrder={onCancelOrder}
+              chartApiRef={chartApiRef} />
           </div>
           <div className="bg-background min-h-0 overflow-hidden relative">
             <SubChartIntervalSelector interval={subCharts[0].interval} onChange={v => handleSubIntervalChange(0, v)} />

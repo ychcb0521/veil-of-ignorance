@@ -22,7 +22,6 @@ export function intervalToMs(interval: string): number {
 
 /**
  * Fetch a single batch of klines from Binance fapi.
- * Returns parsed KlineData[] sorted by time ascending.
  */
 async function fetchBatch(
   symbol: string, interval: string,
@@ -50,12 +49,7 @@ async function fetchBatch(
 }
 
 /**
- * useBinanceData — lazy-loading kline data manager.
- *
- * - `initLoad(symbol, interval, anchorTime)`: loads 1000 candles ending at anchorTime.
- * - `loadOlder()`: prepends 1000 older candles (called on chart left-scroll).
- * - `appendCandle(candle)`: pushes a new candle to the right (sim tick).
- * - `allData`: the current in-memory kline array, time-ascending.
+ * useBinanceData — lazy-loading kline data manager with sub-candle interpolation.
  */
 export function useBinanceData() {
   const [allData, setAllData] = useState<KlineData[]>([]);
@@ -63,15 +57,22 @@ export function useBinanceData() {
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Track current request context to avoid stale closures
   const ctxRef = useRef<{ symbol: string; interval: string }>({ symbol: '', interval: '' });
-  const oldestRef = useRef<number>(Infinity);  // oldest loaded timestamp
-  const noMoreRef = useRef(false);              // true when we've hit the earliest available data
+  const oldestRef = useRef<number>(Infinity);
+  const noMoreRef = useRef(false);
 
-  /**
-   * Initial load: fetch up to 1000 candles ending at `anchorTime`.
-   * Used when user clicks "Start Simulation".
-   */
+  /** Direct ref access to allData — avoids stale closures in RAF loops */
+  const allDataRef = useRef<KlineData[]>([]);
+
+  // Keep ref in sync
+  const setAllDataAndRef = useCallback((updater: KlineData[] | ((prev: KlineData[]) => KlineData[])) => {
+    setAllData(prev => {
+      const next = typeof updater === 'function' ? (updater as (prev: KlineData[]) => KlineData[])(prev) : updater;
+      allDataRef.current = next;
+      return next;
+    });
+  }, []);
+
   const initLoad = useCallback(async (symbol: string, interval: string, anchorTime: number) => {
     setLoading(true);
     setError(null);
@@ -79,12 +80,11 @@ export function useBinanceData() {
     ctxRef.current = { symbol, interval };
 
     try {
-      // Fetch 1000 candles with endTime = anchorTime
       const data = await fetchBatch(symbol, interval, { endTime: anchorTime, limit: 1000 });
       if (data.length === 0) throw new Error('No data returned');
 
       oldestRef.current = data[0].time;
-      setAllData(data);
+      setAllDataAndRef(data);
       return data;
     } catch (e: any) {
       setError(e.message);
@@ -92,13 +92,8 @@ export function useBinanceData() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [setAllDataAndRef]);
 
-  /**
-   * Load older data: fetch 1000 candles before the current oldest.
-   * Returns the number of new candles prepended.
-   * Guards against concurrent calls via `loadingOlder` flag.
-   */
   const loadOlder = useCallback(async (): Promise<number> => {
     if (loadingOlder || noMoreRef.current) return 0;
     const { symbol, interval } = ctxRef.current;
@@ -106,7 +101,6 @@ export function useBinanceData() {
 
     setLoadingOlder(true);
     try {
-      // endTime = oldest - 1ms to avoid duplicate
       const endTime = oldestRef.current - 1;
       const older = await fetchBatch(symbol, interval, { endTime, limit: 1000 });
 
@@ -115,13 +109,11 @@ export function useBinanceData() {
         return 0;
       }
 
-      // If fewer than 1000 returned, we've reached the beginning
       if (older.length < 1000) noMoreRef.current = true;
 
       oldestRef.current = older[0].time;
 
-      setAllData(prev => {
-        // Deduplicate: filter out any overlap
+      setAllDataAndRef(prev => {
         const existingFirst = prev.length > 0 ? prev[0].time : Infinity;
         const unique = older.filter(k => k.time < existingFirst);
         return [...unique, ...prev];
@@ -134,27 +126,61 @@ export function useBinanceData() {
     } finally {
       setLoadingOlder(false);
     }
-  }, [loadingOlder]);
+  }, [loadingOlder, setAllDataAndRef]);
 
   /**
-   * Get visible data up to the simulated time.
+   * Get visible data up to simulated time with sub-candle interpolation.
+   *
+   * When `intervalMs` is provided and the last visible candle is still "forming"
+   * (sim time hasn't reached candle close), its OHLCV values are interpolated
+   * to create a realistic live-candle animation effect.
    */
-  const getVisibleData = useCallback((currentSimTime: number): KlineData[] => {
-    return allData.filter(k => k.time <= currentSimTime);
+  const getVisibleData = useCallback((currentSimTime: number, intervalMs?: number): KlineData[] => {
+    const visible = allData.filter(k => k.time <= currentSimTime);
+    if (visible.length === 0 || !intervalMs || intervalMs <= 0) return visible;
+
+    const last = visible[visible.length - 1];
+    const candleEnd = last.time + intervalMs;
+
+    // If sim time hasn't completed this candle, interpolate its forming state
+    if (currentSimTime < candleEnd) {
+      const progress = Math.max(0, Math.min(1, (currentSimTime - last.time) / intervalMs));
+
+      // Close interpolates linearly from open toward final close
+      const close = last.open + (last.close - last.open) * progress;
+
+      // High/low gradually reveal with a slight lead so extremes appear naturally
+      const hlReveal = Math.min(1, progress * 1.5);
+      const rawHigh = last.open + (last.high - last.open) * hlReveal;
+      const rawLow = last.open + (last.low - last.open) * hlReveal;
+
+      // Enforce OHLC constraints
+      const high = Math.max(last.open, close, rawHigh);
+      const low = Math.min(last.open, close, rawLow);
+
+      visible[visible.length - 1] = {
+        time: last.time,
+        open: last.open,
+        high,
+        low,
+        close,
+        volume: last.volume * progress,
+      };
+    }
+
+    return visible;
   }, [allData]);
 
-  /**
-   * Reset all data (e.g. when switching symbols).
-   */
   const reset = useCallback(() => {
-    setAllData([]);
+    setAllDataAndRef([]);
     oldestRef.current = Infinity;
     noMoreRef.current = false;
     setError(null);
-  }, []);
+  }, [setAllDataAndRef]);
 
   return {
     allData,
+    allDataRef,
     loading,
     loadingOlder,
     error,
