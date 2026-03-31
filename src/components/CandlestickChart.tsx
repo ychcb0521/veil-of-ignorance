@@ -351,6 +351,11 @@ function CandlestickChartComponent({ data, symbol, onLoadOlder, loadingOlder, tr
 
     const needsFit = prevDataLenRef.current === 0;
 
+    // Detect true data replacement: oldest moved forward (symbol/interval change)
+    const isDataReplacement = prevDataLenRef.current > 0
+      && !wasPrepend
+      && currentOldest > prevOldestRef.current;
+
     if (wasPrepend) {
       // Older data prepended — feed older portion via applyMoreData
       const newCount = data.length - prevDataLenRef.current;
@@ -359,22 +364,24 @@ function CandlestickChartComponent({ data, symbol, onLoadOlder, loadingOlder, tr
     } else if (prevDataLenRef.current === 0) {
       // Initial load
       chart.applyNewData(klineData, true);
-    } else if (data.length > prevDataLenRef.current && data.length - prevDataLenRef.current <= 2) {
-      // New candle appended (sim tick)
-      chart.updateData(lastCandle);
-    } else if (data.length === prevDataLenRef.current && lastCandle.timestamp === prevNewestRef.current) {
-      // Same bar evolving: only update last candle to keep crosshair/interaction state stable
-      chart.updateData(lastCandle);
-    } else {
-      // Data replaced (symbol/interval/window replacement)
+    } else if (isDataReplacement) {
+      // Symbol/interval changed — full data replacement
       chart.applyNewData(klineData, true);
+    } else if (data.length > prevDataLenRef.current) {
+      // New candles appended (any count) — feed incrementally to avoid full reset
+      const startIdx = prevDataLenRef.current;
+      for (let i = startIdx; i < klineData.length; i++) {
+        chart.updateData(klineData[i]);
+      }
+    } else {
+      // Same length, bar evolving — update last candle only
+      chart.updateData(lastCandle);
     }
 
-    // Auto-fit content on initial load or full data replacement to fill the viewport
-    if (needsFit || (!wasPrepend && prevDataLenRef.current > 0 && data.length !== prevDataLenRef.current && !(data.length > prevDataLenRef.current && data.length - prevDataLenRef.current <= 2))) {
+    // Auto-fit content on initial load or full data replacement
+    if (needsFit || isDataReplacement) {
       requestAnimationFrame(() => {
         chartRef.current?.scrollByDistance(0, 0);
-        // klinecharts v9 does not have fitContent; use scrollToRealTime to snap to latest
         chartRef.current?.scrollToRealTime();
       });
     }
