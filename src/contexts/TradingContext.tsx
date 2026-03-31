@@ -590,7 +590,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
       id: crypto.randomUUID(), symbol, side: pos.side, type: 'MARKET' as OrderType,
       action: 'CLOSE' as const, entryPrice: pos.entryPrice, exitPrice: fillPrice,
       quantity: pos.quantity, leverage: pos.leverage,
-      pnl: pnl - fee, fee, slippage, openTime: 0, closeTime: getEffectiveTime(sym),
+      pnl: pnl - fee, fee, slippage, openTime: 0, closeTime: getEffectiveTime(symbol),
     }]);
     toast(pnl >= 0 ? '盈利平仓 ✅' : '亏损平仓 ❌', {
       description: `${symbol} ${pnl >= 0 ? '+' : ''}${(pnl - fee).toFixed(2)} USDT`,
