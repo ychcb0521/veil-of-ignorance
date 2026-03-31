@@ -17,6 +17,7 @@ import { SymbolSelector } from '@/components/SymbolSelector';
 import { AccountInfo } from '@/components/AccountInfo';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import { MobileLayout } from '@/components/mobile/MobileLayout';
+import { AssetOverview } from '@/components/AssetOverview';
 import { LiquidationModal } from '@/components/LiquidationModal';
 import { AnalyticsPanel } from '@/components/AnalyticsPanel';
 import { CoolingOffModal, useCoolingOff } from '@/components/CoolingOffModal';
