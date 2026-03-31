@@ -19,6 +19,7 @@ interface Props {
   timeMode?: TimeMode;
   onSetTimeMode?: (v: TimeMode) => void;
   totalPositionCount?: number;
+  originTime?: number | null;
 }
 
 const SPEED_OPTIONS = [1, 2, 5, 10, 30, 60];
@@ -27,6 +28,7 @@ export function TimeControl({
   status, currentSimulatedTime, speed,
   onStart, onPause, onResume, onStop, onSetSpeed, clockRef,
   timeMode = 'synced', onSetTimeMode, totalPositionCount = 0,
+  originTime,
 }: Props) {
   const [dateInput, setDateInput] = useState('2024-01-15 16:00:00');
   const canToggleMode = totalPositionCount === 0;
@@ -101,6 +103,22 @@ export function TimeControl({
     );
   };
 
+  /** Right-side time info block: origin time (static) + current sim time (dynamic) */
+  const TimeDisplay = ({ paused }: { paused?: boolean }) => (
+    <div className="ml-auto flex items-center gap-4">
+      {originTime != null && (
+        <span className="flex items-center gap-1.5 font-mono text-[11px] text-muted-foreground">
+          <span className="text-[9px] px-1.5 py-0.5 rounded bg-muted font-medium tracking-wide">启始</span>
+          {formatUTC8(originTime)}
+        </span>
+      )}
+      <span className={`font-mono text-sm font-medium ${paused ? 'text-yellow-400 animate-pulse' : 'text-primary'}`}>
+        {paused && '⏸ '}
+        <span ref={clockRef}>{formatUTC8(currentSimulatedTime)}</span>
+      </span>
+    </div>
+  );
+
   return (
     <div className="panel px-4 py-3 bg-card">
       <div className="flex items-center gap-4 flex-wrap">
@@ -140,9 +158,7 @@ export function TimeControl({
             </div>
             <SpeedButtons />
             <ModeSelector />
-            <div className="ml-auto font-mono text-sm text-primary font-medium">
-              <span ref={clockRef}>{formatUTC8(currentSimulatedTime)}</span>
-            </div>
+            <TimeDisplay />
           </>
         )}
 
@@ -158,9 +174,7 @@ export function TimeControl({
             </div>
             <SpeedButtons />
             <ModeSelector />
-            <div className="ml-auto font-mono text-sm text-yellow-400 font-medium animate-pulse">
-              ⏸ <span ref={clockRef}>{formatUTC8(currentSimulatedTime)}</span>
-            </div>
+            <TimeDisplay paused />
           </>
         )}
       </div>
