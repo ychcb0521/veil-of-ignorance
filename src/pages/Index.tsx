@@ -123,20 +123,26 @@ const Index = () => {
     [getVisibleData, sim.currentSimulatedTime, iMs]
   );
 
-  // ===== Imperative chart update loop =====
-  // During playback, push candles directly to chart at 60fps via ref,
-  // bypassing React's render cycle for silky-smooth chart animation.
-  // At high speed, batches multiple completed candles per frame (only renders the last).
-  const chartApiRef = useRef<{ updateData: (candle: any) => void } | null>(null);
-  const lastImperativePushRef = useRef(0); // index into allData
-  const imperativeInitRef = useRef(false);
+  // ===== UNIFIED GAME LOOP =====
+  // Single RAF tick handles: time computation → clock DOM → cursor → chart → throttled React flush.
+  // Zero React re-renders for visual updates.
 
-  /** Max completed candles to render per frame. Beyond this, skip intermediate candles. */
-  const MAX_RENDER_PER_FRAME = 3;
+  const chartApiRef = useRef<{ updateData: (candle: any) => void } | null>(null);
+  const cursorRef = useRef(0);           // pointer into allData (O(1) advance)
+  const gameLoopInitRef = useRef(false); // set to false on status change to re-sync cursor
+  const clockRef = useRef<HTMLSpanElement>(null);        // direct DOM clock
+  const headerClockRef = useRef<HTMLSpanElement>(null);   // header bar clock
+  const lastReactFlushRef = useRef(0);   // throttle React setState
+  const lastPersistRef = useRef(0);      // throttle localStorage
+
+  /** Throttle interval for React state flush (ms). Only for matching/liquidation engines. */
+  const REACT_FLUSH_MS = 800;
+  /** Throttle interval for localStorage persistence (ms). */
+  const PERSIST_MS = 500;
 
   useEffect(() => {
     if (sim.status !== 'playing') {
-      imperativeInitRef.current = false;
+      gameLoopInitRef.current = false;
       return;
     }
 
@@ -145,75 +151,81 @@ const Index = () => {
     const tick = () => {
       const api = chartApiRef.current;
       const data = allDataRef.current;
-      const simTime = sim.currentTimeRef.current;
 
-      if (!api || data.length === 0) {
-        raf = requestAnimationFrame(tick);
-        return;
-      }
+      // ① Compute simulated time from wall-clock delta (pure math, no React)
+      const simTime = sim.getSimTime();
+      sim.currentTimeRef.current = simTime;
 
-      // On first tick, sync index to what React already loaded
-      if (!imperativeInitRef.current) {
-        let idx = 0;
-        for (let i = 0; i < data.length; i++) {
-          if (data[i].time <= simTime) idx = i + 1;
+      // ② Update clock DOM directly — zero React overhead
+      const timeStr = formatUTC8(simTime);
+      if (clockRef.current) clockRef.current.textContent = timeStr;
+      if (headerClockRef.current) headerClockRef.current.textContent = timeStr;
+
+      // ③ Advance cursor through data & update chart
+      if (api && data.length > 0) {
+        // First tick after play/resume: binary-search to sync cursor
+        if (!gameLoopInitRef.current) {
+          let idx = 0;
+          for (let i = 0; i < data.length; i++) {
+            if (data[i].time <= simTime) idx = i + 1;
+            else break;
+          }
+          cursorRef.current = idx;
+          gameLoopInitRef.current = true;
+        }
+
+        // Advance cursor: O(1) amortised — just walk forward from last position
+        let newCandles = 0;
+        while (cursorRef.current < data.length) {
+          const candleEnd = data[cursorRef.current].time + iMs;
+          if (candleEnd <= simTime) { newCandles++; cursorRef.current++; }
           else break;
         }
-        lastImperativePushRef.current = idx;
-        imperativeInitRef.current = true;
-        raf = requestAnimationFrame(tick);
-        return;
-      }
 
-      // Count how many completed candles we need to push
-      let completedCount = 0;
-      let scanIdx = lastImperativePushRef.current;
-      while (scanIdx < data.length) {
-        const candleEnd = data[scanIdx].time + iMs;
-        if (candleEnd <= simTime) { completedCount++; scanIdx++; }
-        else break;
-      }
-
-      if (completedCount > 0) {
-        // If many candles completed this frame, skip rendering intermediates
-        // Only render the last MAX_RENDER_PER_FRAME completed candles
-        const skipCount = Math.max(0, completedCount - MAX_RENDER_PER_FRAME);
-        const startIdx = lastImperativePushRef.current;
-
-        for (let i = 0; i < completedCount; i++) {
-          const candle = data[startIdx + i];
-          // Skip rendering for intermediate candles (still advance the index)
-          if (i < skipCount) continue;
-          api.updateData({
-            timestamp: candle.time,
-            open: candle.open,
-            high: candle.high,
-            low: candle.low,
-            close: candle.close,
-            volume: candle.volume,
-          });
+        // ④ Batch chart update — never call update() more than once per frame
+        if (newCandles > 0) {
+          // For large jumps (>3 candles in one frame), push only the last 3
+          // to avoid GPU stall from many sequential update() calls.
+          const batchStart = Math.max(0, cursorRef.current - Math.min(newCandles, 3));
+          for (let i = batchStart; i < cursorRef.current; i++) {
+            const c = data[i];
+            api.updateData({
+              timestamp: c.time, open: c.open, high: c.high,
+              low: c.low, close: c.close, volume: c.volume,
+            });
+          }
         }
-        lastImperativePushRef.current = startIdx + completedCount;
+
+        // Sub-candle interpolation for the forming candle
+        if (cursorRef.current < data.length) {
+          const candle = data[cursorRef.current];
+          if (candle.time <= simTime) {
+            const progress = Math.max(0, Math.min(1, (simTime - candle.time) / iMs));
+            const close = candle.open + (candle.close - candle.open) * progress;
+            const hlReveal = Math.min(1, progress * 1.5);
+            const rawHigh = candle.open + (candle.high - candle.open) * hlReveal;
+            const rawLow = candle.open + (candle.low - candle.open) * hlReveal;
+            api.updateData({
+              timestamp: candle.time, open: candle.open,
+              high: Math.max(candle.open, close, rawHigh),
+              low: Math.min(candle.open, close, rawLow),
+              close, volume: candle.volume * progress,
+            });
+          }
+        }
       }
 
-      // Handle forming candle (sub-candle interpolation)
-      if (lastImperativePushRef.current < data.length) {
-        const candle = data[lastImperativePushRef.current];
-        if (candle.time <= simTime) {
-          const progress = Math.max(0, Math.min(1, (simTime - candle.time) / iMs));
-          const close = candle.open + (candle.close - candle.open) * progress;
-          const hlReveal = Math.min(1, progress * 1.5);
-          const rawHigh = candle.open + (candle.high - candle.open) * hlReveal;
-          const rawLow = candle.open + (candle.low - candle.open) * hlReveal;
-          api.updateData({
-            timestamp: candle.time,
-            open: candle.open,
-            high: Math.max(candle.open, close, rawHigh),
-            low: Math.min(candle.open, close, rawLow),
-            close,
-            volume: candle.volume * progress,
-          });
-        }
+      // ⑤ Throttled React state flush — only for matching/liquidation engines
+      const now = Date.now();
+      if (now - lastReactFlushRef.current >= REACT_FLUSH_MS) {
+        lastReactFlushRef.current = now;
+        sim.syncReactState(simTime);
+      }
+
+      // ⑥ Throttled localStorage persistence
+      if (now - lastPersistRef.current >= PERSIST_MS) {
+        lastPersistRef.current = now;
+        sim.persistTime(simTime);
       }
 
       raf = requestAnimationFrame(tick);
@@ -630,10 +642,9 @@ const Index = () => {
           {loading && <span className="text-[10px] text-primary animate-pulse font-mono">加载历史数据...</span>}
           {visibleData.length > 0 && (
             <span className="font-mono text-xs text-primary font-medium">
-              {(() => {
-                const ts = visibleData[visibleData.length - 1].time;
-                return formatUTC8(ts);
-              })()}
+              <span ref={headerClockRef}>
+                {formatUTC8(visibleData[visibleData.length - 1].time)}
+              </span>
             </span>
           )}
           <button onClick={() => setAssetsOpen(true)}
@@ -656,7 +667,7 @@ const Index = () => {
 
       <div className="shrink-0">
         <TimeControl status={sim.status} currentSimulatedTime={sim.currentSimulatedTime}
-          speed={sim.speed} onStart={handleStart} onPause={sim.pauseSimulation} onResume={sim.resumeSimulation} onStop={handleStop} onSetSpeed={sim.setSpeed} />
+          speed={sim.speed} onStart={handleStart} onPause={sim.pauseSimulation} onResume={sim.resumeSimulation} onStop={handleStop} onSetSpeed={sim.setSpeed} clockRef={clockRef} />
       </div>
 
       <div className="shrink-0">
