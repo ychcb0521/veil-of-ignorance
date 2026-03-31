@@ -595,7 +595,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
     toast(pnl >= 0 ? '盈利平仓 ✅' : '亏损平仓 ❌', {
       description: `${symbol} ${pnl >= 0 ? '+' : ''}${(pnl - fee).toFixed(2)} USDT`,
     });
-  }, [positionsMap, priceMap, sim.currentSimulatedTime]);
+  }, [positionsMap, priceMap, getEffectiveTime]);
 
   // ===== Cancel Order =====
   const handleCancelOrder = useCallback((symbol: string, orderId: string) => {
