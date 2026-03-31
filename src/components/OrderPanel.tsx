@@ -540,7 +540,7 @@ export function OrderPanel({ currentPrice, onPlaceOrder, disabled, symbol, cooli
           ]).map(item => (
             <button key={item.value}
               onClick={() => { setPriceSelection(item.value); setShowPriceSelector(false); }}
-              className="w-full flex items-center justify-between px-4 py-3 hover:bg-accent/30 transition-colors"
+              className="w-full flex items-center justify-between px-4 py-3 hover:bg-accent/30 transition-colors duration-100 ease-out"
             >
               <span className="text-sm text-foreground">{item.label}</span>
               {priceSelection === item.value && <Check className="w-4 h-4 text-primary" />}
