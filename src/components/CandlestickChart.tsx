@@ -269,7 +269,19 @@ function CandlestickChartComponent({ data, symbol, onLoadOlder, loadingOlder, tr
 
     chartRef.current = chart;
 
+    // ResizeObserver for responsive container sizing
+    const ro = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        const { width, height } = entry.contentRect;
+        if (width > 0 && height > 0) {
+          chart.resize();
+        }
+      }
+    });
+    ro.observe(containerRef.current);
+
     return () => {
+      ro.disconnect();
       dispose(containerRef.current!);
       chartRef.current = null;
     };
