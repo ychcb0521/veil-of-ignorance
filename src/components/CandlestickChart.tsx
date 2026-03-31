@@ -64,6 +64,8 @@ interface Props {
   rawSymbol?: string;
   pricePrecision?: number;
   quantityPrecision?: number;
+  pendingOrders?: PendingOrder[];
+  onCancelOrder?: (orderId: string) => void;
 }
 
 // Convert our KlineData to klinecharts KLineData
