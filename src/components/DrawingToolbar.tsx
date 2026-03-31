@@ -164,11 +164,11 @@ export function DrawingToolbar({ activeTool, onToolChange, onClearDrawings, draw
           return (
             <div key={group.id} className="relative">
               <button
-                className={`w-[30px] h-[30px] flex items-center justify-center rounded transition-colors relative group ${
+                className={`w-[30px] h-[30px] flex items-center justify-center rounded transition-all duration-100 ease-out active:scale-[0.9] relative group ${
                   isActive
                     ? 'text-primary bg-primary/15'
                     : 'text-muted-foreground hover:text-foreground hover:bg-accent/40'
-                } ${activeItem.disabled ? 'opacity-40 cursor-not-allowed' : ''}`}
+                } ${activeItem.disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
                 onClick={() => handleMainIconClick(group)}
                 onContextMenu={(e) => { e.preventDefault(); handleGroupClick(group.id); }}
               >
