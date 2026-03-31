@@ -860,23 +860,6 @@ const Index = () => {
         </div>
         <div className="flex items-center gap-3 shrink-0">
           {loading && <span className="text-[10px] text-primary animate-pulse font-mono">加载历史数据...</span>}
-          {activeCoinState.status !== 'stopped' && activeCoinState.originTime != null && (
-            <span className="flex items-center gap-1.5 font-mono text-[10px] text-muted-foreground">
-              <span className="text-[9px] px-1 py-0.5 rounded bg-muted text-muted-foreground font-medium tracking-wide">启始</span>
-              {formatUTC8(activeCoinState.originTime)}
-            </span>
-          )}
-          {activeCoinState.status !== 'stopped' && activeCoinState.time > 0 ? (
-            <span className="font-mono text-xs text-primary font-medium">
-              <span ref={headerClockRef}>
-                {formatUTC8(activeCoinState.time)}
-              </span>
-            </span>
-          ) : visibleData.length > 0 ? (
-            <span className="font-mono text-xs text-primary font-medium">
-              {formatUTC8(visibleData[visibleData.length - 1].time)}
-            </span>
-          ) : null}
           <button onClick={() => setAssetsOpen(true)}
             className="flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors">
             <Wallet className="w-3 h-3" /> 资产
