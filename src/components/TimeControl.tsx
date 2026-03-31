@@ -89,7 +89,7 @@ export function TimeControl({
     const showRunningList = !canToggleMode && totalPositionCount === 0 && runningCoins.length > 0;
 
     return (
-      <Popover open={lockPopoverOpen} onOpenChange={setLockPopoverOpen}>
+      <Popover open={lockPopoverOpen} onOpenChange={handleLockPopoverChange}>
         <PopoverTrigger asChild>
           <div className="flex items-center gap-1 border-l border-border pl-3 ml-1 cursor-pointer">
             {!canToggleMode && <Lock className="w-3 h-3 text-muted-foreground" />}
