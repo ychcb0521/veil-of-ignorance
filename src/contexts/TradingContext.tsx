@@ -644,6 +644,10 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
     handleAddIsolatedMargin,
     fundingRate: FUNDING_RATE,
     liquidationOpen, liquidationDetails, closeLiquidationModal,
+    isTimeIsolated, setIsTimeIsolated,
+    coinTimelines, setCoinTimelines,
+    totalPositionCount,
+    getEffectiveTime,
   };
 
   return <TradingContext.Provider value={value}>{children}</TradingContext.Provider>;
