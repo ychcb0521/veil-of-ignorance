@@ -3,7 +3,7 @@ import { Play, Pause, Square, Clock, Globe, Split, Lock } from 'lucide-react';
 import { formatUTC8 } from '@/lib/timeFormat';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import type { TimeMachineStatus } from '@/hooks/useTimeSimulator';
-import type { TimeMode } from '@/contexts/TradingContext';
+import type { TimeMode, CoinTimelinesMap } from '@/contexts/TradingContext';
 
 interface Props {
   status: TimeMachineStatus;
@@ -20,6 +20,7 @@ interface Props {
   onSetTimeMode?: (v: TimeMode) => void;
   totalPositionCount?: number;
   originTime?: number | null;
+  coinTimelines?: CoinTimelinesMap;
 }
 
 const SPEED_OPTIONS = [1, 2, 5, 10, 30, 60];

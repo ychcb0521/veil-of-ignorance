@@ -744,7 +744,7 @@ const Index = () => {
   }, [activeSymbol, interval, initLoad, sim, timeMode]);
 
   // ===== STATE GUARD: time mode switch =====
-  const handleSetTimeMode = useCallback((newMode: TimeMode) => {
+  const handleSetTimeMode = useCallback((newMode: 'synced' | 'isolated') => {
     // Switching to synced from isolated requires all coins stopped
     if (newMode === 'synced' && timeMode === 'isolated') {
       const runningCoins = Object.entries(coinTimelines)
