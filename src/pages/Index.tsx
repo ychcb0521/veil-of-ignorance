@@ -525,17 +525,31 @@ const Index = () => {
   // ===== Symbol switch: reload chart data =====
   const handleSymbolChange = useCallback(async (newSymbol: string) => {
     if (newSymbol === activeSymbol) return;
+
+    // In isolated mode: save current coin's time before switching
+    if (isTimeIsolated && sim.status !== 'stopped') {
+      const currentTime = sim.currentTimeRef.current || sim.currentSimulatedTime;
+      setCoinTimelines(prev => ({ ...prev, [activeSymbol]: currentTime }));
+    }
+
     setActiveSymbol(newSymbol);
     reset();
     prevVisibleLenRef.current = 0;
+    cursorRef.current = 0;
+    gameLoopInitRef.current = false;
 
     if (sim.status !== 'stopped') {
-      const data = await initLoad(newSymbol, interval, sim.currentSimulatedTime);
+      // In isolated mode: restore the target coin's saved time; otherwise use global time
+      const targetTime = isTimeIsolated
+        ? (coinTimelines[newSymbol] ?? sim.currentSimulatedTime)
+        : sim.currentSimulatedTime;
+
+      const data = await initLoad(newSymbol, interval, targetTime);
       if (data.length > 0) {
         toast.info(`已切换到 ${newSymbol}`, { description: `加载 ${data.length} 根K线` });
       }
     }
-  }, [activeSymbol, sim.status, sim.currentSimulatedTime, interval, initLoad, reset]);
+  }, [activeSymbol, sim.status, sim.currentSimulatedTime, interval, initLoad, reset, isTimeIsolated, coinTimelines]);
 
   const handleIntervalChange = useCallback(async (newInterval: string) => {
     if (newInterval === interval) return;
