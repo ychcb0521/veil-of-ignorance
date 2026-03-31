@@ -64,7 +64,8 @@ export function TimeControl({
     onStart(ts);
   };
 
-  const handleModeSwitchClick = async (
+  // Pure event-driven guard — no useEffect, no side effects
+  const handleModeSwitchClick = (
     e: React.MouseEvent<HTMLButtonElement>,
     nextMode: TimeMode,
   ) => {
@@ -78,15 +79,17 @@ export function TimeControl({
         description: `有 ${totalPositionCount} 笔持仓，需全部平仓后才能切换模式。`,
         duration: 5000,
       });
-      return;
+      return; // Do NOT touch timeMode state
     }
 
     if (nextMode === 'synced' && timeMode === 'isolated' && runningCoinEntries.length > 0) {
-      setGuardedCoins(runningCoinEntries);
+      // Snapshot coins at click time, open modal, do NOT change timeMode
+      setGuardedCoins([...runningCoinEntries]);
       setGuardDialogOpen(true);
       return;
     }
 
+    // Only if all checks pass, actually change mode
     onSetTimeMode(nextMode);
   };
 
@@ -116,6 +119,47 @@ export function TimeControl({
     }
   };
 
+  // Derived values for mode selector (no inner component to avoid remount flicker)
+  const blockedReason = hasBlockingPositions
+    ? `有 ${totalPositionCount} 笔持仓`
+    : hasRunningCoins
+      ? `有 ${runningCoinEntries.length} 个币种正在运行`
+      : null;
+
+  const modeSelectorButtons = onSetTimeMode ? (
+    <div className="flex items-center gap-1 border-l border-border pl-3 ml-1">
+      {showGuardLock && <Lock className="w-3 h-3 text-muted-foreground shrink-0" />}
+      <button
+        onClick={(e) => handleModeSwitchClick(e, 'synced')}
+        title={blockedReason ? `当前不可切换：${blockedReason}` : '切换到同步模式'}
+        aria-disabled={hasBlockingPositions || hasRunningCoins}
+        className={`flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium transition-all duration-200 ease-out ${
+          timeMode === 'synced'
+            ? 'bg-primary/20 text-primary'
+            : showGuardLock
+              ? 'bg-secondary text-muted-foreground opacity-70 hover:bg-secondary'
+              : 'text-muted-foreground hover:text-foreground hover:bg-accent'
+        }`}
+      >
+        <Globe className="w-3 h-3" /> 同步
+      </button>
+      <button
+        onClick={(e) => handleModeSwitchClick(e, 'isolated')}
+        title={hasBlockingPositions ? `当前不可切换：${blockedReason}` : '切换到隔离模式'}
+        aria-disabled={hasBlockingPositions}
+        className={`flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium transition-all duration-200 ease-out ${
+          timeMode === 'isolated'
+            ? 'bg-primary/20 text-primary'
+            : hasBlockingPositions
+              ? 'bg-secondary text-muted-foreground opacity-70 hover:bg-secondary'
+              : 'text-muted-foreground hover:text-foreground hover:bg-accent'
+        }`}
+      >
+        <Split className="w-3 h-3" /> 隔离
+      </button>
+    </div>
+  ) : null;
+
   const SpeedButtons = () => (
     <div className="flex items-center gap-1">
       {SPEED_OPTIONS.map(s => (
@@ -133,46 +177,6 @@ export function TimeControl({
       ))}
     </div>
   );
-
-  const blockedReason = hasBlockingPositions
-    ? `有 ${totalPositionCount} 笔持仓`
-    : hasRunningCoins
-      ? `有 ${runningCoinEntries.length} 个币种正在运行`
-      : null;
-
-  const modeSelectorButtons = onSetTimeMode ? (
-    <div className="flex items-center gap-1 border-l border-border pl-3 ml-1">
-      {showGuardLock && <Lock className="w-3 h-3 text-muted-foreground shrink-0" />}
-      <button
-        onClick={(e) => void handleModeSwitchClick(e, 'synced')}
-        title={blockedReason ? `当前不可切换：${blockedReason}` : '切换到同步模式'}
-        aria-disabled={hasBlockingPositions || hasRunningCoins}
-        className={`flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium transition-all duration-200 ease-out ${
-          timeMode === 'synced'
-            ? 'bg-primary/20 text-primary'
-            : showGuardLock
-              ? 'bg-secondary text-muted-foreground opacity-70 hover:bg-secondary'
-              : 'text-muted-foreground hover:text-foreground hover:bg-accent'
-        }`}
-      >
-        <Globe className="w-3 h-3" /> 同步
-      </button>
-      <button
-        onClick={(e) => void handleModeSwitchClick(e, 'isolated')}
-        title={hasBlockingPositions ? `当前不可切换：${blockedReason}` : '切换到隔离模式'}
-        aria-disabled={hasBlockingPositions}
-        className={`flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium transition-all duration-200 ease-out ${
-          timeMode === 'isolated'
-            ? 'bg-primary/20 text-primary'
-            : hasBlockingPositions
-              ? 'bg-secondary text-muted-foreground opacity-70 hover:bg-secondary'
-              : 'text-muted-foreground hover:text-foreground hover:bg-accent'
-        }`}
-      >
-        <Split className="w-3 h-3" /> 隔离
-      </button>
-    </div>
-  ) : null;
 
   const TimeDisplay = ({ paused }: { paused?: boolean }) => (
     <div className="ml-auto flex items-center gap-4">
@@ -212,7 +216,7 @@ export function TimeControl({
             <button onClick={handleStart} className="btn-long flex items-center gap-1.5 text-xs">
               <Play className="w-3.5 h-3.5" /> 启动
             </button>
-            <ModeSelector />
+            {modeSelectorButtons}
           </div>
         )}
 
@@ -227,7 +231,7 @@ export function TimeControl({
               </button>
             </div>
             <SpeedButtons />
-            <ModeSelector />
+            {modeSelectorButtons}
             <TimeDisplay />
           </>
         )}
@@ -243,11 +247,67 @@ export function TimeControl({
               </button>
             </div>
             <SpeedButtons />
-            <ModeSelector />
+            {modeSelectorButtons}
             <TimeDisplay paused />
           </>
         )}
       </div>
+
+      {/* Guard Dialog — mounted only when needed, completely outside the flex layout */}
+      {guardDialogOpen && (
+        <Dialog open={guardDialogOpen} onOpenChange={handleDialogOpenChange}>
+          <DialogContent
+            className="sm:max-w-md transition-all duration-200 ease-out"
+            onClick={(e) => e.stopPropagation()}
+            onPointerDown={(e) => e.stopPropagation()}
+          >
+            <DialogHeader>
+              <DialogTitle>无法切换模式</DialogTitle>
+              <DialogDescription>
+                当前仍有币种处于独立运行状态。请先查看或停止这些币种，再切换到同步模式。
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="space-y-2">
+              <div className="rounded-lg border border-border bg-card/60 p-3">
+                <div className="mb-2 text-xs font-medium text-muted-foreground">运行中的币种</div>
+                <div className="flex flex-col gap-2">
+                  {guardedCoins.map(({ sym, status: coinStatus }) => (
+                    <button
+                      key={sym}
+                      onClick={(e) => handleJumpToCoin(e, sym)}
+                      className="flex items-center justify-between rounded-md border border-border bg-background px-3 py-2 text-left transition-all duration-200 ease-out hover:bg-accent"
+                    >
+                      <span className="text-sm font-medium text-foreground">{sym}</span>
+                      <span className={`text-xs ${coinStatus === 'playing' ? 'text-primary' : 'text-muted-foreground'}`}>
+                        {coinStatus === 'playing' ? '运行中' : '已暂停'}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            <DialogFooter>
+              <button
+                type="button"
+                onClick={() => setGuardDialogOpen(false)}
+                className="inline-flex items-center justify-center rounded-md border border-border bg-background px-4 py-2 text-sm font-medium text-foreground transition-all duration-200 ease-out hover:bg-accent"
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                onClick={(e) => void handleStopAllAndSwitch(e)}
+                disabled={isStoppingAll}
+                className="inline-flex items-center justify-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-all duration-200 ease-out hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {isStoppingAll ? '处理中…' : '一键停止所有并切换'}
+              </button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
     </div>
   );
 }
