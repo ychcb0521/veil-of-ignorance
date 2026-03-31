@@ -3,7 +3,7 @@
  * Works with klinecharts native indicator system + custom registered indicators.
  */
 
-import { useState, useRef, useEffect, useMemo } from 'react';
+import { useState, useRef, useEffect, useMemo, forwardRef } from 'react';
 import { Search, X, Plus, Check } from 'lucide-react';
 import type { IndicatorConfig } from './CandlestickChart';
 import { CUSTOM_INDICATOR_MAP } from '@/lib/customIndicators';
