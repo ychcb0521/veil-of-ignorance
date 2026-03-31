@@ -276,7 +276,7 @@ const Index = () => {
 
         const timeStr = formatUTC8(simTime);
         if (clockRef.current) clockRef.current.textContent = timeStr;
-        if (headerClockRef.current) headerClockRef.current.textContent = timeStr;
+        
 
         if (api && data.length > 0) {
           if (!gameLoopInitRef.current) {
