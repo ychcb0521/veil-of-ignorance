@@ -978,7 +978,8 @@ const Index = () => {
             priceMap={priceMap}
             pricePrecision={pricePrecision}
             quantityPrecision={quantityPrecision}
-            coolingOff={coolingOff}
+            coolingOff={coolingOff.isActive}
+            coolingOffLabel={coolingOff.isActive ? coolingOff.formatRemaining() : undefined}
             onOpenCoolingOff={() => setCoolingOffModalOpen(true)}
             priceProtection={priceProtection}
             onTogglePriceProtection={() => setPriceProtection(prev => !prev)}
