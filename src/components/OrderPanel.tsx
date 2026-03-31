@@ -433,7 +433,7 @@ export function OrderPanel({ currentPrice, onPlaceOrder, disabled, symbol, cooli
                   { value: 'INITIAL_MARGIN' as UsdtInputMode, label: '初始保证金' },
                 ] as const).map(m => (
                   <button key={m.value} onClick={() => setUsdtInputMode(m.value)}
-                    className={`text-[9px] px-1.5 py-0.5 rounded transition-colors ${
+                    className={`text-[9px] px-1.5 py-0.5 rounded transition-all duration-100 ease-out active:scale-[0.95] ${
                       usdtInputMode === m.value
                         ? 'bg-primary/20 text-primary'
                         : 'text-muted-foreground hover:text-foreground'
