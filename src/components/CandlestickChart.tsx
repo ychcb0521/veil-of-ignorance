@@ -280,6 +280,15 @@ function CandlestickChartComponent({ data, symbol, onLoadOlder, loadingOlder, tr
 
     chartRef.current = chart;
 
+    // Expose imperative API for direct candle updates (bypasses React render)
+    if (chartApiRef) {
+      chartApiRef.current = {
+        updateData: (candle: KLineData) => {
+          chart.updateData(candle);
+        },
+      };
+    }
+
     // ResizeObserver for responsive container sizing
     const ro = new ResizeObserver((entries) => {
       for (const entry of entries) {
@@ -293,6 +302,7 @@ function CandlestickChartComponent({ data, symbol, onLoadOlder, loadingOlder, tr
 
     return () => {
       ro.disconnect();
+      if (chartApiRef) chartApiRef.current = null;
       dispose(containerRef.current!);
       chartRef.current = null;
     };
