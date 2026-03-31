@@ -10,11 +10,10 @@ interface Props {
   positionsMap: PositionsMap;
   priceMap: PriceMap;
   timeMode?: TimeMode;
-  isolatedBalances?: IsolatedBalancesMap;
   activeSymbol?: string;
 }
 
-export function AccountInfo({ balance, positionsMap, priceMap, timeMode = 'synced', isolatedBalances = {}, activeSymbol }: Props) {
+export function AccountInfo({ balance, positionsMap, priceMap, timeMode = 'synced', activeSymbol }: Props) {
   const { profile } = useAuth();
   const initialCapital = profile?.initial_capital ?? 1_000_000;
 
