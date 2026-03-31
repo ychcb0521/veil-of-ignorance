@@ -101,7 +101,9 @@ export function TimeControl({
                 ? timeMode === 'synced'
                   ? '同步模式：所有币种共用同一时间轴。'
                   : '隔离模式：每个币种拥有独立时间轴，互不影响。'
-                : `有 ${totalPositionCount} 笔持仓，需全部平仓后才能切换模式。`}
+                : totalPositionCount > 0
+                  ? `有 ${totalPositionCount} 笔持仓，需全部平仓后才能切换模式。`
+                  : `有币种正在独立运行：${runningCoins.join(', ')}。请先停止所有运行。`}
             </p>
           </TooltipContent>
         </Tooltip>
