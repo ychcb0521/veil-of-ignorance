@@ -922,6 +922,7 @@ const Index = () => {
           onSetTimeMode={handleSetTimeMode}
           totalPositionCount={totalPositionCount}
           coinTimelines={coinTimelines}
+          onSymbolChange={handleSymbolChange}
           originTime={activeCoinState.originTime}
         />
       </div>
