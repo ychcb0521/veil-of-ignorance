@@ -257,7 +257,7 @@ export function TimeControl({
       {guardDialogOpen && (
         <Dialog open={guardDialogOpen} onOpenChange={handleDialogOpenChange}>
           <DialogContent
-            className="sm:max-w-md transition-all duration-200 ease-out"
+            className="sm:max-w-md"
             onClick={(e) => e.stopPropagation()}
             onPointerDown={(e) => e.stopPropagation()}
           >
