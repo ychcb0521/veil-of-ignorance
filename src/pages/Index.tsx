@@ -524,7 +524,7 @@ const Index = () => {
             let slippageAmount = 0;
             if (!isMaker) {
               const notional = fillPrice * order.quantity;
-              actualFillPrice = calcSlippage(fillPrice, notional, order.side);
+              actualFillPrice = calcSlippage(fillPrice, notional, order.side, { high: kline.high, low: kline.low, close: kline.close });
               slippageAmount = Math.abs(actualFillPrice - fillPrice) * order.quantity;
             }
             const fee = calcFee(actualFillPrice, order.quantity, isMaker);
@@ -586,7 +586,7 @@ const Index = () => {
 
             if (filledSoFar + sliceQty <= totalQty + 0.0001 && now < endTime) {
               const notional = price * sliceQty;
-              const slippedPrice = calcSlippage(price, notional, order.side);
+              const slippedPrice = calcSlippage(price, notional, order.side); // TWAP: no kline volatility available
               const slippageAmt = Math.abs(slippedPrice - price) * sliceQty;
               const fee = calcFee(slippedPrice, sliceQty, false);
               const margin = (sliceQty * slippedPrice) / order.leverage;

@@ -442,8 +442,9 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
     }
 
     // --- CROSS liquidation: aggregate all cross positions globally ---
+    // MMR = ∑(notional * MAINTENANCE_MARGIN_RATE) where notional = qty * currentPrice
     let crossUnrealizedPnl = 0;
-    let crossMargin = 0;
+    let crossMaintenanceMargin = 0;
     let crossPositionCount = 0;
     for (const [sym, positions] of Object.entries(positionsMap)) {
       const price = priceMap[sym] || 0;
@@ -451,14 +452,14 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
       for (const pos of positions) {
         if (pos.marginMode !== 'cross') continue;
         crossUnrealizedPnl += calcUnrealizedPnl(pos, price);
-        crossMargin += pos.margin;
+        crossMaintenanceMargin += pos.quantity * price * MAINTENANCE_MARGIN_RATE;
         crossPositionCount++;
       }
     }
 
     if (crossPositionCount > 0) {
       const crossEquity = balance + crossUnrealizedPnl;
-      const crossMaintenance = crossMargin * MAINTENANCE_MARGIN_RATE;
+      const crossMaintenance = crossMaintenanceMargin;
 
       if (crossEquity <= crossMaintenance || crossEquity <= 0) {
         liquidationCheckRef.current = true;

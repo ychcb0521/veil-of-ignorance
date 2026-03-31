@@ -74,7 +74,7 @@ export interface TradeRecord {
   closeTime: number;
 }
 
-export const MAINTENANCE_MARGIN_RATE = 0.004; // 0.4%
+export const MAINTENANCE_MARGIN_RATE = 0.005; // 0.5%
 export const LIQUIDATION_FEE_RATE = 0.005;    // 0.5%
 export const FUNDING_RATE = 0.0001;           // 0.01% per 8h settlement
 
@@ -110,9 +110,23 @@ export function getLeverageTierInfo(notional: number): { maxLeverage: number; ti
 // Funding settlement times in UTC hours
 export const FUNDING_HOURS = [0, 8, 16];
 
-/** Dynamic slippage for market/taker orders */
-export function calcSlippage(price: number, notionalValue: number, side: OrderSide): number {
-  const slippageRate = 0.0005 + notionalValue / 10_000_000;
+/**
+ * Volatility-adjusted slippage for market/taker orders.
+ * Base slippage = 0.05% + notional-scaled component.
+ * If kline volatility (High-Low)/Close > 2%, slippage doubles (adverse market).
+ */
+export function calcSlippage(
+  price: number,
+  notionalValue: number,
+  side: OrderSide,
+  klineVolatility?: { high: number; low: number; close: number },
+): number {
+  let slippageRate = 0.0005 + notionalValue / 10_000_000;
+  // Volatility doubling: if kline range > 2% of close, market is adverse
+  if (klineVolatility && klineVolatility.close > 0) {
+    const range = (klineVolatility.high - klineVolatility.low) / klineVolatility.close;
+    if (range > 0.02) slippageRate *= 2;
+  }
   return side === 'LONG' ? price * (1 + slippageRate) : price * (1 - slippageRate);
 }
 
@@ -134,7 +148,7 @@ export function calcROE(pos: Position, currentPrice: number): number {
 }
 
 export function calcLiquidationPrice(pos: Position): number {
-  const maintenanceRate = 0.004;
+  const maintenanceRate = MAINTENANCE_MARGIN_RATE;
   if (pos.marginMode === 'isolated' && pos.isolatedMargin != null) {
     // Isolated: liq price based on isolatedMargin
     const margin = pos.isolatedMargin;
