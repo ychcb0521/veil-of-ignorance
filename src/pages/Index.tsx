@@ -563,7 +563,7 @@ const Index = () => {
 
       <div className="flex-1 flex min-h-0 overflow-hidden">
         <div className="flex-1 flex flex-col min-h-0 min-w-0">
-          <div className="flex-1 min-h-0 relative">
+          <div className="flex-1 min-h-0 relative overflow-hidden">
             {sim.status === 'stopped' && visibleData.length === 0 ? (
               <div className="h-full flex items-center justify-center bg-background">
                 <div className="text-center space-y-3">
