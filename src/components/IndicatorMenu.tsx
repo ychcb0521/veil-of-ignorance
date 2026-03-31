@@ -270,7 +270,7 @@ export function IndicatorMenu({ open, onClose, indicators, onIndicatorsChange }:
           <button
             key={cat}
             onClick={() => setCategoryFilter(categoryFilter === cat ? null : cat)}
-            className={`px-2 py-0.5 rounded text-[10px] font-medium transition-colors whitespace-nowrap ${
+            className={`px-2 py-0.5 rounded text-[10px] font-medium transition-all duration-100 ease-out active:scale-[0.95] whitespace-nowrap ${
               categoryFilter === cat ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'
             }`}
           >
