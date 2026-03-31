@@ -120,7 +120,62 @@ const Index = () => {
     [getVisibleData, sim.currentSimulatedTime]
   );
 
-  // Update active symbol price from visible data
+  // Build asset state for AssetOverview
+  const assetState = useMemo<AssetState>(() => {
+    const initialCapital = profile?.initial_capital ?? 1_000_000;
+    // Calculate unrealized PnL across all positions
+    let unrealizedPnl = 0;
+    for (const [sym, positions] of Object.entries(positionsMap)) {
+      const price = priceMap[sym] || 0;
+      for (const pos of positions) {
+        const pnl = pos.side === 'LONG'
+          ? (price - pos.entryPrice) * pos.quantity
+          : (pos.entryPrice - price) * pos.quantity;
+        unrealizedPnl += pnl;
+      }
+    }
+    const totalBalance = balance + unrealizedPnl;
+    // Today's PnL from trade history (simplified: sum all closed trades)
+    const todayPnl = tradeHistory.reduce((s, t) => s + (t.pnl || 0), 0) + unrealizedPnl;
+    const todayPnlPct = initialCapital > 0 ? (todayPnl / initialCapital) * 100 : 0;
+
+    // Build history from trade events (simplified mock for now)
+    const history = tradeHistory
+      .filter(t => t.closeTime > 0)
+      .map((t, i, arr) => ({
+        timestamp: t.closeTime,
+        totalBalance: initialCapital + arr.slice(0, i + 1).reduce((s, x) => s + (x.pnl || 0), 0),
+      }));
+    // Add current snapshot
+    if (history.length === 0 || totalBalance !== history[history.length - 1]?.totalBalance) {
+      history.push({ timestamp: sim.currentSimulatedTime || Date.now(), totalBalance });
+    }
+
+    // Build daily PnL from trade history
+    const dailyMap = new Map<string, { pnl: number; trades: number }>();
+    for (const t of tradeHistory) {
+      if (t.closeTime <= 0) continue;
+      const date = new Date(t.closeTime + 8 * 3600_000).toISOString().slice(0, 10);
+      const prev = dailyMap.get(date) || { pnl: 0, trades: 0 };
+      dailyMap.set(date, { pnl: prev.pnl + (t.pnl || 0), trades: prev.trades + 1 });
+    }
+    const dailyPnl = Array.from(dailyMap.entries()).map(([date, v]) => ({ date, ...v }));
+
+    const futuresBalance = totalBalance;
+    return {
+      totalBalance,
+      todayPnl,
+      todayPnlPct,
+      accounts: [
+        { label: '合约', labelEn: 'Futures', balance: futuresBalance, available: balance, frozen: futuresBalance - balance },
+        { label: '资金', labelEn: 'Funding', balance: 0, available: 0, frozen: 0 },
+        { label: '现货', labelEn: 'Spot', balance: 0, available: 0, frozen: 0 },
+      ],
+      history,
+      dailyPnl,
+    };
+  }, [balance, positionsMap, priceMap, tradeHistory, sim.currentSimulatedTime, profile]);
+
   useEffect(() => {
     if (visibleData.length > 0) {
       const lastClose = visibleData[visibleData.length - 1].close;
