@@ -458,7 +458,8 @@ const Index = () => {
             case 'CONDITIONAL': {
               const trigHit = (order.side === 'LONG' && kline.high >= order.stopPrice) || (order.side === 'SHORT' && kline.low <= order.stopPrice);
               if (trigHit) {
-                if (order.conditionalExecType === 'MARKET') { triggered = true; fillPrice = kline.close; isMaker = false; }
+                // Fix: use stopPrice for market execution, NOT kline.close
+                if (order.conditionalExecType === 'MARKET') { triggered = true; fillPrice = order.stopPrice; isMaker = false; }
                 else {
                   const lp = order.conditionalLimitPrice || order.price;
                   if (order.side === 'LONG' && kline.low <= lp) { triggered = true; fillPrice = lp; }
