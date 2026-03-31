@@ -12,19 +12,13 @@ import { IndicatorMenu } from './IndicatorMenu';
 import { BarChart3, X } from 'lucide-react';
 import { usePersistedState } from '@/hooks/usePersistedState';
 import type { TradeRecord } from '@/types/trading';
+import { registerCustomIndicators, CUSTOM_INDICATOR_MAP } from '@/lib/customIndicators';
 
-// Mapping from our indicator IDs to klinecharts built-in indicator names
-// Mapping from our indicator IDs to klinecharts built-in indicator names
-const KLINE_INDICATOR_MAP: Record<string, string> = {
-  MA: 'MA', EMA: 'EMA', SMA: 'SMA', WMA: 'WMA',
-  BOLL: 'BOLL', SAR: 'SAR',
-  RSI: 'RSI', MACD: 'MACD', KDJ: 'KDJ',
-  ATR: 'ATR', CCI: 'CCI', OBV: 'OBV', ROC: 'ROC',
-  STOCH: 'KDJ', VOL: 'VOL',
-  DMI: 'DMI', TRIX: 'TRIX',
-  WR: 'WR', MFI: 'MFI',
-  // Unsupported indicators map to themselves — klinecharts will gracefully skip unknown names
-};
+// Register custom indicators once on module load
+registerCustomIndicators();
+
+// Mapping from our indicator IDs to klinecharts indicator names (built-in + custom)
+const KLINE_INDICATOR_MAP: Record<string, string> = { ...CUSTOM_INDICATOR_MAP };
 
 // IDs that render on the main (candle) pane as overlays
 const OVERLAY_INDICATOR_IDS = new Set([
