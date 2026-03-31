@@ -185,35 +185,7 @@ export function useBackgroundPrices() {
 
   // Also check for liquidation across all symbols
   useEffect(() => {
-    if (!sim.isRunning) return;
-
-    for (const [symbol, positions] of Object.entries(positionsMap)) {
-      const price = priceMap[symbol];
-      if (!price || positions.length === 0) continue;
-
-      const liquidated: number[] = [];
-      for (let i = 0; i < positions.length; i++) {
-        const pos = positions[i];
-        const maintenanceRate = 0.004;
-        let liqPrice: number;
-        if (pos.side === 'LONG') {
-          liqPrice = pos.entryPrice * (1 - 1 / pos.leverage + maintenanceRate);
-          if (price <= liqPrice) liquidated.push(i);
-        } else {
-          liqPrice = pos.entryPrice * (1 + 1 / pos.leverage - maintenanceRate);
-          if (price >= liqPrice) liquidated.push(i);
-        }
-      }
-
-      if (liquidated.length > 0) {
-        const lostMargin = liquidated.reduce((sum, i) => sum + positions[i].margin, 0);
-        setPositionsMap(prev => ({
-          ...prev,
-          [symbol]: (prev[symbol] || []).filter((_, i) => !liquidated.includes(i)),
-        }));
-        setBalance(prev => prev - lostMargin * 0.5); // partial liquidation penalty
-        toast.error(`[${symbol}] 仓位已被强制平仓`, { description: '价格触及强平价' });
-      }
-    }
-  }, [sim.currentSimulatedTime, positionsMap, priceMap]);
+    // Background liquidation now handled by TradingContext's liquidation engine
+    // which uses priceMap (updated by this hook) against the single global balance.
+  }, []);
 }
