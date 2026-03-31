@@ -205,7 +205,6 @@ const Index = () => {
         if (activeIsPlaying) {
           const timeStr = formatUTC8(activeSimTime);
           if (clockRef.current) clockRef.current.textContent = timeStr;
-          if (headerClockRef.current) headerClockRef.current.textContent = timeStr;
         }
 
         // Chart cursor for active coin only
