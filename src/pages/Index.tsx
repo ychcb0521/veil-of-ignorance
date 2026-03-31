@@ -81,7 +81,7 @@ const Index = () => {
     sim, activeSymbol, setActiveSymbol, interval, setInterval: setIntervalVal,
     positionsMap, setPositionsMap, ordersMap, setOrdersMap,
     priceMap, setPriceMap, balance, setBalance,
-    isolatedBalances, setIsolatedBalances,
+    isolatedBalances,
     tradeHistory, setTradeHistory,
     activeSymbolPositions, activeSymbolOrders,
     allPositions, allOrders, currentPrice, activeSymbols,
