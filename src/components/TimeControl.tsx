@@ -3,7 +3,7 @@ import { Play, Pause, Square, Clock, Globe, Split, Lock } from 'lucide-react';
 import { formatUTC8 } from '@/lib/timeFormat';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import type { TimeMachineStatus } from '@/hooks/useTimeSimulator';
-import type { TimeMode } from '@/contexts/TradingContext';
+import type { TimeMode, CoinTimelinesMap } from '@/contexts/TradingContext';
 
 interface Props {
   status: TimeMachineStatus;
@@ -20,6 +20,7 @@ interface Props {
   onSetTimeMode?: (v: TimeMode) => void;
   totalPositionCount?: number;
   originTime?: number | null;
+  coinTimelines?: CoinTimelinesMap;
 }
 
 const SPEED_OPTIONS = [1, 2, 5, 10, 30, 60];
@@ -28,10 +29,15 @@ export function TimeControl({
   status, currentSimulatedTime, speed,
   onStart, onPause, onResume, onStop, onSetSpeed, clockRef,
   timeMode = 'synced', onSetTimeMode, totalPositionCount = 0,
-  originTime,
+  originTime, coinTimelines = {},
 }: Props) {
   const [dateInput, setDateInput] = useState('2024-01-15 16:00:00');
-  const canToggleMode = totalPositionCount === 0;
+
+  // Guard: can't toggle if positions exist OR if any coin is running (isolated→synced)
+  const runningCoins = Object.entries(coinTimelines)
+    .filter(([, ct]) => ct.status === 'playing' || ct.status === 'paused')
+    .map(([sym]) => sym);
+  const canToggleMode = totalPositionCount === 0 && (timeMode === 'synced' || runningCoins.length === 0);
 
   const handleStart = () => {
     const ts = new Date(dateInput.replace(' ', 'T') + 'Z').getTime() - 8 * 3600_000;
@@ -95,7 +101,9 @@ export function TimeControl({
                 ? timeMode === 'synced'
                   ? '同步模式：所有币种共用同一时间轴。'
                   : '隔离模式：每个币种拥有独立时间轴，互不影响。'
-                : `有 ${totalPositionCount} 笔持仓，需全部平仓后才能切换模式。`}
+                : totalPositionCount > 0
+                  ? `有 ${totalPositionCount} 笔持仓，需全部平仓后才能切换模式。`
+                  : `有币种正在独立运行：${runningCoins.join(', ')}。请先停止所有运行。`}
             </p>
           </TooltipContent>
         </Tooltip>
