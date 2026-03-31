@@ -120,6 +120,9 @@ const Index = () => {
 
   const iMs = useMemo(() => intervalToMs(interval), [interval]);
 
+  // Track the original start time for synced mode
+  const [syncedOriginTime, setSyncedOriginTime] = usePersistedState<number | null>('synced_origin_time', null);
+
   // ===== ACTIVE COIN STATE (isolation-aware) =====
   // This is the single source of truth for UI: status, time, speed
   const activeCoinState = useMemo(() => {
