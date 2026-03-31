@@ -591,7 +591,7 @@ const Index = () => {
             )}
           </div>
 
-          <div className="shrink-0 border-t border-border max-h-[200px] overflow-auto">
+          <div className="shrink-0 border-t border-border max-h-[200px] overflow-auto bg-card relative z-10">
             <PositionPanel
               positionsMap={positionsMap}
               ordersMap={ordersMap}
