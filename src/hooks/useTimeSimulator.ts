@@ -23,6 +23,10 @@ export interface PersistedTimeSim {
 /** Throttle interval for React state updates (ms). RAF still runs at 60fps for ref. */
 const STATE_FLUSH_MS = 150;
 
+/** How often to persist currentTimeRef to localStorage (ms) — independent of React. */
+const PERSIST_FLUSH_MS = 500;
+const PERSIST_KEY = '__tm_live_time';
+
 export function useTimeSimulator(initialState?: Partial<PersistedTimeSim>) {
   const [state, setState] = useState<TimeSimulatorState>(() => {
     const base: TimeSimulatorState = {
