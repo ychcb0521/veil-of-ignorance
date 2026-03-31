@@ -229,6 +229,9 @@ function CandlestickChartComponent({ data, symbol, onLoadOlder, loadingOlder, tr
   useEffect(() => {
     if (!containerRef.current) return;
 
+    // Register custom indicators before chart init to ensure klinecharts knows them
+    registerCustomIndicators();
+
     const chart = init(containerRef.current, {
       styles: theme === 'light' ? LIGHT_STYLES : DARK_STYLES,
       timezone: 'Asia/Shanghai',
