@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Play, Pause, Square, Clock, Globe, Split, Lock } from 'lucide-react';
 import { formatUTC8 } from '@/lib/timeFormat';
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import type { TimeMachineStatus } from '@/hooks/useTimeSimulator';
 import type { TimeMode, CoinTimelinesMap } from '@/contexts/TradingContext';
 
@@ -21,6 +21,7 @@ interface Props {
   totalPositionCount?: number;
   originTime?: number | null;
   coinTimelines?: CoinTimelinesMap;
+  onSymbolChange?: (symbol: string) => void;
 }
 
 const SPEED_OPTIONS = [1, 2, 5, 10, 30, 60];
