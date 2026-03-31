@@ -1,7 +1,15 @@
 import { useState } from 'react';
 import { Play, Pause, Square, Clock, Globe, Split, Lock } from 'lucide-react';
+import { toast } from 'sonner';
 import { formatUTC8 } from '@/lib/timeFormat';
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import type { TimeMachineStatus } from '@/hooks/useTimeSimulator';
 import type { TimeMode, CoinTimelinesMap } from '@/contexts/TradingContext';
 
@@ -14,8 +22,8 @@ interface Props {
   onResume: () => void;
   onStop: () => void;
   onSetSpeed: (speed: number) => void;
+  onStopAllAndSwitchToSynced?: () => void | Promise<void>;
   clockRef?: React.RefObject<HTMLSpanElement>;
-  // Multi-Timeline
   timeMode?: TimeMode;
   onSetTimeMode?: (v: TimeMode) => void;
   totalPositionCount?: number;
@@ -26,24 +34,86 @@ interface Props {
 
 const SPEED_OPTIONS = [1, 2, 5, 10, 30, 60];
 
+type GuardedCoin = {
+  sym: string;
+  status: 'playing' | 'paused';
+};
+
 export function TimeControl({
   status, currentSimulatedTime, speed,
-  onStart, onPause, onResume, onStop, onSetSpeed, clockRef,
+  onStart, onPause, onResume, onStop, onSetSpeed, onStopAllAndSwitchToSynced, clockRef,
   timeMode = 'synced', onSetTimeMode, totalPositionCount = 0,
   originTime, coinTimelines = {}, onSymbolChange,
 }: Props) {
   const [dateInput, setDateInput] = useState('2024-01-15 16:00:00');
+  const [guardDialogOpen, setGuardDialogOpen] = useState(false);
+  const [guardedCoins, setGuardedCoins] = useState<GuardedCoin[]>([]);
+  const [isStoppingAll, setIsStoppingAll] = useState(false);
 
-  // Guard: can't toggle if positions exist OR if any coin is running (isolated→synced)
-  const runningCoins = Object.entries(coinTimelines)
+  const runningCoinEntries = Object.entries(coinTimelines)
     .filter(([, ct]) => ct.status === 'playing' || ct.status === 'paused')
-    .map(([sym]) => sym);
-  const canToggleMode = totalPositionCount === 0 && (timeMode === 'synced' || runningCoins.length === 0);
+    .map(([sym, ct]) => ({ sym, status: ct.status } as GuardedCoin));
+
+  const hasBlockingPositions = totalPositionCount > 0;
+  const hasRunningCoins = timeMode === 'isolated' && runningCoinEntries.length > 0;
+  const showGuardLock = hasBlockingPositions || hasRunningCoins;
 
   const handleStart = () => {
     const ts = new Date(dateInput.replace(' ', 'T') + 'Z').getTime() - 8 * 3600_000;
     if (isNaN(ts)) return;
     onStart(ts);
+  };
+
+  const handleModeSwitchClick = async (
+    e: React.MouseEvent<HTMLButtonElement>,
+    nextMode: TimeMode,
+  ) => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    if (!onSetTimeMode || nextMode === timeMode) return;
+
+    if (hasBlockingPositions) {
+      toast.error('无法切换模式', {
+        description: `有 ${totalPositionCount} 笔持仓，需全部平仓后才能切换模式。`,
+        duration: 5000,
+      });
+      return;
+    }
+
+    if (nextMode === 'synced' && timeMode === 'isolated' && runningCoinEntries.length > 0) {
+      setGuardedCoins(runningCoinEntries);
+      setGuardDialogOpen(true);
+      return;
+    }
+
+    onSetTimeMode(nextMode);
+  };
+
+  const handleDialogOpenChange = (open: boolean) => {
+    if (isStoppingAll) return;
+    setGuardDialogOpen(open);
+  };
+
+  const handleJumpToCoin = (e: React.MouseEvent<HTMLButtonElement>, symbol: string) => {
+    e.preventDefault();
+    e.stopPropagation();
+    onSymbolChange?.(symbol);
+    setGuardDialogOpen(false);
+  };
+
+  const handleStopAllAndSwitch = async (e: React.MouseEvent<HTMLButtonElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!onStopAllAndSwitchToSynced) return;
+
+    try {
+      setIsStoppingAll(true);
+      await onStopAllAndSwitchToSynced();
+      setGuardDialogOpen(false);
+    } finally {
+      setIsStoppingAll(false);
+    }
   };
 
   const SpeedButtons = () => (
@@ -64,94 +134,108 @@ export function TimeControl({
     </div>
   );
 
-  const [lockPopoverOpen, setLockPopoverOpen] = useState(false);
-  // Capture a stable snapshot of running coins when popover opens to prevent content jumping
-  const [frozenRunningCoins, setFrozenRunningCoins] = useState<{ sym: string; status: string }[]>([]);
-
-  const handleLockPopoverChange = (open: boolean) => {
-    if (open) {
-      setFrozenRunningCoins(
-        runningCoins.map(sym => ({ sym, status: coinTimelines[sym]?.status ?? 'stopped' }))
-      );
-    }
-    setLockPopoverOpen(open);
-  };
-
   const ModeSelector = () => {
     if (!onSetTimeMode) return null;
 
-    const disabledReason = !canToggleMode
-      ? totalPositionCount > 0
-        ? `有 ${totalPositionCount} 笔持仓，需全部平仓后才能切换模式。`
-        : null
-      : null;
-
-    const showRunningList = !canToggleMode && totalPositionCount === 0 && runningCoins.length > 0;
+    const blockedReason = hasBlockingPositions
+      ? `有 ${totalPositionCount} 笔持仓`
+      : hasRunningCoins
+        ? `有 ${runningCoinEntries.length} 个币种正在运行`
+        : null;
 
     return (
-      <Popover open={lockPopoverOpen} onOpenChange={handleLockPopoverChange}>
-        <PopoverTrigger asChild>
-          <div className="flex items-center gap-1 border-l border-border pl-3 ml-1 cursor-pointer">
-            {!canToggleMode && <Lock className="w-3 h-3 text-muted-foreground" />}
-            <button
-              onClick={(e) => { if (canToggleMode) { e.stopPropagation(); onSetTimeMode('synced'); } }}
-              className={`flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium transition-colors ${
-                timeMode === 'synced'
-                  ? 'bg-primary/20 text-primary'
-                  : 'text-muted-foreground hover:text-foreground disabled:opacity-40'
-              }`}
-            >
-              <Globe className="w-3 h-3" /> 同步
-            </button>
-            <button
-              onClick={(e) => { if (canToggleMode) { e.stopPropagation(); onSetTimeMode('isolated'); } }}
-              className={`flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium transition-colors ${
-                timeMode === 'isolated'
-                  ? 'bg-primary/20 text-primary'
-                  : 'text-muted-foreground hover:text-foreground disabled:opacity-40'
-              }`}
-            >
-              <Split className="w-3 h-3" /> 隔离
-            </button>
-          </div>
-        </PopoverTrigger>
-        {!canToggleMode && (
-          <PopoverContent side="bottom" className="w-72 p-3" align="start" onInteractOutside={(e) => e.preventDefault()}>
-            {disabledReason && <p className="text-xs text-muted-foreground">{disabledReason}</p>}
-            {showRunningList && (
-              <div className="space-y-2">
-                <p className="text-xs text-muted-foreground">
-                  无法切换至同步模式。以下币种正在独立运行：
-                </p>
-                <div className="flex flex-col gap-1">
-                  {frozenRunningCoins.map(({ sym, status }) => {
-                    const statusLabel = status === 'playing' ? '▶ 运行中' : '⏸ 已暂停';
+      <>
+        <div className="flex items-center gap-1 border-l border-border pl-3 ml-1">
+          {showGuardLock && <Lock className="w-3 h-3 text-muted-foreground shrink-0" />}
+          <button
+            onClick={(e) => void handleModeSwitchClick(e, 'synced')}
+            title={blockedReason ? `当前不可切换：${blockedReason}` : '切换到同步模式'}
+            aria-disabled={hasBlockingPositions || hasRunningCoins}
+            className={`flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium transition-all duration-200 ease-out ${
+              timeMode === 'synced'
+                ? 'bg-primary/20 text-primary'
+                : showGuardLock
+                  ? 'bg-secondary text-muted-foreground opacity-70 hover:bg-secondary'
+                  : 'text-muted-foreground hover:text-foreground hover:bg-accent'
+            }`}
+          >
+            <Globe className="w-3 h-3" /> 同步
+          </button>
+          <button
+            onClick={(e) => void handleModeSwitchClick(e, 'isolated')}
+            title={hasBlockingPositions ? `当前不可切换：${blockedReason}` : '切换到隔离模式'}
+            aria-disabled={hasBlockingPositions}
+            className={`flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium transition-all duration-200 ease-out ${
+              timeMode === 'isolated'
+                ? 'bg-primary/20 text-primary'
+                : hasBlockingPositions
+                  ? 'bg-secondary text-muted-foreground opacity-70 hover:bg-secondary'
+                  : 'text-muted-foreground hover:text-foreground hover:bg-accent'
+            }`}
+          >
+            <Split className="w-3 h-3" /> 隔离
+          </button>
+        </div>
+
+        <Dialog open={guardDialogOpen} onOpenChange={handleDialogOpenChange}>
+          <DialogContent
+            className="sm:max-w-md transition-all duration-200 ease-out"
+            onClick={(e) => e.stopPropagation()}
+            onPointerDown={(e) => e.stopPropagation()}
+          >
+            <DialogHeader>
+              <DialogTitle>无法切换模式</DialogTitle>
+              <DialogDescription>
+                当前仍有币种处于独立运行状态。请先查看或停止这些币种，再切换到同步模式。
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="space-y-2">
+              <div className="rounded-lg border border-border bg-card/60 p-3">
+                <div className="mb-2 text-xs font-medium text-muted-foreground">运行中的币种</div>
+                <div className="flex flex-col gap-2">
+                  {guardedCoins.map(({ sym, status }) => {
+                    const statusLabel = status === 'playing' ? '运行中' : '已暂停';
                     return (
                       <button
                         key={sym}
-                        onClick={() => { onSymbolChange?.(sym); setLockPopoverOpen(false); }}
-                        className="flex items-center justify-between px-2 py-1.5 rounded text-xs hover:bg-accent transition-colors text-left group"
+                        onClick={(e) => handleJumpToCoin(e, sym)}
+                        className="flex items-center justify-between rounded-md border border-border bg-background px-3 py-2 text-left transition-all duration-200 ease-out hover:bg-accent"
                       >
-                        <span className="font-medium text-foreground group-hover:text-primary transition-colors">{sym}</span>
-                        <span className={`text-[10px] ${status === 'playing' ? 'text-green-400' : 'text-yellow-400'}`}>
+                        <span className="text-sm font-medium text-foreground">{sym}</span>
+                        <span className={`text-xs ${status === 'playing' ? 'text-primary' : 'text-muted-foreground'}`}>
                           {statusLabel}
                         </span>
                       </button>
                     );
                   })}
                 </div>
-                <p className="text-[10px] text-muted-foreground pt-1 border-t border-border">
-                  点击币种可跳转查看。请先停止所有运行后再切换模式。
-                </p>
               </div>
-            )}
-          </PopoverContent>
-        )}
-      </Popover>
+            </div>
+
+            <DialogFooter>
+              <button
+                type="button"
+                onClick={() => setGuardDialogOpen(false)}
+                className="inline-flex items-center justify-center rounded-md border border-border bg-background px-4 py-2 text-sm font-medium text-foreground transition-all duration-200 ease-out hover:bg-accent"
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                onClick={(e) => void handleStopAllAndSwitch(e)}
+                disabled={isStoppingAll}
+                className="inline-flex items-center justify-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-all duration-200 ease-out hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {isStoppingAll ? '处理中…' : '一键停止所有并切换'}
+              </button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      </>
     );
   };
 
-  /** Right-side time info block: origin time (static) + current sim time (dynamic) */
   const TimeDisplay = ({ paused }: { paused?: boolean }) => (
     <div className="ml-auto flex items-center gap-4">
       {originTime != null && (

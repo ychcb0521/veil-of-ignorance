@@ -745,20 +745,8 @@ const Index = () => {
 
   // ===== STATE GUARD: time mode switch =====
   const handleSetTimeMode = useCallback((newMode: 'synced' | 'isolated') => {
-    // Switching to synced from isolated requires all coins stopped
-    if (newMode === 'synced' && timeMode === 'isolated') {
-      const runningCoins = Object.entries(coinTimelines)
-        .filter(([, ct]) => ct.status === 'playing' || ct.status === 'paused')
-        .map(([sym]) => sym);
-      if (runningCoins.length > 0) {
-        toast.error(`无法切换至同步模式`, {
-          description: `当前有币种正在独立运行：${runningCoins.join(', ')}。请先停止所有运行。`,
-          duration: 5000,
-        });
-        return;
-      }
-    }
-    // Also keep existing position guard
+    if (newMode === timeMode) return;
+
     if (totalPositionCount > 0) {
       toast.error(`无法切换模式`, {
         description: `有 ${totalPositionCount} 笔持仓，需全部平仓后才能切换模式。`,
@@ -766,12 +754,65 @@ const Index = () => {
       });
       return;
     }
+
+    // Defensive guard only; primary interception happens in explicit click handlers.
+    if (newMode === 'synced' && timeMode === 'isolated') {
+      const hasRunningCoins = Object.values(coinTimelines).some(
+        ct => ct.status === 'playing' || ct.status === 'paused'
+      );
+      if (hasRunningCoins) return;
+    }
+
     setTimeMode(newMode);
-    // If switching to synced and all coins stopped, reset coinTimelines
     if (newMode === 'synced') {
       setCoinTimelines({});
     }
   }, [timeMode, coinTimelines, totalPositionCount, setTimeMode, setCoinTimelines]);
+
+  const handleStopAllAndSwitchToSynced = useCallback(() => {
+    if (timeMode !== 'isolated') {
+      handleSetTimeMode('synced');
+      return;
+    }
+
+    for (const [sym, positions] of Object.entries(positionsMap)) {
+      const price = priceMap[sym] || 0;
+      if (price <= 0) continue;
+      for (let i = positions.length - 1; i >= 0; i--) {
+        handleClosePosition(sym, i);
+      }
+    }
+
+    for (const [sym, orders] of Object.entries(ordersMap)) {
+      for (const order of orders) {
+        handleCancelOrder(sym, order.id);
+      }
+    }
+
+    reset();
+    prevVisibleLenRef.current = 0;
+    cursorRef.current = 0;
+    gameLoopInitRef.current = false;
+    clearSimState();
+    setSyncedOriginTime(null);
+    sim.stopSimulation();
+    setCoinTimelines({});
+    setTimeMode('synced');
+
+    toast.success('已停止所有独立时间轴并切换到同步模式');
+  }, [
+    timeMode,
+    handleSetTimeMode,
+    positionsMap,
+    priceMap,
+    handleClosePosition,
+    ordersMap,
+    handleCancelOrder,
+    reset,
+    sim,
+    setCoinTimelines,
+    setTimeMode,
+  ]);
 
   const handleStop = useCallback(() => {
     if (timeMode === 'isolated') {
