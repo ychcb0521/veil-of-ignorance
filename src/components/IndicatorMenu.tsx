@@ -182,12 +182,23 @@ export function IndicatorMenu({ open, onClose, indicators, onIndicatorsChange }:
 
   useEffect(() => {
     if (!open) return;
-    const handler = (e: MouseEvent) => {
-      if (panelRef.current && !panelRef.current.contains(e.target as Node)) onClose();
+    // Delay adding listener to avoid catching the same click that opened the menu
+    const timer = setTimeout(() => {
+      const handler = (e: MouseEvent) => {
+        if (panelRef.current && !panelRef.current.contains(e.target as Node)) onClose();
+      };
+      document.addEventListener('mousedown', handler);
+      // Store cleanup ref
+      cleanupRef.current = () => document.removeEventListener('mousedown', handler);
+    }, 50);
+    return () => {
+      clearTimeout(timer);
+      cleanupRef.current?.();
+      cleanupRef.current = null;
     };
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
   }, [open, onClose]);
+
+  const cleanupRef = useRef<(() => void) | null>(null);
 
   const filtered = useMemo(() => {
     let items = INDICATOR_CATALOG;
@@ -226,7 +237,8 @@ export function IndicatorMenu({ open, onClose, indicators, onIndicatorsChange }:
   const supportedCount = INDICATOR_CATALOG.filter(i => isSupported(i.id)).length;
 
   return (
-    <div ref={panelRef} className="absolute right-2 top-10 z-50 w-96 rounded-lg border border-border shadow-2xl overflow-hidden bg-card">
+    <div ref={panelRef} className="absolute right-0 top-10 z-[100] w-96 rounded-lg border border-border shadow-2xl overflow-hidden bg-card animate-in fade-in slide-in-from-top-2 duration-150"
+      onClick={(e) => e.stopPropagation()}>
       <div className="flex items-center justify-between px-3 py-2.5 border-b border-border">
         <span className="text-sm font-semibold text-foreground">技术指标</span>
         <div className="flex items-center gap-2">
