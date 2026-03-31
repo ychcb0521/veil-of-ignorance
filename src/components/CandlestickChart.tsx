@@ -545,7 +545,7 @@ function CandlestickChartComponent({ data, symbol, onLoadOlder, loadingOlder, tr
         />
 
         {/* Right side: indicator buttons */}
-        <div className="absolute right-12 top-0 z-20 flex items-center gap-1 py-1.5 px-2">
+        <div className="absolute right-12 top-0 z-20 flex items-center gap-1 py-1.5 px-2 max-w-[60%] overflow-x-auto">
           <button
             onClick={() => setShowIndicatorPanel(!showIndicatorPanel)}
             className={`flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium transition-colors ${
