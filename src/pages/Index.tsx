@@ -817,7 +817,7 @@ const Index = () => {
     setSyncedOriginTime(null);
     sim.stopSimulation();
     setCoinTimelines({});
-    setIsolatedBalances({}); // Wipe all sandbox accounts
+    // isolatedBalances removed — single global pool
     setTimeMode('synced');
 
     toast.success('已清除所有平行宇宙数据并切换到同步模式');
