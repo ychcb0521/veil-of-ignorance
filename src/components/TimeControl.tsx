@@ -300,7 +300,7 @@ export function TimeControl({
                 type="button"
                 onClick={(e) => void handleStopAllAndSwitch(e)}
                 disabled={isStoppingAll}
-                className="inline-flex items-center justify-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-all duration-200 ease-out hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
+                className="inline-flex items-center justify-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-all duration-100 ease-out hover:opacity-90 active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {isStoppingAll ? '处理中…' : '一键停止所有并切换'}
               </button>

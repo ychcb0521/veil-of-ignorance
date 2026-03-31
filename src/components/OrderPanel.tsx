@@ -662,7 +662,7 @@ function SelectorRow({ label, value, onClick }: { label: string; value: string; 
   return (
     <button
       onClick={onClick}
-      className="w-full flex items-center justify-between px-2 py-1 rounded text-[10px] hover:bg-accent/30 transition-colors"
+      className="w-full flex items-center justify-between px-2 py-1 rounded text-[10px] hover:bg-accent/30 transition-colors duration-100 ease-out active:scale-[0.98]"
     >
       <span className="text-muted-foreground">{label}</span>
       <span className="text-foreground flex items-center gap-0.5">

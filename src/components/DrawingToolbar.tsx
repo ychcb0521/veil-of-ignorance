@@ -254,7 +254,7 @@ function ToolbarButton({ icon, label, active, onClick, variant }: {
       <TooltipTrigger asChild>
         <button
           onClick={onClick}
-          className={`w-[30px] h-[30px] flex items-center justify-center rounded transition-colors duration-200 ${
+          className={`w-[30px] h-[30px] flex items-center justify-center rounded transition-all duration-100 ease-out active:scale-[0.9] ${
             variant === 'destructive'
               ? 'text-muted-foreground hover:text-destructive hover:bg-destructive/10'
               : active

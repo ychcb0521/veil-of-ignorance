@@ -330,7 +330,7 @@ function IndicatorRow({ item, indicators, onToggle, onUpdatePeriod }: {
 
   return (
     <div
-      className="flex items-center justify-between px-3 py-2 hover:bg-accent/30 transition-colors cursor-pointer group"
+      className="flex items-center justify-between px-3 py-2 hover:bg-accent/30 transition-colors duration-100 ease-out cursor-pointer group"
       onClick={() => onToggle(item)}
     >
       <div className="flex items-center gap-2.5 flex-1 min-w-0">

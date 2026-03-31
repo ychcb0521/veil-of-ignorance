@@ -151,7 +151,7 @@ export function SymbolSelector({ symbol, interval, onSymbolChange, onIntervalCha
                       if (onPrecisionChange) onPrecisionChange(s.pricePrecision, s.quantityPrecision);
                       setIsOpen(false);
                     }}
-                    className={`w-full flex items-center justify-between px-3 py-1.5 text-xs hover:bg-accent/50 transition-colors ${
+                    className={`w-full flex items-center justify-between px-3 py-1.5 text-xs hover:bg-accent/50 transition-colors duration-100 ease-out ${
                       symbol === s.symbol ? 'bg-accent/30' : ''
                     }`}
                   >
