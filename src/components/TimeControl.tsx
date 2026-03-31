@@ -133,11 +133,11 @@ export function TimeControl({
         onClick={(e) => handleModeSwitchClick(e, 'synced')}
         title={blockedReason ? `当前不可切换：${blockedReason}` : '切换到同步模式'}
         aria-disabled={hasBlockingPositions || hasRunningCoins}
-        className={`flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium transition-all duration-200 ease-out ${
+        className={`flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium transition-all duration-100 ease-out active:scale-[0.97] ${
           timeMode === 'synced'
             ? 'bg-primary/20 text-primary'
             : showGuardLock
-              ? 'bg-secondary text-muted-foreground opacity-70 hover:bg-secondary'
+              ? 'bg-secondary text-muted-foreground opacity-50 cursor-not-allowed hover:bg-secondary'
               : 'text-muted-foreground hover:text-foreground hover:bg-accent'
         }`}
       >
