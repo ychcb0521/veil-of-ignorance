@@ -239,10 +239,10 @@ export function TimeControl({
         {status === 'paused' && (
           <>
             <div className="flex items-center gap-2">
-              <button onClick={onResume} className="btn-long flex items-center gap-1.5 text-xs">
+              <button onClick={onResume} className="btn-long flex items-center gap-1.5 text-xs active:scale-[0.97]">
                 <Play className="w-3.5 h-3.5" /> 继续
               </button>
-              <button onClick={onStop} className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded bg-destructive/20 text-destructive hover:bg-destructive/30 transition-colors font-medium">
+              <button onClick={onStop} className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded bg-destructive/20 text-destructive hover:bg-destructive/30 transition-all duration-100 ease-out active:scale-[0.97] font-medium">
                 <Square className="w-3.5 h-3.5" /> 停止
               </button>
             </div>
