@@ -328,6 +328,8 @@ function CandlestickChartComponent({ data, symbol, onLoadOlder, loadingOlder, tr
 
     if (unchangedSnapshot) return;
 
+    const needsFit = prevDataLenRef.current === 0;
+
     if (wasPrepend) {
       // Older data prepended — feed older portion via applyMoreData
       const newCount = data.length - prevDataLenRef.current;
@@ -345,6 +347,15 @@ function CandlestickChartComponent({ data, symbol, onLoadOlder, loadingOlder, tr
     } else {
       // Data replaced (symbol/interval/window replacement)
       chart.applyNewData(klineData, true);
+    }
+
+    // Auto-fit content on initial load or full data replacement to fill the viewport
+    if (needsFit || (!wasPrepend && prevDataLenRef.current > 0 && data.length !== prevDataLenRef.current && !(data.length > prevDataLenRef.current && data.length - prevDataLenRef.current <= 2))) {
+      requestAnimationFrame(() => {
+        chartRef.current?.scrollByDistance(0, 0);
+        // klinecharts v9 does not have fitContent; use scrollToRealTime to snap to latest
+        chartRef.current?.scrollToRealTime();
+      });
     }
 
     prevDataLenRef.current = data.length;
