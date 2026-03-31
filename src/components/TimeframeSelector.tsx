@@ -36,7 +36,7 @@ export function TimeframeSelector({ interval, onIntervalChange }: Props) {
         <button
           key={tf}
           onClick={() => onIntervalChange(tf)}
-          className={`px-2 py-1 rounded text-xs font-mono transition-colors ${
+          className={`px-2 py-1 rounded text-xs font-mono transition-all duration-100 ease-out active:scale-[0.95] ${
             interval === tf
               ? 'bg-primary text-primary-foreground'
               : 'bg-secondary text-secondary-foreground hover:bg-accent'
