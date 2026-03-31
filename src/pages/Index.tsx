@@ -533,6 +533,10 @@ const Index = () => {
               })()}
             </span>
           )}
+          <button onClick={() => setAssetsOpen(true)}
+            className="flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors">
+            <Wallet className="w-3 h-3" /> 资产
+          </button>
           <button onClick={() => setAnalyticsOpen(true)}
             className="flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors">
             <BarChart3 className="w-3 h-3" /> 数据归因
