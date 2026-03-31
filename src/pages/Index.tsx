@@ -120,9 +120,12 @@ const Index = () => {
 
   const iMs = useMemo(() => intervalToMs(interval), [interval]);
 
+  // Effective time for the active coin (isolation-aware)
+  const effectiveSimTime = useMemo(() => getEffectiveTime(activeSymbol), [getEffectiveTime, activeSymbol]);
+
   const visibleData = useMemo(
-    () => getVisibleData(sim.currentSimulatedTime, iMs),
-    [getVisibleData, sim.currentSimulatedTime, iMs]
+    () => getVisibleData(effectiveSimTime, iMs),
+    [getVisibleData, effectiveSimTime, iMs]
   );
 
   // ===== UNIFIED GAME LOOP =====
