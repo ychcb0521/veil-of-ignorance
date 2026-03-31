@@ -248,24 +248,24 @@ function ToolbarButton({ icon, label, active, onClick, variant }: {
   icon: React.ReactNode; label: string; active?: boolean; onClick: () => void; variant?: 'destructive';
 }) {
   return (
-    <button
-      onClick={onClick}
-      className={`w-[30px] h-[30px] flex items-center justify-center rounded transition-colors group relative ${
-        variant === 'destructive'
-          ? 'text-muted-foreground hover:text-destructive hover:bg-destructive/10'
-          : active
-            ? 'text-primary bg-primary/15'
-            : 'text-muted-foreground hover:text-foreground hover:bg-accent/40'
-      }`}
-      title={label}
-    >
-      {icon}
-      <div className="absolute left-full ml-2 hidden group-hover:flex items-center z-50 pointer-events-none">
-        <div className="px-2 py-1 rounded text-[10px] whitespace-nowrap border border-border"
-          style={{ background: 'hsl(var(--popover))', color: 'hsl(var(--foreground))' }}>
-          {label}
-        </div>
-      </div>
-    </button>
+    <Tooltip delayDuration={400}>
+      <TooltipTrigger asChild>
+        <button
+          onClick={onClick}
+          className={`w-[30px] h-[30px] flex items-center justify-center rounded transition-colors duration-200 ${
+            variant === 'destructive'
+              ? 'text-muted-foreground hover:text-destructive hover:bg-destructive/10'
+              : active
+                ? 'text-primary bg-primary/15'
+                : 'text-muted-foreground hover:text-foreground hover:bg-accent/40'
+          }`}
+        >
+          {icon}
+        </button>
+      </TooltipTrigger>
+      <TooltipContent side="right" className="text-[10px]">
+        {label}
+      </TooltipContent>
+    </Tooltip>
   );
 }
