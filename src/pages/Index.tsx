@@ -157,7 +157,7 @@ const Index = () => {
   const cursorRef = useRef(0);
   const gameLoopInitRef = useRef(false);
   const clockRef = useRef<HTMLSpanElement>(null);
-  const headerClockRef = useRef<HTMLSpanElement>(null);
+  
   const lastReactFlushRef = useRef(0);
   const lastPersistRef = useRef(0);
   const timeModeRef = useRef(timeMode);
