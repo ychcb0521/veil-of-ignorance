@@ -824,7 +824,7 @@ const Index = () => {
   }, [
     positionsMap, priceMap, handleClosePosition,
     ordersMap, handleCancelOrder, reset, sim,
-    setCoinTimelines, setTimeMode, setIsolatedBalances,
+    setCoinTimelines, setTimeMode,
   ]);
 
   const handleStop = useCallback(() => {
