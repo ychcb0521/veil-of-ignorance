@@ -1,32 +1,31 @@
-import { useState } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { Play, Pause, Square, Clock } from 'lucide-react';
 import { formatUTC8 } from '@/lib/timeFormat';
 import type { TimeMachineStatus } from '@/hooks/useTimeSimulator';
 
 interface Props {
   status: TimeMachineStatus;
-  currentSimulatedTime: number;
+  currentSimulatedTime: number; // used only for paused fallback
   speed: number;
   onStart: (timestamp: number) => void;
   onPause: () => void;
   onResume: () => void;
   onStop: () => void;
   onSetSpeed: (speed: number) => void;
+  /** Ref to the <span> whose textContent is updated directly by the game loop */
+  clockRef?: React.RefObject<HTMLSpanElement>;
 }
 
 const SPEED_OPTIONS = [1, 2, 5, 10, 30, 60];
 
-export function TimeControl({ status, currentSimulatedTime, speed, onStart, onPause, onResume, onStop, onSetSpeed }: Props) {
-  const [dateInput, setDateInput] = useState('2024-01-15 16:00:00'); // UTC+8 default
+export function TimeControl({ status, currentSimulatedTime, speed, onStart, onPause, onResume, onStop, onSetSpeed, clockRef }: Props) {
+  const [dateInput, setDateInput] = useState('2024-01-15 16:00:00');
 
   const handleStart = () => {
-    // Input is in UTC+8, convert to UTC timestamp by subtracting 8 hours
     const ts = new Date(dateInput.replace(' ', 'T') + 'Z').getTime() - 8 * 3600_000;
     if (isNaN(ts)) return;
     onStart(ts);
   };
-
-  const formatSimTime = formatUTC8;
 
   return (
     <div className="panel px-4 py-3 bg-card">
@@ -78,8 +77,9 @@ export function TimeControl({ status, currentSimulatedTime, speed, onStart, onPa
               ))}
             </div>
 
+            {/* Clock updated directly by game loop via ref — zero React re-renders */}
             <div className="ml-auto font-mono text-sm text-primary font-medium">
-              {formatSimTime(currentSimulatedTime)}
+              <span ref={clockRef}>{formatUTC8(currentSimulatedTime)}</span>
             </div>
           </>
         )}
@@ -112,7 +112,7 @@ export function TimeControl({ status, currentSimulatedTime, speed, onStart, onPa
             </div>
 
             <div className="ml-auto font-mono text-sm text-yellow-400 font-medium animate-pulse">
-              ⏸ {formatSimTime(currentSimulatedTime)}
+              ⏸ <span ref={clockRef}>{formatUTC8(currentSimulatedTime)}</span>
             </div>
           </>
         )}

@@ -20,13 +20,19 @@ export interface PersistedTimeSim {
   speed: number;
 }
 
-/** Throttle interval for React state updates (ms). RAF still runs at 60fps for ref. */
-const STATE_FLUSH_MS = 150;
-
-/** How often to persist currentTimeRef to localStorage (ms) — independent of React. */
-const PERSIST_FLUSH_MS = 500;
 const PERSIST_KEY = '__tm_live_time';
 
+/**
+ * Headless time engine — NO internal RAF loop.
+ *
+ * External game loop (Index.tsx) must call:
+ *   1. getSimTime()        — compute current sim timestamp
+ *   2. currentTimeRef.current = simTime  — store for other reads
+ *   3. syncReactState(simTime)           — throttled, for matching/liquidation engines
+ *
+ * This keeps ALL visual updates (clock DOM, chart) in a single
+ * requestAnimationFrame tick, eliminating cross-loop drift.
+ */
 export function useTimeSimulator(initialState?: Partial<PersistedTimeSim>) {
   const [state, setState] = useState<TimeSimulatorState>(() => {
     const base: TimeSimulatorState = {
@@ -40,28 +46,20 @@ export function useTimeSimulator(initialState?: Partial<PersistedTimeSim>) {
     if (initialState) {
       const status = initialState.status || 'stopped';
       const isRunning = status === 'playing';
-      return {
-        ...base,
-        ...initialState,
-        status,
-        isRunning,
-      };
+      return { ...base, ...initialState, status, isRunning };
     }
     return base;
   });
 
-  const rafRef = useRef<number>();
-
   /**
-   * Real-time simulated timestamp, updated every RAF frame (~60fps).
-   * Use this for high-frequency reads (e.g. imperative chart updates)
-   * without triggering React re-renders.
+   * Real-time simulated timestamp. Updated by the external game loop
+   * at 60fps. Use for high-frequency reads without triggering re-renders.
    */
   const currentTimeRef = useRef<number>(state.currentSimulatedTime);
 
   /**
-   * Core simulation parameters mirrored to a ref so the RAF tick
-   * never reads stale closure values after speed/pause/resume changes.
+   * Core simulation parameters in a ref so getSimTime() never reads
+   * stale closure values after speed/pause/resume changes.
    */
   const coreRef = useRef({
     status: state.status,
@@ -70,84 +68,77 @@ export function useTimeSimulator(initialState?: Partial<PersistedTimeSim>) {
     speed: state.speed,
   });
 
-  const lastFlushRef = useRef<number>(0);
-  const lastPersistRef = useRef<number>(0);
-
-  // ---- Helpers to keep coreRef perfectly in sync ----
   const syncCore = (s: Partial<typeof coreRef.current>) => {
     Object.assign(coreRef.current, s);
   };
 
-  // Start from a historical timestamp
+  // ---- Pure computation: returns sim time from wall-clock delta ----
+  const getSimTime = useCallback((): number => {
+    const c = coreRef.current;
+    if (c.status !== 'playing' || !c.realStartTime || !c.historicalAnchorTime) {
+      return currentTimeRef.current;
+    }
+    return c.historicalAnchorTime + (Date.now() - c.realStartTime) * c.speed;
+  }, []);
+
+  // ---- Flush to React state (call at low freq from game loop) ----
+  const syncReactState = useCallback((simTime: number) => {
+    currentTimeRef.current = simTime;
+    setState(prev => ({
+      ...prev,
+      currentSimulatedTime: simTime,
+    }));
+  }, []);
+
+  // ---- Persist to localStorage (call from game loop) ----
+  const persistTime = useCallback((simTime: number) => {
+    try { localStorage.setItem(PERSIST_KEY, String(simTime)); } catch {}
+  }, []);
+
+  // ---- Actions ----
   const startSimulation = useCallback((historicalTime: number) => {
     const now = Date.now();
     currentTimeRef.current = historicalTime;
     syncCore({ status: 'playing', historicalAnchorTime: historicalTime, realStartTime: now, speed: 1 });
     setState({
-      status: 'playing',
-      isRunning: true,
-      historicalAnchorTime: historicalTime,
-      realStartTime: now,
-      currentSimulatedTime: historicalTime,
-      speed: 1,
+      status: 'playing', isRunning: true,
+      historicalAnchorTime: historicalTime, realStartTime: now,
+      currentSimulatedTime: historicalTime, speed: 1,
     });
   }, []);
 
-  // Pause: freeze currentSimulatedTime
   const pauseSimulation = useCallback(() => {
-    setState(prev => {
-      if (prev.status !== 'playing') return prev;
-      const now = Date.now();
-      const frozenTime = prev.historicalAnchorTime! + (now - prev.realStartTime!) * prev.speed;
-      currentTimeRef.current = frozenTime;
-      syncCore({ status: 'paused' });
-      return {
-        ...prev,
-        status: 'paused',
-        isRunning: false,
-        currentSimulatedTime: frozenTime,
-      };
-    });
-    if (rafRef.current) cancelAnimationFrame(rafRef.current);
+    const c = coreRef.current;
+    if (c.status !== 'playing') return;
+    const now = Date.now();
+    const frozenTime = c.historicalAnchorTime! + (now - c.realStartTime!) * c.speed;
+    currentTimeRef.current = frozenTime;
+    syncCore({ status: 'paused' });
+    setState(prev => ({
+      ...prev, status: 'paused', isRunning: false, currentSimulatedTime: frozenTime,
+    }));
   }, []);
 
-  // Resume from paused state
   const resumeSimulation = useCallback(() => {
     setState(prev => {
       if (prev.status !== 'paused') return prev;
       const now = Date.now();
-      syncCore({
-        status: 'playing',
-        historicalAnchorTime: prev.currentSimulatedTime,
-        realStartTime: now,
-      });
-      return {
-        ...prev,
-        status: 'playing',
-        isRunning: true,
-        historicalAnchorTime: prev.currentSimulatedTime,
-        realStartTime: now,
-      };
+      syncCore({ status: 'playing', historicalAnchorTime: prev.currentSimulatedTime, realStartTime: now });
+      return { ...prev, status: 'playing', isRunning: true, historicalAnchorTime: prev.currentSimulatedTime, realStartTime: now };
     });
   }, []);
 
-  // Stop: full reset
   const stopSimulation = useCallback(() => {
     currentTimeRef.current = 0;
     syncCore({ status: 'stopped', historicalAnchorTime: null, realStartTime: null, speed: 1 });
     setState({
-      status: 'stopped',
-      isRunning: false,
-      historicalAnchorTime: null,
-      realStartTime: null,
-      currentSimulatedTime: 0,
-      speed: 1,
+      status: 'stopped', isRunning: false,
+      historicalAnchorTime: null, realStartTime: null,
+      currentSimulatedTime: 0, speed: 1,
     });
-    if (rafRef.current) cancelAnimationFrame(rafRef.current);
     try { localStorage.removeItem(PERSIST_KEY); } catch {}
   }, []);
 
-  // Change speed (anchor reset to prevent jump)
   const setSpeed = useCallback((speed: number) => {
     setState(prev => {
       if (prev.status !== 'playing' || !prev.realStartTime || !prev.historicalAnchorTime) return prev;
@@ -155,53 +146,9 @@ export function useTimeSimulator(initialState?: Partial<PersistedTimeSim>) {
       const currentSim = prev.historicalAnchorTime + (now - prev.realStartTime) * prev.speed;
       currentTimeRef.current = currentSim;
       syncCore({ speed, historicalAnchorTime: currentSim, realStartTime: now });
-      return {
-        ...prev,
-        speed,
-        historicalAnchorTime: currentSim,
-        realStartTime: now,
-        currentSimulatedTime: currentSim,
-      };
+      return { ...prev, speed, historicalAnchorTime: currentSim, realStartTime: now, currentSimulatedTime: currentSim };
     });
   }, []);
-
-  // ---- RAF tick: updates ref every frame, flushes React state at throttled rate ----
-  useEffect(() => {
-    if (state.status !== 'playing') return;
-
-    const tick = () => {
-      const c = coreRef.current;
-      if (c.status !== 'playing' || !c.realStartTime || !c.historicalAnchorTime) return;
-
-      const now = Date.now();
-      const simTime = c.historicalAnchorTime + (now - c.realStartTime) * c.speed;
-
-      // Always update ref at full 60fps
-      currentTimeRef.current = simTime;
-
-      // Throttle React setState to ~7fps
-      if (now - lastFlushRef.current >= STATE_FLUSH_MS) {
-        lastFlushRef.current = now;
-        setState(prev => ({
-          ...prev,
-          currentSimulatedTime: simTime,
-        }));
-      }
-
-      // Persist to localStorage at low frequency (crash/refresh protection)
-      if (now - lastPersistRef.current >= PERSIST_FLUSH_MS) {
-        lastPersistRef.current = now;
-        try { localStorage.setItem(PERSIST_KEY, String(simTime)); } catch {}
-      }
-
-      rafRef.current = requestAnimationFrame(tick);
-    };
-
-    rafRef.current = requestAnimationFrame(tick);
-    return () => {
-      if (rafRef.current) cancelAnimationFrame(rafRef.current);
-    };
-  }, [state.status]);
 
   // ---- beforeunload: force-persist exact time on page close ----
   useEffect(() => {
@@ -218,28 +165,16 @@ export function useTimeSimulator(initialState?: Partial<PersistedTimeSim>) {
     return () => window.removeEventListener('beforeunload', handler);
   }, []);
 
-  /** Read the last persisted live time (for restore). */
-  const getPersistedLiveTime = useCallback((): number | null => {
-    try {
-      const v = localStorage.getItem(PERSIST_KEY);
-      return v ? Number(v) : null;
-    } catch { return null; }
-  }, []);
-
-  /** Clear the persisted live time (call on stop). */
-  const clearPersistedLiveTime = useCallback(() => {
-    try { localStorage.removeItem(PERSIST_KEY); } catch {}
-  }, []);
-
   return {
     ...state,
     currentTimeRef,
+    getSimTime,
+    syncReactState,
+    persistTime,
     startSimulation,
     pauseSimulation,
     resumeSimulation,
     stopSimulation,
     setSpeed,
-    getPersistedLiveTime,
-    clearPersistedLiveTime,
   };
 }
