@@ -733,6 +733,7 @@ const Index = () => {
           sim.startSimulation(timestamp);
         }
       } else {
+        setSyncedOriginTime(timestamp);
         sim.startSimulation(timestamp);
       }
       toast.success('时间机器已启动', {
