@@ -725,6 +725,12 @@ const Index = () => {
 
       if (timeMode === 'isolated') {
         const now = Date.now();
+        // Initialize sandbox balance for this symbol if not already set
+        const existingBal = isolatedBalances[activeSymbol];
+        if (existingBal === undefined || existingBal === 0) {
+          const sandboxCapital = profile?.initial_capital ?? 1_000_000;
+          setIsolatedBalances(prev => ({ ...prev, [activeSymbol]: sandboxCapital }));
+        }
         setCoinTimelines(prev => ({
           ...prev,
           [activeSymbol]: {
@@ -736,7 +742,6 @@ const Index = () => {
             originTime: timestamp,
           },
         }));
-        // Start global sim as heartbeat (keeps isRunning=true for funding/liquidation engines)
         if (sim.status === 'stopped') {
           sim.startSimulation(timestamp);
         }
@@ -750,7 +755,7 @@ const Index = () => {
     } else {
       toast.error('数据获取失败', { description: '请检查时间范围和交易对' });
     }
-  }, [activeSymbol, interval, initLoad, sim, timeMode]);
+  }, [activeSymbol, interval, initLoad, sim, timeMode, isolatedBalances, profile]);
 
   // ===== STATE GUARD: time mode switch =====
   const handleSetTimeMode = useCallback((newMode: 'synced' | 'isolated') => {
