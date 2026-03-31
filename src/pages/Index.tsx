@@ -1114,6 +1114,38 @@ const Index = () => {
         onClose={() => setCoolingOffModalOpen(false)}
         onConfirm={(durationMs) => { coolingOff.activate(durationMs); setCoolingOffModalOpen(false); }}
       />
+
+      {/* Mode Switch Confirmation Dialog */}
+      <Dialog open={modeSwitchDialogOpen} onOpenChange={setModeSwitchDialogOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>⚠️ 清除所有平行宇宙数据</DialogTitle>
+            <DialogDescription>
+              此操作将清除所有隔离模式下的独立账户数据（各币种的独立资金、持仓、挂单和历史记录），并合并为单一全局时间线。此操作不可撤销。
+            </DialogDescription>
+          </DialogHeader>
+          <div className="rounded-lg border border-border bg-card/60 p-3 text-xs text-muted-foreground space-y-1">
+            <div>• 所有独立沙盒账户将被销毁</div>
+            <div>• 所有未平仓位将被强制结算</div>
+            <div>• 所有挂单将被撤销</div>
+            <div>• 切换后使用全局共享账户</div>
+          </div>
+          <DialogFooter>
+            <button
+              onClick={() => setModeSwitchDialogOpen(false)}
+              className="inline-flex items-center justify-center rounded-md border border-border bg-background px-4 py-2 text-sm font-medium text-foreground transition-all duration-100 ease-out hover:bg-accent active:scale-[0.97]"
+            >
+              取消
+            </button>
+            <button
+              onClick={confirmStopAllAndSwitch}
+              className="inline-flex items-center justify-center rounded-md bg-destructive px-4 py-2 text-sm font-medium text-destructive-foreground transition-all duration-100 ease-out hover:opacity-90 active:scale-[0.97]"
+            >
+              确认清除并切换
+            </button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };
