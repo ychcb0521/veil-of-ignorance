@@ -48,11 +48,11 @@ export function AccountInfo({ balance, positionsMap, priceMap }: Props) {
         <span className="text-muted-foreground whitespace-nowrap">总权益</span>
         <span className="font-semibold text-foreground whitespace-nowrap">{equity.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
       </div>
-      <div>
+      <div className="shrink-0 whitespace-nowrap">
         <span className="text-muted-foreground">可用余额 </span>
         <span className="font-semibold text-foreground">{available.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
       </div>
-      <div>
+      <div className="shrink-0 whitespace-nowrap">
         <span className="text-muted-foreground">已用保证金 </span>
         <span className="font-semibold text-foreground">{totalMargin.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
       </div>
