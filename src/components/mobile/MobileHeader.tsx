@@ -21,11 +21,7 @@ export function MobileHeader({
   symbol, interval, onSymbolChange, onIntervalChange,
   isRunning, currentSimulatedTime, speed, onStart, onStop, onSetSpeed,
 }: Props) {
-  const formatSimTime = (ts: number) => {
-    if (!ts) return '--';
-    const d = new Date(ts);
-    return d.toISOString().replace('T', ' ').slice(0, 19) + ' UTC';
-  };
+  const formatSimTime = formatUTC8;
 
   return (
     <div className="border-b border-border bg-card">

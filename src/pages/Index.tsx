@@ -469,8 +469,7 @@ const Index = () => {
             <span className="font-mono text-xs text-primary font-medium">
               {(() => {
                 const ts = visibleData[visibleData.length - 1].time;
-                const d = new Date(ts);
-                return d.toISOString().replace('T', ' ').slice(0, 19) + ' UTC';
+                return formatUTC8(ts);
               })()}
             </span>
           )}

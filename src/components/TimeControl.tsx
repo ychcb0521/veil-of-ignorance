@@ -24,11 +24,7 @@ export function TimeControl({ status, currentSimulatedTime, speed, onStart, onPa
     onStart(ts);
   };
 
-  const formatSimTime = (ts: number) => {
-    if (!ts) return '--';
-    const d = new Date(ts);
-    return d.toISOString().replace('T', ' ').slice(0, 19) + ' UTC';
-  };
+  const formatSimTime = formatUTC8;
 
   return (
     <div className="panel px-4 py-3 bg-card">
