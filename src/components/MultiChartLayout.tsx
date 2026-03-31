@@ -33,7 +33,7 @@ interface SubChart {
 export function MultiChartLayout({
   mainData, mainSymbol, rawSymbol, onLoadOlder, loadingOlder,
   tradeHistory, isRunning, currentSimulatedTime, mainInterval,
-  pricePrecision, quantityPrecision,
+  pricePrecision, quantityPrecision, pendingOrders, onCancelOrder,
 }: Props) {
   const [layout, setLayout] = useState<LayoutMode>('1x1');
   const [subCharts, setSubCharts] = useState<SubChart[]>([
