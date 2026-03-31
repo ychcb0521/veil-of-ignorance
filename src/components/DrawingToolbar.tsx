@@ -4,6 +4,7 @@
  */
 
 import { useState, useRef, useEffect } from 'react';
+import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
 import {
   Crosshair, MousePointer, Circle, Pencil,
   TrendingUp, Minus, ArrowRight, MoveHorizontal, MoveVertical, Columns,
