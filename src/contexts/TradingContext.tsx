@@ -21,9 +21,20 @@ import {
 } from '@/types/trading';
 
 // ===== Types =====
+export type TimeMode = 'synced' | 'isolated';
+
+export interface CoinTimelineState {
+  status: 'playing' | 'paused' | 'stopped';
+  time: number;
+  speed: number;
+  historicalAnchorTime: number | null;
+  realStartTime: number | null;
+}
+
 export type PositionsMap = Record<string, Position[]>;
 export type OrdersMap = Record<string, PendingOrder[]>;
 export type PriceMap = Record<string, number>;
+export type CoinTimelinesMap = Record<string, CoinTimelineState>;
 
 interface LiquidationDetails { lostAmount: number; liquidatedPositions: number; }
 
