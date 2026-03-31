@@ -218,7 +218,7 @@ const LIGHT_STYLES = {
   separator: { color: '#EAECEF' },
 };
 
-function CandlestickChartComponent({ data, symbol, onLoadOlder, loadingOlder, tradeHistory, rawSymbol, pricePrecision = 2, quantityPrecision = 3 }: Props) {
+function CandlestickChartComponent({ data, symbol, onLoadOlder, loadingOlder, tradeHistory, rawSymbol, pricePrecision = 2, quantityPrecision = 3, pendingOrders, onCancelOrder }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<Chart | null>(null);
   const prevDataLenRef = useRef(0);
@@ -229,6 +229,7 @@ function CandlestickChartComponent({ data, symbol, onLoadOlder, loadingOlder, tr
 
   const [indicators, setIndicators] = usePersistedState<IndicatorConfig[]>('indicators', []);
   const [showIndicatorPanel, setShowIndicatorPanel] = useState(false);
+  const [showOrderLines, setShowOrderLines] = usePersistedState('show_order_lines', true);
   const [drawingsVisible, setDrawingsVisible] = useState(true);
   const [activeDrawingTool, setActiveDrawingTool] = useState<string | null>(null);
   const { theme } = useTheme();
