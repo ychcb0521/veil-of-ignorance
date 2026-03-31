@@ -177,6 +177,24 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
   const [pricePrecision, setPricePrecision] = useState(2);
   const [quantityPrecision, setQuantityPrecision] = useState(3);
 
+  // === Multi-Timeline Isolation ===
+  const [isTimeIsolated, setIsTimeIsolated] = usePersistedState('time_isolated', false);
+  const [coinTimelines, setCoinTimelines] = usePersistedState<Record<string, number>>('coin_timelines', {});
+
+  // Total position count across all symbols (for the guard)
+  const totalPositionCount = useMemo(() => {
+    let count = 0;
+    for (const positions of Object.values(positionsMap)) count += positions.length;
+    return count;
+  }, [positionsMap]);
+
+  // Get effective simulation time for a given symbol
+  const getEffectiveTime = useCallback((symbol?: string): number => {
+    const sym = symbol || activeSymbol;
+    if (!isTimeIsolated) return sim.currentSimulatedTime;
+    return coinTimelines[sym] ?? sim.currentSimulatedTime;
+  }, [isTimeIsolated, coinTimelines, activeSymbol, sim.currentSimulatedTime]);
+
   // Liquidation modal state
   const [liquidationOpen, setLiquidationOpen] = useState(false);
   const [liquidationDetails, setLiquidationDetails] = useState<LiquidationDetails | undefined>();
