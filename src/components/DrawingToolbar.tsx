@@ -211,12 +211,14 @@ export function DrawingToolbar({ activeTool, onToolChange, onClearDrawings, draw
               )}
 
               {!isOpen && (
-                <div className="absolute left-full ml-2 top-1/2 -translate-y-1/2 hidden group-hover:flex items-center z-50 pointer-events-none">
-                  <div className="px-2 py-1 rounded text-[10px] whitespace-nowrap border border-border"
-                    style={{ background: 'hsl(var(--popover))', color: 'hsl(var(--foreground))' }}>
+                <Tooltip delayDuration={400}>
+                  <TooltipTrigger asChild>
+                    <div className="absolute inset-0" />
+                  </TooltipTrigger>
+                  <TooltipContent side="right" className="text-[10px]">
                     {activeItem.label}
-                  </div>
-                </div>
+                  </TooltipContent>
+                </Tooltip>
               )}
             </div>
           );
