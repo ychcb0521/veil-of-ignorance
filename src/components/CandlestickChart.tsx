@@ -55,6 +55,11 @@ export interface IndicatorConfig {
   enabled: boolean;
 }
 
+/** Imperative API exposed to parent for direct chart manipulation (bypasses React). */
+export interface ChartImperativeApi {
+  updateData: (candle: KLineData) => void;
+}
+
 interface Props {
   data: KlineData[];
   symbol: string;
@@ -66,6 +71,8 @@ interface Props {
   quantityPrecision?: number;
   pendingOrders?: PendingOrder[];
   onCancelOrder?: (orderId: string) => void;
+  /** Ref assigned with imperative chart API for direct candle pushing. */
+  chartApiRef?: React.MutableRefObject<ChartImperativeApi | null>;
 }
 
 // Convert our KlineData to klinecharts KLineData
