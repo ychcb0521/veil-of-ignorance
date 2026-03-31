@@ -225,6 +225,14 @@ const Index = () => {
       if (now - lastReactFlushRef.current >= REACT_FLUSH_MS) {
         lastReactFlushRef.current = now;
         sim.syncReactState(simTime);
+
+        // In isolated mode: continuously update the active coin's timeline
+        if (isTimeIsolatedRef.current) {
+          setCoinTimelines(prev => {
+            if (prev[activeSymbolRef.current] === simTime) return prev;
+            return { ...prev, [activeSymbolRef.current]: simTime };
+          });
+        }
       }
 
       // ⑥ Throttled localStorage persistence
