@@ -353,8 +353,12 @@ function CandlestickChartComponent({ data, symbol, onLoadOlder, loadingOlder, tr
       if (!ind.enabled) continue;
       currentActive.add(ind.type);
 
-      const kcName = KLINE_INDICATOR_MAP[ind.type] || ind.type;
       const isOverlay = OVERLAY_INDICATOR_IDS.has(ind.type);
+      // Determine the klinecharts indicator name: mapped, or fallback
+      let kcName = KLINE_INDICATOR_MAP[ind.type];
+      if (!kcName) {
+        kcName = isOverlay ? 'FALLBACK_OVERLAY' : 'FALLBACK_OSCILLATOR';
+      }
 
       if (!activeIndicatorPanes.current.has(ind.type)) {
         try {
@@ -378,8 +382,9 @@ function CandlestickChartComponent({ data, symbol, onLoadOlder, loadingOlder, tr
     for (const [type, paneId] of activeIndicatorPanes.current.entries()) {
       if (!currentActive.has(type)) {
         try {
-          const kcName = KLINE_INDICATOR_MAP[type] || type;
-          // v9 API: removeIndicator(paneId, name?)
+          const isOverlay = OVERLAY_INDICATOR_IDS.has(type);
+          let kcName = KLINE_INDICATOR_MAP[type];
+          if (!kcName) kcName = isOverlay ? 'FALLBACK_OVERLAY' : 'FALLBACK_OSCILLATOR';
           if (paneId) {
             chart.removeIndicator(paneId, kcName);
           }
