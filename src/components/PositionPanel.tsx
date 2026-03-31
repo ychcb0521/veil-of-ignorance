@@ -80,7 +80,7 @@ export function PositionPanel({
           allPositions.length === 0 ? (
             <div className="px-4 py-6 text-center text-xs text-muted-foreground">暂无持仓</div>
           ) : (
-            <table className="w-full text-[11px] font-mono">
+            <table className="w-full text-[11px] font-mono tabular-nums">
               <thead>
                 <tr className="text-muted-foreground border-b border-border">
                   {['合约', '方向', '数量', '开仓均价', '标记价', '强平价', '保证金', '未实现盈亏', 'ROE%', '操作'].map(h => (
