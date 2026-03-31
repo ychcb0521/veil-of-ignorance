@@ -116,10 +116,93 @@ const Index = () => {
     })();
   }, []);
 
+  const iMs = useMemo(() => intervalToMs(interval), [interval]);
+
   const visibleData = useMemo(
-    () => getVisibleData(sim.currentSimulatedTime),
-    [getVisibleData, sim.currentSimulatedTime]
+    () => getVisibleData(sim.currentSimulatedTime, iMs),
+    [getVisibleData, sim.currentSimulatedTime, iMs]
   );
+
+  // ===== Imperative chart update loop =====
+  // During playback, push candles directly to chart at 60fps via ref,
+  // bypassing React's render cycle for silky-smooth chart animation.
+  const chartApiRef = useRef<{ updateData: (candle: any) => void } | null>(null);
+  const lastImperativePushRef = useRef(0); // index into allData
+  const imperativeInitRef = useRef(false);
+
+  useEffect(() => {
+    if (sim.status !== 'playing') {
+      imperativeInitRef.current = false;
+      return;
+    }
+
+    let raf: number;
+
+    const tick = () => {
+      const api = chartApiRef.current;
+      const data = allDataRef.current;
+      const simTime = sim.currentTimeRef.current;
+
+      if (!api || data.length === 0) {
+        raf = requestAnimationFrame(tick);
+        return;
+      }
+
+      // On first tick, sync index to what React already loaded
+      if (!imperativeInitRef.current) {
+        let idx = 0;
+        for (let i = 0; i < data.length; i++) {
+          if (data[i].time <= simTime) idx = i + 1;
+          else break;
+        }
+        lastImperativePushRef.current = idx;
+        imperativeInitRef.current = true;
+        raf = requestAnimationFrame(tick);
+        return;
+      }
+
+      // Push newly visible completed candles
+      while (lastImperativePushRef.current < data.length) {
+        const candle = data[lastImperativePushRef.current];
+        const candleEnd = candle.time + iMs;
+        if (candleEnd <= simTime) {
+          // Fully completed candle — push final values
+          api.updateData({
+            timestamp: candle.time,
+            open: candle.open,
+            high: candle.high,
+            low: candle.low,
+            close: candle.close,
+            volume: candle.volume,
+          });
+          lastImperativePushRef.current++;
+        } else if (candle.time <= simTime) {
+          // Forming candle — interpolate sub-candle state
+          const progress = Math.max(0, Math.min(1, (simTime - candle.time) / iMs));
+          const close = candle.open + (candle.close - candle.open) * progress;
+          const hlReveal = Math.min(1, progress * 1.5);
+          const rawHigh = candle.open + (candle.high - candle.open) * hlReveal;
+          const rawLow = candle.open + (candle.low - candle.open) * hlReveal;
+          api.updateData({
+            timestamp: candle.time,
+            open: candle.open,
+            high: Math.max(candle.open, close, rawHigh),
+            low: Math.min(candle.open, close, rawLow),
+            close,
+            volume: candle.volume * progress,
+          });
+          break;
+        } else {
+          break;
+        }
+      }
+
+      raf = requestAnimationFrame(tick);
+    };
+
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [sim.status, iMs]);
 
   // Build asset state for AssetOverview
   const assetState = useMemo<AssetState>(() => {
