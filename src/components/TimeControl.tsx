@@ -20,7 +20,8 @@ export function TimeControl({ status, currentSimulatedTime, speed, onStart, onPa
   const [dateInput, setDateInput] = useState('2024-01-15 08:00:00');
 
   const handleStart = () => {
-    const ts = new Date(dateInput.replace(' ', 'T') + 'Z').getTime();
+    // Input is in UTC+8, convert to UTC timestamp by subtracting 8 hours
+    const ts = new Date(dateInput.replace(' ', 'T') + 'Z').getTime() - 8 * 3600_000;
     if (isNaN(ts)) return;
     onStart(ts);
   };
