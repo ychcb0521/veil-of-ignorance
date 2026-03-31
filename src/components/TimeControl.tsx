@@ -166,7 +166,7 @@ export function TimeControl({
         <button
           key={s}
           onClick={() => onSetSpeed(s)}
-          className={`px-2 py-1 rounded text-xs font-mono transition-colors ${
+          className={`px-2 py-1 rounded text-xs font-mono transition-all duration-100 ease-out active:scale-[0.95] ${
             speed === s
               ? 'bg-primary text-primary-foreground'
               : 'bg-secondary text-secondary-foreground hover:bg-accent'
