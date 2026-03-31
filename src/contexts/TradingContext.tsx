@@ -141,12 +141,21 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
   const persistedSim = useMemo(() => loadPersistedSimState(), []);
   const restoredStatus = persistedSim?.status ?? 'stopped';
 
+  // On restore, prefer the high-frequency persisted live time over the throttled React state
+  const liveTimeFromStorage = useMemo(() => {
+    try {
+      const v = localStorage.getItem('__tm_live_time');
+      return v ? Number(v) : null;
+    } catch { return null; }
+  }, []);
+  const bestRestoredTime = liveTimeFromStorage ?? persistedSim?.currentSimulatedTime ?? 0;
+
   const sim = useTimeSimulator(
     (restoredStatus === 'playing' || restoredStatus === 'paused') && persistedSim ? {
       status: restoredStatus,
-      historicalAnchorTime: restoredStatus === 'playing' ? persistedSim.historicalAnchorTime : persistedSim.currentSimulatedTime,
+      historicalAnchorTime: bestRestoredTime,
       realStartTime: restoredStatus === 'playing' ? Date.now() : persistedSim.realStartTime,
-      currentSimulatedTime: persistedSim.currentSimulatedTime,
+      currentSimulatedTime: bestRestoredTime,
       speed: persistedSim.speed,
     } : undefined
   );
