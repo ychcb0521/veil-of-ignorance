@@ -635,6 +635,18 @@ function CandlestickChartComponent({ data, symbol, onLoadOlder, loadingOlder, tr
             <span>指标</span>
           </button>
 
+          {/* Show order lines toggle */}
+          <button
+            onClick={() => setShowOrderLines(prev => !prev)}
+            className={`flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium transition-colors ${
+              showOrderLines ? 'bg-primary/20 text-primary' : 'text-muted-foreground hover:text-foreground hover:bg-accent/50'
+            }`}
+            title={showOrderLines ? '隐藏挂单线' : '显示挂单线'}
+          >
+            <ListOrdered className="w-3.5 h-3.5" />
+            <span>挂单</span>
+          </button>
+
           {indicators.map(ind => (
             <span key={ind.type} className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-mono font-medium whitespace-nowrap shrink-0"
               style={{ background: `${ind.color}20`, color: ind.color }}>
