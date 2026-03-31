@@ -22,7 +22,7 @@ import { LiquidationModal } from '@/components/LiquidationModal';
 import { AnalyticsPanel } from '@/components/AnalyticsPanel';
 import { CoolingOffModal, useCoolingOff } from '@/components/CoolingOffModal';
 import { toast } from 'sonner';
-import { BarChart3, Wallet } from 'lucide-react';
+import { BarChart3, Wallet, PanelRightClose, PanelRightOpen } from 'lucide-react';
 import type { PendingOrder, OrderType } from '@/types/trading';
 import { calcFee, calcSlippage } from '@/types/trading';
 import type { AssetState } from '@/types/assets';
