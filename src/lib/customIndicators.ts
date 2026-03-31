@@ -572,6 +572,11 @@ export function registerCustomIndicators() {
       });
     },
   });
+
+    registered = true;
+  } catch (e) {
+    console.error('Failed to register custom indicators:', e);
+  }
 }
 
 /**
