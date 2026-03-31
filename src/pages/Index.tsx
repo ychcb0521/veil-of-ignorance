@@ -1,6 +1,6 @@
 import { useState, useCallback, useMemo, useEffect, useRef } from 'react';
 import { formatUTC8 } from '@/lib/timeFormat';
-import { useTradingContext, type PlaceOrderParams } from '@/contexts/TradingContext';
+import { useTradingContext, type PlaceOrderParams, type CoinTimelineState } from '@/contexts/TradingContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { useBinanceData, intervalToMs, type KlineData } from '@/hooks/useBinanceData';
 import { useBackgroundPrices } from '@/hooks/useBackgroundPrices';
@@ -120,39 +120,57 @@ const Index = () => {
 
   const iMs = useMemo(() => intervalToMs(interval), [interval]);
 
-  // Effective time for the active coin (isolation-aware)
-  const effectiveSimTime = useMemo(() => getEffectiveTime(activeSymbol), [getEffectiveTime, activeSymbol]);
+  // ===== ACTIVE COIN STATE (isolation-aware) =====
+  // This is the single source of truth for UI: status, time, speed
+  const activeCoinState = useMemo(() => {
+    if (timeMode === 'synced') {
+      return { status: sim.status, time: sim.currentSimulatedTime, speed: sim.speed };
+    }
+    const ct = coinTimelines[activeSymbol];
+    if (!ct || ct.status === 'stopped') return { status: 'stopped' as const, time: 0, speed: 1 };
+    return { status: ct.status, time: ct.time, speed: ct.speed };
+  }, [timeMode, sim.status, sim.currentSimulatedTime, sim.speed, coinTimelines, activeSymbol]);
+
+  // Effective time for data filtering
+  const effectiveSimTime = useMemo(() => {
+    if (timeMode === 'synced') return sim.currentSimulatedTime;
+    const ct = coinTimelines[activeSymbol];
+    return ct?.time ?? 0;
+  }, [timeMode, sim.currentSimulatedTime, coinTimelines, activeSymbol]);
 
   const visibleData = useMemo(
     () => getVisibleData(effectiveSimTime, iMs),
     [getVisibleData, effectiveSimTime, iMs]
   );
 
-  // ===== UNIFIED GAME LOOP =====
-  // Single RAF tick handles: time computation → clock DOM → cursor → chart → throttled React flush.
-  // Zero React re-renders for visual updates.
+  // Should the RAF engine be running?
+  const shouldRunEngine = useMemo(() => {
+    if (timeMode === 'synced') return sim.status === 'playing';
+    return Object.values(coinTimelines).some(ct => ct.status === 'playing');
+  }, [timeMode, sim.status, coinTimelines]);
 
+  // ===== REFS =====
   const chartApiRef = useRef<{ updateData: (candle: any) => void } | null>(null);
-  const cursorRef = useRef(0);           // pointer into allData (O(1) advance)
-  const gameLoopInitRef = useRef(false); // set to false on status change to re-sync cursor
-  const clockRef = useRef<HTMLSpanElement>(null);        // direct DOM clock
-  const headerClockRef = useRef<HTMLSpanElement>(null);   // header bar clock
-  const lastReactFlushRef = useRef(0);   // throttle React setState
-  const lastPersistRef = useRef(0);      // throttle localStorage
+  const cursorRef = useRef(0);
+  const gameLoopInitRef = useRef(false);
+  const clockRef = useRef<HTMLSpanElement>(null);
+  const headerClockRef = useRef<HTMLSpanElement>(null);
+  const lastReactFlushRef = useRef(0);
+  const lastPersistRef = useRef(0);
   const timeModeRef = useRef(timeMode);
   const activeSymbolRef = useRef(activeSymbol);
+  const coinTimelinesRef = useRef(coinTimelines);
 
-  // Keep refs in sync
   useEffect(() => { timeModeRef.current = timeMode; }, [timeMode]);
   useEffect(() => { activeSymbolRef.current = activeSymbol; }, [activeSymbol]);
+  useEffect(() => { coinTimelinesRef.current = coinTimelines; }, [coinTimelines]);
 
-  /** Throttle interval for React state flush (ms). Only for matching/liquidation engines. */
   const REACT_FLUSH_MS = 800;
-  /** Throttle interval for localStorage persistence (ms). */
   const PERSIST_MS = 500;
 
+  // ===== UNIFIED GAME LOOP =====
   useEffect(() => {
-    if (sim.status !== 'playing') {
+    if (!shouldRunEngine) {
       gameLoopInitRef.current = false;
       return;
     }
@@ -160,99 +178,152 @@ const Index = () => {
     let raf: number;
 
     const tick = () => {
-      const api = chartApiRef.current;
-      const data = allDataRef.current;
-
-      // ① Compute simulated time from wall-clock delta (pure math, no React)
-      const simTime = sim.getSimTime();
-      sim.currentTimeRef.current = simTime;
-
-      // ② Update clock DOM directly — zero React overhead
-      const timeStr = formatUTC8(simTime);
-      if (clockRef.current) clockRef.current.textContent = timeStr;
-      if (headerClockRef.current) headerClockRef.current.textContent = timeStr;
-
-      // ③ Advance cursor through data & update chart
-      if (api && data.length > 0) {
-        // First tick after play/resume: binary-search to sync cursor
-        if (!gameLoopInitRef.current) {
-          let idx = 0;
-          for (let i = 0; i < data.length; i++) {
-            if (data[i].time <= simTime) idx = i + 1;
-            else break;
-          }
-          cursorRef.current = idx;
-          gameLoopInitRef.current = true;
-        }
-
-        // Advance cursor: O(1) amortised — just walk forward from last position
-        let newCandles = 0;
-        while (cursorRef.current < data.length) {
-          const candleEnd = data[cursorRef.current].time + iMs;
-          if (candleEnd <= simTime) { newCandles++; cursorRef.current++; }
-          else break;
-        }
-
-        // ④ Batch chart update — never call update() more than once per frame
-        if (newCandles > 0) {
-          // For large jumps (>3 candles in one frame), push only the last 3
-          // to avoid GPU stall from many sequential update() calls.
-          const batchStart = Math.max(0, cursorRef.current - Math.min(newCandles, 3));
-          for (let i = batchStart; i < cursorRef.current; i++) {
-            const c = data[i];
-            api.updateData({
-              timestamp: c.time, open: c.open, high: c.high,
-              low: c.low, close: c.close, volume: c.volume,
-            });
-          }
-        }
-
-        // Sub-candle interpolation for the forming candle
-        if (cursorRef.current < data.length) {
-          const candle = data[cursorRef.current];
-          if (candle.time <= simTime) {
-            const progress = Math.max(0, Math.min(1, (simTime - candle.time) / iMs));
-            const close = candle.open + (candle.close - candle.open) * progress;
-            const hlReveal = Math.min(1, progress * 1.5);
-            const rawHigh = candle.open + (candle.high - candle.open) * hlReveal;
-            const rawLow = candle.open + (candle.low - candle.open) * hlReveal;
-            api.updateData({
-              timestamp: candle.time, open: candle.open,
-              high: Math.max(candle.open, close, rawHigh),
-              low: Math.min(candle.open, close, rawLow),
-              close, volume: candle.volume * progress,
-            });
-          }
-        }
-      }
-
-      // ⑤ Throttled React state flush — only for matching/liquidation engines
       const now = Date.now();
-      if (now - lastReactFlushRef.current >= REACT_FLUSH_MS) {
-        lastReactFlushRef.current = now;
-        sim.syncReactState(simTime);
 
-        // In isolated mode: continuously update the active coin's timeline
-        if (timeModeRef.current === 'isolated') {
-          setCoinTimelines(prev => {
-            const existing = prev[activeSymbolRef.current];
-            if (existing && existing.time === simTime) return prev;
-            return {
-              ...prev,
-              [activeSymbolRef.current]: {
-                ...(existing || { status: 'playing', speed: 1, historicalAnchorTime: null, realStartTime: null }),
-                time: simTime,
-                status: 'playing',
-              },
-            };
-          });
+      if (timeModeRef.current === 'isolated') {
+        // === ISOLATED MODE: advance ALL playing coins ===
+        const activeSym = activeSymbolRef.current;
+        const cts = coinTimelinesRef.current;
+        const updates: Record<string, CoinTimelineState> = {};
+        let activeSimTime = cts[activeSym]?.time ?? 0;
+        let activeIsPlaying = false;
+
+        for (const [sym, ct] of Object.entries(cts)) {
+          if (ct.status !== 'playing' || !ct.realStartTime || ct.historicalAnchorTime == null) continue;
+          const simTime = ct.historicalAnchorTime + (now - ct.realStartTime) * ct.speed;
+          updates[sym] = { ...ct, time: simTime };
+          if (sym === activeSym) {
+            activeSimTime = simTime;
+            activeIsPlaying = true;
+          }
         }
-      }
 
-      // ⑥ Throttled localStorage persistence
-      if (now - lastPersistRef.current >= PERSIST_MS) {
-        lastPersistRef.current = now;
-        sim.persistTime(simTime);
+        // Update DOM clock for active coin
+        if (activeIsPlaying) {
+          const timeStr = formatUTC8(activeSimTime);
+          if (clockRef.current) clockRef.current.textContent = timeStr;
+          if (headerClockRef.current) headerClockRef.current.textContent = timeStr;
+        }
+
+        // Chart cursor for active coin only
+        if (activeIsPlaying) {
+          const api = chartApiRef.current;
+          const data = allDataRef.current;
+          if (api && data.length > 0) {
+            if (!gameLoopInitRef.current) {
+              let idx = 0;
+              for (let i = 0; i < data.length; i++) {
+                if (data[i].time <= activeSimTime) idx = i + 1; else break;
+              }
+              cursorRef.current = idx;
+              gameLoopInitRef.current = true;
+            }
+            let newCandles = 0;
+            while (cursorRef.current < data.length) {
+              const candleEnd = data[cursorRef.current].time + iMs;
+              if (candleEnd <= activeSimTime) { newCandles++; cursorRef.current++; } else break;
+            }
+            if (newCandles > 0) {
+              const batchStart = Math.max(0, cursorRef.current - Math.min(newCandles, 3));
+              for (let i = batchStart; i < cursorRef.current; i++) {
+                const c = data[i];
+                api.updateData({ timestamp: c.time, open: c.open, high: c.high, low: c.low, close: c.close, volume: c.volume });
+              }
+            }
+            if (cursorRef.current < data.length) {
+              const candle = data[cursorRef.current];
+              if (candle.time <= activeSimTime) {
+                const progress = Math.max(0, Math.min(1, (activeSimTime - candle.time) / iMs));
+                const close = candle.open + (candle.close - candle.open) * progress;
+                const hlReveal = Math.min(1, progress * 1.5);
+                const rawHigh = candle.open + (candle.high - candle.open) * hlReveal;
+                const rawLow = candle.open + (candle.low - candle.open) * hlReveal;
+                api.updateData({
+                  timestamp: candle.time, open: candle.open,
+                  high: Math.max(candle.open, close, rawHigh),
+                  low: Math.min(candle.open, close, rawLow),
+                  close, volume: candle.volume * progress,
+                });
+              }
+            }
+          }
+        }
+
+        // Throttled React flush
+        if (now - lastReactFlushRef.current >= REACT_FLUSH_MS && Object.keys(updates).length > 0) {
+          lastReactFlushRef.current = now;
+          setCoinTimelines(prev => {
+            const next = { ...prev };
+            for (const [sym, ct] of Object.entries(updates)) {
+              next[sym] = ct;
+            }
+            return next;
+          });
+          // Sync sim React state for matching/liquidation engines (using active coin's time)
+          if (activeIsPlaying) {
+            sim.syncReactState(activeSimTime);
+          }
+        }
+
+      } else {
+        // === SYNCED MODE (original logic) ===
+        const api = chartApiRef.current;
+        const data = allDataRef.current;
+        const simTime = sim.getSimTime();
+        sim.currentTimeRef.current = simTime;
+
+        const timeStr = formatUTC8(simTime);
+        if (clockRef.current) clockRef.current.textContent = timeStr;
+        if (headerClockRef.current) headerClockRef.current.textContent = timeStr;
+
+        if (api && data.length > 0) {
+          if (!gameLoopInitRef.current) {
+            let idx = 0;
+            for (let i = 0; i < data.length; i++) {
+              if (data[i].time <= simTime) idx = i + 1; else break;
+            }
+            cursorRef.current = idx;
+            gameLoopInitRef.current = true;
+          }
+          let newCandles = 0;
+          while (cursorRef.current < data.length) {
+            const candleEnd = data[cursorRef.current].time + iMs;
+            if (candleEnd <= simTime) { newCandles++; cursorRef.current++; } else break;
+          }
+          if (newCandles > 0) {
+            const batchStart = Math.max(0, cursorRef.current - Math.min(newCandles, 3));
+            for (let i = batchStart; i < cursorRef.current; i++) {
+              const c = data[i];
+              api.updateData({ timestamp: c.time, open: c.open, high: c.high, low: c.low, close: c.close, volume: c.volume });
+            }
+          }
+          if (cursorRef.current < data.length) {
+            const candle = data[cursorRef.current];
+            if (candle.time <= simTime) {
+              const progress = Math.max(0, Math.min(1, (simTime - candle.time) / iMs));
+              const close = candle.open + (candle.close - candle.open) * progress;
+              const hlReveal = Math.min(1, progress * 1.5);
+              const rawHigh = candle.open + (candle.high - candle.open) * hlReveal;
+              const rawLow = candle.open + (candle.low - candle.open) * hlReveal;
+              api.updateData({
+                timestamp: candle.time, open: candle.open,
+                high: Math.max(candle.open, close, rawHigh),
+                low: Math.min(candle.open, close, rawLow),
+                close, volume: candle.volume * progress,
+              });
+            }
+          }
+        }
+
+        if (now - lastReactFlushRef.current >= REACT_FLUSH_MS) {
+          lastReactFlushRef.current = now;
+          sim.syncReactState(simTime);
+        }
+
+        if (now - lastPersistRef.current >= PERSIST_MS) {
+          lastPersistRef.current = now;
+          sim.persistTime(simTime);
+        }
       }
 
       raf = requestAnimationFrame(tick);
@@ -260,12 +331,11 @@ const Index = () => {
 
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
-  }, [sim.status, iMs]);
+  }, [shouldRunEngine, iMs]);
 
   // Build asset state for AssetOverview
   const assetState = useMemo<AssetState>(() => {
     const initialCapital = profile?.initial_capital ?? 1_000_000;
-    // Calculate unrealized PnL across all positions
     let unrealizedPnl = 0;
     for (const [sym, positions] of Object.entries(positionsMap)) {
       const price = priceMap[sym] || 0;
@@ -277,23 +347,19 @@ const Index = () => {
       }
     }
     const totalBalance = balance + unrealizedPnl;
-    // Today's PnL from trade history (simplified: sum all closed trades)
     const todayPnl = tradeHistory.reduce((s, t) => s + (t.pnl || 0), 0) + unrealizedPnl;
     const todayPnlPct = initialCapital > 0 ? (todayPnl / initialCapital) * 100 : 0;
 
-    // Build history from trade events (simplified mock for now)
     const history = tradeHistory
       .filter(t => t.closeTime > 0)
       .map((t, i, arr) => ({
         timestamp: t.closeTime,
         totalBalance: initialCapital + arr.slice(0, i + 1).reduce((s, x) => s + (x.pnl || 0), 0),
       }));
-    // Add current snapshot
     if (history.length === 0 || totalBalance !== history[history.length - 1]?.totalBalance) {
-      history.push({ timestamp: sim.currentSimulatedTime || Date.now(), totalBalance });
+      history.push({ timestamp: activeCoinState.time || Date.now(), totalBalance });
     }
 
-    // Build daily PnL from trade history
     const dailyMap = new Map<string, { pnl: number; trades: number }>();
     for (const t of tradeHistory) {
       if (t.closeTime <= 0) continue;
@@ -316,7 +382,7 @@ const Index = () => {
       history,
       dailyPnl,
     };
-  }, [balance, positionsMap, priceMap, tradeHistory, sim.currentSimulatedTime, profile]);
+  }, [balance, positionsMap, priceMap, tradeHistory, activeCoinState.time, profile]);
 
   useEffect(() => {
     if (visibleData.length > 0) {
@@ -430,11 +496,9 @@ const Index = () => {
             // === PRICE PROTECTION: anti-scam-wick check for conditional orders ===
             const isConditionalType = ['MARKET_TP_SL', 'LIMIT_TP_SL', 'CONDITIONAL', 'TRAILING_STOP'].includes(order.type);
             if (isConditionalType && priceProtection) {
-              // Use kline OHLC average as "mark price" proxy
               const markPrice = (kline.open + kline.high + kline.low + kline.close) / 4;
               const deviation = Math.abs(kline.close - markPrice) / markPrice;
               if (deviation > PRICE_PROTECTION_THRESHOLD) {
-                // Reject trigger — price deviation too large (scam wick)
                 toast.warning(`⚠️ 价格保护已触发`, {
                   description: `条件单 ${order.id.slice(0, 8)} 由于最新价与标记价格偏差 ${(deviation * 100).toFixed(2)}% > 2%，未被执行`,
                   duration: 6000,
@@ -445,7 +509,6 @@ const Index = () => {
             }
 
             filledIds.push(order.id);
-            // Apply slippage for taker fills
             let actualFillPrice = fillPrice;
             let slippageAmount = 0;
             if (!isMaker) {
@@ -468,7 +531,7 @@ const Index = () => {
               action: 'OPEN' as const, entryPrice: actualFillPrice, exitPrice: 0,
               quantity: order.quantity, leverage: order.leverage,
               pnl: 0, fee, slippage: slippageAmount,
-              openTime: sim.currentSimulatedTime, closeTime: 0,
+              openTime: effectiveSimTime, closeTime: 0,
             }]);
             toast.success(`委托成交: ${order.side === 'LONG' ? '开多' : '开空'} ${order.quantity} @ ${actualFillPrice.toFixed(2)}`);
           } else if (convertToLimit) {
@@ -485,7 +548,7 @@ const Index = () => {
 
   // ===== TWAP ENGINE =====
   useEffect(() => {
-    if (!sim.isRunning || currentPrice <= 0) return;
+    if (activeCoinState.status !== 'playing' || currentPrice <= 0) return;
 
     for (const [symbol, orders] of Object.entries(ordersMap)) {
       const price = priceMap[symbol] || 0;
@@ -498,7 +561,7 @@ const Index = () => {
         const symOrders = prev[symbol] || [];
         const updated = symOrders.map(order => {
           if (order.type !== 'TWAP') return order;
-          const now = sim.currentSimulatedTime;
+          const now = effectiveSimTime;
           if (order.twapFilledQty !== undefined && order.twapTotalQty !== undefined && order.twapFilledQty >= order.twapTotalQty) {
             changed = true; return null;
           }
@@ -542,25 +605,66 @@ const Index = () => {
         return changed ? { ...prev, [symbol]: updated } : prev;
       });
     }
-  }, [sim.currentSimulatedTime, sim.isRunning, ordersMap, priceMap]);
+  }, [effectiveSimTime, activeCoinState.status, ordersMap, priceMap]);
+
+  // ===== ISOLATED-MODE HANDLERS =====
+  const handlePause = useCallback(() => {
+    if (timeMode === 'isolated') {
+      const now = Date.now();
+      setCoinTimelines(prev => {
+        const ct = prev[activeSymbol];
+        if (!ct || ct.status !== 'playing') return prev;
+        const frozenTime = ct.historicalAnchorTime != null && ct.realStartTime
+          ? ct.historicalAnchorTime + (now - ct.realStartTime) * ct.speed
+          : ct.time;
+        return {
+          ...prev,
+          [activeSymbol]: { ...ct, status: 'paused', time: frozenTime, realStartTime: null },
+        };
+      });
+    } else {
+      sim.pauseSimulation();
+    }
+  }, [timeMode, activeSymbol, sim]);
+
+  const handleResume = useCallback(() => {
+    if (timeMode === 'isolated') {
+      const now = Date.now();
+      setCoinTimelines(prev => {
+        const ct = prev[activeSymbol];
+        if (!ct || ct.status !== 'paused') return prev;
+        return {
+          ...prev,
+          [activeSymbol]: { ...ct, status: 'playing', historicalAnchorTime: ct.time, realStartTime: now },
+        };
+      });
+    } else {
+      sim.resumeSimulation();
+    }
+  }, [timeMode, activeSymbol, sim]);
+
+  const handleSetSpeed = useCallback((speed: number) => {
+    if (timeMode === 'isolated') {
+      const now = Date.now();
+      setCoinTimelines(prev => {
+        const ct = prev[activeSymbol];
+        if (!ct || ct.status !== 'playing') return { ...prev, [activeSymbol]: { ...(ct || { status: 'paused', time: 0, historicalAnchorTime: null, realStartTime: null }), speed } };
+        const currentTime = ct.historicalAnchorTime != null && ct.realStartTime
+          ? ct.historicalAnchorTime + (now - ct.realStartTime) * ct.speed
+          : ct.time;
+        return {
+          ...prev,
+          [activeSymbol]: { ...ct, speed, time: currentTime, historicalAnchorTime: currentTime, realStartTime: now },
+        };
+      });
+    } else {
+      sim.setSpeed(speed);
+    }
+  }, [timeMode, activeSymbol, sim]);
 
   // ===== Symbol switch: reload chart data =====
   const handleSymbolChange = useCallback(async (newSymbol: string) => {
     if (newSymbol === activeSymbol) return;
-
-    // In isolated mode: save current coin's time before switching
-    if (timeMode === 'isolated' && sim.status !== 'stopped') {
-      const currentTime = sim.currentTimeRef.current || sim.currentSimulatedTime;
-      setCoinTimelines(prev => ({
-        ...prev,
-        [activeSymbol]: {
-          ...(prev[activeSymbol] || { historicalAnchorTime: null, realStartTime: null }),
-          status: sim.status as 'playing' | 'paused' | 'stopped',
-          time: currentTime,
-          speed: sim.speed,
-        },
-      }));
-    }
 
     setActiveSymbol(newSymbol);
     reset();
@@ -568,17 +672,28 @@ const Index = () => {
     cursorRef.current = 0;
     gameLoopInitRef.current = false;
 
-    if (sim.status !== 'stopped') {
-      // In isolated mode: restore the target coin's saved time; otherwise use global time
-      const coinState = timeMode === 'isolated' ? coinTimelines[newSymbol] : null;
-      const targetTime = coinState?.time ?? sim.currentSimulatedTime;
-
-      const data = await initLoad(newSymbol, interval, targetTime);
-      if (data.length > 0) {
-        toast.info(`已切换到 ${newSymbol}`, { description: `加载 ${data.length} 根K线` });
+    if (timeMode === 'isolated') {
+      const targetState = coinTimelines[newSymbol];
+      if (targetState && targetState.status !== 'stopped' && targetState.time > 0) {
+        const data = await initLoad(newSymbol, interval, targetState.time);
+        if (data.length > 0) {
+          toast.info(`已切换到 ${newSymbol}`, { description: `加载 ${data.length} 根K线` });
+        }
+        // Sync sim React state to the new coin's time for engines
+        sim.syncReactState(targetState.time);
+      }
+      // If coin not started yet, show empty state - user needs to click Start
+    } else {
+      // Synced mode
+      if (sim.status !== 'stopped') {
+        const targetTime = sim.currentSimulatedTime;
+        const data = await initLoad(newSymbol, interval, targetTime);
+        if (data.length > 0) {
+          toast.info(`已切换到 ${newSymbol}`, { description: `加载 ${data.length} 根K线` });
+        }
       }
     }
-  }, [activeSymbol, sim.status, sim.currentSimulatedTime, sim.speed, interval, initLoad, reset, timeMode, coinTimelines]);
+  }, [activeSymbol, sim.status, sim.currentSimulatedTime, interval, initLoad, reset, timeMode, coinTimelines]);
 
   const handleIntervalChange = useCallback(async (newInterval: string) => {
     if (newInterval === interval) return;
@@ -586,47 +701,98 @@ const Index = () => {
     reset();
     prevVisibleLenRef.current = 0;
 
-    if (sim.status !== 'stopped') {
-      await initLoad(activeSymbol, newInterval, sim.currentSimulatedTime);
+    if (activeCoinState.status !== 'stopped') {
+      await initLoad(activeSymbol, newInterval, effectiveSimTime);
     }
-  }, [activeSymbol, interval, sim.status, sim.currentSimulatedTime, initLoad, reset]);
+  }, [activeSymbol, interval, activeCoinState.status, effectiveSimTime, initLoad, reset]);
 
   const handleStart = useCallback(async (timestamp: number) => {
     const data = await initLoad(activeSymbol, interval, timestamp);
     if (data.length > 0) {
       prevVisibleLenRef.current = 0;
-      sim.startSimulation(timestamp);
+      gameLoopInitRef.current = false;
+
+      if (timeMode === 'isolated') {
+        const now = Date.now();
+        setCoinTimelines(prev => ({
+          ...prev,
+          [activeSymbol]: {
+            status: 'playing',
+            time: timestamp,
+            speed: 1,
+            historicalAnchorTime: timestamp,
+            realStartTime: now,
+          },
+        }));
+        // Start global sim as heartbeat (keeps isRunning=true for funding/liquidation engines)
+        if (sim.status === 'stopped') {
+          sim.startSimulation(timestamp);
+        }
+      } else {
+        sim.startSimulation(timestamp);
+      }
       toast.success('时间机器已启动', {
         description: `已加载 ${data.length} 根K线 · 向左拖动可加载更多历史数据`,
       });
     } else {
       toast.error('数据获取失败', { description: '请检查时间范围和交易对' });
     }
-  }, [activeSymbol, interval, initLoad, sim]);
+  }, [activeSymbol, interval, initLoad, sim, timeMode]);
 
-  // Stop: close all positions, cancel orders, reset
   const handleStop = useCallback(() => {
-    // Close all positions at current prices
-    for (const [sym, positions] of Object.entries(positionsMap)) {
-      const price = priceMap[sym] || 0;
-      if (price <= 0) continue;
-      for (let i = positions.length - 1; i >= 0; i--) {
-        handleClosePosition(sym, i);
+    if (timeMode === 'isolated') {
+      // Stop only the active coin
+      const positions = positionsMap[activeSymbol] || [];
+      const price = priceMap[activeSymbol] || 0;
+      if (price > 0) {
+        for (let i = positions.length - 1; i >= 0; i--) {
+          handleClosePosition(activeSymbol, i);
+        }
       }
-    }
-    // Cancel all orders
-    for (const [sym, orders] of Object.entries(ordersMap)) {
+      const orders = ordersMap[activeSymbol] || [];
       for (const order of orders) {
-        handleCancelOrder(sym, order.id);
+        handleCancelOrder(activeSymbol, order.id);
       }
+      setCoinTimelines(prev => ({
+        ...prev,
+        [activeSymbol]: {
+          ...(prev[activeSymbol] || { speed: 1, historicalAnchorTime: null, realStartTime: null }),
+          status: 'stopped',
+          time: 0,
+        },
+      }));
+      reset();
+      prevVisibleLenRef.current = 0;
+      // If no other coins are playing, also stop global sim
+      const anyOtherPlaying = Object.entries(coinTimelines).some(
+        ([sym, ct]) => sym !== activeSymbol && ct.status === 'playing'
+      );
+      if (!anyOtherPlaying) {
+        clearSimState();
+        sim.stopSimulation();
+      }
+      toast.info(`⏹ ${activeSymbol} 模拟已停止`);
+    } else {
+      // Synced: stop everything
+      for (const [sym, positions] of Object.entries(positionsMap)) {
+        const price = priceMap[sym] || 0;
+        if (price <= 0) continue;
+        for (let i = positions.length - 1; i >= 0; i--) {
+          handleClosePosition(sym, i);
+        }
+      }
+      for (const [sym, orders] of Object.entries(ordersMap)) {
+        for (const order of orders) {
+          handleCancelOrder(sym, order.id);
+        }
+      }
+      reset();
+      prevVisibleLenRef.current = 0;
+      clearSimState();
+      sim.stopSimulation();
+      toast.info('⏹ 模拟已停止，所有仓位已结算');
     }
-    // Reset chart and sim
-    reset();
-    prevVisibleLenRef.current = 0;
-    clearSimState();
-    sim.stopSimulation();
-    toast.info('⏹ 模拟已停止，所有仓位已结算');
-  }, [positionsMap, ordersMap, priceMap, handleClosePosition, handleCancelOrder, reset, sim]);
+  }, [positionsMap, ordersMap, priceMap, handleClosePosition, handleCancelOrder, reset, sim, timeMode, activeSymbol, coinTimelines]);
 
   // Wrapper for OrderPanel
   const handlePlaceOrderForActiveSymbol = useCallback((order: PlaceOrderParams) => {
@@ -651,19 +817,19 @@ const Index = () => {
         interval={interval}
         onSymbolChange={handleSymbolChange}
         onIntervalChange={handleIntervalChange}
-        status={sim.status}
-        currentSimulatedTime={sim.currentSimulatedTime}
-        speed={sim.speed}
+        status={activeCoinState.status}
+        currentSimulatedTime={activeCoinState.time}
+        speed={activeCoinState.speed}
         onStart={handleStart}
-        onPause={sim.pauseSimulation}
-        onResume={sim.resumeSimulation}
+        onPause={handlePause}
+        onResume={handleResume}
         onStop={handleStop}
-        onSetSpeed={sim.setSpeed}
+        onSetSpeed={handleSetSpeed}
         visibleData={visibleData}
         onLoadOlder={loadOlder}
         loadingOlder={loadingOlder}
         currentPrice={currentPrice}
-        disabled={sim.status === 'stopped' || currentPrice === 0}
+        disabled={activeCoinState.status === 'stopped' || currentPrice === 0}
         onPlaceOrder={handlePlaceOrderForActiveSymbol}
         balance={balance}
         positionsMap={positionsMap}
@@ -688,13 +854,17 @@ const Index = () => {
         </div>
         <div className="flex items-center gap-3 shrink-0">
           {loading && <span className="text-[10px] text-primary animate-pulse font-mono">加载历史数据...</span>}
-          {visibleData.length > 0 && (
+          {activeCoinState.status !== 'stopped' && activeCoinState.time > 0 ? (
             <span className="font-mono text-xs text-primary font-medium">
               <span ref={headerClockRef}>
-                {formatUTC8(visibleData[visibleData.length - 1].time)}
+                {formatUTC8(activeCoinState.time)}
               </span>
             </span>
-          )}
+          ) : visibleData.length > 0 ? (
+            <span className="font-mono text-xs text-primary font-medium">
+              {formatUTC8(visibleData[visibleData.length - 1].time)}
+            </span>
+          ) : null}
           <button onClick={() => setAssetsOpen(true)}
             className="flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors">
             <Wallet className="w-3 h-3" /> 资产
@@ -714,9 +884,20 @@ const Index = () => {
       </header>
 
       <div className="shrink-0">
-        <TimeControl status={sim.status} currentSimulatedTime={sim.currentSimulatedTime}
-          speed={sim.speed} onStart={handleStart} onPause={sim.pauseSimulation} onResume={sim.resumeSimulation} onStop={handleStop} onSetSpeed={sim.setSpeed} clockRef={clockRef}
-          timeMode={timeMode} onSetTimeMode={setTimeMode} totalPositionCount={totalPositionCount} />
+        <TimeControl
+          status={activeCoinState.status}
+          currentSimulatedTime={activeCoinState.time}
+          speed={activeCoinState.speed}
+          onStart={handleStart}
+          onPause={handlePause}
+          onResume={handleResume}
+          onStop={handleStop}
+          onSetSpeed={handleSetSpeed}
+          clockRef={clockRef}
+          timeMode={timeMode}
+          onSetTimeMode={setTimeMode}
+          totalPositionCount={totalPositionCount}
+        />
       </div>
 
       <div className="shrink-0">
@@ -726,7 +907,7 @@ const Index = () => {
       <div className="flex-1 flex min-h-0 overflow-hidden">
         <div className="flex-1 flex flex-col min-h-0 min-w-0">
           <div className="flex-1 min-h-0 relative overflow-hidden">
-            {sim.status === 'stopped' && visibleData.length === 0 ? (
+            {activeCoinState.status === 'stopped' && visibleData.length === 0 ? (
               <div className="h-full flex items-center justify-center bg-background">
                 <div className="text-center space-y-3">
                   <div className="text-5xl">⏰</div>
@@ -742,8 +923,8 @@ const Index = () => {
                 onLoadOlder={loadOlder}
                 loadingOlder={loadingOlder}
                 tradeHistory={tradeHistory}
-                isRunning={sim.status !== 'stopped'}
-                currentSimulatedTime={sim.currentSimulatedTime}
+                isRunning={activeCoinState.status !== 'stopped'}
+                currentSimulatedTime={activeCoinState.time}
                 mainInterval={interval}
                 pricePrecision={pricePrecision}
                 quantityPrecision={quantityPrecision}
@@ -781,47 +962,54 @@ const Index = () => {
           </button>
           {isOrderBookOpen ? (
             <div className="flex-1 min-h-0 overflow-hidden">
-              <OrderBook currentPrice={currentPrice} symbol={activeSymbol} pricePrecision={pricePrecision} />
+              <OrderBook symbol={activeSymbol} currentPrice={currentPrice} pricePrecision={pricePrecision} />
             </div>
-          ) : (
-            <div className="flex-1 flex items-center justify-center">
-              <span className="text-[9px] text-muted-foreground font-medium writing-vertical" style={{ writingMode: 'vertical-rl' }}>盘口</span>
-            </div>
-          )}
+          ) : null}
         </div>
 
-        <div className="w-[280px] border-l border-border shrink-0 overflow-y-auto">
-          <OrderPanel currentPrice={currentPrice} onPlaceOrder={handlePlaceOrderForActiveSymbol}
-            disabled={sim.status === 'stopped' || currentPrice === 0} symbol={activeSymbol}
+        <div className="w-[280px] border-l border-border shrink-0 overflow-auto bg-card">
+          <OrderPanel
+            symbol={activeSymbol}
+            currentPrice={currentPrice}
+            disabled={activeCoinState.status === 'stopped' || currentPrice === 0}
+            onPlaceOrder={handlePlaceOrderForActiveSymbol}
+            pricePrecision={pricePrecision}
+            quantityPrecision={quantityPrecision}
             coolingOff={coolingOff.isActive}
-            coolingOffLabel={coolingOff.formatRemaining()}
+            coolingOffLabel={coolingOff.isActive ? coolingOff.formatRemaining() : undefined}
             onOpenCoolingOff={() => setCoolingOffModalOpen(true)}
             priceProtection={priceProtection}
             onTogglePriceProtection={() => setPriceProtection(prev => !prev)}
-            pricePrecision={pricePrecision}
-            quantityPrecision={quantityPrecision}
           />
         </div>
       </div>
 
-      <LiquidationModal open={liquidationOpen} onClose={closeLiquidationModal} details={liquidationDetails} />
-      <AnalyticsPanel
-        open={analyticsOpen} onClose={() => setAnalyticsOpen(false)}
-        tradeHistory={tradeHistory} balance={balance}
-        positionsMap={positionsMap} priceMap={priceMap}
-        initialCapital={profile?.initial_capital ?? 1_000_000}
-      />
       <Dialog open={assetsOpen} onOpenChange={setAssetsOpen}>
-        <DialogContent className="max-w-md p-0 gap-0 overflow-hidden">
-          <div className="p-4">
-            <AssetOverview assets={assetState} />
-          </div>
+        <DialogContent className="max-w-2xl p-0 bg-card">
+          <AssetOverview assets={assetState} />
         </DialogContent>
       </Dialog>
+
+      <AnalyticsPanel
+        open={analyticsOpen}
+        onClose={() => setAnalyticsOpen(false)}
+        tradeHistory={tradeHistory}
+        balance={balance}
+        positionsMap={positionsMap}
+        priceMap={priceMap}
+        initialCapital={profile?.initial_capital ?? 1_000_000}
+      />
+
+      <LiquidationModal
+        open={liquidationOpen}
+        onClose={closeLiquidationModal}
+        details={liquidationDetails}
+      />
+
       <CoolingOffModal
         open={coolingOffModalOpen}
         onClose={() => setCoolingOffModalOpen(false)}
-        onConfirm={(ms) => { coolingOff.activate(ms); toast.info('🧊 交易冷静期已开启', { description: '冷静期内无法开新仓位', duration: 5000 }); }}
+        onConfirm={(durationMs) => { coolingOff.activate(durationMs); setCoolingOffModalOpen(false); }}
       />
     </div>
   );
