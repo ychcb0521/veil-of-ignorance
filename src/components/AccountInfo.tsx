@@ -42,7 +42,7 @@ export function AccountInfo({ balance, positionsMap, priceMap }: Props) {
   const isMedRisk = marginRatio > 50;
 
   return (
-    <div className="flex items-center gap-5 px-4 py-1.5 text-[11px] font-mono border-b border-border bg-card">
+    <div className="flex items-center gap-4 px-4 py-1.5 text-[11px] font-mono border-b border-border bg-card flex-wrap min-h-[28px]">
       <div className="flex items-center gap-1.5">
         <Wallet className="w-3 h-3 text-primary" />
         <span className="text-muted-foreground">总权益</span>
