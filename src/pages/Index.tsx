@@ -989,7 +989,7 @@ const Index = () => {
 
       <Dialog open={assetsOpen} onOpenChange={setAssetsOpen}>
         <DialogContent className="max-w-2xl p-0 bg-card">
-          <AssetOverview state={assetState} />
+          <AssetOverview assets={assetState} />
         </DialogContent>
       </Dialog>
 
