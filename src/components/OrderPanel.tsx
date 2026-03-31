@@ -173,7 +173,7 @@ export function OrderPanel({ currentPrice, onPlaceOrder, disabled, symbol, cooli
             <button
               key={m}
               onClick={() => setMarginMode(m)}
-              className={`flex-1 py-1 rounded text-xs font-medium transition-colors ${
+              className={`flex-1 py-1 rounded text-xs font-medium transition-all duration-100 ease-out active:scale-[0.97] ${
                 marginMode === m
                   ? 'bg-accent text-foreground'
                   : 'text-muted-foreground hover:text-foreground'
