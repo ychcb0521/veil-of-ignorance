@@ -667,7 +667,7 @@ const Index = () => {
 
       <div className="shrink-0">
         <TimeControl status={sim.status} currentSimulatedTime={sim.currentSimulatedTime}
-          speed={sim.speed} onStart={handleStart} onPause={sim.pauseSimulation} onResume={sim.resumeSimulation} onStop={handleStop} onSetSpeed={sim.setSpeed} />
+          speed={sim.speed} onStart={handleStart} onPause={sim.pauseSimulation} onResume={sim.resumeSimulation} onStop={handleStop} onSetSpeed={sim.setSpeed} clockRef={clockRef} />
       </div>
 
       <div className="shrink-0">
