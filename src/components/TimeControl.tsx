@@ -1,25 +1,35 @@
 import { useState, useRef, useEffect } from 'react';
-import { Play, Pause, Square, Clock } from 'lucide-react';
+import { Play, Pause, Square, Clock, Split, Lock } from 'lucide-react';
 import { formatUTC8 } from '@/lib/timeFormat';
+import { Switch } from '@/components/ui/switch';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import type { TimeMachineStatus } from '@/hooks/useTimeSimulator';
 
 interface Props {
   status: TimeMachineStatus;
-  currentSimulatedTime: number; // used only for paused fallback
+  currentSimulatedTime: number;
   speed: number;
   onStart: (timestamp: number) => void;
   onPause: () => void;
   onResume: () => void;
   onStop: () => void;
   onSetSpeed: (speed: number) => void;
-  /** Ref to the <span> whose textContent is updated directly by the game loop */
   clockRef?: React.RefObject<HTMLSpanElement>;
+  // Multi-Timeline Isolation
+  isTimeIsolated?: boolean;
+  onToggleTimeIsolation?: (v: boolean) => void;
+  totalPositionCount?: number;
 }
 
 const SPEED_OPTIONS = [1, 2, 5, 10, 30, 60];
 
-export function TimeControl({ status, currentSimulatedTime, speed, onStart, onPause, onResume, onStop, onSetSpeed, clockRef }: Props) {
+export function TimeControl({
+  status, currentSimulatedTime, speed,
+  onStart, onPause, onResume, onStop, onSetSpeed, clockRef,
+  isTimeIsolated = false, onToggleTimeIsolation, totalPositionCount = 0,
+}: Props) {
   const [dateInput, setDateInput] = useState('2024-01-15 16:00:00');
+  const canToggleIsolation = totalPositionCount === 0;
 
   const handleStart = () => {
     const ts = new Date(dateInput.replace(' ', 'T') + 'Z').getTime() - 8 * 3600_000;
@@ -77,7 +87,6 @@ export function TimeControl({ status, currentSimulatedTime, speed, onStart, onPa
               ))}
             </div>
 
-            {/* Clock updated directly by game loop via ref — zero React re-renders */}
             <div className="ml-auto font-mono text-sm text-primary font-medium">
               <span ref={clockRef}>{formatUTC8(currentSimulatedTime)}</span>
             </div>
@@ -115,6 +124,40 @@ export function TimeControl({ status, currentSimulatedTime, speed, onStart, onPa
               ⏸ <span ref={clockRef}>{formatUTC8(currentSimulatedTime)}</span>
             </div>
           </>
+        )}
+
+        {/* Time Isolation Toggle */}
+        {status !== 'stopped' && onToggleTimeIsolation && (
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <div className="flex items-center gap-1.5 ml-2 border-l border-border pl-3">
+                  {canToggleIsolation ? (
+                    <Split className="w-3.5 h-3.5 text-muted-foreground" />
+                  ) : (
+                    <Lock className="w-3.5 h-3.5 text-muted-foreground" />
+                  )}
+                  <span className="text-[10px] text-muted-foreground whitespace-nowrap">时间隔离</span>
+                  <Switch
+                    checked={isTimeIsolated}
+                    onCheckedChange={onToggleTimeIsolation}
+                    disabled={!canToggleIsolation}
+                    className="scale-75"
+                  />
+                  {isTimeIsolated && (
+                    <span className="text-[9px] px-1.5 py-0.5 rounded bg-primary/20 text-primary font-medium">ON</span>
+                  )}
+                </div>
+              </TooltipTrigger>
+              <TooltipContent side="bottom" className="max-w-[240px]">
+                <p className="text-xs">
+                  {canToggleIsolation
+                    ? '开启后，各币种拥有独立时间轴，互不影响。'
+                    : `有 ${totalPositionCount} 笔持仓，需全部平仓后才能切换。`}
+                </p>
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
         )}
       </div>
     </div>

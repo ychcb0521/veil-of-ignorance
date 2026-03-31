@@ -139,6 +139,12 @@ const Index = () => {
   const headerClockRef = useRef<HTMLSpanElement>(null);   // header bar clock
   const lastReactFlushRef = useRef(0);   // throttle React setState
   const lastPersistRef = useRef(0);      // throttle localStorage
+  const isTimeIsolatedRef = useRef(isTimeIsolated);
+  const activeSymbolRef = useRef(activeSymbol);
+
+  // Keep refs in sync
+  useEffect(() => { isTimeIsolatedRef.current = isTimeIsolated; }, [isTimeIsolated]);
+  useEffect(() => { activeSymbolRef.current = activeSymbol; }, [activeSymbol]);
 
   /** Throttle interval for React state flush (ms). Only for matching/liquidation engines. */
   const REACT_FLUSH_MS = 800;
