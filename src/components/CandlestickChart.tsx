@@ -124,6 +124,20 @@ const DARK_STYLES = {
     },
   },
   indicator: {
+    lastValueMark: {
+      show: true,
+      text: {
+        show: true,
+        color: '#FFFFFF',
+        borderColor: 'inherit',
+        borderRadius: 2,
+        size: 10,
+        paddingLeft: 4,
+        paddingRight: 4,
+        paddingTop: 2,
+        paddingBottom: 2,
+      },
+    },
     tooltip: {
       showRule: TooltipShowRule.FollowCross,
       showType: TooltipShowType.Standard,
