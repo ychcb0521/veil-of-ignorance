@@ -222,7 +222,7 @@ export function DrawingToolbar({ activeTool, onToolChange, onClearDrawings, draw
         })}
       </div>
 
-      <div className="flex flex-col items-center gap-0.5 border-t border-border pt-1.5 mt-1">
+      <div className="flex flex-col items-center gap-0.5 border-t border-border pt-1.5 mt-1 shrink-0">
         <ToolbarButton icon={<Ruler size={ICON_SIZE} strokeWidth={ICON_STROKE} />} label="测量"
           active={activeTool === 'Measure'} onClick={() => onToolChange(activeTool === 'Measure' ? null : 'Measure')} />
         <ToolbarButton icon={<ZoomIn size={ICON_SIZE} strokeWidth={ICON_STROKE} />} label="放大" onClick={() => {}} />
