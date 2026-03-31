@@ -92,6 +92,7 @@ const Index = () => {
 
   const [bottomTab, setBottomTab] = useState('positions');
   const [analyticsOpen, setAnalyticsOpen] = useState(false);
+  const [assetsOpen, setAssetsOpen] = useState(false);
   const [coolingOffModalOpen, setCoolingOffModalOpen] = useState(false);
   const [priceProtection, setPriceProtection] = usePersistedState('price_protection', true);
   const coolingOff = useCoolingOff();
