@@ -23,6 +23,7 @@ interface Props {
   quantityPrecision?: number;
   pendingOrders?: PendingOrder[];
   onCancelOrder?: (orderId: string) => void;
+  chartApiRef?: MutableRefObject<ChartImperativeApi | null>;
 }
 
 interface SubChart {
