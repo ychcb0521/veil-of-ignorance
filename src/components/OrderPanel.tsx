@@ -233,7 +233,7 @@ export function OrderPanel({ currentPrice, onPlaceOrder, disabled, symbol, cooli
       <div className="px-3 pt-2 pb-1 relative" ref={dropdownRef}>
         <button
           onClick={() => setDropdownOpen(!dropdownOpen)}
-          className="w-full flex items-center justify-between px-2.5 py-1.5 rounded text-xs font-medium bg-accent text-foreground hover:bg-accent/80 transition-colors"
+          className="w-full flex items-center justify-between px-2.5 py-1.5 rounded text-xs font-medium bg-accent text-foreground hover:bg-accent/80 transition-all duration-100 ease-out active:scale-[0.98]"
         >
           <span>{selectedInfo.label} <span className="text-muted-foreground ml-1">{selectedInfo.desc}</span></span>
           <ChevronDown className={`w-3.5 h-3.5 transition-transform ${dropdownOpen ? 'rotate-180' : ''}`} />
