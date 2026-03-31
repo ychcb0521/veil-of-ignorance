@@ -670,6 +670,7 @@ const Index = () => {
                 quantityPrecision={quantityPrecision}
                 pendingOrders={activeSymbolOrders}
                 onCancelOrder={(orderId) => handleCancelOrder(activeSymbol, orderId)}
+                chartApiRef={chartApiRef}
               />
             )}
           </div>
