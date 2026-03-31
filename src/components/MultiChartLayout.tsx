@@ -145,7 +145,8 @@ export function MultiChartLayout({
           <div className="bg-background min-h-0 overflow-hidden">
             <CandlestickChart data={mainData} symbol={`${mainSymbol} ${mainInterval}`} onLoadOlder={onLoadOlder}
               loadingOlder={loadingOlder} tradeHistory={tradeHistory} rawSymbol={rawSymbol}
-              pricePrecision={pricePrecision} quantityPrecision={quantityPrecision} />
+              pricePrecision={pricePrecision} quantityPrecision={quantityPrecision}
+              pendingOrders={pendingOrders} onCancelOrder={onCancelOrder} />
           </div>
           {[0, 1, 2].map(i => (
             <div key={i} className="bg-background min-h-0 overflow-hidden relative">
