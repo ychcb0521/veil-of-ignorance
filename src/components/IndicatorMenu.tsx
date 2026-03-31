@@ -3,7 +3,7 @@
  * Works with klinecharts native indicator system + custom registered indicators.
  */
 
-import { useState, useRef, useEffect, useMemo } from 'react';
+import { useState, useRef, useEffect, useMemo, forwardRef } from 'react';
 import { Search, X, Plus, Check } from 'lucide-react';
 import type { IndicatorConfig } from './CandlestickChart';
 import { CUSTOM_INDICATOR_MAP } from '@/lib/customIndicators';
@@ -179,26 +179,24 @@ export function IndicatorMenu({ open, onClose, indicators, onIndicatorsChange }:
   const [search, setSearch] = useState('');
   const [categoryFilter, setCategoryFilter] = useState<string | null>(null);
   const panelRef = useRef<HTMLDivElement>(null);
+  const cleanupRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
     if (!open) return;
-    // Delay adding listener to avoid catching the same click that opened the menu
-    const timer = setTimeout(() => {
+    const timer = window.setTimeout(() => {
       const handler = (e: MouseEvent) => {
         if (panelRef.current && !panelRef.current.contains(e.target as Node)) onClose();
       };
       document.addEventListener('mousedown', handler);
-      // Store cleanup ref
       cleanupRef.current = () => document.removeEventListener('mousedown', handler);
     }, 50);
+
     return () => {
-      clearTimeout(timer);
+      window.clearTimeout(timer);
       cleanupRef.current?.();
       cleanupRef.current = null;
     };
   }, [open, onClose]);
-
-  const cleanupRef = useRef<(() => void) | null>(null);
 
   const filtered = useMemo(() => {
     let items = INDICATOR_CATALOG;
@@ -231,46 +229,47 @@ export function IndicatorMenu({ open, onClose, indicators, onIndicatorsChange }:
 
   const overlays = filtered.filter(i => i.isOverlay);
   const oscillators = filtered.filter(i => !i.isOverlay);
-
   const categories = ['trend', 'momentum', 'volatility', 'volume', 'other'];
-
   const supportedCount = INDICATOR_CATALOG.filter(i => isSupported(i.id)).length;
 
   return (
-    <div ref={panelRef} className="absolute right-0 top-10 z-[100] w-96 rounded-lg border border-border shadow-2xl overflow-hidden bg-card animate-in fade-in slide-in-from-top-2 duration-150"
-      onClick={(e) => e.stopPropagation()}>
-      <div className="flex items-center justify-between px-3 py-2.5 border-b border-border">
+    <div
+      ref={panelRef}
+      className="absolute right-0 top-10 z-[120] w-96 max-w-[min(24rem,calc(100vw-2rem))] rounded-lg border border-border bg-card shadow-2xl overflow-hidden transition-all duration-150 ease-out origin-top"
+      onClick={(e) => e.stopPropagation()}
+      onMouseDown={(e) => e.stopPropagation()}
+    >
+      <div className="flex items-center justify-between px-3 py-2.5 border-b border-border bg-card">
         <span className="text-sm font-semibold text-foreground">技术指标</span>
         <div className="flex items-center gap-2">
-          <span className="text-[10px] text-muted-foreground">{supportedCount}/{INDICATOR_CATALOG.length} 已激活</span>
-          <button onClick={onClose} className="text-muted-foreground hover:text-foreground transition-colors duration-100 ease-out active:scale-[0.9]">
+          <span className="text-[10px] text-muted-foreground">{supportedCount}/{INDICATOR_CATALOG.length} 已支持</span>
+          <button type="button" onClick={onClose} className="text-muted-foreground hover:text-foreground transition-colors duration-100 ease-out active:scale-[0.9]">
             <X className="w-4 h-4" />
           </button>
         </div>
       </div>
 
-      {/* Search */}
-      <div className="px-3 py-2 border-b border-border">
+      <div className="px-3 py-2 border-b border-border bg-card">
         <div className="flex items-center gap-2 px-2 py-1.5 rounded-md bg-secondary/50 border border-border">
-          <Search className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" />
+          <Search className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
           <input
             autoFocus
             value={search}
             onChange={e => setSearch(e.target.value)}
-            placeholder="搜索指标 (如 MACD, 布林带, RSI, Bollinger...)"
+            placeholder="搜索指标 (MACD / RSI / BOLL ...)"
             className="flex-1 bg-transparent text-xs text-foreground placeholder:text-muted-foreground outline-none"
           />
           {search && (
-            <button onClick={() => setSearch('')} className="text-muted-foreground hover:text-foreground">
+            <button type="button" onClick={() => setSearch('')} className="text-muted-foreground hover:text-foreground">
               <X className="w-3 h-3" />
             </button>
           )}
         </div>
       </div>
 
-      {/* Category Filters */}
-      <div className="flex items-center gap-1 px-3 py-1.5 border-b border-border overflow-x-auto">
+      <div className="flex items-center gap-1 px-3 py-1.5 border-b border-border overflow-x-auto bg-card">
         <button
+          type="button"
           onClick={() => setCategoryFilter(null)}
           className={`px-2 py-0.5 rounded text-[10px] font-medium transition-all duration-100 ease-out active:scale-[0.95] whitespace-nowrap ${
             !categoryFilter ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'
@@ -280,6 +279,7 @@ export function IndicatorMenu({ open, onClose, indicators, onIndicatorsChange }:
         </button>
         {categories.map(cat => (
           <button
+            type="button"
             key={cat}
             onClick={() => setCategoryFilter(categoryFilter === cat ? null : cat)}
             className={`px-2 py-0.5 rounded text-[10px] font-medium transition-all duration-100 ease-out active:scale-[0.95] whitespace-nowrap ${
@@ -291,12 +291,12 @@ export function IndicatorMenu({ open, onClose, indicators, onIndicatorsChange }:
         ))}
       </div>
 
-      <div className="max-h-[420px] overflow-y-auto">
-        {filtered.length === 0 && (
+      <div className="max-h-[60vh] overflow-y-auto bg-card">
+        {(!INDICATOR_CATALOG?.length || filtered.length === 0) && (
           <div className="px-4 py-8 text-center text-xs text-muted-foreground">未找到匹配的指标</div>
         )}
 
-        {overlays.length > 0 && (
+        {INDICATOR_CATALOG?.length > 0 && overlays.length > 0 && (
           <>
             <div className="px-3 py-1.5 text-[10px] font-medium text-muted-foreground uppercase tracking-wider bg-secondary/30 border-b border-border sticky top-0 z-10">
               主图叠加 · Overlays ({overlays.length})
@@ -307,7 +307,7 @@ export function IndicatorMenu({ open, onClose, indicators, onIndicatorsChange }:
           </>
         )}
 
-        {oscillators.length > 0 && (
+        {INDICATOR_CATALOG?.length > 0 && oscillators.length > 0 && (
           <>
             <div className="px-3 py-1.5 text-[10px] font-medium text-muted-foreground uppercase tracking-wider bg-secondary/30 border-b border-border sticky top-0 z-10">
               副图指标 · Sub-pane ({oscillators.length})
@@ -319,34 +319,31 @@ export function IndicatorMenu({ open, onClose, indicators, onIndicatorsChange }:
         )}
       </div>
 
-      <div className="px-3 py-2 border-t border-border flex items-center justify-between">
-        <span className="text-[10px] text-muted-foreground">
-          已启用 {indicators.length} 个指标
-        </span>
-        <span className="text-[10px] text-muted-foreground">
-          显示 {filtered.length} / {INDICATOR_CATALOG.length}
-        </span>
+      <div className="px-3 py-2 border-t border-border flex items-center justify-between bg-card">
+        <span className="text-[10px] text-muted-foreground">已启用 {indicators.length} 个指标</span>
+        <span className="text-[10px] text-muted-foreground">显示 {filtered.length} / {INDICATOR_CATALOG.length}</span>
       </div>
     </div>
   );
 }
 
-function IndicatorRow({ item, indicators, onToggle, onUpdatePeriod }: {
+const IndicatorRow = forwardRef<HTMLDivElement, {
   item: IndicatorCatalogItem;
   indicators: IndicatorConfig[];
   onToggle: (item: IndicatorCatalogItem) => void;
   onUpdatePeriod: (id: string, period: number) => void;
-}) {
+}>(function IndicatorRow({ item, indicators, onToggle, onUpdatePeriod }, ref) {
   const active = indicators.find(i => i.type === item.id);
   const supported = isSupported(item.id);
 
   return (
     <div
+      ref={ref}
       className="flex items-center justify-between px-3 py-2 hover:bg-accent/30 transition-colors duration-100 ease-out cursor-pointer group"
       onClick={() => onToggle(item)}
     >
       <div className="flex items-center gap-2.5 flex-1 min-w-0">
-        <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: item.color }} />
+        <span className="w-2 h-2 rounded-full shrink-0" style={{ background: item.color }} />
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-1.5">
             <span className="text-xs font-medium text-foreground truncate">{item.nameZh}</span>
@@ -358,7 +355,7 @@ function IndicatorRow({ item, indicators, onToggle, onUpdatePeriod }: {
         </div>
       </div>
 
-      <div className="flex items-center gap-1.5 flex-shrink-0">
+      <div className="flex items-center gap-1.5 shrink-0">
         {active ? (
           <>
             <input
@@ -376,4 +373,6 @@ function IndicatorRow({ item, indicators, onToggle, onUpdatePeriod }: {
       </div>
     </div>
   );
-}
+});
+
+IndicatorRow.displayName = 'IndicatorRow';

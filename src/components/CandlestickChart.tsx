@@ -641,11 +641,16 @@ function CandlestickChartComponent({ data, symbol, onLoadOlder, loadingOlder, tr
         />
 
         {/* Right side: indicator buttons */}
-        <div className="absolute right-12 top-0 z-20 flex items-center gap-1 py-1.5 px-2 max-w-[60%] overflow-x-auto">
+        <div className="absolute right-12 top-0 z-[70] flex items-center gap-1 py-1.5 px-2 max-w-[60%] overflow-visible">
           <button
-            onClick={() => setShowIndicatorPanel(!showIndicatorPanel)}
-            className={`flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium transition-colors ${
-              showIndicatorPanel ? 'bg-primary/20 text-primary' : 'text-muted-foreground hover:text-foreground hover:bg-accent/50'
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              e.preventDefault();
+              setShowIndicatorPanel(prev => !prev);
+            }}
+            className={`flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium transition-all duration-150 ease-out origin-top active:scale-[0.98] ${
+              showIndicatorPanel ? 'bg-primary text-primary-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground hover:bg-accent/50'
             }`}
           >
             <BarChart3 className="w-3.5 h-3.5" />
@@ -654,8 +659,9 @@ function CandlestickChartComponent({ data, symbol, onLoadOlder, loadingOlder, tr
 
           {/* Show order lines toggle */}
           <button
+            type="button"
             onClick={() => setShowOrderLines(prev => !prev)}
-            className={`flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium transition-colors ${
+            className={`flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium transition-colors duration-150 ease-out active:scale-[0.98] ${
               showOrderLines ? 'bg-primary/20 text-primary' : 'text-muted-foreground hover:text-foreground hover:bg-accent/50'
             }`}
             title={showOrderLines ? '隐藏挂单线' : '显示挂单线'}
@@ -664,15 +670,17 @@ function CandlestickChartComponent({ data, symbol, onLoadOlder, loadingOlder, tr
             <span>挂单</span>
           </button>
 
-          {indicators.map(ind => (
-            <span key={ind.type} className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-mono font-medium whitespace-nowrap shrink-0"
-              style={{ background: `${ind.color}20`, color: ind.color }}>
-              {ind.type} {ind.period}
-              <button onClick={() => setIndicators(indicators.filter(i => i.type !== ind.type))} className="hover:opacity-70">
-                <X className="w-2.5 h-2.5" />
-              </button>
-            </span>
-          ))}
+          <div className="flex items-center gap-1 max-w-full overflow-x-auto">
+            {indicators.map(ind => (
+              <span key={ind.type} className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-mono font-medium whitespace-nowrap shrink-0"
+                style={{ background: `${ind.color}20`, color: ind.color }}>
+                {ind.type} {ind.period}
+                <button type="button" onClick={() => setIndicators(indicators.filter(i => i.type !== ind.type))} className="hover:opacity-70">
+                  <X className="w-2.5 h-2.5" />
+                </button>
+              </span>
+            ))}
+          </div>
 
           <IndicatorMenu
             open={showIndicatorPanel}
