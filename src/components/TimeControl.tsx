@@ -65,6 +65,17 @@ export function TimeControl({
   );
 
   const [lockPopoverOpen, setLockPopoverOpen] = useState(false);
+  // Capture a stable snapshot of running coins when popover opens to prevent content jumping
+  const [frozenRunningCoins, setFrozenRunningCoins] = useState<{ sym: string; status: string }[]>([]);
+
+  const handleLockPopoverChange = (open: boolean) => {
+    if (open) {
+      setFrozenRunningCoins(
+        runningCoins.map(sym => ({ sym, status: coinTimelines[sym]?.status ?? 'stopped' }))
+      );
+    }
+    setLockPopoverOpen(open);
+  };
 
   const ModeSelector = () => {
     if (!onSetTimeMode) return null;
