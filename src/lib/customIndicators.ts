@@ -192,11 +192,12 @@ export function registerCustomIndicators() {
       { key: 'lower', title: '下: ', type: 'line' },
     ],
     calc: (dataList, indicator) => {
-      const [period, multiplier] = indicator.calcParams;
+      const [period, mult] = indicator.calcParams;
       try {
         const result = KeltnerChannels.calculate({
           high: highs(dataList), low: lows(dataList), close: closes(dataList),
           maPeriod: period ?? 20, atrPeriod: period ?? 20, useSMA: false,
+          multiplier: mult ?? 1.5,
         });
         const offset = dataList.length - result.length;
         return dataList.map((_, i) => {
