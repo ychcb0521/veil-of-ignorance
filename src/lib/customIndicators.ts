@@ -84,7 +84,8 @@ let registered = false;
 
 export function registerCustomIndicators() {
   if (registered) return;
-  registered = true;
+
+  try {
 
   // ─── ADX ───
   registerIndicator({
@@ -571,6 +572,70 @@ export function registerCustomIndicators() {
       });
     },
   });
+
+  // ─── WMA (not built into klinecharts) ───
+  registerIndicator({
+    name: 'WMA_CUSTOM',
+    shortName: 'WMA',
+    calcParams: [20],
+    figures: [{ key: 'wma', title: 'WMA: ', type: 'line' }],
+    calc: (dataList, indicator) => {
+      const period = indicator.calcParams[0] ?? 20;
+      const vals = calcWMA(closes(dataList), period);
+      return dataList.map((_, i) => ({ wma: isNaN(vals[i]) ? undefined : vals[i] }));
+    },
+  });
+
+  // ─── ATR (not built into klinecharts) ───
+  registerIndicator({
+    name: 'ATR_CUSTOM',
+    shortName: 'ATR',
+    calcParams: [14],
+    figures: [{ key: 'atr', title: 'ATR: ', type: 'line' }],
+    calc: (dataList, indicator) => {
+      const period = indicator.calcParams[0] ?? 14;
+      const trs: number[] = [];
+      for (let i = 0; i < dataList.length; i++) {
+        if (i === 0) { trs.push(dataList[i].high - dataList[i].low); continue; }
+        trs.push(Math.max(
+          dataList[i].high - dataList[i].low,
+          Math.abs(dataList[i].high - dataList[i - 1].close),
+          Math.abs(dataList[i].low - dataList[i - 1].close)
+        ));
+      }
+      const atrVals = ema(trs, period);
+      return dataList.map((_, i) => ({ atr: atrVals[i] }));
+    },
+  });
+
+  // ─── MFI (not built into klinecharts) ───
+  registerIndicator({
+    name: 'MFI_CUSTOM',
+    shortName: 'MFI',
+    calcParams: [14],
+    figures: [{ key: 'mfi', title: 'MFI: ', type: 'line' }],
+    calc: (dataList, indicator) => {
+      const period = indicator.calcParams[0] ?? 14;
+      return dataList.map((_, i) => {
+        if (i < period) return {};
+        let posFlow = 0, negFlow = 0;
+        for (let j = i - period + 1; j <= i; j++) {
+          const tp = (dataList[j].high + dataList[j].low + dataList[j].close) / 3;
+          const prevTp = j > 0 ? (dataList[j-1].high + dataList[j-1].low + dataList[j-1].close) / 3 : tp;
+          const mf = tp * dataList[j].volume;
+          if (tp > prevTp) posFlow += mf;
+          else negFlow += mf;
+        }
+        const ratio = negFlow === 0 ? 100 : posFlow / negFlow;
+        return { mfi: 100 - (100 / (1 + ratio)) };
+      });
+    },
+  });
+
+    registered = true;
+  } catch (e) {
+    console.error('Failed to register custom indicators:', e);
+  }
 }
 
 /**
@@ -578,18 +643,21 @@ export function registerCustomIndicators() {
  * Returns null if no mapping exists (will use fallback).
  */
 export const CUSTOM_INDICATOR_MAP: Record<string, string> = {
-  // Built-in klinecharts indicators
-  MA: 'MA', EMA: 'EMA', SMA: 'SMA', WMA: 'WMA',
+  // Built-in klinecharts indicators (verified in klinecharts 9.8.12 ESM)
+  MA: 'MA', EMA: 'EMA', SMA: 'SMA',
   BOLL: 'BOLL', SAR: 'SAR',
   RSI: 'RSI', MACD: 'MACD', KDJ: 'KDJ',
-  ATR: 'ATR', CCI: 'CCI', OBV: 'OBV', ROC: 'ROC',
+  CCI: 'CCI', OBV: 'OBV', ROC: 'ROC',
   STOCH: 'KDJ', VOL: 'VOL',
   DMI: 'DMI', TRIX: 'TRIX',
-  WR: 'WR', MFI: 'MFI',
-  // AO is built-in in some klinecharts versions
+  WR: 'WR',
   EMV: 'EMV', PVT: 'PVT',
+  AO: 'AO',
 
-  // Custom registered
+  // Custom registered (not built into klinecharts)
+  WMA: 'WMA_CUSTOM',
+  ATR: 'ATR_CUSTOM',
+  MFI: 'MFI_CUSTOM',
   ADX: 'ADX_CUSTOM',
   VWAP: 'VWAP_CUSTOM',
   ICH: 'ICH_CUSTOM',
@@ -597,7 +665,6 @@ export const CUSTOM_INDICATOR_MAP: Record<string, string> = {
   KC: 'KC_CUSTOM',
   AD: 'AD_CUSTOM',
   ELDER: 'ELDER_CUSTOM',
-  AO: 'AO_CUSTOM',
   BOLL_B: 'BOLL_B_CUSTOM',
   BBW: 'BBW_CUSTOM',
   DEMA: 'DEMA_CUSTOM',

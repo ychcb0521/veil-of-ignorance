@@ -14,9 +14,6 @@ import { usePersistedState } from '@/hooks/usePersistedState';
 import type { TradeRecord } from '@/types/trading';
 import { registerCustomIndicators, CUSTOM_INDICATOR_MAP } from '@/lib/customIndicators';
 
-// Register custom indicators once on module load
-registerCustomIndicators();
-
 // Mapping from our indicator IDs to klinecharts indicator names (built-in + custom)
 const KLINE_INDICATOR_MAP: Record<string, string> = { ...CUSTOM_INDICATOR_MAP };
 
@@ -231,6 +228,9 @@ function CandlestickChartComponent({ data, symbol, onLoadOlder, loadingOlder, tr
   // ============================================================
   useEffect(() => {
     if (!containerRef.current) return;
+
+    // Register custom indicators before chart init to ensure klinecharts knows them
+    registerCustomIndicators();
 
     const chart = init(containerRef.current, {
       styles: theme === 'light' ? LIGHT_STYLES : DARK_STYLES,
