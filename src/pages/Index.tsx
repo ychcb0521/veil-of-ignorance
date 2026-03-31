@@ -1011,8 +1011,8 @@ const Index = () => {
 
       <CoolingOffModal
         open={coolingOffModalOpen}
-        onOpenChange={setCoolingOffModalOpen}
-        coolingOff={coolingOff}
+        onClose={() => setCoolingOffModalOpen(false)}
+        onConfirm={(durationMs) => { coolingOff.activate(durationMs); setCoolingOffModalOpen(false); }}
       />
     </div>
   );
