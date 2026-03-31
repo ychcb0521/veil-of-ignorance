@@ -189,9 +189,9 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
   const [pricePrecision, setPricePrecision] = useState(2);
   const [quantityPrecision, setQuantityPrecision] = useState(3);
 
-  // === Multi-Timeline Isolation ===
-  const [isTimeIsolated, setIsTimeIsolated] = usePersistedState('time_isolated', false);
-  const [coinTimelines, setCoinTimelines] = usePersistedState<Record<string, number>>('coin_timelines', {});
+  // === Multi-Timeline Mode ===
+  const [timeMode, setTimeMode] = usePersistedState<TimeMode>('time_mode', 'synced');
+  const [coinTimelines, setCoinTimelines] = usePersistedState<CoinTimelinesMap>('coin_timelines_v2', {});
 
   // Total position count across all symbols (for the guard)
   const totalPositionCount = useMemo(() => {
@@ -200,12 +200,18 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
     return count;
   }, [positionsMap]);
 
+  // Get a coin's isolated timeline state
+  const getCoinState = useCallback((symbol: string): CoinTimelineState | null => {
+    return coinTimelines[symbol] ?? null;
+  }, [coinTimelines]);
+
   // Get effective simulation time for a given symbol
   const getEffectiveTime = useCallback((symbol?: string): number => {
     const sym = symbol || activeSymbol;
-    if (!isTimeIsolated) return sim.currentSimulatedTime;
-    return coinTimelines[sym] ?? sim.currentSimulatedTime;
-  }, [isTimeIsolated, coinTimelines, activeSymbol, sim.currentSimulatedTime]);
+    if (timeMode === 'synced') return sim.currentSimulatedTime;
+    const ct = coinTimelines[sym];
+    return ct?.time ?? sim.currentSimulatedTime;
+  }, [timeMode, coinTimelines, activeSymbol, sim.currentSimulatedTime]);
 
   // Liquidation modal state
   const [liquidationOpen, setLiquidationOpen] = useState(false);
