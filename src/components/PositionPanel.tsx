@@ -217,7 +217,7 @@ export function PositionPanel({
           tradeRecords.length === 0 ? (
             <div className="px-4 py-6 text-center text-xs text-muted-foreground">暂无历史记录</div>
           ) : (
-            <table className="w-full text-[11px] font-mono">
+            <table className="w-full text-[11px] font-mono tabular-nums">
               <thead>
                 <tr className="text-muted-foreground border-b border-border">
                   {['合约', '操作', '方向', '开仓价', '平仓价', '数量', '手续费', '滑点', '盈亏'].map(h => (
