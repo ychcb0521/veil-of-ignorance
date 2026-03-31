@@ -794,6 +794,7 @@ const Index = () => {
       reset();
       prevVisibleLenRef.current = 0;
       clearSimState();
+      setSyncedOriginTime(null);
       sim.stopSimulation();
       toast.info('⏹ 模拟已停止，所有仓位已结算');
     }
