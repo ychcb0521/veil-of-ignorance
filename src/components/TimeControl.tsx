@@ -29,10 +29,15 @@ export function TimeControl({
   status, currentSimulatedTime, speed,
   onStart, onPause, onResume, onStop, onSetSpeed, clockRef,
   timeMode = 'synced', onSetTimeMode, totalPositionCount = 0,
-  originTime,
+  originTime, coinTimelines = {},
 }: Props) {
   const [dateInput, setDateInput] = useState('2024-01-15 16:00:00');
-  const canToggleMode = totalPositionCount === 0;
+
+  // Guard: can't toggle if positions exist OR if any coin is running (isolated→synced)
+  const runningCoins = Object.entries(coinTimelines)
+    .filter(([, ct]) => ct.status === 'playing' || ct.status === 'paused')
+    .map(([sym]) => sym);
+  const canToggleMode = totalPositionCount === 0 && (timeMode === 'synced' || runningCoins.length === 0);
 
   const handleStart = () => {
     const ts = new Date(dateInput.replace(' ', 'T') + 'Z').getTime() - 8 * 3600_000;
