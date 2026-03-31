@@ -143,7 +143,7 @@ const Index = () => {
   const activeSymbolRef = useRef(activeSymbol);
 
   // Keep refs in sync
-  useEffect(() => { isTimeIsolatedRef.current = isTimeIsolated; }, [isTimeIsolated]);
+  useEffect(() => { timeModeRef.current = timeMode; }, [timeMode]);
   useEffect(() => { activeSymbolRef.current = activeSymbol; }, [activeSymbol]);
 
   /** Throttle interval for React state flush (ms). Only for matching/liquidation engines. */
