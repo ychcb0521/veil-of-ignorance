@@ -85,8 +85,8 @@ const Index = () => {
     handlePlaceOrder, handleClosePosition, handleCancelOrder,
     handleAddIsolatedMargin,
     liquidationOpen, liquidationDetails, closeLiquidationModal,
-    isTimeIsolated, setIsTimeIsolated, coinTimelines, setCoinTimelines,
-    totalPositionCount, getEffectiveTime,
+    timeMode, setTimeMode, coinTimelines, setCoinTimelines,
+    totalPositionCount, getEffectiveTime, getCoinState,
   } = ctx;
 
   const { allData, allDataRef, loading, loadingOlder, error, initLoad, loadOlder, getVisibleData, reset } = useBinanceData();
@@ -139,11 +139,11 @@ const Index = () => {
   const headerClockRef = useRef<HTMLSpanElement>(null);   // header bar clock
   const lastReactFlushRef = useRef(0);   // throttle React setState
   const lastPersistRef = useRef(0);      // throttle localStorage
-  const isTimeIsolatedRef = useRef(isTimeIsolated);
+  const timeModeRef = useRef(timeMode);
   const activeSymbolRef = useRef(activeSymbol);
 
   // Keep refs in sync
-  useEffect(() => { isTimeIsolatedRef.current = isTimeIsolated; }, [isTimeIsolated]);
+  useEffect(() => { timeModeRef.current = timeMode; }, [timeMode]);
   useEffect(() => { activeSymbolRef.current = activeSymbol; }, [activeSymbol]);
 
   /** Throttle interval for React state flush (ms). Only for matching/liquidation engines. */
@@ -233,10 +233,18 @@ const Index = () => {
         sim.syncReactState(simTime);
 
         // In isolated mode: continuously update the active coin's timeline
-        if (isTimeIsolatedRef.current) {
+        if (timeModeRef.current === 'isolated') {
           setCoinTimelines(prev => {
-            if (prev[activeSymbolRef.current] === simTime) return prev;
-            return { ...prev, [activeSymbolRef.current]: simTime };
+            const existing = prev[activeSymbolRef.current];
+            if (existing && existing.time === simTime) return prev;
+            return {
+              ...prev,
+              [activeSymbolRef.current]: {
+                ...(existing || { status: 'playing', speed: 1, historicalAnchorTime: null, realStartTime: null }),
+                time: simTime,
+                status: 'playing',
+              },
+            };
           });
         }
       }
@@ -541,9 +549,17 @@ const Index = () => {
     if (newSymbol === activeSymbol) return;
 
     // In isolated mode: save current coin's time before switching
-    if (isTimeIsolated && sim.status !== 'stopped') {
+    if (timeMode === 'isolated' && sim.status !== 'stopped') {
       const currentTime = sim.currentTimeRef.current || sim.currentSimulatedTime;
-      setCoinTimelines(prev => ({ ...prev, [activeSymbol]: currentTime }));
+      setCoinTimelines(prev => ({
+        ...prev,
+        [activeSymbol]: {
+          ...(prev[activeSymbol] || { historicalAnchorTime: null, realStartTime: null }),
+          status: sim.status as 'playing' | 'paused' | 'stopped',
+          time: currentTime,
+          speed: sim.speed,
+        },
+      }));
     }
 
     setActiveSymbol(newSymbol);
@@ -554,16 +570,15 @@ const Index = () => {
 
     if (sim.status !== 'stopped') {
       // In isolated mode: restore the target coin's saved time; otherwise use global time
-      const targetTime = isTimeIsolated
-        ? (coinTimelines[newSymbol] ?? sim.currentSimulatedTime)
-        : sim.currentSimulatedTime;
+      const coinState = timeMode === 'isolated' ? coinTimelines[newSymbol] : null;
+      const targetTime = coinState?.time ?? sim.currentSimulatedTime;
 
       const data = await initLoad(newSymbol, interval, targetTime);
       if (data.length > 0) {
         toast.info(`已切换到 ${newSymbol}`, { description: `加载 ${data.length} 根K线` });
       }
     }
-  }, [activeSymbol, sim.status, sim.currentSimulatedTime, interval, initLoad, reset, isTimeIsolated, coinTimelines]);
+  }, [activeSymbol, sim.status, sim.currentSimulatedTime, sim.speed, interval, initLoad, reset, timeMode, coinTimelines]);
 
   const handleIntervalChange = useCallback(async (newInterval: string) => {
     if (newInterval === interval) return;
@@ -701,7 +716,7 @@ const Index = () => {
       <div className="shrink-0">
         <TimeControl status={sim.status} currentSimulatedTime={sim.currentSimulatedTime}
           speed={sim.speed} onStart={handleStart} onPause={sim.pauseSimulation} onResume={sim.resumeSimulation} onStop={handleStop} onSetSpeed={sim.setSpeed} clockRef={clockRef}
-          isTimeIsolated={isTimeIsolated} onToggleTimeIsolation={setIsTimeIsolated} totalPositionCount={totalPositionCount} />
+          timeMode={timeMode} onSetTimeMode={setTimeMode} totalPositionCount={totalPositionCount} />
       </div>
 
       <div className="shrink-0">

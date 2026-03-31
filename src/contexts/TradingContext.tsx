@@ -21,9 +21,20 @@ import {
 } from '@/types/trading';
 
 // ===== Types =====
+export type TimeMode = 'synced' | 'isolated';
+
+export interface CoinTimelineState {
+  status: 'playing' | 'paused' | 'stopped';
+  time: number;
+  speed: number;
+  historicalAnchorTime: number | null;
+  realStartTime: number | null;
+}
+
 export type PositionsMap = Record<string, Position[]>;
 export type OrdersMap = Record<string, PendingOrder[]>;
 export type PriceMap = Record<string, number>;
+export type CoinTimelinesMap = Record<string, CoinTimelineState>;
 
 interface LiquidationDetails { lostAmount: number; liquidatedPositions: number; }
 
@@ -61,13 +72,14 @@ interface TradingState {
   liquidationOpen: boolean;
   liquidationDetails: LiquidationDetails | undefined;
   closeLiquidationModal: () => void;
-  // Multi-Timeline Isolation
-  isTimeIsolated: boolean;
-  setIsTimeIsolated: (v: boolean) => void;
-  coinTimelines: Record<string, number>;
-  setCoinTimelines: (v: Record<string, number> | ((prev: Record<string, number>) => Record<string, number>)) => void;
+  // Multi-Timeline
+  timeMode: TimeMode;
+  setTimeMode: (v: TimeMode) => void;
+  coinTimelines: CoinTimelinesMap;
+  setCoinTimelines: (v: CoinTimelinesMap | ((prev: CoinTimelinesMap) => CoinTimelinesMap)) => void;
   totalPositionCount: number;
   getEffectiveTime: (symbol?: string) => number;
+  getCoinState: (symbol: string) => CoinTimelineState | null;
 }
 
 export interface PlaceOrderParams {
@@ -177,9 +189,9 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
   const [pricePrecision, setPricePrecision] = useState(2);
   const [quantityPrecision, setQuantityPrecision] = useState(3);
 
-  // === Multi-Timeline Isolation ===
-  const [isTimeIsolated, setIsTimeIsolated] = usePersistedState('time_isolated', false);
-  const [coinTimelines, setCoinTimelines] = usePersistedState<Record<string, number>>('coin_timelines', {});
+  // === Multi-Timeline Mode ===
+  const [timeMode, setTimeMode] = usePersistedState<TimeMode>('time_mode', 'synced');
+  const [coinTimelines, setCoinTimelines] = usePersistedState<CoinTimelinesMap>('coin_timelines_v2', {});
 
   // Total position count across all symbols (for the guard)
   const totalPositionCount = useMemo(() => {
@@ -188,12 +200,18 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
     return count;
   }, [positionsMap]);
 
+  // Get a coin's isolated timeline state
+  const getCoinState = useCallback((symbol: string): CoinTimelineState | null => {
+    return coinTimelines[symbol] ?? null;
+  }, [coinTimelines]);
+
   // Get effective simulation time for a given symbol
   const getEffectiveTime = useCallback((symbol?: string): number => {
     const sym = symbol || activeSymbol;
-    if (!isTimeIsolated) return sim.currentSimulatedTime;
-    return coinTimelines[sym] ?? sim.currentSimulatedTime;
-  }, [isTimeIsolated, coinTimelines, activeSymbol, sim.currentSimulatedTime]);
+    if (timeMode === 'synced') return sim.currentSimulatedTime;
+    const ct = coinTimelines[sym];
+    return ct?.time ?? sim.currentSimulatedTime;
+  }, [timeMode, coinTimelines, activeSymbol, sim.currentSimulatedTime]);
 
   // Liquidation modal state
   const [liquidationOpen, setLiquidationOpen] = useState(false);
@@ -644,10 +662,11 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
     handleAddIsolatedMargin,
     fundingRate: FUNDING_RATE,
     liquidationOpen, liquidationDetails, closeLiquidationModal,
-    isTimeIsolated, setIsTimeIsolated,
+    timeMode, setTimeMode,
     coinTimelines, setCoinTimelines,
     totalPositionCount,
     getEffectiveTime,
+    getCoinState,
   };
 
   return <TradingContext.Provider value={value}>{children}</TradingContext.Provider>;
