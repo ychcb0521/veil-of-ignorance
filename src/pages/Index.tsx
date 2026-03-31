@@ -743,6 +743,36 @@ const Index = () => {
     }
   }, [activeSymbol, interval, initLoad, sim, timeMode]);
 
+  // ===== STATE GUARD: time mode switch =====
+  const handleSetTimeMode = useCallback((newMode: TimeMode) => {
+    // Switching to synced from isolated requires all coins stopped
+    if (newMode === 'synced' && timeMode === 'isolated') {
+      const runningCoins = Object.entries(coinTimelines)
+        .filter(([, ct]) => ct.status === 'playing' || ct.status === 'paused')
+        .map(([sym]) => sym);
+      if (runningCoins.length > 0) {
+        toast.error(`无法切换至同步模式`, {
+          description: `当前有币种正在独立运行：${runningCoins.join(', ')}。请先停止所有运行。`,
+          duration: 5000,
+        });
+        return;
+      }
+    }
+    // Also keep existing position guard
+    if (totalPositionCount > 0) {
+      toast.error(`无法切换模式`, {
+        description: `有 ${totalPositionCount} 笔持仓，需全部平仓后才能切换模式。`,
+        duration: 5000,
+      });
+      return;
+    }
+    setTimeMode(newMode);
+    // If switching to synced and all coins stopped, reset coinTimelines
+    if (newMode === 'synced') {
+      setCoinTimelines({});
+    }
+  }, [timeMode, coinTimelines, totalPositionCount, setTimeMode, setCoinTimelines]);
+
   const handleStop = useCallback(() => {
     if (timeMode === 'isolated') {
       // Stop only the active coin
