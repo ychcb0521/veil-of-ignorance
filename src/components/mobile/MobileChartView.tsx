@@ -1,4 +1,5 @@
 import { ArrowLeft, Clock, Play, Pause, Square, Calendar, ChevronDown } from 'lucide-react';
+import { formatUTC8 } from '@/lib/timeFormat';
 import { CandlestickChart } from '@/components/CandlestickChart';
 import type { KlineData } from '@/hooks/useBinanceData';
 import type { PositionsMap, PriceMap } from '@/contexts/TradingContext';
@@ -41,11 +42,7 @@ export function MobileChartView(props: Props) {
   const [showTimeframeSheet, setShowTimeframeSheet] = useState(false);
   const baseCoin = props.symbol.replace('USDT', '');
 
-  const formatSimTime = (ts: number) => {
-    if (!ts) return '--';
-    const d = new Date(ts);
-    return d.toISOString().replace('T', ' ').slice(0, 19);
-  };
+  const formatSimTime = formatUTC8;
 
   const formatSelectedDate = () => {
     const d = selectedDate;

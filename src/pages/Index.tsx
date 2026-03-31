@@ -1,4 +1,5 @@
 import { useState, useCallback, useMemo, useEffect, useRef } from 'react';
+import { formatUTC8 } from '@/lib/timeFormat';
 import { useTradingContext, type PlaceOrderParams } from '@/contexts/TradingContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { useBinanceData, type KlineData } from '@/hooks/useBinanceData';
@@ -469,8 +470,7 @@ const Index = () => {
             <span className="font-mono text-xs text-primary font-medium">
               {(() => {
                 const ts = visibleData[visibleData.length - 1].time;
-                const d = new Date(ts);
-                return d.toISOString().replace('T', ' ').slice(0, 19) + ' UTC';
+                return formatUTC8(ts);
               })()}
             </span>
           )}

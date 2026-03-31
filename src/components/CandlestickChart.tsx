@@ -228,6 +228,7 @@ function CandlestickChartComponent({ data, symbol, onLoadOlder, loadingOlder, tr
 
     const chart = init(containerRef.current, {
       styles: theme === 'light' ? LIGHT_STYLES : DARK_STYLES,
+      timezone: 'Asia/Shanghai',
     });
 
     if (!chart) return;
