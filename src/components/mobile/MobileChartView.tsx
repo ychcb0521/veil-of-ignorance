@@ -45,8 +45,8 @@ export function MobileChartView(props: Props) {
   const formatSimTime = formatUTC8;
 
   const formatSelectedDate = () => {
-    const d = selectedDate;
-    return `${d.getUTCFullYear()}-${String(d.getUTCMonth()+1).padStart(2,'0')}-${String(d.getUTCDate()).padStart(2,'0')} ${String(d.getUTCHours()).padStart(2,'0')}:${String(d.getUTCMinutes()).padStart(2,'0')}`;
+    return formatUTC8(selectedDate.getTime()).slice(0, 16);
+  };
   };
 
   const handlePickerConfirm = (date: Date) => {
