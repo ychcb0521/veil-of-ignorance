@@ -2,7 +2,7 @@ import { useState, useCallback, useEffect } from 'react';
 import { CandlestickChart } from './CandlestickChart';
 import { LayoutGrid, Columns, Square } from 'lucide-react';
 import type { KlineData } from '@/hooks/useBinanceData';
-import type { TradeRecord } from '@/types/trading';
+import type { TradeRecord, PendingOrder } from '@/types/trading';
 
 type LayoutMode = '1x1' | '1x2' | '2x2';
 
