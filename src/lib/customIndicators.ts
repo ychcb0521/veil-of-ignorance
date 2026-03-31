@@ -643,18 +643,21 @@ export function registerCustomIndicators() {
  * Returns null if no mapping exists (will use fallback).
  */
 export const CUSTOM_INDICATOR_MAP: Record<string, string> = {
-  // Built-in klinecharts indicators
-  MA: 'MA', EMA: 'EMA', SMA: 'SMA', WMA: 'WMA',
+  // Built-in klinecharts indicators (verified in klinecharts 9.8.12 ESM)
+  MA: 'MA', EMA: 'EMA', SMA: 'SMA',
   BOLL: 'BOLL', SAR: 'SAR',
   RSI: 'RSI', MACD: 'MACD', KDJ: 'KDJ',
-  ATR: 'ATR', CCI: 'CCI', OBV: 'OBV', ROC: 'ROC',
+  CCI: 'CCI', OBV: 'OBV', ROC: 'ROC',
   STOCH: 'KDJ', VOL: 'VOL',
   DMI: 'DMI', TRIX: 'TRIX',
-  WR: 'WR', MFI: 'MFI',
-  // AO is built-in in some klinecharts versions
+  WR: 'WR',
   EMV: 'EMV', PVT: 'PVT',
+  AO: 'AO',
 
-  // Custom registered
+  // Custom registered (not built into klinecharts)
+  WMA: 'WMA_CUSTOM',
+  ATR: 'ATR_CUSTOM',
+  MFI: 'MFI_CUSTOM',
   ADX: 'ADX_CUSTOM',
   VWAP: 'VWAP_CUSTOM',
   ICH: 'ICH_CUSTOM',
@@ -662,7 +665,6 @@ export const CUSTOM_INDICATOR_MAP: Record<string, string> = {
   KC: 'KC_CUSTOM',
   AD: 'AD_CUSTOM',
   ELDER: 'ELDER_CUSTOM',
-  AO: 'AO_CUSTOM',
   BOLL_B: 'BOLL_B_CUSTOM',
   BBW: 'BBW_CUSTOM',
   DEMA: 'DEMA_CUSTOM',
