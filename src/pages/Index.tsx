@@ -860,6 +860,12 @@ const Index = () => {
         </div>
         <div className="flex items-center gap-3 shrink-0">
           {loading && <span className="text-[10px] text-primary animate-pulse font-mono">加载历史数据...</span>}
+          {activeCoinState.status !== 'stopped' && activeCoinState.originTime != null && (
+            <span className="flex items-center gap-1.5 font-mono text-[10px] text-muted-foreground">
+              <span className="text-[9px] px-1 py-0.5 rounded bg-muted text-muted-foreground font-medium tracking-wide">启始</span>
+              {formatUTC8(activeCoinState.originTime)}
+            </span>
+          )}
           {activeCoinState.status !== 'stopped' && activeCoinState.time > 0 ? (
             <span className="font-mono text-xs text-primary font-medium">
               <span ref={headerClockRef}>
