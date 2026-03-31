@@ -144,6 +144,7 @@ export function useTimeSimulator(initialState?: Partial<PersistedTimeSim>) {
       speed: 1,
     });
     if (rafRef.current) cancelAnimationFrame(rafRef.current);
+    try { localStorage.removeItem(PERSIST_KEY); } catch {}
   }, []);
 
   // Change speed (anchor reset to prevent jump)
