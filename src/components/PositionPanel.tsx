@@ -80,7 +80,7 @@ export function PositionPanel({
           allPositions.length === 0 ? (
             <div className="px-4 py-6 text-center text-xs text-muted-foreground">暂无持仓</div>
           ) : (
-            <table className="w-full text-[11px] font-mono">
+            <table className="w-full text-[11px] font-mono tabular-nums">
               <thead>
                 <tr className="text-muted-foreground border-b border-border">
                   {['合约', '方向', '数量', '开仓均价', '标记价', '强平价', '保证金', '未实现盈亏', 'ROE%', '操作'].map(h => (
@@ -173,7 +173,7 @@ export function PositionPanel({
           allOrders.length === 0 ? (
             <div className="px-4 py-6 text-center text-xs text-muted-foreground">暂无委托</div>
           ) : (
-            <table className="w-full text-[11px] font-mono">
+            <table className="w-full text-[11px] font-mono tabular-nums">
               <thead>
                 <tr className="text-muted-foreground border-b border-border">
                   {['合约', '类型', '方向', '价格', '触发价', '数量', '杠杆', '操作'].map(h => (
@@ -217,7 +217,7 @@ export function PositionPanel({
           tradeRecords.length === 0 ? (
             <div className="px-4 py-6 text-center text-xs text-muted-foreground">暂无历史记录</div>
           ) : (
-            <table className="w-full text-[11px] font-mono">
+            <table className="w-full text-[11px] font-mono tabular-nums">
               <thead>
                 <tr className="text-muted-foreground border-b border-border">
                   {['合约', '操作', '方向', '开仓价', '平仓价', '数量', '手续费', '滑点', '盈亏'].map(h => (
@@ -261,7 +261,7 @@ export function PositionPanel({
               暂无资金费记录 · 每 8 小时结算 (00:00, 08:00, 16:00 UTC)
             </div>
           ) : (
-            <table className="w-full text-[11px] font-mono">
+            <table className="w-full text-[11px] font-mono tabular-nums">
               <thead>
                 <tr className="text-muted-foreground border-b border-border">
                   {['时间', '合约', '方向', '名义价值', '费率', '金额'].map(h => (

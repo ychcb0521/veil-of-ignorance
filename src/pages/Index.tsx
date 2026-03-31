@@ -27,6 +27,7 @@ import type { PendingOrder, OrderType } from '@/types/trading';
 import { calcFee, calcSlippage } from '@/types/trading';
 import type { AssetState } from '@/types/assets';
 import { Dialog, DialogContent } from '@/components/ui/dialog';
+import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from '@/components/ui/resizable';
 
 // Price protection threshold: reject conditional triggers if |last - mark| / mark > 2%
 const PRICE_PROTECTION_THRESHOLD = 0.02;
@@ -974,83 +975,98 @@ const Index = () => {
       </div>
 
       <div className="flex-1 flex min-h-0 overflow-hidden">
-        <div className="flex-1 flex flex-col min-h-0 min-w-0">
-          <div className="flex-1 min-h-0 relative overflow-hidden">
-            {activeCoinState.status === 'stopped' && visibleData.length === 0 ? (
-              <div className="h-full flex items-center justify-center bg-background">
-                <div className="text-center space-y-3">
-                  <div className="text-5xl">⏰</div>
-                  <p className="text-sm text-muted-foreground">输入历史时间并点击「启动」开始复盘模拟</p>
-                  <p className="text-xs text-muted-foreground">K线按真实时间 1:1 流速推进 · 绝不暴露未来数据</p>
+        <ResizablePanelGroup direction="horizontal" className="flex-1">
+          <ResizablePanel defaultSize={75} minSize={40}>
+            <ResizablePanelGroup direction="vertical">
+              <ResizablePanel defaultSize={70} minSize={30}>
+                <div className="h-full relative overflow-hidden">
+                  {activeCoinState.status === 'stopped' && visibleData.length === 0 ? (
+                    <div className="h-full flex items-center justify-center bg-background">
+                      <div className="text-center space-y-3">
+                        <div className="text-5xl">⏰</div>
+                        <p className="text-sm text-muted-foreground">输入历史时间并点击「启动」开始复盘模拟</p>
+                        <p className="text-xs text-muted-foreground">K线按真实时间 1:1 流速推进 · 绝不暴露未来数据</p>
+                      </div>
+                    </div>
+                  ) : (
+                    <MultiChartLayout
+                      mainData={visibleData}
+                      mainSymbol={activeSymbol.replace('USDT', '/USDT')}
+                      rawSymbol={activeSymbol}
+                      onLoadOlder={loadOlder}
+                      loadingOlder={loadingOlder}
+                      tradeHistory={tradeHistory}
+                      isRunning={activeCoinState.status !== 'stopped'}
+                      currentSimulatedTime={activeCoinState.time}
+                      mainInterval={interval}
+                      pricePrecision={pricePrecision}
+                      quantityPrecision={quantityPrecision}
+                      pendingOrders={activeSymbolOrders}
+                      onCancelOrder={(orderId) => handleCancelOrder(activeSymbol, orderId)}
+                      chartApiRef={chartApiRef}
+                    />
+                  )}
                 </div>
-              </div>
-            ) : (
-              <MultiChartLayout
-                mainData={visibleData}
-                mainSymbol={activeSymbol.replace('USDT', '/USDT')}
-                rawSymbol={activeSymbol}
-                onLoadOlder={loadOlder}
-                loadingOlder={loadingOlder}
-                tradeHistory={tradeHistory}
-                isRunning={activeCoinState.status !== 'stopped'}
-                currentSimulatedTime={activeCoinState.time}
-                mainInterval={interval}
+              </ResizablePanel>
+              <ResizableHandle className="h-px bg-border hover:bg-primary/40 transition-colors duration-200 data-[resize-handle-active]:bg-primary/60" />
+              <ResizablePanel defaultSize={30} minSize={10} maxSize={50}>
+                <div className="h-full overflow-auto bg-card">
+                  <PositionPanel
+                    positionsMap={positionsMap}
+                    ordersMap={ordersMap}
+                    tradeHistory={tradeHistory}
+                    priceMap={priceMap}
+                    activeSymbol={activeSymbol}
+                    onClosePosition={handleClosePositionForSymbol}
+                    onCancelOrder={handleCancelOrderForSymbol}
+                    onAddIsolatedMargin={handleAddIsolatedMargin}
+                    activeTab={bottomTab}
+                    onTabChange={setBottomTab}
+                  />
+                </div>
+              </ResizablePanel>
+            </ResizablePanelGroup>
+          </ResizablePanel>
+
+          {/* Order Book with collapse toggle */}
+          <ResizableHandle className="w-px bg-border hover:bg-primary/40 transition-colors duration-200 data-[resize-handle-active]:bg-primary/60" />
+          <ResizablePanel defaultSize={isOrderBookOpen ? 8 : 2} minSize={2} maxSize={15} collapsible collapsedSize={2}
+            onCollapse={() => setIsOrderBookOpen(false)} onExpand={() => setIsOrderBookOpen(true)}>
+            <div className="h-full flex flex-col overflow-hidden">
+              <button
+                onClick={() => setIsOrderBookOpen(prev => !prev)}
+                className="flex items-center justify-center py-2 border-b border-border text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-colors duration-200 shrink-0"
+                title={isOrderBookOpen ? '收起盘口' : '展开盘口'}
+              >
+                {isOrderBookOpen ? <PanelRightClose className="w-3.5 h-3.5" /> : <PanelRightOpen className="w-3.5 h-3.5" />}
+              </button>
+              {isOrderBookOpen && (
+                <div className="flex-1 min-h-0 overflow-hidden">
+                  <OrderBook symbol={activeSymbol} currentPrice={currentPrice} pricePrecision={pricePrecision} />
+                </div>
+              )}
+            </div>
+          </ResizablePanel>
+
+          <ResizableHandle className="w-px bg-border hover:bg-primary/40 transition-colors duration-200 data-[resize-handle-active]:bg-primary/60" />
+          <ResizablePanel defaultSize={17} minSize={12} maxSize={25}>
+            <div className="h-full overflow-auto bg-card">
+              <OrderPanel
+                symbol={activeSymbol}
+                currentPrice={currentPrice}
+                disabled={activeCoinState.status === 'stopped' || currentPrice === 0}
+                onPlaceOrder={handlePlaceOrderForActiveSymbol}
                 pricePrecision={pricePrecision}
                 quantityPrecision={quantityPrecision}
-                pendingOrders={activeSymbolOrders}
-                onCancelOrder={(orderId) => handleCancelOrder(activeSymbol, orderId)}
-                chartApiRef={chartApiRef}
+                coolingOff={coolingOff.isActive}
+                coolingOffLabel={coolingOff.isActive ? coolingOff.formatRemaining() : undefined}
+                onOpenCoolingOff={() => setCoolingOffModalOpen(true)}
+                priceProtection={priceProtection}
+                onTogglePriceProtection={() => setPriceProtection(prev => !prev)}
               />
-            )}
-          </div>
-
-          <div className="shrink-0 border-t border-border max-h-[200px] overflow-auto bg-card relative z-10">
-            <PositionPanel
-              positionsMap={positionsMap}
-              ordersMap={ordersMap}
-              tradeHistory={tradeHistory}
-              priceMap={priceMap}
-              activeSymbol={activeSymbol}
-              onClosePosition={handleClosePositionForSymbol}
-              onCancelOrder={handleCancelOrderForSymbol}
-              onAddIsolatedMargin={handleAddIsolatedMargin}
-              activeTab={bottomTab}
-              onTabChange={setBottomTab}
-            />
-          </div>
-        </div>
-
-        {/* Order Book with collapse toggle */}
-        <div className={`border-l border-border shrink-0 overflow-hidden transition-all duration-300 ease-in-out flex flex-col ${isOrderBookOpen ? 'w-[180px]' : 'w-8'}`}>
-          <button
-            onClick={() => setIsOrderBookOpen(prev => !prev)}
-            className="flex items-center justify-center py-2 border-b border-border text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-colors shrink-0"
-            title={isOrderBookOpen ? '收起盘口' : '展开盘口'}
-          >
-            {isOrderBookOpen ? <PanelRightClose className="w-3.5 h-3.5" /> : <PanelRightOpen className="w-3.5 h-3.5" />}
-          </button>
-          {isOrderBookOpen ? (
-            <div className="flex-1 min-h-0 overflow-hidden">
-              <OrderBook symbol={activeSymbol} currentPrice={currentPrice} pricePrecision={pricePrecision} />
             </div>
-          ) : null}
-        </div>
-
-        <div className="w-[280px] border-l border-border shrink-0 overflow-auto bg-card">
-          <OrderPanel
-            symbol={activeSymbol}
-            currentPrice={currentPrice}
-            disabled={activeCoinState.status === 'stopped' || currentPrice === 0}
-            onPlaceOrder={handlePlaceOrderForActiveSymbol}
-            pricePrecision={pricePrecision}
-            quantityPrecision={quantityPrecision}
-            coolingOff={coolingOff.isActive}
-            coolingOffLabel={coolingOff.isActive ? coolingOff.formatRemaining() : undefined}
-            onOpenCoolingOff={() => setCoolingOffModalOpen(true)}
-            priceProtection={priceProtection}
-            onTogglePriceProtection={() => setPriceProtection(prev => !prev)}
-          />
-        </div>
+          </ResizablePanel>
+        </ResizablePanelGroup>
       </div>
 
       <Dialog open={assetsOpen} onOpenChange={setAssetsOpen}>
