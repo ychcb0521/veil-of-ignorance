@@ -64,19 +64,21 @@ export function TimeControl({
     </div>
   );
 
+  const [lockPopoverOpen, setLockPopoverOpen] = useState(false);
+
   const ModeSelector = () => {
     if (!onSetTimeMode) return null;
 
     const disabledReason = !canToggleMode
       ? totalPositionCount > 0
         ? `有 ${totalPositionCount} 笔持仓，需全部平仓后才能切换模式。`
-        : null // will show running coins list
+        : null
       : null;
 
     const showRunningList = !canToggleMode && totalPositionCount === 0 && runningCoins.length > 0;
 
     return (
-      <Popover>
+      <Popover open={lockPopoverOpen} onOpenChange={setLockPopoverOpen}>
         <PopoverTrigger asChild>
           <div className="flex items-center gap-1 border-l border-border pl-3 ml-1 cursor-pointer">
             {!canToggleMode && <Lock className="w-3 h-3 text-muted-foreground" />}
@@ -103,7 +105,7 @@ export function TimeControl({
           </div>
         </PopoverTrigger>
         {!canToggleMode && (
-          <PopoverContent side="bottom" className="w-72 p-3" align="start">
+          <PopoverContent side="bottom" className="w-72 p-3" align="start" onInteractOutside={(e) => e.preventDefault()}>
             {disabledReason && <p className="text-xs text-muted-foreground">{disabledReason}</p>}
             {showRunningList && (
               <div className="space-y-2">
@@ -117,7 +119,7 @@ export function TimeControl({
                     return (
                       <button
                         key={sym}
-                        onClick={() => onSymbolChange?.(sym)}
+                        onClick={() => { onSymbolChange?.(sym); setLockPopoverOpen(false); }}
                         className="flex items-center justify-between px-2 py-1.5 rounded text-xs hover:bg-accent transition-colors text-left group"
                       >
                         <span className="font-medium text-foreground group-hover:text-primary transition-colors">{sym}</span>
