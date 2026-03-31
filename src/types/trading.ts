@@ -74,7 +74,7 @@ export interface TradeRecord {
   closeTime: number;
 }
 
-export const MAINTENANCE_MARGIN_RATE = 0.004; // 0.4%
+export const MAINTENANCE_MARGIN_RATE = 0.005; // 0.5%
 export const LIQUIDATION_FEE_RATE = 0.005;    // 0.5%
 export const FUNDING_RATE = 0.0001;           // 0.01% per 8h settlement
 
