@@ -648,7 +648,7 @@ const Index = () => {
       const now = Date.now();
       setCoinTimelines(prev => {
         const ct = prev[activeSymbol];
-        if (!ct || ct.status !== 'playing') return { ...prev, [activeSymbol]: { ...(ct || { status: 'paused', time: 0, historicalAnchorTime: null, realStartTime: null }), speed } };
+        if (!ct || ct.status !== 'playing') return { ...prev, [activeSymbol]: { ...(ct || { status: 'paused', time: 0, historicalAnchorTime: null, realStartTime: null, originTime: null }), speed } };
         const currentTime = ct.historicalAnchorTime != null && ct.realStartTime
           ? ct.historicalAnchorTime + (now - ct.realStartTime) * ct.speed
           : ct.time;
