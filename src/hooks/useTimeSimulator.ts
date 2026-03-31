@@ -23,6 +23,10 @@ export interface PersistedTimeSim {
 /** Throttle interval for React state updates (ms). RAF still runs at 60fps for ref. */
 const STATE_FLUSH_MS = 150;
 
+/** How often to persist currentTimeRef to localStorage (ms) — independent of React. */
+const PERSIST_FLUSH_MS = 500;
+const PERSIST_KEY = '__tm_live_time';
+
 export function useTimeSimulator(initialState?: Partial<PersistedTimeSim>) {
   const [state, setState] = useState<TimeSimulatorState>(() => {
     const base: TimeSimulatorState = {
@@ -67,6 +71,7 @@ export function useTimeSimulator(initialState?: Partial<PersistedTimeSim>) {
   });
 
   const lastFlushRef = useRef<number>(0);
+  const lastPersistRef = useRef<number>(0);
 
   // ---- Helpers to keep coreRef perfectly in sync ----
   const syncCore = (s: Partial<typeof coreRef.current>) => {
@@ -139,6 +144,7 @@ export function useTimeSimulator(initialState?: Partial<PersistedTimeSim>) {
       speed: 1,
     });
     if (rafRef.current) cancelAnimationFrame(rafRef.current);
+    try { localStorage.removeItem(PERSIST_KEY); } catch {}
   }, []);
 
   // Change speed (anchor reset to prevent jump)
@@ -182,6 +188,12 @@ export function useTimeSimulator(initialState?: Partial<PersistedTimeSim>) {
         }));
       }
 
+      // Persist to localStorage at low frequency (crash/refresh protection)
+      if (now - lastPersistRef.current >= PERSIST_FLUSH_MS) {
+        lastPersistRef.current = now;
+        try { localStorage.setItem(PERSIST_KEY, String(simTime)); } catch {}
+      }
+
       rafRef.current = requestAnimationFrame(tick);
     };
 
@@ -191,6 +203,34 @@ export function useTimeSimulator(initialState?: Partial<PersistedTimeSim>) {
     };
   }, [state.status]);
 
+  // ---- beforeunload: force-persist exact time on page close ----
+  useEffect(() => {
+    const handler = () => {
+      const c = coreRef.current;
+      if (c.status === 'playing' && c.realStartTime && c.historicalAnchorTime) {
+        const simTime = c.historicalAnchorTime + (Date.now() - c.realStartTime) * c.speed;
+        try { localStorage.setItem(PERSIST_KEY, String(simTime)); } catch {}
+      } else if (c.status === 'paused') {
+        try { localStorage.setItem(PERSIST_KEY, String(currentTimeRef.current)); } catch {}
+      }
+    };
+    window.addEventListener('beforeunload', handler);
+    return () => window.removeEventListener('beforeunload', handler);
+  }, []);
+
+  /** Read the last persisted live time (for restore). */
+  const getPersistedLiveTime = useCallback((): number | null => {
+    try {
+      const v = localStorage.getItem(PERSIST_KEY);
+      return v ? Number(v) : null;
+    } catch { return null; }
+  }, []);
+
+  /** Clear the persisted live time (call on stop). */
+  const clearPersistedLiveTime = useCallback(() => {
+    try { localStorage.removeItem(PERSIST_KEY); } catch {}
+  }, []);
+
   return {
     ...state,
     currentTimeRef,
@@ -199,5 +239,7 @@ export function useTimeSimulator(initialState?: Partial<PersistedTimeSim>) {
     resumeSimulation,
     stopSimulation,
     setSpeed,
+    getPersistedLiveTime,
+    clearPersistedLiveTime,
   };
 }

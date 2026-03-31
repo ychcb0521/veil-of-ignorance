@@ -141,12 +141,21 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
   const persistedSim = useMemo(() => loadPersistedSimState(), []);
   const restoredStatus = persistedSim?.status ?? 'stopped';
 
+  // On restore, prefer the high-frequency persisted live time over the throttled React state
+  const liveTimeFromStorage = useMemo(() => {
+    try {
+      const v = localStorage.getItem('__tm_live_time');
+      return v ? Number(v) : null;
+    } catch { return null; }
+  }, []);
+  const bestRestoredTime = liveTimeFromStorage ?? persistedSim?.currentSimulatedTime ?? 0;
+
   const sim = useTimeSimulator(
     (restoredStatus === 'playing' || restoredStatus === 'paused') && persistedSim ? {
       status: restoredStatus,
-      historicalAnchorTime: restoredStatus === 'playing' ? persistedSim.historicalAnchorTime : persistedSim.currentSimulatedTime,
+      historicalAnchorTime: bestRestoredTime,
       realStartTime: restoredStatus === 'playing' ? Date.now() : persistedSim.realStartTime,
-      currentSimulatedTime: persistedSim.currentSimulatedTime,
+      currentSimulatedTime: bestRestoredTime,
       speed: persistedSim.speed,
     } : undefined
   );
@@ -166,7 +175,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
   const [liquidationDetails, setLiquidationDetails] = useState<LiquidationDetails | undefined>();
   const closeLiquidationModal = useCallback(() => setLiquidationOpen(false), []);
 
-  // Persist sim state
+  // Persist sim state (throttled via React state changes)
   useEffect(() => {
     if (sim.status !== 'stopped') {
       saveSimState({
@@ -182,6 +191,33 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
       clearSimState();
     }
   }, [sim.status, sim.historicalAnchorTime, sim.realStartTime, sim.currentSimulatedTime, sim.speed, activeSymbol, interval]);
+
+  // Force-save on page unload with the latest ref-based time
+  const simRef = useRef(sim);
+  simRef.current = sim;
+  const activeSymbolRef = useRef(activeSymbol);
+  activeSymbolRef.current = activeSymbol;
+  const intervalRef = useRef(interval);
+  intervalRef.current = interval;
+
+  useEffect(() => {
+    const handler = () => {
+      const s = simRef.current;
+      if (s.status === 'stopped') return;
+      const liveTime = s.currentTimeRef.current;
+      saveSimState({
+        status: s.status,
+        historicalAnchorTime: liveTime,
+        realStartTime: Date.now(),
+        currentSimulatedTime: liveTime,
+        speed: s.speed,
+        symbol: activeSymbolRef.current,
+        interval: intervalRef.current,
+      });
+    };
+    window.addEventListener('beforeunload', handler);
+    return () => window.removeEventListener('beforeunload', handler);
+  }, []);
 
   // Computed
   const activeSymbolPositions = useMemo(() => positionsMap[activeSymbol] || [], [positionsMap, activeSymbol]);
