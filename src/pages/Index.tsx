@@ -120,16 +120,19 @@ const Index = () => {
 
   const iMs = useMemo(() => intervalToMs(interval), [interval]);
 
+  // Track the original start time for synced mode
+  const [syncedOriginTime, setSyncedOriginTime] = usePersistedState<number | null>('synced_origin_time', null);
+
   // ===== ACTIVE COIN STATE (isolation-aware) =====
   // This is the single source of truth for UI: status, time, speed
   const activeCoinState = useMemo(() => {
     if (timeMode === 'synced') {
-      return { status: sim.status, time: sim.currentSimulatedTime, speed: sim.speed };
+      return { status: sim.status, time: sim.currentSimulatedTime, speed: sim.speed, originTime: syncedOriginTime };
     }
     const ct = coinTimelines[activeSymbol];
-    if (!ct || ct.status === 'stopped') return { status: 'stopped' as const, time: 0, speed: 1 };
-    return { status: ct.status, time: ct.time, speed: ct.speed };
-  }, [timeMode, sim.status, sim.currentSimulatedTime, sim.speed, coinTimelines, activeSymbol]);
+    if (!ct || ct.status === 'stopped') return { status: 'stopped' as const, time: 0, speed: 1, originTime: null as number | null };
+    return { status: ct.status, time: ct.time, speed: ct.speed, originTime: ct.originTime };
+  }, [timeMode, sim.status, sim.currentSimulatedTime, sim.speed, coinTimelines, activeSymbol, syncedOriginTime]);
 
   // Effective time for data filtering
   const effectiveSimTime = useMemo(() => {
@@ -648,7 +651,7 @@ const Index = () => {
       const now = Date.now();
       setCoinTimelines(prev => {
         const ct = prev[activeSymbol];
-        if (!ct || ct.status !== 'playing') return { ...prev, [activeSymbol]: { ...(ct || { status: 'paused', time: 0, historicalAnchorTime: null, realStartTime: null }), speed } };
+        if (!ct || ct.status !== 'playing') return { ...prev, [activeSymbol]: { ...(ct || { status: 'paused', time: 0, historicalAnchorTime: null, realStartTime: null, originTime: null }), speed } };
         const currentTime = ct.historicalAnchorTime != null && ct.realStartTime
           ? ct.historicalAnchorTime + (now - ct.realStartTime) * ct.speed
           : ct.time;
@@ -722,6 +725,7 @@ const Index = () => {
             speed: 1,
             historicalAnchorTime: timestamp,
             realStartTime: now,
+            originTime: timestamp,
           },
         }));
         // Start global sim as heartbeat (keeps isRunning=true for funding/liquidation engines)
@@ -729,6 +733,7 @@ const Index = () => {
           sim.startSimulation(timestamp);
         }
       } else {
+        setSyncedOriginTime(timestamp);
         sim.startSimulation(timestamp);
       }
       toast.success('时间机器已启动', {
@@ -756,7 +761,7 @@ const Index = () => {
       setCoinTimelines(prev => ({
         ...prev,
         [activeSymbol]: {
-          ...(prev[activeSymbol] || { speed: 1, historicalAnchorTime: null, realStartTime: null }),
+          ...(prev[activeSymbol] || { speed: 1, historicalAnchorTime: null, realStartTime: null, originTime: null }),
           status: 'stopped',
           time: 0,
         },
@@ -789,6 +794,7 @@ const Index = () => {
       reset();
       prevVisibleLenRef.current = 0;
       clearSimState();
+      setSyncedOriginTime(null);
       sim.stopSimulation();
       toast.info('⏹ 模拟已停止，所有仓位已结算');
     }
@@ -854,6 +860,12 @@ const Index = () => {
         </div>
         <div className="flex items-center gap-3 shrink-0">
           {loading && <span className="text-[10px] text-primary animate-pulse font-mono">加载历史数据...</span>}
+          {activeCoinState.status !== 'stopped' && activeCoinState.originTime != null && (
+            <span className="flex items-center gap-1.5 font-mono text-[10px] text-muted-foreground">
+              <span className="text-[9px] px-1 py-0.5 rounded bg-muted text-muted-foreground font-medium tracking-wide">启始</span>
+              {formatUTC8(activeCoinState.originTime)}
+            </span>
+          )}
           {activeCoinState.status !== 'stopped' && activeCoinState.time > 0 ? (
             <span className="font-mono text-xs text-primary font-medium">
               <span ref={headerClockRef}>
