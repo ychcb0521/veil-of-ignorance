@@ -85,8 +85,8 @@ const Index = () => {
     handlePlaceOrder, handleClosePosition, handleCancelOrder,
     handleAddIsolatedMargin,
     liquidationOpen, liquidationDetails, closeLiquidationModal,
-    isTimeIsolated, setIsTimeIsolated, coinTimelines, setCoinTimelines,
-    totalPositionCount, getEffectiveTime,
+    timeMode, setTimeMode, coinTimelines, setCoinTimelines,
+    totalPositionCount, getEffectiveTime, getCoinState,
   } = ctx;
 
   const { allData, allDataRef, loading, loadingOlder, error, initLoad, loadOlder, getVisibleData, reset } = useBinanceData();
