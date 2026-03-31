@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Play, Pause, Square, Clock } from 'lucide-react';
+import { formatUTC8 } from '@/lib/timeFormat';
 import type { TimeMachineStatus } from '@/hooks/useTimeSimulator';
 
 interface Props {

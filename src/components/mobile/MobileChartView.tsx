@@ -1,4 +1,5 @@
 import { ArrowLeft, Clock, Play, Pause, Square, Calendar, ChevronDown } from 'lucide-react';
+import { formatUTC8 } from '@/lib/timeFormat';
 import { CandlestickChart } from '@/components/CandlestickChart';
 import type { KlineData } from '@/hooks/useBinanceData';
 import type { PositionsMap, PriceMap } from '@/contexts/TradingContext';

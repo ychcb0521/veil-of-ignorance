@@ -1,6 +1,7 @@
 import { SymbolSelector } from '@/components/SymbolSelector';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import { Play, Pause, Clock } from 'lucide-react';
+import { formatUTC8 } from '@/lib/timeFormat';
 
 interface Props {
   symbol: string;
