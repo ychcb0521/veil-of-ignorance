@@ -630,6 +630,13 @@ const Index = () => {
         positionsMap={positionsMap} priceMap={priceMap}
         initialCapital={profile?.initial_capital ?? 1_000_000}
       />
+      <Dialog open={assetsOpen} onOpenChange={setAssetsOpen}>
+        <DialogContent className="max-w-md p-0 gap-0 overflow-hidden">
+          <div className="p-4">
+            <AssetOverview assets={assetState} />
+          </div>
+        </DialogContent>
+      </Dialog>
       <CoolingOffModal
         open={coolingOffModalOpen}
         onClose={() => setCoolingOffModalOpen(false)}
