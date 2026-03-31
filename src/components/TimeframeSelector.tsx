@@ -49,7 +49,7 @@ export function TimeframeSelector({ interval, onIntervalChange }: Props) {
       {/* Dropdown trigger */}
       <button
         onClick={() => setOpen(!open)}
-        className={`px-2 py-1 rounded text-xs font-mono transition-colors flex items-center gap-0.5 ${
+        className={`px-2 py-1 rounded text-xs font-mono transition-all duration-100 ease-out active:scale-[0.95] flex items-center gap-0.5 ${
           open ? 'bg-primary text-primary-foreground' : !isPinnedActive && interval ? 'bg-accent text-foreground' : 'bg-secondary text-secondary-foreground hover:bg-accent'
         }`}
       >
