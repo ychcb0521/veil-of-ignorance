@@ -2,7 +2,7 @@ import { useState, useCallback, useMemo, useEffect, useRef } from 'react';
 import { formatUTC8 } from '@/lib/timeFormat';
 import { useTradingContext, type PlaceOrderParams } from '@/contexts/TradingContext';
 import { useAuth } from '@/contexts/AuthContext';
-import { useBinanceData, type KlineData } from '@/hooks/useBinanceData';
+import { useBinanceData, intervalToMs, type KlineData } from '@/hooks/useBinanceData';
 import { useBackgroundPrices } from '@/hooks/useBackgroundPrices';
 import { loadPersistedSimState } from '@/hooks/usePersistedState';
 import { usePersistedState, clearSimState } from '@/hooks/usePersistedState';
