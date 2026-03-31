@@ -47,7 +47,6 @@ export function MobileChartView(props: Props) {
   const formatSelectedDate = () => {
     return formatUTC8(selectedDate.getTime()).slice(0, 16);
   };
-  };
 
   const handlePickerConfirm = (date: Date) => {
     setSelectedDate(date);
