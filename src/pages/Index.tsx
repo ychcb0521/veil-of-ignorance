@@ -722,6 +722,7 @@ const Index = () => {
             speed: 1,
             historicalAnchorTime: timestamp,
             realStartTime: now,
+            originTime: timestamp,
           },
         }));
         // Start global sim as heartbeat (keeps isRunning=true for funding/liquidation engines)
