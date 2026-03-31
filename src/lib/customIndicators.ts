@@ -84,7 +84,8 @@ let registered = false;
 
 export function registerCustomIndicators() {
   if (registered) return;
-  registered = true;
+
+  try {
 
   // ─── ADX ───
   registerIndicator({
