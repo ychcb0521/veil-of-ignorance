@@ -97,6 +97,7 @@ const Index = () => {
   const [assetsOpen, setAssetsOpen] = useState(false);
   const [coolingOffModalOpen, setCoolingOffModalOpen] = useState(false);
   const [priceProtection, setPriceProtection] = usePersistedState('price_protection', true);
+  const [isOrderBookOpen, setIsOrderBookOpen] = usePersistedState('orderbook_open', false);
   const coolingOff = useCoolingOff();
   const hasRestoredRef = useRef(false);
   const persistedSim = useMemo(() => loadPersistedSimState(), []);
