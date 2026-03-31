@@ -148,7 +148,7 @@ export function calcROE(pos: Position, currentPrice: number): number {
 }
 
 export function calcLiquidationPrice(pos: Position): number {
-  const maintenanceRate = 0.004;
+  const maintenanceRate = MAINTENANCE_MARGIN_RATE;
   if (pos.marginMode === 'isolated' && pos.isolatedMargin != null) {
     // Isolated: liq price based on isolatedMargin
     const margin = pos.isolatedMargin;
