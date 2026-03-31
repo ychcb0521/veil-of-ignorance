@@ -20,6 +20,8 @@ interface Props {
   mainInterval: string;
   pricePrecision?: number;
   quantityPrecision?: number;
+  pendingOrders?: PendingOrder[];
+  onCancelOrder?: (orderId: string) => void;
 }
 
 interface SubChart {
