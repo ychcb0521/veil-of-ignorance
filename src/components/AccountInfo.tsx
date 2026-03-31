@@ -82,8 +82,8 @@ export function AccountInfo({ balance, positionsMap, priceMap }: Props) {
         </div>
       )}
 
-      <div className="flex items-center gap-1">
-        <TrendingUp className="w-3 h-3 text-muted-foreground" />
+      <div className="flex items-center gap-1 shrink-0 whitespace-nowrap">
+        <TrendingUp className="w-3 h-3 text-muted-foreground shrink-0" />
         <span className="text-muted-foreground">收益率 </span>
         <span className={`font-semibold ${totalReturn >= 0 ? 'trading-green' : 'trading-red'}`}>
           {totalReturn >= 0 ? '+' : ''}{totalReturnPct.toFixed(2)}%
