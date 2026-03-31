@@ -124,9 +124,8 @@ export function TimeControl({
                   无法切换至同步模式。以下币种正在独立运行：
                 </p>
                 <div className="flex flex-col gap-1">
-                  {runningCoins.map(sym => {
-                    const ct = coinTimelines[sym];
-                    const statusLabel = ct?.status === 'playing' ? '▶ 运行中' : '⏸ 已暂停';
+                  {frozenRunningCoins.map(({ sym, status }) => {
+                    const statusLabel = status === 'playing' ? '▶ 运行中' : '⏸ 已暂停';
                     return (
                       <button
                         key={sym}
@@ -134,7 +133,7 @@ export function TimeControl({
                         className="flex items-center justify-between px-2 py-1.5 rounded text-xs hover:bg-accent transition-colors text-left group"
                       >
                         <span className="font-medium text-foreground group-hover:text-primary transition-colors">{sym}</span>
-                        <span className={`text-[10px] ${ct?.status === 'playing' ? 'text-green-400' : 'text-yellow-400'}`}>
+                        <span className={`text-[10px] ${status === 'playing' ? 'text-green-400' : 'text-yellow-400'}`}>
                           {statusLabel}
                         </span>
                       </button>
