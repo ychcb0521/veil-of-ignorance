@@ -14,9 +14,6 @@ import { usePersistedState } from '@/hooks/usePersistedState';
 import type { TradeRecord } from '@/types/trading';
 import { registerCustomIndicators, CUSTOM_INDICATOR_MAP } from '@/lib/customIndicators';
 
-// Register custom indicators once on module load
-registerCustomIndicators();
-
 // Mapping from our indicator IDs to klinecharts indicator names (built-in + custom)
 const KLINE_INDICATOR_MAP: Record<string, string> = { ...CUSTOM_INDICATOR_MAP };
 
