@@ -124,12 +124,12 @@ const Index = () => {
   // This is the single source of truth for UI: status, time, speed
   const activeCoinState = useMemo(() => {
     if (timeMode === 'synced') {
-      return { status: sim.status, time: sim.currentSimulatedTime, speed: sim.speed };
+      return { status: sim.status, time: sim.currentSimulatedTime, speed: sim.speed, originTime: syncedOriginTime };
     }
     const ct = coinTimelines[activeSymbol];
-    if (!ct || ct.status === 'stopped') return { status: 'stopped' as const, time: 0, speed: 1 };
-    return { status: ct.status, time: ct.time, speed: ct.speed };
-  }, [timeMode, sim.status, sim.currentSimulatedTime, sim.speed, coinTimelines, activeSymbol]);
+    if (!ct || ct.status === 'stopped') return { status: 'stopped' as const, time: 0, speed: 1, originTime: null as number | null };
+    return { status: ct.status, time: ct.time, speed: ct.speed, originTime: ct.originTime };
+  }, [timeMode, sim.status, sim.currentSimulatedTime, sim.speed, coinTimelines, activeSymbol, syncedOriginTime]);
 
   // Effective time for data filtering
   const effectiveSimTime = useMemo(() => {
