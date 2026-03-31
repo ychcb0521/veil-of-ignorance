@@ -24,7 +24,7 @@ export function MobileTimeframeSheet({ open, onClose, interval, onIntervalChange
 
       {/* Sheet */}
       <div
-        className="relative w-full rounded-t-2xl border-t border-border pb-8 animate-in slide-in-from-bottom duration-300"
+        className="relative w-full rounded-t-2xl border-t border-border pb-8 animate-in slide-in-from-bottom duration-200"
         style={{ background: 'hsl(var(--card))' }}
         onClick={e => e.stopPropagation()}
       >
