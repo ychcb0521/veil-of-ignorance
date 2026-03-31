@@ -374,7 +374,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
           entryPrice: pos.entryPrice, exitPrice: price,
           quantity: pos.quantity, leverage: pos.leverage,
           pnl: pnl - closeFee - liqFee, fee: closeFee + liqFee, slippage: 0,
-          openTime: 0, closeTime: sim.currentSimulatedTime,
+          openTime: 0, closeTime: getEffectiveTime(sym),
         }]);
 
         // Remove this position — isolated margin is lost
@@ -432,7 +432,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
               entryPrice: pos.entryPrice, exitPrice: price,
               quantity: pos.quantity, leverage: pos.leverage,
               pnl: pnl - closeFee - liqFee, fee: closeFee + liqFee, slippage: 0,
-              openTime: 0, closeTime: sim.currentSimulatedTime,
+              openTime: 0, closeTime: getEffectiveTime(sym),
             });
           }
         }
@@ -590,7 +590,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
       id: crypto.randomUUID(), symbol, side: pos.side, type: 'MARKET' as OrderType,
       action: 'CLOSE' as const, entryPrice: pos.entryPrice, exitPrice: fillPrice,
       quantity: pos.quantity, leverage: pos.leverage,
-      pnl: pnl - fee, fee, slippage, openTime: 0, closeTime: sim.currentSimulatedTime,
+      pnl: pnl - fee, fee, slippage, openTime: 0, closeTime: getEffectiveTime(sym),
     }]);
     toast(pnl >= 0 ? '盈利平仓 ✅' : '亏损平仓 ❌', {
       description: `${symbol} ${pnl >= 0 ? '+' : ''}${(pnl - fee).toFixed(2)} USDT`,
