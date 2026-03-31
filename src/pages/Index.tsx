@@ -126,9 +126,13 @@ const Index = () => {
   // ===== Imperative chart update loop =====
   // During playback, push candles directly to chart at 60fps via ref,
   // bypassing React's render cycle for silky-smooth chart animation.
+  // At high speed, batches multiple completed candles per frame (only renders the last).
   const chartApiRef = useRef<{ updateData: (candle: any) => void } | null>(null);
   const lastImperativePushRef = useRef(0); // index into allData
   const imperativeInitRef = useRef(false);
+
+  /** Max completed candles to render per frame. Beyond this, skip intermediate candles. */
+  const MAX_RENDER_PER_FRAME = 3;
 
   useEffect(() => {
     if (sim.status !== 'playing') {
@@ -161,12 +165,25 @@ const Index = () => {
         return;
       }
 
-      // Push newly visible completed candles
-      while (lastImperativePushRef.current < data.length) {
-        const candle = data[lastImperativePushRef.current];
-        const candleEnd = candle.time + iMs;
-        if (candleEnd <= simTime) {
-          // Fully completed candle — push final values
+      // Count how many completed candles we need to push
+      let completedCount = 0;
+      let scanIdx = lastImperativePushRef.current;
+      while (scanIdx < data.length) {
+        const candleEnd = data[scanIdx].time + iMs;
+        if (candleEnd <= simTime) { completedCount++; scanIdx++; }
+        else break;
+      }
+
+      if (completedCount > 0) {
+        // If many candles completed this frame, skip rendering intermediates
+        // Only render the last MAX_RENDER_PER_FRAME completed candles
+        const skipCount = Math.max(0, completedCount - MAX_RENDER_PER_FRAME);
+        const startIdx = lastImperativePushRef.current;
+
+        for (let i = 0; i < completedCount; i++) {
+          const candle = data[startIdx + i];
+          // Skip rendering for intermediate candles (still advance the index)
+          if (i < skipCount) continue;
           api.updateData({
             timestamp: candle.time,
             open: candle.open,
@@ -175,9 +192,14 @@ const Index = () => {
             close: candle.close,
             volume: candle.volume,
           });
-          lastImperativePushRef.current++;
-        } else if (candle.time <= simTime) {
-          // Forming candle — interpolate sub-candle state
+        }
+        lastImperativePushRef.current = startIdx + completedCount;
+      }
+
+      // Handle forming candle (sub-candle interpolation)
+      if (lastImperativePushRef.current < data.length) {
+        const candle = data[lastImperativePushRef.current];
+        if (candle.time <= simTime) {
           const progress = Math.max(0, Math.min(1, (simTime - candle.time) / iMs));
           const close = candle.open + (candle.close - candle.open) * progress;
           const hlReveal = Math.min(1, progress * 1.5);
@@ -191,9 +213,6 @@ const Index = () => {
             close,
             volume: candle.volume * progress,
           });
-          break;
-        } else {
-          break;
         }
       }
 
