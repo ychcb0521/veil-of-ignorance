@@ -30,7 +30,7 @@ export function TimeControl({
   status, currentSimulatedTime, speed,
   onStart, onPause, onResume, onStop, onSetSpeed, clockRef,
   timeMode = 'synced', onSetTimeMode, totalPositionCount = 0,
-  originTime, coinTimelines = {},
+  originTime, coinTimelines = {}, onSymbolChange,
 }: Props) {
   const [dateInput, setDateInput] = useState('2024-01-15 16:00:00');
 
