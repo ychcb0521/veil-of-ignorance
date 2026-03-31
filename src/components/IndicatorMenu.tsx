@@ -182,12 +182,23 @@ export function IndicatorMenu({ open, onClose, indicators, onIndicatorsChange }:
 
   useEffect(() => {
     if (!open) return;
-    const handler = (e: MouseEvent) => {
-      if (panelRef.current && !panelRef.current.contains(e.target as Node)) onClose();
+    // Delay adding listener to avoid catching the same click that opened the menu
+    const timer = setTimeout(() => {
+      const handler = (e: MouseEvent) => {
+        if (panelRef.current && !panelRef.current.contains(e.target as Node)) onClose();
+      };
+      document.addEventListener('mousedown', handler);
+      // Store cleanup ref
+      cleanupRef.current = () => document.removeEventListener('mousedown', handler);
+    }, 50);
+    return () => {
+      clearTimeout(timer);
+      cleanupRef.current?.();
+      cleanupRef.current = null;
     };
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
   }, [open, onClose]);
+
+  const cleanupRef = useRef<(() => void) | null>(null);
 
   const filtered = useMemo(() => {
     let items = INDICATOR_CATALOG;
