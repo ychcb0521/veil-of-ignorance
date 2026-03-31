@@ -1,7 +1,7 @@
 import { Wallet, TrendingUp, AlertTriangle } from 'lucide-react';
 import type { Position } from '@/types/trading';
 import { calcUnrealizedPnl, MAINTENANCE_MARGIN_RATE } from '@/types/trading';
-import type { PositionsMap, PriceMap, TimeMode, IsolatedBalancesMap } from '@/contexts/TradingContext';
+import type { PositionsMap, PriceMap, TimeMode } from '@/contexts/TradingContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { Progress } from '@/components/ui/progress';
 
