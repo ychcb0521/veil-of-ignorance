@@ -45,8 +45,6 @@ export function PositionPanel({
   const displayedPositions = hideOtherContracts
     ? allPositions.filter(p => p.symbol === activeSymbol)
     : allPositions;
-    positions.forEach((pos, i) => allPositions.push({ symbol: sym, position: pos, index: i }));
-  }
 
   const allOrders: { symbol: string; order: PendingOrder }[] = [];
   for (const [sym, orders] of Object.entries(ordersMap)) {
