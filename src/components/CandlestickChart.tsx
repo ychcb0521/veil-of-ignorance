@@ -322,11 +322,12 @@ function CandlestickChartComponent({ data, symbol, onLoadOlder, loadingOlder, tr
         // Use convertFromPixel to get precise Y-axis price from pixel coordinate
         if (chart && typeof data?.y === 'number') {
           const converted = chart.convertFromPixel(
-            { y: data.y },
+            [{ y: data.y }],
             { paneId: 'candle_pane' }
-          );
-          if (converted && typeof converted.value === 'number' && isFinite(converted.value)) {
-            const rawPrice = converted.value;
+          ) as any;
+          const result = Array.isArray(converted) ? converted[0] : converted;
+          if (result && typeof result.value === 'number' && isFinite(result.value)) {
+            const rawPrice = result.value;
             // Format to symbol's tick size precision
             const formatted = parseFloat(rawPrice.toFixed(pricePrecision));
             crosshairPriceRef.current = formatted;
