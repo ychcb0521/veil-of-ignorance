@@ -192,7 +192,13 @@ const Index = () => {
   const timeModeRef = useRef(timeMode);
   const activeSymbolRef = useRef(activeSymbol);
   const coinTimelinesRef = useRef(coinTimelines);
-  const latestChartPriceRef = useRef(0);
+  const latestChartPriceRef = useRef(currentPrice || 0);
+  // Keep ref synced with currentPrice from context as a fallback
+  useEffect(() => {
+    if (currentPrice > 0 && latestChartPriceRef.current <= 0) {
+      latestChartPriceRef.current = currentPrice;
+    }
+  }, [currentPrice]);
   const effectiveSimTimeRef = useRef(effectiveSimTime);
   const priceProtectionRef = useRef(priceProtection);
   const ordersMapRef = useRef(ordersMap);
