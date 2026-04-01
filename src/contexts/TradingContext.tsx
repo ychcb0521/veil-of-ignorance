@@ -24,7 +24,7 @@ import { toast } from 'sonner';
 import type { Position, PendingOrder, TradeRecord, OrderSide, OrderType, MarginMode } from '@/types/trading';
 import {
   calcFee, calcUnrealizedPnl, calcSlippage,
-  MAINTENANCE_MARGIN_RATE, LIQUIDATION_FEE_RATE, FUNDING_RATE, FUNDING_HOURS,
+  MAINTENANCE_MARGIN_RATE, LIQUIDATION_FEE_RATE, FUNDING_RATE, FUNDING_HOURS, getTriggerOperator,
 } from '@/types/trading';
 
 // ===== Types =====
@@ -336,6 +336,26 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
     return Array.from(syms);
   }, [positionsMap, ordersMap]);
 
+  useEffect(() => {
+    const hasLegacyConditionalOrders = Object.values(ordersMap).some(orders =>
+      orders.some(order => order.type === 'CONDITIONAL' && !order.operator)
+    );
+    if (!hasLegacyConditionalOrders) return;
+
+    setOrdersMap(prev => {
+      let changed = false;
+      const next: OrdersMap = {};
+
+      for (const [symbol, orders] of Object.entries(prev)) {
+        const filtered = orders.filter(order => order.type !== 'CONDITIONAL' || !!order.operator);
+        if (filtered.length !== orders.length) changed = true;
+        if (filtered.length > 0) next[symbol] = filtered;
+      }
+
+      return changed ? next : prev;
+    });
+  }, [ordersMap, setOrdersMap]);
+
   // ===== FUNDING RATE ENGINE =====
   const lastFundingSlotRef = useRef<number>(-1);
 
@@ -619,9 +639,13 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
       return;
     }
 
-    // Determine trigger direction at placement for conditional/TP-SL orders
+    // Determine trigger direction / operator at placement from the then-current price snapshot
     let triggerDirection: 'UP' | 'DOWN' | undefined;
-    if (['CONDITIONAL', 'MARKET_TP_SL', 'LIMIT_TP_SL'].includes(order.type) && order.stopPrice > 0) {
+    let operator: PendingOrder['operator'];
+    if (order.type === 'CONDITIONAL' && order.stopPrice > 0) {
+      operator = getTriggerOperator(order.stopPrice, effectiveCurrentPrice);
+      triggerDirection = operator === '>=' ? 'UP' : 'DOWN';
+    } else if (['MARKET_TP_SL', 'LIMIT_TP_SL'].includes(order.type) && order.stopPrice > 0) {
       if (order.stopPrice > effectiveCurrentPrice) {
         triggerDirection = 'UP';
       } else if (order.stopPrice < effectiveCurrentPrice) {
@@ -640,7 +664,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
       callbackRate: order.callbackRate, trailingExecType: order.trailingExecType,
       trailingLimitPrice: order.trailingLimitPrice, trailingActivated: false,
       conditionalExecType: order.conditionalExecType, conditionalLimitPrice: order.conditionalLimitPrice,
-      triggerDirection,
+      triggerDirection, operator,
     };
     setOrdersMap(prev => ({ ...prev, [symbol]: [...(prev[symbol] || []), newOrder] }));
     toast.info('委托已挂出');

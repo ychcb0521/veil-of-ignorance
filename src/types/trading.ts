@@ -14,6 +14,7 @@ export type OrderType =
 
 export type MarginMode = 'cross' | 'isolated';
 export type OrderStatus = 'NEW' | 'FILLED' | 'CANCELED' | 'TRIGGERED' | 'ACTIVE';
+export type TriggerOperator = '>=' | '<=';
 
 export interface PendingOrder {
   id: string;
@@ -45,8 +46,15 @@ export interface PendingOrder {
 
   /** Trigger direction locked at placement: UP = triggerPrice > currentPrice, DOWN = triggerPrice < currentPrice */
   triggerDirection?: 'UP' | 'DOWN';
+  /** Locked comparison operator for conditional orders, derived from triggerPrice vs currentPrice at placement */
+  operator?: TriggerOperator;
 
   parentScaledId?: string;
+}
+
+interface TriggerRange {
+  high: number;
+  low: number;
 }
 
 export interface Position {
@@ -108,6 +116,16 @@ export function getLeverageTierInfo(notional: number): { maxLeverage: number; ti
     }
   }
   return { maxLeverage: 10, tierLabel: '> 1,000,000 USDT' };
+}
+
+/** Lock the trigger operator at placement time using the then-current close price. */
+export function getTriggerOperator(triggerPrice: number, currentPrice: number): TriggerOperator {
+  return triggerPrice > currentPrice ? '>=' : '<=';
+}
+
+/** Intrabar trigger validation using kline extremes instead of latest close. */
+export function isTriggerConditionMet(operator: TriggerOperator, triggerPrice: number, kline: TriggerRange): boolean {
+  return operator === '>=' ? kline.high >= triggerPrice : kline.low <= triggerPrice;
 }
 
 // Funding settlement times in UTC hours

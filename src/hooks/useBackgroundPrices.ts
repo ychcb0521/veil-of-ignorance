@@ -8,7 +8,7 @@
 import { useEffect, useRef, useCallback } from 'react';
 import { useTradingContext } from '@/contexts/TradingContext';
 import type { PendingOrder, Position } from '@/types/trading';
-import { calcFee, calcUnrealizedPnl } from '@/types/trading';
+import { calcFee, calcUnrealizedPnl, isTriggerConditionMet } from '@/types/trading';
 import { intervalToMs } from '@/hooks/useBinanceData';
 import { toast } from 'sonner';
 
@@ -119,6 +119,7 @@ export function useBackgroundPrices() {
     orders: PendingOrder[],
   ) => {
     const filledIds: string[] = [];
+    const cleanupIds: string[] = [];
 
     for (const order of orders) {
       let triggered = false;
@@ -140,9 +141,11 @@ export function useBackgroundPrices() {
           else if (order.side === 'SHORT' && kline.high >= order.price) { triggered = true; fillPrice = order.price; }
         }
       } else if (order.type === 'CONDITIONAL') {
-        const dir = order.triggerDirection || (order.side === 'LONG' ? 'UP' : 'DOWN');
-        const trigHit = (dir === 'UP' && kline.high >= order.stopPrice)
-          || (dir === 'DOWN' && kline.low <= order.stopPrice);
+        if (!order.operator) {
+          cleanupIds.push(order.id);
+          continue;
+        }
+        const trigHit = isTriggerConditionMet(order.operator, order.stopPrice, kline);
         if (trigHit) {
           if (order.conditionalExecType === 'MARKET') {
             triggered = true; fillPrice = order.stopPrice;
@@ -174,7 +177,12 @@ export function useBackgroundPrices() {
     if (filledIds.length > 0) {
       setOrdersMap(prev => ({
         ...prev,
-        [symbol]: (prev[symbol] || []).filter(o => !filledIds.includes(o.id)),
+        [symbol]: (prev[symbol] || []).filter(o => !filledIds.includes(o.id) && !cleanupIds.includes(o.id)),
+      }));
+    } else if (cleanupIds.length > 0) {
+      setOrdersMap(prev => ({
+        ...prev,
+        [symbol]: (prev[symbol] || []).filter(o => !cleanupIds.includes(o.id)),
       }));
     }
   }, [setBalance, setPositionsMap, setOrdersMap]);
