@@ -173,6 +173,11 @@ const Index = () => {
     [getVisibleData, effectiveSimTime, iMs]
   );
 
+  const latestVisiblePrice = useMemo(() => {
+    const latest = visibleData[visibleData.length - 1];
+    return Number(latest?.close ?? 0);
+  }, [visibleData]);
+
   // Should the RAF engine be running?
   const shouldRunEngine = useMemo(() => {
     if (timeMode === 'synced') return sim.status === 'playing';
@@ -426,7 +431,7 @@ const Index = () => {
 
   useEffect(() => {
     if (visibleData.length > 0) {
-      const lastClose = Number(visibleData[visibleData.length - 1].close);
+      const lastClose = latestVisiblePrice;
       if (Number.isFinite(lastClose) && lastClose > 0) {
         latestChartPriceRef.current = lastClose;
       }
@@ -435,7 +440,7 @@ const Index = () => {
         return { ...prev, [activeSymbol]: lastClose };
       });
     }
-  }, [visibleData, activeSymbol]);
+  }, [latestVisiblePrice, visibleData, activeSymbol]);
 
   const prevVisibleLenRef = useRef(0);
 
@@ -443,7 +448,7 @@ const Index = () => {
     if (activeCoinState.status === 'stopped' || visibleData.length === 0) return;
 
     const latestKline = visibleData[visibleData.length - 1];
-    const anchoredLatestPrice = Number(latestChartPriceRef.current || latestKline.close);
+    const anchoredLatestPrice = Number(latestChartPriceRef.current || latestVisiblePrice || latestKline.close);
     if (!Number.isFinite(anchoredLatestPrice) || anchoredLatestPrice <= 0) return;
 
     latestChartPriceRef.current = anchoredLatestPrice;
@@ -563,7 +568,7 @@ const Index = () => {
       }]);
       toast.success(`委托成交: ${matchedOrder.side === 'LONG' ? '开多' : '开空'} ${matchedOrder.quantity} @ ${actualFillPrice.toFixed(2)}`);
     }
-  }, [activeCoinState.status, activeSymbol, visibleData]);
+  }, [activeCoinState.status, activeSymbol, visibleData, latestVisiblePrice]);
 
   // ===== MATCHING ENGINE for active symbol =====
   useEffect(() => {

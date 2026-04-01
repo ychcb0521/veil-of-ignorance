@@ -26,7 +26,7 @@ import {
   calcFee, calcUnrealizedPnl, calcSlippage,
   MAINTENANCE_MARGIN_RATE, LIQUIDATION_FEE_RATE, FUNDING_RATE, FUNDING_HOURS, getTriggerOperator,
 } from '@/types/trading';
-import { shouldRejectImmediateConditionalPlacement } from '@/lib/conditionalOrders';
+import { resolveConditionalTriggerPrice, shouldRejectImmediateConditionalPlacement } from '@/lib/conditionalOrders';
 
 // ===== Types =====
 export type TimeMode = 'synced' | 'isolated';
@@ -344,20 +344,29 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
       const next: OrdersMap = {};
 
       for (const [symbol, orders] of Object.entries(prev)) {
-        const normalized = orders
-          .filter(order => {
-            const shouldKeep = order.type !== 'CONDITIONAL' || !!order.operator;
-            if (!shouldKeep) changed = true;
-            return shouldKeep;
-          })
-          .map(order => {
-            if (order.type === 'CONDITIONAL' && order.status !== 'PENDING') {
-              changed = true;
-              return { ...order, status: 'PENDING' as const };
-            }
-
+        const normalized = orders.map(order => {
+          if (order.type !== 'CONDITIONAL') {
             return order;
-          });
+          }
+
+          const nextTriggerPrice = resolveConditionalTriggerPrice(order);
+          const shouldNormalizeStatus = order.status !== 'PENDING';
+          const shouldNormalizeStopPrice = Number.isFinite(nextTriggerPrice)
+            && nextTriggerPrice > 0
+            && order.stopPrice !== nextTriggerPrice;
+
+          if (!shouldNormalizeStatus && !shouldNormalizeStopPrice) {
+            return order;
+          }
+
+          changed = true;
+
+          return {
+            ...order,
+            status: 'PENDING' as const,
+            stopPrice: shouldNormalizeStopPrice ? nextTriggerPrice : order.stopPrice,
+          };
+        });
 
         if (normalized.length > 0) next[symbol] = normalized;
       }
