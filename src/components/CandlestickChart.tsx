@@ -732,7 +732,7 @@ function CandlestickChartComponent({ data, symbol, onLoadOlder, loadingOlder, tr
           style={{
             left: 34,
             backgroundColor: theme === 'light' ? '#FFFFFF' : '#0B0E11',
-            cursor: activeDrawingTool ? 'crosshair' : 'default',
+            cursor: activeDrawingTool || pickMode ? 'crosshair' : 'default',
           }}
         />
 
