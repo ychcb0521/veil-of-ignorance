@@ -1,8 +1,9 @@
 import { useState, useRef, useEffect, useMemo } from 'react';
 import type { OrderSide, OrderType, MarginMode } from '@/types/trading';
 import { ORDER_TYPE_INFO, getMaxLeverageForNotional, getLeverageTierInfo } from '@/types/trading';
-import { ChevronDown, Check, Info, AlertTriangle } from 'lucide-react';
+import { ChevronDown, Check, Info, AlertTriangle, Crosshair } from 'lucide-react';
 import type { PlaceOrderParams } from '@/contexts/TradingContext';
+import { usePersistedState } from '@/hooks/usePersistedState';
 
 // Re-export for convenience
 export type { PlaceOrderParams };
