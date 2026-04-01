@@ -824,6 +824,19 @@ function CandlestickChartComponent({ data, symbol, onLoadOlder, loadingOlder, tr
             <span>挂单</span>
           </button>
 
+          {/* Show/hide trade markers toggle */}
+          <button
+            type="button"
+            onClick={() => setShowTradeMarkers(prev => !prev)}
+            className={`flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium transition-colors duration-150 ease-out active:scale-[0.98] ${
+              showTradeMarkers ? 'bg-primary/20 text-primary' : 'text-muted-foreground hover:text-foreground hover:bg-accent/50'
+            }`}
+            title={showTradeMarkers ? '隐藏交易标记' : '显示交易标记'}
+          >
+            {showTradeMarkers ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
+            <span>标记</span>
+          </button>
+
           <div className="flex items-center gap-1 max-w-full overflow-x-auto">
             {indicators.map(ind => (
               <span key={ind.type} className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-mono font-medium whitespace-nowrap shrink-0"
