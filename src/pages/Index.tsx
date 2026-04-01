@@ -22,7 +22,7 @@ import { LiquidationModal } from '@/components/LiquidationModal';
 import { AnalyticsPanel } from '@/components/AnalyticsPanel';
 import { TradeInsightsPanel } from '@/components/TradeInsightsPanel';
 import { CoolingOffModal, useCoolingOff } from '@/components/CoolingOffModal';
-import { getConditionalTriggerDecision, isConditionalPendingOrder } from '@/lib/conditionalOrders';
+import { getConditionalTriggerDecision } from '@/lib/conditionalOrders';
 import { toast } from 'sonner';
 import { BarChart3, Wallet, PanelRightClose, PanelRightOpen, Crosshair } from 'lucide-react';
 import type { PendingOrder, OrderType } from '@/types/trading';
@@ -658,9 +658,7 @@ const Index = () => {
           }
 
           if (triggered) {
-            const matchedOrder = order.type === 'CONDITIONAL'
-              ? { ...order, status: 'FILLED' as const }
-              : order;
+            const matchedOrder = order;
 
             // === PRICE PROTECTION: anti-scam-wick check for conditional orders ===
             const isConditionalType = ['MARKET_TP_SL', 'LIMIT_TP_SL', 'CONDITIONAL', 'TRAILING_STOP'].includes(matchedOrder.type);
