@@ -1,16 +1,24 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { usePersistedState } from '@/hooks/usePersistedState';
 import type { Position, PendingOrder, TradeRecord } from '@/types/trading';
 import { calcUnrealizedPnl, calcROE, calcLiquidationPrice, MAINTENANCE_MARGIN_RATE } from '@/types/trading';
 import type { PositionsMap, OrdersMap, PriceMap } from '@/contexts/TradingContext';
-import { X } from 'lucide-react';
+import { X, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { LeverageModal } from '@/components/LeverageModal';
 import { TpSlModal } from '@/components/TpSlModal';
 import { Checkbox } from '@/components/ui/checkbox';
+import { Badge } from '@/components/ui/badge';
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
 } from '@/components/ui/dialog';
+import {
+  AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogTitle,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogAction, AlertDialogCancel,
+} from '@/components/ui/alert-dialog';
+import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from '@/components/ui/select';
 import { Button } from '@/components/ui/button';
 
 interface Props {
@@ -22,15 +30,27 @@ interface Props {
   onClosePosition: (symbol: string, index: number) => void;
   onCancelOrder: (symbol: string, orderId: string) => void;
   onAddIsolatedMargin?: (symbol: string, posIndex: number, amount: number) => void;
+  onClearSymbolData?: (symbol: string) => void;
   activeTab: string;
   onTabChange: (tab: string) => void;
   onCloseAllPositions?: (symbols: { symbol: string; index: number }[]) => void;
+  pricePrecision?: number;
+}
+
+/** Get display precision for a symbol based on its price magnitude */
+function getSymbolPrecision(price: number): number {
+  if (price > 10000) return 1;
+  if (price > 1000) return 2;
+  if (price > 100) return 3;
+  if (price > 10) return 4;
+  if (price > 1) return 5;
+  return 6;
 }
 
 export function PositionPanel({
   positionsMap, ordersMap, tradeHistory, priceMap, activeSymbol,
-  onClosePosition, onCancelOrder, onAddIsolatedMargin, activeTab, onTabChange,
-  onCloseAllPositions,
+  onClosePosition, onCancelOrder, onAddIsolatedMargin, onClearSymbolData,
+  activeTab, onTabChange, onCloseAllPositions, pricePrecision,
 }: Props) {
   const [leverageModal, setLeverageModal] = useState<{ symbol: string; index: number; pos: Position } | null>(null);
   const [tpslModal, setTpslModal] = useState<{ symbol: string; index: number; pos: Position } | null>(null);
@@ -38,6 +58,10 @@ export function PositionPanel({
   const [hideOtherContracts, setHideOtherContracts] = useState(false);
   const [closeAllConfirmOpen, setCloseAllConfirmOpen] = useState(false);
   const [symbolLeverage, setSymbolLeverage] = usePersistedState<Record<string, number>>('symbol_leverage', {});
+
+  // Rollback modal state
+  const [rollbackOpen, setRollbackOpen] = useState(false);
+  const [rollbackSymbol, setRollbackSymbol] = useState<string>('');
 
   const allPositions: { symbol: string; position: Position; index: number }[] = [];
   for (const [sym, positions] of Object.entries(positionsMap)) {
@@ -55,6 +79,49 @@ export function PositionPanel({
 
   const fundingRecords = tradeHistory.filter(t => t.action === 'FUNDING');
   const tradeRecords = tradeHistory.filter(t => t.action !== 'FUNDING');
+
+  // Collect all symbols that have any data (positions, orders, or history)
+  const allTradedSymbols = useMemo(() => {
+    const syms = new Set<string>();
+    for (const sym of Object.keys(positionsMap)) {
+      if ((positionsMap[sym] || []).length > 0) syms.add(sym);
+    }
+    for (const sym of Object.keys(ordersMap)) {
+      if ((ordersMap[sym] || []).length > 0) syms.add(sym);
+    }
+    for (const t of tradeHistory) {
+      if (t.symbol) syms.add(t.symbol);
+    }
+    return Array.from(syms).sort();
+  }, [positionsMap, ordersMap, tradeHistory]);
+
+  // Compute rollback preview
+  const rollbackPreview = useMemo(() => {
+    if (!rollbackSymbol) return null;
+    const symbolHistory = tradeHistory.filter(t => t.symbol === rollbackSymbol);
+    const symbolPositions = positionsMap[rollbackSymbol] || [];
+    const symbolOrders = ordersMap[rollbackSymbol] || [];
+    let totalPnl = 0;
+    let totalFees = 0;
+    for (const t of symbolHistory) {
+      totalPnl = Math.round((totalPnl + t.pnl) * 1e8) / 1e8;
+      totalFees = Math.round((totalFees + t.fee) * 1e8) / 1e8;
+    }
+    let lockedMargin = 0;
+    for (const pos of symbolPositions) {
+      lockedMargin += pos.marginMode === 'isolated' && pos.isolatedMargin != null
+        ? pos.isolatedMargin : pos.margin;
+    }
+    return {
+      positionCount: symbolPositions.length,
+      orderCount: symbolOrders.length,
+      historyCount: symbolHistory.length,
+      totalPnl,
+      totalFees,
+      lockedMargin,
+      balanceAdjustment: Math.round((lockedMargin - totalPnl + totalFees) * 1e8) / 1e8,
+    };
+  }, [rollbackSymbol, tradeHistory, positionsMap, ordersMap]);
 
   const TABS = [
     { key: 'positions', label: '持仓', count: allPositions.length },
@@ -80,6 +147,21 @@ export function PositionPanel({
       setCloseAllConfirmOpen(false);
       toast.success(`已市价平仓 ${displayedPositions.length} 个仓位`);
     }
+  };
+
+  const handleRollbackConfirm = () => {
+    if (rollbackSymbol && onClearSymbolData) {
+      onClearSymbolData(rollbackSymbol);
+      setRollbackOpen(false);
+      setRollbackSymbol('');
+    }
+  };
+
+  /** Get precision for a symbol */
+  const getPrecision = (symbol: string): number => {
+    if (symbol === activeSymbol && pricePrecision != null) return pricePrecision;
+    const price = priceMap[symbol] || 0;
+    return price > 0 ? getSymbolPrecision(price) : 2;
   };
 
   return (
@@ -124,6 +206,15 @@ export function PositionPanel({
             )}
           </div>
         )}
+        {activeTab === 'history' && allTradedSymbols.length > 0 && (
+          <button
+            onClick={() => { setRollbackSymbol(''); setRollbackOpen(true); }}
+            className="flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium border border-destructive/40 text-destructive hover:bg-destructive/10 transition-colors active:scale-95 shrink-0"
+          >
+            <Trash2 className="w-3 h-3" />
+            清除币种数据
+          </button>
+        )}
       </div>
 
       <div className="overflow-y-auto min-h-[120px]">
@@ -146,6 +237,7 @@ export function PositionPanel({
                 const notional = pos.quantity * price;
                 const marginRatio = notional > 0 ? ((effectiveMargin + pnl) / notional * 100) : 0;
                 const baseCoin = symbol.replace('USDT', '');
+                const prec = getPrecision(symbol);
 
                 return (
                   <div
@@ -188,9 +280,9 @@ export function PositionPanel({
                       <DetailCell label="持仓数量" value={pos.quantity.toFixed(4)} />
                       <DetailCell label="保证金" value={effectiveMargin.toFixed(2)} />
                       <DetailCell label="保证金比率" value={`${marginRatio.toFixed(2)}%`} />
-                      <DetailCell label="开仓价格" value={pos.entryPrice.toFixed(2)} />
-                      <DetailCell label="标记价格" value={price > 0 ? price.toFixed(2) : '-'} />
-                      <DetailCell label="强平价格" value={liq.toFixed(2)} valueClassName="text-red-400" />
+                      <DetailCell label="开仓价格" value={pos.entryPrice.toFixed(prec)} />
+                      <DetailCell label="标记价格" value={price > 0 ? price.toFixed(prec) : '-'} />
+                      <DetailCell label="强平价格" value={liq.toFixed(prec)} valueClassName="text-red-400" />
                     </div>
 
                     {/* Action Buttons */}
@@ -219,38 +311,55 @@ export function PositionPanel({
             <table className="w-full text-[11px] font-mono tabular-nums">
               <thead>
                 <tr className="text-muted-foreground border-b border-border">
-                  {['合约', '类型', '方向', '价格', '触发价', '数量', '杠杆', '操作'].map(h => (
+                  {['合约', '类型', '方向', '价格', '触发价', '数量', '杠杆', '模式', '操作'].map(h => (
                     <th key={h} className="px-3 py-1.5 text-left font-medium whitespace-nowrap">{h}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
-                {allOrders.map(({ symbol, order }) => (
-                  <tr key={order.id} className="border-b border-border/30 hover:bg-accent/20">
-                    <td className="px-3 py-2">
-                      <span className="text-foreground font-medium">{symbol.replace('USDT', '')}</span>
-                      <span className="text-muted-foreground text-[10px]">/USDT</span>
-                    </td>
-                    <td className="px-3 py-2 text-muted-foreground">
-                      {{ LIMIT: '限价', POST_ONLY: '只做Maker', MARKET: '市价', LIMIT_TP_SL: '限价TP/SL', MARKET_TP_SL: '市价TP/SL', CONDITIONAL: '条件', TRAILING_STOP: '跟踪', TWAP: 'TWAP', SCALED: '分段' }[order.type] || order.type}
-                    </td>
-                    <td className={`px-3 py-2 font-bold ${order.side === 'LONG' ? 'text-emerald-400' : 'text-red-400'}`}>
-                      {order.side === 'LONG' ? '多' : '空'}
-                    </td>
-                    <td className="px-3 py-2">{order.price > 0 ? order.price.toFixed(2) : '市价'}</td>
-                    <td className="px-3 py-2">{order.stopPrice > 0 ? order.stopPrice.toFixed(2) : '-'}</td>
-                    <td className="px-3 py-2">{order.quantity.toFixed(4)}</td>
-                    <td className="px-3 py-2">{order.leverage}x</td>
-                    <td className="px-3 py-2">
-                      <button
-                        onClick={() => onCancelOrder(symbol, order.id)}
-                        className="p-0.5 rounded hover:bg-destructive/20 text-muted-foreground hover:text-destructive transition-colors"
-                      >
-                        <X className="w-3.5 h-3.5" />
-                      </button>
-                    </td>
-                  </tr>
-                ))}
+                {allOrders.map(({ symbol, order }) => {
+                  const prec = getPrecision(symbol);
+                  return (
+                    <tr key={order.id} className="border-b border-border/30 hover:bg-accent/20">
+                      <td className="px-3 py-2">
+                        <span className="text-foreground font-medium">{symbol.replace('USDT', '')}</span>
+                        <span className="text-muted-foreground text-[10px]">/USDT</span>
+                      </td>
+                      <td className="px-3 py-2 text-muted-foreground">
+                        {{ LIMIT: '限价', POST_ONLY: '只做Maker', MARKET: '市价', LIMIT_TP_SL: '限价TP/SL', MARKET_TP_SL: '市价TP/SL', CONDITIONAL: '条件', TRAILING_STOP: '跟踪', TWAP: 'TWAP', SCALED: '分段' }[order.type] || order.type}
+                      </td>
+                      <td className={`px-3 py-2 font-bold ${order.side === 'LONG' ? 'text-emerald-400' : 'text-red-400'}`}>
+                        {order.side === 'LONG' ? '多' : '空'}
+                      </td>
+                      <td className="px-3 py-2">
+                        {order.price > 0 ? order.price.toFixed(prec) : '市价'}
+                      </td>
+                      <td className="px-3 py-2">
+                        {order.stopPrice > 0 ? (
+                          <span className="text-amber-400">{order.stopPrice.toFixed(prec)}</span>
+                        ) : '-'}
+                      </td>
+                      <td className="px-3 py-2">{order.quantity.toFixed(4)}</td>
+                      <td className="px-3 py-2">{order.leverage}x</td>
+                      <td className="px-3 py-2">
+                        <Badge
+                          variant={order.marginMode === 'cross' ? 'default' : 'secondary'}
+                          className="text-[9px] px-1.5 py-0"
+                        >
+                          {order.marginMode === 'cross' ? '全仓' : '逐仓'}
+                        </Badge>
+                      </td>
+                      <td className="px-3 py-2">
+                        <button
+                          onClick={() => onCancelOrder(symbol, order.id)}
+                          className="p-0.5 rounded hover:bg-destructive/20 text-muted-foreground hover:text-destructive transition-colors"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           )
@@ -345,7 +454,6 @@ export function PositionPanel({
           notional={leverageModal.pos.entryPrice * leverageModal.pos.quantity}
           onClose={() => setLeverageModal(null)}
           onConfirm={(newLev) => {
-            // Update shared symbol leverage state
             setSymbolLeverage(prev => ({ ...prev, [leverageModal.symbol]: newLev }));
             toast.success(`杠杆已调整为 ${newLev}x`);
             setLeverageModal(null);
@@ -385,6 +493,90 @@ export function PositionPanel({
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* ===== ROLLBACK DANGER MODAL ===== */}
+      <AlertDialog open={rollbackOpen} onOpenChange={setRollbackOpen}>
+        <AlertDialogContent className="sm:max-w-md border-destructive/30">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2 text-destructive">
+              <Trash2 className="w-5 h-5" />
+              清除特定币种数据
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              此操作将<span className="text-destructive font-bold">不可逆地</span>清除选定币种的所有持仓、委托和历史记录，并将账户余额精确回滚至该币种从未交易过的状态。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+
+          <div className="space-y-3 py-2">
+            <div>
+              <label className="text-xs font-medium text-muted-foreground mb-1 block">选择币种</label>
+              <Select value={rollbackSymbol} onValueChange={setRollbackSymbol}>
+                <SelectTrigger className="w-full">
+                  <SelectValue placeholder="请选择要清除的币种..." />
+                </SelectTrigger>
+                <SelectContent>
+                  {allTradedSymbols.map(sym => (
+                    <SelectItem key={sym} value={sym}>
+                      {sym.replace('USDT', '/USDT')}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {rollbackPreview && (
+              <div className="rounded-md border border-destructive/20 bg-destructive/5 p-3 space-y-1.5 text-xs font-mono">
+                <div className="text-[10px] font-sans font-medium text-destructive mb-2">回滚预览</div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">待平仓位</span>
+                  <span className="text-foreground">{rollbackPreview.positionCount} 个</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">待撤委托</span>
+                  <span className="text-foreground">{rollbackPreview.orderCount} 个</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">待删历史</span>
+                  <span className="text-foreground">{rollbackPreview.historyCount} 条</span>
+                </div>
+                <div className="border-t border-border/50 my-1" />
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">该币种总盈亏</span>
+                  <span className={rollbackPreview.totalPnl >= 0 ? 'text-emerald-400' : 'text-red-400'}>
+                    {rollbackPreview.totalPnl >= 0 ? '+' : ''}{rollbackPreview.totalPnl.toFixed(4)}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">该币种总手续费</span>
+                  <span className="text-amber-400">{rollbackPreview.totalFees.toFixed(4)}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">锁定保证金</span>
+                  <span className="text-foreground">{rollbackPreview.lockedMargin.toFixed(2)}</span>
+                </div>
+                <div className="border-t border-border/50 my-1" />
+                <div className="flex justify-between font-bold">
+                  <span className="text-foreground">余额调整</span>
+                  <span className={rollbackPreview.balanceAdjustment >= 0 ? 'text-emerald-400' : 'text-red-400'}>
+                    {rollbackPreview.balanceAdjustment >= 0 ? '+' : ''}{rollbackPreview.balanceAdjustment.toFixed(4)} USDT
+                  </span>
+                </div>
+              </div>
+            )}
+          </div>
+
+          <AlertDialogFooter>
+            <AlertDialogCancel>取消</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={!rollbackSymbol}
+              onClick={handleRollbackConfirm}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              确认清除并回滚
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

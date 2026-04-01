@@ -88,7 +88,7 @@ const Index = () => {
     allPositions, allOrders, currentPrice, activeSymbols,
     pricePrecision, quantityPrecision, setPricePrecision, setQuantityPrecision,
     handlePlaceOrder, handleClosePosition, handleCancelOrder,
-    handleAddIsolatedMargin,
+    handleAddIsolatedMargin, handleClearSymbolData,
     liquidationOpen, liquidationDetails, closeLiquidationModal,
     timeMode, setTimeMode, coinTimelines, setCoinTimelines,
     totalPositionCount, getEffectiveTime, getCoinState,
@@ -1060,6 +1060,8 @@ const Index = () => {
                     onClosePosition={handleClosePositionForSymbol}
                     onCancelOrder={handleCancelOrderForSymbol}
                     onAddIsolatedMargin={handleAddIsolatedMargin}
+                    onClearSymbolData={handleClearSymbolData}
+                    pricePrecision={pricePrecision}
                     activeTab={bottomTab}
                     onTabChange={setBottomTab}
                     onCloseAllPositions={handleCloseAllPositions}
