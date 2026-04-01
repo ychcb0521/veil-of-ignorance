@@ -246,6 +246,7 @@ function CandlestickChartComponent({ data, symbol, onLoadOlder, loadingOlder, tr
   const [drawingsVisible, setDrawingsVisible] = useState(true);
   const [activeDrawingTool, setActiveDrawingTool] = useState<string | null>(null);
   const { theme } = useTheme();
+  const crosshairPriceRef = useRef<number | null>(null);
 
   const activeIndicatorPanes = useRef<Map<string, string | null>>(new Map());
 
