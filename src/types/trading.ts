@@ -43,6 +43,9 @@ export interface PendingOrder {
   conditionalExecType?: 'MARKET' | 'LIMIT';
   conditionalLimitPrice?: number;
 
+  /** Trigger direction locked at placement: UP = triggerPrice > currentPrice, DOWN = triggerPrice < currentPrice */
+  triggerDirection?: 'UP' | 'DOWN';
+
   parentScaledId?: string;
 }
 
