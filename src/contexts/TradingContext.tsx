@@ -227,6 +227,9 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
   const timeModeRef = useRef(timeMode);
   useEffect(() => { timeModeRef.current = timeMode; }, [timeMode]);
 
+  const priceMapRef = useRef(priceMap);
+  useEffect(() => { priceMapRef.current = priceMap; }, [priceMap]);
+
   // Total position count across all symbols
   const totalPositionCount = useMemo(() => {
     let count = 0;
