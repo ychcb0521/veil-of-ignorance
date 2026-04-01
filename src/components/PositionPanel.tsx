@@ -37,6 +37,7 @@ export function PositionPanel({
   const [closingKey, setClosingKey] = useState<string | null>(null);
   const [hideOtherContracts, setHideOtherContracts] = useState(false);
   const [closeAllConfirmOpen, setCloseAllConfirmOpen] = useState(false);
+  const [symbolLeverage, setSymbolLeverage] = usePersistedState<Record<string, number>>('symbol_leverage', {});
 
   const allPositions: { symbol: string; position: Position; index: number }[] = [];
   for (const [sym, positions] of Object.entries(positionsMap)) {
