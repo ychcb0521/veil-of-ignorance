@@ -1010,11 +1010,13 @@ const Index = () => {
 
   // Wrapper for OrderPanel
   const handlePlaceOrderForActiveSymbol = useCallback((order: PlaceOrderParams) => {
+    const freshPrice = latestChartPriceRef.current || priceMap[activeSymbol] || currentPrice;
+    console.log('[下单按钮]', { latestChartPriceRef: latestChartPriceRef.current, priceMap: priceMap[activeSymbol], currentPrice, 最终传递: freshPrice });
     handlePlaceOrder(activeSymbol, {
       ...order,
-      latestPrice: latestChartPriceRef.current || currentPrice,
+      latestPrice: freshPrice,
     });
-  }, [activeSymbol, currentPrice, handlePlaceOrder]);
+  }, [activeSymbol, currentPrice, priceMap, handlePlaceOrder]);
 
   const handleClosePositionForSymbol = useCallback((symbol: string, index: number) => {
     handleClosePosition(symbol, index);
