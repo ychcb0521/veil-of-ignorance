@@ -73,6 +73,8 @@ interface Props {
   onCancelOrder?: (orderId: string) => void;
   /** Ref assigned with imperative chart API for direct candle pushing. */
   chartApiRef?: React.MutableRefObject<ChartImperativeApi | null>;
+  /** Called when crosshair moves over chart — provides Y-axis price */
+  onCrosshairPriceChange?: (price: number | null) => void;
 }
 
 // Convert our KlineData to klinecharts KLineData
