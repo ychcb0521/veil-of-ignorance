@@ -1,8 +1,11 @@
 import { useState } from 'react';
 import type { Position, PendingOrder, TradeRecord } from '@/types/trading';
-import { calcUnrealizedPnl, calcROE, calcLiquidationPrice } from '@/types/trading';
+import { calcUnrealizedPnl, calcROE, calcLiquidationPrice, MAINTENANCE_MARGIN_RATE } from '@/types/trading';
 import type { PositionsMap, OrdersMap, PriceMap } from '@/contexts/TradingContext';
-import { X, Plus } from 'lucide-react';
+import { X } from 'lucide-react';
+import { toast } from 'sonner';
+import { LeverageModal } from '@/components/LeverageModal';
+import { TpSlModal } from '@/components/TpSlModal';
 
 interface Props {
   positionsMap: PositionsMap;
@@ -21,8 +24,9 @@ export function PositionPanel({
   positionsMap, ordersMap, tradeHistory, priceMap, activeSymbol,
   onClosePosition, onCancelOrder, onAddIsolatedMargin, activeTab, onTabChange,
 }: Props) {
-  const [addMarginTarget, setAddMarginTarget] = useState<{ sym: string; idx: number } | null>(null);
-  const [addMarginAmount, setAddMarginAmount] = useState('');
+  const [leverageModal, setLeverageModal] = useState<{ symbol: string; index: number; pos: Position } | null>(null);
+  const [tpslModal, setTpslModal] = useState<{ symbol: string; index: number; pos: Position } | null>(null);
+  const [closingKey, setClosingKey] = useState<string | null>(null);
 
   const allPositions: { symbol: string; position: Position; index: number }[] = [];
   for (const [sym, positions] of Object.entries(positionsMap)) {
@@ -34,7 +38,6 @@ export function PositionPanel({
     for (const o of orders) allOrders.push({ symbol: sym, order: o });
   }
 
-  // Separate funding records for display
   const fundingRecords = tradeHistory.filter(t => t.action === 'FUNDING');
   const tradeRecords = tradeHistory.filter(t => t.action !== 'FUNDING');
 
@@ -45,17 +48,20 @@ export function PositionPanel({
     { key: 'funding', label: '资金费', count: fundingRecords.length },
   ];
 
-  const handleSubmitMargin = () => {
-    if (!addMarginTarget || !onAddIsolatedMargin) return;
-    const amt = parseFloat(addMarginAmount);
-    if (isNaN(amt) || amt <= 0) return;
-    onAddIsolatedMargin(addMarginTarget.sym, addMarginTarget.idx, amt);
-    setAddMarginTarget(null);
-    setAddMarginAmount('');
+  const handleClose = (symbol: string, index: number) => {
+    const key = `${symbol}-${index}`;
+    if (closingKey === key) return;
+    setClosingKey(key);
+    toast('正在平仓...', { duration: 800 });
+    setTimeout(() => {
+      onClosePosition(symbol, index);
+      setClosingKey(null);
+    }, 300);
   };
 
   return (
     <div className="panel flex flex-col bg-card">
+      {/* Tabs */}
       <div className="flex gap-4 px-4 border-b border-border">
         {TABS.map(t => (
           <button
@@ -75,100 +81,90 @@ export function PositionPanel({
         ))}
       </div>
 
-      <div className="overflow-x-auto min-h-[120px]">
+      <div className="overflow-y-auto min-h-[120px]">
+        {/* ===== POSITIONS (Card-based) ===== */}
         {activeTab === 'positions' && (
           allPositions.length === 0 ? (
             <div className="px-4 py-6 text-center text-xs text-muted-foreground">暂无持仓</div>
           ) : (
-            <table className="w-full text-[11px] font-mono tabular-nums">
-              <thead>
-                <tr className="text-muted-foreground border-b border-border">
-                  {['合约', '方向', '数量', '开仓均价', '标记价', '强平价', '保证金', '未实现盈亏', 'ROE%', '操作'].map(h => (
-                    <th key={h} className="px-3 py-1.5 text-left font-medium whitespace-nowrap">{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {allPositions.map(({ symbol, position: pos, index: i }) => {
-                  const price = priceMap[symbol] || 0;
-                  const pnl = calcUnrealizedPnl(pos, price);
-                  const roe = calcROE(pos, price);
-                  const liq = calcLiquidationPrice(pos);
-                  const isProfit = pnl >= 0;
-                  const isActive = symbol === activeSymbol;
-                  const effectiveMargin = pos.marginMode === 'isolated' && pos.isolatedMargin != null
-                    ? pos.isolatedMargin : pos.margin;
-                  return (
-                    <tr key={`${symbol}-${i}`} className={`border-b border-border/30 hover:bg-accent/20 ${isActive ? '' : 'opacity-80'}`}>
-                      <td className="px-3 py-2">
-                        <span className="text-foreground font-medium">{symbol.replace('USDT', '')}</span>
-                        <span className="text-muted-foreground text-[10px] ml-0.5">/USDT</span>
-                      </td>
-                      <td className="px-3 py-2">
-                        <span className={`font-bold ${pos.side === 'LONG' ? 'trading-green' : 'trading-red'}`}>
-                          {pos.side === 'LONG' ? '多' : '空'} {pos.leverage}x
-                        </span>
-                        <span className={`ml-1 text-[10px] ${pos.marginMode === 'isolated' ? 'text-amber-400' : 'text-muted-foreground'}`}>
-                          {pos.marginMode === 'cross' ? '全仓' : '逐仓'}
-                        </span>
-                      </td>
-                      <td className="px-3 py-2">{pos.quantity.toFixed(4)}</td>
-                      <td className="px-3 py-2">{pos.entryPrice.toFixed(2)}</td>
-                      <td className="px-3 py-2">{price > 0 ? price.toFixed(2) : '-'}</td>
-                      <td className="px-3 py-2 text-destructive">{liq.toFixed(2)}</td>
-                      <td className="px-3 py-2">
-                        <div className="flex items-center gap-1">
-                          <span>{effectiveMargin.toFixed(2)}</span>
-                          {pos.marginMode === 'isolated' && onAddIsolatedMargin && (
-                            addMarginTarget?.sym === symbol && addMarginTarget?.idx === i ? (
-                              <span className="flex items-center gap-0.5">
-                                <input
-                                  type="number"
-                                  value={addMarginAmount}
-                                  onChange={e => setAddMarginAmount(e.target.value)}
-                                  onClick={e => e.stopPropagation()}
-                                  className="w-14 px-1 py-0.5 rounded text-[10px] bg-secondary border border-border text-foreground"
-                                  placeholder="金额"
-                                  autoFocus
-                                  onKeyDown={e => e.key === 'Enter' && handleSubmitMargin()}
-                                />
-                                <button onClick={handleSubmitMargin} className="text-primary text-[10px] font-bold">✓</button>
-                                <button onClick={() => setAddMarginTarget(null)} className="text-muted-foreground text-[10px]">✗</button>
-                              </span>
-                            ) : (
-                              <button
-                                onClick={(e) => { e.stopPropagation(); setAddMarginTarget({ sym: symbol, idx: i }); setAddMarginAmount(''); }}
-                                className="p-0.5 rounded hover:bg-accent text-primary"
-                                title="追加保证金"
-                              >
-                                <Plus className="w-3 h-3" />
-                              </button>
-                            )
-                          )}
+            <div className="p-3 space-y-3">
+              {allPositions.map(({ symbol, position: pos, index: i }) => {
+                const price = priceMap[symbol] || 0;
+                const pnl = calcUnrealizedPnl(pos, price);
+                const roe = calcROE(pos, price);
+                const liq = calcLiquidationPrice(pos);
+                const isProfit = pnl >= 0;
+                const effectiveMargin = pos.marginMode === 'isolated' && pos.isolatedMargin != null
+                  ? pos.isolatedMargin : pos.margin;
+                const notional = pos.quantity * price;
+                const marginRatio = notional > 0 ? ((effectiveMargin + pnl) / notional * 100) : 0;
+                const baseCoin = symbol.replace('USDT', '');
+
+                return (
+                  <div
+                    key={`${symbol}-${i}`}
+                    className="rounded-lg border border-border bg-card shadow-sm overflow-hidden"
+                  >
+                    {/* Header */}
+                    <div className="flex items-center gap-2 px-3 py-2 border-b border-border/50">
+                      <span className="text-sm font-bold text-foreground font-mono">{baseCoin}</span>
+                      <span className="text-xs text-muted-foreground">/&nbsp;USDT 永续</span>
+                      <span
+                        className={`ml-1 text-[10px] font-bold px-1.5 py-0.5 rounded ${
+                          pos.side === 'LONG'
+                            ? 'bg-emerald-500/15 text-emerald-400'
+                            : 'bg-red-500/15 text-red-400'
+                        }`}
+                      >
+                        {pos.side === 'LONG' ? '多' : '空'} {pos.leverage}x {pos.marginMode === 'cross' ? '全仓' : '逐仓'}
+                      </span>
+                    </div>
+
+                    {/* Hero Stats */}
+                    <div className="flex items-start justify-between px-3 py-2.5">
+                      <div>
+                        <div className="text-[10px] text-muted-foreground mb-0.5">未实现盈亏 (USDT)</div>
+                        <div className={`text-lg font-bold font-mono tabular-nums ${isProfit ? 'text-emerald-400' : 'text-red-400'}`}>
+                          {isProfit ? '+' : ''}{pnl.toFixed(2)}
                         </div>
-                      </td>
-                      <td className={`px-3 py-2 font-bold ${isProfit ? 'trading-green' : 'trading-red'}`}>
-                        {isProfit ? '+' : ''}{pnl.toFixed(2)}
-                      </td>
-                      <td className={`px-3 py-2 font-bold ${isProfit ? 'trading-green' : 'trading-red'}`}>
-                        {isProfit ? '+' : ''}{roe.toFixed(2)}%
-                      </td>
-                      <td className="px-3 py-2">
-                        <button
-                          onClick={() => onClosePosition(symbol, i)}
-                          className="px-2 py-0.5 rounded text-[10px] font-medium bg-destructive/20 text-destructive hover:bg-destructive/30 transition-colors"
-                        >
-                          平仓
-                        </button>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+                      </div>
+                      <div className="text-right">
+                        <div className="text-[10px] text-muted-foreground mb-0.5">ROE</div>
+                        <div className={`text-lg font-bold font-mono tabular-nums ${isProfit ? 'text-emerald-400' : 'text-red-400'}`}>
+                          {isProfit ? '+' : ''}{roe.toFixed(2)}%
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Details Grid */}
+                    <div className="grid grid-cols-3 gap-x-4 gap-y-2 px-3 pb-2.5">
+                      <DetailCell label="持仓数量" value={pos.quantity.toFixed(4)} />
+                      <DetailCell label="保证金" value={effectiveMargin.toFixed(2)} />
+                      <DetailCell label="保证金比率" value={`${marginRatio.toFixed(2)}%`} />
+                      <DetailCell label="开仓价格" value={pos.entryPrice.toFixed(2)} />
+                      <DetailCell label="标记价格" value={price > 0 ? price.toFixed(2) : '-'} />
+                      <DetailCell label="强平价格" value={liq.toFixed(2)} valueClassName="text-red-400" />
+                    </div>
+
+                    {/* Action Buttons */}
+                    <div className="flex border-t border-border/50">
+                      <ActionBtn label="杠杆" onClick={(e) => { e.stopPropagation(); setLeverageModal({ symbol, index: i, pos }); }} />
+                      <ActionBtn label="止盈/止损" onClick={(e) => { e.stopPropagation(); setTpslModal({ symbol, index: i, pos }); }} />
+                      <ActionBtn
+                        label="平仓"
+                        danger
+                        onClick={(e) => { e.stopPropagation(); handleClose(symbol, i); }}
+                        disabled={closingKey === `${symbol}-${i}`}
+                      />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
           )
         )}
 
+        {/* ===== PENDING ORDERS ===== */}
         {activeTab === 'pending' && (
           allOrders.length === 0 ? (
             <div className="px-4 py-6 text-center text-xs text-muted-foreground">暂无委托</div>
@@ -191,7 +187,7 @@ export function PositionPanel({
                     <td className="px-3 py-2 text-muted-foreground">
                       {{ LIMIT: '限价', POST_ONLY: '只做Maker', MARKET: '市价', LIMIT_TP_SL: '限价TP/SL', MARKET_TP_SL: '市价TP/SL', CONDITIONAL: '条件', TRAILING_STOP: '跟踪', TWAP: 'TWAP', SCALED: '分段' }[order.type] || order.type}
                     </td>
-                    <td className={`px-3 py-2 font-bold ${order.side === 'LONG' ? 'trading-green' : 'trading-red'}`}>
+                    <td className={`px-3 py-2 font-bold ${order.side === 'LONG' ? 'text-emerald-400' : 'text-red-400'}`}>
                       {order.side === 'LONG' ? '多' : '空'}
                     </td>
                     <td className="px-3 py-2">{order.price > 0 ? order.price.toFixed(2) : '市价'}</td>
@@ -213,6 +209,7 @@ export function PositionPanel({
           )
         )}
 
+        {/* ===== HISTORY ===== */}
         {activeTab === 'history' && (
           tradeRecords.length === 0 ? (
             <div className="px-4 py-6 text-center text-xs text-muted-foreground">暂无历史记录</div>
@@ -237,7 +234,7 @@ export function PositionPanel({
                         {t.action === 'LIQUIDATION' ? '💀爆仓' : t.action === 'OPEN' ? '开仓' : '平仓'}
                       </span>
                     </td>
-                    <td className={`px-3 py-2 font-bold ${t.side === 'LONG' ? 'trading-green' : 'trading-red'}`}>
+                    <td className={`px-3 py-2 font-bold ${t.side === 'LONG' ? 'text-emerald-400' : 'text-red-400'}`}>
                       {t.side === 'LONG' ? '多' : '空'} {t.leverage}x
                     </td>
                     <td className="px-3 py-2">{t.entryPrice.toFixed(2)}</td>
@@ -245,7 +242,7 @@ export function PositionPanel({
                     <td className="px-3 py-2">{t.quantity.toFixed(4)}</td>
                     <td className="px-3 py-2 text-muted-foreground">{t.fee.toFixed(4)}</td>
                     <td className="px-3 py-2 text-muted-foreground">{t.slippage > 0 ? t.slippage.toFixed(4) : '-'}</td>
-                    <td className={`px-3 py-2 font-bold ${t.pnl >= 0 ? 'trading-green' : 'trading-red'}`}>
+                    <td className={`px-3 py-2 font-bold ${t.pnl >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
                       {t.pnl >= 0 ? '+' : ''}{t.pnl.toFixed(2)}
                     </td>
                   </tr>
@@ -255,6 +252,7 @@ export function PositionPanel({
           )
         )}
 
+        {/* ===== FUNDING ===== */}
         {activeTab === 'funding' && (
           fundingRecords.length === 0 ? (
             <div className="px-4 py-6 text-center text-xs text-muted-foreground">
@@ -276,12 +274,12 @@ export function PositionPanel({
                       {new Date(t.openTime).toLocaleString()}
                     </td>
                     <td className="px-3 py-2 text-foreground">{t.symbol?.replace('USDT', '/USDT')}</td>
-                    <td className={`px-3 py-2 font-bold ${t.side === 'LONG' ? 'trading-green' : 'trading-red'}`}>
+                    <td className={`px-3 py-2 font-bold ${t.side === 'LONG' ? 'text-emerald-400' : 'text-red-400'}`}>
                       {t.side === 'LONG' ? '多' : '空'}
                     </td>
                     <td className="px-3 py-2">{(t.entryPrice * t.quantity).toFixed(2)}</td>
                     <td className="px-3 py-2 text-muted-foreground">0.01%</td>
-                    <td className={`px-3 py-2 font-bold ${t.pnl >= 0 ? 'trading-green' : 'trading-red'}`}>
+                    <td className={`px-3 py-2 font-bold ${t.pnl >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
                       {t.pnl >= 0 ? '+' : ''}{t.pnl.toFixed(4)}
                     </td>
                   </tr>
@@ -291,6 +289,64 @@ export function PositionPanel({
           )
         )}
       </div>
+
+      {/* Modals */}
+      {leverageModal && (
+        <LeverageModal
+          pos={leverageModal.pos}
+          symbol={leverageModal.symbol}
+          onClose={() => setLeverageModal(null)}
+          onConfirm={(newLev) => {
+            toast.success(`杠杆已调整为 ${newLev}x`);
+            setLeverageModal(null);
+          }}
+        />
+      )}
+      {tpslModal && (
+        <TpSlModal
+          pos={tpslModal.pos}
+          symbol={tpslModal.symbol}
+          markPrice={priceMap[tpslModal.symbol] || 0}
+          liqPrice={calcLiquidationPrice(tpslModal.pos)}
+          onClose={() => setTpslModal(null)}
+          onConfirm={(tp, sl, pct) => {
+            toast.success(`止盈止损已设置 · TP: ${tp || '-'} / SL: ${sl || '-'} (${pct}%)`);
+            setTpslModal(null);
+          }}
+        />
+      )}
     </div>
+  );
+}
+
+/* ===== Sub-components ===== */
+
+function DetailCell({ label, value, valueClassName }: { label: string; value: string; valueClassName?: string }) {
+  return (
+    <div className="min-w-0">
+      <div className="text-[10px] text-muted-foreground truncate">{label}</div>
+      <div className={`text-xs font-mono tabular-nums text-foreground ${valueClassName || ''}`}>{value}</div>
+    </div>
+  );
+}
+
+function ActionBtn({ label, onClick, danger, disabled }: {
+  label: string;
+  onClick: (e: React.MouseEvent) => void;
+  danger?: boolean;
+  disabled?: boolean;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      className={`flex-1 py-2 text-xs font-medium transition-all active:scale-95 border-r border-border/50 last:border-r-0 ${
+        danger
+          ? 'text-red-400 hover:bg-red-500/10'
+          : 'text-muted-foreground hover:bg-accent/50 hover:text-foreground'
+      } disabled:opacity-50`}
+    >
+      {label}
+    </button>
   );
 }
