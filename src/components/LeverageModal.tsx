@@ -42,7 +42,7 @@ export function LeverageModal({ pos, symbol, onClose, onConfirm }: Props) {
             {baseCoin}/USDT 永续 · 当前 {pos.leverage}x
           </div>
 
-          {/* Leverage display with +/- */}
+          {/* Leverage display with +/- and direct input */}
           <div className="flex items-center justify-center gap-4">
             <button
               onClick={() => adjust(-1)}
@@ -50,8 +50,22 @@ export function LeverageModal({ pos, symbol, onClose, onConfirm }: Props) {
             >
               <Minus className="w-4 h-4 text-foreground" />
             </button>
-            <div className="text-2xl font-bold font-mono text-foreground tabular-nums w-20 text-center">
-              {leverage}x
+            <div className="relative w-24">
+              <input
+                type="number"
+                min={1}
+                max={maxLev}
+                value={leverage}
+                onChange={e => {
+                  const v = parseInt(e.target.value);
+                  if (!isNaN(v)) setLeverage(v);
+                }}
+                onBlur={() => {
+                  setLeverage(v => Math.max(1, Math.min(maxLev, v)));
+                }}
+                className="w-full text-center text-2xl font-bold font-mono text-foreground tabular-nums bg-transparent border border-border rounded-lg px-1 py-0.5 focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/30 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+              />
+              <span className="absolute right-2 top-1/2 -translate-y-1/2 text-sm font-bold text-muted-foreground pointer-events-none">x</span>
             </div>
             <button
               onClick={() => adjust(1)}

@@ -38,12 +38,21 @@ interface Props {
   pickedPrice?: number | null;
 }
 
-export function OrderPanel({ currentPrice, onPlaceOrder, disabled, symbol, coolingOff, coolingOffLabel, onOpenCoolingOff, priceProtection, onTogglePriceProtection, pricePrecision = 2, quantityPrecision = 3, crosshairPrice }: Props) {
+export function OrderPanel({ currentPrice, onPlaceOrder, disabled, symbol, coolingOff, coolingOffLabel, onOpenCoolingOff, priceProtection, onTogglePriceProtection, pricePrecision = 2, quantityPrecision = 3, crosshairPrice, pickMode, onPickModeChange, pickedPrice }: Props) {
   const baseCoin = symbol.replace('USDT', '') || 'BTC';
 
   const [orderType, setOrderType] = useState<OrderType>('MARKET');
   const [marginMode, setMarginMode] = useState<MarginMode>('cross');
-  const [leverage, setLeverage] = useState(20);
+  // Unified symbol leverage: same leverage for both LONG and SHORT on same symbol
+  const [symbolLeverage, setSymbolLeverage] = usePersistedState<Record<string, number>>('symbol_leverage', {});
+  const leverage = symbolLeverage[symbol] ?? 20;
+  const setLeverage = (v: number | ((prev: number) => number)) => {
+    setSymbolLeverage(prev => {
+      const current = prev[symbol] ?? 20;
+      const next = typeof v === 'function' ? v(current) : v;
+      return { ...prev, [symbol]: next };
+    });
+  };
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
