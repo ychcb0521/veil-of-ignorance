@@ -1104,10 +1104,10 @@ const Index = () => {
       />
 
       {perfSymbol && (
-        <TradePerformancePanel
+        <TradeInsightsPanel
           open={!!perfSymbol}
           onClose={() => setPerfSymbol(null)}
-          symbol={perfSymbol}
+          initialSymbol={perfSymbol}
           tradeHistory={tradeHistory}
         />
       )}
