@@ -75,8 +75,13 @@ function matchOrdersOffline(
         const margin = (order.quantity * fillPrice) / order.leverage;
         bal -= margin + fee;
         newPositions.push({
-          side: order.side, entryPrice: fillPrice, quantity: order.quantity,
-          leverage: order.leverage, marginMode: order.marginMode, margin,
+          id: crypto.randomUUID(),
+          side: order.side,
+          entryPrice: fillPrice,
+          quantity: order.quantity,
+          leverage: order.leverage,
+          marginMode: order.marginMode,
+          margin,
           isolatedMargin: order.marginMode === 'isolated' ? margin : undefined,
         });
       } else {
