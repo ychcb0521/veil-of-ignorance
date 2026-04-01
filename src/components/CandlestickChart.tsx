@@ -695,7 +695,11 @@ function CandlestickChartComponent({ data, symbol, onLoadOlder, loadingOlder, tr
         <div
           ref={containerRef}
           className="absolute inset-0"
-          style={{ left: 34, backgroundColor: theme === 'light' ? '#FFFFFF' : '#0B0E11' }}
+          style={{
+            left: 34,
+            backgroundColor: theme === 'light' ? '#FFFFFF' : '#0B0E11',
+            cursor: activeDrawingTool ? 'crosshair' : 'default',
+          }}
         />
 
         <DrawingToolbar
