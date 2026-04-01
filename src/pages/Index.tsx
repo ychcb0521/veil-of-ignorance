@@ -101,6 +101,7 @@ const Index = () => {
   useBackgroundPrices();
 
   const [bottomTab, setBottomTab] = useState('positions');
+  const [crosshairPrice, setCrosshairPrice] = useState<number | null>(null);
   const [analyticsOpen, setAnalyticsOpen] = useState(false);
   const [assetsOpen, setAssetsOpen] = useState(false);
   const [perfSymbol, setPerfSymbol] = useState<string | null>(null);
