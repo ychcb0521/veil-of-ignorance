@@ -7,6 +7,7 @@ import { X, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { LeverageModal } from '@/components/LeverageModal';
 import { TpSlModal } from '@/components/TpSlModal';
+import { ClosePositionModal } from '@/components/ClosePositionModal';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Badge } from '@/components/ui/badge';
 import {
@@ -55,6 +56,7 @@ export function PositionPanel({
 }: Props) {
   const [leverageModal, setLeverageModal] = useState<{ symbol: string; index: number; pos: Position } | null>(null);
   const [tpslModal, setTpslModal] = useState<{ symbol: string; index: number; pos: Position } | null>(null);
+  const [closeModal, setCloseModal] = useState<{ symbol: string; index: number; pos: Position } | null>(null);
   const [closingKey, setClosingKey] = useState<string | null>(null);
   const [hideOtherContracts, setHideOtherContracts] = useState(false);
   const [closeAllConfirmOpen, setCloseAllConfirmOpen] = useState(false);
@@ -131,15 +133,12 @@ export function PositionPanel({
     { key: 'funding', label: '资金费', count: fundingRecords.length },
   ];
 
-  const handleClose = (symbol: string, index: number) => {
-    const key = `${symbol}-${index}`;
-    if (closingKey === key) return;
-    setClosingKey(key);
-    toast('正在平仓...', { duration: 800 });
-    setTimeout(() => {
-      onClosePosition(symbol, index);
-      setClosingKey(null);
-    }, 300);
+  const handleOpenCloseModal = (symbol: string, index: number, pos: Position) => {
+    setCloseModal({ symbol, index, pos });
+  };
+
+  const handleCloseConfirm = (symbol: string, index: number, percentage: number) => {
+    onClosePosition(symbol, index, percentage);
   };
 
   const handleCloseAll = () => {
@@ -293,8 +292,7 @@ export function PositionPanel({
                       <ActionBtn
                         label="平仓"
                         danger
-                        onClick={(e) => { e.stopPropagation(); handleClose(symbol, i); }}
-                        disabled={closingKey === `${symbol}-${i}`}
+                        onClick={(e) => { e.stopPropagation(); handleOpenCloseModal(symbol, i, pos); }}
                       />
                     </div>
                   </div>
@@ -476,8 +474,19 @@ export function PositionPanel({
           }}
         />
       )}
+      {closeModal && (
+        <ClosePositionModal
+          open={!!closeModal}
+          onClose={() => setCloseModal(null)}
+          symbol={closeModal.symbol}
+          position={closeModal.pos}
+          posIndex={closeModal.index}
+          currentPrice={priceMap[closeModal.symbol] || 0}
+          pricePrecision={getPrecision(closeModal.symbol)}
+          onConfirm={handleCloseConfirm}
+        />
+      )}
 
-      {/* Close All Confirmation Modal */}
       <Dialog open={closeAllConfirmOpen} onOpenChange={setCloseAllConfirmOpen}>
         <DialogContent className="sm:max-w-sm">
           <DialogHeader>

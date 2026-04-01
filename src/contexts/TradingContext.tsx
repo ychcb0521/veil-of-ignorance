@@ -231,6 +231,12 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
   const priceMapRef = useRef(priceMap);
   useEffect(() => { priceMapRef.current = priceMap; }, [priceMap]);
 
+  const balanceRef = useRef(balance);
+  useEffect(() => { balanceRef.current = balance; }, [balance]);
+
+  const positionsMapRef = useRef(positionsMap);
+  useEffect(() => { positionsMapRef.current = positionsMap; }, [positionsMap]);
+
   // Total position count across all symbols
   const totalPositionCount = useMemo(() => {
     let count = 0;
@@ -557,9 +563,10 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
 
   // ===== Place Order (with strict accounting enforcement — single global pool) =====
   const handlePlaceOrder = useCallback((symbol: string, order: PlaceOrderParams) => {
-    const available = calcAvailable(balance, positionsMap);
+    // Use refs to bypass stale closures in high-frequency time machine ticks
+    const available = calcAvailable(balanceRef.current, positionsMapRef.current);
     // Use ref to avoid stale closure — always get the freshest price
-    const symbolPrice = priceMapRef.current[symbol] || priceMap[symbol] || 0;
+    const symbolPrice = priceMapRef.current[symbol] || 0;
     const effectiveCurrentPrice = Number(order.latestPrice || symbolPrice);
 
     console.log('[下单执行]', {
@@ -709,17 +716,17 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
     };
     setOrdersMap(prev => ({ ...prev, [symbol]: [...(prev[symbol] || []), newOrder] }));
     toast.info('委托已挂出');
-  }, [balance, positionsMap, priceMap, getEffectiveTime]);
+  }, [getEffectiveTime]);
 
   // ===== Close Position — supports partial close via percentage (0-1] =====
   const handleClosePosition = useCallback((symbol: string, index: number, percentage: number = 1) => {
-    const symbolPositions = positionsMap[symbol] || [];
+    const symbolPositions = positionsMapRef.current[symbol] || [];
     const pos = symbolPositions[index];
     if (!pos || pos.quantity <= 0) return;
 
     const pct = Math.min(1, Math.max(0.01, percentage));
     const closeQty = pos.quantity * pct;
-    const rawPrice = priceMapRef.current[symbol] || priceMap[symbol] || 0;
+    const rawPrice = priceMapRef.current[symbol] || 0;
     if (rawPrice <= 0) { toast.error('无法获取当前价格'); return; }
 
     const closeSide: OrderSide = pos.side === 'LONG' ? 'SHORT' : 'LONG';
@@ -768,10 +775,11 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
     }]);
 
     const pctLabel = pct < 1 ? ` (${Math.round(pct * 100)}%)` : '';
-    toast(pnl >= 0 ? '盈利平仓 ✅' : '亏损平仓 ❌', {
-      description: `${symbol}${pctLabel} ${pnl >= 0 ? '+' : ''}${(pnl - fee).toFixed(2)} USDT`,
+    const netPnl = pnl - fee;
+    toast.success(`市价平仓成功，已结算盈亏：${netPnl >= 0 ? '+' : ''}${netPnl.toFixed(2)} USDT`, {
+      description: `${symbol}${pctLabel} @ ${fillPrice.toFixed(2)}`,
     });
-  }, [positionsMap, priceMap, getEffectiveTime]);
+  }, [getEffectiveTime]);
 
   // ===== Place TP/SL conditional orders (reduce-only) =====
   const handlePlaceTpSl = useCallback((symbol: string, pos: Position, tp: number | null, sl: number | null, pct: number) => {
