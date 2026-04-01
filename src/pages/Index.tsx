@@ -88,7 +88,7 @@ const Index = () => {
     allPositions, allOrders, currentPrice, activeSymbols,
     pricePrecision, quantityPrecision, setPricePrecision, setQuantityPrecision,
     handlePlaceOrder, handleClosePosition, handleCancelOrder,
-    handleAddIsolatedMargin,
+    handleAddIsolatedMargin, handleClearSymbolData,
     liquidationOpen, liquidationDetails, closeLiquidationModal,
     timeMode, setTimeMode, coinTimelines, setCoinTimelines,
     totalPositionCount, getEffectiveTime, getCoinState,
