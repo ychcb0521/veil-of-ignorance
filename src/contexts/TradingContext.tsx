@@ -720,13 +720,13 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
 
   // ===== Close Position — supports partial close via percentage (0-1] =====
   const handleClosePosition = useCallback((symbol: string, index: number, percentage: number = 1) => {
-    const symbolPositions = positionsMap[symbol] || [];
+    const symbolPositions = positionsMapRef.current[symbol] || [];
     const pos = symbolPositions[index];
     if (!pos || pos.quantity <= 0) return;
 
     const pct = Math.min(1, Math.max(0.01, percentage));
     const closeQty = pos.quantity * pct;
-    const rawPrice = priceMapRef.current[symbol] || priceMap[symbol] || 0;
+    const rawPrice = priceMapRef.current[symbol] || 0;
     if (rawPrice <= 0) { toast.error('无法获取当前价格'); return; }
 
     const closeSide: OrderSide = pos.side === 'LONG' ? 'SHORT' : 'LONG';
