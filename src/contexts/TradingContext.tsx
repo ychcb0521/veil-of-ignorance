@@ -716,7 +716,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
     };
     setOrdersMap(prev => ({ ...prev, [symbol]: [...(prev[symbol] || []), newOrder] }));
     toast.info('委托已挂出');
-  }, [balance, positionsMap, priceMap, getEffectiveTime]);
+  }, [getEffectiveTime]);
 
   // ===== Close Position — supports partial close via percentage (0-1] =====
   const handleClosePosition = useCallback((symbol: string, index: number, percentage: number = 1) => {
