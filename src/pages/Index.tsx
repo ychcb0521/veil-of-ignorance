@@ -67,6 +67,7 @@ function matchOrdersOffline(
             else if (order.side === 'SHORT' && kline.high >= lp) { triggered = true; fillPrice = lp; }
           }
         }
+      }
 
       if (triggered) {
         const fee = calcFee(fillPrice, order.quantity, true);
