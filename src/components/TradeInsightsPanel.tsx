@@ -437,10 +437,13 @@ export function TradeInsightsPanel({ open, onClose, tradeHistory, initialSymbol,
       const closePrice = pair.close.exitPrice;
 
       // Use chart's coordinate conversion
-      const p1 = chart.convertToPixel({ timestamp: openTs, value: openPrice }, { paneId: 'candle_pane' });
-      const p2 = chart.convertToPixel({ timestamp: closeTs, value: closePrice }, { paneId: 'candle_pane' });
+      const p1Raw = chart.convertToPixel({ timestamp: openTs, value: openPrice }, { paneId: 'candle_pane' });
+      const p2Raw = chart.convertToPixel({ timestamp: closeTs, value: closePrice }, { paneId: 'candle_pane' });
 
-      if (!p1 || !p2) continue;
+      if (!p1Raw || !p2Raw) continue;
+      const p1 = Array.isArray(p1Raw) ? p1Raw[0] : p1Raw;
+      const p2 = Array.isArray(p2Raw) ? p2Raw[0] : p2Raw;
+      if (!p1?.x || !p1?.y || !p2?.x || !p2?.y) continue;
 
       const dist = pointToSegmentDist(clickX, clickY, p1.x, p1.y, p2.x, p2.y);
       if (dist < bestDist) {
