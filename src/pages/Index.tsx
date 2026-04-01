@@ -22,7 +22,7 @@ import { LiquidationModal } from '@/components/LiquidationModal';
 import { AnalyticsPanel } from '@/components/AnalyticsPanel';
 import { TradeInsightsPanel } from '@/components/TradeInsightsPanel';
 import { CoolingOffModal, useCoolingOff } from '@/components/CoolingOffModal';
-import { getConditionalTriggerDecision } from '@/lib/conditionalOrders';
+import { getConditionalTriggerDecisionFromRange } from '@/lib/conditionalOrders';
 import { toast } from 'sonner';
 import { BarChart3, Wallet, PanelRightClose, PanelRightOpen, Crosshair } from 'lucide-react';
 import type { PendingOrder, OrderType } from '@/types/trading';
@@ -58,29 +58,26 @@ function matchOrdersOffline(
         if (dir === 'UP' && kline.high >= order.stopPrice) { triggered = true; fillPrice = order.stopPrice; }
         else if (dir === 'DOWN' && kline.low <= order.stopPrice) { triggered = true; fillPrice = order.stopPrice; }
       } else if (order.type === 'CONDITIONAL') {
-        const decision = getConditionalTriggerDecision(order, kline.close);
+        const decision = getConditionalTriggerDecisionFromRange(order, kline);
         if (!decision) {
           stillPending.push(order);
           continue;
         }
 
         if (decision.triggered) {
-          if (order.conditionalExecType === 'MARKET') { triggered = true; fillPrice = order.stopPrice; }
-          else {
-            const lp = order.conditionalLimitPrice || order.price;
-            if (order.side === 'LONG' && kline.low <= lp) { triggered = true; fillPrice = lp; }
-            else if (order.side === 'SHORT' && kline.high >= lp) { triggered = true; fillPrice = lp; }
-          }
+          triggered = true;
+          fillPrice = decision.triggerPriceNum;
         }
       }
 
       if (triggered) {
-        const fee = calcFee(fillPrice, order.quantity, true);
+        const fee = calcFee(fillPrice, order.quantity, false);
         const margin = (order.quantity * fillPrice) / order.leverage;
         bal -= margin + fee;
         newPositions.push({
           side: order.side, entryPrice: fillPrice, quantity: order.quantity,
           leverage: order.leverage, marginMode: order.marginMode, margin,
+          isolatedMargin: order.marginMode === 'isolated' ? margin : undefined,
         });
       } else {
         stillPending.push(order);
@@ -198,15 +195,113 @@ const Index = () => {
   const latestChartPriceRef = useRef(0);
   const effectiveSimTimeRef = useRef(effectiveSimTime);
   const priceProtectionRef = useRef(priceProtection);
+  const ordersMapRef = useRef(ordersMap);
+  const conditionalTriggerLocksRef = useRef<Set<string>>(new Set());
 
   useEffect(() => { timeModeRef.current = timeMode; }, [timeMode]);
   useEffect(() => { activeSymbolRef.current = activeSymbol; }, [activeSymbol]);
   useEffect(() => { coinTimelinesRef.current = coinTimelines; }, [coinTimelines]);
   useEffect(() => { effectiveSimTimeRef.current = effectiveSimTime; }, [effectiveSimTime]);
   useEffect(() => { priceProtectionRef.current = priceProtection; }, [priceProtection]);
+  useEffect(() => { ordersMapRef.current = ordersMap; }, [ordersMap]);
+  useEffect(() => {
+    const activeOrderIds = new Set(Object.values(ordersMap).flatMap((symbolOrders) => symbolOrders.map((order) => order.id)));
+    conditionalTriggerLocksRef.current.forEach((orderId) => {
+      if (!activeOrderIds.has(orderId)) {
+        conditionalTriggerLocksRef.current.delete(orderId);
+      }
+    });
+  }, [ordersMap]);
 
   const REACT_FLUSH_MS = 800;
   const PERSIST_MS = 500;
+
+  const createTriggeredConditionalPosition = useCallback((symbol: string, order: PendingOrder, triggerPrice: number, openTime: number) => {
+    const entryPrice = Number(triggerPrice);
+    if (!Number.isFinite(entryPrice) || entryPrice <= 0) return;
+
+    const fee = calcFee(entryPrice, order.quantity, false);
+    const margin = (order.quantity * entryPrice) / order.leverage;
+
+    setBalance(prev => prev - margin - fee);
+    setPositionsMap(prev => ({
+      ...prev,
+      [symbol]: [...(prev[symbol] || []), {
+        side: order.side,
+        entryPrice,
+        quantity: order.quantity,
+        leverage: order.leverage,
+        marginMode: order.marginMode,
+        margin,
+        isolatedMargin: order.marginMode === 'isolated' ? margin : undefined,
+      }],
+    }));
+    setTradeHistory(prev => [...prev, {
+      id: crypto.randomUUID(),
+      symbol,
+      side: order.side,
+      type: order.type,
+      action: 'OPEN' as const,
+      entryPrice,
+      exitPrice: 0,
+      quantity: order.quantity,
+      leverage: order.leverage,
+      pnl: 0,
+      fee,
+      slippage: 0,
+      openTime,
+      closeTime: 0,
+    }]);
+    toast.success(`条件单已触发：${symbol} ${order.side} @ ${entryPrice.toFixed(2)}`);
+  }, [setBalance, setPositionsMap, setTradeHistory]);
+
+  const runConditionalMatchingForSymbol = useCallback((symbol: string, candle: Pick<KlineData, 'high' | 'low'>, openTime: number) => {
+    const symbolOrders = ordersMapRef.current[symbol] || [];
+    if (!symbolOrders.some(order => order.type === 'CONDITIONAL' && order.status === 'PENDING' && !conditionalTriggerLocksRef.current.has(order.id))) {
+      return;
+    }
+
+    const triggeredOrders: Array<{ order: PendingOrder; triggerPrice: number }> = [];
+
+    setOrdersMap(prev => {
+      const orders = prev[symbol] || [];
+      if (orders.length === 0) return prev;
+
+      let changed = false;
+      const remaining: PendingOrder[] = [];
+
+      for (const order of orders) {
+        if (order.type !== 'CONDITIONAL') {
+          remaining.push(order);
+          continue;
+        }
+
+        if (order.status !== 'PENDING' || conditionalTriggerLocksRef.current.has(order.id)) {
+          remaining.push(order);
+          continue;
+        }
+
+        const decision = getConditionalTriggerDecisionFromRange(order, candle);
+        if (!decision?.triggered) {
+          remaining.push(order);
+          continue;
+        }
+
+        conditionalTriggerLocksRef.current.add(order.id);
+        triggeredOrders.push({
+          order: { ...order, status: 'FILLED' as const },
+          triggerPrice: decision.triggerPriceNum,
+        });
+        changed = true;
+      }
+
+      return changed ? { ...prev, [symbol]: remaining } : prev;
+    });
+
+    triggeredOrders.forEach(({ order, triggerPrice }) => {
+      createTriggeredConditionalPosition(symbol, order, triggerPrice, openTime);
+    });
+  }, [createTriggeredConditionalPosition, setOrdersMap]);
 
   // ===== UNIFIED GAME LOOP =====
   useEffect(() => {
@@ -263,6 +358,11 @@ const Index = () => {
               if (candleEnd <= activeSimTime) { newCandles++; cursorRef.current++; } else break;
             }
             if (newCandles > 0) {
+              const settledStart = Math.max(0, cursorRef.current - newCandles);
+              for (let i = settledStart; i < cursorRef.current; i++) {
+                runConditionalMatchingForSymbol(activeSym, data[i], Math.min(activeSimTime, data[i].time + iMs));
+              }
+
               const batchStart = Math.max(0, cursorRef.current - Math.min(newCandles, 3));
               for (let i = batchStart; i < cursorRef.current; i++) {
                 const c = data[i];
@@ -285,6 +385,10 @@ const Index = () => {
                   low: Math.min(candle.open, close, rawLow),
                   close, volume: candle.volume * progress,
                 });
+                runConditionalMatchingForSymbol(activeSym, {
+                  high: Math.max(candle.open, close, rawHigh),
+                  low: Math.min(candle.open, close, rawLow),
+                }, activeSimTime);
                 latestChartPriceRef.current = close;
               }
             }
@@ -333,6 +437,11 @@ const Index = () => {
             if (candleEnd <= simTime) { newCandles++; cursorRef.current++; } else break;
           }
           if (newCandles > 0) {
+            const settledStart = Math.max(0, cursorRef.current - newCandles);
+            for (let i = settledStart; i < cursorRef.current; i++) {
+              runConditionalMatchingForSymbol(activeSymbolRef.current, data[i], Math.min(simTime, data[i].time + iMs));
+            }
+
             const batchStart = Math.max(0, cursorRef.current - Math.min(newCandles, 3));
             for (let i = batchStart; i < cursorRef.current; i++) {
               const c = data[i];
@@ -355,6 +464,10 @@ const Index = () => {
                 low: Math.min(candle.open, close, rawLow),
                 close, volume: candle.volume * progress,
               });
+              runConditionalMatchingForSymbol(activeSymbolRef.current, {
+                high: Math.max(candle.open, close, rawHigh),
+                low: Math.min(candle.open, close, rawLow),
+              }, simTime);
               latestChartPriceRef.current = close;
             }
           }
@@ -376,7 +489,7 @@ const Index = () => {
 
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
-  }, [shouldRunEngine, iMs]);
+  }, [shouldRunEngine, iMs, runConditionalMatchingForSymbol]);
 
   // Build asset state for AssetOverview
   const assetState = useMemo<AssetState>(() => {
@@ -443,132 +556,6 @@ const Index = () => {
   }, [latestVisiblePrice, visibleData, activeSymbol]);
 
   const prevVisibleLenRef = useRef(0);
-
-  useEffect(() => {
-    if (activeCoinState.status === 'stopped' || visibleData.length === 0) return;
-
-    const latestKline = visibleData[visibleData.length - 1];
-    const anchoredLatestPrice = Number(latestChartPriceRef.current || latestVisiblePrice || latestKline.close);
-    if (!Number.isFinite(anchoredLatestPrice) || anchoredLatestPrice <= 0) return;
-
-    latestChartPriceRef.current = anchoredLatestPrice;
-
-    const filledOrders: Array<{
-      matchedOrder: PendingOrder;
-      fillPrice: number;
-      isMaker: boolean;
-      kline: KlineData;
-    }> = [];
-
-    setOrdersMap(prev => {
-      const orders = prev[activeSymbol] || [];
-      if (orders.length === 0) return prev;
-
-      let changed = false;
-      const remaining: PendingOrder[] = [];
-
-      for (const order of orders) {
-        if (order.type !== 'CONDITIONAL') {
-          remaining.push(order);
-          continue;
-        }
-
-        if (order.status !== 'PENDING') {
-          remaining.push(order);
-          continue;
-        }
-
-        const decision = getConditionalTriggerDecision(order, anchoredLatestPrice);
-        if (!decision?.triggered) {
-          remaining.push(order);
-          continue;
-        }
-
-        if (priceProtectionRef.current) {
-          const markPrice = (latestKline.open + latestKline.high + latestKline.low + latestKline.close) / 4;
-          const deviation = Math.abs(anchoredLatestPrice - markPrice) / markPrice;
-          if (deviation > PRICE_PROTECTION_THRESHOLD) {
-            remaining.push(order);
-            continue;
-          }
-        }
-
-        changed = true;
-
-        if (order.conditionalExecType === 'LIMIT') {
-          const limitPrice = Number(order.conditionalLimitPrice || order.price);
-          const canFillLimit = Number.isFinite(limitPrice) && limitPrice > 0 && (
-            order.side === 'LONG' ? anchoredLatestPrice <= limitPrice : anchoredLatestPrice >= limitPrice
-          );
-
-          if (canFillLimit) {
-            filledOrders.push({
-              matchedOrder: { ...order, status: 'FILLED' as const },
-              fillPrice: limitPrice,
-              isMaker: true,
-              kline: latestKline,
-            });
-          } else {
-            remaining.push({ ...order, type: 'LIMIT', price: limitPrice, status: 'ACTIVE' });
-          }
-          continue;
-        }
-
-        filledOrders.push({
-          matchedOrder: { ...order, status: 'FILLED' as const },
-          fillPrice: decision.triggerPriceNum,
-          isMaker: false,
-          kline: latestKline,
-        });
-      }
-
-      return changed ? { ...prev, [activeSymbol]: remaining } : prev;
-    });
-
-    for (const { matchedOrder, fillPrice, isMaker, kline } of filledOrders) {
-      let actualFillPrice = fillPrice;
-      let slippageAmount = 0;
-
-      if (!isMaker) {
-        const notional = fillPrice * matchedOrder.quantity;
-        actualFillPrice = calcSlippage(fillPrice, notional, matchedOrder.side, { high: kline.high, low: kline.low, close: kline.close });
-        slippageAmount = Math.abs(actualFillPrice - fillPrice) * matchedOrder.quantity;
-      }
-
-      const fee = calcFee(actualFillPrice, matchedOrder.quantity, isMaker);
-      const margin = (matchedOrder.quantity * actualFillPrice) / matchedOrder.leverage;
-
-      setBalance(prev => prev - margin - fee);
-      setPositionsMap(prev => ({
-        ...prev,
-        [activeSymbol]: [...(prev[activeSymbol] || []), {
-          side: matchedOrder.side,
-          entryPrice: actualFillPrice,
-          quantity: matchedOrder.quantity,
-          leverage: matchedOrder.leverage,
-          marginMode: matchedOrder.marginMode,
-          margin,
-        }],
-      }));
-      setTradeHistory(prev => [...prev, {
-        id: crypto.randomUUID(),
-        symbol: activeSymbol,
-        side: matchedOrder.side,
-        type: matchedOrder.type,
-        action: 'OPEN' as const,
-        entryPrice: actualFillPrice,
-        exitPrice: 0,
-        quantity: matchedOrder.quantity,
-        leverage: matchedOrder.leverage,
-        pnl: 0,
-        fee,
-        slippage: slippageAmount,
-        openTime: effectiveSimTimeRef.current,
-        closeTime: 0,
-      }]);
-      toast.success(`委托成交: ${matchedOrder.side === 'LONG' ? '开多' : '开空'} ${matchedOrder.quantity} @ ${actualFillPrice.toFixed(2)}`);
-    }
-  }, [activeCoinState.status, activeSymbol, visibleData, latestVisiblePrice]);
 
   // ===== MATCHING ENGINE for active symbol =====
   useEffect(() => {

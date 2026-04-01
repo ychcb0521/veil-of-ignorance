@@ -7,10 +7,10 @@
 
 import { useEffect, useRef, useCallback } from 'react';
 import { useTradingContext } from '@/contexts/TradingContext';
-import type { PendingOrder, Position } from '@/types/trading';
-import { calcFee, calcUnrealizedPnl } from '@/types/trading';
+import type { PendingOrder } from '@/types/trading';
+import { calcFee } from '@/types/trading';
 import { intervalToMs } from '@/hooks/useBinanceData';
-import { getConditionalTriggerDecision, isConditionalPendingOrder } from '@/lib/conditionalOrders';
+import { getConditionalTriggerDecisionFromRange } from '@/lib/conditionalOrders';
 import { toast } from 'sonner';
 
 interface KlinePrice {
@@ -49,10 +49,10 @@ async function fetchLatestPrice(symbol: string, interval: string, endTime: numbe
 export function useBackgroundPrices() {
   const {
     sim, activeSymbol, interval, activeSymbols,
-    priceMap, setPriceMap,
+    setPriceMap,
     ordersMap, setOrdersMap,
-    positionsMap, setPositionsMap,
-    balance, setBalance,
+    setPositionsMap,
+    setBalance,
     setTradeHistory,
   } = useTradingContext();
 
@@ -142,25 +142,20 @@ export function useBackgroundPrices() {
           else if (order.side === 'SHORT' && kline.high >= order.price) { triggered = true; fillPrice = order.price; }
         }
       } else if (order.type === 'CONDITIONAL') {
-        if (!isConditionalPendingOrder(order)) {
+        if (order.status !== 'PENDING') {
           continue;
         }
 
-        const decision = getConditionalTriggerDecision(order, kline.close);
+        const decision = getConditionalTriggerDecisionFromRange(order, kline);
         if (decision?.triggered) {
-          if (order.conditionalExecType === 'MARKET') {
-            triggered = true; fillPrice = order.stopPrice;
-          } else {
-            const lp = order.conditionalLimitPrice || order.price;
-            if (order.side === 'LONG' && kline.low <= lp) { triggered = true; fillPrice = lp; }
-            else if (order.side === 'SHORT' && kline.high >= lp) { triggered = true; fillPrice = lp; }
-          }
+          triggered = true;
+          fillPrice = decision.triggerPriceNum;
         }
       }
 
       if (triggered) {
         filledIds.push(order.id);
-        const fee = calcFee(fillPrice, order.quantity, true);
+        const fee = calcFee(fillPrice, order.quantity, false);
         const margin = (order.quantity * fillPrice) / order.leverage;
 
         setBalance(prev => prev - margin - fee);
@@ -169,9 +164,16 @@ export function useBackgroundPrices() {
           [symbol]: [...(prev[symbol] || []), {
             side: order.side, entryPrice: fillPrice, quantity: order.quantity,
             leverage: order.leverage, marginMode: order.marginMode, margin,
+            isolatedMargin: order.marginMode === 'isolated' ? margin : undefined,
           }],
         }));
-        toast.success(`[${symbol}] 后台委托成交: ${order.side === 'LONG' ? '多' : '空'} @ ${fillPrice.toFixed(2)}`);
+        setTradeHistory(prev => [...prev, {
+          id: crypto.randomUUID(), symbol, side: order.side, type: order.type,
+          action: 'OPEN' as const, entryPrice: fillPrice, exitPrice: 0,
+          quantity: order.quantity, leverage: order.leverage,
+          pnl: 0, fee, slippage: 0, openTime: sim.currentSimulatedTime, closeTime: 0,
+        }]);
+        toast.success(`条件单已触发：${symbol} ${order.side} @ ${fillPrice.toFixed(2)}`);
       }
     }
 
@@ -186,7 +188,7 @@ export function useBackgroundPrices() {
         [symbol]: (prev[symbol] || []).filter(o => !cleanupIds.includes(o.id)),
       }));
     }
-  }, [setBalance, setPositionsMap, setOrdersMap]);
+  }, [setBalance, setPositionsMap, setOrdersMap, setTradeHistory, sim.currentSimulatedTime]);
 
   // Poll on interval
   useEffect(() => {
