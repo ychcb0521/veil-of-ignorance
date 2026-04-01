@@ -345,27 +345,28 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
 
       for (const [symbol, orders] of Object.entries(prev)) {
         const normalized = orders.map(order => {
-            if (order.type === 'CONDITIONAL' && order.status !== 'PENDING') {
-              changed = true;
-              return { ...order, status: 'PENDING' as const };
-            }
-
-            if (order.type === 'CONDITIONAL' && !order.operator) {
-              const triggerPrice = resolveConditionalTriggerPrice(order);
-              if (Number.isFinite(triggerPrice) && triggerPrice > 0) {
-                const nextOperator = getTriggerOperator(triggerPrice, triggerPrice === order.stopPrice ? triggerPrice - 1 : order.stopPrice);
-                changed = true;
-                return {
-                  ...order,
-                  stopPrice: triggerPrice,
-                  operator: nextOperator,
-                  triggerDirection: nextOperator === '>=' ? 'UP' : 'DOWN',
-                };
-              }
-            }
-
+          if (order.type !== 'CONDITIONAL') {
             return order;
-          });
+          }
+
+          const nextTriggerPrice = resolveConditionalTriggerPrice(order);
+          const shouldNormalizeStatus = order.status !== 'PENDING';
+          const shouldNormalizeStopPrice = Number.isFinite(nextTriggerPrice)
+            && nextTriggerPrice > 0
+            && order.stopPrice !== nextTriggerPrice;
+
+          if (!shouldNormalizeStatus && !shouldNormalizeStopPrice) {
+            return order;
+          }
+
+          changed = true;
+
+          return {
+            ...order,
+            status: 'PENDING' as const,
+            stopPrice: shouldNormalizeStopPrice ? nextTriggerPrice : order.stopPrice,
+          };
+        });
 
         if (normalized.length > 0) next[symbol] = normalized;
       }
