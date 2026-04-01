@@ -1018,8 +1018,8 @@ const Index = () => {
     });
   }, [activeSymbol, currentPrice, priceMap, handlePlaceOrder]);
 
-  const handleClosePositionForSymbol = useCallback((symbol: string, index: number) => {
-    handleClosePosition(symbol, index);
+  const handleClosePositionForSymbol = useCallback((symbol: string, index: number, percentage?: number) => {
+    handleClosePosition(symbol, index, percentage);
   }, [handleClosePosition]);
 
   const handleCancelOrderForSymbol = useCallback((symbol: string, orderId: string) => {
