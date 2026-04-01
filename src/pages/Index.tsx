@@ -1035,6 +1035,7 @@ const Index = () => {
                       pendingOrders={activeSymbolOrders}
                       onCancelOrder={(orderId) => handleCancelOrder(activeSymbol, orderId)}
                       chartApiRef={chartApiRef}
+                      onCrosshairPriceChange={handleCrosshairPriceChange}
                     />
                   )}
                 </div>
