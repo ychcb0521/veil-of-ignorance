@@ -775,7 +775,7 @@ function CandlestickChartComponent({ data, symbol, onLoadOlder, loadingOlder, tr
       </div>
 
       {/* Chart area with toolbar */}
-      <div className="flex-1 min-h-0 relative">
+      <div className="flex-1 min-h-0 relative overflow-hidden">
         <div
           ref={containerRef}
           className="absolute inset-0"
@@ -795,7 +795,7 @@ function CandlestickChartComponent({ data, symbol, onLoadOlder, loadingOlder, tr
         />
 
         {/* Right side: indicator buttons */}
-        <div className="absolute right-12 top-0 z-[70] flex items-center gap-1 py-1.5 px-2 max-w-[60%] overflow-visible">
+        <div className="absolute right-12 top-0 z-10 flex items-center gap-2 py-1.5 px-2 max-w-[60%] overflow-visible">
           <button
             type="button"
             onClick={(e) => {

@@ -20,7 +20,7 @@ export function ChartToolbar({ activeTool, onToolChange, indicators, onIndicator
   const [showIndicatorPanel, setShowIndicatorPanel] = useState(false);
 
   return (
-    <div className="absolute right-12 top-0 z-[60] flex items-center gap-1 py-1.5 px-2">
+    <div className="absolute right-12 top-0 z-10 flex items-center gap-2 py-1.5 px-2">
       <button
         onClick={(e) => { e.stopPropagation(); e.preventDefault(); setShowIndicatorPanel(!showIndicatorPanel); }}
         className={`flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium transition-all duration-100 ease-out active:scale-[0.95] ${

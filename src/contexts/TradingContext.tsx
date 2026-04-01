@@ -170,14 +170,21 @@ function executeFill(
   const { fillPrice, slippage } = applySlippageIfTaker(rawPrice, order.quantity, order.side, isMaker);
   const fee = calcFee(fillPrice, order.quantity, isMaker);
   const margin = (order.quantity * fillPrice) / order.leverage;
-  return {
-    fee, margin, slippage,
-    position: {
-      side: order.side, entryPrice: fillPrice, quantity: order.quantity,
-      leverage: order.leverage, marginMode: order.marginMode, margin,
-      isolatedMargin: order.marginMode === 'isolated' ? margin : undefined,
-    },
+
+  // PURE FACTORY: brand new Position with tick-0 forced zeroes — no spread from old objects
+  const position: Position = {
+    side: order.side,
+    entryPrice: fillPrice,
+    quantity: order.quantity,
+    leverage: order.leverage,
+    marginMode: order.marginMode,
+    margin,
+    isolatedMargin: order.marginMode === 'isolated' ? margin : undefined,
   };
+
+  console.log('[开仓核对] 瞬时入场价:', fillPrice, ' | 瞬时标记价:', rawPrice, ' | 如果这俩数字不同，就是组件传参延迟导致的脱节！');
+
+  return { fee, margin, slippage, position };
 }
 
 // ===== Provider =====
@@ -610,8 +617,11 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
         return;
       }
       setBalance(prev => prev - requiredMargin);
-      setPositionsMap(prev => ({ ...prev, [symbol]: [...(prev[symbol] || []), position] }));
-      console.log('[下单执行]', { 实际写入的开仓价: position.entryPrice });
+      setPositionsMap(prev => {
+        // Filter out any ghost (near-zero) positions for this symbol before adding
+        const existing = (prev[symbol] || []).filter(p => p.quantity > 1e-8);
+        return { ...prev, [symbol]: [...existing, position] };
+      });
       toast.success(`最优价成交: ${order.side === 'LONG' ? '开多' : '开空'} ${order.quantity.toFixed(6)} @ ${position.entryPrice.toFixed(2)}`);
       return;
     }
@@ -627,8 +637,10 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
         return;
       }
       setBalance(prev => prev - requiredMargin);
-      setPositionsMap(prev => ({ ...prev, [symbol]: [...(prev[symbol] || []), position] }));
-      console.log('[下单执行]', { 实际写入的开仓价: position.entryPrice });
+      setPositionsMap(prev => {
+        const existing = (prev[symbol] || []).filter(p => p.quantity > 1e-8);
+        return { ...prev, [symbol]: [...existing, position] };
+      });
       toast.success(`${order.side === 'LONG' ? '开多' : '开空'} ${order.quantity.toFixed(6)} @ ${position.entryPrice.toFixed(2)}`);
       return;
     }
