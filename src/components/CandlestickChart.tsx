@@ -542,16 +542,48 @@ function CandlestickChartComponent({ data, symbol, onLoadOlder, loadingOlder, tr
   }, [indicators]);
 
   // ============================================================
-  // Drawing tool activation
+  // Drawing tool activation — binds to klinecharts overlay API
   // ============================================================
-  const handleToolChange = useCallback((tool: string | null) => {
+  const stayInDrawingRef = useRef(false);
+
+  const handleToolChange = useCallback((tool: string | null, opts?: { stayInDrawing?: boolean }) => {
     setActiveDrawingTool(tool);
+    if (opts?.stayInDrawing !== undefined) stayInDrawingRef.current = opts.stayInDrawing;
     const chart = chartRef.current;
-    if (!chart || !tool) return;
+    if (!chart) return;
+
+    if (!tool) {
+      // Exiting drawing mode — remove any in-progress (unfinished) overlay
+      // klinecharts auto-cleans unfinished overlays when we don't create a new one
+      return;
+    }
 
     const overlayName = OVERLAY_MAP[tool];
     if (overlayName) {
-      chart.createOverlay({ name: overlayName, mode: 'weak_magnet' } as OverlayCreate);
+      chart.createOverlay({
+        name: overlayName,
+        mode: 'weak_magnet',
+        onDrawEnd: () => {
+          // Auto-reset tool after drawing completes (unless stay-in-drawing mode)
+          if (!stayInDrawingRef.current) {
+            setActiveDrawingTool(null);
+          } else {
+            // In stay mode, immediately start a new overlay of the same type
+            setTimeout(() => {
+              const c = chartRef.current;
+              if (c && overlayName) {
+                c.createOverlay({
+                  name: overlayName,
+                  mode: 'weak_magnet',
+                  onDrawEnd: () => {
+                    if (!stayInDrawingRef.current) setActiveDrawingTool(null);
+                  },
+                } as any);
+              }
+            }, 50);
+          }
+        },
+      } as any);
     }
   }, []);
 
@@ -559,6 +591,7 @@ function CandlestickChartComponent({ data, symbol, onLoadOlder, loadingOlder, tr
     const chart = chartRef.current;
     if (chart) {
       chart.removeOverlay();
+      setActiveDrawingTool(null);
     }
   }, []);
 
@@ -572,6 +605,39 @@ function CandlestickChartComponent({ data, symbol, onLoadOlder, loadingOlder, tr
       return newVal;
     });
   }, []);
+
+  // ============================================================
+  // ESC key & right-click to cancel drawing mode
+  // ============================================================
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && activeDrawingTool) {
+        const chart = chartRef.current;
+        if (chart) {
+          // Remove any in-progress overlay by creating nothing
+          chart.removeOverlay();
+          // Re-add completed trade markers / order lines will re-render via effects
+        }
+        setActiveDrawingTool(null);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [activeDrawingTool]);
+
+  // Right-click on chart cancels drawing
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const handler = (e: MouseEvent) => {
+      if (activeDrawingTool) {
+        e.preventDefault();
+        setActiveDrawingTool(null);
+      }
+    };
+    el.addEventListener('contextmenu', handler);
+    return () => el.removeEventListener('contextmenu', handler);
+  }, [activeDrawingTool]);
 
   // ============================================================
   // Price info
