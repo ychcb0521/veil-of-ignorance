@@ -955,7 +955,7 @@ const Index = () => {
           </button>
           <button onClick={() => setPerfSymbol(activeSymbol)}
             className="flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors">
-            <Activity className="w-3 h-3" /> 绩效复盘
+            <Crosshair className="w-3 h-3" /> 交易侦查
           </button>
           <span className="text-[10px] text-muted-foreground font-mono truncate max-w-[120px]">{user?.email}</span>
           <button
