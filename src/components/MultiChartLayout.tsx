@@ -39,7 +39,7 @@ export function MultiChartLayout({
   mainData, mainSymbol, rawSymbol, onLoadOlder, loadingOlder,
   tradeHistory, isRunning, currentSimulatedTime, mainInterval,
   pricePrecision, quantityPrecision, pendingOrders, onCancelOrder,
-  chartApiRef, onCrosshairPriceChange,
+  chartApiRef, onCrosshairPriceChange, pickMode, onPricePicked,
 }: Props) {
   const [layout, setLayout] = useState<LayoutMode>('1x1');
   const [subCharts, setSubCharts] = useState<SubChart[]>([
