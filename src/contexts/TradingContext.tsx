@@ -778,7 +778,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
     toast(pnl >= 0 ? '盈利平仓 ✅' : '亏损平仓 ❌', {
       description: `${symbol}${pctLabel} ${pnl >= 0 ? '+' : ''}${(pnl - fee).toFixed(2)} USDT`,
     });
-  }, [positionsMap, priceMap, getEffectiveTime]);
+  }, [getEffectiveTime]);
 
   // ===== Place TP/SL conditional orders (reduce-only) =====
   const handlePlaceTpSl = useCallback((symbol: string, pos: Position, tp: number | null, sl: number | null, pct: number) => {
