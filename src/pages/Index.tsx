@@ -1054,6 +1054,7 @@ const Index = () => {
                     onAddIsolatedMargin={handleAddIsolatedMargin}
                     activeTab={bottomTab}
                     onTabChange={setBottomTab}
+                    onCloseAllPositions={handleCloseAllPositions}
                   />
                 </div>
               </ResizablePanel>
