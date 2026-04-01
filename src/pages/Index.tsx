@@ -446,13 +446,15 @@ const Index = () => {
               break;
             }
             case 'MARKET_TP_SL': {
-              // Fix: use stopPrice as fill (the trigger level), NOT kline.close (look-ahead bias)
-              if (order.side === 'LONG' && kline.high >= order.stopPrice) { triggered = true; fillPrice = order.stopPrice; isMaker = false; }
-              else if (order.side === 'SHORT' && kline.low <= order.stopPrice) { triggered = true; fillPrice = order.stopPrice; isMaker = false; }
+              // Use triggerDirection instead of order.side for trigger check
+              const dir = order.triggerDirection || (order.side === 'LONG' ? 'UP' : 'DOWN');
+              if (dir === 'UP' && kline.high >= order.stopPrice) { triggered = true; fillPrice = order.stopPrice; isMaker = false; }
+              else if (dir === 'DOWN' && kline.low <= order.stopPrice) { triggered = true; fillPrice = order.stopPrice; isMaker = false; }
               break;
             }
             case 'LIMIT_TP_SL': {
-              const triggerHit = (order.side === 'LONG' && kline.high >= order.stopPrice) || (order.side === 'SHORT' && kline.low <= order.stopPrice);
+              const dir = order.triggerDirection || (order.side === 'LONG' ? 'UP' : 'DOWN');
+              const triggerHit = (dir === 'UP' && kline.high >= order.stopPrice) || (dir === 'DOWN' && kline.low <= order.stopPrice);
               if (triggerHit) {
                 if (order.side === 'LONG' && kline.low <= order.price) { triggered = true; fillPrice = order.price; }
                 else if (order.side === 'SHORT' && kline.high >= order.price) { triggered = true; fillPrice = order.price; }
@@ -461,9 +463,9 @@ const Index = () => {
               break;
             }
             case 'CONDITIONAL': {
-              const trigHit = (order.side === 'LONG' && kline.high >= order.stopPrice) || (order.side === 'SHORT' && kline.low <= order.stopPrice);
+              const dir = order.triggerDirection || (order.side === 'LONG' ? 'UP' : 'DOWN');
+              const trigHit = (dir === 'UP' && kline.high >= order.stopPrice) || (dir === 'DOWN' && kline.low <= order.stopPrice);
               if (trigHit) {
-                // Fix: use stopPrice for market execution, NOT kline.close
                 if (order.conditionalExecType === 'MARKET') { triggered = true; fillPrice = order.stopPrice; isMaker = false; }
                 else {
                   const lp = order.conditionalLimitPrice || order.price;
