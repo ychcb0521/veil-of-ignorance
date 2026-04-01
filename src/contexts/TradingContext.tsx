@@ -337,19 +337,27 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
   }, [positionsMap, ordersMap]);
 
   useEffect(() => {
-    const hasLegacyConditionalOrders = Object.values(ordersMap).some(orders =>
-      orders.some(order => order.type === 'CONDITIONAL' && !order.operator)
-    );
-    if (!hasLegacyConditionalOrders) return;
-
     setOrdersMap(prev => {
       let changed = false;
       const next: OrdersMap = {};
 
       for (const [symbol, orders] of Object.entries(prev)) {
-        const filtered = orders.filter(order => order.type !== 'CONDITIONAL' || !!order.operator);
-        if (filtered.length !== orders.length) changed = true;
-        if (filtered.length > 0) next[symbol] = filtered;
+        const normalized = orders
+          .filter(order => {
+            const shouldKeep = order.type !== 'CONDITIONAL' || !!order.operator;
+            if (!shouldKeep) changed = true;
+            return shouldKeep;
+          })
+          .map(order => {
+            if (order.type === 'CONDITIONAL' && order.status !== 'PENDING') {
+              changed = true;
+              return { ...order, status: 'PENDING' as const };
+            }
+
+            return order;
+          });
+
+        if (normalized.length > 0) next[symbol] = normalized;
       }
 
       return changed ? next : prev;
@@ -661,7 +669,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
       id: crypto.randomUUID(), side: order.side, type: order.type,
       price: order.price, stopPrice: order.stopPrice, quantity: order.quantity,
       leverage: order.leverage, marginMode: order.marginMode,
-      status: 'NEW', createdAt: now,
+      status: order.type === 'CONDITIONAL' ? 'PENDING' : 'NEW', createdAt: now,
       callbackRate: order.callbackRate, trailingExecType: order.trailingExecType,
       trailingLimitPrice: order.trailingLimitPrice, trailingActivated: false,
       conditionalExecType: order.conditionalExecType, conditionalLimitPrice: order.conditionalLimitPrice,

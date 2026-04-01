@@ -13,7 +13,7 @@ export type OrderType =
   | 'SCALED';             // 分段订单
 
 export type MarginMode = 'cross' | 'isolated';
-export type OrderStatus = 'NEW' | 'FILLED' | 'CANCELED' | 'TRIGGERED' | 'ACTIVE';
+export type OrderStatus = 'NEW' | 'PENDING' | 'FILLED' | 'CANCELED' | 'TRIGGERED' | 'ACTIVE';
 export type TriggerOperator = '>=' | '<=';
 
 export interface PendingOrder {
