@@ -190,10 +190,15 @@ const Index = () => {
   const timeModeRef = useRef(timeMode);
   const activeSymbolRef = useRef(activeSymbol);
   const coinTimelinesRef = useRef(coinTimelines);
+  const latestChartPriceRef = useRef(0);
+  const effectiveSimTimeRef = useRef(effectiveSimTime);
+  const priceProtectionRef = useRef(priceProtection);
 
   useEffect(() => { timeModeRef.current = timeMode; }, [timeMode]);
   useEffect(() => { activeSymbolRef.current = activeSymbol; }, [activeSymbol]);
   useEffect(() => { coinTimelinesRef.current = coinTimelines; }, [coinTimelines]);
+  useEffect(() => { effectiveSimTimeRef.current = effectiveSimTime; }, [effectiveSimTime]);
+  useEffect(() => { priceProtectionRef.current = priceProtection; }, [priceProtection]);
 
   const REACT_FLUSH_MS = 800;
   const PERSIST_MS = 500;
@@ -258,6 +263,8 @@ const Index = () => {
                 const c = data[i];
                 api.updateData({ timestamp: c.time, open: c.open, high: c.high, low: c.low, close: c.close, volume: c.volume });
               }
+              const settledClose = Number(data[cursorRef.current - 1]?.close);
+              if (Number.isFinite(settledClose) && settledClose > 0) latestChartPriceRef.current = settledClose;
             }
             if (cursorRef.current < data.length) {
               const candle = data[cursorRef.current];
@@ -273,6 +280,7 @@ const Index = () => {
                   low: Math.min(candle.open, close, rawLow),
                   close, volume: candle.volume * progress,
                 });
+                latestChartPriceRef.current = close;
               }
             }
           }
@@ -325,6 +333,8 @@ const Index = () => {
               const c = data[i];
               api.updateData({ timestamp: c.time, open: c.open, high: c.high, low: c.low, close: c.close, volume: c.volume });
             }
+            const settledClose = Number(data[cursorRef.current - 1]?.close);
+            if (Number.isFinite(settledClose) && settledClose > 0) latestChartPriceRef.current = settledClose;
           }
           if (cursorRef.current < data.length) {
             const candle = data[cursorRef.current];
@@ -340,6 +350,7 @@ const Index = () => {
                 low: Math.min(candle.open, close, rawLow),
                 close, volume: candle.volume * progress,
               });
+              latestChartPriceRef.current = close;
             }
           }
         }
@@ -415,7 +426,10 @@ const Index = () => {
 
   useEffect(() => {
     if (visibleData.length > 0) {
-      const lastClose = visibleData[visibleData.length - 1].close;
+      const lastClose = Number(visibleData[visibleData.length - 1].close);
+      if (Number.isFinite(lastClose) && lastClose > 0) {
+        latestChartPriceRef.current = lastClose;
+      }
       setPriceMap(prev => {
         if (prev[activeSymbol] === lastClose) return prev;
         return { ...prev, [activeSymbol]: lastClose };
@@ -424,6 +438,132 @@ const Index = () => {
   }, [visibleData, activeSymbol]);
 
   const prevVisibleLenRef = useRef(0);
+
+  useEffect(() => {
+    if (activeCoinState.status === 'stopped' || visibleData.length === 0) return;
+
+    const latestKline = visibleData[visibleData.length - 1];
+    const anchoredLatestPrice = Number(latestChartPriceRef.current || latestKline.close);
+    if (!Number.isFinite(anchoredLatestPrice) || anchoredLatestPrice <= 0) return;
+
+    latestChartPriceRef.current = anchoredLatestPrice;
+
+    const filledOrders: Array<{
+      matchedOrder: PendingOrder;
+      fillPrice: number;
+      isMaker: boolean;
+      kline: KlineData;
+    }> = [];
+
+    setOrdersMap(prev => {
+      const orders = prev[activeSymbol] || [];
+      if (orders.length === 0) return prev;
+
+      let changed = false;
+      const remaining: PendingOrder[] = [];
+
+      for (const order of orders) {
+        if (order.type !== 'CONDITIONAL') {
+          remaining.push(order);
+          continue;
+        }
+
+        if (order.status !== 'PENDING') {
+          remaining.push(order);
+          continue;
+        }
+
+        const decision = getConditionalTriggerDecision(order, anchoredLatestPrice);
+        if (!decision?.triggered) {
+          remaining.push(order);
+          continue;
+        }
+
+        if (priceProtectionRef.current) {
+          const markPrice = (latestKline.open + latestKline.high + latestKline.low + latestKline.close) / 4;
+          const deviation = Math.abs(anchoredLatestPrice - markPrice) / markPrice;
+          if (deviation > PRICE_PROTECTION_THRESHOLD) {
+            remaining.push(order);
+            continue;
+          }
+        }
+
+        changed = true;
+
+        if (order.conditionalExecType === 'LIMIT') {
+          const limitPrice = Number(order.conditionalLimitPrice || order.price);
+          const canFillLimit = Number.isFinite(limitPrice) && limitPrice > 0 && (
+            order.side === 'LONG' ? anchoredLatestPrice <= limitPrice : anchoredLatestPrice >= limitPrice
+          );
+
+          if (canFillLimit) {
+            filledOrders.push({
+              matchedOrder: { ...order, status: 'FILLED' as const },
+              fillPrice: limitPrice,
+              isMaker: true,
+              kline: latestKline,
+            });
+          } else {
+            remaining.push({ ...order, type: 'LIMIT', price: limitPrice, status: 'ACTIVE' });
+          }
+          continue;
+        }
+
+        filledOrders.push({
+          matchedOrder: { ...order, status: 'FILLED' as const },
+          fillPrice: decision.triggerPriceNum,
+          isMaker: false,
+          kline: latestKline,
+        });
+      }
+
+      return changed ? { ...prev, [activeSymbol]: remaining } : prev;
+    });
+
+    for (const { matchedOrder, fillPrice, isMaker, kline } of filledOrders) {
+      let actualFillPrice = fillPrice;
+      let slippageAmount = 0;
+
+      if (!isMaker) {
+        const notional = fillPrice * matchedOrder.quantity;
+        actualFillPrice = calcSlippage(fillPrice, notional, matchedOrder.side, { high: kline.high, low: kline.low, close: kline.close });
+        slippageAmount = Math.abs(actualFillPrice - fillPrice) * matchedOrder.quantity;
+      }
+
+      const fee = calcFee(actualFillPrice, matchedOrder.quantity, isMaker);
+      const margin = (matchedOrder.quantity * actualFillPrice) / matchedOrder.leverage;
+
+      setBalance(prev => prev - margin - fee);
+      setPositionsMap(prev => ({
+        ...prev,
+        [activeSymbol]: [...(prev[activeSymbol] || []), {
+          side: matchedOrder.side,
+          entryPrice: actualFillPrice,
+          quantity: matchedOrder.quantity,
+          leverage: matchedOrder.leverage,
+          marginMode: matchedOrder.marginMode,
+          margin,
+        }],
+      }));
+      setTradeHistory(prev => [...prev, {
+        id: crypto.randomUUID(),
+        symbol: activeSymbol,
+        side: matchedOrder.side,
+        type: matchedOrder.type,
+        action: 'OPEN' as const,
+        entryPrice: actualFillPrice,
+        exitPrice: 0,
+        quantity: matchedOrder.quantity,
+        leverage: matchedOrder.leverage,
+        pnl: 0,
+        fee,
+        slippage: slippageAmount,
+        openTime: effectiveSimTimeRef.current,
+        closeTime: 0,
+      }]);
+      toast.success(`委托成交: ${matchedOrder.side === 'LONG' ? '开多' : '开空'} ${matchedOrder.quantity} @ ${actualFillPrice.toFixed(2)}`);
+    }
+  }, [activeCoinState.status, activeSymbol, visibleData]);
 
   // ===== MATCHING ENGINE for active symbol =====
   useEffect(() => {
@@ -448,7 +588,7 @@ const Index = () => {
 
         for (const order of orders) {
           if (filledIds.includes(order.id)) continue;
-          if (order.type === 'CONDITIONAL' && !isConditionalPendingOrder(order)) {
+          if (order.type === 'CONDITIONAL') {
             remaining.push(order);
             continue;
           }
@@ -480,20 +620,6 @@ const Index = () => {
                 if (order.side === 'LONG' && kline.low <= order.price) { triggered = true; fillPrice = order.price; }
                 else if (order.side === 'SHORT' && kline.high >= order.price) { triggered = true; fillPrice = order.price; }
                 else { convertToLimit = true; updatedOrder = { ...order, type: 'LIMIT', status: 'ACTIVE' }; }
-              }
-              break;
-            }
-            case 'CONDITIONAL': {
-              const chartCurrentPrice = kline.close;
-              const decision = getConditionalTriggerDecision(order, chartCurrentPrice);
-              if (decision?.triggered) {
-                if (order.conditionalExecType === 'MARKET') { triggered = true; fillPrice = order.stopPrice; isMaker = false; }
-                else {
-                  const lp = order.conditionalLimitPrice || order.price;
-                  if (order.side === 'LONG' && kline.low <= lp) { triggered = true; fillPrice = lp; }
-                  else if (order.side === 'SHORT' && kline.high >= lp) { triggered = true; fillPrice = lp; }
-                  else { convertToLimit = true; updatedOrder = { ...order, type: 'LIMIT', price: lp, status: 'ACTIVE' }; }
-                }
               }
               break;
             }
@@ -538,7 +664,7 @@ const Index = () => {
 
             // === PRICE PROTECTION: anti-scam-wick check for conditional orders ===
             const isConditionalType = ['MARKET_TP_SL', 'LIMIT_TP_SL', 'CONDITIONAL', 'TRAILING_STOP'].includes(matchedOrder.type);
-            if (isConditionalType && priceProtection) {
+            if (isConditionalType && priceProtectionRef.current) {
               const markPrice = (kline.open + kline.high + kline.low + kline.close) / 4;
               const deviation = Math.abs(kline.close - markPrice) / markPrice;
               if (deviation > PRICE_PROTECTION_THRESHOLD) {
@@ -574,7 +700,7 @@ const Index = () => {
               action: 'OPEN' as const, entryPrice: actualFillPrice, exitPrice: 0,
               quantity: matchedOrder.quantity, leverage: matchedOrder.leverage,
               pnl: 0, fee, slippage: slippageAmount,
-              openTime: effectiveSimTime, closeTime: 0,
+              openTime: effectiveSimTimeRef.current, closeTime: 0,
             }]);
             toast.success(`委托成交: ${matchedOrder.side === 'LONG' ? '开多' : '开空'} ${matchedOrder.quantity} @ ${actualFillPrice.toFixed(2)}`);
           } else if (convertToLimit) {
@@ -917,8 +1043,11 @@ const Index = () => {
 
   // Wrapper for OrderPanel
   const handlePlaceOrderForActiveSymbol = useCallback((order: PlaceOrderParams) => {
-    handlePlaceOrder(activeSymbol, order);
-  }, [activeSymbol, handlePlaceOrder]);
+    handlePlaceOrder(activeSymbol, {
+      ...order,
+      latestPrice: latestChartPriceRef.current || currentPrice,
+    });
+  }, [activeSymbol, currentPrice, handlePlaceOrder]);
 
   const handleClosePositionForSymbol = useCallback((symbol: string, index: number) => {
     handleClosePosition(symbol, index);

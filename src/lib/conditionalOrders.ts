@@ -1,4 +1,4 @@
-import type { PendingOrder } from '@/types/trading';
+import type { OrderSide, PendingOrder } from '@/types/trading';
 
 interface ConditionalTriggerDecision {
   currentPriceNum: number;
@@ -10,20 +10,19 @@ export function isConditionalPendingOrder(order: PendingOrder): boolean {
   return order.type === 'CONDITIONAL' && order.status === 'PENDING';
 }
 
-export function getConditionalTriggerDecision(
-  order: PendingOrder,
-  chartCurrentPrice: number,
+export function getConditionalTriggerDecisionForPrices(
+  side: OrderSide,
+  latestPrice: number,
+  triggerPrice: number,
 ): ConditionalTriggerDecision | null {
-  if (!isConditionalPendingOrder(order)) return null;
-
-  const currentPriceNum = Number(chartCurrentPrice);
-  const triggerPriceNum = Number(order.stopPrice);
+  const currentPriceNum = Number(latestPrice);
+  const triggerPriceNum = Number(triggerPrice);
 
   if (!Number.isFinite(currentPriceNum) || !Number.isFinite(triggerPriceNum)) {
     return null;
   }
 
-  const triggered = order.side === 'LONG'
+  const triggered = side === 'LONG'
     ? currentPriceNum >= triggerPriceNum
     : currentPriceNum <= triggerPriceNum;
 
@@ -32,4 +31,21 @@ export function getConditionalTriggerDecision(
     triggerPriceNum,
     triggered,
   };
+}
+
+export function shouldRejectImmediateConditionalPlacement(
+  side: OrderSide,
+  latestPrice: number,
+  triggerPrice: number,
+): boolean {
+  return getConditionalTriggerDecisionForPrices(side, latestPrice, triggerPrice)?.triggered ?? false;
+}
+
+export function getConditionalTriggerDecision(
+  order: PendingOrder,
+  chartCurrentPrice: number,
+): ConditionalTriggerDecision | null {
+  if (!isConditionalPendingOrder(order)) return null;
+
+  return getConditionalTriggerDecisionForPrices(order.side, chartCurrentPrice, order.stopPrice);
 }
