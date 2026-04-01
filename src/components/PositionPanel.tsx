@@ -27,10 +27,11 @@ interface Props {
   tradeHistory: TradeRecord[];
   priceMap: PriceMap;
   activeSymbol: string;
-  onClosePosition: (symbol: string, index: number) => void;
+  onClosePosition: (symbol: string, index: number, percentage?: number) => void;
   onCancelOrder: (symbol: string, orderId: string) => void;
   onAddIsolatedMargin?: (symbol: string, posIndex: number, amount: number) => void;
   onClearSymbolData?: (symbol: string) => void;
+  onPlaceTpSl?: (symbol: string, pos: Position, tp: number | null, sl: number | null, pct: number) => void;
   activeTab: string;
   onTabChange: (tab: string) => void;
   onCloseAllPositions?: (symbols: { symbol: string; index: number }[]) => void;
