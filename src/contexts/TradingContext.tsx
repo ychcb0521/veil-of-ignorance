@@ -619,6 +619,19 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
       return;
     }
 
+    // Determine trigger direction at placement for conditional/TP-SL orders
+    let triggerDirection: 'UP' | 'DOWN' | undefined;
+    if (['CONDITIONAL', 'MARKET_TP_SL', 'LIMIT_TP_SL'].includes(order.type) && order.stopPrice > 0) {
+      if (order.stopPrice > effectiveCurrentPrice) {
+        triggerDirection = 'UP';
+      } else if (order.stopPrice < effectiveCurrentPrice) {
+        triggerDirection = 'DOWN';
+      } else {
+        // triggerPrice === currentPrice: default to safe side based on order side
+        triggerDirection = order.side === 'LONG' ? 'UP' : 'DOWN';
+      }
+    }
+
     const newOrder: PendingOrder = {
       id: crypto.randomUUID(), side: order.side, type: order.type,
       price: order.price, stopPrice: order.stopPrice, quantity: order.quantity,
@@ -627,6 +640,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
       callbackRate: order.callbackRate, trailingExecType: order.trailingExecType,
       trailingLimitPrice: order.trailingLimitPrice, trailingActivated: false,
       conditionalExecType: order.conditionalExecType, conditionalLimitPrice: order.conditionalLimitPrice,
+      triggerDirection,
     };
     setOrdersMap(prev => ({ ...prev, [symbol]: [...(prev[symbol] || []), newOrder] }));
     toast.info('委托已挂出');
