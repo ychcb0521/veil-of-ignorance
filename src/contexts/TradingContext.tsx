@@ -84,6 +84,7 @@ interface TradingState {
   handleClosePosition: (symbol: string, index: number) => void;
   handleCancelOrder: (symbol: string, orderId: string) => void;
   handleAddIsolatedMargin: (symbol: string, posIndex: number, amount: number) => void;
+  handleClearSymbolData: (symbol: string) => void;
   fundingRate: number;
   liquidationOpen: boolean;
   liquidationDetails: LiquidationDetails | undefined;
