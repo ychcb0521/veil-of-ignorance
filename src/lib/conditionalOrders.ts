@@ -6,6 +6,11 @@ interface ConditionalTriggerDecision {
   triggered: boolean;
 }
 
+interface ConditionalTriggerRange {
+  high: number;
+  low: number;
+}
+
 type LegacyConditionalOrder = PendingOrder & {
   direction?: string;
   triggerPrice?: number | string;
@@ -66,6 +71,30 @@ export function getConditionalTriggerDecisionForPrices(
   };
 }
 
+export function getConditionalTriggerDecisionForRange(
+  side: OrderSide,
+  triggerPrice: number,
+  range: ConditionalTriggerRange,
+): ConditionalTriggerDecision | null {
+  const highNum = Number(range.high);
+  const lowNum = Number(range.low);
+  const triggerPriceNum = Number(triggerPrice);
+
+  if (!Number.isFinite(highNum) || !Number.isFinite(lowNum) || !Number.isFinite(triggerPriceNum)) {
+    return null;
+  }
+
+  const triggered = side === 'LONG'
+    ? highNum >= triggerPriceNum
+    : lowNum <= triggerPriceNum;
+
+  return {
+    currentPriceNum: side === 'LONG' ? highNum : lowNum,
+    triggerPriceNum,
+    triggered,
+  };
+}
+
 export function shouldRejectImmediateConditionalPlacement(
   side: OrderSide,
   latestPrice: number,
@@ -86,4 +115,18 @@ export function getConditionalTriggerDecision(
   if (!normalizedSide) return null;
 
   return getConditionalTriggerDecisionForPrices(normalizedSide, chartCurrentPrice, triggerPrice);
+}
+
+export function getConditionalTriggerDecisionFromRange(
+  order: PendingOrder,
+  range: ConditionalTriggerRange,
+): ConditionalTriggerDecision | null {
+  if (!isConditionalPendingOrder(order)) return null;
+
+  const normalizedSide = resolveConditionalOrderSide(order);
+  const triggerPrice = resolveConditionalTriggerPrice(order);
+
+  if (!normalizedSide) return null;
+
+  return getConditionalTriggerDecisionForRange(normalizedSide, triggerPrice, range);
 }
