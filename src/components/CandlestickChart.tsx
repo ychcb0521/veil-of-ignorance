@@ -302,9 +302,23 @@ function CandlestickChartComponent({ data, symbol, onLoadOlder, loadingOlder, tr
     });
     ro.observe(containerRef.current);
 
+    // Subscribe to crosshair for price sync
+    const crosshairUnsub = chart.subscribeAction('onCrosshairChange', (data: any) => {
+      if (onCrosshairPriceChange) {
+        if (data && data.kLineData && typeof data.kLineData.close === 'number') {
+          // Use the Y-axis value if available, otherwise use candle close
+          const yPrice = typeof data.y === 'number' ? data.y : data.kLineData.close;
+          onCrosshairPriceChange(yPrice);
+        } else {
+          onCrosshairPriceChange(null);
+        }
+      }
+    });
+
     return () => {
       ro.disconnect();
       if (chartApiRef) chartApiRef.current = null;
+      try { crosshairUnsub?.(); } catch {}
       dispose(containerRef.current!);
       chartRef.current = null;
     };
