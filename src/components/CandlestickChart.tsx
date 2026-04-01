@@ -660,6 +660,19 @@ function CandlestickChartComponent({ data, symbol, onLoadOlder, loadingOlder, tr
     return () => el.removeEventListener('contextmenu', handler);
   }, [activeDrawingTool]);
 
+  // Pick mode: click on chart to pick crosshair price
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el || !pickMode) return;
+    const handler = () => {
+      if (crosshairPriceRef.current != null && onPricePicked) {
+        onPricePicked(crosshairPriceRef.current);
+      }
+    };
+    el.addEventListener('click', handler);
+    return () => el.removeEventListener('click', handler);
+  }, [pickMode, onPricePicked]);
+
   // ============================================================
   // Price info
   // ============================================================
