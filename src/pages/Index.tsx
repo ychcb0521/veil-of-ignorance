@@ -1042,6 +1042,8 @@ const Index = () => {
                       onCancelOrder={(orderId) => handleCancelOrder(activeSymbol, orderId)}
                       chartApiRef={chartApiRef}
                       onCrosshairPriceChange={handleCrosshairPriceChange}
+                      pickMode={pickMode}
+                      onPricePicked={handlePricePicked}
                     />
                   )}
                 </div>
