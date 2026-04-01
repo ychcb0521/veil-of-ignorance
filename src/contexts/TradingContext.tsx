@@ -26,6 +26,7 @@ import {
   calcFee, calcUnrealizedPnl, calcSlippage,
   MAINTENANCE_MARGIN_RATE, LIQUIDATION_FEE_RATE, FUNDING_RATE, FUNDING_HOURS, getTriggerOperator,
 } from '@/types/trading';
+import { shouldRejectImmediateConditionalPlacement } from '@/lib/conditionalOrders';
 
 // ===== Types =====
 export type TimeMode = 'synced' | 'isolated';
@@ -126,6 +127,7 @@ export interface PlaceOrderParams {
   scaledCount?: number;
   scaledStartPrice?: number;
   scaledEndPrice?: number;
+  latestPrice?: number;
 }
 
 const TradingContext = createContext<TradingState | null>(null);
@@ -544,12 +546,28 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
   const handlePlaceOrder = useCallback((symbol: string, order: PlaceOrderParams) => {
     const available = calcAvailable(balance, positionsMap);
     const symbolPrice = priceMap[symbol] || 0;
-    if (symbolPrice <= 0 && order.type === 'MARKET') {
+    const effectiveCurrentPrice = Number(order.latestPrice ?? symbolPrice);
+
+    if (!Number.isFinite(effectiveCurrentPrice) || effectiveCurrentPrice <= 0) {
       toast.error('无法获取当前价格'); return;
     }
 
-    const effectiveCurrentPrice = symbolPrice;
     const now = getEffectiveTime(symbol);
+
+    if (order.type === 'CONDITIONAL') {
+      const currentP = Number(effectiveCurrentPrice);
+      const triggerP = Number(order.stopPrice);
+
+      if (!Number.isFinite(triggerP) || triggerP <= 0) {
+        toast.error('触发价无效');
+        return;
+      }
+
+      if (shouldRejectImmediateConditionalPlacement(order.side, currentP, triggerP)) {
+        toast.error('触发价设置不合理，订单将立即成交，请修改或使用市价单');
+        return;
+      }
+    }
 
     const recordOpen = (fillPrice: number, qty: number, side: OrderSide, fee: number, slippage: number) => {
       setTradeHistory(prev => [...prev, {
