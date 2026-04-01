@@ -6,8 +6,41 @@ interface ConditionalTriggerDecision {
   triggered: boolean;
 }
 
+type LegacyConditionalOrder = PendingOrder & {
+  direction?: string;
+  triggerPrice?: number | string;
+  side?: PendingOrder['side'] | 'BUY' | 'SELL' | 'buy' | 'sell' | 'long' | 'short';
+  type?: PendingOrder['type'] | string;
+  status?: PendingOrder['status'] | string;
+};
+
+function normalizeConditionalDirection(direction?: string): OrderSide | null {
+  const normalized = direction?.toUpperCase();
+
+  if (normalized === 'LONG' || normalized === 'BUY') return 'LONG';
+  if (normalized === 'SHORT' || normalized === 'SELL') return 'SHORT';
+
+  return null;
+}
+
+function getLegacyConditionalOrder(order: PendingOrder): LegacyConditionalOrder {
+  return order as LegacyConditionalOrder;
+}
+
+export function resolveConditionalOrderSide(order: PendingOrder): OrderSide | null {
+  const legacyOrder = getLegacyConditionalOrder(order);
+  return normalizeConditionalDirection(legacyOrder.direction ?? legacyOrder.side);
+}
+
+export function resolveConditionalTriggerPrice(order: PendingOrder): number {
+  const legacyOrder = getLegacyConditionalOrder(order);
+  return Number(legacyOrder.triggerPrice ?? legacyOrder.stopPrice);
+}
+
 export function isConditionalPendingOrder(order: PendingOrder): boolean {
-  return order.type === 'CONDITIONAL' && order.status === 'PENDING';
+  const legacyOrder = getLegacyConditionalOrder(order);
+  return String(legacyOrder.type ?? '').toUpperCase() === 'CONDITIONAL'
+    && String(legacyOrder.status ?? '').toUpperCase() === 'PENDING';
 }
 
 export function getConditionalTriggerDecisionForPrices(
@@ -47,5 +80,10 @@ export function getConditionalTriggerDecision(
 ): ConditionalTriggerDecision | null {
   if (!isConditionalPendingOrder(order)) return null;
 
-  return getConditionalTriggerDecisionForPrices(order.side, chartCurrentPrice, order.stopPrice);
+  const normalizedSide = resolveConditionalOrderSide(order);
+  const triggerPrice = resolveConditionalTriggerPrice(order);
+
+  if (!normalizedSide) return null;
+
+  return getConditionalTriggerDecisionForPrices(normalizedSide, chartCurrentPrice, triggerPrice);
 }
