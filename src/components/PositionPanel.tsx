@@ -27,10 +27,11 @@ interface Props {
   tradeHistory: TradeRecord[];
   priceMap: PriceMap;
   activeSymbol: string;
-  onClosePosition: (symbol: string, index: number) => void;
+  onClosePosition: (symbol: string, index: number, percentage?: number) => void;
   onCancelOrder: (symbol: string, orderId: string) => void;
   onAddIsolatedMargin?: (symbol: string, posIndex: number, amount: number) => void;
   onClearSymbolData?: (symbol: string) => void;
+  onPlaceTpSl?: (symbol: string, pos: Position, tp: number | null, sl: number | null, pct: number) => void;
   activeTab: string;
   onTabChange: (tab: string) => void;
   onCloseAllPositions?: (symbols: { symbol: string; index: number }[]) => void;
@@ -50,7 +51,7 @@ function getSymbolPrecision(price: number): number {
 export function PositionPanel({
   positionsMap, ordersMap, tradeHistory, priceMap, activeSymbol,
   onClosePosition, onCancelOrder, onAddIsolatedMargin, onClearSymbolData,
-  activeTab, onTabChange, onCloseAllPositions, pricePrecision,
+  activeTab, onTabChange, onCloseAllPositions, pricePrecision, onPlaceTpSl,
 }: Props) {
   const [leverageModal, setLeverageModal] = useState<{ symbol: string; index: number; pos: Position } | null>(null);
   const [tpslModal, setTpslModal] = useState<{ symbol: string; index: number; pos: Position } | null>(null);
@@ -468,7 +469,9 @@ export function PositionPanel({
           liqPrice={calcLiquidationPrice(tpslModal.pos)}
           onClose={() => setTpslModal(null)}
           onConfirm={(tp, sl, pct) => {
-            toast.success(`止盈止损已设置 · TP: ${tp || '-'} / SL: ${sl || '-'} (${pct}%)`);
+            if (onPlaceTpSl) {
+              onPlaceTpSl(tpslModal.symbol, tpslModal.pos, tp, sl, pct);
+            }
             setTpslModal(null);
           }}
         />

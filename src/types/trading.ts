@@ -50,6 +50,13 @@ export interface PendingOrder {
   operator?: TriggerOperator;
 
   parentScaledId?: string;
+
+  /** Reduce-only flag — TP/SL orders that only close existing positions */
+  reduceOnly?: boolean;
+  /** Symbol of the position this TP/SL order targets */
+  reduceSymbol?: string;
+  /** Side of the position this TP/SL order targets (opposite of close direction) */
+  reducePositionSide?: OrderSide;
 }
 
 interface TriggerRange {

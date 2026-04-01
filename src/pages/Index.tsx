@@ -101,7 +101,7 @@ const Index = () => {
     activeSymbolPositions, activeSymbolOrders,
     allPositions, allOrders, currentPrice, activeSymbols,
     pricePrecision, quantityPrecision, setPricePrecision, setQuantityPrecision,
-    handlePlaceOrder, handleClosePosition, handleCancelOrder,
+    handlePlaceOrder, handleClosePosition, handleCancelOrder, handlePlaceTpSl,
     handleAddIsolatedMargin, handleClearSymbolData,
     liquidationOpen, liquidationDetails, closeLiquidationModal,
     timeMode, setTimeMode, coinTimelines, setCoinTimelines,
@@ -1018,8 +1018,8 @@ const Index = () => {
     });
   }, [activeSymbol, currentPrice, priceMap, handlePlaceOrder]);
 
-  const handleClosePositionForSymbol = useCallback((symbol: string, index: number) => {
-    handleClosePosition(symbol, index);
+  const handleClosePositionForSymbol = useCallback((symbol: string, index: number, percentage?: number) => {
+    handleClosePosition(symbol, index, percentage);
   }, [handleClosePosition]);
 
   const handleCancelOrderForSymbol = useCallback((symbol: string, orderId: string) => {
@@ -1186,6 +1186,7 @@ const Index = () => {
                     onCancelOrder={handleCancelOrderForSymbol}
                     onAddIsolatedMargin={handleAddIsolatedMargin}
                     onClearSymbolData={handleClearSymbolData}
+                    onPlaceTpSl={handlePlaceTpSl}
                     pricePrecision={pricePrecision}
                     activeTab={bottomTab}
                     onTabChange={setBottomTab}
