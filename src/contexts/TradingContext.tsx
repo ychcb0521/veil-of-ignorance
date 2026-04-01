@@ -711,39 +711,134 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
     toast.info('委托已挂出');
   }, [balance, positionsMap, priceMap, getEffectiveTime]);
 
-  // ===== Close Position — single global balance =====
-  const handleClosePosition = useCallback((symbol: string, index: number) => {
+  // ===== Close Position — supports partial close via percentage (0-1] =====
+  const handleClosePosition = useCallback((symbol: string, index: number, percentage: number = 1) => {
     const symbolPositions = positionsMap[symbol] || [];
     const pos = symbolPositions[index];
-    if (!pos) return;
-    const rawPrice = priceMap[symbol] || 0;
-    const closeSide: OrderSide = pos.side === 'LONG' ? 'SHORT' : 'LONG';
-    const { fillPrice, slippage } = applySlippageIfTaker(rawPrice, pos.quantity, closeSide, false);
-    const pnl = pos.side === 'LONG'
-      ? (fillPrice - pos.entryPrice) * pos.quantity
-      : (pos.entryPrice - fillPrice) * pos.quantity;
-    const fee = calcFee(fillPrice, pos.quantity, false);
+    if (!pos || pos.quantity <= 0) return;
 
-    const returnedMargin = pos.marginMode === 'isolated' && pos.isolatedMargin != null
-      ? pos.isolatedMargin + pnl - fee
-      : pos.margin + pnl - fee;
+    const pct = Math.min(1, Math.max(0.01, percentage));
+    const closeQty = pos.quantity * pct;
+    const rawPrice = priceMapRef.current[symbol] || priceMap[symbol] || 0;
+    if (rawPrice <= 0) { toast.error('无法获取当前价格'); return; }
+
+    const closeSide: OrderSide = pos.side === 'LONG' ? 'SHORT' : 'LONG';
+    const { fillPrice, slippage } = applySlippageIfTaker(rawPrice, closeQty, closeSide, false);
+    const pnl = pos.side === 'LONG'
+      ? (fillPrice - pos.entryPrice) * closeQty
+      : (pos.entryPrice - fillPrice) * closeQty;
+    const fee = calcFee(fillPrice, closeQty, false);
+
+    const closedMargin = pos.margin * pct;
+    const closedIsoMargin = pos.isolatedMargin != null ? pos.isolatedMargin * pct : undefined;
+
+    const returnedMargin = pos.marginMode === 'isolated' && closedIsoMargin != null
+      ? closedIsoMargin + pnl - fee
+      : closedMargin + pnl - fee;
 
     // Credit to single global balance
     setBalance(prev => prev + Math.max(0, returnedMargin));
-    setPositionsMap(prev => ({
-      ...prev,
-      [symbol]: (prev[symbol] || []).filter((_, i) => i !== index),
-    }));
+
+    // Update or remove position
+    setPositionsMap(prev => {
+      const positions = [...(prev[symbol] || [])];
+      if (pct >= 1) {
+        // Full close — remove
+        positions.splice(index, 1);
+      } else {
+        // Partial close — reduce quantity and margin
+        const remaining = positions[index];
+        const remainPct = 1 - pct;
+        positions[index] = {
+          ...remaining,
+          quantity: remaining.quantity * remainPct,
+          margin: remaining.margin * remainPct,
+          isolatedMargin: remaining.isolatedMargin != null
+            ? remaining.isolatedMargin * remainPct : undefined,
+        };
+      }
+      return { ...prev, [symbol]: positions };
+    });
+
     setTradeHistory(prev => [...prev, {
       id: crypto.randomUUID(), symbol, side: pos.side, type: 'MARKET' as OrderType,
       action: 'CLOSE' as const, entryPrice: pos.entryPrice, exitPrice: fillPrice,
-      quantity: pos.quantity, leverage: pos.leverage,
+      quantity: closeQty, leverage: pos.leverage,
       pnl: pnl - fee, fee, slippage, openTime: 0, closeTime: getEffectiveTime(symbol),
     }]);
+
+    const pctLabel = pct < 1 ? ` (${Math.round(pct * 100)}%)` : '';
     toast(pnl >= 0 ? '盈利平仓 ✅' : '亏损平仓 ❌', {
-      description: `${symbol} ${pnl >= 0 ? '+' : ''}${(pnl - fee).toFixed(2)} USDT`,
+      description: `${symbol}${pctLabel} ${pnl >= 0 ? '+' : ''}${(pnl - fee).toFixed(2)} USDT`,
     });
   }, [positionsMap, priceMap, getEffectiveTime]);
+
+  // ===== Place TP/SL conditional orders (reduce-only) =====
+  const handlePlaceTpSl = useCallback((symbol: string, pos: Position, tp: number | null, sl: number | null, pct: number) => {
+    if (tp === null && sl === null) {
+      toast.error('请至少输入一个触发价格');
+      return;
+    }
+
+    const closeQty = pos.quantity * (pct / 100);
+    if (closeQty <= 0) return;
+
+    const now = getEffectiveTime(symbol);
+    const closeSide: OrderSide = pos.side === 'LONG' ? 'SHORT' : 'LONG';
+
+    const newOrders: PendingOrder[] = [];
+
+    if (tp !== null && tp > 0) {
+      // TP: for LONG, trigger when price >= tp; for SHORT, trigger when price <= tp
+      const tpOperator: TriggerOperator = pos.side === 'LONG' ? '>=' : '<=';
+      newOrders.push({
+        id: crypto.randomUUID(),
+        side: closeSide,
+        type: 'CONDITIONAL' as OrderType,
+        price: 0,
+        stopPrice: tp,
+        quantity: closeQty,
+        leverage: pos.leverage,
+        marginMode: pos.marginMode,
+        status: 'PENDING',
+        createdAt: now,
+        conditionalExecType: 'MARKET',
+        operator: tpOperator,
+        triggerDirection: tpOperator === '>=' ? 'UP' : 'DOWN',
+        reduceOnly: true,
+        reduceSymbol: symbol,
+        reducePositionSide: pos.side,
+      });
+    }
+
+    if (sl !== null && sl > 0) {
+      // SL: for LONG, trigger when price <= sl; for SHORT, trigger when price >= sl
+      const slOperator: TriggerOperator = pos.side === 'LONG' ? '<=' : '>=';
+      newOrders.push({
+        id: crypto.randomUUID(),
+        side: closeSide,
+        type: 'CONDITIONAL' as OrderType,
+        price: 0,
+        stopPrice: sl,
+        quantity: closeQty,
+        leverage: pos.leverage,
+        marginMode: pos.marginMode,
+        status: 'PENDING',
+        createdAt: now,
+        conditionalExecType: 'MARKET',
+        operator: slOperator,
+        triggerDirection: slOperator === '>=' ? 'UP' : 'DOWN',
+        reduceOnly: true,
+        reduceSymbol: symbol,
+        reducePositionSide: pos.side,
+      });
+    }
+
+    setOrdersMap(prev => ({ ...prev, [symbol]: [...(prev[symbol] || []), ...newOrders] }));
+    toast.success('止盈/止损委托已下达', {
+      description: `TP: ${tp || '-'} / SL: ${sl || '-'} · ${pct}% 仓位`,
+    });
+  }, [getEffectiveTime]);
 
   // ===== Cancel Order =====
   const handleCancelOrder = useCallback((symbol: string, orderId: string) => {
