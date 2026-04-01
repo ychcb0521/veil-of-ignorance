@@ -899,6 +899,18 @@ const Index = () => {
     handleCancelOrder(symbol, orderId);
   }, [handleCancelOrder]);
 
+  const handleCloseAllPositions = useCallback((items: { symbol: string; index: number }[]) => {
+    // Close in reverse index order to avoid index shifting
+    const sorted = [...items].sort((a, b) => b.index - a.index);
+    for (const { symbol, index } of sorted) {
+      handleClosePosition(symbol, index);
+    }
+  }, [handleClosePosition]);
+
+  const handleCrosshairPriceChange = useCallback((price: number | null) => {
+    setCrosshairPrice(price);
+  }, []);
+
   const isMobile = useIsMobile();
 
   // Mobile layout
