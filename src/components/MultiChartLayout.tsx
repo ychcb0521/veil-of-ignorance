@@ -132,7 +132,7 @@ export function MultiChartLayout({
               loadingOlder={loadingOlder} tradeHistory={tradeHistory} rawSymbol={rawSymbol}
               pricePrecision={pricePrecision} quantityPrecision={quantityPrecision}
               pendingOrders={pendingOrders} onCancelOrder={onCancelOrder}
-              chartApiRef={chartApiRef} />
+              chartApiRef={chartApiRef} onCrosshairPriceChange={onCrosshairPriceChange} />
           </div>
           <div className="bg-background min-h-0 overflow-hidden relative">
             <SubChartIntervalSelector interval={subCharts[0].interval} onChange={v => handleSubIntervalChange(0, v)} />
