@@ -93,8 +93,8 @@ export function useBinanceData() {
 
       try {
         const [historyData, futureData] = await Promise.all([
-          fetchBatch(symbol, interval, { endTime: anchorTime, limit: 1000 }),
-          fetchBatch(symbol, interval, { startTime: anchorTime + 1, limit: 300 }).catch(() => []),
+          fetchBatch(symbol, interval, { endTime: anchorTime, limit: 2000 }),
+          fetchBatch(symbol, interval, { startTime: anchorTime + 1, limit: 600 }).catch(() => []),
         ]);
         if (historyData.length === 0) throw new Error("No data returned");
 
