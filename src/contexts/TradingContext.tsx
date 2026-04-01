@@ -221,6 +221,31 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
   const [ordersMap, setOrdersMap] = usePersistedState<OrdersMap>('orders_map', {});
   const [priceMap, setPriceMap] = usePersistedState<PriceMap>('price_map', {});
   const [balance, setBalance] = usePersistedState('balance', initialCapital);
+
+  useEffect(() => {
+    setPositionsMap(prev => {
+      let changed = false;
+      const next: PositionsMap = {};
+
+      for (const [symbol, positions] of Object.entries(prev)) {
+        const normalized = positions
+          .filter(position => {
+            const keep = position.quantity > 1e-8;
+            if (!keep) changed = true;
+            return keep;
+          })
+          .map(position => {
+            if (position.id) return position;
+            changed = true;
+            return { ...position, id: crypto.randomUUID() };
+          });
+
+        if (normalized.length > 0) next[symbol] = normalized;
+      }
+
+      return changed ? next : prev;
+    });
+  }, [setPositionsMap]);
   const [tradeHistory, setTradeHistory] = usePersistedState<TradeRecord[]>('trade_history', []);
   const [pricePrecision, setPricePrecision] = useState(2);
   const [quantityPrecision, setQuantityPrecision] = useState(3);

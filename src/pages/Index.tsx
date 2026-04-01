@@ -735,13 +735,21 @@ const Index = () => {
               const fee = calcFee(slippedPrice, sliceQty, false);
               const margin = (sliceQty * slippedPrice) / order.leverage;
               setBalance(b => b - margin - fee);
-              setPositionsMap(p => ({
-                ...p,
-                [symbol]: [...(p[symbol] || []), {
-                  side: order.side, entryPrice: slippedPrice, quantity: sliceQty,
-                  leverage: order.leverage, marginMode: order.marginMode, margin,
-                }],
-              }));
+              setPositionsMap(p => {
+                const existing = (p[symbol] || []).filter(position => position.quantity > 1e-8);
+                return {
+                  ...p,
+                  [symbol]: [...existing, {
+                    id: crypto.randomUUID(),
+                    side: order.side,
+                    entryPrice: slippedPrice,
+                    quantity: sliceQty,
+                    leverage: order.leverage,
+                    marginMode: order.marginMode,
+                    margin,
+                  }],
+                };
+              });
               changed = true;
               return { ...order, twapFilledQty: filledSoFar + sliceQty, twapNextExecTime: order.twapNextExecTime! + intervalMs };
             } else {

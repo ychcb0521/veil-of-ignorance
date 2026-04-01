@@ -159,14 +159,22 @@ export function useBackgroundPrices() {
         const margin = (order.quantity * fillPrice) / order.leverage;
 
         setBalance(prev => prev - margin - fee);
-        setPositionsMap(prev => ({
-          ...prev,
-          [symbol]: [...(prev[symbol] || []), {
-            side: order.side, entryPrice: fillPrice, quantity: order.quantity,
-            leverage: order.leverage, marginMode: order.marginMode, margin,
-            isolatedMargin: order.marginMode === 'isolated' ? margin : undefined,
-          }],
-        }));
+        setPositionsMap(prev => {
+          const existing = (prev[symbol] || []).filter(position => position.quantity > 1e-8);
+          return {
+            ...prev,
+            [symbol]: [...existing, {
+              id: crypto.randomUUID(),
+              side: order.side,
+              entryPrice: fillPrice,
+              quantity: order.quantity,
+              leverage: order.leverage,
+              marginMode: order.marginMode,
+              margin,
+              isolatedMargin: order.marginMode === 'isolated' ? margin : undefined,
+            }],
+          };
+        });
         toast.success(`条件单已触发：${symbol} ${order.side} @ ${fillPrice.toFixed(2)}`);
       }
     }
