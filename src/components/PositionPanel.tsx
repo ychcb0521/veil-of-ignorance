@@ -7,6 +7,7 @@ import { X, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { LeverageModal } from '@/components/LeverageModal';
 import { TpSlModal } from '@/components/TpSlModal';
+import { ClosePositionModal } from '@/components/ClosePositionModal';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Badge } from '@/components/ui/badge';
 import {
