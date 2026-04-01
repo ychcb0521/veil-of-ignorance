@@ -20,9 +20,10 @@ import { MobileLayout } from '@/components/mobile/MobileLayout';
 import { AssetOverview } from '@/components/AssetOverview';
 import { LiquidationModal } from '@/components/LiquidationModal';
 import { AnalyticsPanel } from '@/components/AnalyticsPanel';
+import { TradePerformancePanel } from '@/components/TradePerformancePanel';
 import { CoolingOffModal, useCoolingOff } from '@/components/CoolingOffModal';
 import { toast } from 'sonner';
-import { BarChart3, Wallet, PanelRightClose, PanelRightOpen } from 'lucide-react';
+import { BarChart3, Wallet, PanelRightClose, PanelRightOpen, Activity } from 'lucide-react';
 import type { PendingOrder, OrderType } from '@/types/trading';
 import { calcFee, calcSlippage } from '@/types/trading';
 import type { AssetState } from '@/types/assets';
@@ -102,6 +103,7 @@ const Index = () => {
   const [bottomTab, setBottomTab] = useState('positions');
   const [analyticsOpen, setAnalyticsOpen] = useState(false);
   const [assetsOpen, setAssetsOpen] = useState(false);
+  const [perfSymbol, setPerfSymbol] = useState<string | null>(null);
   const [coolingOffModalOpen, setCoolingOffModalOpen] = useState(false);
   const [priceProtection, setPriceProtection] = usePersistedState('price_protection', true);
   const [isOrderBookOpen, setIsOrderBookOpen] = usePersistedState('orderbook_open', false);
@@ -951,6 +953,10 @@ const Index = () => {
             className="flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors">
             <BarChart3 className="w-3 h-3" /> 数据归因
           </button>
+          <button onClick={() => setPerfSymbol(activeSymbol)}
+            className="flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors">
+            <Activity className="w-3 h-3" /> 绩效复盘
+          </button>
           <span className="text-[10px] text-muted-foreground font-mono truncate max-w-[120px]">{user?.email}</span>
           <button
             onClick={signOut}
@@ -1096,6 +1102,15 @@ const Index = () => {
         priceMap={priceMap}
         initialCapital={profile?.initial_capital ?? 1_000_000}
       />
+
+      {perfSymbol && (
+        <TradePerformancePanel
+          open={!!perfSymbol}
+          onClose={() => setPerfSymbol(null)}
+          symbol={perfSymbol}
+          tradeHistory={tradeHistory}
+        />
+      )}
 
       <LiquidationModal
         open={liquidationOpen}
