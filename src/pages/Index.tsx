@@ -913,6 +913,10 @@ const Index = () => {
     setCrosshairPrice(price);
   }, []);
 
+  const handlePricePicked = useCallback((price: number) => {
+    setPickedPrice(price);
+  }, []);
+
   const isMobile = useIsMobile();
 
   // Mobile layout
