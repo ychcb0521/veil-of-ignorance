@@ -192,7 +192,13 @@ const Index = () => {
   const timeModeRef = useRef(timeMode);
   const activeSymbolRef = useRef(activeSymbol);
   const coinTimelinesRef = useRef(coinTimelines);
-  const latestChartPriceRef = useRef(0);
+  const latestChartPriceRef = useRef(currentPrice || 0);
+  // Keep ref synced with currentPrice from context as a fallback
+  useEffect(() => {
+    if (currentPrice > 0 && latestChartPriceRef.current <= 0) {
+      latestChartPriceRef.current = currentPrice;
+    }
+  }, [currentPrice]);
   const effectiveSimTimeRef = useRef(effectiveSimTime);
   const priceProtectionRef = useRef(priceProtection);
   const ordersMapRef = useRef(ordersMap);
@@ -1004,11 +1010,13 @@ const Index = () => {
 
   // Wrapper for OrderPanel
   const handlePlaceOrderForActiveSymbol = useCallback((order: PlaceOrderParams) => {
+    const freshPrice = latestChartPriceRef.current || priceMap[activeSymbol] || currentPrice;
+    console.log('[下单按钮]', { latestChartPriceRef: latestChartPriceRef.current, priceMap: priceMap[activeSymbol], currentPrice, 最终传递: freshPrice });
     handlePlaceOrder(activeSymbol, {
       ...order,
-      latestPrice: latestChartPriceRef.current || currentPrice,
+      latestPrice: freshPrice,
     });
-  }, [activeSymbol, currentPrice, handlePlaceOrder]);
+  }, [activeSymbol, currentPrice, priceMap, handlePlaceOrder]);
 
   const handleClosePositionForSymbol = useCallback((symbol: string, index: number) => {
     handleClosePosition(symbol, index);

@@ -227,6 +227,9 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
   const timeModeRef = useRef(timeMode);
   useEffect(() => { timeModeRef.current = timeMode; }, [timeMode]);
 
+  const priceMapRef = useRef(priceMap);
+  useEffect(() => { priceMapRef.current = priceMap; }, [priceMap]);
+
   // Total position count across all symbols
   const totalPositionCount = useMemo(() => {
     let count = 0;
@@ -554,8 +557,15 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
   // ===== Place Order (with strict accounting enforcement — single global pool) =====
   const handlePlaceOrder = useCallback((symbol: string, order: PlaceOrderParams) => {
     const available = calcAvailable(balance, positionsMap);
-    const symbolPrice = priceMap[symbol] || 0;
-    const effectiveCurrentPrice = Number(order.latestPrice ?? symbolPrice);
+    // Use ref to avoid stale closure — always get the freshest price
+    const symbolPrice = priceMapRef.current[symbol] || priceMap[symbol] || 0;
+    const effectiveCurrentPrice = Number(order.latestPrice || symbolPrice);
+
+    console.log('[下单执行]', {
+      按钮按下时获取的盘面价: order.latestPrice,
+      priceMap最新价: priceMapRef.current[symbol],
+      最终使用价: effectiveCurrentPrice,
+    });
 
     if (!Number.isFinite(effectiveCurrentPrice) || effectiveCurrentPrice <= 0) {
       toast.error('无法获取当前价格'); return;
@@ -593,6 +603,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
       }
       setBalance(prev => prev - requiredMargin);
       setPositionsMap(prev => ({ ...prev, [symbol]: [...(prev[symbol] || []), position] }));
+      console.log('[下单执行]', { 实际写入的开仓价: position.entryPrice });
       toast.success(`最优价成交: ${order.side === 'LONG' ? '开多' : '开空'} ${order.quantity.toFixed(6)} @ ${position.entryPrice.toFixed(2)}`);
       return;
     }
@@ -609,6 +620,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
       }
       setBalance(prev => prev - requiredMargin);
       setPositionsMap(prev => ({ ...prev, [symbol]: [...(prev[symbol] || []), position] }));
+      console.log('[下单执行]', { 实际写入的开仓价: position.entryPrice });
       toast.success(`${order.side === 'LONG' ? '开多' : '开空'} ${order.quantity.toFixed(6)} @ ${position.entryPrice.toFixed(2)}`);
       return;
     }
