@@ -30,6 +30,12 @@ interface Props {
   quantityPrecision?: number;
   /** Crosshair Y-axis price from chart for conditional trigger price sync */
   crosshairPrice?: number | null;
+  /** Whether pick mode is active (user picking price from chart) */
+  pickMode?: boolean;
+  /** Toggle pick mode on/off */
+  onPickModeChange?: (active: boolean) => void;
+  /** Price picked from chart click */
+  pickedPrice?: number | null;
 }
 
 export function OrderPanel({ currentPrice, onPlaceOrder, disabled, symbol, coolingOff, coolingOffLabel, onOpenCoolingOff, priceProtection, onTogglePriceProtection, pricePrecision = 2, quantityPrecision = 3, crosshairPrice }: Props) {
