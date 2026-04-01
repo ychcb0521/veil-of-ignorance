@@ -243,6 +243,7 @@ function CandlestickChartComponent({ data, symbol, onLoadOlder, loadingOlder, tr
   const [indicators, setIndicators] = usePersistedState<IndicatorConfig[]>('indicators', []);
   const [showIndicatorPanel, setShowIndicatorPanel] = useState(false);
   const [showOrderLines, setShowOrderLines] = usePersistedState('show_order_lines', true);
+  const [showTradeMarkers, setShowTradeMarkers] = usePersistedState('show_trade_markers', true);
   const [drawingsVisible, setDrawingsVisible] = useState(true);
   const [activeDrawingTool, setActiveDrawingTool] = useState<string | null>(null);
   const { theme } = useTheme();
