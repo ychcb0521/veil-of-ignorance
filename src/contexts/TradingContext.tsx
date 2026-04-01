@@ -354,7 +354,8 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
 
       return changed ? next : prev;
     });
-  }, [ordersMap, setOrdersMap]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // ===== FUNDING RATE ENGINE =====
   const lastFundingSlotRef = useRef<number>(-1);
