@@ -56,6 +56,7 @@ export function PositionPanel({
 }: Props) {
   const [leverageModal, setLeverageModal] = useState<{ symbol: string; index: number; pos: Position } | null>(null);
   const [tpslModal, setTpslModal] = useState<{ symbol: string; index: number; pos: Position } | null>(null);
+  const [closeModal, setCloseModal] = useState<{ symbol: string; index: number; pos: Position } | null>(null);
   const [closingKey, setClosingKey] = useState<string | null>(null);
   const [hideOtherContracts, setHideOtherContracts] = useState(false);
   const [closeAllConfirmOpen, setCloseAllConfirmOpen] = useState(false);
