@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo, useEffect, useRef } from "react";
+import React, { useState, useCallback, useMemo, useEffect, useRef } from "react";
 import { formatUTC8 } from "@/lib/timeFormat";
 import { useTradingContext, type PlaceOrderParams, type CoinTimelineState } from "@/contexts/TradingContext";
 import { useAuth } from "@/contexts/AuthContext";
@@ -71,7 +71,7 @@ function matchOrdersOffline(pendingOrders: PendingOrder[], klines: KlineData[], 
           fillPrice = order.stopPrice;
         }
       } else if (order.type === "CONDITIONAL") {
-        const decision = getConditionalTriggerDecisionFromRange(order, kline);
+        const decision = getConditionalTriggerDecisionFromRange(order as any, kline);
         if (!decision) {
           stillPending.push(order);
           continue;
@@ -697,7 +697,7 @@ const Index = () => {
           let fillPrice = 0;
           let isMaker = true;
           let convertToLimit = false;
-          let updatedOrder = { ...order };
+          let updatedOrder = { ...order } as PendingOrder;
 
           switch (order.type) {
             case "LIMIT":
@@ -738,7 +738,7 @@ const Index = () => {
                   fillPrice = order.price;
                 } else {
                   convertToLimit = true;
-                  updatedOrder = { ...order, type: "LIMIT", status: "ACTIVE" };
+                  updatedOrder = { ...order, type: "LIMIT", status: "ACTIVE" } as PendingOrder;
                 }
               }
               break;
@@ -930,6 +930,7 @@ const Index = () => {
                         leverage: order.leverage,
                         marginMode: order.marginMode,
                         margin,
+                        isolatedMargin: order.marginMode === "isolated" ? margin : undefined,
                       },
                     ],
                   };
