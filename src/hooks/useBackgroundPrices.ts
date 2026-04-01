@@ -8,8 +8,9 @@
 import { useEffect, useRef, useCallback } from 'react';
 import { useTradingContext } from '@/contexts/TradingContext';
 import type { PendingOrder, Position } from '@/types/trading';
-import { calcFee, calcUnrealizedPnl, isTriggerConditionMet } from '@/types/trading';
+import { calcFee, calcUnrealizedPnl } from '@/types/trading';
 import { intervalToMs } from '@/hooks/useBinanceData';
+import { getConditionalTriggerDecision, isConditionalPendingOrder } from '@/lib/conditionalOrders';
 import { toast } from 'sonner';
 
 interface KlinePrice {
@@ -141,12 +142,12 @@ export function useBackgroundPrices() {
           else if (order.side === 'SHORT' && kline.high >= order.price) { triggered = true; fillPrice = order.price; }
         }
       } else if (order.type === 'CONDITIONAL') {
-        if (!order.operator) {
-          cleanupIds.push(order.id);
+        if (!isConditionalPendingOrder(order)) {
           continue;
         }
-        const trigHit = isTriggerConditionMet(order.operator, order.stopPrice, kline);
-        if (trigHit) {
+
+        const decision = getConditionalTriggerDecision(order, kline.close);
+        if (decision?.triggered) {
           if (order.conditionalExecType === 'MARKET') {
             triggered = true; fillPrice = order.stopPrice;
           } else {

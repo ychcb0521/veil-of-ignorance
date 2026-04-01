@@ -22,10 +22,11 @@ import { LiquidationModal } from '@/components/LiquidationModal';
 import { AnalyticsPanel } from '@/components/AnalyticsPanel';
 import { TradeInsightsPanel } from '@/components/TradeInsightsPanel';
 import { CoolingOffModal, useCoolingOff } from '@/components/CoolingOffModal';
+import { getConditionalTriggerDecision, isConditionalPendingOrder } from '@/lib/conditionalOrders';
 import { toast } from 'sonner';
 import { BarChart3, Wallet, PanelRightClose, PanelRightOpen, Crosshair } from 'lucide-react';
 import type { PendingOrder, OrderType } from '@/types/trading';
-import { calcFee, calcSlippage, isTriggerConditionMet } from '@/types/trading';
+import { calcFee, calcSlippage } from '@/types/trading';
 import type { AssetState } from '@/types/assets';
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
@@ -57,9 +58,13 @@ function matchOrdersOffline(
         if (dir === 'UP' && kline.high >= order.stopPrice) { triggered = true; fillPrice = order.stopPrice; }
         else if (dir === 'DOWN' && kline.low <= order.stopPrice) { triggered = true; fillPrice = order.stopPrice; }
       } else if (order.type === 'CONDITIONAL') {
-        if (!order.operator) continue;
-        const trigHit = isTriggerConditionMet(order.operator, order.stopPrice, kline);
-        if (trigHit) {
+        const decision = getConditionalTriggerDecision(order, kline.close);
+        if (!decision) {
+          stillPending.push(order);
+          continue;
+        }
+
+        if (decision.triggered) {
           if (order.conditionalExecType === 'MARKET') { triggered = true; fillPrice = order.stopPrice; }
           else {
             const lp = order.conditionalLimitPrice || order.price;
@@ -443,7 +448,10 @@ const Index = () => {
 
         for (const order of orders) {
           if (filledIds.includes(order.id)) continue;
-          if (order.type === 'CONDITIONAL' && !order.operator) continue;
+          if (order.type === 'CONDITIONAL' && !isConditionalPendingOrder(order)) {
+            remaining.push(order);
+            continue;
+          }
 
           let triggered = false;
           let fillPrice = 0;
@@ -476,8 +484,9 @@ const Index = () => {
               break;
             }
             case 'CONDITIONAL': {
-              const trigHit = isTriggerConditionMet(order.operator!, order.stopPrice, kline);
-              if (trigHit) {
+              const chartCurrentPrice = kline.close;
+              const decision = getConditionalTriggerDecision(order, chartCurrentPrice);
+              if (decision?.triggered) {
                 if (order.conditionalExecType === 'MARKET') { triggered = true; fillPrice = order.stopPrice; isMaker = false; }
                 else {
                   const lp = order.conditionalLimitPrice || order.price;
@@ -523,14 +532,18 @@ const Index = () => {
           }
 
           if (triggered) {
+            const matchedOrder = order.type === 'CONDITIONAL'
+              ? { ...order, status: 'FILLED' as const }
+              : order;
+
             // === PRICE PROTECTION: anti-scam-wick check for conditional orders ===
-            const isConditionalType = ['MARKET_TP_SL', 'LIMIT_TP_SL', 'CONDITIONAL', 'TRAILING_STOP'].includes(order.type);
+            const isConditionalType = ['MARKET_TP_SL', 'LIMIT_TP_SL', 'CONDITIONAL', 'TRAILING_STOP'].includes(matchedOrder.type);
             if (isConditionalType && priceProtection) {
               const markPrice = (kline.open + kline.high + kline.low + kline.close) / 4;
               const deviation = Math.abs(kline.close - markPrice) / markPrice;
               if (deviation > PRICE_PROTECTION_THRESHOLD) {
                 toast.warning(`⚠️ 价格保护已触发`, {
-                  description: `条件单 ${order.id.slice(0, 8)} 由于最新价与标记价格偏差 ${(deviation * 100).toFixed(2)}% > 2%，未被执行`,
+                  description: `条件单 ${matchedOrder.id.slice(0, 8)} 由于最新价与标记价格偏差 ${(deviation * 100).toFixed(2)}% > 2%，未被执行`,
                   duration: 6000,
                 });
                 remaining.push(order);
@@ -538,32 +551,32 @@ const Index = () => {
               }
             }
 
-            filledIds.push(order.id);
+            filledIds.push(matchedOrder.id);
             let actualFillPrice = fillPrice;
             let slippageAmount = 0;
             if (!isMaker) {
-              const notional = fillPrice * order.quantity;
-              actualFillPrice = calcSlippage(fillPrice, notional, order.side, { high: kline.high, low: kline.low, close: kline.close });
+              const notional = fillPrice * matchedOrder.quantity;
+              actualFillPrice = calcSlippage(fillPrice, notional, matchedOrder.side, { high: kline.high, low: kline.low, close: kline.close });
               slippageAmount = Math.abs(actualFillPrice - fillPrice) * order.quantity;
             }
-            const fee = calcFee(actualFillPrice, order.quantity, isMaker);
-            const margin = (order.quantity * actualFillPrice) / order.leverage;
+            const fee = calcFee(actualFillPrice, matchedOrder.quantity, isMaker);
+            const margin = (matchedOrder.quantity * actualFillPrice) / matchedOrder.leverage;
             setBalance(prev => prev - margin - fee);
             setPositionsMap(prev => ({
               ...prev,
               [activeSymbol]: [...(prev[activeSymbol] || []), {
-                side: order.side, entryPrice: actualFillPrice, quantity: order.quantity,
-                leverage: order.leverage, marginMode: order.marginMode, margin,
+                side: matchedOrder.side, entryPrice: actualFillPrice, quantity: matchedOrder.quantity,
+                leverage: matchedOrder.leverage, marginMode: matchedOrder.marginMode, margin,
               }],
             }));
             setTradeHistory(prev => [...prev, {
-              id: crypto.randomUUID(), symbol: activeSymbol, side: order.side, type: order.type,
+              id: crypto.randomUUID(), symbol: activeSymbol, side: matchedOrder.side, type: matchedOrder.type,
               action: 'OPEN' as const, entryPrice: actualFillPrice, exitPrice: 0,
-              quantity: order.quantity, leverage: order.leverage,
+              quantity: matchedOrder.quantity, leverage: matchedOrder.leverage,
               pnl: 0, fee, slippage: slippageAmount,
               openTime: effectiveSimTime, closeTime: 0,
             }]);
-            toast.success(`委托成交: ${order.side === 'LONG' ? '开多' : '开空'} ${order.quantity} @ ${actualFillPrice.toFixed(2)}`);
+            toast.success(`委托成交: ${matchedOrder.side === 'LONG' ? '开多' : '开空'} ${matchedOrder.quantity} @ ${actualFillPrice.toFixed(2)}`);
           } else if (convertToLimit) {
             remaining.push(updatedOrder);
           } else {
