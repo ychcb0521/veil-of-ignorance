@@ -673,13 +673,21 @@ const Index = () => {
             const fee = calcFee(actualFillPrice, matchedOrder.quantity, isMaker);
             const margin = (matchedOrder.quantity * actualFillPrice) / matchedOrder.leverage;
             setBalance(prev => prev - margin - fee);
-            setPositionsMap(prev => ({
-              ...prev,
-              [activeSymbol]: [...(prev[activeSymbol] || []), {
-                side: matchedOrder.side, entryPrice: actualFillPrice, quantity: matchedOrder.quantity,
-                leverage: matchedOrder.leverage, marginMode: matchedOrder.marginMode, margin,
-              }],
-            }));
+            setPositionsMap(prev => {
+              const existing = (prev[activeSymbol] || []).filter(position => position.quantity > 1e-8);
+              return {
+                ...prev,
+                [activeSymbol]: [...existing, {
+                  id: crypto.randomUUID(),
+                  side: matchedOrder.side,
+                  entryPrice: actualFillPrice,
+                  quantity: matchedOrder.quantity,
+                  leverage: matchedOrder.leverage,
+                  marginMode: matchedOrder.marginMode,
+                  margin,
+                }],
+              };
+            });
             toast.success(`委托成交: ${matchedOrder.side === 'LONG' ? '开多' : '开空'} ${matchedOrder.quantity} @ ${actualFillPrice.toFixed(2)}`);
           } else if (convertToLimit) {
             remaining.push(updatedOrder);
