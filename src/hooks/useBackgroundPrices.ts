@@ -169,7 +169,9 @@ export function useBackgroundPrices() {
         }));
         setTradeHistory(prev => [...prev, {
           id: crypto.randomUUID(), symbol, side: order.side, type: order.type,
-          action: 'OPEN' as const, entryPrice: fillPrice, exitPrice: 0,
+        setTradeHistory(prev => [...prev, {
+          id: crypto.randomUUID(), symbol, side: order.side, type: order.type,
+          action: 'CLOSE' as const, entryPrice: fillPrice, exitPrice: fillPrice,
           quantity: order.quantity, leverage: order.leverage,
           pnl: 0, fee, slippage: 0, openTime: sim.currentSimulatedTime, closeTime: 0,
         }]);
