@@ -74,6 +74,14 @@ export function PositionPanel({
     }, 300);
   };
 
+  const handleCloseAll = () => {
+    if (onCloseAllPositions && displayedPositions.length > 0) {
+      onCloseAllPositions(displayedPositions.map(p => ({ symbol: p.symbol, index: p.index })));
+      setCloseAllConfirmOpen(false);
+      toast.success(`已市价平仓 ${displayedPositions.length} 个仓位`);
+    }
+  };
+
   return (
     <div className="panel flex flex-col bg-card">
       {/* Tabs */}
