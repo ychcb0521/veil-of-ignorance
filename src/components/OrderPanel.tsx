@@ -53,6 +53,9 @@ export function OrderPanel({ currentPrice, onPlaceOrder, disabled, symbol, cooli
       return { ...prev, [symbol]: next };
     });
   };
+  const [leverageInput, setLeverageInput] = useState(String(leverage));
+  // Sync input display when symbol changes
+  useEffect(() => { setLeverageInput(String(leverage)); }, [symbol, leverage]);
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
