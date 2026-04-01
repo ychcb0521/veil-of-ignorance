@@ -75,6 +75,10 @@ interface Props {
   chartApiRef?: React.MutableRefObject<ChartImperativeApi | null>;
   /** Called when crosshair moves over chart — provides Y-axis price */
   onCrosshairPriceChange?: (price: number | null) => void;
+  /** When true, clicking on chart picks the crosshair price */
+  pickMode?: boolean;
+  /** Called when user clicks chart in pick mode */
+  onPricePicked?: (price: number) => void;
 }
 
 // Convert our KlineData to klinecharts KLineData
