@@ -469,7 +469,9 @@ export function PositionPanel({
           liqPrice={calcLiquidationPrice(tpslModal.pos)}
           onClose={() => setTpslModal(null)}
           onConfirm={(tp, sl, pct) => {
-            toast.success(`止盈止损已设置 · TP: ${tp || '-'} / SL: ${sl || '-'} (${pct}%)`);
+            if (onPlaceTpSl) {
+              onPlaceTpSl(tpslModal.symbol, tpslModal.pos, tp, sl, pct);
+            }
             setTpslModal(null);
           }}
         />
