@@ -1105,6 +1105,9 @@ const Index = () => {
                 priceProtection={priceProtection}
                 onTogglePriceProtection={() => setPriceProtection(prev => !prev)}
                 crosshairPrice={crosshairPrice}
+                pickMode={pickMode}
+                onPickModeChange={setPickMode}
+                pickedPrice={pickedPrice}
               />
             </div>
           </ResizablePanel>
