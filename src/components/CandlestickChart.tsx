@@ -828,7 +828,9 @@ function areChartPropsEqual(prev: Props, next: Props) {
     prev.onLoadOlder === next.onLoadOlder &&
     prev.pendingOrders === next.pendingOrders &&
     prev.onCancelOrder === next.onCancelOrder &&
-    prev.onCrosshairPriceChange === next.onCrosshairPriceChange
+    prev.onCrosshairPriceChange === next.onCrosshairPriceChange &&
+    prev.pickMode === next.pickMode &&
+    prev.onPricePicked === next.onPricePicked
   );
 }
 
