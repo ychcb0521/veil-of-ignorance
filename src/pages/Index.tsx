@@ -1060,6 +1060,8 @@ const Index = () => {
                     onClosePosition={handleClosePositionForSymbol}
                     onCancelOrder={handleCancelOrderForSymbol}
                     onAddIsolatedMargin={handleAddIsolatedMargin}
+                    onClearSymbolData={handleClearSymbolData}
+                    pricePrecision={pricePrecision}
                     activeTab={bottomTab}
                     onTabChange={setBottomTab}
                     onCloseAllPositions={handleCloseAllPositions}
