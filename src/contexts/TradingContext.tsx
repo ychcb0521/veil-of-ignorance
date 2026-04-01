@@ -21,7 +21,7 @@ import { useTimeSimulator } from '@/hooks/useTimeSimulator';
 import { usePersistedState, loadPersistedSimState, saveSimState, clearSimState } from '@/hooks/usePersistedState';
 import { useAuth } from '@/contexts/AuthContext';
 import { toast } from 'sonner';
-import type { Position, PendingOrder, TradeRecord, OrderSide, OrderType, MarginMode } from '@/types/trading';
+import type { Position, PendingOrder, TradeRecord, OrderSide, OrderType, MarginMode, TriggerOperator } from '@/types/trading';
 import {
   calcFee, calcUnrealizedPnl, calcSlippage,
   MAINTENANCE_MARGIN_RATE, LIQUIDATION_FEE_RATE, FUNDING_RATE, FUNDING_HOURS, getTriggerOperator,
