@@ -362,6 +362,26 @@ export function PositionPanel({
           }}
         />
       )}
+
+      {/* Close All Confirmation Modal */}
+      <Dialog open={closeAllConfirmOpen} onOpenChange={setCloseAllConfirmOpen}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>确认全平</DialogTitle>
+            <DialogDescription>
+              将以市价强制平仓当前列表中的所有 <span className="font-bold text-foreground">{displayedPositions.length}</span> 个仓位，请确认。
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="gap-2">
+            <Button variant="outline" size="sm" onClick={() => setCloseAllConfirmOpen(false)}>
+              取消
+            </Button>
+            <Button variant="destructive" size="sm" onClick={handleCloseAll}>
+              确认全平
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
