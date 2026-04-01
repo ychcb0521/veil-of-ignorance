@@ -236,22 +236,6 @@ const Index = () => {
         isolatedMargin: order.marginMode === 'isolated' ? margin : undefined,
       }],
     }));
-    setTradeHistory(prev => [...prev, {
-      id: crypto.randomUUID(),
-      symbol,
-      side: order.side,
-      type: order.type,
-      action: 'OPEN' as const,
-      entryPrice,
-      exitPrice: 0,
-      quantity: order.quantity,
-      leverage: order.leverage,
-      pnl: 0,
-      fee,
-      slippage: 0,
-      openTime,
-      closeTime: 0,
-    }]);
     toast.success(`条件单已触发：${symbol} ${order.side} @ ${entryPrice.toFixed(2)}`);
   }, [setBalance, setPositionsMap, setTradeHistory]);
 
@@ -685,13 +669,6 @@ const Index = () => {
                 leverage: matchedOrder.leverage, marginMode: matchedOrder.marginMode, margin,
               }],
             }));
-            setTradeHistory(prev => [...prev, {
-              id: crypto.randomUUID(), symbol: activeSymbol, side: matchedOrder.side, type: matchedOrder.type,
-              action: 'OPEN' as const, entryPrice: actualFillPrice, exitPrice: 0,
-              quantity: matchedOrder.quantity, leverage: matchedOrder.leverage,
-              pnl: 0, fee, slippage: slippageAmount,
-              openTime: effectiveSimTimeRef.current, closeTime: 0,
-            }]);
             toast.success(`委托成交: ${matchedOrder.side === 'LONG' ? '开多' : '开空'} ${matchedOrder.quantity} @ ${actualFillPrice.toFixed(2)}`);
           } else if (convertToLimit) {
             remaining.push(updatedOrder);
@@ -746,12 +723,6 @@ const Index = () => {
                   leverage: order.leverage, marginMode: order.marginMode, margin,
                 }],
               }));
-              setTradeHistory(prev => [...prev, {
-                id: crypto.randomUUID(), symbol, side: order.side, type: 'TWAP' as OrderType,
-                action: 'OPEN' as const, entryPrice: slippedPrice, exitPrice: 0,
-                quantity: sliceQty, leverage: order.leverage,
-                pnl: 0, fee, slippage: slippageAmt, openTime: now, closeTime: 0,
-              }]);
               changed = true;
               return { ...order, twapFilledQty: filledSoFar + sliceQty, twapNextExecTime: order.twapNextExecTime! + intervalMs };
             } else {

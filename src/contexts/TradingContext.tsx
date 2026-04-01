@@ -578,14 +578,8 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
       }
     }
 
-    const recordOpen = (fillPrice: number, qty: number, side: OrderSide, fee: number, slippage: number) => {
-      setTradeHistory(prev => [...prev, {
-        id: crypto.randomUUID(), symbol, side, type: order.type,
-        action: 'OPEN' as const, entryPrice: fillPrice, exitPrice: 0,
-        quantity: qty, leverage: order.leverage,
-        pnl: 0, fee, slippage, openTime: now, closeTime: 0,
-      }]);
-    };
+    // Note: We no longer record OPEN trades to tradeHistory.
+    // Only CLOSE/LIQUIDATION/FUNDING produce realized PnL entries.
 
     // BEST PRICE (taker)
     if (order.priceSelection === 'BEST') {
@@ -599,7 +593,6 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
       }
       setBalance(prev => prev - requiredMargin);
       setPositionsMap(prev => ({ ...prev, [symbol]: [...(prev[symbol] || []), position] }));
-      recordOpen(position.entryPrice, order.quantity, order.side, fee, slippage);
       toast.success(`最优价成交: ${order.side === 'LONG' ? '开多' : '开空'} ${order.quantity.toFixed(6)} @ ${position.entryPrice.toFixed(2)}`);
       return;
     }
@@ -616,7 +609,6 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
       }
       setBalance(prev => prev - requiredMargin);
       setPositionsMap(prev => ({ ...prev, [symbol]: [...(prev[symbol] || []), position] }));
-      recordOpen(position.entryPrice, order.quantity, order.side, fee, slippage);
       toast.success(`${order.side === 'LONG' ? '开多' : '开空'} ${order.quantity.toFixed(6)} @ ${position.entryPrice.toFixed(2)}`);
       return;
     }
