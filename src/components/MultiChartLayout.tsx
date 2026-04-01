@@ -123,7 +123,7 @@ export function MultiChartLayout({
             loadingOlder={loadingOlder} tradeHistory={tradeHistory} rawSymbol={rawSymbol}
             pricePrecision={pricePrecision} quantityPrecision={quantityPrecision}
             pendingOrders={pendingOrders} onCancelOrder={onCancelOrder}
-            chartApiRef={chartApiRef} />
+            chartApiRef={chartApiRef} onCrosshairPriceChange={onCrosshairPriceChange} />
         </div>
       ) : layout === '1x2' ? (
         <div className="flex-1 min-h-0 grid grid-cols-2 gap-px" style={{ background: 'hsl(var(--border))' }}>
