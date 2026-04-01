@@ -20,7 +20,7 @@ import { MobileLayout } from '@/components/mobile/MobileLayout';
 import { AssetOverview } from '@/components/AssetOverview';
 import { LiquidationModal } from '@/components/LiquidationModal';
 import { AnalyticsPanel } from '@/components/AnalyticsPanel';
-import { TradePerformancePanel } from '@/components/TradePerformancePanel';
+import { TradeInsightsPanel } from '@/components/TradeInsightsPanel';
 import { CoolingOffModal, useCoolingOff } from '@/components/CoolingOffModal';
 import { toast } from 'sonner';
 import { BarChart3, Wallet, PanelRightClose, PanelRightOpen, Activity } from 'lucide-react';
