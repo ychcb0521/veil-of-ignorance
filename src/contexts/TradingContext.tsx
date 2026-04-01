@@ -886,53 +886,44 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
 
   // ===== Clear Symbol Data & Financial Reversal =====
   const handleClearSymbolData = useCallback((symbol: string) => {
-    // Step A: Force-close positions (return margin without PnL accounting)
-    const symbolPositions = positionsMap[symbol] || [];
+    // Use refs to avoid stale closures
+    const currentPositions = positionsMapRef.current[symbol] || [];
     let returnedMargin = 0;
-    for (const pos of symbolPositions) {
+    for (const pos of currentPositions) {
       const m = pos.marginMode === 'isolated' && pos.isolatedMargin != null
         ? pos.isolatedMargin : pos.margin;
       returnedMargin += m;
     }
 
-    // Step B: Calculate total realized PnL and fees from history for this symbol
-    const symbolHistory = tradeHistory.filter(t => t.symbol === symbol);
+    const currentHistory = tradeHistory;
+    const symbolHistory = currentHistory.filter(t => t.symbol === symbol);
     let totalRealizedPnl = 0;
     let totalFees = 0;
     for (const t of symbolHistory) {
-      // Use precise arithmetic: multiply by 1e8, round, divide
       totalRealizedPnl = Math.round((totalRealizedPnl + t.pnl) * 1e8) / 1e8;
       totalFees = Math.round((totalFees + t.fee) * 1e8) / 1e8;
     }
 
-    // Reversal formula: newBalance = currentBalance + returnedMargin - totalPnL + totalFees
-    // returnedMargin: give back the margin locked in current positions
-    // -totalPnL: reverse all profits/losses (earned 100 → subtract 100; lost 50 → add 50)
-    // +totalFees: refund all fees ever paid
     const adjustment = Math.round((returnedMargin - totalRealizedPnl + totalFees) * 1e8) / 1e8;
 
-    // Step A: Remove positions
+    // Physically remove all positions for this symbol
     setPositionsMap(prev => {
       const next = { ...prev };
       delete next[symbol];
       return next;
     });
 
-    // Step A: Remove orders
     setOrdersMap(prev => {
       const next = { ...prev };
       delete next[symbol];
       return next;
     });
 
-    // Step C: Remove all history records for this symbol
     setTradeHistory(prev => prev.filter(t => t.symbol !== symbol));
-
-    // Step B: Adjust balance
     setBalance(prev => Math.round((prev + adjustment) * 1e8) / 1e8);
 
     toast.success(`已彻底清除 ${symbol.replace('USDT', '/USDT')} 的所有数据，资产已复原。`);
-  }, [positionsMap, tradeHistory]);
+  }, [tradeHistory]);
 
   const value: TradingState = {
     sim,
