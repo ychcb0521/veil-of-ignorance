@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { usePersistedState } from '@/hooks/usePersistedState';
 import type { Position, PendingOrder, TradeRecord } from '@/types/trading';
 import { calcUnrealizedPnl, calcROE, calcLiquidationPrice, MAINTENANCE_MARGIN_RATE } from '@/types/trading';
 import type { PositionsMap, OrdersMap, PriceMap } from '@/contexts/TradingContext';
@@ -36,6 +37,7 @@ export function PositionPanel({
   const [closingKey, setClosingKey] = useState<string | null>(null);
   const [hideOtherContracts, setHideOtherContracts] = useState(false);
   const [closeAllConfirmOpen, setCloseAllConfirmOpen] = useState(false);
+  const [symbolLeverage, setSymbolLeverage] = usePersistedState<Record<string, number>>('symbol_leverage', {});
 
   const allPositions: { symbol: string; position: Position; index: number }[] = [];
   for (const [sym, positions] of Object.entries(positionsMap)) {
@@ -338,10 +340,13 @@ export function PositionPanel({
       {/* Modals */}
       {leverageModal && (
         <LeverageModal
-          pos={leverageModal.pos}
           symbol={leverageModal.symbol}
+          currentLeverage={leverageModal.pos.leverage}
+          notional={leverageModal.pos.entryPrice * leverageModal.pos.quantity}
           onClose={() => setLeverageModal(null)}
           onConfirm={(newLev) => {
+            // Update shared symbol leverage state
+            setSymbolLeverage(prev => ({ ...prev, [leverageModal.symbol]: newLev }));
             toast.success(`杠杆已调整为 ${newLev}x`);
             setLeverageModal(null);
           }}

@@ -53,6 +53,9 @@ export function OrderPanel({ currentPrice, onPlaceOrder, disabled, symbol, cooli
       return { ...prev, [symbol]: next };
     });
   };
+  const [leverageInput, setLeverageInput] = useState(String(leverage));
+  // Sync input display when symbol changes
+  useEffect(() => { setLeverageInput(String(leverage)); }, [symbol, leverage]);
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
@@ -213,11 +216,36 @@ export function OrderPanel({ currentPrice, onPlaceOrder, disabled, symbol, cooli
         <div>
           <div className="flex items-center justify-between mb-1.5">
             <span className="text-xs text-muted-foreground">杠杆</span>
-            <span className="font-mono text-xs font-bold text-primary">{leverage}x</span>
+          </div>
+          <div className="flex items-center gap-2 mb-2">
+            <button onClick={() => setLeverage(v => Math.max(1, v - 1))}
+              className="w-7 h-7 rounded bg-secondary flex items-center justify-center hover:bg-accent active:scale-95 transition-all text-foreground text-sm font-bold">−</button>
+            <div className="relative flex-1 max-w-[80px]">
+              <input
+                type="number" min={1} max={125}
+                value={leverageInput}
+                onChange={e => {
+                  setLeverageInput(e.target.value);
+                  const v = parseInt(e.target.value);
+                  if (!isNaN(v) && v >= 1 && v <= 125) setLeverage(Math.floor(v));
+                }}
+                onBlur={() => {
+                  const v = parseInt(leverageInput);
+                  const clamped = Math.floor(Math.max(1, Math.min(125, isNaN(v) ? 1 : v)));
+                  setLeverage(clamped);
+                  setLeverageInput(String(clamped));
+                }}
+                onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
+                className="w-full text-center text-lg font-bold font-mono text-foreground tabular-nums bg-transparent border border-border rounded-lg px-1 py-0.5 focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/30 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+              />
+              <span className="absolute right-1.5 top-1/2 -translate-y-1/2 text-xs font-bold text-muted-foreground pointer-events-none">x</span>
+            </div>
+            <button onClick={() => setLeverage(v => Math.min(125, v + 1))}
+              className="w-7 h-7 rounded bg-secondary flex items-center justify-center hover:bg-accent active:scale-95 transition-all text-foreground text-sm font-bold">+</button>
           </div>
           <input
             type="range" min={1} max={125} value={leverage}
-            onChange={e => setLeverage(parseInt(e.target.value))}
+            onChange={e => { const v = parseInt(e.target.value); setLeverage(v); setLeverageInput(String(v)); }}
             className="w-full h-1 rounded-full appearance-none cursor-pointer"
             style={{
               background: `linear-gradient(to right, hsl(var(--primary)) ${(leverage / 125) * 100}%, hsl(var(--secondary)) ${(leverage / 125) * 100}%)`,
@@ -226,7 +254,7 @@ export function OrderPanel({ currentPrice, onPlaceOrder, disabled, symbol, cooli
           <div className="flex justify-between mt-1">
             {[1, 25, 50, 75, 100, 125].map(v => (
               <button
-                key={v} onClick={() => setLeverage(v)}
+                key={v} onClick={() => { setLeverage(v); setLeverageInput(String(v)); }}
                 className={`text-[10px] font-mono px-1 rounded transition-all duration-75 ease-out active:scale-[0.95] ${
                   leverage === v ? 'text-primary' : 'text-muted-foreground hover:text-foreground'
                 }`}
