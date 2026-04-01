@@ -756,15 +756,21 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
         // Partial close — reduce quantity and margin
         const remaining = positions[index];
         const remainPct = 1 - pct;
-        positions[index] = {
-          ...remaining,
-          quantity: remaining.quantity * remainPct,
-          margin: remaining.margin * remainPct,
-          isolatedMargin: remaining.isolatedMargin != null
-            ? remaining.isolatedMargin * remainPct : undefined,
-        };
+        const newQty = remaining.quantity * remainPct;
+        // Guard: if remaining quantity is near-zero, treat as full close
+        if (newQty < 1e-8) {
+          positions.splice(index, 1);
+        } else {
+          positions[index] = {
+            ...remaining,
+            quantity: newQty,
+            margin: remaining.margin * remainPct,
+            isolatedMargin: remaining.isolatedMargin != null
+              ? remaining.isolatedMargin * remainPct : undefined,
+          };
+        }
       }
-      return { ...prev, [symbol]: positions };
+      return { ...prev, [symbol]: positions.filter(p => p.quantity > 1e-8) };
     });
 
     setTradeHistory(prev => [...prev, {
