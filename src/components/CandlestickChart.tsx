@@ -309,13 +309,13 @@ function CandlestickChartComponent({ data, symbol, onLoadOlder, loadingOlder, tr
 
     // Subscribe to crosshair for price sync
     const crosshairCb = (data: any) => {
-      if (onCrosshairPriceChange) {
-        if (data && data.kLineData && typeof data.kLineData.close === 'number') {
-          const yPrice = typeof data.y === 'number' ? data.y : data.kLineData.close;
-          onCrosshairPriceChange(yPrice);
-        } else {
-          onCrosshairPriceChange(null);
-        }
+      if (data && data.kLineData && typeof data.kLineData.close === 'number') {
+        const yPrice = typeof data.y === 'number' ? data.y : data.kLineData.close;
+        crosshairPriceRef.current = yPrice;
+        if (onCrosshairPriceChange) onCrosshairPriceChange(yPrice);
+      } else {
+        crosshairPriceRef.current = null;
+        if (onCrosshairPriceChange) onCrosshairPriceChange(null);
       }
     };
     chart.subscribeAction('onCrosshairChange' as any, crosshairCb);
