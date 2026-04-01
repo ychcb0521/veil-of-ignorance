@@ -1,16 +1,16 @@
 /**
  * TradingView-style left vertical drawing toolbar with flyout sub-menus.
- * Now maps to klinecharts native overlay names.
+ * Hover/long-press triggers submenu. Single click activates default tool.
  */
 
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
 import {
   Crosshair, MousePointer, Circle, Pencil,
   TrendingUp, Minus, ArrowRight, MoveHorizontal, MoveVertical, Columns,
-  GitBranch, Triangle,
-  PenTool, Highlighter, Square, CircleIcon, TriangleIcon, Spline,
-  Type, Tag, DollarSign, MessageSquare,
+  GitBranch,
+  PenTool, Square, CircleIcon,
+  Type, Tag, DollarSign,
   Shapes,
   ArrowUpRight, ArrowDownRight, Ruler as RulerIcon,
   Ruler, ZoomIn, Magnet, Lock, Eye, EyeOff, Trash2, PenLine
@@ -90,6 +90,9 @@ const toolGroups: ToolGroup[] = [
   },
 ];
 
+const HOVER_DELAY = 300; // ms before submenu opens on hover
+const LONG_PRESS_DELAY = 400; // ms
+
 interface Props {
   activeTool: string | null;
   onToolChange: (tool: string | null) => void;
@@ -105,7 +108,10 @@ export function DrawingToolbar({ activeTool, onToolChange, onClearDrawings, draw
   const [stayInDrawing, setStayInDrawing] = useState(false);
   const [lockDrawings, setLockDrawings] = useState(false);
   const toolbarRef = useRef<HTMLDivElement>(null);
+  const hoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // Close menu on outside click
   useEffect(() => {
     const handler = (e: MouseEvent) => {
       if (toolbarRef.current && !toolbarRef.current.contains(e.target as Node)) {
@@ -121,9 +127,13 @@ export function DrawingToolbar({ activeTool, onToolChange, onClearDrawings, draw
     return group.items[idx] || group.items[0];
   };
 
-  const handleGroupClick = (groupId: string) => {
-    setOpenGroupId(openGroupId === groupId ? null : groupId);
-  };
+  const openSubmenu = useCallback((groupId: string) => {
+    setOpenGroupId(groupId);
+  }, []);
+
+  const closeSubmenu = useCallback(() => {
+    setOpenGroupId(null);
+  }, []);
 
   const handleSubItemClick = (groupId: string, itemIndex: number, item: ToolItem) => {
     setSelectedPerGroup(prev => ({ ...prev, [groupId]: itemIndex }));
@@ -148,6 +158,36 @@ export function DrawingToolbar({ activeTool, onToolChange, onClearDrawings, draw
     }
   };
 
+  // Hover handlers for groups with submenus
+  const handleGroupMouseEnter = (group: ToolGroup) => {
+    if (group.items.length <= 1) return;
+    hoverTimerRef.current = setTimeout(() => {
+      openSubmenu(group.id);
+    }, HOVER_DELAY);
+  };
+
+  const handleGroupMouseLeave = () => {
+    if (hoverTimerRef.current) {
+      clearTimeout(hoverTimerRef.current);
+      hoverTimerRef.current = null;
+    }
+  };
+
+  // Long-press handlers
+  const handlePointerDown = (group: ToolGroup) => {
+    if (group.items.length <= 1) return;
+    longPressTimerRef.current = setTimeout(() => {
+      openSubmenu(group.id);
+    }, LONG_PRESS_DELAY);
+  };
+
+  const handlePointerUp = () => {
+    if (longPressTimerRef.current) {
+      clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
+    }
+  };
+
   return (
     <div
       ref={toolbarRef}
@@ -162,21 +202,29 @@ export function DrawingToolbar({ activeTool, onToolChange, onClearDrawings, draw
           const isOpen = openGroupId === group.id;
 
           return (
-            <div key={group.id} className="relative">
+            <div
+              key={group.id}
+              className="relative"
+              onMouseEnter={() => handleGroupMouseEnter(group)}
+              onMouseLeave={handleGroupMouseLeave}
+            >
               <button
                 className={`w-[30px] h-[30px] flex items-center justify-center rounded transition-all duration-100 ease-out active:scale-[0.9] relative group ${
                   isActive
-                    ? 'text-primary bg-primary/15'
+                    ? 'text-primary bg-primary/20 ring-1 ring-primary/30'
                     : 'text-muted-foreground hover:text-foreground hover:bg-accent/40'
                 } ${activeItem.disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
                 onClick={() => handleMainIconClick(group)}
-                onContextMenu={(e) => { e.preventDefault(); handleGroupClick(group.id); }}
+                onPointerDown={() => handlePointerDown(group)}
+                onPointerUp={handlePointerUp}
+                onPointerCancel={handlePointerUp}
+                onContextMenu={(e) => { e.preventDefault(); openSubmenu(group.id); }}
               >
                 {activeItem.icon}
                 {hasSubmenu && (
                   <button
                     className="absolute bottom-0 right-0 w-[10px] h-[10px] flex items-center justify-center"
-                    onClick={(e) => { e.stopPropagation(); handleGroupClick(group.id); }}
+                    onClick={(e) => { e.stopPropagation(); openSubmenu(group.id); }}
                   >
                     <svg width="5" height="5" viewBox="0 0 5 5" fill="currentColor" className="opacity-50">
                       <polygon points="0,0 5,2.5 0,5" />
@@ -187,8 +235,12 @@ export function DrawingToolbar({ activeTool, onToolChange, onClearDrawings, draw
 
               {isOpen && hasSubmenu && (
                 <div
-                  className="absolute left-full top-0 ml-1 py-1 rounded-md shadow-xl border border-border min-w-[160px] z-50"
+                  className="absolute left-full top-0 ml-1 py-1 rounded-md shadow-xl border border-border min-w-[160px] z-50 animate-in fade-in-0 zoom-in-95 slide-in-from-left-2 duration-150"
                   style={{ background: 'hsl(var(--popover))' }}
+                  onMouseEnter={() => {
+                    if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current);
+                  }}
+                  onMouseLeave={() => closeSubmenu()}
                 >
                   {group.items.map((item, idx) => (
                     <button
@@ -197,14 +249,17 @@ export function DrawingToolbar({ activeTool, onToolChange, onClearDrawings, draw
                       className={`w-full flex items-center gap-2.5 px-3 py-1.5 text-xs transition-colors duration-100 ease-out ${
                         item.disabled
                           ? 'opacity-50 cursor-not-allowed text-muted-foreground'
-                          : activeTool === item.id && (selectedPerGroup[group.id] ?? 0) === idx
-                            ? 'text-primary bg-primary/10'
+                          : activeTool === item.id
+                            ? 'text-primary bg-primary/15 font-medium'
                             : 'text-foreground hover:bg-accent/50'
                       }`}
                       disabled={item.disabled}
                     >
                       <span className="w-4 h-4 flex items-center justify-center">{item.icon}</span>
                       <span>{item.label}</span>
+                      {activeTool === item.id && (
+                        <span className="ml-auto w-1.5 h-1.5 rounded-full bg-primary" />
+                      )}
                     </button>
                   ))}
                 </div>
@@ -258,7 +313,7 @@ function ToolbarButton({ icon, label, active, onClick, variant }: {
             variant === 'destructive'
               ? 'text-muted-foreground hover:text-destructive hover:bg-destructive/10'
               : active
-                ? 'text-primary bg-primary/15'
+                ? 'text-primary bg-primary/20 ring-1 ring-primary/30'
                 : 'text-muted-foreground hover:text-foreground hover:bg-accent/40'
           }`}
         >
