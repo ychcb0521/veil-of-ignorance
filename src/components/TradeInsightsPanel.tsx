@@ -1,10 +1,13 @@
-import { useState, useMemo, useCallback } from 'react';
+import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import {
   X, Search, TrendingUp, TrendingDown, Target, Activity,
-  BarChart3, Calendar, ChevronDown, ChevronUp, Clock, Crosshair,
+  BarChart3, Calendar, ChevronDown, Clock, Crosshair,
 } from 'lucide-react';
+import { init, dispose, CandleType, LineType, TooltipShowRule, TooltipShowType, type Chart, type KLineData, type OverlayCreate } from 'klinecharts';
 import type { TradeRecord } from '@/types/trading';
+import type { KlineData } from '@/hooks/useBinanceData';
 import { formatUTC8 } from '@/lib/timeFormat';
+import { useTheme } from '@/contexts/ThemeContext';
 
 /* ===== Trade Pair ===== */
 interface TradePair {
@@ -19,9 +22,7 @@ interface Props {
   open: boolean;
   onClose: () => void;
   tradeHistory: TradeRecord[];
-  /** Initial symbol to pre-select */
   initialSymbol?: string;
-  /** Callback: jump main chart to a specific time */
   onJumpToTime?: (symbol: string, timestamp: number) => void;
 }
 
@@ -66,17 +67,88 @@ function formatDuration(ms: number) {
 }
 
 function formatMinute(ts: number): string {
-  return formatUTC8(ts).slice(0, 16); // YYYY-MM-DD HH:mm
+  return formatUTC8(ts).slice(0, 16);
 }
 
 function parseMinuteInput(str: string): number | null {
-  // Accept "YYYY-MM-DD HH:mm" — interpret as UTC+8
   const m = str.match(/^(\d{4})-(\d{2})-(\d{2})\s+(\d{2}):(\d{2})$/);
   if (!m) return null;
   const [, y, mo, d, h, mi] = m;
-  const utc = Date.UTC(+y, +mo - 1, +d, +h - 8, +mi);
-  return utc;
+  return Date.UTC(+y, +mo - 1, +d, +h - 8, +mi);
 }
+
+/* ===== Fetch klines from Binance ===== */
+async function fetchKlines(
+  symbol: string, interval: string,
+  startTime: number, endTime: number,
+): Promise<KlineData[]> {
+  const all: KlineData[] = [];
+  let cursor = startTime;
+  const limit = 1000;
+
+  while (cursor < endTime) {
+    const qs = new URLSearchParams({
+      symbol, interval,
+      startTime: String(cursor),
+      endTime: String(endTime),
+      limit: String(limit),
+    });
+    const res = await fetch(`https://fapi.binance.com/fapi/v1/klines?${qs}`);
+    if (!res.ok) break;
+    const raw: any[][] = await res.json();
+    if (raw.length === 0) break;
+    for (const k of raw) {
+      all.push({
+        time: k[0] as number,
+        open: parseFloat(k[1]),
+        high: parseFloat(k[2]),
+        low: parseFloat(k[3]),
+        close: parseFloat(k[4]),
+        volume: parseFloat(k[5]),
+      });
+    }
+    cursor = (raw[raw.length - 1][0] as number) + 1;
+    if (raw.length < limit) break;
+  }
+  return all;
+}
+
+/* ===== Chart theme ===== */
+const DARK_CHART_STYLES = {
+  grid: { show: true, horizontal: { color: '#1B1F26' }, vertical: { color: '#1B1F26' } },
+  candle: {
+    type: CandleType.CandleSolid,
+    bar: { upColor: '#0ECB81', downColor: '#F6465D', upBorderColor: '#0ECB81', downBorderColor: '#F6465D', upWickColor: '#0ECB81', downWickColor: '#F6465D' },
+    priceMark: { show: true, last: { show: false } },
+    tooltip: { showRule: TooltipShowRule.FollowCross, showType: TooltipShowType.Standard },
+  },
+  xAxis: { show: true, tickText: { color: '#848E9C' } },
+  yAxis: { show: true, tickText: { color: '#848E9C' } },
+  crosshair: {
+    show: true,
+    horizontal: { show: true, line: { show: true, color: '#F0B90B33', style: LineType.Dashed }, text: { show: true, color: '#FFF', borderColor: '#F0B90B', backgroundColor: '#363A45' } },
+    vertical: { show: true, line: { show: true, color: '#F0B90B33', style: LineType.Dashed }, text: { show: true, color: '#FFF', borderColor: '#F0B90B', backgroundColor: '#363A45' } },
+  },
+  separator: { color: '#1B1F26' },
+};
+
+const LIGHT_CHART_STYLES = {
+  grid: { show: true, horizontal: { color: '#EAECEF' }, vertical: { color: '#EAECEF' } },
+  candle: {
+    type: CandleType.CandleSolid,
+    bar: { upColor: '#0ECB81', downColor: '#F6465D', upBorderColor: '#0ECB81', downBorderColor: '#F6465D', upWickColor: '#0ECB81', downWickColor: '#F6465D' },
+    priceMark: { show: true, last: { show: false } },
+    tooltip: { showRule: TooltipShowRule.FollowCross, showType: TooltipShowType.Standard },
+  },
+  xAxis: { show: true, tickText: { color: '#474D57' } },
+  yAxis: { show: true, tickText: { color: '#474D57' } },
+  crosshair: {
+    show: true,
+    horizontal: { show: true, line: { show: true, color: '#B7BDC633', style: LineType.Dashed }, text: { show: true, color: '#1E2329', borderColor: '#B7BDC6', backgroundColor: '#F0F1F2' } },
+    vertical: { show: true, line: { show: true, color: '#B7BDC633', style: LineType.Dashed }, text: { show: true, color: '#1E2329', borderColor: '#B7BDC6', backgroundColor: '#F0F1F2' } },
+  },
+  separator: { color: '#EAECEF' },
+};
 
 /* ===== Component ===== */
 export function TradeInsightsPanel({ open, onClose, tradeHistory, initialSymbol, onJumpToTime }: Props) {
@@ -84,11 +156,16 @@ export function TradeInsightsPanel({ open, onClose, tradeHistory, initialSymbol,
   const [selectedCoin, setSelectedCoin] = useState(initialSymbol || tradedCoins[0] || '');
   const [coinSearch, setCoinSearch] = useState('');
   const [showCoinList, setShowCoinList] = useState(false);
-
-  // Time range state — minute precision
   const [startStr, setStartStr] = useState('');
   const [endStr, setEndStr] = useState('');
   const [quickRange, setQuickRange] = useState<string>('all');
+  const [chartLoading, setChartLoading] = useState(false);
+  const [hoveredPair, setHoveredPair] = useState<TradePair | null>(null);
+  const [tooltipPos, setTooltipPos] = useState({ x: 0, y: 0 });
+
+  const chartContainerRef = useRef<HTMLDivElement>(null);
+  const chartRef = useRef<Chart | null>(null);
+  const { theme } = useTheme();
 
   const QUICK_RANGES = [
     { key: '24h', label: '24小时', ms: 24 * 3600_000 },
@@ -97,7 +174,6 @@ export function TradeInsightsPanel({ open, onClose, tradeHistory, initialSymbol,
     { key: 'all', label: '全部', ms: Infinity },
   ];
 
-  // Effective time range
   const timeRange = useMemo<{ start: number; end: number }>(() => {
     if (quickRange === 'custom') {
       const s = parseMinuteInput(startStr);
@@ -110,7 +186,6 @@ export function TradeInsightsPanel({ open, onClose, tradeHistory, initialSymbol,
     return { start: now - r.ms, end: now };
   }, [quickRange, startStr, endStr]);
 
-  // Filtered trades for selected coin + time range
   const filteredTrades = useMemo(() => {
     return tradeHistory.filter(t => {
       if (t.symbol !== selectedCoin) return false;
@@ -136,14 +211,10 @@ export function TradeInsightsPanel({ open, onClose, tradeHistory, initialSymbol,
     const totalPnl = closes.reduce((s, t) => s + t.pnl, 0);
     const totalFees = closes.reduce((s, t) => s + t.fee, 0);
 
-    // Max drawdown on equity curve
-    let equity = 0, peak = 0, maxDrawdown = 0;
-    let maxDrawdownTime = 0;
+    let equity = 0, peak = 0, maxDrawdown = 0, maxDrawdownTime = 0;
     const sorted = [...closes].sort((a, b) => a.closeTime - b.closeTime);
-    const equityCurve: { equity: number; time: number }[] = [];
     for (const t of sorted) {
       equity += t.pnl;
-      equityCurve.push({ equity, time: t.closeTime });
       if (equity > peak) peak = equity;
       const dd = peak > 0 ? ((peak - equity) / peak) * 100 : 0;
       if (dd > maxDrawdown) { maxDrawdown = dd; maxDrawdownTime = t.closeTime; }
@@ -154,9 +225,171 @@ export function TradeInsightsPanel({ open, onClose, tradeHistory, initialSymbol,
     return {
       total, wins: wins.length, losses: losses.length,
       winRate, plRatio, expectancy, totalPnl, totalFees,
-      maxDrawdown, maxDrawdownTime, avgWin, avgLoss, equityCurve, avgHoldMs,
+      maxDrawdown, maxDrawdownTime, avgWin, avgLoss, avgHoldMs,
     };
   }, [filteredTrades, pairs]);
+
+  // ===== Chart lifecycle =====
+  useEffect(() => {
+    if (!open || !chartContainerRef.current) return;
+
+    const chart = init(chartContainerRef.current, {
+      styles: theme === 'light' ? LIGHT_CHART_STYLES : DARK_CHART_STYLES,
+      timezone: 'Asia/Shanghai',
+    });
+    if (!chart) return;
+    chartRef.current = chart;
+
+    const ro = new ResizeObserver(() => chart.resize());
+    ro.observe(chartContainerRef.current);
+
+    return () => {
+      ro.disconnect();
+      chartRef.current = null;
+      dispose(chartContainerRef.current!);
+    };
+  }, [open]);
+
+  // Theme sync
+  useEffect(() => {
+    chartRef.current?.setStyles(theme === 'light' ? LIGHT_CHART_STYLES : DARK_CHART_STYLES);
+  }, [theme]);
+
+  // ===== Load klines when coin/time changes =====
+  useEffect(() => {
+    if (!open || !selectedCoin) return;
+    const chart = chartRef.current;
+    if (!chart) return;
+
+    // Determine actual data range from trades
+    const coinTrades = tradeHistory.filter(t => t.symbol === selectedCoin && t.action !== 'FUNDING');
+    if (coinTrades.length === 0) {
+      chart.applyNewData([]);
+      return;
+    }
+
+    const allTimes = coinTrades.flatMap(t => [t.openTime, t.closeTime].filter(x => x > 0));
+    const minTradeTime = Math.min(...allTimes);
+    const maxTradeTime = Math.max(...allTimes);
+
+    let effectiveStart = timeRange.start === 0 ? minTradeTime : Math.max(timeRange.start, minTradeTime);
+    let effectiveEnd = timeRange.end === Infinity ? maxTradeTime : Math.min(timeRange.end, maxTradeTime);
+
+    // Pad by 5% on each side for visual context
+    const span = effectiveEnd - effectiveStart;
+    effectiveStart = Math.max(minTradeTime - span * 0.1, effectiveStart - 3600_000 * 2);
+    effectiveEnd = effectiveEnd + span * 0.1 + 3600_000 * 2;
+
+    let cancelled = false;
+    setChartLoading(true);
+
+    fetchKlines(selectedCoin, '1m', effectiveStart, effectiveEnd).then(klines => {
+      if (cancelled || !chartRef.current) return;
+      const kcData: KLineData[] = klines.map(k => ({
+        timestamp: k.time,
+        open: k.open,
+        high: k.high,
+        low: k.low,
+        close: k.close,
+        volume: k.volume,
+      }));
+      chartRef.current.applyNewData(kcData, true);
+
+      // Fit content after data load
+      requestAnimationFrame(() => {
+        chartRef.current?.scrollToRealTime();
+      });
+
+      setChartLoading(false);
+
+      // Now render trade overlays
+      renderTradeOverlays(chartRef.current, filteredTrades, pairs);
+    }).catch(() => {
+      if (!cancelled) setChartLoading(false);
+    });
+
+    return () => { cancelled = true; };
+  }, [open, selectedCoin, timeRange, filteredTrades.length]);
+
+  // Re-render overlays when pairs change (but chart already has data)
+  useEffect(() => {
+    const chart = chartRef.current;
+    if (!chart || !open) return;
+    renderTradeOverlays(chart, filteredTrades, pairs);
+  }, [pairs, filteredTrades]);
+
+  function renderTradeOverlays(chart: Chart, trades: TradeRecord[], tradePairs: TradePair[]) {
+    // Clear previous
+    try { chart.removeOverlay('review_markers'); } catch {}
+    try { chart.removeOverlay('review_lines'); } catch {}
+
+    // 1. Trade markers
+    for (const trade of trades) {
+      const ts = trade.action === 'OPEN' ? trade.openTime : trade.closeTime;
+      if (ts <= 0) continue;
+      const isBuy = (trade.action === 'OPEN' && trade.side === 'LONG') || (trade.action === 'CLOSE' && trade.side === 'SHORT');
+      const price = trade.action === 'OPEN' ? trade.entryPrice : trade.exitPrice;
+
+      chart.createOverlay({
+        name: 'simpleAnnotation',
+        id: 'review_markers',
+        points: [{ timestamp: ts, value: price }],
+        lock: true,
+        extendData: isBuy ? '▲ B' : '▼ S',
+        styles: {
+          text: {
+            color: isBuy ? '#0ECB81' : '#F6465D',
+            size: 10,
+            borderColor: isBuy ? '#0ECB8140' : '#F6465D40',
+            backgroundColor: isBuy ? '#0ECB8118' : '#F6465D18',
+          },
+        },
+      } as OverlayCreate);
+    }
+
+    // 2. Pair connection lines
+    for (const pair of tradePairs) {
+      const isProfit = pair.pnl >= 0;
+      const color = isProfit ? '#0ECB8199' : '#F6465D99';
+      const openTs = pair.open.openTime;
+      const closeTs = pair.close.closeTime;
+      const openPrice = pair.open.entryPrice;
+      const closePrice = pair.close.exitPrice;
+
+      chart.createOverlay({
+        name: 'segment',
+        id: 'review_lines',
+        points: [
+          { timestamp: openTs, value: openPrice },
+          { timestamp: closeTs, value: closePrice },
+        ],
+        lock: true,
+        styles: {
+          line: {
+            style: 'dashed' as any,
+            dashedValue: [4, 3],
+            size: 1.5,
+            color,
+          },
+        },
+        extendData: JSON.stringify({
+          pnl: pair.pnl,
+          roe: pair.roe,
+          holdMs: pair.holdDurationMs,
+          openTime: openTs,
+          closeTime: closeTs,
+          openPrice,
+          closePrice,
+        }),
+      } as OverlayCreate);
+    }
+  }
+
+  // Tooltip tracking via mouse events on chart container
+  const handleChartMouseMove = useCallback((e: React.MouseEvent) => {
+    // Simple approach: store position for potential tooltip
+    setTooltipPos({ x: e.clientX, y: e.clientY });
+  }, []);
 
   const handleSelectCoin = useCallback((coin: string) => {
     setSelectedCoin(coin);
@@ -169,10 +402,6 @@ export function TradeInsightsPanel({ open, onClose, tradeHistory, initialSymbol,
     if (key !== 'custom') { setStartStr(''); setEndStr(''); }
   }, []);
 
-  const handleCustomApply = useCallback(() => {
-    setQuickRange('custom');
-  }, []);
-
   const handleJump = useCallback((ts: number) => {
     onJumpToTime?.(selectedCoin, ts);
   }, [onJumpToTime, selectedCoin]);
@@ -183,14 +412,6 @@ export function TradeInsightsPanel({ open, onClose, tradeHistory, initialSymbol,
     return tradedCoins.filter(c => c.includes(q));
   }, [tradedCoins, coinSearch]);
 
-  // Equity curve SVG
-  const curve = stats.equityCurve;
-  const W = 440, H = 90;
-  const minEq = curve.length > 0 ? Math.min(...curve.map(c => c.equity)) : 0;
-  const maxEq = curve.length > 0 ? Math.max(...curve.map(c => c.equity)) : 0;
-  const eqRange = maxEq - minEq || 1;
-  const isPositive = (curve[curve.length - 1]?.equity ?? 0) >= 0;
-
   if (!open) return null;
 
   const baseCoin = selectedCoin.replace('USDT', '');
@@ -199,7 +420,7 @@ export function TradeInsightsPanel({ open, onClose, tradeHistory, initialSymbol,
     <div className="fixed inset-0 z-[150] flex items-center justify-center" onClick={onClose}>
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
       <div
-        className="relative w-full max-w-5xl max-h-[88vh] mx-4 rounded-xl border border-border shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200 flex flex-col"
+        className="relative w-full max-w-7xl max-h-[92vh] mx-4 rounded-xl border border-border shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200 flex flex-col"
         style={{ background: 'hsl(var(--card))' }}
         onClick={e => e.stopPropagation()}
       >
@@ -215,7 +436,7 @@ export function TradeInsightsPanel({ open, onClose, tradeHistory, initialSymbol,
           </button>
         </div>
 
-        {/* ===== Toolbar: Coin Selector + Time Range ===== */}
+        {/* ===== Toolbar ===== */}
         <div className="flex items-center gap-3 px-5 py-2.5 border-b border-border/50 shrink-0 flex-wrap">
           {/* Coin Selector */}
           <div className="relative">
@@ -270,7 +491,6 @@ export function TradeInsightsPanel({ open, onClose, tradeHistory, initialSymbol,
             )}
           </div>
 
-          {/* Divider */}
           <div className="w-px h-5 bg-border" />
 
           {/* Quick Range Pills */}
@@ -301,7 +521,6 @@ export function TradeInsightsPanel({ open, onClose, tradeHistory, initialSymbol,
             </button>
           </div>
 
-          {/* Custom range inputs */}
           {quickRange === 'custom' && (
             <div className="flex items-center gap-1.5">
               <input
@@ -319,225 +538,154 @@ export function TradeInsightsPanel({ open, onClose, tradeHistory, initialSymbol,
                 placeholder="2024-01-20 20:00"
                 className="w-[140px] px-2 py-1 rounded-md border border-border bg-secondary text-[11px] font-mono text-foreground placeholder:text-muted-foreground outline-none focus:border-primary"
               />
-              <button
-                onClick={handleCustomApply}
-                className="px-2 py-1 rounded-md bg-primary text-primary-foreground text-[11px] font-medium active:scale-95 transition-all"
-              >
-                应用
-              </button>
             </div>
           )}
 
           <span className="ml-auto text-[10px] text-muted-foreground font-mono">
-            {stats.total} 笔闭环交易 · {pairs.length} 对
+            {stats.total} 笔闭环 · {pairs.length} 对
           </span>
         </div>
 
-        {/* ===== Main Content ===== */}
-        <div className="flex-1 overflow-y-auto">
-          <div className="flex gap-0 min-h-0">
-            {/* Left: Trade Pairs */}
-            <div className="flex-1 border-r border-border/50 p-4 space-y-4">
-              <h3 className="text-xs font-bold text-foreground flex items-center gap-1.5">
-                <Activity className="w-3.5 h-3.5 text-primary" />
-                交易对映射 (Trade Mapping)
-              </h3>
-
-              {pairs.length === 0 ? (
-                <div className="py-16 text-center text-xs text-muted-foreground space-y-2">
-                  <div className="text-3xl">📊</div>
-                  <p>该时间段内暂无闭环交易记录</p>
-                  <p className="text-[10px]">请选择有交易记录的币种和时间范围</p>
+        {/* ===== Main Content: Chart (70%+) + Stats Sidebar ===== */}
+        <div className="flex-1 flex min-h-0 overflow-hidden">
+          {/* Left: Chart area */}
+          <div className="flex-1 min-w-0 flex flex-col relative">
+            {chartLoading && (
+              <div className="absolute inset-0 z-10 flex items-center justify-center bg-background/60 backdrop-blur-sm">
+                <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <div className="w-4 h-4 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+                  加载K线数据中...
                 </div>
-              ) : (
-                <div className="space-y-2 max-h-[55vh] overflow-y-auto pr-1 custom-scrollbar">
+              </div>
+            )}
+            {filteredTrades.length === 0 && !chartLoading ? (
+              <div className="flex-1 flex items-center justify-center">
+                <div className="text-center space-y-2 px-6">
+                  <div className="text-4xl">📊</div>
+                  <p className="text-sm text-muted-foreground">该时间段内暂无交易记录</p>
+                  <p className="text-[10px] text-muted-foreground">请选择有交易记录的币种和时间范围</p>
+                </div>
+              </div>
+            ) : (
+              <div
+                ref={chartContainerRef}
+                className="flex-1 min-h-0"
+                onMouseMove={handleChartMouseMove}
+                style={{ backgroundColor: theme === 'light' ? '#FFFFFF' : '#0B0E11' }}
+              />
+            )}
+
+            {/* Trade pair list (compact, below chart) */}
+            {pairs.length > 0 && (
+              <div className="border-t border-border shrink-0 max-h-[140px] overflow-y-auto">
+                <div className="px-3 py-1.5 text-[10px] font-bold text-muted-foreground flex items-center gap-1.5 border-b border-border/30">
+                  <Activity className="w-3 h-3 text-primary" />
+                  闭环交易列表 ({pairs.length})
+                </div>
+                <div className="divide-y divide-border/20">
                   {pairs.map((pair, idx) => {
                     const isProfit = pair.pnl >= 0;
                     return (
                       <div
                         key={idx}
-                        className={`rounded-lg border p-3 transition-all hover:shadow-md cursor-pointer group ${
-                          isProfit
-                            ? 'border-emerald-500/20 hover:border-emerald-500/40 bg-emerald-500/5'
-                            : 'border-red-500/20 hover:border-red-500/40 bg-red-500/5'
-                        }`}
+                        className="flex items-center gap-3 px-3 py-1.5 hover:bg-accent/30 cursor-pointer transition-colors text-[10px] font-mono"
                         onClick={() => handleJump(pair.open.openTime)}
-                        title="点击跳转至开仓时间点"
+                        onMouseEnter={() => setHoveredPair(pair)}
+                        onMouseLeave={() => setHoveredPair(null)}
                       >
-                        {/* Header */}
-                        <div className="flex items-center justify-between mb-2">
-                          <div className="flex items-center gap-2">
-                            <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
-                              pair.open.side === 'LONG'
-                                ? 'bg-emerald-500/15 text-emerald-400'
-                                : 'bg-red-500/15 text-red-400'
-                            }`}>
-                              {pair.open.side === 'LONG' ? '▲ 多' : '▼ 空'} {pair.open.leverage}x
-                            </span>
-                            {pair.close.action === 'LIQUIDATION' && (
-                              <span className="text-[10px] px-1 py-0.5 rounded bg-destructive/20 text-destructive">💀爆仓</span>
-                            )}
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <span className="text-[10px] text-muted-foreground font-mono">
-                              <Clock className="w-3 h-3 inline mr-0.5" />{formatDuration(pair.holdDurationMs)}
-                            </span>
-                            <Crosshair className="w-3 h-3 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
-                          </div>
-                        </div>
-
-                        {/* Trade flow */}
-                        <div className="flex items-center gap-2 mb-2">
-                          <div className="flex-1">
-                            <div className="text-[9px] text-muted-foreground flex items-center gap-1">
-                              <span className={`w-1.5 h-1.5 rounded-full ${isProfit ? 'bg-emerald-400' : 'bg-red-400'}`} />
-                              开仓 (Entry)
-                            </div>
-                            <div className="text-xs font-mono font-bold text-foreground tabular-nums">{pair.open.entryPrice.toFixed(2)}</div>
-                            <div className="text-[9px] text-muted-foreground font-mono">{formatMinute(pair.open.openTime)}</div>
-                          </div>
-
-                          {/* Gradient connection line */}
-                          <div className="flex-1 flex items-center relative py-1">
-                            <div className={`h-[2px] flex-1 rounded-full ${
-                              isProfit
-                                ? 'bg-gradient-to-r from-emerald-400/60 to-emerald-400'
-                                : 'bg-gradient-to-r from-red-400/60 to-red-400'
-                            }`} />
-                            <div className={`absolute inset-0 flex items-center justify-center`}>
-                              <span className={`text-[9px] font-bold font-mono px-1.5 py-0.5 rounded ${
-                                isProfit ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/20 text-red-400'
-                              }`}>
-                                {isProfit ? '+' : ''}{pair.pnl.toFixed(2)}
-                              </span>
-                            </div>
-                          </div>
-
-                          <div className="flex-1 text-right">
-                            <div className="text-[9px] text-muted-foreground flex items-center justify-end gap-1">
-                              平仓 (Exit)
-                              <span className={`w-1.5 h-1.5 rounded-full ${isProfit ? 'bg-emerald-400' : 'bg-red-400'}`} />
-                            </div>
-                            <div className="text-xs font-mono font-bold text-foreground tabular-nums">{pair.close.exitPrice.toFixed(2)}</div>
-                            <div className="text-[9px] text-muted-foreground font-mono">{formatMinute(pair.close.closeTime)}</div>
-                          </div>
-                        </div>
-
-                        {/* Footer */}
-                        <div className="flex items-center justify-between pt-1.5 border-t border-border/30">
-                          <div className="flex items-center gap-3">
-                            <div>
-                              <span className="text-[9px] text-muted-foreground">ROE </span>
-                              <span className={`text-xs font-mono font-bold tabular-nums ${isProfit ? 'text-emerald-400' : 'text-red-400'}`}>
-                                {isProfit ? '+' : ''}{pair.roe.toFixed(2)}%
-                              </span>
-                            </div>
-                            <div>
-                              <span className="text-[9px] text-muted-foreground">数量 </span>
-                              <span className="text-[10px] font-mono text-foreground tabular-nums">{pair.open.quantity.toFixed(4)}</span>
-                            </div>
-                          </div>
-                          <div className="text-[9px] text-muted-foreground font-mono tabular-nums">
-                            手续费 {pair.close.fee.toFixed(4)}
-                          </div>
-                        </div>
+                        <span className={`font-bold px-1 py-0.5 rounded ${
+                          pair.open.side === 'LONG' ? 'bg-emerald-500/15 text-emerald-400' : 'bg-red-500/15 text-red-400'
+                        }`}>
+                          {pair.open.side === 'LONG' ? '多' : '空'} {pair.open.leverage}x
+                        </span>
+                        <span className="text-muted-foreground">{formatMinute(pair.open.openTime)}</span>
+                        <span className="text-muted-foreground">→</span>
+                        <span className="text-muted-foreground">{formatMinute(pair.close.closeTime)}</span>
+                        <span className="text-muted-foreground ml-auto">
+                          <Clock className="w-2.5 h-2.5 inline mr-0.5" />{formatDuration(pair.holdDurationMs)}
+                        </span>
+                        <span className={`font-bold tabular-nums ${isProfit ? 'text-emerald-400' : 'text-red-400'}`}>
+                          {isProfit ? '+' : ''}{pair.pnl.toFixed(2)}
+                        </span>
+                        <span className={`tabular-nums ${isProfit ? 'text-emerald-400' : 'text-red-400'}`}>
+                          {isProfit ? '+' : ''}{pair.roe.toFixed(1)}%
+                        </span>
                       </div>
                     );
                   })}
                 </div>
-              )}
+              </div>
+            )}
+          </div>
+
+          {/* Right: Stats Dashboard */}
+          <div className="w-[280px] shrink-0 border-l border-border p-4 space-y-4 overflow-y-auto">
+            <h3 className="text-xs font-bold text-foreground flex items-center gap-1.5">
+              <BarChart3 className="w-3.5 h-3.5 text-primary" />
+              统计面板
+            </h3>
+
+            <div className="space-y-1.5">
+              <StatRow label="期望值" value={`${stats.expectancy >= 0 ? '+' : ''}${stats.expectancy.toFixed(2)}`}
+                color={stats.expectancy >= 0 ? 'text-emerald-400' : 'text-red-400'} />
+              <StatRow label="胜率" value={`${stats.winRate.toFixed(1)}%`}
+                color={stats.winRate >= 50 ? 'text-emerald-400' : 'text-red-400'} />
+              <StatRow label="盈亏比" value={stats.plRatio === Infinity ? '∞' : stats.plRatio.toFixed(2)}
+                color={stats.plRatio >= 1 ? 'text-emerald-400' : 'text-red-400'} />
+              <StatRow
+                label="最大回撤"
+                value={`${stats.maxDrawdown.toFixed(2)}%`}
+                color="text-red-400"
+                clickable={!!stats.maxDrawdownTime}
+                onClick={() => stats.maxDrawdownTime && handleJump(stats.maxDrawdownTime)}
+              />
             </div>
 
-            {/* Right: Stats Dashboard */}
-            <div className="w-[320px] shrink-0 p-4 space-y-4 overflow-y-auto">
-              <h3 className="text-xs font-bold text-foreground flex items-center gap-1.5">
-                <BarChart3 className="w-3.5 h-3.5 text-primary" />
-                数学统计面板
-              </h3>
-
-              {/* Core stats */}
-              <div className="space-y-1.5">
-                <StatRow label="期望值 (Expectancy)" value={`${stats.expectancy >= 0 ? '+' : ''}${stats.expectancy.toFixed(2)}`}
-                  color={stats.expectancy >= 0 ? 'text-emerald-400' : 'text-red-400'} />
-                <StatRow label="总胜率 (Win Rate)" value={`${stats.winRate.toFixed(1)}%`}
-                  color={stats.winRate >= 50 ? 'text-emerald-400' : 'text-red-400'} />
-                <StatRow label="盈亏比 (P/L Ratio)" value={stats.plRatio === Infinity ? '∞' : stats.plRatio.toFixed(2)}
-                  color={stats.plRatio >= 1 ? 'text-emerald-400' : 'text-red-400'} />
-                <StatRow
-                  label="最大回撤 (Max DD)"
-                  value={`${stats.maxDrawdown.toFixed(2)}%`}
-                  color="text-red-400"
-                  clickable={!!stats.maxDrawdownTime}
-                  onClick={() => stats.maxDrawdownTime && handleJump(stats.maxDrawdownTime)}
-                />
-              </div>
-
-              <div className="border-t border-border/50 pt-2 space-y-1.5">
-                <StatRow label="总盈亏" value={`${stats.totalPnl >= 0 ? '+' : ''}${stats.totalPnl.toFixed(2)}`}
-                  color={stats.totalPnl >= 0 ? 'text-emerald-400' : 'text-red-400'} />
-                <StatRow label="总手续费" value={`-${stats.totalFees.toFixed(2)}`} color="text-muted-foreground" />
-                <StatRow label="平均盈利" value={`+${stats.avgWin.toFixed(2)}`} color="text-emerald-400" />
-                <StatRow label="平均亏损" value={`-${stats.avgLoss.toFixed(2)}`} color="text-red-400" />
-                <StatRow label="平均持仓" value={formatDuration(stats.avgHoldMs)} color="text-foreground" />
-              </div>
-
-              {/* Win/Loss bar */}
-              <div className="flex items-center gap-2 text-[10px] font-mono pt-1">
-                <span className="text-emerald-400">胜 {stats.wins}</span>
-                <div className="flex-1 h-2 rounded-full overflow-hidden bg-red-500/20">
-                  <div className="h-full bg-emerald-400 rounded-full transition-all"
-                    style={{ width: `${stats.total > 0 ? (stats.wins / stats.total) * 100 : 0}%` }} />
-                </div>
-                <span className="text-red-400">负 {stats.losses}</span>
-              </div>
-
-              {/* Equity Curve */}
-              <div>
-                <div className="text-[10px] text-muted-foreground mb-1.5 font-medium">
-                  {baseCoin} 权益曲线 (Equity Curve)
-                </div>
-                {curve.length < 2 ? (
-                  <div className="h-[80px] flex items-center justify-center text-[10px] text-muted-foreground rounded border border-border/30">
-                    需要至少 2 笔交易
-                  </div>
-                ) : (
-                  <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-[80px]">
-                    {(() => {
-                      const y = H - ((0 - minEq) / eqRange) * H;
-                      return <line x1={0} y1={y} x2={W} y2={y} stroke="hsl(var(--muted-foreground))" strokeWidth={0.5} strokeDasharray="3 2" />;
-                    })()}
-                    <polyline
-                      fill="none"
-                      stroke={isPositive ? '#0ECB81' : '#F6465D'}
-                      strokeWidth={1.5}
-                      points={curve.map((c, i) => {
-                        const x = (i / (curve.length - 1)) * W;
-                        const y = H - ((c.equity - minEq) / eqRange) * H;
-                        return `${x},${y}`;
-                      }).join(' ')}
-                    />
-                    <polygon
-                      fill={isPositive ? 'rgba(14,203,129,0.08)' : 'rgba(246,70,93,0.08)'}
-                      points={[
-                        `0,${H}`,
-                        ...curve.map((c, i) => {
-                          const x = (i / (curve.length - 1)) * W;
-                          const y = H - ((c.equity - minEq) / eqRange) * H;
-                          return `${x},${y}`;
-                        }),
-                        `${W},${H}`,
-                      ].join(' ')}
-                    />
-                  </svg>
-                )}
-              </div>
-
-              {/* Trade distribution by hour */}
-              <div>
-                <div className="text-[10px] text-muted-foreground mb-1.5 font-medium">交易时段分布</div>
-                <HourDistribution pairs={pairs} />
-              </div>
+            <div className="border-t border-border/50 pt-2 space-y-1.5">
+              <StatRow label="总盈亏" value={`${stats.totalPnl >= 0 ? '+' : ''}${stats.totalPnl.toFixed(2)}`}
+                color={stats.totalPnl >= 0 ? 'text-emerald-400' : 'text-red-400'} />
+              <StatRow label="总手续费" value={`-${stats.totalFees.toFixed(2)}`} color="text-muted-foreground" />
+              <StatRow label="平均盈利" value={`+${stats.avgWin.toFixed(2)}`} color="text-emerald-400" />
+              <StatRow label="平均亏损" value={`-${stats.avgLoss.toFixed(2)}`} color="text-red-400" />
+              <StatRow label="平均持仓" value={formatDuration(stats.avgHoldMs)} color="text-foreground" />
             </div>
+
+            {/* Win/Loss bar */}
+            <div className="flex items-center gap-2 text-[10px] font-mono pt-1">
+              <span className="text-emerald-400">胜 {stats.wins}</span>
+              <div className="flex-1 h-2 rounded-full overflow-hidden bg-red-500/20">
+                <div className="h-full bg-emerald-400 rounded-full transition-all"
+                  style={{ width: `${stats.total > 0 ? (stats.wins / stats.total) * 100 : 0}%` }} />
+              </div>
+              <span className="text-red-400">负 {stats.losses}</span>
+            </div>
+
+            {/* Trade pair details on hover */}
+            {hoveredPair && (
+              <div className="rounded-lg border border-primary/30 bg-primary/5 p-3 space-y-1.5 animate-in fade-in duration-150">
+                <div className="text-[10px] font-bold text-primary">交易详情</div>
+                <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-[10px] font-mono">
+                  <span className="text-muted-foreground">开仓时间</span>
+                  <span className="text-foreground">{formatMinute(hoveredPair.open.openTime)}</span>
+                  <span className="text-muted-foreground">平仓时间</span>
+                  <span className="text-foreground">{formatMinute(hoveredPair.close.closeTime)}</span>
+                  <span className="text-muted-foreground">开仓价</span>
+                  <span className="text-foreground tabular-nums">{hoveredPair.open.entryPrice.toFixed(2)}</span>
+                  <span className="text-muted-foreground">平仓价</span>
+                  <span className="text-foreground tabular-nums">{hoveredPair.close.exitPrice.toFixed(2)}</span>
+                  <span className="text-muted-foreground">盈亏</span>
+                  <span className={`font-bold tabular-nums ${hoveredPair.pnl >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                    {hoveredPair.pnl >= 0 ? '+' : ''}{hoveredPair.pnl.toFixed(2)}
+                  </span>
+                  <span className="text-muted-foreground">ROE</span>
+                  <span className={`font-bold tabular-nums ${hoveredPair.roe >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                    {hoveredPair.roe >= 0 ? '+' : ''}{hoveredPair.roe.toFixed(2)}%
+                  </span>
+                  <span className="text-muted-foreground">持仓时长</span>
+                  <span className="text-foreground">{formatDuration(hoveredPair.holdDurationMs)}</span>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -561,33 +709,6 @@ function StatRow({ label, value, color, clickable, onClick }: {
         {clickable && <Crosshair className="w-2.5 h-2.5 text-primary" />}
       </span>
       <span className={`text-xs font-mono font-bold tabular-nums ${color}`}>{value}</span>
-    </div>
-  );
-}
-
-function HourDistribution({ pairs }: { pairs: TradePair[] }) {
-  const hours = useMemo(() => {
-    const bins = new Array(24).fill(0);
-    for (const p of pairs) {
-      const h = new Date(p.open.openTime + 8 * 3600_000).getUTCHours();
-      bins[h]++;
-    }
-    return bins;
-  }, [pairs]);
-
-  const max = Math.max(...hours, 1);
-
-  return (
-    <div className="flex items-end gap-px h-[40px]">
-      {hours.map((count, h) => (
-        <div key={h} className="flex-1 flex flex-col items-center justify-end">
-          <div
-            className="w-full rounded-t-sm bg-primary/40 hover:bg-primary/70 transition-colors"
-            style={{ height: `${(count / max) * 100}%`, minHeight: count > 0 ? '2px' : '0' }}
-            title={`${h.toString().padStart(2, '0')}:00 UTC+8 — ${count} 笔`}
-          />
-        </div>
-      ))}
     </div>
   );
 }
