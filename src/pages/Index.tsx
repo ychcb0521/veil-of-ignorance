@@ -20,10 +20,10 @@ import { MobileLayout } from '@/components/mobile/MobileLayout';
 import { AssetOverview } from '@/components/AssetOverview';
 import { LiquidationModal } from '@/components/LiquidationModal';
 import { AnalyticsPanel } from '@/components/AnalyticsPanel';
-import { TradePerformancePanel } from '@/components/TradePerformancePanel';
+import { TradeInsightsPanel } from '@/components/TradeInsightsPanel';
 import { CoolingOffModal, useCoolingOff } from '@/components/CoolingOffModal';
 import { toast } from 'sonner';
-import { BarChart3, Wallet, PanelRightClose, PanelRightOpen, Activity } from 'lucide-react';
+import { BarChart3, Wallet, PanelRightClose, PanelRightOpen, Crosshair } from 'lucide-react';
 import type { PendingOrder, OrderType } from '@/types/trading';
 import { calcFee, calcSlippage } from '@/types/trading';
 import type { AssetState } from '@/types/assets';
@@ -955,7 +955,7 @@ const Index = () => {
           </button>
           <button onClick={() => setPerfSymbol(activeSymbol)}
             className="flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors">
-            <Activity className="w-3 h-3" /> 绩效复盘
+            <Crosshair className="w-3 h-3" /> 交易侦查
           </button>
           <span className="text-[10px] text-muted-foreground font-mono truncate max-w-[120px]">{user?.email}</span>
           <button
@@ -1104,10 +1104,10 @@ const Index = () => {
       />
 
       {perfSymbol && (
-        <TradePerformancePanel
+        <TradeInsightsPanel
           open={!!perfSymbol}
           onClose={() => setPerfSymbol(null)}
-          symbol={perfSymbol}
+          initialSymbol={perfSymbol}
           tradeHistory={tradeHistory}
         />
       )}
