@@ -90,6 +90,14 @@ export function OrderPanel({ currentPrice, onPlaceOrder, disabled, symbol, cooli
   const [scaledStartPrice, setScaledStartPrice] = useState('');
   const [scaledEndPrice, setScaledEndPrice] = useState('');
 
+  // Handle picked price from chart click (pick mode)
+  useEffect(() => {
+    if (pickedPrice != null && pickMode) {
+      setStopPrice(pickedPrice.toFixed(pricePrecision));
+      onPickModeChange?.(false);
+    }
+  }, [pickedPrice]);
+
   // Close dropdowns on outside click
   useEffect(() => {
     const handler = (e: MouseEvent) => {
