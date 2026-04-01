@@ -563,9 +563,10 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
 
   // ===== Place Order (with strict accounting enforcement — single global pool) =====
   const handlePlaceOrder = useCallback((symbol: string, order: PlaceOrderParams) => {
-    const available = calcAvailable(balance, positionsMap);
+    // Use refs to bypass stale closures in high-frequency time machine ticks
+    const available = calcAvailable(balanceRef.current, positionsMapRef.current);
     // Use ref to avoid stale closure — always get the freshest price
-    const symbolPrice = priceMapRef.current[symbol] || priceMap[symbol] || 0;
+    const symbolPrice = priceMapRef.current[symbol] || 0;
     const effectiveCurrentPrice = Number(order.latestPrice || symbolPrice);
 
     console.log('[下单执行]', {
