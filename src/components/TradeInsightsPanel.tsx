@@ -318,21 +318,27 @@ export function TradeInsightsPanel({ open, onClose, tradeHistory, initialSymbol,
     renderTradeOverlays(chart, filteredTrades, pairs);
   }, [pairs, filteredTrades]);
 
-  function renderTradeOverlays(chart: Chart, trades: TradeRecord[], tradePairs: TradePair[]) {
-    // Clear previous
-    try { chart.removeOverlay('review_markers'); } catch {}
-    try { chart.removeOverlay('review_lines'); } catch {}
+  const overlayIdsRef = useRef<string[]>([]);
 
-    // 1. Trade markers
-    for (const trade of trades) {
+  function renderTradeOverlays(chart: Chart, trades: TradeRecord[], tradePairs: TradePair[]) {
+    // Clean slate: remove all previously created overlays
+    for (const oid of overlayIdsRef.current) {
+      try { chart.removeOverlay(oid); } catch {}
+    }
+    overlayIdsRef.current = [];
+
+    // 1. Trade markers — each gets a unique ID
+    trades.forEach((trade, idx) => {
       const ts = trade.action === 'OPEN' ? trade.openTime : trade.closeTime;
-      if (ts <= 0) continue;
+      if (ts <= 0) return;
       const isBuy = (trade.action === 'OPEN' && trade.side === 'LONG') || (trade.action === 'CLOSE' && trade.side === 'SHORT');
       const price = trade.action === 'OPEN' ? trade.entryPrice : trade.exitPrice;
+      const uid = `rv-mk-${trade.id}-${idx}`;
 
       chart.createOverlay({
         name: 'simpleAnnotation',
-        id: 'review_markers',
+        id: uid,
+        paneId: 'candle_pane',
         points: [{ timestamp: ts, value: price }],
         lock: true,
         extendData: isBuy ? '▲ B' : '▼ S',
@@ -345,20 +351,23 @@ export function TradeInsightsPanel({ open, onClose, tradeHistory, initialSymbol,
           },
         },
       } as OverlayCreate);
-    }
+      overlayIdsRef.current.push(uid);
+    });
 
-    // 2. Pair connection lines
-    for (const pair of tradePairs) {
+    // 2. Pair connection lines — each gets a unique ID
+    tradePairs.forEach((pair, idx) => {
       const isProfit = pair.pnl >= 0;
       const color = isProfit ? '#0ECB8199' : '#F6465D99';
       const openTs = pair.open.openTime;
       const closeTs = pair.close.closeTime;
       const openPrice = pair.open.entryPrice;
       const closePrice = pair.close.exitPrice;
+      const uid = `rv-ln-${pair.open.id}-${pair.close.id}-${idx}`;
 
       chart.createOverlay({
         name: 'segment',
-        id: 'review_lines',
+        id: uid,
+        paneId: 'candle_pane',
         points: [
           { timestamp: openTs, value: openPrice },
           { timestamp: closeTs, value: closePrice },
@@ -382,7 +391,8 @@ export function TradeInsightsPanel({ open, onClose, tradeHistory, initialSymbol,
           closePrice,
         }),
       } as OverlayCreate);
-    }
+      overlayIdsRef.current.push(uid);
+    });
   }
 
   // Tooltip tracking via mouse events on chart container
