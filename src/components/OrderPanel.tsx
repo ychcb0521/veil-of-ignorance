@@ -290,10 +290,18 @@ export function OrderPanel({ currentPrice, onPlaceOrder, disabled, symbol, cooli
             </div>
             <div className="relative">
               <input type="text" value={stopPrice} onChange={e => setStopPrice(e.target.value)}
-                placeholder="触发价格"
-                className="input-dark w-full text-right pr-14 text-xs" />
+                placeholder={crosshairPrice != null && !stopPrice ? crosshairPrice.toFixed(pricePrecision) : '触发价格'}
+                onDoubleClick={() => {
+                  if (crosshairPrice != null && !stopPrice) {
+                    setStopPrice(crosshairPrice.toFixed(pricePrecision));
+                  }
+                }}
+                className={`input-dark w-full text-right pr-14 text-xs ${crosshairPrice != null && !stopPrice ? 'placeholder:text-primary/40 placeholder:animate-pulse' : ''}`} />
               <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] text-muted-foreground">USDT</span>
             </div>
+            {crosshairPrice != null && !stopPrice && (
+              <div className="text-[9px] text-primary/50 mt-0.5 px-1">双击输入框填入准星价格</div>
+            )}
           </div>
         )}
 

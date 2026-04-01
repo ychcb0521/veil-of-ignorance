@@ -24,10 +24,13 @@ interface Props {
 export function PositionPanel({
   positionsMap, ordersMap, tradeHistory, priceMap, activeSymbol,
   onClosePosition, onCancelOrder, onAddIsolatedMargin, activeTab, onTabChange,
+  onCloseAllPositions,
 }: Props) {
   const [leverageModal, setLeverageModal] = useState<{ symbol: string; index: number; pos: Position } | null>(null);
   const [tpslModal, setTpslModal] = useState<{ symbol: string; index: number; pos: Position } | null>(null);
   const [closingKey, setClosingKey] = useState<string | null>(null);
+  const [hideOtherContracts, setHideOtherContracts] = useState(false);
+  const [closeAllConfirmOpen, setCloseAllConfirmOpen] = useState(false);
 
   const allPositions: { symbol: string; position: Position; index: number }[] = [];
   for (const [sym, positions] of Object.entries(positionsMap)) {
