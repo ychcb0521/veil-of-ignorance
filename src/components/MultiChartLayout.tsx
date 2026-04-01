@@ -24,6 +24,7 @@ interface Props {
   pendingOrders?: PendingOrder[];
   onCancelOrder?: (orderId: string) => void;
   chartApiRef?: MutableRefObject<ChartImperativeApi | null>;
+  onCrosshairPriceChange?: (price: number | null) => void;
 }
 
 interface SubChart {
