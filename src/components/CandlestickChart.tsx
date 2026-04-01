@@ -431,15 +431,19 @@ function CandlestickChartComponent({ data, symbol, onLoadOlder, loadingOlder, tr
   }, [data]);
 
   // ============================================================
-  // TRADE MARKERS as overlays
+  // TRADE MARKERS — data-driven: clear all then redraw from tradeHistory
   // ============================================================
   useEffect(() => {
     const chart = chartRef.current;
-    if (!chart || !tradeHistory || !rawSymbol || data.length === 0) return;
+    if (!chart) return;
 
-    // v9: removeOverlay accepts id or no args
+    // Step 1: Atomic clear — always remove old markers first
     try { chart.removeOverlay('trade_markers'); } catch {}
 
+    // Step 2: If hidden or no data, stop after clearing
+    if (!showTradeMarkers || !tradeHistory || !rawSymbol || data.length === 0) return;
+
+    // Step 3: Redraw from single source of truth (tradeHistory)
     const symbolTrades = tradeHistory.filter(t => t.symbol === rawSymbol);
     for (const trade of symbolTrades) {
       const ts = trade.action === 'OPEN' ? trade.openTime : trade.closeTime;
@@ -447,15 +451,37 @@ function CandlestickChartComponent({ data, symbol, onLoadOlder, loadingOlder, tr
       const isBuy = (trade.action === 'OPEN' && trade.side === 'LONG') || (trade.action === 'CLOSE' && trade.side === 'SHORT');
       const price = trade.action === 'OPEN' ? trade.entryPrice : trade.exitPrice;
 
+      // Financial semantics: Buy=green below candle, Sell=red above candle
+      const color = isBuy ? '#0ECB81' : '#F6465D';
+      const label = isBuy ? '▲ B' : '▼ S';
+      // Offset: buy markers below price, sell markers above price
+      const offset = isBuy ? -8 : 8;
+
       chart.createOverlay({
         name: 'simpleAnnotation',
         id: 'trade_markers',
         points: [{ timestamp: ts, value: price }],
         lock: true,
-        extendData: isBuy ? '▲ B' : '▼ S',
+        extendData: label,
+        styles: {
+          text: {
+            color: '#FFFFFF',
+            size: 10,
+            borderColor: color,
+            backgroundColor: color,
+            borderRadius: 2,
+            paddingLeft: 3,
+            paddingRight: 3,
+            paddingTop: 1,
+            paddingBottom: 1,
+          },
+          point: {
+            color: color,
+          },
+        },
       } as OverlayCreate);
     }
-  }, [tradeHistory, rawSymbol, data]);
+  }, [tradeHistory, rawSymbol, data, showTradeMarkers]);
 
   // ============================================================
   // PENDING ORDER LINES on chart
