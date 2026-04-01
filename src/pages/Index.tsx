@@ -1099,6 +1099,15 @@ const Index = () => {
         initialCapital={profile?.initial_capital ?? 1_000_000}
       />
 
+      {perfSymbol && (
+        <TradePerformancePanel
+          open={!!perfSymbol}
+          onClose={() => setPerfSymbol(null)}
+          symbol={perfSymbol}
+          tradeHistory={tradeHistory}
+        />
+      )}
+
       <LiquidationModal
         open={liquidationOpen}
         onClose={closeLiquidationModal}
