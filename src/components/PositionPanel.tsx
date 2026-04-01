@@ -51,7 +51,7 @@ function getSymbolPrecision(price: number): number {
 export function PositionPanel({
   positionsMap, ordersMap, tradeHistory, priceMap, activeSymbol,
   onClosePosition, onCancelOrder, onAddIsolatedMargin, onClearSymbolData,
-  activeTab, onTabChange, onCloseAllPositions, pricePrecision,
+  activeTab, onTabChange, onCloseAllPositions, pricePrecision, onPlaceTpSl,
 }: Props) {
   const [leverageModal, setLeverageModal] = useState<{ symbol: string; index: number; pos: Position } | null>(null);
   const [tpslModal, setTpslModal] = useState<{ symbol: string; index: number; pos: Position } | null>(null);
