@@ -637,8 +637,10 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
         return;
       }
       setBalance(prev => prev - requiredMargin);
-      setPositionsMap(prev => ({ ...prev, [symbol]: [...(prev[symbol] || []), position] }));
-      console.log('[下单执行]', { 实际写入的开仓价: position.entryPrice });
+      setPositionsMap(prev => {
+        const existing = (prev[symbol] || []).filter(p => p.quantity > 1e-8);
+        return { ...prev, [symbol]: [...existing, position] };
+      });
       toast.success(`${order.side === 'LONG' ? '开多' : '开空'} ${order.quantity.toFixed(6)} @ ${position.entryPrice.toFixed(2)}`);
       return;
     }
