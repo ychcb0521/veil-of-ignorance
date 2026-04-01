@@ -775,8 +775,9 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
     }]);
 
     const pctLabel = pct < 1 ? ` (${Math.round(pct * 100)}%)` : '';
-    toast(pnl >= 0 ? '盈利平仓 ✅' : '亏损平仓 ❌', {
-      description: `${symbol}${pctLabel} ${pnl >= 0 ? '+' : ''}${(pnl - fee).toFixed(2)} USDT`,
+    const netPnl = pnl - fee;
+    toast.success(`市价平仓成功，已结算盈亏：${netPnl >= 0 ? '+' : ''}${netPnl.toFixed(2)} USDT`, {
+      description: `${symbol}${pctLabel} @ ${fillPrice.toFixed(2)}`,
     });
   }, [getEffectiveTime]);
 
