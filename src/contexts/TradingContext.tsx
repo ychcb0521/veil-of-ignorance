@@ -170,14 +170,21 @@ function executeFill(
   const { fillPrice, slippage } = applySlippageIfTaker(rawPrice, order.quantity, order.side, isMaker);
   const fee = calcFee(fillPrice, order.quantity, isMaker);
   const margin = (order.quantity * fillPrice) / order.leverage;
-  return {
-    fee, margin, slippage,
-    position: {
-      side: order.side, entryPrice: fillPrice, quantity: order.quantity,
-      leverage: order.leverage, marginMode: order.marginMode, margin,
-      isolatedMargin: order.marginMode === 'isolated' ? margin : undefined,
-    },
+
+  // PURE FACTORY: brand new Position with tick-0 forced zeroes — no spread from old objects
+  const position: Position = {
+    side: order.side,
+    entryPrice: fillPrice,
+    quantity: order.quantity,
+    leverage: order.leverage,
+    marginMode: order.marginMode,
+    margin,
+    isolatedMargin: order.marginMode === 'isolated' ? margin : undefined,
   };
+
+  console.log('[开仓核对] 瞬时入场价:', fillPrice, ' | 瞬时标记价:', rawPrice, ' | 如果这俩数字不同，就是组件传参延迟导致的脱节！');
+
+  return { fee, margin, slippage, position };
 }
 
 // ===== Provider =====
