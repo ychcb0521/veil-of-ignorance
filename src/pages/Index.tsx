@@ -1186,6 +1186,7 @@ const Index = () => {
                     onCancelOrder={handleCancelOrderForSymbol}
                     onAddIsolatedMargin={handleAddIsolatedMargin}
                     onClearSymbolData={handleClearSymbolData}
+                    onPlaceTpSl={handlePlaceTpSl}
                     pricePrecision={pricePrecision}
                     activeTab={bottomTab}
                     onTabChange={setBottomTab}
