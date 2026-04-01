@@ -101,7 +101,7 @@ const Index = () => {
     activeSymbolPositions, activeSymbolOrders,
     allPositions, allOrders, currentPrice, activeSymbols,
     pricePrecision, quantityPrecision, setPricePrecision, setQuantityPrecision,
-    handlePlaceOrder, handleClosePosition, handleCancelOrder,
+    handlePlaceOrder, handleClosePosition, handleCancelOrder, handlePlaceTpSl,
     handleAddIsolatedMargin, handleClearSymbolData,
     liquidationOpen, liquidationDetails, closeLiquidationModal,
     timeMode, setTimeMode, coinTimelines, setCoinTimelines,
