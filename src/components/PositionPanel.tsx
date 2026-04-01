@@ -133,15 +133,12 @@ export function PositionPanel({
     { key: 'funding', label: '资金费', count: fundingRecords.length },
   ];
 
-  const handleClose = (symbol: string, index: number) => {
-    const key = `${symbol}-${index}`;
-    if (closingKey === key) return;
-    setClosingKey(key);
-    toast('正在平仓...', { duration: 800 });
-    setTimeout(() => {
-      onClosePosition(symbol, index);
-      setClosingKey(null);
-    }, 300);
+  const handleOpenCloseModal = (symbol: string, index: number, pos: Position) => {
+    setCloseModal({ symbol, index, pos });
+  };
+
+  const handleCloseConfirm = (symbol: string, index: number, percentage: number) => {
+    onClosePosition(symbol, index, percentage);
   };
 
   const handleCloseAll = () => {
