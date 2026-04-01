@@ -18,6 +18,7 @@ interface Props {
   onAddIsolatedMargin?: (symbol: string, posIndex: number, amount: number) => void;
   activeTab: string;
   onTabChange: (tab: string) => void;
+  onCloseAllPositions?: (symbols: { symbol: string; index: number }[]) => void;
 }
 
 export function PositionPanel({
