@@ -25,6 +25,8 @@ interface Props {
   onCancelOrder?: (orderId: string) => void;
   chartApiRef?: MutableRefObject<ChartImperativeApi | null>;
   onCrosshairPriceChange?: (price: number | null) => void;
+  pickMode?: boolean;
+  onPricePicked?: (price: number) => void;
 }
 
 interface SubChart {
