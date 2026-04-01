@@ -6,6 +6,11 @@ import { X } from 'lucide-react';
 import { toast } from 'sonner';
 import { LeverageModal } from '@/components/LeverageModal';
 import { TpSlModal } from '@/components/TpSlModal';
+import { Checkbox } from '@/components/ui/checkbox';
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
+} from '@/components/ui/dialog';
+import { Button } from '@/components/ui/button';
 
 interface Props {
   positionsMap: PositionsMap;
@@ -18,18 +23,28 @@ interface Props {
   onAddIsolatedMargin?: (symbol: string, posIndex: number, amount: number) => void;
   activeTab: string;
   onTabChange: (tab: string) => void;
+  onCloseAllPositions?: (symbols: { symbol: string; index: number }[]) => void;
 }
 
 export function PositionPanel({
   positionsMap, ordersMap, tradeHistory, priceMap, activeSymbol,
   onClosePosition, onCancelOrder, onAddIsolatedMargin, activeTab, onTabChange,
+  onCloseAllPositions,
 }: Props) {
   const [leverageModal, setLeverageModal] = useState<{ symbol: string; index: number; pos: Position } | null>(null);
   const [tpslModal, setTpslModal] = useState<{ symbol: string; index: number; pos: Position } | null>(null);
   const [closingKey, setClosingKey] = useState<string | null>(null);
+  const [hideOtherContracts, setHideOtherContracts] = useState(false);
+  const [closeAllConfirmOpen, setCloseAllConfirmOpen] = useState(false);
 
   const allPositions: { symbol: string; position: Position; index: number }[] = [];
   for (const [sym, positions] of Object.entries(positionsMap)) {
+    positions.forEach((pos, i) => allPositions.push({ symbol: sym, position: pos, index: i }));
+  }
+
+  const displayedPositions = hideOtherContracts
+    ? allPositions.filter(p => p.symbol === activeSymbol)
+    : allPositions;
     positions.forEach((pos, i) => allPositions.push({ symbol: sym, position: pos, index: i }));
   }
 
@@ -59,36 +74,68 @@ export function PositionPanel({
     }, 300);
   };
 
+  const handleCloseAll = () => {
+    if (onCloseAllPositions && displayedPositions.length > 0) {
+      onCloseAllPositions(displayedPositions.map(p => ({ symbol: p.symbol, index: p.index })));
+      setCloseAllConfirmOpen(false);
+      toast.success(`已市价平仓 ${displayedPositions.length} 个仓位`);
+    }
+  };
+
   return (
     <div className="panel flex flex-col bg-card">
-      {/* Tabs */}
-      <div className="flex gap-4 px-4 border-b border-border">
-        {TABS.map(t => (
-          <button
-            key={t.key}
-            onClick={() => onTabChange(t.key)}
-            className={`py-2 text-xs font-medium border-b-2 transition-all duration-100 ease-out active:scale-[0.97] ${
-              activeTab === t.key
-                ? 'border-primary text-primary'
-                : 'border-transparent text-muted-foreground hover:text-foreground'
-            }`}
-          >
-            {t.label}
-            {t.count > 0 && (
-              <span className="ml-1 px-1 rounded text-[10px] bg-accent">{t.count}</span>
+      {/* Tabs + toolbar */}
+      <div className="flex items-center gap-2 px-4 border-b border-border">
+        <div className="flex gap-4 flex-1">
+          {TABS.map(t => (
+            <button
+              key={t.key}
+              onClick={() => onTabChange(t.key)}
+              className={`py-2 text-xs font-medium border-b-2 transition-all duration-100 ease-out active:scale-[0.97] ${
+                activeTab === t.key
+                  ? 'border-primary text-primary'
+                  : 'border-transparent text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              {t.label}
+              {t.count > 0 && (
+                <span className="ml-1 px-1 rounded text-[10px] bg-accent">{t.count}</span>
+              )}
+            </button>
+          ))}
+        </div>
+        {activeTab === 'positions' && (
+          <div className="flex items-center gap-3 shrink-0">
+            <label className="flex items-center gap-1.5 cursor-pointer select-none">
+              <Checkbox
+                checked={hideOtherContracts}
+                onCheckedChange={(v) => setHideOtherContracts(!!v)}
+                className="h-3.5 w-3.5 border-muted-foreground data-[state=checked]:bg-primary data-[state=checked]:border-primary"
+              />
+              <span className="text-[10px] text-muted-foreground whitespace-nowrap">隐藏其他合约</span>
+            </label>
+            {allPositions.length > 0 && (
+              <button
+                onClick={() => setCloseAllConfirmOpen(true)}
+                className="px-2 py-0.5 rounded text-[10px] font-medium border border-destructive/40 text-destructive hover:bg-destructive/10 transition-colors active:scale-95"
+              >
+                一键平仓
+              </button>
             )}
-          </button>
-        ))}
+          </div>
+        )}
       </div>
 
       <div className="overflow-y-auto min-h-[120px]">
         {/* ===== POSITIONS (Card-based) ===== */}
         {activeTab === 'positions' && (
-          allPositions.length === 0 ? (
-            <div className="px-4 py-6 text-center text-xs text-muted-foreground">暂无持仓</div>
+          displayedPositions.length === 0 ? (
+            <div className="px-4 py-6 text-center text-xs text-muted-foreground">
+              {hideOtherContracts ? `${activeSymbol} 暂无持仓` : '暂无持仓'}
+            </div>
           ) : (
             <div className="p-3 space-y-3">
-              {allPositions.map(({ symbol, position: pos, index: i }) => {
+              {displayedPositions.map(({ symbol, position: pos, index: i }) => {
                 const price = priceMap[symbol] || 0;
                 const pnl = calcUnrealizedPnl(pos, price);
                 const roe = calcROE(pos, price);
@@ -315,6 +362,26 @@ export function PositionPanel({
           }}
         />
       )}
+
+      {/* Close All Confirmation Modal */}
+      <Dialog open={closeAllConfirmOpen} onOpenChange={setCloseAllConfirmOpen}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>确认全平</DialogTitle>
+            <DialogDescription>
+              将以市价强制平仓当前列表中的所有 <span className="font-bold text-foreground">{displayedPositions.length}</span> 个仓位，请确认。
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="gap-2">
+            <Button variant="outline" size="sm" onClick={() => setCloseAllConfirmOpen(false)}>
+              取消
+            </Button>
+            <Button variant="destructive" size="sm" onClick={handleCloseAll}>
+              确认全平
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

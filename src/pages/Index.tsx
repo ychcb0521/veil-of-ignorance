@@ -101,6 +101,7 @@ const Index = () => {
   useBackgroundPrices();
 
   const [bottomTab, setBottomTab] = useState('positions');
+  const [crosshairPrice, setCrosshairPrice] = useState<number | null>(null);
   const [analyticsOpen, setAnalyticsOpen] = useState(false);
   const [assetsOpen, setAssetsOpen] = useState(false);
   const [perfSymbol, setPerfSymbol] = useState<string | null>(null);
@@ -898,6 +899,18 @@ const Index = () => {
     handleCancelOrder(symbol, orderId);
   }, [handleCancelOrder]);
 
+  const handleCloseAllPositions = useCallback((items: { symbol: string; index: number }[]) => {
+    // Close in reverse index order to avoid index shifting
+    const sorted = [...items].sort((a, b) => b.index - a.index);
+    for (const { symbol, index } of sorted) {
+      handleClosePosition(symbol, index);
+    }
+  }, [handleClosePosition]);
+
+  const handleCrosshairPriceChange = useCallback((price: number | null) => {
+    setCrosshairPrice(price);
+  }, []);
+
   const isMobile = useIsMobile();
 
   // Mobile layout
@@ -1022,6 +1035,7 @@ const Index = () => {
                       pendingOrders={activeSymbolOrders}
                       onCancelOrder={(orderId) => handleCancelOrder(activeSymbol, orderId)}
                       chartApiRef={chartApiRef}
+                      onCrosshairPriceChange={handleCrosshairPriceChange}
                     />
                   )}
                 </div>
@@ -1040,6 +1054,7 @@ const Index = () => {
                     onAddIsolatedMargin={handleAddIsolatedMargin}
                     activeTab={bottomTab}
                     onTabChange={setBottomTab}
+                    onCloseAllPositions={handleCloseAllPositions}
                   />
                 </div>
               </ResizablePanel>
@@ -1081,6 +1096,7 @@ const Index = () => {
                 onOpenCoolingOff={() => setCoolingOffModalOpen(true)}
                 priceProtection={priceProtection}
                 onTogglePriceProtection={() => setPriceProtection(prev => !prev)}
+                crosshairPrice={crosshairPrice}
               />
             </div>
           </ResizablePanel>

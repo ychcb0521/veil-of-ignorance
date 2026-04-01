@@ -24,6 +24,7 @@ interface Props {
   pendingOrders?: PendingOrder[];
   onCancelOrder?: (orderId: string) => void;
   chartApiRef?: MutableRefObject<ChartImperativeApi | null>;
+  onCrosshairPriceChange?: (price: number | null) => void;
 }
 
 interface SubChart {
@@ -36,7 +37,7 @@ export function MultiChartLayout({
   mainData, mainSymbol, rawSymbol, onLoadOlder, loadingOlder,
   tradeHistory, isRunning, currentSimulatedTime, mainInterval,
   pricePrecision, quantityPrecision, pendingOrders, onCancelOrder,
-  chartApiRef,
+  chartApiRef, onCrosshairPriceChange,
 }: Props) {
   const [layout, setLayout] = useState<LayoutMode>('1x1');
   const [subCharts, setSubCharts] = useState<SubChart[]>([
@@ -122,7 +123,7 @@ export function MultiChartLayout({
             loadingOlder={loadingOlder} tradeHistory={tradeHistory} rawSymbol={rawSymbol}
             pricePrecision={pricePrecision} quantityPrecision={quantityPrecision}
             pendingOrders={pendingOrders} onCancelOrder={onCancelOrder}
-            chartApiRef={chartApiRef} />
+            chartApiRef={chartApiRef} onCrosshairPriceChange={onCrosshairPriceChange} />
         </div>
       ) : layout === '1x2' ? (
         <div className="flex-1 min-h-0 grid grid-cols-2 gap-px" style={{ background: 'hsl(var(--border))' }}>
@@ -131,7 +132,7 @@ export function MultiChartLayout({
               loadingOlder={loadingOlder} tradeHistory={tradeHistory} rawSymbol={rawSymbol}
               pricePrecision={pricePrecision} quantityPrecision={quantityPrecision}
               pendingOrders={pendingOrders} onCancelOrder={onCancelOrder}
-              chartApiRef={chartApiRef} />
+              chartApiRef={chartApiRef} onCrosshairPriceChange={onCrosshairPriceChange} />
           </div>
           <div className="bg-background min-h-0 overflow-hidden relative">
             <SubChartIntervalSelector interval={subCharts[0].interval} onChange={v => handleSubIntervalChange(0, v)} />

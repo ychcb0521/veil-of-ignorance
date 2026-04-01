@@ -73,6 +73,8 @@ interface Props {
   onCancelOrder?: (orderId: string) => void;
   /** Ref assigned with imperative chart API for direct candle pushing. */
   chartApiRef?: React.MutableRefObject<ChartImperativeApi | null>;
+  /** Called when crosshair moves over chart — provides Y-axis price */
+  onCrosshairPriceChange?: (price: number | null) => void;
 }
 
 // Convert our KlineData to klinecharts KLineData
@@ -225,7 +227,7 @@ const LIGHT_STYLES = {
   separator: { color: '#EAECEF' },
 };
 
-function CandlestickChartComponent({ data, symbol, onLoadOlder, loadingOlder, tradeHistory, rawSymbol, pricePrecision = 2, quantityPrecision = 3, pendingOrders, onCancelOrder, chartApiRef }: Props) {
+function CandlestickChartComponent({ data, symbol, onLoadOlder, loadingOlder, tradeHistory, rawSymbol, pricePrecision = 2, quantityPrecision = 3, pendingOrders, onCancelOrder, chartApiRef, onCrosshairPriceChange }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<Chart | null>(null);
   const prevDataLenRef = useRef(0);
@@ -300,9 +302,23 @@ function CandlestickChartComponent({ data, symbol, onLoadOlder, loadingOlder, tr
     });
     ro.observe(containerRef.current);
 
+    // Subscribe to crosshair for price sync
+    const crosshairCb = (data: any) => {
+      if (onCrosshairPriceChange) {
+        if (data && data.kLineData && typeof data.kLineData.close === 'number') {
+          const yPrice = typeof data.y === 'number' ? data.y : data.kLineData.close;
+          onCrosshairPriceChange(yPrice);
+        } else {
+          onCrosshairPriceChange(null);
+        }
+      }
+    };
+    chart.subscribeAction('onCrosshairChange' as any, crosshairCb);
+
     return () => {
       ro.disconnect();
       if (chartApiRef) chartApiRef.current = null;
+      try { chart.unsubscribeAction('onCrosshairChange' as any, crosshairCb); } catch {}
       dispose(containerRef.current!);
       chartRef.current = null;
     };
@@ -793,7 +809,8 @@ function areChartPropsEqual(prev: Props, next: Props) {
     prev.tradeHistory === next.tradeHistory &&
     prev.onLoadOlder === next.onLoadOlder &&
     prev.pendingOrders === next.pendingOrders &&
-    prev.onCancelOrder === next.onCancelOrder
+    prev.onCancelOrder === next.onCancelOrder &&
+    prev.onCrosshairPriceChange === next.onCrosshairPriceChange
   );
 }
 
