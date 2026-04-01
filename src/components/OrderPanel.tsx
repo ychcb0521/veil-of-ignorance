@@ -1,8 +1,9 @@
 import { useState, useRef, useEffect, useMemo } from 'react';
 import type { OrderSide, OrderType, MarginMode } from '@/types/trading';
 import { ORDER_TYPE_INFO, getMaxLeverageForNotional, getLeverageTierInfo } from '@/types/trading';
-import { ChevronDown, Check, Info, AlertTriangle } from 'lucide-react';
+import { ChevronDown, Check, Info, AlertTriangle, Crosshair } from 'lucide-react';
 import type { PlaceOrderParams } from '@/contexts/TradingContext';
+import { usePersistedState } from '@/hooks/usePersistedState';
 
 // Re-export for convenience
 export type { PlaceOrderParams };
@@ -29,14 +30,29 @@ interface Props {
   quantityPrecision?: number;
   /** Crosshair Y-axis price from chart for conditional trigger price sync */
   crosshairPrice?: number | null;
+  /** Whether pick mode is active (user picking price from chart) */
+  pickMode?: boolean;
+  /** Toggle pick mode on/off */
+  onPickModeChange?: (active: boolean) => void;
+  /** Price picked from chart click */
+  pickedPrice?: number | null;
 }
 
-export function OrderPanel({ currentPrice, onPlaceOrder, disabled, symbol, coolingOff, coolingOffLabel, onOpenCoolingOff, priceProtection, onTogglePriceProtection, pricePrecision = 2, quantityPrecision = 3, crosshairPrice }: Props) {
+export function OrderPanel({ currentPrice, onPlaceOrder, disabled, symbol, coolingOff, coolingOffLabel, onOpenCoolingOff, priceProtection, onTogglePriceProtection, pricePrecision = 2, quantityPrecision = 3, crosshairPrice, pickMode, onPickModeChange, pickedPrice }: Props) {
   const baseCoin = symbol.replace('USDT', '') || 'BTC';
 
   const [orderType, setOrderType] = useState<OrderType>('MARKET');
   const [marginMode, setMarginMode] = useState<MarginMode>('cross');
-  const [leverage, setLeverage] = useState(20);
+  // Unified symbol leverage: same leverage for both LONG and SHORT on same symbol
+  const [symbolLeverage, setSymbolLeverage] = usePersistedState<Record<string, number>>('symbol_leverage', {});
+  const leverage = symbolLeverage[symbol] ?? 20;
+  const setLeverage = (v: number | ((prev: number) => number)) => {
+    setSymbolLeverage(prev => {
+      const current = prev[symbol] ?? 20;
+      const next = typeof v === 'function' ? v(current) : v;
+      return { ...prev, [symbol]: next };
+    });
+  };
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
@@ -73,6 +89,14 @@ export function OrderPanel({ currentPrice, onPlaceOrder, disabled, symbol, cooli
   const [scaledCount, setScaledCount] = useState('5');
   const [scaledStartPrice, setScaledStartPrice] = useState('');
   const [scaledEndPrice, setScaledEndPrice] = useState('');
+
+  // Handle picked price from chart click (pick mode)
+  useEffect(() => {
+    if (pickedPrice != null && pickMode) {
+      setStopPrice(pickedPrice.toFixed(pricePrecision));
+      onPickModeChange?.(false);
+    }
+  }, [pickedPrice]);
 
   // Close dropdowns on outside click
   useEffect(() => {
@@ -281,7 +305,7 @@ export function OrderPanel({ currentPrice, onPlaceOrder, disabled, symbol, cooli
       {/* Order Inputs */}
       <div className="px-3 space-y-2 flex-1 overflow-y-auto pb-2">
 
-        {/* === Trigger / Stop Price === */}
+        {/* === Trigger / Stop Price with Pick Mode === */}
         {needsTrigger && (
           <div>
             <div className="flex items-center justify-between mb-1">
@@ -290,17 +314,26 @@ export function OrderPanel({ currentPrice, onPlaceOrder, disabled, symbol, cooli
             </div>
             <div className="relative">
               <input type="text" value={stopPrice} onChange={e => setStopPrice(e.target.value)}
-                placeholder={crosshairPrice != null && !stopPrice ? crosshairPrice.toFixed(pricePrecision) : '触发价格'}
-                onDoubleClick={() => {
-                  if (crosshairPrice != null && !stopPrice) {
-                    setStopPrice(crosshairPrice.toFixed(pricePrecision));
-                  }
-                }}
-                className={`input-dark w-full text-right pr-14 text-xs ${crosshairPrice != null && !stopPrice ? 'placeholder:text-primary/40 placeholder:animate-pulse' : ''}`} />
-              <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] text-muted-foreground">USDT</span>
+                placeholder={pickMode && crosshairPrice != null ? crosshairPrice.toFixed(pricePrecision) : '触发价格'}
+                className={`input-dark w-full text-right pr-20 text-xs ${pickMode && crosshairPrice != null && !stopPrice ? 'placeholder:text-primary/50 placeholder:animate-pulse' : ''}`} />
+              <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => onPickModeChange?.(!pickMode)}
+                  className={`p-0.5 rounded transition-all duration-150 ${
+                    pickMode
+                      ? 'text-primary bg-primary/20 ring-1 ring-primary/40'
+                      : 'text-muted-foreground hover:text-foreground hover:bg-accent/50'
+                  }`}
+                  title={pickMode ? '退出取价模式' : '从图表取价'}
+                >
+                  <Crosshair className="w-3.5 h-3.5" />
+                </button>
+                <span className="text-[10px] text-muted-foreground">USDT</span>
+              </div>
             </div>
-            {crosshairPrice != null && !stopPrice && (
-              <div className="text-[9px] text-primary/50 mt-0.5 px-1">双击输入框填入准星价格</div>
+            {pickMode && (
+              <div className="text-[9px] text-primary/70 mt-0.5 px-1 animate-pulse">📍 点击图表任意位置取价</div>
             )}
           </div>
         )}

@@ -75,6 +75,10 @@ interface Props {
   chartApiRef?: React.MutableRefObject<ChartImperativeApi | null>;
   /** Called when crosshair moves over chart — provides Y-axis price */
   onCrosshairPriceChange?: (price: number | null) => void;
+  /** When true, clicking on chart picks the crosshair price */
+  pickMode?: boolean;
+  /** Called when user clicks chart in pick mode */
+  onPricePicked?: (price: number) => void;
 }
 
 // Convert our KlineData to klinecharts KLineData
@@ -227,7 +231,7 @@ const LIGHT_STYLES = {
   separator: { color: '#EAECEF' },
 };
 
-function CandlestickChartComponent({ data, symbol, onLoadOlder, loadingOlder, tradeHistory, rawSymbol, pricePrecision = 2, quantityPrecision = 3, pendingOrders, onCancelOrder, chartApiRef, onCrosshairPriceChange }: Props) {
+function CandlestickChartComponent({ data, symbol, onLoadOlder, loadingOlder, tradeHistory, rawSymbol, pricePrecision = 2, quantityPrecision = 3, pendingOrders, onCancelOrder, chartApiRef, onCrosshairPriceChange, pickMode, onPricePicked }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<Chart | null>(null);
   const prevDataLenRef = useRef(0);
@@ -242,6 +246,7 @@ function CandlestickChartComponent({ data, symbol, onLoadOlder, loadingOlder, tr
   const [drawingsVisible, setDrawingsVisible] = useState(true);
   const [activeDrawingTool, setActiveDrawingTool] = useState<string | null>(null);
   const { theme } = useTheme();
+  const crosshairPriceRef = useRef<number | null>(null);
 
   const activeIndicatorPanes = useRef<Map<string, string | null>>(new Map());
 
@@ -304,13 +309,13 @@ function CandlestickChartComponent({ data, symbol, onLoadOlder, loadingOlder, tr
 
     // Subscribe to crosshair for price sync
     const crosshairCb = (data: any) => {
-      if (onCrosshairPriceChange) {
-        if (data && data.kLineData && typeof data.kLineData.close === 'number') {
-          const yPrice = typeof data.y === 'number' ? data.y : data.kLineData.close;
-          onCrosshairPriceChange(yPrice);
-        } else {
-          onCrosshairPriceChange(null);
-        }
+      if (data && data.kLineData && typeof data.kLineData.close === 'number') {
+        const yPrice = typeof data.y === 'number' ? data.y : data.kLineData.close;
+        crosshairPriceRef.current = yPrice;
+        if (onCrosshairPriceChange) onCrosshairPriceChange(yPrice);
+      } else {
+        crosshairPriceRef.current = null;
+        if (onCrosshairPriceChange) onCrosshairPriceChange(null);
       }
     };
     chart.subscribeAction('onCrosshairChange' as any, crosshairCb);
@@ -655,6 +660,19 @@ function CandlestickChartComponent({ data, symbol, onLoadOlder, loadingOlder, tr
     return () => el.removeEventListener('contextmenu', handler);
   }, [activeDrawingTool]);
 
+  // Pick mode: click on chart to pick crosshair price
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el || !pickMode) return;
+    const handler = () => {
+      if (crosshairPriceRef.current != null && onPricePicked) {
+        onPricePicked(crosshairPriceRef.current);
+      }
+    };
+    el.addEventListener('click', handler);
+    return () => el.removeEventListener('click', handler);
+  }, [pickMode, onPricePicked]);
+
   // ============================================================
   // Price info
   // ============================================================
@@ -714,7 +732,7 @@ function CandlestickChartComponent({ data, symbol, onLoadOlder, loadingOlder, tr
           style={{
             left: 34,
             backgroundColor: theme === 'light' ? '#FFFFFF' : '#0B0E11',
-            cursor: activeDrawingTool ? 'crosshair' : 'default',
+            cursor: activeDrawingTool || pickMode ? 'crosshair' : 'default',
           }}
         />
 
@@ -810,7 +828,9 @@ function areChartPropsEqual(prev: Props, next: Props) {
     prev.onLoadOlder === next.onLoadOlder &&
     prev.pendingOrders === next.pendingOrders &&
     prev.onCancelOrder === next.onCancelOrder &&
-    prev.onCrosshairPriceChange === next.onCrosshairPriceChange
+    prev.onCrosshairPriceChange === next.onCrosshairPriceChange &&
+    prev.pickMode === next.pickMode &&
+    prev.onPricePicked === next.onPricePicked
   );
 }
 

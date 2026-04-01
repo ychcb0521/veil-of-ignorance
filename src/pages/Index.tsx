@@ -102,6 +102,8 @@ const Index = () => {
 
   const [bottomTab, setBottomTab] = useState('positions');
   const [crosshairPrice, setCrosshairPrice] = useState<number | null>(null);
+  const [pickMode, setPickMode] = useState(false);
+  const [pickedPrice, setPickedPrice] = useState<number | null>(null);
   const [analyticsOpen, setAnalyticsOpen] = useState(false);
   const [assetsOpen, setAssetsOpen] = useState(false);
   const [perfSymbol, setPerfSymbol] = useState<string | null>(null);
@@ -911,6 +913,10 @@ const Index = () => {
     setCrosshairPrice(price);
   }, []);
 
+  const handlePricePicked = useCallback((price: number) => {
+    setPickedPrice(price);
+  }, []);
+
   const isMobile = useIsMobile();
 
   // Mobile layout
@@ -1036,6 +1042,8 @@ const Index = () => {
                       onCancelOrder={(orderId) => handleCancelOrder(activeSymbol, orderId)}
                       chartApiRef={chartApiRef}
                       onCrosshairPriceChange={handleCrosshairPriceChange}
+                      pickMode={pickMode}
+                      onPricePicked={handlePricePicked}
                     />
                   )}
                 </div>
@@ -1097,6 +1105,9 @@ const Index = () => {
                 priceProtection={priceProtection}
                 onTogglePriceProtection={() => setPriceProtection(prev => !prev)}
                 crosshairPrice={crosshairPrice}
+                pickMode={pickMode}
+                onPickModeChange={setPickMode}
+                pickedPrice={pickedPrice}
               />
             </div>
           </ResizablePanel>
