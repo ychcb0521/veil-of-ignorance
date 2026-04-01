@@ -171,8 +171,9 @@ function executeFill(
   const fee = calcFee(fillPrice, order.quantity, isMaker);
   const margin = (order.quantity * fillPrice) / order.leverage;
 
-  // PURE FACTORY: brand new Position with tick-0 forced zeroes — no spread from old objects
+  // PURE FACTORY: brand new Position with unique physical identity and hard-reset PnL basis
   const position: Position = {
+    id: crypto.randomUUID(),
     side: order.side,
     entryPrice: fillPrice,
     quantity: order.quantity,
@@ -183,6 +184,7 @@ function executeFill(
   };
 
   console.log('[开仓核对] 瞬时入场价:', fillPrice, ' | 瞬时标记价:', rawPrice, ' | 如果这俩数字不同，就是组件传参延迟导致的脱节！');
+  console.log('[持仓实例]', { positionId: position.id, symbolHint: 'fresh-open', quantity: position.quantity, entryPrice: position.entryPrice });
 
   return { fee, margin, slippage, position };
 }

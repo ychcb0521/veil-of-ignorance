@@ -65,6 +65,7 @@ interface TriggerRange {
 }
 
 export interface Position {
+  id: string;
   side: OrderSide;
   entryPrice: number;
   quantity: number;
