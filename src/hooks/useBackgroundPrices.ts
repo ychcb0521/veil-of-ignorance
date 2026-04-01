@@ -128,21 +128,24 @@ export function useBackgroundPrices() {
         if (order.side === 'LONG' && kline.low <= order.price) { triggered = true; fillPrice = order.price; }
         else if (order.side === 'SHORT' && kline.high >= order.price) { triggered = true; fillPrice = order.price; }
       } else if (order.type === 'MARKET_TP_SL') {
-        if (order.side === 'LONG' && kline.high >= order.stopPrice) { triggered = true; fillPrice = kline.close; }
-        else if (order.side === 'SHORT' && kline.low <= order.stopPrice) { triggered = true; fillPrice = kline.close; }
+        const dir = order.triggerDirection || (order.side === 'LONG' ? 'UP' : 'DOWN');
+        if (dir === 'UP' && kline.high >= order.stopPrice) { triggered = true; fillPrice = order.stopPrice; }
+        else if (dir === 'DOWN' && kline.low <= order.stopPrice) { triggered = true; fillPrice = order.stopPrice; }
       } else if (order.type === 'LIMIT_TP_SL') {
-        const triggerHit = (order.side === 'LONG' && kline.high >= order.stopPrice)
-          || (order.side === 'SHORT' && kline.low <= order.stopPrice);
+        const dir = order.triggerDirection || (order.side === 'LONG' ? 'UP' : 'DOWN');
+        const triggerHit = (dir === 'UP' && kline.high >= order.stopPrice)
+          || (dir === 'DOWN' && kline.low <= order.stopPrice);
         if (triggerHit) {
           if (order.side === 'LONG' && kline.low <= order.price) { triggered = true; fillPrice = order.price; }
           else if (order.side === 'SHORT' && kline.high >= order.price) { triggered = true; fillPrice = order.price; }
         }
       } else if (order.type === 'CONDITIONAL') {
-        const trigHit = (order.side === 'LONG' && kline.high >= order.stopPrice)
-          || (order.side === 'SHORT' && kline.low <= order.stopPrice);
+        const dir = order.triggerDirection || (order.side === 'LONG' ? 'UP' : 'DOWN');
+        const trigHit = (dir === 'UP' && kline.high >= order.stopPrice)
+          || (dir === 'DOWN' && kline.low <= order.stopPrice);
         if (trigHit) {
           if (order.conditionalExecType === 'MARKET') {
-            triggered = true; fillPrice = kline.close;
+            triggered = true; fillPrice = order.stopPrice;
           } else {
             const lp = order.conditionalLimitPrice || order.price;
             if (order.side === 'LONG' && kline.low <= lp) { triggered = true; fillPrice = lp; }
