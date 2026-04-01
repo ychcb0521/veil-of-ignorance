@@ -307,16 +307,38 @@ function CandlestickChartComponent({ data, symbol, onLoadOlder, loadingOlder, tr
     });
     ro.observe(containerRef.current);
 
-    // Subscribe to crosshair for price sync
+    // Subscribe to crosshair for price sync — use pixel-to-value conversion, NOT kline data
     const crosshairCb = (data: any) => {
-      if (data && data.kLineData && typeof data.kLineData.close === 'number') {
-        const yPrice = typeof data.y === 'number' ? data.y : data.kLineData.close;
-        crosshairPriceRef.current = yPrice;
-        if (onCrosshairPriceChange) onCrosshairPriceChange(yPrice);
-      } else {
-        crosshairPriceRef.current = null;
-        if (onCrosshairPriceChange) onCrosshairPriceChange(null);
+      try {
+        // Only process when mouse is over the main candle pane
+        const paneId = data?.paneId;
+        if (paneId && paneId !== 'candle_pane') {
+          // Mouse is over a sub-pane (Volume, MACD etc.) — ignore
+          crosshairPriceRef.current = null;
+          if (onCrosshairPriceChange) onCrosshairPriceChange(null);
+          return;
+        }
+
+        // Use convertFromPixel to get precise Y-axis price from pixel coordinate
+        if (chart && typeof data?.y === 'number') {
+          const converted = chart.convertFromPixel(
+            { y: data.y },
+            { paneId: 'candle_pane' }
+          );
+          if (converted && typeof converted.value === 'number' && isFinite(converted.value)) {
+            const rawPrice = converted.value;
+            // Format to symbol's tick size precision
+            const formatted = parseFloat(rawPrice.toFixed(pricePrecision));
+            crosshairPriceRef.current = formatted;
+            if (onCrosshairPriceChange) onCrosshairPriceChange(formatted);
+            return;
+          }
+        }
+      } catch {
+        // convertFromPixel may not be available in all versions — fallback silently
       }
+      crosshairPriceRef.current = null;
+      if (onCrosshairPriceChange) onCrosshairPriceChange(null);
     };
     chart.subscribeAction('onCrosshairChange' as any, crosshairCb);
 
