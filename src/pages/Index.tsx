@@ -75,8 +75,13 @@ function matchOrdersOffline(
         const margin = (order.quantity * fillPrice) / order.leverage;
         bal -= margin + fee;
         newPositions.push({
-          side: order.side, entryPrice: fillPrice, quantity: order.quantity,
-          leverage: order.leverage, marginMode: order.marginMode, margin,
+          id: crypto.randomUUID(),
+          side: order.side,
+          entryPrice: fillPrice,
+          quantity: order.quantity,
+          leverage: order.leverage,
+          marginMode: order.marginMode,
+          margin,
           isolatedMargin: order.marginMode === 'isolated' ? margin : undefined,
         });
       } else {
@@ -230,18 +235,22 @@ const Index = () => {
     const margin = (order.quantity * entryPrice) / order.leverage;
 
     setBalance(prev => prev - margin - fee);
-    setPositionsMap(prev => ({
-      ...prev,
-      [symbol]: [...(prev[symbol] || []), {
-        side: order.side,
-        entryPrice,
-        quantity: order.quantity,
-        leverage: order.leverage,
-        marginMode: order.marginMode,
-        margin,
-        isolatedMargin: order.marginMode === 'isolated' ? margin : undefined,
-      }],
-    }));
+    setPositionsMap(prev => {
+      const existing = (prev[symbol] || []).filter(position => position.quantity > 1e-8);
+      return {
+        ...prev,
+        [symbol]: [...existing, {
+          id: crypto.randomUUID(),
+          side: order.side,
+          entryPrice,
+          quantity: order.quantity,
+          leverage: order.leverage,
+          marginMode: order.marginMode,
+          margin,
+          isolatedMargin: order.marginMode === 'isolated' ? margin : undefined,
+        }],
+      };
+    });
     toast.success(`条件单已触发：${symbol} ${order.side} @ ${entryPrice.toFixed(2)}`);
   }, [setBalance, setPositionsMap, setTradeHistory]);
 
@@ -668,13 +677,21 @@ const Index = () => {
             const fee = calcFee(actualFillPrice, matchedOrder.quantity, isMaker);
             const margin = (matchedOrder.quantity * actualFillPrice) / matchedOrder.leverage;
             setBalance(prev => prev - margin - fee);
-            setPositionsMap(prev => ({
-              ...prev,
-              [activeSymbol]: [...(prev[activeSymbol] || []), {
-                side: matchedOrder.side, entryPrice: actualFillPrice, quantity: matchedOrder.quantity,
-                leverage: matchedOrder.leverage, marginMode: matchedOrder.marginMode, margin,
-              }],
-            }));
+            setPositionsMap(prev => {
+              const existing = (prev[activeSymbol] || []).filter(position => position.quantity > 1e-8);
+              return {
+                ...prev,
+                [activeSymbol]: [...existing, {
+                  id: crypto.randomUUID(),
+                  side: matchedOrder.side,
+                  entryPrice: actualFillPrice,
+                  quantity: matchedOrder.quantity,
+                  leverage: matchedOrder.leverage,
+                  marginMode: matchedOrder.marginMode,
+                  margin,
+                }],
+              };
+            });
             toast.success(`委托成交: ${matchedOrder.side === 'LONG' ? '开多' : '开空'} ${matchedOrder.quantity} @ ${actualFillPrice.toFixed(2)}`);
           } else if (convertToLimit) {
             remaining.push(updatedOrder);
@@ -722,13 +739,21 @@ const Index = () => {
               const fee = calcFee(slippedPrice, sliceQty, false);
               const margin = (sliceQty * slippedPrice) / order.leverage;
               setBalance(b => b - margin - fee);
-              setPositionsMap(p => ({
-                ...p,
-                [symbol]: [...(p[symbol] || []), {
-                  side: order.side, entryPrice: slippedPrice, quantity: sliceQty,
-                  leverage: order.leverage, marginMode: order.marginMode, margin,
-                }],
-              }));
+              setPositionsMap(p => {
+                const existing = (p[symbol] || []).filter(position => position.quantity > 1e-8);
+                return {
+                  ...p,
+                  [symbol]: [...existing, {
+                    id: crypto.randomUUID(),
+                    side: order.side,
+                    entryPrice: slippedPrice,
+                    quantity: sliceQty,
+                    leverage: order.leverage,
+                    marginMode: order.marginMode,
+                    margin,
+                  }],
+                };
+              });
               changed = true;
               return { ...order, twapFilledQty: filledSoFar + sliceQty, twapNextExecTime: order.twapNextExecTime! + intervalMs };
             } else {

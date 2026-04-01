@@ -241,7 +241,7 @@ export function PositionPanel({
 
                 return (
                   <div
-                    key={`${symbol}-${i}`}
+                    key={pos.id}
                     className="rounded-lg border border-border bg-card shadow-sm overflow-hidden"
                   >
                     {/* Header */}
