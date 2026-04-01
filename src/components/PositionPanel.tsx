@@ -474,8 +474,19 @@ export function PositionPanel({
           }}
         />
       )}
+      {closeModal && (
+        <ClosePositionModal
+          open={!!closeModal}
+          onClose={() => setCloseModal(null)}
+          symbol={closeModal.symbol}
+          position={closeModal.pos}
+          posIndex={closeModal.index}
+          currentPrice={priceMap[closeModal.symbol] || 0}
+          pricePrecision={getPrecision(closeModal.symbol)}
+          onConfirm={handleCloseConfirm}
+        />
+      )}
 
-      {/* Close All Confirmation Modal */}
       <Dialog open={closeAllConfirmOpen} onOpenChange={setCloseAllConfirmOpen}>
         <DialogContent className="sm:max-w-sm">
           <DialogHeader>
