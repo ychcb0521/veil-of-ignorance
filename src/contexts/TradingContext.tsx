@@ -603,6 +603,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
       }
       setBalance(prev => prev - requiredMargin);
       setPositionsMap(prev => ({ ...prev, [symbol]: [...(prev[symbol] || []), position] }));
+      console.log('[下单执行]', { 实际写入的开仓价: position.entryPrice });
       toast.success(`最优价成交: ${order.side === 'LONG' ? '开多' : '开空'} ${order.quantity.toFixed(6)} @ ${position.entryPrice.toFixed(2)}`);
       return;
     }
