@@ -77,6 +77,18 @@ function parseMinuteInput(str: string): number | null {
   return Date.UTC(+y, +mo - 1, +d, +h - 8, +mi);
 }
 
+/* ===== Timeframes ===== */
+const REVIEW_TIMEFRAMES = [
+  { key: '1m', label: '1分', ms: 60_000 },
+  { key: '3m', label: '3分', ms: 3 * 60_000 },
+  { key: '5m', label: '5分', ms: 5 * 60_000 },
+  { key: '15m', label: '15分', ms: 15 * 60_000 },
+  { key: '30m', label: '30分', ms: 30 * 60_000 },
+  { key: '1h', label: '1时', ms: 3_600_000 },
+  { key: '4h', label: '4时', ms: 4 * 3_600_000 },
+  { key: '1d', label: '1日', ms: 86_400_000 },
+] as const;
+
 /* ===== Fetch klines from Binance ===== */
 async function fetchKlines(
   symbol: string, interval: string,
@@ -161,7 +173,9 @@ export function TradeInsightsPanel({ open, onClose, tradeHistory, initialSymbol,
   const [quickRange, setQuickRange] = useState<string>('all');
   const [chartLoading, setChartLoading] = useState(false);
   const [hoveredPair, setHoveredPair] = useState<TradePair | null>(null);
-  const [tooltipPos, setTooltipPos] = useState({ x: 0, y: 0 });
+  const [selectedPairIdx, setSelectedPairIdx] = useState<number | null>(null);
+  const [selectedTooltip, setSelectedTooltip] = useState<{ x: number; y: number; pair: TradePair } | null>(null);
+  const [interval, setInterval] = useState<string>('1m');
 
   const chartContainerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<Chart | null>(null);
@@ -255,13 +269,16 @@ export function TradeInsightsPanel({ open, onClose, tradeHistory, initialSymbol,
     chartRef.current?.setStyles(theme === 'light' ? LIGHT_CHART_STYLES : DARK_CHART_STYLES);
   }, [theme]);
 
-  // ===== Load klines when coin/time changes =====
+  // ===== Load klines when coin/time/interval changes =====
   useEffect(() => {
     if (!open || !selectedCoin) return;
     const chart = chartRef.current;
     if (!chart) return;
 
-    // Determine actual data range from trades
+    // Clear selected state on data change
+    setSelectedPairIdx(null);
+    setSelectedTooltip(null);
+
     const coinTrades = tradeHistory.filter(t => t.symbol === selectedCoin && t.action !== 'FUNDING');
     if (coinTrades.length === 0) {
       chart.applyNewData([]);
@@ -275,7 +292,6 @@ export function TradeInsightsPanel({ open, onClose, tradeHistory, initialSymbol,
     let effectiveStart = timeRange.start === 0 ? minTradeTime : Math.max(timeRange.start, minTradeTime);
     let effectiveEnd = timeRange.end === Infinity ? maxTradeTime : Math.min(timeRange.end, maxTradeTime);
 
-    // Pad by 5% on each side for visual context
     const span = effectiveEnd - effectiveStart;
     effectiveStart = Math.max(minTradeTime - span * 0.1, effectiveStart - 3600_000 * 2);
     effectiveEnd = effectiveEnd + span * 0.1 + 3600_000 * 2;
@@ -283,7 +299,7 @@ export function TradeInsightsPanel({ open, onClose, tradeHistory, initialSymbol,
     let cancelled = false;
     setChartLoading(true);
 
-    fetchKlines(selectedCoin, '1m', effectiveStart, effectiveEnd).then(klines => {
+    fetchKlines(selectedCoin, interval, effectiveStart, effectiveEnd).then(klines => {
       if (cancelled || !chartRef.current) return;
       const kcData: KLineData[] = klines.map(k => ({
         timestamp: k.time,
@@ -295,39 +311,36 @@ export function TradeInsightsPanel({ open, onClose, tradeHistory, initialSymbol,
       }));
       chartRef.current.applyNewData(kcData, true);
 
-      // Fit content after data load
       requestAnimationFrame(() => {
         chartRef.current?.scrollToRealTime();
       });
 
       setChartLoading(false);
-
-      // Now render trade overlays
-      renderTradeOverlays(chartRef.current, filteredTrades, pairs);
+      renderTradeOverlays(chartRef.current, filteredTrades, pairs, null);
     }).catch(() => {
       if (!cancelled) setChartLoading(false);
     });
 
     return () => { cancelled = true; };
-  }, [open, selectedCoin, timeRange, filteredTrades.length]);
+  }, [open, selectedCoin, timeRange, interval, filteredTrades.length]);
 
-  // Re-render overlays when pairs change (but chart already has data)
+  // Re-render overlays when pairs change or selection changes
   useEffect(() => {
     const chart = chartRef.current;
     if (!chart || !open) return;
-    renderTradeOverlays(chart, filteredTrades, pairs);
-  }, [pairs, filteredTrades]);
+    renderTradeOverlays(chart, filteredTrades, pairs, selectedPairIdx);
+  }, [pairs, filteredTrades, selectedPairIdx]);
 
   const overlayIdsRef = useRef<string[]>([]);
 
-  function renderTradeOverlays(chart: Chart, trades: TradeRecord[], tradePairs: TradePair[]) {
-    // Clean slate: remove all previously created overlays
+  function renderTradeOverlays(chart: Chart, trades: TradeRecord[], tradePairs: TradePair[], selectedIdx: number | null) {
+    // Clean slate
     for (const oid of overlayIdsRef.current) {
       try { chart.removeOverlay(oid); } catch {}
     }
     overlayIdsRef.current = [];
 
-    // 1. Trade markers — each gets a unique ID
+    // 1. Trade markers
     trades.forEach((trade, idx) => {
       const ts = trade.action === 'OPEN' ? trade.openTime : trade.closeTime;
       if (ts <= 0) return;
@@ -354,14 +367,22 @@ export function TradeInsightsPanel({ open, onClose, tradeHistory, initialSymbol,
       overlayIdsRef.current.push(uid);
     });
 
-    // 2. Pair connection lines — each gets a unique ID
-    tradePairs.forEach((pair, idx) => {
+    // 2. Pair connection lines — render non-selected first, selected last (on top)
+    const renderOrder = tradePairs.map((p, i) => i);
+    if (selectedIdx !== null) {
+      const si = renderOrder.indexOf(selectedIdx);
+      if (si >= 0) {
+        renderOrder.splice(si, 1);
+        renderOrder.push(selectedIdx);
+      }
+    }
+
+    for (const idx of renderOrder) {
+      const pair = tradePairs[idx];
       const isProfit = pair.pnl >= 0;
-      const color = isProfit ? '#0ECB8199' : '#F6465D99';
-      const openTs = pair.open.openTime;
-      const closeTs = pair.close.closeTime;
-      const openPrice = pair.open.entryPrice;
-      const closePrice = pair.close.exitPrice;
+      const isSelected = idx === selectedIdx;
+      const baseColor = isProfit ? '#0ECB81' : '#F6465D';
+      const color = isSelected ? baseColor : (baseColor + '99');
       const uid = `rv-ln-${pair.open.id}-${pair.close.id}-${idx}`;
 
       chart.createOverlay({
@@ -369,47 +390,100 @@ export function TradeInsightsPanel({ open, onClose, tradeHistory, initialSymbol,
         id: uid,
         paneId: 'candle_pane',
         points: [
-          { timestamp: openTs, value: openPrice },
-          { timestamp: closeTs, value: closePrice },
+          { timestamp: pair.open.openTime, value: pair.open.entryPrice },
+          { timestamp: pair.close.closeTime, value: pair.close.exitPrice },
         ],
         lock: true,
         styles: {
           line: {
-            style: 'dashed' as any,
-            dashedValue: [4, 3],
-            size: 1.5,
+            style: isSelected ? ('solid' as any) : ('dashed' as any),
+            dashedValue: isSelected ? undefined : [4, 3],
+            size: isSelected ? 3 : 1.5,
             color,
           },
         },
-        extendData: JSON.stringify({
-          pnl: pair.pnl,
-          roe: pair.roe,
-          holdMs: pair.holdDurationMs,
-          openTime: openTs,
-          closeTime: closeTs,
-          openPrice,
-          closePrice,
-        }),
+        extendData: JSON.stringify({ pairIdx: idx }),
       } as OverlayCreate);
       overlayIdsRef.current.push(uid);
-    });
+    }
   }
 
-  // Tooltip tracking via mouse events on chart container
-  const handleChartMouseMove = useCallback((e: React.MouseEvent) => {
-    // Simple approach: store position for potential tooltip
-    setTooltipPos({ x: e.clientX, y: e.clientY });
-  }, []);
+  // Click on chart to select/deselect trade pairs
+  const handleChartClick = useCallback((e: React.MouseEvent) => {
+    const chart = chartRef.current;
+    if (!chart || pairs.length === 0) {
+      setSelectedPairIdx(null);
+      setSelectedTooltip(null);
+      return;
+    }
+
+    // Get click position relative to chart container
+    const rect = chartContainerRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const clickX = e.clientX - rect.left;
+    const clickY = e.clientY - rect.top;
+
+    // Try to find the closest trade pair line to the click
+    // We use a simple heuristic: convert each pair's open/close to pixel coords
+    // and check distance from click to the line segment
+    let bestIdx: number | null = null;
+    let bestDist = 30; // max pixel distance threshold
+
+    for (let i = 0; i < pairs.length; i++) {
+      const pair = pairs[i];
+      const openTs = pair.open.openTime;
+      const closeTs = pair.close.closeTime;
+      const openPrice = pair.open.entryPrice;
+      const closePrice = pair.close.exitPrice;
+
+      // Use chart's coordinate conversion
+      const p1Raw = chart.convertToPixel({ timestamp: openTs, value: openPrice }, { paneId: 'candle_pane' });
+      const p2Raw = chart.convertToPixel({ timestamp: closeTs, value: closePrice }, { paneId: 'candle_pane' });
+
+      if (!p1Raw || !p2Raw) continue;
+      const p1 = Array.isArray(p1Raw) ? p1Raw[0] : p1Raw;
+      const p2 = Array.isArray(p2Raw) ? p2Raw[0] : p2Raw;
+      if (!p1?.x || !p1?.y || !p2?.x || !p2?.y) continue;
+
+      const dist = pointToSegmentDist(clickX, clickY, p1.x, p1.y, p2.x, p2.y);
+      if (dist < bestDist) {
+        bestDist = dist;
+        bestIdx = i;
+      }
+    }
+
+    if (bestIdx !== null) {
+      setSelectedPairIdx(prev => prev === bestIdx ? null : bestIdx);
+      if (bestIdx !== selectedPairIdx) {
+        setSelectedTooltip({ x: e.clientX, y: e.clientY, pair: pairs[bestIdx] });
+      } else {
+        setSelectedTooltip(null);
+      }
+    } else {
+      setSelectedPairIdx(null);
+      setSelectedTooltip(null);
+    }
+  }, [pairs, selectedPairIdx]);
 
   const handleSelectCoin = useCallback((coin: string) => {
     setSelectedCoin(coin);
     setShowCoinList(false);
     setCoinSearch('');
+    setSelectedPairIdx(null);
+    setSelectedTooltip(null);
   }, []);
 
   const handleQuickRange = useCallback((key: string) => {
     setQuickRange(key);
     if (key !== 'custom') { setStartStr(''); setEndStr(''); }
+    setSelectedPairIdx(null);
+    setSelectedTooltip(null);
+  }, []);
+
+  const handleIntervalChange = useCallback((tf: string) => {
+    setInterval(tf);
+    setSelectedPairIdx(null);
+    setSelectedTooltip(null);
   }, []);
 
   const handleJump = useCallback((ts: number) => {
@@ -503,6 +577,25 @@ export function TradeInsightsPanel({ open, onClose, tradeHistory, initialSymbol,
 
           <div className="w-px h-5 bg-border" />
 
+          {/* Timeframe Switcher */}
+          <div className="flex items-center gap-0.5">
+            {REVIEW_TIMEFRAMES.map(tf => (
+              <button
+                key={tf.key}
+                onClick={() => handleIntervalChange(tf.key)}
+                className={`px-2 py-1 rounded-md text-[11px] font-mono font-medium transition-all active:scale-95 ${
+                  interval === tf.key
+                    ? 'bg-primary/15 text-primary border border-primary/30'
+                    : 'text-muted-foreground hover:bg-accent hover:text-foreground'
+                }`}
+              >
+                {tf.label}
+              </button>
+            ))}
+          </div>
+
+          <div className="w-px h-5 bg-border" />
+
           {/* Quick Range Pills */}
           <div className="flex items-center gap-1">
             <Calendar className="w-3.5 h-3.5 text-muted-foreground mr-1" />
@@ -580,9 +673,49 @@ export function TradeInsightsPanel({ open, onClose, tradeHistory, initialSymbol,
               <div
                 ref={chartContainerRef}
                 className="flex-1 min-h-0"
-                onMouseMove={handleChartMouseMove}
+                onClick={handleChartClick}
                 style={{ backgroundColor: theme === 'light' ? '#FFFFFF' : '#0B0E11' }}
               />
+            )}
+
+            {/* Selected trade tooltip (floating) */}
+            {selectedTooltip && (
+              <div
+                className="fixed z-[200] pointer-events-none animate-in fade-in zoom-in-95 duration-150"
+                style={{
+                  left: Math.min(selectedTooltip.x + 12, window.innerWidth - 240),
+                  top: Math.max(selectedTooltip.y - 100, 10),
+                }}
+              >
+                <div className="rounded-lg border border-primary/40 shadow-xl p-3 min-w-[200px]"
+                  style={{ background: 'hsl(var(--popover))' }}
+                >
+                  <div className="flex items-center gap-1.5 mb-2">
+                    <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
+                      selectedTooltip.pair.open.side === 'LONG' ? 'bg-emerald-500/15 text-emerald-400' : 'bg-red-500/15 text-red-400'
+                    }`}>
+                      {selectedTooltip.pair.open.side === 'LONG' ? '多' : '空'} {selectedTooltip.pair.open.leverage}x
+                    </span>
+                    <span className="text-[10px] text-muted-foreground font-mono">
+                      {formatDuration(selectedTooltip.pair.holdDurationMs)}
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-[10px] font-mono">
+                    <span className="text-muted-foreground">开仓价</span>
+                    <span className="text-foreground tabular-nums">{selectedTooltip.pair.open.entryPrice.toFixed(2)}</span>
+                    <span className="text-muted-foreground">平仓价</span>
+                    <span className="text-foreground tabular-nums">{selectedTooltip.pair.close.exitPrice.toFixed(2)}</span>
+                    <span className="text-muted-foreground">盈亏</span>
+                    <span className={`font-bold tabular-nums ${selectedTooltip.pair.pnl >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                      {selectedTooltip.pair.pnl >= 0 ? '+' : ''}{selectedTooltip.pair.pnl.toFixed(2)} USDT
+                    </span>
+                    <span className="text-muted-foreground">ROE</span>
+                    <span className={`font-bold tabular-nums ${selectedTooltip.pair.roe >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                      {selectedTooltip.pair.roe >= 0 ? '+' : ''}{selectedTooltip.pair.roe.toFixed(2)}%
+                    </span>
+                  </div>
+                </div>
+              </div>
             )}
 
             {/* Trade pair list (compact, below chart) */}
@@ -595,11 +728,20 @@ export function TradeInsightsPanel({ open, onClose, tradeHistory, initialSymbol,
                 <div className="divide-y divide-border/20">
                   {pairs.map((pair, idx) => {
                     const isProfit = pair.pnl >= 0;
+                    const isSelected = idx === selectedPairIdx;
                     return (
                       <div
                         key={idx}
-                        className="flex items-center gap-3 px-3 py-1.5 hover:bg-accent/30 cursor-pointer transition-colors text-[10px] font-mono"
-                        onClick={() => handleJump(pair.open.openTime)}
+                        className={`flex items-center gap-3 px-3 py-1.5 cursor-pointer transition-colors text-[10px] font-mono ${
+                          isSelected
+                            ? 'bg-primary/10 border-l-2 border-l-primary'
+                            : 'hover:bg-accent/30'
+                        }`}
+                        onClick={() => {
+                          setSelectedPairIdx(prev => prev === idx ? null : idx);
+                          setSelectedTooltip(prev => prev && selectedPairIdx === idx ? null : { x: 300, y: 300, pair });
+                          handleJump(pair.open.openTime);
+                        }}
                         onMouseEnter={() => setHoveredPair(pair)}
                         onMouseLeave={() => setHoveredPair(null)}
                       >
@@ -703,8 +845,17 @@ export function TradeInsightsPanel({ open, onClose, tradeHistory, initialSymbol,
   );
 }
 
-/* ===== Sub-components ===== */
+/* ===== Geometry helper ===== */
+function pointToSegmentDist(px: number, py: number, ax: number, ay: number, bx: number, by: number): number {
+  const dx = bx - ax, dy = by - ay;
+  const lenSq = dx * dx + dy * dy;
+  if (lenSq === 0) return Math.hypot(px - ax, py - ay);
+  let t = ((px - ax) * dx + (py - ay) * dy) / lenSq;
+  t = Math.max(0, Math.min(1, t));
+  return Math.hypot(px - (ax + t * dx), py - (ay + t * dy));
+}
 
+/* ===== Sub-components ===== */
 function StatRow({ label, value, color, clickable, onClick }: {
   label: string; value: string; color: string; clickable?: boolean; onClick?: () => void;
 }) {
