@@ -292,8 +292,7 @@ export function PositionPanel({
                       <ActionBtn
                         label="平仓"
                         danger
-                        onClick={(e) => { e.stopPropagation(); handleClose(symbol, i); }}
-                        disabled={closingKey === `${symbol}-${i}`}
+                        onClick={(e) => { e.stopPropagation(); handleOpenCloseModal(symbol, i, pos); }}
                       />
                     </div>
                   </div>
