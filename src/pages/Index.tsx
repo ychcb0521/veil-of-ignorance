@@ -723,12 +723,6 @@ const Index = () => {
                   leverage: order.leverage, marginMode: order.marginMode, margin,
                 }],
               }));
-              setTradeHistory(prev => [...prev, {
-                id: crypto.randomUUID(), symbol, side: order.side, type: 'TWAP' as OrderType,
-                action: 'OPEN' as const, entryPrice: slippedPrice, exitPrice: 0,
-                quantity: sliceQty, leverage: order.leverage,
-                pnl: 0, fee, slippage: slippageAmt, openTime: now, closeTime: 0,
-              }]);
               changed = true;
               return { ...order, twapFilledQty: filledSoFar + sliceQty, twapNextExecTime: order.twapNextExecTime! + intervalMs };
             } else {
