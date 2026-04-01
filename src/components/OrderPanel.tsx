@@ -27,9 +27,11 @@ interface Props {
   onTogglePriceProtection?: () => void;
   pricePrecision?: number;
   quantityPrecision?: number;
+  /** Crosshair Y-axis price from chart for conditional trigger price sync */
+  crosshairPrice?: number | null;
 }
 
-export function OrderPanel({ currentPrice, onPlaceOrder, disabled, symbol, coolingOff, coolingOffLabel, onOpenCoolingOff, priceProtection, onTogglePriceProtection, pricePrecision = 2, quantityPrecision = 3 }: Props) {
+export function OrderPanel({ currentPrice, onPlaceOrder, disabled, symbol, coolingOff, coolingOffLabel, onOpenCoolingOff, priceProtection, onTogglePriceProtection, pricePrecision = 2, quantityPrecision = 3, crosshairPrice }: Props) {
   const baseCoin = symbol.replace('USDT', '') || 'BTC';
 
   const [orderType, setOrderType] = useState<OrderType>('MARKET');
