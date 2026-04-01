@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { usePersistedState } from '@/hooks/usePersistedState';
 import type { Position, PendingOrder, TradeRecord } from '@/types/trading';
 import { calcUnrealizedPnl, calcROE, calcLiquidationPrice, MAINTENANCE_MARGIN_RATE } from '@/types/trading';
 import type { PositionsMap, OrdersMap, PriceMap } from '@/contexts/TradingContext';
