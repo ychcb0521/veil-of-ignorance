@@ -25,7 +25,7 @@ import { CoolingOffModal, useCoolingOff } from '@/components/CoolingOffModal';
 import { toast } from 'sonner';
 import { BarChart3, Wallet, PanelRightClose, PanelRightOpen, Crosshair } from 'lucide-react';
 import type { PendingOrder, OrderType } from '@/types/trading';
-import { calcFee, calcSlippage } from '@/types/trading';
+import { calcFee, calcSlippage, isTriggerConditionMet } from '@/types/trading';
 import type { AssetState } from '@/types/assets';
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
@@ -57,8 +57,8 @@ function matchOrdersOffline(
         if (dir === 'UP' && kline.high >= order.stopPrice) { triggered = true; fillPrice = order.stopPrice; }
         else if (dir === 'DOWN' && kline.low <= order.stopPrice) { triggered = true; fillPrice = order.stopPrice; }
       } else if (order.type === 'CONDITIONAL') {
-        const dir = order.triggerDirection || (order.side === 'LONG' ? 'UP' : 'DOWN');
-        const trigHit = (dir === 'UP' && kline.high >= order.stopPrice) || (dir === 'DOWN' && kline.low <= order.stopPrice);
+        if (!order.operator) continue;
+        const trigHit = isTriggerConditionMet(order.operator, order.stopPrice, kline);
         if (trigHit) {
           if (order.conditionalExecType === 'MARKET') { triggered = true; fillPrice = order.stopPrice; }
           else {
@@ -443,6 +443,7 @@ const Index = () => {
 
         for (const order of orders) {
           if (filledIds.includes(order.id)) continue;
+          if (order.type === 'CONDITIONAL' && !order.operator) continue;
 
           let triggered = false;
           let fillPrice = 0;
@@ -475,8 +476,7 @@ const Index = () => {
               break;
             }
             case 'CONDITIONAL': {
-              const dir = order.triggerDirection || (order.side === 'LONG' ? 'UP' : 'DOWN');
-              const trigHit = (dir === 'UP' && kline.high >= order.stopPrice) || (dir === 'DOWN' && kline.low <= order.stopPrice);
+              const trigHit = isTriggerConditionMet(order.operator!, order.stopPrice, kline);
               if (trigHit) {
                 if (order.conditionalExecType === 'MARKET') { triggered = true; fillPrice = order.stopPrice; isMaker = false; }
                 else {
