@@ -231,6 +231,12 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
   const priceMapRef = useRef(priceMap);
   useEffect(() => { priceMapRef.current = priceMap; }, [priceMap]);
 
+  const balanceRef = useRef(balance);
+  useEffect(() => { balanceRef.current = balance; }, [balance]);
+
+  const positionsMapRef = useRef(positionsMap);
+  useEffect(() => { positionsMapRef.current = positionsMap; }, [positionsMap]);
+
   // Total position count across all symbols
   const totalPositionCount = useMemo(() => {
     let count = 0;
