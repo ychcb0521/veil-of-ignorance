@@ -1096,6 +1096,7 @@ const Index = () => {
                 onOpenCoolingOff={() => setCoolingOffModalOpen(true)}
                 priceProtection={priceProtection}
                 onTogglePriceProtection={() => setPriceProtection(prev => !prev)}
+                crosshairPrice={crosshairPrice}
               />
             </div>
           </ResizablePanel>
