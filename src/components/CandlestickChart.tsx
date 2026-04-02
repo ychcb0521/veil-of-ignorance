@@ -3,49 +3,93 @@
  * Uses applyNewData / updateData / applyMoreData for data feeding.
  */
 
-import { useEffect, useRef, useCallback, useState, memo } from 'react';
-import { init, dispose, CandleType, LineType, TooltipShowRule, TooltipShowType, type Chart, type KLineData, type OverlayCreate } from 'klinecharts';
-import type { KlineData } from '@/hooks/useBinanceData';
-import type { PendingOrder } from '@/types/trading';
-import { useTheme } from '@/contexts/ThemeContext';
-import { DrawingToolbar } from './DrawingToolbar';
-import { IndicatorMenu } from './IndicatorMenu';
-import { BarChart3, X, ListOrdered, Eye, EyeOff } from 'lucide-react';
-import { usePersistedState } from '@/hooks/usePersistedState';
-import type { TradeRecord } from '@/types/trading';
-import { registerCustomIndicators, CUSTOM_INDICATOR_MAP } from '@/lib/customIndicators';
+import { useEffect, useRef, useCallback, useState, memo } from "react";
+import {
+  init,
+  dispose,
+  CandleType,
+  LineType,
+  TooltipShowRule,
+  TooltipShowType,
+  type Chart,
+  type KLineData,
+  type OverlayCreate,
+} from "klinecharts";
+import type { KlineData } from "@/hooks/useBinanceData";
+import type { PendingOrder } from "@/types/trading";
+import { useTheme } from "@/contexts/ThemeContext";
+import { DrawingToolbar } from "./DrawingToolbar";
+import { IndicatorMenu } from "./IndicatorMenu";
+import { BarChart3, X, ListOrdered, Eye, EyeOff } from "lucide-react";
+import { usePersistedState } from "@/hooks/usePersistedState";
+import type { TradeRecord } from "@/types/trading";
+import { registerCustomIndicators, CUSTOM_INDICATOR_MAP } from "@/lib/customIndicators";
 
 // Mapping from our indicator IDs to klinecharts indicator names (built-in + custom)
 const KLINE_INDICATOR_MAP: Record<string, string> = { ...CUSTOM_INDICATOR_MAP };
 
 // IDs that render on the main (candle) pane as overlays
 const OVERLAY_INDICATOR_IDS = new Set([
-  'MA', 'EMA', 'SMA', 'WMA', 'BOLL', 'SAR',
-  'DEMA', 'TEMA', 'SMMA', 'HMA', 'ALMA', 'LSMA', 'KAMA', 'HAMA', 'MCGD',
-  'DMA', 'TMA', 'MMA', 'GMMA', 'MACHAN', 'EMA_CROSS', 'MA_EMA_CROSS',
-  'KC', 'DC', 'PC', 'ENV', 'SEB',
-  'ICH', 'ST', 'ZIGZAG', 'CRSI_STOP', 'PIVOT', 'W52HL', 'FRAC', 'ALLIGATOR', 'LRC',
-  'MEDP', 'TYPP', 'AVGP', 'VWAP',
+  "MA",
+  "EMA",
+  "SMA",
+  "WMA",
+  "BOLL",
+  "SAR",
+  "DEMA",
+  "TEMA",
+  "SMMA",
+  "HMA",
+  "ALMA",
+  "LSMA",
+  "KAMA",
+  "HAMA",
+  "MCGD",
+  "DMA",
+  "TMA",
+  "MMA",
+  "GMMA",
+  "MACHAN",
+  "EMA_CROSS",
+  "MA_EMA_CROSS",
+  "KC",
+  "DC",
+  "PC",
+  "ENV",
+  "SEB",
+  "ICH",
+  "ST",
+  "ZIGZAG",
+  "CRSI_STOP",
+  "PIVOT",
+  "W52HL",
+  "FRAC",
+  "ALLIGATOR",
+  "LRC",
+  "MEDP",
+  "TYPP",
+  "AVGP",
+  "VWAP",
 ]);
 
 // Overlay tool name mapping for klinecharts built-in overlays
 const OVERLAY_MAP: Record<string, string> = {
-  TrendLine: 'segment',
-  Ray: 'rayLine',
-  ExtendedLine: 'straightLine',
-  HorizontalLine: 'horizontalStraightLine',
-  VerticalLine: 'verticalStraightLine',
-  ParallelChannel: 'parallelStraightLine',
-  FibRetracement: 'fibonacciLine',
-  Rectangle: 'rect',
-  Circle: 'circle',
-  Brush: 'segment',
-  Text: 'simpleAnnotation',
-  Marker: 'simpleTag',
-  Measure: 'priceLine',
-  LongPosition: 'priceLine',
-  ShortPosition: 'priceLine',
-  PriceLine: 'priceLine',
+  TrendLine: "segment",
+  Ray: "rayLine",
+  ExtendedLine: "straightLine",
+  HorizontalLine: "horizontalStraightLine",
+  VerticalLine: "verticalStraightLine",
+  ParallelChannel: "parallelStraightLine",
+  FibRetracement: "fibonacciLine",
+  Rectangle: "rect",
+  Circle: "circle",
+  Brush: "segment",
+  Text: "simpleAnnotation",
+  Marker: "simpleTag",
+  Measure: "priceLine",
+  LongPosition: "priceLine",
+  ShortPosition: "priceLine",
+  PriceLine: "priceLine",
 };
 
 export interface IndicatorConfig {
@@ -97,25 +141,25 @@ function toKLineData(d: KlineData): KLineData {
 const DARK_STYLES = {
   grid: {
     show: true,
-    horizontal: { color: '#1B1F26' },
-    vertical: { color: '#1B1F26' },
+    horizontal: { color: "#1B1F26" },
+    vertical: { color: "#1B1F26" },
   },
   candle: {
     type: CandleType.CandleSolid,
     bar: {
-      upColor: '#0ECB81',
-      downColor: '#F6465D',
-      upBorderColor: '#0ECB81',
-      downBorderColor: '#F6465D',
-      upWickColor: '#0ECB81',
-      downWickColor: '#F6465D',
+      upColor: "#0ECB81",
+      downColor: "#F6465D",
+      upBorderColor: "#0ECB81",
+      downBorderColor: "#F6465D",
+      upWickColor: "#0ECB81",
+      downWickColor: "#F6465D",
     },
     priceMark: {
       show: true,
       last: {
         show: true,
-        upColor: '#0ECB81',
-        downColor: '#F6465D',
+        upColor: "#0ECB81",
+        downColor: "#F6465D",
         line: { show: true, style: LineType.Dashed, dashedValue: [4, 4] },
       },
     },
@@ -124,19 +168,19 @@ const DARK_STYLES = {
       showType: TooltipShowType.Standard,
     },
   },
-  xAxis: { show: true, tickText: { color: '#848E9C' } },
-  yAxis: { show: true, tickText: { color: '#848E9C' } },
+  xAxis: { show: true, tickText: { color: "#848E9C" } },
+  yAxis: { show: true, tickText: { color: "#848E9C" } },
   crosshair: {
     show: true,
     horizontal: {
       show: true,
-      line: { show: true, color: '#F0B90B33', style: LineType.Dashed },
-      text: { show: true, color: '#FFFFFF', borderColor: '#F0B90B', backgroundColor: '#363A45' },
+      line: { show: true, color: "#F0B90B33", style: LineType.Dashed },
+      text: { show: true, color: "#FFFFFF", borderColor: "#F0B90B", backgroundColor: "#363A45" },
     },
     vertical: {
       show: true,
-      line: { show: true, color: '#F0B90B33', style: LineType.Dashed },
-      text: { show: true, color: '#FFFFFF', borderColor: '#F0B90B', backgroundColor: '#363A45' },
+      line: { show: true, color: "#F0B90B33", style: LineType.Dashed },
+      text: { show: true, color: "#FFFFFF", borderColor: "#F0B90B", backgroundColor: "#363A45" },
     },
   },
   indicator: {
@@ -144,8 +188,8 @@ const DARK_STYLES = {
       show: true,
       text: {
         show: true,
-        color: '#FFFFFF',
-        borderColor: 'inherit',
+        color: "#FFFFFF",
+        borderColor: "inherit",
         borderRadius: 2,
         size: 10,
         paddingLeft: 4,
@@ -159,32 +203,32 @@ const DARK_STYLES = {
       showType: TooltipShowType.Standard,
     },
   },
-  separator: { color: '#1B1F26' },
+  separator: { color: "#1B1F26" },
 };
 
 // Light theme styles
 const LIGHT_STYLES = {
   grid: {
     show: true,
-    horizontal: { color: '#EAECEF' },
-    vertical: { color: '#EAECEF' },
+    horizontal: { color: "#EAECEF" },
+    vertical: { color: "#EAECEF" },
   },
   candle: {
     type: CandleType.CandleSolid,
     bar: {
-      upColor: '#0ECB81',
-      downColor: '#F6465D',
-      upBorderColor: '#0ECB81',
-      downBorderColor: '#F6465D',
-      upWickColor: '#0ECB81',
-      downWickColor: '#F6465D',
+      upColor: "#0ECB81",
+      downColor: "#F6465D",
+      upBorderColor: "#0ECB81",
+      downBorderColor: "#F6465D",
+      upWickColor: "#0ECB81",
+      downWickColor: "#F6465D",
     },
     priceMark: {
       show: true,
       last: {
         show: true,
-        upColor: '#0ECB81',
-        downColor: '#F6465D',
+        upColor: "#0ECB81",
+        downColor: "#F6465D",
         line: { show: true, style: LineType.Dashed, dashedValue: [4, 4] },
       },
     },
@@ -193,19 +237,19 @@ const LIGHT_STYLES = {
       showType: TooltipShowType.Standard,
     },
   },
-  xAxis: { show: true, tickText: { color: '#474D57' } },
-  yAxis: { show: true, tickText: { color: '#474D57' } },
+  xAxis: { show: true, tickText: { color: "#474D57" } },
+  yAxis: { show: true, tickText: { color: "#474D57" } },
   crosshair: {
     show: true,
     horizontal: {
       show: true,
-      line: { show: true, color: '#B7BDC6', style: LineType.Dashed },
-      text: { show: true, color: '#1E2329', borderColor: '#B7BDC6', backgroundColor: '#F0F1F2' },
+      line: { show: true, color: "#B7BDC6", style: LineType.Dashed },
+      text: { show: true, color: "#1E2329", borderColor: "#B7BDC6", backgroundColor: "#F0F1F2" },
     },
     vertical: {
       show: true,
-      line: { show: true, color: '#B7BDC6', style: LineType.Dashed },
-      text: { show: true, color: '#1E2329', borderColor: '#B7BDC6', backgroundColor: '#F0F1F2' },
+      line: { show: true, color: "#B7BDC6", style: LineType.Dashed },
+      text: { show: true, color: "#1E2329", borderColor: "#B7BDC6", backgroundColor: "#F0F1F2" },
     },
   },
   indicator: {
@@ -213,8 +257,8 @@ const LIGHT_STYLES = {
       show: true,
       text: {
         show: true,
-        color: '#1E2329',
-        borderColor: 'inherit',
+        color: "#1E2329",
+        borderColor: "inherit",
         borderRadius: 2,
         size: 10,
         paddingLeft: 4,
@@ -228,22 +272,37 @@ const LIGHT_STYLES = {
       showType: TooltipShowType.Standard,
     },
   },
-  separator: { color: '#EAECEF' },
+  separator: { color: "#EAECEF" },
 };
 
-function CandlestickChartComponent({ data, symbol, onLoadOlder, loadingOlder, tradeHistory, rawSymbol, pricePrecision = 2, quantityPrecision = 3, pendingOrders, onCancelOrder, chartApiRef, onCrosshairPriceChange, pickMode, onPricePicked }: Props) {
+function CandlestickChartComponent({
+  data,
+  symbol,
+  onLoadOlder,
+  loadingOlder,
+  tradeHistory,
+  rawSymbol,
+  pricePrecision = 2,
+  quantityPrecision = 3,
+  pendingOrders,
+  onCancelOrder,
+  chartApiRef,
+  onCrosshairPriceChange,
+  pickMode,
+  onPricePicked,
+}: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<Chart | null>(null);
   const prevDataLenRef = useRef(0);
   const prevOldestRef = useRef<number>(0);
   const prevNewestRef = useRef<number>(0);
-  const prevLastSigRef = useRef('');
+  const prevLastSigRef = useRef("");
   const prevSymbolRef = useRef<string>(symbol);
 
-  const [indicators, setIndicators] = usePersistedState<IndicatorConfig[]>('indicators', []);
+  const [indicators, setIndicators] = usePersistedState<IndicatorConfig[]>("indicators", []);
   const [showIndicatorPanel, setShowIndicatorPanel] = useState(false);
-  const [showOrderLines, setShowOrderLines] = usePersistedState('show_order_lines', true);
-  const [showTradeMarkers, setShowTradeMarkers] = usePersistedState('show_trade_markers', true);
+  const [showOrderLines, setShowOrderLines] = usePersistedState("show_order_lines", true);
+  const [showTradeMarkers, setShowTradeMarkers] = usePersistedState("show_trade_markers", true);
   const [drawingsVisible, setDrawingsVisible] = useState(true);
   const [activeDrawingTool, setActiveDrawingTool] = useState<string | null>(null);
   const { theme } = useTheme();
@@ -265,7 +324,7 @@ function CandlestickChartComponent({ data, symbol, onLoadOlder, loadingOlder, tr
       prevDataLenRef.current = 0;
       prevOldestRef.current = 0;
       prevNewestRef.current = 0;
-      prevLastSigRef.current = '';
+      prevLastSigRef.current = "";
       prevSymbolRef.current = symbol;
     }
   }, [symbol]);
@@ -280,8 +339,8 @@ function CandlestickChartComponent({ data, symbol, onLoadOlder, loadingOlder, tr
     registerCustomIndicators();
 
     const chart = init(containerRef.current, {
-      styles: theme === 'light' ? LIGHT_STYLES : DARK_STYLES,
-      timezone: 'Asia/Shanghai',
+      styles: theme === "light" ? LIGHT_STYLES : DARK_STYLES,
+      timezone: "Asia/Shanghai",
     });
 
     if (!chart) return;
@@ -313,7 +372,7 @@ function CandlestickChartComponent({ data, symbol, onLoadOlder, loadingOlder, tr
       try {
         // Only process when mouse is over the main candle pane
         const paneId = data?.paneId;
-        if (paneId && paneId !== 'candle_pane') {
+        if (paneId && paneId !== "candle_pane") {
           // Mouse is over a sub-pane (Volume, MACD etc.) — ignore
           crosshairPriceRef.current = null;
           if (onCrosshairPriceChange) onCrosshairPriceChange(null);
@@ -321,13 +380,10 @@ function CandlestickChartComponent({ data, symbol, onLoadOlder, loadingOlder, tr
         }
 
         // Use convertFromPixel to get precise Y-axis price from pixel coordinate
-        if (chart && typeof data?.y === 'number') {
-          const converted = chart.convertFromPixel(
-            [{ y: data.y }],
-            { paneId: 'candle_pane' }
-          ) as any;
+        if (chart && typeof data?.y === "number") {
+          const converted = chart.convertFromPixel([{ y: data.y }], { paneId: "candle_pane" }) as any;
           const result = Array.isArray(converted) ? converted[0] : converted;
-          if (result && typeof result.value === 'number' && isFinite(result.value)) {
+          if (result && typeof result.value === "number" && isFinite(result.value)) {
             const rawPrice = result.value;
             // Format to symbol's tick size precision
             const formatted = parseFloat(rawPrice.toFixed(pricePrecision));
@@ -342,12 +398,14 @@ function CandlestickChartComponent({ data, symbol, onLoadOlder, loadingOlder, tr
       crosshairPriceRef.current = null;
       if (onCrosshairPriceChange) onCrosshairPriceChange(null);
     };
-    chart.subscribeAction('onCrosshairChange' as any, crosshairCb);
+    chart.subscribeAction("onCrosshairChange" as any, crosshairCb);
 
     return () => {
       ro.disconnect();
       if (chartApiRef) chartApiRef.current = null;
-      try { chart.unsubscribeAction('onCrosshairChange' as any, crosshairCb); } catch {}
+      try {
+        chart.unsubscribeAction("onCrosshairChange" as any, crosshairCb);
+      } catch {}
       dispose(containerRef.current!);
       chartRef.current = null;
     };
@@ -359,7 +417,7 @@ function CandlestickChartComponent({ data, symbol, onLoadOlder, loadingOlder, tr
   useEffect(() => {
     const chart = chartRef.current;
     if (!chart) return;
-    chart.setStyles(theme === 'light' ? LIGHT_STYLES : DARK_STYLES);
+    chart.setStyles(theme === "light" ? LIGHT_STYLES : DARK_STYLES);
   }, [theme]);
 
   // ============================================================
@@ -383,14 +441,13 @@ function CandlestickChartComponent({ data, symbol, onLoadOlder, loadingOlder, tr
     const lastCandle = klineData[klineData.length - 1];
     const lastSig = `${lastCandle.timestamp}|${lastCandle.open}|${lastCandle.high}|${lastCandle.low}|${lastCandle.close}|${lastCandle.volume}`;
 
-    const wasPrepend = prevDataLenRef.current > 0
-      && data.length > prevDataLenRef.current
-      && currentOldest < prevOldestRef.current;
+    const wasPrepend =
+      prevDataLenRef.current > 0 && data.length > prevDataLenRef.current && currentOldest < prevOldestRef.current;
 
     const unchangedSnapshot =
-      data.length === prevDataLenRef.current
-      && currentOldest === prevOldestRef.current
-      && lastSig === prevLastSigRef.current;
+      data.length === prevDataLenRef.current &&
+      currentOldest === prevOldestRef.current &&
+      lastSig === prevLastSigRef.current;
 
     if (unchangedSnapshot) return;
 
@@ -416,7 +473,13 @@ function CandlestickChartComponent({ data, symbol, onLoadOlder, loadingOlder, tr
     }
 
     // Auto-fit content on initial load or full data replacement to fill the viewport
-    if (needsFit || (!wasPrepend && prevDataLenRef.current > 0 && data.length !== prevDataLenRef.current && !(data.length > prevDataLenRef.current && data.length - prevDataLenRef.current <= 2))) {
+    if (
+      needsFit ||
+      (!wasPrepend &&
+        prevDataLenRef.current > 0 &&
+        data.length !== prevDataLenRef.current &&
+        !(data.length > prevDataLenRef.current && data.length - prevDataLenRef.current <= 2))
+    ) {
       requestAnimationFrame(() => {
         chartRef.current?.scrollByDistance(0, 0);
         // klinecharts v9 does not have fitContent; use scrollToRealTime to snap to latest
@@ -438,34 +501,37 @@ function CandlestickChartComponent({ data, symbol, onLoadOlder, loadingOlder, tr
     if (!chart) return;
 
     // Step 1: Atomic clear — always remove old markers first
-    try { chart.removeOverlay('trade_markers'); } catch {}
+    try {
+      chart.removeOverlay("trade_markers");
+    } catch {}
 
     // Step 2: If hidden or no data, stop after clearing
     if (!showTradeMarkers || !tradeHistory || !rawSymbol || data.length === 0) return;
 
     // Step 3: Redraw from single source of truth (tradeHistory)
-    const symbolTrades = tradeHistory.filter(t => t.symbol === rawSymbol);
+    const symbolTrades = tradeHistory.filter((t) => t.symbol === rawSymbol);
     for (const trade of symbolTrades) {
-      const ts = trade.action === 'OPEN' ? trade.openTime : trade.closeTime;
+      const ts = trade.action === "OPEN" ? trade.openTime : trade.closeTime;
       if (ts <= 0) continue;
-      const isBuy = (trade.action === 'OPEN' && trade.side === 'LONG') || (trade.action === 'CLOSE' && trade.side === 'SHORT');
-      const price = trade.action === 'OPEN' ? trade.entryPrice : trade.exitPrice;
+      const isBuy =
+        (trade.action === "OPEN" && trade.side === "LONG") || (trade.action === "CLOSE" && trade.side === "SHORT");
+      const price = trade.action === "OPEN" ? trade.entryPrice : trade.exitPrice;
 
       // Financial semantics: Buy=green below candle, Sell=red above candle
-      const color = isBuy ? '#0ECB81' : '#F6465D';
-      const label = isBuy ? '▲ B' : '▼ S';
+      const color = isBuy ? "#0ECB81" : "#F6465D";
+      const label = isBuy ? "▲ B" : "▼ S";
       // Offset: buy markers below price, sell markers above price
       const offset = isBuy ? -8 : 8;
 
       chart.createOverlay({
-        name: 'simpleAnnotation',
-        id: 'trade_markers',
+        name: "simpleAnnotation",
+        id: "trade_markers",
         points: [{ timestamp: ts, value: price }],
         lock: true,
         extendData: label,
         styles: {
           text: {
-            color: '#FFFFFF',
+            color: "#FFFFFF",
             size: 10,
             borderColor: color,
             backgroundColor: color,
@@ -491,7 +557,9 @@ function CandlestickChartComponent({ data, symbol, onLoadOlder, loadingOlder, tr
     if (!chart) return;
 
     // Always clear previous order line overlays
-    try { chart.removeOverlay('order_lines'); } catch {}
+    try {
+      chart.removeOverlay("order_lines");
+    } catch {}
 
     if (!showOrderLines || !pendingOrders || pendingOrders.length === 0 || data.length === 0) return;
 
@@ -501,34 +569,45 @@ function CandlestickChartComponent({ data, symbol, onLoadOlder, loadingOlder, tr
       const displayPrice = order.price > 0 ? order.price : order.stopPrice;
       if (displayPrice <= 0) continue;
 
-      const isLong = order.side === 'LONG';
-      const typeLabel = order.type === 'LIMIT' || order.type === 'POST_ONLY'
-        ? (isLong ? 'Limit Buy' : 'Limit Sell')
-        : order.type === 'MARKET_TP_SL' || order.type === 'LIMIT_TP_SL'
-        ? (isLong ? 'TP/SL Buy' : 'TP/SL Sell')
-        : order.type === 'CONDITIONAL'
-        ? (isLong ? 'Cond Buy' : 'Cond Sell')
-        : order.type === 'TRAILING_STOP'
-        ? (isLong ? 'Trail Buy' : 'Trail Sell')
-        : (isLong ? 'Buy' : 'Sell');
+      const isLong = order.side === "LONG";
+      const typeLabel =
+        order.type === "LIMIT" || order.type === "POST_ONLY"
+          ? isLong
+            ? "Limit Buy"
+            : "Limit Sell"
+          : order.type === "MARKET_TP_SL" || order.type === "LIMIT_TP_SL"
+            ? isLong
+              ? "TP/SL Buy"
+              : "TP/SL Sell"
+            : order.type === "CONDITIONAL"
+              ? isLong
+                ? "Cond Buy"
+                : "Cond Sell"
+              : order.type === "TRAILING_STOP"
+                ? isLong
+                  ? "Trail Buy"
+                  : "Trail Sell"
+                : isLong
+                  ? "Buy"
+                  : "Sell";
 
       chart.createOverlay({
-        name: 'horizontalStraightLine',
-        id: 'order_lines',
+        name: "horizontalStraightLine",
+        id: "order_lines",
         points: [{ timestamp: lastTime, value: displayPrice }],
         lock: true,
         styles: {
           line: {
-            style: 'dashed' as any,
+            style: "dashed" as any,
             dashedValue: [6, 4],
             size: 1,
-            color: isLong ? '#0ECB8180' : '#F6465D80',
+            color: isLong ? "#0ECB8180" : "#F6465D80",
           },
           text: {
-            color: isLong ? '#0ECB81' : '#F6465D',
+            color: isLong ? "#0ECB81" : "#F6465D",
             size: 10,
-            borderColor: isLong ? '#0ECB8140' : '#F6465D40',
-            backgroundColor: isLong ? '#0ECB8118' : '#F6465D18',
+            borderColor: isLong ? "#0ECB8140" : "#F6465D40",
+            backgroundColor: isLong ? "#0ECB8118" : "#F6465D18",
           },
         },
         extendData: `${typeLabel} ${order.quantity.toFixed(4)} @ ${displayPrice.toFixed(pricePrecision)}`,
@@ -537,22 +616,22 @@ function CandlestickChartComponent({ data, symbol, onLoadOlder, loadingOlder, tr
       // If there's also a stopPrice different from price (e.g. TP/SL orders), draw trigger line
       if (order.stopPrice > 0 && order.price > 0 && order.stopPrice !== order.price) {
         chart.createOverlay({
-          name: 'horizontalStraightLine',
-          id: 'order_lines',
+          name: "horizontalStraightLine",
+          id: "order_lines",
           points: [{ timestamp: lastTime, value: order.stopPrice }],
           lock: true,
           styles: {
             line: {
-              style: 'dashed' as any,
+              style: "dashed" as any,
               dashedValue: [3, 3],
               size: 1,
-              color: '#F0B90B60',
+              color: "#F0B90B60",
             },
             text: {
-              color: '#F0B90B',
+              color: "#F0B90B",
               size: 9,
-              borderColor: '#F0B90B40',
-              backgroundColor: '#F0B90B18',
+              borderColor: "#F0B90B40",
+              backgroundColor: "#F0B90B18",
             },
           },
           extendData: `Trigger @ ${order.stopPrice.toFixed(pricePrecision)}`,
@@ -575,7 +654,7 @@ function CandlestickChartComponent({ data, symbol, onLoadOlder, loadingOlder, tr
       // Determine the klinecharts indicator name: mapped, or fallback
       let kcName = KLINE_INDICATOR_MAP[ind.type];
       if (!kcName) {
-        kcName = isOverlay ? 'FALLBACK_OVERLAY' : 'FALLBACK_OSCILLATOR';
+        kcName = isOverlay ? "FALLBACK_OVERLAY" : "FALLBACK_OSCILLATOR";
       }
 
       if (!activeIndicatorPanes.current.has(ind.type)) {
@@ -583,7 +662,7 @@ function CandlestickChartComponent({ data, symbol, onLoadOlder, loadingOlder, tr
           const paneId = chart.createIndicator(
             { name: kcName, calcParams: [ind.period] },
             isOverlay,
-            isOverlay ? { id: 'candle_pane' } : { height: 80 }
+            isOverlay ? { id: "candle_pane" } : { height: 80 },
           );
           activeIndicatorPanes.current.set(ind.type, paneId);
         } catch (e) {
@@ -602,7 +681,7 @@ function CandlestickChartComponent({ data, symbol, onLoadOlder, loadingOlder, tr
         try {
           const isOverlay = OVERLAY_INDICATOR_IDS.has(type);
           let kcName = KLINE_INDICATOR_MAP[type];
-          if (!kcName) kcName = isOverlay ? 'FALLBACK_OVERLAY' : 'FALLBACK_OSCILLATOR';
+          if (!kcName) kcName = isOverlay ? "FALLBACK_OVERLAY" : "FALLBACK_OSCILLATOR";
           if (paneId) {
             chart.removeIndicator(paneId, kcName);
           }
@@ -633,7 +712,7 @@ function CandlestickChartComponent({ data, symbol, onLoadOlder, loadingOlder, tr
     if (overlayName) {
       chart.createOverlay({
         name: overlayName,
-        mode: 'weak_magnet',
+        mode: "weak_magnet",
         onDrawEnd: () => {
           // Auto-reset tool after drawing completes (unless stay-in-drawing mode)
           if (!stayInDrawingRef.current) {
@@ -645,7 +724,7 @@ function CandlestickChartComponent({ data, symbol, onLoadOlder, loadingOlder, tr
               if (c && overlayName) {
                 c.createOverlay({
                   name: overlayName,
-                  mode: 'weak_magnet',
+                  mode: "weak_magnet",
                   onDrawEnd: () => {
                     if (!stayInDrawingRef.current) setActiveDrawingTool(null);
                   },
@@ -667,7 +746,7 @@ function CandlestickChartComponent({ data, symbol, onLoadOlder, loadingOlder, tr
   }, []);
 
   const handleToggleDrawingsVisible = useCallback(() => {
-    setDrawingsVisible(prev => {
+    setDrawingsVisible((prev) => {
       const newVal = !prev;
       const chart = chartRef.current;
       if (chart) {
@@ -682,7 +761,7 @@ function CandlestickChartComponent({ data, symbol, onLoadOlder, loadingOlder, tr
   // ============================================================
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && activeDrawingTool) {
+      if (e.key === "Escape" && activeDrawingTool) {
         const chart = chartRef.current;
         if (chart) {
           // Remove any in-progress overlay by creating nothing
@@ -692,8 +771,8 @@ function CandlestickChartComponent({ data, symbol, onLoadOlder, loadingOlder, tr
         setActiveDrawingTool(null);
       }
     };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
   }, [activeDrawingTool]);
 
   // Right-click on chart cancels drawing
@@ -706,8 +785,8 @@ function CandlestickChartComponent({ data, symbol, onLoadOlder, loadingOlder, tr
         setActiveDrawingTool(null);
       }
     };
-    el.addEventListener('contextmenu', handler);
-    return () => el.removeEventListener('contextmenu', handler);
+    el.addEventListener("contextmenu", handler);
+    return () => el.removeEventListener("contextmenu", handler);
   }, [activeDrawingTool]);
 
   // Pick mode: click on chart to pick crosshair price
@@ -719,8 +798,8 @@ function CandlestickChartComponent({ data, symbol, onLoadOlder, loadingOlder, tr
         onPricePicked(crosshairPriceRef.current);
       }
     };
-    el.addEventListener('click', handler);
-    return () => el.removeEventListener('click', handler);
+    el.addEventListener("click", handler);
+    return () => el.removeEventListener("click", handler);
   }, [pickMode, onPricePicked]);
 
   // ============================================================
@@ -735,42 +814,64 @@ function CandlestickChartComponent({ data, symbol, onLoadOlder, loadingOlder, tr
   return (
     <div className="flex flex-col h-full bg-background">
       {/* Price header bar */}
-      <div className="flex items-center gap-4 px-4 py-2 border-b border-border flex-wrap min-w-0">
+      <div className="flex items-center gap-4 px-4 py-2 border-b border-border flex-wrap w-full">
         <div className="flex items-center gap-2 shrink-0">
           <span className="font-mono text-base font-bold text-foreground whitespace-nowrap">{symbol}</span>
           <span className="text-xs px-1.5 py-0.5 rounded bg-primary/10 text-primary font-medium shrink-0">永续</span>
         </div>
         {last && (
-          <>
+          <div className="flex items-center flex-wrap gap-4 overflow-hidden w-full sm:w-auto">
             <div className="flex flex-col shrink-0">
-              <span className={`font-mono text-xl font-bold whitespace-nowrap ${isUp ? 'trading-green' : 'trading-red'}`}>
-                {last.close.toLocaleString(undefined, { minimumFractionDigits: pricePrecision, maximumFractionDigits: pricePrecision })}
+              <span
+                className={`font-mono text-xl font-bold whitespace-nowrap ${isUp ? "trading-green" : "trading-red"}`}
+              >
+                {last.close.toLocaleString(undefined, {
+                  minimumFractionDigits: pricePrecision,
+                  maximumFractionDigits: pricePrecision,
+                })}
               </span>
             </div>
-            <div className="flex items-center gap-4 text-xs font-mono flex-wrap min-w-0">
+            <div className="flex items-center gap-4 text-xs font-mono flex-wrap overflow-hidden">
               <div className="whitespace-nowrap shrink-0">
                 <span className="text-muted-foreground">24h涨跌</span>
-                <span className={`ml-1.5 font-medium ${priceChange >= 0 ? 'trading-green' : 'trading-red'}`}>
-                  {priceChange >= 0 ? '+' : ''}{priceChange.toFixed(pricePrecision)} ({priceChangePct >= 0 ? '+' : ''}{priceChangePct.toFixed(2)}%)
+                <span className={`ml-1.5 font-medium ${priceChange >= 0 ? "trading-green" : "trading-red"}`}>
+                  {priceChange >= 0 ? "+" : ""}
+                  {priceChange.toFixed(pricePrecision)} ({priceChangePct >= 0 ? "+" : ""}
+                  {priceChangePct.toFixed(2)}%)
                 </span>
               </div>
               <div className="whitespace-nowrap shrink-0">
                 <span className="text-muted-foreground">最高</span>
-                <span className="ml-1.5 text-foreground">{last.high.toLocaleString(undefined, { minimumFractionDigits: pricePrecision })}</span>
+                <span className="ml-1.5 text-foreground">
+                  {last.high.toLocaleString(undefined, { minimumFractionDigits: pricePrecision })}
+                </span>
               </div>
               <div className="whitespace-nowrap shrink-0">
                 <span className="text-muted-foreground">最低</span>
-                <span className="ml-1.5 text-foreground">{last.low.toLocaleString(undefined, { minimumFractionDigits: pricePrecision })}</span>
+                <span className="ml-1.5 text-foreground">
+                  {last.low.toLocaleString(undefined, { minimumFractionDigits: pricePrecision })}
+                </span>
               </div>
               <div className="whitespace-nowrap shrink-0">
                 <span className="text-muted-foreground">成交量</span>
-                <span className="ml-1.5 text-foreground">{last.volume.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
+                <span className="ml-1.5 text-foreground">
+                  {last.volume.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                </span>
+              </div>
+              <div className="whitespace-nowrap shrink-0">
+                <span className="text-muted-foreground">价格变化率</span>
+                <span className={`ml-1.5 font-medium ${priceChangePct >= 0 ? "trading-green" : "trading-red"}`}>
+                  {priceChangePct >= 0 ? "+" : ""}
+                  {priceChangePct.toFixed(2)}%
+                </span>
               </div>
             </div>
-          </>
+          </div>
         )}
         {loadingOlder && (
-          <span className="text-[10px] text-primary animate-pulse font-mono ml-auto shrink-0 whitespace-nowrap">加载更早数据...</span>
+          <span className="text-[10px] text-primary animate-pulse font-mono ml-auto shrink-0 whitespace-nowrap">
+            加载更早数据...
+          </span>
         )}
       </div>
 
@@ -781,8 +882,8 @@ function CandlestickChartComponent({ data, symbol, onLoadOlder, loadingOlder, tr
           className="absolute inset-0"
           style={{
             left: 34,
-            backgroundColor: theme === 'light' ? '#FFFFFF' : '#0B0E11',
-            cursor: activeDrawingTool || pickMode ? 'crosshair' : 'default',
+            backgroundColor: theme === "light" ? "#FFFFFF" : "#0B0E11",
+            cursor: activeDrawingTool || pickMode ? "crosshair" : "default",
           }}
         />
 
@@ -801,10 +902,12 @@ function CandlestickChartComponent({ data, symbol, onLoadOlder, loadingOlder, tr
             onClick={(e) => {
               e.stopPropagation();
               e.preventDefault();
-              setShowIndicatorPanel(prev => !prev);
+              setShowIndicatorPanel((prev) => !prev);
             }}
             className={`flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium transition-all duration-150 ease-out origin-top active:scale-[0.98] ${
-              showIndicatorPanel ? 'bg-primary text-primary-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground hover:bg-accent/50'
+              showIndicatorPanel
+                ? "bg-primary text-primary-foreground shadow-sm"
+                : "text-muted-foreground hover:text-foreground hover:bg-accent/50"
             }`}
           >
             <BarChart3 className="w-3.5 h-3.5" />
@@ -814,11 +917,13 @@ function CandlestickChartComponent({ data, symbol, onLoadOlder, loadingOlder, tr
           {/* Show order lines toggle */}
           <button
             type="button"
-            onClick={() => setShowOrderLines(prev => !prev)}
+            onClick={() => setShowOrderLines((prev) => !prev)}
             className={`flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium transition-colors duration-150 ease-out active:scale-[0.98] ${
-              showOrderLines ? 'bg-primary/20 text-primary' : 'text-muted-foreground hover:text-foreground hover:bg-accent/50'
+              showOrderLines
+                ? "bg-primary/20 text-primary"
+                : "text-muted-foreground hover:text-foreground hover:bg-accent/50"
             }`}
-            title={showOrderLines ? '隐藏挂单线' : '显示挂单线'}
+            title={showOrderLines ? "隐藏挂单线" : "显示挂单线"}
           >
             <ListOrdered className="w-3.5 h-3.5" />
             <span>挂单</span>
@@ -827,22 +932,31 @@ function CandlestickChartComponent({ data, symbol, onLoadOlder, loadingOlder, tr
           {/* Show/hide trade markers toggle */}
           <button
             type="button"
-            onClick={() => setShowTradeMarkers(prev => !prev)}
+            onClick={() => setShowTradeMarkers((prev) => !prev)}
             className={`flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium transition-colors duration-150 ease-out active:scale-[0.98] ${
-              showTradeMarkers ? 'bg-primary/20 text-primary' : 'text-muted-foreground hover:text-foreground hover:bg-accent/50'
+              showTradeMarkers
+                ? "bg-primary/20 text-primary"
+                : "text-muted-foreground hover:text-foreground hover:bg-accent/50"
             }`}
-            title={showTradeMarkers ? '隐藏交易标记' : '显示交易标记'}
+            title={showTradeMarkers ? "隐藏交易标记" : "显示交易标记"}
           >
             {showTradeMarkers ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
             <span>标记</span>
           </button>
 
           <div className="flex items-center gap-1 max-w-full overflow-x-auto">
-            {indicators.map(ind => (
-              <span key={ind.type} className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-mono font-medium whitespace-nowrap shrink-0"
-                style={{ background: `${ind.color}20`, color: ind.color }}>
+            {indicators.map((ind) => (
+              <span
+                key={ind.type}
+                className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-mono font-medium whitespace-nowrap shrink-0"
+                style={{ background: `${ind.color}20`, color: ind.color }}
+              >
                 {ind.type} {ind.period}
-                <button type="button" onClick={() => setIndicators(indicators.filter(i => i.type !== ind.type))} className="hover:opacity-70">
+                <button
+                  type="button"
+                  onClick={() => setIndicators(indicators.filter((i) => i.type !== ind.type))}
+                  className="hover:opacity-70"
+                >
                   <X className="w-2.5 h-2.5" />
                 </button>
               </span>
