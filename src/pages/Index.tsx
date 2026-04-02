@@ -221,10 +221,6 @@ const Index = () => {
     if (visibleData.length === 0 || currentPrice <= 0) return visibleData;
     const next = [...visibleData];
     const last = { ...next[next.length - 1] };
-    const base = Number(last.close || 0);
-    if (base <= 0) return visibleData;
-    const ratio = currentPrice / base;
-    if (!Number.isFinite(ratio) || ratio > 5 || ratio < 0.2) return visibleData;
     last.close = currentPrice;
     last.high = Math.max(last.high, currentPrice);
     last.low = Math.min(last.low, currentPrice);
