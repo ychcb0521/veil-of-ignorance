@@ -572,12 +572,13 @@ function CandlestickChartComponent({
       const ts = trade.action === "OPEN" ? trade.openTime : trade.closeTime;
       if (ts <= 0) continue;
       const isBuy =
-        (trade.action === "OPEN" && trade.side === "LONG") || (trade.action === "CLOSE" && trade.side === "SHORT");
+        (trade.action === "OPEN" && trade.side === "LONG") ||
+        ((trade.action === "CLOSE" || trade.action === "LIQUIDATION") && trade.side === "SHORT");
       const price = trade.action === "OPEN" ? trade.entryPrice : trade.exitPrice;
 
       // Financial semantics: Buy=green below candle, Sell=red above candle
       const color = isBuy ? "#0ECB81" : "#F6465D";
-      const label = isBuy ? "▲ B" : "▼ S";
+      const label = trade.action === "LIQUIDATION" ? (isBuy ? "💀 ▲ B" : "💀 ▼ S") : isBuy ? "▲ B" : "▼ S";
       // Offset: buy markers below price, sell markers above price
       const offset = isBuy ? -8 : 8;
 
