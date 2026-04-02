@@ -6,7 +6,7 @@
 import { IndicatorMenu } from './IndicatorMenu';
 import { useState } from 'react';
 import { BarChart3, X } from 'lucide-react';
-import type { IndicatorConfig } from './CandlestickChart';
+import type { IndicatorConfig } from '@/types/trading';
 
 interface Props {
   activeTool: string | null;
