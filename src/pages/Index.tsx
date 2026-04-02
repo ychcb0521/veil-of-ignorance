@@ -322,6 +322,25 @@ const Index = () => {
           ],
         };
       });
+      setTradeHistory((prev) => [
+        ...prev,
+        {
+          id: crypto.randomUUID(),
+          symbol,
+          side: order.side,
+          type: order.type as OrderType,
+          action: "OPEN",
+          entryPrice,
+          exitPrice: 0,
+          quantity: order.quantity,
+          leverage: order.leverage,
+          pnl: 0,
+          fee,
+          slippage: 0,
+          openTime,
+          closeTime: 0,
+        },
+      ]);
       toast.success(`条件单已触发：${symbol} ${order.side} @ ${entryPrice.toFixed(2)}`);
     },
     [setBalance, setPositionsMap, setTradeHistory],
@@ -877,6 +896,25 @@ const Index = () => {
                 ],
               };
             });
+            setTradeHistory((prev) => [
+              ...prev,
+              {
+                id: crypto.randomUUID(),
+                symbol: activeSymbol,
+                side: matchedOrder.side,
+                type: matchedOrder.type as OrderType,
+                action: "OPEN",
+                entryPrice: actualFillPrice,
+                exitPrice: 0,
+                quantity: matchedOrder.quantity,
+                leverage: matchedOrder.leverage,
+                pnl: 0,
+                fee,
+                slippage: slippageAmount,
+                openTime: effectiveSimTimeRef.current,
+                closeTime: 0,
+              },
+            ]);
             toast.success(
               `委托成交: ${matchedOrder.side === "LONG" ? "开多" : "开空"} ${matchedOrder.quantity} @ ${actualFillPrice.toFixed(2)}`,
             );
@@ -951,6 +989,25 @@ const Index = () => {
                     ],
                   };
                 });
+                setTradeHistory((prev) => [
+                  ...prev,
+                  {
+                    id: crypto.randomUUID(),
+                    symbol,
+                    side: order.side,
+                    type: order.type as OrderType,
+                    action: "OPEN",
+                    entryPrice: slippedPrice,
+                    exitPrice: 0,
+                    quantity: sliceQty,
+                    leverage: order.leverage,
+                    pnl: 0,
+                    fee,
+                    slippage: slippageAmt,
+                    openTime: now,
+                    closeTime: 0,
+                  },
+                ]);
                 changed = true;
                 return {
                   ...order,
