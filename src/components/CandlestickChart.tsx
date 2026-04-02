@@ -92,7 +92,7 @@ const OVERLAY_MAP: Record<string, string> = {
   PriceLine: "priceLine",
 };
 
-// Re-export for backwards compatibility
+import type { IndicatorConfig } from '@/types/trading';
 export type { IndicatorConfig } from '@/types/trading';
 
 /** Imperative API exposed to parent for direct chart manipulation (bypasses React). */
