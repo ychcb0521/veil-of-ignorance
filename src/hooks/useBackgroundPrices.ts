@@ -198,6 +198,25 @@ export function useBackgroundPrices() {
               ],
             };
           });
+          setTradeHistory((prev) => [
+            ...prev,
+            {
+              id: crypto.randomUUID(),
+              symbol,
+              side: order.side,
+              type: order.type as any,
+              action: "OPEN",
+              entryPrice: fillPrice,
+              exitPrice: 0,
+              quantity: order.quantity,
+              leverage: order.leverage,
+              pnl: 0,
+              fee,
+              slippage: 0,
+              openTime: sim.currentSimulatedTime,
+              closeTime: 0,
+            },
+          ]);
           toast.success(`条件单已触发：${symbol} ${order.side} @ ${fillPrice.toFixed(2)}`);
         }
       }
