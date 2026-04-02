@@ -3,7 +3,7 @@
  * Uses applyNewData / updateData / applyMoreData for data feeding.
  */
 
-import { useEffect, useRef, useCallback, useState, memo } from "react";
+import React, { useEffect, useRef, useCallback, useState, memo } from "react";
 import {
   init,
   dispose,
@@ -412,13 +412,54 @@ function CandlestickChartComponent({
   }, []);
 
   // ============================================================
-  // Theme reactivity
+  // Theme reactivity & Tooltip customization
   // ============================================================
   useEffect(() => {
     const chart = chartRef.current;
     if (!chart) return;
-    chart.setStyles(theme === "light" ? LIGHT_STYLES : DARK_STYLES);
-  }, [theme]);
+
+    const baseStyle = theme === "light" ? LIGHT_STYLES : DARK_STYLES;
+
+    // Inject custom tooltip formatter to use shorter labels (prevent overlap) and add Price Change Rate
+    const styles = {
+      ...baseStyle,
+      candle: {
+        ...baseStyle.candle,
+        tooltip: {
+          ...baseStyle.candle.tooltip,
+          custom: (data: any) => {
+            const current = data.current;
+            if (!current) return [];
+
+            const prev = data.prev;
+            let changePct = 0;
+            if (prev && prev.close > 0) {
+              changePct = ((current.close - prev.close) / prev.close) * 100;
+            }
+            const isUp = changePct >= 0;
+            const color = isUp ? "#0ECB81" : "#F6465D";
+            const sign = isUp ? "+" : "";
+
+            // Format time: YYYY-MM-DD HH:mm
+            const d = new Date(current.timestamp);
+            const timeStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+
+            return [
+              { title: "时间 ", value: timeStr },
+              { title: "开 ", value: current.open.toFixed(pricePrecision) },
+              { title: "高 ", value: current.high.toFixed(pricePrecision) },
+              { title: "低 ", value: current.low.toFixed(pricePrecision) },
+              { title: "收 ", value: current.close.toFixed(pricePrecision) },
+              { title: "量 ", value: current.volume.toLocaleString(undefined, { maximumFractionDigits: 0 }) },
+              { title: "幅 ", value: { text: `${sign}${changePct.toFixed(2)}%`, color } },
+            ];
+          },
+        },
+      },
+    };
+
+    chart.setStyles(styles);
+  }, [theme, pricePrecision]);
 
   // ============================================================
   // Price/Volume precision
