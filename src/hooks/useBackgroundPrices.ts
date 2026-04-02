@@ -9,7 +9,6 @@ import { useEffect, useRef, useCallback } from "react";
 import { useTradingContext } from "@/contexts/TradingContext";
 import type { PendingOrder } from "@/types/trading";
 import { calcFee } from "@/types/trading";
-import { intervalToMs } from "@/hooks/useBinanceData";
 import { getConditionalTriggerDecisionFromRange } from "@/lib/conditionalOrders";
 import { toast } from "sonner";
 
@@ -70,9 +69,9 @@ export function useBackgroundPrices() {
 
     // Use 1m interval for accurate pricing instead of potentially large chart intervals
     const fetchInterval = "1m";
-    const intervalMs = intervalToMs(fetchInterval);
     const now = sim.currentSimulatedTime;
-    if (now - lastPollRef.current < intervalMs * 0.8) return;
+    const MIN_POLL_MS = 1000;
+    if (now - lastPollRef.current < MIN_POLL_MS) return;
 
     // Fetch prices for ALL active symbols, including the main activeSymbol,
     // so the engine always has the precise 1m price regardless of chart interval
@@ -221,7 +220,7 @@ export function useBackgroundPrices() {
   // Poll on interval
   useEffect(() => {
     if (!sim.isRunning) return;
-    const handle = window.setInterval(pollBackgroundSymbols, 3000);
+    const handle = window.setInterval(pollBackgroundSymbols, 1000);
     return () => window.clearInterval(handle);
   }, [sim.isRunning, pollBackgroundSymbols]);
 
