@@ -217,6 +217,17 @@ const Index = () => {
 
   const visibleData = useMemo(() => getVisibleData(effectiveSimTime, iMs), [getVisibleData, effectiveSimTime, iMs]);
 
+  const displayData = useMemo(() => {
+    if (visibleData.length === 0 || currentPrice <= 0) return visibleData;
+    const next = [...visibleData];
+    const last = { ...next[next.length - 1] };
+    last.close = currentPrice;
+    last.high = Math.max(last.high, currentPrice);
+    last.low = Math.min(last.low, currentPrice);
+    next[next.length - 1] = last;
+    return next;
+  }, [visibleData, currentPrice]);
+
   const latestVisiblePrice = useMemo(() => {
     const latest = visibleData[visibleData.length - 1];
     return Number(latest?.close ?? 0);
@@ -1343,7 +1354,7 @@ const Index = () => {
         onResume={handleResume}
         onStop={handleStop}
         onSetSpeed={handleSetSpeed}
-        visibleData={visibleData}
+        visibleData={displayData}
         onLoadOlder={loadOlder}
         loadingOlder={loadingOlder}
         currentPrice={currentPrice}
@@ -1458,7 +1469,7 @@ const Index = () => {
                     </div>
                   ) : (
                     <MultiChartLayout
-                      mainData={visibleData}
+                      mainData={displayData}
                       mainSymbol={activeSymbol.replace("USDT", "/USDT")}
                       rawSymbol={activeSymbol}
                       onLoadOlder={loadOlder}
