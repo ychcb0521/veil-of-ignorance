@@ -92,12 +92,8 @@ const OVERLAY_MAP: Record<string, string> = {
   PriceLine: "priceLine",
 };
 
-export interface IndicatorConfig {
-  type: string;
-  period: number;
-  color?: string;
-  enabled: boolean;
-}
+// Re-export for backwards compatibility
+export type { IndicatorConfig } from '@/types/trading';
 
 /** Imperative API exposed to parent for direct chart manipulation (bypasses React). */
 export interface ChartImperativeApi {
