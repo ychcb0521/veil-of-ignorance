@@ -307,18 +307,8 @@ function CandlestickChartComponent({
   const [activeDrawingTool, setActiveDrawingTool] = useState<string | null>(null);
   const { theme } = useTheme();
   const crosshairPriceRef = useRef<number | null>(null);
-  const onCrosshairPriceChangeRef = useRef(onCrosshairPriceChange);
-  const pricePrecisionRef = useRef(pricePrecision);
 
   const activeIndicatorPanes = useRef<Map<string, string | null>>(new Map());
-
-  useEffect(() => {
-    onCrosshairPriceChangeRef.current = onCrosshairPriceChange;
-  }, [onCrosshairPriceChange]);
-
-  useEffect(() => {
-    pricePrecisionRef.current = pricePrecision;
-  }, [pricePrecision]);
 
   // ============================================================
   // Clear overlays on symbol change to prevent cross-symbol pollution
@@ -385,7 +375,7 @@ function CandlestickChartComponent({
         if (paneId && paneId !== "candle_pane") {
           // Mouse is over a sub-pane (Volume, MACD etc.) — ignore
           crosshairPriceRef.current = null;
-          if (onCrosshairPriceChangeRef.current) onCrosshairPriceChangeRef.current(null);
+          if (onCrosshairPriceChange) onCrosshairPriceChange(null);
           return;
         }
 
@@ -396,24 +386,17 @@ function CandlestickChartComponent({
           if (result && typeof result.value === "number" && isFinite(result.value)) {
             const rawPrice = result.value;
             // Format to symbol's tick size precision
-            const formatted = parseFloat(rawPrice.toFixed(pricePrecisionRef.current));
+            const formatted = parseFloat(rawPrice.toFixed(pricePrecision));
             crosshairPriceRef.current = formatted;
-            if (onCrosshairPriceChangeRef.current) onCrosshairPriceChangeRef.current(formatted);
+            if (onCrosshairPriceChange) onCrosshairPriceChange(formatted);
             return;
           }
-        }
-        const fallbackPrice = Number(data?.kLineData?.close ?? data?.data?.close);
-        if (Number.isFinite(fallbackPrice) && fallbackPrice > 0) {
-          const formatted = parseFloat(fallbackPrice.toFixed(pricePrecisionRef.current));
-          crosshairPriceRef.current = formatted;
-          if (onCrosshairPriceChangeRef.current) onCrosshairPriceChangeRef.current(formatted);
-          return;
         }
       } catch {
         // convertFromPixel may not be available in all versions — fallback silently
       }
       crosshairPriceRef.current = null;
-      if (onCrosshairPriceChangeRef.current) onCrosshairPriceChangeRef.current(null);
+      if (onCrosshairPriceChange) onCrosshairPriceChange(null);
     };
     chart.subscribeAction("onCrosshairChange" as any, crosshairCb);
 

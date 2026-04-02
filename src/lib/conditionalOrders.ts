@@ -1,4 +1,4 @@
-import type { OrderSide, PendingOrder } from "@/types/trading";
+import type { OrderSide, PendingOrder } from '@/types/trading';
 
 interface ConditionalTriggerDecision {
   currentPriceNum: number;
@@ -14,16 +14,16 @@ interface ConditionalTriggerRange {
 type LegacyConditionalOrder = PendingOrder & {
   direction?: string;
   triggerPrice?: number | string;
-  side?: PendingOrder["side"] | "BUY" | "SELL" | "buy" | "sell" | "long" | "short";
-  type?: PendingOrder["type"] | string;
-  status?: PendingOrder["status"] | string;
+  side?: PendingOrder['side'] | 'BUY' | 'SELL' | 'buy' | 'sell' | 'long' | 'short';
+  type?: PendingOrder['type'] | string;
+  status?: PendingOrder['status'] | string;
 };
 
 function normalizeConditionalDirection(direction?: string): OrderSide | null {
   const normalized = direction?.toUpperCase();
 
-  if (normalized === "LONG" || normalized === "BUY") return "LONG";
-  if (normalized === "SHORT" || normalized === "SELL") return "SHORT";
+  if (normalized === 'LONG' || normalized === 'BUY') return 'LONG';
+  if (normalized === 'SHORT' || normalized === 'SELL') return 'SHORT';
 
   return null;
 }
@@ -44,17 +44,14 @@ export function resolveConditionalTriggerPrice(order: PendingOrder): number {
 
 export function isConditionalPendingOrder(order: PendingOrder): boolean {
   const legacyOrder = getLegacyConditionalOrder(order);
-  return (
-    String(legacyOrder.type ?? "").toUpperCase() === "CONDITIONAL" &&
-    String(legacyOrder.status ?? "").toUpperCase() === "PENDING"
-  );
+  return String(legacyOrder.type ?? '').toUpperCase() === 'CONDITIONAL'
+    && String(legacyOrder.status ?? '').toUpperCase() === 'PENDING';
 }
 
 export function getConditionalTriggerDecisionForPrices(
   side: OrderSide,
   latestPrice: number,
   triggerPrice: number,
-  operator?: PendingOrder["operator"],
 ): ConditionalTriggerDecision | null {
   const currentPriceNum = Number(latestPrice);
   const triggerPriceNum = Number(triggerPrice);
@@ -63,13 +60,9 @@ export function getConditionalTriggerDecisionForPrices(
     return null;
   }
 
-  const triggered = operator
-    ? operator === ">="
-      ? currentPriceNum >= triggerPriceNum
-      : currentPriceNum <= triggerPriceNum
-    : side === "LONG"
-      ? currentPriceNum >= triggerPriceNum
-      : currentPriceNum <= triggerPriceNum;
+  const triggered = side === 'LONG'
+    ? currentPriceNum >= triggerPriceNum
+    : currentPriceNum <= triggerPriceNum;
 
   return {
     currentPriceNum,
@@ -82,7 +75,6 @@ export function getConditionalTriggerDecisionForRange(
   side: OrderSide,
   triggerPrice: number,
   range: ConditionalTriggerRange,
-  operator?: PendingOrder["operator"],
 ): ConditionalTriggerDecision | null {
   const highNum = Number(range.high);
   const lowNum = Number(range.low);
@@ -92,16 +84,12 @@ export function getConditionalTriggerDecisionForRange(
     return null;
   }
 
-  const triggered = operator
-    ? operator === ">="
-      ? highNum >= triggerPriceNum
-      : lowNum <= triggerPriceNum
-    : side === "LONG"
-      ? highNum >= triggerPriceNum
-      : lowNum <= triggerPriceNum;
+  const triggered = side === 'LONG'
+    ? highNum >= triggerPriceNum
+    : lowNum <= triggerPriceNum;
 
   return {
-    currentPriceNum: operator ? (operator === ">=" ? highNum : lowNum) : side === "LONG" ? highNum : lowNum,
+    currentPriceNum: side === 'LONG' ? highNum : lowNum,
     triggerPriceNum,
     triggered,
   };
@@ -126,7 +114,7 @@ export function getConditionalTriggerDecision(
 
   if (!normalizedSide) return null;
 
-  return getConditionalTriggerDecisionForPrices(normalizedSide, chartCurrentPrice, triggerPrice, order.operator);
+  return getConditionalTriggerDecisionForPrices(normalizedSide, chartCurrentPrice, triggerPrice);
 }
 
 export function getConditionalTriggerDecisionFromRange(
@@ -140,5 +128,5 @@ export function getConditionalTriggerDecisionFromRange(
 
   if (!normalizedSide) return null;
 
-  return getConditionalTriggerDecisionForRange(normalizedSide, triggerPrice, range, order.operator);
+  return getConditionalTriggerDecisionForRange(normalizedSide, triggerPrice, range);
 }
