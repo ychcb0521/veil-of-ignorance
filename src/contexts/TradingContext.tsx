@@ -743,9 +743,6 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
         }
       }
 
-      // Note: We no longer record OPEN trades to tradeHistory.
-      // Only CLOSE/LIQUIDATION/FUNDING produce realized PnL entries.
-
       // BEST PRICE (taker)
       if (order.priceSelection === "BEST") {
         const { fee, margin, slippage, position } = executeFill(effectiveCurrentPrice, order, false);
@@ -762,6 +759,25 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
           const existing = (prev[symbol] || []).filter((p) => p.quantity > 1e-8);
           return { ...prev, [symbol]: [...existing, position] };
         });
+        setTradeHistory((prev) => [
+          ...prev,
+          {
+            id: crypto.randomUUID(),
+            symbol,
+            side: order.side,
+            type: "MARKET" as OrderType,
+            action: "OPEN",
+            entryPrice: position.entryPrice,
+            exitPrice: 0,
+            quantity: order.quantity,
+            leverage: order.leverage,
+            pnl: 0,
+            fee,
+            slippage,
+            openTime: now,
+            closeTime: 0,
+          },
+        ]);
         toast.success(
           `最优价成交: ${order.side === "LONG" ? "开多" : "开空"} ${order.quantity.toFixed(6)} @ ${position.entryPrice.toFixed(2)}`,
         );
@@ -783,6 +799,25 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
           const existing = (prev[symbol] || []).filter((p) => p.quantity > 1e-8);
           return { ...prev, [symbol]: [...existing, position] };
         });
+        setTradeHistory((prev) => [
+          ...prev,
+          {
+            id: crypto.randomUUID(),
+            symbol,
+            side: order.side,
+            type: "MARKET" as OrderType,
+            action: "OPEN",
+            entryPrice: position.entryPrice,
+            exitPrice: 0,
+            quantity: order.quantity,
+            leverage: order.leverage,
+            pnl: 0,
+            fee,
+            slippage,
+            openTime: now,
+            closeTime: 0,
+          },
+        ]);
         toast.success(
           `${order.side === "LONG" ? "开多" : "开空"} ${order.quantity.toFixed(6)} @ ${position.entryPrice.toFixed(2)}`,
         );
