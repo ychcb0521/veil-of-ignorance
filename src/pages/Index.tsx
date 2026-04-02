@@ -665,21 +665,15 @@ const Index = () => {
 
   useEffect(() => {
     if (visibleData.length === 0) return;
-    const lastClose = latestVisiblePrice;
-    if (!Number.isFinite(lastClose) || lastClose <= 0) return;
+    const candidate = Number(latestChartPriceRef.current || latestVisiblePrice);
+    if (!Number.isFinite(candidate) || candidate <= 0) return;
 
-    const existing = Number(priceMap[activeSymbol] || 0);
-    if (existing > 0) {
-      latestChartPriceRef.current = existing;
-      return;
-    }
-
-    latestChartPriceRef.current = lastClose;
+    latestChartPriceRef.current = candidate;
     setPriceMap((prev) => {
-      if (prev[activeSymbol] === lastClose) return prev;
-      return { ...prev, [activeSymbol]: lastClose };
+      if (prev[activeSymbol] === candidate) return prev;
+      return { ...prev, [activeSymbol]: candidate };
     });
-  }, [latestVisiblePrice, visibleData, activeSymbol, priceMap]);
+  }, [latestVisiblePrice, visibleData, activeSymbol]);
 
   const prevVisibleLenRef = useRef(0);
 
