@@ -76,7 +76,7 @@ export function useBackgroundPrices() {
 
     // Fetch prices for ALL active symbols, including the main activeSymbol,
     // so the engine always has the precise 1m price regardless of chart interval
-    const backgroundSymbols = activeSymbols.length > 0 ? activeSymbols : [];
+    const backgroundSymbols = Array.from(new Set([...activeSymbols, activeSymbol]));
     if (backgroundSymbols.length === 0) return;
 
     pollingRef.current = true;
@@ -120,7 +120,7 @@ export function useBackgroundPrices() {
     } finally {
       pollingRef.current = false;
     }
-  }, [sim.isRunning, sim.currentSimulatedTime, activeSymbols, ordersMap]);
+  }, [sim.isRunning, sim.currentSimulatedTime, activeSymbol, activeSymbols, ordersMap]);
 
   // Simple matching for background symbols (limit/stop orders only)
   const matchBackgroundOrders = useCallback(
