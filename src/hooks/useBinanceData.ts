@@ -170,19 +170,20 @@ export function useBinanceData() {
 
       // If sim time hasn't completed this candle, interpolate its forming state
       if (currentSimTime < candleEnd) {
+        const isLiveCandle = candleEnd > Date.now() - 60000;
         const progress = Math.max(0, Math.min(1, (currentSimTime - last.time) / intervalMs));
 
         // Close interpolates linearly from open toward final close
-        const close = last.open + (last.close - last.open) * progress;
+        const close = isLiveCandle ? last.close : last.open + (last.close - last.open) * progress;
 
         // High/low gradually reveal with a slight lead so extremes appear naturally
         const hlReveal = Math.min(1, progress * 1.5);
-        const rawHigh = last.open + (last.high - last.open) * hlReveal;
-        const rawLow = last.open + (last.low - last.open) * hlReveal;
+        const rawHigh = isLiveCandle ? last.high : last.open + (last.high - last.open) * hlReveal;
+        const rawLow = isLiveCandle ? last.low : last.open + (last.low - last.open) * hlReveal;
 
         // Enforce OHLC constraints
-        const high = Math.max(last.open, close, rawHigh);
-        const low = Math.min(last.open, close, rawLow);
+        const high = isLiveCandle ? last.high : Math.max(last.open, close, rawHigh);
+        const low = isLiveCandle ? last.low : Math.min(last.open, close, rawLow);
 
         visible[visible.length - 1] = {
           time: last.time,
