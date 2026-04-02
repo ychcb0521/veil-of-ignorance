@@ -220,3 +220,10 @@ export function getPriceStep(price: number): number {
   if (price > 10) return 0.0001;
   return 0.00001;
 }
+
+export interface IndicatorConfig {
+  type: string;
+  period: number;
+  color?: string;
+  enabled: boolean;
+}
