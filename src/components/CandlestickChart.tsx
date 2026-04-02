@@ -92,8 +92,12 @@ const OVERLAY_MAP: Record<string, string> = {
   PriceLine: "priceLine",
 };
 
-import type { IndicatorConfig } from '@/types/trading';
-export type { IndicatorConfig } from '@/types/trading';
+export interface IndicatorConfig {
+  type: string;
+  period: number;
+  color?: string;
+  enabled: boolean;
+}
 
 /** Imperative API exposed to parent for direct chart manipulation (bypasses React). */
 export interface ChartImperativeApi {
@@ -568,13 +572,12 @@ function CandlestickChartComponent({
       const ts = trade.action === "OPEN" ? trade.openTime : trade.closeTime;
       if (ts <= 0) continue;
       const isBuy =
-        (trade.action === "OPEN" && trade.side === "LONG") ||
-        ((trade.action === "CLOSE" || trade.action === "LIQUIDATION") && trade.side === "SHORT");
+        (trade.action === "OPEN" && trade.side === "LONG") || (trade.action === "CLOSE" && trade.side === "SHORT");
       const price = trade.action === "OPEN" ? trade.entryPrice : trade.exitPrice;
 
       // Financial semantics: Buy=green below candle, Sell=red above candle
       const color = isBuy ? "#0ECB81" : "#F6465D";
-      const label = trade.action === "LIQUIDATION" ? (isBuy ? "💀 ▲ B" : "💀 ▼ S") : isBuy ? "▲ B" : "▼ S";
+      const label = isBuy ? "▲ B" : "▼ S";
       // Offset: buy markers below price, sell markers above price
       const offset = isBuy ? -8 : 8;
 
