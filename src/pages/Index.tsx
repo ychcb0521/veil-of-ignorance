@@ -665,7 +665,11 @@ const Index = () => {
 
   useEffect(() => {
     if (visibleData.length === 0) return;
-    const candidate = Number(latestChartPriceRef.current || latestVisiblePrice);
+    const refPrice = Number(latestChartPriceRef.current || 0);
+    const visPrice = Number(latestVisiblePrice || 0);
+    const ratio = refPrice > 0 && visPrice > 0 ? refPrice / visPrice : 1;
+    const isCrossSymbolPollution = ratio > 5 || ratio < 0.2;
+    const candidate = Number(refPrice > 0 && !isCrossSymbolPollution ? refPrice : visPrice);
     if (!Number.isFinite(candidate) || candidate <= 0) return;
 
     latestChartPriceRef.current = candidate;
@@ -1046,6 +1050,7 @@ const Index = () => {
       if (newSymbol === activeSymbol) return;
 
       setActiveSymbol(newSymbol);
+      latestChartPriceRef.current = Number(priceMap[newSymbol] || 0);
       reset();
       prevVisibleLenRef.current = 0;
       cursorRef.current = 0;
