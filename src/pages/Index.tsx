@@ -653,17 +653,22 @@ const Index = () => {
   }, [balance, positionsMap, priceMap, tradeHistory, activeCoinState.time, profile]);
 
   useEffect(() => {
-    if (visibleData.length > 0) {
-      const lastClose = latestVisiblePrice;
-      if (Number.isFinite(lastClose) && lastClose > 0) {
-        latestChartPriceRef.current = lastClose;
-      }
-      setPriceMap((prev) => {
-        if (prev[activeSymbol] === lastClose) return prev;
-        return { ...prev, [activeSymbol]: lastClose };
-      });
+    if (visibleData.length === 0) return;
+    const lastClose = latestVisiblePrice;
+    if (!Number.isFinite(lastClose) || lastClose <= 0) return;
+
+    const existing = Number(priceMap[activeSymbol] || 0);
+    if (existing > 0) {
+      latestChartPriceRef.current = existing;
+      return;
     }
-  }, [latestVisiblePrice, visibleData, activeSymbol]);
+
+    latestChartPriceRef.current = lastClose;
+    setPriceMap((prev) => {
+      if (prev[activeSymbol] === lastClose) return prev;
+      return { ...prev, [activeSymbol]: lastClose };
+    });
+  }, [latestVisiblePrice, visibleData, activeSymbol, priceMap]);
 
   const prevVisibleLenRef = useRef(0);
 
