@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo, useEffect, useRef } from "react";
+import React, { useState, useCallback, useMemo, useEffect, useRef } from "react";
 import { formatUTC8 } from "@/lib/timeFormat";
 import { useTradingContext, type PlaceOrderParams, type CoinTimelineState } from "@/contexts/TradingContext";
 import { useAuth } from "@/contexts/AuthContext";
@@ -71,7 +71,7 @@ function matchOrdersOffline(pendingOrders: PendingOrder[], klines: KlineData[], 
           fillPrice = order.stopPrice;
         }
       } else if (order.type === "CONDITIONAL") {
-        const decision = getConditionalTriggerDecisionFromRange(order, kline);
+        const decision = getConditionalTriggerDecisionFromRange(order as any, kline);
         if (!decision) {
           stillPending.push(order);
           continue;
@@ -456,24 +456,25 @@ const Index = () => {
             if (cursorRef.current < data.length) {
               const candle = data[cursorRef.current];
               if (candle.time <= activeSimTime) {
+                const isLiveCandle = candle.time + iMs > Date.now() - 60000;
                 const progress = Math.max(0, Math.min(1, (activeSimTime - candle.time) / iMs));
-                const close = candle.open + (candle.close - candle.open) * progress;
+                const close = isLiveCandle ? candle.close : candle.open + (candle.close - candle.open) * progress;
                 const hlReveal = Math.min(1, progress * 1.5);
-                const rawHigh = candle.open + (candle.high - candle.open) * hlReveal;
-                const rawLow = candle.open + (candle.low - candle.open) * hlReveal;
+                const rawHigh = isLiveCandle ? candle.high : candle.open + (candle.high - candle.open) * hlReveal;
+                const rawLow = isLiveCandle ? candle.low : candle.open + (candle.low - candle.open) * hlReveal;
                 api.updateData({
                   timestamp: candle.time,
                   open: candle.open,
-                  high: Math.max(candle.open, close, rawHigh),
-                  low: Math.min(candle.open, close, rawLow),
+                  high: isLiveCandle ? candle.high : Math.max(candle.open, close, rawHigh),
+                  low: isLiveCandle ? candle.low : Math.min(candle.open, close, rawLow),
                   close,
                   volume: candle.volume * progress,
                 });
                 runConditionalMatchingForSymbol(
                   activeSym,
                   {
-                    high: Math.max(candle.open, close, rawHigh),
-                    low: Math.min(candle.open, close, rawLow),
+                    high: isLiveCandle ? candle.high : Math.max(candle.open, close, rawHigh),
+                    low: isLiveCandle ? candle.low : Math.min(candle.open, close, rawLow),
                   },
                   activeSimTime,
                 );
@@ -550,24 +551,25 @@ const Index = () => {
           if (cursorRef.current < data.length) {
             const candle = data[cursorRef.current];
             if (candle.time <= simTime) {
+              const isLiveCandle = candle.time + iMs > Date.now() - 60000;
               const progress = Math.max(0, Math.min(1, (simTime - candle.time) / iMs));
-              const close = candle.open + (candle.close - candle.open) * progress;
+              const close = isLiveCandle ? candle.close : candle.open + (candle.close - candle.open) * progress;
               const hlReveal = Math.min(1, progress * 1.5);
-              const rawHigh = candle.open + (candle.high - candle.open) * hlReveal;
-              const rawLow = candle.open + (candle.low - candle.open) * hlReveal;
+              const rawHigh = isLiveCandle ? candle.high : candle.open + (candle.high - candle.open) * hlReveal;
+              const rawLow = isLiveCandle ? candle.low : candle.open + (candle.low - candle.open) * hlReveal;
               api.updateData({
                 timestamp: candle.time,
                 open: candle.open,
-                high: Math.max(candle.open, close, rawHigh),
-                low: Math.min(candle.open, close, rawLow),
+                high: isLiveCandle ? candle.high : Math.max(candle.open, close, rawHigh),
+                low: isLiveCandle ? candle.low : Math.min(candle.open, close, rawLow),
                 close,
                 volume: candle.volume * progress,
               });
               runConditionalMatchingForSymbol(
                 activeSymbolRef.current,
                 {
-                  high: Math.max(candle.open, close, rawHigh),
-                  low: Math.min(candle.open, close, rawLow),
+                  high: isLiveCandle ? candle.high : Math.max(candle.open, close, rawHigh),
+                  low: isLiveCandle ? candle.low : Math.min(candle.open, close, rawLow),
                 },
                 simTime,
               );
@@ -697,7 +699,7 @@ const Index = () => {
           let fillPrice = 0;
           let isMaker = true;
           let convertToLimit = false;
-          let updatedOrder = { ...order };
+          let updatedOrder = { ...order } as PendingOrder;
 
           switch (order.type) {
             case "LIMIT":
@@ -738,7 +740,7 @@ const Index = () => {
                   fillPrice = order.price;
                 } else {
                   convertToLimit = true;
-                  updatedOrder = { ...order, type: "LIMIT", status: "ACTIVE" };
+                  updatedOrder = { ...order, type: "LIMIT", status: "ACTIVE" } as PendingOrder;
                 }
               }
               break;
@@ -930,6 +932,7 @@ const Index = () => {
                         leverage: order.leverage,
                         marginMode: order.marginMode,
                         margin,
+                        isolatedMargin: order.marginMode === "isolated" ? margin : undefined,
                       },
                     ],
                   };
