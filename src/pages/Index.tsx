@@ -177,6 +177,7 @@ const Index = () => {
 
   const displayData = useMemo(() => {
     if (visibleData.length === 0 || currentPrice <= 0) return visibleData;
+    if (Date.now() < displayOverlayWarmupUntilRef.current) return visibleData;
     const next = [...visibleData];
     const last = { ...next[next.length - 1] };
     const simGap = effectiveSimTime - Number(last.time || 0);
@@ -208,6 +209,7 @@ const Index = () => {
   const cursorRef = useRef(0);
   const gameLoopInitRef = useRef(false);
   const clockRef = useRef<HTMLSpanElement>(null);
+  const displayOverlayWarmupUntilRef = useRef(Date.now() + 5000);
   
   const lastReactFlushRef = useRef(0);
   const lastPersistRef = useRef(0);
@@ -880,7 +882,8 @@ const Index = () => {
     if (newSymbol === activeSymbol) return;
 
     setActiveSymbol(newSymbol);
-    latestChartPriceRef.current = Number(priceMap[newSymbol] || 0);
+    latestChartPriceRef.current = 0;
+    displayOverlayWarmupUntilRef.current = Date.now() + 3000;
     reset();
     prevVisibleLenRef.current = 0;
     cursorRef.current = 0;
