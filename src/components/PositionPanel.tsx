@@ -94,6 +94,50 @@ export function PositionPanel({
     ? allPositions.filter(p => p.symbol === activeSymbol)
     : allPositions;
 
+  // Merge positions by symbol + side
+  interface MergedPosition {
+    symbol: string;
+    side: Position['side'];
+    totalQuantity: number;
+    weightedEntryPrice: number;
+    totalMargin: number;
+    totalIsolatedMargin: number | null;
+    leverage: number;
+    marginMode: Position['marginMode'];
+    children: { position: Position; index: number }[];
+  }
+
+  const mergedPositions = useMemo(() => {
+    const groups = new Map<string, MergedPosition>();
+    for (const { symbol, position: pos, index } of displayedPositions) {
+      const key = `${symbol}_${pos.side}`;
+      if (!groups.has(key)) {
+        groups.set(key, {
+          symbol,
+          side: pos.side,
+          totalQuantity: 0,
+          weightedEntryPrice: 0,
+          totalMargin: 0,
+          totalIsolatedMargin: null,
+          leverage: pos.leverage,
+          marginMode: pos.marginMode,
+          children: [],
+        });
+      }
+      const g = groups.get(key)!;
+      g.weightedEntryPrice = (g.weightedEntryPrice * g.totalQuantity + pos.entryPrice * pos.quantity) / (g.totalQuantity + pos.quantity);
+      g.totalQuantity += pos.quantity;
+      g.totalMargin += pos.margin;
+      if (pos.marginMode === 'isolated' && pos.isolatedMargin != null) {
+        g.totalIsolatedMargin = (g.totalIsolatedMargin ?? 0) + pos.isolatedMargin;
+      }
+      // Use highest leverage in the group
+      if (pos.leverage > g.leverage) g.leverage = pos.leverage;
+      g.children.push({ position: pos, index });
+    }
+    return Array.from(groups.values());
+  }, [displayedPositions]);
+
   const allOrders: { symbol: string; order: PendingOrder }[] = [];
   for (const [sym, orders] of Object.entries(ordersMap)) {
     for (const o of orders) allOrders.push({ symbol: sym, order: o });
