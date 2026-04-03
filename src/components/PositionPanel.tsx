@@ -3,7 +3,7 @@ import { usePersistedState } from '@/hooks/usePersistedState';
 import type { Position, PendingOrder, TradeRecord } from '@/types/trading';
 import { calcUnrealizedPnl, calcROE, calcLiquidationPrice, MAINTENANCE_MARGIN_RATE } from '@/types/trading';
 import type { PositionsMap, OrdersMap, PriceMap } from '@/contexts/TradingContext';
-import { X, Trash2 } from 'lucide-react';
+import { X, Trash2, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
 import { toast } from 'sonner';
 import { LeverageModal } from '@/components/LeverageModal';
 import { TpSlModal } from '@/components/TpSlModal';
