@@ -220,12 +220,20 @@ const Index = () => {
 
   const displayData = useMemo(() => {
     if (visibleData.length === 0 || currentPrice <= 0) return visibleData;
+    // Sanity check: don't apply currentPrice if it's wildly different from the candle's range
+    // This prevents stale persisted prices from creating extreme wicks on symbol switch
+    const last = visibleData[visibleData.length - 1];
+    const mid = (last.high + last.low) / 2;
+    if (mid > 0) {
+      const ratio = currentPrice / mid;
+      if (ratio > 3 || ratio < 0.33) return visibleData; // skip if >3x deviation
+    }
     const next = [...visibleData];
-    const last = { ...next[next.length - 1] };
-    last.close = currentPrice;
-    last.high = Math.max(last.high, currentPrice);
-    last.low = Math.min(last.low, currentPrice);
-    next[next.length - 1] = last;
+    const newLast = { ...last };
+    newLast.close = currentPrice;
+    newLast.high = Math.max(newLast.high, currentPrice);
+    newLast.low = Math.min(newLast.low, currentPrice);
+    next[next.length - 1] = newLast;
     return next;
   }, [visibleData, currentPrice]);
 
@@ -1054,7 +1062,14 @@ const Index = () => {
       if (newSymbol === activeSymbol) return;
 
       setActiveSymbol(newSymbol);
-      latestChartPriceRef.current = Number(priceMap[newSymbol] || 0);
+      // Clear stale price to prevent cross-symbol pollution on chart
+      latestChartPriceRef.current = 0;
+      setPriceMap((prev) => {
+        if (!prev[newSymbol]) return prev;
+        const next = { ...prev };
+        delete next[newSymbol];
+        return next;
+      });
       reset();
       prevVisibleLenRef.current = 0;
       cursorRef.current = 0;
