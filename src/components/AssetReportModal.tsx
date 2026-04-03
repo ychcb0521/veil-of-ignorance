@@ -66,19 +66,31 @@ export function AssetReportModal({ open, onClose, assets }: Props) {
     return map;
   }, [dailyPnl]);
 
-  // Outlier detection: top/bottom 5% by absolute PnL
+  // Calendar state
+  const [calMonth, setCalMonth] = useState(new Date());
+  const [selectedDate, setSelectedDate] = useState<string | null>(null);
+
+  // Outlier detection: within current month, top/bottom 5% by absolute PnL
   const outlierDates = useMemo(() => {
-    if (dailyPnl.length < 5) return new Set<string>();
-    const sorted = [...dailyPnl].sort((a, b) => a.pnl - b.pnl);
+    const year = calMonth.getFullYear();
+    const month = calMonth.getMonth();
+    const prefix = `${year}-${String(month + 1).padStart(2, '0')}`;
+    const monthPnl = dailyPnl.filter(d => d.date.startsWith(prefix));
+    if (monthPnl.length < 5) return new Set<string>();
+    const sorted = [...monthPnl].sort((a, b) => a.pnl - b.pnl);
     const n = Math.max(1, Math.ceil(sorted.length * 0.05));
     const outliers = new Set<string>();
     for (let i = 0; i < n; i++) outliers.add(sorted[i].date);
     for (let i = sorted.length - n; i < sorted.length; i++) outliers.add(sorted[i].date);
     return outliers;
-  }, [dailyPnl]);
+  }, [dailyPnl, calMonth]);
 
-  // Calendar state
-  const [calMonth, setCalMonth] = useState(new Date());
+  // trades map for selected date detail
+  const tradesMap = useMemo(() => {
+    const map = new Map<string, number>();
+    dailyPnl.forEach(d => map.set(d.date, d.trades));
+    return map;
+  }, [dailyPnl]);
 
   // Build calendar grid for current month
   const calendarGrid = useMemo(() => {
