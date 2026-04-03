@@ -875,6 +875,7 @@ const Index = () => {
                     marginMode: matchedOrder.marginMode,
                     margin,
                     isolatedMargin: matchedOrder.marginMode === "isolated" ? margin : undefined,
+                    openTime: Date.now(),
                   },
                 ],
               };
