@@ -93,10 +93,10 @@ function matchOrdersOffline(pendingOrders: PendingOrder[], klines: KlineData[], 
           entryPrice: fillPrice,
           quantity: order.quantity,
           leverage: order.leverage,
+          openTime: kline.time,
           marginMode: order.marginMode,
           margin,
           isolatedMargin: order.marginMode === "isolated" ? margin : undefined,
-          openTime: Date.now(),
         });
       } else {
         stillPending.push(order);
@@ -220,14 +220,21 @@ const Index = () => {
 
   const displayData = useMemo(() => {
     if (visibleData.length === 0 || currentPrice <= 0) return visibleData;
+    if (Date.now() < displayOverlayWarmupUntilRef.current) return visibleData;
     const next = [...visibleData];
     const last = { ...next[next.length - 1] };
+    const simGap = effectiveSimTime - Number(last.time || 0);
+    if (!Number.isFinite(simGap) || simGap < 0 || simGap > iMs * 1.2) return visibleData;
+    const base = Number(last.close || 0);
+    if (base <= 0) return visibleData;
+    const ratio = currentPrice / base;
+    if (!Number.isFinite(ratio) || ratio > 5 || ratio < 0.2) return visibleData;
     last.close = currentPrice;
     last.high = Math.max(last.high, currentPrice);
     last.low = Math.min(last.low, currentPrice);
     next[next.length - 1] = last;
     return next;
-  }, [visibleData, currentPrice]);
+  }, [visibleData, currentPrice, effectiveSimTime, iMs]);
 
   const latestVisiblePrice = useMemo(() => {
     const latest = visibleData[visibleData.length - 1];
@@ -245,6 +252,7 @@ const Index = () => {
   const cursorRef = useRef(0);
   const gameLoopInitRef = useRef(false);
   const clockRef = useRef<HTMLSpanElement>(null);
+  const displayOverlayWarmupUntilRef = useRef(Date.now() + 5000);
 
   const lastReactFlushRef = useRef(0);
   const lastPersistRef = useRef(0);
@@ -316,14 +324,35 @@ const Index = () => {
               entryPrice,
               quantity: order.quantity,
               leverage: order.leverage,
+              openTime,
               marginMode: order.marginMode,
               margin,
               isolatedMargin: order.marginMode === "isolated" ? margin : undefined,
-              openTime: Date.now(),
             },
           ],
         };
       });
+      setTradeHistory((prev) => [
+        ...prev,
+        {
+          id: crypto.randomUUID(),
+          symbol,
+          side: order.side,
+          type: order.type as OrderType,
+          action: "OPEN",
+          entryPrice,
+          exitPrice: 0,
+          quantity: order.quantity,
+          leverage: order.leverage,
+          marginMode: order.marginMode,
+          margin,
+          pnl: 0,
+          fee,
+          slippage: 0,
+          openTime,
+          closeTime: 0,
+        },
+      ]);
       toast.success(`条件单已触发：${symbol} ${order.side} @ ${entryPrice.toFixed(2)}`);
     },
     [setBalance, setPositionsMap, setTradeHistory],
@@ -872,14 +901,35 @@ const Index = () => {
                     entryPrice: actualFillPrice,
                     quantity: matchedOrder.quantity,
                     leverage: matchedOrder.leverage,
+                    openTime: effectiveSimTimeRef.current,
                     marginMode: matchedOrder.marginMode,
                     margin,
                     isolatedMargin: matchedOrder.marginMode === "isolated" ? margin : undefined,
-                    openTime: Date.now(),
                   },
                 ],
               };
             });
+            setTradeHistory((prev) => [
+              ...prev,
+              {
+                id: crypto.randomUUID(),
+                symbol: activeSymbol,
+                side: matchedOrder.side,
+                type: matchedOrder.type as OrderType,
+                action: "OPEN",
+                entryPrice: actualFillPrice,
+                exitPrice: 0,
+                quantity: matchedOrder.quantity,
+                leverage: matchedOrder.leverage,
+                marginMode: matchedOrder.marginMode,
+                margin,
+                pnl: 0,
+                fee,
+                slippage: slippageAmount,
+                openTime: effectiveSimTimeRef.current,
+                closeTime: 0,
+              },
+            ]);
             toast.success(
               `委托成交: ${matchedOrder.side === "LONG" ? "开多" : "开空"} ${matchedOrder.quantity} @ ${actualFillPrice.toFixed(2)}`,
             );
@@ -947,14 +997,35 @@ const Index = () => {
                         entryPrice: slippedPrice,
                         quantity: sliceQty,
                         leverage: order.leverage,
+                        openTime: now,
                         marginMode: order.marginMode,
                         margin,
                         isolatedMargin: order.marginMode === "isolated" ? margin : undefined,
-                        openTime: Date.now(),
                       },
                     ],
                   };
                 });
+                setTradeHistory((prev) => [
+                  ...prev,
+                  {
+                    id: crypto.randomUUID(),
+                    symbol,
+                    side: order.side,
+                    type: order.type as OrderType,
+                    action: "OPEN",
+                    entryPrice: slippedPrice,
+                    exitPrice: 0,
+                    quantity: sliceQty,
+                    leverage: order.leverage,
+                    marginMode: order.marginMode,
+                    margin,
+                    pnl: 0,
+                    fee,
+                    slippage: slippageAmt,
+                    openTime: now,
+                    closeTime: 0,
+                  },
+                ]);
                 changed = true;
                 return {
                   ...order,
@@ -1054,7 +1125,8 @@ const Index = () => {
       if (newSymbol === activeSymbol) return;
 
       setActiveSymbol(newSymbol);
-      latestChartPriceRef.current = Number(priceMap[newSymbol] || 0);
+      latestChartPriceRef.current = 0;
+      displayOverlayWarmupUntilRef.current = Date.now() + 3000;
       reset();
       prevVisibleLenRef.current = 0;
       cursorRef.current = 0;
