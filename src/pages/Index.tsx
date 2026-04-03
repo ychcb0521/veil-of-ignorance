@@ -192,6 +192,7 @@ const Index = () => {
     })();
   }, []);
 
+  const displayOverlayWarmupUntilRef = useRef(Date.now() + 5000);
   const iMs = useMemo(() => intervalToMs(interval), [interval]);
 
   // Track the original start time for synced mode
