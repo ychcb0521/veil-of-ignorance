@@ -389,13 +389,28 @@ export function PositionPanel({
             <table className="w-full text-[11px] font-mono tabular-nums">
               <thead>
                 <tr className="text-muted-foreground border-b border-border">
-                  {['合约', '操作', '方向', '开仓价', '平仓价', '数量', '开仓时间', '平仓时间', '盈亏', '盈亏%'].map(h => (
+                  {['合约', '操作', '方向', '开仓价', '平仓价', '数量', '开仓时间', '平仓时间'].map(h => (
                     <th key={h} className="px-3 py-1.5 text-left font-medium whitespace-nowrap">{h}</th>
                   ))}
+                  <th className="px-3 py-1.5 text-left font-medium whitespace-nowrap cursor-pointer select-none" onClick={() => toggleSort('pnl')}>
+                    盈亏{getSortIcon('pnl')}
+                  </th>
+                  <th className="px-3 py-1.5 text-left font-medium whitespace-nowrap cursor-pointer select-none" onClick={() => toggleSort('pct')}>
+                    盈亏%{getSortIcon('pct')}
+                  </th>
                 </tr>
               </thead>
               <tbody>
-                {tradeRecords.slice().reverse().slice(0, 50).map(t => (
+                {(() => {
+                  let sorted = tradeRecords.slice().reverse();
+                  if (historySort === 'pnl-desc') sorted.sort((a, b) => b.pnl - a.pnl);
+                  else if (historySort === 'pnl-asc') sorted.sort((a, b) => a.pnl - b.pnl);
+                  else if (historySort === 'pct-desc' || historySort === 'pct-asc') {
+                    const pct = (t: typeof sorted[0]) => { const m = (t.quantity * t.entryPrice) / t.leverage; return m > 0 ? t.pnl / m : 0; };
+                    sorted.sort((a, b) => historySort === 'pct-desc' ? pct(b) - pct(a) : pct(a) - pct(b));
+                  }
+                  return sorted.slice(0, 50);
+                })().map(t => (
                   <tr key={t.id} className="border-b border-border/30">
                     <td className="px-3 py-2 text-foreground">{t.symbol?.replace('USDT', '/USDT') || '-'}</td>
                     <td className="px-3 py-2">
