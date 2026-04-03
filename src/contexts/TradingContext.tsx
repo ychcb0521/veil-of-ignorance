@@ -825,7 +825,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
       id: crypto.randomUUID(), symbol, side: pos.side, type: 'MARKET' as OrderType,
       action: 'CLOSE' as const, entryPrice: pos.entryPrice, exitPrice: fillPrice,
       quantity: closeQty, leverage: pos.leverage,
-      pnl: pnl - fee, fee, slippage, openTime: 0, closeTime: getEffectiveTime(symbol),
+      pnl: pnl - fee, fee, slippage, openTime: pos.openTime || 0, closeTime: getEffectiveTime(symbol),
     }]);
 
     const pctLabel = pct < 1 ? ` (${Math.round(pct * 100)}%)` : '';
