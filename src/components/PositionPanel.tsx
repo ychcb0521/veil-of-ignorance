@@ -3,7 +3,7 @@ import { usePersistedState } from '@/hooks/usePersistedState';
 import type { Position, PendingOrder, TradeRecord } from '@/types/trading';
 import { calcUnrealizedPnl, calcROE, calcLiquidationPrice, MAINTENANCE_MARGIN_RATE } from '@/types/trading';
 import type { PositionsMap, OrdersMap, PriceMap } from '@/contexts/TradingContext';
-import { X, Trash2 } from 'lucide-react';
+import { X, Trash2, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
 import { toast } from 'sonner';
 import { LeverageModal } from '@/components/LeverageModal';
 import { TpSlModal } from '@/components/TpSlModal';
@@ -66,6 +66,23 @@ export function PositionPanel({
   const [rollbackOpen, setRollbackOpen] = useState(false);
   const [rollbackSymbol, setRollbackSymbol] = useState<string>('');
 
+  // History sort: 'time' (default, newest first), 'pnl-desc', 'pnl-asc', 'pct-desc', 'pct-asc'
+  type HistorySort = 'time' | 'pnl-desc' | 'pnl-asc' | 'pct-desc' | 'pct-asc';
+  const [historySort, setHistorySort] = useState<HistorySort>('time');
+
+  const toggleSort = (field: 'pnl' | 'pct') => {
+    setHistorySort(prev => {
+      if (prev === `${field}-desc`) return `${field}-asc` as HistorySort;
+      if (prev === `${field}-asc`) return 'time';
+      return `${field}-desc` as HistorySort;
+    });
+  };
+
+  const getSortIcon = (field: 'pnl' | 'pct') => {
+    if (historySort === `${field}-desc`) return <ArrowDown className="inline w-3 h-3 ml-0.5" />;
+    if (historySort === `${field}-asc`) return <ArrowUp className="inline w-3 h-3 ml-0.5" />;
+    return <ArrowUpDown className="inline w-3 h-3 ml-0.5 opacity-40" />;
+  };
   const allPositions: { symbol: string; position: Position; index: number }[] = [];
   for (const [sym, positions] of Object.entries(positionsMap)) {
     positions.forEach((pos, i) => allPositions.push({ symbol: sym, position: pos, index: i }));
@@ -372,13 +389,28 @@ export function PositionPanel({
             <table className="w-full text-[11px] font-mono tabular-nums">
               <thead>
                 <tr className="text-muted-foreground border-b border-border">
-                  {['合约', '操作', '方向', '开仓价', '平仓价', '数量', '开仓时间', '平仓时间', '盈亏', '盈亏%'].map(h => (
+                  {['合约', '操作', '方向', '开仓价', '平仓价', '数量', '开仓时间', '平仓时间'].map(h => (
                     <th key={h} className="px-3 py-1.5 text-left font-medium whitespace-nowrap">{h}</th>
                   ))}
+                  <th className="px-3 py-1.5 text-left font-medium whitespace-nowrap cursor-pointer select-none" onClick={() => toggleSort('pnl')}>
+                    盈亏{getSortIcon('pnl')}
+                  </th>
+                  <th className="px-3 py-1.5 text-left font-medium whitespace-nowrap cursor-pointer select-none" onClick={() => toggleSort('pct')}>
+                    盈亏%{getSortIcon('pct')}
+                  </th>
                 </tr>
               </thead>
               <tbody>
-                {tradeRecords.slice().reverse().slice(0, 50).map(t => (
+                {(() => {
+                  let sorted = tradeRecords.slice().reverse();
+                  if (historySort === 'pnl-desc') sorted.sort((a, b) => b.pnl - a.pnl);
+                  else if (historySort === 'pnl-asc') sorted.sort((a, b) => a.pnl - b.pnl);
+                  else if (historySort === 'pct-desc' || historySort === 'pct-asc') {
+                    const pct = (t: typeof sorted[0]) => { const m = (t.quantity * t.entryPrice) / t.leverage; return m > 0 ? t.pnl / m : 0; };
+                    sorted.sort((a, b) => historySort === 'pct-desc' ? pct(b) - pct(a) : pct(a) - pct(b));
+                  }
+                  return sorted.slice(0, 50);
+                })().map(t => (
                   <tr key={t.id} className="border-b border-border/30">
                     <td className="px-3 py-2 text-foreground">{t.symbol?.replace('USDT', '/USDT') || '-'}</td>
                     <td className="px-3 py-2">
