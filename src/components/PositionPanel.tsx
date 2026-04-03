@@ -372,7 +372,7 @@ export function PositionPanel({
             <table className="w-full text-[11px] font-mono tabular-nums">
               <thead>
                 <tr className="text-muted-foreground border-b border-border">
-                  {['合约', '操作', '方向', '开仓价', '平仓价', '数量', '手续费', '滑点', '盈亏'].map(h => (
+                  {['合约', '操作', '方向', '开仓价', '平仓价', '数量', '开仓时间', '滑点', '盈亏'].map(h => (
                     <th key={h} className="px-3 py-1.5 text-left font-medium whitespace-nowrap">{h}</th>
                   ))}
                 </tr>
