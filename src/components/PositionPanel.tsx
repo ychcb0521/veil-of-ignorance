@@ -67,6 +67,8 @@ export function PositionPanel({
   const [rollbackSymbol, setRollbackSymbol] = useState<string>('');
 
   // History sort: 'time' (default, newest first), 'pnl-desc', 'pnl-asc', 'pct-desc', 'pct-asc'
+  type HistorySort = 'time' | 'pnl-desc' | 'pnl-asc' | 'pct-desc' | 'pct-asc';
+  const [historySort, setHistorySort] = useState<HistorySort>('time');
   const [historySymbolFilter, setHistorySymbolFilter] = useState<string>('ALL');
 
   const historySymbols = useMemo(() => {
@@ -74,7 +76,6 @@ export function PositionPanel({
     for (const t of tradeRecords) { if (t.symbol) syms.add(t.symbol); }
     return Array.from(syms).sort();
   }, [tradeRecords]);
-  const [historySort, setHistorySort] = useState<HistorySort>('time');
 
   const toggleSort = (field: 'pnl' | 'pct') => {
     setHistorySort(prev => {
