@@ -1,7 +1,7 @@
 import { useState, useMemo } from 'react';
 import { X, TrendingUp, TrendingDown, BarChart3, Calendar as CalendarIcon, ChevronLeft, ChevronRight } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { Calendar } from '@/components/ui/calendar';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { cn } from '@/lib/utils';
 import type { AssetState, AssetSnapshot, DailyPnL } from '@/types/assets';
 import { formatUTC8 } from '@/lib/timeFormat';
@@ -66,19 +66,31 @@ export function AssetReportModal({ open, onClose, assets }: Props) {
     return map;
   }, [dailyPnl]);
 
-  // Outlier detection: top/bottom 5% by absolute PnL
+  // Calendar state
+  const [calMonth, setCalMonth] = useState(new Date());
+  const [selectedDate, setSelectedDate] = useState<string | null>(null);
+
+  // Outlier detection: within current month, top/bottom 5% by absolute PnL
   const outlierDates = useMemo(() => {
-    if (dailyPnl.length < 5) return new Set<string>();
-    const sorted = [...dailyPnl].sort((a, b) => a.pnl - b.pnl);
+    const year = calMonth.getFullYear();
+    const month = calMonth.getMonth();
+    const prefix = `${year}-${String(month + 1).padStart(2, '0')}`;
+    const monthPnl = dailyPnl.filter(d => d.date.startsWith(prefix));
+    if (monthPnl.length < 5) return new Set<string>();
+    const sorted = [...monthPnl].sort((a, b) => a.pnl - b.pnl);
     const n = Math.max(1, Math.ceil(sorted.length * 0.05));
     const outliers = new Set<string>();
     for (let i = 0; i < n; i++) outliers.add(sorted[i].date);
     for (let i = sorted.length - n; i < sorted.length; i++) outliers.add(sorted[i].date);
     return outliers;
-  }, [dailyPnl]);
+  }, [dailyPnl, calMonth]);
 
-  // Calendar state
-  const [calMonth, setCalMonth] = useState(new Date());
+  // trades map for selected date detail
+  const tradesMap = useMemo(() => {
+    const map = new Map<string, number>();
+    dailyPnl.forEach(d => map.set(d.date, d.trades));
+    return map;
+  }, [dailyPnl]);
 
   // Build calendar grid for current month
   const calendarGrid = useMemo(() => {
@@ -278,31 +290,58 @@ export function AssetReportModal({ open, onClose, assets }: Props) {
                 const isProfit = hasPnl && cell.pnl! > 0;
                 const isLoss = hasPnl && cell.pnl! < 0;
                 const isOutlier = outlierDates.has(cell.date);
-                return (
-                  <div
-                    key={i}
-                    className={cn(
-                      'h-12 rounded-md flex flex-col items-center justify-center text-center relative',
-                      isProfit && 'bg-[hsl(160,72%,43%)]/15',
-                      isLoss && 'bg-[hsl(354,91%,62%)]/15',
-                      !hasPnl && 'bg-secondary/20',
-                      isOutlier && 'ring-2 ring-yellow-400/70 ring-inset',
-                    )}
-                  >
-                    <span className="text-[10px] text-muted-foreground leading-none">{cell.day}</span>
-                    {hasPnl ? (
-                      <span className={cn(
-                        'text-[9px] font-mono font-semibold leading-tight mt-0.5',
-                        isProfit ? 'text-[hsl(160,72%,43%)]' : 'text-[hsl(354,91%,62%)]'
-                      )}>
-                        {isProfit ? '+' : ''}{Math.abs(cell.pnl!) >= 1000
-                          ? `${(cell.pnl! / 1000).toFixed(1)}k`
-                          : cell.pnl!.toFixed(0)}
-                      </span>
-                    ) : (
-                      <span className="text-[9px] text-muted-foreground/30 leading-tight mt-0.5">-</span>
-                    )}
-                  </div>
+                  const selectedPnl = cell.pnl;
+                  const selectedTrades = tradesMap.get(cell.date) ?? 0;
+                  return (
+                    <Popover key={i} open={selectedDate === cell.date} onOpenChange={(v) => setSelectedDate(v ? cell.date : null)}>
+                      <PopoverTrigger asChild>
+                        <button
+                          className={cn(
+                            'h-12 rounded-md flex flex-col items-center justify-center text-center relative w-full transition-all',
+                            isProfit && 'bg-[hsl(160,72%,43%)]/15',
+                            isLoss && 'bg-[hsl(354,91%,62%)]/15',
+                            !hasPnl && 'bg-secondary/20',
+                            isOutlier && 'ring-2 ring-yellow-400/70 ring-inset',
+                            hasPnl && 'hover:brightness-125 cursor-pointer',
+                            selectedDate === cell.date && 'ring-2 ring-primary ring-inset',
+                          )}
+                        >
+                          <span className="text-[10px] text-muted-foreground leading-none">{cell.day}</span>
+                          {hasPnl ? (
+                            <span className={cn(
+                              'text-[9px] font-mono font-semibold leading-tight mt-0.5',
+                              isProfit ? 'text-[hsl(160,72%,43%)]' : 'text-[hsl(354,91%,62%)]'
+                            )}>
+                              {isProfit ? '+' : ''}{Math.abs(cell.pnl!) >= 1000
+                                ? `${(cell.pnl! / 1000).toFixed(1)}k`
+                                : cell.pnl!.toFixed(0)}
+                            </span>
+                          ) : (
+                            <span className="text-[9px] text-muted-foreground/30 leading-tight mt-0.5">-</span>
+                          )}
+                        </button>
+                      </PopoverTrigger>
+                      {hasPnl && (
+                        <PopoverContent className="w-44 p-3 text-xs" side="top" align="center">
+                          <div className="font-medium mb-1.5">{cell.date}</div>
+                          <div className="flex justify-between mb-1">
+                            <span className="text-muted-foreground">盈亏</span>
+                            <span className={cn('font-mono font-semibold', (selectedPnl ?? 0) >= 0 ? 'text-[hsl(160,72%,43%)]' : 'text-[hsl(354,91%,62%)]')}>
+                              {(selectedPnl ?? 0) >= 0 ? '+' : ''}${selectedPnl?.toFixed(2)}
+                            </span>
+                          </div>
+                          <div className="flex justify-between mb-1">
+                            <span className="text-muted-foreground">交易笔数</span>
+                            <span className="font-mono">{selectedTrades}</span>
+                          </div>
+                          {isOutlier && (
+                            <div className="mt-1.5 px-1.5 py-0.5 bg-yellow-400/10 text-yellow-400 rounded text-[10px] text-center font-medium">
+                              ⚠ 当月异常值
+                            </div>
+                          )}
+                        </PopoverContent>
+                      )}
+                    </Popover>
                 );
               })}
             </div>
