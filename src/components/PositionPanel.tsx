@@ -162,7 +162,7 @@ export function PositionPanel({
           qtyLeft: t.quantity,
           openTime: t.openTime,
           entryPrice: t.entryPrice,
-          marginMode: t.marginMode,
+          marginMode: (t as any).marginMode,
         });
         queueMap.set(key, queue);
         continue;
