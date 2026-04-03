@@ -70,6 +70,7 @@ export interface Position {
   entryPrice: number;
   quantity: number;
   leverage: number;
+  openTime: number;
   marginMode: MarginMode;
   margin: number;
   /** For isolated positions: the segregated margin assigned to this position */
@@ -86,6 +87,8 @@ export interface TradeRecord {
   exitPrice: number;
   quantity: number;
   leverage: number;
+  marginMode?: MarginMode;
+  margin?: number;
   pnl: number;
   fee: number;
   slippage: number;
@@ -219,4 +222,11 @@ export function getPriceStep(price: number): number {
   if (price > 100) return 0.001;
   if (price > 10) return 0.0001;
   return 0.00001;
+}
+
+export interface IndicatorConfig {
+  type: string;
+  period: number;
+  color?: string;
+  enabled: boolean;
 }
