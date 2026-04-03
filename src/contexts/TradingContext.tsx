@@ -578,7 +578,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
               entryPrice: pos.entryPrice, exitPrice: price,
               quantity: pos.quantity, leverage: pos.leverage,
               pnl: pnl - closeFee - liqFee, fee: closeFee + liqFee, slippage: 0,
-              openTime: 0, closeTime: getEffectiveTime(sym),
+              openTime: pos.openTime || 0, closeTime: getEffectiveTime(sym),
             });
           }
         }
