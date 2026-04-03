@@ -189,7 +189,7 @@ export function PositionPanel({
 
       const basePrice = matchedOpenPrice > 0 ? matchedOpenPrice : t.entryPrice;
       const quantityUsdt = basePrice * t.quantity;
-      const margin = t.margin ?? quantityUsdt / Math.max(1, t.leverage);
+      const margin = (t as any).margin ?? quantityUsdt / Math.max(1, t.leverage);
       const pnlPct = margin > 0 ? (t.pnl / margin) * 100 : 0;
       const closeTime = t.closeTime || 0;
       const openTime = matchedOpenTime > 0 ? matchedOpenTime : 0;
