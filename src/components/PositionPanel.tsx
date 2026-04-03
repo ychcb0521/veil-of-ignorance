@@ -173,7 +173,7 @@ export function PositionPanel({
       let remainingQty = t.quantity;
       let matchedOpenTime = t.openTime || 0;
       let matchedOpenPrice = t.entryPrice;
-      let matchedMode = t.marginMode;
+      let matchedMode = (t as any).marginMode;
 
       while (remainingQty > 1e-8 && queue.length > 0) {
         const lot = queue[0];
