@@ -96,6 +96,7 @@ function matchOrdersOffline(pendingOrders: PendingOrder[], klines: KlineData[], 
           marginMode: order.marginMode,
           margin,
           isolatedMargin: order.marginMode === "isolated" ? margin : undefined,
+          openTime: kline.time,
         });
       } else {
         stillPending.push(order);
