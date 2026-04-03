@@ -1062,7 +1062,14 @@ const Index = () => {
       if (newSymbol === activeSymbol) return;
 
       setActiveSymbol(newSymbol);
-      latestChartPriceRef.current = Number(priceMap[newSymbol] || 0);
+      // Clear stale price to prevent cross-symbol pollution on chart
+      latestChartPriceRef.current = 0;
+      setPriceMap((prev) => {
+        if (!prev[newSymbol]) return prev;
+        const next = { ...prev };
+        delete next[newSymbol];
+        return next;
+      });
       reset();
       prevVisibleLenRef.current = 0;
       cursorRef.current = 0;
