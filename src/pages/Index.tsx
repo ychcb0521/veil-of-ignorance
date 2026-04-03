@@ -318,6 +318,7 @@ const Index = () => {
               marginMode: order.marginMode,
               margin,
               isolatedMargin: order.marginMode === "isolated" ? margin : undefined,
+              openTime,
             },
           ],
         };
