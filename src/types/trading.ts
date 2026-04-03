@@ -74,6 +74,8 @@ export interface Position {
   margin: number;
   /** For isolated positions: the segregated margin assigned to this position */
   isolatedMargin?: number;
+  /** Simulated clock time when this position was opened */
+  openTime?: number;
 }
 
 export interface TradeRecord {

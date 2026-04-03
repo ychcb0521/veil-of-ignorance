@@ -173,6 +173,7 @@ function executeFill(
   rawPrice: number,
   order: { side: OrderSide; quantity: number; leverage: number; marginMode: MarginMode },
   isMaker: boolean,
+  openTime: number = 0,
 ): { fee: number; margin: number; slippage: number; position: Position } {
   const { fillPrice, slippage } = applySlippageIfTaker(rawPrice, order.quantity, order.side, isMaker);
   const fee = calcFee(fillPrice, order.quantity, isMaker);
@@ -188,6 +189,7 @@ function executeFill(
     marginMode: order.marginMode,
     margin,
     isolatedMargin: order.marginMode === 'isolated' ? margin : undefined,
+    openTime,
   };
 
   console.log('[开仓核对] 瞬时入场价:', fillPrice, ' | 瞬时标记价:', rawPrice, ' | 如果这俩数字不同，就是组件传参延迟导致的脱节！');
@@ -517,7 +519,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
           entryPrice: pos.entryPrice, exitPrice: price,
           quantity: pos.quantity, leverage: pos.leverage,
           pnl: pnl - closeFee - liqFee, fee: closeFee + liqFee, slippage: 0,
-          openTime: 0, closeTime: getEffectiveTime(sym),
+          openTime: pos.openTime || 0, closeTime: getEffectiveTime(sym),
         }]);
 
         setPositionsMap(prev => ({
@@ -576,7 +578,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
               entryPrice: pos.entryPrice, exitPrice: price,
               quantity: pos.quantity, leverage: pos.leverage,
               pnl: pnl - closeFee - liqFee, fee: closeFee + liqFee, slippage: 0,
-              openTime: 0, closeTime: getEffectiveTime(sym),
+              openTime: pos.openTime || 0, closeTime: getEffectiveTime(sym),
             });
           }
         }
@@ -642,7 +644,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
 
     // BEST PRICE (taker)
     if (order.priceSelection === 'BEST') {
-      const { fee, margin, slippage, position } = executeFill(effectiveCurrentPrice, order, false);
+      const { fee, margin, slippage, position } = executeFill(effectiveCurrentPrice, order, false, now);
       const requiredMargin = margin + fee;
       if (requiredMargin > available) {
         toast.error('可用余额不足', {
@@ -662,7 +664,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
 
     // MARKET (taker with slippage)
     if (order.type === 'MARKET') {
-      const { fee, margin, slippage, position } = executeFill(effectiveCurrentPrice, order, false);
+      const { fee, margin, slippage, position } = executeFill(effectiveCurrentPrice, order, false, now);
       const requiredMargin = margin + fee;
       if (requiredMargin > available) {
         toast.error('可用余额不足', {
@@ -823,7 +825,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
       id: crypto.randomUUID(), symbol, side: pos.side, type: 'MARKET' as OrderType,
       action: 'CLOSE' as const, entryPrice: pos.entryPrice, exitPrice: fillPrice,
       quantity: closeQty, leverage: pos.leverage,
-      pnl: pnl - fee, fee, slippage, openTime: 0, closeTime: getEffectiveTime(symbol),
+      pnl: pnl - fee, fee, slippage, openTime: pos.openTime || 0, closeTime: getEffectiveTime(symbol),
     }]);
 
     const pctLabel = pct < 1 ? ` (${Math.round(pct * 100)}%)` : '';

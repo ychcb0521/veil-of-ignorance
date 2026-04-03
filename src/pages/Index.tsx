@@ -96,6 +96,7 @@ function matchOrdersOffline(pendingOrders: PendingOrder[], klines: KlineData[], 
           marginMode: order.marginMode,
           margin,
           isolatedMargin: order.marginMode === "isolated" ? margin : undefined,
+          openTime: kline.time,
         });
       } else {
         stillPending.push(order);
@@ -318,6 +319,7 @@ const Index = () => {
               marginMode: order.marginMode,
               margin,
               isolatedMargin: order.marginMode === "isolated" ? margin : undefined,
+              openTime,
             },
           ],
         };
@@ -873,6 +875,7 @@ const Index = () => {
                     marginMode: matchedOrder.marginMode,
                     margin,
                     isolatedMargin: matchedOrder.marginMode === "isolated" ? margin : undefined,
+                    openTime: getEffectiveTime(activeSymbol),
                   },
                 ],
               };
@@ -947,6 +950,7 @@ const Index = () => {
                         marginMode: order.marginMode,
                         margin,
                         isolatedMargin: order.marginMode === "isolated" ? margin : undefined,
+                        openTime: getEffectiveTime(symbol),
                       },
                     ],
                   };
