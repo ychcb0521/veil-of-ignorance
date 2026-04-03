@@ -400,6 +400,15 @@ export function PositionPanel({
                     <td className={`px-3 py-2 font-bold ${t.pnl >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
                       {t.pnl >= 0 ? '+' : ''}{t.pnl.toFixed(2)}
                     </td>
+                    {(() => {
+                      const margin = (t.quantity * t.entryPrice) / t.leverage;
+                      const pct = margin > 0 ? (t.pnl / margin) * 100 : 0;
+                      return (
+                        <td className={`px-3 py-2 font-bold ${pct >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                          {pct >= 0 ? '+' : ''}{pct.toFixed(2)}%
+                        </td>
+                      );
+                    })()}
                   </tr>
                 ))}
               </tbody>
