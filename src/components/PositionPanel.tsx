@@ -444,8 +444,8 @@ export function PositionPanel({
                     <td className={`px-3 py-2 font-bold ${t.side === 'LONG' ? 'text-emerald-400' : 'text-red-400'}`}>
                       {t.side === 'LONG' ? '多' : '空'} {t.leverage}x
                     </td>
-                    <td className="px-3 py-2">{t.entryPrice.toFixed(2)}</td>
-                    <td className="px-3 py-2">{t.exitPrice > 0 ? t.exitPrice.toFixed(2) : '-'}</td>
+                    <td className="px-3 py-2">{t.entryPrice.toPrecision(6)}</td>
+                    <td className="px-3 py-2">{t.exitPrice > 0 ? t.exitPrice.toPrecision(6) : '-'}</td>
                     <td className="px-3 py-2">{(t.quantity * t.entryPrice).toFixed(2)} USDT</td>
                     <td className="px-3 py-2 text-muted-foreground">{t.openTime && t.openTime > 0 ? new Date(t.openTime).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '-'}</td>
                     <td className="px-3 py-2 text-muted-foreground">{t.closeTime ? new Date(t.closeTime).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '-'}</td>
