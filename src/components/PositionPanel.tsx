@@ -69,6 +69,8 @@ export function PositionPanel({
   // History sort: 'time' (default, newest first), 'pnl-desc', 'pnl-asc', 'pct-desc', 'pct-asc'
   type HistorySort = 'time' | 'pnl-desc' | 'pnl-asc' | 'pct-desc' | 'pct-asc';
   const [historySort, setHistorySort] = useState<HistorySort>('time');
+  const [historySymbolFilter, setHistorySymbolFilter] = useState<string>('ALL');
+
 
   const toggleSort = (field: 'pnl' | 'pct') => {
     setHistorySort(prev => {
@@ -100,7 +102,12 @@ export function PositionPanel({
   const fundingRecords = tradeHistory.filter(t => t.action === 'FUNDING');
   const tradeRecords = tradeHistory.filter(t => t.action === 'CLOSE' || t.action === 'LIQUIDATION');
 
-  // Collect all symbols that have any data (positions, orders, or history)
+  const historySymbols = useMemo(() => {
+    const syms = new Set<string>();
+    for (const t of tradeRecords) { if (t.symbol) syms.add(t.symbol); }
+    return Array.from(syms).sort();
+  }, [tradeRecords]);
+
   const allTradedSymbols = useMemo(() => {
     const syms = new Set<string>();
     for (const sym of Object.keys(positionsMap)) {
@@ -389,7 +396,19 @@ export function PositionPanel({
             <table className="w-full text-[11px] font-mono tabular-nums">
               <thead>
                 <tr className="text-muted-foreground border-b border-border">
-                  {['合约', '操作', '方向', '开仓价', '平仓价', '数量', '开仓时间', '平仓时间'].map(h => (
+                  <th className="px-3 py-1.5 text-left font-medium whitespace-nowrap">
+                    <select
+                      value={historySymbolFilter}
+                      onChange={e => setHistorySymbolFilter(e.target.value)}
+                      className="bg-transparent border border-border rounded px-1 py-0.5 text-[11px] text-muted-foreground cursor-pointer outline-none"
+                    >
+                      <option value="ALL">全部合约</option>
+                      {historySymbols.map(s => (
+                        <option key={s} value={s}>{s.replace('USDT', '/USDT')}</option>
+                      ))}
+                    </select>
+                  </th>
+                  {['操作', '方向', '开仓价', '平仓价', '数量', '开仓时间', '平仓时间'].map(h => (
                     <th key={h} className="px-3 py-1.5 text-left font-medium whitespace-nowrap">{h}</th>
                   ))}
                   <th className="px-3 py-1.5 text-left font-medium whitespace-nowrap cursor-pointer select-none" onClick={() => toggleSort('pnl')}>
@@ -403,6 +422,7 @@ export function PositionPanel({
               <tbody>
                 {(() => {
                   let sorted = tradeRecords.slice().reverse();
+                  if (historySymbolFilter !== 'ALL') sorted = sorted.filter(t => t.symbol === historySymbolFilter);
                   if (historySort === 'pnl-desc') sorted.sort((a, b) => b.pnl - a.pnl);
                   else if (historySort === 'pnl-asc') sorted.sort((a, b) => a.pnl - b.pnl);
                   else if (historySort === 'pct-desc' || historySort === 'pct-asc') {
