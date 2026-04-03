@@ -59,15 +59,48 @@ export function AssetReportModal({ open, onClose, assets }: Props) {
     return { totalPnl, totalTrades };
   }, [dailyPnl, range]);
 
-  // Build a map for calendar day modifiers
+  // Build a map for calendar day PnL
   const pnlMap = useMemo(() => {
     const map = new Map<string, number>();
     dailyPnl.forEach(d => map.set(d.date, d.pnl));
     return map;
   }, [dailyPnl]);
 
-  const profitDays = dailyPnl.filter(d => d.pnl > 0).map(d => new Date(d.date + 'T00:00:00'));
-  const lossDays = dailyPnl.filter(d => d.pnl < 0).map(d => new Date(d.date + 'T00:00:00'));
+  // Outlier detection: top/bottom 5% by absolute PnL
+  const outlierDates = useMemo(() => {
+    if (dailyPnl.length < 5) return new Set<string>();
+    const sorted = [...dailyPnl].sort((a, b) => a.pnl - b.pnl);
+    const n = Math.max(1, Math.ceil(sorted.length * 0.05));
+    const outliers = new Set<string>();
+    for (let i = 0; i < n; i++) outliers.add(sorted[i].date);
+    for (let i = sorted.length - n; i < sorted.length; i++) outliers.add(sorted[i].date);
+    return outliers;
+  }, [dailyPnl]);
+
+  // Calendar state
+  const [calMonth, setCalMonth] = useState(new Date());
+
+  // Build calendar grid for current month
+  const calendarGrid = useMemo(() => {
+    const year = calMonth.getFullYear();
+    const month = calMonth.getMonth();
+    const firstDay = new Date(year, month, 1).getDay(); // 0=Sun
+    const daysInMonth = new Date(year, month + 1, 0).getDate();
+    const weeks: { day: number; date: string; pnl: number | null }[][] = [];
+    let week: { day: number; date: string; pnl: number | null }[] = [];
+    // Fill leading blanks
+    for (let i = 0; i < firstDay; i++) week.push({ day: 0, date: '', pnl: null });
+    for (let d = 1; d <= daysInMonth; d++) {
+      const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+      week.push({ day: d, date: dateStr, pnl: pnlMap.get(dateStr) ?? null });
+      if (week.length === 7) { weeks.push(week); week = []; }
+    }
+    if (week.length > 0) {
+      while (week.length < 7) week.push({ day: 0, date: '', pnl: null });
+      weeks.push(week);
+    }
+    return weeks;
+  }, [calMonth, pnlMap]);
 
   const startVal = chartData.length > 0 ? chartData[0].value : 0;
   const endVal = chartData.length > 0 ? chartData[chartData.length - 1].value : 0;
