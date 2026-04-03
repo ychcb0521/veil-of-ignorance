@@ -372,7 +372,7 @@ export function PositionPanel({
             <table className="w-full text-[11px] font-mono tabular-nums">
               <thead>
                 <tr className="text-muted-foreground border-b border-border">
-                  {['合约', '操作', '方向', '开仓价', '平仓价', '数量', '开仓时间', '滑点', '盈亏'].map(h => (
+                  {['合约', '操作', '方向', '开仓价', '平仓价', '数量', '开仓时间', '平仓时间', '盈亏'].map(h => (
                     <th key={h} className="px-3 py-1.5 text-left font-medium whitespace-nowrap">{h}</th>
                   ))}
                 </tr>
@@ -396,7 +396,7 @@ export function PositionPanel({
                     <td className="px-3 py-2">{t.exitPrice > 0 ? t.exitPrice.toFixed(2) : '-'}</td>
                     <td className="px-3 py-2">{(t.quantity * t.entryPrice).toFixed(2)} USDT</td>
                     <td className="px-3 py-2 text-muted-foreground">{t.openTime ? new Date(t.openTime).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '-'}</td>
-                    <td className="px-3 py-2 text-muted-foreground">{t.slippage > 0 ? t.slippage.toFixed(4) : '-'}</td>
+                    <td className="px-3 py-2 text-muted-foreground">{t.closeTime ? new Date(t.closeTime).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '-'}</td>
                     <td className={`px-3 py-2 font-bold ${t.pnl >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
                       {t.pnl >= 0 ? '+' : ''}{t.pnl.toFixed(2)}
                     </td>
