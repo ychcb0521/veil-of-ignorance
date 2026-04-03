@@ -131,7 +131,7 @@ export function PositionPanel({
       qtyLeft: number;
       openTime: number;
       entryPrice: number;
-      marginMode: TradeRecord["marginMode"];
+      marginMode?: string;
     };
     type HistoryRow = {
       id: string;
@@ -139,7 +139,7 @@ export function PositionPanel({
       action: TradeRecord["action"];
       side: TradeRecord["side"];
       leverage: number;
-      marginMode: TradeRecord["marginMode"];
+      marginMode?: string;
       openPrice: number;
       closePrice: number;
       quantityUsdt: number;
@@ -162,7 +162,7 @@ export function PositionPanel({
           qtyLeft: t.quantity,
           openTime: t.openTime,
           entryPrice: t.entryPrice,
-          marginMode: t.marginMode,
+          marginMode: (t as any).marginMode,
         });
         queueMap.set(key, queue);
         continue;
@@ -173,7 +173,7 @@ export function PositionPanel({
       let remainingQty = t.quantity;
       let matchedOpenTime = t.openTime || 0;
       let matchedOpenPrice = t.entryPrice;
-      let matchedMode = t.marginMode;
+      let matchedMode = (t as any).marginMode;
 
       while (remainingQty > 1e-8 && queue.length > 0) {
         const lot = queue[0];
@@ -189,7 +189,7 @@ export function PositionPanel({
 
       const basePrice = matchedOpenPrice > 0 ? matchedOpenPrice : t.entryPrice;
       const quantityUsdt = basePrice * t.quantity;
-      const margin = t.margin ?? quantityUsdt / Math.max(1, t.leverage);
+      const margin = (t as any).margin ?? quantityUsdt / Math.max(1, t.leverage);
       const pnlPct = margin > 0 ? (t.pnl / margin) * 100 : 0;
       const closeTime = t.closeTime || 0;
       const openTime = matchedOpenTime > 0 ? matchedOpenTime : 0;
