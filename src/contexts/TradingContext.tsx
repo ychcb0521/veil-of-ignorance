@@ -664,7 +664,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
 
     // MARKET (taker with slippage)
     if (order.type === 'MARKET') {
-      const { fee, margin, slippage, position } = executeFill(effectiveCurrentPrice, order, false);
+      const { fee, margin, slippage, position } = executeFill(effectiveCurrentPrice, order, false, now);
       const requiredMargin = margin + fee;
       if (requiredMargin > available) {
         toast.error('可用余额不足', {
