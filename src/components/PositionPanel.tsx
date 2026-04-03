@@ -102,7 +102,12 @@ export function PositionPanel({
   const fundingRecords = tradeHistory.filter(t => t.action === 'FUNDING');
   const tradeRecords = tradeHistory.filter(t => t.action === 'CLOSE' || t.action === 'LIQUIDATION');
 
-  // Collect all symbols that have any data (positions, orders, or history)
+  const historySymbols = useMemo(() => {
+    const syms = new Set<string>();
+    for (const t of tradeRecords) { if (t.symbol) syms.add(t.symbol); }
+    return Array.from(syms).sort();
+  }, [tradeRecords]);
+
   const allTradedSymbols = useMemo(() => {
     const syms = new Set<string>();
     for (const sym of Object.keys(positionsMap)) {
