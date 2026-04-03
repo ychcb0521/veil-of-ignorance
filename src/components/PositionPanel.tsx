@@ -195,7 +195,7 @@ export function PositionPanel({
   }, [rollbackSymbol, tradeHistory, positionsMap, ordersMap]);
 
   const TABS = [
-    { key: 'positions', label: '持仓', count: allPositions.length },
+    { key: 'positions', label: '持仓', count: mergedPositions.length },
     { key: 'pending', label: '当前委托', count: allOrders.length },
     { key: 'history', label: '历史记录', count: tradeRecords.length },
     { key: 'funding', label: '资金费', count: fundingRecords.length },
