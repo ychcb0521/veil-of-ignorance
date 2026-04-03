@@ -32,7 +32,7 @@ interface Props {
   onSymbolChange?: (symbol: string) => void;
 }
 
-const SPEED_OPTIONS = [1, 2, 5, 10, 30, 60, 180, 300, 600];
+const SPEED_OPTIONS = [1, 2, 5, 10, 30, 60, 180, 300, 900];
 
 type GuardedCoin = {
   sym: string;

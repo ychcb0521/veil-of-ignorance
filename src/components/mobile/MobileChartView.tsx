@@ -36,7 +36,7 @@ interface Props {
 }
 
 export function MobileChartView(props: Props) {
-  const SPEED_OPTIONS = [1, 2, 5, 10, 30, 60, 180, 300, 600];
+  const SPEED_OPTIONS = [1, 2, 5, 10, 30, 60, 180, 300, 900];
   const [selectedDate, setSelectedDate] = useState(() => new Date('2024-01-15T00:00:00Z')); // 00:00 UTC = 08:00 UTC+8
   const [showPicker, setShowPicker] = useState(false);
   const [showTimeframeSheet, setShowTimeframeSheet] = useState(false);
