@@ -181,6 +181,7 @@ function executeFill(
     marginMode: order.marginMode,
     margin,
     isolatedMargin: order.marginMode === 'isolated' ? margin : undefined,
+    openTime: Date.now(),
   };
 
   console.log('[开仓核对] 瞬时入场价:', fillPrice, ' | 瞬时标记价:', rawPrice, ' | 如果这俩数字不同，就是组件传参延迟导致的脱节！');
