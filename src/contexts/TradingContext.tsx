@@ -173,6 +173,7 @@ function executeFill(
   rawPrice: number,
   order: { side: OrderSide; quantity: number; leverage: number; marginMode: MarginMode },
   isMaker: boolean,
+  openTime: number = 0,
 ): { fee: number; margin: number; slippage: number; position: Position } {
   const { fillPrice, slippage } = applySlippageIfTaker(rawPrice, order.quantity, order.side, isMaker);
   const fee = calcFee(fillPrice, order.quantity, isMaker);
@@ -188,6 +189,7 @@ function executeFill(
     marginMode: order.marginMode,
     margin,
     isolatedMargin: order.marginMode === 'isolated' ? margin : undefined,
+    openTime,
   };
 
   console.log('[开仓核对] 瞬时入场价:', fillPrice, ' | 瞬时标记价:', rawPrice, ' | 如果这俩数字不同，就是组件传参延迟导致的脱节！');
