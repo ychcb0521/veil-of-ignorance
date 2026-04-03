@@ -394,7 +394,7 @@ export function PositionPanel({
                     </td>
                     <td className="px-3 py-2">{t.entryPrice.toFixed(2)}</td>
                     <td className="px-3 py-2">{t.exitPrice > 0 ? t.exitPrice.toFixed(2) : '-'}</td>
-                    <td className="px-3 py-2">{t.quantity.toFixed(4)}</td>
+                    <td className="px-3 py-2">{(t.quantity * t.entryPrice).toFixed(2)} USDT</td>
                     <td className="px-3 py-2 text-muted-foreground">{t.fee.toFixed(4)}</td>
                     <td className="px-3 py-2 text-muted-foreground">{t.slippage > 0 ? t.slippage.toFixed(4) : '-'}</td>
                     <td className={`px-3 py-2 font-bold ${t.pnl >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
