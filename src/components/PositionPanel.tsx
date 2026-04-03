@@ -71,11 +71,6 @@ export function PositionPanel({
   const [historySort, setHistorySort] = useState<HistorySort>('time');
   const [historySymbolFilter, setHistorySymbolFilter] = useState<string>('ALL');
 
-  const historySymbols = useMemo(() => {
-    const syms = new Set<string>();
-    for (const t of tradeRecords) { if (t.symbol) syms.add(t.symbol); }
-    return Array.from(syms).sort();
-  }, [tradeRecords]);
 
   const toggleSort = (field: 'pnl' | 'pct') => {
     setHistorySort(prev => {
