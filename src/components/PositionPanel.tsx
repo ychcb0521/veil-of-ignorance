@@ -131,7 +131,7 @@ export function PositionPanel({
       qtyLeft: number;
       openTime: number;
       entryPrice: number;
-      marginMode: TradeRecord["marginMode"];
+      marginMode?: string;
     };
     type HistoryRow = {
       id: string;
@@ -139,7 +139,7 @@ export function PositionPanel({
       action: TradeRecord["action"];
       side: TradeRecord["side"];
       leverage: number;
-      marginMode: TradeRecord["marginMode"];
+      marginMode?: string;
       openPrice: number;
       closePrice: number;
       quantityUsdt: number;
