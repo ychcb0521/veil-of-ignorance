@@ -253,7 +253,7 @@ const Index = () => {
   const cursorRef = useRef(0);
   const gameLoopInitRef = useRef(false);
   const clockRef = useRef<HTMLSpanElement>(null);
-  const displayOverlayWarmupUntilRef = useRef(Date.now() + 5000);
+  // displayOverlayWarmupUntilRef moved above useMemo that depends on it
 
   const lastReactFlushRef = useRef(0);
   const lastPersistRef = useRef(0);
