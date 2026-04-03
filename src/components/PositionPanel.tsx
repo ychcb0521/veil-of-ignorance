@@ -372,7 +372,7 @@ export function PositionPanel({
             <table className="w-full text-[11px] font-mono tabular-nums">
               <thead>
                 <tr className="text-muted-foreground border-b border-border">
-                  {['合约', '操作', '方向', '开仓价', '平仓价', '数量', '开仓时间', '平仓时间', '盈亏'].map(h => (
+                  {['合约', '操作', '方向', '开仓价', '平仓价', '数量', '开仓时间', '平仓时间', '盈亏', '盈亏%'].map(h => (
                     <th key={h} className="px-3 py-1.5 text-left font-medium whitespace-nowrap">{h}</th>
                   ))}
                 </tr>
@@ -400,6 +400,15 @@ export function PositionPanel({
                     <td className={`px-3 py-2 font-bold ${t.pnl >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
                       {t.pnl >= 0 ? '+' : ''}{t.pnl.toFixed(2)}
                     </td>
+                    {(() => {
+                      const margin = (t.quantity * t.entryPrice) / t.leverage;
+                      const pct = margin > 0 ? (t.pnl / margin) * 100 : 0;
+                      return (
+                        <td className={`px-3 py-2 font-bold ${pct >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                          {pct >= 0 ? '+' : ''}{pct.toFixed(2)}%
+                        </td>
+                      );
+                    })()}
                   </tr>
                 ))}
               </tbody>
