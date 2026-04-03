@@ -286,30 +286,54 @@ export function PositionPanel({
       </div>
 
       <div className="overflow-y-auto min-h-[120px]">
-        {/* ===== POSITIONS (Card-based) ===== */}
+        {/* ===== POSITIONS (Card-based, merged by symbol+side) ===== */}
         {activeTab === 'positions' && (
-          displayedPositions.length === 0 ? (
+          mergedPositions.length === 0 ? (
             <div className="px-4 py-6 text-center text-xs text-muted-foreground">
               {hideOtherContracts ? `${activeSymbol} 暂无持仓` : '暂无持仓'}
             </div>
           ) : (
             <div className="p-3 space-y-3">
-              {displayedPositions.map(({ symbol, position: pos, index: i }) => {
-                const price = priceMap[symbol] || 0;
-                const pnl = calcUnrealizedPnl(pos, price);
-                const roe = calcROE(pos, price);
-                const liq = calcLiquidationPrice(pos);
-                const isProfit = pnl >= 0;
-                const effectiveMargin = pos.marginMode === 'isolated' && pos.isolatedMargin != null
-                  ? pos.isolatedMargin : pos.margin;
-                const notional = pos.quantity * price;
-                const marginRatio = notional > 0 ? ((effectiveMargin + pnl) / notional * 100) : 0;
-                const baseCoin = symbol.replace('USDT', '');
-                const prec = getPrecision(symbol);
+              {mergedPositions.map((mg) => {
+                const price = priceMap[mg.symbol] || 0;
+                // Aggregate PnL across all children
+                let totalPnl = 0;
+                for (const c of mg.children) totalPnl += calcUnrealizedPnl(c.position, price);
+                const effectiveMargin = mg.totalIsolatedMargin != null ? mg.totalIsolatedMargin : mg.totalMargin;
+                const roe = effectiveMargin > 0 ? (totalPnl / effectiveMargin) * 100 : 0;
+                const isProfit = totalPnl >= 0;
+                const notional = mg.totalQuantity * price;
+                const marginRatio = notional > 0 ? ((effectiveMargin + totalPnl) / notional * 100) : 0;
+                const baseCoin = mg.symbol.replace('USDT', '');
+                const prec = getPrecision(mg.symbol);
+
+                // Compute aggregate liquidation price from the first child (approximation for merged)
+                // For merged positions use weighted entry to compute approximate liq
+                const syntheticPos: Position = {
+                  id: `merged_${mg.symbol}_${mg.side}`,
+                  side: mg.side,
+                  entryPrice: mg.weightedEntryPrice,
+                  quantity: mg.totalQuantity,
+                  leverage: mg.leverage,
+                  marginMode: mg.marginMode,
+                  margin: mg.totalMargin,
+                  isolatedMargin: mg.totalIsolatedMargin ?? undefined,
+                };
+                const liq = calcLiquidationPrice(syntheticPos);
+
+                const handleCloseGroup = (e: React.MouseEvent) => {
+                  e.stopPropagation();
+                  if (mg.children.length === 1) {
+                    handleOpenCloseModal(mg.symbol, mg.children[0].index, mg.children[0].position);
+                  } else if (onCloseAllPositions) {
+                    onCloseAllPositions(mg.children.map(c => ({ symbol: mg.symbol, index: c.index })));
+                    toast.success(`已市价平仓 ${mg.children.length} 个 ${baseCoin} ${mg.side === 'LONG' ? '多' : '空'}仓`);
+                  }
+                };
 
                 return (
                   <div
-                    key={pos.id}
+                    key={`${mg.symbol}_${mg.side}`}
                     className="rounded-lg border border-border bg-card shadow-sm overflow-hidden"
                   >
                     {/* Header */}
@@ -318,13 +342,18 @@ export function PositionPanel({
                       <span className="text-xs text-muted-foreground">/&nbsp;USDT 永续</span>
                       <span
                         className={`ml-1 text-[10px] font-bold px-1.5 py-0.5 rounded ${
-                          pos.side === 'LONG'
+                          mg.side === 'LONG'
                             ? 'bg-emerald-500/15 text-emerald-400'
                             : 'bg-red-500/15 text-red-400'
                         }`}
                       >
-                        {pos.side === 'LONG' ? '多' : '空'} {pos.leverage}x {pos.marginMode === 'cross' ? '全仓' : '逐仓'}
+                        {mg.side === 'LONG' ? '多' : '空'} {mg.leverage}x {mg.marginMode === 'cross' ? '全仓' : '逐仓'}
                       </span>
+                      {mg.children.length > 1 && (
+                        <span className="text-[9px] text-muted-foreground ml-auto">
+                          {mg.children.length} 笔合并
+                        </span>
+                      )}
                     </div>
 
                     {/* Hero Stats */}
@@ -332,7 +361,7 @@ export function PositionPanel({
                       <div>
                         <div className="text-[10px] text-muted-foreground mb-0.5">未实现盈亏 (USDT)</div>
                         <div className={`text-lg font-bold font-mono tabular-nums ${isProfit ? 'text-emerald-400' : 'text-red-400'}`}>
-                          {isProfit ? '+' : ''}{pnl.toFixed(2)}
+                          {isProfit ? '+' : ''}{totalPnl.toFixed(2)}
                         </div>
                       </div>
                       <div className="text-right">
@@ -345,22 +374,26 @@ export function PositionPanel({
 
                     {/* Details Grid */}
                     <div className="grid grid-cols-3 gap-x-4 gap-y-2 px-3 pb-2.5">
-                      <DetailCell label="持仓数量" value={pos.quantity.toFixed(4)} />
+                      <DetailCell label="持仓数量" value={mg.totalQuantity.toFixed(4)} />
                       <DetailCell label="保证金" value={effectiveMargin.toFixed(2)} />
                       <DetailCell label="保证金比率" value={`${marginRatio.toFixed(2)}%`} />
-                      <DetailCell label="开仓价格" value={pos.entryPrice.toFixed(prec)} />
+                      <DetailCell label="开仓均价" value={mg.weightedEntryPrice.toFixed(prec)} />
                       <DetailCell label="标记价格" value={price > 0 ? price.toFixed(prec) : '-'} />
                       <DetailCell label="强平价格" value={liq.toFixed(prec)} valueClassName="text-red-400" />
                     </div>
 
                     {/* Action Buttons */}
                     <div className="flex border-t border-border/50">
-                      <ActionBtn label="杠杆" onClick={(e) => { e.stopPropagation(); setLeverageModal({ symbol, index: i, pos }); }} />
-                      <ActionBtn label="止盈/止损" onClick={(e) => { e.stopPropagation(); setTpslModal({ symbol, index: i, pos }); }} />
+                      <ActionBtn label="止盈/止损" onClick={(e) => {
+                        e.stopPropagation();
+                        // Apply TP/SL to the first child position
+                        const first = mg.children[0];
+                        setTpslModal({ symbol: mg.symbol, index: first.index, pos: first.position });
+                      }} />
                       <ActionBtn
-                        label="平仓"
+                        label={mg.children.length > 1 ? '全部平仓' : '平仓'}
                         danger
-                        onClick={(e) => { e.stopPropagation(); handleOpenCloseModal(symbol, i, pos); }}
+                        onClick={handleCloseGroup}
                       />
                     </div>
                   </div>
