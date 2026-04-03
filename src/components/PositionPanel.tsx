@@ -66,6 +66,23 @@ export function PositionPanel({
   const [rollbackOpen, setRollbackOpen] = useState(false);
   const [rollbackSymbol, setRollbackSymbol] = useState<string>('');
 
+  // History sort: 'time' (default, newest first), 'pnl-desc', 'pnl-asc', 'pct-desc', 'pct-asc'
+  type HistorySort = 'time' | 'pnl-desc' | 'pnl-asc' | 'pct-desc' | 'pct-asc';
+  const [historySort, setHistorySort] = useState<HistorySort>('time');
+
+  const toggleSort = (field: 'pnl' | 'pct') => {
+    setHistorySort(prev => {
+      if (prev === `${field}-desc`) return `${field}-asc` as HistorySort;
+      if (prev === `${field}-asc`) return 'time';
+      return `${field}-desc` as HistorySort;
+    });
+  };
+
+  const getSortIcon = (field: 'pnl' | 'pct') => {
+    if (historySort === `${field}-desc`) return <ArrowDown className="inline w-3 h-3 ml-0.5" />;
+    if (historySort === `${field}-asc`) return <ArrowUp className="inline w-3 h-3 ml-0.5" />;
+    return <ArrowUpDown className="inline w-3 h-3 ml-0.5 opacity-40" />;
+  };
   const allPositions: { symbol: string; position: Position; index: number }[] = [];
   for (const [sym, positions] of Object.entries(positionsMap)) {
     positions.forEach((pos, i) => allPositions.push({ symbol: sym, position: pos, index: i }));
