@@ -191,7 +191,6 @@ export function useBackgroundPrices() {
                   entryPrice: fillPrice,
                   quantity: order.quantity,
                   leverage: order.leverage,
-                  openTime: sim.currentSimulatedTime,
                   marginMode: order.marginMode,
                   margin,
                   isolatedMargin: order.marginMode === "isolated" ? margin : undefined,
@@ -199,27 +198,6 @@ export function useBackgroundPrices() {
               ],
             };
           });
-          setTradeHistory((prev) => [
-            ...prev,
-            {
-              id: crypto.randomUUID(),
-              symbol,
-              side: order.side,
-              type: order.type as any,
-              action: "OPEN",
-              entryPrice: fillPrice,
-              exitPrice: 0,
-              quantity: order.quantity,
-              leverage: order.leverage,
-              marginMode: order.marginMode,
-              margin,
-              pnl: 0,
-              fee,
-              slippage: 0,
-              openTime: sim.currentSimulatedTime,
-              closeTime: 0,
-            },
-          ]);
           toast.success(`条件单已触发：${symbol} ${order.side} @ ${fillPrice.toFixed(2)}`);
         }
       }
