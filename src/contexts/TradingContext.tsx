@@ -135,7 +135,11 @@ const TradingContext = createContext<TradingState | null>(null);
 
 export function useTradingContext() {
   const ctx = useContext(TradingContext);
-  if (!ctx) throw new Error('useTradingContext must be used within TradingProvider');
+  if (!ctx) {
+    // During Vite HMR, components may briefly re-mount outside the provider tree.
+    // Throw so React error boundary / suspense catches it and re-renders correctly.
+    throw new Error('useTradingContext must be used within TradingProvider');
+  }
   return ctx;
 }
 
