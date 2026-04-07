@@ -439,7 +439,7 @@ export function PositionPanel({
                           <span className="text-amber-400">{order.stopPrice.toFixed(prec)}</span>
                         ) : '-'}
                       </td>
-                      <td className="px-3 py-2">{order.quantity.toFixed(4)}</td>
+                      <td className="px-3 py-2">{((order.price > 0 ? order.price : (priceMap[symbol] || 0)) * order.quantity).toFixed(2)} USDT</td>
                       <td className="px-3 py-2">{order.leverage}x</td>
                       <td className="px-3 py-2">
                         <Badge
