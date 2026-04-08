@@ -143,7 +143,7 @@ async function fetchKlines(symbol: string, interval: string, startTime: number, 
 
 /* ===== Chart theme ===== */
 const DARK_CHART_STYLES = {
-  grid: { show: true, horizontal: { color: "#1B1F26" }, vertical: { color: "#1B1F26" } },
+  grid: { show: true, horizontal: { color: "#2B3139" }, vertical: { color: "#2B3139" } },
   candle: {
     type: CandleType.CandleSolid,
     bar: {
@@ -799,7 +799,7 @@ export function TradeInsightsPanel({ open, onClose, tradeHistory, initialSymbol,
                 ref={chartContainerRef}
                 className="flex-1 min-h-0"
                 onClick={handleChartClick}
-                style={{ backgroundColor: theme === "light" ? "#FFFFFF" : "#0B0E11" }}
+                style={{ backgroundColor: theme === "light" ? "#FFFFFF" : "#1E2329" }}
               />
             )}
 
