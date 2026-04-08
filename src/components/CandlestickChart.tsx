@@ -141,8 +141,8 @@ function toKLineData(d: KlineData): KLineData {
 const DARK_STYLES = {
   grid: {
     show: true,
-    horizontal: { color: "#1B1F26" },
-    vertical: { color: "#1B1F26" },
+    horizontal: { color: "#2B3139" },
+    vertical: { color: "#2B3139" },
   },
   candle: {
     type: CandleType.CandleSolid,
@@ -923,7 +923,7 @@ function CandlestickChartComponent({
           className="absolute inset-0"
           style={{
             left: 34,
-            backgroundColor: theme === "light" ? "#FFFFFF" : "#0B0E11",
+            backgroundColor: theme === "light" ? "#FFFFFF" : "#1E2329",
             cursor: activeDrawingTool || pickMode ? "crosshair" : "default",
           }}
         />
