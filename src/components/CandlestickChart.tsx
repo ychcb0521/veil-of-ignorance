@@ -853,7 +853,7 @@ function CandlestickChartComponent({
   const isUp = last ? last.close >= last.open : true;
 
   return (
-    <div className="flex flex-col h-full bg-background">
+    <div className="flex flex-col h-full bg-card">
       {/* Price header bar */}
       <div className="flex items-center gap-4 px-4 py-2 border-b border-border flex-wrap w-full">
         <div className="flex items-center gap-2 shrink-0">
