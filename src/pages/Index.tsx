@@ -1478,7 +1478,7 @@ const Index = () => {
               <ResizablePanel defaultSize={70} minSize={30}>
                 <div className="h-full relative overflow-hidden">
                   {activeCoinState.status === "stopped" && visibleData.length === 0 ? (
-                    <div className="h-full flex items-center justify-center bg-background">
+                    <div className="h-full flex items-center justify-center bg-card">
                       <div className="text-center space-y-3">
                         <div className="text-5xl">⏰</div>
                         <p className="text-sm text-muted-foreground">输入历史时间并点击「启动」开始复盘模拟</p>
@@ -1543,7 +1543,7 @@ const Index = () => {
             onCollapse={() => setIsOrderBookOpen(false)}
             onExpand={() => setIsOrderBookOpen(true)}
           >
-            <div className="h-full flex flex-col overflow-hidden">
+            <div className="h-full flex flex-col overflow-hidden bg-card">
               <button
                 onClick={() => setIsOrderBookOpen((prev) => !prev)}
                 className="flex items-center justify-center py-2 border-b border-border text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-colors duration-200 shrink-0"
