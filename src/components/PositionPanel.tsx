@@ -86,9 +86,15 @@ export function PositionPanel({
     if (historySort === `${field}-asc`) return <ArrowUp className="inline w-3 h-3 ml-0.5" />;
     return <ArrowUpDown className="inline w-3 h-3 ml-0.5 opacity-40" />;
   };
+  // VIEW-LEVEL SANITIZATION GUARD: drop any dust positions (defends against state leak / float precision)
+  const POSITION_DUST_EPSILON = 1e-6;
   const allPositions: { symbol: string; position: Position; index: number }[] = [];
   for (const [sym, positions] of Object.entries(positionsMap)) {
-    positions.forEach((pos, i) => allPositions.push({ symbol: sym, position: pos, index: i }));
+    positions.forEach((pos, i) => {
+      if (Number(pos.quantity) > POSITION_DUST_EPSILON) {
+        allPositions.push({ symbol: sym, position: pos, index: i });
+      }
+    });
   }
 
   const displayedPositions = hideOtherContracts
