@@ -239,7 +239,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
       for (const [symbol, positions] of Object.entries(prev)) {
         const normalized = positions
           .filter(position => {
-            const keep = position.quantity > 1e-8;
+            const keep = position.quantity > 1e-6;
             if (!keep) changed = true;
             return keep;
           })
