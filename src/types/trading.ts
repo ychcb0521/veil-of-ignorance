@@ -57,6 +57,12 @@ export interface PendingOrder {
   reduceSymbol?: string;
   /** Side of the position this TP/SL order targets (opposite of close direction) */
   reducePositionSide?: OrderSide;
+  /** Hard binding to a specific position id — TP/SL only acts on this one */
+  linkedPositionId?: string;
+  /** TP or SL category (used for OCO + UI display) */
+  reduceKind?: "TP" | "SL";
+  /** Percentage (0-100] of the linked position to close on trigger */
+  reducePercentage?: number;
 }
 
 interface TriggerRange {
