@@ -455,11 +455,13 @@ export function PositionPanel({
                         <span className="text-muted-foreground text-[10px]">/USDT</span>
                       </td>
                       <td className="px-3 py-2 text-muted-foreground">
-                        {order.reduceOnly && order.reduceKind === 'TP' && <span className="text-emerald-400">止盈(只减仓)</span>}
-                        {order.reduceOnly && order.reduceKind === 'SL' && <span className="text-red-400">止损(只减仓)</span>}
-                        {!order.reduceOnly && (
-                          { LIMIT: '限价', POST_ONLY: '只做Maker', MARKET: '市价', LIMIT_TP_SL: '限价TP/SL', MARKET_TP_SL: '市价TP/SL', CONDITIONAL: '条件', TRAILING_STOP: '跟踪', TWAP: 'TWAP', SCALED: '分段' } as Record<string, string>
-                        )[order.type] || (!order.reduceOnly ? order.type : '')}
+                        {order.reduceOnly && order.reduceKind === 'TP' ? (
+                          <span className="text-emerald-400">止盈(只减仓)</span>
+                        ) : order.reduceOnly && order.reduceKind === 'SL' ? (
+                          <span className="text-red-400">止损(只减仓)</span>
+                        ) : (
+                          ({ LIMIT: '限价', POST_ONLY: '只做Maker', MARKET: '市价', LIMIT_TP_SL: '限价TP/SL', MARKET_TP_SL: '市价TP/SL', CONDITIONAL: '条件', TRAILING_STOP: '跟踪', TWAP: 'TWAP', SCALED: '分段' } as Record<string, string>)[order.type] || order.type
+                        )}
                       </td>
                       <td className={`px-3 py-2 font-bold ${order.side === 'LONG' ? 'text-emerald-400' : 'text-red-400'}`}>
                         {order.side === 'LONG' ? '多' : '空'}
