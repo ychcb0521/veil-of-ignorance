@@ -382,6 +382,35 @@ export function PositionPanel({
                       <DetailCell label="强平价格" value={liq.toFixed(prec)} valueClassName="text-red-400" />
                     </div>
 
+                    {/* TP / SL display strip — aggregated for this group's children */}
+                    {(() => {
+                      const childIds = new Set(mg.children.map(c => c.position.id));
+                      const groupOrders = (ordersMap[mg.symbol] || []).filter(
+                        o => o.reduceOnly && o.linkedPositionId && childIds.has(o.linkedPositionId)
+                      );
+                      const tps = groupOrders.filter(o => o.reduceKind === 'TP');
+                      const sls = groupOrders.filter(o => o.reduceKind === 'SL');
+                      if (tps.length === 0 && sls.length === 0) return null;
+                      const fmtList = (arr: typeof groupOrders) =>
+                        arr.map(o => o.stopPrice.toFixed(prec)).join(' / ');
+                      return (
+                        <div className="flex items-center gap-3 px-3 pb-2 text-[10px] font-mono tabular-nums">
+                          {tps.length > 0 && (
+                            <span className="flex items-center gap-1">
+                              <span className="text-muted-foreground">止盈</span>
+                              <span className="text-emerald-400">{fmtList(tps)}</span>
+                            </span>
+                          )}
+                          {sls.length > 0 && (
+                            <span className="flex items-center gap-1">
+                              <span className="text-muted-foreground">止损</span>
+                              <span className="text-red-400">{fmtList(sls)}</span>
+                            </span>
+                          )}
+                        </div>
+                      );
+                    })()}
+
                     {/* Action Buttons */}
                     <div className="flex border-t border-border/50">
                       <ActionBtn label="止盈/止损" onClick={(e) => {
@@ -426,7 +455,13 @@ export function PositionPanel({
                         <span className="text-muted-foreground text-[10px]">/USDT</span>
                       </td>
                       <td className="px-3 py-2 text-muted-foreground">
-                        {{ LIMIT: '限价', POST_ONLY: '只做Maker', MARKET: '市价', LIMIT_TP_SL: '限价TP/SL', MARKET_TP_SL: '市价TP/SL', CONDITIONAL: '条件', TRAILING_STOP: '跟踪', TWAP: 'TWAP', SCALED: '分段' }[order.type] || order.type}
+                        {order.reduceOnly && order.reduceKind === 'TP' ? (
+                          <span className="text-emerald-400">止盈(只减仓)</span>
+                        ) : order.reduceOnly && order.reduceKind === 'SL' ? (
+                          <span className="text-red-400">止损(只减仓)</span>
+                        ) : (
+                          ({ LIMIT: '限价', POST_ONLY: '只做Maker', MARKET: '市价', LIMIT_TP_SL: '限价TP/SL', MARKET_TP_SL: '市价TP/SL', CONDITIONAL: '条件', TRAILING_STOP: '跟踪', TWAP: 'TWAP', SCALED: '分段' } as Record<string, string>)[order.type] || order.type
+                        )}
                       </td>
                       <td className={`px-3 py-2 font-bold ${order.side === 'LONG' ? 'text-emerald-400' : 'text-red-400'}`}>
                         {order.side === 'LONG' ? '多' : '空'}

@@ -794,18 +794,19 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
     // Credit to single global balance
     setBalance(prev => prev + Math.max(0, returnedMargin));
 
+    // Determine if this position will be fully closed (for OCO cleanup)
+    const willFullyClose = pct >= 1 || pos.quantity * (1 - pct) < 1e-8;
+    const closedPositionId = pos.id;
+
     // Update or remove position
     setPositionsMap(prev => {
       const positions = [...(prev[symbol] || [])];
       if (pct >= 1) {
-        // Full close — remove
         positions.splice(index, 1);
       } else {
-        // Partial close — reduce quantity and margin
         const remaining = positions[index];
         const remainPct = 1 - pct;
         const newQty = remaining.quantity * remainPct;
-        // Guard: if remaining quantity is near-zero, treat as full close
         if (newQty < 1e-8) {
           positions.splice(index, 1);
         } else {
@@ -819,6 +820,31 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
         }
       }
       return { ...prev, [symbol]: positions.filter(p => p.quantity > 1e-8) };
+    });
+
+    // OCO / linked TP-SL maintenance
+    setOrdersMap(prev => {
+      const orders = prev[symbol] || [];
+      if (orders.length === 0) return prev;
+      let changed = false;
+      const next: PendingOrder[] = [];
+      for (const o of orders) {
+        if (o.reduceOnly && o.linkedPositionId === closedPositionId) {
+          if (willFullyClose) {
+            changed = true;
+            continue; // drop the linked order
+          }
+          // partial close: rescale the reduce-only quantity proportionally
+          const remainPct = 1 - pct;
+          const newQty = o.quantity * remainPct;
+          if (newQty < 1e-8) { changed = true; continue; }
+          changed = true;
+          next.push({ ...o, quantity: newQty });
+          continue;
+        }
+        next.push(o);
+      }
+      return changed ? { ...prev, [symbol]: next } : prev;
     });
 
     setTradeHistory(prev => [...prev, {
@@ -835,70 +861,76 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
     });
   }, [getEffectiveTime]);
 
-  // ===== Place TP/SL conditional orders (reduce-only) =====
+  // ===== Place TP/SL conditional orders (reduce-only, linked to a specific position) =====
   const handlePlaceTpSl = useCallback((symbol: string, pos: Position, tp: number | null, sl: number | null, pct: number) => {
-    if (tp === null && sl === null) {
-      toast.error('请至少输入一个触发价格');
+    if ((tp === null || !(tp > 0)) && (sl === null || !(sl > 0))) {
+      toast.error('请至少输入一个有效的触发价格');
       return;
     }
 
-    const closeQty = pos.quantity * (pct / 100);
-    if (closeQty <= 0) return;
+    const safePct = Math.min(100, Math.max(1, pct));
+    const closeQty = pos.quantity * (safePct / 100);
+    if (closeQty <= 0) {
+      toast.error('平仓数量无效');
+      return;
+    }
+
+    const markPrice = priceMapRef.current[symbol] || 0;
+
+    // Sanity check TP/SL direction relative to current mark price
+    if (markPrice > 0) {
+      if (tp !== null && tp > 0) {
+        if (pos.side === 'LONG' && tp <= markPrice) { toast.error('多单止盈价必须高于当前价'); return; }
+        if (pos.side === 'SHORT' && tp >= markPrice) { toast.error('空单止盈价必须低于当前价'); return; }
+      }
+      if (sl !== null && sl > 0) {
+        if (pos.side === 'LONG' && sl >= markPrice) { toast.error('多单止损价必须低于当前价'); return; }
+        if (pos.side === 'SHORT' && sl <= markPrice) { toast.error('空单止损价必须高于当前价'); return; }
+      }
+    }
 
     const now = getEffectiveTime(symbol);
     const closeSide: OrderSide = pos.side === 'LONG' ? 'SHORT' : 'LONG';
 
-    const newOrders: PendingOrder[] = [];
+    setOrdersMap(prev => {
+      const orders = prev[symbol] || [];
+      // Replace any existing TP/SL on this exact position
+      const filtered = orders.filter(o => !(o.reduceOnly && o.linkedPositionId === pos.id));
+      const newOrders: PendingOrder[] = [];
 
-    if (tp !== null && tp > 0) {
-      // TP: for LONG, trigger when price >= tp; for SHORT, trigger when price <= tp
-      const tpOperator: TriggerOperator = pos.side === 'LONG' ? '>=' : '<=';
-      newOrders.push({
-        id: crypto.randomUUID(),
-        side: closeSide,
-        type: 'CONDITIONAL' as OrderType,
-        price: 0,
-        stopPrice: tp,
-        quantity: closeQty,
-        leverage: pos.leverage,
-        marginMode: pos.marginMode,
-        status: 'PENDING',
-        createdAt: now,
-        conditionalExecType: 'MARKET',
-        operator: tpOperator,
-        triggerDirection: tpOperator === '>=' ? 'UP' : 'DOWN',
-        reduceOnly: true,
-        reduceSymbol: symbol,
-        reducePositionSide: pos.side,
-      });
-    }
+      if (tp !== null && tp > 0) {
+        const tpOperator: TriggerOperator = pos.side === 'LONG' ? '>=' : '<=';
+        newOrders.push({
+          id: crypto.randomUUID(), side: closeSide, type: 'CONDITIONAL' as OrderType,
+          price: 0, stopPrice: tp, quantity: closeQty,
+          leverage: pos.leverage, marginMode: pos.marginMode,
+          status: 'PENDING', createdAt: now,
+          conditionalExecType: 'MARKET',
+          operator: tpOperator, triggerDirection: tpOperator === '>=' ? 'UP' : 'DOWN',
+          reduceOnly: true, reduceSymbol: symbol, reducePositionSide: pos.side,
+          linkedPositionId: pos.id, reduceKind: 'TP', reducePercentage: safePct,
+        });
+      }
 
-    if (sl !== null && sl > 0) {
-      // SL: for LONG, trigger when price <= sl; for SHORT, trigger when price >= sl
-      const slOperator: TriggerOperator = pos.side === 'LONG' ? '<=' : '>=';
-      newOrders.push({
-        id: crypto.randomUUID(),
-        side: closeSide,
-        type: 'CONDITIONAL' as OrderType,
-        price: 0,
-        stopPrice: sl,
-        quantity: closeQty,
-        leverage: pos.leverage,
-        marginMode: pos.marginMode,
-        status: 'PENDING',
-        createdAt: now,
-        conditionalExecType: 'MARKET',
-        operator: slOperator,
-        triggerDirection: slOperator === '>=' ? 'UP' : 'DOWN',
-        reduceOnly: true,
-        reduceSymbol: symbol,
-        reducePositionSide: pos.side,
-      });
-    }
+      if (sl !== null && sl > 0) {
+        const slOperator: TriggerOperator = pos.side === 'LONG' ? '<=' : '>=';
+        newOrders.push({
+          id: crypto.randomUUID(), side: closeSide, type: 'CONDITIONAL' as OrderType,
+          price: 0, stopPrice: sl, quantity: closeQty,
+          leverage: pos.leverage, marginMode: pos.marginMode,
+          status: 'PENDING', createdAt: now,
+          conditionalExecType: 'MARKET',
+          operator: slOperator, triggerDirection: slOperator === '>=' ? 'UP' : 'DOWN',
+          reduceOnly: true, reduceSymbol: symbol, reducePositionSide: pos.side,
+          linkedPositionId: pos.id, reduceKind: 'SL', reducePercentage: safePct,
+        });
+      }
 
-    setOrdersMap(prev => ({ ...prev, [symbol]: [...(prev[symbol] || []), ...newOrders] }));
+      return { ...prev, [symbol]: [...filtered, ...newOrders] };
+    });
+
     toast.success('止盈/止损委托已下达', {
-      description: `TP: ${tp || '-'} / SL: ${sl || '-'} · ${pct}% 仓位`,
+      description: `TP: ${tp || '-'} / SL: ${sl || '-'} · ${safePct}% 仓位`,
     });
   }, [getEffectiveTime]);
 
