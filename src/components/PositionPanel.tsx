@@ -10,6 +10,7 @@ import { TpSlModal } from '@/components/TpSlModal';
 import { ClosePositionModal } from '@/components/ClosePositionModal';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Badge } from '@/components/ui/badge';
+import { formatPrice, formatAmount, formatUSDT, formatSignedUSDT } from '@/lib/formatters';
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
 } from '@/components/ui/dialog';
@@ -361,7 +362,7 @@ export function PositionPanel({
                       <div>
                         <div className="text-[10px] text-muted-foreground mb-0.5">未实现盈亏 (USDT)</div>
                         <div className={`text-lg font-bold font-mono tabular-nums ${isProfit ? 'text-emerald-400' : 'text-red-400'}`}>
-                          {isProfit ? '+' : ''}{totalPnl.toFixed(2)}
+                          {formatSignedUSDT(totalPnl)}
                         </div>
                       </div>
                       <div className="text-right">
@@ -374,12 +375,12 @@ export function PositionPanel({
 
                     {/* Details Grid */}
                     <div className="grid grid-cols-3 gap-x-4 gap-y-2 px-3 pb-2.5">
-                      <DetailCell label="持仓数量" value={mg.totalQuantity.toFixed(4)} />
-                      <DetailCell label="保证金" value={effectiveMargin.toFixed(2)} />
+                      <DetailCell label="持仓数量" value={formatAmount(mg.totalQuantity)} />
+                      <DetailCell label="保证金" value={formatUSDT(effectiveMargin)} />
                       <DetailCell label="保证金比率" value={`${marginRatio.toFixed(2)}%`} />
-                      <DetailCell label="开仓均价" value={mg.weightedEntryPrice.toFixed(prec)} />
-                      <DetailCell label="标记价格" value={price > 0 ? price.toFixed(prec) : '-'} />
-                      <DetailCell label="强平价格" value={liq.toFixed(prec)} valueClassName="text-red-400" />
+                      <DetailCell label="开仓均价" value={formatPrice(mg.weightedEntryPrice, mg.symbol)} />
+                      <DetailCell label="标记价格" value={price > 0 ? formatPrice(price, mg.symbol) : '-'} />
+                      <DetailCell label="强平价格" value={formatPrice(liq, mg.symbol)} valueClassName="text-red-400" />
                     </div>
 
                     {/* TP / SL display strip — aggregated for this group's children */}
@@ -392,7 +393,7 @@ export function PositionPanel({
                       const sls = groupOrders.filter(o => o.reduceKind === 'SL');
                       if (tps.length === 0 && sls.length === 0) return null;
                       const fmtList = (arr: typeof groupOrders) =>
-                        arr.map(o => o.stopPrice.toFixed(prec)).join(' / ');
+                        arr.map(o => formatPrice(o.stopPrice, mg.symbol)).join(' / ');
                       return (
                         <div className="flex items-center gap-3 px-3 pb-2 text-[10px] font-mono tabular-nums">
                           {tps.length > 0 && (
@@ -447,7 +448,6 @@ export function PositionPanel({
               </thead>
               <tbody>
                 {allOrders.map(({ symbol, order }) => {
-                  const prec = getPrecision(symbol);
                   return (
                     <tr key={order.id} className="border-b border-border/30 hover:bg-accent/20">
                       <td className="px-3 py-2">
@@ -478,16 +478,16 @@ export function PositionPanel({
                       <td className="px-3 py-2">
                         {order.reduceOnly ? (
                           <span className="text-muted-foreground">市价平仓</span>
-                        ) : order.price > 0 ? order.price.toFixed(prec) : '市价'}
+                        ) : order.price > 0 ? formatPrice(order.price, symbol) : '市价'}
                       </td>
                       <td className="px-3 py-2">
                         {order.stopPrice > 0 ? (
                           <span className={order.reduceKind === 'TP' ? 'text-emerald-400' : order.reduceKind === 'SL' ? 'text-red-400' : 'text-amber-400'}>
-                            {order.stopPrice.toFixed(prec)}
+                            {formatPrice(order.stopPrice, symbol)}
                           </span>
                         ) : '-'}
                       </td>
-                      <td className="px-3 py-2">{((order.price > 0 ? order.price : (priceMap[symbol] || 0)) * order.quantity).toFixed(2)} USDT</td>
+                      <td className="px-3 py-2">{formatUSDT((order.price > 0 ? order.price : (priceMap[symbol] || 0)) * order.quantity)} USDT</td>
                       <td className="px-3 py-2">{order.leverage}x</td>
                       <td className="px-3 py-2">
                         <Badge
