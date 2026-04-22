@@ -794,18 +794,19 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
     // Credit to single global balance
     setBalance(prev => prev + Math.max(0, returnedMargin));
 
+    // Determine if this position will be fully closed (for OCO cleanup)
+    const willFullyClose = pct >= 1 || pos.quantity * (1 - pct) < 1e-8;
+    const closedPositionId = pos.id;
+
     // Update or remove position
     setPositionsMap(prev => {
       const positions = [...(prev[symbol] || [])];
       if (pct >= 1) {
-        // Full close — remove
         positions.splice(index, 1);
       } else {
-        // Partial close — reduce quantity and margin
         const remaining = positions[index];
         const remainPct = 1 - pct;
         const newQty = remaining.quantity * remainPct;
-        // Guard: if remaining quantity is near-zero, treat as full close
         if (newQty < 1e-8) {
           positions.splice(index, 1);
         } else {
@@ -819,6 +820,31 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
         }
       }
       return { ...prev, [symbol]: positions.filter(p => p.quantity > 1e-8) };
+    });
+
+    // OCO / linked TP-SL maintenance
+    setOrdersMap(prev => {
+      const orders = prev[symbol] || [];
+      if (orders.length === 0) return prev;
+      let changed = false;
+      const next: PendingOrder[] = [];
+      for (const o of orders) {
+        if (o.reduceOnly && o.linkedPositionId === closedPositionId) {
+          if (willFullyClose) {
+            changed = true;
+            continue; // drop the linked order
+          }
+          // partial close: rescale the reduce-only quantity proportionally
+          const remainPct = 1 - pct;
+          const newQty = o.quantity * remainPct;
+          if (newQty < 1e-8) { changed = true; continue; }
+          changed = true;
+          next.push({ ...o, quantity: newQty });
+          continue;
+        }
+        next.push(o);
+      }
+      return changed ? { ...prev, [symbol]: next } : prev;
     });
 
     setTradeHistory(prev => [...prev, {
