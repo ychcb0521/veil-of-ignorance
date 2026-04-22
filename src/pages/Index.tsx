@@ -308,6 +308,103 @@ const Index = () => {
       const entryPrice = Number(triggerPrice);
       if (!Number.isFinite(entryPrice) || entryPrice <= 0) return;
 
+      // === REDUCE-ONLY (TP/SL) PATH: close the linked position atomically ===
+      if (order.reduceOnly && order.linkedPositionId) {
+        const targetSymbol = order.reduceSymbol || symbol;
+        const positions = positionsMap[targetSymbol] || [];
+        const idx = positions.findIndex((p) => p.id === order.linkedPositionId);
+        if (idx === -1) {
+          // Linked position no longer exists (manual close happened) — silently drop
+          return;
+        }
+        const pos = positions[idx];
+        const closeQty = Math.min(pos.quantity, order.quantity);
+        if (closeQty <= 0) return;
+        const pct = pos.quantity > 0 ? closeQty / pos.quantity : 1;
+
+        const closeSide = pos.side === "LONG" ? "SHORT" : "LONG";
+        const fee = calcFee(entryPrice, closeQty, false);
+        const pnl = pos.side === "LONG"
+          ? (entryPrice - pos.entryPrice) * closeQty
+          : (pos.entryPrice - entryPrice) * closeQty;
+        const closedMargin = pos.margin * pct;
+        const closedIso = pos.isolatedMargin != null ? pos.isolatedMargin * pct : undefined;
+        const returnedMargin = pos.marginMode === "isolated" && closedIso != null
+          ? closedIso + pnl - fee
+          : closedMargin + pnl - fee;
+
+        setBalance((prev) => prev + Math.max(0, returnedMargin));
+
+        const willFullyClose = pct >= 1 || pos.quantity * (1 - pct) < 1e-8;
+        const linkedId = pos.id;
+
+        setPositionsMap((prev) => {
+          const list = [...(prev[targetSymbol] || [])];
+          if (willFullyClose) {
+            list.splice(idx, 1);
+          } else {
+            const remainPct = 1 - pct;
+            list[idx] = {
+              ...pos,
+              quantity: pos.quantity * remainPct,
+              margin: pos.margin * remainPct,
+              isolatedMargin: pos.isolatedMargin != null ? pos.isolatedMargin * remainPct : undefined,
+            };
+          }
+          return { ...prev, [targetSymbol]: list.filter((p) => p.quantity > 1e-8) };
+        });
+
+        // OCO: drop the sibling TP/SL bound to the same position
+        setOrdersMap((prev) => {
+          const list = prev[targetSymbol] || [];
+          if (list.length === 0) return prev;
+          let changed = false;
+          const next: PendingOrder[] = [];
+          for (const o of list) {
+            if (o.id === order.id) continue; // current already moved out by caller
+            if (o.reduceOnly && o.linkedPositionId === linkedId) {
+              if (willFullyClose) { changed = true; continue; }
+              // partial: rescale remaining linked orders
+              const newQty = o.quantity * (1 - pct);
+              if (newQty < 1e-8) { changed = true; continue; }
+              changed = true;
+              next.push({ ...o, quantity: newQty });
+              continue;
+            }
+            next.push(o);
+          }
+          return changed ? { ...prev, [targetSymbol]: next } : prev;
+        });
+
+        setTradeHistory((prev) => [
+          ...prev,
+          {
+            id: crypto.randomUUID(),
+            symbol: targetSymbol,
+            side: pos.side,
+            type: "MARKET" as OrderType,
+            action: "CLOSE" as const,
+            entryPrice: pos.entryPrice,
+            exitPrice: entryPrice,
+            quantity: closeQty,
+            leverage: pos.leverage,
+            pnl: pnl - fee,
+            fee,
+            slippage: 0,
+            openTime: pos.openTime || 0,
+            closeTime: openTime,
+          },
+        ]);
+
+        const kindLabel = order.reduceKind === "TP" ? "止盈" : order.reduceKind === "SL" ? "止损" : "条件";
+        const net = pnl - fee;
+        toast.success(`${kindLabel}已触发：${targetSymbol} @ ${entryPrice.toFixed(2)}`, {
+          description: `${net >= 0 ? "+" : ""}${net.toFixed(2)} USDT`,
+        });
+        return;
+      }
+
+      // === REGULAR CONDITIONAL OPEN PATH ===
       const fee = calcFee(entryPrice, order.quantity, false);
       const margin = (order.quantity * entryPrice) / order.leverage;
 
@@ -334,7 +431,7 @@ const Index = () => {
       });
       toast.success(`条件单已触发：${symbol} ${order.side} @ ${entryPrice.toFixed(2)}`);
     },
-    [setBalance, setPositionsMap, setTradeHistory],
+    [positionsMap, setBalance, setPositionsMap, setOrdersMap, setTradeHistory],
   );
 
   const runConditionalMatchingForSymbol = useCallback(
