@@ -448,7 +448,6 @@ export function PositionPanel({
               </thead>
               <tbody>
                 {allOrders.map(({ symbol, order }) => {
-                  const prec = getPrecision(symbol);
                   return (
                     <tr key={order.id} className="border-b border-border/30 hover:bg-accent/20">
                       <td className="px-3 py-2">
