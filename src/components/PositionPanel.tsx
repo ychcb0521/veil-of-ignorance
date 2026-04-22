@@ -382,6 +382,35 @@ export function PositionPanel({
                       <DetailCell label="强平价格" value={liq.toFixed(prec)} valueClassName="text-red-400" />
                     </div>
 
+                    {/* TP / SL display strip — aggregated for this group's children */}
+                    {(() => {
+                      const childIds = new Set(mg.children.map(c => c.position.id));
+                      const groupOrders = (ordersMap[mg.symbol] || []).filter(
+                        o => o.reduceOnly && o.linkedPositionId && childIds.has(o.linkedPositionId)
+                      );
+                      const tps = groupOrders.filter(o => o.reduceKind === 'TP');
+                      const sls = groupOrders.filter(o => o.reduceKind === 'SL');
+                      if (tps.length === 0 && sls.length === 0) return null;
+                      const fmtList = (arr: typeof groupOrders) =>
+                        arr.map(o => o.stopPrice.toFixed(prec)).join(' / ');
+                      return (
+                        <div className="flex items-center gap-3 px-3 pb-2 text-[10px] font-mono tabular-nums">
+                          {tps.length > 0 && (
+                            <span className="flex items-center gap-1">
+                              <span className="text-muted-foreground">止盈</span>
+                              <span className="text-emerald-400">{fmtList(tps)}</span>
+                            </span>
+                          )}
+                          {sls.length > 0 && (
+                            <span className="flex items-center gap-1">
+                              <span className="text-muted-foreground">止损</span>
+                              <span className="text-red-400">{fmtList(sls)}</span>
+                            </span>
+                          )}
+                        </div>
+                      );
+                    })()}
+
                     {/* Action Buttons */}
                     <div className="flex border-t border-border/50">
                       <ActionBtn label="止盈/止损" onClick={(e) => {
