@@ -476,11 +476,15 @@ export function PositionPanel({
                         {order.side === 'LONG' ? '多' : '空'}
                       </td>
                       <td className="px-3 py-2">
-                        {order.price > 0 ? order.price.toFixed(prec) : '市价'}
+                        {order.reduceOnly ? (
+                          <span className="text-muted-foreground">市价平仓</span>
+                        ) : order.price > 0 ? order.price.toFixed(prec) : '市价'}
                       </td>
                       <td className="px-3 py-2">
                         {order.stopPrice > 0 ? (
-                          <span className="text-amber-400">{order.stopPrice.toFixed(prec)}</span>
+                          <span className={order.reduceKind === 'TP' ? 'text-emerald-400' : order.reduceKind === 'SL' ? 'text-red-400' : 'text-amber-400'}>
+                            {order.stopPrice.toFixed(prec)}
+                          </span>
                         ) : '-'}
                       </td>
                       <td className="px-3 py-2">{((order.price > 0 ? order.price : (priceMap[symbol] || 0)) * order.quantity).toFixed(2)} USDT</td>
