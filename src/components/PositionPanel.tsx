@@ -362,7 +362,7 @@ export function PositionPanel({
                       <div>
                         <div className="text-[10px] text-muted-foreground mb-0.5">未实现盈亏 (USDT)</div>
                         <div className={`text-lg font-bold font-mono tabular-nums ${isProfit ? 'text-emerald-400' : 'text-red-400'}`}>
-                          {isProfit ? '+' : ''}{totalPnl.toFixed(2)}
+                          {formatSignedUSDT(totalPnl)}
                         </div>
                       </div>
                       <div className="text-right">
@@ -488,7 +488,7 @@ export function PositionPanel({
                           </span>
                         ) : '-'}
                       </td>
-                      <td className="px-3 py-2">{((order.price > 0 ? order.price : (priceMap[symbol] || 0)) * order.quantity).toFixed(2)} USDT</td>
+                      <td className="px-3 py-2">{formatUSDT((order.price > 0 ? order.price : (priceMap[symbol] || 0)) * order.quantity)} USDT</td>
                       <td className="px-3 py-2">{order.leverage}x</td>
                       <td className="px-3 py-2">
                         <Badge
