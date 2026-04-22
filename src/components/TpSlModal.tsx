@@ -2,6 +2,7 @@ import { useState } from 'react';
 import type { Position } from '@/types/trading';
 import { Slider } from '@/components/ui/slider';
 import { X } from 'lucide-react';
+import { formatPrice } from '@/lib/formatters';
 
 interface Props {
   pos: Position;
@@ -42,9 +43,9 @@ export function TpSlModal({ pos, symbol, markPrice, liqPrice, onClose, onConfirm
         <div className="px-4 py-4 space-y-4">
           {/* Position info row */}
           <div className="grid grid-cols-3 gap-2 text-center">
-            <InfoCell label="开仓价" value={pos.entryPrice.toFixed(2)} />
-            <InfoCell label="标记价" value={markPrice > 0 ? markPrice.toFixed(2) : '-'} />
-            <InfoCell label="强平价" value={liqPrice.toFixed(2)} valueClass="text-red-400" />
+            <InfoCell label="开仓价" value={formatPrice(pos.entryPrice, symbol)} />
+            <InfoCell label="标记价" value={markPrice > 0 ? formatPrice(markPrice, symbol) : '-'} />
+            <InfoCell label="强平价" value={formatPrice(liqPrice, symbol)} valueClass="text-red-400" />
           </div>
 
           <div className="text-[10px] text-muted-foreground text-center">
