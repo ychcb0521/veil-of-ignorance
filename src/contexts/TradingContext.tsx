@@ -795,34 +795,39 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
     setBalance(prev => prev + Math.max(0, returnedMargin));
 
     // Determine if this position will be fully closed (for OCO cleanup)
-    const willFullyClose = pct >= 1 || pos.quantity * (1 - pct) < 1e-8;
+    // Use Epsilon Threshold (1e-6) to defend against JS float precision dust
+    const POSITION_DUST_EPSILON = 1e-6;
+    const remainingQtyAfter = pos.quantity * (1 - pct);
+    const willFullyClose = pct >= 1 || remainingQtyAfter <= POSITION_DUST_EPSILON;
     const closedPositionId = pos.id;
 
-    // Update or remove position
+    // Update or remove position — physical destruction on full close
     setPositionsMap(prev => {
       const positions = [...(prev[symbol] || [])];
-      if (pct >= 1) {
-        positions.splice(index, 1);
-      } else {
-        const remaining = positions[index];
-        const remainPct = 1 - pct;
-        const newQty = remaining.quantity * remainPct;
-        if (newQty < 1e-8) {
-          positions.splice(index, 1);
-        } else {
-          positions[index] = {
-            ...remaining,
-            quantity: newQty,
-            margin: remaining.margin * remainPct,
-            isolatedMargin: remaining.isolatedMargin != null
-              ? remaining.isolatedMargin * remainPct : undefined,
-          };
-        }
+      if (willFullyClose) {
+        // Physically remove by id (defensive: not just by index)
+        const filtered = positions.filter(p => p.id !== closedPositionId && p.quantity > POSITION_DUST_EPSILON);
+        return { ...prev, [symbol]: filtered };
       }
-      return { ...prev, [symbol]: positions.filter(p => p.quantity > 1e-8) };
+      const remaining = positions[index];
+      const remainPct = 1 - pct;
+      const newQty = remaining.quantity * remainPct;
+      if (newQty <= POSITION_DUST_EPSILON) {
+        const filtered = positions.filter(p => p.id !== closedPositionId && p.quantity > POSITION_DUST_EPSILON);
+        return { ...prev, [symbol]: filtered };
+      }
+      positions[index] = {
+        ...remaining,
+        quantity: newQty,
+        margin: remaining.margin * remainPct,
+        isolatedMargin: remaining.isolatedMargin != null
+          ? remaining.isolatedMargin * remainPct : undefined,
+      };
+      // Final sanitization sweep — drop any dust positions
+      return { ...prev, [symbol]: positions.filter(p => p.quantity > POSITION_DUST_EPSILON) };
     });
 
-    // OCO / linked TP-SL maintenance
+    // OCO / linked TP-SL maintenance — drop ALL linked reduce-only orders on full close (orphan prevention)
     setOrdersMap(prev => {
       const orders = prev[symbol] || [];
       if (orders.length === 0) return prev;
@@ -832,12 +837,12 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
         if (o.reduceOnly && o.linkedPositionId === closedPositionId) {
           if (willFullyClose) {
             changed = true;
-            continue; // drop the linked order
+            continue; // drop the linked TP/SL — prevent orphan conditional orders
           }
           // partial close: rescale the reduce-only quantity proportionally
           const remainPct = 1 - pct;
           const newQty = o.quantity * remainPct;
-          if (newQty < 1e-8) { changed = true; continue; }
+          if (newQty <= POSITION_DUST_EPSILON) { changed = true; continue; }
           changed = true;
           next.push({ ...o, quantity: newQty });
           continue;
