@@ -6,6 +6,7 @@ import {
 } from '@/components/ui/dialog';
 import { Slider } from '@/components/ui/slider';
 import { Button } from '@/components/ui/button';
+import { formatPrice, formatAmount, formatUSDT, formatSignedUSDT } from '@/lib/formatters';
 
 interface Props {
   open: boolean;
@@ -131,13 +132,13 @@ export function ClosePositionModal({ open, onClose, symbol, position, posIndex, 
           <div>
             <span className="text-muted-foreground">开仓价格</span>
             <div className="font-mono font-medium text-foreground mt-0.5">
-              {position.entryPrice.toFixed(pricePrecision)}
+              {formatPrice(position.entryPrice, symbol)}
             </div>
           </div>
           <div>
             <span className="text-muted-foreground">标记价格</span>
             <div className="font-mono font-medium text-primary mt-0.5 animate-pulse">
-              {currentPrice.toFixed(pricePrecision)}
+              {formatPrice(currentPrice, symbol)}
             </div>
           </div>
         </div>
@@ -187,7 +188,7 @@ export function ClosePositionModal({ open, onClose, symbol, position, posIndex, 
             />
             <div className="flex items-center justify-between">
               <span className="text-[11px] text-muted-foreground font-mono">
-                ≈ {currentPercentage.toFixed(1)}% · {notionalValue.toFixed(2)} USDT
+                ≈ {currentPercentage.toFixed(1)}% · {formatUSDT(notionalValue)} USDT
               </span>
               <div className="flex gap-1">
                 {QUICK_PERCENTAGES.map(pct => {
@@ -215,24 +216,24 @@ export function ClosePositionModal({ open, onClose, symbol, position, posIndex, 
         <div className="rounded-lg border border-border bg-accent/30 p-3 space-y-2">
           <div className="flex items-center justify-between text-xs">
             <span className="text-muted-foreground">仓位总数量</span>
-            <span className="font-mono text-foreground">{position.quantity.toFixed(QTY_PRECISION)} {baseCoin}</span>
+            <span className="font-mono text-foreground">{formatAmount(position.quantity, QTY_PRECISION)} {baseCoin}</span>
           </div>
           <div className="flex items-center justify-between text-xs">
             <span className="text-muted-foreground">平仓数量</span>
-            <span className="font-mono text-foreground">{closeAmount.toFixed(QTY_PRECISION)} {baseCoin}</span>
+            <span className="font-mono text-foreground">{formatAmount(closeAmount, QTY_PRECISION)} {baseCoin}</span>
           </div>
           <div className="flex items-center justify-between text-xs">
             <span className="text-muted-foreground">平仓价值</span>
-            <span className="font-mono text-foreground">{notionalValue.toFixed(2)} USDT</span>
+            <span className="font-mono text-foreground">{formatUSDT(notionalValue)} USDT</span>
           </div>
           <div className="flex items-center justify-between text-xs">
             <span className="text-muted-foreground">预计退回保证金</span>
-            <span className="font-mono text-foreground">{releasedMargin.toFixed(2)} USDT</span>
+            <span className="font-mono text-foreground">{formatUSDT(releasedMargin)} USDT</span>
           </div>
           <div className="border-t border-border pt-2 flex items-center justify-between">
             <span className="text-xs font-medium text-muted-foreground">预计盈亏</span>
             <span className={`text-sm font-bold font-mono tabular-nums ${isProfit ? 'text-emerald-400' : 'text-red-400'}`}>
-              {isProfit ? '+' : ''}{estimatedPnl.toFixed(2)} USDT
+              {formatSignedUSDT(estimatedPnl)} USDT
             </span>
           </div>
         </div>
