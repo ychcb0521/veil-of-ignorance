@@ -123,10 +123,44 @@ export function getConditionalTriggerDecisionFromRange(
 ): ConditionalTriggerDecision | null {
   if (!isConditionalPendingOrder(order)) return null;
 
-  const normalizedSide = resolveConditionalOrderSide(order);
   const triggerPrice = resolveConditionalTriggerPrice(order);
+  const highNum = Number(range.high);
+  const lowNum = Number(range.low);
 
+  if (!Number.isFinite(highNum) || !Number.isFinite(lowNum) || !Number.isFinite(triggerPrice)) {
+    return null;
+  }
+
+  // ===== AUTHORITATIVE PATH: explicit operator / triggerDirection =====
+  // For reduce-only TP/SL orders, `order.side` is the *closing* side (opposite of position),
+  // which inverts the natural side-based trigger logic. The placement code (handlePlaceTpSl)
+  // sets `operator` and `triggerDirection` to encode the correct quadrant per
+  // (positionSide × TP/SL). Honor these whenever present — they are the ground truth.
+  const op = (order as any).operator as '>=' | '<=' | undefined;
+  const dir = order.triggerDirection as 'UP' | 'DOWN' | undefined;
+  const useUp = op === '>=' || dir === 'UP';
+  const useDown = op === '<=' || dir === 'DOWN';
+
+  if (useUp || useDown) {
+    const triggered = useUp ? highNum >= triggerPrice : lowNum <= triggerPrice;
+    if (order.reduceOnly && order.reduceKind) {
+      // Debug breadcrumb for TP/SL audits — silent in production logs unless triggered or near-miss
+      const posSide = (order as any).reducePositionSide ?? 'N/A';
+      // eslint-disable-next-line no-console
+      console.log(
+        `[TP/SL Check] kind=${order.reduceKind} posSide=${posSide} dir=${useUp ? 'UP' : 'DOWN'} ` +
+          `low=${lowNum} high=${highNum} trigger=${triggerPrice} fired=${triggered}`,
+      );
+    }
+    return {
+      currentPriceNum: useUp ? highNum : lowNum,
+      triggerPriceNum: triggerPrice,
+      triggered,
+    };
+  }
+
+  // ===== FALLBACK: legacy side-based decision (open-side conditional orders only) =====
+  const normalizedSide = resolveConditionalOrderSide(order);
   if (!normalizedSide) return null;
-
   return getConditionalTriggerDecisionForRange(normalizedSide, triggerPrice, range);
 }
