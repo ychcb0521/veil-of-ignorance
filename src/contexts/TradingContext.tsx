@@ -948,26 +948,59 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
     toast.info('委托已撤销');
   }, []);
 
-  // ===== Add Isolated Margin (top-up) =====
-  const handleAddIsolatedMargin = useCallback((symbol: string, posIndex: number, amount: number) => {
-    if (amount <= 0) return;
-    const avail = calcAvailable(balance, positionsMap);
-    const actual = Math.min(amount, avail);
-    if (actual <= 0) { toast.error('可用余额不足'); return; }
+  // ===== Adjust Isolated Margin (add OR remove) =====
+  // signedDelta > 0 = add (debit available, credit position margin)
+  // signedDelta < 0 = remove (credit available, debit position margin, guarded by initial margin floor)
+  const handleAdjustMargin = useCallback((symbol: string, posIndex: number, signedDelta: number) => {
+    if (!signedDelta || isNaN(signedDelta)) return;
+    const positions = positionsMapRef.current[symbol] || [];
+    const pos = positions[posIndex];
+    if (!pos) return;
+    if (pos.marginMode !== 'isolated') {
+      toast.error('全仓模式不支持单仓位调整保证金');
+      return;
+    }
 
-    setBalance(prev => prev - actual);
-    setPositionsMap(prev => {
-      const positions = [...(prev[symbol] || [])];
-      const pos = positions[posIndex];
-      if (!pos || pos.marginMode !== 'isolated') return prev;
-      positions[posIndex] = {
-        ...pos,
-        isolatedMargin: (pos.isolatedMargin || pos.margin) + actual,
-      };
-      return { ...prev, [symbol]: positions };
-    });
-    toast.success(`已追加 ${actual.toFixed(2)} USDT 保证金`);
-  }, [balance, positionsMap]);
+    const currentMargin = pos.isolatedMargin ?? pos.margin;
+    const initialMargin = (pos.quantity * pos.entryPrice) / pos.leverage;
+
+    if (signedDelta > 0) {
+      // ADD
+      const avail = calcAvailable(balanceRef.current, positionsMapRef.current);
+      const actual = Math.min(signedDelta, avail);
+      if (actual <= 1e-8) { toast.error('可用余额不足'); return; }
+      setBalance(prev => prev - actual);
+      setPositionsMap(prev => {
+        const arr = [...(prev[symbol] || [])];
+        const p = arr[posIndex];
+        if (!p) return prev;
+        arr[posIndex] = { ...p, isolatedMargin: (p.isolatedMargin ?? p.margin) + actual };
+        return { ...prev, [symbol]: arr };
+      });
+    } else {
+      // REMOVE — guard by initial margin floor
+      const requested = -signedDelta;
+      const maxRemovable = Math.max(0, currentMargin - initialMargin);
+      const actual = Math.min(requested, maxRemovable);
+      if (actual <= 1e-8) {
+        toast.error('已达初始保证金下限，无法继续减少');
+        return;
+      }
+      setBalance(prev => prev + actual);
+      setPositionsMap(prev => {
+        const arr = [...(prev[symbol] || [])];
+        const p = arr[posIndex];
+        if (!p) return prev;
+        arr[posIndex] = { ...p, isolatedMargin: (p.isolatedMargin ?? p.margin) - actual };
+        return { ...prev, [symbol]: arr };
+      });
+    }
+  }, []);
+
+  // Backwards-compat alias: legacy "+只追加" callsites
+  const handleAddIsolatedMargin = useCallback((symbol: string, posIndex: number, amount: number) => {
+    handleAdjustMargin(symbol, posIndex, Math.abs(amount));
+  }, [handleAdjustMargin]);
 
   // ===== Clear Symbol Data & Financial Reversal =====
   const handleClearSymbolData = useCallback((symbol: string) => {
