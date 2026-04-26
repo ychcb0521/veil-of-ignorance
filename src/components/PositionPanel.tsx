@@ -3,7 +3,8 @@ import { usePersistedState } from '@/hooks/usePersistedState';
 import type { Position, PendingOrder, TradeRecord } from '@/types/trading';
 import { calcUnrealizedPnl, calcROE, calcLiquidationPrice, MAINTENANCE_MARGIN_RATE } from '@/types/trading';
 import type { PositionsMap, OrdersMap, PriceMap } from '@/contexts/TradingContext';
-import { X, Trash2, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
+import { X, Trash2, ArrowUpDown, ArrowUp, ArrowDown, Plus } from 'lucide-react';
+import { AdjustMarginModal } from '@/components/AdjustMarginModal';
 import { toast } from 'sonner';
 import { LeverageModal } from '@/components/LeverageModal';
 import { TpSlModal } from '@/components/TpSlModal';
@@ -38,6 +39,7 @@ interface Props {
   onTabChange: (tab: string) => void;
   onCloseAllPositions?: (symbols: { symbol: string; index: number }[]) => void;
   pricePrecision?: number;
+  availableBalance?: number;
 }
 
 /** Get display precision for a symbol based on its price magnitude */
@@ -53,8 +55,9 @@ function getSymbolPrecision(price: number): number {
 export function PositionPanel({
   positionsMap, ordersMap, tradeHistory, priceMap, activeSymbol,
   onClosePosition, onCancelOrder, onAddIsolatedMargin, onClearSymbolData,
-  activeTab, onTabChange, onCloseAllPositions, pricePrecision, onPlaceTpSl,
+  activeTab, onTabChange, onCloseAllPositions, pricePrecision, onPlaceTpSl, availableBalance = 0,
 }: Props) {
+  const [adjustMarginModal, setAdjustMarginModal] = useState<{ symbol: string; index: number; pos: Position } | null>(null);
   const [leverageModal, setLeverageModal] = useState<{ symbol: string; index: number; pos: Position } | null>(null);
   const [tpslModal, setTpslModal] = useState<{ symbol: string; index: number; pos: Position } | null>(null);
   const [closeModal, setCloseModal] = useState<{ symbol: string; index: number; pos: Position } | null>(null);
@@ -71,6 +74,7 @@ export function PositionPanel({
   type HistorySort = 'time' | 'pnl-desc' | 'pnl-asc' | 'pct-desc' | 'pct-asc';
   const [historySort, setHistorySort] = useState<HistorySort>('time');
   const [historySymbolFilter, setHistorySymbolFilter] = useState<string>('ALL');
+
 
 
   const toggleSort = (field: 'pnl' | 'pct') => {
@@ -382,7 +386,26 @@ export function PositionPanel({
                     {/* Details Grid */}
                     <div className="grid grid-cols-3 gap-x-4 gap-y-2 px-3 pb-2.5">
                       <DetailCell label="持仓数量" value={formatAmount(mg.totalQuantity)} />
-                      <DetailCell label="保证金" value={formatUSDT(effectiveMargin)} />
+                      <div className="min-w-0">
+                        <div className="text-[10px] text-muted-foreground truncate">保证金</div>
+                        <div className="flex items-center gap-1">
+                          <div className="text-xs font-mono tabular-nums text-foreground">{formatUSDT(effectiveMargin)}</div>
+                          {onAddIsolatedMargin && mg.children.length > 0 && (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                const first = mg.children[0];
+                                setAdjustMarginModal({ symbol: mg.symbol, index: first.index, pos: first.position });
+                              }}
+                              title="调整保证金"
+                              className="inline-flex items-center justify-center w-4 h-4 rounded border border-border/60 bg-muted/40 text-muted-foreground hover:text-primary hover:border-primary/60 hover:bg-primary/10 transition-colors active:scale-90"
+                            >
+                              <Plus className="w-2.5 h-2.5" />
+                            </button>
+                          )}
+                        </div>
+                      </div>
                       <DetailCell label="保证金比率" value={`${marginRatio.toFixed(2)}%`} />
                       <DetailCell label="开仓均价" value={formatPrice(mg.weightedEntryPrice, mg.symbol)} />
                       <DetailCell label="标记价格" value={price > 0 ? formatPrice(price, mg.symbol) : '-'} />
@@ -676,6 +699,17 @@ export function PositionPanel({
           currentPrice={priceMap[closeModal.symbol] || 0}
           pricePrecision={getPrecision(closeModal.symbol)}
           onConfirm={handleCloseConfirm}
+        />
+      )}
+
+      {adjustMarginModal && onAddIsolatedMargin && (
+        <AdjustMarginModal
+          open={!!adjustMarginModal}
+          onOpenChange={(v) => { if (!v) setAdjustMarginModal(null); }}
+          symbol={adjustMarginModal.symbol}
+          position={adjustMarginModal.pos}
+          available={availableBalance}
+          onConfirm={(amount) => onAddIsolatedMargin(adjustMarginModal.symbol, adjustMarginModal.index, amount)}
         />
       )}
 
