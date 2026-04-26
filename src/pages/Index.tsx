@@ -270,6 +270,7 @@ const Index = () => {
   const effectiveSimTimeRef = useRef(effectiveSimTime);
   const priceProtectionRef = useRef(priceProtection);
   const ordersMapRef = useRef(ordersMap);
+  const positionsMapRef = useRef(positionsMap);
   const conditionalTriggerLocksRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
@@ -290,6 +291,9 @@ const Index = () => {
   useEffect(() => {
     ordersMapRef.current = ordersMap;
   }, [ordersMap]);
+  useEffect(() => {
+    positionsMapRef.current = positionsMap;
+  }, [positionsMap]);
   useEffect(() => {
     const activeOrderIds = new Set(
       Object.values(ordersMap).flatMap((symbolOrders) => symbolOrders.map((order) => order.id)),
@@ -312,18 +316,29 @@ const Index = () => {
       // === REDUCE-ONLY (TP/SL) PATH: close the linked position atomically ===
       if (order.reduceOnly && order.linkedPositionId) {
         const targetSymbol = order.reduceSymbol || symbol;
-        const positions = positionsMap[targetSymbol] || [];
-        const idx = positions.findIndex((p) => p.id === order.linkedPositionId);
-        if (idx === -1) {
+        // CRITICAL: read live positions via ref to bypass stale closures during high-speed ticks
+        const positions = positionsMapRef.current[targetSymbol] || [];
+        const linkedId = order.linkedPositionId;
+        const pos = positions.find((p) => p.id === linkedId);
+        if (!pos) {
           // Linked position no longer exists (manual close happened) — silently drop
+          console.log("[TP/SL Skip] linked position missing", { orderId: order.id, linkedId });
           return;
         }
-        const pos = positions[idx];
         const closeQty = Math.min(pos.quantity, order.quantity);
         if (closeQty <= 0) return;
         const pct = pos.quantity > 0 ? closeQty / pos.quantity : 1;
 
-        const closeSide = pos.side === "LONG" ? "SHORT" : "LONG";
+        console.log("[TP/SL Triggered]", {
+          orderId: order.id,
+          kind: order.reduceKind,
+          linkedId,
+          posSide: pos.side,
+          triggerPrice: entryPrice,
+          posQty: pos.quantity,
+          closeQty,
+        });
+
         const fee = calcFee(entryPrice, closeQty, false);
         const pnl = pos.side === "LONG"
           ? (entryPrice - pos.entryPrice) * closeQty
@@ -336,23 +351,27 @@ const Index = () => {
 
         setBalance((prev) => prev + Math.max(0, returnedMargin));
 
-        const willFullyClose = pct >= 1 || pos.quantity * (1 - pct) < 1e-8;
-        const linkedId = pos.id;
+        const willFullyClose = pct >= 1 || pos.quantity * (1 - pct) < 1e-6;
 
+        // Physical destruction by id (not by stale index)
         setPositionsMap((prev) => {
-          const list = [...(prev[targetSymbol] || [])];
+          const list = prev[targetSymbol] || [];
           if (willFullyClose) {
-            list.splice(idx, 1);
-          } else {
-            const remainPct = 1 - pct;
-            list[idx] = {
-              ...pos,
-              quantity: pos.quantity * remainPct,
-              margin: pos.margin * remainPct,
-              isolatedMargin: pos.isolatedMargin != null ? pos.isolatedMargin * remainPct : undefined,
-            };
+            return { ...prev, [targetSymbol]: list.filter((p) => p.id !== linkedId && p.quantity > 1e-6) };
           }
-          return { ...prev, [targetSymbol]: list.filter((p) => p.quantity > 1e-8) };
+          const remainPct = 1 - pct;
+          const next = list
+            .map((p) => {
+              if (p.id !== linkedId) return p;
+              return {
+                ...p,
+                quantity: p.quantity * remainPct,
+                margin: p.margin * remainPct,
+                isolatedMargin: p.isolatedMargin != null ? p.isolatedMargin * remainPct : undefined,
+              };
+            })
+            .filter((p) => p.quantity > 1e-6);
+          return { ...prev, [targetSymbol]: next };
         });
 
         // OCO: drop the sibling TP/SL bound to the same position
@@ -432,7 +451,7 @@ const Index = () => {
       });
       toast.success(`条件单已触发：${symbol} ${order.side} @ ${entryPrice.toFixed(2)}`);
     },
-    [positionsMap, setBalance, setPositionsMap, setOrdersMap, setTradeHistory],
+    [setBalance, setPositionsMap, setOrdersMap, setTradeHistory],
   );
 
   const runConditionalMatchingForSymbol = useCallback(
@@ -459,35 +478,45 @@ const Index = () => {
         const remaining: PendingOrder[] = [];
 
         for (const order of orders) {
-          if (order.type !== "CONDITIONAL") {
-            remaining.push(order);
-            continue;
-          }
+          try {
+            if (order.type !== "CONDITIONAL") {
+              remaining.push(order);
+              continue;
+            }
 
-          if (order.status !== "PENDING" || conditionalTriggerLocksRef.current.has(order.id)) {
-            remaining.push(order);
-            continue;
-          }
+            if (order.status !== "PENDING" || conditionalTriggerLocksRef.current.has(order.id)) {
+              remaining.push(order);
+              continue;
+            }
 
-          const decision = getConditionalTriggerDecisionFromRange(order, candle);
-          if (!decision?.triggered) {
-            remaining.push(order);
-            continue;
-          }
+            const decision = getConditionalTriggerDecisionFromRange(order, candle);
+            if (!decision?.triggered) {
+              remaining.push(order);
+              continue;
+            }
 
-          conditionalTriggerLocksRef.current.add(order.id);
-          triggeredOrders.push({
-            order: { ...order, status: "FILLED" as const },
-            triggerPrice: decision.triggerPriceNum,
-          });
-          changed = true;
+            conditionalTriggerLocksRef.current.add(order.id);
+            triggeredOrders.push({
+              order: { ...order, status: "FILLED" as const },
+              triggerPrice: decision.triggerPriceNum,
+            });
+            changed = true;
+          } catch (err) {
+            // Defensive: never let a single bad order break the matching loop
+            console.error("[TP/SL Match Error]", { orderId: order?.id, err });
+            remaining.push(order);
+          }
         }
 
         return changed ? { ...prev, [symbol]: remaining } : prev;
       });
 
       triggeredOrders.forEach(({ order, triggerPrice }) => {
-        createTriggeredConditionalPosition(symbol, order, triggerPrice, openTime);
+        try {
+          createTriggeredConditionalPosition(symbol, order, triggerPrice, openTime);
+        } catch (err) {
+          console.error("[TP/SL Execute Error]", { orderId: order?.id, err });
+        }
       });
     },
     [createTriggeredConditionalPosition, setOrdersMap],
