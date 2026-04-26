@@ -412,7 +412,12 @@ export function PositionPanel({
                       <DetailCell label="保证金比率" value={`${marginRatio.toFixed(2)}%`} />
                       <DetailCell label="开仓均价" value={formatPrice(mg.weightedEntryPrice, mg.symbol)} />
                       <DetailCell label="标记价格" value={price > 0 ? formatPrice(price, mg.symbol) : '-'} />
-                      <DetailCell label="强平价格" value={liq > 0 ? formatPrice(liq, mg.symbol) : '--'} valueClassName={liq > 0 ? 'text-red-400' : 'text-muted-foreground'} />
+                      <DetailCell
+                        key={`liq-${mg.totalIsolatedMargin ?? mg.totalMargin}-${mg.totalQuantity}-${mg.weightedEntryPrice}`}
+                        label="强平价格"
+                        value={liq > 0 ? formatPrice(liq, mg.symbol) : '0.0000'}
+                        valueClassName={liq > 0 ? 'text-red-400' : 'text-emerald-400'}
+                      />
                     </div>
 
                     {/* TP / SL display strip — aggregated for this group's children */}
@@ -709,7 +714,7 @@ export function PositionPanel({
           open={!!adjustMarginModal}
           onClose={() => setAdjustMarginModal(null)}
           symbol={adjustMarginModal.symbol}
-          position={adjustMarginModal.pos}
+          position={positionsMap[adjustMarginModal.symbol]?.[adjustMarginModal.index] ?? adjustMarginModal.pos}
           availableBalance={availableBalance}
           onConfirm={(signedDelta) => {
             onAdjustMargin(adjustMarginModal.symbol, adjustMarginModal.index, signedDelta);
