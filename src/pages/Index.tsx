@@ -270,6 +270,7 @@ const Index = () => {
   const effectiveSimTimeRef = useRef(effectiveSimTime);
   const priceProtectionRef = useRef(priceProtection);
   const ordersMapRef = useRef(ordersMap);
+  const positionsMapRef = useRef(positionsMap);
   const conditionalTriggerLocksRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
@@ -290,6 +291,9 @@ const Index = () => {
   useEffect(() => {
     ordersMapRef.current = ordersMap;
   }, [ordersMap]);
+  useEffect(() => {
+    positionsMapRef.current = positionsMap;
+  }, [positionsMap]);
   useEffect(() => {
     const activeOrderIds = new Set(
       Object.values(ordersMap).flatMap((symbolOrders) => symbolOrders.map((order) => order.id)),
