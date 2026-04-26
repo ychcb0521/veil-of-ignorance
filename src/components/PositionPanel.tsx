@@ -415,8 +415,8 @@ export function PositionPanel({
                       <DetailCell
                         key={`liq-${mg.totalIsolatedMargin ?? mg.totalMargin}-${mg.totalQuantity}-${mg.weightedEntryPrice}`}
                         label="强平价格"
-                        value={liq > 0 ? formatPrice(liq, mg.symbol) : '0.0000'}
-                        valueClassName={liq > 0 ? 'text-red-400' : 'text-emerald-400'}
+                        value={isFinite(liq) ? formatPrice(liq, mg.symbol) : '--'}
+                        valueClassName="text-red-400"
                       />
                     </div>
 

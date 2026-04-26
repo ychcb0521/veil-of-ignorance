@@ -45,7 +45,7 @@ export function TpSlModal({ pos, symbol, markPrice, liqPrice, onClose, onConfirm
           <div className="grid grid-cols-3 gap-2 text-center">
             <InfoCell label="开仓价" value={formatPrice(pos.entryPrice, symbol)} />
             <InfoCell label="标记价" value={markPrice > 0 ? formatPrice(markPrice, symbol) : '-'} />
-            <InfoCell label="强平价" value={liqPrice > 0 ? formatPrice(liqPrice, symbol) : '--'} valueClass={liqPrice > 0 ? 'text-red-400' : 'text-muted-foreground'} />
+            <InfoCell label="强平价" value={isFinite(liqPrice) ? formatPrice(liqPrice, symbol) : '--'} valueClass="text-red-400" />
           </div>
 
           <div className="text-[10px] text-muted-foreground text-center">
