@@ -143,6 +143,7 @@ const Index = () => {
     handleCancelOrder,
     handlePlaceTpSl,
     handleAddIsolatedMargin,
+    handleAdjustMargin,
     handleClearSymbolData,
     liquidationOpen,
     liquidationDetails,
@@ -1617,6 +1618,8 @@ const Index = () => {
                     onClosePosition={handleClosePositionForSymbol}
                     onCancelOrder={handleCancelOrderForSymbol}
                     onAddIsolatedMargin={handleAddIsolatedMargin}
+                    onAdjustMargin={handleAdjustMargin}
+                    availableBalance={getEffectiveAvailable(activeSymbol)}
                     onClearSymbolData={handleClearSymbolData}
                     onPlaceTpSl={handlePlaceTpSl}
                     pricePrecision={pricePrecision}

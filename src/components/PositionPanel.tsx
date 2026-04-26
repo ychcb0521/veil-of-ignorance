@@ -3,11 +3,12 @@ import { usePersistedState } from '@/hooks/usePersistedState';
 import type { Position, PendingOrder, TradeRecord } from '@/types/trading';
 import { calcUnrealizedPnl, calcROE, calcLiquidationPrice, MAINTENANCE_MARGIN_RATE } from '@/types/trading';
 import type { PositionsMap, OrdersMap, PriceMap } from '@/contexts/TradingContext';
-import { X, Trash2, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
+import { X, Trash2, ArrowUpDown, ArrowUp, ArrowDown, Plus } from 'lucide-react';
 import { toast } from 'sonner';
 import { LeverageModal } from '@/components/LeverageModal';
 import { TpSlModal } from '@/components/TpSlModal';
 import { ClosePositionModal } from '@/components/ClosePositionModal';
+import { AdjustMarginModal } from '@/components/AdjustMarginModal';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Badge } from '@/components/ui/badge';
 import { formatPrice, formatAmount, formatUSDT, formatSignedUSDT } from '@/lib/formatters';
@@ -32,6 +33,8 @@ interface Props {
   onClosePosition: (symbol: string, index: number, percentage?: number) => void;
   onCancelOrder: (symbol: string, orderId: string) => void;
   onAddIsolatedMargin?: (symbol: string, posIndex: number, amount: number) => void;
+  onAdjustMargin?: (symbol: string, posIndex: number, signedDelta: number) => void;
+  availableBalance?: number;
   onClearSymbolData?: (symbol: string) => void;
   onPlaceTpSl?: (symbol: string, pos: Position, tp: number | null, sl: number | null, pct: number) => void;
   activeTab: string;
@@ -52,12 +55,14 @@ function getSymbolPrecision(price: number): number {
 
 export function PositionPanel({
   positionsMap, ordersMap, tradeHistory, priceMap, activeSymbol,
-  onClosePosition, onCancelOrder, onAddIsolatedMargin, onClearSymbolData,
+  onClosePosition, onCancelOrder, onAddIsolatedMargin, onAdjustMargin, availableBalance = 0,
+  onClearSymbolData,
   activeTab, onTabChange, onCloseAllPositions, pricePrecision, onPlaceTpSl,
 }: Props) {
   const [leverageModal, setLeverageModal] = useState<{ symbol: string; index: number; pos: Position } | null>(null);
   const [tpslModal, setTpslModal] = useState<{ symbol: string; index: number; pos: Position } | null>(null);
   const [closeModal, setCloseModal] = useState<{ symbol: string; index: number; pos: Position } | null>(null);
+  const [adjustMarginModal, setAdjustMarginModal] = useState<{ symbol: string; index: number; pos: Position } | null>(null);
   const [closingKey, setClosingKey] = useState<string | null>(null);
   const [hideOtherContracts, setHideOtherContracts] = useState(false);
   const [closeAllConfirmOpen, setCloseAllConfirmOpen] = useState(false);
@@ -382,7 +387,28 @@ export function PositionPanel({
                     {/* Details Grid */}
                     <div className="grid grid-cols-3 gap-x-4 gap-y-2 px-3 pb-2.5">
                       <DetailCell label="持仓数量" value={formatAmount(mg.totalQuantity)} />
-                      <DetailCell label="保证金" value={formatUSDT(effectiveMargin)} />
+                      <div className="min-w-0">
+                        <div className="text-[10px] text-muted-foreground truncate">保证金</div>
+                        <div className="flex items-center gap-1">
+                          <span className="text-xs font-mono tabular-nums text-foreground">
+                            {formatUSDT(effectiveMargin)}
+                          </span>
+                          {mg.marginMode === 'isolated' && mg.children.length === 1 && onAdjustMargin && (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                const first = mg.children[0];
+                                setAdjustMarginModal({ symbol: mg.symbol, index: first.index, pos: first.position });
+                              }}
+                              title="调整保证金"
+                              className="inline-flex items-center justify-center w-4 h-4 rounded border border-border bg-muted/40 hover:bg-primary/20 hover:border-primary/60 text-muted-foreground hover:text-primary transition-colors active:scale-95"
+                            >
+                              <Plus className="w-2.5 h-2.5" strokeWidth={3} />
+                            </button>
+                          )}
+                        </div>
+                      </div>
                       <DetailCell label="保证金比率" value={`${marginRatio.toFixed(2)}%`} />
                       <DetailCell label="开仓均价" value={formatPrice(mg.weightedEntryPrice, mg.symbol)} />
                       <DetailCell label="标记价格" value={price > 0 ? formatPrice(price, mg.symbol) : '-'} />
@@ -676,6 +702,18 @@ export function PositionPanel({
           currentPrice={priceMap[closeModal.symbol] || 0}
           pricePrecision={getPrecision(closeModal.symbol)}
           onConfirm={handleCloseConfirm}
+        />
+      )}
+      {adjustMarginModal && onAdjustMargin && (
+        <AdjustMarginModal
+          open={!!adjustMarginModal}
+          onClose={() => setAdjustMarginModal(null)}
+          symbol={adjustMarginModal.symbol}
+          position={adjustMarginModal.pos}
+          availableBalance={availableBalance}
+          onConfirm={(signedDelta) => {
+            onAdjustMargin(adjustMarginModal.symbol, adjustMarginModal.index, signedDelta);
+          }}
         />
       )}
 
