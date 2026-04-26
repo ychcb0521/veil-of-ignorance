@@ -1060,7 +1060,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
     currentPrice, pricePrecision, quantityPrecision, setPricePrecision, setQuantityPrecision,
     activeSymbols,
     handlePlaceOrder, handleClosePosition, handleCancelOrder, handlePlaceTpSl,
-    handleAddIsolatedMargin, handleClearSymbolData,
+    handleAddIsolatedMargin, handleAdjustMargin, handleClearSymbolData,
     fundingRate: FUNDING_RATE,
     liquidationOpen, liquidationDetails, closeLiquidationModal,
     timeMode, setTimeMode,
