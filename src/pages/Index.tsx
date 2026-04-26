@@ -316,18 +316,29 @@ const Index = () => {
       // === REDUCE-ONLY (TP/SL) PATH: close the linked position atomically ===
       if (order.reduceOnly && order.linkedPositionId) {
         const targetSymbol = order.reduceSymbol || symbol;
-        const positions = positionsMap[targetSymbol] || [];
-        const idx = positions.findIndex((p) => p.id === order.linkedPositionId);
-        if (idx === -1) {
+        // CRITICAL: read live positions via ref to bypass stale closures during high-speed ticks
+        const positions = positionsMapRef.current[targetSymbol] || [];
+        const linkedId = order.linkedPositionId;
+        const pos = positions.find((p) => p.id === linkedId);
+        if (!pos) {
           // Linked position no longer exists (manual close happened) — silently drop
+          console.log("[TP/SL Skip] linked position missing", { orderId: order.id, linkedId });
           return;
         }
-        const pos = positions[idx];
         const closeQty = Math.min(pos.quantity, order.quantity);
         if (closeQty <= 0) return;
         const pct = pos.quantity > 0 ? closeQty / pos.quantity : 1;
 
-        const closeSide = pos.side === "LONG" ? "SHORT" : "LONG";
+        console.log("[TP/SL Triggered]", {
+          orderId: order.id,
+          kind: order.reduceKind,
+          linkedId,
+          posSide: pos.side,
+          triggerPrice: entryPrice,
+          posQty: pos.quantity,
+          closeQty,
+        });
+
         const fee = calcFee(entryPrice, closeQty, false);
         const pnl = pos.side === "LONG"
           ? (entryPrice - pos.entryPrice) * closeQty
@@ -340,23 +351,27 @@ const Index = () => {
 
         setBalance((prev) => prev + Math.max(0, returnedMargin));
 
-        const willFullyClose = pct >= 1 || pos.quantity * (1 - pct) < 1e-8;
-        const linkedId = pos.id;
+        const willFullyClose = pct >= 1 || pos.quantity * (1 - pct) < 1e-6;
 
+        // Physical destruction by id (not by stale index)
         setPositionsMap((prev) => {
-          const list = [...(prev[targetSymbol] || [])];
+          const list = prev[targetSymbol] || [];
           if (willFullyClose) {
-            list.splice(idx, 1);
-          } else {
-            const remainPct = 1 - pct;
-            list[idx] = {
-              ...pos,
-              quantity: pos.quantity * remainPct,
-              margin: pos.margin * remainPct,
-              isolatedMargin: pos.isolatedMargin != null ? pos.isolatedMargin * remainPct : undefined,
-            };
+            return { ...prev, [targetSymbol]: list.filter((p) => p.id !== linkedId && p.quantity > 1e-6) };
           }
-          return { ...prev, [targetSymbol]: list.filter((p) => p.quantity > 1e-8) };
+          const remainPct = 1 - pct;
+          const next = list
+            .map((p) => {
+              if (p.id !== linkedId) return p;
+              return {
+                ...p,
+                quantity: p.quantity * remainPct,
+                margin: p.margin * remainPct,
+                isolatedMargin: p.isolatedMargin != null ? p.isolatedMargin * remainPct : undefined,
+              };
+            })
+            .filter((p) => p.quantity > 1e-6);
+          return { ...prev, [targetSymbol]: next };
         });
 
         // OCO: drop the sibling TP/SL bound to the same position
