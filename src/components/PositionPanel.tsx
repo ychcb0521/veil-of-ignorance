@@ -39,6 +39,7 @@ interface Props {
   onTabChange: (tab: string) => void;
   onCloseAllPositions?: (symbols: { symbol: string; index: number }[]) => void;
   pricePrecision?: number;
+  availableBalance?: number;
 }
 
 /** Get display precision for a symbol based on its price magnitude */
