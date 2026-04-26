@@ -948,26 +948,52 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
     toast.info('委托已撤销');
   }, []);
 
-  // ===== Add Isolated Margin (top-up) =====
+  // ===== Adjust Position Margin (top-up; supports both isolated & cross) =====
+  // - Isolated: deducts from wallet balance; increases isolatedMargin & margin.
+  // - Cross   : balance unchanged (wallet equity backs all crosses); just increases pos.margin
+  //             which automatically reduces "available" via calcAvailable, and pushes liquidation away.
+  // Never mutates `quantity` or `entryPrice`.
   const handleAddIsolatedMargin = useCallback((symbol: string, posIndex: number, amount: number) => {
-    if (amount <= 0) return;
-    const avail = calcAvailable(balance, positionsMap);
-    const actual = Math.min(amount, avail);
-    if (actual <= 0) { toast.error('可用余额不足'); return; }
+    if (!Number.isFinite(amount) || amount <= 0) {
+      toast.error('请输入大于 0 的追加金额');
+      return;
+    }
+    const positions = positionsMapRef.current[symbol] || [];
+    const pos = positions[posIndex];
+    if (!pos) { toast.error('持仓不存在'); return; }
 
-    setBalance(prev => prev - actual);
-    setPositionsMap(prev => {
-      const positions = [...(prev[symbol] || [])];
-      const pos = positions[posIndex];
-      if (!pos || pos.marginMode !== 'isolated') return prev;
-      positions[posIndex] = {
-        ...pos,
-        isolatedMargin: (pos.isolatedMargin || pos.margin) + actual,
-      };
-      return { ...prev, [symbol]: positions };
-    });
-    toast.success(`已追加 ${actual.toFixed(2)} USDT 保证金`);
-  }, [balance, positionsMap]);
+    const available = calcAvailable(balanceRef.current, positionsMapRef.current);
+    if (amount > available + 1e-8) {
+      toast.error('可用余额不足');
+      return;
+    }
+
+    if (pos.marginMode === 'isolated') {
+      setBalance(prev => prev - amount);
+      setPositionsMap(prev => {
+        const arr = [...(prev[symbol] || [])];
+        const p = arr[posIndex];
+        if (!p) return prev;
+        arr[posIndex] = {
+          ...p,
+          margin: p.margin + amount,
+          isolatedMargin: (p.isolatedMargin ?? p.margin) + amount,
+        };
+        return { ...prev, [symbol]: arr };
+      });
+    } else {
+      // Cross: do NOT touch balance — equity already backs the position;
+      // increasing pos.margin lowers available via calcAvailable.
+      setPositionsMap(prev => {
+        const arr = [...(prev[symbol] || [])];
+        const p = arr[posIndex];
+        if (!p) return prev;
+        arr[posIndex] = { ...p, margin: p.margin + amount };
+        return { ...prev, [symbol]: arr };
+      });
+    }
+    toast.success(`成功追加 ${amount.toFixed(2)} USDT 保证金，强平风险已降低`);
+  }, []);
 
   // ===== Clear Symbol Data & Financial Reversal =====
   const handleClearSymbolData = useCallback((symbol: string) => {
