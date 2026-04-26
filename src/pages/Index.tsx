@@ -451,7 +451,7 @@ const Index = () => {
       });
       toast.success(`条件单已触发：${symbol} ${order.side} @ ${entryPrice.toFixed(2)}`);
     },
-    [positionsMap, setBalance, setPositionsMap, setOrdersMap, setTradeHistory],
+    [setBalance, setPositionsMap, setOrdersMap, setTradeHistory],
   );
 
   const runConditionalMatchingForSymbol = useCallback(
