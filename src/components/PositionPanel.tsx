@@ -75,16 +75,7 @@ export function PositionPanel({
   const [historySort, setHistorySort] = useState<HistorySort>('time');
   const [historySymbolFilter, setHistorySymbolFilter] = useState<string>('ALL');
 
-      {adjustMarginModal && onAddIsolatedMargin && (
-        <AdjustMarginModal
-          open={!!adjustMarginModal}
-          onOpenChange={(v) => { if (!v) setAdjustMarginModal(null); }}
-          symbol={adjustMarginModal.symbol}
-          position={adjustMarginModal.pos}
-          available={availableBalance}
-          onConfirm={(amount) => onAddIsolatedMargin(adjustMarginModal.symbol, adjustMarginModal.index, amount)}
-        />
-      )}
+
 
   const toggleSort = (field: 'pnl' | 'pct') => {
     setHistorySort(prev => {
