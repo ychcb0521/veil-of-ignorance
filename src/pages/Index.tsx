@@ -478,35 +478,45 @@ const Index = () => {
         const remaining: PendingOrder[] = [];
 
         for (const order of orders) {
-          if (order.type !== "CONDITIONAL") {
-            remaining.push(order);
-            continue;
-          }
+          try {
+            if (order.type !== "CONDITIONAL") {
+              remaining.push(order);
+              continue;
+            }
 
-          if (order.status !== "PENDING" || conditionalTriggerLocksRef.current.has(order.id)) {
-            remaining.push(order);
-            continue;
-          }
+            if (order.status !== "PENDING" || conditionalTriggerLocksRef.current.has(order.id)) {
+              remaining.push(order);
+              continue;
+            }
 
-          const decision = getConditionalTriggerDecisionFromRange(order, candle);
-          if (!decision?.triggered) {
-            remaining.push(order);
-            continue;
-          }
+            const decision = getConditionalTriggerDecisionFromRange(order, candle);
+            if (!decision?.triggered) {
+              remaining.push(order);
+              continue;
+            }
 
-          conditionalTriggerLocksRef.current.add(order.id);
-          triggeredOrders.push({
-            order: { ...order, status: "FILLED" as const },
-            triggerPrice: decision.triggerPriceNum,
-          });
-          changed = true;
+            conditionalTriggerLocksRef.current.add(order.id);
+            triggeredOrders.push({
+              order: { ...order, status: "FILLED" as const },
+              triggerPrice: decision.triggerPriceNum,
+            });
+            changed = true;
+          } catch (err) {
+            // Defensive: never let a single bad order break the matching loop
+            console.error("[TP/SL Match Error]", { orderId: order?.id, err });
+            remaining.push(order);
+          }
         }
 
         return changed ? { ...prev, [symbol]: remaining } : prev;
       });
 
       triggeredOrders.forEach(({ order, triggerPrice }) => {
-        createTriggeredConditionalPosition(symbol, order, triggerPrice, openTime);
+        try {
+          createTriggeredConditionalPosition(symbol, order, triggerPrice, openTime);
+        } catch (err) {
+          console.error("[TP/SL Execute Error]", { orderId: order?.id, err });
+        }
       });
     },
     [createTriggeredConditionalPosition, setOrdersMap],
