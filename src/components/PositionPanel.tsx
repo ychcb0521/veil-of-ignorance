@@ -704,6 +704,18 @@ export function PositionPanel({
           onConfirm={handleCloseConfirm}
         />
       )}
+      {adjustMarginModal && onAdjustMargin && (
+        <AdjustMarginModal
+          open={!!adjustMarginModal}
+          onClose={() => setAdjustMarginModal(null)}
+          symbol={adjustMarginModal.symbol}
+          position={adjustMarginModal.pos}
+          availableBalance={availableBalance}
+          onConfirm={(signedDelta) => {
+            onAdjustMargin(adjustMarginModal.symbol, adjustMarginModal.index, signedDelta);
+          }}
+        />
+      )}
 
       <Dialog open={closeAllConfirmOpen} onOpenChange={setCloseAllConfirmOpen}>
         <DialogContent className="sm:max-w-sm">
