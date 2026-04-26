@@ -101,7 +101,7 @@ export interface TradeRecord {
   closeTime: number;
 }
 
-export const MAINTENANCE_MARGIN_RATE = 0.005; // 0.5%
+export const MAINTENANCE_MARGIN_RATE = 0.004; // 0.4% — strict MM rate (MMR) per tier default
 export const LIQUIDATION_FEE_RATE = 0.005; // 0.5%
 export const FUNDING_RATE = 0.0001; // 0.01% per 8h settlement
 
@@ -182,28 +182,44 @@ export function calcROE(pos: Position, currentPrice: number): number {
   return effectiveMargin > 0 ? (pnl / effectiveMargin) * 100 : 0;
 }
 
+/**
+ * Strict U-margined liquidation price (industry-standard formula).
+ *
+ *   PositionNotional = quantity * entryPrice
+ *   MaintenanceMargin (MM) = PositionNotional * MMR
+ *
+ *   LONG : liqPrice = (PositionNotional - margin + MM) / quantity
+ *   SHORT: liqPrice = (PositionNotional + margin - MM) / quantity
+ *
+ * No zero-clamp: returns the true mathematical value, including negatives, so
+ * over-collateralized positions truthfully show their "buffer below zero".
+ * Only NaN / non-finite results are guarded (returns NaN to signal invalid input).
+ */
 export function calcLiquidationPrice(pos: Position): number {
-  const maintenanceRate = MAINTENANCE_MARGIN_RATE;
+  if (!pos.quantity || pos.quantity <= 0 || !isFinite(pos.entryPrice)) return NaN;
+
+  const mmr = MAINTENANCE_MARGIN_RATE;
+  const positionNotional = pos.quantity * pos.entryPrice;
+  const mm = positionNotional * mmr;
+
   let liq: number;
   if (pos.marginMode === "isolated" && pos.isolatedMargin != null) {
     const margin = pos.isolatedMargin;
     if (pos.side === "LONG") {
-      liq = (pos.entryPrice * pos.quantity - margin) / (pos.quantity * (1 - maintenanceRate));
+      liq = (positionNotional - margin + mm) / pos.quantity;
     } else {
-      liq = (pos.entryPrice * pos.quantity + margin) / (pos.quantity * (1 + maintenanceRate));
+      liq = (positionNotional + margin - mm) / pos.quantity;
     }
   } else {
-    // Cross mode: approximate
+    // Cross mode: derive an effective margin from leverage, then apply the same formula.
+    const margin = positionNotional / pos.leverage;
     if (pos.side === "LONG") {
-      liq = pos.entryPrice * (1 - 1 / pos.leverage + maintenanceRate);
+      liq = (positionNotional - margin + mm) / pos.quantity;
     } else {
-      liq = pos.entryPrice * (1 + 1 / pos.leverage - maintenanceRate);
+      liq = (positionNotional + margin - mm) / pos.quantity;
     }
   }
-  // Physical boundary guard: price cannot be negative.
-  // For LONG: over-collateralized => liq <= 0 means no liquidation risk even at zero.
-  // For SHORT: liq is theoretically unbounded upward, but never negative.
-  if (!isFinite(liq) || liq <= 0) return 0;
+  if (!isFinite(liq)) return NaN;
   return liq;
 }
 

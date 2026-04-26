@@ -158,16 +158,16 @@ export function AdjustMarginModal({
                 label="预估强平价"
                 value={
                   <span className="flex items-center gap-1.5">
-                    <span className={currentLiq > 0 ? 'text-red-400/80' : 'text-muted-foreground'}>
-                      {currentLiq > 0 ? formatPrice(currentLiq, symbol) : '--'}
+                    <span className={isFinite(currentLiq) ? 'text-red-400/80' : 'text-muted-foreground'}>
+                      {isFinite(currentLiq) ? formatPrice(currentLiq, symbol) : '--'}
                     </span>
                     <span className="text-muted-foreground">→</span>
                     <span className={
-                      !isFinite(projectedLiq) || projectedLiq <= 0
-                        ? 'text-emerald-400'
+                      !isFinite(projectedLiq)
+                        ? 'text-muted-foreground'
                         : (mode === 'add' ? 'text-emerald-400' : 'text-red-400')
                     }>
-                      {!isFinite(projectedLiq) || projectedLiq <= 0 ? '--' : formatPrice(projectedLiq, symbol)}
+                      {!isFinite(projectedLiq) ? '--' : formatPrice(projectedLiq, symbol)}
                     </span>
                   </span>
                 }
