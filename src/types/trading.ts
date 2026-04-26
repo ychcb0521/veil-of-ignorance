@@ -184,23 +184,27 @@ export function calcROE(pos: Position, currentPrice: number): number {
 
 export function calcLiquidationPrice(pos: Position): number {
   const maintenanceRate = MAINTENANCE_MARGIN_RATE;
+  let liq: number;
   if (pos.marginMode === "isolated" && pos.isolatedMargin != null) {
-    // Isolated: liq price based on isolatedMargin
     const margin = pos.isolatedMargin;
-    const notional = pos.entryPrice * pos.quantity;
     if (pos.side === "LONG") {
-      // margin + unrealizedPnl = maintenanceMargin => margin + (liqPrice - entry)*qty = maintenanceRate * liqPrice * qty
-      // liqPrice * qty - entry*qty + margin = maintenanceRate * liqPrice * qty
-      // liqPrice * qty * (1 - maintenanceRate) = entry*qty - margin
-      return (pos.entryPrice * pos.quantity - margin) / (pos.quantity * (1 - maintenanceRate));
+      liq = (pos.entryPrice * pos.quantity - margin) / (pos.quantity * (1 - maintenanceRate));
+    } else {
+      liq = (pos.entryPrice * pos.quantity + margin) / (pos.quantity * (1 + maintenanceRate));
     }
-    return (pos.entryPrice * pos.quantity + margin) / (pos.quantity * (1 + maintenanceRate));
+  } else {
+    // Cross mode: approximate
+    if (pos.side === "LONG") {
+      liq = pos.entryPrice * (1 - 1 / pos.leverage + maintenanceRate);
+    } else {
+      liq = pos.entryPrice * (1 + 1 / pos.leverage - maintenanceRate);
+    }
   }
-  // Cross mode: approximate
-  if (pos.side === "LONG") {
-    return pos.entryPrice * (1 - 1 / pos.leverage + maintenanceRate);
-  }
-  return pos.entryPrice * (1 + 1 / pos.leverage - maintenanceRate);
+  // Physical boundary guard: price cannot be negative.
+  // For LONG: over-collateralized => liq <= 0 means no liquidation risk even at zero.
+  // For SHORT: liq is theoretically unbounded upward, but never negative.
+  if (!isFinite(liq) || liq <= 0) return 0;
+  return liq;
 }
 
 export function calcFee(price: number, quantity: number, isMaker: boolean): number {

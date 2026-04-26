@@ -412,7 +412,7 @@ export function PositionPanel({
                       <DetailCell label="保证金比率" value={`${marginRatio.toFixed(2)}%`} />
                       <DetailCell label="开仓均价" value={formatPrice(mg.weightedEntryPrice, mg.symbol)} />
                       <DetailCell label="标记价格" value={price > 0 ? formatPrice(price, mg.symbol) : '-'} />
-                      <DetailCell label="强平价格" value={formatPrice(liq, mg.symbol)} valueClassName="text-red-400" />
+                      <DetailCell label="强平价格" value={liq > 0 ? formatPrice(liq, mg.symbol) : '--'} valueClassName={liq > 0 ? 'text-red-400' : 'text-muted-foreground'} />
                     </div>
 
                     {/* TP / SL display strip — aggregated for this group's children */}
