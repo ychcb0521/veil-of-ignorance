@@ -702,6 +702,17 @@ export function PositionPanel({
         />
       )}
 
+      {adjustMarginModal && onAddIsolatedMargin && (
+        <AdjustMarginModal
+          open={!!adjustMarginModal}
+          onOpenChange={(v) => { if (!v) setAdjustMarginModal(null); }}
+          symbol={adjustMarginModal.symbol}
+          position={adjustMarginModal.pos}
+          available={availableBalance}
+          onConfirm={(amount) => onAddIsolatedMargin(adjustMarginModal.symbol, adjustMarginModal.index, amount)}
+        />
+      )}
+
       <Dialog open={closeAllConfirmOpen} onOpenChange={setCloseAllConfirmOpen}>
         <DialogContent className="sm:max-w-sm">
           <DialogHeader>
