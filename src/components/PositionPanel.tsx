@@ -714,7 +714,7 @@ export function PositionPanel({
           open={!!adjustMarginModal}
           onClose={() => setAdjustMarginModal(null)}
           symbol={adjustMarginModal.symbol}
-          position={adjustMarginModal.pos}
+          position={positionsMap[adjustMarginModal.symbol]?.[adjustMarginModal.index] ?? adjustMarginModal.pos}
           availableBalance={availableBalance}
           onConfirm={(signedDelta) => {
             onAdjustMargin(adjustMarginModal.symbol, adjustMarginModal.index, signedDelta);
