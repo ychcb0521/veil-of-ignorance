@@ -207,10 +207,29 @@ export function PositionPanel({
   }, [rollbackSymbol, tradeHistory, positionsMap, ordersMap]);
 
   const TABS = [
-    { key: 'positions', label: '持仓', count: mergedPositions.length },
-    { key: 'pending', label: '当前委托', count: allOrders.length },
-    { key: 'history', label: '历史记录', count: tradeRecords.length },
-    { key: 'funding', label: '资金费', count: fundingRecords.length },
+    { key: 'positions', label: '仓位', count: mergedPositions.length, showCount: true },
+    { key: 'pending', label: '当前委托', count: allOrders.length, showCount: true },
+    { key: 'history', label: '历史委托', count: 0, showCount: false },
+    { key: 'trades', label: '历史成交', count: tradeRecords.length, showCount: false },
+    { key: 'funding', label: '资金流水', count: fundingRecords.length, showCount: false },
+    { key: 'positionHistory', label: '仓位历史记录', count: 0, showCount: false },
+    { key: 'bots', label: '机器人', count: 0, showCount: false },
+    { key: 'assets', label: '资产', count: 0, showCount: false },
+  ];
+
+  // Column definitions for the positions table header (always rendered)
+  const POSITION_COLUMNS = [
+    { label: '合约', flex: 'flex-[1.4]', align: 'text-left' },
+    { label: '数量', flex: 'flex-1', align: 'text-right' },
+    { label: '开仓价格', flex: 'flex-1', align: 'text-right' },
+    { label: '损益两平价', flex: 'flex-1', align: 'text-right' },
+    { label: '标记价格', flex: 'flex-1', align: 'text-right' },
+    { label: '强平价格', flex: 'flex-1', align: 'text-right' },
+    { label: '保证金比率', flex: 'flex-1', align: 'text-right' },
+    { label: '保证金', flex: 'flex-1', align: 'text-right' },
+    { label: '盈亏 (回报率)', flex: 'flex-[1.2]', align: 'text-right' },
+    { label: '预估资金费用', flex: 'flex-1', align: 'text-right' },
+    { label: '市价 / 限价', flex: 'flex-[1.2]', align: 'text-right' },
   ];
 
   const handleOpenCloseModal = (symbol: string, index: number, pos: Position) => {
@@ -245,69 +264,92 @@ export function PositionPanel({
   };
 
   return (
-    <div className="panel flex flex-col bg-card">
-      {/* Tabs + toolbar */}
-      <div className="flex items-center gap-2 px-4 border-b border-border">
-        <div className="flex gap-4 flex-1">
-          {TABS.map(t => (
-            <button
-              key={t.key}
-              onClick={() => onTabChange(t.key)}
-              className={`py-2 text-xs font-medium border-b-2 transition-all duration-100 ease-out active:scale-[0.97] ${
-                activeTab === t.key
-                  ? 'border-primary text-primary'
-                  : 'border-transparent text-muted-foreground hover:text-foreground'
-              }`}
-            >
-              {t.label}
-              {t.count > 0 && (
-                <span className="ml-1 px-1 rounded text-[10px] bg-accent">{t.count}</span>
-              )}
-            </button>
-          ))}
-        </div>
-        {activeTab === 'positions' && (
-          <div className="flex items-center gap-3 shrink-0">
-            <label className="flex items-center gap-1.5 cursor-pointer select-none">
-              <Checkbox
-                checked={hideOtherContracts}
-                onCheckedChange={(v) => setHideOtherContracts(!!v)}
-                className="h-3.5 w-3.5 border-muted-foreground data-[state=checked]:bg-primary data-[state=checked]:border-primary"
-              />
-              <span className="text-[10px] text-muted-foreground whitespace-nowrap">隐藏其他合约</span>
-            </label>
-            {allPositions.length > 0 && (
+    <div className="flex flex-col h-full bg-[#1e2329] border-t border-[#2b3139]">
+      {/* ===== Tabs Bar ===== */}
+      <div className="flex justify-between items-center px-4 h-10 border-b border-[#2b3139] shrink-0">
+        <div className="flex space-x-6 flex-1 overflow-x-auto h-full items-center">
+          {TABS.map(t => {
+            const isActive = activeTab === t.key;
+            const labelText = t.showCount ? `${t.label}(${t.count})` : t.label;
+            return (
               <button
-                onClick={() => setCloseAllConfirmOpen(true)}
-                className="px-2 py-0.5 rounded text-[10px] font-medium border border-destructive/40 text-destructive hover:bg-destructive/10 transition-colors active:scale-95"
+                key={t.key}
+                onClick={() => onTabChange(t.key)}
+                className={`relative h-full text-sm font-medium whitespace-nowrap transition-colors ${
+                  isActive
+                    ? 'text-[#fcd535]'
+                    : 'text-[#848e9c] hover:text-white'
+                }`}
               >
-                一键平仓
+                {labelText}
+                {isActive && (
+                  <span className="absolute left-0 right-0 -bottom-px h-[2px] bg-[#fcd535]" />
+                )}
               </button>
-            )}
-          </div>
-        )}
-        {activeTab === 'history' && allTradedSymbols.length > 0 && (
-          <button
-            onClick={() => { setRollbackSymbol(''); setRollbackOpen(true); }}
-            className="flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium border border-destructive/40 text-destructive hover:bg-destructive/10 transition-colors active:scale-95 shrink-0"
-          >
-            <Trash2 className="w-3 h-3" />
-            清除币种数据
-          </button>
-        )}
+            );
+          })}
+        </div>
+        <div className="flex items-center gap-3 shrink-0 pl-4">
+          {activeTab === 'positions' && (
+            <>
+              <label className="flex items-center gap-1.5 cursor-pointer select-none">
+                <Checkbox
+                  checked={hideOtherContracts}
+                  onCheckedChange={(v) => setHideOtherContracts(!!v)}
+                  className="h-3.5 w-3.5 border-[#5e6673] data-[state=checked]:bg-[#fcd535] data-[state=checked]:border-[#fcd535] data-[state=checked]:text-[#0b0e11]"
+                />
+                <span className="text-xs text-[#848e9c] whitespace-nowrap">隐藏其他合约</span>
+              </label>
+              {allPositions.length > 0 && (
+                <button
+                  onClick={() => setCloseAllConfirmOpen(true)}
+                  className="px-2 py-0.5 rounded text-[10px] font-medium border border-[#f6465d]/50 text-[#f6465d] hover:bg-[#f6465d]/10 transition-colors active:scale-95"
+                >
+                  一键平仓
+                </button>
+              )}
+            </>
+          )}
+          {activeTab === 'trades' && allTradedSymbols.length > 0 && (
+            <button
+              onClick={() => { setRollbackSymbol(''); setRollbackOpen(true); }}
+              className="flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium border border-[#f6465d]/50 text-[#f6465d] hover:bg-[#f6465d]/10 transition-colors active:scale-95 shrink-0"
+            >
+              <Trash2 className="w-3 h-3" />
+              清除币种数据
+            </button>
+          )}
+        </div>
       </div>
 
-      <div className="overflow-y-auto min-h-[120px]">
-        {/* ===== POSITIONS (Card-based, merged by symbol+side) ===== */}
+      <div className="flex-1 flex flex-col overflow-hidden min-h-0">
+        {/* ===== POSITIONS — always-visible header + body ===== */}
         {activeTab === 'positions' && (
-          mergedPositions.length === 0 ? (
-            <div className="px-4 py-6 text-center text-xs text-muted-foreground">
-              {hideOtherContracts ? `${activeSymbol} 暂无持仓` : '暂无持仓'}
+          <>
+            {/* Persistent table header */}
+            <div className="h-8 flex items-center px-4 text-xs text-[#848e9c] border-b border-[#2b3139] shrink-0 overflow-x-auto">
+              {POSITION_COLUMNS.map((col, i) => (
+                <div key={i} className={`${col.flex} ${col.align} whitespace-nowrap px-2`}>
+                  {col.label}
+                </div>
+              ))}
             </div>
-          ) : (
-            <div className="p-3 space-y-3">
-              {mergedPositions.map((mg) => {
-                const price = priceMap[mg.symbol] || 0;
+
+            {/* Body */}
+            <div className="flex-1 overflow-y-auto">
+              {mergedPositions.length === 0 ? (
+                <div className="py-20 flex flex-col items-center justify-center text-[#848e9c] text-sm gap-2">
+                  <svg className="w-10 h-10 opacity-40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.2">
+                    <rect x="3" y="5" width="18" height="14" rx="2" />
+                    <path d="M3 10h18" />
+                    <path d="M9 15h6" />
+                  </svg>
+                  <span>{hideOtherContracts ? `${activeSymbol} 暂无持仓` : '暂无持仓'}</span>
+                </div>
+              ) : (
+                <div className="p-3 space-y-3">
+                  {mergedPositions.map((mg) => {
+                    const price = priceMap[mg.symbol] || 0;
                 // Aggregate PnL across all children
                 let totalPnl = 0;
                 for (const c of mg.children) totalPnl += calcUnrealizedPnl(c.position, price);
@@ -465,9 +507,11 @@ export function PositionPanel({
                     </div>
                   </div>
                 );
-              })}
+                  })}
+                </div>
+              )}
             </div>
-          )
+          </>
         )}
 
         {/* ===== PENDING ORDERS ===== */}
