@@ -820,8 +820,8 @@ export function TradeInsightsPanel({ open, onClose, tradeHistory, initialSymbol,
                     <span
                       className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
                         selectedTooltip.pair.open.side === "LONG"
-                          ? "bg-emerald-500/15 text-emerald-400"
-                          : "bg-red-500/15 text-red-400"
+                          ? "bg-trading-green/15 text-trading-green"
+                          : "bg-trading-red/15 text-trading-red"
                       }`}
                     >
                       {selectedTooltip.pair.open.side === "LONG" ? "多" : "空"} {selectedTooltip.pair.open.leverage}x
@@ -841,14 +841,14 @@ export function TradeInsightsPanel({ open, onClose, tradeHistory, initialSymbol,
                     </span>
                     <span className="text-muted-foreground">盈亏</span>
                     <span
-                      className={`font-bold tabular-nums ${selectedTooltip.pair.pnl >= 0 ? "text-emerald-400" : "text-red-400"}`}
+                      className={`font-bold tabular-nums ${selectedTooltip.pair.pnl >= 0 ? "text-trading-green" : "text-trading-red"}`}
                     >
                       {selectedTooltip.pair.pnl >= 0 ? "+" : ""}
                       {selectedTooltip.pair.pnl.toFixed(2)} USDT
                     </span>
                     <span className="text-muted-foreground">ROE</span>
                     <span
-                      className={`font-bold tabular-nums ${selectedTooltip.pair.roe >= 0 ? "text-emerald-400" : "text-red-400"}`}
+                      className={`font-bold tabular-nums ${selectedTooltip.pair.roe >= 0 ? "text-trading-green" : "text-trading-red"}`}
                     >
                       {selectedTooltip.pair.roe >= 0 ? "+" : ""}
                       {selectedTooltip.pair.roe.toFixed(2)}%
@@ -888,8 +888,8 @@ export function TradeInsightsPanel({ open, onClose, tradeHistory, initialSymbol,
                         <span
                           className={`font-bold px-1 py-0.5 rounded ${
                             pair.open.side === "LONG"
-                              ? "bg-emerald-500/15 text-emerald-400"
-                              : "bg-red-500/15 text-red-400"
+                              ? "bg-trading-green/15 text-trading-green"
+                              : "bg-trading-red/15 text-trading-red"
                           }`}
                         >
                           {pair.open.side === "LONG" ? "多" : "空"} {pair.open.leverage}x
@@ -901,11 +901,11 @@ export function TradeInsightsPanel({ open, onClose, tradeHistory, initialSymbol,
                           <Clock className="w-2.5 h-2.5 inline mr-0.5" />
                           {formatDuration(pair.holdDurationMs)}
                         </span>
-                        <span className={`font-bold tabular-nums ${isProfit ? "text-emerald-400" : "text-red-400"}`}>
+                        <span className={`font-bold tabular-nums ${isProfit ? "text-trading-green" : "text-trading-red"}`}>
                           {isProfit ? "+" : ""}
                           {pair.pnl.toFixed(2)}
                         </span>
-                        <span className={`tabular-nums ${isProfit ? "text-emerald-400" : "text-red-400"}`}>
+                        <span className={`tabular-nums ${isProfit ? "text-trading-green" : "text-trading-red"}`}>
                           {isProfit ? "+" : ""}
                           {pair.roe.toFixed(1)}%
                         </span>
@@ -928,22 +928,22 @@ export function TradeInsightsPanel({ open, onClose, tradeHistory, initialSymbol,
               <StatRow
                 label="期望值"
                 value={`${stats.expectancy >= 0 ? "+" : ""}${stats.expectancy.toFixed(2)}`}
-                color={stats.expectancy >= 0 ? "text-emerald-400" : "text-red-400"}
+                color={stats.expectancy >= 0 ? "text-trading-green" : "text-trading-red"}
               />
               <StatRow
                 label="胜率"
                 value={`${stats.winRate.toFixed(1)}%`}
-                color={stats.winRate >= 50 ? "text-emerald-400" : "text-red-400"}
+                color={stats.winRate >= 50 ? "text-trading-green" : "text-trading-red"}
               />
               <StatRow
                 label="盈亏比"
                 value={stats.plRatio === Infinity ? "∞" : stats.plRatio.toFixed(2)}
-                color={stats.plRatio >= 1 ? "text-emerald-400" : "text-red-400"}
+                color={stats.plRatio >= 1 ? "text-trading-green" : "text-trading-red"}
               />
               <StatRow
                 label="最大回撤"
                 value={`${stats.maxDrawdown.toFixed(2)}%`}
-                color="text-red-400"
+                color="text-trading-red"
                 clickable={!!stats.maxDrawdownTime}
                 onClick={() => stats.maxDrawdownTime && handleJump(stats.maxDrawdownTime)}
               />
@@ -953,24 +953,24 @@ export function TradeInsightsPanel({ open, onClose, tradeHistory, initialSymbol,
               <StatRow
                 label="总盈亏"
                 value={`${stats.totalPnl >= 0 ? "+" : ""}${stats.totalPnl.toFixed(2)}`}
-                color={stats.totalPnl >= 0 ? "text-emerald-400" : "text-red-400"}
+                color={stats.totalPnl >= 0 ? "text-trading-green" : "text-trading-red"}
               />
               <StatRow label="总手续费" value={`-${stats.totalFees.toFixed(2)}`} color="text-muted-foreground" />
-              <StatRow label="平均盈利" value={`+${stats.avgWin.toFixed(2)}`} color="text-emerald-400" />
-              <StatRow label="平均亏损" value={`-${stats.avgLoss.toFixed(2)}`} color="text-red-400" />
+              <StatRow label="平均盈利" value={`+${stats.avgWin.toFixed(2)}`} color="text-trading-green" />
+              <StatRow label="平均亏损" value={`-${stats.avgLoss.toFixed(2)}`} color="text-trading-red" />
               <StatRow label="平均持仓" value={formatDuration(stats.avgHoldMs)} color="text-foreground" />
             </div>
 
             {/* Win/Loss bar */}
             <div className="flex items-center gap-2 text-[10px] font-mono pt-1">
-              <span className="text-emerald-400">胜 {stats.wins}</span>
+              <span className="text-trading-green">胜 {stats.wins}</span>
               <div className="flex-1 h-2 rounded-full overflow-hidden bg-red-500/20">
                 <div
                   className="h-full bg-emerald-400 rounded-full transition-all"
                   style={{ width: `${stats.total > 0 ? (stats.wins / stats.total) * 100 : 0}%` }}
                 />
               </div>
-              <span className="text-red-400">负 {stats.losses}</span>
+              <span className="text-trading-red">负 {stats.losses}</span>
             </div>
 
             {/* Trade pair details on hover */}
@@ -988,14 +988,14 @@ export function TradeInsightsPanel({ open, onClose, tradeHistory, initialSymbol,
                   <span className="text-foreground tabular-nums">{hoveredPair.close.exitPrice.toFixed(2)}</span>
                   <span className="text-muted-foreground">盈亏</span>
                   <span
-                    className={`font-bold tabular-nums ${hoveredPair.pnl >= 0 ? "text-emerald-400" : "text-red-400"}`}
+                    className={`font-bold tabular-nums ${hoveredPair.pnl >= 0 ? "text-trading-green" : "text-trading-red"}`}
                   >
                     {hoveredPair.pnl >= 0 ? "+" : ""}
                     {hoveredPair.pnl.toFixed(2)}
                   </span>
                   <span className="text-muted-foreground">ROE</span>
                   <span
-                    className={`font-bold tabular-nums ${hoveredPair.roe >= 0 ? "text-emerald-400" : "text-red-400"}`}
+                    className={`font-bold tabular-nums ${hoveredPair.roe >= 0 ? "text-trading-green" : "text-trading-red"}`}
                   >
                     {hoveredPair.roe >= 0 ? "+" : ""}
                     {hoveredPair.roe.toFixed(2)}%

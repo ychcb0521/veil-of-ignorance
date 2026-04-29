@@ -40,7 +40,7 @@ function PriceDisplay({ price, change }: { price?: string; change?: string }) {
   return (
     <>
       <span className="text-xs font-mono text-foreground">{parseFloat(price).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 6 })}</span>
-      <span className={`text-[11px] font-mono font-semibold px-1.5 py-0.5 rounded ${isUp ? 'bg-green-500/15 text-green-500' : 'bg-red-500/15 text-red-500'}`}>
+      <span className={`text-[11px] font-mono font-semibold px-1.5 py-0.5 rounded ${isUp ? 'bg-green-500/15 text-green-500' : 'bg-trading-red/15 text-red-500'}`}>
         {isUp ? '+' : ''}{pct.toFixed(2)}%
       </span>
     </>
@@ -235,7 +235,7 @@ export function MobileSearchView({ onSelectSymbol, currentSymbol }: Props) {
                 <span className={`text-[11px] font-mono font-semibold px-1.5 py-0.5 rounded ${
                   parseFloat(sym.priceChangePercent) >= 0
                     ? 'bg-green-500/15 text-green-500'
-                    : 'bg-red-500/15 text-red-500'
+                    : 'bg-trading-red/15 text-red-500'
                 }`}>
                   {parseFloat(sym.priceChangePercent) >= 0 ? '+' : ''}{parseFloat(sym.priceChangePercent).toFixed(2)}%
                 </span>

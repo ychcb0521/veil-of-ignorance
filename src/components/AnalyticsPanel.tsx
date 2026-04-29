@@ -120,21 +120,21 @@ export function AnalyticsPanel({ open, onClose, tradeHistory, balance, positions
           <div className="grid grid-cols-4 gap-3">
             <StatCard label="总交易" value={`${stats.totalTrades} 笔`} icon={<Target className="w-3.5 h-3.5" />} />
             <StatCard label="胜率" value={`${stats.winRate.toFixed(1)}%`}
-              color={stats.winRate >= 50 ? 'text-green-400' : 'text-red-400'}
+              color={stats.winRate >= 50 ? 'text-green-400' : 'text-trading-red'}
               icon={stats.winRate >= 50 ? <TrendingUp className="w-3.5 h-3.5" /> : <TrendingDown className="w-3.5 h-3.5" />} />
             <StatCard label="盈亏比" value={stats.plRatio === Infinity ? '∞' : stats.plRatio.toFixed(2)}
-              color={stats.plRatio >= 1 ? 'text-green-400' : 'text-red-400'} />
-            <StatCard label="最大回撤" value={`${stats.maxDrawdown.toFixed(2)}%`} color="text-red-400" />
+              color={stats.plRatio >= 1 ? 'text-green-400' : 'text-trading-red'} />
+            <StatCard label="最大回撤" value={`${stats.maxDrawdown.toFixed(2)}%`} color="text-trading-red" />
           </div>
 
           <div className="grid grid-cols-4 gap-3">
             <StatCard label="净利润" value={`${stats.netProfit >= 0 ? '+' : ''}${stats.netProfit.toFixed(2)}`}
-              color={stats.netProfit >= 0 ? 'text-green-400' : 'text-red-400'} />
+              color={stats.netProfit >= 0 ? 'text-green-400' : 'text-trading-red'} />
             <StatCard label="总手续费" value={`-${stats.totalFees.toFixed(2)}`} color="text-muted-foreground" />
             <StatCard label="资金费总计" value={`${stats.fundingTotal >= 0 ? '+' : ''}${stats.fundingTotal.toFixed(2)}`}
-              color={stats.fundingTotal >= 0 ? 'text-green-400' : 'text-red-400'} />
+              color={stats.fundingTotal >= 0 ? 'text-green-400' : 'text-trading-red'} />
             <StatCard label="当前权益" value={currentEquity.toFixed(2)}
-              color={currentEquity >= initialCapital ? 'text-green-400' : 'text-red-400'} />
+              color={currentEquity >= initialCapital ? 'text-green-400' : 'text-trading-red'} />
           </div>
 
           {/* Equity Curve */}
@@ -192,7 +192,7 @@ export function AnalyticsPanel({ open, onClose, tradeHistory, balance, positions
               <div className="h-full bg-green-400 rounded-full"
                 style={{ width: `${stats.totalTrades > 0 ? (stats.wins / stats.totalTrades) * 100 : 0}%` }} />
             </div>
-            <span className="text-red-400">负 {stats.losses}</span>
+            <span className="text-trading-red">负 {stats.losses}</span>
           </div>
         </div>
       </div>
