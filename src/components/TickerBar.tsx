@@ -90,22 +90,24 @@ export function TickerBar({ symbol, currentPrice, visibleData, pricePrecision, e
   }, [effectiveSimTime, now]);
 
   const isUp = stats.change >= 0;
-  const priceColor = isUp ? 'text-trading-green' : 'text-trading-red';
+  const upColor = 'text-[#0ecb81]';
+  const downColor = 'text-[#f6465d]';
+  const priceColor = isUp ? upColor : downColor;
   const priceText = currentPrice > 0
     ? currentPrice.toLocaleString('en-US', { minimumFractionDigits: pricePrecision, maximumFractionDigits: pricePrecision })
     : '--';
 
   return (
-    <div className="flex items-center gap-6 px-4 h-14 border-b border-[#2b3139] bg-[#0b0e11] overflow-x-auto">
+    <div className="flex items-center gap-6 px-4 h-14 border-b border-[#2b3139] bg-[#1e2329] overflow-x-auto">
       {/* Symbol + last price block */}
       <div className="flex items-center gap-4 shrink-0">
         <div className="flex items-center gap-2">
-          <span className="text-base font-bold text-white tracking-tight">{display}</span>
-          <span className="text-[10px] px-1.5 py-0.5 rounded bg-primary/15 text-primary font-medium">永续</span>
+          <span className="text-base font-bold text-[#EAECEF] tracking-tight">{display}</span>
+          <span className="text-[10px] px-1.5 py-0.5 rounded bg-[#2b2514] text-[#fcd535] font-medium">永续</span>
         </div>
         <div className="flex flex-col leading-tight">
           <span className={`text-lg font-bold font-mono tabular-nums ${priceColor}`}>{priceText}</span>
-          <span className="text-[10px] text-[#B7BDC6] font-mono tabular-nums">
+          <span className="text-[10px] text-[#848e9c] font-mono tabular-nums">
             ≈ ${formatNum(currentPrice, pricePrecision)}
           </span>
         </div>
@@ -121,10 +123,10 @@ export function TickerBar({ symbol, currentPrice, visibleData, pricePrecision, e
       <div className="flex flex-col leading-tight shrink-0">
         <span className="text-[10px] text-[#848e9c]">资金费率 / 倒计时</span>
         <div className="flex items-center gap-1.5 font-mono tabular-nums">
-          <span className="text-xs text-trading-green font-semibold">
+          <span className="text-xs text-[#0ecb81] font-semibold">
             {(FUNDING_RATE * 100).toFixed(4)}%
           </span>
-          <span className="text-xs text-white">{formatCountdown(fundingMs)}</span>
+          <span className="text-xs text-[#EAECEF]">{formatCountdown(fundingMs)}</span>
         </div>
       </div>
 
@@ -135,9 +137,9 @@ export function TickerBar({ symbol, currentPrice, visibleData, pricePrecision, e
       <Stat
         label="24h 涨跌"
         value={`${isUp ? '+' : ''}${formatNum(stats.change, pricePrecision)}`}
-        valueClass={isUp ? 'text-trading-green' : 'text-trading-red'}
+        valueClass={isUp ? upColor : downColor}
         sub={`${isUp ? '+' : ''}${stats.changePct.toFixed(2)}%`}
-        subClass={isUp ? 'text-trading-green' : 'text-trading-red'}
+        subClass={isUp ? upColor : downColor}
       />
       <Stat label="24h 最高" value={formatNum(stats.high, pricePrecision)} />
       <Stat label="24h 最低" value={formatNum(stats.low, pricePrecision)} />
@@ -148,7 +150,7 @@ export function TickerBar({ symbol, currentPrice, visibleData, pricePrecision, e
 }
 
 function Stat({
-  label, value, sub, valueClass = 'text-white', subClass = 'text-[#848e9c]',
+  label, value, sub, valueClass = 'text-[#EAECEF]', subClass = 'text-[#848e9c]',
 }: {
   label: string; value: string; sub?: string; valueClass?: string; subClass?: string;
 }) {
