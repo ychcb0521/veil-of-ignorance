@@ -101,18 +101,18 @@ export function OrderBook({ currentPrice, symbol, previousPrice, pricePrecision:
   }
 
   return (
-    <div className="flex flex-col h-full text-[10px] font-mono tabular-nums select-none">
+    <div className="flex flex-col h-full text-[10px] font-mono tabular-nums select-none bg-[#1e2329]">
       {/* Header */}
-      <div className="flex items-center justify-between px-2 py-1.5 border-b border-border">
-        <span className="text-[10px] font-semibold text-foreground">盘口</span>
-        <span className="text-[10px] text-muted-foreground">{symbol.replace('USDT', '/USDT')}</span>
+      <div className="flex items-center justify-between px-3 h-8 border-b border-[#2b3139] shrink-0">
+        <span className="text-[11px] font-semibold text-white">订单簿</span>
+        <span className="text-[10px] text-[#848e9c]">{symbol.replace('USDT', '/USDT')}</span>
       </div>
 
       {/* Column headers */}
-      <div className="flex items-center px-2 py-1 text-[9px] text-muted-foreground border-b border-border/50">
-        <span className="flex-1">价格</span>
-        <span className="w-16 text-right">数量</span>
-        <span className="w-16 text-right">累计</span>
+      <div className="flex items-center px-3 h-6 text-[9px] text-[#848e9c] border-b border-[#2b3139]/60 shrink-0">
+        <span className="flex-1">价格(USDT)</span>
+        <span className="w-16 text-right">数量(USDT)</span>
+        <span className="w-16 text-right">合计</span>
       </div>
 
       {/* Asks (sells) - red, reversed so lowest ask is at bottom */}
