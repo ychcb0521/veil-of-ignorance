@@ -26,7 +26,7 @@ import { TradeInsightsPanel } from "@/components/TradeInsightsPanel";
 import { CoolingOffModal, useCoolingOff } from "@/components/CoolingOffModal";
 import { getConditionalTriggerDecisionFromRange } from "@/lib/conditionalOrders";
 import { toast } from "sonner";
-import { BarChart3, Wallet, PanelRightClose, PanelRightOpen, Crosshair } from "lucide-react";
+import { BarChart3, Wallet, Crosshair } from "lucide-react";
 import type { PendingOrder, OrderType } from "@/types/trading";
 import { calcFee, calcSlippage } from "@/types/trading";
 import type { AssetState } from "@/types/assets";
@@ -38,7 +38,7 @@ import {
   DialogDescription,
   DialogFooter,
 } from "@/components/ui/dialog";
-import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@/components/ui/resizable";
+
 
 // Price protection threshold: reject conditional triggers if |last - mark| / mark > 2%
 const PRICE_PROTECTION_THRESHOLD = 0.02;
@@ -176,7 +176,7 @@ const Index = () => {
   const [perfSymbol, setPerfSymbol] = useState<string | null>(null);
   const [coolingOffModalOpen, setCoolingOffModalOpen] = useState(false);
   const [priceProtection, setPriceProtection] = usePersistedState("price_protection", true);
-  const [isOrderBookOpen, setIsOrderBookOpen] = usePersistedState("orderbook_open", false);
+  
   const coolingOff = useCoolingOff();
   const hasRestoredRef = useRef(false);
   const persistedSim = useMemo(() => loadPersistedSimState(), []);
