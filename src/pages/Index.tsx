@@ -1521,8 +1521,8 @@ const Index = () => {
 
   // Desktop layout
   return (
-    <div className="h-screen flex flex-col overflow-hidden bg-background">
-      <header className="border-b border-border px-4 py-1.5 flex items-center justify-between shrink-0 bg-card gap-2 min-h-[36px]">
+    <div className="h-screen flex flex-col overflow-hidden bg-[#0b0e11]">
+      <header className="border-b border-[#2b3139] px-4 py-1.5 flex items-center justify-between shrink-0 bg-[#0b0e11] gap-2 min-h-[36px]">
         <div className="flex items-center gap-4 min-w-0 shrink-0">
           <ThemeToggle />
           <h1 className="text-xs font-bold text-primary tracking-widest uppercase whitespace-nowrap shrink-0">
@@ -1543,33 +1543,33 @@ const Index = () => {
           {loading && <span className="text-[10px] text-primary animate-pulse font-mono">加载历史数据...</span>}
           <button
             onClick={() => setAssetsOpen(true)}
-            className="flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
+            className="flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium text-[#B7BDC6] hover:text-primary hover:bg-primary/10 transition-colors"
           >
             <Wallet className="w-3 h-3" /> 资产
           </button>
           <button
             onClick={() => setAnalyticsOpen(true)}
-            className="flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
+            className="flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium text-[#B7BDC6] hover:text-primary hover:bg-primary/10 transition-colors"
           >
             <BarChart3 className="w-3 h-3" /> 数据归因
           </button>
           <button
             onClick={() => setPerfSymbol(activeSymbol)}
-            className="flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
+            className="flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium text-[#B7BDC6] hover:text-primary hover:bg-primary/10 transition-colors"
           >
             <Crosshair className="w-3 h-3" /> 交易侦查
           </button>
-          <span className="text-[10px] text-muted-foreground font-mono truncate max-w-[120px]">{user?.email}</span>
+          <span className="text-[10px] text-[#848e9c] font-mono truncate max-w-[120px]">{user?.email}</span>
           <button
             onClick={signOut}
-            className="text-[10px] text-muted-foreground hover:text-destructive font-medium transition-colors"
+            className="text-[10px] text-[#B7BDC6] hover:text-destructive font-medium transition-colors"
           >
             登出
           </button>
         </div>
       </header>
 
-      <div className="shrink-0">
+      <div className="shrink-0 bg-[#0b0e11] border-b border-[#2b3139]">
         <TimeControl
           status={activeCoinState.status}
           currentSimulatedTime={activeCoinState.time}
@@ -1600,123 +1600,110 @@ const Index = () => {
         />
       </div>
 
-      <div className="flex-1 flex min-h-0 overflow-hidden">
-        <ResizablePanelGroup direction="horizontal" className="flex-1">
-          <ResizablePanel defaultSize={75} minSize={40}>
-            <ResizablePanelGroup direction="vertical">
-              <ResizablePanel defaultSize={70} minSize={30}>
-                <div className="h-full relative overflow-hidden">
-                  {activeCoinState.status === "stopped" && visibleData.length === 0 ? (
-                    <div className="h-full flex items-center justify-center bg-card">
-                      <div className="text-center space-y-3">
-                        <div className="text-5xl">⏰</div>
-                        <p className="text-sm text-muted-foreground">输入历史时间并点击「启动」开始复盘模拟</p>
-                        <p className="text-xs text-muted-foreground">K线按真实时间 1:1 流速推进 · 绝不暴露未来数据</p>
-                      </div>
-                    </div>
-                  ) : (
-                    <MultiChartLayout
-                      mainData={displayData}
-                      mainSymbol={activeSymbol.replace("USDT", "/USDT")}
-                      rawSymbol={activeSymbol}
-                      onLoadOlder={loadOlder}
-                      loadingOlder={loadingOlder}
-                      tradeHistory={tradeHistory}
-                      isRunning={activeCoinState.status !== "stopped"}
-                      currentSimulatedTime={activeCoinState.time}
-                      mainInterval={interval}
-                      pricePrecision={pricePrecision}
-                      quantityPrecision={quantityPrecision}
-                      pendingOrders={activeSymbolOrders}
-                      onCancelOrder={(orderId) => handleCancelOrder(activeSymbol, orderId)}
-                      chartApiRef={chartApiRef}
-                      onCrosshairPriceChange={handleCrosshairPriceChange}
-                      pickMode={pickMode}
-                      onPricePicked={handlePricePicked}
-                    />
-                  )}
-                </div>
-              </ResizablePanel>
-              <ResizableHandle className="h-px bg-border hover:bg-primary/40 transition-colors duration-200 data-[resize-handle-active]:bg-primary/60" />
-              <ResizablePanel defaultSize={30} minSize={10} maxSize={50}>
-                <div className="h-full overflow-auto bg-card">
-                  <PositionPanel
-                    positionsMap={positionsMap}
-                    ordersMap={ordersMap}
-                    tradeHistory={tradeHistory}
-                    priceMap={priceMap}
-                    activeSymbol={activeSymbol}
-                    onClosePosition={handleClosePositionForSymbol}
-                    onCancelOrder={handleCancelOrderForSymbol}
-                    onAddIsolatedMargin={handleAddIsolatedMargin}
-                    onAdjustMargin={handleAdjustMargin}
-                    availableBalance={getEffectiveAvailable(activeSymbol)}
-                    onClearSymbolData={handleClearSymbolData}
-                    onPlaceTpSl={handlePlaceTpSl}
-                    pricePrecision={pricePrecision}
-                    activeTab={bottomTab}
-                    onTabChange={setBottomTab}
-                    onCloseAllPositions={handleCloseAllPositions}
-                  />
-                </div>
-              </ResizablePanel>
-            </ResizablePanelGroup>
-          </ResizablePanel>
+      {/* ===== 3-Column Pro Grid ===== */}
+      <div className="flex-1 flex flex-row min-h-0 overflow-hidden bg-[#0b0e11]">
+        {/* Left main area */}
+        <div className="flex-1 flex flex-col min-w-0 min-h-0">
+          {/* Layer 1: Ticker bar */}
+          <TickerBar
+            symbol={activeSymbol}
+            currentPrice={currentPrice}
+            visibleData={displayData}
+            pricePrecision={pricePrecision}
+            effectiveSimTime={effectiveSimTime}
+          />
 
-          {/* Order Book with collapse toggle */}
-          <ResizableHandle className="w-px bg-border hover:bg-primary/40 transition-colors duration-200 data-[resize-handle-active]:bg-primary/60" />
-          <ResizablePanel
-            defaultSize={isOrderBookOpen ? 8 : 2}
-            minSize={2}
-            maxSize={15}
-            collapsible
-            collapsedSize={2}
-            onCollapse={() => setIsOrderBookOpen(false)}
-            onExpand={() => setIsOrderBookOpen(true)}
-          >
-            <div className="h-full flex flex-col overflow-hidden bg-card">
-              <button
-                onClick={() => setIsOrderBookOpen((prev) => !prev)}
-                className="flex items-center justify-center py-2 border-b border-border text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-colors duration-200 shrink-0"
-                title={isOrderBookOpen ? "收起盘口" : "展开盘口"}
-              >
-                {isOrderBookOpen ? (
-                  <PanelRightClose className="w-3.5 h-3.5" />
-                ) : (
-                  <PanelRightOpen className="w-3.5 h-3.5" />
-                )}
-              </button>
-              {isOrderBookOpen && (
-                <div className="flex-1 min-h-0 overflow-hidden">
-                  <OrderBook symbol={activeSymbol} currentPrice={currentPrice} pricePrecision={pricePrecision} />
+          {/* Layer 2: Chart + OrderBook column */}
+          <div className="flex-1 flex flex-row min-h-0 min-w-0">
+            {/* Chart area */}
+            <div className="flex-1 min-w-0 relative overflow-hidden bg-[#0b0e11]">
+              {activeCoinState.status === "stopped" && visibleData.length === 0 ? (
+                <div className="h-full flex items-center justify-center bg-[#0b0e11]">
+                  <div className="text-center space-y-3">
+                    <div className="text-5xl">⏰</div>
+                    <p className="text-sm text-[#B7BDC6]">输入历史时间并点击「启动」开始复盘模拟</p>
+                    <p className="text-xs text-[#848e9c]">K线按真实时间 1:1 流速推进 · 绝不暴露未来数据</p>
+                  </div>
                 </div>
+              ) : (
+                <MultiChartLayout
+                  mainData={displayData}
+                  mainSymbol={activeSymbol.replace("USDT", "/USDT")}
+                  rawSymbol={activeSymbol}
+                  onLoadOlder={loadOlder}
+                  loadingOlder={loadingOlder}
+                  tradeHistory={tradeHistory}
+                  isRunning={activeCoinState.status !== "stopped"}
+                  currentSimulatedTime={activeCoinState.time}
+                  mainInterval={interval}
+                  pricePrecision={pricePrecision}
+                  quantityPrecision={quantityPrecision}
+                  pendingOrders={activeSymbolOrders}
+                  onCancelOrder={(orderId) => handleCancelOrder(activeSymbol, orderId)}
+                  chartApiRef={chartApiRef}
+                  onCrosshairPriceChange={handleCrosshairPriceChange}
+                  pickMode={pickMode}
+                  onPricePicked={handlePricePicked}
+                />
               )}
             </div>
-          </ResizablePanel>
 
-          <ResizableHandle className="w-px bg-border hover:bg-primary/40 transition-colors duration-200 data-[resize-handle-active]:bg-primary/60" />
-          <ResizablePanel defaultSize={17} minSize={12} maxSize={25}>
-            <div className="h-full overflow-auto bg-card">
-              <OrderPanel
-                symbol={activeSymbol}
-                currentPrice={currentPrice}
-                disabled={activeCoinState.status === "stopped" || currentPrice === 0}
-                onPlaceOrder={handlePlaceOrderForActiveSymbol}
+            {/* Order Book + Recent Trades column */}
+            <div className="w-[320px] shrink-0 flex flex-col bg-[#1e2329] border-x border-[#2b3139] min-h-0">
+              <div className="flex-1 min-h-0 border-b border-[#2b3139] overflow-hidden">
+                <OrderBook symbol={activeSymbol} currentPrice={currentPrice} pricePrecision={pricePrecision} />
+              </div>
+              <div className="flex-1 min-h-0 overflow-hidden">
+                <RecentTrades currentPrice={currentPrice} pricePrecision={pricePrecision} />
+              </div>
+            </div>
+          </div>
+
+          {/* Layer 3: Bottom positions panel */}
+          <div className="h-[30%] min-h-[250px] shrink-0 border-t border-[#2b3139] overflow-hidden bg-[#0b0e11]">
+            <div className="h-full overflow-auto">
+              <PositionPanel
+                positionsMap={positionsMap}
+                ordersMap={ordersMap}
+                tradeHistory={tradeHistory}
+                priceMap={priceMap}
+                activeSymbol={activeSymbol}
+                onClosePosition={handleClosePositionForSymbol}
+                onCancelOrder={handleCancelOrderForSymbol}
+                onAddIsolatedMargin={handleAddIsolatedMargin}
+                onAdjustMargin={handleAdjustMargin}
+                availableBalance={getEffectiveAvailable(activeSymbol)}
+                onClearSymbolData={handleClearSymbolData}
+                onPlaceTpSl={handlePlaceTpSl}
                 pricePrecision={pricePrecision}
-                quantityPrecision={quantityPrecision}
-                coolingOff={coolingOff.isActive}
-                coolingOffLabel={coolingOff.isActive ? coolingOff.formatRemaining() : undefined}
-                onOpenCoolingOff={() => setCoolingOffModalOpen(true)}
-                priceProtection={priceProtection}
-                onTogglePriceProtection={() => setPriceProtection((prev) => !prev)}
-                crosshairPrice={crosshairPrice}
-                pickMode={pickMode}
-                onPickModeChange={setPickMode}
-                pickedPrice={pickedPrice}
+                activeTab={bottomTab}
+                onTabChange={setBottomTab}
+                onCloseAllPositions={handleCloseAllPositions}
               />
             </div>
-          </ResizablePanel>
-        </ResizablePanelGroup>
+          </div>
+        </div>
+
+        {/* Right order panel (fixed 320px) */}
+        <div className="w-[320px] shrink-0 h-full bg-[#1e2329] border-l border-[#2b3139] overflow-y-auto">
+          <OrderPanel
+            symbol={activeSymbol}
+            currentPrice={currentPrice}
+            disabled={activeCoinState.status === "stopped" || currentPrice === 0}
+            onPlaceOrder={handlePlaceOrderForActiveSymbol}
+            pricePrecision={pricePrecision}
+            quantityPrecision={quantityPrecision}
+            coolingOff={coolingOff.isActive}
+            coolingOffLabel={coolingOff.isActive ? coolingOff.formatRemaining() : undefined}
+            onOpenCoolingOff={() => setCoolingOffModalOpen(true)}
+            priceProtection={priceProtection}
+            onTogglePriceProtection={() => setPriceProtection((prev) => !prev)}
+            crosshairPrice={crosshairPrice}
+            pickMode={pickMode}
+            onPickModeChange={setPickMode}
+            pickedPrice={pickedPrice}
+          />
+        </div>
       </div>
 
       <Dialog open={assetsOpen} onOpenChange={setAssetsOpen}>
