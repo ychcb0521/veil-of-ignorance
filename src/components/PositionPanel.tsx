@@ -507,9 +507,11 @@ export function PositionPanel({
                     </div>
                   </div>
                 );
-              })}
+                  })}
+                </div>
+              )}
             </div>
-          )
+          </>
         )}
 
         {/* ===== PENDING ORDERS ===== */}
