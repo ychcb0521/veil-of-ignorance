@@ -1521,8 +1521,8 @@ const Index = () => {
 
   // Desktop layout
   return (
-    <div className="h-screen flex flex-col overflow-hidden bg-[#0b0e11]">
-      <header className="border-b border-[#2b3139] px-4 py-1.5 flex items-center justify-between shrink-0 bg-[#0b0e11] gap-2 min-h-[36px]">
+    <div className="h-screen flex flex-col overflow-hidden bg-gray-50 dark:bg-[#0b0e11]">
+      <header className="border-b border-gray-200 dark:border-[#2b3139] px-4 py-1.5 flex items-center justify-between shrink-0 bg-gray-50 dark:bg-[#0b0e11] gap-2 min-h-[36px]">
         <div className="flex items-center gap-4 min-w-0 shrink-0">
           <ThemeToggle />
           <h1 className="text-xs font-bold text-primary tracking-widest uppercase whitespace-nowrap shrink-0">
@@ -1543,33 +1543,33 @@ const Index = () => {
           {loading && <span className="text-[10px] text-primary animate-pulse font-mono">加载历史数据...</span>}
           <button
             onClick={() => setAssetsOpen(true)}
-            className="flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium text-[#B7BDC6] hover:text-primary hover:bg-primary/10 transition-colors"
+            className="flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium text-gray-600 dark:text-[#B7BDC6] hover:text-primary hover:bg-primary/10 transition-colors"
           >
             <Wallet className="w-3 h-3" /> 资产
           </button>
           <button
             onClick={() => setAnalyticsOpen(true)}
-            className="flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium text-[#B7BDC6] hover:text-primary hover:bg-primary/10 transition-colors"
+            className="flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium text-gray-600 dark:text-[#B7BDC6] hover:text-primary hover:bg-primary/10 transition-colors"
           >
             <BarChart3 className="w-3 h-3" /> 数据归因
           </button>
           <button
             onClick={() => setPerfSymbol(activeSymbol)}
-            className="flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium text-[#B7BDC6] hover:text-primary hover:bg-primary/10 transition-colors"
+            className="flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium text-gray-600 dark:text-[#B7BDC6] hover:text-primary hover:bg-primary/10 transition-colors"
           >
             <Crosshair className="w-3 h-3" /> 交易侦查
           </button>
-          <span className="text-[10px] text-[#848e9c] font-mono truncate max-w-[120px]">{user?.email}</span>
+          <span className="text-[10px] text-gray-500 dark:text-[#848e9c] font-mono truncate max-w-[120px]">{user?.email}</span>
           <button
             onClick={signOut}
-            className="text-[10px] text-[#B7BDC6] hover:text-destructive font-medium transition-colors"
+            className="text-[10px] text-gray-600 dark:text-[#B7BDC6] hover:text-destructive font-medium transition-colors"
           >
             登出
           </button>
         </div>
       </header>
 
-      <div className="shrink-0 bg-[#0b0e11] border-b border-[#2b3139]">
+      <div className="shrink-0 bg-gray-50 dark:bg-[#0b0e11] border-b border-gray-200 dark:border-[#2b3139]">
         <TimeControl
           status={activeCoinState.status}
           currentSimulatedTime={activeCoinState.time}
@@ -1601,7 +1601,7 @@ const Index = () => {
       </div>
 
       {/* ===== 3-Column Pro Grid ===== */}
-      <div className="flex-1 flex flex-row min-h-0 overflow-hidden bg-[#0b0e11]">
+      <div className="flex-1 flex flex-row min-h-0 overflow-hidden bg-gray-50 dark:bg-[#0b0e11]">
         {/* Left main area */}
         <div className="flex-1 flex flex-col min-w-0 min-h-0">
           {/* Layer 1: Ticker bar */}
@@ -1616,13 +1616,13 @@ const Index = () => {
           {/* Layer 2: Chart + OrderBook column */}
           <div className="flex-1 flex flex-row min-h-0 min-w-0">
             {/* Chart area */}
-            <div className="flex-1 min-w-0 relative overflow-hidden bg-[#0b0e11]">
+            <div className="flex-1 min-w-0 relative overflow-hidden bg-gray-50 dark:bg-[#0b0e11]">
               {activeCoinState.status === "stopped" && visibleData.length === 0 ? (
-                <div className="h-full flex items-center justify-center bg-[#0b0e11]">
+                <div className="h-full flex items-center justify-center bg-gray-50 dark:bg-[#0b0e11]">
                   <div className="text-center space-y-3">
                     <div className="text-5xl">⏰</div>
-                    <p className="text-sm text-[#B7BDC6]">输入历史时间并点击「启动」开始复盘模拟</p>
-                    <p className="text-xs text-[#848e9c]">K线按真实时间 1:1 流速推进 · 绝不暴露未来数据</p>
+                    <p className="text-sm text-gray-600 dark:text-[#B7BDC6]">输入历史时间并点击「启动」开始复盘模拟</p>
+                    <p className="text-xs text-gray-500 dark:text-[#848e9c]">K线按真实时间 1:1 流速推进 · 绝不暴露未来数据</p>
                   </div>
                 </div>
               ) : (
@@ -1649,8 +1649,8 @@ const Index = () => {
             </div>
 
             {/* Order Book + Recent Trades column */}
-            <div className="w-[320px] shrink-0 flex flex-col bg-[#1e2329] border-x border-[#2b3139] min-h-0">
-              <div className="flex-1 min-h-0 border-b border-[#2b3139] overflow-hidden">
+            <div className="w-[320px] shrink-0 flex flex-col bg-white dark:bg-[#1e2329] border-x border-gray-200 dark:border-[#2b3139] min-h-0">
+              <div className="flex-1 min-h-0 border-b border-gray-200 dark:border-[#2b3139] overflow-hidden">
                 <OrderBook symbol={activeSymbol} currentPrice={currentPrice} pricePrecision={pricePrecision} />
               </div>
               <div className="flex-1 min-h-0 overflow-hidden">
@@ -1660,7 +1660,7 @@ const Index = () => {
           </div>
 
           {/* Layer 3: Bottom positions panel */}
-          <div className="h-[30%] min-h-[250px] shrink-0 border-t border-[#2b3139] overflow-hidden bg-[#0b0e11]">
+          <div className="h-[30%] min-h-[250px] shrink-0 border-t border-gray-200 dark:border-[#2b3139] overflow-hidden bg-gray-50 dark:bg-[#0b0e11]">
             <div className="h-full overflow-auto">
               <PositionPanel
                 positionsMap={positionsMap}
@@ -1685,7 +1685,7 @@ const Index = () => {
         </div>
 
         {/* Right order panel (fixed 320px) */}
-        <div className="w-[320px] shrink-0 h-full bg-[#1e2329] border-l border-[#2b3139] overflow-y-auto">
+        <div className="w-[320px] shrink-0 h-full bg-white dark:bg-[#1e2329] border-l border-gray-200 dark:border-[#2b3139] overflow-y-auto">
           <OrderPanel
             symbol={activeSymbol}
             currentPrice={currentPrice}
