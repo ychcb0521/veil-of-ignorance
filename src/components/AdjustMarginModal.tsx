@@ -89,7 +89,7 @@ export function AdjustMarginModal({
           <DialogTitle className="text-base">调整保证金</DialogTitle>
           <DialogDescription className="text-xs">
             {baseCoin}/USDT 永续 ·{' '}
-            <span className={position.side === 'LONG' ? 'text-emerald-400' : 'text-red-400'}>
+            <span className={position.side === 'LONG' ? 'text-trading-green' : 'text-trading-red'}>
               {position.side === 'LONG' ? '多' : '空'} {position.leverage}x
             </span>{' '}
             · 逐仓
@@ -158,14 +158,14 @@ export function AdjustMarginModal({
                 label="预估强平价"
                 value={
                   <span className="flex items-center gap-1.5">
-                    <span className={isFinite(currentLiq) ? 'text-red-400/80' : 'text-muted-foreground'}>
+                    <span className={isFinite(currentLiq) ? 'text-trading-red/80' : 'text-muted-foreground'}>
                       {isFinite(currentLiq) ? formatPrice(currentLiq, symbol) : '--'}
                     </span>
                     <span className="text-muted-foreground">→</span>
                     <span className={
                       !isFinite(projectedLiq)
                         ? 'text-muted-foreground'
-                        : (mode === 'add' ? 'text-emerald-400' : 'text-red-400')
+                        : (mode === 'add' ? 'text-trading-green' : 'text-trading-red')
                     }>
                       {!isFinite(projectedLiq) ? '--' : formatPrice(projectedLiq, symbol)}
                     </span>

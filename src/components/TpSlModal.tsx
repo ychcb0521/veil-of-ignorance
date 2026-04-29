@@ -45,19 +45,19 @@ export function TpSlModal({ pos, symbol, markPrice, liqPrice, onClose, onConfirm
           <div className="grid grid-cols-3 gap-2 text-center">
             <InfoCell label="开仓价" value={formatPrice(pos.entryPrice, symbol)} />
             <InfoCell label="标记价" value={markPrice > 0 ? formatPrice(markPrice, symbol) : '-'} />
-            <InfoCell label="强平价" value={isFinite(liqPrice) ? formatPrice(liqPrice, symbol) : '--'} valueClass="text-red-400" />
+            <InfoCell label="强平价" value={isFinite(liqPrice) ? formatPrice(liqPrice, symbol) : '--'} valueClass="text-trading-red" />
           </div>
 
           <div className="text-[10px] text-muted-foreground text-center">
             {baseCoin}/USDT 永续 ·{' '}
-            <span className={pos.side === 'LONG' ? 'text-emerald-400' : 'text-red-400'}>
+            <span className={pos.side === 'LONG' ? 'text-trading-green' : 'text-trading-red'}>
               {pos.side === 'LONG' ? '多' : '空'} {pos.leverage}x
             </span>
           </div>
 
           {/* TP input */}
           <div className="space-y-1.5">
-            <label className="text-xs font-medium text-emerald-400">止盈 (Take Profit)</label>
+            <label className="text-xs font-medium text-trading-green">止盈 (Take Profit)</label>
             <input
               type="number"
               value={tpPrice}
@@ -69,7 +69,7 @@ export function TpSlModal({ pos, symbol, markPrice, liqPrice, onClose, onConfirm
 
           {/* SL input */}
           <div className="space-y-1.5">
-            <label className="text-xs font-medium text-red-400">止损 (Stop Loss)</label>
+            <label className="text-xs font-medium text-trading-red">止损 (Stop Loss)</label>
             <input
               type="number"
               value={slPrice}

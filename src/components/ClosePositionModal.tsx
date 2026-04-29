@@ -120,8 +120,8 @@ export function ClosePositionModal({ open, onClose, symbol, position, posIndex, 
           <span className="text-sm font-bold font-mono text-foreground">{baseCoin}/USDT 永续</span>
           <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
             position.side === 'LONG'
-              ? 'bg-emerald-500/15 text-emerald-400'
-              : 'bg-red-500/15 text-red-400'
+              ? 'bg-trading-green/15 text-trading-green'
+              : 'bg-trading-red/15 text-trading-red'
           }`}>
             {position.side === 'LONG' ? '多' : '空'} {position.leverage}x
           </span>
@@ -232,7 +232,7 @@ export function ClosePositionModal({ open, onClose, symbol, position, posIndex, 
           </div>
           <div className="border-t border-border pt-2 flex items-center justify-between">
             <span className="text-xs font-medium text-muted-foreground">预计盈亏</span>
-            <span className={`text-sm font-bold font-mono tabular-nums ${isProfit ? 'text-emerald-400' : 'text-red-400'}`}>
+            <span className={`text-sm font-bold font-mono tabular-nums ${isProfit ? 'text-trading-green' : 'text-trading-red'}`}>
               {formatSignedUSDT(estimatedPnl)} USDT
             </span>
           </div>
@@ -247,8 +247,8 @@ export function ClosePositionModal({ open, onClose, symbol, position, posIndex, 
             disabled={submitDisabled}
             className={`flex-1 ${
               position.side === 'LONG'
-                ? 'bg-red-500 hover:bg-red-600 text-white'
-                : 'bg-emerald-500 hover:bg-emerald-600 text-white'
+                ? 'bg-trading-red hover:bg-trading-red/90 text-white'
+                : 'bg-trading-green hover:bg-trading-green/90 text-white'
             }`}
           >
             确认平仓 ({sliderPct}%)
