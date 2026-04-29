@@ -264,9 +264,9 @@ export function PositionPanel({
   };
 
   return (
-    <div className="flex flex-col h-full bg-[#1e2329] border-t border-[#2b3139]">
+    <div className="flex flex-col h-full bg-white dark:bg-[#1e2329] border-t border-gray-200 dark:border-[#2b3139]">
       {/* ===== Tabs Bar ===== */}
-      <div className="flex justify-between items-center px-4 h-10 border-b border-[#2b3139] shrink-0">
+      <div className="flex justify-between items-center px-4 h-10 border-b border-gray-200 dark:border-[#2b3139] shrink-0">
         <div className="flex space-x-6 flex-1 overflow-x-auto h-full items-center">
           {TABS.map(t => {
             const isActive = activeTab === t.key;
@@ -278,7 +278,7 @@ export function PositionPanel({
                 className={`relative h-full text-sm font-medium whitespace-nowrap transition-colors ${
                   isActive
                     ? 'text-[#fcd535]'
-                    : 'text-[#848e9c] hover:text-white'
+                    : 'text-gray-500 dark:text-[#848e9c] hover:text-gray-900 dark:text-white'
                 }`}
               >
                 {labelText}
@@ -298,7 +298,7 @@ export function PositionPanel({
                   onCheckedChange={(v) => setHideOtherContracts(!!v)}
                   className="h-3.5 w-3.5 border-[#5e6673] data-[state=checked]:bg-[#fcd535] data-[state=checked]:border-[#fcd535] data-[state=checked]:text-[#0b0e11]"
                 />
-                <span className="text-xs text-[#848e9c] whitespace-nowrap">隐藏其他合约</span>
+                <span className="text-xs text-gray-500 dark:text-[#848e9c] whitespace-nowrap">隐藏其他合约</span>
               </label>
               {allPositions.length > 0 && (
                 <button
@@ -327,7 +327,7 @@ export function PositionPanel({
         {activeTab === 'positions' && (
           <>
             {/* Persistent table header */}
-            <div className="h-8 flex items-center px-4 text-xs text-[#848e9c] border-b border-[#2b3139] shrink-0 overflow-x-auto">
+            <div className="h-8 flex items-center px-4 text-xs text-gray-500 dark:text-[#848e9c] border-b border-gray-200 dark:border-[#2b3139] shrink-0 overflow-x-auto">
               {POSITION_COLUMNS.map((col, i) => (
                 <div key={i} className={`${col.flex} ${col.align} whitespace-nowrap px-2`}>
                   {col.label}
@@ -338,7 +338,7 @@ export function PositionPanel({
             {/* Body */}
             <div className="flex-1 overflow-y-auto">
               {mergedPositions.length === 0 ? (
-                <div className="py-20 flex flex-col items-center justify-center text-[#848e9c] text-sm gap-2">
+                <div className="py-20 flex flex-col items-center justify-center text-gray-500 dark:text-[#848e9c] text-sm gap-2">
                   <svg className="w-10 h-10 opacity-40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.2">
                     <rect x="3" y="5" width="18" height="14" rx="2" />
                     <path d="M3 10h18" />

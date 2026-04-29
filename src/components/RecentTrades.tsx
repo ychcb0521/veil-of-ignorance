@@ -55,11 +55,11 @@ export function RecentTrades({ currentPrice, pricePrecision }: Props) {
   return (
     <div className="flex flex-col h-full text-[10px] font-mono select-none">
       {/* Tabs */}
-      <div className="flex items-center gap-4 px-3 h-8 border-b border-[#2b3139] shrink-0">
+      <div className="flex items-center gap-4 px-3 h-8 border-b border-gray-200 dark:border-[#2b3139] shrink-0">
         <button
           onClick={() => setTab('trades')}
           className={`text-[11px] font-medium transition-colors ${
-            tab === 'trades' ? 'text-white border-b-2 border-primary -mb-px h-8 flex items-center' : 'text-[#848e9c] hover:text-white'
+            tab === 'trades' ? 'text-gray-900 dark:text-white border-b-2 border-primary -mb-px h-8 flex items-center' : 'text-gray-500 dark:text-[#848e9c] hover:text-gray-900 dark:text-white'
           }`}
         >
           最新成交
@@ -67,7 +67,7 @@ export function RecentTrades({ currentPrice, pricePrecision }: Props) {
         <button
           onClick={() => setTab('movers')}
           className={`text-[11px] font-medium transition-colors ${
-            tab === 'movers' ? 'text-white border-b-2 border-primary -mb-px h-8 flex items-center' : 'text-[#848e9c] hover:text-white'
+            tab === 'movers' ? 'text-gray-900 dark:text-white border-b-2 border-primary -mb-px h-8 flex items-center' : 'text-gray-500 dark:text-[#848e9c] hover:text-gray-900 dark:text-white'
           }`}
         >
           市场异动
@@ -75,7 +75,7 @@ export function RecentTrades({ currentPrice, pricePrecision }: Props) {
       </div>
 
       {/* Column headers */}
-      <div className="flex items-center px-3 h-6 text-[9px] text-[#848e9c] border-b border-[#2b3139]/60 shrink-0">
+      <div className="flex items-center px-3 h-6 text-[9px] text-gray-500 dark:text-[#848e9c] border-b border-gray-200 dark:border-[#2b3139]/60 shrink-0">
         <span className="flex-1">价格(USDT)</span>
         <span className="w-16 text-right">数量</span>
         <span className="w-14 text-right">时间</span>
@@ -84,21 +84,21 @@ export function RecentTrades({ currentPrice, pricePrecision }: Props) {
       {tab === 'trades' ? (
         <div className="flex-1 overflow-y-auto">
           {trades.length === 0 ? (
-            <div className="flex items-center justify-center h-full text-[#848e9c]">等待数据...</div>
+            <div className="flex items-center justify-center h-full text-gray-500 dark:text-[#848e9c]">等待数据...</div>
           ) : (
             trades.map(t => (
               <div key={t.id} className="flex items-center px-3 h-[20px] hover:bg-[#2b3139]/40 tabular-nums">
                 <span className={`flex-1 ${t.side === 'BUY' ? 'text-trading-green' : 'text-trading-red'}`}>
                   {t.price.toFixed(pricePrecision)}
                 </span>
-                <span className="w-16 text-right text-[#B7BDC6]">{t.qty.toFixed(3)}</span>
-                <span className="w-14 text-right text-[#848e9c]">{formatTime(t.time)}</span>
+                <span className="w-16 text-right text-gray-600 dark:text-[#B7BDC6]">{t.qty.toFixed(3)}</span>
+                <span className="w-14 text-right text-gray-500 dark:text-[#848e9c]">{formatTime(t.time)}</span>
               </div>
             ))
           )}
         </div>
       ) : (
-        <div className="flex-1 flex items-center justify-center text-[#848e9c] text-[11px]">
+        <div className="flex-1 flex items-center justify-center text-gray-500 dark:text-[#848e9c] text-[11px]">
           市场异动 · 即将上线
         </div>
       )}
