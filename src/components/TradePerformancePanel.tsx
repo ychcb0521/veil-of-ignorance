@@ -205,8 +205,8 @@ export function TradePerformancePanel({ open, onClose, symbol, tradeHistory }: P
                           <div className="flex items-center gap-2">
                             <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
                               pair.open.side === 'LONG'
-                                ? 'bg-emerald-500/15 text-emerald-400'
-                                : 'bg-red-500/15 text-red-400'
+                                ? 'bg-trading-green/15 text-trading-green'
+                                : 'bg-trading-red/15 text-trading-red'
                             }`}>
                               {pair.open.side === 'LONG' ? '多' : '空'} {pair.open.leverage}x
                             </span>
@@ -233,7 +233,7 @@ export function TradePerformancePanel({ open, onClose, symbol, tradeHistory }: P
                           {/* Connection line */}
                           <div className="flex-1 flex items-center">
                             <div className={`h-0.5 flex-1 rounded ${isProfit ? 'bg-emerald-400/40' : 'bg-red-400/40'}`} />
-                            <div className={`mx-1 text-[10px] font-bold font-mono ${isProfit ? 'text-emerald-400' : 'text-red-400'}`}>
+                            <div className={`mx-1 text-[10px] font-bold font-mono ${isProfit ? 'text-trading-green' : 'text-trading-red'}`}>
                               →
                             </div>
                             <div className={`h-0.5 flex-1 rounded ${isProfit ? 'bg-emerald-400/40' : 'bg-red-400/40'}`} />
@@ -254,13 +254,13 @@ export function TradePerformancePanel({ open, onClose, symbol, tradeHistory }: P
                           <div className="flex items-center gap-3">
                             <div>
                               <span className="text-[9px] text-muted-foreground">盈亏 </span>
-                              <span className={`text-xs font-mono font-bold ${isProfit ? 'text-emerald-400' : 'text-red-400'}`}>
+                              <span className={`text-xs font-mono font-bold ${isProfit ? 'text-trading-green' : 'text-trading-red'}`}>
                                 {isProfit ? '+' : ''}{pair.pnl.toFixed(2)}
                               </span>
                             </div>
                             <div>
                               <span className="text-[9px] text-muted-foreground">ROE </span>
-                              <span className={`text-xs font-mono font-bold ${isProfit ? 'text-emerald-400' : 'text-red-400'}`}>
+                              <span className={`text-xs font-mono font-bold ${isProfit ? 'text-trading-green' : 'text-trading-red'}`}>
                                 {isProfit ? '+' : ''}{pair.roe.toFixed(2)}%
                               </span>
                             </div>
@@ -283,31 +283,31 @@ export function TradePerformancePanel({ open, onClose, symbol, tradeHistory }: P
               {/* Core stats */}
               <div className="space-y-2">
                 <MiniStat label="总期望值 (Expectancy)" value={`${stats.expectancy >= 0 ? '+' : ''}${stats.expectancy.toFixed(2)}`}
-                  color={stats.expectancy >= 0 ? 'text-emerald-400' : 'text-red-400'} />
+                  color={stats.expectancy >= 0 ? 'text-trading-green' : 'text-trading-red'} />
                 <MiniStat label="总胜率 (Win Rate)" value={`${stats.winRate.toFixed(1)}%`}
-                  color={stats.winRate >= 50 ? 'text-emerald-400' : 'text-red-400'} />
+                  color={stats.winRate >= 50 ? 'text-trading-green' : 'text-trading-red'} />
                 <MiniStat label="盈亏比 (P/L Ratio)" value={stats.plRatio === Infinity ? '∞' : stats.plRatio.toFixed(2)}
-                  color={stats.plRatio >= 1 ? 'text-emerald-400' : 'text-red-400'} />
-                <MiniStat label="最大回撤 (Max DD)" value={`${stats.maxDrawdown.toFixed(2)}%`} color="text-red-400" />
+                  color={stats.plRatio >= 1 ? 'text-trading-green' : 'text-trading-red'} />
+                <MiniStat label="最大回撤 (Max DD)" value={`${stats.maxDrawdown.toFixed(2)}%`} color="text-trading-red" />
               </div>
 
               <div className="border-t border-border/50 pt-2 space-y-2">
                 <MiniStat label="总盈亏" value={`${stats.totalPnl >= 0 ? '+' : ''}${stats.totalPnl.toFixed(2)}`}
-                  color={stats.totalPnl >= 0 ? 'text-emerald-400' : 'text-red-400'} />
+                  color={stats.totalPnl >= 0 ? 'text-trading-green' : 'text-trading-red'} />
                 <MiniStat label="总手续费" value={`-${stats.totalFees.toFixed(2)}`} color="text-muted-foreground" />
-                <MiniStat label="平均盈利" value={`+${stats.avgWin.toFixed(2)}`} color="text-emerald-400" />
-                <MiniStat label="平均亏损" value={`-${stats.avgLoss.toFixed(2)}`} color="text-red-400" />
+                <MiniStat label="平均盈利" value={`+${stats.avgWin.toFixed(2)}`} color="text-trading-green" />
+                <MiniStat label="平均亏损" value={`-${stats.avgLoss.toFixed(2)}`} color="text-trading-red" />
                 <MiniStat label="平均持仓时长" value={formatDuration(stats.avgHoldMs)} color="text-foreground" />
               </div>
 
               {/* Win/Loss bar */}
               <div className="flex items-center gap-2 text-[10px] font-mono pt-1">
-                <span className="text-emerald-400">胜 {stats.wins}</span>
+                <span className="text-trading-green">胜 {stats.wins}</span>
                 <div className="flex-1 h-2 rounded-full overflow-hidden bg-red-500/20">
                   <div className="h-full bg-emerald-400 rounded-full transition-all"
                     style={{ width: `${stats.total > 0 ? (stats.wins / stats.total) * 100 : 0}%` }} />
                 </div>
-                <span className="text-red-400">负 {stats.losses}</span>
+                <span className="text-trading-red">负 {stats.losses}</span>
               </div>
 
               {/* Equity curve */}
