@@ -11,6 +11,8 @@ import { TimeControl } from "@/components/TimeControl";
 import { CandlestickChart, type ChartImperativeApi } from "@/components/CandlestickChart";
 import { MultiChartLayout } from "@/components/MultiChartLayout";
 import { OrderBook } from "@/components/OrderBook";
+import { RecentTrades } from "@/components/RecentTrades";
+import { TickerBar } from "@/components/TickerBar";
 import { OrderPanel } from "@/components/OrderPanel";
 import { PositionPanel } from "@/components/PositionPanel";
 import { SymbolSelector } from "@/components/SymbolSelector";
