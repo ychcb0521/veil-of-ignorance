@@ -355,8 +355,8 @@ export function PositionPanel({
                       <span
                         className={`ml-1 text-[10px] font-bold px-1.5 py-0.5 rounded ${
                           mg.side === 'LONG'
-                            ? 'bg-emerald-500/15 text-emerald-400'
-                            : 'bg-red-500/15 text-red-400'
+                            ? 'bg-trading-green/15 text-trading-green'
+                            : 'bg-trading-red/15 text-trading-red'
                         }`}
                       >
                         {mg.side === 'LONG' ? '多' : '空'} {mg.leverage}x {mg.marginMode === 'cross' ? '全仓' : '逐仓'}
@@ -372,13 +372,13 @@ export function PositionPanel({
                     <div className="flex items-start justify-between px-3 py-2.5">
                       <div>
                         <div className="text-[10px] text-muted-foreground mb-0.5">未实现盈亏 (USDT)</div>
-                        <div className={`text-lg font-bold font-mono tabular-nums ${isProfit ? 'text-emerald-400' : 'text-red-400'}`}>
+                        <div className={`text-lg font-bold font-mono tabular-nums ${isProfit ? 'text-trading-green' : 'text-trading-red'}`}>
                           {formatSignedUSDT(totalPnl)}
                         </div>
                       </div>
                       <div className="text-right">
                         <div className="text-[10px] text-muted-foreground mb-0.5">ROE</div>
-                        <div className={`text-lg font-bold font-mono tabular-nums ${isProfit ? 'text-emerald-400' : 'text-red-400'}`}>
+                        <div className={`text-lg font-bold font-mono tabular-nums ${isProfit ? 'text-trading-green' : 'text-trading-red'}`}>
                           {isProfit ? '+' : ''}{roe.toFixed(2)}%
                         </div>
                       </div>
@@ -416,7 +416,7 @@ export function PositionPanel({
                         key={`liq-${mg.totalIsolatedMargin ?? mg.totalMargin}-${mg.totalQuantity}-${mg.weightedEntryPrice}`}
                         label="强平价格"
                         value={isFinite(liq) ? formatPrice(liq, mg.symbol) : '--'}
-                        valueClassName="text-red-400"
+                        valueClassName="text-trading-red"
                       />
                     </div>
 
@@ -436,13 +436,13 @@ export function PositionPanel({
                           {tps.length > 0 && (
                             <span className="flex items-center gap-1">
                               <span className="text-muted-foreground">止盈</span>
-                              <span className="text-emerald-400">{fmtList(tps)}</span>
+                              <span className="text-trading-green">{fmtList(tps)}</span>
                             </span>
                           )}
                           {sls.length > 0 && (
                             <span className="flex items-center gap-1">
                               <span className="text-muted-foreground">止损</span>
-                              <span className="text-red-400">{fmtList(sls)}</span>
+                              <span className="text-trading-red">{fmtList(sls)}</span>
                             </span>
                           )}
                         </div>
@@ -494,9 +494,9 @@ export function PositionPanel({
                       <td className="px-3 py-2 text-muted-foreground">
                         <div className="flex items-center gap-1.5 flex-wrap">
                           {order.reduceOnly && order.reduceKind === 'TP' ? (
-                            <span className="font-bold text-emerald-400">止盈</span>
+                            <span className="font-bold text-trading-green">止盈</span>
                           ) : order.reduceOnly && order.reduceKind === 'SL' ? (
-                            <span className="font-bold text-red-400">止损</span>
+                            <span className="font-bold text-trading-red">止损</span>
                           ) : (
                             <span>
                               {({ LIMIT: '限价', POST_ONLY: '只做Maker', MARKET: '市价', LIMIT_TP_SL: '限价TP/SL', MARKET_TP_SL: '市价TP/SL', CONDITIONAL: '条件', TRAILING_STOP: '跟踪', TWAP: 'TWAP', SCALED: '分段' } as Record<string, string>)[order.type] || order.type}
@@ -509,7 +509,7 @@ export function PositionPanel({
                           )}
                         </div>
                       </td>
-                      <td className={`px-3 py-2 font-bold ${order.side === 'LONG' ? 'text-emerald-400' : 'text-red-400'}`}>
+                      <td className={`px-3 py-2 font-bold ${order.side === 'LONG' ? 'text-trading-green' : 'text-trading-red'}`}>
                         {order.side === 'LONG' ? '多' : '空'}
                       </td>
                       <td className="px-3 py-2">
@@ -519,7 +519,7 @@ export function PositionPanel({
                       </td>
                       <td className="px-3 py-2">
                         {order.stopPrice > 0 ? (
-                          <span className={order.reduceKind === 'TP' ? 'text-emerald-400' : order.reduceKind === 'SL' ? 'text-red-400' : 'text-amber-400'}>
+                          <span className={order.reduceKind === 'TP' ? 'text-trading-green' : order.reduceKind === 'SL' ? 'text-trading-red' : 'text-amber-400'}>
                             {formatPrice(order.stopPrice, symbol)}
                           </span>
                         ) : '-'}
@@ -603,7 +603,7 @@ export function PositionPanel({
                         {t.action === 'LIQUIDATION' ? '💀爆仓' : t.action === 'OPEN' ? '开仓' : '平仓'}
                       </span>
                     </td>
-                    <td className={`px-3 py-2 font-bold ${t.side === 'LONG' ? 'text-emerald-400' : 'text-red-400'}`}>
+                    <td className={`px-3 py-2 font-bold ${t.side === 'LONG' ? 'text-trading-green' : 'text-trading-red'}`}>
                       {t.side === 'LONG' ? '多' : '空'} {t.leverage}x
                     </td>
                     <td className="px-3 py-2">{t.entryPrice.toPrecision(6)}</td>
@@ -611,14 +611,14 @@ export function PositionPanel({
                     <td className="px-3 py-2">{(t.quantity * t.entryPrice).toFixed(2)} USDT</td>
                     <td className="px-3 py-2 text-muted-foreground">{t.openTime && t.openTime > 0 ? new Date(t.openTime).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '-'}</td>
                     <td className="px-3 py-2 text-muted-foreground">{t.closeTime ? new Date(t.closeTime).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '-'}</td>
-                    <td className={`px-3 py-2 font-bold ${t.pnl >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                    <td className={`px-3 py-2 font-bold ${t.pnl >= 0 ? 'text-trading-green' : 'text-trading-red'}`}>
                       {t.pnl >= 0 ? '+' : ''}{t.pnl.toFixed(2)}
                     </td>
                     {(() => {
                       const margin = (t.quantity * t.entryPrice) / t.leverage;
                       const pct = margin > 0 ? (t.pnl / margin) * 100 : 0;
                       return (
-                        <td className={`px-3 py-2 font-bold ${pct >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                        <td className={`px-3 py-2 font-bold ${pct >= 0 ? 'text-trading-green' : 'text-trading-red'}`}>
                           {pct >= 0 ? '+' : ''}{pct.toFixed(2)}%
                         </td>
                       );
@@ -652,12 +652,12 @@ export function PositionPanel({
                       {new Date(t.openTime).toLocaleString()}
                     </td>
                     <td className="px-3 py-2 text-foreground">{t.symbol?.replace('USDT', '/USDT')}</td>
-                    <td className={`px-3 py-2 font-bold ${t.side === 'LONG' ? 'text-emerald-400' : 'text-red-400'}`}>
+                    <td className={`px-3 py-2 font-bold ${t.side === 'LONG' ? 'text-trading-green' : 'text-trading-red'}`}>
                       {t.side === 'LONG' ? '多' : '空'}
                     </td>
                     <td className="px-3 py-2">{(t.entryPrice * t.quantity).toFixed(2)}</td>
                     <td className="px-3 py-2 text-muted-foreground">0.01%</td>
-                    <td className={`px-3 py-2 font-bold ${t.pnl >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                    <td className={`px-3 py-2 font-bold ${t.pnl >= 0 ? 'text-trading-green' : 'text-trading-red'}`}>
                       {t.pnl >= 0 ? '+' : ''}{t.pnl.toFixed(4)}
                     </td>
                   </tr>
@@ -789,7 +789,7 @@ export function PositionPanel({
                 <div className="border-t border-border/50 my-1" />
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">该币种总盈亏</span>
-                  <span className={rollbackPreview.totalPnl >= 0 ? 'text-emerald-400' : 'text-red-400'}>
+                  <span className={rollbackPreview.totalPnl >= 0 ? 'text-trading-green' : 'text-trading-red'}>
                     {rollbackPreview.totalPnl >= 0 ? '+' : ''}{rollbackPreview.totalPnl.toFixed(4)}
                   </span>
                 </div>
@@ -804,7 +804,7 @@ export function PositionPanel({
                 <div className="border-t border-border/50 my-1" />
                 <div className="flex justify-between font-bold">
                   <span className="text-foreground">余额调整</span>
-                  <span className={rollbackPreview.balanceAdjustment >= 0 ? 'text-emerald-400' : 'text-red-400'}>
+                  <span className={rollbackPreview.balanceAdjustment >= 0 ? 'text-trading-green' : 'text-trading-red'}>
                     {rollbackPreview.balanceAdjustment >= 0 ? '+' : ''}{rollbackPreview.balanceAdjustment.toFixed(4)} USDT
                   </span>
                 </div>
@@ -851,7 +851,7 @@ function ActionBtn({ label, onClick, danger, disabled }: {
       disabled={disabled}
       className={`flex-1 py-2 text-xs font-medium transition-all active:scale-95 border-r border-border/50 last:border-r-0 ${
         danger
-          ? 'text-red-400 hover:bg-red-500/10'
+          ? 'text-trading-red hover:bg-trading-red/10'
           : 'text-muted-foreground hover:bg-accent/50 hover:text-foreground'
       } disabled:opacity-50`}
     >
