@@ -207,10 +207,29 @@ export function PositionPanel({
   }, [rollbackSymbol, tradeHistory, positionsMap, ordersMap]);
 
   const TABS = [
-    { key: 'positions', label: '持仓', count: mergedPositions.length },
-    { key: 'pending', label: '当前委托', count: allOrders.length },
-    { key: 'history', label: '历史记录', count: tradeRecords.length },
-    { key: 'funding', label: '资金费', count: fundingRecords.length },
+    { key: 'positions', label: '仓位', count: mergedPositions.length, showCount: true },
+    { key: 'pending', label: '当前委托', count: allOrders.length, showCount: true },
+    { key: 'history', label: '历史委托', count: 0, showCount: false },
+    { key: 'trades', label: '历史成交', count: tradeRecords.length, showCount: false },
+    { key: 'funding', label: '资金流水', count: fundingRecords.length, showCount: false },
+    { key: 'positionHistory', label: '仓位历史记录', count: 0, showCount: false },
+    { key: 'bots', label: '机器人', count: 0, showCount: false },
+    { key: 'assets', label: '资产', count: 0, showCount: false },
+  ];
+
+  // Column definitions for the positions table header (always rendered)
+  const POSITION_COLUMNS = [
+    { label: '合约', flex: 'flex-[1.4]', align: 'text-left' },
+    { label: '数量', flex: 'flex-1', align: 'text-right' },
+    { label: '开仓价格', flex: 'flex-1', align: 'text-right' },
+    { label: '损益两平价', flex: 'flex-1', align: 'text-right' },
+    { label: '标记价格', flex: 'flex-1', align: 'text-right' },
+    { label: '强平价格', flex: 'flex-1', align: 'text-right' },
+    { label: '保证金比率', flex: 'flex-1', align: 'text-right' },
+    { label: '保证金', flex: 'flex-1', align: 'text-right' },
+    { label: '盈亏 (回报率)', flex: 'flex-[1.2]', align: 'text-right' },
+    { label: '预估资金费用', flex: 'flex-1', align: 'text-right' },
+    { label: '市价 / 限价', flex: 'flex-[1.2]', align: 'text-right' },
   ];
 
   const handleOpenCloseModal = (symbol: string, index: number, pos: Position) => {
