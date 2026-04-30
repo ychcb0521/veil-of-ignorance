@@ -39,7 +39,7 @@ export function TimeframeSelector({ interval, onIntervalChange }: Props) {
           className={`px-2 py-1 rounded text-xs font-mono transition-all duration-100 ease-out active:scale-[0.95] ${
             interval === tf
               ? 'bg-primary text-primary-foreground'
-              : 'bg-secondary text-secondary-foreground hover:bg-accent'
+              : 'bg-gray-100 dark:bg-[#2b3139] text-gray-600 dark:text-[#848e9c] hover:bg-gray-200 dark:hover:bg-[#3a3f47]'
           }`}
         >
           {tf}
