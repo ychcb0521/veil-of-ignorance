@@ -50,7 +50,7 @@ export function TimeframeSelector({ interval, onIntervalChange }: Props) {
       <button
         onClick={() => setOpen(!open)}
         className={`px-2 py-1 rounded text-xs font-mono transition-all duration-100 ease-out active:scale-[0.95] flex items-center gap-0.5 ${
-          open ? 'bg-primary text-primary-foreground' : !isPinnedActive && interval ? 'bg-accent text-foreground' : 'bg-secondary text-secondary-foreground hover:bg-accent'
+          open ? 'bg-primary text-primary-foreground' : !isPinnedActive && interval ? 'bg-gray-200 dark:bg-[#3a3f47] text-gray-900 dark:text-white' : 'bg-gray-100 dark:bg-[#2b3139] text-gray-600 dark:text-[#848e9c] hover:bg-gray-200 dark:hover:bg-[#3a3f47]'
         }`}
       >
         {!isPinnedActive ? interval : ''}
