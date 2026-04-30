@@ -338,7 +338,7 @@ export function OrderPanel({
       </div>
 
       {/* ============ MAIN BODY (independent scroll area) ============ */}
-      <div className="flex-1 min-h-0 overflow-y-auto scrollbar-pro px-3 pt-2.5 pb-8 space-y-2.5">
+      <div className="flex-1 overflow-y-auto min-h-0 scrollbar-thin scrollbar-thumb-[#2b3139] scrollbar-track-transparent px-3 pt-2.5 pb-6 space-y-2.5">
 
         {/* Available balance row */}
         <div className="flex items-center justify-between text-[12px]">
