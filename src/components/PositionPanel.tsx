@@ -237,9 +237,9 @@ export function PositionPanel({
     { key: 'action', label: '市价 / 限价', flex: 'flex-[1.2]', align: 'text-right' },
     { key: 'notional', label: '仓位面值', flex: 'flex-1', align: 'text-right', hiddenByDefault: true },
     { key: 'adl', label: '自动减仓', flex: 'flex-1', align: 'text-right', hiddenByDefault: true },
-  ] as const;
+  ];
 
-  type ColumnKey = typeof POSITION_COLUMNS[number]['key'];
+  type ColumnKey = string;
   const [columnVisibility, setColumnVisibility] = usePersistedState<Record<string, boolean>>(
     'position_column_visibility',
     POSITION_COLUMNS.reduce((acc, c) => {
