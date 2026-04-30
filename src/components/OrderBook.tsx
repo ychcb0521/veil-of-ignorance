@@ -18,6 +18,7 @@ interface Props {
   symbol: string;
   previousPrice?: number;
   pricePrecision?: number;
+  onMinimize?: () => void;
   onClose?: () => void;
 }
 
@@ -37,7 +38,7 @@ function generateDepth(basePrice: number, step: number, levels: number, isBid: b
   return entries;
 }
 
-export function OrderBook({ currentPrice, symbol, previousPrice, pricePrecision: propPrecision, onClose }: Props) {
+export function OrderBook({ currentPrice, symbol, previousPrice, pricePrecision: propPrecision, onMinimize, onClose }: Props) {
   const [seed, setSeed] = useState(0);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const prevPriceRef = useRef(currentPrice);
@@ -102,11 +103,11 @@ export function OrderBook({ currentPrice, symbol, previousPrice, pricePrecision:
   }
 
   return (
-    <div className="flex flex-col h-full text-[10px] font-mono tabular-nums select-none bg-white dark:bg-[#1e2329]">
-      {/* Header */}
-      <div className="flex items-center justify-between px-3 h-10 border-b border-gray-200 dark:border-[#2b3139] shrink-0">
+    <div className="flex flex-col h-full min-h-0 overflow-hidden text-[10px] font-mono tabular-nums select-none bg-white dark:bg-[#1e2329]">
+      {/* Header (frozen) */}
+      <div className="flex-none flex items-center justify-between px-3 h-10 border-b border-gray-200 dark:border-[#2b3139]">
         <span className="text-sm font-medium text-gray-900 dark:text-[#EAECEF]">订单簿</span>
-        <div className="flex items-center space-x-3 text-[#848e9c]">
+        <div className="flex items-center space-x-2 text-gray-500 dark:text-[#848e9c]">
           <button
             type="button"
             className="flex items-center gap-0.5 text-[11px] hover:text-gray-900 dark:hover:text-white cursor-pointer transition-colors"
@@ -122,28 +123,42 @@ export function OrderBook({ currentPrice, symbol, previousPrice, pricePrecision:
               <circle cx="8" cy="3" r="1.2" /><circle cx="8" cy="8" r="1.2" /><circle cx="8" cy="13" r="1.2" />
             </svg>
           </button>
-          <button
-            type="button"
-            title="关闭"
-            onClick={onClose}
-            className="hover:text-gray-900 dark:hover:text-white cursor-pointer transition-colors"
-          >
-            <svg className="w-3 h-3" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
-              <path d="M3 3l6 6M9 3l-6 6" />
-            </svg>
-          </button>
+          {onMinimize && (
+            <button
+              type="button"
+              title="最小化"
+              onClick={onMinimize}
+              className="hover:text-gray-900 dark:hover:text-white cursor-pointer transition-colors"
+            >
+              <svg className="w-3.5 h-3.5" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+                <path d="M2.5 9h7" />
+              </svg>
+            </button>
+          )}
+          {onClose && (
+            <button
+              type="button"
+              title="关闭"
+              onClick={onClose}
+              className="hover:text-gray-900 dark:hover:text-white cursor-pointer transition-colors"
+            >
+              <svg className="w-3 h-3" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+                <path d="M3 3l6 6M9 3l-6 6" />
+              </svg>
+            </button>
+          )}
         </div>
       </div>
 
-      {/* Column headers */}
-      <div className="flex items-center px-3 h-6 text-[9px] text-gray-500 dark:text-[#848e9c] border-b border-gray-200 dark:border-[#2b3139]/60 shrink-0">
+      {/* Column headers (frozen) */}
+      <div className="flex-none flex items-center px-3 h-6 text-[9px] text-gray-500 dark:text-[#848e9c] border-b border-gray-200 dark:border-[#2b3139]/60">
         <span className="flex-1">价格(USDT)</span>
         <span className="w-16 text-right">数量(USDT)</span>
         <span className="w-16 text-right">合计</span>
       </div>
 
       {/* Asks (sells) - red, reversed so lowest ask is at bottom */}
-      <div className="flex-1 overflow-hidden flex flex-col justify-end">
+      <div className="flex-1 min-h-0 overflow-y-auto scrollbar-thin scrollbar-thumb-[#2b3139] scrollbar-track-transparent flex flex-col justify-end">
         {asks.map((entry, i) => {
           const isBestAsk = i === asks.length - 1;
           return (
@@ -165,8 +180,8 @@ export function OrderBook({ currentPrice, symbol, previousPrice, pricePrecision:
         })}
       </div>
 
-      {/* Current price center */}
-      <div className={`flex items-center justify-center py-1.5 border-y border-border transition-colors duration-200 ${
+      {/* Current price center (frozen) */}
+      <div className={`flex-none flex items-center justify-center py-1.5 border-y border-border transition-colors duration-200 ${
         flash === 'up' ? 'bg-green-900/30' : flash === 'down' ? 'bg-red-900/30' : 'bg-card'
       }`}>
         <span className={`text-sm font-bold transition-colors ${priceUp ? 'trading-green' : 'trading-red'}`}>
@@ -178,7 +193,7 @@ export function OrderBook({ currentPrice, symbol, previousPrice, pricePrecision:
       </div>
 
       {/* Bids (buys) - green */}
-      <div className="flex-1 overflow-hidden">
+      <div className="flex-1 min-h-0 overflow-y-auto scrollbar-thin scrollbar-thumb-[#2b3139] scrollbar-track-transparent">
         {bids.map((entry, i) => {
           const isBestBid = i === 0;
           return (
