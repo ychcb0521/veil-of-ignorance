@@ -108,7 +108,7 @@ export function SymbolSelector({ symbol, interval, onSymbolChange, onIntervalCha
       <div className="relative" ref={dropdownRef}>
         <button
           onClick={() => setIsOpen(!isOpen)}
-          className="flex items-center gap-1.5 px-2.5 py-1.5 rounded text-xs font-medium bg-accent text-foreground hover:bg-accent/80 transition-all duration-100 ease-out active:scale-[0.97]"
+          className="flex items-center gap-1.5 px-2.5 py-1.5 rounded text-xs font-medium bg-gray-100 dark:bg-[#2b3139] text-gray-900 dark:text-white hover:bg-gray-200 dark:hover:bg-[#3a3f47] transition-all duration-100 ease-out active:scale-[0.97]"
         >
           <span className="font-mono font-bold">{currentDisplay}</span>
           <ChevronDown className={`w-3.5 h-3.5 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
