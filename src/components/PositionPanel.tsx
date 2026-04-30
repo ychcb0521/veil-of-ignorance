@@ -3,7 +3,8 @@ import { usePersistedState } from '@/hooks/usePersistedState';
 import type { Position, PendingOrder, TradeRecord } from '@/types/trading';
 import { calcUnrealizedPnl, calcROE, calcLiquidationPrice, MAINTENANCE_MARGIN_RATE } from '@/types/trading';
 import type { PositionsMap, OrdersMap, PriceMap } from '@/contexts/TradingContext';
-import { X, Trash2, ArrowUpDown, ArrowUp, ArrowDown, Plus } from 'lucide-react';
+import { X, Trash2, ArrowUpDown, ArrowUp, ArrowDown, Plus, MoreVertical, ChevronDown, ChevronRight, GripVertical } from 'lucide-react';
+import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover';
 import { toast } from 'sonner';
 import { LeverageModal } from '@/components/LeverageModal';
 import { TpSlModal } from '@/components/TpSlModal';
@@ -219,20 +220,49 @@ export function PositionPanel({
     { key: 'assets', label: '资产', count: 0, showCount: false },
   ];
 
-  // Column definitions for the positions table header (always rendered)
-  const POSITION_COLUMNS = [
-    { label: '合约', flex: 'flex-[1.4]', align: 'text-left' },
-    { label: '数量', flex: 'flex-1', align: 'text-right' },
-    { label: '开仓价格', flex: 'flex-1', align: 'text-right' },
-    { label: '损益两平价', flex: 'flex-1', align: 'text-right' },
-    { label: '标记价格', flex: 'flex-1', align: 'text-right' },
-    { label: '强平价格', flex: 'flex-1', align: 'text-right' },
-    { label: '保证金比率', flex: 'flex-1', align: 'text-right' },
-    { label: '保证金', flex: 'flex-1', align: 'text-right' },
-    { label: '盈亏 (回报率)', flex: 'flex-[1.2]', align: 'text-right' },
-    { label: '预估资金费用', flex: 'flex-1', align: 'text-right' },
-    { label: '市价 / 限价', flex: 'flex-[1.2]', align: 'text-right' },
+  // Column definitions for the positions table header
+  // `key` is used to bind to columnVisibility state.
+  // `hiddenByDefault` means it lives in the "隐藏栏" section of the menu and is OFF by default.
+  const POSITION_COLUMNS: { key: string; label: string; flex: string; align: string; locked?: boolean; hiddenByDefault?: boolean }[] = [
+    { key: 'symbol', label: '合约', flex: 'flex-[1.4]', align: 'text-left', locked: true },
+    { key: 'quantity', label: '数量', flex: 'flex-1', align: 'text-right' },
+    { key: 'entryPrice', label: '开仓价格', flex: 'flex-1', align: 'text-right' },
+    { key: 'breakEven', label: '损益两平价', flex: 'flex-1', align: 'text-right' },
+    { key: 'markPrice', label: '标记价格', flex: 'flex-1', align: 'text-right' },
+    { key: 'liqPrice', label: '强平价格', flex: 'flex-1', align: 'text-right' },
+    { key: 'marginRatio', label: '保证金比率', flex: 'flex-1', align: 'text-right' },
+    { key: 'margin', label: '保证金', flex: 'flex-1', align: 'text-right' },
+    { key: 'pnl', label: '盈亏 (回报率)', flex: 'flex-[1.2]', align: 'text-right' },
+    { key: 'funding', label: '预估资金费用', flex: 'flex-1', align: 'text-right' },
+    { key: 'action', label: '市价 / 限价', flex: 'flex-[1.2]', align: 'text-right' },
+    { key: 'notional', label: '仓位面值', flex: 'flex-1', align: 'text-right', hiddenByDefault: true },
+    { key: 'adl', label: '自动减仓', flex: 'flex-1', align: 'text-right', hiddenByDefault: true },
   ];
+
+  type ColumnKey = string;
+  const [columnVisibility, setColumnVisibility] = usePersistedState<Record<string, boolean>>(
+    'position_column_visibility',
+    POSITION_COLUMNS.reduce((acc, c) => {
+      acc[c.key] = !c.hiddenByDefault;
+      return acc;
+    }, {} as Record<string, boolean>)
+  );
+  const [actionGroupExpanded, setActionGroupExpanded] = useState(true);
+  const [actionSubOptions, setActionSubOptions] = usePersistedState<Record<string, boolean>>(
+    'position_action_suboptions',
+    { marketCloseAll: true, pnlCloseAll: false }
+  );
+
+  const toggleColumn = (key: ColumnKey) => {
+    setColumnVisibility(prev => ({ ...prev, [key]: !prev[key] }));
+  };
+  const toggleSubOption = (key: string) => {
+    setActionSubOptions(prev => ({ ...prev, [key]: !prev[key] }));
+  };
+
+  const visibleColumns = POSITION_COLUMNS.filter(c => columnVisibility[c.key] !== false);
+  const regularColumns = POSITION_COLUMNS.filter(c => !c.hiddenByDefault);
+  const hiddenSectionColumns = POSITION_COLUMNS.filter(c => c.hiddenByDefault);
 
   const handleOpenCloseModal = (symbol: string, index: number, pos: Position) => {
     setCloseModal({ symbol, index, pos });
@@ -321,24 +351,131 @@ export function PositionPanel({
               清除币种数据
             </button>
           )}
-          {/* Window controls — uniform across all panels */}
-          <div className="flex items-center space-x-3 text-[#848e9c] pl-1 border-l border-gray-200 dark:border-[#2b3139] ml-1">
-            <button type="button" title="设置" className="hover:text-gray-900 dark:hover:text-white cursor-pointer transition-colors">
-              <svg className="w-3.5 h-3.5" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4">
-                <circle cx="8" cy="8" r="2" />
-                <path strokeLinecap="round" d="M8 2v1.5M8 12.5V14M2 8h1.5M12.5 8H14M3.8 3.8l1 1M11.2 11.2l1 1M3.8 12.2l1-1M11.2 4.8l1-1" />
-              </svg>
-            </button>
-            <button type="button" title="最小化" className="hover:text-gray-900 dark:hover:text-white cursor-pointer transition-colors">
-              <svg className="w-3.5 h-3.5" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
-                <path d="M3 11h8" />
-              </svg>
-            </button>
-            <button type="button" title="更多" className="hover:text-gray-900 dark:hover:text-white cursor-pointer transition-colors">
-              <svg className="w-3.5 h-3.5" viewBox="0 0 16 16" fill="currentColor">
-                <circle cx="8" cy="3" r="1.2" /><circle cx="8" cy="8" r="1.2" /><circle cx="8" cy="13" r="1.2" />
-              </svg>
-            </button>
+          {/* Column settings menu — only the more icon, no theme/minimize */}
+          <div className="flex items-center text-[#848e9c] pl-2 border-l border-gray-200 dark:border-[#2b3139] ml-1">
+            <Popover>
+              <PopoverTrigger asChild>
+                <button
+                  type="button"
+                  title="自定义表头"
+                  className="hover:text-gray-900 dark:hover:text-white cursor-pointer transition-colors p-1 rounded"
+                >
+                  <MoreVertical className="w-3.5 h-3.5" />
+                </button>
+              </PopoverTrigger>
+              <PopoverContent
+                align="end"
+                sideOffset={6}
+                className="w-64 bg-white dark:bg-[#1e2329] border border-gray-200 dark:border-[#2b3139] p-0 rounded-md shadow-xl overflow-hidden z-50"
+              >
+                <div className="max-h-[500px] overflow-y-auto scrollbar-thin">
+                  {regularColumns.map(col => {
+                    const isAction = col.key === 'action';
+                    return (
+                      <div key={col.key}>
+                        <div
+                          className="flex items-center justify-between px-4 py-3 border-b border-gray-100 dark:border-[#2b3139] hover:bg-gray-50 dark:hover:bg-[#2b3139] cursor-pointer"
+                          onClick={() => !col.locked && toggleColumn(col.key)}
+                        >
+                          <div className="flex items-center min-w-0">
+                            {isAction ? (
+                              <button
+                                type="button"
+                                onClick={(e) => { e.stopPropagation(); setActionGroupExpanded(v => !v); }}
+                                className="text-gray-500 dark:text-[#848e9c] mr-1 -ml-1"
+                              >
+                                {actionGroupExpanded ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
+                              </button>
+                            ) : null}
+                            <button
+                              type="button"
+                              onClick={(e) => { e.stopPropagation(); !col.locked && toggleColumn(col.key); }}
+                              disabled={col.locked}
+                              className={`w-4 h-4 rounded-sm border flex items-center justify-center transition-colors ${
+                                columnVisibility[col.key]
+                                  ? 'bg-[#fcd535] border-[#fcd535]'
+                                  : 'border-gray-400 dark:border-[#5e6673] bg-transparent'
+                              } ${col.locked ? 'opacity-60 cursor-not-allowed' : ''}`}
+                            >
+                              {columnVisibility[col.key] && (
+                                <svg viewBox="0 0 12 12" className="w-3 h-3 text-[#0b0e11]" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                  <path d="M2.5 6.5L5 9l4.5-5.5" />
+                                </svg>
+                              )}
+                            </button>
+                            <span className="text-sm text-gray-900 dark:text-[#EAECEF] ml-3 truncate">
+                              {isAction ? '操作 (市价/限价)' : col.label}
+                            </span>
+                          </div>
+                          <GripVertical className="w-3.5 h-3.5 text-gray-400 dark:text-gray-500 shrink-0" />
+                        </div>
+                        {isAction && actionGroupExpanded && (
+                          <div className="bg-gray-50/40 dark:bg-black/20">
+                            {[
+                              { key: 'marketCloseAll', label: '市价全部平仓' },
+                              { key: 'pnlCloseAll', label: '基于盈亏的全平仓' },
+                            ].map(sub => (
+                              <div
+                                key={sub.key}
+                                onClick={() => toggleSubOption(sub.key)}
+                                className="flex items-center pl-10 pr-4 py-2.5 border-b border-gray-100 dark:border-[#2b3139] hover:bg-gray-50 dark:hover:bg-[#2b3139] cursor-pointer"
+                              >
+                                <div
+                                  className={`w-4 h-4 rounded-sm border flex items-center justify-center transition-colors ${
+                                    actionSubOptions[sub.key]
+                                      ? 'bg-[#fcd535] border-[#fcd535]'
+                                      : 'border-gray-400 dark:border-[#5e6673] bg-transparent'
+                                  }`}
+                                >
+                                  {actionSubOptions[sub.key] && (
+                                    <svg viewBox="0 0 12 12" className="w-3 h-3 text-[#0b0e11]" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                      <path d="M2.5 6.5L5 9l4.5-5.5" />
+                                    </svg>
+                                  )}
+                                </div>
+                                <span className="text-sm text-gray-900 dark:text-[#EAECEF] ml-3">{sub.label}</span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+
+                  {hiddenSectionColumns.length > 0 && (
+                    <>
+                      <div className="border-t border-gray-200 dark:border-[#2b3139]" />
+                      <div className="text-xs text-gray-500 px-4 py-2">隐藏栏</div>
+                      {hiddenSectionColumns.map(col => (
+                        <div
+                          key={col.key}
+                          onClick={() => toggleColumn(col.key)}
+                          className="flex items-center justify-between px-4 py-3 border-b border-gray-100 dark:border-[#2b3139] hover:bg-gray-50 dark:hover:bg-[#2b3139] cursor-pointer"
+                        >
+                          <div className="flex items-center min-w-0">
+                            <div
+                              className={`w-4 h-4 rounded-sm border flex items-center justify-center transition-colors ${
+                                columnVisibility[col.key]
+                                  ? 'bg-[#fcd535] border-[#fcd535]'
+                                  : 'border-gray-400 dark:border-[#5e6673] bg-transparent'
+                              }`}
+                            >
+                              {columnVisibility[col.key] && (
+                                <svg viewBox="0 0 12 12" className="w-3 h-3 text-[#0b0e11]" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                  <path d="M2.5 6.5L5 9l4.5-5.5" />
+                                </svg>
+                              )}
+                            </div>
+                            <span className="text-sm text-gray-900 dark:text-[#EAECEF] ml-3 truncate">{col.label}</span>
+                          </div>
+                          <GripVertical className="w-3.5 h-3.5 text-gray-400 dark:text-gray-500 shrink-0" />
+                        </div>
+                      ))}
+                    </>
+                  )}
+                </div>
+              </PopoverContent>
+            </Popover>
           </div>
         </div>
       </div>
@@ -349,8 +486,8 @@ export function PositionPanel({
           <>
             {/* Persistent table header */}
             <div className="h-8 flex items-center px-4 text-xs text-gray-500 dark:text-[#848e9c] border-b border-gray-200 dark:border-[#2b3139] shrink-0 overflow-x-auto">
-              {POSITION_COLUMNS.map((col, i) => (
-                <div key={i} className={`${col.flex} ${col.align} whitespace-nowrap px-2`}>
+              {visibleColumns.map((col) => (
+                <div key={col.key} className={`${col.flex} ${col.align} whitespace-nowrap px-2`}>
                   {col.label}
                 </div>
               ))}
