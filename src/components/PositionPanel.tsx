@@ -321,6 +321,25 @@ export function PositionPanel({
               清除币种数据
             </button>
           )}
+          {/* Window controls — uniform across all panels */}
+          <div className="flex items-center space-x-3 text-[#848e9c] pl-1 border-l border-gray-200 dark:border-[#2b3139] ml-1">
+            <button type="button" title="设置" className="hover:text-gray-900 dark:hover:text-white cursor-pointer transition-colors">
+              <svg className="w-3.5 h-3.5" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4">
+                <circle cx="8" cy="8" r="2" />
+                <path strokeLinecap="round" d="M8 2v1.5M8 12.5V14M2 8h1.5M12.5 8H14M3.8 3.8l1 1M11.2 11.2l1 1M3.8 12.2l1-1M11.2 4.8l1-1" />
+              </svg>
+            </button>
+            <button type="button" title="最小化" className="hover:text-gray-900 dark:hover:text-white cursor-pointer transition-colors">
+              <svg className="w-3.5 h-3.5" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+                <path d="M3 11h8" />
+              </svg>
+            </button>
+            <button type="button" title="更多" className="hover:text-gray-900 dark:hover:text-white cursor-pointer transition-colors">
+              <svg className="w-3.5 h-3.5" viewBox="0 0 16 16" fill="currentColor">
+                <circle cx="8" cy="3" r="1.2" /><circle cx="8" cy="8" r="1.2" /><circle cx="8" cy="13" r="1.2" />
+              </svg>
+            </button>
+          </div>
         </div>
       </div>
 

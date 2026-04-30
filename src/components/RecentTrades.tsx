@@ -55,23 +55,39 @@ export function RecentTrades({ currentPrice, pricePrecision }: Props) {
   return (
     <div className="flex flex-col h-full text-[10px] font-mono select-none">
       {/* Tabs */}
-      <div className="flex items-center gap-4 px-3 h-8 border-b border-gray-200 dark:border-[#2b3139] shrink-0">
-        <button
-          onClick={() => setTab('trades')}
-          className={`text-[11px] font-medium transition-colors ${
-            tab === 'trades' ? 'text-gray-900 dark:text-white border-b-2 border-primary -mb-px h-8 flex items-center' : 'text-gray-500 dark:text-[#848e9c] hover:text-gray-900 dark:text-white'
-          }`}
-        >
-          最新成交
-        </button>
-        <button
-          onClick={() => setTab('movers')}
-          className={`text-[11px] font-medium transition-colors ${
-            tab === 'movers' ? 'text-gray-900 dark:text-white border-b-2 border-primary -mb-px h-8 flex items-center' : 'text-gray-500 dark:text-[#848e9c] hover:text-gray-900 dark:text-white'
-          }`}
-        >
-          市场异动
-        </button>
+      <div className="flex items-center justify-between px-3 h-10 border-b border-gray-200 dark:border-[#2b3139] shrink-0">
+        <div className="flex items-center gap-4 h-full">
+          <button
+            onClick={() => setTab('trades')}
+            className={`relative h-full text-sm font-medium transition-colors flex items-center ${
+              tab === 'trades' ? 'text-gray-900 dark:text-[#EAECEF]' : 'text-gray-500 dark:text-[#848e9c] hover:text-gray-900 dark:hover:text-white'
+            }`}
+          >
+            最新成交
+            {tab === 'trades' && <span className="absolute left-0 right-0 -bottom-px h-[2px] bg-[#fcd535]" />}
+          </button>
+          <button
+            onClick={() => setTab('movers')}
+            className={`relative h-full text-sm font-medium transition-colors flex items-center ${
+              tab === 'movers' ? 'text-gray-900 dark:text-[#EAECEF]' : 'text-gray-500 dark:text-[#848e9c] hover:text-gray-900 dark:hover:text-white'
+            }`}
+          >
+            市场异动
+            {tab === 'movers' && <span className="absolute left-0 right-0 -bottom-px h-[2px] bg-[#fcd535]" />}
+          </button>
+        </div>
+        <div className="flex items-center space-x-3 text-[#848e9c]">
+          <button type="button" title="弹出窗口" className="hover:text-gray-900 dark:hover:text-white cursor-pointer transition-colors">
+            <svg className="w-3.5 h-3.5" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M8 2h4v4" /><path d="M12 2L7 7" /><path d="M11 8.5V11a1.5 1.5 0 0 1-1.5 1.5H3.5A1.5 1.5 0 0 1 2 11V5a1.5 1.5 0 0 1 1.5-1.5H6" />
+            </svg>
+          </button>
+          <button type="button" title="更多" className="hover:text-gray-900 dark:hover:text-white cursor-pointer transition-colors">
+            <svg className="w-3.5 h-3.5" viewBox="0 0 16 16" fill="currentColor">
+              <circle cx="8" cy="3" r="1.2" /><circle cx="8" cy="8" r="1.2" /><circle cx="8" cy="13" r="1.2" />
+            </svg>
+          </button>
+        </div>
       </div>
 
       {/* Column headers */}
