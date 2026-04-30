@@ -36,6 +36,7 @@ interface Props {
   onAdjustMargin?: (symbol: string, posIndex: number, signedDelta: number) => void;
   availableBalance?: number;
   balance?: number;
+  initialCapital?: number;
   onClearSymbolData?: (symbol: string) => void;
   onPlaceTpSl?: (symbol: string, pos: Position, tp: number | null, sl: number | null, pct: number) => void;
   activeTab: string;
