@@ -181,6 +181,7 @@ const Index = () => {
   const [perfSymbol, setPerfSymbol] = useState<string | null>(null);
   const [coolingOffModalOpen, setCoolingOffModalOpen] = useState(false);
   const [priceProtection, setPriceProtection] = usePersistedState("price_protection", true);
+  const [isOrderBookOpen, setIsOrderBookOpen] = useState(true);
   
   const coolingOff = useCoolingOff();
   const hasRestoredRef = useRef(false);
