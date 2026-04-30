@@ -234,9 +234,9 @@ export function OrderPanel({
   const showLimitPriceField = orderType !== 'MARKET' && orderType !== 'MARKET_TP_SL';
 
   return (
-    <div className="flex flex-col h-full bg-card text-foreground font-sans">
-      {/* ============ TOP STATUS BADGES ============ */}
-      <div className="flex-shrink-0 flex items-center gap-1.5 px-3 pt-2.5 pb-2">
+    <div className="flex flex-col h-full min-h-0 bg-card text-foreground font-sans">
+      {/* ============ TOP STATUS BADGES (frozen) ============ */}
+      <div className="flex-none flex items-center gap-1.5 px-3 pt-2.5 pb-2">
         <button
           onClick={() => setMarginMode(m => (m === 'isolated' ? 'cross' : 'isolated'))}
           className="px-2 py-0.5 rounded bg-secondary hover:bg-accent text-[11px] text-foreground transition-colors"
