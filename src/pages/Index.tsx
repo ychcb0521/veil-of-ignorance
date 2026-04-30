@@ -1739,24 +1739,27 @@ const Index = () => {
 
           {/* Right order panel */}
           <ResizablePanel defaultSize={25} minSize={20} maxSize={30}>
-            <div className="h-full w-full flex flex-col overflow-hidden bg-white dark:bg-[#1e2329] border-l border-gray-200 dark:border-[#2b3139]">
-              <OrderPanel
-                symbol={activeSymbol}
-                currentPrice={currentPrice}
-                disabled={activeCoinState.status === "stopped" || currentPrice === 0}
-                onPlaceOrder={handlePlaceOrderForActiveSymbol}
-                pricePrecision={pricePrecision}
-                quantityPrecision={quantityPrecision}
-                coolingOff={coolingOff.isActive}
-                coolingOffLabel={coolingOff.isActive ? coolingOff.formatRemaining() : undefined}
-                onOpenCoolingOff={() => setCoolingOffModalOpen(true)}
-                priceProtection={priceProtection}
-                onTogglePriceProtection={() => setPriceProtection((prev) => !prev)}
-                crosshairPrice={crosshairPrice}
-                pickMode={pickMode}
-                onPickModeChange={setPickMode}
-                pickedPrice={pickedPrice}
-              />
+            {/* Root: absolute lock — prevents inner content from inflating parent height */}
+            <div className="relative w-full h-full overflow-hidden bg-white dark:bg-[#1e2329] border-l border-gray-200 dark:border-[#2b3139]">
+              <div className="absolute inset-0 flex flex-col">
+                <OrderPanel
+                  symbol={activeSymbol}
+                  currentPrice={currentPrice}
+                  disabled={activeCoinState.status === "stopped" || currentPrice === 0}
+                  onPlaceOrder={handlePlaceOrderForActiveSymbol}
+                  pricePrecision={pricePrecision}
+                  quantityPrecision={quantityPrecision}
+                  coolingOff={coolingOff.isActive}
+                  coolingOffLabel={coolingOff.isActive ? coolingOff.formatRemaining() : undefined}
+                  onOpenCoolingOff={() => setCoolingOffModalOpen(true)}
+                  priceProtection={priceProtection}
+                  onTogglePriceProtection={() => setPriceProtection((prev) => !prev)}
+                  crosshairPrice={crosshairPrice}
+                  pickMode={pickMode}
+                  onPickModeChange={setPickMode}
+                  pickedPrice={pickedPrice}
+                />
+              </div>
             </div>
           </ResizablePanel>
         </ResizablePanelGroup>
