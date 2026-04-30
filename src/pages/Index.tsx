@@ -1609,7 +1609,7 @@ const Index = () => {
       {/* ===== Resizable Pro Grid (Binance/TradingView-style) =====
           Viewport lock: enforce min width so layout never wraps/squishes;
           allow horizontal scroll on small viewports. */}
-      <div className="h-[calc(100vh-64px)] min-h-0 w-full min-w-[1280px] overflow-x-auto overflow-y-hidden bg-gray-50 dark:bg-[#0b0e11]">
+      <div className="h-[calc(100vh-64px)] min-h-0 w-full min-w-[1200px] overflow-x-auto overflow-y-hidden bg-gray-50 dark:bg-[#0b0e11]">
         <ResizablePanelGroup direction="horizontal" className="h-full min-h-0 w-full">
           {/* Left main area (chart + orderbook + positions) */}
           <ResizablePanel defaultSize={75} minSize={60}>
@@ -1684,7 +1684,7 @@ const Index = () => {
                         <>
                           <ResizableHandle withHandle />
                           <ResizablePanel defaultSize={25} minSize={15} maxSize={35}>
-                            <div className="h-full w-full flex flex-col bg-white dark:bg-[#1e2329] min-h-0">
+                            <div className="h-full w-full min-w-[280px] flex flex-col bg-white dark:bg-[#1e2329] min-h-0">
                               <div className="flex-1 min-h-0 border-b border-gray-200 dark:border-[#2b3139] overflow-hidden">
                                 <OrderBook
                                   symbol={activeSymbol}
