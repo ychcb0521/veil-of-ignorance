@@ -18,6 +18,7 @@ interface Props {
   symbol: string;
   previousPrice?: number;
   pricePrecision?: number;
+  onClose?: () => void;
 }
 
 const DEPTH_LEVELS = 12;
@@ -36,7 +37,7 @@ function generateDepth(basePrice: number, step: number, levels: number, isBid: b
   return entries;
 }
 
-export function OrderBook({ currentPrice, symbol, previousPrice, pricePrecision: propPrecision }: Props) {
+export function OrderBook({ currentPrice, symbol, previousPrice, pricePrecision: propPrecision, onClose }: Props) {
   const [seed, setSeed] = useState(0);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const prevPriceRef = useRef(currentPrice);
@@ -121,7 +122,12 @@ export function OrderBook({ currentPrice, symbol, previousPrice, pricePrecision:
               <circle cx="8" cy="3" r="1.2" /><circle cx="8" cy="8" r="1.2" /><circle cx="8" cy="13" r="1.2" />
             </svg>
           </button>
-          <button type="button" title="关闭" className="hover:text-gray-900 dark:hover:text-white cursor-pointer transition-colors">
+          <button
+            type="button"
+            title="关闭"
+            onClick={onClose}
+            className="hover:text-gray-900 dark:hover:text-white cursor-pointer transition-colors"
+          >
             <svg className="w-3 h-3" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
               <path d="M3 3l6 6M9 3l-6 6" />
             </svg>
