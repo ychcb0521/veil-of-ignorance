@@ -36,6 +36,7 @@ interface Props {
   onAdjustMargin?: (symbol: string, posIndex: number, signedDelta: number) => void;
   availableBalance?: number;
   balance?: number;
+  initialCapital?: number;
   onClearSymbolData?: (symbol: string) => void;
   onPlaceTpSl?: (symbol: string, pos: Position, tp: number | null, sl: number | null, pct: number) => void;
   activeTab: string;
@@ -56,7 +57,7 @@ function getSymbolPrecision(price: number): number {
 
 export function PositionPanel({
   positionsMap, ordersMap, tradeHistory, priceMap, activeSymbol,
-  onClosePosition, onCancelOrder, onAddIsolatedMargin, onAdjustMargin, availableBalance = 0, balance = 0,
+  onClosePosition, onCancelOrder, onAddIsolatedMargin, onAdjustMargin, availableBalance = 0, balance = 0, initialCapital = 1_000_000,
   onClearSymbolData,
   activeTab, onTabChange, onCloseAllPositions, pricePrecision, onPlaceTpSl,
 }: Props) {
@@ -817,22 +818,39 @@ export function PositionPanel({
 
         {/* ===== ASSETS (资产) ===== */}
         {activeTab === 'assets' && (() => {
+          // ===== Ledger-based derivation (absolute conservation) =====
+          // 1. Total Realized PnL — sum of all closed-trade pnl (already net of fees)
+          const totalRealized = (tradeHistory ?? []).reduce(
+            (sum, trade) => sum + (Number.isFinite(trade.pnl) ? trade.pnl : 0),
+            0,
+          );
+
+          // 2. Active positions iterated per-symbol so we can resolve the mark price
           let totalUnrealized = 0;
           let totalUsedMargin = 0;
-          for (const [sym, positions] of Object.entries(positionsMap)) {
+          for (const [sym, positions] of Object.entries(positionsMap ?? {})) {
             const px = priceMap[sym] || 0;
-            for (const pos of positions) {
-              totalUnrealized += calcUnrealizedPnl(pos, px);
-              totalUsedMargin += pos.marginMode === 'isolated' && pos.isolatedMargin != null
+            for (const pos of positions || []) {
+              // 3. Unrealized PnL — live floating PnL across all open positions
+              if (px > 0) {
+                const u = calcUnrealizedPnl(pos, px);
+                if (Number.isFinite(u)) totalUnrealized += u;
+              }
+              // 4. Used Margin — margin locked by each position
+              const m = pos.marginMode === 'isolated' && pos.isolatedMargin != null
                 ? pos.isolatedMargin
                 : pos.margin;
+              if (Number.isFinite(m)) totalUsedMargin += m;
             }
           }
-          const equity = balance + totalUnrealized;
-          const available = Math.max(0, balance - totalUsedMargin);
+
+          // 5. Derive top-level cards strictly from the formulas
+          const equity = initialCapital + totalRealized + totalUnrealized;
+          const available = equity - totalUsedMargin;
+
           const cards = [
             { label: '总权益 (Total Equity)', value: equity, signed: false },
-            { label: '可用余额 (Available)', value: available, signed: false },
+            { label: '可用余额 (Available Balance)', value: available, signed: false },
             { label: '已用保证金 (Used Margin)', value: totalUsedMargin, signed: false },
             { label: '未实现盈亏 (Unrealized PnL)', value: totalUnrealized, signed: true },
           ];

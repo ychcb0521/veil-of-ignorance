@@ -1673,6 +1673,7 @@ const Index = () => {
               onAdjustMargin={handleAdjustMargin}
               availableBalance={getEffectiveAvailable(activeSymbol)}
               balance={balance}
+              initialCapital={profile?.initial_capital ?? 1_000_000}
               onClearSymbolData={handleClearSymbolData}
               onPlaceTpSl={handlePlaceTpSl}
               pricePrecision={pricePrecision}
