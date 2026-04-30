@@ -543,18 +543,18 @@ export function OrderPanel({
         )}
 
         {/* ===== ACTION BUTTONS + PRE-TRADE INFO ===== */}
-        <div className="grid grid-cols-2 gap-2 pt-1">
+        <div className="grid grid-cols-2 gap-2 pt-1 w-full min-w-0">
           <button
             onClick={() => handleOrder('LONG')}
             disabled={orderDisabled}
-            className="h-10 rounded-md bg-trading-green hover:bg-trading-green/90 active:scale-[0.98] disabled:opacity-40 disabled:cursor-not-allowed text-white text-[13px] font-semibold transition-all"
+            className="w-full min-w-0 h-10 px-1 rounded-md bg-trading-green hover:bg-trading-green/90 active:scale-[0.98] disabled:opacity-40 disabled:cursor-not-allowed text-white text-[13px] font-semibold transition-all truncate"
           >
             {coolingOff ? '🧊 冷静中' : (actionMode === 'OPEN' ? '开多 / Buy' : '平空 / Buy')}
           </button>
           <button
             onClick={() => handleOrder('SHORT')}
             disabled={orderDisabled}
-            className="h-10 rounded-md bg-trading-red hover:bg-trading-red/90 active:scale-[0.98] disabled:opacity-40 disabled:cursor-not-allowed text-white text-[13px] font-semibold transition-all"
+            className="w-full min-w-0 h-10 px-1 rounded-md bg-trading-red hover:bg-trading-red/90 active:scale-[0.98] disabled:opacity-40 disabled:cursor-not-allowed text-white text-[13px] font-semibold transition-all truncate"
           >
             {coolingOff ? '🧊 冷静中' : (actionMode === 'OPEN' ? '开空 / Sell' : '平多 / Sell')}
           </button>
@@ -600,13 +600,13 @@ export function OrderPanel({
             <div className={`h-full ${ratioBg} transition-all`} style={{ width: `${Math.min(100, marginRatio)}%` }} />
           </div>
 
-          <div className="flex items-center justify-between text-[11px]">
-            <span className="text-muted-foreground/80">维持保证金</span>
-            <span className="font-mono tabular-nums text-foreground">{formatUSDT(totalMaintenance, 4)} USDT</span>
+          <div className="flex items-center justify-between gap-2 text-[11px] w-full min-w-0">
+            <span className="text-muted-foreground/80 shrink-0">维持保证金</span>
+            <span className="font-mono tabular-nums text-foreground truncate text-right min-w-0">{formatUSDT(totalMaintenance, 4)} USDT</span>
           </div>
-          <div className="flex items-center justify-between text-[11px]">
-            <span className="text-muted-foreground/80">保证金余额</span>
-            <span className="font-mono tabular-nums text-foreground">{formatUSDT(equity, 4)} USDT</span>
+          <div className="flex items-center justify-between gap-2 text-[11px] w-full min-w-0">
+            <span className="text-muted-foreground/80 shrink-0">保证金余额</span>
+            <span className="font-mono tabular-nums text-foreground truncate text-right min-w-0">{formatUSDT(equity, 4)} USDT</span>
           </div>
 
           <button className="w-full h-9 mt-1 rounded-md bg-secondary hover:bg-accent text-[12px] text-foreground font-medium transition-colors">
