@@ -292,7 +292,7 @@ export function OrderPanel({
       </div>
 
       {/* ============ ORDER TYPE TABS (with active yellow underline) ============ */}
-      <div className="flex-shrink-0 px-3 pb-1 flex items-center gap-3 text-[12px] border-b border-border">
+      <div className="flex-none px-3 pb-1 flex items-center gap-3 text-[12px] border-b border-border">
         {PRIMARY_ORDER_TABS.map(t => {
           const active = orderType === t.value;
           return (
