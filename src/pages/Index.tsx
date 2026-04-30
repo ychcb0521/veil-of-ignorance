@@ -1739,7 +1739,7 @@ const Index = () => {
 
           {/* Right order panel */}
           <ResizablePanel defaultSize={25} minSize={20} maxSize={30} className="flex flex-col h-full min-h-0">
-            <div className="flex flex-col flex-1 h-full min-h-0 overflow-hidden bg-white dark:bg-[#1e2329] border-l border-gray-200 dark:border-[#2b3139]">
+            <div className="flex flex-col flex-1 h-full min-h-0 w-full min-w-[300px] overflow-hidden bg-white dark:bg-[#1e2329] border-l border-gray-200 dark:border-[#2b3139]">
               <OrderPanel
                 symbol={activeSymbol}
                 currentPrice={currentPrice}
