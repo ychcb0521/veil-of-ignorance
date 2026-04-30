@@ -57,7 +57,7 @@ function getSymbolPrecision(price: number): number {
 
 export function PositionPanel({
   positionsMap, ordersMap, tradeHistory, priceMap, activeSymbol,
-  onClosePosition, onCancelOrder, onAddIsolatedMargin, onAdjustMargin, availableBalance = 0, balance = 0,
+  onClosePosition, onCancelOrder, onAddIsolatedMargin, onAdjustMargin, availableBalance = 0, balance = 0, initialCapital = 1_000_000,
   onClearSymbolData,
   activeTab, onTabChange, onCloseAllPositions, pricePrecision, onPlaceTpSl,
 }: Props) {
