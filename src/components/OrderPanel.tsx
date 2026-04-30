@@ -236,7 +236,7 @@ export function OrderPanel({
   return (
     <div className="flex flex-col h-full bg-card text-foreground font-sans">
       {/* ============ TOP STATUS BADGES ============ */}
-      <div className="flex items-center gap-1.5 px-3 pt-2.5 pb-2">
+      <div className="flex-shrink-0 flex items-center gap-1.5 px-3 pt-2.5 pb-2">
         <button
           onClick={() => setMarginMode(m => (m === 'isolated' ? 'cross' : 'isolated'))}
           className="px-2 py-0.5 rounded bg-secondary hover:bg-accent text-[11px] text-foreground transition-colors"
@@ -273,7 +273,7 @@ export function OrderPanel({
       </div>
 
       {/* ============ OPEN / CLOSE PILL ============ */}
-      <div className="px-3 pb-2">
+      <div className="flex-shrink-0 px-3 pb-2">
         <div className="flex bg-secondary rounded-md p-0.5">
           {(['OPEN', 'CLOSE'] as const).map(m => (
             <button
@@ -292,7 +292,7 @@ export function OrderPanel({
       </div>
 
       {/* ============ ORDER TYPE TABS (with active yellow underline) ============ */}
-      <div className="px-3 pb-1 flex items-center gap-3 text-[12px] border-b border-border">
+      <div className="flex-shrink-0 px-3 pb-1 flex items-center gap-3 text-[12px] border-b border-border">
         {PRIMARY_ORDER_TABS.map(t => {
           const active = orderType === t.value;
           return (
@@ -338,7 +338,7 @@ export function OrderPanel({
       </div>
 
       {/* ============ MAIN BODY ============ */}
-      <div className="flex-1 overflow-y-auto px-3 pt-2.5 space-y-2.5">
+      <div className="flex-1 min-h-0 overflow-y-auto scrollbar-pro px-3 pt-2.5 pb-12 space-y-2.5">
 
         {/* Available balance row */}
         <div className="flex items-center justify-between text-[12px]">
