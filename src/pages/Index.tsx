@@ -1569,7 +1569,7 @@ const Index = () => {
         </div>
       </header>
 
-      <div className="shrink-0 bg-gray-50 dark:bg-[#0b0e11] border-b border-gray-200 dark:border-[#2b3139]">
+      <div className="shrink-0 bg-white dark:bg-[#1e2329] border-b border-gray-200 dark:border-[#2b3139]">
         <TimeControl
           status={activeCoinState.status}
           currentSimulatedTime={activeCoinState.time}
