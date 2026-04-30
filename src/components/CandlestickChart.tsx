@@ -844,13 +844,8 @@ function CandlestickChartComponent({
   }, [pickMode, onPricePicked]);
 
   // ============================================================
-  // Price info
+  // Price info — header moved to global TickerBar
   // ============================================================
-  const last = data.length > 0 ? data[data.length - 1] : null;
-  const prev = data.length > 1 ? data[data.length - 2] : null;
-  const priceChange = last && prev ? last.close - prev.close : 0;
-  const priceChangePct = last && prev ? (priceChange / prev.close) * 100 : 0;
-  const isUp = last ? last.close >= last.open : true;
 
   return (
     <div className="flex flex-col h-full bg-card">
