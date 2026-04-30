@@ -265,7 +265,7 @@ export function PositionPanel({
   };
 
   return (
-    <div className="flex flex-col h-full bg-white dark:bg-[#1e2329] border-t border-gray-200 dark:border-[#2b3139]">
+    <div className="flex flex-col h-full min-h-0 overflow-hidden bg-white dark:bg-[#1e2329]">
       {/* ===== Tabs Bar ===== */}
       <div className="flex justify-between items-center px-4 h-10 border-b border-gray-200 dark:border-[#2b3139] shrink-0">
         <div className="flex space-x-6 flex-1 overflow-x-auto h-full items-center">
