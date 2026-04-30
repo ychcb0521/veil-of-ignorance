@@ -234,7 +234,7 @@ export function OrderPanel({
   const showLimitPriceField = orderType !== 'MARKET' && orderType !== 'MARKET_TP_SL';
 
   return (
-    <div className="flex flex-col h-full min-h-0 bg-card text-foreground font-sans">
+    <div className="flex flex-col h-full min-h-0 w-full min-w-[300px] bg-card text-foreground font-sans">
       {/* ============ TOP STATUS BADGES (frozen) ============ */}
       <div className="flex-none flex items-center gap-1.5 px-3 pt-2.5 pb-2">
         <button
@@ -358,17 +358,17 @@ export function OrderPanel({
 
         {/* Limit price input (with BBO button) */}
         {showLimitPriceField && (
-          <div className="flex items-stretch gap-1.5">
-            <div className="flex-1 flex items-center bg-secondary rounded-md h-9 px-3">
-              <span className="text-[11px] text-muted-foreground/80 mr-2">价格</span>
+          <div className="flex items-stretch gap-1.5 w-full min-w-0">
+            <div className="flex flex-1 min-w-0 items-center bg-secondary rounded-md h-9 px-3">
+              <span className="text-[11px] text-muted-foreground/80 mr-2 shrink-0">价格</span>
               <input
                 type="text"
                 value={price}
                 onChange={e => setPrice(e.target.value)}
                 placeholder={currentPrice > 0 ? currentPrice.toFixed(pricePrecision) : '0.00'}
-                className="flex-1 bg-transparent text-right text-[13px] text-foreground font-mono tabular-nums outline-none placeholder:text-muted-foreground/60"
+                className="flex-1 w-full min-w-0 bg-transparent text-right text-[13px] text-foreground font-mono tabular-nums outline-none placeholder:text-muted-foreground/60"
               />
-              <span className="text-[11px] text-muted-foreground/80 ml-2">USDT</span>
+              <span className="text-[11px] text-muted-foreground/80 ml-2 shrink-0">USDT</span>
             </div>
             <button
               onClick={fillBBO}
@@ -382,52 +382,52 @@ export function OrderPanel({
 
         {/* Market price hint */}
         {!showLimitPriceField && (
-          <div className="flex items-center bg-secondary rounded-md h-9 px-3">
-            <span className="text-[11px] text-muted-foreground/80 mr-2">价格</span>
-            <span className="flex-1 text-right text-[13px] text-muted-foreground">市价</span>
-            <span className="text-[11px] text-muted-foreground/80 ml-2">USDT</span>
+          <div className="flex items-center bg-secondary rounded-md h-9 px-3 w-full min-w-0">
+            <span className="text-[11px] text-muted-foreground/80 mr-2 shrink-0">价格</span>
+            <span className="flex-1 min-w-0 text-right text-[13px] text-muted-foreground truncate">市价</span>
+            <span className="text-[11px] text-muted-foreground/80 ml-2 shrink-0">USDT</span>
           </div>
         )}
 
         {/* Trigger price (TP/SL or conditional types) */}
         {(orderType === 'LIMIT_TP_SL' || orderType === 'MARKET_TP_SL' || orderType === 'CONDITIONAL' || orderType === 'TRAILING_STOP') && (
-          <div className="flex items-center bg-secondary rounded-md h-9 px-3">
-            <span className="text-[11px] text-muted-foreground/80 mr-2">触发价</span>
+          <div className="flex items-center bg-secondary rounded-md h-9 px-3 w-full min-w-0">
+            <span className="text-[11px] text-muted-foreground/80 mr-2 shrink-0">触发价</span>
             <input
               type="text"
               value={stopPrice}
               onChange={e => setStopPrice(e.target.value)}
               placeholder={pickMode && crosshairPrice != null ? crosshairPrice.toFixed(pricePrecision) : '0.00'}
-              className={`flex-1 bg-transparent text-right text-[13px] text-foreground font-mono tabular-nums outline-none placeholder:text-muted-foreground/60 ${
+              className={`flex-1 w-full min-w-0 bg-transparent text-right text-[13px] text-foreground font-mono tabular-nums outline-none placeholder:text-muted-foreground/60 ${
                 pickMode ? 'placeholder:text-primary/70' : ''
               }`}
             />
             <button
               onClick={() => onPickModeChange?.(!pickMode)}
-              className={`ml-2 p-0.5 rounded transition-colors ${
+              className={`ml-2 p-0.5 rounded transition-colors shrink-0 ${
                 pickMode ? 'text-primary' : 'text-muted-foreground/80 hover:text-foreground/90'
               }`}
               title="从图表取价"
             >
               <Crosshair className="w-3.5 h-3.5" />
             </button>
-            <span className="text-[11px] text-muted-foreground/80 ml-2">USDT</span>
+            <span className="text-[11px] text-muted-foreground/80 ml-2 shrink-0">USDT</span>
           </div>
         )}
 
         {/* Quantity input with currency unit selector */}
-        <div className="flex items-center bg-secondary rounded-md h-9 px-3">
-          <span className="text-[11px] text-muted-foreground/80 mr-2">数量</span>
+        <div className="flex items-center bg-secondary rounded-md h-9 px-3 w-full min-w-0">
+          <span className="text-[11px] text-muted-foreground/80 mr-2 shrink-0">数量</span>
           <input
             type="text"
             value={quantity}
             onChange={e => { setQuantity(e.target.value); setPercent(0); }}
             placeholder="0"
-            className="flex-1 bg-transparent text-right text-[13px] text-foreground font-mono tabular-nums outline-none placeholder:text-muted-foreground/60"
+            className="flex-1 w-full min-w-0 bg-transparent text-right text-[13px] text-foreground font-mono tabular-nums outline-none placeholder:text-muted-foreground/60"
           />
           <button
             onClick={() => setShowCurrencySelector(true)}
-            className="ml-2 flex items-center gap-0.5 text-[11px] text-foreground/90 hover:text-foreground"
+            className="ml-2 flex items-center gap-0.5 text-[11px] text-foreground/90 hover:text-foreground shrink-0"
           >
             {unitLabel} <ChevronDown className="w-3 h-3" />
           </button>
