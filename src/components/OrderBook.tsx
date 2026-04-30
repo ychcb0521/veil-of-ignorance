@@ -37,7 +37,7 @@ function generateDepth(basePrice: number, step: number, levels: number, isBid: b
   return entries;
 }
 
-export function OrderBook({ currentPrice, symbol, previousPrice, pricePrecision: propPrecision }: Props) {
+export function OrderBook({ currentPrice, symbol, previousPrice, pricePrecision: propPrecision, onClose }: Props) {
   const [seed, setSeed] = useState(0);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const prevPriceRef = useRef(currentPrice);
