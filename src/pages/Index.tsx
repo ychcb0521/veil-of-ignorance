@@ -1605,111 +1605,137 @@ const Index = () => {
         />
       </div>
 
-      {/* ===== 3-Column Pro Grid ===== */}
-      <div className="flex-1 flex flex-row min-h-0 overflow-hidden bg-gray-50 dark:bg-[#0b0e11]">
-        {/* Left main area */}
-        <div className="flex-1 flex flex-col min-w-0 min-h-0">
-          {/* Layer 1: Ticker bar */}
-          <TickerBar
-            symbol={activeSymbol}
-            currentPrice={currentPrice}
-            visibleData={displayData}
-            pricePrecision={pricePrecision}
-            effectiveSimTime={effectiveSimTime}
-          />
+      {/* ===== Resizable Pro Grid (Binance/TradingView-style) =====
+          Viewport lock: enforce min width so layout never wraps/squishes;
+          allow horizontal scroll on small viewports. */}
+      <div className="flex-1 min-h-0 w-full min-w-[1280px] overflow-x-auto overflow-y-hidden bg-gray-50 dark:bg-[#0b0e11]">
+        <ResizablePanelGroup direction="horizontal" className="h-full w-full">
+          {/* Left main area (chart + orderbook + positions) */}
+          <ResizablePanel defaultSize={75} minSize={60}>
+            <ResizablePanelGroup direction="vertical" className="h-full w-full">
+              {/* Top: Ticker + Chart + OrderBook */}
+              <ResizablePanel defaultSize={70} minSize={50}>
+                <div className="h-full w-full flex flex-col min-h-0">
+                  {/* Ticker bar (fixed strip, not resizable) */}
+                  <TickerBar
+                    symbol={activeSymbol}
+                    currentPrice={currentPrice}
+                    visibleData={displayData}
+                    pricePrecision={pricePrecision}
+                    effectiveSimTime={effectiveSimTime}
+                  />
 
-          {/* Layer 2: Chart + OrderBook column */}
-          <div className="flex-1 flex flex-row min-h-0 min-w-0">
-            {/* Chart area */}
-            <div className="flex-1 min-w-0 relative overflow-hidden bg-gray-50 dark:bg-[#0b0e11]">
-              {activeCoinState.status === "stopped" && visibleData.length === 0 ? (
-                <div className="h-full flex items-center justify-center bg-gray-50 dark:bg-[#0b0e11]">
-                  <div className="text-center space-y-3">
-                    <div className="text-5xl">⏰</div>
-                    <p className="text-sm text-gray-600 dark:text-[#B7BDC6]">输入历史时间并点击「启动」开始复盘模拟</p>
-                    <p className="text-xs text-gray-500 dark:text-[#848e9c]">K线按真实时间 1:1 流速推进 · 绝不暴露未来数据</p>
+                  {/* Chart vs OrderBook (horizontal resizable) */}
+                  <div className="flex-1 min-h-0 min-w-0">
+                    <ResizablePanelGroup direction="horizontal" className="h-full w-full">
+                      <ResizablePanel defaultSize={75} minSize={50}>
+                        <div className="h-full w-full relative overflow-hidden bg-gray-50 dark:bg-[#0b0e11]">
+                          {activeCoinState.status === "stopped" && visibleData.length === 0 ? (
+                            <div className="h-full flex items-center justify-center bg-gray-50 dark:bg-[#0b0e11]">
+                              <div className="text-center space-y-3">
+                                <div className="text-5xl">⏰</div>
+                                <p className="text-sm text-gray-600 dark:text-[#B7BDC6]">输入历史时间并点击「启动」开始复盘模拟</p>
+                                <p className="text-xs text-gray-500 dark:text-[#848e9c]">K线按真实时间 1:1 流速推进 · 绝不暴露未来数据</p>
+                              </div>
+                            </div>
+                          ) : (
+                            <MultiChartLayout
+                              mainData={displayData}
+                              mainSymbol={activeSymbol.replace("USDT", "/USDT")}
+                              rawSymbol={activeSymbol}
+                              onLoadOlder={loadOlder}
+                              loadingOlder={loadingOlder}
+                              tradeHistory={tradeHistory}
+                              isRunning={activeCoinState.status !== "stopped"}
+                              currentSimulatedTime={activeCoinState.time}
+                              mainInterval={interval}
+                              pricePrecision={pricePrecision}
+                              quantityPrecision={quantityPrecision}
+                              pendingOrders={activeSymbolOrders}
+                              onCancelOrder={(orderId) => handleCancelOrder(activeSymbol, orderId)}
+                              chartApiRef={chartApiRef}
+                              onCrosshairPriceChange={handleCrosshairPriceChange}
+                              pickMode={pickMode}
+                              onPricePicked={handlePricePicked}
+                            />
+                          )}
+                        </div>
+                      </ResizablePanel>
+
+                      <ResizableHandle withHandle />
+
+                      <ResizablePanel defaultSize={25} minSize={15} maxSize={35}>
+                        <div className="h-full w-full flex flex-col bg-white dark:bg-[#1e2329] min-h-0">
+                          <div className="flex-1 min-h-0 border-b border-gray-200 dark:border-[#2b3139] overflow-hidden">
+                            <OrderBook symbol={activeSymbol} currentPrice={currentPrice} pricePrecision={pricePrecision} />
+                          </div>
+                          <div className="flex-1 min-h-0 overflow-hidden">
+                            <RecentTrades currentPrice={currentPrice} pricePrecision={pricePrecision} />
+                          </div>
+                        </div>
+                      </ResizablePanel>
+                    </ResizablePanelGroup>
                   </div>
                 </div>
-              ) : (
-                <MultiChartLayout
-                  mainData={displayData}
-                  mainSymbol={activeSymbol.replace("USDT", "/USDT")}
-                  rawSymbol={activeSymbol}
-                  onLoadOlder={loadOlder}
-                  loadingOlder={loadingOlder}
-                  tradeHistory={tradeHistory}
-                  isRunning={activeCoinState.status !== "stopped"}
-                  currentSimulatedTime={activeCoinState.time}
-                  mainInterval={interval}
-                  pricePrecision={pricePrecision}
-                  quantityPrecision={quantityPrecision}
-                  pendingOrders={activeSymbolOrders}
-                  onCancelOrder={(orderId) => handleCancelOrder(activeSymbol, orderId)}
-                  chartApiRef={chartApiRef}
-                  onCrosshairPriceChange={handleCrosshairPriceChange}
-                  pickMode={pickMode}
-                  onPricePicked={handlePricePicked}
-                />
-              )}
+              </ResizablePanel>
+
+              <ResizableHandle withHandle />
+
+              {/* Bottom: Positions panel */}
+              <ResizablePanel defaultSize={30} minSize={15}>
+                <div className="h-full w-full bg-gray-50 dark:bg-[#0b0e11] flex flex-col overflow-hidden min-h-0">
+                  <PositionPanel
+                    positionsMap={positionsMap}
+                    ordersMap={ordersMap}
+                    tradeHistory={tradeHistory}
+                    priceMap={priceMap}
+                    activeSymbol={activeSymbol}
+                    onClosePosition={handleClosePositionForSymbol}
+                    onCancelOrder={handleCancelOrderForSymbol}
+                    onAddIsolatedMargin={handleAddIsolatedMargin}
+                    onAdjustMargin={handleAdjustMargin}
+                    availableBalance={getEffectiveAvailable(activeSymbol)}
+                    balance={balance}
+                    initialCapital={profile?.initial_capital ?? 1_000_000}
+                    onClearSymbolData={handleClearSymbolData}
+                    onPlaceTpSl={handlePlaceTpSl}
+                    pricePrecision={pricePrecision}
+                    activeTab={bottomTab}
+                    onTabChange={setBottomTab}
+                    onCloseAllPositions={handleCloseAllPositions}
+                  />
+                </div>
+              </ResizablePanel>
+            </ResizablePanelGroup>
+          </ResizablePanel>
+
+          <ResizableHandle withHandle />
+
+          {/* Right order panel */}
+          <ResizablePanel defaultSize={25} minSize={20} maxSize={30}>
+            <div className="h-full w-full bg-white dark:bg-[#1e2329] border-l border-gray-200 dark:border-[#2b3139] overflow-y-auto">
+              <OrderPanel
+                symbol={activeSymbol}
+                currentPrice={currentPrice}
+                disabled={activeCoinState.status === "stopped" || currentPrice === 0}
+                onPlaceOrder={handlePlaceOrderForActiveSymbol}
+                pricePrecision={pricePrecision}
+                quantityPrecision={quantityPrecision}
+                coolingOff={coolingOff.isActive}
+                coolingOffLabel={coolingOff.isActive ? coolingOff.formatRemaining() : undefined}
+                onOpenCoolingOff={() => setCoolingOffModalOpen(true)}
+                priceProtection={priceProtection}
+                onTogglePriceProtection={() => setPriceProtection((prev) => !prev)}
+                crosshairPrice={crosshairPrice}
+                pickMode={pickMode}
+                onPickModeChange={setPickMode}
+                pickedPrice={pickedPrice}
+              />
             </div>
-
-            {/* Order Book + Recent Trades column */}
-            <div className="w-[320px] shrink-0 flex flex-col bg-white dark:bg-[#1e2329] border-x border-gray-200 dark:border-[#2b3139] min-h-0">
-              <div className="flex-1 min-h-0 border-b border-gray-200 dark:border-[#2b3139] overflow-hidden">
-                <OrderBook symbol={activeSymbol} currentPrice={currentPrice} pricePrecision={pricePrecision} />
-              </div>
-              <div className="flex-1 min-h-0 overflow-hidden">
-                <RecentTrades currentPrice={currentPrice} pricePrecision={pricePrecision} />
-              </div>
-            </div>
-          </div>
-
-          {/* Layer 3: Bottom positions panel */}
-          <div className="h-[30%] min-h-[250px] shrink-0 border-t border-gray-200 dark:border-[#2b3139] bg-gray-50 dark:bg-[#0b0e11] flex flex-col overflow-hidden min-h-0">
-            <PositionPanel
-              positionsMap={positionsMap}
-              ordersMap={ordersMap}
-              tradeHistory={tradeHistory}
-              priceMap={priceMap}
-              activeSymbol={activeSymbol}
-              onClosePosition={handleClosePositionForSymbol}
-              onCancelOrder={handleCancelOrderForSymbol}
-              onAddIsolatedMargin={handleAddIsolatedMargin}
-              onAdjustMargin={handleAdjustMargin}
-              availableBalance={getEffectiveAvailable(activeSymbol)}
-              balance={balance}
-              initialCapital={profile?.initial_capital ?? 1_000_000}
-              onClearSymbolData={handleClearSymbolData}
-              onPlaceTpSl={handlePlaceTpSl}
-              pricePrecision={pricePrecision}
-              activeTab={bottomTab}
-              onTabChange={setBottomTab}
-              onCloseAllPositions={handleCloseAllPositions}
-            />
-          </div>
-        </div>
-
-        {/* Right order panel (fixed 320px) */}
-        <div className="w-[320px] shrink-0 h-full bg-white dark:bg-[#1e2329] border-l border-gray-200 dark:border-[#2b3139] overflow-y-auto">
-          <OrderPanel
-            symbol={activeSymbol}
-            currentPrice={currentPrice}
-            disabled={activeCoinState.status === "stopped" || currentPrice === 0}
-            onPlaceOrder={handlePlaceOrderForActiveSymbol}
-            pricePrecision={pricePrecision}
-            quantityPrecision={quantityPrecision}
-            coolingOff={coolingOff.isActive}
-            coolingOffLabel={coolingOff.isActive ? coolingOff.formatRemaining() : undefined}
-            onOpenCoolingOff={() => setCoolingOffModalOpen(true)}
-            priceProtection={priceProtection}
-            onTogglePriceProtection={() => setPriceProtection((prev) => !prev)}
-            crosshairPrice={crosshairPrice}
-            pickMode={pickMode}
-            onPickModeChange={setPickMode}
-            pickedPrice={pickedPrice}
-          />
-        </div>
+          </ResizablePanel>
+        </ResizablePanelGroup>
       </div>
+
 
       <Dialog open={assetsOpen} onOpenChange={setAssetsOpen}>
         <DialogContent className="max-w-2xl p-0 bg-card">
