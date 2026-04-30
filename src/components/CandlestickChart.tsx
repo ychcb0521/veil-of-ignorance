@@ -854,67 +854,11 @@ function CandlestickChartComponent({
 
   return (
     <div className="flex flex-col h-full bg-card">
-      {/* Price header bar */}
-      <div className="flex items-center gap-4 px-4 py-2 border-b border-border flex-wrap w-full">
-        <div className="flex items-center gap-2 shrink-0">
-          <span className="font-mono text-base font-bold text-foreground whitespace-nowrap">{symbol}</span>
-          <span className="text-xs px-1.5 py-0.5 rounded bg-primary/10 text-primary font-medium shrink-0">永续</span>
+      {loadingOlder && (
+        <div className="absolute top-1 left-1/2 -translate-x-1/2 z-30 text-[10px] text-primary animate-pulse font-mono px-2 py-0.5 rounded bg-card/80 border border-border/50">
+          加载更早数据...
         </div>
-        {last && (
-          <div className="flex items-center flex-wrap gap-4 overflow-hidden w-full sm:w-auto">
-            <div className="flex flex-col shrink-0">
-              <span
-                className={`font-mono text-xl font-bold whitespace-nowrap ${isUp ? "trading-green" : "trading-red"}`}
-              >
-                {last.close.toLocaleString(undefined, {
-                  minimumFractionDigits: pricePrecision,
-                  maximumFractionDigits: pricePrecision,
-                })}
-              </span>
-            </div>
-            <div className="flex items-center gap-4 text-xs font-mono flex-wrap overflow-hidden">
-              <div className="whitespace-nowrap shrink-0">
-                <span className="text-muted-foreground">24h涨跌</span>
-                <span className={`ml-1.5 font-medium ${priceChange >= 0 ? "trading-green" : "trading-red"}`}>
-                  {priceChange >= 0 ? "+" : ""}
-                  {priceChange.toFixed(pricePrecision)} ({priceChangePct >= 0 ? "+" : ""}
-                  {priceChangePct.toFixed(2)}%)
-                </span>
-              </div>
-              <div className="whitespace-nowrap shrink-0">
-                <span className="text-muted-foreground">最高</span>
-                <span className="ml-1.5 text-foreground">
-                  {last.high.toLocaleString(undefined, { minimumFractionDigits: pricePrecision })}
-                </span>
-              </div>
-              <div className="whitespace-nowrap shrink-0">
-                <span className="text-muted-foreground">最低</span>
-                <span className="ml-1.5 text-foreground">
-                  {last.low.toLocaleString(undefined, { minimumFractionDigits: pricePrecision })}
-                </span>
-              </div>
-              <div className="whitespace-nowrap shrink-0">
-                <span className="text-muted-foreground">成交量</span>
-                <span className="ml-1.5 text-foreground">
-                  {last.volume.toLocaleString(undefined, { maximumFractionDigits: 0 })}
-                </span>
-              </div>
-              <div className="whitespace-nowrap shrink-0">
-                <span className="text-muted-foreground">价格变化率</span>
-                <span className={`ml-1.5 font-medium ${priceChangePct >= 0 ? "trading-green" : "trading-red"}`}>
-                  {priceChangePct >= 0 ? "+" : ""}
-                  {priceChangePct.toFixed(2)}%
-                </span>
-              </div>
-            </div>
-          </div>
-        )}
-        {loadingOlder && (
-          <span className="text-[10px] text-primary animate-pulse font-mono ml-auto shrink-0 whitespace-nowrap">
-            加载更早数据...
-          </span>
-        )}
-      </div>
+      )}
 
       {/* Chart area with toolbar */}
       <div className="flex-1 min-h-0 relative overflow-hidden">
