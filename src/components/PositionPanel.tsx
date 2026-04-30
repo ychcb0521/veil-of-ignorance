@@ -220,20 +220,49 @@ export function PositionPanel({
     { key: 'assets', label: '资产', count: 0, showCount: false },
   ];
 
-  // Column definitions for the positions table header (always rendered)
+  // Column definitions for the positions table header
+  // `key` is used to bind to columnVisibility state.
+  // `hiddenByDefault` means it lives in the "隐藏栏" section of the menu and is OFF by default.
   const POSITION_COLUMNS = [
-    { label: '合约', flex: 'flex-[1.4]', align: 'text-left' },
-    { label: '数量', flex: 'flex-1', align: 'text-right' },
-    { label: '开仓价格', flex: 'flex-1', align: 'text-right' },
-    { label: '损益两平价', flex: 'flex-1', align: 'text-right' },
-    { label: '标记价格', flex: 'flex-1', align: 'text-right' },
-    { label: '强平价格', flex: 'flex-1', align: 'text-right' },
-    { label: '保证金比率', flex: 'flex-1', align: 'text-right' },
-    { label: '保证金', flex: 'flex-1', align: 'text-right' },
-    { label: '盈亏 (回报率)', flex: 'flex-[1.2]', align: 'text-right' },
-    { label: '预估资金费用', flex: 'flex-1', align: 'text-right' },
-    { label: '市价 / 限价', flex: 'flex-[1.2]', align: 'text-right' },
-  ];
+    { key: 'symbol', label: '合约', flex: 'flex-[1.4]', align: 'text-left', locked: true },
+    { key: 'quantity', label: '数量', flex: 'flex-1', align: 'text-right' },
+    { key: 'entryPrice', label: '开仓价格', flex: 'flex-1', align: 'text-right' },
+    { key: 'breakEven', label: '损益两平价', flex: 'flex-1', align: 'text-right' },
+    { key: 'markPrice', label: '标记价格', flex: 'flex-1', align: 'text-right' },
+    { key: 'liqPrice', label: '强平价格', flex: 'flex-1', align: 'text-right' },
+    { key: 'marginRatio', label: '保证金比率', flex: 'flex-1', align: 'text-right' },
+    { key: 'margin', label: '保证金', flex: 'flex-1', align: 'text-right' },
+    { key: 'pnl', label: '盈亏 (回报率)', flex: 'flex-[1.2]', align: 'text-right' },
+    { key: 'funding', label: '预估资金费用', flex: 'flex-1', align: 'text-right' },
+    { key: 'action', label: '市价 / 限价', flex: 'flex-[1.2]', align: 'text-right' },
+    { key: 'notional', label: '仓位面值', flex: 'flex-1', align: 'text-right', hiddenByDefault: true },
+    { key: 'adl', label: '自动减仓', flex: 'flex-1', align: 'text-right', hiddenByDefault: true },
+  ] as const;
+
+  type ColumnKey = typeof POSITION_COLUMNS[number]['key'];
+  const [columnVisibility, setColumnVisibility] = usePersistedState<Record<string, boolean>>(
+    'position_column_visibility',
+    POSITION_COLUMNS.reduce((acc, c) => {
+      acc[c.key] = !c.hiddenByDefault;
+      return acc;
+    }, {} as Record<string, boolean>)
+  );
+  const [actionGroupExpanded, setActionGroupExpanded] = useState(true);
+  const [actionSubOptions, setActionSubOptions] = usePersistedState<Record<string, boolean>>(
+    'position_action_suboptions',
+    { marketCloseAll: true, pnlCloseAll: false }
+  );
+
+  const toggleColumn = (key: ColumnKey) => {
+    setColumnVisibility(prev => ({ ...prev, [key]: !prev[key] }));
+  };
+  const toggleSubOption = (key: string) => {
+    setActionSubOptions(prev => ({ ...prev, [key]: !prev[key] }));
+  };
+
+  const visibleColumns = POSITION_COLUMNS.filter(c => columnVisibility[c.key] !== false);
+  const regularColumns = POSITION_COLUMNS.filter(c => !c.hiddenByDefault);
+  const hiddenSectionColumns = POSITION_COLUMNS.filter(c => c.hiddenByDefault);
 
   const handleOpenCloseModal = (symbol: string, index: number, pos: Position) => {
     setCloseModal({ symbol, index, pos });
