@@ -379,8 +379,8 @@ export function PositionPanel({
           <>
             {/* Persistent table header */}
             <div className="h-8 flex items-center px-4 text-xs text-gray-500 dark:text-[#848e9c] border-b border-gray-200 dark:border-[#2b3139] shrink-0 overflow-x-auto">
-              {POSITION_COLUMNS.map((col, i) => (
-                <div key={i} className={`${col.flex} ${col.align} whitespace-nowrap px-2`}>
+              {visibleColumns.map((col) => (
+                <div key={col.key} className={`${col.flex} ${col.align} whitespace-nowrap px-2`}>
                   {col.label}
                 </div>
               ))}
