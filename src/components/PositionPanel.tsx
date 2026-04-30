@@ -825,24 +825,24 @@ export function PositionPanel({
             0,
           );
 
-          // 2. Active positions: flatten the per-symbol map
-          const activePositions: Position[] = Object.values(positionsMap ?? {}).flat();
-
-          // 3. Total Unrealized PnL — live floating PnL across all open positions
-          const totalUnrealized = activePositions.reduce((sum, pos) => {
-            const px = priceMap[
-              Object.keys(positionsMap).find((s) => (positionsMap[s] || []).includes(pos)) || ''
-            ] || 0;
-            return sum + (px > 0 ? calcUnrealizedPnl(pos, px) : 0);
-          }, 0);
-
-          // 4. Total Used Margin — sum of margin locked by open positions
-          const totalUsedMargin = activePositions.reduce((sum, pos) => {
-            const m = pos.marginMode === 'isolated' && pos.isolatedMargin != null
-              ? pos.isolatedMargin
-              : pos.margin;
-            return sum + (Number.isFinite(m) ? m : 0);
-          }, 0);
+          // 2. Active positions iterated per-symbol so we can resolve the mark price
+          let totalUnrealized = 0;
+          let totalUsedMargin = 0;
+          for (const [sym, positions] of Object.entries(positionsMap ?? {})) {
+            const px = priceMap[sym] || 0;
+            for (const pos of positions || []) {
+              // 3. Unrealized PnL — live floating PnL across all open positions
+              if (px > 0) {
+                const u = calcUnrealizedPnl(pos, px);
+                if (Number.isFinite(u)) totalUnrealized += u;
+              }
+              // 4. Used Margin — margin locked by each position
+              const m = pos.marginMode === 'isolated' && pos.isolatedMargin != null
+                ? pos.isolatedMargin
+                : pos.margin;
+              if (Number.isFinite(m)) totalUsedMargin += m;
+            }
+          }
 
           // 5. Derive top-level cards strictly from the formulas
           const equity = initialCapital + totalRealized + totalUnrealized;
