@@ -1522,7 +1522,7 @@ const Index = () => {
   // Desktop layout
   return (
     <div className="h-screen flex flex-col overflow-hidden bg-gray-50 dark:bg-[#0b0e11]">
-      <header className="border-b border-gray-200 dark:border-[#2b3139] px-4 py-1.5 flex items-center justify-between shrink-0 bg-gray-50 dark:bg-[#0b0e11] gap-2 min-h-[36px]">
+      <header className="border-b border-gray-200 dark:border-[#2b3139] px-4 py-1.5 flex items-center justify-between shrink-0 bg-white dark:bg-[#1e2329] gap-2 min-h-[36px]">
         <div className="flex items-center gap-4 min-w-0 shrink-0">
           <ThemeToggle />
           <h1 className="text-xs font-bold text-primary tracking-widest uppercase whitespace-nowrap shrink-0">
