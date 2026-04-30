@@ -1609,8 +1609,8 @@ const Index = () => {
       {/* ===== Resizable Pro Grid (Binance/TradingView-style) =====
           Viewport lock: enforce min width so layout never wraps/squishes;
           allow horizontal scroll on small viewports. */}
-      <div className="flex-1 min-h-0 w-full min-w-[1280px] overflow-x-auto overflow-y-hidden bg-gray-50 dark:bg-[#0b0e11]">
-        <ResizablePanelGroup direction="horizontal" className="h-full w-full">
+      <div className="h-[calc(100vh-64px)] min-h-0 w-full min-w-[1280px] overflow-x-auto overflow-y-hidden bg-gray-50 dark:bg-[#0b0e11]">
+        <ResizablePanelGroup direction="horizontal" className="h-full min-h-0 w-full">
           {/* Left main area (chart + orderbook + positions) */}
           <ResizablePanel defaultSize={75} minSize={60}>
             <ResizablePanelGroup direction="vertical" className="h-full w-full">
@@ -1738,28 +1738,25 @@ const Index = () => {
           <ResizableHandle withHandle />
 
           {/* Right order panel */}
-          <ResizablePanel defaultSize={25} minSize={20} maxSize={30}>
-            {/* Root: absolute lock — prevents inner content from inflating parent height */}
-            <div className="relative w-full h-full overflow-hidden bg-white dark:bg-[#1e2329] border-l border-gray-200 dark:border-[#2b3139]">
-              <div className="absolute inset-0 flex flex-col">
-                <OrderPanel
-                  symbol={activeSymbol}
-                  currentPrice={currentPrice}
-                  disabled={activeCoinState.status === "stopped" || currentPrice === 0}
-                  onPlaceOrder={handlePlaceOrderForActiveSymbol}
-                  pricePrecision={pricePrecision}
-                  quantityPrecision={quantityPrecision}
-                  coolingOff={coolingOff.isActive}
-                  coolingOffLabel={coolingOff.isActive ? coolingOff.formatRemaining() : undefined}
-                  onOpenCoolingOff={() => setCoolingOffModalOpen(true)}
-                  priceProtection={priceProtection}
-                  onTogglePriceProtection={() => setPriceProtection((prev) => !prev)}
-                  crosshairPrice={crosshairPrice}
-                  pickMode={pickMode}
-                  onPickModeChange={setPickMode}
-                  pickedPrice={pickedPrice}
-                />
-              </div>
+          <ResizablePanel defaultSize={25} minSize={20} maxSize={30} className="flex flex-col h-full min-h-0">
+            <div className="flex flex-col flex-1 h-full min-h-0 overflow-hidden bg-white dark:bg-[#1e2329] border-l border-gray-200 dark:border-[#2b3139]">
+              <OrderPanel
+                symbol={activeSymbol}
+                currentPrice={currentPrice}
+                disabled={activeCoinState.status === "stopped" || currentPrice === 0}
+                onPlaceOrder={handlePlaceOrderForActiveSymbol}
+                pricePrecision={pricePrecision}
+                quantityPrecision={quantityPrecision}
+                coolingOff={coolingOff.isActive}
+                coolingOffLabel={coolingOff.isActive ? coolingOff.formatRemaining() : undefined}
+                onOpenCoolingOff={() => setCoolingOffModalOpen(true)}
+                priceProtection={priceProtection}
+                onTogglePriceProtection={() => setPriceProtection((prev) => !prev)}
+                crosshairPrice={crosshairPrice}
+                pickMode={pickMode}
+                onPickModeChange={setPickMode}
+                pickedPrice={pickedPrice}
+              />
             </div>
           </ResizablePanel>
         </ResizablePanelGroup>
