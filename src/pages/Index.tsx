@@ -38,6 +38,11 @@ import {
   DialogDescription,
   DialogFooter,
 } from "@/components/ui/dialog";
+import {
+  ResizablePanelGroup,
+  ResizablePanel,
+  ResizableHandle,
+} from "@/components/ui/resizable";
 
 
 // Price protection threshold: reject conditional triggers if |last - mark| / mark > 2%
