@@ -223,7 +223,7 @@ export function PositionPanel({
   // Column definitions for the positions table header
   // `key` is used to bind to columnVisibility state.
   // `hiddenByDefault` means it lives in the "隐藏栏" section of the menu and is OFF by default.
-  const POSITION_COLUMNS = [
+  const POSITION_COLUMNS: { key: string; label: string; flex: string; align: string; locked?: boolean; hiddenByDefault?: boolean }[] = [
     { key: 'symbol', label: '合约', flex: 'flex-[1.4]', align: 'text-left', locked: true },
     { key: 'quantity', label: '数量', flex: 'flex-1', align: 'text-right' },
     { key: 'entryPrice', label: '开仓价格', flex: 'flex-1', align: 'text-right' },
