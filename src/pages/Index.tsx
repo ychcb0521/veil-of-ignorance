@@ -1660,27 +1660,26 @@ const Index = () => {
           </div>
 
           {/* Layer 3: Bottom positions panel */}
-          <div className="h-[30%] min-h-[250px] shrink-0 border-t border-gray-200 dark:border-[#2b3139] overflow-hidden bg-gray-50 dark:bg-[#0b0e11]">
-            <div className="h-full overflow-auto">
-              <PositionPanel
-                positionsMap={positionsMap}
-                ordersMap={ordersMap}
-                tradeHistory={tradeHistory}
-                priceMap={priceMap}
-                activeSymbol={activeSymbol}
-                onClosePosition={handleClosePositionForSymbol}
-                onCancelOrder={handleCancelOrderForSymbol}
-                onAddIsolatedMargin={handleAddIsolatedMargin}
-                onAdjustMargin={handleAdjustMargin}
-                availableBalance={getEffectiveAvailable(activeSymbol)}
-                onClearSymbolData={handleClearSymbolData}
-                onPlaceTpSl={handlePlaceTpSl}
-                pricePrecision={pricePrecision}
-                activeTab={bottomTab}
-                onTabChange={setBottomTab}
-                onCloseAllPositions={handleCloseAllPositions}
-              />
-            </div>
+          <div className="h-[30%] min-h-[250px] shrink-0 border-t border-gray-200 dark:border-[#2b3139] bg-gray-50 dark:bg-[#0b0e11] flex flex-col overflow-hidden min-h-0">
+            <PositionPanel
+              positionsMap={positionsMap}
+              ordersMap={ordersMap}
+              tradeHistory={tradeHistory}
+              priceMap={priceMap}
+              activeSymbol={activeSymbol}
+              onClosePosition={handleClosePositionForSymbol}
+              onCancelOrder={handleCancelOrderForSymbol}
+              onAddIsolatedMargin={handleAddIsolatedMargin}
+              onAdjustMargin={handleAdjustMargin}
+              availableBalance={getEffectiveAvailable(activeSymbol)}
+              balance={balance}
+              onClearSymbolData={handleClearSymbolData}
+              onPlaceTpSl={handlePlaceTpSl}
+              pricePrecision={pricePrecision}
+              activeTab={bottomTab}
+              onTabChange={setBottomTab}
+              onCloseAllPositions={handleCloseAllPositions}
+            />
           </div>
         </div>
 
