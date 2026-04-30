@@ -1685,18 +1685,54 @@ const Index = () => {
                         <>
                           <ResizableHandle withHandle />
                           <ResizablePanel defaultSize={25} minSize={15} maxSize={35}>
-                            <div className="h-full w-full min-w-[280px] flex flex-col bg-white dark:bg-[#1e2329] min-h-0">
-                              <div className="flex-1 min-h-0 border-b border-gray-200 dark:border-[#2b3139] overflow-hidden">
-                                <OrderBook
-                                  symbol={activeSymbol}
-                                  currentPrice={currentPrice}
-                                  pricePrecision={pricePrecision}
-                                  onClose={() => setIsOrderBookOpen(false)}
-                                />
-                              </div>
-                              <div className="flex-1 min-h-0 overflow-hidden">
-                                <RecentTrades currentPrice={currentPrice} pricePrecision={pricePrecision} />
-                              </div>
+                            <div className="h-full w-full min-w-[280px] flex flex-col bg-white dark:bg-[#1e2329] min-h-0 overflow-hidden">
+                              <ResizablePanelGroup
+                                key={`${isRecentTradesOpen ? "rt-open" : "rt-closed"}`}
+                                direction="vertical"
+                                className="h-full w-full"
+                              >
+                                <ResizablePanel defaultSize={isRecentTradesOpen ? 60 : 100} minSize={20}>
+                                  <div className="h-full w-full flex flex-col min-h-0 overflow-hidden border-b border-gray-200 dark:border-[#2b3139]">
+                                    <OrderBook
+                                      symbol={activeSymbol}
+                                      currentPrice={currentPrice}
+                                      pricePrecision={pricePrecision}
+                                      onMinimize={() => setIsRecentTradesOpen((v) => !v)}
+                                      onClose={() => setIsOrderBookOpen(false)}
+                                    />
+                                  </div>
+                                </ResizablePanel>
+
+                                {isRecentTradesOpen && (
+                                  <>
+                                    <ResizableHandle withHandle className="bg-gray-200 dark:bg-[#2b3139]" />
+                                    <ResizablePanel defaultSize={40} minSize={20}>
+                                      <div className="h-full w-full flex flex-col min-h-0 overflow-hidden">
+                                        <RecentTrades
+                                          currentPrice={currentPrice}
+                                          pricePrecision={pricePrecision}
+                                          onMinimize={() => setIsRecentTradesOpen(false)}
+                                          onClose={() => setIsRecentTradesOpen(false)}
+                                        />
+                                      </div>
+                                    </ResizablePanel>
+                                  </>
+                                )}
+                              </ResizablePanelGroup>
+
+                              {!isRecentTradesOpen && (
+                                <button
+                                  type="button"
+                                  onClick={() => setIsRecentTradesOpen(true)}
+                                  title="显示最新成交"
+                                  className="flex-none flex items-center justify-center gap-1 h-7 text-[11px] border-t border-gray-200 dark:border-[#2b3139] text-gray-500 dark:text-[#848e9c] hover:text-gray-900 dark:hover:text-white transition-colors"
+                                >
+                                  <svg className="w-3 h-3" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+                                    <path d="M2 4l4 4 4-4" />
+                                  </svg>
+                                  最新成交
+                                </button>
+                              )}
                             </div>
                           </ResizablePanel>
                         </>
