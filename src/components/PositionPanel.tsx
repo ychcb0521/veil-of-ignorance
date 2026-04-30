@@ -337,7 +337,7 @@ export function PositionPanel({
             </div>
 
             {/* Body */}
-            <div className="flex-1 overflow-y-auto">
+            <div className="flex-1 overflow-y-auto scrollbar-pro min-h-0">
               {mergedPositions.length === 0 ? (
                 <div className="py-20 flex flex-col items-center justify-center text-gray-500 dark:text-[#848e9c] text-sm gap-2">
                   <svg className="w-10 h-10 opacity-40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.2">
