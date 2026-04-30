@@ -35,6 +35,7 @@ interface Props {
   onAddIsolatedMargin?: (symbol: string, posIndex: number, amount: number) => void;
   onAdjustMargin?: (symbol: string, posIndex: number, signedDelta: number) => void;
   availableBalance?: number;
+  balance?: number;
   onClearSymbolData?: (symbol: string) => void;
   onPlaceTpSl?: (symbol: string, pos: Position, tp: number | null, sl: number | null, pct: number) => void;
   activeTab: string;
@@ -55,7 +56,7 @@ function getSymbolPrecision(price: number): number {
 
 export function PositionPanel({
   positionsMap, ordersMap, tradeHistory, priceMap, activeSymbol,
-  onClosePosition, onCancelOrder, onAddIsolatedMargin, onAdjustMargin, availableBalance = 0,
+  onClosePosition, onCancelOrder, onAddIsolatedMargin, onAdjustMargin, availableBalance = 0, balance = 0,
   onClearSymbolData,
   activeTab, onTabChange, onCloseAllPositions, pricePrecision, onPlaceTpSl,
 }: Props) {
@@ -264,7 +265,7 @@ export function PositionPanel({
   };
 
   return (
-    <div className="flex flex-col h-full bg-white dark:bg-[#1e2329] border-t border-gray-200 dark:border-[#2b3139]">
+    <div className="flex flex-col h-full min-h-0 overflow-hidden bg-white dark:bg-[#1e2329]">
       {/* ===== Tabs Bar ===== */}
       <div className="flex justify-between items-center px-4 h-10 border-b border-gray-200 dark:border-[#2b3139] shrink-0">
         <div className="flex space-x-6 flex-1 overflow-x-auto h-full items-center">
@@ -336,7 +337,7 @@ export function PositionPanel({
             </div>
 
             {/* Body */}
-            <div className="flex-1 overflow-y-auto">
+            <div className="flex-1 overflow-y-auto scrollbar-pro min-h-0">
               {mergedPositions.length === 0 ? (
                 <div className="py-20 flex flex-col items-center justify-center text-gray-500 dark:text-[#848e9c] text-sm gap-2">
                   <svg className="w-10 h-10 opacity-40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.2">
@@ -516,200 +517,352 @@ export function PositionPanel({
 
         {/* ===== PENDING ORDERS ===== */}
         {activeTab === 'pending' && (
-          allOrders.length === 0 ? (
-            <div className="px-4 py-6 text-center text-xs text-muted-foreground">暂无委托</div>
-          ) : (
-            <table className="w-full text-[11px] font-mono tabular-nums">
-              <thead>
-                <tr className="text-muted-foreground border-b border-border">
-                  {['合约', '类型', '方向', '价格', '触发价', '数量', '杠杆', '模式', '操作'].map(h => (
-                    <th key={h} className="px-3 py-1.5 text-left font-medium whitespace-nowrap">{h}</th>
+          <div className="flex-1 overflow-y-auto scrollbar-pro min-h-0">
+            {allOrders.length === 0 ? (
+              <div className="px-4 py-20 text-center text-xs text-gray-500 dark:text-[#848e9c]">暂无委托</div>
+            ) : (
+              <table className="w-full text-[11px] font-mono tabular-nums">
+                <thead className="sticky top-0 bg-white dark:bg-[#1e2329] z-10">
+                  <tr className="text-gray-500 dark:text-[#848e9c] border-b border-gray-200 dark:border-[#2b3139]">
+                    {['合约', '类型', '方向', '价格', '触发价', '数量', '杠杆', '模式', '操作'].map(h => (
+                      <th key={h} className="px-3 py-1.5 text-left font-medium whitespace-nowrap">{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {allOrders.map(({ symbol, order }) => {
+                    return (
+                      <tr key={order.id} className="border-b border-gray-100 dark:border-[#2b3139]/50 hover:bg-gray-50 dark:hover:bg-white/5">
+                        <td className="px-3 py-2">
+                          <span className="text-gray-900 dark:text-white font-medium">{symbol.replace('USDT', '')}</span>
+                          <span className="text-gray-500 dark:text-[#848e9c] text-[10px]">/USDT</span>
+                        </td>
+                        <td className="px-3 py-2 text-gray-500 dark:text-[#848e9c]">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            {order.reduceOnly && order.reduceKind === 'TP' ? (
+                              <span className="font-bold text-[#0ecb81]">止盈</span>
+                            ) : order.reduceOnly && order.reduceKind === 'SL' ? (
+                              <span className="font-bold text-[#f6465d]">止损</span>
+                            ) : (
+                              <span>
+                                {({ LIMIT: '限价', POST_ONLY: '只做Maker', MARKET: '市价', LIMIT_TP_SL: '限价TP/SL', MARKET_TP_SL: '市价TP/SL', CONDITIONAL: '条件', TRAILING_STOP: '跟踪', TWAP: 'TWAP', SCALED: '分段' } as Record<string, string>)[order.type] || order.type}
+                              </span>
+                            )}
+                            {order.reduceOnly && (
+                              <span className="text-[9px] px-1 py-0 rounded bg-gray-100 dark:bg-white/5 text-gray-500 dark:text-[#848e9c] border border-gray-200 dark:border-[#2b3139] whitespace-nowrap">
+                                只减仓
+                              </span>
+                            )}
+                          </div>
+                        </td>
+                        <td className={`px-3 py-2 font-bold ${order.side === 'LONG' ? 'text-[#0ecb81]' : 'text-[#f6465d]'}`}>
+                          {order.side === 'LONG' ? '多' : '空'}
+                        </td>
+                        <td className="px-3 py-2 text-gray-900 dark:text-white">
+                          {order.reduceOnly ? (
+                            <span className="text-gray-500 dark:text-[#848e9c]">市价平仓</span>
+                          ) : order.price > 0 ? formatPrice(order.price, symbol) : '市价'}
+                        </td>
+                        <td className="px-3 py-2 text-gray-900 dark:text-white">
+                          {order.stopPrice > 0 ? (
+                            <span className={order.reduceKind === 'TP' ? 'text-[#0ecb81]' : order.reduceKind === 'SL' ? 'text-[#f6465d]' : 'text-amber-400'}>
+                              {formatPrice(order.stopPrice, symbol)}
+                            </span>
+                          ) : '-'}
+                        </td>
+                        <td className="px-3 py-2 text-gray-900 dark:text-white">{formatUSDT((order.price > 0 ? order.price : (priceMap[symbol] || 0)) * order.quantity)} USDT</td>
+                        <td className="px-3 py-2 text-gray-900 dark:text-white">{order.leverage}x</td>
+                        <td className="px-3 py-2">
+                          <Badge
+                            variant={order.marginMode === 'cross' ? 'default' : 'secondary'}
+                            className="text-[9px] px-1.5 py-0"
+                          >
+                            {order.marginMode === 'cross' ? '全仓' : '逐仓'}
+                          </Badge>
+                        </td>
+                        <td className="px-3 py-2">
+                          <button
+                            onClick={() => onCancelOrder(symbol, order.id)}
+                            className="p-0.5 rounded hover:bg-[#f6465d]/20 text-gray-500 dark:text-[#848e9c] hover:text-[#f6465d] transition-colors"
+                          >
+                            <X className="w-3.5 h-3.5" />
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            )}
+          </div>
+        )}
+
+        {/* ===== HISTORY (历史委托) ===== */}
+        {activeTab === 'history' && (
+          <div className="flex-1 overflow-y-auto scrollbar-pro min-h-0">
+            {tradeRecords.length === 0 ? (
+              <div className="px-4 py-20 text-center text-xs text-gray-500 dark:text-[#848e9c]">暂无历史记录</div>
+            ) : (
+              <table className="w-full text-[11px] font-mono tabular-nums">
+                <thead className="sticky top-0 bg-white dark:bg-[#1e2329] z-10">
+                  <tr className="text-gray-500 dark:text-[#848e9c] border-b border-gray-200 dark:border-[#2b3139]">
+                    <th className="px-3 py-1.5 text-left font-medium whitespace-nowrap">
+                      <select
+                        value={historySymbolFilter}
+                        onChange={e => setHistorySymbolFilter(e.target.value)}
+                        className="bg-transparent border border-gray-200 dark:border-[#2b3139] rounded px-1 py-0.5 text-[11px] text-gray-500 dark:text-[#848e9c] cursor-pointer outline-none"
+                      >
+                        <option value="ALL">全部合约</option>
+                        {historySymbols.map(s => (
+                          <option key={s} value={s}>{s.replace('USDT', '/USDT')}</option>
+                        ))}
+                      </select>
+                    </th>
+                    {['操作', '方向', '开仓价', '平仓价', '数量', '开仓时间', '平仓时间'].map(h => (
+                      <th key={h} className="px-3 py-1.5 text-left font-medium whitespace-nowrap">{h}</th>
+                    ))}
+                    <th className="px-3 py-1.5 text-left font-medium whitespace-nowrap cursor-pointer select-none" onClick={() => toggleSort('pnl')}>
+                      盈亏{getSortIcon('pnl')}
+                    </th>
+                    <th className="px-3 py-1.5 text-left font-medium whitespace-nowrap cursor-pointer select-none" onClick={() => toggleSort('pct')}>
+                      盈亏%{getSortIcon('pct')}
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(() => {
+                    let sorted = tradeRecords.slice().reverse();
+                    if (historySymbolFilter !== 'ALL') sorted = sorted.filter(t => t.symbol === historySymbolFilter);
+                    if (historySort === 'pnl-desc') sorted.sort((a, b) => b.pnl - a.pnl);
+                    else if (historySort === 'pnl-asc') sorted.sort((a, b) => a.pnl - b.pnl);
+                    else if (historySort === 'pct-desc' || historySort === 'pct-asc') {
+                      const pct = (t: typeof sorted[0]) => { const m = (t.quantity * t.entryPrice) / t.leverage; return m > 0 ? t.pnl / m : 0; };
+                      sorted.sort((a, b) => historySort === 'pct-desc' ? pct(b) - pct(a) : pct(a) - pct(b));
+                    }
+                    return sorted.slice(0, 100);
+                  })().map(t => (
+                    <tr key={t.id} className="border-b border-gray-100 dark:border-[#2b3139]/50">
+                      <td className="px-3 py-2 text-gray-900 dark:text-white">{t.symbol?.replace('USDT', '/USDT') || '-'}</td>
+                      <td className="px-3 py-2">
+                        <span className={`text-[10px] px-1 py-0.5 rounded ${
+                          t.action === 'LIQUIDATION' ? 'bg-[#f6465d]/20 text-[#f6465d]' :
+                          t.action === 'OPEN' ? 'bg-[#fcd535]/20 text-[#fcd535]' : 'bg-gray-100 dark:bg-white/5 text-gray-900 dark:text-white'
+                        }`}>
+                          {t.action === 'LIQUIDATION' ? '💀爆仓' : t.action === 'OPEN' ? '开仓' : '平仓'}
+                        </span>
+                      </td>
+                      <td className={`px-3 py-2 font-bold ${t.side === 'LONG' ? 'text-[#0ecb81]' : 'text-[#f6465d]'}`}>
+                        {t.side === 'LONG' ? '多' : '空'} {t.leverage}x
+                      </td>
+                      <td className="px-3 py-2 text-gray-900 dark:text-white">{formatPrice(t.entryPrice, t.symbol)}</td>
+                      <td className="px-3 py-2 text-gray-900 dark:text-white">{t.exitPrice > 0 ? formatPrice(t.exitPrice, t.symbol) : '-'}</td>
+                      <td className="px-3 py-2 text-gray-900 dark:text-white">{(t.quantity * t.entryPrice).toFixed(2)} USDT</td>
+                      <td className="px-3 py-2 text-gray-500 dark:text-[#848e9c]">{t.openTime && t.openTime > 0 ? new Date(t.openTime).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '-'}</td>
+                      <td className="px-3 py-2 text-gray-500 dark:text-[#848e9c]">{t.closeTime ? new Date(t.closeTime).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '-'}</td>
+                      <td className={`px-3 py-2 font-bold ${t.pnl >= 0 ? 'text-[#0ecb81]' : 'text-[#f6465d]'}`}>
+                        {t.pnl >= 0 ? '+' : ''}{t.pnl.toFixed(2)}
+                      </td>
+                      {(() => {
+                        const margin = (t.quantity * t.entryPrice) / t.leverage;
+                        const pct = margin > 0 ? (t.pnl / margin) * 100 : 0;
+                        return (
+                          <td className={`px-3 py-2 font-bold ${pct >= 0 ? 'text-[#0ecb81]' : 'text-[#f6465d]'}`}>
+                            {pct >= 0 ? '+' : ''}{pct.toFixed(2)}%
+                          </td>
+                        );
+                      })()}
+                    </tr>
                   ))}
-                </tr>
-              </thead>
-              <tbody>
-                {allOrders.map(({ symbol, order }) => {
-                  return (
-                    <tr key={order.id} className="border-b border-border/30 hover:bg-accent/20">
-                      <td className="px-3 py-2">
-                        <span className="text-foreground font-medium">{symbol.replace('USDT', '')}</span>
-                        <span className="text-muted-foreground text-[10px]">/USDT</span>
+                </tbody>
+              </table>
+            )}
+          </div>
+        )}
+
+        {/* ===== TRADE HISTORY (历史成交) ===== */}
+        {activeTab === 'trades' && (
+          <div className="flex-1 overflow-y-auto scrollbar-pro min-h-0">
+            {tradeRecords.length === 0 ? (
+              <div className="px-4 py-20 text-center text-xs text-gray-500 dark:text-[#848e9c]">暂无历史成交</div>
+            ) : (
+              <table className="w-full text-[11px] font-mono tabular-nums">
+                <thead className="sticky top-0 bg-white dark:bg-[#1e2329] z-10">
+                  <tr className="text-gray-500 dark:text-[#848e9c] border-b border-gray-200 dark:border-[#2b3139]">
+                    {['时间', '合约', '方向', '成交价', '成交数量', '已实现盈亏'].map(h => (
+                      <th key={h} className="px-3 py-1.5 text-left font-medium whitespace-nowrap">{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {tradeRecords.slice().reverse().slice(0, 100).map(t => {
+                    const ts = t.closeTime || t.openTime;
+                    const isLong = t.side === 'LONG';
+                    // Closing a LONG = sell; closing a SHORT = buy
+                    const dirLabel = isLong ? '卖出平多' : '买入平空';
+                    const dirColor = isLong ? 'text-[#f6465d]' : 'text-[#0ecb81]';
+                    return (
+                      <tr key={t.id} className="border-b border-gray-100 dark:border-[#2b3139]/50">
+                        <td className="px-3 py-2 text-gray-500 dark:text-[#848e9c]">
+                          {ts ? new Date(ts).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '-'}
+                        </td>
+                        <td className="px-3 py-2 text-gray-900 dark:text-white">{t.symbol?.replace('USDT', '/USDT') || '-'}</td>
+                        <td className={`px-3 py-2 font-bold ${dirColor}`}>{dirLabel}</td>
+                        <td className="px-3 py-2 text-gray-900 dark:text-white">{formatPrice(t.exitPrice > 0 ? t.exitPrice : t.entryPrice, t.symbol)}</td>
+                        <td className="px-3 py-2 text-gray-900 dark:text-white">{formatAmount(t.quantity)}</td>
+                        <td className={`px-3 py-2 font-bold ${t.pnl >= 0 ? 'text-[#0ecb81]' : 'text-[#f6465d]'}`}>
+                          {formatSignedUSDT(t.pnl)}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            )}
+          </div>
+        )}
+
+        {/* ===== POSITION HISTORY (仓位历史记录) ===== */}
+        {activeTab === 'positionHistory' && (
+          <div className="flex-1 overflow-y-auto scrollbar-pro min-h-0">
+            {tradeRecords.length === 0 ? (
+              <div className="px-4 py-20 text-center text-xs text-gray-500 dark:text-[#848e9c]">暂无仓位历史记录</div>
+            ) : (
+              <table className="w-full text-[11px] font-mono tabular-nums">
+                <thead className="sticky top-0 bg-white dark:bg-[#1e2329] z-10">
+                  <tr className="text-gray-500 dark:text-[#848e9c] border-b border-gray-200 dark:border-[#2b3139]">
+                    {['合约', '方向', '开仓均价', '平仓均价', '数量', '开仓时间', '平仓时间', '平仓盈亏', '收益率(ROE)'].map(h => (
+                      <th key={h} className="px-3 py-1.5 text-left font-medium whitespace-nowrap">{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {tradeRecords.slice().reverse().slice(0, 100).map(t => {
+                    const margin = (t.quantity * t.entryPrice) / t.leverage;
+                    const roe = margin > 0 ? (t.pnl / margin) * 100 : 0;
+                    return (
+                      <tr key={t.id} className="border-b border-gray-100 dark:border-[#2b3139]/50">
+                        <td className="px-3 py-2 text-gray-900 dark:text-white">{t.symbol?.replace('USDT', '/USDT') || '-'}</td>
+                        <td className={`px-3 py-2 font-bold ${t.side === 'LONG' ? 'text-[#0ecb81]' : 'text-[#f6465d]'}`}>
+                          {t.side === 'LONG' ? '多' : '空'} {t.leverage}x
+                        </td>
+                        <td className="px-3 py-2 text-gray-900 dark:text-white">{formatPrice(t.entryPrice, t.symbol)}</td>
+                        <td className="px-3 py-2 text-gray-900 dark:text-white">{t.exitPrice > 0 ? formatPrice(t.exitPrice, t.symbol) : '-'}</td>
+                        <td className="px-3 py-2 text-gray-900 dark:text-white">{formatAmount(t.quantity)}</td>
+                        <td className="px-3 py-2 text-gray-500 dark:text-[#848e9c]">
+                          {t.openTime && t.openTime > 0 ? new Date(t.openTime).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '-'}
+                        </td>
+                        <td className="px-3 py-2 text-gray-500 dark:text-[#848e9c]">
+                          {t.closeTime ? new Date(t.closeTime).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '-'}
+                        </td>
+                        <td className={`px-3 py-2 font-bold ${t.pnl >= 0 ? 'text-[#0ecb81]' : 'text-[#f6465d]'}`}>
+                          {formatSignedUSDT(t.pnl)}
+                        </td>
+                        <td className={`px-3 py-2 font-bold ${roe >= 0 ? 'text-[#0ecb81]' : 'text-[#f6465d]'}`}>
+                          {roe >= 0 ? '+' : ''}{roe.toFixed(2)}%
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            )}
+          </div>
+        )}
+
+        {/* ===== FUNDING (资金流水) ===== */}
+        {activeTab === 'funding' && (
+          <div className="flex-1 overflow-y-auto scrollbar-pro min-h-0">
+            {fundingRecords.length === 0 ? (
+              <div className="px-4 py-20 text-center text-xs text-gray-500 dark:text-[#848e9c]">
+                暂无资金费记录 · 每 8 小时结算 (00:00, 08:00, 16:00 UTC)
+              </div>
+            ) : (
+              <table className="w-full text-[11px] font-mono tabular-nums">
+                <thead className="sticky top-0 bg-white dark:bg-[#1e2329] z-10">
+                  <tr className="text-gray-500 dark:text-[#848e9c] border-b border-gray-200 dark:border-[#2b3139]">
+                    {['时间', '合约', '方向', '名义价值', '费率', '金额'].map(h => (
+                      <th key={h} className="px-3 py-1.5 text-left font-medium whitespace-nowrap">{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {fundingRecords.slice().reverse().slice(0, 100).map(t => (
+                    <tr key={t.id} className="border-b border-gray-100 dark:border-[#2b3139]/50">
+                      <td className="px-3 py-2 text-gray-500 dark:text-[#848e9c]">
+                        {new Date(t.openTime).toLocaleString()}
                       </td>
-                      <td className="px-3 py-2 text-muted-foreground">
-                        <div className="flex items-center gap-1.5 flex-wrap">
-                          {order.reduceOnly && order.reduceKind === 'TP' ? (
-                            <span className="font-bold text-trading-green">止盈</span>
-                          ) : order.reduceOnly && order.reduceKind === 'SL' ? (
-                            <span className="font-bold text-trading-red">止损</span>
-                          ) : (
-                            <span>
-                              {({ LIMIT: '限价', POST_ONLY: '只做Maker', MARKET: '市价', LIMIT_TP_SL: '限价TP/SL', MARKET_TP_SL: '市价TP/SL', CONDITIONAL: '条件', TRAILING_STOP: '跟踪', TWAP: 'TWAP', SCALED: '分段' } as Record<string, string>)[order.type] || order.type}
-                            </span>
-                          )}
-                          {order.reduceOnly && (
-                            <span className="text-[9px] px-1 py-0 rounded bg-muted text-muted-foreground border border-border whitespace-nowrap">
-                              只减仓
-                            </span>
-                          )}
-                        </div>
+                      <td className="px-3 py-2 text-gray-900 dark:text-white">{t.symbol?.replace('USDT', '/USDT')}</td>
+                      <td className={`px-3 py-2 font-bold ${t.side === 'LONG' ? 'text-[#0ecb81]' : 'text-[#f6465d]'}`}>
+                        {t.side === 'LONG' ? '多' : '空'}
                       </td>
-                      <td className={`px-3 py-2 font-bold ${order.side === 'LONG' ? 'text-trading-green' : 'text-trading-red'}`}>
-                        {order.side === 'LONG' ? '多' : '空'}
-                      </td>
-                      <td className="px-3 py-2">
-                        {order.reduceOnly ? (
-                          <span className="text-muted-foreground">市价平仓</span>
-                        ) : order.price > 0 ? formatPrice(order.price, symbol) : '市价'}
-                      </td>
-                      <td className="px-3 py-2">
-                        {order.stopPrice > 0 ? (
-                          <span className={order.reduceKind === 'TP' ? 'text-trading-green' : order.reduceKind === 'SL' ? 'text-trading-red' : 'text-amber-400'}>
-                            {formatPrice(order.stopPrice, symbol)}
-                          </span>
-                        ) : '-'}
-                      </td>
-                      <td className="px-3 py-2">{formatUSDT((order.price > 0 ? order.price : (priceMap[symbol] || 0)) * order.quantity)} USDT</td>
-                      <td className="px-3 py-2">{order.leverage}x</td>
-                      <td className="px-3 py-2">
-                        <Badge
-                          variant={order.marginMode === 'cross' ? 'default' : 'secondary'}
-                          className="text-[9px] px-1.5 py-0"
-                        >
-                          {order.marginMode === 'cross' ? '全仓' : '逐仓'}
-                        </Badge>
-                      </td>
-                      <td className="px-3 py-2">
-                        <button
-                          onClick={() => onCancelOrder(symbol, order.id)}
-                          className="p-0.5 rounded hover:bg-destructive/20 text-muted-foreground hover:text-destructive transition-colors"
-                        >
-                          <X className="w-3.5 h-3.5" />
-                        </button>
+                      <td className="px-3 py-2 text-gray-900 dark:text-white">{(t.entryPrice * t.quantity).toFixed(2)}</td>
+                      <td className="px-3 py-2 text-gray-500 dark:text-[#848e9c]">0.01%</td>
+                      <td className={`px-3 py-2 font-bold ${t.pnl >= 0 ? 'text-[#0ecb81]' : 'text-[#f6465d]'}`}>
+                        {t.pnl >= 0 ? '+' : ''}{t.pnl.toFixed(4)}
                       </td>
                     </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        )}
+
+        {/* ===== BOTS (机器人) ===== */}
+        {activeTab === 'bots' && (
+          <div className="flex-1 overflow-y-auto scrollbar-pro min-h-0 px-4 py-20 text-center text-xs text-gray-500 dark:text-[#848e9c]">
+            暂未启用机器人
+          </div>
+        )}
+
+        {/* ===== ASSETS (资产) ===== */}
+        {activeTab === 'assets' && (() => {
+          let totalUnrealized = 0;
+          let totalUsedMargin = 0;
+          for (const [sym, positions] of Object.entries(positionsMap)) {
+            const px = priceMap[sym] || 0;
+            for (const pos of positions) {
+              totalUnrealized += calcUnrealizedPnl(pos, px);
+              totalUsedMargin += pos.marginMode === 'isolated' && pos.isolatedMargin != null
+                ? pos.isolatedMargin
+                : pos.margin;
+            }
+          }
+          const equity = balance + totalUnrealized;
+          const available = Math.max(0, balance - totalUsedMargin);
+          const cards = [
+            { label: '总权益 (Total Equity)', value: equity, signed: false },
+            { label: '可用余额 (Available)', value: available, signed: false },
+            { label: '已用保证金 (Used Margin)', value: totalUsedMargin, signed: false },
+            { label: '未实现盈亏 (Unrealized PnL)', value: totalUnrealized, signed: true },
+          ];
+          return (
+            <div className="flex-1 overflow-y-auto scrollbar-pro min-h-0 p-4">
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                {cards.map(c => {
+                  const isPnl = c.signed;
+                  const positive = c.value >= 0;
+                  const color = isPnl
+                    ? (positive ? 'text-[#0ecb81]' : 'text-[#f6465d]')
+                    : 'text-gray-900 dark:text-white';
+                  const display = isPnl ? formatSignedUSDT(c.value) : formatUSDT(c.value);
+                  return (
+                    <div
+                      key={c.label}
+                      className="rounded-lg border border-gray-200 dark:border-[#2b3139] bg-gray-50 dark:bg-[#0b0e11] px-4 py-3"
+                    >
+                      <div className="text-[11px] text-gray-500 dark:text-[#848e9c] mb-1.5">{c.label}</div>
+                      <div className={`font-mono tabular-nums text-xl font-bold ${color}`}>
+                        {display}
+                        <span className="ml-1 text-[11px] font-normal text-gray-500 dark:text-[#848e9c]">USDT</span>
+                      </div>
+                    </div>
                   );
                 })}
-              </tbody>
-            </table>
-          )
-        )}
-
-        {/* ===== HISTORY ===== */}
-        {activeTab === 'history' && (
-          tradeRecords.length === 0 ? (
-            <div className="px-4 py-6 text-center text-xs text-muted-foreground">暂无历史记录</div>
-          ) : (
-            <table className="w-full text-[11px] font-mono tabular-nums">
-              <thead>
-                <tr className="text-muted-foreground border-b border-border">
-                  <th className="px-3 py-1.5 text-left font-medium whitespace-nowrap">
-                    <select
-                      value={historySymbolFilter}
-                      onChange={e => setHistorySymbolFilter(e.target.value)}
-                      className="bg-transparent border border-border rounded px-1 py-0.5 text-[11px] text-muted-foreground cursor-pointer outline-none"
-                    >
-                      <option value="ALL">全部合约</option>
-                      {historySymbols.map(s => (
-                        <option key={s} value={s}>{s.replace('USDT', '/USDT')}</option>
-                      ))}
-                    </select>
-                  </th>
-                  {['操作', '方向', '开仓价', '平仓价', '数量', '开仓时间', '平仓时间'].map(h => (
-                    <th key={h} className="px-3 py-1.5 text-left font-medium whitespace-nowrap">{h}</th>
-                  ))}
-                  <th className="px-3 py-1.5 text-left font-medium whitespace-nowrap cursor-pointer select-none" onClick={() => toggleSort('pnl')}>
-                    盈亏{getSortIcon('pnl')}
-                  </th>
-                  <th className="px-3 py-1.5 text-left font-medium whitespace-nowrap cursor-pointer select-none" onClick={() => toggleSort('pct')}>
-                    盈亏%{getSortIcon('pct')}
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {(() => {
-                  let sorted = tradeRecords.slice().reverse();
-                  if (historySymbolFilter !== 'ALL') sorted = sorted.filter(t => t.symbol === historySymbolFilter);
-                  if (historySort === 'pnl-desc') sorted.sort((a, b) => b.pnl - a.pnl);
-                  else if (historySort === 'pnl-asc') sorted.sort((a, b) => a.pnl - b.pnl);
-                  else if (historySort === 'pct-desc' || historySort === 'pct-asc') {
-                    const pct = (t: typeof sorted[0]) => { const m = (t.quantity * t.entryPrice) / t.leverage; return m > 0 ? t.pnl / m : 0; };
-                    sorted.sort((a, b) => historySort === 'pct-desc' ? pct(b) - pct(a) : pct(a) - pct(b));
-                  }
-                  return sorted.slice(0, 50);
-                })().map(t => (
-                  <tr key={t.id} className="border-b border-border/30">
-                    <td className="px-3 py-2 text-foreground">{t.symbol?.replace('USDT', '/USDT') || '-'}</td>
-                    <td className="px-3 py-2">
-                      <span className={`text-[10px] px-1 py-0.5 rounded ${
-                        t.action === 'LIQUIDATION' ? 'bg-destructive/20 text-destructive' :
-                        t.action === 'OPEN' ? 'bg-primary/20 text-primary' : 'bg-accent text-foreground'
-                      }`}>
-                        {t.action === 'LIQUIDATION' ? '💀爆仓' : t.action === 'OPEN' ? '开仓' : '平仓'}
-                      </span>
-                    </td>
-                    <td className={`px-3 py-2 font-bold ${t.side === 'LONG' ? 'text-trading-green' : 'text-trading-red'}`}>
-                      {t.side === 'LONG' ? '多' : '空'} {t.leverage}x
-                    </td>
-                    <td className="px-3 py-2">{t.entryPrice.toPrecision(6)}</td>
-                    <td className="px-3 py-2">{t.exitPrice > 0 ? t.exitPrice.toPrecision(6) : '-'}</td>
-                    <td className="px-3 py-2">{(t.quantity * t.entryPrice).toFixed(2)} USDT</td>
-                    <td className="px-3 py-2 text-muted-foreground">{t.openTime && t.openTime > 0 ? new Date(t.openTime).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '-'}</td>
-                    <td className="px-3 py-2 text-muted-foreground">{t.closeTime ? new Date(t.closeTime).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '-'}</td>
-                    <td className={`px-3 py-2 font-bold ${t.pnl >= 0 ? 'text-trading-green' : 'text-trading-red'}`}>
-                      {t.pnl >= 0 ? '+' : ''}{t.pnl.toFixed(2)}
-                    </td>
-                    {(() => {
-                      const margin = (t.quantity * t.entryPrice) / t.leverage;
-                      const pct = margin > 0 ? (t.pnl / margin) * 100 : 0;
-                      return (
-                        <td className={`px-3 py-2 font-bold ${pct >= 0 ? 'text-trading-green' : 'text-trading-red'}`}>
-                          {pct >= 0 ? '+' : ''}{pct.toFixed(2)}%
-                        </td>
-                      );
-                    })()}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )
-        )}
-
-        {/* ===== FUNDING ===== */}
-        {activeTab === 'funding' && (
-          fundingRecords.length === 0 ? (
-            <div className="px-4 py-6 text-center text-xs text-muted-foreground">
-              暂无资金费记录 · 每 8 小时结算 (00:00, 08:00, 16:00 UTC)
+              </div>
             </div>
-          ) : (
-            <table className="w-full text-[11px] font-mono tabular-nums">
-              <thead>
-                <tr className="text-muted-foreground border-b border-border">
-                  {['时间', '合约', '方向', '名义价值', '费率', '金额'].map(h => (
-                    <th key={h} className="px-3 py-1.5 text-left font-medium whitespace-nowrap">{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {fundingRecords.slice().reverse().slice(0, 50).map(t => (
-                  <tr key={t.id} className="border-b border-border/30">
-                    <td className="px-3 py-2 text-muted-foreground">
-                      {new Date(t.openTime).toLocaleString()}
-                    </td>
-                    <td className="px-3 py-2 text-foreground">{t.symbol?.replace('USDT', '/USDT')}</td>
-                    <td className={`px-3 py-2 font-bold ${t.side === 'LONG' ? 'text-trading-green' : 'text-trading-red'}`}>
-                      {t.side === 'LONG' ? '多' : '空'}
-                    </td>
-                    <td className="px-3 py-2">{(t.entryPrice * t.quantity).toFixed(2)}</td>
-                    <td className="px-3 py-2 text-muted-foreground">0.01%</td>
-                    <td className={`px-3 py-2 font-bold ${t.pnl >= 0 ? 'text-trading-green' : 'text-trading-red'}`}>
-                      {t.pnl >= 0 ? '+' : ''}{t.pnl.toFixed(4)}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )
-        )}
+          );
+        })()}
       </div>
 
       {/* Modals */}
