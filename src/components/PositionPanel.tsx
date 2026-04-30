@@ -851,10 +851,10 @@ export function PositionPanel({
                       key={c.label}
                       className="rounded-lg border border-gray-200 dark:border-[#2b3139] bg-white dark:bg-transparent p-5"
                     >
-                      <div className="text-sm text-gray-500 dark:text-[#848e9c] mb-2">{c.label}</div>
-                      <div className={`font-mono tabular-nums text-2xl font-semibold ${color}`}>
-                        {display}
-                        <span className="ml-1 text-sm font-normal text-gray-500 dark:text-[#848e9c]">USDT</span>
+                      <div className="text-xs font-normal text-gray-500 dark:text-[#848e9c] mb-1.5 whitespace-nowrap overflow-hidden text-ellipsis">{c.label}</div>
+                      <div className="flex items-baseline space-x-1.5">
+                        <span className={`font-mono text-xl font-semibold tracking-tight tabular-nums ${color}`}>{display}</span>
+                        <span className="text-[11px] font-medium text-gray-500 dark:text-[#848e9c]">USDT</span>
                       </div>
                     </div>
                   );
