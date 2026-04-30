@@ -273,7 +273,7 @@ export function OrderPanel({
       </div>
 
       {/* ============ OPEN / CLOSE PILL ============ */}
-      <div className="flex-shrink-0 px-3 pb-2">
+      <div className="flex-none px-3 pb-2">
         <div className="flex bg-secondary rounded-md p-0.5">
           {(['OPEN', 'CLOSE'] as const).map(m => (
             <button
