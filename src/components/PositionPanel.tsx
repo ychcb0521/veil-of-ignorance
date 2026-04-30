@@ -849,12 +849,12 @@ export function PositionPanel({
                   return (
                     <div
                       key={c.label}
-                      className="rounded-lg border border-gray-200 dark:border-[#2b3139] bg-gray-50 dark:bg-[#0b0e11] px-4 py-3"
+                      className="rounded-lg border border-gray-200 dark:border-[#2b3139] bg-white dark:bg-transparent p-5"
                     >
-                      <div className="text-[11px] text-gray-500 dark:text-[#848e9c] mb-1.5">{c.label}</div>
-                      <div className={`font-mono tabular-nums text-xl font-bold ${color}`}>
+                      <div className="text-sm text-gray-500 dark:text-[#848e9c] mb-2">{c.label}</div>
+                      <div className={`font-mono tabular-nums text-2xl font-semibold ${color}`}>
                         {display}
-                        <span className="ml-1 text-[11px] font-normal text-gray-500 dark:text-[#848e9c]">USDT</span>
+                        <span className="ml-1 text-sm font-normal text-gray-500 dark:text-[#848e9c]">USDT</span>
                       </div>
                     </div>
                   );
