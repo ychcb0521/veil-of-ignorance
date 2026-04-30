@@ -207,4 +207,24 @@
   .press-feedback {
     @apply transition-transform duration-75 ease-out active:scale-[0.97];
   }
+
+  /* Thin dark scrollbar (Binance-style) */
+  .scrollbar-pro {
+    scrollbar-width: thin;
+    scrollbar-color: #2b3139 transparent;
+  }
+  .scrollbar-pro::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  .scrollbar-pro::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .scrollbar-pro::-webkit-scrollbar-thumb {
+    background-color: #2b3139;
+    border-radius: 3px;
+  }
+  .scrollbar-pro::-webkit-scrollbar-thumb:hover {
+    background-color: #474d57;
+  }
 }
