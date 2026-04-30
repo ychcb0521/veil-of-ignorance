@@ -1628,9 +1628,26 @@ const Index = () => {
 
                   {/* Chart vs OrderBook (horizontal resizable) */}
                   <div className="flex-1 min-h-0 min-w-0">
-                    <ResizablePanelGroup direction="horizontal" className="h-full w-full">
-                      <ResizablePanel defaultSize={75} minSize={50}>
+                    <ResizablePanelGroup
+                      key={isOrderBookOpen ? "ob-open" : "ob-closed"}
+                      direction="horizontal"
+                      className="h-full w-full"
+                    >
+                      <ResizablePanel defaultSize={isOrderBookOpen ? 75 : 100} minSize={50}>
                         <div className="h-full w-full relative overflow-hidden bg-gray-50 dark:bg-[#0b0e11]">
+                          {!isOrderBookOpen && (
+                            <button
+                              type="button"
+                              onClick={() => setIsOrderBookOpen(true)}
+                              title="显示订单簿"
+                              className="absolute top-2 right-2 z-20 flex items-center gap-1 px-2 py-1 rounded text-[11px] bg-white/90 dark:bg-[#1e2329]/90 border border-gray-200 dark:border-[#2b3139] text-gray-600 dark:text-[#848e9c] hover:text-gray-900 dark:hover:text-white shadow-sm cursor-pointer transition-colors"
+                            >
+                              <svg className="w-3 h-3" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5">
+                                <path d="M2 3h8M2 6h8M2 9h8" strokeLinecap="round" />
+                              </svg>
+                              订单簿
+                            </button>
+                          )}
                           {activeCoinState.status === "stopped" && visibleData.length === 0 ? (
                             <div className="h-full flex items-center justify-center bg-gray-50 dark:bg-[#0b0e11]">
                               <div className="text-center space-y-3">
@@ -1663,18 +1680,26 @@ const Index = () => {
                         </div>
                       </ResizablePanel>
 
-                      <ResizableHandle withHandle />
-
-                      <ResizablePanel defaultSize={25} minSize={15} maxSize={35}>
-                        <div className="h-full w-full flex flex-col bg-white dark:bg-[#1e2329] min-h-0">
-                          <div className="flex-1 min-h-0 border-b border-gray-200 dark:border-[#2b3139] overflow-hidden">
-                            <OrderBook symbol={activeSymbol} currentPrice={currentPrice} pricePrecision={pricePrecision} />
-                          </div>
-                          <div className="flex-1 min-h-0 overflow-hidden">
-                            <RecentTrades currentPrice={currentPrice} pricePrecision={pricePrecision} />
-                          </div>
-                        </div>
-                      </ResizablePanel>
+                      {isOrderBookOpen && (
+                        <>
+                          <ResizableHandle withHandle />
+                          <ResizablePanel defaultSize={25} minSize={15} maxSize={35}>
+                            <div className="h-full w-full flex flex-col bg-white dark:bg-[#1e2329] min-h-0">
+                              <div className="flex-1 min-h-0 border-b border-gray-200 dark:border-[#2b3139] overflow-hidden">
+                                <OrderBook
+                                  symbol={activeSymbol}
+                                  currentPrice={currentPrice}
+                                  pricePrecision={pricePrecision}
+                                  onClose={() => setIsOrderBookOpen(false)}
+                                />
+                              </div>
+                              <div className="flex-1 min-h-0 overflow-hidden">
+                                <RecentTrades currentPrice={currentPrice} pricePrecision={pricePrecision} />
+                              </div>
+                            </div>
+                          </ResizablePanel>
+                        </>
+                      )}
                     </ResizablePanelGroup>
                   </div>
                 </div>
