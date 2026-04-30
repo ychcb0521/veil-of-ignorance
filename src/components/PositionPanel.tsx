@@ -517,82 +517,84 @@ export function PositionPanel({
 
         {/* ===== PENDING ORDERS ===== */}
         {activeTab === 'pending' && (
-          allOrders.length === 0 ? (
-            <div className="px-4 py-6 text-center text-xs text-muted-foreground">暂无委托</div>
-          ) : (
-            <table className="w-full text-[11px] font-mono tabular-nums">
-              <thead>
-                <tr className="text-muted-foreground border-b border-border">
-                  {['合约', '类型', '方向', '价格', '触发价', '数量', '杠杆', '模式', '操作'].map(h => (
-                    <th key={h} className="px-3 py-1.5 text-left font-medium whitespace-nowrap">{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {allOrders.map(({ symbol, order }) => {
-                  return (
-                    <tr key={order.id} className="border-b border-border/30 hover:bg-accent/20">
-                      <td className="px-3 py-2">
-                        <span className="text-foreground font-medium">{symbol.replace('USDT', '')}</span>
-                        <span className="text-muted-foreground text-[10px]">/USDT</span>
-                      </td>
-                      <td className="px-3 py-2 text-muted-foreground">
-                        <div className="flex items-center gap-1.5 flex-wrap">
-                          {order.reduceOnly && order.reduceKind === 'TP' ? (
-                            <span className="font-bold text-trading-green">止盈</span>
-                          ) : order.reduceOnly && order.reduceKind === 'SL' ? (
-                            <span className="font-bold text-trading-red">止损</span>
-                          ) : (
-                            <span>
-                              {({ LIMIT: '限价', POST_ONLY: '只做Maker', MARKET: '市价', LIMIT_TP_SL: '限价TP/SL', MARKET_TP_SL: '市价TP/SL', CONDITIONAL: '条件', TRAILING_STOP: '跟踪', TWAP: 'TWAP', SCALED: '分段' } as Record<string, string>)[order.type] || order.type}
+          <div className="flex-1 overflow-y-auto scrollbar-pro min-h-0">
+            {allOrders.length === 0 ? (
+              <div className="px-4 py-20 text-center text-xs text-gray-500 dark:text-[#848e9c]">暂无委托</div>
+            ) : (
+              <table className="w-full text-[11px] font-mono tabular-nums">
+                <thead className="sticky top-0 bg-white dark:bg-[#1e2329] z-10">
+                  <tr className="text-gray-500 dark:text-[#848e9c] border-b border-gray-200 dark:border-[#2b3139]">
+                    {['合约', '类型', '方向', '价格', '触发价', '数量', '杠杆', '模式', '操作'].map(h => (
+                      <th key={h} className="px-3 py-1.5 text-left font-medium whitespace-nowrap">{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {allOrders.map(({ symbol, order }) => {
+                    return (
+                      <tr key={order.id} className="border-b border-gray-100 dark:border-[#2b3139]/50 hover:bg-gray-50 dark:hover:bg-white/5">
+                        <td className="px-3 py-2">
+                          <span className="text-gray-900 dark:text-white font-medium">{symbol.replace('USDT', '')}</span>
+                          <span className="text-gray-500 dark:text-[#848e9c] text-[10px]">/USDT</span>
+                        </td>
+                        <td className="px-3 py-2 text-gray-500 dark:text-[#848e9c]">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            {order.reduceOnly && order.reduceKind === 'TP' ? (
+                              <span className="font-bold text-[#0ecb81]">止盈</span>
+                            ) : order.reduceOnly && order.reduceKind === 'SL' ? (
+                              <span className="font-bold text-[#f6465d]">止损</span>
+                            ) : (
+                              <span>
+                                {({ LIMIT: '限价', POST_ONLY: '只做Maker', MARKET: '市价', LIMIT_TP_SL: '限价TP/SL', MARKET_TP_SL: '市价TP/SL', CONDITIONAL: '条件', TRAILING_STOP: '跟踪', TWAP: 'TWAP', SCALED: '分段' } as Record<string, string>)[order.type] || order.type}
+                              </span>
+                            )}
+                            {order.reduceOnly && (
+                              <span className="text-[9px] px-1 py-0 rounded bg-gray-100 dark:bg-white/5 text-gray-500 dark:text-[#848e9c] border border-gray-200 dark:border-[#2b3139] whitespace-nowrap">
+                                只减仓
+                              </span>
+                            )}
+                          </div>
+                        </td>
+                        <td className={`px-3 py-2 font-bold ${order.side === 'LONG' ? 'text-[#0ecb81]' : 'text-[#f6465d]'}`}>
+                          {order.side === 'LONG' ? '多' : '空'}
+                        </td>
+                        <td className="px-3 py-2 text-gray-900 dark:text-white">
+                          {order.reduceOnly ? (
+                            <span className="text-gray-500 dark:text-[#848e9c]">市价平仓</span>
+                          ) : order.price > 0 ? formatPrice(order.price, symbol) : '市价'}
+                        </td>
+                        <td className="px-3 py-2 text-gray-900 dark:text-white">
+                          {order.stopPrice > 0 ? (
+                            <span className={order.reduceKind === 'TP' ? 'text-[#0ecb81]' : order.reduceKind === 'SL' ? 'text-[#f6465d]' : 'text-amber-400'}>
+                              {formatPrice(order.stopPrice, symbol)}
                             </span>
-                          )}
-                          {order.reduceOnly && (
-                            <span className="text-[9px] px-1 py-0 rounded bg-muted text-muted-foreground border border-border whitespace-nowrap">
-                              只减仓
-                            </span>
-                          )}
-                        </div>
-                      </td>
-                      <td className={`px-3 py-2 font-bold ${order.side === 'LONG' ? 'text-trading-green' : 'text-trading-red'}`}>
-                        {order.side === 'LONG' ? '多' : '空'}
-                      </td>
-                      <td className="px-3 py-2">
-                        {order.reduceOnly ? (
-                          <span className="text-muted-foreground">市价平仓</span>
-                        ) : order.price > 0 ? formatPrice(order.price, symbol) : '市价'}
-                      </td>
-                      <td className="px-3 py-2">
-                        {order.stopPrice > 0 ? (
-                          <span className={order.reduceKind === 'TP' ? 'text-trading-green' : order.reduceKind === 'SL' ? 'text-trading-red' : 'text-amber-400'}>
-                            {formatPrice(order.stopPrice, symbol)}
-                          </span>
-                        ) : '-'}
-                      </td>
-                      <td className="px-3 py-2">{formatUSDT((order.price > 0 ? order.price : (priceMap[symbol] || 0)) * order.quantity)} USDT</td>
-                      <td className="px-3 py-2">{order.leverage}x</td>
-                      <td className="px-3 py-2">
-                        <Badge
-                          variant={order.marginMode === 'cross' ? 'default' : 'secondary'}
-                          className="text-[9px] px-1.5 py-0"
-                        >
-                          {order.marginMode === 'cross' ? '全仓' : '逐仓'}
-                        </Badge>
-                      </td>
-                      <td className="px-3 py-2">
-                        <button
-                          onClick={() => onCancelOrder(symbol, order.id)}
-                          className="p-0.5 rounded hover:bg-destructive/20 text-muted-foreground hover:text-destructive transition-colors"
-                        >
-                          <X className="w-3.5 h-3.5" />
-                        </button>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          )
+                          ) : '-'}
+                        </td>
+                        <td className="px-3 py-2 text-gray-900 dark:text-white">{formatUSDT((order.price > 0 ? order.price : (priceMap[symbol] || 0)) * order.quantity)} USDT</td>
+                        <td className="px-3 py-2 text-gray-900 dark:text-white">{order.leverage}x</td>
+                        <td className="px-3 py-2">
+                          <Badge
+                            variant={order.marginMode === 'cross' ? 'default' : 'secondary'}
+                            className="text-[9px] px-1.5 py-0"
+                          >
+                            {order.marginMode === 'cross' ? '全仓' : '逐仓'}
+                          </Badge>
+                        </td>
+                        <td className="px-3 py-2">
+                          <button
+                            onClick={() => onCancelOrder(symbol, order.id)}
+                            className="p-0.5 rounded hover:bg-[#f6465d]/20 text-gray-500 dark:text-[#848e9c] hover:text-[#f6465d] transition-colors"
+                          >
+                            <X className="w-3.5 h-3.5" />
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            )}
+          </div>
         )}
 
         {/* ===== HISTORY ===== */}
