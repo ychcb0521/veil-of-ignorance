@@ -57,7 +57,7 @@ export function RecentTrades({ currentPrice, pricePrecision, onMinimize, onClose
   return (
     <div className="flex flex-col h-full min-h-0 overflow-hidden text-[10px] font-mono select-none bg-white dark:bg-[#1e2329]">
       {/* Tabs + window controls (frozen) */}
-      <div className="flex-none flex items-center justify-between px-3 h-10 border-b border-gray-200 dark:border-[#2b3139]">
+      <div className="group flex-none flex items-center justify-between px-3 h-10 border-b border-gray-200 dark:border-[#2b3139]">
         <div className="flex items-center gap-4 h-full">
           <button
             onClick={() => setTab('trades')}
@@ -84,6 +84,11 @@ export function RecentTrades({ currentPrice, pricePrecision, onMinimize, onClose
               <path d="M8 2h4v4" /><path d="M12 2L7 7" /><path d="M11 8.5V11a1.5 1.5 0 0 1-1.5 1.5H3.5A1.5 1.5 0 0 1 2 11V5a1.5 1.5 0 0 1 1.5-1.5H6" />
             </svg>
           </button>
+          <button type="button" title="更多" className="hover:text-gray-900 dark:hover:text-white cursor-pointer transition-colors">
+            <svg className="w-3.5 h-3.5" viewBox="0 0 16 16" fill="currentColor">
+              <circle cx="8" cy="3" r="1.2" /><circle cx="8" cy="8" r="1.2" /><circle cx="8" cy="13" r="1.2" />
+            </svg>
+          </button>
           {onMinimize && (
             <button type="button" title="最小化" onClick={onMinimize} className="hover:text-gray-900 dark:hover:text-white cursor-pointer transition-colors">
               <svg className="w-3.5 h-3.5" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
@@ -92,7 +97,7 @@ export function RecentTrades({ currentPrice, pricePrecision, onMinimize, onClose
             </button>
           )}
           {onClose && (
-            <button type="button" title="关闭" onClick={onClose} className="hover:text-gray-900 dark:hover:text-white cursor-pointer transition-colors">
+            <button type="button" title="关闭" onClick={onClose} className="opacity-0 transition-opacity group-hover:opacity-100 cursor-pointer hover:text-gray-900 dark:hover:text-white">
               <svg className="w-3 h-3" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
                 <path d="M3 3l6 6M9 3l-6 6" />
               </svg>
