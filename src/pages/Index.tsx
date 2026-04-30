@@ -1705,7 +1705,7 @@ const Index = () => {
 
                                 {isRecentTradesOpen && (
                                   <>
-                                    <ResizableHandle withHandle className="bg-gray-200 dark:bg-[#2b3139]" />
+                                    <ResizableHandle withHandle className="!h-[2px] bg-gray-200 dark:bg-[#2b3139] hover:bg-gray-300 dark:hover:bg-[#474d57] transition-colors cursor-row-resize" />
                                     <ResizablePanel defaultSize={40} minSize={20}>
                                       <div className="h-full w-full flex flex-col min-h-0 overflow-hidden">
                                         <RecentTrades
