@@ -103,9 +103,30 @@ export function OrderBook({ currentPrice, symbol, previousPrice, pricePrecision:
   return (
     <div className="flex flex-col h-full text-[10px] font-mono tabular-nums select-none bg-white dark:bg-[#1e2329]">
       {/* Header */}
-      <div className="flex items-center justify-between px-3 h-8 border-b border-gray-200 dark:border-[#2b3139] shrink-0">
-        <span className="text-[11px] font-semibold text-gray-900 dark:text-white">订单簿</span>
-        <span className="text-[10px] text-gray-500 dark:text-[#848e9c]">{symbol.replace('USDT', '/USDT')}</span>
+      <div className="flex items-center justify-between px-3 h-10 border-b border-gray-200 dark:border-[#2b3139] shrink-0">
+        <span className="text-sm font-medium text-gray-900 dark:text-[#EAECEF]">订单簿</span>
+        <div className="flex items-center space-x-3 text-[#848e9c]">
+          <button
+            type="button"
+            className="flex items-center gap-0.5 text-[11px] hover:text-gray-900 dark:hover:text-white cursor-pointer transition-colors"
+            title="深度聚合"
+          >
+            {step.toString()}
+            <svg className="w-2.5 h-2.5" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5">
+              <path d="M3 4.5l3 3 3-3" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </button>
+          <button type="button" title="更多" className="hover:text-gray-900 dark:hover:text-white cursor-pointer transition-colors">
+            <svg className="w-3.5 h-3.5" viewBox="0 0 16 16" fill="currentColor">
+              <circle cx="8" cy="3" r="1.2" /><circle cx="8" cy="8" r="1.2" /><circle cx="8" cy="13" r="1.2" />
+            </svg>
+          </button>
+          <button type="button" title="关闭" className="hover:text-gray-900 dark:hover:text-white cursor-pointer transition-colors">
+            <svg className="w-3 h-3" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+              <path d="M3 3l6 6M9 3l-6 6" />
+            </svg>
+          </button>
+        </div>
       </div>
 
       {/* Column headers */}
