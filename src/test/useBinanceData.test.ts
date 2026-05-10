@@ -182,6 +182,7 @@ describe("useBinanceData", () => {
   it("prevents concurrent loadOlder calls", async () => {
     const now = 1_700_000_000_000;
     const initialData = [[now - 60_000, "105", "115", "95", "110", "2000"]];
+    const olderData = [[now - 120_000, "100", "110", "90", "105", "1000"]];
 
     mockFetch
       .mockResolvedValueOnce({
@@ -192,10 +193,11 @@ describe("useBinanceData", () => {
         ok: true,
         json: () => Promise.resolve([]),
       })
-      .mockResolvedValueOnce({
-        ok: true,
-        json: () => Promise.resolve([]),
-      });
+      .mockImplementationOnce(() =>
+        new Promise((resolve) =>
+          setTimeout(() => resolve({ ok: true, json: () => Promise.resolve(olderData) }), 50),
+        ),
+      );
 
     const { result } = renderHook(() => useBinanceData());
 
@@ -203,20 +205,25 @@ describe("useBinanceData", () => {
       await result.current.initLoad("BTCUSDT", "1m", now);
     });
 
-    // Start first loadOlder (it will be pending)
+    await waitFor(() => {
+      expect(result.current.allData).toHaveLength(1);
+    });
+
+    // Start first loadOlder (it will be pending for 50ms)
     const promise1 = act(async () => {
       return await result.current.loadOlder();
     });
 
     // Second call should return 0 immediately because loadingOlder is true
-    const promise2 = act(async () => {
+    const result2 = await act(async () => {
       return await result.current.loadOlder();
     });
 
-    const [result1, result2] = await Promise.all([promise1, promise2]);
+    expect(result2).toBe(0);
 
-    // One should load, the other should be blocked
-    expect(result1 + result2).toBeLessThanOrEqual(0);
+    const result1 = await promise1;
+    expect(result1).toBe(1);
+    expect(result.current.allData).toHaveLength(2);
   });
 
   it("returns visible data up to current sim time", async () => {
