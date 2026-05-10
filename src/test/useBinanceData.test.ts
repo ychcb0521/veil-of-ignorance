@@ -525,22 +525,23 @@ describe("useBinanceData", () => {
 
   it("ignores stale initLoad responses (requestId mismatch)", async () => {
     const now = 1_700_000_000_000;
-    const data = [[now - 60_000, "100", "110", "90", "100", "1000"]];
+    const btcData = [[now - 60_000, "100", "110", "90", "100", "1000"]];
+    const ethData = [[now - 60_000, "200", "220", "180", "210", "5000"]];
 
-    let resolveFirst: (value: { ok: boolean; json: () => Promise<unknown[]> }) => void;
-    const firstPromise = new Promise<{ ok: boolean; json: () => Promise<unknown[]> }>((resolve) => {
-      resolveFirst = resolve;
+    let firstResolve: (value: { ok: boolean; json: () => Promise<unknown[]> }) => void;
+    const firstHistoryPromise = new Promise<{ ok: boolean; json: () => Promise<unknown[]> }>((resolve) => {
+      firstResolve = resolve;
     });
 
     mockFetch
-      .mockReturnValueOnce(firstPromise)
+      .mockReturnValueOnce(firstHistoryPromise)
       .mockResolvedValueOnce({
         ok: true,
         json: () => Promise.resolve([]),
       })
       .mockResolvedValueOnce({
         ok: true,
-        json: () => Promise.resolve(data),
+        json: () => Promise.resolve(ethData),
       })
       .mockResolvedValueOnce({
         ok: true,
@@ -549,27 +550,33 @@ describe("useBinanceData", () => {
 
     const { result } = renderHook(() => useBinanceData());
 
-    // Start first initLoad but don't resolve it yet
+    // Start first initLoad but don't resolve history yet
     const firstInit = act(async () => {
       await result.current.initLoad("BTCUSDT", "1m", now);
     });
 
-    // Start second initLoad which should cancel the first
+    // Start second initLoad which should complete with ETH data
     await act(async () => {
       await result.current.initLoad("ETHUSDT", "1m", now);
     });
 
+    await waitFor(() => {
+      expect(result.current.allData).toHaveLength(1);
+    });
+
+    // Verify ETH data is loaded
+    expect(result.current.allData[0].close).toBe(210);
+
     // Now resolve the first (stale) request
-    resolveFirst!({
+    firstResolve!({
       ok: true,
-      json: () => Promise.resolve([[now - 120_000, "90", "100", "80", "95", "500"]]),
+      json: () => Promise.resolve(btcData),
     });
 
     await firstInit;
 
-    // The stale response should not overwrite the newer data
-    await waitFor(() => {
-      expect(result.current.allData.length).toBeGreaterThan(0);
-    });
+    // The stale response should not overwrite the newer ETH data
+    expect(result.current.allData).toHaveLength(1);
+    expect(result.current.allData[0].close).toBe(210);
   });
 });
