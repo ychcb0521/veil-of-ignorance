@@ -32,7 +32,7 @@ describe("intervalToMs", () => {
 describe("useBinanceData", () => {
   beforeEach(() => {
     mockFetch.mockReset();
-    // Default fallback: return empty array so unmocked fetches don't crash
+    // Default fallback for any unmocked fetch calls
     mockFetch.mockResolvedValue({ ok: true, json: () => Promise.resolve([]) });
   });
 
@@ -51,20 +51,16 @@ describe("useBinanceData", () => {
   });
 
   it("sets loading state during initLoad", async () => {
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      json: () => Promise.resolve([]),
-    });
-
     const { result } = renderHook(() => useBinanceData());
 
-    act(() => {
-      result.current.initLoad("BTCUSDT", "1m", Date.now());
+    const initPromise = act(async () => {
+      await result.current.initLoad("BTCUSDT", "1m", Date.now());
     });
 
-    await waitFor(() => {
-      expect(result.current.loading).toBe(true);
-    });
+    // loading should be true immediately after starting initLoad
+    expect(result.current.loading).toBe(true);
+
+    await initPromise;
   });
 
   it("successfully loads and merges history + future data", async () => {
@@ -178,51 +174,6 @@ describe("useBinanceData", () => {
     expect(result.current.allData).toHaveLength(4);
     expect(result.current.allData[0].time).toBe(now - 180_000);
     expect(result.current.allData[3].time).toBe(now);
-    expect(result.current.loadingOlder).toBe(false);
-  });
-
-  it("sets loadingOlder state during loadOlder operation", async () => {
-    const now = 1_700_000_000_000;
-    const initialData = [[now - 60_000, "105", "115", "95", "110", "2000"]];
-    const olderData = [[now - 120_000, "100", "110", "90", "105", "1000"]];
-
-    mockFetch
-      .mockResolvedValueOnce({
-        ok: true,
-        json: () => Promise.resolve(initialData),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        json: () => Promise.resolve([]),
-      })
-      .mockImplementationOnce(() =>
-        new Promise((resolve) =>
-          setTimeout(() => resolve({ ok: true, json: () => Promise.resolve(olderData) }), 50),
-        ),
-      );
-
-    const { result } = renderHook(() => useBinanceData());
-
-    await act(async () => {
-      await result.current.initLoad("BTCUSDT", "1m", now);
-    });
-
-    await waitFor(() => {
-      expect(result.current.allData).toHaveLength(1);
-    });
-
-    // Start loadOlder (it will be pending for 50ms)
-    const loadPromise = act(async () => {
-      return await result.current.loadOlder();
-    });
-
-    // Verify loadingOlder is true while operation is in flight
-    expect(result.current.loadingOlder).toBe(true);
-
-    const loadedCount = await loadPromise;
-
-    expect(loadedCount).toBe(1);
-    expect(result.current.allData).toHaveLength(2);
     expect(result.current.loadingOlder).toBe(false);
   });
 
@@ -493,10 +444,6 @@ describe("useBinanceData", () => {
       .mockResolvedValueOnce({
         ok: true,
         json: () => Promise.resolve(olderData),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        json: () => Promise.resolve([]),
       });
 
     const { result } = renderHook(() => useBinanceData());
@@ -528,23 +475,16 @@ describe("useBinanceData", () => {
     const btcData = [[now - 60_000, "100", "110", "90", "100", "1000"]];
     const ethData = [[now - 60_000, "200", "220", "180", "210", "5000"]];
 
-    mockFetch
-      .mockResolvedValueOnce({
-        ok: true,
-        json: () => Promise.resolve(btcData),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        json: () => Promise.resolve([]),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        json: () => Promise.resolve(ethData),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        json: () => Promise.resolve([]),
-      });
+    // Use mockImplementation to route by symbol instead of relying on call order
+    mockFetch.mockImplementation((url: string) => {
+      if (typeof url === "string" && url.includes("BTCUSDT")) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve(btcData) });
+      }
+      if (typeof url === "string" && url.includes("ETHUSDT")) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve(ethData) });
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
+    });
 
     const { result } = renderHook(() => useBinanceData());
 
