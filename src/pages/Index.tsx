@@ -38,12 +38,7 @@ import {
   DialogDescription,
   DialogFooter,
 } from "@/components/ui/dialog";
-import {
-  ResizablePanelGroup,
-  ResizablePanel,
-  ResizableHandle,
-} from "@/components/ui/resizable";
-
+import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@/components/ui/resizable";
 
 // Price protection threshold: reject conditional triggers if |last - mark| / mark > 2%
 const PRICE_PROTECTION_THRESHOLD = 0.02;
@@ -183,7 +178,7 @@ const Index = () => {
   const [priceProtection, setPriceProtection] = usePersistedState("price_protection", true);
   const [isOrderBookOpen, setIsOrderBookOpen] = useState(true);
   const [isRecentTradesOpen, setIsRecentTradesOpen] = useState(true);
-  
+
   const coolingOff = useCoolingOff();
   const hasRestoredRef = useRef(false);
   const persistedSim = useMemo(() => loadPersistedSimState(), []);
@@ -349,14 +344,12 @@ const Index = () => {
         });
 
         const fee = calcFee(entryPrice, closeQty, false);
-        const pnl = pos.side === "LONG"
-          ? (entryPrice - pos.entryPrice) * closeQty
-          : (pos.entryPrice - entryPrice) * closeQty;
+        const pnl =
+          pos.side === "LONG" ? (entryPrice - pos.entryPrice) * closeQty : (pos.entryPrice - entryPrice) * closeQty;
         const closedMargin = pos.margin * pct;
         const closedIso = pos.isolatedMargin != null ? pos.isolatedMargin * pct : undefined;
-        const returnedMargin = pos.marginMode === "isolated" && closedIso != null
-          ? closedIso + pnl - fee
-          : closedMargin + pnl - fee;
+        const returnedMargin =
+          pos.marginMode === "isolated" && closedIso != null ? closedIso + pnl - fee : closedMargin + pnl - fee;
 
         setBalance((prev) => prev + Math.max(0, returnedMargin));
 
@@ -392,10 +385,16 @@ const Index = () => {
           for (const o of list) {
             if (o.id === order.id) continue; // current already moved out by caller
             if (o.reduceOnly && o.linkedPositionId === linkedId) {
-              if (willFullyClose) { changed = true; continue; }
+              if (willFullyClose) {
+                changed = true;
+                continue;
+              }
               // partial: rescale remaining linked orders
               const newQty = o.quantity * (1 - pct);
-              if (newQty < 1e-8) { changed = true; continue; }
+              if (newQty < 1e-8) {
+                changed = true;
+                continue;
+              }
               changed = true;
               next.push({ ...o, quantity: newQty });
               continue;
@@ -1242,6 +1241,9 @@ const Index = () => {
       setIntervalVal(newInterval);
       reset();
       prevVisibleLenRef.current = 0;
+      cursorRef.current = 0;
+      gameLoopInitRef.current = false;
+      latestChartPriceRef.current = 0;
 
       if (activeCoinState.status !== "stopped") {
         await initLoad(activeSymbol, newInterval, effectiveSimTime);
@@ -1566,7 +1568,9 @@ const Index = () => {
           >
             <Crosshair className="w-3 h-3" /> 交易侦查
           </button>
-          <span className="text-[10px] text-gray-500 dark:text-[#848e9c] font-mono truncate max-w-[120px]">{user?.email}</span>
+          <span className="text-[10px] text-gray-500 dark:text-[#848e9c] font-mono truncate max-w-[120px]">
+            {user?.email}
+          </span>
           <button
             onClick={signOut}
             className="text-[10px] text-gray-600 dark:text-[#B7BDC6] hover:text-destructive font-medium transition-colors"
@@ -1643,7 +1647,13 @@ const Index = () => {
                               title="显示订单簿"
                               className="absolute top-2 right-2 z-20 flex items-center gap-1 px-2 py-1 rounded text-[11px] bg-white/90 dark:bg-[#1e2329]/90 border border-gray-200 dark:border-[#2b3139] text-gray-600 dark:text-[#848e9c] hover:text-gray-900 dark:hover:text-white shadow-sm cursor-pointer transition-colors"
                             >
-                              <svg className="w-3 h-3" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5">
+                              <svg
+                                className="w-3 h-3"
+                                viewBox="0 0 12 12"
+                                fill="none"
+                                stroke="currentColor"
+                                strokeWidth="1.5"
+                              >
                                 <path d="M2 3h8M2 6h8M2 9h8" strokeLinecap="round" />
                               </svg>
                               订单簿
@@ -1653,8 +1663,12 @@ const Index = () => {
                             <div className="h-full flex items-center justify-center bg-gray-50 dark:bg-[#0b0e11]">
                               <div className="text-center space-y-3">
                                 <div className="text-5xl">⏰</div>
-                                <p className="text-sm text-gray-600 dark:text-[#B7BDC6]">输入历史时间并点击「启动」开始复盘模拟</p>
-                                <p className="text-xs text-gray-500 dark:text-[#848e9c]">K线按真实时间 1:1 流速推进 · 绝不暴露未来数据</p>
+                                <p className="text-sm text-gray-600 dark:text-[#B7BDC6]">
+                                  输入历史时间并点击「启动」开始复盘模拟
+                                </p>
+                                <p className="text-xs text-gray-500 dark:text-[#848e9c]">
+                                  K线按真实时间 1:1 流速推进 · 绝不暴露未来数据
+                                </p>
                               </div>
                             </div>
                           ) : (
@@ -1705,7 +1719,10 @@ const Index = () => {
 
                                 {isRecentTradesOpen && (
                                   <>
-                                    <ResizableHandle withHandle className="!h-[2px] bg-gray-200 dark:bg-[#2b3139] hover:bg-gray-300 dark:hover:bg-[#474d57] transition-colors cursor-row-resize" />
+                                    <ResizableHandle
+                                      withHandle
+                                      className="!h-[2px] bg-gray-200 dark:bg-[#2b3139] hover:bg-gray-300 dark:hover:bg-[#474d57] transition-colors cursor-row-resize"
+                                    />
                                     <ResizablePanel defaultSize={40} minSize={20}>
                                       <div className="h-full w-full flex flex-col min-h-0 overflow-hidden">
                                         <RecentTrades
@@ -1727,7 +1744,14 @@ const Index = () => {
                                   title="显示最新成交"
                                   className="flex-none flex items-center justify-center gap-1 h-7 text-[11px] border-t border-gray-200 dark:border-[#2b3139] text-gray-500 dark:text-[#848e9c] hover:text-gray-900 dark:hover:text-white transition-colors"
                                 >
-                                  <svg className="w-3 h-3" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+                                  <svg
+                                    className="w-3 h-3"
+                                    viewBox="0 0 12 12"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    strokeWidth="1.5"
+                                    strokeLinecap="round"
+                                  >
                                     <path d="M2 4l4 4 4-4" />
                                   </svg>
                                   最新成交
@@ -1798,7 +1822,6 @@ const Index = () => {
           </ResizablePanel>
         </ResizablePanelGroup>
       </div>
-
 
       <Dialog open={assetsOpen} onOpenChange={setAssetsOpen}>
         <DialogContent className="max-w-2xl p-0 bg-card">
