@@ -71,6 +71,7 @@ export function useBinanceData() {
   const ctxRef = useRef<{ symbol: string; interval: string }>({ symbol: "", interval: "" });
   const oldestRef = useRef<number>(Infinity);
   const noMoreRef = useRef(false);
+  const initLoadRequestIdRef = useRef(0);
 
   /** Direct ref access to allData — avoids stale closures in RAF loops */
   const allDataRef = useRef<KlineData[]>([]);
@@ -86,6 +87,7 @@ export function useBinanceData() {
 
   const initLoad = useCallback(
     async (symbol: string, interval: string, anchorTime: number) => {
+      const requestId = ++initLoadRequestIdRef.current;
       setLoading(true);
       setError(null);
       noMoreRef.current = false;
@@ -106,14 +108,22 @@ export function useBinanceData() {
           }
         }
 
+        if (requestId !== initLoadRequestIdRef.current) {
+          return merged;
+        }
+
         oldestRef.current = merged[0].time;
         setAllDataAndRef(merged);
         return merged;
       } catch (e: any) {
-        setError(e.message);
+        if (requestId === initLoadRequestIdRef.current) {
+          setError(e.message);
+        }
         return [];
       } finally {
-        setLoading(false);
+        if (requestId === initLoadRequestIdRef.current) {
+          setLoading(false);
+        }
       }
     },
     [setAllDataAndRef],
@@ -201,10 +211,12 @@ export function useBinanceData() {
   );
 
   const reset = useCallback(() => {
+    initLoadRequestIdRef.current += 1;
     setAllDataAndRef([]);
     oldestRef.current = Infinity;
     noMoreRef.current = false;
     setError(null);
+    setLoading(false);
   }, [setAllDataAndRef]);
 
   return {
