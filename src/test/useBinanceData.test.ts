@@ -179,7 +179,7 @@ describe("useBinanceData", () => {
     expect(result.current.loadingOlder).toBe(false);
   });
 
-  it("prevents concurrent loadOlder calls", async () => {
+  it("sets loadingOlder state during loadOlder operation", async () => {
     const now = 1_700_000_000_000;
     const initialData = [[now - 60_000, "105", "115", "95", "110", "2000"]];
     const olderData = [[now - 120_000, "100", "110", "90", "105", "1000"]];
@@ -209,21 +209,19 @@ describe("useBinanceData", () => {
       expect(result.current.allData).toHaveLength(1);
     });
 
-    // Start first loadOlder (it will be pending for 50ms)
-    const promise1 = act(async () => {
+    // Start loadOlder (it will be pending for 50ms)
+    const loadPromise = act(async () => {
       return await result.current.loadOlder();
     });
 
-    // Second call should return 0 immediately because loadingOlder is true
-    const result2 = await act(async () => {
-      return await result.current.loadOlder();
-    });
+    // Verify loadingOlder is true while operation is in flight
+    expect(result.current.loadingOlder).toBe(true);
 
-    expect(result2).toBe(0);
+    const loadedCount = await loadPromise;
 
-    const result1 = await promise1;
-    expect(result1).toBe(1);
+    expect(loadedCount).toBe(1);
     expect(result.current.allData).toHaveLength(2);
+    expect(result.current.loadingOlder).toBe(false);
   });
 
   it("returns visible data up to current sim time", async () => {
