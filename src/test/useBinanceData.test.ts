@@ -31,7 +31,7 @@ describe("intervalToMs", () => {
 
 describe("useBinanceData", () => {
   beforeEach(() => {
-    mockFetch.mockClear();
+    mockFetch.mockReset();
   });
 
   afterEach(() => {
