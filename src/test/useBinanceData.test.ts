@@ -528,13 +528,15 @@ describe("useBinanceData", () => {
     const btcData = [[now - 60_000, "100", "110", "90", "100", "1000"]];
     const ethData = [[now - 60_000, "200", "220", "180", "210", "5000"]];
 
-    let firstResolve: (value: { ok: boolean; json: () => Promise<unknown[]> }) => void;
-    const firstHistoryPromise = new Promise<{ ok: boolean; json: () => Promise<unknown[]> }>((resolve) => {
-      firstResolve = resolve;
-    });
-
+    // Delay the first initLoad's history fetch so it resolves after the second initLoad
     mockFetch
-      .mockReturnValueOnce(firstHistoryPromise)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () =>
+          new Promise((resolve) =>
+            setTimeout(() => resolve(btcData), 100),
+          ),
+      })
       .mockResolvedValueOnce({
         ok: true,
         json: () => Promise.resolve([]),
@@ -550,12 +552,12 @@ describe("useBinanceData", () => {
 
     const { result } = renderHook(() => useBinanceData());
 
-    // Start first initLoad but don't resolve history yet
+    // Start first initLoad (BTC) — it will take 100ms to resolve
     const firstInit = act(async () => {
       await result.current.initLoad("BTCUSDT", "1m", now);
     });
 
-    // Start second initLoad which should complete with ETH data
+    // Start and await second initLoad (ETH) — it should complete first
     await act(async () => {
       await result.current.initLoad("ETHUSDT", "1m", now);
     });
@@ -564,18 +566,13 @@ describe("useBinanceData", () => {
       expect(result.current.allData).toHaveLength(1);
     });
 
-    // Verify ETH data is loaded
+    // Verify ETH data is present
     expect(result.current.allData[0].close).toBe(210);
 
-    // Now resolve the first (stale) request
-    firstResolve!({
-      ok: true,
-      json: () => Promise.resolve(btcData),
-    });
-
+    // Now the first initLoad finally resolves
     await firstInit;
 
-    // The stale response should not overwrite the newer ETH data
+    // Stale BTC data should NOT overwrite ETH data
     expect(result.current.allData).toHaveLength(1);
     expect(result.current.allData[0].close).toBe(210);
   });
