@@ -32,6 +32,8 @@ describe("intervalToMs", () => {
 describe("useBinanceData", () => {
   beforeEach(() => {
     mockFetch.mockReset();
+    // Default fallback: return empty array so unmocked fetches don't crash
+    mockFetch.mockResolvedValue({ ok: true, json: () => Promise.resolve([]) });
   });
 
   afterEach(() => {
