@@ -60,7 +60,9 @@ describe("useBinanceData", () => {
       result.current.initLoad("BTCUSDT", "1m", Date.now());
     });
 
-    expect(result.current.loading).toBe(true);
+    await waitFor(() => {
+      expect(result.current.loading).toBe(true);
+    });
   });
 
   it("successfully loads and merges history + future data", async () => {
