@@ -323,6 +323,15 @@ function CandlestickChartComponent({
   const [drawingsVisible, setDrawingsVisible] = useState(true);
   const [activeDrawingTool, setActiveDrawingTool] = useState<string | null>(null);
   const { theme } = useTheme();
+
+  const [chartInterval, setChartInterval] = useState(interval || '1天');
+
+  useEffect(() => {
+    if (interval) {
+      const match = INTERVAL_OPTIONS.find((opt) => opt.value === interval);
+      if (match) setChartInterval(match.label);
+    }
+  }, [interval]);
   const crosshairPriceRef = useRef<number | null>(null);
 
   const activeIndicatorPanes = useRef<Map<string, string | null>>(new Map());
