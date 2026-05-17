@@ -123,6 +123,10 @@ interface Props {
   pickMode?: boolean;
   /** Called when user clicks chart in pick mode */
   onPricePicked?: (price: number) => void;
+  /** Current chart interval (e.g. '15m') */
+  interval?: string;
+  /** Called when user selects a new interval from the toolbar */
+  onIntervalChange?: (interval: string) => void;
 }
 
 // Convert our KlineData to klinecharts KLineData
