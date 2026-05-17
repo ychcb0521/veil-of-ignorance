@@ -305,6 +305,8 @@ function CandlestickChartComponent({
   onCrosshairPriceChange,
   pickMode,
   onPricePicked,
+  interval,
+  onIntervalChange,
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<Chart | null>(null);
