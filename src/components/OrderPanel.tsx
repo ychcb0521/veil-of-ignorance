@@ -543,7 +543,7 @@ export function OrderPanel({
         )}
 
         {/* ===== ACTION BUTTONS + PRE-TRADE INFO ===== */}
-        <div className="grid grid-cols-2 gap-2 pt-1 w-full min-w-0">
+        <div className="grid grid-cols-2 gap-2 pt-1 mb-4 w-full min-w-0">
           <button
             onClick={() => handleOrder('LONG')}
             disabled={orderDisabled}
