@@ -27,6 +27,7 @@ interface Props {
   onCrosshairPriceChange?: (price: number | null) => void;
   pickMode?: boolean;
   onPricePicked?: (price: number) => void;
+  onMainIntervalChange?: (interval: string) => void;
 }
 
 interface SubChart {
