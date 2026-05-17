@@ -580,16 +580,16 @@ export function OrderPanel({
         </button>
 
         {/* ===== ACCOUNT RISK PANEL ===== */}
-        <div className="border-t border-border pt-3 mt-2 space-y-2">
+        <div className="relative border-t border-border pt-4 mt-12 space-y-2.5">
           <div className="flex items-center justify-between">
-            <span className="text-[12px] font-medium text-foreground">账户</span>
+            <span className="text-[13px] font-semibold text-foreground">账户</span>
             <button className="text-muted-foreground/80 hover:text-foreground/90" title="切换">
               <ArrowLeftRight className="w-3.5 h-3.5" />
             </button>
           </div>
 
-          <div className="flex items-center justify-between text-[11px]">
-            <span className="text-muted-foreground/80">保证金比率</span>
+          <div className="flex items-center justify-between gap-2 text-[12px] w-full min-w-0">
+            <span className="text-muted-foreground/80 shrink-0">保证金比率</span>
             <div className="flex items-center gap-1.5">
               <Gauge className={`w-3.5 h-3.5 ${ratioColor}`} />
               <span className={`font-mono tabular-nums ${ratioColor}`}>{marginRatio.toFixed(2)}%</span>
@@ -600,16 +600,16 @@ export function OrderPanel({
             <div className={`h-full ${ratioBg} transition-all`} style={{ width: `${Math.min(100, marginRatio)}%` }} />
           </div>
 
-          <div className="flex items-center justify-between gap-2 text-[11px] w-full min-w-0">
+          <div className="flex items-center justify-between gap-2 text-[12px] w-full min-w-0">
             <span className="text-muted-foreground/80 shrink-0">维持保证金</span>
             <span className="font-mono tabular-nums text-foreground truncate text-right min-w-0">{formatUSDT(totalMaintenance, 4)} USDT</span>
           </div>
-          <div className="flex items-center justify-between gap-2 text-[11px] w-full min-w-0">
+          <div className="flex items-center justify-between gap-2 text-[12px] w-full min-w-0">
             <span className="text-muted-foreground/80 shrink-0">保证金余额</span>
             <span className="font-mono tabular-nums text-foreground truncate text-right min-w-0">{formatUSDT(equity, 4)} USDT</span>
           </div>
 
-          <button className="w-full h-9 mt-1 rounded-md bg-secondary hover:bg-accent text-[12px] text-foreground font-medium transition-colors">
+          <button className="w-full h-9 mt-2 rounded-md bg-secondary hover:bg-accent text-[12px] text-foreground font-medium transition-colors">
             单币保证金模式
           </button>
         </div>
