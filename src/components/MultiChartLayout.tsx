@@ -27,6 +27,7 @@ interface Props {
   onCrosshairPriceChange?: (price: number | null) => void;
   pickMode?: boolean;
   onPricePicked?: (price: number) => void;
+  onMainIntervalChange?: (interval: string) => void;
 }
 
 interface SubChart {
@@ -53,6 +54,7 @@ export function MultiChartLayout({
   onCrosshairPriceChange,
   pickMode,
   onPricePicked,
+  onMainIntervalChange,
 }: Props) {
   const [layout, setLayout] = useState<LayoutMode>("1x1");
   const [subCharts, setSubCharts] = useState<SubChart[]>([
@@ -213,6 +215,8 @@ export function MultiChartLayout({
             onCrosshairPriceChange={onCrosshairPriceChange}
             pickMode={pickMode}
             onPricePicked={onPricePicked}
+            interval={mainInterval}
+            onIntervalChange={onMainIntervalChange}
           />
         </div>
       ) : layout === "1x2" ? (
@@ -233,6 +237,8 @@ export function MultiChartLayout({
               onCrosshairPriceChange={onCrosshairPriceChange}
               pickMode={pickMode}
               onPricePicked={onPricePicked}
+              interval={mainInterval}
+              onIntervalChange={onMainIntervalChange}
             />
           </div>
           <div className="bg-background min-h-0 overflow-hidden relative">
@@ -273,6 +279,8 @@ export function MultiChartLayout({
               quantityPrecision={quantityPrecision}
               pendingOrders={pendingOrders}
               onCancelOrder={onCancelOrder}
+              interval={mainInterval}
+              onIntervalChange={onMainIntervalChange}
             />
           </div>
           {[0, 1, 2].map((i) => (
