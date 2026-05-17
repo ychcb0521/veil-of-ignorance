@@ -901,80 +901,104 @@ function CandlestickChartComponent({
           onToggleDrawingsVisible={handleToggleDrawingsVisible}
         />
 
-        {/* Right side: indicator buttons */}
-        <div className="absolute right-12 top-0 z-10 flex items-center gap-2 py-1.5 px-2 max-w-[60%] overflow-visible">
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              e.preventDefault();
-              setShowIndicatorPanel((prev) => !prev);
-            }}
-            className={`flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium transition-all duration-150 ease-out origin-top active:scale-[0.98] ${
-              showIndicatorPanel
-                ? "bg-primary text-primary-foreground shadow-sm"
-                : "text-muted-foreground hover:text-foreground hover:bg-accent/50"
-            }`}
-          >
-            <BarChart3 className="w-3.5 h-3.5" />
-            <span>指标</span>
-          </button>
-
-          {/* Show order lines toggle */}
-          <button
-            type="button"
-            onClick={() => setShowOrderLines((prev) => !prev)}
-            className={`flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium transition-colors duration-150 ease-out active:scale-[0.98] ${
-              showOrderLines
-                ? "bg-primary/20 text-primary"
-                : "text-muted-foreground hover:text-foreground hover:bg-accent/50"
-            }`}
-            title={showOrderLines ? "隐藏挂单线" : "显示挂单线"}
-          >
-            <ListOrdered className="w-3.5 h-3.5" />
-            <span>挂单</span>
-          </button>
-
-          {/* Show/hide trade markers toggle */}
-          <button
-            type="button"
-            onClick={() => setShowTradeMarkers((prev) => !prev)}
-            className={`flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium transition-colors duration-150 ease-out active:scale-[0.98] ${
-              showTradeMarkers
-                ? "bg-primary/20 text-primary"
-                : "text-muted-foreground hover:text-foreground hover:bg-accent/50"
-            }`}
-            title={showTradeMarkers ? "隐藏交易标记" : "显示交易标记"}
-          >
-            {showTradeMarkers ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
-            <span>标记</span>
-          </button>
-
-          <div className="flex items-center gap-1 max-w-full overflow-x-auto">
-            {indicators.map((ind) => (
-              <span
-                key={ind.type}
-                className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-mono font-medium whitespace-nowrap shrink-0"
-                style={{ background: `${ind.color}20`, color: ind.color }}
+        {/* Top toolbar: interval selector + indicator buttons */}
+        <div className="absolute top-0 left-[34px] right-12 z-10 flex justify-between items-center px-2 py-1">
+          {/* Left: interval selector */}
+          <div className="flex items-center space-x-3 overflow-x-auto no-scrollbar">
+            {INTERVAL_OPTIONS.map((opt) => (
+              <button
+                key={opt.label}
+                type="button"
+                onClick={() => {
+                  setChartInterval(opt.label);
+                  if (onIntervalChange) onIntervalChange(opt.value);
+                }}
+                className={`text-sm cursor-pointer transition-colors shrink-0 ${
+                  chartInterval === opt.label
+                    ? 'font-medium text-gray-900 dark:text-[#fcd535]'
+                    : 'text-gray-500 hover:text-gray-300 dark:text-[#848e9c] dark:hover:text-white'
+                }`}
               >
-                {ind.type} {ind.period}
-                <button
-                  type="button"
-                  onClick={() => setIndicators(indicators.filter((i) => i.type !== ind.type))}
-                  className="hover:opacity-70"
-                >
-                  <X className="w-2.5 h-2.5" />
-                </button>
-              </span>
+                {opt.label}
+              </button>
             ))}
           </div>
 
-          <IndicatorMenu
-            open={showIndicatorPanel}
-            onClose={() => setShowIndicatorPanel(false)}
-            indicators={indicators}
-            onIndicatorsChange={setIndicators}
-          />
+          {/* Right: indicator buttons */}
+          <div className="flex items-center space-x-2 flex-shrink-0">
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                e.preventDefault();
+                setShowIndicatorPanel((prev) => !prev);
+              }}
+              className={`flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium transition-all duration-150 ease-out origin-top active:scale-[0.98] ${
+                showIndicatorPanel
+                  ? "bg-primary text-primary-foreground shadow-sm"
+                  : "text-muted-foreground hover:text-foreground hover:bg-accent/50"
+              }`}
+            >
+              <BarChart3 className="w-3.5 h-3.5" />
+              <span>指标</span>
+            </button>
+
+            {/* Show order lines toggle */}
+            <button
+              type="button"
+              onClick={() => setShowOrderLines((prev) => !prev)}
+              className={`flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium transition-colors duration-150 ease-out active:scale-[0.98] ${
+                showOrderLines
+                  ? "bg-primary/20 text-primary"
+                  : "text-muted-foreground hover:text-foreground hover:bg-accent/50"
+              }`}
+              title={showOrderLines ? "隐藏挂单线" : "显示挂单线"}
+            >
+              <ListOrdered className="w-3.5 h-3.5" />
+              <span>挂单</span>
+            </button>
+
+            {/* Show/hide trade markers toggle */}
+            <button
+              type="button"
+              onClick={() => setShowTradeMarkers((prev) => !prev)}
+              className={`flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium transition-colors duration-150 ease-out active:scale-[0.98] ${
+                showTradeMarkers
+                  ? "bg-primary/20 text-primary"
+                  : "text-muted-foreground hover:text-foreground hover:bg-accent/50"
+              }`}
+              title={showTradeMarkers ? "隐藏交易标记" : "显示交易标记"}
+            >
+              {showTradeMarkers ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
+              <span>标记</span>
+            </button>
+
+            <div className="flex items-center gap-1 max-w-full overflow-x-auto">
+              {indicators.map((ind) => (
+                <span
+                  key={ind.type}
+                  className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-mono font-medium whitespace-nowrap shrink-0"
+                  style={{ background: `${ind.color}20`, color: ind.color }}
+                >
+                  {ind.type} {ind.period}
+                  <button
+                    type="button"
+                    onClick={() => setIndicators(indicators.filter((i) => i.type !== ind.type))}
+                    className="hover:opacity-70"
+                  >
+                    <X className="w-2.5 h-2.5" />
+                  </button>
+                </span>
+              ))}
+            </div>
+
+            <IndicatorMenu
+              open={showIndicatorPanel}
+              onClose={() => setShowIndicatorPanel(false)}
+              indicators={indicators}
+              onIndicatorsChange={setIndicators}
+            />
+          </div>
         </div>
       </div>
     </div>
