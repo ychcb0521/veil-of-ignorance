@@ -237,6 +237,8 @@ export function MultiChartLayout({
               onCrosshairPriceChange={onCrosshairPriceChange}
               pickMode={pickMode}
               onPricePicked={onPricePicked}
+              interval={mainInterval}
+              onIntervalChange={onMainIntervalChange}
             />
           </div>
           <div className="bg-background min-h-0 overflow-hidden relative">
