@@ -215,6 +215,8 @@ export function MultiChartLayout({
             onCrosshairPriceChange={onCrosshairPriceChange}
             pickMode={pickMode}
             onPricePicked={onPricePicked}
+            interval={mainInterval}
+            onIntervalChange={onMainIntervalChange}
           />
         </div>
       ) : layout === "1x2" ? (
