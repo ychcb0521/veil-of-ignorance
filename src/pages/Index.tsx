@@ -1690,6 +1690,7 @@ const Index = () => {
                               onCrosshairPriceChange={handleCrosshairPriceChange}
                               pickMode={pickMode}
                               onPricePicked={handlePricePicked}
+                              onMainIntervalChange={handleIntervalChange}
                             />
                           )}
                         </div>
