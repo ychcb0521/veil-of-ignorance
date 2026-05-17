@@ -279,6 +279,8 @@ export function MultiChartLayout({
               quantityPrecision={quantityPrecision}
               pendingOrders={pendingOrders}
               onCancelOrder={onCancelOrder}
+              interval={mainInterval}
+              onIntervalChange={onMainIntervalChange}
             />
           </div>
           {[0, 1, 2].map((i) => (
