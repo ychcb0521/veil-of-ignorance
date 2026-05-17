@@ -153,8 +153,25 @@ export function MultiChartLayout({
     loadSubChart(index, newInterval);
   };
 
+  const [isFullscreen, setIsFullscreen] = useState(false);
+
+  useEffect(() => {
+    if (!isFullscreen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setIsFullscreen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [isFullscreen]);
+
   return (
-    <div className="h-full flex flex-col">
+    <div
+      className={
+        isFullscreen
+          ? "fixed inset-0 z-[9999] bg-white dark:bg-[#0b0e11] flex flex-col w-full h-full"
+          : "h-full flex flex-col relative"
+      }
+    >
       <div className="absolute right-2 top-1 z-30 flex items-center gap-0.5 bg-card/90 rounded px-1 py-0.5 border border-border/50">
         {[
           { mode: "1x1" as LayoutMode, icon: <Square className="w-3 h-3" />, label: "单图" },
@@ -170,6 +187,13 @@ export function MultiChartLayout({
             {opt.icon}
           </button>
         ))}
+        <button
+          onClick={() => setIsFullscreen((v) => !v)}
+          title={isFullscreen ? "退出全屏 (Esc)" : "全屏"}
+          className="p-1 rounded transition-colors text-muted-foreground hover:text-foreground hover:bg-accent/50"
+        >
+          {isFullscreen ? <Minimize2 className="w-3 h-3" /> : <Maximize2 className="w-3 h-3" />}
+        </button>
       </div>
 
       {layout === "1x1" ? (
