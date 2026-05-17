@@ -227,13 +227,4 @@
   .scrollbar-pro::-webkit-scrollbar-thumb:hover {
     background-color: #474d57;
   }
-
-  /* Hide scrollbar utility */
-  .no-scrollbar::-webkit-scrollbar {
-    display: none;
-  }
-  .no-scrollbar {
-    -ms-overflow-style: none;
-    scrollbar-width: none;
-  }
 }
