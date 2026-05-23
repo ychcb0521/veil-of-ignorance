@@ -28,6 +28,7 @@ import { getConditionalTriggerDecisionFromRange } from "@/lib/conditionalOrders"
 import { toast } from "sonner";
 import { BarChart3, Wallet, Crosshair, BookOpen, Tag } from "lucide-react";
 import { Link } from "react-router-dom";
+import { JournalNavMenu } from "@/components/journal/JournalNavMenu";
 import type { PendingOrder, OrderType } from "@/types/trading";
 import { calcFee, calcSlippage } from "@/types/trading";
 import type { AssetState } from "@/types/assets";
@@ -1560,42 +1561,10 @@ const Index = () => {
         </div>
         <div className="flex items-center gap-3 shrink-0">
           {loading && <span className="text-[10px] text-primary animate-pulse font-mono">加载历史数据...</span>}
-          <button
-            onClick={() => setAssetsOpen(true)}
-            className="flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium text-gray-600 dark:text-[#B7BDC6] hover:text-primary hover:bg-primary/10 transition-colors"
-          >
-            <Wallet className="w-3 h-3" /> 资产
-          </button>
-          <button
-            onClick={() => setAnalyticsOpen(true)}
-            className="flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium text-gray-600 dark:text-[#B7BDC6] hover:text-primary hover:bg-primary/10 transition-colors"
-          >
-            <BarChart3 className="w-3 h-3" /> 数据归因
-          </button>
-          <Link
-            to="/journal"
-            className="flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium text-gray-600 dark:text-[#B7BDC6] hover:text-primary hover:bg-primary/10 transition-colors"
-          >
-            <BookOpen className="w-3 h-3" /> 错题集
-          </Link>
-          <Link
-            to="/journal/insights"
-            className="flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium text-gray-600 dark:text-[#B7BDC6] hover:text-primary hover:bg-primary/10 transition-colors"
-          >
-            <BarChart3 className="w-3 h-3" /> 元监控
-          </Link>
-          <Link
-            to="/journal/rules"
-            className="flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium text-gray-600 dark:text-[#B7BDC6] hover:text-primary hover:bg-primary/10 transition-colors"
-          >
-            <BookOpen className="w-3 h-3" /> 规则
-          </Link>
-          <Link
-            to="/journal/tags"
-            className="flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium text-gray-600 dark:text-[#B7BDC6] hover:text-primary hover:bg-primary/10 transition-colors"
-          >
-            <Tag className="w-3 h-3" /> 标签字典
-          </Link>
+          <JournalNavMenu
+            onOpenAssets={() => setAssetsOpen(true)}
+            onOpenAnalytics={() => setAnalyticsOpen(true)}
+          />
           <span className="text-[10px] text-gray-500 dark:text-[#848e9c] font-mono truncate max-w-[120px]">
             {user?.email}
           </span>
