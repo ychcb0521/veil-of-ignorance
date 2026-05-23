@@ -196,18 +196,20 @@ export function OrderPanel({
     }
   };
 
-  const handleOrder = (rawSide: OrderSide) => {
-    if (orderDisabled || effectiveQty <= 0) return;
-    // CLOSE mode flips intent: closing LONG = SHORT side, closing SHORT = LONG side
-    // We delegate actual close to position panel normally — here we just place an opposite order if user is in CLOSE mode.
-    const side: OrderSide = rawSide;
+  // ===== Snapshot dialog state (intercepts every order placement) =====
+  const [snapshotOpen, setSnapshotOpen] = useState(false);
+  const [snapshotSide, setSnapshotSide] = useState<OrderSide>('LONG');
+  const [pendingOrderParams, setPendingOrderParams] = useState<PlaceOrderParams | null>(null);
+  const [snapshotSimTime, setSnapshotSimTime] = useState<number>(Date.now());
+  const [snapshotEntryPrice, setSnapshotEntryPrice] = useState<number | null>(null);
 
+  const buildOrderParams = (rawSide: OrderSide): PlaceOrderParams | null => {
+    if (orderDisabled || effectiveQty <= 0) return null;
     const finalType: OrderType = enableTpSl
       ? (orderType === 'MARKET' ? 'MARKET_TP_SL' : orderType === 'LIMIT' ? 'LIMIT_TP_SL' : orderType)
       : orderType;
-
-    onPlaceOrder({
-      side,
+    return {
+      side: rawSide,
       type: finalType,
       price: priceSelection === 'LIMIT' ? (parseFloat(price) || 0) : 0,
       stopPrice: parseFloat(stopPrice) || parseFloat(tpTrigger) || parseFloat(slTrigger) || 0,
@@ -229,7 +231,17 @@ export function OrderPanel({
       scaledCount: parseInt(scaledCount) || 5,
       scaledStartPrice: parseFloat(scaledStartPrice) || 0,
       scaledEndPrice: parseFloat(scaledEndPrice) || 0,
-    });
+    };
+  };
+
+  const handleOrder = (rawSide: OrderSide) => {
+    const params = buildOrderParams(rawSide);
+    if (!params) return;
+    setPendingOrderParams(params);
+    setSnapshotSide(rawSide);
+    setSnapshotSimTime(ctx.getEffectiveTime(symbol));
+    setSnapshotEntryPrice(ctx.priceMap[symbol] ?? currentPrice ?? null);
+    setSnapshotOpen(true);
   };
 
   const isPrimaryTab = PRIMARY_ORDER_TABS.some(t => t.value === orderType);
