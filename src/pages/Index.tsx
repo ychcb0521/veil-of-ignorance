@@ -1825,6 +1825,7 @@ const Index = () => {
                 pickMode={pickMode}
                 onPickModeChange={setPickMode}
                 pickedPrice={pickedPrice}
+                onAutoPauseTimeMachine={handleAutoPauseTimeMachine}
               />
             </div>
           </ResizablePanel>
