@@ -71,7 +71,7 @@ const STEPS: StepDef[] = [
 interface Props {
   value: SixStepValue;
   onChange: (next: SixStepValue) => void;
-  onSaveRule?: (ruleText: string, required: boolean) => Promise<void>;
+  onSaveRule?: (ruleText: string, required: boolean, sourcePatternId: string | null) => Promise<void>;
   ruleSaved?: { at: string } | null;
   patternChips?: { id: string; name: string }[];
   readonly?: boolean;
@@ -84,6 +84,7 @@ export function SixStepAnalysisForm({
   const [saving, setSaving] = useState(false);
   const [required, setRequired] = useState(true);
   const [justSaved, setJustSaved] = useState<{ at: string } | null>(null);
+  const [selectedPatternId, setSelectedPatternId] = useState<string | null>(null);
 
   const completed = useMemo(
     () => STEPS.filter(s => (value[s.key] ?? '').trim().length >= s.minLength).length,
@@ -95,13 +96,20 @@ export function SixStepAnalysisForm({
 
   const step6Saved = ruleSaved ?? justSaved;
   const step6Text = value.post_new_rule_draft.trim();
-  const canSaveRule = !saving && step6Text.length >= 15 && !step6Saved;
+  const multiTag = (patternChips?.length ?? 0) > 1;
+  const needsPick = multiTag && selectedPatternId === null;
+  const canSaveRule = !saving && step6Text.length >= 15 && !step6Saved && !needsPick;
 
   const handleSaveRule = async () => {
     if (!onSaveRule || !canSaveRule) return;
+    const sourceId = !patternChips || patternChips.length === 0
+      ? null
+      : patternChips.length === 1
+        ? patternChips[0].id
+        : selectedPatternId;
     setSaving(true);
     try {
-      await onSaveRule(step6Text, required);
+      await onSaveRule(step6Text, required, sourceId);
       setJustSaved({ at: new Date().toISOString() });
     } finally {
       setSaving(false);
