@@ -107,7 +107,7 @@ export function JournalTimelineList({ journals, assignments, patterns }: Props) 
             </span>
             <span>
               <Button size="sm" variant="ghost" className="h-6 px-2 text-[10px]"
-                onClick={() => { nav(`/journal/${j.id}`); toast.info('批次 5 即将上线'); }}>
+                onClick={() => nav(`/journal/${j.id}`)}>
                 复盘
               </Button>
             </span>
