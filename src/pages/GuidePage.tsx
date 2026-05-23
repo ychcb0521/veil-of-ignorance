@@ -71,8 +71,8 @@ function SubTitle({ children }: { children: React.ReactNode }) {
   return <h3 className="text-[15px] font-medium text-foreground mt-6 mb-2">{children}</h3>;
 }
 
-function P({ children }: { children: React.ReactNode }) {
-  return <p className="text-[14px] leading-relaxed text-foreground/90">{children}</p>;
+function P({ children, className = '' }: { children: React.ReactNode; className?: string }) {
+  return <p className={`text-[14px] leading-relaxed text-foreground/90 ${className}`}>{children}</p>;
 }
 
 function TocList({ activeId, onJump }: { activeId: string; onJump?: () => void }) {
