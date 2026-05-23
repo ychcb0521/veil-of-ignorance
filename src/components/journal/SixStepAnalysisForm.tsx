@@ -102,11 +102,10 @@ export function SixStepAnalysisForm({
 
   const handleSaveRule = async () => {
     if (!onSaveRule || !canSaveRule) return;
-    const sourceId = !patternChips || patternChips.length === 0
-      ? null
-      : patternChips.length === 1
-        ? patternChips[0].id
-        : selectedPatternId;
+    let sourceId: string | null;
+    if (!patternChips || patternChips.length === 0) sourceId = null;
+    else if (patternChips.length === 1) sourceId = patternChips[0].id;
+    else sourceId = selectedPatternId === '__none__' ? null : selectedPatternId;
     setSaving(true);
     try {
       await onSaveRule(step6Text, required, sourceId);
