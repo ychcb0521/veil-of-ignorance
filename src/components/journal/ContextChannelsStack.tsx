@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useReplay } from '@/contexts/ReplayContext';
 import { MENTAL_STATE_LABELS, type TradeJournal } from '@/types/journal';
+import { CounterfactualPanel } from './CounterfactualPanel';
+import type { KlineData } from '@/hooks/useBinanceData';
 
 interface ChannelProps {
   num: string;
@@ -35,18 +37,32 @@ function pnlColor(v: number) {
 
 interface HistoricalContext {
   allJournals: TradeJournal[];
+  journal: TradeJournal;
+  klines: KlineData[];
+  selectedBranchId: string | null;
+  onSelectBranch: (id: string | null) => void;
+  onBranchesChanged: (updated: TradeJournal) => void;
 }
 
-export function ContextChannelsStack({ allJournals }: HistoricalContext) {
+export function ContextChannelsStack({
+  allJournals, journal, klines, selectedBranchId, onSelectBranch, onBranchesChanged,
+}: HistoricalContext) {
   return (
     <div className="flex-1 min-h-0 flex flex-col gap-2 overflow-hidden">
       <DecisionChannel />
       <StateChannel allJournals={allJournals} />
       <RiskChannel />
-      <CounterfactualChannel />
+      <CounterfactualChannel
+        journal={journal}
+        klines={klines}
+        selectedBranchId={selectedBranchId}
+        onSelectBranch={onSelectBranch}
+        onBranchesChanged={onBranchesChanged}
+      />
     </div>
   );
 }
+
 
 function DecisionChannel() {
   const { journal, replayTime, tEntry } = useReplay();
