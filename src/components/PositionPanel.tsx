@@ -122,22 +122,38 @@ export function PositionPanel({
       .catch(e => toast.error(e instanceof Error ? e.message : String(e)));
   }, [tradeHistory, user]);
 
-  // Load all user journals for history-tab mapping
+  // Load all user journals for history-tab mapping (key by symbol+side+entry-price)
+  const [journalsByCompositeKey, setJournalsByCompositeKey] = useState<Record<string, TradeJournal>>({});
   const reloadJournals = async () => {
     if (!user) return;
     try {
       const all = await listJournals(user.id);
       const map: Record<string, TradeJournal> = {};
-      all.forEach(j => { if (j.trade_record_id) map[j.trade_record_id] = j; });
+      const ckey: Record<string, TradeJournal> = {};
+      all.forEach(j => {
+        if (j.trade_record_id) map[j.trade_record_id] = j;
+        if (j.pre_entry_price != null && j.direction !== 'no_entry') {
+          const side = j.direction === 'long' ? 'LONG' : 'SHORT';
+          const k = `${j.symbol}_${side}_${j.pre_entry_price.toFixed(4)}`;
+          // keep latest unreviewed first
+          if (!ckey[k] || (!j.post_reviewed_at && ckey[k].post_reviewed_at)) ckey[k] = j;
+        }
+      });
       setJournalsByTradeId(map);
+      setJournalsByCompositeKey(ckey);
     } catch { /* silent */ }
   };
   useEffect(() => { reloadJournals(); /* eslint-disable-next-line */ }, [user]);
 
   const unreviewedCount = useMemo(
-    () => Object.values(journalsByTradeId).filter(j => !j.post_reviewed_at).length,
-    [journalsByTradeId],
+    () => Object.values(journalsByCompositeKey).filter(j => !j.post_reviewed_at).length,
+    [journalsByCompositeKey],
   );
+
+  const lookupJournalForRecord = (t: TradeRecord): TradeJournal | null => {
+    const k = `${t.symbol}_${t.side}_${t.entryPrice.toFixed(4)}`;
+    return journalsByCompositeKey[k] ?? null;
+  };
 
   const toggleSort = (field: 'pnl' | 'pct') => {
     setHistorySort(prev => {
