@@ -162,6 +162,18 @@ export function PostTradeReviewSheet({
         note: tagNotes[id] ?? null,
       }));
       await replacePhaseAssignments(journal.id, 'post', assignments);
+      // Save deep analysis if any field was filled
+      const hasDeep = Object.values(sixStep).some(v => (v ?? '').trim().length > 0);
+      if (hasDeep) {
+        try {
+          await updateJournalDeepAnalysis(journal.id, sixStep);
+          if (sixStep.post_new_rule_draft.trim().length >= 15) {
+            toast.info('提示：Step 6 已写但未加入 checklist，可前往复现页激活');
+          }
+        } catch (e) {
+          console.warn('[deep] save failed', e);
+        }
+      }
       toast.success('已保存平仓评价');
       window.dispatchEvent(new CustomEvent('journal:reviewed', { detail: { journalId: journal.id } }));
       onReviewed?.(updated);
@@ -171,6 +183,12 @@ export function PostTradeReviewSheet({
     } finally {
       setSaving(false);
     }
+  };
+
+  const applySixStepToFields = () => {
+    const ref = `[场景] ${sixStep.post_error_scenario}\n[现实] ${sixStep.post_reality_feedback}\n[根因] ${sixStep.post_real_problem}`;
+    setReflection(ref);
+    if (sixStep.post_new_rule_draft) setCorrectAction(sixStep.post_new_rule_draft);
   };
 
   const fmtTime = (iso: string) =>
