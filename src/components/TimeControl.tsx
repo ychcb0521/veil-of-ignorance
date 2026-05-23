@@ -242,6 +242,13 @@ export function TimeControl({
               <button onClick={onStop} className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded bg-destructive/20 text-destructive hover:bg-destructive/30 transition-all duration-100 ease-out active:scale-[0.97] font-medium">
                 <Square className="w-3.5 h-3.5" /> 停止
               </button>
+              <button
+                onClick={openNoEntry}
+                title="记录'该开没开'决策（不下单）"
+                className="h-7 w-7 flex items-center justify-center rounded text-[#848E9C] hover:text-[#F0B90B] hover:bg-accent transition-colors"
+              >
+                <BookmarkX className="w-3.5 h-3.5" />
+              </button>
             </div>
             <SpeedButtons />
             {modeSelectorButtons}
@@ -258,6 +265,13 @@ export function TimeControl({
               <button onClick={onStop} className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded bg-destructive/20 text-destructive hover:bg-destructive/30 transition-all duration-100 ease-out active:scale-[0.97] font-medium">
                 <Square className="w-3.5 h-3.5" /> 停止
               </button>
+              <button
+                onClick={openNoEntry}
+                title="记录'该开没开'决策（不下单）"
+                className="h-7 w-7 flex items-center justify-center rounded text-[#848E9C] hover:text-[#F0B90B] hover:bg-accent transition-colors"
+              >
+                <BookmarkX className="w-3.5 h-3.5" />
+              </button>
             </div>
             <SpeedButtons />
             {modeSelectorButtons}
@@ -265,6 +279,20 @@ export function TimeControl({
           </>
         )}
       </div>
+
+      {/* No-entry snapshot dialog */}
+      <PreTradeSnapshotDialog
+        isOpen={noEntryOpen}
+        onOpenChange={setNoEntryOpen}
+        mode="no_entry"
+        symbol={noEntrySymbol}
+        direction="no_entry"
+        simulatedTimeMs={noEntrySimTime}
+        lockedEntryPrice={ctx.priceMap[noEntrySymbol] ?? null}
+        leverage={1}
+        marginMode="isolated"
+        pricePrecision={2}
+      />
 
       {/* Guard Dialog — mounted only when needed, completely outside the flex layout */}
       {guardDialogOpen && (
