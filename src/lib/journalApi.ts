@@ -9,6 +9,7 @@ import type {
   ErrorTagPattern,
   JournalTagAssignment,
   TaggedPhase,
+  TradeDirection,
   TradeJournal,
   TradeOutcome,
   TradingRule,
