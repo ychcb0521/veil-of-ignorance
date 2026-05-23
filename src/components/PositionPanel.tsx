@@ -86,6 +86,58 @@ export function PositionPanel({
   const [historySort, setHistorySort] = useState<HistorySort>('time');
   const [historySymbolFilter, setHistorySymbolFilter] = useState<string>('ALL');
 
+  // ===== Post-trade review state =====
+  const { user } = useAuth();
+  const [reviewJournal, setReviewJournal] = useState<TradeJournal | null>(null);
+  const [reviewTradeRecord, setReviewTradeRecord] = useState<TradeRecord | null>(null);
+  const [reviewOpen, setReviewOpen] = useState(false);
+  const [journalsByTradeId, setJournalsByTradeId] = useState<Record<string, TradeJournal>>({});
+  const lastCloseIdRef = useRef<string | null>(null);
+  const initialLoadRef = useRef(false);
+
+  // Detect new CLOSE records and try to match an unreviewed pre-snapshot
+  useEffect(() => {
+    if (!user) return;
+    const closes = tradeHistory.filter(t => t.action === 'CLOSE' || t.action === 'LIQUIDATION');
+    if (closes.length === 0) return;
+    const latest = closes[closes.length - 1];
+    if (!initialLoadRef.current) {
+      initialLoadRef.current = true;
+      lastCloseIdRef.current = latest.id;
+      return;
+    }
+    if (lastCloseIdRef.current === latest.id) return;
+    lastCloseIdRef.current = latest.id;
+    const direction = latest.side === 'LONG' ? 'long' : 'short';
+    findUnreviewedJournalForClose(user.id, latest.symbol, direction, latest.entryPrice)
+      .then(j => {
+        if (j) {
+          setReviewJournal(j);
+          setReviewTradeRecord(latest);
+          setReviewOpen(true);
+        } else {
+          toast.info('该笔平仓未找到对应的开仓快照（历史遗留持仓）');
+        }
+      })
+      .catch(e => toast.error(e instanceof Error ? e.message : String(e)));
+  }, [tradeHistory, user]);
+
+  // Load all user journals for history-tab mapping
+  const reloadJournals = async () => {
+    if (!user) return;
+    try {
+      const all = await listJournals(user.id);
+      const map: Record<string, TradeJournal> = {};
+      all.forEach(j => { if (j.trade_record_id) map[j.trade_record_id] = j; });
+      setJournalsByTradeId(map);
+    } catch { /* silent */ }
+  };
+  useEffect(() => { reloadJournals(); /* eslint-disable-next-line */ }, [user]);
+
+  const unreviewedCount = useMemo(
+    () => Object.values(journalsByTradeId).filter(j => !j.post_reviewed_at).length,
+    [journalsByTradeId],
+  );
 
   const toggleSort = (field: 'pnl' | 'pct') => {
     setHistorySort(prev => {
