@@ -1,9 +1,9 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect, useRef } from 'react';
 import { usePersistedState } from '@/hooks/usePersistedState';
 import type { Position, PendingOrder, TradeRecord } from '@/types/trading';
 import { calcUnrealizedPnl, calcROE, calcLiquidationPrice, MAINTENANCE_MARGIN_RATE } from '@/types/trading';
 import type { PositionsMap, OrdersMap, PriceMap } from '@/contexts/TradingContext';
-import { X, Trash2, ArrowUpDown, ArrowUp, ArrowDown, Plus, MoreVertical, ChevronDown, ChevronRight, GripVertical } from 'lucide-react';
+import { X, Trash2, ArrowUpDown, ArrowUp, ArrowDown, Plus, MoreVertical, ChevronDown, ChevronRight, GripVertical, Check } from 'lucide-react';
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover';
 import { toast } from 'sonner';
 import { LeverageModal } from '@/components/LeverageModal';
@@ -24,6 +24,12 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select';
 import { Button } from '@/components/ui/button';
+import { useAuth } from '@/contexts/AuthContext';
+import { PostTradeReviewSheet } from '@/components/journal/PostTradeReviewSheet';
+import {
+  findUnreviewedJournalForClose, findUnreviewedJournals, listJournals,
+} from '@/lib/journalApi';
+import type { TradeJournal } from '@/types/journal';
 
 interface Props {
   positionsMap: PositionsMap;
