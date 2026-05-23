@@ -8,9 +8,12 @@ import { Textarea } from '@/components/ui/textarea';
 import { Input } from '@/components/ui/input';
 import { Checkbox } from '@/components/ui/checkbox';
 import { MENTAL_STATE_LABELS } from '@/types/journal';
-import { DEFAULT_PRE_TRADE_CHECKLIST, isChecklistPassed } from '@/lib/defaultChecklist';
+import { buildChecklist, isChecklistPassed } from '@/lib/defaultChecklist';
+import { listRules } from '@/lib/journalApi';
+import { useAuth } from '@/contexts/AuthContext';
+import { ShieldCheck } from 'lucide-react';
 import type { PlaceOrderParams } from '@/contexts/TradingContext';
-import type { ChecklistItem, TradeDirection } from '@/types/journal';
+import type { ChecklistItem, TradeDirection, TradingRule } from '@/types/journal';
 
 export type SnapshotMode = 'trade' | 'no_entry';
 
@@ -62,6 +65,7 @@ export function PreTradeSnapshotForm({
 }: Props) {
   const isTrade = mode === 'trade';
   const isShort = direction === 'short';
+  const { user } = useAuth();
 
   const [reason, setReason] = useState('');
   const [stopLoss, setStopLoss] = useState('');
@@ -75,6 +79,15 @@ export function PreTradeSnapshotForm({
   const [noEntryReason, setNoEntryReason] = useState('');
   const [overrideLowMental, setOverrideLowMental] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [userRules, setUserRules] = useState<TradingRule[]>([]);
+
+  // Load user rules for checklist injection
+  useEffect(() => {
+    if (!user || !isTrade) return;
+    listRules(user.id).then(setUserRules).catch(() => {});
+  }, [user, isTrade]);
+
+  const checklistItems = useMemo(() => buildChecklist(userRules), [userRules]);
 
   // Reset override when mental state >2
   useEffect(() => {
@@ -85,24 +98,18 @@ export function PreTradeSnapshotForm({
   const sl = parseFloat(stopLoss) || 0;
   const sizeUsdt = parseFloat(posSize) || 0;
 
-  const maxLoss = useMemo(() => {
-    if (!isTrade || !lockedEntryPrice || sl <= 0 || sizeUsdt <= 0) return 0;
-    const qty = sizeUsdt / lockedEntryPrice;
-    const diff = isShort ? sl - lockedEntryPrice : lockedEntryPrice - sl;
-    return Math.max(0, diff * qty * leverage / lockedEntryPrice * lockedEntryPrice);
-    // Simplified: loss in USDT = (entry - sl) * qty for long; (sl - entry) * qty for short
-  }, [isTrade, lockedEntryPrice, sl, sizeUsdt, isShort, leverage]);
-
-  // Actually simpler & correct: loss = |entry - sl| * qty (linear contracts), leverage doesn't multiply loss
+  // Loss in USDT = |entry - sl| * qty (linear contracts), leverage doesn't multiply loss
   const realMaxLoss = useMemo(() => {
     if (!isTrade || !lockedEntryPrice || sl <= 0 || sizeUsdt <= 0) return 0;
     const qty = sizeUsdt / lockedEntryPrice;
     return Math.abs(lockedEntryPrice - sl) * qty;
   }, [isTrade, lockedEntryPrice, sl, sizeUsdt]);
 
-  const checklistPassed = isChecklistPassed(checked);
-  const requiredCount = DEFAULT_PRE_TRADE_CHECKLIST.filter(i => i.required && checked.includes(i.id)).length;
-  const optionalCount = DEFAULT_PRE_TRADE_CHECKLIST.filter(i => !i.required && checked.includes(i.id)).length;
+  const checklistPassed = isChecklistPassed(checked, checklistItems);
+  const requiredCount = checklistItems.filter(i => i.required && checked.includes(i.id)).length;
+  const requiredTotal = checklistItems.filter(i => i.required).length;
+  const optionalCount = checklistItems.filter(i => !i.required && i.source !== 'rule' && checked.includes(i.id)).length;
+  const optionalTotal = checklistItems.filter(i => !i.required && i.source !== 'rule').length;
 
   const tpsValid = useMemo(() => {
     if (!isTrade) return true;
@@ -135,12 +142,14 @@ export function PreTradeSnapshotForm({
     if (!canSubmit || submitting) return;
     setSubmitting(true);
     try {
-      const checklistItems: ChecklistItem[] = DEFAULT_PRE_TRADE_CHECKLIST.map(d => ({
+      const checklistItemsOut: ChecklistItem[] = checklistItems.map(d => ({
         id: d.id,
         label: d.label,
         required: d.required,
         checked: checked.includes(d.id),
       }));
+
+
 
       // Primary TP price (first valid level) — schema only has one column
       const firstTp = tps.find(t => parseFloat(t.price) > 0);
@@ -154,7 +163,7 @@ export function PreTradeSnapshotForm({
           : (mental <= 3 ? mentalTrigger.trim() : null),
         pre_risk_awareness: riskAware.trim(),
         pre_risk_management: riskManage.trim(),
-        pre_checklist_items: isTrade ? checklistItems : [],
+        pre_checklist_items: isTrade ? checklistItemsOut : [],
         pre_checklist_passed: isTrade ? checklistPassed : true,
         pre_position_size: isTrade && sizeUsdt > 0 ? sizeUsdt : null,
         pre_max_loss_usdt: isTrade && realMaxLoss > 0 ? Number(realMaxLoss.toFixed(2)) : null,
@@ -381,20 +390,23 @@ export function PreTradeSnapshotForm({
           <div className="space-y-1.5">
             <div className={labelCls}>开仓 Checklist{requiredStar}</div>
             <div className="space-y-1.5 bg-[#0B0E11] border border-[#2B3139] rounded p-3">
-              {DEFAULT_PRE_TRADE_CHECKLIST.map(item => (
+              {checklistItems.map(item => (
                 <label key={item.id} className="flex items-center gap-2 cursor-pointer">
                   <Checkbox
                     checked={checked.includes(item.id)}
                     onCheckedChange={v => toggleChecklist(item.id, !!v)}
                   />
-                  <span className="text-[11px] text-foreground">
-                    {item.label}
+                  <span className="text-[11px] text-foreground flex items-center gap-1">
+                    {item.source === 'rule' && (
+                      <ShieldCheck className="w-3 h-3 text-[#F0B90B] shrink-0" />
+                    )}
+                    <span>{item.label}</span>
                     {item.required && <span className="text-[#F6465D] ml-0.5">*</span>}
                   </span>
                 </label>
               ))}
               <div className={`text-[11px] font-mono pt-1.5 border-t border-[#2B3139] ${checklistPassed ? 'text-[#0ECB81]' : 'text-[#F6465D]'}`}>
-                必填 {requiredCount}/4 · 可选 {optionalCount}/4 · 状态：{checklistPassed ? '通过' : '未通过'}
+                必填 {requiredCount}/{requiredTotal} · 可选 {optionalCount}/{optionalTotal} · 状态：{checklistPassed ? '通过' : '未通过'}
               </div>
             </div>
           </div>

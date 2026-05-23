@@ -39,15 +39,10 @@ function pnlColor(v: number) {
 
 interface HistoricalContext {
   allJournals: TradeJournal[];
-  onJournalUpdated?: (updated: TradeJournal) => void;
 }
 
-export function ContextChannelsStack({ allJournals, onJournalUpdated }: HistoricalContext) {
-  const { journal, tStart, tEnd } = useReplay();
-  const [currentJournal, setCurrentJournal] = useState<TradeJournal>(journal);
-  const [selectedBranchId, setSelectedBranchId] = useState<string | null>(null);
-  useEffect(() => { setCurrentJournal(journal); }, [journal]);
-
+export function ContextChannelsStack({ allJournals }: HistoricalContext) {
+  const { journal, setJournal, tStart, tEnd, selectedBranchId, setSelectedBranchId } = useReplay();
   const { klines } = useReplayKlines(journal.symbol, tStart - 6 * 3600_000, tEnd + 2 * 3600_000, '1m');
 
   return (
@@ -56,11 +51,11 @@ export function ContextChannelsStack({ allJournals, onJournalUpdated }: Historic
       <StateChannel allJournals={allJournals} />
       <RiskChannel />
       <CounterfactualChannel
-        journal={currentJournal}
+        journal={journal}
         klines={klines}
         selectedBranchId={selectedBranchId}
         onSelectBranch={setSelectedBranchId}
-        onBranchesChanged={(u) => { setCurrentJournal(u); onJournalUpdated?.(u); }}
+        onBranchesChanged={setJournal}
       />
     </div>
   );

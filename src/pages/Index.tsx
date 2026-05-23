@@ -1579,6 +1579,18 @@ const Index = () => {
             <BookOpen className="w-3 h-3" /> 错题集
           </Link>
           <Link
+            to="/journal/insights"
+            className="flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium text-gray-600 dark:text-[#B7BDC6] hover:text-primary hover:bg-primary/10 transition-colors"
+          >
+            <BarChart3 className="w-3 h-3" /> 元监控
+          </Link>
+          <Link
+            to="/journal/rules"
+            className="flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium text-gray-600 dark:text-[#B7BDC6] hover:text-primary hover:bg-primary/10 transition-colors"
+          >
+            <BookOpen className="w-3 h-3" /> 规则
+          </Link>
+          <Link
             to="/journal/tags"
             className="flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium text-gray-600 dark:text-[#B7BDC6] hover:text-primary hover:bg-primary/10 transition-colors"
           >

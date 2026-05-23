@@ -10,12 +10,17 @@ const INTERVALS = ['1m', '5m', '15m', '1h'] as const;
 type Interval = (typeof INTERVALS)[number];
 
 export function ReplayChartView() {
-  const { journal, tradeRecord, tEntry, tExit, tStart, tEnd, replayTime, jumpTo } = useReplay();
+  const { journal, tradeRecord, tEntry, tExit, tStart, tEnd, replayTime, jumpTo, selectedBranchId } = useReplay();
   const [interval, setInterval] = useState<Interval>('1m');
 
   const fetchFrom = useMemo(() => tStart - 6 * 60 * 60_000, [tStart]);
   const fetchTo = useMemo(() => tEnd + 2 * 60 * 60_000, [tEnd]);
   const { klines, loading, error, reload } = useReplayKlines(journal.symbol, fetchFrom, fetchTo, interval);
+
+  const selectedBranch = useMemo(
+    () => (journal.counterfactual_branches ?? []).find(b => b.id === selectedBranchId) ?? null,
+    [journal.counterfactual_branches, selectedBranchId],
+  );
 
   const markers: ChartMarker[] = useMemo(() => {
     const out: ChartMarker[] = [];
@@ -39,8 +44,30 @@ export function ReplayChartView() {
         label: `EXIT ${tradeRecord.exitPrice.toFixed(2)}  P&L ${(journal.post_realized_pnl ?? tradeRecord.pnl).toFixed(2)}`,
       });
     }
+    if (selectedBranch) {
+      const p = selectedBranch.params;
+      const r = selectedBranch.result;
+      if (p.entry_price != null) {
+        out.push({
+          time: new Date(p.entry_time).getTime(),
+          price: p.entry_price,
+          shape: p.direction === 'short' ? 'triangle-down' : 'triangle-up',
+          color: '#B080FF',
+          label: `CF ${selectedBranch.label}`,
+        });
+      }
+      if (r.exit_price != null && r.exit_time) {
+        out.push({
+          time: new Date(r.exit_time).getTime(),
+          price: r.exit_price,
+          shape: 'square',
+          color: '#B080FF',
+          label: `CF EXIT ${r.exit_reason}`,
+        });
+      }
+    }
     return out;
-  }, [journal, tradeRecord, tEntry, tExit]);
+  }, [journal, tradeRecord, tEntry, tExit, selectedBranch]);
 
   const inWindow = tExit == null
     ? replayTime >= tEntry
@@ -48,31 +75,34 @@ export function ReplayChartView() {
   const priceLines: PriceLine[] = useMemo(() => {
     const out: PriceLine[] = [];
     if (journal.pre_planned_stop_loss != null) {
-      out.push({
-        price: journal.pre_planned_stop_loss,
-        color: '#F6465D',
-        title: 'SL',
-        dim: !inWindow,
-      });
+      out.push({ price: journal.pre_planned_stop_loss, color: '#F6465D', title: 'SL', dim: !inWindow });
     }
     if (journal.pre_planned_take_profit != null) {
-      out.push({
-        price: journal.pre_planned_take_profit,
-        color: '#0ECB81',
-        title: 'TP',
-        dim: !inWindow,
+      out.push({ price: journal.pre_planned_take_profit, color: '#0ECB81', title: 'TP', dim: !inWindow });
+    }
+    if (selectedBranch) {
+      const p = selectedBranch.params;
+      if (p.stop_loss != null) out.push({ price: p.stop_loss, color: '#B080FF', title: 'CF·SL' });
+      p.take_profits.forEach((tp, i) => {
+        out.push({ price: tp.price, color: '#B080FF', title: `CF·TP${i + 1}` });
       });
     }
     return out;
-  }, [journal, inWindow]);
+  }, [journal, inWindow, selectedBranch]);
 
   const verticalLines: VerticalLine[] = useMemo(() => {
     const out: VerticalLine[] = [
       { time: tEntry, color: 'rgba(14, 203, 129, 0.6)', width: 1, z: 1 },
     ];
     if (tExit != null) out.push({ time: tExit, color: 'rgba(246, 70, 93, 0.6)', width: 1, z: 1 });
+    if (selectedBranch) {
+      out.push({ time: new Date(selectedBranch.params.entry_time).getTime(), color: 'rgba(176,128,255,0.6)', width: 1, z: 2 });
+      if (selectedBranch.result.exit_time) {
+        out.push({ time: new Date(selectedBranch.result.exit_time).getTime(), color: 'rgba(176,128,255,0.6)', width: 1, z: 2 });
+      }
+    }
     return out;
-  }, [tEntry, tExit]);
+  }, [tEntry, tExit, selectedBranch]);
 
   return (
     <div className="h-full flex flex-col gap-2 min-h-0">
