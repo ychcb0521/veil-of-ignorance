@@ -13,6 +13,7 @@ export type ReplaySpeed = (typeof REPLAY_SPEEDS)[number];
 
 interface ReplayContextValue {
   journal: TradeJournal;
+  setJournal: (j: TradeJournal) => void;
   tradeRecord: TradeRecord | null;
   assignments: JournalTagAssignment[];
   patterns: Map<string, ErrorTagPattern>;
@@ -28,6 +29,9 @@ interface ReplayContextValue {
   tExit: number | null;
   tStart: number;
   tEnd: number;
+
+  selectedBranchId: string | null;
+  setSelectedBranchId: (id: string | null) => void;
 
   play: () => void;
   pause: () => void;
@@ -48,7 +52,10 @@ interface ProviderProps {
 
 const FRAME_MS = 50;
 
-export function ReplayProvider({ journal, tradeRecord, assignments, patterns, children }: ProviderProps) {
+export function ReplayProvider({ journal: initialJournal, tradeRecord, assignments, patterns, children }: ProviderProps) {
+  const [journal, setJournal] = useState<TradeJournal>(initialJournal);
+  useEffect(() => { setJournal(initialJournal); }, [initialJournal]);
+
   const tEntry = useMemo(() => new Date(journal.pre_simulated_time).getTime(), [journal.pre_simulated_time]);
   const tExit = useMemo(() => (tradeRecord ? tradeRecord.closeTime : null), [tradeRecord]);
   const tStart = useMemo(() => tEntry - 30 * 60_000, [tEntry]);
@@ -58,6 +65,7 @@ export function ReplayProvider({ journal, tradeRecord, assignments, patterns, ch
   const [replayTime, setReplayTime] = useState<number>(tStart);
   const [replayStatus, setReplayStatus] = useState<ReplayStatus>('paused');
   const [replaySpeed, setReplaySpeed] = useState<ReplaySpeed>(1);
+  const [selectedBranchId, setSelectedBranchId] = useState<string | null>(null);
 
   const timerRef = useRef<number | null>(null);
   const stateRef = useRef({ replayTime, replayStatus, replaySpeed, tEnd });
@@ -101,10 +109,11 @@ export function ReplayProvider({ journal, tradeRecord, assignments, patterns, ch
   }, [tStart, tEnd]);
 
   const value: ReplayContextValue = {
-    journal, tradeRecord, assignments, patterns: patternMap,
+    journal, setJournal, tradeRecord, assignments, patterns: patternMap,
     klines, setKlines,
     replayTime, replayStatus, replaySpeed,
     tEntry, tExit, tStart, tEnd,
+    selectedBranchId, setSelectedBranchId,
     play, pause, toggle, setSpeed, jumpTo,
   };
 
