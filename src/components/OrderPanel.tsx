@@ -678,6 +678,37 @@ export function OrderPanel({
           </button>
         </BottomSheet>
       )}
+
+      {/* ===== Pre-trade snapshot dialog (hard-gates every order placement) ===== */}
+      <PreTradeSnapshotDialog
+        isOpen={snapshotOpen}
+        onOpenChange={(o) => {
+          setSnapshotOpen(o);
+          if (!o) setPendingOrderParams(null);
+        }}
+        mode="trade"
+        symbol={symbol}
+        direction={snapshotSide === 'LONG' ? 'long' : 'short'}
+        simulatedTimeMs={snapshotSimTime}
+        lockedEntryPrice={snapshotEntryPrice}
+        leverage={leverage}
+        marginMode={marginMode}
+        pricePrecision={pricePrecision}
+        orderParams={pendingOrderParams}
+        initialPositionSizeUsdt={(() => {
+          if (!pendingOrderParams) return null;
+          const p = snapshotEntryPrice ?? currentPrice ?? 0;
+          return p > 0 ? Number((pendingOrderParams.quantity * p).toFixed(2)) : null;
+        })()}
+        onAutoPause={onAutoPauseTimeMachine}
+        onPlaceOrder={async (params) => {
+          const result = await onPlaceOrder(params);
+          if (result && typeof result === 'object' && 'id' in result) {
+            return result as { id: string };
+          }
+          return null;
+        }}
+      />
     </div>
   );
 }
