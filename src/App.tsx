@@ -55,7 +55,7 @@ function AppRoutes() {
         <Route path="/" element={<Index />} />
         <Route path="/journal" element={<JournalListPage />} />
         <Route path="/journal/tags" element={<JournalTagsPage />} />
-        <Route path="/journal/:id" element={<JournalListPage />} />
+        <Route path="/journal/:id" element={<JournalPlaybackPage />} />
         <Route path="*" element={<NotFound />} />
       </Routes>
     </TradingProvider>
