@@ -69,7 +69,7 @@ export function groupJournalsByPattern(
     const pnls = js.map(j => j.post_realized_pnl ?? 0);
     const totalPnl = pnls.reduce((a, b) => a + b, 0);
     const rs = js.map(j => j.post_r_multiple).filter((v): v is number => v != null);
-    const mentals = js.map(j => j.pre_mental_state).filter((v): v is number => v != null);
+    const mentals = js.map(j => j.pre_mental_state as number).filter(v => v != null);
     const times = js.map(j => new Date(j.pre_simulated_time).getTime()).sort((a, b) => a - b);
     const last30 = js.filter(j => now - new Date(j.pre_simulated_time).getTime() <= 30 * DAY).length;
     let win = 0, loss = 0, be = 0, ne = 0;
