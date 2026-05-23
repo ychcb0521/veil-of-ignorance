@@ -13,7 +13,11 @@ import type {
   TradeJournal,
   TradeOutcome,
   TradingRule,
+  CounterfactualBranch,
+  CounterfactualBranchParams,
+  CounterfactualBranchResult,
 } from "@/types/journal";
+
 
 function wrap<T>(label: string, error: { message: string } | null, data: T | null): T {
   if (error) {
