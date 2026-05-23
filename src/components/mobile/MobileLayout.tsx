@@ -103,6 +103,7 @@ export function MobileLayout(props: Props) {
           onClosePosition={props.onClosePosition}
           onCancelOrder={props.onCancelOrder}
           balance={props.balance}
+          onAutoPauseTimeMachine={props.onAutoPauseTimeMachine}
         />
       );
   }
