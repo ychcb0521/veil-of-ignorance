@@ -1292,6 +1292,15 @@ export function PositionPanel({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Post-trade review sheet */}
+      <PostTradeReviewSheet
+        isOpen={reviewOpen}
+        onOpenChange={setReviewOpen}
+        journal={reviewJournal}
+        tradeRecord={reviewTradeRecord}
+        onReviewed={() => { reloadJournals(); }}
+      />
     </div>
   );
 }
