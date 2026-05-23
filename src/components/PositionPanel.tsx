@@ -956,8 +956,12 @@ export function PositionPanel({
         {activeTab === 'positionHistory' && (
           <div className="flex-1 overflow-y-auto scrollbar-pro min-h-0">
             {unreviewedCount > 0 && (
-              <div className="bg-[#F0B90B]/10 border border-[#F0B90B]/30 rounded px-3 py-2 text-[11px] text-[#F0B90B] m-2">
-                你有 {unreviewedCount} 笔已平仓交易未评价。错题集只在评价后才会生效。
+              <div className="bg-[#F0B90B]/10 border border-[#F0B90B]/30 rounded px-3 py-2 text-[11px] text-[#F0B90B] m-2 flex items-center justify-between gap-3">
+                <span>你有 {unreviewedCount} 笔已平仓交易未评价。错题集只在评价后才会生效。</span>
+                <a href="/journal?view=unreviewed"
+                  className="shrink-0 h-6 px-2 inline-flex items-center rounded bg-[#F0B90B] text-black text-[11px] font-medium hover:bg-[#F0B90B]/90">
+                  前往未评价视图
+                </a>
               </div>
             )}
             {tradeRecords.length === 0 ? (
