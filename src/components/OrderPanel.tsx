@@ -52,6 +52,7 @@ export function OrderPanel({
   priceProtection, onTogglePriceProtection,
   pricePrecision = 2, quantityPrecision = 3,
   crosshairPrice, pickMode, onPickModeChange, pickedPrice,
+  onAutoPauseTimeMachine,
 }: Props) {
   const baseCoin = symbol.replace('USDT', '') || 'BTC';
 
