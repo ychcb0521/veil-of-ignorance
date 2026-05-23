@@ -633,3 +633,55 @@ export async function snoozeRulePattern(
     if (error) throw new Error(`延后失败：${error.message}`);
   }
 }
+
+// ============ Batch 7: Deep analysis ============
+
+export interface DeepAnalysisInput {
+  post_error_scenario?: string | null;
+  post_original_hypothesis?: string | null;
+  post_reality_feedback?: string | null;
+  post_error_type_summary?: string | null;
+  post_real_problem?: string | null;
+  post_new_rule_draft?: string | null;
+}
+
+export async function updateJournalDeepAnalysis(
+  journalId: string,
+  input: DeepAnalysisInput,
+): Promise<TradeJournal> {
+  const { data, error } = await supabase
+    .from("trade_journals" as never)
+    .update(input as never)
+    .eq("id", journalId)
+    .select()
+    .single();
+  return wrap("保存深度分析", error, data as unknown as TradeJournal);
+}
+
+export async function promoteDraftToRule(
+  journalId: string,
+  options: { required: boolean; sourcePatternId?: string | null },
+): Promise<TradingRule> {
+  const { data: cur, error: gErr } = await supabase
+    .from("trade_journals" as never)
+    .select("user_id,post_new_rule_draft")
+    .eq("id", journalId)
+    .single();
+  if (gErr) throw new Error(`读取草稿失败：${gErr.message}`);
+  const row = cur as unknown as { user_id: string; post_new_rule_draft: string | null };
+  const text = (row?.post_new_rule_draft ?? "").trim();
+  if (text.length < 15) throw new Error("规则草稿至少 15 字");
+  const { data, error } = await supabase
+    .from("trading_rules" as never)
+    .insert({
+      user_id: row.user_id,
+      source_pattern_id: options.sourcePatternId ?? null,
+      rule_text: text,
+      is_active: true,
+      added_to_checklist: true,
+      required: options.required,
+    } as never)
+    .select()
+    .single();
+  return wrap("写入规则", error, data as unknown as TradingRule);
+}

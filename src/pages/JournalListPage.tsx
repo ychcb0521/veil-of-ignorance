@@ -3,7 +3,8 @@
  */
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { ArrowLeft, Tag } from 'lucide-react';
+import { Tag } from 'lucide-react';
+import { BackButton } from '@/components/journal/BackButton';
 import { toast } from 'sonner';
 import { useAuth } from '@/contexts/AuthContext';
 import { useIsMobile } from '@/hooks/use-mobile';
@@ -114,14 +115,11 @@ export default function JournalListPage() {
   return (
     <div className="min-h-screen bg-[#0B0E11] text-foreground">
       {/* Header */}
-      <header className="sticky top-0 z-10 bg-[#0B0E11] border-b border-[#2B3139]">
-        <div className="px-6 py-3 max-w-[1600px] mx-auto flex items-center justify-between gap-4">
-          <div className="flex items-center gap-3 min-w-0">
-            <button onClick={() => nav(-1)} className="text-muted-foreground hover:text-foreground shrink-0">
-              <ArrowLeft className="w-4 h-4" />
-            </button>
-            <h1 className="text-[14px] font-medium">错题集</h1>
-          </div>
+      <header className="sticky top-0 z-20 bg-[#0B0E11]/95 backdrop-blur-sm border-b border-[#2B3139]">
+        <div className="px-6 py-3 max-w-[1600px] mx-auto flex items-center gap-3">
+          <BackButton />
+          <h1 className="text-[14px] font-medium">错题集</h1>
+          <div className="flex-1" />
           <Tabs value={view} onValueChange={setView}>
             <TabsList className="h-8 bg-[#181A20]">
               <TabsTrigger value="patterns" className="text-[12px] h-7 px-3">按模式</TabsTrigger>

@@ -94,6 +94,16 @@ export interface TradeJournal {
 
   reason_was_rewritten: boolean;
   counterfactual_branches?: CounterfactualBranch[];
+
+  // ============ Batch 7: 六步深度分析 ============
+  post_error_scenario?: string | null;
+  post_original_hypothesis?: string | null;
+  post_reality_feedback?: string | null;
+  post_error_type_summary?: string | null;
+  post_real_problem?: string | null;
+  post_new_rule_draft?: string | null;
+  deep_analysis_completed_at?: string | null;
+
   created_at: string;
   updated_at: string;
 }

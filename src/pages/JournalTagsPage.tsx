@@ -3,7 +3,7 @@
  */
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft } from 'lucide-react';
+import { BackButton } from '@/components/journal/BackButton';
 import { Button } from '@/components/ui/button';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { toast } from 'sonner';
@@ -57,17 +57,17 @@ export default function JournalTagsPage() {
 
   return (
     <div className="min-h-screen bg-[#0B0E11] text-foreground">
-      <header className="px-6 py-4 border-b border-[#2B3139] flex justify-between items-center bg-[#181A20]">
-        <div className="flex items-center gap-3">
-          <button onClick={() => nav('/journal')} className="text-muted-foreground hover:text-foreground flex items-center gap-1 text-[12px]">
-            <ArrowLeft className="w-4 h-4" /> 错题集
-          </button>
-          <h1 className="text-[14px] font-medium">错误模式字典</h1>
+      <header className="sticky top-0 z-20 bg-[#0B0E11]/95 backdrop-blur-sm border-b border-[#2B3139]">
+        <div className="px-6 py-3 max-w-[1600px] mx-auto flex items-center gap-3">
+          <BackButton />
+          <h1 className="text-[14px] font-medium">标签字典</h1>
+          <span className="text-[11px] text-muted-foreground">错误模式字典</span>
+          <div className="flex-1" />
+          <Button
+            onClick={() => setNewDialog({ open: true })}
+            className="h-8 text-[12px] bg-[#F0B90B] hover:bg-[#F0B90B]/90 text-black"
+          >+ 新建模式</Button>
         </div>
-        <Button
-          onClick={() => setNewDialog({ open: true })}
-          className="h-8 text-[12px] bg-[#F0B90B] hover:bg-[#F0B90B]/90 text-black"
-        >+ 新建模式</Button>
       </header>
 
       <main className="px-6 py-4 max-w-[1200px] mx-auto">

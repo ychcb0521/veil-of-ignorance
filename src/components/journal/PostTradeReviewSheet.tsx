@@ -11,16 +11,21 @@ import { Label } from '@/components/ui/label';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { toast } from 'sonner';
-import { Pencil, ChevronDown } from 'lucide-react';
+import { Pencil, ChevronDown, BrainCircuit } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import {
   finalizeJournalReview, replacePhaseAssignments,
   listAssignmentsForJournal, countPatternOccurrencesLast30Days, listPatterns,
+  updateJournalDeepAnalysis,
 } from '@/lib/journalApi';
 import type { TradeJournal, TradeOutcome, ErrorTagPattern } from '@/types/journal';
 import { MENTAL_STATE_LABELS } from '@/types/journal';
 import type { TradeRecord } from '@/types/trading';
 import { JournalTagPicker } from './JournalTagPicker';
+import {
+  SixStepAnalysisForm, EMPTY_SIX_STEP, pickSixStepValue, countCompletedSteps,
+  type SixStepValue,
+} from './SixStepAnalysisForm';
 
 interface Props {
   isOpen: boolean;
@@ -46,6 +51,8 @@ export function PostTradeReviewSheet({
   const [saving, setSaving] = useState(false);
   const [hotCounts, setHotCounts] = useState<Record<string, number>>({});
   const [allPatterns, setAllPatterns] = useState<ErrorTagPattern[]>([]);
+  const [sixStep, setSixStep] = useState<SixStepValue>(EMPTY_SIX_STEP);
+  const [sixStepOpen, setSixStepOpen] = useState(false);
   const pausedOnce = useState({ done: false })[0];
 
   // Auto-pause + reset state per journal
@@ -64,6 +71,8 @@ export function PostTradeReviewSheet({
         setReflection(journal.post_reflection ?? '');
         setCorrectAction(journal.post_correct_action ?? '');
         setRMultipleOverride(journal.post_r_multiple != null ? String(journal.post_r_multiple) : '');
+        setSixStep(pickSixStepValue(journal));
+        setSixStepOpen(countCompletedSteps(pickSixStepValue(journal)) > 0);
         if (user) {
           listPatterns(user.id).then(setAllPatterns).catch(() => {});
         }
@@ -153,6 +162,18 @@ export function PostTradeReviewSheet({
         note: tagNotes[id] ?? null,
       }));
       await replacePhaseAssignments(journal.id, 'post', assignments);
+      // Save deep analysis if any field was filled
+      const hasDeep = Object.values(sixStep).some(v => (v ?? '').trim().length > 0);
+      if (hasDeep) {
+        try {
+          await updateJournalDeepAnalysis(journal.id, sixStep);
+          if (sixStep.post_new_rule_draft.trim().length >= 15) {
+            toast.info('提示：Step 6 已写但未加入 checklist，可前往复现页激活');
+          }
+        } catch (e) {
+          console.warn('[deep] save failed', e);
+        }
+      }
       toast.success('已保存平仓评价');
       window.dispatchEvent(new CustomEvent('journal:reviewed', { detail: { journalId: journal.id } }));
       onReviewed?.(updated);
@@ -162,6 +183,12 @@ export function PostTradeReviewSheet({
     } finally {
       setSaving(false);
     }
+  };
+
+  const applySixStepToFields = () => {
+    const ref = `[场景] ${sixStep.post_error_scenario}\n[现实] ${sixStep.post_reality_feedback}\n[根因] ${sixStep.post_real_problem}`;
+    setReflection(ref);
+    if (sixStep.post_new_rule_draft) setCorrectAction(sixStep.post_new_rule_draft);
   };
 
   const fmtTime = (iso: string) =>
@@ -261,6 +288,27 @@ export function PostTradeReviewSheet({
             </label>
           </div>
         )}
+
+        {/* (C+) 六步深度分析（可选） */}
+        <Collapsible open={sixStepOpen} onOpenChange={setSixStepOpen}>
+          <CollapsibleTrigger className="w-full bg-[#181A20] border border-[#2B3139] rounded px-3 py-2 flex items-center gap-2 hover:bg-[#1f242c]">
+            <BrainCircuit className="w-3.5 h-3.5 text-[#F0B90B]" />
+            <div className="flex-1 text-left">
+              <div className="text-[12px] text-foreground">进入六步深度分析（推荐）</div>
+              <div className="text-[10px] text-muted-foreground">
+                比"复盘文字"+"反事实"更结构化。完成后下方两个字段可自动生成。
+              </div>
+            </div>
+            <ChevronDown className={`w-3.5 h-3.5 text-muted-foreground transition-transform ${sixStepOpen ? 'rotate-180' : ''}`} />
+          </CollapsibleTrigger>
+          <CollapsibleContent className="mt-2 space-y-2">
+            <SixStepAnalysisForm value={sixStep} onChange={setSixStep} />
+            <Button size="sm" variant="ghost" onClick={applySixStepToFields}
+              className="h-7 text-[10px] bg-[#2B3139] hover:bg-[#363c45]">
+              用六步内容回写下方字段
+            </Button>
+          </CollapsibleContent>
+        </Collapsible>
 
         {/* (D) Reflection */}
         <div className="space-y-1.5">
