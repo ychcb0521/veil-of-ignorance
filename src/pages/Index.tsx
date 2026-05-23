@@ -1578,6 +1578,18 @@ const Index = () => {
           >
             <Crosshair className="w-3 h-3" /> 交易侦查
           </button>
+          <button
+            onClick={() => toast.info('错题集列表页：批次 4 即将上线')}
+            className="flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium text-gray-600 dark:text-[#B7BDC6] hover:text-primary hover:bg-primary/10 transition-colors"
+          >
+            <BookOpen className="w-3 h-3" /> 错题集
+          </button>
+          <Link
+            to="/journal/tags"
+            className="flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium text-gray-600 dark:text-[#B7BDC6] hover:text-primary hover:bg-primary/10 transition-colors"
+          >
+            <Tag className="w-3 h-3" /> 标签字典
+          </Link>
           <span className="text-[10px] text-gray-500 dark:text-[#848e9c] font-mono truncate max-w-[120px]">
             {user?.email}
           </span>
