@@ -11,16 +11,21 @@ import { Label } from '@/components/ui/label';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { toast } from 'sonner';
-import { Pencil, ChevronDown } from 'lucide-react';
+import { Pencil, ChevronDown, BrainCircuit } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import {
   finalizeJournalReview, replacePhaseAssignments,
   listAssignmentsForJournal, countPatternOccurrencesLast30Days, listPatterns,
+  updateJournalDeepAnalysis,
 } from '@/lib/journalApi';
 import type { TradeJournal, TradeOutcome, ErrorTagPattern } from '@/types/journal';
 import { MENTAL_STATE_LABELS } from '@/types/journal';
 import type { TradeRecord } from '@/types/trading';
 import { JournalTagPicker } from './JournalTagPicker';
+import {
+  SixStepAnalysisForm, EMPTY_SIX_STEP, pickSixStepValue, countCompletedSteps,
+  type SixStepValue,
+} from './SixStepAnalysisForm';
 
 interface Props {
   isOpen: boolean;
