@@ -3,6 +3,8 @@ import { useReplay } from '@/contexts/ReplayContext';
 import { MENTAL_STATE_LABELS, type TradeJournal } from '@/types/journal';
 import { CounterfactualPanel } from './CounterfactualPanel';
 import { useReplayKlines } from '@/hooks/useReplayKlines';
+import type { KlineData } from '@/hooks/useBinanceData';
+
 
 interface ChannelProps {
   num: string;
