@@ -1461,19 +1461,8 @@ const Index = () => {
 
   // Pause the active timeline when the pre-trade snapshot dialog opens
   const handleAutoPauseTimeMachine = useCallback(() => {
-    if (timeMode === "synced") {
-      if (sim.status === "playing") sim.pauseSimulation();
-    } else {
-      const ct = coinTimelines[activeSymbol];
-      if (ct?.status === "playing") {
-        setCoinTimelines((prev) => {
-          const cur = prev[activeSymbol];
-          if (!cur || cur.status !== "playing") return prev;
-          return { ...prev, [activeSymbol]: { ...cur, status: "paused", time: cur.time } };
-        });
-      }
-    }
-  }, [timeMode, sim, coinTimelines, activeSymbol, setCoinTimelines]);
+    if (isPlaying) handlePause();
+  }, [isPlaying, handlePause]);
 
   const handleClosePositionForSymbol = useCallback(
     (symbol: string, index: number, percentage?: number) => {
