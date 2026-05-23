@@ -1,9 +1,9 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect, useRef } from 'react';
 import { usePersistedState } from '@/hooks/usePersistedState';
 import type { Position, PendingOrder, TradeRecord } from '@/types/trading';
 import { calcUnrealizedPnl, calcROE, calcLiquidationPrice, MAINTENANCE_MARGIN_RATE } from '@/types/trading';
 import type { PositionsMap, OrdersMap, PriceMap } from '@/contexts/TradingContext';
-import { X, Trash2, ArrowUpDown, ArrowUp, ArrowDown, Plus, MoreVertical, ChevronDown, ChevronRight, GripVertical } from 'lucide-react';
+import { X, Trash2, ArrowUpDown, ArrowUp, ArrowDown, Plus, MoreVertical, ChevronDown, ChevronRight, GripVertical, Check } from 'lucide-react';
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover';
 import { toast } from 'sonner';
 import { LeverageModal } from '@/components/LeverageModal';
@@ -24,6 +24,12 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select';
 import { Button } from '@/components/ui/button';
+import { useAuth } from '@/contexts/AuthContext';
+import { PostTradeReviewSheet } from '@/components/journal/PostTradeReviewSheet';
+import {
+  findUnreviewedJournalForClose, listJournals,
+} from '@/lib/journalApi';
+import type { TradeJournal } from '@/types/journal';
 
 interface Props {
   positionsMap: PositionsMap;
@@ -80,6 +86,74 @@ export function PositionPanel({
   const [historySort, setHistorySort] = useState<HistorySort>('time');
   const [historySymbolFilter, setHistorySymbolFilter] = useState<string>('ALL');
 
+  // ===== Post-trade review state =====
+  const { user } = useAuth();
+  const [reviewJournal, setReviewJournal] = useState<TradeJournal | null>(null);
+  const [reviewTradeRecord, setReviewTradeRecord] = useState<TradeRecord | null>(null);
+  const [reviewOpen, setReviewOpen] = useState(false);
+  const [journalsByTradeId, setJournalsByTradeId] = useState<Record<string, TradeJournal>>({});
+  const lastCloseIdRef = useRef<string | null>(null);
+  const initialLoadRef = useRef(false);
+
+  // Detect new CLOSE records and try to match an unreviewed pre-snapshot
+  useEffect(() => {
+    if (!user) return;
+    const closes = tradeHistory.filter(t => t.action === 'CLOSE' || t.action === 'LIQUIDATION');
+    if (closes.length === 0) return;
+    const latest = closes[closes.length - 1];
+    if (!initialLoadRef.current) {
+      initialLoadRef.current = true;
+      lastCloseIdRef.current = latest.id;
+      return;
+    }
+    if (lastCloseIdRef.current === latest.id) return;
+    lastCloseIdRef.current = latest.id;
+    const direction = latest.side === 'LONG' ? 'long' : 'short';
+    findUnreviewedJournalForClose(user.id, latest.symbol, direction, latest.entryPrice)
+      .then(j => {
+        if (j) {
+          setReviewJournal(j);
+          setReviewTradeRecord(latest);
+          setReviewOpen(true);
+        } else {
+          toast.info('该笔平仓未找到对应的开仓快照（历史遗留持仓）');
+        }
+      })
+      .catch(e => toast.error(e instanceof Error ? e.message : String(e)));
+  }, [tradeHistory, user]);
+
+  // Load all user journals for history-tab mapping (key by symbol+side+entry-price)
+  const [journalsByCompositeKey, setJournalsByCompositeKey] = useState<Record<string, TradeJournal>>({});
+  const reloadJournals = async () => {
+    if (!user) return;
+    try {
+      const all = await listJournals(user.id);
+      const map: Record<string, TradeJournal> = {};
+      const ckey: Record<string, TradeJournal> = {};
+      all.forEach(j => {
+        if (j.trade_record_id) map[j.trade_record_id] = j;
+        if (j.pre_entry_price != null && j.direction !== 'no_entry') {
+          const side = j.direction === 'long' ? 'LONG' : 'SHORT';
+          const k = `${j.symbol}_${side}_${j.pre_entry_price.toFixed(4)}`;
+          // keep latest unreviewed first
+          if (!ckey[k] || (!j.post_reviewed_at && ckey[k].post_reviewed_at)) ckey[k] = j;
+        }
+      });
+      setJournalsByTradeId(map);
+      setJournalsByCompositeKey(ckey);
+    } catch { /* silent */ }
+  };
+  useEffect(() => { reloadJournals(); /* eslint-disable-next-line */ }, [user]);
+
+  const unreviewedCount = useMemo(
+    () => Object.values(journalsByCompositeKey).filter(j => !j.post_reviewed_at).length,
+    [journalsByCompositeKey],
+  );
+
+  const lookupJournalForRecord = (t: TradeRecord): TradeJournal | null => {
+    const k = `${t.symbol}_${t.side}_${t.entryPrice.toFixed(4)}`;
+    return journalsByCompositeKey[k] ?? null;
+  };
 
   const toggleSort = (field: 'pnl' | 'pct') => {
     setHistorySort(prev => {
@@ -881,13 +955,18 @@ export function PositionPanel({
         {/* ===== POSITION HISTORY (仓位历史记录) ===== */}
         {activeTab === 'positionHistory' && (
           <div className="flex-1 overflow-y-auto scrollbar-pro min-h-0">
+            {unreviewedCount > 0 && (
+              <div className="bg-[#F0B90B]/10 border border-[#F0B90B]/30 rounded px-3 py-2 text-[11px] text-[#F0B90B] m-2">
+                你有 {unreviewedCount} 笔已平仓交易未评价。错题集只在评价后才会生效。
+              </div>
+            )}
             {tradeRecords.length === 0 ? (
               <div className="px-4 py-20 text-center text-xs text-gray-500 dark:text-[#848e9c]">暂无仓位历史记录</div>
             ) : (
               <table className="w-full text-[11px] font-mono tabular-nums">
                 <thead className="sticky top-0 bg-white dark:bg-[#1e2329] z-10">
                   <tr className="text-gray-500 dark:text-[#848e9c] border-b border-gray-200 dark:border-[#2b3139]">
-                    {['合约', '方向', '开仓均价', '平仓均价', '数量', '开仓时间', '平仓时间', '平仓盈亏', '收益率(ROE)'].map(h => (
+                    {['合约', '方向', '开仓均价', '平仓均价', '数量', '开仓时间', '平仓时间', '平仓盈亏', '收益率(ROE)', '评价状态'].map(h => (
                       <th key={h} className="px-3 py-1.5 text-left font-medium whitespace-nowrap">{h}</th>
                     ))}
                   </tr>
@@ -896,6 +975,7 @@ export function PositionPanel({
                   {tradeRecords.slice().reverse().slice(0, 100).map(t => {
                     const margin = (t.quantity * t.entryPrice) / t.leverage;
                     const roe = margin > 0 ? (t.pnl / margin) * 100 : 0;
+                    const matchedJ = lookupJournalForRecord(t);
                     return (
                       <tr key={t.id} className="border-b border-gray-100 dark:border-[#2b3139]/50">
                         <td className="px-3 py-2 text-gray-900 dark:text-white">{t.symbol?.replace('USDT', '/USDT') || '-'}</td>
@@ -916,6 +996,23 @@ export function PositionPanel({
                         </td>
                         <td className={`px-3 py-2 font-bold ${roe >= 0 ? 'text-[#0ecb81]' : 'text-[#f6465d]'}`}>
                           {roe >= 0 ? '+' : ''}{roe.toFixed(2)}%
+                        </td>
+                        <td className="px-3 py-2 w-[80px]">
+                          {!matchedJ ? (
+                            <span className="text-muted-foreground">—</span>
+                          ) : matchedJ.post_reviewed_at ? (
+                            <button
+                              onClick={() => { setReviewJournal(matchedJ); setReviewTradeRecord(t); setReviewOpen(true); }}
+                              className="flex items-center gap-1 text-[10px] text-muted-foreground hover:text-foreground"
+                            >
+                              <Check className="w-3 h-3 text-[#0ecb81]" /> 已评价
+                            </button>
+                          ) : (
+                            <Button
+                              onClick={() => { setReviewJournal(matchedJ); setReviewTradeRecord(t); setReviewOpen(true); }}
+                              className="h-6 px-2 text-[10px] bg-[#F0B90B] hover:bg-[#F0B90B]/90 text-black"
+                            >评价</Button>
+                          )}
                         </td>
                       </tr>
                     );
@@ -1195,6 +1292,15 @@ export function PositionPanel({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Post-trade review sheet */}
+      <PostTradeReviewSheet
+        isOpen={reviewOpen}
+        onOpenChange={setReviewOpen}
+        journal={reviewJournal}
+        tradeRecord={reviewTradeRecord}
+        onReviewed={() => { reloadJournals(); }}
+      />
     </div>
   );
 }

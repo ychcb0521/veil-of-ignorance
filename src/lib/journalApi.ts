@@ -9,6 +9,7 @@ import type {
   ErrorTagPattern,
   JournalTagAssignment,
   TaggedPhase,
+  TradeDirection,
   TradeJournal,
   TradeOutcome,
   TradingRule,
@@ -292,6 +293,159 @@ export interface CreateRuleInput {
   is_active?: boolean;
   trigger_threshold?: number;
 }
+
+// ============ Batch 3 additions ============
+
+export interface FinalizeJournalInput {
+  post_outcome: TradeOutcome;
+  post_realized_pnl: number | null;
+  post_r_multiple: number | null;
+  post_reflection: string;
+  post_correct_action: string;
+}
+
+export async function finalizeJournalReview(
+  journalId: string,
+  input: FinalizeJournalInput,
+): Promise<TradeJournal> {
+  const payload = { ...input, post_reviewed_at: new Date().toISOString() };
+  const { data, error } = await supabase
+    .from("trade_journals" as never)
+    .update(payload as never)
+    .eq("id", journalId)
+    .select()
+    .single();
+  return wrap("提交平仓评价", error, data as unknown as TradeJournal);
+}
+
+export async function listJournalsByTradeRecordId(
+  userId: string,
+  tradeRecordId: string,
+): Promise<TradeJournal[]> {
+  const { data, error } = await supabase
+    .from("trade_journals" as never)
+    .select("*")
+    .eq("user_id", userId)
+    .eq("trade_record_id", tradeRecordId);
+  return wrap("按交易记录查询日记", error, data as unknown as TradeJournal[]);
+}
+
+export async function findUnreviewedJournals(userId: string): Promise<TradeJournal[]> {
+  const { data, error } = await supabase
+    .from("trade_journals" as never)
+    .select("*")
+    .eq("user_id", userId)
+    .not("trade_record_id", "is", null)
+    .is("post_reviewed_at", null)
+    .order("pre_simulated_time", { ascending: false });
+  return wrap("查询未评价日记", error, data as unknown as TradeJournal[]);
+}
+
+/**
+ * 通过 symbol + direction + 入场价 匹配最近一笔未评价 journal（CLOSE 触发时使用）
+ */
+export async function findUnreviewedJournalForClose(
+  userId: string,
+  symbol: string,
+  direction: TradeDirection,
+  entryPrice: number,
+): Promise<TradeJournal | null> {
+  const { data, error } = await supabase
+    .from("trade_journals" as never)
+    .select("*")
+    .eq("user_id", userId)
+    .eq("symbol", symbol)
+    .eq("direction", direction)
+    .is("post_reviewed_at", null)
+    .order("pre_simulated_time", { ascending: false })
+    .limit(20);
+  if (error) {
+    console.error("[journalApi] 匹配未评价日记失败:", error);
+    throw new Error(`匹配未评价日记失败：${error.message}`);
+  }
+  const rows = (data ?? []) as unknown as TradeJournal[];
+  if (rows.length === 0) return null;
+  // 按入场价接近度排序，取最接近的
+  const tolerance = Math.max(entryPrice * 0.005, 0.5);
+  const matched = rows
+    .filter(r => r.pre_entry_price != null && Math.abs(r.pre_entry_price - entryPrice) <= tolerance)
+    .sort(
+      (a, b) =>
+        Math.abs((a.pre_entry_price ?? 0) - entryPrice) -
+        Math.abs((b.pre_entry_price ?? 0) - entryPrice),
+    );
+  return matched[0] ?? rows[0] ?? null;
+}
+
+export interface BulkTagInput {
+  patternId: string;
+  phase: TaggedPhase;
+  note?: string | null;
+}
+
+export async function bulkAssignTags(
+  journalId: string,
+  assignments: BulkTagInput[],
+): Promise<void> {
+  if (assignments.length === 0) return;
+  const { data: userData } = await supabase.auth.getUser();
+  const userId = userData.user?.id;
+  if (!userId) throw new Error("打标签失败：用户未登录");
+
+  const rows = assignments.map(a => ({
+    user_id: userId,
+    journal_id: journalId,
+    pattern_id: a.patternId,
+    tagged_phase: a.phase,
+    note: a.note ?? null,
+  }));
+  const { error } = await supabase
+    .from("journal_tag_assignments" as never)
+    .upsert(rows as never, { onConflict: "journal_id,pattern_id,tagged_phase" });
+  if (error) {
+    console.error("[journalApi] 批量打标签失败:", error);
+    throw new Error(`批量打标签失败：${error.message}`);
+  }
+}
+
+/**
+ * 替换某 journal 在指定 phase 下的所有标签（保存评价时使用）。
+ */
+export async function replacePhaseAssignments(
+  journalId: string,
+  phase: TaggedPhase,
+  assignments: BulkTagInput[],
+): Promise<void> {
+  const { error: delErr } = await supabase
+    .from("journal_tag_assignments" as never)
+    .delete()
+    .eq("journal_id", journalId)
+    .eq("tagged_phase", phase);
+  if (delErr) {
+    console.error("[journalApi] 清除旧标签失败:", delErr);
+    throw new Error(`清除旧标签失败：${delErr.message}`);
+  }
+  await bulkAssignTags(journalId, assignments);
+}
+
+export async function countPatternOccurrencesLast30Days(
+  userId: string,
+  patternId: string,
+): Promise<number> {
+  const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+  const { count, error } = await supabase
+    .from("journal_tag_assignments" as never)
+    .select("*", { count: "exact", head: true })
+    .eq("user_id", userId)
+    .eq("pattern_id", patternId)
+    .gte("created_at", since);
+  if (error) {
+    console.error("[journalApi] 统计模式 30 天频次失败:", error);
+    throw new Error(`统计模式频次失败：${error.message}`);
+  }
+  return count ?? 0;
+}
+
 
 export async function createRule(input: CreateRuleInput): Promise<TradingRule> {
   const { data, error } = await supabase

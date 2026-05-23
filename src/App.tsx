@@ -9,6 +9,7 @@ import { TradingProvider } from "@/contexts/TradingContext";
 import Index from "./pages/Index.tsx";
 import AuthPage from "./pages/AuthPage.tsx";
 import OnboardingPage from "./pages/OnboardingPage.tsx";
+import JournalTagsPage from "./pages/JournalTagsPage.tsx";
 import NotFound from "./pages/NotFound.tsx";
 
 const queryClient = new QueryClient();
@@ -50,6 +51,7 @@ function AppRoutes() {
     <TradingProvider>
       <Routes>
         <Route path="/" element={<Index />} />
+        <Route path="/journal/tags" element={<JournalTagsPage />} />
         <Route path="*" element={<NotFound />} />
       </Routes>
     </TradingProvider>
