@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Play, Pause, Square, Clock, Globe, Split, Lock } from 'lucide-react';
+import { Play, Pause, Square, Clock, Globe, Split, Lock, BookmarkX } from 'lucide-react';
 import { toast } from 'sonner';
 import { formatUTC8 } from '@/lib/timeFormat';
 import {
@@ -12,6 +12,8 @@ import {
 } from '@/components/ui/dialog';
 import type { TimeMachineStatus } from '@/hooks/useTimeSimulator';
 import type { TimeMode, CoinTimelinesMap } from '@/contexts/TradingContext';
+import { useTradingContext } from '@/contexts/TradingContext';
+import { PreTradeSnapshotDialog } from '@/components/journal/PreTradeSnapshotDialog';
 
 interface Props {
   status: TimeMachineStatus;
