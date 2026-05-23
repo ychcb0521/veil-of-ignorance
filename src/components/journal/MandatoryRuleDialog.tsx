@@ -38,12 +38,9 @@ export function MandatoryRuleDialog({ info, userId, onResolved }: Props) {
         rule_text: text.trim(),
         is_active: true,
       });
-      // Mark added to checklist + required
-      await fetch; // no-op for linter; actual update via updateRule
-      await import('@/lib/journalApi').then(api =>
-        api.updateRule(rule.id, { added_to_checklist: true, required: required === 'true' }),
-      );
+      await updateRule(rule.id, { added_to_checklist: true, required: required === 'true' });
       await markRuleAddedToChecklist(rule.id).catch(() => {});
+
       toast.success('规则已写入 checklist');
       setText(''); setRequired('true');
       onResolved();
