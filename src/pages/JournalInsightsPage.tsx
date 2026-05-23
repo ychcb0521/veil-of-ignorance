@@ -87,7 +87,12 @@ export default function JournalInsightsPage() {
         return { rule: r, pattern, before, after, delta: after - before };
       });
 
-    return { cur, curClusters, trend, timeDist, mentalDist, outcome, alphaHours, ruleEffect };
+    // 深度分析完成率：六步全填的占已评价 journal 比
+    const reviewed = cur.filter(j => !!j.post_reviewed_at);
+    const deepDone = reviewed.filter(j => !!j.deep_analysis_completed_at);
+    const deepRate = reviewed.length === 0 ? 0 : deepDone.length / reviewed.length;
+
+    return { cur, curClusters, trend, timeDist, mentalDist, outcome, alphaHours, ruleEffect, reviewed, deepDone, deepRate };
   }, [data, range]);
 
   if (loading || !data || !stats) {
@@ -117,11 +122,17 @@ export default function JournalInsightsPage() {
 
       <main className="max-w-[1400px] mx-auto px-6 py-4 space-y-4">
         {/* Overview */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
           <StatCard label="总交易" value={stats.cur.length.toString()} />
           <StatCard label="胜率" value={`${(stats.outcome.win_rate * 100).toFixed(0)}%`} accent={stats.outcome.win_rate >= 0.5 ? '#0ECB81' : '#F6465D'} />
           <StatCard label="期望 R" value={stats.outcome.expectancy.toFixed(2)} accent={stats.outcome.expectancy >= 0 ? '#0ECB81' : '#F6465D'} />
           <StatCard label="错误模式数" value={stats.curClusters.length.toString()} />
+          <StatCard
+            label="深度分析完成率"
+            value={`${(stats.deepRate * 100).toFixed(0)}%`}
+            accent={stats.deepRate >= 0.5 ? '#0ECB81' : stats.deepRate > 0 ? '#F0B90B' : '#848E9C'}
+            sub={`${stats.deepDone.length}/${stats.reviewed.length}`}
+          />
         </div>
 
         {/* Pattern trend */}
@@ -203,20 +214,27 @@ export default function JournalInsightsPage() {
           ) : (
             <table className="w-full text-[11px]">
               <thead className="text-muted-foreground bg-[#0B0E11]">
-                <tr><th className="text-left px-3 py-1.5">规则</th><th className="text-left px-3">来源模式</th><th className="text-right px-3">规则前</th><th className="text-right px-3">规则后</th><th className="text-right px-3 pr-3">Δ</th></tr>
+                <tr><th className="text-left px-3 py-1.5">规则</th><th className="text-left px-3">来源</th><th className="text-left px-3">来源模式</th><th className="text-right px-3">规则前</th><th className="text-right px-3">规则后</th><th className="text-right px-3 pr-3">Δ</th></tr>
               </thead>
               <tbody className="font-mono">
-                {stats.ruleEffect.map(e => (
-                  <tr key={e.rule.id} className="border-t border-[#2B3139]">
-                    <td className="px-3 py-1.5 text-foreground truncate max-w-[300px]">{e.rule.rule_text}</td>
-                    <td className="px-3 text-muted-foreground">{e.pattern?.pattern_name ?? '—'}</td>
-                    <td className="text-right px-3">{e.before}</td>
-                    <td className="text-right px-3">{e.after}</td>
-                    <td className={`text-right px-3 pr-3 ${e.delta < 0 ? 'text-[#0ECB81]' : e.delta > 0 ? 'text-[#F6465D]' : 'text-muted-foreground'}`}>
-                      {e.delta > 0 ? '+' : ''}{e.delta}
-                    </td>
-                  </tr>
-                ))}
+                {stats.ruleEffect.map(e => {
+                  const sourceLabel = e.rule.source_pattern_id ? '模式触发' : '手动';
+                  const sourceColor = e.rule.source_pattern_id ? 'bg-[#F0B90B]/15 text-[#F0B90B]' : 'bg-[#2B3139] text-muted-foreground';
+                  return (
+                    <tr key={e.rule.id} className="border-t border-[#2B3139]">
+                      <td className="px-3 py-1.5 text-foreground truncate max-w-[300px]">{e.rule.rule_text}</td>
+                      <td className="px-3">
+                        <span className={`inline-block rounded px-1.5 py-0.5 text-[10px] ${sourceColor}`}>{sourceLabel}</span>
+                      </td>
+                      <td className="px-3 text-muted-foreground">{e.pattern?.pattern_name ?? '—'}</td>
+                      <td className="text-right px-3">{e.before}</td>
+                      <td className="text-right px-3">{e.after}</td>
+                      <td className={`text-right px-3 pr-3 ${e.delta < 0 ? 'text-[#0ECB81]' : e.delta > 0 ? 'text-[#F6465D]' : 'text-muted-foreground'}`}>
+                        {e.delta > 0 ? '+' : ''}{e.delta}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           )}
@@ -226,11 +244,12 @@ export default function JournalInsightsPage() {
   );
 }
 
-function StatCard({ label, value, accent }: { label: string; value: string; accent?: string }) {
+function StatCard({ label, value, accent, sub }: { label: string; value: string; accent?: string; sub?: string }) {
   return (
     <div className="border border-[#2B3139] rounded bg-[#181A20] p-3">
       <div className="text-[10px] text-muted-foreground">{label}</div>
       <div className="text-[22px] font-mono mt-1" style={{ color: accent }}>{value}</div>
+      {sub && <div className="text-[10px] text-muted-foreground font-mono mt-0.5">{sub}</div>}
     </div>
   );
 }

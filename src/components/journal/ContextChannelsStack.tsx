@@ -289,10 +289,9 @@ function CounterfactualChannel({ journal, klines, selectedBranchId, onSelectBran
     return journal.deep_analysis_completed_at ? { at: journal.deep_analysis_completed_at } : null;
   }, [journal.deep_analysis_completed_at]);
 
-  const handleSaveRule = async (_text: string, required: boolean) => {
+  const handleSaveRule = async (_text: string, required: boolean, sourcePatternId: string | null) => {
     try {
       await updateJournalDeepAnalysis(journal.id, sixStep);
-      const sourcePatternId = tags.length === 1 ? tags[0].id : null;
       await promoteDraftToRule(journal.id, { required, sourcePatternId });
       toast.success('已写入 checklist');
       const fresh = await getJournalById(journal.id);

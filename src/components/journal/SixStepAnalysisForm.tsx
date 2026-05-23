@@ -71,7 +71,7 @@ const STEPS: StepDef[] = [
 interface Props {
   value: SixStepValue;
   onChange: (next: SixStepValue) => void;
-  onSaveRule?: (ruleText: string, required: boolean) => Promise<void>;
+  onSaveRule?: (ruleText: string, required: boolean, sourcePatternId: string | null) => Promise<void>;
   ruleSaved?: { at: string } | null;
   patternChips?: { id: string; name: string }[];
   readonly?: boolean;
@@ -84,6 +84,7 @@ export function SixStepAnalysisForm({
   const [saving, setSaving] = useState(false);
   const [required, setRequired] = useState(true);
   const [justSaved, setJustSaved] = useState<{ at: string } | null>(null);
+  const [selectedPatternId, setSelectedPatternId] = useState<string | null>(null);
 
   const completed = useMemo(
     () => STEPS.filter(s => (value[s.key] ?? '').trim().length >= s.minLength).length,
@@ -95,13 +96,19 @@ export function SixStepAnalysisForm({
 
   const step6Saved = ruleSaved ?? justSaved;
   const step6Text = value.post_new_rule_draft.trim();
-  const canSaveRule = !saving && step6Text.length >= 15 && !step6Saved;
+  const multiTag = (patternChips?.length ?? 0) > 1;
+  const needsPick = multiTag && selectedPatternId === null;
+  const canSaveRule = !saving && step6Text.length >= 15 && !step6Saved && !needsPick;
 
   const handleSaveRule = async () => {
     if (!onSaveRule || !canSaveRule) return;
+    let sourceId: string | null;
+    if (!patternChips || patternChips.length === 0) sourceId = null;
+    else if (patternChips.length === 1) sourceId = patternChips[0].id;
+    else sourceId = selectedPatternId === '__none__' ? null : selectedPatternId;
     setSaving(true);
     try {
-      await onSaveRule(step6Text, required);
+      await onSaveRule(step6Text, required, sourceId);
       setJustSaved({ at: new Date().toISOString() });
     } finally {
       setSaving(false);
@@ -171,29 +178,57 @@ export function SixStepAnalysisForm({
             )}
 
             {isStep6 && !readonly && onSaveRule && (
-              <div className="mt-2 pl-2 flex items-center gap-3">
-                <label className="flex items-center gap-1.5 text-[11px] cursor-pointer">
-                  <Checkbox
-                    checked={required}
-                    disabled={!!step6Saved}
-                    onCheckedChange={v => setRequired(!!v)}
-                  />
-                  <span>设为必填项</span>
-                </label>
-                {step6Saved ? (
-                  <span className="text-[10px] text-[#0ECB81] font-mono">
-                    ✓ 已写入 {new Date(step6Saved.at).toLocaleString('zh-CN', { hour: '2-digit', minute: '2-digit', month: '2-digit', day: '2-digit' })}
-                  </span>
-                ) : (
-                  <Button
-                    size="sm"
-                    disabled={!canSaveRule}
-                    onClick={handleSaveRule}
-                    className="h-7 text-[10px] bg-[#F0B90B] hover:bg-[#F0B90B]/90 text-black disabled:opacity-40"
-                  >
-                    {saving ? '写入中…' : '写入 checklist'}
-                  </Button>
+              <div className="mt-2 pl-2 space-y-2">
+                {multiTag && !step6Saved && (
+                  <div className="space-y-1">
+                    <div className="text-[10px] text-muted-foreground">
+                      该笔关联多个错误模式，请选择此规则来自哪个（用于规则有效性追踪）：
+                    </div>
+                    <div className="flex flex-wrap gap-1">
+                      <button
+                        type="button"
+                        onClick={() => setSelectedPatternId('__none__')}
+                        className={`text-[10px] rounded-full px-2 py-0.5 border ${selectedPatternId === '__none__' ? 'bg-[#F0B90B] text-black border-[#F0B90B]' : 'bg-[#0B0E11] border-[#2B3139] text-muted-foreground hover:text-foreground'}`}
+                      >
+                        通用 / 不绑定
+                      </button>
+                      {patternChips!.map(c => (
+                        <button
+                          key={c.id}
+                          type="button"
+                          onClick={() => setSelectedPatternId(c.id)}
+                          className={`text-[10px] rounded-full px-2 py-0.5 border ${selectedPatternId === c.id ? 'bg-[#F0B90B] text-black border-[#F0B90B]' : 'bg-[#0B0E11] border-[#2B3139] text-muted-foreground hover:text-foreground'}`}
+                        >
+                          {c.name}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
                 )}
+                <div className="flex items-center gap-3">
+                  <label className="flex items-center gap-1.5 text-[11px] cursor-pointer">
+                    <Checkbox
+                      checked={required}
+                      disabled={!!step6Saved}
+                      onCheckedChange={v => setRequired(!!v)}
+                    />
+                    <span>设为必填项</span>
+                  </label>
+                  {step6Saved ? (
+                    <span className="text-[10px] text-[#0ECB81] font-mono">
+                      ✓ 已写入 {new Date(step6Saved.at).toLocaleString('zh-CN', { hour: '2-digit', minute: '2-digit', month: '2-digit', day: '2-digit' })}
+                    </span>
+                  ) : (
+                    <Button
+                      size="sm"
+                      disabled={!canSaveRule}
+                      onClick={handleSaveRule}
+                      className="h-7 text-[10px] bg-[#F0B90B] hover:bg-[#F0B90B]/90 text-black disabled:opacity-40"
+                    >
+                      {saving ? '写入中…' : needsPick ? '请先选择来源' : '写入 checklist'}
+                    </Button>
+                  )}
+                </div>
               </div>
             )}
           </div>
