@@ -4,7 +4,7 @@
  */
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft } from 'lucide-react';
+import { BackButton } from '@/components/journal/BackButton';
 import { toast } from 'sonner';
 import { useAuth } from '@/contexts/AuthContext';
 import {
@@ -100,12 +100,10 @@ export default function JournalInsightsPage() {
 
   return (
     <div className="min-h-screen bg-[#0B0E11] text-foreground">
-      <header className="sticky top-0 z-10 bg-[#0B0E11] border-b border-[#2B3139]">
+      <header className="sticky top-0 z-20 bg-[#0B0E11]/95 backdrop-blur-sm border-b border-[#2B3139]">
         <div className="px-6 py-3 max-w-[1400px] mx-auto flex items-center gap-3">
-          <button onClick={() => nav('/journal')} className="text-muted-foreground hover:text-foreground flex items-center gap-1 text-[12px]">
-            <ArrowLeft className="w-4 h-4" /> 错题集
-          </button>
-          <h1 className="text-[14px] font-medium ml-2">元监控</h1>
+          <BackButton />
+          <h1 className="text-[14px] font-medium">元监控</h1>
           <div className="ml-auto flex gap-1">
             {[7, 30, 90].map(r => (
               <button key={r} onClick={() => setRange(r as Range)}
