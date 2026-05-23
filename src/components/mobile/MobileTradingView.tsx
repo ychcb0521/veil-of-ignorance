@@ -55,6 +55,7 @@ export function MobileTradingView({
           onPlaceOrder={onPlaceOrder}
           disabled={disabled}
           symbol={symbol}
+          onAutoPauseTimeMachine={onAutoPauseTimeMachine}
         />
 
         {/* Position panel */}
