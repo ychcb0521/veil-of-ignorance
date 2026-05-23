@@ -122,11 +122,17 @@ export default function JournalInsightsPage() {
 
       <main className="max-w-[1400px] mx-auto px-6 py-4 space-y-4">
         {/* Overview */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
           <StatCard label="总交易" value={stats.cur.length.toString()} />
           <StatCard label="胜率" value={`${(stats.outcome.win_rate * 100).toFixed(0)}%`} accent={stats.outcome.win_rate >= 0.5 ? '#0ECB81' : '#F6465D'} />
           <StatCard label="期望 R" value={stats.outcome.expectancy.toFixed(2)} accent={stats.outcome.expectancy >= 0 ? '#0ECB81' : '#F6465D'} />
           <StatCard label="错误模式数" value={stats.curClusters.length.toString()} />
+          <StatCard
+            label="深度分析完成率"
+            value={`${(stats.deepRate * 100).toFixed(0)}%`}
+            accent={stats.deepRate >= 0.5 ? '#0ECB81' : stats.deepRate > 0 ? '#F0B90B' : '#848E9C'}
+            sub={`${stats.deepDone.length}/${stats.reviewed.length}`}
+          />
         </div>
 
         {/* Pattern trend */}
