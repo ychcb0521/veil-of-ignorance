@@ -519,3 +519,117 @@ export async function listAllJournalDataForUser(
     rules: (rr.data ?? []) as unknown as TradingRule[],
   };
 }
+
+// ============ Batch 6: Counterfactual branches ============
+
+const MAX_BRANCHES = 10;
+
+export async function appendCounterfactualBranch(
+  journalId: string,
+  branch: { label: string; params: CounterfactualBranchParams; result: CounterfactualBranchResult },
+): Promise<TradeJournal> {
+  const { data: current, error: gErr } = await supabase
+    .from("trade_journals" as never)
+    .select("counterfactual_branches")
+    .eq("id", journalId)
+    .single();
+  if (gErr) throw new Error(`读取分支失败：${gErr.message}`);
+  const rawBranches = ((current as unknown as { counterfactual_branches?: CounterfactualBranch[] })?.counterfactual_branches) ?? [];
+  const existing: CounterfactualBranch[] = Array.isArray(rawBranches) ? rawBranches : [];
+  const newBranch: CounterfactualBranch = {
+    id: crypto.randomUUID(),
+    label: branch.label.slice(0, 20),
+    created_at: new Date().toISOString(),
+    params: branch.params,
+    result: branch.result,
+  };
+  let next = [...existing, newBranch];
+  if (next.length > MAX_BRANCHES) {
+    next = next.sort((a, b) => a.created_at.localeCompare(b.created_at)).slice(next.length - MAX_BRANCHES);
+  }
+  const { data, error } = await supabase
+    .from("trade_journals" as never)
+    .update({ counterfactual_branches: next } as never)
+    .eq("id", journalId)
+    .select()
+    .single();
+  return wrap("保存反事实分支", error, data as unknown as TradeJournal);
+}
+
+export async function deleteCounterfactualBranch(
+  journalId: string,
+  branchId: string,
+): Promise<TradeJournal> {
+  const { data: current, error: gErr } = await supabase
+    .from("trade_journals" as never)
+    .select("counterfactual_branches")
+    .eq("id", journalId)
+    .single();
+  if (gErr) throw new Error(`读取分支失败：${gErr.message}`);
+  const existing = (((current as unknown as { counterfactual_branches?: CounterfactualBranch[] })?.counterfactual_branches) ?? []) as CounterfactualBranch[];
+  const next = existing.filter(b => b.id !== branchId);
+  const { data, error } = await supabase
+    .from("trade_journals" as never)
+    .update({ counterfactual_branches: next } as never)
+    .eq("id", journalId)
+    .select()
+    .single();
+  return wrap("删除反事实分支", error, data as unknown as TradeJournal);
+}
+
+// ============ Batch 6: Rule management ============
+
+export async function updateRule(
+  ruleId: string,
+  patch: Partial<Pick<TradingRule, "rule_text" | "is_active" | "required" | "added_to_checklist" | "ui_order" | "snooze_until">>,
+): Promise<TradingRule> {
+  const { data, error } = await supabase
+    .from("trading_rules" as never)
+    .update(patch as never)
+    .eq("id", ruleId)
+    .select()
+    .single();
+  return wrap("更新规则", error, data as unknown as TradingRule);
+}
+
+export async function deleteRule(ruleId: string): Promise<void> {
+  const { error } = await supabase
+    .from("trading_rules" as never)
+    .delete()
+    .eq("id", ruleId);
+  if (error) throw new Error(`删除规则失败：${error.message}`);
+}
+
+export async function snoozeRulePattern(
+  userId: string,
+  patternId: string,
+  hours: number,
+): Promise<void> {
+  // Create a placeholder dismissed rule to capture snooze for this pattern
+  const snoozeUntil = new Date(Date.now() + hours * 3600_000).toISOString();
+  // Find existing rule for this pattern (any state) or create disabled placeholder
+  const { data: existing } = await supabase
+    .from("trading_rules" as never)
+    .select("*")
+    .eq("user_id", userId)
+    .eq("source_pattern_id", patternId)
+    .order("created_at", { ascending: false })
+    .limit(1);
+  const row = (existing as unknown as TradingRule[] | null)?.[0];
+  if (row) {
+    await updateRule(row.id, { snooze_until: snoozeUntil });
+  } else {
+    const { error } = await supabase
+      .from("trading_rules" as never)
+      .insert({
+        user_id: userId,
+        source_pattern_id: patternId,
+        rule_text: "[延后]",
+        is_active: false,
+        added_to_checklist: false,
+        snooze_until: snoozeUntil,
+        required: false,
+      } as never);
+    if (error) throw new Error(`延后失败：${error.message}`);
+  }
+}
