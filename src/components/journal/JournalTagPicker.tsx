@@ -91,7 +91,7 @@ export function JournalTagPicker({
   const n = selectedPatternIds.length;
 
   return (
-    <div className={`bg-[#0B0E11] border border-[#2B3139] rounded p-3 max-h-[400px] overflow-y-auto ${disabled ? 'opacity-50 pointer-events-none' : ''}`}>
+    <div className={`bg-background border border-border rounded p-3 max-h-[400px] overflow-y-auto ${disabled ? 'opacity-50 pointer-events-none' : ''}`}>
       {categories.map(c => {
         const items = grouped.get(c.id) ?? [];
         const isCollapsed = collapsed[c.id];
@@ -100,7 +100,7 @@ export function JournalTagPicker({
             <button
               type="button"
               onClick={() => setCollapsed(prev => ({ ...prev, [c.id]: !prev[c.id] }))}
-              className="w-full flex items-center justify-between py-1.5 hover:bg-[#181A20] rounded px-1"
+              className="w-full flex items-center justify-between py-1.5 hover:bg-card rounded px-1"
             >
               <div className="flex items-center gap-2">
                 <span className="w-2.5 h-2.5 rounded-full" style={{ background: c.color }} />
@@ -120,7 +120,7 @@ export function JournalTagPicker({
                   return (
                     <div key={p.id}>
                       <div
-                        className="flex items-center gap-2 h-7 px-1 hover:bg-[#181A20] rounded cursor-pointer"
+                        className="flex items-center gap-2 h-7 px-1 hover:bg-card rounded cursor-pointer"
                         onClick={() => toggleSelect(p.id)}
                       >
                         <Checkbox checked={checked} className="h-3.5 w-3.5" />
@@ -133,7 +133,7 @@ export function JournalTagPicker({
                           value={notes[p.id] ?? ''}
                           onChange={e => setNote(p.id, e.target.value)}
                           placeholder="本次的具体备注（可选）"
-                          className="h-9 min-h-[36px] my-1 ml-5 text-[11px] bg-[#0B0E11] border-[#2B3139]/60 resize-none"
+                          className="h-9 min-h-[36px] my-1 ml-5 text-[11px] bg-background border-border/60 resize-none"
                         />
                       )}
                     </div>
@@ -151,7 +151,7 @@ export function JournalTagPicker({
           </div>
         );
       })}
-      <div className={`mt-2 pt-2 border-t border-[#2B3139] text-[10px] font-mono ${n === 0 ? 'text-[#F6465D]' : 'text-muted-foreground'}`}>
+      <div className={`mt-2 pt-2 border-t border-border text-[10px] font-mono ${n === 0 ? 'text-[#F6465D]' : 'text-muted-foreground'}`}>
         {n === 0 ? '未选任何标签——请确认本次确实无错误，或新增一个模式' : `已选 ${n} 个错误模式`}
       </div>
       <NewPatternDialog

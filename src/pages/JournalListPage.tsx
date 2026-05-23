@@ -97,7 +97,7 @@ export default function JournalListPage() {
 
   if (loading || !data) {
     return (
-      <div className="min-h-screen bg-[#0B0E11] flex items-center justify-center">
+      <div className="min-h-screen bg-background flex items-center justify-center">
         <div className="text-muted-foreground text-sm font-mono">加载中…</div>
       </div>
     );
@@ -113,15 +113,15 @@ export default function JournalListPage() {
   );
 
   return (
-    <div className="min-h-screen bg-[#0B0E11] text-foreground">
+    <div className="min-h-screen bg-background text-foreground">
       {/* Header */}
-      <header className="sticky top-0 z-20 bg-[#0B0E11]/95 backdrop-blur-sm border-b border-[#2B3139]">
+      <header className="sticky top-0 z-20 bg-background/95 backdrop-blur-sm border-b border-border">
         <div className="px-6 py-3 max-w-[1600px] mx-auto flex items-center gap-3">
           <BackButton />
           <h1 className="text-[14px] font-medium">错题集</h1>
           <div className="flex-1" />
           <Tabs value={view} onValueChange={setView}>
-            <TabsList className="h-8 bg-[#181A20]">
+            <TabsList className="h-8 bg-card">
               <TabsTrigger value="patterns" className="text-[12px] h-7 px-3">按模式</TabsTrigger>
               <TabsTrigger value="timeline" className="text-[12px] h-7 px-3">按时间</TabsTrigger>
               <TabsTrigger value="unreviewed" className="text-[12px] h-7 px-3">未评价</TabsTrigger>
@@ -168,7 +168,7 @@ export default function JournalListPage() {
                       ['recent', '最近'],
                     ] as [SortKey, string][]).map(([k, l]) => (
                       <button key={k} onClick={() => setSortKey(k)}
-                        className={`h-6 px-2 rounded ${sortKey === k ? 'bg-[#F0B90B] text-black' : 'bg-[#2B3139] text-foreground hover:bg-[#363c45]'}`}>
+                        className={`h-6 px-2 rounded ${sortKey === k ? 'bg-[#F0B90B] text-black' : 'bg-muted text-foreground hover:bg-[#363c45]'}`}>
                         {l}
                       </button>
                     ))}
@@ -182,7 +182,7 @@ export default function JournalListPage() {
                 </div>
 
                 {clusters.length === 0 ? (
-                  <div className="border border-[#2B3139] rounded p-10 text-center">
+                  <div className="border border-border rounded p-10 text-center">
                     <div className="text-[40px] mb-2">📚</div>
                     <div className="text-[12px] text-muted-foreground">
                       尚无可聚类的错误模式 — 完成首笔交易评价后这里会有内容

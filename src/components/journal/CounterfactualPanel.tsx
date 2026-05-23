@@ -112,11 +112,11 @@ export function CounterfactualPanel({ journal, klines, selectedBranchId, onSelec
     ? Math.round((tradeRecord.closeTime - new Date(journal.pre_simulated_time).getTime()) / 60_000)
     : null;
 
-  const inputCls = 'h-8 px-2 bg-[#0B0E11] border border-[#2B3139] rounded text-[11px] font-mono text-foreground w-full';
+  const inputCls = 'h-8 px-2 bg-background border border-border rounded text-[11px] font-mono text-foreground w-full';
 
   return (
     <div className="space-y-3">
-      <div className="rounded border border-[#2B3139] p-2 space-y-2">
+      <div className="rounded border border-border p-2 space-y-2">
         <div className="text-[11px] text-muted-foreground">运行反事实分支</div>
 
         <div>
@@ -126,7 +126,7 @@ export function CounterfactualPanel({ journal, klines, selectedBranchId, onSelec
             className={inputCls} />
         </div>
 
-        <div className="flex items-center justify-between gap-2 bg-[#0B0E11] rounded px-2 py-1.5">
+        <div className="flex items-center justify-between gap-2 bg-background rounded px-2 py-1.5">
           <Label className="text-[11px]">改为不开仓</Label>
           <Switch checked={noEntry} onCheckedChange={setNoEntry} />
         </div>
@@ -173,7 +173,7 @@ export function CounterfactualPanel({ journal, klines, selectedBranchId, onSelec
               return (
                 <div
                   key={b.id}
-                  className={`bg-[#2B3139] rounded px-2 py-1 text-[11px] flex items-center gap-2 cursor-pointer
+                  className={`bg-muted rounded px-2 py-1 text-[11px] flex items-center gap-2 cursor-pointer
                     ${active ? 'ring-1 ring-[#B080FF]' : 'hover:bg-[#363c45]'}`}
                   onClick={() => onSelectBranch(active ? null : b.id)}
                   onContextMenu={e => { e.preventDefault(); if (confirm(`删除分支「${b.label}」？`)) handleDelete(b.id); }}

@@ -33,8 +33,8 @@ export function UnreviewedJournalList({ journals, onReviewed }: Props) {
         未评价的交易不计入错题模式统计。请尽快补完。
       </div>
 
-      <div className="bg-[#181A20] border border-[#2B3139] rounded">
-        <div className="grid grid-cols-[110px_80px_60px_50px_80px_100px] text-[10px] text-muted-foreground bg-[#0B0E11] px-3 py-1.5 sticky top-0">
+      <div className="bg-card border border-border rounded">
+        <div className="grid grid-cols-[110px_80px_60px_50px_80px_100px] text-[10px] text-muted-foreground bg-background px-3 py-1.5 sticky top-0">
           <span>时间</span><span>标的</span><span>方向</span><span>心态</span>
           <span>入场价</span><span>操作</span>
         </div>
@@ -42,7 +42,7 @@ export function UnreviewedJournalList({ journals, onReviewed }: Props) {
           <div className="px-3 py-8 text-center text-[11px] text-muted-foreground">没有未评价的交易 🎉</div>
         )}
         {unreviewed.map(j => (
-          <div key={j.id} className="grid grid-cols-[110px_80px_60px_50px_80px_100px] px-3 py-1.5 text-[11px] font-mono border-b border-[#2B3139]/40 hover:bg-[#1E2026] items-center">
+          <div key={j.id} className="grid grid-cols-[110px_80px_60px_50px_80px_100px] px-3 py-1.5 text-[11px] font-mono border-b border-border/40 hover:bg-accent items-center">
             <span className="flex items-center gap-1">
               {j.reason_was_rewritten && <AlertTriangle className="w-3 h-3 text-[#F0B90B]" />}
               {fmtTime(j.pre_simulated_time)}

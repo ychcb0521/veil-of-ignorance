@@ -48,14 +48,14 @@ export function JournalFilterBar({ journals, categories }: Props) {
   const reset = () => setParams(new URLSearchParams(), { replace: true });
 
   return (
-    <div className="bg-[#181A20] border-b border-[#2B3139]">
+    <div className="bg-card border-b border-border">
       <div className="px-6 py-2 max-w-[1600px] mx-auto flex flex-wrap items-center gap-3 text-[11px]">
         <div className="flex items-center gap-1">
           <span className="text-muted-foreground">区间</span>
           {PRESETS.map(p => (
             <button key={p.key}
               onClick={() => update({ range: p.key === '30d' ? undefined : p.key })}
-              className={`h-6 px-2 rounded ${range === p.key ? 'bg-[#F0B90B] text-black' : 'bg-[#2B3139] text-foreground hover:bg-[#363c45]'}`}>
+              className={`h-6 px-2 rounded ${range === p.key ? 'bg-[#F0B90B] text-black' : 'bg-muted text-foreground hover:bg-[#363c45]'}`}>
               {p.label}
             </button>
           ))}
@@ -74,13 +74,13 @@ export function JournalFilterBar({ journals, categories }: Props) {
           <span className="text-muted-foreground">心态</span>
           <select value={mentalMin}
             onChange={e => update({ mmin: e.target.value === '1' ? undefined : e.target.value })}
-            className="h-6 bg-[#2B3139] rounded px-1 text-[11px]">
+            className="h-6 bg-muted rounded px-1 text-[11px]">
             {[1, 2, 3, 4, 5].map(n => <option key={n} value={n}>{n}</option>)}
           </select>
           <span className="text-muted-foreground">~</span>
           <select value={mentalMax}
             onChange={e => update({ mmax: e.target.value === '5' ? undefined : e.target.value })}
-            className="h-6 bg-[#2B3139] rounded px-1 text-[11px]">
+            className="h-6 bg-muted rounded px-1 text-[11px]">
             {[1, 2, 3, 4, 5].map(n => <option key={n} value={n}>{n}</option>)}
           </select>
         </div>
@@ -103,7 +103,7 @@ function Multi({ label, options, selected, onToggle, renderLabel }: {
           const on = selected.includes(o);
           return (
             <button key={o} onClick={() => onToggle(o)}
-              className={`h-6 px-2 rounded text-[11px] ${on ? 'bg-[#F0B90B] text-black' : 'bg-[#2B3139] text-foreground hover:bg-[#363c45]'}`}>
+              className={`h-6 px-2 rounded text-[11px] ${on ? 'bg-[#F0B90B] text-black' : 'bg-muted text-foreground hover:bg-[#363c45]'}`}>
               {renderLabel ? renderLabel(o) : o}
             </button>
           );

@@ -18,7 +18,7 @@ export function BackButton() {
           <button
             onClick={handle}
             aria-label="返回"
-            className="h-8 w-8 flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-[#181A20] rounded shrink-0"
+            className="h-8 w-8 flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-card rounded shrink-0"
           >
             <ArrowLeft className="w-4 h-4" />
           </button>

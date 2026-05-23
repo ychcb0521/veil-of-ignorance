@@ -60,7 +60,7 @@ export function JournalStatsSidebar({ journals, assignments, clusters, rangeDays
   const maxR = Math.max(1, ...scatter.map(s => Math.abs(s.y)));
 
   return (
-    <aside className="bg-[#181A20] border border-[#2B3139] rounded">
+    <aside className="bg-card border border-border rounded">
       <Section title={`周期内（${rangeDays} 天）`}>
         <div className="grid grid-cols-2 gap-3">
           <Metric label="总交易" value={String(journals.length)} />
@@ -126,7 +126,7 @@ export function JournalStatsSidebar({ journals, assignments, clusters, rangeDays
             {topSymbols.map(s => (
               <div key={s.symbol} className="flex items-center gap-2 font-mono text-[11px]">
                 <span className="w-16 truncate">{s.symbol}</span>
-                <div className="flex-1 h-1.5 bg-[#2B3139] rounded">
+                <div className="flex-1 h-1.5 bg-muted rounded">
                   <div className="h-full bg-[#5b8def] rounded" style={{ width: `${(s.count / maxSymCount) * 100}%` }} />
                 </div>
                 <span className="text-muted-foreground w-6 text-right">×{s.count}</span>
@@ -159,7 +159,7 @@ export function JournalStatsSidebar({ journals, assignments, clusters, rangeDays
 
 function Section({ title, children, lastBlock }: { title: string; children: React.ReactNode; lastBlock?: boolean }) {
   return (
-    <div className={`px-4 py-3 ${lastBlock ? '' : 'border-b border-[#2B3139]'}`}>
+    <div className={`px-4 py-3 ${lastBlock ? '' : 'border-b border-border'}`}>
       <div className="text-[11px] text-muted-foreground mb-2">{title}</div>
       {children}
     </div>

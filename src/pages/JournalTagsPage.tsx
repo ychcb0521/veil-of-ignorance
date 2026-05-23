@@ -56,8 +56,8 @@ export default function JournalTagsPage() {
     iso ? new Date(iso).toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit' }) : '—';
 
   return (
-    <div className="min-h-screen bg-[#0B0E11] text-foreground">
-      <header className="sticky top-0 z-20 bg-[#0B0E11]/95 backdrop-blur-sm border-b border-[#2B3139]">
+    <div className="min-h-screen bg-background text-foreground">
+      <header className="sticky top-0 z-20 bg-background/95 backdrop-blur-sm border-b border-border">
         <div className="px-6 py-3 max-w-[1600px] mx-auto flex items-center gap-3">
           <BackButton />
           <h1 className="text-[14px] font-medium">标签字典</h1>
@@ -74,7 +74,7 @@ export default function JournalTagsPage() {
         {categories.map(c => {
           const rows = groupedActive.get(c.id) ?? [];
           return (
-            <div key={c.id} className="bg-[#181A20] border border-[#2B3139] rounded p-4 mb-4">
+            <div key={c.id} className="bg-card border border-border rounded p-4 mb-4">
               <div className="flex justify-between items-center mb-2">
                 <div className="flex items-center gap-2">
                   <span className="w-2.5 h-2.5 rounded-full" style={{ background: c.color }} />
@@ -92,7 +92,7 @@ export default function JournalTagsPage() {
               ) : (
                 <table className="w-full">
                   <thead>
-                    <tr className="text-[10px] text-muted-foreground bg-[#0B0E11]">
+                    <tr className="text-[10px] text-muted-foreground bg-background">
                       <th className="text-left px-2 py-2 flex-1">模式名称</th>
                       <th className="text-left px-2 py-2">可操作定义</th>
                       <th className="text-right px-2 py-2 w-[80px]">累计出现</th>
@@ -102,7 +102,7 @@ export default function JournalTagsPage() {
                   </thead>
                   <tbody>
                     {rows.map(p => (
-                      <tr key={p.id} className="text-[11px] border-b border-[#2B3139]/40">
+                      <tr key={p.id} className="text-[11px] border-b border-border/40">
                         <td className="px-2 py-2 font-medium">{p.pattern_name}</td>
                         <td className="px-2 py-2 text-muted-foreground">{p.operational_definition}</td>
                         <td className={`px-2 py-2 text-right font-mono ${p.occurrence_count >= 5 ? 'text-[#F6465D]' : ''}`}>
@@ -133,9 +133,9 @@ export default function JournalTagsPage() {
             <CollapsibleTrigger className="text-[12px] text-muted-foreground hover:text-foreground mb-2">
               已归档（{archived.length}）
             </CollapsibleTrigger>
-            <CollapsibleContent className="bg-[#181A20] border border-[#2B3139] rounded p-3">
+            <CollapsibleContent className="bg-card border border-border rounded p-3">
               {archived.map(p => (
-                <div key={p.id} className="text-[11px] text-muted-foreground py-1 border-b border-[#2B3139]/30 last:border-b-0">
+                <div key={p.id} className="text-[11px] text-muted-foreground py-1 border-b border-border/30 last:border-b-0">
                   {p.pattern_name} — {p.operational_definition}
                 </div>
               ))}

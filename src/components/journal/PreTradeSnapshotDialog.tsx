@@ -134,7 +134,7 @@ export function PreTradeSnapshotDialog({
       <Sheet open={isOpen} onOpenChange={onOpenChange}>
         <SheetContent
           side="bottom"
-          className="h-[92vh] rounded-t-2xl p-0 bg-[#181A20] border-t border-[#2B3139] overflow-y-auto"
+          className="h-[92vh] rounded-t-2xl p-0 bg-card border-t border-border overflow-y-auto"
         >
           {form}
         </SheetContent>
@@ -144,7 +144,7 @@ export function PreTradeSnapshotDialog({
 
   return (
     <Dialog open={isOpen} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-[680px] max-h-[90vh] overflow-y-auto bg-[#181A20] border border-[#2B3139] p-0">
+      <DialogContent className="max-w-[680px] max-h-[90vh] overflow-y-auto bg-card border border-border p-0">
         {form}
       </DialogContent>
     </Dialog>

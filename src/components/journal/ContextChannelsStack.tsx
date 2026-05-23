@@ -22,9 +22,9 @@ interface ChannelProps {
 
 function ChannelPanel({ num, title, highlight, children, rightHint }: ChannelProps) {
   return (
-    <div className={`bg-[#181A20] border border-[#2B3139] rounded flex-1 min-h-0 overflow-y-auto transition-all ${highlight ? 'ring-1 ring-[#0ECB81]' : ''}`}>
-      <div className="px-3 py-2 border-b border-[#2B3139] flex items-center gap-2 sticky top-0 bg-[#181A20] z-10">
-        <span className="w-5 h-5 rounded-full bg-[#2B3139] text-[10px] font-mono flex items-center justify-center">{num}</span>
+    <div className={`bg-card border border-border rounded flex-1 min-h-0 overflow-y-auto transition-all ${highlight ? 'ring-1 ring-[#0ECB81]' : ''}`}>
+      <div className="px-3 py-2 border-b border-border flex items-center gap-2 sticky top-0 bg-card z-10">
+        <span className="w-5 h-5 rounded-full bg-muted text-[10px] font-mono flex items-center justify-center">{num}</span>
         <span className="text-[12px] font-medium">{title}</span>
         <div className="flex-1" />
         {rightHint && <span className="text-[10px] text-muted-foreground">{rightHint}</span>}
@@ -210,7 +210,7 @@ function RiskChannel() {
           </div>
         </div>
         {tradeRecord && (
-          <div className={`rounded p-2 ${riskFailed ? 'ring-1 ring-[#F6465D]' : 'bg-[#0B0E11]'}`}>
+          <div className={`rounded p-2 ${riskFailed ? 'ring-1 ring-[#F6465D]' : 'bg-background'}`}>
             <div className="text-[11px] text-muted-foreground mb-1">事后对照</div>
             <div className="grid grid-cols-2 gap-1 font-mono text-[11px]">
               <span className="text-muted-foreground">止损触发</span>
@@ -314,7 +314,7 @@ function CounterfactualChannel({ journal, klines, selectedBranchId, onSelectBran
           </div>
         )}
 
-        <div ref={deepAnchorRef} className="-mx-3 px-3 py-1.5 bg-[#181A20] border-y border-[#2B3139] text-[11px] font-medium">
+        <div ref={deepAnchorRef} className="-mx-3 px-3 py-1.5 bg-card border-y border-border text-[11px] font-medium">
           六步深度分析
         </div>
         <SixStepAnalysisForm
