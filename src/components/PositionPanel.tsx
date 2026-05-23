@@ -27,7 +27,7 @@ import { Button } from '@/components/ui/button';
 import { useAuth } from '@/contexts/AuthContext';
 import { PostTradeReviewSheet } from '@/components/journal/PostTradeReviewSheet';
 import {
-  findUnreviewedJournalForClose, findUnreviewedJournals, listJournals,
+  findUnreviewedJournalForClose, listJournals,
 } from '@/lib/journalApi';
 import type { TradeJournal } from '@/types/journal';
 
