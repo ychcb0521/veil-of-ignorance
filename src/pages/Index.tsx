@@ -1572,12 +1572,12 @@ const Index = () => {
           >
             <BarChart3 className="w-3 h-3" /> 数据归因
           </button>
-          <button
-            onClick={() => toast.info('错题集列表页：批次 4 即将上线')}
+          <Link
+            to="/journal"
             className="flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium text-gray-600 dark:text-[#B7BDC6] hover:text-primary hover:bg-primary/10 transition-colors"
           >
             <BookOpen className="w-3 h-3" /> 错题集
-          </button>
+          </Link>
           <Link
             to="/journal/tags"
             className="flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium text-gray-600 dark:text-[#B7BDC6] hover:text-primary hover:bg-primary/10 transition-colors"

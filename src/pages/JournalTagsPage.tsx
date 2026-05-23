@@ -59,8 +59,8 @@ export default function JournalTagsPage() {
     <div className="min-h-screen bg-[#0B0E11] text-foreground">
       <header className="px-6 py-4 border-b border-[#2B3139] flex justify-between items-center bg-[#181A20]">
         <div className="flex items-center gap-3">
-          <button onClick={() => nav('/')} className="text-muted-foreground hover:text-foreground">
-            <ArrowLeft className="w-4 h-4" />
+          <button onClick={() => nav('/journal')} className="text-muted-foreground hover:text-foreground flex items-center gap-1 text-[12px]">
+            <ArrowLeft className="w-4 h-4" /> 错题集
           </button>
           <h1 className="text-[14px] font-medium">错误模式字典</h1>
         </div>
