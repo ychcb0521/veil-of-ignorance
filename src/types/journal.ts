@@ -93,6 +93,7 @@ export interface TradeJournal {
   post_reviewed_at: string | null;
 
   reason_was_rewritten: boolean;
+  counterfactual_branches?: CounterfactualBranch[];
   created_at: string;
   updated_at: string;
 }
