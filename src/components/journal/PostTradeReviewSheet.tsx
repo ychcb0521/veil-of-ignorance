@@ -289,6 +289,27 @@ export function PostTradeReviewSheet({
           </div>
         )}
 
+        {/* (C+) 六步深度分析（可选） */}
+        <Collapsible open={sixStepOpen} onOpenChange={setSixStepOpen}>
+          <CollapsibleTrigger className="w-full bg-[#181A20] border border-[#2B3139] rounded px-3 py-2 flex items-center gap-2 hover:bg-[#1f242c]">
+            <BrainCircuit className="w-3.5 h-3.5 text-[#F0B90B]" />
+            <div className="flex-1 text-left">
+              <div className="text-[12px] text-foreground">进入六步深度分析（推荐）</div>
+              <div className="text-[10px] text-muted-foreground">
+                比"复盘文字"+"反事实"更结构化。完成后下方两个字段可自动生成。
+              </div>
+            </div>
+            <ChevronDown className={`w-3.5 h-3.5 text-muted-foreground transition-transform ${sixStepOpen ? 'rotate-180' : ''}`} />
+          </CollapsibleTrigger>
+          <CollapsibleContent className="mt-2 space-y-2">
+            <SixStepAnalysisForm value={sixStep} onChange={setSixStep} />
+            <Button size="sm" variant="ghost" onClick={applySixStepToFields}
+              className="h-7 text-[10px] bg-[#2B3139] hover:bg-[#363c45]">
+              用六步内容回写下方字段
+            </Button>
+          </CollapsibleContent>
+        </Collapsible>
+
         {/* (D) Reflection */}
         <div className="space-y-1.5">
           <Label className="text-[12px]">复盘文字（这笔交易里你真正学到了什么？）* ≥30 字</Label>

@@ -1,9 +1,15 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useReplay } from '@/contexts/ReplayContext';
 import { MENTAL_STATE_LABELS, type TradeJournal } from '@/types/journal';
 import { CounterfactualPanel } from './CounterfactualPanel';
 import { useReplayKlines } from '@/hooks/useReplayKlines';
 import type { KlineData } from '@/hooks/useBinanceData';
+import {
+  SixStepAnalysisForm, pickSixStepValue, countCompletedSteps,
+  type SixStepValue,
+} from './SixStepAnalysisForm';
+import { updateJournalDeepAnalysis, promoteDraftToRule, getJournalById } from '@/lib/journalApi';
+import { toast } from 'sonner';
 
 
 interface ChannelProps {
