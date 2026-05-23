@@ -32,6 +32,7 @@ interface Props {
   originTime?: number | null;
   coinTimelines?: CoinTimelinesMap;
   onSymbolChange?: (symbol: string) => void;
+  activeSymbol?: string;
 }
 
 const SPEED_OPTIONS = [1, 2, 5, 10, 30, 60, 180, 300, 900];
