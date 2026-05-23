@@ -115,6 +115,50 @@ export interface TradingRule {
   is_active: boolean;
   added_to_checklist: boolean;
   trigger_threshold: number | null;
+  required: boolean;
+  ui_order: number;
+  snooze_until: string | null;
   created_at: string;
   updated_at: string;
 }
+
+// ============ Batch 6: Counterfactual branches ============
+
+export interface CounterfactualTpLevel {
+  price: number;
+  size_pct: number;
+}
+
+export interface CounterfactualBranchParams {
+  direction: TradeDirection;
+  entry_price: number | null;
+  stop_loss: number | null;
+  take_profits: CounterfactualTpLevel[];
+  position_size_usdt: number;
+  leverage: number;
+  entry_time: string; // ISO
+  max_hold_minutes?: number;
+}
+
+export type CounterfactualExitReason =
+  | 'sl_hit' | 'tp1_hit' | 'tp2_hit' | 'tp3_hit'
+  | 'timeout' | 'no_entry' | 'no_data';
+
+export interface CounterfactualBranchResult {
+  exit_time: string | null; // ISO
+  exit_price: number | null;
+  exit_reason: CounterfactualExitReason;
+  realized_pnl_usdt: number;
+  r_multiple: number;
+  filled_tp_index: number | null;
+  hold_duration_minutes: number;
+}
+
+export interface CounterfactualBranch {
+  id: string;
+  label: string;
+  created_at: string;
+  params: CounterfactualBranchParams;
+  result: CounterfactualBranchResult;
+}
+
