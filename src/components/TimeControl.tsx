@@ -46,8 +46,18 @@ export function TimeControl({
   status, currentSimulatedTime, speed,
   onStart, onPause, onResume, onStop, onSetSpeed, onStopAllAndSwitchToSynced, clockRef,
   timeMode = 'synced', onSetTimeMode, totalPositionCount = 0,
-  originTime, coinTimelines = {}, onSymbolChange,
+  originTime, coinTimelines = {}, onSymbolChange, activeSymbol,
 }: Props) {
+  const ctx = useTradingContext();
+  const [noEntryOpen, setNoEntryOpen] = useState(false);
+  const [noEntrySimTime, setNoEntrySimTime] = useState<number>(Date.now());
+  const noEntrySymbol = activeSymbol || 'BTCUSDT';
+
+  const openNoEntry = () => {
+    setNoEntrySimTime(ctx.getEffectiveTime(noEntrySymbol));
+    if (status === 'playing') onPause();
+    setNoEntryOpen(true);
+  };
   const [dateInput, setDateInput] = useState('2024-01-15 16:00:00');
   const [guardDialogOpen, setGuardDialogOpen] = useState(false);
   const [guardedCoins, setGuardedCoins] = useState<GuardedCoin[]>([]);
