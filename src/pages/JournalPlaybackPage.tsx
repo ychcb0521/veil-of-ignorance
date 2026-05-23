@@ -116,20 +116,18 @@ export default function JournalPlaybackPage() {
   return (
     <ReplayProvider journal={journal} tradeRecord={tradeRecord} assignments={assignments} patterns={patterns}>
       <div className="min-h-screen bg-[#0B0E11] text-foreground flex flex-col">
-        <header className="sticky top-0 z-20 bg-[#0B0E11] border-b border-[#2B3139]">
+        <header className="sticky top-0 z-20 bg-[#0B0E11]/95 backdrop-blur-sm border-b border-[#2B3139]">
           <div className="px-6 py-3 max-w-[1600px] mx-auto w-full flex items-center justify-between gap-4">
             <div className="flex items-center gap-3 min-w-0">
-              <button onClick={() => nav('/journal')}
-                className="text-muted-foreground hover:text-foreground flex items-center gap-1 text-[12px] shrink-0">
-                <ArrowLeft className="w-4 h-4" /> 错题集
-              </button>
+              <BackButton />
+              <h1 className="text-[14px] font-medium shrink-0">单笔复现 · {journal.symbol}</h1>
             </div>
-            <div className="font-mono text-[12px] text-foreground truncate flex-1 text-center">
-              {journal.symbol} · <span className={dirColor}>{dirLabel}</span>
+            <div className="font-mono text-[11px] text-muted-foreground truncate flex-1 text-center hidden md:block">
+              <span className={dirColor}>{dirLabel}</span>
               {journal.leverage != null && journal.direction !== 'no_entry' && (
                 <> · 杠杆 {journal.leverage}×</>
               )}
-              {' · 模拟时间 '}{fmtSimTime}
+              {' · '}{fmtSimTime}
             </div>
             <div className="flex items-center gap-2 shrink-0">
               <span className={`h-6 px-2 rounded text-[11px] font-medium flex items-center ${outcomeColor(journal.post_outcome)}`}>
@@ -145,6 +143,12 @@ export default function JournalPlaybackPage() {
                   {journal.post_realized_pnl >= 0 ? '+' : ''}{journal.post_realized_pnl.toFixed(2)} USDT
                 </span>
               )}
+              <Button size="sm" variant="ghost" className="h-7 text-[11px]"
+                onClick={() => {
+                  window.dispatchEvent(new CustomEvent('replay:scroll-to-deep-analysis'));
+                }}>
+                <BrainCircuit className="w-3 h-3 mr-1" /> 深度分析
+              </Button>
               <Button size="sm" variant="ghost" className="h-7 text-[11px]"
                 onClick={() => setEditOpen(true)}>
                 <Pencil className="w-3 h-3 mr-1" /> 编辑评价
