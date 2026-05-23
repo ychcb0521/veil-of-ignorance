@@ -10,7 +10,7 @@ import { Label } from '@/components/ui/label';
 import { AlertOctagon } from 'lucide-react';
 import { toast } from 'sonner';
 import { Link } from 'react-router-dom';
-import { createRule, markRuleAddedToChecklist, snoozeRulePattern } from '@/lib/journalApi';
+import { createRule, markRuleAddedToChecklist, snoozeRulePattern, updateRule } from '@/lib/journalApi';
 import type { CriticalPatternInfo } from '@/lib/criticalPatternDetector';
 
 interface Props {
