@@ -244,6 +244,36 @@ interface CounterfactualChannelProps {
 
 function CounterfactualChannel({ journal, klines, selectedBranchId, onSelectBranch, onBranchesChanged }: CounterfactualChannelProps) {
   const { assignments, patterns } = useReplay();
+  const [sixStep, setSixStep] = useState<SixStepValue>(pickSixStepValue(journal));
+  const debounceRef = useRef<number | null>(null);
+  const deepAnchorRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => { setSixStep(pickSixStepValue(journal)); }, [journal.id]);
+
+  // Debounced auto-save
+  useEffect(() => {
+    if (debounceRef.current) window.clearTimeout(debounceRef.current);
+    const initial = pickSixStepValue(journal);
+    const dirty = (Object.keys(sixStep) as (keyof SixStepValue)[]).some(k => (sixStep[k] ?? '') !== (initial[k] ?? ''));
+    if (!dirty) return;
+    debounceRef.current = window.setTimeout(async () => {
+      try {
+        await updateJournalDeepAnalysis(journal.id, sixStep);
+      } catch (e) {
+        console.warn('[deep auto-save]', e);
+      }
+    }, 1500);
+    return () => { if (debounceRef.current) window.clearTimeout(debounceRef.current); };
+  }, [sixStep, journal.id]);
+
+  // Scroll-to listener for the header button
+  useEffect(() => {
+    const onScroll = () => {
+      deepAnchorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    };
+    window.addEventListener('replay:scroll-to-deep-analysis', onScroll);
+    return () => window.removeEventListener('replay:scroll-to-deep-analysis', onScroll);
+  }, []);
 
   const tags = useMemo(() => {
     const out: { id: string; name: string }[] = [];
@@ -254,14 +284,48 @@ function CounterfactualChannel({ journal, klines, selectedBranchId, onSelectBran
     return out;
   }, [assignments, patterns]);
 
+  const completed = countCompletedSteps(sixStep);
+  const ruleSaved = useMemo(() => {
+    return journal.deep_analysis_completed_at ? { at: journal.deep_analysis_completed_at } : null;
+  }, [journal.deep_analysis_completed_at]);
+
+  const handleSaveRule = async (_text: string, required: boolean) => {
+    try {
+      await updateJournalDeepAnalysis(journal.id, sixStep);
+      const sourcePatternId = tags.length === 1 ? tags[0].id : null;
+      await promoteDraftToRule(journal.id, { required, sourcePatternId });
+      toast.success('已写入 checklist');
+      const fresh = await getJournalById(journal.id);
+      if (fresh) onBranchesChanged(fresh);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : String(e));
+    }
+  };
+
   return (
-    <ChannelPanel num="⑤" title="反事实">
+    <ChannelPanel num="⑤" title="反事实" rightHint={
+      <span className={`px-1.5 py-0.5 rounded ${completed === 6 ? 'text-[#0ECB81] bg-[#0ECB81]/10' : 'text-muted-foreground'}`}>
+        深度分析 {completed}/6
+      </span>
+    }>
       <div className="space-y-3 text-[12px]">
         {journal.post_correct_action && (
           <div className="border-l-2 border-[#0ECB81] pl-3 text-foreground">
             {journal.post_correct_action}
           </div>
         )}
+
+        <div ref={deepAnchorRef} className="-mx-3 px-3 py-1.5 bg-[#181A20] border-y border-[#2B3139] text-[11px] font-medium">
+          六步深度分析
+        </div>
+        <SixStepAnalysisForm
+          value={sixStep}
+          onChange={setSixStep}
+          onSaveRule={handleSaveRule}
+          ruleSaved={ruleSaved}
+          patternChips={tags}
+          step4Hint="↑ 同时在标签选择器中勾选对应的 6 大类 pattern"
+        />
 
         <CounterfactualPanel
           journal={journal}
@@ -270,17 +334,6 @@ function CounterfactualChannel({ journal, klines, selectedBranchId, onSelectBran
           onSelectBranch={onSelectBranch}
           onBranchesChanged={onBranchesChanged}
         />
-
-        {tags.length > 0 && (
-          <div>
-            <div className="text-[11px] text-muted-foreground mb-1">错误标签</div>
-            <div className="flex flex-wrap gap-1">
-              {tags.map(t => (
-                <span key={t.id} className="bg-[#2B3139] rounded-full px-2 py-0.5 text-[10px]">{t.name}</span>
-              ))}
-            </div>
-          </div>
-        )}
 
         {journal.post_reflection && (
           <div>
