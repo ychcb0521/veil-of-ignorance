@@ -466,3 +466,52 @@ export async function markRuleAddedToChecklist(ruleId: string): Promise<void> {
     throw new Error(`标记规则失败：${error.message}`);
   }
 }
+
+// ============ Batch 4: bulk fetch ============
+
+export interface BulkJournalFilters {
+  dateFrom?: string;
+  dateTo?: string;
+  symbol?: string;
+  outcome?: TradeOutcome;
+  categoryId?: string;
+}
+
+export interface BulkJournalData {
+  journals: TradeJournal[];
+  assignments: JournalTagAssignment[];
+  patterns: ErrorTagPattern[];
+  categories: ErrorTagCategory[];
+  rules: TradingRule[];
+}
+
+export async function listAllJournalDataForUser(
+  userId: string,
+  filters?: BulkJournalFilters,
+): Promise<BulkJournalData> {
+  let jq = supabase.from("trade_journals" as never).select("*").eq("user_id", userId);
+  if (filters?.dateFrom) jq = jq.gte("pre_simulated_time", filters.dateFrom);
+  if (filters?.dateTo) jq = jq.lte("pre_simulated_time", filters.dateTo);
+  if (filters?.symbol) jq = jq.eq("symbol", filters.symbol);
+  if (filters?.outcome) jq = jq.eq("post_outcome", filters.outcome);
+
+  const aq = supabase.from("journal_tag_assignments" as never).select("*").eq("user_id", userId);
+  const pq = supabase.from("error_tag_patterns" as never).select("*").eq("user_id", userId);
+  const cq = supabase.from("error_tag_categories" as never).select("*").order("sort_order", { ascending: true });
+  const rq = supabase.from("trading_rules" as never).select("*").eq("user_id", userId);
+
+  const [jr, ar, pr, cr, rr] = await Promise.all([jq, aq, pq, cq, rq]);
+  if (jr.error) throw new Error(`加载日记失败：${jr.error.message}`);
+  if (ar.error) throw new Error(`加载标签关联失败：${ar.error.message}`);
+  if (pr.error) throw new Error(`加载错误模式失败：${pr.error.message}`);
+  if (cr.error) throw new Error(`加载分类失败：${cr.error.message}`);
+  if (rr.error) throw new Error(`加载规则失败：${rr.error.message}`);
+
+  return {
+    journals: (jr.data ?? []) as unknown as TradeJournal[],
+    assignments: (ar.data ?? []) as unknown as JournalTagAssignment[],
+    patterns: (pr.data ?? []) as unknown as ErrorTagPattern[],
+    categories: (cr.data ?? []) as unknown as ErrorTagCategory[],
+    rules: (rr.data ?? []) as unknown as TradingRule[],
+  };
+}
