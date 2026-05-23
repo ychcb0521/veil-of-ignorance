@@ -125,7 +125,7 @@ export function PatternClusterCard({ cluster, expandedSignal }: Props) {
               </div>
               {journals.slice().sort((a, b) => +new Date(b.pre_simulated_time) - +new Date(a.pre_simulated_time)).map(j => (
                 <div key={j.id}
-                  onClick={() => { nav(`/journal/${j.id}`); toast.info('批次 5 即将上线'); }}
+                  onClick={() => nav(`/journal/${j.id}`)}
                   className="grid grid-cols-[110px_80px_60px_50px_60px_80px_40px] px-2 py-1.5 text-[11px] font-mono hover:bg-[#1E2026] cursor-pointer border-t border-[#2B3139]/40">
                   <span>{fmtTime(j.pre_simulated_time)}</span>
                   <span className="truncate">{j.symbol}</span>

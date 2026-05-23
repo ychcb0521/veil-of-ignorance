@@ -11,6 +11,7 @@ import AuthPage from "./pages/AuthPage.tsx";
 import OnboardingPage from "./pages/OnboardingPage.tsx";
 import JournalTagsPage from "./pages/JournalTagsPage.tsx";
 import JournalListPage from "./pages/JournalListPage.tsx";
+import JournalPlaybackPage from "./pages/JournalPlaybackPage.tsx";
 import NotFound from "./pages/NotFound.tsx";
 
 const queryClient = new QueryClient();
@@ -54,7 +55,7 @@ function AppRoutes() {
         <Route path="/" element={<Index />} />
         <Route path="/journal" element={<JournalListPage />} />
         <Route path="/journal/tags" element={<JournalTagsPage />} />
-        <Route path="/journal/:id" element={<JournalListPage />} />
+        <Route path="/journal/:id" element={<JournalPlaybackPage />} />
         <Route path="*" element={<NotFound />} />
       </Routes>
     </TradingProvider>

@@ -1,0 +1,186 @@
+/**
+ * /journal/:id — 单笔交易五通道复现页
+ */
+import { useEffect, useMemo, useState } from 'react';
+import { useNavigate, useParams } from 'react-router-dom';
+import { ArrowLeft, Pencil } from 'lucide-react';
+import { toast } from 'sonner';
+import { useAuth } from '@/contexts/AuthContext';
+import { useTradingContext } from '@/contexts/TradingContext';
+import { useIsMobile } from '@/hooks/use-mobile';
+import { Button } from '@/components/ui/button';
+import { Skeleton } from '@/components/ui/skeleton';
+import {
+  getJournalById, listAssignmentsForJournal, listPatterns, listAllJournalDataForUser,
+} from '@/lib/journalApi';
+import type { ErrorTagPattern, JournalTagAssignment, TradeJournal } from '@/types/journal';
+import type { TradeRecord } from '@/types/trading';
+import { ReplayProvider } from '@/contexts/ReplayContext';
+import { ReplayChartView } from '@/components/journal/ReplayChartView';
+import { ContextChannelsStack } from '@/components/journal/ContextChannelsStack';
+import { PostTradeReviewSheet } from '@/components/journal/PostTradeReviewSheet';
+
+function outcomeColor(o: string | null) {
+  switch (o) {
+    case 'win': return 'bg-[#0ECB81]/20 text-[#0ECB81]';
+    case 'loss': return 'bg-[#F6465D]/20 text-[#F6465D]';
+    case 'breakeven': return 'bg-[#F0B90B]/20 text-[#F0B90B]';
+    case 'no_entry': return 'bg-[#2B3139] text-muted-foreground';
+    default: return 'bg-[#2B3139] text-muted-foreground';
+  }
+}
+function outcomeLabel(o: string | null) {
+  return o === 'win' ? 'WIN' : o === 'loss' ? 'LOSS' : o === 'breakeven' ? 'BE' : o === 'no_entry' ? 'PASS' : '待评价';
+}
+function pnlColor(v: number) {
+  return v > 0 ? 'text-[#0ECB81]' : v < 0 ? 'text-[#F6465D]' : 'text-muted-foreground';
+}
+
+export default function JournalPlaybackPage() {
+  const { id } = useParams<{ id: string }>();
+  const nav = useNavigate();
+  const { user } = useAuth();
+  const { tradeHistory } = useTradingContext();
+  const isMobile = useIsMobile();
+
+  const [journal, setJournal] = useState<TradeJournal | null>(null);
+  const [assignments, setAssignments] = useState<JournalTagAssignment[]>([]);
+  const [patterns, setPatterns] = useState<ErrorTagPattern[]>([]);
+  const [allJournals, setAllJournals] = useState<TradeJournal[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [editOpen, setEditOpen] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);
+
+  useEffect(() => {
+    if (!id || !user) return;
+    let cancelled = false;
+    setLoading(true);
+    (async () => {
+      try {
+        const j = await getJournalById(id);
+        if (cancelled) return;
+        if (!j || j.user_id !== user.id) {
+          toast.error('该交易日记不存在或无权访问');
+          nav('/journal');
+          return;
+        }
+        setJournal(j);
+        const [as, ps, bulk] = await Promise.all([
+          listAssignmentsForJournal(j.id),
+          listPatterns(user.id, { includeArchived: true }),
+          listAllJournalDataForUser(user.id),
+        ]);
+        if (cancelled) return;
+        setAssignments(as);
+        setPatterns(ps);
+        setAllJournals(bulk.journals);
+      } catch (e) {
+        if (!cancelled) toast.error(e instanceof Error ? e.message : String(e));
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [id, user, nav, reloadKey]);
+
+  const tradeRecord: TradeRecord | null = useMemo(() => {
+    if (!journal?.trade_record_id) return null;
+    return tradeHistory.find(t => t.id === journal.trade_record_id) ?? null;
+  }, [journal, tradeHistory]);
+
+  if (loading || !journal) {
+    return (
+      <div className="min-h-screen bg-[#0B0E11] p-6">
+        <Skeleton className="h-10 w-full mb-4 bg-[#181A20]" />
+        <div className={isMobile ? '' : 'grid grid-cols-[1fr_400px] gap-3'}>
+          <Skeleton className="h-[60vh] bg-[#181A20]" />
+          <div className="space-y-2">
+            {[1, 2, 3, 4].map(i => <Skeleton key={i} className="h-32 bg-[#181A20]" />)}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  const fmtSimTime = (() => {
+    const d = new Date(journal.pre_simulated_time);
+    const p = (n: number) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+  })();
+
+  const dirLabel = journal.direction === 'long' ? 'LONG' : journal.direction === 'short' ? 'SHORT' : 'PASS';
+  const dirColor = journal.direction === 'long' ? 'text-[#0ECB81]'
+    : journal.direction === 'short' ? 'text-[#F6465D]' : 'text-muted-foreground';
+
+  return (
+    <ReplayProvider journal={journal} tradeRecord={tradeRecord} assignments={assignments} patterns={patterns}>
+      <div className="min-h-screen bg-[#0B0E11] text-foreground flex flex-col">
+        <header className="sticky top-0 z-20 bg-[#0B0E11] border-b border-[#2B3139]">
+          <div className="px-6 py-3 max-w-[1600px] mx-auto w-full flex items-center justify-between gap-4">
+            <div className="flex items-center gap-3 min-w-0">
+              <button onClick={() => nav('/journal')}
+                className="text-muted-foreground hover:text-foreground flex items-center gap-1 text-[12px] shrink-0">
+                <ArrowLeft className="w-4 h-4" /> 错题集
+              </button>
+            </div>
+            <div className="font-mono text-[12px] text-foreground truncate flex-1 text-center">
+              {journal.symbol} · <span className={dirColor}>{dirLabel}</span>
+              {journal.leverage != null && journal.direction !== 'no_entry' && (
+                <> · 杠杆 {journal.leverage}×</>
+              )}
+              {' · 模拟时间 '}{fmtSimTime}
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              <span className={`h-6 px-2 rounded text-[11px] font-medium flex items-center ${outcomeColor(journal.post_outcome)}`}>
+                {outcomeLabel(journal.post_outcome)}
+              </span>
+              {journal.post_r_multiple != null && (
+                <span className={`font-mono text-[11px] ${pnlColor(journal.post_r_multiple)}`}>
+                  R̄ {journal.post_r_multiple.toFixed(2)}
+                </span>
+              )}
+              {journal.post_realized_pnl != null && (
+                <span className={`font-mono text-[11px] ${pnlColor(journal.post_realized_pnl)}`}>
+                  {journal.post_realized_pnl >= 0 ? '+' : ''}{journal.post_realized_pnl.toFixed(2)} USDT
+                </span>
+              )}
+              <Button size="sm" variant="ghost" className="h-7 text-[11px]"
+                onClick={() => setEditOpen(true)}>
+                <Pencil className="w-3 h-3 mr-1" /> 编辑评价
+              </Button>
+            </div>
+          </div>
+        </header>
+
+        <main className="flex-1 max-w-[1600px] mx-auto w-full px-6 py-4 min-h-0">
+          {isMobile ? (
+            <div className="h-full flex flex-col gap-2">
+              <div className="h-[55vh] min-h-0"><ReplayChartView /></div>
+              <div className="h-[45vh] min-h-0 overflow-y-auto">
+                <ContextChannelsStack allJournals={allJournals} />
+              </div>
+            </div>
+          ) : (
+            <div className="h-[calc(100vh-100px)] grid grid-cols-[1fr_400px] gap-3 min-h-0">
+              <div className="min-h-0"><ReplayChartView /></div>
+              <div className="min-h-0">
+                <ContextChannelsStack allJournals={allJournals} />
+              </div>
+            </div>
+          )}
+        </main>
+
+        <PostTradeReviewSheet
+          isOpen={editOpen}
+          onOpenChange={setEditOpen}
+          journal={journal}
+          tradeRecord={tradeRecord}
+          onReviewed={() => {
+            setEditOpen(false);
+            setReloadKey(k => k + 1);
+          }}
+        />
+      </div>
+    </ReplayProvider>
+  );
+}
