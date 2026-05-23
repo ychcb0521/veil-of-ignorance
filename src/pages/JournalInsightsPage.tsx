@@ -237,11 +237,12 @@ export default function JournalInsightsPage() {
   );
 }
 
-function StatCard({ label, value, accent }: { label: string; value: string; accent?: string }) {
+function StatCard({ label, value, accent, sub }: { label: string; value: string; accent?: string; sub?: string }) {
   return (
     <div className="border border-[#2B3139] rounded bg-[#181A20] p-3">
       <div className="text-[10px] text-muted-foreground">{label}</div>
       <div className="text-[22px] font-mono mt-1" style={{ color: accent }}>{value}</div>
+      {sub && <div className="text-[10px] text-muted-foreground font-mono mt-0.5">{sub}</div>}
     </div>
   );
 }
