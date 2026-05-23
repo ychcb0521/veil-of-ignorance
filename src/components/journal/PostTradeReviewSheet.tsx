@@ -154,6 +154,7 @@ export function PostTradeReviewSheet({
       }));
       await replacePhaseAssignments(journal.id, 'post', assignments);
       toast.success('已保存平仓评价');
+      window.dispatchEvent(new CustomEvent('journal:reviewed', { detail: { journalId: journal.id } }));
       onReviewed?.(updated);
       onOpenChange(false);
     } catch (e) {

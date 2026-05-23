@@ -12,7 +12,10 @@ import OnboardingPage from "./pages/OnboardingPage.tsx";
 import JournalTagsPage from "./pages/JournalTagsPage.tsx";
 import JournalListPage from "./pages/JournalListPage.tsx";
 import JournalPlaybackPage from "./pages/JournalPlaybackPage.tsx";
+import JournalInsightsPage from "./pages/JournalInsightsPage.tsx";
+import JournalRulesPage from "./pages/JournalRulesPage.tsx";
 import NotFound from "./pages/NotFound.tsx";
+import { MandatoryRuleQueueRoot } from "./components/journal/MandatoryRuleQueueRoot.tsx";
 
 const queryClient = new QueryClient();
 
@@ -51,10 +54,13 @@ function AppRoutes() {
   // Fully initialized → main app
   return (
     <TradingProvider>
+      <MandatoryRuleQueueRoot />
       <Routes>
         <Route path="/" element={<Index />} />
         <Route path="/journal" element={<JournalListPage />} />
         <Route path="/journal/tags" element={<JournalTagsPage />} />
+        <Route path="/journal/rules" element={<JournalRulesPage />} />
+        <Route path="/journal/insights" element={<JournalInsightsPage />} />
         <Route path="/journal/:id" element={<JournalPlaybackPage />} />
         <Route path="*" element={<NotFound />} />
       </Routes>
