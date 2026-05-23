@@ -606,7 +606,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
   }, [priceMap, positionsMap, balance, sim.isRunning, sim.currentSimulatedTime]);
 
   // ===== Place Order (with strict accounting enforcement — single global pool) =====
-  const handlePlaceOrder = useCallback((symbol: string, order: PlaceOrderParams) => {
+  const handlePlaceOrder = useCallback((symbol: string, order: PlaceOrderParams): { id: string } | null => {
     // Use refs to bypass stale closures in high-frequency time machine ticks
     const available = calcAvailable(balanceRef.current, positionsMapRef.current);
     // Use ref to avoid stale closure — always get the freshest price
