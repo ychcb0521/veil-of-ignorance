@@ -10,12 +10,17 @@ const INTERVALS = ['1m', '5m', '15m', '1h'] as const;
 type Interval = (typeof INTERVALS)[number];
 
 export function ReplayChartView() {
-  const { journal, tradeRecord, tEntry, tExit, tStart, tEnd, replayTime, jumpTo } = useReplay();
+  const { journal, tradeRecord, tEntry, tExit, tStart, tEnd, replayTime, jumpTo, selectedBranchId } = useReplay();
   const [interval, setInterval] = useState<Interval>('1m');
 
   const fetchFrom = useMemo(() => tStart - 6 * 60 * 60_000, [tStart]);
   const fetchTo = useMemo(() => tEnd + 2 * 60 * 60_000, [tEnd]);
   const { klines, loading, error, reload } = useReplayKlines(journal.symbol, fetchFrom, fetchTo, interval);
+
+  const selectedBranch = useMemo(
+    () => (journal.counterfactual_branches ?? []).find(b => b.id === selectedBranchId) ?? null,
+    [journal.counterfactual_branches, selectedBranchId],
+  );
 
   const markers: ChartMarker[] = useMemo(() => {
     const out: ChartMarker[] = [];
