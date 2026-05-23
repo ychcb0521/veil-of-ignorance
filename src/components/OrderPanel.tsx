@@ -23,7 +23,7 @@ interface Props {
   currentPrice: number;
   disabled: boolean;
   symbol: string;
-  onPlaceOrder: (order: PlaceOrderParams) => void;
+  onPlaceOrder: (order: PlaceOrderParams) => void | { id: string } | null | Promise<{ id: string } | null | void>;
   coolingOff?: boolean;
   coolingOffLabel?: string;
   onOpenCoolingOff?: () => void;
@@ -35,6 +35,8 @@ interface Props {
   pickMode?: boolean;
   onPickModeChange?: (active: boolean) => void;
   pickedPrice?: number | null;
+  /** Optional: pause the time machine when the snapshot dialog opens */
+  onAutoPauseTimeMachine?: () => void;
 }
 
 // Order types shown in the horizontal tab strip (top 3 + dropdown for the rest)
