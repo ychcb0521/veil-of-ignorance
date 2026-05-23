@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useReplay } from '@/contexts/ReplayContext';
 import { MENTAL_STATE_LABELS, type TradeJournal } from '@/types/journal';
 import { CounterfactualPanel } from './CounterfactualPanel';
-import type { KlineData } from '@/hooks/useBinanceData';
+import { useReplayKlines } from '@/hooks/useReplayKlines';
 
 interface ChannelProps {
   num: string;
@@ -37,31 +37,33 @@ function pnlColor(v: number) {
 
 interface HistoricalContext {
   allJournals: TradeJournal[];
-  journal: TradeJournal;
-  klines: KlineData[];
-  selectedBranchId: string | null;
-  onSelectBranch: (id: string | null) => void;
-  onBranchesChanged: (updated: TradeJournal) => void;
+  onJournalUpdated?: (updated: TradeJournal) => void;
 }
 
-export function ContextChannelsStack({
-  allJournals, journal, klines, selectedBranchId, onSelectBranch, onBranchesChanged,
-}: HistoricalContext) {
+export function ContextChannelsStack({ allJournals, onJournalUpdated }: HistoricalContext) {
+  const { journal, tStart, tEnd } = useReplay();
+  const [currentJournal, setCurrentJournal] = useState<TradeJournal>(journal);
+  const [selectedBranchId, setSelectedBranchId] = useState<string | null>(null);
+  useEffect(() => { setCurrentJournal(journal); }, [journal]);
+
+  const { klines } = useReplayKlines(journal.symbol, tStart - 6 * 3600_000, tEnd + 2 * 3600_000, '1m');
+
   return (
     <div className="flex-1 min-h-0 flex flex-col gap-2 overflow-hidden">
       <DecisionChannel />
       <StateChannel allJournals={allJournals} />
       <RiskChannel />
       <CounterfactualChannel
-        journal={journal}
+        journal={currentJournal}
         klines={klines}
         selectedBranchId={selectedBranchId}
-        onSelectBranch={onSelectBranch}
-        onBranchesChanged={onBranchesChanged}
+        onSelectBranch={setSelectedBranchId}
+        onBranchesChanged={(u) => { setCurrentJournal(u); onJournalUpdated?.(u); }}
       />
     </div>
   );
 }
+
 
 
 function DecisionChannel() {
