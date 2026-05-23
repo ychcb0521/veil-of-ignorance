@@ -1607,6 +1607,7 @@ const Index = () => {
           coinTimelines={coinTimelines}
           onSymbolChange={handleSymbolChange}
           originTime={activeCoinState.originTime}
+          activeSymbol={activeSymbol}
         />
       </div>
 
