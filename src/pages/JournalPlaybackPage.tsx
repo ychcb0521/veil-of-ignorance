@@ -3,7 +3,7 @@
  */
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, Pencil } from 'lucide-react';
+import { Pencil, BrainCircuit } from 'lucide-react';
 import { toast } from 'sonner';
 import { useAuth } from '@/contexts/AuthContext';
 import { useTradingContext } from '@/contexts/TradingContext';
@@ -19,6 +19,7 @@ import { ReplayProvider } from '@/contexts/ReplayContext';
 import { ReplayChartView } from '@/components/journal/ReplayChartView';
 import { ContextChannelsStack } from '@/components/journal/ContextChannelsStack';
 import { PostTradeReviewSheet } from '@/components/journal/PostTradeReviewSheet';
+import { BackButton } from '@/components/journal/BackButton';
 
 function outcomeColor(o: string | null) {
   switch (o) {
