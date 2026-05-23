@@ -114,6 +114,17 @@ export type CreateJournalPreInput = Omit<
   | "updated_at"
 >;
 
+export async function updateJournalTradeRef(journalId: string, tradeRecordId: string): Promise<void> {
+  const { error } = await supabase
+    .from("trade_journals" as never)
+    .update({ trade_record_id: tradeRecordId } as never)
+    .eq("id", journalId);
+  if (error) {
+    console.error("[journalApi] 回填 trade_record_id 失败:", error);
+    throw new Error(`回填交易记录ID失败：${error.message}`);
+  }
+}
+
 export async function createJournalPreSnapshot(input: CreateJournalPreInput): Promise<TradeJournal> {
   const payload = { ...input, pre_real_time: new Date().toISOString() };
   const { data, error } = await supabase

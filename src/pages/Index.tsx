@@ -1451,13 +1451,21 @@ const Index = () => {
         currentPrice,
         最终传递: freshPrice,
       });
-      handlePlaceOrder(activeSymbol, {
+      return handlePlaceOrder(activeSymbol, {
         ...order,
         latestPrice: freshPrice,
       });
     },
     [activeSymbol, currentPrice, priceMap, handlePlaceOrder],
   );
+
+  // Pause the active timeline when the pre-trade snapshot dialog opens
+  const handleAutoPauseTimeMachine = useCallback(() => {
+    const playing = timeMode === "synced"
+      ? sim.status === "playing"
+      : coinTimelines[activeSymbol]?.status === "playing";
+    if (playing) handlePause();
+  }, [timeMode, sim.status, coinTimelines, activeSymbol, handlePause]);
 
   const handleClosePositionForSymbol = useCallback(
     (symbol: string, index: number, percentage?: number) => {
@@ -1524,6 +1532,7 @@ const Index = () => {
         activeSymbol={activeSymbol}
         onClosePosition={handleClosePositionForSymbol}
         onCancelOrder={handleCancelOrderForSymbol}
+        onAutoPauseTimeMachine={handleAutoPauseTimeMachine}
       />
     );
   }
@@ -1598,6 +1607,7 @@ const Index = () => {
           coinTimelines={coinTimelines}
           onSymbolChange={handleSymbolChange}
           originTime={activeCoinState.originTime}
+          activeSymbol={activeSymbol}
         />
       </div>
 
@@ -1817,6 +1827,7 @@ const Index = () => {
                 pickMode={pickMode}
                 onPickModeChange={setPickMode}
                 pickedPrice={pickedPrice}
+                onAutoPauseTimeMachine={handleAutoPauseTimeMachine}
               />
             </div>
           </ResizablePanel>

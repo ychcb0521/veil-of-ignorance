@@ -6,6 +6,7 @@ import type { PlaceOrderParams } from '@/contexts/TradingContext';
 import { useTradingContext } from '@/contexts/TradingContext';
 import { usePersistedState } from '@/hooks/usePersistedState';
 import { formatUSDT, formatPrice as fmtPrice } from '@/lib/formatters';
+import { PreTradeSnapshotDialog } from '@/components/journal/PreTradeSnapshotDialog';
 
 // Re-export for convenience
 export type { PlaceOrderParams };
@@ -22,7 +23,7 @@ interface Props {
   currentPrice: number;
   disabled: boolean;
   symbol: string;
-  onPlaceOrder: (order: PlaceOrderParams) => void;
+  onPlaceOrder: (order: PlaceOrderParams) => void | { id: string } | null | Promise<{ id: string } | null | void>;
   coolingOff?: boolean;
   coolingOffLabel?: string;
   onOpenCoolingOff?: () => void;
@@ -34,6 +35,8 @@ interface Props {
   pickMode?: boolean;
   onPickModeChange?: (active: boolean) => void;
   pickedPrice?: number | null;
+  /** Optional: pause the time machine when the snapshot dialog opens */
+  onAutoPauseTimeMachine?: () => void;
 }
 
 // Order types shown in the horizontal tab strip (top 3 + dropdown for the rest)
@@ -49,6 +52,7 @@ export function OrderPanel({
   priceProtection, onTogglePriceProtection,
   pricePrecision = 2, quantityPrecision = 3,
   crosshairPrice, pickMode, onPickModeChange, pickedPrice,
+  onAutoPauseTimeMachine,
 }: Props) {
   const baseCoin = symbol.replace('USDT', '') || 'BTC';
 
@@ -192,18 +196,20 @@ export function OrderPanel({
     }
   };
 
-  const handleOrder = (rawSide: OrderSide) => {
-    if (orderDisabled || effectiveQty <= 0) return;
-    // CLOSE mode flips intent: closing LONG = SHORT side, closing SHORT = LONG side
-    // We delegate actual close to position panel normally — here we just place an opposite order if user is in CLOSE mode.
-    const side: OrderSide = rawSide;
+  // ===== Snapshot dialog state (intercepts every order placement) =====
+  const [snapshotOpen, setSnapshotOpen] = useState(false);
+  const [snapshotSide, setSnapshotSide] = useState<OrderSide>('LONG');
+  const [pendingOrderParams, setPendingOrderParams] = useState<PlaceOrderParams | null>(null);
+  const [snapshotSimTime, setSnapshotSimTime] = useState<number>(Date.now());
+  const [snapshotEntryPrice, setSnapshotEntryPrice] = useState<number | null>(null);
 
+  const buildOrderParams = (rawSide: OrderSide): PlaceOrderParams | null => {
+    if (orderDisabled || effectiveQty <= 0) return null;
     const finalType: OrderType = enableTpSl
       ? (orderType === 'MARKET' ? 'MARKET_TP_SL' : orderType === 'LIMIT' ? 'LIMIT_TP_SL' : orderType)
       : orderType;
-
-    onPlaceOrder({
-      side,
+    return {
+      side: rawSide,
       type: finalType,
       price: priceSelection === 'LIMIT' ? (parseFloat(price) || 0) : 0,
       stopPrice: parseFloat(stopPrice) || parseFloat(tpTrigger) || parseFloat(slTrigger) || 0,
@@ -225,7 +231,17 @@ export function OrderPanel({
       scaledCount: parseInt(scaledCount) || 5,
       scaledStartPrice: parseFloat(scaledStartPrice) || 0,
       scaledEndPrice: parseFloat(scaledEndPrice) || 0,
-    });
+    };
+  };
+
+  const handleOrder = (rawSide: OrderSide) => {
+    const params = buildOrderParams(rawSide);
+    if (!params) return;
+    setPendingOrderParams(params);
+    setSnapshotSide(rawSide);
+    setSnapshotSimTime(ctx.getEffectiveTime(symbol));
+    setSnapshotEntryPrice(ctx.priceMap[symbol] ?? currentPrice ?? null);
+    setSnapshotOpen(true);
   };
 
   const isPrimaryTab = PRIMARY_ORDER_TABS.some(t => t.value === orderType);
@@ -662,6 +678,37 @@ export function OrderPanel({
           </button>
         </BottomSheet>
       )}
+
+      {/* ===== Pre-trade snapshot dialog (hard-gates every order placement) ===== */}
+      <PreTradeSnapshotDialog
+        isOpen={snapshotOpen}
+        onOpenChange={(o) => {
+          setSnapshotOpen(o);
+          if (!o) setPendingOrderParams(null);
+        }}
+        mode="trade"
+        symbol={symbol}
+        direction={snapshotSide === 'LONG' ? 'long' : 'short'}
+        simulatedTimeMs={snapshotSimTime}
+        lockedEntryPrice={snapshotEntryPrice}
+        leverage={leverage}
+        marginMode={marginMode}
+        pricePrecision={pricePrecision}
+        orderParams={pendingOrderParams}
+        initialPositionSizeUsdt={(() => {
+          if (!pendingOrderParams) return null;
+          const p = snapshotEntryPrice ?? currentPrice ?? 0;
+          return p > 0 ? Number((pendingOrderParams.quantity * p).toFixed(2)) : null;
+        })()}
+        onAutoPause={onAutoPauseTimeMachine}
+        onPlaceOrder={async (params) => {
+          const result = await onPlaceOrder(params);
+          if (result && typeof result === 'object' && 'id' in result) {
+            return result as { id: string };
+          }
+          return null;
+        }}
+      />
     </div>
   );
 }

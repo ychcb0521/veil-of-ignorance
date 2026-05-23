@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Play, Pause, Square, Clock, Globe, Split, Lock } from 'lucide-react';
+import { Play, Pause, Square, Clock, Globe, Split, Lock, BookmarkX } from 'lucide-react';
 import { toast } from 'sonner';
 import { formatUTC8 } from '@/lib/timeFormat';
 import {
@@ -12,6 +12,8 @@ import {
 } from '@/components/ui/dialog';
 import type { TimeMachineStatus } from '@/hooks/useTimeSimulator';
 import type { TimeMode, CoinTimelinesMap } from '@/contexts/TradingContext';
+import { useTradingContext } from '@/contexts/TradingContext';
+import { PreTradeSnapshotDialog } from '@/components/journal/PreTradeSnapshotDialog';
 
 interface Props {
   status: TimeMachineStatus;
@@ -30,6 +32,7 @@ interface Props {
   originTime?: number | null;
   coinTimelines?: CoinTimelinesMap;
   onSymbolChange?: (symbol: string) => void;
+  activeSymbol?: string;
 }
 
 const SPEED_OPTIONS = [1, 2, 5, 10, 30, 60, 180, 300, 900];
@@ -43,8 +46,18 @@ export function TimeControl({
   status, currentSimulatedTime, speed,
   onStart, onPause, onResume, onStop, onSetSpeed, onStopAllAndSwitchToSynced, clockRef,
   timeMode = 'synced', onSetTimeMode, totalPositionCount = 0,
-  originTime, coinTimelines = {}, onSymbolChange,
+  originTime, coinTimelines = {}, onSymbolChange, activeSymbol,
 }: Props) {
+  const ctx = useTradingContext();
+  const [noEntryOpen, setNoEntryOpen] = useState(false);
+  const [noEntrySimTime, setNoEntrySimTime] = useState<number>(Date.now());
+  const noEntrySymbol = activeSymbol || 'BTCUSDT';
+
+  const openNoEntry = () => {
+    setNoEntrySimTime(ctx.getEffectiveTime(noEntrySymbol));
+    if (status === 'playing') onPause();
+    setNoEntryOpen(true);
+  };
   const [dateInput, setDateInput] = useState('2024-01-15 16:00:00');
   const [guardDialogOpen, setGuardDialogOpen] = useState(false);
   const [guardedCoins, setGuardedCoins] = useState<GuardedCoin[]>([]);
@@ -229,6 +242,13 @@ export function TimeControl({
               <button onClick={onStop} className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded bg-destructive/20 text-destructive hover:bg-destructive/30 transition-all duration-100 ease-out active:scale-[0.97] font-medium">
                 <Square className="w-3.5 h-3.5" /> 停止
               </button>
+              <button
+                onClick={openNoEntry}
+                title="记录'该开没开'决策（不下单）"
+                className="h-7 w-7 flex items-center justify-center rounded text-[#848E9C] hover:text-[#F0B90B] hover:bg-accent transition-colors"
+              >
+                <BookmarkX className="w-3.5 h-3.5" />
+              </button>
             </div>
             <SpeedButtons />
             {modeSelectorButtons}
@@ -245,6 +265,13 @@ export function TimeControl({
               <button onClick={onStop} className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded bg-destructive/20 text-destructive hover:bg-destructive/30 transition-all duration-100 ease-out active:scale-[0.97] font-medium">
                 <Square className="w-3.5 h-3.5" /> 停止
               </button>
+              <button
+                onClick={openNoEntry}
+                title="记录'该开没开'决策（不下单）"
+                className="h-7 w-7 flex items-center justify-center rounded text-[#848E9C] hover:text-[#F0B90B] hover:bg-accent transition-colors"
+              >
+                <BookmarkX className="w-3.5 h-3.5" />
+              </button>
             </div>
             <SpeedButtons />
             {modeSelectorButtons}
@@ -252,6 +279,20 @@ export function TimeControl({
           </>
         )}
       </div>
+
+      {/* No-entry snapshot dialog */}
+      <PreTradeSnapshotDialog
+        isOpen={noEntryOpen}
+        onOpenChange={setNoEntryOpen}
+        mode="no_entry"
+        symbol={noEntrySymbol}
+        direction="no_entry"
+        simulatedTimeMs={noEntrySimTime}
+        lockedEntryPrice={ctx.priceMap[noEntrySymbol] ?? null}
+        leverage={1}
+        marginMode="isolated"
+        pricePrecision={2}
+      />
 
       {/* Guard Dialog — mounted only when needed, completely outside the flex layout */}
       {guardDialogOpen && (

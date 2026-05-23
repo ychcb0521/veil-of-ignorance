@@ -31,7 +31,7 @@ interface Props {
   // Trading
   currentPrice: number;
   disabled: boolean;
-  onPlaceOrder: (order: PlaceOrderParams) => void;
+  onPlaceOrder: (order: PlaceOrderParams) => void | { id: string } | null | Promise<{ id: string } | null | void>;
   // Account
   balance: number;
   positionsMap: PositionsMap;
@@ -41,6 +41,7 @@ interface Props {
   activeSymbol: string;
   onClosePosition: (symbol: string, index: number) => void;
   onCancelOrder: (symbol: string, orderId: string) => void;
+  onAutoPauseTimeMachine?: () => void;
 }
 
 export function MobileLayout(props: Props) {
@@ -102,6 +103,7 @@ export function MobileLayout(props: Props) {
           onClosePosition={props.onClosePosition}
           onCancelOrder={props.onCancelOrder}
           balance={props.balance}
+          onAutoPauseTimeMachine={props.onAutoPauseTimeMachine}
         />
       );
   }

@@ -10,7 +10,7 @@ interface Props {
   currentPrice: number;
   disabled: boolean;
   symbol: string;
-  onPlaceOrder: (order: PlaceOrderParams) => void;
+  onPlaceOrder: (order: PlaceOrderParams) => void | { id: string } | null | Promise<{ id: string } | null | void>;
   positionsMap: PositionsMap;
   ordersMap: OrdersMap;
   tradeHistory: TradeRecord[];
@@ -19,12 +19,13 @@ interface Props {
   onClosePosition: (symbol: string, index: number) => void;
   onCancelOrder: (symbol: string, orderId: string) => void;
   balance: number;
+  onAutoPauseTimeMachine?: () => void;
 }
 
 export function MobileTradingView({
   onBack, currentPrice, disabled, symbol, onPlaceOrder,
   positionsMap, ordersMap, tradeHistory, priceMap, activeSymbol,
-  onClosePosition, onCancelOrder, balance,
+  onClosePosition, onCancelOrder, balance, onAutoPauseTimeMachine,
 }: Props) {
   const [bottomTab, setBottomTab] = useState('positions');
   const baseCoin = symbol.replace('USDT', '');
@@ -54,6 +55,7 @@ export function MobileTradingView({
           onPlaceOrder={onPlaceOrder}
           disabled={disabled}
           symbol={symbol}
+          onAutoPauseTimeMachine={onAutoPauseTimeMachine}
         />
 
         {/* Position panel */}
