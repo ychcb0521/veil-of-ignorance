@@ -87,7 +87,12 @@ export default function JournalInsightsPage() {
         return { rule: r, pattern, before, after, delta: after - before };
       });
 
-    return { cur, curClusters, trend, timeDist, mentalDist, outcome, alphaHours, ruleEffect };
+    // 深度分析完成率：六步全填的占已评价 journal 比
+    const reviewed = cur.filter(j => !!j.post_reviewed_at);
+    const deepDone = reviewed.filter(j => !!j.deep_analysis_completed_at);
+    const deepRate = reviewed.length === 0 ? 0 : deepDone.length / reviewed.length;
+
+    return { cur, curClusters, trend, timeDist, mentalDist, outcome, alphaHours, ruleEffect, reviewed, deepDone, deepRate };
   }, [data, range]);
 
   if (loading || !data || !stats) {
