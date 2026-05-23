@@ -51,6 +51,8 @@ export function PostTradeReviewSheet({
   const [saving, setSaving] = useState(false);
   const [hotCounts, setHotCounts] = useState<Record<string, number>>({});
   const [allPatterns, setAllPatterns] = useState<ErrorTagPattern[]>([]);
+  const [sixStep, setSixStep] = useState<SixStepValue>(EMPTY_SIX_STEP);
+  const [sixStepOpen, setSixStepOpen] = useState(false);
   const pausedOnce = useState({ done: false })[0];
 
   // Auto-pause + reset state per journal
