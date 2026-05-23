@@ -214,20 +214,27 @@ export default function JournalInsightsPage() {
           ) : (
             <table className="w-full text-[11px]">
               <thead className="text-muted-foreground bg-[#0B0E11]">
-                <tr><th className="text-left px-3 py-1.5">规则</th><th className="text-left px-3">来源模式</th><th className="text-right px-3">规则前</th><th className="text-right px-3">规则后</th><th className="text-right px-3 pr-3">Δ</th></tr>
+                <tr><th className="text-left px-3 py-1.5">规则</th><th className="text-left px-3">来源</th><th className="text-left px-3">来源模式</th><th className="text-right px-3">规则前</th><th className="text-right px-3">规则后</th><th className="text-right px-3 pr-3">Δ</th></tr>
               </thead>
               <tbody className="font-mono">
-                {stats.ruleEffect.map(e => (
-                  <tr key={e.rule.id} className="border-t border-[#2B3139]">
-                    <td className="px-3 py-1.5 text-foreground truncate max-w-[300px]">{e.rule.rule_text}</td>
-                    <td className="px-3 text-muted-foreground">{e.pattern?.pattern_name ?? '—'}</td>
-                    <td className="text-right px-3">{e.before}</td>
-                    <td className="text-right px-3">{e.after}</td>
-                    <td className={`text-right px-3 pr-3 ${e.delta < 0 ? 'text-[#0ECB81]' : e.delta > 0 ? 'text-[#F6465D]' : 'text-muted-foreground'}`}>
-                      {e.delta > 0 ? '+' : ''}{e.delta}
-                    </td>
-                  </tr>
-                ))}
+                {stats.ruleEffect.map(e => {
+                  const sourceLabel = e.rule.source_pattern_id ? '模式触发' : '手动';
+                  const sourceColor = e.rule.source_pattern_id ? 'bg-[#F0B90B]/15 text-[#F0B90B]' : 'bg-[#2B3139] text-muted-foreground';
+                  return (
+                    <tr key={e.rule.id} className="border-t border-[#2B3139]">
+                      <td className="px-3 py-1.5 text-foreground truncate max-w-[300px]">{e.rule.rule_text}</td>
+                      <td className="px-3">
+                        <span className={`inline-block rounded px-1.5 py-0.5 text-[10px] ${sourceColor}`}>{sourceLabel}</span>
+                      </td>
+                      <td className="px-3 text-muted-foreground">{e.pattern?.pattern_name ?? '—'}</td>
+                      <td className="text-right px-3">{e.before}</td>
+                      <td className="text-right px-3">{e.after}</td>
+                      <td className={`text-right px-3 pr-3 ${e.delta < 0 ? 'text-[#0ECB81]' : e.delta > 0 ? 'text-[#F6465D]' : 'text-muted-foreground'}`}>
+                        {e.delta > 0 ? '+' : ''}{e.delta}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           )}
