@@ -6,6 +6,7 @@ import type { PlaceOrderParams } from '@/contexts/TradingContext';
 import { useTradingContext } from '@/contexts/TradingContext';
 import { usePersistedState } from '@/hooks/usePersistedState';
 import { formatUSDT, formatPrice as fmtPrice } from '@/lib/formatters';
+import { PreTradeSnapshotDialog } from '@/components/journal/PreTradeSnapshotDialog';
 
 // Re-export for convenience
 export type { PlaceOrderParams };
