@@ -14,6 +14,7 @@ import JournalListPage from "./pages/JournalListPage.tsx";
 import JournalPlaybackPage from "./pages/JournalPlaybackPage.tsx";
 import JournalInsightsPage from "./pages/JournalInsightsPage.tsx";
 import JournalRulesPage from "./pages/JournalRulesPage.tsx";
+import GuidePage from "./pages/GuidePage.tsx";
 import NotFound from "./pages/NotFound.tsx";
 import { MandatoryRuleQueueRoot } from "./components/journal/MandatoryRuleQueueRoot.tsx";
 
