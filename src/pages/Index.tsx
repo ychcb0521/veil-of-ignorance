@@ -1532,6 +1532,7 @@ const Index = () => {
         activeSymbol={activeSymbol}
         onClosePosition={handleClosePositionForSymbol}
         onCancelOrder={handleCancelOrderForSymbol}
+        onAutoPauseTimeMachine={handleAutoPauseTimeMachine}
       />
     );
   }
