@@ -620,7 +620,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
     });
 
     if (!Number.isFinite(effectiveCurrentPrice) || effectiveCurrentPrice <= 0) {
-      toast.error('无法获取当前价格'); return;
+      toast.error('无法获取当前价格'); return null;
     }
 
     const now = getEffectiveTime(symbol);
@@ -631,12 +631,12 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
 
       if (!Number.isFinite(triggerP) || triggerP <= 0) {
         toast.error('触发价无效');
-        return;
+        return null;
       }
 
       if (shouldRejectImmediateConditionalPlacement(order.side, currentP, triggerP)) {
         toast.error('触发价设置不合理，订单将立即成交，请修改或使用市价单');
-        return;
+        return null;
       }
     }
 
@@ -651,7 +651,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
         toast.error('可用余额不足', {
           description: `需要 ${requiredMargin.toFixed(2)} USDT，当前可用 ${available.toFixed(2)} USDT`,
         });
-        return;
+        return null;
       }
       setBalance(prev => prev - requiredMargin);
       setPositionsMap(prev => {
@@ -660,7 +660,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
         return { ...prev, [symbol]: [...existing, position] };
       });
       toast.success(`最优价成交: ${order.side === 'LONG' ? '开多' : '开空'} ${order.quantity.toFixed(6)} @ ${position.entryPrice.toFixed(2)}`);
-      return;
+      return { id: position.id };
     }
 
     // MARKET (taker with slippage)
@@ -671,7 +671,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
         toast.error('可用余额不足', {
           description: `需要 ${requiredMargin.toFixed(2)} USDT，当前可用 ${available.toFixed(2)} USDT`,
         });
-        return;
+        return null;
       }
       setBalance(prev => prev - requiredMargin);
       setPositionsMap(prev => {
@@ -679,13 +679,13 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
         return { ...prev, [symbol]: [...existing, position] };
       });
       toast.success(`${order.side === 'LONG' ? '开多' : '开空'} ${order.quantity.toFixed(6)} @ ${position.entryPrice.toFixed(2)}`);
-      return;
+      return { id: position.id };
     }
 
     // POST ONLY
     if (order.type === 'POST_ONLY') {
-      if (order.side === 'LONG' && order.price >= effectiveCurrentPrice) { toast.error('Post Only 被拒绝'); return; }
-      if (order.side === 'SHORT' && order.price <= effectiveCurrentPrice) { toast.error('Post Only 被拒绝'); return; }
+      if (order.side === 'LONG' && order.price >= effectiveCurrentPrice) { toast.error('Post Only 被拒绝'); return null; }
+      if (order.side === 'SHORT' && order.price <= effectiveCurrentPrice) { toast.error('Post Only 被拒绝'); return null; }
     }
 
     // SCALED
@@ -693,7 +693,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
       const count = order.scaledCount || 5;
       const startP = order.scaledStartPrice || 0;
       const endP = order.scaledEndPrice || 0;
-      if (count < 2 || startP <= 0 || endP <= 0) { toast.error('分段订单参数无效'); return; }
+      if (count < 2 || startP <= 0 || endP <= 0) { toast.error('分段订单参数无效'); return null; }
       const step = (endP - startP) / (count - 1);
       const qtyPerStep = order.quantity / count;
       const parentId = crypto.randomUUID();
@@ -705,7 +705,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
       }));
       setOrdersMap(prev => ({ ...prev, [symbol]: [...(prev[symbol] || []), ...newOrders] }));
       toast.info(`分段订单已挂出: ${count} 笔限价单`);
-      return;
+      return null;
     }
 
     // TWAP
@@ -723,7 +723,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
       };
       setOrdersMap(prev => ({ ...prev, [symbol]: [...(prev[symbol] || []), twapOrder] }));
       toast.info(`TWAP 委托已启动`);
-      return;
+      return null;
     }
 
     // All other pending types — strict margin pre-check
@@ -733,7 +733,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
       toast.error('可用余额不足', {
         description: `需要 ${estMargin.toFixed(2)} USDT，当前可用 ${available.toFixed(2)} USDT`,
       });
-      return;
+        return null;
     }
 
     // Determine trigger direction / operator at placement from the then-current price snapshot
@@ -765,6 +765,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
     };
     setOrdersMap(prev => ({ ...prev, [symbol]: [...(prev[symbol] || []), newOrder] }));
     toast.info('委托已挂出');
+    return { id: newOrder.id };
   }, [getEffectiveTime]);
 
   // ===== Close Position — supports partial close via percentage (0-1] =====
