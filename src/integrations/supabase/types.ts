@@ -183,13 +183,20 @@ export type Database = {
         Row: {
           counterfactual_branches: Json
           created_at: string
+          deep_analysis_completed_at: string | null
           direction: string
           id: string
           leverage: number | null
           position_mode: string | null
           post_correct_action: string | null
+          post_error_scenario: string | null
+          post_error_type_summary: string | null
+          post_new_rule_draft: string | null
+          post_original_hypothesis: string | null
           post_outcome: string | null
           post_r_multiple: number | null
+          post_real_problem: string | null
+          post_reality_feedback: string | null
           post_realized_pnl: number | null
           post_reflection: string | null
           post_reviewed_at: string | null
@@ -216,13 +223,20 @@ export type Database = {
         Insert: {
           counterfactual_branches?: Json
           created_at?: string
+          deep_analysis_completed_at?: string | null
           direction: string
           id?: string
           leverage?: number | null
           position_mode?: string | null
           post_correct_action?: string | null
+          post_error_scenario?: string | null
+          post_error_type_summary?: string | null
+          post_new_rule_draft?: string | null
+          post_original_hypothesis?: string | null
           post_outcome?: string | null
           post_r_multiple?: number | null
+          post_real_problem?: string | null
+          post_reality_feedback?: string | null
           post_realized_pnl?: number | null
           post_reflection?: string | null
           post_reviewed_at?: string | null
@@ -249,13 +263,20 @@ export type Database = {
         Update: {
           counterfactual_branches?: Json
           created_at?: string
+          deep_analysis_completed_at?: string | null
           direction?: string
           id?: string
           leverage?: number | null
           position_mode?: string | null
           post_correct_action?: string | null
+          post_error_scenario?: string | null
+          post_error_type_summary?: string | null
+          post_new_rule_draft?: string | null
+          post_original_hypothesis?: string | null
           post_outcome?: string | null
           post_r_multiple?: number | null
+          post_real_problem?: string | null
+          post_reality_feedback?: string | null
           post_realized_pnl?: number | null
           post_reflection?: string | null
           post_reviewed_at?: string | null
