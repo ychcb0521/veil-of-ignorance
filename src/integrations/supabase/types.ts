@@ -181,6 +181,7 @@ export type Database = {
       }
       trade_journals: {
         Row: {
+          counterfactual_branches: Json
           created_at: string
           direction: string
           id: string
@@ -213,6 +214,7 @@ export type Database = {
           user_id: string
         }
         Insert: {
+          counterfactual_branches?: Json
           created_at?: string
           direction: string
           id?: string
@@ -245,6 +247,7 @@ export type Database = {
           user_id: string
         }
         Update: {
+          counterfactual_branches?: Json
           created_at?: string
           direction?: string
           id?: string
@@ -284,9 +287,12 @@ export type Database = {
           created_at: string
           id: string
           is_active: boolean
+          required: boolean
           rule_text: string
+          snooze_until: string | null
           source_pattern_id: string | null
           trigger_threshold: number | null
+          ui_order: number
           updated_at: string
           user_id: string
         }
@@ -295,9 +301,12 @@ export type Database = {
           created_at?: string
           id?: string
           is_active?: boolean
+          required?: boolean
           rule_text: string
+          snooze_until?: string | null
           source_pattern_id?: string | null
           trigger_threshold?: number | null
+          ui_order?: number
           updated_at?: string
           user_id: string
         }
@@ -306,9 +315,12 @@ export type Database = {
           created_at?: string
           id?: string
           is_active?: boolean
+          required?: boolean
           rule_text?: string
+          snooze_until?: string | null
           source_pattern_id?: string | null
           trigger_threshold?: number | null
+          ui_order?: number
           updated_at?: string
           user_id?: string
         }
