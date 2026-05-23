@@ -71,6 +71,8 @@ export function PostTradeReviewSheet({
         setReflection(journal.post_reflection ?? '');
         setCorrectAction(journal.post_correct_action ?? '');
         setRMultipleOverride(journal.post_r_multiple != null ? String(journal.post_r_multiple) : '');
+        setSixStep(pickSixStepValue(journal));
+        setSixStepOpen(countCompletedSteps(pickSixStepValue(journal)) > 0);
         if (user) {
           listPatterns(user.id).then(setAllPatterns).catch(() => {});
         }
