@@ -14,6 +14,141 @@ export type Database = {
   }
   public: {
     Tables: {
+      error_tag_categories: {
+        Row: {
+          code: string
+          color: string
+          created_at: string
+          description: string
+          id: string
+          is_special: boolean
+          name_zh: string
+          sort_order: number
+        }
+        Insert: {
+          code: string
+          color: string
+          created_at?: string
+          description: string
+          id?: string
+          is_special?: boolean
+          name_zh: string
+          sort_order: number
+        }
+        Update: {
+          code?: string
+          color?: string
+          created_at?: string
+          description?: string
+          id?: string
+          is_special?: boolean
+          name_zh?: string
+          sort_order?: number
+        }
+        Relationships: []
+      }
+      error_tag_patterns: {
+        Row: {
+          category_id: string
+          created_at: string
+          id: string
+          is_archived: boolean
+          last_seen_at: string | null
+          occurrence_count: number
+          operational_definition: string
+          parent_id: string | null
+          pattern_name: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          category_id: string
+          created_at?: string
+          id?: string
+          is_archived?: boolean
+          last_seen_at?: string | null
+          occurrence_count?: number
+          operational_definition: string
+          parent_id?: string | null
+          pattern_name: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          category_id?: string
+          created_at?: string
+          id?: string
+          is_archived?: boolean
+          last_seen_at?: string | null
+          occurrence_count?: number
+          operational_definition?: string
+          parent_id?: string | null
+          pattern_name?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "error_tag_patterns_category_id_fkey"
+            columns: ["category_id"]
+            isOneToOne: false
+            referencedRelation: "error_tag_categories"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "error_tag_patterns_parent_id_fkey"
+            columns: ["parent_id"]
+            isOneToOne: false
+            referencedRelation: "error_tag_patterns"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      journal_tag_assignments: {
+        Row: {
+          created_at: string
+          id: string
+          journal_id: string
+          note: string | null
+          pattern_id: string
+          tagged_phase: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          journal_id: string
+          note?: string | null
+          pattern_id: string
+          tagged_phase: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          journal_id?: string
+          note?: string | null
+          pattern_id?: string
+          tagged_phase?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "journal_tag_assignments_journal_id_fkey"
+            columns: ["journal_id"]
+            isOneToOne: false
+            referencedRelation: "trade_journals"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "journal_tag_assignments_pattern_id_fkey"
+            columns: ["pattern_id"]
+            isOneToOne: false
+            referencedRelation: "error_tag_patterns"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       profiles: {
         Row: {
           created_at: string
@@ -43,6 +178,149 @@ export type Database = {
           user_id?: string
         }
         Relationships: []
+      }
+      trade_journals: {
+        Row: {
+          created_at: string
+          direction: string
+          id: string
+          leverage: number | null
+          position_mode: string | null
+          post_correct_action: string | null
+          post_outcome: string | null
+          post_r_multiple: number | null
+          post_realized_pnl: number | null
+          post_reflection: string | null
+          post_reviewed_at: string | null
+          pre_checklist_items: Json
+          pre_checklist_passed: boolean
+          pre_entry_price: number | null
+          pre_entry_reason: string
+          pre_max_loss_usdt: number | null
+          pre_mental_state: number
+          pre_mental_trigger: string | null
+          pre_planned_stop_loss: number | null
+          pre_planned_take_profit: number | null
+          pre_position_size: number | null
+          pre_real_time: string
+          pre_risk_awareness: string
+          pre_risk_management: string
+          pre_simulated_time: string
+          reason_was_rewritten: boolean
+          symbol: string
+          trade_record_id: string | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          direction: string
+          id?: string
+          leverage?: number | null
+          position_mode?: string | null
+          post_correct_action?: string | null
+          post_outcome?: string | null
+          post_r_multiple?: number | null
+          post_realized_pnl?: number | null
+          post_reflection?: string | null
+          post_reviewed_at?: string | null
+          pre_checklist_items: Json
+          pre_checklist_passed: boolean
+          pre_entry_price?: number | null
+          pre_entry_reason: string
+          pre_max_loss_usdt?: number | null
+          pre_mental_state: number
+          pre_mental_trigger?: string | null
+          pre_planned_stop_loss?: number | null
+          pre_planned_take_profit?: number | null
+          pre_position_size?: number | null
+          pre_real_time?: string
+          pre_risk_awareness: string
+          pre_risk_management: string
+          pre_simulated_time: string
+          reason_was_rewritten?: boolean
+          symbol: string
+          trade_record_id?: string | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          direction?: string
+          id?: string
+          leverage?: number | null
+          position_mode?: string | null
+          post_correct_action?: string | null
+          post_outcome?: string | null
+          post_r_multiple?: number | null
+          post_realized_pnl?: number | null
+          post_reflection?: string | null
+          post_reviewed_at?: string | null
+          pre_checklist_items?: Json
+          pre_checklist_passed?: boolean
+          pre_entry_price?: number | null
+          pre_entry_reason?: string
+          pre_max_loss_usdt?: number | null
+          pre_mental_state?: number
+          pre_mental_trigger?: string | null
+          pre_planned_stop_loss?: number | null
+          pre_planned_take_profit?: number | null
+          pre_position_size?: number | null
+          pre_real_time?: string
+          pre_risk_awareness?: string
+          pre_risk_management?: string
+          pre_simulated_time?: string
+          reason_was_rewritten?: boolean
+          symbol?: string
+          trade_record_id?: string | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      trading_rules: {
+        Row: {
+          added_to_checklist: boolean
+          created_at: string
+          id: string
+          is_active: boolean
+          rule_text: string
+          source_pattern_id: string | null
+          trigger_threshold: number | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          added_to_checklist?: boolean
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          rule_text: string
+          source_pattern_id?: string | null
+          trigger_threshold?: number | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          added_to_checklist?: boolean
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          rule_text?: string
+          source_pattern_id?: string | null
+          trigger_threshold?: number | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "trading_rules_source_pattern_id_fkey"
+            columns: ["source_pattern_id"]
+            isOneToOne: false
+            referencedRelation: "error_tag_patterns"
+            referencedColumns: ["id"]
+          },
+        ]
       }
     }
     Views: {
