@@ -40,7 +40,7 @@ export default function JournalPlaybackPage() {
   const { id } = useParams<{ id: string }>();
   const nav = useNavigate();
   const { user } = useAuth();
-  const { tradeHistory } = useTrading();
+  const { tradeHistory } = useTradingContext();
   const isMobile = useIsMobile();
 
   const [journal, setJournal] = useState<TradeJournal | null>(null);
