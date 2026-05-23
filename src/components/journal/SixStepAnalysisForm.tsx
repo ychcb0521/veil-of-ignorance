@@ -126,11 +126,11 @@ export function SixStepAnalysisForm({
         return (
           <div
             key={s.key}
-            className="relative bg-[#0B0E11] border border-[#2B3139] rounded p-3 overflow-hidden"
+            className="relative bg-background border border-border rounded p-3 overflow-hidden"
           >
             <div className="absolute left-0 top-0 bottom-0 w-1" style={{ background: s.color }} />
             <div className="flex items-center gap-2 mb-1 pl-2">
-              <span className="w-5 h-5 rounded-full bg-[#2B3139] text-[10px] font-mono flex items-center justify-center">
+              <span className="w-5 h-5 rounded-full bg-muted text-[10px] font-mono flex items-center justify-center">
                 {s.num}
               </span>
               <span className="text-[12px] font-medium">{s.title}</span>
@@ -146,7 +146,7 @@ export function SixStepAnalysisForm({
               disabled={readonly}
               onChange={e => handleField(s.key, e.target.value)}
               placeholder={s.placeholder}
-              className="bg-transparent border-[#2B3139]/60 text-[12px]"
+              className="bg-transparent border-border/60 text-[12px]"
             />
             <div className="flex items-center justify-between mt-1">
               {short ? (
@@ -168,7 +168,7 @@ export function SixStepAnalysisForm({
                 ) : (
                   <div className="flex flex-wrap gap-1">
                     {patternChips.map(c => (
-                      <span key={c.id} className="bg-[#2B3139] text-[10px] rounded-full px-2 py-0.5">
+                      <span key={c.id} className="bg-muted text-[10px] rounded-full px-2 py-0.5">
                         {c.name}
                       </span>
                     ))}
@@ -188,7 +188,7 @@ export function SixStepAnalysisForm({
                       <button
                         type="button"
                         onClick={() => setSelectedPatternId('__none__')}
-                        className={`text-[10px] rounded-full px-2 py-0.5 border ${selectedPatternId === '__none__' ? 'bg-[#F0B90B] text-black border-[#F0B90B]' : 'bg-[#0B0E11] border-[#2B3139] text-muted-foreground hover:text-foreground'}`}
+                        className={`text-[10px] rounded-full px-2 py-0.5 border ${selectedPatternId === '__none__' ? 'bg-[#F0B90B] text-black border-[#F0B90B]' : 'bg-background border-border text-muted-foreground hover:text-foreground'}`}
                       >
                         通用 / 不绑定
                       </button>
@@ -197,7 +197,7 @@ export function SixStepAnalysisForm({
                           key={c.id}
                           type="button"
                           onClick={() => setSelectedPatternId(c.id)}
-                          className={`text-[10px] rounded-full px-2 py-0.5 border ${selectedPatternId === c.id ? 'bg-[#F0B90B] text-black border-[#F0B90B]' : 'bg-[#0B0E11] border-[#2B3139] text-muted-foreground hover:text-foreground'}`}
+                          className={`text-[10px] rounded-full px-2 py-0.5 border ${selectedPatternId === c.id ? 'bg-[#F0B90B] text-black border-[#F0B90B]' : 'bg-background border-border text-muted-foreground hover:text-foreground'}`}
                         >
                           {c.name}
                         </button>
@@ -235,9 +235,9 @@ export function SixStepAnalysisForm({
         );
       })}
 
-      <div className="bg-[#0B0E11] border border-[#2B3139] rounded p-2">
+      <div className="bg-background border border-border rounded p-2">
         <div className="flex items-center gap-2">
-          <div className="flex-1 h-1.5 bg-[#2B3139] rounded overflow-hidden">
+          <div className="flex-1 h-1.5 bg-muted rounded overflow-hidden">
             <div
               className="h-full bg-[#0ECB81] transition-all"
               style={{ width: `${(completed / 6) * 100}%` }}

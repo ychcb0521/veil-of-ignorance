@@ -196,7 +196,7 @@ export function PostTradeReviewSheet({
 
   const body = (
     <>
-      <div className="px-5 py-4 border-b border-[#2B3139]">
+      <div className="px-5 py-4 border-b border-border">
         <div className="text-[14px] font-medium text-foreground">平仓评价</div>
         <div className="font-mono text-[11px] text-muted-foreground mt-0.5">
           {journal.symbol} · {journal.direction} · 模拟时间 {fmtTime(journal.pre_simulated_time)}
@@ -209,7 +209,7 @@ export function PostTradeReviewSheet({
           <CollapsibleTrigger className="text-[11px] text-muted-foreground flex items-center gap-1 hover:text-foreground">
             <ChevronDown className="w-3 h-3" /> 开仓时的快照
           </CollapsibleTrigger>
-          <CollapsibleContent className="mt-2 space-y-1 text-[11px] font-mono text-foreground/80 pl-3 border-l border-[#2B3139]">
+          <CollapsibleContent className="mt-2 space-y-1 text-[11px] font-mono text-foreground/80 pl-3 border-l border-border">
             <div>• 入场理由：{journal.pre_entry_reason}</div>
             <div>• 预设止损/止盈：{journal.pre_planned_stop_loss ?? '—'} / {journal.pre_planned_take_profit ?? '—'}</div>
             <div>• 风险认识：{journal.pre_risk_awareness}</div>
@@ -225,7 +225,7 @@ export function PostTradeReviewSheet({
         </Collapsible>
 
         {/* (B) Auto outcome */}
-        <div className="bg-[#0B0E11] border border-[#2B3139] rounded p-3 grid grid-cols-2 sm:grid-cols-4 gap-3 text-[12px] font-mono">
+        <div className="bg-background border border-border rounded p-3 grid grid-cols-2 sm:grid-cols-4 gap-3 text-[12px] font-mono">
           <div>
             <div className="text-[10px] text-muted-foreground">结果</div>
             <div className={outcome === 'win' ? 'text-[#0ECB81]' : outcome === 'loss' ? 'text-[#F6465D]' : 'text-foreground'}>
@@ -249,7 +249,7 @@ export function PostTradeReviewSheet({
                 onChange={e => setRMultipleOverride(e.target.value)}
                 onBlur={() => setEditingR(false)}
                 autoFocus
-                className="h-6 text-[12px] bg-[#181A20] border-[#2B3139] font-mono"
+                className="h-6 text-[12px] bg-card border-border font-mono"
               />
             ) : (
               <div>{finalR != null ? finalR.toFixed(2) + ' R' : '—'}</div>
@@ -291,7 +291,7 @@ export function PostTradeReviewSheet({
 
         {/* (C+) 六步深度分析（可选） */}
         <Collapsible open={sixStepOpen} onOpenChange={setSixStepOpen}>
-          <CollapsibleTrigger className="w-full bg-[#181A20] border border-[#2B3139] rounded px-3 py-2 flex items-center gap-2 hover:bg-[#1f242c]">
+          <CollapsibleTrigger className="w-full bg-card border border-border rounded px-3 py-2 flex items-center gap-2 hover:bg-[#1f242c]">
             <BrainCircuit className="w-3.5 h-3.5 text-[#F0B90B]" />
             <div className="flex-1 text-left">
               <div className="text-[12px] text-foreground">进入六步深度分析（推荐）</div>
@@ -304,7 +304,7 @@ export function PostTradeReviewSheet({
           <CollapsibleContent className="mt-2 space-y-2">
             <SixStepAnalysisForm value={sixStep} onChange={setSixStep} />
             <Button size="sm" variant="ghost" onClick={applySixStepToFields}
-              className="h-7 text-[10px] bg-[#2B3139] hover:bg-[#363c45]">
+              className="h-7 text-[10px] bg-muted hover:bg-[#363c45]">
               用六步内容回写下方字段
             </Button>
           </CollapsibleContent>
@@ -318,7 +318,7 @@ export function PostTradeReviewSheet({
             value={reflection}
             onChange={e => setReflection(e.target.value)}
             placeholder="例如：本次入场理由在事后看仍然成立，但仓位过重；止损位过近导致被洗出后又看着行情走出预期方向。下次应根据 ATR 设置止损宽度。"
-            className="text-[12px] bg-[#0B0E11] border-[#2B3139]"
+            className="text-[12px] bg-background border-border"
           />
           <div className="text-[10px] text-muted-foreground text-right font-mono">{reflection.trim().length} / 30</div>
         </div>
@@ -331,7 +331,7 @@ export function PostTradeReviewSheet({
             value={correctAction}
             onChange={e => setCorrectAction(e.target.value)}
             placeholder="例如：止损位放在 X 而非 Y；分批入场 3 次而非一次满仓；不在心态 ≤3 分时开仓。"
-            className="text-[12px] bg-[#0B0E11] border-[#2B3139]"
+            className="text-[12px] bg-background border-border"
           />
           <div className="flex items-center justify-between">
             <p className="text-[10px] text-muted-foreground">❗ 必须可执行——不是"下次更冷静"，而是"下次开仓前必须满足 checklist 第 N 项"</p>
@@ -352,7 +352,7 @@ export function PostTradeReviewSheet({
         )}
       </div>
 
-      <div className="px-5 py-3 border-t border-[#2B3139] flex justify-end gap-2 shrink-0 bg-[#181A20]">
+      <div className="px-5 py-3 border-t border-border flex justify-end gap-2 shrink-0 bg-card">
         <Button variant="ghost" onClick={() => onOpenChange(false)} className="h-8 text-[12px]">取消</Button>
         <Button
           onClick={handleSave}
@@ -366,7 +366,7 @@ export function PostTradeReviewSheet({
   if (isMobile) {
     return (
       <Sheet open={isOpen} onOpenChange={onOpenChange}>
-        <SheetContent side="bottom" className="h-[92vh] rounded-t-2xl p-0 bg-[#181A20] border-t border-[#2B3139] flex flex-col">
+        <SheetContent side="bottom" className="h-[92vh] rounded-t-2xl p-0 bg-card border-t border-border flex flex-col">
           {body}
         </SheetContent>
       </Sheet>
@@ -375,7 +375,7 @@ export function PostTradeReviewSheet({
 
   return (
     <Sheet open={isOpen} onOpenChange={onOpenChange}>
-      <SheetContent side="right" className="w-[640px] sm:max-w-[640px] p-0 bg-[#181A20] border-l border-[#2B3139] flex flex-col">
+      <SheetContent side="right" className="w-[640px] sm:max-w-[640px] p-0 bg-card border-l border-border flex flex-col">
         {body}
       </SheetContent>
     </Sheet>

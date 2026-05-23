@@ -11,7 +11,7 @@ const SEV_BAR: Record<PatternCluster['severity'], string> = {
   critical: 'bg-[#F6465D]',
   high: 'bg-[#F0B90B]',
   medium: 'bg-[#848E9C]',
-  low: 'bg-[#2B3139]',
+  low: 'bg-muted',
 };
 
 function pnlColor(v: number) {
@@ -49,11 +49,11 @@ export function PatternClusterCard({ cluster, expandedSignal }: Props) {
   const maxSymbol = Math.max(1, ...symbolDist.map(s => s.count));
 
   return (
-    <div className="bg-[#181A20] border border-[#2B3139] rounded mb-2 overflow-hidden flex">
+    <div className="bg-card border border-border rounded mb-2 overflow-hidden flex">
       <div className={`w-1 shrink-0 ${SEV_BAR[severity]}`} />
       <div className="flex-1 min-w-0">
         <div
-          className="px-4 py-3 flex items-center gap-3 cursor-pointer hover:bg-[#1E2026]"
+          className="px-4 py-3 flex items-center gap-3 cursor-pointer hover:bg-accent"
           onClick={() => setOpenLocal(v => (expandedSignal == null ? !v : !open))}
         >
           <span className="w-2 h-2 rounded-full shrink-0" style={{ background: category.color }} />
@@ -72,7 +72,7 @@ export function PatternClusterCard({ cluster, expandedSignal }: Props) {
         </div>
 
         {open && (
-          <div className="border-t border-[#2B3139] px-4 py-3 space-y-3">
+          <div className="border-t border-border px-4 py-3 space-y-3">
             <div className="text-[11px] text-muted-foreground italic">
               定义：{pattern.operational_definition}
             </div>
@@ -108,7 +108,7 @@ export function PatternClusterCard({ cluster, expandedSignal }: Props) {
                   {symbolDist.map(s => (
                     <div key={s.symbol} className="flex items-center gap-1 text-[9px] font-mono">
                       <span className="w-12 truncate text-foreground">{s.symbol}</span>
-                      <div className="flex-1 h-1.5 bg-[#2B3139] rounded">
+                      <div className="flex-1 h-1.5 bg-muted rounded">
                         <div className="h-full bg-[#5b8def] rounded" style={{ width: `${(s.count / maxSymbol) * 100}%` }} />
                       </div>
                       <span className="text-muted-foreground w-6 text-right">{s.count}</span>
@@ -118,15 +118,15 @@ export function PatternClusterCard({ cluster, expandedSignal }: Props) {
               </MiniChart>
             </div>
 
-            <div className="border border-[#2B3139] rounded overflow-hidden">
-              <div className="grid grid-cols-[110px_80px_60px_50px_60px_80px_40px] text-[10px] text-muted-foreground bg-[#0B0E11] px-2 py-1">
+            <div className="border border-border rounded overflow-hidden">
+              <div className="grid grid-cols-[110px_80px_60px_50px_60px_80px_40px] text-[10px] text-muted-foreground bg-background px-2 py-1">
                 <span>时间</span><span>标的</span><span>方向</span><span>心态</span>
                 <span>R</span><span>P&L</span><span>标注</span>
               </div>
               {journals.slice().sort((a, b) => +new Date(b.pre_simulated_time) - +new Date(a.pre_simulated_time)).map(j => (
                 <div key={j.id}
                   onClick={() => nav(`/journal/${j.id}`)}
-                  className="grid grid-cols-[110px_80px_60px_50px_60px_80px_40px] px-2 py-1.5 text-[11px] font-mono hover:bg-[#1E2026] cursor-pointer border-t border-[#2B3139]/40">
+                  className="grid grid-cols-[110px_80px_60px_50px_60px_80px_40px] px-2 py-1.5 text-[11px] font-mono hover:bg-accent cursor-pointer border-t border-border/40">
                   <span>{fmtTime(j.pre_simulated_time)}</span>
                   <span className="truncate">{j.symbol}</span>
                   <span className={
@@ -157,7 +157,7 @@ export function PatternClusterCard({ cluster, expandedSignal }: Props) {
 
 function MiniChart({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div className="bg-[#0B0E11] rounded p-2 border border-[#2B3139]">
+    <div className="bg-background rounded p-2 border border-border">
       <div className="text-[9px] text-muted-foreground mb-1">{title}</div>
       {children}
     </div>

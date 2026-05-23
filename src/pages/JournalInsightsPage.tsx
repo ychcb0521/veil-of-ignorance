@@ -97,22 +97,22 @@ export default function JournalInsightsPage() {
 
   if (loading || !data || !stats) {
     return (
-      <div className="min-h-screen bg-[#0B0E11] flex items-center justify-center text-muted-foreground text-[12px] font-mono">
+      <div className="min-h-screen bg-background flex items-center justify-center text-muted-foreground text-[12px] font-mono">
         加载中…
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-[#0B0E11] text-foreground">
-      <header className="sticky top-0 z-20 bg-[#0B0E11]/95 backdrop-blur-sm border-b border-[#2B3139]">
+    <div className="min-h-screen bg-background text-foreground">
+      <header className="sticky top-0 z-20 bg-background/95 backdrop-blur-sm border-b border-border">
         <div className="px-6 py-3 max-w-[1400px] mx-auto flex items-center gap-3">
           <BackButton />
           <h1 className="text-[14px] font-medium">元监控</h1>
           <div className="ml-auto flex gap-1">
             {[7, 30, 90].map(r => (
               <button key={r} onClick={() => setRange(r as Range)}
-                className={`h-7 px-2 text-[11px] rounded ${range === r ? 'bg-[#F0B90B] text-black' : 'bg-[#2B3139] text-foreground hover:bg-[#363c45]'}`}>
+                className={`h-7 px-2 text-[11px] rounded ${range === r ? 'bg-[#F0B90B] text-black' : 'bg-muted text-foreground hover:bg-[#363c45]'}`}>
                 {r}d
               </button>
             ))}
@@ -136,20 +136,20 @@ export default function JournalInsightsPage() {
         </div>
 
         {/* Pattern trend */}
-        <section className="border border-[#2B3139] rounded bg-[#181A20]">
-          <div className="px-3 py-2 border-b border-[#2B3139] text-[12px] font-medium">错误模式趋势（vs 上一个周期）</div>
+        <section className="border border-border rounded bg-card">
+          <div className="px-3 py-2 border-b border-border text-[12px] font-medium">错误模式趋势（vs 上一个周期）</div>
           {stats.trend.length === 0 ? (
             <div className="p-6 text-center text-[11px] text-muted-foreground">暂无数据</div>
           ) : (
             <table className="w-full text-[11px]">
-              <thead className="text-muted-foreground bg-[#0B0E11]">
+              <thead className="text-muted-foreground bg-background">
                 <tr><th className="text-left px-3 py-1.5">模式</th><th className="text-right px-3">本周期</th><th className="text-right px-3">上周期</th><th className="text-right px-3">Δ</th><th className="text-right px-3 pr-3">avg P&L</th></tr>
               </thead>
               <tbody className="font-mono">
                 {stats.trend.slice(0, 12).map(t => {
                   const deltaColor = t.delta > 0 ? 'text-[#F6465D]' : t.delta < 0 ? 'text-[#0ECB81]' : 'text-muted-foreground';
                   return (
-                    <tr key={t.pattern.id} className="border-t border-[#2B3139]">
+                    <tr key={t.pattern.id} className="border-t border-border">
                       <td className="px-3 py-1.5 text-foreground">{t.pattern.pattern_name}</td>
                       <td className="text-right px-3">{t.cur}</td>
                       <td className="text-right px-3 text-muted-foreground">{t.prev}</td>
@@ -167,7 +167,7 @@ export default function JournalInsightsPage() {
 
         {/* Alpha & mental */}
         <div className="grid md:grid-cols-2 gap-3">
-          <section className="border border-[#2B3139] rounded bg-[#181A20] p-3">
+          <section className="border border-border rounded bg-card p-3">
             <div className="text-[12px] font-medium mb-2">Alpha 时段 Top 5</div>
             {stats.alphaHours.length === 0 ? (
               <div className="text-[11px] text-muted-foreground">数据不足（每个小时段至少需 3 笔交易）</div>
@@ -176,7 +176,7 @@ export default function JournalInsightsPage() {
                 {stats.alphaHours.map(h => (
                   <div key={h.hour} className="flex items-center gap-2 text-[11px] font-mono">
                     <span className="w-8 text-muted-foreground">{String(h.hour).padStart(2, '0')}时</span>
-                    <div className="flex-1 bg-[#0B0E11] h-2 rounded overflow-hidden">
+                    <div className="flex-1 bg-background h-2 rounded overflow-hidden">
                       <div className="h-full bg-[#0ECB81]" style={{ width: `${Math.min(100, h.avg_pnl)}%` }} />
                     </div>
                     <span className="w-12 text-right text-[#0ECB81]">+{h.avg_pnl.toFixed(2)}</span>
@@ -186,14 +186,14 @@ export default function JournalInsightsPage() {
               </div>
             )}
           </section>
-          <section className="border border-[#2B3139] rounded bg-[#181A20] p-3">
+          <section className="border border-border rounded bg-card p-3">
             <div className="text-[12px] font-medium mb-2">心态评分 vs 表现</div>
             <div className="space-y-1.5">
               {stats.mentalDist.map(m => (
                 <div key={m.state} className="flex items-center gap-2 text-[11px] font-mono">
                   <span className="w-6 text-muted-foreground">{m.state}分</span>
                   <span className="w-10 text-muted-foreground">{m.count}笔</span>
-                  <div className="flex-1 bg-[#0B0E11] h-2 rounded overflow-hidden relative">
+                  <div className="flex-1 bg-background h-2 rounded overflow-hidden relative">
                     <div className={`h-full ${m.avg_pnl >= 0 ? 'bg-[#0ECB81]' : 'bg-[#F6465D]'}`}
                       style={{ width: `${Math.min(100, Math.abs(m.avg_pnl))}%` }} />
                   </div>
@@ -207,21 +207,21 @@ export default function JournalInsightsPage() {
         </div>
 
         {/* Rule effectiveness */}
-        <section className="border border-[#2B3139] rounded bg-[#181A20]">
-          <div className="px-3 py-2 border-b border-[#2B3139] text-[12px] font-medium">规则有效性（生效前后该 pattern 的出现次数）</div>
+        <section className="border border-border rounded bg-card">
+          <div className="px-3 py-2 border-b border-border text-[12px] font-medium">规则有效性（生效前后该 pattern 的出现次数）</div>
           {stats.ruleEffect.length === 0 ? (
             <div className="p-6 text-center text-[11px] text-muted-foreground">尚无已生效的规则可观测</div>
           ) : (
             <table className="w-full text-[11px]">
-              <thead className="text-muted-foreground bg-[#0B0E11]">
+              <thead className="text-muted-foreground bg-background">
                 <tr><th className="text-left px-3 py-1.5">规则</th><th className="text-left px-3">来源</th><th className="text-left px-3">来源模式</th><th className="text-right px-3">规则前</th><th className="text-right px-3">规则后</th><th className="text-right px-3 pr-3">Δ</th></tr>
               </thead>
               <tbody className="font-mono">
                 {stats.ruleEffect.map(e => {
                   const sourceLabel = e.rule.source_pattern_id ? '模式触发' : '手动';
-                  const sourceColor = e.rule.source_pattern_id ? 'bg-[#F0B90B]/15 text-[#F0B90B]' : 'bg-[#2B3139] text-muted-foreground';
+                  const sourceColor = e.rule.source_pattern_id ? 'bg-[#F0B90B]/15 text-[#F0B90B]' : 'bg-muted text-muted-foreground';
                   return (
-                    <tr key={e.rule.id} className="border-t border-[#2B3139]">
+                    <tr key={e.rule.id} className="border-t border-border">
                       <td className="px-3 py-1.5 text-foreground truncate max-w-[300px]">{e.rule.rule_text}</td>
                       <td className="px-3">
                         <span className={`inline-block rounded px-1.5 py-0.5 text-[10px] ${sourceColor}`}>{sourceLabel}</span>
@@ -246,7 +246,7 @@ export default function JournalInsightsPage() {
 
 function StatCard({ label, value, accent, sub }: { label: string; value: string; accent?: string; sub?: string }) {
   return (
-    <div className="border border-[#2B3139] rounded bg-[#181A20] p-3">
+    <div className="border border-border rounded bg-card p-3">
       <div className="text-[10px] text-muted-foreground">{label}</div>
       <div className="text-[22px] font-mono mt-1" style={{ color: accent }}>{value}</div>
       {sub && <div className="text-[10px] text-muted-foreground font-mono mt-0.5">{sub}</div>}

@@ -68,7 +68,7 @@ export function MandatoryRuleDialog({ info, userId, onResolved }: Props) {
   return (
     <Dialog open={true} onOpenChange={() => { /* blocked */ }}>
       <DialogContent
-        className="max-w-[560px] bg-[#181A20] border border-[#F6465D] p-0"
+        className="max-w-[560px] bg-card border border-[#F6465D] p-0"
         onPointerDownOutside={e => e.preventDefault()}
         onEscapeKeyDown={e => e.preventDefault()}
         onInteractOutside={e => e.preventDefault()}
@@ -94,7 +94,7 @@ export function MandatoryRuleDialog({ info, userId, onResolved }: Props) {
               <div className="flex flex-wrap gap-1.5">
                 {info.recent_journals.map(j => (
                   <Link key={j.id} to={`/journal/${j.id}`}
-                    className="bg-[#2B3139] hover:bg-[#363c45] rounded px-2 py-1 text-[11px] font-mono text-foreground">
+                    className="bg-muted hover:bg-[#363c45] rounded px-2 py-1 text-[11px] font-mono text-foreground">
                     {j.symbol} · {new Date(j.pre_simulated_time).toLocaleDateString('zh-CN')}
                   </Link>
                 ))}
@@ -109,7 +109,7 @@ export function MandatoryRuleDialog({ info, userId, onResolved }: Props) {
               value={text}
               onChange={e => setText(e.target.value)}
               placeholder="例如：开仓前必须确认 ATR(14) ≥ 50，否则止损位过近，禁止入场"
-              className="text-[12px] bg-[#0B0E11] border-[#2B3139]"
+              className="text-[12px] bg-background border-border"
             />
             <p className="text-[10px] text-muted-foreground">
               ❗ 必须可被未来的你在 checklist 上勾选/不勾选——避免空泛。{text.trim().length}/20
@@ -129,7 +129,7 @@ export function MandatoryRuleDialog({ info, userId, onResolved }: Props) {
           </div>
         </div>
 
-        <div className="px-5 py-3 border-t border-[#2B3139] flex justify-between">
+        <div className="px-5 py-3 border-t border-border flex justify-between">
           <Button
             variant="ghost"
             disabled={snoozing}

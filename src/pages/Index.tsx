@@ -1548,6 +1548,13 @@ const Index = () => {
           <h1 className="text-xs font-bold text-primary tracking-widest uppercase whitespace-nowrap shrink-0">
             ⚡ 无知之幕
           </h1>
+          <Link
+            to="/guide"
+            className="ml-3 flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground transition-colors shrink-0"
+          >
+            <BookOpen className="h-3 w-3" />
+            <span>使用说明</span>
+          </Link>
           <SymbolSelector
             symbol={activeSymbol}
             interval={interval}

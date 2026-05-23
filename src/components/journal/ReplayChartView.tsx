@@ -106,16 +106,16 @@ export function ReplayChartView() {
 
   return (
     <div className="h-full flex flex-col gap-2 min-h-0">
-      <div className="h-9 px-2 bg-[#181A20] border border-[#2B3139] rounded flex items-center gap-3 shrink-0">
+      <div className="h-9 px-2 bg-card border border-border rounded flex items-center gap-3 shrink-0">
         <div className="flex items-center gap-1.5">
-          <span className="w-5 h-5 rounded-full bg-[#2B3139] text-[10px] font-mono flex items-center justify-center">①</span>
+          <span className="w-5 h-5 rounded-full bg-muted text-[10px] font-mono flex items-center justify-center">①</span>
           <span className="text-[12px] font-medium">盘面</span>
         </div>
 
         <div className="flex items-center gap-1">
           {INTERVALS.map(i => (
             <button key={i} onClick={() => setInterval(i)}
-              className={`h-6 px-2 rounded text-[10px] font-mono ${interval === i ? 'bg-[#F0B90B] text-black' : 'bg-[#2B3139] text-foreground hover:bg-[#363c45]'}`}>
+              className={`h-6 px-2 rounded text-[10px] font-mono ${interval === i ? 'bg-[#F0B90B] text-black' : 'bg-muted text-foreground hover:bg-[#363c45]'}`}>
               {i}
             </button>
           ))}
@@ -123,7 +123,7 @@ export function ReplayChartView() {
 
         <div className="flex items-center gap-1">
           <button disabled
-            className="h-6 px-2 rounded text-[10px] font-mono bg-[#2B3139] text-muted-foreground opacity-50 cursor-not-allowed"
+            className="h-6 px-2 rounded text-[10px] font-mono bg-muted text-muted-foreground opacity-50 cursor-not-allowed"
             title="批次 5 暂不支持深度图">深度图</button>
         </div>
 
@@ -141,7 +141,7 @@ export function ReplayChartView() {
         </div>
       </div>
 
-      <div className="flex-1 min-h-0 bg-[#0B0E11] border border-[#2B3139] rounded overflow-hidden relative">
+      <div className="flex-1 min-h-0 bg-background border border-border rounded overflow-hidden relative">
         {loading && (
           <div className="absolute inset-0 flex items-center justify-center text-muted-foreground text-xs font-mono">
             加载 K 线…

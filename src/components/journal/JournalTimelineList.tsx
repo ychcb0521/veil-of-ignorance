@@ -65,8 +65,8 @@ export function JournalTimelineList({ journals, assignments, patterns }: Props) 
   const pageRows = sorted.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
 
   return (
-    <div className="bg-[#181A20] border border-[#2B3139] rounded">
-      <div className="grid grid-cols-[110px_80px_60px_50px_60px_60px_80px_60px_80px] text-[10px] text-muted-foreground bg-[#0B0E11] px-3 py-1.5 sticky top-0">
+    <div className="bg-card border border-border rounded">
+      <div className="grid grid-cols-[110px_80px_60px_50px_60px_60px_80px_60px_80px] text-[10px] text-muted-foreground bg-background px-3 py-1.5 sticky top-0">
         <span>时间</span><span>标的</span><span>方向</span><span>心态</span>
         <span>结果</span><span>R</span><span>P&L</span><span>标签数</span><span>操作</span>
       </div>
@@ -76,7 +76,7 @@ export function JournalTimelineList({ journals, assignments, patterns }: Props) 
       {pageRows.map(j => {
         const tags = tagsByJournal.get(j.id) ?? [];
         return (
-          <div key={j.id} className="grid grid-cols-[110px_80px_60px_50px_60px_60px_80px_60px_80px] px-3 py-1.5 text-[11px] font-mono border-b border-[#2B3139]/40 hover:bg-[#1E2026] items-center">
+          <div key={j.id} className="grid grid-cols-[110px_80px_60px_50px_60px_60px_80px_60px_80px] px-3 py-1.5 text-[11px] font-mono border-b border-border/40 hover:bg-accent items-center">
             <span className="flex items-center gap-1">
               {j.reason_was_rewritten && <AlertTriangle className="w-3 h-3 text-[#F0B90B]" />}
               {fmtTime(j.pre_simulated_time)}
@@ -96,9 +96,9 @@ export function JournalTimelineList({ journals, assignments, patterns }: Props) 
               {tags.length > 0 ? (
                 <Popover>
                   <PopoverTrigger asChild>
-                    <button className="inline-flex h-5 px-1.5 rounded bg-[#2B3139] text-foreground text-[10px]">×{tags.length}</button>
+                    <button className="inline-flex h-5 px-1.5 rounded bg-muted text-foreground text-[10px]">×{tags.length}</button>
                   </PopoverTrigger>
-                  <PopoverContent className="w-56 p-2 bg-[#181A20] border-[#2B3139] text-[11px]">
+                  <PopoverContent className="w-56 p-2 bg-card border-border text-[11px]">
                     {tags.slice(0, 3).map(t => <div key={t.id} className="truncate">• {t.pattern_name}</div>)}
                     {tags.length > 3 && <div className="text-muted-foreground">…+{tags.length - 3}</div>}
                   </PopoverContent>
@@ -115,7 +115,7 @@ export function JournalTimelineList({ journals, assignments, patterns }: Props) 
         );
       })}
       {totalPages > 1 && (
-        <div className="flex items-center justify-between px-3 py-2 border-t border-[#2B3139] text-[11px]">
+        <div className="flex items-center justify-between px-3 py-2 border-t border-border text-[11px]">
           <span className="text-muted-foreground">共 {sorted.length} 条</span>
           <div className="flex items-center gap-2">
             <Button size="sm" variant="ghost" className="h-6 text-[11px]"

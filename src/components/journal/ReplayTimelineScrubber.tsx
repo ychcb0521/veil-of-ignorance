@@ -24,7 +24,7 @@ export function ReplayTimelineScrubber() {
   const exitPct = tExit != null ? ((tExit - tStart) / range) * 100 : null;
 
   return (
-    <div className="h-12 bg-[#181A20] border border-[#2B3139] rounded px-3 flex items-center gap-3">
+    <div className="h-12 bg-card border border-border rounded px-3 flex items-center gap-3">
       <Button size="icon" variant="ghost" className="h-8 w-8 shrink-0"
         onClick={() => (replayStatus === 'running' ? pause() : play())}>
         {replayStatus === 'running' ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
@@ -37,7 +37,7 @@ export function ReplayTimelineScrubber() {
       <div className="flex items-center gap-1 shrink-0">
         {REPLAY_SPEEDS.map(s => (
           <button key={s} onClick={() => setSpeed(s as ReplaySpeed)}
-            className={`h-7 px-2 rounded text-[10px] font-mono ${replaySpeed === s ? 'bg-[#F0B90B] text-black' : 'bg-[#2B3139] text-foreground hover:bg-[#363c45]'}`}>
+            className={`h-7 px-2 rounded text-[10px] font-mono ${replaySpeed === s ? 'bg-[#F0B90B] text-black' : 'bg-muted text-foreground hover:bg-[#363c45]'}`}>
             {s}×
           </button>
         ))}

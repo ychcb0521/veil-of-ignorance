@@ -8,7 +8,7 @@ interface Props {
 const STYLES: Record<MetaAlertItem['level'], string> = {
   red: 'bg-[#F6465D]/10 border-[#F6465D]/30 text-[#F6465D]',
   yellow: 'bg-[#F0B90B]/10 border-[#F0B90B]/30 text-[#F0B90B]',
-  gray: 'bg-[#2B3139]/40 border-[#2B3139] text-muted-foreground',
+  gray: 'bg-muted/40 border-border text-muted-foreground',
 };
 
 export function JournalMetaAlerts({ alerts }: Props) {

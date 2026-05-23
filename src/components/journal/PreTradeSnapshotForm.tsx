@@ -192,13 +192,13 @@ export function PreTradeSnapshotForm({
 
   const labelCls = 'text-[11px] text-muted-foreground';
   const requiredStar = <span className="text-[#F6465D] ml-0.5">*</span>;
-  const inputCls = 'bg-[#0B0E11] border-[#2B3139] text-[12px] font-mono text-foreground h-9';
-  const textareaCls = 'bg-[#0B0E11] border-[#2B3139] text-[12px] font-mono text-foreground resize-none';
+  const inputCls = 'bg-background border-border text-[12px] font-mono text-foreground h-9';
+  const textareaCls = 'bg-background border-border text-[12px] font-mono text-foreground resize-none';
 
   return (
     <div className="flex flex-col">
       {/* Header */}
-      <div className="px-5 py-4 border-b border-[#2B3139]">
+      <div className="px-5 py-4 border-b border-border">
         <h2 className="text-[14px] font-medium text-foreground">
           {mode === 'no_entry' ? "记录'该开没开'决策" : '开仓快照（必填）'}
         </h2>
@@ -299,7 +299,7 @@ export function PreTradeSnapshotForm({
         {isTrade && realMaxLoss > 0 && (
           <div className="space-y-1.5">
             <div className={labelCls}>计划最大亏损 (USDT)</div>
-            <div className="px-3 py-2 bg-[#0B0E11] border border-[#2B3139] rounded text-[12px] font-mono text-[#F6465D]">
+            <div className="px-3 py-2 bg-background border border-border rounded text-[12px] font-mono text-[#F6465D]">
               -{realMaxLoss.toFixed(2)} USDT
             </div>
           </div>
@@ -389,7 +389,7 @@ export function PreTradeSnapshotForm({
         {isTrade && (
           <div className="space-y-1.5">
             <div className={labelCls}>开仓 Checklist{requiredStar}</div>
-            <div className="space-y-1.5 bg-[#0B0E11] border border-[#2B3139] rounded p-3">
+            <div className="space-y-1.5 bg-background border border-border rounded p-3">
               {checklistItems.map(item => (
                 <label key={item.id} className="flex items-center gap-2 cursor-pointer">
                   <Checkbox
@@ -405,7 +405,7 @@ export function PreTradeSnapshotForm({
                   </span>
                 </label>
               ))}
-              <div className={`text-[11px] font-mono pt-1.5 border-t border-[#2B3139] ${checklistPassed ? 'text-[#0ECB81]' : 'text-[#F6465D]'}`}>
+              <div className={`text-[11px] font-mono pt-1.5 border-t border-border ${checklistPassed ? 'text-[#0ECB81]' : 'text-[#F6465D]'}`}>
                 必填 {requiredCount}/{requiredTotal} · 可选 {optionalCount}/{optionalTotal} · 状态：{checklistPassed ? '通过' : '未通过'}
               </div>
             </div>
@@ -428,7 +428,7 @@ export function PreTradeSnapshotForm({
       </div>
 
       {/* Footer */}
-      <div className="px-5 py-3 border-t border-[#2B3139] flex justify-end gap-2">
+      <div className="px-5 py-3 border-t border-border flex justify-end gap-2">
         <button
           type="button"
           onClick={onCancel}

@@ -73,8 +73,8 @@ export default function JournalRulesPage() {
   };
 
   return (
-    <div className="min-h-screen bg-[#0B0E11] text-foreground">
-      <header className="sticky top-0 z-20 bg-[#0B0E11]/95 backdrop-blur-sm border-b border-[#2B3139]">
+    <div className="min-h-screen bg-background text-foreground">
+      <header className="sticky top-0 z-20 bg-background/95 backdrop-blur-sm border-b border-border">
         <div className="px-6 py-3 max-w-[1200px] mx-auto flex items-center gap-3">
           <BackButton />
           <h1 className="text-[14px] font-medium">规则</h1>
@@ -86,16 +86,16 @@ export default function JournalRulesPage() {
         {loading ? (
           <div className="text-muted-foreground text-[12px] font-mono">加载中…</div>
         ) : rules.length === 0 ? (
-          <div className="border border-[#2B3139] rounded p-10 text-center">
+          <div className="border border-border rounded p-10 text-center">
             <div className="text-[40px] mb-2">📜</div>
             <div className="text-[12px] text-muted-foreground">
               你还没有写过任何规则。规则会在某个错误模式 30 天内重复 3 次后强制要求生成。
             </div>
           </div>
         ) : (
-          <div className="border border-[#2B3139] rounded overflow-hidden">
+          <div className="border border-border rounded overflow-hidden">
             <table className="w-full text-[12px]">
-              <thead className="bg-[#181A20] text-muted-foreground">
+              <thead className="bg-card text-muted-foreground">
                 <tr>
                   <th className="text-left px-3 py-2">规则</th>
                   <th className="text-left px-3 py-2 w-[180px]">来源模式</th>
@@ -110,12 +110,12 @@ export default function JournalRulesPage() {
                   const p = r.source_pattern_id ? patternMap.get(r.source_pattern_id) : null;
                   const snoozed = r.snooze_until && new Date(r.snooze_until).getTime() > Date.now();
                   return (
-                    <tr key={r.id} className="border-t border-[#2B3139] hover:bg-[#181A20]/50">
+                    <tr key={r.id} className="border-t border-border hover:bg-card/50">
                       <td className="px-3 py-2 align-top">
                         {editingId === r.id ? (
                           <div className="flex gap-1">
                             <Input value={editText} onChange={e => setEditText(e.target.value)}
-                              className="h-7 text-[12px] bg-[#0B0E11] border-[#2B3139]" />
+                              className="h-7 text-[12px] bg-background border-border" />
                             <Button size="sm" className="h-7 w-7 p-0" onClick={() => saveEdit(r.id)}>
                               <Check className="w-3 h-3" />
                             </Button>

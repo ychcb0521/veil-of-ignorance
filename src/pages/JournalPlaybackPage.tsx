@@ -26,8 +26,8 @@ function outcomeColor(o: string | null) {
     case 'win': return 'bg-[#0ECB81]/20 text-[#0ECB81]';
     case 'loss': return 'bg-[#F6465D]/20 text-[#F6465D]';
     case 'breakeven': return 'bg-[#F0B90B]/20 text-[#F0B90B]';
-    case 'no_entry': return 'bg-[#2B3139] text-muted-foreground';
-    default: return 'bg-[#2B3139] text-muted-foreground';
+    case 'no_entry': return 'bg-muted text-muted-foreground';
+    default: return 'bg-muted text-muted-foreground';
   }
 }
 function outcomeLabel(o: string | null) {
@@ -91,12 +91,12 @@ export default function JournalPlaybackPage() {
 
   if (loading || !journal) {
     return (
-      <div className="min-h-screen bg-[#0B0E11] p-6">
-        <Skeleton className="h-10 w-full mb-4 bg-[#181A20]" />
+      <div className="min-h-screen bg-background p-6">
+        <Skeleton className="h-10 w-full mb-4 bg-card" />
         <div className={isMobile ? '' : 'grid grid-cols-[1fr_400px] gap-3'}>
-          <Skeleton className="h-[60vh] bg-[#181A20]" />
+          <Skeleton className="h-[60vh] bg-card" />
           <div className="space-y-2">
-            {[1, 2, 3, 4].map(i => <Skeleton key={i} className="h-32 bg-[#181A20]" />)}
+            {[1, 2, 3, 4].map(i => <Skeleton key={i} className="h-32 bg-card" />)}
           </div>
         </div>
       </div>
@@ -115,8 +115,8 @@ export default function JournalPlaybackPage() {
 
   return (
     <ReplayProvider journal={journal} tradeRecord={tradeRecord} assignments={assignments} patterns={patterns}>
-      <div className="min-h-screen bg-[#0B0E11] text-foreground flex flex-col">
-        <header className="sticky top-0 z-20 bg-[#0B0E11]/95 backdrop-blur-sm border-b border-[#2B3139]">
+      <div className="min-h-screen bg-background text-foreground flex flex-col">
+        <header className="sticky top-0 z-20 bg-background/95 backdrop-blur-sm border-b border-border">
           <div className="px-6 py-3 max-w-[1600px] mx-auto w-full flex items-center justify-between gap-4">
             <div className="flex items-center gap-3 min-w-0">
               <BackButton />

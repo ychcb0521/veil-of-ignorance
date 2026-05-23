@@ -91,7 +91,7 @@ export function NewPatternDialog({
 
   return (
     <Dialog open={isOpen} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-[520px] bg-[#181A20] border border-[#2B3139]">
+      <DialogContent className="max-w-[520px] bg-card border border-border">
         <DialogHeader>
           <DialogTitle className="text-[14px]">{mode === 'edit' ? '编辑错误模式' : '新建错误模式'}</DialogTitle>
         </DialogHeader>
@@ -99,7 +99,7 @@ export function NewPatternDialog({
           <div className="space-y-1.5">
             <Label className="text-[11px] text-muted-foreground">所属大类 *</Label>
             <Select value={categoryId} onValueChange={setCategoryId} disabled={mode === 'edit'}>
-              <SelectTrigger className="h-9 text-[12px] bg-[#0B0E11] border-[#2B3139]"><SelectValue placeholder="选择大类" /></SelectTrigger>
+              <SelectTrigger className="h-9 text-[12px] bg-background border-border"><SelectValue placeholder="选择大类" /></SelectTrigger>
               <SelectContent>
                 {categories.map(c => (
                   <SelectItem key={c.id} value={c.id} className="text-[12px]">{c.name_zh}</SelectItem>
@@ -113,7 +113,7 @@ export function NewPatternDialog({
               value={name}
               onChange={e => setName(e.target.value.slice(0, 40))}
               placeholder="例如：在连续亏损 ≥2 笔后立即开仓"
-              className="h-9 text-[12px] bg-[#0B0E11] border-[#2B3139]"
+              className="h-9 text-[12px] bg-background border-border"
             />
           </div>
           <div className="space-y-1.5">
@@ -123,7 +123,7 @@ export function NewPatternDialog({
               value={definition}
               onChange={e => setDefinition(e.target.value)}
               placeholder="例如：在前一笔交易出现负收益后，30 分钟内开新仓，且 entry 与上一笔同方向。"
-              className="text-[12px] bg-[#0B0E11] border-[#2B3139]"
+              className="text-[12px] bg-background border-border"
             />
             <p className="text-[10px] text-muted-foreground">
               ❗ 必须可被未来的你客观判定——不要写"心态不好"，要写"交易前心态自评 ≤2 分"
@@ -133,7 +133,7 @@ export function NewPatternDialog({
             <div className="space-y-1.5">
               <Label className="text-[11px] text-muted-foreground">父模式（可选）</Label>
               <Select value={parentId || '__none__'} onValueChange={v => setParentId(v === '__none__' ? '' : v)}>
-                <SelectTrigger className="h-9 text-[12px] bg-[#0B0E11] border-[#2B3139]"><SelectValue placeholder="无父模式" /></SelectTrigger>
+                <SelectTrigger className="h-9 text-[12px] bg-background border-border"><SelectValue placeholder="无父模式" /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="__none__" className="text-[12px]">无父模式</SelectItem>
                   {peersInCategory.map(p => (
