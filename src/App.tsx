@@ -63,6 +63,7 @@ function AppRoutes() {
         <Route path="/journal/rules" element={<JournalRulesPage />} />
         <Route path="/journal/insights" element={<JournalInsightsPage />} />
         <Route path="/journal/:id" element={<JournalPlaybackPage />} />
+        <Route path="/guide" element={<GuidePage />} />
         <Route path="*" element={<NotFound />} />
       </Routes>
     </TradingProvider>
