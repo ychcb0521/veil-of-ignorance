@@ -1,6 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useReplay } from '@/contexts/ReplayContext';
 import { MENTAL_STATE_LABELS, type TradeJournal } from '@/types/journal';
+import { CounterfactualPanel } from './CounterfactualPanel';
+import { useReplayKlines } from '@/hooks/useReplayKlines';
+import type { KlineData } from '@/hooks/useBinanceData';
+
 
 interface ChannelProps {
   num: string;
@@ -35,18 +39,34 @@ function pnlColor(v: number) {
 
 interface HistoricalContext {
   allJournals: TradeJournal[];
+  onJournalUpdated?: (updated: TradeJournal) => void;
 }
 
-export function ContextChannelsStack({ allJournals }: HistoricalContext) {
+export function ContextChannelsStack({ allJournals, onJournalUpdated }: HistoricalContext) {
+  const { journal, tStart, tEnd } = useReplay();
+  const [currentJournal, setCurrentJournal] = useState<TradeJournal>(journal);
+  const [selectedBranchId, setSelectedBranchId] = useState<string | null>(null);
+  useEffect(() => { setCurrentJournal(journal); }, [journal]);
+
+  const { klines } = useReplayKlines(journal.symbol, tStart - 6 * 3600_000, tEnd + 2 * 3600_000, '1m');
+
   return (
     <div className="flex-1 min-h-0 flex flex-col gap-2 overflow-hidden">
       <DecisionChannel />
       <StateChannel allJournals={allJournals} />
       <RiskChannel />
-      <CounterfactualChannel />
+      <CounterfactualChannel
+        journal={currentJournal}
+        klines={klines}
+        selectedBranchId={selectedBranchId}
+        onSelectBranch={setSelectedBranchId}
+        onBranchesChanged={(u) => { setCurrentJournal(u); onJournalUpdated?.(u); }}
+      />
     </div>
   );
 }
+
+
 
 function DecisionChannel() {
   const { journal, replayTime, tEntry } = useReplay();
@@ -213,19 +233,23 @@ function RiskChannel() {
   );
 }
 
-function CounterfactualChannel() {
-  const { journal, tradeRecord, assignments, patterns } = useReplay();
+interface CounterfactualChannelProps {
+  journal: TradeJournal;
+  klines: KlineData[];
+  selectedBranchId: string | null;
+  onSelectBranch: (id: string | null) => void;
+  onBranchesChanged: (updated: TradeJournal) => void;
+}
 
-  const grouped = useMemo(() => {
-    const out: { categoryId: string; items: { id: string; name: string }[] }[] = [];
-    const byCat = new Map<string, { id: string; name: string }[]>();
+function CounterfactualChannel({ journal, klines, selectedBranchId, onSelectBranch, onBranchesChanged }: CounterfactualChannelProps) {
+  const { assignments, patterns } = useReplay();
+
+  const tags = useMemo(() => {
+    const out: { id: string; name: string }[] = [];
     for (const a of assignments) {
       const p = patterns.get(a.pattern_id);
-      if (!p) continue;
-      if (!byCat.has(p.category_id)) byCat.set(p.category_id, []);
-      byCat.get(p.category_id)!.push({ id: p.id, name: p.pattern_name });
+      if (p) out.push({ id: p.id, name: p.pattern_name });
     }
-    for (const [categoryId, items] of byCat) out.push({ categoryId, items });
     return out;
   }, [assignments, patterns]);
 
@@ -238,32 +262,19 @@ function CounterfactualChannel() {
           </div>
         )}
 
-        {tradeRecord ? (
-          <div className="rounded border border-[#2B3139] p-2 space-y-2">
-            <div className="text-[11px] text-muted-foreground">反事实分支（批次 6 解锁）</div>
-            <div className="grid grid-cols-2 gap-2 font-mono text-[11px]">
-              <DisabledField label="入场价" defaultValue={journal.pre_entry_price?.toString() ?? ''} />
-              <DisabledField label="止损价" defaultValue={journal.pre_planned_stop_loss?.toString() ?? ''} />
-              <DisabledField label="止盈价" defaultValue={journal.pre_planned_take_profit?.toString() ?? ''} />
-              <DisabledField label="仓位" defaultValue={journal.pre_position_size?.toString() ?? ''} />
-              <DisabledField label="入场偏移(分钟)" defaultValue="0" />
-            </div>
-            <button disabled
-              className="w-full h-8 rounded bg-[#2B3139] text-muted-foreground text-[11px] cursor-not-allowed">
-              运行反事实分支（批次 6 解锁）
-            </button>
-          </div>
-        ) : (
-          <div className="text-[11px] text-muted-foreground italic">
-            未成交（no_entry），无实际结果可对比。
-          </div>
-        )}
+        <CounterfactualPanel
+          journal={journal}
+          klines={klines}
+          selectedBranchId={selectedBranchId}
+          onSelectBranch={onSelectBranch}
+          onBranchesChanged={onBranchesChanged}
+        />
 
-        {grouped.length > 0 && (
+        {tags.length > 0 && (
           <div>
             <div className="text-[11px] text-muted-foreground mb-1">错误标签</div>
             <div className="flex flex-wrap gap-1">
-              {grouped.flatMap(g => g.items).map(t => (
+              {tags.map(t => (
                 <span key={t.id} className="bg-[#2B3139] rounded-full px-2 py-0.5 text-[10px]">{t.name}</span>
               ))}
             </div>
@@ -283,12 +294,3 @@ function CounterfactualChannel() {
   );
 }
 
-function DisabledField({ label, defaultValue }: { label: string; defaultValue: string }) {
-  return (
-    <div>
-      <div className="text-[10px] text-muted-foreground">{label}</div>
-      <input disabled defaultValue={defaultValue}
-        className="w-full h-7 px-2 bg-[#0B0E11] border border-[#2B3139] rounded text-[11px] font-mono text-muted-foreground cursor-not-allowed" />
-    </div>
-  );
-}
