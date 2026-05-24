@@ -126,30 +126,47 @@ export function PatternClusterCard({ cluster, expandedSignal }: Props) {
               </MiniChart>
             </div>
 
-            <div className="border border-border rounded overflow-hidden">
-              <div className="grid grid-cols-[110px_80px_60px_50px_60px_80px_40px] text-[10px] text-muted-foreground bg-background px-2 py-1">
-                <span>时间</span><span>标的</span><span>方向</span><span>心态</span>
+            <div className="border border-border rounded overflow-hidden overflow-x-auto">
+              <div className="grid grid-cols-[110px_110px_80px_60px_80px_80px_70px_50px_60px_80px_40px] text-[10px] text-muted-foreground bg-muted/40 px-2 py-1.5 min-w-[900px]">
+                <span>开仓时间</span><span>平仓时间</span><span>标的</span><span>方向</span>
+                <span>开仓价</span><span>平仓价</span><span>平仓方式</span><span>心态</span>
                 <span>R</span><span>P&L</span><span>标注</span>
               </div>
-              {journals.slice().sort((a, b) => +new Date(b.pre_simulated_time) - +new Date(a.pre_simulated_time)).map(j => (
-                <div key={j.id}
-                  onClick={() => nav(`/journal/${j.id}`)}
-                  className="grid grid-cols-[110px_80px_60px_50px_60px_80px_40px] px-2 py-1.5 text-[11px] font-mono hover:bg-accent cursor-pointer border-t border-border/40">
-                  <span>{fmtTime(j.pre_simulated_time)}</span>
-                  <span className="truncate">{j.symbol}</span>
-                  <span className={
-                    j.direction === 'long' ? 'text-[#0ECB81]' :
-                    j.direction === 'short' ? 'text-[#F6465D]' : 'text-muted-foreground'
-                  }>
-                    {j.direction === 'long' ? 'LONG' : j.direction === 'short' ? 'SHORT' : 'PASS'}
-                  </span>
-                  <span className={mentalColor(j.pre_mental_state)}>{j.pre_mental_state}</span>
-                  <span className={pnlColor(j.post_r_multiple ?? 0)}>{j.post_r_multiple != null ? j.post_r_multiple.toFixed(2) : '—'}</span>
-                  <span className={pnlColor(j.post_realized_pnl ?? 0)}>{j.post_realized_pnl != null ? fmtPnl(j.post_realized_pnl) : '—'}</span>
-                  <span>{j.reason_was_rewritten && <AlertTriangle className="w-3 h-3 text-[#F0B90B]" />}</span>
-                </div>
-              ))}
+              {journals.slice().sort((a, b) => +new Date(b.pre_simulated_time) - +new Date(a.pre_simulated_time)).map(j => {
+                const tr = j.trade_record_id ? tradeRecordMap.get(j.trade_record_id) ?? null : null;
+                const openT = tr?.openTime
+                  ? (() => { const d = new Date(tr.openTime); const p = (n: number) => String(n).padStart(2, '0'); return `${p(d.getMonth() + 1)}/${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`; })()
+                  : fmtTime(j.pre_simulated_time);
+                const closeT = tr?.closeTime
+                  ? (() => { const d = new Date(tr.closeTime); const p = (n: number) => String(n).padStart(2, '0'); return `${p(d.getMonth() + 1)}/${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`; })()
+                  : null;
+                const entryP = tr?.entryPrice ?? j.pre_entry_price ?? null;
+                const exitP = tr && tr.exitPrice > 0 ? tr.exitPrice : null;
+                return (
+                  <div key={j.id}
+                    onClick={() => nav(`/journal/${j.id}`)}
+                    className="grid grid-cols-[110px_110px_80px_60px_80px_80px_70px_50px_60px_80px_40px] px-2 py-1.5 text-[11px] font-mono hover:bg-accent cursor-pointer border-t border-border/40 min-w-[900px]">
+                    <span>{openT}</span>
+                    <span>{closeT ?? <span className="text-muted-foreground">—</span>}</span>
+                    <span className="truncate">{j.symbol}</span>
+                    <span className={
+                      j.direction === 'long' ? 'text-[#0ECB81]' :
+                      j.direction === 'short' ? 'text-[#F6465D]' : 'text-muted-foreground'
+                    }>
+                      {j.direction === 'long' ? 'LONG' : j.direction === 'short' ? 'SHORT' : 'PASS'}
+                    </span>
+                    <span>{entryP != null ? formatPrice(entryP, j.symbol) : <span className="text-muted-foreground">—</span>}</span>
+                    <span>{exitP != null ? formatPrice(exitP, j.symbol) : <span className="text-muted-foreground">—</span>}</span>
+                    <span><ExitMethodBadge method={tr?.exit_method} /></span>
+                    <span className={mentalColor(j.pre_mental_state)}>{j.pre_mental_state}</span>
+                    <span className={pnlColor(j.post_r_multiple ?? 0)}>{j.post_r_multiple != null ? j.post_r_multiple.toFixed(2) : '—'}</span>
+                    <span className={pnlColor(j.post_realized_pnl ?? 0)}>{j.post_realized_pnl != null ? fmtPnl(j.post_realized_pnl) : '—'}</span>
+                    <span>{j.reason_was_rewritten && <AlertTriangle className="w-3 h-3 text-[#F0B90B]" />}</span>
+                  </div>
+                );
+              })}
             </div>
+
           </div>
         )}
 
