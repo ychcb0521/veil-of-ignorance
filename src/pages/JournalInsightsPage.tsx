@@ -190,6 +190,11 @@ export default function JournalInsightsPage() {
                 ))}
               </div>
             )}
+            {stats.mixedRBasis && (
+              <div className="mt-2 text-[10px] text-muted-foreground">
+                R 倍数计算基于"本次预设最大亏损"。历史 journal（使用"预设止损价"计算）的 R 数据仍可用，但口径与新 journal 略有差异。
+              </div>
+            )}
           </section>
           <section className="border border-border rounded bg-card p-3">
             <div className="text-[12px] font-medium mb-2">心态评分 vs 表现</div>
