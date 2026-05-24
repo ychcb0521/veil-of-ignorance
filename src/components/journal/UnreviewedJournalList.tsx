@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { AlertTriangle } from 'lucide-react';
 import { PostTradeReviewSheet } from './PostTradeReviewSheet';
+import { useTradingContext } from '@/contexts/TradingContext';
 import type { TradeJournal } from '@/types/journal';
 
 interface Props {
