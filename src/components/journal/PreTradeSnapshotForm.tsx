@@ -187,7 +187,7 @@ export function PreTradeSnapshotForm({
         : {
             order_kind: mode === 'no_entry' ? 'main' : orderKind,
             pre_entry_reason: reason.trim(),
-            pre_planned_stop_loss: isTrade && sl > 0 ? sl : null,
+            pre_planned_stop_loss: null,
             pre_planned_take_profit: isTrade && firstTp ? parseFloat(firstTp.price) : null,
             pre_mental_state: mental,
             pre_mental_trigger: baseMentalTrigger,
@@ -196,7 +196,7 @@ export function PreTradeSnapshotForm({
             pre_checklist_items: isTrade ? checklistItemsOut : [],
             pre_checklist_passed: isTrade ? checklistPassed : true,
             pre_position_size: isTrade && sizeUsdt > 0 ? sizeUsdt : null,
-            pre_max_loss_usdt: isTrade && realMaxLoss > 0 ? Number(realMaxLoss.toFixed(2)) : null,
+            pre_max_loss_usdt: isTrade && maxLoss > 0 ? Number(maxLoss.toFixed(2)) : null,
             tp_levels: isTrade ? tps : [],
           };
 
