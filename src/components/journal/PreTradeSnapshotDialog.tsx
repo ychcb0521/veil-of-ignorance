@@ -80,6 +80,7 @@ export function PreTradeSnapshotDialog({
         position_mode: mode === 'trade' ? (marginMode as PositionMode) : null,
         pre_simulated_time: lockedTime.toISOString(),
         pre_entry_price: lockedPrice,
+        order_kind: payload.order_kind,
         pre_planned_stop_loss: payload.pre_planned_stop_loss,
         pre_planned_take_profit: payload.pre_planned_take_profit,
         pre_entry_reason: payload.pre_entry_reason,

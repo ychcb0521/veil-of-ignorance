@@ -13,7 +13,7 @@ import { listRules } from '@/lib/journalApi';
 import { useAuth } from '@/contexts/AuthContext';
 import { ShieldCheck } from 'lucide-react';
 import type { PlaceOrderParams } from '@/contexts/TradingContext';
-import type { ChecklistItem, TradeDirection, TradingRule } from '@/types/journal';
+import type { ChecklistItem, OrderKind, TradeDirection, TradingRule } from '@/types/journal';
 
 export type SnapshotMode = 'trade' | 'no_entry';
 
@@ -23,15 +23,16 @@ export interface TpLevel {
 }
 
 export interface SnapshotPayload {
+  order_kind: OrderKind;
   pre_entry_reason: string;
   pre_planned_stop_loss: number | null;
   pre_planned_take_profit: number | null;
   pre_mental_state: 1 | 2 | 3 | 4 | 5;
   pre_mental_trigger: string | null;
-  pre_risk_awareness: string;
-  pre_risk_management: string;
-  pre_checklist_items: ChecklistItem[];
-  pre_checklist_passed: boolean;
+  pre_risk_awareness: string | null;
+  pre_risk_management: string | null;
+  pre_checklist_items: ChecklistItem[] | null;
+  pre_checklist_passed: boolean | null;
   pre_position_size: number | null;
   pre_max_loss_usdt: number | null;
   tp_levels: TpLevel[];
@@ -66,6 +67,10 @@ export function PreTradeSnapshotForm({
   const isTrade = mode === 'trade';
   const isShort = direction === 'short';
   const { user } = useAuth();
+
+  const [orderKind, setOrderKind] = useState<OrderKind>('main');
+  const isHedge = isTrade && orderKind === 'hedge';
+  const showFullFields = isTrade && orderKind === 'main';
 
   const [reason, setReason] = useState('');
   const [stopLoss, setStopLoss] = useState('');
@@ -122,21 +127,29 @@ export function PreTradeSnapshotForm({
   // ===== Submit gate =====
   const canSubmit = useMemo(() => {
     if (reason.trim().length < 20) return false;
-    if (riskAware.trim().length < 15) return false;
-    if (riskManage.trim().length < 15) return false;
     if (mental <= 3 && mentalTrigger.trim().length < 10) return false;
     if (mental <= 2 && !overrideLowMental) return false;
-    if (isTrade) {
-      if (sl <= 0) return false;
-      if (!tpsValid) return false;
-      if (sizeUsdt <= 0) return false;
-      if (!checklistPassed) return false;
-    } else {
+    if (mode === 'no_entry') {
+      if (riskAware.trim().length < 15) return false;
+      if (riskManage.trim().length < 15) return false;
       if (noEntryReason.trim().length < 10) return false;
+      return true;
     }
+    // trade mode
+    if (isHedge) {
+      // Hedge: only reason + mental + (mentalTrigger if low) + low-mental override
+      return true;
+    }
+    // main order: full requirements
+    if (riskAware.trim().length < 15) return false;
+    if (riskManage.trim().length < 15) return false;
+    if (sl <= 0) return false;
+    if (!tpsValid) return false;
+    if (sizeUsdt <= 0) return false;
+    if (!checklistPassed) return false;
     return true;
   }, [reason, riskAware, riskManage, mental, mentalTrigger, overrideLowMental,
-      isTrade, sl, tpsValid, sizeUsdt, checklistPassed, noEntryReason]);
+      mode, isHedge, sl, tpsValid, sizeUsdt, checklistPassed, noEntryReason]);
 
   const handleSubmit = async () => {
     if (!canSubmit || submitting) return;
@@ -149,26 +162,43 @@ export function PreTradeSnapshotForm({
         checked: checked.includes(d.id),
       }));
 
-
-
-      // Primary TP price (first valid level) — schema only has one column
+      // Primary TP price (first valid level)
       const firstTp = tps.find(t => parseFloat(t.price) > 0);
-      const payload: SnapshotPayload = {
-        pre_entry_reason: reason.trim(),
-        pre_planned_stop_loss: isTrade && sl > 0 ? sl : null,
-        pre_planned_take_profit: isTrade && firstTp ? parseFloat(firstTp.price) : null,
-        pre_mental_state: mental,
-        pre_mental_trigger: mode === 'no_entry'
-          ? noEntryReason.trim()
-          : (mental <= 3 ? mentalTrigger.trim() : null),
-        pre_risk_awareness: riskAware.trim(),
-        pre_risk_management: riskManage.trim(),
-        pre_checklist_items: isTrade ? checklistItemsOut : [],
-        pre_checklist_passed: isTrade ? checklistPassed : true,
-        pre_position_size: isTrade && sizeUsdt > 0 ? sizeUsdt : null,
-        pre_max_loss_usdt: isTrade && realMaxLoss > 0 ? Number(realMaxLoss.toFixed(2)) : null,
-        tp_levels: isTrade ? tps : [],
-      };
+      const baseMentalTrigger = mode === 'no_entry'
+        ? noEntryReason.trim()
+        : (mental <= 3 ? mentalTrigger.trim() : null);
+
+      const payload: SnapshotPayload = isHedge
+        ? {
+            order_kind: 'hedge',
+            pre_entry_reason: reason.trim(),
+            pre_planned_stop_loss: null,
+            pre_planned_take_profit: null,
+            pre_mental_state: mental,
+            pre_mental_trigger: baseMentalTrigger,
+            pre_risk_awareness: null,
+            pre_risk_management: null,
+            pre_checklist_items: null,
+            pre_checklist_passed: null,
+            pre_position_size: initialPositionSizeUsdt ?? (sizeUsdt > 0 ? sizeUsdt : null),
+            pre_max_loss_usdt: null,
+            tp_levels: [],
+          }
+        : {
+            order_kind: mode === 'no_entry' ? 'main' : orderKind,
+            pre_entry_reason: reason.trim(),
+            pre_planned_stop_loss: isTrade && sl > 0 ? sl : null,
+            pre_planned_take_profit: isTrade && firstTp ? parseFloat(firstTp.price) : null,
+            pre_mental_state: mental,
+            pre_mental_trigger: baseMentalTrigger,
+            pre_risk_awareness: riskAware.trim(),
+            pre_risk_management: riskManage.trim(),
+            pre_checklist_items: isTrade ? checklistItemsOut : [],
+            pre_checklist_passed: isTrade ? checklistPassed : true,
+            pre_position_size: isTrade && sizeUsdt > 0 ? sizeUsdt : null,
+            pre_max_loss_usdt: isTrade && realMaxLoss > 0 ? Number(realMaxLoss.toFixed(2)) : null,
+            tp_levels: isTrade ? tps : [],
+          };
 
       await onSubmit(payload);
     } finally {
@@ -186,9 +216,16 @@ export function PreTradeSnapshotForm({
 
   const confirmBtnClass = mode === 'no_entry'
     ? 'bg-[#F0B90B] hover:bg-[#F0B90B]/90 text-black'
-    : isShort
-      ? 'bg-[#F6465D] hover:bg-[#F6465D]/90 text-white'
-      : 'bg-[#0ECB81] hover:bg-[#0ECB81]/90 text-black';
+    : isHedge
+      ? 'bg-[#F0B90B] hover:bg-[#F0B90B]/90 text-black'
+      : isShort
+        ? 'bg-[#F6465D] hover:bg-[#F6465D]/90 text-white'
+        : 'bg-[#0ECB81] hover:bg-[#0ECB81]/90 text-black';
+
+  const confirmBtnText = submitting ? '提交中…'
+    : mode === 'no_entry' ? '记录决策'
+    : isHedge ? '确认对冲并下单'
+    : '确认并下单';
 
   const labelCls = 'text-[11px] text-muted-foreground';
   const requiredStar = <span className="text-[#F6465D] ml-0.5">*</span>;
@@ -211,10 +248,47 @@ export function PreTradeSnapshotForm({
 
       {/* Form */}
       <div className="px-5 py-4 space-y-4 max-h-[60vh] overflow-y-auto">
+        {/* (0) Order kind toggle — hidden in no_entry mode */}
+        {isTrade && (
+          <div className="mt-0 mb-1">
+            <div className={`${labelCls} mb-2`}>订单类型{requiredStar}</div>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => setOrderKind('main')}
+                className={`h-16 rounded border-2 cursor-pointer transition-all text-left p-3 flex flex-col gap-1 justify-center ${
+                  orderKind === 'main'
+                    ? 'border-foreground bg-foreground/5 text-foreground'
+                    : 'border-border bg-card hover:bg-accent'
+                }`}
+              >
+                <div className="text-[12px] font-medium">主力单</div>
+                <div className="text-[10px] text-muted-foreground">方向性下注，需完整理由+风控规划</div>
+              </button>
+              <button
+                type="button"
+                onClick={() => setOrderKind('hedge')}
+                className={`h-16 rounded border-2 cursor-pointer transition-all text-left p-3 flex flex-col gap-1 justify-center ${
+                  orderKind === 'hedge'
+                    ? 'border-[#F0B90B] bg-[#F0B90B]/10 text-foreground'
+                    : 'border-border bg-card hover:bg-accent'
+                }`}
+              >
+                <div className="text-[12px] font-medium">对冲单</div>
+                <div className="text-[10px] text-muted-foreground">防御性头寸，简化记录</div>
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* (1) Reason */}
         <div className="space-y-1.5">
           <div className={labelCls}>
-            {mode === 'no_entry' ? '你看到的信号是什么' : '开仓理由'}{requiredStar}
+            {mode === 'no_entry'
+              ? '你看到的信号是什么'
+              : isHedge
+                ? '对冲理由'
+                : '开仓理由'}{requiredStar}
             <span className="ml-2 text-muted-foreground/60">至少 20 字</span>
           </div>
           <Textarea
@@ -223,13 +297,16 @@ export function PreTradeSnapshotForm({
             onChange={e => setReason(e.target.value)}
             placeholder={mode === 'no_entry'
               ? '你看到的信号是什么'
-              : '例如：BTC 突破 4H 趋势线 + 成交量放大；进场点位 X，止损 Y，止盈分批 Z1/Z2'}
+              : isHedge
+                ? '例如：保护 BTC 主力多仓，对冲未来 24h 的下行风险；或对冲整体账户的 BTC beta 敞口'
+                : '例如：BTC 突破 4H 趋势线 + 成交量放大；进场点位 X，止损 Y，止盈分批 Z1/Z2'}
             className={textareaCls}
           />
         </div>
 
+
         {/* (2) Stop loss */}
-        {isTrade && (
+        {showFullFields && (
           <div className="space-y-1.5">
             <div className={labelCls}>预设止损价{requiredStar}</div>
             <Input
@@ -244,7 +321,7 @@ export function PreTradeSnapshotForm({
         )}
 
         {/* (3) TP levels */}
-        {isTrade && (
+        {showFullFields && (
           <div className="space-y-1.5">
             <div className={labelCls}>预设止盈档位{requiredStar} <span className="text-muted-foreground/60">（最多 3 档，至少 1 档，仓位合计 ≤ 100%）</span></div>
             <div className="space-y-1.5">
@@ -282,7 +359,7 @@ export function PreTradeSnapshotForm({
         )}
 
         {/* (4) Position size */}
-        {isTrade && (
+        {showFullFields && (
           <div className="space-y-1.5">
             <div className={labelCls}>仓位规模 (USDT){requiredStar}</div>
             <Input
@@ -296,7 +373,7 @@ export function PreTradeSnapshotForm({
         )}
 
         {/* (5) Max loss readonly */}
-        {isTrade && realMaxLoss > 0 && (
+        {showFullFields && realMaxLoss > 0 && (
           <div className="space-y-1.5">
             <div className={labelCls}>计划最大亏损 (USDT)</div>
             <div className="px-3 py-2 bg-background border border-border rounded text-[12px] font-mono text-[#F6465D]">
@@ -346,7 +423,7 @@ export function PreTradeSnapshotForm({
         </div>
 
         {/* (7) Mental trigger — conditional */}
-        {mental <= 3 && mode === 'trade' && (
+        {mental <= 3 && mode !== 'no_entry' && (
           <div className="space-y-1.5">
             <div className={labelCls}>心态触发原因{requiredStar} <span className="text-muted-foreground/60">至少 10 字</span></div>
             <Textarea
@@ -360,33 +437,37 @@ export function PreTradeSnapshotForm({
         )}
 
         {/* (8) Risk awareness */}
-        <div className="space-y-1.5">
-          <div className={labelCls}>当时对风险的认识{requiredStar} <span className="text-muted-foreground/60">至少 15 字</span></div>
-          <Textarea
-            rows={2}
-            value={riskAware}
-            onChange={e => setRiskAware(e.target.value)}
-            placeholder="例如：这是反弹中的逆势单，最坏情况下可能扫损 1R；本币流动性较差，存在跳空风险"
-            className={textareaCls}
-          />
-        </div>
+        {(showFullFields || mode === 'no_entry') && (
+          <div className="space-y-1.5">
+            <div className={labelCls}>当时对风险的认识{requiredStar} <span className="text-muted-foreground/60">至少 15 字</span></div>
+            <Textarea
+              rows={2}
+              value={riskAware}
+              onChange={e => setRiskAware(e.target.value)}
+              placeholder="例如：这是反弹中的逆势单,最坏情况下可能扫损 1R；本币流动性较差，存在跳空风险"
+              className={textareaCls}
+            />
+          </div>
+        )}
 
         {/* (9) Risk management */}
-        <div className="space-y-1.5">
-          <div className={labelCls}>当时对风险的管理方式{requiredStar} <span className="text-muted-foreground/60">至少 15 字</span></div>
-          <Textarea
-            rows={2}
-            value={riskManage}
-            onChange={e => setRiskManage(e.target.value)}
-            placeholder={mode === 'no_entry'
-              ? '如果当时开了，你会怎么控制风险'
-              : '例如：止损放在 X 下方；同时挂对冲单于 Y；30 分钟未走出方向则平仓'}
-            className={textareaCls}
-          />
-        </div>
+        {(showFullFields || mode === 'no_entry') && (
+          <div className="space-y-1.5">
+            <div className={labelCls}>当时对风险的管理方式{requiredStar} <span className="text-muted-foreground/60">至少 15 字</span></div>
+            <Textarea
+              rows={2}
+              value={riskManage}
+              onChange={e => setRiskManage(e.target.value)}
+              placeholder={mode === 'no_entry'
+                ? '如果当时开了，你会怎么控制风险'
+                : '例如：止损放在 X 下方；同时挂对冲单于 Y；30 分钟未走出方向则平仓'}
+              className={textareaCls}
+            />
+          </div>
+        )}
 
         {/* (10) Checklist */}
-        {isTrade && (
+        {showFullFields && (
           <div className="space-y-1.5">
             <div className={labelCls}>开仓 Checklist{requiredStar}</div>
             <div className="space-y-1.5 bg-background border border-border rounded p-3">
@@ -443,7 +524,7 @@ export function PreTradeSnapshotForm({
           disabled={!canSubmit || submitting}
           className={`h-8 px-4 text-[12px] font-medium rounded transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${confirmBtnClass}`}
         >
-          {submitting ? '提交中…' : (mode === 'no_entry' ? '记录决策' : '确认并下单')}
+          {confirmBtnText}
         </button>
       </div>
     </div>

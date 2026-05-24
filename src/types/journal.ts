@@ -26,6 +26,7 @@ export type TradeDirection = "long" | "short" | "no_entry";
 export type TradeOutcome = "win" | "loss" | "breakeven" | "no_entry";
 export type TaggedPhase = "pre" | "post";
 export type PositionMode = "cross" | "isolated";
+export type OrderKind = "main" | "hedge";
 
 export interface ErrorTagCategory {
   id: string;
@@ -67,6 +68,7 @@ export interface TradeJournal {
   direction: TradeDirection;
   leverage: number | null;
   position_mode: PositionMode | null;
+  order_kind: OrderKind;
 
   // pre-snapshot
   pre_simulated_time: string;
@@ -77,10 +79,10 @@ export interface TradeJournal {
   pre_entry_reason: string;
   pre_mental_state: 1 | 2 | 3 | 4 | 5;
   pre_mental_trigger: string | null;
-  pre_risk_awareness: string;
-  pre_risk_management: string;
-  pre_checklist_items: ChecklistItem[];
-  pre_checklist_passed: boolean;
+  pre_risk_awareness: string | null;
+  pre_risk_management: string | null;
+  pre_checklist_items: ChecklistItem[] | null;
+  pre_checklist_passed: boolean | null;
   pre_position_size: number | null;
   pre_max_loss_usdt: number | null;
 

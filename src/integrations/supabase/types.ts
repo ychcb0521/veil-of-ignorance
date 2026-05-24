@@ -187,6 +187,7 @@ export type Database = {
           direction: string
           id: string
           leverage: number | null
+          order_kind: string
           position_mode: string | null
           post_correct_action: string | null
           post_error_scenario: string | null
@@ -200,8 +201,8 @@ export type Database = {
           post_realized_pnl: number | null
           post_reflection: string | null
           post_reviewed_at: string | null
-          pre_checklist_items: Json
-          pre_checklist_passed: boolean
+          pre_checklist_items: Json | null
+          pre_checklist_passed: boolean | null
           pre_entry_price: number | null
           pre_entry_reason: string
           pre_max_loss_usdt: number | null
@@ -211,8 +212,8 @@ export type Database = {
           pre_planned_take_profit: number | null
           pre_position_size: number | null
           pre_real_time: string
-          pre_risk_awareness: string
-          pre_risk_management: string
+          pre_risk_awareness: string | null
+          pre_risk_management: string | null
           pre_simulated_time: string
           reason_was_rewritten: boolean
           symbol: string
@@ -227,6 +228,7 @@ export type Database = {
           direction: string
           id?: string
           leverage?: number | null
+          order_kind?: string
           position_mode?: string | null
           post_correct_action?: string | null
           post_error_scenario?: string | null
@@ -240,8 +242,8 @@ export type Database = {
           post_realized_pnl?: number | null
           post_reflection?: string | null
           post_reviewed_at?: string | null
-          pre_checklist_items: Json
-          pre_checklist_passed: boolean
+          pre_checklist_items?: Json | null
+          pre_checklist_passed?: boolean | null
           pre_entry_price?: number | null
           pre_entry_reason: string
           pre_max_loss_usdt?: number | null
@@ -251,8 +253,8 @@ export type Database = {
           pre_planned_take_profit?: number | null
           pre_position_size?: number | null
           pre_real_time?: string
-          pre_risk_awareness: string
-          pre_risk_management: string
+          pre_risk_awareness?: string | null
+          pre_risk_management?: string | null
           pre_simulated_time: string
           reason_was_rewritten?: boolean
           symbol: string
@@ -267,6 +269,7 @@ export type Database = {
           direction?: string
           id?: string
           leverage?: number | null
+          order_kind?: string
           position_mode?: string | null
           post_correct_action?: string | null
           post_error_scenario?: string | null
@@ -280,8 +283,8 @@ export type Database = {
           post_realized_pnl?: number | null
           post_reflection?: string | null
           post_reviewed_at?: string | null
-          pre_checklist_items?: Json
-          pre_checklist_passed?: boolean
+          pre_checklist_items?: Json | null
+          pre_checklist_passed?: boolean | null
           pre_entry_price?: number | null
           pre_entry_reason?: string
           pre_max_loss_usdt?: number | null
@@ -291,8 +294,8 @@ export type Database = {
           pre_planned_take_profit?: number | null
           pre_position_size?: number | null
           pre_real_time?: string
-          pre_risk_awareness?: string
-          pre_risk_management?: string
+          pre_risk_awareness?: string | null
+          pre_risk_management?: string | null
           pre_simulated_time?: string
           reason_was_rewritten?: boolean
           symbol?: string
