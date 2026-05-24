@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { AlertTriangle } from 'lucide-react';
 import { PostTradeReviewSheet } from './PostTradeReviewSheet';
+import { useTradingContext } from '@/contexts/TradingContext';
 import type { TradeJournal } from '@/types/journal';
 
 interface Props {
@@ -20,12 +21,18 @@ function fmtTime(iso: string) {
 function fmtPnl(v: number) { return `${v > 0 ? '+' : ''}${v.toFixed(2)}`; }
 
 export function UnreviewedJournalList({ journals, onReviewed }: Props) {
+  const { tradeHistory } = useTradingContext();
+  const tradeRecordMap = useMemo(
+    () => new Map(tradeHistory.map(t => [t.id, t])),
+    [tradeHistory],
+  );
   const unreviewed = useMemo(
     () => journals.filter(j => j.trade_record_id && !j.post_reviewed_at)
       .sort((a, b) => +new Date(b.pre_simulated_time) - +new Date(a.pre_simulated_time)),
     [journals],
   );
   const [active, setActive] = useState<TradeJournal | null>(null);
+  const activeTradeRecord = active?.trade_record_id ? tradeRecordMap.get(active.trade_record_id) ?? null : null;
 
   return (
     <div className="space-y-2">
@@ -70,6 +77,7 @@ export function UnreviewedJournalList({ journals, onReviewed }: Props) {
         isOpen={!!active}
         onOpenChange={open => { if (!open) setActive(null); }}
         journal={active}
+        tradeRecord={activeTradeRecord}
         onReviewed={u => { onReviewed?.(u); setActive(null); }}
       />
     </div>
