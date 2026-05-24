@@ -42,6 +42,11 @@ export function PatternClusterCard({ cluster, expandedSignal }: Props) {
   const open = expandedSignal == null ? openLocal : expandedSignal;
   const nav = useNavigate();
   const { pattern, category, stats, severity, journals } = cluster;
+  const { tradeHistory } = useTradingContext();
+  const tradeRecordMap = useMemo(
+    () => new Map(tradeHistory.map(t => [t.id, t])),
+    [tradeHistory],
+  );
 
   const timeDist = useMemo(() => computeTimeDistribution(journals), [journals]);
   const mentalDist = useMemo(() => computeMentalStateDistribution(journals), [journals]);
