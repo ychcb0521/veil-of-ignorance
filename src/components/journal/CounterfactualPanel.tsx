@@ -38,7 +38,7 @@ export function CounterfactualPanel({ journal, klines, selectedBranchId, onSelec
 
   const [label, setLabel] = useState('');
   const [entryPrice, setEntryPrice] = useState(journal.pre_entry_price?.toString() ?? '');
-  const [sl, setSl] = useState(journal.pre_planned_stop_loss?.toString() ?? '');
+  const [sl, setSl] = useState('');
   const [tp1, setTp1] = useState(journal.pre_planned_take_profit?.toString() ?? '');
   const [tp1Pct, setTp1Pct] = useState('100');
   const [tp2, setTp2] = useState('');
