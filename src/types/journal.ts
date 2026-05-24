@@ -26,6 +26,7 @@ export type TradeDirection = "long" | "short" | "no_entry";
 export type TradeOutcome = "win" | "loss" | "breakeven" | "no_entry";
 export type TaggedPhase = "pre" | "post";
 export type PositionMode = "cross" | "isolated";
+export type OrderKind = "main" | "hedge";
 
 export interface ErrorTagCategory {
   id: string;
