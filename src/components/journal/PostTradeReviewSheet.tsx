@@ -197,6 +197,10 @@ export function PostTradeReviewSheet({ isOpen, onOpenChange, journal, tradeRecor
     })
     .filter(Boolean) as { pattern: ErrorTagPattern; count: number }[];
 
+  const sectionCardClass = "rounded-xl border border-border/70 bg-card/70 shadow-[0_10px_30px_rgba(0,0,0,0.04)]";
+  const subtleLabelClass = "text-[11px] font-medium text-muted-foreground";
+  const metricCardClass = "rounded-xl border border-border/70 bg-background/70 px-3 py-3";
+
   const handleSave = async () => {
     if (!canSave) return;
     setSaving(true);
@@ -250,21 +254,25 @@ export function PostTradeReviewSheet({ isOpen, onOpenChange, journal, tradeRecor
 
   const body = (
     <>
-      <div className="px-5 py-4 border-b border-border">
-        <div className="text-[14px] font-medium text-foreground">平仓评价</div>
+      <div className="px-5 py-4 border-b border-border bg-gradient-to-b from-muted/25 to-background/80">
+        <div className="text-[15px] font-semibold tracking-[0.01em] text-foreground">平仓评价</div>
         <div className="font-mono text-[11px] text-muted-foreground mt-0.5">
           {journal.symbol} · {journal.direction} · 模拟时间 {fmtTime(journal.pre_simulated_time)}
         </div>
       </div>
 
-      <div className="px-5 py-4 space-y-4 overflow-y-auto flex-1">
+      <div className="px-5 py-4 space-y-4 overflow-y-auto flex-1 bg-background">
         {/* (A) Snapshot */}
         <Collapsible defaultOpen>
-          <CollapsibleTrigger className="text-[11px] text-muted-foreground flex items-center gap-1 hover:text-foreground">
+          <CollapsibleTrigger
+            className={`w-full px-4 py-3 text-[11px] ${subtleLabelClass} flex items-center gap-1.5 hover:text-foreground transition-colors ${sectionCardClass}`}
+          >
             <ChevronDown className="w-3 h-3" /> 开仓时的快照
           </CollapsibleTrigger>
-          <CollapsibleContent className="mt-2 space-y-1 text-[11px] font-mono text-foreground/80 pl-3 border-l border-border">
-            <div>
+          <CollapsibleContent
+            className={`mt-2 space-y-2 text-[11px] font-mono text-foreground/85 px-4 py-4 ${sectionCardClass}`}
+          >
+            <div className="flex flex-wrap items-center gap-1.5">
               <span
                 className={`inline-block rounded px-2 py-0.5 text-[10px] ${
                   isHedge ? "bg-[#F0B90B]/15 text-[#F0B90B]" : "bg-foreground/10 text-foreground"
@@ -273,12 +281,12 @@ export function PostTradeReviewSheet({ isOpen, onOpenChange, journal, tradeRecor
                 {isHedge ? "对冲单" : "主力单"}
               </span>
               {journal.position_mode && (
-                <span className={`inline-block rounded px-2 py-0.5 text-[10px] ml-1 ${positionModeChipClass}`}>
+                <span className={`inline-block rounded px-2 py-0.5 text-[10px] ${positionModeChipClass}`}>
                   {positionModeLabel}
                 </span>
               )}
               {journal.position_mode === "cross" && (
-                <span className="inline-block rounded px-2 py-0.5 text-[10px] ml-1 bg-[#F6465D]/10 text-[#F6465D]">
+                <span className="inline-block rounded px-2 py-0.5 text-[10px] bg-[#F6465D]/10 text-[#F6465D]">
                   这笔在守卫上线前用了全仓
                 </span>
               )}
@@ -321,13 +329,13 @@ export function PostTradeReviewSheet({ isOpen, onOpenChange, journal, tradeRecor
 
         {/* (B) Auto outcome */}
         {!tradeRecord && journal.direction !== "no_entry" && (
-          <div className="bg-[#F0B90B]/10 border border-[#F0B90B]/30 rounded p-2 text-[11px] text-[#F0B90B]">
+          <div className="rounded-xl border border-[#F0B90B]/30 bg-[#F0B90B]/8 px-3 py-2.5 text-[11px] leading-relaxed text-[#F0B90B]">
             未找到对应的成交记录，下方判定字段使用快照中保存的数据，必要时可手填 R 倍数覆盖。
           </div>
         )}
-        <div className="bg-background border border-border rounded p-3 grid grid-cols-2 sm:grid-cols-4 gap-3 text-[12px] font-mono">
-          <div>
-            <div className="text-[10px] text-muted-foreground">结果</div>
+        <div className={`grid grid-cols-2 sm:grid-cols-4 gap-3 text-[12px] font-mono ${sectionCardClass} p-3`}>
+          <div className={metricCardClass}>
+            <div className="text-[10px] uppercase tracking-wide text-muted-foreground">结果</div>
             <div
               className={
                 outcome === "win" ? "text-[#0ECB81]" : outcome === "loss" ? "text-[#F6465D]" : "text-foreground"
@@ -336,15 +344,15 @@ export function PostTradeReviewSheet({ isOpen, onOpenChange, journal, tradeRecor
               {outcome}
             </div>
           </div>
-          <div>
-            <div className="text-[10px] text-muted-foreground">实现 P&L</div>
+          <div className={metricCardClass}>
+            <div className="text-[10px] uppercase tracking-wide text-muted-foreground">实现 P&L</div>
             <div className={pnl >= 0 ? "text-[#0ECB81]" : "text-[#F6465D]"}>
               {pnl >= 0 ? "+" : ""}
               {pnl.toFixed(2)}
             </div>
           </div>
-          <div>
-            <div className="text-[10px] text-muted-foreground flex items-center gap-1">
+          <div className={metricCardClass}>
+            <div className="text-[10px] uppercase tracking-wide text-muted-foreground flex items-center gap-1">
               R 倍数
               <button onClick={() => setEditingR((v) => !v)}>
                 <Pencil className="w-2.5 h-2.5 text-muted-foreground hover:text-foreground" />
@@ -356,23 +364,23 @@ export function PostTradeReviewSheet({ isOpen, onOpenChange, journal, tradeRecor
                 onChange={(e) => setRMultipleOverride(e.target.value)}
                 onBlur={() => setEditingR(false)}
                 autoFocus
-                className="h-6 text-[12px] bg-card border-border font-mono"
+                className="mt-1 h-7 text-[12px] bg-card border-border/70 font-mono rounded-md"
               />
             ) : (
               <div>{finalR != null ? finalR.toFixed(2) + " R" : "—"}</div>
             )}
           </div>
-          <div>
-            <div className="text-[10px] text-muted-foreground">持仓时长</div>
+          <div className={metricCardClass}>
+            <div className="text-[10px] uppercase tracking-wide text-muted-foreground">持仓时长</div>
             <div>{holdDurationLabel}</div>
           </div>
         </div>
 
         {/* (C) Tags */}
         {user && (
-          <div className="space-y-2">
+          <div className={`space-y-2 px-4 py-4 ${sectionCardClass}`}>
             <div className="flex items-center justify-between">
-              <Label className="text-[12px]">错误标签 *</Label>
+              <Label className="text-[12px] font-medium">错误标签 *</Label>
               <span className="text-[11px] text-muted-foreground">至少选 1 个，或勾选下方"本次无明显错误"</span>
             </div>
             <JournalTagPicker
@@ -385,7 +393,7 @@ export function PostTradeReviewSheet({ isOpen, onOpenChange, journal, tradeRecor
               }}
               disabled={noErrors}
             />
-            <label className="flex items-center gap-2 text-[12px] text-foreground cursor-pointer">
+            <label className="flex items-center gap-2 text-[12px] text-foreground cursor-pointer rounded-lg border border-border/60 bg-background/60 px-3 py-2">
               <Checkbox
                 checked={noErrors}
                 onCheckedChange={(v) => {
@@ -404,10 +412,10 @@ export function PostTradeReviewSheet({ isOpen, onOpenChange, journal, tradeRecor
 
         {/* (C+) 六步深度分析（可选） */}
         <Collapsible open={sixStepOpen} onOpenChange={setSixStepOpen}>
-          <CollapsibleTrigger className="w-full bg-card border border-border rounded px-3 py-2 flex items-center gap-2 hover:bg-[#1f242c]">
+          <CollapsibleTrigger className="w-full rounded-xl border border-border/70 bg-gradient-to-r from-card via-card to-accent/20 px-4 py-3 flex items-center gap-2 transition-colors hover:bg-accent/30 shadow-[0_10px_30px_rgba(0,0,0,0.04)]">
             <BrainCircuit className="w-3.5 h-3.5 text-[#F0B90B]" />
             <div className="flex-1 text-left">
-              <div className="text-[12px] text-foreground">进入六步深度分析（推荐）</div>
+              <div className="text-[12px] font-medium text-foreground">进入六步深度分析（推荐）</div>
               <div className="text-[10px] text-muted-foreground">
                 比"复盘文字"+"反事实"更结构化。完成后下方两个字段可自动生成。
               </div>
@@ -422,7 +430,7 @@ export function PostTradeReviewSheet({ isOpen, onOpenChange, journal, tradeRecor
               size="sm"
               variant="ghost"
               onClick={applySixStepToFields}
-              className="h-7 text-[10px] bg-muted hover:bg-[#363c45]"
+              className="h-8 rounded-lg text-[10px] border border-border/70 bg-card/80 hover:bg-accent/60"
             >
               用六步内容回写下方字段
             </Button>
@@ -430,27 +438,27 @@ export function PostTradeReviewSheet({ isOpen, onOpenChange, journal, tradeRecor
         </Collapsible>
 
         {/* (D) Reflection */}
-        <div className="space-y-1.5">
-          <Label className="text-[12px]">复盘文字（这笔交易里你真正学到了什么？）* ≥30 字</Label>
+        <div className={`space-y-2 px-4 py-4 ${sectionCardClass}`}>
+          <Label className="text-[12px] font-medium">复盘文字（这笔交易里你真正学到了什么？）* ≥30 字</Label>
           <Textarea
             rows={4}
             value={reflection}
             onChange={(e) => setReflection(e.target.value)}
             placeholder="例如：本次入场理由在事后看仍然成立，但仓位过重；止损位过近导致被洗出后又看着行情走出预期方向。下次应根据 ATR 设置止损宽度。"
-            className="text-[12px] bg-background border-border"
+            className="text-[12px] bg-background/80 border-border/70 rounded-xl"
           />
           <div className="text-[10px] text-muted-foreground text-right font-mono">{reflection.trim().length} / 30</div>
         </div>
 
         {/* (E) Counterfactual */}
-        <div className="space-y-1.5">
-          <Label className="text-[12px]">如果重来一次，你会怎么做？* ≥20 字</Label>
+        <div className={`space-y-2 px-4 py-4 ${sectionCardClass}`}>
+          <Label className="text-[12px] font-medium">如果重来一次，你会怎么做？* ≥20 字</Label>
           <Textarea
             rows={3}
             value={correctAction}
             onChange={(e) => setCorrectAction(e.target.value)}
             placeholder="例如：止损位放在 X 而非 Y；分批入场 3 次而非一次满仓；不在心态 ≤3 分时开仓。"
-            className="text-[12px] bg-background border-border"
+            className="text-[12px] bg-background/80 border-border/70 rounded-xl"
           />
           <div className="flex items-center justify-between">
             <p className="text-[10px] text-muted-foreground">
@@ -462,7 +470,7 @@ export function PostTradeReviewSheet({ isOpen, onOpenChange, journal, tradeRecor
 
         {/* (F) Frequency warning */}
         {hotWarnings.length > 0 && (
-          <div className="bg-[#F6465D]/10 border border-[#F6465D]/30 rounded p-3 space-y-1">
+          <div className="bg-[#F6465D]/8 border border-[#F6465D]/25 rounded-xl px-4 py-3 space-y-1 shadow-[0_10px_30px_rgba(246,70,93,0.08)]">
             {hotWarnings.map((w) => (
               <div key={w.pattern.id} className="text-[12px] text-[#F6465D]">
                 ⚠ 模式「{w.pattern.pattern_name}」最近 30 天内已出现 {w.count} 次（含本次 = {w.count + 1} 次）。 满 3
@@ -473,14 +481,18 @@ export function PostTradeReviewSheet({ isOpen, onOpenChange, journal, tradeRecor
         )}
       </div>
 
-      <div className="px-5 py-3 border-t border-border flex justify-end gap-2 shrink-0 bg-card">
-        <Button variant="ghost" onClick={() => onOpenChange(false)} className="h-8 text-[12px]">
+      <div className="px-5 py-3 border-t border-border flex justify-end gap-2 shrink-0 bg-gradient-to-t from-muted/20 to-background">
+        <Button
+          variant="ghost"
+          onClick={() => onOpenChange(false)}
+          className="h-9 rounded-lg px-4 text-[12px] hover:bg-accent/60"
+        >
           取消
         </Button>
         <Button
           onClick={handleSave}
           disabled={!canSave}
-          className="h-8 text-[12px] bg-[#F0B90B] hover:bg-[#F0B90B]/90 text-black disabled:opacity-40"
+          className="h-9 rounded-lg px-4 text-[12px] bg-[#F0B90B] hover:bg-[#F0B90B]/90 text-black shadow-[0_10px_24px_rgba(240,185,11,0.18)] disabled:opacity-40 disabled:shadow-none"
         >
           {saving ? "保存中..." : "保存评价"}
         </Button>
@@ -491,7 +503,10 @@ export function PostTradeReviewSheet({ isOpen, onOpenChange, journal, tradeRecor
   if (isMobile) {
     return (
       <Sheet open={isOpen} onOpenChange={onOpenChange}>
-        <SheetContent side="bottom" className="h-[92vh] rounded-t-2xl p-0 bg-card border-t border-border flex flex-col">
+        <SheetContent
+          side="bottom"
+          className="h-[92vh] rounded-t-2xl p-0 bg-background border-t border-border flex flex-col"
+        >
           {body}
         </SheetContent>
       </Sheet>
@@ -502,7 +517,7 @@ export function PostTradeReviewSheet({ isOpen, onOpenChange, journal, tradeRecor
     <Sheet open={isOpen} onOpenChange={onOpenChange}>
       <SheetContent
         side="right"
-        className="w-[640px] sm:max-w-[640px] p-0 bg-card border-l border-border flex flex-col"
+        className="w-[640px] sm:max-w-[640px] p-0 bg-background border-l border-border shadow-2xl flex flex-col"
       >
         {body}
       </SheetContent>
