@@ -235,17 +235,26 @@ export function PostTradeReviewSheet({
             <ChevronDown className="w-3 h-3" /> 开仓时的快照
           </CollapsibleTrigger>
           <CollapsibleContent className="mt-2 space-y-1 text-[11px] font-mono text-foreground/80 pl-3 border-l border-border">
-            <div>• 入场理由：{journal.pre_entry_reason}</div>
-            <div>• 预设止损/止盈：{journal.pre_planned_stop_loss ?? '—'} / {journal.pre_planned_take_profit ?? '—'}</div>
-            <div>• 风险认识：{journal.pre_risk_awareness}</div>
-            <div>• 风险管理：{journal.pre_risk_management}</div>
+            <div>
+              <span className={`inline-block rounded px-2 py-0.5 text-[10px] ${
+                isHedge ? 'bg-[#F0B90B]/15 text-[#F0B90B]' : 'bg-foreground/10 text-foreground'
+              }`}>{isHedge ? '对冲单' : '主力单'}</span>
+            </div>
+            <div>• {isHedge ? '对冲理由' : '入场理由'}：{journal.pre_entry_reason}</div>
+            {(journal.pre_planned_stop_loss != null || journal.pre_planned_take_profit != null) && (
+              <div>• 预设止损/止盈：{journal.pre_planned_stop_loss ?? '—'} / {journal.pre_planned_take_profit ?? '—'}</div>
+            )}
+            {journal.pre_risk_awareness && <div>• 风险认识：{journal.pre_risk_awareness}</div>}
+            {journal.pre_risk_management && <div>• 风险管理：{journal.pre_risk_management}</div>}
             <div>
               • 心态自评：{journal.pre_mental_state} 分（{MENTAL_STATE_LABELS[journal.pre_mental_state]}）
               {journal.pre_mental_trigger ? ` · ${journal.pre_mental_trigger}` : ''}
             </div>
-            <div>
-              • Checklist：{reqChecked}/{checklistRequired.length} 必填 · {optChecked}/{checklistOptional.length} 可选 · {journal.pre_checklist_passed ? '通过' : '未通过'}
-            </div>
+            {checklistItemsArr.length > 0 && (
+              <div>
+                • Checklist：{reqChecked}/{checklistRequired.length} 必填 · {optChecked}/{checklistOptional.length} 可选 · {journal.pre_checklist_passed ? '通过' : '未通过'}
+              </div>
+            )}
           </CollapsibleContent>
         </Collapsible>
 
