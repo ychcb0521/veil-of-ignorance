@@ -222,8 +222,29 @@ function RiskChannel() {
           <div className={`rounded p-2 ${riskFailed ? 'ring-1 ring-[#F6465D]' : 'bg-background'}`}>
             <div className="text-[11px] text-muted-foreground mb-1">事后对照</div>
             <div className="grid grid-cols-2 gap-1 font-mono text-[11px]">
-              <span className="text-muted-foreground">止损触发</span>
-              <span className={slTriggered ? 'text-[#F6465D]' : 'text-foreground'}>{slTriggered ? '是' : '否'}</span>
+              {journal.pre_planned_stop_loss != null ? (
+                <>
+                  <span className="text-muted-foreground">止损触发</span>
+                  <span className={slTriggered ? 'text-[#F6465D]' : 'text-foreground'}>{slTriggered ? '是' : '否'}</span>
+                </>
+              ) : (
+                <>
+                  <span className="text-muted-foreground">出场原因</span>
+                  <span className="text-foreground">
+                    {(() => {
+                      const m = tradeRecord.exit_method;
+                      if (!m) return '—';
+                      if (m === 'manual') return '手动';
+                      if (m === 'sl') return '止损';
+                      if (m === 'liquidation') return '爆仓';
+                      if (m === 'tp1') return '止盈 1';
+                      if (m === 'tp2') return '止盈 2';
+                      if (m === 'tp3') return '止盈 3';
+                      return m;
+                    })()}
+                  </span>
+                </>
+              )}
               <span className="text-muted-foreground">实际亏损</span>
               <span className={pnlColor(-actualLoss)}>
                 {actualLoss.toFixed(2)} / {planned.toFixed(2)} ({diffPct >= 0 ? '+' : ''}{diffPct.toFixed(0)}%)
