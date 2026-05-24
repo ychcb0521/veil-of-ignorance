@@ -101,6 +101,8 @@ export interface TradeRecord {
   closeTime: number;
   /** How the position was closed. Manual for user-initiated; sl/tp1-3 for triggered TP/SL; liquidation for forced close. */
   exit_method?: "manual" | "sl" | "tp1" | "tp2" | "tp3" | "liquidation";
+  /** User-written reason recorded after the close, used for post-trade review and playback. */
+  exit_reason_text?: string;
 }
 
 export const MAINTENANCE_MARGIN_RATE = 0.004; // 0.4% — strict MM rate (MMR) per tier default
