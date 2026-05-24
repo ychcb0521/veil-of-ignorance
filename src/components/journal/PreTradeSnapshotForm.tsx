@@ -11,6 +11,7 @@ import { MENTAL_STATE_LABELS } from '@/types/journal';
 import { buildChecklist, isChecklistPassed } from '@/lib/defaultChecklist';
 import { listRules } from '@/lib/journalApi';
 import { useAuth } from '@/contexts/AuthContext';
+import { useTradingContext } from '@/contexts/TradingContext';
 import { ShieldCheck } from 'lucide-react';
 import type { PlaceOrderParams } from '@/contexts/TradingContext';
 import type { ChecklistItem, OrderKind, TradeDirection, TradingRule } from '@/types/journal';
