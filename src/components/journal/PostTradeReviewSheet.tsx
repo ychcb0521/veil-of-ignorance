@@ -150,10 +150,12 @@ export function PostTradeReviewSheet({
     );
   }
 
-  const checklistRequired = journal.pre_checklist_items.filter(i => i.required);
-  const checklistOptional = journal.pre_checklist_items.filter(i => !i.required);
+  const checklistItemsArr = journal.pre_checklist_items ?? [];
+  const checklistRequired = checklistItemsArr.filter(i => i.required);
+  const checklistOptional = checklistItemsArr.filter(i => !i.required);
   const reqChecked = checklistRequired.filter(i => i.checked).length;
   const optChecked = checklistOptional.filter(i => i.checked).length;
+  const isHedge = journal.order_kind === 'hedge';
 
   const tagsValid = noErrors || selectedTags.length >= 1;
   const reflectionValid = reflection.trim().length >= 30;
