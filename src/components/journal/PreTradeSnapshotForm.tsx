@@ -423,7 +423,7 @@ export function PreTradeSnapshotForm({
         </div>
 
         {/* (7) Mental trigger — conditional */}
-        {mental <= 3 && mode === 'trade' && (
+        {mental <= 3 && mode !== 'no_entry' && (
           <div className="space-y-1.5">
             <div className={labelCls}>心态触发原因{requiredStar} <span className="text-muted-foreground/60">至少 10 字</span></div>
             <Textarea
