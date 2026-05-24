@@ -437,30 +437,34 @@ export function PreTradeSnapshotForm({
         )}
 
         {/* (8) Risk awareness */}
-        <div className="space-y-1.5">
-          <div className={labelCls}>当时对风险的认识{requiredStar} <span className="text-muted-foreground/60">至少 15 字</span></div>
-          <Textarea
-            rows={2}
-            value={riskAware}
-            onChange={e => setRiskAware(e.target.value)}
-            placeholder="例如：这是反弹中的逆势单，最坏情况下可能扫损 1R；本币流动性较差，存在跳空风险"
-            className={textareaCls}
-          />
-        </div>
+        {(showFullFields || mode === 'no_entry') && (
+          <div className="space-y-1.5">
+            <div className={labelCls}>当时对风险的认识{requiredStar} <span className="text-muted-foreground/60">至少 15 字</span></div>
+            <Textarea
+              rows={2}
+              value={riskAware}
+              onChange={e => setRiskAware(e.target.value)}
+              placeholder="例如：这是反弹中的逆势单,最坏情况下可能扫损 1R；本币流动性较差，存在跳空风险"
+              className={textareaCls}
+            />
+          </div>
+        )}
 
         {/* (9) Risk management */}
-        <div className="space-y-1.5">
-          <div className={labelCls}>当时对风险的管理方式{requiredStar} <span className="text-muted-foreground/60">至少 15 字</span></div>
-          <Textarea
-            rows={2}
-            value={riskManage}
-            onChange={e => setRiskManage(e.target.value)}
-            placeholder={mode === 'no_entry'
-              ? '如果当时开了，你会怎么控制风险'
-              : '例如：止损放在 X 下方；同时挂对冲单于 Y；30 分钟未走出方向则平仓'}
-            className={textareaCls}
-          />
-        </div>
+        {(showFullFields || mode === 'no_entry') && (
+          <div className="space-y-1.5">
+            <div className={labelCls}>当时对风险的管理方式{requiredStar} <span className="text-muted-foreground/60">至少 15 字</span></div>
+            <Textarea
+              rows={2}
+              value={riskManage}
+              onChange={e => setRiskManage(e.target.value)}
+              placeholder={mode === 'no_entry'
+                ? '如果当时开了，你会怎么控制风险'
+                : '例如：止损放在 X 下方；同时挂对冲单于 Y；30 分钟未走出方向则平仓'}
+              className={textareaCls}
+            />
+          </div>
+        )}
 
         {/* (10) Checklist */}
         {isTrade && (
