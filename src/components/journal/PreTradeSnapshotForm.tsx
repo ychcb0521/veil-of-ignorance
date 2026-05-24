@@ -68,6 +68,10 @@ export function PreTradeSnapshotForm({
   const isShort = direction === 'short';
   const { user } = useAuth();
 
+  const [orderKind, setOrderKind] = useState<OrderKind>('main');
+  const isHedge = isTrade && orderKind === 'hedge';
+  const showFullFields = isTrade && orderKind === 'main';
+
   const [reason, setReason] = useState('');
   const [stopLoss, setStopLoss] = useState('');
   const [tps, setTps] = useState<TpLevel[]>([{ price: '', pct: '' }]);
