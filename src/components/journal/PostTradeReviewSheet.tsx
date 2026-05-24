@@ -13,6 +13,7 @@ import { useIsMobile } from "@/hooks/use-mobile";
 import { toast } from "sonner";
 import { Pencil, ChevronDown, BrainCircuit } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
+import { useTradingContext } from "@/contexts/TradingContext";
 import {
   finalizeJournalReview,
   replacePhaseAssignments,
@@ -45,11 +46,13 @@ interface Props {
 export function PostTradeReviewSheet({ isOpen, onOpenChange, journal, tradeRecord, onReviewed, onAutoPause }: Props) {
   const isMobile = useIsMobile();
   const { user } = useAuth();
+  const { setTradeHistory } = useTradingContext();
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [tagNotes, setTagNotes] = useState<Record<string, string>>({});
   const [noErrors, setNoErrors] = useState(false);
   const [reflection, setReflection] = useState("");
   const [correctAction, setCorrectAction] = useState("");
+  const [exitReason, setExitReason] = useState("");
   const [rMultipleOverride, setRMultipleOverride] = useState<string>("");
   const [editingR, setEditingR] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -79,6 +82,7 @@ export function PostTradeReviewSheet({ isOpen, onOpenChange, journal, tradeRecor
         setNoErrors(post.length === 0 && !!journal.post_reviewed_at);
         setReflection(journal.post_reflection ?? "");
         setCorrectAction(journal.post_correct_action ?? "");
+        setExitReason(tradeRecord?.exit_reason_text ?? "");
         setRMultipleOverride(journal.post_r_multiple != null ? String(journal.post_r_multiple) : "");
         setSixStep(pickSixStepValue(journal));
         setSixStepOpen(countCompletedSteps(pickSixStepValue(journal)) > 0);
@@ -95,7 +99,7 @@ export function PostTradeReviewSheet({ isOpen, onOpenChange, journal, tradeRecor
       pausedOnce.done = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isOpen, journal?.id]);
+  }, [isOpen, journal?.id, tradeRecord?.id]);
 
   // 计算频次告警
   useEffect(() => {
@@ -187,7 +191,8 @@ export function PostTradeReviewSheet({ isOpen, onOpenChange, journal, tradeRecor
   const tagsValid = noErrors || selectedTags.length >= 1;
   const reflectionValid = reflection.trim().length >= 30;
   const correctValid = correctAction.trim().length >= 20;
-  const canSave = tagsValid && reflectionValid && correctValid && !saving;
+  const exitReasonValid = journal.direction === "no_entry" || exitReason.trim().length >= 10;
+  const canSave = tagsValid && reflectionValid && correctValid && exitReasonValid && !saving;
 
   const hotWarnings = selectedTags
     .map((id) => {
@@ -232,6 +237,12 @@ export function PostTradeReviewSheet({ isOpen, onOpenChange, journal, tradeRecor
           console.warn("[deep] save failed", e);
         }
       }
+      if (tradeRecord?.id) {
+        const nextExitReason = exitReason.trim();
+        setTradeHistory((prev) =>
+          prev.map((t) => (t.id === tradeRecord.id ? { ...t, exit_reason_text: nextExitReason } : t)),
+        );
+      }
       toast.success("已保存平仓评价");
       window.dispatchEvent(new CustomEvent("journal:reviewed", { detail: { journalId: journal.id } }));
       onReviewed?.(updated);
@@ -248,6 +259,18 @@ export function PostTradeReviewSheet({ isOpen, onOpenChange, journal, tradeRecor
     setReflection(ref);
     if (sixStep.post_new_rule_draft) setCorrectAction(sixStep.post_new_rule_draft);
   };
+
+  const exitMethodLabel = (() => {
+    const m = tradeRecord?.action === "LIQUIDATION" ? "liquidation" : tradeRecord?.exit_method;
+    if (!m) return "—";
+    if (m === "manual") return "手动";
+    if (m === "sl") return "止损";
+    if (m === "liquidation") return "爆仓";
+    if (m === "tp1") return "止盈 1";
+    if (m === "tp2") return "止盈 2";
+    if (m === "tp3") return "止盈 3";
+    return m;
+  })();
 
   const fmtTime = (iso: string) =>
     new Date(iso).toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
@@ -373,6 +396,32 @@ export function PostTradeReviewSheet({ isOpen, onOpenChange, journal, tradeRecor
           <div className={metricCardClass}>
             <div className="text-[10px] uppercase tracking-wide text-muted-foreground">持仓时长</div>
             <div>{holdDurationLabel}</div>
+          </div>
+        </div>
+
+        <div className={`space-y-2 px-4 py-4 ${sectionCardClass}`}>
+          <div className="flex items-center justify-between gap-3">
+            <Label className="text-[12px] font-medium">出场原因 * ≥10 字</Label>
+            <span className="text-[11px] text-muted-foreground">出场方式：{exitMethodLabel}</span>
+          </div>
+          <Textarea
+            rows={3}
+            value={exitReason}
+            onChange={(e) => setExitReason(e.target.value)}
+            placeholder={
+              tradeRecord?.exit_method === "manual" || tradeRecord?.action === "LIQUIDATION"
+                ? "例如：跌破计划结构位后主动认错；或出现超预期波动，优先回收风险敞口。"
+                : "例如：止盈触发后没有再追；止损触发符合预案，因此按系统执行离场。"
+            }
+            className="text-[12px] bg-background/80 border-border/70 rounded-xl"
+          />
+          <div className="flex items-center justify-between">
+            <p className="text-[10px] text-muted-foreground">
+              这里写的是你为什么在这个位置离场，不是这笔交易最后学到了什么。
+            </p>
+            <span className={`text-[10px] font-mono ${exitReasonValid ? "text-muted-foreground" : "text-[#F6465D]"}`}>
+              {exitReason.trim().length} / 10
+            </span>
           </div>
         </div>
 
