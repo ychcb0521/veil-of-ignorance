@@ -1,9 +1,11 @@
 import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { toast } from 'sonner';
 import { AlertTriangle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { ExitMethodBadge } from './ExitMethodBadge';
+import { useTradingContext } from '@/contexts/TradingContext';
+import { formatPrice } from '@/lib/formatters';
 import type { JournalTagAssignment, ErrorTagPattern, TradeJournal } from '@/types/journal';
 
 interface Props {
@@ -34,16 +36,25 @@ function outcomeColor(o: string | null) {
 function outcomeLabel(o: string | null) {
   return o === 'win' ? 'WIN' : o === 'loss' ? 'LOSS' : o === 'breakeven' ? 'BE' : o === 'no_entry' ? 'PASS' : '—';
 }
-function fmtTime(iso: string) {
-  const d = new Date(iso);
+function fmtTime(ms: number | string | null | undefined) {
+  if (!ms) return null;
+  const d = typeof ms === 'number' ? new Date(ms) : new Date(ms);
+  if (isNaN(+d)) return null;
   const pad = (n: number) => String(n).padStart(2, '0');
   return `${pad(d.getMonth() + 1)}/${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 function fmtPnl(v: number) { return `${v > 0 ? '+' : ''}${v.toFixed(2)}`; }
 
+const COLS = 'grid-cols-[110px_110px_80px_60px_80px_80px_70px_50px_60px_60px_80px_60px_80px]';
+
 export function JournalTimelineList({ journals, assignments, patterns }: Props) {
   const nav = useNavigate();
   const [page, setPage] = useState(0);
+  const { tradeHistory } = useTradingContext();
+  const tradeRecordMap = useMemo(
+    () => new Map(tradeHistory.map(t => [t.id, t])),
+    [tradeHistory],
+  );
 
   const tagsByJournal = useMemo(() => {
     const m = new Map<string, ErrorTagPattern[]>();
@@ -66,54 +77,66 @@ export function JournalTimelineList({ journals, assignments, patterns }: Props) 
 
   return (
     <div className="bg-card border border-border rounded">
-      <div className="grid grid-cols-[110px_80px_60px_50px_60px_60px_80px_60px_80px] text-[10px] text-muted-foreground bg-background px-3 py-1.5 sticky top-0">
-        <span>时间</span><span>标的</span><span>方向</span><span>心态</span>
-        <span>结果</span><span>R</span><span>P&L</span><span>标签数</span><span>操作</span>
+      <div className="overflow-x-auto">
+        <div className={`grid ${COLS} text-[10px] text-muted-foreground bg-muted/40 px-3 py-2 sticky top-0 min-w-[1100px]`}>
+          <span>开仓时间</span><span>平仓时间</span><span>标的</span><span>方向</span>
+          <span>开仓价</span><span>平仓价</span><span>平仓方式</span><span>心态</span>
+          <span>结果</span><span>R</span><span>P&L</span><span>标签数</span><span>操作</span>
+        </div>
+        {pageRows.length === 0 && (
+          <div className="px-3 py-8 text-center text-[11px] text-muted-foreground">暂无数据</div>
+        )}
+        {pageRows.map(j => {
+          const tags = tagsByJournal.get(j.id) ?? [];
+          const tr = j.trade_record_id ? tradeRecordMap.get(j.trade_record_id) ?? null : null;
+          const openT = fmtTime(tr?.openTime) ?? fmtTime(j.pre_simulated_time);
+          const closeT = fmtTime(tr?.closeTime);
+          const entryP = tr?.entryPrice ?? j.pre_entry_price ?? null;
+          const exitP = tr && tr.exitPrice > 0 ? tr.exitPrice : null;
+          return (
+            <div key={j.id} className={`grid ${COLS} px-3 py-2 text-[11px] font-mono border-b border-border/40 hover:bg-accent items-center min-w-[1100px]`}>
+              <span className="flex items-center gap-1">
+                {j.reason_was_rewritten && <AlertTriangle className="w-3 h-3 text-[#F0B90B]" />}
+                {openT ?? <span className="text-muted-foreground">—</span>}
+              </span>
+              <span>{closeT ?? <span className="text-muted-foreground">—</span>}</span>
+              <span className="truncate">{j.symbol}</span>
+              <span className={
+                j.direction === 'long' ? 'text-[#0ECB81]' :
+                j.direction === 'short' ? 'text-[#F6465D]' : 'text-muted-foreground'
+              }>
+                {j.direction === 'long' ? 'LONG' : j.direction === 'short' ? 'SHORT' : 'PASS'}
+              </span>
+              <span>{entryP != null ? formatPrice(entryP, j.symbol) : <span className="text-muted-foreground">—</span>}</span>
+              <span>{exitP != null ? formatPrice(exitP, j.symbol) : <span className="text-muted-foreground">—</span>}</span>
+              <span><ExitMethodBadge method={tr?.exit_method} /></span>
+              <span className={mentalColor(j.pre_mental_state)}>{j.pre_mental_state}</span>
+              <span className={outcomeColor(j.post_outcome)}>{outcomeLabel(j.post_outcome)}</span>
+              <span className={pnlColor(j.post_r_multiple ?? 0)}>{j.post_r_multiple != null ? j.post_r_multiple.toFixed(2) : '—'}</span>
+              <span className={pnlColor(j.post_realized_pnl ?? 0)}>{j.post_realized_pnl != null ? fmtPnl(j.post_realized_pnl) : '—'}</span>
+              <span>
+                {tags.length > 0 ? (
+                  <Popover>
+                    <PopoverTrigger asChild>
+                      <button className="inline-flex h-5 px-1.5 rounded bg-muted text-foreground text-[10px]">×{tags.length}</button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-56 p-2 bg-card border-border text-[11px]">
+                      {tags.slice(0, 3).map(t => <div key={t.id} className="truncate">• {t.pattern_name}</div>)}
+                      {tags.length > 3 && <div className="text-muted-foreground">…+{tags.length - 3}</div>}
+                    </PopoverContent>
+                  </Popover>
+                ) : <span className="text-muted-foreground">—</span>}
+              </span>
+              <span>
+                <Button size="sm" variant="ghost" className="h-6 px-2 text-[10px]"
+                  onClick={() => nav(`/journal/${j.id}`)}>
+                  复盘
+                </Button>
+              </span>
+            </div>
+          );
+        })}
       </div>
-      {pageRows.length === 0 && (
-        <div className="px-3 py-8 text-center text-[11px] text-muted-foreground">暂无数据</div>
-      )}
-      {pageRows.map(j => {
-        const tags = tagsByJournal.get(j.id) ?? [];
-        return (
-          <div key={j.id} className="grid grid-cols-[110px_80px_60px_50px_60px_60px_80px_60px_80px] px-3 py-1.5 text-[11px] font-mono border-b border-border/40 hover:bg-accent items-center">
-            <span className="flex items-center gap-1">
-              {j.reason_was_rewritten && <AlertTriangle className="w-3 h-3 text-[#F0B90B]" />}
-              {fmtTime(j.pre_simulated_time)}
-            </span>
-            <span className="truncate">{j.symbol}</span>
-            <span className={
-              j.direction === 'long' ? 'text-[#0ECB81]' :
-              j.direction === 'short' ? 'text-[#F6465D]' : 'text-muted-foreground'
-            }>
-              {j.direction === 'long' ? 'LONG' : j.direction === 'short' ? 'SHORT' : 'PASS'}
-            </span>
-            <span className={mentalColor(j.pre_mental_state)}>{j.pre_mental_state}</span>
-            <span className={outcomeColor(j.post_outcome)}>{outcomeLabel(j.post_outcome)}</span>
-            <span className={pnlColor(j.post_r_multiple ?? 0)}>{j.post_r_multiple != null ? j.post_r_multiple.toFixed(2) : '—'}</span>
-            <span className={pnlColor(j.post_realized_pnl ?? 0)}>{j.post_realized_pnl != null ? fmtPnl(j.post_realized_pnl) : '—'}</span>
-            <span>
-              {tags.length > 0 ? (
-                <Popover>
-                  <PopoverTrigger asChild>
-                    <button className="inline-flex h-5 px-1.5 rounded bg-muted text-foreground text-[10px]">×{tags.length}</button>
-                  </PopoverTrigger>
-                  <PopoverContent className="w-56 p-2 bg-card border-border text-[11px]">
-                    {tags.slice(0, 3).map(t => <div key={t.id} className="truncate">• {t.pattern_name}</div>)}
-                    {tags.length > 3 && <div className="text-muted-foreground">…+{tags.length - 3}</div>}
-                  </PopoverContent>
-                </Popover>
-              ) : <span className="text-muted-foreground">—</span>}
-            </span>
-            <span>
-              <Button size="sm" variant="ghost" className="h-6 px-2 text-[10px]"
-                onClick={() => nav(`/journal/${j.id}`)}>
-                复盘
-              </Button>
-            </span>
-          </div>
-        );
-      })}
       {totalPages > 1 && (
         <div className="flex items-center justify-between px-3 py-2 border-t border-border text-[11px]">
           <span className="text-muted-foreground">共 {sorted.length} 条</span>

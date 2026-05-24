@@ -99,6 +99,8 @@ export interface TradeRecord {
   slippage: number;
   openTime: number;
   closeTime: number;
+  /** How the position was closed. Manual for user-initiated; sl/tp1-3 for triggered TP/SL; liquidation for forced close. */
+  exit_method?: "manual" | "sl" | "tp1" | "tp2" | "tp3" | "liquidation";
 }
 
 export const MAINTENANCE_MARGIN_RATE = 0.004; // 0.4% — strict MM rate (MMR) per tier default

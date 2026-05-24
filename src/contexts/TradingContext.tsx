@@ -82,7 +82,7 @@ interface TradingState {
   setQuantityPrecision: (v: number) => void;
   activeSymbols: string[];
   handlePlaceOrder: (symbol: string, order: PlaceOrderParams) => { id: string } | null;
-  handleClosePosition: (symbol: string, index: number, percentage?: number) => void;
+  handleClosePosition: (symbol: string, index: number, percentage?: number, method?: 'manual' | 'sl' | 'tp1' | 'tp2' | 'tp3' | 'liquidation') => void;
   handleCancelOrder: (symbol: string, orderId: string) => void;
   handlePlaceTpSl: (symbol: string, pos: Position, tp: number | null, sl: number | null, pct: number) => void;
   handleAddIsolatedMargin: (symbol: string, posIndex: number, amount: number) => void;
@@ -521,6 +521,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
           quantity: pos.quantity, leverage: pos.leverage,
           pnl: pnl - closeFee - liqFee, fee: closeFee + liqFee, slippage: 0,
           openTime: pos.openTime || 0, closeTime: getEffectiveTime(sym),
+          exit_method: 'liquidation',
         }]);
 
         setPositionsMap(prev => ({
@@ -580,6 +581,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
               quantity: pos.quantity, leverage: pos.leverage,
               pnl: pnl - closeFee - liqFee, fee: closeFee + liqFee, slippage: 0,
               openTime: pos.openTime || 0, closeTime: getEffectiveTime(sym),
+              exit_method: 'liquidation',
             });
           }
         }
@@ -769,7 +771,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
   }, [getEffectiveTime]);
 
   // ===== Close Position — supports partial close via percentage (0-1] =====
-  const handleClosePosition = useCallback((symbol: string, index: number, percentage: number = 1) => {
+  const handleClosePosition = useCallback((symbol: string, index: number, percentage: number = 1, method: 'manual' | 'sl' | 'tp1' | 'tp2' | 'tp3' | 'liquidation' = 'manual') => {
     const symbolPositions = positionsMapRef.current[symbol] || [];
     const pos = symbolPositions[index];
     if (!pos || pos.quantity <= 0) return;
@@ -859,6 +861,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
       action: 'CLOSE' as const, entryPrice: pos.entryPrice, exitPrice: fillPrice,
       quantity: closeQty, leverage: pos.leverage,
       pnl: pnl - fee, fee, slippage, openTime: pos.openTime || 0, closeTime: getEffectiveTime(symbol),
+      exit_method: method,
     }]);
 
     const pctLabel = pct < 1 ? ` (${Math.round(pct * 100)}%)` : '';

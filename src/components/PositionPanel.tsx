@@ -26,6 +26,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { useAuth } from '@/contexts/AuthContext';
 import { PostTradeReviewSheet } from '@/components/journal/PostTradeReviewSheet';
+import { ExitMethodBadge } from '@/components/journal/ExitMethodBadge';
 import {
   findUnreviewedJournalForClose, listJournals,
 } from '@/lib/journalApi';
@@ -970,7 +971,7 @@ export function PositionPanel({
               <table className="w-full text-[11px] font-mono tabular-nums">
                 <thead className="sticky top-0 bg-white dark:bg-[#1e2329] z-10">
                   <tr className="text-gray-500 dark:text-[#848e9c] border-b border-gray-200 dark:border-[#2b3139]">
-                    {['合约', '方向', '开仓均价', '平仓均价', '数量', '开仓时间', '平仓时间', '平仓盈亏', '收益率(ROE)', '评价状态'].map(h => (
+                    {['合约', '方向', '开仓均价', '平仓均价', '数量', '开仓时间', '平仓时间', '平仓方式', '平仓盈亏', '收益率(ROE)', '评价状态'].map(h => (
                       <th key={h} className="px-3 py-1.5 text-left font-medium whitespace-nowrap">{h}</th>
                     ))}
                   </tr>
@@ -994,6 +995,9 @@ export function PositionPanel({
                         </td>
                         <td className="px-3 py-2 text-gray-500 dark:text-[#848e9c]">
                           {t.closeTime ? new Date(t.closeTime).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '-'}
+                        </td>
+                        <td className="px-3 py-2">
+                          <ExitMethodBadge method={t.action === 'LIQUIDATION' ? 'liquidation' : t.exit_method} />
                         </td>
                         <td className={`px-3 py-2 font-bold ${t.pnl >= 0 ? 'text-[#0ecb81]' : 'text-[#f6465d]'}`}>
                           {formatSignedUSDT(t.pnl)}

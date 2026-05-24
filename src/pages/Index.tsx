@@ -423,6 +423,7 @@ const Index = () => {
             slippage: 0,
             openTime: pos.openTime || 0,
             closeTime: openTime,
+            exit_method: order.reduceKind === "TP" ? "tp1" : order.reduceKind === "SL" ? "sl" : "manual",
           },
         ]);
 
