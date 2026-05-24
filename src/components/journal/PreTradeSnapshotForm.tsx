@@ -524,7 +524,7 @@ export function PreTradeSnapshotForm({
           disabled={!canSubmit || submitting}
           className={`h-8 px-4 text-[12px] font-medium rounded transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${confirmBtnClass}`}
         >
-          {submitting ? '提交中…' : (mode === 'no_entry' ? '记录决策' : '确认并下单')}
+          {confirmBtnText}
         </button>
       </div>
     </div>
