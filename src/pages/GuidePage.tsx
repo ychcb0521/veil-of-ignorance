@@ -40,8 +40,7 @@ const TOC: TocItem[] = [
     ],
   },
   { id: "s5", label: "5. 完整学习闭环" },
-  { id: "s6", label: "6. 三天上手指南" },
-  { id: "s7", label: "7. 一句话总结" },
+  { id: "s7", label: "6. 一句话总结" },
 ];
 
 const FLAT_TOC = TOC.flatMap((t) => [t, ...(t.children ?? [])]);
@@ -208,10 +207,10 @@ export default function GuidePage() {
             <div className="space-y-3">
               <P>
                 无知之幕（Veil of
-                Ignorance）是一个加密货币合约交易的"时光机模拟器"。它的存在是为了让你在不损失真实资金的前提下，把交易能力训练到足以面对真实市场的程度。
+                Ignorance）是一个给合约交易者使用的"时光机模拟器"。它的意义不是给你一个可以随便点单的练习场，而是让你在不损失真实资金的前提下，把一整套交易决策流程练到足以面对真实市场的程度。
               </P>
               <P>
-                它不是"游戏"，也不是"沙盒"。它是一台训练机器——目标是让你每一次错误都成为可被分析、可被消除的输入信号。
+                如果你已经在做实盘，这一页最重要的理解是：它训练的不只是"看方向"，而是训练你在入场前如何表达理由、如何定义风险、如何识别自己的情绪、以及如何在事后把错误转成下一次可执行的规则。
               </P>
               <P>数据来源：完全使用币安 USDT 永续合约真实历史数据。</P>
               <P>
@@ -224,30 +223,39 @@ export default function GuidePage() {
           <section id="s2" className="scroll-mt-20">
             <SectionTitle accent="#0ECB81">2. 核心理念</SectionTitle>
             <div className="space-y-3">
-              <P>理念分三层。</P>
+              <P>理念分三层，但你可以把它理解成一名交易者每天真正需要做好的三件事。</P>
               <P>
                 <strong>第一层 · 时光机</strong>：你可以选择历史上任意时间点，加载该时刻的真实币安 K 线数据，以 1x-100x
-                倍速重放行情，并进行模拟下单。这让"过去 5 年的市场"变成你的训练场。
+                倍速重放行情，并进行模拟下单。这让"过去 5
+                年的市场"变成你的训练场。对交易者来说，它最实用的价值是：你可以反复练同一种行情，而不是被动等待下一次市场给机会。
               </P>
               <P>
                 <strong>第二层 · 错题集闭环</strong>
                 ：交易能力的提升不在交易本身，而在复盘。本系统内置一套完整的负反馈控制系统——双时点记录 + 模式聚类 +
-                反事实回放 + 规则回写——让你的每个错误都不只是事件，而是可被分析、归类、并最终被消除的系统漏洞。
+                反事实回放 +
+                规则回写——让你的每个错误都不只是事件，而是可被分析、归类、并最终被消除的系统漏洞。你真正要练的不是"这单赚没赚"，而是"我为什么会在这种情境下做出这种决定"。
               </P>
               <P>
                 <strong>第三层 · 硬约束守卫</strong>
                 ：有些规则不能依赖你"情绪上头时仍然冷静"。系统在关键决策点上把这些规则做成无法绕过的硬约束——例如"禁止使用全仓"。这是
                 Ulysses Pact 的工程化实现。
               </P>
+              <P>
+                <strong>元认知层</strong>：系统会逼你在下单前回答四个问题:
+                我看到了什么？我相信什么会发生？我准备承受多少错误成本？我现在的心理状态会不会污染这笔决策？这些字段不是为了把表单做复杂，而是为了把"当下的你"暴露给"事后的你"。这正是元认知设计的核心。
+              </P>
               <Highlight>
-                "一次错误是事件，三次同模式是系统。错题集让你的眼睛在物理上看到这种系统性。硬约束则让你不需要每次都靠意志力——把意志力留给值得的战斗。"
+                "一次错误是事件，三次同模式是系统。错题集让你的眼睛在物理上看到这种系统性。元认知记录让你看见'是谁在下单'，硬约束则让你不需要每次都靠意志力——把意志力留给值得的战斗。"
               </Highlight>
             </div>
           </section>
 
           <section id="s3" className="scroll-mt-20">
             <SectionTitle accent="hsl(var(--primary))">3. 主界面分区</SectionTitle>
-            <P>主交易页 1:1 复刻币安永续合约专业版。从上到下、从左到右介绍。</P>
+            <P>
+              主交易页 1:1
+              复刻币安永续合约专业版。从实操角度，建议你的使用顺序是：先定时间和节奏，再读盘，再决定要不要下单，最后把结果送进复盘中心。
+            </P>
 
             <section id="s3-1" className="scroll-mt-20">
               <SubTitle>3.1 时光机控制条（TIME MACHINE）</SubTitle>
@@ -269,6 +277,10 @@ export default function GuidePage() {
                   <li>中途可暂停 / 恢复 / 跳转</li>
                 </ul>
                 <P>注意："启动"后所有的盘口、持仓盈亏、订单状态都以这个模拟时间为唯一真理源。</P>
+                <P>
+                  实操建议：不要一上来就用 100x。先用 1x-5x 找节奏，再用 10x-50x 刷同类行情，最后再回到 1x
+                  检查自己在慢节奏下是否仍然执行同一套规则。
+                </P>
               </div>
             </section>
 
@@ -291,6 +303,9 @@ export default function GuidePage() {
                   <li>多图表布局 1x1 / 1x2 / 2x2</li>
                   <li>全屏切换</li>
                 </ul>
+                <P>
+                  实操建议：把图表当作"做假设"的地方，而不是"找借口"的地方。入场前先明确你看到的是趋势延续、结构反转还是区间波动，否则后面的开仓理由很容易变成事后补作文。
+                </P>
               </div>
             </section>
 
@@ -304,6 +319,9 @@ export default function GuidePage() {
                   <strong>目的</strong>：还原盘口微观结构
                 </P>
                 <P>让你训练对挂单分布、买卖力量对比、成交节奏的感知——这些在真实交易中很重要但常被忽略。</P>
+                <P>
+                  实操建议：如果你的系统不依赖微观结构，就不要在这里临时找理由加仓；如果你的系统依赖微观结构，就要把盘口看到的东西写进开仓理由，而不是只停留在"感觉有承接"这种模糊表述。
+                </P>
               </div>
             </section>
 
@@ -370,6 +388,10 @@ export default function GuidePage() {
                     <strong>Checklist 通过</strong>（仅主力单）——4 个必填项 + 至少 2 个可选项
                   </li>
                 </ol>
+                <P>
+                  如果你是实盘交易者，最该认真对待的是第 3、6、7、8、9、10
+                  项。它们共同回答的是：你为什么现在要出手、这笔最多亏多少、你的情绪有没有污染判断、以及你到底有没有想清楚风险。这些字段组合起来，就是系统的元认知快照。
+                </P>
                 <Highlight>
                   "开仓快照不是负担，是这个系统区别于其他模拟器的关键。它强制把你的判断、心态、风险认识固化为不可篡改的记录。三个月后回头看，你会发现这些记录比你的盈亏数字更有价值。"
                 </Highlight>
@@ -379,6 +401,9 @@ export default function GuidePage() {
                 <P>
                   把"具体在哪个价格止损"和"这笔我愿意亏多少"分开——前者是市场结构决定的（应该根据
                   ATR、支撑位、流动性来动态判断），后者是你的心理上限（应该在你冷静时决定）。把两者强行绑定，会让你"为了凑止损位"而违反风险预算，或"为了凑风险预算"而把止损放在没有市场结构意义的地方。
+                </P>
+                <P>
+                  元认知上的意义在于：系统不是只记录"你做了什么"，而是记录"你是以什么心理和风险叙事去做这件事"。这会直接决定你事后复盘时看到的是市场问题，还是决策者自己的问题。
                 </P>
               </div>
             </section>
@@ -404,6 +429,9 @@ export default function GuidePage() {
                     <strong>平仓方式（手动 / 止损 / 止盈 1-3 / 爆仓）</strong>
                   </li>
                 </ul>
+                <P>
+                  实操上，这里不是给你看"今天赚了多少"，而是给你快速抽样自己的执行质量。尤其是未评价交易，不要积压，因为拖延越久，元认知对照就越失真。
+                </P>
               </div>
             </section>
 
@@ -468,6 +496,9 @@ export default function GuidePage() {
                   <li>元监控页有独立卡片对比两类订单（详见 §4.2）</li>
                 </ul>
                 <P>
+                  元认知上的关键区别是：主力单暴露的是你的方向判断能力，对冲单暴露的是你面对浮亏时的稳定性。如果你频繁开对冲单，不一定说明你会管理风险，也可能说明你不愿意直视主力仓已经错了。
+                </P>
+                <P>
                   <strong>关于杠杆：</strong>
                 </P>
                 <P>
@@ -501,6 +532,9 @@ export default function GuidePage() {
                 <P>
                   这个设计哲学的根源在 Ulysses
                   Pact（尤利西斯契约）——尤利西斯让水手把自己绑在桅杆上，并明确告诉他们：无论我之后多么哀求，都不许放开。
+                </P>
+                <P>
+                  从交易者视角看，硬约束的作用不是"限制发挥"，而是帮你把最容易在高波动里失真的部分交给系统托管。真正该靠主观能力的，是读盘、建模、等待和执行；不该靠情绪临场决定的，是仓位灾难边界。
                 </P>
                 <P>
                   <strong>本系统当前的硬约束清单：</strong>
@@ -549,13 +583,19 @@ export default function GuidePage() {
             <P>
               复盘中心是这个系统的真正差异化能力。它不是普通的"交易日记"，而是一套完整的负反馈控制系统——让错误真正成为成长的输入。
             </P>
-            <P>下面 7 个模块互为表里，彼此互联。</P>
+            <P>
+              下面 7
+              个模块互为表里，彼此互联。对交易者来说，你可以把这里理解成"盘后真正赚钱的地方"——因为交易结果只提供样本，复盘中心才负责把样本加工成能力。
+            </P>
 
             <div className="space-y-8 mt-6">
               <section id="s4-1" className="scroll-mt-20 space-y-3">
                 <SubTitle>4.1 错题集（/journal）</SubTitle>
                 <P>
                   <strong>目的</strong>：把分散的错误归类成"模式"，让你看到自己反复犯的系统性错误。
+                </P>
+                <P>
+                  实操上，打开错题集时不要先看哪一笔亏得最惨，而是先看哪一种错误在重复出现。单笔盈亏会放大情绪，模式统计才会暴露结构。
                 </P>
                 <P>
                   <strong>三个核心特性：</strong>
@@ -606,6 +646,10 @@ export default function GuidePage() {
                       </li>
                       <li>订单类型默认仅显示"主力单"（避免对冲单污染模式统计），用户可手动切换</li>
                     </ul>
+                    <P>
+                      元认知上，这一页的真正任务是把"我最近状态不好"这种模糊感受，拆成可检验的句子，比如"当心态自评 ≤2
+                      时，我更容易追单"。
+                    </P>
                   </div>
                 </div>
               </section>
@@ -619,6 +663,9 @@ export default function GuidePage() {
                   包含多张卡片，但你只需要关心一张：<strong>规则有效性追踪</strong>。
                 </P>
                 <P>这张表显示每条规则创建后，对应错误模式的频次是否真的下降了。</P>
+                <P>
+                  如果你想把这页用到极致，一个很实操的习惯是每周只问三个问题：哪种错误下降了？哪种错误没变？哪种错误虽然少了，但换了另一种形式回来？第三个问题就是元认知监控的开始。
+                </P>
                 <RedHighlight>
                   "这个系统的全部价值在这张表上。如果你的规则在 60 天内让对应 pattern
                   频次下降，系统起作用了。如果没有，那条规则需要重写——不是 pattern 有问题，是规则不够'可操作'。"
@@ -665,6 +712,10 @@ export default function GuidePage() {
                 <SubTitle>4.3 规则（/journal/rules）</SubTitle>
                 <P>
                   <strong>目的</strong>：把错误模式转化为可执行的规则，注入下次开仓 checklist。
+                </P>
+                <P>
+                  写规则时最重要的实操标准只有一个：下一次开仓前，你能不能在 3
+                  秒内判断这条规则是"已满足"还是"未满足"。如果不能，它更像口号，不像规则。
                 </P>
                 <P>
                   <strong>来源有两条：</strong>
@@ -718,6 +769,9 @@ export default function GuidePage() {
                 <P>
                   <strong>目的</strong>：把一笔交易完整"重演"，五通道同步。
                 </P>
+                <P>
+                  这不是为了回味一笔单子的好坏，而是为了让你重新站回当时那个决策节点，检查自己到底忽略了什么、脑内讲了什么故事、又是如何一步步把自己送到那个结果里的。
+                </P>
                 <ul className="list-disc pl-6 text-[14px] text-foreground/90 space-y-1">
                   <li>
                     <strong>通道 ①：盘面</strong> —— K 线回放 + 入场/出场标记 + 止盈线 +
@@ -744,6 +798,10 @@ export default function GuidePage() {
                 <SubTitle>4.6 六步深度分析框架</SubTitle>
                 <P>
                   <strong>目的</strong>：把模糊的复盘文字升级为可分析的结构化数据。
+                </P>
+                <P>
+                  这 6
+                  步本质上是一套元认知拆解流程：它迫使你把"我觉得"拆成"我看到了什么、我推断了什么、市场实际上回应了什么、我到底错在观察、推理、执行，还是情绪"。
                 </P>
                 <P>
                   <strong>六步：</strong>
@@ -833,61 +891,14 @@ export default function GuidePage() {
                 模式强制规则）——它们是整个流程里"不可绕过"的关键卡口。
                 <strong>软提示可以被情绪绕过，硬约束不能。</strong>
               </P>
-            </div>
-          </section>
-
-          <section id="s6" className="scroll-mt-20">
-            <SectionTitle accent="#0ECB81">6. 三天上手指南</SectionTitle>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <div className="bg-card border border-border rounded p-4 flex flex-col">
-                <div className="text-[14px] font-medium text-foreground mb-3">【Day 1 · 熟悉时光机 + 体验硬约束】</div>
-                <ul className="list-disc pl-5 space-y-1.5 text-[13px] text-foreground/90 flex-1">
-                  <li>选一个你熟悉的标的（BTC / ETH）</li>
-                  <li>选 2024 年某个明显波动的时刻作为起点</li>
-                  <li>用不同倍速（5x / 50x / 100x）观察盘面</li>
-                  <li>尝试打开开仓快照，故意把仓位模式留在"全仓"，体验确认按钮被锁死</li>
-                  <li>这一天不要真正交易，只是建立"无知之幕 + 不能违规"的状态感</li>
-                </ul>
-                <div className="mt-3 pt-2 border-t border-border text-[12px] text-[#F0B90B]">
-                  目的：让"不知道未来 + 不能违规"成为身体记忆。
-                </div>
-              </div>
-
-              <div className="bg-card border border-border rounded p-4 flex flex-col">
-                <div className="text-[14px] font-medium text-foreground mb-3">【Day 2 · 第一笔有快照的主力单】</div>
-                <ul className="list-disc pl-5 space-y-1.5 text-[13px] text-foreground/90 flex-1">
-                  <li>找一个清晰的形态信号（突破 / 反转 / 区间）</li>
-                  <li>选择"主力单"+ 确认"逐仓"</li>
-                  <li>完整填写开仓快照——理由、止盈、最大亏损金额、风险认识、风险管理、心态、checklist</li>
-                  <li>平仓后认真完成六步深度分析（不要敷衍 Step 5）</li>
-                  <li>把这笔记录留到 Day 3 早上重新看</li>
-                </ul>
-                <div className="mt-3 pt-2 border-t border-border text-[12px] text-[#F0B90B]">
-                  目的：让"双时点记录"成为肌肉记忆。
-                </div>
-              </div>
-
-              <div className="bg-card border border-border rounded p-4 flex flex-col">
-                <div className="text-[14px] font-medium text-foreground mb-3">
-                  【Day 3 · 第一条规则 + 第一笔对冲单】
-                </div>
-                <ul className="list-disc pl-5 space-y-1.5 text-[13px] text-foreground/90 flex-1">
-                  <li>进入错题集查看你的第一个 pattern</li>
-                  <li>用六步框架 Step 6 写出第一条规则（必须可勾选）</li>
-                  <li>点击"写入 checklist"</li>
-                  <li>在下一次开仓时观察这条规则如何拦截你</li>
-                  <li>再尝试一笔对冲单——体验"只填理由 + 心态"的精简流程</li>
-                  <li>此时进入元监控查看"规则有效性追踪"基线</li>
-                </ul>
-                <div className="mt-3 pt-2 border-t border-border text-[12px] text-[#F0B90B]">
-                  目的：完成第一次完整闭环 + 理解订单类型分层。
-                </div>
-              </div>
+              <P>
+                如果从元认知角度看，这个闭环真正完成了三件事：记录你当时的主观模型，记录市场随后给出的客观反馈，再把两者之间的偏差强制翻译成一条下次能执行的规则。交易成长不是来自多做几单，而是来自这种偏差被反复缩小。
+              </P>
             </div>
           </section>
 
           <section id="s7" className="scroll-mt-20">
-            <SectionTitle accent="#B080FF">7. 一句话总结</SectionTitle>
+            <SectionTitle accent="#B080FF">6. 一句话总结</SectionTitle>
             <div className="bg-card border-l-4 border-[#F0B90B] rounded-r p-6 my-8">
               <p className="text-[24px] leading-relaxed text-foreground text-center">
                 "这不是模拟器，是训练机器。判断它是否在为你工作的唯一标准，是元监控里那张'规则有效性追踪'表——其他一切都可以欺骗你，那张表不能。"
