@@ -359,7 +359,7 @@ export function PreTradeSnapshotForm({
         )}
 
         {/* (4) Position size */}
-        {isTrade && (
+        {showFullFields && (
           <div className="space-y-1.5">
             <div className={labelCls}>仓位规模 (USDT){requiredStar}</div>
             <Input
