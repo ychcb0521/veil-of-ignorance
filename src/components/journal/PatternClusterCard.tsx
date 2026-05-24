@@ -6,6 +6,9 @@ import type { PatternCluster } from '@/lib/journalAggregations';
 import {
   computeTimeDistribution, computeMentalStateDistribution, computeSymbolDistribution,
 } from '@/lib/journalAggregations';
+import { ExitMethodBadge } from './ExitMethodBadge';
+import { useTradingContext } from '@/contexts/TradingContext';
+import { formatPrice } from '@/lib/formatters';
 
 const SEV_BAR: Record<PatternCluster['severity'], string> = {
   critical: 'bg-[#F6465D]',
