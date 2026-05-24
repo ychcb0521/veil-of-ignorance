@@ -92,7 +92,12 @@ export default function JournalInsightsPage() {
     const deepDone = reviewed.filter(j => !!j.deep_analysis_completed_at);
     const deepRate = reviewed.length === 0 ? 0 : deepDone.length / reviewed.length;
 
-    return { cur, curClusters, trend, timeDist, mentalDist, outcome, alphaHours, ruleEffect, reviewed, deepDone, deepRate };
+    // R 倍数口径混合：是否同时存在带 SL 的历史 journal 与不带 SL 的新 journal
+    const hasLegacySl = cur.some(j => j.pre_planned_stop_loss != null);
+    const hasNewMaxLoss = cur.some(j => j.pre_planned_stop_loss == null && j.pre_max_loss_usdt != null);
+    const mixedRBasis = hasLegacySl && hasNewMaxLoss;
+
+    return { cur, curClusters, trend, timeDist, mentalDist, outcome, alphaHours, ruleEffect, reviewed, deepDone, deepRate, mixedRBasis };
   }, [data, range]);
 
   if (loading || !data || !stats) {
