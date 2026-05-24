@@ -521,6 +521,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
           quantity: pos.quantity, leverage: pos.leverage,
           pnl: pnl - closeFee - liqFee, fee: closeFee + liqFee, slippage: 0,
           openTime: pos.openTime || 0, closeTime: getEffectiveTime(sym),
+          exit_method: 'liquidation',
         }]);
 
         setPositionsMap(prev => ({
