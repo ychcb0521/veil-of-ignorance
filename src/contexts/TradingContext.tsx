@@ -82,7 +82,7 @@ interface TradingState {
   setQuantityPrecision: (v: number) => void;
   activeSymbols: string[];
   handlePlaceOrder: (symbol: string, order: PlaceOrderParams) => { id: string } | null;
-  handleClosePosition: (symbol: string, index: number, percentage?: number) => void;
+  handleClosePosition: (symbol: string, index: number, percentage?: number, method?: 'manual' | 'sl' | 'tp1' | 'tp2' | 'tp3' | 'liquidation') => void;
   handleCancelOrder: (symbol: string, orderId: string) => void;
   handlePlaceTpSl: (symbol: string, pos: Position, tp: number | null, sl: number | null, pct: number) => void;
   handleAddIsolatedMargin: (symbol: string, posIndex: number, amount: number) => void;
