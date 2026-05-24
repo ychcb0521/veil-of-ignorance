@@ -127,21 +127,29 @@ export function PreTradeSnapshotForm({
   // ===== Submit gate =====
   const canSubmit = useMemo(() => {
     if (reason.trim().length < 20) return false;
-    if (riskAware.trim().length < 15) return false;
-    if (riskManage.trim().length < 15) return false;
     if (mental <= 3 && mentalTrigger.trim().length < 10) return false;
     if (mental <= 2 && !overrideLowMental) return false;
-    if (isTrade) {
-      if (sl <= 0) return false;
-      if (!tpsValid) return false;
-      if (sizeUsdt <= 0) return false;
-      if (!checklistPassed) return false;
-    } else {
+    if (mode === 'no_entry') {
+      if (riskAware.trim().length < 15) return false;
+      if (riskManage.trim().length < 15) return false;
       if (noEntryReason.trim().length < 10) return false;
+      return true;
     }
+    // trade mode
+    if (isHedge) {
+      // Hedge: only reason + mental + (mentalTrigger if low) + low-mental override
+      return true;
+    }
+    // main order: full requirements
+    if (riskAware.trim().length < 15) return false;
+    if (riskManage.trim().length < 15) return false;
+    if (sl <= 0) return false;
+    if (!tpsValid) return false;
+    if (sizeUsdt <= 0) return false;
+    if (!checklistPassed) return false;
     return true;
   }, [reason, riskAware, riskManage, mental, mentalTrigger, overrideLowMental,
-      isTrade, sl, tpsValid, sizeUsdt, checklistPassed, noEntryReason]);
+      mode, isHedge, sl, tpsValid, sizeUsdt, checklistPassed, noEntryReason]);
 
   const handleSubmit = async () => {
     if (!canSubmit || submitting) return;
@@ -154,26 +162,43 @@ export function PreTradeSnapshotForm({
         checked: checked.includes(d.id),
       }));
 
-
-
-      // Primary TP price (first valid level) — schema only has one column
+      // Primary TP price (first valid level)
       const firstTp = tps.find(t => parseFloat(t.price) > 0);
-      const payload: SnapshotPayload = {
-        pre_entry_reason: reason.trim(),
-        pre_planned_stop_loss: isTrade && sl > 0 ? sl : null,
-        pre_planned_take_profit: isTrade && firstTp ? parseFloat(firstTp.price) : null,
-        pre_mental_state: mental,
-        pre_mental_trigger: mode === 'no_entry'
-          ? noEntryReason.trim()
-          : (mental <= 3 ? mentalTrigger.trim() : null),
-        pre_risk_awareness: riskAware.trim(),
-        pre_risk_management: riskManage.trim(),
-        pre_checklist_items: isTrade ? checklistItemsOut : [],
-        pre_checklist_passed: isTrade ? checklistPassed : true,
-        pre_position_size: isTrade && sizeUsdt > 0 ? sizeUsdt : null,
-        pre_max_loss_usdt: isTrade && realMaxLoss > 0 ? Number(realMaxLoss.toFixed(2)) : null,
-        tp_levels: isTrade ? tps : [],
-      };
+      const baseMentalTrigger = mode === 'no_entry'
+        ? noEntryReason.trim()
+        : (mental <= 3 ? mentalTrigger.trim() : null);
+
+      const payload: SnapshotPayload = isHedge
+        ? {
+            order_kind: 'hedge',
+            pre_entry_reason: reason.trim(),
+            pre_planned_stop_loss: null,
+            pre_planned_take_profit: null,
+            pre_mental_state: mental,
+            pre_mental_trigger: baseMentalTrigger,
+            pre_risk_awareness: null,
+            pre_risk_management: null,
+            pre_checklist_items: null,
+            pre_checklist_passed: null,
+            pre_position_size: initialPositionSizeUsdt ?? (sizeUsdt > 0 ? sizeUsdt : null),
+            pre_max_loss_usdt: null,
+            tp_levels: [],
+          }
+        : {
+            order_kind: mode === 'no_entry' ? 'main' : orderKind,
+            pre_entry_reason: reason.trim(),
+            pre_planned_stop_loss: isTrade && sl > 0 ? sl : null,
+            pre_planned_take_profit: isTrade && firstTp ? parseFloat(firstTp.price) : null,
+            pre_mental_state: mental,
+            pre_mental_trigger: baseMentalTrigger,
+            pre_risk_awareness: riskAware.trim(),
+            pre_risk_management: riskManage.trim(),
+            pre_checklist_items: isTrade ? checklistItemsOut : [],
+            pre_checklist_passed: isTrade ? checklistPassed : true,
+            pre_position_size: isTrade && sizeUsdt > 0 ? sizeUsdt : null,
+            pre_max_loss_usdt: isTrade && realMaxLoss > 0 ? Number(realMaxLoss.toFixed(2)) : null,
+            tp_levels: isTrade ? tps : [],
+          };
 
       await onSubmit(payload);
     } finally {
