@@ -4,6 +4,7 @@ import { CandlestickChart } from "./CandlestickChart";
 import { LayoutGrid, Columns, Square, Maximize2, Minimize2 } from "lucide-react";
 import type { KlineData } from "@/hooks/useBinanceData";
 import type { TradeRecord, PendingOrder } from "@/types/trading";
+import { fetchBinanceKlines } from "@/lib/binanceKlines";
 
 type LayoutMode = "1x1" | "1x2" | "2x2";
 
@@ -86,18 +87,13 @@ export function MultiChartLayout({
         const ms = intervalMs[interval] || 60000;
         const startTime = endTime - ms * 300;
 
-        const res = await fetch(
-          `https://fapi.binance.com/fapi/v1/klines?symbol=${rawSymbol}&interval=${interval}&startTime=${startTime}&endTime=${endTime}&limit=300`,
-        );
-        const raw = await res.json();
-        const data: KlineData[] = raw.map((k: any[]) => ({
-          time: k[0],
-          open: +k[1],
-          high: +k[2],
-          low: +k[3],
-          close: +k[4],
-          volume: +k[5],
-        }));
+        const data: KlineData[] = await fetchBinanceKlines({
+          symbol: rawSymbol,
+          interval,
+          startTime,
+          endTime,
+          limit: 300,
+        });
         setSubCharts((prev) => {
           const next = [...prev];
           next[index] = { interval, data, loading: false };

@@ -6,7 +6,7 @@ import { toast } from 'sonner';
 type AuthStep = 'form' | 'verify';
 
 export default function AuthPage() {
-  const { signIn, signUp } = useAuth();
+  const { signIn, signUp, devAuthEnabled } = useAuth();
   const [isLogin, setIsLogin] = useState(true);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -43,8 +43,12 @@ export default function AuthPage() {
           toast.error('注册失败', { description: error });
         }
       } else {
-        toast.success('注册成功', { description: '验证邮件已发送，请查收' });
-        setStep('verify');
+        if (devAuthEnabled) {
+          toast.success('开发模式注册成功', { description: '已跳过邮箱验证并自动登录' });
+        } else {
+          toast.success('注册成功', { description: '验证邮件已发送，请查收' });
+          setStep('verify');
+        }
       }
     }
   };

@@ -3,6 +3,7 @@
  */
 import { useEffect, useState } from 'react';
 import { intervalToMs, type KlineData } from '@/hooks/useBinanceData';
+import { fetchBinanceKlines } from '@/lib/binanceKlines';
 
 async function fetchRange(
   symbol: string,
@@ -15,27 +16,9 @@ async function fetchRange(
   // Binance fapi limit 1500 per request
   const limit = 1500;
   while (cursor < toTime) {
-    const qs = new URLSearchParams({
-      symbol,
-      interval,
-      startTime: String(cursor),
-      endTime: String(toTime),
-      limit: String(limit),
-    });
-    const res = await fetch(`https://fapi.binance.com/fapi/v1/klines?${qs}`);
-    if (!res.ok) throw new Error(`API ${res.status}`);
-    const raw: unknown[][] = await res.json();
+    const raw = await fetchBinanceKlines({ symbol, interval, startTime: cursor, endTime: toTime, limit });
     if (raw.length === 0) break;
-    for (const k of raw) {
-      out.push({
-        time: k[0] as number,
-        open: parseFloat(String(k[1])),
-        high: parseFloat(String(k[2])),
-        low: parseFloat(String(k[3])),
-        close: parseFloat(String(k[4])),
-        volume: parseFloat(String(k[5])),
-      });
-    }
+    out.push(...raw);
     const last = out[out.length - 1];
     if (!last) break;
     const next = last.time + intervalToMs(interval);

@@ -27,6 +27,7 @@ import type { TradeRecord } from "@/types/trading";
 import type { KlineData } from "@/hooks/useBinanceData";
 import { formatUTC8 } from "@/lib/timeFormat";
 import { useTheme } from "@/contexts/ThemeContext";
+import { fetchBinanceKlines } from "@/lib/binanceKlines";
 
 /* ===== Trade Pair ===== */
 interface TradePair {
@@ -114,28 +115,10 @@ async function fetchKlines(symbol: string, interval: string, startTime: number, 
   const limit = 1000;
 
   while (cursor < endTime) {
-    const qs = new URLSearchParams({
-      symbol,
-      interval,
-      startTime: String(cursor),
-      endTime: String(endTime),
-      limit: String(limit),
-    });
-    const res = await fetch(`https://fapi.binance.com/fapi/v1/klines?${qs}`);
-    if (!res.ok) break;
-    const raw: any[][] = await res.json();
+    const raw = await fetchBinanceKlines({ symbol, interval, startTime: cursor, endTime, limit });
     if (raw.length === 0) break;
-    for (const k of raw) {
-      all.push({
-        time: k[0] as number,
-        open: parseFloat(k[1]),
-        high: parseFloat(k[2]),
-        low: parseFloat(k[3]),
-        close: parseFloat(k[4]),
-        volume: parseFloat(k[5]),
-      });
-    }
-    cursor = (raw[raw.length - 1][0] as number) + 1;
+    all.push(...raw);
+    cursor = raw[raw.length - 1].time + 1;
     if (raw.length < limit) break;
   }
   return all;

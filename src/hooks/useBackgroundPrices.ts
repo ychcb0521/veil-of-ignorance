@@ -10,6 +10,7 @@ import { useTradingContext } from "@/contexts/TradingContext";
 import type { PendingOrder } from "@/types/trading";
 import { calcFee } from "@/types/trading";
 import { getConditionalTriggerDecisionFromRange } from "@/lib/conditionalOrders";
+import { fetchBinanceKlines } from "@/lib/binanceKlines";
 import { toast } from "sonner";
 
 interface KlinePrice {
@@ -20,20 +21,17 @@ interface KlinePrice {
 
 async function fetchLatestPrice(symbol: string, interval: string, endTime: number): Promise<KlinePrice | null> {
   try {
-    const qs = new URLSearchParams({
+    const raw = await fetchBinanceKlines({
       symbol,
       interval,
-      limit: "1",
-      endTime: String(endTime),
+      limit: 1,
+      endTime,
     });
-    const res = await fetch(`https://fapi.binance.com/fapi/v1/klines?${qs}`);
-    if (!res.ok) return null;
-    const raw: any[][] = await res.json();
     if (raw.length === 0) return null;
     return {
-      high: parseFloat(raw[0][2]),
-      low: parseFloat(raw[0][3]),
-      close: parseFloat(raw[0][4]),
+      high: raw[0].high,
+      low: raw[0].low,
+      close: raw[0].close,
     };
   } catch {
     return null;

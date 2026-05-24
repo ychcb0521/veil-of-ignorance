@@ -1,4 +1,5 @@
 import { useState, useCallback, useRef } from "react";
+import { fetchBinanceKlines } from "@/lib/binanceKlines";
 
 export interface KlineData {
   time: number; // ms timestamp (open time)
@@ -38,25 +39,7 @@ async function fetchBatch(
   interval: string,
   params: { startTime?: number; endTime?: number; limit?: number },
 ): Promise<KlineData[]> {
-  const qs = new URLSearchParams({
-    symbol,
-    interval,
-    limit: String(params.limit ?? 1000),
-  });
-  if (params.startTime != null) qs.set("startTime", String(params.startTime));
-  if (params.endTime != null) qs.set("endTime", String(params.endTime));
-
-  const res = await fetch(`https://fapi.binance.com/fapi/v1/klines?${qs}`);
-  if (!res.ok) throw new Error(`API ${res.status}`);
-  const raw: any[][] = await res.json();
-  return raw.map((k) => ({
-    time: k[0] as number,
-    open: parseFloat(k[1]),
-    high: parseFloat(k[2]),
-    low: parseFloat(k[3]),
-    close: parseFloat(k[4]),
-    volume: parseFloat(k[5]),
-  }));
+  return fetchBinanceKlines({ symbol, interval, ...params });
 }
 
 /**
