@@ -996,6 +996,9 @@ export function PositionPanel({
                         <td className="px-3 py-2 text-gray-500 dark:text-[#848e9c]">
                           {t.closeTime ? new Date(t.closeTime).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '-'}
                         </td>
+                        <td className="px-3 py-2">
+                          <ExitMethodBadge method={t.action === 'LIQUIDATION' ? 'liquidation' : t.exit_method} />
+                        </td>
                         <td className={`px-3 py-2 font-bold ${t.pnl >= 0 ? 'text-[#0ecb81]' : 'text-[#f6465d]'}`}>
                           {formatSignedUSDT(t.pnl)}
                         </td>
