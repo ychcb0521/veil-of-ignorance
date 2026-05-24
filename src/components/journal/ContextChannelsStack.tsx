@@ -89,10 +89,19 @@ function DecisionChannel() {
           {journal.pre_entry_reason || <span className="text-muted-foreground italic">无</span>}
         </div>
         <div className="grid grid-cols-2 gap-2 font-mono text-[11px]">
-          <Cell label="计划止损" value={journal.pre_planned_stop_loss?.toFixed(2) ?? '—'} />
           <Cell label="计划止盈" value={journal.pre_planned_take_profit?.toFixed(2) ?? '—'} />
           <Cell label="仓位" value={journal.pre_position_size?.toFixed(4) ?? '—'} />
-          <Cell label="计划最大亏损" value={journal.pre_max_loss_usdt != null ? `${journal.pre_max_loss_usdt.toFixed(2)} USDT` : '—'} />
+          <Cell
+            label="本次预设最大亏损"
+            value={journal.pre_max_loss_usdt != null ? `${journal.pre_max_loss_usdt.toFixed(2)} USDT` : '—'}
+            valueClass="text-[#F6465D]"
+          />
+          {journal.pre_planned_stop_loss != null && (
+            <Cell
+              label="计划止损（历史）"
+              value={journal.pre_planned_stop_loss.toFixed(2)}
+            />
+          )}
         </div>
         <div>
           <div className="text-[11px] text-muted-foreground mb-1">Checklist</div>
