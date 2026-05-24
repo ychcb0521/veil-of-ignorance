@@ -321,7 +321,7 @@ export function PreTradeSnapshotForm({
         )}
 
         {/* (3) TP levels */}
-        {isTrade && (
+        {showFullFields && (
           <div className="space-y-1.5">
             <div className={labelCls}>预设止盈档位{requiredStar} <span className="text-muted-foreground/60">（最多 3 档，至少 1 档，仓位合计 ≤ 100%）</span></div>
             <div className="space-y-1.5">
