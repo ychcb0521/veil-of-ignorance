@@ -77,6 +77,7 @@ export function UnreviewedJournalList({ journals, onReviewed }: Props) {
         isOpen={!!active}
         onOpenChange={open => { if (!open) setActive(null); }}
         journal={active}
+        tradeRecord={activeTradeRecord}
         onReviewed={u => { onReviewed?.(u); setActive(null); }}
       />
     </div>
