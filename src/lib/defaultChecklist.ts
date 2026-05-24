@@ -17,7 +17,7 @@ export interface ChecklistDefItem {
 }
 
 export const DEFAULT_PRE_TRADE_CHECKLIST: ChecklistDefItem[] = [
-  { id: 'stop_loss_set',      label: '已设置止损位且本次不打算移动',       required: true,  source: 'default' },
+  { id: 'risk_capped',        label: '已明确本次愿意承受的最大亏损金额，并已规划风险控制方式', required: true, source: 'default' },
   { id: 'take_profit_set',    label: '已设置止盈策略（非镜像 1:1）',        required: true,  source: 'default' },
   { id: 'position_in_budget', label: '本次仓位风险 ≤ 总账户 1R',           required: true,  source: 'default' },
   { id: 'mental_state_ok',    label: '当前心态自评 ≥ 3 分',                required: true,  source: 'default' },

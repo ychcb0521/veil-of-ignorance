@@ -241,8 +241,13 @@ export function PostTradeReviewSheet({
               }`}>{isHedge ? '对冲单' : '主力单'}</span>
             </div>
             <div>• {isHedge ? '对冲理由' : '入场理由'}：{journal.pre_entry_reason}</div>
-            {(journal.pre_planned_stop_loss != null || journal.pre_planned_take_profit != null) && (
-              <div>• 预设止损/止盈：{journal.pre_planned_stop_loss ?? '—'} / {journal.pre_planned_take_profit ?? '—'}</div>
+            {journal.pre_planned_stop_loss != null ? (
+              <div>• 预设止损/止盈：{journal.pre_planned_stop_loss} / {journal.pre_planned_take_profit ?? '—'} <span className="text-[10px] text-muted-foreground">（历史记录）</span></div>
+            ) : journal.pre_planned_take_profit != null ? (
+              <div>• 预设止盈：{journal.pre_planned_take_profit}</div>
+            ) : null}
+            {journal.pre_max_loss_usdt != null && (
+              <div>• 本次预设最大亏损：<span className="text-[#F6465D]">{journal.pre_max_loss_usdt.toFixed(2)} USDT</span></div>
             )}
             {journal.pre_risk_awareness && <div>• 风险认识：{journal.pre_risk_awareness}</div>}
             {journal.pre_risk_management && <div>• 风险管理：{journal.pre_risk_management}</div>}

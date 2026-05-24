@@ -89,10 +89,19 @@ function DecisionChannel() {
           {journal.pre_entry_reason || <span className="text-muted-foreground italic">无</span>}
         </div>
         <div className="grid grid-cols-2 gap-2 font-mono text-[11px]">
-          <Cell label="计划止损" value={journal.pre_planned_stop_loss?.toFixed(2) ?? '—'} />
           <Cell label="计划止盈" value={journal.pre_planned_take_profit?.toFixed(2) ?? '—'} />
           <Cell label="仓位" value={journal.pre_position_size?.toFixed(4) ?? '—'} />
-          <Cell label="计划最大亏损" value={journal.pre_max_loss_usdt != null ? `${journal.pre_max_loss_usdt.toFixed(2)} USDT` : '—'} />
+          <Cell
+            label="本次预设最大亏损"
+            value={journal.pre_max_loss_usdt != null ? `${journal.pre_max_loss_usdt.toFixed(2)} USDT` : '—'}
+            valueClass="text-[#F6465D]"
+          />
+          {journal.pre_planned_stop_loss != null && (
+            <Cell
+              label="计划止损（历史）"
+              value={journal.pre_planned_stop_loss.toFixed(2)}
+            />
+          )}
         </div>
         <div>
           <div className="text-[11px] text-muted-foreground mb-1">Checklist</div>
@@ -113,11 +122,11 @@ function DecisionChannel() {
   );
 }
 
-function Cell({ label, value }: { label: string; value: string }) {
+function Cell({ label, value, valueClass }: { label: string; value: string; valueClass?: string }) {
   return (
     <div>
       <div className="text-[10px] text-muted-foreground">{label}</div>
-      <div className="text-[12px] text-foreground tabular-nums">{value}</div>
+      <div className={`text-[12px] tabular-nums ${valueClass ?? 'text-foreground'}`}>{value}</div>
     </div>
   );
 }
@@ -213,8 +222,29 @@ function RiskChannel() {
           <div className={`rounded p-2 ${riskFailed ? 'ring-1 ring-[#F6465D]' : 'bg-background'}`}>
             <div className="text-[11px] text-muted-foreground mb-1">事后对照</div>
             <div className="grid grid-cols-2 gap-1 font-mono text-[11px]">
-              <span className="text-muted-foreground">止损触发</span>
-              <span className={slTriggered ? 'text-[#F6465D]' : 'text-foreground'}>{slTriggered ? '是' : '否'}</span>
+              {journal.pre_planned_stop_loss != null ? (
+                <>
+                  <span className="text-muted-foreground">止损触发</span>
+                  <span className={slTriggered ? 'text-[#F6465D]' : 'text-foreground'}>{slTriggered ? '是' : '否'}</span>
+                </>
+              ) : (
+                <>
+                  <span className="text-muted-foreground">出场原因</span>
+                  <span className="text-foreground">
+                    {(() => {
+                      const m = tradeRecord.exit_method;
+                      if (!m) return '—';
+                      if (m === 'manual') return '手动';
+                      if (m === 'sl') return '止损';
+                      if (m === 'liquidation') return '爆仓';
+                      if (m === 'tp1') return '止盈 1';
+                      if (m === 'tp2') return '止盈 2';
+                      if (m === 'tp3') return '止盈 3';
+                      return m;
+                    })()}
+                  </span>
+                </>
+              )}
               <span className="text-muted-foreground">实际亏损</span>
               <span className={pnlColor(-actualLoss)}>
                 {actualLoss.toFixed(2)} / {planned.toFixed(2)} ({diffPct >= 0 ? '+' : ''}{diffPct.toFixed(0)}%)

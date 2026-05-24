@@ -11,6 +11,7 @@ import { MENTAL_STATE_LABELS } from '@/types/journal';
 import { buildChecklist, isChecklistPassed } from '@/lib/defaultChecklist';
 import { listRules } from '@/lib/journalApi';
 import { useAuth } from '@/contexts/AuthContext';
+import { useTradingContext } from '@/contexts/TradingContext';
 import { ShieldCheck } from 'lucide-react';
 import type { PlaceOrderParams } from '@/contexts/TradingContext';
 import type { ChecklistItem, OrderKind, TradeDirection, TradingRule } from '@/types/journal';
@@ -67,15 +68,16 @@ export function PreTradeSnapshotForm({
   const isTrade = mode === 'trade';
   const isShort = direction === 'short';
   const { user } = useAuth();
+  const { getEffectiveAvailable } = useTradingContext();
 
   const [orderKind, setOrderKind] = useState<OrderKind>('main');
   const isHedge = isTrade && orderKind === 'hedge';
   const showFullFields = isTrade && orderKind === 'main';
 
   const [reason, setReason] = useState('');
-  const [stopLoss, setStopLoss] = useState('');
   const [tps, setTps] = useState<TpLevel[]>([{ price: '', pct: '' }]);
   const [posSize, setPosSize] = useState(initialPositionSizeUsdt ? initialPositionSizeUsdt.toFixed(2) : '');
+  const [maxLossInput, setMaxLossInput] = useState('');
   const [mental, setMental] = useState<1 | 2 | 3 | 4 | 5>(3);
   const [mentalTrigger, setMentalTrigger] = useState('');
   const [riskAware, setRiskAware] = useState('');
@@ -100,15 +102,14 @@ export function PreTradeSnapshotForm({
   }, [mental]);
 
   // ===== Derived =====
-  const sl = parseFloat(stopLoss) || 0;
   const sizeUsdt = parseFloat(posSize) || 0;
-
-  // Loss in USDT = |entry - sl| * qty (linear contracts), leverage doesn't multiply loss
-  const realMaxLoss = useMemo(() => {
-    if (!isTrade || !lockedEntryPrice || sl <= 0 || sizeUsdt <= 0) return 0;
-    const qty = sizeUsdt / lockedEntryPrice;
-    return Math.abs(lockedEntryPrice - sl) * qty;
-  }, [isTrade, lockedEntryPrice, sl, sizeUsdt]);
+  const maxLoss = parseFloat(maxLossInput) || 0;
+  const availableBalance = useMemo(() => {
+    try { return getEffectiveAvailable(symbol); } catch { return 0; }
+  }, [getEffectiveAvailable, symbol]);
+  const maxLossPctOfAccount = availableBalance > 0 && maxLoss > 0
+    ? (maxLoss / availableBalance) * 100
+    : 0;
 
   const checklistPassed = isChecklistPassed(checked, checklistItems);
   const requiredCount = checklistItems.filter(i => i.required && checked.includes(i.id)).length;
@@ -137,19 +138,18 @@ export function PreTradeSnapshotForm({
     }
     // trade mode
     if (isHedge) {
-      // Hedge: only reason + mental + (mentalTrigger if low) + low-mental override
       return true;
     }
     // main order: full requirements
     if (riskAware.trim().length < 15) return false;
     if (riskManage.trim().length < 15) return false;
-    if (sl <= 0) return false;
     if (!tpsValid) return false;
     if (sizeUsdt <= 0) return false;
+    if (maxLoss <= 0) return false;
     if (!checklistPassed) return false;
     return true;
   }, [reason, riskAware, riskManage, mental, mentalTrigger, overrideLowMental,
-      mode, isHedge, sl, tpsValid, sizeUsdt, checklistPassed, noEntryReason]);
+      mode, isHedge, tpsValid, sizeUsdt, maxLoss, checklistPassed, noEntryReason]);
 
   const handleSubmit = async () => {
     if (!canSubmit || submitting) return;
@@ -187,7 +187,7 @@ export function PreTradeSnapshotForm({
         : {
             order_kind: mode === 'no_entry' ? 'main' : orderKind,
             pre_entry_reason: reason.trim(),
-            pre_planned_stop_loss: isTrade && sl > 0 ? sl : null,
+            pre_planned_stop_loss: null,
             pre_planned_take_profit: isTrade && firstTp ? parseFloat(firstTp.price) : null,
             pre_mental_state: mental,
             pre_mental_trigger: baseMentalTrigger,
@@ -196,7 +196,7 @@ export function PreTradeSnapshotForm({
             pre_checklist_items: isTrade ? checklistItemsOut : [],
             pre_checklist_passed: isTrade ? checklistPassed : true,
             pre_position_size: isTrade && sizeUsdt > 0 ? sizeUsdt : null,
-            pre_max_loss_usdt: isTrade && realMaxLoss > 0 ? Number(realMaxLoss.toFixed(2)) : null,
+            pre_max_loss_usdt: isTrade && maxLoss > 0 ? Number(maxLoss.toFixed(2)) : null,
             tp_levels: isTrade ? tps : [],
           };
 
@@ -305,20 +305,7 @@ export function PreTradeSnapshotForm({
         </div>
 
 
-        {/* (2) Stop loss */}
-        {showFullFields && (
-          <div className="space-y-1.5">
-            <div className={labelCls}>预设止损价{requiredStar}</div>
-            <Input
-              type="number"
-              step={1 / Math.pow(10, pricePrecision)}
-              value={stopLoss}
-              onChange={e => setStopLoss(e.target.value)}
-              placeholder="0"
-              className={inputCls}
-            />
-          </div>
-        )}
+        {/* (2) [Removed] Stop loss field — risk now defined by 最大亏损 USDT */}
 
         {/* (3) TP levels */}
         {showFullFields && (
@@ -372,12 +359,28 @@ export function PreTradeSnapshotForm({
           </div>
         )}
 
-        {/* (5) Max loss readonly */}
-        {showFullFields && realMaxLoss > 0 && (
+        {/* (5) Max loss — user input */}
+        {showFullFields && (
           <div className="space-y-1.5">
-            <div className={labelCls}>计划最大亏损 (USDT)</div>
-            <div className="px-3 py-2 bg-background border border-border rounded text-[12px] font-mono text-[#F6465D]">
-              -{realMaxLoss.toFixed(2)} USDT
+            <div className={labelCls}>本次愿意承受最大亏损 USDT{requiredStar}</div>
+            <div className="text-[10px] text-muted-foreground italic">
+              这笔交易你能承受亏多少？这是后续 R 倍数计算的分母。不需要对应某个具体止损价。
+            </div>
+            <div className="flex items-center gap-2">
+              <Input
+                type="number"
+                step="0.01"
+                min="0"
+                value={maxLossInput}
+                onChange={e => setMaxLossInput(e.target.value)}
+                placeholder="0.00"
+                className={`${inputCls} flex-1`}
+              />
+              <span className={`text-[10px] font-mono whitespace-nowrap ${maxLossPctOfAccount > 5 ? 'text-[#F6465D]' : 'text-muted-foreground'}`}>
+                {maxLoss > 0 && availableBalance > 0
+                  ? `≈ 总账户的 ${maxLossPctOfAccount.toFixed(2)}%`
+                  : '≈ —'}
+              </span>
             </div>
           </div>
         )}
