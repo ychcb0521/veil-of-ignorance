@@ -771,7 +771,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
   }, [getEffectiveTime]);
 
   // ===== Close Position — supports partial close via percentage (0-1] =====
-  const handleClosePosition = useCallback((symbol: string, index: number, percentage: number = 1) => {
+  const handleClosePosition = useCallback((symbol: string, index: number, percentage: number = 1, method: 'manual' | 'sl' | 'tp1' | 'tp2' | 'tp3' | 'liquidation' = 'manual') => {
     const symbolPositions = positionsMapRef.current[symbol] || [];
     const pos = symbolPositions[index];
     if (!pos || pos.quantity <= 0) return;
