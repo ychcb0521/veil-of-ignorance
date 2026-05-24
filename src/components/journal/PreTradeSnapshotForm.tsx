@@ -306,7 +306,7 @@ export function PreTradeSnapshotForm({
 
 
         {/* (2) Stop loss */}
-        {isTrade && (
+        {showFullFields && (
           <div className="space-y-1.5">
             <div className={labelCls}>预设止损价{requiredStar}</div>
             <Input
