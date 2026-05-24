@@ -1,23 +1,28 @@
-import { useState, useRef, useEffect, useMemo } from 'react';
-import type { OrderSide, OrderType, MarginMode } from '@/types/trading';
-import { ORDER_TYPE_INFO, getMaxLeverageForNotional, getLeverageTierInfo, MAINTENANCE_MARGIN_RATE, calcUnrealizedPnl } from '@/types/trading';
-import { ChevronDown, Check, AlertTriangle, Crosshair, ArrowLeftRight, Calculator, Gauge, Info } from 'lucide-react';
-import type { PlaceOrderParams } from '@/contexts/TradingContext';
-import { useTradingContext } from '@/contexts/TradingContext';
-import { usePersistedState } from '@/hooks/usePersistedState';
-import { formatUSDT, formatPrice as fmtPrice } from '@/lib/formatters';
-import { PreTradeSnapshotDialog } from '@/components/journal/PreTradeSnapshotDialog';
+import { useState, useRef, useEffect, useMemo } from "react";
+import type { OrderSide, OrderType, MarginMode } from "@/types/trading";
+import {
+  ORDER_TYPE_INFO,
+  getMaxLeverageForNotional,
+  getLeverageTierInfo,
+  MAINTENANCE_MARGIN_RATE,
+  calcUnrealizedPnl,
+} from "@/types/trading";
+import { ChevronDown, Check, AlertTriangle, Crosshair, ArrowLeftRight, Calculator, Gauge, Info } from "lucide-react";
+import type { PlaceOrderParams } from "@/contexts/TradingContext";
+import { useTradingContext } from "@/contexts/TradingContext";
+import { formatUSDT, formatPrice as fmtPrice } from "@/lib/formatters";
+import { PreTradeSnapshotDialog } from "@/components/journal/PreTradeSnapshotDialog";
 
 // Re-export for convenience
 export type { PlaceOrderParams };
 
 // === Selector types (kept for compatibility) ===
-export type PriceSelection = 'MARKET' | 'LIMIT' | 'BEST';
-export type TriggerType = 'MARK' | 'LAST';
-export type CurrencyUnit = 'BASE' | 'USDT';
-export type UsdtInputMode = 'ORDER_VALUE' | 'INITIAL_MARGIN';
-export type ActionMode = 'OPEN' | 'CLOSE';
-export type TimeInForce = 'GTC' | 'IOC' | 'FOK';
+export type PriceSelection = "MARKET" | "LIMIT" | "BEST";
+export type TriggerType = "MARK" | "LAST";
+export type CurrencyUnit = "BASE" | "USDT";
+export type UsdtInputMode = "ORDER_VALUE" | "INITIAL_MARGIN";
+export type ActionMode = "OPEN" | "CLOSE";
+export type TimeInForce = "GTC" | "IOC" | "FOK";
 
 interface Props {
   currentPrice: number;
@@ -41,20 +46,30 @@ interface Props {
 
 // Order types shown in the horizontal tab strip (top 3 + dropdown for the rest)
 const PRIMARY_ORDER_TABS: { value: OrderType; label: string }[] = [
-  { value: 'LIMIT', label: '限价' },
-  { value: 'MARKET', label: '市价' },
-  { value: 'LIMIT_TP_SL', label: '限价止盈止损' },
+  { value: "LIMIT", label: "限价" },
+  { value: "MARKET", label: "市价" },
+  { value: "LIMIT_TP_SL", label: "限价止盈止损" },
 ];
 
 export function OrderPanel({
-  currentPrice, onPlaceOrder, disabled, symbol,
-  coolingOff, coolingOffLabel, onOpenCoolingOff,
-  priceProtection, onTogglePriceProtection,
-  pricePrecision = 2, quantityPrecision = 3,
-  crosshairPrice, pickMode, onPickModeChange, pickedPrice,
+  currentPrice,
+  onPlaceOrder,
+  disabled,
+  symbol,
+  coolingOff,
+  coolingOffLabel,
+  onOpenCoolingOff,
+  priceProtection,
+  onTogglePriceProtection,
+  pricePrecision = 2,
+  quantityPrecision = 3,
+  crosshairPrice,
+  pickMode,
+  onPickModeChange,
+  pickedPrice,
   onAutoPauseTimeMachine,
 }: Props) {
-  const baseCoin = symbol.replace('USDT', '') || 'BTC';
+  const baseCoin = symbol.replace("USDT", "") || "BTC";
 
   // ===== Live account info pulled from context (for available balance + risk panel) =====
   const ctx = useTradingContext();
@@ -63,7 +78,7 @@ export function OrderPanel({
   let totalMargin = 0;
   let totalMaintenance = 0;
   let totalPnl = 0;
-  for (const ps of Object.values(ctx.positionsMap)) {
+  for (const ps of Object.values(ctx.positionsMap) as (typeof positions)[]) {
     for (const p of ps) {
       totalMargin += p.margin;
       totalMaintenance += p.quantity * (ctx.priceMap[symbol] ?? p.entryPrice) * MAINTENANCE_MARGIN_RATE;
@@ -73,31 +88,23 @@ export function OrderPanel({
   const equity = ctx.balance + totalPnl;
   const available = ctx.balance - totalMargin;
   const marginRatio = equity > 0 ? (totalMaintenance / equity) * 100 : 0;
-  const ratioColor = marginRatio > 80 ? 'text-trading-red' : marginRatio > 50 ? 'text-yellow-400' : 'text-trading-green';
-  const ratioBg = marginRatio > 80 ? 'bg-red-400' : marginRatio > 50 ? 'bg-yellow-400' : 'bg-emerald-400';
+  const ratioColor =
+    marginRatio > 80 ? "text-trading-red" : marginRatio > 50 ? "text-yellow-400" : "text-trading-green";
+  const ratioBg = marginRatio > 80 ? "bg-red-400" : marginRatio > 50 ? "bg-yellow-400" : "bg-emerald-400";
 
   // ===== Top-level state =====
-  const [actionMode, setActionMode] = useState<ActionMode>('OPEN');
-  const [orderType, setOrderType] = useState<OrderType>('LIMIT');
-  const [marginMode, setMarginMode] = useState<MarginMode>('isolated');
-
-  // Symbol-scoped persisted leverage
-  const [symbolLeverage, setSymbolLeverage] = usePersistedState<Record<string, number>>('symbol_leverage', {});
-  const leverage = symbolLeverage[symbol] ?? 35;
-  const setLeverage = (v: number | ((prev: number) => number)) => {
-    setSymbolLeverage(prev => {
-      const current = prev[symbol] ?? 35;
-      const next = typeof v === 'function' ? v(current) : v;
-      return { ...prev, [symbol]: Math.floor(Math.max(1, Math.min(125, next))) };
-    });
-  };
+  const [actionMode, setActionMode] = useState<ActionMode>("OPEN");
+  const [orderType, setOrderType] = useState<OrderType>("LIMIT");
+  const marginMode = ctx.getSymbolMarginMode(symbol);
+  const leverage = ctx.getSymbolLeverage(symbol);
+  const setLeverage = (v: number | ((prev: number) => number)) => ctx.setSymbolLeverage(symbol, v);
 
   // ===== Existing selectors / payload state =====
-  const [priceSelection, setPriceSelection] = useState<PriceSelection>('LIMIT');
-  const [triggerType, setTriggerType] = useState<TriggerType>('LAST');
-  const [currencyUnit, setCurrencyUnit] = useState<CurrencyUnit>('USDT');
-  const [usdtInputMode, setUsdtInputMode] = useState<UsdtInputMode>('ORDER_VALUE');
-  const [tif, setTif] = useState<TimeInForce>('GTC');
+  const [priceSelection, setPriceSelection] = useState<PriceSelection>("LIMIT");
+  const [triggerType, setTriggerType] = useState<TriggerType>("LAST");
+  const [currencyUnit, setCurrencyUnit] = useState<CurrencyUnit>("USDT");
+  const [usdtInputMode, setUsdtInputMode] = useState<UsdtInputMode>("ORDER_VALUE");
+  const [tif, setTif] = useState<TimeInForce>("GTC");
 
   const [showCurrencySelector, setShowCurrencySelector] = useState(false);
   const [showOrderTypeMenu, setShowOrderTypeMenu] = useState(false);
@@ -106,32 +113,33 @@ export function OrderPanel({
   const tifMenuRef = useRef<HTMLDivElement>(null);
 
   // Inputs
-  const [price, setPrice] = useState('');
-  const [stopPrice, setStopPrice] = useState('');
-  const [quantity, setQuantity] = useState('');
+  const [price, setPrice] = useState("");
+  const [stopPrice, setStopPrice] = useState("");
+  const [quantity, setQuantity] = useState("");
   const [percent, setPercent] = useState(0);
 
   // TP/SL inline checkbox state
   const [enableTpSl, setEnableTpSl] = useState(false);
-  const [tpTrigger, setTpTrigger] = useState('');
-  const [slTrigger, setSlTrigger] = useState('');
+  const [tpTrigger, setTpTrigger] = useState("");
+  const [slTrigger, setSlTrigger] = useState("");
 
   // Trailing / TWAP / Conditional / Scaled defaults (kept for payload compatibility)
-  const [callbackRate] = useState('1');
-  const [trailingExecType] = useState<'MARKET' | 'LIMIT'>('MARKET');
-  const [trailingLimitPrice] = useState('');
-  const [twapDuration] = useState('60');
-  const [twapInterval] = useState('5');
-  const [condExecType] = useState<'MARKET' | 'LIMIT'>('MARKET');
-  const [condLimitPrice] = useState('');
-  const [scaledCount] = useState('5');
-  const [scaledStartPrice] = useState('');
-  const [scaledEndPrice] = useState('');
+  const [callbackRate] = useState("1");
+  const [trailingExecType] = useState<"MARKET" | "LIMIT">("MARKET");
+  const [trailingLimitPrice] = useState("");
+  const [twapDuration] = useState("60");
+  const [twapInterval] = useState("5");
+  const [condExecType] = useState<"MARKET" | "LIMIT">("MARKET");
+  const [condLimitPrice] = useState("");
+  const [scaledCount] = useState("5");
+  const [scaledStartPrice] = useState("");
+  const [scaledEndPrice] = useState("");
 
   // Sync priceSelection ↔ orderType
   useEffect(() => {
-    if (orderType === 'MARKET' || orderType === 'MARKET_TP_SL') setPriceSelection('MARKET');
-    else if (orderType === 'LIMIT' || orderType === 'POST_ONLY' || orderType === 'LIMIT_TP_SL') setPriceSelection('LIMIT');
+    if (orderType === "MARKET" || orderType === "MARKET_TP_SL") setPriceSelection("MARKET");
+    else if (orderType === "LIMIT" || orderType === "POST_ONLY" || orderType === "LIMIT_TP_SL")
+      setPriceSelection("LIMIT");
   }, [orderType]);
 
   // Picked-from-chart price → fill stopPrice
@@ -149,20 +157,20 @@ export function OrderPanel({
       if (orderTypeMenuRef.current && !orderTypeMenuRef.current.contains(e.target as Node)) setShowOrderTypeMenu(false);
       if (tifMenuRef.current && !tifMenuRef.current.contains(e.target as Node)) setShowTifMenu(false);
     };
-    document.addEventListener('mousedown', h);
-    return () => document.removeEventListener('mousedown', h);
+    document.addEventListener("mousedown", h);
+    return () => document.removeEventListener("mousedown", h);
   }, []);
 
   // ===== Derived values =====
   const inputAmount = parseFloat(quantity) || 0;
-  const effectivePrice = priceSelection === 'LIMIT' ? (parseFloat(price) || currentPrice) : currentPrice;
+  const effectivePrice = priceSelection === "LIMIT" ? parseFloat(price) || currentPrice : currentPrice;
 
   let effectiveQty = 0;
   let margin = 0;
-  if (currencyUnit === 'BASE') {
+  if (currencyUnit === "BASE") {
     effectiveQty = inputAmount;
     margin = (effectiveQty * effectivePrice) / leverage;
-  } else if (usdtInputMode === 'ORDER_VALUE') {
+  } else if (usdtInputMode === "ORDER_VALUE") {
     effectiveQty = effectivePrice > 0 ? inputAmount / effectivePrice : 0;
     margin = inputAmount / leverage;
   } else {
@@ -178,7 +186,7 @@ export function OrderPanel({
 
   // Max buy/sell capacity in USDT (notional)
   const maxNotional = Math.max(0, available) * leverage;
-  const unitLabel = currencyUnit === 'BASE' ? baseCoin : 'USDT';
+  const unitLabel = currencyUnit === "BASE" ? baseCoin : "USDT";
 
   // ===== Handlers =====
   const fillBBO = () => {
@@ -187,8 +195,8 @@ export function OrderPanel({
 
   const applyPercent = (p: number) => {
     setPercent(p);
-    if (currencyUnit === 'USDT') {
-      const target = usdtInputMode === 'ORDER_VALUE' ? maxNotional : Math.max(0, available);
+    if (currencyUnit === "USDT") {
+      const target = usdtInputMode === "ORDER_VALUE" ? maxNotional : Math.max(0, available);
       setQuantity((target * (p / 100)).toFixed(2));
     } else {
       const maxBase = effectivePrice > 0 ? maxNotional / effectivePrice : 0;
@@ -198,7 +206,7 @@ export function OrderPanel({
 
   // ===== Snapshot dialog state (intercepts every order placement) =====
   const [snapshotOpen, setSnapshotOpen] = useState(false);
-  const [snapshotSide, setSnapshotSide] = useState<OrderSide>('LONG');
+  const [snapshotSide, setSnapshotSide] = useState<OrderSide>("LONG");
   const [pendingOrderParams, setPendingOrderParams] = useState<PlaceOrderParams | null>(null);
   const [snapshotSimTime, setSnapshotSimTime] = useState<number>(Date.now());
   const [snapshotEntryPrice, setSnapshotEntryPrice] = useState<number | null>(null);
@@ -206,12 +214,16 @@ export function OrderPanel({
   const buildOrderParams = (rawSide: OrderSide): PlaceOrderParams | null => {
     if (orderDisabled || effectiveQty <= 0) return null;
     const finalType: OrderType = enableTpSl
-      ? (orderType === 'MARKET' ? 'MARKET_TP_SL' : orderType === 'LIMIT' ? 'LIMIT_TP_SL' : orderType)
+      ? orderType === "MARKET"
+        ? "MARKET_TP_SL"
+        : orderType === "LIMIT"
+          ? "LIMIT_TP_SL"
+          : orderType
       : orderType;
     return {
       side: rawSide,
       type: finalType,
-      price: priceSelection === 'LIMIT' ? (parseFloat(price) || 0) : 0,
+      price: priceSelection === "LIMIT" ? parseFloat(price) || 0 : 0,
       stopPrice: parseFloat(stopPrice) || parseFloat(tpTrigger) || parseFloat(slTrigger) || 0,
       quantity: effectiveQty,
       leverage,
@@ -244,24 +256,24 @@ export function OrderPanel({
     setSnapshotOpen(true);
   };
 
-  const isPrimaryTab = PRIMARY_ORDER_TABS.some(t => t.value === orderType);
-  const dropdownLabel = isPrimaryTab ? '更多' : (ORDER_TYPE_INFO.find(t => t.value === orderType)?.label ?? '更多');
+  const isPrimaryTab = PRIMARY_ORDER_TABS.some((t) => t.value === orderType);
+  const dropdownLabel = isPrimaryTab ? "更多" : (ORDER_TYPE_INFO.find((t) => t.value === orderType)?.label ?? "更多");
 
-  const showLimitPriceField = orderType !== 'MARKET' && orderType !== 'MARKET_TP_SL';
+  const showLimitPriceField = orderType !== "MARKET" && orderType !== "MARKET_TP_SL";
 
   return (
     <div className="flex flex-col h-full min-h-0 w-full min-w-[300px] bg-card text-foreground font-sans">
       {/* ============ TOP STATUS BADGES (frozen) ============ */}
       <div className="flex-none flex items-center gap-1.5 px-3 pt-2.5 pb-2">
         <button
-          onClick={() => setMarginMode(m => (m === 'isolated' ? 'cross' : 'isolated'))}
+          onClick={() => ctx.setSymbolMarginMode(symbol, marginMode === "isolated" ? "cross" : "isolated")}
           className="px-2 py-0.5 rounded bg-secondary hover:bg-accent text-[11px] text-foreground transition-colors"
         >
-          {marginMode === 'isolated' ? '逐仓' : '全仓'}
+          {marginMode === "isolated" ? "逐仓" : "全仓"}
         </button>
         <button
           onClick={() => {
-            const next = prompt('设置杠杆 (1-125)', String(leverage));
+            const next = prompt("设置杠杆 (1-125)", String(leverage));
             if (next) {
               const v = parseInt(next);
               if (!isNaN(v)) setLeverage(v);
@@ -291,17 +303,15 @@ export function OrderPanel({
       {/* ============ OPEN / CLOSE PILL ============ */}
       <div className="flex-none px-3 pb-2">
         <div className="flex bg-secondary rounded-md p-0.5">
-          {(['OPEN', 'CLOSE'] as const).map(m => (
+          {(["OPEN", "CLOSE"] as const).map((m) => (
             <button
               key={m}
               onClick={() => setActionMode(m)}
               className={`flex-1 py-1 rounded text-[12px] font-medium transition-all ${
-                actionMode === m
-                  ? 'bg-accent text-white shadow-sm'
-                  : 'text-muted-foreground hover:text-foreground'
+                actionMode === m ? "bg-accent text-white shadow-sm" : "text-muted-foreground hover:text-foreground"
               }`}
             >
-              {m === 'OPEN' ? '开仓' : '平仓'}
+              {m === "OPEN" ? "开仓" : "平仓"}
             </button>
           ))}
         </div>
@@ -309,14 +319,14 @@ export function OrderPanel({
 
       {/* ============ ORDER TYPE TABS (with active yellow underline) ============ */}
       <div className="flex-none px-3 pb-1 flex items-center gap-3 text-[12px] border-b border-border">
-        {PRIMARY_ORDER_TABS.map(t => {
+        {PRIMARY_ORDER_TABS.map((t) => {
           const active = orderType === t.value;
           return (
             <button
               key={t.value}
               onClick={() => setOrderType(t.value)}
               className={`relative pb-1.5 transition-colors ${
-                active ? 'text-white' : 'text-muted-foreground hover:text-foreground'
+                active ? "text-white" : "text-muted-foreground hover:text-foreground"
               }`}
             >
               {t.label}
@@ -326,9 +336,9 @@ export function OrderPanel({
         })}
         <div className="relative" ref={orderTypeMenuRef}>
           <button
-            onClick={() => setShowOrderTypeMenu(s => !s)}
+            onClick={() => setShowOrderTypeMenu((s) => !s)}
             className={`relative pb-1.5 flex items-center gap-0.5 transition-colors ${
-              !isPrimaryTab ? 'text-white' : 'text-muted-foreground hover:text-foreground'
+              !isPrimaryTab ? "text-white" : "text-muted-foreground hover:text-foreground"
             }`}
           >
             {dropdownLabel}
@@ -337,12 +347,15 @@ export function OrderPanel({
           </button>
           {showOrderTypeMenu && (
             <div className="absolute z-40 top-full mt-1 left-0 min-w-[160px] rounded-md border border-border bg-popover shadow-xl">
-              {ORDER_TYPE_INFO.filter(t => !PRIMARY_ORDER_TABS.some(p => p.value === t.value)).map(t => (
+              {ORDER_TYPE_INFO.filter((t) => !PRIMARY_ORDER_TABS.some((p) => p.value === t.value)).map((t) => (
                 <button
                   key={t.value}
-                  onClick={() => { setOrderType(t.value); setShowOrderTypeMenu(false); }}
+                  onClick={() => {
+                    setOrderType(t.value);
+                    setShowOrderTypeMenu(false);
+                  }}
                   className={`w-full text-left px-3 py-1.5 text-[12px] hover:bg-secondary transition-colors ${
-                    orderType === t.value ? 'text-primary' : 'text-foreground/90'
+                    orderType === t.value ? "text-primary" : "text-foreground/90"
                   }`}
                 >
                   {t.label}
@@ -355,7 +368,6 @@ export function OrderPanel({
 
       {/* ============ MAIN BODY (independent scroll area) ============ */}
       <div className="flex-1 overflow-y-auto min-h-0 scrollbar-thin scrollbar-thumb-[#2b3139] scrollbar-track-transparent px-3 pt-2.5 pb-6 space-y-2.5">
-
         {/* Available balance row */}
         <div className="flex items-center justify-between text-[12px]">
           <div className="text-muted-foreground">
@@ -380,8 +392,8 @@ export function OrderPanel({
               <input
                 type="text"
                 value={price}
-                onChange={e => setPrice(e.target.value)}
-                placeholder={currentPrice > 0 ? currentPrice.toFixed(pricePrecision) : '0.00'}
+                onChange={(e) => setPrice(e.target.value)}
+                placeholder={currentPrice > 0 ? currentPrice.toFixed(pricePrecision) : "0.00"}
                 className="flex-1 w-full min-w-0 bg-transparent text-right text-[13px] text-foreground font-mono tabular-nums outline-none placeholder:text-muted-foreground/60"
               />
               <span className="text-[11px] text-muted-foreground/80 ml-2 shrink-0">USDT</span>
@@ -406,22 +418,25 @@ export function OrderPanel({
         )}
 
         {/* Trigger price (TP/SL or conditional types) */}
-        {(orderType === 'LIMIT_TP_SL' || orderType === 'MARKET_TP_SL' || orderType === 'CONDITIONAL' || orderType === 'TRAILING_STOP') && (
+        {(orderType === "LIMIT_TP_SL" ||
+          orderType === "MARKET_TP_SL" ||
+          orderType === "CONDITIONAL" ||
+          orderType === "TRAILING_STOP") && (
           <div className="flex items-center bg-secondary rounded-md h-9 px-3 w-full min-w-0">
             <span className="text-[11px] text-muted-foreground/80 mr-2 shrink-0">触发价</span>
             <input
               type="text"
               value={stopPrice}
-              onChange={e => setStopPrice(e.target.value)}
-              placeholder={pickMode && crosshairPrice != null ? crosshairPrice.toFixed(pricePrecision) : '0.00'}
+              onChange={(e) => setStopPrice(e.target.value)}
+              placeholder={pickMode && crosshairPrice != null ? crosshairPrice.toFixed(pricePrecision) : "0.00"}
               className={`flex-1 w-full min-w-0 bg-transparent text-right text-[13px] text-foreground font-mono tabular-nums outline-none placeholder:text-muted-foreground/60 ${
-                pickMode ? 'placeholder:text-primary/70' : ''
+                pickMode ? "placeholder:text-primary/70" : ""
               }`}
             />
             <button
               onClick={() => onPickModeChange?.(!pickMode)}
               className={`ml-2 p-0.5 rounded transition-colors shrink-0 ${
-                pickMode ? 'text-primary' : 'text-muted-foreground/80 hover:text-foreground/90'
+                pickMode ? "text-primary" : "text-muted-foreground/80 hover:text-foreground/90"
               }`}
               title="从图表取价"
             >
@@ -437,7 +452,10 @@ export function OrderPanel({
           <input
             type="text"
             value={quantity}
-            onChange={e => { setQuantity(e.target.value); setPercent(0); }}
+            onChange={(e) => {
+              setQuantity(e.target.value);
+              setPercent(0);
+            }}
             placeholder="0"
             className="flex-1 w-full min-w-0 bg-transparent text-right text-[13px] text-foreground font-mono tabular-nums outline-none placeholder:text-muted-foreground/60"
           />
@@ -453,23 +471,23 @@ export function OrderPanel({
         <div className="px-1 pt-1 pb-2">
           <div className="relative h-5 flex items-center">
             <input
-              type="range" min={0} max={100} step={1}
+              type="range"
+              min={0}
+              max={100}
+              step={1}
               value={percent}
-              onChange={e => applyPercent(parseInt(e.target.value))}
+              onChange={(e) => applyPercent(parseInt(e.target.value))}
               className="absolute inset-0 w-full h-5 opacity-0 cursor-pointer z-10"
             />
             {/* Track */}
             <div className="relative h-[3px] w-full rounded-full bg-secondary">
-              <div
-                className="absolute left-0 top-0 h-full rounded-full bg-primary"
-                style={{ width: `${percent}%` }}
-              />
+              <div className="absolute left-0 top-0 h-full rounded-full bg-primary" style={{ width: `${percent}%` }} />
               {/* Diamond anchors */}
-              {[0, 25, 50, 75, 100].map(p => (
+              {[0, 25, 50, 75, 100].map((p) => (
                 <div
                   key={p}
                   className={`absolute top-1/2 w-2 h-2 rotate-45 -translate-x-1/2 -translate-y-1/2 ${
-                    percent >= p ? 'bg-primary' : 'bg-muted'
+                    percent >= p ? "bg-primary" : "bg-muted"
                   }`}
                   style={{ left: `${p}%` }}
                 />
@@ -477,11 +495,11 @@ export function OrderPanel({
             </div>
           </div>
           <div className="flex justify-between text-[10px] text-muted-foreground/80 mt-1">
-            {[0, 25, 50, 75, 100].map(p => (
+            {[0, 25, 50, 75, 100].map((p) => (
               <button
                 key={p}
                 onClick={() => applyPercent(p)}
-                className={`tabular-nums ${percent === p ? 'text-primary' : 'hover:text-foreground/90'}`}
+                className={`tabular-nums ${percent === p ? "text-primary" : "hover:text-foreground/90"}`}
               >
                 {p}%
               </button>
@@ -495,7 +513,7 @@ export function OrderPanel({
             <input
               type="checkbox"
               checked={enableTpSl}
-              onChange={e => setEnableTpSl(e.target.checked)}
+              onChange={(e) => setEnableTpSl(e.target.checked)}
               className="w-3 h-3 accent-primary"
             />
             <span>止盈/止损</span>
@@ -503,19 +521,22 @@ export function OrderPanel({
 
           <div className="relative" ref={tifMenuRef}>
             <button
-              onClick={() => setShowTifMenu(s => !s)}
+              onClick={() => setShowTifMenu((s) => !s)}
               className="flex items-center gap-0.5 text-foreground/90 hover:text-foreground"
             >
               {tif} <ChevronDown className="w-3 h-3" />
             </button>
             {showTifMenu && (
               <div className="absolute z-40 right-0 top-full mt-1 min-w-[120px] rounded-md border border-border bg-popover shadow-xl">
-                {(['GTC', 'IOC', 'FOK'] as const).map(t => (
+                {(["GTC", "IOC", "FOK"] as const).map((t) => (
                   <button
                     key={t}
-                    onClick={() => { setTif(t); setShowTifMenu(false); }}
+                    onClick={() => {
+                      setTif(t);
+                      setShowTifMenu(false);
+                    }}
                     className={`w-full text-left px-3 py-1.5 text-[12px] hover:bg-secondary ${
-                      tif === t ? 'text-primary' : 'text-foreground/90'
+                      tif === t ? "text-primary" : "text-foreground/90"
                     }`}
                   >
                     {t}
@@ -532,7 +553,9 @@ export function OrderPanel({
             <div className="flex items-center bg-secondary rounded-md h-8 px-3">
               <span className="text-[11px] text-trading-green mr-2">止盈</span>
               <input
-                type="text" value={tpTrigger} onChange={e => setTpTrigger(e.target.value)}
+                type="text"
+                value={tpTrigger}
+                onChange={(e) => setTpTrigger(e.target.value)}
                 placeholder="触发价"
                 className="flex-1 bg-transparent text-right text-[12px] text-foreground font-mono outline-none placeholder:text-muted-foreground/60"
               />
@@ -541,7 +564,9 @@ export function OrderPanel({
             <div className="flex items-center bg-secondary rounded-md h-8 px-3">
               <span className="text-[11px] text-trading-red mr-2">止损</span>
               <input
-                type="text" value={slTrigger} onChange={e => setSlTrigger(e.target.value)}
+                type="text"
+                value={slTrigger}
+                onChange={(e) => setSlTrigger(e.target.value)}
                 placeholder="触发价"
                 className="flex-1 bg-transparent text-right text-[12px] text-foreground font-mono outline-none placeholder:text-muted-foreground/60"
               />
@@ -554,37 +579,47 @@ export function OrderPanel({
         {leverageExceeded && (
           <div className="flex items-start gap-1.5 px-2 py-1.5 rounded text-[10px] bg-trading-red/10 text-trading-red border border-trading-red/30">
             <AlertTriangle className="w-3 h-3 mt-0.5 shrink-0" />
-            <span>名义价值超出当前 {leverage}x 杠杆上限（最高 {maxAllowedLeverage}x）</span>
+            <span>
+              名义价值超出当前 {leverage}x 杠杆上限（最高 {maxAllowedLeverage}x）
+            </span>
           </div>
         )}
 
         {/* ===== ACTION BUTTONS + PRE-TRADE INFO ===== */}
         <div className="grid grid-cols-2 gap-2 pt-1 w-full min-w-0">
           <button
-            onClick={() => handleOrder('LONG')}
+            onClick={() => handleOrder("LONG")}
             disabled={orderDisabled}
             className="w-full min-w-0 h-10 px-1 rounded-md bg-trading-green hover:bg-trading-green/90 active:scale-[0.98] disabled:opacity-40 disabled:cursor-not-allowed text-white text-[13px] font-semibold transition-all truncate"
           >
-            {coolingOff ? '🧊 冷静中' : (actionMode === 'OPEN' ? '开多 / Buy' : '平空 / Buy')}
+            {coolingOff ? "🧊 冷静中" : actionMode === "OPEN" ? "开多 / Buy" : "平空 / Buy"}
           </button>
           <button
-            onClick={() => handleOrder('SHORT')}
+            onClick={() => handleOrder("SHORT")}
             disabled={orderDisabled}
             className="w-full min-w-0 h-10 px-1 rounded-md bg-trading-red hover:bg-trading-red/90 active:scale-[0.98] disabled:opacity-40 disabled:cursor-not-allowed text-white text-[13px] font-semibold transition-all truncate"
           >
-            {coolingOff ? '🧊 冷静中' : (actionMode === 'OPEN' ? '开空 / Sell' : '平多 / Sell')}
+            {coolingOff ? "🧊 冷静中" : actionMode === "OPEN" ? "开空 / Sell" : "平多 / Sell"}
           </button>
         </div>
 
         {/* Pre-trade calculation: left aligned for LONG, right aligned for SHORT */}
         <div className="grid grid-cols-2 gap-2 text-[10px] font-mono tabular-nums">
           <div className="text-left space-y-0.5">
-            <div className="text-muted-foreground/80">保证金 <span className="text-foreground/90">{formatUSDT(margin)}</span> USDT</div>
-            <div className="text-muted-foreground/80">可开 <span className="text-foreground/90">{formatUSDT(maxNotional)}</span> USDT</div>
+            <div className="text-muted-foreground/80">
+              保证金 <span className="text-foreground/90">{formatUSDT(margin)}</span> USDT
+            </div>
+            <div className="text-muted-foreground/80">
+              可开 <span className="text-foreground/90">{formatUSDT(maxNotional)}</span> USDT
+            </div>
           </div>
           <div className="text-right space-y-0.5">
-            <div className="text-muted-foreground/80">保证金 <span className="text-foreground/90">{formatUSDT(margin)}</span> USDT</div>
-            <div className="text-muted-foreground/80">可开 <span className="text-foreground/90">{formatUSDT(maxNotional)}</span> USDT</div>
+            <div className="text-muted-foreground/80">
+              保证金 <span className="text-foreground/90">{formatUSDT(margin)}</span> USDT
+            </div>
+            <div className="text-muted-foreground/80">
+              可开 <span className="text-foreground/90">{formatUSDT(maxNotional)}</span> USDT
+            </div>
           </div>
         </div>
 
@@ -618,11 +653,15 @@ export function OrderPanel({
 
           <div className="flex items-center justify-between gap-2 text-[11px] w-full min-w-0">
             <span className="text-muted-foreground/80 shrink-0">维持保证金</span>
-            <span className="font-mono tabular-nums text-foreground truncate text-right min-w-0">{formatUSDT(totalMaintenance, 4)} USDT</span>
+            <span className="font-mono tabular-nums text-foreground truncate text-right min-w-0">
+              {formatUSDT(totalMaintenance, 4)} USDT
+            </span>
           </div>
           <div className="flex items-center justify-between gap-2 text-[11px] w-full min-w-0">
             <span className="text-muted-foreground/80 shrink-0">保证金余额</span>
-            <span className="font-mono tabular-nums text-foreground truncate text-right min-w-0">{formatUSDT(equity, 4)} USDT</span>
+            <span className="font-mono tabular-nums text-foreground truncate text-right min-w-0">
+              {formatUSDT(equity, 4)} USDT
+            </span>
           </div>
 
           <button className="w-full h-9 mt-1 rounded-md bg-secondary hover:bg-accent text-[12px] text-foreground font-medium transition-colors">
@@ -635,40 +674,48 @@ export function OrderPanel({
       {showCurrencySelector && (
         <BottomSheet title="货币单位" onClose={() => setShowCurrencySelector(false)}>
           <button
-            onClick={() => { setCurrencyUnit('BASE'); setShowCurrencySelector(false); }}
+            onClick={() => {
+              setCurrencyUnit("BASE");
+              setShowCurrencySelector(false);
+            }}
             className="w-full text-left px-4 py-3 hover:bg-secondary transition-colors"
           >
             <div className="flex items-center justify-between">
               <span className="text-sm text-foreground font-medium">{baseCoin}</span>
-              {currencyUnit === 'BASE' && <Check className="w-4 h-4 text-primary" />}
+              {currencyUnit === "BASE" && <Check className="w-4 h-4 text-primary" />}
             </div>
             <p className="text-[11px] text-muted-foreground/80 mt-1">输入并显示以 {baseCoin} 表示的订单金额。</p>
           </button>
           <div className="border-t border-border" />
           <button
-            onClick={() => { setCurrencyUnit('USDT'); setShowCurrencySelector(false); }}
+            onClick={() => {
+              setCurrencyUnit("USDT");
+              setShowCurrencySelector(false);
+            }}
             className="w-full text-left px-4 py-3 hover:bg-secondary transition-colors"
           >
             <div className="flex items-center justify-between">
               <span className="text-sm text-foreground font-medium">USDT</span>
-              {currencyUnit === 'USDT' && <Check className="w-4 h-4 text-primary" />}
+              {currencyUnit === "USDT" && <Check className="w-4 h-4 text-primary" />}
             </div>
-            <p className="text-[11px] text-muted-foreground/80 mt-1">
-              输入并显示以 USDT 表示的订单金额。
-            </p>
-            {currencyUnit === 'USDT' && (
+            <p className="text-[11px] text-muted-foreground/80 mt-1">输入并显示以 USDT 表示的订单金额。</p>
+            {currencyUnit === "USDT" && (
               <div className="flex gap-3 mt-2 ml-1">
-                {([
-                  { value: 'ORDER_VALUE' as UsdtInputMode, label: '订单金额' },
-                  { value: 'INITIAL_MARGIN' as UsdtInputMode, label: '初始保证金' },
-                ]).map(m => (
+                {[
+                  { value: "ORDER_VALUE" as UsdtInputMode, label: "订单金额" },
+                  { value: "INITIAL_MARGIN" as UsdtInputMode, label: "初始保证金" },
+                ].map((m) => (
                   <label key={m.value} className="flex items-center gap-1.5 cursor-pointer">
-                    <span className={`w-3.5 h-3.5 rounded-full border-2 flex items-center justify-center ${
-                      usdtInputMode === m.value ? 'border-primary' : 'border-gray-500'
-                    }`}>
+                    <span
+                      className={`w-3.5 h-3.5 rounded-full border-2 flex items-center justify-center ${
+                        usdtInputMode === m.value ? "border-primary" : "border-gray-500"
+                      }`}
+                    >
                       {usdtInputMode === m.value && <span className="w-1.5 h-1.5 rounded-full bg-primary" />}
                     </span>
-                    <span className={`text-xs ${usdtInputMode === m.value ? 'text-foreground' : 'text-muted-foreground'}`}>
+                    <span
+                      className={`text-xs ${usdtInputMode === m.value ? "text-foreground" : "text-muted-foreground"}`}
+                    >
                       {m.label}
                     </span>
                   </label>
@@ -688,7 +735,7 @@ export function OrderPanel({
         }}
         mode="trade"
         symbol={symbol}
-        direction={snapshotSide === 'LONG' ? 'long' : 'short'}
+        direction={snapshotSide === "LONG" ? "long" : "short"}
         simulatedTimeMs={snapshotSimTime}
         lockedEntryPrice={snapshotEntryPrice}
         leverage={leverage}
@@ -703,7 +750,7 @@ export function OrderPanel({
         onAutoPause={onAutoPauseTimeMachine}
         onPlaceOrder={async (params) => {
           const result = await onPlaceOrder(params);
-          if (result && typeof result === 'object' && 'id' in result) {
+          if (result && typeof result === "object" && "id" in result) {
             return result as { id: string };
           }
           return null;
@@ -720,11 +767,13 @@ function BottomSheet({ title, children, onClose }: { title: string; children: Re
       <div className="absolute inset-0 bg-black/60" />
       <div
         className="relative w-full max-w-sm rounded-t-xl border-t border-border overflow-hidden animate-in slide-in-from-bottom duration-200 bg-popover"
-        onClick={e => e.stopPropagation()}
+        onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between px-4 py-3 border-b border-border">
           <h3 className="text-sm font-medium text-foreground">{title}</h3>
-          <button onClick={onClose} className="text-muted-foreground hover:text-foreground text-xs">✕</button>
+          <button onClick={onClose} className="text-muted-foreground hover:text-foreground text-xs">
+            ✕
+          </button>
         </div>
         <div className="max-h-[60vh] overflow-y-auto">{children}</div>
       </div>
