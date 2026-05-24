@@ -68,15 +68,16 @@ export function PreTradeSnapshotForm({
   const isTrade = mode === 'trade';
   const isShort = direction === 'short';
   const { user } = useAuth();
+  const { getEffectiveAvailable } = useTradingContext();
 
   const [orderKind, setOrderKind] = useState<OrderKind>('main');
   const isHedge = isTrade && orderKind === 'hedge';
   const showFullFields = isTrade && orderKind === 'main';
 
   const [reason, setReason] = useState('');
-  const [stopLoss, setStopLoss] = useState('');
   const [tps, setTps] = useState<TpLevel[]>([{ price: '', pct: '' }]);
   const [posSize, setPosSize] = useState(initialPositionSizeUsdt ? initialPositionSizeUsdt.toFixed(2) : '');
+  const [maxLossInput, setMaxLossInput] = useState('');
   const [mental, setMental] = useState<1 | 2 | 3 | 4 | 5>(3);
   const [mentalTrigger, setMentalTrigger] = useState('');
   const [riskAware, setRiskAware] = useState('');
@@ -101,15 +102,14 @@ export function PreTradeSnapshotForm({
   }, [mental]);
 
   // ===== Derived =====
-  const sl = parseFloat(stopLoss) || 0;
   const sizeUsdt = parseFloat(posSize) || 0;
-
-  // Loss in USDT = |entry - sl| * qty (linear contracts), leverage doesn't multiply loss
-  const realMaxLoss = useMemo(() => {
-    if (!isTrade || !lockedEntryPrice || sl <= 0 || sizeUsdt <= 0) return 0;
-    const qty = sizeUsdt / lockedEntryPrice;
-    return Math.abs(lockedEntryPrice - sl) * qty;
-  }, [isTrade, lockedEntryPrice, sl, sizeUsdt]);
+  const maxLoss = parseFloat(maxLossInput) || 0;
+  const availableBalance = useMemo(() => {
+    try { return getEffectiveAvailable(symbol); } catch { return 0; }
+  }, [getEffectiveAvailable, symbol]);
+  const maxLossPctOfAccount = availableBalance > 0 && maxLoss > 0
+    ? (maxLoss / availableBalance) * 100
+    : 0;
 
   const checklistPassed = isChecklistPassed(checked, checklistItems);
   const requiredCount = checklistItems.filter(i => i.required && checked.includes(i.id)).length;
@@ -138,19 +138,18 @@ export function PreTradeSnapshotForm({
     }
     // trade mode
     if (isHedge) {
-      // Hedge: only reason + mental + (mentalTrigger if low) + low-mental override
       return true;
     }
     // main order: full requirements
     if (riskAware.trim().length < 15) return false;
     if (riskManage.trim().length < 15) return false;
-    if (sl <= 0) return false;
     if (!tpsValid) return false;
     if (sizeUsdt <= 0) return false;
+    if (maxLoss <= 0) return false;
     if (!checklistPassed) return false;
     return true;
   }, [reason, riskAware, riskManage, mental, mentalTrigger, overrideLowMental,
-      mode, isHedge, sl, tpsValid, sizeUsdt, checklistPassed, noEntryReason]);
+      mode, isHedge, tpsValid, sizeUsdt, maxLoss, checklistPassed, noEntryReason]);
 
   const handleSubmit = async () => {
     if (!canSubmit || submitting) return;
