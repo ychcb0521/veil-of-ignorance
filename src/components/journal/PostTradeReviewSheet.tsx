@@ -248,6 +248,11 @@ export function PostTradeReviewSheet({
         </Collapsible>
 
         {/* (B) Auto outcome */}
+        {!tradeRecord && journal.direction !== 'no_entry' && (
+          <div className="bg-[#F0B90B]/10 border border-[#F0B90B]/30 rounded p-2 text-[11px] text-[#F0B90B]">
+            未找到对应的成交记录，下方判定字段使用快照中保存的数据，必要时可手填 R 倍数覆盖。
+          </div>
+        )}
         <div className="bg-background border border-border rounded p-3 grid grid-cols-2 sm:grid-cols-4 gap-3 text-[12px] font-mono">
           <div>
             <div className="text-[10px] text-muted-foreground">结果</div>
