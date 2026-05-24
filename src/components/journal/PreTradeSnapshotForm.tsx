@@ -373,7 +373,7 @@ export function PreTradeSnapshotForm({
         )}
 
         {/* (5) Max loss readonly */}
-        {isTrade && realMaxLoss > 0 && (
+        {showFullFields && realMaxLoss > 0 && (
           <div className="space-y-1.5">
             <div className={labelCls}>计划最大亏损 (USDT)</div>
             <div className="px-3 py-2 bg-background border border-border rounded text-[12px] font-mono text-[#F6465D]">
