@@ -216,9 +216,16 @@ export function PreTradeSnapshotForm({
 
   const confirmBtnClass = mode === 'no_entry'
     ? 'bg-[#F0B90B] hover:bg-[#F0B90B]/90 text-black'
-    : isShort
-      ? 'bg-[#F6465D] hover:bg-[#F6465D]/90 text-white'
-      : 'bg-[#0ECB81] hover:bg-[#0ECB81]/90 text-black';
+    : isHedge
+      ? 'bg-[#F0B90B] hover:bg-[#F0B90B]/90 text-black'
+      : isShort
+        ? 'bg-[#F6465D] hover:bg-[#F6465D]/90 text-white'
+        : 'bg-[#0ECB81] hover:bg-[#0ECB81]/90 text-black';
+
+  const confirmBtnText = submitting ? '提交中…'
+    : mode === 'no_entry' ? '记录决策'
+    : isHedge ? '确认对冲并下单'
+    : '确认并下单';
 
   const labelCls = 'text-[11px] text-muted-foreground';
   const requiredStar = <span className="text-[#F6465D] ml-0.5">*</span>;
