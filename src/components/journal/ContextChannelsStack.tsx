@@ -122,11 +122,11 @@ function DecisionChannel() {
   );
 }
 
-function Cell({ label, value }: { label: string; value: string }) {
+function Cell({ label, value, valueClass }: { label: string; value: string; valueClass?: string }) {
   return (
     <div>
       <div className="text-[10px] text-muted-foreground">{label}</div>
-      <div className="text-[12px] text-foreground tabular-nums">{value}</div>
+      <div className={`text-[12px] tabular-nums ${valueClass ?? 'text-foreground'}`}>{value}</div>
     </div>
   );
 }
