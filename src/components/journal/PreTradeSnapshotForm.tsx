@@ -359,12 +359,28 @@ export function PreTradeSnapshotForm({
           </div>
         )}
 
-        {/* (5) Max loss readonly */}
-        {showFullFields && realMaxLoss > 0 && (
+        {/* (5) Max loss — user input */}
+        {showFullFields && (
           <div className="space-y-1.5">
-            <div className={labelCls}>计划最大亏损 (USDT)</div>
-            <div className="px-3 py-2 bg-background border border-border rounded text-[12px] font-mono text-[#F6465D]">
-              -{realMaxLoss.toFixed(2)} USDT
+            <div className={labelCls}>本次愿意承受最大亏损 USDT{requiredStar}</div>
+            <div className="text-[10px] text-muted-foreground italic">
+              这笔交易你能承受亏多少？这是后续 R 倍数计算的分母。不需要对应某个具体止损价。
+            </div>
+            <div className="flex items-center gap-2">
+              <Input
+                type="number"
+                step="0.01"
+                min="0"
+                value={maxLossInput}
+                onChange={e => setMaxLossInput(e.target.value)}
+                placeholder="0.00"
+                className={`${inputCls} flex-1`}
+              />
+              <span className={`text-[10px] font-mono whitespace-nowrap ${maxLossPctOfAccount > 5 ? 'text-[#F6465D]' : 'text-muted-foreground'}`}>
+                {maxLoss > 0 && availableBalance > 0
+                  ? `≈ 总账户的 ${maxLossPctOfAccount.toFixed(2)}%`
+                  : '≈ —'}
+              </span>
             </div>
           </div>
         )}
