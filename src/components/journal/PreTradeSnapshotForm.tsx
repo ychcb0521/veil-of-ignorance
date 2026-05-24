@@ -467,7 +467,7 @@ export function PreTradeSnapshotForm({
         )}
 
         {/* (10) Checklist */}
-        {isTrade && (
+        {showFullFields && (
           <div className="space-y-1.5">
             <div className={labelCls}>开仓 Checklist{requiredStar}</div>
             <div className="space-y-1.5 bg-background border border-border rounded p-3">
