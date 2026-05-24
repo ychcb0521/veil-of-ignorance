@@ -21,12 +21,11 @@ import { ThemeToggle } from "@/components/ThemeToggle";
 import { MobileLayout } from "@/components/mobile/MobileLayout";
 import { AssetOverview } from "@/components/AssetOverview";
 import { LiquidationModal } from "@/components/LiquidationModal";
-import { AnalyticsPanel } from "@/components/AnalyticsPanel";
 import { TradeInsightsPanel } from "@/components/TradeInsightsPanel";
 import { CoolingOffModal, useCoolingOff } from "@/components/CoolingOffModal";
 import { getConditionalTriggerDecisionFromRange } from "@/lib/conditionalOrders";
 import { toast } from "sonner";
-import { BarChart3, Wallet, Crosshair, BookOpen, Tag } from "lucide-react";
+import { Wallet, Crosshair, BookOpen, Tag } from "lucide-react";
 import { Link } from "react-router-dom";
 import { JournalNavMenu } from "@/components/journal/JournalNavMenu";
 import type { PendingOrder, OrderType } from "@/types/trading";
@@ -173,7 +172,6 @@ const Index = () => {
   const [crosshairPrice, setCrosshairPrice] = useState<number | null>(null);
   const [pickMode, setPickMode] = useState(false);
   const [pickedPrice, setPickedPrice] = useState<number | null>(null);
-  const [analyticsOpen, setAnalyticsOpen] = useState(false);
   const [assetsOpen, setAssetsOpen] = useState(false);
   const [perfSymbol, setPerfSymbol] = useState<string | null>(null);
   const [coolingOffModalOpen, setCoolingOffModalOpen] = useState(false);
@@ -1464,9 +1462,8 @@ const Index = () => {
 
   // Pause the active timeline when the pre-trade snapshot dialog opens
   const handleAutoPauseTimeMachine = useCallback(() => {
-    const playing = timeMode === "synced"
-      ? sim.status === "playing"
-      : coinTimelines[activeSymbol]?.status === "playing";
+    const playing =
+      timeMode === "synced" ? sim.status === "playing" : coinTimelines[activeSymbol]?.status === "playing";
     if (playing) handlePause();
   }, [timeMode, sim.status, coinTimelines, activeSymbol, handlePause]);
 
@@ -1569,10 +1566,7 @@ const Index = () => {
         </div>
         <div className="flex items-center gap-3 shrink-0">
           {loading && <span className="text-[10px] text-primary animate-pulse font-mono">加载历史数据...</span>}
-          <JournalNavMenu
-            onOpenAssets={() => setAssetsOpen(true)}
-            onOpenAnalytics={() => setAnalyticsOpen(true)}
-          />
+          <JournalNavMenu onOpenAssets={() => setAssetsOpen(true)} />
           <span className="text-[10px] text-gray-500 dark:text-[#848e9c] font-mono truncate max-w-[120px]">
             {user?.email}
           </span>
@@ -1835,16 +1829,6 @@ const Index = () => {
           <AssetOverview assets={assetState} />
         </DialogContent>
       </Dialog>
-
-      <AnalyticsPanel
-        open={analyticsOpen}
-        onClose={() => setAnalyticsOpen(false)}
-        tradeHistory={tradeHistory}
-        balance={balance}
-        positionsMap={positionsMap}
-        priceMap={priceMap}
-        initialCapital={profile?.initial_capital ?? 1_000_000}
-      />
 
       {perfSymbol && (
         <TradeInsightsPanel
