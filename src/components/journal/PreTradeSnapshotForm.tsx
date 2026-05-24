@@ -248,10 +248,47 @@ export function PreTradeSnapshotForm({
 
       {/* Form */}
       <div className="px-5 py-4 space-y-4 max-h-[60vh] overflow-y-auto">
+        {/* (0) Order kind toggle — hidden in no_entry mode */}
+        {isTrade && (
+          <div className="mt-0 mb-1">
+            <div className={`${labelCls} mb-2`}>订单类型{requiredStar}</div>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => setOrderKind('main')}
+                className={`h-16 rounded border-2 cursor-pointer transition-all text-left p-3 flex flex-col gap-1 justify-center ${
+                  orderKind === 'main'
+                    ? 'border-foreground bg-foreground/5 text-foreground'
+                    : 'border-border bg-card hover:bg-accent'
+                }`}
+              >
+                <div className="text-[12px] font-medium">主力单</div>
+                <div className="text-[10px] text-muted-foreground">方向性下注，需完整理由+风控规划</div>
+              </button>
+              <button
+                type="button"
+                onClick={() => setOrderKind('hedge')}
+                className={`h-16 rounded border-2 cursor-pointer transition-all text-left p-3 flex flex-col gap-1 justify-center ${
+                  orderKind === 'hedge'
+                    ? 'border-[#F0B90B] bg-[#F0B90B]/10 text-foreground'
+                    : 'border-border bg-card hover:bg-accent'
+                }`}
+              >
+                <div className="text-[12px] font-medium">对冲单</div>
+                <div className="text-[10px] text-muted-foreground">防御性头寸，简化记录</div>
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* (1) Reason */}
         <div className="space-y-1.5">
           <div className={labelCls}>
-            {mode === 'no_entry' ? '你看到的信号是什么' : '开仓理由'}{requiredStar}
+            {mode === 'no_entry'
+              ? '你看到的信号是什么'
+              : isHedge
+                ? '对冲理由'
+                : '开仓理由'}{requiredStar}
             <span className="ml-2 text-muted-foreground/60">至少 20 字</span>
           </div>
           <Textarea
@@ -260,10 +297,13 @@ export function PreTradeSnapshotForm({
             onChange={e => setReason(e.target.value)}
             placeholder={mode === 'no_entry'
               ? '你看到的信号是什么'
-              : '例如：BTC 突破 4H 趋势线 + 成交量放大；进场点位 X，止损 Y，止盈分批 Z1/Z2'}
+              : isHedge
+                ? '例如：保护 BTC 主力多仓，对冲未来 24h 的下行风险；或对冲整体账户的 BTC beta 敞口'
+                : '例如：BTC 突破 4H 趋势线 + 成交量放大；进场点位 X，止损 Y，止盈分批 Z1/Z2'}
             className={textareaCls}
           />
         </div>
+
 
         {/* (2) Stop loss */}
         {isTrade && (
