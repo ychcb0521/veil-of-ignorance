@@ -102,30 +102,53 @@ export function PostTradeReviewSheet({
     return () => { cancelled = true; };
   }, [selectedTags, user]);
 
-  if (!journal) return null;
-
-  // Auto outcome
-  const pnl = tradeRecord?.pnl ?? journal.post_realized_pnl ?? 0;
+  // Auto outcome — guard for null journal so hooks order is stable
+  const pnl = tradeRecord?.pnl ?? journal?.post_realized_pnl ?? 0;
   const outcome: TradeOutcome =
-    journal.direction === 'no_entry' ? 'no_entry'
+    journal?.direction === 'no_entry' ? 'no_entry'
     : pnl > 0 ? 'win' : pnl < 0 ? 'loss' : 'breakeven';
   const computedR = useMemo(() => {
-    const ml = journal.pre_max_loss_usdt;
+    const ml = journal?.pre_max_loss_usdt;
     if (!ml || ml === 0) return null;
     return pnl / ml;
-  }, [pnl, journal.pre_max_loss_usdt]);
+  }, [pnl, journal?.pre_max_loss_usdt]);
   const finalR = rMultipleOverride !== '' && !isNaN(Number(rMultipleOverride))
     ? Number(rMultipleOverride)
     : computedR;
 
   const holdDurationLabel = useMemo(() => {
+    if (!journal) return '—';
     const start = new Date(journal.pre_simulated_time).getTime();
     const end = tradeRecord?.closeTime ?? Date.now();
     const diff = Math.max(0, end - start);
     const h = Math.floor(diff / 3_600_000);
     const m = Math.floor((diff % 3_600_000) / 60_000);
     return `${h}h ${m}m`;
-  }, [journal.pre_simulated_time, tradeRecord?.closeTime]);
+  }, [journal, tradeRecord?.closeTime]);
+
+  // Render loading placeholder instead of null to keep hook order stable
+  if (!journal) {
+    const placeholder = (
+      <div className="p-6 space-y-3">
+        <div className="h-4 w-32 bg-muted rounded animate-pulse" />
+        <div className="h-3 w-full bg-muted rounded animate-pulse" />
+        <div className="h-3 w-3/4 bg-muted rounded animate-pulse" />
+        <div className="h-3 w-2/3 bg-muted rounded animate-pulse" />
+      </div>
+    );
+    return (
+      <Sheet open={isOpen} onOpenChange={onOpenChange}>
+        <SheetContent
+          side={isMobile ? 'bottom' : 'right'}
+          className={isMobile
+            ? 'h-[60vh] rounded-t-2xl p-0 bg-card border-t border-border text-foreground'
+            : 'w-[640px] sm:max-w-[640px] p-0 bg-card border-l border-border text-foreground'}
+        >
+          {placeholder}
+        </SheetContent>
+      </Sheet>
+    );
+  }
 
   const checklistRequired = journal.pre_checklist_items.filter(i => i.required);
   const checklistOptional = journal.pre_checklist_items.filter(i => !i.required);
