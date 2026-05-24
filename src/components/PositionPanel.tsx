@@ -26,6 +26,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { useAuth } from '@/contexts/AuthContext';
 import { PostTradeReviewSheet } from '@/components/journal/PostTradeReviewSheet';
+import { ExitMethodBadge } from '@/components/journal/ExitMethodBadge';
 import {
   findUnreviewedJournalForClose, listJournals,
 } from '@/lib/journalApi';
