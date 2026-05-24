@@ -861,6 +861,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
       action: 'CLOSE' as const, entryPrice: pos.entryPrice, exitPrice: fillPrice,
       quantity: closeQty, leverage: pos.leverage,
       pnl: pnl - fee, fee, slippage, openTime: pos.openTime || 0, closeTime: getEffectiveTime(symbol),
+      exit_method: method,
     }]);
 
     const pctLabel = pct < 1 ? ` (${Math.round(pct * 100)}%)` : '';
