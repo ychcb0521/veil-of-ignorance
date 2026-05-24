@@ -971,7 +971,7 @@ export function PositionPanel({
               <table className="w-full text-[11px] font-mono tabular-nums">
                 <thead className="sticky top-0 bg-white dark:bg-[#1e2329] z-10">
                   <tr className="text-gray-500 dark:text-[#848e9c] border-b border-gray-200 dark:border-[#2b3139]">
-                    {['合约', '方向', '开仓均价', '平仓均价', '数量', '开仓时间', '平仓时间', '平仓盈亏', '收益率(ROE)', '评价状态'].map(h => (
+                    {['合约', '方向', '开仓均价', '平仓均价', '数量', '开仓时间', '平仓时间', '平仓方式', '平仓盈亏', '收益率(ROE)', '评价状态'].map(h => (
                       <th key={h} className="px-3 py-1.5 text-left font-medium whitespace-nowrap">{h}</th>
                     ))}
                   </tr>
