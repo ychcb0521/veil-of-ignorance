@@ -305,20 +305,7 @@ export function PreTradeSnapshotForm({
         </div>
 
 
-        {/* (2) Stop loss */}
-        {showFullFields && (
-          <div className="space-y-1.5">
-            <div className={labelCls}>预设止损价{requiredStar}</div>
-            <Input
-              type="number"
-              step={1 / Math.pow(10, pricePrecision)}
-              value={stopLoss}
-              onChange={e => setStopLoss(e.target.value)}
-              placeholder="0"
-              className={inputCls}
-            />
-          </div>
-        )}
+        {/* (2) [Removed] Stop loss field — risk now defined by 最大亏损 USDT */}
 
         {/* (3) TP levels */}
         {showFullFields && (
