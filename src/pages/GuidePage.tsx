@@ -335,7 +335,7 @@ export default function GuidePage() {
                 <P><strong>目的</strong>：实时显示账户全貌</P>
                 <P><strong>包含</strong>：</P>
                 <ul className="list-disc pl-6 text-[14px] text-foreground/90 space-y-1">
-                  <li>仓位 / 当前委托 / 历史委托 / 历史成交 / 资金流水 / 仓位历史记录 / 机器人 / 资产</li>
+                  <li>仓位 / 当前委托 / 历史委托 / 历史成交 / 资金流水 / 仓位历史记录 / 机器人 / 账户资产 / 认知资产</li>
                   <li>每笔历史交易都关联一份可复盘的 journal</li>
                   <li>历史 Tab 中未评价的交易会显示警示按钮 [立即评价]</li>
                   <li>历史 Tab 字段：开仓时间 / 平仓时间 / 开仓价 / 平仓价 / <strong>平仓方式（手动 / 止损 / 止盈 1-3 / 爆仓）</strong></li>
