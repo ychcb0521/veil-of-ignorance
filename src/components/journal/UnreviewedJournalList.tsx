@@ -56,6 +56,11 @@ export function UnreviewedJournalList({ journals, onReviewed }: Props) {
     <div className="space-y-2">
       <div className="bg-[#F0B90B]/10 border border-[#F0B90B]/30 rounded px-3 py-2 text-[11px] text-[#F0B90B]">
         未评价的交易不计入错题模式统计。请尽快补完。
+        <div>
+          <a href="/journal/campaigns/classify" className="text-[#5BA3FF] hover:underline">
+            或前往归类历史交易
+          </a>
+        </div>
       </div>
 
       {/* Desktop / tablet table */}

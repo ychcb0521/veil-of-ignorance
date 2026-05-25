@@ -49,3 +49,29 @@ export const LEG_ROLE_LABELS: Record<LegRole, string> = {
   reentry_hedge: '重新入场对冲',
   standalone: '独立单',
 };
+
+export function getAssignableLegRoles(template: StrategyTemplate): LegRole[] {
+  if (template === 'main_only') {
+    return ['main_open', 'reentry_main'];
+  }
+  if (template === 'custom') {
+    return [
+      'main_open',
+      'hedge_initial_a',
+      'hedge_initial_b',
+      'hedge_rolling',
+      'mirror_tp',
+      'reentry_main',
+      'reentry_hedge',
+    ];
+  }
+  return [
+    'main_open',
+    'hedge_initial_a',
+    'hedge_initial_b',
+    'hedge_rolling',
+    'mirror_tp',
+    'reentry_main',
+    'reentry_hedge',
+  ];
+}

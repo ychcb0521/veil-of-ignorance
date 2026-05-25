@@ -45,6 +45,8 @@ export type LegRole =
   | 'reentry_hedge'
   | 'standalone';
 
+export type SuggestionConfidence = 'high' | 'medium' | 'low';
+
 export interface CampaignEvent {
   id: string;
   timestamp: string;
@@ -187,6 +189,32 @@ export interface DeviationCost {
   cost_pct_of_account: number;
   fix_description: string;
   source_deduction_id?: string;
+}
+
+export interface SuggestedLegRole {
+  journalId: string;
+  suggestedRole: LegRole;
+  confidence: SuggestionConfidence;
+  reason: string;
+}
+
+export interface ClassificationAssignmentInput {
+  journalId: string;
+  legRole: LegRole;
+  legSequence?: number | null;
+  attachNote?: string | null;
+}
+
+export interface ClassificationValidationInput {
+  legs: Array<{ journalId: string; legRole: LegRole }>;
+  strategyTemplate: StrategyTemplate;
+  targetCampaignId?: string;
+}
+
+export interface ClassificationValidationResult {
+  ok: boolean;
+  errors: string[];
+  warnings: string[];
 }
 
 export interface ErrorTagCategory {

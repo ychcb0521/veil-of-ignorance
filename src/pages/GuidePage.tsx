@@ -28,6 +28,7 @@ const TOC: TocItem[] = [
     id: 's4', label: '4. 复盘中心 ★', children: [
       { id: 's4-1', label: '4.1 错题集' },
       { id: 's4-1-5', label: '4.1.5 交易战役' },
+      { id: 's4-1-6', label: '4.1.6 战役级 SOP 评分边界' },
       { id: 's4-2', label: '4.2 元监控' },
       { id: 's4-3', label: '4.3 规则' },
       { id: 's4-4', label: '4.4 标签字典' },
@@ -492,49 +493,123 @@ export default function GuidePage() {
 
               <section id="s4-1-5" className="scroll-mt-20 space-y-3">
                 <SubTitle>4.1.5 交易战役（/journal/campaigns）</SubTitle>
-                <P><strong>目的</strong>：把"一个币种一段时间内的一系列协同操作"作为复盘的高层单位。</P>
-                <P><strong>为什么需要这层抽象？</strong></P>
-                <P>如果你的交易策略是"开主力 + 双对冲 + 镜像止盈 + 滚动调整"这类<strong>多 leg 协同</strong>的体系，单笔评价毫无意义——一个对冲单在战役里可能是"完美对冲"，但单独看是"亏损交易"。</P>
-                <P>所以系统在 <code>/journal</code> 之上加了一层 <code>/journal/campaigns</code>：</P>
+                <P><strong>核心概念</strong></P>
+                <P>战役（Campaign）是复盘的高层单位。它由以下要素严格定义：</P>
+                <ol className="list-decimal pl-6 text-[14px] text-foreground/90 space-y-1">
+                  <li><strong>同一标的</strong>：一个战役内的所有 legs 必须属于同一个 symbol（如全部是 BTCUSDT）</li>
+                  <li><strong>同一方向</strong>：一个战役的主仓方向（main_long / main_short）由 main_open leg 决定，不可中途反转</li>
+                  <li><strong>明确的开始与结束</strong>：每个战役有 opened_at 与 closed_at（active 战役 closed_at 为 null）</li>
+                  <li><strong>结构化的 legs 组织</strong>：每条 leg 必须有明确的角色（leg_role），角色不可重复（互斥角色除外）</li>
+                </ol>
+                <P><strong>Legs 的角色规范</strong></P>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-[11px] my-3 border border-border rounded overflow-hidden">
+                    <thead className="bg-muted/50">
+                      <tr>
+                        <th className="text-left px-3 py-2 font-medium text-foreground text-[10px]">角色</th>
+                        <th className="text-left px-3 py-2 font-medium text-foreground text-[10px]">含义</th>
+                        <th className="text-left px-3 py-2 font-medium text-foreground text-[10px]">order_kind 兼容性</th>
+                        <th className="text-left px-3 py-2 font-medium text-foreground text-[10px]">战役内重复性</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr><td className="px-3 py-2 border-t border-border">main_open</td><td className="px-3 py-2 border-t border-border">主力开仓</td><td className="px-3 py-2 border-t border-border">main only</td><td className="px-3 py-2 border-t border-border"><strong>唯一</strong>（每个战役只能有 1 个）</td></tr>
+                      <tr><td className="px-3 py-2 border-t border-border">hedge_initial_a / hedge_initial_b</td><td className="px-3 py-2 border-t border-border">初始双对冲</td><td className="px-3 py-2 border-t border-border">hedge only</td><td className="px-3 py-2 border-t border-border">各 1 个</td></tr>
+                      <tr><td className="px-3 py-2 border-t border-border">hedge_rolling</td><td className="px-3 py-2 border-t border-border">滚动对冲</td><td className="px-3 py-2 border-t border-border">hedge only</td><td className="px-3 py-2 border-t border-border">可多次</td></tr>
+                      <tr><td className="px-3 py-2 border-t border-border">mirror_tp</td><td className="px-3 py-2 border-t border-border">镜像止盈委托</td><td className="px-3 py-2 border-t border-border">hedge 或 main</td><td className="px-3 py-2 border-t border-border">通常 1 个</td></tr>
+                      <tr><td className="px-3 py-2 border-t border-border">reentry_main</td><td className="px-3 py-2 border-t border-border">对冲触发后重新入场的主力</td><td className="px-3 py-2 border-t border-border">main only</td><td className="px-3 py-2 border-t border-border">可多次</td></tr>
+                      <tr><td className="px-3 py-2 border-t border-border">reentry_hedge</td><td className="px-3 py-2 border-t border-border">重新入场后的新对冲</td><td className="px-3 py-2 border-t border-border">hedge only</td><td className="px-3 py-2 border-t border-border">可多次</td></tr>
+                      <tr><td className="px-3 py-2 border-t border-border">standalone</td><td className="px-3 py-2 border-t border-border">独立不归属</td><td className="px-3 py-2 border-t border-border">任意</td><td className="px-3 py-2 border-t border-border">N/A</td></tr>
+                    </tbody>
+                  </table>
+                </div>
+                <P><strong>战役的两种来源</strong></P>
+                <P>战役可以通过以下两种方式创建：</P>
+                <P>(A) <strong>实时创建</strong>：每次开主力单时，开仓快照会自动询问“战役归属”。这种来源的战役 actual_evolution 事件最完整。</P>
+                <P>(B) <strong>历史归类</strong>：通过 <code>/journal/campaigns/classify</code> 页面，把已有的 journal 手动归类。这种来源的战役会丢失部分事件（如 hedge_cancelled 与 hedge_placed 的精确时机），SOP 评分仅供参考。</P>
+                <P><strong>实时归类 vs 历史归类的差异</strong></P>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-[11px] my-3 border border-border rounded overflow-hidden">
+                    <thead className="bg-muted/50">
+                      <tr>
+                        <th className="text-left px-3 py-2 font-medium text-foreground text-[10px]">维度</th>
+                        <th className="text-left px-3 py-2 font-medium text-foreground text-[10px]">实时归类</th>
+                        <th className="text-left px-3 py-2 font-medium text-foreground text-[10px]">历史归类</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr><td className="px-3 py-2 border-t border-border">actual_evolution 完整性</td><td className="px-3 py-2 border-t border-border">完整（含 cancel 与 place 事件）</td><td className="px-3 py-2 border-t border-border">仅含 leg 创建事件</td></tr>
+                      <tr><td className="px-3 py-2 border-t border-border">SOP 评分准确性</td><td className="px-3 py-2 border-t border-border">高</td><td className="px-3 py-2 border-t border-border">中（缺少时序精度）</td></tr>
+                      <tr><td className="px-3 py-2 border-t border-border">决策准确性指标</td><td className="px-3 py-2 border-t border-border">准确</td><td className="px-3 py-2 border-t border-border">准确（基于 K 线数据）</td></tr>
+                      <tr><td className="px-3 py-2 border-t border-border">反事实回放</td><td className="px-3 py-2 border-t border-border">可用</td><td className="px-3 py-2 border-t border-border">可用</td></tr>
+                      <tr><td className="px-3 py-2 border-t border-border">解除归属</td><td className="px-3 py-2 border-t border-border">可逆</td><td className="px-3 py-2 border-t border-border">可逆</td></tr>
+                    </tbody>
+                  </table>
+                </div>
+                <P><strong>历史归类的操作流程</strong></P>
+                <P>进入 <code>/journal/campaigns/classify</code> 后：</P>
+                <ol className="list-decimal pl-6 text-[14px] text-foreground/90 space-y-1">
+                  <li><strong>筛选</strong>：选择标的（必填）+ 日期范围。批量操作必须同标的，跨标的需分批处理。</li>
+                  <li><strong>选择</strong>：勾选属于同一战役的 journals（多选）。</li>
+                  <li><strong>决策</strong>：选择“归类为新战役”或“加入现有战役”。</li>
+                  <li><strong>角色分配</strong>：在弹窗中为每条 leg 指定角色。系统会给出基于时序与 order_kind 的建议（confidence high/medium/low），用户可覆盖。</li>
+                  <li><strong>校验</strong>：系统自动校验（同标的、互斥角色、时序合理性等）。</li>
+                  <li><strong>提交</strong>：通过校验后写入数据库，跳转到该战役详情页。</li>
+                </ol>
+                <P><strong>校验规则（严格）</strong></P>
+                <P>errors（必须修复）：</P>
                 <ul className="list-disc pl-6 text-[14px] text-foreground/90 space-y-1">
-                  <li>一个战役 = 一个币种 + 一组协同操作 + 明确的开始/结束</li>
-                  <li>每条 journal 可以归属到一个战役里，角色是 main_open / hedge_initial_a / hedge_initial_b / mirror_tp / hedge_rolling / reentry_main / reentry_hedge / standalone</li>
-                  <li>每次开仓快照里都会问你"归到哪个战役"</li>
+                  <li>选中 journals 跨多标的</li>
+                  <li>journal 当前已有 campaign_id（需先解除归属）</li>
+                  <li>main_dual_hedge_mirror_tp 模板无 main_open leg</li>
+                  <li>leg 角色与 journal 的 order_kind 不兼容</li>
+                  <li>加入现有战役时，目标战役已有 main_open 而本次又含 main_open</li>
                 </ul>
-                <P>战役完成后，你看到的是<strong>整套打法的执行偏离</strong>，而不是单笔的输赢。这是真正能让你看清"你是不是按 SOP 执行"的视图。</P>
-                <Highlight>
-                  "单笔评价回答'这一刀砍得好不好'，战役评价回答'整场仗打得对不对'。后者比前者重要十倍。"
-                </Highlight>
-                <P><strong>关于战役详情页：</strong></P>
-                <P>进入任一战役后，你看到的不是"几笔交易堆在一起"，而是四张相互关联的视图：</P>
-                <ol className="list-decimal pl-6 text-[14px] text-foreground/90 space-y-1">
-                  <li><strong>K 线全 legs 可视化</strong> —— 主仓、对冲、镜像止盈、滚动调整全部叠在同一张图上，按角色配色。让你"看见"整场战役的形态。</li>
-                  <li><strong>状态机时间轴</strong> —— 横向色带告诉你这场战役在哪些时间段处于哪个状态：完整结构 → 已锁定不亏 → 滚动跟随 → 已退场。这是 SOP 执行的"形状"。</li>
-                  <li><strong>决策准确性指标</strong> —— 三个核心数字：
-                    <ul className="list-disc pl-6 mt-1 space-y-1">
-                      <li>对冲位选择精度（每个对冲触发后市场实际下探深度，越浅越精准）</li>
-                      <li>镜像止盈捕获率（TP 触发后市场继续涨了多少，越少越好）</li>
-                      <li>盈利捕获率（已实现 vs 峰值，越高越好）</li>
-                    </ul>
-                  </li>
-                  <li><strong>SOP 偏离度评分</strong> —— 0-100 分，A 到 F 五个等级。把你实际做的事，和你冷静时定下的 SOP，做一次差分。</li>
-                </ol>
+                <P>warnings（允许提交但提示）：</P>
+                <ul className="list-disc pl-6 text-[14px] text-foreground/90 space-y-1">
+                  <li>main_open 不是时间最早的 leg</li>
+                  <li>缺少 hedge_initial_a 或 hedge_initial_b</li>
+                  <li>legs 时间跨度 &gt; 7 天</li>
+                  <li>hedge_rolling 时间早于 mirror_tp_triggered（语义异常）</li>
+                </ul>
+                <P><strong>解除归属</strong></P>
+                <P>任何归类操作都是可逆的。在战役详情页的 legs 列表中，每条 leg 都有“解除”按钮：</P>
+                <ul className="list-disc pl-6 text-[14px] text-foreground/90 space-y-1">
+                  <li>解除后 journal.campaign_id = null</li>
+                  <li>战役的 actual_evolution 保留一条 'note' 事件记录解除</li>
+                  <li>其他 legs 不受影响</li>
+                  <li>战役的 SOP 评分会自动重新计算</li>
+                </ul>
+                <P><strong>不支持的场景（明示）</strong></P>
+                <ul className="list-disc pl-6 text-[14px] text-foreground/90 space-y-1">
+                  <li><strong>不支持跨标的战役</strong>：BTC 和 ETH 的对冲组合无法在一个战役内表达。</li>
+                  <li><strong>不支持反转主仓</strong>：主仓方向由 main_open 决定，中途不能反向。如果做了反向操作（先做多后做空），应当视为两个独立战役。</li>
+                  <li><strong>不支持 standalone 与战役 leg 混合</strong>：一个 journal 要么独立（standalone）要么归属（leg），不能既是又不是。</li>
+                  <li><strong>不支持手动添加非 journal 事件</strong>：如果你做了某个操作但当时没创建 journal（如手动取消委托），无法补录到 actual_evolution。</li>
+                  <li><strong>不支持 mirror_tp 自动识别</strong>：系统不能从 order_kind 推断某 journal 是 mirror_tp，需用户手动指定。</li>
+                </ul>
+                <div className="rounded border border-[#F0B90B]/40 bg-[#F0B90B]/8 p-4 text-[14px] leading-relaxed text-foreground">
+                  历史归类是补救工具，不是常规流程。最佳实践是从今天开始用“实时归类”——每次开主力单都立刻指定战役归属。
+                  历史归类的 SOP 评分准确性低于实时归类，因此不要用历史归类的数据来评判“你的 SOP 执行能力”。
+                  历史归类的真正价值在于：让你过去 N 个月的交易数据进入战役级复盘的视野，而不是让你为过去的执行打分。
+                </div>
+              </section>
+
+              <section id="s4-1-6" className="scroll-mt-20 space-y-3">
+                <SubTitle>4.1.6 战役级 SOP 评分的严谨性边界</SubTitle>
+                <P>SOP 偏离度评分的有效性取决于以下前提：</P>
+                <P><strong>前提 1：战役模板与你的实际策略匹配</strong></P>
+                <P>如果你的实际打法不是“主仓 + 双对冲 + 镜像 TP”，请选择 <code>custom</code> 模板。custom 模板不参与 SOP 评分，避免错误信号。</P>
+                <P><strong>前提 2：actual_evolution 事件完整</strong></P>
+                <P>SOP 评分的扣分项之一是“mirror_tp 触发后 5 分钟内未取消任一 hedge”。这要求系统能看到 hedge_cancelled 事件。只有实时归类才会记录此事件。历史归类的战役在这一项上会得到默认分（既不加也不扣），导致评分偏高。</P>
+                <P><strong>前提 3：legs 数据完整</strong></P>
+                <P>每条 leg 必须有正确的 pre_simulated_time、entry_price、size。缺失任一项的 legs 会被视为异常，相关扣分项会标记 N/A。</P>
+                <P><strong>前提 4：战役已结束</strong></P>
+                <P>active 战役的 SOP 评分是即时快照，会随后续操作变化。最终评估应在战役结束后进行。</P>
                 <RedHighlight>
-                  "SOP 偏离度 ≠ 战役胜负。这是这套系统给你的最重要的认知校准——它不告诉你'你赢了'或'你亏了'，它告诉你'你是按计划赢的，还是靠运气赢的'。
-                  60 天后回头看，连续 10 场 ≥85 分的战役，才意味着你的 SOP 真的被身体记住了。在这之前，每一次复盘都应当回到这张表。"
-                </RedHighlight>
-                <SubTitle>反事实战役与偏离代价（终极工具）</SubTitle>
-                <P>战役详情页底部的"反事实战役"区块，是这套系统给你的最锋利的一面镜子。</P>
-                <P>它做的事情很简单：</P>
-                <ol className="list-decimal pl-6 text-[14px] text-foreground/90 space-y-1">
-                  <li><strong>Pure SOP 一键运行</strong> —— 用你冷静时定的 SOP 默认参数 + 这场战役实际的市场数据，模拟"如果严格按 SOP 执行会怎样"。</li>
-                  <li><strong>偏离代价折算</strong> —— 把 SOP 偏离度评分中的每一条扣分，自动跑"修正这一条"的反事实，告诉你这条违规的具体 USDT 代价。</li>
-                  <li><strong>What-if 自定义分支</strong> —— "如果对冲位放在 X" "如果不滚动" "如果单 hedge 不双 hedge"——任你输入。</li>
-                </ol>
-                <RedHighlight>
-                  "这张'偏离代价表'是把抽象的纪律违规，翻译成具体的真金白银。
-                  30 天后，进入元监控页查看'战役 SOP 经济成本'卡片——它会告诉你过去一个月因 SOP 偏离损失了多少 USDT。
-                  如果这个数字 &gt; 0，你的 SOP 还没有真正起作用；如果它持续接近 0，你正在变成一个'按规则交易'的交易者。"
+                  如果你看到一个历史归类战役的 SOP 评分是 95 分 A 级，不要立刻自我表扬。
+                  请打开 actual_evolution 看一眼，确认是否含完整的 cancel/place 事件。
+                  如果没有，那个 A 分只是数据缺失造成的虚高，不代表你的真实执行水平。
                 </RedHighlight>
               </section>
 

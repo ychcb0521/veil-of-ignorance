@@ -16,6 +16,7 @@ import JournalInsightsPage from "./pages/JournalInsightsPage.tsx";
 import JournalRulesPage from "./pages/JournalRulesPage.tsx";
 import JournalCampaignsPage from "./pages/JournalCampaignsPage.tsx";
 import JournalCampaignDetailPage from "./pages/JournalCampaignDetailPage.tsx";
+import JournalCampaignClassifyPage from "./pages/JournalCampaignClassifyPage.tsx";
 import GuidePage from "./pages/GuidePage.tsx";
 import NotFound from "./pages/NotFound.tsx";
 import { MandatoryRuleQueueRoot } from "./components/journal/MandatoryRuleQueueRoot.tsx";
@@ -65,6 +66,7 @@ function AppRoutes() {
         <Route path="/journal/rules" element={<JournalRulesPage />} />
         <Route path="/journal/insights" element={<JournalInsightsPage />} />
         <Route path="/journal/campaigns" element={<JournalCampaignsPage />} />
+        <Route path="/journal/campaigns/classify" element={<JournalCampaignClassifyPage />} />
         <Route path="/journal/campaigns/:id" element={<JournalCampaignDetailPage />} />
         <Route path="/journal/:id" element={<JournalPlaybackPage />} />
         <Route path="/guide" element={<GuidePage />} />

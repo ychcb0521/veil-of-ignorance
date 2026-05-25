@@ -6,6 +6,7 @@ import type { Deduction, SopDeviationResult } from '@/lib/campaignAnalysis';
 interface Props {
   result: SopDeviationResult;
   active: boolean;
+  historicalWarning?: boolean;
   onJumpToEvent?: (eventIds: string[]) => void;
 }
 
@@ -32,7 +33,7 @@ const GROUPS: Array<{ key: Deduction['category']; title: string; total: number }
   { key: 'exit', title: 'Exit 阶段', total: 20 },
 ];
 
-export function SopDeviationCard({ result, active, onJumpToEvent }: Props) {
+export function SopDeviationCard({ result, active, historicalWarning = false, onJumpToEvent }: Props) {
   const grouped = useMemo(() => {
     return GROUPS.map(group => ({
       ...group,
@@ -58,6 +59,11 @@ export function SopDeviationCard({ result, active, onJumpToEvent }: Props) {
       {active && (
         <div className="bg-muted/50 border border-border rounded px-3 py-2 text-[11px] text-muted-foreground">
           战役进行中，SOP 评分仅基于当前已发生的事件，可能随后续操作变化。结束战役后再做最终评估。
+        </div>
+      )}
+      {historicalWarning && (
+        <div className="bg-muted/50 border border-border rounded p-2 text-[11px] text-muted-foreground">
+          本战役含历史归类项。由于缺少实时记录的取消/挂单事件，部分扣分项可能不准确。SOP 评分仅供参考。
         </div>
       )}
 

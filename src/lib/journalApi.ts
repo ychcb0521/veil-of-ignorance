@@ -12,11 +12,15 @@ import {
   computeDeviationCosts,
   simulateCampaign,
 } from '@/lib/campaignSimulationEngine';
+import { suggestLegRoles as suggestLegRolesHeuristic } from '@/lib/legRoleSuggestion';
 import type {
   CampaignCounterfactual,
   CampaignCounterfactualBranchKind,
   CampaignCounterfactualParams,
   CampaignCounterfactualResult,
+  ClassificationAssignmentInput,
+  ClassificationValidationInput,
+  ClassificationValidationResult,
   CampaignEvent,
   CampaignStatus,
   DeviationCost,
@@ -25,6 +29,7 @@ import type {
   JournalTagAssignment,
   LegRole,
   StrategyTemplate,
+  SuggestedLegRole,
   TaggedPhase,
   TradeCampaign,
   TradeDirection,
@@ -93,6 +98,160 @@ async function getCurrentUserAndCapital(): Promise<{ userId: string; initialCapi
   if (error) throw new Error(`读取账户信息失败：${error.message}`);
   const initialCapital = ((profile as { initial_capital?: number } | null)?.initial_capital ?? 10_000);
   return { userId, initialCapital };
+}
+
+const RETRO_CLASSIFY_NOTE = 'classified retroactively';
+
+const LEG_ROLE_ORDER_KIND_COMPATIBILITY: Record<LegRole, Array<TradeJournal['order_kind']>> = {
+  main_open: ['main'],
+  hedge_initial_a: ['hedge'],
+  hedge_initial_b: ['hedge'],
+  hedge_rolling: ['hedge'],
+  mirror_tp: ['hedge', 'main'],
+  reentry_main: ['main'],
+  reentry_hedge: ['hedge'],
+  standalone: ['main', 'hedge'],
+} as const satisfies Record<string, Array<TradeJournal['order_kind']>>;
+
+type MutableCampaignPatch = Partial<
+  Pick<
+    TradeCampaign,
+    | 'opened_at'
+    | 'closed_at'
+    | 'direction'
+    | 'status'
+    | 'initial_main_size_usdt'
+    | 'initial_leverage'
+    | 'final_realized_pnl'
+    | 'final_r_multiple'
+    | 'peak_unrealized_pnl'
+    | 'peak_drawdown'
+    | 'actual_evolution'
+  >
+>;
+
+function journalTimeMs(journal: Pick<TradeJournal, 'pre_simulated_time'>): number {
+  return new Date(journal.pre_simulated_time).getTime();
+}
+
+function toCampaignDirection(direction: TradeJournal['direction']): TradeCampaign['direction'] {
+  return direction === 'short' ? 'main_short' : 'main_long';
+}
+
+function toIso(ms: number | null): string | null {
+  return ms == null ? null : new Date(ms).toISOString();
+}
+
+function campaignSnapshotPatch(campaign: TradeCampaign): MutableCampaignPatch {
+  return {
+    opened_at: campaign.opened_at,
+    closed_at: campaign.closed_at,
+    direction: campaign.direction,
+    status: campaign.status,
+    initial_main_size_usdt: campaign.initial_main_size_usdt,
+    initial_leverage: campaign.initial_leverage,
+    final_realized_pnl: campaign.final_realized_pnl,
+    final_r_multiple: campaign.final_r_multiple,
+    peak_unrealized_pnl: campaign.peak_unrealized_pnl,
+    peak_drawdown: campaign.peak_drawdown,
+    actual_evolution: campaign.actual_evolution,
+  };
+}
+
+async function getJournalsByIds(journalIds: string[]): Promise<TradeJournal[]> {
+  if (journalIds.length === 0) return [];
+  const { data, error } = await supabase
+    .from('trade_journals' as never)
+    .select('*')
+    .in('id', journalIds);
+  return wrap('读取交易日记', error, (data ?? []) as unknown as TradeJournal[]);
+}
+
+function getTradeRecordMapForUser(userId: string) {
+  const tradeHistory = readUserScopedStorage<TradeRecord[]>(userId, 'trade_history', []);
+  return new Map(tradeHistory.map(record => [record.id, record]));
+}
+
+function deriveCampaignPatchFromLegs(
+  currentCampaign: TradeCampaign,
+  legs: TradeJournal[],
+  tradeRecordMap: Map<string, TradeRecord>,
+): MutableCampaignPatch {
+  if (legs.length === 0) {
+    return {
+      opened_at: currentCampaign.opened_at,
+      closed_at: null,
+      status: 'planned',
+      initial_main_size_usdt: null,
+      initial_leverage: null,
+      final_realized_pnl: null,
+      final_r_multiple: null,
+    };
+  }
+
+  const ordered = [...legs].sort((a, b) => journalTimeMs(a) - journalTimeMs(b));
+  const mainOpen = ordered.find(leg => leg.leg_role === 'main_open') ?? ordered.find(leg => leg.order_kind === 'main') ?? null;
+  const openedAt = ordered[0]?.pre_simulated_time ?? currentCampaign.opened_at;
+  const allHaveTradeRecord = ordered.every(leg => leg.trade_record_id != null);
+  const totalPnl = ordered.reduce((sum, leg) => {
+    const record = leg.trade_record_id ? tradeRecordMap.get(leg.trade_record_id) ?? null : null;
+    return sum + (leg.post_realized_pnl ?? record?.pnl ?? 0);
+  }, 0);
+  const totalPlannedMaxLoss = ordered.reduce((sum, leg) => sum + (leg.pre_max_loss_usdt ?? 0), 0);
+  const closeTimes = ordered
+    .map(leg => leg.trade_record_id ? tradeRecordMap.get(leg.trade_record_id)?.closeTime ?? null : null)
+    .filter((time): time is number => typeof time === 'number');
+  const closedAt = allHaveTradeRecord && closeTimes.length === ordered.length
+    ? toIso(Math.max(...closeTimes))
+    : null;
+
+  let status: CampaignStatus = 'active';
+  if (ordered.some(leg => leg.trade_record_id == null)) {
+    status = 'active';
+  } else if (closedAt) {
+    status = totalPnl > 0 ? 'closed_profit' : totalPnl < 0 ? 'closed_loss' : 'closed_breakeven';
+  }
+
+  return {
+    opened_at: openedAt,
+    closed_at: closedAt,
+    direction: mainOpen ? toCampaignDirection(mainOpen.direction) : currentCampaign.direction,
+    status,
+    initial_main_size_usdt: mainOpen?.pre_position_size ?? currentCampaign.initial_main_size_usdt,
+    initial_leverage: mainOpen?.leverage ?? currentCampaign.initial_leverage,
+    final_realized_pnl: allHaveTradeRecord ? totalPnl : null,
+    final_r_multiple: allHaveTradeRecord && totalPlannedMaxLoss > 0 ? totalPnl / totalPlannedMaxLoss : null,
+  };
+}
+
+async function normalizeCampaignLegSequences(campaignId: string): Promise<void> {
+  const { data, error } = await supabase
+    .from('trade_journals' as never)
+    .select('id, pre_simulated_time')
+    .eq('campaign_id', campaignId)
+    .order('pre_simulated_time', { ascending: true });
+  if (error) throw new Error(`重排 leg 顺序失败：${error.message}`);
+  const legs = (data ?? []) as Array<Pick<TradeJournal, 'id' | 'pre_simulated_time'>>;
+  for (let index = 0; index < legs.length; index += 1) {
+    const { error: updateErr } = await supabase
+      .from('trade_journals' as never)
+      .update({ leg_sequence: index + 1 } as never)
+      .eq('id', legs[index].id);
+    if (updateErr) throw new Error(`更新 leg_sequence 失败：${updateErr.message}`);
+  }
+}
+
+async function recomputeCampaignDerivedFields(campaignId: string): Promise<TradeCampaign> {
+  const { campaign, legs } = await getCampaignWithLegs(campaignId);
+  const tradeRecordMap = getTradeRecordMapForUser(campaign.user_id);
+  const patch = deriveCampaignPatchFromLegs(campaign, legs, tradeRecordMap);
+  const { data, error } = await supabase
+    .from('trade_campaigns' as never)
+    .update(patch as never)
+    .eq('id', campaignId)
+    .select()
+    .single();
+  return wrap('重算战役元数据', error, toCampaign(data));
 }
 
 export interface CreateCampaignInput {
@@ -337,6 +496,405 @@ export async function attachJournalToCampaign(
       .eq('id', campaignId);
     if (campaignErr) throw new Error(`更新战役主仓信息失败：${campaignErr.message}`);
   }
+}
+
+export async function listUnclassifiedJournals(
+  userId: string,
+  filters: {
+    symbol?: string;
+    dateFrom?: string;
+    dateTo?: string;
+    includeClassified?: boolean;
+  } = {},
+): Promise<TradeJournal[]> {
+  let query = supabase
+    .from('trade_journals' as never)
+    .select('*')
+    .eq('user_id', userId);
+
+  if (filters.symbol) query = query.eq('symbol', filters.symbol);
+  if (filters.dateFrom) query = query.gte('pre_simulated_time', filters.dateFrom);
+  if (filters.dateTo) query = query.lte('pre_simulated_time', filters.dateTo);
+  if (!filters.includeClassified) query = query.is('campaign_id', null);
+
+  const { data, error } = await query.order('pre_simulated_time', { ascending: false });
+  return wrap('加载待归类 journals', error, (data ?? []) as unknown as TradeJournal[]);
+}
+
+export async function validateClassification(
+  input: ClassificationValidationInput,
+): Promise<ClassificationValidationResult> {
+  const journalIds = [...new Set(input.legs.map(item => item.journalId))];
+  const journals = await getJournalsByIds(journalIds);
+  const journalMap = new Map(journals.map(journal => [journal.id, journal]));
+  const errors: string[] = [];
+  const warnings: string[] = [];
+
+  const selected = input.legs
+    .map(item => ({ ...item, journal: journalMap.get(item.journalId) ?? null }))
+    .filter((item): item is { journalId: string; legRole: LegRole; journal: TradeJournal } => item.journal != null);
+
+  const symbols = new Set(selected.map(item => item.journal.symbol));
+  if (symbols.size > 1) errors.push('选中 journals 跨多个 symbol');
+
+  const occupied = selected.filter(item => item.journal.campaign_id != null);
+  if (occupied.length > 0) errors.push('存在已归属到战役的 journal，请先解除归属');
+
+  if (input.strategyTemplate === 'main_dual_hedge_mirror_tp' && !selected.some(item => item.legRole === 'main_open')) {
+    errors.push('main_dual_hedge_mirror_tp 模板必须包含 main_open 角色');
+  }
+
+  for (const item of selected) {
+    const allowedKinds = LEG_ROLE_ORDER_KIND_COMPATIBILITY[item.legRole];
+    if (!allowedKinds.includes(item.journal.order_kind)) {
+      errors.push(`角色 ${item.legRole} 与 journal ${item.journal.id} 的 order_kind 不兼容`);
+    }
+  }
+
+  let targetCampaign: TradeCampaign | null = null;
+  let targetLegs: TradeJournal[] = [];
+  if (input.targetCampaignId) {
+    const details = await getCampaignWithLegs(input.targetCampaignId);
+    targetCampaign = details.campaign;
+    targetLegs = details.legs;
+
+    const selectedMain = selected.find(item => item.legRole === 'main_open') ?? null;
+    const existingMain = targetLegs.find(leg => leg.leg_role === 'main_open') ?? null;
+    if (existingMain && selectedMain) {
+      errors.push('目标战役已有 main_open，本次不能再次添加 main_open');
+    }
+
+    for (const item of selected) {
+      if (new Date(item.journal.pre_simulated_time).getTime() < new Date(targetCampaign.opened_at).getTime()) {
+        errors.push('leg 时间不能早于战役开始时间');
+        break;
+      }
+    }
+
+    if (selectedMain && targetCampaign.direction !== toCampaignDirection(selectedMain.journal.direction)) {
+      errors.push('方向冲突');
+    }
+  }
+
+  const combined = [
+    ...targetLegs,
+    ...selected.map(item => ({
+      ...item.journal,
+      leg_role: item.legRole,
+    })),
+  ].sort((a, b) => journalTimeMs(a) - journalTimeMs(b));
+
+  const mainOpen = combined.find(leg => leg.leg_role === 'main_open') ?? null;
+  if (mainOpen && combined[0]?.id !== mainOpen.id) {
+    warnings.push('main_open 不是最早的 leg（时序异常）');
+  }
+
+  if (
+    input.strategyTemplate === 'main_dual_hedge_mirror_tp' &&
+    (!combined.some(leg => leg.leg_role === 'hedge_initial_a') || !combined.some(leg => leg.leg_role === 'hedge_initial_b'))
+  ) {
+    warnings.push('main_dual_hedge_mirror_tp 模板缺少 hedge_initial_a 或 hedge_initial_b');
+  }
+
+  if (combined.length > 1) {
+    const spanMs = journalTimeMs(combined[combined.length - 1]) - journalTimeMs(combined[0]);
+    if (spanMs > 7 * 24 * 60 * 60 * 1000) {
+      warnings.push('选中 legs 时间跨度 > 7 天（异常长战役）');
+    }
+  }
+
+  const firstMirrorTp = combined.find(leg => leg.leg_role === 'mirror_tp') ?? null;
+  if (firstMirrorTp) {
+    const mirrorTime = journalTimeMs(firstMirrorTp);
+    if (combined.some(leg => leg.leg_role === 'hedge_rolling' && journalTimeMs(leg) < mirrorTime)) {
+      warnings.push('存在 hedge_rolling 早于第一个 mirror_tp_triggered 的语义异常');
+    }
+  }
+
+  return { ok: errors.length === 0, errors, warnings };
+}
+
+export async function batchAttachToCampaign(
+  campaignId: string,
+  assignments: ClassificationAssignmentInput[],
+): Promise<void> {
+  if (assignments.length === 0) return;
+
+  const validation = await validateClassification({
+    legs: assignments.map(item => ({ journalId: item.journalId, legRole: item.legRole })),
+    strategyTemplate: (await getCampaignWithLegs(campaignId)).campaign.strategy_template,
+    targetCampaignId: campaignId,
+  });
+  if (!validation.ok) {
+    throw new Error(validation.errors.join('；'));
+  }
+
+  const { campaign, legs: existingLegs } = await getCampaignWithLegs(campaignId);
+  const originalCampaignPatch = campaignSnapshotPatch(campaign);
+  const journals = await getJournalsByIds(assignments.map(item => item.journalId));
+  const journalMap = new Map(journals.map(journal => [journal.id, journal]));
+  const originalJournals = journals.map(journal => ({
+    id: journal.id,
+    campaign_id: journal.campaign_id,
+    leg_role: journal.leg_role,
+    leg_sequence: journal.leg_sequence,
+  }));
+
+  const combinedSequence = [...existingLegs, ...journals]
+    .sort((a, b) => journalTimeMs(a) - journalTimeMs(b))
+    .map(leg => leg.id);
+  const sequenceMap = new Map(combinedSequence.map((journalId, index) => [journalId, index + 1]));
+
+  const nextEvents: CampaignEvent[] = [...campaign.actual_evolution];
+  const newLegs: TradeJournal[] = [];
+
+  try {
+    for (const assignment of assignments) {
+      const journal = journalMap.get(assignment.journalId);
+      if (!journal) continue;
+      const nextSequence = assignment.legSequence ?? sequenceMap.get(journal.id) ?? null;
+      const patch = {
+        campaign_id: campaignId,
+        leg_role: assignment.legRole,
+        leg_sequence: nextSequence,
+      };
+      const { error: updateErr } = await supabase
+        .from('trade_journals' as never)
+        .update(patch as never)
+        .eq('id', journal.id);
+      if (updateErr) throw new Error(`关联战役失败：${updateErr.message}`);
+
+      newLegs.push({ ...journal, ...patch });
+      nextEvents.push({
+        id: crypto.randomUUID(),
+        timestamp: journal.pre_simulated_time,
+        event_type: inferCampaignEventType(assignment.legRole),
+        leg_role: assignment.legRole,
+        journal_id: journal.id,
+        trade_record_id: journal.trade_record_id,
+        pending_order_id: null,
+        price: journal.pre_entry_price,
+        size_usdt: journal.pre_position_size,
+        notes: assignment.attachNote ? `${assignment.attachNote} · ${RETRO_CLASSIFY_NOTE}` : RETRO_CLASSIFY_NOTE,
+        recorded_at: new Date().toISOString(),
+      });
+    }
+
+    const tradeRecordMap = getTradeRecordMapForUser(campaign.user_id);
+    const patch = {
+      ...deriveCampaignPatchFromLegs(campaign, [...existingLegs, ...newLegs], tradeRecordMap),
+      actual_evolution: nextEvents,
+    };
+    const { error: campaignErr } = await supabase
+      .from('trade_campaigns' as never)
+      .update(patch as never)
+      .eq('id', campaignId);
+    if (campaignErr) throw new Error(`更新战役事件流失败：${campaignErr.message}`);
+
+    await normalizeCampaignLegSequences(campaignId);
+    await recomputeCampaignDerivedFields(campaignId);
+  } catch (error) {
+    for (const snapshot of originalJournals) {
+      await supabase
+        .from('trade_journals' as never)
+        .update({
+          campaign_id: snapshot.campaign_id,
+          leg_role: snapshot.leg_role,
+          leg_sequence: snapshot.leg_sequence,
+        } as never)
+        .eq('id', snapshot.id);
+    }
+    await supabase
+      .from('trade_campaigns' as never)
+      .update(originalCampaignPatch as never)
+      .eq('id', campaignId);
+    throw error instanceof Error ? error : new Error(String(error));
+  }
+}
+
+export async function createCampaignFromJournals(input: {
+  title: string;
+  strategyTemplate: StrategyTemplate;
+  legs: Array<{ journalId: string; legRole: LegRole; legSequence: number }>;
+  notes?: string;
+}): Promise<TradeCampaign> {
+  const validation = await validateClassification({
+    legs: input.legs.map(leg => ({ journalId: leg.journalId, legRole: leg.legRole })),
+    strategyTemplate: input.strategyTemplate,
+  });
+  if (!validation.ok) {
+    throw new Error(validation.errors.join('；'));
+  }
+
+  const journals = await getJournalsByIds(input.legs.map(leg => leg.journalId));
+  const journalMap = new Map(journals.map(journal => [journal.id, journal]));
+  const orderedLegs = input.legs
+    .map(leg => ({
+      ...leg,
+      journal: journalMap.get(leg.journalId) ?? null,
+    }))
+    .filter((item): item is typeof item & { journal: TradeJournal } => item.journal != null)
+    .sort((a, b) => a.legSequence - b.legSequence);
+
+  const symbolSet = new Set(orderedLegs.map(item => item.journal.symbol));
+  if (symbolSet.size !== 1) throw new Error('创建战役失败：所选 journals 必须属于同一标的');
+
+  const mainOpen = orderedLegs.find(item => item.legRole === 'main_open')?.journal ?? null;
+  if (!mainOpen) {
+    throw new Error('创建战役失败：必须指定一个 main_open');
+  }
+
+  const { data: auth } = await supabase.auth.getUser();
+  const userId = auth.user?.id;
+  if (!userId) throw new Error('创建战役失败：用户未登录');
+
+  const tradeRecordMap = getTradeRecordMapForUser(userId);
+  const draftLegs = orderedLegs.map(item => ({
+    ...item.journal,
+    leg_role: item.legRole,
+    leg_sequence: item.legSequence,
+  }));
+  const draftCampaign = {
+    id: crypto.randomUUID(),
+    user_id: userId,
+    symbol: mainOpen.symbol,
+    direction: toCampaignDirection(mainOpen.direction),
+    status: 'planned' as CampaignStatus,
+    strategy_template: input.strategyTemplate,
+    title: input.title,
+    opened_at: orderedLegs[0]?.journal.pre_simulated_time ?? mainOpen.pre_simulated_time,
+    closed_at: null,
+    initial_main_size_usdt: mainOpen.pre_position_size,
+    initial_leverage: mainOpen.leverage,
+    final_realized_pnl: null,
+    final_r_multiple: null,
+    peak_unrealized_pnl: null,
+    peak_drawdown: null,
+    notes: input.notes?.trim() || null,
+    actual_evolution: [],
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  } satisfies TradeCampaign;
+  const derivedPatch = deriveCampaignPatchFromLegs(draftCampaign, draftLegs, tradeRecordMap);
+  const payload = {
+    user_id: userId,
+    symbol: mainOpen.symbol,
+    direction: derivedPatch.direction ?? toCampaignDirection(mainOpen.direction),
+    strategy_template: input.strategyTemplate,
+    title: input.title,
+    opened_at: derivedPatch.opened_at ?? mainOpen.pre_simulated_time,
+    closed_at: derivedPatch.closed_at ?? null,
+    status: derivedPatch.status ?? 'active',
+    initial_main_size_usdt: derivedPatch.initial_main_size_usdt ?? mainOpen.pre_position_size,
+    initial_leverage: derivedPatch.initial_leverage ?? mainOpen.leverage,
+    final_realized_pnl: derivedPatch.final_realized_pnl ?? null,
+    final_r_multiple: derivedPatch.final_r_multiple ?? null,
+    notes: input.notes?.trim() || null,
+    actual_evolution: [{
+      id: crypto.randomUUID(),
+      timestamp: derivedPatch.opened_at ?? mainOpen.pre_simulated_time,
+      event_type: 'campaign_opened',
+      leg_role: null,
+      journal_id: null,
+      trade_record_id: null,
+      pending_order_id: null,
+      price: null,
+      size_usdt: null,
+      notes: input.notes?.trim() || null,
+      recorded_at: new Date().toISOString(),
+    }],
+  };
+
+  const { data, error } = await supabase
+    .from('trade_campaigns' as never)
+    .insert(payload as never)
+    .select()
+    .single();
+  const campaign = wrap('创建战役', error, toCampaign(data));
+
+  try {
+    await batchAttachToCampaign(
+      campaign.id,
+      input.legs.map(leg => ({
+        journalId: leg.journalId,
+        legRole: leg.legRole,
+        legSequence: leg.legSequence,
+        attachNote: RETRO_CLASSIFY_NOTE,
+      })),
+    );
+    const { campaign: refreshed } = await getCampaignWithLegs(campaign.id);
+    return refreshed;
+  } catch (attachError) {
+    await supabase
+      .from('trade_campaigns' as never)
+      .delete()
+      .eq('id', campaign.id);
+    throw attachError instanceof Error ? attachError : new Error(String(attachError));
+  }
+}
+
+export async function detachJournalFromCampaign(journalId: string): Promise<void> {
+  const journal = await getJournalById(journalId);
+  if (!journal?.campaign_id) return;
+
+  const { campaign } = await getCampaignWithLegs(journal.campaign_id);
+  const originalCampaignPatch = campaignSnapshotPatch(campaign);
+  const originalJournalPatch = {
+    campaign_id: journal.campaign_id,
+    leg_role: journal.leg_role,
+    leg_sequence: journal.leg_sequence,
+  };
+
+  try {
+    const { error: journalErr } = await supabase
+      .from('trade_journals' as never)
+      .update({
+        campaign_id: null,
+        leg_role: null,
+        leg_sequence: null,
+      } as never)
+      .eq('id', journal.id);
+    if (journalErr) throw new Error(`解除归属失败：${journalErr.message}`);
+
+    const nextEvents: CampaignEvent[] = [
+      ...campaign.actual_evolution,
+      {
+        id: crypto.randomUUID(),
+        timestamp: new Date().toISOString(),
+        event_type: 'note',
+        leg_role: journal.leg_role,
+        journal_id: journal.id,
+        trade_record_id: journal.trade_record_id,
+        pending_order_id: null,
+        price: journal.pre_entry_price,
+        size_usdt: journal.pre_position_size,
+        notes: `leg ${journal.leg_role ?? 'unknown'} 已被解除归属（journal ${journal.id}）`,
+        recorded_at: new Date().toISOString(),
+      },
+    ];
+    const { error: campaignErr } = await supabase
+      .from('trade_campaigns' as never)
+      .update({ actual_evolution: nextEvents } as never)
+      .eq('id', campaign.id);
+    if (campaignErr) throw new Error(`写入解除归属记录失败：${campaignErr.message}`);
+
+    await normalizeCampaignLegSequences(campaign.id);
+    await recomputeCampaignDerivedFields(campaign.id);
+  } catch (error) {
+    await supabase
+      .from('trade_journals' as never)
+      .update(originalJournalPatch as never)
+      .eq('id', journal.id);
+    await supabase
+      .from('trade_campaigns' as never)
+      .update(originalCampaignPatch as never)
+      .eq('id', campaign.id);
+    throw error instanceof Error ? error : new Error(String(error));
+  }
+}
+
+export function suggestLegRoles(journals: TradeJournal[]): SuggestedLegRole[] {
+  return suggestLegRolesHeuristic(journals);
 }
 
 // ============ Batch 18: Campaign Counterfactuals ============

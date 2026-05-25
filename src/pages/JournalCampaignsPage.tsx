@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { ChangeEvent } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { Layers } from 'lucide-react';
+import { FolderPlus, Layers } from 'lucide-react';
 import { BackButton } from '@/components/journal/BackButton';
 import { Input } from '@/components/ui/input';
 import { useAuth } from '@/contexts/AuthContext';
@@ -123,6 +123,15 @@ export default function JournalCampaignsPage() {
             <h1 className="text-[14px] font-medium">交易战役</h1>
             <p className="text-[11px] text-muted-foreground">复盘的高层单位</p>
           </div>
+          <div className="flex-1" />
+          <button
+            type="button"
+            onClick={() => nav('/journal/campaigns/classify')}
+            className="inline-flex h-8 items-center gap-1 rounded border border-border bg-card px-3 text-[12px] hover:bg-accent"
+          >
+            <FolderPlus className="w-3.5 h-3.5" />
+            归类历史交易
+          </button>
         </div>
       </header>
 

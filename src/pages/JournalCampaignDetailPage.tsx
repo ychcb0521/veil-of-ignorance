@@ -1,12 +1,14 @@
 import { type ChangeEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, Flag, Layers, Sparkles, Target, Trash2, TrendingUp } from 'lucide-react';
+import { ArrowLeft, Flag, Info, Layers, Sparkles, Target, Trash2, TrendingUp } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Switch } from '@/components/ui/switch';
 import { Textarea } from '@/components/ui/textarea';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { ReplayCandleChart, type ChartMarker, type TimeBoundPriceLine, type VerticalLine } from '@/components/journal/ReplayCandleChart';
 import { StateMachineTimeline } from '@/components/journal/StateMachineTimeline';
 import { CampaignLegsList } from '@/components/journal/CampaignLegsList';
@@ -27,6 +29,7 @@ import {
 } from '@/lib/campaignAnalysis';
 import {
   deleteCounterfactual,
+  detachJournalFromCampaign,
   getCampaignFullData,
   listCounterfactuals,
   runAndPersistCustomCounterfactual,
@@ -339,6 +342,8 @@ export default function JournalCampaignDetailPage() {
   const [deviationCosts, setDeviationCosts] = useState<DeviationCost[]>([]);
   const [deviationLoading, setDeviationLoading] = useState(false);
   const [deviationHydrated, setDeviationHydrated] = useState(false);
+  const [detachTarget, setDetachTarget] = useState<TradeJournal | null>(null);
+  const [detaching, setDetaching] = useState(false);
   const sopRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -435,6 +440,16 @@ export default function JournalCampaignDetailPage() {
     () => counterfactuals.some(branch => branch.branch_kind === 'pure_sop'),
     [counterfactuals],
   );
+  const historicalClassifiedIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const event of campaign.actual_evolution) {
+      if (event.journal_id && event.notes?.includes('classified retroactively')) {
+        ids.add(event.journal_id);
+      }
+    }
+    return ids;
+  }, [campaign.actual_evolution]);
+  const historicalClassifiedCount = historicalClassifiedIds.size;
 
   useEffect(() => {
     if (!pureSopDefaults) return;
@@ -482,6 +497,14 @@ export default function JournalCampaignDetailPage() {
   const otherCount = Math.max(0, legs.length - mainCount - hedgeCount - tpCount);
   const actualPnl = campaign.final_realized_pnl ?? 0;
   const totalDeviationCost = deviationCosts.reduce((sum, item) => sum + item.cost_usdt, 0);
+
+  const refreshCampaign = async () => {
+    const full = await getCampaignFullData(campaign.id);
+    setCampaign(full.campaign);
+    setLegs(full.legs);
+    setTradeRecords(full.tradeRecords);
+    setPendingOrders(full.pendingOrders);
+  };
 
   const reloadCounterfactuals = async (keepSelectionId?: string | null) => {
     const next = await listCounterfactuals(campaign.id);
@@ -632,6 +655,19 @@ export default function JournalCampaignDetailPage() {
             <div>结束：{fmtMdHm(campaign.closed_at)}</div>
             <div>持续时间：{fmtDuration(campaign.opened_at, campaign.closed_at)}</div>
             <div>legs 数：{legs.length} (主仓 {mainCount} / 对冲 {hedgeCount} / TP {tpCount} / 其他 {otherCount})</div>
+            <div className="flex items-center gap-1.5">
+              <span>本战役 legs 中含 {historicalClassifiedCount} 个历史归类项</span>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button type="button" className="text-muted-foreground hover:text-foreground">
+                    <Info className="w-3.5 h-3.5" />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent className="max-w-[260px] text-[11px]">
+                  历史归类的 legs 缺少实时记录的 hedge_cancelled / hedge_placed 事件，可能影响 SOP 评分准确性。
+                </TooltipContent>
+              </Tooltip>
+            </div>
           </div>
 
           <div className="bg-card border border-border rounded p-4 space-y-2 text-[12px]">
@@ -731,7 +767,7 @@ export default function JournalCampaignDetailPage() {
               <Layers className="w-4 h-4 text-muted-foreground" />
               Legs 列表
             </div>
-            <CampaignLegsList legs={legs} tradeRecords={tradeRecords} />
+            <CampaignLegsList legs={legs} tradeRecords={tradeRecords} onDetach={setDetachTarget} />
           </div>
           <div className="space-y-3">
             <div className="flex items-center gap-2 text-[13px] font-medium">
@@ -750,6 +786,7 @@ export default function JournalCampaignDetailPage() {
           <SopDeviationCard
             result={sop}
             active={campaign.status === 'active'}
+            historicalWarning={historicalClassifiedCount > 0}
             onJumpToEvent={(eventIds) => {
               const event = chart.events.find((item: typeof chart.events[number]) => eventIds.includes(item.id));
               if (event) setFocusTime(new Date(event.timestamp).getTime());
@@ -1121,14 +1158,46 @@ export default function JournalCampaignDetailPage() {
           accuracy={accuracy}
           currentSimulatedTime={getEffectiveTime(campaign.symbol)}
           onClosed={async () => {
-            const full = await getCampaignFullData(campaign.id);
-            setCampaign(full.campaign);
-            setLegs(full.legs);
-            setTradeRecords(full.tradeRecords);
-            setPendingOrders(full.pendingOrders);
+            await refreshCampaign();
             toast.success('战役已结束');
           }}
         />
+        <Dialog open={!!detachTarget} onOpenChange={(open) => { if (!open) setDetachTarget(null); }}>
+          <DialogContent className="max-w-[520px]">
+            <DialogHeader>
+              <DialogTitle>解除该 leg 归属</DialogTitle>
+              <DialogDescription className="text-[12px] leading-relaxed">
+                解除后该 journal 将变为未归属状态，可重新归类。
+                战役的 actual_evolution 中将保留一条“leg 解除”的记录。
+                其他 legs 与战役 SOP 评分不受影响（但分数会因 leg 缺失而重新计算）。
+              </DialogDescription>
+            </DialogHeader>
+            <DialogFooter>
+              <Button variant="ghost" onClick={() => setDetachTarget(null)}>取消</Button>
+              <Button
+                variant="outline"
+                className="border-[#F6465D]/40 text-[#F6465D] hover:bg-[#F6465D]/10"
+                disabled={!detachTarget || detaching}
+                onClick={async () => {
+                  if (!detachTarget) return;
+                  try {
+                    setDetaching(true);
+                    await detachJournalFromCampaign(detachTarget.id);
+                    await refreshCampaign();
+                    setDetachTarget(null);
+                    toast.success('该 leg 已解除归属');
+                  } catch (error) {
+                    toast.error(error instanceof Error ? error.message : String(error));
+                  } finally {
+                    setDetaching(false);
+                  }
+                }}
+              >
+                确认解除
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </main>
     </div>
   );
