@@ -527,6 +527,39 @@ export default function GuidePage() {
                 <P>战役可以通过以下两种方式创建：</P>
                 <P>(A) <strong>实时创建</strong>：每次开主力单时，开仓快照会自动询问“战役归属”。这种来源的战役 actual_evolution 事件最完整。</P>
                 <P>(B) <strong>历史归类</strong>：通过 <code>/journal/campaigns/classify</code> 页面，把已有的 journal 手动归类。这种来源的战役会丢失部分事件（如 hedge_cancelled 与 hedge_placed 的精确时机），SOP 评分仅供参考。</P>
+                <P><strong>第三种来源：裸 TradeRecord 回填归类</strong></P>
+                <P>如果你在快照系统启用前已经有大量历史交易，这些 TradeRecord 没有对应的 trade_journal。本系统支持把它们直接归类。在 <code>/journal/campaigns/classify</code> 页面选中裸 record 时，系统会：</P>
+                <ol className="list-decimal pl-6 text-[14px] text-foreground/90 space-y-1">
+                  <li>自动为每条 record 生成最小化 journal（<code>source='retroactive_from_record'</code>）</li>
+                  <li>把该 journal 关联到指定战役</li>
+                  <li>journal 的 pre_* 字段（理由、心态、风险认识等）全部为空</li>
+                  <li>该 journal 在所有视图中显示“[历史回填]”标识</li>
+                </ol>
+                <P><strong>回填 journal 的局限性（严格）</strong></P>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-[11px] my-3 border border-border rounded overflow-hidden">
+                    <thead className="bg-muted/50">
+                      <tr>
+                        <th className="text-left px-3 py-2 font-medium text-foreground text-[10px]">维度</th>
+                        <th className="text-left px-3 py-2 font-medium text-foreground text-[10px]">实时 journal</th>
+                        <th className="text-left px-3 py-2 font-medium text-foreground text-[10px]">回填 journal</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr><td className="px-3 py-2 border-t border-border">开仓决策记录</td><td className="px-3 py-2 border-t border-border">完整</td><td className="px-3 py-2 border-t border-border">完全缺失</td></tr>
+                      <tr><td className="px-3 py-2 border-t border-border">心态/风险认识</td><td className="px-3 py-2 border-t border-border">完整</td><td className="px-3 py-2 border-t border-border">缺失</td></tr>
+                      <tr><td className="px-3 py-2 border-t border-border">Checklist 通过</td><td className="px-3 py-2 border-t border-border">已记录</td><td className="px-3 py-2 border-t border-border">视为未参与</td></tr>
+                      <tr><td className="px-3 py-2 border-t border-border">SOP 偏离度评分参与</td><td className="px-3 py-2 border-t border-border">是</td><td className="px-3 py-2 border-t border-border"><strong>跳过该 leg</strong></td></tr>
+                      <tr><td className="px-3 py-2 border-t border-border">反事实回放</td><td className="px-3 py-2 border-t border-border">可用</td><td className="px-3 py-2 border-t border-border">可用（基于 K 线）</td></tr>
+                      <tr><td className="px-3 py-2 border-t border-border">决策准确性指标</td><td className="px-3 py-2 border-t border-border">准确</td><td className="px-3 py-2 border-t border-border">准确（基于 K 线）</td></tr>
+                    </tbody>
+                  </table>
+                </div>
+                <div className="rounded border border-[#F6465D]/40 bg-[#F6465D]/8 p-4 text-[14px] leading-relaxed text-foreground">
+                  裸 record 回填的本质是“让历史数据进入战役视野”，不是“重建当时的决策记录”。
+                  当时你为什么开那一仓，永远地丢失了。系统不会假装它知道。
+                  所以回填 journal 的 SOP 评分跳过该 leg，而不是给一个假分数。
+                </div>
                 <P><strong>实时归类 vs 历史归类的差异</strong></P>
                 <div className="overflow-x-auto">
                   <table className="w-full text-[11px] my-3 border border-border rounded overflow-hidden">

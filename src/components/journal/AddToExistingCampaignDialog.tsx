@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { LegRoleChip } from '@/components/journal/LegRoleChip';
 import { getAssignableLegRoles, LEG_ROLE_LABELS } from '@/lib/strategyTemplates';
-import { batchAttachToCampaign, suggestLegRoles, validateClassification } from '@/lib/journalApi';
+import { batchAttachToCampaign, batchBackfillAndAttach, suggestLegRoles, validateClassification } from '@/lib/journalApi';
 import type {
   ClassificationValidationResult,
   LegRole,
@@ -13,12 +13,13 @@ import type {
   TradeCampaign,
   TradeJournal,
 } from '@/types/journal';
+import type { ClassifiableItem, ClassifiableSuggestion } from '@/types/journalClassification';
 
 interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   campaigns: Array<{ campaign: TradeCampaign; legs: TradeJournal[] }>;
-  journals: TradeJournal[];
+  items: ClassifiableItem[];
   symbol: string;
   onAttached: (campaignId: string) => void;
 }
@@ -35,21 +36,89 @@ function fmtLabel(iso: string) {
   return `${pad(d.getMonth() + 1)}/${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
+function itemTimeMs(item: ClassifiableItem) {
+  return item.kind === 'journal'
+    ? new Date(item.journal.pre_simulated_time).getTime()
+    : (item.record.openTime || item.record.closeTime || 0);
+}
+
+function itemTimeLabel(item: ClassifiableItem) {
+  return fmtLabel(item.kind === 'journal' ? item.journal.pre_simulated_time : new Date(item.record.openTime).toISOString());
+}
+
+function itemSymbol(item: ClassifiableItem) {
+  return item.kind === 'journal' ? item.journal.symbol : item.record.symbol;
+}
+
+function itemDirection(item: ClassifiableItem): 'long' | 'short' {
+  if (item.kind === 'journal') return item.journal.direction === 'short' ? 'short' : 'long';
+  return item.record.side === 'SHORT' ? 'short' : 'long';
+}
+
+function itemEntryPrice(item: ClassifiableItem) {
+  return item.kind === 'journal' ? item.journal.pre_entry_price ?? 0 : item.record.entryPrice;
+}
+
+function itemPositionSize(item: ClassifiableItem) {
+  return item.kind === 'journal'
+    ? item.journal.pre_position_size
+    : item.record.entryPrice * item.record.quantity;
+}
+
 function occupiedRolesLabel(legs: TradeJournal[]): LegRole[] {
   return legs.map(leg => leg.leg_role).filter((role): role is LegRole => !!role);
+}
+
+function buildMixedValidation(
+  ordered: ClassifiableItem[],
+  target: { campaign: TradeCampaign; legs: TradeJournal[] } | null,
+  targetCampaignId: string,
+  roleMap: Record<string, LegRole | ''>,
+): ClassificationValidationResult {
+  const errors: string[] = [];
+  const warnings: string[] = [];
+  if (!target || !targetCampaignId) return { ok: false, errors: ['请选择目标战役'], warnings };
+
+  const assigned = ordered.filter(item => roleMap[item.id]).map(item => ({ item, role: roleMap[item.id] as LegRole }));
+  const symbols = new Set(ordered.map(itemSymbol));
+  if (symbols.size > 1) errors.push('选中项跨多个 symbol');
+  if (ordered.some(item => itemSymbol(item) !== target.campaign.symbol)) {
+    errors.push('目标战役与选中项 symbol 不一致');
+  }
+
+  const selectedMain = assigned.find(item => item.role === 'main_open') ?? null;
+  const existingMain = target.legs.find(leg => leg.leg_role === 'main_open') ?? null;
+  if (existingMain && selectedMain) errors.push('目标战役已有 main_open，本次不能再次添加 main_open');
+
+  if (assigned.some(item => itemTimeMs(item.item) < new Date(target.campaign.opened_at).getTime())) {
+    errors.push('leg 时间不能早于战役开始时间');
+  }
+
+  if (selectedMain) {
+    const nextDirection = itemDirection(selectedMain.item) === 'short' ? 'main_short' : 'main_long';
+    if (nextDirection !== target.campaign.direction) errors.push('方向冲突');
+  }
+
+  const combinedSpan = [...target.legs.map(leg => new Date(leg.pre_simulated_time).getTime()), ...assigned.map(item => itemTimeMs(item.item))]
+    .sort((a, b) => a - b);
+  if (combinedSpan.length > 1 && combinedSpan[combinedSpan.length - 1] - combinedSpan[0] > 7 * 24 * 60 * 60 * 1000) {
+    warnings.push('选中 legs 时间跨度 > 7 天（异常长战役）');
+  }
+
+  return { ok: errors.length === 0, errors, warnings };
 }
 
 export function AddToExistingCampaignDialog({
   open,
   onOpenChange,
   campaigns,
-  journals,
+  items,
   symbol,
   onAttached,
 }: Props) {
-  const orderedJournals = useMemo(
-    () => [...journals].sort((a, b) => new Date(a.pre_simulated_time).getTime() - new Date(b.pre_simulated_time).getTime()),
-    [journals],
+  const orderedItems = useMemo(
+    () => [...items].sort((a, b) => itemTimeMs(a) - itemTimeMs(b)),
+    [items],
   );
   const sortedCampaigns = useMemo(() => {
     return [...campaigns].sort((a, b) => {
@@ -65,18 +134,45 @@ export function AddToExistingCampaignDialog({
   const [submitting, setSubmitting] = useState(false);
 
   const target = sortedCampaigns.find(item => item.campaign.id === targetCampaignId) ?? null;
+  const orphanCount = useMemo(() => orderedItems.filter(item => item.kind === 'orphanRecord').length, [orderedItems]);
   const suggestions = useMemo(() => {
-    const base = suggestLegRoles(orderedJournals);
-    if (!target) return base;
+    const base: SuggestedLegRole[] = suggestLegRoles(orderedItems.flatMap(item => item.kind === 'journal' ? [item.journal] : []));
+    const baseMap = new Map<string, SuggestedLegRole>(base.map(item => [item.journalId, item] as const));
+    const normalized: ClassifiableSuggestion[] = orderedItems.map(item => {
+      if (item.kind === 'orphanRecord') {
+        return {
+          itemId: item.id,
+          suggestedRole: 'main_open',
+          confidence: 'low',
+          reason: '裸 record 缺少开仓快照，默认建议先作为 main_open 归类',
+        };
+      }
+      const suggestion = baseMap.get(item.journal.id);
+      if (!suggestion) {
+        return {
+          itemId: item.id,
+          suggestedRole: 'main_open',
+          confidence: 'low',
+          reason: '未能推断角色，默认建议 main_open',
+        };
+      }
+      return {
+        itemId: item.id,
+        suggestedRole: suggestion.suggestedRole,
+        confidence: suggestion.confidence,
+        reason: suggestion.reason,
+      };
+    });
+    if (!target) return normalized;
     const occupied = new Set(occupiedRolesLabel(target.legs));
-    return base.map(item => {
+    return normalized.map(item => {
       if (item.suggestedRole === 'main_open' && occupied.has('main_open')) {
         return { ...item, suggestedRole: 'reentry_main', confidence: 'low' as const, reason: '目标战役已有 main_open，改建议为 reentry_main' };
       }
       return item;
     });
-  }, [orderedJournals, target]);
-  const suggestionMap = useMemo(() => new Map(suggestions.map(item => [item.journalId, item])), [suggestions]);
+  }, [orderedItems, target]);
+  const suggestionMap = useMemo(() => new Map(suggestions.map(item => [item.itemId, item])), [suggestions]);
 
   useEffect(() => {
     if (!open) return;
@@ -86,25 +182,30 @@ export function AddToExistingCampaignDialog({
 
   useEffect(() => {
     if (!open || !targetCampaignId || !target) return;
-    const activeRoles = orderedJournals
-      .filter(journal => roleMap[journal.id])
-      .map(journal => ({ journalId: journal.id, legRole: roleMap[journal.id] as LegRole }));
     let cancelled = false;
     (async () => {
-      const next = await validateClassification({
-        legs: activeRoles,
-        strategyTemplate: target.campaign.strategy_template,
-        targetCampaignId,
-      });
+      let next: ClassificationValidationResult;
+      if (orphanCount === 0) {
+        const activeRoles = orderedItems
+          .filter((item): item is Extract<ClassifiableItem, { kind: 'journal' }> => item.kind === 'journal' && !!roleMap[item.id])
+          .map(item => ({ journalId: item.journal.id, legRole: roleMap[item.id] as LegRole }));
+        next = await validateClassification({
+          legs: activeRoles,
+          strategyTemplate: target.campaign.strategy_template,
+          targetCampaignId,
+        });
+      } else {
+        next = buildMixedValidation(orderedItems, target, targetCampaignId, roleMap);
+      }
       if (!cancelled) setValidation(next);
     })();
     return () => {
       cancelled = true;
     };
-  }, [open, orderedJournals, roleMap, targetCampaignId, target]);
+  }, [open, orderedItems, orphanCount, roleMap, targetCampaignId, target]);
 
   const occupied = new Set(target ? occupiedRolesLabel(target.legs) : []);
-  const allAssigned = orderedJournals.every(journal => !!roleMap[journal.id]);
+  const allAssigned = orderedItems.every(item => !!roleMap[item.id]);
   const roleOptions = getAssignableLegRoles(target?.campaign.strategy_template ?? 'main_dual_hedge_mirror_tp');
 
   return (
@@ -113,11 +214,17 @@ export function AddToExistingCampaignDialog({
         <DialogHeader>
           <DialogTitle>加入现有战役</DialogTitle>
           <DialogDescription className="text-[11px]">
-            选择目标战役后，为当前选中的历史 journals 指定角色。
+            选择目标战役后，为当前选中的归类项指定角色。
           </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4">
+          {orphanCount > 0 && (
+            <div className="rounded border border-[#F0B90B]/30 bg-[#F0B90B]/10 px-3 py-2 text-[11px] text-[#F0B90B]">
+              本次选中含 {orphanCount} 个裸 records，归类时将自动回填为最小化 journal。
+              这些回填 journal 缺少开仓决策信息（理由/心态/风险认识），在战役复盘中会显示“[历史回填]”标识。
+            </div>
+          )}
           {sortedCampaigns.length === 0 ? (
             <div className="rounded border border-border bg-muted/30 px-4 py-4 text-[12px] text-muted-foreground">
               该标的下无可加入的活动战役，请选择“归类为新战役”。
@@ -158,8 +265,9 @@ export function AddToExistingCampaignDialog({
                   <thead className="bg-muted/30 text-muted-foreground">
                     <tr>
                       <th className="px-2 py-2 text-left">#</th>
-                      <th className="px-2 py-2 text-left">时间</th>
                       <th className="px-2 py-2 text-left">类型</th>
+                      <th className="px-2 py-2 text-left">时间</th>
+                      <th className="px-2 py-2 text-left">订单类型</th>
                       <th className="px-2 py-2 text-left">方向</th>
                       <th className="px-2 py-2 text-left">价格</th>
                       <th className="px-2 py-2 text-left">仓位</th>
@@ -168,18 +276,24 @@ export function AddToExistingCampaignDialog({
                     </tr>
                   </thead>
                   <tbody>
-                    {orderedJournals.map((journal, index) => {
-                      const suggestion = suggestionMap.get(journal.id);
+                    {orderedItems.map((item, index) => {
+                      const suggestion = suggestionMap.get(item.id);
+                      const direction = itemDirection(item);
                       return (
-                        <tr key={journal.id} className="border-t border-border">
+                        <tr key={item.id} className="border-t border-border">
                           <td className="px-2 py-2">{index + 1}</td>
-                          <td className="px-2 py-2 font-mono">{fmtLabel(journal.pre_simulated_time)}</td>
-                          <td className="px-2 py-2">{journal.order_kind === 'main' ? '主力' : '对冲'}</td>
-                          <td className={`px-2 py-2 ${journal.direction === 'short' ? 'text-[#F6465D]' : 'text-[#0ECB81]'}`}>
-                            {journal.direction === 'short' ? 'SHORT' : 'LONG'}
+                          <td className="px-2 py-2">
+                            <span className={`inline-flex items-center rounded px-2 py-0.5 text-[10px] ${item.kind === 'journal' ? 'bg-[#0ECB81]/15 text-[#0ECB81]' : 'bg-[#F0B90B]/15 text-[#F0B90B]'}`}>
+                              {item.kind === 'journal' ? 'journal' : '裸 record'}
+                            </span>
                           </td>
-                          <td className="px-2 py-2 font-mono">{(journal.pre_entry_price ?? 0).toFixed(4)}</td>
-                          <td className="px-2 py-2 font-mono">{journal.pre_position_size?.toFixed(2) ?? '—'}</td>
+                          <td className="px-2 py-2 font-mono">{itemTimeLabel(item)}</td>
+                          <td className="px-2 py-2">{item.kind === 'journal' ? (item.journal.order_kind === 'main' ? '主力' : '对冲') : '历史成交'}</td>
+                          <td className={`px-2 py-2 ${direction === 'short' ? 'text-[#F6465D]' : 'text-[#0ECB81]'}`}>
+                            {direction === 'short' ? 'SHORT' : 'LONG'}
+                          </td>
+                          <td className="px-2 py-2 font-mono">{itemEntryPrice(item).toFixed(4)}</td>
+                          <td className="px-2 py-2 font-mono">{itemPositionSize(item)?.toFixed(2) ?? '—'}</td>
                           <td className="px-2 py-2">
                             {suggestion ? (
                               <span title={suggestion.reason} className="inline-flex items-center gap-1 rounded bg-background px-2 py-1">
@@ -190,11 +304,11 @@ export function AddToExistingCampaignDialog({
                           </td>
                           <td className="px-2 py-2">
                             <select
-                              value={roleMap[journal.id] ?? ''}
+                              value={roleMap[item.id] ?? ''}
                               onChange={(e: ChangeEvent<HTMLSelectElement>) => {
                                 setRoleMap(prev => ({
                                   ...prev,
-                                  [journal.id]: e.target.value as LegRole,
+                                  [item.id]: e.target.value as LegRole,
                                 }));
                               }}
                               className="h-9 min-w-[160px] rounded border border-border bg-background px-2 text-[11px]"
@@ -237,16 +351,42 @@ export function AddToExistingCampaignDialog({
               if (!target) return;
               try {
                 setSubmitting(true);
-                await batchAttachToCampaign(
-                  target.campaign.id,
-                  orderedJournals.map((journal, index) => ({
-                    journalId: journal.id,
-                    legRole: roleMap[journal.id] as LegRole,
-                    legSequence: target.legs.length + index + 1,
-                    attachNote: 'classified retroactively',
-                  })),
+                const orderedAssignments = orderedItems.map((item, index) => ({
+                  item,
+                  legRole: roleMap[item.id] as LegRole,
+                  legSequence: target.legs.length + index + 1,
+                }));
+                const journalAssignments = orderedAssignments.filter(
+                  (item): item is typeof item & { item: Extract<ClassifiableItem, { kind: 'journal' }> } => item.item.kind === 'journal',
                 );
-                toast.success('历史 journals 已加入现有战役');
+                const orphanAssignments = orderedAssignments.filter(
+                  (item): item is typeof item & { item: Extract<ClassifiableItem, { kind: 'orphanRecord' }> } => item.item.kind === 'orphanRecord',
+                );
+
+                if (journalAssignments.length > 0) {
+                  await batchAttachToCampaign(
+                    target.campaign.id,
+                    journalAssignments.map(({ item, legRole, legSequence }) => ({
+                      journalId: item.journal.id,
+                      legRole,
+                      legSequence,
+                      attachNote: 'classified retroactively',
+                    })),
+                  );
+                }
+                if (orphanAssignments.length > 0) {
+                  await batchBackfillAndAttach(
+                    orphanAssignments.map(({ item }) => item.record),
+                    orphanAssignments.map(({ item, legRole, legSequence }) => ({
+                      recordId: item.record.id,
+                      legRole,
+                      legSequence,
+                      attachNote: 'classified retroactively',
+                    })),
+                    target.campaign.id,
+                  );
+                }
+                toast.success('历史归类项已加入现有战役');
                 onOpenChange(false);
                 onAttached(target.campaign.id);
               } catch (error) {

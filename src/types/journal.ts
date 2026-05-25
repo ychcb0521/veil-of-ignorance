@@ -27,6 +27,7 @@ export type TradeOutcome = "win" | "loss" | "breakeven" | "no_entry";
 export type TaggedPhase = "pre" | "post";
 export type PositionMode = "cross" | "isolated";
 export type OrderKind = "main" | "hedge";
+export type JournalSource = 'live' | 'retroactive_from_record';
 export type CampaignStatus =
   | 'planned'
   | 'active'
@@ -258,6 +259,7 @@ export interface TradeJournal {
   campaign_id: string | null;
   leg_role: LegRole | null;
   leg_sequence: number | null;
+  source: JournalSource;
   symbol: string;
   direction: TradeDirection;
   leverage: number | null;

@@ -1,8 +1,9 @@
 import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { AlertTriangle } from 'lucide-react';
+import { AlertTriangle, RotateCcw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { ExitMethodBadge } from './ExitMethodBadge';
 import { useTradingContext } from '@/contexts/TradingContext';
 import { formatPrice } from '@/lib/formatters';
@@ -97,6 +98,16 @@ export function JournalTimelineList({ journals, assignments, patterns }: Props) 
             <div key={j.id} className={`grid ${COLS} px-3 py-2 text-[11px] font-mono border-b border-border/40 hover:bg-accent items-center min-w-[1100px]`}>
               <span className="flex items-center gap-1">
                 {j.reason_was_rewritten && <AlertTriangle className="w-3 h-3 text-[#F0B90B]" />}
+                {j.source === 'retroactive_from_record' && (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <span className="inline-flex">
+                        <RotateCcw className="w-3 h-3 text-muted-foreground" />
+                      </span>
+                    </TooltipTrigger>
+                    <TooltipContent className="text-[11px]">历史回填</TooltipContent>
+                  </Tooltip>
+                )}
                 {openT ?? <span className="text-muted-foreground">—</span>}
               </span>
               <span>{closeT ?? <span className="text-muted-foreground">—</span>}</span>

@@ -214,6 +214,18 @@ function journalTimeMs(journal: Pick<TradeJournal, 'pre_simulated_time'>): numbe
   return new Date(journal.pre_simulated_time).getTime();
 }
 
+function tradeRecordTimeMs(record: Pick<TradeRecord, 'openTime' | 'closeTime'>): number {
+  return record.openTime || record.closeTime || 0;
+}
+
+function tradeRecordDirection(record: Pick<TradeRecord, 'side'>): TradeJournal['direction'] {
+  return record.side === 'SHORT' ? 'short' : 'long';
+}
+
+function tradeRecordPositionSize(record: Pick<TradeRecord, 'entryPrice' | 'quantity'>): number {
+  return Math.abs(record.entryPrice * record.quantity);
+}
+
 function toCampaignDirection(direction: TradeJournal['direction']): TradeCampaign['direction'] {
   return direction === 'short' ? 'main_short' : 'main_long';
 }
@@ -413,6 +425,14 @@ export async function closeCampaign(
   return updateCampaign(id, finalState);
 }
 
+export async function deleteCampaign(id: string): Promise<void> {
+  const { error } = await supabase
+    .from('trade_campaigns' as never)
+    .delete()
+    .eq('id', id);
+  if (error) throw new Error(`删除战役失败：${error.message}`);
+}
+
 export async function listActiveCampaigns(userId: string, symbol?: string): Promise<TradeCampaign[]> {
   let q = supabase
     .from('trade_campaigns' as never)
@@ -601,6 +621,183 @@ export async function listUnclassifiedJournals(
   return wrap('加载待归类 journals', error, (data ?? []) as unknown as TradeJournal[]);
 }
 
+export interface ListUnclassifiedItemsFilters {
+  symbol?: string;
+  dateFrom?: string;
+  dateTo?: string;
+  includeClassified?: boolean;
+}
+
+export interface BackfillJournalOptions {
+  campaignId?: string | null;
+  legRole?: LegRole | null;
+  legSequence?: number | null;
+  attachNote?: string | null;
+}
+
+export interface BackfillAssignmentInput {
+  recordId: string;
+  legRole: LegRole;
+  legSequence?: number | null;
+  attachNote?: string | null;
+}
+
+function isTradeRecordClassifiable(record: TradeRecord): boolean {
+  return record.action === 'CLOSE' || record.action === 'LIQUIDATION';
+}
+
+function matchesTradeRecordFilters(record: TradeRecord, filters: Omit<ListUnclassifiedItemsFilters, 'includeClassified'>): boolean {
+  if (filters.symbol && record.symbol !== filters.symbol) return false;
+  const timeMs = tradeRecordTimeMs(record);
+  if (filters.dateFrom && timeMs < new Date(`${filters.dateFrom}T00:00:00`).getTime()) return false;
+  if (filters.dateTo && timeMs > new Date(`${filters.dateTo}T23:59:59`).getTime()) return false;
+  return true;
+}
+
+export async function listOrphanTradeRecords(
+  userId: string,
+  filters: Omit<ListUnclassifiedItemsFilters, 'includeClassified'> = {},
+): Promise<TradeRecord[]> {
+  const tradeHistory = readUserScopedStorage<TradeRecord[]>(userId, 'trade_history', [])
+    .filter(isTradeRecordClassifiable);
+  const { data, error } = await supabase
+    .from('trade_journals' as never)
+    .select('trade_record_id')
+    .eq('user_id', userId)
+    .not('trade_record_id', 'is', null);
+  const linked = wrap(
+    '加载已关联 trade_record',
+    error,
+    (data ?? []) as Array<{ trade_record_id: string | null }>,
+  );
+  const linkedIds = new Set(linked.map(row => row.trade_record_id).filter((value): value is string => Boolean(value)));
+  return tradeHistory
+    .filter(record => !linkedIds.has(record.id))
+    .filter(record => matchesTradeRecordFilters(record, filters))
+    .sort((a, b) => tradeRecordTimeMs(b) - tradeRecordTimeMs(a));
+}
+
+export async function backfillJournalFromRecord(
+  record: TradeRecord,
+  options: BackfillJournalOptions = {},
+): Promise<TradeJournal> {
+  if (!isTradeRecordClassifiable(record)) {
+    throw new Error('仅已成交/已平仓的 TradeRecord 可以回填为 journal');
+  }
+
+  const { data: auth } = await supabase.auth.getUser();
+  const userId = auth.user?.id;
+  if (!userId) throw new Error('回填 journal 失败：用户未登录');
+
+  const existing = await listJournalsByTradeRecordId(userId, record.id);
+  if (existing.length > 0) {
+    throw new Error('该 TradeRecord 已存在对应 journal，无需重复回填');
+  }
+
+  const payload = {
+    user_id: userId,
+    trade_record_id: record.id,
+    campaign_id: options.campaignId ?? null,
+    leg_role: options.legRole ?? null,
+    leg_sequence: options.legSequence ?? null,
+    symbol: record.symbol,
+    direction: tradeRecordDirection(record),
+    leverage: record.leverage,
+    position_mode: 'isolated' as const,
+    order_kind: 'main' as const,
+    source: 'retroactive_from_record' as const,
+    pre_simulated_time: new Date(tradeRecordTimeMs(record)).toISOString(),
+    pre_real_time: new Date().toISOString(),
+    pre_entry_price: record.entryPrice,
+    pre_planned_stop_loss: null,
+    pre_planned_take_profit: null,
+    pre_entry_reason: '[历史回填] 该交易在快照系统启用前发生，原始决策信息已缺失',
+    pre_mental_state: 3 as const,
+    pre_mental_trigger: null,
+    pre_risk_awareness: null,
+    pre_risk_management: null,
+    pre_checklist_items: null,
+    pre_checklist_passed: null,
+    pre_position_size: tradeRecordPositionSize(record),
+    pre_max_loss_usdt: null,
+    post_outcome: record.pnl > 0 ? 'win' : record.pnl < 0 ? 'loss' : 'breakeven',
+    post_realized_pnl: record.pnl,
+    post_r_multiple: null,
+    post_reflection: null,
+    post_correct_action: null,
+    post_reviewed_at: null,
+    reason_was_rewritten: false,
+  };
+
+  const { data, error } = await supabase
+    .from('trade_journals' as never)
+    .insert(payload as never)
+    .select()
+    .single();
+  return wrap('回填最小化 journal', error, data as unknown as TradeJournal);
+}
+
+export async function batchBackfillAndAttach(
+  records: TradeRecord[],
+  assignments: BackfillAssignmentInput[],
+  campaignId: string,
+): Promise<TradeJournal[]> {
+  if (records.length === 0) return [];
+
+  const assignmentMap = new Map(assignments.map(item => [item.recordId, item]));
+  const created: TradeJournal[] = [];
+
+  try {
+    for (const record of records) {
+      const assignment = assignmentMap.get(record.id);
+      if (!assignment) {
+        throw new Error(`缺少 TradeRecord ${record.id} 的归类角色`);
+      }
+      const journal = await backfillJournalFromRecord(record, {
+        attachNote: assignment.attachNote ?? null,
+      });
+      created.push(journal);
+    }
+
+    await batchAttachToCampaign(
+      campaignId,
+      created.map((journal) => {
+        const assignment = assignmentMap.get(journal.trade_record_id ?? '');
+        if (!assignment) {
+          throw new Error(`缺少 journal ${journal.id} 的归类角色`);
+        }
+        return {
+          journalId: journal.id,
+          legRole: assignment.legRole,
+          legSequence: assignment.legSequence ?? null,
+          attachNote: assignment.attachNote ?? RETRO_CLASSIFY_NOTE,
+        };
+      }),
+    );
+
+    return getJournalsByIds(created.map(journal => journal.id));
+  } catch (error) {
+    if (created.length > 0) {
+      await supabase
+        .from('trade_journals' as never)
+        .delete()
+        .in('id', created.map(journal => journal.id));
+    }
+    throw error instanceof Error ? error : new Error(String(error));
+  }
+}
+
+export async function listUnclassifiedItems(
+  userId: string,
+  filters: ListUnclassifiedItemsFilters = {},
+): Promise<{ journals: TradeJournal[]; orphanRecords: TradeRecord[] }> {
+  const [journals, orphanRecords] = await Promise.all([
+    listUnclassifiedJournals(userId, filters),
+    listOrphanTradeRecords(userId, filters),
+  ]);
+  return { journals, orphanRecords };
+}
+
 export async function validateClassification(
   input: ClassificationValidationInput,
 ): Promise<ClassificationValidationResult> {
@@ -626,7 +823,7 @@ export async function validateClassification(
 
   for (const item of selected) {
     const allowedKinds = LEG_ROLE_ORDER_KIND_COMPATIBILITY[item.legRole];
-    if (!allowedKinds.includes(item.journal.order_kind)) {
+    if (item.journal.source !== 'retroactive_from_record' && !allowedKinds.includes(item.journal.order_kind)) {
       errors.push(`角色 ${item.legRole} 与 journal ${item.journal.id} 的 order_kind 不兼容`);
     }
   }
@@ -1216,6 +1413,7 @@ export type CreateJournalPreInput = Omit<
   | "post_reflection"
   | "post_correct_action"
   | "post_reviewed_at"
+  | "source"
   | "reason_was_rewritten"
   | "created_at"
   | "updated_at"
@@ -1233,7 +1431,7 @@ export async function updateJournalTradeRef(journalId: string, tradeRecordId: st
 }
 
 export async function createJournalPreSnapshot(input: CreateJournalPreInput): Promise<TradeJournal> {
-  const payload = { ...input, pre_real_time: new Date().toISOString() };
+  const payload = { ...input, pre_real_time: new Date().toISOString(), source: 'live' as const };
   const { data, error } = await supabase
     .from("trade_journals" as never)
     .insert(payload as never)

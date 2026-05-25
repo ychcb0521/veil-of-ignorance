@@ -95,6 +95,11 @@ function DecisionChannel() {
     <ChannelPanel num="②" title="决策" highlight={pulse}
       rightHint={replayTime >= tEntry ? '已发生' : '尚未发生'}>
       <div className="space-y-3 text-[12px]">
+        {journal.source === 'retroactive_from_record' && (
+          <div className="rounded border border-border bg-muted/50 px-3 py-2 text-[11px] text-muted-foreground">
+            该 journal 为历史回填，缺少开仓决策的原始记录。复现仅基于 K 线与 trade_record。
+          </div>
+        )}
         <div className="border-l-2 border-[#F0B90B] pl-3 text-foreground">
           {journal.pre_entry_reason || <span className="text-muted-foreground italic">无</span>}
         </div>

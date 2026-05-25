@@ -51,6 +51,7 @@ export interface SopDeviationResult {
   grade: 'A' | 'B' | 'C' | 'D' | 'F' | null;
   deductions: Deduction[];
   total_deductions: number;
+  retroactive_leg_count: number;
 }
 
 const HEDGE_ROLES: LegRole[] = ['hedge_initial_a', 'hedge_initial_b', 'hedge_rolling'];
@@ -450,6 +451,13 @@ function toleranceEqual(value: number | null, target: number | null, tolerancePc
   return Math.abs(value - target) / target <= tolerancePct;
 }
 
+function deductionCategoryForLeg(role: LegRole | null): Deduction['category'] {
+  if (role === 'mirror_tp') return 'lockin';
+  if (role === 'hedge_rolling') return 'rolling';
+  if (role === 'reentry_main' || role === 'reentry_hedge') return 'exit';
+  return 'setup';
+}
+
 export function computeSopDeviation(
   campaign: TradeCampaign,
   legs: TradeJournal[],
@@ -462,6 +470,7 @@ export function computeSopDeviation(
       grade: null,
       deductions: [],
       total_deductions: 0,
+      retroactive_leg_count: 0,
     };
   }
 
@@ -470,8 +479,20 @@ export function computeSopDeviation(
   const addDeduction = (category: Deduction['category'], points: number, reason: string, related_event_ids: string[]) => {
     deductions.push({ category, points, reason, related_event_ids });
   };
+  const retroactiveLegs = legs.filter(leg => leg.source === 'retroactive_from_record');
+  const retroactiveLegIds = new Set(retroactiveLegs.map(leg => leg.id));
+  const liveLegs = legs.filter(leg => leg.source !== 'retroactive_from_record');
 
-  const mainLeg = legs.find(leg => leg.leg_role === 'main_open') ?? legs.find(leg => leg.leg_role === 'reentry_main') ?? null;
+  for (const retroLeg of retroactiveLegs) {
+    addDeduction(
+      deductionCategoryForLeg(retroLeg.leg_role),
+      0,
+      `${retroLeg.leg_role ?? 'unknown'} 为历史回填，本项扣分跳过`,
+      [retroLeg.id],
+    );
+  }
+
+  const mainLeg = liveLegs.find(leg => leg.leg_role === 'main_open') ?? liveLegs.find(leg => leg.leg_role === 'reentry_main') ?? null;
   const mainSize = mainLeg ? legSize(mainLeg) : null;
   const mainLeverage = mainLeg?.leverage ?? campaign.initial_leverage ?? null;
   const requiredSetupRoles: LegRole[] = campaign.strategy_template === 'main_only'
@@ -486,18 +507,18 @@ export function computeSopDeviation(
 
   if (campaign.strategy_template === 'main_dual_hedge_mirror_tp' && mainSize != null) {
     for (const role of ['hedge_initial_a', 'hedge_initial_b'] as const) {
-      const leg = legs.find(item => item.leg_role === role) ?? null;
+      const leg = liveLegs.find(item => item.leg_role === role) ?? null;
       if (leg && !toleranceEqual(legSize(leg), mainSize * 0.5, 0.05)) {
         addDeduction('setup', 3, `${LEGEND[role]}仓位大小未对齐主仓 50%`, [leg.id]);
       }
     }
-    const mirrorLeg = legs.find(item => item.leg_role === 'mirror_tp') ?? null;
+    const mirrorLeg = liveLegs.find(item => item.leg_role === 'mirror_tp') ?? null;
     if (mirrorLeg && !toleranceEqual(legSize(mirrorLeg), mainSize * 0.5, 0.05)) {
       addDeduction('setup', 3, 'mirror_tp 仓位大小未对齐主仓 50%', [mirrorLeg.id]);
     }
   }
 
-  const setupLegs = legs.filter(leg =>
+  const setupLegs = liveLegs.filter(leg =>
     leg.leg_role === 'main_open' ||
     leg.leg_role === 'hedge_initial_a' ||
     leg.leg_role === 'hedge_initial_b' ||
@@ -510,7 +531,7 @@ export function computeSopDeviation(
     }
   }
 
-  const mirrorTriggered = events.find(event => event.event_type === 'mirror_tp_triggered') ?? null;
+  const mirrorTriggered = events.find(event => event.event_type === 'mirror_tp_triggered' && (!event.journal_id || !retroactiveLegIds.has(event.journal_id))) ?? null;
   if (campaign.strategy_template === 'main_dual_hedge_mirror_tp' && mirrorTriggered) {
     const tpMs = toMs(mirrorTriggered.timestamp);
     const cancelWithinFive = events.filter(event =>
@@ -524,15 +545,15 @@ export function computeSopDeviation(
     if (cancelWithinFive.length >= 2) {
       addDeduction('lockin', 15, 'mirror_tp 触发后取消了 2 个 hedge', cancelWithinFive.map(event => event.id));
     }
-    const mirrorLeg = legs.find(leg => leg.leg_role === 'mirror_tp') ?? null;
+    const mirrorLeg = liveLegs.find(leg => leg.leg_role === 'mirror_tp') ?? null;
     if (mirrorLeg && mainSize != null && !toleranceEqual(legSize(mirrorLeg), mainSize * 0.5, 0.05)) {
       addDeduction('lockin', 5, '主力部分平仓比例不等于 50%', [mirrorLeg.id]);
     }
   }
 
   if (campaign.strategy_template === 'main_dual_hedge_mirror_tp') {
-    const rollingLegs = legs.filter(leg => leg.leg_role === 'hedge_rolling').sort((a, b) => toMs(a.pre_simulated_time) - toMs(b.pre_simulated_time));
-    const orderedHedges = legs
+    const rollingLegs = liveLegs.filter(leg => leg.leg_role === 'hedge_rolling').sort((a, b) => toMs(a.pre_simulated_time) - toMs(b.pre_simulated_time));
+    const orderedHedges = liveLegs
       .filter(leg => leg.leg_role && [...HEDGE_ROLES, 'reentry_hedge'].includes(leg.leg_role))
       .sort((a, b) => toMs(a.pre_simulated_time) - toMs(b.pre_simulated_time));
     for (const rollingLeg of rollingLegs) {
@@ -561,7 +582,10 @@ export function computeSopDeviation(
     }
   }
 
-  const exitTrigger = events.find(event => event.event_type === 'hedge_triggered' || event.event_type === 'main_fully_closed') ?? null;
+  const exitTrigger = events.find(event =>
+    (event.event_type === 'hedge_triggered' || event.event_type === 'main_fully_closed') &&
+    (!event.journal_id || !retroactiveLegIds.has(event.journal_id)),
+  ) ?? null;
   if (exitTrigger) {
     const triggerMs = toMs(exitTrigger.timestamp);
     const nextDecision = events.find(event =>
@@ -608,6 +632,7 @@ export function computeSopDeviation(
     grade: gradeForScore(normalizedScore),
     deductions,
     total_deductions: deductions.reduce((sum, deduction) => sum + deduction.points, 0),
+      retroactive_leg_count: retroactiveLegs.length,
   };
 }
 

@@ -43,7 +43,14 @@ export function CampaignLegsList({ legs, tradeRecords, onDetach }: Props) {
             className="grid grid-cols-[48px_120px_1fr_96px_92px_88px_72px_150px] items-center text-[11px] font-mono py-2 px-3 border-b border-border/40 hover:bg-accent"
           >
             <div>{leg.leg_sequence ?? '—'}</div>
-            <div>{leg.leg_role ? <LegRoleChip role={leg.leg_role} /> : '—'}</div>
+            <div className="flex items-center gap-1.5">
+              {leg.leg_role ? <LegRoleChip role={leg.leg_role} /> : '—'}
+              {leg.source === 'retroactive_from_record' && (
+                <span className="inline-flex items-center rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
+                  回填
+                </span>
+              )}
+            </div>
             <div>{timeLabel}</div>
             <div>{(leg.pre_entry_price ?? record?.entryPrice ?? 0).toFixed(4)}</div>
             <div>{leg.pre_position_size != null ? leg.pre_position_size.toFixed(2) : '—'}</div>

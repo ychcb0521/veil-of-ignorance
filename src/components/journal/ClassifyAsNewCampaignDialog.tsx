@@ -6,19 +6,28 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { getAssignableLegRoles, LEG_ROLE_LABELS, STRATEGY_TEMPLATES } from '@/lib/strategyTemplates';
-import { createCampaignFromJournals, suggestLegRoles, validateClassification } from '@/lib/journalApi';
+import {
+  appendCampaignEvent,
+  batchAttachToCampaign,
+  batchBackfillAndAttach,
+  createCampaign,
+  createCampaignFromJournals,
+  deleteCampaign,
+  suggestLegRoles,
+  validateClassification,
+} from '@/lib/journalApi';
 import type {
   ClassificationValidationResult,
   LegRole,
   StrategyTemplate,
   SuggestedLegRole,
-  TradeJournal,
 } from '@/types/journal';
+import type { ClassifiableItem, ClassifiableSuggestion } from '@/types/journalClassification';
 
 interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  journals: TradeJournal[];
+  items: ClassifiableItem[];
   onCreated: (campaignId: string) => void;
 }
 
@@ -28,25 +37,114 @@ const CONFIDENCE_DOT: Record<SuggestedLegRole['confidence'], string> = {
   low: 'bg-muted-foreground',
 };
 
-function fmtLabel(iso: string) {
-  const d = new Date(iso);
+function fmtLabel(value: string | number) {
+  const d = new Date(value);
   const pad = (n: number) => String(n).padStart(2, '0');
   return `${pad(d.getMonth() + 1)}/${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
-function statusLabel(journal: TradeJournal) {
-  if (journal.trade_record_id) return '已成交';
-  return journal.order_kind === 'hedge' ? '未触发取消' : '挂单中';
+function itemTimeMs(item: ClassifiableItem) {
+  return item.kind === 'journal'
+    ? new Date(item.journal.pre_simulated_time).getTime()
+    : (item.record.openTime || item.record.closeTime || 0);
 }
 
-export function ClassifyAsNewCampaignDialog({ open, onOpenChange, journals, onCreated }: Props) {
+function itemTimeLabel(item: ClassifiableItem) {
+  return fmtLabel(item.kind === 'journal' ? item.journal.pre_simulated_time : item.record.openTime);
+}
+
+function itemSymbol(item: ClassifiableItem) {
+  return item.kind === 'journal' ? item.journal.symbol : item.record.symbol;
+}
+
+function itemDirection(item: ClassifiableItem): 'long' | 'short' {
+  if (item.kind === 'journal') return item.journal.direction === 'short' ? 'short' : 'long';
+  return item.record.side === 'SHORT' ? 'short' : 'long';
+}
+
+function itemEntryPrice(item: ClassifiableItem) {
+  return item.kind === 'journal' ? item.journal.pre_entry_price ?? 0 : item.record.entryPrice;
+}
+
+function itemPositionSize(item: ClassifiableItem) {
+  return item.kind === 'journal'
+    ? item.journal.pre_position_size
+    : item.record.entryPrice * item.record.quantity;
+}
+
+function statusLabel(item: ClassifiableItem) {
+  if (item.kind === 'orphanRecord') return '已成交';
+  if (item.journal.trade_record_id) return '已成交';
+  return item.journal.order_kind === 'hedge' ? '未触发取消' : '挂单中';
+}
+
+function buildMixedValidation(
+  ordered: ClassifiableItem[],
+  roleMap: Record<string, LegRole | ''>,
+  strategyTemplate: StrategyTemplate,
+): ClassificationValidationResult {
+  const errors: string[] = [];
+  const warnings: string[] = [];
+  const assigned = ordered.filter(item => roleMap[item.id]).map(item => ({ item, role: roleMap[item.id] as LegRole }));
+  const symbols = new Set(ordered.map(itemSymbol));
+  if (symbols.size > 1) errors.push('选中项跨多个 symbol');
+  if (strategyTemplate === 'main_dual_hedge_mirror_tp' && !assigned.some(item => item.role === 'main_open')) {
+    errors.push('main_dual_hedge_mirror_tp 模板必须包含 main_open 角色');
+  }
+  if (assigned.length > 1) {
+    const spanMs = itemTimeMs(assigned[assigned.length - 1].item) - itemTimeMs(assigned[0].item);
+    if (spanMs > 7 * 24 * 60 * 60 * 1000) {
+      warnings.push('选中 legs 时间跨度 > 7 天（异常长战役）');
+    }
+  }
+  if (
+    strategyTemplate === 'main_dual_hedge_mirror_tp' &&
+    (!assigned.some(item => item.role === 'hedge_initial_a') || !assigned.some(item => item.role === 'hedge_initial_b'))
+  ) {
+    warnings.push('main_dual_hedge_mirror_tp 模板缺少 hedge_initial_a 或 hedge_initial_b');
+  }
+  return { ok: errors.length === 0, errors, warnings };
+}
+
+export function ClassifyAsNewCampaignDialog({ open, onOpenChange, items, onCreated }: Props) {
   const ordered = useMemo(
-    () => [...journals].sort((a, b) => new Date(a.pre_simulated_time).getTime() - new Date(b.pre_simulated_time).getTime()),
-    [journals],
+    () => [...items].sort((a, b) => itemTimeMs(a) - itemTimeMs(b)),
+    [items],
   );
-  const suggestions = useMemo(() => suggestLegRoles(ordered), [ordered]);
-  const suggestionMap = useMemo(() => new Map(suggestions.map(item => [item.journalId, item])), [suggestions]);
-  const firstJournal = ordered[0] ?? null;
+  const journalSuggestions = useMemo(
+    () => new Map(suggestLegRoles(ordered.flatMap(item => item.kind === 'journal' ? [item.journal] : [])).map(item => [item.journalId, item])),
+    [ordered],
+  );
+  const suggestions = useMemo<ClassifiableSuggestion[]>(
+    () => ordered.map(item => {
+      if (item.kind === 'journal') {
+        const suggestion = journalSuggestions.get(item.journal.id);
+        return suggestion
+          ? {
+              itemId: item.id,
+              suggestedRole: suggestion.suggestedRole,
+              confidence: suggestion.confidence,
+              reason: suggestion.reason,
+            }
+          : {
+              itemId: item.id,
+              suggestedRole: 'main_open',
+              confidence: 'low',
+              reason: '未能推断角色，默认建议 main_open',
+            };
+      }
+      return {
+        itemId: item.id,
+        suggestedRole: 'main_open',
+        confidence: 'low',
+        reason: '裸 record 缺少开仓快照，默认建议先作为 main_open 归类',
+      };
+    }),
+    [journalSuggestions, ordered],
+  );
+  const suggestionMap = useMemo(() => new Map(suggestions.map(item => [item.itemId, item])), [suggestions]);
+  const firstItem = ordered[0] ?? null;
+  const orphanCount = useMemo(() => ordered.filter(item => item.kind === 'orphanRecord').length, [ordered]);
   const [title, setTitle] = useState('');
   const [strategyTemplate, setStrategyTemplate] = useState<StrategyTemplate>('main_dual_hedge_mirror_tp');
   const [notes, setNotes] = useState('');
@@ -55,34 +153,39 @@ export function ClassifyAsNewCampaignDialog({ open, onOpenChange, journals, onCr
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
-    if (!open || !firstJournal) return;
-    const d = new Date(firstJournal.pre_simulated_time);
+    if (!open || !firstItem) return;
+    const d = new Date(itemTimeMs(firstItem));
     const dateLabel = d.toISOString().slice(0, 10);
-    const directionLabel = firstJournal.direction === 'short' ? '空' : '多';
-    setTitle(`${firstJournal.symbol} ${dateLabel} ${directionLabel}战役`);
+    const directionLabel = itemDirection(firstItem) === 'short' ? '空' : '多';
+    setTitle(`${itemSymbol(firstItem)} ${dateLabel} ${directionLabel}战役`);
     setNotes('');
     setStrategyTemplate('main_dual_hedge_mirror_tp');
     setRoleMap({});
-  }, [open, firstJournal]);
+  }, [open, firstItem]);
 
   useEffect(() => {
-    if (!open) return;
-    const activeRoles = ordered
-      .filter(journal => roleMap[journal.id])
-      .map(journal => ({ journalId: journal.id, legRole: roleMap[journal.id] as LegRole }));
+    if (!open || ordered.length === 0) return;
     let cancelled = false;
     (async () => {
-      const next = await validateClassification({ legs: activeRoles, strategyTemplate });
+      let next: ClassificationValidationResult;
+      if (orphanCount === 0) {
+        const activeRoles = ordered
+          .filter((item): item is Extract<ClassifiableItem, { kind: 'journal' }> => item.kind === 'journal' && !!roleMap[item.id])
+          .map(item => ({ journalId: item.journal.id, legRole: roleMap[item.id] as LegRole }));
+        next = await validateClassification({ legs: activeRoles, strategyTemplate });
+      } else {
+        next = buildMixedValidation(ordered, roleMap, strategyTemplate);
+      }
       if (!cancelled) setValidation(next);
     })();
     return () => {
       cancelled = true;
     };
-  }, [open, ordered, roleMap, strategyTemplate]);
+  }, [open, ordered, orphanCount, roleMap, strategyTemplate]);
 
-  const allAssigned = ordered.every(journal => !!roleMap[journal.id]);
+  const allAssigned = ordered.every(item => !!roleMap[item.id]);
   const roleOptions = getAssignableLegRoles(strategyTemplate);
-  const symbol = firstJournal?.symbol ?? '—';
+  const symbol = firstItem ? itemSymbol(firstItem) : '—';
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -90,11 +193,18 @@ export function ClassifyAsNewCampaignDialog({ open, onOpenChange, journals, onCr
         <DialogHeader>
           <DialogTitle>归类为新战役</DialogTitle>
           <DialogDescription className="text-[11px]">
-            {ordered.length} 个 journals · {symbol}
+            {ordered.length} 个归类项 · {symbol}
           </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4">
+          {orphanCount > 0 && (
+            <div className="rounded border border-[#F0B90B]/30 bg-[#F0B90B]/10 px-3 py-2 text-[11px] text-[#F0B90B]">
+              本次选中含 {orphanCount} 个裸 records，归类时将自动回填为最小化 journal。
+              这些回填 journal 缺少开仓决策信息（理由/心态/风险认识），在战役复盘中会显示“[历史回填]”标识。
+            </div>
+          )}
+
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             <div className="space-y-1.5">
               <div className="text-[11px] text-muted-foreground">战役标题 *</div>
@@ -133,7 +243,7 @@ export function ClassifyAsNewCampaignDialog({ open, onOpenChange, journals, onCr
                 onClick={() => {
                   const next: Record<string, LegRole> = {};
                   suggestions.forEach(item => {
-                    next[item.journalId] = item.suggestedRole;
+                    next[item.itemId] = item.suggestedRole;
                   });
                   setRoleMap(next);
                 }}
@@ -147,6 +257,7 @@ export function ClassifyAsNewCampaignDialog({ open, onOpenChange, journals, onCr
                 <thead className="bg-muted/30 text-muted-foreground">
                   <tr>
                     <th className="px-2 py-2 text-left">#</th>
+                    <th className="px-2 py-2 text-left">订单类型</th>
                     <th className="px-2 py-2 text-left">时间</th>
                     <th className="px-2 py-2 text-left">类型</th>
                     <th className="px-2 py-2 text-left">方向</th>
@@ -158,19 +269,25 @@ export function ClassifyAsNewCampaignDialog({ open, onOpenChange, journals, onCr
                   </tr>
                 </thead>
                 <tbody>
-                  {ordered.map((journal, index) => {
-                    const suggestion = suggestionMap.get(journal.id);
+                  {ordered.map((item, index) => {
+                    const suggestion = suggestionMap.get(item.id);
+                    const direction = itemDirection(item);
                     return (
-                      <tr key={journal.id} className="border-t border-border">
+                      <tr key={item.id} className="border-t border-border">
                         <td className="px-2 py-2">{index + 1}</td>
-                        <td className="px-2 py-2 font-mono">{fmtLabel(journal.pre_simulated_time)}</td>
-                        <td className="px-2 py-2">{journal.order_kind === 'main' ? '主力' : '对冲'}</td>
-                        <td className={`px-2 py-2 ${journal.direction === 'short' ? 'text-[#F6465D]' : 'text-[#0ECB81]'}`}>
-                          {journal.direction === 'short' ? 'SHORT' : 'LONG'}
+                        <td className="px-2 py-2">
+                          <span className={`inline-flex items-center rounded px-2 py-0.5 text-[10px] ${item.kind === 'journal' ? 'bg-[#0ECB81]/15 text-[#0ECB81]' : 'bg-[#F0B90B]/15 text-[#F0B90B]'}`}>
+                            {item.kind === 'journal' ? 'journal' : '裸 record'}
+                          </span>
                         </td>
-                        <td className="px-2 py-2 font-mono">{(journal.pre_entry_price ?? 0).toFixed(4)}</td>
-                        <td className="px-2 py-2 font-mono">{journal.pre_position_size?.toFixed(2) ?? '—'}</td>
-                        <td className="px-2 py-2">{statusLabel(journal)}</td>
+                        <td className="px-2 py-2 font-mono">{itemTimeLabel(item)}</td>
+                        <td className="px-2 py-2">{item.kind === 'journal' ? (item.journal.order_kind === 'main' ? '主力' : '对冲') : '历史成交'}</td>
+                        <td className={`px-2 py-2 ${direction === 'short' ? 'text-[#F6465D]' : 'text-[#0ECB81]'}`}>
+                          {direction === 'short' ? 'SHORT' : 'LONG'}
+                        </td>
+                        <td className="px-2 py-2 font-mono">{itemEntryPrice(item).toFixed(4)}</td>
+                        <td className="px-2 py-2 font-mono">{itemPositionSize(item)?.toFixed(2) ?? '—'}</td>
+                        <td className="px-2 py-2">{statusLabel(item)}</td>
                         <td className="px-2 py-2">
                           {suggestion ? (
                             <span
@@ -184,11 +301,11 @@ export function ClassifyAsNewCampaignDialog({ open, onOpenChange, journals, onCr
                         </td>
                         <td className="px-2 py-2">
                           <select
-                            value={roleMap[journal.id] ?? ''}
+                            value={roleMap[item.id] ?? ''}
                             onChange={(e: ChangeEvent<HTMLSelectElement>) => {
                               setRoleMap(prev => ({
                                 ...prev,
-                                [journal.id]: e.target.value as LegRole,
+                                [item.id]: e.target.value as LegRole,
                               }));
                             }}
                             className="h-9 min-w-[160px] rounded border border-border bg-background px-2 text-[11px]"
@@ -227,19 +344,85 @@ export function ClassifyAsNewCampaignDialog({ open, onOpenChange, journals, onCr
             onClick={async () => {
               try {
                 setSubmitting(true);
-                const campaign = await createCampaignFromJournals({
-                  title: title.trim(),
-                  strategyTemplate,
-                  notes: notes.trim() || undefined,
-                  legs: ordered.map((journal, index) => ({
-                    journalId: journal.id,
-                    legRole: roleMap[journal.id] as LegRole,
-                    legSequence: index + 1,
-                  })),
-                });
-                toast.success('历史 journals 已归类为新战役');
+                const orderedAssignments = ordered.map((item, index) => ({
+                  item,
+                  legRole: roleMap[item.id] as LegRole,
+                  legSequence: index + 1,
+                }));
+                const journalAssignments = orderedAssignments.filter(
+                  (item): item is typeof item & { item: Extract<ClassifiableItem, { kind: 'journal' }> } => item.item.kind === 'journal',
+                );
+                const orphanAssignments = orderedAssignments.filter(
+                  (item): item is typeof item & { item: Extract<ClassifiableItem, { kind: 'orphanRecord' }> } => item.item.kind === 'orphanRecord',
+                );
+
+                let campaignId: string;
+                if (orphanAssignments.length === 0) {
+                  const campaign = await createCampaignFromJournals({
+                    title: title.trim(),
+                    strategyTemplate,
+                    notes: notes.trim() || undefined,
+                    legs: journalAssignments.map(({ item, legRole, legSequence }) => ({
+                      journalId: item.journal.id,
+                      legRole,
+                      legSequence,
+                    })),
+                  });
+                  campaignId = campaign.id;
+                } else {
+                  const mainItem = orderedAssignments.find(item => item.legRole === 'main_open')?.item ?? orderedAssignments[0].item;
+                  const campaign = await createCampaign({
+                    symbol: itemSymbol(mainItem),
+                    direction: itemDirection(mainItem) === 'short' ? 'main_short' : 'main_long',
+                    title: title.trim(),
+                    opened_at: new Date(itemTimeMs(ordered[0])).toISOString(),
+                    strategy_template: strategyTemplate,
+                    notes: notes.trim() || null,
+                  });
+                  campaignId = campaign.id;
+                  try {
+                    await appendCampaignEvent(campaign.id, {
+                      timestamp: new Date(itemTimeMs(ordered[0])).toISOString(),
+                      event_type: 'historical_classification_created',
+                      leg_role: null,
+                      journal_id: null,
+                      trade_record_id: null,
+                      pending_order_id: null,
+                      price: null,
+                      size_usdt: null,
+                      notes: notes.trim() || null,
+                    });
+                    if (journalAssignments.length > 0) {
+                      await batchAttachToCampaign(
+                        campaign.id,
+                        journalAssignments.map(({ item, legRole, legSequence }) => ({
+                          journalId: item.journal.id,
+                          legRole,
+                          legSequence,
+                          attachNote: 'classified retroactively',
+                        })),
+                      );
+                    }
+                    if (orphanAssignments.length > 0) {
+                      await batchBackfillAndAttach(
+                        orphanAssignments.map(({ item }) => item.record),
+                        orphanAssignments.map(({ item, legRole, legSequence }) => ({
+                          recordId: item.record.id,
+                          legRole,
+                          legSequence,
+                          attachNote: 'classified retroactively',
+                        })),
+                        campaign.id,
+                      );
+                    }
+                  } catch (error) {
+                    await deleteCampaign(campaign.id).catch(() => undefined);
+                    throw error;
+                  }
+                }
+                toast.success('历史归类项已归类为新战役');
                 onOpenChange(false);
-                onCreated(campaign.id);
+                onCreated(campaignId);
               } catch (error) {
                 toast.error(error instanceof Error ? error.message : String(error));
               } finally {

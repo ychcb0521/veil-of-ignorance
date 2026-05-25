@@ -34,6 +34,7 @@ const GROUPS: Array<{ key: Deduction['category']; title: string; total: number }
 ];
 
 export function SopDeviationCard({ result, active, historicalWarning = false, onJumpToEvent }: Props) {
+  const retroactiveCount = result.retroactive_leg_count ?? 0;
   const grouped = useMemo(() => {
     return GROUPS.map(group => ({
       ...group,
@@ -61,9 +62,9 @@ export function SopDeviationCard({ result, active, historicalWarning = false, on
           战役进行中，SOP 评分仅基于当前已发生的事件，可能随后续操作变化。结束战役后再做最终评估。
         </div>
       )}
-      {historicalWarning && (
+      {(historicalWarning || retroactiveCount > 0) && (
         <div className="bg-muted/50 border border-border rounded p-2 text-[11px] text-muted-foreground">
-          本战役含历史归类项。由于缺少实时记录的取消/挂单事件，部分扣分项可能不准确。SOP 评分仅供参考。
+          本战役含 {retroactiveCount} 个历史回填 leg。SOP 评分仅基于实时记录的 legs，结果可能偏高。
         </div>
       )}
 
@@ -91,15 +92,19 @@ export function SopDeviationCard({ result, active, historicalWarning = false, on
                 <div className="space-y-2">
                   {group.deductions.map((deduction: Deduction, index: number) => (
                     <div key={`${group.key}-${index}`} className="flex items-start gap-3 text-[11px] font-mono border border-border/40 rounded p-2">
-                      <div className="text-[#F6465D] shrink-0">-{deduction.points} 分</div>
+                      <div className={`shrink-0 ${deduction.points > 0 ? 'text-[#F6465D]' : 'text-muted-foreground'}`}>
+                        {deduction.points > 0 ? `-${deduction.points} 分` : '跳过'}
+                      </div>
                       <div className="flex-1">{deduction.reason}</div>
-                      <button
-                        type="button"
-                        onClick={() => onJumpToEvent?.(deduction.related_event_ids)}
-                        className="text-muted-foreground hover:text-foreground"
-                      >
-                        <ExternalLink className="w-3.5 h-3.5" />
-                      </button>
+                      {deduction.related_event_ids.length > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => onJumpToEvent?.(deduction.related_event_ids)}
+                          className="text-muted-foreground hover:text-foreground"
+                        >
+                          <ExternalLink className="w-3.5 h-3.5" />
+                        </button>
+                      )}
                     </div>
                   ))}
                 </div>

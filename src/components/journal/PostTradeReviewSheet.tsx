@@ -266,6 +266,11 @@ export function PostTradeReviewSheet({
       </div>
 
       <div className="px-5 py-4 space-y-4 overflow-y-auto flex-1 bg-background">
+        {journal.source === 'retroactive_from_record' && (
+          <div className="rounded border border-[#F0B90B]/30 bg-[#F0B90B]/10 px-3 py-2 text-[11px] text-[#F0B90B]">
+            这是历史回填，事后复盘有效，但避免编造当时未存在的决策。
+          </div>
+        )}
         {/* (A) Snapshot */}
         <Collapsible defaultOpen>
           <CollapsibleTrigger className={`w-full px-4 py-3 text-[11px] ${subtleLabelClass} flex items-center gap-1.5 hover:text-foreground transition-colors ${sectionCardClass}`}>

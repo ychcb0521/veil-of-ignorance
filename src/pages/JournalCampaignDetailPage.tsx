@@ -440,22 +440,10 @@ export default function JournalCampaignDetailPage() {
     () => counterfactuals.some(branch => branch.branch_kind === 'pure_sop'),
     [counterfactuals],
   );
-  const historicalClassifiedIds = useMemo(() => {
-    const ids = new Set<string>();
-    for (const event of campaign.actual_evolution) {
-      if (
-        event.journal_id &&
-        (
-          event.event_type === 'historical_leg_attached' ||
-          event.notes?.includes('classified retroactively')
-        )
-      ) {
-        ids.add(event.journal_id);
-      }
-    }
-    return ids;
-  }, [campaign.actual_evolution]);
-  const historicalClassifiedCount = historicalClassifiedIds.size;
+  const retroactiveLegCount = useMemo(
+    () => legs.filter(leg => leg.source === 'retroactive_from_record').length,
+    [legs],
+  );
 
   useEffect(() => {
     if (!pureSopDefaults) return;
@@ -661,19 +649,21 @@ export default function JournalCampaignDetailPage() {
             <div>结束：{fmtMdHm(campaign.closed_at)}</div>
             <div>持续时间：{fmtDuration(campaign.opened_at, campaign.closed_at)}</div>
             <div>legs 数：{legs.length} (主仓 {mainCount} / 对冲 {hedgeCount} / TP {tpCount} / 其他 {otherCount})</div>
-            <div className="flex items-center gap-1.5">
-              <span>本战役 legs 中含 {historicalClassifiedCount} 个历史归类项</span>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <button type="button" className="text-muted-foreground hover:text-foreground">
-                    <Info className="w-3.5 h-3.5" />
-                  </button>
-                </TooltipTrigger>
-                <TooltipContent className="max-w-[260px] text-[11px]">
-                  历史归类的 legs 缺少实时记录的 hedge_cancelled / hedge_placed 事件，可能影响 SOP 评分准确性。
-                </TooltipContent>
-              </Tooltip>
-            </div>
+            {retroactiveLegCount > 0 && (
+              <div className="flex items-center gap-1.5">
+                <span>本战役 legs 中含 {retroactiveLegCount} 个历史回填项</span>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button type="button" className="text-muted-foreground hover:text-foreground">
+                      <Info className="w-3.5 h-3.5" />
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent className="max-w-[260px] text-[11px]">
+                    历史回填的 legs 缺少原始开仓决策信息，SOP 评分会跳过这些 legs。
+                  </TooltipContent>
+                </Tooltip>
+              </div>
+            )}
           </div>
 
           <div className="bg-card border border-border rounded p-4 space-y-2 text-[12px]">
@@ -792,7 +782,7 @@ export default function JournalCampaignDetailPage() {
           <SopDeviationCard
             result={sop}
             active={campaign.status === 'active'}
-            historicalWarning={historicalClassifiedCount > 0}
+            historicalWarning={retroactiveLegCount > 0}
             onJumpToEvent={(eventIds) => {
               const event = chart.events.find((item: typeof chart.events[number]) => eventIds.includes(item.id));
               if (event) setFocusTime(new Date(event.timestamp).getTime());
