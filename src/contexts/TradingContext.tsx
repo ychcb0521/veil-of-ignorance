@@ -1,52 +1,38 @@
 /**
  * Global Trading Context
- *
+ * 
  * Manages:
  * - Global simulated clock (single source of truth)
  * - Multi-symbol positions & pending orders
  * - **Single global wallet balance** (1,000,000 USDT) — ALL symbols share one pool
  * - Liquidation engine (cross + isolated margin modes), fees, slippage
  * - Funding rate engine (8h settlement)
- *
+ * 
  * ACCOUNTING IDENTITY (enforced at all times):
  *   Total Equity = Available Balance + Used Margin + Unrealized PnL
- *
+ * 
  * In isolated TIME mode, each symbol runs on its own timeline, but funds
  * are deducted/credited from the single global balance in the order the
  * user physically clicks (Real-world Sequential Ledger).
  */
 
-import React, { createContext, useContext, useCallback, useEffect, useRef, useMemo, useState } from "react";
-import { useTimeSimulator } from "@/hooks/useTimeSimulator";
-import { usePersistedState, loadPersistedSimState, saveSimState, clearSimState } from "@/hooks/usePersistedState";
-import { useAuth } from "@/contexts/AuthContext";
-import { toast } from "sonner";
-import type {
-  Position,
-  PendingOrder,
-  TradeRecord,
-  OrderSide,
-  OrderType,
-  MarginMode,
-  TriggerOperator,
-} from "@/types/trading";
+import React, { createContext, useContext, useCallback, useEffect, useRef, useMemo, useState } from 'react';
+import { useTimeSimulator } from '@/hooks/useTimeSimulator';
+import { usePersistedState, loadPersistedSimState, saveSimState, clearSimState } from '@/hooks/usePersistedState';
+import { useAuth } from '@/contexts/AuthContext';
+import { toast } from 'sonner';
+import type { Position, PendingOrder, TradeRecord, OrderSide, OrderType, MarginMode, TriggerOperator } from '@/types/trading';
 import {
-  calcFee,
-  calcUnrealizedPnl,
-  calcSlippage,
-  MAINTENANCE_MARGIN_RATE,
-  LIQUIDATION_FEE_RATE,
-  FUNDING_RATE,
-  FUNDING_HOURS,
-  getTriggerOperator,
-} from "@/types/trading";
-import { resolveConditionalTriggerPrice, shouldRejectImmediateConditionalPlacement } from "@/lib/conditionalOrders";
+  calcFee, calcUnrealizedPnl, calcSlippage,
+  MAINTENANCE_MARGIN_RATE, LIQUIDATION_FEE_RATE, FUNDING_RATE, FUNDING_HOURS, getTriggerOperator,
+} from '@/types/trading';
+import { resolveConditionalTriggerPrice, shouldRejectImmediateConditionalPlacement } from '@/lib/conditionalOrders';
 
 // ===== Types =====
-export type TimeMode = "synced" | "isolated";
+export type TimeMode = 'synced' | 'isolated';
 
 export interface CoinTimelineState {
-  status: "playing" | "paused" | "stopped";
+  status: 'playing' | 'paused' | 'stopped';
   time: number;
   speed: number;
   historicalAnchorTime: number | null;
@@ -63,10 +49,7 @@ export type CoinTimelinesMap = Record<string, CoinTimelineState>;
 /** @deprecated kept for backward compat — always empty now */
 export type IsolatedBalancesMap = Record<string, number>;
 
-interface LiquidationDetails {
-  lostAmount: number;
-  liquidatedPositions: number;
-}
+interface LiquidationDetails { lostAmount: number; liquidatedPositions: number; }
 
 interface TradingState {
   sim: ReturnType<typeof useTimeSimulator>;
@@ -105,12 +88,7 @@ interface TradingState {
   setSymbolMarginMode: (symbol: string, mode: MarginMode) => void;
   activeSymbols: string[];
   handlePlaceOrder: (symbol: string, order: PlaceOrderParams) => { id: string } | null;
-  handleClosePosition: (
-    symbol: string,
-    index: number,
-    percentage?: number,
-    method?: "manual" | "sl" | "tp1" | "tp2" | "tp3" | "liquidation",
-  ) => void;
+  handleClosePosition: (symbol: string, index: number, percentage?: number, method?: 'manual' | 'sl' | 'tp1' | 'tp2' | 'tp3' | 'liquidation') => void;
   handleCancelOrder: (symbol: string, orderId: string) => void;
   handlePlaceTpSl: (symbol: string, pos: Position, tp: number | null, sl: number | null, pct: number) => void;
   handleAddIsolatedMargin: (symbol: string, posIndex: number, amount: number) => void;
@@ -142,17 +120,17 @@ export interface PlaceOrderParams {
   quantity: number;
   leverage: number;
   marginMode: MarginMode;
-  priceSelection: "MARKET" | "LIMIT" | "BEST";
-  triggerType: "MARK" | "LAST";
-  currencyUnit: "BASE" | "USDT";
-  usdtInputMode: "ORDER_VALUE" | "INITIAL_MARGIN";
+  priceSelection: 'MARKET' | 'LIMIT' | 'BEST';
+  triggerType: 'MARK' | 'LAST';
+  currencyUnit: 'BASE' | 'USDT';
+  usdtInputMode: 'ORDER_VALUE' | 'INITIAL_MARGIN';
   inputAmount: number;
   callbackRate?: number;
-  trailingExecType?: "MARKET" | "LIMIT";
+  trailingExecType?: 'MARKET' | 'LIMIT';
   trailingLimitPrice?: number;
   twapDuration?: number;
   twapInterval?: number;
-  conditionalExecType?: "MARKET" | "LIMIT";
+  conditionalExecType?: 'MARKET' | 'LIMIT';
   conditionalLimitPrice?: number;
   scaledCount?: number;
   scaledStartPrice?: number;
@@ -161,16 +139,16 @@ export interface PlaceOrderParams {
 }
 
 // Persist context across Vite HMR to avoid "must be used within Provider" errors
-const HMR_KEY = "__TradingContext__";
-const TradingContext: React.Context<TradingState | null> = ((globalThis as any)[HMR_KEY] ??=
-  createContext<TradingState | null>(null));
+const HMR_KEY = '__TradingContext__';
+const TradingContext: React.Context<TradingState | null> =
+  (globalThis as any)[HMR_KEY] ??= createContext<TradingState | null>(null);
 
 export function useTradingContext() {
   const ctx = useContext(TradingContext);
   if (!ctx) {
     // During Vite HMR, components may briefly re-mount outside the provider tree.
     // Throw so React error boundary / suspense catches it and re-renders correctly.
-    throw new Error("useTradingContext must be used within TradingProvider");
+    throw new Error('useTradingContext must be used within TradingProvider');
   }
   return ctx;
 }
@@ -185,18 +163,13 @@ function calcAvailable(balance: number, positionsMap: PositionsMap): number {
   let totalCrossMargin = 0;
   for (const positions of Object.values(positionsMap)) {
     for (const p of positions) {
-      if (p.marginMode === "cross") totalCrossMargin += p.margin;
+      if (p.marginMode === 'cross') totalCrossMargin += p.margin;
     }
   }
   return balance - totalCrossMargin;
 }
 
-function applySlippageIfTaker(
-  price: number,
-  quantity: number,
-  side: OrderSide,
-  isMaker: boolean,
-): { fillPrice: number; slippage: number } {
+function applySlippageIfTaker(price: number, quantity: number, side: OrderSide, isMaker: boolean): { fillPrice: number; slippage: number } {
   if (isMaker) return { fillPrice: price, slippage: 0 };
   const notional = price * quantity;
   const slippedPrice = calcSlippage(price, notional, side);
@@ -222,23 +195,12 @@ function executeFill(
     leverage: order.leverage,
     marginMode: order.marginMode,
     margin,
-    isolatedMargin: order.marginMode === "isolated" ? margin : undefined,
+    isolatedMargin: order.marginMode === 'isolated' ? margin : undefined,
     openTime,
   };
 
-  console.log(
-    "[开仓核对] 瞬时入场价:",
-    fillPrice,
-    " | 瞬时标记价:",
-    rawPrice,
-    " | 如果这俩数字不同，就是组件传参延迟导致的脱节！",
-  );
-  console.log("[持仓实例]", {
-    positionId: position.id,
-    symbolHint: "fresh-open",
-    quantity: position.quantity,
-    entryPrice: position.entryPrice,
-  });
+  console.log('[开仓核对] 瞬时入场价:', fillPrice, ' | 瞬时标记价:', rawPrice, ' | 如果这俩数字不同，就是组件传参延迟导致的脱节！');
+  console.log('[持仓实例]', { positionId: position.id, symbolHint: 'fresh-open', quantity: position.quantity, entryPrice: position.entryPrice });
 
   return { fee, margin, slippage, position };
 }
@@ -249,50 +211,46 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
   const initialCapital = profile?.initial_capital ?? 1_000_000;
 
   const persistedSim = useMemo(() => loadPersistedSimState(), []);
-  const restoredStatus = persistedSim?.status ?? "stopped";
+  const restoredStatus = persistedSim?.status ?? 'stopped';
 
   const liveTimeFromStorage = useMemo(() => {
     try {
-      const v = localStorage.getItem("__tm_live_time");
+      const v = localStorage.getItem('__tm_live_time');
       return v ? Number(v) : null;
-    } catch {
-      return null;
-    }
+    } catch { return null; }
   }, []);
   const bestRestoredTime = liveTimeFromStorage ?? persistedSim?.currentSimulatedTime ?? 0;
 
   const sim = useTimeSimulator(
-    (restoredStatus === "playing" || restoredStatus === "paused") && persistedSim
-      ? {
-          status: restoredStatus,
-          historicalAnchorTime: bestRestoredTime,
-          realStartTime: restoredStatus === "playing" ? Date.now() : persistedSim.realStartTime,
-          currentSimulatedTime: bestRestoredTime,
-          speed: persistedSim.speed,
-        }
-      : undefined,
+    (restoredStatus === 'playing' || restoredStatus === 'paused') && persistedSim ? {
+      status: restoredStatus,
+      historicalAnchorTime: bestRestoredTime,
+      realStartTime: restoredStatus === 'playing' ? Date.now() : persistedSim.realStartTime,
+      currentSimulatedTime: bestRestoredTime,
+      speed: persistedSim.speed,
+    } : undefined
   );
 
-  const [activeSymbol, setActiveSymbol] = usePersistedState("symbol", persistedSim?.symbol ?? "BTCUSDT");
-  const [interval, setInterval] = usePersistedState("interval", persistedSim?.interval ?? "1m");
-  const [positionsMap, setPositionsMap] = usePersistedState<PositionsMap>("positions_map", {});
-  const [ordersMap, setOrdersMap] = usePersistedState<OrdersMap>("orders_map", {});
-  const [priceMap, setPriceMap] = usePersistedState<PriceMap>("price_map", {});
-  const [balance, setBalance] = usePersistedState("balance", initialCapital);
+  const [activeSymbol, setActiveSymbol] = usePersistedState('symbol', persistedSim?.symbol ?? 'BTCUSDT');
+  const [interval, setInterval] = usePersistedState('interval', persistedSim?.interval ?? '1m');
+  const [positionsMap, setPositionsMap] = usePersistedState<PositionsMap>('positions_map', {});
+  const [ordersMap, setOrdersMap] = usePersistedState<OrdersMap>('orders_map', {});
+  const [priceMap, setPriceMap] = usePersistedState<PriceMap>('price_map', {});
+  const [balance, setBalance] = usePersistedState('balance', initialCapital);
 
   useEffect(() => {
-    setPositionsMap((prev) => {
+    setPositionsMap(prev => {
       let changed = false;
       const next: PositionsMap = {};
 
       for (const [symbol, positions] of Object.entries(prev)) {
         const normalized = positions
-          .filter((position) => {
+          .filter(position => {
             const keep = position.quantity > 1e-6;
             if (!keep) changed = true;
             return keep;
           })
-          .map((position) => {
+          .map(position => {
             if (position.id) return position;
             changed = true;
             return { ...position, id: crypto.randomUUID() };
@@ -304,43 +262,32 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
       return changed ? next : prev;
     });
   }, [setPositionsMap]);
-  const [tradeHistory, setTradeHistory] = usePersistedState<TradeRecord[]>("trade_history", []);
+  const [tradeHistory, setTradeHistory] = usePersistedState<TradeRecord[]>('trade_history', []);
   const [pricePrecision, setPricePrecision] = useState(2);
   const [quantityPrecision, setQuantityPrecision] = useState(3);
-  const [leverageMap, setLeverageMap] = usePersistedState<Record<string, number>>("symbol_leverage", {});
-  const [marginModeMap, setMarginModeMap] = usePersistedState<Record<string, MarginMode>>("symbol_margin_mode", {});
+  const [leverageMap, setLeverageMap] = usePersistedState<Record<string, number>>('symbol_leverage', {});
+  const [marginModeMap, setMarginModeMap] = usePersistedState<Record<string, MarginMode>>('symbol_margin_mode', {});
 
   // === Multi-Timeline Mode ===
-  const [timeMode, setTimeMode] = usePersistedState<TimeMode>("time_mode", "synced");
-  const [coinTimelines, setCoinTimelines] = usePersistedState<CoinTimelinesMap>("coin_timelines_v2", {});
+  const [timeMode, setTimeMode] = usePersistedState<TimeMode>('time_mode', 'synced');
+  const [coinTimelines, setCoinTimelines] = usePersistedState<CoinTimelinesMap>('coin_timelines_v2', {});
 
   // Stub for backward compat — isolated balances no longer used
   const emptyIsolatedBalances: IsolatedBalancesMap = {};
-  const setIsolatedBalancesNoop = useCallback(
-    (_v: IsolatedBalancesMap | ((prev: IsolatedBalancesMap) => IsolatedBalancesMap)) => {},
-    [],
-  );
+  const setIsolatedBalancesNoop = useCallback((_v: IsolatedBalancesMap | ((prev: IsolatedBalancesMap) => IsolatedBalancesMap)) => {}, []);
 
   // Refs for latest values in callbacks
   const timeModeRef = useRef(timeMode);
-  useEffect(() => {
-    timeModeRef.current = timeMode;
-  }, [timeMode]);
+  useEffect(() => { timeModeRef.current = timeMode; }, [timeMode]);
 
   const priceMapRef = useRef(priceMap);
-  useEffect(() => {
-    priceMapRef.current = priceMap;
-  }, [priceMap]);
+  useEffect(() => { priceMapRef.current = priceMap; }, [priceMap]);
 
   const balanceRef = useRef(balance);
-  useEffect(() => {
-    balanceRef.current = balance;
-  }, [balance]);
+  useEffect(() => { balanceRef.current = balance; }, [balance]);
 
   const positionsMapRef = useRef(positionsMap);
-  useEffect(() => {
-    positionsMapRef.current = positionsMap;
-  }, [positionsMap]);
+  useEffect(() => { positionsMapRef.current = positionsMap; }, [positionsMap]);
 
   // Total position count across all symbols
   const totalPositionCount = useMemo(() => {
@@ -350,39 +297,27 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
   }, [positionsMap]);
 
   // Get a coin's isolated timeline state
-  const getCoinState = useCallback(
-    (symbol: string): CoinTimelineState | null => {
-      return coinTimelines[symbol] ?? null;
-    },
-    [coinTimelines],
-  );
+  const getCoinState = useCallback((symbol: string): CoinTimelineState | null => {
+    return coinTimelines[symbol] ?? null;
+  }, [coinTimelines]);
 
   // Get effective simulation time for a given symbol
-  const getEffectiveTime = useCallback(
-    (symbol?: string): number => {
-      const sym = symbol || activeSymbol;
-      if (timeMode === "synced") return sim.currentSimulatedTime;
-      const ct = coinTimelines[sym];
-      return ct?.time ?? sim.currentSimulatedTime;
-    },
-    [timeMode, coinTimelines, activeSymbol, sim.currentSimulatedTime],
-  );
+  const getEffectiveTime = useCallback((symbol?: string): number => {
+    const sym = symbol || activeSymbol;
+    if (timeMode === 'synced') return sim.currentSimulatedTime;
+    const ct = coinTimelines[sym];
+    return ct?.time ?? sim.currentSimulatedTime;
+  }, [timeMode, coinTimelines, activeSymbol, sim.currentSimulatedTime]);
 
   // Always return the single global balance
-  const getEffectiveBalance = useCallback(
-    (_symbol: string): number => {
-      return balance;
-    },
-    [balance],
-  );
+  const getEffectiveBalance = useCallback((_symbol: string): number => {
+    return balance;
+  }, [balance]);
 
   // Always return available from the single global pool
-  const getEffectiveAvailable = useCallback(
-    (_symbol: string): number => {
-      return calcAvailable(balance, positionsMap);
-    },
-    [balance, positionsMap],
-  );
+  const getEffectiveAvailable = useCallback((_symbol: string): number => {
+    return calcAvailable(balance, positionsMap);
+  }, [balance, positionsMap]);
 
   // Liquidation modal state
   const [liquidationOpen, setLiquidationOpen] = useState(false);
@@ -391,7 +326,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
 
   // Persist sim state
   useEffect(() => {
-    if (sim.status !== "stopped") {
+    if (sim.status !== 'stopped') {
       saveSimState({
         status: sim.status,
         historicalAnchorTime: sim.historicalAnchorTime,
@@ -404,15 +339,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
     } else {
       clearSimState();
     }
-  }, [
-    sim.status,
-    sim.historicalAnchorTime,
-    sim.realStartTime,
-    sim.currentSimulatedTime,
-    sim.speed,
-    activeSymbol,
-    interval,
-  ]);
+  }, [sim.status, sim.historicalAnchorTime, sim.realStartTime, sim.currentSimulatedTime, sim.speed, activeSymbol, interval]);
 
   // Force-save on page unload
   const simRef = useRef(sim);
@@ -425,7 +352,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     const handler = () => {
       const s = simRef.current;
-      if (s.status === "stopped") return;
+      if (s.status === 'stopped') return;
       const liveTime = s.currentTimeRef.current;
       saveSimState({
         status: s.status,
@@ -437,8 +364,8 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
         interval: intervalRef.current,
       });
     };
-    window.addEventListener("beforeunload", handler);
-    return () => window.removeEventListener("beforeunload", handler);
+    window.addEventListener('beforeunload', handler);
+    return () => window.removeEventListener('beforeunload', handler);
   }, []);
 
   // Computed
@@ -473,56 +400,45 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
     return Array.from(syms);
   }, [positionsMap, ordersMap]);
 
-  const getSymbolLeverage = useCallback(
-    (symbol: string) => {
-      return leverageMap[symbol] ?? 35;
-    },
-    [leverageMap],
-  );
+  const getSymbolLeverage = useCallback((symbol: string) => {
+    return leverageMap[symbol] ?? 35;
+  }, [leverageMap]);
 
-  const setSymbolLeverage = useCallback(
-    (symbol: string, value: number | ((prev: number) => number)) => {
-      setLeverageMap((prev) => {
-        const current = prev[symbol] ?? 35;
-        const nextValue = typeof value === "function" ? value(current) : value;
-        return {
-          ...prev,
-          [symbol]: Math.floor(Math.max(1, Math.min(125, nextValue))),
-        };
-      });
-    },
-    [setLeverageMap],
-  );
+  const setSymbolLeverage = useCallback((symbol: string, value: number | ((prev: number) => number)) => {
+    setLeverageMap(prev => {
+      const current = prev[symbol] ?? 35;
+      const nextValue = typeof value === 'function' ? value(current) : value;
+      return {
+        ...prev,
+        [symbol]: Math.floor(Math.max(1, Math.min(125, nextValue))),
+      };
+    });
+  }, [setLeverageMap]);
 
-  const getSymbolMarginMode = useCallback(
-    (symbol: string): MarginMode => {
-      return marginModeMap[symbol] ?? "cross";
-    },
-    [marginModeMap],
-  );
+  const getSymbolMarginMode = useCallback((symbol: string): MarginMode => {
+    return marginModeMap[symbol] ?? 'cross';
+  }, [marginModeMap]);
 
-  const setSymbolMarginMode = useCallback(
-    (symbol: string, mode: MarginMode) => {
-      setMarginModeMap((prev) => ({ ...prev, [symbol]: mode }));
-    },
-    [setMarginModeMap],
-  );
+  const setSymbolMarginMode = useCallback((symbol: string, mode: MarginMode) => {
+    setMarginModeMap(prev => ({ ...prev, [symbol]: mode }));
+  }, [setMarginModeMap]);
 
   useEffect(() => {
-    setOrdersMap((prev) => {
+    setOrdersMap(prev => {
       let changed = false;
       const next: OrdersMap = {};
 
       for (const [symbol, orders] of Object.entries(prev)) {
-        const normalized = orders.map((order) => {
-          if (order.type !== "CONDITIONAL") {
+        const normalized = orders.map(order => {
+          if (order.type !== 'CONDITIONAL') {
             return order;
           }
 
           const nextTriggerPrice = resolveConditionalTriggerPrice(order);
-          const shouldNormalizeStatus = order.status !== "PENDING";
-          const shouldNormalizeStopPrice =
-            Number.isFinite(nextTriggerPrice) && nextTriggerPrice > 0 && order.stopPrice !== nextTriggerPrice;
+          const shouldNormalizeStatus = order.status !== 'PENDING';
+          const shouldNormalizeStopPrice = Number.isFinite(nextTriggerPrice)
+            && nextTriggerPrice > 0
+            && order.stopPrice !== nextTriggerPrice;
 
           if (!shouldNormalizeStatus && !shouldNormalizeStopPrice) {
             return order;
@@ -532,7 +448,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
 
           return {
             ...order,
-            status: "PENDING" as const,
+            status: 'PENDING' as const,
             stopPrice: shouldNormalizeStopPrice ? nextTriggerPrice : order.stopPrice,
           };
         });
@@ -542,7 +458,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
 
       return changed ? next : prev;
     });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // ===== FUNDING RATE ENGINE =====
@@ -556,10 +472,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
 
     let currentSlot = -1;
     for (let i = FUNDING_HOURS.length - 1; i >= 0; i--) {
-      if (utcHour >= FUNDING_HOURS[i]) {
-        currentSlot = i;
-        break;
-      }
+      if (utcHour >= FUNDING_HOURS[i]) { currentSlot = i; break; }
     }
     if (currentSlot < 0) currentSlot = FUNDING_HOURS.length - 1;
 
@@ -583,34 +496,26 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
       for (const pos of positions) {
         const notional = pos.quantity * price;
         const fee = notional * FUNDING_RATE;
-        const amount = pos.side === "LONG" ? -fee : fee;
+        const amount = pos.side === 'LONG' ? -fee : fee;
         totalFunding += amount;
         posCount++;
 
         fundingRecords.push({
-          id: crypto.randomUUID(),
-          symbol: sym,
-          side: pos.side,
-          type: "FUNDING" as any,
-          action: "FUNDING",
-          entryPrice: price,
-          exitPrice: 0,
-          quantity: pos.quantity,
-          leverage: pos.leverage,
-          pnl: amount,
-          fee: Math.abs(fee),
-          slippage: 0,
-          openTime: now,
-          closeTime: now,
+          id: crypto.randomUUID(), symbol: sym, side: pos.side,
+          type: 'FUNDING' as any, action: 'FUNDING',
+          entryPrice: price, exitPrice: 0,
+          quantity: pos.quantity, leverage: pos.leverage,
+          pnl: amount, fee: Math.abs(fee), slippage: 0,
+          openTime: now, closeTime: now,
         });
       }
     }
 
     if (posCount > 0 && totalFunding !== 0) {
       // Single global balance debit/credit
-      setBalance((prev) => prev + totalFunding);
-      setTradeHistory((prev) => [...prev, ...fundingRecords]);
-      const sign = totalFunding >= 0 ? "+" : "";
+      setBalance(prev => prev + totalFunding);
+      setTradeHistory(prev => [...prev, ...fundingRecords]);
+      const sign = totalFunding >= 0 ? '+' : '';
       toast.info(`💰 资金费率结算: ${sign}${totalFunding.toFixed(4)} USDT`, {
         description: `费率 ${(FUNDING_RATE * 100).toFixed(4)}% · ${posCount} 笔仓位`,
       });
@@ -629,7 +534,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
 
       for (let i = positions.length - 1; i >= 0; i--) {
         const pos = positions[i];
-        if (pos.marginMode !== "isolated" || pos.isolatedMargin == null) continue;
+        if (pos.marginMode !== 'isolated' || pos.isolatedMargin == null) continue;
 
         const pnl = calcUnrealizedPnl(pos, price);
         const posEquity = pos.isolatedMargin + pnl;
@@ -640,34 +545,23 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
         const closeFee = calcFee(price, pos.quantity, false);
         const liqFee = pos.quantity * price * LIQUIDATION_FEE_RATE;
 
-        setTradeHistory((prev) => [
-          ...prev,
-          {
-            id: crypto.randomUUID(),
-            symbol: sym,
-            side: pos.side,
-            type: "MARKET" as OrderType,
-            action: "LIQUIDATION" as const,
-            entryPrice: pos.entryPrice,
-            exitPrice: price,
-            quantity: pos.quantity,
-            leverage: pos.leverage,
-            pnl: pnl - closeFee - liqFee,
-            fee: closeFee + liqFee,
-            slippage: 0,
-            openTime: pos.openTime || 0,
-            closeTime: getEffectiveTime(sym),
-            exit_method: "liquidation",
-          },
-        ]);
+        setTradeHistory(prev => [...prev, {
+          id: crypto.randomUUID(), symbol: sym, side: pos.side,
+          type: 'MARKET' as OrderType, action: 'LIQUIDATION' as const,
+          entryPrice: pos.entryPrice, exitPrice: price,
+          quantity: pos.quantity, leverage: pos.leverage,
+          pnl: pnl - closeFee - liqFee, fee: closeFee + liqFee, slippage: 0,
+          openTime: pos.openTime || 0, closeTime: getEffectiveTime(sym),
+          exit_method: 'liquidation',
+        }]);
 
-        setPositionsMap((prev) => ({
+        setPositionsMap(prev => ({
           ...prev,
           [sym]: (prev[sym] || []).filter((_, idx) => idx !== i),
         }));
 
         // Isolated margin is lost — no change to global balance (it was already deducted at open)
-        toast.error(`🚨 逐仓爆仓: ${sym} ${pos.side === "LONG" ? "多" : "空"} ${pos.quantity}`, {
+        toast.error(`🚨 逐仓爆仓: ${sym} ${pos.side === 'LONG' ? '多' : '空'} ${pos.quantity}`, {
           description: `保证金 ${pos.isolatedMargin.toFixed(2)} USDT 已清零`,
           duration: 8000,
         });
@@ -683,7 +577,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
       const price = priceMap[sym] || 0;
       if (price <= 0) continue;
       for (const pos of positions) {
-        if (pos.marginMode !== "cross") continue;
+        if (pos.marginMode !== 'cross') continue;
         crossUnrealizedPnl += calcUnrealizedPnl(pos, price);
         crossMaintenanceMargin += pos.quantity * price * MAINTENANCE_MARGIN_RATE;
         crossPositionCount++;
@@ -705,504 +599,389 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
           if (price <= 0) continue;
 
           for (const pos of positions) {
-            if (pos.marginMode !== "cross") continue;
+            if (pos.marginMode !== 'cross') continue;
             const pnl = calcUnrealizedPnl(pos, price);
             const closeFee = calcFee(price, pos.quantity, false);
             const liqFee = pos.quantity * price * LIQUIDATION_FEE_RATE;
             totalLoss += Math.abs(Math.min(0, pnl - closeFee - liqFee)) + liqFee;
 
             liqRecords.push({
-              id: crypto.randomUUID(),
-              symbol: sym,
-              side: pos.side,
-              type: "MARKET" as OrderType,
-              action: "LIQUIDATION" as const,
-              entryPrice: pos.entryPrice,
-              exitPrice: price,
-              quantity: pos.quantity,
-              leverage: pos.leverage,
-              pnl: pnl - closeFee - liqFee,
-              fee: closeFee + liqFee,
-              slippage: 0,
-              openTime: pos.openTime || 0,
-              closeTime: getEffectiveTime(sym),
-              exit_method: "liquidation",
+              id: crypto.randomUUID(), symbol: sym, side: pos.side,
+              type: 'MARKET' as OrderType, action: 'LIQUIDATION' as const,
+              entryPrice: pos.entryPrice, exitPrice: price,
+              quantity: pos.quantity, leverage: pos.leverage,
+              pnl: pnl - closeFee - liqFee, fee: closeFee + liqFee, slippage: 0,
+              openTime: pos.openTime || 0, closeTime: getEffectiveTime(sym),
+              exit_method: 'liquidation',
             });
           }
         }
 
-        setPositionsMap((prev) => {
+        setPositionsMap(prev => {
           const next: PositionsMap = {};
           for (const [sym, positions] of Object.entries(prev)) {
-            const isolated = positions.filter((p) => p.marginMode === "isolated");
+            const isolated = positions.filter(p => p.marginMode === 'isolated');
             if (isolated.length > 0) next[sym] = isolated;
           }
           return next;
         });
         setOrdersMap({});
         setBalance(Math.max(0, crossEquity * 0.05));
-        setTradeHistory((prev) => [...prev, ...liqRecords]);
+        setTradeHistory(prev => [...prev, ...liqRecords]);
 
         setLiquidationDetails({ lostAmount: totalLoss, liquidatedPositions: crossPositionCount });
         setLiquidationOpen(true);
-        toast.error("🚨 全仓爆仓！所有全仓仓位已被强制平仓", { duration: 10000 });
+        toast.error('🚨 全仓爆仓！所有全仓仓位已被强制平仓', { duration: 10000 });
 
-        setTimeout(() => {
-          liquidationCheckRef.current = false;
-        }, 2000);
+        setTimeout(() => { liquidationCheckRef.current = false; }, 2000);
       }
     }
   }, [priceMap, positionsMap, balance, sim.isRunning, sim.currentSimulatedTime]);
 
   // ===== Place Order (with strict accounting enforcement — single global pool) =====
-  const handlePlaceOrder = useCallback(
-    (symbol: string, order: PlaceOrderParams): { id: string } | null => {
-      // Use refs to bypass stale closures in high-frequency time machine ticks
-      const available = calcAvailable(balanceRef.current, positionsMapRef.current);
-      // Use ref to avoid stale closure — always get the freshest price
-      const symbolPrice = priceMapRef.current[symbol] || 0;
-      const effectiveCurrentPrice = Number(order.latestPrice || symbolPrice);
+  const handlePlaceOrder = useCallback((symbol: string, order: PlaceOrderParams): { id: string } | null => {
+    // Use refs to bypass stale closures in high-frequency time machine ticks
+    const available = calcAvailable(balanceRef.current, positionsMapRef.current);
+    // Use ref to avoid stale closure — always get the freshest price
+    const symbolPrice = priceMapRef.current[symbol] || 0;
+    const effectiveCurrentPrice = Number(order.latestPrice || symbolPrice);
 
-      console.log("[下单执行]", {
-        按钮按下时获取的盘面价: order.latestPrice,
-        priceMap最新价: priceMapRef.current[symbol],
-        最终使用价: effectiveCurrentPrice,
+    console.log('[下单执行]', {
+      按钮按下时获取的盘面价: order.latestPrice,
+      priceMap最新价: priceMapRef.current[symbol],
+      最终使用价: effectiveCurrentPrice,
+    });
+
+    if (!Number.isFinite(effectiveCurrentPrice) || effectiveCurrentPrice <= 0) {
+      toast.error('无法获取当前价格'); return null;
+    }
+
+    const now = getEffectiveTime(symbol);
+
+    if (order.type === 'CONDITIONAL') {
+      const currentP = Number(effectiveCurrentPrice);
+      const triggerP = Number(order.stopPrice);
+
+      if (!Number.isFinite(triggerP) || triggerP <= 0) {
+        toast.error('触发价无效');
+        return null;
+      }
+
+      if (shouldRejectImmediateConditionalPlacement(order.side, currentP, triggerP)) {
+        toast.error('触发价设置不合理，订单将立即成交，请修改或使用市价单');
+        return null;
+      }
+    }
+
+    // Note: We no longer record OPEN trades to tradeHistory.
+    // Only CLOSE/LIQUIDATION/FUNDING produce realized PnL entries.
+
+    // BEST PRICE (taker)
+    if (order.priceSelection === 'BEST') {
+      const { fee, margin, slippage, position } = executeFill(effectiveCurrentPrice, order, false, now);
+      const requiredMargin = margin + fee;
+      if (requiredMargin > available) {
+        toast.error('可用余额不足', {
+          description: `需要 ${requiredMargin.toFixed(2)} USDT，当前可用 ${available.toFixed(2)} USDT`,
+        });
+        return null;
+      }
+      setBalance(prev => prev - requiredMargin);
+      setPositionsMap(prev => {
+        // Filter out any ghost (near-zero) positions for this symbol before adding
+        const existing = (prev[symbol] || []).filter(p => p.quantity > 1e-8);
+        return { ...prev, [symbol]: [...existing, position] };
       });
+      toast.success(`最优价成交: ${order.side === 'LONG' ? '开多' : '开空'} ${order.quantity.toFixed(6)} @ ${position.entryPrice.toFixed(2)}`);
+      return { id: position.id };
+    }
 
-      if (!Number.isFinite(effectiveCurrentPrice) || effectiveCurrentPrice <= 0) {
-        toast.error("无法获取当前价格");
-        return null;
-      }
-
-      const now = getEffectiveTime(symbol);
-
-      if (order.type === "CONDITIONAL") {
-        const currentP = Number(effectiveCurrentPrice);
-        const triggerP = Number(order.stopPrice);
-
-        if (!Number.isFinite(triggerP) || triggerP <= 0) {
-          toast.error("触发价无效");
-          return null;
-        }
-
-        if (shouldRejectImmediateConditionalPlacement(order.side, currentP, triggerP)) {
-          toast.error("触发价设置不合理，订单将立即成交，请修改或使用市价单");
-          return null;
-        }
-      }
-
-      // Note: We no longer record OPEN trades to tradeHistory.
-      // Only CLOSE/LIQUIDATION/FUNDING produce realized PnL entries.
-
-      // BEST PRICE (taker)
-      if (order.priceSelection === "BEST") {
-        const { fee, margin, slippage, position } = executeFill(effectiveCurrentPrice, order, false, now);
-        const requiredMargin = margin + fee;
-        if (requiredMargin > available) {
-          toast.error("可用余额不足", {
-            description: `需要 ${requiredMargin.toFixed(2)} USDT，当前可用 ${available.toFixed(2)} USDT`,
-          });
-          return null;
-        }
-        setBalance((prev) => prev - requiredMargin);
-        setPositionsMap((prev) => {
-          // Filter out any ghost (near-zero) positions for this symbol before adding
-          const existing = (prev[symbol] || []).filter((p) => p.quantity > 1e-8);
-          return { ...prev, [symbol]: [...existing, position] };
-        });
-        toast.success(
-          `最优价成交: ${order.side === "LONG" ? "开多" : "开空"} ${order.quantity.toFixed(6)} @ ${position.entryPrice.toFixed(2)}`,
-        );
-        return { id: position.id };
-      }
-
-      // MARKET (taker with slippage)
-      if (order.type === "MARKET") {
-        const { fee, margin, slippage, position } = executeFill(effectiveCurrentPrice, order, false, now);
-        const requiredMargin = margin + fee;
-        if (requiredMargin > available) {
-          toast.error("可用余额不足", {
-            description: `需要 ${requiredMargin.toFixed(2)} USDT，当前可用 ${available.toFixed(2)} USDT`,
-          });
-          return null;
-        }
-        setBalance((prev) => prev - requiredMargin);
-        setPositionsMap((prev) => {
-          const existing = (prev[symbol] || []).filter((p) => p.quantity > 1e-8);
-          return { ...prev, [symbol]: [...existing, position] };
-        });
-        toast.success(
-          `${order.side === "LONG" ? "开多" : "开空"} ${order.quantity.toFixed(6)} @ ${position.entryPrice.toFixed(2)}`,
-        );
-        return { id: position.id };
-      }
-
-      // POST ONLY
-      if (order.type === "POST_ONLY") {
-        if (order.side === "LONG" && order.price >= effectiveCurrentPrice) {
-          toast.error("Post Only 被拒绝");
-          return null;
-        }
-        if (order.side === "SHORT" && order.price <= effectiveCurrentPrice) {
-          toast.error("Post Only 被拒绝");
-          return null;
-        }
-      }
-
-      // SCALED
-      if (order.type === "SCALED") {
-        const count = order.scaledCount || 5;
-        const startP = order.scaledStartPrice || 0;
-        const endP = order.scaledEndPrice || 0;
-        if (count < 2 || startP <= 0 || endP <= 0) {
-          toast.error("分段订单参数无效");
-          return null;
-        }
-        const step = (endP - startP) / (count - 1);
-        const qtyPerStep = order.quantity / count;
-        const parentId = crypto.randomUUID();
-        const newOrders: PendingOrder[] = Array.from({ length: count }, (_, i) => ({
-          id: crypto.randomUUID(),
-          side: order.side,
-          type: "LIMIT" as OrderType,
-          price: startP + step * i,
-          stopPrice: 0,
-          quantity: qtyPerStep,
-          leverage: order.leverage,
-          marginMode: order.marginMode,
-          status: "NEW" as const,
-          createdAt: now,
-          parentScaledId: parentId,
-        }));
-        setOrdersMap((prev) => ({ ...prev, [symbol]: [...(prev[symbol] || []), ...newOrders] }));
-        toast.info(`分段订单已挂出: ${count} 笔限价单`);
-        return null;
-      }
-
-      // TWAP
-      if (order.type === "TWAP") {
-        const durationMs = (order.twapDuration || 60) * 60 * 1000;
-        const intervalMs = (order.twapInterval || 5) * 60 * 1000;
-        const twapOrder: PendingOrder = {
-          id: crypto.randomUUID(),
-          side: order.side,
-          type: "TWAP",
-          price: 0,
-          stopPrice: 0,
-          quantity: order.quantity,
-          leverage: order.leverage,
-          marginMode: order.marginMode,
-          status: "ACTIVE",
-          createdAt: now,
-          twapTotalQty: order.quantity,
-          twapFilledQty: 0,
-          twapInterval: intervalMs,
-          twapNextExecTime: now,
-          twapEndTime: now + durationMs,
-        };
-        setOrdersMap((prev) => ({ ...prev, [symbol]: [...(prev[symbol] || []), twapOrder] }));
-        toast.info(`TWAP 委托已启动`);
-        return null;
-      }
-
-      // All other pending types — strict margin pre-check
-      const estPrice = order.price > 0 ? order.price : effectiveCurrentPrice;
-      const estMargin = (order.quantity * estPrice) / order.leverage + calcFee(estPrice, order.quantity, true);
-      if (estMargin > available) {
-        toast.error("可用余额不足", {
-          description: `需要 ${estMargin.toFixed(2)} USDT，当前可用 ${available.toFixed(2)} USDT`,
+    // MARKET (taker with slippage)
+    if (order.type === 'MARKET') {
+      const { fee, margin, slippage, position } = executeFill(effectiveCurrentPrice, order, false, now);
+      const requiredMargin = margin + fee;
+      if (requiredMargin > available) {
+        toast.error('可用余额不足', {
+          description: `需要 ${requiredMargin.toFixed(2)} USDT，当前可用 ${available.toFixed(2)} USDT`,
         });
         return null;
       }
+      setBalance(prev => prev - requiredMargin);
+      setPositionsMap(prev => {
+        const existing = (prev[symbol] || []).filter(p => p.quantity > 1e-8);
+        return { ...prev, [symbol]: [...existing, position] };
+      });
+      toast.success(`${order.side === 'LONG' ? '开多' : '开空'} ${order.quantity.toFixed(6)} @ ${position.entryPrice.toFixed(2)}`);
+      return { id: position.id };
+    }
 
-      // Determine trigger direction / operator at placement from the then-current price snapshot
-      let triggerDirection: "UP" | "DOWN" | undefined;
-      let operator: PendingOrder["operator"];
-      if (order.type === "CONDITIONAL" && order.stopPrice > 0) {
-        operator = getTriggerOperator(order.stopPrice, effectiveCurrentPrice);
-        triggerDirection = operator === ">=" ? "UP" : "DOWN";
-      } else if (["MARKET_TP_SL", "LIMIT_TP_SL"].includes(order.type) && order.stopPrice > 0) {
-        if (order.stopPrice > effectiveCurrentPrice) {
-          triggerDirection = "UP";
-        } else if (order.stopPrice < effectiveCurrentPrice) {
-          triggerDirection = "DOWN";
-        } else {
-          // triggerPrice === currentPrice: default to safe side based on order side
-          triggerDirection = order.side === "LONG" ? "UP" : "DOWN";
-        }
-      }
+    // POST ONLY
+    if (order.type === 'POST_ONLY') {
+      if (order.side === 'LONG' && order.price >= effectiveCurrentPrice) { toast.error('Post Only 被拒绝'); return null; }
+      if (order.side === 'SHORT' && order.price <= effectiveCurrentPrice) { toast.error('Post Only 被拒绝'); return null; }
+    }
 
-      const newOrder: PendingOrder = {
-        id: crypto.randomUUID(),
-        side: order.side,
-        type: order.type,
-        price: order.price,
-        stopPrice: order.stopPrice,
-        quantity: order.quantity,
-        leverage: order.leverage,
-        marginMode: order.marginMode,
-        status: order.type === "CONDITIONAL" ? "PENDING" : "NEW",
-        createdAt: now,
-        callbackRate: order.callbackRate,
-        trailingExecType: order.trailingExecType,
-        trailingLimitPrice: order.trailingLimitPrice,
-        trailingActivated: false,
-        conditionalExecType: order.conditionalExecType,
-        conditionalLimitPrice: order.conditionalLimitPrice,
-        triggerDirection,
-        operator,
+    // SCALED
+    if (order.type === 'SCALED') {
+      const count = order.scaledCount || 5;
+      const startP = order.scaledStartPrice || 0;
+      const endP = order.scaledEndPrice || 0;
+      if (count < 2 || startP <= 0 || endP <= 0) { toast.error('分段订单参数无效'); return null; }
+      const step = (endP - startP) / (count - 1);
+      const qtyPerStep = order.quantity / count;
+      const parentId = crypto.randomUUID();
+      const newOrders: PendingOrder[] = Array.from({ length: count }, (_, i) => ({
+        id: crypto.randomUUID(), side: order.side, type: 'LIMIT' as OrderType,
+        price: startP + step * i, stopPrice: 0, quantity: qtyPerStep,
+        leverage: order.leverage, marginMode: order.marginMode,
+        status: 'NEW' as const, createdAt: now, parentScaledId: parentId,
+      }));
+      setOrdersMap(prev => ({ ...prev, [symbol]: [...(prev[symbol] || []), ...newOrders] }));
+      toast.info(`分段订单已挂出: ${count} 笔限价单`);
+      return null;
+    }
+
+    // TWAP
+    if (order.type === 'TWAP') {
+      const durationMs = (order.twapDuration || 60) * 60 * 1000;
+      const intervalMs = (order.twapInterval || 5) * 60 * 1000;
+      const twapOrder: PendingOrder = {
+        id: crypto.randomUUID(), side: order.side, type: 'TWAP',
+        price: 0, stopPrice: 0, quantity: order.quantity,
+        leverage: order.leverage, marginMode: order.marginMode,
+        status: 'ACTIVE', createdAt: now,
+        twapTotalQty: order.quantity, twapFilledQty: 0,
+        twapInterval: intervalMs, twapNextExecTime: now,
+        twapEndTime: now + durationMs,
       };
-      setOrdersMap((prev) => ({ ...prev, [symbol]: [...(prev[symbol] || []), newOrder] }));
-      toast.info("委托已挂出");
-      return { id: newOrder.id };
-    },
-    [getEffectiveTime],
-  );
+      setOrdersMap(prev => ({ ...prev, [symbol]: [...(prev[symbol] || []), twapOrder] }));
+      toast.info(`TWAP 委托已启动`);
+      return null;
+    }
+
+    // All other pending types — strict margin pre-check
+    const estPrice = order.price > 0 ? order.price : effectiveCurrentPrice;
+    const estMargin = (order.quantity * estPrice) / order.leverage + calcFee(estPrice, order.quantity, true);
+    if (estMargin > available) {
+      toast.error('可用余额不足', {
+        description: `需要 ${estMargin.toFixed(2)} USDT，当前可用 ${available.toFixed(2)} USDT`,
+      });
+        return null;
+    }
+
+    // Determine trigger direction / operator at placement from the then-current price snapshot
+    let triggerDirection: 'UP' | 'DOWN' | undefined;
+    let operator: PendingOrder['operator'];
+    if (order.type === 'CONDITIONAL' && order.stopPrice > 0) {
+      operator = getTriggerOperator(order.stopPrice, effectiveCurrentPrice);
+      triggerDirection = operator === '>=' ? 'UP' : 'DOWN';
+    } else if (['MARKET_TP_SL', 'LIMIT_TP_SL'].includes(order.type) && order.stopPrice > 0) {
+      if (order.stopPrice > effectiveCurrentPrice) {
+        triggerDirection = 'UP';
+      } else if (order.stopPrice < effectiveCurrentPrice) {
+        triggerDirection = 'DOWN';
+      } else {
+        // triggerPrice === currentPrice: default to safe side based on order side
+        triggerDirection = order.side === 'LONG' ? 'UP' : 'DOWN';
+      }
+    }
+
+    const newOrder: PendingOrder = {
+      id: crypto.randomUUID(), side: order.side, type: order.type,
+      price: order.price, stopPrice: order.stopPrice, quantity: order.quantity,
+      leverage: order.leverage, marginMode: order.marginMode,
+      status: order.type === 'CONDITIONAL' ? 'PENDING' : 'NEW', createdAt: now,
+      callbackRate: order.callbackRate, trailingExecType: order.trailingExecType,
+      trailingLimitPrice: order.trailingLimitPrice, trailingActivated: false,
+      conditionalExecType: order.conditionalExecType, conditionalLimitPrice: order.conditionalLimitPrice,
+      triggerDirection, operator,
+    };
+    setOrdersMap(prev => ({ ...prev, [symbol]: [...(prev[symbol] || []), newOrder] }));
+    toast.info('委托已挂出');
+    return { id: newOrder.id };
+  }, [getEffectiveTime]);
 
   // ===== Close Position — supports partial close via percentage (0-1] =====
-  const handleClosePosition = useCallback(
-    (
-      symbol: string,
-      index: number,
-      percentage: number = 1,
-      method: "manual" | "sl" | "tp1" | "tp2" | "tp3" | "liquidation" = "manual",
-    ) => {
-      const symbolPositions = positionsMapRef.current[symbol] || [];
-      const pos = symbolPositions[index];
-      if (!pos || pos.quantity <= 0) return;
+  const handleClosePosition = useCallback((symbol: string, index: number, percentage: number = 1, method: 'manual' | 'sl' | 'tp1' | 'tp2' | 'tp3' | 'liquidation' = 'manual') => {
+    const symbolPositions = positionsMapRef.current[symbol] || [];
+    const pos = symbolPositions[index];
+    if (!pos || pos.quantity <= 0) return;
 
-      const pct = Math.min(1, Math.max(0.01, percentage));
-      const closeQty = pos.quantity * pct;
-      const rawPrice = priceMapRef.current[symbol] || 0;
-      if (rawPrice <= 0) {
-        toast.error("无法获取当前价格");
-        return;
+    const pct = Math.min(1, Math.max(0.01, percentage));
+    const closeQty = pos.quantity * pct;
+    const rawPrice = priceMapRef.current[symbol] || 0;
+    if (rawPrice <= 0) { toast.error('无法获取当前价格'); return; }
+
+    const closeSide: OrderSide = pos.side === 'LONG' ? 'SHORT' : 'LONG';
+    const { fillPrice, slippage } = applySlippageIfTaker(rawPrice, closeQty, closeSide, false);
+    const pnl = pos.side === 'LONG'
+      ? (fillPrice - pos.entryPrice) * closeQty
+      : (pos.entryPrice - fillPrice) * closeQty;
+    const fee = calcFee(fillPrice, closeQty, false);
+
+    const closedMargin = pos.margin * pct;
+    const closedIsoMargin = pos.isolatedMargin != null ? pos.isolatedMargin * pct : undefined;
+
+    const returnedMargin = pos.marginMode === 'isolated' && closedIsoMargin != null
+      ? closedIsoMargin + pnl - fee
+      : closedMargin + pnl - fee;
+
+    // Credit to single global balance
+    setBalance(prev => prev + Math.max(0, returnedMargin));
+
+    // Determine if this position will be fully closed (for OCO cleanup)
+    // Use Epsilon Threshold (1e-6) to defend against JS float precision dust
+    const POSITION_DUST_EPSILON = 1e-6;
+    const remainingQtyAfter = pos.quantity * (1 - pct);
+    const willFullyClose = pct >= 1 || remainingQtyAfter <= POSITION_DUST_EPSILON;
+    const closedPositionId = pos.id;
+
+    // Update or remove position — physical destruction on full close
+    setPositionsMap(prev => {
+      const positions = [...(prev[symbol] || [])];
+      if (willFullyClose) {
+        // Physically remove by id (defensive: not just by index)
+        const filtered = positions.filter(p => p.id !== closedPositionId && p.quantity > POSITION_DUST_EPSILON);
+        return { ...prev, [symbol]: filtered };
       }
+      const remaining = positions[index];
+      const remainPct = 1 - pct;
+      const newQty = remaining.quantity * remainPct;
+      if (newQty <= POSITION_DUST_EPSILON) {
+        const filtered = positions.filter(p => p.id !== closedPositionId && p.quantity > POSITION_DUST_EPSILON);
+        return { ...prev, [symbol]: filtered };
+      }
+      positions[index] = {
+        ...remaining,
+        quantity: newQty,
+        margin: remaining.margin * remainPct,
+        isolatedMargin: remaining.isolatedMargin != null
+          ? remaining.isolatedMargin * remainPct : undefined,
+      };
+      // Final sanitization sweep — drop any dust positions
+      return { ...prev, [symbol]: positions.filter(p => p.quantity > POSITION_DUST_EPSILON) };
+    });
 
-      const closeSide: OrderSide = pos.side === "LONG" ? "SHORT" : "LONG";
-      const { fillPrice, slippage } = applySlippageIfTaker(rawPrice, closeQty, closeSide, false);
-      const pnl =
-        pos.side === "LONG" ? (fillPrice - pos.entryPrice) * closeQty : (pos.entryPrice - fillPrice) * closeQty;
-      const fee = calcFee(fillPrice, closeQty, false);
-
-      const closedMargin = pos.margin * pct;
-      const closedIsoMargin = pos.isolatedMargin != null ? pos.isolatedMargin * pct : undefined;
-
-      const returnedMargin =
-        pos.marginMode === "isolated" && closedIsoMargin != null
-          ? closedIsoMargin + pnl - fee
-          : closedMargin + pnl - fee;
-
-      // Credit to single global balance
-      setBalance((prev) => prev + Math.max(0, returnedMargin));
-
-      // Determine if this position will be fully closed (for OCO cleanup)
-      // Use Epsilon Threshold (1e-6) to defend against JS float precision dust
-      const POSITION_DUST_EPSILON = 1e-6;
-      const remainingQtyAfter = pos.quantity * (1 - pct);
-      const willFullyClose = pct >= 1 || remainingQtyAfter <= POSITION_DUST_EPSILON;
-      const closedPositionId = pos.id;
-
-      // Update or remove position — physical destruction on full close
-      setPositionsMap((prev) => {
-        const positions = [...(prev[symbol] || [])];
-        if (willFullyClose) {
-          // Physically remove by id (defensive: not just by index)
-          const filtered = positions.filter((p) => p.id !== closedPositionId && p.quantity > POSITION_DUST_EPSILON);
-          return { ...prev, [symbol]: filtered };
-        }
-        const remaining = positions[index];
-        const remainPct = 1 - pct;
-        const newQty = remaining.quantity * remainPct;
-        if (newQty <= POSITION_DUST_EPSILON) {
-          const filtered = positions.filter((p) => p.id !== closedPositionId && p.quantity > POSITION_DUST_EPSILON);
-          return { ...prev, [symbol]: filtered };
-        }
-        positions[index] = {
-          ...remaining,
-          quantity: newQty,
-          margin: remaining.margin * remainPct,
-          isolatedMargin: remaining.isolatedMargin != null ? remaining.isolatedMargin * remainPct : undefined,
-        };
-        // Final sanitization sweep — drop any dust positions
-        return { ...prev, [symbol]: positions.filter((p) => p.quantity > POSITION_DUST_EPSILON) };
-      });
-
-      // OCO / linked TP-SL maintenance — drop ALL linked reduce-only orders on full close (orphan prevention)
-      setOrdersMap((prev) => {
-        const orders = prev[symbol] || [];
-        if (orders.length === 0) return prev;
-        let changed = false;
-        const next: PendingOrder[] = [];
-        for (const o of orders) {
-          if (o.reduceOnly && o.linkedPositionId === closedPositionId) {
-            if (willFullyClose) {
-              changed = true;
-              continue; // drop the linked TP/SL — prevent orphan conditional orders
-            }
-            // partial close: rescale the reduce-only quantity proportionally
-            const remainPct = 1 - pct;
-            const newQty = o.quantity * remainPct;
-            if (newQty <= POSITION_DUST_EPSILON) {
-              changed = true;
-              continue;
-            }
+    // OCO / linked TP-SL maintenance — drop ALL linked reduce-only orders on full close (orphan prevention)
+    setOrdersMap(prev => {
+      const orders = prev[symbol] || [];
+      if (orders.length === 0) return prev;
+      let changed = false;
+      const next: PendingOrder[] = [];
+      for (const o of orders) {
+        if (o.reduceOnly && o.linkedPositionId === closedPositionId) {
+          if (willFullyClose) {
             changed = true;
-            next.push({ ...o, quantity: newQty });
-            continue;
+            continue; // drop the linked TP/SL — prevent orphan conditional orders
           }
-          next.push(o);
+          // partial close: rescale the reduce-only quantity proportionally
+          const remainPct = 1 - pct;
+          const newQty = o.quantity * remainPct;
+          if (newQty <= POSITION_DUST_EPSILON) { changed = true; continue; }
+          changed = true;
+          next.push({ ...o, quantity: newQty });
+          continue;
         }
-        return changed ? { ...prev, [symbol]: next } : prev;
-      });
+        next.push(o);
+      }
+      return changed ? { ...prev, [symbol]: next } : prev;
+    });
 
-      setTradeHistory((prev) => [
-        ...prev,
-        {
-          id: crypto.randomUUID(),
-          symbol,
-          side: pos.side,
-          type: "MARKET" as OrderType,
-          action: "CLOSE" as const,
-          entryPrice: pos.entryPrice,
-          exitPrice: fillPrice,
-          quantity: closeQty,
-          leverage: pos.leverage,
-          pnl: pnl - fee,
-          fee,
-          slippage,
-          openTime: pos.openTime || 0,
-          closeTime: getEffectiveTime(symbol),
-          exit_method: method,
-        },
-      ]);
+    setTradeHistory(prev => [...prev, {
+      id: crypto.randomUUID(), symbol, side: pos.side, type: 'MARKET' as OrderType,
+      action: 'CLOSE' as const, entryPrice: pos.entryPrice, exitPrice: fillPrice,
+      quantity: closeQty, leverage: pos.leverage,
+      pnl: pnl - fee, fee, slippage, openTime: pos.openTime || 0, closeTime: getEffectiveTime(symbol),
+      exit_method: method,
+    }]);
 
-      const pctLabel = pct < 1 ? ` (${Math.round(pct * 100)}%)` : "";
-      const netPnl = pnl - fee;
-      toast.success(`市价平仓成功，已结算盈亏：${netPnl >= 0 ? "+" : ""}${netPnl.toFixed(2)} USDT`, {
-        description: `${symbol}${pctLabel} @ ${fillPrice.toFixed(2)}`,
-      });
-    },
-    [getEffectiveTime],
-  );
+    const pctLabel = pct < 1 ? ` (${Math.round(pct * 100)}%)` : '';
+    const netPnl = pnl - fee;
+    toast.success(`市价平仓成功，已结算盈亏：${netPnl >= 0 ? '+' : ''}${netPnl.toFixed(2)} USDT`, {
+      description: `${symbol}${pctLabel} @ ${fillPrice.toFixed(2)}`,
+    });
+  }, [getEffectiveTime]);
 
   // ===== Place TP/SL conditional orders (reduce-only, linked to a specific position) =====
-  const handlePlaceTpSl = useCallback(
-    (symbol: string, pos: Position, tp: number | null, sl: number | null, pct: number) => {
-      if ((tp === null || !(tp > 0)) && (sl === null || !(sl > 0))) {
-        toast.error("请至少输入一个有效的触发价格");
-        return;
+  const handlePlaceTpSl = useCallback((symbol: string, pos: Position, tp: number | null, sl: number | null, pct: number) => {
+    if ((tp === null || !(tp > 0)) && (sl === null || !(sl > 0))) {
+      toast.error('请至少输入一个有效的触发价格');
+      return;
+    }
+
+    const safePct = Math.min(100, Math.max(1, pct));
+    const closeQty = pos.quantity * (safePct / 100);
+    if (closeQty <= 0) {
+      toast.error('平仓数量无效');
+      return;
+    }
+
+    const markPrice = priceMapRef.current[symbol] || 0;
+
+    // Sanity check TP/SL direction relative to current mark price
+    if (markPrice > 0) {
+      if (tp !== null && tp > 0) {
+        if (pos.side === 'LONG' && tp <= markPrice) { toast.error('多单止盈价必须高于当前价'); return; }
+        if (pos.side === 'SHORT' && tp >= markPrice) { toast.error('空单止盈价必须低于当前价'); return; }
+      }
+      if (sl !== null && sl > 0) {
+        if (pos.side === 'LONG' && sl >= markPrice) { toast.error('多单止损价必须低于当前价'); return; }
+        if (pos.side === 'SHORT' && sl <= markPrice) { toast.error('空单止损价必须高于当前价'); return; }
+      }
+    }
+
+    const now = getEffectiveTime(symbol);
+    const closeSide: OrderSide = pos.side === 'LONG' ? 'SHORT' : 'LONG';
+
+    setOrdersMap(prev => {
+      const orders = prev[symbol] || [];
+      // Replace any existing TP/SL on this exact position
+      const filtered = orders.filter(o => !(o.reduceOnly && o.linkedPositionId === pos.id));
+      const newOrders: PendingOrder[] = [];
+
+      if (tp !== null && tp > 0) {
+        const tpOperator: TriggerOperator = pos.side === 'LONG' ? '>=' : '<=';
+        newOrders.push({
+          id: crypto.randomUUID(), side: closeSide, type: 'CONDITIONAL' as OrderType,
+          price: 0, stopPrice: tp, quantity: closeQty,
+          leverage: pos.leverage, marginMode: pos.marginMode,
+          status: 'PENDING', createdAt: now,
+          conditionalExecType: 'MARKET',
+          operator: tpOperator, triggerDirection: tpOperator === '>=' ? 'UP' : 'DOWN',
+          reduceOnly: true, reduceSymbol: symbol, reducePositionSide: pos.side,
+          linkedPositionId: pos.id, reduceKind: 'TP', reducePercentage: safePct,
+        });
       }
 
-      const safePct = Math.min(100, Math.max(1, pct));
-      const closeQty = pos.quantity * (safePct / 100);
-      if (closeQty <= 0) {
-        toast.error("平仓数量无效");
-        return;
+      if (sl !== null && sl > 0) {
+        const slOperator: TriggerOperator = pos.side === 'LONG' ? '<=' : '>=';
+        newOrders.push({
+          id: crypto.randomUUID(), side: closeSide, type: 'CONDITIONAL' as OrderType,
+          price: 0, stopPrice: sl, quantity: closeQty,
+          leverage: pos.leverage, marginMode: pos.marginMode,
+          status: 'PENDING', createdAt: now,
+          conditionalExecType: 'MARKET',
+          operator: slOperator, triggerDirection: slOperator === '>=' ? 'UP' : 'DOWN',
+          reduceOnly: true, reduceSymbol: symbol, reducePositionSide: pos.side,
+          linkedPositionId: pos.id, reduceKind: 'SL', reducePercentage: safePct,
+        });
       }
 
-      const markPrice = priceMapRef.current[symbol] || 0;
+      return { ...prev, [symbol]: [...filtered, ...newOrders] };
+    });
 
-      // Sanity check TP/SL direction relative to current mark price
-      if (markPrice > 0) {
-        if (tp !== null && tp > 0) {
-          if (pos.side === "LONG" && tp <= markPrice) {
-            toast.error("多单止盈价必须高于当前价");
-            return;
-          }
-          if (pos.side === "SHORT" && tp >= markPrice) {
-            toast.error("空单止盈价必须低于当前价");
-            return;
-          }
-        }
-        if (sl !== null && sl > 0) {
-          if (pos.side === "LONG" && sl >= markPrice) {
-            toast.error("多单止损价必须低于当前价");
-            return;
-          }
-          if (pos.side === "SHORT" && sl <= markPrice) {
-            toast.error("空单止损价必须高于当前价");
-            return;
-          }
-        }
-      }
-
-      const now = getEffectiveTime(symbol);
-      const closeSide: OrderSide = pos.side === "LONG" ? "SHORT" : "LONG";
-
-      setOrdersMap((prev) => {
-        const orders = prev[symbol] || [];
-        // Replace any existing TP/SL on this exact position
-        const filtered = orders.filter((o) => !(o.reduceOnly && o.linkedPositionId === pos.id));
-        const newOrders: PendingOrder[] = [];
-
-        if (tp !== null && tp > 0) {
-          const tpOperator: TriggerOperator = pos.side === "LONG" ? ">=" : "<=";
-          newOrders.push({
-            id: crypto.randomUUID(),
-            side: closeSide,
-            type: "CONDITIONAL" as OrderType,
-            price: 0,
-            stopPrice: tp,
-            quantity: closeQty,
-            leverage: pos.leverage,
-            marginMode: pos.marginMode,
-            status: "PENDING",
-            createdAt: now,
-            conditionalExecType: "MARKET",
-            operator: tpOperator,
-            triggerDirection: tpOperator === ">=" ? "UP" : "DOWN",
-            reduceOnly: true,
-            reduceSymbol: symbol,
-            reducePositionSide: pos.side,
-            linkedPositionId: pos.id,
-            reduceKind: "TP",
-            reducePercentage: safePct,
-          });
-        }
-
-        if (sl !== null && sl > 0) {
-          const slOperator: TriggerOperator = pos.side === "LONG" ? "<=" : ">=";
-          newOrders.push({
-            id: crypto.randomUUID(),
-            side: closeSide,
-            type: "CONDITIONAL" as OrderType,
-            price: 0,
-            stopPrice: sl,
-            quantity: closeQty,
-            leverage: pos.leverage,
-            marginMode: pos.marginMode,
-            status: "PENDING",
-            createdAt: now,
-            conditionalExecType: "MARKET",
-            operator: slOperator,
-            triggerDirection: slOperator === ">=" ? "UP" : "DOWN",
-            reduceOnly: true,
-            reduceSymbol: symbol,
-            reducePositionSide: pos.side,
-            linkedPositionId: pos.id,
-            reduceKind: "SL",
-            reducePercentage: safePct,
-          });
-        }
-
-        return { ...prev, [symbol]: [...filtered, ...newOrders] };
-      });
-
-      toast.success("止盈/止损委托已下达", {
-        description: `TP: ${tp || "-"} / SL: ${sl || "-"} · ${safePct}% 仓位`,
-      });
-    },
-    [getEffectiveTime],
-  );
+    toast.success('止盈/止损委托已下达', {
+      description: `TP: ${tp || '-'} / SL: ${sl || '-'} · ${safePct}% 仓位`,
+    });
+  }, [getEffectiveTime]);
 
   // ===== Cancel Order =====
   const handleCancelOrder = useCallback((symbol: string, orderId: string) => {
-    setOrdersMap((prev) => ({
+    setOrdersMap(prev => ({
       ...prev,
-      [symbol]: (prev[symbol] || []).filter((o) => o.id !== orderId),
+      [symbol]: (prev[symbol] || []).filter(o => o.id !== orderId),
     }));
-    toast.info("委托已撤销");
+    toast.info('委托已撤销');
   }, []);
 
   // ===== Adjust Isolated Margin (add OR remove) =====
@@ -1213,8 +992,8 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
     const positions = positionsMapRef.current[symbol] || [];
     const pos = positions[posIndex];
     if (!pos) return;
-    if (pos.marginMode !== "isolated") {
-      toast.error("全仓模式不支持单仓位调整保证金");
+    if (pos.marginMode !== 'isolated') {
+      toast.error('全仓模式不支持单仓位调整保证金');
       return;
     }
 
@@ -1225,12 +1004,9 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
       // ADD
       const avail = calcAvailable(balanceRef.current, positionsMapRef.current);
       const actual = Math.min(signedDelta, avail);
-      if (actual <= 1e-8) {
-        toast.error("可用余额不足");
-        return;
-      }
-      setBalance((prev) => prev - actual);
-      setPositionsMap((prev) => {
+      if (actual <= 1e-8) { toast.error('可用余额不足'); return; }
+      setBalance(prev => prev - actual);
+      setPositionsMap(prev => {
         const arr = [...(prev[symbol] || [])];
         const p = arr[posIndex];
         if (!p) return prev;
@@ -1243,11 +1019,11 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
       const maxRemovable = Math.max(0, currentMargin - initialMargin);
       const actual = Math.min(requested, maxRemovable);
       if (actual <= 1e-8) {
-        toast.error("已达初始保证金下限，无法继续减少");
+        toast.error('已达初始保证金下限，无法继续减少');
         return;
       }
-      setBalance((prev) => prev + actual);
-      setPositionsMap((prev) => {
+      setBalance(prev => prev + actual);
+      setPositionsMap(prev => {
         const arr = [...(prev[symbol] || [])];
         const p = arr[posIndex];
         if (!p) return prev;
@@ -1258,105 +1034,73 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   // Backwards-compat alias: legacy "+只追加" callsites
-  const handleAddIsolatedMargin = useCallback(
-    (symbol: string, posIndex: number, amount: number) => {
-      handleAdjustMargin(symbol, posIndex, Math.abs(amount));
-    },
-    [handleAdjustMargin],
-  );
+  const handleAddIsolatedMargin = useCallback((symbol: string, posIndex: number, amount: number) => {
+    handleAdjustMargin(symbol, posIndex, Math.abs(amount));
+  }, [handleAdjustMargin]);
 
   // ===== Clear Symbol Data & Financial Reversal =====
-  const handleClearSymbolData = useCallback(
-    (symbol: string) => {
-      // Use refs to avoid stale closures
-      const currentPositions = positionsMapRef.current[symbol] || [];
-      let returnedMargin = 0;
-      for (const pos of currentPositions) {
-        const m = pos.marginMode === "isolated" && pos.isolatedMargin != null ? pos.isolatedMargin : pos.margin;
-        returnedMargin += m;
-      }
+  const handleClearSymbolData = useCallback((symbol: string) => {
+    // Use refs to avoid stale closures
+    const currentPositions = positionsMapRef.current[symbol] || [];
+    let returnedMargin = 0;
+    for (const pos of currentPositions) {
+      const m = pos.marginMode === 'isolated' && pos.isolatedMargin != null
+        ? pos.isolatedMargin : pos.margin;
+      returnedMargin += m;
+    }
 
-      const currentHistory = tradeHistory;
-      const symbolHistory = currentHistory.filter((t) => t.symbol === symbol);
-      let totalRealizedPnl = 0;
-      let totalFees = 0;
-      for (const t of symbolHistory) {
-        totalRealizedPnl = Math.round((totalRealizedPnl + t.pnl) * 1e8) / 1e8;
-        totalFees = Math.round((totalFees + t.fee) * 1e8) / 1e8;
-      }
+    const currentHistory = tradeHistory;
+    const symbolHistory = currentHistory.filter(t => t.symbol === symbol);
+    let totalRealizedPnl = 0;
+    let totalFees = 0;
+    for (const t of symbolHistory) {
+      totalRealizedPnl = Math.round((totalRealizedPnl + t.pnl) * 1e8) / 1e8;
+      totalFees = Math.round((totalFees + t.fee) * 1e8) / 1e8;
+    }
 
-      const adjustment = Math.round((returnedMargin - totalRealizedPnl + totalFees) * 1e8) / 1e8;
+    const adjustment = Math.round((returnedMargin - totalRealizedPnl + totalFees) * 1e8) / 1e8;
 
-      // Physically remove all positions for this symbol
-      setPositionsMap((prev) => {
-        const next = { ...prev };
-        delete next[symbol];
-        return next;
-      });
+    // Physically remove all positions for this symbol
+    setPositionsMap(prev => {
+      const next = { ...prev };
+      delete next[symbol];
+      return next;
+    });
 
-      setOrdersMap((prev) => {
-        const next = { ...prev };
-        delete next[symbol];
-        return next;
-      });
+    setOrdersMap(prev => {
+      const next = { ...prev };
+      delete next[symbol];
+      return next;
+    });
 
-      setTradeHistory((prev) => prev.filter((t) => t.symbol !== symbol));
-      setBalance((prev) => Math.round((prev + adjustment) * 1e8) / 1e8);
+    setTradeHistory(prev => prev.filter(t => t.symbol !== symbol));
+    setBalance(prev => Math.round((prev + adjustment) * 1e8) / 1e8);
 
-      toast.success(`已彻底清除 ${symbol.replace("USDT", "/USDT")} 的所有数据，资产已复原。`);
-    },
-    [tradeHistory],
-  );
+    toast.success(`已彻底清除 ${symbol.replace('USDT', '/USDT')} 的所有数据，资产已复原。`);
+  }, [tradeHistory]);
 
   const value: TradingState = {
     sim,
-    activeSymbol,
-    setActiveSymbol,
-    interval,
-    setInterval,
-    positionsMap,
-    setPositionsMap,
-    ordersMap,
-    setOrdersMap,
-    priceMap,
-    setPriceMap,
-    balance,
-    setBalance,
+    activeSymbol, setActiveSymbol,
+    interval, setInterval,
+    positionsMap, setPositionsMap,
+    ordersMap, setOrdersMap,
+    priceMap, setPriceMap,
+    balance, setBalance,
     isolatedBalances: emptyIsolatedBalances,
     setIsolatedBalances: setIsolatedBalancesNoop,
-    tradeHistory,
-    setTradeHistory,
-    activeSymbolPositions,
-    activeSymbolOrders,
-    allPositions,
-    allOrders,
-    currentPrice,
-    pricePrecision,
-    quantityPrecision,
-    setPricePrecision,
-    setQuantityPrecision,
-    leverageMap,
-    marginModeMap,
-    getSymbolLeverage,
-    setSymbolLeverage,
-    getSymbolMarginMode,
-    setSymbolMarginMode,
+    tradeHistory, setTradeHistory,
+    activeSymbolPositions, activeSymbolOrders,
+    allPositions, allOrders,
+    currentPrice, pricePrecision, quantityPrecision, setPricePrecision, setQuantityPrecision,
+    leverageMap, marginModeMap, getSymbolLeverage, setSymbolLeverage, getSymbolMarginMode, setSymbolMarginMode,
     activeSymbols,
-    handlePlaceOrder,
-    handleClosePosition,
-    handleCancelOrder,
-    handlePlaceTpSl,
-    handleAddIsolatedMargin,
-    handleAdjustMargin,
-    handleClearSymbolData,
+    handlePlaceOrder, handleClosePosition, handleCancelOrder, handlePlaceTpSl,
+    handleAddIsolatedMargin, handleAdjustMargin, handleClearSymbolData,
     fundingRate: FUNDING_RATE,
-    liquidationOpen,
-    liquidationDetails,
-    closeLiquidationModal,
-    timeMode,
-    setTimeMode,
-    coinTimelines,
-    setCoinTimelines,
+    liquidationOpen, liquidationDetails, closeLiquidationModal,
+    timeMode, setTimeMode,
+    coinTimelines, setCoinTimelines,
     totalPositionCount,
     getEffectiveTime,
     getCoinState,

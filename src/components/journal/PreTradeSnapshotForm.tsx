@@ -9,12 +9,21 @@ import { Input } from '@/components/ui/input';
 import { Checkbox } from '@/components/ui/checkbox';
 import { MENTAL_STATE_LABELS } from '@/types/journal';
 import { buildChecklist, isChecklistPassed } from '@/lib/defaultChecklist';
-import { listRules } from '@/lib/journalApi';
+import { getCampaignWithLegs, listActiveCampaigns, listRules } from '@/lib/journalApi';
+import { LEG_ROLE_LABELS, STRATEGY_TEMPLATES } from '@/lib/strategyTemplates';
 import { useAuth } from '@/contexts/AuthContext';
 import { useTradingContext } from '@/contexts/TradingContext';
-import { ShieldCheck } from 'lucide-react';
+import { AlertTriangle, ShieldCheck } from 'lucide-react';
 import type { PlaceOrderParams } from '@/contexts/TradingContext';
-import type { ChecklistItem, OrderKind, TradeDirection, TradingRule } from '@/types/journal';
+import type {
+  ChecklistItem,
+  LegRole,
+  OrderKind,
+  StrategyTemplate,
+  TradeCampaign,
+  TradeDirection,
+  TradingRule,
+} from '@/types/journal';
 
 export type SnapshotMode = 'trade' | 'no_entry';
 
@@ -25,6 +34,12 @@ export interface TpLevel {
 
 export interface SnapshotPayload {
   order_kind: OrderKind;
+  campaign_mode: 'create' | 'join' | 'standalone';
+  campaign_id: string | null;
+  campaign_title: string | null;
+  campaign_template: StrategyTemplate | null;
+  campaign_leg_role: LegRole | null;
+  campaign_note: string | null;
   pre_entry_reason: string;
   pre_planned_stop_loss: number | null;
   pre_planned_take_profit: number | null;
@@ -38,6 +53,8 @@ export interface SnapshotPayload {
   pre_max_loss_usdt: number | null;
   tp_levels: TpLevel[];
 }
+
+type CampaignOption = TradeCampaign & { legCount: number };
 
 interface Props {
   mode: SnapshotMode;
@@ -61,14 +78,28 @@ const fmtTime = (d: Date) => {
 const directionLabel = (d: TradeDirection) =>
   d === 'long' ? '做多' : d === 'short' ? '做空' : '未开仓';
 
+const buildDefaultCampaignTitle = (symbol: string, time: Date, direction: TradeDirection) => {
+  const date = time.toISOString().slice(0, 10);
+  const dir = direction === 'short' ? '做空' : '做多';
+  return `${symbol} ${date} ${dir}主战役`;
+};
+
+const createRolesForHedge: LegRole[] = ['hedge_initial_a', 'hedge_initial_b', 'mirror_tp', 'hedge_rolling'];
+const joinRolesForHedge: LegRole[] = ['hedge_initial_a', 'hedge_initial_b', 'hedge_rolling', 'mirror_tp', 'reentry_hedge'];
+
 export function PreTradeSnapshotForm({
   mode, symbol, direction, simulatedTime, lockedEntryPrice, leverage,
-  initialPositionSizeUsdt, pricePrecision, orderParams, onCancel, onSubmit,
+  initialPositionSizeUsdt, pricePrecision, onCancel, onSubmit,
 }: Props) {
   const isTrade = mode === 'trade';
   const isShort = direction === 'short';
   const { user } = useAuth();
-  const { getEffectiveAvailable } = useTradingContext();
+  const {
+    getEffectiveAvailable,
+    getSymbolLeverage,
+    getSymbolMarginMode,
+    setSymbolMarginMode,
+  } = useTradingContext();
 
   const [orderKind, setOrderKind] = useState<OrderKind>('main');
   const isHedge = isTrade && orderKind === 'hedge';
@@ -87,12 +118,78 @@ export function PreTradeSnapshotForm({
   const [overrideLowMental, setOverrideLowMental] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [userRules, setUserRules] = useState<TradingRule[]>([]);
+  const [activeCampaigns, setActiveCampaigns] = useState<CampaignOption[]>([]);
+  const [campaignMode, setCampaignMode] = useState<'create' | 'join' | 'standalone'>('create');
+  const [campaignTitle, setCampaignTitle] = useState(() => buildDefaultCampaignTitle(symbol, simulatedTime, direction));
+  const [campaignTemplate, setCampaignTemplate] = useState<StrategyTemplate>('main_dual_hedge_mirror_tp');
+  const [campaignLegRole, setCampaignLegRole] = useState<LegRole>('main_open');
+  const [selectedCampaignId, setSelectedCampaignId] = useState('');
+  const [campaignNote, setCampaignNote] = useState('');
+  const currentLeverage = getSymbolLeverage(symbol) ?? leverage;
+  const currentMarginMode = getSymbolMarginMode(symbol) ?? 'cross';
+  const crossBlocked = isTrade && currentMarginMode === 'cross';
 
   // Load user rules for checklist injection
   useEffect(() => {
     if (!user || !isTrade) return;
     listRules(user.id).then(setUserRules).catch(() => {});
   }, [user, isTrade]);
+
+  useEffect(() => {
+    if (!user || !isTrade) {
+      setActiveCampaigns([]);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const campaigns = await listActiveCampaigns(user.id);
+        const withCounts = await Promise.all(
+          campaigns.map(async campaign => {
+            try {
+              const details = await getCampaignWithLegs(campaign.id);
+              return { ...campaign, legCount: details.legs.length };
+            } catch {
+              return { ...campaign, legCount: 0 };
+            }
+          }),
+        );
+        if (!cancelled) {
+          const sorted = withCounts.sort((a, b) => {
+            const aMatch = a.symbol === symbol ? 1 : 0;
+            const bMatch = b.symbol === symbol ? 1 : 0;
+            if (aMatch !== bMatch) return bMatch - aMatch;
+            return b.opened_at.localeCompare(a.opened_at);
+          });
+          setActiveCampaigns(sorted);
+        }
+      } catch {
+        if (!cancelled) setActiveCampaigns([]);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [user, isTrade, symbol]);
+
+  useEffect(() => {
+    setCampaignTitle(buildDefaultCampaignTitle(symbol, simulatedTime, direction));
+  }, [symbol, simulatedTime, direction]);
+
+  useEffect(() => {
+    if (!isTrade) return;
+    if (orderKind === 'main') {
+      setCampaignMode('create');
+      setCampaignLegRole('main_open');
+      return;
+    }
+    if (activeCampaigns.length > 0) {
+      setCampaignMode('join');
+      setSelectedCampaignId(prev => prev || activeCampaigns[0]?.id || '');
+      setCampaignLegRole('hedge_initial_a');
+    } else {
+      setCampaignMode('create');
+      setCampaignLegRole('hedge_initial_a');
+    }
+  }, [orderKind, activeCampaigns, isTrade]);
 
   const checklistItems = useMemo(() => buildChecklist(userRules), [userRules]);
 
@@ -125,6 +222,19 @@ export function PreTradeSnapshotForm({
     return totalPct > 0 && totalPct <= 100;
   }, [tps, isTrade]);
 
+  const joinDisabled = activeCampaigns.length === 0;
+  const campaignFieldsValid = useMemo(() => {
+    if (!isTrade) return true;
+    if (campaignMode === 'standalone') return true;
+    if (campaignMode === 'create') {
+      return campaignTitle.trim().length >= 3 && !!campaignTemplate && !!campaignLegRole;
+    }
+    if (campaignMode === 'join') {
+      return !!selectedCampaignId && !!campaignLegRole;
+    }
+    return false;
+  }, [campaignLegRole, campaignMode, campaignTemplate, campaignTitle, isTrade, selectedCampaignId]);
+
   // ===== Submit gate =====
   const canSubmit = useMemo(() => {
     if (reason.trim().length < 20) return false;
@@ -137,6 +247,8 @@ export function PreTradeSnapshotForm({
       return true;
     }
     // trade mode
+    if (currentMarginMode !== 'isolated') return false;
+    if (!campaignFieldsValid) return false;
     if (isHedge) {
       return true;
     }
@@ -149,7 +261,7 @@ export function PreTradeSnapshotForm({
     if (!checklistPassed) return false;
     return true;
   }, [reason, riskAware, riskManage, mental, mentalTrigger, overrideLowMental,
-      mode, isHedge, tpsValid, sizeUsdt, maxLoss, checklistPassed, noEntryReason]);
+      mode, isHedge, tpsValid, sizeUsdt, maxLoss, checklistPassed, noEntryReason, currentMarginMode, campaignFieldsValid]);
 
   const handleSubmit = async () => {
     if (!canSubmit || submitting) return;
@@ -167,9 +279,24 @@ export function PreTradeSnapshotForm({
       const baseMentalTrigger = mode === 'no_entry'
         ? noEntryReason.trim()
         : (mental <= 3 ? mentalTrigger.trim() : null);
+      const resolvedCampaignMode = mode === 'no_entry' ? 'standalone' : campaignMode;
+      const resolvedLegRole: LegRole | null = mode === 'no_entry'
+        ? null
+        : campaignMode === 'standalone'
+          ? 'standalone'
+          : campaignLegRole;
+      const baseCampaign = {
+        campaign_mode: resolvedCampaignMode,
+        campaign_id: campaignMode === 'join' ? selectedCampaignId : null,
+        campaign_title: campaignMode === 'create' ? campaignTitle.trim() : null,
+        campaign_template: campaignMode === 'create' ? campaignTemplate : null,
+        campaign_leg_role: resolvedLegRole,
+        campaign_note: campaignMode === 'join' ? (campaignNote.trim() || null) : null,
+      } as const;
 
       const payload: SnapshotPayload = isHedge
         ? {
+            ...baseCampaign,
             order_kind: 'hedge',
             pre_entry_reason: reason.trim(),
             pre_planned_stop_loss: null,
@@ -185,6 +312,7 @@ export function PreTradeSnapshotForm({
             tp_levels: [],
           }
         : {
+            ...baseCampaign,
             order_kind: mode === 'no_entry' ? 'main' : orderKind,
             pre_entry_reason: reason.trim(),
             pre_planned_stop_loss: null,
@@ -242,7 +370,7 @@ export function PreTradeSnapshotForm({
         <p className="text-[11px] text-muted-foreground font-mono mt-1">
           {fmtTime(simulatedTime)} · {symbol} · {directionLabel(direction)}
           {isTrade && lockedEntryPrice ? ` · 入场价 ${lockedEntryPrice.toFixed(pricePrecision)}` : ''}
-          {isTrade ? ` · ${leverage}x` : ''}
+          {isTrade ? ` · ${currentLeverage}x` : ''}
         </p>
       </div>
 
@@ -278,6 +406,219 @@ export function PreTradeSnapshotForm({
                 <div className="text-[10px] text-muted-foreground">防御性头寸，简化记录</div>
               </button>
             </div>
+            {isHedge && (
+              <div className="mt-2 px-3 py-2 bg-muted/30 rounded">
+                <div className="text-[11px] text-muted-foreground">
+                  {'💡 对冲单使用与主力单相同的杠杆 '}{currentLeverage}x {'—— 同标的的杠杆是系统级共享设置，不可在订单层独立调整。'}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* (0.5) Margin mode guard — hidden in no_entry mode */}
+        {isTrade && (
+          <div className="mt-0 mb-1">
+            <div className={`${labelCls} mb-2`}>仓位模式{requiredStar}</div>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => setSymbolMarginMode(symbol, 'cross')}
+                className={`h-14 rounded border-2 cursor-pointer transition-all text-left p-3 flex flex-col gap-0.5 justify-center ${
+                  currentMarginMode === 'cross'
+                    ? 'border-[#F6465D] bg-[#F6465D]/10 text-[#F6465D]'
+                    : 'border-border bg-card text-muted-foreground hover:bg-accent'
+                }`}
+              >
+                <div className="text-[12px] font-medium">全仓</div>
+                <div className="text-[10px]">本系统禁止使用</div>
+              </button>
+              <button
+                type="button"
+                onClick={() => setSymbolMarginMode(symbol, 'isolated')}
+                className={`h-14 rounded border-2 cursor-pointer transition-all text-left p-3 flex flex-col gap-0.5 justify-center ${
+                  currentMarginMode === 'isolated'
+                    ? 'border-[#0ECB81] bg-[#0ECB81]/10 text-foreground'
+                    : 'border-border bg-card text-muted-foreground hover:bg-accent'
+                }`}
+              >
+                <div className="text-[12px] font-medium">逐仓</div>
+                <div className="text-[10px] text-muted-foreground">每笔风险独立隔离</div>
+              </button>
+            </div>
+            {crossBlocked && (
+              <div className="mt-3 bg-[#F6465D]/10 border border-[#F6465D]/30 rounded p-3">
+                <div className="flex items-center gap-2 text-[#F6465D] font-medium text-[12px]">
+                  <AlertTriangle className="w-4 h-4" />
+                  <span>全仓模式被系统拒绝</span>
+                </div>
+                <div className="mt-2 text-[11px] text-foreground">
+                  全仓会让单笔爆仓拖垮整个账户。本系统在训练阶段不允许使用全仓——这是不可绕过的风险预算守卫，不是 UI 提示。
+                </div>
+                <div className="mt-3">
+                  <button
+                    type="button"
+                    onClick={() => setSymbolMarginMode(symbol, 'isolated')}
+                    className="bg-[#0ECB81] hover:bg-[#0ECB81]/90 text-black h-8 text-[12px] px-3 rounded font-medium transition-colors"
+                  >
+                    一键切换为逐仓
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {isTrade && (
+          <div className="mt-0 mb-1 space-y-2">
+            <div className={`${labelCls} mb-2`}>战役归属{requiredStar}</div>
+            <div className="text-[10px] text-muted-foreground italic mb-2">
+              把这笔归入哪个战役？战役是复盘的高层单位——用于把"主仓 + 对冲 + 滚动调整"的一系列操作绑在一起看。
+            </div>
+
+            <button
+              type="button"
+              onClick={() => {
+                setCampaignMode('create');
+                setCampaignLegRole(orderKind === 'main' ? 'main_open' : 'hedge_initial_a');
+              }}
+              className={`w-full rounded border text-left p-3 transition-colors ${
+                campaignMode === 'create' ? 'border-[#F0B90B] bg-[#F0B90B]/10' : 'border-border bg-card hover:bg-accent'
+              }`}
+            >
+              <div className="text-[12px] font-medium">新建战役</div>
+              <div className="text-[10px] text-muted-foreground mt-0.5">本笔将作为新战役的起点</div>
+              {campaignMode === 'create' && (
+                <div className="mt-3 space-y-2">
+                  <div>
+                    <div className={labelCls}>战役标题{requiredStar}</div>
+                    <Input
+                      value={campaignTitle}
+                      onChange={e => setCampaignTitle(e.target.value)}
+                      className={`${inputCls} mt-1`}
+                    />
+                  </div>
+                  <div>
+                    <div className={labelCls}>策略模板{requiredStar}</div>
+                    <select
+                      value={campaignTemplate}
+                      onChange={e => setCampaignTemplate(e.target.value as StrategyTemplate)}
+                      className={`${inputCls} mt-1 w-full rounded-md px-3`}
+                    >
+                      {Object.entries(STRATEGY_TEMPLATES).map(([key, meta]) => (
+                        <option key={key} value={key}>{meta.name}</option>
+                      ))}
+                    </select>
+                    <div className="mt-1 text-[10px] text-muted-foreground">
+                      {STRATEGY_TEMPLATES[campaignTemplate].description}
+                    </div>
+                  </div>
+                  <div>
+                    <div className={labelCls}>本笔在战役中的角色{requiredStar}</div>
+                    {orderKind === 'main' ? (
+                      <Input value={LEG_ROLE_LABELS.main_open} disabled className={`${inputCls} mt-1 opacity-80`} />
+                    ) : (
+                      <select
+                        value={campaignLegRole}
+                        onChange={e => setCampaignLegRole(e.target.value as LegRole)}
+                        className={`${inputCls} mt-1 w-full rounded-md px-3`}
+                      >
+                        {createRolesForHedge.map(role => (
+                          <option key={role} value={role}>{LEG_ROLE_LABELS[role]}</option>
+                        ))}
+                      </select>
+                    )}
+                  </div>
+                  {orderKind === 'hedge' && activeCampaigns.length === 0 && (
+                    <div className="text-[10px] text-[#F0B90B]">
+                      对冲单一般应加入主力战役，请确认这是有意为之。
+                    </div>
+                  )}
+                </div>
+              )}
+            </button>
+
+            <button
+              type="button"
+              disabled={joinDisabled}
+              onClick={() => {
+                if (joinDisabled) return;
+                setCampaignMode('join');
+                setSelectedCampaignId(prev => prev || activeCampaigns[0]?.id || '');
+                setCampaignLegRole(orderKind === 'main' ? 'reentry_main' : 'hedge_initial_a');
+              }}
+              className={`w-full rounded border text-left p-3 transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+                campaignMode === 'join' ? 'border-[#F0B90B] bg-[#F0B90B]/10' : 'border-border bg-card hover:bg-accent'
+              }`}
+            >
+              <div className="text-[12px] font-medium">加入现有战役</div>
+              <div className="text-[10px] text-muted-foreground mt-0.5">本笔将作为某个 active 战役的新 leg</div>
+              {joinDisabled && (
+                <div className="mt-2 text-[10px] text-muted-foreground">当前无任何 active 战役可加入</div>
+              )}
+              {campaignMode === 'join' && !joinDisabled && (
+                <div className="mt-3 space-y-2">
+                  <div>
+                    <div className={labelCls}>选择战役{requiredStar}</div>
+                    <select
+                      value={selectedCampaignId}
+                      onChange={e => setSelectedCampaignId(e.target.value)}
+                      className={`${inputCls} mt-1 w-full rounded-md px-3`}
+                    >
+                      {activeCampaigns.map(campaign => {
+                        const daysAgo = Math.max(0, Math.floor((Date.now() - new Date(campaign.opened_at).getTime()) / 86400000));
+                        const prefix = campaign.symbol === symbol ? '★ ' : '';
+                        return (
+                          <option key={campaign.id} value={campaign.id}>
+                            {prefix}{campaign.title} · {daysAgo} 天前 · {campaign.legCount} legs
+                          </option>
+                        );
+                      })}
+                    </select>
+                  </div>
+                  <div>
+                    <div className={labelCls}>本笔角色{requiredStar}</div>
+                    {orderKind === 'main' ? (
+                      <Input value={LEG_ROLE_LABELS.reentry_main} disabled className={`${inputCls} mt-1 opacity-80`} />
+                    ) : (
+                      <select
+                        value={campaignLegRole}
+                        onChange={e => setCampaignLegRole(e.target.value as LegRole)}
+                        className={`${inputCls} mt-1 w-full rounded-md px-3`}
+                      >
+                        {joinRolesForHedge.map(role => (
+                          <option key={role} value={role}>{LEG_ROLE_LABELS[role]}</option>
+                        ))}
+                      </select>
+                    )}
+                  </div>
+                  <div>
+                    <div className={labelCls}>附加说明</div>
+                    <Textarea
+                      rows={2}
+                      value={campaignNote}
+                      onChange={e => setCampaignNote(e.target.value)}
+                      placeholder="例如：取代旧对冲 X；新支撑位 1.32"
+                      className={textareaCls}
+                    />
+                  </div>
+                </div>
+              )}
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                setCampaignMode('standalone');
+                setCampaignLegRole('standalone');
+              }}
+              className={`w-full rounded border text-left p-3 transition-colors ${
+                campaignMode === 'standalone' ? 'border-[#F0B90B] bg-[#F0B90B]/10' : 'border-border bg-card hover:bg-accent'
+              }`}
+            >
+              <div className="text-[12px] font-medium">不归属任何战役</div>
+              <div className="text-[10px] text-muted-foreground mt-0.5">用于一次性单笔交易，不进入战役复盘</div>
+            </button>
           </div>
         )}
 
@@ -521,14 +862,16 @@ export function PreTradeSnapshotForm({
         >
           取消
         </button>
-        <button
-          type="button"
-          onClick={handleSubmit}
-          disabled={!canSubmit || submitting}
-          className={`h-8 px-4 text-[12px] font-medium rounded transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${confirmBtnClass}`}
-        >
-          {confirmBtnText}
-        </button>
+        <div title={crossBlocked ? '请先切换为逐仓' : undefined}>
+          <button
+            type="button"
+            onClick={handleSubmit}
+            disabled={!canSubmit || submitting}
+            className={`h-8 px-4 text-[12px] font-medium rounded transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${confirmBtnClass}`}
+          >
+            {confirmBtnText}
+          </button>
+        </div>
       </div>
     </div>
   );

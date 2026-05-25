@@ -4,11 +4,29 @@
  */
 
 import { supabase } from "@/integrations/supabase/client";
+import type { KlineData } from '@/hooks/useBinanceData';
+import {
+  buildActualSimulationParams,
+  buildDeviationFixParams,
+  buildPureSopParams,
+  computeDeviationCosts,
+  simulateCampaign,
+} from '@/lib/campaignSimulationEngine';
 import type {
+  CampaignCounterfactual,
+  CampaignCounterfactualBranchKind,
+  CampaignCounterfactualParams,
+  CampaignCounterfactualResult,
+  CampaignEvent,
+  CampaignStatus,
+  DeviationCost,
   ErrorTagCategory,
   ErrorTagPattern,
   JournalTagAssignment,
+  LegRole,
+  StrategyTemplate,
   TaggedPhase,
+  TradeCampaign,
   TradeDirection,
   TradeJournal,
   TradeOutcome,
@@ -17,6 +35,7 @@ import type {
   CounterfactualBranchParams,
   CounterfactualBranchResult,
 } from "@/types/journal";
+import type { PendingOrder, TradeRecord } from "@/types/trading";
 
 
 function wrap<T>(label: string, error: { message: string } | null, data: T | null): T {
@@ -28,6 +47,451 @@ function wrap<T>(label: string, error: { message: string } | null, data: T | nul
     throw new Error(`${label}失败：返回数据为空`);
   }
   return data;
+}
+
+function toCampaign(row: unknown): TradeCampaign {
+  return row as TradeCampaign;
+}
+
+function toCampaignCounterfactual(row: unknown): CampaignCounterfactual {
+  return row as CampaignCounterfactual;
+}
+
+function toCampaignEvent(row: unknown): CampaignEvent {
+  return row as CampaignEvent;
+}
+
+function inferCampaignEventType(legRole: LegRole): CampaignEvent['event_type'] {
+  if (legRole === 'main_open' || legRole === 'reentry_main') return 'main_opened';
+  if (legRole === 'mirror_tp') return 'mirror_tp_placed';
+  return 'hedge_placed';
+}
+
+function getUserStoragePrefix(userId: string): string {
+  return `sim_${userId}_`;
+}
+
+function readUserScopedStorage<T>(userId: string, key: string, fallback: T): T {
+  try {
+    const raw = localStorage.getItem(`${getUserStoragePrefix(userId)}${key}`);
+    if (!raw) return fallback;
+    return JSON.parse(raw) as T;
+  } catch {
+    return fallback;
+  }
+}
+
+async function getCurrentUserAndCapital(): Promise<{ userId: string; initialCapital: number }> {
+  const { data: auth } = await supabase.auth.getUser();
+  const userId = auth.user?.id;
+  if (!userId) throw new Error('用户未登录');
+  const { data: profile, error } = await supabase
+    .from('profiles' as never)
+    .select('initial_capital')
+    .eq('user_id', userId)
+    .maybeSingle();
+  if (error) throw new Error(`读取账户信息失败：${error.message}`);
+  const initialCapital = ((profile as { initial_capital?: number } | null)?.initial_capital ?? 10_000);
+  return { userId, initialCapital };
+}
+
+export interface CreateCampaignInput {
+  symbol: string;
+  direction: 'main_long' | 'main_short';
+  title: string;
+  opened_at: string;
+  strategy_template?: StrategyTemplate;
+  notes?: string | null;
+}
+
+export interface ListCampaignFilters {
+  status?: CampaignStatus | 'all';
+  symbol?: string;
+  dateFrom?: string;
+  dateTo?: string;
+}
+
+export async function createCampaign(input: CreateCampaignInput): Promise<TradeCampaign> {
+  const { data: auth } = await supabase.auth.getUser();
+  const userId = auth.user?.id;
+  if (!userId) throw new Error('创建战役失败：用户未登录');
+  const event: CampaignEvent = {
+    id: crypto.randomUUID(),
+    timestamp: input.opened_at,
+    event_type: 'campaign_opened',
+    leg_role: null,
+    journal_id: null,
+    trade_record_id: null,
+    pending_order_id: null,
+    price: null,
+    size_usdt: null,
+    notes: input.notes ?? null,
+    recorded_at: new Date().toISOString(),
+  };
+  const payload = {
+    user_id: userId,
+    symbol: input.symbol,
+    direction: input.direction,
+    strategy_template: input.strategy_template ?? 'main_dual_hedge_mirror_tp',
+    title: input.title,
+    opened_at: input.opened_at,
+    notes: input.notes ?? null,
+    actual_evolution: [event],
+  };
+  const { data, error } = await supabase
+    .from('trade_campaigns' as never)
+    .insert(payload as never)
+    .select()
+    .single();
+  return wrap('创建战役', error, toCampaign(data));
+}
+
+export async function updateCampaign(
+  id: string,
+  patch: Partial<Pick<TradeCampaign, 'title' | 'status' | 'notes' | 'closed_at' | 'final_realized_pnl' | 'final_r_multiple' | 'peak_unrealized_pnl' | 'peak_drawdown'>>,
+): Promise<TradeCampaign> {
+  const { data, error } = await supabase
+    .from('trade_campaigns' as never)
+    .update(patch as never)
+    .eq('id', id)
+    .select()
+    .single();
+  return wrap('更新战役', error, toCampaign(data));
+}
+
+export async function closeCampaign(
+  id: string,
+  finalState: {
+    status: Extract<CampaignStatus, 'closed_profit' | 'closed_loss' | 'closed_breakeven' | 'abandoned'>;
+    final_realized_pnl: number | null;
+    final_r_multiple: number | null;
+    closed_at: string;
+    peak_unrealized_pnl?: number | null;
+    peak_drawdown?: number | null;
+    notes?: string | null;
+  },
+): Promise<TradeCampaign> {
+  return updateCampaign(id, finalState);
+}
+
+export async function listActiveCampaigns(userId: string, symbol?: string): Promise<TradeCampaign[]> {
+  let q = supabase
+    .from('trade_campaigns' as never)
+    .select('*')
+    .eq('user_id', userId)
+    .eq('status', 'active');
+  if (symbol) q = q.eq('symbol', symbol);
+  const { data, error } = await q.order('opened_at', { ascending: false });
+  return wrap('加载进行中的战役', error, (data ?? []).map(toCampaign));
+}
+
+export async function listAllCampaigns(
+  userId: string,
+  filters?: ListCampaignFilters,
+): Promise<TradeCampaign[]> {
+  let q = supabase.from('trade_campaigns' as never).select('*').eq('user_id', userId);
+  if (filters?.status && filters.status !== 'all') q = q.eq('status', filters.status);
+  if (filters?.symbol) q = q.eq('symbol', filters.symbol);
+  if (filters?.dateFrom) q = q.gte('opened_at', filters.dateFrom);
+  if (filters?.dateTo) q = q.lte('opened_at', filters.dateTo);
+  const { data, error } = await q.order('opened_at', { ascending: false });
+  return wrap('加载战役列表', error, (data ?? []).map(toCampaign));
+}
+
+export async function getCampaignWithLegs(
+  campaignId: string,
+): Promise<{ campaign: TradeCampaign; legs: TradeJournal[] }> {
+  const [{ data: campaign, error: cErr }, { data: legs, error: lErr }] = await Promise.all([
+    supabase.from('trade_campaigns' as never).select('*').eq('id', campaignId).single(),
+    supabase.from('trade_journals' as never).select('*').eq('campaign_id', campaignId).order('leg_sequence', { ascending: true }),
+  ]);
+  if (cErr) throw new Error(`加载战役失败：${cErr.message}`);
+  if (lErr) throw new Error(`加载战役 legs 失败：${lErr.message}`);
+  return {
+    campaign: toCampaign(campaign),
+    legs: (legs ?? []) as unknown as TradeJournal[],
+  };
+}
+
+export async function getCampaignFullData(
+  campaignId: string,
+): Promise<{
+  campaign: TradeCampaign;
+  legs: TradeJournal[];
+  tradeRecords: TradeRecord[];
+  pendingOrders: PendingOrder[];
+}> {
+  const { campaign, legs } = await getCampaignWithLegs(campaignId);
+  const userId = campaign.user_id;
+  const tradeHistory = readUserScopedStorage<TradeRecord[]>(userId, 'trade_history', []);
+  const ordersMap = readUserScopedStorage<Record<string, PendingOrder[]>>(userId, 'orders_map', {});
+  const legRecordIds = new Set(legs.map(leg => leg.trade_record_id).filter(Boolean));
+  const openedAtMs = new Date(campaign.opened_at).getTime();
+  const closedAtMs = campaign.closed_at ? new Date(campaign.closed_at).getTime() : Number.POSITIVE_INFINITY;
+
+  const tradeRecords = tradeHistory.filter(record =>
+    legRecordIds.has(record.id) ||
+    (
+      record.symbol === campaign.symbol &&
+      (
+        (record.openTime >= openedAtMs && record.openTime <= closedAtMs) ||
+        (record.closeTime >= openedAtMs && record.closeTime <= closedAtMs)
+      )
+    ),
+  );
+  const pendingOrders = Object.entries(ordersMap)
+    .flatMap(([symbol, orders]) => symbol === campaign.symbol ? orders : [])
+    .filter(order => order.status === 'NEW' || order.status === 'PENDING' || order.status === 'ACTIVE');
+
+  return {
+    campaign,
+    legs: [...legs].sort((a, b) => (a.leg_sequence ?? 9999) - (b.leg_sequence ?? 9999)),
+    tradeRecords,
+    pendingOrders,
+  };
+}
+
+export async function appendCampaignEvent(
+  campaignId: string,
+  event: Omit<CampaignEvent, 'id' | 'recorded_at'>,
+): Promise<void> {
+  const { data: current, error: currentErr } = await supabase
+    .from('trade_campaigns' as never)
+    .select('actual_evolution')
+    .eq('id', campaignId)
+    .single();
+  if (currentErr) throw new Error(`读取战役事件流失败：${currentErr.message}`);
+  const existingRaw = (current as { actual_evolution?: unknown[] } | null)?.actual_evolution ?? [];
+  const existing = Array.isArray(existingRaw) ? existingRaw.map(toCampaignEvent) : [];
+  const next: CampaignEvent[] = [
+    ...existing,
+    {
+      ...event,
+      id: crypto.randomUUID(),
+      recorded_at: new Date().toISOString(),
+    },
+  ];
+  const { error } = await supabase
+    .from('trade_campaigns' as never)
+    .update({ actual_evolution: next } as never)
+    .eq('id', campaignId);
+  if (error) throw new Error(`追加战役事件失败：${error.message}`);
+}
+
+export async function attachJournalToCampaign(
+  journalId: string,
+  campaignId: string,
+  legRole: LegRole,
+  legSequence?: number | null,
+): Promise<void> {
+  const { data: journal, error: jErr } = await supabase
+    .from('trade_journals' as never)
+    .select('*')
+    .eq('id', journalId)
+    .single();
+  if (jErr) throw new Error(`读取日记失败：${jErr.message}`);
+
+  let nextSequence = legSequence ?? null;
+  if (nextSequence == null) {
+    const { data: existingLegs, error: seqErr } = await supabase
+      .from('trade_journals' as never)
+      .select('leg_sequence')
+      .eq('campaign_id', campaignId)
+      .order('leg_sequence', { ascending: false })
+      .limit(1);
+    if (seqErr) throw new Error(`读取战役顺序失败：${seqErr.message}`);
+    nextSequence = (((existingLegs ?? [])[0] as { leg_sequence?: number } | undefined)?.leg_sequence ?? 0) + 1;
+  }
+
+  const patch = {
+    campaign_id: campaignId,
+    leg_role: legRole,
+    leg_sequence: nextSequence,
+  };
+  const { error: updateErr } = await supabase
+    .from('trade_journals' as never)
+    .update(patch as never)
+    .eq('id', journalId);
+  if (updateErr) throw new Error(`关联战役失败：${updateErr.message}`);
+
+  await appendCampaignEvent(campaignId, {
+    timestamp: (journal as TradeJournal).pre_simulated_time,
+    event_type: inferCampaignEventType(legRole),
+    leg_role: legRole,
+    journal_id: journalId,
+    trade_record_id: (journal as TradeJournal).trade_record_id,
+    pending_order_id: null,
+    price: (journal as TradeJournal).pre_entry_price,
+    size_usdt: (journal as TradeJournal).pre_position_size,
+    notes: null,
+  });
+
+  if (legRole === 'main_open') {
+    const j = journal as TradeJournal;
+    const { error: campaignErr } = await supabase
+      .from('trade_campaigns' as never)
+      .update({
+        initial_main_size_usdt: j.pre_position_size,
+        initial_leverage: j.leverage,
+      } as never)
+      .eq('id', campaignId);
+    if (campaignErr) throw new Error(`更新战役主仓信息失败：${campaignErr.message}`);
+  }
+}
+
+// ============ Batch 18: Campaign Counterfactuals ============
+
+export interface CreateCampaignCounterfactualInput {
+  campaign_id: string;
+  label: string;
+  branch_kind: CampaignCounterfactualBranchKind;
+  source_deduction_id?: string | null;
+  params: CampaignCounterfactualParams;
+  result: CampaignCounterfactualResult;
+}
+
+export async function createCounterfactual(
+  input: CreateCampaignCounterfactualInput,
+): Promise<CampaignCounterfactual> {
+  const { userId } = await getCurrentUserAndCapital();
+  const payload = {
+    user_id: userId,
+    campaign_id: input.campaign_id,
+    label: input.label.slice(0, 20),
+    branch_kind: input.branch_kind,
+    source_deduction_id: input.source_deduction_id ?? null,
+    params: input.params,
+    result: input.result,
+  };
+  const { data, error } = await supabase
+    .from('campaign_counterfactuals' as never)
+    .insert(payload as never)
+    .select()
+    .single();
+  return wrap('创建反事实战役分支', error, toCampaignCounterfactual(data));
+}
+
+export async function listCounterfactuals(campaignId: string): Promise<CampaignCounterfactual[]> {
+  const { data, error } = await supabase
+    .from('campaign_counterfactuals' as never)
+    .select('*')
+    .eq('campaign_id', campaignId)
+    .order('created_at', { ascending: false });
+  return wrap('加载反事实战役分支', error, (data ?? []).map(toCampaignCounterfactual));
+}
+
+export async function deleteCounterfactual(id: string): Promise<void> {
+  const { error } = await supabase
+    .from('campaign_counterfactuals' as never)
+    .delete()
+    .eq('id', id);
+  if (error) throw new Error(`删除反事实分支失败：${error.message}`);
+}
+
+export async function runAndPersistPureSop(
+  campaignId: string,
+  klines: KlineData[],
+): Promise<CampaignCounterfactual> {
+  const { campaign, legs } = await getCampaignFullData(campaignId);
+  if (campaign.strategy_template === 'custom') {
+    throw new Error('自定义模板暂不支持反事实模拟');
+  }
+  const params = buildPureSopParams(campaign, legs);
+  if (!params) throw new Error('无法构建 Pure SOP 参数：缺少主仓战役数据');
+  const result = simulateCampaign(
+    params,
+    klines,
+    campaign.strategy_template as 'main_dual_hedge_mirror_tp' | 'main_only',
+  );
+  return createCounterfactual({
+    campaign_id: campaignId,
+    label: 'Pure SOP',
+    branch_kind: 'pure_sop',
+    params,
+    result,
+  });
+}
+
+export async function runAndPersistCustomCounterfactual(
+  campaignId: string,
+  label: string,
+  params: CampaignCounterfactualParams,
+  klines: KlineData[],
+): Promise<CampaignCounterfactual> {
+  const { campaign } = await getCampaignFullData(campaignId);
+  if (campaign.strategy_template === 'custom') {
+    throw new Error('自定义模板暂不支持反事实模拟');
+  }
+  const result = simulateCampaign(
+    params,
+    klines,
+    campaign.strategy_template as 'main_dual_hedge_mirror_tp' | 'main_only',
+  );
+  return createCounterfactual({
+    campaign_id: campaignId,
+    label,
+    branch_kind: 'custom_what_if',
+    params,
+    result,
+  });
+}
+
+export async function runAndPersistDeviationCosts(
+  campaignId: string,
+  klines: KlineData[],
+): Promise<DeviationCost[]> {
+  const { campaign, legs, tradeRecords } = await getCampaignFullData(campaignId);
+  if (campaign.strategy_template === 'custom') return [];
+  const { initialCapital } = await getCurrentUserAndCapital();
+  const actualParams = buildActualSimulationParams(campaign, legs);
+  if (!actualParams) return [];
+  const actualResult = simulateCampaign(
+    actualParams,
+    klines,
+    campaign.strategy_template as 'main_dual_hedge_mirror_tp' | 'main_only',
+  );
+  const costs = computeDeviationCosts(
+    {
+      campaign,
+      legs,
+      tradeRecords,
+      account_size_usdt: initialCapital,
+    },
+    {
+      final_realized_pnl: actualResult.final_realized_pnl,
+      account_size_usdt: initialCapital,
+    },
+    klines,
+  );
+
+  for (const cost of costs) {
+    if (!cost.source_deduction_id) continue;
+    const existing = await supabase
+      .from('campaign_counterfactuals' as never)
+      .select('id')
+      .eq('campaign_id', campaignId)
+      .eq('branch_kind', 'fix_one_deviation')
+      .eq('source_deduction_id', cost.source_deduction_id)
+      .limit(1);
+    if ((existing.data ?? []).length > 0) continue;
+    const fixBranch = buildDeviationFixParams(campaign, legs, tradeRecords, cost.source_deduction_id);
+    if (!fixBranch) continue;
+    const fixResult = simulateCampaign(
+      fixBranch.params,
+      klines,
+      campaign.strategy_template as 'main_dual_hedge_mirror_tp' | 'main_only',
+    );
+    await createCounterfactual({
+      campaign_id: campaignId,
+      label: fixBranch.fix_description.slice(0, 20),
+      branch_kind: 'fix_one_deviation',
+      source_deduction_id: cost.source_deduction_id,
+      params: fixBranch.params,
+      result: fixResult,
+    });
+  }
+
+  return costs;
 }
 
 // ============ Categories ============

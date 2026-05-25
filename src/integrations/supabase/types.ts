@@ -179,13 +179,60 @@ export type Database = {
         }
         Relationships: []
       }
+      campaign_counterfactuals: {
+        Row: {
+          branch_kind: string
+          campaign_id: string
+          created_at: string
+          id: string
+          label: string
+          params: Json
+          result: Json
+          source_deduction_id: string | null
+          user_id: string
+        }
+        Insert: {
+          branch_kind: string
+          campaign_id: string
+          created_at?: string
+          id?: string
+          label: string
+          params: Json
+          result: Json
+          source_deduction_id?: string | null
+          user_id: string
+        }
+        Update: {
+          branch_kind?: string
+          campaign_id?: string
+          created_at?: string
+          id?: string
+          label?: string
+          params?: Json
+          result?: Json
+          source_deduction_id?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "campaign_counterfactuals_campaign_id_fkey"
+            columns: ["campaign_id"]
+            isOneToOne: false
+            referencedRelation: "trade_campaigns"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       trade_journals: {
         Row: {
+          campaign_id: string | null
           counterfactual_branches: Json
           created_at: string
           deep_analysis_completed_at: string | null
           direction: string
           id: string
+          leg_role: string | null
+          leg_sequence: number | null
           leverage: number | null
           order_kind: string
           position_mode: string | null
@@ -222,11 +269,14 @@ export type Database = {
           user_id: string
         }
         Insert: {
+          campaign_id?: string | null
           counterfactual_branches?: Json
           created_at?: string
           deep_analysis_completed_at?: string | null
           direction: string
           id?: string
+          leg_role?: string | null
+          leg_sequence?: number | null
           leverage?: number | null
           order_kind?: string
           position_mode?: string | null
@@ -263,11 +313,14 @@ export type Database = {
           user_id: string
         }
         Update: {
+          campaign_id?: string | null
           counterfactual_branches?: Json
           created_at?: string
           deep_analysis_completed_at?: string | null
           direction?: string
           id?: string
+          leg_role?: string | null
+          leg_sequence?: number | null
           leverage?: number | null
           order_kind?: string
           position_mode?: string | null
@@ -301,6 +354,80 @@ export type Database = {
           symbol?: string
           trade_record_id?: string | null
           updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "trade_journals_campaign_id_fkey"
+            columns: ["campaign_id"]
+            isOneToOne: false
+            referencedRelation: "trade_campaigns"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      trade_campaigns: {
+        Row: {
+          actual_evolution: Json
+          closed_at: string | null
+          created_at: string | null
+          direction: string
+          final_r_multiple: number | null
+          final_realized_pnl: number | null
+          id: string
+          initial_leverage: number | null
+          initial_main_size_usdt: number | null
+          notes: string | null
+          opened_at: string
+          peak_drawdown: number | null
+          peak_unrealized_pnl: number | null
+          status: string
+          strategy_template: string
+          symbol: string
+          title: string
+          updated_at: string | null
+          user_id: string
+        }
+        Insert: {
+          actual_evolution?: Json
+          closed_at?: string | null
+          created_at?: string | null
+          direction: string
+          final_r_multiple?: number | null
+          final_realized_pnl?: number | null
+          id?: string
+          initial_leverage?: number | null
+          initial_main_size_usdt?: number | null
+          notes?: string | null
+          opened_at: string
+          peak_drawdown?: number | null
+          peak_unrealized_pnl?: number | null
+          status?: string
+          strategy_template?: string
+          symbol: string
+          title: string
+          updated_at?: string | null
+          user_id: string
+        }
+        Update: {
+          actual_evolution?: Json
+          closed_at?: string | null
+          created_at?: string | null
+          direction?: string
+          final_r_multiple?: number | null
+          final_realized_pnl?: number | null
+          id?: string
+          initial_leverage?: number | null
+          initial_main_size_usdt?: number | null
+          notes?: string | null
+          opened_at?: string
+          peak_drawdown?: number | null
+          peak_unrealized_pnl?: number | null
+          status?: string
+          strategy_template?: string
+          symbol?: string
+          title?: string
+          updated_at?: string | null
           user_id?: string
         }
         Relationships: []

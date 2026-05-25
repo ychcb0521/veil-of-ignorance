@@ -1,12 +1,16 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { useReplay } from "@/contexts/ReplayContext";
-import { MENTAL_STATE_LABELS, type TradeJournal } from "@/types/journal";
-import { CounterfactualPanel } from "./CounterfactualPanel";
-import { useReplayKlines } from "@/hooks/useReplayKlines";
-import type { KlineData } from "@/hooks/useBinanceData";
-import { SixStepAnalysisForm, pickSixStepValue, countCompletedSteps, type SixStepValue } from "./SixStepAnalysisForm";
-import { updateJournalDeepAnalysis, promoteDraftToRule, getJournalById } from "@/lib/journalApi";
-import { toast } from "sonner";
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { useReplay } from '@/contexts/ReplayContext';
+import { MENTAL_STATE_LABELS, type TradeJournal } from '@/types/journal';
+import { CounterfactualPanel } from './CounterfactualPanel';
+import { useReplayKlines } from '@/hooks/useReplayKlines';
+import type { KlineData } from '@/hooks/useBinanceData';
+import {
+  SixStepAnalysisForm, pickSixStepValue, countCompletedSteps,
+  type SixStepValue,
+} from './SixStepAnalysisForm';
+import { updateJournalDeepAnalysis, promoteDraftToRule, getJournalById } from '@/lib/journalApi';
+import { toast } from 'sonner';
+
 
 interface ChannelProps {
   num: string;
@@ -18,13 +22,9 @@ interface ChannelProps {
 
 function ChannelPanel({ num, title, highlight, children, rightHint }: ChannelProps) {
   return (
-    <div
-      className={`bg-card border border-border rounded flex-1 min-h-0 overflow-y-auto transition-all ${highlight ? "ring-1 ring-[#0ECB81]" : ""}`}
-    >
+    <div className={`bg-card border border-border rounded flex-1 min-h-0 overflow-y-auto transition-all ${highlight ? 'ring-1 ring-[#0ECB81]' : ''}`}>
       <div className="px-3 py-2 border-b border-border flex items-center gap-2 sticky top-0 bg-card z-10">
-        <span className="w-5 h-5 rounded-full bg-muted text-[10px] font-mono flex items-center justify-center">
-          {num}
-        </span>
+        <span className="w-5 h-5 rounded-full bg-muted text-[10px] font-mono flex items-center justify-center">{num}</span>
         <span className="text-[12px] font-medium">{title}</span>
         <div className="flex-1" />
         {rightHint && <span className="text-[10px] text-muted-foreground">{rightHint}</span>}
@@ -35,12 +35,12 @@ function ChannelPanel({ num, title, highlight, children, rightHint }: ChannelPro
 }
 
 function mentalColor(s: number) {
-  if (s <= 2) return "text-[#F6465D]";
-  if (s === 3) return "text-muted-foreground";
-  return "text-[#0ECB81]";
+  if (s <= 2) return 'text-[#F6465D]';
+  if (s === 3) return 'text-muted-foreground';
+  return 'text-[#0ECB81]';
 }
 function pnlColor(v: number) {
-  return v > 0 ? "text-[#0ECB81]" : v < 0 ? "text-[#F6465D]" : "text-muted-foreground";
+  return v > 0 ? 'text-[#0ECB81]' : v < 0 ? 'text-[#F6465D]' : 'text-muted-foreground';
 }
 
 interface HistoricalContext {
@@ -49,7 +49,7 @@ interface HistoricalContext {
 
 export function ContextChannelsStack({ allJournals }: HistoricalContext) {
   const { journal, setJournal, tStart, tEnd, selectedBranchId, setSelectedBranchId } = useReplay();
-  const { klines } = useReplayKlines(journal.symbol, tStart - 6 * 3600_000, tEnd + 2 * 3600_000, "1m");
+  const { klines } = useReplayKlines(journal.symbol, tStart - 6 * 3600_000, tEnd + 2 * 3600_000, '1m');
 
   return (
     <div className="flex-1 min-h-0 flex flex-col gap-2 overflow-hidden">
@@ -67,17 +67,21 @@ export function ContextChannelsStack({ allJournals }: HistoricalContext) {
   );
 }
 
+
+
 function DecisionChannel() {
   const { journal, replayTime, tEntry } = useReplay();
   const [pulse, setPulse] = useState(false);
-  const positionModeLabel =
-    journal.position_mode === "isolated" ? "逐仓" : journal.position_mode === "cross" ? "全仓" : "—";
-  const positionModeClass =
-    journal.position_mode === "isolated"
-      ? "text-[#0ECB81]"
-      : journal.position_mode === "cross"
-        ? "text-[#F6465D]"
-        : "text-muted-foreground";
+  const positionModeLabel = journal.position_mode === 'isolated'
+    ? '逐仓'
+    : journal.position_mode === 'cross'
+      ? '全仓'
+      : '—';
+  const positionModeClass = journal.position_mode === 'isolated'
+    ? 'text-[#0ECB81]'
+    : journal.position_mode === 'cross'
+      ? 'text-[#F6465D]'
+      : 'text-muted-foreground';
 
   useEffect(() => {
     if (Math.abs(replayTime - tEntry) < 30_000 && replayTime >= tEntry) {
@@ -88,34 +92,38 @@ function DecisionChannel() {
   }, [replayTime, tEntry]);
 
   return (
-    <ChannelPanel num="②" title="决策" highlight={pulse} rightHint={replayTime >= tEntry ? "已发生" : "尚未发生"}>
+    <ChannelPanel num="②" title="决策" highlight={pulse}
+      rightHint={replayTime >= tEntry ? '已发生' : '尚未发生'}>
       <div className="space-y-3 text-[12px]">
         <div className="border-l-2 border-[#F0B90B] pl-3 text-foreground">
           {journal.pre_entry_reason || <span className="text-muted-foreground italic">无</span>}
         </div>
         <div className="grid grid-cols-2 gap-2 font-mono text-[11px]">
-          <Cell label="计划止盈" value={journal.pre_planned_take_profit?.toFixed(2) ?? "—"} />
-          <Cell label="仓位" value={journal.pre_position_size?.toFixed(4) ?? "—"} />
-          <Cell label="杠杆" value={journal.leverage != null ? `${journal.leverage}x` : "—"} />
+          <Cell label="计划止盈" value={journal.pre_planned_take_profit?.toFixed(2) ?? '—'} />
+          <Cell label="仓位" value={journal.pre_position_size?.toFixed(4) ?? '—'} />
+          <Cell label="杠杆" value={journal.leverage != null ? `${journal.leverage}x` : '—'} />
           <Cell label="仓位模式" value={positionModeLabel} valueClass={positionModeClass} />
           <Cell
             label="本次预设最大亏损"
-            value={journal.pre_max_loss_usdt != null ? `${journal.pre_max_loss_usdt.toFixed(2)} USDT` : "—"}
+            value={journal.pre_max_loss_usdt != null ? `${journal.pre_max_loss_usdt.toFixed(2)} USDT` : '—'}
             valueClass="text-[#F6465D]"
           />
           {journal.pre_planned_stop_loss != null && (
-            <Cell label="计划止损（历史）" value={journal.pre_planned_stop_loss.toFixed(2)} />
+            <Cell
+              label="计划止损（历史）"
+              value={journal.pre_planned_stop_loss.toFixed(2)}
+            />
           )}
         </div>
         <div>
           <div className="text-[11px] text-muted-foreground mb-1">Checklist</div>
           <div className="space-y-1">
-            {(journal.pre_checklist_items ?? []).map((it) => (
+            {(journal.pre_checklist_items ?? []).map(it => (
               <div key={it.id} className="flex items-center gap-2 text-[11px]">
-                <span className={it.checked ? "text-[#0ECB81]" : "text-muted-foreground"}>
-                  {it.checked ? "✓" : "—"}
+                <span className={it.checked ? 'text-[#0ECB81]' : 'text-muted-foreground'}>
+                  {it.checked ? '✓' : '—'}
                 </span>
-                <span className={it.checked ? "text-foreground" : "text-muted-foreground"}>{it.label}</span>
+                <span className={it.checked ? 'text-foreground' : 'text-muted-foreground'}>{it.label}</span>
                 {it.required && <span className="text-[9px] text-[#F0B90B]">必填</span>}
               </div>
             ))}
@@ -130,7 +138,7 @@ function Cell({ label, value, valueClass }: { label: string; value: string; valu
   return (
     <div>
       <div className="text-[10px] text-muted-foreground">{label}</div>
-      <div className={`text-[12px] tabular-nums ${valueClass ?? "text-foreground"}`}>{value}</div>
+      <div className={`text-[12px] tabular-nums ${valueClass ?? 'text-foreground'}`}>{value}</div>
     </div>
   );
 }
@@ -140,14 +148,14 @@ function StateChannel({ allJournals }: { allJournals: TradeJournal[] }) {
   const hour = new Date(journal.pre_simulated_time).getHours();
 
   const stats = useMemo(() => {
-    const closed = allJournals.filter((j) => j.post_r_multiple != null);
-    const sameHour = closed.filter((j) => new Date(j.pre_simulated_time).getHours() === hour);
-    const lowMental = closed.filter((j) => (j.pre_mental_state ?? 5) <= 2);
-    const sameSymbol = closed.filter((j) => j.symbol === journal.symbol);
+    const closed = allJournals.filter(j => j.post_r_multiple != null);
+    const sameHour = closed.filter(j => new Date(j.pre_simulated_time).getHours() === hour);
+    const lowMental = closed.filter(j => (j.pre_mental_state ?? 5) <= 2);
+    const sameSymbol = closed.filter(j => j.symbol === journal.symbol);
     const avg = (arr: TradeJournal[]) =>
       arr.length ? arr.reduce((a, j) => a + (j.post_r_multiple ?? 0), 0) / arr.length : 0;
     const winRate = sameSymbol.length
-      ? sameSymbol.filter((j) => j.post_outcome === "win").length / sameSymbol.length
+      ? sameSymbol.filter(j => j.post_outcome === 'win').length / sameSymbol.length
       : 0;
     return {
       sameHourAvgR: avg(sameHour),
@@ -167,10 +175,12 @@ function StateChannel({ allJournals }: { allJournals: TradeJournal[] }) {
           <div className="text-[12px] text-foreground pb-1">{MENTAL_STATE_LABELS[mState]}</div>
         </div>
         {journal.pre_mental_trigger && (
-          <div className="text-[11px] text-muted-foreground italic">触发：{journal.pre_mental_trigger}</div>
+          <div className="text-[11px] text-muted-foreground italic">
+            触发：{journal.pre_mental_trigger}
+          </div>
         )}
         <div className="grid grid-cols-3 gap-2 font-mono text-[11px]">
-          <Cell label={`${String(hour).padStart(2, "0")}时段历史R̄`} value={stats.sameHourAvgR.toFixed(2)} />
+          <Cell label={`${String(hour).padStart(2, '0')}时段历史R̄`} value={stats.sameHourAvgR.toFixed(2)} />
           <Cell label="心态≤2 历史R̄" value={stats.lowMentalAvgR.toFixed(2)} />
           <Cell label={`${journal.symbol} 胜率`} value={`${(stats.symbolWinRate * 100).toFixed(0)}%`} />
         </div>
@@ -197,8 +207,8 @@ function RiskChannel() {
     if (!tradeRecord || journal.pre_planned_stop_loss == null) return false;
     const sl = journal.pre_planned_stop_loss;
     const exit = tradeRecord.exitPrice;
-    if (journal.direction === "long") return exit <= sl;
-    if (journal.direction === "short") return exit >= sl;
+    if (journal.direction === 'long') return exit <= sl;
+    if (journal.direction === 'short') return exit >= sl;
     return false;
   }, [tradeRecord, journal]);
 
@@ -221,15 +231,13 @@ function RiskChannel() {
           </div>
         </div>
         {tradeRecord && (
-          <div className={`rounded p-2 ${riskFailed ? "ring-1 ring-[#F6465D]" : "bg-background"}`}>
+          <div className={`rounded p-2 ${riskFailed ? 'ring-1 ring-[#F6465D]' : 'bg-background'}`}>
             <div className="text-[11px] text-muted-foreground mb-1">事后对照</div>
             <div className="grid grid-cols-2 gap-1 font-mono text-[11px]">
               {journal.pre_planned_stop_loss != null ? (
                 <>
                   <span className="text-muted-foreground">止损触发</span>
-                  <span className={slTriggered ? "text-[#F6465D]" : "text-foreground"}>
-                    {slTriggered ? "是" : "否"}
-                  </span>
+                  <span className={slTriggered ? 'text-[#F6465D]' : 'text-foreground'}>{slTriggered ? '是' : '否'}</span>
                 </>
               ) : (
                 <>
@@ -237,13 +245,13 @@ function RiskChannel() {
                   <span className="text-foreground">
                     {(() => {
                       const m = tradeRecord.exit_method;
-                      if (!m) return "—";
-                      if (m === "manual") return "手动";
-                      if (m === "sl") return "止损";
-                      if (m === "liquidation") return "爆仓";
-                      if (m === "tp1") return "止盈 1";
-                      if (m === "tp2") return "止盈 2";
-                      if (m === "tp3") return "止盈 3";
+                      if (!m) return '—';
+                      if (m === 'manual') return '手动';
+                      if (m === 'sl') return '止损';
+                      if (m === 'liquidation') return '爆仓';
+                      if (m === 'tp1') return '止盈 1';
+                      if (m === 'tp2') return '止盈 2';
+                      if (m === 'tp3') return '止盈 3';
                       return m;
                     })()}
                   </span>
@@ -257,15 +265,16 @@ function RiskChannel() {
               ) : null}
               <span className="text-muted-foreground">实际亏损</span>
               <span className={pnlColor(-actualLoss)}>
-                {actualLoss.toFixed(2)} / {planned.toFixed(2)} ({diffPct >= 0 ? "+" : ""}
-                {diffPct.toFixed(0)}%)
+                {actualLoss.toFixed(2)} / {planned.toFixed(2)} ({diffPct >= 0 ? '+' : ''}{diffPct.toFixed(0)}%)
               </span>
               <span className="text-muted-foreground">实际 R</span>
               <span className={pnlColor(journal.post_r_multiple ?? 0)}>
-                {journal.post_r_multiple != null ? journal.post_r_multiple.toFixed(2) : "—"}
+                {journal.post_r_multiple != null ? journal.post_r_multiple.toFixed(2) : '—'}
               </span>
             </div>
-            {riskFailed && <div className="mt-2 text-[11px] text-[#F6465D] font-medium">⚠ 风险管理失效</div>}
+            {riskFailed && (
+              <div className="mt-2 text-[11px] text-[#F6465D] font-medium">⚠ 风险管理失效</div>
+            )}
           </div>
         )}
       </div>
@@ -281,49 +290,37 @@ interface CounterfactualChannelProps {
   onBranchesChanged: (updated: TradeJournal) => void;
 }
 
-function CounterfactualChannel({
-  journal,
-  klines,
-  selectedBranchId,
-  onSelectBranch,
-  onBranchesChanged,
-}: CounterfactualChannelProps) {
+function CounterfactualChannel({ journal, klines, selectedBranchId, onSelectBranch, onBranchesChanged }: CounterfactualChannelProps) {
   const { assignments, patterns } = useReplay();
   const [sixStep, setSixStep] = useState<SixStepValue>(pickSixStepValue(journal));
   const debounceRef = useRef<number | null>(null);
   const deepAnchorRef = useRef<HTMLDivElement | null>(null);
 
-  useEffect(() => {
-    setSixStep(pickSixStepValue(journal));
-  }, [journal.id]);
+  useEffect(() => { setSixStep(pickSixStepValue(journal)); }, [journal.id]);
 
   // Debounced auto-save
   useEffect(() => {
     if (debounceRef.current) window.clearTimeout(debounceRef.current);
     const initial = pickSixStepValue(journal);
-    const dirty = (Object.keys(sixStep) as (keyof SixStepValue)[]).some(
-      (k) => (sixStep[k] ?? "") !== (initial[k] ?? ""),
-    );
+    const dirty = (Object.keys(sixStep) as (keyof SixStepValue)[]).some(k => (sixStep[k] ?? '') !== (initial[k] ?? ''));
     if (!dirty) return;
     debounceRef.current = window.setTimeout(async () => {
       try {
         await updateJournalDeepAnalysis(journal.id, sixStep);
       } catch (e) {
-        console.warn("[deep auto-save]", e);
+        console.warn('[deep auto-save]', e);
       }
     }, 1500);
-    return () => {
-      if (debounceRef.current) window.clearTimeout(debounceRef.current);
-    };
+    return () => { if (debounceRef.current) window.clearTimeout(debounceRef.current); };
   }, [sixStep, journal.id]);
 
   // Scroll-to listener for the header button
   useEffect(() => {
     const onScroll = () => {
-      deepAnchorRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      deepAnchorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     };
-    window.addEventListener("replay:scroll-to-deep-analysis", onScroll);
-    return () => window.removeEventListener("replay:scroll-to-deep-analysis", onScroll);
+    window.addEventListener('replay:scroll-to-deep-analysis', onScroll);
+    return () => window.removeEventListener('replay:scroll-to-deep-analysis', onScroll);
   }, []);
 
   const tags = useMemo(() => {
@@ -344,7 +341,7 @@ function CounterfactualChannel({
     try {
       await updateJournalDeepAnalysis(journal.id, sixStep);
       await promoteDraftToRule(journal.id, { required, sourcePatternId });
-      toast.success("已写入 checklist");
+      toast.success('已写入 checklist');
       const fresh = await getJournalById(journal.id);
       if (fresh) onBranchesChanged(fresh);
     } catch (e) {
@@ -353,20 +350,16 @@ function CounterfactualChannel({
   };
 
   return (
-    <ChannelPanel
-      num="⑤"
-      title="反事实"
-      rightHint={
-        <span
-          className={`px-1.5 py-0.5 rounded ${completed === 6 ? "text-[#0ECB81] bg-[#0ECB81]/10" : "text-muted-foreground"}`}
-        >
-          深度分析 {completed}/6
-        </span>
-      }
-    >
+    <ChannelPanel num="⑤" title="反事实" rightHint={
+      <span className={`px-1.5 py-0.5 rounded ${completed === 6 ? 'text-[#0ECB81] bg-[#0ECB81]/10' : 'text-muted-foreground'}`}>
+        深度分析 {completed}/6
+      </span>
+    }>
       <div className="space-y-3 text-[12px]">
         {journal.post_correct_action && (
-          <div className="border-l-2 border-[#0ECB81] pl-3 text-foreground">{journal.post_correct_action}</div>
+          <div className="border-l-2 border-[#0ECB81] pl-3 text-foreground">
+            {journal.post_correct_action}
+          </div>
         )}
 
         <div ref={deepAnchorRef} className="-mx-3 px-3 py-1.5 bg-card border-y border-border text-[11px] font-medium">

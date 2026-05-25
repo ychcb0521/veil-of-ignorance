@@ -4,6 +4,7 @@
  * 支持：marker 三角/方块、价格线（dashed）、垂直时间线、当前回放 cursor。
  */
 import { useMemo } from 'react';
+import type { ReactNode } from 'react';
 import type { KlineData } from '@/hooks/useBinanceData';
 
 export interface ChartMarker {
@@ -21,6 +22,13 @@ export interface PriceLine {
   dim?: boolean;
 }
 
+export interface TimeBoundPriceLine extends PriceLine {
+  startTime: number;
+  endTime: number;
+  dashed?: boolean;
+  endMarker?: 'x' | null;
+}
+
 export interface VerticalLine {
   time: number;
   color: string;
@@ -34,6 +42,7 @@ interface Props {
   intervalMs: number;
   markers?: ChartMarker[];
   priceLines?: PriceLine[];
+  timeBoundPriceLines?: TimeBoundPriceLine[];
   verticalLines?: VerticalLine[];
   /** Anchor zoom around currentTime — number of candles visible */
   windowCandles?: number;
@@ -46,7 +55,7 @@ const CHART_PAD_RIGHT = 64;
 
 export function ReplayCandleChart({
   klines, currentTime, intervalMs,
-  markers = [], priceLines = [], verticalLines = [],
+  markers = [], priceLines = [], timeBoundPriceLines = [], verticalLines = [],
   windowCandles = 120,
 }: Props) {
   const visible = useMemo(() => {
@@ -78,6 +87,10 @@ export function ReplayCandleChart({
       if (pl.price < minP) minP = pl.price;
       if (pl.price > maxP) maxP = pl.price;
     }
+    for (const pl of timeBoundPriceLines) {
+      if (pl.price < minP) minP = pl.price;
+      if (pl.price > maxP) maxP = pl.price;
+    }
     for (const m of markers) {
       if (m.price < minP) minP = m.price;
       if (m.price > maxP) maxP = m.price;
@@ -87,7 +100,7 @@ export function ReplayCandleChart({
     const minT = visible[0].time;
     const maxT = visible[visible.length - 1].time + intervalMs;
     return { minP, maxP, minT, maxT };
-  }, [visible, priceLines, markers, intervalMs]);
+  }, [visible, priceLines, timeBoundPriceLines, markers, intervalMs]);
 
   // viewport in arbitrary user units; rendered with viewBox/preserveAspectRatio for responsiveness
   const W = 1000;
@@ -124,7 +137,7 @@ export function ReplayCandleChart({
   return (
     <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" className="w-full h-full block">
       {/* grid + y ticks */}
-      {yTicks.map((p, i) => (
+      {yTicks.map((p: number, i: number) => (
         <g key={i}>
           <line x1={CHART_PAD_LEFT} x2={W - CHART_PAD_RIGHT}
             y1={yForPrice(p)} y2={yForPrice(p)} stroke="#2B3139" strokeWidth={0.5} />
@@ -148,8 +161,40 @@ export function ReplayCandleChart({
         );
       })}
 
+      {/* bounded price lines */}
+      {timeBoundPriceLines.map((pl, i) => {
+        const clampedStart = Math.max(pl.startTime, bounds.minT);
+        const clampedEnd = Math.min(pl.endTime, bounds.maxT);
+        if (clampedEnd <= clampedStart) return null;
+        const y = yForPrice(pl.price);
+        const x1 = xForTime(clampedStart);
+        const x2 = xForTime(clampedEnd);
+        return (
+          <g key={`tb-${i}`} opacity={pl.dim ? 0.3 : 1}>
+            <line
+              x1={x1}
+              x2={x2}
+              y1={y}
+              y2={y}
+              stroke={pl.color}
+              strokeWidth={1}
+              strokeDasharray={pl.dashed ? '4 4' : undefined}
+            />
+            {pl.title && (
+              <text x={x1 + 4} y={y - 4} fontSize="9" fill={pl.color} fontFamily="monospace">{pl.title}</text>
+            )}
+            {pl.endMarker === 'x' && (
+              <>
+                <line x1={x2 - 4} y1={y - 4} x2={x2 + 4} y2={y + 4} stroke={pl.color} strokeWidth={1} />
+                <line x1={x2 - 4} y1={y + 4} x2={x2 + 4} y2={y - 4} stroke={pl.color} strokeWidth={1} />
+              </>
+            )}
+          </g>
+        );
+      })}
+
       {/* candles */}
-      {visible.map((k, i) => {
+      {visible.map((k: KlineData, i: number) => {
         const x = xForTime(k.time + intervalMs / 2);
         const isUp = k.close >= k.open;
         const color = isUp ? '#0ECB81' : '#F6465D';
@@ -185,7 +230,7 @@ export function ReplayCandleChart({
         if (m.time < bounds.minT || m.time > bounds.maxT) return null;
         const x = xForTime(m.time);
         const y = yForPrice(m.price);
-        let shape: React.ReactNode;
+        let shape: ReactNode;
         switch (m.shape) {
           case 'triangle-up':
             shape = <polygon points={`${x},${y - 7} ${x - 5},${y + 3} ${x + 5},${y + 3}`} fill={m.color} />;

@@ -1462,8 +1462,9 @@ const Index = () => {
 
   // Pause the active timeline when the pre-trade snapshot dialog opens
   const handleAutoPauseTimeMachine = useCallback(() => {
-    const playing =
-      timeMode === "synced" ? sim.status === "playing" : coinTimelines[activeSymbol]?.status === "playing";
+    const playing = timeMode === "synced"
+      ? sim.status === "playing"
+      : coinTimelines[activeSymbol]?.status === "playing";
     if (playing) handlePause();
   }, [timeMode, sim.status, coinTimelines, activeSymbol, handlePause]);
 
@@ -1566,7 +1567,9 @@ const Index = () => {
         </div>
         <div className="flex items-center gap-3 shrink-0">
           {loading && <span className="text-[10px] text-primary animate-pulse font-mono">加载历史数据...</span>}
-          <JournalNavMenu onOpenAssets={() => setAssetsOpen(true)} />
+          <JournalNavMenu
+            onOpenAssets={() => setAssetsOpen(true)}
+          />
           <span className="text-[10px] text-gray-500 dark:text-[#848e9c] font-mono truncate max-w-[120px]">
             {user?.email}
           </span>

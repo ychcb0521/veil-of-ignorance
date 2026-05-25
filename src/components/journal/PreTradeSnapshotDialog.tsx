@@ -9,8 +9,9 @@ import { Dialog, DialogContent } from '@/components/ui/dialog';
 import { Sheet, SheetContent } from '@/components/ui/sheet';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { useAuth } from '@/contexts/AuthContext';
+import { useTradingContext } from '@/contexts/TradingContext';
 import { toast } from 'sonner';
-import { createJournalPreSnapshot, updateJournalTradeRef } from '@/lib/journalApi';
+import { appendCampaignEvent, attachJournalToCampaign, createCampaign, createJournalPreSnapshot, updateJournalTradeRef } from '@/lib/journalApi';
 import type { PlaceOrderParams } from '@/contexts/TradingContext';
 import type { TradeDirection, PositionMode } from '@/types/journal';
 import {
@@ -45,6 +46,9 @@ export function PreTradeSnapshotDialog({
 }: Props) {
   const isMobile = useIsMobile();
   const { user } = useAuth();
+  const trading = useTradingContext();
+  const currentLeverage = trading.getSymbolLeverage(symbol) ?? leverage;
+  const currentMarginMode = trading.getSymbolMarginMode(symbol) ?? marginMode;
 
   // Lock time + entry price on open
   const [lockedTime, setLockedTime] = useState<Date>(() => new Date(simulatedTimeMs));
@@ -71,13 +75,29 @@ export function PreTradeSnapshotDialog({
       return;
     }
     try {
+      let campaignId = payload.campaign_id;
+      if (mode === 'trade' && payload.campaign_mode === 'create' && payload.campaign_title && payload.campaign_template) {
+        const campaign = await createCampaign({
+          symbol,
+          direction: direction === 'short' ? 'main_short' : 'main_long',
+          title: payload.campaign_title,
+          opened_at: lockedTime.toISOString(),
+          strategy_template: payload.campaign_template,
+          notes: null,
+        });
+        campaignId = campaign.id;
+      }
+
       const journal = await createJournalPreSnapshot({
         user_id: user.id,
         trade_record_id: null,
+        campaign_id: mode === 'trade' ? (campaignId ?? null) : null,
+        leg_role: mode === 'trade' ? (payload.campaign_leg_role ?? null) : null,
+        leg_sequence: null,
         symbol,
         direction,
-        leverage: mode === 'trade' ? leverage : null,
-        position_mode: mode === 'trade' ? (marginMode as PositionMode) : null,
+        leverage: mode === 'trade' ? currentLeverage : null,
+        position_mode: mode === 'trade' ? (currentMarginMode as PositionMode) : null,
         pre_simulated_time: lockedTime.toISOString(),
         pre_entry_price: lockedPrice,
         order_kind: payload.order_kind,
@@ -93,6 +113,23 @@ export function PreTradeSnapshotDialog({
         pre_position_size: payload.pre_position_size,
         pre_max_loss_usdt: payload.pre_max_loss_usdt,
       });
+
+      if (mode === 'trade' && campaignId && payload.campaign_leg_role && payload.campaign_mode !== 'standalone') {
+        await attachJournalToCampaign(journal.id, campaignId, payload.campaign_leg_role);
+        if (payload.campaign_note?.trim()) {
+          await appendCampaignEvent(campaignId, {
+            timestamp: lockedTime.toISOString(),
+            event_type: 'note',
+            leg_role: payload.campaign_leg_role,
+            journal_id: journal.id,
+            trade_record_id: null,
+            pending_order_id: null,
+            price: lockedPrice,
+            size_usdt: payload.pre_position_size,
+            notes: payload.campaign_note.trim(),
+          });
+        }
+      }
 
       if (mode === 'trade' && orderParams && onPlaceOrder) {
         try {
@@ -121,7 +158,7 @@ export function PreTradeSnapshotDialog({
       direction={direction}
       simulatedTime={lockedTime}
       lockedEntryPrice={lockedPrice}
-      leverage={leverage}
+      leverage={currentLeverage}
       initialPositionSizeUsdt={initialPositionSizeUsdt ?? null}
       pricePrecision={pricePrecision}
       orderParams={orderParams ?? null}

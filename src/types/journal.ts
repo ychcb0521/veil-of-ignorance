@@ -27,6 +27,167 @@ export type TradeOutcome = "win" | "loss" | "breakeven" | "no_entry";
 export type TaggedPhase = "pre" | "post";
 export type PositionMode = "cross" | "isolated";
 export type OrderKind = "main" | "hedge";
+export type CampaignStatus =
+  | 'planned'
+  | 'active'
+  | 'closed_profit'
+  | 'closed_loss'
+  | 'closed_breakeven'
+  | 'abandoned';
+export type StrategyTemplate = 'main_dual_hedge_mirror_tp' | 'main_only' | 'custom';
+export type LegRole =
+  | 'main_open'
+  | 'hedge_initial_a'
+  | 'hedge_initial_b'
+  | 'hedge_rolling'
+  | 'mirror_tp'
+  | 'reentry_main'
+  | 'reentry_hedge'
+  | 'standalone';
+
+export interface CampaignEvent {
+  id: string;
+  timestamp: string;
+  event_type:
+    | 'campaign_opened'
+    | 'main_opened'
+    | 'hedge_placed'
+    | 'mirror_tp_placed'
+    | 'hedge_cancelled'
+    | 'hedge_triggered'
+    | 'mirror_tp_triggered'
+    | 'main_partial_closed'
+    | 'main_fully_closed'
+    | 'campaign_closed'
+    | 'note';
+  leg_role: LegRole | null;
+  journal_id: string | null;
+  trade_record_id: string | null;
+  pending_order_id: string | null;
+  price: number | null;
+  size_usdt: number | null;
+  notes: string | null;
+  recorded_at: string;
+}
+
+export interface TradeCampaign {
+  id: string;
+  user_id: string;
+  symbol: string;
+  direction: 'main_long' | 'main_short';
+  status: CampaignStatus;
+  strategy_template: StrategyTemplate;
+  title: string;
+  opened_at: string;
+  closed_at: string | null;
+  initial_main_size_usdt: number | null;
+  initial_leverage: number | null;
+  final_realized_pnl: number | null;
+  final_r_multiple: number | null;
+  peak_unrealized_pnl: number | null;
+  peak_drawdown: number | null;
+  notes: string | null;
+  actual_evolution: CampaignEvent[];
+  created_at: string;
+  updated_at: string;
+}
+
+export type CampaignCounterfactualBranchKind =
+  | 'pure_sop'
+  | 'fix_one_deviation'
+  | 'custom_what_if';
+
+export interface CampaignCounterfactualParams {
+  entry: {
+    time: string;
+    price: number;
+    size_usdt: number;
+    direction: 'long' | 'short';
+    leverage: number;
+  };
+  hedge_a: {
+    offset_pct: number;
+    size_pct: number;
+  };
+  hedge_b: {
+    offset_pct: number;
+    size_pct: number;
+  };
+  mirror_tp: {
+    offset_pct: number;
+    size_pct: number;
+  };
+  rolling: {
+    enabled: boolean;
+    trigger_rise_pct: number;
+    min_interval_minutes: number;
+    new_hedge_offset_pct: number;
+    rolling_hedge_size_pct: number;
+  };
+  exit_rule: 'close_all_on_hedge_trigger' | 'reenter_after_hedge_trigger' | 'manual_only';
+  reentry?: {
+    delay_minutes: number;
+    size_pct: number;
+  };
+}
+
+export interface CampaignCounterfactualEvent {
+  timestamp: string;
+  event_type: string;
+  leg_role: string;
+  price: number;
+  size_usdt: number;
+  notes: string;
+}
+
+export interface CampaignCounterfactualLegSummary {
+  leg_role: string;
+  placed_at: string;
+  trigger_price: number;
+  status: 'filled' | 'cancelled' | 'never_triggered';
+  triggered_at: string | null;
+  realized_pnl_usdt: number;
+}
+
+export interface CampaignCounterfactualStateSegment {
+  state: string;
+  state_label: string;
+  start_time: string;
+  end_time: string;
+}
+
+export interface CampaignCounterfactualResult {
+  final_realized_pnl: number;
+  final_r_multiple: number;
+  peak_unrealized_pnl: number;
+  peak_drawdown: number;
+  profit_capture_ratio: number;
+  events: CampaignCounterfactualEvent[];
+  legs_summary: CampaignCounterfactualLegSummary[];
+  state_segments: CampaignCounterfactualStateSegment[];
+  sop_score: number;
+}
+
+export interface CampaignCounterfactual {
+  id: string;
+  user_id: string;
+  campaign_id: string;
+  label: string;
+  branch_kind: CampaignCounterfactualBranchKind;
+  source_deduction_id: string | null;
+  params: CampaignCounterfactualParams;
+  result: CampaignCounterfactualResult;
+  created_at: string;
+}
+
+export interface DeviationCost {
+  deduction_category: 'setup' | 'lockin' | 'rolling' | 'exit';
+  deduction_reason: string;
+  cost_usdt: number;
+  cost_pct_of_account: number;
+  fix_description: string;
+  source_deduction_id?: string;
+}
 
 export interface ErrorTagCategory {
   id: string;
@@ -64,6 +225,9 @@ export interface TradeJournal {
   id: string;
   user_id: string;
   trade_record_id: string | null;
+  campaign_id: string | null;
+  leg_role: LegRole | null;
+  leg_sequence: number | null;
   symbol: string;
   direction: TradeDirection;
   leverage: number | null;
@@ -174,4 +338,3 @@ export interface CounterfactualBranch {
   params: CounterfactualBranchParams;
   result: CounterfactualBranchResult;
 }
-
