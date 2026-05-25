@@ -41,6 +41,26 @@ async function createDefaultAsset(userId: string): Promise<CognitiveAsset> {
   return toCognitiveAsset(data);
 }
 
+async function hydrateEmptyAsset(asset: CognitiveAsset): Promise<CognitiveAsset> {
+  const nextTitle = asset.title.trim() || DEFAULT_COGNITIVE_ASSET_TITLE;
+  const nextContent = asset.content.trim() || DEFAULT_COGNITIVE_ASSET_CONTENT;
+  const { data, error } = await supabase
+    .from('cognitive_assets' as never)
+    .update({
+      title: nextTitle,
+      content: nextContent,
+    } as never)
+    .eq('id', asset.id)
+    .select()
+    .single();
+
+  if (error) {
+    throw new Error(`补写默认认知资产失败：${error.message}`);
+  }
+
+  return toCognitiveAsset(data);
+}
+
 export async function getOrCreateCognitiveAsset(): Promise<CognitiveAsset> {
   const userId = await requireUserId();
   const { data, error } = await supabase
@@ -54,7 +74,11 @@ export async function getOrCreateCognitiveAsset(): Promise<CognitiveAsset> {
   }
 
   if (data) {
-    return toCognitiveAsset(data);
+    const asset = toCognitiveAsset(data);
+    if (!asset.content.trim() || !asset.title.trim()) {
+      return hydrateEmptyAsset(asset);
+    }
+    return asset;
   }
 
   return createDefaultAsset(userId);

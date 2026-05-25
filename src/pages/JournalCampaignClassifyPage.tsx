@@ -9,6 +9,7 @@ import { ClassifyAsNewCampaignDialog } from '@/components/journal/ClassifyAsNewC
 import { LegRoleChip } from '@/components/journal/LegRoleChip';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
 import { useAuth } from '@/contexts/AuthContext';
 import { useTradingContext } from '@/contexts/TradingContext';
@@ -91,18 +92,34 @@ export default function JournalCampaignClassifyPage() {
 
   const tradeRecordMap = useMemo(() => new Map(tradeHistory.map(record => [record.id, record])), [tradeHistory]);
   const campaignMap = useMemo(() => new Map(campaignBundles.map(bundle => [bundle.campaign.id, bundle.campaign])), [campaignBundles]);
-  const availableSymbols = useMemo(
-    () => [...new Set(journals.map(journal => journal.symbol))].sort(),
+  const allCandidateJournals = useMemo(
+    () => [...journals].sort((a, b) => new Date(b.pre_simulated_time).getTime() - new Date(a.pre_simulated_time).getTime()),
     [journals],
   );
+  const availableSymbols = useMemo(
+    () =>
+      [...new Set(allCandidateJournals.map(journal => journal.symbol?.trim()).filter((value): value is string => Boolean(value)))]
+        .sort((a, b) => a.localeCompare(b)),
+    [allCandidateJournals],
+  );
+  const localTradeSymbols = useMemo(
+    () =>
+      [...new Set(tradeHistory.map(record => record.symbol?.trim()).filter((value): value is string => Boolean(value)))]
+        .sort((a, b) => a.localeCompare(b)),
+    [tradeHistory],
+  );
+  const localOnlySymbols = useMemo(
+    () => localTradeSymbols.filter(item => !availableSymbols.includes(item)),
+    [localTradeSymbols, availableSymbols],
+  );
   const suggestionMap = useMemo(
-    () => new Map(suggestLegRoles(filteredForSuggestions(journals)).map(item => [item.journalId, item])),
-    [journals],
+    () => new Map(suggestLegRoles(filteredForSuggestions(allCandidateJournals)).map(item => [item.journalId, item])),
+    [allCandidateJournals],
   );
 
   const symbolScoped = useMemo(
-    () => journals.filter(journal => !symbol || journal.symbol === symbol),
-    [journals, symbol],
+    () => allCandidateJournals.filter(journal => !symbol || journal.symbol === symbol),
+    [allCandidateJournals, symbol],
   );
   const filtered = useMemo(() => {
     return symbolScoped.filter(journal => {
@@ -115,12 +132,12 @@ export default function JournalCampaignClassifyPage() {
   }, [symbolScoped, dateFrom, dateTo, onlyUnclassified, onlyClosed]);
 
   const stats = useMemo(() => ({
-    total: journals.length,
-    unclassified: journals.filter(journal => !journal.campaign_id).length,
-    classified: journals.filter(journal => !!journal.campaign_id).length,
+    total: allCandidateJournals.length,
+    unclassified: allCandidateJournals.filter(journal => !journal.campaign_id).length,
+    classified: allCandidateJournals.filter(journal => !!journal.campaign_id).length,
     current: filtered.length,
     currentClosed: filtered.filter(journal => !!journal.trade_record_id).length,
-  }), [journals, filtered]);
+  }), [allCandidateJournals, filtered]);
 
   const selectedJournals = useMemo(
     () => filtered.filter(journal => selectedIds.includes(journal.id)),
@@ -136,13 +153,28 @@ export default function JournalCampaignClassifyPage() {
   const emptyReason = useMemo(() => {
     if (loadError) return `加载失败：${loadError}`;
     if (loading) return '正在加载可归类 journals…';
-    if (journals.length === 0) return '当前用户下没有 trade_journals 数据，因此暂时没有可归类记录。历史归类只基于已写入 Supabase 的 trade_journals，不会直接用 localStorage 的 tradeHistory 代替。';
+    if (allCandidateJournals.length === 0) {
+      if (tradeHistory.length > 0) {
+        return `当前用户本地有 ${tradeHistory.length} 条成交历史，但没有任何已写入 Supabase 的 trade_journals，所以暂时没有可归类标的。历史归类当前仍以 trade_journals 为准；本地仅有成交记录时，页面会明确提示而不是让选择器看起来像坏掉。`;
+      }
+      return '当前用户下没有 trade_journals 数据，因此暂时没有可归类记录。历史归类只基于已写入 Supabase 的 trade_journals，不会直接用 localStorage 的 tradeHistory 代替。';
+    }
     if (!symbol) return '请先在左侧选择标的。symbol 选项来自当前用户已有的 trade_journals。';
     if (symbolScoped.length === 0) return `当前 symbol ${symbol} 下没有任何 journal。`;
     if (onlyUnclassified && symbolScoped.every(journal => !!journal.campaign_id)) return `当前 symbol ${symbol} 下没有未归类 journals。`;
     if (onlyClosed && symbolScoped.every(journal => !journal.trade_record_id)) return `当前 symbol ${symbol} 下没有已平仓记录。`;
     return '当前筛选条件过窄，请放宽日期范围或关闭部分筛选。';
-  }, [loadError, loading, journals, symbol, symbolScoped, onlyUnclassified, onlyClosed]);
+  }, [loadError, loading, allCandidateJournals, tradeHistory.length, symbol, symbolScoped, onlyUnclassified, onlyClosed]);
+
+  useEffect(() => {
+    if (!symbol && availableSymbols.length === 1) {
+      setSymbol(availableSymbols[0]);
+      return;
+    }
+    if (symbol && !availableSymbols.includes(symbol)) {
+      setSymbol('');
+    }
+  }, [availableSymbols, symbol]);
 
   return (
     <div className="min-h-screen bg-background text-foreground">
@@ -169,16 +201,24 @@ export default function JournalCampaignClassifyPage() {
         <aside className="bg-card border border-border rounded p-4 space-y-4 self-start xl:sticky xl:top-[80px]">
           <div className="space-y-2">
             <div className="text-[12px] font-medium">筛选 journals</div>
-            <select
-              value={symbol}
-              onChange={(e: ChangeEvent<HTMLSelectElement>) => setSymbol(e.target.value)}
-              className="h-9 w-full rounded border border-border bg-background px-3 text-[12px]"
-            >
-              <option value="">请选择标的（批量操作必须同标的）</option>
-              {availableSymbols.map(item => (
-                <option key={item} value={item}>{item}</option>
-              ))}
-            </select>
+            <Select value={symbol} onValueChange={setSymbol} disabled={availableSymbols.length === 0}>
+              <SelectTrigger className="h-9 text-[12px]">
+                <SelectValue placeholder={availableSymbols.length === 0 ? '暂无可归类标的' : '请选择标的（批量操作必须同标的）'} />
+              </SelectTrigger>
+              <SelectContent className="z-[80]">
+                {availableSymbols.map(item => (
+                  <SelectItem key={item} value={item}>
+                    {item}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {availableSymbols.length === 0 ? (
+              <div className="rounded border border-[#F0B90B]/30 bg-[#F0B90B]/8 px-3 py-2 text-[11px] text-muted-foreground">
+                当前没有可归类标的。
+                {localOnlySymbols.length > 0 ? ` 检测到本地成交历史标的：${localOnlySymbols.join(' / ')}，但这些记录还没有对应的 trade_journals。` : ''}
+              </div>
+            ) : null}
             <div className="grid grid-cols-2 gap-2">
               <Input type="date" value={dateFrom} onChange={(e: ChangeEvent<HTMLInputElement>) => setDateFrom(e.target.value)} className="h-9 text-[12px]" />
               <Input type="date" value={dateTo} onChange={(e: ChangeEvent<HTMLInputElement>) => setDateTo(e.target.value)} className="h-9 text-[12px]" />
@@ -200,6 +240,7 @@ export default function JournalCampaignClassifyPage() {
             <div className="text-[12px] text-muted-foreground">已归类：{stats.classified}</div>
             <div className="text-[12px] text-muted-foreground">当前筛选结果：{stats.current}</div>
             <div className="text-[12px] text-muted-foreground">当前已平仓：{stats.currentClosed}</div>
+            <div className="text-[12px] text-muted-foreground">可选标的：{availableSymbols.length}</div>
             <div className="text-[11px] text-muted-foreground">仅同标的归类有效，如果跨标的需要分批处理。</div>
           </div>
 
@@ -219,7 +260,7 @@ export default function JournalCampaignClassifyPage() {
         <section className="bg-card border border-border rounded overflow-hidden">
           {!symbol ? (
             <div className="h-[480px] flex items-center justify-center text-[13px] text-muted-foreground">
-              请先在左侧选择标的
+              {availableSymbols.length === 0 ? emptyReason : '请先在左侧选择标的'}
             </div>
           ) : loading ? (
             <div className="h-[480px] flex items-center justify-center text-[13px] text-muted-foreground">
