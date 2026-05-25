@@ -12,7 +12,9 @@ import {
   computeDeviationCosts,
   simulateCampaign,
 } from '@/lib/campaignSimulationEngine';
+import { INITIAL_COGNITIVE_ASSETS } from '@/lib/cognitiveAssetsInitialContent';
 import { suggestLegRoles as suggestLegRolesHeuristic } from '@/lib/legRoleSuggestion';
+import type { CognitiveAssetsDoc, CognitiveAssetCategory, CognitiveAssetSection } from '@/types/cognitiveAssets';
 import type {
   CampaignCounterfactual,
   CampaignCounterfactualBranchKind,
@@ -85,6 +87,83 @@ function readUserScopedStorage<T>(userId: string, key: string, fallback: T): T {
   } catch {
     return fallback;
   }
+}
+
+function deepClone<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value)) as T;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isCognitiveAssetSection(value: unknown): value is CognitiveAssetSection {
+  return isRecord(value)
+    && typeof value.id === 'string'
+    && typeof value.title === 'string'
+    && typeof value.content === 'string';
+}
+
+function isCognitiveAssetCategory(value: unknown): value is CognitiveAssetCategory {
+  return isRecord(value)
+    && typeof value.id === 'string'
+    && typeof value.title === 'string'
+    && typeof value.subtitle === 'string'
+    && typeof value.intro === 'string'
+    && Array.isArray(value.sections)
+    && value.sections.every(isCognitiveAssetSection);
+}
+
+function isCognitiveAssetsDoc(value: unknown): value is CognitiveAssetsDoc {
+  return isRecord(value)
+    && isRecord(value.meta)
+    && typeof value.meta.title === 'string'
+    && typeof value.meta.subtitle === 'string'
+    && Array.isArray(value.categories)
+    && value.categories.every(isCognitiveAssetCategory);
+}
+
+type CognitiveAssetsRow = {
+  user_id: string;
+  content: unknown;
+  last_edited_at?: string | null;
+  created_at?: string;
+};
+
+function getInitialCognitiveAssetsDoc(): CognitiveAssetsDoc {
+  return deepClone(INITIAL_COGNITIVE_ASSETS);
+}
+
+async function readCognitiveAssetsRow(userId: string): Promise<CognitiveAssetsRow | null> {
+  const { data, error } = await supabase
+    .from('cognitive_assets' as never)
+    .select('user_id, content, last_edited_at, created_at')
+    .eq('user_id', userId)
+    .maybeSingle();
+  if (error) {
+    throw new Error(`读取认知资产失败：${error.message}`);
+  }
+  return (data as CognitiveAssetsRow | null) ?? null;
+}
+
+async function writeCognitiveAssetsDoc(userId: string, doc: CognitiveAssetsDoc): Promise<void> {
+  const payload = {
+    user_id: userId,
+    content: deepClone(doc),
+    last_edited_at: new Date().toISOString(),
+  };
+  const { error } = await supabase
+    .from('cognitive_assets' as never)
+    .upsert(payload as never, { onConflict: 'user_id' })
+    .select('user_id')
+    .single();
+  if (error) {
+    throw new Error(`保存认知资产失败：${error.message}`);
+  }
+}
+
+function normalizeCognitiveAssetsDoc(raw: unknown): CognitiveAssetsDoc | null {
+  return isCognitiveAssetsDoc(raw) ? deepClone(raw) : null;
 }
 
 async function getCurrentUserAndCapital(): Promise<{ userId: string; initialCapital: number }> {
@@ -1577,6 +1656,99 @@ export async function appendCounterfactualBranch(
     .select()
     .single();
   return wrap("保存反事实分支", error, data as unknown as TradeJournal);
+}
+
+export async function getCognitiveAssets(userId: string): Promise<CognitiveAssetsDoc | null> {
+  const row = await readCognitiveAssetsRow(userId);
+  if (!row) return null;
+  return normalizeCognitiveAssetsDoc(row.content);
+}
+
+export async function ensureCognitiveAssetsExists(userId: string): Promise<CognitiveAssetsDoc> {
+  const current = await getCognitiveAssets(userId);
+  if (current) return current;
+  const initial = getInitialCognitiveAssetsDoc();
+  await writeCognitiveAssetsDoc(userId, initial);
+  return initial;
+}
+
+function updateSectionContent(
+  doc: CognitiveAssetsDoc,
+  categoryId: string,
+  sectionId: string,
+  updater: (section: CognitiveAssetSection) => string,
+): CognitiveAssetsDoc {
+  let categoryFound = false;
+  let sectionFound = false;
+  const next = deepClone(doc);
+  next.categories = next.categories.map(category => {
+    if (category.id !== categoryId) return category;
+    categoryFound = true;
+    return {
+      ...category,
+      sections: category.sections.map(section => {
+        if (section.id !== sectionId) return section;
+        sectionFound = true;
+        return {
+          ...section,
+          content: updater(section),
+        };
+      }),
+    };
+  });
+  if (!categoryFound) {
+    throw new Error(`未找到认知资产分类：${categoryId}`);
+  }
+  if (!sectionFound) {
+    throw new Error(`未找到认知资产章节：${sectionId}`);
+  }
+  return next;
+}
+
+function getInitialSectionContent(categoryId: string, sectionId: string): string {
+  const category = INITIAL_COGNITIVE_ASSETS.categories.find(item => item.id === categoryId);
+  if (!category) {
+    throw new Error(`默认认知资产中不存在分类：${categoryId}`);
+  }
+  const section = category.sections.find(item => item.id === sectionId);
+  if (!section) {
+    throw new Error(`默认认知资产中不存在章节：${sectionId}`);
+  }
+  return section.content;
+}
+
+export async function updateCognitiveAssetSection(
+  userId: string,
+  categoryId: string,
+  sectionId: string,
+  newContent: string,
+): Promise<void> {
+  const nextContent = newContent.trim();
+  if (!nextContent) {
+    throw new Error('章节内容不能为空');
+  }
+  const current = await ensureCognitiveAssetsExists(userId);
+  const next = updateSectionContent(current, categoryId, sectionId, () => nextContent);
+  await writeCognitiveAssetsDoc(userId, next);
+}
+
+export async function resetCognitiveAssetSection(
+  userId: string,
+  categoryId: string,
+  sectionId: string,
+): Promise<void> {
+  const current = await ensureCognitiveAssetsExists(userId);
+  const next = updateSectionContent(
+    current,
+    categoryId,
+    sectionId,
+    () => getInitialSectionContent(categoryId, sectionId),
+  );
+  await writeCognitiveAssetsDoc(userId, next);
+}
+
+export async function resetAllCognitiveAssets(userId: string): Promise<void> {
+  await writeCognitiveAssetsDoc(userId, getInitialCognitiveAssetsDoc());
 }
 
 export async function deleteCounterfactualBranch(

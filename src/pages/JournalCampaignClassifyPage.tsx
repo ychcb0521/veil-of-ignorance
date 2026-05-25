@@ -2,17 +2,19 @@ import { useEffect, useMemo, useState } from 'react';
 import type { ChangeEvent } from 'react';
 import { toast } from 'sonner';
 import { Link, useNavigate } from 'react-router-dom';
-import { AlertCircle } from 'lucide-react';
+import { AlertCircle, ChevronDown, Filter } from 'lucide-react';
 import { BackButton } from '@/components/journal/BackButton';
 import { AddToExistingCampaignDialog } from '@/components/journal/AddToExistingCampaignDialog';
 import { ClassifyAsNewCampaignDialog } from '@/components/journal/ClassifyAsNewCampaignDialog';
 import { LegRoleChip } from '@/components/journal/LegRoleChip';
 import { Checkbox } from '@/components/ui/checkbox';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
 import { useAuth } from '@/contexts/AuthContext';
 import { useTradingContext } from '@/contexts/TradingContext';
+import { useIsMobile } from '@/hooks/use-mobile';
 import { detachJournalFromCampaign, listAllCampaigns, listUnclassifiedJournals, suggestLegRoles } from '@/lib/journalApi';
 import { LEG_ROLE_LABELS } from '@/lib/strategyTemplates';
 import type { TradeCampaign, TradeJournal } from '@/types/journal';
@@ -45,12 +47,14 @@ export default function JournalCampaignClassifyPage() {
   const nav = useNavigate();
   const { user } = useAuth();
   const { tradeHistory } = useTradingContext();
+  const isMobile = useIsMobile();
   const [loading, setLoading] = useState(true);
   const [symbol, setSymbol] = useState('');
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
   const [onlyUnclassified, setOnlyUnclassified] = useState(true);
   const [onlyClosed, setOnlyClosed] = useState(false);
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const [journals, setJournals] = useState<TradeJournal[]>([]);
   const [campaignBundles, setCampaignBundles] = useState<CampaignBundle[]>([]);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
@@ -131,14 +135,6 @@ export default function JournalCampaignClassifyPage() {
     });
   }, [symbolScoped, dateFrom, dateTo, onlyUnclassified, onlyClosed]);
 
-  const stats = useMemo(() => ({
-    total: allCandidateJournals.length,
-    unclassified: allCandidateJournals.filter(journal => !journal.campaign_id).length,
-    classified: allCandidateJournals.filter(journal => !!journal.campaign_id).length,
-    current: filtered.length,
-    currentClosed: filtered.filter(journal => !!journal.trade_record_id).length,
-  }), [allCandidateJournals, filtered]);
-
   const selectedJournals = useMemo(
     () => filtered.filter(journal => selectedIds.includes(journal.id)),
     [filtered, selectedIds],
@@ -159,7 +155,7 @@ export default function JournalCampaignClassifyPage() {
       }
       return '当前用户下没有 trade_journals 数据，因此暂时没有可归类记录。历史归类只基于已写入 Supabase 的 trade_journals，不会直接用 localStorage 的 tradeHistory 代替。';
     }
-    if (!symbol) return '请先在左侧选择标的。symbol 选项来自当前用户已有的 trade_journals。';
+    if (!symbol) return '请先在上方选择标的。symbol 选项来自当前用户已有的 trade_journals。';
     if (symbolScoped.length === 0) return `当前 symbol ${symbol} 下没有任何 journal。`;
     if (onlyUnclassified && symbolScoped.every(journal => !!journal.campaign_id)) return `当前 symbol ${symbol} 下没有未归类 journals。`;
     if (onlyClosed && symbolScoped.every(journal => !journal.trade_record_id)) return `当前 symbol ${symbol} 下没有已平仓记录。`;
@@ -175,6 +171,31 @@ export default function JournalCampaignClassifyPage() {
       setSymbol('');
     }
   }, [availableSymbols, symbol]);
+
+  useEffect(() => {
+    setFiltersOpen(isMobile);
+  }, [isMobile]);
+
+  const filterSummary = useMemo(() => {
+    const parts: string[] = [];
+    parts.push(symbol || '全部标的');
+    if (dateFrom || dateTo) {
+      parts.push(`${dateFrom || '起始'} ~ ${dateTo || '今天'}`);
+    } else {
+      parts.push('全部时间');
+    }
+    parts.push(onlyUnclassified ? '未归类' : '全部');
+    if (onlyClosed) {
+      parts.push('仅已平仓');
+    }
+    return parts.join(' · ');
+  }, [dateFrom, dateTo, onlyClosed, onlyUnclassified, symbol]);
+
+  const collapseAfterFilterChange = () => {
+    if (!isMobile) {
+      setFiltersOpen(false);
+    }
+  };
 
   return (
     <div className="min-h-screen bg-background text-foreground">
@@ -197,70 +218,108 @@ export default function JournalCampaignClassifyPage() {
         </div>
       </header>
 
-      <main className="max-w-[1600px] mx-auto px-6 py-4 grid grid-cols-1 xl:grid-cols-[300px_1fr] gap-4">
-        <aside className="bg-card border border-border rounded p-4 space-y-4 self-start xl:sticky xl:top-[80px]">
-          <div className="space-y-2">
-            <div className="text-[12px] font-medium">筛选 journals</div>
-            <Select value={symbol} onValueChange={setSymbol} disabled={availableSymbols.length === 0}>
-              <SelectTrigger className="h-9 text-[12px]">
-                <SelectValue placeholder={availableSymbols.length === 0 ? '暂无可归类标的' : '请选择标的（批量操作必须同标的）'} />
-              </SelectTrigger>
-              <SelectContent className="z-[80]">
-                {availableSymbols.map(item => (
-                  <SelectItem key={item} value={item}>
-                    {item}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            {availableSymbols.length === 0 ? (
-              <div className="rounded border border-[#F0B90B]/30 bg-[#F0B90B]/8 px-3 py-2 text-[11px] text-muted-foreground">
-                当前没有可归类标的。
-                {localOnlySymbols.length > 0 ? ` 检测到本地成交历史标的：${localOnlySymbols.join(' / ')}，但这些记录还没有对应的 trade_journals。` : ''}
+      <div className="sticky top-[57px] z-10 bg-background/95 backdrop-blur-sm border-b border-border">
+        <div className="max-w-[1600px] mx-auto px-6 py-3 space-y-2">
+          <Collapsible open={filtersOpen} onOpenChange={setFiltersOpen}>
+            <CollapsibleTrigger asChild>
+              <button
+                type="button"
+                className="h-9 w-full bg-card border border-border rounded px-3 flex items-center justify-between gap-3 text-left"
+              >
+                <span className="flex items-center gap-2 text-[12px] font-medium">
+                  <Filter className="h-4 w-4" />
+                  筛选 journals
+                </span>
+                <span className="flex items-center gap-2 min-w-0">
+                  <span className="truncate text-[11px] text-muted-foreground">{filterSummary}</span>
+                  <ChevronDown className={`h-4 w-4 text-muted-foreground transition-transform ${filtersOpen ? 'rotate-180' : ''}`} />
+                </span>
+              </button>
+            </CollapsibleTrigger>
+            <CollapsibleContent className="pt-3">
+              <div className="bg-card border border-border rounded p-4 space-y-3">
+                <Select
+                  value={symbol}
+                  onValueChange={(value) => {
+                    setSymbol(value);
+                    collapseAfterFilterChange();
+                  }}
+                  disabled={availableSymbols.length === 0}
+                >
+                  <SelectTrigger className="h-9 text-[12px]">
+                    <SelectValue placeholder={availableSymbols.length === 0 ? '暂无可归类标的' : '请选择标的（批量操作必须同标的）'} />
+                  </SelectTrigger>
+                  <SelectContent className="z-[80]">
+                    {availableSymbols.map(item => (
+                      <SelectItem key={item} value={item}>
+                        {item}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {availableSymbols.length === 0 ? (
+                  <div className="rounded border border-[#F0B90B]/30 bg-[#F0B90B]/8 px-3 py-2 text-[11px] text-muted-foreground">
+                    当前没有可归类标的。
+                    {localOnlySymbols.length > 0 ? ` 检测到本地成交历史标的：${localOnlySymbols.join(' / ')}，但这些记录还没有对应的 trade_journals。` : ''}
+                  </div>
+                ) : null}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <Input
+                    type="date"
+                    value={dateFrom}
+                    onChange={(e: ChangeEvent<HTMLInputElement>) => {
+                      setDateFrom(e.target.value);
+                      collapseAfterFilterChange();
+                    }}
+                    className="h-9 text-[12px]"
+                  />
+                  <Input
+                    type="date"
+                    value={dateTo}
+                    onChange={(e: ChangeEvent<HTMLInputElement>) => {
+                      setDateTo(e.target.value);
+                      collapseAfterFilterChange();
+                    }}
+                    className="h-9 text-[12px]"
+                  />
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <div className="flex items-center justify-between rounded border border-border px-3 py-2 text-[12px]">
+                    <span>仅显示未归类</span>
+                    <Switch
+                      checked={onlyUnclassified}
+                      onCheckedChange={(checked) => {
+                        setOnlyUnclassified(checked);
+                        collapseAfterFilterChange();
+                      }}
+                    />
+                  </div>
+                  <div className="flex items-center justify-between rounded border border-border px-3 py-2 text-[12px]">
+                    <span>仅显示已平仓</span>
+                    <Switch
+                      checked={onlyClosed}
+                      onCheckedChange={(checked) => {
+                        setOnlyClosed(checked);
+                        collapseAfterFilterChange();
+                      }}
+                    />
+                  </div>
+                </div>
               </div>
-            ) : null}
-            <div className="grid grid-cols-2 gap-2">
-              <Input type="date" value={dateFrom} onChange={(e: ChangeEvent<HTMLInputElement>) => setDateFrom(e.target.value)} className="h-9 text-[12px]" />
-              <Input type="date" value={dateTo} onChange={(e: ChangeEvent<HTMLInputElement>) => setDateTo(e.target.value)} className="h-9 text-[12px]" />
-            </div>
-            <div className="flex items-center justify-between rounded border border-border px-3 py-2 text-[12px]">
-              <span>仅显示未归类</span>
-              <Switch checked={onlyUnclassified} onCheckedChange={setOnlyUnclassified} />
-            </div>
-            <div className="flex items-center justify-between rounded border border-border px-3 py-2 text-[12px]">
-              <span>仅显示已平仓</span>
-              <Switch checked={onlyClosed} onCheckedChange={setOnlyClosed} />
-            </div>
-          </div>
+            </CollapsibleContent>
+          </Collapsible>
 
-          <div className="space-y-2 rounded border border-border p-3">
-            <div className="text-[12px] font-medium">统计</div>
-            <div className="text-[12px] text-muted-foreground">总数：{stats.total} 个 journals</div>
-            <div className="text-[12px] text-muted-foreground">未归类：{stats.unclassified}</div>
-            <div className="text-[12px] text-muted-foreground">已归类：{stats.classified}</div>
-            <div className="text-[12px] text-muted-foreground">当前筛选结果：{stats.current}</div>
-            <div className="text-[12px] text-muted-foreground">当前已平仓：{stats.currentClosed}</div>
-            <div className="text-[12px] text-muted-foreground">可选标的：{availableSymbols.length}</div>
-            <div className="text-[11px] text-muted-foreground">仅同标的归类有效，如果跨标的需要分批处理。</div>
+          <div className="text-[10px] text-muted-foreground">
+            勾选属于同一战役的 journals，然后在底部操作栏选择归类方式。
           </div>
+        </div>
+      </div>
 
-          <div className="rounded bg-muted/30 p-3 text-[11px] text-muted-foreground whitespace-pre-line">
-            操作流程：
-            {'\n'}① 筛选目标标的 + 日期范围
-            {'\n'}② 勾选属于同一战役的 journals
-            {'\n'}③ 点击底部“归类为新战役”或“加入现有战役”
-            {'\n'}④ 在弹窗中为每条 leg 指定角色
-          </div>
-
-          <div className="rounded border border-border bg-background/50 p-3 text-[11px] text-muted-foreground">
-            历史归类不会补录缺失的实时事件。像 hedge_cancelled / hedge_placed 的精确时机无法从历史 journal 反推出，后续 SOP 评分会明确标注“仅供参考”。
-          </div>
-        </aside>
-
+      <main className="max-w-[1600px] mx-auto px-6 py-4">
         <section className="bg-card border border-border rounded overflow-hidden">
           {!symbol ? (
             <div className="h-[480px] flex items-center justify-center text-[13px] text-muted-foreground">
-              {availableSymbols.length === 0 ? emptyReason : '请先在左侧选择标的'}
+              {availableSymbols.length === 0 ? emptyReason : '请先在上方选择标的'}
             </div>
           ) : loading ? (
             <div className="h-[480px] flex items-center justify-center text-[13px] text-muted-foreground">

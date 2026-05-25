@@ -181,26 +181,26 @@ export type Database = {
       }
       cognitive_assets: {
         Row: {
-          content: string
+          content: Json
           created_at: string
           id: string
-          title: string
+          last_edited_at: string
           updated_at: string
           user_id: string
         }
         Insert: {
-          content: string
+          content: Json
           created_at?: string
           id?: string
-          title?: string
+          last_edited_at?: string
           updated_at?: string
           user_id: string
         }
         Update: {
-          content?: string
+          content?: Json
           created_at?: string
           id?: string
-          title?: string
+          last_edited_at?: string
           updated_at?: string
           user_id?: string
         }

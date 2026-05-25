@@ -14,7 +14,7 @@ import {
 } from '@/components/ui/sheet';
 import {
   LayoutGrid, ChevronDown, CheckCheck,
-  Wallet, Brain, BookOpen, Layers, Gauge, ShieldCheck, Tags,
+  Wallet, BookMarked, BookOpen, Layers, Gauge, ShieldCheck, Tags,
 } from 'lucide-react';
 
 interface NavItem {
@@ -39,8 +39,9 @@ function useNavItems(
     { key: 'assets', icon: Wallet, label: '账户资产', action: onOpenAssets, isActive: () => false },
     {
       key: 'cognitive-assets',
-      icon: Brain,
+      icon: BookMarked,
       label: '认知资产',
+      badge: '新',
       action: () => nav('/cognitive-assets'),
       isActive: () => loc.pathname === '/cognitive-assets',
     },
