@@ -443,7 +443,13 @@ export default function JournalCampaignDetailPage() {
   const historicalClassifiedIds = useMemo(() => {
     const ids = new Set<string>();
     for (const event of campaign.actual_evolution) {
-      if (event.journal_id && event.notes?.includes('classified retroactively')) {
+      if (
+        event.journal_id &&
+        (
+          event.event_type === 'historical_leg_attached' ||
+          event.notes?.includes('classified retroactively')
+        )
+      ) {
         ids.add(event.journal_id);
       }
     }

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import type { ChangeEvent } from 'react';
 import { toast } from 'sonner';
 import { Link, useNavigate } from 'react-router-dom';
+import { AlertCircle } from 'lucide-react';
 import { BackButton } from '@/components/journal/BackButton';
 import { AddToExistingCampaignDialog } from '@/components/journal/AddToExistingCampaignDialog';
 import { ClassifyAsNewCampaignDialog } from '@/components/journal/ClassifyAsNewCampaignDialog';
@@ -11,7 +12,8 @@ import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
 import { useAuth } from '@/contexts/AuthContext';
 import { useTradingContext } from '@/contexts/TradingContext';
-import { detachJournalFromCampaign, listAllCampaigns, listUnclassifiedJournals } from '@/lib/journalApi';
+import { detachJournalFromCampaign, listAllCampaigns, listUnclassifiedJournals, suggestLegRoles } from '@/lib/journalApi';
+import { LEG_ROLE_LABELS } from '@/lib/strategyTemplates';
 import type { TradeCampaign, TradeJournal } from '@/types/journal';
 import type { TradeRecord } from '@/types/trading';
 
@@ -53,10 +55,12 @@ export default function JournalCampaignClassifyPage() {
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [newDialogOpen, setNewDialogOpen] = useState(false);
   const [attachDialogOpen, setAttachDialogOpen] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const loadData = async () => {
     if (!user) return;
     setLoading(true);
+    setLoadError(null);
     try {
       const [journalRows, campaigns] = await Promise.all([
         listUnclassifiedJournals(user.id, { includeClassified: true }),
@@ -73,7 +77,9 @@ export default function JournalCampaignClassifyPage() {
       setCampaignBundles(bundles);
       setSelectedIds(prev => prev.filter(id => journalRows.some(journal => journal.id === id)));
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : String(error));
+      const message = error instanceof Error ? error.message : String(error);
+      setLoadError(message);
+      toast.error(message);
     } finally {
       setLoading(false);
     }
@@ -89,23 +95,32 @@ export default function JournalCampaignClassifyPage() {
     () => [...new Set(journals.map(journal => journal.symbol))].sort(),
     [journals],
   );
+  const suggestionMap = useMemo(
+    () => new Map(suggestLegRoles(filteredForSuggestions(journals)).map(item => [item.journalId, item])),
+    [journals],
+  );
 
+  const symbolScoped = useMemo(
+    () => journals.filter(journal => !symbol || journal.symbol === symbol),
+    [journals, symbol],
+  );
   const filtered = useMemo(() => {
-    return journals.filter(journal => {
-      if (symbol && journal.symbol !== symbol) return false;
+    return symbolScoped.filter(journal => {
       if (dateFrom && new Date(journal.pre_simulated_time).getTime() < new Date(`${dateFrom}T00:00:00`).getTime()) return false;
       if (dateTo && new Date(journal.pre_simulated_time).getTime() > new Date(`${dateTo}T23:59:59`).getTime()) return false;
       if (onlyUnclassified && journal.campaign_id) return false;
       if (onlyClosed && !journal.trade_record_id) return false;
       return true;
     });
-  }, [journals, symbol, dateFrom, dateTo, onlyUnclassified, onlyClosed]);
+  }, [symbolScoped, dateFrom, dateTo, onlyUnclassified, onlyClosed]);
 
   const stats = useMemo(() => ({
-    total: filtered.length,
-    unclassified: filtered.filter(journal => !journal.campaign_id).length,
-    classified: filtered.filter(journal => !!journal.campaign_id).length,
-  }), [filtered]);
+    total: journals.length,
+    unclassified: journals.filter(journal => !journal.campaign_id).length,
+    classified: journals.filter(journal => !!journal.campaign_id).length,
+    current: filtered.length,
+    currentClosed: filtered.filter(journal => !!journal.trade_record_id).length,
+  }), [journals, filtered]);
 
   const selectedJournals = useMemo(
     () => filtered.filter(journal => selectedIds.includes(journal.id)),
@@ -115,9 +130,19 @@ export default function JournalCampaignClassifyPage() {
   const someCurrentSelected = filtered.some(journal => selectedIds.includes(journal.id));
   const allSelectedClassified = selectedJournals.length > 0 && selectedJournals.every(journal => !!journal.campaign_id);
   const activeCampaigns = useMemo(
-    () => campaignBundles.filter(bundle => bundle.campaign.status === 'active' || bundle.campaign.status === 'planned'),
-    [campaignBundles],
+    () => campaignBundles.filter(bundle => !symbol || bundle.campaign.symbol === symbol),
+    [campaignBundles, symbol],
   );
+  const emptyReason = useMemo(() => {
+    if (loadError) return `加载失败：${loadError}`;
+    if (loading) return '正在加载可归类 journals…';
+    if (journals.length === 0) return '当前用户下没有 trade_journals 数据，因此暂时没有可归类记录。历史归类只基于已写入 Supabase 的 trade_journals，不会直接用 localStorage 的 tradeHistory 代替。';
+    if (!symbol) return '请先在左侧选择标的。symbol 选项来自当前用户已有的 trade_journals。';
+    if (symbolScoped.length === 0) return `当前 symbol ${symbol} 下没有任何 journal。`;
+    if (onlyUnclassified && symbolScoped.every(journal => !!journal.campaign_id)) return `当前 symbol ${symbol} 下没有未归类 journals。`;
+    if (onlyClosed && symbolScoped.every(journal => !journal.trade_record_id)) return `当前 symbol ${symbol} 下没有已平仓记录。`;
+    return '当前筛选条件过窄，请放宽日期范围或关闭部分筛选。';
+  }, [loadError, loading, journals, symbol, symbolScoped, onlyUnclassified, onlyClosed]);
 
   return (
     <div className="min-h-screen bg-background text-foreground">
@@ -173,6 +198,8 @@ export default function JournalCampaignClassifyPage() {
             <div className="text-[12px] text-muted-foreground">总数：{stats.total} 个 journals</div>
             <div className="text-[12px] text-muted-foreground">未归类：{stats.unclassified}</div>
             <div className="text-[12px] text-muted-foreground">已归类：{stats.classified}</div>
+            <div className="text-[12px] text-muted-foreground">当前筛选结果：{stats.current}</div>
+            <div className="text-[12px] text-muted-foreground">当前已平仓：{stats.currentClosed}</div>
             <div className="text-[11px] text-muted-foreground">仅同标的归类有效，如果跨标的需要分批处理。</div>
           </div>
 
@@ -226,13 +253,17 @@ export default function JournalCampaignClassifyPage() {
 
               <div className="max-h-[calc(100vh-240px)] overflow-auto">
                 {filtered.length === 0 ? (
-                  <div className="px-4 py-10 text-center text-[12px] text-muted-foreground">
-                    该筛选条件下无 journal
+                  <div className="px-4 py-10 text-center text-[12px] text-muted-foreground space-y-2">
+                    <div className="mx-auto h-8 w-8 rounded-full bg-muted flex items-center justify-center">
+                      <AlertCircle className="w-4 h-4" />
+                    </div>
+                    <div>{emptyReason}</div>
                   </div>
                 ) : (
                   filtered.map(journal => {
                     const record = journal.trade_record_id ? tradeRecordMap.get(journal.trade_record_id) ?? null : null;
                     const campaign = journal.campaign_id ? campaignMap.get(journal.campaign_id) ?? null : null;
+                    const suggestion = suggestionMap.get(journal.id);
                     return (
                       <div
                         key={journal.id}
@@ -242,7 +273,7 @@ export default function JournalCampaignClassifyPage() {
                         onKeyDown={(event) => {
                           if (event.key === 'Enter') window.open(`/journal/${journal.id}`, '_blank', 'noopener,noreferrer');
                         }}
-                        className="grid grid-cols-[40px_100px_72px_72px_90px_80px_100px_90px_90px_1fr] h-9 hover:bg-accent text-[11px] font-mono items-center px-3 border-t border-border/30"
+                      className="grid grid-cols-[40px_100px_72px_72px_90px_80px_100px_90px_90px_1fr] min-h-9 hover:bg-accent text-[11px] font-mono items-center px-3 py-1 border-t border-border/30"
                       >
                         <div onClick={event => event.stopPropagation()}>
                           <Checkbox
@@ -265,16 +296,23 @@ export default function JournalCampaignClassifyPage() {
                         <div>{fmtPrice(record?.exitPrice)}</div>
                         <div>{exitMethodLabel(record)}</div>
                         <div className="min-w-0" onClick={event => event.stopPropagation()}>
-                          {!journal.campaign_id || !campaign ? (
-                            <span className="text-muted-foreground">未归类</span>
-                          ) : (
-                            <div className="flex items-center gap-2 min-w-0">
-                              <Link to={`/journal/campaigns/${campaign.id}`} className="truncate text-[#5BA3FF] hover:underline">
-                                {campaign.title}
-                              </Link>
-                              {journal.leg_role && <LegRoleChip role={journal.leg_role} short />}
-                            </div>
-                          )}
+                          <div className="flex items-center gap-2 min-w-0">
+                            {!journal.campaign_id || !campaign ? (
+                              <span className="text-muted-foreground">未归类</span>
+                            ) : (
+                              <>
+                                <Link to={`/journal/campaigns/${campaign.id}`} className="truncate text-[#5BA3FF] hover:underline">
+                                  {campaign.title}
+                                </Link>
+                                {journal.leg_role && <LegRoleChip role={journal.leg_role} short />}
+                              </>
+                            )}
+                            {suggestion && !journal.campaign_id && (
+                              <span className="truncate text-[10px] text-muted-foreground">
+                                建议：{LEG_ROLE_LABELS[suggestion.suggestedRole]}
+                              </span>
+                            )}
+                          </div>
                         </div>
                       </div>
                     );
@@ -369,4 +407,8 @@ export default function JournalCampaignClassifyPage() {
       />
     </div>
   );
+}
+
+function filteredForSuggestions(journals: TradeJournal[]) {
+  return [...journals].sort((a, b) => new Date(a.pre_simulated_time).getTime() - new Date(b.pre_simulated_time).getTime());
 }

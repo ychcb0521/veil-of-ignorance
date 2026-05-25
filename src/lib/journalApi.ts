@@ -67,6 +67,7 @@ function toCampaignEvent(row: unknown): CampaignEvent {
 }
 
 function inferCampaignEventType(legRole: LegRole): CampaignEvent['event_type'] {
+  if (legRole === 'standalone') return 'note';
   if (legRole === 'main_open' || legRole === 'reentry_main') return 'main_opened';
   if (legRole === 'mirror_tp') return 'mirror_tp_placed';
   return 'hedge_placed';
@@ -668,7 +669,7 @@ export async function batchAttachToCampaign(
       nextEvents.push({
         id: crypto.randomUUID(),
         timestamp: journal.pre_simulated_time,
-        event_type: inferCampaignEventType(assignment.legRole),
+        event_type: 'historical_leg_attached',
         leg_role: assignment.legRole,
         journal_id: journal.id,
         trade_record_id: journal.trade_record_id,
@@ -793,7 +794,7 @@ export async function createCampaignFromJournals(input: {
     actual_evolution: [{
       id: crypto.randomUUID(),
       timestamp: derivedPatch.opened_at ?? mainOpen.pre_simulated_time,
-      event_type: 'campaign_opened',
+      event_type: 'historical_classification_created',
       leg_role: null,
       journal_id: null,
       trade_record_id: null,

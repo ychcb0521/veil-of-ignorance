@@ -52,6 +52,8 @@ export interface CampaignEvent {
   timestamp: string;
   event_type:
     | 'campaign_opened'
+    | 'historical_classification_created'
+    | 'historical_leg_attached'
     | 'main_opened'
     | 'hedge_placed'
     | 'mirror_tp_placed'
