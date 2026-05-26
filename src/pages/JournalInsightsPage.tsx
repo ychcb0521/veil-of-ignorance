@@ -14,7 +14,7 @@ import {
 } from '@/lib/journalApi';
 import {
   groupJournalsByPattern, computeTimeDistribution,
-  computeMentalStateDistribution, computeOutcomeRate,
+  computeMentalStateDistribution,
 } from '@/lib/journalAggregations';
 import type { TradeCampaign, TradeJournal } from '@/types/journal';
 
@@ -77,6 +77,7 @@ async function loadCampaignEconomicStats(userId: string): Promise<CampaignEconom
 export default function JournalInsightsPage() {
   const { user } = useAuth();
   const [data, setData] = useState<BulkJournalData | null>(null);
+  const [campaigns, setCampaigns] = useState<TradeCampaign[]>([]);
   const [campaignEconomic, setCampaignEconomic] = useState<CampaignEconomicStats | null>(null);
   const [range, setRange] = useState<Range>(30);
   const [loading, setLoading] = useState(true);
@@ -92,9 +93,13 @@ export default function JournalInsightsPage() {
       try {
         setLoading(true);
         setLoadError(null);
-        const d = await listAllJournalDataForUser(user.id);
+        const [d, campaignRows] = await Promise.all([
+          listAllJournalDataForUser(user.id),
+          listAllCampaigns(user.id),
+        ]);
         if (cancelled) return;
         setData(d);
+        setCampaigns(campaignRows);
         setCampaignEconomic(EMPTY_CAMPAIGN_ECONOMIC);
         setLoading(false);
 
@@ -124,6 +129,7 @@ export default function JournalInsightsPage() {
   const stats = useMemo(() => {
     if (!data) return null;
     const now = Date.now();
+    const sinceMs = now - range * DAY;
     const cur = data.journals.filter(j =>
       now - new Date(j.pre_simulated_time).getTime() <= range * DAY,
     );
@@ -145,7 +151,16 @@ export default function JournalInsightsPage() {
 
     const timeDist = computeTimeDistribution(cur);
     const mentalDist = computeMentalStateDistribution(cur);
-    const outcome = computeOutcomeRate(cur);
+    const curCampaigns = campaigns.filter(campaign => isClosedCampaign(campaign, sinceMs));
+    const campaignWinCount = curCampaigns.filter(campaign =>
+      campaign.status === 'closed_profit' || (campaign.final_realized_pnl ?? 0) > 0,
+    ).length;
+    const campaignRValues = curCampaigns
+      .map(campaign => campaign.final_r_multiple)
+      .filter((value): value is number => typeof value === 'number' && Number.isFinite(value));
+    const averageRelativeExpectancy = campaignRValues.length === 0
+      ? 0
+      : campaignRValues.reduce((sum, value) => sum + value, 0) / campaignRValues.length;
     const mainOrders = cur.filter(j => j.order_kind === 'main');
     const hedgeOrders = cur.filter(j => j.order_kind === 'hedge');
     const avgR = (arr: TradeJournal[]) => {
@@ -192,14 +207,20 @@ export default function JournalInsightsPage() {
     const mixedRBasis = hasLegacySl && hasNewMaxLoss;
 
     return {
-      cur, curClusters, trend, timeDist, mentalDist, outcome, alphaHours, ruleEffect, reviewed, deepDone, deepRate, mixedRBasis,
+      cur, curClusters, trend, timeDist, mentalDist, alphaHours, ruleEffect, reviewed, deepDone, deepRate, mixedRBasis,
+      campaignOutcome: {
+        count: curCampaigns.length,
+        winRate: curCampaigns.length === 0 ? 0 : campaignWinCount / curCampaigns.length,
+        averageRelativeExpectancy,
+        relativeSampleCount: campaignRValues.length,
+      },
       orderTypeStats: {
         main: { count: mainOrders.length, winRate: winRate(mainOrders), avgR: avgR(mainOrders) },
         hedge: { count: hedgeOrders.length, winRate: winRate(hedgeOrders), avgR: avgR(hedgeOrders) },
       },
       crossCount,
     };
-  }, [data, range]);
+  }, [campaigns, data, range]);
 
   if (loading) {
     return (
@@ -257,9 +278,18 @@ export default function JournalInsightsPage() {
       <main className="max-w-[1400px] mx-auto px-6 py-4 space-y-4">
         {/* Overview */}
         <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-          <StatCard label="总交易" value={stats.cur.length.toString()} />
-          <StatCard label="胜率" value={`${(stats.outcome.win_rate * 100).toFixed(0)}%`} accent={stats.outcome.win_rate >= 0.5 ? '#0ECB81' : '#F6465D'} />
-          <StatCard label="期望 R" value={stats.outcome.expectancy.toFixed(2)} accent={stats.outcome.expectancy >= 0 ? '#0ECB81' : '#F6465D'} />
+          <StatCard label="总战役" value={stats.campaignOutcome.count.toString()} sub="已结束战役" />
+          <StatCard
+            label="战役胜率"
+            value={`${(stats.campaignOutcome.winRate * 100).toFixed(0)}%`}
+            accent={stats.campaignOutcome.count === 0 ? '#848E9C' : stats.campaignOutcome.winRate >= 0.5 ? '#0ECB81' : '#F6465D'}
+          />
+          <StatCard
+            label="平均相对期望"
+            value={stats.campaignOutcome.averageRelativeExpectancy.toFixed(2)}
+            accent={stats.campaignOutcome.relativeSampleCount === 0 ? '#848E9C' : stats.campaignOutcome.averageRelativeExpectancy >= 0 ? '#0ECB81' : '#F6465D'}
+            sub={stats.campaignOutcome.count === 0 ? '按战役 R' : `${stats.campaignOutcome.relativeSampleCount}/${stats.campaignOutcome.count} 有 R 数据`}
+          />
           <StatCard label="错误模式数" value={stats.curClusters.length.toString()} />
           <StatCard
             label="深度分析完成率"
