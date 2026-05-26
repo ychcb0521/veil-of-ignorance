@@ -7,6 +7,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { ExitMethodBadge } from './ExitMethodBadge';
 import { useTradingContext } from '@/contexts/TradingContext';
 import { formatPrice } from '@/lib/formatters';
+import { formatBeijingTimeShort } from '@/lib/timeFormat';
 import type { JournalTagAssignment, ErrorTagPattern, TradeJournal } from '@/types/journal';
 
 interface Props {
@@ -80,7 +81,9 @@ export function JournalTimelineList({ journals, assignments, patterns }: Props) 
     <div className="bg-card border border-border rounded">
       <div className="overflow-x-auto">
         <div className={`grid ${COLS} text-[10px] text-muted-foreground bg-muted/40 px-3 py-2 sticky top-0 min-w-[1100px]`}>
-          <span>开仓时间</span><span>平仓时间</span><span>标的</span><span>方向</span>
+          <span>实际开仓<br/><span className="text-[9px]">(北京 / 模拟)</span></span>
+          <span>实际平仓<br/><span className="text-[9px]">(北京 / 模拟)</span></span>
+          <span>标的</span><span>方向</span>
           <span>开仓价</span><span>平仓价</span><span>平仓方式</span><span>心态</span>
           <span>结果</span><span>R</span><span>P&L</span><span>标签数</span><span>操作</span>
         </div>
@@ -90,8 +93,10 @@ export function JournalTimelineList({ journals, assignments, patterns }: Props) 
         {pageRows.map(j => {
           const tags = tagsByJournal.get(j.id) ?? [];
           const tr = j.trade_record_id ? tradeRecordMap.get(j.trade_record_id) ?? null : null;
-          const openT = fmtTime(tr?.openTime) ?? fmtTime(j.pre_simulated_time);
-          const closeT = fmtTime(tr?.closeTime);
+          const openRealBeijing = formatBeijingTimeShort(j.pre_real_time);
+          const closeRealBeijing = formatBeijingTimeShort(j.post_real_close_time);
+          const openSim = fmtTime(tr?.openTime) ?? fmtTime(j.pre_simulated_time);
+          const closeSim = fmtTime(tr?.closeTime);
           const entryP = tr?.entryPrice ?? j.pre_entry_price ?? null;
           const exitP = tr && tr.exitPrice > 0 ? tr.exitPrice : null;
           return (
@@ -108,9 +113,15 @@ export function JournalTimelineList({ journals, assignments, patterns }: Props) 
                     <TooltipContent className="text-[11px]">历史回填</TooltipContent>
                   </Tooltip>
                 )}
-                {openT ?? <span className="text-muted-foreground">—</span>}
+                <span className="leading-tight">
+                  <span className="block">{openRealBeijing}</span>
+                  <span className="block text-[9px] text-muted-foreground">{openSim ?? '—'}</span>
+                </span>
               </span>
-              <span>{closeT ?? <span className="text-muted-foreground">—</span>}</span>
+              <span className="leading-tight">
+                <span className="block">{closeRealBeijing}</span>
+                <span className="block text-[9px] text-muted-foreground">{closeSim ?? '—'}</span>
+              </span>
               <span className="truncate">{j.symbol}</span>
               <span className={
                 j.direction === 'long' ? 'text-[#0ECB81]' :

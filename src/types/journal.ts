@@ -310,6 +310,8 @@ export interface TradeJournal {
   post_reflection: string | null;
   post_correct_action: string | null;
   post_reviewed_at: string | null;
+  /** Real wall-clock time of position close (stamped on first review-sheet open). */
+  post_real_close_time?: string | null;
 
   reason_was_rewritten: boolean;
   counterfactual_branches?: CounterfactualBranch[];

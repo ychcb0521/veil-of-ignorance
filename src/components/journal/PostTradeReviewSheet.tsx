@@ -19,10 +19,11 @@ import { useTradingContext } from '@/contexts/TradingContext';
 import {
   finalizeJournalReview, replacePhaseAssignments,
   listAssignmentsForJournal, countPatternOccurrencesLast30Days, listPatterns,
-  updateJournalDeepAnalysis,
+  updateJournalDeepAnalysis, stampJournalCloseRealTime,
 } from '@/lib/journalApi';
 import type { TradeJournal, TradeOutcome, ErrorTagPattern } from '@/types/journal';
 import { MENTAL_STATE_LABELS } from '@/types/journal';
+import { formatBeijingTime } from '@/lib/timeFormat';
 import type { TradeRecord } from '@/types/trading';
 import { JournalTagPicker } from './JournalTagPicker';
 import {
@@ -58,12 +59,15 @@ export function PostTradeReviewSheet({
   const [allPatterns, setAllPatterns] = useState<ErrorTagPattern[]>([]);
   const [sixStep, setSixStep] = useState<SixStepValue>(EMPTY_SIX_STEP);
   const [sixStepOpen, setSixStepOpen] = useState(false);
+  /** Local override so the just-stamped close time renders immediately without re-fetch. */
+  const [stampedCloseTime, setStampedCloseTime] = useState<string | null>(null);
   const pausedOnce = useState({ done: false })[0];
 
   // Auto-pause + reset state per journal
   useEffect(() => {
     if (!isOpen || !journal) return;
     if (!pausedOnce.done) { pausedOnce.done = true; onAutoPause?.(); }
+    setStampedCloseTime(null);
     (async () => {
       try {
         const existing = await listAssignmentsForJournal(journal.id);
@@ -81,6 +85,11 @@ export function PostTradeReviewSheet({
         setSixStepOpen(countCompletedSteps(pickSixStepValue(journal)) > 0);
         if (user) {
           listPatterns(user.id).then(setAllPatterns).catch(() => {});
+        }
+        // Stamp the real close time on first open (idempotent — API noop if already set)
+        if (!journal.post_reviewed_at && !journal.post_real_close_time) {
+          const stamped = await stampJournalCloseRealTime(journal.id);
+          if (stamped) setStampedCloseTime(stamped);
         }
       } catch (e) {
         toast.error(e instanceof Error ? e.message : String(e));
@@ -316,6 +325,16 @@ export function PostTradeReviewSheet({
                   这笔在守卫上线前用了全仓
                 </span>
               )}
+            </div>
+            <div className="border border-border/60 rounded-md bg-background/60 px-2.5 py-2 text-[10.5px] leading-relaxed">
+              <div className="text-muted-foreground mb-1">实际操作时间（北京时间）</div>
+              <div>开仓：<span className="text-foreground">{formatBeijingTime(journal.pre_real_time)}</span></div>
+              <div>
+                平仓：
+                <span className="text-foreground">
+                  {formatBeijingTime(journal.post_real_close_time ?? stampedCloseTime)}
+                </span>
+              </div>
             </div>
             <div>• {isHedge ? '对冲理由' : '入场理由'}：{journal.pre_entry_reason}</div>
             {journal.pre_planned_stop_loss != null ? (

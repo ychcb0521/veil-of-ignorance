@@ -20,6 +20,7 @@ import { ReplayChartView } from '@/components/journal/ReplayChartView';
 import { ContextChannelsStack } from '@/components/journal/ContextChannelsStack';
 import { PostTradeReviewSheet } from '@/components/journal/PostTradeReviewSheet';
 import { BackButton } from '@/components/journal/BackButton';
+import { formatBeijingTime } from '@/lib/timeFormat';
 
 function outcomeColor(o: string | null) {
   switch (o) {
@@ -154,7 +155,15 @@ export default function JournalPlaybackPage() {
               {journal.leverage != null && journal.direction !== 'no_entry' && (
                 <> · 杠杆 {journal.leverage}×</>
               )}
-              {' · '}{fmtSimTime}
+              {' · 模拟 '}{fmtSimTime}
+              <span className="ml-2 text-foreground/70">
+                · 实际开仓 <span className="text-foreground">{formatBeijingTime(journal.pre_real_time)}</span>
+              </span>
+              {journal.post_real_close_time && (
+                <span className="ml-2 text-foreground/70">
+                  · 平仓 <span className="text-foreground">{formatBeijingTime(journal.post_real_close_time)}</span>
+                </span>
+              )}
             </div>
             <div className="flex items-center gap-2 shrink-0">
               <span className={`h-6 px-2 rounded text-[11px] font-medium flex items-center ${outcomeColor(journal.post_outcome)}`}>

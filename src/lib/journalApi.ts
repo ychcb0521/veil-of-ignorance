@@ -1915,6 +1915,36 @@ export async function updateJournalTradeRef(journalId: string, tradeRecordId: st
   }
 }
 
+/**
+ * Stamp the real wall-clock close time. Idempotent: only writes if currently NULL,
+ * so re-opening the review sheet later doesn't overwrite the original close moment.
+ * Returns the new ISO string if a write happened, or null if already stamped.
+ */
+export async function stampJournalCloseRealTime(journalId: string): Promise<string | null> {
+  const { data: cur, error: gErr } = await supabase
+    .from("trade_journals" as never)
+    .select("post_real_close_time")
+    .eq("id", journalId)
+    .single();
+  if (gErr) {
+    console.warn("[journalApi] 读取 post_real_close_time 失败:", gErr);
+    return null;
+  }
+  const row = cur as unknown as { post_real_close_time: string | null } | null;
+  if (row?.post_real_close_time) return null;
+  const now = new Date().toISOString();
+  const { error } = await supabase
+    .from("trade_journals" as never)
+    .update({ post_real_close_time: now } as never)
+    .eq("id", journalId)
+    .is("post_real_close_time", null);
+  if (error) {
+    console.warn("[journalApi] 写入 post_real_close_time 失败:", error);
+    return null;
+  }
+  return now;
+}
+
 export async function createJournalPreSnapshot(input: CreateJournalPreInput): Promise<TradeJournal> {
   const payload = { ...input, pre_real_time: new Date().toISOString(), source: 'live' as const };
   const { data, error } = await supabase
