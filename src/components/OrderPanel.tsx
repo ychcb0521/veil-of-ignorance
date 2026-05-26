@@ -224,9 +224,19 @@ export function OrderPanel({
     };
   };
 
-  const handleOrder = (rawSide: OrderSide) => {
+  const handleOrder = async (rawSide: OrderSide) => {
     const params = buildOrderParams(rawSide);
     if (!params) return;
+    // 直接交易模式：跳过快照对话框，直接下单。journal 不会被创建，
+    // 因此错题集 / 元监控 不会收录；但 tradeHistory 仍记录，可在战役中归类。
+    if (ctx.tradingMode === 'direct') {
+      try {
+        await onPlaceOrder(params);
+      } catch (e) {
+        console.error('[OrderPanel] direct-mode place order failed', e);
+      }
+      return;
+    }
     setPendingOrderParams(params);
     setSnapshotSide(rawSide);
     setSnapshotSimTime(ctx.getEffectiveTime(symbol));

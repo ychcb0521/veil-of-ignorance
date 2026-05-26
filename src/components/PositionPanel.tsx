@@ -70,7 +70,7 @@ export function PositionPanel({
   onClearSymbolData,
   activeTab, onTabChange, onCloseAllPositions, pricePrecision, onPlaceTpSl,
 }: Props) {
-  const { setSymbolLeverage: setSharedSymbolLeverage } = useTradingContext();
+  const { setSymbolLeverage: setSharedSymbolLeverage, tradingMode } = useTradingContext();
   const [leverageModal, setLeverageModal] = useState<{ symbol: string; index: number; pos: Position } | null>(null);
   const [tpslModal, setTpslModal] = useState<{ symbol: string; index: number; pos: Position } | null>(null);
   const [closeModal, setCloseModal] = useState<{ symbol: string; index: number; pos: Position } | null>(null);
@@ -116,12 +116,13 @@ export function PositionPanel({
           setReviewJournal(j);
           setReviewTradeRecord(latest);
           setReviewOpen(true);
-        } else {
+        } else if (tradingMode !== 'direct') {
+          // In direct-trading mode the absence of a journal is expected, so we stay silent.
           toast.info('该笔平仓未找到对应的开仓快照（历史遗留持仓）');
         }
       })
       .catch(e => toast.error(e instanceof Error ? e.message : String(e)));
-  }, [tradeHistory, user]);
+  }, [tradeHistory, user, tradingMode]);
 
   // Load all user journals for history-tab mapping (key by symbol+side+entry-price)
   const [journalsByCompositeKey, setJournalsByCompositeKey] = useState<Record<string, TradeJournal>>({});
