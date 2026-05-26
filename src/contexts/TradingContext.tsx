@@ -104,10 +104,10 @@ interface TradingState {
   setTimeMode: (v: TimeMode) => void;
   /**
    * Trading mode:
-   *   'decision' — full snapshot + post-trade review flow (default, original behavior)
-   *   'direct'   — skip snapshot + skip review; trade still hits trade_history and
-   *                can be retroactively classified into a campaign via 裸 record 回填,
+   *   'direct'   — DEFAULT. skip snapshot + skip review; trade still hits trade_history
+   *                and can be retroactively classified into a campaign via 裸 record 回填,
    *                but is excluded from 错题集 and 元监控 (because no journal is created)
+   *   'decision' — full snapshot + post-trade review flow (opt-in for training sessions)
    */
   tradingMode: TradingMode;
   setTradingMode: (v: TradingMode) => void;
@@ -280,7 +280,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
 
   // === Multi-Timeline Mode ===
   const [timeMode, setTimeMode] = usePersistedState<TimeMode>('time_mode', 'synced');
-  const [tradingMode, setTradingMode] = usePersistedState<TradingMode>('trading_mode', 'decision');
+  const [tradingMode, setTradingMode] = usePersistedState<TradingMode>('trading_mode', 'direct');
   const [coinTimelines, setCoinTimelines] = usePersistedState<CoinTimelinesMap>('coin_timelines_v2', {});
 
   // Stub for backward compat — isolated balances no longer used
