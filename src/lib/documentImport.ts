@@ -322,11 +322,88 @@ function getHeadingTitle(line: string): string | null {
     return trimmed.replace(/^#{1,6}\s+/, '');
   }
 
+  const bracketHeading = /^([（(][一二三四五六七八九十0-9]+[）)]|[【[].+[】\]])\s*(.+)?$/.exec(trimmed);
+  if (bracketHeading && trimmed.length <= 40) return trimmed;
+
   return null;
 }
 
+function isTableLine(line: string): boolean {
+  const trimmed = line.trim();
+  return trimmed.includes('|') && trimmed.split('|').filter(Boolean).length >= 2;
+}
+
+function isListLine(line: string): boolean {
+  return /^\s*(?:[-*+]\s+|[•·]\s+|\d+[.)）、．]\s*|[（(]\d+[）)]\s*)\S+/.test(line);
+}
+
+function normalizeListLine(line: string): string {
+  const trimmed = line.trim();
+  const bullet = /^[•·]\s+(.+)$/.exec(trimmed);
+  if (bullet) return `- ${bullet[1].trim()}`;
+
+  const parenthesizedNumber = /^[（(](\d+)[）)]\s*(.+)$/.exec(trimmed);
+  if (parenthesizedNumber) return `${parenthesizedNumber[1]}. ${parenthesizedNumber[2].trim()}`;
+
+  const ordered = /^(\d+)[)）、．.]\s*(.+)$/.exec(trimmed);
+  if (ordered) return `${ordered[1]}. ${ordered[2].trim()}`;
+
+  return trimmed;
+}
+
+function isHighlightLine(line: string): boolean {
+  return /^(注意|提示|重点|原则|结论|核心|警告|风险)[:：]/.test(line.trim());
+}
+
+function normalizeHighlightLine(line: string): string {
+  const match = /^(注意|提示|重点|原则|结论|核心|警告|风险)[:：]\s*(.+)$/.exec(line.trim());
+  if (!match) return line.trim();
+  return `> **${match[1]}**：${match[2].trim()}`;
+}
+
+function isLikelyStandaloneHeading(line: string, nextLine?: string): boolean {
+  const trimmed = line.trim();
+  const next = nextLine?.trim() ?? '';
+  if (!trimmed || !next) return false;
+  if (isListLine(trimmed) || isTableLine(trimmed) || isHighlightLine(trimmed)) return false;
+  if (trimmed.length > 34 || next.length <= trimmed.length) return false;
+  if (/[。！？.!?；;]/.test(trimmed)) return false;
+  if (/[:：].+/.test(trimmed)) return false;
+  if (/[，,、]/.test(trimmed) && trimmed.length > 16) return false;
+  return /[\u4e00-\u9fa5a-zA-Z0-9]/.test(trimmed);
+}
+
+function formatSectionLines(lines: string[]): string {
+  const blocks: string[] = [];
+  let groupedLines: string[] = [];
+  let groupedKind: 'list' | 'table' | null = null;
+
+  const flushGroup = () => {
+    if (groupedLines.length === 0) return;
+    blocks.push(groupedLines.join('\n'));
+    groupedLines = [];
+    groupedKind = null;
+  };
+
+  lines.forEach(line => {
+    const kind = isTableLine(line) ? 'table' : isListLine(line) ? 'list' : null;
+    if (kind) {
+      if (groupedKind && groupedKind !== kind) flushGroup();
+      groupedKind = kind;
+      groupedLines.push(line);
+      return;
+    }
+
+    flushGroup();
+    blocks.push(line);
+  });
+
+  flushGroup();
+  return blocks.join('\n\n');
+}
+
 function pushSection(sections: DraftSection[], title: string, lines: string[]) {
-  const content = lines.join('\n\n').trim();
+  const content = formatSectionLines(lines).trim();
   if (!content) return;
   sections.push({ title, content });
 }
@@ -355,7 +432,9 @@ function splitIntoSections(title: string, text: string): DraftSection[] {
   let currentLines: string[] = [];
 
   lines.forEach((line, index) => {
-    const heading = getHeadingTitle(line);
+    const heading = getHeadingTitle(line) ?? (
+      isLikelyStandaloneHeading(line, lines[index + 1]) ? line.trim().replace(/[:：]$/, '') : null
+    );
     const canStartSection = heading && (index > 0 || lines.length > 1);
     if (canStartSection) {
       pushSection(sections, currentTitle, currentLines);
@@ -372,14 +451,38 @@ function splitIntoSections(title: string, text: string): DraftSection[] {
 }
 
 function toMarkdownContent(content: string): string {
-  return content
-    .split(/\n{2,}/)
-    .map(paragraph => {
-      if (/^([-*+]|\d+[.)、])\s+/.test(paragraph)) return paragraph;
-      if (/^>/.test(paragraph)) return paragraph;
-      return paragraph.replace(/\n/g, ' ');
-    })
-    .join('\n\n');
+  const paragraphs = content.split(/\n{2,}/).map(paragraph => paragraph.trim()).filter(Boolean);
+  const normalized: string[] = [];
+
+  paragraphs.forEach(paragraph => {
+    const lines = paragraph.split('\n').map(line => line.trim()).filter(Boolean);
+    if (lines.length > 1 && lines.every(isTableLine)) {
+      normalized.push(lines.join('\n'));
+      return;
+    }
+
+    if (lines.length > 1 && lines.every(isListLine)) {
+      normalized.push(lines.map(normalizeListLine).join('\n'));
+      return;
+    }
+
+    const line = lines.join(' ');
+    if (isListLine(line)) {
+      normalized.push(normalizeListLine(line));
+      return;
+    }
+    if (isHighlightLine(line)) {
+      normalized.push(normalizeHighlightLine(line));
+      return;
+    }
+    if (/^>/.test(line)) {
+      normalized.push(line);
+      return;
+    }
+    normalized.push(line);
+  });
+
+  return normalized.join('\n\n');
 }
 
 function truncateIfNeeded(text: string): string {

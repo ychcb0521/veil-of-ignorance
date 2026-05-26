@@ -1,9 +1,20 @@
 import { type DragEvent, type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowLeft, FileText, List, Loader2, Upload } from 'lucide-react';
+import { ArrowLeft, FileText, List, Loader2, Trash2, Upload } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { useNavigate } from 'react-router-dom';
 import remarkGfm from 'remark-gfm';
 import { toast } from 'sonner';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from '@/components/ui/alert-dialog';
 import { Button } from '@/components/ui/button';
 import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet';
 import { useAuth } from '@/contexts/AuthContext';
@@ -12,6 +23,7 @@ import {
   isSupportedCognitiveAssetFile,
 } from '@/lib/documentImport';
 import {
+  deleteCognitiveAssetsDoc,
   getCognitiveAssets,
   replaceCognitiveAssetsDoc,
 } from '@/lib/journalApi';
@@ -122,16 +134,20 @@ function MarkdownArticle({ content }: { content: string }) {
 function UploadPanel({
   hasDocument,
   importing,
+  deleting,
   dragActive,
   onChoose,
+  onDelete,
   onDrop,
   onDragOver,
   onDragLeave,
 }: {
   hasDocument: boolean;
   importing: boolean;
+  deleting: boolean;
   dragActive: boolean;
   onChoose: () => void;
+  onDelete: () => void;
   onDrop: (event: DragEvent<HTMLDivElement>) => void;
   onDragOver: (event: DragEvent<HTMLDivElement>) => void;
   onDragLeave: () => void;
@@ -161,19 +177,58 @@ function UploadPanel({
             </p>
           </div>
         </div>
-        <Button
-          type="button"
-          className="h-9 bg-[#F0B90B] text-black hover:bg-[#F0B90B]/90 sm:shrink-0"
-          onClick={onChoose}
-          disabled={importing}
-        >
-          {importing ? (
-            <Loader2 className="h-4 w-4 mr-1 animate-spin" />
-          ) : (
-            <Upload className="h-4 w-4 mr-1" />
+        <div className="flex flex-wrap items-center gap-2 sm:shrink-0">
+          {hasDocument && (
+            <AlertDialog>
+              <AlertDialogTrigger asChild>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="h-9 border-[#F6465D]/40 text-[#F6465D] hover:bg-[#F6465D]/10 hover:text-[#F6465D]"
+                  disabled={importing || deleting}
+                >
+                  {deleting ? (
+                    <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+                  ) : (
+                    <Trash2 className="h-4 w-4 mr-1" />
+                  )}
+                  删除当前
+                </Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent className="border-[#F6465D]/40">
+                <AlertDialogHeader>
+                  <AlertDialogTitle>删除当前认知资产文档？</AlertDialogTitle>
+                  <AlertDialogDescription className="leading-6">
+                    删除后会回到上传模式。这个操作只删除当前生成的认知资产内容，不会影响交易记录或其他数据。
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel disabled={deleting}>取消</AlertDialogCancel>
+                  <AlertDialogAction
+                    onClick={onDelete}
+                    disabled={deleting}
+                    className="bg-[#F6465D] text-white hover:bg-[#F6465D]/90"
+                  >
+                    确认删除
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
           )}
-          {importing ? '生成中' : '选择文档'}
-        </Button>
+          <Button
+            type="button"
+            className="h-9 bg-[#F0B90B] text-black hover:bg-[#F0B90B]/90"
+            onClick={onChoose}
+            disabled={importing || deleting}
+          >
+            {importing ? (
+              <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+            ) : (
+              <Upload className="h-4 w-4 mr-1" />
+            )}
+            {importing ? '生成中' : '选择文档'}
+          </Button>
+        </div>
       </div>
     </div>
   );
@@ -188,6 +243,7 @@ export default function CognitiveAssetsPage() {
   const [loading, setLoading] = useState(true);
   const [activeId, setActiveId] = useState('');
   const [importing, setImporting] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [dragActive, setDragActive] = useState(false);
 
   const tocItems = useMemo<TocItem[]>(
@@ -238,12 +294,12 @@ export default function CognitiveAssetsPage() {
   }, [doc, tocItems]);
 
   const openFilePicker = () => {
-    if (importing) return;
+    if (importing || deleting) return;
     fileInputRef.current?.click();
   };
 
   const handleFile = async (file: File | null | undefined) => {
-    if (!file || !user?.id) return;
+    if (!file || !user?.id || deleting) return;
     if (!isSupportedCognitiveAssetFile(file)) {
       toast.error('仅支持上传 PDF、Word（doc/docx）或 TXT 文件');
       return;
@@ -267,17 +323,32 @@ export default function CognitiveAssetsPage() {
 
   const handleDrop = (event: DragEvent<HTMLDivElement>) => {
     event.preventDefault();
-    if (importing) return;
+    if (importing || deleting) return;
     void handleFile(event.dataTransfer.files[0]);
   };
 
   const handleDragOver = (event: DragEvent<HTMLDivElement>) => {
     event.preventDefault();
-    if (!importing) setDragActive(true);
+    if (!importing && !deleting) setDragActive(true);
   };
 
   const handleDragLeave = () => {
     setDragActive(false);
+  };
+
+  const handleDelete = async () => {
+    if (!user?.id) return;
+    setDeleting(true);
+    try {
+      await deleteCognitiveAssetsDoc(user.id);
+      setDoc(null);
+      setActiveId('');
+      toast.success('当前认知资产文档已删除');
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : '删除失败');
+    } finally {
+      setDeleting(false);
+    }
   };
 
   return (
@@ -324,7 +395,7 @@ export default function CognitiveAssetsPage() {
               size="sm"
               className="h-8 px-2 text-muted-foreground hover:text-[#F0B90B]"
               onClick={openFilePicker}
-              disabled={loading || importing}
+              disabled={loading || importing || deleting}
             >
               {importing ? (
                 <Loader2 className="h-4 w-4 mr-1 animate-spin" />
@@ -354,8 +425,10 @@ export default function CognitiveAssetsPage() {
               <UploadPanel
                 hasDocument={Boolean(doc)}
                 importing={importing}
+                deleting={deleting}
                 dragActive={dragActive}
                 onChoose={openFilePicker}
+                onDelete={() => void handleDelete()}
                 onDrop={handleDrop}
                 onDragOver={handleDragOver}
                 onDragLeave={handleDragLeave}

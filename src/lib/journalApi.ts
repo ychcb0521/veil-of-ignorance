@@ -97,6 +97,14 @@ function writeUserScopedStorage<T>(userId: string, key: string, value: T): void 
   }
 }
 
+function removeUserScopedStorage(userId: string, key: string): void {
+  try {
+    localStorage.removeItem(`${getUserStoragePrefix(userId)}${key}`);
+  } catch (error) {
+    console.warn(`[journalApi] 删除本地缓存失败: ${key}`, error);
+  }
+}
+
 function deepClone<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
 }
@@ -197,6 +205,7 @@ async function writeCognitiveAssetsDoc(userId: string, doc: CognitiveAssetsDoc):
     }
     throw new Error(`保存认知资产失败：${error.message}`);
   }
+  removeUserScopedStorage(userId, COGNITIVE_ASSETS_STORAGE_KEY);
 }
 
 function normalizeCognitiveAssetsDoc(raw: unknown): CognitiveAssetsDoc | null {
@@ -1912,6 +1921,17 @@ export async function replaceCognitiveAssetsDoc(userId: string, doc: CognitiveAs
     throw new Error('认知资产文档格式无效');
   }
   await writeCognitiveAssetsDoc(userId, doc);
+}
+
+export async function deleteCognitiveAssetsDoc(userId: string): Promise<void> {
+  const { error } = await supabase
+    .from('cognitive_assets' as never)
+    .delete()
+    .eq('user_id', userId);
+  if (error && !isMissingCognitiveAssetsTableError(error)) {
+    throw new Error(`删除认知资产失败：${error.message}`);
+  }
+  removeUserScopedStorage(userId, COGNITIVE_ASSETS_STORAGE_KEY);
 }
 
 function updateSectionContent(
