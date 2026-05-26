@@ -433,21 +433,10 @@ export default function GuidePage() {
 
           <section id="s5" className="scroll-mt-20">
             <SectionTitle accent="#F0B90B">5. 认知资产</SectionTitle>
-            <P>认知资产用于保存你的交易知识体系。当前支持上传 PDF、Word、TXT，系统会自动提取正文，识别小标题层级，并生成带目录的阅读页。</P>
-            <KeyGrid>
-              <KeyCard title="上传">
-                选择文档后系统会生成目录与正文。目录按上传文件中的标题层级编号，如 1、1.1、1.1.1。
-              </KeyCard>
-              <KeyCard title="替换">
-                替换文档属于低频操作，默认折叠。需要更新整套知识库时再展开。
-              </KeyCard>
-              <KeyCard title="删除">
-                上传错文件时可删除当前认知资产文档，然后重新上传。
-              </KeyCard>
-            </KeyGrid>
             <Highlight>
-              认知资产不是资料仓库，而是交易原则的源头。错题集负责发现你哪里没做到，认知资产负责定义“正确做法”本身。
+              你可以在自己的账号里上传自己总结的交易规则、SOP 或复盘原则，作为个人认知资产保存。
             </Highlight>
+            <P>这部分不影响交易训练主流程。把它当成你的个人规则库即可，需要时再上传或更新。</P>
           </section>
 
           <section id="s6" className="scroll-mt-20">
