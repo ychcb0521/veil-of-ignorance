@@ -1,28 +1,19 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowLeft, List, RotateCcw } from 'lucide-react';
-import { useBlocker, useNavigate } from 'react-router-dom';
+import { type DragEvent, type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
+import { ArrowLeft, FileText, List, Loader2, Upload } from 'lucide-react';
+import ReactMarkdown from 'react-markdown';
+import { useNavigate } from 'react-router-dom';
+import remarkGfm from 'remark-gfm';
 import { toast } from 'sonner';
-import { CognitiveAssetSection } from '@/components/cognitive-assets/CognitiveAssetSection';
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  AlertDialogTrigger,
-} from '@/components/ui/alert-dialog';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet';
 import { useAuth } from '@/contexts/AuthContext';
 import {
-  ensureCognitiveAssetsExists,
-  resetAllCognitiveAssets,
-  resetCognitiveAssetSection,
-  updateCognitiveAssetSection,
+  buildCognitiveAssetsDocFromFile,
+  isSupportedCognitiveAssetFile,
+} from '@/lib/documentImport';
+import {
+  getCognitiveAssets,
+  replaceCognitiveAssetsDoc,
 } from '@/lib/journalApi';
 import type { CognitiveAssetsDoc } from '@/types/cognitiveAssets';
 
@@ -32,13 +23,34 @@ interface TocItem {
   depth: 1 | 2;
 }
 
-const CATEGORY_ACCENT: Record<string, string> = {
-  dao: '#F0B90B',
-  fa: '#5BA3FF',
-  shou: '#F6465D',
-  gong: '#0ECB81',
-  xin: '#A855F7',
-};
+const CATEGORY_ACCENTS = ['#F0B90B', '#0ECB81', '#5BA3FF', '#F6465D', '#A855F7'];
+const DOCUMENT_ACCEPT = [
+  '.pdf',
+  '.doc',
+  '.docx',
+  '.txt',
+  'application/pdf',
+  'application/msword',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'text/plain',
+].join(',');
+
+function getFirstTocId(doc: CognitiveAssetsDoc | null): string {
+  const firstCategory = doc?.categories[0];
+  return firstCategory ? `category-${firstCategory.id}` : '';
+}
+
+function SectionTitle({ children, accent }: { children: ReactNode; accent?: string }) {
+  return (
+    <div className="flex items-center gap-3 mb-4">
+      <span
+        className="inline-block w-1 h-6 rounded"
+        style={{ background: accent ?? 'hsl(var(--primary))' }}
+      />
+      <h2 className="text-[20px] font-medium text-foreground">{children}</h2>
+    </div>
+  );
+}
 
 function TocList({
   items,
@@ -52,21 +64,118 @@ function TocList({
   return (
     <nav className="space-y-0.5">
       <div className="text-[11px] text-muted-foreground uppercase tracking-wider mb-2">目录</div>
-      {items.map(item => (
-        <a
-          key={item.id}
-          href={`#${item.id}`}
-          onClick={onJump}
-          className={`block rounded hover:bg-accent cursor-pointer ${
-            item.depth === 1
-              ? 'h-8 px-2 leading-8 text-[12px]'
-              : 'h-8 pl-6 pr-2 leading-8 text-[12px]'
-          } ${activeId === item.id ? 'bg-accent border-l-2 border-[#F0B90B] text-foreground' : item.depth === 1 ? 'text-foreground' : 'text-muted-foreground'}`}
-        >
-          {item.label}
-        </a>
-      ))}
+      {items.length === 0 ? (
+        <div className="px-2 py-2 text-[12px] text-muted-foreground">上传文档后自动生成</div>
+      ) : (
+        items.map(item => (
+          <a
+            key={item.id}
+            href={`#${item.id}`}
+            onClick={onJump}
+            className={`block rounded hover:bg-accent cursor-pointer ${
+              item.depth === 1
+                ? 'h-8 px-2 leading-8 text-[12px]'
+                : 'h-7 pl-6 pr-2 leading-7 text-[11px]'
+            } ${activeId === item.id ? 'bg-accent border-l-2 border-[#F0B90B] text-foreground' : 'text-muted-foreground'}`}
+          >
+            {item.label}
+          </a>
+        ))
+      )}
     </nav>
+  );
+}
+
+function MarkdownArticle({ content }: { content: string }) {
+  return (
+    <ReactMarkdown
+      remarkPlugins={[remarkGfm]}
+      components={{
+        h1: ({ children }) => <h3 className="text-[16px] font-medium text-foreground mt-6 mb-2">{children}</h3>,
+        h2: ({ children }) => <h3 className="text-[16px] font-medium text-foreground mt-6 mb-2">{children}</h3>,
+        h3: ({ children }) => <h4 className="text-[14px] font-medium text-foreground mt-5 mb-2">{children}</h4>,
+        p: ({ children }) => <p className="text-[14px] leading-relaxed text-foreground/90 mb-3">{children}</p>,
+        strong: ({ children }) => <strong className="font-medium text-foreground">{children}</strong>,
+        blockquote: ({ children }) => (
+          <blockquote className="bg-accent/50 border-l-2 border-[#F0B90B] pl-4 py-2 rounded-r text-[14px] leading-relaxed text-foreground my-4">
+            {children}
+          </blockquote>
+        ),
+        ul: ({ children }) => <ul className="list-disc pl-6 text-[14px] text-foreground/90 space-y-1 my-3">{children}</ul>,
+        ol: ({ children }) => <ol className="list-decimal pl-6 text-[14px] text-foreground/90 space-y-1 my-3">{children}</ol>,
+        li: ({ children }) => <li className="leading-relaxed">{children}</li>,
+        code: ({ children }) => (
+          <code className="rounded bg-muted px-1.5 py-0.5 text-[12px] font-mono text-foreground">{children}</code>
+        ),
+        pre: ({ children }) => (
+          <pre className="my-3 rounded bg-muted p-3 text-[12px] font-mono text-foreground overflow-x-auto whitespace-pre-wrap">
+            {children}
+          </pre>
+        ),
+      }}
+    >
+      {content}
+    </ReactMarkdown>
+  );
+}
+
+function UploadPanel({
+  hasDocument,
+  importing,
+  dragActive,
+  onChoose,
+  onDrop,
+  onDragOver,
+  onDragLeave,
+}: {
+  hasDocument: boolean;
+  importing: boolean;
+  dragActive: boolean;
+  onChoose: () => void;
+  onDrop: (event: DragEvent<HTMLDivElement>) => void;
+  onDragOver: (event: DragEvent<HTMLDivElement>) => void;
+  onDragLeave: () => void;
+}) {
+  return (
+    <div
+      onDrop={onDrop}
+      onDragOver={onDragOver}
+      onDragLeave={onDragLeave}
+      className={`border rounded p-5 transition-colors ${
+        dragActive
+          ? 'border-[#F0B90B] bg-[#F0B90B]/10'
+          : 'border-border bg-card'
+      }`}
+    >
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex items-start gap-3 min-w-0">
+          <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded border border-border bg-background text-[#F0B90B]">
+            <FileText className="h-4 w-4" />
+          </div>
+          <div className="min-w-0">
+            <h2 className="text-[16px] font-medium text-foreground">
+              {hasDocument ? '替换认知资产文档' : '上传认知资产文档'}
+            </h2>
+            <p className="mt-1 text-[12px] leading-5 text-muted-foreground">
+              支持 PDF / Word / TXT，上传后自动提取正文并生成类似“使用说明”的目录与阅读样式。
+            </p>
+          </div>
+        </div>
+        <Button
+          type="button"
+          className="h-9 bg-[#F0B90B] text-black hover:bg-[#F0B90B]/90 sm:shrink-0"
+          onClick={onChoose}
+          disabled={importing}
+        >
+          {importing ? (
+            <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+          ) : (
+            <Upload className="h-4 w-4 mr-1" />
+          )}
+          {importing ? '生成中' : '选择文档'}
+        </Button>
+      </div>
+    </div>
   );
 }
 
@@ -74,14 +183,12 @@ export default function CognitiveAssetsPage() {
   const nav = useNavigate();
   const { user } = useAuth();
   const observerRef = useRef<IntersectionObserver | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [doc, setDoc] = useState<CognitiveAssetsDoc | null>(null);
   const [loading, setLoading] = useState(true);
   const [activeId, setActiveId] = useState('');
-  const [editingSectionId, setEditingSectionId] = useState<string | null>(null);
-  const [editingCategoryId, setEditingCategoryId] = useState<string | null>(null);
-  const [editingContent, setEditingContent] = useState('');
-  const [saving, setSaving] = useState(false);
-  const [resetAllToken, setResetAllToken] = useState('');
+  const [importing, setImporting] = useState(false);
+  const [dragActive, setDragActive] = useState(false);
 
   const tocItems = useMemo<TocItem[]>(
     () => (doc?.categories ?? []).flatMap(category => [
@@ -91,60 +198,26 @@ export default function CognitiveAssetsPage() {
     [doc],
   );
 
-  const editingSection = useMemo(() => {
-    if (!doc || !editingSectionId || !editingCategoryId) return null;
-    const category = doc.categories.find(item => item.id === editingCategoryId);
-    return category?.sections.find(item => item.id === editingSectionId) ?? null;
-  }, [doc, editingCategoryId, editingSectionId]);
-
-  const hasUnsavedChanges = Boolean(editingSection && editingContent !== editingSection.content);
-
-  const blocker = useBlocker(({ currentLocation, nextLocation }) => (
-    hasUnsavedChanges && currentLocation.pathname !== nextLocation.pathname
-  ));
-
   useEffect(() => {
-    if (blocker.state !== 'blocked') return;
-    const confirmed = window.confirm('当前章节有未保存内容，确认离开吗？');
-    if (confirmed) {
-      blocker.proceed();
-    } else {
-      blocker.reset();
-    }
-  }, [blocker]);
-
-  useEffect(() => {
-    if (!hasUnsavedChanges) return undefined;
-    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
-      event.preventDefault();
-      event.returnValue = '';
-    };
-    window.addEventListener('beforeunload', handleBeforeUnload);
-    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
-  }, [hasUnsavedChanges]);
-
-  const load = async () => {
     if (!user?.id) return;
-    setLoading(true);
-    try {
-      const next = await ensureCognitiveAssetsExists(user.id);
-      setDoc(next);
-      if (!activeId && next.categories[0]) {
-        setActiveId(`category-${next.categories[0].id}`);
+    const load = async () => {
+      setLoading(true);
+      try {
+        const next = await getCognitiveAssets(user.id);
+        setDoc(next);
+        setActiveId(getFirstTocId(next));
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : '加载认知资产失败');
+      } finally {
+        setLoading(false);
       }
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : '加载认知资产失败');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
+    };
     void load();
   }, [user?.id]);
 
   useEffect(() => {
-    if (!doc) return;
+    observerRef.current?.disconnect();
+    if (!doc || tocItems.length === 0) return undefined;
     const obs = new IntersectionObserver(
       entries => {
         const visible = entries
@@ -164,91 +237,59 @@ export default function CognitiveAssetsPage() {
     return () => obs.disconnect();
   }, [doc, tocItems]);
 
-  const handleEdit = (categoryId: string, sectionId: string) => {
-    if (editingSectionId && editingSectionId !== sectionId && hasUnsavedChanges) {
-      const confirmed = window.confirm('当前章节有未保存内容，确认切换编辑章节吗？');
-      if (!confirmed) return;
-    }
-    const category = doc?.categories.find(item => item.id === categoryId);
-    const section = category?.sections.find(item => item.id === sectionId);
-    if (!section) return;
-    setEditingCategoryId(categoryId);
-    setEditingSectionId(sectionId);
-    setEditingContent(section.content);
+  const openFilePicker = () => {
+    if (importing) return;
+    fileInputRef.current?.click();
   };
 
-  const handleCancel = () => {
-    if (hasUnsavedChanges) {
-      const confirmed = window.confirm('丢弃当前章节的未保存修改，确认吗？');
-      if (!confirmed) return;
-    }
-    setEditingCategoryId(null);
-    setEditingSectionId(null);
-    setEditingContent('');
-  };
-
-  const handleSave = async () => {
-    if (!user?.id || !editingSectionId || !editingCategoryId) return;
-    if (!editingContent.trim()) {
-      toast.error('章节内容不能为空');
+  const handleFile = async (file: File | null | undefined) => {
+    if (!file || !user?.id) return;
+    if (!isSupportedCognitiveAssetFile(file)) {
+      toast.error('仅支持上传 PDF、Word（doc/docx）或 TXT 文件');
       return;
     }
-    setSaving(true);
+
+    setImporting(true);
     try {
-      await updateCognitiveAssetSection(user.id, editingCategoryId, editingSectionId, editingContent);
-      toast.success('章节已保存');
-      setEditingCategoryId(null);
-      setEditingSectionId(null);
-      setEditingContent('');
-      await load();
+      const next = await buildCognitiveAssetsDocFromFile(file);
+      await replaceCognitiveAssetsDoc(user.id, next);
+      setDoc(next);
+      setActiveId(getFirstTocId(next));
+      toast.success('文档已生成认知资产阅读页');
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : '保存失败');
+      toast.error(error instanceof Error ? error.message : '文档生成失败');
     } finally {
-      setSaving(false);
+      setImporting(false);
+      setDragActive(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
     }
   };
 
-  const handleResetSection = async (categoryId: string, sectionId: string) => {
-    if (!user?.id) return;
-    const confirmed = window.confirm('重置后将丢失你对该节的所有自定义内容，确认？');
-    if (!confirmed) return;
-    setSaving(true);
-    try {
-      await resetCognitiveAssetSection(user.id, categoryId, sectionId);
-      if (editingSectionId === sectionId) {
-        setEditingCategoryId(null);
-        setEditingSectionId(null);
-        setEditingContent('');
-      }
-      toast.success('该节已恢复初始内容');
-      await load();
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : '重置章节失败');
-    } finally {
-      setSaving(false);
-    }
+  const handleDrop = (event: DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    if (importing) return;
+    void handleFile(event.dataTransfer.files[0]);
   };
 
-  const handleResetAll = async () => {
-    if (!user?.id) return;
-    setSaving(true);
-    try {
-      await resetAllCognitiveAssets(user.id);
-      setEditingCategoryId(null);
-      setEditingSectionId(null);
-      setEditingContent('');
-      setResetAllToken('');
-      toast.success('认知资产已恢复为初始内容');
-      await load();
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : '重置全部失败');
-    } finally {
-      setSaving(false);
-    }
+  const handleDragOver = (event: DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    if (!importing) setDragActive(true);
+  };
+
+  const handleDragLeave = () => {
+    setDragActive(false);
   };
 
   return (
     <div className="min-h-screen bg-background text-foreground">
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept={DOCUMENT_ACCEPT}
+        className="hidden"
+        onChange={event => void handleFile(event.target.files?.[0])}
+      />
+
       <header className="sticky top-0 z-20 bg-background/95 backdrop-blur-sm border-b border-border">
         <div className="px-6 py-3 max-w-[1280px] mx-auto flex items-center gap-3">
           <Button variant="ghost" size="sm" className="h-8 px-2" onClick={() => nav(-1)}>
@@ -272,36 +313,26 @@ export default function CognitiveAssetsPage() {
           </div>
           <div className="min-w-0">
             <h1 className="text-[14px] font-medium">认知资产</h1>
-            <p className="text-[11px] text-muted-foreground">{doc?.meta.subtitle ?? '交易底层认知体系 · 道-法-术-心'}</p>
+            <p className="truncate text-[11px] text-muted-foreground">
+              {doc?.meta.subtitle ?? '上传 PDF / Word / TXT 自动生成阅读页'}
+            </p>
           </div>
           <div className="ml-auto">
-            <AlertDialog>
-              <AlertDialogTrigger asChild>
-                <Button variant="ghost" size="sm" className="h-8 px-2 text-muted-foreground hover:text-[#F6465D]" disabled={loading || saving}>
-                  <RotateCcw className="h-4 w-4 mr-1" />
-                  重置全部为初始内容
-                </Button>
-              </AlertDialogTrigger>
-              <AlertDialogContent className="border-[#F6465D]/40">
-                <AlertDialogHeader>
-                  <AlertDialogTitle>重置全部认知资产</AlertDialogTitle>
-                  <AlertDialogDescription className="leading-6">
-                    此操作将丢弃你对所有 sections 的自定义内容，完全恢复为初始的“道-法-术-心”框架。这个操作不可撤销。请输入“重置”解锁确认按钮。
-                  </AlertDialogDescription>
-                </AlertDialogHeader>
-                <Input value={resetAllToken} onChange={event => setResetAllToken(event.target.value)} placeholder="请输入：重置" />
-                <AlertDialogFooter>
-                  <AlertDialogCancel onClick={() => setResetAllToken('')}>取消</AlertDialogCancel>
-                  <AlertDialogAction
-                    onClick={() => void handleResetAll()}
-                    disabled={resetAllToken !== '重置' || saving}
-                    className="bg-[#F6465D] text-white hover:bg-[#F6465D]/90 disabled:opacity-50"
-                  >
-                    确认重置全部
-                  </AlertDialogAction>
-                </AlertDialogFooter>
-              </AlertDialogContent>
-            </AlertDialog>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-8 px-2 text-muted-foreground hover:text-[#F0B90B]"
+              onClick={openFilePicker}
+              disabled={loading || importing}
+            >
+              {importing ? (
+                <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+              ) : (
+                <Upload className="h-4 w-4 mr-1" />
+              )}
+              上传文档
+            </Button>
           </div>
         </div>
       </header>
@@ -318,44 +349,50 @@ export default function CognitiveAssetsPage() {
             <div className="rounded border border-border bg-card p-6 text-[13px] text-muted-foreground">
               正在加载认知资产...
             </div>
-          ) : !doc ? (
-            <div className="rounded border border-[#F6465D]/30 bg-[#F6465D]/5 p-6 text-[13px] text-muted-foreground">
-              认知资产加载失败，请刷新后重试。
-            </div>
           ) : (
-            doc.categories.map(category => (
-              <section key={category.id} id={`category-${category.id}`} className="scroll-mt-24 space-y-4">
-                <div className="space-y-2">
-                  <div className="flex items-center gap-3">
-                    <span
-                      className="inline-block w-1 h-6 rounded"
-                      style={{ background: CATEGORY_ACCENT[category.id] ?? '#F0B90B' }}
-                    />
-                    <h2 className="text-[20px] font-medium text-foreground">{category.title}</h2>
-                  </div>
-                  <div className="text-[12px] text-muted-foreground">{category.subtitle}</div>
-                  <p className="text-[12px] italic leading-6 text-muted-foreground">{category.intro}</p>
-                </div>
+            <>
+              <UploadPanel
+                hasDocument={Boolean(doc)}
+                importing={importing}
+                dragActive={dragActive}
+                onChoose={openFilePicker}
+                onDrop={handleDrop}
+                onDragOver={handleDragOver}
+                onDragLeave={handleDragLeave}
+              />
 
-                <div>
-                  {category.sections.map(section => (
-                    <CognitiveAssetSection
-                      key={section.id}
-                      categoryId={category.id}
-                      section={section}
-                      isEditing={editingSectionId === section.id}
-                      editingContent={editingSectionId === section.id ? editingContent : section.content}
-                      saving={saving}
-                      onEdit={handleEdit}
-                      onChange={setEditingContent}
-                      onSave={() => void handleSave()}
-                      onCancel={handleCancel}
-                      onReset={(nextCategoryId, nextSectionId) => void handleResetSection(nextCategoryId, nextSectionId)}
-                    />
-                  ))}
-                </div>
-              </section>
-            ))
+              {!doc ? (
+                <section className="scroll-mt-20">
+                  <SectionTitle accent="#F0B90B">等待上传</SectionTitle>
+                  <div className="space-y-3">
+                    <p className="text-[14px] leading-relaxed text-foreground/90">
+                      认知资产现在使用文档上传模式。选择或拖入 PDF、Word、TXT 后，系统会自动生成目录与阅读正文。
+                    </p>
+                  </div>
+                </section>
+              ) : (
+                doc.categories.map((category, categoryIndex) => (
+                  <section key={category.id} id={`category-${category.id}`} className="scroll-mt-24">
+                    <SectionTitle accent={CATEGORY_ACCENTS[categoryIndex % CATEGORY_ACCENTS.length]}>
+                      {category.title}
+                    </SectionTitle>
+                    <div className="space-y-2">
+                      <p className="text-[12px] text-muted-foreground">{category.subtitle}</p>
+                      <p className="text-[12px] italic leading-6 text-muted-foreground">{category.intro}</p>
+                    </div>
+
+                    <div className="mt-6 space-y-10">
+                      {category.sections.map(section => (
+                        <section key={section.id} id={section.id} className="scroll-mt-24">
+                          <h3 className="text-[16px] font-medium text-foreground mb-3">{section.title}</h3>
+                          <MarkdownArticle content={section.content} />
+                        </section>
+                      ))}
+                    </div>
+                  </section>
+                ))
+              )}
+            </>
           )}
         </main>
       </div>

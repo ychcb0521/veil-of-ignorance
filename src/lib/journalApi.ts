@@ -1870,6 +1870,13 @@ export async function ensureCognitiveAssetsExists(userId: string): Promise<Cogni
   return initial;
 }
 
+export async function replaceCognitiveAssetsDoc(userId: string, doc: CognitiveAssetsDoc): Promise<void> {
+  if (!isCognitiveAssetsDoc(doc)) {
+    throw new Error('认知资产文档格式无效');
+  }
+  await writeCognitiveAssetsDoc(userId, doc);
+}
+
 function updateSectionContent(
   doc: CognitiveAssetsDoc,
   categoryId: string,
