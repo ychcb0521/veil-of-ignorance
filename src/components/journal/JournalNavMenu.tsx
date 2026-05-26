@@ -23,7 +23,6 @@ interface NavItem {
   label: string;
   action: () => void;
   isActive: () => boolean;
-  badge?: string;
 }
 
 interface Props {
@@ -41,7 +40,6 @@ function useNavItems(
       key: 'cognitive-assets',
       icon: BookMarked,
       label: '认知资产',
-      badge: '新',
       action: () => nav('/cognitive-assets'),
       isActive: () => loc.pathname === '/cognitive-assets',
     },
@@ -53,7 +51,7 @@ function useNavItems(
         !['/journal/campaigns', '/journal/insights', '/journal/rules', '/journal/tags'].includes(loc.pathname)),
     },
     {
-      key: 'campaigns', icon: Layers, label: '交易战役', badge: '新',
+      key: 'campaigns', icon: Layers, label: '交易战役',
       action: () => nav('/journal/campaigns'),
       isActive: () => loc.pathname === '/journal/campaigns' || loc.pathname.startsWith('/journal/campaigns/'),
     },
@@ -100,9 +98,6 @@ export function JournalNavMenu({ onOpenAssets }: Props) {
                 >
                   {active ? <CheckCheck className="h-3.5 w-3.5 text-[#F0B90B]" /> : <Icon className="h-3.5 w-3.5 text-muted-foreground" />}
                   <span className="flex-1">{it.label}</span>
-                  {it.badge ? (
-                    <span className="px-1.5 py-0.5 rounded bg-[#F0B90B] text-black text-[10px] leading-none">{it.badge}</span>
-                  ) : null}
                 </DropdownMenuItem>
               );
             })}
@@ -139,9 +134,6 @@ export function JournalNavMenu({ onOpenAssets }: Props) {
                   >
                     {active ? <CheckCheck className="h-4 w-4 text-[#F0B90B]" /> : <Icon className="h-4 w-4 text-muted-foreground" />}
                     <span className="flex-1 text-left">{it.label}</span>
-                    {it.badge ? (
-                      <span className="px-1.5 py-0.5 rounded bg-[#F0B90B] text-black text-[10px] leading-none">{it.badge}</span>
-                    ) : null}
                   </button>
                 );
               })}
