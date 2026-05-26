@@ -3,7 +3,7 @@
  */
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { Tag } from 'lucide-react';
+import { Maximize2, Minimize2, Tag } from 'lucide-react';
 import { BackButton } from '@/components/journal/BackButton';
 import { toast } from 'sonner';
 import { useAuth } from '@/contexts/AuthContext';
@@ -83,6 +83,10 @@ export default function JournalListPage() {
     () => (data ? computeMetaAlerts(clusters, filteredJournals) : []),
     [data, clusters, filteredJournals],
   );
+  const unreviewedCount = useMemo(
+    () => (data?.journals ?? []).filter(journal => journal.trade_record_id && !journal.post_reviewed_at).length,
+    [data?.journals],
+  );
 
   const rangeDays = useMemo(() => {
     const r = params.get('range') ?? '30d';
@@ -116,9 +120,16 @@ export default function JournalListPage() {
     <div className="min-h-screen bg-background text-foreground">
       {/* Header */}
       <header className="sticky top-0 z-20 bg-background/95 backdrop-blur-sm border-b border-border">
-        <div className="px-6 py-3 max-w-[1600px] mx-auto flex items-center gap-3">
-          <BackButton />
-          <h1 className="text-[14px] font-medium">错题集</h1>
+        <div className="px-6 py-3 max-w-[1600px] mx-auto flex flex-wrap items-center gap-3">
+          <div className="flex items-center gap-3 min-w-0">
+            <BackButton />
+            <div className="min-w-0">
+              <h1 className="text-[14px] font-medium leading-tight">错题集</h1>
+              <div className="mt-0.5 truncate text-[10px] text-muted-foreground">
+                {filteredJournals.length} 条记录 · {clusters.length} 个模式 · {unreviewedCount} 条未评价
+              </div>
+            </div>
+          </div>
           <div className="flex-1" />
           <Tabs value={view} onValueChange={setView}>
             <TabsList className="h-8 bg-card">
@@ -128,7 +139,7 @@ export default function JournalListPage() {
             </TabsList>
           </Tabs>
           <Link to="/journal/tags"
-            className="flex items-center gap-1 text-[12px] text-muted-foreground hover:text-foreground shrink-0">
+            className="inline-flex h-8 items-center gap-1.5 rounded border border-border bg-card px-3 text-[12px] text-muted-foreground hover:bg-accent hover:text-foreground shrink-0">
             <Tag className="w-3.5 h-3.5" /> 标签字典
           </Link>
         </div>
@@ -158,26 +169,29 @@ export default function JournalListPage() {
 
             {view === 'patterns' && (
               <>
-                <div className="flex items-center justify-between mb-2">
-                  <div className="flex items-center gap-2 text-[11px]">
-                    <span className="text-muted-foreground">排序</span>
-                    {([
-                      ['severity', '严重度'],
-                      ['frequency', '频次'],
-                      ['pnl', 'P&L'],
-                      ['recent', '最近'],
-                    ] as [SortKey, string][]).map(([k, l]) => (
-                      <button key={k} onClick={() => setSortKey(k)}
-                        className={`h-6 px-2 rounded ${sortKey === k ? 'bg-[#F0B90B] text-black' : 'bg-muted text-foreground hover:bg-[#363c45]'}`}>
-                        {l}
-                      </button>
-                    ))}
+                <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                  <div className="text-[11px] text-muted-foreground">
+                    {clusters.length === 0 ? '暂无模式' : `当前 ${clusters.length} 个模式，来自 ${filteredJournals.length} 条记录`}
                   </div>
-                  <div className="flex items-center gap-2 text-[11px]">
-                    <Button size="sm" variant="ghost" className="h-6 text-[11px]"
-                      onClick={() => setExpandAllSignal(true)}>全部展开</Button>
-                    <Button size="sm" variant="ghost" className="h-6 text-[11px]"
-                      onClick={() => setExpandAllSignal(false)}>全部收起</Button>
+                  <div className="flex items-center gap-1.5">
+                    <select
+                      value={sortKey}
+                      onChange={event => setSortKey(event.target.value as SortKey)}
+                      className="h-8 rounded border border-border bg-card px-2 text-[11px]"
+                    >
+                      <option value="severity">严重度</option>
+                      <option value="frequency">频次</option>
+                      <option value="pnl">P&L</option>
+                      <option value="recent">最近</option>
+                    </select>
+                    <Button size="sm" variant="ghost" className="h-8 w-8 p-0" title="全部展开"
+                      onClick={() => setExpandAllSignal(true)}>
+                      <Maximize2 className="h-3.5 w-3.5" />
+                    </Button>
+                    <Button size="sm" variant="ghost" className="h-8 w-8 p-0" title="全部收起"
+                      onClick={() => setExpandAllSignal(false)}>
+                      <Minimize2 className="h-3.5 w-3.5" />
+                    </Button>
                   </div>
                 </div>
 

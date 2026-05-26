@@ -60,31 +60,41 @@ export function JournalStatsSidebar({ journals, assignments, clusters, rangeDays
   const maxR = Math.max(1, ...scatter.map(s => Math.abs(s.y)));
 
   return (
-    <aside className="bg-card border border-border rounded">
-      <Section title={`周期内（${rangeDays} 天）`}>
-        <div className="grid grid-cols-2 gap-3">
+    <aside className="overflow-hidden rounded border border-border bg-card">
+      <div className="border-b border-border px-4 py-3">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <div className="text-[12px] font-medium">关键指标</div>
+            <div className="text-[10px] text-muted-foreground">近 {rangeDays} 天</div>
+          </div>
+          <div className={`font-mono text-[16px] ${pnlColor(outcome.expectancy)}`}>{outcome.expectancy.toFixed(2)}R</div>
+        </div>
+        <div className="mt-3 grid grid-cols-2 gap-3">
           <Metric label="总交易" value={String(journals.length)} />
           <Metric label="总标签数" value={String(assignments.length)} />
           <Metric label="胜率" value={`${(outcome.win_rate * 100).toFixed(0)}%`} />
           <Metric label="期望 R̄" value={outcome.expectancy.toFixed(2)} color={pnlColor(outcome.expectancy)} />
-          {mostFatal && (
-            <div className="col-span-2">
-              <div className="text-[10px] text-muted-foreground">最致命模式</div>
-              <div className="text-[12px] font-medium truncate">{mostFatal.pattern.pattern_name}</div>
-              <div className={`text-[11px] font-mono ${pnlColor(mostFatal.stats.total_pnl)}`}>
-                {fmtPnl(mostFatal.stats.total_pnl)} USDT
-              </div>
-            </div>
-          )}
-          {mostFrequent && (
-            <div className="col-span-2">
-              <div className="text-[10px] text-muted-foreground">最高频模式</div>
-              <div className="text-[12px] font-medium truncate">{mostFrequent.pattern.pattern_name}</div>
-              <div className="text-[11px] font-mono text-muted-foreground">×{mostFrequent.stats.occurrence_count}</div>
-            </div>
-          )}
         </div>
-      </Section>
+        {(mostFatal || mostFrequent) && (
+          <div className="mt-3 space-y-2 border-t border-border/60 pt-3">
+            {mostFatal && (
+              <CompactInsight
+                label="最致命"
+                title={mostFatal.pattern.pattern_name}
+                value={`${fmtPnl(mostFatal.stats.total_pnl)} USDT`}
+                color={pnlColor(mostFatal.stats.total_pnl)}
+              />
+            )}
+            {mostFrequent && (
+              <CompactInsight
+                label="最高频"
+                title={mostFrequent.pattern.pattern_name}
+                value={`×${mostFrequent.stats.occurrence_count}`}
+              />
+            )}
+          </div>
+        )}
+      </div>
 
       <Section title="心态-收益">
         <svg viewBox="0 0 240 100" className="w-full h-32">
@@ -159,10 +169,13 @@ export function JournalStatsSidebar({ journals, assignments, clusters, rangeDays
 
 function Section({ title, children, lastBlock }: { title: string; children: React.ReactNode; lastBlock?: boolean }) {
   return (
-    <div className={`px-4 py-3 ${lastBlock ? '' : 'border-b border-border'}`}>
-      <div className="text-[11px] text-muted-foreground mb-2">{title}</div>
-      {children}
-    </div>
+    <details className={`group ${lastBlock ? '' : 'border-b border-border'}`}>
+      <summary className="flex cursor-pointer list-none items-center justify-between px-4 py-3 text-[11px] text-muted-foreground hover:text-foreground">
+        <span>{title}</span>
+        <span className="text-[13px] transition-transform group-open:rotate-45">+</span>
+      </summary>
+      <div className="px-4 pb-3">{children}</div>
+    </details>
   );
 }
 
@@ -171,6 +184,16 @@ function Metric({ label, value, color }: { label: string; value: string; color?:
     <div>
       <div className="text-[10px] text-muted-foreground">{label}</div>
       <div className={`font-mono text-[14px] ${color ?? 'text-foreground'}`}>{value}</div>
+    </div>
+  );
+}
+
+function CompactInsight({ label, title, value, color }: { label: string; title: string; value: string; color?: string }) {
+  return (
+    <div className="grid grid-cols-[52px_1fr_auto] items-center gap-2 text-[11px]">
+      <span className="text-muted-foreground">{label}</span>
+      <span className="truncate font-medium">{title}</span>
+      <span className={`font-mono ${color ?? 'text-muted-foreground'}`}>{value}</span>
     </div>
   );
 }
