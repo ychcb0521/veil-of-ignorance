@@ -412,22 +412,29 @@ export default function GuidePage() {
 
             <section id="s4-4" className="scroll-mt-20">
               <SubTitle>4.4 规则</SubTitle>
-              <P>规则是复盘闭环的输出。合格规则必须具体、可执行、可检查。</P>
+              <P>规则不是独立写出来的口号，而是复盘系统的输出。它来自已发生的交易错误，并被写回下一次开仓前的 checklist。</P>
+              <P>规则生成有三条来源：</P>
               <div className="overflow-x-auto">
                 <table className="w-full text-[11px] my-3 border border-border rounded overflow-hidden">
                   <thead className="bg-muted/50">
                     <tr>
-                      <th className="text-left px-3 py-2 font-medium text-foreground text-[10px]">不合格</th>
-                      <th className="text-left px-3 py-2 font-medium text-foreground text-[10px]">合格</th>
+                      <th className="text-left px-3 py-2 font-medium text-foreground text-[10px]">来源</th>
+                      <th className="text-left px-3 py-2 font-medium text-foreground text-[10px]">触发条件</th>
+                      <th className="text-left px-3 py-2 font-medium text-foreground text-[10px]">生成方式</th>
                     </tr>
                   </thead>
                   <tbody>
-                    <tr><td className="px-3 py-2 border-t border-border">不要冲动交易</td><td className="px-3 py-2 border-t border-border">心态自评小于 3 时，不允许开主力单，除非写出外部结构证据</td></tr>
-                    <tr><td className="px-3 py-2 border-t border-border">注意止损</td><td className="px-3 py-2 border-t border-border">开仓前必须填写最大亏损，且不得超过账户的既定风险上限</td></tr>
-                    <tr><td className="px-3 py-2 border-t border-border">别追高</td><td className="px-3 py-2 border-t border-border">突破后若 3 根 K 线内放量滞涨，不允许在当前位置追加主力仓</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border">六步深度分析</td><td className="px-3 py-2 border-t border-border">用户完成一笔交易的根因分析</td><td className="px-3 py-2 border-t border-border">Step 6 将结论转写为可检查规则，并可加入 checklist</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border">Critical 错误模式</td><td className="px-3 py-2 border-t border-border">同一 pattern 近期多次出现且平均亏损</td><td className="px-3 py-2 border-t border-border">系统强制弹出规则写入流程，避免重复错误继续裸奔</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border">手动补充</td><td className="px-3 py-2 border-t border-border">用户发现某条原则需要前置到开仓前</td><td className="px-3 py-2 border-t border-border">在规则页直接写入，并决定是否启用、是否进入 checklist</td></tr>
                   </tbody>
                 </table>
               </div>
+              <P>生成原理是：先用错题集把单笔错误归入 pattern，再用复盘分析找出可操作的防错条件，最后把这个条件写成下次开仓前必须检查的规则。</P>
+              <P>一条规则只有在“启用”且“加入 checklist”后，才会进入开仓快照；否则它只是记录，不会参与下单前约束。</P>
+              <Highlight>
+                规则的价值不在于写得完整，而在于能否前置到下一次决策点，并在元监控中看到对应错误频次下降。
+              </Highlight>
             </section>
           </section>
 
