@@ -2,8 +2,6 @@ import { useState } from 'react';
 import { Play, Pause, Square, Clock, Globe, Split, Lock, BookmarkX, Brain, Zap } from 'lucide-react';
 import { toast } from 'sonner';
 import { formatUTC8 } from '@/lib/timeFormat';
-import { findUnreviewedJournals } from '@/lib/journalApi';
-import { useAuth } from '@/contexts/AuthContext';
 import {
   Dialog,
   DialogContent,
@@ -51,9 +49,7 @@ export function TimeControl({
   originTime, coinTimelines = {}, onSymbolChange, activeSymbol,
 }: Props) {
   const ctx = useTradingContext();
-  const { user } = useAuth();
   const [noEntryOpen, setNoEntryOpen] = useState(false);
-  const [switchingMode, setSwitchingMode] = useState(false);
   const [noEntrySimTime, setNoEntrySimTime] = useState<number>(Date.now());
   const noEntrySymbol = activeSymbol || 'BTCUSDT';
 
@@ -179,38 +175,17 @@ export function TimeControl({
 
   /**
    * Switch between 决策记录 ↔ 直接交易 modes.
-   * Going INTO 直接交易 while unreviewed decision-mode journals exist is blocked —
-   * otherwise it becomes a back-door to skip post-trade review.
+   * Both directions are unconditional — no review-pending gate. Unreviewed journals
+   * (if any) simply remain pending and can be reviewed manually from /journal later.
    */
-  const handleTradingModeClick = async (next: 'decision' | 'direct') => {
-    if (next === ctx.tradingMode || switchingMode) return;
-    if (next === 'direct' && user) {
-      try {
-        setSwitchingMode(true);
-        const list = await findUnreviewedJournals(user.id);
-        // Filter to journals whose position is no longer open (i.e., truly pending review)
-        const openIds = new Set<string>();
-        for (const ps of Object.values(ctx.positionsMap)) for (const p of ps) openIds.add(p.id);
-        const stillPending = list.filter(j => j.trade_record_id != null && !openIds.has(j.trade_record_id));
-        if (stillPending.length > 0) {
-          toast.error('无法切换到直接交易模式', {
-            description: `还有 ${stillPending.length} 笔已平仓未评价交易，必须先完成评价。`,
-            duration: 5000,
-          });
-          return;
-        }
-      } catch (e) {
-        console.warn('[TimeControl] unreviewed check failed', e);
-      } finally {
-        setSwitchingMode(false);
-      }
-    }
+  const handleTradingModeClick = (next: 'decision' | 'direct') => {
+    if (next === ctx.tradingMode) return;
     ctx.setTradingMode(next);
     toast.message(
       next === 'direct' ? '已切换到直接交易模式' : '已切换到决策记录模式',
       {
         description: next === 'direct'
-          ? '下单不再弹出快照、平仓无需评价。错题集 / 元监控不会收录这些单。'
+          ? '下单不再弹出快照、平仓无需评价。错题集 / 元监控 不会收录这些单。'
           : '完整的开仓快照 + 平仓评价 + 错题集 + 元监控 全部生效。',
       },
     );
@@ -231,9 +206,8 @@ export function TimeControl({
       </button>
       <button
         onClick={() => handleTradingModeClick('direct')}
-        disabled={switchingMode}
         title="直接交易：跳过快照与评价，仍可在交易战役中归类，但不进错题集/元监控"
-        className={`flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium transition-all duration-100 ease-out active:scale-[0.97] disabled:opacity-50 ${
+        className={`flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium transition-all duration-100 ease-out active:scale-[0.97] ${
           ctx.tradingMode === 'direct'
             ? 'bg-[#F0B90B]/20 text-[#F0B90B]'
             : 'text-muted-foreground hover:text-foreground hover:bg-accent'
