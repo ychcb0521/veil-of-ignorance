@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { ChangeEvent } from 'react';
 import { toast } from 'sonner';
 import { Link, useNavigate } from 'react-router-dom';
@@ -10,7 +10,6 @@ import { LegRoleChip } from '@/components/journal/LegRoleChip';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { Input } from '@/components/ui/input';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
 import { useAuth } from '@/contexts/AuthContext';
 import { useTradingContext } from '@/contexts/TradingContext';
@@ -57,19 +56,18 @@ export default function JournalCampaignClassifyPage() {
   const [onlyClosed, setOnlyClosed] = useState(false);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [journals, setJournals] = useState<TradeJournal[]>([]);
-  const [orphanRecords, setOrphanRecords] = useState<TradeRecord[]>([]);
   const [campaignBundles, setCampaignBundles] = useState<CampaignBundle[]>([]);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [newDialogOpen, setNewDialogOpen] = useState(false);
   const [attachDialogOpen, setAttachDialogOpen] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
 
-  const loadData = async () => {
+  const loadData = useCallback(async () => {
     if (!user) return;
     setLoading(true);
     setLoadError(null);
     try {
-      const [{ journals: journalRows, orphanRecords: orphanRows }, campaigns] = await Promise.all([
+      const [{ journals: journalRows }, campaigns] = await Promise.all([
         listUnclassifiedItems(user.id, { includeClassified: true }),
         listAllCampaigns(user.id, { status: 'all' }),
       ]);
@@ -81,13 +79,7 @@ export default function JournalCampaignClassifyPage() {
       }));
 
       setJournals(journalRows);
-      setOrphanRecords(orphanRows);
       setCampaignBundles(bundles);
-      const validIds = new Set([
-        ...journalRows.map(journal => `j_${journal.id}`),
-        ...orphanRows.map(record => `r_${record.id}`),
-      ]);
-      setSelectedIds(prev => new Set([...prev].filter(id => validIds.has(id))));
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       setLoadError(message);
@@ -95,19 +87,37 @@ export default function JournalCampaignClassifyPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [user]);
 
   useEffect(() => {
     loadData();
-  }, [user]);
+  }, [loadData]);
 
   const campaignMap = useMemo(() => new Map(campaignBundles.map(bundle => [bundle.campaign.id, bundle.campaign])), [campaignBundles]);
+  const recordCampaignMap = useMemo(() => {
+    const next = new Map<string, TradeCampaign>();
+    campaignBundles.forEach(({ campaign }) => {
+      (campaign.actual_evolution ?? []).forEach(event => {
+        if (event.trade_record_id) next.set(event.trade_record_id, campaign);
+      });
+    });
+    return next;
+  }, [campaignBundles]);
+  const classifiableTradeHistory = useMemo(
+    () => tradeHistory.filter(record => record.action === 'CLOSE' || record.action === 'LIQUIDATION'),
+    [tradeHistory],
+  );
   const allItems = useMemo<ClassifiableItem[]>(
-    () => [
-      ...journals.map(journal => ({ id: `j_${journal.id}`, kind: 'journal' as const, journal })),
-      ...orphanRecords.map(record => ({ id: `r_${record.id}`, kind: 'orphanRecord' as const, record })),
-    ].sort((a, b) => itemTimeMs(b) - itemTimeMs(a)),
-    [journals, orphanRecords],
+    () => {
+      const journalRecordIds = new Set(journals.map(journal => journal.trade_record_id).filter((value): value is string => Boolean(value)));
+      return [
+        ...journals.map(journal => ({ id: `j_${journal.id}`, kind: 'journal' as const, journal })),
+        ...classifiableTradeHistory
+          .filter(record => !journalRecordIds.has(record.id))
+          .map(record => ({ id: `r_${record.id}`, kind: 'orphanRecord' as const, record })),
+      ].sort((a, b) => itemTimeMs(b) - itemTimeMs(a));
+    },
+    [classifiableTradeHistory, journals],
   );
   const allCandidateJournals = useMemo(
     () => [...journals].sort((a, b) => new Date(b.pre_simulated_time).getTime() - new Date(a.pre_simulated_time).getTime()),
@@ -119,23 +129,16 @@ export default function JournalCampaignClassifyPage() {
         .sort((a, b) => a.localeCompare(b)),
     [allItems],
   );
-  const localTradeSymbols = useMemo(
-    () =>
-      [...new Set(tradeHistory.map(record => record.symbol?.trim()).filter((value): value is string => Boolean(value)))]
-        .sort((a, b) => a.localeCompare(b)),
-    [tradeHistory],
-  );
-  const localOnlySymbols = useMemo(
-    () => localTradeSymbols.filter(item => !availableSymbols.includes(item)),
-    [localTradeSymbols, availableSymbols],
-  );
   const suggestionMap = useMemo(
     () => new Map(suggestLegRoles(filteredForSuggestions(allCandidateJournals)).map(item => [item.journalId, item])),
     [allCandidateJournals],
   );
 
   const symbolScoped = useMemo(
-    () => allItems.filter(item => !symbol || itemSymbol(item) === symbol),
+    () => {
+      const normalized = symbol.trim().toUpperCase();
+      return allItems.filter(item => !normalized || itemSymbol(item).toUpperCase().includes(normalized));
+    },
     [allItems, symbol],
   );
   const filtered = useMemo(() => {
@@ -144,10 +147,11 @@ export default function JournalCampaignClassifyPage() {
       if (dateFrom && timeMs < new Date(`${dateFrom}T00:00:00`).getTime()) return false;
       if (dateTo && timeMs > new Date(`${dateTo}T23:59:59`).getTime()) return false;
       if (onlyUnclassified && item.kind === 'journal' && item.journal.campaign_id) return false;
+      if (onlyUnclassified && item.kind === 'orphanRecord' && recordCampaignMap.has(item.record.id)) return false;
       if (onlyClosed && item.kind === 'journal' && !item.journal.trade_record_id) return false;
       return true;
     });
-  }, [symbolScoped, dateFrom, dateTo, onlyUnclassified, onlyClosed]);
+  }, [symbolScoped, dateFrom, dateTo, onlyUnclassified, recordCampaignMap, onlyClosed]);
 
   const selectedItems = useMemo(
     () => filtered.filter(item => selectedIds.has(item.id)),
@@ -163,13 +167,18 @@ export default function JournalCampaignClassifyPage() {
   );
   const allCurrentSelected = filtered.length > 0 && filtered.every(item => selectedIds.has(item.id));
   const someCurrentSelected = filtered.some(item => selectedIds.has(item.id));
-  const allSelectedClassified = selectedItems.length > 0 && selectedItems.every(item => item.kind === 'journal' && !!item.journal.campaign_id);
+  const allSelectedClassified = selectedItems.length > 0 && selectedItems.every(item => (
+    item.kind === 'journal' ? !!item.journal.campaign_id : recordCampaignMap.has(item.record.id)
+  ));
   const activeCampaigns = useMemo(
-    () => campaignBundles.filter(bundle => !symbol || bundle.campaign.symbol === symbol),
+    () => {
+      const normalized = symbol.trim().toUpperCase();
+      return campaignBundles.filter(bundle => !normalized || bundle.campaign.symbol.includes(normalized));
+    },
     [campaignBundles, symbol],
   );
   const filteredJournalCount = useMemo(
-    () => filtered.filter(item => item.kind === 'journal' && !item.journal.campaign_id).length,
+    () => filtered.filter(item => item.kind === 'journal').length,
     [filtered],
   );
   const filteredOrphanCount = useMemo(
@@ -179,32 +188,24 @@ export default function JournalCampaignClassifyPage() {
   const emptyReason = useMemo(() => {
     if (loadError) return `加载失败：${loadError}`;
     if (loading) return '正在加载可归类项…';
-    if (allItems.length === 0) {
-      if (tradeHistory.length > 0) {
-        return `当前筛选下没有可归类项。若本地已有历史成交但未显示，请先执行本批次 migration 并刷新 Supabase schema cache。`;
-      }
-      return '当前用户下没有可归类的 journals 或裸 records。';
-    }
-    if (!symbol) return '请先在上方选择标的。';
-    if (symbolScoped.length === 0) return `当前 symbol ${symbol} 下没有任何可归类项。`;
-    if (onlyUnclassified && symbolScoped.every(item => item.kind === 'orphanRecord' || !!item.journal.campaign_id)) {
-      return `当前 symbol ${symbol} 下没有未归类 journals，仅剩已归属项。`;
+    if (allItems.length === 0) return '仓位历史记录里还没有已平仓/爆仓记录。';
+    if (!symbol) return '输入或下拉选择标的后，会显示该币种所有时间段的仓位历史记录。';
+    if (symbolScoped.length === 0) return `当前输入 ${symbol} 没有匹配的仓位历史记录。`;
+    if (onlyUnclassified && symbolScoped.every(item => (
+      item.kind === 'journal' ? !!item.journal.campaign_id : recordCampaignMap.has(item.record.id)
+    ))) {
+      return `当前输入 ${symbol} 下没有未归类的仓位历史记录。`;
     }
     if (onlyClosed && symbolScoped.every(item => item.kind === 'orphanRecord' || !item.journal.trade_record_id)) {
       return `当前 symbol ${symbol} 下没有可平仓复核的项。`;
     }
     return '当前筛选条件过窄，请放宽日期范围或关闭部分筛选。';
-  }, [loadError, loading, allItems, tradeHistory.length, symbol, symbolScoped, onlyUnclassified, onlyClosed]);
+  }, [loadError, loading, allItems, symbol, symbolScoped, onlyUnclassified, onlyClosed, recordCampaignMap]);
 
   useEffect(() => {
-    if (!symbol && availableSymbols.length === 1) {
-      setSymbol(availableSymbols[0]);
-      return;
-    }
-    if (symbol && !availableSymbols.includes(symbol)) {
-      setSymbol('');
-    }
-  }, [availableSymbols, symbol]);
+    const validIds = new Set(allItems.map(item => item.id));
+    setSelectedIds(prev => new Set([...prev].filter(id => validIds.has(id))));
+  }, [allItems]);
 
   useEffect(() => {
     setFiltersOpen(isMobile);
@@ -212,7 +213,7 @@ export default function JournalCampaignClassifyPage() {
 
   const filterSummary = useMemo(() => {
     const parts: string[] = [];
-    parts.push(symbol || '全部标的');
+    parts.push(symbol.trim() || '全部标的');
     if (dateFrom || dateTo) {
       parts.push(`${dateFrom || '起始'} ~ ${dateTo || '今天'}`);
     } else {
@@ -272,29 +273,47 @@ export default function JournalCampaignClassifyPage() {
             </CollapsibleTrigger>
             <CollapsibleContent className="pt-3">
               <div className="bg-card border border-border rounded p-4 space-y-3">
-                <Select
-                  value={symbol}
-                  onValueChange={(value) => {
-                    setSymbol(value);
-                    collapseAfterFilterChange();
-                  }}
-                  disabled={availableSymbols.length === 0}
-                >
-                  <SelectTrigger className="h-9 text-[12px]">
-                    <SelectValue placeholder={availableSymbols.length === 0 ? '暂无可归类标的' : '请选择标的（批量操作必须同标的）'} />
-                  </SelectTrigger>
-                  <SelectContent className="z-[80]">
+                <div className="grid grid-cols-1 md:grid-cols-[1fr_240px] gap-2">
+                  <div className="relative">
+                    <Input
+                      value={symbol}
+                      list="campaign-symbol-options"
+                      onChange={(e: ChangeEvent<HTMLInputElement>) => setSymbol(e.target.value.trim().toUpperCase())}
+                      placeholder="输入标的名称，例如 RAVEUSDT"
+                      className="h-9 pr-16 text-[12px]"
+                    />
+                    {symbol ? (
+                      <button
+                        type="button"
+                        onClick={() => setSymbol('')}
+                        className="absolute right-2 top-1/2 -translate-y-1/2 rounded px-2 py-1 text-[10px] text-muted-foreground hover:bg-accent"
+                      >
+                        清空
+                      </button>
+                    ) : null}
+                    <datalist id="campaign-symbol-options">
+                      {availableSymbols.map(item => (
+                        <option key={item} value={item} />
+                      ))}
+                    </datalist>
+                  </div>
+                  <select
+                    value={availableSymbols.includes(symbol) ? symbol : ''}
+                    onChange={(e: ChangeEvent<HTMLSelectElement>) => {
+                      setSymbol(e.target.value);
+                      collapseAfterFilterChange();
+                    }}
+                    className="h-9 rounded border border-border bg-background px-3 text-[12px]"
+                  >
+                    <option value="">{availableSymbols.length === 0 ? '暂无仓位历史标的' : '从历史标的下拉选择'}</option>
                     {availableSymbols.map(item => (
-                      <SelectItem key={item} value={item}>
-                        {item}
-                      </SelectItem>
+                      <option key={item} value={item}>{item}</option>
                     ))}
-                  </SelectContent>
-                </Select>
+                  </select>
+                </div>
                 {availableSymbols.length === 0 ? (
                   <div className="rounded border border-[#F0B90B]/30 bg-[#F0B90B]/8 px-3 py-2 text-[11px] text-muted-foreground">
-                    当前没有可归类标的。
-                    {localOnlySymbols.length > 0 ? ` 检测到本地成交历史标的：${localOnlySymbols.join(' / ')}，这些历史成交会在本批次以“裸 record”形式直接归类。` : ''}
+                    当前仓位历史记录里没有已平仓/爆仓记录。
                   </div>
                 ) : null}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
@@ -344,7 +363,7 @@ export default function JournalCampaignClassifyPage() {
           </Collapsible>
 
           <div className="text-[10px] text-muted-foreground">
-            勾选属于同一战役的 journals 或裸 records，然后在底部操作栏选择归类方式。
+            输入或下拉选择标的后，勾选该币种属于同一战役的一系列仓位历史记录。
           </div>
         </div>
       </div>
@@ -353,7 +372,7 @@ export default function JournalCampaignClassifyPage() {
         <div className="text-[11px] text-muted-foreground py-2">
           {filteredJournalCount === 0 && filteredOrphanCount === 0
             ? '该筛选条件下无可归类项'
-            : `共 ${filteredJournalCount} 个未归类 journals · ${filteredOrphanCount} 个裸 records（无 journal 的历史成交）`}
+            : `共 ${filteredJournalCount} 个 journal · ${filteredOrphanCount} 条仓位历史记录`}
         </div>
         <section className="bg-card border border-border rounded overflow-hidden">
           {!symbol ? (
@@ -431,7 +450,7 @@ export default function JournalCampaignClassifyPage() {
                         </div>
                         <div>
                           <span className={`inline-flex items-center rounded px-2 py-0.5 text-[10px] ${item.kind === 'journal' ? 'bg-[#0ECB81]/15 text-[#0ECB81]' : 'bg-[#F0B90B]/15 text-[#F0B90B]'}`}>
-                            {item.kind === 'journal' ? 'journal' : '裸 record'}
+                            {item.kind === 'journal' ? 'journal' : '仓位历史'}
                           </span>
                         </div>
                         <div>{fmtTime(item.kind === 'journal' ? item.journal.pre_simulated_time : item.record.openTime)}</div>
@@ -445,7 +464,13 @@ export default function JournalCampaignClassifyPage() {
                         <div className="min-w-0" onClick={event => event.stopPropagation()}>
                           <div className="flex items-center gap-2 min-w-0">
                             {item.kind === 'orphanRecord' ? (
-                              <span className="text-muted-foreground">无 journal / 未归类</span>
+                              recordCampaignMap.has(item.record.id) ? (
+                                <Link to={`/journal/campaigns/${recordCampaignMap.get(item.record.id)?.id}`} className="truncate text-[#5BA3FF] hover:underline">
+                                  {recordCampaignMap.get(item.record.id)?.title}
+                                </Link>
+                              ) : (
+                                <span className="text-muted-foreground">仓位历史记录 / 未归类</span>
+                              )
                             ) : !journal.campaign_id || !campaign ? (
                               <span className="text-muted-foreground">未归类</span>
                             ) : (
@@ -483,7 +508,7 @@ export default function JournalCampaignClassifyPage() {
           <div className="max-w-[1600px] mx-auto flex flex-wrap items-center justify-between gap-3">
             <div className="text-[12px]">
               已选 {selectedItems.length} 项
-              {selectedOrphanRecords.length > 0 ? ` · 含 ${selectedOrphanRecords.length} 个裸 records` : ''}
+              {selectedOrphanRecords.length > 0 ? ` · 含 ${selectedOrphanRecords.length} 条仓位历史记录` : ''}
             </div>
             <div className="flex flex-wrap items-center gap-2">
               <button
@@ -502,10 +527,10 @@ export default function JournalCampaignClassifyPage() {
               </button>
               <button
                 type="button"
-                disabled={!allSelectedClassified}
+                disabled={!allSelectedClassified || selectedJournals.length !== selectedItems.length}
                 className="h-8 rounded bg-muted px-3 text-[12px] disabled:opacity-50"
                 onClick={async () => {
-                  if (!allSelectedClassified) return;
+                  if (!allSelectedClassified || selectedJournals.length !== selectedItems.length) return;
                   if (!window.confirm(`确认解除这 ${selectedJournals.length} 条 journal 的战役归属吗？`)) return;
                   try {
                     for (const journal of selectedJournals) {

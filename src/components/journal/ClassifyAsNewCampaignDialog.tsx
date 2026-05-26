@@ -12,6 +12,7 @@ import {
   batchBackfillAndAttach,
   createCampaign,
   createCampaignFromJournals,
+  createCampaignFromTradeRecords,
   deleteCampaign,
   suggestLegRoles,
   validateClassification,
@@ -116,7 +117,7 @@ export function ClassifyAsNewCampaignDialog({ open, onOpenChange, items, onCreat
     [ordered],
   );
   const suggestions = useMemo<ClassifiableSuggestion[]>(
-    () => ordered.map(item => {
+    () => ordered.map((item, index) => {
       if (item.kind === 'journal') {
         const suggestion = journalSuggestions.get(item.journal.id);
         return suggestion
@@ -135,9 +136,9 @@ export function ClassifyAsNewCampaignDialog({ open, onOpenChange, items, onCreat
       }
       return {
         itemId: item.id,
-        suggestedRole: 'main_open',
+        suggestedRole: index === 0 ? 'main_open' : 'standalone',
         confidence: 'low',
-        reason: '裸 record 缺少开仓快照，默认建议先作为 main_open 归类',
+        reason: index === 0 ? '第一条仓位历史记录默认作为 main_open' : '后续仓位历史记录默认作为 standalone',
       };
     }),
     [journalSuggestions, ordered],
@@ -162,6 +163,11 @@ export function ClassifyAsNewCampaignDialog({ open, onOpenChange, items, onCreat
     setStrategyTemplate('main_dual_hedge_mirror_tp');
     setRoleMap({});
   }, [open, firstItem]);
+
+  useEffect(() => {
+    if (!open || suggestions.length === 0) return;
+    setRoleMap(Object.fromEntries(suggestions.map(item => [item.itemId, item.suggestedRole])));
+  }, [open, suggestions]);
 
   useEffect(() => {
     if (!open || ordered.length === 0) return;
@@ -200,8 +206,7 @@ export function ClassifyAsNewCampaignDialog({ open, onOpenChange, items, onCreat
         <div className="space-y-4">
           {orphanCount > 0 && (
             <div className="rounded border border-[#F0B90B]/30 bg-[#F0B90B]/10 px-3 py-2 text-[11px] text-[#F0B90B]">
-              本次选中含 {orphanCount} 个裸 records，归类时将自动回填为最小化 journal。
-              这些回填 journal 缺少开仓决策信息（理由/心态/风险认识），在战役复盘中会显示“[历史回填]”标识。
+              本次选中含 {orphanCount} 条仓位历史记录。若全部来自仓位历史记录，将直接组成一次交易战役。
             </div>
           )}
 
@@ -364,6 +369,18 @@ export function ClassifyAsNewCampaignDialog({ open, onOpenChange, items, onCreat
                     notes: notes.trim() || undefined,
                     legs: journalAssignments.map(({ item, legRole, legSequence }) => ({
                       journalId: item.journal.id,
+                      legRole,
+                      legSequence,
+                    })),
+                  });
+                  campaignId = campaign.id;
+                } else if (journalAssignments.length === 0) {
+                  const campaign = await createCampaignFromTradeRecords({
+                    title: title.trim(),
+                    strategyTemplate,
+                    notes: notes.trim() || undefined,
+                    records: orphanAssignments.map(({ item, legRole, legSequence }) => ({
+                      record: item.record,
                       legRole,
                       legSequence,
                     })),

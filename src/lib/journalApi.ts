@@ -150,6 +150,7 @@ type CognitiveAssetsRow = {
 };
 
 const COGNITIVE_ASSETS_STORAGE_KEY = 'cognitive_assets_doc';
+const TRADE_CAMPAIGNS_STORAGE_KEY = 'trade_campaigns';
 
 function getInitialCognitiveAssetsDoc(): CognitiveAssetsDoc {
   return deepClone(INITIAL_COGNITIVE_ASSETS);
@@ -259,6 +260,128 @@ type MutableCampaignPatch = Partial<
   >
 >;
 
+function isMissingTradeCampaignsTableError(error: { code?: string; message?: string } | null): boolean {
+  if (!error) return false;
+  const message = error.message ?? '';
+  return error.code === 'PGRST205'
+    || error.code === '42P01'
+    || (/trade_campaigns/i.test(message) && /schema cache|could not find|does not exist/i.test(message));
+}
+
+function isMissingTradeJournalsFeatureError(error: { code?: string; message?: string } | null): boolean {
+  if (!error) return false;
+  const message = error.message ?? '';
+  return error.code === 'PGRST205'
+    || error.code === '42P01'
+    || (/trade_journals|campaign_id|leg_role|leg_sequence/i.test(message) && /schema cache|could not find|does not exist|column/i.test(message));
+}
+
+function isMissingCounterfactualsTableError(error: { code?: string; message?: string } | null): boolean {
+  if (!error) return false;
+  const message = error.message ?? '';
+  return error.code === 'PGRST205'
+    || error.code === '42P01'
+    || (/campaign_counterfactuals/i.test(message) && /schema cache|could not find|does not exist/i.test(message));
+}
+
+function isCampaignNotFoundError(error: { code?: string; message?: string } | null): boolean {
+  if (!error) return false;
+  const message = error.message ?? '';
+  return error.code === 'PGRST116' || /no rows|0 rows/i.test(message);
+}
+
+function normalizeLocalCampaigns(raw: unknown): TradeCampaign[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.filter((item): item is TradeCampaign => (
+    isRecord(item)
+    && typeof item.id === 'string'
+    && typeof item.user_id === 'string'
+    && typeof item.symbol === 'string'
+    && typeof item.title === 'string'
+  ));
+}
+
+function readLocalCampaigns(userId: string): TradeCampaign[] {
+  return normalizeLocalCampaigns(readUserScopedStorage<unknown>(userId, TRADE_CAMPAIGNS_STORAGE_KEY, []));
+}
+
+function writeLocalCampaigns(userId: string, campaigns: TradeCampaign[]): void {
+  writeUserScopedStorage(userId, TRADE_CAMPAIGNS_STORAGE_KEY, campaigns);
+}
+
+function upsertLocalCampaign(campaign: TradeCampaign): void {
+  const rows = readLocalCampaigns(campaign.user_id);
+  const index = rows.findIndex(item => item.id === campaign.id);
+  const next = index >= 0
+    ? rows.map(item => item.id === campaign.id ? campaign : item)
+    : [campaign, ...rows];
+  writeLocalCampaigns(campaign.user_id, next);
+}
+
+function removeLocalCampaign(userId: string, campaignId: string): void {
+  writeLocalCampaigns(userId, readLocalCampaigns(userId).filter(item => item.id !== campaignId));
+}
+
+function findLocalCampaign(userId: string, campaignId: string): TradeCampaign | null {
+  return readLocalCampaigns(userId).find(item => item.id === campaignId) ?? null;
+}
+
+function applyCampaignFilters(rows: TradeCampaign[], filters?: ListCampaignFilters): TradeCampaign[] {
+  return rows
+    .filter(campaign => {
+      if (filters?.status && filters.status !== 'all' && campaign.status !== filters.status) return false;
+      if (filters?.symbol && campaign.symbol !== filters.symbol) return false;
+      const openedAt = new Date(campaign.opened_at).getTime();
+      if (filters?.dateFrom && openedAt < new Date(filters.dateFrom).getTime()) return false;
+      if (filters?.dateTo && openedAt > new Date(filters.dateTo).getTime()) return false;
+      return true;
+    })
+    .sort((a, b) => new Date(b.opened_at).getTime() - new Date(a.opened_at).getTime());
+}
+
+function mergeCampaigns(remote: TradeCampaign[], local: TradeCampaign[]): TradeCampaign[] {
+  const merged = new Map<string, TradeCampaign>();
+  local.forEach(campaign => merged.set(campaign.id, campaign));
+  remote.forEach(campaign => merged.set(campaign.id, campaign));
+  return [...merged.values()].sort((a, b) => new Date(b.opened_at).getTime() - new Date(a.opened_at).getTime());
+}
+
+async function getAuthenticatedUserId(label: string): Promise<string> {
+  const { data: auth } = await supabase.auth.getUser();
+  const userId = auth.user?.id;
+  if (!userId) throw new Error(`${label}失败：用户未登录`);
+  return userId;
+}
+
+function buildLocalCampaignFromCreateInput(
+  userId: string,
+  input: CreateCampaignInput,
+  event: CampaignEvent,
+): TradeCampaign {
+  const now = new Date().toISOString();
+  return {
+    id: crypto.randomUUID(),
+    user_id: userId,
+    symbol: input.symbol,
+    direction: input.direction,
+    status: 'active',
+    strategy_template: input.strategy_template ?? 'main_dual_hedge_mirror_tp',
+    title: input.title,
+    opened_at: input.opened_at,
+    closed_at: null,
+    initial_main_size_usdt: null,
+    initial_leverage: null,
+    final_realized_pnl: null,
+    final_r_multiple: null,
+    peak_unrealized_pnl: null,
+    peak_drawdown: null,
+    notes: input.notes ?? null,
+    actual_evolution: [event],
+    created_at: now,
+    updated_at: now,
+  };
+}
+
 function journalTimeMs(journal: Pick<TradeJournal, 'pre_simulated_time'>): number {
   return new Date(journal.pre_simulated_time).getTime();
 }
@@ -281,6 +404,74 @@ function toCampaignDirection(direction: TradeJournal['direction']): TradeCampaig
 
 function toIso(ms: number | null): string | null {
   return ms == null ? null : new Date(ms).toISOString();
+}
+
+function tradeRecordOutcome(record: Pick<TradeRecord, 'pnl'>): TradeOutcome {
+  if (record.pnl > 0) return 'win';
+  if (record.pnl < 0) return 'loss';
+  return 'breakeven';
+}
+
+function synthesizeJournalFromRecord(
+  campaign: TradeCampaign,
+  record: TradeRecord,
+  event: CampaignEvent,
+  sequence: number,
+): TradeJournal {
+  const timestamp = toIso(tradeRecordTimeMs(record)) ?? event.timestamp;
+  const now = event.recorded_at || new Date().toISOString();
+  return {
+    id: event.journal_id ?? `record-${record.id}`,
+    user_id: campaign.user_id,
+    trade_record_id: record.id,
+    campaign_id: campaign.id,
+    leg_role: event.leg_role ?? 'standalone',
+    leg_sequence: sequence,
+    source: 'retroactive_from_record',
+    symbol: record.symbol,
+    direction: tradeRecordDirection(record),
+    leverage: record.leverage,
+    position_mode: 'isolated',
+    order_kind: event.leg_role?.startsWith('hedge_') ? 'hedge' : 'main',
+    pre_simulated_time: timestamp,
+    pre_real_time: now,
+    pre_entry_price: record.entryPrice,
+    pre_planned_stop_loss: null,
+    pre_planned_take_profit: null,
+    pre_entry_reason: '[历史记录归类] 由仓位历史记录直接组成交易战役',
+    pre_mental_state: 3,
+    pre_mental_trigger: null,
+    pre_risk_awareness: null,
+    pre_risk_management: null,
+    pre_checklist_items: null,
+    pre_checklist_passed: null,
+    pre_position_size: tradeRecordPositionSize(record),
+    pre_max_loss_usdt: null,
+    post_outcome: tradeRecordOutcome(record),
+    post_realized_pnl: record.pnl,
+    post_r_multiple: null,
+    post_reflection: null,
+    post_correct_action: null,
+    post_reviewed_at: null,
+    reason_was_rewritten: false,
+    created_at: now,
+    updated_at: now,
+  };
+}
+
+function synthesizeCampaignLegsFromEvents(campaign: TradeCampaign): TradeJournal[] {
+  const tradeRecordMap = getTradeRecordMapForUser(campaign.user_id);
+  const seen = new Set<string>();
+  return (campaign.actual_evolution ?? [])
+    .filter(event => Boolean(event.trade_record_id))
+    .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime())
+    .flatMap((event) => {
+      if (!event.trade_record_id || seen.has(event.trade_record_id)) return [];
+      const record = tradeRecordMap.get(event.trade_record_id);
+      if (!record) return [];
+      seen.add(event.trade_record_id);
+      return [synthesizeJournalFromRecord(campaign, record, event, seen.size)];
+    });
 }
 
 function campaignSnapshotPatch(campaign: TradeCampaign): MutableCampaignPatch {
@@ -392,6 +583,15 @@ async function recomputeCampaignDerivedFields(campaignId: string): Promise<Trade
     .eq('id', campaignId)
     .select()
     .single();
+  if (error && (isMissingTradeCampaignsTableError(error) || isCampaignNotFoundError(error))) {
+    const local = {
+      ...campaign,
+      ...patch,
+      updated_at: new Date().toISOString(),
+    };
+    upsertLocalCampaign(local);
+    return local;
+  }
   return wrap('重算战役元数据', error, toCampaign(data));
 }
 
@@ -412,9 +612,7 @@ export interface ListCampaignFilters {
 }
 
 export async function createCampaign(input: CreateCampaignInput): Promise<TradeCampaign> {
-  const { data: auth } = await supabase.auth.getUser();
-  const userId = auth.user?.id;
-  if (!userId) throw new Error('创建战役失败：用户未登录');
+  const userId = await getAuthenticatedUserId('创建战役');
   const event: CampaignEvent = {
     id: crypto.randomUUID(),
     timestamp: input.opened_at,
@@ -443,6 +641,11 @@ export async function createCampaign(input: CreateCampaignInput): Promise<TradeC
     .insert(payload as never)
     .select()
     .single();
+  if (error && isMissingTradeCampaignsTableError(error)) {
+    const local = buildLocalCampaignFromCreateInput(userId, input, event);
+    upsertLocalCampaign(local);
+    return local;
+  }
   return wrap('创建战役', error, toCampaign(data));
 }
 
@@ -456,6 +659,14 @@ export async function updateCampaign(
     .eq('id', id)
     .select()
     .single();
+  if (error && (isMissingTradeCampaignsTableError(error) || isCampaignNotFoundError(error))) {
+    const userId = await getAuthenticatedUserId('更新战役');
+    const local = findLocalCampaign(userId, id);
+    if (!local) return wrap('更新战役', error, toCampaign(data));
+    const updated = { ...local, ...patch, updated_at: new Date().toISOString() };
+    upsertLocalCampaign(updated);
+    return updated;
+  }
   return wrap('更新战役', error, toCampaign(data));
 }
 
@@ -479,7 +690,16 @@ export async function deleteCampaign(id: string): Promise<void> {
     .from('trade_campaigns' as never)
     .delete()
     .eq('id', id);
-  if (error) throw new Error(`删除战役失败：${error.message}`);
+  if (error) {
+    if (isMissingTradeCampaignsTableError(error) || isCampaignNotFoundError(error)) {
+      const userId = await getAuthenticatedUserId('删除战役');
+      removeLocalCampaign(userId, id);
+      return;
+    }
+    throw new Error(`删除战役失败：${error.message}`);
+  }
+  const userId = await getAuthenticatedUserId('删除战役');
+  removeLocalCampaign(userId, id);
 }
 
 export async function listActiveCampaigns(userId: string, symbol?: string): Promise<TradeCampaign[]> {
@@ -490,7 +710,12 @@ export async function listActiveCampaigns(userId: string, symbol?: string): Prom
     .eq('status', 'active');
   if (symbol) q = q.eq('symbol', symbol);
   const { data, error } = await q.order('opened_at', { ascending: false });
-  return wrap('加载进行中的战役', error, (data ?? []).map(toCampaign));
+  const local = applyCampaignFilters(readLocalCampaigns(userId), { status: 'active', symbol });
+  if (error) {
+    if (isMissingTradeCampaignsTableError(error)) return local;
+    return wrap('加载进行中的战役', error, (data ?? []).map(toCampaign));
+  }
+  return mergeCampaigns((data ?? []).map(toCampaign), local);
 }
 
 export async function listAllCampaigns(
@@ -503,21 +728,53 @@ export async function listAllCampaigns(
   if (filters?.dateFrom) q = q.gte('opened_at', filters.dateFrom);
   if (filters?.dateTo) q = q.lte('opened_at', filters.dateTo);
   const { data, error } = await q.order('opened_at', { ascending: false });
-  return wrap('加载战役列表', error, (data ?? []).map(toCampaign));
+  const local = applyCampaignFilters(readLocalCampaigns(userId), filters);
+  if (error) {
+    if (isMissingTradeCampaignsTableError(error)) return local;
+    return wrap('加载战役列表', error, (data ?? []).map(toCampaign));
+  }
+  return mergeCampaigns((data ?? []).map(toCampaign), local);
 }
 
 export async function getCampaignWithLegs(
   campaignId: string,
 ): Promise<{ campaign: TradeCampaign; legs: TradeJournal[] }> {
-  const [{ data: campaign, error: cErr }, { data: legs, error: lErr }] = await Promise.all([
-    supabase.from('trade_campaigns' as never).select('*').eq('id', campaignId).single(),
-    supabase.from('trade_journals' as never).select('*').eq('campaign_id', campaignId).order('leg_sequence', { ascending: true }),
-  ]);
-  if (cErr) throw new Error(`加载战役失败：${cErr.message}`);
-  if (lErr) throw new Error(`加载战役 legs 失败：${lErr.message}`);
+  const { data: campaign, error: cErr } = await supabase
+    .from('trade_campaigns' as never)
+    .select('*')
+    .eq('id', campaignId)
+    .single();
+  let resolvedCampaign: TradeCampaign | null = null;
+  if (cErr) {
+    if (isMissingTradeCampaignsTableError(cErr) || isCampaignNotFoundError(cErr)) {
+      const userId = await getAuthenticatedUserId('加载战役');
+      resolvedCampaign = findLocalCampaign(userId, campaignId);
+    }
+    if (!resolvedCampaign) throw new Error(`加载战役失败：${cErr.message}`);
+  } else {
+    resolvedCampaign = toCampaign(campaign);
+  }
+  if (!resolvedCampaign) throw new Error('加载战役失败：返回数据为空');
+
+  const { data: legs, error: lErr } = await supabase
+    .from('trade_journals' as never)
+    .select('*')
+    .eq('campaign_id', campaignId)
+    .order('leg_sequence', { ascending: true });
+  if (lErr) {
+    const syntheticLegs = resolvedCampaign ? synthesizeCampaignLegsFromEvents(resolvedCampaign) : [];
+    if (syntheticLegs.length > 0 || isMissingTradeJournalsFeatureError(lErr)) {
+      return { campaign: resolvedCampaign, legs: syntheticLegs };
+    }
+    throw new Error(`加载战役 legs 失败：${lErr.message}`);
+  }
+  const dbLegs = (legs ?? []) as unknown as TradeJournal[];
+  const syntheticLegs = dbLegs.length > 0 || !resolvedCampaign
+    ? []
+    : synthesizeCampaignLegsFromEvents(resolvedCampaign);
   return {
-    campaign: toCampaign(campaign),
-    legs: (legs ?? []) as unknown as TradeJournal[],
+    campaign: resolvedCampaign,
+    legs: dbLegs.length > 0 ? dbLegs : syntheticLegs,
   };
 }
 
@@ -568,7 +825,27 @@ export async function appendCampaignEvent(
     .select('actual_evolution')
     .eq('id', campaignId)
     .single();
-  if (currentErr) throw new Error(`读取战役事件流失败：${currentErr.message}`);
+  if (currentErr) {
+    if (isMissingTradeCampaignsTableError(currentErr) || isCampaignNotFoundError(currentErr)) {
+      const userId = await getAuthenticatedUserId('追加战役事件');
+      const local = findLocalCampaign(userId, campaignId);
+      if (!local) throw new Error(`读取战役事件流失败：${currentErr.message}`);
+      upsertLocalCampaign({
+        ...local,
+        actual_evolution: [
+          ...(local.actual_evolution ?? []),
+          {
+            ...event,
+            id: crypto.randomUUID(),
+            recorded_at: new Date().toISOString(),
+          },
+        ],
+        updated_at: new Date().toISOString(),
+      });
+      return;
+    }
+    throw new Error(`读取战役事件流失败：${currentErr.message}`);
+  }
   const existingRaw = (current as { actual_evolution?: unknown[] } | null)?.actual_evolution ?? [];
   const existing = Array.isArray(existingRaw) ? existingRaw.map(toCampaignEvent) : [];
   const next: CampaignEvent[] = [
@@ -583,7 +860,17 @@ export async function appendCampaignEvent(
     .from('trade_campaigns' as never)
     .update({ actual_evolution: next } as never)
     .eq('id', campaignId);
-  if (error) throw new Error(`追加战役事件失败：${error.message}`);
+  if (error) {
+    if (isMissingTradeCampaignsTableError(error) || isCampaignNotFoundError(error)) {
+      const userId = await getAuthenticatedUserId('追加战役事件');
+      const local = findLocalCampaign(userId, campaignId);
+      if (local) {
+        upsertLocalCampaign({ ...local, actual_evolution: next, updated_at: new Date().toISOString() });
+        return;
+      }
+    }
+    throw new Error(`追加战役事件失败：${error.message}`);
+  }
 }
 
 export async function attachJournalToCampaign(
@@ -667,6 +954,7 @@ export async function listUnclassifiedJournals(
   if (!filters.includeClassified) query = query.is('campaign_id', null);
 
   const { data, error } = await query.order('pre_simulated_time', { ascending: false });
+  if (error && isMissingTradeJournalsFeatureError(error)) return [];
   return wrap('加载待归类 journals', error, (data ?? []) as unknown as TradeJournal[]);
 }
 
@@ -714,6 +1002,11 @@ export async function listOrphanTradeRecords(
     .select('trade_record_id')
     .eq('user_id', userId)
     .not('trade_record_id', 'is', null);
+  if (error && isMissingTradeJournalsFeatureError(error)) {
+    return tradeHistory
+      .filter(record => matchesTradeRecordFilters(record, filters))
+      .sort((a, b) => tradeRecordTimeMs(b) - tradeRecordTimeMs(a));
+  }
   const linked = wrap(
     '加载已关联 trade_record',
     error,
@@ -1159,6 +1452,95 @@ export async function createCampaignFromJournals(input: {
   }
 }
 
+export async function createCampaignFromTradeRecords(input: {
+  title: string;
+  strategyTemplate: StrategyTemplate;
+  records: Array<{ record: TradeRecord; legRole: LegRole; legSequence: number }>;
+  notes?: string;
+}): Promise<TradeCampaign> {
+  if (input.records.length === 0) throw new Error('创建战役失败：请选择至少一条仓位历史记录');
+  const ordered = [...input.records].sort((a, b) => a.legSequence - b.legSequence);
+  const symbols = new Set(ordered.map(item => item.record.symbol));
+  if (symbols.size !== 1) throw new Error('创建战役失败：所选仓位历史记录必须属于同一标的');
+  const notClassifiable = ordered.find(item => !isTradeRecordClassifiable(item.record));
+  if (notClassifiable) throw new Error('创建战役失败：只能选择已平仓或爆仓的仓位历史记录');
+
+  const userId = await getAuthenticatedUserId('创建战役');
+  const now = new Date().toISOString();
+  const mainItem = ordered.find(item => item.legRole === 'main_open') ?? ordered[0];
+  const openedMs = Math.min(...ordered.map(item => tradeRecordTimeMs(item.record)));
+  const closeTimes = ordered.map(item => item.record.closeTime || tradeRecordTimeMs(item.record)).filter(time => time > 0);
+  const closedMs = closeTimes.length === ordered.length ? Math.max(...closeTimes) : null;
+  const totalPnl = ordered.reduce((sum, item) => sum + (item.record.pnl || 0), 0);
+  const closedStatus: CampaignStatus = totalPnl > 0 ? 'closed_profit' : totalPnl < 0 ? 'closed_loss' : 'closed_breakeven';
+  const openedAt = toIso(openedMs) ?? now;
+  const closedAt = toIso(closedMs);
+  const notes = input.notes?.trim() || null;
+  const events: CampaignEvent[] = [
+    {
+      id: crypto.randomUUID(),
+      timestamp: openedAt,
+      event_type: 'historical_classification_created',
+      leg_role: null,
+      journal_id: null,
+      trade_record_id: null,
+      pending_order_id: null,
+      price: null,
+      size_usdt: null,
+      notes,
+      recorded_at: now,
+    },
+    ...ordered.map(({ record, legRole }) => ({
+      id: crypto.randomUUID(),
+      timestamp: toIso(tradeRecordTimeMs(record)) ?? openedAt,
+      event_type: 'historical_leg_attached' as const,
+      leg_role: legRole,
+      journal_id: null,
+      trade_record_id: record.id,
+      pending_order_id: null,
+      price: record.entryPrice,
+      size_usdt: tradeRecordPositionSize(record),
+      notes: 'classified retroactively · 仓位历史记录',
+      recorded_at: now,
+    })),
+  ];
+  const campaign: TradeCampaign = {
+    id: crypto.randomUUID(),
+    user_id: userId,
+    symbol: mainItem.record.symbol,
+    direction: mainItem.record.side === 'SHORT' ? 'main_short' : 'main_long',
+    status: closedAt ? closedStatus : 'active',
+    strategy_template: input.strategyTemplate,
+    title: input.title.trim(),
+    opened_at: openedAt,
+    closed_at: closedAt,
+    initial_main_size_usdt: tradeRecordPositionSize(mainItem.record),
+    initial_leverage: mainItem.record.leverage,
+    final_realized_pnl: totalPnl,
+    final_r_multiple: null,
+    peak_unrealized_pnl: null,
+    peak_drawdown: null,
+    notes,
+    actual_evolution: events,
+    created_at: now,
+    updated_at: now,
+  };
+
+  const { data, error } = await supabase
+    .from('trade_campaigns' as never)
+    .insert(campaign as never)
+    .select()
+    .single();
+  if (error) {
+    if (isMissingTradeCampaignsTableError(error)) {
+      upsertLocalCampaign(campaign);
+      return campaign;
+    }
+    throw new Error(`创建战役失败：${error.message}`);
+  }
+  return toCampaign(data);
+}
+
 export async function detachJournalFromCampaign(journalId: string): Promise<void> {
   const journal = await getJournalById(journalId);
   if (!journal?.campaign_id) return;
@@ -1261,6 +1643,7 @@ export async function listCounterfactuals(campaignId: string): Promise<CampaignC
     .select('*')
     .eq('campaign_id', campaignId)
     .order('created_at', { ascending: false });
+  if (error && isMissingCounterfactualsTableError(error)) return [];
   return wrap('加载反事实战役分支', error, (data ?? []).map(toCampaignCounterfactual));
 }
 
