@@ -42,6 +42,7 @@ import type {
   CounterfactualBranchParams,
   CounterfactualBranchResult,
 } from "@/types/journal";
+import { isHistoricalCampaign, ruleCooldownRemainingMs } from "@/types/journal";
 import type { PendingOrder, TradeRecord } from "@/types/trading";
 
 
@@ -879,6 +880,11 @@ export async function attachJournalToCampaign(
   legRole: LegRole,
   legSequence?: number | null,
 ): Promise<void> {
+  const { campaign } = await getCampaignWithLegs(campaignId);
+  if (isHistoricalCampaign(campaign)) {
+    throw new Error('实时订单不能加入历史归类战役，请新建实时战役或选择实时战役。');
+  }
+
   const { data: journal, error: jErr } = await supabase
     .from('trade_journals' as never)
     .select('*')
@@ -1176,6 +1182,9 @@ export async function validateClassification(
     const details = await getCampaignWithLegs(input.targetCampaignId);
     targetCampaign = details.campaign;
     targetLegs = details.legs;
+    if (!isHistoricalCampaign(targetCampaign)) {
+      errors.push('历史归类只能加入历史战役；实时战役必须在开仓时归属，不能与回填数据混合');
+    }
 
     const selectedMain = selected.find(item => item.legRole === 'main_open') ?? null;
     const existingMain = targetLegs.find(leg => leg.leg_role === 'main_open') ?? null;
@@ -1806,6 +1815,22 @@ export async function createPattern(input: CreatePatternInput): Promise<ErrorTag
   return wrap("创建错误模式", error, data as unknown as ErrorTagPattern);
 }
 
+/**
+ * Returns true if the pattern has any tag assignment. Used to decide whether
+ * structural fields (name, category, parent) are locked.
+ */
+export async function patternHasAnyAssignment(patternId: string): Promise<boolean> {
+  const { count, error } = await supabase
+    .from("journal_tag_assignments" as never)
+    .select("id", { count: "exact", head: true })
+    .eq("pattern_id", patternId);
+  if (error) {
+    console.error("[journalApi] 检查模式使用情况失败:", error);
+    throw new Error(`检查模式使用情况失败：${error.message}`);
+  }
+  return (count ?? 0) > 0;
+}
+
 export async function updatePattern(
   id: string,
   patch: Partial<Pick<ErrorTagPattern, "pattern_name" | "operational_definition" | "parent_id" | "is_archived">>,
@@ -1813,6 +1838,34 @@ export async function updatePattern(
   if (patch.operational_definition !== undefined && patch.operational_definition.trim().length < 10) {
     throw new Error("可操作定义至少需要 10 个字符");
   }
+
+  // Lock identity once the pattern has been tagged to any journal.
+  // Rationale: renaming an in-use pattern silently rewrites historical statistics
+  // (frequency / pattern clusters / rule attribution). The operational definition
+  // can still be clarified, but the name and structural placement are frozen.
+  const wantsIdentityChange =
+    patch.pattern_name !== undefined || patch.parent_id !== undefined;
+  if (wantsIdentityChange) {
+    const used = await patternHasAnyAssignment(id);
+    if (used) {
+      // Compare against current row to allow no-op patches.
+      const { data: cur, error: gErr } = await supabase
+        .from("error_tag_patterns" as never)
+        .select("pattern_name,parent_id")
+        .eq("id", id)
+        .single();
+      if (gErr) throw new Error(`读取模式失败：${gErr.message}`);
+      const row = cur as unknown as Pick<ErrorTagPattern, 'pattern_name' | 'parent_id'>;
+      const nameChanging = patch.pattern_name !== undefined && patch.pattern_name !== row.pattern_name;
+      const parentChanging = patch.parent_id !== undefined && (patch.parent_id ?? null) !== (row.parent_id ?? null);
+      if (nameChanging || parentChanging) {
+        throw new Error(
+          "该模式已被打到一条或多条交易上，名称与父模式已冻结。若你认为定义需要修正，请编辑'可操作定义'，或归档后新建一个模式。",
+        );
+      }
+    }
+  }
+
   const { data, error } = await supabase
     .from("error_tag_patterns" as never)
     .update(patch as never)
@@ -2027,6 +2080,8 @@ export interface CreateRuleInput {
   source_pattern_id?: string | null;
   rule_text: string;
   is_active?: boolean;
+  added_to_checklist?: boolean;
+  required?: boolean;
   trigger_threshold?: number;
 }
 
@@ -2184,18 +2239,31 @@ export async function countPatternOccurrencesLast30Days(
 
 
 export async function createRule(input: CreateRuleInput): Promise<TradingRule> {
+  const payload: CreateRuleInput & { activated_at?: string } = { ...input };
+  if (input.is_active && input.added_to_checklist) payload.activated_at = new Date().toISOString();
   const { data, error } = await supabase
     .from("trading_rules" as never)
-    .insert(input as never)
+    .insert(payload as never)
     .select()
     .single();
   return wrap("创建交易规则", error, data as unknown as TradingRule);
 }
 
 export async function markRuleAddedToChecklist(ruleId: string): Promise<void> {
+  const { data: cur, error: gErr } = await supabase
+    .from("trading_rules" as never)
+    .select("activated_at,is_active")
+    .eq("id", ruleId)
+    .single();
+  if (gErr) throw new Error(`读取规则状态失败：${gErr.message}`);
+  const row = cur as unknown as Pick<TradingRule, 'activated_at' | 'is_active'>;
+  const patch = {
+    added_to_checklist: true,
+    activated_at: row.is_active && !row.activated_at ? new Date().toISOString() : row.activated_at,
+  };
   const { error } = await supabase
     .from("trading_rules" as never)
-    .update({ added_to_checklist: true } as never)
+    .update(patch as never)
     .eq("id", ruleId);
   if (error) {
     console.error("[journalApi] 标记规则已加入 checklist 失败:", error);
@@ -2426,9 +2494,42 @@ export async function updateRule(
   ruleId: string,
   patch: Partial<Pick<TradingRule, "rule_text" | "is_active" | "required" | "added_to_checklist" | "ui_order" | "snooze_until">>,
 ): Promise<TradingRule> {
+  // Cooldown guard: weakening a rule during its activation cooldown is blocked.
+  // "Weakening" = turning off is_active, removing from checklist, or downgrading required → false.
+  const weakening =
+    patch.is_active === false ||
+    patch.added_to_checklist === false ||
+    patch.required === false ||
+    (typeof patch.snooze_until === 'string' && patch.snooze_until.length > 0);
+  const canActivate = patch.is_active === true || patch.added_to_checklist === true;
+  let current: Pick<TradingRule, 'activated_at' | 'is_active' | 'added_to_checklist'> | null = null;
+  if (weakening || canActivate) {
+    const { data: cur, error: gErr } = await supabase
+      .from("trading_rules" as never)
+      .select("activated_at,is_active,added_to_checklist")
+      .eq("id", ruleId)
+      .single();
+    if (gErr) throw new Error(`读取规则状态失败：${gErr.message}`);
+    current = cur as unknown as Pick<TradingRule, 'activated_at' | 'is_active' | 'added_to_checklist'>;
+  }
+  if (weakening && current) {
+    const remaining = ruleCooldownRemainingMs(current);
+    if (remaining > 0) {
+      const days = Math.ceil(remaining / 86400_000);
+      throw new Error(`规则处于激活冷却期，还需 ${days} 天后才能修改。冷却期的设计是：你刚为自己定下的规则，不能在情绪冲动下立即关掉。`);
+    }
+  }
+  const nextPatch: typeof patch & { activated_at?: string } = { ...patch };
+  if (canActivate && current) {
+    const nextActive = patch.is_active ?? current.is_active;
+    const nextChecklist = patch.added_to_checklist ?? current.added_to_checklist;
+    if (nextActive && nextChecklist && !current.activated_at) {
+      nextPatch.activated_at = new Date().toISOString();
+    }
+  }
   const { data, error } = await supabase
     .from("trading_rules" as never)
-    .update(patch as never)
+    .update(nextPatch as never)
     .eq("id", ruleId)
     .select()
     .single();
@@ -2436,6 +2537,18 @@ export async function updateRule(
 }
 
 export async function deleteRule(ruleId: string): Promise<void> {
+  const { data: cur, error: gErr } = await supabase
+    .from("trading_rules" as never)
+    .select("activated_at")
+    .eq("id", ruleId)
+    .single();
+  if (gErr) throw new Error(`读取规则状态失败：${gErr.message}`);
+  const row = cur as unknown as Pick<TradingRule, 'activated_at'>;
+  const remaining = ruleCooldownRemainingMs(row);
+  if (remaining > 0) {
+    const days = Math.ceil(remaining / 86400_000);
+    throw new Error(`规则处于激活冷却期，还需 ${days} 天后才能删除。`);
+  }
   const { error } = await supabase
     .from("trading_rules" as never)
     .delete()

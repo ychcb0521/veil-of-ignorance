@@ -3,7 +3,7 @@
  */
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { Pencil, BrainCircuit } from 'lucide-react';
+import { AlertOctagon, Pencil, BrainCircuit } from 'lucide-react';
 import { toast } from 'sonner';
 import { useAuth } from '@/contexts/AuthContext';
 import { useTradingContext } from '@/contexts/TradingContext';
@@ -112,6 +112,33 @@ export default function JournalPlaybackPage() {
   const dirLabel = journal.direction === 'long' ? 'LONG' : journal.direction === 'short' ? 'SHORT' : 'PASS';
   const dirColor = journal.direction === 'long' ? 'text-[#0ECB81]'
     : journal.direction === 'short' ? 'text-[#F6465D]' : 'text-muted-foreground';
+  const attributionComplete = Boolean(
+    journal.post_reviewed_at &&
+    journal.post_reflection?.trim() &&
+    journal.post_correct_action?.trim(),
+  );
+  const hindsightLocked = journal.direction !== 'no_entry' && !attributionComplete;
+
+  const hindsightGuard = (
+    <div className="h-full min-h-[360px] rounded border border-[#F0B90B]/35 bg-card flex items-center justify-center p-8">
+      <div className="max-w-[520px] text-center space-y-3">
+        <div className="mx-auto h-10 w-10 rounded-full bg-[#F0B90B]/12 border border-[#F0B90B]/35 flex items-center justify-center">
+          <AlertOctagon className="h-5 w-5 text-[#F0B90B]" />
+        </div>
+        <div className="text-[15px] font-medium">后续走势已隐藏</div>
+        <div className="text-[12px] leading-6 text-muted-foreground">
+          为封住 hindsight bias，必须先完成结果归因、错误标签和可执行修正，再揭示平仓后的行情路径。
+        </div>
+        <Button
+          size="sm"
+          className="h-8 bg-[#F0B90B] hover:bg-[#F0B90B]/90 text-black text-[12px]"
+          onClick={() => setEditOpen(true)}
+        >
+          先完成归因
+        </Button>
+      </div>
+    </div>
+  );
 
   return (
     <ReplayProvider journal={journal} tradeRecord={tradeRecord} assignments={assignments} patterns={patterns}>
@@ -158,7 +185,16 @@ export default function JournalPlaybackPage() {
         </header>
 
         <main className="flex-1 max-w-[1600px] mx-auto w-full px-6 py-4 min-h-0">
-          {isMobile ? (
+          {hindsightLocked ? (
+            <div className={isMobile ? 'h-[calc(100vh-120px)]' : 'h-[calc(100vh-100px)] grid grid-cols-[1fr_400px] gap-3 min-h-0'}>
+              <div className="min-h-0">{hindsightGuard}</div>
+              {!isMobile && (
+                <div className="rounded border border-border bg-card p-4 text-[12px] text-muted-foreground leading-6">
+                  归因完成前，本页只保留开仓快照入口，不展示后续 K 线、结果解释或走势复盘。保存评价后系统会自动刷新并解锁回放。
+                </div>
+              )}
+            </div>
+          ) : isMobile ? (
             <div className="h-full flex flex-col gap-2">
               <div className="h-[55vh] min-h-0"><ReplayChartView /></div>
               <div className="h-[45vh] min-h-0 overflow-y-auto">

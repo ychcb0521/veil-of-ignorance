@@ -10,7 +10,7 @@ import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useAuth } from '@/contexts/AuthContext';
 import { toast } from 'sonner';
-import { createPattern, updatePattern, listCategories, listPatterns } from '@/lib/journalApi';
+import { createPattern, updatePattern, listCategories, listPatterns, patternHasAnyAssignment } from '@/lib/journalApi';
 import type { ErrorTagCategory, ErrorTagPattern } from '@/types/journal';
 
 interface Props {
@@ -35,6 +35,7 @@ export function NewPatternDialog({
   const [definition, setDefinition] = useState('');
   const [parentId, setParentId] = useState<string>('');
   const [saving, setSaving] = useState(false);
+  const [identityLocked, setIdentityLocked] = useState(false);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -45,11 +46,16 @@ export function NewPatternDialog({
       setName(editing.pattern_name);
       setDefinition(editing.operational_definition);
       setParentId(editing.parent_id ?? '');
+      setIdentityLocked(false);
+      patternHasAnyAssignment(editing.id)
+        .then(setIdentityLocked)
+        .catch(() => setIdentityLocked(false));
     } else {
       setCategoryId(defaultCategoryId ?? '');
       setName('');
       setDefinition('');
       setParentId('');
+      setIdentityLocked(false);
     }
   }, [isOpen, mode, editing, defaultCategoryId, user]);
 
@@ -108,13 +114,22 @@ export function NewPatternDialog({
             </Select>
           </div>
           <div className="space-y-1.5">
-            <Label className="text-[11px] text-muted-foreground">模式名称 * (1-40 字符)</Label>
+            <Label className="text-[11px] text-muted-foreground">
+              模式名称 * (1-40 字符)
+              {identityLocked && <span className="ml-2 text-[#F6465D]">🔒 已被使用，名称已冻结</span>}
+            </Label>
             <Input
               value={name}
               onChange={e => setName(e.target.value.slice(0, 40))}
               placeholder="例如：在连续亏损 ≥2 笔后立即开仓"
-              className="h-9 text-[12px] bg-background border-border"
+              disabled={identityLocked}
+              className="h-9 text-[12px] bg-background border-border disabled:opacity-60"
             />
+            {identityLocked && (
+              <p className="text-[10px] text-muted-foreground">
+                该模式已被打到一条或多条交易上。重命名会改写历史错题统计——若定义需要修正，请编辑下方"可操作定义"，或归档后新建一个模式。
+              </p>
+            )}
           </div>
           <div className="space-y-1.5">
             <Label className="text-[11px] text-muted-foreground">可操作定义 * (≥10 字符)</Label>
@@ -131,9 +146,16 @@ export function NewPatternDialog({
           </div>
           {peersInCategory.length > 0 && (
             <div className="space-y-1.5">
-              <Label className="text-[11px] text-muted-foreground">父模式（可选）</Label>
-              <Select value={parentId || '__none__'} onValueChange={v => setParentId(v === '__none__' ? '' : v)}>
-                <SelectTrigger className="h-9 text-[12px] bg-background border-border"><SelectValue placeholder="无父模式" /></SelectTrigger>
+              <Label className="text-[11px] text-muted-foreground">
+                父模式（可选）
+                {identityLocked && <span className="ml-2 text-[#F6465D]">🔒 已冻结</span>}
+              </Label>
+              <Select
+                value={parentId || '__none__'}
+                onValueChange={v => setParentId(v === '__none__' ? '' : v)}
+                disabled={identityLocked}
+              >
+                <SelectTrigger className="h-9 text-[12px] bg-background border-border disabled:opacity-60"><SelectValue placeholder="无父模式" /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="__none__" className="text-[12px]">无父模式</SelectItem>
                   {peersInCategory.map(p => (

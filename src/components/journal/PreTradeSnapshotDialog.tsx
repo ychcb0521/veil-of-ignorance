@@ -4,16 +4,22 @@
  *       trade 模式下回调 onPlaceOrder 真正下单并回填 trade_record_id。
  */
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { Dialog, DialogContent } from '@/components/ui/dialog';
 import { Sheet, SheetContent } from '@/components/ui/sheet';
+import { Button } from '@/components/ui/button';
+import { AlertOctagon } from 'lucide-react';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { useAuth } from '@/contexts/AuthContext';
 import { useTradingContext } from '@/contexts/TradingContext';
 import { toast } from 'sonner';
-import { appendCampaignEvent, attachJournalToCampaign, createCampaign, createJournalPreSnapshot, updateJournalTradeRef } from '@/lib/journalApi';
+import {
+  appendCampaignEvent, attachJournalToCampaign, createCampaign,
+  createJournalPreSnapshot, findUnreviewedJournals, updateJournalTradeRef,
+} from '@/lib/journalApi';
 import type { PlaceOrderParams } from '@/contexts/TradingContext';
-import type { TradeDirection, PositionMode } from '@/types/journal';
+import type { TradeDirection, PositionMode, TradeJournal } from '@/types/journal';
 import {
   PreTradeSnapshotForm,
   type SnapshotMode,
@@ -55,6 +61,16 @@ export function PreTradeSnapshotDialog({
   const [lockedPrice, setLockedPrice] = useState<number | null>(lockedEntryPrice);
   const pausedRef = useRef(false);
 
+  // Pending-review gate: closed trades without post-review must be evaluated before new orders
+  const [pendingReviews, setPendingReviews] = useState<TradeJournal[] | null>(null);
+  const openPositionIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const positions of Object.values(trading.positionsMap)) {
+      for (const p of positions) ids.add(p.id);
+    }
+    return ids;
+  }, [trading.positionsMap]);
+
   useEffect(() => {
     if (isOpen) {
       setLockedTime(new Date(simulatedTimeMs));
@@ -69,10 +85,50 @@ export function PreTradeSnapshotDialog({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen]);
 
+  // Fetch pending reviews when opening in trade mode
+  useEffect(() => {
+    if (!isOpen || mode !== 'trade' || !user) {
+      setPendingReviews(null);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const list = await findUnreviewedJournals(user.id);
+        // Filter to journals whose linked position is no longer open (i.e., the trade is closed)
+        const closed = list.filter(j =>
+          j.trade_record_id != null && !openPositionIds.has(j.trade_record_id),
+        );
+        if (!cancelled) setPendingReviews(closed);
+      } catch (e) {
+        console.warn('[PreTradeSnapshot] pending-review check failed', e);
+        if (!cancelled) setPendingReviews([]);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [isOpen, mode, user, openPositionIds]);
+
+  const blocked = mode === 'trade' && (pendingReviews?.length ?? 0) > 0;
+
   const handleSubmit = async (payload: SnapshotPayload) => {
     if (!user) {
       toast.error('请先登录后再记录交易快照');
       return;
+    }
+    if (mode === 'trade') {
+      try {
+        const list = await findUnreviewedJournals(user.id);
+        const stillPending = list.filter(j =>
+          j.trade_record_id != null && !openPositionIds.has(j.trade_record_id),
+        );
+        if (stillPending.length > 0) {
+          setPendingReviews(stillPending);
+          toast.error(`还有 ${stillPending.length} 笔已平仓未评价交易，必须先评价`);
+          return;
+        }
+      } catch (e) {
+        console.warn('[PreTradeSnapshot] gate recheck failed', e);
+      }
     }
     try {
       let campaignId = payload.campaign_id;
@@ -112,6 +168,12 @@ export function PreTradeSnapshotDialog({
         pre_checklist_passed: payload.pre_checklist_passed,
         pre_position_size: payload.pre_position_size,
         pre_max_loss_usdt: payload.pre_max_loss_usdt,
+        // Decision-quality fields
+        pre_mortem_text: payload.pre_mortem_text,
+        pre_calibration_win_pct: payload.pre_calibration_win_pct,
+        pre_dataset_split: payload.pre_dataset_split,
+        pre_lollapalooza_score: payload.pre_lollapalooza_score,
+        pre_bankruptcy_estimate: payload.pre_bankruptcy_estimate,
       });
 
       if (mode === 'trade' && campaignId && payload.campaign_leg_role && payload.campaign_mode !== 'standalone') {
@@ -151,7 +213,60 @@ export function PreTradeSnapshotDialog({
     }
   };
 
-  const form = (
+  const fmtTimeShort = (iso: string) => {
+    const d = new Date(iso);
+    const pad = (n: number) => String(n).padStart(2, '0');
+    return `${pad(d.getMonth() + 1)}/${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  };
+
+  const blocker = blocked && pendingReviews ? (
+    <div className="flex flex-col">
+      <div className="bg-[#F6465D]/10 px-5 py-3 border-b border-[#F6465D]/30 flex items-center gap-2">
+        <AlertOctagon className="w-4 h-4 text-[#F6465D]" />
+        <span className="text-[14px] font-medium">先评价已平仓交易，再开新仓</span>
+      </div>
+      <div className="px-5 py-4 space-y-3">
+        <p className="text-[12px] text-foreground">
+          你有 <span className="text-[#F6465D] font-medium">{pendingReviews.length}</span> 笔已平仓但未评价的交易。
+          按 "无知之幕" 闭环原则：错题未归类前不能开新仓——否则错题集会丢失这些样本，元监控失真。
+        </p>
+        <div className="rounded border border-border bg-background/60 max-h-[240px] overflow-y-auto">
+          {pendingReviews.slice(0, 10).map(j => (
+            <Link
+              key={j.id}
+              to={`/journal/${j.id}`}
+              onClick={() => onOpenChange(false)}
+              className="block border-b border-border/40 last:border-b-0 px-3 py-2 text-[11px] font-mono hover:bg-accent/40"
+            >
+              <span className="text-foreground">{j.symbol}</span>
+              <span className={`mx-2 ${j.direction === 'long' ? 'text-[#0ECB81]' : j.direction === 'short' ? 'text-[#F6465D]' : 'text-muted-foreground'}`}>
+                {j.direction.toUpperCase()}
+              </span>
+              <span className="text-muted-foreground">{fmtTimeShort(j.pre_simulated_time)}</span>
+            </Link>
+          ))}
+          {pendingReviews.length > 10 && (
+            <div className="px-3 py-2 text-[10px] text-muted-foreground">还有 {pendingReviews.length - 10} 笔…</div>
+          )}
+        </div>
+        <p className="text-[10px] text-muted-foreground">
+          每条记录点击即可进入评价。完成所有评价后回到这里再下单。
+        </p>
+      </div>
+      <div className="px-5 py-3 border-t border-border flex justify-between">
+        <Button variant="ghost" onClick={() => onOpenChange(false)} className="h-8 text-[12px]">
+          取消下单
+        </Button>
+        <Link to="/journal" onClick={() => onOpenChange(false)}>
+          <Button className="h-8 text-[12px] bg-[#F0B90B] hover:bg-[#F0B90B]/90 text-black">
+            前往错题集
+          </Button>
+        </Link>
+      </div>
+    </div>
+  ) : null;
+
+  const form = blocker ?? (
     <PreTradeSnapshotForm
       mode={mode}
       symbol={symbol}

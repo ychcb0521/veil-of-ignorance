@@ -28,6 +28,8 @@ export type TaggedPhase = "pre" | "post";
 export type PositionMode = "cross" | "isolated";
 export type OrderKind = "main" | "hedge";
 export type JournalSource = 'live' | 'retroactive_from_record';
+/** Training-set vs holdout-set discipline (anti-overfitting). */
+export type DatasetSplit = 'in_sample' | 'out_of_sample';
 export type CampaignStatus =
   | 'planned'
   | 'active'
@@ -95,6 +97,13 @@ export interface TradeCampaign {
   actual_evolution: CampaignEvent[];
   created_at: string;
   updated_at: string;
+}
+
+export function isHistoricalCampaign(campaign: Pick<TradeCampaign, 'actual_evolution'>): boolean {
+  return (campaign.actual_evolution ?? []).some(event =>
+    event.event_type === 'historical_classification_created' ||
+    event.event_type === 'historical_leg_attached',
+  );
 }
 
 export type CampaignCounterfactualBranchKind =
@@ -282,6 +291,18 @@ export interface TradeJournal {
   pre_position_size: number | null;
   pre_max_loss_usdt: number | null;
 
+  // ============ Decision-quality fields (added 2026-05) ============
+  /** Klein's pre-mortem: "if this loses, what's the most likely reason?" */
+  pre_mortem_text?: string | null;
+  /** Tetlock-style calibration prediction at open time, 0-100. */
+  pre_calibration_win_pct?: number | null;
+  /** Anti-overfitting: training set vs holdout (out-of-sample). */
+  pre_dataset_split?: DatasetSplit | null;
+  /** 0-100 composite of mental, sizing, recent losses, time-of-day, etc. */
+  pre_lollapalooza_score?: number | null;
+  /** Expected ruin events out of 100 trades, computed at submit time. */
+  pre_bankruptcy_estimate?: number | null;
+
   // post-review
   post_outcome: TradeOutcome | null;
   post_realized_pnl: number | null;
@@ -327,8 +348,20 @@ export interface TradingRule {
   required: boolean;
   ui_order: number;
   snooze_until: string | null;
+  /** Stamped when the rule first reaches (is_active && added_to_checklist). Drives cooldown. */
+  activated_at: string | null;
   created_at: string;
   updated_at: string;
+}
+
+/** Days a rule stays locked after activation. Weakening edits are blocked during this window. */
+export const RULE_COOLDOWN_DAYS = 7;
+
+/** Returns ms remaining in the cooldown window, or 0 if expired / never activated. */
+export function ruleCooldownRemainingMs(rule: Pick<TradingRule, 'activated_at'>): number {
+  if (!rule.activated_at) return 0;
+  const end = new Date(rule.activated_at).getTime() + RULE_COOLDOWN_DAYS * 86400_000;
+  return Math.max(0, end - Date.now());
 }
 
 // ============ Batch 6: Counterfactual branches ============

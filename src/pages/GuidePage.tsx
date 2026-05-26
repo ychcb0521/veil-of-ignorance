@@ -247,7 +247,7 @@ export default function GuidePage() {
                 <FlowArrow />
                 <FlowNode>回放行情，等待符合策略的机会</FlowNode>
                 <FlowArrow />
-                <FlowNode accent>开仓前填写快照：理由、最大亏损、心态、风险管理、checklist</FlowNode>
+                <FlowNode accent>开仓前填写快照：理由、最大亏损、pre-mortem、预测胜率、心态、风险管理、checklist</FlowNode>
                 <FlowArrow />
                 <FlowNode>下单、持仓、平仓</FlowNode>
                 <FlowArrow />
@@ -284,7 +284,7 @@ export default function GuidePage() {
                   输入日期和时间后，系统加载该时刻附近的真实历史行情。K 线、盘口、成交、持仓盈亏和订单触发都以模拟时间为准。
                 </KeyCard>
                 <KeyCard title="加速播放">
-                  支持 1x、2x、5x、10x、50x、100x 倍速。慢速用于练决策细节，高倍速用于快速穿越等待区和重复训练同类行情。
+                  支持 1x、2x、5x、10x、50x 倍速。慢速用于练决策细节，高倍速用于快速穿越等待区和重复训练同类行情。
                 </KeyCard>
                 <KeyCard title="暂停与恢复">
                   可随时暂停、继续或跳转。暂停时适合写交易计划、检查 checklist、复盘刚才为什么想出手。
@@ -302,7 +302,7 @@ export default function GuidePage() {
                   <tbody>
                     <tr><td className="px-3 py-2 border-t border-border">历史回放</td><td className="px-3 py-2 border-t border-border">从任意历史时刻重新进入市场</td><td className="px-3 py-2 border-t border-border">把过去行情变成可反复练习的样本</td></tr>
                     <tr><td className="px-3 py-2 border-t border-border">未来不可见</td><td className="px-3 py-2 border-t border-border">只显示模拟时间以前的数据</td><td className="px-3 py-2 border-t border-border">避免用已知结果污染判断</td></tr>
-                    <tr><td className="px-3 py-2 border-t border-border">倍速播放</td><td className="px-3 py-2 border-t border-border">按 1x 到 100x 推进行情</td><td className="px-3 py-2 border-t border-border">用高倍速提高训练密度，用低倍速校准执行质量</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border">倍速播放</td><td className="px-3 py-2 border-t border-border">按 1x 到 50x 推进行情</td><td className="px-3 py-2 border-t border-border">用高倍速提高训练密度，用低倍速校准执行质量</td></tr>
                     <tr><td className="px-3 py-2 border-t border-border">统一模拟时钟</td><td className="px-3 py-2 border-t border-border">订单、持仓、盈亏、历史记录同步推进</td><td className="px-3 py-2 border-t border-border">让训练接近真实交易节奏</td></tr>
                   </tbody>
                 </table>
@@ -315,7 +315,7 @@ export default function GuidePage() {
                   用来观察微观结构。若盘口不是策略的一部分，就不要用它作为冲动加仓的借口。
                 </KeyCard>
                 <KeyCard title="推荐节奏">
-                  新手先用 1x-5x 练完整决策，熟悉后用 10x-50x 提高样本量；100x 适合穿越无交易价值的等待区。
+                  新手先用 1x-5x 练完整决策，熟悉后用 10x-50x 提高样本量；50x 适合穿越无交易价值的等待区。
                 </KeyCard>
               </KeyGrid>
               <Highlight>
@@ -339,7 +339,11 @@ export default function GuidePage() {
                     <tr><td className="px-3 py-2 border-t border-border">订单类型</td><td className="px-3 py-2 border-t border-border">区分主力单与对冲单</td><td className="px-3 py-2 border-t border-border">主力单评估方向判断；对冲单评估风险防御</td></tr>
                     <tr><td className="px-3 py-2 border-t border-border">开仓理由</td><td className="px-3 py-2 border-t border-border">记录原始假设</td><td className="px-3 py-2 border-t border-border">必须具体到结构、条件和失效点</td></tr>
                     <tr><td className="px-3 py-2 border-t border-border">最大亏损</td><td className="px-3 py-2 border-t border-border">定义本次风险预算</td><td className="px-3 py-2 border-t border-border">后续 R 倍数以此为分母</td></tr>
-                    <tr><td className="px-3 py-2 border-t border-border">心态自评</td><td className="px-3 py-2 border-t border-border">记录决策者状态</td><td className="px-3 py-2 border-t border-border">低分时必须解释触发原因</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border">心态自评</td><td className="px-3 py-2 border-t border-border">记录决策者状态</td><td className="px-3 py-2 border-t border-border">≤2 分硬阻挡，不能用确认框绕过</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border">Pre-mortem</td><td className="px-3 py-2 border-t border-border">强制先想“如果这单亏完，最可能的原因是什么”</td><td className="px-3 py-2 border-t border-border">平仓后用它比对真实亏损原因</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border">预测胜率</td><td className="px-3 py-2 border-t border-border">Tetlock 式校准训练</td><td className="px-3 py-2 border-t border-border">平仓后进入 Calibration，计算校准分数</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border">训练集划分</td><td className="px-3 py-2 border-t border-border">区分进场期与出场期</td><td className="px-3 py-2 border-t border-border">防止把训练样本误当考试成绩</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border">风险组合与破产估计</td><td className="px-3 py-2 border-t border-border">显示 Lollapalooza score 与 100 次连续训练的期望破产次数</td><td className="px-3 py-2 border-t border-border">组合风险过高时硬阻挡</td></tr>
                     <tr><td className="px-3 py-2 border-t border-border">Checklist</td><td className="px-3 py-2 border-t border-border">把规则前置到下单前</td><td className="px-3 py-2 border-t border-border">不能判断是否通过的条目，需要重写</td></tr>
                   </tbody>
                 </table>
@@ -353,9 +357,10 @@ export default function GuidePage() {
               <SubTitle>3.3 持仓与历史</SubTitle>
               <P>底部历史区用于检查执行结果。重点关注三类记录：未评价交易、仓位历史记录、平仓方式。</P>
               <ul className="list-disc pl-6 text-[14px] text-foreground/90 space-y-1">
-                <li><strong>未评价交易</strong>：优先补齐，否则错题集无法形成有效样本。</li>
+                <li><strong>未评价交易</strong>：优先补齐。已平仓未评价会硬阻塞下一次开仓。</li>
                 <li><strong>仓位历史记录</strong>：可用于归类历史交易，组成一次交易战役。</li>
                 <li><strong>平仓方式</strong>：区分手动、止损、止盈、爆仓，判断你是在执行系统还是被情绪驱动。</li>
+                <li><strong>克制记录</strong>：记录“我忍住没下的单”，它和实际下单一样进入元监控。</li>
               </ul>
             </section>
           </section>
@@ -400,14 +405,17 @@ export default function GuidePage() {
                 </table>
               </div>
               <P>归类历史交易时，先输入或选择标的，再从该币种所有时间段的仓位历史记录中勾选一组相关交易。被选中的记录共同构成一次交易战役。</P>
+              <P>实时战役与历史归类战役必须隔离。实时战役在开仓时归属；历史归类只加入历史战役，不把回填数据混进实时训练口径。</P>
             </section>
 
             <section id="s4-3" className="scroll-mt-20">
               <SubTitle>4.3 元监控</SubTitle>
-              <P>元监控回答“系统是否真的让你变好”。不要只看漂亮图表，核心看规则创建后，对应错误模式是否下降。</P>
+              <P>元监控回答“系统是否真的让你变好”。不要只看漂亮图表，核心看规则创建后，对应错误模式是否在扣除自然学习曲线与 regression to mean 后仍然下降。</P>
               <ul className="list-disc pl-6 text-[14px] text-foreground/90 space-y-1">
                 <li><strong>错误趋势</strong>：同一 pattern 的近期变化。</li>
-                <li><strong>规则有效性</strong>：规则上线后，对应错误是否减少。</li>
+                <li><strong>规则有效性</strong>：规则上线后，对应错误是否减少，并与全局基线比较。</li>
+                <li><strong>置信区间</strong>：低样本下不把随机波动误读成进步。</li>
+                <li><strong>Calibration</strong>：比较开仓预测胜率与平仓结果，观察判断是否过度自信。</li>
                 <li><strong>订单类型分布</strong>：主力单与对冲单是否失衡。</li>
                 <li><strong>心态与时段</strong>：识别你的高质量状态与危险时段。</li>
               </ul>
@@ -438,6 +446,7 @@ export default function GuidePage() {
               </div>
               <P>生成原理是：先用错题集把单笔错误归入 pattern，再用复盘分析找出可操作的防错条件，最后把这个条件写成下次开仓前必须检查的规则。</P>
               <P>一条规则只有在“启用”且“加入 checklist”后，才会进入开仓快照；否则它只是记录，不会参与下单前约束。</P>
+              <P>规则激活后会进入 7 天冷却期。冷却期内不能关闭、删除、移出 checklist 或降级为非必填，避免刚写下的规则被下一次情绪波动立即废掉。</P>
               <Highlight>
                 规则的价值不在于写得完整，而在于能否前置到下一次决策点，并在元监控中看到对应错误频次下降。
               </Highlight>
@@ -458,6 +467,9 @@ export default function GuidePage() {
               <P><strong>主力单与对冲单必须分开理解。</strong> 主力单评估方向与机会质量；对冲单评估风险管理。把两者混在一起，会污染 R 倍数、胜率和错误模式统计。</P>
               <P><strong>最大亏损是 R 倍数的分母。</strong> 它表达的是本次愿意承受的最大错误成本，不应被事后修改成更好看的数字。</P>
               <P><strong>全仓是硬阻断。</strong> 系统训练阶段只允许逐仓。全仓会把单笔错误扩散到账户整体，违背“损失有界”的底层原则。</P>
+              <P><strong>平仓评价是硬阻断。</strong> 已平仓交易未完成评价、标签与归因前，不能开下一笔新仓。</P>
+              <P><strong>低心态是硬阻断。</strong> 心态 ≤2 分时不能开仓，不提供“我知道但继续”的后门。</P>
+              <P><strong>后见偏差必须隔离。</strong> 复现页在归因完成前隐藏后续走势，归因完成后才揭示行情路径。</P>
               <P><strong>历史回填不等于真实快照。</strong> 回填可以恢复交易结构，但无法恢复当时的理由、心态和风险认识。系统不会假装知道这些缺失信息。</P>
             </div>
           </section>

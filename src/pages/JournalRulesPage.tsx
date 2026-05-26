@@ -16,6 +16,7 @@ import {
   listRules, listPatterns, updateRule, deleteRule,
 } from '@/lib/journalApi';
 import type { TradingRule, ErrorTagPattern } from '@/types/journal';
+import { ruleCooldownRemainingMs } from '@/types/journal';
 
 export default function JournalRulesPage() {
   const nav = useNavigate();
@@ -109,6 +110,9 @@ export default function JournalRulesPage() {
                 {rules.map(r => {
                   const p = r.source_pattern_id ? patternMap.get(r.source_pattern_id) : null;
                   const snoozed = r.snooze_until && new Date(r.snooze_until).getTime() > Date.now();
+                  const cooldownMs = ruleCooldownRemainingMs(r);
+                  const locked = cooldownMs > 0;
+                  const lockedDays = locked ? Math.ceil(cooldownMs / 86400_000) : 0;
                   return (
                     <tr key={r.id} className="border-t border-border hover:bg-card/50">
                       <td className="px-3 py-2 align-top">
@@ -131,6 +135,11 @@ export default function JournalRulesPage() {
                                 延后至 {new Date(r.snooze_until!).toLocaleString('zh-CN')}
                               </div>
                             )}
+                            {locked && (
+                              <div className="text-[10px] text-[#F6465D] mt-0.5">
+                                🔒 激活冷却期 · 还需 {lockedDays} 天
+                              </div>
+                            )}
                           </div>
                         )}
                       </td>
@@ -138,20 +147,33 @@ export default function JournalRulesPage() {
                         {p ? p.pattern_name : '手动'}
                       </td>
                       <td className="px-3 py-2 align-top text-center">
-                        <Switch checked={r.is_active} onCheckedChange={(v) => handlePatch(r.id, { is_active: v })} />
+                        <Switch
+                          checked={r.is_active}
+                          disabled={locked && r.is_active}
+                          onCheckedChange={(v) => handlePatch(r.id, { is_active: v })}
+                        />
                       </td>
                       <td className="px-3 py-2 align-top text-center">
-                        <Switch checked={r.added_to_checklist} onCheckedChange={(v) => handlePatch(r.id, { added_to_checklist: v })} />
+                        <Switch
+                          checked={r.added_to_checklist}
+                          disabled={locked && r.added_to_checklist}
+                          onCheckedChange={(v) => handlePatch(r.id, { added_to_checklist: v })}
+                        />
                       </td>
                       <td className="px-3 py-2 align-top text-center">
-                        <Switch checked={r.required} onCheckedChange={(v) => handlePatch(r.id, { required: v })} />
+                        <Switch
+                          checked={r.required}
+                          disabled={locked && r.required}
+                          onCheckedChange={(v) => handlePatch(r.id, { required: v })}
+                        />
                       </td>
                       <td className="px-3 py-2 align-top text-right">
                         <Button size="sm" variant="ghost" className="h-7 w-7 p-0"
                           onClick={() => { setEditingId(r.id); setEditText(r.rule_text); }}>
                           <Pencil className="w-3 h-3" />
                         </Button>
-                        <Button size="sm" variant="ghost" className="h-7 w-7 p-0 hover:text-[#F6465D]"
+                        <Button size="sm" variant="ghost" className="h-7 w-7 p-0 hover:text-[#F6465D] disabled:opacity-30"
+                          disabled={locked}
                           onClick={() => handleDelete(r.id)}>
                           <Trash2 className="w-3 h-3" />
                         </Button>

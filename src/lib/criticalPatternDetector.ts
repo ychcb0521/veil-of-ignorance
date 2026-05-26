@@ -1,13 +1,27 @@
 /**
  * 高频错误模式检测器：检测应该立即生成新规则的 pattern
+ *
+ * 触发条件：
+ *  - frequency: 同一 pattern 30 天内 ≥3 次且平均亏损（防中频错误堆积）
+ *  - catastrophic: 单笔实际亏损 ≥ 2 × 预设最大亏损（防尾部黑天鹅，1 次就触发）
  */
 import { supabase } from '@/integrations/supabase/client';
 import type { ErrorTagPattern, TradeJournal, JournalTagAssignment, TradingRule } from '@/types/journal';
 
+export type CriticalTrigger = 'frequency' | 'catastrophic';
+
+/** 实际亏损超过预设最大亏损多少倍即视为致命（突破自己定的止损）。 */
+export const CATASTROPHIC_LOSS_R_MULTIPLE = 2;
+
 export interface CriticalPatternInfo {
-  pattern: ErrorTagPattern;
+  trigger: CriticalTrigger;
+  pattern: ErrorTagPattern | null;
+  /** frequency: 30 天内出现次数；catastrophic: 1 */
   last_30d_count: number;
+  /** frequency: 平均 P&L；catastrophic: 单笔 P&L */
   avg_pnl: number;
+  /** catastrophic 触发时填入实际 / 预设亏损倍数（R 倍数的绝对值） */
+  loss_r_multiple?: number;
   recent_journals: TradeJournal[];
 }
 
@@ -54,6 +68,8 @@ export async function evaluateCriticalPatterns(
   }
 
   const result: CriticalPatternInfo[] = [];
+
+  // ===== Trigger 1: frequency (legacy) =====
   for (const p of patterns) {
     if (snoozedPatterns.has(p.id)) continue;
     if (activeRulesByPattern.has(p.id)) continue;
@@ -68,11 +84,49 @@ export async function evaluateCriticalPatterns(
       (a, b) => new Date(b.pre_simulated_time).getTime() - new Date(a.pre_simulated_time).getTime(),
     ).slice(0, 3);
     result.push({
+      trigger: 'frequency',
       pattern: p,
       last_30d_count: js.length,
       avg_pnl: avg,
       recent_journals: recent,
     });
   }
+
+  // ===== Trigger 2: catastrophic single event (fat-tail defense) =====
+  // 任何一笔实际亏损 ≥ CATASTROPHIC_LOSS_R_MULTIPLE × 预设最大亏损，且当前没有针对它的活规则。
+  // 这类事件 30 天 ≥3 次的阈值永远等不到——你已经爆仓了。
+  const catastrophicSeenKey = new Set<string>(); // journalId 去重
+  // Already-handled catastrophic journals: any journal that is the source for an active or snoozed rule.
+  // We use post_reflection presence as a weak proxy for "user already wrote something" — but the real
+  // gate is: has the user already created an active rule for any pattern attached to this journal?
+  const journalToActivePattern = new Map<string, string>();
+  for (const a of assignments) {
+    if (activeRulesByPattern.has(a.pattern_id) || snoozedPatterns.has(a.pattern_id)) {
+      journalToActivePattern.set(a.journal_id, a.pattern_id);
+    }
+  }
+
+  for (const j of journals) {
+    if (catastrophicSeenKey.has(j.id)) continue;
+    if (journalToActivePattern.has(j.id)) continue; // already has rule
+    if (!j.post_reviewed_at) continue; // wait for user to review first
+    const pnl = j.post_realized_pnl;
+    const maxLoss = j.pre_max_loss_usdt;
+    if (pnl == null || maxLoss == null || maxLoss <= 0) continue;
+    if (pnl >= 0) continue;
+    const absR = Math.abs(pnl) / maxLoss;
+    if (absR < CATASTROPHIC_LOSS_R_MULTIPLE) continue;
+    if (new Date(j.pre_simulated_time).getTime() < since30) continue;
+    catastrophicSeenKey.add(j.id);
+    result.push({
+      trigger: 'catastrophic',
+      pattern: null,
+      last_30d_count: 1,
+      avg_pnl: pnl,
+      loss_r_multiple: absR,
+      recent_journals: [j],
+    });
+  }
+
   return result;
 }

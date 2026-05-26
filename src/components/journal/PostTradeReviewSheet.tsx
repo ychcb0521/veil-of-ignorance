@@ -1,5 +1,7 @@
 /**
  * 平仓评价抽屉 — 桌面 right Sheet / 移动 bottom Sheet
+ * 注意：本抽屉一旦被打开（journal.post_reviewed_at == null）就不允许 dismiss。
+ *      用户必须填完字段并保存才能离开。这是为了堵住"静默关闭"漏洞。
  */
 import { useEffect, useMemo, useState } from 'react';
 import { Sheet, SheetContent } from '@/components/ui/sheet';
@@ -130,6 +132,17 @@ export function PostTradeReviewSheet({
     return `${h}h ${m}m`;
   }, [journal, tradeRecord?.closeTime]);
 
+  // Hard-block dismiss when an unreviewed journal is open. Editing an already-reviewed
+  // journal stays freely dismissible.
+  const unreviewedBlock = !!journal && !journal.post_reviewed_at;
+  const guardedOpenChange = (next: boolean) => {
+    if (!next && unreviewedBlock) {
+      toast.error('请先完成本笔平仓评价，再离开');
+      return;
+    }
+    onOpenChange(next);
+  };
+
   // Render loading placeholder instead of null to keep hook order stable
   if (!journal) {
     const placeholder = (
@@ -256,6 +269,18 @@ export function PostTradeReviewSheet({
   const fmtTime = (iso: string) =>
     new Date(iso).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
 
+  const calibrationPct = journal.pre_calibration_win_pct;
+  const calibrationScore = calibrationPct == null || journal.direction === 'no_entry'
+    ? null
+    : Math.pow((calibrationPct / 100) - (outcome === 'win' ? 1 : 0), 2);
+  const calibrationOutcomeLabel = outcome === 'win'
+    ? '实际盈利'
+    : outcome === 'loss'
+      ? '实际亏损'
+      : outcome === 'breakeven'
+        ? '实际保本'
+        : '未入场';
+
   const body = (
     <>
       <div className="px-5 py-4 border-b border-border bg-gradient-to-b from-muted/25 to-background/80">
@@ -359,6 +384,38 @@ export function PostTradeReviewSheet({
             <div>{holdDurationLabel}</div>
           </div>
         </div>
+
+        {calibrationPct != null && (
+          <div className={`space-y-2 px-4 py-4 ${sectionCardClass}`}>
+            <div className="flex items-center justify-between gap-3">
+              <div className="text-[12px] font-medium">Calibration 比对</div>
+              {calibrationScore != null && (
+                <span className={`font-mono text-[11px] ${
+                  calibrationScore <= 0.2 ? 'text-[#0ECB81]' : calibrationScore <= 0.3 ? 'text-[#F0B90B]' : 'text-[#F6465D]'
+                }`}>
+                  Brier {calibrationScore.toFixed(3)}
+                </span>
+              )}
+            </div>
+            <div className="grid grid-cols-2 gap-2 text-[11px] font-mono">
+              <div className={metricCardClass}>
+                <div className="text-[10px] uppercase tracking-wide text-muted-foreground">开仓预测胜率</div>
+                <div>{calibrationPct.toFixed(0)}%</div>
+              </div>
+              <div className={metricCardClass}>
+                <div className="text-[10px] uppercase tracking-wide text-muted-foreground">平仓后结果</div>
+                <div className={outcome === 'win' ? 'text-[#0ECB81]' : outcome === 'loss' ? 'text-[#F6465D]' : 'text-muted-foreground'}>
+                  {calibrationOutcomeLabel}
+                </div>
+              </div>
+            </div>
+            {journal.pre_mortem_text && (
+              <div className="rounded-lg border border-border/60 bg-background/60 px-3 py-2 text-[11px] leading-relaxed">
+                <span className="text-muted-foreground">开仓前最担心：</span>{journal.pre_mortem_text}
+              </div>
+            )}
+          </div>
+        )}
 
         <div className={`space-y-2 px-4 py-4 ${sectionCardClass}`}>
           <div className="flex items-center justify-between gap-3">
@@ -475,8 +532,14 @@ export function PostTradeReviewSheet({
         )}
       </div>
 
-      <div className="px-5 py-3 border-t border-border flex justify-end gap-2 shrink-0 bg-gradient-to-t from-muted/20 to-background">
-        <Button variant="ghost" onClick={() => onOpenChange(false)} className="h-9 rounded-lg px-4 text-[12px] hover:bg-accent/60">取消</Button>
+      <div className="px-5 py-3 border-t border-border flex justify-between items-center gap-2 shrink-0 bg-gradient-to-t from-muted/20 to-background">
+        {unreviewedBlock ? (
+          <span className="text-[10px] text-[#F6465D] font-medium">
+            🔒 评价完成前无法关闭 — 防止"静默关闭"丢失错题样本
+          </span>
+        ) : (
+          <Button variant="ghost" onClick={() => onOpenChange(false)} className="h-9 rounded-lg px-4 text-[12px] hover:bg-accent/60">取消</Button>
+        )}
         <Button
           onClick={handleSave}
           disabled={!canSave}
@@ -488,8 +551,14 @@ export function PostTradeReviewSheet({
 
   if (isMobile) {
     return (
-      <Sheet open={isOpen} onOpenChange={onOpenChange}>
-        <SheetContent side="bottom" className="h-[92vh] rounded-t-2xl p-0 bg-background border-t border-border flex flex-col">
+      <Sheet open={isOpen} onOpenChange={guardedOpenChange}>
+        <SheetContent
+          side="bottom"
+          className="h-[92vh] rounded-t-2xl p-0 bg-background border-t border-border flex flex-col"
+          onPointerDownOutside={unreviewedBlock ? e => e.preventDefault() : undefined}
+          onEscapeKeyDown={unreviewedBlock ? e => e.preventDefault() : undefined}
+          onInteractOutside={unreviewedBlock ? e => e.preventDefault() : undefined}
+        >
           {body}
         </SheetContent>
       </Sheet>
@@ -497,8 +566,14 @@ export function PostTradeReviewSheet({
   }
 
   return (
-    <Sheet open={isOpen} onOpenChange={onOpenChange}>
-      <SheetContent side="right" className="w-[640px] sm:max-w-[640px] p-0 bg-background border-l border-border shadow-2xl flex flex-col">
+    <Sheet open={isOpen} onOpenChange={guardedOpenChange}>
+      <SheetContent
+        side="right"
+        className="w-[640px] sm:max-w-[640px] p-0 bg-background border-l border-border shadow-2xl flex flex-col"
+        onPointerDownOutside={unreviewedBlock ? e => e.preventDefault() : undefined}
+        onEscapeKeyDown={unreviewedBlock ? e => e.preventDefault() : undefined}
+        onInteractOutside={unreviewedBlock ? e => e.preventDefault() : undefined}
+      >
         {body}
       </SheetContent>
     </Sheet>

@@ -6,6 +6,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { LegRoleChip } from '@/components/journal/LegRoleChip';
 import { getAssignableLegRoles, LEG_ROLE_LABELS } from '@/lib/strategyTemplates';
 import { batchAttachToCampaign, batchBackfillAndAttach, suggestLegRoles, validateClassification } from '@/lib/journalApi';
+import { isHistoricalCampaign } from '@/types/journal';
 import type {
   ClassificationValidationResult,
   LegRole,
@@ -121,7 +122,7 @@ export function AddToExistingCampaignDialog({
     [items],
   );
   const sortedCampaigns = useMemo(() => {
-    return [...campaigns].sort((a, b) => {
+    return campaigns.filter(item => isHistoricalCampaign(item.campaign)).sort((a, b) => {
       const aScore = a.campaign.symbol === symbol ? 0 : 1;
       const bScore = b.campaign.symbol === symbol ? 0 : 1;
       if (aScore !== bScore) return aScore - bScore;
@@ -227,7 +228,7 @@ export function AddToExistingCampaignDialog({
           )}
           {sortedCampaigns.length === 0 ? (
             <div className="rounded border border-border bg-muted/30 px-4 py-4 text-[12px] text-muted-foreground">
-              该标的下无可加入的活动战役，请选择“归类为新战役”。
+              该标的下无可加入的历史战役，请选择“归类为新战役”。实时战役不会在这里混入历史归类。
             </div>
           ) : (
             <>

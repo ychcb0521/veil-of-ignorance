@@ -7,21 +7,25 @@ import { useEffect, useMemo, useState } from 'react';
 import { Textarea } from '@/components/ui/textarea';
 import { Input } from '@/components/ui/input';
 import { Checkbox } from '@/components/ui/checkbox';
-import { MENTAL_STATE_LABELS } from '@/types/journal';
+import { isHistoricalCampaign, MENTAL_STATE_LABELS } from '@/types/journal';
 import { buildChecklist, isChecklistPassed } from '@/lib/defaultChecklist';
-import { getCampaignWithLegs, listActiveCampaigns, listRules } from '@/lib/journalApi';
+import { getCampaignWithLegs, listActiveCampaigns, listJournals, listRules } from '@/lib/journalApi';
 import { LEG_ROLE_LABELS, STRATEGY_TEMPLATES } from '@/lib/strategyTemplates';
+import { computeLollapaloozaScore, lollapaloozaLevel } from '@/lib/lollapaloozaScore';
+import { estimateBankruptcy } from '@/lib/bankruptcyEstimator';
 import { useAuth } from '@/contexts/AuthContext';
 import { useTradingContext } from '@/contexts/TradingContext';
-import { AlertTriangle, ShieldCheck } from 'lucide-react';
+import { AlertOctagon, AlertTriangle, ShieldCheck } from 'lucide-react';
 import type { PlaceOrderParams } from '@/contexts/TradingContext';
 import type {
   ChecklistItem,
+  DatasetSplit,
   LegRole,
   OrderKind,
   StrategyTemplate,
   TradeCampaign,
   TradeDirection,
+  TradeJournal,
   TradingRule,
 } from '@/types/journal';
 
@@ -51,6 +55,12 @@ export interface SnapshotPayload {
   pre_checklist_passed: boolean | null;
   pre_position_size: number | null;
   pre_max_loss_usdt: number | null;
+  // Decision-quality fields
+  pre_mortem_text: string | null;
+  pre_calibration_win_pct: number | null;
+  pre_dataset_split: DatasetSplit | null;
+  pre_lollapalooza_score: number | null;
+  pre_bankruptcy_estimate: number | null;
   tp_levels: TpLevel[];
 }
 
@@ -115,9 +125,14 @@ export function PreTradeSnapshotForm({
   const [riskManage, setRiskManage] = useState('');
   const [checked, setChecked] = useState<string[]>([]);
   const [noEntryReason, setNoEntryReason] = useState('');
-  const [overrideLowMental, setOverrideLowMental] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [userRules, setUserRules] = useState<TradingRule[]>([]);
+  // Decision-quality state
+  const [preMortem, setPreMortem] = useState('');
+  const [calibrationPct, setCalibrationPct] = useState('');
+  const [datasetSplit, setDatasetSplit] = useState<DatasetSplit>('in_sample');
+  const [recent24h, setRecent24h] = useState<TradeJournal[]>([]);
+  const [acknowledgedCaution, setAcknowledgedCaution] = useState(false);
   const [activeCampaigns, setActiveCampaigns] = useState<CampaignOption[]>([]);
   const [campaignMode, setCampaignMode] = useState<'create' | 'join' | 'standalone'>('create');
   const [campaignTitle, setCampaignTitle] = useState(() => buildDefaultCampaignTitle(symbol, simulatedTime, direction));
@@ -144,8 +159,9 @@ export function PreTradeSnapshotForm({
     (async () => {
       try {
         const campaigns = await listActiveCampaigns(user.id);
+        const liveCampaigns = campaigns.filter(campaign => !isHistoricalCampaign(campaign));
         const withCounts = await Promise.all(
-          campaigns.map(async campaign => {
+          liveCampaigns.map(async campaign => {
             try {
               const details = await getCampaignWithLegs(campaign.id);
               return { ...campaign, legCount: details.legs.length };
@@ -193,10 +209,27 @@ export function PreTradeSnapshotForm({
 
   const checklistItems = useMemo(() => buildChecklist(userRules), [userRules]);
 
-  // Reset override when mental state >2
+  // Fetch last 24h of journals for Lollapalooza streak detection
   useEffect(() => {
-    if (mental > 2) setOverrideLowMental(false);
-  }, [mental]);
+    if (!user || !isTrade) { setRecent24h([]); return; }
+    let cancelled = false;
+    (async () => {
+      try {
+        const to = new Date().toISOString();
+        const from = new Date(Date.now() - 24 * 3600_000).toISOString();
+        const list = await listJournals(user.id, { dateRange: { from, to } });
+        if (!cancelled) setRecent24h(list);
+      } catch {
+        if (!cancelled) setRecent24h([]);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [user, isTrade]);
+
+  // Reset acknowledgment whenever inputs that drive the score change materially
+  useEffect(() => {
+    setAcknowledgedCaution(false);
+  }, [mental, mentalTrigger, posSize, maxLossInput]);
 
   // ===== Derived =====
   const sizeUsdt = parseFloat(posSize) || 0;
@@ -222,6 +255,34 @@ export function PreTradeSnapshotForm({
     return totalPct > 0 && totalPct <= 100;
   }, [tps, isTrade]);
 
+  // ===== Lollapalooza & bankruptcy estimates =====
+  const lollapalooza = useMemo(() => {
+    if (!isTrade || isHedge) return null;
+    return computeLollapaloozaScore({
+      mentalState: mental,
+      mentalTrigger,
+      positionSizeUsdt: sizeUsdt,
+      availableBalance,
+      recentJournals24h: recent24h,
+    });
+  }, [isTrade, isHedge, mental, mentalTrigger, sizeUsdt, availableBalance, recent24h]);
+
+  const lollaLevel = lollapalooza ? lollapaloozaLevel(lollapalooza.score) : 'safe';
+
+  const calibrationParsed = calibrationPct.trim() === '' ? null : Number(calibrationPct);
+  const calibrationValid = calibrationParsed != null && !isNaN(calibrationParsed)
+    && calibrationParsed >= 0 && calibrationParsed <= 100;
+
+  const bankruptcy = useMemo(() => {
+    if (!isTrade || isHedge || maxLoss <= 0 || availableBalance <= 0) return null;
+    if (!calibrationValid || calibrationParsed == null) return null;
+    return estimateBankruptcy({
+      winProb: calibrationParsed / 100,
+      maxLossUsdt: maxLoss,
+      availableBalance,
+    });
+  }, [isTrade, isHedge, maxLoss, availableBalance, calibrationValid, calibrationParsed]);
+
   const joinDisabled = activeCampaigns.length === 0;
   const campaignFieldsValid = useMemo(() => {
     if (!isTrade) return true;
@@ -239,7 +300,9 @@ export function PreTradeSnapshotForm({
   const canSubmit = useMemo(() => {
     if (reason.trim().length < 20) return false;
     if (mental <= 3 && mentalTrigger.trim().length < 10) return false;
-    if (mental <= 2 && !overrideLowMental) return false;
+    // Mental ≤2 is a hard block — no override path. Per Munger: gates with escape
+    // valves are not gates. If you're in a 1-2 state, walk away.
+    if (mental <= 2) return false;
     if (mode === 'no_entry') {
       if (riskAware.trim().length < 15) return false;
       if (riskManage.trim().length < 15) return false;
@@ -259,9 +322,16 @@ export function PreTradeSnapshotForm({
     if (sizeUsdt <= 0) return false;
     if (maxLoss <= 0) return false;
     if (!checklistPassed) return false;
+    // ===== Decision-quality gates =====
+    if (preMortem.trim().length < 10) return false;
+    if (!calibrationValid) return false;
+    if (lollapalooza && lollapalooza.score >= 60) return false;
+    if (lollapalooza && lollapalooza.score >= 30 && !acknowledgedCaution) return false;
     return true;
-  }, [reason, riskAware, riskManage, mental, mentalTrigger, overrideLowMental,
-      mode, isHedge, tpsValid, sizeUsdt, maxLoss, checklistPassed, noEntryReason, currentMarginMode, campaignFieldsValid]);
+  }, [reason, riskAware, riskManage, mental, mentalTrigger,
+      mode, isHedge, tpsValid, sizeUsdt, maxLoss, checklistPassed, noEntryReason,
+      currentMarginMode, campaignFieldsValid,
+      preMortem, calibrationValid, lollapalooza, acknowledgedCaution]);
 
   const handleSubmit = async () => {
     if (!canSubmit || submitting) return;
@@ -294,9 +364,20 @@ export function PreTradeSnapshotForm({
         campaign_note: campaignMode === 'join' ? (campaignNote.trim() || null) : null,
       } as const;
 
+      // Decision-quality values — only filled in for live trade-mode main orders
+      const isLiveMain = isTrade && !isHedge;
+      const dqFields = {
+        pre_mortem_text: isLiveMain ? preMortem.trim() : null,
+        pre_calibration_win_pct: isLiveMain && calibrationValid ? Number(calibrationParsed) : null,
+        pre_dataset_split: isLiveMain ? datasetSplit : null,
+        pre_lollapalooza_score: isLiveMain && lollapalooza ? lollapalooza.score : null,
+        pre_bankruptcy_estimate: isLiveMain && bankruptcy ? Number(bankruptcy.expectedRuinCountPerHundred.toFixed(2)) : null,
+      };
+
       const payload: SnapshotPayload = isHedge
         ? {
             ...baseCampaign,
+            ...dqFields,
             order_kind: 'hedge',
             pre_entry_reason: reason.trim(),
             pre_planned_stop_loss: null,
@@ -313,6 +394,7 @@ export function PreTradeSnapshotForm({
           }
         : {
             ...baseCampaign,
+            ...dqFields,
             order_kind: mode === 'no_entry' ? 'main' : orderKind,
             pre_entry_reason: reason.trim(),
             pre_planned_stop_loss: null,
@@ -753,15 +835,15 @@ export function PreTradeSnapshotForm({
           </div>
 
           {mental <= 2 && (
-            <div className="bg-[#F6465D]/10 border border-[#F6465D]/30 rounded p-2 text-[11px] text-[#F6465D] space-y-2">
-              <div>心态 ≤2 分，强烈不建议交易。仍要继续请勾选下方确认。</div>
-              <label className="flex items-center gap-2 text-foreground cursor-pointer">
-                <Checkbox
-                  checked={overrideLowMental}
-                  onCheckedChange={v => setOverrideLowMental(!!v)}
-                />
-                <span className="text-[11px]">我已知心态 ≤2 分，仍坚持本次交易</span>
-              </label>
+            <div className="bg-[#F6465D]/10 border border-[#F6465D]/30 rounded p-2 text-[11px] text-[#F6465D] space-y-1">
+              <div className="flex items-center gap-1.5 font-medium">
+                <AlertOctagon className="w-3.5 h-3.5" />
+                <span>心态 ≤2 分 — 系统硬阻挡，本次不能下单</span>
+              </div>
+              <div className="text-foreground/80">
+                关闭弹窗、离开屏幕、做点别的事。下一次心态恢复到 3 分以上再回来。
+                （这条规则没有"我知道我状态差但仍要下单"的复选框——那种后门让本节失效。）
+              </div>
             </div>
           )}
         </div>
@@ -837,6 +919,158 @@ export function PreTradeSnapshotForm({
           </div>
         )}
 
+        {/* (10.5) Decision-quality block — main orders only */}
+        {showFullFields && (
+          <div className="rounded border border-border bg-background/40 p-3 space-y-3">
+            <div className="text-[11px] font-medium text-foreground">决策质量记录</div>
+
+            {/* Pre-mortem (Klein 1989) */}
+            <div className="space-y-1.5">
+              <div className={labelCls}>
+                Pre-mortem{requiredStar}
+                <span className="text-muted-foreground/60 ml-1">至少 10 字</span>
+              </div>
+              <Textarea
+                rows={2}
+                value={preMortem}
+                onChange={e => setPreMortem(e.target.value)}
+                placeholder="假设这单亏完，最可能的原因是什么？例如：行情冲突的更高时间框架结构、流动性枯竭、新闻冲击⋯"
+                className={textareaCls}
+              />
+              <div className="text-[10px] text-muted-foreground">
+                Munger："Invert, always invert" — 先想清楚怎么输，才有资格谈怎么赢。
+              </div>
+            </div>
+
+            {/* Calibration */}
+            <div className="space-y-1.5">
+              <div className={labelCls}>
+                你预测本单胜率{requiredStar}
+                <span className="text-muted-foreground/60 ml-1">0-100%</span>
+              </div>
+              <Input
+                type="number"
+                inputMode="decimal"
+                min={0}
+                max={100}
+                value={calibrationPct}
+                onChange={e => setCalibrationPct(e.target.value)}
+                placeholder="例如：55"
+                className={`${inputCls} w-32`}
+              />
+              <div className="text-[10px] text-muted-foreground">
+                平仓后系统会比对实际结果生成你的校准曲线。重复 50 次后能看出"你以为多准 vs 实际多准"。
+              </div>
+            </div>
+
+            {/* Dataset split */}
+            <div className="space-y-1.5">
+              <div className={labelCls}>训练集划分{requiredStar}</div>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setDatasetSplit('in_sample')}
+                  className={`h-9 rounded border text-[11px] text-left px-3 ${
+                    datasetSplit === 'in_sample'
+                      ? 'border-[#F0B90B] bg-[#F0B90B]/10 text-foreground'
+                      : 'border-border bg-card text-muted-foreground hover:bg-accent'
+                  }`}
+                >
+                  进场期 (in-sample)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setDatasetSplit('out_of_sample')}
+                  className={`h-9 rounded border text-[11px] text-left px-3 ${
+                    datasetSplit === 'out_of_sample'
+                      ? 'border-[#0ECB81] bg-[#0ECB81]/10 text-foreground'
+                      : 'border-border bg-card text-muted-foreground hover:bg-accent'
+                  }`}
+                >
+                  出场期 (out-of-sample)
+                </button>
+              </div>
+              <div className="text-[10px] text-muted-foreground">
+                {datasetSplit === 'in_sample'
+                  ? '进场期：你正在打磨策略——可以反复回看同段行情。'
+                  : '出场期：测试新策略——这段行情你之前没训练过，更能反映真实表现。'}
+              </div>
+            </div>
+
+            {/* Lollapalooza */}
+            {lollapalooza && (
+              <div
+                className={`rounded border p-2.5 text-[11px] space-y-1 ${
+                  lollaLevel === 'blocked'
+                    ? 'border-[#F6465D] bg-[#F6465D]/10'
+                    : lollaLevel === 'caution'
+                      ? 'border-[#F0B90B] bg-[#F0B90B]/10'
+                      : 'border-border bg-card/60'
+                }`}
+              >
+                <div className="flex items-center justify-between">
+                  <span className="font-medium text-foreground">Lollapalooza 风险组合</span>
+                  <span
+                    className={`font-mono ${
+                      lollaLevel === 'blocked' ? 'text-[#F6465D]' :
+                      lollaLevel === 'caution' ? 'text-[#F0B90B]' : 'text-[#0ECB81]'
+                    }`}
+                  >
+                    {lollapalooza.score}/100
+                  </span>
+                </div>
+                {lollapalooza.reasons.length > 0 ? (
+                  <ul className="text-[10px] text-muted-foreground space-y-0.5">
+                    {lollapalooza.reasons.map((r, i) => (
+                      <li key={i}>• {r.label} (+{r.points})</li>
+                    ))}
+                  </ul>
+                ) : (
+                  <div className="text-[10px] text-muted-foreground">无明显偏差叠加。</div>
+                )}
+                {lollaLevel === 'blocked' && (
+                  <div className="text-[10px] text-[#F6465D] font-medium pt-1">
+                    ≥60 分硬阻挡。Munger：多个偏差同时叠加才致命——这正是 fat-tail 的形状。
+                  </div>
+                )}
+                {lollaLevel === 'caution' && (
+                  <label className="flex items-center gap-2 text-foreground cursor-pointer pt-1">
+                    <Checkbox
+                      checked={acknowledgedCaution}
+                      onCheckedChange={v => setAcknowledgedCaution(!!v)}
+                    />
+                    <span className="text-[10px]">我已意识到这些叠加风险，仍坚持下单</span>
+                  </label>
+                )}
+              </div>
+            )}
+
+            {/* Bankruptcy estimate */}
+            {bankruptcy && (
+              <div className="rounded border border-border bg-card/60 p-2.5 text-[11px] space-y-1">
+                <div className="flex items-center justify-between">
+                  <span className="font-medium text-foreground">破产概率估算（按当前仓位连续 100 次）</span>
+                  <span
+                    className={`font-mono ${
+                      bankruptcy.expectedRuinCountPerHundred >= 10
+                        ? 'text-[#F6465D]'
+                        : bankruptcy.expectedRuinCountPerHundred >= 2
+                          ? 'text-[#F0B90B]'
+                          : 'text-[#0ECB81]'
+                    }`}
+                  >
+                    {bankruptcy.expectedRuinCountPerHundred.toFixed(1)} / 100
+                  </span>
+                </div>
+                <div className="text-[10px] text-muted-foreground">
+                  Taleb / ergodicity：账户跌破 50% 即视为破产。中位最终账户倍数 ≈ {bankruptcy.medianFinalMultiple.toFixed(2)}×。
+                  {bankruptcy.expectedRuinCountPerHundred >= 10 && ' ← 这个仓位长期等于自杀。'}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
         {/* (11) No entry reason */}
         {mode === 'no_entry' && (
           <div className="space-y-1.5">
@@ -848,6 +1082,9 @@ export function PreTradeSnapshotForm({
               placeholder="例如：心态不在状态；手机不在身边；担心当下波动率不可控"
               className={textareaCls}
             />
+            <div className="text-[10px] text-muted-foreground">
+              Via Negativa：你"忍住没下的单"和"下了的单"同样重要。这条记录会进入元监控的克制比指标。
+            </div>
           </div>
         )}
       </div>

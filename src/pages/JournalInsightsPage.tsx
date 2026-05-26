@@ -16,6 +16,14 @@ import {
   groupJournalsByPattern, computeTimeDistribution,
   computeMentalStateDistribution,
 } from '@/lib/journalAggregations';
+import {
+  brierScore,
+  formatDeltaWithCI,
+  meanConfidenceInterval,
+  ruleEffectNetOfBaseline,
+  wilsonInterval,
+} from '@/lib/insightsStats';
+import { isHistoricalCampaign } from '@/types/journal';
 import type { TradeCampaign, TradeJournal } from '@/types/journal';
 
 type Range = 7 | 30 | 90;
@@ -44,9 +52,18 @@ function isClosedCampaign(campaign: TradeCampaign, sinceMs: number) {
   return new Date(campaign.closed_at).getTime() >= sinceMs;
 }
 
+function pct(value: number) {
+  return `${(value * 100).toFixed(0)}%`;
+}
+
+function pctRange([low, high]: [number, number]) {
+  return `${pct(low)}~${pct(high)}`;
+}
+
 async function loadCampaignEconomicStats(userId: string): Promise<CampaignEconomicStats> {
   const sinceMs = Date.now() - 30 * DAY;
-  const campaignRows = (await listAllCampaigns(userId)).filter(campaign => isClosedCampaign(campaign, sinceMs));
+  const campaignRows = (await listAllCampaigns(userId))
+    .filter(campaign => isClosedCampaign(campaign, sinceMs) && !isHistoricalCampaign(campaign));
   if (campaignRows.length === 0) return EMPTY_CAMPAIGN_ECONOMIC;
 
   const pnlMap = new Map(campaignRows.map(item => [item.id, item.final_realized_pnl ?? 0]));
@@ -151,16 +168,20 @@ export default function JournalInsightsPage() {
 
     const timeDist = computeTimeDistribution(cur);
     const mentalDist = computeMentalStateDistribution(cur);
-    const curCampaigns = campaigns.filter(campaign => isClosedCampaign(campaign, sinceMs));
+    const closedCampaigns = campaigns.filter(campaign => isClosedCampaign(campaign, sinceMs));
+    const historicalCampaigns = closedCampaigns.filter(isHistoricalCampaign);
+    const curCampaigns = closedCampaigns.filter(campaign => !isHistoricalCampaign(campaign));
     const campaignWinCount = curCampaigns.filter(campaign =>
       campaign.status === 'closed_profit' || (campaign.final_realized_pnl ?? 0) > 0,
     ).length;
+    const campaignWinCi = wilsonInterval(campaignWinCount, curCampaigns.length);
     const campaignRValues = curCampaigns
       .map(campaign => campaign.final_r_multiple)
       .filter((value): value is number => typeof value === 'number' && Number.isFinite(value));
     const averageRelativeExpectancy = campaignRValues.length === 0
       ? 0
       : campaignRValues.reduce((sum, value) => sum + value, 0) / campaignRValues.length;
+    const averageRelativeExpectancyCi = meanConfidenceInterval(campaignRValues);
     const mainOrders = cur.filter(j => j.order_kind === 'main');
     const hedgeOrders = cur.filter(j => j.order_kind === 'hedge');
     const avgR = (arr: TradeJournal[]) => {
@@ -182,19 +203,53 @@ export default function JournalInsightsPage() {
     const ruleEffect = data.rules
       .filter(r => r.source_pattern_id && r.added_to_checklist && r.is_active)
       .map(r => {
-        const since = new Date(r.created_at).getTime();
+        const since = new Date(r.activated_at ?? r.created_at).getTime();
+        const afterEnd = Math.min(now, since + range * DAY);
+        const windowMs = Math.max(0, afterEnd - since);
+        const beforeStart = since - windowMs;
         const before = data.assignments.filter(a =>
           a.pattern_id === r.source_pattern_id &&
           new Date(a.created_at).getTime() < since &&
-          new Date(a.created_at).getTime() >= since - range * DAY,
+          new Date(a.created_at).getTime() >= beforeStart,
         ).length;
         const after = data.assignments.filter(a =>
           a.pattern_id === r.source_pattern_id &&
-          new Date(a.created_at).getTime() >= since,
+          new Date(a.created_at).getTime() >= since &&
+          new Date(a.created_at).getTime() <= afterEnd,
         ).length;
+        const globalBefore = data.assignments.filter(a => {
+          const ts = new Date(a.created_at).getTime();
+          return ts >= beforeStart && ts < since;
+        }).length;
+        const globalAfter = data.assignments.filter(a => {
+          const ts = new Date(a.created_at).getTime();
+          return ts >= since && ts <= afterEnd;
+        }).length;
         const pattern = data.patterns.find(p => p.id === r.source_pattern_id);
-        return { rule: r, pattern, before, after, delta: after - before };
+        const ci = formatDeltaWithCI(before, after);
+        const baseline = ruleEffectNetOfBaseline(before, after, globalBefore, globalAfter);
+        return { rule: r, pattern, before, after, delta: after - before, ci, baseline, globalBefore, globalAfter };
       });
+
+    const calibrationSamples = cur
+      .filter(j => j.pre_calibration_win_pct != null && j.post_outcome != null && j.post_outcome !== 'no_entry')
+      .map(j => ({
+        predProb: Math.min(1, Math.max(0, (j.pre_calibration_win_pct ?? 0) / 100)),
+        outcomeWin: j.post_outcome === 'win',
+      }));
+    const calibrationWins = calibrationSamples.filter(sample => sample.outcomeWin).length;
+    const calibrationCi = wilsonInterval(calibrationWins, calibrationSamples.length);
+    const avgPredictedWinRate = calibrationSamples.length === 0
+      ? 0
+      : calibrationSamples.reduce((sum, sample) => sum + sample.predProb, 0) / calibrationSamples.length;
+    const calibration = {
+      count: calibrationSamples.length,
+      brier: brierScore(calibrationSamples),
+      avgPredictedWinRate,
+      actualWinRate: calibrationSamples.length === 0 ? 0 : calibrationWins / calibrationSamples.length,
+      ci: calibrationCi,
+    };
+    const restraintCount = cur.filter(j => j.direction === 'no_entry' || j.post_outcome === 'no_entry').length;
 
     // 深度分析完成率：六步全填的占已评价 journal 比
     const reviewed = cur.filter(j => !!j.post_reviewed_at);
@@ -208,11 +263,16 @@ export default function JournalInsightsPage() {
 
     return {
       cur, curClusters, trend, timeDist, mentalDist, alphaHours, ruleEffect, reviewed, deepDone, deepRate, mixedRBasis,
+      calibration,
+      restraintCount,
       campaignOutcome: {
         count: curCampaigns.length,
         winRate: curCampaigns.length === 0 ? 0 : campaignWinCount / curCampaigns.length,
+        winCi: campaignWinCi,
         averageRelativeExpectancy,
+        averageRelativeExpectancyCi,
         relativeSampleCount: campaignRValues.length,
+        historicalExcludedCount: historicalCampaigns.length,
       },
       orderTypeStats: {
         main: { count: mainOrders.length, winRate: winRate(mainOrders), avgR: avgR(mainOrders) },
@@ -277,19 +337,29 @@ export default function JournalInsightsPage() {
 
       <main className="max-w-[1400px] mx-auto px-6 py-4 space-y-4">
         {/* Overview */}
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-          <StatCard label="总战役" value={stats.campaignOutcome.count.toString()} sub="已结束战役" />
+        <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
+          <StatCard
+            label="总战役"
+            value={stats.campaignOutcome.count.toString()}
+            sub={stats.campaignOutcome.historicalExcludedCount > 0
+              ? `实时已结束 · 排除历史 ${stats.campaignOutcome.historicalExcludedCount}`
+              : '实时已结束战役'}
+          />
           <StatCard
             label="战役胜率"
-            value={`${(stats.campaignOutcome.winRate * 100).toFixed(0)}%`}
+            value={pct(stats.campaignOutcome.winRate)}
             accent={stats.campaignOutcome.count === 0 ? '#848E9C' : stats.campaignOutcome.winRate >= 0.5 ? '#0ECB81' : '#F6465D'}
+            sub={stats.campaignOutcome.count === 0 ? '95% CI —' : `95% CI ${pctRange(stats.campaignOutcome.winCi)}`}
           />
           <StatCard
             label="平均相对期望"
             value={stats.campaignOutcome.averageRelativeExpectancy.toFixed(2)}
             accent={stats.campaignOutcome.relativeSampleCount === 0 ? '#848E9C' : stats.campaignOutcome.averageRelativeExpectancy >= 0 ? '#0ECB81' : '#F6465D'}
-            sub={stats.campaignOutcome.count === 0 ? '按战役 R' : `${stats.campaignOutcome.relativeSampleCount}/${stats.campaignOutcome.count} 有 R 数据`}
+            sub={stats.campaignOutcome.relativeSampleCount === 0
+              ? '按实时战役 R'
+              : `95% CI ${stats.campaignOutcome.averageRelativeExpectancyCi[0].toFixed(2)}~${stats.campaignOutcome.averageRelativeExpectancyCi[1].toFixed(2)}`}
           />
+          <StatCard label="克制记录" value={stats.restraintCount.toString()} sub="忍住没下的单" />
           <StatCard label="错误模式数" value={stats.curClusters.length.toString()} />
           <StatCard
             label="深度分析完成率"
@@ -375,6 +445,36 @@ export default function JournalInsightsPage() {
           </section>
         </div>
 
+        <section className="border border-border rounded bg-card p-3">
+          <div className="text-[12px] font-medium mb-2">Calibration 校准</div>
+          {stats.calibration.count === 0 ? (
+            <div className="text-[11px] text-muted-foreground">暂无带开仓胜率预测且已平仓评价的样本</div>
+          ) : (
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              <div className="rounded border border-border bg-background p-2">
+                <div className="text-[10px] text-muted-foreground">样本</div>
+                <div className="text-[18px] font-mono">{stats.calibration.count}</div>
+              </div>
+              <div className="rounded border border-border bg-background p-2">
+                <div className="text-[10px] text-muted-foreground">预测胜率均值</div>
+                <div className="text-[18px] font-mono">{pct(stats.calibration.avgPredictedWinRate)}</div>
+              </div>
+              <div className="rounded border border-border bg-background p-2">
+                <div className="text-[10px] text-muted-foreground">实际胜率</div>
+                <div className="text-[18px] font-mono">{pct(stats.calibration.actualWinRate)}</div>
+                <div className="text-[10px] text-muted-foreground font-mono">95% CI {pctRange(stats.calibration.ci)}</div>
+              </div>
+              <div className="rounded border border-border bg-background p-2">
+                <div className="text-[10px] text-muted-foreground">Brier 分数</div>
+                <div className={`text-[18px] font-mono ${stats.calibration.brier <= 0.2 ? 'text-[#0ECB81]' : stats.calibration.brier <= 0.3 ? 'text-[#F0B90B]' : 'text-[#F6465D]'}`}>
+                  {stats.calibration.brier.toFixed(3)}
+                </div>
+                <div className="text-[10px] text-muted-foreground">越低越准</div>
+              </div>
+            </div>
+          )}
+        </section>
+
         <div className="grid md:grid-cols-2 gap-3">
           <section className="border border-border rounded bg-card p-3">
             <div className="text-[12px] font-medium mb-2">订单类型分布</div>
@@ -415,29 +515,38 @@ export default function JournalInsightsPage() {
 
         {/* Rule effectiveness */}
         <section className="border border-border rounded bg-card">
-          <div className="px-3 py-2 border-b border-border text-[12px] font-medium">规则有效性（生效前后该 pattern 的出现次数）</div>
+          <div className="px-3 py-2 border-b border-border text-[12px] font-medium">规则有效性（扣除学习曲线与均值回归）</div>
           {stats.ruleEffect.length === 0 ? (
             <div className="p-6 text-center text-[11px] text-muted-foreground">尚无已生效的规则可观测</div>
           ) : (
             <table className="w-full text-[11px]">
               <thead className="text-muted-foreground bg-background">
-                <tr><th className="text-left px-3 py-1.5">规则</th><th className="text-left px-3">来源</th><th className="text-left px-3">来源模式</th><th className="text-right px-3">规则前</th><th className="text-right px-3">规则后</th><th className="text-right px-3 pr-3">Δ</th></tr>
+                <tr>
+                  <th className="text-left px-3 py-1.5">规则</th>
+                  <th className="text-left px-3">来源模式</th>
+                  <th className="text-right px-3">前</th>
+                  <th className="text-right px-3">后</th>
+                  <th className="text-right px-3">Δ / CI</th>
+                  <th className="text-left px-3 pr-3">净效应</th>
+                </tr>
               </thead>
               <tbody className="font-mono">
                 {stats.ruleEffect.map(e => {
-                  const sourceLabel = e.rule.source_pattern_id ? '模式触发' : '手动';
-                  const sourceColor = e.rule.source_pattern_id ? 'bg-[#F0B90B]/15 text-[#F0B90B]' : 'bg-muted text-muted-foreground';
                   return (
                     <tr key={e.rule.id} className="border-t border-border">
                       <td className="px-3 py-1.5 text-foreground truncate max-w-[300px]">{e.rule.rule_text}</td>
-                      <td className="px-3">
-                        <span className={`inline-block rounded px-1.5 py-0.5 text-[10px] ${sourceColor}`}>{sourceLabel}</span>
-                      </td>
                       <td className="px-3 text-muted-foreground">{e.pattern?.pattern_name ?? '—'}</td>
                       <td className="text-right px-3">{e.before}</td>
                       <td className="text-right px-3">{e.after}</td>
-                      <td className={`text-right px-3 pr-3 ${e.delta < 0 ? 'text-[#0ECB81]' : e.delta > 0 ? 'text-[#F6465D]' : 'text-muted-foreground'}`}>
-                        {e.delta > 0 ? '+' : ''}{e.delta}
+                      <td className={`text-right px-3 ${e.delta < 0 ? 'text-[#0ECB81]' : e.delta > 0 ? 'text-[#F6465D]' : 'text-muted-foreground'}`}>
+                        <div>{e.delta > 0 ? '+' : ''}{e.delta}</div>
+                        <div className="text-[9px] text-muted-foreground">{e.ci.note}</div>
+                      </td>
+                      <td className={`px-3 pr-3 ${e.baseline.ruleAttributablePct < -0.1 ? 'text-[#0ECB81]' : e.baseline.ruleAttributablePct > 0.1 ? 'text-[#F6465D]' : 'text-muted-foreground'}`}>
+                        <div>{e.baseline.note}</div>
+                        <div className="text-[9px] text-muted-foreground">
+                          全局 {e.globalBefore}→{e.globalAfter}
+                        </div>
                       </td>
                     </tr>
                   );
@@ -455,7 +564,7 @@ export default function JournalInsightsPage() {
             {campaignEconomic?.unavailable ? '—' : `${(campaignEconomic?.totalDeviationCost ?? 0).toFixed(2)} USDT`}
           </div>
           <div className="mt-2 text-[11px] text-muted-foreground">
-            {campaignEconomic?.unavailable ? '战役成本数据暂不可用' : '过去 30 天因 SOP 偏离损失的金额'}
+            {campaignEconomic?.unavailable ? '战役成本数据暂不可用' : '过去 30 天实时战役因 SOP 偏离损失的金额'}
           </div>
           <div className={`mt-2 text-[11px] ${
             (campaignEconomic?.totalDeviationCost ?? 0) > 0 ? 'text-[#F6465D]' : 'text-[#0ECB81]'
