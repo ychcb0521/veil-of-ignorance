@@ -117,7 +117,10 @@ function isCognitiveAssetSection(value: unknown): value is CognitiveAssetSection
   return isRecord(value)
     && typeof value.id === 'string'
     && typeof value.title === 'string'
-    && typeof value.content === 'string';
+    && typeof value.content === 'string'
+    && (value.headingLevel === undefined || typeof value.headingLevel === 'number')
+    && (value.headingNumber === undefined || typeof value.headingNumber === 'string')
+    && (value.sourceTitle === undefined || typeof value.sourceTitle === 'string');
 }
 
 function isCognitiveAssetCategory(value: unknown): value is CognitiveAssetCategory {

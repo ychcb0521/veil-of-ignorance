@@ -17,6 +17,13 @@ type ExtractedDocument = {
 type DraftSection = {
   title: string;
   content: string;
+  level: number;
+};
+
+type HeadingInfo = {
+  title: string;
+  level?: number;
+  isTopLevel?: boolean;
 };
 
 const SUPPORTED_EXTENSIONS = new Set(['pdf', 'doc', 'docx', 'txt']);
@@ -313,17 +320,51 @@ async function extractPdfText(buffer: ArrayBuffer): Promise<string> {
   return normalizeText([...blockTexts, plainText].filter(Boolean).join('\n\n'));
 }
 
-function getHeadingTitle(line: string): string | null {
+function clampHeadingLevel(level: number): number {
+  return Math.max(1, Math.min(6, Math.floor(level)));
+}
+
+function stripSourceNumber(title: string): string {
+  return title
+    .replace(/^\s*\d+(?:\.\d+)*[.)）、．、\s]+/, '')
+    .replace(/^\s*[（(]\d+[）)]\s*/, '')
+    .trim();
+}
+
+function getHeadingInfo(line: string): HeadingInfo | null {
   const trimmed = line.trim();
   const markdown = /^(#{1,6})\s+(.+)$/.exec(trimmed);
-  if (markdown) return markdown[2].trim();
-
-  if (/^(第[一二三四五六七八九十百千万0-9]+[章节篇部]|[一二三四五六七八九十]+[、.．]|[0-9]+(?:\.[0-9]+)*[、.．\s])\s*.+/.test(trimmed)) {
-    return trimmed.replace(/^#{1,6}\s+/, '');
+  if (markdown) {
+    return {
+      title: stripSourceNumber(markdown[2].trim()) || markdown[2].trim(),
+      level: markdown[1].length,
+    };
   }
 
-  const bracketHeading = /^([（(][一二三四五六七八九十0-9]+[）)]|[【[].+[】\]])\s*(.+)?$/.exec(trimmed);
-  if (bracketHeading && trimmed.length <= 40) return trimmed;
+  const dottedNumber = /^(\d+(?:\.\d+)*)[.)、．\s]+(.+)$/.exec(trimmed);
+  if (dottedNumber) {
+    return {
+      title: stripSourceNumber(dottedNumber[2].trim()) || dottedNumber[2].trim(),
+      level: dottedNumber[1].split('.').length,
+    };
+  }
+
+  if (/^(第[一二三四五六七八九十百千万0-9]+[章节篇部]|[一二三四五六七八九十]+[、.．]|[0-9]+(?:\.[0-9]+)*[、.．\s])\s*.+/.test(trimmed)) {
+    return {
+      title: stripSourceNumber(trimmed.replace(/^#{1,6}\s+/, '')) || trimmed,
+      level: 1,
+      isTopLevel: true,
+    };
+  }
+
+  const bracketHeading = /^([（(][一二三四五六七八九十0-9]+[）)]|(?:【|\[).+[】\]])\s*(.+)?$/.exec(trimmed);
+  if (bracketHeading && trimmed.length <= 40) {
+    return {
+      title: trimmed,
+      level: /^(?:【|\[)/.test(trimmed) ? 1 : 2,
+      isTopLevel: /^(?:【|\[)/.test(trimmed),
+    };
+  }
 
   return null;
 }
@@ -402,10 +443,17 @@ function formatSectionLines(lines: string[]): string {
   return blocks.join('\n\n');
 }
 
-function pushSection(sections: DraftSection[], title: string, lines: string[]) {
+function inferHeadingLevel(info: HeadingInfo, currentLevel: number, hasPriorSections: boolean): number {
+  if (info.level) return clampHeadingLevel(info.level);
+  if (!hasPriorSections) return 1;
+  if (info.isTopLevel) return 1;
+  return currentLevel <= 1 ? 2 : currentLevel;
+}
+
+function pushSection(sections: DraftSection[], title: string, lines: string[], level: number) {
   const content = formatSectionLines(lines).trim();
   if (!content) return;
-  sections.push({ title, content });
+  sections.push({ title, content, level: clampHeadingLevel(level) });
 }
 
 function chunkByParagraphs(title: string, text: string): DraftSection[] {
@@ -419,35 +467,60 @@ function chunkByParagraphs(title: string, text: string): DraftSection[] {
     sections.push({
       title: index === 0 ? '正文' : `正文 ${Math.floor(index / chunkSize) + 1}`,
       content: chunk.join('\n\n'),
+      level: 1,
     });
   }
 
-  return sections.length > 0 ? sections : [{ title, content: text }];
+  return sections.length > 0 ? sections : [{ title, content: text, level: 1 }];
 }
 
 function splitIntoSections(title: string, text: string): DraftSection[] {
   const lines = text.split('\n').map(line => line.trim()).filter(Boolean);
   const sections: DraftSection[] = [];
   let currentTitle = '正文';
+  let currentLevel = 1;
   let currentLines: string[] = [];
 
   lines.forEach((line, index) => {
-    const heading = getHeadingTitle(line) ?? (
-      isLikelyStandaloneHeading(line, lines[index + 1]) ? line.trim().replace(/[:：]$/, '') : null
+    const heading = getHeadingInfo(line) ?? (
+      isLikelyStandaloneHeading(line, lines[index + 1])
+        ? { title: line.trim().replace(/[:：]$/, '') }
+        : null
     );
     const canStartSection = heading && (index > 0 || lines.length > 1);
     if (canStartSection) {
-      pushSection(sections, currentTitle, currentLines);
-      currentTitle = heading;
+      pushSection(sections, currentTitle, currentLines, currentLevel);
+      const nextLevel = inferHeadingLevel(heading, currentLevel, sections.length > 0);
+      currentTitle = stripSourceNumber(heading.title) || heading.title;
+      currentLevel = nextLevel;
       currentLines = [];
       return;
     }
     currentLines.push(line);
   });
 
-  pushSection(sections, currentTitle, currentLines);
+  pushSection(sections, currentTitle, currentLines, currentLevel);
   if (sections.length >= 2) return sections;
   return chunkByParagraphs(title, text);
+}
+
+function numberSections(sections: DraftSection[]): Array<DraftSection & { number: string }> {
+  const counters: number[] = [];
+  let previousLevel = 1;
+
+  return sections.map(section => {
+    let level = clampHeadingLevel(section.level);
+    if (level > previousLevel + 1) level = previousLevel + 1;
+    counters[level - 1] = (counters[level - 1] ?? 0) + 1;
+    counters.length = level;
+    previousLevel = level;
+
+    return {
+      ...section,
+      level,
+      number: counters.join('.'),
+    };
+  });
 }
 
 function toMarkdownContent(content: string): string {
@@ -525,7 +598,7 @@ export async function buildCognitiveAssetsDocFromFile(file: File): Promise<Cogni
   }
 
   const title = stripExtension(file.name);
-  const sections = splitIntoSections(title, text);
+  const sections = numberSections(splitIntoSections(title, text));
   const uploadedAt = new Date().toLocaleString('zh-CN', {
     year: 'numeric',
     month: '2-digit',
@@ -548,6 +621,9 @@ export async function buildCognitiveAssetsDocFromFile(file: File): Promise<Cogni
         sections: sections.map((section, index) => ({
           id: `doc-section-${index + 1}-${makeSlug(section.title)}`,
           title: section.title,
+          headingLevel: section.level,
+          headingNumber: section.number,
+          sourceTitle: section.title,
           content: toMarkdownContent(section.content),
         })),
       },

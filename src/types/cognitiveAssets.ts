@@ -2,6 +2,9 @@ export interface CognitiveAssetSection {
   id: string;
   title: string;
   content: string;
+  headingLevel?: number;
+  headingNumber?: string;
+  sourceTitle?: string;
 }
 
 export interface CognitiveAssetCategory {

@@ -1,5 +1,5 @@
 import { type DragEvent, type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowLeft, FileText, List, Loader2, Trash2, Upload } from 'lucide-react';
+import { ArrowLeft, ChevronDown, ChevronRight, FileText, List, Loader2, Trash2, Upload } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { useNavigate } from 'react-router-dom';
 import remarkGfm from 'remark-gfm';
@@ -27,13 +27,20 @@ import {
   getCognitiveAssets,
   replaceCognitiveAssetsDoc,
 } from '@/lib/journalApi';
-import type { CognitiveAssetsDoc } from '@/types/cognitiveAssets';
+import type { CognitiveAssetSection, CognitiveAssetsDoc } from '@/types/cognitiveAssets';
 
 interface TocItem {
   id: string;
   label: string;
-  depth: 1 | 2;
+  level: number;
+  number?: string;
 }
+
+type NumberedSection = CognitiveAssetSection & {
+  displayLevel: number;
+  displayNumber: string;
+  displayTitle: string;
+};
 
 const CATEGORY_ACCENTS = ['#F0B90B', '#0ECB81', '#5BA3FF', '#F6465D', '#A855F7'];
 const DOCUMENT_ACCEPT = [
@@ -50,6 +57,51 @@ const DOCUMENT_ACCEPT = [
 function getFirstTocId(doc: CognitiveAssetsDoc | null): string {
   const firstCategory = doc?.categories[0];
   return firstCategory ? `category-${firstCategory.id}` : '';
+}
+
+function clampTocLevel(level: number): number {
+  return Math.max(1, Math.min(6, Math.floor(level)));
+}
+
+function inferSectionLevel(section: CognitiveAssetSection, previousLevel: number, index: number): number {
+  if (typeof section.headingLevel === 'number') return clampTocLevel(section.headingLevel);
+
+  const title = section.sourceTitle ?? section.title;
+  const numeric = /^(\d+(?:\.\d+)*)[.)、．\s]+/.exec(title);
+  if (numeric) return clampTocLevel(numeric[1].split('.').length);
+  if (/^(?:【|\[)/.test(title) || /^第[一二三四五六七八九十百千万0-9]+[章节篇部]/.test(title)) return 1;
+  if (index === 0) return 1;
+  return previousLevel <= 1 ? 2 : previousLevel;
+}
+
+function stripDisplayNumber(title: string): string {
+  return title
+    .replace(/^\s*\d+(?:\.\d+)*[.)、．\s]+/, '')
+    .replace(/^\s*[（(]\d+[）)]\s*/, '')
+    .trim();
+}
+
+function numberSectionsForDisplay(sections: CognitiveAssetSection[]): NumberedSection[] {
+  const counters: number[] = [];
+  let previousLevel = 1;
+
+  return sections.map((section, index) => {
+    let level = inferSectionLevel(section, previousLevel, index);
+    if (level > previousLevel + 1) level = previousLevel + 1;
+    counters[level - 1] = (counters[level - 1] ?? 0) + 1;
+    counters.length = level;
+    previousLevel = level;
+
+    const displayNumber = section.headingNumber ?? counters.join('.');
+    const displayTitle = stripDisplayNumber(section.sourceTitle ?? section.title) || section.title;
+
+    return {
+      ...section,
+      displayLevel: level,
+      displayNumber,
+      displayTitle,
+    };
+  });
 }
 
 function SectionTitle({ children, accent }: { children: ReactNode; accent?: string }) {
@@ -84,12 +136,12 @@ function TocList({
             key={item.id}
             href={`#${item.id}`}
             onClick={onJump}
-            className={`block rounded hover:bg-accent cursor-pointer ${
-              item.depth === 1
-                ? 'h-8 px-2 leading-8 text-[12px]'
-                : 'h-7 pl-6 pr-2 leading-7 text-[11px]'
-            } ${activeId === item.id ? 'bg-accent border-l-2 border-[#F0B90B] text-foreground' : 'text-muted-foreground'}`}
+            className={`block rounded py-1.5 pr-2 text-[11px] leading-4 hover:bg-accent cursor-pointer break-words ${
+              activeId === item.id ? 'bg-accent border-l-2 border-[#F0B90B] text-foreground' : 'text-muted-foreground'
+            }`}
+            style={{ paddingLeft: item.level === 0 ? 8 : 8 + Math.min(item.level, 5) * 12 }}
           >
+            {item.number ? <span className="font-mono text-[10px] text-[#F0B90B] mr-1">{item.number}</span> : null}
             {item.label}
           </a>
         ))
@@ -245,13 +297,27 @@ export default function CognitiveAssetsPage() {
   const [importing, setImporting] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [dragActive, setDragActive] = useState(false);
+  const [uploadPanelOpen, setUploadPanelOpen] = useState(false);
+
+  const numberedCategories = useMemo(
+    () => (doc?.categories ?? []).map(category => ({
+      ...category,
+      sections: numberSectionsForDisplay(category.sections),
+    })),
+    [doc],
+  );
 
   const tocItems = useMemo<TocItem[]>(
-    () => (doc?.categories ?? []).flatMap(category => [
-      { id: `category-${category.id}`, label: category.title, depth: 1 as const },
-      ...category.sections.map(section => ({ id: section.id, label: section.title, depth: 2 as const })),
+    () => numberedCategories.flatMap(category => [
+      { id: `category-${category.id}`, label: category.title, level: 0 },
+      ...category.sections.map(section => ({
+        id: section.id,
+        label: section.displayTitle,
+        level: section.displayLevel,
+        number: section.displayNumber,
+      })),
     ]),
-    [doc],
+    [numberedCategories],
   );
 
   useEffect(() => {
@@ -262,6 +328,7 @@ export default function CognitiveAssetsPage() {
         const next = await getCognitiveAssets(user.id);
         setDoc(next);
         setActiveId(getFirstTocId(next));
+        setUploadPanelOpen(false);
       } catch (error) {
         toast.error(error instanceof Error ? error.message : '加载认知资产失败');
       } finally {
@@ -298,6 +365,14 @@ export default function CognitiveAssetsPage() {
     fileInputRef.current?.click();
   };
 
+  const handleHeaderUploadClick = () => {
+    if (!doc) {
+      openFilePicker();
+      return;
+    }
+    setUploadPanelOpen(value => !value);
+  };
+
   const handleFile = async (file: File | null | undefined) => {
     if (!file || !user?.id || deleting) return;
     if (!isSupportedCognitiveAssetFile(file)) {
@@ -311,6 +386,7 @@ export default function CognitiveAssetsPage() {
       await replaceCognitiveAssetsDoc(user.id, next);
       setDoc(next);
       setActiveId(getFirstTocId(next));
+      setUploadPanelOpen(false);
       toast.success('文档已生成认知资产阅读页');
     } catch (error) {
       toast.error(error instanceof Error ? error.message : '文档生成失败');
@@ -343,6 +419,7 @@ export default function CognitiveAssetsPage() {
       await deleteCognitiveAssetsDoc(user.id);
       setDoc(null);
       setActiveId('');
+      setUploadPanelOpen(true);
       toast.success('当前认知资产文档已删除');
     } catch (error) {
       toast.error(error instanceof Error ? error.message : '删除失败');
@@ -394,15 +471,19 @@ export default function CognitiveAssetsPage() {
               variant="ghost"
               size="sm"
               className="h-8 px-2 text-muted-foreground hover:text-[#F0B90B]"
-              onClick={openFilePicker}
+              onClick={handleHeaderUploadClick}
               disabled={loading || importing || deleting}
             >
               {importing ? (
                 <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+              ) : doc && uploadPanelOpen ? (
+                <ChevronDown className="h-4 w-4 mr-1" />
+              ) : doc ? (
+                <ChevronRight className="h-4 w-4 mr-1" />
               ) : (
                 <Upload className="h-4 w-4 mr-1" />
               )}
-              上传文档
+              {doc ? '文档管理' : '上传文档'}
             </Button>
           </div>
         </div>
@@ -422,17 +503,19 @@ export default function CognitiveAssetsPage() {
             </div>
           ) : (
             <>
-              <UploadPanel
-                hasDocument={Boolean(doc)}
-                importing={importing}
-                deleting={deleting}
-                dragActive={dragActive}
-                onChoose={openFilePicker}
-                onDelete={() => void handleDelete()}
-                onDrop={handleDrop}
-                onDragOver={handleDragOver}
-                onDragLeave={handleDragLeave}
-              />
+              {(!doc || uploadPanelOpen) && (
+                <UploadPanel
+                  hasDocument={Boolean(doc)}
+                  importing={importing}
+                  deleting={deleting}
+                  dragActive={dragActive}
+                  onChoose={openFilePicker}
+                  onDelete={() => void handleDelete()}
+                  onDrop={handleDrop}
+                  onDragOver={handleDragOver}
+                  onDragLeave={handleDragLeave}
+                />
+              )}
 
               {!doc ? (
                 <section className="scroll-mt-20">
@@ -444,7 +527,7 @@ export default function CognitiveAssetsPage() {
                   </div>
                 </section>
               ) : (
-                doc.categories.map((category, categoryIndex) => (
+                numberedCategories.map((category, categoryIndex) => (
                   <section key={category.id} id={`category-${category.id}`} className="scroll-mt-24">
                     <SectionTitle accent={CATEGORY_ACCENTS[categoryIndex % CATEGORY_ACCENTS.length]}>
                       {category.title}
@@ -457,7 +540,13 @@ export default function CognitiveAssetsPage() {
                     <div className="mt-6 space-y-10">
                       {category.sections.map(section => (
                         <section key={section.id} id={section.id} className="scroll-mt-24">
-                          <h3 className="text-[16px] font-medium text-foreground mb-3">{section.title}</h3>
+                          <h3
+                            className="font-medium text-foreground mb-3"
+                            style={{ fontSize: section.displayLevel <= 1 ? 18 : section.displayLevel === 2 ? 16 : 14 }}
+                          >
+                            <span className="font-mono text-[#F0B90B] mr-2">{section.displayNumber}</span>
+                            {section.displayTitle}
+                          </h3>
                           <MarkdownArticle content={section.content} />
                         </section>
                       ))}
