@@ -109,6 +109,9 @@ export function PositionPanel({
     }
     if (lastCloseIdRef.current === latest.id) return;
     lastCloseIdRef.current = latest.id;
+    // Direct-trading mode: stay silent — no auto-popup, no toast. 1:1 Binance flow.
+    // Old journals (if any) can still be reviewed manually from /journal.
+    if (tradingMode === 'direct') return;
     const direction = latest.side === 'LONG' ? 'long' : 'short';
     findUnreviewedJournalForClose(user.id, latest.symbol, direction, latest.entryPrice)
       .then(j => {
@@ -116,8 +119,7 @@ export function PositionPanel({
           setReviewJournal(j);
           setReviewTradeRecord(latest);
           setReviewOpen(true);
-        } else if (tradingMode !== 'direct') {
-          // In direct-trading mode the absence of a journal is expected, so we stay silent.
+        } else {
           toast.info('该笔平仓未找到对应的开仓快照（历史遗留持仓）');
         }
       })
@@ -957,7 +959,7 @@ export function PositionPanel({
         {/* ===== POSITION HISTORY (仓位历史记录) ===== */}
         {activeTab === 'positionHistory' && (
           <div className="flex-1 overflow-y-auto scrollbar-pro min-h-0">
-            {unreviewedCount > 0 && (
+            {unreviewedCount > 0 && tradingMode !== 'direct' && (
               <div className="bg-[#F0B90B]/10 border border-[#F0B90B]/30 rounded px-3 py-2 text-[11px] text-[#F0B90B] m-2 flex items-center justify-between gap-3">
                 <span>你有 {unreviewedCount} 笔已平仓交易未评价。错题集只在评价后才会生效。</span>
                 <a href="/journal?view=unreviewed"
