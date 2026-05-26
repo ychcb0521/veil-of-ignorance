@@ -89,6 +89,14 @@ function readUserScopedStorage<T>(userId: string, key: string, fallback: T): T {
   }
 }
 
+function writeUserScopedStorage<T>(userId: string, key: string, value: T): void {
+  try {
+    localStorage.setItem(`${getUserStoragePrefix(userId)}${key}`, JSON.stringify(value));
+  } catch (error) {
+    console.warn(`[journalApi] 写入本地缓存失败: ${key}`, error);
+  }
+}
+
 function deepClone<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
 }
@@ -130,8 +138,30 @@ type CognitiveAssetsRow = {
   created_at?: string;
 };
 
+const COGNITIVE_ASSETS_STORAGE_KEY = 'cognitive_assets_doc';
+
 function getInitialCognitiveAssetsDoc(): CognitiveAssetsDoc {
   return deepClone(INITIAL_COGNITIVE_ASSETS);
+}
+
+function isMissingCognitiveAssetsTableError(error: { code?: string; message?: string } | null): boolean {
+  if (!error) return false;
+  const message = error.message ?? '';
+  return error.code === 'PGRST205'
+    || error.code === '42P01'
+    || /schema cache/i.test(message)
+    || /cognitive_assets/i.test(message) && /could not find|does not exist/i.test(message);
+}
+
+function readLocalCognitiveAssetsRow(userId: string): CognitiveAssetsRow | null {
+  const localDoc = readUserScopedStorage<unknown>(userId, COGNITIVE_ASSETS_STORAGE_KEY, null);
+  const normalized = normalizeCognitiveAssetsDoc(localDoc);
+  if (!normalized) return null;
+  return {
+    user_id: userId,
+    content: normalized,
+    last_edited_at: null,
+  };
 }
 
 async function readCognitiveAssetsRow(userId: string): Promise<CognitiveAssetsRow | null> {
@@ -141,6 +171,9 @@ async function readCognitiveAssetsRow(userId: string): Promise<CognitiveAssetsRo
     .eq('user_id', userId)
     .maybeSingle();
   if (error) {
+    if (isMissingCognitiveAssetsTableError(error)) {
+      return readLocalCognitiveAssetsRow(userId);
+    }
     throw new Error(`读取认知资产失败：${error.message}`);
   }
   return (data as CognitiveAssetsRow | null) ?? null;
@@ -158,6 +191,10 @@ async function writeCognitiveAssetsDoc(userId: string, doc: CognitiveAssetsDoc):
     .select('user_id')
     .single();
   if (error) {
+    if (isMissingCognitiveAssetsTableError(error)) {
+      writeUserScopedStorage(userId, COGNITIVE_ASSETS_STORAGE_KEY, doc);
+      return;
+    }
     throw new Error(`保存认知资产失败：${error.message}`);
   }
 }
