@@ -270,17 +270,51 @@ export default function GuidePage() {
 
             <section id="s3-1" className="scroll-mt-20">
               <SubTitle>3.1 时光机与行情</SubTitle>
+              <P>
+                时光机是交易页的核心训练能力。它把真实历史行情切回到你指定的某一刻，并用“模拟时钟”继续向前播放。你只能看到当时已经发生的数据，看不到未来。
+              </P>
               <KeyGrid>
-                <KeyCard title="时光机">
-                  选择历史时间点后，系统按模拟时间推进行情。盘口、K 线、持仓盈亏和订单状态都以该模拟时间为准。
+                <KeyCard title="选择历史时点">
+                  输入日期和时间后，系统加载该时刻附近的真实历史行情。K 线、盘口、成交、持仓盈亏和订单触发都以模拟时间为准。
                 </KeyCard>
+                <KeyCard title="加速播放">
+                  支持 1x、2x、5x、10x、50x、100x 倍速。慢速用于练决策细节，高倍速用于快速穿越等待区和重复训练同类行情。
+                </KeyCard>
+                <KeyCard title="暂停与恢复">
+                  可随时暂停、继续或跳转。暂停时适合写交易计划、检查 checklist、复盘刚才为什么想出手。
+                </KeyCard>
+              </KeyGrid>
+              <div className="overflow-x-auto">
+                <table className="w-full text-[11px] my-3 border border-border rounded overflow-hidden">
+                  <thead className="bg-muted/50">
+                    <tr>
+                      <th className="text-left px-3 py-2 font-medium text-foreground text-[10px]">能力</th>
+                      <th className="text-left px-3 py-2 font-medium text-foreground text-[10px]">含义</th>
+                      <th className="text-left px-3 py-2 font-medium text-foreground text-[10px]">训练价值</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr><td className="px-3 py-2 border-t border-border">历史回放</td><td className="px-3 py-2 border-t border-border">从任意历史时刻重新进入市场</td><td className="px-3 py-2 border-t border-border">把过去行情变成可反复练习的样本</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border">未来不可见</td><td className="px-3 py-2 border-t border-border">只显示模拟时间以前的数据</td><td className="px-3 py-2 border-t border-border">避免用已知结果污染判断</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border">倍速播放</td><td className="px-3 py-2 border-t border-border">按 1x 到 100x 推进行情</td><td className="px-3 py-2 border-t border-border">用高倍速提高训练密度，用低倍速校准执行质量</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border">统一模拟时钟</td><td className="px-3 py-2 border-t border-border">订单、持仓、盈亏、历史记录同步推进</td><td className="px-3 py-2 border-t border-border">让训练接近真实交易节奏</td></tr>
+                  </tbody>
+                </table>
+              </div>
+              <KeyGrid>
                 <KeyCard title="K 线主图">
                   用来建立交易假设：趋势延续、结构反转、区间波动或放弃交易。不要在持仓后用图表临时补理由。
                 </KeyCard>
                 <KeyCard title="盘口与成交">
                   用来观察微观结构。若盘口不是策略的一部分，就不要用它作为冲动加仓的借口。
                 </KeyCard>
+                <KeyCard title="推荐节奏">
+                  新手先用 1x-5x 练完整决策，熟悉后用 10x-50x 提高样本量；100x 适合穿越无交易价值的等待区。
+                </KeyCard>
               </KeyGrid>
+              <Highlight>
+                时光机的价值不是“快进看答案”，而是在看不到未来的条件下，把同一类行情反复练到动作稳定。倍速只是提高训练密度，不能替代下单前的判断。
+              </Highlight>
             </section>
 
             <section id="s3-2" className="scroll-mt-20">
