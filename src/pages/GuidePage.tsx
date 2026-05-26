@@ -24,9 +24,10 @@ const TOC: TocItem[] = [
     id: 's3',
     label: '3. 交易页',
     children: [
-      { id: 's3-1', label: '3.1 时光机与行情' },
-      { id: 's3-2', label: '3.2 下单前快照' },
-      { id: 's3-3', label: '3.3 持仓与历史' },
+      { id: 's3-0', label: '3.1 交易模式选择' },
+      { id: 's3-1', label: '3.2 时光机与行情' },
+      { id: 's3-2', label: '3.3 下单前快照' },
+      { id: 's3-3', label: '3.4 持仓与历史' },
     ],
   },
   {
@@ -274,8 +275,49 @@ export default function GuidePage() {
             <SectionTitle accent="hsl(var(--primary))">3. 交易页</SectionTitle>
             <P>交易页负责训练和记录，所有后续复盘都依赖这里产生的数据。关键不是多点几笔单，而是每次出手前把判断写清楚。</P>
 
+            <section id="s3-0" className="scroll-mt-20">
+              <SubTitle>3.1 交易模式选择</SubTitle>
+              <P>
+                时光机工具条右侧有一对开关：<strong>决策记录</strong> 与 <strong>直接交易</strong>。这是进入交易页后你做的第一个决定，也是整套系统里最大的一个分叉——它决定本次会话产生的数据是否进入复盘体系。系统默认 <strong>直接交易</strong>，需要训练时手动切换到决策记录。
+              </P>
+              <KeyGrid>
+                <KeyCard title="直接交易（默认）">
+                  下单零弹窗、平仓零评价，节奏与币安 1:1。本模式下产生的交易仅进入持仓历史与交易战役归类，<strong>不进入</strong> 错题集、元监控、规则系统。适合熟悉的标的、流畅的执行、或只想观察盘面的场景。
+                </KeyCard>
+                <KeyCard title="决策记录">
+                  完整的开仓快照（理由、最大亏损、心态、Pre-mortem、胜率预测、Lollapalooza、破产估算等）+ 平仓后强制评价 + 错题集自动归类 + 元监控统计 + 规则系统冷却。适合刻意训练同一类 setup、复盘高频错误模式、或对自己进行校准。
+                </KeyCard>
+              </KeyGrid>
+              <div className="overflow-x-auto">
+                <table className="w-full text-[11px] my-3 border border-border rounded overflow-hidden">
+                  <thead className="bg-muted/50">
+                    <tr>
+                      <th className="text-left px-3 py-2 font-medium text-foreground text-[10px]">触发点</th>
+                      <th className="text-left px-3 py-2 font-medium text-foreground text-[10px]">直接交易</th>
+                      <th className="text-left px-3 py-2 font-medium text-foreground text-[10px]">决策记录</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr><td className="px-3 py-2 border-t border-border">点 Long / Short</td><td className="px-3 py-2 border-t border-border">立即成交，无弹窗</td><td className="px-3 py-2 border-t border-border">弹完整开仓快照</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border">平仓</td><td className="px-3 py-2 border-t border-border">静默成交</td><td className="px-3 py-2 border-t border-border">弹评价抽屉，不填完不能关</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border">交易战役归类</td><td className="px-3 py-2 border-t border-border">可走"裸 record 回填"事后归类</td><td className="px-3 py-2 border-t border-border">实时归类，事件链完整</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border">错题集 / 元监控</td><td className="px-3 py-2 border-t border-border">不收录</td><td className="px-3 py-2 border-t border-border">全量收录、自动聚类、CI 与基线对比</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border">高频错误强制写规则</td><td className="px-3 py-2 border-t border-border">不触发</td><td className="px-3 py-2 border-t border-border">同一 pattern 30 天 ≥3 次自动弹窗</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border">致命单笔损失弹窗</td><td className="px-3 py-2 border-t border-border">不触发</td><td className="px-3 py-2 border-t border-border">单笔实亏 ≥2× 预设最大亏损时弹窗</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border">心态 ≤2 / Lollapalooza 风险阻挡</td><td className="px-3 py-2 border-t border-border">不出现（无快照）</td><td className="px-3 py-2 border-t border-border">硬阻挡，不能下单</td></tr>
+                  </tbody>
+                </table>
+              </div>
+              <Highlight>
+                两个模式可以随时切换，但<strong>从决策记录切到直接交易前，系统会检查是否有未评价的已平仓交易</strong>——有则拦截。这是为了堵住"切个模式就能逃避评价"的后门。
+              </Highlight>
+              <RedHighlight>
+                <strong>判断标准：</strong>你要回答的是"这一笔的目的是产数据，还是去执行已经训练过的动作？"。前者用决策记录，后者用直接交易。混用本身没问题，但不要在同一个 setup 上反复横跳——那会让错题集只能看到你想被看到的那一半。
+              </RedHighlight>
+            </section>
+
             <section id="s3-1" className="scroll-mt-20">
-              <SubTitle>3.1 时光机与行情</SubTitle>
+              <SubTitle>3.2 时光机与行情</SubTitle>
               <P>
                 时光机是交易页的核心训练能力。它把真实历史行情切回到你指定的某一刻，并用“模拟时钟”继续向前播放。你只能看到当时已经发生的数据，看不到未来。
               </P>
@@ -324,7 +366,7 @@ export default function GuidePage() {
             </section>
 
             <section id="s3-2" className="scroll-mt-20">
-              <SubTitle>3.2 下单前快照</SubTitle>
+              <SubTitle>3.3 下单前快照</SubTitle>
               <P>开仓快照是系统的核心记录点。它固定“下单前的你”看到什么、相信什么、愿意亏多少、处在什么心态。</P>
               <div className="overflow-x-auto">
                 <table className="w-full text-[11px] my-3 border border-border rounded overflow-hidden">
@@ -354,7 +396,7 @@ export default function GuidePage() {
             </section>
 
             <section id="s3-3" className="scroll-mt-20">
-              <SubTitle>3.3 持仓与历史</SubTitle>
+              <SubTitle>3.4 持仓与历史</SubTitle>
               <P>底部历史区用于检查执行结果。重点关注三类记录：未评价交易、仓位历史记录、平仓方式。</P>
               <ul className="list-disc pl-6 text-[14px] text-foreground/90 space-y-1">
                 <li><strong>未评价交易</strong>：优先补齐。已平仓未评价会硬阻塞下一次开仓。</li>
