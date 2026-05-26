@@ -22,16 +22,43 @@ import type { TradeRecord } from '@/types/trading';
 
 type CampaignBundle = { campaign: TradeCampaign; legs: TradeJournal[] };
 
-function fmtTime(value: string | number | null | undefined) {
+function fmtPrice(value: number | null | undefined) {
+  return typeof value === 'number' ? value.toFixed(4) : '—';
+}
+
+function fmtAmount(value: number | null | undefined) {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return '—';
+  return value.toLocaleString('en-US', {
+    maximumFractionDigits: 4,
+  });
+}
+
+function fmtSignedUsdt(value: number | null | undefined) {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return '—';
+  return `${value >= 0 ? '+' : ''}${value.toFixed(2)}`;
+}
+
+function fmtRoe(value: number | null | undefined) {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return '—';
+  return `${value >= 0 ? '+' : ''}${value.toFixed(2)}%`;
+}
+
+function fmtContract(symbol: string | null | undefined) {
+  return symbol?.replace(/USDT$/, '/USDT') || '—';
+}
+
+function fmtStackedTime(value: string | number | null | undefined) {
   if (!value) return '—';
   const date = typeof value === 'number' ? new Date(value) : new Date(value);
   if (Number.isNaN(date.getTime())) return '—';
   const pad = (n: number) => String(n).padStart(2, '0');
-  return `${pad(date.getMonth() + 1)}/${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+  return `${pad(date.getMonth() + 1)}/${pad(date.getDate())}\n${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
 }
 
-function fmtPrice(value: number | null | undefined) {
-  return typeof value === 'number' ? value.toFixed(4) : '—';
+function roeFromRecord(record: TradeRecord | null) {
+  if (!record || record.leverage <= 0) return null;
+  const margin = (record.quantity * record.entryPrice) / record.leverage;
+  return margin > 0 ? (record.pnl / margin) * 100 : null;
 }
 
 function exitMethodLabel(record: TradeRecord | null) {
@@ -94,6 +121,7 @@ export default function JournalCampaignClassifyPage() {
   }, [loadData]);
 
   const campaignMap = useMemo(() => new Map(campaignBundles.map(bundle => [bundle.campaign.id, bundle.campaign])), [campaignBundles]);
+  const tradeRecordMap = useMemo(() => new Map(tradeHistory.map(record => [record.id, record])), [tradeHistory]);
   const recordCampaignMap = useMemo(() => {
     const next = new Map<string, TradeCampaign>();
     campaignBundles.forEach(({ campaign }) => {
@@ -384,121 +412,129 @@ export default function JournalCampaignClassifyPage() {
               加载中…
             </div>
           ) : (
-            <>
-              <div className="grid grid-cols-[40px_90px_110px_96px_72px_90px_100px_92px_1fr] h-9 bg-muted/40 text-[10px] text-muted-foreground items-center px-3">
-                <div className="flex items-center">
-                  <Checkbox
-                    checked={allCurrentSelected ? true : someCurrentSelected ? 'indeterminate' : false}
-                    onCheckedChange={(checked) => {
-                      if (checked) {
-                        setSelectedIds(prev => new Set([...prev, ...filtered.map(item => item.id)]));
-                      } else {
-                        setSelectedIds(prev => new Set([...prev].filter(id => !filtered.some(item => item.id === id))));
-                      }
-                    }}
-                  />
-                </div>
-                <div>类型</div>
-                <div>时间</div>
-                <div>标的</div>
-                <div>方向</div>
-                <div>订单类型</div>
-                <div>价格</div>
-                <div>仓位</div>
-                <div>当前归属</div>
-              </div>
-
-              <div className="max-h-[calc(100vh-240px)] overflow-auto">
-                {filtered.length === 0 ? (
-                  <div className="px-4 py-10 text-center text-[12px] text-muted-foreground space-y-2">
-                    <div className="mx-auto h-8 w-8 rounded-full bg-muted flex items-center justify-center">
-                      <AlertCircle className="w-4 h-4" />
-                    </div>
-                    <div>{emptyReason}</div>
+            <div className="max-h-[calc(100vh-240px)] overflow-auto">
+              {filtered.length === 0 ? (
+                <div className="px-4 py-10 text-center text-[12px] text-muted-foreground space-y-2">
+                  <div className="mx-auto h-8 w-8 rounded-full bg-muted flex items-center justify-center">
+                    <AlertCircle className="w-4 h-4" />
                   </div>
-                ) : (
-                  filtered.map(item => {
-                    const journal = item.kind === 'journal' ? item.journal : null;
-                    const campaign = journal?.campaign_id ? campaignMap.get(journal.campaign_id) ?? null : null;
-                    const suggestion = journal ? suggestionMap.get(journal.id) : null;
-                    const rowClickable = Boolean(journal?.id);
-                    return (
-                      <div
-                        key={item.id}
-                        role={rowClickable ? 'button' : undefined}
-                        tabIndex={rowClickable ? 0 : -1}
-                        onClick={() => {
-                          if (journal?.id) window.open(`/journal/${journal.id}`, '_blank', 'noopener,noreferrer');
-                        }}
-                        onKeyDown={(event) => {
-                          if (journal?.id && event.key === 'Enter') window.open(`/journal/${journal.id}`, '_blank', 'noopener,noreferrer');
-                        }}
-                        className={`grid grid-cols-[40px_90px_110px_96px_72px_90px_100px_92px_1fr] min-h-9 text-[11px] font-mono items-center px-3 py-1 border-t border-border/30 ${rowClickable ? 'hover:bg-accent' : ''}`}
-                      >
-                        <div onClick={event => event.stopPropagation()}>
-                          <Checkbox
-                            checked={selectedIds.has(item.id)}
-                            onCheckedChange={(checked) => {
-                              setSelectedIds(prev => {
-                                const next = new Set(prev);
-                                if (checked) next.add(item.id);
-                                else next.delete(item.id);
-                                return next;
-                              });
-                            }}
-                          />
-                        </div>
-                        <div>
-                          <span className={`inline-flex items-center rounded px-2 py-0.5 text-[10px] ${item.kind === 'journal' ? 'bg-[#0ECB81]/15 text-[#0ECB81]' : 'bg-[#F0B90B]/15 text-[#F0B90B]'}`}>
-                            {item.kind === 'journal' ? 'journal' : '仓位历史'}
-                          </span>
-                        </div>
-                        <div>{fmtTime(item.kind === 'journal' ? item.journal.pre_simulated_time : item.record.openTime)}</div>
-                        <div>{item.kind === 'journal' ? item.journal.symbol : item.record.symbol}</div>
-                        <div className={(item.kind === 'journal' ? item.journal.direction : tradeRecordDirection(item.record)) === 'short' ? 'text-[#F6465D]' : 'text-[#0ECB81]'}>
-                          {(item.kind === 'journal' ? item.journal.direction : tradeRecordDirection(item.record)) === 'short' ? 'SHORT' : 'LONG'}
-                        </div>
-                        <div>{item.kind === 'journal' ? (item.journal.order_kind === 'main' ? '主力' : '对冲') : '历史成交'}</div>
-                        <div>{fmtPrice(item.kind === 'journal' ? item.journal.pre_entry_price : item.record.entryPrice)}</div>
-                        <div>{item.kind === 'journal' ? item.journal.pre_position_size?.toFixed(2) ?? '—' : (item.record.entryPrice * item.record.quantity).toFixed(2)}</div>
-                        <div className="min-w-0" onClick={event => event.stopPropagation()}>
-                          <div className="flex items-center gap-2 min-w-0">
-                            {item.kind === 'orphanRecord' ? (
-                              recordCampaignMap.has(item.record.id) ? (
-                                <Link to={`/journal/campaigns/${recordCampaignMap.get(item.record.id)?.id}`} className="truncate text-[#5BA3FF] hover:underline">
-                                  {recordCampaignMap.get(item.record.id)?.title}
-                                </Link>
+                  <div>{emptyReason}</div>
+                </div>
+              ) : (
+                <table className="w-full min-w-[1320px] text-[12px] font-mono tabular-nums">
+                  <thead className="sticky top-0 z-10 bg-card">
+                    <tr className="border-b border-border bg-muted/35 text-[11px] text-muted-foreground">
+                      <th className="w-[48px] px-3 py-2 text-left font-medium">
+                        <Checkbox
+                          checked={allCurrentSelected ? true : someCurrentSelected ? 'indeterminate' : false}
+                          onCheckedChange={(checked) => {
+                            if (checked) {
+                              setSelectedIds(prev => new Set([...prev, ...filtered.map(item => item.id)]));
+                            } else {
+                              setSelectedIds(prev => new Set([...prev].filter(id => !filtered.some(item => item.id === id))));
+                            }
+                          }}
+                        />
+                      </th>
+                      {['合约', '方向', '开仓均价', '平仓均价', '数量', '开仓时间', '平仓时间', '平仓方式', '平仓盈亏', '收益率(ROE)', '当前归属'].map(header => (
+                        <th key={header} className="px-3 py-2 text-left font-medium whitespace-nowrap">{header}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filtered.map(item => {
+                      const journal = item.kind === 'journal' ? item.journal : null;
+                      const record = item.kind === 'orphanRecord'
+                        ? item.record
+                        : journal?.trade_record_id
+                          ? tradeRecordMap.get(journal.trade_record_id) ?? null
+                          : null;
+                      const campaign = journal?.campaign_id ? campaignMap.get(journal.campaign_id) ?? null : null;
+                      const suggestion = journal ? suggestionMap.get(journal.id) : null;
+                      const rowClickable = Boolean(journal?.id);
+                      const direction = item.kind === 'journal' ? item.journal.direction : tradeRecordDirection(item.record);
+                      const leverage = record?.leverage ?? journal?.leverage ?? null;
+                      const entryPrice = record?.entryPrice ?? journal?.pre_entry_price ?? null;
+                      const exitPrice = record?.exitPrice && record.exitPrice > 0 ? record.exitPrice : null;
+                      const quantity = record?.quantity ?? null;
+                      const pnl = record?.pnl ?? journal?.post_realized_pnl ?? null;
+                      const roe = roeFromRecord(record);
+                      return (
+                        <tr
+                          key={item.id}
+                          role={rowClickable ? 'button' : undefined}
+                          tabIndex={rowClickable ? 0 : -1}
+                          onClick={() => {
+                            if (journal?.id) window.open(`/journal/${journal.id}`, '_blank', 'noopener,noreferrer');
+                          }}
+                          onKeyDown={(event) => {
+                            if (journal?.id && event.key === 'Enter') window.open(`/journal/${journal.id}`, '_blank', 'noopener,noreferrer');
+                          }}
+                          className={`border-b border-border/40 ${rowClickable ? 'hover:bg-accent' : ''}`}
+                        >
+                          <td className="px-3 py-2" onClick={event => event.stopPropagation()}>
+                            <Checkbox
+                              checked={selectedIds.has(item.id)}
+                              onCheckedChange={(checked) => {
+                                setSelectedIds(prev => {
+                                  const next = new Set(prev);
+                                  if (checked) next.add(item.id);
+                                  else next.delete(item.id);
+                                  return next;
+                                });
+                              }}
+                            />
+                          </td>
+                          <td className="px-3 py-2 text-foreground font-medium whitespace-nowrap">{fmtContract(itemSymbol(item))}</td>
+                          <td className={`px-3 py-2 font-bold whitespace-pre-line ${direction === 'short' ? 'text-[#F6465D]' : 'text-[#0ECB81]'}`}>
+                            {direction === 'short' ? '空' : '多'}{leverage ? `\n${leverage}x` : ''}
+                          </td>
+                          <td className="px-3 py-2 text-foreground whitespace-nowrap">{fmtPrice(entryPrice)}</td>
+                          <td className="px-3 py-2 text-foreground whitespace-nowrap">{fmtPrice(exitPrice)}</td>
+                          <td className="px-3 py-2 text-foreground whitespace-nowrap">{fmtAmount(quantity)}</td>
+                          <td className="px-3 py-2 text-muted-foreground whitespace-pre-line">{fmtStackedTime(record?.openTime ?? journal?.pre_simulated_time)}</td>
+                          <td className="px-3 py-2 text-muted-foreground whitespace-pre-line">{fmtStackedTime(record?.closeTime)}</td>
+                          <td className="px-3 py-2 whitespace-nowrap">{record ? exitMethodLabel(record) : '—'}</td>
+                          <td className={`px-3 py-2 font-bold whitespace-nowrap ${typeof pnl !== 'number' ? 'text-muted-foreground' : pnl >= 0 ? 'text-[#0ECB81]' : 'text-[#F6465D]'}`}>
+                            {fmtSignedUsdt(pnl)}
+                          </td>
+                          <td className={`px-3 py-2 font-bold whitespace-nowrap ${typeof roe !== 'number' ? 'text-muted-foreground' : roe >= 0 ? 'text-[#0ECB81]' : 'text-[#F6465D]'}`}>
+                            {fmtRoe(roe)}
+                          </td>
+                          <td className="px-3 py-2 min-w-[220px]" onClick={event => event.stopPropagation()}>
+                            <div className="flex items-center gap-2 min-w-0 text-[11px]">
+                              {item.kind === 'orphanRecord' ? (
+                                recordCampaignMap.has(item.record.id) ? (
+                                  <Link to={`/journal/campaigns/${recordCampaignMap.get(item.record.id)?.id}`} className="truncate text-[#5BA3FF] hover:underline">
+                                    {recordCampaignMap.get(item.record.id)?.title}
+                                  </Link>
+                                ) : (
+                                  <span className="text-muted-foreground">未归类</span>
+                                )
+                              ) : !journal.campaign_id || !campaign ? (
+                                <span className="text-muted-foreground">未归类</span>
                               ) : (
-                                <span className="text-muted-foreground">仓位历史记录 / 未归类</span>
-                              )
-                            ) : !journal.campaign_id || !campaign ? (
-                              <span className="text-muted-foreground">未归类</span>
-                            ) : (
-                              <>
-                                <Link to={`/journal/campaigns/${campaign.id}`} className="truncate text-[#5BA3FF] hover:underline">
-                                  {campaign.title}
-                                </Link>
-                                {journal.leg_role && <LegRoleChip role={journal.leg_role} short />}
-                              </>
-                            )}
-                            {suggestion && item.kind === 'journal' && !journal.campaign_id && (
-                              <span className="truncate text-[10px] text-muted-foreground">
-                                建议：{LEG_ROLE_LABELS[suggestion.suggestedRole]}
-                              </span>
-                            )}
-                            {item.kind === 'orphanRecord' && (
-                              <span className="truncate text-[10px] text-muted-foreground">
-                                {exitMethodLabel(item.record)}
-                              </span>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })
-                )}
-              </div>
-            </>
+                                <>
+                                  <Link to={`/journal/campaigns/${campaign.id}`} className="truncate text-[#5BA3FF] hover:underline">
+                                    {campaign.title}
+                                  </Link>
+                                  {journal.leg_role && <LegRoleChip role={journal.leg_role} short />}
+                                </>
+                              )}
+                              {suggestion && item.kind === 'journal' && !journal.campaign_id && (
+                                <span className="truncate text-[10px] text-muted-foreground">
+                                  建议：{LEG_ROLE_LABELS[suggestion.suggestedRole]}
+                                </span>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              )}
+            </div>
           )}
         </section>
       </main>
