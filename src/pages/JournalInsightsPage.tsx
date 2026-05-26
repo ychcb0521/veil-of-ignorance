@@ -6,15 +6,17 @@ import { useEffect, useMemo, useState } from 'react';
 import { BackButton } from '@/components/journal/BackButton';
 import { toast } from 'sonner';
 import { useAuth } from '@/contexts/AuthContext';
-import { supabase } from '@/integrations/supabase/client';
 import {
-  listAllJournalDataForUser, type BulkJournalData,
+  listAllCampaigns,
+  listAllJournalDataForUser,
+  listCounterfactuals,
+  type BulkJournalData,
 } from '@/lib/journalApi';
 import {
   groupJournalsByPattern, computeTimeDistribution,
   computeMentalStateDistribution, computeOutcomeRate,
 } from '@/lib/journalAggregations';
-import type { TradeJournal } from '@/types/journal';
+import type { TradeCampaign, TradeJournal } from '@/types/journal';
 
 type Range = 7 | 30 | 90;
 const DAY = 24 * 3600_000;
@@ -22,12 +24,54 @@ const DAY = 24 * 3600_000;
 interface CampaignEconomicStats {
   totalDeviationCost: number;
   topReasons: Array<{ reason: string; count: number; totalCost: number }>;
+  unavailable?: boolean;
 }
+
+const EMPTY_CAMPAIGN_ECONOMIC: CampaignEconomicStats = {
+  totalDeviationCost: 0,
+  topReasons: [],
+};
 
 function parseDeductionReason(sourceDeductionId: string | null) {
   if (!sourceDeductionId) return '未命名违规';
   const parts = sourceDeductionId.split(':');
   return parts.slice(2).join(':') || parts[parts.length - 1] || '未命名违规';
+}
+
+function isClosedCampaign(campaign: TradeCampaign, sinceMs: number) {
+  if (!campaign.closed_at) return false;
+  if (!['closed_profit', 'closed_loss', 'closed_breakeven', 'abandoned'].includes(campaign.status)) return false;
+  return new Date(campaign.closed_at).getTime() >= sinceMs;
+}
+
+async function loadCampaignEconomicStats(userId: string): Promise<CampaignEconomicStats> {
+  const sinceMs = Date.now() - 30 * DAY;
+  const campaignRows = (await listAllCampaigns(userId)).filter(campaign => isClosedCampaign(campaign, sinceMs));
+  if (campaignRows.length === 0) return EMPTY_CAMPAIGN_ECONOMIC;
+
+  const pnlMap = new Map(campaignRows.map(item => [item.id, item.final_realized_pnl ?? 0]));
+  const grouped = new Map<string, { reason: string; count: number; totalCost: number }>();
+  let totalDeviationCost = 0;
+
+  const branches = await Promise.all(campaignRows.map(campaign => listCounterfactuals(campaign.id)));
+  for (const row of branches.flat().filter(branch => branch.branch_kind === 'fix_one_deviation')) {
+    const actual = pnlMap.get(row.campaign_id) ?? 0;
+    const branchPnl = row.result?.final_realized_pnl ?? 0;
+    const cost = Math.max(0, branchPnl - actual);
+    totalDeviationCost += cost;
+    const reason = parseDeductionReason(row.source_deduction_id);
+    const prev = grouped.get(reason) ?? { reason, count: 0, totalCost: 0 };
+    prev.count += 1;
+    prev.totalCost += cost;
+    grouped.set(reason, prev);
+  }
+
+  return {
+    totalDeviationCost,
+    topReasons: [...grouped.values()]
+      .sort((a, b) => b.totalCost - a.totalCost)
+      .slice(0, 3),
+  };
 }
 
 export default function JournalInsightsPage() {
@@ -36,82 +80,57 @@ export default function JournalInsightsPage() {
   const [campaignEconomic, setCampaignEconomic] = useState<CampaignEconomicStats | null>(null);
   const [range, setRange] = useState<Range>(30);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!user) return;
+    let cancelled = false;
+    if (!user) {
+      setLoading(false);
+      return () => { cancelled = true; };
+    }
     (async () => {
       try {
         setLoading(true);
+        setLoadError(null);
         const d = await listAllJournalDataForUser(user.id);
-        const since = new Date(Date.now() - 30 * DAY).toISOString();
-        const { data: campaigns, error: campaignError } = await supabase
-          .from('trade_campaigns' as never)
-          .select('id, final_realized_pnl, closed_at, status')
-          .eq('user_id', user.id)
-          .gte('closed_at', since)
-          .in('status', ['closed_profit', 'closed_loss', 'closed_breakeven', 'abandoned']);
-        if (campaignError) throw new Error(campaignError.message);
-        const campaignRows = ((campaigns ?? []) as Array<{
-          id: string;
-          final_realized_pnl: number | null;
-          closed_at: string | null;
-          status: string;
-        }>);
-        const campaignIds = campaignRows.map(item => item.id);
-        let economicStats: CampaignEconomicStats = {
-          totalDeviationCost: 0,
-          topReasons: [],
-        };
-        if (campaignIds.length > 0) {
-          const { data: fixes, error: fixError } = await supabase
-            .from('campaign_counterfactuals' as never)
-            .select('campaign_id, source_deduction_id, result')
-            .in('campaign_id', campaignIds)
-            .eq('branch_kind', 'fix_one_deviation');
-          if (fixError) throw new Error(fixError.message);
-          const pnlMap = new Map(campaignRows.map(item => [item.id, item.final_realized_pnl ?? 0]));
-          const grouped = new Map<string, { reason: string; count: number; totalCost: number }>();
-          let totalDeviationCost = 0;
-          for (const row of (fixes ?? []) as Array<{
-            campaign_id: string;
-            source_deduction_id: string | null;
-            result: { final_realized_pnl?: number } | null;
-          }>) {
-            const actual = pnlMap.get(row.campaign_id) ?? 0;
-            const branchPnl = row.result?.final_realized_pnl ?? 0;
-            const cost = Math.max(0, branchPnl - actual);
-            totalDeviationCost += cost;
-            const reason = parseDeductionReason(row.source_deduction_id);
-            const prev = grouped.get(reason) ?? { reason, count: 0, totalCost: 0 };
-            prev.count += 1;
-            prev.totalCost += cost;
-            grouped.set(reason, prev);
-          }
-          economicStats = {
-            totalDeviationCost,
-            topReasons: [...grouped.values()]
-              .sort((a, b) => b.totalCost - a.totalCost)
-              .slice(0, 3),
-          };
-        }
+        if (cancelled) return;
         setData(d);
-        setCampaignEconomic(economicStats);
-      } catch (e) { toast.error(e instanceof Error ? e.message : String(e)); }
-      finally { setLoading(false); }
-    })();
-  }, [user]);
+        setCampaignEconomic(EMPTY_CAMPAIGN_ECONOMIC);
+        setLoading(false);
 
-  const inRange = (j: TradeJournal) =>
-    Date.now() - new Date(j.pre_simulated_time).getTime() <= range * DAY;
-  const prevWindow = (j: TradeJournal) => {
-    const diff = Date.now() - new Date(j.pre_simulated_time).getTime();
-    return diff > range * DAY && diff <= 2 * range * DAY;
-  };
+        try {
+          const economicStats = await loadCampaignEconomicStats(user.id);
+          if (!cancelled) setCampaignEconomic(economicStats);
+        } catch (e) {
+          console.warn('[JournalInsightsPage] 战役经济成本暂不可用', e);
+          if (!cancelled) {
+            setCampaignEconomic({ ...EMPTY_CAMPAIGN_ECONOMIC, unavailable: true });
+            toast.warning('战役经济成本暂不可用，元监控其他数据已正常加载');
+          }
+        }
+      } catch (e) {
+        const message = e instanceof Error ? e.message : String(e);
+        if (!cancelled) {
+          setLoadError(message);
+          toast.error(message);
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [user]);
 
   const stats = useMemo(() => {
     if (!data) return null;
-    const cur = data.journals.filter(inRange);
-    const prev = data.journals.filter(prevWindow);
+    const now = Date.now();
+    const cur = data.journals.filter(j =>
+      now - new Date(j.pre_simulated_time).getTime() <= range * DAY,
+    );
+    const prev = data.journals.filter(j => {
+      const diff = now - new Date(j.pre_simulated_time).getTime();
+      return diff > range * DAY && diff <= 2 * range * DAY;
+    });
     const curClusters = groupJournalsByPattern(cur, data.assignments, data.patterns, data.categories);
     const prevClusters = groupJournalsByPattern(prev, data.assignments, data.patterns, data.categories);
     const prevMap = new Map(prevClusters.map(c => [c.pattern.id, c.stats.occurrence_count]));
@@ -182,10 +201,38 @@ export default function JournalInsightsPage() {
     };
   }, [data, range]);
 
-  if (loading || !data || !stats) {
+  if (loading) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center text-muted-foreground text-[12px] font-mono">
         加载中…
+      </div>
+    );
+  }
+
+  if (loadError || !data || !stats) {
+    return (
+      <div className="min-h-screen bg-background text-foreground">
+        <header className="sticky top-0 z-20 bg-background/95 backdrop-blur-sm border-b border-border">
+          <div className="px-6 py-3 max-w-[1400px] mx-auto flex items-center gap-3">
+            <BackButton />
+            <h1 className="text-[14px] font-medium">元监控</h1>
+          </div>
+        </header>
+        <main className="max-w-[720px] mx-auto px-6 py-16">
+          <div className="border border-border rounded bg-card p-6 text-center">
+            <div className="text-[14px] font-medium">元监控加载失败</div>
+            <div className="mt-2 text-[12px] text-muted-foreground leading-6">
+              {loadError ?? '暂无可用于统计的数据。'}
+            </div>
+            <button
+              type="button"
+              onClick={() => window.location.reload()}
+              className="mt-5 h-9 px-4 rounded bg-[#F0B90B] text-black text-[12px] font-medium hover:opacity-90"
+            >
+              重新加载
+            </button>
+          </div>
+        </main>
       </div>
     );
   }
@@ -375,18 +422,22 @@ export default function JournalInsightsPage() {
           <div className={`text-[34px] font-mono leading-none ${
             (campaignEconomic?.totalDeviationCost ?? 0) > 0 ? 'text-[#F6465D]' : 'text-[#0ECB81]'
           }`}>
-            {(campaignEconomic?.totalDeviationCost ?? 0).toFixed(2)} USDT
+            {campaignEconomic?.unavailable ? '—' : `${(campaignEconomic?.totalDeviationCost ?? 0).toFixed(2)} USDT`}
           </div>
           <div className="mt-2 text-[11px] text-muted-foreground">
-            过去 30 天因 SOP 偏离损失的金额
+            {campaignEconomic?.unavailable ? '战役成本数据暂不可用' : '过去 30 天因 SOP 偏离损失的金额'}
           </div>
           <div className={`mt-2 text-[11px] ${
             (campaignEconomic?.totalDeviationCost ?? 0) > 0 ? 'text-[#F6465D]' : 'text-[#0ECB81]'
           }`}>
-            {(campaignEconomic?.totalDeviationCost ?? 0) === 0 ? '完美执行' : 'SOP 偏离仍在持续烧钱'}
+            {campaignEconomic?.unavailable
+              ? '元监控其他数据已正常加载'
+              : (campaignEconomic?.totalDeviationCost ?? 0) === 0 ? '完美执行' : 'SOP 偏离仍在持续烧钱'}
           </div>
           <div className="mt-4 space-y-2">
-            {(campaignEconomic?.topReasons ?? []).length === 0 ? (
+            {campaignEconomic?.unavailable ? (
+              <div className="text-[11px] text-muted-foreground">请稍后同步战役相关数据表后再查看成本拆解</div>
+            ) : (campaignEconomic?.topReasons ?? []).length === 0 ? (
               <div className="text-[11px] text-muted-foreground">暂无已结束战役的偏离代价数据</div>
             ) : (
               campaignEconomic?.topReasons.map(item => (
