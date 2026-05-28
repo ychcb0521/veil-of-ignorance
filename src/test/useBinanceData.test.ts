@@ -6,6 +6,16 @@ import { useBinanceData, intervalToMs } from "@/hooks/useBinanceData";
 const mockFetch = vi.fn();
 global.fetch = mockFetch;
 
+function deferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
+
 describe("intervalToMs", () => {
   it("returns correct milliseconds for all supported intervals", () => {
     expect(intervalToMs("1m")).toBe(60_000);
@@ -51,16 +61,36 @@ describe("useBinanceData", () => {
   });
 
   it("sets loading state during initLoad", async () => {
+    const now = 1_700_000_000_000;
+    const historyResponse = deferred<Response>();
+    const futureResponse = deferred<Response>();
+    mockFetch
+      .mockReturnValueOnce(historyResponse.promise)
+      .mockReturnValueOnce(futureResponse.promise);
+
     const { result } = renderHook(() => useBinanceData());
 
-    const initPromise = act(async () => {
-      await result.current.initLoad("BTCUSDT", "1m", Date.now());
+    let initPromise!: Promise<unknown>;
+    act(() => {
+      initPromise = result.current.initLoad("BTCUSDT", "1m", now);
     });
 
-    // loading should be true immediately after starting initLoad
     expect(result.current.loading).toBe(true);
 
-    await initPromise;
+    historyResponse.resolve({
+      ok: true,
+      json: () => Promise.resolve([[now - 60_000, "100", "110", "90", "105", "1000"]]),
+    } as Response);
+    futureResponse.resolve({
+      ok: true,
+      json: () => Promise.resolve([]),
+    } as Response);
+
+    await act(async () => {
+      await initPromise;
+    });
+
+    expect(result.current.loading).toBe(false);
   });
 
   it("successfully loads and merges history + future data", async () => {
