@@ -27,7 +27,7 @@ export function MandatoryRuleDialog({ info, userId, onResolved }: Props) {
 
   if (!info) return null;
   const isCatastrophic = info.trigger === 'catastrophic';
-  const canSubmit = text.trim().length >= 20 && !saving;
+  const canSubmit = text.trim().length > 0 && !saving;
   // Catastrophic events have no pattern to snooze against — force user to write the rule.
   const canSnooze = !isCatastrophic && info.pattern !== null;
 
@@ -40,6 +40,8 @@ export function MandatoryRuleDialog({ info, userId, onResolved }: Props) {
         source_pattern_id: info.pattern?.id ?? null,
         rule_text: text.trim(),
         is_active: true,
+        rule_category: 'core',
+        weight: isCatastrophic ? 95 : 80,
       });
       await updateRule(rule.id, { added_to_checklist: true, required: required === 'true' });
       await markRuleAddedToChecklist(rule.id).catch(() => {});

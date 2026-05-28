@@ -52,6 +52,11 @@ export function PostTradeReviewSheet({
   const [reflection, setReflection] = useState('');
   const [correctAction, setCorrectAction] = useState('');
   const [exitReason, setExitReason] = useState('');
+  const [resultSummary, setResultSummary] = useState('');
+  const [decisionQuality, setDecisionQuality] = useState<TradeJournal['post_decision_quality']>('mixed');
+  const [expectancyReview, setExpectancyReview] = useState('');
+  const [premortemReview, setPremortemReview] = useState('');
+  const [invalidationReview, setInvalidationReview] = useState('');
   const [rMultipleOverride, setRMultipleOverride] = useState<string>('');
   const [editingR, setEditingR] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -80,6 +85,11 @@ export function PostTradeReviewSheet({
         setReflection(journal.post_reflection ?? '');
         setCorrectAction(journal.post_correct_action ?? '');
         setExitReason(tradeRecord?.exit_reason_text ?? '');
+        setResultSummary(journal.post_result_summary ?? '');
+        setDecisionQuality(journal.post_decision_quality ?? 'mixed');
+        setExpectancyReview(journal.post_positive_expectancy_review ?? '');
+        setPremortemReview(journal.post_premortem_review ?? '');
+        setInvalidationReview(journal.post_invalidation_review ?? '');
         setRMultipleOverride(journal.post_r_multiple != null ? String(journal.post_r_multiple) : '');
         setSixStep(pickSixStepValue(journal));
         setSixStepOpen(countCompletedSteps(pickSixStepValue(journal)) > 0);
@@ -194,10 +204,13 @@ export function PostTradeReviewSheet({
       : 'bg-muted text-muted-foreground';
 
   const tagsValid = noErrors || selectedTags.length >= 1;
-  const reflectionValid = reflection.trim().length >= 30;
-  const correctValid = correctAction.trim().length >= 20;
-  const exitReasonValid = journal.direction === 'no_entry' || exitReason.trim().length >= 10;
-  const canSave = tagsValid && reflectionValid && correctValid && exitReasonValid && !saving;
+  const reflectionValid = !!reflection.trim();
+  const correctValid = !!correctAction.trim();
+  const exitReasonValid = journal.direction === 'no_entry' || !!exitReason.trim();
+  const resultValid = !!resultSummary.trim();
+  const decisionValid = !!decisionQuality;
+  const reviewLoopValid = !!expectancyReview.trim() && !!premortemReview.trim() && !!invalidationReview.trim();
+  const canSave = tagsValid && reflectionValid && correctValid && exitReasonValid && resultValid && decisionValid && reviewLoopValid && !saving;
 
   const hotWarnings = selectedTags
     .map(id => {
@@ -221,6 +234,11 @@ export function PostTradeReviewSheet({
         post_r_multiple: finalR,
         post_reflection: reflection.trim(),
         post_correct_action: correctAction.trim(),
+        post_result_summary: resultSummary.trim(),
+        post_decision_quality: decisionQuality,
+        post_positive_expectancy_review: expectancyReview.trim(),
+        post_premortem_review: premortemReview.trim(),
+        post_invalidation_review: invalidationReview.trim(),
       });
       const assignments = noErrors ? [] : selectedTags.map(id => ({
         patternId: id,
@@ -233,7 +251,7 @@ export function PostTradeReviewSheet({
       if (hasDeep) {
         try {
           await updateJournalDeepAnalysis(journal.id, sixStep);
-          if (sixStep.post_new_rule_draft.trim().length >= 15) {
+          if (sixStep.post_new_rule_draft.trim().length > 0) {
             toast.info('提示：Step 6 已写但未加入 checklist，可前往复现页激活');
           }
         } catch (e) {
@@ -436,9 +454,89 @@ export function PostTradeReviewSheet({
           </div>
         )}
 
+        <div className={`space-y-3 px-4 py-4 ${sectionCardClass}`}>
+          <div className="text-[12px] font-medium">结果与决策质量分离</div>
+          <div className="space-y-1.5">
+            <Label className="text-[12px] font-medium">这笔结果如何？*</Label>
+            <Textarea
+              rows={2}
+              value={resultSummary}
+              onChange={e => setResultSummary(e.target.value)}
+              placeholder="只写结果事实：赚/亏/保本、平仓方式、是否达到原计划。"
+              className="text-[12px] bg-background/80 border-border/70 rounded-xl"
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label className="text-[12px] font-medium">按当时信息看，这笔决策质量如何？*</Label>
+            <div className="grid grid-cols-3 gap-2">
+              {[
+                { value: 'good', label: '好决策', className: 'border-[#0ECB81] bg-[#0ECB81]/10 text-[#0ECB81]' },
+                { value: 'mixed', label: '混合', className: 'border-[#F0B90B] bg-[#F0B90B]/10 text-[#F0B90B]' },
+                { value: 'bad', label: '坏决策', className: 'border-[#F6465D] bg-[#F6465D]/10 text-[#F6465D]' },
+              ].map(item => (
+                <button
+                  key={item.value}
+                  type="button"
+                  onClick={() => setDecisionQuality(item.value as TradeJournal['post_decision_quality'])}
+                  className={`h-9 rounded-lg border text-[11px] ${
+                    decisionQuality === item.value ? item.className : 'border-border bg-background text-muted-foreground hover:bg-accent'
+                  }`}
+                >
+                  {item.label}
+                </button>
+              ))}
+            </div>
+            <p className="text-[10px] text-muted-foreground">坏结果不自动等于坏决策；好结果也不自动等于好决策。</p>
+          </div>
+        </div>
+
+        <div className={`space-y-3 px-4 py-4 ${sectionCardClass}`}>
+          <div className="text-[12px] font-medium">下单前三问复核</div>
+          {journal.pre_positive_expectancy && (
+            <div className="rounded-lg border border-border/60 bg-background/60 px-3 py-2 text-[11px] leading-relaxed">
+              <span className="text-muted-foreground">当时认为有正期望：</span>{journal.pre_positive_expectancy}
+            </div>
+          )}
+          <div className="space-y-1.5">
+            <Label className="text-[12px] font-medium">正期望判断是否成立？*</Label>
+            <Textarea
+              rows={2}
+              value={expectancyReview}
+              onChange={e => setExpectancyReview(e.target.value)}
+              placeholder="复核当时的赔率、结构、胜率假设；不要用最终盈亏倒推。"
+              className="text-[12px] bg-background/80 border-border/70 rounded-xl"
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label className="text-[12px] font-medium">亏损原因是否命中 pre-mortem？*</Label>
+            <Textarea
+              rows={2}
+              value={premortemReview}
+              onChange={e => setPremortemReview(e.target.value)}
+              placeholder="如果亏损，是否正是开仓前担心的原因；如果盈利，风险是否仍真实存在。"
+              className="text-[12px] bg-background/80 border-border/70 rounded-xl"
+            />
+          </div>
+          {journal.pre_invalidation_condition && (
+            <div className="rounded-lg border border-border/60 bg-background/60 px-3 py-2 text-[11px] leading-relaxed">
+              <span className="text-muted-foreground">当时证伪条件：</span>{journal.pre_invalidation_condition}
+            </div>
+          )}
+          <div className="space-y-1.5">
+            <Label className="text-[12px] font-medium">证伪条件是否出现？你是否执行？*</Label>
+            <Textarea
+              rows={2}
+              value={invalidationReview}
+              onChange={e => setInvalidationReview(e.target.value)}
+              placeholder="记录市场是否给出反证、你是否承认反证并执行。"
+              className="text-[12px] bg-background/80 border-border/70 rounded-xl"
+            />
+          </div>
+        </div>
+
         <div className={`space-y-2 px-4 py-4 ${sectionCardClass}`}>
           <div className="flex items-center justify-between gap-3">
-            <Label className="text-[12px] font-medium">出场原因 * ≥10 字</Label>
+            <Label className="text-[12px] font-medium">出场原因 *</Label>
             <span className="text-[11px] text-muted-foreground">出场方式：{exitMethodLabel}</span>
           </div>
           <Textarea
@@ -454,9 +552,7 @@ export function PostTradeReviewSheet({
           />
           <div className="flex items-center justify-between">
             <p className="text-[10px] text-muted-foreground">这里写的是你为什么在这个位置离场，不是这笔交易最后学到了什么。</p>
-            <span className={`text-[10px] font-mono ${exitReasonValid ? 'text-muted-foreground' : 'text-[#F6465D]'}`}>
-              {exitReason.trim().length} / 10
-            </span>
+            {!exitReasonValid && <span className="text-[10px] font-mono text-[#F6465D]">必填</span>}
           </div>
         </div>
 
@@ -511,7 +607,7 @@ export function PostTradeReviewSheet({
 
         {/* (D) Reflection */}
         <div className={`space-y-2 px-4 py-4 ${sectionCardClass}`}>
-          <Label className="text-[12px] font-medium">复盘文字（这笔交易里你真正学到了什么？）* ≥30 字</Label>
+          <Label className="text-[12px] font-medium">复盘文字（这笔交易里你真正学到了什么？）*</Label>
           <Textarea
             rows={4}
             value={reflection}
@@ -519,12 +615,12 @@ export function PostTradeReviewSheet({
             placeholder="例如：本次入场理由在事后看仍然成立，但仓位过重；止损位过近导致被洗出后又看着行情走出预期方向。下次应根据 ATR 设置止损宽度。"
             className="text-[12px] bg-background/80 border-border/70 rounded-xl"
           />
-          <div className="text-[10px] text-muted-foreground text-right font-mono">{reflection.trim().length} / 30</div>
+          {!reflectionValid && <div className="text-[10px] text-[#F6465D] text-right font-mono">必填</div>}
         </div>
 
         {/* (E) Counterfactual */}
         <div className={`space-y-2 px-4 py-4 ${sectionCardClass}`}>
-          <Label className="text-[12px] font-medium">如果重来一次，你会怎么做？* ≥20 字</Label>
+          <Label className="text-[12px] font-medium">如果重来一次，你会怎么做？*</Label>
           <Textarea
             rows={3}
             value={correctAction}
@@ -534,7 +630,7 @@ export function PostTradeReviewSheet({
           />
           <div className="flex items-center justify-between">
             <p className="text-[10px] text-muted-foreground">❗ 必须可执行——不是"下次更冷静"，而是"下次开仓前必须满足 checklist 第 N 项"</p>
-            <span className="text-[10px] text-muted-foreground font-mono">{correctAction.trim().length} / 20</span>
+            {!correctValid && <span className="text-[10px] text-[#F6465D] font-mono">必填</span>}
           </div>
         </div>
 

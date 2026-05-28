@@ -5,7 +5,7 @@ import { FolderPlus, Layers } from 'lucide-react';
 import { BackButton } from '@/components/journal/BackButton';
 import { Input } from '@/components/ui/input';
 import { useAuth } from '@/contexts/AuthContext';
-import { listAllCampaigns, getCampaignWithLegs } from '@/lib/journalApi';
+import { listAllCampaigns, listVisibleCampaigns, getCampaignWithLegs } from '@/lib/journalApi';
 import { LEG_ROLE_LABELS, STRATEGY_TEMPLATES } from '@/lib/strategyTemplates';
 import type { CampaignStatus, LegRole, TradeCampaign, TradeJournal } from '@/types/journal';
 
@@ -80,6 +80,7 @@ export default function JournalCampaignsPage() {
   const [symbol, setSymbol] = useState('');
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
+  const [scope, setScope] = useState<'own' | 'mutual'>('own');
   const [loading, setLoading] = useState(true);
   const [rows, setRows] = useState<CampaignCardData[]>([]);
 
@@ -89,12 +90,15 @@ export default function JournalCampaignsPage() {
     (async () => {
       setLoading(true);
       try {
-        const campaigns = await listAllCampaigns(user.id, {
+        const filters = {
           status,
           symbol: symbol.trim() || undefined,
           dateFrom: dateFrom ? `${dateFrom}T00:00:00.000Z` : undefined,
           dateTo: dateTo ? `${dateTo}T23:59:59.999Z` : undefined,
-        });
+        };
+        const campaigns = scope === 'own'
+          ? await listAllCampaigns(user.id, filters)
+          : (await listVisibleCampaigns(user.id, filters)).filter(campaign => campaign.user_id !== user.id);
         const full = await Promise.all(
           campaigns.map(async campaign => {
             const details = await getCampaignWithLegs(campaign.id);
@@ -107,7 +111,7 @@ export default function JournalCampaignsPage() {
       }
     })();
     return () => { cancelled = true; };
-  }, [user, status, symbol, dateFrom, dateTo]);
+  }, [user, status, symbol, dateFrom, dateTo, scope]);
 
   const activeCount = useMemo(
     () => rows.filter((row: CampaignCardData) => row.campaign.status === 'active').length,
@@ -142,7 +146,24 @@ export default function JournalCampaignsPage() {
           </div>
         )}
 
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-3 mb-4">
+        <div className="grid grid-cols-1 md:grid-cols-5 gap-3 mb-4">
+          <div className="h-9 rounded-md border border-border bg-card p-1 flex items-center gap-1">
+            {[
+              { value: 'own', label: '我的战役' },
+              { value: 'mutual', label: '互关可见' },
+            ].map(option => (
+              <button
+                key={option.value}
+                type="button"
+                onClick={() => setScope(option.value as 'own' | 'mutual')}
+                className={`h-7 flex-1 rounded text-[11px] transition-colors ${
+                  scope === option.value ? 'bg-[#F0B90B] text-black' : 'text-muted-foreground hover:bg-accent hover:text-foreground'
+                }`}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
           <select
             value={status}
             onChange={(e: ChangeEvent<HTMLSelectElement>) => setStatus(e.target.value as CampaignStatus | 'all')}
@@ -179,8 +200,10 @@ export default function JournalCampaignsPage() {
             <div className="mx-auto w-10 h-10 rounded-full bg-accent flex items-center justify-center">
               <Layers className="w-5 h-5 text-muted-foreground" />
             </div>
-            <div className="text-[13px] font-medium">尚无战役</div>
-            <div className="text-[12px] text-muted-foreground">你下次开主力单时会自动创建第一个战役</div>
+            <div className="text-[13px] font-medium">{scope === 'own' ? '尚无战役' : '暂无互关可见战役'}</div>
+            <div className="text-[12px] text-muted-foreground">
+              {scope === 'own' ? '你下次开主力单时会自动创建第一个战役' : '双方互关后，对方战役会出现在这里'}
+            </div>
           </div>
         ) : (
           rows.map(({ campaign, legs }) => {
@@ -207,6 +230,11 @@ export default function JournalCampaignsPage() {
                       {campaign.direction === 'main_short' ? '主空' : '主多'}
                     </span>
                     <span className="px-2 py-0.5 rounded text-[10px] bg-muted text-muted-foreground">{campaign.symbol}</span>
+                    {campaign.user_id !== user?.id && (
+                      <span className="px-2 py-0.5 rounded text-[10px] bg-[#B080FF]/10 text-[#B080FF]">
+                        互关账户
+                      </span>
+                    )}
                     <span className="text-[11px] text-muted-foreground">{STRATEGY_TEMPLATES[campaign.strategy_template].name}</span>
                   </div>
                   <div className={`px-2 py-0.5 rounded text-[11px] ${STATUS_STYLES[campaign.status] || 'bg-muted text-muted-foreground'}`}>

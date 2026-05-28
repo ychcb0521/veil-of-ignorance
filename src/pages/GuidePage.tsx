@@ -285,7 +285,7 @@ export default function GuidePage() {
                   下单零弹窗、平仓零评价，节奏与币安 1:1。本模式下产生的交易仅进入持仓历史与交易战役归类，<strong>不进入</strong> 错题集、元监控、规则系统。适合熟悉的标的、流畅的执行、或只想观察盘面的场景。
                 </KeyCard>
                 <KeyCard title="决策记录">
-                  完整的开仓快照（理由、最大亏损、心态、Pre-mortem、胜率预测、Lollapalooza、破产估算等）+ 平仓后强制评价 + 错题集自动归类 + 元监控统计 + 规则系统冷却。适合刻意训练同一类 setup、复盘高频错误模式、或对自己进行校准。
+                  完整的开仓快照（正期望理由、亏完最可能原因、证伪条件、最大亏损、心态、胜率预测、Lollapalooza、破产估算等）+ 平仓后强制评价 + 错题集自动归类 + 元监控统计 + 规则系统冷却。适合刻意训练同一类 setup、复盘高频错误模式、或对自己进行校准。
                 </KeyCard>
               </KeyGrid>
               <div className="overflow-x-auto">
@@ -379,7 +379,9 @@ export default function GuidePage() {
                   </thead>
                   <tbody>
                     <tr><td className="px-3 py-2 border-t border-border">订单类型</td><td className="px-3 py-2 border-t border-border">区分主力单与对冲单</td><td className="px-3 py-2 border-t border-border">主力单评估方向判断；对冲单评估风险防御</td></tr>
-                    <tr><td className="px-3 py-2 border-t border-border">开仓理由</td><td className="px-3 py-2 border-t border-border">记录原始假设</td><td className="px-3 py-2 border-t border-border">必须具体到结构、条件和失效点</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border">开仓理由</td><td className="px-3 py-2 border-t border-border">记录原始假设</td><td className="px-3 py-2 border-t border-border">必须具体到结构和条件</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border">正期望理由</td><td className="px-3 py-2 border-t border-border">回答“我为什么认为这笔有正期望”</td><td className="px-3 py-2 border-t border-border">说清优势来自概率、赔率、亏损边界还是组合</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border">证伪条件</td><td className="px-3 py-2 border-t border-border">回答“什么条件出现时证明我错了”</td><td className="px-3 py-2 border-t border-border">平仓后必须比对是否出现、是否执行</td></tr>
                     <tr><td className="px-3 py-2 border-t border-border">最大亏损</td><td className="px-3 py-2 border-t border-border">定义本次风险预算</td><td className="px-3 py-2 border-t border-border">后续 R 倍数以此为分母</td></tr>
                     <tr><td className="px-3 py-2 border-t border-border">心态自评</td><td className="px-3 py-2 border-t border-border">记录决策者状态</td><td className="px-3 py-2 border-t border-border">≤2 分硬阻挡，不能用确认框绕过</td></tr>
                     <tr><td className="px-3 py-2 border-t border-border">Pre-mortem</td><td className="px-3 py-2 border-t border-border">强制先想“如果这单亏完，最可能的原因是什么”</td><td className="px-3 py-2 border-t border-border">平仓后用它比对真实亏损原因</td></tr>
@@ -448,6 +450,7 @@ export default function GuidePage() {
               </div>
               <P>归类历史交易时，先输入或选择标的，再从该币种所有时间段的仓位历史记录中勾选一组相关交易。被选中的记录共同构成一次交易战役。</P>
               <P>实时战役与历史归类战役必须隔离。实时战役在开仓时归属；历史归类只加入历史战役，不把回填数据混进实时训练口径。</P>
+              <P>互关账户可以打开彼此的战役详情，并留下带可信度权重的留言评价。外部校验只评价“按当时信息看是否是好决策”，不是用后续走势倒推对错。</P>
             </section>
 
             <section id="s4-3" className="scroll-mt-20">
@@ -487,7 +490,7 @@ export default function GuidePage() {
                 </table>
               </div>
               <P>生成原理是：先用错题集把单笔错误归入 pattern，再用复盘分析找出可操作的防错条件，最后把这个条件写成下次开仓前必须检查的规则。</P>
-              <P>一条规则只有在“启用”且“加入 checklist”后，才会进入开仓快照；否则它只是记录，不会参与下单前约束。</P>
+              <P>规则分四类：硬规则违反即阻断交易；核心规则必须进入 checklist；观察规则只记录不阻断；失效规则由元监控证明无效后归档。规则有权重，权重高的规则在 checklist 和元监控中优先展示。</P>
               <P>规则激活后会进入 7 天冷却期。冷却期内不能关闭、删除、移出 checklist 或降级为非必填，避免刚写下的规则被下一次情绪波动立即废掉。</P>
               <Highlight>
                 规则的价值不在于写得完整，而在于能否前置到下一次决策点，并在元监控中看到对应错误频次下降。

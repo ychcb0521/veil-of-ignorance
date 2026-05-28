@@ -32,37 +32,36 @@ interface StepDef {
   color: string;
   hint: string;
   placeholder: string;
-  minLength: number;
 }
 
 const STEPS: StepDef[] = [
   {
-    key: 'post_error_scenario', num: 1, title: '错误场景', color: '#848E9C', minLength: 20,
+    key: 'post_error_scenario', num: 1, title: '错误场景', color: '#848E9C',
     hint: '当时市场在做什么？你看到了什么信号？你的身体/心态在什么状态？',
     placeholder: '例如：BTC 在 4H 趋势线下方反弹至前高，成交量背离；当时凌晨 2 点，已连续盯盘 4 小时；前一笔刚扫损',
   },
   {
-    key: 'post_original_hypothesis', num: 2, title: '原始假设', color: '#F0B90B', minLength: 20,
+    key: 'post_original_hypothesis', num: 2, title: '原始假设', color: '#F0B90B',
     hint: '你当时相信什么会发生？这笔交易的底层逻辑是什么？',
     placeholder: '例如：我假设趋势线已经失效，前高会被突破，止损在前低下方 0.5%',
   },
   {
-    key: 'post_reality_feedback', num: 3, title: '现实反馈', color: '#B080FF', minLength: 20,
+    key: 'post_reality_feedback', num: 3, title: '现实反馈', color: '#B080FF',
     hint: '市场实际怎么回应你？哪里和你的假设不一致？',
     placeholder: '例如：价格在前高位置二次假突破，量能没放大，然后快速跌破止损；事后看是前高的诱多结构',
   },
   {
-    key: 'post_error_type_summary', num: 4, title: '错误类型', color: '#F6465D', minLength: 10,
+    key: 'post_error_type_summary', num: 4, title: '错误类型', color: '#F6465D',
     hint: '这次错误在你的 6 大类里属于哪类？一句话归纳。也请在上面的标签选择器中打对应 tag。',
     placeholder: '例如：入场理由错——把假突破当成有效突破，忽略了量价背离',
   },
   {
-    key: 'post_real_problem', num: 5, title: '真正问题', color: '#0ECB81', minLength: 20,
+    key: 'post_real_problem', num: 5, title: '真正问题', color: '#0ECB81',
     hint: "不是'我冲动了'，而是系统性的——你的判断/规则/状态哪里有结构性漏洞？",
     placeholder: '例如：我的策略对"假突破"没有过滤规则，只看价格不看量；同时心态评分 ≤2 时仍交易',
   },
   {
-    key: 'post_new_rule_draft', num: 6, title: '新规则', color: '#F0B90B', minLength: 15,
+    key: 'post_new_rule_draft', num: 6, title: '新规则', color: '#F0B90B',
     hint: "写一条具体、可被未来的你勾选/不勾选的规则。然后点'写入 checklist'。",
     placeholder: '例如：突破入场必须满足 4H 成交量 ≥ 前 20 根均值的 1.5 倍',
   },
@@ -87,7 +86,7 @@ export function SixStepAnalysisForm({
   const [selectedPatternId, setSelectedPatternId] = useState<string | null>(null);
 
   const completed = useMemo(
-    () => STEPS.filter(s => (value[s.key] ?? '').trim().length >= s.minLength).length,
+    () => STEPS.filter(s => (value[s.key] ?? '').trim().length > 0).length,
     [value],
   );
 
@@ -98,7 +97,7 @@ export function SixStepAnalysisForm({
   const step6Text = value.post_new_rule_draft.trim();
   const multiTag = (patternChips?.length ?? 0) > 1;
   const needsPick = multiTag && selectedPatternId === null;
-  const canSaveRule = !saving && step6Text.length >= 15 && !step6Saved && !needsPick;
+  const canSaveRule = !saving && step6Text.length > 0 && !step6Saved && !needsPick;
 
   const handleSaveRule = async () => {
     if (!onSaveRule || !canSaveRule) return;
@@ -120,7 +119,6 @@ export function SixStepAnalysisForm({
       {STEPS.map(s => {
         const v = value[s.key] ?? '';
         const len = v.trim().length;
-        const short = len > 0 && len < s.minLength;
         const isStep4 = s.num === 4;
         const isStep6 = s.num === 6;
         return (
@@ -134,7 +132,7 @@ export function SixStepAnalysisForm({
                 {s.num}
               </span>
               <span className="text-[12px] font-medium text-foreground">{s.title}</span>
-              {len >= s.minLength && <Check className="w-3 h-3 text-[#0ECB81]" />}
+              {len > 0 && <Check className="w-3 h-3 text-[#0ECB81]" />}
               {isStep4 && step4Hint && (
                 <span className="ml-auto text-[10px] text-muted-foreground italic">{step4Hint}</span>
               )}
@@ -149,17 +147,13 @@ export function SixStepAnalysisForm({
               className="bg-background/85 border-border/60 text-[12px] rounded-lg"
             />
             <div className="flex items-center justify-between mt-1">
-              {short ? (
-                <span className="text-[10px] text-[#F6465D]">还差 {s.minLength - len} 字</span>
-              ) : (
-                <span />
-              )}
+              <span />
               <span className="text-[10px] text-muted-foreground font-mono">
-                {len} / {s.minLength}
+                {len} 字
               </span>
             </div>
 
-            {isStep4 && len >= s.minLength && patternChips && (
+            {isStep4 && len > 0 && patternChips && (
               <div className="mt-2 pl-2">
                 {patternChips.length === 0 ? (
                   <div className="text-[10px] text-[#F6465D]">
@@ -253,7 +247,7 @@ export function SixStepAnalysisForm({
 }
 
 export function countCompletedSteps(v: SixStepValue): number {
-  return STEPS.filter(s => (v[s.key] ?? '').trim().length >= s.minLength).length;
+  return STEPS.filter(s => (v[s.key] ?? '').trim().length > 0).length;
 }
 
 export function pickSixStepValue(j: {

@@ -55,7 +55,7 @@ export function CounterfactualPanel({ journal, klines, selectedBranchId, onSelec
     [branches, selectedBranchId],
   );
 
-  const canRun = label.trim().length > 0 && label.trim().length <= 20 && !running &&
+  const canRun = label.trim().length > 0 && !running &&
     (noEntry || (parseFloat(entryPrice) > 0 && parseFloat(posSize) > 0));
 
   const handleRun = async () => {

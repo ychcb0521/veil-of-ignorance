@@ -28,14 +28,21 @@ export const DEFAULT_PRE_TRADE_CHECKLIST: ChecklistDefItem[] = [
 ];
 
 export function ruleToChecklistItem(rule: TradingRule): ChecklistDefItem {
+  const category = rule.rule_category ?? (rule.required ? 'core' : 'watch');
   return {
     id: `rule_${rule.id}`,
     label: rule.rule_text,
-    required: rule.required,
+    required: category === 'hard' || rule.required,
     source: 'rule',
     sourceRuleId: rule.id,
     sourcePatternId: rule.source_pattern_id,
   };
+}
+
+function entersChecklist(rule: TradingRule): boolean {
+  const category = rule.rule_category ?? (rule.required ? 'core' : 'watch');
+  if (category === 'watch' || category === 'retired') return false;
+  return rule.added_to_checklist || category === 'hard' || category === 'core';
 }
 
 export function buildChecklist(rules: TradingRule[] = []): ChecklistDefItem[] {
@@ -43,11 +50,20 @@ export function buildChecklist(rules: TradingRule[] = []): ChecklistDefItem[] {
   const activeRules = rules
     .filter(r =>
       r.is_active &&
-      r.added_to_checklist &&
+      entersChecklist(r) &&
       r.rule_text !== '[延后]' &&
       (!r.snooze_until || new Date(r.snooze_until).getTime() < now),
     )
-    .sort((a, b) => (a.ui_order ?? 100) - (b.ui_order ?? 100));
+    .sort((a, b) => {
+      const categoryRank: Record<string, number> = { hard: 0, core: 1, watch: 2, retired: 3 };
+      const ar = categoryRank[a.rule_category ?? 'core'] ?? 1;
+      const br = categoryRank[b.rule_category ?? 'core'] ?? 1;
+      if (ar !== br) return ar - br;
+      const aw = Number.isFinite(a.weight) ? a.weight : 50;
+      const bw = Number.isFinite(b.weight) ? b.weight : 50;
+      if (aw !== bw) return bw - aw;
+      return (a.ui_order ?? 100) - (b.ui_order ?? 100);
+    });
   return [...DEFAULT_PRE_TRADE_CHECKLIST, ...activeRules.map(ruleToChecklistItem)];
 }
 

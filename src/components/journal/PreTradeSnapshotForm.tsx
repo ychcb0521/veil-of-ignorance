@@ -57,6 +57,8 @@ export interface SnapshotPayload {
   pre_max_loss_usdt: number | null;
   // Decision-quality fields
   pre_mortem_text: string | null;
+  pre_positive_expectancy: string | null;
+  pre_invalidation_condition: string | null;
   pre_calibration_win_pct: number | null;
   pre_dataset_split: DatasetSplit | null;
   pre_lollapalooza_score: number | null;
@@ -128,7 +130,9 @@ export function PreTradeSnapshotForm({
   const [submitting, setSubmitting] = useState(false);
   const [userRules, setUserRules] = useState<TradingRule[]>([]);
   // Decision-quality state
+  const [positiveExpectancy, setPositiveExpectancy] = useState('');
   const [preMortem, setPreMortem] = useState('');
+  const [invalidationCondition, setInvalidationCondition] = useState('');
   const [calibrationPct, setCalibrationPct] = useState('');
   const [datasetSplit, setDatasetSplit] = useState<DatasetSplit>('in_sample');
   const [recent24h, setRecent24h] = useState<TradeJournal[]>([]);
@@ -298,15 +302,15 @@ export function PreTradeSnapshotForm({
 
   // ===== Submit gate =====
   const canSubmit = useMemo(() => {
-    if (reason.trim().length < 20) return false;
-    if (mental <= 3 && mentalTrigger.trim().length < 10) return false;
+    if (!reason.trim()) return false;
+    if (mental <= 3 && !mentalTrigger.trim()) return false;
     // Mental ≤2 is a hard block — no override path. Per Munger: gates with escape
     // valves are not gates. If you're in a 1-2 state, walk away.
     if (mental <= 2) return false;
     if (mode === 'no_entry') {
-      if (riskAware.trim().length < 15) return false;
-      if (riskManage.trim().length < 15) return false;
-      if (noEntryReason.trim().length < 10) return false;
+      if (!riskAware.trim()) return false;
+      if (!riskManage.trim()) return false;
+      if (!noEntryReason.trim()) return false;
       return true;
     }
     // trade mode
@@ -316,14 +320,16 @@ export function PreTradeSnapshotForm({
       return true;
     }
     // main order: full requirements
-    if (riskAware.trim().length < 15) return false;
-    if (riskManage.trim().length < 15) return false;
+    if (!riskAware.trim()) return false;
+    if (!riskManage.trim()) return false;
     if (!tpsValid) return false;
     if (sizeUsdt <= 0) return false;
     if (maxLoss <= 0) return false;
     if (!checklistPassed) return false;
     // ===== Decision-quality gates =====
-    if (preMortem.trim().length < 10) return false;
+    if (!positiveExpectancy.trim()) return false;
+    if (!preMortem.trim()) return false;
+    if (!invalidationCondition.trim()) return false;
     if (!calibrationValid) return false;
     if (lollapalooza && lollapalooza.score >= 60) return false;
     if (lollapalooza && lollapalooza.score >= 30 && !acknowledgedCaution) return false;
@@ -331,7 +337,7 @@ export function PreTradeSnapshotForm({
   }, [reason, riskAware, riskManage, mental, mentalTrigger,
       mode, isHedge, tpsValid, sizeUsdt, maxLoss, checklistPassed, noEntryReason,
       currentMarginMode, campaignFieldsValid,
-      preMortem, calibrationValid, lollapalooza, acknowledgedCaution]);
+      positiveExpectancy, preMortem, invalidationCondition, calibrationValid, lollapalooza, acknowledgedCaution]);
 
   const handleSubmit = async () => {
     if (!canSubmit || submitting) return;
@@ -368,6 +374,8 @@ export function PreTradeSnapshotForm({
       const isLiveMain = isTrade && !isHedge;
       const dqFields = {
         pre_mortem_text: isLiveMain ? preMortem.trim() : null,
+        pre_positive_expectancy: isLiveMain ? positiveExpectancy.trim() : null,
+        pre_invalidation_condition: isLiveMain ? invalidationCondition.trim() : null,
         pre_calibration_win_pct: isLiveMain && calibrationValid ? Number(calibrationParsed) : null,
         pre_dataset_split: isLiveMain ? datasetSplit : null,
         pre_lollapalooza_score: isLiveMain && lollapalooza ? lollapalooza.score : null,
@@ -712,7 +720,6 @@ export function PreTradeSnapshotForm({
               : isHedge
                 ? '对冲理由'
                 : '开仓理由'}{requiredStar}
-            <span className="ml-2 text-muted-foreground/60">至少 20 字</span>
           </div>
           <Textarea
             rows={3}
@@ -851,7 +858,7 @@ export function PreTradeSnapshotForm({
         {/* (7) Mental trigger — conditional */}
         {mental <= 3 && mode !== 'no_entry' && (
           <div className="space-y-1.5">
-            <div className={labelCls}>心态触发原因{requiredStar} <span className="text-muted-foreground/60">至少 10 字</span></div>
+            <div className={labelCls}>心态触发原因{requiredStar}</div>
             <Textarea
               rows={2}
               value={mentalTrigger}
@@ -865,7 +872,7 @@ export function PreTradeSnapshotForm({
         {/* (8) Risk awareness */}
         {(showFullFields || mode === 'no_entry') && (
           <div className="space-y-1.5">
-            <div className={labelCls}>当时对风险的认识{requiredStar} <span className="text-muted-foreground/60">至少 15 字</span></div>
+            <div className={labelCls}>当时对风险的认识{requiredStar}</div>
             <Textarea
               rows={2}
               value={riskAware}
@@ -879,7 +886,7 @@ export function PreTradeSnapshotForm({
         {/* (9) Risk management */}
         {(showFullFields || mode === 'no_entry') && (
           <div className="space-y-1.5">
-            <div className={labelCls}>当时对风险的管理方式{requiredStar} <span className="text-muted-foreground/60">至少 15 字</span></div>
+            <div className={labelCls}>当时对风险的管理方式{requiredStar}</div>
             <Textarea
               rows={2}
               value={riskManage}
@@ -924,12 +931,19 @@ export function PreTradeSnapshotForm({
           <div className="rounded border border-border bg-background/40 p-3 space-y-3">
             <div className="text-[11px] font-medium text-foreground">决策质量记录</div>
 
-            {/* Pre-mortem (Klein 1989) */}
             <div className="space-y-1.5">
-              <div className={labelCls}>
-                Pre-mortem{requiredStar}
-                <span className="text-muted-foreground/60 ml-1">至少 10 字</span>
-              </div>
+              <div className={labelCls}>我为什么认为这笔有正期望？{requiredStar}</div>
+              <Textarea
+                rows={2}
+                value={positiveExpectancy}
+                onChange={e => setPositiveExpectancy(e.target.value)}
+                placeholder="例如：结构位置、赔率、胜率、波动率、时间窗口或资金流同时支持这笔交易。"
+                className={textareaCls}
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <div className={labelCls}>如果亏完，最可能因为什么？{requiredStar}</div>
               <Textarea
                 rows={2}
                 value={preMortem}
@@ -940,6 +954,17 @@ export function PreTradeSnapshotForm({
               <div className="text-[10px] text-muted-foreground">
                 Munger："Invert, always invert" — 先想清楚怎么输，才有资格谈怎么赢。
               </div>
+            </div>
+
+            <div className="space-y-1.5">
+              <div className={labelCls}>什么条件出现时证明我错了？{requiredStar}</div>
+              <Textarea
+                rows={2}
+                value={invalidationCondition}
+                onChange={e => setInvalidationCondition(e.target.value)}
+                placeholder="例如：跌破关键结构位且放量未收回；BTC 大盘同步转弱；盘口流动性消失。"
+                className={textareaCls}
+              />
             </div>
 
             {/* Calibration */}
@@ -1074,7 +1099,7 @@ export function PreTradeSnapshotForm({
         {/* (11) No entry reason */}
         {mode === 'no_entry' && (
           <div className="space-y-1.5">
-            <div className={labelCls}>未开仓原因{requiredStar} <span className="text-muted-foreground/60">至少 10 字</span></div>
+            <div className={labelCls}>未开仓原因{requiredStar}</div>
             <Textarea
               rows={2}
               value={noEntryReason}

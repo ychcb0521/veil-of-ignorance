@@ -103,6 +103,19 @@ function DecisionChannel() {
         <div className="border-l-2 border-[#F0B90B] pl-3 text-foreground">
           {journal.pre_entry_reason || <span className="text-muted-foreground italic">无</span>}
         </div>
+        {(journal.pre_positive_expectancy || journal.pre_mortem_text || journal.pre_invalidation_condition) && (
+          <div className="rounded border border-border bg-background/60 p-2 space-y-1.5 text-[11px]">
+            {journal.pre_positive_expectancy && (
+              <div><span className="text-muted-foreground">正期望理由：</span>{journal.pre_positive_expectancy}</div>
+            )}
+            {journal.pre_mortem_text && (
+              <div><span className="text-muted-foreground">亏完最可能原因：</span>{journal.pre_mortem_text}</div>
+            )}
+            {journal.pre_invalidation_condition && (
+              <div><span className="text-muted-foreground">证伪条件：</span>{journal.pre_invalidation_condition}</div>
+            )}
+          </div>
+        )}
         <div className="grid grid-cols-2 gap-2 font-mono text-[11px]">
           <Cell label="计划止盈" value={journal.pre_planned_take_profit?.toFixed(2) ?? '—'} />
           <Cell label="仓位" value={journal.pre_position_size?.toFixed(4) ?? '—'} />
@@ -361,6 +374,19 @@ function CounterfactualChannel({ journal, klines, selectedBranchId, onSelectBran
       </span>
     }>
       <div className="space-y-3 text-[12px]">
+        {(journal.post_result_summary || journal.post_decision_quality) && (
+          <div className="rounded border border-border bg-background/60 p-2 space-y-1.5 text-[11px]">
+            {journal.post_result_summary && (
+              <div><span className="text-muted-foreground">结果：</span>{journal.post_result_summary}</div>
+            )}
+            {journal.post_decision_quality && (
+              <div>
+                <span className="text-muted-foreground">按当时信息的决策质量：</span>
+                {journal.post_decision_quality === 'good' ? '好决策' : journal.post_decision_quality === 'bad' ? '坏决策' : '混合'}
+              </div>
+            )}
+          </div>
+        )}
         {journal.post_correct_action && (
           <div className="border-l-2 border-[#0ECB81] pl-3 text-foreground">
             {journal.post_correct_action}

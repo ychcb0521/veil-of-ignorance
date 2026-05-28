@@ -201,7 +201,15 @@ export default function JournalInsightsPage() {
 
     // 规则有效性：拥有规则后是否减少了对应 pattern 出现频次
     const ruleEffect = data.rules
-      .filter(r => r.source_pattern_id && r.added_to_checklist && r.is_active)
+      .filter(r =>
+        r.source_pattern_id &&
+        r.is_active &&
+        (r.rule_category === 'hard' || r.rule_category === 'core' || r.added_to_checklist),
+      )
+      .sort((a, b) =>
+        (b.weight ?? 0) - (a.weight ?? 0) ||
+        new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
+      )
       .map(r => {
         const since = new Date(r.activated_at ?? r.created_at).getTime();
         const afterEnd = Math.min(now, since + range * DAY);
@@ -523,6 +531,7 @@ export default function JournalInsightsPage() {
               <thead className="text-muted-foreground bg-background">
                 <tr>
                   <th className="text-left px-3 py-1.5">规则</th>
+                  <th className="text-left px-3">类型/权重</th>
                   <th className="text-left px-3">来源模式</th>
                   <th className="text-right px-3">前</th>
                   <th className="text-right px-3">后</th>
@@ -535,6 +544,9 @@ export default function JournalInsightsPage() {
                   return (
                     <tr key={e.rule.id} className="border-t border-border">
                       <td className="px-3 py-1.5 text-foreground truncate max-w-[300px]">{e.rule.rule_text}</td>
+                      <td className="px-3 text-muted-foreground">
+                        {e.rule.rule_category === 'hard' ? '硬' : e.rule.rule_category === 'core' ? '核心' : '观察'} · {e.rule.weight ?? 0}
+                      </td>
                       <td className="px-3 text-muted-foreground">{e.pattern?.pattern_name ?? '—'}</td>
                       <td className="text-right px-3">{e.before}</td>
                       <td className="text-right px-3">{e.after}</td>

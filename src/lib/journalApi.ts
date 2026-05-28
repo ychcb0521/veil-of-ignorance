@@ -20,6 +20,7 @@ import type {
   CampaignCounterfactualBranchKind,
   CampaignCounterfactualParams,
   CampaignCounterfactualResult,
+  CampaignComment,
   ClassificationAssignmentInput,
   ClassificationValidationInput,
   ClassificationValidationResult,
@@ -30,6 +31,8 @@ import type {
   ErrorTagPattern,
   JournalTagAssignment,
   LegRole,
+  AccountFollow,
+  RuleCategory,
   StrategyTemplate,
   SuggestedLegRole,
   TaggedPhase,
@@ -283,6 +286,14 @@ function isMissingCounterfactualsTableError(error: { code?: string; message?: st
   return error.code === 'PGRST205'
     || error.code === '42P01'
     || (/campaign_counterfactuals/i.test(message) && /schema cache|could not find|does not exist/i.test(message));
+}
+
+function isMissingSocialFeatureError(error: { code?: string; message?: string } | null): boolean {
+  if (!error) return false;
+  const message = error.message ?? '';
+  return error.code === 'PGRST205'
+    || error.code === '42P01'
+    || (/account_follows|trade_campaign_comments/i.test(message) && /schema cache|could not find|does not exist|column/i.test(message));
 }
 
 function isCampaignNotFoundError(error: { code?: string; message?: string } | null): boolean {
@@ -733,6 +744,24 @@ export async function listAllCampaigns(
   if (error) {
     if (isMissingTradeCampaignsTableError(error)) return local;
     return wrap('加载战役列表', error, (data ?? []).map(toCampaign));
+  }
+  return mergeCampaigns((data ?? []).map(toCampaign), local);
+}
+
+export async function listVisibleCampaigns(
+  userId: string,
+  filters?: ListCampaignFilters,
+): Promise<TradeCampaign[]> {
+  let q = supabase.from('trade_campaigns' as never).select('*');
+  if (filters?.status && filters.status !== 'all') q = q.eq('status', filters.status);
+  if (filters?.symbol) q = q.eq('symbol', filters.symbol);
+  if (filters?.dateFrom) q = q.gte('opened_at', filters.dateFrom);
+  if (filters?.dateTo) q = q.lte('opened_at', filters.dateTo);
+  const { data, error } = await q.order('opened_at', { ascending: false });
+  const local = applyCampaignFilters(readLocalCampaigns(userId), filters);
+  if (error) {
+    if (isMissingTradeCampaignsTableError(error)) return local;
+    return wrap('加载可见战役列表', error, (data ?? []).map(toCampaign));
   }
   return mergeCampaigns((data ?? []).map(toCampaign), local);
 }
@@ -1656,6 +1685,97 @@ export async function listCounterfactuals(campaignId: string): Promise<CampaignC
   return wrap('加载反事实战役分支', error, (data ?? []).map(toCampaignCounterfactual));
 }
 
+export async function followAccount(followeeId: string): Promise<AccountFollow> {
+  const followerId = await getAuthenticatedUserId('关注账户');
+  if (followerId === followeeId) throw new Error('不能关注自己');
+  const payload = { follower_id: followerId, followee_id: followeeId };
+  const { data, error } = await supabase
+    .from('account_follows' as never)
+    .upsert(payload as never, { onConflict: 'follower_id,followee_id' })
+    .select()
+    .single();
+  return wrap('关注账户', error, data as unknown as AccountFollow);
+}
+
+export async function unfollowAccount(followeeId: string): Promise<void> {
+  const followerId = await getAuthenticatedUserId('取消关注');
+  const { error } = await supabase
+    .from('account_follows' as never)
+    .delete()
+    .eq('follower_id', followerId)
+    .eq('followee_id', followeeId);
+  if (error && !isMissingSocialFeatureError(error)) throw new Error(`取消关注失败：${error.message}`);
+}
+
+export async function listMyFollows(): Promise<AccountFollow[]> {
+  const userId = await getAuthenticatedUserId('加载关注列表');
+  const { data, error } = await supabase
+    .from('account_follows' as never)
+    .select('*')
+    .eq('follower_id', userId)
+    .order('created_at', { ascending: false });
+  if (error && isMissingSocialFeatureError(error)) return [];
+  return wrap('加载关注列表', error, data as unknown as AccountFollow[]);
+}
+
+export async function hasMutualFollow(userId: string, otherUserId: string): Promise<boolean> {
+  if (userId === otherUserId) return true;
+  const [outbound, inbound] = await Promise.all([
+    supabase
+      .from('account_follows' as never)
+      .select('id')
+      .eq('follower_id', userId)
+      .eq('followee_id', otherUserId)
+      .maybeSingle(),
+    supabase
+      .from('account_follows' as never)
+      .select('id')
+      .eq('follower_id', otherUserId)
+      .eq('followee_id', userId)
+      .maybeSingle(),
+  ]);
+  if (
+    (outbound.error && isMissingSocialFeatureError(outbound.error)) ||
+    (inbound.error && isMissingSocialFeatureError(inbound.error))
+  ) {
+    return false;
+  }
+  if (outbound.error && outbound.error.code !== 'PGRST116') throw new Error(`检查互关失败：${outbound.error.message}`);
+  if (inbound.error && inbound.error.code !== 'PGRST116') throw new Error(`检查互关失败：${inbound.error.message}`);
+  return !!outbound.data && !!inbound.data;
+}
+
+export async function listCampaignComments(campaignId: string): Promise<CampaignComment[]> {
+  const { data, error } = await supabase
+    .from('trade_campaign_comments' as never)
+    .select('*')
+    .eq('campaign_id', campaignId)
+    .order('created_at', { ascending: false });
+  if (error && isMissingSocialFeatureError(error)) return [];
+  return wrap('加载战役留言', error, data as unknown as CampaignComment[]);
+}
+
+export async function createCampaignComment(input: {
+  campaignId: string;
+  body: string;
+  believabilityScore?: number | null;
+}): Promise<CampaignComment> {
+  const userId = await getAuthenticatedUserId('发表战役留言');
+  const payload = {
+    campaign_id: input.campaignId,
+    user_id: userId,
+    body: input.body.trim(),
+    believability_score: input.believabilityScore ?? null,
+  };
+  if (!payload.body) throw new Error('留言不能为空');
+  const { data, error } = await supabase
+    .from('trade_campaign_comments' as never)
+    .insert(payload as never)
+    .select()
+    .single();
+  return wrap('发表战役留言', error, data as unknown as CampaignComment);
+}
+
 export async function deleteCounterfactual(id: string): Promise<void> {
   const { error } = await supabase
     .from('campaign_counterfactuals' as never)
@@ -1804,9 +1924,6 @@ export interface CreatePatternInput {
 }
 
 export async function createPattern(input: CreatePatternInput): Promise<ErrorTagPattern> {
-  if (input.operational_definition.trim().length < 10) {
-    throw new Error("可操作定义至少需要 10 个字符");
-  }
   const { data, error } = await supabase
     .from("error_tag_patterns" as never)
     .insert(input as never)
@@ -1835,10 +1952,6 @@ export async function updatePattern(
   id: string,
   patch: Partial<Pick<ErrorTagPattern, "pattern_name" | "operational_definition" | "parent_id" | "is_archived">>,
 ): Promise<ErrorTagPattern> {
-  if (patch.operational_definition !== undefined && patch.operational_definition.trim().length < 10) {
-    throw new Error("可操作定义至少需要 10 个字符");
-  }
-
   // Lock identity once the pattern has been tagged to any journal.
   // Rationale: renaming an in-use pattern silently rewrites historical statistics
   // (frequency / pattern clusters / rule attribution). The operational definition
@@ -1961,6 +2074,11 @@ export interface UpdateJournalPostInput {
   post_r_multiple?: number | null;
   post_reflection?: string | null;
   post_correct_action?: string | null;
+  post_result_summary?: string | null;
+  post_decision_quality?: TradeJournal['post_decision_quality'];
+  post_positive_expectancy_review?: string | null;
+  post_premortem_review?: string | null;
+  post_invalidation_review?: string | null;
 }
 
 export async function updateJournalPostReview(
@@ -2112,6 +2230,8 @@ export interface CreateRuleInput {
   is_active?: boolean;
   added_to_checklist?: boolean;
   required?: boolean;
+  rule_category?: RuleCategory;
+  weight?: number;
   trigger_threshold?: number;
 }
 
@@ -2123,6 +2243,11 @@ export interface FinalizeJournalInput {
   post_r_multiple: number | null;
   post_reflection: string;
   post_correct_action: string;
+  post_result_summary?: string | null;
+  post_decision_quality?: TradeJournal['post_decision_quality'];
+  post_positive_expectancy_review?: string | null;
+  post_premortem_review?: string | null;
+  post_invalidation_review?: string | null;
 }
 
 export async function finalizeJournalReview(
@@ -2522,7 +2647,7 @@ export async function deleteCounterfactualBranch(
 
 export async function updateRule(
   ruleId: string,
-  patch: Partial<Pick<TradingRule, "rule_text" | "is_active" | "required" | "added_to_checklist" | "ui_order" | "snooze_until">>,
+  patch: Partial<Pick<TradingRule, "rule_text" | "is_active" | "required" | "added_to_checklist" | "rule_category" | "weight" | "ui_order" | "snooze_until">>,
 ): Promise<TradingRule> {
   // Cooldown guard: weakening a rule during its activation cooldown is blocked.
   // "Weakening" = turning off is_active, removing from checklist, or downgrading required → false.
@@ -2656,7 +2781,7 @@ export async function promoteDraftToRule(
   if (gErr) throw new Error(`读取草稿失败：${gErr.message}`);
   const row = cur as unknown as { user_id: string; post_new_rule_draft: string | null };
   const text = (row?.post_new_rule_draft ?? "").trim();
-  if (text.length < 15) throw new Error("规则草稿至少 15 字");
+  if (!text) throw new Error("规则草稿不能为空");
   const { data, error } = await supabase
     .from("trading_rules" as never)
     .insert({
@@ -2664,6 +2789,8 @@ export async function promoteDraftToRule(
       source_pattern_id: options.sourcePatternId ?? null,
       rule_text: text,
       is_active: true,
+      rule_category: 'core',
+      weight: options.required ? 80 : 60,
       added_to_checklist: true,
       required: options.required,
     } as never)

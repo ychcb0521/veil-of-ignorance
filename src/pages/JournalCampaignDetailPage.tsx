@@ -1,6 +1,6 @@
 import { type ChangeEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, Flag, Info, Layers, Sparkles, Target, Trash2, TrendingUp } from 'lucide-react';
+import { ArrowLeft, Flag, Info, Layers, MessageSquare, Send, Sparkles, Target, Trash2, TrendingUp, UserPlus } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -30,7 +30,11 @@ import {
 import {
   deleteCounterfactual,
   detachJournalFromCampaign,
+  createCampaignComment,
+  followAccount,
   getCampaignFullData,
+  hasMutualFollow,
+  listCampaignComments,
   listCounterfactuals,
   runAndPersistCustomCounterfactual,
   runAndPersistDeviationCosts,
@@ -40,6 +44,7 @@ import { STRATEGY_TEMPLATES } from '@/lib/strategyTemplates';
 import type {
   CampaignCounterfactual,
   CampaignCounterfactualParams,
+  CampaignComment,
   DeviationCost,
   TradeCampaign,
   TradeJournal,
@@ -70,6 +75,10 @@ function fmtDuration(start: string, end: string | null) {
   const hours = Math.floor(mins / 60);
   const rest = mins % 60;
   return `${hours} 小时 ${rest} 分钟`;
+}
+
+function shortAccountId(value: string) {
+  return value.length <= 12 ? value : `${value.slice(0, 6)}…${value.slice(-4)}`;
 }
 
 function chipForStatus(status: TradeCampaign['status']) {
@@ -344,6 +353,14 @@ export default function JournalCampaignDetailPage() {
   const [deviationHydrated, setDeviationHydrated] = useState(false);
   const [detachTarget, setDetachTarget] = useState<TradeJournal | null>(null);
   const [detaching, setDetaching] = useState(false);
+  const [isOwner, setIsOwner] = useState(true);
+  const [comments, setComments] = useState<CampaignComment[]>([]);
+  const [commentsLoading, setCommentsLoading] = useState(false);
+  const [commentText, setCommentText] = useState('');
+  const [commentScore, setCommentScore] = useState(3);
+  const [commentSaving, setCommentSaving] = useState(false);
+  const [followeeId, setFolloweeId] = useState('');
+  const [following, setFollowing] = useState(false);
   const sopRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -357,16 +374,26 @@ export default function JournalCampaignDetailPage() {
           listCounterfactuals(id),
         ]);
         if (cancelled) return;
-        if (full.campaign.user_id !== user.id) {
+        const ownCampaign = full.campaign.user_id === user.id;
+        const mutual = ownCampaign ? true : await hasMutualFollow(user.id, full.campaign.user_id);
+        if (!mutual) {
           nav(`/journal/campaigns${location.search}`);
           return;
         }
+        setIsOwner(ownCampaign);
         setCampaign(full.campaign);
         setLegs(full.legs);
         setTradeRecords(full.tradeRecords);
         setPendingOrders(full.pendingOrders);
         setCounterfactuals(savedCounterfactuals);
         setSelectedCounterfactualId(prev => prev ?? savedCounterfactuals[0]?.id ?? null);
+        setCommentsLoading(true);
+        try {
+          const nextComments = await listCampaignComments(full.campaign.id);
+          if (!cancelled) setComments(nextComments);
+        } finally {
+          if (!cancelled) setCommentsLoading(false);
+        }
       } catch (error) {
         if (!cancelled) {
           toast.error(error instanceof Error ? error.message : String(error));
@@ -491,6 +518,7 @@ export default function JournalCampaignDetailPage() {
   const otherCount = Math.max(0, legs.length - mainCount - hedgeCount - tpCount);
   const actualPnl = campaign.final_realized_pnl ?? 0;
   const totalDeviationCost = deviationCosts.reduce((sum, item) => sum + item.cost_usdt, 0);
+  const canLeaveExternalComment = !isOwner;
 
   const refreshCampaign = async () => {
     const full = await getCampaignFullData(campaign.id);
@@ -504,6 +532,43 @@ export default function JournalCampaignDetailPage() {
     const next = await listCounterfactuals(campaign.id);
     setCounterfactuals(next);
     setSelectedCounterfactualId(keepSelectionId ?? next[0]?.id ?? null);
+  };
+
+  const handleFollowAccount = async () => {
+    const target = followeeId.trim();
+    if (!target || target === user?.id) {
+      toast.error('请输入对方的用户 ID');
+      return;
+    }
+    try {
+      setFollowing(true);
+      await followAccount(target);
+      setFolloweeId('');
+      toast.success('已关注。双方互关后，可查看并评价彼此的交易战役');
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : String(error));
+    } finally {
+      setFollowing(false);
+    }
+  };
+
+  const handleCreateComment = async () => {
+    if (!commentText.trim()) return;
+    try {
+      setCommentSaving(true);
+      const next = await createCampaignComment({
+        campaignId: campaign.id,
+        body: commentText.trim(),
+        believabilityScore: commentScore,
+      });
+      setComments(prev => [next, ...prev]);
+      setCommentText('');
+      toast.success('可信度评价已写入');
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : String(error));
+    } finally {
+      setCommentSaving(false);
+    }
   };
 
   const handleRunPureSop = async () => {
@@ -692,6 +757,104 @@ export default function JournalCampaignDetailPage() {
           </button>
         </section>
 
+        <section className="grid grid-cols-1 xl:grid-cols-[1fr_420px] gap-4">
+          <div className="bg-card border border-border rounded p-4 space-y-3">
+            <div className="flex items-center gap-2 text-[13px] font-medium">
+              <MessageSquare className="w-4 h-4 text-muted-foreground" />
+              可信度加权外部校验
+            </div>
+            {canLeaveExternalComment && (
+              <div className="rounded border border-border bg-background/60 p-3 space-y-3">
+                <div className="grid grid-cols-1 md:grid-cols-[1fr_140px] gap-2">
+                  <Textarea
+                    value={commentText}
+                    onChange={(event: ChangeEvent<HTMLTextAreaElement>) => setCommentText(event.target.value)}
+                    placeholder="按当时信息评价这场战役的决策质量、证伪条件和风险控制。"
+                    className="min-h-[92px] text-[12px]"
+                  />
+                  <div className="space-y-2">
+                    <label className="text-[11px] text-muted-foreground">可信度权重</label>
+                    <select
+                      value={commentScore}
+                      onChange={(event: ChangeEvent<HTMLSelectElement>) => setCommentScore(Number(event.target.value))}
+                      className="h-9 w-full rounded border border-border bg-background px-2 text-[12px]"
+                    >
+                      {[1, 2, 3, 4, 5].map(score => (
+                        <option key={score} value={score}>{score}</option>
+                      ))}
+                    </select>
+                    <Button
+                      disabled={!commentText.trim() || commentSaving}
+                      onClick={handleCreateComment}
+                      className="w-full h-9 bg-[#F0B90B] text-black hover:bg-[#F0B90B]/90 text-[12px]"
+                    >
+                      <Send className="w-3.5 h-3.5 mr-1.5" />
+                      {commentSaving ? '写入中…' : '留言评价'}
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            )}
+            <div className="space-y-2">
+              {commentsLoading ? (
+                <div className="text-[12px] text-muted-foreground">加载留言中…</div>
+              ) : comments.length === 0 ? (
+                <div className="rounded border border-border bg-background/50 px-3 py-4 text-[12px] text-muted-foreground">
+                  暂无互关账户评价。
+                </div>
+              ) : (
+                comments.map(comment => (
+                  <div key={comment.id} className="rounded border border-border bg-background/60 px-3 py-2">
+                    <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
+                      <span className="font-mono">{shortAccountId(comment.user_id)}</span>
+                      <span>可信度 {comment.believability_score}/5</span>
+                      <span className="ml-auto font-mono">{fmtMdHm(comment.created_at)}</span>
+                    </div>
+                    <div className="mt-1 text-[12px] leading-relaxed whitespace-pre-wrap">{comment.body}</div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+          <div className="bg-card border border-border rounded p-4 space-y-3">
+            <div className="flex items-center gap-2 text-[13px] font-medium">
+              <UserPlus className="w-4 h-4 text-muted-foreground" />
+              互关账户
+            </div>
+            {isOwner ? (
+              <>
+                <div className="rounded border border-border bg-background/60 px-3 py-2 text-[12px]">
+                  <div className="text-muted-foreground">你的用户 ID</div>
+                  <div className="mt-1 font-mono break-all">{user?.id}</div>
+                </div>
+                <div className="flex gap-2">
+                  <Input
+                    value={followeeId}
+                    onChange={(event: ChangeEvent<HTMLInputElement>) => setFolloweeId(event.target.value)}
+                    placeholder="输入对方用户 ID"
+                    className="h-9 text-[12px]"
+                  />
+                  <Button
+                    variant="outline"
+                    className="h-9 shrink-0 text-[12px]"
+                    disabled={following || !followeeId.trim()}
+                    onClick={handleFollowAccount}
+                  >
+                    {following ? '关注中…' : '关注'}
+                  </Button>
+                </div>
+                <div className="text-[11px] text-muted-foreground leading-relaxed">
+                  双方都关注后，彼此可打开对方战役详情页并留下带权重的外部校验评价。
+                </div>
+              </>
+            ) : (
+              <div className="text-[12px] text-muted-foreground leading-relaxed">
+                你正在查看互关账户的交易战役。你的留言会作为外部校验进入这场战役的可信度加权记录。
+              </div>
+            )}
+          </div>
+        </section>
+
         <section className="space-y-3">
           <div className="bg-card border border-border rounded p-2">
             <div className="h-9 px-2 flex flex-wrap items-center gap-2">
@@ -869,7 +1032,6 @@ export default function JournalCampaignDetailPage() {
                         <label className="text-[11px] text-muted-foreground">分支标签</label>
                         <Input
                           value={whatIfLabel}
-                          maxLength={20}
                           placeholder="例如：对冲更宽 / 不滚动 / 单 hedge"
                           onChange={(e: ChangeEvent<HTMLInputElement>) => setWhatIfLabel(e.target.value)}
                           className="text-[12px]"

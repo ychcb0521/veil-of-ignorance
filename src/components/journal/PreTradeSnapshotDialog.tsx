@@ -170,6 +170,8 @@ export function PreTradeSnapshotDialog({
         pre_max_loss_usdt: payload.pre_max_loss_usdt,
         // Decision-quality fields
         pre_mortem_text: payload.pre_mortem_text,
+        pre_positive_expectancy: payload.pre_positive_expectancy,
+        pre_invalidation_condition: payload.pre_invalidation_condition,
         pre_calibration_win_pct: payload.pre_calibration_win_pct,
         pre_dataset_split: payload.pre_dataset_split,
         pre_lollapalooza_score: payload.pre_lollapalooza_score,

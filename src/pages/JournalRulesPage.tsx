@@ -15,7 +15,7 @@ import { Switch } from '@/components/ui/switch';
 import {
   listRules, listPatterns, updateRule, deleteRule,
 } from '@/lib/journalApi';
-import type { TradingRule, ErrorTagPattern } from '@/types/journal';
+import type { TradingRule, ErrorTagPattern, RuleCategory } from '@/types/journal';
 import { ruleCooldownRemainingMs } from '@/types/journal';
 
 export default function JournalRulesPage() {
@@ -35,7 +35,15 @@ export default function JournalRulesPage() {
         listRules(user.id),
         listPatterns(user.id, { includeArchived: true }),
       ]);
-      setRules(r.filter(x => x.rule_text !== '[延后]'));
+      const rank: Record<string, number> = { hard: 0, core: 1, watch: 2, retired: 3 };
+      setRules(r
+        .filter(x => x.rule_text !== '[延后]')
+        .sort((a, b) => {
+          const ar = rank[a.rule_category ?? 'core'] ?? 1;
+          const br = rank[b.rule_category ?? 'core'] ?? 1;
+          if (ar !== br) return ar - br;
+          return (b.weight ?? 50) - (a.weight ?? 50);
+        }));
       setPatterns(p);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : String(e));
@@ -65,8 +73,8 @@ export default function JournalRulesPage() {
   };
 
   const saveEdit = async (id: string) => {
-    if (editText.trim().length < 20) {
-      toast.error('规则文字至少 20 字');
+    if (!editText.trim()) {
+      toast.error('规则文字不能为空');
       return;
     }
     await handlePatch(id, { rule_text: editText.trim() });
@@ -100,6 +108,8 @@ export default function JournalRulesPage() {
                 <tr>
                   <th className="text-left px-3 py-2">规则</th>
                   <th className="text-left px-3 py-2 w-[180px]">来源模式</th>
+                  <th className="text-center px-3 py-2 w-[120px]">类型</th>
+                  <th className="text-center px-3 py-2 w-[110px]">权重</th>
                   <th className="text-center px-3 py-2 w-[80px]">激活</th>
                   <th className="text-center px-3 py-2 w-[100px]">加入 Checklist</th>
                   <th className="text-center px-3 py-2 w-[80px]">必填</th>
@@ -147,23 +157,68 @@ export default function JournalRulesPage() {
                         {p ? p.pattern_name : '手动'}
                       </td>
                       <td className="px-3 py-2 align-top text-center">
+                        <select
+                          value={r.rule_category ?? 'core'}
+                          onChange={(e) => {
+                            const category = e.target.value as RuleCategory;
+                            const patch: Partial<TradingRule> = { rule_category: category };
+                            if (category === 'hard') {
+                              patch.is_active = true;
+                              patch.added_to_checklist = true;
+                              patch.required = true;
+                            } else if (category === 'core') {
+                              patch.is_active = true;
+                              patch.added_to_checklist = true;
+                            } else if (category === 'watch') {
+                              patch.added_to_checklist = false;
+                              patch.required = false;
+                            } else if (category === 'retired') {
+                              patch.is_active = false;
+                              patch.added_to_checklist = false;
+                              patch.required = false;
+                            }
+                            handlePatch(r.id, patch);
+                          }}
+                          disabled={locked}
+                          className="h-8 rounded border border-border bg-background px-2 text-[11px]"
+                        >
+                          <option value="hard">硬规则</option>
+                          <option value="core">核心规则</option>
+                          <option value="watch">观察规则</option>
+                          <option value="retired">失效规则</option>
+                        </select>
+                      </td>
+                      <td className="px-3 py-2 align-top text-center">
+                        <Input
+                          type="number"
+                          min={0}
+                          max={100}
+                          value={r.weight ?? 50}
+                          onChange={e => {
+                            const next = Math.max(0, Math.min(100, Number(e.target.value) || 0));
+                            handlePatch(r.id, { weight: next });
+                          }}
+                          className="h-8 w-20 mx-auto text-center text-[11px] bg-background border-border"
+                        />
+                      </td>
+                      <td className="px-3 py-2 align-top text-center">
                         <Switch
                           checked={r.is_active}
-                          disabled={locked && r.is_active}
+                          disabled={(locked && r.is_active) || r.rule_category === 'hard'}
                           onCheckedChange={(v) => handlePatch(r.id, { is_active: v })}
                         />
                       </td>
                       <td className="px-3 py-2 align-top text-center">
                         <Switch
                           checked={r.added_to_checklist}
-                          disabled={locked && r.added_to_checklist}
+                          disabled={(locked && r.added_to_checklist) || r.rule_category === 'hard' || r.rule_category === 'core' || r.rule_category === 'watch' || r.rule_category === 'retired'}
                           onCheckedChange={(v) => handlePatch(r.id, { added_to_checklist: v })}
                         />
                       </td>
                       <td className="px-3 py-2 align-top text-center">
                         <Switch
                           checked={r.required}
-                          disabled={locked && r.required}
+                          disabled={(locked && r.required) || r.rule_category === 'hard' || r.rule_category === 'watch' || r.rule_category === 'retired'}
                           onCheckedChange={(v) => handlePatch(r.id, { required: v })}
                         />
                       </td>

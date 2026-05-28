@@ -59,7 +59,7 @@ export function NewPatternDialog({
     }
   }, [isOpen, mode, editing, defaultCategoryId, user]);
 
-  const disabled = !categoryId || name.trim().length === 0 || name.length > 40 || definition.trim().length < 10;
+  const disabled = !categoryId || name.trim().length === 0 || definition.trim().length === 0;
 
   const handleSubmit = async () => {
     if (!user) { toast.error('请先登录'); return; }
@@ -115,12 +115,12 @@ export function NewPatternDialog({
           </div>
           <div className="space-y-1.5">
             <Label className="text-[11px] text-muted-foreground">
-              模式名称 * (1-40 字符)
+              模式名称 *
               {identityLocked && <span className="ml-2 text-[#F6465D]">🔒 已被使用，名称已冻结</span>}
             </Label>
             <Input
               value={name}
-              onChange={e => setName(e.target.value.slice(0, 40))}
+              onChange={e => setName(e.target.value)}
               placeholder="例如：在连续亏损 ≥2 笔后立即开仓"
               disabled={identityLocked}
               className="h-9 text-[12px] bg-background border-border disabled:opacity-60"
@@ -132,7 +132,7 @@ export function NewPatternDialog({
             )}
           </div>
           <div className="space-y-1.5">
-            <Label className="text-[11px] text-muted-foreground">可操作定义 * (≥10 字符)</Label>
+            <Label className="text-[11px] text-muted-foreground">可操作定义 *</Label>
             <Textarea
               rows={3}
               value={definition}

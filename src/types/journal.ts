@@ -30,6 +30,8 @@ export type OrderKind = "main" | "hedge";
 export type JournalSource = 'live' | 'retroactive_from_record';
 /** Training-set vs holdout-set discipline (anti-overfitting). */
 export type DatasetSplit = 'in_sample' | 'out_of_sample';
+export type DecisionQuality = 'good' | 'mixed' | 'bad';
+export type RuleCategory = 'hard' | 'core' | 'watch' | 'retired';
 export type CampaignStatus =
   | 'planned'
   | 'active'
@@ -294,6 +296,10 @@ export interface TradeJournal {
   // ============ Decision-quality fields (added 2026-05) ============
   /** Klein's pre-mortem: "if this loses, what's the most likely reason?" */
   pre_mortem_text?: string | null;
+  /** Why the user believes this trade has positive expectancy. */
+  pre_positive_expectancy?: string | null;
+  /** What observation would prove the trade thesis wrong. */
+  pre_invalidation_condition?: string | null;
   /** Tetlock-style calibration prediction at open time, 0-100. */
   pre_calibration_win_pct?: number | null;
   /** Anti-overfitting: training set vs holdout (out-of-sample). */
@@ -310,6 +316,13 @@ export interface TradeJournal {
   post_reflection: string | null;
   post_correct_action: string | null;
   post_reviewed_at: string | null;
+  /** Outcome summary separated from decision quality. */
+  post_result_summary?: string | null;
+  /** Good/bad decision under information available at entry, independent of outcome. */
+  post_decision_quality?: DecisionQuality | null;
+  post_positive_expectancy_review?: string | null;
+  post_premortem_review?: string | null;
+  post_invalidation_review?: string | null;
   /** Real wall-clock time of position close (stamped on first review-sheet open). */
   post_real_close_time?: string | null;
 
@@ -348,10 +361,29 @@ export interface TradingRule {
   added_to_checklist: boolean;
   trigger_threshold: number | null;
   required: boolean;
+  rule_category: RuleCategory;
+  weight: number;
   ui_order: number;
   snooze_until: string | null;
   /** Stamped when the rule first reaches (is_active && added_to_checklist). Drives cooldown. */
   activated_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AccountFollow {
+  id: string;
+  follower_id: string;
+  followee_id: string;
+  created_at: string;
+}
+
+export interface CampaignComment {
+  id: string;
+  campaign_id: string;
+  user_id: string;
+  body: string;
+  believability_score: number | null;
   created_at: string;
   updated_at: string;
 }
