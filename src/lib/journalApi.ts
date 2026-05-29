@@ -304,9 +304,67 @@ function isMissingDalioMetaLayerError(error: { code?: string; message?: string }
   if (!error) return false;
   const message = error.message ?? '';
   return error.code === 'PGRST205'
+    || error.code === 'PGRST204'
     || error.code === '42P01'
     || (/trade_principles|pain_log_entries|pre_mortem_text|pre_positive_expectancy|pre_invalidation_condition|pre_calibration_win_pct|pre_dataset_split|pre_lollapalooza_score|pre_bankruptcy_estimate|pre_info_|pre_opponent_statement|pre_pain_tags|post_result_summary|post_decision_quality|post_positive_expectancy_review|post_premortem_review|post_invalidation_review|post_five_step|post_opponent_was_right|post_real_close_time|evolution_level|principle_id/i.test(message)
       && /schema cache|could not find|does not exist|column/i.test(message));
+}
+
+function missingSchemaColumn(error: { message?: string } | null): string | null {
+  const message = error?.message ?? '';
+  const quotedColumn = /['"]([a-zA-Z0-9_]+)['"]\s+column/i.exec(message);
+  if (quotedColumn?.[1]) return quotedColumn[1];
+  const columnOf = /column\s+['"]([a-zA-Z0-9_]+)['"]/i.exec(message);
+  return columnOf?.[1] ?? null;
+}
+
+async function updateTradeJournalWithSchemaFallback(
+  journalId: string,
+  payload: Record<string, unknown>,
+): Promise<{ data: unknown; error: { message: string; code?: string } | null }> {
+  let nextPayload = { ...payload };
+  let lastData: unknown = null;
+  let lastError: { message: string; code?: string } | null = null;
+
+  for (let attempt = 0; attempt < 30; attempt += 1) {
+    if (Object.keys(nextPayload).length === 0) return { data: lastData, error: null };
+    const { data, error } = await supabase
+      .from("trade_journals" as never)
+      .update(nextPayload as never)
+      .eq("id", journalId)
+      .select()
+      .single();
+    lastData = data;
+    lastError = error;
+    if (!error) return { data, error: null };
+    if (!isMissingDalioMetaLayerError(error)) return { data, error };
+    const missing = missingSchemaColumn(error);
+    if (!missing || !(missing in nextPayload)) return { data, error };
+    const rest = { ...nextPayload };
+    delete rest[missing];
+    nextPayload = rest;
+  }
+
+  return { data: lastData, error: lastError };
+}
+
+const BASE_POST_REVIEW_KEYS = new Set([
+  'post_outcome',
+  'post_realized_pnl',
+  'post_r_multiple',
+  'post_reflection',
+  'post_correct_action',
+  'post_reviewed_at',
+]);
+
+function splitPostReviewPayload(payload: Record<string, unknown>) {
+  const base: Record<string, unknown> = {};
+  const extra: Record<string, unknown> = {};
+  Object.entries(payload).forEach(([key, value]) => {
+    if (BASE_POST_REVIEW_KEYS.has(key)) base[key] = value;
+    else extra[key] = value;
+  });
+  return { base, extra };
 }
 
 function isCampaignNotFoundError(error: { code?: string; message?: string } | null): boolean {
@@ -2150,40 +2208,19 @@ export async function updateJournalPostReview(
   input: UpdateJournalPostInput,
 ): Promise<TradeJournal> {
   const payload = { ...input, post_reviewed_at: new Date().toISOString() };
-  let { data, error } = await supabase
-    .from("trade_journals" as never)
-    .update(payload as never)
-    .eq("id", id)
-    .select()
-    .single();
-  if (error && isMissingDalioMetaLayerError(error)) {
-    const {
-      post_result_summary: _resultSummary,
-      post_decision_quality: _decisionQuality,
-      post_positive_expectancy_review: _expectancyReview,
-      post_premortem_review: _premortemReview,
-      post_invalidation_review: _invalidationReview,
-      post_opponent_was_right: _opponent,
-      post_five_step_goal: _goal,
-      post_five_step_problem: _problem,
-      post_proximate_cause: _proximate,
-      post_root_cause: _root,
-      post_design_intervention: _design,
-      post_intervention_type: _type,
-      post_execution_monitor: _monitor,
-      post_five_step_weak_point: _weak,
-      ...legacyPayload
-    } = payload as Record<string, unknown>;
-    const retry = await supabase
-      .from("trade_journals" as never)
-      .update(legacyPayload as never)
-      .eq("id", id)
-      .select()
-      .single();
-    data = retry.data;
-    error = retry.error;
+  const { base, extra } = splitPostReviewPayload(payload);
+  const baseResult = await updateTradeJournalWithSchemaFallback(id, base);
+  const baseJournal = wrap("提交交易复盘", baseResult.error, baseResult.data as TradeJournal | null);
+  if (Object.keys(extra).length === 0) return baseJournal;
+
+  const extraResult = await updateTradeJournalWithSchemaFallback(id, extra);
+  if (extraResult.error) {
+    if (!isMissingDalioMetaLayerError(extraResult.error)) {
+      console.warn('[journalApi] 保存扩展复盘字段失败:', extraResult.error);
+    }
+    return baseJournal;
   }
-  return wrap("提交交易复盘", error, data as unknown as TradeJournal);
+  return (extraResult.data as TradeJournal | null) ?? baseJournal;
 }
 
 export interface ListJournalFilters {
@@ -2438,40 +2475,19 @@ export async function finalizeJournalReview(
   input: FinalizeJournalInput,
 ): Promise<TradeJournal> {
   const payload = { ...input, post_reviewed_at: new Date().toISOString() };
-  let { data, error } = await supabase
-    .from("trade_journals" as never)
-    .update(payload as never)
-    .eq("id", journalId)
-    .select()
-    .single();
-  if (error && isMissingDalioMetaLayerError(error)) {
-    const {
-      post_result_summary: _resultSummary,
-      post_decision_quality: _decisionQuality,
-      post_positive_expectancy_review: _expectancyReview,
-      post_premortem_review: _premortemReview,
-      post_invalidation_review: _invalidationReview,
-      post_opponent_was_right: _opponent,
-      post_five_step_goal: _goal,
-      post_five_step_problem: _problem,
-      post_proximate_cause: _proximate,
-      post_root_cause: _root,
-      post_design_intervention: _design,
-      post_intervention_type: _type,
-      post_execution_monitor: _monitor,
-      post_five_step_weak_point: _weak,
-      ...legacyPayload
-    } = payload as Record<string, unknown>;
-    const retry = await supabase
-      .from("trade_journals" as never)
-      .update(legacyPayload as never)
-      .eq("id", journalId)
-      .select()
-      .single();
-    data = retry.data;
-    error = retry.error;
+  const { base, extra } = splitPostReviewPayload(payload);
+  const baseResult = await updateTradeJournalWithSchemaFallback(journalId, base);
+  const baseJournal = wrap("提交平仓评价", baseResult.error, baseResult.data as TradeJournal | null);
+  if (Object.keys(extra).length === 0) return baseJournal;
+
+  const extraResult = await updateTradeJournalWithSchemaFallback(journalId, extra);
+  if (extraResult.error) {
+    if (!isMissingDalioMetaLayerError(extraResult.error)) {
+      console.warn('[journalApi] 保存扩展平仓评价字段失败:', extraResult.error);
+    }
+    return baseJournal;
   }
-  return wrap("提交平仓评价", error, data as unknown as TradeJournal);
+  return (extraResult.data as TradeJournal | null) ?? baseJournal;
 }
 
 export async function listJournalsByTradeRecordId(
