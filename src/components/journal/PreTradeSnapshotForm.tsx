@@ -7,9 +7,14 @@ import { useEffect, useMemo, useState } from 'react';
 import { Textarea } from '@/components/ui/textarea';
 import { Input } from '@/components/ui/input';
 import { Checkbox } from '@/components/ui/checkbox';
-import { isHistoricalCampaign, MENTAL_STATE_LABELS } from '@/types/journal';
+import {
+  isHistoricalCampaign,
+  MENTAL_STATE_LABELS,
+  PAIN_TAG_LABELS,
+  PRINCIPLE_EVOLUTION_LEVEL_LABELS,
+} from '@/types/journal';
 import { buildChecklist, isChecklistPassed } from '@/lib/defaultChecklist';
-import { getCampaignWithLegs, listActiveCampaigns, listJournals, listRules } from '@/lib/journalApi';
+import { getCampaignWithLegs, listActiveCampaigns, listJournals, listPrinciples, listRules } from '@/lib/journalApi';
 import { LEG_ROLE_LABELS, STRATEGY_TEMPLATES } from '@/lib/strategyTemplates';
 import { computeLollapaloozaScore, lollapaloozaLevel } from '@/lib/lollapaloozaScore';
 import { estimateBankruptcy } from '@/lib/bankruptcyEstimator';
@@ -22,10 +27,12 @@ import type {
   DatasetSplit,
   LegRole,
   OrderKind,
+  PainTag,
   StrategyTemplate,
   TradeCampaign,
   TradeDirection,
   TradeJournal,
+  TradePrinciple,
   TradingRule,
 } from '@/types/journal';
 
@@ -63,6 +70,17 @@ export interface SnapshotPayload {
   pre_dataset_split: DatasetSplit | null;
   pre_lollapalooza_score: number | null;
   pre_bankruptcy_estimate: number | null;
+  pre_info_kline_facts: string | null;
+  pre_info_macro_facts: string | null;
+  pre_info_rule_advice: string | null;
+  pre_info_intuition: string | null;
+  pre_info_designer_view: string | null;
+  pre_opponent_statement: string | null;
+  pre_triggered_principle_ids: string[] | null;
+  pre_triggered_rule_ids: string[] | null;
+  pre_pain_tags: PainTag[] | null;
+  pre_executor_self: string | null;
+  pre_designer_self: string | null;
   tp_levels: TpLevel[];
 }
 
@@ -98,6 +116,7 @@ const buildDefaultCampaignTitle = (symbol: string, time: Date, direction: TradeD
 
 const createRolesForHedge: LegRole[] = ['hedge_initial_a', 'hedge_initial_b', 'mirror_tp', 'hedge_rolling'];
 const joinRolesForHedge: LegRole[] = ['hedge_initial_a', 'hedge_initial_b', 'hedge_rolling', 'mirror_tp', 'reentry_hedge'];
+const PAIN_TAG_ORDER = Object.keys(PAIN_TAG_LABELS) as PainTag[];
 
 export function PreTradeSnapshotForm({
   mode, symbol, direction, simulatedTime, lockedEntryPrice, leverage,
@@ -129,10 +148,21 @@ export function PreTradeSnapshotForm({
   const [noEntryReason, setNoEntryReason] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [userRules, setUserRules] = useState<TradingRule[]>([]);
+  const [principles, setPrinciples] = useState<TradePrinciple[]>([]);
   // Decision-quality state
   const [positiveExpectancy, setPositiveExpectancy] = useState('');
   const [preMortem, setPreMortem] = useState('');
   const [invalidationCondition, setInvalidationCondition] = useState('');
+  const [klineFacts, setKlineFacts] = useState('');
+  const [macroFacts, setMacroFacts] = useState('');
+  const [ruleAdvice, setRuleAdvice] = useState('');
+  const [intuition, setIntuition] = useState('');
+  const [designerView, setDesignerView] = useState('');
+  const [opponentStatement, setOpponentStatement] = useState('');
+  const [selectedPrincipleIds, setSelectedPrincipleIds] = useState<string[]>([]);
+  const [painTags, setPainTags] = useState<PainTag[]>([]);
+  const [executorSelf, setExecutorSelf] = useState('');
+  const [designerSelf, setDesignerSelf] = useState('');
   const [calibrationPct, setCalibrationPct] = useState('');
   const [datasetSplit, setDatasetSplit] = useState<DatasetSplit>('in_sample');
   const [recent24h, setRecent24h] = useState<TradeJournal[]>([]);
@@ -152,6 +182,7 @@ export function PreTradeSnapshotForm({
   useEffect(() => {
     if (!user || !isTrade) return;
     listRules(user.id).then(setUserRules).catch(() => {});
+    listPrinciples(user.id).then(setPrinciples).catch(() => {});
   }, [user, isTrade]);
 
   useEffect(() => {
@@ -250,6 +281,35 @@ export function PreTradeSnapshotForm({
   const requiredTotal = checklistItems.filter(i => i.required).length;
   const optionalCount = checklistItems.filter(i => !i.required && i.source !== 'rule' && checked.includes(i.id)).length;
   const optionalTotal = checklistItems.filter(i => !i.required && i.source !== 'rule').length;
+  const selectedRuleIds = useMemo(() => checklistItems
+    .filter(item => item.source === 'rule' && checked.includes(item.id) && item.sourceRuleId)
+    .map(item => item.sourceRuleId!)
+  , [checklistItems, checked]);
+  const dalioSnapshotValid = useMemo(() => {
+    if (!showFullFields) return true;
+    return [
+      klineFacts,
+      macroFacts,
+      ruleAdvice,
+      intuition,
+      designerView,
+      executorSelf,
+      designerSelf,
+    ].every(value => value.trim().length > 0)
+      && opponentStatement.trim().length >= 30
+      && painTags.length > 0;
+  }, [
+    showFullFields,
+    klineFacts,
+    macroFacts,
+    ruleAdvice,
+    intuition,
+    designerView,
+    executorSelf,
+    designerSelf,
+    opponentStatement,
+    painTags,
+  ]);
 
   const tpsValid = useMemo(() => {
     if (!isTrade) return true;
@@ -330,6 +390,7 @@ export function PreTradeSnapshotForm({
     if (!positiveExpectancy.trim()) return false;
     if (!preMortem.trim()) return false;
     if (!invalidationCondition.trim()) return false;
+    if (!dalioSnapshotValid) return false;
     if (!calibrationValid) return false;
     if (lollapalooza && lollapalooza.score >= 60) return false;
     if (lollapalooza && lollapalooza.score >= 30 && !acknowledgedCaution) return false;
@@ -337,7 +398,7 @@ export function PreTradeSnapshotForm({
   }, [reason, riskAware, riskManage, mental, mentalTrigger,
       mode, isHedge, tpsValid, sizeUsdt, maxLoss, checklistPassed, noEntryReason,
       currentMarginMode, campaignFieldsValid,
-      positiveExpectancy, preMortem, invalidationCondition, calibrationValid, lollapalooza, acknowledgedCaution]);
+      positiveExpectancy, preMortem, invalidationCondition, dalioSnapshotValid, calibrationValid, lollapalooza, acknowledgedCaution]);
 
   const handleSubmit = async () => {
     if (!canSubmit || submitting) return;
@@ -380,6 +441,17 @@ export function PreTradeSnapshotForm({
         pre_dataset_split: isLiveMain ? datasetSplit : null,
         pre_lollapalooza_score: isLiveMain && lollapalooza ? lollapalooza.score : null,
         pre_bankruptcy_estimate: isLiveMain && bankruptcy ? Number(bankruptcy.expectedRuinCountPerHundred.toFixed(2)) : null,
+        pre_info_kline_facts: isLiveMain ? klineFacts.trim() : null,
+        pre_info_macro_facts: isLiveMain ? macroFacts.trim() : null,
+        pre_info_rule_advice: isLiveMain ? ruleAdvice.trim() : null,
+        pre_info_intuition: isLiveMain ? intuition.trim() : null,
+        pre_info_designer_view: isLiveMain ? designerView.trim() : null,
+        pre_opponent_statement: isLiveMain ? opponentStatement.trim() : null,
+        pre_triggered_principle_ids: isLiveMain ? selectedPrincipleIds : null,
+        pre_triggered_rule_ids: isLiveMain ? selectedRuleIds : null,
+        pre_pain_tags: isLiveMain ? painTags : null,
+        pre_executor_self: isLiveMain ? executorSelf.trim() : null,
+        pre_designer_self: isLiveMain ? designerSelf.trim() : null,
       };
 
       const payload: SnapshotPayload = isHedge
@@ -430,6 +502,14 @@ export function PreTradeSnapshotForm({
 
   const updateTp = (idx: number, patch: Partial<TpLevel>) => {
     setTps(prev => prev.map((t, i) => i === idx ? { ...t, ...patch } : t));
+  };
+
+  const togglePainTag = (tag: PainTag) => {
+    setPainTags(prev => prev.includes(tag) ? prev.filter(item => item !== tag) : [...prev, tag]);
+  };
+
+  const togglePrinciple = (id: string) => {
+    setSelectedPrincipleIds(prev => prev.includes(id) ? prev.filter(item => item !== id) : [...prev, id]);
   };
 
   const confirmBtnClass = mode === 'no_entry'
@@ -930,6 +1010,128 @@ export function PreTradeSnapshotForm({
         {showFullFields && (
           <div className="rounded border border-border bg-background/40 p-3 space-y-3">
             <div className="text-[11px] font-medium text-foreground">决策质量记录</div>
+
+            <div className="rounded border border-border/70 bg-card/50 p-3 space-y-3">
+              <div>
+                <div className="text-[11px] font-medium text-foreground">信息收集快照</div>
+                <div className="text-[10px] text-muted-foreground mt-0.5">
+                  Dalio 两步法：先记录你了解了什么，再决定做什么。
+                </div>
+              </div>
+              <div className="space-y-1.5">
+                <div className={labelCls}>K 线结构看到的事实{requiredStar}</div>
+                <Textarea rows={2} value={klineFacts} onChange={e => setKlineFacts(e.target.value)}
+                  placeholder="只写事实：结构、量能、位置、波动率，不写愿望。"
+                  className={textareaCls} />
+              </div>
+              <div className="space-y-1.5">
+                <div className={labelCls}>宏观/大盘环境看到的事实{requiredStar}</div>
+                <Textarea rows={2} value={macroFacts} onChange={e => setMacroFacts(e.target.value)}
+                  placeholder="BTC、大盘、板块、资金费率或新闻环境给出的事实。"
+                  className={textareaCls} />
+              </div>
+              <div className="space-y-1.5">
+                <div className={labelCls}>规则系统给出的建议{requiredStar}</div>
+                <Textarea rows={2} value={ruleAdvice} onChange={e => setRuleAdvice(e.target.value)}
+                  placeholder="规则/checklist 支持什么、反对什么；如果没有规则，也要写明这是 level 0 直觉。"
+                  className={textareaCls} />
+              </div>
+              <div className="space-y-1.5">
+                <div className={labelCls}>直觉/感觉{requiredStar}</div>
+                <Textarea rows={2} value={intuition} onChange={e => setIntuition(e.target.value)}
+                  placeholder="记录感觉，不把感觉包装成逻辑。"
+                  className={textareaCls} />
+              </div>
+              <div className="space-y-1.5">
+                <div className={labelCls}>设计者-我会怎么说{requiredStar}</div>
+                <Textarea rows={2} value={designerView} onChange={e => setDesignerView(e.target.value)}
+                  placeholder="盘后的、冷静的、看历史数据的你，会怎样评价这笔？"
+                  className={textareaCls} />
+              </div>
+            </div>
+
+            <div className="space-y-1.5">
+              <div className={labelCls}>反对者陈述{requiredStar}</div>
+              <Textarea
+                rows={3}
+                value={opponentStatement}
+                onChange={e => setOpponentStatement(e.target.value)}
+                placeholder="如果有一个比我可信的人，他会说我这笔不该开。他的理由会是："
+                className={textareaCls}
+              />
+              <div className={`text-[10px] text-right font-mono ${
+                opponentStatement.trim().length >= 30 ? 'text-[#0ECB81]' : 'text-[#F6465D]'
+              }`}>
+                {opponentStatement.trim().length}/30
+              </div>
+            </div>
+
+            <div className="space-y-1.5">
+              <div className={labelCls}>触发原则与规则层级</div>
+              {principles.length === 0 ? (
+                <div className="rounded border border-border/70 bg-card/50 px-3 py-2 text-[10px] text-muted-foreground">
+                  当前还没有单独录入 L1 原则。你仍可在规则建议里标注“level 0 直觉”，之后再沉淀到认知资产或规则页。
+                </div>
+              ) : (
+                <div className="flex flex-wrap gap-1.5">
+                  {principles.slice(0, 8).map(principle => (
+                    <button
+                      key={principle.id}
+                      type="button"
+                      onClick={() => togglePrinciple(principle.id)}
+                      className={`rounded-full border px-2.5 py-1 text-[10px] transition-colors ${
+                        selectedPrincipleIds.includes(principle.id)
+                          ? 'border-[#F0B90B] bg-[#F0B90B]/15 text-foreground'
+                          : 'border-border bg-card text-muted-foreground hover:text-foreground hover:bg-accent'
+                      }`}
+                    >
+                      {principle.title} · L{principle.evolution_level} {PRINCIPLE_EVOLUTION_LEVEL_LABELS[principle.evolution_level]}
+                    </button>
+                  ))}
+                </div>
+              )}
+              <div className="text-[10px] text-muted-foreground">
+                已勾选的规则项会自动写入本次快照：{selectedRuleIds.length > 0 ? `${selectedRuleIds.length} 条` : '暂无'}
+              </div>
+            </div>
+
+            <div className="space-y-1.5">
+              <div className={labelCls}>当前痛苦/情绪标签{requiredStar}</div>
+              <div className="grid grid-cols-2 gap-1.5">
+                {PAIN_TAG_ORDER.map(tag => (
+                  <button
+                    key={tag}
+                    type="button"
+                    onClick={() => togglePainTag(tag)}
+                    className={`h-8 rounded border text-[10px] transition-colors ${
+                      painTags.includes(tag)
+                        ? 'border-[#F0B90B] bg-[#F0B90B]/15 text-foreground'
+                        : 'border-border bg-card text-muted-foreground hover:text-foreground hover:bg-accent'
+                    }`}
+                  >
+                    {PAIN_TAG_LABELS[tag]}
+                  </button>
+                ))}
+              </div>
+              <div className="text-[10px] text-muted-foreground">
+                痛苦日志记录当下感受，不要求解释；解释留给平仓后的诊断。
+              </div>
+            </div>
+
+            <div className="grid sm:grid-cols-2 gap-2">
+              <div className="space-y-1.5">
+                <div className={labelCls}>执行者-我{requiredStar}</div>
+                <Textarea rows={2} value={executorSelf} onChange={e => setExecutorSelf(e.target.value)}
+                  placeholder="现在想做什么，理由是什么。"
+                  className={textareaCls} />
+              </div>
+              <div className="space-y-1.5">
+                <div className={labelCls}>设计者-我{requiredStar}</div>
+                <Textarea rows={2} value={designerSelf} onChange={e => setDesignerSelf(e.target.value)}
+                  placeholder="这是否符合既定原则和规则。"
+                  className={textareaCls} />
+              </div>
+            </div>
 
             <div className="space-y-1.5">
               <div className={labelCls}>我为什么认为这笔有正期望？{requiredStar}</div>

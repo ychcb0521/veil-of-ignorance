@@ -32,6 +32,34 @@ export type JournalSource = 'live' | 'retroactive_from_record';
 export type DatasetSplit = 'in_sample' | 'out_of_sample';
 export type DecisionQuality = 'good' | 'mixed' | 'bad';
 export type RuleCategory = 'hard' | 'core' | 'watch' | 'retired';
+export type PrincipleEvolutionLevel = 0 | 1 | 2 | 3 | 4 | 5;
+export type PainTag =
+  | 'loss_aversion'
+  | 'fomo'
+  | 'regret'
+  | 'greed'
+  | 'anxiety'
+  | 'revenge';
+export type FiveStepWeakPoint = 'goal' | 'problem' | 'diagnosis' | 'design' | 'execution';
+export type InterventionType = 'principle' | 'rule' | 'sop' | 'awareness';
+
+export const PRINCIPLE_EVOLUTION_LEVEL_LABELS: Record<PrincipleEvolutionLevel, string> = {
+  0: '直觉',
+  1: '表述',
+  2: '模式确认',
+  3: '规则化',
+  4: '算法化',
+  5: '已证伪/升级',
+};
+
+export const PAIN_TAG_LABELS: Record<PainTag, string> = {
+  loss_aversion: '损失厌恶痛',
+  fomo: '错失/FOMO 痛',
+  regret: '后悔痛',
+  greed: '贪婪痛',
+  anxiety: '焦虑痛',
+  revenge: '报复痛',
+};
 export type CampaignStatus =
   | 'planned'
   | 'active'
@@ -263,6 +291,29 @@ export interface ChecklistItem {
   required?: boolean;
 }
 
+export interface TradePrinciple {
+  id: string;
+  user_id: string;
+  title: string;
+  body: string;
+  evolution_level: PrincipleEvolutionLevel;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PainLogEntry {
+  id: string;
+  user_id: string;
+  journal_id: string | null;
+  symbol: string | null;
+  pain_tag: PainTag;
+  intensity: 1 | 2 | 3 | 4 | 5;
+  recorded_at: string;
+  market_time: string | null;
+  created_at: string;
+}
+
 export interface TradeJournal {
   id: string;
   user_id: string;
@@ -308,6 +359,20 @@ export interface TradeJournal {
   pre_lollapalooza_score?: number | null;
   /** Expected ruin events out of 100 trades, computed at submit time. */
   pre_bankruptcy_estimate?: number | null;
+  /** Dalio L3: facts before deciding. */
+  pre_info_kline_facts?: string | null;
+  pre_info_macro_facts?: string | null;
+  pre_info_rule_advice?: string | null;
+  pre_info_intuition?: string | null;
+  pre_info_designer_view?: string | null;
+  /** Dalio disagreement protocol. */
+  pre_opponent_statement?: string | null;
+  pre_triggered_principle_ids?: string[] | null;
+  pre_triggered_rule_ids?: string[] | null;
+  /** Pain + reflection loop; also mirrored into pain_log_entries when possible. */
+  pre_pain_tags?: PainTag[] | null;
+  pre_executor_self?: string | null;
+  pre_designer_self?: string | null;
 
   // post-review
   post_outcome: TradeOutcome | null;
@@ -323,6 +388,16 @@ export interface TradeJournal {
   post_positive_expectancy_review?: string | null;
   post_premortem_review?: string | null;
   post_invalidation_review?: string | null;
+  post_opponent_was_right?: boolean | null;
+  /** Dalio five-step diagnosis. */
+  post_five_step_goal?: string | null;
+  post_five_step_problem?: string | null;
+  post_proximate_cause?: string | null;
+  post_root_cause?: string | null;
+  post_design_intervention?: string | null;
+  post_intervention_type?: InterventionType | null;
+  post_execution_monitor?: string | null;
+  post_five_step_weak_point?: FiveStepWeakPoint | null;
   /** Real wall-clock time of position close (stamped on first review-sheet open). */
   post_real_close_time?: string | null;
 
@@ -363,6 +438,8 @@ export interface TradingRule {
   required: boolean;
   rule_category: RuleCategory;
   weight: number;
+  principle_id: string | null;
+  evolution_level: PrincipleEvolutionLevel;
   ui_order: number;
   snooze_until: string | null;
   /** Stamped when the rule first reaches (is_active && added_to_checklist). Drives cooldown. */

@@ -32,10 +32,14 @@ import type {
   JournalTagAssignment,
   LegRole,
   AccountFollow,
+  PainLogEntry,
+  PainTag,
+  PrincipleEvolutionLevel,
   RuleCategory,
   StrategyTemplate,
   SuggestedLegRole,
   TaggedPhase,
+  TradePrinciple,
   TradeCampaign,
   TradeDirection,
   TradeJournal,
@@ -294,6 +298,15 @@ function isMissingSocialFeatureError(error: { code?: string; message?: string } 
   return error.code === 'PGRST205'
     || error.code === '42P01'
     || (/account_follows|trade_campaign_comments/i.test(message) && /schema cache|could not find|does not exist|column/i.test(message));
+}
+
+function isMissingDalioMetaLayerError(error: { code?: string; message?: string } | null): boolean {
+  if (!error) return false;
+  const message = error.message ?? '';
+  return error.code === 'PGRST205'
+    || error.code === '42P01'
+    || (/trade_principles|pain_log_entries|pre_info_|pre_opponent_statement|pre_pain_tags|post_five_step|post_opponent_was_right|evolution_level|principle_id/i.test(message)
+      && /schema cache|could not find|does not exist|column/i.test(message));
 }
 
 function isCampaignNotFoundError(error: { code?: string; message?: string } | null): boolean {
@@ -2060,12 +2073,47 @@ export async function stampJournalCloseRealTime(journalId: string): Promise<stri
 
 export async function createJournalPreSnapshot(input: CreateJournalPreInput): Promise<TradeJournal> {
   const payload = { ...input, pre_real_time: new Date().toISOString(), source: 'live' as const };
-  const { data, error } = await supabase
+  let { data, error } = await supabase
     .from("trade_journals" as never)
     .insert(payload as never)
     .select()
     .single();
-  return wrap("创建交易日记事前快照", error, data as unknown as TradeJournal);
+  if (error && isMissingDalioMetaLayerError(error)) {
+    const {
+      pre_info_kline_facts: _kline,
+      pre_info_macro_facts: _macro,
+      pre_info_rule_advice: _ruleAdvice,
+      pre_info_intuition: _intuition,
+      pre_info_designer_view: _designerView,
+      pre_opponent_statement: _opponent,
+      pre_triggered_principle_ids: _principleIds,
+      pre_triggered_rule_ids: _ruleIds,
+      pre_pain_tags: _painTags,
+      pre_executor_self: _executor,
+      pre_designer_self: _designer,
+      ...legacyPayload
+    } = payload as Record<string, unknown>;
+    const retry = await supabase
+      .from("trade_journals" as never)
+      .insert(legacyPayload as never)
+      .select()
+      .single();
+    data = retry.data;
+    error = retry.error;
+  }
+  const journal = wrap("创建交易日记事前快照", error, data as unknown as TradeJournal);
+  const painTags = input.pre_pain_tags ?? [];
+  if (painTags.length > 0) {
+    createPainLogEntries({
+      userId: input.user_id,
+      journalId: journal.id,
+      symbol: input.symbol,
+      marketTime: input.pre_simulated_time,
+      tags: painTags,
+      intensity: input.pre_mental_state,
+    }).catch(err => console.warn('[journalApi] 痛苦日志写入失败:', err));
+  }
+  return journal;
 }
 
 export interface UpdateJournalPostInput {
@@ -2079,6 +2127,15 @@ export interface UpdateJournalPostInput {
   post_positive_expectancy_review?: string | null;
   post_premortem_review?: string | null;
   post_invalidation_review?: string | null;
+  post_opponent_was_right?: boolean | null;
+  post_five_step_goal?: string | null;
+  post_five_step_problem?: string | null;
+  post_proximate_cause?: string | null;
+  post_root_cause?: string | null;
+  post_design_intervention?: string | null;
+  post_intervention_type?: TradeJournal['post_intervention_type'];
+  post_execution_monitor?: string | null;
+  post_five_step_weak_point?: TradeJournal['post_five_step_weak_point'];
 }
 
 export async function updateJournalPostReview(
@@ -2161,6 +2218,87 @@ export async function getJournalById(id: string): Promise<TradeJournal | null> {
   return (data as unknown as TradeJournal) ?? null;
 }
 
+// ============ Dalio L1 / L5 meta layer ============
+
+export async function listPrinciples(userId: string): Promise<TradePrinciple[]> {
+  const { data, error } = await supabase
+    .from('trade_principles' as never)
+    .select('*')
+    .eq('user_id', userId)
+    .eq('is_active', true)
+    .order('created_at', { ascending: false });
+  if (error) {
+    if (isMissingDalioMetaLayerError(error)) return [];
+    return wrap('加载交易原则', error, data as unknown as TradePrinciple[]);
+  }
+  return (data ?? []) as unknown as TradePrinciple[];
+}
+
+export interface CreatePrincipleInput {
+  user_id: string;
+  title: string;
+  body?: string;
+  evolution_level?: PrincipleEvolutionLevel;
+  is_active?: boolean;
+}
+
+export async function createPrinciple(input: CreatePrincipleInput): Promise<TradePrinciple> {
+  const payload = {
+    user_id: input.user_id,
+    title: input.title.trim(),
+    body: input.body?.trim() ?? '',
+    evolution_level: input.evolution_level ?? 1,
+    is_active: input.is_active ?? true,
+  };
+  const { data, error } = await supabase
+    .from('trade_principles' as never)
+    .insert(payload as never)
+    .select()
+    .single();
+  return wrap('创建交易原则', error, data as unknown as TradePrinciple);
+}
+
+export interface CreatePainLogEntriesInput {
+  userId: string;
+  journalId?: string | null;
+  symbol?: string | null;
+  marketTime?: string | null;
+  tags: PainTag[];
+  intensity?: 1 | 2 | 3 | 4 | 5;
+}
+
+export async function createPainLogEntries(input: CreatePainLogEntriesInput): Promise<void> {
+  if (input.tags.length === 0) return;
+  const rows = [...new Set(input.tags)].map(tag => ({
+    user_id: input.userId,
+    journal_id: input.journalId ?? null,
+    symbol: input.symbol ?? null,
+    pain_tag: tag,
+    intensity: input.intensity ?? 3,
+    market_time: input.marketTime ?? null,
+  }));
+  const { error } = await supabase
+    .from('pain_log_entries' as never)
+    .insert(rows as never);
+  if (error) {
+    if (isMissingDalioMetaLayerError(error)) return;
+    throw new Error(`写入痛苦日志失败：${error.message}`);
+  }
+}
+
+export async function listPainLogEntries(userId: string): Promise<PainLogEntry[]> {
+  const { data, error } = await supabase
+    .from('pain_log_entries' as never)
+    .select('*')
+    .eq('user_id', userId)
+    .order('recorded_at', { ascending: false });
+  if (error) {
+    if (isMissingDalioMetaLayerError(error)) return [];
+    return wrap('加载痛苦日志', error, data as unknown as PainLogEntry[]);
+  }
+  return (data ?? []) as unknown as PainLogEntry[];
+}
+
 // ============ Tag Assignments ============
 
 export async function assignTag(
@@ -2226,12 +2364,14 @@ export async function listRules(userId: string): Promise<TradingRule[]> {
 export interface CreateRuleInput {
   user_id: string;
   source_pattern_id?: string | null;
+  principle_id?: string | null;
   rule_text: string;
   is_active?: boolean;
   added_to_checklist?: boolean;
   required?: boolean;
   rule_category?: RuleCategory;
   weight?: number;
+  evolution_level?: PrincipleEvolutionLevel;
   trigger_threshold?: number;
 }
 
@@ -2248,6 +2388,15 @@ export interface FinalizeJournalInput {
   post_positive_expectancy_review?: string | null;
   post_premortem_review?: string | null;
   post_invalidation_review?: string | null;
+  post_opponent_was_right?: boolean | null;
+  post_five_step_goal?: string | null;
+  post_five_step_problem?: string | null;
+  post_proximate_cause?: string | null;
+  post_root_cause?: string | null;
+  post_design_intervention?: string | null;
+  post_intervention_type?: TradeJournal['post_intervention_type'];
+  post_execution_monitor?: string | null;
+  post_five_step_weak_point?: TradeJournal['post_five_step_weak_point'];
 }
 
 export async function finalizeJournalReview(
@@ -2255,12 +2404,34 @@ export async function finalizeJournalReview(
   input: FinalizeJournalInput,
 ): Promise<TradeJournal> {
   const payload = { ...input, post_reviewed_at: new Date().toISOString() };
-  const { data, error } = await supabase
+  let { data, error } = await supabase
     .from("trade_journals" as never)
     .update(payload as never)
     .eq("id", journalId)
     .select()
     .single();
+  if (error && isMissingDalioMetaLayerError(error)) {
+    const {
+      post_opponent_was_right: _opponent,
+      post_five_step_goal: _goal,
+      post_five_step_problem: _problem,
+      post_proximate_cause: _proximate,
+      post_root_cause: _root,
+      post_design_intervention: _design,
+      post_intervention_type: _type,
+      post_execution_monitor: _monitor,
+      post_five_step_weak_point: _weak,
+      ...legacyPayload
+    } = payload as Record<string, unknown>;
+    const retry = await supabase
+      .from("trade_journals" as never)
+      .update(legacyPayload as never)
+      .eq("id", journalId)
+      .select()
+      .single();
+    data = retry.data;
+    error = retry.error;
+  }
   return wrap("提交平仓评价", error, data as unknown as TradeJournal);
 }
 
@@ -2442,6 +2613,8 @@ export interface BulkJournalData {
   patterns: ErrorTagPattern[];
   categories: ErrorTagCategory[];
   rules: TradingRule[];
+  principles: TradePrinciple[];
+  painEntries: PainLogEntry[];
 }
 
 export async function listAllJournalDataForUser(
@@ -2458,13 +2631,17 @@ export async function listAllJournalDataForUser(
   const pq = supabase.from("error_tag_patterns" as never).select("*").eq("user_id", userId);
   const cq = supabase.from("error_tag_categories" as never).select("*").order("sort_order", { ascending: true });
   const rq = supabase.from("trading_rules" as never).select("*").eq("user_id", userId);
+  const ppq = supabase.from('trade_principles' as never).select('*').eq('user_id', userId);
+  const plq = supabase.from('pain_log_entries' as never).select('*').eq('user_id', userId);
 
-  const [jr, ar, pr, cr, rr] = await Promise.all([jq, aq, pq, cq, rq]);
+  const [jr, ar, pr, cr, rr, ppr, plr] = await Promise.all([jq, aq, pq, cq, rq, ppq, plq]);
   if (jr.error) throw new Error(`加载日记失败：${jr.error.message}`);
   if (ar.error) throw new Error(`加载标签关联失败：${ar.error.message}`);
   if (pr.error) throw new Error(`加载错误模式失败：${pr.error.message}`);
   if (cr.error) throw new Error(`加载分类失败：${cr.error.message}`);
   if (rr.error) throw new Error(`加载规则失败：${rr.error.message}`);
+  if (ppr.error && !isMissingDalioMetaLayerError(ppr.error)) throw new Error(`加载原则失败：${ppr.error.message}`);
+  if (plr.error && !isMissingDalioMetaLayerError(plr.error)) throw new Error(`加载痛苦日志失败：${plr.error.message}`);
 
   return {
     journals: (jr.data ?? []) as unknown as TradeJournal[],
@@ -2472,6 +2649,8 @@ export async function listAllJournalDataForUser(
     patterns: (pr.data ?? []) as unknown as ErrorTagPattern[],
     categories: (cr.data ?? []) as unknown as ErrorTagCategory[],
     rules: (rr.data ?? []) as unknown as TradingRule[],
+    principles: ppr.error ? [] : (ppr.data ?? []) as unknown as TradePrinciple[],
+    painEntries: plr.error ? [] : (plr.data ?? []) as unknown as PainLogEntry[],
   };
 }
 
@@ -2647,7 +2826,7 @@ export async function deleteCounterfactualBranch(
 
 export async function updateRule(
   ruleId: string,
-  patch: Partial<Pick<TradingRule, "rule_text" | "is_active" | "required" | "added_to_checklist" | "rule_category" | "weight" | "ui_order" | "snooze_until">>,
+  patch: Partial<Pick<TradingRule, "rule_text" | "is_active" | "required" | "added_to_checklist" | "rule_category" | "weight" | "principle_id" | "evolution_level" | "ui_order" | "snooze_until">>,
 ): Promise<TradingRule> {
   // Cooldown guard: weakening a rule during its activation cooldown is blocked.
   // "Weakening" = turning off is_active, removing from checklist, or downgrading required → false.

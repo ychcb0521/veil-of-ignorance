@@ -220,6 +220,12 @@ export default function GuidePage() {
               <P>
                 因此，就“决策受到什么信息影响”而言，本系统中的模拟交易与实际交易几乎等价。二者面对的关键问题相同：在未来不可见、结果不确定、情绪会干扰判断的条件下，你是否仍能按事前规则行动。
               </P>
+              <P>
+                Ray Dalio 在《原则》中提醒：没有原则，人就会被迫把每件事都当成第一次来处理。翻译成交易语言就是：没有原则的交易者，每一笔都是第一次。本系统的目标，是把“逐事反应”升级为“原则驱动”。
+              </P>
+              <P>
+                系统按五层闭环工作：L1 原则层保存长期稳定的交易世界观；L2 规则层把原则转成 if-then；L3 决策记录层固定下单前证据；L4 反思诊断层用五步流程找近因与根因；L5 可信度演进层用校准、痛苦日志、反对者命中率和 D-score vs R 评估系统自身是否有效。
+              </P>
               <Highlight>
                 核心目标只有一个：让每一次亏损都能回答“哪里错了、为什么会重复、下次如何被系统拦住”。
               </Highlight>
@@ -248,7 +254,7 @@ export default function GuidePage() {
                 <FlowArrow />
                 <FlowNode>回放行情，等待符合策略的机会</FlowNode>
                 <FlowArrow />
-                <FlowNode accent>开仓前填写快照：理由、最大亏损、pre-mortem、预测胜率、心态、风险管理、checklist</FlowNode>
+                <FlowNode accent>开仓前填写快照：信息收集五维度、反对者陈述、正期望、pre-mortem、证伪条件、痛苦标签、预测胜率、checklist</FlowNode>
                 <FlowArrow />
                 <FlowNode>下单、持仓、平仓</FlowNode>
                 <FlowArrow />
@@ -285,7 +291,7 @@ export default function GuidePage() {
                   下单零弹窗、平仓零评价，节奏与币安 1:1。本模式下产生的交易仅进入持仓历史与交易战役归类，<strong>不进入</strong> 错题集、元监控、规则系统。适合熟悉的标的、流畅的执行、或只想观察盘面的场景。
                 </KeyCard>
                 <KeyCard title="决策记录">
-                  完整的开仓快照（正期望理由、亏完最可能原因、证伪条件、最大亏损、心态、胜率预测、Lollapalooza、破产估算等）+ 平仓后强制评价 + 错题集自动归类 + 元监控统计 + 规则系统冷却。适合刻意训练同一类 setup、复盘高频错误模式、或对自己进行校准。
+                  完整的开仓快照（信息收集五维度、反对者陈述、正期望理由、亏完最可能原因、证伪条件、痛苦标签、最大亏损、心态、胜率预测、Lollapalooza、破产估算等）+ 平仓后强制评价 + 错题集自动归类 + 元监控统计 + 规则系统冷却。适合刻意训练同一类 setup、复盘高频错误模式、或对自己进行校准。
                 </KeyCard>
               </KeyGrid>
               <div className="overflow-x-auto">
@@ -379,6 +385,8 @@ export default function GuidePage() {
                   </thead>
                   <tbody>
                     <tr><td className="px-3 py-2 border-t border-border">订单类型</td><td className="px-3 py-2 border-t border-border">区分主力单与对冲单</td><td className="px-3 py-2 border-t border-border">主力单评估方向判断；对冲单评估风险防御</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border">信息收集五维度</td><td className="px-3 py-2 border-t border-border">先了解后决定：K线、宏观、规则建议、直觉、设计者视角</td><td className="px-3 py-2 border-t border-border">只记录当时可见信息，不写事后解释</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border">反对者陈述</td><td className="px-3 py-2 border-t border-border">强制自己提出高质量反对意见</td><td className="px-3 py-2 border-t border-border">平仓后比对反对者是否命中</td></tr>
                     <tr><td className="px-3 py-2 border-t border-border">开仓理由</td><td className="px-3 py-2 border-t border-border">记录原始假设</td><td className="px-3 py-2 border-t border-border">必须具体到结构和条件</td></tr>
                     <tr><td className="px-3 py-2 border-t border-border">正期望理由</td><td className="px-3 py-2 border-t border-border">回答“我为什么认为这笔有正期望”</td><td className="px-3 py-2 border-t border-border">说清优势来自概率、赔率、亏损边界还是组合</td></tr>
                     <tr><td className="px-3 py-2 border-t border-border">证伪条件</td><td className="px-3 py-2 border-t border-border">回答“什么条件出现时证明我错了”</td><td className="px-3 py-2 border-t border-border">平仓后必须比对是否出现、是否执行</td></tr>
@@ -386,6 +394,8 @@ export default function GuidePage() {
                     <tr><td className="px-3 py-2 border-t border-border">心态自评</td><td className="px-3 py-2 border-t border-border">记录决策者状态</td><td className="px-3 py-2 border-t border-border">≤2 分硬阻挡，不能用确认框绕过</td></tr>
                     <tr><td className="px-3 py-2 border-t border-border">Pre-mortem</td><td className="px-3 py-2 border-t border-border">强制先想“如果这单亏完，最可能的原因是什么”</td><td className="px-3 py-2 border-t border-border">平仓后用它比对真实亏损原因</td></tr>
                     <tr><td className="px-3 py-2 border-t border-border">预测胜率</td><td className="px-3 py-2 border-t border-border">Tetlock 式校准训练</td><td className="px-3 py-2 border-t border-border">平仓后进入 Calibration，计算校准分数</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border">痛苦标签</td><td className="px-3 py-2 border-t border-border">即时记录损失厌恶、FOMO、后悔、贪婪、焦虑、报复等痛感</td><td className="px-3 py-2 border-t border-border">长期观察痛苦类型与后续 R 的关系</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border">两个你</td><td className="px-3 py-2 border-t border-border">分开记录执行者-我与设计者-我的意见</td><td className="px-3 py-2 border-t border-border">持仓中不能用执行者状态临时改规则</td></tr>
                     <tr><td className="px-3 py-2 border-t border-border">训练集划分</td><td className="px-3 py-2 border-t border-border">区分进场期与出场期</td><td className="px-3 py-2 border-t border-border">防止把训练样本误当考试成绩</td></tr>
                     <tr><td className="px-3 py-2 border-t border-border">风险组合与破产估计</td><td className="px-3 py-2 border-t border-border">显示 Lollapalooza score 与 100 次连续训练的期望破产次数</td><td className="px-3 py-2 border-t border-border">组合风险过高时硬阻挡</td></tr>
                     <tr><td className="px-3 py-2 border-t border-border">Checklist</td><td className="px-3 py-2 border-t border-border">把规则前置到下单前</td><td className="px-3 py-2 border-t border-border">不能判断是否通过的条目，需要重写</td></tr>
@@ -461,6 +471,10 @@ export default function GuidePage() {
                 <li><strong>规则有效性</strong>：规则上线后，对应错误是否减少，并与全局基线比较。</li>
                 <li><strong>置信区间</strong>：低样本下不把随机波动误读成进步。</li>
                 <li><strong>Calibration</strong>：比较开仓预测胜率与平仓结果，观察判断是否过度自信。</li>
+                <li><strong>可信度向量</strong>：分别追踪方向判断、决策质量、反对者命中、快照完整度和校准能力。</li>
+                <li><strong>决策质量 vs 结果</strong>：用 D-score 与 R 的散点关系判断规则是否真有预测性。</li>
+                <li><strong>痛苦日志</strong>：观察不同痛苦类型后续的平均 R，识别最危险的心理入口。</li>
+                <li><strong>规则演化地图</strong>：查看规则从直觉、表述、模式确认、规则化到算法化的证据等级。</li>
                 <li><strong>订单类型分布</strong>：主力单与对冲单是否失衡。</li>
                 <li><strong>心态与时段</strong>：识别你的高质量状态与危险时段。</li>
               </ul>
@@ -491,6 +505,8 @@ export default function GuidePage() {
               </div>
               <P>生成原理是：先用错题集把单笔错误归入 pattern，再用复盘分析找出可操作的防错条件，最后把这个条件写成下次开仓前必须检查的规则。</P>
               <P>规则分四类：硬规则违反即阻断交易；核心规则必须进入 checklist；观察规则只记录不阻断；失效规则由元监控证明无效后归档。规则有权重，权重高的规则在 checklist 和元监控中优先展示。</P>
+              <P>每条规则都有 0-5 的演化等级：0 是直觉，1 是已表述，2 是模式确认，3 是规则化，4 是算法化，5 是已证伪或已升级。升级必须依赖样本证据，不能靠当下感觉。</P>
+              <P>规则修改属于“设计者-我”的工作。有进行中战役时，系统会锁定规则编辑，防止执行者-我在持仓压力下把规则重写成合理化借口。</P>
               <P>规则激活后会进入 7 天冷却期。冷却期内不能关闭、删除、移出 checklist 或降级为非必填，避免刚写下的规则被下一次情绪波动立即废掉。</P>
               <Highlight>
                 规则的价值不在于写得完整，而在于能否前置到下一次决策点，并在元监控中看到对应错误频次下降。

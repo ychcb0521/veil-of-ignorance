@@ -57,6 +57,15 @@ export function PostTradeReviewSheet({
   const [expectancyReview, setExpectancyReview] = useState('');
   const [premortemReview, setPremortemReview] = useState('');
   const [invalidationReview, setInvalidationReview] = useState('');
+  const [opponentWasRight, setOpponentWasRight] = useState<boolean | null>(null);
+  const [fiveStepGoal, setFiveStepGoal] = useState('');
+  const [fiveStepProblem, setFiveStepProblem] = useState('');
+  const [proximateCause, setProximateCause] = useState('');
+  const [rootCause, setRootCause] = useState('');
+  const [designIntervention, setDesignIntervention] = useState('');
+  const [interventionType, setInterventionType] = useState<NonNullable<TradeJournal['post_intervention_type']>>('rule');
+  const [executionMonitor, setExecutionMonitor] = useState('');
+  const [fiveStepWeakPoint, setFiveStepWeakPoint] = useState<NonNullable<TradeJournal['post_five_step_weak_point']>>('diagnosis');
   const [rMultipleOverride, setRMultipleOverride] = useState<string>('');
   const [editingR, setEditingR] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -90,6 +99,15 @@ export function PostTradeReviewSheet({
         setExpectancyReview(journal.post_positive_expectancy_review ?? '');
         setPremortemReview(journal.post_premortem_review ?? '');
         setInvalidationReview(journal.post_invalidation_review ?? '');
+        setOpponentWasRight(journal.post_opponent_was_right ?? null);
+        setFiveStepGoal(journal.post_five_step_goal ?? '');
+        setFiveStepProblem(journal.post_five_step_problem ?? '');
+        setProximateCause(journal.post_proximate_cause ?? '');
+        setRootCause(journal.post_root_cause ?? '');
+        setDesignIntervention(journal.post_design_intervention ?? '');
+        setInterventionType(journal.post_intervention_type ?? 'rule');
+        setExecutionMonitor(journal.post_execution_monitor ?? '');
+        setFiveStepWeakPoint(journal.post_five_step_weak_point ?? 'diagnosis');
         setRMultipleOverride(journal.post_r_multiple != null ? String(journal.post_r_multiple) : '');
         setSixStep(pickSixStepValue(journal));
         setSixStepOpen(countCompletedSteps(pickSixStepValue(journal)) > 0);
@@ -210,7 +228,16 @@ export function PostTradeReviewSheet({
   const resultValid = !!resultSummary.trim();
   const decisionValid = !!decisionQuality;
   const reviewLoopValid = !!expectancyReview.trim() && !!premortemReview.trim() && !!invalidationReview.trim();
-  const canSave = tagsValid && reflectionValid && correctValid && exitReasonValid && resultValid && decisionValid && reviewLoopValid && !saving;
+  const opponentValid = !journal.pre_opponent_statement || opponentWasRight !== null;
+  const fiveStepValid = [
+    fiveStepGoal,
+    fiveStepProblem,
+    proximateCause,
+    rootCause,
+    designIntervention,
+    executionMonitor,
+  ].every(value => value.trim().length > 0);
+  const canSave = tagsValid && reflectionValid && correctValid && exitReasonValid && resultValid && decisionValid && reviewLoopValid && opponentValid && fiveStepValid && !saving;
 
   const hotWarnings = selectedTags
     .map(id => {
@@ -239,6 +266,15 @@ export function PostTradeReviewSheet({
         post_positive_expectancy_review: expectancyReview.trim(),
         post_premortem_review: premortemReview.trim(),
         post_invalidation_review: invalidationReview.trim(),
+        post_opponent_was_right: opponentWasRight,
+        post_five_step_goal: fiveStepGoal.trim(),
+        post_five_step_problem: fiveStepProblem.trim(),
+        post_proximate_cause: proximateCause.trim(),
+        post_root_cause: rootCause.trim(),
+        post_design_intervention: designIntervention.trim(),
+        post_intervention_type: interventionType,
+        post_execution_monitor: executionMonitor.trim(),
+        post_five_step_weak_point: fiveStepWeakPoint,
       });
       const assignments = noErrors ? [] : selectedTags.map(id => ({
         patternId: id,
@@ -375,6 +411,21 @@ export function PostTradeReviewSheet({
             {checklistItemsArr.length > 0 && (
               <div>
                 • Checklist：{reqChecked}/{checklistRequired.length} 必填 · {optChecked}/{checklistOptional.length} 可选 · {journal.pre_checklist_passed ? '通过' : '未通过'}
+              </div>
+            )}
+            {(journal.pre_info_kline_facts || journal.pre_opponent_statement || journal.pre_pain_tags?.length) && (
+              <div className="mt-2 space-y-1 border-t border-border/60 pt-2">
+                {journal.pre_info_kline_facts && <div>• K线事实：{journal.pre_info_kline_facts}</div>}
+                {journal.pre_info_macro_facts && <div>• 宏观事实：{journal.pre_info_macro_facts}</div>}
+                {journal.pre_info_rule_advice && <div>• 规则建议：{journal.pre_info_rule_advice}</div>}
+                {journal.pre_info_intuition && <div>• 直觉/感觉：{journal.pre_info_intuition}</div>}
+                {journal.pre_info_designer_view && <div>• 设计者视角：{journal.pre_info_designer_view}</div>}
+                {journal.pre_opponent_statement && <div>• 反对者：{journal.pre_opponent_statement}</div>}
+                {journal.pre_pain_tags && journal.pre_pain_tags.length > 0 && (
+                  <div>• 痛苦标签：{journal.pre_pain_tags.join(' / ')}</div>
+                )}
+                {journal.pre_executor_self && <div>• 执行者-我：{journal.pre_executor_self}</div>}
+                {journal.pre_designer_self && <div>• 设计者-我：{journal.pre_designer_self}</div>}
               </div>
             )}
           </CollapsibleContent>
@@ -532,6 +583,117 @@ export function PostTradeReviewSheet({
               className="text-[12px] bg-background/80 border-border/70 rounded-xl"
             />
           </div>
+        </div>
+
+        {journal.pre_opponent_statement && (
+          <div className={`space-y-3 px-4 py-4 ${sectionCardClass}`}>
+            <div className="text-[12px] font-medium">反对者陈述追踪</div>
+            <div className="rounded-lg border border-border/60 bg-background/60 px-3 py-2 text-[11px] leading-relaxed">
+              <span className="text-muted-foreground">开仓前反对者说：</span>{journal.pre_opponent_statement}
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => setOpponentWasRight(true)}
+                className={`h-9 rounded-lg border text-[11px] ${
+                  opponentWasRight === true
+                    ? 'border-[#F6465D] bg-[#F6465D]/10 text-[#F6465D]'
+                    : 'border-border bg-background text-muted-foreground hover:bg-accent'
+                }`}
+              >
+                反对者命中
+              </button>
+              <button
+                type="button"
+                onClick={() => setOpponentWasRight(false)}
+                className={`h-9 rounded-lg border text-[11px] ${
+                  opponentWasRight === false
+                    ? 'border-[#0ECB81] bg-[#0ECB81]/10 text-[#0ECB81]'
+                    : 'border-border bg-background text-muted-foreground hover:bg-accent'
+                }`}
+              >
+                原方案成立
+              </button>
+            </div>
+            {opponentWasRight === null && <div className="text-[10px] text-[#F6465D] text-right font-mono">必选</div>}
+          </div>
+        )}
+
+        <div className={`space-y-3 px-4 py-4 ${sectionCardClass}`}>
+          <div>
+            <div className="text-[12px] font-medium">Dalio 五步诊断</div>
+            <div className="text-[10px] text-muted-foreground mt-0.5">
+              目标、问题、诊断、设计、执行分开写；近因写动作，根因写性质。
+            </div>
+          </div>
+          <div className="space-y-1.5">
+            <Label className="text-[12px] font-medium">目标 *</Label>
+            <Textarea rows={2} value={fiveStepGoal} onChange={e => setFiveStepGoal(e.target.value)}
+              placeholder="这条错题要把哪个可衡量指标改善到什么程度？"
+              className="text-[12px] bg-background/80 border-border/70 rounded-xl" />
+          </div>
+          <div className="space-y-1.5">
+            <Label className="text-[12px] font-medium">问题 *</Label>
+            <Textarea rows={2} value={fiveStepProblem} onChange={e => setFiveStepProblem(e.target.value)}
+              placeholder="精准描述问题，不写“心态不好”这种空泛结论。"
+              className="text-[12px] bg-background/80 border-border/70 rounded-xl" />
+          </div>
+          <div className="grid sm:grid-cols-2 gap-2">
+            <div className="space-y-1.5">
+              <Label className="text-[12px] font-medium">近因（我做了什么动作）*</Label>
+              <Textarea rows={2} value={proximateCause} onChange={e => setProximateCause(e.target.value)}
+                placeholder="例如：提前拆掉对冲、追高加仓、没有执行证伪。"
+                className="text-[12px] bg-background/80 border-border/70 rounded-xl" />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-[12px] font-medium">根因（我是什么性质导致）*</Label>
+              <Textarea rows={2} value={rootCause} onChange={e => setRootCause(e.target.value)}
+                placeholder="例如：对浮亏耐受力低、对陌生结构过度自信。"
+                className="text-[12px] bg-background/80 border-border/70 rounded-xl" />
+            </div>
+          </div>
+          <div className="space-y-1.5">
+            <Label className="text-[12px] font-medium">设计干预 *</Label>
+            <Textarea rows={2} value={designIntervention} onChange={e => setDesignIntervention(e.target.value)}
+              placeholder="针对根因设计干预：原则、规则、SOP 或觉察项。"
+              className="text-[12px] bg-background/80 border-border/70 rounded-xl" />
+          </div>
+          <div className="grid sm:grid-cols-2 gap-2">
+            <div className="space-y-1.5">
+              <Label className="text-[12px] font-medium">干预类型 *</Label>
+              <select
+                value={interventionType}
+                onChange={e => setInterventionType(e.target.value as NonNullable<TradeJournal['post_intervention_type']>)}
+                className="h-9 rounded-xl border border-border/70 bg-background/80 px-3 text-[12px] w-full"
+              >
+                <option value="principle">L1 原则</option>
+                <option value="rule">L2 规则</option>
+                <option value="sop">SOP</option>
+                <option value="awareness">觉察项</option>
+              </select>
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-[12px] font-medium">最薄弱的一步 *</Label>
+              <select
+                value={fiveStepWeakPoint}
+                onChange={e => setFiveStepWeakPoint(e.target.value as NonNullable<TradeJournal['post_five_step_weak_point']>)}
+                className="h-9 rounded-xl border border-border/70 bg-background/80 px-3 text-[12px] w-full"
+              >
+                <option value="goal">目标</option>
+                <option value="problem">问题</option>
+                <option value="diagnosis">诊断</option>
+                <option value="design">设计</option>
+                <option value="execution">执行</option>
+              </select>
+            </div>
+          </div>
+          <div className="space-y-1.5">
+            <Label className="text-[12px] font-medium">执行与监控 *</Label>
+            <Textarea rows={2} value={executionMonitor} onChange={e => setExecutionMonitor(e.target.value)}
+              placeholder="干预如何上线？未来用哪个指标确认它是否有效？"
+              className="text-[12px] bg-background/80 border-border/70 rounded-xl" />
+          </div>
+          {!fiveStepValid && <div className="text-[10px] text-[#F6465D] text-right font-mono">五步诊断必填</div>}
         </div>
 
         <div className={`space-y-2 px-4 py-4 ${sectionCardClass}`}>

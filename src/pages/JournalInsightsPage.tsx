@@ -23,8 +23,8 @@ import {
   ruleEffectNetOfBaseline,
   wilsonInterval,
 } from '@/lib/insightsStats';
-import { isHistoricalCampaign } from '@/types/journal';
-import type { TradeCampaign, TradeJournal } from '@/types/journal';
+import { isHistoricalCampaign, PAIN_TAG_LABELS, PRINCIPLE_EVOLUTION_LEVEL_LABELS } from '@/types/journal';
+import type { PainTag, PrincipleEvolutionLevel, TradeCampaign, TradeJournal } from '@/types/journal';
 
 type Range = 7 | 30 | 90;
 const DAY = 24 * 3600_000;
@@ -58,6 +58,26 @@ function pct(value: number) {
 
 function pctRange([low, high]: [number, number]) {
   return `${pct(low)}~${pct(high)}`;
+}
+
+function decisionQualityScore(journal: TradeJournal): number {
+  const checks = [
+    !!journal.pre_positive_expectancy?.trim(),
+    !!journal.pre_mortem_text?.trim(),
+    !!journal.pre_invalidation_condition?.trim(),
+    !!journal.pre_info_kline_facts?.trim(),
+    !!journal.pre_info_macro_facts?.trim(),
+    !!journal.pre_info_rule_advice?.trim(),
+    !!journal.pre_info_intuition?.trim(),
+    !!journal.pre_info_designer_view?.trim(),
+    (journal.pre_opponent_statement?.trim().length ?? 0) >= 30,
+    (journal.pre_pain_tags?.length ?? 0) > 0,
+    !!journal.pre_executor_self?.trim(),
+    !!journal.pre_designer_self?.trim(),
+    journal.pre_calibration_win_pct != null,
+    journal.pre_checklist_passed === true,
+  ];
+  return Math.round((checks.filter(Boolean).length / checks.length) * 100);
 }
 
 async function loadCampaignEconomicStats(userId: string): Promise<CampaignEconomicStats> {
@@ -259,6 +279,75 @@ export default function JournalInsightsPage() {
     };
     const restraintCount = cur.filter(j => j.direction === 'no_entry' || j.post_outcome === 'no_entry').length;
 
+    const reviewedMain = cur.filter(j => j.order_kind === 'main' && j.post_reviewed_at && j.post_outcome && j.post_outcome !== 'no_entry');
+    const directionWins = reviewedMain.filter(j => j.post_outcome === 'win').length;
+    const goodDecisionCount = reviewedMain.filter(j => j.post_decision_quality === 'good').length;
+    const opponentSamples = reviewedMain.filter(j => typeof j.post_opponent_was_right === 'boolean');
+    const opponentHits = opponentSamples.filter(j => j.post_opponent_was_right === true).length;
+    const snapshotComplete = reviewedMain.filter(j => decisionQualityScore(j) >= 80).length;
+    const credibilityVector = [
+      {
+        label: '方向判断',
+        count: reviewedMain.length,
+        score: reviewedMain.length === 0 ? 0 : directionWins / reviewedMain.length,
+        ci: wilsonInterval(directionWins, reviewedMain.length),
+        note: '按已评价主力单胜率近似',
+      },
+      {
+        label: '决策质量',
+        count: reviewedMain.length,
+        score: reviewedMain.length === 0 ? 0 : goodDecisionCount / reviewedMain.length,
+        ci: wilsonInterval(goodDecisionCount, reviewedMain.length),
+        note: '按当时信息的好决策占比',
+      },
+      {
+        label: '反对者命中',
+        count: opponentSamples.length,
+        score: opponentSamples.length === 0 ? 0 : opponentHits / opponentSamples.length,
+        ci: wilsonInterval(opponentHits, opponentSamples.length),
+        note: '反对意见是否事后被验证',
+      },
+      {
+        label: '快照完整度',
+        count: reviewedMain.length,
+        score: reviewedMain.length === 0 ? 0 : snapshotComplete / reviewedMain.length,
+        ci: wilsonInterval(snapshotComplete, reviewedMain.length),
+        note: 'D-score ≥80 的样本占比',
+      },
+      {
+        label: '校准能力',
+        count: calibration.count,
+        score: calibration.count === 0 ? 0 : Math.max(0, 1 - calibration.brier),
+        ci: calibration.ci,
+        note: '1 - Brier，仅作方向性镜子',
+      },
+    ];
+
+    const decisionScatter = reviewedMain
+      .filter(j => typeof j.post_r_multiple === 'number' && Number.isFinite(j.post_r_multiple))
+      .map(j => ({
+        id: j.id,
+        symbol: j.symbol,
+        score: decisionQualityScore(j),
+        r: j.post_r_multiple ?? 0,
+        quality: j.post_decision_quality ?? 'mixed',
+      }));
+
+    const painStats = (Object.keys(PAIN_TAG_LABELS) as PainTag[])
+      .map(tag => {
+        const rows = cur.filter(j => j.pre_pain_tags?.includes(tag));
+        const withR = rows.filter(j => typeof j.post_r_multiple === 'number');
+        const avg = withR.length === 0 ? 0 : withR.reduce((sum, j) => sum + (j.post_r_multiple ?? 0), 0) / withR.length;
+        return { tag, count: rows.length, avgR: avg };
+      })
+      .filter(item => item.count > 0)
+      .sort((a, b) => b.count - a.count);
+
+    const evolutionMap = [0, 1, 2, 3, 4, 5].map(level => ({
+      level: level as PrincipleEvolutionLevel,
+      count: data.rules.filter(rule => (rule.evolution_level ?? 3) === level).length,
+    }));
+
     // 深度分析完成率：六步全填的占已评价 journal 比
     const reviewed = cur.filter(j => !!j.post_reviewed_at);
     const deepDone = reviewed.filter(j => !!j.deep_analysis_completed_at);
@@ -272,6 +361,10 @@ export default function JournalInsightsPage() {
     return {
       cur, curClusters, trend, timeDist, mentalDist, alphaHours, ruleEffect, reviewed, deepDone, deepRate, mixedRBasis,
       calibration,
+      credibilityVector,
+      decisionScatter,
+      painStats,
+      evolutionMap,
       restraintCount,
       campaignOutcome: {
         count: curCampaigns.length,
@@ -483,6 +576,75 @@ export default function JournalInsightsPage() {
           )}
         </section>
 
+        <section className="border border-border rounded bg-card p-3">
+          <div className="text-[12px] font-medium mb-2">可信度向量</div>
+          <div className="grid md:grid-cols-5 gap-2">
+            {stats.credibilityVector.map(item => (
+              <div key={item.label} className="rounded border border-border bg-background p-2">
+                <div className="text-[10px] text-muted-foreground">{item.label}</div>
+                <div className={`text-[18px] font-mono ${
+                  item.count === 0 ? 'text-muted-foreground' : item.score >= 0.6 ? 'text-[#0ECB81]' : item.score >= 0.45 ? 'text-[#F0B90B]' : 'text-[#F6465D]'
+                }`}>
+                  {pct(item.score)}
+                </div>
+                <div className="text-[9px] text-muted-foreground font-mono">
+                  n={item.count} · CI {item.count === 0 ? '—' : pctRange(item.ci)}
+                </div>
+                <div className="text-[9px] text-muted-foreground mt-1">{item.note}</div>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <div className="grid md:grid-cols-2 gap-3">
+          <section className="border border-border rounded bg-card p-3">
+            <div className="text-[12px] font-medium mb-2">决策质量 vs 结果</div>
+            <DecisionScatterPlot points={stats.decisionScatter} />
+            <div className="mt-2 text-[10px] text-muted-foreground">
+              横轴 D-score，纵轴 R。坏结果不自动等于坏决策；真正要看的是长期相关性。
+            </div>
+          </section>
+          <section className="border border-border rounded bg-card p-3">
+            <div className="text-[12px] font-medium mb-2">痛苦日志</div>
+            {stats.painStats.length === 0 ? (
+              <div className="text-[11px] text-muted-foreground">暂无带痛苦标签的样本</div>
+            ) : (
+              <div className="space-y-1.5">
+                {stats.painStats.map(item => (
+                  <div key={item.tag} className="flex items-center gap-2 text-[11px] font-mono">
+                    <span className="w-28 text-muted-foreground">{PAIN_TAG_LABELS[item.tag]}</span>
+                    <span className="w-10 text-right">{item.count}次</span>
+                    <div className="flex-1 bg-background h-2 rounded overflow-hidden">
+                      <div
+                        className={item.avgR >= 0 ? 'h-full bg-[#0ECB81]' : 'h-full bg-[#F6465D]'}
+                        style={{ width: `${Math.min(100, Math.abs(item.avgR) * 40 + 8)}%` }}
+                      />
+                    </div>
+                    <span className={item.avgR >= 0 ? 'w-16 text-right text-[#0ECB81]' : 'w-16 text-right text-[#F6465D]'}>
+                      {item.avgR >= 0 ? '+' : ''}{item.avgR.toFixed(2)}R
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
+        </div>
+
+        <section className="border border-border rounded bg-card p-3">
+          <div className="text-[12px] font-medium mb-2">规则演化地图</div>
+          <div className="grid grid-cols-2 md:grid-cols-6 gap-2">
+            {stats.evolutionMap.map(item => (
+              <div key={item.level} className="rounded border border-border bg-background p-2">
+                <div className="text-[10px] text-muted-foreground">L{item.level}</div>
+                <div className="text-[18px] font-mono">{item.count}</div>
+                <div className="text-[9px] text-muted-foreground">
+                  {PRINCIPLE_EVOLUTION_LEVEL_LABELS[item.level]}
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+
         <div className="grid md:grid-cols-2 gap-3">
           <section className="border border-border rounded bg-card p-3">
             <div className="text-[12px] font-medium mb-2">订单类型分布</div>
@@ -615,5 +777,39 @@ function StatCard({ label, value, accent, sub }: { label: string; value: string;
       <div className="text-[22px] font-mono mt-1" style={{ color: accent }}>{value}</div>
       {sub && <div className="text-[10px] text-muted-foreground font-mono mt-0.5">{sub}</div>}
     </div>
+  );
+}
+
+function DecisionScatterPlot({
+  points,
+}: {
+  points: Array<{ id: string; symbol: string; score: number; r: number; quality: string | null }>;
+}) {
+  if (points.length === 0) {
+    return <div className="h-[220px] flex items-center justify-center text-[11px] text-muted-foreground">暂无可绘制样本</div>;
+  }
+  const minR = Math.min(-2, ...points.map(point => point.r));
+  const maxR = Math.max(2, ...points.map(point => point.r));
+  const yFor = (r: number) => 190 - ((r - minR) / Math.max(0.01, maxR - minR)) * 160;
+  return (
+    <svg viewBox="0 0 360 220" className="w-full h-[220px] rounded border border-border bg-background">
+      <line x1="35" y1="190" x2="340" y2="190" stroke="currentColor" className="text-border" />
+      <line x1="35" y1="30" x2="35" y2="190" stroke="currentColor" className="text-border" />
+      <line x1="35" y1={yFor(0)} x2="340" y2={yFor(0)} stroke="currentColor" className="text-muted-foreground/40" strokeDasharray="4 4" />
+      <text x="35" y="208" className="fill-muted-foreground text-[9px]">0</text>
+      <text x="175" y="208" className="fill-muted-foreground text-[9px]">D-score</text>
+      <text x="320" y="208" className="fill-muted-foreground text-[9px]">100</text>
+      <text x="5" y="35" className="fill-muted-foreground text-[9px]">R</text>
+      {points.slice(0, 160).map(point => {
+        const x = 35 + (point.score / 100) * 305;
+        const y = yFor(point.r);
+        const fill = point.quality === 'good' ? '#0ECB81' : point.quality === 'bad' ? '#F6465D' : '#F0B90B';
+        return (
+          <circle key={point.id} cx={x} cy={y} r="4" fill={fill}>
+            <title>{point.symbol} · D {point.score} · {point.r.toFixed(2)}R</title>
+          </circle>
+        );
+      })}
+    </svg>
   );
 }

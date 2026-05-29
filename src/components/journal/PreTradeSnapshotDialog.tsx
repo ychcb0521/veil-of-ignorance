@@ -176,6 +176,17 @@ export function PreTradeSnapshotDialog({
         pre_dataset_split: payload.pre_dataset_split,
         pre_lollapalooza_score: payload.pre_lollapalooza_score,
         pre_bankruptcy_estimate: payload.pre_bankruptcy_estimate,
+        pre_info_kline_facts: payload.pre_info_kline_facts,
+        pre_info_macro_facts: payload.pre_info_macro_facts,
+        pre_info_rule_advice: payload.pre_info_rule_advice,
+        pre_info_intuition: payload.pre_info_intuition,
+        pre_info_designer_view: payload.pre_info_designer_view,
+        pre_opponent_statement: payload.pre_opponent_statement,
+        pre_triggered_principle_ids: payload.pre_triggered_principle_ids,
+        pre_triggered_rule_ids: payload.pre_triggered_rule_ids,
+        pre_pain_tags: payload.pre_pain_tags,
+        pre_executor_self: payload.pre_executor_self,
+        pre_designer_self: payload.pre_designer_self,
       });
 
       if (mode === 'trade' && campaignId && payload.campaign_leg_role && payload.campaign_mode !== 'standalone') {
