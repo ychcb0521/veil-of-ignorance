@@ -305,7 +305,7 @@ function isMissingDalioMetaLayerError(error: { code?: string; message?: string }
   const message = error.message ?? '';
   return error.code === 'PGRST205'
     || error.code === '42P01'
-    || (/trade_principles|pain_log_entries|pre_info_|pre_opponent_statement|pre_pain_tags|post_five_step|post_opponent_was_right|evolution_level|principle_id/i.test(message)
+    || (/trade_principles|pain_log_entries|pre_mortem_text|pre_positive_expectancy|pre_invalidation_condition|pre_calibration_win_pct|pre_dataset_split|pre_lollapalooza_score|pre_bankruptcy_estimate|pre_info_|pre_opponent_statement|pre_pain_tags|post_result_summary|post_decision_quality|post_positive_expectancy_review|post_premortem_review|post_invalidation_review|post_five_step|post_opponent_was_right|post_real_close_time|evolution_level|principle_id/i.test(message)
       && /schema cache|could not find|does not exist|column/i.test(message));
 }
 
@@ -2080,6 +2080,13 @@ export async function createJournalPreSnapshot(input: CreateJournalPreInput): Pr
     .single();
   if (error && isMissingDalioMetaLayerError(error)) {
     const {
+      pre_mortem_text: _preMortem,
+      pre_positive_expectancy: _positiveExpectancy,
+      pre_invalidation_condition: _invalidationCondition,
+      pre_calibration_win_pct: _calibration,
+      pre_dataset_split: _datasetSplit,
+      pre_lollapalooza_score: _lollapalooza,
+      pre_bankruptcy_estimate: _bankruptcy,
       pre_info_kline_facts: _kline,
       pre_info_macro_facts: _macro,
       pre_info_rule_advice: _ruleAdvice,
@@ -2143,12 +2150,39 @@ export async function updateJournalPostReview(
   input: UpdateJournalPostInput,
 ): Promise<TradeJournal> {
   const payload = { ...input, post_reviewed_at: new Date().toISOString() };
-  const { data, error } = await supabase
+  let { data, error } = await supabase
     .from("trade_journals" as never)
     .update(payload as never)
     .eq("id", id)
     .select()
     .single();
+  if (error && isMissingDalioMetaLayerError(error)) {
+    const {
+      post_result_summary: _resultSummary,
+      post_decision_quality: _decisionQuality,
+      post_positive_expectancy_review: _expectancyReview,
+      post_premortem_review: _premortemReview,
+      post_invalidation_review: _invalidationReview,
+      post_opponent_was_right: _opponent,
+      post_five_step_goal: _goal,
+      post_five_step_problem: _problem,
+      post_proximate_cause: _proximate,
+      post_root_cause: _root,
+      post_design_intervention: _design,
+      post_intervention_type: _type,
+      post_execution_monitor: _monitor,
+      post_five_step_weak_point: _weak,
+      ...legacyPayload
+    } = payload as Record<string, unknown>;
+    const retry = await supabase
+      .from("trade_journals" as never)
+      .update(legacyPayload as never)
+      .eq("id", id)
+      .select()
+      .single();
+    data = retry.data;
+    error = retry.error;
+  }
   return wrap("提交交易复盘", error, data as unknown as TradeJournal);
 }
 
@@ -2412,6 +2446,11 @@ export async function finalizeJournalReview(
     .single();
   if (error && isMissingDalioMetaLayerError(error)) {
     const {
+      post_result_summary: _resultSummary,
+      post_decision_quality: _decisionQuality,
+      post_positive_expectancy_review: _expectancyReview,
+      post_premortem_review: _premortemReview,
+      post_invalidation_review: _invalidationReview,
       post_opponent_was_right: _opponent,
       post_five_step_goal: _goal,
       post_five_step_problem: _problem,
