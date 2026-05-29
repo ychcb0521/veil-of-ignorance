@@ -8,7 +8,7 @@ import type { TradeRecord } from '@/types/trading';
 import type { KlineData } from '@/hooks/useBinanceData';
 
 export type ReplayStatus = 'idle' | 'running' | 'paused';
-export const REPLAY_SPEEDS = [1, 2, 5, 10, 50] as const;
+export const REPLAY_SPEEDS = [1, 2, 5, 10, 50, 60, 180, 300] as const;
 export type ReplaySpeed = (typeof REPLAY_SPEEDS)[number];
 
 interface ReplayContextValue {

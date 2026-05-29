@@ -332,7 +332,7 @@ export default function GuidePage() {
                   输入日期和时间后，系统加载该时刻附近的真实历史行情。K 线、盘口、成交、持仓盈亏和订单触发都以模拟时间为准。
                 </KeyCard>
                 <KeyCard title="加速播放">
-                  支持 1x、2x、5x、10x、50x 倍速。慢速用于练决策细节，高倍速用于快速穿越等待区和重复训练同类行情。
+                  支持 1x、2x、5x、10x、50x、60x、180x、300x 倍速。慢速用于练决策细节，高倍速用于快速穿越等待区和重复训练同类行情。
                 </KeyCard>
                 <KeyCard title="暂停与恢复">
                   可随时暂停、继续或跳转。暂停时适合写交易计划、检查 checklist、复盘刚才为什么想出手。
@@ -350,7 +350,7 @@ export default function GuidePage() {
                   <tbody>
                     <tr><td className="px-3 py-2 border-t border-border">历史回放</td><td className="px-3 py-2 border-t border-border">从任意历史时刻重新进入市场</td><td className="px-3 py-2 border-t border-border">把过去行情变成可反复练习的样本</td></tr>
                     <tr><td className="px-3 py-2 border-t border-border">未来不可见</td><td className="px-3 py-2 border-t border-border">只显示模拟时间以前的数据</td><td className="px-3 py-2 border-t border-border">避免用已知结果污染判断</td></tr>
-                    <tr><td className="px-3 py-2 border-t border-border">倍速播放</td><td className="px-3 py-2 border-t border-border">按 1x 到 50x 推进行情</td><td className="px-3 py-2 border-t border-border">用高倍速提高训练密度，用低倍速校准执行质量</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border">倍速播放</td><td className="px-3 py-2 border-t border-border">按 1x 到 300x 推进行情</td><td className="px-3 py-2 border-t border-border">用高倍速提高训练密度，用低倍速校准执行质量</td></tr>
                     <tr><td className="px-3 py-2 border-t border-border">统一模拟时钟</td><td className="px-3 py-2 border-t border-border">订单、持仓、盈亏、历史记录同步推进</td><td className="px-3 py-2 border-t border-border">让训练接近真实交易节奏</td></tr>
                   </tbody>
                 </table>
@@ -363,7 +363,7 @@ export default function GuidePage() {
                   用来观察微观结构。若盘口不是策略的一部分，就不要用它作为冲动加仓的借口。
                 </KeyCard>
                 <KeyCard title="推荐节奏">
-                  新手先用 1x-5x 练完整决策，熟悉后用 10x-50x 提高样本量；50x 适合穿越无交易价值的等待区。
+                  新手先用 1x-5x 练完整决策，熟悉后用 10x-60x 提高样本量；180x 和 300x 适合穿越无交易价值的等待区。
                 </KeyCard>
               </KeyGrid>
               <Highlight>
