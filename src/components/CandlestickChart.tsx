@@ -104,6 +104,41 @@ export interface ChartImperativeApi {
   updateData: (candle: KLineData) => void;
 }
 
+export interface AnalysisChartMarker {
+  time: number;
+  price: number;
+  color: string;
+  label?: string;
+  shape?: "triangle-up" | "triangle-down" | "circle" | "square";
+}
+
+export interface AnalysisPriceLine {
+  price: number;
+  color: string;
+  title?: string;
+  dim?: boolean;
+}
+
+export interface AnalysisTimeBoundPriceLine extends AnalysisPriceLine {
+  startTime: number;
+  endTime: number;
+  dashed?: boolean;
+  endMarker?: "x" | null;
+}
+
+export interface AnalysisVerticalLine {
+  time: number;
+  color: string;
+  width?: number;
+}
+
+export interface AnalysisChartAnnotations {
+  markers?: AnalysisChartMarker[];
+  priceLines?: AnalysisPriceLine[];
+  timeBoundPriceLines?: AnalysisTimeBoundPriceLine[];
+  verticalLines?: AnalysisVerticalLine[];
+}
+
 interface Props {
   data: KlineData[];
   symbol: string;
@@ -123,6 +158,10 @@ interface Props {
   pickMode?: boolean;
   /** Called when user clicks chart in pick mode */
   onPricePicked?: (price: number) => void;
+  /** Use the main chart engine in read-only analysis surfaces such as replay/campaign review. */
+  analysisMode?: boolean;
+  /** Non-trading overlays rendered by replay and campaign review pages. */
+  analysisAnnotations?: AnalysisChartAnnotations;
 }
 
 // Convert our KlineData to klinecharts KLineData
@@ -290,6 +329,8 @@ function CandlestickChartComponent({
   onCrosshairPriceChange,
   pickMode,
   onPricePicked,
+  analysisMode = false,
+  analysisAnnotations,
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<Chart | null>(null);
@@ -681,6 +722,178 @@ function CandlestickChartComponent({
     }
   }, [pendingOrders, showOrderLines, data, pricePrecision]);
 
+  // ============================================================
+  // ANALYSIS / REPLAY ANNOTATIONS — read-only overlays for review surfaces
+  // ============================================================
+  useEffect(() => {
+    const chart = chartRef.current;
+    if (!chart) return;
+
+    try {
+      chart.removeOverlay("analysis_annotations");
+    } catch {
+      // Overlay group may not exist on the first render.
+    }
+
+    if (!analysisAnnotations || data.length === 0) return;
+
+    const newest = data[data.length - 1];
+    const inferredInterval = data.length > 1 ? Math.max(0, newest.time - data[data.length - 2].time) : 0;
+    const minTime = data[0].time;
+    const maxTime = newest.time + inferredInterval;
+    const lastValue = newest.close;
+    const formatPrice = (value: number) => value.toFixed(pricePrecision);
+    const clampTime = (time: number) => Math.min(Math.max(time, minTime), maxTime);
+
+    for (const line of analysisAnnotations.priceLines ?? []) {
+      if (!Number.isFinite(line.price)) continue;
+      chart.createOverlay({
+        name: "horizontalStraightLine",
+        id: "analysis_annotations",
+        points: [{ timestamp: newest.time, value: line.price }],
+        lock: true,
+        styles: {
+          line: {
+            style: LineType.Dashed,
+            dashedValue: [6, 4],
+            size: 1,
+            color: line.dim ? `${line.color}55` : line.color,
+          },
+          text: {
+            color: line.dim ? `${line.color}88` : line.color,
+            size: 10,
+            borderColor: `${line.color}40`,
+            backgroundColor: `${line.color}18`,
+          },
+        },
+        extendData: line.title ? `${line.title} ${formatPrice(line.price)}` : formatPrice(line.price),
+      } as OverlayCreate);
+    }
+
+    for (const line of analysisAnnotations.timeBoundPriceLines ?? []) {
+      if (!Number.isFinite(line.price)) continue;
+      const startTime = clampTime(line.startTime);
+      const endTime = clampTime(line.endTime);
+      if (endTime <= startTime) continue;
+      const color = line.dim ? `${line.color}55` : line.color;
+
+      chart.createOverlay({
+        name: "segment",
+        id: "analysis_annotations",
+        points: [
+          { timestamp: startTime, value: line.price },
+          { timestamp: endTime, value: line.price },
+        ],
+        lock: true,
+        styles: {
+          line: {
+            style: line.dashed ? LineType.Dashed : LineType.Solid,
+            dashedValue: [5, 4],
+            size: 1,
+            color,
+          },
+        },
+      } as OverlayCreate);
+
+      if (line.title) {
+        chart.createOverlay({
+          name: "simpleAnnotation",
+          id: "analysis_annotations",
+          points: [{ timestamp: startTime, value: line.price }],
+          lock: true,
+          extendData: line.title,
+          styles: {
+            text: {
+              color: "#FFFFFF",
+              size: 10,
+              borderColor: `${line.color}50`,
+              backgroundColor: line.color,
+              borderRadius: 2,
+              paddingLeft: 3,
+              paddingRight: 3,
+              paddingTop: 1,
+              paddingBottom: 1,
+            },
+            point: { color: line.color },
+          },
+        } as OverlayCreate);
+      }
+
+      if (line.endMarker === "x") {
+        chart.createOverlay({
+          name: "simpleAnnotation",
+          id: "analysis_annotations",
+          points: [{ timestamp: endTime, value: line.price }],
+          lock: true,
+          extendData: "×",
+          styles: {
+            text: {
+              color: "#FFFFFF",
+              size: 10,
+              borderColor: `${line.color}50`,
+              backgroundColor: line.color,
+              borderRadius: 2,
+              paddingLeft: 3,
+              paddingRight: 3,
+              paddingTop: 1,
+              paddingBottom: 1,
+            },
+            point: { color: line.color },
+          },
+        } as OverlayCreate);
+      }
+    }
+
+    for (const vertical of analysisAnnotations.verticalLines ?? []) {
+      if (vertical.time < minTime || vertical.time > maxTime) continue;
+      chart.createOverlay({
+        name: "verticalStraightLine",
+        id: "analysis_annotations",
+        points: [{ timestamp: vertical.time, value: lastValue }],
+        lock: true,
+        styles: {
+          line: {
+            style: LineType.Dashed,
+            dashedValue: [4, 4],
+            size: vertical.width ?? 1,
+            color: vertical.color,
+          },
+        },
+      } as OverlayCreate);
+    }
+
+    for (const marker of analysisAnnotations.markers ?? []) {
+      if (!Number.isFinite(marker.price) || marker.time < minTime || marker.time > maxTime) continue;
+      const glyph =
+        marker.shape === "triangle-up" ? "▲" :
+        marker.shape === "triangle-down" ? "▼" :
+        marker.shape === "square" ? "■" :
+        "●";
+
+      chart.createOverlay({
+        name: "simpleAnnotation",
+        id: "analysis_annotations",
+        points: [{ timestamp: marker.time, value: marker.price }],
+        lock: true,
+        extendData: marker.label ? `${glyph} ${marker.label}` : glyph,
+        styles: {
+          text: {
+            color: "#FFFFFF",
+            size: 10,
+            borderColor: `${marker.color}50`,
+            backgroundColor: marker.color,
+            borderRadius: 2,
+            paddingLeft: 3,
+            paddingRight: 3,
+            paddingTop: 1,
+            paddingBottom: 1,
+          },
+          point: { color: marker.color },
+        },
+      } as OverlayCreate);
+    }
+  }, [analysisAnnotations, data, pricePrecision]);
+
   useEffect(() => {
     const chart = chartRef.current;
     if (!chart) return;
@@ -861,19 +1074,21 @@ function CandlestickChartComponent({
           ref={containerRef}
           className="absolute inset-0"
           style={{
-            left: 34,
+            left: analysisMode ? 0 : 34,
             backgroundColor: theme === "light" ? "#FFFFFF" : "#1E2329",
             cursor: activeDrawingTool || pickMode ? "crosshair" : "default",
           }}
         />
 
-        <DrawingToolbar
-          activeTool={activeDrawingTool}
-          onToolChange={handleToolChange}
-          onClearDrawings={handleClearDrawings}
-          drawingsVisible={drawingsVisible}
-          onToggleDrawingsVisible={handleToggleDrawingsVisible}
-        />
+        {!analysisMode && (
+          <DrawingToolbar
+            activeTool={activeDrawingTool}
+            onToolChange={handleToolChange}
+            onClearDrawings={handleClearDrawings}
+            drawingsVisible={drawingsVisible}
+            onToggleDrawingsVisible={handleToggleDrawingsVisible}
+          />
+        )}
 
         {/* Right side: indicator buttons */}
         <div className="absolute right-12 top-0 z-10 flex items-center gap-2 py-1.5 px-2 max-w-[60%] overflow-visible">
@@ -894,35 +1109,39 @@ function CandlestickChartComponent({
             <span>指标</span>
           </button>
 
-          {/* Show order lines toggle */}
-          <button
-            type="button"
-            onClick={() => setShowOrderLines((prev) => !prev)}
-            className={`flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium transition-colors duration-150 ease-out active:scale-[0.98] ${
-              showOrderLines
-                ? "bg-primary/20 text-primary"
-                : "text-muted-foreground hover:text-foreground hover:bg-accent/50"
-            }`}
-            title={showOrderLines ? "隐藏挂单线" : "显示挂单线"}
-          >
-            <ListOrdered className="w-3.5 h-3.5" />
-            <span>挂单</span>
-          </button>
+          {!analysisMode && (
+            <>
+              {/* Show order lines toggle */}
+              <button
+                type="button"
+                onClick={() => setShowOrderLines((prev) => !prev)}
+                className={`flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium transition-colors duration-150 ease-out active:scale-[0.98] ${
+                  showOrderLines
+                    ? "bg-primary/20 text-primary"
+                    : "text-muted-foreground hover:text-foreground hover:bg-accent/50"
+                }`}
+                title={showOrderLines ? "隐藏挂单线" : "显示挂单线"}
+              >
+                <ListOrdered className="w-3.5 h-3.5" />
+                <span>挂单</span>
+              </button>
 
-          {/* Show/hide trade markers toggle */}
-          <button
-            type="button"
-            onClick={() => setShowTradeMarkers((prev) => !prev)}
-            className={`flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium transition-colors duration-150 ease-out active:scale-[0.98] ${
-              showTradeMarkers
-                ? "bg-primary/20 text-primary"
-                : "text-muted-foreground hover:text-foreground hover:bg-accent/50"
-            }`}
-            title={showTradeMarkers ? "隐藏交易标记" : "显示交易标记"}
-          >
-            {showTradeMarkers ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
-            <span>标记</span>
-          </button>
+              {/* Show/hide trade markers toggle */}
+              <button
+                type="button"
+                onClick={() => setShowTradeMarkers((prev) => !prev)}
+                className={`flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium transition-colors duration-150 ease-out active:scale-[0.98] ${
+                  showTradeMarkers
+                    ? "bg-primary/20 text-primary"
+                    : "text-muted-foreground hover:text-foreground hover:bg-accent/50"
+                }`}
+                title={showTradeMarkers ? "隐藏交易标记" : "显示交易标记"}
+              >
+                {showTradeMarkers ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
+                <span>标记</span>
+              </button>
+            </>
+          )}
 
           <div className="flex items-center gap-1 max-w-full overflow-x-auto">
             {indicators.map((ind) => (
@@ -987,7 +1206,9 @@ function areChartPropsEqual(prev: Props, next: Props) {
     prev.onCancelOrder === next.onCancelOrder &&
     prev.onCrosshairPriceChange === next.onCrosshairPriceChange &&
     prev.pickMode === next.pickMode &&
-    prev.onPricePicked === next.onPricePicked
+    prev.onPricePicked === next.onPricePicked &&
+    prev.analysisMode === next.analysisMode &&
+    prev.analysisAnnotations === next.analysisAnnotations
   );
 }
 

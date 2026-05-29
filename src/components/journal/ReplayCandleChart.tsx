@@ -1,7 +1,6 @@
 /**
- * ReplayCandleChart — 自研只读 SVG 蜡烛图，专为复现页设计。
- * 不复用主 CandlestickChart（klinecharts）以避免破坏主图的复杂状态与禁用绘图工具/挂单交互。
- * 支持：marker 三角/方块、价格线（dashed）、垂直时间线、当前回放 cursor。
+ * Legacy SVG fallback and shared replay annotation types.
+ * Active replay surfaces use ReplayKlineChart, which wraps the main klinecharts chart.
  */
 import { useMemo } from 'react';
 import type { ReactNode } from 'react';

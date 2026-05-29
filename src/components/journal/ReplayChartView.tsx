@@ -2,7 +2,8 @@ import { useMemo, useState } from 'react';
 import { useReplay } from '@/contexts/ReplayContext';
 import { useReplayKlines } from '@/hooks/useReplayKlines';
 import { intervalToMs } from '@/hooks/useBinanceData';
-import { ReplayCandleChart, type ChartMarker, type PriceLine, type VerticalLine } from './ReplayCandleChart';
+import { type ChartMarker, type PriceLine, type VerticalLine } from './ReplayCandleChart';
+import { ReplayKlineChart } from './ReplayKlineChart';
 import { ReplayTimelineScrubber } from './ReplayTimelineScrubber';
 import { Button } from '@/components/ui/button';
 
@@ -154,10 +155,11 @@ export function ReplayChartView() {
           </div>
         )}
         {!loading && !error && (
-          <ReplayCandleChart
+          <ReplayKlineChart
             klines={klines}
             currentTime={replayTime}
             intervalMs={intervalToMs(interval)}
+            symbol={journal.symbol}
             markers={markers}
             priceLines={priceLines}
             verticalLines={verticalLines}

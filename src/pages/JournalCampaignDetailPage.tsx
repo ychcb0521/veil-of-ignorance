@@ -9,7 +9,8 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Switch } from '@/components/ui/switch';
 import { Textarea } from '@/components/ui/textarea';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import { ReplayCandleChart, type ChartMarker, type TimeBoundPriceLine, type VerticalLine } from '@/components/journal/ReplayCandleChart';
+import { type ChartMarker, type TimeBoundPriceLine, type VerticalLine } from '@/components/journal/ReplayCandleChart';
+import { ReplayKlineChart } from '@/components/journal/ReplayKlineChart';
 import { StateMachineTimeline } from '@/components/journal/StateMachineTimeline';
 import { CampaignLegsList } from '@/components/journal/CampaignLegsList';
 import { DecisionAccuracyPanel } from '@/components/journal/DecisionAccuracyPanel';
@@ -893,14 +894,15 @@ export default function JournalCampaignDetailPage() {
               {klinesLoading ? (
                 <div className="h-full flex items-center justify-center text-[12px] text-muted-foreground">加载 K 线…</div>
               ) : (
-                <ReplayCandleChart
+                <ReplayKlineChart
                   klines={klines}
                   currentTime={chartCurrentTime}
                   intervalMs={intervalToMs(interval)}
+                  symbol={campaign.symbol}
                   markers={displayMarkers}
                   timeBoundPriceLines={displayPriceLines}
                   verticalLines={displayVerticalLines}
-                  windowCandles={180}
+                  historyCandles={1440}
                 />
               )}
             </div>
