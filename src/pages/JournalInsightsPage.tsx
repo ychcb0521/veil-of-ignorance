@@ -160,6 +160,18 @@ function calibrationTarget(bins: CalibrationBin[], sampleCount: number) {
 }
 
 function decisionQualityScore(journal: TradeJournal): number {
+  if (journal.pre_thesis_why_right || journal.pre_premortem_failure_reason || journal.pre_falsification_signal) {
+    const checks = [
+      !!journal.pre_thesis_why_right?.trim(),
+      !!journal.pre_premortem_failure_reason?.trim(),
+      !!journal.pre_falsification_signal?.trim(),
+      journal.pre_calibration_win_pct != null,
+      journal.pre_max_loss_usdt != null && journal.pre_max_loss_usdt > 0,
+      journal.pre_checklist_passed === true,
+      journal.pre_mental_state >= 3,
+    ];
+    return Math.round((checks.filter(Boolean).length / checks.length) * 100);
+  }
   const checks = [
     !!journal.pre_positive_expectancy?.trim(),
     !!journal.pre_mortem_text?.trim(),
@@ -387,19 +399,22 @@ export default function JournalInsightsPage() {
     };
     const calibrationBins = buildCalibrationBins(calibrationSamples);
     const calibrationDrillCandidates: CalibrationDrillCandidate[] = calibrationRows
-      .filter(j => j.pre_entry_reason?.trim())
-      .map(j => ({
-        id: j.id,
-        symbol: j.symbol,
-        direction: j.direction,
-        simulatedTime: j.pre_simulated_time,
-        entryReason: j.pre_entry_reason,
-        positiveExpectancy: j.pre_positive_expectancy ?? null,
-        preMortem: j.pre_mortem_text ?? null,
-        originalProbability: Math.min(100, Math.max(0, j.pre_calibration_win_pct ?? 0)),
-        outcomeWin: j.post_outcome === 'win',
-        rMultiple: j.post_r_multiple ?? null,
-      }));
+      .map(j => {
+        const entryReason = j.pre_thesis_why_right?.trim() || j.pre_entry_reason?.trim() || '';
+        return {
+          id: j.id,
+          symbol: j.symbol,
+          direction: j.direction,
+          simulatedTime: j.pre_simulated_time,
+          entryReason,
+          positiveExpectancy: j.pre_thesis_why_right ?? j.pre_positive_expectancy ?? null,
+          preMortem: j.pre_premortem_failure_reason ?? j.pre_mortem_text ?? null,
+          originalProbability: Math.min(100, Math.max(0, j.pre_calibration_win_pct ?? 0)),
+          outcomeWin: j.post_outcome === 'win',
+          rMultiple: j.post_r_multiple ?? null,
+        };
+      })
+      .filter(j => j.entryReason.trim());
     const calibrationTraining = {
       bins: calibrationBins,
       target: calibrationTarget(calibrationBins, calibration.count),

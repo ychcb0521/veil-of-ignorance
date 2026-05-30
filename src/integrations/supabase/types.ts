@@ -280,13 +280,33 @@ export type Database = {
           pre_calibration_competence_basis: string | null
           pre_calibration_reference_class: string | null
           pre_calibration_update_signal: string | null
+          pre_calibration_win_pct: number | null
+          pre_account_equity_usdt: number | null
           pre_confidence_interval_high_pct: number | null
           pre_confidence_interval_low_pct: number | null
+          pre_confidence_basis: string | null
+          pre_dataset_split: string | null
+          pre_bankruptcy_estimate: number | null
           pre_entry_price: number | null
-          pre_entry_reason: string
+          pre_entry_reason: string | null
+          pre_executor_self: string | null
+          pre_designer_self: string | null
+          pre_falsification_signal: string | null
           pre_max_loss_usdt: number | null
           pre_mental_state: number
           pre_mental_trigger: string | null
+          pre_mortem_text: string | null
+          pre_opponent_statement: string | null
+          pre_pain_tags: Json | null
+          pre_positive_expectancy: string | null
+          pre_premortem_failure_reason: string | null
+          pre_info_designer_view: string | null
+          pre_info_intuition: string | null
+          pre_info_kline_facts: string | null
+          pre_info_macro_facts: string | null
+          pre_info_rule_advice: string | null
+          pre_invalidation_condition: string | null
+          pre_lollapalooza_score: number | null
           pre_planned_stop_loss: number | null
           pre_planned_take_profit: number | null
           pre_position_size: number | null
@@ -294,6 +314,9 @@ export type Database = {
           pre_risk_awareness: string | null
           pre_risk_management: string | null
           pre_simulated_time: string
+          pre_thesis_why_right: string | null
+          pre_triggered_principle_ids: Json | null
+          pre_triggered_rule_ids: Json | null
           reason_was_rewritten: boolean
           symbol: string
           trade_record_id: string | null
@@ -329,13 +352,33 @@ export type Database = {
           pre_calibration_competence_basis?: string | null
           pre_calibration_reference_class?: string | null
           pre_calibration_update_signal?: string | null
+          pre_calibration_win_pct?: number | null
+          pre_account_equity_usdt?: number | null
           pre_confidence_interval_high_pct?: number | null
           pre_confidence_interval_low_pct?: number | null
+          pre_confidence_basis?: string | null
+          pre_dataset_split?: string | null
+          pre_bankruptcy_estimate?: number | null
           pre_entry_price?: number | null
-          pre_entry_reason: string
+          pre_entry_reason?: string | null
+          pre_executor_self?: string | null
+          pre_designer_self?: string | null
+          pre_falsification_signal?: string | null
           pre_max_loss_usdt?: number | null
           pre_mental_state: number
           pre_mental_trigger?: string | null
+          pre_mortem_text?: string | null
+          pre_opponent_statement?: string | null
+          pre_pain_tags?: Json | null
+          pre_positive_expectancy?: string | null
+          pre_premortem_failure_reason?: string | null
+          pre_info_designer_view?: string | null
+          pre_info_intuition?: string | null
+          pre_info_kline_facts?: string | null
+          pre_info_macro_facts?: string | null
+          pre_info_rule_advice?: string | null
+          pre_invalidation_condition?: string | null
+          pre_lollapalooza_score?: number | null
           pre_planned_stop_loss?: number | null
           pre_planned_take_profit?: number | null
           pre_position_size?: number | null
@@ -343,6 +386,9 @@ export type Database = {
           pre_risk_awareness?: string | null
           pre_risk_management?: string | null
           pre_simulated_time: string
+          pre_thesis_why_right?: string | null
+          pre_triggered_principle_ids?: Json | null
+          pre_triggered_rule_ids?: Json | null
           reason_was_rewritten?: boolean
           symbol: string
           trade_record_id?: string | null
@@ -378,13 +424,33 @@ export type Database = {
           pre_calibration_competence_basis?: string | null
           pre_calibration_reference_class?: string | null
           pre_calibration_update_signal?: string | null
+          pre_calibration_win_pct?: number | null
+          pre_account_equity_usdt?: number | null
           pre_confidence_interval_high_pct?: number | null
           pre_confidence_interval_low_pct?: number | null
+          pre_confidence_basis?: string | null
+          pre_dataset_split?: string | null
+          pre_bankruptcy_estimate?: number | null
           pre_entry_price?: number | null
-          pre_entry_reason?: string
+          pre_entry_reason?: string | null
+          pre_executor_self?: string | null
+          pre_designer_self?: string | null
+          pre_falsification_signal?: string | null
           pre_max_loss_usdt?: number | null
           pre_mental_state?: number
           pre_mental_trigger?: string | null
+          pre_mortem_text?: string | null
+          pre_opponent_statement?: string | null
+          pre_pain_tags?: Json | null
+          pre_positive_expectancy?: string | null
+          pre_premortem_failure_reason?: string | null
+          pre_info_designer_view?: string | null
+          pre_info_intuition?: string | null
+          pre_info_kline_facts?: string | null
+          pre_info_macro_facts?: string | null
+          pre_info_rule_advice?: string | null
+          pre_invalidation_condition?: string | null
+          pre_lollapalooza_score?: number | null
           pre_planned_stop_loss?: number | null
           pre_planned_take_profit?: number | null
           pre_position_size?: number | null
@@ -392,6 +458,9 @@ export type Database = {
           pre_risk_awareness?: string | null
           pre_risk_management?: string | null
           pre_simulated_time?: string
+          pre_thesis_why_right?: string | null
+          pre_triggered_principle_ids?: Json | null
+          pre_triggered_rule_ids?: Json | null
           reason_was_rewritten?: boolean
           symbol?: string
           trade_record_id?: string | null

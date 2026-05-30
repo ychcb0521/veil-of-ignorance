@@ -306,7 +306,7 @@ function isMissingDalioMetaLayerError(error: { code?: string; message?: string }
   return error.code === 'PGRST205'
     || error.code === 'PGRST204'
     || error.code === '42P01'
-    || (/trade_principles|pain_log_entries|pre_mortem_text|pre_positive_expectancy|pre_invalidation_condition|pre_calibration_win_pct|pre_confidence_interval_|pre_calibration_reference_class|pre_calibration_competence_basis|pre_calibration_update_signal|pre_dataset_split|pre_lollapalooza_score|pre_bankruptcy_estimate|pre_info_|pre_opponent_statement|pre_pain_tags|post_result_summary|post_decision_quality|post_positive_expectancy_review|post_premortem_review|post_invalidation_review|post_five_step|post_opponent_was_right|post_real_close_time|evolution_level|principle_id/i.test(message)
+    || (/trade_principles|pain_log_entries|pre_thesis_why_right|pre_premortem_failure_reason|pre_falsification_signal|pre_confidence_basis|pre_account_equity_usdt|pre_mortem_text|pre_positive_expectancy|pre_invalidation_condition|pre_calibration_win_pct|pre_confidence_interval_|pre_calibration_reference_class|pre_calibration_competence_basis|pre_calibration_update_signal|pre_dataset_split|pre_lollapalooza_score|pre_bankruptcy_estimate|pre_info_|pre_opponent_statement|pre_pain_tags|post_result_summary|post_decision_quality|post_positive_expectancy_review|post_premortem_review|post_invalidation_review|post_five_step|post_opponent_was_right|post_real_close_time|evolution_level|principle_id/i.test(message)
       && /schema cache|could not find|does not exist|column/i.test(message));
 }
 
@@ -2138,6 +2138,11 @@ export async function createJournalPreSnapshot(input: CreateJournalPreInput): Pr
     .single();
   if (error && isMissingDalioMetaLayerError(error)) {
     const {
+      pre_thesis_why_right: _thesisWhyRight,
+      pre_premortem_failure_reason: _premortemFailure,
+      pre_falsification_signal: _falsificationSignal,
+      pre_confidence_basis: _confidenceBasis,
+      pre_account_equity_usdt: _accountEquity,
       pre_mortem_text: _preMortem,
       pre_positive_expectancy: _positiveExpectancy,
       pre_invalidation_condition: _invalidationCondition,
@@ -2163,6 +2168,9 @@ export async function createJournalPreSnapshot(input: CreateJournalPreInput): Pr
       pre_designer_self: _designer,
       ...legacyPayload
     } = payload as Record<string, unknown>;
+    if (legacyPayload.pre_entry_reason == null) {
+      legacyPayload.pre_entry_reason = input.pre_thesis_why_right ?? '';
+    }
     const retry = await supabase
       .from("trade_journals" as never)
       .insert(legacyPayload as never)

@@ -72,6 +72,17 @@ export function ContextChannelsStack({ allJournals }: HistoricalContext) {
 function DecisionChannel() {
   const { journal, replayTime, tEntry } = useReplay();
   const [pulse, setPulse] = useState(false);
+  const isSnapshotV2 = Boolean(
+    journal.pre_thesis_why_right
+    || journal.pre_premortem_failure_reason
+    || journal.pre_falsification_signal,
+  );
+  const snapshotWhyRight = journal.pre_thesis_why_right || journal.pre_positive_expectancy || journal.pre_entry_reason || '';
+  const snapshotPremortem = journal.pre_premortem_failure_reason || journal.pre_mortem_text || '';
+  const snapshotFalsification = journal.pre_falsification_signal || journal.pre_invalidation_condition || '';
+  const riskAnchorPct = journal.pre_max_loss_usdt != null && journal.pre_account_equity_usdt
+    ? (journal.pre_max_loss_usdt / journal.pre_account_equity_usdt) * 100
+    : null;
   const positionModeLabel = journal.position_mode === 'isolated'
     ? '逐仓'
     : journal.position_mode === 'cross'
@@ -100,30 +111,46 @@ function DecisionChannel() {
             该 journal 为历史回填，缺少开仓决策的原始记录。复现仅基于 K 线与 trade_record。
           </div>
         )}
+        {!isSnapshotV2 && (
+          <span className="inline-flex w-fit rounded bg-muted px-2 py-0.5 text-[10px] text-muted-foreground">
+            旧版快照 v1
+          </span>
+        )}
         <div className="border-l-2 border-[#F0B90B] pl-3 text-foreground">
-          {journal.pre_entry_reason || <span className="text-muted-foreground italic">无</span>}
+          {snapshotWhyRight || <span className="text-muted-foreground italic">无</span>}
         </div>
-        {(journal.pre_positive_expectancy || journal.pre_mortem_text || journal.pre_invalidation_condition) && (
+        {(snapshotWhyRight || snapshotPremortem || snapshotFalsification || journal.pre_confidence_basis) && (
           <div className="rounded border border-border bg-background/60 p-2 space-y-1.5 text-[11px]">
-            {journal.pre_positive_expectancy && (
-              <div><span className="text-muted-foreground">正期望理由：</span>{journal.pre_positive_expectancy}</div>
+            {snapshotWhyRight && (
+              <div><span className="text-muted-foreground">{isSnapshotV2 ? '这笔为什么会对：' : '正期望理由：'}</span>{snapshotWhyRight}</div>
             )}
-            {journal.pre_mortem_text && (
-              <div><span className="text-muted-foreground">亏完最可能原因：</span>{journal.pre_mortem_text}</div>
+            {snapshotPremortem && (
+              <div><span className="text-muted-foreground">亏完最可能原因：</span>{snapshotPremortem}</div>
             )}
-            {journal.pre_invalidation_condition && (
-              <div><span className="text-muted-foreground">证伪条件：</span>{journal.pre_invalidation_condition}</div>
+            {snapshotFalsification && (
+              <div><span className="text-muted-foreground">{isSnapshotV2 ? '提前止损/拆仓信号：' : '证伪条件：'}</span>{snapshotFalsification}</div>
+            )}
+            {journal.pre_calibration_win_pct != null && (
+              <div>
+                <span className="text-muted-foreground">开仓预测：</span>
+                会对 {journal.pre_calibration_win_pct.toFixed(0)}% · 会错 {(100 - journal.pre_calibration_win_pct).toFixed(0)}%
+              </div>
+            )}
+            {journal.pre_confidence_basis && (
+              <div><span className="text-muted-foreground">置信度依据：</span>{journal.pre_confidence_basis}</div>
             )}
           </div>
         )}
         <div className="grid grid-cols-2 gap-2 font-mono text-[11px]">
-          <Cell label="计划止盈" value={journal.pre_planned_take_profit?.toFixed(2) ?? '—'} />
+          {!isSnapshotV2 && <Cell label="计划止盈" value={journal.pre_planned_take_profit?.toFixed(2) ?? '—'} />}
           <Cell label="仓位" value={journal.pre_position_size?.toFixed(4) ?? '—'} />
           <Cell label="杠杆" value={journal.leverage != null ? `${journal.leverage}x` : '—'} />
           <Cell label="仓位模式" value={positionModeLabel} valueClass={positionModeClass} />
           <Cell
             label="本次预设最大亏损"
-            value={journal.pre_max_loss_usdt != null ? `${journal.pre_max_loss_usdt.toFixed(2)} USDT` : '—'}
+            value={journal.pre_max_loss_usdt != null
+              ? `${journal.pre_max_loss_usdt.toFixed(2)} USDT${riskAnchorPct != null ? ` · ${riskAnchorPct.toFixed(1)}%` : ''}`
+              : '—'}
             valueClass="text-[#F6465D]"
           />
           {journal.pre_planned_stop_loss != null && (

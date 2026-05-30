@@ -332,56 +332,83 @@ export interface TradeJournal {
   pre_simulated_time: string;
   pre_real_time: string;
   pre_entry_price: number | null;
+  /** @deprecated v2 snapshot no longer records stop-loss in this field. */
   pre_planned_stop_loss: number | null;
+  /** @deprecated v2 snapshot does not collect TP levels; order-level TP/SL stays outside the snapshot. */
   pre_planned_take_profit: number | null;
-  pre_entry_reason: string;
+  /** @deprecated v2 snapshot uses pre_thesis_why_right; legacy journals may still display this. */
+  pre_entry_reason: string | null;
   pre_mental_state: 1 | 2 | 3 | 4 | 5;
+  /** @deprecated v2 snapshot blocks mental <=2 and does not collect a separate trigger note. */
   pre_mental_trigger: string | null;
+  /** @deprecated v2 snapshot folds risk framing into the decision-three-questions block. */
   pre_risk_awareness: string | null;
+  /** @deprecated v2 snapshot folds risk framing into the decision-three-questions block. */
   pre_risk_management: string | null;
   pre_checklist_items: ChecklistItem[] | null;
   pre_checklist_passed: boolean | null;
+  /** @deprecated v2 snapshot infers this from pendingOrderParams instead of user input. */
   pre_position_size: number | null;
   pre_max_loss_usdt: number | null;
 
+  // ============ Snapshot v2 fields (batch 23) ============
+  /** Decision-three-questions A: why this has positive expectancy. */
+  pre_thesis_why_right?: string | null;
+  /** Decision-three-questions B: pre-mortem failure reason. */
+  pre_premortem_failure_reason?: string | null;
+  /** Decision-three-questions C: objective falsification / exit signal. */
+  pre_falsification_signal?: string | null;
+  /** Optional basis for the binary probability slider. */
+  pre_confidence_basis?: string | null;
+  /** Account equity snapshot used to reconstruct the risk-anchor percentage. */
+  pre_account_equity_usdt?: number | null;
+
   // ============ Decision-quality fields (added 2026-05) ============
-  /** Klein's pre-mortem: "if this loses, what's the most likely reason?" */
+  /** @deprecated v2 snapshot uses pre_premortem_failure_reason. */
   pre_mortem_text?: string | null;
-  /** Why the user believes this trade has positive expectancy. */
+  /** @deprecated v2 snapshot uses pre_thesis_why_right. */
   pre_positive_expectancy?: string | null;
-  /** What observation would prove the trade thesis wrong. */
+  /** @deprecated v2 snapshot uses pre_falsification_signal. */
   pre_invalidation_condition?: string | null;
   /** Tetlock-style calibration prediction at open time, 0-100. */
   pre_calibration_win_pct?: number | null;
-  /** Lower bound of the user's confidence interval for win probability, 0-100. */
+  /** @deprecated v2 snapshot keeps only a binary probability slider. */
   pre_confidence_interval_low_pct?: number | null;
-  /** Upper bound of the user's confidence interval for win probability, 0-100. */
+  /** @deprecated v2 snapshot keeps only a binary probability slider. */
   pre_confidence_interval_high_pct?: number | null;
-  /** Reference-class / historical base-rate check behind the confidence estimate. */
+  /** @deprecated v2 snapshot no longer collects this separate field. */
   pre_calibration_reference_class?: string | null;
-  /** Why this judgment sits inside the user's circle of competence. */
+  /** @deprecated v2 snapshot uses pre_confidence_basis. */
   pre_calibration_competence_basis?: string | null;
-  /** New-information / belief-update check after the judgment was formed. */
+  /** @deprecated v2 snapshot no longer collects this separate field. */
   pre_calibration_update_signal?: string | null;
-  /** Anti-overfitting: training set vs holdout (out-of-sample). */
+  /** @deprecated v2 snapshot no longer asks for training/test split at entry. */
   pre_dataset_split?: DatasetSplit | null;
-  /** 0-100 composite of mental, sizing, recent losses, time-of-day, etc. */
+  /** @deprecated v2 snapshot removed the explicit Lollapalooza block. */
   pre_lollapalooza_score?: number | null;
-  /** Expected ruin events out of 100 trades, computed at submit time. */
+  /** @deprecated v2 snapshot removed this submit-time estimate from the form. */
   pre_bankruptcy_estimate?: number | null;
-  /** Dalio L3: facts before deciding. */
+  /** @deprecated v2 snapshot folds facts into pre_thesis_why_right. */
   pre_info_kline_facts?: string | null;
+  /** @deprecated v2 snapshot folds facts into pre_thesis_why_right. */
   pre_info_macro_facts?: string | null;
+  /** @deprecated v2 snapshot folds facts into pre_thesis_why_right. */
   pre_info_rule_advice?: string | null;
+  /** @deprecated v2 snapshot folds facts into pre_thesis_why_right. */
   pre_info_intuition?: string | null;
+  /** @deprecated v2 snapshot no longer collects designer-self separately. */
   pre_info_designer_view?: string | null;
-  /** Dalio disagreement protocol. */
+  /** @deprecated v2 snapshot folds inversion into pre_premortem_failure_reason. */
   pre_opponent_statement?: string | null;
+  /** @deprecated v2 snapshot no longer asks for explicit principle links. */
   pre_triggered_principle_ids?: string[] | null;
+  /** @deprecated v2 snapshot keeps checklist entries but no separate triggered rule list. */
   pre_triggered_rule_ids?: string[] | null;
   /** Pain + reflection loop; also mirrored into pain_log_entries when possible. */
   pre_pain_tags?: PainTag[] | null;
+  /** @deprecated v2 snapshot removed the executor/designer dialogue box. */
   pre_executor_self?: string | null;
+  /** @deprecated v2 snapshot removed the executor/designer dialogue box. */
   pre_designer_self?: string | null;
 
   // post-review

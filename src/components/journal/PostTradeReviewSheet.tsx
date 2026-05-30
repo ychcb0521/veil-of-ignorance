@@ -220,6 +220,17 @@ export function PostTradeReviewSheet({
     : journal.position_mode === 'cross'
       ? 'bg-[#F6465D]/10 text-[#F6465D]'
       : 'bg-muted text-muted-foreground';
+  const isSnapshotV2 = Boolean(
+    journal.pre_thesis_why_right
+    || journal.pre_premortem_failure_reason
+    || journal.pre_falsification_signal,
+  );
+  const snapshotWhyRight = journal.pre_thesis_why_right || journal.pre_positive_expectancy || journal.pre_entry_reason || '';
+  const snapshotPremortem = journal.pre_premortem_failure_reason || journal.pre_mortem_text || '';
+  const snapshotFalsification = journal.pre_falsification_signal || journal.pre_invalidation_condition || '';
+  const riskAnchorPct = journal.pre_max_loss_usdt != null && journal.pre_account_equity_usdt
+    ? (journal.pre_max_loss_usdt / journal.pre_account_equity_usdt) * 100
+    : null;
 
   const tagsValid = noErrors || selectedTags.length >= 1;
   const reflectionValid = !!reflection.trim();
@@ -379,6 +390,11 @@ export function PostTradeReviewSheet({
                   这笔在守卫上线前用了全仓
                 </span>
               )}
+              {!isSnapshotV2 && (
+                <span className="inline-block rounded px-2 py-0.5 text-[10px] bg-muted text-muted-foreground">
+                  旧版快照 v1
+                </span>
+              )}
             </div>
             <div className="border border-border/60 rounded-md bg-background/60 px-2.5 py-2 text-[10.5px] leading-relaxed">
               <div className="text-muted-foreground mb-1">实际操作时间（北京时间）</div>
@@ -390,14 +406,39 @@ export function PostTradeReviewSheet({
                 </span>
               </div>
             </div>
-            <div>• {isHedge ? '对冲理由' : '入场理由'}：{journal.pre_entry_reason}</div>
-            {journal.pre_planned_stop_loss != null ? (
-              <div>• 预设止损/止盈：{journal.pre_planned_stop_loss} / {journal.pre_planned_take_profit ?? '—'} <span className="text-[10px] text-muted-foreground">（历史记录）</span></div>
-            ) : journal.pre_planned_take_profit != null ? (
-              <div>• 预设止盈：{journal.pre_planned_take_profit}</div>
-            ) : null}
+            {isSnapshotV2 ? (
+              <div className="grid gap-2">
+                <div className="rounded-lg border border-border/60 bg-background/60 px-3 py-2">
+                  <span className="text-muted-foreground">这笔为什么会对：</span>{snapshotWhyRight || '—'}
+                </div>
+                <div className="rounded-lg border border-border/60 bg-background/60 px-3 py-2">
+                  <span className="text-muted-foreground">亏完最可能原因：</span>{snapshotPremortem || '—'}
+                </div>
+                <div className="rounded-lg border border-border/60 bg-background/60 px-3 py-2">
+                  <span className="text-muted-foreground">提前止损/拆仓信号：</span>{snapshotFalsification || '—'}
+                </div>
+                {calibrationPct != null && (
+                  <div className="rounded-lg border border-border/60 bg-background/60 px-3 py-2">
+                    <span className="text-muted-foreground">开仓预测：</span>会对 {calibrationPct.toFixed(0)}% · 会错 {(100 - calibrationPct).toFixed(0)}%
+                    {journal.pre_confidence_basis ? <span> · {journal.pre_confidence_basis}</span> : null}
+                  </div>
+                )}
+              </div>
+            ) : (
+              <>
+                <div>• {isHedge ? '对冲理由' : '入场理由'}：{journal.pre_entry_reason || '—'}</div>
+                {journal.pre_planned_stop_loss != null ? (
+                  <div>• 预设止损/止盈：{journal.pre_planned_stop_loss} / {journal.pre_planned_take_profit ?? '—'} <span className="text-[10px] text-muted-foreground">（历史记录）</span></div>
+                ) : journal.pre_planned_take_profit != null ? (
+                  <div>• 预设止盈：{journal.pre_planned_take_profit}</div>
+                ) : null}
+              </>
+            )}
             {journal.pre_max_loss_usdt != null && (
-              <div>• 本次预设最大亏损：<span className="text-[#F6465D]">{journal.pre_max_loss_usdt.toFixed(2)} USDT</span></div>
+              <div>
+                • 本次预设最大亏损：<span className="text-[#F6465D]">{journal.pre_max_loss_usdt.toFixed(2)} USDT</span>
+                {riskAnchorPct != null ? <span className="text-muted-foreground"> · 占当时账户 {riskAnchorPct.toFixed(1)}%</span> : null}
+              </div>
             )}
             {journal.pre_risk_awareness && <div>• 风险认识：{journal.pre_risk_awareness}</div>}
             {journal.pre_risk_management && <div>• 风险管理：{journal.pre_risk_management}</div>}
@@ -572,9 +613,14 @@ export function PostTradeReviewSheet({
 
         <div className={`space-y-3 px-4 py-4 ${sectionCardClass}`}>
           <div className="text-[12px] font-medium">下单前三问复核</div>
-          {journal.pre_positive_expectancy && (
+          {snapshotWhyRight && (
             <div className="rounded-lg border border-border/60 bg-background/60 px-3 py-2 text-[11px] leading-relaxed">
-              <span className="text-muted-foreground">当时认为有正期望：</span>{journal.pre_positive_expectancy}
+              <span className="text-muted-foreground">当时认为会对：</span>{snapshotWhyRight}
+            </div>
+          )}
+          {snapshotPremortem && (
+            <div className="rounded-lg border border-border/60 bg-background/60 px-3 py-2 text-[11px] leading-relaxed">
+              <span className="text-muted-foreground">当时预演的亏损原因：</span>{snapshotPremortem}
             </div>
           )}
           <div className="space-y-1.5">
@@ -597,9 +643,9 @@ export function PostTradeReviewSheet({
               className="text-[12px] bg-background/80 border-border/70 rounded-xl"
             />
           </div>
-          {journal.pre_invalidation_condition && (
+          {snapshotFalsification && (
             <div className="rounded-lg border border-border/60 bg-background/60 px-3 py-2 text-[11px] leading-relaxed">
-              <span className="text-muted-foreground">当时证伪条件：</span>{journal.pre_invalidation_condition}
+              <span className="text-muted-foreground">当时证伪/拆仓信号：</span>{snapshotFalsification}
             </div>
           )}
           <div className="space-y-1.5">

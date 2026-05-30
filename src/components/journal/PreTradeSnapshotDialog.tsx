@@ -15,7 +15,6 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useTradingContext } from '@/contexts/TradingContext';
 import { toast } from 'sonner';
 import {
-  appendCampaignEvent, attachJournalToCampaign, createCampaign,
   createJournalPreSnapshot, findUnreviewedJournals, updateJournalTradeRef,
 } from '@/lib/journalApi';
 import type { PlaceOrderParams } from '@/contexts/TradingContext';
@@ -131,24 +130,11 @@ export function PreTradeSnapshotDialog({
       }
     }
     try {
-      let campaignId = payload.campaign_id;
-      if (mode === 'trade' && payload.campaign_mode === 'create' && payload.campaign_title && payload.campaign_template) {
-        const campaign = await createCampaign({
-          symbol,
-          direction: direction === 'short' ? 'main_short' : 'main_long',
-          title: payload.campaign_title,
-          opened_at: lockedTime.toISOString(),
-          strategy_template: payload.campaign_template,
-          notes: null,
-        });
-        campaignId = campaign.id;
-      }
-
       const journal = await createJournalPreSnapshot({
         user_id: user.id,
         trade_record_id: null,
-        campaign_id: mode === 'trade' ? (campaignId ?? null) : null,
-        leg_role: mode === 'trade' ? (payload.campaign_leg_role ?? null) : null,
+        campaign_id: null,
+        leg_role: null,
         leg_sequence: null,
         symbol,
         direction,
@@ -168,6 +154,11 @@ export function PreTradeSnapshotDialog({
         pre_checklist_passed: payload.pre_checklist_passed,
         pre_position_size: payload.pre_position_size,
         pre_max_loss_usdt: payload.pre_max_loss_usdt,
+        pre_thesis_why_right: payload.pre_thesis_why_right,
+        pre_premortem_failure_reason: payload.pre_premortem_failure_reason,
+        pre_falsification_signal: payload.pre_falsification_signal,
+        pre_confidence_basis: payload.pre_confidence_basis,
+        pre_account_equity_usdt: payload.pre_account_equity_usdt,
         // Decision-quality fields
         pre_mortem_text: payload.pre_mortem_text,
         pre_positive_expectancy: payload.pre_positive_expectancy,
@@ -193,23 +184,6 @@ export function PreTradeSnapshotDialog({
         pre_executor_self: payload.pre_executor_self,
         pre_designer_self: payload.pre_designer_self,
       });
-
-      if (mode === 'trade' && campaignId && payload.campaign_leg_role && payload.campaign_mode !== 'standalone') {
-        await attachJournalToCampaign(journal.id, campaignId, payload.campaign_leg_role);
-        if (payload.campaign_note?.trim()) {
-          await appendCampaignEvent(campaignId, {
-            timestamp: lockedTime.toISOString(),
-            event_type: 'note',
-            leg_role: payload.campaign_leg_role,
-            journal_id: journal.id,
-            trade_record_id: null,
-            pending_order_id: null,
-            price: lockedPrice,
-            size_usdt: payload.pre_position_size,
-            notes: payload.campaign_note.trim(),
-          });
-        }
-      }
 
       if (mode === 'trade' && orderParams && onPlaceOrder) {
         try {
