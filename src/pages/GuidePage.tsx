@@ -384,7 +384,7 @@ export default function GuidePage() {
                   下单零弹窗、平仓零评价，节奏与币安 1:1。本模式下产生的交易仅进入持仓历史与交易战役归类，<strong>不进入</strong> 错题集、元监控、规则系统。适合熟悉的标的、流畅的执行、或只想观察盘面的场景。
                 </KeyCard>
                 <KeyCard title="决策记录">
-                  完整的开仓快照（<strong>决策三问</strong>：为什么对 / 亏完最可能原因 / 证伪信号；最大亏损、心态自评、<strong>情绪标签</strong>（按唤醒度×效价分组）、二元预测胜率、checklist 等）+ 平仓后强制评价 + 错题集自动归类 + 元监控统计 + 规则系统冷却。适合刻意训练同一类 setup、复盘高频错误模式、或对自己进行校准。
+                  完整的开仓快照（<strong>决策三问</strong>：为什么对 / 亏完最可能原因 / 证伪信号；最大亏损、心态自评、<strong>情绪标签</strong>（三类）、二元预测胜率、checklist 等）+ 平仓后强制评价 + 错题集自动归类 + 元监控统计 + 规则系统冷却。适合刻意训练同一类 setup、复盘高频错误模式、或对自己进行校准。
                 </KeyCard>
               </KeyGrid>
               <div className="overflow-x-auto">
@@ -663,7 +663,7 @@ export default function GuidePage() {
                 <li><strong>Calibration</strong>：比较开仓预测胜率与平仓结果，观察判断是否过度自信。</li>
                 <li><strong>可信度向量</strong>：分别追踪方向判断、决策质量、反对者命中、快照完整度和校准能力。</li>
                 <li><strong>决策质量 vs 结果</strong>：用 D-score 与 R 的散点关系判断规则是否真有预测性。</li>
-                <li><strong>情绪日志</strong>：按情绪唤醒度 × 效价分组统计后续平均 R，识别最危险的心理入口；正向/中性标签同样进入对比，用来检验“自认为状态好”是否真的有正期望。</li>
+                <li><strong>情绪日志</strong>：按正向/中性/负向三类分组统计后续平均 R，识别最危险的心理入口；正向/中性标签同样进入对比，用来检验“自认为状态好”是否真的有正期望。</li>
                 <li><strong>规则演化地图</strong>：查看规则从直觉、表述、模式确认、规则化到算法化的证据等级。</li>
                 <li><strong>订单类型分布</strong>：主力单与对冲单是否失衡。</li>
                 <li><strong>心态与时段</strong>：识别你的高质量状态与危险时段。</li>
