@@ -369,7 +369,7 @@ export function PreTradeSnapshotDialog({
   return (
     <>
       <Dialog open={isOpen} onOpenChange={onOpenChange}>
-        <DialogContent className="max-w-[680px] max-h-[90vh] overflow-y-auto bg-card border border-border p-0">
+        <DialogContent className="max-w-[860px] max-h-[92vh] overflow-y-auto bg-card border border-border p-0">
           {form}
         </DialogContent>
       </Dialog>

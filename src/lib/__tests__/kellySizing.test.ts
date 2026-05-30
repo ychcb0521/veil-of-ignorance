@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
 import type { TradeJournal } from '@/types/journal';
+import type { TradeCampaign } from '@/types/journal';
 import {
   computeBetSizing,
+  estimateCampaignSizingStats,
   estimatePayoffRatio,
   RUIN_PROBABILITY_TARGET,
   DEFAULT_PAYOFF_RATIO,
@@ -14,6 +16,14 @@ function journal(overrides: Partial<TradeJournal>): TradeJournal {
     post_realized_pnl: null,
     ...overrides,
   } as TradeJournal;
+}
+
+function campaign(overrides: Partial<TradeCampaign>): TradeCampaign {
+  return {
+    status: 'closed_profit',
+    final_realized_pnl: 100,
+    ...overrides,
+  } as TradeCampaign;
 }
 
 describe('computeBetSizing', () => {
@@ -78,6 +88,30 @@ describe('estimatePayoffRatio', () => {
     // a pile of no_trade rows with absurd pnl must not move the ratio
     for (let i = 0; i < 20; i++) journals.push(journal({ journal_kind: 'no_trade', post_realized_pnl: 99_999 }));
     expect(estimatePayoffRatio(journals)).toBeCloseTo(3, 5);
+  });
+});
+
+describe('estimateCampaignSizingStats', () => {
+  it('returns null win rate when closed-campaign samples are too few', () => {
+    const campaigns = [
+      campaign({ final_realized_pnl: 100, status: 'closed_profit' }),
+      campaign({ final_realized_pnl: -50, status: 'closed_loss' }),
+    ];
+    const result = estimateCampaignSizingStats(campaigns);
+    expect(result.winRate).toBeNull();
+    expect(result.payoffRatio).toBeNull();
+  });
+
+  it('computes campaign-level win rate and payoff ratio from resolved campaigns only', () => {
+    const campaigns: TradeCampaign[] = [];
+    for (let i = 0; i < 6; i++) campaigns.push(campaign({ final_realized_pnl: 200, status: 'closed_profit' }));
+    for (let i = 0; i < 5; i++) campaigns.push(campaign({ final_realized_pnl: -100, status: 'closed_loss' }));
+    campaigns.push(campaign({ status: 'active', final_realized_pnl: null }));
+
+    const result = estimateCampaignSizingStats(campaigns);
+    expect(result.winRate).toBeCloseTo(6 / 11, 5);
+    expect(result.payoffRatio).toBeCloseTo(2, 5);
+    expect(result.winRateSampleCount).toBe(11);
   });
 });
 

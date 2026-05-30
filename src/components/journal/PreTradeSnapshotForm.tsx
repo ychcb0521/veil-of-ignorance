@@ -18,12 +18,16 @@ import {
   type CognitiveBiasTagId,
 } from '@/lib/cognitiveBiasTags';
 import { computeDiscount } from '@/lib/confidenceDiscount';
-import { computeBetSizing, estimatePayoffRatio, DEFAULT_PAYOFF_RATIO } from '@/lib/kellySizing';
+import {
+  computeBetSizing,
+  estimateCampaignSizingStats,
+  DEFAULT_PAYOFF_RATIO,
+} from '@/lib/kellySizing';
 import { analyzePositionFeedback, type FeedbackPolarity } from '@/lib/positionFeedback';
 import { EMOTION_CATEGORIES, EMOTION_TAG_META } from '@/types/journal';
 import type { EmotionTagMeta, EmotionValence } from '@/types/journal';
 import { buildChecklist, isChecklistPassed } from '@/lib/defaultChecklist';
-import { listJournals, listRules } from '@/lib/journalApi';
+import { listAllCampaigns, listJournals, listRules } from '@/lib/journalApi';
 import { useAuth } from '@/contexts/AuthContext';
 import { useTradingContext } from '@/contexts/TradingContext';
 import { calcUnrealizedPnl } from '@/types/trading';
@@ -35,6 +39,7 @@ import type {
   OrderKind,
   PainTag,
   StrategyTemplate,
+  TradeCampaign,
   TradeDirection,
   TradeJournal,
   TradingRule,
@@ -251,6 +256,7 @@ export function PreTradeSnapshotForm({
   const [checked, setChecked] = useState<string[]>([]);
   const [userRules, setUserRules] = useState<TradingRule[]>([]);
   const [historicalJournals, setHistoricalJournals] = useState<TradeJournal[]>([]);
+  const [historicalCampaigns, setHistoricalCampaigns] = useState<TradeCampaign[]>([]);
   const [submitting, setSubmitting] = useState(false);
 
   const isHedge = isTrade && orderKind === 'hedge';
@@ -266,15 +272,25 @@ export function PreTradeSnapshotForm({
   useEffect(() => {
     if (!user) {
       setHistoricalJournals([]);
+      setHistoricalCampaigns([]);
       return;
     }
     let cancelled = false;
     (async () => {
       try {
-        const rows = await listJournals(user.id);
-        if (!cancelled) setHistoricalJournals(rows);
+        const [journalRows, campaignRows] = await Promise.all([
+          listJournals(user.id),
+          listAllCampaigns(user.id, { status: 'all' }),
+        ]);
+        if (!cancelled) {
+          setHistoricalJournals(journalRows);
+          setHistoricalCampaigns(campaignRows);
+        }
       } catch {
-        if (!cancelled) setHistoricalJournals([]);
+        if (!cancelled) {
+          setHistoricalJournals([]);
+          setHistoricalCampaigns([]);
+        }
       }
     })();
     return () => { cancelled = true; };
@@ -353,22 +369,26 @@ export function PreTradeSnapshotForm({
     [confidencePct, historicalJournals],
   );
 
-  // 下注规模 · 毁灭概率封顶（批次 25）— 用折扣后的诚实胜率，绝不写库，仅显示。
-  const personalPayoffRatio = useMemo(
-    () => estimatePayoffRatio(historicalJournals),
-    [historicalJournals],
+  // 下注规模 · 毁灭概率封顶（批次 25）— 胜率与盈亏比改用战役口径，绝不写库，仅显示。
+  const campaignSizingStats = useMemo(
+    () => estimateCampaignSizingStats(historicalCampaigns),
+    [historicalCampaigns],
   );
-  const payoffRatio = personalPayoffRatio ?? DEFAULT_PAYOFF_RATIO;
+  const campaignWinRatePct = campaignSizingStats.winRate == null
+    ? null
+    : Number((campaignSizingStats.winRate * 100).toFixed(0));
+  const sizingWinProb = campaignSizingStats.winRate ?? (discount.discountedPct / 100);
+  const payoffRatio = campaignSizingStats.payoffRatio ?? DEFAULT_PAYOFF_RATIO;
   const betSizing = useMemo(
     () => (isTrade && accountEquity > 0
       ? computeBetSizing({
-        winProb: discount.discountedPct / 100,
+        winProb: sizingWinProb,
         payoffRatio,
         equity: accountEquity,
         plannedMaxLossUsdt: maxLossValid ? maxLoss : null,
       })
       : null),
-    [isTrade, accountEquity, discount.discountedPct, payoffRatio, maxLossValid, maxLoss],
+    [isTrade, accountEquity, sizingWinProb, payoffRatio, maxLossValid, maxLoss],
   );
 
   // 持仓反馈体检（批次 25）— 负反馈维稳 / 正反馈顺势，软性提示，绝不阻塞。
@@ -583,7 +603,7 @@ export function PreTradeSnapshotForm({
               })}
             </div>
           </div>
-          <div className="grid gap-3 md:grid-cols-3">
+          <div className="grid items-stretch gap-3 md:grid-cols-3">
             {DECISION_QUESTIONS.map(q => {
               const value = (
                 q.id === 'why' ? whyRight
@@ -599,13 +619,13 @@ export function PreTradeSnapshotForm({
               return (
                 <label
                   key={q.id}
-                  className="group flex flex-col rounded-md border bg-card p-3 transition-colors"
+                  className="group flex h-full min-h-[292px] flex-col rounded-lg border bg-card/90 p-3.5 shadow-sm transition-colors"
                   style={{
                     borderColor: filled ? q.accent : 'hsl(var(--border))',
                     background: filled ? `${q.accent}0A` : undefined,
                   }}
                 >
-                  <div className="mb-2 flex items-center gap-2">
+                  <div className="mb-3 flex min-h-[48px] items-start gap-2.5">
                     <span
                       className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[11px] font-bold text-black"
                       style={{ background: q.accent }}
@@ -623,7 +643,7 @@ export function PreTradeSnapshotForm({
                     value={value}
                     onChange={event => onChange(event.target.value)}
                     placeholder={q.placeholder}
-                    className={`${textareaCls} bg-background/80`}
+                    className={`${textareaCls} min-h-[170px] flex-1 bg-background/80`}
                   />
                   <div className="mt-1.5 flex items-center justify-between text-[10px] text-muted-foreground">
                     <span
@@ -688,14 +708,14 @@ export function PreTradeSnapshotForm({
         </section>
 
         {isTrade && betSizing && (
-          <section className="rounded border border-border bg-card p-3">
+          <section className="rounded-lg border border-border bg-card p-3.5 shadow-sm">
             <div className={labelCls}>下注规模 · 毁灭概率封顶</div>
             <div className="mt-1 text-[11px] text-muted-foreground">
-              用折扣后胜率定规模；仓位上限由毁灭概率（分数 Kelly 精神）封顶，而不是由信心封顶。
+              胜率与盈亏比优先使用战役级统计；当前折扣后置信度保留为自我校准镜子，不再用单笔交易样本抬高下注规模。
             </div>
             {betSizing.verdict === 'no_edge' ? (
               <div className="mt-2 rounded border border-[#F6465D]/40 bg-[#F6465D]/10 px-3 py-2 text-[12px] text-[#F6465D]">
-                按折扣后胜率 {discount.discountedPct}% 与盈亏比 {betSizing.payoffRatio.toFixed(2)}，这单没有正期望优势 → 不该下注。
+                按当前用于定仓位的胜率 {(sizingWinProb * 100).toFixed(0)}% 与盈亏比 {betSizing.payoffRatio.toFixed(2)}，这单没有正期望优势 → 不该下注。
                 只在赔率明显被错误定价时才出手。
               </div>
             ) : (
@@ -726,10 +746,14 @@ export function PreTradeSnapshotForm({
                   );
                 })()}
                 <div className="text-[10px] text-muted-foreground">
-                  胜率：折扣后 {discount.discountedPct}%（原值 {confidencePct}%）· 盈亏比：
-                  {personalPayoffRatio != null
-                    ? `个人历史 ${payoffRatio.toFixed(2)}`
-                    : `默认 ${DEFAULT_PAYOFF_RATIO.toFixed(2)}（个人样本不足）`}
+                  胜率：
+                  {campaignWinRatePct != null
+                    ? `战役历史 ${campaignWinRatePct}%（${campaignSizingStats.winRateSampleCount} 笔已结束战役）`
+                    : `当前折扣后 ${discount.discountedPct}%（战役样本不足，原值 ${confidencePct}%）`}
+                  {' '}· 盈亏比：
+                  {campaignSizingStats.payoffRatio != null
+                    ? `战役历史 ${payoffRatio.toFixed(2)}（盈 ${campaignSizingStats.payoffWinCount} / 亏 ${campaignSizingStats.payoffLossCount}）`
+                    : `默认 ${DEFAULT_PAYOFF_RATIO.toFixed(2)}（战役盈亏样本不足）`}
                 </div>
               </div>
             )}
@@ -773,9 +797,9 @@ export function PreTradeSnapshotForm({
               {EMOTION_GROUPS.map(group => (
                 <div
                   key={group.valence}
-                  className="rounded-md border border-border/70 bg-card/60 p-2.5"
+                  className="rounded-lg border border-border/70 bg-card/80 p-3 shadow-sm"
                 >
-                  <div className="mb-1.5 flex items-center gap-2">
+                  <div className="mb-2 flex items-center gap-2">
                     <span
                       className="inline-block h-2 w-2 shrink-0 rounded-full"
                       style={{ background: group.accent }}
@@ -784,12 +808,12 @@ export function PreTradeSnapshotForm({
                     <span className="text-[10px] text-muted-foreground">· {group.ruleImpact}</span>
                   </div>
                   <div
-                    className="mb-2 border-l-2 pl-2 text-[10px] italic leading-snug text-muted-foreground"
+                    className="mb-2.5 border-l-2 pl-2 text-[10px] italic leading-snug text-muted-foreground"
                     style={{ borderColor: group.accent }}
                   >
                     {group.systemPrompt}
                   </div>
-                  <div className="flex flex-wrap gap-1.5">
+                  <div className="flex flex-wrap gap-2">
                     {group.tags.map(tag => {
                       const meta = EMOTION_TAG_META[tag];
                       const selected = painTags.includes(tag);
@@ -799,7 +823,7 @@ export function PreTradeSnapshotForm({
                             <button
                               type="button"
                               onClick={() => togglePainTag(tag)}
-                              className="h-7 rounded-full border px-2.5 text-[11px] transition-colors"
+                              className="inline-flex min-h-8 items-center rounded-full border px-2.5 py-1 text-[11px] leading-none transition-colors"
                               style={{
                                 borderColor: selected ? group.accent : 'hsl(var(--border))',
                                 background: selected ? `${group.accent}1F` : undefined,
@@ -809,7 +833,12 @@ export function PreTradeSnapshotForm({
                               {meta.label}
                             </button>
                           </TooltipTrigger>
-                          <TooltipContent side="top" className="max-w-[240px] border-border bg-popover">
+                          <TooltipContent
+                            side="bottom"
+                            align="start"
+                            collisionPadding={12}
+                            className="w-[min(320px,calc(100vw-24px))] border-border bg-popover p-3 shadow-xl"
+                          >
                             <div className="space-y-1">
                               <div className="text-[11px] font-medium" style={{ color: group.accent }}>
                                 {meta.label}
@@ -849,9 +878,9 @@ export function PreTradeSnapshotForm({
               {COGNITIVE_BIAS_GROUPS.map(group => (
                 <div
                   key={group.category}
-                  className="rounded-md border border-border/70 bg-card/60 p-2.5"
+                  className="rounded-lg border border-border/70 bg-card/80 p-3 shadow-sm"
                 >
-                  <div className="mb-1.5 flex items-center gap-2">
+                  <div className="mb-2 flex items-center gap-2">
                     <span
                       className="inline-block h-2 w-2 shrink-0 rounded-full"
                       style={{ background: group.accent }}
@@ -860,12 +889,12 @@ export function PreTradeSnapshotForm({
                     <span className="text-[10px] text-muted-foreground">· {group.oneLiner}</span>
                   </div>
                   <div
-                    className="mb-2 border-l-2 pl-2 text-[10px] italic leading-snug text-muted-foreground"
+                    className="mb-2.5 border-l-2 pl-2 text-[10px] italic leading-snug text-muted-foreground"
                     style={{ borderColor: group.accent }}
                   >
                     {group.systemPrompt}
                   </div>
-                  <div className="flex flex-wrap gap-1.5">
+                  <div className="flex flex-wrap gap-2">
                     {group.tags.map(tag => {
                       const meta = COGNITIVE_BIAS_META[tag];
                       const selected = cognitiveBiasTags.includes(tag);
@@ -875,7 +904,7 @@ export function PreTradeSnapshotForm({
                             <button
                               type="button"
                               onClick={() => toggleCognitiveBiasTag(tag)}
-                              className="h-7 rounded-full border px-2.5 text-[11px] transition-colors"
+                              className="inline-flex min-h-8 items-center rounded-full border px-2.5 py-1 text-[11px] leading-none transition-colors"
                               style={{
                                 borderColor: selected ? group.accent : 'hsl(var(--border))',
                                 background: selected ? `${group.accent}1F` : undefined,
@@ -885,7 +914,12 @@ export function PreTradeSnapshotForm({
                               {meta.label}
                             </button>
                           </TooltipTrigger>
-                          <TooltipContent side="top" className="max-w-[240px] border-border bg-popover">
+                          <TooltipContent
+                            side="bottom"
+                            align="start"
+                            collisionPadding={12}
+                            className="w-[min(320px,calc(100vw-24px))] border-border bg-popover p-3 shadow-xl"
+                          >
                             <div className="space-y-1">
                               <div className="text-[11px] font-medium" style={{ color: group.accent }}>
                                 {meta.label}

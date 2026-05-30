@@ -1,8 +1,10 @@
 import { type ReactNode, useEffect, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { ArrowDown, ArrowLeft, List } from 'lucide-react';
+import { ArrowDown, ArrowLeft, ChevronDown, Download, List } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet';
+import { toast } from 'sonner';
 
 interface TocItem {
   id: string;
@@ -147,9 +149,40 @@ function FlowArrow() {
   );
 }
 
+function normalizeExportText(text: string) {
+  return text
+    .replace(/\u00a0/g, ' ')
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+function buildGuideExport(items: TocItem[]): string {
+  const lines: string[] = ['# 使用说明 · 无知之幕', ''];
+
+  const appendItems = (nodes: TocItem[], depth: number) => {
+    for (const node of nodes) {
+      const section = document.getElementById(node.id);
+      const clone = section?.cloneNode(true) as HTMLElement | undefined;
+      clone?.querySelectorAll('section[id]').forEach(child => child.remove());
+      const body = normalizeExportText(clone?.innerText ?? '');
+
+      lines.push(`${'#'.repeat(Math.min(depth + 1, 6))} ${node.label}`, '');
+      if (body) {
+        lines.push(body, '');
+      }
+      if (node.children?.length) appendItems(node.children, depth + 1);
+    }
+  };
+
+  appendItems(items, 1);
+  return `${lines.join('\n').trim()}\n`;
+}
+
 export default function GuidePage() {
   const nav = useNavigate();
   const [activeId, setActiveId] = useState<string>('s1');
+  const [exportOpen, setExportOpen] = useState(false);
   const observerRef = useRef<IntersectionObserver | null>(null);
 
   useEffect(() => {
@@ -168,6 +201,25 @@ export default function GuidePage() {
     observerRef.current = obs;
     return () => obs.disconnect();
   }, []);
+
+  const handleExportGuide = () => {
+    try {
+      const content = buildGuideExport(TOC);
+      const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      const stamp = new Date().toISOString().slice(0, 10);
+      link.href = url;
+      link.download = `veil-of-ignorance-guide-${stamp}.txt`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+      toast.success('使用说明已导出');
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : '导出失败');
+    }
+  };
 
   return (
     <div className="min-h-screen bg-background text-foreground">
@@ -192,6 +244,30 @@ export default function GuidePage() {
           </div>
           <h1 className="text-[14px] font-medium">使用说明 · 无知之幕</h1>
           <div className="flex-1" />
+          <Collapsible open={exportOpen} onOpenChange={setExportOpen}>
+            <div className="flex items-center gap-1">
+              <CollapsibleTrigger asChild>
+                <button
+                  type="button"
+                  aria-label="展开导出使用说明"
+                  className="flex h-7 w-7 items-center justify-center rounded-full text-muted-foreground/35 transition-all hover:bg-accent hover:text-muted-foreground/90"
+                >
+                  <ChevronDown className={`h-3.5 w-3.5 transition-transform ${exportOpen ? 'rotate-180' : ''}`} />
+                </button>
+              </CollapsibleTrigger>
+              <CollapsibleContent className="data-[state=open]:animate-in data-[state=closed]:animate-out">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-8 px-2 text-[11px] text-muted-foreground hover:text-foreground"
+                  onClick={handleExportGuide}
+                >
+                  <Download className="mr-1 h-3.5 w-3.5" />
+                  导出说明
+                </Button>
+              </CollapsibleContent>
+            </div>
+          </Collapsible>
           <Link to="/">
             <Button className="h-8 bg-[#F0B90B] hover:bg-[#F0B90B]/90 text-black text-[12px]">
               进入交易页
@@ -254,7 +330,7 @@ export default function GuidePage() {
                 <FlowArrow />
                 <FlowNode>回放行情，等待符合策略的机会</FlowNode>
                 <FlowArrow />
-                <FlowNode accent>开仓前填写快照：决策三问（正/反/止）、最大亏损、心态自评、情绪标签（唤醒度×效价）、预测胜率、checklist</FlowNode>
+                <FlowNode accent>开仓前填写快照：决策三问（正/反/止）、最大亏损、心态自评、三类情绪标签、认知偏差自查、置信度折扣、下注规模建议、checklist；也可选择“太难，不做这单”</FlowNode>
                 <FlowArrow />
                 <FlowNode>下单、持仓、平仓</FlowNode>
                 <FlowArrow />
@@ -373,7 +449,7 @@ export default function GuidePage() {
 
             <section id="s3-2" className="scroll-mt-20">
               <SubTitle>3.3 下单前快照</SubTitle>
-              <P>开仓快照是系统的核心记录点。它固定“下单前的你”看到什么、相信什么、愿意亏多少、处在什么心态。批次 23 之后只保留会直接改变决策质量的字段，其它放进复盘抽屉，避免表单变成负担。</P>
+              <P>开仓快照是系统的核心记录点。它固定“下单前的你”看到什么、相信什么、愿意亏多少、处在什么心态。现在的快照遵循一个硬原则：<strong>主流程只保留决策三问</strong>，其余新增能力都放在表单边缘，用来辅助决策而不是制造填写负担。</P>
 
               <SubTitle>决策三问（正—反—止）</SubTitle>
               <P>快照的核心是三道按 <strong>Munger inversion</strong> 排列的问题，必须三问全写满才能提交。前端把三题做成同等宽的并列卡片，<span style={{ color: '#0ECB81' }}>绿</span>—<span style={{ color: '#F0B90B' }}>黄</span>—<span style={{ color: '#F6465D' }}>红</span> 的色阶提示从“证成”到“证伪”的思考路径，右上角的小圆点会随填写进度变色。</P>
@@ -397,27 +473,86 @@ export default function GuidePage() {
                 三问的意义不是“写满表单”，而是逼自己在下单前把<strong>胜的逻辑</strong>与<strong>败的剧本</strong>同时摊开。只写第一问，等于只看到了想看到的那一半。
               </Highlight>
 
-              <SubTitle>情绪标签（唤醒度 × 效价）</SubTitle>
-              <P>情绪选项按 Russell 情感环模型分组：<strong>情绪唤醒度</strong>（高/低）描述能量是否被激活，<strong>情绪效价</strong>（正/负）描述这股能量是建设性还是破坏性，另外保留一个<strong>平和度</strong>专属选项（抽离/旁观）记录“设计者视角”这种特殊的中性状态。可多选，也可全不选。</P>
+              <SubTitle>太难篮子（No Trade）</SubTitle>
+              <P>快照底部现在有三个按钮：<strong>取消</strong>、<strong>太难，不做这单</strong>、<strong>确认下单</strong>。其中“太难”不是误关弹窗，而是一种被正式记录、被尊重、并进入元监控统计的决定。</P>
+              <div className="overflow-x-auto">
+                <table className="w-full text-[11px] my-3 border border-border rounded overflow-hidden">
+                  <thead className="bg-muted/50">
+                    <tr>
+                      <th className="text-left px-3 py-2 font-medium text-foreground text-[10px]">按钮</th>
+                      <th className="text-left px-3 py-2 font-medium text-foreground text-[10px]">含义</th>
+                      <th className="text-left px-3 py-2 font-medium text-foreground text-[10px]">后果</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr><td className="px-3 py-2 border-t border-border">取消</td><td className="px-3 py-2 border-t border-border">误开弹窗或暂时不处理</td><td className="px-3 py-2 border-t border-border">关闭快照，不留下记录</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border">太难，不做这单</td><td className="px-3 py-2 border-t border-border">结构看不懂、赔率不够、超出能力圈、状态不对</td><td className="px-3 py-2 border-t border-border">写入 <code>journal_kind='no_trade'</code>，记录当时方向、价格和原因，不真正下单</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border">确认下单</td><td className="px-3 py-2 border-t border-border">正常进入交易</td><td className="px-3 py-2 border-t border-border">写入 trade journal，并继续真实模拟成交流程</td></tr>
+                  </tbody>
+                </table>
+              </div>
+              <Highlight>
+                “太难”与“该开没开”不是一回事。“该开没开”是机会过去了才记录；“太难”是在开仓弹窗里当场作出的放弃决定。
+              </Highlight>
+
+              <SubTitle>情绪标签（三类）</SubTitle>
+              <P>情绪标签已经从旧的“唤醒度 × 效价”模型，收口成更适合执行训练的三类结构：<strong>正向情绪</strong>帮助执行规则，<strong>负向情绪</strong>容易破坏规则，<strong>中性情绪</strong>本身不一定坏，但必须被校准，否则会滑向失控。标签可多选，也可全不选；鼠标悬停在标签上，会显示它的<strong>核心含义</strong>与<strong>可能导致的行为倾向</strong>。</P>
               <div className="overflow-x-auto">
                 <table className="w-full text-[11px] my-3 border border-border rounded overflow-hidden">
                   <thead className="bg-muted/50">
                     <tr>
                       <th className="text-left px-3 py-2 font-medium text-foreground text-[10px]">分组</th>
-                      <th className="text-left px-3 py-2 font-medium text-foreground text-[10px]">含义</th>
-                      <th className="text-left px-3 py-2 font-medium text-foreground text-[10px]">标签</th>
+                      <th className="text-left px-3 py-2 font-medium text-foreground text-[10px]">原则</th>
+                      <th className="text-left px-3 py-2 font-medium text-foreground text-[10px]">典型标签</th>
                     </tr>
                   </thead>
                   <tbody>
-                    <tr><td className="px-3 py-2 border-t border-border"><span style={{ color: '#0ECB81' }}>正向 · 高唤醒</span></td><td className="px-3 py-2 border-t border-border">能量被建设性方向调动</td><td className="px-3 py-2 border-t border-border">心流/专注、自信</td></tr>
-                    <tr><td className="px-3 py-2 border-t border-border"><span style={{ color: '#2EBD85' }}>正向 · 低唤醒</span></td><td className="px-3 py-2 border-t border-border">稳定且放松的状态</td><td className="px-3 py-2 border-t border-border">平和、知足</td></tr>
-                    <tr><td className="px-3 py-2 border-t border-border"><span style={{ color: '#7C8B9C' }}>中性 · 平和度</span></td><td className="px-3 py-2 border-t border-border">把自己当成第三方观察</td><td className="px-3 py-2 border-t border-border">抽离/旁观</td></tr>
-                    <tr><td className="px-3 py-2 border-t border-border"><span style={{ color: '#F6465D' }}>负向 · 高唤醒</span></td><td className="px-3 py-2 border-t border-border">情绪推着你做决定</td><td className="px-3 py-2 border-t border-border">错失/FOMO、焦虑、贪婪、报复</td></tr>
-                    <tr><td className="px-3 py-2 border-t border-border"><span style={{ color: '#D89B00' }}>负向 · 低唤醒</span></td><td className="px-3 py-2 border-t border-border">情绪压住你，逃避或停摆</td><td className="px-3 py-2 border-t border-border">损失厌恶、后悔、疲惫/无力</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border"><span style={{ color: '#0ECB81' }}>正向情绪</span></td><td className="px-3 py-2 border-t border-border">可放行，但不能替代规则</td><td className="px-3 py-2 border-t border-border">冷静、专注、耐心</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border"><span style={{ color: '#F0B90B' }}>中性情绪</span></td><td className="px-3 py-2 border-t border-border">本身不坏，但必须校准</td><td className="px-3 py-2 border-t border-border">害怕亏损、犹豫、不安/怀疑、困惑、后悔、兴奋、疲惫、分心</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border"><span style={{ color: '#F6465D' }}>负向情绪</span></td><td className="px-3 py-2 border-t border-border">默认黄灯或红灯</td><td className="px-3 py-2 border-t border-border">FOMO、复仇交易、证明自己、贪婪、恐慌、压力过载、虚假掌控感等</td></tr>
                   </tbody>
                 </table>
               </div>
-              <P>情绪标签会同步写入 <code>pain_log_entries</code> 痛苦日志（沿用旧表名），元监控里会按标签统计后续平均 R，识别<strong>最危险的心理入口</strong>。新增的正向与中性标签同样进入这条管线，用来观察“自认为状态好”时是否真的有正期望。</P>
+              <P>情绪标签会同步写入 <code>pain_log_entries</code> 痛苦日志（沿用旧表名），元监控里会按标签统计后续平均 R，识别<strong>最危险的心理入口</strong>。新增的正向与中性标签同样进入这条管线，用来检验“自认为状态好”时是否真的有正期望。</P>
+
+              <SubTitle>认知偏差自查（信息 / 判断 / 执行）</SubTitle>
+              <P>痛苦/情绪标签是“情绪轨”，认知偏差是另一条“认知轨”。前者你能感觉到，后者你往往意识不到，所以快照在情绪标签下方增加了<strong>认知偏差自查</strong>。它同样支持 hover 解释，但不阻塞提交。</P>
+              <div className="overflow-x-auto">
+                <table className="w-full text-[11px] my-3 border border-border rounded overflow-hidden">
+                  <thead className="bg-muted/50">
+                    <tr>
+                      <th className="text-left px-3 py-2 font-medium text-foreground text-[10px]">分组</th>
+                      <th className="text-left px-3 py-2 font-medium text-foreground text-[10px]">你在查什么</th>
+                      <th className="text-left px-3 py-2 font-medium text-foreground text-[10px]">典型偏差</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr><td className="px-3 py-2 border-t border-border">信息偏差</td><td className="px-3 py-2 border-t border-border">我是不是只看见了想看的信息？</td><td className="px-3 py-2 border-t border-border">确认偏误、社会认同、权威偏误、光环效应、群体极化、峰终定律</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border">判断偏差</td><td className="px-3 py-2 border-t border-border">我是不是把噪音当成规律？</td><td className="px-3 py-2 border-t border-border">叙事谬误、小样本偏差、黑天鹅盲区、零风险偏误、线性外推</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border">执行偏差</td><td className="px-3 py-2 border-t border-border">我是不是被盈亏和自尊绑架了？</td><td className="px-3 py-2 border-t border-border">锚定、沉没成本、现状偏差、承诺升级、拖延偏误、Lollapalooza 复合效应</td></tr>
+                  </tbody>
+                </table>
+              </div>
+              <P>这部分写入 <code>pre_cognitive_bias_tags</code>，并在元监控里和情绪标签一起汇总成你的<strong>个人偏差光谱</strong>。</P>
+
+              <SubTitle>置信度安全边际与下注规模</SubTitle>
+              <P>二元预测概率滑块仍然保留，但它下方新增了两层提示。第一层是<strong>芒格折扣</strong>：先把你主观输入的置信度，按个人历史校准或默认 15 个百分点做折扣，只用于显示，不写库。第二层是<strong>下注规模 · 毁灭概率封顶</strong>：当前建议规模优先使用<strong>战役级胜率</strong>与<strong>战役级盈亏比</strong>，而不是单笔交易样本。</P>
+              <div className="overflow-x-auto">
+                <table className="w-full text-[11px] my-3 border border-border rounded overflow-hidden">
+                  <thead className="bg-muted/50">
+                    <tr>
+                      <th className="text-left px-3 py-2 font-medium text-foreground text-[10px]">模块</th>
+                      <th className="text-left px-3 py-2 font-medium text-foreground text-[10px]">作用</th>
+                      <th className="text-left px-3 py-2 font-medium text-foreground text-[10px]">边界</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr><td className="px-3 py-2 border-t border-border">芒格折扣</td><td className="px-3 py-2 border-t border-border">把主观置信度先打折，提醒你“真实可能”没有自己感觉的那么高</td><td className="px-3 py-2 border-t border-border">只显示，不写库；写库仍保存原始置信度，供后续校准</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border">下注规模建议</td><td className="px-3 py-2 border-t border-border">用 Kelly + 毁灭概率封顶，给出建议单笔最大亏损</td><td className="px-3 py-2 border-t border-border">胜率和盈亏比优先使用战役口径；样本不足时才回落到默认值</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border">提示性质</td><td className="px-3 py-2 border-t border-border">帮助你诚实面对仓位问题</td><td className="px-3 py-2 border-t border-border">软提示，不替你自动改单</td></tr>
+                  </tbody>
+                </table>
+              </div>
 
               <SubTitle>其它快照字段</SubTitle>
               <div className="overflow-x-auto">
@@ -434,7 +569,8 @@ export default function GuidePage() {
                     <tr><td className="px-3 py-2 border-t border-border">仓位模式</td><td className="px-3 py-2 border-t border-border">强制使用逐仓</td><td className="px-3 py-2 border-t border-border">全仓是硬阻断，必须切换到逐仓才能提交</td></tr>
                     <tr><td className="px-3 py-2 border-t border-border">本次最大亏损 USDT</td><td className="px-3 py-2 border-t border-border">定义本次风险预算</td><td className="px-3 py-2 border-t border-border">后续 R 倍数以此为分母；占总账户 ≥10% 会触发提醒</td></tr>
                     <tr><td className="px-3 py-2 border-t border-border">心态自评 (1–5)</td><td className="px-3 py-2 border-t border-border">记录决策者状态</td><td className="px-3 py-2 border-t border-border">≤2 分硬阻挡，不能用确认框绕过</td></tr>
-                    <tr><td className="px-3 py-2 border-t border-border">二元预测概率</td><td className="px-3 py-2 border-t border-border">Tetlock / Good Judgment 式校准训练</td><td className="px-3 py-2 border-t border-border">用“做对/做错”互补滑杆给出具体概率，并写下你为什么有资格给这个置信度；平仓后进入 Calibration 计算校准分数</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border">二元预测概率</td><td className="px-3 py-2 border-t border-border">Tetlock / Good Judgment 式校准训练</td><td className="px-3 py-2 border-t border-border">用“做对/做错”互补滑杆给出具体概率，并写下你为什么有资格给这个置信度；下方显示芒格折扣，但写库仍保存原始值</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border">下注规模 · 毁灭概率封顶</td><td className="px-3 py-2 border-t border-border">把仓位上限从“我很有信心”改成“别把账户打穿”</td><td className="px-3 py-2 border-t border-border">优先用战役级胜率与盈亏比；战役样本不足时回落到默认值</td></tr>
                     <tr><td className="px-3 py-2 border-t border-border">开仓 Checklist</td><td className="px-3 py-2 border-t border-border">把规则前置到下单前</td><td className="px-3 py-2 border-t border-border">必填项必须全勾；不能判断是否通过的条目，需要回到规则页重写</td></tr>
                   </tbody>
                 </table>

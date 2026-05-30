@@ -10,7 +10,7 @@
  * 输入的胜率应当是【折扣后】的诚实胜率（confidenceDiscount.discountedPct / 100），
  * 而不是滑块原值，否则会把已知的偏高再喂回 Kelly，放大下注。
  */
-import type { TradeJournal } from '@/types/journal';
+import type { TradeCampaign, TradeJournal } from '@/types/journal';
 import { estimateBankruptcy } from './bankruptcyEstimator';
 
 /** 目标：按当前下注规模连打 100 笔，破产概率不超过这个上限。 */
@@ -21,6 +21,16 @@ export const KELLY_FRACTION = 0.5;
 export const DEFAULT_PAYOFF_RATIO = 2;
 /** 估计个人盈亏比所需的最小盈/亏样本数（各自）。 */
 export const MIN_PAYOFF_SAMPLES = 5;
+/** 估计战役胜率所需的最小已结束战役样本数。 */
+export const MIN_CAMPAIGN_WINRATE_SAMPLES = 5;
+
+export interface CampaignSizingStats {
+  winRate: number | null;
+  winRateSampleCount: number;
+  payoffRatio: number | null;
+  payoffWinCount: number;
+  payoffLossCount: number;
+}
 
 export type BetSizingVerdict =
   /** 折扣后无正期望 → 不该下注。 */
@@ -145,4 +155,42 @@ export function estimatePayoffRatio(journals: TradeJournal[]): number | null {
   const avgLoss = losses.reduce((sum, value) => sum + value, 0) / losses.length;
   if (avgLoss <= 0) return null;
   return avgWin / avgLoss;
+}
+
+function isResolvedCampaign(campaign: TradeCampaign): boolean {
+  return (
+    ['closed_profit', 'closed_loss', 'closed_breakeven'].includes(campaign.status)
+    && typeof campaign.final_realized_pnl === 'number'
+    && Number.isFinite(campaign.final_realized_pnl)
+  );
+}
+
+/**
+ * 用已结束战役估下注规模的两个基础统计：
+ *   1. 胜率 = 盈利战役 / 全部已结束战役
+ *   2. 盈亏比 = 平均盈利战役 PnL / 平均亏损战役 |PnL|
+ */
+export function estimateCampaignSizingStats(campaigns: TradeCampaign[]): CampaignSizingStats {
+  const resolved = campaigns.filter(isResolvedCampaign);
+  const wins = resolved.filter(campaign => (campaign.final_realized_pnl ?? 0) > 0);
+  const losses = resolved.filter(campaign => (campaign.final_realized_pnl ?? 0) < 0);
+
+  const winRate = resolved.length >= MIN_CAMPAIGN_WINRATE_SAMPLES
+    ? wins.length / resolved.length
+    : null;
+
+  let payoffRatio: number | null = null;
+  if (wins.length >= MIN_PAYOFF_SAMPLES && losses.length >= MIN_PAYOFF_SAMPLES) {
+    const avgWin = wins.reduce((sum, campaign) => sum + (campaign.final_realized_pnl ?? 0), 0) / wins.length;
+    const avgLoss = losses.reduce((sum, campaign) => sum + Math.abs(campaign.final_realized_pnl ?? 0), 0) / losses.length;
+    if (avgLoss > 0) payoffRatio = avgWin / avgLoss;
+  }
+
+  return {
+    winRate,
+    winRateSampleCount: resolved.length,
+    payoffRatio,
+    payoffWinCount: wins.length,
+    payoffLossCount: losses.length,
+  };
 }
