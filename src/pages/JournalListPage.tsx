@@ -66,9 +66,15 @@ export default function JournalListPage() {
     [data?.categories],
   );
 
+  // 错题集只看真实交易；'太难'(no_trade) 记录是独立的"太难篮子"，只在元监控展示，不进列表/聚类/统计。
+  const tradeJournals = useMemo(
+    () => (data?.journals ?? []).filter(journal => (journal.journal_kind ?? 'trade') === 'trade'),
+    [data?.journals],
+  );
+
   const filteredJournals = useMemo(
-    () => (data ? getFilteredJournals(data.journals, params, categoriesById) : []),
-    [data, params, categoriesById],
+    () => (data ? getFilteredJournals(tradeJournals, params, categoriesById) : []),
+    [data, tradeJournals, params, categoriesById],
   );
 
   const clusters = useMemo(() => {
@@ -145,7 +151,7 @@ export default function JournalListPage() {
         </div>
       </header>
 
-      <JournalFilterBar journals={data.journals} categories={data.categories} />
+      <JournalFilterBar journals={tradeJournals} categories={data.categories} />
 
       <main className="max-w-[1600px] mx-auto px-6 py-4">
         {largeDataset && (
@@ -220,7 +226,7 @@ export default function JournalListPage() {
 
             {view === 'unreviewed' && (
               <UnreviewedJournalList
-                journals={data.journals}
+                journals={tradeJournals}
                 onReviewed={() => {
                   if (user) {
                     listAllJournalDataForUser(user.id).then(setData).catch(e => toast.error(String(e)));

@@ -34,34 +34,67 @@ export type DecisionQuality = 'good' | 'mixed' | 'bad';
 export type RuleCategory = 'hard' | 'core' | 'watch' | 'retired';
 export type PrincipleEvolutionLevel = 0 | 1 | 2 | 3 | 4 | 5;
 export type PainTag =
-  // 负向 · 高唤醒
-  | 'fomo'
-  | 'anxiety'
-  | 'greed'
-  | 'revenge'
-  // 负向 · 低唤醒
-  | 'loss_aversion'
+  // 正向情绪 · 帮助执行规则
+  | 'calm'
+  | 'focused'
+  | 'patient'
+  // 中性情绪 · 需要被校准，否则会滑向失控
+  | 'fear_of_loss'
+  | 'fear_giveback'
+  | 'hesitation'
+  | 'odds_excitement'
   | 'regret'
   | 'fatigue'
-  // 正向 · 高唤醒
-  | 'focused'
-  | 'confident'
-  // 正向 · 低唤醒
-  | 'calm'
-  | 'content'
-  // 中性 · 平和度（执行者抽离）
-  | 'detached';
+  | 'distracted'
+  // 负向情绪 · 容易破坏规则
+  | 'fomo'
+  | 'revenge'
+  | 'prove_self'
+  | 'impatience'
+  | 'greed'
+  | 'overconfidence'
+  | 'unwilling'
+  | 'sunk_cost'
+  | 'boredom'
+  | 'panic'
+  | 'jackpot_fantasy'
+  | 'wishful'
+  | 'denial'
+  | 'stubborn_hold'
+  | 'confirmation'
+  | 'narrative'
+  | 'anchoring'
+  | 'envy'
+  | 'numbness'
+  | 'stress_overload';
 
+/** 三类情绪：正向助执行 / 负向易破坏 / 中性需校准。 */
 export type EmotionValence = 'positive' | 'neutral' | 'negative';
-export type EmotionArousal = 'high' | 'low';
 
 export interface EmotionTagMeta {
   label: string;
   valence: EmotionValence;
-  arousal: EmotionArousal;
-  /** 简短说明，给 UI tooltip / 副标题用 */
-  hint: string;
+  /** 核心含义：这个情绪本身是什么。 */
+  coreMeaning: string;
+  /** 可能导致的行为倾向：它会把你推向哪些破坏纪律的动作。 */
+  behaviorTendency: string;
 }
+
+/** 情绪类别元数据，驱动快照表单按"对交易纪律的影响"分组渲染。 */
+export interface EmotionCategoryMeta {
+  valence: EmotionValence;
+  title: string;
+  /** 该类情绪对"执行规则"的整体作用。 */
+  ruleImpact: string;
+  /** 分类强调色，严格走品牌色。 */
+  accent: string;
+}
+
+export const EMOTION_CATEGORIES: EmotionCategoryMeta[] = [
+  { valence: 'positive', title: '正向情绪', ruleImpact: '帮助你执行规则', accent: '#0ECB81' },
+  { valence: 'neutral', title: '中性情绪', ruleImpact: '本身不一定坏，但需要被校准，否则会滑向失控', accent: '#F0B90B' },
+  { valence: 'negative', title: '负向情绪', ruleImpact: '容易让你破坏规则', accent: '#F6465D' },
+];
 export type FiveStepWeakPoint = 'goal' | 'problem' | 'diagnosis' | 'design' | 'execution';
 export type InterventionType = 'principle' | 'rule' | 'sop' | 'awareness';
 
@@ -81,23 +114,41 @@ export const PRINCIPLE_EVOLUTION_LEVEL_LABELS: Record<PrincipleEvolutionLevel, s
 };
 
 export const EMOTION_TAG_META: Record<PainTag, EmotionTagMeta> = {
-  // 负向 · 高唤醒（被情绪推着走）
-  fomo: { label: '错失/FOMO 痛', valence: 'negative', arousal: 'high', hint: '怕赶不上别人，急着追入' },
-  anxiety: { label: '焦虑痛', valence: 'negative', arousal: 'high', hint: '未发生事就提前心慌' },
-  greed: { label: '贪婪痛', valence: 'negative', arousal: 'high', hint: '想再多赚一点，舍不得离场' },
-  revenge: { label: '报复痛', valence: 'negative', arousal: 'high', hint: '想用下一单把上一单赢回来' },
-  // 负向 · 低唤醒（被情绪压住）
-  loss_aversion: { label: '损失厌恶痛', valence: 'negative', arousal: 'low', hint: '害怕兑现亏损，不敢动' },
-  regret: { label: '后悔痛', valence: 'negative', arousal: 'low', hint: '盯着已发生的错误反复回放' },
-  fatigue: { label: '疲惫/无力', valence: 'negative', arousal: 'low', hint: '注意力涣散，不想再判断' },
-  // 正向 · 高唤醒（积极但活跃）
-  focused: { label: '心流/专注', valence: 'positive', arousal: 'high', hint: '盘面与判断高度契合' },
-  confident: { label: '自信', valence: 'positive', arousal: 'high', hint: '判断有据，敢按计划下注' },
-  // 正向 · 低唤醒（积极且平稳）
-  calm: { label: '平和', valence: 'positive', arousal: 'low', hint: '情绪平稳，不急不躁' },
-  content: { label: '知足', valence: 'positive', arousal: 'low', hint: '对当前进度满意，不勉强' },
-  // 中性 · 平和度（执行者抽离）
-  detached: { label: '抽离/旁观', valence: 'neutral', arousal: 'low', hint: '设计者视角，把自己当成第三方' },
+  // ===== 正向情绪 · 帮助执行规则（无明显失控倾向）=====
+  calm: { label: '冷静', valence: 'positive', coreMeaning: '情绪稳定，能按计划交易', behaviorTendency: '无明显失控倾向' },
+  focused: { label: '专注', valence: 'positive', coreMeaning: '注意力集中，只做计划内机会', behaviorTendency: '无明显失控倾向' },
+  patient: { label: '耐心', valence: 'positive', coreMeaning: '能等待触发，不被噪音诱导', behaviorTendency: '无明显失控倾向' },
+
+  // ===== 中性情绪 · 需要被校准，否则会滑向失控 =====
+  fear_of_loss: { label: '害怕亏损', valence: 'neutral', coreMeaning: '对亏损敏感，可能是风控意识，也可能是过度恐惧', behaviorTendency: '提前止盈、频繁交易' },
+  fear_giveback: { label: '害怕回吐利润', valence: 'neutral', coreMeaning: '想保护浮盈，轻度是风险意识，过度会拿不住趋势', behaviorTendency: '提前止盈' },
+  hesitation: { label: '犹豫', valence: 'neutral', coreMeaning: '对信号不够确信，可能是谨慎，也可能是执行障碍', behaviorTendency: '提前止盈、频繁交易' },
+  odds_excitement: { label: '赔率兴奋', valence: 'neutral', coreMeaning: '看到巨大盈利空间，可能发现机会，也可能忽略风险', behaviorTendency: '追单、加仓、取消止损' },
+  regret: { label: '后悔', valence: 'neutral', coreMeaning: '对错过机会或错误操作的反应，可用于复盘，也可能变成补偿交易', behaviorTendency: '追单、频繁交易、加仓' },
+  fatigue: { label: '疲惫', valence: 'neutral', coreMeaning: '注意力下降，属于状态信号，不是道德问题', behaviorTendency: '频繁交易、取消止损、拒绝更新判断' },
+  distracted: { label: '分心', valence: 'neutral', coreMeaning: '注意力不完整，容易造成执行错误', behaviorTendency: '取消止损、频繁交易' },
+
+  // ===== 负向情绪 · 容易破坏规则 =====
+  fomo: { label: 'FOMO / 怕错过', valence: 'negative', coreMeaning: '害怕不上车就没机会', behaviorTendency: '追单、频繁交易、加仓' },
+  revenge: { label: '复仇交易', valence: 'negative', coreMeaning: '想把上一笔亏损马上赚回来', behaviorTendency: '频繁交易、加仓、追单' },
+  prove_self: { label: '证明自己', valence: 'negative', coreMeaning: '交易不是为了机会，而是为了证明判断没错', behaviorTendency: '扛单、加仓、拒绝更新判断' },
+  impatience: { label: '急躁', valence: 'negative', coreMeaning: '等不了确认信号，想提前行动', behaviorTendency: '追单、频繁交易' },
+  greed: { label: '贪婪', valence: 'negative', coreMeaning: '已经达到计划收益，还想吃更多', behaviorTendency: '加仓、拒绝更新判断、取消止损' },
+  overconfidence: { label: '过度自信', valence: 'negative', coreMeaning: '连续盈利后高估自己判断力', behaviorTendency: '加仓、追单、取消止损' },
+  unwilling: { label: '不甘心', valence: 'negative', coreMeaning: '亏损后觉得不能就这么走', behaviorTendency: '扛单、取消止损、拒绝更新判断' },
+  sunk_cost: { label: '沉没成本感', valence: 'negative', coreMeaning: '因为已经亏了，所以更舍不得退出', behaviorTendency: '扛单、加仓、拒绝更新判断' },
+  boredom: { label: '无聊交易', valence: 'negative', coreMeaning: '不是市场给机会，而是自己想找刺激', behaviorTendency: '频繁交易、追单' },
+  panic: { label: '惊慌', valence: 'negative', coreMeaning: '剧烈波动时进入失控反应', behaviorTendency: '提前止盈、取消止损、频繁交易' },
+  jackpot_fantasy: { label: '暴富幻想', valence: 'negative', coreMeaning: '把一笔交易想象成人生翻身点', behaviorTendency: '加仓、扛单、取消止损' },
+  wishful: { label: '侥幸', valence: 'negative', coreMeaning: '明知结构不对，但希望行情救回来', behaviorTendency: '扛单、取消止损、拒绝更新判断' },
+  denial: { label: '心理否认', valence: 'negative', coreMeaning: '市场已经反馈错误，但假装没看见', behaviorTendency: '扛单、拒绝更新判断、取消止损' },
+  stubborn_hold: { label: '死扛', valence: 'negative', coreMeaning: '不再基于策略，而是靠忍耐持仓', behaviorTendency: '扛单、取消止损、拒绝更新判断' },
+  confirmation: { label: '确认偏误', valence: 'negative', coreMeaning: '只寻找支持自己仓位的信息', behaviorTendency: '拒绝更新判断、扛单' },
+  narrative: { label: '叙事上头', valence: 'negative', coreMeaning: '被宏大故事带走，不看价格结构', behaviorTendency: '扛单、加仓、拒绝更新判断' },
+  anchoring: { label: '锚定', valence: 'negative', coreMeaning: '被开仓价、前高、最高浮盈绑架', behaviorTendency: '扛单、提前止盈、拒绝更新判断' },
+  envy: { label: '嫉妒 / 比较', valence: 'negative', coreMeaning: '看到别人赚钱后心态失衡', behaviorTendency: '追单、加仓、频繁交易' },
+  numbness: { label: '麻木', valence: 'negative', coreMeaning: '连续亏损或过度交易后，对风险失感', behaviorTendency: '加仓、取消止损、频繁交易' },
+  stress_overload: { label: '压力过载', valence: 'negative', coreMeaning: '现实压力、账户压力、情绪压力叠加', behaviorTendency: '加仓、扛单、频繁交易、拒绝更新判断' },
 };
 
 /** 向后兼容旧代码：只保留 label。新 UI 用 EMOTION_TAG_META。 */

@@ -619,6 +619,13 @@ export function PostTradeReviewSheet({
               ))}
             </div>
             <p className="text-[10px] text-muted-foreground">坏结果不自动等于坏决策；好结果也不自动等于好决策。</p>
+            {outcome === 'win' && (
+              <p className="rounded border border-[#F0B90B]/40 bg-[#F0B90B]/10 px-2 py-1.5 text-[10px] leading-relaxed text-[#D89B00]">
+                {decisionQuality === 'good'
+                  ? '这笔赚钱了 — 但先确认它不是靠运气：如果当时推理错了、只是运气好，照样标成「坏决策」记下来。'
+                  : '赚钱但靠运气 = 坏决策。结果盈利不改判当时的推理质量，照样如实记下来。'}
+              </p>
+            )}
           </div>
         </div>
 

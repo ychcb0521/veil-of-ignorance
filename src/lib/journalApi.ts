@@ -2645,7 +2645,10 @@ export async function findUnreviewedJournalForClose(
     console.error("[journalApi] 匹配未评价日记失败:", error);
     throw new Error(`匹配未评价日记失败：${error.message}`);
   }
-  const rows = (data ?? []) as unknown as TradeJournal[];
+  // no_trade（太难）记录也带 long/short 方向且 post_reviewed_at 为空，但它没有真实仓位，
+  // 必须排除，否则平仓评价可能错配到一条"太难"记录。用 JS 过滤而非 SQL，避免未跑 migration 时查询报错。
+  const rows = ((data ?? []) as unknown as TradeJournal[])
+    .filter(r => (r.journal_kind ?? 'trade') === 'trade');
   if (rows.length === 0) return null;
   // 按入场价接近度排序，取最接近的
   const tolerance = Math.max(entryPrice * 0.005, 0.5);

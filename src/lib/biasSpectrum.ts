@@ -1,5 +1,17 @@
 import { COGNITIVE_BIAS_LABELS } from '@/lib/cognitiveBiasTags';
-import { PAIN_TAG_LABELS, type TradeJournal } from '@/types/journal';
+import { EMOTION_TAG_META, PAIN_TAG_LABELS, type TradeJournal } from '@/types/journal';
+
+/**
+ * 正向情绪（冷静/专注/耐心，以及历史遗留的 confident/content）帮助执行规则，
+ * 不是"漏洞"，因此排除在偏差光谱之外。中性与负向情绪都计入。
+ */
+const POSITIVE_EMOTION_TAGS = new Set<string>([
+  ...Object.entries(EMOTION_TAG_META)
+    .filter(([, meta]) => meta.valence === 'positive')
+    .map(([id]) => id),
+  'confident',
+  'content',
+]);
 
 export interface BiasSpectrumItem {
   id: string;
@@ -43,7 +55,7 @@ export function computeBiasSpectrum(
   let labeledTradeCount = 0;
 
   for (const journal of trades) {
-    const painTags = journal.pre_pain_tags ?? [];
+    const painTags = (journal.pre_pain_tags ?? []).filter(tag => !POSITIVE_EMOTION_TAGS.has(tag));
     const cognitiveBiasTags = (journal.pre_cognitive_bias_tags ?? []).filter(tag => tag !== 'none');
     const hasAnyTag = painTags.length > 0 || cognitiveBiasTags.length > 0;
     if (!hasAnyTag) continue;

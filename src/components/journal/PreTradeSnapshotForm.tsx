@@ -9,10 +9,13 @@ import { Textarea } from '@/components/ui/textarea';
 import { Input } from '@/components/ui/input';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Slider } from '@/components/ui/slider';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { COGNITIVE_BIAS_NONE, COGNITIVE_BIAS_TAGS, type CognitiveBiasTagId } from '@/lib/cognitiveBiasTags';
 import { computeDiscount } from '@/lib/confidenceDiscount';
-import { EMOTION_TAG_META } from '@/types/journal';
-import type { EmotionTagMeta } from '@/types/journal';
+import { computeBetSizing, estimatePayoffRatio, DEFAULT_PAYOFF_RATIO } from '@/lib/kellySizing';
+import { analyzePositionFeedback, type FeedbackPolarity } from '@/lib/positionFeedback';
+import { EMOTION_CATEGORIES, EMOTION_TAG_META } from '@/types/journal';
+import type { EmotionTagMeta, EmotionValence } from '@/types/journal';
 import { buildChecklist, isChecklistPassed } from '@/lib/defaultChecklist';
 import { listJournals, listRules } from '@/lib/journalApi';
 import { useAuth } from '@/contexts/AuthContext';
@@ -27,6 +30,7 @@ import type {
   PainTag,
   StrategyTemplate,
   TradeDirection,
+  TradeJournal,
   TradingRule,
 } from '@/types/journal';
 
@@ -105,55 +109,20 @@ interface Props {
 }
 
 interface EmotionGroup {
-  key: string;
+  valence: EmotionValence;
   title: string;
-  hint: string;
+  ruleImpact: string;
   accent: string;
   tags: PainTag[];
 }
 
-const EMOTION_GROUPS: EmotionGroup[] = (() => {
-  const entries = Object.entries(EMOTION_TAG_META) as [PainTag, EmotionTagMeta][];
-  const byBucket = (valence: EmotionTagMeta['valence'], arousal: EmotionTagMeta['arousal']) =>
-    entries.filter(([, meta]) => meta.valence === valence && meta.arousal === arousal).map(([tag]) => tag);
-  return [
-    {
-      key: 'pos-high',
-      title: '正向 · 高唤醒',
-      hint: '能量被建设性方向调动',
-      accent: '#0ECB81',
-      tags: byBucket('positive', 'high'),
-    },
-    {
-      key: 'pos-low',
-      title: '正向 · 低唤醒',
-      hint: '稳定且放松的状态',
-      accent: '#2EBD85',
-      tags: byBucket('positive', 'low'),
-    },
-    {
-      key: 'neutral',
-      title: '中性 · 平和度',
-      hint: '把自己当成第三方观察',
-      accent: '#7C8B9C',
-      tags: byBucket('neutral', 'low'),
-    },
-    {
-      key: 'neg-high',
-      title: '负向 · 高唤醒',
-      hint: '情绪推着你做决定',
-      accent: '#F6465D',
-      tags: byBucket('negative', 'high'),
-    },
-    {
-      key: 'neg-low',
-      title: '负向 · 低唤醒',
-      hint: '情绪压住你，逃避或停摆',
-      accent: '#D89B00',
-      tags: byBucket('negative', 'low'),
-    },
-  ].filter(group => group.tags.length > 0);
-})();
+/** 三类情绪（正向助执行 / 中性需校准 / 负向易破坏），按 EMOTION_TAG_META 的声明顺序填充各自的标签。 */
+const EMOTION_GROUPS: EmotionGroup[] = EMOTION_CATEGORIES.map(category => ({
+  ...category,
+  tags: (Object.entries(EMOTION_TAG_META) as [PainTag, EmotionTagMeta][])
+    .filter(([, meta]) => meta.valence === category.valence)
+    .map(([tag]) => tag),
+})).filter(group => group.tags.length > 0);
 
 interface DecisionQuestion {
   id: 'why' | 'premortem' | 'falsification';
@@ -212,6 +181,12 @@ function riskTone(pct: number | null) {
   return 'text-[#F6465D]';
 }
 
+function polarityTone(polarity: FeedbackPolarity): { box: string; text: string } {
+  if (polarity === 'danger') return { box: 'border-[#F6465D]/40 bg-[#F6465D]/10', text: 'text-[#F6465D]' };
+  if (polarity === 'caution') return { box: 'border-[#F0B90B]/40 bg-[#F0B90B]/10', text: 'text-[#D89B00]' };
+  return { box: 'border-[#0ECB81]/40 bg-[#0ECB81]/10', text: 'text-[#0ECB81]' };
+}
+
 export function PreTradeSnapshotForm({
   mode,
   symbol,
@@ -250,7 +225,7 @@ export function PreTradeSnapshotForm({
   const [confidenceBasis, setConfidenceBasis] = useState('');
   const [checked, setChecked] = useState<string[]>([]);
   const [userRules, setUserRules] = useState<TradingRule[]>([]);
-  const [historicalJournals, setHistoricalJournals] = useState<any[]>([]);
+  const [historicalJournals, setHistoricalJournals] = useState<TradeJournal[]>([]);
   const [submitting, setSubmitting] = useState(false);
 
   const isHedge = isTrade && orderKind === 'hedge';
@@ -358,6 +333,52 @@ export function PreTradeSnapshotForm({
     () => computeDiscount(confidencePct, historicalJournals),
     [confidencePct, historicalJournals],
   );
+
+  // 下注规模 · 毁灭概率封顶（批次 25）— 用折扣后的诚实胜率，绝不写库，仅显示。
+  const personalPayoffRatio = useMemo(
+    () => estimatePayoffRatio(historicalJournals),
+    [historicalJournals],
+  );
+  const payoffRatio = personalPayoffRatio ?? DEFAULT_PAYOFF_RATIO;
+  const betSizing = useMemo(
+    () => (isTrade && accountEquity > 0
+      ? computeBetSizing({
+        winProb: discount.discountedPct / 100,
+        payoffRatio,
+        equity: accountEquity,
+        plannedMaxLossUsdt: maxLossValid ? maxLoss : null,
+      })
+      : null),
+    [isTrade, accountEquity, discount.discountedPct, payoffRatio, maxLossValid, maxLoss],
+  );
+
+  // 持仓反馈体检（批次 25）— 负反馈维稳 / 正反馈顺势，软性提示，绝不阻塞。
+  const positionFeedback = useMemo(() => {
+    const proposedSide = direction === 'long' ? 'LONG' : direction === 'short' ? 'SHORT' : null;
+    const positions = (positionsMap[symbol] ?? []).map(p => ({
+      side: p.side,
+      entryPrice: p.entryPrice,
+      quantity: p.quantity,
+      leverage: p.leverage,
+    }));
+    const recentCloses = historicalJournals
+      .filter(j => (j.journal_kind ?? 'trade') === 'trade' && j.symbol === symbol && j.post_outcome != null)
+      .map(j => ({
+        pnlUsdt: typeof j.post_realized_pnl === 'number'
+          ? j.post_realized_pnl
+          : (j.post_outcome === 'loss' ? -1 : 0),
+        closeTimeMs: Date.parse(j.pre_simulated_time),
+      }))
+      .filter(c => Number.isFinite(c.closeTimeMs));
+    return analyzePositionFeedback({
+      proposedSide,
+      proposedLeverage: leverage,
+      markPrice: priceMap[symbol] ?? null,
+      positions,
+      recentCloses,
+      nowMs: simulatedTime.getTime(),
+    });
+  }, [direction, positionsMap, symbol, historicalJournals, leverage, priceMap, simulatedTime]);
 
   const submit = async () => {
     if (!canSubmit || submitting) return;
@@ -647,57 +668,143 @@ export function PreTradeSnapshotForm({
           </div>
         </section>
 
+        {isTrade && betSizing && (
+          <section className="rounded border border-border bg-card p-3">
+            <div className={labelCls}>下注规模 · 毁灭概率封顶</div>
+            <div className="mt-1 text-[11px] text-muted-foreground">
+              用折扣后胜率定规模；仓位上限由毁灭概率（分数 Kelly 精神）封顶，而不是由信心封顶。
+            </div>
+            {betSizing.verdict === 'no_edge' ? (
+              <div className="mt-2 rounded border border-[#F6465D]/40 bg-[#F6465D]/10 px-3 py-2 text-[12px] text-[#F6465D]">
+                按折扣后胜率 {discount.discountedPct}% 与盈亏比 {betSizing.payoffRatio.toFixed(2)}，这单没有正期望优势 → 不该下注。
+                只在赔率明显被错误定价时才出手。
+              </div>
+            ) : (
+              <div className="mt-2 space-y-2">
+                <div className="flex items-baseline justify-between gap-3">
+                  <span className="text-[11px] text-muted-foreground">建议单笔最大亏损 ≤</span>
+                  <span className="font-mono text-[13px] text-[#0ECB81]">{betSizing.recommendedMaxLossUsdt.toFixed(0)} USDT</span>
+                </div>
+                <div className="text-[10px] text-muted-foreground">
+                  取小：半 Kelly {betSizing.halfKellyMaxLossUsdt.toFixed(0)} · 毁灭概率封顶 {betSizing.ruinCapMaxLossUsdt.toFixed(0)}
+                  （封顶后破产概率 ≈ {(betSizing.ruinProbabilityAtRecommended * 100).toFixed(0)}/100 笔）
+                </div>
+                {betSizing.ruinProbabilityAtPlanned != null && (() => {
+                  const tone = betSizing.verdict === 'over_ruin_cap'
+                    ? { box: 'border-[#F6465D]/40 bg-[#F6465D]/10', text: 'text-[#F6465D]' }
+                    : betSizing.verdict === 'over_kelly'
+                      ? { box: 'border-[#F0B90B]/40 bg-[#F0B90B]/10', text: 'text-[#D89B00]' }
+                      : { box: 'border-[#0ECB81]/40 bg-[#0ECB81]/10', text: 'text-[#0ECB81]' };
+                  const note = betSizing.verdict === 'over_ruin_cap'
+                    ? `已超毁灭概率封顶 — 这是用信心而非毁灭概率定仓位，建议下调到 ${betSizing.recommendedMaxLossUsdt.toFixed(0)} USDT。`
+                    : betSizing.verdict === 'over_kelly'
+                      ? `略高于半 Kelly 上限，可考虑下调到 ${betSizing.recommendedMaxLossUsdt.toFixed(0)} USDT。`
+                      : '在建议上限内。';
+                  return (
+                    <div className={`rounded border px-3 py-2 text-[12px] ${tone.box} ${tone.text}`}>
+                      你的计划 {maxLoss.toFixed(0)} USDT → 连打 100 笔约破产 {(betSizing.ruinProbabilityAtPlanned * 100).toFixed(0)} 次。{note}
+                    </div>
+                  );
+                })()}
+                <div className="text-[10px] text-muted-foreground">
+                  胜率：折扣后 {discount.discountedPct}%（原值 {confidencePct}%）· 盈亏比：
+                  {personalPayoffRatio != null
+                    ? `个人历史 ${payoffRatio.toFixed(2)}`
+                    : `默认 ${DEFAULT_PAYOFF_RATIO.toFixed(2)}（个人样本不足）`}
+                </div>
+              </div>
+            )}
+          </section>
+        )}
+
+        {isTrade && positionFeedback.signals.length > 0 && (
+          <section className="rounded border border-border bg-card p-3">
+            <div className={labelCls}>持仓反馈体检</div>
+            <div className="mt-1 text-[11px] text-muted-foreground">
+              把这一单和现有持仓、近期平仓对照 — 负反馈维稳，正反馈顺势。
+            </div>
+            <div className="mt-2 space-y-1.5">
+              {positionFeedback.signals.map(sig => {
+                const tone = polarityTone(sig.polarity);
+                return (
+                  <div key={sig.kind} className={`rounded border px-3 py-2 ${tone.box}`}>
+                    <div className={`text-[12px] font-medium ${tone.text}`}>{sig.title}</div>
+                    <div className="mt-0.5 text-[11px] leading-relaxed text-muted-foreground">{sig.detail}</div>
+                  </div>
+                );
+              })}
+            </div>
+          </section>
+        )}
+
         <section>
           <div className="mb-2 flex items-end justify-between gap-3">
             <div>
               <div className="text-[12px] font-medium text-foreground">当前情绪标签</div>
               <div className="mt-0.5 text-[10px] text-muted-foreground">
-                按情绪唤醒度 × 情绪效价 双维分组，含一个平和度（抽离）；可多选，也可全不选
+                按对交易纪律的影响分三类：正向助执行、中性需校准、负向易破坏；可多选，也可全不选。悬停标签可看核心含义与行为倾向。
               </div>
             </div>
             <div className="text-[10px] text-muted-foreground">
               已选 <span className="font-mono text-foreground">{painTags.length}</span>
             </div>
           </div>
-          <div className="grid gap-2 md:grid-cols-2">
-            {EMOTION_GROUPS.map(group => (
-              <div
-                key={group.key}
-                className="rounded-md border border-border/70 bg-card/60 p-2.5"
-              >
-                <div className="mb-2 flex items-center gap-2">
-                  <span
-                    className="inline-block h-2 w-2 shrink-0 rounded-full"
-                    style={{ background: group.accent }}
-                  />
-                  <span className="text-[11px] font-medium text-foreground">{group.title}</span>
-                  <span className="text-[10px] text-muted-foreground">· {group.hint}</span>
+          <TooltipProvider delayDuration={150}>
+            <div className="space-y-2">
+              {EMOTION_GROUPS.map(group => (
+                <div
+                  key={group.valence}
+                  className="rounded-md border border-border/70 bg-card/60 p-2.5"
+                >
+                  <div className="mb-2 flex items-center gap-2">
+                    <span
+                      className="inline-block h-2 w-2 shrink-0 rounded-full"
+                      style={{ background: group.accent }}
+                    />
+                    <span className="text-[11px] font-medium text-foreground">{group.title}</span>
+                    <span className="text-[10px] text-muted-foreground">· {group.ruleImpact}</span>
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {group.tags.map(tag => {
+                      const meta = EMOTION_TAG_META[tag];
+                      const selected = painTags.includes(tag);
+                      return (
+                        <Tooltip key={tag}>
+                          <TooltipTrigger asChild>
+                            <button
+                              type="button"
+                              onClick={() => togglePainTag(tag)}
+                              className="h-7 rounded-full border px-2.5 text-[11px] transition-colors"
+                              style={{
+                                borderColor: selected ? group.accent : 'hsl(var(--border))',
+                                background: selected ? `${group.accent}1F` : undefined,
+                                color: selected ? group.accent : 'hsl(var(--muted-foreground))',
+                              }}
+                            >
+                              {meta.label}
+                            </button>
+                          </TooltipTrigger>
+                          <TooltipContent side="top" className="max-w-[240px] border-border bg-popover">
+                            <div className="space-y-1">
+                              <div className="text-[11px] font-medium" style={{ color: group.accent }}>
+                                {meta.label}
+                              </div>
+                              <div className="text-[11px] leading-snug text-popover-foreground">
+                                <span className="text-muted-foreground">核心含义：</span>{meta.coreMeaning}
+                              </div>
+                              <div className="text-[11px] leading-snug text-popover-foreground">
+                                <span className="text-muted-foreground">行为倾向：</span>{meta.behaviorTendency}
+                              </div>
+                            </div>
+                          </TooltipContent>
+                        </Tooltip>
+                      );
+                    })}
+                  </div>
                 </div>
-                <div className="flex flex-wrap gap-1.5">
-                  {group.tags.map(tag => {
-                    const meta = EMOTION_TAG_META[tag];
-                    const selected = painTags.includes(tag);
-                    return (
-                      <button
-                        key={tag}
-                        type="button"
-                        onClick={() => togglePainTag(tag)}
-                        title={meta.hint}
-                        className="h-7 rounded-full border px-2.5 text-[11px] transition-colors"
-                        style={{
-                          borderColor: selected ? group.accent : 'hsl(var(--border))',
-                          background: selected ? `${group.accent}1F` : undefined,
-                          color: selected ? group.accent : 'hsl(var(--muted-foreground))',
-                        }}
-                      >
-                        {meta.label}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          </TooltipProvider>
         </section>
 
         <section>
