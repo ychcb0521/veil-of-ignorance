@@ -6,16 +6,17 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Dialog, DialogContent } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Sheet, SheetContent } from '@/components/ui/sheet';
 import { Button } from '@/components/ui/button';
+import { Textarea } from '@/components/ui/textarea';
 import { AlertOctagon } from 'lucide-react';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { useAuth } from '@/contexts/AuthContext';
 import { useTradingContext } from '@/contexts/TradingContext';
 import { toast } from 'sonner';
 import {
-  createJournalPreSnapshot, findUnreviewedJournals, updateJournalTradeRef,
+  createJournalPreSnapshot, createNoTradeJournal, findUnreviewedJournals, updateJournalTradeRef,
 } from '@/lib/journalApi';
 import type { PlaceOrderParams } from '@/contexts/TradingContext';
 import type { TradeDirection, PositionMode, TradeJournal } from '@/types/journal';
@@ -59,6 +60,10 @@ export function PreTradeSnapshotDialog({
   const [lockedTime, setLockedTime] = useState<Date>(() => new Date(simulatedTimeMs));
   const [lockedPrice, setLockedPrice] = useState<number | null>(lockedEntryPrice);
   const pausedRef = useRef(false);
+  const [tooHardOpen, setTooHardOpen] = useState(false);
+  const [tooHardReason, setTooHardReason] = useState('');
+  const [tooHardOrderKind, setTooHardOrderKind] = useState<'main' | 'hedge'>('main');
+  const [savingTooHard, setSavingTooHard] = useState(false);
 
   // Pending-review gate: closed trades without post-review must be evaluated before new orders
   const [pendingReviews, setPendingReviews] = useState<TradeJournal[] | null>(null);
@@ -74,6 +79,8 @@ export function PreTradeSnapshotDialog({
     if (isOpen) {
       setLockedTime(new Date(simulatedTimeMs));
       setLockedPrice(lockedEntryPrice);
+      setTooHardReason('');
+      setTooHardOpen(false);
       if (!pausedRef.current) {
         pausedRef.current = true;
         onAutoPause?.();
@@ -181,6 +188,7 @@ export function PreTradeSnapshotDialog({
         pre_triggered_principle_ids: payload.pre_triggered_principle_ids,
         pre_triggered_rule_ids: payload.pre_triggered_rule_ids,
         pre_pain_tags: payload.pre_pain_tags,
+        pre_cognitive_bias_tags: payload.pre_cognitive_bias_tags,
         pre_executor_self: payload.pre_executor_self,
         pre_designer_self: payload.pre_designer_self,
       });
@@ -202,6 +210,34 @@ export function PreTradeSnapshotDialog({
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       toast.error(msg);
+    }
+  };
+
+  const handleConfirmTooHard = async () => {
+    if (!user) {
+      toast.error('请先登录后再记录交易快照');
+      return;
+    }
+    if (mode !== 'trade' || direction === 'no_entry') return;
+    setSavingTooHard(true);
+    try {
+      await createNoTradeJournal({
+        user_id: user.id,
+        symbol,
+        direction,
+        pre_simulated_time: lockedTime.toISOString(),
+        no_trade_would_be_entry_price: lockedPrice,
+        no_trade_reason: tooHardReason,
+        order_kind: tooHardOrderKind,
+      });
+      toast.success("已记录'太难'决策");
+      setTooHardOpen(false);
+      onOpenChange(false);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      toast.error(msg);
+    } finally {
+      setSavingTooHard(false);
     }
   };
 
@@ -270,28 +306,110 @@ export function PreTradeSnapshotDialog({
       pricePrecision={pricePrecision}
       orderParams={orderParams ?? null}
       onCancel={() => onOpenChange(false)}
+      onTooHard={({ order_kind }) => {
+        setTooHardOrderKind(order_kind);
+        setTooHardOpen(true);
+      }}
       onSubmit={handleSubmit}
     />
   );
 
   if (isMobile) {
     return (
-      <Sheet open={isOpen} onOpenChange={onOpenChange}>
-        <SheetContent
-          side="bottom"
-          className="h-[92vh] rounded-t-2xl p-0 bg-card border-t border-border overflow-y-auto"
-        >
-          {form}
-        </SheetContent>
-      </Sheet>
+      <>
+        <Sheet open={isOpen} onOpenChange={onOpenChange}>
+          <SheetContent
+            side="bottom"
+            className="h-[92vh] rounded-t-2xl p-0 bg-card border-t border-border overflow-y-auto"
+          >
+            {form}
+          </SheetContent>
+        </Sheet>
+        <Dialog open={tooHardOpen} onOpenChange={setTooHardOpen}>
+          <DialogContent className="max-w-[420px] bg-card border border-border">
+            <DialogHeader>
+              <DialogTitle className="text-[14px]">记录为"太难"决策</DialogTitle>
+              <DialogDescription className="text-[11px] leading-relaxed text-muted-foreground">
+                我只想知道我将来会死在哪里，这样就永远不去那里。不做，也是一种被尊重的决定。
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-3">
+              <label className="block">
+                <div className="text-[12px] font-medium text-foreground">为什么这单太难？（可选）</div>
+                <Textarea
+                  rows={4}
+                  value={tooHardReason}
+                  onChange={event => setTooHardReason(event.target.value)}
+                  placeholder="例如：结构看不懂 / 赔率不够 / 我对这个币种没有能力圈 / 此刻状态不对"
+                  className="mt-2 min-h-[110px] border-border bg-background text-[12px]"
+                />
+              </label>
+              <div className="rounded border border-border bg-background/70 px-3 py-2 text-[11px] text-muted-foreground">
+                标的 <span className="text-foreground">{symbol}</span> · 方向 <span className="text-foreground">{direction === 'long' ? '做多' : '做空'}</span> · 当前价 <span className="text-foreground">{lockedPrice != null ? lockedPrice.toFixed(pricePrecision) : '—'}</span>
+              </div>
+              <div className="flex items-center justify-between gap-2">
+                <Button variant="ghost" onClick={() => setTooHardOpen(false)} className="h-8 text-[12px]">
+                  返回继续填快照
+                </Button>
+                <Button
+                  onClick={() => void handleConfirmTooHard()}
+                  disabled={savingTooHard}
+                  className="h-8 bg-[#F0B90B] text-black hover:bg-[#F0B90B]/90 text-[12px]"
+                >
+                  {savingTooHard ? '记录中...' : '确认跳过'}
+                </Button>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
+      </>
     );
   }
 
   return (
-    <Dialog open={isOpen} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-[680px] max-h-[90vh] overflow-y-auto bg-card border border-border p-0">
-        {form}
-      </DialogContent>
-    </Dialog>
+    <>
+      <Dialog open={isOpen} onOpenChange={onOpenChange}>
+        <DialogContent className="max-w-[680px] max-h-[90vh] overflow-y-auto bg-card border border-border p-0">
+          {form}
+        </DialogContent>
+      </Dialog>
+      <Dialog open={tooHardOpen} onOpenChange={setTooHardOpen}>
+        <DialogContent className="max-w-[460px] bg-card border border-border">
+          <DialogHeader>
+            <DialogTitle className="text-[14px]">记录为"太难"决策</DialogTitle>
+            <DialogDescription className="text-[11px] leading-relaxed text-muted-foreground">
+              我只想知道我将来会死在哪里，这样就永远不去那里。不做，也是一种被尊重的决定。
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <label className="block">
+              <div className="text-[12px] font-medium text-foreground">为什么这单太难？（可选）</div>
+              <Textarea
+                rows={4}
+                value={tooHardReason}
+                onChange={event => setTooHardReason(event.target.value)}
+                placeholder="例如：结构看不懂 / 赔率不够 / 我对这个币种没有能力圈 / 此刻状态不对"
+                className="mt-2 min-h-[120px] border-border bg-background text-[12px]"
+              />
+            </label>
+            <div className="rounded border border-border bg-background/70 px-3 py-2 text-[11px] text-muted-foreground">
+              标的 <span className="text-foreground">{symbol}</span> · 方向 <span className="text-foreground">{direction === 'long' ? '做多' : '做空'}</span> · 当前价 <span className="text-foreground">{lockedPrice != null ? lockedPrice.toFixed(pricePrecision) : '—'}</span>
+            </div>
+            <div className="flex items-center justify-between gap-2">
+              <Button variant="ghost" onClick={() => setTooHardOpen(false)} className="h-8 text-[12px]">
+                返回继续填快照
+              </Button>
+              <Button
+                onClick={() => void handleConfirmTooHard()}
+                disabled={savingTooHard}
+                className="h-8 bg-[#F0B90B] text-black hover:bg-[#F0B90B]/90 text-[12px]"
+              >
+                {savingTooHard ? '记录中...' : '确认跳过'}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }

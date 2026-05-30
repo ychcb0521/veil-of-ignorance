@@ -306,7 +306,7 @@ function isMissingDalioMetaLayerError(error: { code?: string; message?: string }
   return error.code === 'PGRST205'
     || error.code === 'PGRST204'
     || error.code === '42P01'
-    || (/trade_principles|pain_log_entries|pre_thesis_why_right|pre_premortem_failure_reason|pre_falsification_signal|pre_confidence_basis|pre_account_equity_usdt|pre_mortem_text|pre_positive_expectancy|pre_invalidation_condition|pre_calibration_win_pct|pre_confidence_interval_|pre_calibration_reference_class|pre_calibration_competence_basis|pre_calibration_update_signal|pre_dataset_split|pre_lollapalooza_score|pre_bankruptcy_estimate|pre_info_|pre_opponent_statement|pre_pain_tags|post_result_summary|post_decision_quality|post_positive_expectancy_review|post_premortem_review|post_invalidation_review|post_five_step|post_opponent_was_right|post_real_close_time|evolution_level|principle_id/i.test(message)
+    || (/trade_principles|pain_log_entries|pre_thesis_why_right|pre_premortem_failure_reason|pre_falsification_signal|pre_confidence_basis|pre_account_equity_usdt|pre_mortem_text|pre_positive_expectancy|pre_invalidation_condition|pre_calibration_win_pct|pre_confidence_interval_|pre_calibration_reference_class|pre_calibration_competence_basis|pre_calibration_update_signal|pre_dataset_split|pre_lollapalooza_score|pre_bankruptcy_estimate|pre_info_|pre_opponent_statement|pre_pain_tags|pre_cognitive_bias_tags|journal_kind|no_trade_reason|no_trade_would_be_entry_price|no_trade_direction|exit_falsification_status|exit_falsification_note|post_result_summary|post_decision_quality|post_positive_expectancy_review|post_premortem_review|post_invalidation_review|post_five_step|post_opponent_was_right|post_real_close_time|evolution_level|principle_id/i.test(message)
       && /schema cache|could not find|does not exist|column/i.test(message));
 }
 
@@ -2194,6 +2194,101 @@ export async function createJournalPreSnapshot(input: CreateJournalPreInput): Pr
   return journal;
 }
 
+export interface CreateNoTradeJournalInput {
+  user_id: string;
+  symbol: string;
+  direction: Extract<TradeDirection, 'long' | 'short'>;
+  pre_simulated_time: string;
+  no_trade_would_be_entry_price: number | null;
+  no_trade_reason?: string | null;
+  order_kind?: TradeJournal['order_kind'];
+}
+
+export async function createNoTradeJournal(
+  input: CreateNoTradeJournalInput,
+): Promise<TradeJournal> {
+  const payload = {
+    user_id: input.user_id,
+    trade_record_id: null,
+    campaign_id: null,
+    leg_role: null,
+    leg_sequence: null,
+    source: 'live' as const,
+    symbol: input.symbol,
+    direction: input.direction,
+    leverage: null,
+    position_mode: null,
+    order_kind: input.order_kind ?? 'main',
+    pre_simulated_time: input.pre_simulated_time,
+    pre_real_time: new Date().toISOString(),
+    pre_entry_price: null,
+    pre_planned_stop_loss: null,
+    pre_planned_take_profit: null,
+    pre_entry_reason: null,
+    pre_mental_state: 3 as const,
+    pre_mental_trigger: null,
+    pre_risk_awareness: null,
+    pre_risk_management: null,
+    pre_checklist_items: null,
+    pre_checklist_passed: null,
+    pre_position_size: null,
+    pre_max_loss_usdt: null,
+    pre_thesis_why_right: null,
+    pre_premortem_failure_reason: null,
+    pre_falsification_signal: null,
+    pre_confidence_basis: null,
+    pre_account_equity_usdt: null,
+    pre_mortem_text: null,
+    pre_positive_expectancy: null,
+    pre_invalidation_condition: null,
+    pre_calibration_win_pct: null,
+    pre_confidence_interval_low_pct: null,
+    pre_confidence_interval_high_pct: null,
+    pre_calibration_reference_class: null,
+    pre_calibration_competence_basis: null,
+    pre_calibration_update_signal: null,
+    pre_dataset_split: null,
+    pre_lollapalooza_score: null,
+    pre_bankruptcy_estimate: null,
+    pre_info_kline_facts: null,
+    pre_info_macro_facts: null,
+    pre_info_rule_advice: null,
+    pre_info_intuition: null,
+    pre_info_designer_view: null,
+    pre_opponent_statement: null,
+    pre_triggered_principle_ids: null,
+    pre_triggered_rule_ids: null,
+    pre_pain_tags: null,
+    pre_cognitive_bias_tags: [],
+    pre_executor_self: null,
+    pre_designer_self: null,
+    journal_kind: 'no_trade' as const,
+    no_trade_reason: input.no_trade_reason?.trim() || null,
+    no_trade_would_be_entry_price: input.no_trade_would_be_entry_price,
+    no_trade_direction: input.direction,
+    exit_falsification_status: null,
+    exit_falsification_note: null,
+    post_outcome: null,
+    post_realized_pnl: null,
+    post_r_multiple: null,
+    post_reflection: null,
+    post_correct_action: null,
+    post_reviewed_at: null,
+  };
+
+  const { data, error } = await supabase
+    .from("trade_journals" as never)
+    .insert(payload as never)
+    .select()
+    .single();
+
+  if (error && isMissingDalioMetaLayerError(error)) {
+    throw new Error('记录"太难"决策失败：数据库尚未完成批次 24 migration，请先同步 trade_journals 新字段');
+  }
+
+  return wrap('记录"太难"决策', error, data as unknown as TradeJournal);
+}
+
 export interface UpdateJournalPostInput {
   post_outcome: TradeOutcome;
   post_realized_pnl?: number | null;
@@ -2481,6 +2576,8 @@ export interface FinalizeJournalInput {
   post_intervention_type?: TradeJournal['post_intervention_type'];
   post_execution_monitor?: string | null;
   post_five_step_weak_point?: TradeJournal['post_five_step_weak_point'];
+  exit_falsification_status?: TradeJournal['exit_falsification_status'];
+  exit_falsification_note?: string | null;
 }
 
 export async function finalizeJournalReview(

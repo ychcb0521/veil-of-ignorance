@@ -7,6 +7,7 @@ import { BackButton } from '@/components/journal/BackButton';
 import { Slider } from '@/components/ui/slider';
 import { toast } from 'sonner';
 import { useAuth } from '@/contexts/AuthContext';
+import { computeBiasSpectrum } from '@/lib/biasSpectrum';
 import {
   listAllCampaigns,
   listAllJournalDataForUser,
@@ -24,6 +25,7 @@ import {
   ruleEffectNetOfBaseline,
   wilsonInterval,
 } from '@/lib/insightsStats';
+import { computeTooHardBasketStats, type TooHardBasketStats } from '@/lib/noTradeHypothetical';
 import { isHistoricalCampaign, PAIN_TAG_LABELS, PRINCIPLE_EVOLUTION_LEVEL_LABELS } from '@/types/journal';
 import type { PainTag, PrincipleEvolutionLevel, TradeCampaign, TradeJournal } from '@/types/journal';
 
@@ -232,6 +234,8 @@ export default function JournalInsightsPage() {
   const [data, setData] = useState<BulkJournalData | null>(null);
   const [campaigns, setCampaigns] = useState<TradeCampaign[]>([]);
   const [campaignEconomic, setCampaignEconomic] = useState<CampaignEconomicStats | null>(null);
+  const [tooHardStats, setTooHardStats] = useState<TooHardBasketStats | null>(null);
+  const [tooHardLoading, setTooHardLoading] = useState(false);
   const [range, setRange] = useState<Range>(30);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -279,6 +283,27 @@ export default function JournalInsightsPage() {
     return () => { cancelled = true; };
   }, [user]);
 
+  useEffect(() => {
+    if (!data) {
+      setTooHardStats(null);
+      return;
+    }
+    let cancelled = false;
+    setTooHardLoading(true);
+    computeTooHardBasketStats(data.journals, { days: 90 })
+      .then(result => {
+        if (!cancelled) setTooHardStats(result);
+      })
+      .catch(error => {
+        console.warn('[JournalInsightsPage] 太难篮子统计失败', error);
+        if (!cancelled) setTooHardStats(null);
+      })
+      .finally(() => {
+        if (!cancelled) setTooHardLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [data]);
+
   const stats = useMemo(() => {
     if (!data) return null;
     const now = Date.now();
@@ -290,8 +315,10 @@ export default function JournalInsightsPage() {
       const diff = now - new Date(j.pre_simulated_time).getTime();
       return diff > range * DAY && diff <= 2 * range * DAY;
     });
-    const curClusters = groupJournalsByPattern(cur, data.assignments, data.patterns, data.categories);
-    const prevClusters = groupJournalsByPattern(prev, data.assignments, data.patterns, data.categories);
+    const curTrades = cur.filter(j => (j.journal_kind ?? 'trade') === 'trade');
+    const prevTrades = prev.filter(j => (j.journal_kind ?? 'trade') === 'trade');
+    const curClusters = groupJournalsByPattern(curTrades, data.assignments, data.patterns, data.categories);
+    const prevClusters = groupJournalsByPattern(prevTrades, data.assignments, data.patterns, data.categories);
     const prevMap = new Map(prevClusters.map(c => [c.pattern.id, c.stats.occurrence_count]));
 
     const trend = curClusters.map(c => ({
@@ -302,8 +329,8 @@ export default function JournalInsightsPage() {
       avg_pnl: c.stats.avg_pnl,
     })).sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta));
 
-    const timeDist = computeTimeDistribution(cur);
-    const mentalDist = computeMentalStateDistribution(cur);
+    const timeDist = computeTimeDistribution(curTrades);
+    const mentalDist = computeMentalStateDistribution(curTrades);
     const closedCampaigns = campaigns.filter(campaign => isClosedCampaign(campaign, sinceMs));
     const historicalCampaigns = closedCampaigns.filter(isHistoricalCampaign);
     const curCampaigns = closedCampaigns.filter(campaign => !isHistoricalCampaign(campaign));
@@ -318,8 +345,8 @@ export default function JournalInsightsPage() {
       ? 0
       : campaignRValues.reduce((sum, value) => sum + value, 0) / campaignRValues.length;
     const averageRelativeExpectancyCi = meanConfidenceInterval(campaignRValues);
-    const mainOrders = cur.filter(j => j.order_kind === 'main');
-    const hedgeOrders = cur.filter(j => j.order_kind === 'hedge');
+    const mainOrders = curTrades.filter(j => j.order_kind === 'main');
+    const hedgeOrders = curTrades.filter(j => j.order_kind === 'hedge');
     const avgR = (arr: TradeJournal[]) => {
       const withR = arr.filter(j => j.post_r_multiple != null);
       if (withR.length === 0) return 0;
@@ -329,7 +356,7 @@ export default function JournalInsightsPage() {
       if (arr.length === 0) return 0;
       return arr.filter(j => j.post_outcome === 'win').length / arr.length;
     };
-    const crossCount = data.journals.filter(j => j.position_mode === 'cross').length;
+    const crossCount = data.journals.filter(j => (j.journal_kind ?? 'trade') === 'trade' && j.position_mode === 'cross').length;
 
     // Alpha 时段：avg_pnl > 0 且 count >= 3 的小时段
     const alphaHours = timeDist.filter(b => b.count >= 3 && b.avg_pnl > 0)
@@ -375,7 +402,7 @@ export default function JournalInsightsPage() {
         return { rule: r, pattern, before, after, delta: after - before, ci, baseline, globalBefore, globalAfter };
       });
 
-    const calibrationRows = cur.filter(j =>
+    const calibrationRows = curTrades.filter(j =>
       j.pre_calibration_win_pct != null &&
       j.post_outcome != null &&
       j.post_outcome !== 'no_entry',
@@ -420,9 +447,9 @@ export default function JournalInsightsPage() {
       target: calibrationTarget(calibrationBins, calibration.count),
       drillCandidates: calibrationDrillCandidates,
     };
-    const restraintCount = cur.filter(j => j.direction === 'no_entry' || j.post_outcome === 'no_entry').length;
+    const restraintCount = curTrades.filter(j => j.direction === 'no_entry' || j.post_outcome === 'no_entry').length;
 
-    const reviewedMain = cur.filter(j => j.order_kind === 'main' && j.post_reviewed_at && j.post_outcome && j.post_outcome !== 'no_entry');
+    const reviewedMain = curTrades.filter(j => j.order_kind === 'main' && j.post_reviewed_at && j.post_outcome && j.post_outcome !== 'no_entry');
     const directionWins = reviewedMain.filter(j => j.post_outcome === 'win').length;
     const goodDecisionCount = reviewedMain.filter(j => j.post_decision_quality === 'good').length;
     const opponentSamples = reviewedMain.filter(j => typeof j.post_opponent_was_right === 'boolean');
@@ -478,7 +505,7 @@ export default function JournalInsightsPage() {
 
     const painStats = (Object.keys(PAIN_TAG_LABELS) as PainTag[])
       .map(tag => {
-        const rows = cur.filter(j => j.pre_pain_tags?.includes(tag));
+        const rows = curTrades.filter(j => j.pre_pain_tags?.includes(tag));
         const withR = rows.filter(j => typeof j.post_r_multiple === 'number');
         const avg = withR.length === 0 ? 0 : withR.reduce((sum, j) => sum + (j.post_r_multiple ?? 0), 0) / withR.length;
         return { tag, count: rows.length, avgR: avg };
@@ -492,7 +519,7 @@ export default function JournalInsightsPage() {
     }));
 
     // 深度分析完成率：六步全填的占已评价 journal 比
-    const reviewed = cur.filter(j => !!j.post_reviewed_at);
+    const reviewed = curTrades.filter(j => !!j.post_reviewed_at);
     const deepDone = reviewed.filter(j => !!j.deep_analysis_completed_at);
     const deepRate = reviewed.length === 0 ? 0 : deepDone.length / reviewed.length;
 
@@ -526,6 +553,11 @@ export default function JournalInsightsPage() {
       crossCount,
     };
   }, [campaigns, data, range]);
+
+  const biasSpectrum = useMemo(
+    () => computeBiasSpectrum(data?.journals ?? [], 90),
+    [data],
+  );
 
   if (loading) {
     return (
@@ -687,6 +719,97 @@ export default function JournalInsightsPage() {
                 </div>
               ))}
             </div>
+          </section>
+        </div>
+
+        <div className="grid md:grid-cols-2 gap-3">
+          <section className="border border-border rounded bg-card p-3">
+            <div className="text-[12px] font-medium">个人偏差光谱 · 过去 90 天</div>
+            <div className="mt-1 text-[10px] text-muted-foreground">
+              超级预测者的核心实践：知道自己的偏差光谱。
+            </div>
+            {biasSpectrum.labeledTradeCount < 5 ? (
+              <div className="mt-4 text-[11px] text-muted-foreground">
+                数据积累中——记录更多带标签的交易后，这里会显示你的偏差光谱。
+              </div>
+            ) : (
+              <div className="mt-4 space-y-2">
+                {biasSpectrum.items.map(item => (
+                  <div key={item.id} className="rounded border border-border bg-background px-3 py-2">
+                    <div className="flex items-center justify-between gap-3 text-[11px]">
+                      <div>
+                        {item.rank}. {item.label} {item.is_biggest_gap ? <span className="text-[#F0B90B]">#1</span> : null}
+                      </div>
+                      <div className="font-mono text-muted-foreground">
+                        {item.occurrences} 次（其中 {item.loss_count} 次以亏损收场）
+                      </div>
+                    </div>
+                    <div className="mt-2 h-1.5 rounded bg-card overflow-hidden">
+                      <div
+                        className="h-full"
+                        style={{
+                          width: `${Math.max(8, item.loss_ratio * 100)}%`,
+                          background: item.loss_ratio >= 0.66 ? '#F6465D' : item.loss_ratio >= 0.4 ? '#F0B90B' : '#0ECB81',
+                        }}
+                      />
+                    </div>
+                  </div>
+                ))}
+                {biasSpectrum.items[0] && (
+                  <div className="rounded border border-[#F0B90B]/30 bg-[#F0B90B]/10 px-3 py-2 text-[11px] text-[#F0B90B]">
+                    → 你的最大单一漏洞：{biasSpectrum.items[0].label}
+                  </div>
+                )}
+              </div>
+            )}
+          </section>
+
+          <section className="border border-border rounded bg-card p-3">
+            <div className="text-[12px] font-medium">太难篮子 · 过去 90 天</div>
+            <div className="mt-1 text-[10px] text-muted-foreground">
+              芒格的第三个篮子：进、出、太难。跳过不是空白，而是被尊重的记录。
+            </div>
+            {tooHardLoading ? (
+              <div className="mt-4 text-[11px] text-muted-foreground">计算中…</div>
+            ) : (
+              <div className="mt-4 space-y-3">
+                <div className="grid grid-cols-3 gap-2">
+                  <div className="rounded border border-border bg-background p-2">
+                    <div className="text-[10px] text-muted-foreground">跳过次数</div>
+                    <div className="text-[18px] font-mono">{tooHardStats?.skipCount ?? 0}</div>
+                  </div>
+                  <div className="rounded border border-border bg-background p-2">
+                    <div className="text-[10px] text-muted-foreground">跳过率</div>
+                    <div className="text-[18px] font-mono">{pct(tooHardStats?.skipRate ?? 0)}</div>
+                  </div>
+                  <div className="rounded border border-border bg-background p-2">
+                    <div className="text-[10px] text-muted-foreground">+7d 平均盈亏</div>
+                    <div className={`text-[18px] font-mono ${
+                      (tooHardStats?.avgPnl7d ?? 0) < 0 ? 'text-[#0ECB81]' : (tooHardStats?.avgPnl7d ?? 0) > 0 ? 'text-[#F0B90B]' : 'text-muted-foreground'
+                    }`}>
+                      {tooHardStats?.avgPnl7d == null ? '—' : `${tooHardStats.avgPnl7d >= 0 ? '+' : ''}${tooHardStats.avgPnl7d.toFixed(2)}%`}
+                    </div>
+                  </div>
+                </div>
+                <div className={`text-[11px] ${
+                  tooHardStats?.avgPnl7d == null
+                    ? 'text-muted-foreground'
+                    : tooHardStats.avgPnl7d < 0
+                      ? 'text-[#0ECB81]'
+                      : tooHardStats.avgPnl7d > 0
+                        ? 'text-[#F0B90B]'
+                        : 'text-muted-foreground'
+                }`}>
+                  {tooHardStats?.avgPnl7d == null
+                    ? '部分太难记录尚未到期，+7d 假想盈亏暂不足以给结论。'
+                    : tooHardStats.avgPnl7d < 0
+                      ? "你跳过的多数是亏损单——'太难'用得好"
+                      : tooHardStats.avgPnl7d > 0
+                        ? '你跳过的多数会盈利——可能过度保守，复查能力圈边界'
+                        : '目前看，你的“太难”筛选没有明显偏向。'}
+                </div>
+              </div>
+            )}
           </section>
         </div>
 

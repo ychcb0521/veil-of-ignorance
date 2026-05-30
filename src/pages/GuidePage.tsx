@@ -254,7 +254,7 @@ export default function GuidePage() {
                 <FlowArrow />
                 <FlowNode>回放行情，等待符合策略的机会</FlowNode>
                 <FlowArrow />
-                <FlowNode accent>开仓前填写快照：信息收集五维度、反对者陈述、正期望、pre-mortem、证伪条件、痛苦标签、预测胜率、checklist</FlowNode>
+                <FlowNode accent>开仓前填写快照：决策三问（正/反/止）、最大亏损、心态自评、情绪标签（唤醒度×效价）、预测胜率、checklist</FlowNode>
                 <FlowArrow />
                 <FlowNode>下单、持仓、平仓</FlowNode>
                 <FlowArrow />
@@ -291,7 +291,7 @@ export default function GuidePage() {
                   下单零弹窗、平仓零评价，节奏与币安 1:1。本模式下产生的交易仅进入持仓历史与交易战役归类，<strong>不进入</strong> 错题集、元监控、规则系统。适合熟悉的标的、流畅的执行、或只想观察盘面的场景。
                 </KeyCard>
                 <KeyCard title="决策记录">
-                  完整的开仓快照（信息收集五维度、反对者陈述、正期望理由、亏完最可能原因、证伪条件、痛苦标签、最大亏损、心态、胜率预测、Lollapalooza、破产估算等）+ 平仓后强制评价 + 错题集自动归类 + 元监控统计 + 规则系统冷却。适合刻意训练同一类 setup、复盘高频错误模式、或对自己进行校准。
+                  完整的开仓快照（<strong>决策三问</strong>：为什么对 / 亏完最可能原因 / 证伪信号；最大亏损、心态自评、<strong>情绪标签</strong>（按唤醒度×效价分组）、二元预测胜率、checklist 等）+ 平仓后强制评价 + 错题集自动归类 + 元监控统计 + 规则系统冷却。适合刻意训练同一类 setup、复盘高频错误模式、或对自己进行校准。
                 </KeyCard>
               </KeyGrid>
               <div className="overflow-x-auto">
@@ -373,7 +373,53 @@ export default function GuidePage() {
 
             <section id="s3-2" className="scroll-mt-20">
               <SubTitle>3.3 下单前快照</SubTitle>
-              <P>开仓快照是系统的核心记录点。它固定“下单前的你”看到什么、相信什么、愿意亏多少、处在什么心态。</P>
+              <P>开仓快照是系统的核心记录点。它固定“下单前的你”看到什么、相信什么、愿意亏多少、处在什么心态。批次 23 之后只保留会直接改变决策质量的字段，其它放进复盘抽屉，避免表单变成负担。</P>
+
+              <SubTitle>决策三问（正—反—止）</SubTitle>
+              <P>快照的核心是三道按 <strong>Munger inversion</strong> 排列的问题，必须三问全写满才能提交。前端把三题做成同等宽的并列卡片，<span style={{ color: '#0ECB81' }}>绿</span>—<span style={{ color: '#F0B90B' }}>黄</span>—<span style={{ color: '#F6465D' }}>红</span> 的色阶提示从“证成”到“证伪”的思考路径，右上角的小圆点会随填写进度变色。</P>
+              <div className="overflow-x-auto">
+                <table className="w-full text-[11px] my-3 border border-border rounded overflow-hidden">
+                  <thead className="bg-muted/50">
+                    <tr>
+                      <th className="text-left px-3 py-2 font-medium text-foreground text-[10px]">题号</th>
+                      <th className="text-left px-3 py-2 font-medium text-foreground text-[10px]">问题</th>
+                      <th className="text-left px-3 py-2 font-medium text-foreground text-[10px]">回答方式</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr><td className="px-3 py-2 border-t border-border"><span style={{ color: '#0ECB81' }}>① 正</span></td><td className="px-3 py-2 border-t border-border">这笔为什么会对？</td><td className="px-3 py-2 border-t border-border">结构、量能、宏观、规则整合写一段；不要拆成多个论据框</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border"><span style={{ color: '#F0B90B' }}>② 反</span></td><td className="px-3 py-2 border-t border-border">假设这笔亏完，最可能的原因是？</td><td className="px-3 py-2 border-t border-border">用 pre-mortem 写出最可能让你输的剧本，平仓后用它比对真实亏损原因</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border"><span style={{ color: '#F6465D' }}>③ 止</span></td><td className="px-3 py-2 border-t border-border">什么 K 线 / 盘面信号会让你提前止损或拆仓？</td><td className="px-3 py-2 border-t border-border">证伪点必须是可被盘面客观验证的事件（破支撑、量能背离、收盘价等）</td></tr>
+                  </tbody>
+                </table>
+              </div>
+              <Highlight>
+                三问的意义不是“写满表单”，而是逼自己在下单前把<strong>胜的逻辑</strong>与<strong>败的剧本</strong>同时摊开。只写第一问，等于只看到了想看到的那一半。
+              </Highlight>
+
+              <SubTitle>情绪标签（唤醒度 × 效价）</SubTitle>
+              <P>情绪选项按 Russell 情感环模型分组：<strong>情绪唤醒度</strong>（高/低）描述能量是否被激活，<strong>情绪效价</strong>（正/负）描述这股能量是建设性还是破坏性，另外保留一个<strong>平和度</strong>专属选项（抽离/旁观）记录“设计者视角”这种特殊的中性状态。可多选，也可全不选。</P>
+              <div className="overflow-x-auto">
+                <table className="w-full text-[11px] my-3 border border-border rounded overflow-hidden">
+                  <thead className="bg-muted/50">
+                    <tr>
+                      <th className="text-left px-3 py-2 font-medium text-foreground text-[10px]">分组</th>
+                      <th className="text-left px-3 py-2 font-medium text-foreground text-[10px]">含义</th>
+                      <th className="text-left px-3 py-2 font-medium text-foreground text-[10px]">标签</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr><td className="px-3 py-2 border-t border-border"><span style={{ color: '#0ECB81' }}>正向 · 高唤醒</span></td><td className="px-3 py-2 border-t border-border">能量被建设性方向调动</td><td className="px-3 py-2 border-t border-border">心流/专注、自信</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border"><span style={{ color: '#2EBD85' }}>正向 · 低唤醒</span></td><td className="px-3 py-2 border-t border-border">稳定且放松的状态</td><td className="px-3 py-2 border-t border-border">平和、知足</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border"><span style={{ color: '#7C8B9C' }}>中性 · 平和度</span></td><td className="px-3 py-2 border-t border-border">把自己当成第三方观察</td><td className="px-3 py-2 border-t border-border">抽离/旁观</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border"><span style={{ color: '#F6465D' }}>负向 · 高唤醒</span></td><td className="px-3 py-2 border-t border-border">情绪推着你做决定</td><td className="px-3 py-2 border-t border-border">错失/FOMO、焦虑、贪婪、报复</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border"><span style={{ color: '#D89B00' }}>负向 · 低唤醒</span></td><td className="px-3 py-2 border-t border-border">情绪压住你，逃避或停摆</td><td className="px-3 py-2 border-t border-border">损失厌恶、后悔、疲惫/无力</td></tr>
+                  </tbody>
+                </table>
+              </div>
+              <P>情绪标签会同步写入 <code>pain_log_entries</code> 痛苦日志（沿用旧表名），元监控里会按标签统计后续平均 R，识别<strong>最危险的心理入口</strong>。新增的正向与中性标签同样进入这条管线，用来观察“自认为状态好”时是否真的有正期望。</P>
+
+              <SubTitle>其它快照字段</SubTitle>
               <div className="overflow-x-auto">
                 <table className="w-full text-[11px] my-3 border border-border rounded overflow-hidden">
                   <thead className="bg-muted/50">
@@ -385,24 +431,11 @@ export default function GuidePage() {
                   </thead>
                   <tbody>
                     <tr><td className="px-3 py-2 border-t border-border">订单类型</td><td className="px-3 py-2 border-t border-border">区分主力单与对冲单</td><td className="px-3 py-2 border-t border-border">主力单评估方向判断；对冲单评估风险防御</td></tr>
-                    <tr><td className="px-3 py-2 border-t border-border">信息收集五维度</td><td className="px-3 py-2 border-t border-border">先了解后决定：K线、宏观、规则建议、直觉、设计者视角</td><td className="px-3 py-2 border-t border-border">只记录当时可见信息，不写事后解释</td></tr>
-                    <tr><td className="px-3 py-2 border-t border-border">反对者陈述</td><td className="px-3 py-2 border-t border-border">强制自己提出高质量反对意见</td><td className="px-3 py-2 border-t border-border">平仓后比对反对者是否命中</td></tr>
-                    <tr><td className="px-3 py-2 border-t border-border">开仓理由</td><td className="px-3 py-2 border-t border-border">记录原始假设</td><td className="px-3 py-2 border-t border-border">必须具体到结构和条件</td></tr>
-                    <tr><td className="px-3 py-2 border-t border-border">正期望理由</td><td className="px-3 py-2 border-t border-border">回答“我为什么认为这笔有正期望”</td><td className="px-3 py-2 border-t border-border">说清优势来自概率、赔率、亏损边界还是组合</td></tr>
-                    <tr><td className="px-3 py-2 border-t border-border">证伪条件</td><td className="px-3 py-2 border-t border-border">回答“什么条件出现时证明我错了”</td><td className="px-3 py-2 border-t border-border">平仓后必须比对是否出现、是否执行</td></tr>
-                    <tr><td className="px-3 py-2 border-t border-border">最大亏损</td><td className="px-3 py-2 border-t border-border">定义本次风险预算</td><td className="px-3 py-2 border-t border-border">后续 R 倍数以此为分母</td></tr>
-                    <tr><td className="px-3 py-2 border-t border-border">心态自评</td><td className="px-3 py-2 border-t border-border">记录决策者状态</td><td className="px-3 py-2 border-t border-border">≤2 分硬阻挡，不能用确认框绕过</td></tr>
-                    <tr><td className="px-3 py-2 border-t border-border">Pre-mortem</td><td className="px-3 py-2 border-t border-border">强制先想“如果这单亏完，最可能的原因是什么”</td><td className="px-3 py-2 border-t border-border">平仓后用它比对真实亏损原因</td></tr>
-                    <tr><td className="px-3 py-2 border-t border-border">预测胜率</td><td className="px-3 py-2 border-t border-border">Tetlock / Good Judgment 式校准训练</td><td className="px-3 py-2 border-t border-border">用“做对/做错”互补滑杆给出具体概率，平仓后进入 Calibration 计算校准分数</td></tr>
-                    <tr><td className="px-3 py-2 border-t border-border">90% 置信区间</td><td className="px-3 py-2 border-t border-border">检查自己的概率范围是否覆盖预测值</td><td className="px-3 py-2 border-t border-border">过窄通常意味着过度自信，过宽说明判断尚未成熟</td></tr>
-                    <tr><td className="px-3 py-2 border-t border-border">历史回溯</td><td className="px-3 py-2 border-t border-border">引用过去类似 setup 的真实表现</td><td className="px-3 py-2 border-t border-border">没有参考类，就不要给高置信度</td></tr>
-                    <tr><td className="px-3 py-2 border-t border-border">能力圈匹配</td><td className="px-3 py-2 border-t border-border">说明高置信来自理解还是感觉</td><td className="px-3 py-2 border-t border-border">感觉可以记录，但不能伪装成能力圈</td></tr>
-                    <tr><td className="px-3 py-2 border-t border-border">更新检查</td><td className="px-3 py-2 border-t border-border">确认形成判断后是否出现新信息</td><td className="px-3 py-2 border-t border-border">出现新信息必须更新概率、区间或放弃交易</td></tr>
-                    <tr><td className="px-3 py-2 border-t border-border">痛苦标签</td><td className="px-3 py-2 border-t border-border">即时记录损失厌恶、FOMO、后悔、贪婪、焦虑、报复等痛感</td><td className="px-3 py-2 border-t border-border">长期观察痛苦类型与后续 R 的关系</td></tr>
-                    <tr><td className="px-3 py-2 border-t border-border">两个你</td><td className="px-3 py-2 border-t border-border">分开记录执行者-我与设计者-我的意见</td><td className="px-3 py-2 border-t border-border">持仓中不能用执行者状态临时改规则</td></tr>
-                    <tr><td className="px-3 py-2 border-t border-border">训练集划分</td><td className="px-3 py-2 border-t border-border">区分进场期与出场期</td><td className="px-3 py-2 border-t border-border">防止把训练样本误当考试成绩</td></tr>
-                    <tr><td className="px-3 py-2 border-t border-border">风险组合与破产估计</td><td className="px-3 py-2 border-t border-border">显示 Lollapalooza score 与 100 次连续训练的期望破产次数</td><td className="px-3 py-2 border-t border-border">组合风险过高时硬阻挡</td></tr>
-                    <tr><td className="px-3 py-2 border-t border-border">Checklist</td><td className="px-3 py-2 border-t border-border">把规则前置到下单前</td><td className="px-3 py-2 border-t border-border">不能判断是否通过的条目，需要重写</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border">仓位模式</td><td className="px-3 py-2 border-t border-border">强制使用逐仓</td><td className="px-3 py-2 border-t border-border">全仓是硬阻断，必须切换到逐仓才能提交</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border">本次最大亏损 USDT</td><td className="px-3 py-2 border-t border-border">定义本次风险预算</td><td className="px-3 py-2 border-t border-border">后续 R 倍数以此为分母；占总账户 ≥10% 会触发提醒</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border">心态自评 (1–5)</td><td className="px-3 py-2 border-t border-border">记录决策者状态</td><td className="px-3 py-2 border-t border-border">≤2 分硬阻挡，不能用确认框绕过</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border">二元预测概率</td><td className="px-3 py-2 border-t border-border">Tetlock / Good Judgment 式校准训练</td><td className="px-3 py-2 border-t border-border">用“做对/做错”互补滑杆给出具体概率，并写下你为什么有资格给这个置信度；平仓后进入 Calibration 计算校准分数</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border">开仓 Checklist</td><td className="px-3 py-2 border-t border-border">把规则前置到下单前</td><td className="px-3 py-2 border-t border-border">必填项必须全勾；不能判断是否通过的条目，需要回到规则页重写</td></tr>
                   </tbody>
                 </table>
               </div>
@@ -477,7 +510,7 @@ export default function GuidePage() {
                 <li><strong>Calibration</strong>：比较开仓预测胜率与平仓结果，观察判断是否过度自信。</li>
                 <li><strong>可信度向量</strong>：分别追踪方向判断、决策质量、反对者命中、快照完整度和校准能力。</li>
                 <li><strong>决策质量 vs 结果</strong>：用 D-score 与 R 的散点关系判断规则是否真有预测性。</li>
-                <li><strong>痛苦日志</strong>：观察不同痛苦类型后续的平均 R，识别最危险的心理入口。</li>
+                <li><strong>情绪日志</strong>：按情绪唤醒度 × 效价分组统计后续平均 R，识别最危险的心理入口；正向/中性标签同样进入对比，用来检验“自认为状态好”是否真的有正期望。</li>
                 <li><strong>规则演化地图</strong>：查看规则从直觉、表述、模式确认、规则化到算法化的证据等级。</li>
                 <li><strong>订单类型分布</strong>：主力单与对冲单是否失衡。</li>
                 <li><strong>心态与时段</strong>：识别你的高质量状态与危险时段。</li>

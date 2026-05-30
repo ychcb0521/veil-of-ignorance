@@ -34,14 +34,42 @@ export type DecisionQuality = 'good' | 'mixed' | 'bad';
 export type RuleCategory = 'hard' | 'core' | 'watch' | 'retired';
 export type PrincipleEvolutionLevel = 0 | 1 | 2 | 3 | 4 | 5;
 export type PainTag =
-  | 'loss_aversion'
+  // 负向 · 高唤醒
   | 'fomo'
-  | 'regret'
-  | 'greed'
   | 'anxiety'
-  | 'revenge';
+  | 'greed'
+  | 'revenge'
+  // 负向 · 低唤醒
+  | 'loss_aversion'
+  | 'regret'
+  | 'fatigue'
+  // 正向 · 高唤醒
+  | 'focused'
+  | 'confident'
+  // 正向 · 低唤醒
+  | 'calm'
+  | 'content'
+  // 中性 · 平和度（执行者抽离）
+  | 'detached';
+
+export type EmotionValence = 'positive' | 'neutral' | 'negative';
+export type EmotionArousal = 'high' | 'low';
+
+export interface EmotionTagMeta {
+  label: string;
+  valence: EmotionValence;
+  arousal: EmotionArousal;
+  /** 简短说明，给 UI tooltip / 副标题用 */
+  hint: string;
+}
 export type FiveStepWeakPoint = 'goal' | 'problem' | 'diagnosis' | 'design' | 'execution';
 export type InterventionType = 'principle' | 'rule' | 'sop' | 'awareness';
+
+// ============ Batch 24: Munger layer ============
+/** 'trade' = normal order (incl. the legacy "该开没开" decision record); 'no_trade' = Munger "too hard" skip. */
+export type JournalKind = 'trade' | 'no_trade';
+/** Result of checking the entry-time falsification signal against what actually happened before close. */
+export type ExitFalsificationStatus = 'triggered_reacted' | 'triggered_late' | 'not_triggered';
 
 export const PRINCIPLE_EVOLUTION_LEVEL_LABELS: Record<PrincipleEvolutionLevel, string> = {
   0: '直觉',
@@ -52,14 +80,31 @@ export const PRINCIPLE_EVOLUTION_LEVEL_LABELS: Record<PrincipleEvolutionLevel, s
   5: '已证伪/升级',
 };
 
-export const PAIN_TAG_LABELS: Record<PainTag, string> = {
-  loss_aversion: '损失厌恶痛',
-  fomo: '错失/FOMO 痛',
-  regret: '后悔痛',
-  greed: '贪婪痛',
-  anxiety: '焦虑痛',
-  revenge: '报复痛',
+export const EMOTION_TAG_META: Record<PainTag, EmotionTagMeta> = {
+  // 负向 · 高唤醒（被情绪推着走）
+  fomo: { label: '错失/FOMO 痛', valence: 'negative', arousal: 'high', hint: '怕赶不上别人，急着追入' },
+  anxiety: { label: '焦虑痛', valence: 'negative', arousal: 'high', hint: '未发生事就提前心慌' },
+  greed: { label: '贪婪痛', valence: 'negative', arousal: 'high', hint: '想再多赚一点，舍不得离场' },
+  revenge: { label: '报复痛', valence: 'negative', arousal: 'high', hint: '想用下一单把上一单赢回来' },
+  // 负向 · 低唤醒（被情绪压住）
+  loss_aversion: { label: '损失厌恶痛', valence: 'negative', arousal: 'low', hint: '害怕兑现亏损，不敢动' },
+  regret: { label: '后悔痛', valence: 'negative', arousal: 'low', hint: '盯着已发生的错误反复回放' },
+  fatigue: { label: '疲惫/无力', valence: 'negative', arousal: 'low', hint: '注意力涣散，不想再判断' },
+  // 正向 · 高唤醒（积极但活跃）
+  focused: { label: '心流/专注', valence: 'positive', arousal: 'high', hint: '盘面与判断高度契合' },
+  confident: { label: '自信', valence: 'positive', arousal: 'high', hint: '判断有据，敢按计划下注' },
+  // 正向 · 低唤醒（积极且平稳）
+  calm: { label: '平和', valence: 'positive', arousal: 'low', hint: '情绪平稳，不急不躁' },
+  content: { label: '知足', valence: 'positive', arousal: 'low', hint: '对当前进度满意，不勉强' },
+  // 中性 · 平和度（执行者抽离）
+  detached: { label: '抽离/旁观', valence: 'neutral', arousal: 'low', hint: '设计者视角，把自己当成第三方' },
 };
+
+/** 向后兼容旧代码：只保留 label。新 UI 用 EMOTION_TAG_META。 */
+export const PAIN_TAG_LABELS: Record<PainTag, string> = Object.fromEntries(
+  (Object.entries(EMOTION_TAG_META) as [PainTag, EmotionTagMeta][])
+    .map(([tag, meta]) => [tag, meta.label]),
+) as Record<PainTag, string>;
 export type CampaignStatus =
   | 'planned'
   | 'active'
@@ -362,6 +407,22 @@ export interface TradeJournal {
   pre_confidence_basis?: string | null;
   /** Account equity snapshot used to reconstruct the risk-anchor percentage. */
   pre_account_equity_usdt?: number | null;
+
+  // ============ Batch 24: Munger layer ============
+  /** 'trade' (default, incl. legacy no_entry decision record) or 'no_trade' (too-hard skip). */
+  journal_kind?: JournalKind;
+  /** Free-text reason a setup was judged "too hard" (no_trade only). */
+  no_trade_reason?: string | null;
+  /** Market price at the moment the user pressed "too hard", for hypothetical PnL. */
+  no_trade_would_be_entry_price?: number | null;
+  /** Direction the user would have taken had they entered (no_trade only). */
+  no_trade_direction?: 'long' | 'short' | null;
+  /** Cognitive-bias self-check tags (dual-track with pre_pain_tags). 'none' means self-checked clean. */
+  pre_cognitive_bias_tags?: string[] | null;
+  /** Post-close check of the entry-time falsification signal. */
+  exit_falsification_status?: ExitFalsificationStatus | null;
+  /** Optional note for the falsification check. */
+  exit_falsification_note?: string | null;
 
   // ============ Decision-quality fields (added 2026-05) ============
   /** @deprecated v2 snapshot uses pre_premortem_failure_reason. */

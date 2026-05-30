@@ -16,13 +16,15 @@ import { toast } from 'sonner';
 import { Pencil, ChevronDown, BrainCircuit } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useTradingContext } from '@/contexts/TradingContext';
+import { COGNITIVE_BIAS_LABELS } from '@/lib/cognitiveBiasTags';
 import {
   finalizeJournalReview, replacePhaseAssignments,
   listAssignmentsForJournal, countPatternOccurrencesLast30Days, listPatterns,
   updateJournalDeepAnalysis, stampJournalCloseRealTime,
 } from '@/lib/journalApi';
 import type { TradeJournal, TradeOutcome, ErrorTagPattern } from '@/types/journal';
-import { MENTAL_STATE_LABELS } from '@/types/journal';
+import { MENTAL_STATE_LABELS, PAIN_TAG_LABELS } from '@/types/journal';
+import type { PainTag } from '@/types/journal';
 import { formatBeijingTime } from '@/lib/timeFormat';
 import type { TradeRecord } from '@/types/trading';
 import { JournalTagPicker } from './JournalTagPicker';
@@ -57,6 +59,8 @@ export function PostTradeReviewSheet({
   const [expectancyReview, setExpectancyReview] = useState('');
   const [premortemReview, setPremortemReview] = useState('');
   const [invalidationReview, setInvalidationReview] = useState('');
+  const [falsificationStatus, setFalsificationStatus] = useState<TradeJournal['exit_falsification_status']>(null);
+  const [falsificationNote, setFalsificationNote] = useState('');
   const [opponentWasRight, setOpponentWasRight] = useState<boolean | null>(null);
   const [fiveStepGoal, setFiveStepGoal] = useState('');
   const [fiveStepProblem, setFiveStepProblem] = useState('');
@@ -99,6 +103,8 @@ export function PostTradeReviewSheet({
         setExpectancyReview(journal.post_positive_expectancy_review ?? '');
         setPremortemReview(journal.post_premortem_review ?? '');
         setInvalidationReview(journal.post_invalidation_review ?? '');
+        setFalsificationStatus(journal.exit_falsification_status ?? null);
+        setFalsificationNote(journal.exit_falsification_note ?? '');
         setOpponentWasRight(journal.post_opponent_was_right ?? null);
         setFiveStepGoal(journal.post_five_step_goal ?? '');
         setFiveStepProblem(journal.post_five_step_problem ?? '');
@@ -277,6 +283,8 @@ export function PostTradeReviewSheet({
         post_positive_expectancy_review: expectancyReview.trim(),
         post_premortem_review: premortemReview.trim(),
         post_invalidation_review: invalidationReview.trim(),
+        exit_falsification_status: falsificationStatus,
+        exit_falsification_note: falsificationNote.trim() || null,
         post_opponent_was_right: opponentWasRight,
         post_five_step_goal: fiveStepGoal.trim(),
         post_five_step_problem: fiveStepProblem.trim(),
@@ -463,7 +471,10 @@ export function PostTradeReviewSheet({
                 {journal.pre_info_designer_view && <div>• 设计者视角：{journal.pre_info_designer_view}</div>}
                 {journal.pre_opponent_statement && <div>• 反对者：{journal.pre_opponent_statement}</div>}
                 {journal.pre_pain_tags && journal.pre_pain_tags.length > 0 && (
-                  <div>• 痛苦标签：{journal.pre_pain_tags.join(' / ')}</div>
+                  <div>• 情绪标签：{journal.pre_pain_tags.map(tag => PAIN_TAG_LABELS[tag as PainTag] ?? tag).join(' / ')}</div>
+                )}
+                {journal.pre_cognitive_bias_tags && journal.pre_cognitive_bias_tags.length > 0 && (
+                  <div>• 认知偏差：{journal.pre_cognitive_bias_tags.map(tag => COGNITIVE_BIAS_LABELS[tag] ?? tag).join(' / ')}</div>
                 )}
                 {journal.pre_executor_self && <div>• 执行者-我：{journal.pre_executor_self}</div>}
                 {journal.pre_designer_self && <div>• 设计者-我：{journal.pre_designer_self}</div>}
@@ -621,6 +632,50 @@ export function PostTradeReviewSheet({
           {snapshotPremortem && (
             <div className="rounded-lg border border-border/60 bg-background/60 px-3 py-2 text-[11px] leading-relaxed">
               <span className="text-muted-foreground">当时预演的亏损原因：</span>{snapshotPremortem}
+            </div>
+          )}
+          {journal.pre_falsification_signal && (
+            <div className="rounded-xl border border-border/70 bg-background/70 px-3 py-3 space-y-3">
+              <div>
+                <div className="text-[12px] font-medium text-foreground">证伪信号校验</div>
+                <div className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
+                  你开仓时写的证伪信号：
+                </div>
+                <div className="mt-1 rounded border border-border/60 bg-card px-3 py-2 text-[11px] leading-relaxed text-foreground">
+                  {journal.pre_falsification_signal}
+                </div>
+              </div>
+              <div className="space-y-2">
+                <Label className="text-[12px] font-medium">这个信号在平仓前触发了吗？</Label>
+                <div className="grid gap-2">
+                  {[
+                    { value: 'triggered_reacted', label: '触发了，我及时反应了' },
+                    { value: 'triggered_late', label: '触发了，但我反应晚了' },
+                    { value: 'not_triggered', label: '没触发，我是主观平仓' },
+                  ].map(option => (
+                    <button
+                      key={option.value}
+                      type="button"
+                      onClick={() => setFalsificationStatus(option.value as NonNullable<TradeJournal['exit_falsification_status']>)}
+                      className={`rounded-lg border px-3 py-2 text-left text-[11px] transition-colors ${
+                        falsificationStatus === option.value
+                          ? 'border-[#F0B90B] bg-[#F0B90B]/10 text-foreground'
+                          : 'border-border bg-background text-muted-foreground hover:bg-accent'
+                      }`}
+                    >
+                      {option.label}
+                    </button>
+                  ))}
+                </div>
+                <Textarea
+                  rows={2}
+                  value={falsificationNote}
+                  onChange={event => setFalsificationNote(event.target.value)}
+                  placeholder="备注（可选）"
+                  className="text-[12px] bg-background/80 border-border/70 rounded-xl"
+                />
+                <div className="text-[10px] text-muted-foreground">这项是软性校验，可跳过，不阻塞保存。</div>
+              </div>
             </div>
           )}
           <div className="space-y-1.5">

@@ -9,9 +9,12 @@ import { Textarea } from '@/components/ui/textarea';
 import { Input } from '@/components/ui/input';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Slider } from '@/components/ui/slider';
-import { PAIN_TAG_LABELS } from '@/types/journal';
+import { COGNITIVE_BIAS_NONE, COGNITIVE_BIAS_TAGS, type CognitiveBiasTagId } from '@/lib/cognitiveBiasTags';
+import { computeDiscount } from '@/lib/confidenceDiscount';
+import { EMOTION_TAG_META } from '@/types/journal';
+import type { EmotionTagMeta } from '@/types/journal';
 import { buildChecklist, isChecklistPassed } from '@/lib/defaultChecklist';
-import { listRules } from '@/lib/journalApi';
+import { listJournals, listRules } from '@/lib/journalApi';
 import { useAuth } from '@/contexts/AuthContext';
 import { useTradingContext } from '@/contexts/TradingContext';
 import { calcUnrealizedPnl } from '@/types/trading';
@@ -80,6 +83,7 @@ export interface SnapshotPayload {
   pre_triggered_principle_ids: string[] | null;
   pre_triggered_rule_ids: string[] | null;
   pre_pain_tags: PainTag[] | null;
+  pre_cognitive_bias_tags: string[] | null;
   pre_executor_self: string | null;
   pre_designer_self: string | null;
   tp_levels: TpLevel[];
@@ -96,10 +100,100 @@ interface Props {
   pricePrecision: number;
   orderParams?: PlaceOrderParams | null;
   onCancel: () => void;
+  onTooHard?: (draft: { order_kind: OrderKind }) => void;
   onSubmit: (payload: SnapshotPayload) => Promise<void> | void;
 }
 
-const PAIN_TAG_ORDER = Object.keys(PAIN_TAG_LABELS) as PainTag[];
+interface EmotionGroup {
+  key: string;
+  title: string;
+  hint: string;
+  accent: string;
+  tags: PainTag[];
+}
+
+const EMOTION_GROUPS: EmotionGroup[] = (() => {
+  const entries = Object.entries(EMOTION_TAG_META) as [PainTag, EmotionTagMeta][];
+  const byBucket = (valence: EmotionTagMeta['valence'], arousal: EmotionTagMeta['arousal']) =>
+    entries.filter(([, meta]) => meta.valence === valence && meta.arousal === arousal).map(([tag]) => tag);
+  return [
+    {
+      key: 'pos-high',
+      title: '正向 · 高唤醒',
+      hint: '能量被建设性方向调动',
+      accent: '#0ECB81',
+      tags: byBucket('positive', 'high'),
+    },
+    {
+      key: 'pos-low',
+      title: '正向 · 低唤醒',
+      hint: '稳定且放松的状态',
+      accent: '#2EBD85',
+      tags: byBucket('positive', 'low'),
+    },
+    {
+      key: 'neutral',
+      title: '中性 · 平和度',
+      hint: '把自己当成第三方观察',
+      accent: '#7C8B9C',
+      tags: byBucket('neutral', 'low'),
+    },
+    {
+      key: 'neg-high',
+      title: '负向 · 高唤醒',
+      hint: '情绪推着你做决定',
+      accent: '#F6465D',
+      tags: byBucket('negative', 'high'),
+    },
+    {
+      key: 'neg-low',
+      title: '负向 · 低唤醒',
+      hint: '情绪压住你，逃避或停摆',
+      accent: '#D89B00',
+      tags: byBucket('negative', 'low'),
+    },
+  ].filter(group => group.tags.length > 0);
+})();
+
+interface DecisionQuestion {
+  id: 'why' | 'premortem' | 'falsification';
+  index: number;
+  title: string;
+  hint: string;
+  placeholder: string;
+  accent: string;
+  badgeText: string;
+}
+
+const DECISION_QUESTIONS: DecisionQuestion[] = [
+  {
+    id: 'why',
+    index: 1,
+    title: '这笔为什么会对？',
+    hint: '正向论证：结构 / 量能 / 宏观 / 规则',
+    placeholder: '把支撑你下注的证据整合成一段话，不分多框。',
+    accent: '#0ECB81',
+    badgeText: '正',
+  },
+  {
+    id: 'premortem',
+    index: 2,
+    title: '假设这笔亏完，最可能的原因是？',
+    hint: 'Munger inversion：先想清楚怎么输',
+    placeholder: '写出最可能让你亏完的剧本——是结构破位、是情绪、还是规则失效。',
+    accent: '#F0B90B',
+    badgeText: '反',
+  },
+  {
+    id: 'falsification',
+    index: 3,
+    title: '什么 K 线 / 盘面信号会让你提前止损或拆仓？',
+    hint: '证伪点：必须可被盘面客观验证',
+    placeholder: '写成具体事件，例如「跌破 4h 关键支撑且 1h 量能放大」。',
+    accent: '#F6465D',
+    badgeText: '止',
+  },
+];
 
 const fmtTime = (d: Date) => {
   const pad = (n: number) => n.toString().padStart(2, '0');
@@ -129,6 +223,7 @@ export function PreTradeSnapshotForm({
   pricePrecision,
   orderParams,
   onCancel,
+  onTooHard,
   onSubmit,
 }: Props) {
   const isTrade = mode === 'trade';
@@ -150,10 +245,12 @@ export function PreTradeSnapshotForm({
   const [maxLossInput, setMaxLossInput] = useState('');
   const [mental, setMental] = useState<1 | 2 | 3 | 4 | 5>(3);
   const [painTags, setPainTags] = useState<PainTag[]>([]);
+  const [cognitiveBiasTags, setCognitiveBiasTags] = useState<CognitiveBiasTagId[]>([]);
   const [confidencePct, setConfidencePct] = useState(50);
   const [confidenceBasis, setConfidenceBasis] = useState('');
   const [checked, setChecked] = useState<string[]>([]);
   const [userRules, setUserRules] = useState<TradingRule[]>([]);
+  const [historicalJournals, setHistoricalJournals] = useState<any[]>([]);
   const [submitting, setSubmitting] = useState(false);
 
   const isHedge = isTrade && orderKind === 'hedge';
@@ -165,6 +262,23 @@ export function PreTradeSnapshotForm({
     if (!user || !isTrade) return;
     listRules(user.id).then(setUserRules).catch(() => setUserRules([]));
   }, [user, isTrade]);
+
+  useEffect(() => {
+    if (!user) {
+      setHistoricalJournals([]);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const rows = await listJournals(user.id);
+        if (!cancelled) setHistoricalJournals(rows);
+      } catch {
+        if (!cancelled) setHistoricalJournals([]);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [user]);
 
   const accountEquity = useMemo(() => {
     let equity = Number.isFinite(balance) ? balance : 0;
@@ -230,6 +344,21 @@ export function PreTradeSnapshotForm({
     setPainTags(prev => prev.includes(tag) ? prev.filter(item => item !== tag) : [...prev, tag]);
   };
 
+  const toggleCognitiveBiasTag = (tag: CognitiveBiasTagId) => {
+    setCognitiveBiasTags(prev => {
+      if (tag === COGNITIVE_BIAS_NONE) {
+        return prev.includes(tag) ? [] : [tag];
+      }
+      const base = prev.filter(item => item !== COGNITIVE_BIAS_NONE);
+      return base.includes(tag) ? base.filter(item => item !== tag) : [...base, tag];
+    });
+  };
+
+  const discount = useMemo(
+    () => computeDiscount(confidencePct, historicalJournals),
+    [confidencePct, historicalJournals],
+  );
+
   const submit = async () => {
     if (!canSubmit || submitting) return;
     setSubmitting(true);
@@ -286,6 +415,7 @@ export function PreTradeSnapshotForm({
         pre_triggered_principle_ids: null,
         pre_triggered_rule_ids: null,
         pre_pain_tags: painTags,
+        pre_cognitive_bias_tags: cognitiveBiasTags,
         pre_executor_self: null,
         pre_designer_self: null,
         tp_levels: [],
@@ -385,35 +515,88 @@ export function PreTradeSnapshotForm({
         )}
 
         <section>
-          <div className={`${labelCls} mb-2`}>决策三问{requiredStar}</div>
+          <div className="mb-3 flex items-end justify-between gap-3">
+            <div>
+              <div className="text-[12px] font-medium text-foreground">决策三问{requiredStar}</div>
+              <div className="mt-0.5 text-[10px] text-muted-foreground">
+                正—反—止：用 Munger inversion 把胜与败一起写清楚，三题都必填
+              </div>
+            </div>
+            <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
+              {DECISION_QUESTIONS.map(q => {
+                const done = (
+                  q.id === 'why' ? whyRight.trim().length > 0
+                    : q.id === 'premortem' ? failureReason.trim().length > 0
+                    : falsificationSignal.trim().length > 0
+                );
+                return (
+                  <span
+                    key={q.id}
+                    className={`flex h-4 w-4 items-center justify-center rounded-full text-[9px] font-bold transition-colors ${
+                      done ? 'text-black' : 'text-muted-foreground'
+                    }`}
+                    style={{ background: done ? q.accent : 'hsl(var(--muted))' }}
+                  >
+                    {q.index}
+                  </span>
+                );
+              })}
+            </div>
+          </div>
           <div className="grid gap-3 md:grid-cols-3">
-            <label className="block">
-              <div className="mb-1 text-[12px] font-medium">这笔为什么会对？</div>
-              <Textarea
-                value={whyRight}
-                onChange={event => setWhyRight(event.target.value)}
-                placeholder="结构、量能、宏观、规则一起说，不分多框。"
-                className={textareaCls}
-              />
-            </label>
-            <label className="block">
-              <div className="mb-1 text-[12px] font-medium">假设这笔亏完，最可能的原因是什么？</div>
-              <Textarea
-                value={failureReason}
-                onChange={event => setFailureReason(event.target.value)}
-                placeholder="Munger inversion——先想清楚怎么输，才有资格谈怎么赢。"
-                className={textareaCls}
-              />
-            </label>
-            <label className="block">
-              <div className="mb-1 text-[12px] font-medium">什么 K 线/盘面信号会让你提前止损或拆仓？</div>
-              <Textarea
-                value={falsificationSignal}
-                onChange={event => setFalsificationSignal(event.target.value)}
-                placeholder="把证伪点写成可被盘面客观验证的事件。"
-                className={textareaCls}
-              />
-            </label>
+            {DECISION_QUESTIONS.map(q => {
+              const value = (
+                q.id === 'why' ? whyRight
+                  : q.id === 'premortem' ? failureReason
+                  : falsificationSignal
+              );
+              const onChange = (v: string) => {
+                if (q.id === 'why') setWhyRight(v);
+                else if (q.id === 'premortem') setFailureReason(v);
+                else setFalsificationSignal(v);
+              };
+              const filled = value.trim().length > 0;
+              return (
+                <label
+                  key={q.id}
+                  className="group flex flex-col rounded-md border bg-card p-3 transition-colors"
+                  style={{
+                    borderColor: filled ? q.accent : 'hsl(var(--border))',
+                    background: filled ? `${q.accent}0A` : undefined,
+                  }}
+                >
+                  <div className="mb-2 flex items-center gap-2">
+                    <span
+                      className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[11px] font-bold text-black"
+                      style={{ background: q.accent }}
+                    >
+                      {q.index}
+                    </span>
+                    <div className="min-w-0">
+                      <div className="text-[12px] font-medium leading-snug text-foreground">
+                        {q.title}
+                      </div>
+                      <div className="text-[10px] text-muted-foreground leading-snug">{q.hint}</div>
+                    </div>
+                  </div>
+                  <Textarea
+                    value={value}
+                    onChange={event => onChange(event.target.value)}
+                    placeholder={q.placeholder}
+                    className={`${textareaCls} bg-background/80`}
+                  />
+                  <div className="mt-1.5 flex items-center justify-between text-[10px] text-muted-foreground">
+                    <span
+                      className="inline-flex h-4 items-center rounded px-1.5 text-[9px] font-medium"
+                      style={{ background: `${q.accent}1A`, color: q.accent }}
+                    >
+                      {q.badgeText}
+                    </span>
+                    <span className="font-mono">{value.trim().length} 字</span>
+                  </div>
+                </label>
+              );
+            })}
           </div>
         </section>
 
@@ -465,22 +648,92 @@ export function PreTradeSnapshotForm({
         </section>
 
         <section>
-          <div className={`${labelCls} mb-2`}>当前痛苦/情绪标签</div>
-          <div className="flex flex-wrap gap-2">
-            {PAIN_TAG_ORDER.map(tag => (
-              <button
-                key={tag}
-                type="button"
-                onClick={() => togglePainTag(tag)}
-                className={`h-8 rounded border px-3 text-[12px] transition-colors ${
-                  painTags.includes(tag)
-                    ? 'border-[#F0B90B] bg-[#F0B90B]/10 text-foreground'
-                    : 'border-border bg-card text-muted-foreground hover:bg-accent'
-                }`}
+          <div className="mb-2 flex items-end justify-between gap-3">
+            <div>
+              <div className="text-[12px] font-medium text-foreground">当前情绪标签</div>
+              <div className="mt-0.5 text-[10px] text-muted-foreground">
+                按情绪唤醒度 × 情绪效价 双维分组，含一个平和度（抽离）；可多选，也可全不选
+              </div>
+            </div>
+            <div className="text-[10px] text-muted-foreground">
+              已选 <span className="font-mono text-foreground">{painTags.length}</span>
+            </div>
+          </div>
+          <div className="grid gap-2 md:grid-cols-2">
+            {EMOTION_GROUPS.map(group => (
+              <div
+                key={group.key}
+                className="rounded-md border border-border/70 bg-card/60 p-2.5"
               >
-                {PAIN_TAG_LABELS[tag]}
-              </button>
+                <div className="mb-2 flex items-center gap-2">
+                  <span
+                    className="inline-block h-2 w-2 shrink-0 rounded-full"
+                    style={{ background: group.accent }}
+                  />
+                  <span className="text-[11px] font-medium text-foreground">{group.title}</span>
+                  <span className="text-[10px] text-muted-foreground">· {group.hint}</span>
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {group.tags.map(tag => {
+                    const meta = EMOTION_TAG_META[tag];
+                    const selected = painTags.includes(tag);
+                    return (
+                      <button
+                        key={tag}
+                        type="button"
+                        onClick={() => togglePainTag(tag)}
+                        title={meta.hint}
+                        className="h-7 rounded-full border px-2.5 text-[11px] transition-colors"
+                        style={{
+                          borderColor: selected ? group.accent : 'hsl(var(--border))',
+                          background: selected ? `${group.accent}1F` : undefined,
+                          color: selected ? group.accent : 'hsl(var(--muted-foreground))',
+                        }}
+                      >
+                        {meta.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
             ))}
+          </div>
+        </section>
+
+        <section>
+          <div className="mb-2 flex items-end justify-between gap-3">
+            <div>
+              <div className="text-[12px] font-medium text-foreground">认知偏差自查</div>
+              <div className="mt-0.5 text-[10px] text-muted-foreground">
+                痛苦标签是情绪轨；认知偏差是另一条轨。情绪你能感觉到，偏差你意识不到，所以更要主动查。
+              </div>
+            </div>
+            <div className="text-[10px] text-muted-foreground">
+              已选 <span className="font-mono text-foreground">{cognitiveBiasTags.length}</span>
+            </div>
+          </div>
+          <div className="rounded-md border border-border/70 bg-card/60 p-2.5">
+            <div className="flex flex-wrap gap-1.5">
+              {COGNITIVE_BIAS_TAGS.map(tag => {
+                const selected = cognitiveBiasTags.includes(tag.id);
+                return (
+                  <button
+                    key={tag.id}
+                    type="button"
+                    onClick={() => toggleCognitiveBiasTag(tag.id)}
+                    title={tag.hint}
+                    className="h-7 rounded-full border px-2.5 text-[11px] transition-colors"
+                    style={{
+                      borderColor: selected ? '#F0B90B' : 'hsl(var(--border))',
+                      background: selected ? 'rgba(240, 185, 11, 0.12)' : undefined,
+                      color: selected ? '#F0B90B' : 'hsl(var(--muted-foreground))',
+                    }}
+                  >
+                    {tag.label}
+                  </button>
+                );
+              })}
+            </div>
           </div>
         </section>
 
@@ -514,6 +767,19 @@ export function PreTradeSnapshotForm({
               placeholder="我为什么有资格给这个置信度？"
               className={inputCls}
             />
+            <div className="rounded border border-border/70 bg-background/70 px-3 py-2.5">
+              <div className="text-[11px] font-medium text-foreground">芒格折扣 · 置信度安全边际</div>
+              <div className="mt-1 text-[12px] text-foreground">
+                {discount.source === 'personalized'
+                  ? `你的输入：${confidencePct}% → 按你的历史校准，真实可能：${discount.discountedPct}%`
+                  : `你的输入：${confidencePct}% → 折扣后真实可能：${discount.discountedPct}%`}
+              </div>
+              <div className="mt-1 text-[10px] text-muted-foreground">
+                {discount.source === 'personalized'
+                  ? `基于你过去 ${discount.sampleSize} 笔相近置信度交易的实际胜率`
+                  : '主观置信度系统性偏高约 15 个百分点（Tetlock）。积累 10 笔以上相近交易后，此处将改用你的个人校准。'}
+              </div>
+            </div>
           </div>
         </section>
 
@@ -554,14 +820,26 @@ export function PreTradeSnapshotForm({
         >
           取消
         </button>
-        <button
-          type="button"
-          onClick={submit}
-          disabled={!canSubmit || submitting}
-          className={`h-9 rounded px-4 text-[12px] font-medium transition-opacity disabled:cursor-not-allowed disabled:opacity-40 ${confirmBtnClass}`}
-        >
-          {confirmBtnText}
-        </button>
+        <div className="flex items-center gap-2">
+          {isTrade && (
+            <button
+              type="button"
+              onClick={() => onTooHard?.({ order_kind: orderKind })}
+              disabled={submitting}
+              className="h-9 rounded border border-[#F0B90B]/40 px-4 text-[12px] font-medium text-[#F0B90B] transition-colors hover:bg-[#F0B90B]/10 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              太难，不做这单
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={submit}
+            disabled={!canSubmit || submitting}
+            className={`h-9 rounded px-4 text-[12px] font-medium transition-opacity disabled:cursor-not-allowed disabled:opacity-40 ${confirmBtnClass}`}
+          >
+            {confirmBtnText}
+          </button>
+        </div>
       </div>
     </div>
   );
