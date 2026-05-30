@@ -4,11 +4,12 @@
  */
 
 import { useEffect, useMemo, useState } from 'react';
-import { AlertTriangle } from 'lucide-react';
+import { AlertTriangle, ChevronDown } from 'lucide-react';
 import { Textarea } from '@/components/ui/textarea';
 import { Input } from '@/components/ui/input';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Slider } from '@/components/ui/slider';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import {
   COGNITIVE_BIAS_CATEGORIES,
@@ -794,69 +795,82 @@ export function PreTradeSnapshotForm({
           </div>
           <TooltipProvider delayDuration={150}>
             <div className="space-y-2">
-              {EMOTION_GROUPS.map(group => (
-                <div
-                  key={group.valence}
-                  className="rounded-lg border border-border/70 bg-card/80 p-3 shadow-sm"
-                >
-                  <div className="mb-2 flex items-center gap-2">
-                    <span
-                      className="inline-block h-2 w-2 shrink-0 rounded-full"
-                      style={{ background: group.accent }}
-                    />
-                    <span className="text-[11px] font-medium text-foreground">{group.title}</span>
-                    <span className="text-[10px] text-muted-foreground">· {group.ruleImpact}</span>
-                  </div>
-                  <div
-                    className="mb-2.5 border-l-2 pl-2 text-[10px] italic leading-snug text-muted-foreground"
-                    style={{ borderColor: group.accent }}
-                  >
-                    {group.systemPrompt}
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    {group.tags.map(tag => {
-                      const meta = EMOTION_TAG_META[tag];
-                      const selected = painTags.includes(tag);
-                      return (
-                        <Tooltip key={tag}>
-                          <TooltipTrigger asChild>
-                            <button
-                              type="button"
-                              onClick={() => togglePainTag(tag)}
-                              className="inline-flex min-h-8 items-center rounded-full border px-2.5 py-1 text-[11px] leading-none transition-colors"
-                              style={{
-                                borderColor: selected ? group.accent : 'hsl(var(--border))',
-                                background: selected ? `${group.accent}1F` : undefined,
-                                color: selected ? group.accent : 'hsl(var(--muted-foreground))',
-                              }}
-                            >
-                              {meta.label}
-                            </button>
-                          </TooltipTrigger>
-                          <TooltipContent
-                            side="bottom"
-                            align="start"
-                            collisionPadding={12}
-                            className="w-[min(320px,calc(100vw-24px))] border-border bg-popover p-3 shadow-xl"
-                          >
-                            <div className="space-y-1">
-                              <div className="text-[11px] font-medium" style={{ color: group.accent }}>
-                                {meta.label}
-                              </div>
-                              <div className="text-[11px] leading-snug text-popover-foreground">
-                                <span className="text-muted-foreground">核心含义：</span>{meta.coreMeaning}
-                              </div>
-                              <div className="text-[11px] leading-snug text-popover-foreground">
-                                <span className="text-muted-foreground">可能导致的行为倾向：</span>{meta.behaviorTendency}
-                              </div>
-                            </div>
-                          </TooltipContent>
-                        </Tooltip>
-                      );
-                    })}
-                  </div>
-                </div>
-              ))}
+              {EMOTION_GROUPS.map(group => {
+                const selectedCount = group.tags.filter(tag => painTags.includes(tag)).length;
+                return (
+                  <Collapsible key={group.valence} defaultOpen>
+                    <div className="rounded-lg border border-border/70 bg-card/80 shadow-sm">
+                      <CollapsibleTrigger
+                        className="group flex w-full items-start justify-between gap-3 px-3 py-3 text-left"
+                      >
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2">
+                            <span
+                              className="inline-block h-2 w-2 shrink-0 rounded-full"
+                              style={{ background: group.accent }}
+                            />
+                            <span className="text-[11px] font-medium text-foreground">{group.title}</span>
+                            <span className="text-[10px] text-muted-foreground">· {group.ruleImpact}</span>
+                          </div>
+                          <div className="mt-1 border-l-2 pl-2 text-[10px] italic leading-snug text-muted-foreground" style={{ borderColor: group.accent }}>
+                            {group.systemPrompt}
+                          </div>
+                        </div>
+                        <div className="flex shrink-0 items-center gap-2">
+                          <span className="text-[10px] font-mono text-muted-foreground">
+                            已选 {selectedCount}
+                          </span>
+                          <ChevronDown className="h-4 w-4 text-muted-foreground transition-transform group-data-[state=open]:rotate-180" />
+                        </div>
+                      </CollapsibleTrigger>
+                      <CollapsibleContent className="px-3 pb-3">
+                        <div className="flex flex-wrap gap-2">
+                          {group.tags.map(tag => {
+                            const meta = EMOTION_TAG_META[tag];
+                            const selected = painTags.includes(tag);
+                            return (
+                              <Tooltip key={tag}>
+                                <TooltipTrigger asChild>
+                                  <button
+                                    type="button"
+                                    onClick={() => togglePainTag(tag)}
+                                    className="inline-flex min-h-8 items-center rounded-full border px-2.5 py-1 text-[11px] leading-none transition-colors"
+                                    style={{
+                                      borderColor: selected ? group.accent : 'hsl(var(--border))',
+                                      background: selected ? `${group.accent}1F` : undefined,
+                                      color: selected ? group.accent : 'hsl(var(--muted-foreground))',
+                                    }}
+                                  >
+                                    {meta.label}
+                                  </button>
+                                </TooltipTrigger>
+                                <TooltipContent
+                                  side="bottom"
+                                  align="start"
+                                  collisionPadding={12}
+                                  className="w-[min(320px,calc(100vw-24px))] border-border bg-popover p-3 shadow-xl"
+                                >
+                                  <div className="space-y-1">
+                                    <div className="text-[11px] font-medium" style={{ color: group.accent }}>
+                                      {meta.label}
+                                    </div>
+                                    <div className="text-[11px] leading-snug text-popover-foreground">
+                                      <span className="text-muted-foreground">核心含义：</span>{meta.coreMeaning}
+                                    </div>
+                                    <div className="text-[11px] leading-snug text-popover-foreground">
+                                      <span className="text-muted-foreground">可能导致的行为倾向：</span>{meta.behaviorTendency}
+                                    </div>
+                                  </div>
+                                </TooltipContent>
+                              </Tooltip>
+                            );
+                          })}
+                        </div>
+                      </CollapsibleContent>
+                    </div>
+                  </Collapsible>
+                );
+              })}
             </div>
           </TooltipProvider>
         </section>
@@ -875,69 +889,82 @@ export function PreTradeSnapshotForm({
           </div>
           <TooltipProvider delayDuration={150}>
             <div className="space-y-2">
-              {COGNITIVE_BIAS_GROUPS.map(group => (
-                <div
-                  key={group.category}
-                  className="rounded-lg border border-border/70 bg-card/80 p-3 shadow-sm"
-                >
-                  <div className="mb-2 flex items-center gap-2">
-                    <span
-                      className="inline-block h-2 w-2 shrink-0 rounded-full"
-                      style={{ background: group.accent }}
-                    />
-                    <span className="text-[11px] font-medium text-foreground">{group.title}</span>
-                    <span className="text-[10px] text-muted-foreground">· {group.oneLiner}</span>
-                  </div>
-                  <div
-                    className="mb-2.5 border-l-2 pl-2 text-[10px] italic leading-snug text-muted-foreground"
-                    style={{ borderColor: group.accent }}
-                  >
-                    {group.systemPrompt}
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    {group.tags.map(tag => {
-                      const meta = COGNITIVE_BIAS_META[tag];
-                      const selected = cognitiveBiasTags.includes(tag);
-                      return (
-                        <Tooltip key={tag}>
-                          <TooltipTrigger asChild>
-                            <button
-                              type="button"
-                              onClick={() => toggleCognitiveBiasTag(tag)}
-                              className="inline-flex min-h-8 items-center rounded-full border px-2.5 py-1 text-[11px] leading-none transition-colors"
-                              style={{
-                                borderColor: selected ? group.accent : 'hsl(var(--border))',
-                                background: selected ? `${group.accent}1F` : undefined,
-                                color: selected ? group.accent : 'hsl(var(--muted-foreground))',
-                              }}
-                            >
-                              {meta.label}
-                            </button>
-                          </TooltipTrigger>
-                          <TooltipContent
-                            side="bottom"
-                            align="start"
-                            collisionPadding={12}
-                            className="w-[min(320px,calc(100vw-24px))] border-border bg-popover p-3 shadow-xl"
-                          >
-                            <div className="space-y-1">
-                              <div className="text-[11px] font-medium" style={{ color: group.accent }}>
-                                {meta.label}
-                              </div>
-                              <div className="text-[11px] leading-snug text-popover-foreground">
-                                <span className="text-muted-foreground">核心含义：</span>{meta.coreMeaning}
-                              </div>
-                              <div className="text-[11px] leading-snug text-popover-foreground">
-                                <span className="text-muted-foreground">典型交易危害：</span>{meta.tradingHarm}
-                              </div>
-                            </div>
-                          </TooltipContent>
-                        </Tooltip>
-                      );
-                    })}
-                  </div>
-                </div>
-              ))}
+              {COGNITIVE_BIAS_GROUPS.map(group => {
+                const selectedCount = group.tags.filter(tag => cognitiveBiasTags.includes(tag)).length;
+                return (
+                  <Collapsible key={group.category} defaultOpen>
+                    <div className="rounded-lg border border-border/70 bg-card/80 shadow-sm">
+                      <CollapsibleTrigger
+                        className="group flex w-full items-start justify-between gap-3 px-3 py-3 text-left"
+                      >
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2">
+                            <span
+                              className="inline-block h-2 w-2 shrink-0 rounded-full"
+                              style={{ background: group.accent }}
+                            />
+                            <span className="text-[11px] font-medium text-foreground">{group.title}</span>
+                            <span className="text-[10px] text-muted-foreground">· {group.oneLiner}</span>
+                          </div>
+                          <div className="mt-1 border-l-2 pl-2 text-[10px] italic leading-snug text-muted-foreground" style={{ borderColor: group.accent }}>
+                            {group.systemPrompt}
+                          </div>
+                        </div>
+                        <div className="flex shrink-0 items-center gap-2">
+                          <span className="text-[10px] font-mono text-muted-foreground">
+                            已选 {selectedCount}
+                          </span>
+                          <ChevronDown className="h-4 w-4 text-muted-foreground transition-transform group-data-[state=open]:rotate-180" />
+                        </div>
+                      </CollapsibleTrigger>
+                      <CollapsibleContent className="px-3 pb-3">
+                        <div className="flex flex-wrap gap-2">
+                          {group.tags.map(tag => {
+                            const meta = COGNITIVE_BIAS_META[tag];
+                            const selected = cognitiveBiasTags.includes(tag);
+                            return (
+                              <Tooltip key={tag}>
+                                <TooltipTrigger asChild>
+                                  <button
+                                    type="button"
+                                    onClick={() => toggleCognitiveBiasTag(tag)}
+                                    className="inline-flex min-h-8 items-center rounded-full border px-2.5 py-1 text-[11px] leading-none transition-colors"
+                                    style={{
+                                      borderColor: selected ? group.accent : 'hsl(var(--border))',
+                                      background: selected ? `${group.accent}1F` : undefined,
+                                      color: selected ? group.accent : 'hsl(var(--muted-foreground))',
+                                    }}
+                                  >
+                                    {meta.label}
+                                  </button>
+                                </TooltipTrigger>
+                                <TooltipContent
+                                  side="bottom"
+                                  align="start"
+                                  collisionPadding={12}
+                                  className="w-[min(320px,calc(100vw-24px))] border-border bg-popover p-3 shadow-xl"
+                                >
+                                  <div className="space-y-1">
+                                    <div className="text-[11px] font-medium" style={{ color: group.accent }}>
+                                      {meta.label}
+                                    </div>
+                                    <div className="text-[11px] leading-snug text-popover-foreground">
+                                      <span className="text-muted-foreground">核心含义：</span>{meta.coreMeaning}
+                                    </div>
+                                    <div className="text-[11px] leading-snug text-popover-foreground">
+                                      <span className="text-muted-foreground">典型交易危害：</span>{meta.tradingHarm}
+                                    </div>
+                                  </div>
+                                </TooltipContent>
+                              </Tooltip>
+                            );
+                          })}
+                        </div>
+                      </CollapsibleContent>
+                    </div>
+                  </Collapsible>
+                );
+              })}
             </div>
           </TooltipProvider>
         </section>
