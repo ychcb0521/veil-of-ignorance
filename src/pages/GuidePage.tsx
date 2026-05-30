@@ -302,6 +302,40 @@ export default function GuidePage() {
               <P>
                 因此，就“决策受到什么信息影响”而言，这里的模拟训练与真实交易几乎等价。两者面对的是同一个问题：在未来不可见、结果不确定、情绪和偏差会干扰判断的条件下，你能不能仍然按事前规则行动；如果做不到，系统能不能留下足够证据，帮你找出为什么做不到。
               </P>
+              <SubTitle>封住下限，敞开上限：系统的不对称</SubTitle>
+              <P>
+                站在“无知之幕”背后，你并不知道这一笔会赢还是会输——于是系统做的第一件事，是优化下限、放开上限：它追求的不是每一笔都对，而是即使在最坏的情况下，也能拿到一个“还可以”的结果，亏得起，活得下来。
+              </P>
+              <P>
+                这不是保守。在一个你无法预测的市场里，最坏情况不是会不会来，而是迟早会来——所以你必须先把它兜住。下限兜死之后，才谈上限：而上限要尽可能放开，因为乐观情况可遇不可求，可一旦真的遇到，你必须有底气、也有仓位，去抓住那个高赔率。
+              </P>
+              <P>
+                这就是它的不对称——下限是封住的，上限是敞开的。亏损被锁在一个你受得起的数字里，盈利却可以一路放大。而你之所以敢让赢的单子奔跑，正是因为输的那一端，早已被钉死。
+              </P>
+              <div className="bg-card border-l-4 border-[#F0B90B] rounded-r p-6 my-8">
+                <p className="text-[24px] leading-relaxed text-foreground text-center">
+                  封住下限，不是为了少亏，而是为了敢赢。
+                </p>
+              </div>
+              <P>这一句把“保守”和“反脆弱”彻底分开：保守的人两端都收着；反脆弱的人锁死一端、敞开另一端。</P>
+              <div className="overflow-x-auto">
+                <table className="w-full text-[11px] my-3 border border-border rounded overflow-hidden">
+                  <thead className="bg-muted/50">
+                    <tr>
+                      <th className="text-left px-3 py-2 font-medium text-foreground text-[10px]">取向</th>
+                      <th className="text-left px-3 py-2 font-medium text-foreground text-[10px]">下限（最坏情况）</th>
+                      <th className="text-left px-3 py-2 font-medium text-foreground text-[10px]">上限（最好情况）</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr><td className="px-3 py-2 border-t border-border">保守</td><td className="px-3 py-2 border-t border-border">收着、回避风险</td><td className="px-3 py-2 border-t border-border">也收着，盈利过早兑现</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border"><strong>反脆弱（本系统）</strong></td><td className="px-3 py-2 border-t border-border">锁死，封在受得起的数字</td><td className="px-3 py-2 border-t border-border">敞开，让盈利一路放大</td></tr>
+                  </tbody>
+                </table>
+              </div>
+              <P>
+                这套不对称不是态度，而是被写进机制的：开仓前的“本次最大亏损”把单笔风险钉成 R 的分母，“下注规模 · 毁灭概率封顶”用毁灭概率给仓位设顶，逐仓、全仓硬阻断与致命单笔损失弹窗共同把下限焊死；而盈利端，系统从不设上限——当赔率够高、战役级样本也支持时，下注建议反而鼓励你把仓位放到该放的位置。
+              </P>
               <SubTitle>五层闭环：从信念到动作，再用数据反写信念</SubTitle>
               <P>
                 这套系统不是用来记录盈亏的，而是用来训练你的判断。它按五层闭环运转：底层信念生成规则，规则被带进每一笔交易现场，交易结束后被复盘诊断，最后由长期数据反过来检查——这整套方法，到底有没有让你变好。从上到下，越来越快、越来越具体；从下到上，真实数据一点点改写你最底层的信念。
@@ -714,6 +748,7 @@ export default function GuidePage() {
 
           <section id="s6" className="scroll-mt-20">
             <SectionTitle accent="#F6465D">6. 数据边界与硬约束</SectionTitle>
+            <P className="mb-3">这一节的每一条硬约束，本质上都在做同一件事：把<strong>下限</strong>钉死。它们不决定你能赚多少，只确保最坏情况发生时，你依然亏得起、活得下来——上限可以敞开，正是因为下限不会被击穿。</P>
             <div className="space-y-3">
               <P><strong>主力单与对冲单必须分开理解。</strong> 主力单评估方向与机会质量；对冲单评估风险管理。把两者混在一起，会污染 R 倍数、胜率和错误模式统计。</P>
               <P><strong>最大亏损是 R 倍数的分母。</strong> 它表达的是本次愿意承受的最大错误成本，不应被事后修改成更好看的数字。</P>
