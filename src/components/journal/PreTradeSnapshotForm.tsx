@@ -798,7 +798,7 @@ export function PreTradeSnapshotForm({
               {EMOTION_GROUPS.map(group => {
                 const selectedCount = group.tags.filter(tag => painTags.includes(tag)).length;
                 return (
-                  <Collapsible key={group.valence} defaultOpen>
+                  <Collapsible key={group.valence}>
                     <div className="rounded-lg border border-border/70 bg-card/80 shadow-sm">
                       <CollapsibleTrigger
                         className="group flex w-full items-start justify-between gap-3 px-3 py-3 text-left"
@@ -892,7 +892,7 @@ export function PreTradeSnapshotForm({
               {COGNITIVE_BIAS_GROUPS.map(group => {
                 const selectedCount = group.tags.filter(tag => cognitiveBiasTags.includes(tag)).length;
                 return (
-                  <Collapsible key={group.category} defaultOpen>
+                  <Collapsible key={group.category}>
                     <div className="rounded-lg border border-border/70 bg-card/80 shadow-sm">
                       <CollapsibleTrigger
                         className="group flex w-full items-start justify-between gap-3 px-3 py-3 text-left"
