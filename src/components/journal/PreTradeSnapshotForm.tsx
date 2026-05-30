@@ -10,7 +10,13 @@ import { Input } from '@/components/ui/input';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Slider } from '@/components/ui/slider';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
-import { COGNITIVE_BIAS_NONE, COGNITIVE_BIAS_TAGS, type CognitiveBiasTagId } from '@/lib/cognitiveBiasTags';
+import {
+  COGNITIVE_BIAS_CATEGORIES,
+  COGNITIVE_BIAS_META,
+  type CognitiveBiasCategory,
+  type CognitiveBiasMeta,
+  type CognitiveBiasTagId,
+} from '@/lib/cognitiveBiasTags';
 import { computeDiscount } from '@/lib/confidenceDiscount';
 import { computeBetSizing, estimatePayoffRatio, DEFAULT_PAYOFF_RATIO } from '@/lib/kellySizing';
 import { analyzePositionFeedback, type FeedbackPolarity } from '@/lib/positionFeedback';
@@ -121,6 +127,24 @@ const EMOTION_GROUPS: EmotionGroup[] = EMOTION_CATEGORIES.map(category => ({
   ...category,
   tags: (Object.entries(EMOTION_TAG_META) as [PainTag, EmotionTagMeta][])
     .filter(([, meta]) => meta.valence === category.valence)
+    .map(([tag]) => tag),
+})).filter(group => group.tags.length > 0);
+
+interface CognitiveBiasGroup {
+  category: CognitiveBiasCategory;
+  title: string;
+  oneLiner: string;
+  definition: string;
+  systemPrompt: string;
+  accent: string;
+  tags: CognitiveBiasTagId[];
+}
+
+/** 三类认知偏差（信息=看错信息 / 判断=想错逻辑 / 执行=做错动作），按 COGNITIVE_BIAS_META 的声明顺序填充各自的标签。 */
+const COGNITIVE_BIAS_GROUPS: CognitiveBiasGroup[] = COGNITIVE_BIAS_CATEGORIES.map(category => ({
+  ...category,
+  tags: (Object.entries(COGNITIVE_BIAS_META) as [CognitiveBiasTagId, CognitiveBiasMeta][])
+    .filter(([, meta]) => meta.category === category.category)
     .map(([tag]) => tag),
 })).filter(group => group.tags.length > 0);
 
@@ -320,13 +344,7 @@ export function PreTradeSnapshotForm({
   };
 
   const toggleCognitiveBiasTag = (tag: CognitiveBiasTagId) => {
-    setCognitiveBiasTags(prev => {
-      if (tag === COGNITIVE_BIAS_NONE) {
-        return prev.includes(tag) ? [] : [tag];
-      }
-      const base = prev.filter(item => item !== COGNITIVE_BIAS_NONE);
-      return base.includes(tag) ? base.filter(item => item !== tag) : [...base, tag];
-    });
+    setCognitiveBiasTags(prev => prev.includes(tag) ? prev.filter(item => item !== tag) : [...prev, tag]);
   };
 
   const discount = useMemo(
@@ -812,36 +830,75 @@ export function PreTradeSnapshotForm({
             <div>
               <div className="text-[12px] font-medium text-foreground">认知偏差自查</div>
               <div className="mt-0.5 text-[10px] text-muted-foreground">
-                痛苦标签是情绪轨；认知偏差是另一条轨。情绪你能感觉到，偏差你意识不到，所以更要主动查。
+                按决策的哪个环节出错分三类：看错信息 / 想错逻辑 / 做错动作。情绪你能感觉到，偏差你意识不到，所以更要主动查。悬停标签可看核心含义与典型交易危害。
               </div>
             </div>
             <div className="text-[10px] text-muted-foreground">
               已选 <span className="font-mono text-foreground">{cognitiveBiasTags.length}</span>
             </div>
           </div>
-          <div className="rounded-md border border-border/70 bg-card/60 p-2.5">
-            <div className="flex flex-wrap gap-1.5">
-              {COGNITIVE_BIAS_TAGS.map(tag => {
-                const selected = cognitiveBiasTags.includes(tag.id);
-                return (
-                  <button
-                    key={tag.id}
-                    type="button"
-                    onClick={() => toggleCognitiveBiasTag(tag.id)}
-                    title={tag.hint}
-                    className="h-7 rounded-full border px-2.5 text-[11px] transition-colors"
-                    style={{
-                      borderColor: selected ? '#F0B90B' : 'hsl(var(--border))',
-                      background: selected ? 'rgba(240, 185, 11, 0.12)' : undefined,
-                      color: selected ? '#F0B90B' : 'hsl(var(--muted-foreground))',
-                    }}
+          <TooltipProvider delayDuration={150}>
+            <div className="space-y-2">
+              {COGNITIVE_BIAS_GROUPS.map(group => (
+                <div
+                  key={group.category}
+                  className="rounded-md border border-border/70 bg-card/60 p-2.5"
+                >
+                  <div className="mb-1.5 flex items-center gap-2">
+                    <span
+                      className="inline-block h-2 w-2 shrink-0 rounded-full"
+                      style={{ background: group.accent }}
+                    />
+                    <span className="text-[11px] font-medium text-foreground">{group.title}</span>
+                    <span className="text-[10px] text-muted-foreground">· {group.oneLiner}</span>
+                  </div>
+                  <div
+                    className="mb-2 border-l-2 pl-2 text-[10px] italic leading-snug text-muted-foreground"
+                    style={{ borderColor: group.accent }}
                   >
-                    {tag.label}
-                  </button>
-                );
-              })}
+                    {group.systemPrompt}
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {group.tags.map(tag => {
+                      const meta = COGNITIVE_BIAS_META[tag];
+                      const selected = cognitiveBiasTags.includes(tag);
+                      return (
+                        <Tooltip key={tag}>
+                          <TooltipTrigger asChild>
+                            <button
+                              type="button"
+                              onClick={() => toggleCognitiveBiasTag(tag)}
+                              className="h-7 rounded-full border px-2.5 text-[11px] transition-colors"
+                              style={{
+                                borderColor: selected ? group.accent : 'hsl(var(--border))',
+                                background: selected ? `${group.accent}1F` : undefined,
+                                color: selected ? group.accent : 'hsl(var(--muted-foreground))',
+                              }}
+                            >
+                              {meta.label}
+                            </button>
+                          </TooltipTrigger>
+                          <TooltipContent side="top" className="max-w-[240px] border-border bg-popover">
+                            <div className="space-y-1">
+                              <div className="text-[11px] font-medium" style={{ color: group.accent }}>
+                                {meta.label}
+                              </div>
+                              <div className="text-[11px] leading-snug text-popover-foreground">
+                                <span className="text-muted-foreground">核心含义：</span>{meta.coreMeaning}
+                              </div>
+                              <div className="text-[11px] leading-snug text-popover-foreground">
+                                <span className="text-muted-foreground">典型交易危害：</span>{meta.tradingHarm}
+                              </div>
+                            </div>
+                          </TooltipContent>
+                        </Tooltip>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
             </div>
-          </div>
+          </TooltipProvider>
         </section>
 
         <section className="rounded border border-border bg-card p-3">
