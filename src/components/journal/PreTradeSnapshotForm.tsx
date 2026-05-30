@@ -118,6 +118,7 @@ interface EmotionGroup {
   valence: EmotionValence;
   title: string;
   ruleImpact: string;
+  systemPrompt: string;
   accent: string;
   tags: PainTag[];
 }
@@ -760,7 +761,7 @@ export function PreTradeSnapshotForm({
             <div>
               <div className="text-[12px] font-medium text-foreground">当前情绪标签</div>
               <div className="mt-0.5 text-[10px] text-muted-foreground">
-                按对交易纪律的影响分三类：正向助执行、中性需校准、负向易破坏；可多选，也可全不选。悬停标签可看核心含义与行为倾向。
+                依然分三类：正向情绪帮助执行规则，负向情绪容易破坏规则，中性情绪本身不一定坏，但需要被校准，否则会滑向失控。可多选，也可全不选；悬停标签可看核心含义与可能导致的行为倾向。
               </div>
             </div>
             <div className="text-[10px] text-muted-foreground">
@@ -774,13 +775,19 @@ export function PreTradeSnapshotForm({
                   key={group.valence}
                   className="rounded-md border border-border/70 bg-card/60 p-2.5"
                 >
-                  <div className="mb-2 flex items-center gap-2">
+                  <div className="mb-1.5 flex items-center gap-2">
                     <span
                       className="inline-block h-2 w-2 shrink-0 rounded-full"
                       style={{ background: group.accent }}
                     />
                     <span className="text-[11px] font-medium text-foreground">{group.title}</span>
                     <span className="text-[10px] text-muted-foreground">· {group.ruleImpact}</span>
+                  </div>
+                  <div
+                    className="mb-2 border-l-2 pl-2 text-[10px] italic leading-snug text-muted-foreground"
+                    style={{ borderColor: group.accent }}
+                  >
+                    {group.systemPrompt}
                   </div>
                   <div className="flex flex-wrap gap-1.5">
                     {group.tags.map(tag => {
@@ -811,7 +818,7 @@ export function PreTradeSnapshotForm({
                                 <span className="text-muted-foreground">核心含义：</span>{meta.coreMeaning}
                               </div>
                               <div className="text-[11px] leading-snug text-popover-foreground">
-                                <span className="text-muted-foreground">行为倾向：</span>{meta.behaviorTendency}
+                                <span className="text-muted-foreground">可能导致的行为倾向：</span>{meta.behaviorTendency}
                               </div>
                             </div>
                           </TooltipContent>
