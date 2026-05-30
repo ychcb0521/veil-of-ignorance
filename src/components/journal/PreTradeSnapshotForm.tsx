@@ -7,6 +7,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Textarea } from '@/components/ui/textarea';
 import { Input } from '@/components/ui/input';
 import { Checkbox } from '@/components/ui/checkbox';
+import { Slider } from '@/components/ui/slider';
 import {
   isHistoricalCampaign,
   MENTAL_STATE_LABELS,
@@ -122,6 +123,7 @@ const buildDefaultCampaignTitle = (symbol: string, time: Date, direction: TradeD
 const createRolesForHedge: LegRole[] = ['hedge_initial_a', 'hedge_initial_b', 'mirror_tp', 'hedge_rolling'];
 const joinRolesForHedge: LegRole[] = ['hedge_initial_a', 'hedge_initial_b', 'hedge_rolling', 'mirror_tp', 'reentry_hedge'];
 const PAIN_TAG_ORDER = Object.keys(PAIN_TAG_LABELS) as PainTag[];
+const clampProbability = (value: number) => Math.min(100, Math.max(0, Math.round(value)));
 
 export function PreTradeSnapshotForm({
   mode, symbol, direction, simulatedTime, lockedEntryPrice, leverage,
@@ -346,6 +348,33 @@ export function PreTradeSnapshotForm({
   const calibrationParsed = calibrationPct.trim() === '' ? null : Number(calibrationPct);
   const calibrationValid = calibrationParsed != null && !isNaN(calibrationParsed)
     && calibrationParsed >= 0 && calibrationParsed <= 100;
+  const calibrationSliderPct = calibrationValid ? clampProbability(calibrationParsed) : 50;
+  const calibrationNoPct = 100 - calibrationSliderPct;
+  const setWinProbability = (value: number) => {
+    if (!Number.isFinite(value)) return;
+    setCalibrationPct(String(clampProbability(value)));
+  };
+  const handleWinProbabilityInput = (value: string) => {
+    if (value.trim() === '') {
+      setCalibrationPct('');
+      return;
+    }
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed)) {
+      setCalibrationPct(value);
+      return;
+    }
+    setWinProbability(parsed);
+  };
+  const handleLossProbabilityInput = (value: string) => {
+    if (value.trim() === '') {
+      setCalibrationPct('');
+      return;
+    }
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed)) return;
+    setWinProbability(100 - clampProbability(parsed));
+  };
   const confidenceLowParsed = confidenceLowPct.trim() === '' ? null : Number(confidenceLowPct);
   const confidenceHighParsed = confidenceHighPct.trim() === '' ? null : Number(confidenceHighPct);
   const confidenceIntervalValid = confidenceLowParsed != null
@@ -1178,31 +1207,6 @@ export function PreTradeSnapshotForm({
             </div>
 
             <div className="space-y-1.5">
-              <div className={labelCls}>我为什么认为这笔有正期望？{requiredStar}</div>
-              <Textarea
-                rows={2}
-                value={positiveExpectancy}
-                onChange={e => setPositiveExpectancy(e.target.value)}
-                placeholder="例如：结构位置、赔率、胜率、波动率、时间窗口或资金流同时支持这笔交易。"
-                className={textareaCls}
-              />
-            </div>
-
-            <div className="space-y-1.5">
-              <div className={labelCls}>如果亏完，最可能因为什么？{requiredStar}</div>
-              <Textarea
-                rows={2}
-                value={preMortem}
-                onChange={e => setPreMortem(e.target.value)}
-                placeholder="假设这单亏完，最可能的原因是什么？例如：行情冲突的更高时间框架结构、流动性枯竭、新闻冲击⋯"
-                className={textareaCls}
-              />
-              <div className="text-[10px] text-muted-foreground">
-                Munger："Invert, always invert" — 先想清楚怎么输，才有资格谈怎么赢。
-              </div>
-            </div>
-
-            <div className="space-y-1.5">
               <div className={labelCls}>什么条件出现时证明我错了？{requiredStar}</div>
               <Textarea
                 rows={2}
@@ -1222,23 +1226,118 @@ export function PreTradeSnapshotForm({
                 </div>
               </div>
 
-              <div className="space-y-1.5">
-                <div className={labelCls}>
-                  数字化你的信心：你预测本单胜率{requiredStar}
-                  <span className="text-muted-foreground/60 ml-1">0-100%</span>
+              <div className="space-y-3 rounded border border-border/60 bg-background/60 p-3">
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                  <div>
+                    <div className={labelCls}>
+                      数字化你的信心：二元预测概率{requiredStar}
+                    </div>
+                    <div className="text-[10px] text-muted-foreground mt-0.5">
+                      拖动“做对”或“做错”任一滑杆，另一项会自动补足到 100%。
+                    </div>
+                  </div>
+                  <div className="shrink-0 text-left sm:text-right">
+                    <div className="text-[12px] font-semibold text-foreground">
+                      合计 {calibrationValid ? '100' : '--'}%
+                    </div>
+                    <div className={`text-[10px] ${calibrationValid ? 'text-[#0ECB81]' : 'text-[#F6465D]'}`}>
+                      {calibrationValid ? '剩余 0%' : '请设定概率'}
+                    </div>
+                  </div>
                 </div>
-                <Input
-                  type="number"
-                  inputMode="decimal"
-                  min={0}
-                  max={100}
-                  value={calibrationPct}
-                  onChange={e => setCalibrationPct(e.target.value)}
-                  placeholder="例如：55"
-                  className={`${inputCls} w-32`}
-                />
+
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="text-[12px] font-medium text-foreground">做对 / 判断成立</div>
+                    <div className="flex items-stretch overflow-hidden rounded border border-border bg-card">
+                      <Input
+                        type="number"
+                        inputMode="numeric"
+                        min={0}
+                        max={100}
+                        step={1}
+                        value={calibrationPct}
+                        onChange={e => handleWinProbabilityInput(e.target.value)}
+                        placeholder="50"
+                        className="h-8 w-16 border-0 bg-transparent text-right text-lg font-semibold shadow-none focus-visible:ring-0"
+                      />
+                      <div className="flex h-8 w-8 items-center justify-center border-l border-border bg-muted text-[11px] text-muted-foreground">%</div>
+                    </div>
+                  </div>
+                  <Slider
+                    value={[calibrationSliderPct]}
+                    min={0}
+                    max={100}
+                    step={1}
+                    onValueChange={value => setWinProbability(value[0] ?? calibrationSliderPct)}
+                    className="py-1"
+                  />
+                  <div className="flex items-center justify-between text-[10px] text-muted-foreground">
+                    <span>0%</span>
+                    <span>100%</span>
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="text-[12px] font-medium text-foreground">做错 / 判断不成立</div>
+                    <div className="flex items-stretch overflow-hidden rounded border border-border bg-card">
+                      <Input
+                        type="number"
+                        inputMode="numeric"
+                        min={0}
+                        max={100}
+                        step={1}
+                        value={calibrationValid ? String(calibrationNoPct) : ''}
+                        onChange={e => handleLossProbabilityInput(e.target.value)}
+                        placeholder="50"
+                        className="h-8 w-16 border-0 bg-transparent text-right text-lg font-semibold shadow-none focus-visible:ring-0"
+                      />
+                      <div className="flex h-8 w-8 items-center justify-center border-l border-border bg-muted text-[11px] text-muted-foreground">%</div>
+                    </div>
+                  </div>
+                  <Slider
+                    value={[calibrationValid ? calibrationNoPct : 50]}
+                    min={0}
+                    max={100}
+                    step={1}
+                    onValueChange={value => setWinProbability(100 - (value[0] ?? calibrationNoPct))}
+                    className="py-1"
+                  />
+                  <div className="flex items-center justify-between text-[10px] text-muted-foreground">
+                    <span>0%</span>
+                    <span>100%</span>
+                  </div>
+                </div>
+
                 <div className="text-[10px] text-muted-foreground">
-                  不能给出具体数字，通常说明判断还没有被认真拆解。
+                  这里存入系统的是“做对/判断成立”的概率；平仓后会和真实结果进入校准曲线。
+                </div>
+              </div>
+
+              <div className="grid gap-3 md:grid-cols-2">
+                <div className="space-y-1.5">
+                  <div className={labelCls}>为什么我认为它会对？{requiredStar}</div>
+                  <Textarea
+                    rows={4}
+                    value={positiveExpectancy}
+                    onChange={e => setPositiveExpectancy(e.target.value)}
+                    placeholder="写出正期望来源：结构位置、赔率、胜率、波动率、时间窗口或资金流。"
+                    className={textareaCls}
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <div className={labelCls}>为什么我可能是错的？{requiredStar}</div>
+                  <Textarea
+                    rows={4}
+                    value={preMortem}
+                    onChange={e => setPreMortem(e.target.value)}
+                    placeholder="假设这单亏完，最可能的原因是什么？这是否足以降低置信度？"
+                    className={textareaCls}
+                  />
+                  <div className="text-[10px] text-muted-foreground">
+                    Munger："Invert, always invert" — 先想清楚怎么输，才有资格谈怎么赢。
+                  </div>
                 </div>
               </div>
 
