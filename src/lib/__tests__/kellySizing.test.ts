@@ -4,6 +4,7 @@ import type { TradeJournal } from '@/types/journal';
 import type { TradeCampaign } from '@/types/journal';
 import {
   computeBetSizing,
+  deriveProfitUpsideAdvice,
   estimateCampaignSizingStats,
   estimatePayoffRatio,
   RUIN_PROBABILITY_TARGET,
@@ -120,5 +121,40 @@ describe('exported constants', () => {
     expect(RUIN_PROBABILITY_TARGET).toBeGreaterThan(0);
     expect(RUIN_PROBABILITY_TARGET).toBeLessThan(0.2);
     expect(DEFAULT_PAYOFF_RATIO).toBeGreaterThan(0);
+  });
+});
+
+describe('deriveProfitUpsideAdvice', () => {
+  it('encourages sizing toward the recommended cap when campaign edge is strong and current plan is undersized', () => {
+    const betSizing = computeBetSizing({ winProb: 0.62, payoffRatio: 3, equity: 10_000, plannedMaxLossUsdt: 100 });
+    const campaigns: TradeCampaign[] = [];
+    for (let i = 0; i < 8; i++) campaigns.push(campaign({ final_realized_pnl: 300, status: 'closed_profit' }));
+    for (let i = 0; i < 5; i++) campaigns.push(campaign({ final_realized_pnl: -100, status: 'closed_loss' }));
+    const stats = estimateCampaignSizingStats(campaigns);
+
+    const advice = deriveProfitUpsideAdvice({
+      betSizing,
+      campaignStats: stats,
+      plannedMaxLossUsdt: 100,
+    });
+
+    expect(advice).not.toBeNull();
+    expect(advice?.title).toContain('盈利端不设上限');
+  });
+
+  it('returns null when campaign samples are insufficient or edge is not strong enough', () => {
+    const betSizing = computeBetSizing({ winProb: 0.55, payoffRatio: 1.2, equity: 10_000, plannedMaxLossUsdt: 100 });
+    const advice = deriveProfitUpsideAdvice({
+      betSizing,
+      campaignStats: {
+        winRate: null,
+        winRateSampleCount: 2,
+        payoffRatio: null,
+        payoffWinCount: 1,
+        payoffLossCount: 1,
+      },
+      plannedMaxLossUsdt: 100,
+    });
+    expect(advice).toBeNull();
   });
 });

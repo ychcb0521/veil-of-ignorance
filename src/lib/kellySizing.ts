@@ -32,6 +32,11 @@ export interface CampaignSizingStats {
   payoffLossCount: number;
 }
 
+export interface ProfitUpsideAdvice {
+  title: string;
+  detail: string;
+}
+
 export type BetSizingVerdict =
   /** 折扣后无正期望 → 不该下注。 */
   | 'no_edge'
@@ -192,5 +197,45 @@ export function estimateCampaignSizingStats(campaigns: TradeCampaign[]): Campaig
     payoffRatio,
     payoffWinCount: wins.length,
     payoffLossCount: losses.length,
+  };
+}
+
+interface ProfitUpsideAdviceInput {
+  betSizing: BetSizingResult | null;
+  campaignStats: CampaignSizingStats;
+  plannedMaxLossUsdt: number | null;
+}
+
+/**
+ * 盈利端建议：
+ * 1. 只有当战役级胜率和盈亏比都站住时，才鼓励把仓位放到建议上沿。
+ * 2. 下限仍由毁灭概率封顶钉死；这里不是鼓励无限冒险，而是拒绝把盈利端再人为封顶。
+ */
+export function deriveProfitUpsideAdvice(input: ProfitUpsideAdviceInput): ProfitUpsideAdvice | null {
+  const { betSizing, campaignStats, plannedMaxLossUsdt } = input;
+  if (!betSizing) return null;
+  if (betSizing.verdict !== 'within') return null;
+  if (campaignStats.winRate == null || campaignStats.payoffRatio == null) return null;
+  if (betSizing.recommendedMaxLossUsdt <= 0) return null;
+
+  const strongCampaignEdge = betSizing.kellyFraction >= 0.12 && campaignStats.payoffRatio >= 2;
+  if (!strongCampaignEdge) return null;
+
+  const recommended = betSizing.recommendedMaxLossUsdt.toFixed(0);
+  const winRatePct = (campaignStats.winRate * 100).toFixed(0);
+  const planned = plannedMaxLossUsdt != null && Number.isFinite(plannedMaxLossUsdt)
+    ? plannedMaxLossUsdt
+    : null;
+
+  if (planned == null || planned < betSizing.recommendedMaxLossUsdt * 0.75) {
+    return {
+      title: '盈利端不设上限',
+      detail: `这类 setup 的战役样本已支持更积极的仓位表达（胜率 ${winRatePct}% · 盈亏比 ${campaignStats.payoffRatio.toFixed(2)}）。下限已经由毁灭概率封顶钉死后，不必再因模糊恐惧把盈利端额外封顶；若决定出手，可把仓位朝建议上沿 ${recommended} USDT 靠拢。`,
+    };
+  }
+
+  return {
+    title: '把仓位放到该放的位置',
+    detail: `当前计划已接近系统建议上沿 ${recommended} USDT。这里的重点不再是缩，而是维持“小错误不断、大错误不犯”的前提，让高赔率样本拿到与其赔率匹配的仓位。`,
   };
 }

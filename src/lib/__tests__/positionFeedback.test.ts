@@ -48,6 +48,24 @@ describe('analyzePositionFeedback', () => {
     expect(r.sameSideUnrealizedPnl).toBeGreaterThan(0);
   });
 
+  it('suggests add/roll when a two-sided structure has already locked in mathematical profit', () => {
+    const r = analyzePositionFeedback(base({
+      proposedSide: 'LONG',
+      proposedOrderKind: 'hedge',
+      recommendedMaxLossUsdt: 300,
+      positions: [
+        pos({ side: 'LONG', entryPrice: 80, quantity: 3 }),
+        pos({ side: 'SHORT', entryPrice: 110, quantity: 1 }),
+      ],
+      markPrice: 100,
+    }));
+    const lockin = r.signals.find(s => s.kind === 'mathematical_lockin');
+    expect(lockin).toBeDefined();
+    expect(lockin?.title).toContain('滚仓');
+    expect(r.hasTwoSidedStructure).toBe(true);
+    expect(r.totalUnrealizedPnl).toBeGreaterThan(0);
+  });
+
   it('flags a leverage spiral when the new order out-levers existing positions', () => {
     const r = analyzePositionFeedback(base({
       proposedLeverage: 25,

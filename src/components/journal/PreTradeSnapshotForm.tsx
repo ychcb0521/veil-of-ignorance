@@ -21,6 +21,7 @@ import {
 import { computeDiscount } from '@/lib/confidenceDiscount';
 import {
   computeBetSizing,
+  deriveProfitUpsideAdvice,
   estimateCampaignSizingStats,
   DEFAULT_PAYOFF_RATIO,
 } from '@/lib/kellySizing';
@@ -391,6 +392,14 @@ export function PreTradeSnapshotForm({
       : null),
     [isTrade, accountEquity, sizingWinProb, payoffRatio, maxLossValid, maxLoss],
   );
+  const profitUpsideAdvice = useMemo(
+    () => deriveProfitUpsideAdvice({
+      betSizing,
+      campaignStats: campaignSizingStats,
+      plannedMaxLossUsdt: maxLossValid ? maxLoss : null,
+    }),
+    [betSizing, campaignSizingStats, maxLossValid, maxLoss],
+  );
 
   // 持仓反馈体检（批次 25）— 负反馈维稳 / 正反馈顺势，软性提示，绝不阻塞。
   const positionFeedback = useMemo(() => {
@@ -412,13 +421,15 @@ export function PreTradeSnapshotForm({
       .filter(c => Number.isFinite(c.closeTimeMs));
     return analyzePositionFeedback({
       proposedSide,
+      proposedOrderKind: orderKind,
       proposedLeverage: leverage,
       markPrice: priceMap[symbol] ?? null,
       positions,
       recentCloses,
       nowMs: simulatedTime.getTime(),
+      recommendedMaxLossUsdt: betSizing?.recommendedMaxLossUsdt ?? null,
     });
-  }, [direction, positionsMap, symbol, historicalJournals, leverage, priceMap, simulatedTime]);
+  }, [direction, orderKind, positionsMap, symbol, historicalJournals, leverage, priceMap, simulatedTime, betSizing]);
 
   const submit = async () => {
     if (!canSubmit || submitting) return;
@@ -712,7 +723,7 @@ export function PreTradeSnapshotForm({
           <section className="rounded-lg border border-border bg-card p-3.5 shadow-sm">
             <div className={labelCls}>下注规模 · 毁灭概率封顶</div>
             <div className="mt-1 text-[11px] text-muted-foreground">
-              胜率与盈亏比优先使用战役级统计；当前折扣后置信度保留为自我校准镜子，不再用单笔交易样本抬高下注规模。
+              小错误不断，大错误不犯：下限由毁灭概率封顶锁死；上限不再被主观保守提前封死。胜率与盈亏比优先使用战役级统计，避免用单笔样本抬高或压低仓位。
             </div>
             {betSizing.verdict === 'no_edge' ? (
               <div className="mt-2 rounded border border-[#F6465D]/40 bg-[#F6465D]/10 px-3 py-2 text-[12px] text-[#F6465D]">
@@ -756,6 +767,14 @@ export function PreTradeSnapshotForm({
                     ? `战役历史 ${payoffRatio.toFixed(2)}（盈 ${campaignSizingStats.payoffWinCount} / 亏 ${campaignSizingStats.payoffLossCount}）`
                     : `默认 ${DEFAULT_PAYOFF_RATIO.toFixed(2)}（战役盈亏样本不足）`}
                 </div>
+                {profitUpsideAdvice && (
+                  <div className="rounded border border-[#0ECB81]/40 bg-[#0ECB81]/10 px-3 py-2 text-[12px] text-[#0ECB81]">
+                    <div className="font-medium">{profitUpsideAdvice.title}</div>
+                    <div className="mt-0.5 text-[11px] leading-relaxed text-foreground/80">
+                      {profitUpsideAdvice.detail}
+                    </div>
+                  </div>
+                )}
               </div>
             )}
           </section>

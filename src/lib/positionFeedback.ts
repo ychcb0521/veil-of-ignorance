@@ -16,7 +16,8 @@ export type FeedbackSignalKind =
   | 'averaging_down'   // 向下摊平：给亏损中的同向持仓加仓
   | 'revenge_trade'    // 报复交易：刚在该标的亏损平仓后又立刻下单
   | 'leverage_spiral'  // 杠杆螺旋：新单杠杆高于现有持仓
-  | 'healthy_pyramid'; // 顺势加仓：给盈利中的同向持仓加仓（健康，但需服从封顶）
+  | 'healthy_pyramid'  // 顺势加仓：给盈利中的同向持仓加仓（健康，但需服从封顶）
+  | 'mathematical_lockin'; // 双边结构已锁定盈利，可考虑加仓/滚仓
 
 export type FeedbackPolarity = 'danger' | 'caution' | 'healthy';
 
@@ -43,6 +44,8 @@ export interface RecentCloseLite {
 export interface PositionFeedbackInput {
   /** 即将下单方向；none / 未知传 null。 */
   proposedSide: PositionSideLite | null;
+  /** 即将下单类型：主力单 or 对冲单。 */
+  proposedOrderKind?: 'main' | 'hedge';
   proposedLeverage: number;
   /** 标记价（用于算同向持仓的浮盈浮亏）；未知传 null。 */
   markPrice: number | null;
@@ -54,6 +57,8 @@ export interface PositionFeedbackInput {
   nowMs: number;
   /** 报复检测窗口（毫秒），默认 4h。 */
   revengeWindowMs?: number;
+  /** 当前建议单笔最大亏损，用于在正反馈提示里回显约束。 */
+  recommendedMaxLossUsdt?: number | null;
 }
 
 export interface PositionFeedbackResult {
@@ -61,6 +66,9 @@ export interface PositionFeedbackResult {
   hasExistingPosition: boolean;
   /** 同向持仓的浮动盈亏合计（USDT），无同向持仓 / 无标记价为 null。 */
   sameSideUnrealizedPnl: number | null;
+  /** 全部持仓的浮动盈亏合计（USDT），无标记价为 null。 */
+  totalUnrealizedPnl: number | null;
+  hasTwoSidedStructure: boolean;
 }
 
 const DEFAULT_REVENGE_WINDOW_MS = 4 * 60 * 60_000;
@@ -87,6 +95,15 @@ export function analyzePositionFeedback(input: PositionFeedbackInput): PositionF
     sameSideUnrealizedPnl = sameSide.reduce((sum, p) => sum + unrealizedPnl(p, input.markPrice as number), 0);
   }
 
+  const hasLong = input.positions.some(p => p.side === 'LONG');
+  const hasShort = input.positions.some(p => p.side === 'SHORT');
+  const hasTwoSidedStructure = hasLong && hasShort;
+
+  let totalUnrealizedPnl: number | null = null;
+  if (input.positions.length > 0 && input.markPrice != null && Number.isFinite(input.markPrice)) {
+    totalUnrealizedPnl = input.positions.reduce((sum, p) => sum + unrealizedPnl(p, input.markPrice as number), 0);
+  }
+
   // 1) 向下摊平 / 顺势加仓：取决于同向持仓当前是亏是盈。
   if (sameSideUnrealizedPnl != null) {
     if (sameSideUnrealizedPnl < 0) {
@@ -97,13 +114,33 @@ export function analyzePositionFeedback(input: PositionFeedbackInput): PositionF
         detail: `正在给浮亏中的同向持仓加仓（当前浮亏约 ${Math.abs(sameSideUnrealizedPnl).toFixed(0)} USDT）。这是正反馈失控的典型起点——加仓应基于趋势更强，而不是为了摊低成本。`,
       });
     } else if (sameSideUnrealizedPnl > 0) {
+      const capNote = input.recommendedMaxLossUsdt != null && Number.isFinite(input.recommendedMaxLossUsdt)
+        ? `新增部分仍要服从当前建议上沿 ${input.recommendedMaxLossUsdt.toFixed(0)} USDT。`
+        : '新增部分仍要服从毁灭概率封顶。';
       signals.push({
         kind: 'healthy_pyramid',
         polarity: 'healthy',
         title: '顺势加仓',
-        detail: `同向持仓正在盈利（浮盈约 ${sameSideUnrealizedPnl.toFixed(0)} USDT）。只有在趋势确认更强时才加仓，且新增部分仍要服从毁灭概率封顶。`,
+        detail: `同向持仓正在盈利（浮盈约 ${sameSideUnrealizedPnl.toFixed(0)} USDT）。只有在趋势确认更强时才加仓，${capNote}`,
       });
     }
+  }
+
+  // 1.5) 数学盈利已锁定：当前标的存在多空双边结构，且合计浮盈已为正。
+  if (hasTwoSidedStructure && totalUnrealizedPnl != null && totalUnrealizedPnl > 0) {
+    const capNote = input.recommendedMaxLossUsdt != null && Number.isFinite(input.recommendedMaxLossUsdt)
+      ? `任何新增风险仍不应超过建议上沿 ${input.recommendedMaxLossUsdt.toFixed(0)} USDT。`
+      : '任何新增风险仍应继续服从毁灭概率封顶。';
+    const title = input.proposedOrderKind === 'hedge' ? '可考虑滚仓' : '可考虑加仓';
+    const action = input.proposedOrderKind === 'hedge'
+      ? '若你是在继续上移对冲止损线，这更像滚动风险管理，而不是重新开一个纯赌方向的新仓。'
+      : '若主方向证据更强，此时允许把仓位继续放在赢家一侧，而不是因为已经有利润就过早封顶。';
+    signals.push({
+      kind: 'mathematical_lockin',
+      polarity: 'healthy',
+      title,
+      detail: `当前双边结构合计已锁定约 ${totalUnrealizedPnl.toFixed(0)} USDT 的数学盈利。${action}${capNote}`,
+    });
   }
 
   // 2) 杠杆螺旋：新单杠杆高于该标的现有持仓最高杠杆。
@@ -139,5 +176,7 @@ export function analyzePositionFeedback(input: PositionFeedbackInput): PositionF
     signals,
     hasExistingPosition: input.positions.length > 0,
     sameSideUnrealizedPnl,
+    totalUnrealizedPnl,
+    hasTwoSidedStructure,
   };
 }
