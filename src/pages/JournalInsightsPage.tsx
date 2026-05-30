@@ -60,6 +60,36 @@ function pctRange([low, high]: [number, number]) {
   return `${pct(low)}~${pct(high)}`;
 }
 
+function calibrationBias(count: number, predicted: number, actual: number) {
+  if (count < 20) {
+    return {
+      label: '样本不足',
+      detail: `还差 ${Math.max(0, 30 - count)} 条揭晓样本再判断偏差`,
+      accent: '#848E9C',
+    };
+  }
+  const gap = predicted - actual;
+  if (gap > 0.08) {
+    return {
+      label: '偏过度自信',
+      detail: `预测均值比实际高 ${(gap * 100).toFixed(0)} 个百分点`,
+      accent: '#F6465D',
+    };
+  }
+  if (gap < -0.08) {
+    return {
+      label: '偏保守',
+      detail: `预测均值比实际低 ${(Math.abs(gap) * 100).toFixed(0)} 个百分点`,
+      accent: '#F0B90B',
+    };
+  }
+  return {
+    label: '校准接近',
+    detail: `预测与实际差 ${(Math.abs(gap) * 100).toFixed(0)} 个百分点`,
+    accent: '#0ECB81',
+  };
+}
+
 function decisionQualityScore(journal: TradeJournal): number {
   const checks = [
     !!journal.pre_positive_expectancy?.trim(),
@@ -282,6 +312,29 @@ export default function JournalInsightsPage() {
       actualWinRate: calibrationSamples.length === 0 ? 0 : calibrationWins / calibrationSamples.length,
       ci: calibrationCi,
     };
+    const calibrationTraining = {
+      bias: calibrationBias(calibration.count, calibration.avgPredictedWinRate, calibration.actualWinRate),
+      remainingToThirty: Math.max(0, 30 - calibration.count),
+      practice: [
+        {
+          title: '数字化信心',
+          status: '已接入快照',
+          detail: '每笔开仓必须用“做对/做错”互补滑杆给出概率。',
+        },
+        {
+          title: '记录与揭晓',
+          status: `${calibration.count} 条样本`,
+          detail: calibration.count === 0
+            ? '平仓评价后，预测会自动进入校准统计。'
+            : `预测均值 ${pct(calibration.avgPredictedWinRate)} · 实际 ${pct(calibration.actualWinRate)}`,
+        },
+        {
+          title: '外部校准测验',
+          status: '每周练习',
+          detail: '用 Good Judgment Open 或类似概率题训练，把结果写回认知资产。',
+        },
+      ],
+    };
     const restraintCount = cur.filter(j => j.direction === 'no_entry' || j.post_outcome === 'no_entry').length;
 
     const reviewedMain = cur.filter(j => j.order_kind === 'main' && j.post_reviewed_at && j.post_outcome && j.post_outcome !== 'no_entry');
@@ -366,6 +419,7 @@ export default function JournalInsightsPage() {
     return {
       cur, curClusters, trend, timeDist, mentalDist, alphaHours, ruleEffect, reviewed, deepDone, deepRate, mixedRBasis,
       calibration,
+      calibrationTraining,
       credibilityVector,
       decisionScatter,
       painStats,
@@ -579,6 +633,34 @@ export default function JournalInsightsPage() {
               </div>
             </div>
           )}
+          <div className="mt-3 rounded border border-border bg-background p-3">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <div className="text-[12px] font-medium">日常校准练习</div>
+                <div className="mt-1 text-[10px] text-muted-foreground">
+                  目标不是“感觉更准”，而是长期看见自己在哪些判断上过度自信、在哪些判断上过度保守。
+                </div>
+              </div>
+              <div className="shrink-0 rounded border border-border bg-card px-2 py-1 sm:text-right">
+                <div className="text-[10px] text-muted-foreground">当前偏差</div>
+                <div className="text-[13px] font-mono" style={{ color: stats.calibrationTraining.bias.accent }}>
+                  {stats.calibrationTraining.bias.label}
+                </div>
+                <div className="text-[9px] text-muted-foreground">{stats.calibrationTraining.bias.detail}</div>
+              </div>
+            </div>
+            <div className="mt-3 grid gap-2 md:grid-cols-3">
+              {stats.calibrationTraining.practice.map(item => (
+                <div key={item.title} className="rounded border border-border/70 bg-card p-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="text-[11px] font-medium">{item.title}</div>
+                    <div className="text-[9px] text-muted-foreground font-mono">{item.status}</div>
+                  </div>
+                  <div className="mt-1 text-[10px] leading-relaxed text-muted-foreground">{item.detail}</div>
+                </div>
+              ))}
+            </div>
+          </div>
         </section>
 
         <section className="border border-border rounded bg-card p-3">
