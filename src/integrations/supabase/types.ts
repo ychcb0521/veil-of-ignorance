@@ -277,6 +277,11 @@ export type Database = {
           post_reviewed_at: string | null
           pre_checklist_items: Json | null
           pre_checklist_passed: boolean | null
+          pre_calibration_competence_basis: string | null
+          pre_calibration_reference_class: string | null
+          pre_calibration_update_signal: string | null
+          pre_confidence_interval_high_pct: number | null
+          pre_confidence_interval_low_pct: number | null
           pre_entry_price: number | null
           pre_entry_reason: string
           pre_max_loss_usdt: number | null
@@ -321,6 +326,11 @@ export type Database = {
           post_reviewed_at?: string | null
           pre_checklist_items?: Json | null
           pre_checklist_passed?: boolean | null
+          pre_calibration_competence_basis?: string | null
+          pre_calibration_reference_class?: string | null
+          pre_calibration_update_signal?: string | null
+          pre_confidence_interval_high_pct?: number | null
+          pre_confidence_interval_low_pct?: number | null
           pre_entry_price?: number | null
           pre_entry_reason: string
           pre_max_loss_usdt?: number | null
@@ -365,6 +375,11 @@ export type Database = {
           post_reviewed_at?: string | null
           pre_checklist_items?: Json | null
           pre_checklist_passed?: boolean | null
+          pre_calibration_competence_basis?: string | null
+          pre_calibration_reference_class?: string | null
+          pre_calibration_update_signal?: string | null
+          pre_confidence_interval_high_pct?: number | null
+          pre_confidence_interval_low_pct?: number | null
           pre_entry_price?: number | null
           pre_entry_reason?: string
           pre_max_loss_usdt?: number | null

@@ -353,6 +353,16 @@ export interface TradeJournal {
   pre_invalidation_condition?: string | null;
   /** Tetlock-style calibration prediction at open time, 0-100. */
   pre_calibration_win_pct?: number | null;
+  /** Lower bound of the user's confidence interval for win probability, 0-100. */
+  pre_confidence_interval_low_pct?: number | null;
+  /** Upper bound of the user's confidence interval for win probability, 0-100. */
+  pre_confidence_interval_high_pct?: number | null;
+  /** Reference-class / historical base-rate check behind the confidence estimate. */
+  pre_calibration_reference_class?: string | null;
+  /** Why this judgment sits inside the user's circle of competence. */
+  pre_calibration_competence_basis?: string | null;
+  /** New-information / belief-update check after the judgment was formed. */
+  pre_calibration_update_signal?: string | null;
   /** Anti-overfitting: training set vs holdout (out-of-sample). */
   pre_dataset_split?: DatasetSplit | null;
   /** 0-100 composite of mental, sizing, recent losses, time-of-day, etc. */

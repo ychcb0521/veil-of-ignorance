@@ -75,6 +75,11 @@ function decisionQualityScore(journal: TradeJournal): number {
     !!journal.pre_executor_self?.trim(),
     !!journal.pre_designer_self?.trim(),
     journal.pre_calibration_win_pct != null,
+    journal.pre_confidence_interval_low_pct != null,
+    journal.pre_confidence_interval_high_pct != null,
+    !!journal.pre_calibration_reference_class?.trim(),
+    !!journal.pre_calibration_competence_basis?.trim(),
+    !!journal.pre_calibration_update_signal?.trim(),
     journal.pre_checklist_passed === true,
   ];
   return Math.round((checks.filter(Boolean).length / checks.length) * 100);

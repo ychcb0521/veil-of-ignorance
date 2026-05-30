@@ -67,6 +67,11 @@ export interface SnapshotPayload {
   pre_positive_expectancy: string | null;
   pre_invalidation_condition: string | null;
   pre_calibration_win_pct: number | null;
+  pre_confidence_interval_low_pct: number | null;
+  pre_confidence_interval_high_pct: number | null;
+  pre_calibration_reference_class: string | null;
+  pre_calibration_competence_basis: string | null;
+  pre_calibration_update_signal: string | null;
   pre_dataset_split: DatasetSplit | null;
   pre_lollapalooza_score: number | null;
   pre_bankruptcy_estimate: number | null;
@@ -164,6 +169,11 @@ export function PreTradeSnapshotForm({
   const [executorSelf, setExecutorSelf] = useState('');
   const [designerSelf, setDesignerSelf] = useState('');
   const [calibrationPct, setCalibrationPct] = useState('');
+  const [confidenceLowPct, setConfidenceLowPct] = useState('');
+  const [confidenceHighPct, setConfidenceHighPct] = useState('');
+  const [calibrationReferenceClass, setCalibrationReferenceClass] = useState('');
+  const [calibrationCompetenceBasis, setCalibrationCompetenceBasis] = useState('');
+  const [calibrationUpdateSignal, setCalibrationUpdateSignal] = useState('');
   const [datasetSplit, setDatasetSplit] = useState<DatasetSplit>('in_sample');
   const [recent24h, setRecent24h] = useState<TradeJournal[]>([]);
   const [acknowledgedCaution, setAcknowledgedCaution] = useState(false);
@@ -336,6 +346,33 @@ export function PreTradeSnapshotForm({
   const calibrationParsed = calibrationPct.trim() === '' ? null : Number(calibrationPct);
   const calibrationValid = calibrationParsed != null && !isNaN(calibrationParsed)
     && calibrationParsed >= 0 && calibrationParsed <= 100;
+  const confidenceLowParsed = confidenceLowPct.trim() === '' ? null : Number(confidenceLowPct);
+  const confidenceHighParsed = confidenceHighPct.trim() === '' ? null : Number(confidenceHighPct);
+  const confidenceIntervalValid = confidenceLowParsed != null
+    && confidenceHighParsed != null
+    && calibrationParsed != null
+    && !isNaN(confidenceLowParsed)
+    && !isNaN(confidenceHighParsed)
+    && confidenceLowParsed >= 0
+    && confidenceHighParsed <= 100
+    && confidenceLowParsed <= calibrationParsed
+    && calibrationParsed <= confidenceHighParsed;
+  const confidenceIntervalWidth = confidenceLowParsed != null && confidenceHighParsed != null
+    ? confidenceHighParsed - confidenceLowParsed
+    : null;
+  const calibrationChecklistValid = useMemo(() => {
+    if (!showFullFields) return true;
+    return confidenceIntervalValid
+      && calibrationReferenceClass.trim().length > 0
+      && calibrationCompetenceBasis.trim().length > 0
+      && calibrationUpdateSignal.trim().length > 0;
+  }, [
+    showFullFields,
+    confidenceIntervalValid,
+    calibrationReferenceClass,
+    calibrationCompetenceBasis,
+    calibrationUpdateSignal,
+  ]);
 
   const bankruptcy = useMemo(() => {
     if (!isTrade || isHedge || maxLoss <= 0 || availableBalance <= 0) return null;
@@ -392,13 +429,15 @@ export function PreTradeSnapshotForm({
     if (!invalidationCondition.trim()) return false;
     if (!dalioSnapshotValid) return false;
     if (!calibrationValid) return false;
+    if (!calibrationChecklistValid) return false;
     if (lollapalooza && lollapalooza.score >= 60) return false;
     if (lollapalooza && lollapalooza.score >= 30 && !acknowledgedCaution) return false;
     return true;
   }, [reason, riskAware, riskManage, mental, mentalTrigger,
       mode, isHedge, tpsValid, sizeUsdt, maxLoss, checklistPassed, noEntryReason,
       currentMarginMode, campaignFieldsValid,
-      positiveExpectancy, preMortem, invalidationCondition, dalioSnapshotValid, calibrationValid, lollapalooza, acknowledgedCaution]);
+      positiveExpectancy, preMortem, invalidationCondition, dalioSnapshotValid, calibrationValid,
+      calibrationChecklistValid, lollapalooza, acknowledgedCaution]);
 
   const handleSubmit = async () => {
     if (!canSubmit || submitting) return;
@@ -438,6 +477,11 @@ export function PreTradeSnapshotForm({
         pre_positive_expectancy: isLiveMain ? positiveExpectancy.trim() : null,
         pre_invalidation_condition: isLiveMain ? invalidationCondition.trim() : null,
         pre_calibration_win_pct: isLiveMain && calibrationValid ? Number(calibrationParsed) : null,
+        pre_confidence_interval_low_pct: isLiveMain && confidenceIntervalValid ? Number(confidenceLowParsed) : null,
+        pre_confidence_interval_high_pct: isLiveMain && confidenceIntervalValid ? Number(confidenceHighParsed) : null,
+        pre_calibration_reference_class: isLiveMain ? calibrationReferenceClass.trim() : null,
+        pre_calibration_competence_basis: isLiveMain ? calibrationCompetenceBasis.trim() : null,
+        pre_calibration_update_signal: isLiveMain ? calibrationUpdateSignal.trim() : null,
         pre_dataset_split: isLiveMain ? datasetSplit : null,
         pre_lollapalooza_score: isLiveMain && lollapalooza ? lollapalooza.score : null,
         pre_bankruptcy_estimate: isLiveMain && bankruptcy ? Number(bankruptcy.expectedRuinCountPerHundred.toFixed(2)) : null,
@@ -1170,23 +1214,107 @@ export function PreTradeSnapshotForm({
             </div>
 
             {/* Calibration */}
-            <div className="space-y-1.5">
-              <div className={labelCls}>
-                你预测本单胜率{requiredStar}
-                <span className="text-muted-foreground/60 ml-1">0-100%</span>
+            <div className="rounded border border-border/70 bg-card/50 p-3 space-y-3">
+              <div>
+                <div className="text-[11px] font-medium text-foreground">置信度校准检查清单</div>
+                <div className="text-[10px] text-muted-foreground mt-0.5">
+                  把“我很确定”改写成可追踪的概率、区间、历史样本和更新依据。
+                </div>
               </div>
-              <Input
-                type="number"
-                inputMode="decimal"
-                min={0}
-                max={100}
-                value={calibrationPct}
-                onChange={e => setCalibrationPct(e.target.value)}
-                placeholder="例如：55"
-                className={`${inputCls} w-32`}
-              />
-              <div className="text-[10px] text-muted-foreground">
-                平仓后系统会比对实际结果生成你的校准曲线。重复 50 次后能看出"你以为多准 vs 实际多准"。
+
+              <div className="space-y-1.5">
+                <div className={labelCls}>
+                  数字化你的信心：你预测本单胜率{requiredStar}
+                  <span className="text-muted-foreground/60 ml-1">0-100%</span>
+                </div>
+                <Input
+                  type="number"
+                  inputMode="decimal"
+                  min={0}
+                  max={100}
+                  value={calibrationPct}
+                  onChange={e => setCalibrationPct(e.target.value)}
+                  placeholder="例如：55"
+                  className={`${inputCls} w-32`}
+                />
+                <div className="text-[10px] text-muted-foreground">
+                  不能给出具体数字，通常说明判断还没有被认真拆解。
+                </div>
+              </div>
+
+              <div className="space-y-1.5">
+                <div className={labelCls}>区间检查：90% 置信区间{requiredStar}</div>
+                <div className="flex items-center gap-2">
+                  <Input
+                    type="number"
+                    inputMode="decimal"
+                    min={0}
+                    max={100}
+                    value={confidenceLowPct}
+                    onChange={e => setConfidenceLowPct(e.target.value)}
+                    placeholder="下限"
+                    className={`${inputCls} w-24`}
+                  />
+                  <span className="text-[11px] text-muted-foreground">%</span>
+                  <span className="text-[11px] text-muted-foreground">~</span>
+                  <Input
+                    type="number"
+                    inputMode="decimal"
+                    min={0}
+                    max={100}
+                    value={confidenceHighPct}
+                    onChange={e => setConfidenceHighPct(e.target.value)}
+                    placeholder="上限"
+                    className={`${inputCls} w-24`}
+                  />
+                  <span className="text-[11px] text-muted-foreground">%</span>
+                </div>
+                <div className={`text-[10px] ${
+                  confidenceIntervalValid
+                    ? confidenceIntervalWidth != null && confidenceIntervalWidth < 10
+                      ? 'text-[#F0B90B]'
+                      : 'text-[#0ECB81]'
+                    : 'text-[#F6465D]'
+                }`}>
+                  {confidenceIntervalValid
+                    ? confidenceIntervalWidth != null && confidenceIntervalWidth < 10
+                      ? '区间有效，但很窄。请确认这不是过度自信。'
+                      : '区间有效：预测胜率落在你的置信区间内。'
+                    : '需要满足：下限 ≤ 预测胜率 ≤ 上限，且范围在 0-100%。'}
+                </div>
+              </div>
+
+              <div className="space-y-1.5">
+                <div className={labelCls}>历史回溯：过去类似判断准确率如何？{requiredStar}</div>
+                <Textarea
+                  rows={2}
+                  value={calibrationReferenceClass}
+                  onChange={e => setCalibrationReferenceClass(e.target.value)}
+                  placeholder="写参考类：过去类似结构/币种/时段/心态下的胜率、R 倍数或典型错误。"
+                  className={textareaCls}
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <div className={labelCls}>能力圈匹配：高置信来自理解，还是来自感觉？{requiredStar}</div>
+                <Textarea
+                  rows={2}
+                  value={calibrationCompetenceBasis}
+                  onChange={e => setCalibrationCompetenceBasis(e.target.value)}
+                  placeholder="说明你为什么有资格对这类判断给高置信；若只是感觉，必须降低置信度。"
+                  className={textareaCls}
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <div className={labelCls}>更新检查：有没有新信息应该改变置信度？{requiredStar}</div>
+                <Textarea
+                  rows={2}
+                  value={calibrationUpdateSignal}
+                  onChange={e => setCalibrationUpdateSignal(e.target.value)}
+                  placeholder="自形成判断以来，是否出现了新 K 线、成交、盘口、BTC 环境、资金费率或消息？你是否已更新？"
+                  className={textareaCls}
+                />
               </div>
             </div>
 

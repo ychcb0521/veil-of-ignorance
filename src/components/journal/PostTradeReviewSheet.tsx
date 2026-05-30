@@ -490,6 +490,16 @@ export function PostTradeReviewSheet({
                 <div className="text-[10px] uppercase tracking-wide text-muted-foreground">开仓预测胜率</div>
                 <div>{calibrationPct.toFixed(0)}%</div>
               </div>
+              {(journal.pre_confidence_interval_low_pct != null || journal.pre_confidence_interval_high_pct != null) && (
+                <div className={metricCardClass}>
+                  <div className="text-[10px] uppercase tracking-wide text-muted-foreground">90% 区间</div>
+                  <div>
+                    {journal.pre_confidence_interval_low_pct != null ? journal.pre_confidence_interval_low_pct.toFixed(0) : '—'}%
+                    ~
+                    {journal.pre_confidence_interval_high_pct != null ? journal.pre_confidence_interval_high_pct.toFixed(0) : '—'}%
+                  </div>
+                </div>
+              )}
               <div className={metricCardClass}>
                 <div className="text-[10px] uppercase tracking-wide text-muted-foreground">平仓后结果</div>
                 <div className={outcome === 'win' ? 'text-[#0ECB81]' : outcome === 'loss' ? 'text-[#F6465D]' : 'text-muted-foreground'}>
@@ -497,6 +507,25 @@ export function PostTradeReviewSheet({
                 </div>
               </div>
             </div>
+            {(journal.pre_calibration_reference_class || journal.pre_calibration_competence_basis || journal.pre_calibration_update_signal) && (
+              <div className="grid gap-2 text-[11px] leading-relaxed">
+                {journal.pre_calibration_reference_class && (
+                  <div className="rounded-lg border border-border/60 bg-background/60 px-3 py-2">
+                    <span className="text-muted-foreground">历史回溯：</span>{journal.pre_calibration_reference_class}
+                  </div>
+                )}
+                {journal.pre_calibration_competence_basis && (
+                  <div className="rounded-lg border border-border/60 bg-background/60 px-3 py-2">
+                    <span className="text-muted-foreground">能力圈依据：</span>{journal.pre_calibration_competence_basis}
+                  </div>
+                )}
+                {journal.pre_calibration_update_signal && (
+                  <div className="rounded-lg border border-border/60 bg-background/60 px-3 py-2">
+                    <span className="text-muted-foreground">更新检查：</span>{journal.pre_calibration_update_signal}
+                  </div>
+                )}
+              </div>
+            )}
             {journal.pre_mortem_text && (
               <div className="rounded-lg border border-border/60 bg-background/60 px-3 py-2 text-[11px] leading-relaxed">
                 <span className="text-muted-foreground">开仓前最担心：</span>{journal.pre_mortem_text}
