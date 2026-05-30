@@ -406,18 +406,6 @@ export default function GuidePage() {
                   </tbody>
                 </table>
               </div>
-              <SubTitle>校准水平的日常练习</SubTitle>
-              <KeyGrid>
-                <KeyCard title="数字化信心">
-                  不写“我觉得大概率会涨”，而是给出 55%、65%、80% 这类明确数字。数字会暴露判断的模糊度，这是校准的起点。
-                </KeyCard>
-                <KeyCard title="记录并揭晓">
-                  每次开仓预测都会随平仓评价进入 Calibration。累计几十到上百条后，元监控会显示你是过度自信、过度保守，还是接近校准。
-                </KeyCard>
-                <KeyCard title="外部测验">
-                  定期使用 Good Judgment Open 或类似概率校准题训练判断，把发现的系统性偏差写回认知资产或规则。
-                </KeyCard>
-              </KeyGrid>
               <Highlight>
                 快照不是表单负担。它是事后复盘的证据链：没有快照，就只能靠记忆复盘；靠记忆复盘，最容易把理由改写成对自己有利的版本。
               </Highlight>

@@ -4,6 +4,7 @@
  */
 import { useEffect, useMemo, useState } from 'react';
 import { BackButton } from '@/components/journal/BackButton';
+import { Slider } from '@/components/ui/slider';
 import { toast } from 'sonner';
 import { useAuth } from '@/contexts/AuthContext';
 import {
@@ -35,6 +36,35 @@ interface CampaignEconomicStats {
   unavailable?: boolean;
 }
 
+interface CalibrationSample {
+  predProb: number;
+  outcomeWin: boolean;
+}
+
+interface CalibrationBin {
+  label: string;
+  lower: number;
+  upper: number;
+  count: number;
+  wins: number;
+  avgPredicted: number;
+  actualRate: number;
+  diff: number;
+}
+
+interface CalibrationDrillCandidate {
+  id: string;
+  symbol: string;
+  direction: string;
+  simulatedTime: string;
+  entryReason: string;
+  positiveExpectancy: string | null;
+  preMortem: string | null;
+  originalProbability: number;
+  outcomeWin: boolean;
+  rMultiple: number | null;
+}
+
 const EMPTY_CAMPAIGN_ECONOMIC: CampaignEconomicStats = {
   totalDeviationCost: 0,
   topReasons: [],
@@ -60,32 +90,71 @@ function pctRange([low, high]: [number, number]) {
   return `${pct(low)}~${pct(high)}`;
 }
 
-function calibrationBias(count: number, predicted: number, actual: number) {
-  if (count < 20) {
+function buildCalibrationBins(samples: CalibrationSample[]): CalibrationBin[] {
+  const ranges = [
+    { label: '0-20%', lower: 0, upper: 0.2 },
+    { label: '20-40%', lower: 0.2, upper: 0.4 },
+    { label: '40-60%', lower: 0.4, upper: 0.6 },
+    { label: '60-80%', lower: 0.6, upper: 0.8 },
+    { label: '80-100%', lower: 0.8, upper: 1 },
+  ];
+  return ranges.map(range => {
+    const rows = samples.filter(sample =>
+      range.upper === 1
+        ? sample.predProb >= range.lower && sample.predProb <= range.upper
+        : sample.predProb >= range.lower && sample.predProb < range.upper,
+    );
+    const wins = rows.filter(sample => sample.outcomeWin).length;
+    const avgPredicted = rows.length === 0
+      ? 0
+      : rows.reduce((sum, sample) => sum + sample.predProb, 0) / rows.length;
+    const actualRate = rows.length === 0 ? 0 : wins / rows.length;
     return {
-      label: '样本不足',
-      detail: `还差 ${Math.max(0, 30 - count)} 条揭晓样本再判断偏差`,
+      ...range,
+      count: rows.length,
+      wins,
+      avgPredicted,
+      actualRate,
+      diff: avgPredicted - actualRate,
+    };
+  });
+}
+
+function calibrationTarget(bins: CalibrationBin[], sampleCount: number) {
+  if (sampleCount < 30) {
+    return {
+      label: '先积累 30 条揭晓预测',
+      detail: `还差 ${30 - sampleCount} 条样本。样本不足时不急着给结论。`,
       accent: '#848E9C',
     };
   }
-  const gap = predicted - actual;
-  if (gap > 0.08) {
+  const target = [...bins]
+    .filter(bin => bin.count >= 3)
+    .sort((a, b) => Math.abs(b.diff) - Math.abs(a.diff))[0];
+  if (!target) {
     return {
-      label: '偏过度自信',
-      detail: `预测均值比实际高 ${(gap * 100).toFixed(0)} 个百分点`,
+      label: '每个档位样本仍偏少',
+      detail: '继续积累不同置信档位的预测，不要只集中在 50-60%。',
+      accent: '#F0B90B',
+    };
+  }
+  if (target.diff > 0.08) {
+    return {
+      label: `${target.label} 档偏过度自信`,
+      detail: `该档预测 ${pct(target.avgPredicted)}，实际 ${pct(target.actualRate)}。下次进入此档先下调置信度。`,
       accent: '#F6465D',
     };
   }
-  if (gap < -0.08) {
+  if (target.diff < -0.08) {
     return {
-      label: '偏保守',
-      detail: `预测均值比实际低 ${(Math.abs(gap) * 100).toFixed(0)} 个百分点`,
+      label: `${target.label} 档偏保守`,
+      detail: `该档预测 ${pct(target.avgPredicted)}，实际 ${pct(target.actualRate)}。下次遇到同类 setup 可以提高置信度。`,
       accent: '#F0B90B',
     };
   }
   return {
-    label: '校准接近',
-    detail: `预测与实际差 ${(Math.abs(gap) * 100).toFixed(0)} 个百分点`,
+    label: '各档位暂无明显偏差',
+    detail: '继续扩大样本，重点观察高置信档位是否稳定。',
     accent: '#0ECB81',
   };
 }
@@ -294,8 +363,12 @@ export default function JournalInsightsPage() {
         return { rule: r, pattern, before, after, delta: after - before, ci, baseline, globalBefore, globalAfter };
       });
 
-    const calibrationSamples = cur
-      .filter(j => j.pre_calibration_win_pct != null && j.post_outcome != null && j.post_outcome !== 'no_entry')
+    const calibrationRows = cur.filter(j =>
+      j.pre_calibration_win_pct != null &&
+      j.post_outcome != null &&
+      j.post_outcome !== 'no_entry',
+    );
+    const calibrationSamples = calibrationRows
       .map(j => ({
         predProb: Math.min(1, Math.max(0, (j.pre_calibration_win_pct ?? 0) / 100)),
         outcomeWin: j.post_outcome === 'win',
@@ -312,28 +385,25 @@ export default function JournalInsightsPage() {
       actualWinRate: calibrationSamples.length === 0 ? 0 : calibrationWins / calibrationSamples.length,
       ci: calibrationCi,
     };
+    const calibrationBins = buildCalibrationBins(calibrationSamples);
+    const calibrationDrillCandidates: CalibrationDrillCandidate[] = calibrationRows
+      .filter(j => j.pre_entry_reason?.trim())
+      .map(j => ({
+        id: j.id,
+        symbol: j.symbol,
+        direction: j.direction,
+        simulatedTime: j.pre_simulated_time,
+        entryReason: j.pre_entry_reason,
+        positiveExpectancy: j.pre_positive_expectancy ?? null,
+        preMortem: j.pre_mortem_text ?? null,
+        originalProbability: Math.min(100, Math.max(0, j.pre_calibration_win_pct ?? 0)),
+        outcomeWin: j.post_outcome === 'win',
+        rMultiple: j.post_r_multiple ?? null,
+      }));
     const calibrationTraining = {
-      bias: calibrationBias(calibration.count, calibration.avgPredictedWinRate, calibration.actualWinRate),
-      remainingToThirty: Math.max(0, 30 - calibration.count),
-      practice: [
-        {
-          title: '数字化信心',
-          status: '已接入快照',
-          detail: '每笔开仓必须用“做对/做错”互补滑杆给出概率。',
-        },
-        {
-          title: '记录与揭晓',
-          status: `${calibration.count} 条样本`,
-          detail: calibration.count === 0
-            ? '平仓评价后，预测会自动进入校准统计。'
-            : `预测均值 ${pct(calibration.avgPredictedWinRate)} · 实际 ${pct(calibration.actualWinRate)}`,
-        },
-        {
-          title: '外部校准测验',
-          status: '每周练习',
-          detail: '用 Good Judgment Open 或类似概率题训练，把结果写回认知资产。',
-        },
-      ],
+      bins: calibrationBins,
+      target: calibrationTarget(calibrationBins, calibration.count),
+      drillCandidates: calibrationDrillCandidates,
     };
     const restraintCount = cur.filter(j => j.direction === 'no_entry' || j.post_outcome === 'no_entry').length;
 
@@ -633,33 +703,50 @@ export default function JournalInsightsPage() {
               </div>
             </div>
           )}
-          <div className="mt-3 rounded border border-border bg-background p-3">
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-              <div>
-                <div className="text-[12px] font-medium">日常校准练习</div>
-                <div className="mt-1 text-[10px] text-muted-foreground">
-                  目标不是“感觉更准”，而是长期看见自己在哪些判断上过度自信、在哪些判断上过度保守。
-                </div>
-              </div>
-              <div className="shrink-0 rounded border border-border bg-card px-2 py-1 sm:text-right">
-                <div className="text-[10px] text-muted-foreground">当前偏差</div>
-                <div className="text-[13px] font-mono" style={{ color: stats.calibrationTraining.bias.accent }}>
-                  {stats.calibrationTraining.bias.label}
-                </div>
-                <div className="text-[9px] text-muted-foreground">{stats.calibrationTraining.bias.detail}</div>
-              </div>
-            </div>
-            <div className="mt-3 grid gap-2 md:grid-cols-3">
-              {stats.calibrationTraining.practice.map(item => (
-                <div key={item.title} className="rounded border border-border/70 bg-card p-2">
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="text-[11px] font-medium">{item.title}</div>
-                    <div className="text-[9px] text-muted-foreground font-mono">{item.status}</div>
+          <div className="mt-3 grid gap-3 lg:grid-cols-[1.15fr_0.85fr]">
+            <div className="rounded border border-border bg-background p-3">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                <div>
+                  <div className="text-[12px] font-medium">概率档位校准</div>
+                  <div className="mt-1 text-[10px] text-muted-foreground">
+                    每个档位直接比较“当时预测均值”和“实际胜率”。
                   </div>
-                  <div className="mt-1 text-[10px] leading-relaxed text-muted-foreground">{item.detail}</div>
                 </div>
-              ))}
+                <div className="shrink-0 rounded border border-border bg-card px-2 py-1 sm:text-right">
+                  <div className="text-[10px] text-muted-foreground">训练目标</div>
+                  <div className="text-[13px] font-mono" style={{ color: stats.calibrationTraining.target.accent }}>
+                    {stats.calibrationTraining.target.label}
+                  </div>
+                  <div className="text-[9px] text-muted-foreground max-w-[260px]">{stats.calibrationTraining.target.detail}</div>
+                </div>
+              </div>
+              <div className="mt-3 space-y-2">
+                {stats.calibrationTraining.bins.map(bin => (
+                  <div key={bin.label} className="grid grid-cols-[58px_1fr_64px] items-center gap-2 text-[10px]">
+                    <div className="font-mono text-muted-foreground">{bin.label}</div>
+                    <div className="space-y-1">
+                      <div className="h-2 rounded bg-card overflow-hidden">
+                        <div className="h-full bg-[#F0B90B]" style={{ width: `${bin.avgPredicted * 100}%` }} />
+                      </div>
+                      <div className="h-2 rounded bg-card overflow-hidden">
+                        <div className="h-full bg-[#0ECB81]" style={{ width: `${bin.actualRate * 100}%` }} />
+                      </div>
+                    </div>
+                    <div className="text-right font-mono text-muted-foreground">
+                      n={bin.count}
+                      <div className={bin.diff > 0.08 ? 'text-[#F6465D]' : bin.diff < -0.08 ? 'text-[#F0B90B]' : 'text-[#0ECB81]'}>
+                        {bin.count === 0 ? '—' : `${bin.diff >= 0 ? '+' : ''}${(bin.diff * 100).toFixed(0)}pp`}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <div className="mt-3 flex gap-4 text-[9px] text-muted-foreground">
+                <span><span className="inline-block h-2 w-4 rounded bg-[#F0B90B] mr-1" />预测均值</span>
+                <span><span className="inline-block h-2 w-4 rounded bg-[#0ECB81] mr-1" />实际胜率</span>
+              </div>
             </div>
+            <CalibrationDrillCard candidates={stats.calibrationTraining.drillCandidates} />
           </div>
         </section>
 
@@ -863,6 +950,128 @@ function StatCard({ label, value, accent, sub }: { label: string; value: string;
       <div className="text-[10px] text-muted-foreground">{label}</div>
       <div className="text-[22px] font-mono mt-1" style={{ color: accent }}>{value}</div>
       {sub && <div className="text-[10px] text-muted-foreground font-mono mt-0.5">{sub}</div>}
+    </div>
+  );
+}
+
+function CalibrationDrillCard({ candidates }: { candidates: CalibrationDrillCandidate[] }) {
+  const [index, setIndex] = useState(0);
+  const [estimate, setEstimate] = useState(50);
+  const [revealed, setRevealed] = useState(false);
+
+  useEffect(() => {
+    setIndex(0);
+    setEstimate(50);
+    setRevealed(false);
+  }, [candidates.length]);
+
+  if (candidates.length === 0) {
+    return (
+      <div className="rounded border border-border bg-background p-3">
+        <div className="text-[12px] font-medium">历史快照校准训练</div>
+        <div className="mt-6 text-center text-[11px] text-muted-foreground">
+          暂无可训练样本。需要先有“已预测胜率 + 已平仓评价”的交易。
+        </div>
+      </div>
+    );
+  }
+
+  const current = candidates[index % candidates.length];
+  const actual = current.outcomeWin ? 1 : 0;
+  const brier = Math.pow(estimate / 100 - actual, 2);
+  const simulatedDate = current.simulatedTime
+    ? current.simulatedTime.slice(0, 16).replace('T', ' ')
+    : '—';
+  const next = () => {
+    setIndex(prev => (prev + 1) % candidates.length);
+    setEstimate(50);
+    setRevealed(false);
+  };
+
+  return (
+    <div className="rounded border border-border bg-background p-3">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <div className="text-[12px] font-medium">历史快照校准训练</div>
+          <div className="mt-1 text-[10px] text-muted-foreground">先隐藏结果，只按当时快照重新估概率。</div>
+        </div>
+        <button
+          type="button"
+          onClick={next}
+          className="h-7 rounded bg-muted px-2 text-[10px] text-foreground hover:bg-[#363c45]"
+        >
+          下一题
+        </button>
+      </div>
+
+      <div className="mt-3 rounded border border-border bg-card p-2">
+        <div className="flex flex-wrap items-center gap-2 text-[10px] font-mono text-muted-foreground">
+          <span>{current.symbol}</span>
+          <span>{current.direction.toUpperCase()}</span>
+          <span>{simulatedDate}</span>
+        </div>
+        <div className="mt-2 text-[11px] leading-relaxed text-foreground line-clamp-3">
+          {current.entryReason}
+        </div>
+        {current.positiveExpectancy && (
+          <div className="mt-2 text-[10px] leading-relaxed text-muted-foreground line-clamp-2">
+            正期望：{current.positiveExpectancy}
+          </div>
+        )}
+        {current.preMortem && (
+          <div className="mt-1 text-[10px] leading-relaxed text-muted-foreground line-clamp-2">
+            可能错因：{current.preMortem}
+          </div>
+        )}
+      </div>
+
+      <div className="mt-3 space-y-2">
+        <div className="flex items-center justify-between text-[11px]">
+          <span className="text-muted-foreground">你现在估计这笔最终盈利概率</span>
+          <span className="font-mono text-[16px] text-foreground">{estimate}%</span>
+        </div>
+        <Slider
+          value={[estimate]}
+          min={0}
+          max={100}
+          step={1}
+          onValueChange={value => setEstimate(value[0] ?? estimate)}
+          className="py-1"
+        />
+        <div className="flex justify-between text-[9px] text-muted-foreground">
+          <span>0%</span>
+          <span>100%</span>
+        </div>
+      </div>
+
+      {revealed ? (
+        <div className="mt-3 grid grid-cols-3 gap-2 text-[10px]">
+          <div className="rounded border border-border bg-card p-2">
+            <div className="text-muted-foreground">实际结果</div>
+            <div className={`mt-1 font-mono text-[13px] ${current.outcomeWin ? 'text-[#0ECB81]' : 'text-[#F6465D]'}`}>
+              {current.outcomeWin ? 'WIN' : 'LOSS'}
+            </div>
+          </div>
+          <div className="rounded border border-border bg-card p-2">
+            <div className="text-muted-foreground">原始预测</div>
+            <div className="mt-1 font-mono text-[13px]">{current.originalProbability.toFixed(0)}%</div>
+          </div>
+          <div className="rounded border border-border bg-card p-2">
+            <div className="text-muted-foreground">本次 Brier</div>
+            <div className={`mt-1 font-mono text-[13px] ${brier <= 0.2 ? 'text-[#0ECB81]' : brier <= 0.3 ? 'text-[#F0B90B]' : 'text-[#F6465D]'}`}>
+              {brier.toFixed(3)}
+            </div>
+          </div>
+        </div>
+      ) : (
+        <button
+          type="button"
+          onClick={() => setRevealed(true)}
+          className="mt-3 h-8 w-full rounded bg-[#F0B90B] text-[11px] font-medium text-black hover:opacity-90"
+        >
+          揭晓结果并计算误差
+        </button>
+      )}
     </div>
   );
 }
