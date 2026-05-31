@@ -629,6 +629,11 @@ export function PreTradeSnapshotForm({
   const requiredStar = <span className="ml-0.5 text-[#F6465D]">*</span>;
   const inputCls = 'h-9 border-border bg-background text-[12px] text-foreground font-mono';
   const textareaCls = 'min-h-[116px] resize-none border-border bg-background text-[12px] text-foreground leading-relaxed';
+  const hedgeAnchorCardCls = 'group relative flex h-full flex-col overflow-hidden rounded-xl border border-border/70 bg-gradient-to-b from-background to-background/70 p-3.5 shadow-[0_1px_2px_rgba(0,0,0,0.04)] transition-colors';
+  const hedgeAnchorHeaderCls = 'min-h-[60px] border-b border-border/50 pb-2';
+  const hedgeAnchorButtonBaseCls = 'h-10 rounded-md border text-[13px] font-semibold transition-all';
+  const hedgeAnchorButtonIdleCls = 'border-border/60 bg-muted/70 text-muted-foreground hover:border-border hover:bg-muted';
+  const hedgeAnchorButtonActiveCls = 'border-[#F0B90B]/70 bg-[#F0B90B] text-black shadow-[0_8px_20px_rgba(240,185,11,0.28)]';
 
   // 心态自评卡片（批次 25：主力单与对冲单共用同一组件，行为一致——≤2 硬阻断）。
   const mentalRatingCard = (
@@ -979,7 +984,6 @@ export function PreTradeSnapshotForm({
                   <Input
                     value={hedgeBoundaryPrice}
                     onChange={event => setHedgeBoundaryPrice(event.target.value)}
-                    placeholder={hedgeTypeMeta?.boundaryHint ?? '先选择对冲类型'}
                     inputMode="decimal"
                     className={`${inputCls} mt-2`}
                   />
@@ -992,7 +996,6 @@ export function PreTradeSnapshotForm({
                   <Input
                     value={hedgeBoundaryBasis}
                     onChange={event => setHedgeBoundaryBasis(event.target.value)}
-                    placeholder="例如：ATR 线 / 中枢下沿 / 阻力位，都是在找机会=风险的交叉点"
                     className={`${inputCls} mt-2`}
                   />
                 </label>
@@ -1074,19 +1077,24 @@ export function PreTradeSnapshotForm({
               <div className="mt-0.5 text-[10px] text-muted-foreground">
                 = 尾部风险概率 × 风险绝对值。这份保险兜住的风险期望越大，对冲越该大。最大 = 与主仓等额。
               </div>
-              <div className="mt-3 grid gap-3 lg:grid-cols-3">
-                <div className="rounded-lg border border-border/70 bg-background/70 p-3">
-                  <div className={labelCls}>行情强劲程度{requiredStar}</div>
-                  <div className="mt-2 grid grid-cols-5 gap-1">
+              <div className="mt-3 grid items-stretch gap-3 lg:grid-cols-3">
+                <div className={hedgeAnchorCardCls}>
+                  <div className={hedgeAnchorHeaderCls}>
+                    <div className="text-[11px] font-medium tracking-[0.01em] text-foreground">行情强劲程度{requiredStar}</div>
+                    <div className="mt-1 text-[10px] leading-relaxed text-muted-foreground">
+                      越强，尾部风险概率越低。
+                    </div>
+                  </div>
+                  <div className="mt-3 grid grid-cols-5 gap-1.5">
                     {[1, 2, 3, 4, 5].map(score => (
                       <button
                         key={`strength-${score}`}
                         type="button"
                         onClick={() => setHedgeSafetyStrength(score as 1 | 2 | 3 | 4 | 5)}
-                        className={`h-8 rounded text-[12px] font-medium transition-colors ${
+                        className={`${hedgeAnchorButtonBaseCls} ${
                           hedgeSafetyStrength === score
-                            ? 'bg-[#F0B90B] text-black'
-                            : 'bg-muted text-muted-foreground hover:bg-muted/80'
+                            ? hedgeAnchorButtonActiveCls
+                            : hedgeAnchorButtonIdleCls
                         }`}
                       >
                         {score}
@@ -1094,18 +1102,23 @@ export function PreTradeSnapshotForm({
                     ))}
                   </div>
                 </div>
-                <div className="rounded-lg border border-border/70 bg-background/70 p-3">
-                  <div className={labelCls}>历史规则程度{requiredStar}</div>
-                  <div className="mt-2 grid grid-cols-5 gap-1">
+                <div className={hedgeAnchorCardCls}>
+                  <div className={hedgeAnchorHeaderCls}>
+                    <div className="text-[11px] font-medium tracking-[0.01em] text-foreground">历史规则程度{requiredStar}</div>
+                    <div className="mt-1 text-[10px] leading-relaxed text-muted-foreground">
+                      越规则，尾部风险概率越低。
+                    </div>
+                  </div>
+                  <div className="mt-3 grid grid-cols-5 gap-1.5">
                     {[1, 2, 3, 4, 5].map(score => (
                       <button
                         key={`regularity-${score}`}
                         type="button"
                         onClick={() => setHedgeSafetyRegularity(score as 1 | 2 | 3 | 4 | 5)}
-                        className={`h-8 rounded text-[12px] font-medium transition-colors ${
+                        className={`${hedgeAnchorButtonBaseCls} ${
                           hedgeSafetyRegularity === score
-                            ? 'bg-[#F0B90B] text-black'
-                            : 'bg-muted text-muted-foreground hover:bg-muted/80'
+                            ? hedgeAnchorButtonActiveCls
+                            : hedgeAnchorButtonIdleCls
                         }`}
                       >
                         {score}
@@ -1113,21 +1126,23 @@ export function PreTradeSnapshotForm({
                     ))}
                   </div>
                 </div>
-                <div className="rounded-lg border border-border/70 bg-background/70 p-3">
-                  <div className={labelCls}>下行烈度 / 跳空风险{requiredStar}</div>
-                  <div className="mt-1 text-[10px] text-muted-foreground">
-                    一旦反向，它能多猛？妖币能瞬间天地针给 5，低波动主流给 1。
+                <div className={hedgeAnchorCardCls}>
+                  <div className={hedgeAnchorHeaderCls}>
+                    <div className="text-[11px] font-medium tracking-[0.01em] text-foreground">下行烈度 / 跳空风险{requiredStar}</div>
+                    <div className="mt-1 text-[10px] leading-relaxed text-muted-foreground">
+                      一旦反向，它能多猛？妖币能瞬间天地针给 5，低波动主流给 1。
+                    </div>
                   </div>
-                  <div className="mt-2 grid grid-cols-5 gap-1">
+                  <div className="mt-3 grid grid-cols-5 gap-1.5">
                     {[1, 2, 3, 4, 5].map(score => (
                       <button
                         key={`magnitude-${score}`}
                         type="button"
                         onClick={() => setHedgeRiskMagnitude(score as 1 | 2 | 3 | 4 | 5)}
-                        className={`h-8 rounded text-[12px] font-medium transition-colors ${
+                        className={`${hedgeAnchorButtonBaseCls} ${
                           hedgeRiskMagnitude === score
-                            ? 'bg-[#F0B90B] text-black'
-                            : 'bg-muted text-muted-foreground hover:bg-muted/80'
+                            ? hedgeAnchorButtonActiveCls
+                            : hedgeAnchorButtonIdleCls
                         }`}
                       >
                         {score}
@@ -1230,7 +1245,6 @@ export function PreTradeSnapshotForm({
                     <Input
                       value={hedgeFrictionCost}
                       onChange={event => setHedgeFrictionCost(event.target.value)}
-                      placeholder="点差 + 手续费 + 资金费——你拿这点已知小出血，换未知大风险。"
                       className={`${inputCls} mt-2`}
                     />
                   </label>
