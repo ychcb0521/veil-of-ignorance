@@ -17,6 +17,7 @@ import { Pencil, ChevronDown, BrainCircuit } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useTradingContext } from '@/contexts/TradingContext';
 import { COGNITIVE_BIAS_LABELS } from '@/lib/cognitiveBiasTags';
+import { parseHedgeBoundaryBasis } from '@/lib/hedgeBoundaryBasis';
 import { HEDGE_BOUNDARY_STANCE_LABELS, HEDGE_ORDER_METHOD_LABELS, HEDGE_TYPE_LABELS } from '@/lib/hedgeTypes';
 import {
   finalizeJournalReview, replacePhaseAssignments,
@@ -237,6 +238,7 @@ export function PostTradeReviewSheet({
   const snapshotWhyRight = journal.pre_thesis_why_right || journal.pre_positive_expectancy || journal.pre_entry_reason || '';
   const snapshotPremortem = journal.pre_premortem_failure_reason || journal.pre_mortem_text || '';
   const snapshotFalsification = journal.pre_falsification_signal || journal.pre_invalidation_condition || '';
+  const hedgeBoundaryBasis = parseHedgeBoundaryBasis(journal.hedge_boundary_basis);
   const riskAnchorPct = journal.pre_max_loss_usdt != null && journal.pre_account_equity_usdt
     ? (journal.pre_max_loss_usdt / journal.pre_account_equity_usdt) * 100
     : null;
@@ -439,9 +441,19 @@ export function PostTradeReviewSheet({
                 <div className="rounded-lg border border-border/60 bg-background/60 px-3 py-2">
                   <span className="text-muted-foreground">边界：</span>
                   {journal.hedge_boundary_price != null ? journal.hedge_boundary_price.toFixed(4) : '—'}
-                  {journal.hedge_boundary_basis ? <span> · {journal.hedge_boundary_basis}</span> : null}
                   {journal.hedge_boundary_stance ? <span> · {HEDGE_BOUNDARY_STANCE_LABELS[journal.hedge_boundary_stance]}</span> : null}
                   {journal.hedge_lock_profit_pct != null ? <span> · 锁定微利 {journal.hedge_lock_profit_pct}%</span> : null}
+                </div>
+                <div className="grid gap-2 md:grid-cols-3">
+                  <div className="rounded-lg border border-border/60 bg-background/60 px-3 py-2">
+                    <span className="text-muted-foreground">正：</span>{hedgeBoundaryBasis.whyRight || '—'}
+                  </div>
+                  <div className="rounded-lg border border-border/60 bg-background/60 px-3 py-2">
+                    <span className="text-muted-foreground">反：</span>{hedgeBoundaryBasis.failureReason || '—'}
+                  </div>
+                  <div className="rounded-lg border border-border/60 bg-background/60 px-3 py-2">
+                    <span className="text-muted-foreground">止：</span>{hedgeBoundaryBasis.invalidationSignal || '—'}
+                  </div>
                 </div>
                 <div className="rounded-lg border border-border/60 bg-background/60 px-3 py-2">
                   <span className="text-muted-foreground">向上预案：</span>{journal.hedge_resolution_up || '—'}

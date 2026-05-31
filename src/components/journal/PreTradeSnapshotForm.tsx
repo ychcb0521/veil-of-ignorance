@@ -19,6 +19,7 @@ import {
   type CognitiveBiasTagId,
 } from '@/lib/cognitiveBiasTags';
 import { computeDiscount, computeHedgeConvictionDiscount } from '@/lib/confidenceDiscount';
+import { buildHedgeBoundaryBasis } from '@/lib/hedgeBoundaryBasis';
 import {
   HEDGE_TYPES,
   HEDGE_ORDER_METHOD_LABELS,
@@ -288,7 +289,9 @@ export function PreTradeSnapshotForm({
   // 批次 25：对冲专属状态。把握性绝不参与必要性/对冲大小的任何推导（铁律）。
   const [hedgeType, setHedgeType] = useState<HedgeType | null>(null);
   const [hedgeBoundaryPrice, setHedgeBoundaryPrice] = useState('');
-  const [hedgeBoundaryBasis, setHedgeBoundaryBasis] = useState('');
+  const [hedgeBoundaryWhyRight, setHedgeBoundaryWhyRight] = useState('');
+  const [hedgeBoundaryFailureReason, setHedgeBoundaryFailureReason] = useState('');
+  const [hedgeBoundaryInvalidationSignal, setHedgeBoundaryInvalidationSignal] = useState('');
   const [hedgeBoundaryStance, setHedgeBoundaryStance] = useState<HedgeBoundaryStance | null>(null);
   const [hedgeLockProfitPct, setHedgeLockProfitPct] = useState('4');
   const [hedgeResolutionUp, setHedgeResolutionUp] = useState('');
@@ -588,7 +591,13 @@ export function PreTradeSnapshotForm({
         // 批次 25：对冲专属字段——仅在对冲路径写入，主力单恒为 null。
         hedge_type: isHedge ? hedgeType : null,
         hedge_boundary_price: isHedge && hedgeBoundaryValid ? Number(hedgeBoundary.toFixed(pricePrecision)) : null,
-        hedge_boundary_basis: isHedge ? (hedgeBoundaryBasis.trim() || null) : null,
+        hedge_boundary_basis: isHedge
+          ? buildHedgeBoundaryBasis({
+            whyRight: hedgeBoundaryWhyRight,
+            failureReason: hedgeBoundaryFailureReason,
+            invalidationSignal: hedgeBoundaryInvalidationSignal,
+          })
+          : null,
         hedge_boundary_stance: isHedge ? hedgeBoundaryStance : null,
         hedge_lock_profit_pct: isHedge && hedgeTypeMeta?.lockProfit && Number.isFinite(Number(hedgeLockProfitPct))
           ? Number(hedgeLockProfitPct)
@@ -984,14 +993,38 @@ export function PreTradeSnapshotForm({
                     className={`${inputCls} mt-2`}
                   />
                 </label>
-                <label className="block">
-                  <div className={labelCls}>边界依据</div>
-                  <Input
-                    value={hedgeBoundaryBasis}
-                    onChange={event => setHedgeBoundaryBasis(event.target.value)}
-                    className={`${inputCls} mt-2`}
-                  />
-                </label>
+                <div className="rounded-lg border border-border/70 bg-background/70 p-3">
+                  <div className="text-[11px] font-medium text-foreground">边界依据 · 正反止</div>
+                  <div className="mt-1 text-[10px] leading-relaxed text-muted-foreground">
+                    把边界当成一条要被验证的判断，不再只写一句依据。
+                  </div>
+                </div>
+                <div className="grid gap-3 md:col-span-2 md:grid-cols-3">
+                  <label className="block rounded-lg border border-border/70 bg-background/70 p-3">
+                    <div className="text-[11px] font-medium text-foreground">正 · 边界为什么会对？</div>
+                    <Textarea
+                      value={hedgeBoundaryWhyRight}
+                      onChange={event => setHedgeBoundaryWhyRight(event.target.value)}
+                      className={`${textareaCls} mt-2 min-h-[120px] bg-background`}
+                    />
+                  </label>
+                  <label className="block rounded-lg border border-border/70 bg-background/70 p-3">
+                    <div className="text-[11px] font-medium text-foreground">反 · 如果错，原因是什么？</div>
+                    <Textarea
+                      value={hedgeBoundaryFailureReason}
+                      onChange={event => setHedgeBoundaryFailureReason(event.target.value)}
+                      className={`${textareaCls} mt-2 min-h-[120px] bg-background`}
+                    />
+                  </label>
+                  <label className="block rounded-lg border border-border/70 bg-background/70 p-3">
+                    <div className="text-[11px] font-medium text-foreground">止 · 什么信号出现就意味着不再对了？</div>
+                    <Textarea
+                      value={hedgeBoundaryInvalidationSignal}
+                      onChange={event => setHedgeBoundaryInvalidationSignal(event.target.value)}
+                      className={`${textareaCls} mt-2 min-h-[120px] bg-background`}
+                    />
+                  </label>
+                </div>
                 <div className="rounded-lg border border-border/70 bg-background/70 p-3 md:col-span-2">
                   <div className={labelCls}>相对“机会=风险”的交叉点，你这条线放在哪？</div>
                   <div className="mt-2 flex flex-wrap gap-2">
