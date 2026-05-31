@@ -562,7 +562,7 @@ export default function GuidePage() {
               </Highlight>
 
               <SubTitle>情绪标签（三类）</SubTitle>
-              <P>情绪标签已经从旧的“唤醒度 × 效价”模型，收口成更适合执行训练的三类结构：<strong>正向情绪</strong>帮助执行规则，<strong>负向情绪</strong>容易破坏规则，<strong>中性情绪</strong>本身不一定坏，但必须被校准，否则会滑向失控。标签可多选，也可全不选；鼠标悬停在标签上，会显示它的<strong>核心含义</strong>与<strong>可能导致的行为倾向</strong>。</P>
+              <P>情绪标签包括三类：<strong>正向情绪</strong>帮助执行规则，<strong>负向情绪</strong>容易破坏规则，<strong>中性情绪</strong>本身不一定坏，但必须被校准，否则会滑向失控。标签可多选，也可全不选；鼠标悬停在标签上，会显示它的<strong>核心含义</strong>与<strong>可能导致的行为倾向</strong>。</P>
               <div className="overflow-x-auto">
                 <table className="w-full text-[11px] my-3 border border-border rounded overflow-hidden">
                   <thead className="bg-muted/50">
@@ -579,7 +579,7 @@ export default function GuidePage() {
                   </tbody>
                 </table>
               </div>
-              <P>情绪标签会同步写入 <code>pain_log_entries</code> 痛苦日志（沿用旧表名），元监控里会按标签统计后续平均 R，识别<strong>最危险的心理入口</strong>。新增的正向与中性标签同样进入这条管线，用来检验“自认为状态好”时是否真的有正期望。</P>
+              <P>负向情绪标签会同步写入 <code>pain_log_entries</code> 痛苦日志，元监控里会按标签统计后续平均 R，识别<strong>最危险的心理入口</strong>。正向与中性标签同样进入这条管线，用来检验“自认为状态好”时是否真的有正期望。</P>
 
               <SubTitle>认知偏差自查（信息 / 判断 / 执行）</SubTitle>
               <P>痛苦/情绪标签是“情绪轨”，认知偏差是另一条“认知轨”。前者你能感觉到，后者你往往意识不到，所以快照在情绪标签下方增加了<strong>认知偏差自查</strong>。它同样支持 hover 解释，但不阻塞提交。</P>
