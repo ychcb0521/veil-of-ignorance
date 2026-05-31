@@ -500,19 +500,25 @@ export default function GuidePage() {
 
             <section id="s3-2" className="scroll-mt-20">
               <SubTitle>3.3 下单前快照</SubTitle>
-              <P>开仓快照是系统的核心记录点。它固定“下单前的你”看到什么、相信什么、愿意亏多少、处在什么心态。现在的快照遵循一个硬原则：<strong>主力单与对冲单分开设计</strong>。主力单主流程仍然是决策三问；对冲单则不再回答方向问题，而是记录你如何用一份小摩擦成本，把未知的大风险换成可计量的保险。</P>
+              <P>开仓快照是系统的核心记录点。它固定“下单前的你”看到什么、相信什么、愿意亏多少、处在什么心态。但这里有一个必须先讲清的底层原则：<strong>主力单与对冲单不是同一类决策，不能用同一套问题去问。</strong> 主力单是在分布右尾下注，核心是“这次机会为什么值得押”；对冲单是在分布左尾买保险，核心是“什么时候裸拿已经变成负期望，应该让保险接管”。</P>
+
+              <SubTitle>主力单快照：方向下注的证据链</SubTitle>
+              <P><strong>主力单</strong>的第一性原理是：你是在押一段右尾收益，真正要回答的是<strong>收益期望</strong>够不够大，是否值得把风险预算押上去。系统因此把主力单快照设计成“方向判断 + 风险预算 + 执行状态”的组合，而不是单纯问你想不想下单。</P>
+              <P>这里的底层公式更接近：<strong>收益期望 = P(赢) × |收益绝对值|。</strong> 所以主力单快照会追着你回答三件事：为什么这笔会对、如果错最可能怎么错、出现什么信号就说明它已经不再对。它要防的不是“没写够”，而是你只写看多理由，不写失败剧本；只看上行，不看证伪。</P>
+              <P>因此主力单路径会保留<strong>决策三问、二元置信度、最大亏损 USDT、下注规模建议、Checklist、心态自评</strong>这些组件。它们共同服务的是同一个目标：在真正出手前，把<strong>机会质量</strong>和<strong>账户下限</strong>同时钉住。</P>
 
               <SubTitle>对冲单快照：风险工具，不是方向下注</SubTitle>
               <P>当你把订单类型切到<strong>对冲单</strong>时，快照会切换成完全不同的一套问题。顶部先提醒第一性原理：<strong>对冲不是下注，是把“未知、不可控的无限风险”，换成“已知、可衡量的极小摩擦成本”。</strong></P>
-              <P>这时不再出现主力单的“为什么会对 / pre-mortem / 证伪信号”、二元置信度、最大亏损与 Checklist；取而代之的是三组专属记录：<strong>先选对冲类型</strong>，再写<strong>边界与双向预案</strong>，最后把<strong>必要性</strong>和<strong>把握性</strong>拆开分别记录。</P>
-              <P><strong>必要性</strong>只回答“这份保险该买多大”，现在明确按<strong>尾部风险概率 × 风险绝对值</strong>来估。前者由“行情强劲程度 + 历史规则程度”近似，后者由“下行烈度 / 跳空风险”单独评分；<strong>把握性</strong>只回答“我多确定这个风险估计是对的”，它只影响校准镜子，不允许反向缩小对冲仓位。</P>
-              <P><strong>对冲边界</strong>的第一性原理也已写进问二：对冲腿出发的位置 = 主力腿的生存底线 = <strong>预期风险开始盖过预期盈利的交叉点</strong>。ATR 线、中枢下沿、阻力位只是三种行情里寻找同一个交叉点的方法。快照还会额外问你这条线放得<strong>偏早 / 大致在交叉点 / 偏晚</strong>，用来照出你的机会成本门槛。</P>
+              <P>对冲单的底层问题不是“市场会不会往我想的方向走”，而是<strong>左尾风险是不是已经大到，继续裸拿变成了负期望</strong>。它对应的是另一条公式：<strong>风险期望 = P(尾部风险) × |风险绝对值|。</strong> 两者越大，这份保险兜住的东西越大，对冲就越值得做、也越应该做得更足。</P>
+              <P>因此，对冲路径不再出现主力单的“为什么会对 / pre-mortem / 证伪信号”、二元置信度、最大亏损与 Checklist；取而代之的是三组专属记录：<strong>先选对冲类型</strong>，再写<strong>边界与双向预案</strong>，最后把<strong>必要性</strong>和<strong>把握性</strong>拆开分别记录。</P>
+              <P><strong>必要性</strong>只回答“这份保险该买多大”，按<strong>尾部风险概率 × 风险绝对值</strong>来估。前者由“行情强劲程度 + 历史规则程度”近似，后者由“下行烈度 / 跳空风险”单独评分；<strong>把握性</strong>只回答“我多确定这个风险估计是对的”，它只影响校准镜子，不允许反向缩小对冲仓位。</P>
+              <P><strong>对冲边界</strong>的第一性原理也要单独理解：对冲腿出发的位置 = 主力腿的生存底线 = <strong>预期风险开始盖过预期盈利的交叉点</strong>。ATR 线、中枢下沿、阻力位只是三种行情里寻找同一个交叉点的方法。快照还会额外问你这条线放得<strong>偏早 / 大致在交叉点 / 偏晚</strong>，用来照出你的机会成本门槛。</P>
               <Highlight>
-                对冲路径里的铁律是：大小归客观，把握归成色。把握性永远不能直接参与对冲大小计算。
+                主力单在问“为什么值得押右尾”；对冲单在问“什么时候必须封左尾”。两者都重要，但绝不能混成一套语言。
               </Highlight>
 
-              <SubTitle>决策三问（正—反—止）</SubTitle>
-              <P>快照的核心是三道按 <strong>Munger inversion</strong> 排列的问题，必须三问全写满才能提交。前端把三题做成同等宽的并列卡片，<span style={{ color: '#0ECB81' }}>绿</span>—<span style={{ color: '#F0B90B' }}>黄</span>—<span style={{ color: '#F6465D' }}>红</span> 的色阶提示从“证成”到“证伪”的思考路径，右上角的小圆点会随填写进度变色。</P>
+              <SubTitle>主力单的决策三问（正—反—止）</SubTitle>
+              <P>下面这组三问只属于<strong>主力单</strong>。它的作用是把一次方向下注拆成“证成、反证、证伪”三步，逼你同时看见收益剧本和失败剧本。对冲单不会复用这套问题，因为对冲不是在赌方向，而是在记录边界、必要性和保险质量。</P>
               <div className="overflow-x-auto">
                 <table className="w-full text-[11px] my-3 border border-border rounded overflow-hidden">
                   <thead className="bg-muted/50">
@@ -633,7 +639,7 @@ export default function GuidePage() {
                     <tr><td className="px-3 py-2 border-t border-border">二元预测概率</td><td className="px-3 py-2 border-t border-border">Tetlock / Good Judgment 式校准训练</td><td className="px-3 py-2 border-t border-border">用“做对/做错”互补滑杆给出具体概率，并写下你为什么有资格给这个置信度；下方显示芒格折扣，但写库仍保存原始值</td></tr>
                     <tr><td className="px-3 py-2 border-t border-border">下注规模 · 毁灭概率封顶</td><td className="px-3 py-2 border-t border-border">把仓位上限从“我很有信心”改成“别把账户打穿”</td><td className="px-3 py-2 border-t border-border">优先用战役级胜率与盈亏比；战役样本不足时回落到默认值</td></tr>
                     <tr><td className="px-3 py-2 border-t border-border">对冲必要性 / 把握性</td><td className="px-3 py-2 border-t border-border">一个决定保险大小，一个记录决策成色</td><td className="px-3 py-2 border-t border-border">必要性只由客观锚点驱动；把握性只做“值回成本”校准，二者完全解耦</td></tr>
-                    <tr><td className="px-3 py-2 border-t border-border">摩擦成本 / 下单方式</td><td className="px-3 py-2 border-t border-border">记录你愿意为保险付出的已知小代价</td><td className="px-3 py-2 border-t border-border">市价追会被标记为纪律风险；预挂限价更接近计划内对冲</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border">对冲边界 / 下单方式</td><td className="px-3 py-2 border-t border-border">记录保险从哪里接管，以及这次是不是计划内执行</td><td className="px-3 py-2 border-t border-border">边界用于定义生存底线；市价追会被标记为纪律风险，预挂限价更接近计划内对冲</td></tr>
                     <tr><td className="px-3 py-2 border-t border-border">持仓反馈体检</td><td className="px-3 py-2 border-t border-border">识别向下摊平、报复交易、杠杆螺旋，也识别顺势加仓与已实现数学盈利后的加仓/滚仓窗口</td><td className="px-3 py-2 border-t border-border">只给软性建议；新增部分仍必须受毁灭概率封顶约束</td></tr>
                     <tr><td className="px-3 py-2 border-t border-border">开仓 Checklist</td><td className="px-3 py-2 border-t border-border">把规则前置到下单前</td><td className="px-3 py-2 border-t border-border">必填项必须全勾；不能判断是否通过的条目，需要回到规则页重写</td></tr>
                   </tbody>
