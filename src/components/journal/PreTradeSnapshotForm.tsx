@@ -659,6 +659,8 @@ export function PreTradeSnapshotForm({
   const hedgeAnchorButtonBaseCls = 'h-10 rounded-md border text-[12px] font-medium transition-colors';
   const hedgeAnchorButtonIdleCls = 'border-border/60 bg-muted/45 text-muted-foreground hover:border-border hover:bg-muted/70';
   const hedgeAnchorButtonActiveCls = 'border-[#F0B90B]/55 bg-[#F0B90B]/10 text-foreground';
+  const hedgeScenarioCardCls = 'flex h-full flex-col rounded-xl border border-border/70 bg-card/95 p-4 shadow-sm transition-colors';
+  const hedgeScenarioTextareaCls = 'mt-3 min-h-[128px] resize-none rounded-lg border-border bg-background/95 text-[12px] leading-relaxed shadow-inner';
 
   // 心态自评卡片（批次 25：主力单与对冲单共用同一组件，行为一致——≤2 硬阻断）。
   const mentalRatingCard = (
@@ -1087,57 +1089,114 @@ export function PreTradeSnapshotForm({
               <div className="mt-0.5 text-[10px] text-muted-foreground">
                 在还不知道往哪破的此刻就写死两边，到时候照着执行，而不是临场即兴。
               </div>
-              <div className="mt-3 grid gap-3 md:grid-cols-2">
-                <label className="block">
-                  <div className={labelCls}>向上预案{requiredStar}</div>
+              <div className="mt-3 grid gap-3 xl:grid-cols-[minmax(0,1.05fr)_minmax(0,0.95fr)]">
+                <label className="block rounded-xl border border-border/70 bg-background/70 p-4 shadow-sm">
+                  <div className="flex items-center gap-2">
+                    <span className="inline-flex h-5 items-center rounded-full border border-[#0ECB81]/30 bg-[#0ECB81]/10 px-2 text-[10px] font-medium text-[#0ECB81]">
+                      向上
+                    </span>
+                    <div className="text-[11px] font-semibold text-foreground">向上预案{requiredStar}</div>
+                  </div>
+                  <div className="mt-1 text-[10px] leading-relaxed text-muted-foreground">
+                    这一支保持单字段，处理“继续顺势”的情况。
+                  </div>
                   <Textarea
                     value={hedgeResolutionUp}
                     onChange={event => setHedgeResolutionUp(event.target.value)}
                     placeholder={hedgeTypeMeta?.resolutionUpDefault ?? '先选择对冲类型'}
-                    className={`${textareaCls} mt-2 min-h-[140px]`}
+                    className={`${textareaCls} mt-3 min-h-[142px] rounded-lg bg-background/95 shadow-inner`}
                   />
                 </label>
-                <div className="rounded-lg border border-[#F0B90B]/20 bg-[#F0B90B]/5 p-3 text-[11px] leading-relaxed text-foreground">
-                  <span className="font-medium">对冲触发不是决定</span>
-                  ，是“开始观察”的信号。下一个信号会告诉你走哪一支，现在就把三支都写死，到时候照着读，别临场即兴。
+                <div className="rounded-xl border border-[#F0B90B]/20 bg-[linear-gradient(180deg,rgba(240,185,11,0.10),rgba(240,185,11,0.04))] p-4 shadow-sm">
+                  <div className="inline-flex h-5 items-center rounded-full border border-[#F0B90B]/30 bg-[#F0B90B]/10 px-2 text-[10px] font-medium text-[#D89B00]">
+                    触发后先观察
+                  </div>
+                  <div className="mt-2 text-[13px] font-semibold leading-6 text-foreground">
+                    对冲触发不是决定，是“开始观察”的信号。
+                  </div>
+                  <div className="mt-2 text-[11px] leading-6 text-foreground/85">
+                    下一个信号会告诉你走哪一支。现在就把三支都写死，到时候照着读，别临场即兴。
+                  </div>
+                  <div className="mt-3 grid gap-2 sm:grid-cols-3">
+                    <div className="rounded-lg border border-border/50 bg-background/70 px-3 py-2 text-[10px] leading-5 text-muted-foreground">
+                      无信号
+                      <div className="mt-0.5 font-medium text-foreground">震荡</div>
+                    </div>
+                    <div className="rounded-lg border border-border/50 bg-background/70 px-3 py-2 text-[10px] leading-5 text-muted-foreground">
+                      反向信号
+                      <div className="mt-0.5 font-medium text-foreground">确认下行</div>
+                    </div>
+                    <div className="rounded-lg border border-border/50 bg-background/70 px-3 py-2 text-[10px] leading-5 text-muted-foreground">
+                      正向增强
+                      <div className="mt-0.5 font-medium text-foreground">快速反弹</div>
+                    </div>
+                  </div>
                 </div>
               </div>
-              <div className="mt-3 grid gap-3 lg:grid-cols-3">
-                <label className="block rounded-lg border border-border/70 bg-background/70 p-3">
-                  <div className="text-[11px] font-medium text-foreground">① 若触发后转为【震荡】</div>
-                  <div className="mt-1 text-[10px] leading-relaxed text-muted-foreground">
+              <div className="mt-4 rounded-xl border border-border/60 bg-background/40 p-4">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <div className="text-[11px] font-semibold tracking-[0.01em] text-foreground">向下触发后的三种情境</div>
+                    <div className="mt-1 text-[10px] leading-relaxed text-muted-foreground">
+                      这是重点。先识别触发后出现的是哪一种信号，再执行对应脚本。
+                    </div>
+                  </div>
+                  <div className="inline-flex h-6 items-center rounded-full border border-[#F0B90B]/25 bg-[#F0B90B]/8 px-2.5 text-[10px] font-medium text-[#D89B00]">
+                    三支都建议预先写死
+                  </div>
+                </div>
+                <div className="mt-4 grid gap-3 xl:grid-cols-3">
+                <label className={hedgeScenarioCardCls}>
+                  <div className="flex items-center gap-2">
+                    <span className="inline-flex h-6 w-6 items-center justify-center rounded-full border border-border/60 bg-background text-[11px] font-semibold text-foreground">
+                      ①
+                    </span>
+                    <div className="text-[11px] font-semibold text-foreground">若触发后转为【震荡】</div>
+                  </div>
+                  <div className="mt-2 text-[10px] leading-relaxed text-muted-foreground">
                     没确认下跌，也没强反弹。
                   </div>
                   <Textarea
                     value={hedgeDownIfChop}
                     onChange={event => setHedgeDownIfChop(event.target.value)}
-                    className={`${textareaCls} mt-2 min-h-[112px] bg-background`}
+                    className={hedgeScenarioTextareaCls}
                   />
                 </label>
-                <label className="block rounded-lg border border-border/70 bg-background/70 p-3">
-                  <div className="text-[11px] font-medium text-foreground">② 若触发后【确认下行】</div>
-                  <div className="mt-1 text-[10px] leading-relaxed text-muted-foreground">
+                <label className={hedgeScenarioCardCls}>
+                  <div className="flex items-center gap-2">
+                    <span className="inline-flex h-6 w-6 items-center justify-center rounded-full border border-[#F6465D]/25 bg-[#F6465D]/10 text-[11px] font-semibold text-[#F6465D]">
+                      ②
+                    </span>
+                    <div className="text-[11px] font-semibold text-foreground">若触发后【确认下行】</div>
+                  </div>
+                  <div className="mt-2 text-[10px] leading-relaxed text-muted-foreground">
                     异常反向信号已出现。
                   </div>
                   <Textarea
                     value={hedgeDownIfTrend}
                     onChange={event => setHedgeDownIfTrend(event.target.value)}
-                    className={`${textareaCls} mt-2 min-h-[112px] bg-background`}
+                    className={hedgeScenarioTextareaCls}
                   />
                 </label>
-                <label className="block rounded-lg border border-border/70 bg-background/70 p-3">
-                  <div className="text-[11px] font-medium text-foreground">③ 若触发后【快速反弹】</div>
-                  <div className="mt-1 text-[10px] leading-relaxed text-muted-foreground">
+                <label className={hedgeScenarioCardCls}>
+                  <div className="flex items-center gap-2">
+                    <span className="inline-flex h-6 w-6 items-center justify-center rounded-full border border-[#0ECB81]/25 bg-[#0ECB81]/10 text-[11px] font-semibold text-[#0ECB81]">
+                      ③
+                    </span>
+                    <div className="text-[11px] font-semibold text-foreground">若触发后【快速反弹】</div>
+                  </div>
+                  <div className="mt-2 text-[10px] leading-relaxed text-muted-foreground">
                     无反向信号，正向信号反而更强。
                   </div>
                   <Textarea
                     value={hedgeDownIfRebound}
                     onChange={event => setHedgeDownIfRebound(event.target.value)}
-                    className={`${textareaCls} mt-2 min-h-[112px] bg-background`}
+                    className={hedgeScenarioTextareaCls}
                   />
                 </label>
+                </div>
               </div>
-              <div className="mt-2 text-[10px] leading-relaxed text-muted-foreground">
+              <div className="mt-3 text-[10px] leading-relaxed text-muted-foreground">
                 这三支对应三种信号：无信号(震荡) / 反向信号(下行) / 正向信号增强(反弹)。触发后先读信号，再决定走哪一支。
               </div>
               {!hedgeDownBranchesComplete && (
