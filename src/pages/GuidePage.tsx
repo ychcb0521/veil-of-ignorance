@@ -500,7 +500,16 @@ export default function GuidePage() {
 
             <section id="s3-2" className="scroll-mt-20">
               <SubTitle>3.3 下单前快照</SubTitle>
-              <P>开仓快照是系统的核心记录点。它固定“下单前的你”看到什么、相信什么、愿意亏多少、处在什么心态。现在的快照遵循一个硬原则：<strong>主流程只保留决策三问</strong>，其余新增能力都放在表单边缘，用来辅助决策而不是制造填写负担。</P>
+              <P>开仓快照是系统的核心记录点。它固定“下单前的你”看到什么、相信什么、愿意亏多少、处在什么心态。现在的快照遵循一个硬原则：<strong>主力单与对冲单分开设计</strong>。主力单主流程仍然是决策三问；对冲单则不再回答方向问题，而是记录你如何用一份小摩擦成本，把未知的大风险换成可计量的保险。</P>
+
+              <SubTitle>对冲单快照：风险工具，不是方向下注</SubTitle>
+              <P>当你把订单类型切到<strong>对冲单</strong>时，快照会切换成完全不同的一套问题。顶部先提醒第一性原理：<strong>对冲不是下注，是把“未知、不可控的无限风险”，换成“已知、可衡量的极小摩擦成本”。</strong></P>
+              <P>这时不再出现主力单的“为什么会对 / pre-mortem / 证伪信号”、二元置信度、最大亏损与 Checklist；取而代之的是三组专属记录：<strong>先选对冲类型</strong>，再写<strong>边界与双向预案</strong>，最后把<strong>必要性</strong>和<strong>把握性</strong>拆开分别记录。</P>
+              <P><strong>必要性</strong>只回答“这份保险该买多大”，现在明确按<strong>尾部风险概率 × 风险绝对值</strong>来估。前者由“行情强劲程度 + 历史规则程度”近似，后者由“下行烈度 / 跳空风险”单独评分；<strong>把握性</strong>只回答“我多确定这个风险估计是对的”，它只影响校准镜子，不允许反向缩小对冲仓位。</P>
+              <P><strong>对冲边界</strong>的第一性原理也已写进问二：对冲腿出发的位置 = 主力腿的生存底线 = <strong>预期风险开始盖过预期盈利的交叉点</strong>。ATR 线、中枢下沿、阻力位只是三种行情里寻找同一个交叉点的方法。快照还会额外问你这条线放得<strong>偏早 / 大致在交叉点 / 偏晚</strong>，用来照出你的机会成本门槛。</P>
+              <Highlight>
+                对冲路径里的铁律是：大小归客观，把握归成色。把握性永远不能直接参与对冲大小计算。
+              </Highlight>
 
               <SubTitle>决策三问（正—反—止）</SubTitle>
               <P>快照的核心是三道按 <strong>Munger inversion</strong> 排列的问题，必须三问全写满才能提交。前端把三题做成同等宽的并列卡片，<span style={{ color: '#0ECB81' }}>绿</span>—<span style={{ color: '#F0B90B' }}>黄</span>—<span style={{ color: '#F6465D' }}>红</span> 的色阶提示从“证成”到“证伪”的思考路径，右上角的小圆点会随填写进度变色。</P>
@@ -617,12 +626,14 @@ export default function GuidePage() {
                     </tr>
                   </thead>
                   <tbody>
-                    <tr><td className="px-3 py-2 border-t border-border">订单类型</td><td className="px-3 py-2 border-t border-border">区分主力单与对冲单</td><td className="px-3 py-2 border-t border-border">主力单评估方向判断；对冲单评估风险防御</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border">订单类型</td><td className="px-3 py-2 border-t border-border">区分主力单与对冲单</td><td className="px-3 py-2 border-t border-border">主力单评估方向判断；对冲单改成对冲类型、边界、必要性、把握性与双向预案</td></tr>
                     <tr><td className="px-3 py-2 border-t border-border">仓位模式</td><td className="px-3 py-2 border-t border-border">强制使用逐仓</td><td className="px-3 py-2 border-t border-border">全仓是硬阻断，必须切换到逐仓才能提交</td></tr>
                     <tr><td className="px-3 py-2 border-t border-border">本次最大亏损 USDT</td><td className="px-3 py-2 border-t border-border">定义本次风险预算</td><td className="px-3 py-2 border-t border-border">后续 R 倍数以此为分母；占总账户 ≥10% 会触发提醒</td></tr>
                     <tr><td className="px-3 py-2 border-t border-border">心态自评 (1–5)</td><td className="px-3 py-2 border-t border-border">记录决策者状态</td><td className="px-3 py-2 border-t border-border">≤2 分硬阻挡，不能用确认框绕过</td></tr>
                     <tr><td className="px-3 py-2 border-t border-border">二元预测概率</td><td className="px-3 py-2 border-t border-border">Tetlock / Good Judgment 式校准训练</td><td className="px-3 py-2 border-t border-border">用“做对/做错”互补滑杆给出具体概率，并写下你为什么有资格给这个置信度；下方显示芒格折扣，但写库仍保存原始值</td></tr>
                     <tr><td className="px-3 py-2 border-t border-border">下注规模 · 毁灭概率封顶</td><td className="px-3 py-2 border-t border-border">把仓位上限从“我很有信心”改成“别把账户打穿”</td><td className="px-3 py-2 border-t border-border">优先用战役级胜率与盈亏比；战役样本不足时回落到默认值</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border">对冲必要性 / 把握性</td><td className="px-3 py-2 border-t border-border">一个决定保险大小，一个记录决策成色</td><td className="px-3 py-2 border-t border-border">必要性只由客观锚点驱动；把握性只做“值回成本”校准，二者完全解耦</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border">摩擦成本 / 下单方式</td><td className="px-3 py-2 border-t border-border">记录你愿意为保险付出的已知小代价</td><td className="px-3 py-2 border-t border-border">市价追会被标记为纪律风险；预挂限价更接近计划内对冲</td></tr>
                     <tr><td className="px-3 py-2 border-t border-border">持仓反馈体检</td><td className="px-3 py-2 border-t border-border">识别向下摊平、报复交易、杠杆螺旋，也识别顺势加仓与已实现数学盈利后的加仓/滚仓窗口</td><td className="px-3 py-2 border-t border-border">只给软性建议；新增部分仍必须受毁灭概率封顶约束</td></tr>
                     <tr><td className="px-3 py-2 border-t border-border">开仓 Checklist</td><td className="px-3 py-2 border-t border-border">把规则前置到下单前</td><td className="px-3 py-2 border-t border-border">必填项必须全勾；不能判断是否通过的条目，需要回到规则页重写</td></tr>
                   </tbody>

@@ -2,6 +2,7 @@ import { useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ExternalLink } from 'lucide-react';
 import { LegRoleChip } from '@/components/journal/LegRoleChip';
+import { HEDGE_TYPE_LABELS } from '@/lib/hedgeTypes';
 import type { TradeJournal } from '@/types/journal';
 import type { TradeRecord } from '@/types/trading';
 
@@ -37,6 +38,9 @@ export function CampaignLegsList({ legs, tradeRecords, onDetach }: Props) {
         const record = leg.trade_record_id ? recordMap.get(leg.trade_record_id) ?? null : null;
         const status = statusForLeg(leg, record);
         const timeLabel = leg.pre_simulated_time.replace('T', ' ').slice(5, 16);
+        const hedgeSummary = leg.order_kind === 'hedge' && leg.hedge_type
+          ? `${HEDGE_TYPE_LABELS[leg.hedge_type]}${leg.hedge_necessity_pct != null ? ` · ${leg.hedge_necessity_pct.toFixed(0)}%` : ''}`
+          : null;
         return (
           <div
             key={leg.id}
@@ -51,7 +55,10 @@ export function CampaignLegsList({ legs, tradeRecords, onDetach }: Props) {
                 </span>
               )}
             </div>
-            <div>{timeLabel}</div>
+            <div className="leading-tight">
+              <div>{timeLabel}</div>
+              {hedgeSummary && <div className="text-[10px] text-[#F0B90B]">{hedgeSummary}</div>}
+            </div>
             <div>{(leg.pre_entry_price ?? record?.entryPrice ?? 0).toFixed(4)}</div>
             <div>{leg.pre_position_size != null ? leg.pre_position_size.toFixed(2) : '—'}</div>
             <div className={status.className}>{status.label}</div>

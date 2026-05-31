@@ -18,7 +18,13 @@ import {
   type CognitiveBiasMeta,
   type CognitiveBiasTagId,
 } from '@/lib/cognitiveBiasTags';
-import { computeDiscount } from '@/lib/confidenceDiscount';
+import { computeDiscount, computeHedgeConvictionDiscount } from '@/lib/confidenceDiscount';
+import {
+  HEDGE_TYPES,
+  HEDGE_ORDER_METHOD_LABELS,
+  computeNecessitySuggestion,
+  getHedgeType,
+} from '@/lib/hedgeTypes';
 import {
   computeBetSizing,
   deriveProfitUpsideAdvice,
@@ -37,6 +43,9 @@ import type { PlaceOrderParams } from '@/contexts/TradingContext';
 import type {
   ChecklistItem,
   DatasetSplit,
+  HedgeBoundaryStance,
+  HedgeOrderMethod,
+  HedgeType,
   LegRole,
   OrderKind,
   PainTag,
@@ -103,6 +112,21 @@ export interface SnapshotPayload {
   pre_cognitive_bias_tags: string[] | null;
   pre_executor_self: string | null;
   pre_designer_self: string | null;
+  // 批次 25：对冲单专属快照字段（主力单恒为 null）。
+  hedge_type: HedgeType | null;
+  hedge_boundary_price: number | null;
+  hedge_boundary_basis: string | null;
+  hedge_boundary_stance: HedgeBoundaryStance | null;
+  hedge_lock_profit_pct: number | null;
+  hedge_resolution_up: string | null;
+  hedge_resolution_down: string | null;
+  hedge_necessity_pct: number | null;
+  hedge_safety_strength: 1 | 2 | 3 | 4 | 5 | null;
+  hedge_safety_regularity: 1 | 2 | 3 | 4 | 5 | null;
+  hedge_risk_magnitude: 1 | 2 | 3 | 4 | 5 | null;
+  hedge_conviction_pct: number | null;
+  hedge_friction_cost: string | null;
+  hedge_order_method: HedgeOrderMethod | null;
   tp_levels: TpLevel[];
 }
 
@@ -261,6 +285,22 @@ export function PreTradeSnapshotForm({
   const [historicalCampaigns, setHistoricalCampaigns] = useState<TradeCampaign[]>([]);
   const [submitting, setSubmitting] = useState(false);
 
+  // 批次 25：对冲专属状态。把握性绝不参与必要性/对冲大小的任何推导（铁律）。
+  const [hedgeType, setHedgeType] = useState<HedgeType | null>(null);
+  const [hedgeBoundaryPrice, setHedgeBoundaryPrice] = useState('');
+  const [hedgeBoundaryBasis, setHedgeBoundaryBasis] = useState('');
+  const [hedgeBoundaryStance, setHedgeBoundaryStance] = useState<HedgeBoundaryStance | null>(null);
+  const [hedgeLockProfitPct, setHedgeLockProfitPct] = useState('4');
+  const [hedgeResolutionUp, setHedgeResolutionUp] = useState('');
+  const [hedgeResolutionDown, setHedgeResolutionDown] = useState('');
+  const [hedgeSafetyStrength, setHedgeSafetyStrength] = useState<1 | 2 | 3 | 4 | 5 | null>(null);
+  const [hedgeSafetyRegularity, setHedgeSafetyRegularity] = useState<1 | 2 | 3 | 4 | 5 | null>(null);
+  const [hedgeRiskMagnitude, setHedgeRiskMagnitude] = useState<1 | 2 | 3 | 4 | 5 | null>(null);
+  const [hedgeNecessityPct, setHedgeNecessityPct] = useState<number | null>(null);
+  const [hedgeConvictionPct, setHedgeConvictionPct] = useState<number | null>(null);
+  const [hedgeFrictionCost, setHedgeFrictionCost] = useState('');
+  const [hedgeOrderMethod, setHedgeOrderMethod] = useState<HedgeOrderMethod | null>(null);
+
   const isHedge = isTrade && orderKind === 'hedge';
   const currentLeverage = getSymbolLeverage(symbol) ?? leverage;
   const currentMarginMode = getSymbolMarginMode(symbol) ?? 'cross';
@@ -347,12 +387,23 @@ export function PreTradeSnapshotForm({
     && failureReason.trim().length > 0
     && falsificationSignal.trim().length > 0;
   const mentalReady = mental >= 3;
+  // 对冲路径的可提交条件（见 spec §5）。把握性与必要性各自独立校验，互不推导。
+  const hedgeReady = !isHedge || (
+    hedgeType != null
+    && Number(hedgeBoundaryPrice) > 0
+    && hedgeResolutionUp.trim().length > 0
+    && hedgeResolutionDown.trim().length > 0
+    && (hedgeNecessityPct ?? 0) > 0
+    && hedgeSafetyStrength != null
+    && hedgeSafetyRegularity != null
+    && hedgeRiskMagnitude != null
+    && hedgeConvictionPct != null
+  );
   const tradeReady = !isTrade || (
     currentMarginMode === 'isolated'
-    && maxLossValid
-    && checklistPassed
+    && (isHedge ? hedgeReady : (maxLossValid && checklistPassed))
   );
-  const canSubmit = decisionReady && mentalReady && tradeReady;
+  const canSubmit = mentalReady && tradeReady && (isHedge || decisionReady);
 
   const toggleChecklist = (id: string, checkedValue: boolean) => {
     setChecked(prev => checkedValue ? Array.from(new Set([...prev, id])) : prev.filter(item => item !== id));
@@ -370,6 +421,51 @@ export function PreTradeSnapshotForm({
     () => computeDiscount(confidencePct, historicalJournals),
     [confidencePct, historicalJournals],
   );
+
+  // ===== 批次 25：对冲专属派生值 =====
+  const hedgeTypeMeta = getHedgeType(hedgeType);
+  const hedgeBoundary = Number(hedgeBoundaryPrice);
+  const hedgeBoundaryValid = Number.isFinite(hedgeBoundary) && hedgeBoundary > 0;
+  const hedgeNecessityValue = hedgeNecessityPct ?? 0;
+  const hedgeConvictionValue = hedgeConvictionPct ?? 0;
+
+  // 切换对冲类型时预填两分支预案（可编辑、可改不可清空）；同型重复点击不覆盖已编辑内容。
+  const selectHedgeType = (id: HedgeType) => {
+    if (id === hedgeType) return;
+    setHedgeType(id);
+    const meta = getHedgeType(id);
+    if (meta) {
+      setHedgeResolutionUp(meta.resolutionUpDefault);
+      setHedgeResolutionDown(meta.resolutionDownDefault);
+    }
+  };
+
+  // 必要性建议（幽灵刻度）：只由概率维度 + 烈度维度驱动，绝不引用把握性。
+  const necessitySuggestion = useMemo(() => {
+    if (hedgeSafetyStrength == null || hedgeSafetyRegularity == null || hedgeRiskMagnitude == null) return null;
+    return computeNecessitySuggestion(hedgeSafetyStrength, hedgeSafetyRegularity, hedgeRiskMagnitude);
+  }, [hedgeSafetyStrength, hedgeSafetyRegularity, hedgeRiskMagnitude]);
+
+  // 把握性的芒格折扣（值回率口径）：仅显示，绝不写库。
+  const hedgeDiscount = useMemo(
+    () => computeHedgeConvictionDiscount(hedgeConvictionValue, historicalJournals),
+    [hedgeConvictionValue, historicalJournals],
+  );
+
+  // 恐慌探测器：把握低却下重手——软提示，不阻塞。
+  const hedgePanic = isHedge
+    && hedgeConvictionPct != null
+    && hedgeNecessityPct != null
+    && hedgeConvictionPct < 40
+    && hedgeNecessityPct > 60;
+
+  // 类型 × 必要性一致性软提示——仅提示，不阻塞。
+  const hedgeConsistencyHint = (() => {
+    if (!isHedge || hedgeType == null || hedgeNecessityPct == null) return null;
+    if (hedgeType === 'filter' && hedgeNecessityPct < 40) return '混沌行情通常需要更大对冲，确认？';
+    if (hedgeType === 'ratio' && hedgeNecessityPct > 70) return '主升浪通常只需部分对冲，确认？';
+    return null;
+  })();
 
   // 下注规模 · 毁灭概率封顶（批次 25）— 胜率与盈亏比改用战役口径，绝不写库，仅显示。
   const campaignSizingStats = useMemo(
@@ -457,19 +553,19 @@ export function PreTradeSnapshotForm({
         pre_mental_trigger: null,
         pre_risk_awareness: null,
         pre_risk_management: null,
-        pre_checklist_items: isTrade ? checklistItemsOut : [],
-        pre_checklist_passed: isTrade ? checklistPassed : true,
+        pre_checklist_items: isHedge ? [] : (isTrade ? checklistItemsOut : []),
+        pre_checklist_passed: isHedge ? true : (isTrade ? checklistPassed : true),
         pre_position_size: isTrade ? inferredPositionSizeUsdt : null,
-        pre_max_loss_usdt: isTrade && maxLossValid ? Number(maxLoss.toFixed(2)) : null,
-        pre_thesis_why_right: whyRight.trim(),
-        pre_premortem_failure_reason: failureReason.trim(),
-        pre_falsification_signal: falsificationSignal.trim(),
-        pre_confidence_basis: confidenceBasis.trim() || null,
+        pre_max_loss_usdt: !isHedge && isTrade && maxLossValid ? Number(maxLoss.toFixed(2)) : null,
+        pre_thesis_why_right: isHedge ? null : whyRight.trim(),
+        pre_premortem_failure_reason: isHedge ? null : failureReason.trim(),
+        pre_falsification_signal: isHedge ? null : falsificationSignal.trim(),
+        pre_confidence_basis: isHedge ? null : (confidenceBasis.trim() || null),
         pre_account_equity_usdt: accountEquity > 0 ? Number(accountEquity.toFixed(2)) : null,
         pre_mortem_text: null,
         pre_positive_expectancy: null,
         pre_invalidation_condition: null,
-        pre_calibration_win_pct: confidencePct,
+        pre_calibration_win_pct: isHedge ? null : confidencePct,
         pre_confidence_interval_low_pct: null,
         pre_confidence_interval_high_pct: null,
         pre_calibration_reference_class: null,
@@ -490,6 +586,23 @@ export function PreTradeSnapshotForm({
         pre_cognitive_bias_tags: cognitiveBiasTags,
         pre_executor_self: null,
         pre_designer_self: null,
+        // 批次 25：对冲专属字段——仅在对冲路径写入，主力单恒为 null。
+        hedge_type: isHedge ? hedgeType : null,
+        hedge_boundary_price: isHedge && hedgeBoundaryValid ? Number(hedgeBoundary.toFixed(pricePrecision)) : null,
+        hedge_boundary_basis: isHedge ? (hedgeBoundaryBasis.trim() || null) : null,
+        hedge_boundary_stance: isHedge ? hedgeBoundaryStance : null,
+        hedge_lock_profit_pct: isHedge && hedgeTypeMeta?.lockProfit && Number.isFinite(Number(hedgeLockProfitPct))
+          ? Number(hedgeLockProfitPct)
+          : null,
+        hedge_resolution_up: isHedge ? (hedgeResolutionUp.trim() || null) : null,
+        hedge_resolution_down: isHedge ? (hedgeResolutionDown.trim() || null) : null,
+        hedge_necessity_pct: isHedge ? hedgeNecessityPct : null,
+        hedge_safety_strength: isHedge ? hedgeSafetyStrength : null,
+        hedge_safety_regularity: isHedge ? hedgeSafetyRegularity : null,
+        hedge_risk_magnitude: isHedge ? hedgeRiskMagnitude : null,
+        hedge_conviction_pct: isHedge ? hedgeConvictionPct : null,
+        hedge_friction_cost: isHedge ? (hedgeFrictionCost.trim() || null) : null,
+        hedge_order_method: isHedge ? hedgeOrderMethod : null,
         tp_levels: [],
       };
 
@@ -516,6 +629,34 @@ export function PreTradeSnapshotForm({
   const requiredStar = <span className="ml-0.5 text-[#F6465D]">*</span>;
   const inputCls = 'h-9 border-border bg-background text-[12px] text-foreground font-mono';
   const textareaCls = 'min-h-[116px] resize-none border-border bg-background text-[12px] text-foreground leading-relaxed';
+
+  // 心态自评卡片（批次 25：主力单与对冲单共用同一组件，行为一致——≤2 硬阻断）。
+  const mentalRatingCard = (
+    <div className="rounded border border-border bg-card p-3">
+      <div className={labelCls}>心态自评{requiredStar}</div>
+      <div className="mt-2 grid grid-cols-5 gap-1">
+        {[1, 2, 3, 4, 5].map(score => (
+          <button
+            key={score}
+            type="button"
+            onClick={() => setMental(score as 1 | 2 | 3 | 4 | 5)}
+            className={`h-8 rounded text-[12px] font-medium transition-colors ${
+              mental === score
+                ? 'bg-[#F0B90B] text-black'
+                : 'bg-muted text-muted-foreground hover:bg-muted/80'
+            }`}
+          >
+            {score}
+          </button>
+        ))}
+      </div>
+      {mental <= 2 && (
+        <div className="mt-2 text-[11px] text-[#F6465D]">
+          心态 ≤2 是硬阻断，不能提交快照。
+        </div>
+      )}
+    </div>
+  );
 
   return (
     <div className="flex flex-col">
@@ -560,6 +701,14 @@ export function PreTradeSnapshotForm({
           </section>
         )}
 
+        {isHedge && (
+          <section className="rounded border border-[#F0B90B]/30 bg-accent/30 px-3 py-2.5">
+            <p className="text-[12px] italic leading-relaxed text-foreground">
+              对冲不是下注，是把“未知、不可控的无限风险”，换成“已知、可衡量的极小摩擦成本”。
+            </p>
+          </section>
+        )}
+
         {isTrade && (
           <section className="rounded border border-border bg-card p-3">
             <div className="flex items-center justify-between gap-3">
@@ -586,218 +735,535 @@ export function PreTradeSnapshotForm({
           </section>
         )}
 
-        <section>
-          <div className="mb-3 flex items-end justify-between gap-3">
-            <div>
-              <div className="text-[12px] font-medium text-foreground">决策三问{requiredStar}</div>
-              <div className="mt-0.5 text-[10px] text-muted-foreground">
-                正—反—止：用 Munger inversion 把胜与败一起写清楚，三题都必填
-              </div>
-            </div>
-            <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
-              {DECISION_QUESTIONS.map(q => {
-                const done = (
-                  q.id === 'why' ? whyRight.trim().length > 0
-                    : q.id === 'premortem' ? failureReason.trim().length > 0
-                    : falsificationSignal.trim().length > 0
-                );
-                return (
-                  <span
-                    key={q.id}
-                    className={`flex h-4 w-4 items-center justify-center rounded-full text-[9px] font-bold transition-colors ${
-                      done ? 'text-black' : 'text-muted-foreground'
-                    }`}
-                    style={{ background: done ? q.accent : 'hsl(var(--muted))' }}
-                  >
-                    {q.index}
-                  </span>
-                );
-              })}
-            </div>
-          </div>
-          <div className="grid items-stretch gap-3 md:grid-cols-3">
-            {DECISION_QUESTIONS.map(q => {
-              const value = (
-                q.id === 'why' ? whyRight
-                  : q.id === 'premortem' ? failureReason
-                  : falsificationSignal
-              );
-              const onChange = (v: string) => {
-                if (q.id === 'why') setWhyRight(v);
-                else if (q.id === 'premortem') setFailureReason(v);
-                else setFalsificationSignal(v);
-              };
-              const filled = value.trim().length > 0;
-              return (
-                <label
-                  key={q.id}
-                  className="group flex h-full min-h-[292px] flex-col rounded-lg border bg-card/90 p-3.5 shadow-sm transition-colors"
-                  style={{
-                    borderColor: filled ? q.accent : 'hsl(var(--border))',
-                    background: filled ? `${q.accent}0A` : undefined,
-                  }}
-                >
-                  <div className="mb-3 flex min-h-[48px] items-start gap-2.5">
-                    <span
-                      className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[11px] font-bold text-black"
-                      style={{ background: q.accent }}
-                    >
-                      {q.index}
-                    </span>
-                    <div className="min-w-0">
-                      <div className="text-[12px] font-medium leading-snug text-foreground">
-                        {q.title}
-                      </div>
-                      <div className="text-[10px] text-muted-foreground leading-snug">{q.hint}</div>
-                    </div>
+        {!isHedge && (
+          <>
+            <section>
+              <div className="mb-3 flex items-end justify-between gap-3">
+                <div>
+                  <div className="text-[12px] font-medium text-foreground">决策三问{requiredStar}</div>
+                  <div className="mt-0.5 text-[10px] text-muted-foreground">
+                    正—反—止：用 Munger inversion 把胜与败一起写清楚，三题都必填
                   </div>
-                  <Textarea
-                    value={value}
-                    onChange={event => onChange(event.target.value)}
-                    placeholder={q.placeholder}
-                    className={`${textareaCls} min-h-[170px] flex-1 bg-background/80`}
-                  />
-                  <div className="mt-1.5 flex items-center justify-between text-[10px] text-muted-foreground">
-                    <span
-                      className="inline-flex h-4 items-center rounded px-1.5 text-[9px] font-medium"
-                      style={{ background: `${q.accent}1A`, color: q.accent }}
+                </div>
+                <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
+                  {DECISION_QUESTIONS.map(q => {
+                    const done = (
+                      q.id === 'why' ? whyRight.trim().length > 0
+                        : q.id === 'premortem' ? failureReason.trim().length > 0
+                        : falsificationSignal.trim().length > 0
+                    );
+                    return (
+                      <span
+                        key={q.id}
+                        className={`flex h-4 w-4 items-center justify-center rounded-full text-[9px] font-bold transition-colors ${
+                          done ? 'text-black' : 'text-muted-foreground'
+                        }`}
+                        style={{ background: done ? q.accent : 'hsl(var(--muted))' }}
+                      >
+                        {q.index}
+                      </span>
+                    );
+                  })}
+                </div>
+              </div>
+              <div className="grid items-stretch gap-3 md:grid-cols-3">
+                {DECISION_QUESTIONS.map(q => {
+                  const value = (
+                    q.id === 'why' ? whyRight
+                      : q.id === 'premortem' ? failureReason
+                      : falsificationSignal
+                  );
+                  const onChange = (v: string) => {
+                    if (q.id === 'why') setWhyRight(v);
+                    else if (q.id === 'premortem') setFailureReason(v);
+                    else setFalsificationSignal(v);
+                  };
+                  const filled = value.trim().length > 0;
+                  return (
+                    <label
+                      key={q.id}
+                      className="group flex h-full min-h-[292px] flex-col rounded-lg border bg-card/90 p-3.5 shadow-sm transition-colors"
+                      style={{
+                        borderColor: filled ? q.accent : 'hsl(var(--border))',
+                        background: filled ? `${q.accent}0A` : undefined,
+                      }}
                     >
-                      {q.badgeText}
-                    </span>
-                    <span className="font-mono">{value.trim().length} 字</span>
+                      <div className="mb-3 flex min-h-[48px] items-start gap-2.5">
+                        <span
+                          className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[11px] font-bold text-black"
+                          style={{ background: q.accent }}
+                        >
+                          {q.index}
+                        </span>
+                        <div className="min-w-0">
+                          <div className="text-[12px] font-medium leading-snug text-foreground">
+                            {q.title}
+                          </div>
+                          <div className="text-[10px] text-muted-foreground leading-snug">{q.hint}</div>
+                        </div>
+                      </div>
+                      <Textarea
+                        value={value}
+                        onChange={event => onChange(event.target.value)}
+                        placeholder={q.placeholder}
+                        className={`${textareaCls} min-h-[170px] flex-1 bg-background/80`}
+                      />
+                      <div className="mt-1.5 flex items-center justify-between text-[10px] text-muted-foreground">
+                        <span
+                          className="inline-flex h-4 items-center rounded px-1.5 text-[9px] font-medium"
+                          style={{ background: `${q.accent}1A`, color: q.accent }}
+                        >
+                          {q.badgeText}
+                        </span>
+                        <span className="font-mono">{value.trim().length} 字</span>
+                      </div>
+                    </label>
+                  );
+                })}
+              </div>
+            </section>
+
+            <section className="grid gap-3 md:grid-cols-[1fr_160px]">
+              {isTrade && (
+                <label className="block rounded border border-border bg-card p-3">
+                  <div className={labelCls}>本次愿意承受最大亏损 USDT{requiredStar}</div>
+                  <Input
+                    value={maxLossInput}
+                    onChange={event => setMaxLossInput(event.target.value)}
+                    placeholder="例如 300"
+                    inputMode="decimal"
+                    className={`${inputCls} mt-2`}
+                  />
+                  <div className={`mt-2 text-[12px] font-medium ${riskTone(maxLossPct)}`}>
+                    占总账户 {maxLossPctLabel}
+                    {maxLossPct != null && maxLossPct > 10 ? ' · 本笔风险偏高，请确认' : ''}
+                  </div>
+                  <div className="mt-1 text-[10px] text-muted-foreground">
+                    当前账户净值估算 {accountEquity > 0 ? accountEquity.toFixed(2) : '—'} USDT
                   </div>
                 </label>
-              );
-            })}
-          </div>
-        </section>
+              )}
 
-        <section className="grid gap-3 md:grid-cols-[1fr_160px]">
-          {isTrade && (
-            <label className="block rounded border border-border bg-card p-3">
-              <div className={labelCls}>本次愿意承受最大亏损 USDT{requiredStar}</div>
-              <Input
-                value={maxLossInput}
-                onChange={event => setMaxLossInput(event.target.value)}
-                placeholder="例如 300"
-                inputMode="decimal"
-                className={`${inputCls} mt-2`}
-              />
-              <div className={`mt-2 text-[12px] font-medium ${riskTone(maxLossPct)}`}>
-                占总账户 {maxLossPctLabel}
-                {maxLossPct != null && maxLossPct > 10 ? ' · 本笔风险偏高，请确认' : ''}
-              </div>
-              <div className="mt-1 text-[10px] text-muted-foreground">
-                当前账户净值估算 {accountEquity > 0 ? accountEquity.toFixed(2) : '—'} USDT
-              </div>
-            </label>
-          )}
+              {mentalRatingCard}
+            </section>
 
-          <div className="rounded border border-border bg-card p-3">
-            <div className={labelCls}>心态自评{requiredStar}</div>
-            <div className="mt-2 grid grid-cols-5 gap-1">
-              {[1, 2, 3, 4, 5].map(score => (
-                <button
-                  key={score}
-                  type="button"
-                  onClick={() => setMental(score as 1 | 2 | 3 | 4 | 5)}
-                  className={`h-8 rounded text-[12px] font-medium transition-colors ${
-                    mental === score
-                      ? 'bg-[#F0B90B] text-black'
-                      : 'bg-muted text-muted-foreground hover:bg-muted/80'
-                  }`}
-                >
-                  {score}
-                </button>
-              ))}
-            </div>
-            {mental <= 2 && (
-              <div className="mt-2 text-[11px] text-[#F6465D]">
-                心态 ≤2 是硬阻断，不能提交快照。
-              </div>
+            {isTrade && betSizing && (
+              <section className="rounded-lg border border-border bg-card p-3.5 shadow-sm">
+                <div className={labelCls}>下注规模 · 毁灭概率封顶</div>
+                <div className="mt-1 text-[11px] text-muted-foreground">
+                  小错误不断，大错误不犯：下限由毁灭概率封顶锁死；上限不再被主观保守提前封死。胜率与盈亏比优先使用战役级统计，避免用单笔样本抬高或压低仓位。
+                </div>
+                {betSizing.verdict === 'no_edge' ? (
+                  <div className="mt-2 rounded border border-[#F6465D]/40 bg-[#F6465D]/10 px-3 py-2 text-[12px] text-[#F6465D]">
+                    按当前用于定仓位的胜率 {(sizingWinProb * 100).toFixed(0)}% 与盈亏比 {betSizing.payoffRatio.toFixed(2)}，这单没有正期望优势 → 不该下注。
+                    只在赔率明显被错误定价时才出手。
+                  </div>
+                ) : (
+                  <div className="mt-2 space-y-2">
+                    <div className="flex items-baseline justify-between gap-3">
+                      <span className="text-[11px] text-muted-foreground">建议单笔最大亏损 ≤</span>
+                      <span className="font-mono text-[13px] text-[#0ECB81]">{betSizing.recommendedMaxLossUsdt.toFixed(0)} USDT</span>
+                    </div>
+                    <div className="text-[10px] text-muted-foreground">
+                      取小：半 Kelly {betSizing.halfKellyMaxLossUsdt.toFixed(0)} · 毁灭概率封顶 {betSizing.ruinCapMaxLossUsdt.toFixed(0)}
+                      （封顶后破产概率 ≈ {(betSizing.ruinProbabilityAtRecommended * 100).toFixed(0)}/100 笔）
+                    </div>
+                    {betSizing.ruinProbabilityAtPlanned != null && (() => {
+                      const tone = betSizing.verdict === 'over_ruin_cap'
+                        ? { box: 'border-[#F6465D]/40 bg-[#F6465D]/10', text: 'text-[#F6465D]' }
+                        : betSizing.verdict === 'over_kelly'
+                          ? { box: 'border-[#F0B90B]/40 bg-[#F0B90B]/10', text: 'text-[#D89B00]' }
+                          : { box: 'border-[#0ECB81]/40 bg-[#0ECB81]/10', text: 'text-[#0ECB81]' };
+                      const note = betSizing.verdict === 'over_ruin_cap'
+                        ? `已超毁灭概率封顶 — 这是用信心而非毁灭概率定仓位，建议下调到 ${betSizing.recommendedMaxLossUsdt.toFixed(0)} USDT。`
+                        : betSizing.verdict === 'over_kelly'
+                          ? `略高于半 Kelly 上限，可考虑下调到 ${betSizing.recommendedMaxLossUsdt.toFixed(0)} USDT。`
+                          : '在建议上限内。';
+                      return (
+                        <div className={`rounded border px-3 py-2 text-[12px] ${tone.box} ${tone.text}`}>
+                          你的计划 {maxLoss.toFixed(0)} USDT → 连打 100 笔约破产 {(betSizing.ruinProbabilityAtPlanned * 100).toFixed(0)} 次。{note}
+                        </div>
+                      );
+                    })()}
+                    <div className="text-[10px] text-muted-foreground">
+                      胜率：
+                      {campaignWinRatePct != null
+                        ? `战役历史 ${campaignWinRatePct}%（${campaignSizingStats.winRateSampleCount} 笔已结束战役）`
+                        : `当前折扣后 ${discount.discountedPct}%（战役样本不足，原值 ${confidencePct}%）`}
+                      {' '}· 盈亏比：
+                      {campaignSizingStats.payoffRatio != null
+                        ? `战役历史 ${payoffRatio.toFixed(2)}（盈 ${campaignSizingStats.payoffWinCount} / 亏 ${campaignSizingStats.payoffLossCount}）`
+                        : `默认 ${DEFAULT_PAYOFF_RATIO.toFixed(2)}（战役盈亏样本不足）`}
+                    </div>
+                    {profitUpsideAdvice && (
+                      <div className="rounded border border-[#0ECB81]/40 bg-[#0ECB81]/10 px-3 py-2 text-[12px] text-[#0ECB81]">
+                        <div className="font-medium">{profitUpsideAdvice.title}</div>
+                        <div className="mt-0.5 text-[11px] leading-relaxed text-foreground/80">
+                          {profitUpsideAdvice.detail}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </section>
             )}
-          </div>
-        </section>
 
-        {isTrade && betSizing && (
-          <section className="rounded-lg border border-border bg-card p-3.5 shadow-sm">
-            <div className={labelCls}>下注规模 · 毁灭概率封顶</div>
-            <div className="mt-1 text-[11px] text-muted-foreground">
-              小错误不断，大错误不犯：下限由毁灭概率封顶锁死；上限不再被主观保守提前封死。胜率与盈亏比优先使用战役级统计，避免用单笔样本抬高或压低仓位。
-            </div>
-            {betSizing.verdict === 'no_edge' ? (
-              <div className="mt-2 rounded border border-[#F6465D]/40 bg-[#F6465D]/10 px-3 py-2 text-[12px] text-[#F6465D]">
-                按当前用于定仓位的胜率 {(sizingWinProb * 100).toFixed(0)}% 与盈亏比 {betSizing.payoffRatio.toFixed(2)}，这单没有正期望优势 → 不该下注。
-                只在赔率明显被错误定价时才出手。
-              </div>
-            ) : (
-              <div className="mt-2 space-y-2">
-                <div className="flex items-baseline justify-between gap-3">
-                  <span className="text-[11px] text-muted-foreground">建议单笔最大亏损 ≤</span>
-                  <span className="font-mono text-[13px] text-[#0ECB81]">{betSizing.recommendedMaxLossUsdt.toFixed(0)} USDT</span>
+            {isTrade && positionFeedback.signals.length > 0 && (
+              <section className="rounded border border-border bg-card p-3">
+                <div className={labelCls}>持仓反馈体检</div>
+                <div className="mt-1 text-[11px] text-muted-foreground">
+                  把这一单和现有持仓、近期平仓对照 — 负反馈维稳，正反馈顺势。
                 </div>
-                <div className="text-[10px] text-muted-foreground">
-                  取小：半 Kelly {betSizing.halfKellyMaxLossUsdt.toFixed(0)} · 毁灭概率封顶 {betSizing.ruinCapMaxLossUsdt.toFixed(0)}
-                  （封顶后破产概率 ≈ {(betSizing.ruinProbabilityAtRecommended * 100).toFixed(0)}/100 笔）
+                <div className="mt-2 space-y-1.5">
+                  {positionFeedback.signals.map(sig => {
+                    const tone = polarityTone(sig.polarity);
+                    return (
+                      <div key={sig.kind} className={`rounded border px-3 py-2 ${tone.box}`}>
+                        <div className={`text-[12px] font-medium ${tone.text}`}>{sig.title}</div>
+                        <div className="mt-0.5 text-[11px] leading-relaxed text-muted-foreground">{sig.detail}</div>
+                      </div>
+                    );
+                  })}
                 </div>
-                {betSizing.ruinProbabilityAtPlanned != null && (() => {
-                  const tone = betSizing.verdict === 'over_ruin_cap'
-                    ? { box: 'border-[#F6465D]/40 bg-[#F6465D]/10', text: 'text-[#F6465D]' }
-                    : betSizing.verdict === 'over_kelly'
-                      ? { box: 'border-[#F0B90B]/40 bg-[#F0B90B]/10', text: 'text-[#D89B00]' }
-                      : { box: 'border-[#0ECB81]/40 bg-[#0ECB81]/10', text: 'text-[#0ECB81]' };
-                  const note = betSizing.verdict === 'over_ruin_cap'
-                    ? `已超毁灭概率封顶 — 这是用信心而非毁灭概率定仓位，建议下调到 ${betSizing.recommendedMaxLossUsdt.toFixed(0)} USDT。`
-                    : betSizing.verdict === 'over_kelly'
-                      ? `略高于半 Kelly 上限，可考虑下调到 ${betSizing.recommendedMaxLossUsdt.toFixed(0)} USDT。`
-                      : '在建议上限内。';
-                  return (
-                    <div className={`rounded border px-3 py-2 text-[12px] ${tone.box} ${tone.text}`}>
-                      你的计划 {maxLoss.toFixed(0)} USDT → 连打 100 笔约破产 {(betSizing.ruinProbabilityAtPlanned * 100).toFixed(0)} 次。{note}
-                    </div>
-                  );
-                })()}
-                <div className="text-[10px] text-muted-foreground">
-                  胜率：
-                  {campaignWinRatePct != null
-                    ? `战役历史 ${campaignWinRatePct}%（${campaignSizingStats.winRateSampleCount} 笔已结束战役）`
-                    : `当前折扣后 ${discount.discountedPct}%（战役样本不足，原值 ${confidencePct}%）`}
-                  {' '}· 盈亏比：
-                  {campaignSizingStats.payoffRatio != null
-                    ? `战役历史 ${payoffRatio.toFixed(2)}（盈 ${campaignSizingStats.payoffWinCount} / 亏 ${campaignSizingStats.payoffLossCount}）`
-                    : `默认 ${DEFAULT_PAYOFF_RATIO.toFixed(2)}（战役盈亏样本不足）`}
+              </section>
+            )}
+          </>
+        )}
+
+        {isHedge && (
+          <>
+            <section className="rounded-lg border border-[#F0B90B]/25 bg-card p-3.5 shadow-sm">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <div className="text-[12px] font-medium text-foreground">问一 · 这是哪一类对冲？{requiredStar}</div>
+                  <div className="mt-0.5 text-[10px] text-muted-foreground">
+                    先给这份保险定类别，再谈边界和大小。
+                  </div>
                 </div>
-                {profitUpsideAdvice && (
-                  <div className="rounded border border-[#0ECB81]/40 bg-[#0ECB81]/10 px-3 py-2 text-[12px] text-[#0ECB81]">
-                    <div className="font-medium">{profitUpsideAdvice.title}</div>
-                    <div className="mt-0.5 text-[11px] leading-relaxed text-foreground/80">
-                      {profitUpsideAdvice.detail}
-                    </div>
+                {hedgeTypeMeta && (
+                  <div className="rounded-full bg-[#F0B90B]/12 px-2 py-1 text-[10px] font-medium text-[#F0B90B]">
+                    已选 {hedgeTypeMeta.label}
                   </div>
                 )}
               </div>
-            )}
-          </section>
-        )}
+              <div className="mt-3 grid gap-3 md:grid-cols-3">
+                {HEDGE_TYPES.map(type => {
+                  const selected = hedgeType === type.id;
+                  return (
+                    <button
+                      key={type.id}
+                      type="button"
+                      onClick={() => selectHedgeType(type.id)}
+                      className={`rounded-lg border px-3 py-3 text-left transition-colors ${
+                        selected
+                          ? 'border-[#F0B90B] bg-[#F0B90B]/10 text-foreground'
+                          : 'border-border bg-background text-muted-foreground hover:bg-accent'
+                      }`}
+                    >
+                      <div className="text-[12px] font-medium">{type.label}</div>
+                      <div className="mt-1 text-[10px] leading-relaxed">{type.sub}</div>
+                    </button>
+                  );
+                })}
+              </div>
+            </section>
 
-        {isTrade && positionFeedback.signals.length > 0 && (
-          <section className="rounded border border-border bg-card p-3">
-            <div className={labelCls}>持仓反馈体检</div>
-            <div className="mt-1 text-[11px] text-muted-foreground">
-              把这一单和现有持仓、近期平仓对照 — 负反馈维稳，正反馈顺势。
-            </div>
-            <div className="mt-2 space-y-1.5">
-              {positionFeedback.signals.map(sig => {
-                const tone = polarityTone(sig.polarity);
-                return (
-                  <div key={sig.kind} className={`rounded border px-3 py-2 ${tone.box}`}>
-                    <div className={`text-[12px] font-medium ${tone.text}`}>{sig.title}</div>
-                    <div className="mt-0.5 text-[11px] leading-relaxed text-muted-foreground">{sig.detail}</div>
+            <section className="rounded-lg border border-border bg-card p-3.5 shadow-sm">
+              <div className="text-[12px] font-medium text-foreground">问二 · 边界划在哪、比例多少？{requiredStar}</div>
+              <div className="mt-0.5 text-[10px] text-muted-foreground">
+                先把保险生效的边界钉住；比例由下面的必要性滑块承载，不单独重复填写。
+              </div>
+              <div className="mt-3 grid gap-3 md:grid-cols-2">
+                <label className="block">
+                  <div className={labelCls}>边界价{requiredStar}</div>
+                  <Input
+                    value={hedgeBoundaryPrice}
+                    onChange={event => setHedgeBoundaryPrice(event.target.value)}
+                    placeholder={hedgeTypeMeta?.boundaryHint ?? '先选择对冲类型'}
+                    inputMode="decimal"
+                    className={`${inputCls} mt-2`}
+                  />
+                </label>
+                <label className="block">
+                  <div className={labelCls}>边界依据</div>
+                  <div className="mt-1 text-[10px] leading-relaxed text-muted-foreground">
+                    这条线 = 主力腿的生存底线 = 预期风险开始盖过预期盈利的交叉点。三类边界(ATR/中枢下沿/阻力位)都是在找这同一个点。
                   </div>
-                );
-              })}
-            </div>
-          </section>
+                  <Input
+                    value={hedgeBoundaryBasis}
+                    onChange={event => setHedgeBoundaryBasis(event.target.value)}
+                    placeholder="例如：ATR 线 / 中枢下沿 / 阻力位，都是在找机会=风险的交叉点"
+                    className={`${inputCls} mt-2`}
+                  />
+                </label>
+                <div className="rounded-lg border border-border/70 bg-background/70 p-3 md:col-span-2">
+                  <div className={labelCls}>相对“机会=风险”的交叉点，你这条线放在哪？</div>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {([
+                      ['early', '偏早', '机会还略大于风险，我就让出（我有别的机会）'],
+                      ['at_crossover', '大致在交叉点', '机会与风险大致打平时，对冲开始接管'],
+                      ['late', '偏晚', '风险已经盖过机会，但我舍不得走'],
+                    ] as const).map(([value, label, desc]) => (
+                      <button
+                        key={value}
+                        type="button"
+                        onClick={() => setHedgeBoundaryStance(value)}
+                        className={`rounded-lg border px-3 py-2 text-left transition-colors ${
+                          hedgeBoundaryStance === value
+                            ? 'border-[#F0B90B] bg-[#F0B90B]/10 text-foreground'
+                            : 'border-border bg-card text-muted-foreground hover:bg-accent'
+                        }`}
+                      >
+                        <div className="text-[11px] font-medium">{label}</div>
+                        <div className="mt-0.5 text-[10px] leading-relaxed">{desc}</div>
+                      </button>
+                    ))}
+                  </div>
+                  {hedgeBoundaryStance === 'late' && (
+                    <div className="mt-2 text-[10px] text-[#D89B00]">
+                      偏晚是机会匮乏者的打法。确认这是计划，不是舍不得？
+                    </div>
+                  )}
+                </div>
+                {hedgeTypeMeta?.lockProfit && (
+                  <label className="block md:col-span-2">
+                    <div className={labelCls}>锁定的最低微利 %{requiredStar}</div>
+                    <Input
+                      value={hedgeLockProfitPct}
+                      onChange={event => setHedgeLockProfitPct(event.target.value)}
+                      inputMode="decimal"
+                      className={`${inputCls} mt-2 max-w-[220px]`}
+                    />
+                    <div className="mt-1 text-[10px] text-muted-foreground">
+                      默认 4，确保总仓位回撤后仍有 3–5% 微利。
+                    </div>
+                  </label>
+                )}
+              </div>
+            </section>
+
+            <section className="rounded-lg border border-border bg-card p-3.5 shadow-sm">
+              <div className="text-[12px] font-medium text-foreground">问三 · 向上怎么办、向下怎么办？{requiredStar}</div>
+              <div className="mt-0.5 text-[10px] text-muted-foreground">
+                在还不知道往哪破的此刻就写死两边，到时候照着执行，而不是临场即兴。
+              </div>
+              <div className="mt-3 grid gap-3 md:grid-cols-2">
+                <label className="block">
+                  <div className={labelCls}>向上预案{requiredStar}</div>
+                  <Textarea
+                    value={hedgeResolutionUp}
+                    onChange={event => setHedgeResolutionUp(event.target.value)}
+                    placeholder={hedgeTypeMeta?.resolutionUpDefault ?? '先选择对冲类型'}
+                    className={`${textareaCls} mt-2 min-h-[140px]`}
+                  />
+                </label>
+                <label className="block">
+                  <div className={labelCls}>向下预案{requiredStar}</div>
+                  <Textarea
+                    value={hedgeResolutionDown}
+                    onChange={event => setHedgeResolutionDown(event.target.value)}
+                    placeholder={hedgeTypeMeta?.resolutionDownDefault ?? '先选择对冲类型'}
+                    className={`${textareaCls} mt-2 min-h-[140px]`}
+                  />
+                </label>
+              </div>
+            </section>
+
+            <section className="rounded-lg border border-border bg-card p-3.5 shadow-sm">
+              <div className="text-[12px] font-medium text-foreground">必要性 · 外部先定大小{requiredStar}</div>
+              <div className="mt-0.5 text-[10px] text-muted-foreground">
+                = 尾部风险概率 × 风险绝对值。这份保险兜住的风险期望越大，对冲越该大。最大 = 与主仓等额。
+              </div>
+              <div className="mt-3 grid gap-3 lg:grid-cols-3">
+                <div className="rounded-lg border border-border/70 bg-background/70 p-3">
+                  <div className={labelCls}>行情强劲程度{requiredStar}</div>
+                  <div className="mt-2 grid grid-cols-5 gap-1">
+                    {[1, 2, 3, 4, 5].map(score => (
+                      <button
+                        key={`strength-${score}`}
+                        type="button"
+                        onClick={() => setHedgeSafetyStrength(score as 1 | 2 | 3 | 4 | 5)}
+                        className={`h-8 rounded text-[12px] font-medium transition-colors ${
+                          hedgeSafetyStrength === score
+                            ? 'bg-[#F0B90B] text-black'
+                            : 'bg-muted text-muted-foreground hover:bg-muted/80'
+                        }`}
+                      >
+                        {score}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div className="rounded-lg border border-border/70 bg-background/70 p-3">
+                  <div className={labelCls}>历史规则程度{requiredStar}</div>
+                  <div className="mt-2 grid grid-cols-5 gap-1">
+                    {[1, 2, 3, 4, 5].map(score => (
+                      <button
+                        key={`regularity-${score}`}
+                        type="button"
+                        onClick={() => setHedgeSafetyRegularity(score as 1 | 2 | 3 | 4 | 5)}
+                        className={`h-8 rounded text-[12px] font-medium transition-colors ${
+                          hedgeSafetyRegularity === score
+                            ? 'bg-[#F0B90B] text-black'
+                            : 'bg-muted text-muted-foreground hover:bg-muted/80'
+                        }`}
+                      >
+                        {score}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div className="rounded-lg border border-border/70 bg-background/70 p-3">
+                  <div className={labelCls}>下行烈度 / 跳空风险{requiredStar}</div>
+                  <div className="mt-1 text-[10px] text-muted-foreground">
+                    一旦反向，它能多猛？妖币能瞬间天地针给 5，低波动主流给 1。
+                  </div>
+                  <div className="mt-2 grid grid-cols-5 gap-1">
+                    {[1, 2, 3, 4, 5].map(score => (
+                      <button
+                        key={`magnitude-${score}`}
+                        type="button"
+                        onClick={() => setHedgeRiskMagnitude(score as 1 | 2 | 3 | 4 | 5)}
+                        className={`h-8 rounded text-[12px] font-medium transition-colors ${
+                          hedgeRiskMagnitude === score
+                            ? 'bg-[#F0B90B] text-black'
+                            : 'bg-muted text-muted-foreground hover:bg-muted/80'
+                        }`}
+                      >
+                        {score}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+              <div className="mt-4 rounded-lg border border-border/70 bg-background/70 p-3">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <div className="text-[11px] font-medium text-foreground">对冲必要性 / 占主仓比例{requiredStar}</div>
+                    <div className="mt-1 text-[10px] text-muted-foreground">
+                      = 尾部风险概率 × 风险绝对值，0%–100%，硬顶 100%。
+                    </div>
+                  </div>
+                  <div className="font-mono text-[16px] text-[#F0B90B]">{hedgeNecessityPct == null ? '—' : `${hedgeNecessityValue}%`}</div>
+                </div>
+                <div className="relative mt-4">
+                  {necessitySuggestion && (
+                    <div
+                      className="pointer-events-none absolute -top-3 z-10 flex -translate-x-1/2 flex-col items-center"
+                      style={{ left: `${necessitySuggestion.suggested}%` }}
+                    >
+                      <span className="rounded-full bg-[#F0B90B]/12 px-1.5 py-0.5 text-[9px] font-mono text-[#F0B90B]">
+                        建议 {necessitySuggestion.suggested}%
+                      </span>
+                      <span className="mt-1 h-4 border-l border-[#F0B90B]/60" />
+                    </div>
+                  )}
+                  <Slider
+                    value={[hedgeNecessityValue]}
+                    min={0}
+                    max={100}
+                    step={1}
+                    onValueChange={([value]) => setHedgeNecessityPct(Math.min(100, clampProbability(value ?? 0)))}
+                  />
+                </div>
+                <div className="mt-3 text-[10px] text-muted-foreground">
+                  {necessitySuggestion
+                    ? '按“概率×烈度”算出，并按“宁可多对冲”+15 偏移。可采纳或覆盖。'
+                    : '先给上面的三个客观锚点打分，系统再给出幽灵建议值。'}
+                </div>
+                {hedgeConsistencyHint && (
+                  <div className="mt-3 rounded border border-[#F0B90B]/35 bg-[#F0B90B]/10 px-3 py-2 text-[11px] text-[#D89B00]">
+                    {hedgeConsistencyHint}
+                  </div>
+                )}
+              </div>
+            </section>
+
+            <section className="rounded-lg border border-border bg-card p-3.5 shadow-sm">
+              <div className="text-[12px] font-medium text-foreground">把握性 · 内部只定成色{requiredStar}</div>
+              <div className="mt-0.5 text-[10px] whitespace-pre-line text-muted-foreground">
+                这里不是“市场会不会按我想的走”，而是“我对必要性这个估计（尾部概率 × 烈度）有多确定”。
+                是冷静算出来的，还是被行情吓出来高估的？
+              </div>
+              <div className="mt-4 rounded-lg border border-border/70 bg-background/70 p-3">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="text-[11px] font-medium text-foreground">把握性 · 我多确定“这个风险估计”是对的</div>
+                  <div className="font-mono text-[16px] text-[#F0B90B]">{hedgeConvictionPct == null ? '—' : `${hedgeConvictionValue}%`}</div>
+                </div>
+                <div className="mt-3">
+                  <Slider
+                    value={[hedgeConvictionValue]}
+                    min={0}
+                    max={100}
+                    step={1}
+                    onValueChange={([value]) => setHedgeConvictionPct(clampProbability(value ?? 0))}
+                  />
+                </div>
+                <div className="mt-3 rounded border border-border/70 bg-card px-3 py-2.5">
+                  <div className="text-[11px] font-medium text-foreground">芒格折扣 · 对冲校准</div>
+                  <div className="mt-1 text-[12px] text-foreground">
+                    你的输入：{hedgeConvictionValue}% → 折扣后真实可能：{hedgeDiscount.discountedPct}%
+                  </div>
+                  <div className="mt-1 text-[10px] text-muted-foreground">
+                    {hedgeDiscount.source === 'personalized'
+                      ? `基于你过去 ${hedgeDiscount.sampleSize} 笔已平仓对冲的“值回成本”记录`
+                      : '对冲样本不足 10 笔时，默认先做 -15% 谦逊折扣。折扣只显示，不写入数据库。'}
+                  </div>
+                </div>
+              </div>
+              <div className="mt-3 text-[10px] text-muted-foreground">
+                低把握性意味着你对这个风险估计没底。在不对称原则下，没底是更该保护，而不是更少保护。
+              </div>
+              {hedgePanic && (
+                <div className="mt-3 rounded border border-[#F0B90B]/45 bg-[#F0B90B]/12 px-3 py-2.5 text-[12px] leading-relaxed text-[#D89B00]">
+                  你对“必要性这个估计”自己都没底，却下了重手。这是计划内的纪律，还是被行情吓出来高估了风险？
+                </div>
+              )}
+            </section>
+
+            <section className="grid gap-3 lg:grid-cols-[1fr_200px]">
+              <div className="rounded-lg border border-border bg-card p-3.5 shadow-sm">
+                <div className="text-[12px] font-medium text-foreground">摩擦成本 + 下单方式</div>
+                <div className="mt-3 space-y-3">
+                  <label className="block">
+                    <div className={labelCls}>愿意为这份保险付多少摩擦成本</div>
+                    <Input
+                      value={hedgeFrictionCost}
+                      onChange={event => setHedgeFrictionCost(event.target.value)}
+                      placeholder="点差 + 手续费 + 资金费——你拿这点已知小出血，换未知大风险。"
+                      className={`${inputCls} mt-2`}
+                    />
+                  </label>
+                  <div>
+                    <div className={labelCls}>下单方式</div>
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      {(Object.entries(HEDGE_ORDER_METHOD_LABELS) as [HedgeOrderMethod, string][]).map(([value, label]) => (
+                        <button
+                          key={value}
+                          type="button"
+                          onClick={() => setHedgeOrderMethod(value)}
+                          className={`inline-flex h-8 items-center rounded-full border px-3 text-[11px] transition-colors ${
+                            hedgeOrderMethod === value
+                              ? 'border-[#F0B90B] bg-[#F0B90B]/10 text-[#F0B90B]'
+                              : 'border-border bg-background text-muted-foreground hover:bg-accent'
+                          }`}
+                        >
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+                    {hedgeOrderMethod === 'market_chase' && (
+                      <div className="mt-2 text-[10px] text-[#D89B00]">
+                        市价追多半是慌，预挂才是纪律。
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {mentalRatingCard}
+            </section>
+          </>
         )}
 
         <section>
@@ -988,53 +1454,55 @@ export function PreTradeSnapshotForm({
           </TooltipProvider>
         </section>
 
-        <section className="rounded border border-border bg-card p-3">
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <div className={labelCls}>二元预测概率</div>
-              <div className="mt-1 text-[12px] text-muted-foreground">移动任一端，另一端自动补足到 100%。</div>
-            </div>
-            <div className="text-right font-mono">
-              <div className="text-[13px] text-[#0ECB81]">对 {confidencePct}%</div>
-              <div className="text-[13px] text-[#F6465D]">错 {100 - confidencePct}%</div>
-            </div>
-          </div>
-          <div className="mt-3 space-y-3">
-            <div>
-              <div className="mb-1 flex justify-between text-[11px] text-muted-foreground">
-                <span>会对</span><span>{confidencePct}%</span>
+        {!isHedge && (
+          <section className="rounded border border-border bg-card p-3">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <div className={labelCls}>二元预测概率</div>
+                <div className="mt-1 text-[12px] text-muted-foreground">移动任一端，另一端自动补足到 100%。</div>
               </div>
-              <Slider value={[confidencePct]} min={0} max={100} step={1} onValueChange={([v]) => setConfidencePct(clampProbability(v ?? 50))} />
-            </div>
-            <div>
-              <div className="mb-1 flex justify-between text-[11px] text-muted-foreground">
-                <span>会错</span><span>{100 - confidencePct}%</span>
-              </div>
-              <Slider value={[100 - confidencePct]} min={0} max={100} step={1} onValueChange={([v]) => setConfidencePct(100 - clampProbability(v ?? 50))} />
-            </div>
-            <Input
-              value={confidenceBasis}
-              onChange={event => setConfidenceBasis(event.target.value)}
-              placeholder="我为什么有资格给这个置信度？"
-              className={inputCls}
-            />
-            <div className="rounded border border-border/70 bg-background/70 px-3 py-2.5">
-              <div className="text-[11px] font-medium text-foreground">芒格折扣 · 置信度安全边际</div>
-              <div className="mt-1 text-[12px] text-foreground">
-                {discount.source === 'personalized'
-                  ? `你的输入：${confidencePct}% → 按你的历史校准，真实可能：${discount.discountedPct}%`
-                  : `你的输入：${confidencePct}% → 折扣后真实可能：${discount.discountedPct}%`}
-              </div>
-              <div className="mt-1 text-[10px] text-muted-foreground">
-                {discount.source === 'personalized'
-                  ? `基于你过去 ${discount.sampleSize} 笔相近置信度交易的实际胜率`
-                  : '主观置信度系统性偏高约 15 个百分点（Tetlock）。积累 10 笔以上相近交易后，此处将改用你的个人校准。'}
+              <div className="text-right font-mono">
+                <div className="text-[13px] text-[#0ECB81]">对 {confidencePct}%</div>
+                <div className="text-[13px] text-[#F6465D]">错 {100 - confidencePct}%</div>
               </div>
             </div>
-          </div>
-        </section>
+            <div className="mt-3 space-y-3">
+              <div>
+                <div className="mb-1 flex justify-between text-[11px] text-muted-foreground">
+                  <span>会对</span><span>{confidencePct}%</span>
+                </div>
+                <Slider value={[confidencePct]} min={0} max={100} step={1} onValueChange={([v]) => setConfidencePct(clampProbability(v ?? 50))} />
+              </div>
+              <div>
+                <div className="mb-1 flex justify-between text-[11px] text-muted-foreground">
+                  <span>会错</span><span>{100 - confidencePct}%</span>
+                </div>
+                <Slider value={[100 - confidencePct]} min={0} max={100} step={1} onValueChange={([v]) => setConfidencePct(100 - clampProbability(v ?? 50))} />
+              </div>
+              <Input
+                value={confidenceBasis}
+                onChange={event => setConfidenceBasis(event.target.value)}
+                placeholder="我为什么有资格给这个置信度？"
+                className={inputCls}
+              />
+              <div className="rounded border border-border/70 bg-background/70 px-3 py-2.5">
+                <div className="text-[11px] font-medium text-foreground">芒格折扣 · 置信度安全边际</div>
+                <div className="mt-1 text-[12px] text-foreground">
+                  {discount.source === 'personalized'
+                    ? `你的输入：${confidencePct}% → 按你的历史校准，真实可能：${discount.discountedPct}%`
+                    : `你的输入：${confidencePct}% → 折扣后真实可能：${discount.discountedPct}%`}
+                </div>
+                <div className="mt-1 text-[10px] text-muted-foreground">
+                  {discount.source === 'personalized'
+                    ? `基于你过去 ${discount.sampleSize} 笔相近置信度交易的实际胜率`
+                    : '主观置信度系统性偏高约 15 个百分点（Tetlock）。积累 10 笔以上相近交易后，此处将改用你的个人校准。'}
+                </div>
+              </div>
+            </div>
+          </section>
+        )}
 
-        {isTrade && (
+        {!isHedge && isTrade && (
           <section className="rounded border border-border bg-card p-3">
             <div className="mb-2 flex items-center justify-between">
               <div className={labelCls}>开仓 Checklist{requiredStar}</div>

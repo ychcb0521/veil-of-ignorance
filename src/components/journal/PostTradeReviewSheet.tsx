@@ -17,6 +17,7 @@ import { Pencil, ChevronDown, BrainCircuit } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useTradingContext } from '@/contexts/TradingContext';
 import { COGNITIVE_BIAS_LABELS } from '@/lib/cognitiveBiasTags';
+import { HEDGE_BOUNDARY_STANCE_LABELS, HEDGE_ORDER_METHOD_LABELS, HEDGE_TYPE_LABELS } from '@/lib/hedgeTypes';
 import {
   finalizeJournalReview, replacePhaseAssignments,
   listAssignmentsForJournal, countPatternOccurrencesLast30Days, listPatterns,
@@ -61,6 +62,7 @@ export function PostTradeReviewSheet({
   const [invalidationReview, setInvalidationReview] = useState('');
   const [falsificationStatus, setFalsificationStatus] = useState<TradeJournal['exit_falsification_status']>(null);
   const [falsificationNote, setFalsificationNote] = useState('');
+  const [hedgeWorthIt, setHedgeWorthIt] = useState<TradeJournal['hedge_worth_it']>(null);
   const [opponentWasRight, setOpponentWasRight] = useState<boolean | null>(null);
   const [fiveStepGoal, setFiveStepGoal] = useState('');
   const [fiveStepProblem, setFiveStepProblem] = useState('');
@@ -105,6 +107,7 @@ export function PostTradeReviewSheet({
         setInvalidationReview(journal.post_invalidation_review ?? '');
         setFalsificationStatus(journal.exit_falsification_status ?? null);
         setFalsificationNote(journal.exit_falsification_note ?? '');
+        setHedgeWorthIt(journal.hedge_worth_it ?? null);
         setOpponentWasRight(journal.post_opponent_was_right ?? null);
         setFiveStepGoal(journal.post_five_step_goal ?? '');
         setFiveStepProblem(journal.post_five_step_problem ?? '');
@@ -246,6 +249,7 @@ export function PostTradeReviewSheet({
   const decisionValid = !!decisionQuality;
   const reviewLoopValid = !!expectancyReview.trim() && !!premortemReview.trim() && !!invalidationReview.trim();
   const opponentValid = !journal.pre_opponent_statement || opponentWasRight !== null;
+  const hedgeWorthItValid = !isHedge || hedgeWorthIt != null;
   const fiveStepValid = [
     fiveStepGoal,
     fiveStepProblem,
@@ -254,7 +258,7 @@ export function PostTradeReviewSheet({
     designIntervention,
     executionMonitor,
   ].every(value => value.trim().length > 0);
-  const canSave = tagsValid && reflectionValid && correctValid && exitReasonValid && resultValid && decisionValid && reviewLoopValid && opponentValid && fiveStepValid && !saving;
+  const canSave = tagsValid && reflectionValid && correctValid && exitReasonValid && resultValid && decisionValid && reviewLoopValid && opponentValid && hedgeWorthItValid && fiveStepValid && !saving;
 
   const hotWarnings = selectedTags
     .map(id => {
@@ -285,6 +289,7 @@ export function PostTradeReviewSheet({
         post_invalidation_review: invalidationReview.trim(),
         exit_falsification_status: falsificationStatus,
         exit_falsification_note: falsificationNote.trim() || null,
+        hedge_worth_it: isHedge ? hedgeWorthIt : null,
         post_opponent_was_right: opponentWasRight,
         post_five_step_goal: fiveStepGoal.trim(),
         post_five_step_problem: fiveStepProblem.trim(),
@@ -414,7 +419,42 @@ export function PostTradeReviewSheet({
                 </span>
               </div>
             </div>
-            {isSnapshotV2 ? (
+            {isHedge ? (
+              <div className="grid gap-2">
+                <div className="rounded-lg border border-[#F0B90B]/30 bg-[#F0B90B]/8 px-3 py-2 text-[11px] leading-relaxed text-foreground">
+                  对冲不是下注，是把“未知、不可控的无限风险”，换成“已知、可衡量的极小摩擦成本”。
+                </div>
+                <div className="rounded-lg border border-border/60 bg-background/60 px-3 py-2">
+                  <span className="text-muted-foreground">对冲类型：</span>
+                  {journal.hedge_type ? HEDGE_TYPE_LABELS[journal.hedge_type] : '—'}
+                  {journal.hedge_necessity_pct != null ? <span> · 必要性 {journal.hedge_necessity_pct.toFixed(0)}%</span> : null}
+                  {journal.hedge_conviction_pct != null ? <span> · 把握性 {journal.hedge_conviction_pct.toFixed(0)}%</span> : null}
+                </div>
+                <div className="rounded-lg border border-border/60 bg-background/60 px-3 py-2">
+                  <span className="text-muted-foreground">客观锚点：</span>
+                  {journal.hedge_safety_strength != null ? <span>强劲 {journal.hedge_safety_strength}/5</span> : '—'}
+                  {journal.hedge_safety_regularity != null ? <span> · 规则 {journal.hedge_safety_regularity}/5</span> : null}
+                  {journal.hedge_risk_magnitude != null ? <span> · 烈度 {journal.hedge_risk_magnitude}/5</span> : null}
+                </div>
+                <div className="rounded-lg border border-border/60 bg-background/60 px-3 py-2">
+                  <span className="text-muted-foreground">边界：</span>
+                  {journal.hedge_boundary_price != null ? journal.hedge_boundary_price.toFixed(4) : '—'}
+                  {journal.hedge_boundary_basis ? <span> · {journal.hedge_boundary_basis}</span> : null}
+                  {journal.hedge_boundary_stance ? <span> · {HEDGE_BOUNDARY_STANCE_LABELS[journal.hedge_boundary_stance]}</span> : null}
+                  {journal.hedge_lock_profit_pct != null ? <span> · 锁定微利 {journal.hedge_lock_profit_pct}%</span> : null}
+                </div>
+                <div className="rounded-lg border border-border/60 bg-background/60 px-3 py-2">
+                  <span className="text-muted-foreground">向上预案：</span>{journal.hedge_resolution_up || '—'}
+                </div>
+                <div className="rounded-lg border border-border/60 bg-background/60 px-3 py-2">
+                  <span className="text-muted-foreground">向下预案：</span>{journal.hedge_resolution_down || '—'}
+                </div>
+                <div className="rounded-lg border border-border/60 bg-background/60 px-3 py-2">
+                  <span className="text-muted-foreground">摩擦成本：</span>{journal.hedge_friction_cost || '—'}
+                  {journal.hedge_order_method ? <span> · {HEDGE_ORDER_METHOD_LABELS[journal.hedge_order_method]}</span> : null}
+                </div>
+              </div>
+            ) : isSnapshotV2 ? (
               <div className="grid gap-2">
                 <div className="rounded-lg border border-border/60 bg-background/60 px-3 py-2">
                   <span className="text-muted-foreground">这笔为什么会对：</span>{snapshotWhyRight || '—'}
@@ -524,6 +564,38 @@ export function PostTradeReviewSheet({
             <div>{holdDurationLabel}</div>
           </div>
         </div>
+
+        {isHedge && (
+          <div className={`space-y-3 px-4 py-4 ${sectionCardClass}`}>
+            <div>
+              <div className="text-[12px] font-medium">这个对冲值回成本了吗？</div>
+              <div className="mt-1 text-[10px] text-muted-foreground">
+                回答的不是方向对错，而是这份保险是否真的值回它付出的摩擦成本。
+              </div>
+            </div>
+            <div className="grid gap-2">
+              {[
+                { value: 'yes', label: '值', desc: '该锁的锁住了 / 边界划对了' },
+                { value: 'partial', label: '部分', desc: '起到了一部分保护，但不够完整' },
+                { value: 'no', label: '不值', desc: '被噪音打穿白付摩擦 / 白白盖死上限' },
+              ].map(option => (
+                <button
+                  key={option.value}
+                  type="button"
+                  onClick={() => setHedgeWorthIt(option.value as NonNullable<TradeJournal['hedge_worth_it']>)}
+                  className={`rounded-lg border px-3 py-2 text-left transition-colors ${
+                    hedgeWorthIt === option.value
+                      ? 'border-[#F0B90B] bg-[#F0B90B]/10 text-foreground'
+                      : 'border-border bg-background text-muted-foreground hover:bg-accent'
+                  }`}
+                >
+                  <div className="text-[11px] font-medium">{option.label}</div>
+                  <div className="mt-0.5 text-[10px] leading-relaxed">{option.desc}</div>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
 
         {calibrationPct != null && (
           <div className={`space-y-2 px-4 py-4 ${sectionCardClass}`}>

@@ -6,6 +6,7 @@
  * 否则校准曲线会被擦花，无法持续暴露真实的偏高程度。
  */
 import type { TradeJournal } from '@/types/journal';
+import { HEDGE_WORTH_IT_SCORE } from '@/lib/hedgeTypes';
 
 /** Tetlock 经验默认折扣（百分点）。 */
 export const DEFAULT_CONFIDENCE_DISCOUNT = 15;
@@ -58,6 +59,52 @@ export function computeDiscount(
 
   return {
     discountedPct: clampPct(currentConfidencePct - DEFAULT_CONFIDENCE_DISCOUNT),
+    discount: DEFAULT_CONFIDENCE_DISCOUNT,
+    source: 'default',
+    sampleSize: inBand.length,
+  };
+}
+
+/**
+ * 对冲把握性的芒格折扣（批次 25）。
+ * 与主力单同款逻辑，但"真实可能"用的是对冲值回率（yes=1 / partial=0.5 / no=0 的均值），
+ * 而非方向胜率。≥10 笔相近把握性的已平仓对冲 → 用个人值回率；否则回落到 -15pt 默认。
+ *
+ * 注意：折扣值【绝不写库】，仅用于显示；存库的永远是把握性滑块原值。
+ */
+export function computeHedgeConvictionDiscount(
+  currentConvictionPct: number,
+  journals: TradeJournal[],
+): DiscountResult {
+  const closed = journals.filter(j =>
+    j.order_kind === 'hedge'
+    && typeof j.hedge_conviction_pct === 'number'
+    && (j.hedge_worth_it === 'yes' || j.hedge_worth_it === 'partial' || j.hedge_worth_it === 'no'),
+  );
+
+  const inBand = closed.filter(j => {
+    const conv = j.hedge_conviction_pct as number;
+    return conv >= currentConvictionPct - CONFIDENCE_BAND
+      && conv <= currentConvictionPct + CONFIDENCE_BAND;
+  });
+
+  if (inBand.length >= MIN_PERSONALIZED_SAMPLES) {
+    const totalScore = inBand.reduce(
+      (sum, j) => sum + HEDGE_WORTH_IT_SCORE[j.hedge_worth_it as keyof typeof HEDGE_WORTH_IT_SCORE],
+      0,
+    );
+    const actualWorthRate = (totalScore / inBand.length) * 100;
+    const discount = currentConvictionPct - actualWorthRate;
+    return {
+      discountedPct: clampPct(currentConvictionPct - discount),
+      discount,
+      source: 'personalized',
+      sampleSize: inBand.length,
+    };
+  }
+
+  return {
+    discountedPct: clampPct(currentConvictionPct - DEFAULT_CONFIDENCE_DISCOUNT),
     discount: DEFAULT_CONFIDENCE_DISCOUNT,
     source: 'default',
     sampleSize: inBand.length,

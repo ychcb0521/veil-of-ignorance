@@ -191,6 +191,20 @@ export function PreTradeSnapshotDialog({
         pre_cognitive_bias_tags: payload.pre_cognitive_bias_tags,
         pre_executor_self: payload.pre_executor_self,
         pre_designer_self: payload.pre_designer_self,
+        hedge_type: payload.hedge_type,
+        hedge_boundary_price: payload.hedge_boundary_price,
+        hedge_boundary_basis: payload.hedge_boundary_basis,
+        hedge_boundary_stance: payload.hedge_boundary_stance,
+        hedge_lock_profit_pct: payload.hedge_lock_profit_pct,
+        hedge_resolution_up: payload.hedge_resolution_up,
+        hedge_resolution_down: payload.hedge_resolution_down,
+        hedge_necessity_pct: payload.hedge_necessity_pct,
+        hedge_safety_strength: payload.hedge_safety_strength,
+        hedge_safety_regularity: payload.hedge_safety_regularity,
+        hedge_risk_magnitude: payload.hedge_risk_magnitude,
+        hedge_conviction_pct: payload.hedge_conviction_pct,
+        hedge_friction_cost: payload.hedge_friction_cost,
+        hedge_order_method: payload.hedge_order_method,
       });
 
       if (mode === 'trade' && orderParams && onPlaceOrder) {

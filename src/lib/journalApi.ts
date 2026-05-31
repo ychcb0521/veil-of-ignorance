@@ -306,7 +306,7 @@ function isMissingDalioMetaLayerError(error: { code?: string; message?: string }
   return error.code === 'PGRST205'
     || error.code === 'PGRST204'
     || error.code === '42P01'
-    || (/trade_principles|pain_log_entries|pre_thesis_why_right|pre_premortem_failure_reason|pre_falsification_signal|pre_confidence_basis|pre_account_equity_usdt|pre_mortem_text|pre_positive_expectancy|pre_invalidation_condition|pre_calibration_win_pct|pre_confidence_interval_|pre_calibration_reference_class|pre_calibration_competence_basis|pre_calibration_update_signal|pre_dataset_split|pre_lollapalooza_score|pre_bankruptcy_estimate|pre_info_|pre_opponent_statement|pre_pain_tags|pre_cognitive_bias_tags|journal_kind|no_trade_reason|no_trade_would_be_entry_price|no_trade_direction|exit_falsification_status|exit_falsification_note|post_result_summary|post_decision_quality|post_positive_expectancy_review|post_premortem_review|post_invalidation_review|post_five_step|post_opponent_was_right|post_real_close_time|evolution_level|principle_id/i.test(message)
+    || (/trade_principles|pain_log_entries|pre_thesis_why_right|pre_premortem_failure_reason|pre_falsification_signal|pre_confidence_basis|pre_account_equity_usdt|pre_mortem_text|pre_positive_expectancy|pre_invalidation_condition|pre_calibration_win_pct|pre_confidence_interval_|pre_calibration_reference_class|pre_calibration_competence_basis|pre_calibration_update_signal|pre_dataset_split|pre_lollapalooza_score|pre_bankruptcy_estimate|pre_info_|pre_opponent_statement|pre_pain_tags|pre_cognitive_bias_tags|journal_kind|no_trade_reason|no_trade_would_be_entry_price|no_trade_direction|exit_falsification_status|exit_falsification_note|post_result_summary|post_decision_quality|post_positive_expectancy_review|post_premortem_review|post_invalidation_review|post_five_step|post_opponent_was_right|post_real_close_time|evolution_level|principle_id|hedge_type|hedge_boundary_price|hedge_boundary_basis|hedge_boundary_stance|hedge_lock_profit_pct|hedge_resolution_up|hedge_resolution_down|hedge_necessity_pct|hedge_safety_strength|hedge_safety_regularity|hedge_risk_magnitude|hedge_conviction_pct|hedge_friction_cost|hedge_order_method|hedge_worth_it/i.test(message)
       && /schema cache|could not find|does not exist|column/i.test(message));
 }
 
@@ -342,6 +342,45 @@ async function updateTradeJournalWithSchemaFallback(
     if (!missing || !(missing in nextPayload)) return { data, error };
     const rest = { ...nextPayload };
     delete rest[missing];
+    nextPayload = rest;
+  }
+
+  return { data: lastData, error: lastError };
+}
+
+/**
+ * 插入 trade_journals，遇到"schema 里还没有的列"就逐列剥掉再重试（最多 30 次），
+ * 而不是一次性按硬编码清单全删——后者会在"批次 23/24 列已存在、批次 25 列还没建"的
+ * 混合 schema 下，把主力单快照里本应写入的元数据列一起误删，造成主力单退化。
+ *
+ * 唯一的特殊处理：旧库若连 pre_thesis_why_right 都没有，则把它的内容回填到 legacy
+ * 的 pre_entry_reason（NOT NULL 兜底），与重构前的行为保持一致。
+ */
+async function insertTradeJournalWithSchemaFallback(
+  payload: Record<string, unknown>,
+): Promise<{ data: unknown; error: { message: string; code?: string } | null }> {
+  let nextPayload = { ...payload };
+  let lastData: unknown = null;
+  let lastError: { message: string; code?: string } | null = null;
+
+  for (let attempt = 0; attempt < 30; attempt += 1) {
+    const { data, error } = await supabase
+      .from("trade_journals" as never)
+      .insert(nextPayload as never)
+      .select()
+      .single();
+    lastData = data;
+    lastError = error;
+    if (!error) return { data, error: null };
+    if (!isMissingDalioMetaLayerError(error)) return { data, error };
+    const missing = missingSchemaColumn(error);
+    if (!missing || !(missing in nextPayload)) return { data, error };
+    const rest = { ...nextPayload };
+    delete rest[missing];
+    // legacy 兜底：丢掉 pre_thesis_why_right 时，把理由回填到旧列 pre_entry_reason。
+    if (missing === 'pre_thesis_why_right' && rest.pre_entry_reason == null) {
+      rest.pre_entry_reason = (payload.pre_thesis_why_right as string | null | undefined) ?? '';
+    }
     nextPayload = rest;
   }
 
@@ -2131,54 +2170,7 @@ export async function stampJournalCloseRealTime(journalId: string): Promise<stri
 
 export async function createJournalPreSnapshot(input: CreateJournalPreInput): Promise<TradeJournal> {
   const payload = { ...input, pre_real_time: new Date().toISOString(), source: 'live' as const };
-  let { data, error } = await supabase
-    .from("trade_journals" as never)
-    .insert(payload as never)
-    .select()
-    .single();
-  if (error && isMissingDalioMetaLayerError(error)) {
-    const {
-      pre_thesis_why_right: _thesisWhyRight,
-      pre_premortem_failure_reason: _premortemFailure,
-      pre_falsification_signal: _falsificationSignal,
-      pre_confidence_basis: _confidenceBasis,
-      pre_account_equity_usdt: _accountEquity,
-      pre_mortem_text: _preMortem,
-      pre_positive_expectancy: _positiveExpectancy,
-      pre_invalidation_condition: _invalidationCondition,
-      pre_calibration_win_pct: _calibration,
-      pre_confidence_interval_low_pct: _confidenceLow,
-      pre_confidence_interval_high_pct: _confidenceHigh,
-      pre_calibration_reference_class: _referenceClass,
-      pre_calibration_competence_basis: _competenceBasis,
-      pre_calibration_update_signal: _updateSignal,
-      pre_dataset_split: _datasetSplit,
-      pre_lollapalooza_score: _lollapalooza,
-      pre_bankruptcy_estimate: _bankruptcy,
-      pre_info_kline_facts: _kline,
-      pre_info_macro_facts: _macro,
-      pre_info_rule_advice: _ruleAdvice,
-      pre_info_intuition: _intuition,
-      pre_info_designer_view: _designerView,
-      pre_opponent_statement: _opponent,
-      pre_triggered_principle_ids: _principleIds,
-      pre_triggered_rule_ids: _ruleIds,
-      pre_pain_tags: _painTags,
-      pre_executor_self: _executor,
-      pre_designer_self: _designer,
-      ...legacyPayload
-    } = payload as Record<string, unknown>;
-    if (legacyPayload.pre_entry_reason == null) {
-      legacyPayload.pre_entry_reason = input.pre_thesis_why_right ?? '';
-    }
-    const retry = await supabase
-      .from("trade_journals" as never)
-      .insert(legacyPayload as never)
-      .select()
-      .single();
-    data = retry.data;
-    error = retry.error;
-  }
+  const { data, error } = await insertTradeJournalWithSchemaFallback(payload as Record<string, unknown>);
   const journal = wrap("创建交易日记事前快照", error, data as unknown as TradeJournal);
   const painTags = input.pre_pain_tags ?? [];
   if (painTags.length > 0) {
@@ -2578,6 +2570,8 @@ export interface FinalizeJournalInput {
   post_five_step_weak_point?: TradeJournal['post_five_step_weak_point'];
   exit_falsification_status?: TradeJournal['exit_falsification_status'];
   exit_falsification_note?: string | null;
+  /** 批次 25：对冲单平仓回填的"值回成本"判定（仅对冲单使用）。 */
+  hedge_worth_it?: TradeJournal['hedge_worth_it'];
 }
 
 export async function finalizeJournalReview(

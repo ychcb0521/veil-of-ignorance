@@ -27,6 +27,14 @@ export type TradeOutcome = "win" | "loss" | "breakeven" | "no_entry";
 export type TaggedPhase = "pre" | "post";
 export type PositionMode = "cross" | "isolated";
 export type OrderKind = "main" | "hedge";
+/** Batch 25: three kinds of hedge — filter (chaos), trailing (lock profit), ratio (partial). */
+export type HedgeType = "filter" | "trailing" | "ratio";
+/** Where the hedge boundary sits relative to the opportunity=risk crossover. */
+export type HedgeBoundaryStance = "early" | "at_crossover" | "late";
+/** How the hedge order was placed: a pre-set limit (discipline) vs chasing at market (often panic). */
+export type HedgeOrderMethod = "limit_preset" | "market_chase";
+/** Post-close verdict feeding the hedge calibration curve. */
+export type HedgeWorthIt = "yes" | "partial" | "no";
 export type JournalSource = 'live' | 'retroactive_from_record';
 /** Training-set vs holdout-set discipline (anti-overfitting). */
 export type DatasetSplit = 'in_sample' | 'out_of_sample';
@@ -508,6 +516,38 @@ export interface TradeJournal {
   exit_falsification_status?: ExitFalsificationStatus | null;
   /** Optional note for the falsification check. */
   exit_falsification_note?: string | null;
+
+  // ============ Batch 25: hedge snapshot (order_kind='hedge' only) ============
+  /** Which of the three hedge kinds (filter / trailing / ratio). */
+  hedge_type?: HedgeType | null;
+  /** The boundary price the hedge is built around. */
+  hedge_boundary_price?: number | null;
+  /** Free-text basis for the boundary (ATR multiple, structure level, etc.). */
+  hedge_boundary_basis?: string | null;
+  /** Reflective tag: where this boundary sits versus the opportunity=risk crossover. */
+  hedge_boundary_stance?: HedgeBoundaryStance | null;
+  /** Trailing hedge only: the minimum micro-profit % locked in. */
+  hedge_lock_profit_pct?: number | null;
+  /** Pre-written plan if price breaks upward. */
+  hedge_resolution_up?: string | null;
+  /** Pre-written plan if price breaks downward. */
+  hedge_resolution_down?: string | null;
+  /** Necessity slider = hedge size as % of the main position (0–100, hard cap 100). External → size. */
+  hedge_necessity_pct?: number | null;
+  /** Objective anchor: how strong/forceful the市场 is (1–5). Drives the necessity suggestion. */
+  hedge_safety_strength?: 1 | 2 | 3 | 4 | 5 | null;
+  /** Objective anchor: how rule-like / regular recent price action has been (1–5). */
+  hedge_safety_regularity?: 1 | 2 | 3 | 4 | 5 | null;
+  /** Objective anchor: if the market turns, how violent the downside / tail move can be (1–5). */
+  hedge_risk_magnitude?: 1 | 2 | 3 | 4 | 5 | null;
+  /** Conviction slider = how sure this hedge is a thought-through call (0–100). Internal → quality. */
+  hedge_conviction_pct?: number | null;
+  /** What friction cost (spread + fees + funding) you accept for this insurance. */
+  hedge_friction_cost?: string | null;
+  /** Pre-set limit order vs market chase. */
+  hedge_order_method?: HedgeOrderMethod | null;
+  /** Post-close: did this hedge earn back its cost? Feeds the hedge calibration curve. */
+  hedge_worth_it?: HedgeWorthIt | null;
 
   // ============ Decision-quality fields (added 2026-05) ============
   /** @deprecated v2 snapshot uses pre_premortem_failure_reason. */

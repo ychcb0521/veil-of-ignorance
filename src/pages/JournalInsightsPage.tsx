@@ -26,8 +26,9 @@ import {
   wilsonInterval,
 } from '@/lib/insightsStats';
 import { computeTooHardBasketStats, type TooHardBasketStats } from '@/lib/noTradeHypothetical';
+import { HEDGE_BOUNDARY_STANCE_LABELS, HEDGE_WORTH_IT_SCORE } from '@/lib/hedgeTypes';
 import { isHistoricalCampaign, PAIN_TAG_LABELS, PRINCIPLE_EVOLUTION_LEVEL_LABELS } from '@/types/journal';
-import type { PainTag, PrincipleEvolutionLevel, TradeCampaign, TradeJournal } from '@/types/journal';
+import type { HedgeBoundaryStance, PainTag, PrincipleEvolutionLevel, TradeCampaign, TradeJournal } from '@/types/journal';
 
 type Range = 7 | 30 | 90;
 const DAY = 24 * 3600_000;
@@ -51,6 +52,21 @@ interface CalibrationBin {
   wins: number;
   avgPredicted: number;
   actualRate: number;
+  diff: number;
+}
+
+interface HedgeCalibrationSample {
+  predProb: number;
+  worthScore: number;
+}
+
+interface HedgeCalibrationBin {
+  label: string;
+  lower: number;
+  upper: number;
+  count: number;
+  avgPredicted: number;
+  actualWorthRate: number;
   diff: number;
 }
 
@@ -159,6 +175,51 @@ function calibrationTarget(bins: CalibrationBin[], sampleCount: number) {
     detail: '继续扩大样本，重点观察高置信档位是否稳定。',
     accent: '#0ECB81',
   };
+}
+
+function buildHedgeCalibrationBins(samples: HedgeCalibrationSample[]): HedgeCalibrationBin[] {
+  const ranges = [
+    { label: '0-20%', lower: 0, upper: 0.2 },
+    { label: '20-40%', lower: 0.2, upper: 0.4 },
+    { label: '40-60%', lower: 0.4, upper: 0.6 },
+    { label: '60-80%', lower: 0.6, upper: 0.8 },
+    { label: '80-100%', lower: 0.8, upper: 1 },
+  ];
+  return ranges.map(range => {
+    const rows = samples.filter(sample =>
+      range.upper === 1
+        ? sample.predProb >= range.lower && sample.predProb <= range.upper
+        : sample.predProb >= range.lower && sample.predProb < range.upper,
+    );
+    const avgPredicted = rows.length === 0
+      ? 0
+      : rows.reduce((sum, sample) => sum + sample.predProb, 0) / rows.length;
+    const actualWorthRate = rows.length === 0
+      ? 0
+      : rows.reduce((sum, sample) => sum + sample.worthScore, 0) / rows.length;
+    return {
+      ...range,
+      count: rows.length,
+      avgPredicted,
+      actualWorthRate,
+      diff: avgPredicted - actualWorthRate,
+    };
+  });
+}
+
+function opportunityCostConclusion(distribution: Record<HedgeBoundaryStance, number>, total: number) {
+  if (total === 0) {
+    return '数据积累中。先记录更多对冲边界，再看你究竟偏早、贴着交叉点，还是总在偏晚才保护。';
+  }
+  const earlyRate = distribution.early / total;
+  const lateRate = distribution.late / total;
+  if (earlyRate >= Math.max(distribution.at_crossover / total, lateRate) && earlyRate >= 0.4) {
+    return '你在用机会富裕者的方式对冲：保守，但这正是敢下重注的前提。';
+  }
+  if (lateRate >= Math.max(distribution.at_crossover / total, earlyRate) && lateRate >= 0.4) {
+    return `你 ${(lateRate * 100).toFixed(0)}% 的对冲放得偏晚：你自认的纪律，手上却是赌徒打法。`;
+  }
+  return '你的对冲边界大多贴着交叉点，本质上是在让机会和风险大致打平时才把保险接上。';
 }
 
 function decisionQualityScore(journal: TradeJournal): number {
@@ -447,6 +508,54 @@ export default function JournalInsightsPage() {
       target: calibrationTarget(calibrationBins, calibration.count),
       drillCandidates: calibrationDrillCandidates,
     };
+    const reviewedHedges = curTrades.filter(j =>
+      j.order_kind === 'hedge'
+      && typeof j.hedge_conviction_pct === 'number'
+      && j.hedge_worth_it != null
+      && j.hedge_worth_it in HEDGE_WORTH_IT_SCORE,
+    );
+    const hedgeCalibrationSamples = reviewedHedges.map(j => ({
+      predProb: Math.min(1, Math.max(0, (j.hedge_conviction_pct ?? 0) / 100)),
+      worthScore: HEDGE_WORTH_IT_SCORE[j.hedge_worth_it!],
+    }));
+    const hedgeCalibration = {
+      count: hedgeCalibrationSamples.length,
+      avgPredicted: hedgeCalibrationSamples.length === 0
+        ? 0
+        : hedgeCalibrationSamples.reduce((sum, sample) => sum + sample.predProb, 0) / hedgeCalibrationSamples.length,
+      actualWorthRate: hedgeCalibrationSamples.length === 0
+        ? 0
+        : hedgeCalibrationSamples.reduce((sum, sample) => sum + sample.worthScore, 0) / hedgeCalibrationSamples.length,
+      bins: buildHedgeCalibrationBins(hedgeCalibrationSamples),
+    };
+    const hedgeMethodRows = hedgeOrders.filter(j => j.hedge_order_method != null);
+    const marketChaseCount = hedgeMethodRows.filter(j => j.hedge_order_method === 'market_chase').length;
+    const panicHedgeCount = hedgeOrders.filter(j =>
+      (j.hedge_conviction_pct ?? 100) < 40 && (j.hedge_necessity_pct ?? 0) > 60,
+    ).length;
+    const hedgeDiscipline = {
+      count: hedgeOrders.length,
+      methodSampleCount: hedgeMethodRows.length,
+      marketChaseCount,
+      marketChaseRate: hedgeMethodRows.length === 0 ? 0 : marketChaseCount / hedgeMethodRows.length,
+      panicHedgeCount,
+    };
+    const boundaryStanceRows = hedgeOrders.filter((j): j is TradeJournal & { hedge_boundary_stance: HedgeBoundaryStance } =>
+      j.hedge_boundary_stance === 'early' || j.hedge_boundary_stance === 'at_crossover' || j.hedge_boundary_stance === 'late',
+    );
+    const stanceDistribution = boundaryStanceRows.reduce<Record<HedgeBoundaryStance, number>>((acc, journal) => {
+      acc[journal.hedge_boundary_stance] += 1;
+      return acc;
+    }, {
+      early: 0,
+      at_crossover: 0,
+      late: 0,
+    });
+    const opportunityCostProfile = {
+      count: boundaryStanceRows.length,
+      distribution: stanceDistribution,
+      conclusion: opportunityCostConclusion(stanceDistribution, boundaryStanceRows.length),
+    };
     const restraintCount = curTrades.filter(j => j.direction === 'no_entry' || j.post_outcome === 'no_entry').length;
 
     const reviewedMain = curTrades.filter(j => j.order_kind === 'main' && j.post_reviewed_at && j.post_outcome && j.post_outcome !== 'no_entry');
@@ -532,6 +641,9 @@ export default function JournalInsightsPage() {
       cur, curClusters, trend, timeDist, mentalDist, alphaHours, ruleEffect, reviewed, deepDone, deepRate, mixedRBasis,
       calibration,
       calibrationTraining,
+      hedgeCalibration,
+      hedgeDiscipline,
+      opportunityCostProfile,
       credibilityVector,
       decisionScatter,
       painStats,
@@ -885,6 +997,153 @@ export default function JournalInsightsPage() {
               </div>
             </div>
             <CalibrationDrillCard candidates={stats.calibrationTraining.drillCandidates} />
+          </div>
+        </section>
+
+        <section className="border border-border rounded bg-card p-3">
+          <div className="text-[12px] font-medium mb-2">对冲校准与纪律</div>
+          <div className="grid gap-3 lg:grid-cols-[1.15fr_0.85fr]">
+            <div className="rounded border border-border bg-background p-3">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <div className="text-[12px] font-medium">对冲校准曲线</div>
+                  <div className="mt-1 text-[10px] text-muted-foreground">
+                    回答的是：我打 80% 把握的那些对冲，后来真有 80% 值回成本吗？
+                  </div>
+                </div>
+                <div className="rounded border border-border bg-card px-2 py-1 text-right">
+                  <div className="text-[10px] text-muted-foreground">样本</div>
+                  <div className="text-[14px] font-mono">{stats.hedgeCalibration.count}</div>
+                </div>
+              </div>
+              {stats.hedgeCalibration.count < 10 ? (
+                <div className="mt-6 text-[11px] text-muted-foreground">
+                  数据积累中。至少需要 10 笔已平仓且已判定“值 / 部分 / 不值”的对冲样本。
+                </div>
+              ) : (
+                <>
+                  <div className="mt-3 grid grid-cols-2 gap-2 text-[10px]">
+                    <div className="rounded border border-border bg-card p-2">
+                      <div className="text-muted-foreground">平均输入把握性</div>
+                      <div className="mt-1 text-[16px] font-mono">{pct(stats.hedgeCalibration.avgPredicted)}</div>
+                    </div>
+                    <div className="rounded border border-border bg-card p-2">
+                      <div className="text-muted-foreground">实际值回率</div>
+                      <div className="mt-1 text-[16px] font-mono">{pct(stats.hedgeCalibration.actualWorthRate)}</div>
+                    </div>
+                  </div>
+                  <div className="mt-3 space-y-2">
+                    {stats.hedgeCalibration.bins.map(bin => (
+                      <div key={bin.label} className="grid grid-cols-[58px_1fr_64px] items-center gap-2 text-[10px]">
+                        <div className="font-mono text-muted-foreground">{bin.label}</div>
+                        <div className="space-y-1">
+                          <div className="h-2 rounded bg-card overflow-hidden">
+                            <div className="h-full bg-[#F0B90B]" style={{ width: `${bin.avgPredicted * 100}%` }} />
+                          </div>
+                          <div className="h-2 rounded bg-card overflow-hidden">
+                            <div className="h-full bg-[#0ECB81]" style={{ width: `${bin.actualWorthRate * 100}%` }} />
+                          </div>
+                        </div>
+                        <div className="text-right font-mono text-muted-foreground">
+                          n={bin.count}
+                          <div className={bin.diff > 0.08 ? 'text-[#F6465D]' : bin.diff < -0.08 ? 'text-[#F0B90B]' : 'text-[#0ECB81]'}>
+                            {bin.count === 0 ? '—' : `${bin.diff >= 0 ? '+' : ''}${(bin.diff * 100).toFixed(0)}pp`}
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="mt-3 flex gap-4 text-[9px] text-muted-foreground">
+                    <span><span className="inline-block h-2 w-4 rounded bg-[#F0B90B] mr-1" />输入把握性</span>
+                    <span><span className="inline-block h-2 w-4 rounded bg-[#0ECB81] mr-1" />实际值回率</span>
+                  </div>
+                </>
+              )}
+            </div>
+
+            <div className="rounded border border-border bg-background p-3">
+              <div className="text-[12px] font-medium">对冲纪律</div>
+              <div className="mt-1 text-[10px] text-muted-foreground">
+                只看纪律痕迹，不把方向输赢重新塞回对冲评估。
+              </div>
+              {stats.hedgeDiscipline.count === 0 ? (
+                <div className="mt-6 text-[11px] text-muted-foreground">当前周期暂无对冲单。</div>
+              ) : (
+                <div className="mt-4 space-y-3">
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="rounded border border-border bg-card p-2">
+                      <div className="text-[10px] text-muted-foreground">对冲总数</div>
+                      <div className="text-[18px] font-mono">{stats.hedgeDiscipline.count}</div>
+                    </div>
+                    <div className="rounded border border-border bg-card p-2">
+                      <div className="text-[10px] text-muted-foreground">恐慌对冲计数</div>
+                      <div className={`text-[18px] font-mono ${stats.hedgeDiscipline.panicHedgeCount > 0 ? 'text-[#F0B90B]' : 'text-[#0ECB81]'}`}>
+                        {stats.hedgeDiscipline.panicHedgeCount}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="rounded border border-border bg-card p-2">
+                    <div className="flex items-center justify-between text-[10px] text-muted-foreground">
+                      <span>市价追占比</span>
+                      <span className="font-mono">
+                        {stats.hedgeDiscipline.methodSampleCount === 0
+                          ? '—'
+                          : `${(stats.hedgeDiscipline.marketChaseRate * 100).toFixed(0)}%`}
+                      </span>
+                    </div>
+                    <div className="mt-2 h-2 rounded bg-background overflow-hidden">
+                      <div
+                        className="h-full bg-[#F0B90B]"
+                        style={{ width: `${stats.hedgeDiscipline.methodSampleCount === 0 ? 0 : stats.hedgeDiscipline.marketChaseRate * 100}%` }}
+                      />
+                    </div>
+                    <div className="mt-2 text-[10px] text-muted-foreground">
+                      {stats.hedgeDiscipline.methodSampleCount === 0
+                        ? '还没有足够的下单方式样本。'
+                        : `已记录 ${stats.hedgeDiscipline.methodSampleCount} 笔对冲下单方式，其中市价追 ${stats.hedgeDiscipline.marketChaseCount} 笔。`}
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+          <div className="mt-3 rounded border border-border bg-background p-3">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <div className="text-[12px] font-medium">机会成本自画像</div>
+                <div className="mt-1 text-[10px] text-muted-foreground">
+                  这面镜子照的是：你到底是巴菲特型，还是没得选的将就型。
+                </div>
+              </div>
+              <div className="rounded border border-border bg-card px-2 py-1 text-right">
+                <div className="text-[10px] text-muted-foreground">样本</div>
+                <div className="text-[14px] font-mono">{stats.opportunityCostProfile.count}</div>
+              </div>
+            </div>
+            {stats.opportunityCostProfile.count === 0 ? (
+              <div className="mt-4 text-[11px] text-muted-foreground">
+                数据积累中。先在对冲快照里多记录几次“偏早 / 交叉点 / 偏晚”。
+              </div>
+            ) : (
+              <>
+                <div className="mt-4 grid gap-2 md:grid-cols-3">
+                  {(['early', 'at_crossover', 'late'] as const).map(key => {
+                    const count = stats.opportunityCostProfile.distribution[key];
+                    const rate = count / stats.opportunityCostProfile.count;
+                    return (
+                      <div key={key} className="rounded border border-border bg-card p-2">
+                        <div className="text-[10px] text-muted-foreground">{HEDGE_BOUNDARY_STANCE_LABELS[key]}</div>
+                        <div className="mt-1 text-[18px] font-mono">{(rate * 100).toFixed(0)}%</div>
+                        <div className="text-[9px] text-muted-foreground">{count} 笔</div>
+                      </div>
+                    );
+                  })}
+                </div>
+                <div className="mt-3 rounded border border-[#F0B90B]/30 bg-[#F0B90B]/10 px-3 py-2 text-[11px] leading-relaxed text-foreground">
+                  {stats.opportunityCostProfile.conclusion}
+                </div>
+              </>
+            )}
           </div>
         </section>
 

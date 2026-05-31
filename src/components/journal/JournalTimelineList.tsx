@@ -7,6 +7,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { ExitMethodBadge } from './ExitMethodBadge';
 import { useTradingContext } from '@/contexts/TradingContext';
 import { formatPrice } from '@/lib/formatters';
+import { HEDGE_TYPE_LABELS } from '@/lib/hedgeTypes';
 import { formatBeijingTimeShort } from '@/lib/timeFormat';
 import type { JournalTagAssignment, ErrorTagPattern, TradeJournal } from '@/types/journal';
 
@@ -99,6 +100,9 @@ export function JournalTimelineList({ journals, assignments, patterns }: Props) 
           const closeSim = fmtTime(tr?.closeTime);
           const entryP = tr?.entryPrice ?? j.pre_entry_price ?? null;
           const exitP = tr && tr.exitPrice > 0 ? tr.exitPrice : null;
+          const hedgeSummary = j.order_kind === 'hedge' && j.hedge_type
+            ? `${HEDGE_TYPE_LABELS[j.hedge_type]}${j.hedge_necessity_pct != null ? ` · ${j.hedge_necessity_pct.toFixed(0)}%` : ''}`
+            : null;
           return (
             <div key={j.id} className={`grid ${COLS} px-3 py-2 text-[11px] font-mono border-b border-border/40 hover:bg-accent items-center min-w-[1100px]`}>
               <span className="flex items-center gap-1">
@@ -130,12 +134,21 @@ export function JournalTimelineList({ journals, assignments, patterns }: Props) 
                 <span className="block">{closeRealBeijing}</span>
                 <span className="block text-[9px] text-muted-foreground">{closeSim ?? '—'}</span>
               </span>
-              <span className="truncate">{j.symbol}</span>
+              <span className="truncate leading-tight">
+                <span className="block truncate">{j.symbol}</span>
+                {hedgeSummary && (
+                  <span className="block truncate text-[9px] text-[#F0B90B]">{hedgeSummary}</span>
+                )}
+              </span>
               <span className={
-                j.direction === 'long' ? 'text-[#0ECB81]' :
-                j.direction === 'short' ? 'text-[#F6465D]' : 'text-muted-foreground'
+                j.order_kind === 'hedge'
+                  ? 'text-muted-foreground'
+                  : j.direction === 'long' ? 'text-[#0ECB81]'
+                    : j.direction === 'short' ? 'text-[#F6465D]' : 'text-muted-foreground'
               }>
-                {j.direction === 'long' ? 'LONG' : j.direction === 'short' ? 'SHORT' : 'PASS'}
+                {j.order_kind === 'hedge'
+                  ? '—'
+                  : j.direction === 'long' ? 'LONG' : j.direction === 'short' ? 'SHORT' : 'PASS'}
               </span>
               <span>{entryP != null ? formatPrice(entryP, j.symbol) : <span className="text-muted-foreground">—</span>}</span>
               <span>{exitP != null ? formatPrice(exitP, j.symbol) : <span className="text-muted-foreground">—</span>}</span>
