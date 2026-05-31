@@ -56,6 +56,12 @@ export const HEDGE_TYPES: readonly HedgeTypeMeta[] = [
   },
 ] as const;
 
+export const HEDGE_DOWN_BRANCH_DEFAULTS = {
+  chop: '小周期高点拆多单、低点拆空单（在区间里收割震荡）',
+  trend: '多空双平——假设已被证伪，离场',
+  rebound: '择机拆空单、只保留多单——刚才是假摔，回到方向',
+} as const;
+
 export function getHedgeType(id: HedgeType | null | undefined): HedgeTypeMeta | null {
   if (!id) return null;
   return HEDGE_TYPES.find(t => t.id === id) ?? null;

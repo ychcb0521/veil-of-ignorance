@@ -22,6 +22,7 @@ import { computeDiscount, computeHedgeConvictionDiscount } from '@/lib/confidenc
 import { buildHedgeBoundaryBasis } from '@/lib/hedgeBoundaryBasis';
 import {
   HEDGE_TYPES,
+  HEDGE_DOWN_BRANCH_DEFAULTS,
   HEDGE_ORDER_METHOD_LABELS,
   computeNecessitySuggestion,
   getHedgeType,
@@ -120,6 +121,10 @@ export interface SnapshotPayload {
   hedge_boundary_stance: HedgeBoundaryStance | null;
   hedge_lock_profit_pct: number | null;
   hedge_resolution_up: string | null;
+  hedge_down_if_chop: string | null;
+  hedge_down_if_trend: string | null;
+  hedge_down_if_rebound: string | null;
+  /** @deprecated 旧版单字段向下预案，保留给历史 journal。 */
   hedge_resolution_down: string | null;
   hedge_necessity_pct: number | null;
   hedge_safety_strength: 1 | 2 | 3 | 4 | 5 | null;
@@ -295,7 +300,9 @@ export function PreTradeSnapshotForm({
   const [hedgeBoundaryStance, setHedgeBoundaryStance] = useState<HedgeBoundaryStance | null>(null);
   const [hedgeLockProfitPct, setHedgeLockProfitPct] = useState('4');
   const [hedgeResolutionUp, setHedgeResolutionUp] = useState('');
-  const [hedgeResolutionDown, setHedgeResolutionDown] = useState('');
+  const [hedgeDownIfChop, setHedgeDownIfChop] = useState<string>(HEDGE_DOWN_BRANCH_DEFAULTS.chop);
+  const [hedgeDownIfTrend, setHedgeDownIfTrend] = useState<string>(HEDGE_DOWN_BRANCH_DEFAULTS.trend);
+  const [hedgeDownIfRebound, setHedgeDownIfRebound] = useState<string>(HEDGE_DOWN_BRANCH_DEFAULTS.rebound);
   const [hedgeSafetyStrength, setHedgeSafetyStrength] = useState<1 | 2 | 3 | 4 | 5 | null>(null);
   const [hedgeSafetyRegularity, setHedgeSafetyRegularity] = useState<1 | 2 | 3 | 4 | 5 | null>(null);
   const [hedgeRiskMagnitude, setHedgeRiskMagnitude] = useState<1 | 2 | 3 | 4 | 5 | null>(null);
@@ -394,7 +401,6 @@ export function PreTradeSnapshotForm({
     hedgeType != null
     && Number(hedgeBoundaryPrice) > 0
     && hedgeResolutionUp.trim().length > 0
-    && hedgeResolutionDown.trim().length > 0
     && (hedgeNecessityPct ?? 0) > 0
     && hedgeSafetyStrength != null
     && hedgeSafetyRegularity != null
@@ -438,7 +444,9 @@ export function PreTradeSnapshotForm({
     const meta = getHedgeType(id);
     if (meta) {
       setHedgeResolutionUp(meta.resolutionUpDefault);
-      setHedgeResolutionDown(meta.resolutionDownDefault);
+      setHedgeDownIfChop(HEDGE_DOWN_BRANCH_DEFAULTS.chop);
+      setHedgeDownIfTrend(HEDGE_DOWN_BRANCH_DEFAULTS.trend);
+      setHedgeDownIfRebound(HEDGE_DOWN_BRANCH_DEFAULTS.rebound);
     }
   };
 
@@ -468,6 +476,12 @@ export function PreTradeSnapshotForm({
     if (hedgeType === 'ratio' && hedgeNecessityPct > 70) return '主升浪通常只需部分对冲，确认？';
     return null;
   })();
+
+  const hedgeDownBranchesComplete = (
+    hedgeDownIfChop.trim().length > 0
+    && hedgeDownIfTrend.trim().length > 0
+    && hedgeDownIfRebound.trim().length > 0
+  );
 
   // 下注规模 · 毁灭概率封顶（批次 25）— 胜率与盈亏比改用战役口径，绝不写库，仅显示。
   const campaignSizingStats = useMemo(
@@ -603,7 +617,10 @@ export function PreTradeSnapshotForm({
           ? Number(hedgeLockProfitPct)
           : null,
         hedge_resolution_up: isHedge ? (hedgeResolutionUp.trim() || null) : null,
-        hedge_resolution_down: isHedge ? (hedgeResolutionDown.trim() || null) : null,
+        hedge_down_if_chop: isHedge ? (hedgeDownIfChop.trim() || null) : null,
+        hedge_down_if_trend: isHedge ? (hedgeDownIfTrend.trim() || null) : null,
+        hedge_down_if_rebound: isHedge ? (hedgeDownIfRebound.trim() || null) : null,
+        hedge_resolution_down: null,
         hedge_necessity_pct: isHedge ? hedgeNecessityPct : null,
         hedge_safety_strength: isHedge ? hedgeSafetyStrength : null,
         hedge_safety_regularity: isHedge ? hedgeSafetyRegularity : null,
@@ -1080,16 +1097,54 @@ export function PreTradeSnapshotForm({
                     className={`${textareaCls} mt-2 min-h-[140px]`}
                   />
                 </label>
-                <label className="block">
-                  <div className={labelCls}>向下预案{requiredStar}</div>
+                <div className="rounded-lg border border-[#F0B90B]/20 bg-[#F0B90B]/5 p-3 text-[11px] leading-relaxed text-foreground">
+                  <span className="font-medium">对冲触发不是决定</span>
+                  ，是“开始观察”的信号。下一个信号会告诉你走哪一支，现在就把三支都写死，到时候照着读，别临场即兴。
+                </div>
+              </div>
+              <div className="mt-3 grid gap-3 lg:grid-cols-3">
+                <label className="block rounded-lg border border-border/70 bg-background/70 p-3">
+                  <div className="text-[11px] font-medium text-foreground">① 若触发后转为【震荡】</div>
+                  <div className="mt-1 text-[10px] leading-relaxed text-muted-foreground">
+                    没确认下跌，也没强反弹。
+                  </div>
                   <Textarea
-                    value={hedgeResolutionDown}
-                    onChange={event => setHedgeResolutionDown(event.target.value)}
-                    placeholder={hedgeTypeMeta?.resolutionDownDefault ?? '先选择对冲类型'}
-                    className={`${textareaCls} mt-2 min-h-[140px]`}
+                    value={hedgeDownIfChop}
+                    onChange={event => setHedgeDownIfChop(event.target.value)}
+                    className={`${textareaCls} mt-2 min-h-[112px] bg-background`}
+                  />
+                </label>
+                <label className="block rounded-lg border border-border/70 bg-background/70 p-3">
+                  <div className="text-[11px] font-medium text-foreground">② 若触发后【确认下行】</div>
+                  <div className="mt-1 text-[10px] leading-relaxed text-muted-foreground">
+                    异常反向信号已出现。
+                  </div>
+                  <Textarea
+                    value={hedgeDownIfTrend}
+                    onChange={event => setHedgeDownIfTrend(event.target.value)}
+                    className={`${textareaCls} mt-2 min-h-[112px] bg-background`}
+                  />
+                </label>
+                <label className="block rounded-lg border border-border/70 bg-background/70 p-3">
+                  <div className="text-[11px] font-medium text-foreground">③ 若触发后【快速反弹】</div>
+                  <div className="mt-1 text-[10px] leading-relaxed text-muted-foreground">
+                    无反向信号，正向信号反而更强。
+                  </div>
+                  <Textarea
+                    value={hedgeDownIfRebound}
+                    onChange={event => setHedgeDownIfRebound(event.target.value)}
+                    className={`${textareaCls} mt-2 min-h-[112px] bg-background`}
                   />
                 </label>
               </div>
+              <div className="mt-2 text-[10px] leading-relaxed text-muted-foreground">
+                这三支对应三种信号：无信号(震荡) / 反向信号(下行) / 正向信号增强(反弹)。触发后先读信号，再决定走哪一支。
+              </div>
+              {!hedgeDownBranchesComplete && (
+                <div className="mt-2 rounded-lg border border-[#D89B00]/30 bg-[#D89B00]/10 px-3 py-2 text-[10px] leading-relaxed text-[#D89B00]">
+                  建议把三支都写满。它们是触发后的条件脚本，不是临场再想的即兴反应。
+                </div>
+              )}
             </section>
 
             <section className="rounded-lg border border-border bg-card p-3.5 shadow-sm">

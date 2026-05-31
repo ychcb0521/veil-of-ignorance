@@ -239,6 +239,11 @@ export function PostTradeReviewSheet({
   const snapshotPremortem = journal.pre_premortem_failure_reason || journal.pre_mortem_text || '';
   const snapshotFalsification = journal.pre_falsification_signal || journal.pre_invalidation_condition || '';
   const hedgeBoundaryBasis = parseHedgeBoundaryBasis(journal.hedge_boundary_basis);
+  const hasStructuredHedgeDownPlan = Boolean(
+    journal.hedge_down_if_chop
+    || journal.hedge_down_if_trend
+    || journal.hedge_down_if_rebound,
+  );
   const riskAnchorPct = journal.pre_max_loss_usdt != null && journal.pre_account_equity_usdt
     ? (journal.pre_max_loss_usdt / journal.pre_account_equity_usdt) * 100
     : null;
@@ -458,9 +463,23 @@ export function PostTradeReviewSheet({
                 <div className="rounded-lg border border-border/60 bg-background/60 px-3 py-2">
                   <span className="text-muted-foreground">向上预案：</span>{journal.hedge_resolution_up || '—'}
                 </div>
-                <div className="rounded-lg border border-border/60 bg-background/60 px-3 py-2">
-                  <span className="text-muted-foreground">向下预案：</span>{journal.hedge_resolution_down || '—'}
-                </div>
+                {hasStructuredHedgeDownPlan ? (
+                  <div className="grid gap-2 md:grid-cols-3">
+                    <div className="rounded-lg border border-border/60 bg-background/60 px-3 py-2">
+                      <span className="text-muted-foreground">向下 · 震荡：</span>{journal.hedge_down_if_chop || '—'}
+                    </div>
+                    <div className="rounded-lg border border-border/60 bg-background/60 px-3 py-2">
+                      <span className="text-muted-foreground">向下 · 确认下行：</span>{journal.hedge_down_if_trend || '—'}
+                    </div>
+                    <div className="rounded-lg border border-border/60 bg-background/60 px-3 py-2">
+                      <span className="text-muted-foreground">向下 · 快速反弹：</span>{journal.hedge_down_if_rebound || '—'}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="rounded-lg border border-border/60 bg-background/60 px-3 py-2">
+                    <span className="text-muted-foreground">旧版向下预案：</span>{journal.hedge_resolution_down || '—'}
+                  </div>
+                )}
                 <div className="rounded-lg border border-border/60 bg-background/60 px-3 py-2">
                   <span className="text-muted-foreground">摩擦成本：</span>{journal.hedge_friction_cost || '—'}
                   {journal.hedge_order_method ? <span> · {HEDGE_ORDER_METHOD_LABELS[journal.hedge_order_method]}</span> : null}

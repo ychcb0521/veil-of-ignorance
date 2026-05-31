@@ -530,8 +530,14 @@ export interface TradeJournal {
   hedge_lock_profit_pct?: number | null;
   /** Pre-written plan if price breaks upward. */
   hedge_resolution_up?: string | null;
-  /** Pre-written plan if price breaks downward. */
+  /** @deprecated Replaced by hedge_down_if_chop / hedge_down_if_trend / hedge_down_if_rebound. */
   hedge_resolution_down?: string | null;
+  /** Downside branch after trigger: price turns into chop / no confirmation yet. */
+  hedge_down_if_chop?: string | null;
+  /** Downside branch after trigger: bearish reversal gets confirmed. */
+  hedge_down_if_trend?: string | null;
+  /** Downside branch after trigger: price rebounds fast and positive signals strengthen. */
+  hedge_down_if_rebound?: string | null;
   /** Necessity slider = hedge size as % of the main position (0–100, hard cap 100). External → size. */
   hedge_necessity_pct?: number | null;
   /** Objective anchor: how strong/forceful the市场 is (1–5). Drives the necessity suggestion. */
