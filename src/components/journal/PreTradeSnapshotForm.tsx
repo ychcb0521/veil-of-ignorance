@@ -629,11 +629,11 @@ export function PreTradeSnapshotForm({
   const requiredStar = <span className="ml-0.5 text-[#F6465D]">*</span>;
   const inputCls = 'h-9 border-border bg-background text-[12px] text-foreground font-mono';
   const textareaCls = 'min-h-[116px] resize-none border-border bg-background text-[12px] text-foreground leading-relaxed';
-  const hedgeAnchorCardCls = 'group relative flex h-full flex-col overflow-hidden rounded-xl border border-border/70 bg-gradient-to-b from-background to-background/70 p-3.5 shadow-[0_1px_2px_rgba(0,0,0,0.04)] transition-colors';
-  const hedgeAnchorHeaderCls = 'min-h-[60px] border-b border-border/50 pb-2';
-  const hedgeAnchorButtonBaseCls = 'h-10 rounded-md border text-[13px] font-semibold transition-all';
-  const hedgeAnchorButtonIdleCls = 'border-border/60 bg-muted/70 text-muted-foreground hover:border-border hover:bg-muted';
-  const hedgeAnchorButtonActiveCls = 'border-[#F0B90B]/70 bg-[#F0B90B] text-black shadow-[0_8px_20px_rgba(240,185,11,0.28)]';
+  const hedgeAnchorCardCls = 'flex h-full flex-col rounded-lg border border-border/70 bg-card p-3.5 shadow-none transition-colors';
+  const hedgeAnchorHeaderCls = 'min-h-[60px] border-b border-border/40 pb-2';
+  const hedgeAnchorButtonBaseCls = 'h-10 rounded-md border text-[12px] font-medium transition-colors';
+  const hedgeAnchorButtonIdleCls = 'border-border/60 bg-muted/45 text-muted-foreground hover:border-border hover:bg-muted/70';
+  const hedgeAnchorButtonActiveCls = 'border-[#F0B90B]/55 bg-[#F0B90B]/10 text-foreground';
 
   // 心态自评卡片（批次 25：主力单与对冲单共用同一组件，行为一致——≤2 硬阻断）。
   const mentalRatingCard = (
@@ -1080,7 +1080,7 @@ export function PreTradeSnapshotForm({
               <div className="mt-3 grid items-stretch gap-3 lg:grid-cols-3">
                 <div className={hedgeAnchorCardCls}>
                   <div className={hedgeAnchorHeaderCls}>
-                    <div className="text-[11px] font-medium tracking-[0.01em] text-foreground">行情强劲程度{requiredStar}</div>
+                    <div className="text-[11px] font-semibold text-foreground">行情强劲程度{requiredStar}</div>
                     <div className="mt-1 text-[10px] leading-relaxed text-muted-foreground">
                       越强，尾部风险概率越低。
                     </div>
@@ -1104,7 +1104,7 @@ export function PreTradeSnapshotForm({
                 </div>
                 <div className={hedgeAnchorCardCls}>
                   <div className={hedgeAnchorHeaderCls}>
-                    <div className="text-[11px] font-medium tracking-[0.01em] text-foreground">历史规则程度{requiredStar}</div>
+                    <div className="text-[11px] font-semibold text-foreground">历史规则程度{requiredStar}</div>
                     <div className="mt-1 text-[10px] leading-relaxed text-muted-foreground">
                       越规则，尾部风险概率越低。
                     </div>
@@ -1128,7 +1128,7 @@ export function PreTradeSnapshotForm({
                 </div>
                 <div className={hedgeAnchorCardCls}>
                   <div className={hedgeAnchorHeaderCls}>
-                    <div className="text-[11px] font-medium tracking-[0.01em] text-foreground">下行烈度 / 跳空风险{requiredStar}</div>
+                    <div className="text-[11px] font-semibold text-foreground">下行烈度 / 跳空风险{requiredStar}</div>
                     <div className="mt-1 text-[10px] leading-relaxed text-muted-foreground">
                       一旦反向，它能多猛？妖币能瞬间天地针给 5，低波动主流给 1。
                     </div>
