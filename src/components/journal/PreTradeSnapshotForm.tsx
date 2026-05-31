@@ -298,7 +298,6 @@ export function PreTradeSnapshotForm({
   const [hedgeRiskMagnitude, setHedgeRiskMagnitude] = useState<1 | 2 | 3 | 4 | 5 | null>(null);
   const [hedgeNecessityPct, setHedgeNecessityPct] = useState<number | null>(null);
   const [hedgeConvictionPct, setHedgeConvictionPct] = useState<number | null>(null);
-  const [hedgeFrictionCost, setHedgeFrictionCost] = useState('');
   const [hedgeOrderMethod, setHedgeOrderMethod] = useState<HedgeOrderMethod | null>(null);
 
   const isHedge = isTrade && orderKind === 'hedge';
@@ -601,7 +600,7 @@ export function PreTradeSnapshotForm({
         hedge_safety_regularity: isHedge ? hedgeSafetyRegularity : null,
         hedge_risk_magnitude: isHedge ? hedgeRiskMagnitude : null,
         hedge_conviction_pct: isHedge ? hedgeConvictionPct : null,
-        hedge_friction_cost: isHedge ? (hedgeFrictionCost.trim() || null) : null,
+        hedge_friction_cost: null,
         hedge_order_method: isHedge ? hedgeOrderMethod : null,
         tp_levels: [],
       };
@@ -975,9 +974,6 @@ export function PreTradeSnapshotForm({
 
             <section className="rounded-lg border border-border bg-card p-3.5 shadow-sm">
               <div className="text-[12px] font-medium text-foreground">问二 · 边界划在哪、比例多少？{requiredStar}</div>
-              <div className="mt-0.5 text-[10px] text-muted-foreground">
-                先把保险生效的边界钉住；比例由下面的必要性滑块承载，不单独重复填写。
-              </div>
               <div className="mt-3 grid gap-3 md:grid-cols-2">
                 <label className="block">
                   <div className={labelCls}>边界价{requiredStar}</div>
@@ -990,9 +986,6 @@ export function PreTradeSnapshotForm({
                 </label>
                 <label className="block">
                   <div className={labelCls}>边界依据</div>
-                  <div className="mt-1 text-[10px] leading-relaxed text-muted-foreground">
-                    这条线 = 主力腿的生存底线 = 预期风险开始盖过预期盈利的交叉点。三类边界(ATR/中枢下沿/阻力位)都是在找这同一个点。
-                  </div>
                   <Input
                     value={hedgeBoundaryBasis}
                     onChange={event => setHedgeBoundaryBasis(event.target.value)}
@@ -1238,40 +1231,29 @@ export function PreTradeSnapshotForm({
 
             <section className="grid gap-3 lg:grid-cols-[1fr_200px]">
               <div className="rounded-lg border border-border bg-card p-3.5 shadow-sm">
-                <div className="text-[12px] font-medium text-foreground">摩擦成本 + 下单方式</div>
-                <div className="mt-3 space-y-3">
-                  <label className="block">
-                    <div className={labelCls}>愿意为这份保险付多少摩擦成本</div>
-                    <Input
-                      value={hedgeFrictionCost}
-                      onChange={event => setHedgeFrictionCost(event.target.value)}
-                      className={`${inputCls} mt-2`}
-                    />
-                  </label>
-                  <div>
-                    <div className={labelCls}>下单方式</div>
-                    <div className="mt-2 flex flex-wrap gap-2">
-                      {(Object.entries(HEDGE_ORDER_METHOD_LABELS) as [HedgeOrderMethod, string][]).map(([value, label]) => (
-                        <button
-                          key={value}
-                          type="button"
-                          onClick={() => setHedgeOrderMethod(value)}
-                          className={`inline-flex h-8 items-center rounded-full border px-3 text-[11px] transition-colors ${
-                            hedgeOrderMethod === value
-                              ? 'border-[#F0B90B] bg-[#F0B90B]/10 text-[#F0B90B]'
-                              : 'border-border bg-background text-muted-foreground hover:bg-accent'
-                          }`}
-                        >
-                          {label}
-                        </button>
-                      ))}
-                    </div>
-                    {hedgeOrderMethod === 'market_chase' && (
-                      <div className="mt-2 text-[10px] text-[#D89B00]">
-                        市价追多半是慌，预挂才是纪律。
-                      </div>
-                    )}
+                <div className="text-[12px] font-medium text-foreground">下单方式</div>
+                <div className="mt-3">
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {(Object.entries(HEDGE_ORDER_METHOD_LABELS) as [HedgeOrderMethod, string][]).map(([value, label]) => (
+                      <button
+                        key={value}
+                        type="button"
+                        onClick={() => setHedgeOrderMethod(value)}
+                        className={`inline-flex h-8 items-center rounded-full border px-3 text-[11px] transition-colors ${
+                          hedgeOrderMethod === value
+                            ? 'border-[#F0B90B] bg-[#F0B90B]/10 text-[#F0B90B]'
+                            : 'border-border bg-background text-muted-foreground hover:bg-accent'
+                        }`}
+                      >
+                        {label}
+                      </button>
+                    ))}
                   </div>
+                  {hedgeOrderMethod === 'market_chase' && (
+                    <div className="mt-2 text-[10px] text-[#D89B00]">
+                      市价追多半是慌，预挂才是纪律。
+                    </div>
+                  )}
                 </div>
               </div>
 
