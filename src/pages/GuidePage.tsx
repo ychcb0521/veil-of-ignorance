@@ -51,7 +51,7 @@ const FLAT_TOC = TOC.flatMap(t => [t, ...(t.children ?? [])]);
 
 function Highlight({ children }: { children: ReactNode }) {
   return (
-    <div className="bg-accent/50 border-l-2 border-[#F0B90B] pl-4 py-2 rounded-r text-[14px] leading-relaxed text-foreground">
+    <div className="rounded-xl border border-[#F0B90B]/25 bg-[#F0B90B]/6 px-4 py-3 text-[14px] leading-7 text-foreground shadow-sm">
       {children}
     </div>
   );
@@ -59,7 +59,7 @@ function Highlight({ children }: { children: ReactNode }) {
 
 function RedHighlight({ children }: { children: ReactNode }) {
   return (
-    <div className="bg-[#F6465D]/10 border border-[#F6465D]/30 rounded p-4 text-[14px] leading-relaxed text-foreground">
+    <div className="rounded-xl border border-[#F6465D]/25 bg-[#F6465D]/7 px-4 py-3 text-[14px] leading-7 text-foreground shadow-sm">
       {children}
     </div>
   );
@@ -78,7 +78,7 @@ function SectionTitle({ children, accent }: { children: ReactNode; accent?: stri
 }
 
 function SubTitle({ children }: { children: ReactNode }) {
-  return <h3 className="text-[16px] font-medium text-foreground mt-6 mb-2">{children}</h3>;
+  return <h3 className="mt-7 mb-3 text-[16px] font-semibold tracking-[0.01em] text-foreground">{children}</h3>;
 }
 
 function P({ children, className = '' }: { children: ReactNode; className?: string }) {
@@ -119,22 +119,24 @@ function TocList({ activeId, onJump }: { activeId: string; onJump?: () => void }
 }
 
 function KeyGrid({ children }: { children: ReactNode }) {
-  return <div className="grid md:grid-cols-3 gap-3">{children}</div>;
+  return <div className="grid gap-4 md:grid-cols-3">{children}</div>;
 }
 
 function KeyCard({ title, children }: { title: string; children: ReactNode }) {
   return (
-    <div className="border border-border rounded bg-card p-4">
-      <div className="text-[12px] font-medium text-foreground mb-2">{title}</div>
-      <div className="text-[13px] leading-relaxed text-muted-foreground">{children}</div>
+    <div className="flex h-full flex-col rounded-xl border border-border/70 bg-card/95 p-5 shadow-sm">
+      <div className="border-b border-border/50 pb-3">
+        <div className="text-[13px] font-semibold tracking-[0.01em] text-foreground">{title}</div>
+      </div>
+      <div className="pt-3 text-[13px] leading-7 text-muted-foreground">{children}</div>
     </div>
   );
 }
 
 function FlowNode({ children, accent }: { children: ReactNode; accent?: boolean }) {
   return (
-    <div className={`relative bg-card border rounded p-3 text-[12px] text-center max-w-[520px] mx-auto ${
-      accent ? 'border-[#F0B90B]' : 'border-border'
+    <div className={`relative mx-auto max-w-[520px] rounded-xl border bg-card/95 px-4 py-3 text-center text-[12px] leading-6 shadow-sm ${
+      accent ? 'border-[#F0B90B]/55' : 'border-border/70'
     }`}>
       {children}
     </div>
@@ -413,14 +415,24 @@ export default function GuidePage() {
               <P>
                 时光机工具条右侧有一对开关：<strong>决策记录</strong> 与 <strong>直接交易</strong>。这是进入交易页后你做的第一个决定，也是整套系统里最大的一个分叉——它决定本次会话产生的数据是否进入复盘体系。系统默认 <strong>直接交易</strong>，需要训练时手动切换到决策记录。
               </P>
-              <KeyGrid>
-                <KeyCard title="直接交易（默认）">
-                  下单零弹窗、平仓零评价，节奏与币安 1:1。本模式下产生的交易仅进入持仓历史与交易战役归类，<strong>不进入</strong> 错题集、元监控、规则系统。适合熟悉的标的、流畅的执行、或只想观察盘面的场景。
-                </KeyCard>
-                <KeyCard title="决策记录">
-                  完整的开仓快照（<strong>决策三问</strong>：为什么对 / 亏完最可能原因 / 证伪信号；最大亏损、心态自评、<strong>情绪标签</strong>（三类）、二元预测胜率、checklist 等）+ 平仓后强制评价 + 错题集自动归类 + 元监控统计 + 规则系统冷却。适合刻意训练同一类 setup、复盘高频错误模式、或对自己进行校准。
-                </KeyCard>
-              </KeyGrid>
+              <div className="mt-4 grid gap-4 md:grid-cols-2">
+                <div className="flex h-full flex-col rounded-xl border border-border/70 bg-card/95 p-5 shadow-sm">
+                  <div className="border-b border-border/50 pb-3">
+                    <div className="text-[13px] font-semibold tracking-[0.01em] text-foreground">直接交易（默认）</div>
+                  </div>
+                  <div className="pt-3 text-[13px] leading-7 text-muted-foreground">
+                    下单零弹窗、平仓零评价，节奏与币安 1:1。本模式下产生的交易仅进入持仓历史与交易战役归类，<strong>不进入</strong> 错题集、元监控、规则系统。适合熟悉的标的、流畅的执行、或只想观察盘面的场景。
+                  </div>
+                </div>
+                <div className="flex h-full flex-col rounded-xl border border-border/70 bg-card/95 p-5 shadow-sm">
+                  <div className="border-b border-border/50 pb-3">
+                    <div className="text-[13px] font-semibold tracking-[0.01em] text-foreground">决策记录</div>
+                  </div>
+                  <div className="pt-3 text-[13px] leading-7 text-muted-foreground">
+                    完整的开仓快照（<strong>决策三问</strong>：为什么对 / 亏完最可能原因 / 证伪信号；最大亏损、心态自评、<strong>情绪标签</strong>（三类）、二元预测胜率、checklist 等）+ 平仓后强制评价 + 错题集自动归类 + 元监控统计 + 规则系统冷却。适合刻意训练同一类 setup、复盘高频错误模式、或对自己进行校准。
+                  </div>
+                </div>
+              </div>
               <div className="overflow-x-auto">
                 <table className="w-full text-[11px] my-3 border border-border rounded overflow-hidden">
                   <thead className="bg-muted/50">
