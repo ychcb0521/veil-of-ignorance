@@ -59,6 +59,12 @@ export interface BetSizingInput {
 }
 
 export interface BetSizingResult {
+  /** 单笔期望值（以 1R 风险为单位）：E = p·b − (1 − p)。 */
+  expectedR: number;
+  /** 若已填写计划最大亏损，按该风险额折算的单笔期望 USDT。 */
+  expectedUsdtAtPlanned: number | null;
+  /** 当前盈亏比下的盈亏平衡胜率。 */
+  breakEvenWinRate: number;
   /** 完整 Kelly 比例 f* = (p·b − q) / b，可为负（负 = 无优势）。 */
   kellyFraction: number;
   /** 半 Kelly 对应的单笔最大亏损 USDT（占净值 f*·KELLY_FRACTION），下限 0。 */
@@ -103,8 +109,11 @@ export function computeBetSizing(input: BetSizingInput): BetSizingResult {
     ? input.plannedMaxLossUsdt
     : null;
 
-  // Kelly：f* = (p·b − q) / b，其中 q = 1 − p。
-  const kellyFraction = (p * b - (1 - p)) / b;
+  // 期望值：E = p·b − q；Kelly：f* = E / b，其中 q = 1 − p。
+  const expectedR = p * b - (1 - p);
+  const expectedUsdtAtPlanned = planned == null ? null : planned * expectedR;
+  const breakEvenWinRate = 1 / (b + 1);
+  const kellyFraction = expectedR / b;
   const halfKellyMaxLossUsdt = Math.max(0, equity * kellyFraction * KELLY_FRACTION);
   const ruinCapMaxLossUsdt = kellyFraction > 0 ? solveRuinCapMaxLoss(p, b, equity) : 0;
   const recommendedMaxLossUsdt = Math.max(0, Math.min(halfKellyMaxLossUsdt, ruinCapMaxLossUsdt));
@@ -130,6 +139,9 @@ export function computeBetSizing(input: BetSizingInput): BetSizingResult {
   }
 
   return {
+    expectedR,
+    expectedUsdtAtPlanned,
+    breakEvenWinRate,
     kellyFraction,
     halfKellyMaxLossUsdt,
     ruinCapMaxLossUsdt,

@@ -263,6 +263,7 @@ const ODDS_RATIO_STEP = 0.1;
 const ODDS_RATIO_BREAK_EVEN = 1;
 const ODDS_RATIO_BREAK_EVEN_PCT = ((ODDS_RATIO_BREAK_EVEN - ODDS_RATIO_MIN) / (ODDS_RATIO_MAX - ODDS_RATIO_MIN)) * 100;
 const formatOddsRatio = (value: number) => value.toFixed(1);
+const formatSigned = (value: number, digits = 2) => `${value >= 0 ? '+' : ''}${value.toFixed(digits)}`;
 
 function riskTone(pct: number | null) {
   if (pct == null) return 'text-muted-foreground';
@@ -563,6 +564,11 @@ export function PreTradeSnapshotForm({
       : null),
     [isTrade, accountEquity, sizingWinProb, payoffRatio, maxLossValid, maxLoss],
   );
+  const expectedValueTone = !betSizing || betSizing.expectedR > 0
+    ? 'text-[#0ECB81]'
+    : betSizing.expectedR < 0
+      ? 'text-[#F6465D]'
+      : 'text-muted-foreground';
   const profitUpsideAdvice = useMemo(
     () => deriveProfitUpsideAdvice({
       betSizing,
@@ -1185,21 +1191,51 @@ export function PreTradeSnapshotForm({
                 <CollapsibleTrigger className={mainPanelTriggerCls}>
                   <div className="min-w-0">
                     <div className="text-[12px] font-semibold text-foreground">下注规模 · 毁灭概率封顶</div>
-                    <div className="mt-0.5 text-[10px] text-muted-foreground">小错误不断，大错误不犯；需要时展开看上限来源。</div>
+                    <div className="mt-0.5 text-[10px] text-muted-foreground">小错误不断，大错误不犯；展开可看期望值公式与上限来源。</div>
                   </div>
                   <div className="flex shrink-0 items-center gap-3">
-                    <span className={`font-mono text-[12px] ${
-                      betSizing.verdict === 'no_edge' ? 'text-[#F6465D]' : 'text-[#0ECB81]'
-                    }`}>
-                      {betSizing.verdict === 'no_edge' ? '无正期望' : `≤ ${betSizing.recommendedMaxLossUsdt.toFixed(0)} USDT`}
-                    </span>
+                    <div className="text-right font-mono leading-tight">
+                      <div className={`text-[12px] ${expectedValueTone}`}>E {formatSigned(betSizing.expectedR)}R</div>
+                      <div className={`text-[10px] ${
+                        betSizing.verdict === 'no_edge' ? 'text-[#F6465D]' : 'text-muted-foreground'
+                      }`}>
+                        {betSizing.verdict === 'no_edge' ? '无正期望' : `上限 ${betSizing.recommendedMaxLossUsdt.toFixed(0)} USDT`}
+                      </div>
+                    </div>
                     <ChevronDown className="h-4 w-4 text-muted-foreground transition-transform group-data-[state=open]:rotate-180" />
                   </div>
                 </CollapsibleTrigger>
                 <CollapsibleContent className="border-t border-border/60 px-3.5 py-3">
+                  <div className={`mb-3 rounded-xl border px-3 py-2.5 ${
+                    betSizing.expectedR > 0
+                      ? 'border-[#0ECB81]/40 bg-[#0ECB81]/10'
+                      : betSizing.expectedR < 0
+                        ? 'border-[#F6465D]/40 bg-[#F6465D]/10'
+                        : 'border-border/70 bg-background/70'
+                  }`}>
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="text-[11px] font-medium text-foreground">具体期望值</div>
+                        <div className="mt-1 font-mono text-[12px] text-foreground">
+                          E = {(sizingWinProb * 100).toFixed(0)}% × {betSizing.payoffRatio.toFixed(2)}
+                          {' − '}
+                          {(100 - sizingWinProb * 100).toFixed(0)}% = {formatSigned(betSizing.expectedR)}R
+                        </div>
+                        <div className="mt-1 text-[10px] text-muted-foreground">
+                          盈亏平衡胜率 {(betSizing.breakEvenWinRate * 100).toFixed(1)}%；
+                          {betSizing.expectedUsdtAtPlanned == null
+                            ? '填入最大亏损后可折算 USDT 期望。'
+                            : `按本次最大亏损 ${maxLoss.toFixed(0)} USDT，单笔期望 ${formatSigned(betSizing.expectedUsdtAtPlanned, 0)} USDT。`}
+                        </div>
+                      </div>
+                      <div className={`shrink-0 rounded-full px-2 py-1 font-mono text-[11px] ${expectedValueTone}`}>
+                        {formatSigned(betSizing.expectedR)}R
+                      </div>
+                    </div>
+                  </div>
                 {betSizing.verdict === 'no_edge' ? (
                   <div className="rounded-xl border border-[#F6465D]/40 bg-[#F6465D]/10 px-3 py-2 text-[12px] text-[#F6465D]">
-                    按当前用于定仓位的胜率 {(sizingWinProb * 100).toFixed(0)}% 与盈亏比 {betSizing.payoffRatio.toFixed(2)}，这单没有正期望优势 → 不该下注。
+                    按当前用于定仓位的胜率 {(sizingWinProb * 100).toFixed(0)}% 与盈亏比 {betSizing.payoffRatio.toFixed(2)}，期望值 {formatSigned(betSizing.expectedR)}R，这单没有正期望优势 → 不该下注。
                     只在赔率明显被错误定价时才出手。
                   </div>
                 ) : (
