@@ -711,7 +711,12 @@ export function PreTradeSnapshotForm({
   const labelCls = 'text-[11px] text-muted-foreground';
   const requiredStar = <span className="ml-0.5 text-[#F6465D]">*</span>;
   const inputCls = 'h-9 border-border bg-background text-[12px] text-foreground font-mono';
-  const textareaCls = 'min-h-[116px] resize-none border-border bg-background text-[12px] text-foreground leading-relaxed';
+  const textareaCls = 'min-h-[116px] resize-none border-border bg-background text-[12px] text-foreground leading-relaxed shadow-inner';
+  const mainSurfaceCls = 'rounded-xl border border-border/70 bg-card/95 shadow-sm';
+  const mainPanelTriggerCls = 'group flex w-full items-center justify-between gap-3 px-3.5 py-3 text-left transition-colors hover:bg-accent/40';
+  const mainSectionTitleCls = 'text-[12px] font-semibold tracking-normal text-foreground';
+  const mainSectionHintCls = 'mt-0.5 text-[10px] leading-relaxed text-muted-foreground';
+  const mainStatusChipCls = 'inline-flex h-5 items-center rounded-full border border-border/70 bg-background/80 px-2 text-[10px] font-medium text-muted-foreground';
   const hedgeAnchorCardCls = 'flex h-full flex-col rounded-lg border border-border/70 bg-card p-3.5 shadow-none transition-colors';
   const hedgeAnchorHeaderCls = 'min-h-[60px] border-b border-border/40 pb-2';
   const hedgeAnchorButtonBaseCls = 'h-10 rounded-md border text-[12px] font-medium transition-colors';
@@ -719,10 +724,21 @@ export function PreTradeSnapshotForm({
   const hedgeAnchorButtonActiveCls = 'border-[#F0B90B]/55 bg-[#F0B90B]/10 text-foreground';
   const hedgeScenarioCardCls = 'flex h-full flex-col rounded-xl border border-border/70 bg-card/95 p-4 shadow-sm transition-colors';
   const hedgeScenarioTextareaCls = 'mt-3 min-h-[128px] resize-none rounded-lg border-border bg-background/95 text-[12px] leading-relaxed shadow-inner';
+  const decisionDoneCount = [
+    whyRight.trim().length > 0,
+    failureReason.trim().length > 0,
+    falsificationSignal.trim().length > 0,
+  ].filter(Boolean).length;
+  const oddsDoneCount = [
+    oddsStructure != null,
+    oddsStructureSource.trim().length > 0,
+    oddsStructurePremortem.trim().length > 0,
+    oddsStructureBreakdownSignals.trim().length > 0,
+  ].filter(Boolean).length;
 
   // 心态自评卡片（批次 25：主力单与对冲单共用同一组件，行为一致——≤2 硬阻断）。
   const mentalRatingCard = (
-    <div className="rounded border border-border bg-card p-3">
+    <div className="rounded-xl border border-border/70 bg-card/95 p-3 shadow-sm">
       <div className={labelCls}>心态自评{requiredStar}</div>
       <div className="mt-2 grid grid-cols-5 gap-1">
         {[1, 2, 3, 4, 5].map(score => (
@@ -800,7 +816,7 @@ export function PreTradeSnapshotForm({
         )}
 
         {isTrade && (
-          <section className="rounded border border-border bg-card p-3">
+          <section className="rounded-xl border border-border/70 bg-card/95 p-3 shadow-sm">
             <div className="flex items-center justify-between gap-3">
               <div>
                 <div className={labelCls}>仓位模式{requiredStar}</div>
@@ -828,14 +844,18 @@ export function PreTradeSnapshotForm({
         {!isHedge && (
           <>
             {isTrade && (
-              <section className="rounded-lg border border-border bg-card p-3.5 shadow-sm">
-                <div className="text-[12px] font-medium text-foreground">① 盈亏比轴 | 选择目标（做不做，就在这一轴决定）{requiredStar}</div>
-                <div className="mt-0.5 text-[10px] leading-relaxed text-muted-foreground">
-                  盈亏比结构与决策三问并列，但它既不问方向也不问涨幅，只问结构；进场那刻由结构选定，选定即固定。
-                  决定做不做的筛子在这里。
-                  趋势死于震荡，震荡死于趋势；震荡是趋势的成本，大行情后该休息一阵。
+              <section className={`${mainSurfaceCls} overflow-hidden`}>
+                <div className="flex items-start justify-between gap-3 border-b border-border/60 px-3.5 py-3">
+                  <div className="min-w-0">
+                    <div className={mainSectionTitleCls}>① 盈亏比轴 | 选择目标{requiredStar}</div>
+                    <div className={mainSectionHintCls}>
+                      只问结构，不问方向、不问涨幅。做不做的筛子在这里；结构选定即固定。
+                    </div>
+                  </div>
+                  <span className={mainStatusChipCls}>{oddsDoneCount}/4</span>
                 </div>
-                <div className="mt-3 grid gap-2">
+                <div className="space-y-3 px-3.5 py-3">
+                  <div className="grid gap-2 lg:grid-cols-3">
                   {ODDS_STRUCTURE_OPTIONS.map(option => (
                     <button
                       key={option.id}
@@ -844,86 +864,93 @@ export function PreTradeSnapshotForm({
                         setOddsStructure(option.id);
                         if (option.id !== 'with_crowd_released') setConfirmBadOddsTradeOpen(false);
                       }}
-                      className={`rounded-lg border px-3 py-3 text-left transition-colors ${
+                      className={`min-h-[92px] rounded-xl border px-3 py-2.5 text-left transition-colors ${
                         oddsStructure === option.id
-                          ? 'border-foreground bg-foreground/5 text-foreground'
-                          : 'border-border bg-background text-muted-foreground hover:bg-accent'
+                          ? 'border-[#F0B90B]/70 bg-[#F0B90B]/10 text-foreground shadow-sm'
+                          : 'border-border/70 bg-background/80 text-muted-foreground hover:border-border hover:bg-accent/70'
                       }`}
                     >
-                      <div className="text-[11px] font-medium">{option.label}</div>
-                      <div className="mt-1 text-[10px] leading-relaxed">{option.description}</div>
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="text-[11px] font-semibold">{option.label}</div>
+                        {oddsStructure === option.id && (
+                          <span className="h-1.5 w-1.5 rounded-full bg-[#F0B90B]" />
+                        )}
+                      </div>
+                      <div className="mt-1.5 text-[10px] leading-relaxed">{option.description}</div>
                     </button>
                   ))}
-                </div>
-                <div className="mt-3 grid gap-3 md:grid-cols-3">
-                  <label className="block">
+                  </div>
+                  <div className="grid gap-2 md:grid-cols-3">
+                  <label className="block rounded-xl border border-border/60 bg-background/70 p-2.5">
                     <div className={labelCls}>1. 这笔的盈亏比结构来自哪？</div>
                     <Textarea
                       value={oddsStructureSource}
                       onChange={event => setOddsStructureSource(event.target.value)}
                       placeholder="人性：谁在恐慌/狂热；市场：什么错配。说不清＝没有高盈亏比，只是赌。"
-                      className={`${textareaCls} mt-2 min-h-[112px]`}
+                      className={`${textareaCls} mt-2 min-h-[98px]`}
                     />
                   </label>
-                  <label className="block">
+                  <label className="block rounded-xl border border-border/60 bg-background/70 p-2.5">
                     <div className={labelCls}>2. 如果这个结构判断错了，最可能的原因是什么？</div>
                     <Textarea
                       value={oddsStructurePremortem}
                       onChange={event => setOddsStructurePremortem(event.target.value)}
                       placeholder="写清楚你可能误判了谁的情绪、哪段趋势/震荡周期，或哪里其实已经释放。"
-                      className={`${textareaCls} mt-2 min-h-[112px]`}
+                      className={`${textareaCls} mt-2 min-h-[98px]`}
                     />
                   </label>
-                  <label className="block">
+                  <label className="block rounded-xl border border-border/60 bg-background/70 p-2.5">
                     <div className={labelCls}>3. 哪些具体信号出现，意味着这个结构破坏了？</div>
                     <Textarea
                       value={oddsStructureBreakdownSignals}
                       onChange={event => setOddsStructureBreakdownSignals(event.target.value)}
                       placeholder="写可被盘面验证的结构破坏信号，而不是主观感觉。"
-                      className={`${textareaCls} mt-2 min-h-[112px]`}
+                      className={`${textareaCls} mt-2 min-h-[98px]`}
                     />
                   </label>
-                </div>
+                  </div>
                 {oddsStructure === 'with_crowd_released' && (
-                  <div className="mt-3 rounded-lg border border-[#F0B90B]/40 bg-[#F0B90B]/10 px-3 py-2 text-[11px] leading-relaxed text-[#D89B00]">
+                  <div className="rounded-xl border border-[#F0B90B]/40 bg-[#F0B90B]/10 px-3 py-2 text-[11px] leading-relaxed text-[#D89B00]">
                     稳固坏结构：向量已经释放，导致向下空间太大。盈亏比是筛子，这一笔默认该弃；空仓是选择，不是失败。
                   </div>
                 )}
                 {oddsStructure === 'neutral_choppy' && (
-                  <div className="mt-3 rounded-lg border border-[#F0B90B]/40 bg-[#F0B90B]/10 px-3 py-2 text-[11px] leading-relaxed text-[#D89B00]">
+                  <div className="rounded-xl border border-[#F0B90B]/40 bg-[#F0B90B]/10 px-3 py-2 text-[11px] leading-relaxed text-[#D89B00]">
                     持有小机会仓位警告：在震荡里开仓＝持有小机会仓位，比空仓更差。它占行动力，让你在大机会来时犹豫，错过后还会心理懈怠。空仓观望是推荐默认。
                   </div>
                 )}
                 {oddsStructure === 'neutral_choppy' && weakeningMainPerformance && (
-                  <div className="mt-3 rounded-lg border border-border/70 bg-background/70 px-3 py-2 text-[10px] leading-relaxed text-muted-foreground">
+                  <div className="rounded-xl border border-border/70 bg-background/70 px-3 py-2 text-[10px] leading-relaxed text-muted-foreground">
                     近期实现 R 或胜率走弱：市场越差，筛子越紧；中性震荡里更该挑，默认空仓观望。
                   </div>
                 )}
                 {oddsStructure === 'against_crowd_unreleased' && weakeningMainPerformance && (
-                  <div className="mt-3 rounded-lg border border-border/70 bg-background/70 px-3 py-2 text-[10px] leading-relaxed text-muted-foreground">
+                  <div className="rounded-xl border border-border/70 bg-background/70 px-3 py-2 text-[10px] leading-relaxed text-muted-foreground">
                     近期实现 R 或胜率走弱：即使是逆拥挤，也只做结构来源说得清的纯净机会；来源含糊时先空仓。
                   </div>
                 )}
                 {!oddsStructureReady && (
-                  <div className="mt-2 text-[10px] font-mono text-[#F6465D]">必须先完成三态单选与盈亏比结构三问。</div>
+                  <div className="text-[10px] font-mono text-[#F6465D]">必须先完成三态单选与盈亏比结构三问。</div>
                 )}
+                </div>
               </section>
             )}
 
-            <section>
-              <div className="mb-3 flex items-end justify-between gap-3">
-                <div>
-                  <div className="text-[12px] font-medium text-foreground">
+            <section className={`${isTrade ? mainSurfaceCls : ''} ${isTrade ? 'p-3.5' : ''}`}>
+              <div className="mb-3 flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className={isTrade ? mainSectionTitleCls : 'text-[12px] font-medium text-foreground'}>
                     {isTrade ? '② 胜率轴 | 校准你的判断（不是去挑高胜率的单）' : "决策三问"}
                     {requiredStar}
                   </div>
-                  <div className="mt-0.5 text-[10px] text-muted-foreground">
+                  <div className={isTrade ? mainSectionHintCls : 'mt-0.5 text-[10px] text-muted-foreground'}>
                     {isTrade
-                      ? '胜率不可选、只能事后校准；这里是校准你的判断，不是去挑高胜率。决策三问只问方向：正—反—止。'
+                      ? '决策三问只问方向：正、反、止。胜率只用于事后校准。'
                       : '记录这次“该开没开”的当时判断，后续复盘时用来校准遗漏机会。'}
                   </div>
                 </div>
                 <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
+                  {isTrade && <span className={mainStatusChipCls}>{decisionDoneCount}/3</span>}
                   {DECISION_QUESTIONS.map(q => {
                     const done = (
                       q.id === 'why' ? whyRight.trim().length > 0
@@ -944,7 +971,7 @@ export function PreTradeSnapshotForm({
                   })}
                 </div>
               </div>
-              <div className="grid items-stretch gap-3 md:grid-cols-3">
+              <div className="grid items-stretch gap-2 md:grid-cols-3">
                 {DECISION_QUESTIONS.map(q => {
                   const value = (
                     q.id === 'why' ? whyRight
@@ -960,13 +987,13 @@ export function PreTradeSnapshotForm({
                   return (
                     <label
                       key={q.id}
-                      className="group flex h-full min-h-[292px] flex-col rounded-lg border bg-card/90 p-3.5 shadow-sm transition-colors"
+                      className="group flex h-full min-h-[236px] flex-col rounded-xl border bg-background/80 p-3 shadow-sm transition-colors"
                       style={{
                         borderColor: filled ? q.accent : 'hsl(var(--border))',
                         background: filled ? `${q.accent}0A` : undefined,
                       }}
                     >
-                      <div className="mb-3 flex min-h-[48px] items-start gap-2.5">
+                      <div className="mb-2.5 flex min-h-[46px] items-start gap-2.5">
                         <span
                           className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[11px] font-bold text-black"
                           style={{ background: q.accent }}
@@ -984,7 +1011,7 @@ export function PreTradeSnapshotForm({
                         value={value}
                         onChange={event => onChange(event.target.value)}
                         placeholder={q.placeholder}
-                        className={`${textareaCls} min-h-[170px] flex-1 bg-background/80`}
+                        className={`${textareaCls} min-h-[128px] flex-1 bg-background/95`}
                       />
                       <div className="mt-1.5 flex items-center justify-between text-[10px] text-muted-foreground">
                         <span
@@ -1001,39 +1028,42 @@ export function PreTradeSnapshotForm({
             </section>
 
             {isTrade && (
-              <section className="rounded border border-border bg-card p-3">
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <div className={labelCls}>胜率校准滑块</div>
-                    <div className="mt-1 text-[12px] text-muted-foreground">
-                      胜率不可选、只能事后校准；这不是下单筛子，真正的筛子在盈亏比轴。
-                    </div>
+              <Collapsible className={`${mainSurfaceCls} overflow-hidden`}>
+                <CollapsibleTrigger className={mainPanelTriggerCls}>
+                  <div className="min-w-0">
+                    <div className="text-[12px] font-semibold text-foreground">胜率校准</div>
+                    <div className="mt-0.5 text-[10px] text-muted-foreground">滑块与芒格折扣默认收起，只记录你的判断刻度。</div>
                   </div>
-                  <div className="text-right font-mono">
-                    <div className="text-[13px] text-[#0ECB81]">对 {confidencePct}%</div>
-                    <div className="text-[13px] text-[#F6465D]">错 {100 - confidencePct}%</div>
-                  </div>
-                </div>
-                <div className="mt-3 space-y-3">
-                  <div>
-                    <div className="mb-1 flex justify-between text-[11px] text-muted-foreground">
-                      <span>会对</span><span>{confidencePct}%</span>
+                  <div className="flex shrink-0 items-center gap-3">
+                    <div className="text-right font-mono leading-tight">
+                      <div className="text-[12px] text-[#0ECB81]">对 {confidencePct}%</div>
+                      <div className="text-[12px] text-[#F6465D]">错 {100 - confidencePct}%</div>
                     </div>
-                    <Slider value={[confidencePct]} min={0} max={100} step={1} onValueChange={([v]) => setConfidencePct(clampProbability(v ?? 50))} />
+                    <ChevronDown className="h-4 w-4 text-muted-foreground transition-transform group-data-[state=open]:rotate-180" />
                   </div>
-                  <div>
-                    <div className="mb-1 flex justify-between text-[11px] text-muted-foreground">
-                      <span>会错</span><span>{100 - confidencePct}%</span>
+                </CollapsibleTrigger>
+                <CollapsibleContent className="border-t border-border/60 px-3.5 py-3">
+                  <div className="grid gap-3 md:grid-cols-2">
+                    <div>
+                      <div className="mb-1 flex justify-between text-[11px] text-muted-foreground">
+                        <span>会对</span><span>{confidencePct}%</span>
+                      </div>
+                      <Slider value={[confidencePct]} min={0} max={100} step={1} onValueChange={([v]) => setConfidencePct(clampProbability(v ?? 50))} />
                     </div>
-                    <Slider value={[100 - confidencePct]} min={0} max={100} step={1} onValueChange={([v]) => setConfidencePct(100 - clampProbability(v ?? 50))} />
+                    <div>
+                      <div className="mb-1 flex justify-between text-[11px] text-muted-foreground">
+                        <span>会错</span><span>{100 - confidencePct}%</span>
+                      </div>
+                      <Slider value={[100 - confidencePct]} min={0} max={100} step={1} onValueChange={([v]) => setConfidencePct(100 - clampProbability(v ?? 50))} />
+                    </div>
                   </div>
                   <Input
                     value={confidenceBasis}
                     onChange={event => setConfidenceBasis(event.target.value)}
                     placeholder="我为什么有资格给这个置信度？"
-                    className={inputCls}
+                    className={`${inputCls} mt-3`}
                   />
-                  <div className="rounded border border-border/70 bg-background/70 px-3 py-2.5">
+                  <div className="mt-3 rounded-xl border border-border/70 bg-background/70 px-3 py-2.5">
                     <div className="text-[11px] font-medium text-foreground">芒格折扣 · 置信度安全边际</div>
                     <div className="mt-1 text-[12px] text-foreground">
                       {discount.source === 'personalized'
@@ -1046,13 +1076,13 @@ export function PreTradeSnapshotForm({
                         : '主观置信度系统性偏高约 15 个百分点（Tetlock）。积累 10 笔以上相近交易后，此处将改用你的个人校准。'}
                     </div>
                   </div>
-                </div>
-              </section>
+                </CollapsibleContent>
+              </Collapsible>
             )}
 
-            <section className="grid gap-3 md:grid-cols-[1fr_160px]">
+            <section className="grid gap-3 md:grid-cols-[1fr_170px]">
               {isTrade && (
-                <label className="block rounded border border-border bg-card p-3">
+                <label className={`block ${mainSurfaceCls} p-3`}>
                   <div className={labelCls}>本次愿意承受最大亏损 USDT{requiredStar}</div>
                   <Input
                     value={maxLossInput}
@@ -1075,18 +1105,29 @@ export function PreTradeSnapshotForm({
             </section>
 
             {isTrade && betSizing && (
-              <section className="rounded-lg border border-border bg-card p-3.5 shadow-sm">
-                <div className={labelCls}>下注规模 · 毁灭概率封顶</div>
-                <div className="mt-1 text-[11px] text-muted-foreground">
-                  小错误不断，大错误不犯：下限由毁灭概率封顶锁死；上限不再被主观保守提前封死。胜率与盈亏比优先使用战役级统计，避免用单笔样本抬高或压低仓位。
-                </div>
+              <Collapsible className={`${mainSurfaceCls} overflow-hidden`}>
+                <CollapsibleTrigger className={mainPanelTriggerCls}>
+                  <div className="min-w-0">
+                    <div className="text-[12px] font-semibold text-foreground">下注规模 · 毁灭概率封顶</div>
+                    <div className="mt-0.5 text-[10px] text-muted-foreground">小错误不断，大错误不犯；需要时展开看上限来源。</div>
+                  </div>
+                  <div className="flex shrink-0 items-center gap-3">
+                    <span className={`font-mono text-[12px] ${
+                      betSizing.verdict === 'no_edge' ? 'text-[#F6465D]' : 'text-[#0ECB81]'
+                    }`}>
+                      {betSizing.verdict === 'no_edge' ? '无正期望' : `≤ ${betSizing.recommendedMaxLossUsdt.toFixed(0)} USDT`}
+                    </span>
+                    <ChevronDown className="h-4 w-4 text-muted-foreground transition-transform group-data-[state=open]:rotate-180" />
+                  </div>
+                </CollapsibleTrigger>
+                <CollapsibleContent className="border-t border-border/60 px-3.5 py-3">
                 {betSizing.verdict === 'no_edge' ? (
-                  <div className="mt-2 rounded border border-[#F6465D]/40 bg-[#F6465D]/10 px-3 py-2 text-[12px] text-[#F6465D]">
+                  <div className="rounded-xl border border-[#F6465D]/40 bg-[#F6465D]/10 px-3 py-2 text-[12px] text-[#F6465D]">
                     按当前用于定仓位的胜率 {(sizingWinProb * 100).toFixed(0)}% 与盈亏比 {betSizing.payoffRatio.toFixed(2)}，这单没有正期望优势 → 不该下注。
                     只在赔率明显被错误定价时才出手。
                   </div>
                 ) : (
-                  <div className="mt-2 space-y-2">
+                  <div className="space-y-2">
                     <div className="flex items-baseline justify-between gap-3">
                       <span className="text-[11px] text-muted-foreground">建议单笔最大亏损 ≤</span>
                       <span className="font-mono text-[13px] text-[#0ECB81]">{betSizing.recommendedMaxLossUsdt.toFixed(0)} USDT</span>
@@ -1107,7 +1148,7 @@ export function PreTradeSnapshotForm({
                           ? `略高于半 Kelly 上限，可考虑下调到 ${betSizing.recommendedMaxLossUsdt.toFixed(0)} USDT。`
                           : '在建议上限内。';
                       return (
-                        <div className={`rounded border px-3 py-2 text-[12px] ${tone.box} ${tone.text}`}>
+                        <div className={`rounded-xl border px-3 py-2 text-[12px] ${tone.box} ${tone.text}`}>
                           你的计划 {maxLoss.toFixed(0)} USDT → 连打 100 笔约破产 {(betSizing.ruinProbabilityAtPlanned * 100).toFixed(0)} 次。{note}
                         </div>
                       );
@@ -1123,7 +1164,7 @@ export function PreTradeSnapshotForm({
                         : `默认 ${DEFAULT_PAYOFF_RATIO.toFixed(2)}（战役盈亏样本不足）`}
                     </div>
                     {profitUpsideAdvice && (
-                      <div className="rounded border border-[#0ECB81]/40 bg-[#0ECB81]/10 px-3 py-2 text-[12px] text-[#0ECB81]">
+                      <div className="rounded-xl border border-[#0ECB81]/40 bg-[#0ECB81]/10 px-3 py-2 text-[12px] text-[#0ECB81]">
                         <div className="font-medium">{profitUpsideAdvice.title}</div>
                         <div className="mt-0.5 text-[11px] leading-relaxed text-foreground/80">
                           {profitUpsideAdvice.detail}
@@ -1132,27 +1173,36 @@ export function PreTradeSnapshotForm({
                     )}
                   </div>
                 )}
-              </section>
+                </CollapsibleContent>
+              </Collapsible>
             )}
 
             {isTrade && positionFeedback.signals.length > 0 && (
-              <section className="rounded border border-border bg-card p-3">
-                <div className={labelCls}>持仓反馈体检</div>
-                <div className="mt-1 text-[11px] text-muted-foreground">
-                  把这一单和现有持仓、近期平仓对照 — 负反馈维稳，正反馈顺势。
-                </div>
-                <div className="mt-2 space-y-1.5">
+              <Collapsible className={`${mainSurfaceCls} overflow-hidden`}>
+                <CollapsibleTrigger className={mainPanelTriggerCls}>
+                  <div className="min-w-0">
+                    <div className="text-[12px] font-semibold text-foreground">持仓反馈体检</div>
+                    <div className="mt-0.5 text-[10px] text-muted-foreground">与现有持仓、近期平仓对照。</div>
+                  </div>
+                  <div className="flex shrink-0 items-center gap-3">
+                    <span className={mainStatusChipCls}>{positionFeedback.signals.length} 条</span>
+                    <ChevronDown className="h-4 w-4 text-muted-foreground transition-transform group-data-[state=open]:rotate-180" />
+                  </div>
+                </CollapsibleTrigger>
+                <CollapsibleContent className="border-t border-border/60 px-3.5 py-3">
+                <div className="space-y-1.5">
                   {positionFeedback.signals.map(sig => {
                     const tone = polarityTone(sig.polarity);
                     return (
-                      <div key={sig.kind} className={`rounded border px-3 py-2 ${tone.box}`}>
+                      <div key={sig.kind} className={`rounded-xl border px-3 py-2 ${tone.box}`}>
                         <div className={`text-[12px] font-medium ${tone.text}`}>{sig.title}</div>
                         <div className="mt-0.5 text-[11px] leading-relaxed text-muted-foreground">{sig.detail}</div>
                       </div>
                     );
                   })}
                 </div>
-              </section>
+                </CollapsibleContent>
+              </Collapsible>
             )}
           </>
         )}
@@ -1598,18 +1648,18 @@ export function PreTradeSnapshotForm({
           </>
         )}
 
-        <section>
-          <div className="mb-2 flex items-end justify-between gap-3">
-            <div>
-              <div className="text-[12px] font-medium text-foreground">当前情绪标签</div>
-              <div className="mt-0.5 text-[10px] text-muted-foreground">
-                依然分三类：正向情绪帮助执行规则，负向情绪容易破坏规则，中性情绪本身不一定坏，但需要被校准，否则会滑向失控。可多选，也可全不选；悬停标签可看核心含义与可能导致的行为倾向。
-              </div>
+        <Collapsible className={`${mainSurfaceCls} overflow-hidden`}>
+          <CollapsibleTrigger className={mainPanelTriggerCls}>
+            <div className="min-w-0">
+              <div className="text-[12px] font-semibold text-foreground">当前情绪标签</div>
+              <div className="mt-0.5 text-[10px] text-muted-foreground">可选项，展开后按正向 / 中性 / 负向打标。</div>
             </div>
-            <div className="text-[10px] text-muted-foreground">
-              已选 <span className="font-mono text-foreground">{painTags.length}</span>
+            <div className="flex shrink-0 items-center gap-3">
+              <span className={mainStatusChipCls}>已选 {painTags.length}</span>
+              <ChevronDown className="h-4 w-4 text-muted-foreground transition-transform group-data-[state=open]:rotate-180" />
             </div>
-          </div>
+          </CollapsibleTrigger>
+          <CollapsibleContent className="border-t border-border/60 px-3.5 py-3">
           <TooltipProvider delayDuration={150}>
             <div className="space-y-2">
               {EMOTION_GROUPS.map(group => {
@@ -1690,20 +1740,21 @@ export function PreTradeSnapshotForm({
               })}
             </div>
           </TooltipProvider>
-        </section>
+          </CollapsibleContent>
+        </Collapsible>
 
-        <section>
-          <div className="mb-2 flex items-end justify-between gap-3">
-            <div>
-              <div className="text-[12px] font-medium text-foreground">认知偏差自查</div>
-              <div className="mt-0.5 text-[10px] text-muted-foreground">
-                按决策的哪个环节出错分三类：看错信息 / 想错逻辑 / 做错动作。情绪你能感觉到，偏差你意识不到，所以更要主动查。悬停标签可看核心含义与典型交易危害。
-              </div>
+        <Collapsible className={`${mainSurfaceCls} overflow-hidden`}>
+          <CollapsibleTrigger className={mainPanelTriggerCls}>
+            <div className="min-w-0">
+              <div className="text-[12px] font-semibold text-foreground">认知偏差自查</div>
+              <div className="mt-0.5 text-[10px] text-muted-foreground">可选项，展开后按信息 / 逻辑 / 行动检查。</div>
             </div>
-            <div className="text-[10px] text-muted-foreground">
-              已选 <span className="font-mono text-foreground">{cognitiveBiasTags.length}</span>
+            <div className="flex shrink-0 items-center gap-3">
+              <span className={mainStatusChipCls}>已选 {cognitiveBiasTags.length}</span>
+              <ChevronDown className="h-4 w-4 text-muted-foreground transition-transform group-data-[state=open]:rotate-180" />
             </div>
-          </div>
+          </CollapsibleTrigger>
+          <CollapsibleContent className="border-t border-border/60 px-3.5 py-3">
           <TooltipProvider delayDuration={150}>
             <div className="space-y-2">
               {COGNITIVE_BIAS_GROUPS.map(group => {
@@ -1784,13 +1835,14 @@ export function PreTradeSnapshotForm({
               })}
             </div>
           </TooltipProvider>
-        </section>
+          </CollapsibleContent>
+        </Collapsible>
 
         {!isHedge && isTrade && (
-          <section className="rounded border border-border bg-card p-3">
+          <section className={`${mainSurfaceCls} p-3`}>
             <div className="mb-2 flex items-center justify-between">
-              <div className={labelCls}>开仓 Checklist{requiredStar}</div>
-              <div className="text-[11px] text-muted-foreground">
+              <div className="text-[12px] font-semibold text-foreground">开仓 Checklist{requiredStar}</div>
+              <div className={mainStatusChipCls}>
                 必填 {requiredCount}/{requiredTotal} · 可选 {optionalCount}/{optionalNeed}
               </div>
             </div>
@@ -1798,7 +1850,7 @@ export function PreTradeSnapshotForm({
               {checklistItems.map(item => (
                 <label
                   key={item.id}
-                  className="flex min-h-[36px] items-center gap-2 rounded border border-border/60 bg-background px-2 py-1.5 text-[12px]"
+                  className="flex min-h-[36px] items-center gap-2 rounded-lg border border-border/60 bg-background/80 px-2.5 py-1.5 text-[12px]"
                 >
                   <Checkbox
                     checked={checked.includes(item.id)}
