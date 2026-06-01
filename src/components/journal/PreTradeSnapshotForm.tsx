@@ -735,8 +735,8 @@ export function PreTradeSnapshotForm({
   const hedgeAnchorButtonBaseCls = 'h-10 rounded-md border text-[12px] font-medium transition-colors';
   const hedgeAnchorButtonIdleCls = 'border-border/60 bg-muted/45 text-muted-foreground hover:border-border hover:bg-muted/70';
   const hedgeAnchorButtonActiveCls = 'border-[#F0B90B]/55 bg-[#F0B90B]/10 text-foreground';
-  const hedgeScenarioCardCls = 'flex h-full flex-col rounded-xl border border-border/70 bg-card/95 p-4 shadow-sm transition-colors';
-  const hedgeScenarioTextareaCls = 'mt-3 min-h-[128px] resize-none rounded-lg border-border bg-background/95 text-[12px] leading-relaxed shadow-inner';
+  const hedgeScenarioCardCls = 'block rounded-xl border border-border/70 bg-card/95 p-4 shadow-sm transition-colors';
+  const hedgeScenarioTextareaCls = 'mt-3 min-h-[108px] resize-none rounded-lg border-border bg-background/95 text-[12px] leading-relaxed shadow-inner';
   const decisionDoneCount = [
     whyRight.trim().length > 0,
     failureReason.trim().length > 0,
@@ -1502,55 +1502,61 @@ export function PreTradeSnapshotForm({
                     三支都建议预先写死
                   </div>
                 </div>
-                <div className="mt-4 grid gap-3 xl:grid-cols-3">
-                <label className={hedgeScenarioCardCls}>
-                  <div className="flex items-center gap-2">
-                    <span className="inline-flex h-6 w-6 items-center justify-center rounded-full border border-border/60 bg-background text-[11px] font-semibold text-foreground">
-                      ①
-                    </span>
-                    <div className="text-[11px] font-semibold text-foreground">若触发后转为【震荡】</div>
-                  </div>
-                  <div className="mt-2 text-[10px] leading-relaxed text-muted-foreground">
-                    没确认下跌，也没强反弹。
-                  </div>
-                  <Textarea
-                    value={hedgeDownIfChop}
-                    onChange={event => setHedgeDownIfChop(event.target.value)}
-                    className={hedgeScenarioTextareaCls}
-                  />
-                </label>
-                <label className={hedgeScenarioCardCls}>
-                  <div className="flex items-center gap-2">
-                    <span className="inline-flex h-6 w-6 items-center justify-center rounded-full border border-[#F6465D]/25 bg-[#F6465D]/10 text-[11px] font-semibold text-[#F6465D]">
-                      ②
-                    </span>
-                    <div className="text-[11px] font-semibold text-foreground">若触发后【确认下行】</div>
-                  </div>
-                  <div className="mt-2 text-[10px] leading-relaxed text-muted-foreground">
-                    异常反向信号已出现。
-                  </div>
-                  <Textarea
-                    value={hedgeDownIfTrend}
-                    onChange={event => setHedgeDownIfTrend(event.target.value)}
-                    className={hedgeScenarioTextareaCls}
-                  />
-                </label>
-                <label className={hedgeScenarioCardCls}>
-                  <div className="flex items-center gap-2">
-                    <span className="inline-flex h-6 w-6 items-center justify-center rounded-full border border-[#0ECB81]/25 bg-[#0ECB81]/10 text-[11px] font-semibold text-[#0ECB81]">
-                      ③
-                    </span>
-                    <div className="text-[11px] font-semibold text-foreground">若触发后【快速反弹】</div>
-                  </div>
-                  <div className="mt-2 text-[10px] leading-relaxed text-muted-foreground">
-                    无反向信号，正向信号反而更强。
-                  </div>
-                  <Textarea
-                    value={hedgeDownIfRebound}
-                    onChange={event => setHedgeDownIfRebound(event.target.value)}
-                    className={hedgeScenarioTextareaCls}
-                  />
-                </label>
+                <div className="mt-4 space-y-3">
+                  <label className={`${hedgeScenarioCardCls} border-l-4 border-l-border`}>
+                    <div className="flex items-start gap-3">
+                      <span className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-border/60 bg-background text-[12px] font-semibold text-foreground">
+                        ①
+                      </span>
+                      <div className="min-w-0">
+                        <div className="text-[12px] font-semibold text-foreground">若触发后转为【震荡】</div>
+                        <div className="mt-1 text-[10px] leading-relaxed text-muted-foreground">
+                          没确认下跌，也没强反弹。先把区间内的拆法写清楚。
+                        </div>
+                      </div>
+                    </div>
+                    <Textarea
+                      value={hedgeDownIfChop}
+                      onChange={event => setHedgeDownIfChop(event.target.value)}
+                      className={hedgeScenarioTextareaCls}
+                    />
+                  </label>
+                  <label className={`${hedgeScenarioCardCls} border-l-4 border-l-[#F6465D]/60`}>
+                    <div className="flex items-start gap-3">
+                      <span className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-[#F6465D]/25 bg-[#F6465D]/10 text-[12px] font-semibold text-[#F6465D]">
+                        ②
+                      </span>
+                      <div className="min-w-0">
+                        <div className="text-[12px] font-semibold text-foreground">若触发后【确认下行】</div>
+                        <div className="mt-1 text-[10px] leading-relaxed text-muted-foreground">
+                          异常反向信号已出现。这里写离场、双平或转防守的脚本。
+                        </div>
+                      </div>
+                    </div>
+                    <Textarea
+                      value={hedgeDownIfTrend}
+                      onChange={event => setHedgeDownIfTrend(event.target.value)}
+                      className={hedgeScenarioTextareaCls}
+                    />
+                  </label>
+                  <label className={`${hedgeScenarioCardCls} border-l-4 border-l-[#0ECB81]/60`}>
+                    <div className="flex items-start gap-3">
+                      <span className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-[#0ECB81]/25 bg-[#0ECB81]/10 text-[12px] font-semibold text-[#0ECB81]">
+                        ③
+                      </span>
+                      <div className="min-w-0">
+                        <div className="text-[12px] font-semibold text-foreground">若触发后【快速反弹】</div>
+                        <div className="mt-1 text-[10px] leading-relaxed text-muted-foreground">
+                          无反向信号，正向信号反而更强。这里写保留主方向、拆保险的脚本。
+                        </div>
+                      </div>
+                    </div>
+                    <Textarea
+                      value={hedgeDownIfRebound}
+                      onChange={event => setHedgeDownIfRebound(event.target.value)}
+                      className={hedgeScenarioTextareaCls}
+                    />
+                  </label>
                 </div>
               </div>
               <div className="mt-3 text-[10px] leading-relaxed text-muted-foreground">
