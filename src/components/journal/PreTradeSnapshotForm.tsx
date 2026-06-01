@@ -10,6 +10,16 @@ import { Input } from '@/components/ui/input';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Slider } from '@/components/ui/slider';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import {
   COGNITIVE_BIAS_CATEGORIES,
@@ -20,6 +30,7 @@ import {
 } from '@/lib/cognitiveBiasTags';
 import { computeDiscount, computeHedgeConvictionDiscount } from '@/lib/confidenceDiscount';
 import { buildHedgeBoundaryBasis } from '@/lib/hedgeBoundaryBasis';
+import { ODDS_STRUCTURE_OPTIONS } from '@/lib/oddsStructure';
 import {
   HEDGE_TYPES,
   HEDGE_DOWN_BRANCH_DEFAULTS,
@@ -49,6 +60,7 @@ import type {
   HedgeOrderMethod,
   HedgeType,
   LegRole,
+  OddsStructure,
   OrderKind,
   PainTag,
   StrategyTemplate,
@@ -88,6 +100,10 @@ export interface SnapshotPayload {
   pre_premortem_failure_reason: string | null;
   pre_falsification_signal: string | null;
   pre_confidence_basis: string | null;
+  pre_odds_structure: OddsStructure | null;
+  pre_odds_structure_source: string | null;
+  pre_odds_structure_premortem: string | null;
+  pre_odds_structure_breakdown_signals: string | null;
   pre_account_equity_usdt: number | null;
   // Deprecated snapshot fields kept in the payload shape for backwards-safe inserts.
   pre_mortem_text: string | null;
@@ -147,7 +163,13 @@ interface Props {
   pricePrecision: number;
   orderParams?: PlaceOrderParams | null;
   onCancel: () => void;
-  onTooHard?: (draft: { order_kind: OrderKind }) => void;
+  onTooHard?: (draft: {
+    order_kind: OrderKind;
+    pre_odds_structure?: OddsStructure | null;
+    pre_odds_structure_source?: string | null;
+    pre_odds_structure_premortem?: string | null;
+    pre_odds_structure_breakdown_signals?: string | null;
+  }) => void;
   onSubmit: (payload: SnapshotPayload) => Promise<void> | void;
 }
 
@@ -285,6 +307,11 @@ export function PreTradeSnapshotForm({
   const [cognitiveBiasTags, setCognitiveBiasTags] = useState<CognitiveBiasTagId[]>([]);
   const [confidencePct, setConfidencePct] = useState(50);
   const [confidenceBasis, setConfidenceBasis] = useState('');
+  const [oddsStructure, setOddsStructure] = useState<OddsStructure | null>(null);
+  const [oddsStructureSource, setOddsStructureSource] = useState('');
+  const [oddsStructurePremortem, setOddsStructurePremortem] = useState('');
+  const [oddsStructureBreakdownSignals, setOddsStructureBreakdownSignals] = useState('');
+  const [confirmBadOddsTradeOpen, setConfirmBadOddsTradeOpen] = useState(false);
   const [checked, setChecked] = useState<string[]>([]);
   const [userRules, setUserRules] = useState<TradingRule[]>([]);
   const [historicalJournals, setHistoricalJournals] = useState<TradeJournal[]>([]);
@@ -395,6 +422,12 @@ export function PreTradeSnapshotForm({
   const decisionReady = whyRight.trim().length > 0
     && failureReason.trim().length > 0
     && falsificationSignal.trim().length > 0;
+  const oddsStructureReady = isHedge || !isTrade || (
+    oddsStructure != null
+    && oddsStructureSource.trim().length > 0
+    && oddsStructurePremortem.trim().length > 0
+    && oddsStructureBreakdownSignals.trim().length > 0
+  );
   const mentalReady = mental >= 3;
   // 对冲路径的可提交条件（见 spec §5）。把握性与必要性各自独立校验，互不推导。
   const hedgeReady = !isHedge || (
@@ -411,7 +444,26 @@ export function PreTradeSnapshotForm({
     currentMarginMode === 'isolated'
     && (isHedge ? hedgeReady : (maxLossValid && checklistPassed))
   );
-  const canSubmit = mentalReady && tradeReady && (isHedge || decisionReady);
+  const canSubmit = mentalReady && tradeReady && (isHedge || (decisionReady && oddsStructureReady));
+  const recentMainReviewed = historicalJournals.filter(j =>
+    (j.journal_kind ?? 'trade') === 'trade'
+    && j.order_kind === 'main'
+    && j.post_reviewed_at
+    && j.post_outcome
+    && j.post_outcome !== 'no_entry',
+  );
+  const weakeningMainPerformance = (() => {
+    if (recentMainReviewed.length < 6) return false;
+    const recent = recentMainReviewed.slice(0, 6);
+    const weakWinRate = recent.filter(j => j.post_outcome === 'win').length / recent.length < 0.4;
+    const withR = recent.filter(j => typeof j.post_r_multiple === 'number');
+    const weakR = withR.length >= 4
+      && (withR.reduce((sum, j) => sum + (j.post_r_multiple ?? 0), 0) / withR.length) < 0;
+    return weakWinRate || weakR;
+  })();
+  const badOddsGate = isTrade && !isHedge && oddsStructure === 'with_crowd_released';
+  const smallOpportunityGate = isTrade && !isHedge && oddsStructure === 'neutral_choppy';
+  const oddsCautionGate = badOddsGate || smallOpportunityGate;
 
   const toggleChecklist = (id: string, checkedValue: boolean) => {
     setChecked(prev => checkedValue ? Array.from(new Set([...prev, id])) : prev.filter(item => item !== id));
@@ -577,6 +629,10 @@ export function PreTradeSnapshotForm({
         pre_premortem_failure_reason: isHedge ? null : failureReason.trim(),
         pre_falsification_signal: isHedge ? null : falsificationSignal.trim(),
         pre_confidence_basis: isHedge ? null : (confidenceBasis.trim() || null),
+        pre_odds_structure: isHedge || !isTrade ? null : oddsStructure,
+        pre_odds_structure_source: isHedge || !isTrade ? null : (oddsStructureSource.trim() || null),
+        pre_odds_structure_premortem: isHedge || !isTrade ? null : (oddsStructurePremortem.trim() || null),
+        pre_odds_structure_breakdown_signals: isHedge || !isTrade ? null : (oddsStructureBreakdownSignals.trim() || null),
         pre_account_equity_usdt: accountEquity > 0 ? Number(accountEquity.toFixed(2)) : null,
         pre_mortem_text: null,
         pre_positive_expectancy: null,
@@ -641,6 +697,8 @@ export function PreTradeSnapshotForm({
     ? 'bg-[#F0B90B] hover:bg-[#F0B90B]/90 text-black'
     : isHedge
       ? 'bg-[#F0B90B] hover:bg-[#F0B90B]/90 text-black'
+      : oddsCautionGate
+        ? 'bg-[#F0B90B] hover:bg-[#F0B90B]/90 text-black'
       : isShort
         ? 'bg-[#F6465D] hover:bg-[#F6465D]/90 text-white'
         : 'bg-[#0ECB81] hover:bg-[#0ECB81]/90 text-black';
@@ -648,7 +706,7 @@ export function PreTradeSnapshotForm({
   const confirmBtnText = submitting ? '提交中...'
     : mode === 'no_entry' ? '记录决策'
     : isHedge ? '确认对冲并下单'
-    : '确认并下单';
+    : oddsCautionGate ? '空仓观望 / 太难不做' : '确认并下单';
 
   const labelCls = 'text-[11px] text-muted-foreground';
   const requiredStar = <span className="ml-0.5 text-[#F6465D]">*</span>;
@@ -772,9 +830,14 @@ export function PreTradeSnapshotForm({
             <section>
               <div className="mb-3 flex items-end justify-between gap-3">
                 <div>
-                  <div className="text-[12px] font-medium text-foreground">决策三问{requiredStar}</div>
+                  <div className="text-[12px] font-medium text-foreground">
+                    {isTrade ? '① 胜率轴 | 校准你的判断（不是去挑高胜率的单）' : "决策三问"}
+                    {requiredStar}
+                  </div>
                   <div className="mt-0.5 text-[10px] text-muted-foreground">
-                    正—反—止：用 Munger inversion 把胜与败一起写清楚，三题都必填
+                    {isTrade
+                      ? '胜率不可选、只能事后校准；这里是校准你的判断，不是去挑高胜率。决策三问只问方向：正—反—止。'
+                      : '记录这次“该开没开”的当时判断，后续复盘时用来校准遗漏机会。'}
                   </div>
                 </div>
                 <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
@@ -847,13 +910,62 @@ export function PreTradeSnapshotForm({
                         >
                           {q.badgeText}
                         </span>
-                        <span className="font-mono">{value.trim().length} 字</span>
                       </div>
                     </label>
                   );
                 })}
               </div>
             </section>
+
+            {isTrade && (
+              <section className="rounded border border-border bg-card p-3">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <div className={labelCls}>胜率校准滑块</div>
+                    <div className="mt-1 text-[12px] text-muted-foreground">
+                      胜率不可选、只能事后校准；这不是下单筛子，真正的筛子在盈亏比轴。
+                    </div>
+                  </div>
+                  <div className="text-right font-mono">
+                    <div className="text-[13px] text-[#0ECB81]">对 {confidencePct}%</div>
+                    <div className="text-[13px] text-[#F6465D]">错 {100 - confidencePct}%</div>
+                  </div>
+                </div>
+                <div className="mt-3 space-y-3">
+                  <div>
+                    <div className="mb-1 flex justify-between text-[11px] text-muted-foreground">
+                      <span>会对</span><span>{confidencePct}%</span>
+                    </div>
+                    <Slider value={[confidencePct]} min={0} max={100} step={1} onValueChange={([v]) => setConfidencePct(clampProbability(v ?? 50))} />
+                  </div>
+                  <div>
+                    <div className="mb-1 flex justify-between text-[11px] text-muted-foreground">
+                      <span>会错</span><span>{100 - confidencePct}%</span>
+                    </div>
+                    <Slider value={[100 - confidencePct]} min={0} max={100} step={1} onValueChange={([v]) => setConfidencePct(100 - clampProbability(v ?? 50))} />
+                  </div>
+                  <Input
+                    value={confidenceBasis}
+                    onChange={event => setConfidenceBasis(event.target.value)}
+                    placeholder="我为什么有资格给这个置信度？"
+                    className={inputCls}
+                  />
+                  <div className="rounded border border-border/70 bg-background/70 px-3 py-2.5">
+                    <div className="text-[11px] font-medium text-foreground">芒格折扣 · 置信度安全边际</div>
+                    <div className="mt-1 text-[12px] text-foreground">
+                      {discount.source === 'personalized'
+                        ? `你的输入：${confidencePct}% → 按你的历史校准，真实可能：${discount.discountedPct}%`
+                        : `你的输入：${confidencePct}% → 折扣后真实可能：${discount.discountedPct}%`}
+                    </div>
+                    <div className="mt-1 text-[10px] text-muted-foreground">
+                      {discount.source === 'personalized'
+                        ? `基于你过去 ${discount.sampleSize} 笔相近置信度交易的实际胜率`
+                        : '主观置信度系统性偏高约 15 个百分点（Tetlock）。积累 10 笔以上相近交易后，此处将改用你的个人校准。'}
+                    </div>
+                  </div>
+                </div>
+              </section>
+            )}
 
             <section className="grid gap-3 md:grid-cols-[1fr_160px]">
               {isTrade && (
@@ -878,6 +990,88 @@ export function PreTradeSnapshotForm({
 
               {mentalRatingCard}
             </section>
+
+            {isTrade && (
+              <section className="rounded-lg border border-border bg-card p-3.5 shadow-sm">
+                <div className="text-[12px] font-medium text-foreground">② 盈亏比轴 | 选择目标（做不做，就在这一轴决定）{requiredStar}</div>
+                <div className="mt-0.5 text-[10px] leading-relaxed text-muted-foreground">
+                  盈亏比是进场那刻由结构选定的形状，选定即固定；这一轴只问结构，不问方向、不问涨幅。决定做不做的筛子在这里。
+                  趋势死于震荡，震荡死于趋势；震荡是趋势的成本，大行情后该休息一阵。
+                </div>
+                <div className="mt-3 grid gap-2">
+                  {ODDS_STRUCTURE_OPTIONS.map(option => (
+                    <button
+                      key={option.id}
+                      type="button"
+                      onClick={() => {
+                        setOddsStructure(option.id);
+                        if (option.id !== 'with_crowd_released') setConfirmBadOddsTradeOpen(false);
+                      }}
+                      className={`rounded-lg border px-3 py-3 text-left transition-colors ${
+                        oddsStructure === option.id
+                          ? 'border-foreground bg-foreground/5 text-foreground'
+                          : 'border-border bg-background text-muted-foreground hover:bg-accent'
+                      }`}
+                    >
+                      <div className="text-[11px] font-medium">{option.label}</div>
+                      <div className="mt-1 text-[10px] leading-relaxed">{option.description}</div>
+                    </button>
+                  ))}
+                </div>
+                <div className="mt-3 grid gap-3 md:grid-cols-3">
+                  <label className="block">
+                    <div className={labelCls}>1. 这笔的盈亏比结构来自哪？</div>
+                    <Textarea
+                      value={oddsStructureSource}
+                      onChange={event => setOddsStructureSource(event.target.value)}
+                      placeholder="人性：谁在恐慌/狂热；市场：什么错配。说不清＝没有高盈亏比，只是赌。"
+                      className={`${textareaCls} mt-2 min-h-[112px]`}
+                    />
+                  </label>
+                  <label className="block">
+                    <div className={labelCls}>2. 如果这个结构判断错了，最可能的原因是什么？</div>
+                    <Textarea
+                      value={oddsStructurePremortem}
+                      onChange={event => setOddsStructurePremortem(event.target.value)}
+                      placeholder="写清楚你可能误判了谁的情绪、哪段趋势/震荡周期，或哪里其实已经释放。"
+                      className={`${textareaCls} mt-2 min-h-[112px]`}
+                    />
+                  </label>
+                  <label className="block">
+                    <div className={labelCls}>3. 哪些具体信号出现，意味着这个结构破坏了？</div>
+                    <Textarea
+                      value={oddsStructureBreakdownSignals}
+                      onChange={event => setOddsStructureBreakdownSignals(event.target.value)}
+                      placeholder="写可被盘面验证的结构破坏信号，而不是主观感觉。"
+                      className={`${textareaCls} mt-2 min-h-[112px]`}
+                    />
+                  </label>
+                </div>
+                {oddsStructure === 'with_crowd_released' && (
+                  <div className="mt-3 rounded-lg border border-[#F0B90B]/40 bg-[#F0B90B]/10 px-3 py-2 text-[11px] leading-relaxed text-[#D89B00]">
+                    稳固坏结构：向量已经释放，反向回吐空间太大。盈亏比是筛子，这一笔默认该弃；空仓是选择，不是失败。
+                  </div>
+                )}
+                {oddsStructure === 'neutral_choppy' && (
+                  <div className="mt-3 rounded-lg border border-[#F0B90B]/40 bg-[#F0B90B]/10 px-3 py-2 text-[11px] leading-relaxed text-[#D89B00]">
+                    持有小机会仓位警告：在震荡里开仓＝持有小机会仓位，比空仓更差。它占行动力，让你在大机会来时犹豫，错过后还会心理懈怠。空仓观望是推荐默认。
+                  </div>
+                )}
+                {oddsStructure === 'neutral_choppy' && weakeningMainPerformance && (
+                  <div className="mt-3 rounded-lg border border-border/70 bg-background/70 px-3 py-2 text-[10px] leading-relaxed text-muted-foreground">
+                    近期实现 R 或胜率走弱：市场越差，筛子越紧；中性震荡里更该挑，默认空仓观望。
+                  </div>
+                )}
+                {oddsStructure === 'against_crowd_unreleased' && weakeningMainPerformance && (
+                  <div className="mt-3 rounded-lg border border-border/70 bg-background/70 px-3 py-2 text-[10px] leading-relaxed text-muted-foreground">
+                    近期实现 R 或胜率走弱：即使是逆拥挤，也只做结构来源说得清的纯净机会；来源含糊时先空仓。
+                  </div>
+                )}
+                {!oddsStructureReady && (
+                  <div className="mt-2 text-[10px] font-mono text-[#F6465D]">必须先完成三态单选与盈亏比结构三问。</div>
+                )}
+              </section>
+            )}
 
             {isTrade && betSizing && (
               <section className="rounded-lg border border-border bg-card p-3.5 shadow-sm">
@@ -1591,54 +1785,6 @@ export function PreTradeSnapshotForm({
           </TooltipProvider>
         </section>
 
-        {!isHedge && (
-          <section className="rounded border border-border bg-card p-3">
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <div className={labelCls}>二元预测概率</div>
-                <div className="mt-1 text-[12px] text-muted-foreground">移动任一端，另一端自动补足到 100%。</div>
-              </div>
-              <div className="text-right font-mono">
-                <div className="text-[13px] text-[#0ECB81]">对 {confidencePct}%</div>
-                <div className="text-[13px] text-[#F6465D]">错 {100 - confidencePct}%</div>
-              </div>
-            </div>
-            <div className="mt-3 space-y-3">
-              <div>
-                <div className="mb-1 flex justify-between text-[11px] text-muted-foreground">
-                  <span>会对</span><span>{confidencePct}%</span>
-                </div>
-                <Slider value={[confidencePct]} min={0} max={100} step={1} onValueChange={([v]) => setConfidencePct(clampProbability(v ?? 50))} />
-              </div>
-              <div>
-                <div className="mb-1 flex justify-between text-[11px] text-muted-foreground">
-                  <span>会错</span><span>{100 - confidencePct}%</span>
-                </div>
-                <Slider value={[100 - confidencePct]} min={0} max={100} step={1} onValueChange={([v]) => setConfidencePct(100 - clampProbability(v ?? 50))} />
-              </div>
-              <Input
-                value={confidenceBasis}
-                onChange={event => setConfidenceBasis(event.target.value)}
-                placeholder="我为什么有资格给这个置信度？"
-                className={inputCls}
-              />
-              <div className="rounded border border-border/70 bg-background/70 px-3 py-2.5">
-                <div className="text-[11px] font-medium text-foreground">芒格折扣 · 置信度安全边际</div>
-                <div className="mt-1 text-[12px] text-foreground">
-                  {discount.source === 'personalized'
-                    ? `你的输入：${confidencePct}% → 按你的历史校准，真实可能：${discount.discountedPct}%`
-                    : `你的输入：${confidencePct}% → 折扣后真实可能：${discount.discountedPct}%`}
-                </div>
-                <div className="mt-1 text-[10px] text-muted-foreground">
-                  {discount.source === 'personalized'
-                    ? `基于你过去 ${discount.sampleSize} 笔相近置信度交易的实际胜率`
-                    : '主观置信度系统性偏高约 15 个百分点（Tetlock）。积累 10 笔以上相近交易后，此处将改用你的个人校准。'}
-                </div>
-              </div>
-            </div>
-          </section>
-        )}
-
         {!isHedge && isTrade && (
           <section className="rounded border border-border bg-card p-3">
             <div className="mb-2 flex items-center justify-between">
@@ -1677,26 +1823,84 @@ export function PreTradeSnapshotForm({
           取消
         </button>
         <div className="flex items-center gap-2">
-          {isTrade && (
+          {isTrade && !oddsCautionGate && (
             <button
               type="button"
-              onClick={() => onTooHard?.({ order_kind: orderKind })}
+              onClick={() => {
+                setConfirmBadOddsTradeOpen(false);
+                onTooHard?.({
+                  order_kind: orderKind,
+                  pre_odds_structure: isHedge ? null : oddsStructure,
+                  pre_odds_structure_source: isHedge ? null : (oddsStructureSource.trim() || null),
+                  pre_odds_structure_premortem: isHedge ? null : (oddsStructurePremortem.trim() || null),
+                  pre_odds_structure_breakdown_signals: isHedge ? null : (oddsStructureBreakdownSignals.trim() || null),
+                });
+              }}
               disabled={submitting}
               className="h-9 rounded border border-[#F0B90B]/40 px-4 text-[12px] font-medium text-[#F0B90B] transition-colors hover:bg-[#F0B90B]/10 disabled:cursor-not-allowed disabled:opacity-40"
             >
-              太难，不做这单
+              空仓观望 / 太难不做
+            </button>
+          )}
+          {oddsCautionGate && (
+            <button
+              type="button"
+              onClick={() => setConfirmBadOddsTradeOpen(true)}
+              disabled={!canSubmit || submitting}
+              className="h-9 rounded border border-border px-4 text-[12px] font-medium text-foreground transition-colors hover:bg-accent disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              仍要下单
             </button>
           )}
           <button
             type="button"
-            onClick={submit}
-            disabled={!canSubmit || submitting}
+            onClick={() => {
+              if (oddsCautionGate) {
+                setConfirmBadOddsTradeOpen(false);
+                onTooHard?.({
+                  order_kind: orderKind,
+                  pre_odds_structure: isHedge ? null : oddsStructure,
+                  pre_odds_structure_source: isHedge ? null : (oddsStructureSource.trim() || null),
+                  pre_odds_structure_premortem: isHedge ? null : (oddsStructurePremortem.trim() || null),
+                  pre_odds_structure_breakdown_signals: isHedge ? null : (oddsStructureBreakdownSignals.trim() || null),
+                });
+                return;
+              }
+              void submit();
+            }}
+            disabled={oddsCautionGate ? submitting : (!canSubmit || submitting)}
             className={`h-9 rounded px-4 text-[12px] font-medium transition-opacity disabled:cursor-not-allowed disabled:opacity-40 ${confirmBtnClass}`}
           >
             {confirmBtnText}
           </button>
         </div>
       </div>
+      <AlertDialog open={confirmBadOddsTradeOpen} onOpenChange={setConfirmBadOddsTradeOpen}>
+        <AlertDialogContent className="border-border bg-card">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="text-[14px] text-foreground">仍要下这一笔？</AlertDialogTitle>
+            <AlertDialogDescription className="text-[11px] leading-relaxed text-muted-foreground">
+              {badOddsGate
+                ? '你已经把这笔判定为“顺情绪 / 追价”的坏结构。系统默认建议空仓观望；如果仍要下，等于明确接受这不是高盈亏比，而是在逆着筛子强行出手。'
+                : '你已经把这笔判定为“中性震荡”。在震荡里开仓＝持有小机会仓位，比空仓更差；如果仍要下，等于明确接受行动力被占用、未来大机会时更容易犹豫。'}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <div className="rounded-lg border border-[#F0B90B]/35 bg-[#F0B90B]/10 px-3 py-2 text-[11px] leading-relaxed text-[#D89B00]">
+            空仓是选择，不是失败。这里是二次确认，不是硬阻断；确认后仍按原主力单流程提交。
+          </div>
+          <AlertDialogFooter>
+            <AlertDialogCancel className="border-border bg-background text-[12px] text-foreground hover:bg-accent">
+              返回弃单
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => void submit()}
+              className="bg-[#F6465D] text-[12px] text-white hover:bg-[#F6465D]/90"
+            >
+              确认，仍要下单
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

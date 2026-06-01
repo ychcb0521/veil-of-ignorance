@@ -306,7 +306,7 @@ function isMissingDalioMetaLayerError(error: { code?: string; message?: string }
   return error.code === 'PGRST205'
     || error.code === 'PGRST204'
     || error.code === '42P01'
-    || (/trade_principles|pain_log_entries|pre_thesis_why_right|pre_premortem_failure_reason|pre_falsification_signal|pre_confidence_basis|pre_account_equity_usdt|pre_mortem_text|pre_positive_expectancy|pre_invalidation_condition|pre_calibration_win_pct|pre_confidence_interval_|pre_calibration_reference_class|pre_calibration_competence_basis|pre_calibration_update_signal|pre_dataset_split|pre_lollapalooza_score|pre_bankruptcy_estimate|pre_info_|pre_opponent_statement|pre_pain_tags|pre_cognitive_bias_tags|journal_kind|no_trade_reason|no_trade_would_be_entry_price|no_trade_direction|exit_falsification_status|exit_falsification_note|post_result_summary|post_decision_quality|post_positive_expectancy_review|post_premortem_review|post_invalidation_review|post_five_step|post_opponent_was_right|post_real_close_time|evolution_level|principle_id|hedge_type|hedge_boundary_price|hedge_boundary_basis|hedge_boundary_stance|hedge_lock_profit_pct|hedge_resolution_up|hedge_resolution_down|hedge_down_if_chop|hedge_down_if_trend|hedge_down_if_rebound|hedge_necessity_pct|hedge_safety_strength|hedge_safety_regularity|hedge_risk_magnitude|hedge_conviction_pct|hedge_friction_cost|hedge_order_method|hedge_worth_it/i.test(message)
+    || (/trade_principles|pain_log_entries|pre_thesis_why_right|pre_premortem_failure_reason|pre_falsification_signal|pre_confidence_basis|pre_odds_structure|pre_odds_structure_source|pre_odds_structure_premortem|pre_odds_structure_breakdown_signals|pre_account_equity_usdt|pre_mortem_text|pre_positive_expectancy|pre_invalidation_condition|pre_calibration_win_pct|pre_confidence_interval_|pre_calibration_reference_class|pre_calibration_competence_basis|pre_calibration_update_signal|pre_dataset_split|pre_lollapalooza_score|pre_bankruptcy_estimate|pre_info_|pre_opponent_statement|pre_pain_tags|pre_cognitive_bias_tags|journal_kind|no_trade_reason|no_trade_would_be_entry_price|no_trade_direction|exit_falsification_status|exit_falsification_note|post_result_summary|post_decision_quality|post_positive_expectancy_review|post_premortem_review|post_invalidation_review|post_five_step|post_opponent_was_right|post_real_close_time|evolution_level|principle_id|hedge_type|hedge_boundary_price|hedge_boundary_basis|hedge_boundary_stance|hedge_lock_profit_pct|hedge_resolution_up|hedge_resolution_down|hedge_down_if_chop|hedge_down_if_trend|hedge_down_if_rebound|hedge_necessity_pct|hedge_safety_strength|hedge_safety_regularity|hedge_risk_magnitude|hedge_conviction_pct|hedge_friction_cost|hedge_order_method|hedge_worth_it/i.test(message)
       && /schema cache|could not find|does not exist|column/i.test(message));
 }
 
@@ -2194,6 +2194,10 @@ export interface CreateNoTradeJournalInput {
   no_trade_would_be_entry_price: number | null;
   no_trade_reason?: string | null;
   order_kind?: TradeJournal['order_kind'];
+  pre_odds_structure?: TradeJournal['pre_odds_structure'];
+  pre_odds_structure_source?: TradeJournal['pre_odds_structure_source'];
+  pre_odds_structure_premortem?: TradeJournal['pre_odds_structure_premortem'];
+  pre_odds_structure_breakdown_signals?: TradeJournal['pre_odds_structure_breakdown_signals'];
 }
 
 export async function createNoTradeJournal(
@@ -2229,6 +2233,10 @@ export async function createNoTradeJournal(
     pre_premortem_failure_reason: null,
     pre_falsification_signal: null,
     pre_confidence_basis: null,
+    pre_odds_structure: input.pre_odds_structure ?? null,
+    pre_odds_structure_source: input.pre_odds_structure_source?.trim() || null,
+    pre_odds_structure_premortem: input.pre_odds_structure_premortem?.trim() || null,
+    pre_odds_structure_breakdown_signals: input.pre_odds_structure_breakdown_signals?.trim() || null,
     pre_account_equity_usdt: null,
     pre_mortem_text: null,
     pre_positive_expectancy: null,
@@ -2268,17 +2276,8 @@ export async function createNoTradeJournal(
     post_reviewed_at: null,
   };
 
-  const { data, error } = await supabase
-    .from("trade_journals" as never)
-    .insert(payload as never)
-    .select()
-    .single();
-
-  if (error && isMissingDalioMetaLayerError(error)) {
-    throw new Error('记录"太难"决策失败：数据库尚未完成批次 24 migration，请先同步 trade_journals 新字段');
-  }
-
-  return wrap('记录"太难"决策', error, data as unknown as TradeJournal);
+  const { data, error } = await insertTradeJournalWithSchemaFallback(payload as Record<string, unknown>);
+  return wrap('记录空仓观望决策', error, data as unknown as TradeJournal);
 }
 
 export interface UpdateJournalPostInput {

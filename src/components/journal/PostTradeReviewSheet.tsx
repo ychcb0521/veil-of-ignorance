@@ -20,6 +20,12 @@ import { COGNITIVE_BIAS_LABELS } from '@/lib/cognitiveBiasTags';
 import { parseHedgeBoundaryBasis } from '@/lib/hedgeBoundaryBasis';
 import { HEDGE_BOUNDARY_STANCE_LABELS, HEDGE_ORDER_METHOD_LABELS, HEDGE_TYPE_LABELS } from '@/lib/hedgeTypes';
 import {
+  buildOddsStructureReviewText,
+  ODDS_STRUCTURE_LABELS,
+  parseOddsStructureReviewText,
+  type OddsStructureReview,
+} from '@/lib/oddsStructure';
+import {
   finalizeJournalReview, replacePhaseAssignments,
   listAssignmentsForJournal, countPatternOccurrencesLast30Days, listPatterns,
   updateJournalDeepAnalysis, stampJournalCloseRealTime,
@@ -59,6 +65,7 @@ export function PostTradeReviewSheet({
   const [resultSummary, setResultSummary] = useState('');
   const [decisionQuality, setDecisionQuality] = useState<TradeJournal['post_decision_quality']>('mixed');
   const [expectancyReview, setExpectancyReview] = useState('');
+  const [oddsStructureReviewValue, setOddsStructureReviewValue] = useState<OddsStructureReview | null>(null);
   const [premortemReview, setPremortemReview] = useState('');
   const [invalidationReview, setInvalidationReview] = useState('');
   const [falsificationStatus, setFalsificationStatus] = useState<TradeJournal['exit_falsification_status']>(null);
@@ -103,7 +110,9 @@ export function PostTradeReviewSheet({
         setExitReason(tradeRecord?.exit_reason_text ?? '');
         setResultSummary(journal.post_result_summary ?? '');
         setDecisionQuality(journal.post_decision_quality ?? 'mixed');
-        setExpectancyReview(journal.post_positive_expectancy_review ?? '');
+        const parsedOddsStructureReview = parseOddsStructureReviewText(journal.post_positive_expectancy_review);
+        setOddsStructureReviewValue(parsedOddsStructureReview.review);
+        setExpectancyReview(parsedOddsStructureReview.body);
         setPremortemReview(journal.post_premortem_review ?? '');
         setInvalidationReview(journal.post_invalidation_review ?? '');
         setFalsificationStatus(journal.exit_falsification_status ?? null);
@@ -238,6 +247,9 @@ export function PostTradeReviewSheet({
   const snapshotWhyRight = journal.pre_thesis_why_right || journal.pre_positive_expectancy || journal.pre_entry_reason || '';
   const snapshotPremortem = journal.pre_premortem_failure_reason || journal.pre_mortem_text || '';
   const snapshotFalsification = journal.pre_falsification_signal || journal.pre_invalidation_condition || '';
+  const snapshotOddsSource = journal.pre_odds_structure_source || '';
+  const snapshotOddsPremortem = journal.pre_odds_structure_premortem || '';
+  const snapshotOddsBreakdown = journal.pre_odds_structure_breakdown_signals || '';
   const hedgeBoundaryBasis = parseHedgeBoundaryBasis(journal.hedge_boundary_basis);
   const hasStructuredHedgeDownPlan = Boolean(
     journal.hedge_down_if_chop
@@ -291,7 +303,7 @@ export function PostTradeReviewSheet({
         post_correct_action: correctAction.trim(),
         post_result_summary: resultSummary.trim(),
         post_decision_quality: decisionQuality,
-        post_positive_expectancy_review: expectancyReview.trim(),
+        post_positive_expectancy_review: buildOddsStructureReviewText(expectancyReview, oddsStructureReviewValue),
         post_premortem_review: premortemReview.trim(),
         post_invalidation_review: invalidationReview.trim(),
         exit_falsification_status: falsificationStatus,
@@ -500,6 +512,28 @@ export function PostTradeReviewSheet({
                   <div className="rounded-lg border border-border/60 bg-background/60 px-3 py-2">
                     <span className="text-muted-foreground">开仓预测：</span>会对 {calibrationPct.toFixed(0)}% · 会错 {(100 - calibrationPct).toFixed(0)}%
                     {journal.pre_confidence_basis ? <span> · {journal.pre_confidence_basis}</span> : null}
+                  </div>
+                )}
+                <div className="rounded-lg border border-border/60 bg-background/60 px-3 py-2">
+                  <span className="text-muted-foreground">盈亏比结构：</span>
+                  {journal.pre_odds_structure ? ODDS_STRUCTURE_LABELS[journal.pre_odds_structure] : '旧版快照'}
+                </div>
+                {journal.pre_odds_structure && (
+                  <>
+                    <div className="rounded-lg border border-border/60 bg-background/60 px-3 py-2">
+                      <span className="text-muted-foreground">结构来自：</span>{snapshotOddsSource || '—'}
+                    </div>
+                    <div className="rounded-lg border border-border/60 bg-background/60 px-3 py-2">
+                      <span className="text-muted-foreground">结构判断错因：</span>{snapshotOddsPremortem || '—'}
+                    </div>
+                    <div className="rounded-lg border border-border/60 bg-background/60 px-3 py-2">
+                      <span className="text-muted-foreground">结构破坏信号：</span>{snapshotOddsBreakdown || '—'}
+                    </div>
+                  </>
+                )}
+                {isSnapshotV2 && !journal.pre_odds_structure && !isHedge && (
+                  <div className="rounded-lg border border-border/60 bg-background/60 px-3 py-2 text-muted-foreground">
+                    旧版快照：未记录盈亏比结构三问
                   </div>
                 )}
               </div>
@@ -789,6 +823,50 @@ export function PostTradeReviewSheet({
             </div>
           )}
           <div className="space-y-1.5">
+            {!isHedge && (
+              <div className="rounded-xl border border-border/70 bg-background/70 px-3 py-3 space-y-2">
+                <div>
+                  <div className="text-[12px] font-medium text-foreground">盈亏比结构复核</div>
+                  <div className="mt-1 text-[10px] leading-relaxed text-muted-foreground">
+                    这是软性复盘项，只复核你当时对结构的判断、破坏信号是否兑现，不强制填写。
+                  </div>
+                </div>
+                {journal.pre_odds_structure && (
+                  <div className="rounded-lg border border-border/60 bg-card px-3 py-2 text-[10px] leading-relaxed text-muted-foreground">
+                    当时结构：<span className="text-foreground">{ODDS_STRUCTURE_LABELS[journal.pre_odds_structure]}</span>
+                    {snapshotOddsBreakdown ? <span> · 破坏信号：{snapshotOddsBreakdown}</span> : null}
+                  </div>
+                )}
+                <div className="grid gap-2">
+                  {[
+                    { value: 'right', label: '对', desc: '当时判结构基本正确' },
+                    { value: 'mixed', label: '一般', desc: '部分对，但没看完整' },
+                    { value: 'wrong', label: '错', desc: '当时把结构看错了' },
+                  ].map(option => (
+                    <button
+                      key={option.value}
+                      type="button"
+                      onClick={() => setOddsStructureReviewValue(option.value as OddsStructureReview)}
+                      className={`rounded-lg border px-3 py-2 text-left text-[11px] transition-colors ${
+                        oddsStructureReviewValue === option.value
+                          ? 'border-foreground bg-foreground/5 text-foreground'
+                          : 'border-border bg-background text-muted-foreground hover:bg-accent'
+                      }`}
+                    >
+                      <div className="font-medium">{option.label}</div>
+                      <div className="mt-0.5 text-[10px] leading-relaxed">{option.desc}</div>
+                    </button>
+                  ))}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setOddsStructureReviewValue(null)}
+                  className="text-[10px] text-muted-foreground transition-colors hover:text-foreground"
+                >
+                  清空此项
+                </button>
+              </div>
+            )}
             <Label className="text-[12px] font-medium">正期望判断是否成立？*</Label>
             <Textarea
               rows={2}

@@ -27,8 +27,9 @@ import {
 } from '@/lib/insightsStats';
 import { computeTooHardBasketStats, type TooHardBasketStats } from '@/lib/noTradeHypothetical';
 import { HEDGE_BOUNDARY_STANCE_LABELS, HEDGE_WORTH_IT_SCORE } from '@/lib/hedgeTypes';
+import { ODDS_STRUCTURE_LABELS } from '@/lib/oddsStructure';
 import { isHistoricalCampaign, PAIN_TAG_LABELS, PRINCIPLE_EVOLUTION_LEVEL_LABELS } from '@/types/journal';
-import type { HedgeBoundaryStance, PainTag, PrincipleEvolutionLevel, TradeCampaign, TradeJournal } from '@/types/journal';
+import type { HedgeBoundaryStance, OddsStructure, PainTag, PrincipleEvolutionLevel, TradeCampaign, TradeJournal } from '@/types/journal';
 
 type Range = 7 | 30 | 90;
 const DAY = 24 * 3600_000;
@@ -106,6 +107,15 @@ function pct(value: number) {
 
 function pctRange([low, high]: [number, number]) {
   return `${pct(low)}~${pct(high)}`;
+}
+
+function median(values: number[]): number | null {
+  if (values.length === 0) return null;
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 0
+    ? (sorted[mid - 1] + sorted[mid]) / 2
+    : sorted[mid];
 }
 
 function buildCalibrationBins(samples: CalibrationSample[]): CalibrationBin[] {
@@ -557,6 +567,62 @@ export default function JournalInsightsPage() {
       conclusion: opportunityCostConclusion(stanceDistribution, boundaryStanceRows.length),
     };
     const restraintCount = curTrades.filter(j => j.direction === 'no_entry' || j.post_outcome === 'no_entry').length;
+    const oddsStructureRows = mainOrders.filter((j): j is TradeJournal & { pre_odds_structure: OddsStructure } =>
+      j.pre_odds_structure === 'against_crowd_unreleased'
+      || j.pre_odds_structure === 'neutral_choppy'
+      || j.pre_odds_structure === 'with_crowd_released',
+    );
+    const oddsStructureProfile = {
+      count: oddsStructureRows.length,
+      legacyCount: mainOrders.filter(j => !j.pre_odds_structure).length,
+      items: ([
+        'against_crowd_unreleased',
+        'neutral_choppy',
+        'with_crowd_released',
+      ] as const).map(structure => {
+        const rows = oddsStructureRows.filter(j => j.pre_odds_structure === structure);
+        const rValues = rows
+          .map(j => j.post_r_multiple)
+          .filter((value): value is number => typeof value === 'number' && Number.isFinite(value));
+        return {
+          structure,
+          label: ODDS_STRUCTURE_LABELS[structure],
+          count: rows.length,
+          share: oddsStructureRows.length === 0 ? 0 : rows.length / oddsStructureRows.length,
+          medianR: median(rValues),
+        };
+      }),
+    };
+    const smallOpportunityRows = mainOrders.filter(j =>
+      j.pre_odds_structure === 'neutral_choppy'
+      || j.pre_odds_structure === 'with_crowd_released',
+    );
+    const smallOpportunityExposureUsdt = smallOpportunityRows.reduce(
+      (sum, journal) => sum + (journal.pre_position_size ?? 0),
+      0,
+    );
+    const smallOpportunityHoldingHours = smallOpportunityRows.reduce((sum, journal) => {
+      const openedAt = new Date(journal.pre_real_time).getTime();
+      const closedAt = journal.post_real_close_time
+        ? new Date(journal.post_real_close_time).getTime()
+        : journal.post_reviewed_at
+          ? new Date(journal.post_reviewed_at).getTime()
+          : NaN;
+      if (!Number.isFinite(openedAt) || !Number.isFinite(closedAt) || closedAt <= openedAt) return sum;
+      return sum + (closedAt - openedAt) / 3_600_000;
+    }, 0);
+    const noTradeMainRows = cur.filter(j =>
+      (j.journal_kind ?? 'trade') === 'no_trade'
+      && (j.order_kind ?? 'main') === 'main',
+    );
+    const smallOpportunityProfile = {
+      count: smallOpportunityRows.length,
+      neutralCount: smallOpportunityRows.filter(j => j.pre_odds_structure === 'neutral_choppy').length,
+      releasedCount: smallOpportunityRows.filter(j => j.pre_odds_structure === 'with_crowd_released').length,
+      exposureUsdt: smallOpportunityExposureUsdt,
+      holdingHours: smallOpportunityHoldingHours,
+      emptyCount: noTradeMainRows.length,
+    };
 
     const reviewedMain = curTrades.filter(j => j.order_kind === 'main' && j.post_reviewed_at && j.post_outcome && j.post_outcome !== 'no_entry');
     const directionWins = reviewedMain.filter(j => j.post_outcome === 'win').length;
@@ -649,6 +715,8 @@ export default function JournalInsightsPage() {
       painStats,
       evolutionMap,
       restraintCount,
+      oddsStructureProfile,
+      smallOpportunityProfile,
       campaignOutcome: {
         count: curCampaigns.length,
         winRate: curCampaigns.length === 0 ? 0 : campaignWinCount / curCampaigns.length,
@@ -1241,6 +1309,95 @@ export default function JournalInsightsPage() {
             </div>
           </section>
 
+          <section className="border border-border rounded bg-card p-3">
+            <div className="text-[12px] font-medium mb-2">盈亏比结构分布</div>
+            <div className="text-[10px] text-muted-foreground">
+              仅统计主力单开仓时记录的结构判定；旧版快照空值不进入三态分布。
+            </div>
+            {stats.oddsStructureProfile.count === 0 ? (
+              <div className="mt-4 text-[11px] text-muted-foreground">
+                数据积累中。等有更多带“盈亏比结构”的主力单后，这里会显示三态占比与各自实现 R 中位数。
+              </div>
+            ) : (
+              <div className="mt-4 space-y-2">
+                {stats.oddsStructureProfile.items.map(item => (
+                  <div key={item.structure} className="rounded border border-border bg-background p-2">
+                    <div className="flex items-center justify-between gap-3 text-[11px]">
+                      <span className="text-foreground">{item.label}</span>
+                      <span className="font-mono text-muted-foreground">{item.count} 笔 · {(item.share * 100).toFixed(0)}%</span>
+                    </div>
+                    <div className="mt-2 h-2 rounded bg-card overflow-hidden">
+                      <div className="h-full bg-[#F0B90B]" style={{ width: `${item.share * 100}%` }} />
+                    </div>
+                    <div className="mt-2 text-[10px] font-mono">
+                      {item.medianR == null
+                        ? <span className="text-muted-foreground">实现 R 中位数：样本不足</span>
+                        : (
+                          <span className={item.medianR >= 0 ? 'text-[#0ECB81]' : 'text-[#F6465D]'}>
+                            实现 R 中位数：{item.medianR >= 0 ? '+' : ''}{item.medianR.toFixed(2)}R
+                          </span>
+                        )}
+                    </div>
+                  </div>
+                ))}
+                {stats.oddsStructureProfile.legacyCount > 0 && (
+                  <div className="text-[10px] text-muted-foreground">
+                    另有 {stats.oddsStructureProfile.legacyCount} 笔主力单属于旧版快照，结构列为空。
+                  </div>
+                )}
+              </div>
+            )}
+          </section>
+
+          <section className="border border-border rounded bg-card p-3">
+            <div className="text-[12px] font-medium mb-2">小机会仓位 vs 空仓</div>
+            <div className="text-[10px] text-muted-foreground">
+              中性震荡或顺情绪已释放结构下仍开仓，记为“小机会仓位”：这是负向指标；空仓观望是正向选择。
+            </div>
+            {stats.smallOpportunityProfile.count === 0 && stats.smallOpportunityProfile.emptyCount === 0 ? (
+              <div className="mt-4 text-[11px] text-muted-foreground">
+                数据不足。后续会对比坏结构开仓的占用资金/时间，与正确空仓（no_trade）的次数。
+              </div>
+            ) : (
+              <div className="mt-4 grid gap-2">
+                <div className="rounded border border-[#F6465D]/30 bg-[#F6465D]/5 p-2">
+                  <div className="flex items-center justify-between text-[11px]">
+                    <span className="text-[#F6465D]">小机会仓位</span>
+                    <span className="font-mono">{stats.smallOpportunityProfile.count} 笔</span>
+                  </div>
+                  <div className="mt-2 grid grid-cols-3 gap-2 text-[10px] text-muted-foreground">
+                    <div>
+                      <div>震荡中性</div>
+                      <div className="font-mono text-foreground">{stats.smallOpportunityProfile.neutralCount}</div>
+                    </div>
+                    <div>
+                      <div>已释放追价</div>
+                      <div className="font-mono text-foreground">{stats.smallOpportunityProfile.releasedCount}</div>
+                    </div>
+                    <div>
+                      <div>占用时间</div>
+                      <div className="font-mono text-foreground">{stats.smallOpportunityProfile.holdingHours.toFixed(1)}h</div>
+                    </div>
+                  </div>
+                  <div className="mt-2 text-[10px] text-muted-foreground">
+                    占用资金约 <span className="font-mono text-foreground">{stats.smallOpportunityProfile.exposureUsdt.toFixed(2)} USDT</span>
+                  </div>
+                </div>
+                <div className="rounded border border-[#0ECB81]/30 bg-[#0ECB81]/5 p-2">
+                  <div className="flex items-center justify-between text-[11px]">
+                    <span className="text-[#0ECB81]">正确空仓（no_trade）</span>
+                    <span className="font-mono">{stats.smallOpportunityProfile.emptyCount} 次</span>
+                  </div>
+                  <div className="mt-2 text-[10px] text-muted-foreground">
+                    空仓不是失败，而是把行动力留给真正高盈亏比结构。
+                  </div>
+                </div>
+              </div>
+            )}
+          </section>
+        </div>
+
+        <div className="grid md:grid-cols-1 gap-3">
           <section className="border border-border rounded bg-card p-3">
             <div className="text-[12px] font-medium mb-2">全仓笔数审计</div>
             <div className="text-[28px] font-mono leading-none">{stats.crossCount}</div>

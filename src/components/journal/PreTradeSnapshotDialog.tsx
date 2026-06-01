@@ -63,6 +63,10 @@ export function PreTradeSnapshotDialog({
   const [tooHardOpen, setTooHardOpen] = useState(false);
   const [tooHardReason, setTooHardReason] = useState('');
   const [tooHardOrderKind, setTooHardOrderKind] = useState<'main' | 'hedge'>('main');
+  const [tooHardOddsStructure, setTooHardOddsStructure] = useState<SnapshotPayload['pre_odds_structure']>(null);
+  const [tooHardOddsStructureSource, setTooHardOddsStructureSource] = useState<string | null>(null);
+  const [tooHardOddsStructurePremortem, setTooHardOddsStructurePremortem] = useState<string | null>(null);
+  const [tooHardOddsStructureBreakdownSignals, setTooHardOddsStructureBreakdownSignals] = useState<string | null>(null);
   const [savingTooHard, setSavingTooHard] = useState(false);
 
   // Pending-review gate: closed trades without post-review must be evaluated before new orders
@@ -81,6 +85,10 @@ export function PreTradeSnapshotDialog({
       setLockedPrice(lockedEntryPrice);
       setTooHardReason('');
       setTooHardOpen(false);
+      setTooHardOddsStructure(null);
+      setTooHardOddsStructureSource(null);
+      setTooHardOddsStructurePremortem(null);
+      setTooHardOddsStructureBreakdownSignals(null);
       if (!pausedRef.current) {
         pausedRef.current = true;
         onAutoPause?.();
@@ -165,6 +173,10 @@ export function PreTradeSnapshotDialog({
         pre_premortem_failure_reason: payload.pre_premortem_failure_reason,
         pre_falsification_signal: payload.pre_falsification_signal,
         pre_confidence_basis: payload.pre_confidence_basis,
+        pre_odds_structure: payload.pre_odds_structure,
+        pre_odds_structure_source: payload.pre_odds_structure_source,
+        pre_odds_structure_premortem: payload.pre_odds_structure_premortem,
+        pre_odds_structure_breakdown_signals: payload.pre_odds_structure_breakdown_signals,
         pre_account_equity_usdt: payload.pre_account_equity_usdt,
         // Decision-quality fields
         pre_mortem_text: payload.pre_mortem_text,
@@ -246,8 +258,12 @@ export function PreTradeSnapshotDialog({
         no_trade_would_be_entry_price: lockedPrice,
         no_trade_reason: tooHardReason,
         order_kind: tooHardOrderKind,
+        pre_odds_structure: tooHardOrderKind === 'main' ? tooHardOddsStructure : null,
+        pre_odds_structure_source: tooHardOrderKind === 'main' ? tooHardOddsStructureSource : null,
+        pre_odds_structure_premortem: tooHardOrderKind === 'main' ? tooHardOddsStructurePremortem : null,
+        pre_odds_structure_breakdown_signals: tooHardOrderKind === 'main' ? tooHardOddsStructureBreakdownSignals : null,
       });
-      toast.success("已记录'太难'决策");
+      toast.success('已记录空仓观望决策');
       setTooHardOpen(false);
       onOpenChange(false);
     } catch (e) {
@@ -323,8 +339,15 @@ export function PreTradeSnapshotDialog({
       pricePrecision={pricePrecision}
       orderParams={orderParams ?? null}
       onCancel={() => onOpenChange(false)}
-      onTooHard={({ order_kind }) => {
+      onTooHard={({ order_kind, pre_odds_structure, pre_odds_structure_source, pre_odds_structure_premortem, pre_odds_structure_breakdown_signals }) => {
         setTooHardOrderKind(order_kind);
+        setTooHardOddsStructure(pre_odds_structure ?? null);
+        setTooHardOddsStructureSource(pre_odds_structure_source ?? null);
+        setTooHardOddsStructurePremortem(pre_odds_structure_premortem ?? null);
+        setTooHardOddsStructureBreakdownSignals(pre_odds_structure_breakdown_signals ?? null);
+        if (order_kind === 'main' && pre_odds_structure && !tooHardReason.trim()) {
+          setTooHardReason(pre_odds_structure_source?.trim() || '');
+        }
         setTooHardOpen(true);
       }}
       onSubmit={handleSubmit}
@@ -345,19 +368,19 @@ export function PreTradeSnapshotDialog({
         <Dialog open={tooHardOpen} onOpenChange={setTooHardOpen}>
           <DialogContent className="max-w-[420px] bg-card border border-border">
             <DialogHeader>
-              <DialogTitle className="text-[14px]">记录为"太难"决策</DialogTitle>
+              <DialogTitle className="text-[14px]">空仓观望＝一等正向选择</DialogTitle>
               <DialogDescription className="text-[11px] leading-relaxed text-muted-foreground">
-                我只想知道我将来会死在哪里，这样就永远不去那里。不做，也是一种被尊重的决定。
+                空仓是选择，不是失败。它保留行动力，让你在真正的大机会出现时不被小机会仓位绑住。
               </DialogDescription>
             </DialogHeader>
             <div className="space-y-3">
               <label className="block">
-                <div className="text-[12px] font-medium text-foreground">为什么这单太难？（可选）</div>
+                <div className="text-[12px] font-medium text-foreground">为什么选择空仓观望？（可选）</div>
                 <Textarea
                   rows={4}
                   value={tooHardReason}
                   onChange={event => setTooHardReason(event.target.value)}
-                  placeholder="例如：结构看不懂 / 赔率不够 / 我对这个币种没有能力圈 / 此刻状态不对"
+                  placeholder="例如：结构看不懂 / 赔率不够 / 震荡成本太高 / 顺情绪追价已经释放 / 此刻状态不对"
                   className="mt-2 min-h-[110px] border-border bg-background text-[12px]"
                 />
               </label>
@@ -373,7 +396,7 @@ export function PreTradeSnapshotDialog({
                   disabled={savingTooHard}
                   className="h-8 bg-[#F0B90B] text-black hover:bg-[#F0B90B]/90 text-[12px]"
                 >
-                  {savingTooHard ? '记录中...' : '确认跳过'}
+                  {savingTooHard ? '记录中...' : '确认空仓观望'}
                 </Button>
               </div>
             </div>
@@ -393,19 +416,19 @@ export function PreTradeSnapshotDialog({
       <Dialog open={tooHardOpen} onOpenChange={setTooHardOpen}>
         <DialogContent className="max-w-[460px] bg-card border border-border">
           <DialogHeader>
-            <DialogTitle className="text-[14px]">记录为"太难"决策</DialogTitle>
+            <DialogTitle className="text-[14px]">空仓观望＝一等正向选择</DialogTitle>
             <DialogDescription className="text-[11px] leading-relaxed text-muted-foreground">
-              我只想知道我将来会死在哪里，这样就永远不去那里。不做，也是一种被尊重的决定。
+              空仓是选择，不是失败。它保留行动力，让你在真正的大机会出现时不被小机会仓位绑住。
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-3">
             <label className="block">
-              <div className="text-[12px] font-medium text-foreground">为什么这单太难？（可选）</div>
+              <div className="text-[12px] font-medium text-foreground">为什么选择空仓观望？（可选）</div>
               <Textarea
                 rows={4}
                 value={tooHardReason}
                 onChange={event => setTooHardReason(event.target.value)}
-                placeholder="例如：结构看不懂 / 赔率不够 / 我对这个币种没有能力圈 / 此刻状态不对"
+                placeholder="例如：结构看不懂 / 赔率不够 / 震荡成本太高 / 顺情绪追价已经释放 / 此刻状态不对"
                 className="mt-2 min-h-[120px] border-border bg-background text-[12px]"
               />
             </label>
@@ -421,7 +444,7 @@ export function PreTradeSnapshotDialog({
                 disabled={savingTooHard}
                 className="h-8 bg-[#F0B90B] text-black hover:bg-[#F0B90B]/90 text-[12px]"
               >
-                {savingTooHard ? '记录中...' : '确认跳过'}
+                {savingTooHard ? '记录中...' : '确认空仓观望'}
               </Button>
             </div>
           </div>

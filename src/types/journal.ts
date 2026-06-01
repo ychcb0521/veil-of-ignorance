@@ -35,6 +35,7 @@ export type HedgeBoundaryStance = "early" | "at_crossover" | "late";
 export type HedgeOrderMethod = "limit_preset" | "market_chase";
 /** Post-close verdict feeding the hedge calibration curve. */
 export type HedgeWorthIt = "yes" | "partial" | "no";
+export type OddsStructure = "against_crowd_unreleased" | "neutral_choppy" | "with_crowd_released";
 export type JournalSource = 'live' | 'retroactive_from_record';
 /** Training-set vs holdout-set discipline (anti-overfitting). */
 export type DatasetSplit = 'in_sample' | 'out_of_sample';
@@ -498,6 +499,14 @@ export interface TradeJournal {
   pre_falsification_signal?: string | null;
   /** Optional basis for the binary probability slider. */
   pre_confidence_basis?: string | null;
+  /** Main order only: structural odds classification before entry. */
+  pre_odds_structure?: OddsStructure | null;
+  /** Optional source note for the structural-odds classification. */
+  pre_odds_structure_source?: string | null;
+  /** Why the structural-odds classification could be wrong. */
+  pre_odds_structure_premortem?: string | null;
+  /** Signals that mean the structural-odds thesis has broken. */
+  pre_odds_structure_breakdown_signals?: string | null;
   /** Account equity snapshot used to reconstruct the risk-anchor percentage. */
   pre_account_equity_usdt?: number | null;
 
