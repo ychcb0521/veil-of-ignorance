@@ -827,11 +827,94 @@ export function PreTradeSnapshotForm({
 
         {!isHedge && (
           <>
+            {isTrade && (
+              <section className="rounded-lg border border-border bg-card p-3.5 shadow-sm">
+                <div className="text-[12px] font-medium text-foreground">① 盈亏比轴 | 选择目标（做不做，就在这一轴决定）{requiredStar}</div>
+                <div className="mt-0.5 text-[10px] leading-relaxed text-muted-foreground">
+                  盈亏比结构与决策三问并列，但它既不问方向也不问涨幅，只问结构；进场那刻由结构选定，选定即固定。
+                  决定做不做的筛子在这里。
+                  趋势死于震荡，震荡死于趋势；震荡是趋势的成本，大行情后该休息一阵。
+                </div>
+                <div className="mt-3 grid gap-2">
+                  {ODDS_STRUCTURE_OPTIONS.map(option => (
+                    <button
+                      key={option.id}
+                      type="button"
+                      onClick={() => {
+                        setOddsStructure(option.id);
+                        if (option.id !== 'with_crowd_released') setConfirmBadOddsTradeOpen(false);
+                      }}
+                      className={`rounded-lg border px-3 py-3 text-left transition-colors ${
+                        oddsStructure === option.id
+                          ? 'border-foreground bg-foreground/5 text-foreground'
+                          : 'border-border bg-background text-muted-foreground hover:bg-accent'
+                      }`}
+                    >
+                      <div className="text-[11px] font-medium">{option.label}</div>
+                      <div className="mt-1 text-[10px] leading-relaxed">{option.description}</div>
+                    </button>
+                  ))}
+                </div>
+                <div className="mt-3 grid gap-3 md:grid-cols-3">
+                  <label className="block">
+                    <div className={labelCls}>1. 这笔的盈亏比结构来自哪？</div>
+                    <Textarea
+                      value={oddsStructureSource}
+                      onChange={event => setOddsStructureSource(event.target.value)}
+                      placeholder="人性：谁在恐慌/狂热；市场：什么错配。说不清＝没有高盈亏比，只是赌。"
+                      className={`${textareaCls} mt-2 min-h-[112px]`}
+                    />
+                  </label>
+                  <label className="block">
+                    <div className={labelCls}>2. 如果这个结构判断错了，最可能的原因是什么？</div>
+                    <Textarea
+                      value={oddsStructurePremortem}
+                      onChange={event => setOddsStructurePremortem(event.target.value)}
+                      placeholder="写清楚你可能误判了谁的情绪、哪段趋势/震荡周期，或哪里其实已经释放。"
+                      className={`${textareaCls} mt-2 min-h-[112px]`}
+                    />
+                  </label>
+                  <label className="block">
+                    <div className={labelCls}>3. 哪些具体信号出现，意味着这个结构破坏了？</div>
+                    <Textarea
+                      value={oddsStructureBreakdownSignals}
+                      onChange={event => setOddsStructureBreakdownSignals(event.target.value)}
+                      placeholder="写可被盘面验证的结构破坏信号，而不是主观感觉。"
+                      className={`${textareaCls} mt-2 min-h-[112px]`}
+                    />
+                  </label>
+                </div>
+                {oddsStructure === 'with_crowd_released' && (
+                  <div className="mt-3 rounded-lg border border-[#F0B90B]/40 bg-[#F0B90B]/10 px-3 py-2 text-[11px] leading-relaxed text-[#D89B00]">
+                    稳固坏结构：向量已经释放，导致向下空间太大。盈亏比是筛子，这一笔默认该弃；空仓是选择，不是失败。
+                  </div>
+                )}
+                {oddsStructure === 'neutral_choppy' && (
+                  <div className="mt-3 rounded-lg border border-[#F0B90B]/40 bg-[#F0B90B]/10 px-3 py-2 text-[11px] leading-relaxed text-[#D89B00]">
+                    持有小机会仓位警告：在震荡里开仓＝持有小机会仓位，比空仓更差。它占行动力，让你在大机会来时犹豫，错过后还会心理懈怠。空仓观望是推荐默认。
+                  </div>
+                )}
+                {oddsStructure === 'neutral_choppy' && weakeningMainPerformance && (
+                  <div className="mt-3 rounded-lg border border-border/70 bg-background/70 px-3 py-2 text-[10px] leading-relaxed text-muted-foreground">
+                    近期实现 R 或胜率走弱：市场越差，筛子越紧；中性震荡里更该挑，默认空仓观望。
+                  </div>
+                )}
+                {oddsStructure === 'against_crowd_unreleased' && weakeningMainPerformance && (
+                  <div className="mt-3 rounded-lg border border-border/70 bg-background/70 px-3 py-2 text-[10px] leading-relaxed text-muted-foreground">
+                    近期实现 R 或胜率走弱：即使是逆拥挤，也只做结构来源说得清的纯净机会；来源含糊时先空仓。
+                  </div>
+                )}
+                {!oddsStructureReady && (
+                  <div className="mt-2 text-[10px] font-mono text-[#F6465D]">必须先完成三态单选与盈亏比结构三问。</div>
+                )}
+              </section>
+            )}
+
             <section>
               <div className="mb-3 flex items-end justify-between gap-3">
                 <div>
                   <div className="text-[12px] font-medium text-foreground">
-                    {isTrade ? '① 胜率轴 | 校准你的判断（不是去挑高胜率的单）' : "决策三问"}
+                    {isTrade ? '② 胜率轴 | 校准你的判断（不是去挑高胜率的单）' : "决策三问"}
                     {requiredStar}
                   </div>
                   <div className="mt-0.5 text-[10px] text-muted-foreground">
@@ -1048,89 +1131,6 @@ export function PreTradeSnapshotForm({
                       </div>
                     )}
                   </div>
-                )}
-              </section>
-            )}
-
-            {isTrade && (
-              <section className="rounded-lg border border-border bg-card p-3.5 shadow-sm">
-                <div className="text-[12px] font-medium text-foreground">② 盈亏比轴 | 选择目标（做不做，就在这一轴决定）{requiredStar}</div>
-                <div className="mt-0.5 text-[10px] leading-relaxed text-muted-foreground">
-                  盈亏比结构与决策三问并列，但它既不问方向也不问涨幅，只问结构；进场那刻由结构选定，选定即固定。
-                  决定做不做的筛子在这里。
-                  趋势死于震荡，震荡死于趋势；震荡是趋势的成本，大行情后该休息一阵。
-                </div>
-                <div className="mt-3 grid gap-2">
-                  {ODDS_STRUCTURE_OPTIONS.map(option => (
-                    <button
-                      key={option.id}
-                      type="button"
-                      onClick={() => {
-                        setOddsStructure(option.id);
-                        if (option.id !== 'with_crowd_released') setConfirmBadOddsTradeOpen(false);
-                      }}
-                      className={`rounded-lg border px-3 py-3 text-left transition-colors ${
-                        oddsStructure === option.id
-                          ? 'border-foreground bg-foreground/5 text-foreground'
-                          : 'border-border bg-background text-muted-foreground hover:bg-accent'
-                      }`}
-                    >
-                      <div className="text-[11px] font-medium">{option.label}</div>
-                      <div className="mt-1 text-[10px] leading-relaxed">{option.description}</div>
-                    </button>
-                  ))}
-                </div>
-                <div className="mt-3 grid gap-3 md:grid-cols-3">
-                  <label className="block">
-                    <div className={labelCls}>1. 这笔的盈亏比结构来自哪？</div>
-                    <Textarea
-                      value={oddsStructureSource}
-                      onChange={event => setOddsStructureSource(event.target.value)}
-                      placeholder="人性：谁在恐慌/狂热；市场：什么错配。说不清＝没有高盈亏比，只是赌。"
-                      className={`${textareaCls} mt-2 min-h-[112px]`}
-                    />
-                  </label>
-                  <label className="block">
-                    <div className={labelCls}>2. 如果这个结构判断错了，最可能的原因是什么？</div>
-                    <Textarea
-                      value={oddsStructurePremortem}
-                      onChange={event => setOddsStructurePremortem(event.target.value)}
-                      placeholder="写清楚你可能误判了谁的情绪、哪段趋势/震荡周期，或哪里其实已经释放。"
-                      className={`${textareaCls} mt-2 min-h-[112px]`}
-                    />
-                  </label>
-                  <label className="block">
-                    <div className={labelCls}>3. 哪些具体信号出现，意味着这个结构破坏了？</div>
-                    <Textarea
-                      value={oddsStructureBreakdownSignals}
-                      onChange={event => setOddsStructureBreakdownSignals(event.target.value)}
-                      placeholder="写可被盘面验证的结构破坏信号，而不是主观感觉。"
-                      className={`${textareaCls} mt-2 min-h-[112px]`}
-                    />
-                  </label>
-                </div>
-                {oddsStructure === 'with_crowd_released' && (
-                  <div className="mt-3 rounded-lg border border-[#F0B90B]/40 bg-[#F0B90B]/10 px-3 py-2 text-[11px] leading-relaxed text-[#D89B00]">
-                    稳固坏结构：向量已经释放，导致向下空间太大。盈亏比是筛子，这一笔默认该弃；空仓是选择，不是失败。
-                  </div>
-                )}
-                {oddsStructure === 'neutral_choppy' && (
-                  <div className="mt-3 rounded-lg border border-[#F0B90B]/40 bg-[#F0B90B]/10 px-3 py-2 text-[11px] leading-relaxed text-[#D89B00]">
-                    持有小机会仓位警告：在震荡里开仓＝持有小机会仓位，比空仓更差。它占行动力，让你在大机会来时犹豫，错过后还会心理懈怠。空仓观望是推荐默认。
-                  </div>
-                )}
-                {oddsStructure === 'neutral_choppy' && weakeningMainPerformance && (
-                  <div className="mt-3 rounded-lg border border-border/70 bg-background/70 px-3 py-2 text-[10px] leading-relaxed text-muted-foreground">
-                    近期实现 R 或胜率走弱：市场越差，筛子越紧；中性震荡里更该挑，默认空仓观望。
-                  </div>
-                )}
-                {oddsStructure === 'against_crowd_unreleased' && weakeningMainPerformance && (
-                  <div className="mt-3 rounded-lg border border-border/70 bg-background/70 px-3 py-2 text-[10px] leading-relaxed text-muted-foreground">
-                    近期实现 R 或胜率走弱：即使是逆拥挤，也只做结构来源说得清的纯净机会；来源含糊时先空仓。
-                  </div>
-                )}
-                {!oddsStructureReady && (
-                  <div className="mt-2 text-[10px] font-mono text-[#F6465D]">必须先完成三态单选与盈亏比结构三问。</div>
                 )}
               </section>
             )}
