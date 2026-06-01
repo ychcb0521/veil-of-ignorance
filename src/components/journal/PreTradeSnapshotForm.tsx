@@ -991,6 +991,67 @@ export function PreTradeSnapshotForm({
               {mentalRatingCard}
             </section>
 
+            {isTrade && betSizing && (
+              <section className="rounded-lg border border-border bg-card p-3.5 shadow-sm">
+                <div className={labelCls}>下注规模 · 毁灭概率封顶</div>
+                <div className="mt-1 text-[11px] text-muted-foreground">
+                  小错误不断，大错误不犯：下限由毁灭概率封顶锁死；上限不再被主观保守提前封死。胜率与盈亏比优先使用战役级统计，避免用单笔样本抬高或压低仓位。
+                </div>
+                {betSizing.verdict === 'no_edge' ? (
+                  <div className="mt-2 rounded border border-[#F6465D]/40 bg-[#F6465D]/10 px-3 py-2 text-[12px] text-[#F6465D]">
+                    按当前用于定仓位的胜率 {(sizingWinProb * 100).toFixed(0)}% 与盈亏比 {betSizing.payoffRatio.toFixed(2)}，这单没有正期望优势 → 不该下注。
+                    只在赔率明显被错误定价时才出手。
+                  </div>
+                ) : (
+                  <div className="mt-2 space-y-2">
+                    <div className="flex items-baseline justify-between gap-3">
+                      <span className="text-[11px] text-muted-foreground">建议单笔最大亏损 ≤</span>
+                      <span className="font-mono text-[13px] text-[#0ECB81]">{betSizing.recommendedMaxLossUsdt.toFixed(0)} USDT</span>
+                    </div>
+                    <div className="text-[10px] text-muted-foreground">
+                      取小：半 Kelly {betSizing.halfKellyMaxLossUsdt.toFixed(0)} · 毁灭概率封顶 {betSizing.ruinCapMaxLossUsdt.toFixed(0)}
+                      （封顶后破产概率 ≈ {(betSizing.ruinProbabilityAtRecommended * 100).toFixed(0)}/100 笔）
+                    </div>
+                    {betSizing.ruinProbabilityAtPlanned != null && (() => {
+                      const tone = betSizing.verdict === 'over_ruin_cap'
+                        ? { box: 'border-[#F6465D]/40 bg-[#F6465D]/10', text: 'text-[#F6465D]' }
+                        : betSizing.verdict === 'over_kelly'
+                          ? { box: 'border-[#F0B90B]/40 bg-[#F0B90B]/10', text: 'text-[#D89B00]' }
+                          : { box: 'border-[#0ECB81]/40 bg-[#0ECB81]/10', text: 'text-[#0ECB81]' };
+                      const note = betSizing.verdict === 'over_ruin_cap'
+                        ? `已超毁灭概率封顶 — 这是用信心而非毁灭概率定仓位，建议下调到 ${betSizing.recommendedMaxLossUsdt.toFixed(0)} USDT。`
+                        : betSizing.verdict === 'over_kelly'
+                          ? `略高于半 Kelly 上限，可考虑下调到 ${betSizing.recommendedMaxLossUsdt.toFixed(0)} USDT。`
+                          : '在建议上限内。';
+                      return (
+                        <div className={`rounded border px-3 py-2 text-[12px] ${tone.box} ${tone.text}`}>
+                          你的计划 {maxLoss.toFixed(0)} USDT → 连打 100 笔约破产 {(betSizing.ruinProbabilityAtPlanned * 100).toFixed(0)} 次。{note}
+                        </div>
+                      );
+                    })()}
+                    <div className="text-[10px] text-muted-foreground">
+                      胜率：
+                      {campaignWinRatePct != null
+                        ? `战役历史 ${campaignWinRatePct}%（${campaignSizingStats.winRateSampleCount} 笔已结束战役）`
+                        : `当前折扣后 ${discount.discountedPct}%（战役样本不足，原值 ${confidencePct}%）`}
+                      {' '}· 盈亏比：
+                      {campaignSizingStats.payoffRatio != null
+                        ? `战役历史 ${payoffRatio.toFixed(2)}（盈 ${campaignSizingStats.payoffWinCount} / 亏 ${campaignSizingStats.payoffLossCount}）`
+                        : `默认 ${DEFAULT_PAYOFF_RATIO.toFixed(2)}（战役盈亏样本不足）`}
+                    </div>
+                    {profitUpsideAdvice && (
+                      <div className="rounded border border-[#0ECB81]/40 bg-[#0ECB81]/10 px-3 py-2 text-[12px] text-[#0ECB81]">
+                        <div className="font-medium">{profitUpsideAdvice.title}</div>
+                        <div className="mt-0.5 text-[11px] leading-relaxed text-foreground/80">
+                          {profitUpsideAdvice.detail}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </section>
+            )}
+
             {isTrade && (
               <section className="rounded-lg border border-border bg-card p-3.5 shadow-sm">
                 <div className="text-[12px] font-medium text-foreground">② 盈亏比轴 | 选择目标（做不做，就在这一轴决定）{requiredStar}</div>
@@ -1070,67 +1131,6 @@ export function PreTradeSnapshotForm({
                 )}
                 {!oddsStructureReady && (
                   <div className="mt-2 text-[10px] font-mono text-[#F6465D]">必须先完成三态单选与盈亏比结构三问。</div>
-                )}
-              </section>
-            )}
-
-            {isTrade && betSizing && (
-              <section className="rounded-lg border border-border bg-card p-3.5 shadow-sm">
-                <div className={labelCls}>下注规模 · 毁灭概率封顶</div>
-                <div className="mt-1 text-[11px] text-muted-foreground">
-                  小错误不断，大错误不犯：下限由毁灭概率封顶锁死；上限不再被主观保守提前封死。胜率与盈亏比优先使用战役级统计，避免用单笔样本抬高或压低仓位。
-                </div>
-                {betSizing.verdict === 'no_edge' ? (
-                  <div className="mt-2 rounded border border-[#F6465D]/40 bg-[#F6465D]/10 px-3 py-2 text-[12px] text-[#F6465D]">
-                    按当前用于定仓位的胜率 {(sizingWinProb * 100).toFixed(0)}% 与盈亏比 {betSizing.payoffRatio.toFixed(2)}，这单没有正期望优势 → 不该下注。
-                    只在赔率明显被错误定价时才出手。
-                  </div>
-                ) : (
-                  <div className="mt-2 space-y-2">
-                    <div className="flex items-baseline justify-between gap-3">
-                      <span className="text-[11px] text-muted-foreground">建议单笔最大亏损 ≤</span>
-                      <span className="font-mono text-[13px] text-[#0ECB81]">{betSizing.recommendedMaxLossUsdt.toFixed(0)} USDT</span>
-                    </div>
-                    <div className="text-[10px] text-muted-foreground">
-                      取小：半 Kelly {betSizing.halfKellyMaxLossUsdt.toFixed(0)} · 毁灭概率封顶 {betSizing.ruinCapMaxLossUsdt.toFixed(0)}
-                      （封顶后破产概率 ≈ {(betSizing.ruinProbabilityAtRecommended * 100).toFixed(0)}/100 笔）
-                    </div>
-                    {betSizing.ruinProbabilityAtPlanned != null && (() => {
-                      const tone = betSizing.verdict === 'over_ruin_cap'
-                        ? { box: 'border-[#F6465D]/40 bg-[#F6465D]/10', text: 'text-[#F6465D]' }
-                        : betSizing.verdict === 'over_kelly'
-                          ? { box: 'border-[#F0B90B]/40 bg-[#F0B90B]/10', text: 'text-[#D89B00]' }
-                          : { box: 'border-[#0ECB81]/40 bg-[#0ECB81]/10', text: 'text-[#0ECB81]' };
-                      const note = betSizing.verdict === 'over_ruin_cap'
-                        ? `已超毁灭概率封顶 — 这是用信心而非毁灭概率定仓位，建议下调到 ${betSizing.recommendedMaxLossUsdt.toFixed(0)} USDT。`
-                        : betSizing.verdict === 'over_kelly'
-                          ? `略高于半 Kelly 上限，可考虑下调到 ${betSizing.recommendedMaxLossUsdt.toFixed(0)} USDT。`
-                          : '在建议上限内。';
-                      return (
-                        <div className={`rounded border px-3 py-2 text-[12px] ${tone.box} ${tone.text}`}>
-                          你的计划 {maxLoss.toFixed(0)} USDT → 连打 100 笔约破产 {(betSizing.ruinProbabilityAtPlanned * 100).toFixed(0)} 次。{note}
-                        </div>
-                      );
-                    })()}
-                    <div className="text-[10px] text-muted-foreground">
-                      胜率：
-                      {campaignWinRatePct != null
-                        ? `战役历史 ${campaignWinRatePct}%（${campaignSizingStats.winRateSampleCount} 笔已结束战役）`
-                        : `当前折扣后 ${discount.discountedPct}%（战役样本不足，原值 ${confidencePct}%）`}
-                      {' '}· 盈亏比：
-                      {campaignSizingStats.payoffRatio != null
-                        ? `战役历史 ${payoffRatio.toFixed(2)}（盈 ${campaignSizingStats.payoffWinCount} / 亏 ${campaignSizingStats.payoffLossCount}）`
-                        : `默认 ${DEFAULT_PAYOFF_RATIO.toFixed(2)}（战役盈亏样本不足）`}
-                    </div>
-                    {profitUpsideAdvice && (
-                      <div className="rounded border border-[#0ECB81]/40 bg-[#0ECB81]/10 px-3 py-2 text-[12px] text-[#0ECB81]">
-                        <div className="font-medium">{profitUpsideAdvice.title}</div>
-                        <div className="mt-0.5 text-[11px] leading-relaxed text-foreground/80">
-                          {profitUpsideAdvice.detail}
-                        </div>
-                      </div>
-                    )}
-                  </div>
                 )}
               </section>
             )}
