@@ -257,6 +257,12 @@ const directionLabel = (d: TradeDirection) =>
   d === 'long' ? '做多' : d === 'short' ? '做空' : '未开仓';
 
 const clampProbability = (value: number) => Math.min(100, Math.max(0, Math.round(value)));
+const ODDS_RATIO_MIN = 0.5;
+const ODDS_RATIO_MAX = 5;
+const ODDS_RATIO_STEP = 0.1;
+const ODDS_RATIO_BREAK_EVEN = 1;
+const ODDS_RATIO_BREAK_EVEN_PCT = ((ODDS_RATIO_BREAK_EVEN - ODDS_RATIO_MIN) / (ODDS_RATIO_MAX - ODDS_RATIO_MIN)) * 100;
+const formatOddsRatio = (value: number) => value.toFixed(1);
 
 function riskTone(pct: number | null) {
   if (pct == null) return 'text-muted-foreground';
@@ -308,6 +314,7 @@ export function PreTradeSnapshotForm({
   const [confidencePct, setConfidencePct] = useState(50);
   const [confidenceBasis, setConfidenceBasis] = useState('');
   const [oddsStructure, setOddsStructure] = useState<OddsStructure | null>(null);
+  const [oddsRatioEstimate, setOddsRatioEstimate] = useState(DEFAULT_PAYOFF_RATIO);
   const [oddsStructureSource, setOddsStructureSource] = useState('');
   const [oddsStructurePremortem, setOddsStructurePremortem] = useState('');
   const [oddsStructureBreakdownSignals, setOddsStructureBreakdownSignals] = useState('');
@@ -535,7 +542,7 @@ export function PreTradeSnapshotForm({
     && hedgeDownIfRebound.trim().length > 0
   );
 
-  // 下注规模 · 毁灭概率封顶（批次 25）— 胜率与盈亏比改用战役口径，绝不写库，仅显示。
+  // 下注规模 · 毁灭概率封顶（批次 25）— 胜率与盈亏比战役口径优先；样本不足时使用本次滑条，绝不写库。
   const campaignSizingStats = useMemo(
     () => estimateCampaignSizingStats(historicalCampaigns),
     [historicalCampaigns],
@@ -544,7 +551,7 @@ export function PreTradeSnapshotForm({
     ? null
     : Number((campaignSizingStats.winRate * 100).toFixed(0));
   const sizingWinProb = campaignSizingStats.winRate ?? (discount.discountedPct / 100);
-  const payoffRatio = campaignSizingStats.payoffRatio ?? DEFAULT_PAYOFF_RATIO;
+  const payoffRatio = campaignSizingStats.payoffRatio ?? oddsRatioEstimate;
   const betSizing = useMemo(
     () => (isTrade && accountEquity > 0
       ? computeBetSizing({
@@ -856,58 +863,127 @@ export function PreTradeSnapshotForm({
                 </div>
                 <div className="space-y-3 px-3.5 py-3">
                   <div className="grid gap-2 lg:grid-cols-3">
-                  {ODDS_STRUCTURE_OPTIONS.map(option => (
-                    <button
-                      key={option.id}
-                      type="button"
-                      onClick={() => {
-                        setOddsStructure(option.id);
-                        if (option.id !== 'with_crowd_released') setConfirmBadOddsTradeOpen(false);
-                      }}
-                      className={`min-h-[92px] rounded-xl border px-3 py-2.5 text-left transition-colors ${
-                        oddsStructure === option.id
-                          ? 'border-[#F0B90B]/70 bg-[#F0B90B]/10 text-foreground shadow-sm'
-                          : 'border-border/70 bg-background/80 text-muted-foreground hover:border-border hover:bg-accent/70'
-                      }`}
-                    >
-                      <div className="flex items-center justify-between gap-2">
-                        <div className="text-[11px] font-semibold">{option.label}</div>
-                        {oddsStructure === option.id && (
-                          <span className="h-1.5 w-1.5 rounded-full bg-[#F0B90B]" />
-                        )}
-                      </div>
-                      <div className="mt-1.5 text-[10px] leading-relaxed">{option.description}</div>
-                    </button>
-                  ))}
+                    {ODDS_STRUCTURE_OPTIONS.map(option => (
+                      <button
+                        key={option.id}
+                        type="button"
+                        onClick={() => {
+                          setOddsStructure(option.id);
+                          if (option.id !== 'with_crowd_released') setConfirmBadOddsTradeOpen(false);
+                        }}
+                        className={`min-h-[92px] rounded-xl border px-3 py-2.5 text-left transition-colors ${
+                          oddsStructure === option.id
+                            ? 'border-[#F0B90B]/70 bg-[#F0B90B]/10 text-foreground shadow-sm'
+                            : 'border-border/70 bg-background/80 text-muted-foreground hover:border-border hover:bg-accent/70'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="text-[11px] font-semibold">{option.label}</div>
+                          {oddsStructure === option.id && (
+                            <span className="h-1.5 w-1.5 rounded-full bg-[#F0B90B]" />
+                          )}
+                        </div>
+                        <div className="mt-1.5 text-[10px] leading-relaxed">{option.description}</div>
+                      </button>
+                    ))}
                   </div>
-                  <div className="grid gap-2 md:grid-cols-3">
-                  <label className="block rounded-xl border border-border/60 bg-background/70 p-2.5">
-                    <div className={labelCls}>1. 这笔的盈亏比结构来自哪？</div>
-                    <Textarea
-                      value={oddsStructureSource}
-                      onChange={event => setOddsStructureSource(event.target.value)}
-                      placeholder="人性：谁在恐慌/狂热；市场：什么错配。说不清＝没有高盈亏比，只是赌。"
-                      className={`${textareaCls} mt-2 min-h-[98px]`}
-                    />
-                  </label>
-                  <label className="block rounded-xl border border-border/60 bg-background/70 p-2.5">
-                    <div className={labelCls}>2. 如果这个结构判断错了，最可能的原因是什么？</div>
-                    <Textarea
-                      value={oddsStructurePremortem}
-                      onChange={event => setOddsStructurePremortem(event.target.value)}
-                      placeholder="写清楚你可能误判了谁的情绪、哪段趋势/震荡周期，或哪里其实已经释放。"
-                      className={`${textareaCls} mt-2 min-h-[98px]`}
-                    />
-                  </label>
-                  <label className="block rounded-xl border border-border/60 bg-background/70 p-2.5">
-                    <div className={labelCls}>3. 哪些具体信号出现，意味着这个结构破坏了？</div>
-                    <Textarea
-                      value={oddsStructureBreakdownSignals}
-                      onChange={event => setOddsStructureBreakdownSignals(event.target.value)}
-                      placeholder="写可被盘面验证的结构破坏信号，而不是主观感觉。"
-                      className={`${textareaCls} mt-2 min-h-[98px]`}
-                    />
-                  </label>
+
+                  <div className="rounded-xl border border-border/60 bg-background/70 p-3">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="text-[11px] font-semibold text-foreground">盈亏比滑条</div>
+                        <div className="mt-0.5 text-[10px] text-muted-foreground">预期盈利 / 预期亏损；1:1 是需要特别确认的基准线。</div>
+                      </div>
+                      <div className="shrink-0 text-right font-mono">
+                        <div className="text-[15px] font-semibold text-[#F0B90B]">{formatOddsRatio(oddsRatioEstimate)}:1</div>
+                        <div className="text-[10px] text-muted-foreground">盈 / 亏</div>
+                      </div>
+                    </div>
+                    <div className="relative mt-4 px-1 pb-6">
+                      <Slider
+                        value={[oddsRatioEstimate]}
+                        min={ODDS_RATIO_MIN}
+                        max={ODDS_RATIO_MAX}
+                        step={ODDS_RATIO_STEP}
+                        onValueChange={([value]) => {
+                          const next = Math.min(ODDS_RATIO_MAX, Math.max(ODDS_RATIO_MIN, value ?? DEFAULT_PAYOFF_RATIO));
+                          setOddsRatioEstimate(Number(next.toFixed(1)));
+                        }}
+                      />
+                      <div
+                        className="pointer-events-none absolute top-5 flex -translate-x-1/2 flex-col items-center gap-0.5"
+                        style={{ left: `${ODDS_RATIO_BREAK_EVEN_PCT}%` }}
+                      >
+                        <span className="h-2 border-l border-[#F6465D]/70" />
+                        <span className="rounded bg-background px-1 font-mono text-[10px] text-[#F6465D]">1:1</span>
+                      </div>
+                      <div className="mt-2 flex justify-between font-mono text-[10px] text-muted-foreground">
+                        <span>{formatOddsRatio(ODDS_RATIO_MIN)}:1</span>
+                        <span>{formatOddsRatio(ODDS_RATIO_MAX)}:1</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="grid items-stretch gap-2 md:grid-cols-3">
+                    {[
+                      {
+                        index: 1,
+                        title: '这笔的盈亏比结构来自哪？',
+                        hint: '人性与市场错配',
+                        value: oddsStructureSource,
+                        onChange: setOddsStructureSource,
+                        placeholder: '人性：谁在恐慌/狂热；市场：什么错配。说不清＝没有高盈亏比，只是赌。',
+                      },
+                      {
+                        index: 2,
+                        title: '如果这个结构判断错了，最可能的原因是什么？',
+                        hint: '结构预演',
+                        value: oddsStructurePremortem,
+                        onChange: setOddsStructurePremortem,
+                        placeholder: '写清楚你可能误判了谁的情绪、哪段趋势/震荡周期，或哪里其实已经释放。',
+                      },
+                      {
+                        index: 3,
+                        title: '哪些具体信号出现，意味着这个结构破坏了？',
+                        hint: '客观破坏信号',
+                        value: oddsStructureBreakdownSignals,
+                        onChange: setOddsStructureBreakdownSignals,
+                        placeholder: '写可被盘面验证的结构破坏信号，而不是主观感觉。',
+                      },
+                    ].map(q => {
+                      const filled = q.value.trim().length > 0;
+                      return (
+                        <label
+                          key={q.index}
+                          className="group flex h-full min-h-[236px] flex-col rounded-xl border bg-background/80 p-3 shadow-sm transition-colors"
+                          style={{
+                            borderColor: filled ? '#F0B90B' : 'hsl(var(--border))',
+                            background: filled ? '#F0B90B0A' : undefined,
+                          }}
+                        >
+                          <div className="mb-2.5 flex min-h-[46px] items-start gap-2.5">
+                            <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[#F0B90B] text-[11px] font-bold text-black">
+                              {q.index}
+                            </span>
+                            <div className="min-w-0">
+                              <div className="text-[12px] font-medium leading-snug text-foreground">{q.title}</div>
+                              <div className="text-[10px] leading-snug text-muted-foreground">{q.hint}</div>
+                            </div>
+                          </div>
+                          <Textarea
+                            value={q.value}
+                            onChange={event => q.onChange(event.target.value)}
+                            placeholder={q.placeholder}
+                            className={`${textareaCls} min-h-[128px] flex-1 bg-background/95`}
+                          />
+                          <div className="mt-1.5 flex items-center justify-between text-[10px] text-muted-foreground">
+                            <span className="inline-flex h-4 items-center rounded bg-[#F0B90B]/10 px-1.5 text-[9px] font-medium text-[#D89B00]">
+                              结构
+                            </span>
+                          </div>
+                        </label>
+                      );
+                    })}
                   </div>
                 {oddsStructure === 'with_crowd_released' && (
                   <div className="rounded-xl border border-[#F0B90B]/40 bg-[#F0B90B]/10 px-3 py-2 text-[11px] leading-relaxed text-[#D89B00]">
@@ -1161,7 +1237,7 @@ export function PreTradeSnapshotForm({
                       {' '}· 盈亏比：
                       {campaignSizingStats.payoffRatio != null
                         ? `战役历史 ${payoffRatio.toFixed(2)}（盈 ${campaignSizingStats.payoffWinCount} / 亏 ${campaignSizingStats.payoffLossCount}）`
-                        : `默认 ${DEFAULT_PAYOFF_RATIO.toFixed(2)}（战役盈亏样本不足）`}
+                        : `本次滑条 ${payoffRatio.toFixed(2)}（战役盈亏样本不足）`}
                     </div>
                     {profitUpsideAdvice && (
                       <div className="rounded-xl border border-[#0ECB81]/40 bg-[#0ECB81]/10 px-3 py-2 text-[12px] text-[#0ECB81]">
