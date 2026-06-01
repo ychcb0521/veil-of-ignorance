@@ -12,17 +12,17 @@ export const ODDS_STRUCTURE_OPTIONS: readonly OddsStructureOption[] = [
   {
     id: 'against_crowd_unreleased',
     label: '逆拥挤',
-    description: '向量纯净，但还未释放（趋势刚起）→ 结构性高盈亏比',
+    description: '向量纯净，但还未释放 → 结构性高盈亏比',
   },
   {
     id: 'neutral_choppy',
     label: '中性',
-    description: '多空力量胶着（震荡，没成型的趋势）→ 盈亏比看你自己的下限；在震荡里开仓＝持有小机会仓位',
+    description: '多空力量胶着 → 盈亏比由你自己的止损纪律决定，得自己确认下限封死没有',
   },
   {
     id: 'with_crowd_released',
     label: '顺情绪 / 追价',
-    description: '向量纯净，但已释放（趋势末端），反向回吐空间太大 → 结构性低盈亏比',
+    description: '向量纯净，但已经释放，导致向下空间太大 → 结构性低盈亏比',
   },
 ] as const;
 

@@ -995,7 +995,8 @@ export function PreTradeSnapshotForm({
               <section className="rounded-lg border border-border bg-card p-3.5 shadow-sm">
                 <div className="text-[12px] font-medium text-foreground">② 盈亏比轴 | 选择目标（做不做，就在这一轴决定）{requiredStar}</div>
                 <div className="mt-0.5 text-[10px] leading-relaxed text-muted-foreground">
-                  盈亏比是进场那刻由结构选定的形状，选定即固定；这一轴只问结构，不问方向、不问涨幅。决定做不做的筛子在这里。
+                  盈亏比结构与决策三问并列，但它既不问方向也不问涨幅，只问结构；进场那刻由结构选定，选定即固定。
+                  决定做不做的筛子在这里。
                   趋势死于震荡，震荡死于趋势；震荡是趋势的成本，大行情后该休息一阵。
                 </div>
                 <div className="mt-3 grid gap-2">
@@ -1049,7 +1050,7 @@ export function PreTradeSnapshotForm({
                 </div>
                 {oddsStructure === 'with_crowd_released' && (
                   <div className="mt-3 rounded-lg border border-[#F0B90B]/40 bg-[#F0B90B]/10 px-3 py-2 text-[11px] leading-relaxed text-[#D89B00]">
-                    稳固坏结构：向量已经释放，反向回吐空间太大。盈亏比是筛子，这一笔默认该弃；空仓是选择，不是失败。
+                    稳固坏结构：向量已经释放，导致向下空间太大。盈亏比是筛子，这一笔默认该弃；空仓是选择，不是失败。
                   </div>
                 )}
                 {oddsStructure === 'neutral_choppy' && (
