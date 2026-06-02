@@ -29,7 +29,8 @@ const TOC: TocItem[] = [
       { id: 's3-0', label: '3.1 交易模式选择' },
       { id: 's3-1', label: '3.2 时光机与行情' },
       { id: 's3-2', label: '3.3 下单前快照' },
-      { id: 's3-3', label: '3.4 持仓与历史' },
+      { id: 's3-3', label: '3.4 平仓评价复盘' },
+      { id: 's3-4', label: '3.5 持仓与历史' },
     ],
   },
   {
@@ -387,7 +388,7 @@ export default function GuidePage() {
                 <FlowArrow />
                 <FlowNode>下单、持仓、平仓；若左尾风险扩大，对冲单走独立的边界、必要性、把握性与双向预案快照</FlowNode>
                 <FlowArrow />
-                <FlowNode accent>平仓后评价：结果与决策质量分开看，回查盈亏比结构、失败剧本、证伪信号、置信度校准与具体期望值</FlowNode>
+                <FlowNode accent>平仓后评价：先把结果与决策质量分开，再摆进「结构 × 结果」四象限警惕“危险的盈利”；做证伪信号闭环、edge 源头的盈亏同源、过程纠结度与小机会仓位记账，回查失败剧本、置信度校准与具体期望值</FlowNode>
                 <FlowArrow />
                 <FlowNode>归类到交易战役或错题模式；重复错误写成规则，再到元监控里验证规则是否真的降低错误频次</FlowNode>
               </div>
@@ -400,7 +401,7 @@ export default function GuidePage() {
               <SubTitle>2.2 每周复盘闭环</SubTitle>
               <ol className="list-decimal pl-6 text-[14px] text-foreground/90 space-y-1">
                 <li>打开错题集，优先处理“未评价”交易，先区分结果好坏与决策质量好坏。</li>
-                <li>查看按模式聚类的错误，也查看空仓观望、小机会仓位、盈亏比结构与胜率校准是否出现系统偏差。</li>
+                <li>查看按模式聚类的错误，也查看空仓观望、小机会仓位、盈亏比结构、edge 源头的盈亏同源、过程纠结度与胜率校准是否出现系统偏差。</li>
                 <li>对重复出现且造成亏损的模式做六步分析。</li>
                 <li>把结论写成下一次开仓前能判断的规则。</li>
                 <li>在元监控里检查：规则创建后，对应错误频次是否下降，期望值、置信度校准和战役级胜率是否改善。</li>
@@ -548,6 +549,37 @@ export default function GuidePage() {
                 </table>
               </div>
 
+              <SubTitle>主力单的源头与机会成本（盈亏比轴之后）</SubTitle>
+              <P>判完结构、还没开始问方向之前，主力单快照插入一组必答题：<strong>源头 · 机会成本</strong>（计数 2/2）。它对应《不对称思考》的两条第一性原理——“盈亏同源”和“持有小机会仓位是一等负向状态”。结构告诉你赔率形状好不好，这一步告诉你<strong>这笔的优势到底从哪来、值不值得占用你的行动力</strong>。</P>
+              <P><strong>第一问·edge / 源头</strong>：先认领这一单的不对称优势来自哪里，七选一。它在<strong>开仓当时</strong>固定下来，作为“盈亏同源”的归类标签，避免事后归因。</P>
+              <div className="overflow-x-auto">
+                <table className="w-full text-[11px] my-3 border border-border rounded overflow-hidden">
+                  <thead className="bg-muted/50">
+                    <tr>
+                      <th className="text-left px-3 py-2 font-medium text-foreground text-[10px]">edge / 源头</th>
+                      <th className="text-left px-3 py-2 font-medium text-foreground text-[10px]">含义</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr><td className="px-3 py-2 border-t border-border">逆拥挤</td><td className="px-3 py-2 border-t border-border">在拥挤交易释放前逆向布局，赌人群结构反转——结构性高盈亏比的正源头</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border">顺势</td><td className="px-3 py-2 border-t border-border">跟随已确立的趋势惯性；利润来自趋势本身，警惕“贪天之功”</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border">结构位</td><td className="px-3 py-2 border-t border-border">在关键支撑 / 阻力 / 区间边界处，赌价格对结构的反应</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border">突破</td><td className="px-3 py-2 border-t border-border">区间 / 形态突破后的动量跟进，源头是结构被打破后的加速</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border">均值回归</td><td className="px-3 py-2 border-t border-border">价格极端偏离后赌它修复回均值</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border">事件催化</td><td className="px-3 py-2 border-t border-border">消息 / 数据 / 资金费率等外部催化驱动的波动</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border"><span style={{ color: '#F6465D' }}>说不清 / 凭感觉</span></td><td className="px-3 py-2 border-t border-border">没有明确优势来源——标红警告，盈亏同源里它通常只贡献亏损，多半在填补无聊</td></tr>
+                  </tbody>
+                </table>
+              </div>
+              <P><strong>第二问·机会成本</strong>：在结构判定之后再问一次——<strong>“与做相比，不做的机会成本更高吗？是在浪费机会吗？”</strong> 这一步特意放在结构判断<strong>之后</strong>，因为它筛的不是赔率，而是动机。</P>
+              <ul className="list-disc pl-6 text-[14px] text-foreground/90 space-y-1">
+                <li><strong>是 · 不做更亏，值得做</strong>：放行。</li>
+                <li><strong>否 · 不做也不亏</strong>：说明这单本质是在<strong>填补无聊</strong>，是典型的“小机会仓位”。系统视同坏结构，默认建议空仓观望，仍要下单会进入<strong>二次确认</strong>。</li>
+              </ul>
+              <RedHighlight>
+                持有小机会仓位是一等负向状态，<strong>比空仓更糟</strong>：它占用行动力，让你在大机会来时犹豫，错过后还会心理懈怠。在震荡里开仓 = 持有小机会仓位。空仓观望才是推荐默认。
+              </RedHighlight>
+
               <SubTitle>主力单的决策三问（正—反—止）</SubTitle>
               <P>下面这组三问属于主力单的<strong>胜率轴</strong>。它的作用是把一次方向判断拆成“证成、反证、证伪”三步，逼你同时看见收益剧本和失败剧本。对冲单不会复用这套问题，因为对冲不是在赌方向，而是在记录边界、必要性和保险质量。</P>
               <div className="overflow-x-auto">
@@ -562,7 +594,7 @@ export default function GuidePage() {
                   <tbody>
                     <tr><td className="px-3 py-2 border-t border-border"><span style={{ color: '#0ECB81' }}>① 正</span></td><td className="px-3 py-2 border-t border-border">这笔为什么会对？</td><td className="px-3 py-2 border-t border-border">结构、量能、宏观、规则整合写一段；不要拆成多个论据框</td></tr>
                     <tr><td className="px-3 py-2 border-t border-border"><span style={{ color: '#F0B90B' }}>② 反</span></td><td className="px-3 py-2 border-t border-border">假设这笔亏完，最可能的原因是？</td><td className="px-3 py-2 border-t border-border">用 pre-mortem 写出最可能让你输的剧本，平仓后用它比对真实亏损原因</td></tr>
-                    <tr><td className="px-3 py-2 border-t border-border"><span style={{ color: '#F6465D' }}>③ 止</span></td><td className="px-3 py-2 border-t border-border">什么 K 线 / 盘面信号会让你提前止损或拆仓？</td><td className="px-3 py-2 border-t border-border">证伪点必须是可被盘面客观验证的事件（破支撑、量能背离、收盘价等）</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border"><span style={{ color: '#F6465D' }}>③ 止</span></td><td className="px-3 py-2 border-t border-border">什么 K 线 / 盘面信号会让你提前止损或拆仓？</td><td className="px-3 py-2 border-t border-border">失效信号必须<strong>可观测、可触发</strong>——写成盘面会自己触发的事件（价位 / 形态 / 量能 / 时间，如“跌破 4h 关键支撑且 1h 放量”），不能是“感觉要跌了”这种感受；平仓复盘时对它做闭环校验</td></tr>
                   </tbody>
                 </table>
               </div>
@@ -663,6 +695,17 @@ export default function GuidePage() {
                 </table>
               </div>
 
+              <SubTitle>回撤的非对称：把最大亏损画出来，不只给一个百分数</SubTitle>
+              <P>填入<strong>本次最大亏损 USDT</strong> 后，除了显示“占总账户 X%”，系统会在下方把<strong>回撤的非对称</strong>直接<strong>可视化成一组条形图</strong>——因为“亏 50%”这个数字本身不痛，痛的是它要 <strong>+100%</strong> 才能回来。</P>
+              <ul className="list-disc pl-6 text-[14px] text-foreground/90 space-y-1">
+                <li>上行红条 = 这次的回撤幅度（亏 X%）；下行绿条 = 回到盈亏平衡所需的涨幅（回本）。两条等长的视觉对照，让“回本永远比回撤更陡”一眼可见。</li>
+                <li>条上标注 <strong>“回本需 +Y%（N×）”</strong>：Y 永远大于 X，且越深越离谱——<strong>-10% → +11.1%；-25% → +33.3%；-50% → +100%；-90% → +900%</strong>。</li>
+                <li>跌幅逼近 100% 时显示<strong>“几乎无法回本”</strong>，对应“损失有界”这条硬约束的直觉化。</li>
+              </ul>
+              <RedHighlight>
+                这块可视化不是装饰：它把“再赚回来就行”的侥幸，换成“这一刀下去要用几倍的涨幅才能填平”的体感。深度回撤的真正代价是<strong>复利被打断</strong>，不是账面上那个负号。
+              </RedHighlight>
+
               <SubTitle>其它快照字段</SubTitle>
               <div className="overflow-x-auto">
                 <table className="w-full text-[11px] my-3 border border-border rounded overflow-hidden">
@@ -678,7 +721,9 @@ export default function GuidePage() {
                     <tr><td className="px-3 py-2 border-t border-border">仓位模式</td><td className="px-3 py-2 border-t border-border">强制使用逐仓</td><td className="px-3 py-2 border-t border-border">全仓是硬阻断，必须切换到逐仓才能提交</td></tr>
                     <tr><td className="px-3 py-2 border-t border-border">盈亏比轴</td><td className="px-3 py-2 border-t border-border">先判断这笔是否值得做</td><td className="px-3 py-2 border-t border-border">三态结构必选；中性震荡与顺情绪追价会强化空仓观望提示</td></tr>
                     <tr><td className="px-3 py-2 border-t border-border">盈亏比滑条</td><td className="px-3 py-2 border-t border-border">记录本次预期盈利 / 预期亏损</td><td className="px-3 py-2 border-t border-border">1:1 是显式锚点；战役盈亏样本不足时作为期望值和定仓计算的回落口径</td></tr>
-                    <tr><td className="px-3 py-2 border-t border-border">本次最大亏损 USDT</td><td className="px-3 py-2 border-t border-border">定义本次风险预算</td><td className="px-3 py-2 border-t border-border">后续 R 倍数以此为分母；占总账户 ≥10% 会触发提醒</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border">edge / 源头（主力单）</td><td className="px-3 py-2 border-t border-border">认领这一单的不对称优势来自哪里，作为“盈亏同源”标签</td><td className="px-3 py-2 border-t border-border">主力单必填；七选一，“说不清 / 凭感觉”标红——多半在填补无聊</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border">机会成本问句（主力单）</td><td className="px-3 py-2 border-t border-border">结构判定之后再问“不做的机会成本更高吗”</td><td className="px-3 py-2 border-t border-border">主力单必答；答“否 · 不做也不亏”= 小机会仓位，触发二次确认</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border">本次最大亏损 USDT</td><td className="px-3 py-2 border-t border-border">定义本次风险预算，并可视化回撤的非对称</td><td className="px-3 py-2 border-t border-border">后续 R 倍数以此为分母；占总账户 ≥10% 会触发提醒；下方用条形图显示“回本需 +Y%（N×）”（-50% 要 +100%，-90% 要 +900%）</td></tr>
                     <tr><td className="px-3 py-2 border-t border-border">心态自评 (1–5)</td><td className="px-3 py-2 border-t border-border">记录决策者状态</td><td className="px-3 py-2 border-t border-border">≤2 分硬阻挡，不能用确认框绕过</td></tr>
                     <tr><td className="px-3 py-2 border-t border-border">二元预测概率</td><td className="px-3 py-2 border-t border-border">Tetlock / Good Judgment 式校准训练</td><td className="px-3 py-2 border-t border-border">用“做对/做错”互补滑杆给出具体概率，并写下你为什么有资格给这个置信度；下方显示芒格折扣，但写库仍保存原始值</td></tr>
                     <tr><td className="px-3 py-2 border-t border-border">下注规模 · 毁灭概率封顶</td><td className="px-3 py-2 border-t border-border">显示具体期望值，并把仓位上限从“我很有信心”改成“别把账户打穿”</td><td className="px-3 py-2 border-t border-border">E ≤ 0 标记无正期望；E &gt; 0 时再用 Kelly 与毁灭概率封顶给建议上限</td></tr>
@@ -695,7 +740,77 @@ export default function GuidePage() {
             </section>
 
             <section id="s3-3" className="scroll-mt-20">
-              <SubTitle>3.4 持仓与历史</SubTitle>
+              <SubTitle>3.4 平仓评价复盘</SubTitle>
+              <P>决策记录模式下，平仓会弹出<strong>评价抽屉</strong>，不填完不能关。第一步永远是把<strong>结果</strong>与<strong>决策质量</strong>分开：坏结果不自动等于坏决策，好结果也不自动等于好决策。下面几块把《不对称思考》的几条第一性原理落进这一步——它们都是<strong>软性项、不阻塞保存</strong>，但补全后历史统计会准得多。</P>
+
+              <SubTitle>结构 × 结果四象限（警惕“危险的盈利”）</SubTitle>
+              <P>把上一步的两个判断交叉成一张 2×2：<strong>结构轴 = 当时的决策质量（对 / 错）</strong>，<strong>结果轴 = 这单赢 / 亏</strong>。一句话锚点：<strong>机会是运气，优秀是结构</strong>。</P>
+              <div className="overflow-x-auto">
+                <table className="w-full text-[11px] my-3 border border-border rounded overflow-hidden">
+                  <thead className="bg-muted/50">
+                    <tr>
+                      <th className="text-left px-3 py-2 font-medium text-foreground text-[10px]">象限</th>
+                      <th className="text-left px-3 py-2 font-medium text-foreground text-[10px]">结构 · 结果</th>
+                      <th className="text-left px-3 py-2 font-medium text-foreground text-[10px]">该学到什么</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr><td className="px-3 py-2 border-t border-border"><span style={{ color: '#0ECB81' }}>实力兑现</span></td><td className="px-3 py-2 border-t border-border">结构对 · 赢</td><td className="px-3 py-2 border-t border-border">可复制——记住你做对了什么，而不是记住你赚了多少</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border"><span style={{ color: '#F0B90B' }}>正确的亏损</span></td><td className="px-3 py-2 border-t border-border">结构对 · 亏</td><td className="px-3 py-2 border-t border-border">盈亏同源——它和你的盈利来自同一个源头，是 edge 的成本，别因一次亏损改掉对的做法</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border"><span style={{ color: '#F6465D' }}>危险的盈利</span></td><td className="px-3 py-2 border-t border-border">结构错 · 赢</td><td className="px-3 py-2 border-t border-border">最危险的一格：市场替你的错误买了单。别把趋势的能力当成自己的（贪天之功）——这次的赢会教你错误的经验</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border"><span style={{ color: '#D89B00' }}>应得的亏损</span></td><td className="px-3 py-2 border-t border-border">结构错 · 亏</td><td className="px-3 py-2 border-t border-border">结果诚实反映过程。要修正的是结构，不是运气</td></tr>
+                  </tbody>
+                </table>
+              </div>
+              <RedHighlight>
+                命中<strong>“危险的盈利”</strong>时，抽屉里会有红色警示图标。这是系统唯一要对你“喊”的一格——盈利会强化你刚刚犯的错，下次仓位更大、错得更狠。
+              </RedHighlight>
+              <P className="mt-2">决策质量标成“混合”、或结果是两平 / 未入场时，不归入任何象限——系统会提示先判成“好”或“坏”才看得清。</P>
+
+              <SubTitle>证伪信号闭环</SubTitle>
+              <P>如果开仓快照里写过<strong>失效信号</strong>，评价抽屉会把它<strong>原样回显</strong>，再问一句：<strong>“这个信号在平仓前触发了吗？”</strong> 三选一——<strong>触发了，我及时反应了 / 触发了，但我反应晚了 / 没触发，我是主观平仓</strong>。这一步把“事前写的证伪点”和“事后真实的退出动作”对上，专治“写了止损条件却没执行”。可加备注，软性、可跳过。</P>
+
+              <SubTitle>源头校准 · 盈亏同源</SubTitle>
+              <P>这块承接快照里标的 <strong>edge / 源头</strong>：</P>
+              <ul className="list-disc pl-6 text-[14px] text-foreground/90 space-y-1">
+                <li><strong>开仓已标</strong>：只读回显，本次盈亏直接归到这个源头下，不允许事后改写。</li>
+                <li><strong>旧快照漏标</strong>：允许在此<strong>补标</strong>一个源头（软性，可跳过），让这笔也能进入“盈亏同源”统计。</li>
+              </ul>
+              <Highlight>
+                盈亏同源的意思是：当同一个源头<strong>既是你最大的盈利、又是最大的亏损来源</strong>时，那不是该砍掉的毛病，而是 edge 本身的两面。别在一次亏损后把对的做法一起砍掉。
+              </Highlight>
+
+              <SubTitle>过程纠结度（先行指标）</SubTitle>
+              <P>仅主力单出现。用 1–5 记录<strong>这一单做得有多纠结 / 多轻松</strong>：<strong>1 极度煎熬 → 2 纠结 → 3 一般 → 4 轻松 → 5 行云流水</strong>。它锚定一句话：<strong>交易最重要的不是赚钱，是轻松。</strong></P>
+              <RedHighlight>
+                高纠结<strong>即使结果对</strong>，过程也已经亮黄灯——它是亏损的<strong>先行指标</strong>。全程煎熬、反复想平仓的赢单，是高风险过程，别因为这次赢了就重复它。
+              </RedHighlight>
+
+              <SubTitle>小机会仓位记账</SubTitle>
+              <P>当开仓时判定<strong>“不做也不亏”</strong>，或结构是<strong>中性震荡</strong>时，抽屉会追加这块，把小机会仓位的<strong>隐性成本</strong>显式记下来，四选一：</P>
+              <div className="overflow-x-auto">
+                <table className="w-full text-[11px] my-3 border border-border rounded overflow-hidden">
+                  <thead className="bg-muted/50">
+                    <tr>
+                      <th className="text-left px-3 py-2 font-medium text-foreground text-[10px]">拖累程度</th>
+                      <th className="text-left px-3 py-2 font-medium text-foreground text-[10px]">含义</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr><td className="px-3 py-2 border-t border-border">无明显拖累</td><td className="px-3 py-2 border-t border-border">干净的小仓，没有影响别的判断或机会</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border">占用注意力</td><td className="px-3 py-2 border-t border-border">占用了注意力 / 心力，但没错过大机会</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border">错过更大机会</td><td className="px-3 py-2 border-t border-border">钝化了敏感度，做小了 / 错过了真正更大的机会</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border">引发连锁乱做</td><td className="px-3 py-2 border-t border-border">引发后续乱做（无聊 → 乱做 → 复仇等连锁负向）</td></tr>
+                  </tbody>
+                </table>
+              </div>
+              <RedHighlight>
+                持有小机会仓位是<strong>一等负向状态：它比空仓更糟</strong>——在悄悄损耗你的行动力与对大机会的敏感度。把它的成本记成账，下次才舍得空仓。
+              </RedHighlight>
+            </section>
+
+            <section id="s3-4" className="scroll-mt-20">
+              <SubTitle>3.5 持仓与历史</SubTitle>
               <P>底部历史区用于检查执行结果。重点关注三类记录：未评价交易、仓位历史记录、平仓方式。</P>
               <ul className="list-disc pl-6 text-[14px] text-foreground/90 space-y-1">
                 <li><strong>未评价交易</strong>：优先补齐。已平仓未评价会硬阻塞下一次开仓。</li>
@@ -760,6 +875,8 @@ export default function GuidePage() {
                 <li><strong>Calibration</strong>：比较开仓预测胜率与平仓结果，观察判断是否过度自信。</li>
                 <li><strong>可信度向量</strong>：分别追踪方向判断、决策质量、反对者命中、快照完整度和校准能力。</li>
                 <li><strong>决策质量 vs 结果</strong>：用 D-score 与 R 的散点关系判断规则是否真有预测性。</li>
+                <li><strong>盈亏同源（edge 源头）</strong>：按 edge 源头聚合盈 / 亏，标出既是最大盈利、又是最大亏损来源的“同源”源头——它是 edge 的两面，不是该砍掉的毛病。</li>
+                <li><strong>纠结度 × 结果</strong>：把过程纠结度与后续胜率 / R 对照，验证“轻松”是不是真的正向先行指标，“煎熬”是不是真的预示亏损。</li>
                 <li><strong>情绪日志</strong>：按正向/中性/负向三类分组统计后续平均 R，识别最危险的心理入口；正向/中性标签同样进入对比，用来检验“自认为状态好”是否真的有正期望。</li>
                 <li><strong>规则演化地图</strong>：查看规则从直觉、表述、模式确认、规则化到算法化的证据等级。</li>
                 <li><strong>订单类型分布</strong>：主力单与对冲单是否失衡。</li>
