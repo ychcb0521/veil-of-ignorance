@@ -304,6 +304,7 @@ function EdgeSourceTooltipContent({ option }: { option: (typeof EDGE_SOURCE_OPTI
   return (
     <div className="max-w-[340px] space-y-1.5 text-[11px] leading-relaxed">
       <div className="font-medium text-foreground">{option.label}</div>
+      <div className="text-muted-foreground">{option.description}</div>
       <div><span className="font-medium text-foreground/70">入场第一性原理：</span>{option.entryPrinciple}</div>
       <div><span className="text-[#0ECB81]">好位置：</span>{option.goodLocation}</div>
       <div><span className="text-[#F6465D]">坏位置：</span>{option.badLocation}</div>
@@ -1076,32 +1077,42 @@ export function PreTradeSnapshotForm({
 
                   <div>
                     <div className="mb-1.5 text-[11px] font-medium text-foreground">你在哪个阶段入场？</div>
-                    <div className="grid gap-2 sm:grid-cols-3">
-                      {ENTRY_STAGE_OPTIONS.map(opt => {
-                        const active = entryStage === opt.id;
-                        const isLate = opt.id === 'late';
-                        return (
-                          <button
-                            key={opt.id}
-                            type="button"
-                            onClick={() => setEntryStage(opt.id)}
-                            className={`px-3 py-2 text-left ${
-                              active
-                                ? isLate
-                                  ? 'rounded-xl border border-[#F0B90B]/45 bg-[#F0B90B]/10 text-foreground'
-                                  : `rounded-xl ${selectedOptionCls}`
-                                : quietOptionCls
-                            }`}
-                          >
-                            <div className="flex items-center justify-between gap-2">
-                              <span className="text-[11px] font-semibold">{opt.label}</span>
-                              {active && <span className="h-1.5 w-1.5 rounded-full bg-[#F0B90B]" />}
-                            </div>
-                            <div className="mt-1 text-[10px] leading-relaxed text-muted-foreground">{opt.description}</div>
-                          </button>
-                        );
-                      })}
-                    </div>
+                    <TooltipProvider delayDuration={120}>
+                      <div className="grid gap-2 sm:grid-cols-3">
+                        {ENTRY_STAGE_OPTIONS.map(opt => {
+                          const active = entryStage === opt.id;
+                          const isLate = opt.id === 'late';
+                          return (
+                            <Tooltip key={opt.id}>
+                              <TooltipTrigger asChild>
+                                <button
+                                  type="button"
+                                  onClick={() => setEntryStage(opt.id)}
+                                  className={`min-h-[58px] px-3 py-2 text-left ${
+                                    active
+                                      ? isLate
+                                        ? 'rounded-xl border border-[#F0B90B]/45 bg-[#F0B90B]/10 text-foreground'
+                                        : `rounded-xl ${selectedOptionCls}`
+                                      : quietOptionCls
+                                  }`}
+                                >
+                                  <div className="flex items-center justify-between gap-2">
+                                    <span className="text-[11px] font-semibold">{opt.label}</span>
+                                    {active && <span className="h-1.5 w-1.5 rounded-full bg-[#F0B90B]" />}
+                                  </div>
+                                </button>
+                              </TooltipTrigger>
+                              <TooltipContent side="top" align="start" className="max-w-[320px] border-border bg-card text-card-foreground shadow-lg">
+                                <div className="space-y-1.5 text-[11px] leading-relaxed">
+                                  <div className="font-medium text-foreground">{opt.label}</div>
+                                  <div className="text-muted-foreground">{opt.description}</div>
+                                </div>
+                              </TooltipContent>
+                            </Tooltip>
+                          );
+                        })}
+                      </div>
+                    </TooltipProvider>
                     {entryStageHint && (
                       <div className="mt-2 flex items-start gap-2 rounded-lg border border-[#F0B90B]/30 bg-[#F0B90B]/5 px-2.5 py-2 text-[10px] leading-relaxed text-[#D89B00]">
                         <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
@@ -1152,7 +1163,6 @@ export function PreTradeSnapshotForm({
                                       <span className={`h-1.5 w-1.5 rounded-full ${warn ? 'bg-[#F6465D]' : 'bg-[#F0B90B]'}`} />
                                     )}
                                   </div>
-                                  <div className="mt-1 text-[10px] leading-relaxed">{opt.description}</div>
                                 </button>
                               </TooltipTrigger>
                               <TooltipContent side="top" align="start" className="border-border bg-card text-card-foreground shadow-lg">
