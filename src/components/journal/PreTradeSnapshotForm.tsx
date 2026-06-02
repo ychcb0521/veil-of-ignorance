@@ -173,6 +173,7 @@ interface Props {
   onCancel: () => void;
   onTooHard?: (draft: {
     order_kind: OrderKind;
+    pre_planned_stop_loss?: number | null;
     pre_odds_structure?: OddsStructure | null;
     pre_odds_structure_source?: string | null;
     pre_odds_structure_premortem?: string | null;
@@ -272,6 +273,9 @@ const ODDS_RATIO_MAX = 5;
 const ODDS_RATIO_STEP = 0.1;
 const ODDS_RATIO_BREAK_EVEN = 1;
 const ODDS_RATIO_BREAK_EVEN_PCT = ((ODDS_RATIO_BREAK_EVEN - ODDS_RATIO_MIN) / (ODDS_RATIO_MAX - ODDS_RATIO_MIN)) * 100;
+const R_DRAWDOWN_MIN_PCT = 0.1;
+const R_DRAWDOWN_MAX_PCT = 50;
+const R_DRAWDOWN_STEP_PCT = 0.1;
 const formatOddsRatio = (value: number) => value.toFixed(1);
 const formatSigned = (value: number, digits = 2) => `${value >= 0 ? '+' : ''}${value.toFixed(digits)}`;
 
@@ -326,6 +330,7 @@ export function PreTradeSnapshotForm({
   const [confidenceBasis, setConfidenceBasis] = useState('');
   const [oddsStructure, setOddsStructure] = useState<OddsStructure | null>(null);
   const [oddsRatioEstimate, setOddsRatioEstimate] = useState(DEFAULT_PAYOFF_RATIO);
+  const [plannedDrawdownPriceInput, setPlannedDrawdownPriceInput] = useState('');
   const [oddsStructureSource, setOddsStructureSource] = useState('');
   const [oddsStructurePremortem, setOddsStructurePremortem] = useState('');
   const [oddsStructureBreakdownSignals, setOddsStructureBreakdownSignals] = useState('');
@@ -455,11 +460,54 @@ export function PreTradeSnapshotForm({
     : 100;
   const afterLossEquityPct = maxLossPct != null ? Math.max(0, 100 - maxLossPct) : null;
 
+  const plannedDrawdownPrice = Number(plannedDrawdownPriceInput);
+  const plannedDrawdownPriceProvided = plannedDrawdownPriceInput.trim().length > 0;
+  const plannedDrawdownPriceFinite = plannedDrawdownPriceProvided
+    && Number.isFinite(plannedDrawdownPrice)
+    && plannedDrawdownPrice > 0;
+  const rDrawdownRawPct = lockedEntryPrice && lockedEntryPrice > 0 && plannedDrawdownPriceFinite
+    ? (
+      isShort
+        ? ((plannedDrawdownPrice - lockedEntryPrice) / lockedEntryPrice) * 100
+        : ((lockedEntryPrice - plannedDrawdownPrice) / lockedEntryPrice) * 100
+    )
+    : null;
+  const rDrawdownPct = rDrawdownRawPct != null && rDrawdownRawPct > 0 ? rDrawdownRawPct : null;
+  const plannedDrawdownPriceValid = plannedDrawdownPriceFinite && rDrawdownPct != null;
+  const plannedDrawdownPriceForPayload = plannedDrawdownPriceValid
+    ? Number(plannedDrawdownPrice.toFixed(pricePrecision))
+    : null;
+  const rDrawdownPctForSlider = rDrawdownPct != null
+    ? Math.min(R_DRAWDOWN_MAX_PCT, Math.max(R_DRAWDOWN_MIN_PCT, rDrawdownPct))
+    : R_DRAWDOWN_MIN_PCT;
+  const rRecoveryPct = rDrawdownPct != null ? recoveryGainPct(rDrawdownPct) : null;
+  const rRecoveryRatio = rDrawdownPct != null ? recoveryAsymmetryRatio(rDrawdownPct) : null;
+  const rFiniteRecoveryPct = rRecoveryPct != null && Number.isFinite(rRecoveryPct) ? rRecoveryPct : null;
+  const rRecoveryScaleMax = rDrawdownPct != null
+    ? Math.max(10, rDrawdownPct, rFiniteRecoveryPct ?? rDrawdownPct)
+    : 10;
+  const rDrawdownVisualWidth = rDrawdownPct != null
+    ? Math.min(100, (rDrawdownPct / rRecoveryScaleMax) * 100)
+    : 0;
+  const rRecoveryVisualWidth = rFiniteRecoveryPct != null
+    ? Math.min(100, (rFiniteRecoveryPct / rRecoveryScaleMax) * 100)
+    : 100;
+  const rAfterDrawdownBasePct = rDrawdownPct != null ? Math.max(0, 100 - rDrawdownPct) : null;
+  const updatePlannedDrawdownFromPct = (pct: number) => {
+    if (!lockedEntryPrice || lockedEntryPrice <= 0) return;
+    const clamped = Math.min(R_DRAWDOWN_MAX_PCT, Math.max(R_DRAWDOWN_MIN_PCT, pct));
+    const nextPrice = isShort
+      ? lockedEntryPrice * (1 + clamped / 100)
+      : lockedEntryPrice * (1 - clamped / 100);
+    setPlannedDrawdownPriceInput(nextPrice > 0 ? nextPrice.toFixed(pricePrecision) : '');
+  };
+
   const decisionReady = whyRight.trim().length > 0
     && failureReason.trim().length > 0
     && falsificationSignal.trim().length > 0;
   const oddsStructureReady = isHedge || !isTrade || (
     oddsStructure != null
+    && plannedDrawdownPriceValid
     && oddsStructureSource.trim().length > 0
     && oddsStructurePremortem.trim().length > 0
     && oddsStructureBreakdownSignals.trim().length > 0
@@ -662,7 +710,7 @@ export function PreTradeSnapshotForm({
         campaign_leg_role: null,
         campaign_note: null,
         pre_entry_reason: null,
-        pre_planned_stop_loss: null,
+        pre_planned_stop_loss: isHedge || !isTrade ? null : plannedDrawdownPriceForPayload,
         pre_planned_take_profit: null,
         pre_mental_state: mental,
         pre_mental_trigger: null,
@@ -780,6 +828,7 @@ export function PreTradeSnapshotForm({
   ].filter(Boolean).length;
   const oddsDoneCount = [
     oddsStructure != null,
+    plannedDrawdownPriceValid,
     oddsStructureSource.trim().length > 0,
     oddsStructurePremortem.trim().length > 0,
     oddsStructureBreakdownSignals.trim().length > 0,
@@ -902,7 +951,7 @@ export function PreTradeSnapshotForm({
                       只问结构，不问方向、不问涨幅。做不做的筛子在这里；结构选定即固定。
                     </div>
                   </div>
-                  <span className={mainStatusChipCls}>{oddsDoneCount}/4</span>
+                  <span className={mainStatusChipCls}>{oddsDoneCount}/5</span>
                 </div>
                 <div className="space-y-3 px-3.5 py-3">
                   <div className="grid gap-2 lg:grid-cols-3">
@@ -929,6 +978,126 @@ export function PreTradeSnapshotForm({
                         <div className="mt-1.5 text-[10px] leading-relaxed">{option.description}</div>
                       </button>
                     ))}
+                  </div>
+
+                  <div className="rounded-xl border border-border/60 bg-background/70 p-3">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="text-[11px] font-semibold text-foreground">R 回撤滑条 · 成本分母效应{requiredStar}</div>
+                        <div className="mt-0.5 text-[10px] text-muted-foreground">
+                          手动输入预期最大回撤价格，系统自动换算 R 占成本价的比例；做多应低于成本价，做空应高于成本价。
+                        </div>
+                      </div>
+                      <div className="shrink-0 text-right font-mono">
+                        <div className={`text-[15px] font-semibold ${rDrawdownPct != null ? 'text-[#F0B90B]' : 'text-muted-foreground'}`}>
+                          {rDrawdownPct != null ? `${rDrawdownPct.toFixed(1)}%` : '—'}
+                        </div>
+                        <div className="text-[10px] text-muted-foreground">R / 成本</div>
+                      </div>
+                    </div>
+                    <div className="mt-3 grid gap-2 md:grid-cols-[1fr_170px]">
+                      <label className="block">
+                        <div className="text-[10px] font-medium text-muted-foreground">预期最大回撤价格</div>
+                        <Input
+                          value={plannedDrawdownPriceInput}
+                          onChange={event => setPlannedDrawdownPriceInput(event.target.value)}
+                          placeholder={lockedEntryPrice
+                            ? (isShort
+                              ? (lockedEntryPrice * 1.03).toFixed(pricePrecision)
+                              : (lockedEntryPrice * 0.97).toFixed(pricePrecision))
+                            : '结构失效价'}
+                          inputMode="decimal"
+                          className={`${inputCls} mt-1.5`}
+                        />
+                      </label>
+                      <div className="rounded-lg border border-border/60 bg-card/70 px-3 py-2">
+                        <div className="text-[10px] text-muted-foreground">成本价</div>
+                        <div className="mt-1 font-mono text-[13px] font-semibold text-foreground">
+                          {lockedEntryPrice != null ? lockedEntryPrice.toFixed(pricePrecision) : '—'}
+                        </div>
+                        <div className="mt-0.5 text-[9px] text-muted-foreground">
+                          {isShort ? '做空：回撤价高于成本' : '做多：回撤价低于成本'}
+                        </div>
+                      </div>
+                    </div>
+                    {plannedDrawdownPriceProvided && !plannedDrawdownPriceValid && (
+                      <div className="mt-2 rounded-lg border border-[#F6465D]/30 bg-[#F6465D]/5 px-2.5 py-2 text-[10px] leading-relaxed text-[#F6465D]">
+                        回撤价格必须在亏损方向：做多低于成本价，做空高于成本价。
+                      </div>
+                    )}
+                    <div className="relative mt-4 px-1 pb-6">
+                      <Slider
+                        value={[rDrawdownPctForSlider]}
+                        min={R_DRAWDOWN_MIN_PCT}
+                        max={R_DRAWDOWN_MAX_PCT}
+                        step={R_DRAWDOWN_STEP_PCT}
+                        disabled={!lockedEntryPrice}
+                        onValueChange={([value]) => updatePlannedDrawdownFromPct(value ?? R_DRAWDOWN_MIN_PCT)}
+                      />
+                      <div className="mt-2 flex justify-between font-mono text-[10px] text-muted-foreground">
+                        <span>{R_DRAWDOWN_MIN_PCT.toFixed(1)}%</span>
+                        <span>{R_DRAWDOWN_MAX_PCT.toFixed(0)}%</span>
+                      </div>
+                    </div>
+                    {rDrawdownPct != null && rRecoveryPct != null && rRecoveryRatio != null && (
+                      <div className="rounded-xl border border-border/60 bg-muted/20 p-3">
+                        <div className="flex items-start justify-between gap-3 text-[10px] text-muted-foreground">
+                          <span className="font-medium text-foreground">回撤非对称 · 分母效应</span>
+                          {Number.isFinite(rRecoveryPct) ? (
+                            <span className="text-right font-mono text-[#F0B90B]">
+                              亏 {rDrawdownPct.toFixed(1)}% 后，回本要 +{rRecoveryPct.toFixed(1)}%
+                            </span>
+                          ) : (
+                            <span className="text-right font-mono text-[#F6465D]">几乎无法回本</span>
+                          )}
+                        </div>
+                        <div className="mt-3 grid gap-2">
+                          <div className="grid grid-cols-[50px_1fr_64px] items-center gap-2">
+                            <span className="text-[9px] text-[#F6465D]">下坠</span>
+                            <div className="h-3 overflow-hidden rounded-full bg-background shadow-inner">
+                              <div
+                                className="h-full rounded-full bg-[#F6465D]"
+                                style={{ width: `${rDrawdownVisualWidth}%` }}
+                              />
+                            </div>
+                            <span className="text-right font-mono text-[9px] text-[#F6465D]">-{rDrawdownPct.toFixed(1)}%</span>
+                          </div>
+                          <div className="grid grid-cols-[50px_1fr_64px] items-center gap-2">
+                            <span className="text-[9px] text-[#0ECB81]">爬回</span>
+                            <div className="h-3 overflow-hidden rounded-full bg-background shadow-inner">
+                              <div
+                                className="h-full rounded-full bg-[#0ECB81]"
+                                style={{ width: `${rRecoveryVisualWidth}%` }}
+                              />
+                            </div>
+                            <span className="text-right font-mono text-[9px] text-[#0ECB81]">
+                              {rFiniteRecoveryPct != null ? `+${rFiniteRecoveryPct.toFixed(1)}%` : '+∞'}
+                            </span>
+                          </div>
+                        </div>
+                        <div className="mt-2 flex items-center justify-between gap-1 text-center font-mono text-[9px]">
+                          <div className="rounded-md border border-border/50 bg-background px-2 py-1">
+                            <div className="text-muted-foreground">成本</div>
+                            <div className="text-foreground">100</div>
+                          </div>
+                          <div className="h-px flex-1 bg-[#F6465D]/40" />
+                          <div className="rounded-md border border-[#F6465D]/30 bg-[#F6465D]/5 px-2 py-1">
+                            <div className="text-[#F6465D]">回撤后</div>
+                            <div className="text-[#F6465D]">{rAfterDrawdownBasePct != null ? rAfterDrawdownBasePct.toFixed(1) : '—'}</div>
+                          </div>
+                          <div className="h-px flex-1 bg-[#0ECB81]/40" />
+                          <div className="rounded-md border border-[#0ECB81]/30 bg-[#0ECB81]/5 px-2 py-1">
+                            <div className="text-[#0ECB81]">回到成本</div>
+                            <div className="text-[#0ECB81]">100</div>
+                          </div>
+                        </div>
+                        {Number.isFinite(rRecoveryRatio) && (
+                          <div className="mt-2 rounded-md bg-background/70 px-2 py-1 text-[9px] leading-relaxed text-muted-foreground">
+                            分母变小后，回本路程是下坠的 <span className="font-mono text-[#F0B90B]">{rRecoveryRatio.toFixed(2)}×</span>。
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
 
                   <div className="rounded-xl border border-border/60 bg-background/70 p-3">
@@ -1049,7 +1218,7 @@ export function PreTradeSnapshotForm({
                   </div>
                 )}
                 {!oddsStructureReady && (
-                  <div className="text-[10px] font-mono text-[#F6465D]">必须先完成三态单选与盈亏比结构三问。</div>
+                  <div className="text-[10px] font-mono text-[#F6465D]">必须先完成三态单选、R 回撤价与盈亏比结构三问。</div>
                 )}
                 </div>
               </section>
@@ -2196,6 +2365,7 @@ export function PreTradeSnapshotForm({
                 setConfirmBadOddsTradeOpen(false);
                 onTooHard?.({
                   order_kind: orderKind,
+                  pre_planned_stop_loss: isHedge ? null : plannedDrawdownPriceForPayload,
                   pre_odds_structure: isHedge ? null : oddsStructure,
                   pre_odds_structure_source: isHedge ? null : (oddsStructureSource.trim() || null),
                   pre_odds_structure_premortem: isHedge ? null : (oddsStructurePremortem.trim() || null),
@@ -2227,6 +2397,7 @@ export function PreTradeSnapshotForm({
                 setConfirmBadOddsTradeOpen(false);
                 onTooHard?.({
                   order_kind: orderKind,
+                  pre_planned_stop_loss: isHedge ? null : plannedDrawdownPriceForPayload,
                   pre_odds_structure: isHedge ? null : oddsStructure,
                   pre_odds_structure_source: isHedge ? null : (oddsStructureSource.trim() || null),
                   pre_odds_structure_premortem: isHedge ? null : (oddsStructurePremortem.trim() || null),

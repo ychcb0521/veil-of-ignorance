@@ -155,7 +155,7 @@ function DecisionChannel() {
           />
           {journal.pre_planned_stop_loss != null && (
             <Cell
-              label="计划止损（历史）"
+              label={isSnapshotV2 ? 'R 回撤价' : '计划止损（历史）'}
               value={journal.pre_planned_stop_loss.toFixed(2)}
             />
           )}

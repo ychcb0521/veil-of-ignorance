@@ -2194,6 +2194,7 @@ export interface CreateNoTradeJournalInput {
   no_trade_would_be_entry_price: number | null;
   no_trade_reason?: string | null;
   order_kind?: TradeJournal['order_kind'];
+  pre_planned_stop_loss?: TradeJournal['pre_planned_stop_loss'];
   pre_odds_structure?: TradeJournal['pre_odds_structure'];
   pre_odds_structure_source?: TradeJournal['pre_odds_structure_source'];
   pre_odds_structure_premortem?: TradeJournal['pre_odds_structure_premortem'];
@@ -2220,7 +2221,7 @@ export async function createNoTradeJournal(
     pre_simulated_time: input.pre_simulated_time,
     pre_real_time: new Date().toISOString(),
     pre_entry_price: null,
-    pre_planned_stop_loss: null,
+    pre_planned_stop_loss: input.pre_planned_stop_loss ?? null,
     pre_planned_take_profit: null,
     pre_entry_reason: null,
     pre_mental_state: 3 as const,

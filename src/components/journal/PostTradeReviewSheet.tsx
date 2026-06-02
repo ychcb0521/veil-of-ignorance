@@ -551,6 +551,11 @@ export function PostTradeReviewSheet({
                   <span className="text-muted-foreground">盈亏比结构：</span>
                   {journal.pre_odds_structure ? ODDS_STRUCTURE_LABELS[journal.pre_odds_structure] : '旧版快照'}
                 </div>
+                {journal.pre_planned_stop_loss != null && (
+                  <div className="rounded-lg border border-border/60 bg-background/60 px-3 py-2">
+                    <span className="text-muted-foreground">R 回撤价 / 结构失效价：</span>{journal.pre_planned_stop_loss.toFixed(2)}
+                  </div>
+                )}
                 {journal.pre_odds_structure && (
                   <>
                     <div className="rounded-lg border border-border/60 bg-background/60 px-3 py-2">

@@ -63,6 +63,7 @@ export function PreTradeSnapshotDialog({
   const [tooHardOpen, setTooHardOpen] = useState(false);
   const [tooHardReason, setTooHardReason] = useState('');
   const [tooHardOrderKind, setTooHardOrderKind] = useState<'main' | 'hedge'>('main');
+  const [tooHardPlannedStopLoss, setTooHardPlannedStopLoss] = useState<SnapshotPayload['pre_planned_stop_loss']>(null);
   const [tooHardOddsStructure, setTooHardOddsStructure] = useState<SnapshotPayload['pre_odds_structure']>(null);
   const [tooHardOddsStructureSource, setTooHardOddsStructureSource] = useState<string | null>(null);
   const [tooHardOddsStructurePremortem, setTooHardOddsStructurePremortem] = useState<string | null>(null);
@@ -87,10 +88,13 @@ export function PreTradeSnapshotDialog({
       setLockedPrice(lockedEntryPrice);
       setTooHardReason('');
       setTooHardOpen(false);
+      setTooHardPlannedStopLoss(null);
       setTooHardOddsStructure(null);
       setTooHardOddsStructureSource(null);
       setTooHardOddsStructurePremortem(null);
       setTooHardOddsStructureBreakdownSignals(null);
+      setTooHardOppCostWorth(null);
+      setTooHardEdgeSource(null);
       if (!pausedRef.current) {
         pausedRef.current = true;
         onAutoPause?.();
@@ -262,6 +266,7 @@ export function PreTradeSnapshotDialog({
         no_trade_would_be_entry_price: lockedPrice,
         no_trade_reason: tooHardReason,
         order_kind: tooHardOrderKind,
+        pre_planned_stop_loss: tooHardOrderKind === 'main' ? tooHardPlannedStopLoss : null,
         pre_odds_structure: tooHardOrderKind === 'main' ? tooHardOddsStructure : null,
         pre_odds_structure_source: tooHardOrderKind === 'main' ? tooHardOddsStructureSource : null,
         pre_odds_structure_premortem: tooHardOrderKind === 'main' ? tooHardOddsStructurePremortem : null,
@@ -345,8 +350,9 @@ export function PreTradeSnapshotDialog({
       pricePrecision={pricePrecision}
       orderParams={orderParams ?? null}
       onCancel={() => onOpenChange(false)}
-      onTooHard={({ order_kind, pre_odds_structure, pre_odds_structure_source, pre_odds_structure_premortem, pre_odds_structure_breakdown_signals, pre_opportunity_cost_worth, pre_edge_source }) => {
+      onTooHard={({ order_kind, pre_planned_stop_loss, pre_odds_structure, pre_odds_structure_source, pre_odds_structure_premortem, pre_odds_structure_breakdown_signals, pre_opportunity_cost_worth, pre_edge_source }) => {
         setTooHardOrderKind(order_kind);
+        setTooHardPlannedStopLoss(pre_planned_stop_loss ?? null);
         setTooHardOddsStructure(pre_odds_structure ?? null);
         setTooHardOddsStructureSource(pre_odds_structure_source ?? null);
         setTooHardOddsStructurePremortem(pre_odds_structure_premortem ?? null);
