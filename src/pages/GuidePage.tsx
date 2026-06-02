@@ -374,31 +374,38 @@ export default function GuidePage() {
 
           <section id="s2" className="scroll-mt-20">
             <SectionTitle accent="#0ECB81">2. 推荐使用流程</SectionTitle>
-            <P>如果只记一条路径，就按“训练一笔 → 评价一笔 → 归类一类 → 写入一条规则 → 观察规则是否生效”执行。</P>
+            <P>如果只记一条路径，就按“筛掉坏结构 → 记录一笔决策 → 评价一笔结果 → 归类一类战役 / 错误 → 写入一条规则 → 用元监控验证”执行。</P>
 
             <section id="s2-1" className="scroll-mt-20">
               <SubTitle>2.1 交易训练闭环</SubTitle>
               <div className="bg-card border border-border rounded p-6">
                 <FlowNode>选择历史时间与标的</FlowNode>
                 <FlowArrow />
-                <FlowNode>回放行情，等待符合策略的机会</FlowNode>
+                <FlowNode>回放行情，等待符合策略的机会；看不懂、赔率不够、超出能力圈时，允许直接空仓观望</FlowNode>
                 <FlowArrow />
-                <FlowNode accent>开仓前填写快照：决策三问（正/反/止）、最大亏损、心态自评、三类情绪标签、认知偏差自查、置信度折扣、下注规模建议、checklist；也可选择“太难，不做这单”</FlowNode>
+                <FlowNode accent>主力单先过盈亏比轴：三态结构、盈亏比滑条、1:1 锚点、具体期望值；中性震荡或顺情绪追价时，系统默认推荐“空仓观望 / 太难不做”</FlowNode>
                 <FlowArrow />
-                <FlowNode>下单、持仓、平仓</FlowNode>
+                <FlowNode accent>若仍值得做，再填写胜率轴：决策三问（正/反/止）、二元预测概率、置信度 basis、最大亏损、心态自评、情绪标签、认知偏差自查、下注规模建议与 checklist</FlowNode>
                 <FlowArrow />
-                <FlowNode accent>平仓后评价：结果、错误标签、复盘结论</FlowNode>
+                <FlowNode>下单、持仓、平仓；若左尾风险扩大，对冲单走独立的边界、必要性、把握性与双向预案快照</FlowNode>
+                <FlowArrow />
+                <FlowNode accent>平仓后评价：结果与决策质量分开看，回查盈亏比结构、失败剧本、证伪信号、置信度校准与具体期望值</FlowNode>
+                <FlowArrow />
+                <FlowNode>归类到交易战役或错题模式；重复错误写成规则，再到元监控里验证规则是否真的降低错误频次</FlowNode>
               </div>
+              <Highlight>
+                闭环的关键不是“每次都下单”，而是每次都留下可学习样本：做了的单、没做的单、对冲的单、亏损的单、合规但亏的单，都要能被事后还原。
+              </Highlight>
             </section>
 
             <section id="s2-2" className="scroll-mt-20">
               <SubTitle>2.2 每周复盘闭环</SubTitle>
               <ol className="list-decimal pl-6 text-[14px] text-foreground/90 space-y-1">
-                <li>打开错题集，优先处理“未评价”交易。</li>
-                <li>查看按模式聚类的错误，而不是只看单笔盈亏。</li>
+                <li>打开错题集，优先处理“未评价”交易，先区分结果好坏与决策质量好坏。</li>
+                <li>查看按模式聚类的错误，也查看空仓观望、小机会仓位、盈亏比结构与胜率校准是否出现系统偏差。</li>
                 <li>对重复出现且造成亏损的模式做六步分析。</li>
                 <li>把结论写成下一次开仓前能判断的规则。</li>
-                <li>在元监控里检查：规则创建后，对应错误频次是否下降。</li>
+                <li>在元监控里检查：规则创建后，对应错误频次是否下降，期望值、置信度校准和战役级胜率是否改善。</li>
               </ol>
               <RedHighlight>
                 如果一条规则不能让后续同类错误减少，它不是有效规则。要么写得太抽象，要么没有进入真实的开仓检查点。
@@ -429,7 +436,7 @@ export default function GuidePage() {
                     <div className="text-[13px] font-semibold tracking-[0.01em] text-foreground">决策记录</div>
                   </div>
                   <div className="pt-3 text-[13px] leading-7 text-muted-foreground">
-                    完整的开仓快照（<strong>决策三问</strong>：为什么对 / 亏完最可能原因 / 证伪信号；最大亏损、心态自评、<strong>情绪标签</strong>（三类）、二元预测胜率、checklist 等）+ 平仓后强制评价 + 错题集自动归类 + 元监控统计 + 规则系统冷却。适合刻意训练同一类 setup、复盘高频错误模式、或对自己进行校准。
+                    完整的开仓快照（主力单先过<strong>盈亏比轴</strong>：三态结构、盈亏比滑条、具体期望值；再过<strong>胜率轴</strong>：决策三问、二元预测概率、最大亏损、心态自评、情绪标签、checklist 等）+ 平仓后强制评价 + 错题集自动归类 + 元监控统计 + 规则系统冷却。适合刻意训练同一类 setup、复盘高频错误模式、或对自己进行校准。
                   </div>
                 </div>
               </div>
