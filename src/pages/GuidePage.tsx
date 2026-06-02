@@ -547,7 +547,7 @@ export default function GuidePage() {
                   </tbody>
                 </table>
               </div>
-              <P>每个源头都能展开<strong>“查看源头说明与入场口诀”</strong>，里面用统一的两色语言写清四件事：<span style={{ color: '#0ECB81' }}>好位置 / 入场要等</span>（绿，该参与的位置）与 <span style={{ color: '#F6465D' }}>坏位置 / 不能等到</span>（红，会把你套在末端的位置）。口诀一句话：<strong>顺势看支点、突破看接受、均值回归看衰竭、挤压释放看触发</strong>。</P>
+              <P>源头卡片 hover 时显示详细说明；折叠区只保留<strong>入场口诀</strong>：<strong>顺势看支点、突破看接受、均值回归看衰竭、挤压释放看触发</strong>。</P>
 
               <SubTitle>第一步 · 机会成本：不做更亏吗（三选一）</SubTitle>
               <P>认完源头紧接着问一句<strong>动机</strong>题——<strong>“不做更亏吗？是在浪费机会吗？”</strong> 它筛的不是赔率，而是你下这一单到底是因为机会，还是因为手痒。三选一：</P>

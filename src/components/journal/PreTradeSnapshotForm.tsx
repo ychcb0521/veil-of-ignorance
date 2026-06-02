@@ -294,8 +294,8 @@ const ODDS_RATIO_MAX = 5;
 const ODDS_RATIO_STEP = 0.1;
 const ODDS_RATIO_BREAK_EVEN = 1;
 const ODDS_RATIO_BREAK_EVEN_PCT = ((ODDS_RATIO_BREAK_EVEN - ODDS_RATIO_MIN) / (ODDS_RATIO_MAX - ODDS_RATIO_MIN)) * 100;
-const R_DRAWDOWN_MIN_PCT = 0.1;
-const R_DRAWDOWN_MAX_PCT = 50;
+const R_DRAWDOWN_MIN_PCT = 0;
+const R_DRAWDOWN_MAX_PCT = 100;
 const R_DRAWDOWN_STEP_PCT = 0.1;
 const formatOddsRatio = (value: number) => value.toFixed(1);
 const formatSigned = (value: number, digits = 2) => `${value >= 0 ? '+' : ''}${value.toFixed(digits)}`;
@@ -502,7 +502,7 @@ export function PreTradeSnapshotForm({
   const plannedDrawdownPriceProvided = plannedDrawdownPriceInput.trim().length > 0;
   const plannedDrawdownPriceFinite = plannedDrawdownPriceProvided
     && Number.isFinite(plannedDrawdownPrice)
-    && plannedDrawdownPrice > 0;
+    && (isShort ? plannedDrawdownPrice > 0 : plannedDrawdownPrice >= 0);
   const rDrawdownRawPct = lockedEntryPrice && lockedEntryPrice > 0 && plannedDrawdownPriceFinite
     ? (
       isShort
@@ -537,7 +537,7 @@ export function PreTradeSnapshotForm({
     const nextPrice = isShort
       ? lockedEntryPrice * (1 + clamped / 100)
       : lockedEntryPrice * (1 - clamped / 100);
-    setPlannedDrawdownPriceInput(nextPrice > 0 ? nextPrice.toFixed(pricePrecision) : '');
+    setPlannedDrawdownPriceInput(nextPrice >= 0 ? nextPrice.toFixed(pricePrecision) : '');
   };
 
   const decisionReady = whyRight.trim().length > 0
@@ -1035,29 +1035,37 @@ export function PreTradeSnapshotForm({
                 <div className="space-y-3 px-3.5 py-3">
                   <div>
                     <div className="mb-1.5 text-[11px] font-medium text-foreground">当前是什么市场？</div>
-                    <div className="grid gap-2 sm:grid-cols-3">
-                      {MARKET_REGIME_OPTIONS.map(opt => {
-                        const active = marketRegime === opt.id;
-                        return (
-                          <button
-                            key={opt.id}
-                            type="button"
-                            onClick={() => setMarketRegime(opt.id)}
-                            className={`px-3 py-2 text-left ${active ? `rounded-xl ${selectedOptionCls}` : quietOptionCls}`}
-                          >
-                            <div className="flex items-center justify-between gap-2">
-                              <span className="text-[11px] font-semibold">{opt.label}</span>
-                              {active && <span className="h-1.5 w-1.5 rounded-full bg-[#F0B90B]" />}
-                            </div>
-                            <div className="mt-1 text-[10px] leading-relaxed text-muted-foreground">{opt.description}</div>
-                            <div className="mt-1.5 space-y-0.5 text-[9px] leading-relaxed">
-                              <div className="text-[#0ECB81]">有效：{opt.worksWith}</div>
-                              <div className="text-[#F6465D]">致命：{opt.killsWith}</div>
-                            </div>
-                          </button>
-                        );
-                      })}
-                    </div>
+                    <TooltipProvider delayDuration={120}>
+                      <div className="grid gap-2 sm:grid-cols-3">
+                        {MARKET_REGIME_OPTIONS.map(opt => {
+                          const active = marketRegime === opt.id;
+                          return (
+                            <Tooltip key={opt.id}>
+                              <TooltipTrigger asChild>
+                                <button
+                                  type="button"
+                                  onClick={() => setMarketRegime(opt.id)}
+                                  className={`min-h-[58px] px-3 py-2 text-left ${active ? `rounded-xl ${selectedOptionCls}` : quietOptionCls}`}
+                                >
+                                  <div className="flex items-center justify-between gap-2">
+                                    <span className="text-[11px] font-semibold">{opt.label}</span>
+                                    {active && <span className="h-1.5 w-1.5 rounded-full bg-[#F0B90B]" />}
+                                  </div>
+                                </button>
+                              </TooltipTrigger>
+                              <TooltipContent side="top" align="start" className="max-w-[360px] border-border bg-card text-card-foreground shadow-lg">
+                                <div className="space-y-1.5 text-[11px] leading-relaxed">
+                                  <div className="font-medium text-foreground">{opt.label}</div>
+                                  <div className="text-muted-foreground">{opt.description}</div>
+                                  <div><span className="text-[#0ECB81]">有效：</span>{opt.worksWith}</div>
+                                  <div><span className="text-[#F6465D]">致命：</span>{opt.killsWith}</div>
+                                </div>
+                              </TooltipContent>
+                            </Tooltip>
+                          );
+                        })}
+                      </div>
+                    </TooltipProvider>
                     {regimeMismatchHint && (
                       <div className="mt-2 flex items-start gap-2 rounded-lg border border-[#F0B90B]/30 bg-[#F0B90B]/5 px-2.5 py-2 text-[10px] leading-relaxed text-[#D89B00]">
                         <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
@@ -1158,25 +1166,11 @@ export function PreTradeSnapshotForm({
                     <div className="mt-2">
                       <Collapsible className="rounded-xl border border-border/55 bg-background/55">
                         <CollapsibleTrigger className="group flex w-full items-center justify-between gap-3 px-3 py-2 text-left">
-                          <span className="text-[11px] font-medium text-muted-foreground">查看源头说明与入场口诀</span>
+                          <span className="text-[11px] font-medium text-muted-foreground">查看入场口诀</span>
                           <ChevronDown className="h-3.5 w-3.5 text-muted-foreground transition-transform group-data-[state=open]:rotate-180" />
                         </CollapsibleTrigger>
                         <CollapsibleContent className="border-t border-border/60 px-3 pb-3 pt-2">
-                          <div className="grid gap-2">
-                            {EDGE_SOURCE_OPTIONS.map(opt => (
-                              <div key={opt.id} className="rounded-lg bg-muted/25 px-2.5 py-2">
-                                <div className={`text-[11px] font-semibold ${opt.isWarning ? 'text-[#F6465D]' : 'text-foreground'}`}>{opt.label}</div>
-                                <div className="mt-1 grid gap-1 text-[10px] leading-relaxed text-muted-foreground md:grid-cols-3">
-                                  <div><span className="font-medium text-foreground/70">第一性原理：</span>{opt.entryPrinciple}</div>
-                                  <div><span className="text-[#0ECB81]">好位置：</span>{opt.goodLocation}</div>
-                                  <div><span className="text-[#F6465D]">坏位置：</span>{opt.badLocation}</div>
-                                  <div><span className="text-[#0ECB81]">入场要等：</span>{opt.waitForEntry}</div>
-                                  <div><span className="text-[#F6465D]">不能等到：</span>{opt.avoidWaitingUntil}</div>
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                          <div className="mt-2 rounded-lg bg-muted/20 px-2.5 py-2 text-[10px] leading-relaxed text-muted-foreground">
+                          <div className="rounded-lg bg-muted/20 px-2.5 py-2 text-[10px] leading-relaxed text-muted-foreground">
                             <span className="font-medium text-foreground/70">入场口诀：</span>顺势入场看支点、参与惯性；突破入场看接受、参与扩张；均值回归入场看衰竭、参与修复；挤压释放入场看触发、站在被迫交易流的上游。
                           </div>
                         </CollapsibleContent>
@@ -1334,37 +1328,6 @@ export function PreTradeSnapshotForm({
                         回撤价格必须在亏损方向：做多低于成本价，做空高于成本价。
                       </div>
                     )}
-                    <div className="mt-3 rounded-lg border border-border/55 bg-card/60 p-2.5">
-                      <div className="text-[10px] font-medium text-foreground">止损质量{requiredStar}</div>
-                      <div className="mt-0.5 text-[9px] leading-relaxed text-muted-foreground">
-                        这个回撤价是结构失效位，还是只是「我想亏这么多」？止损在结构位是保护，在噪音里是送钱。
-                      </div>
-                      <div className="mt-2 grid gap-2 sm:grid-cols-2">
-                        {STOP_QUALITY_OPTIONS.map(opt => {
-                          const active = stopQuality === opt.id;
-                          return (
-                            <button
-                              key={opt.id}
-                              type="button"
-                              onClick={() => setStopQuality(opt.id)}
-                              className={`px-2.5 py-2 text-left ${
-                                active
-                                  ? opt.healthy
-                                    ? 'rounded-lg border border-[#0ECB81]/45 bg-[#0ECB81]/10 text-foreground'
-                                    : 'rounded-lg border border-[#F6465D]/45 bg-[#F6465D]/10 text-foreground'
-                                  : quietOptionCls
-                              }`}
-                            >
-                              <div className="flex items-center justify-between gap-2">
-                                <span className={`text-[11px] font-semibold ${active ? (opt.healthy ? 'text-[#0ECB81]' : 'text-[#F6465D]') : ''}`}>{opt.label}</span>
-                                {active && <span className={`h-1.5 w-1.5 rounded-full ${opt.healthy ? 'bg-[#0ECB81]' : 'bg-[#F6465D]'}`} />}
-                              </div>
-                              <div className="mt-1 text-[9px] leading-relaxed text-muted-foreground">{opt.description}</div>
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
                     <div className="relative mt-4 px-1 pb-6">
                       <Slider
                         value={[rDrawdownPctForSlider]}
@@ -1375,8 +1338,8 @@ export function PreTradeSnapshotForm({
                         onValueChange={([value]) => updatePlannedDrawdownFromPct(value ?? R_DRAWDOWN_MIN_PCT)}
                       />
                       <div className="mt-2 flex justify-between font-mono text-[10px] text-muted-foreground">
-                        <span>{R_DRAWDOWN_MIN_PCT.toFixed(1)}%</span>
-                        <span>{R_DRAWDOWN_MAX_PCT.toFixed(0)}%</span>
+                        <span>0</span>
+                        <span>100%</span>
                       </div>
                     </div>
                     {rDrawdownPct != null && rRecoveryPct != null && rRecoveryRatio != null && (
@@ -1472,6 +1435,37 @@ export function PreTradeSnapshotForm({
                       <div className="mt-2 flex justify-between font-mono text-[10px] text-muted-foreground">
                         <span>{formatOddsRatio(ODDS_RATIO_MIN)}:1</span>
                         <span>{formatOddsRatio(ODDS_RATIO_MAX)}:1</span>
+                      </div>
+                    </div>
+                    <div className="mt-3 rounded-lg border border-border/55 bg-card/60 p-2.5">
+                      <div className="text-[10px] font-medium text-foreground">止损质量{requiredStar}</div>
+                      <div className="mt-0.5 text-[9px] leading-relaxed text-muted-foreground">
+                        这个回撤价是结构失效位，还是只是「我想亏这么多」？止损在结构位是保护，在噪音里是送钱。
+                      </div>
+                      <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                        {STOP_QUALITY_OPTIONS.map(opt => {
+                          const active = stopQuality === opt.id;
+                          return (
+                            <button
+                              key={opt.id}
+                              type="button"
+                              onClick={() => setStopQuality(opt.id)}
+                              className={`px-2.5 py-2 text-left ${
+                                active
+                                  ? opt.healthy
+                                    ? 'rounded-lg border border-[#0ECB81]/45 bg-[#0ECB81]/10 text-foreground'
+                                    : 'rounded-lg border border-[#F6465D]/45 bg-[#F6465D]/10 text-foreground'
+                                  : quietOptionCls
+                              }`}
+                            >
+                              <div className="flex items-center justify-between gap-2">
+                                <span className={`text-[11px] font-semibold ${active ? (opt.healthy ? 'text-[#0ECB81]' : 'text-[#F6465D]') : ''}`}>{opt.label}</span>
+                                {active && <span className={`h-1.5 w-1.5 rounded-full ${opt.healthy ? 'bg-[#0ECB81]' : 'bg-[#F6465D]'}`} />}
+                              </div>
+                              <div className="mt-1 text-[9px] leading-relaxed text-muted-foreground">{opt.description}</div>
+                            </button>
+                          );
+                        })}
                       </div>
                     </div>
                   </div>
