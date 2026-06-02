@@ -283,10 +283,10 @@ function EdgeSourceTooltipContent({ option }: { option: (typeof EDGE_SOURCE_OPTI
   return (
     <div className="max-w-[340px] space-y-1.5 text-[11px] leading-relaxed">
       <div className="font-medium text-foreground">{option.label}</div>
-      <div><span className="text-[#F0B90B]">入场第一性原理：</span>{option.entryPrinciple}</div>
+      <div><span className="font-medium text-foreground/70">入场第一性原理：</span>{option.entryPrinciple}</div>
       <div><span className="text-[#0ECB81]">好位置：</span>{option.goodLocation}</div>
       <div><span className="text-[#F6465D]">坏位置：</span>{option.badLocation}</div>
-      <div><span className="text-[#F0B90B]">入场要等：</span>{option.waitForEntry}</div>
+      <div><span className="text-[#0ECB81]">入场要等：</span>{option.waitForEntry}</div>
       <div><span className="text-[#F6465D]">不能等到：</span>{option.avoidWaitingUntil}</div>
     </div>
   );
@@ -841,8 +841,8 @@ export function PreTradeSnapshotForm({
   const hedgeAnchorButtonBaseCls = 'h-10 rounded-md border text-[12px] font-medium transition-colors';
   const hedgeAnchorButtonIdleCls = 'border-border/60 bg-muted/45 text-muted-foreground hover:border-border hover:bg-muted/70';
   const hedgeAnchorButtonActiveCls = 'border-[#F0B90B]/55 bg-[#F0B90B]/10 text-foreground';
-  const hedgeScenarioCardCls = 'block rounded-xl border border-border/70 bg-card/95 p-4 shadow-sm transition-colors';
-  const hedgeScenarioTextareaCls = 'mt-3 min-h-[108px] resize-none rounded-lg border-border bg-background/95 text-[12px] leading-relaxed shadow-inner';
+  const hedgeScenarioCardCls = 'flex h-full flex-col rounded-xl border border-border/70 bg-card/95 p-3 shadow-sm transition-colors';
+  const hedgeScenarioTextareaCls = 'mt-2 min-h-[84px] flex-1 resize-none rounded-lg border-border bg-background/95 text-[12px] leading-relaxed shadow-inner';
   const decisionDoneCount = [
     whyRight.trim().length > 0,
     failureReason.trim().length > 0,
@@ -990,7 +990,7 @@ export function PreTradeSnapshotForm({
                   <div>
                     <div className="mb-1.5 text-[11px] font-medium text-foreground">这一单靠什么赚钱？</div>
                     <TooltipProvider delayDuration={120}>
-                      <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                      <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
                         {EDGE_SOURCE_OPTIONS.map(opt => {
                           const active = edgeSource === opt.id;
                           const warn = opt.isWarning;
@@ -1025,10 +1025,10 @@ export function PreTradeSnapshotForm({
                         })}
                       </div>
                     </TooltipProvider>
-                    <div className="mt-2 grid gap-2 lg:grid-cols-[minmax(0,1fr)_320px]">
+                    <div className="mt-2">
                       <Collapsible className="rounded-xl border border-border/55 bg-background/55">
                         <CollapsibleTrigger className="group flex w-full items-center justify-between gap-3 px-3 py-2 text-left">
-                          <span className="text-[11px] font-medium text-muted-foreground">查看源头标签说明表</span>
+                          <span className="text-[11px] font-medium text-muted-foreground">查看源头说明与入场口诀</span>
                           <ChevronDown className="h-3.5 w-3.5 text-muted-foreground transition-transform group-data-[state=open]:rotate-180" />
                         </CollapsibleTrigger>
                         <CollapsibleContent className="border-t border-border/60 px-3 pb-3 pt-2">
@@ -1037,24 +1037,18 @@ export function PreTradeSnapshotForm({
                               <div key={opt.id} className="rounded-lg bg-muted/25 px-2.5 py-2">
                                 <div className={`text-[11px] font-semibold ${opt.isWarning ? 'text-[#F6465D]' : 'text-foreground'}`}>{opt.label}</div>
                                 <div className="mt-1 grid gap-1 text-[10px] leading-relaxed text-muted-foreground md:grid-cols-3">
-                                  <div><span className="text-[#F0B90B]">第一性原理：</span>{opt.entryPrinciple}</div>
+                                  <div><span className="font-medium text-foreground/70">第一性原理：</span>{opt.entryPrinciple}</div>
                                   <div><span className="text-[#0ECB81]">好位置：</span>{opt.goodLocation}</div>
                                   <div><span className="text-[#F6465D]">坏位置：</span>{opt.badLocation}</div>
-                                  <div><span className="text-[#F0B90B]">入场要等：</span>{opt.waitForEntry}</div>
+                                  <div><span className="text-[#0ECB81]">入场要等：</span>{opt.waitForEntry}</div>
                                   <div><span className="text-[#F6465D]">不能等到：</span>{opt.avoidWaitingUntil}</div>
                                 </div>
                               </div>
                             ))}
                           </div>
-                        </CollapsibleContent>
-                      </Collapsible>
-                      <Collapsible className="rounded-xl border border-border/55 bg-background/55">
-                        <CollapsibleTrigger className="group flex w-full items-center justify-between gap-3 px-3 py-2 text-left">
-                          <span className="text-[11px] font-medium text-muted-foreground">查看入场口诀</span>
-                          <ChevronDown className="h-3.5 w-3.5 text-muted-foreground transition-transform group-data-[state=open]:rotate-180" />
-                        </CollapsibleTrigger>
-                        <CollapsibleContent className="border-t border-border/60 px-3 pb-3 pt-2 text-[10px] leading-relaxed text-muted-foreground">
-                          顺势入场看支点、参与惯性；突破入场看接受、参与扩张；均值回归入场看衰竭、参与修复；挤压释放入场看触发、站在被迫交易流的上游。
+                          <div className="mt-2 rounded-lg bg-muted/20 px-2.5 py-2 text-[10px] leading-relaxed text-muted-foreground">
+                            <span className="font-medium text-foreground/70">入场口诀：</span>顺势入场看支点、参与惯性；突破入场看接受、参与扩张；均值回归入场看衰竭、参与修复；挤压释放入场看触发、站在被迫交易流的上游。
+                          </div>
                         </CollapsibleContent>
                       </Collapsible>
                     </div>
@@ -1148,7 +1142,14 @@ export function PreTradeSnapshotForm({
                         }`}
                       >
                         <div className="flex items-center justify-between gap-2">
-                          <div className="text-[11px] font-semibold">{option.label}</div>
+                          <div className={`text-[11px] font-semibold ${
+                            option.id === 'odds_insufficient' || option.id === 'target_unclear'
+                              ? 'text-[#F6465D]'
+                              : ''
+                          }`}
+                          >
+                            {option.label}
+                          </div>
                           {oddsStructure === option.id && (
                             <span className="h-1.5 w-1.5 rounded-full bg-[#F0B90B]" />
                           )}
@@ -1157,30 +1158,6 @@ export function PreTradeSnapshotForm({
                       </button>
                     ))}
                   </div>
-                  <Collapsible className="rounded-xl border border-border/55 bg-background/55">
-                    <CollapsibleTrigger className="group flex w-full items-center justify-between gap-3 px-3 py-2 text-left">
-                      <span className="text-[11px] font-medium text-muted-foreground">查看盈亏比目标说明表</span>
-                      <ChevronDown className="h-3.5 w-3.5 text-muted-foreground transition-transform group-data-[state=open]:rotate-180" />
-                    </CollapsibleTrigger>
-                    <CollapsibleContent className="border-t border-border/60 px-3 pb-3 pt-2">
-                      <div className="grid gap-1.5">
-                        {ODDS_STRUCTURE_OPTIONS.map(option => (
-                          <div key={option.id} className="grid gap-1 rounded-lg bg-muted/25 px-2.5 py-2 sm:grid-cols-[120px_1fr]">
-                            <div className={`text-[11px] font-semibold ${
-                              option.id === 'odds_insufficient' || option.id === 'target_unclear'
-                                ? 'text-[#F6465D]'
-                                : 'text-foreground'
-                            }`}
-                            >
-                              {option.label}
-                            </div>
-                            <div className="text-[10px] leading-relaxed text-muted-foreground">{option.description}</div>
-                          </div>
-                        ))}
-                      </div>
-                    </CollapsibleContent>
-                  </Collapsible>
-
                   <div className="grid gap-3 lg:grid-cols-2">
                   <div className="rounded-xl border border-border/55 bg-background/55 p-3">
                     <div className="flex items-start justify-between gap-3">
@@ -1968,7 +1945,7 @@ export function PreTradeSnapshotForm({
                     三支都建议预先写死
                   </div>
                 </div>
-                <div className="mt-4 space-y-3">
+                <div className="mt-4 grid items-stretch gap-3 lg:grid-cols-3">
                   <label className={`${hedgeScenarioCardCls} border-l-4 border-l-border`}>
                     <div className="flex items-start gap-3">
                       <span className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-border/60 bg-background text-[12px] font-semibold text-foreground">
