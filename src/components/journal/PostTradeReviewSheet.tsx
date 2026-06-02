@@ -282,10 +282,16 @@ export function PostTradeReviewSheet({
   // edge 源头：开仓已标则只读回显；旧快照漏标则允许复盘补标，纳入「盈亏同源」。
   const showEdgeSource = !isHedge && journal.direction !== 'no_entry';
   const capturedEdge = journal.pre_edge_source ?? null;
-  // 小机会仓位记账：开仓判定「不做也不亏」或结构为中性震荡时触发。
+  // 小机会仓位记账：机会成本不足、无明确 edge、目标不清或盈亏比不足时触发。
   const showSmallPositionDrag = !isHedge
     && journal.direction !== 'no_entry'
-    && (journal.pre_opportunity_cost_worth === false || journal.pre_odds_structure === 'neutral_choppy');
+    && (
+      journal.pre_opportunity_cost_worth === false
+      || journal.pre_edge_source === 'no_clear_edge'
+      || journal.pre_odds_structure === 'odds_insufficient'
+      || journal.pre_odds_structure === 'target_unclear'
+      || journal.pre_odds_structure === 'neutral_choppy'
+    );
   // 结构对／错的 2×2 排布（上排结构对、下排结构错；左列赢、右列亏）。
   const QUADRANT_GRID: StructureResultQuadrant[] = ['deserved_win', 'correct_loss', 'dangerous_win', 'deserved_loss'];
 
@@ -548,30 +554,30 @@ export function PostTradeReviewSheet({
                   </div>
                 )}
                 <div className="rounded-lg border border-border/60 bg-background/60 px-3 py-2">
-                  <span className="text-muted-foreground">盈亏比结构：</span>
+                  <span className="text-muted-foreground">盈亏比目标：</span>
                   {journal.pre_odds_structure ? ODDS_STRUCTURE_LABELS[journal.pre_odds_structure] : '旧版快照'}
                 </div>
                 {journal.pre_planned_stop_loss != null && (
                   <div className="rounded-lg border border-border/60 bg-background/60 px-3 py-2">
-                    <span className="text-muted-foreground">R 回撤价 / 结构失效价：</span>{journal.pre_planned_stop_loss.toFixed(2)}
+                    <span className="text-muted-foreground">R 回撤价 / 目标失效价：</span>{journal.pre_planned_stop_loss.toFixed(2)}
                   </div>
                 )}
                 {journal.pre_odds_structure && (
                   <>
                     <div className="rounded-lg border border-border/60 bg-background/60 px-3 py-2">
-                      <span className="text-muted-foreground">结构来自：</span>{snapshotOddsSource || '—'}
+                      <span className="text-muted-foreground">收益空间来自：</span>{snapshotOddsSource || '—'}
                     </div>
                     <div className="rounded-lg border border-border/60 bg-background/60 px-3 py-2">
-                      <span className="text-muted-foreground">结构判断错因：</span>{snapshotOddsPremortem || '—'}
+                      <span className="text-muted-foreground">目标判断错因：</span>{snapshotOddsPremortem || '—'}
                     </div>
                     <div className="rounded-lg border border-border/60 bg-background/60 px-3 py-2">
-                      <span className="text-muted-foreground">结构破坏信号：</span>{snapshotOddsBreakdown || '—'}
+                      <span className="text-muted-foreground">目标失效信号：</span>{snapshotOddsBreakdown || '—'}
                     </div>
                   </>
                 )}
                 {isSnapshotV2 && !journal.pre_odds_structure && !isHedge && (
                   <div className="rounded-lg border border-border/60 bg-background/60 px-3 py-2 text-muted-foreground">
-                    旧版快照：未记录盈亏比结构三问
+                    旧版快照：未记录盈亏比目标三问
                   </div>
                 )}
               </div>
@@ -944,7 +950,9 @@ export function PostTradeReviewSheet({
             <p className="text-[10px] leading-relaxed text-muted-foreground">
               {journal.pre_opportunity_cost_worth === false
                 ? '开仓时你判定「不做也不亏」—— 这是典型的小机会仓位（多半在填补无聊）。它的隐性成本要被记下来：'
-                : '这是一单中性震荡结构 —— 最容易变成填补无聊的小仓。它的隐性成本要被记下来：'}
+                : journal.pre_edge_source === 'no_clear_edge'
+                  ? '开仓时你选择「无明确 edge」—— 看不出来源，只是想交易。它的隐性成本要被记下来：'
+                  : '开仓时你判定「目标不清楚 / 盈亏比不足」—— 方向可能对，但目标空间不够厚。它的隐性成本要被记下来：'}
             </p>
             <div className="grid gap-1.5">
               {SMALL_POSITION_DRAG_OPTIONS.map(opt => {
@@ -1037,22 +1045,22 @@ export function PostTradeReviewSheet({
             {!isHedge && (
               <div className="rounded-xl border border-border/70 bg-background/70 px-3 py-3 space-y-2">
                 <div>
-                  <div className="text-[12px] font-medium text-foreground">盈亏比结构复核</div>
+                  <div className="text-[12px] font-medium text-foreground">盈亏比目标复核</div>
                   <div className="mt-1 text-[10px] leading-relaxed text-muted-foreground">
-                    这是软性复盘项，只复核你当时对结构的判断、破坏信号是否兑现，不强制填写。
+                    这是软性复盘项，只复核你当时对目标空间的判断、失效信号是否兑现，不强制填写。
                   </div>
                 </div>
                 {journal.pre_odds_structure && (
                   <div className="rounded-lg border border-border/60 bg-card px-3 py-2 text-[10px] leading-relaxed text-muted-foreground">
-                    当时结构：<span className="text-foreground">{ODDS_STRUCTURE_LABELS[journal.pre_odds_structure]}</span>
+                    当时目标：<span className="text-foreground">{ODDS_STRUCTURE_LABELS[journal.pre_odds_structure]}</span>
                     {snapshotOddsBreakdown ? <span> · 破坏信号：{snapshotOddsBreakdown}</span> : null}
                   </div>
                 )}
                 <div className="grid gap-2">
                   {[
-                    { value: 'right', label: '对', desc: '当时判结构基本正确' },
+                    { value: 'right', label: '对', desc: '当时判目标空间基本正确' },
                     { value: 'mixed', label: '一般', desc: '部分对，但没看完整' },
-                    { value: 'wrong', label: '错', desc: '当时把结构看错了' },
+                    { value: 'wrong', label: '错', desc: '当时把目标空间看错了' },
                   ].map(option => (
                     <button
                       key={option.value}

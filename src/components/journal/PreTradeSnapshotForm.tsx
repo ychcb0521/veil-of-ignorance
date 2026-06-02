@@ -549,8 +549,15 @@ export function PreTradeSnapshotForm({
       && (withR.reduce((sum, j) => sum + (j.post_r_multiple ?? 0), 0) / withR.length) < 0;
     return weakWinRate || weakR;
   })();
-  const badOddsGate = isTrade && !isHedge && oddsStructure === 'with_crowd_released';
-  const smallOpportunityGate = isTrade && !isHedge && oddsStructure === 'neutral_choppy';
+  const badOddsGate = isTrade && !isHedge && (
+    oddsStructure === 'odds_insufficient'
+    || oddsStructure === 'target_unclear'
+    || oddsStructure === 'with_crowd_released'
+  );
+  const smallOpportunityGate = isTrade && !isHedge && (
+    edgeSource === 'no_clear_edge'
+    || oddsStructure === 'neutral_choppy'
+  );
   // 机会成本答「否 / 说不清」= 不做也不亏 / 凭感觉 = 小机会仓位，与坏结构同样触发二次确认。
   const boredomGate = isTrade && !isHedge && oppCostWorth === false;
   const oddsCautionGate = badOddsGate || smallOpportunityGate || boredomGate;
@@ -984,6 +991,22 @@ export function PreTradeSnapshotForm({
                         );
                       })}
                     </div>
+                    <Collapsible className="mt-2 rounded-xl border border-border/60 bg-background/70">
+                      <CollapsibleTrigger className="group flex w-full items-center justify-between gap-3 px-3 py-2 text-left">
+                        <span className="text-[11px] font-medium text-muted-foreground">查看源头标签说明表</span>
+                        <ChevronDown className="h-3.5 w-3.5 text-muted-foreground transition-transform group-data-[state=open]:rotate-180" />
+                      </CollapsibleTrigger>
+                      <CollapsibleContent className="border-t border-border/60 px-3 pb-3 pt-2">
+                        <div className="grid gap-1.5">
+                          {EDGE_SOURCE_OPTIONS.map(opt => (
+                            <div key={opt.id} className="grid gap-1 rounded-lg bg-muted/25 px-2.5 py-2 sm:grid-cols-[110px_1fr]">
+                              <div className={`text-[11px] font-semibold ${opt.isWarning ? 'text-[#F6465D]' : 'text-foreground'}`}>{opt.label}</div>
+                              <div className="text-[10px] leading-relaxed text-muted-foreground">{opt.description}</div>
+                            </div>
+                          ))}
+                        </div>
+                      </CollapsibleContent>
+                    </Collapsible>
                   </div>
 
                   <div className="rounded-xl border border-border/60 bg-background/70 p-3">
@@ -1044,9 +1067,9 @@ export function PreTradeSnapshotForm({
               <section className={`${mainSurfaceCls} overflow-hidden`}>
                 <div className="flex items-start justify-between gap-3 border-b border-border/60 px-3.5 py-3">
                   <div className="min-w-0">
-                    <div className={mainSectionTitleCls}>① 盈亏比轴 | 选择目标{requiredStar}</div>
+                    <div className={mainSectionTitleCls}>① 盈亏比目标 | 选择目标{requiredStar}</div>
                     <div className={mainSectionHintCls}>
-                      再判断这个 edge 现在处于什么价格结构：未释放、胶着，还是已过度释放。这里只判断下注质量。
+                      结构给出的收益空间够不够厚？这里只判断目标空间，不判断 edge 来源。
                     </div>
                   </div>
                   <span className={mainStatusChipCls}>{oddsDoneCount}/5</span>
@@ -1059,7 +1082,13 @@ export function PreTradeSnapshotForm({
                         type="button"
                         onClick={() => {
                           setOddsStructure(option.id);
-                          if (option.id !== 'with_crowd_released') setConfirmBadOddsTradeOpen(false);
+                          if (
+                            option.id !== 'odds_insufficient'
+                            && option.id !== 'target_unclear'
+                            && option.id !== 'with_crowd_released'
+                          ) {
+                            setConfirmBadOddsTradeOpen(false);
+                          }
                         }}
                         className={`min-h-[92px] rounded-xl border px-3 py-2.5 text-left transition-colors ${
                           oddsStructure === option.id
@@ -1077,6 +1106,29 @@ export function PreTradeSnapshotForm({
                       </button>
                     ))}
                   </div>
+                  <Collapsible className="rounded-xl border border-border/60 bg-background/70">
+                    <CollapsibleTrigger className="group flex w-full items-center justify-between gap-3 px-3 py-2 text-left">
+                      <span className="text-[11px] font-medium text-muted-foreground">查看盈亏比目标说明表</span>
+                      <ChevronDown className="h-3.5 w-3.5 text-muted-foreground transition-transform group-data-[state=open]:rotate-180" />
+                    </CollapsibleTrigger>
+                    <CollapsibleContent className="border-t border-border/60 px-3 pb-3 pt-2">
+                      <div className="grid gap-1.5">
+                        {ODDS_STRUCTURE_OPTIONS.map(option => (
+                          <div key={option.id} className="grid gap-1 rounded-lg bg-muted/25 px-2.5 py-2 sm:grid-cols-[120px_1fr]">
+                            <div className={`text-[11px] font-semibold ${
+                              option.id === 'odds_insufficient' || option.id === 'target_unclear'
+                                ? 'text-[#F6465D]'
+                                : 'text-foreground'
+                            }`}
+                            >
+                              {option.label}
+                            </div>
+                            <div className="text-[10px] leading-relaxed text-muted-foreground">{option.description}</div>
+                          </div>
+                        ))}
+                      </div>
+                    </CollapsibleContent>
+                  </Collapsible>
 
                   <div className="rounded-xl border border-border/60 bg-background/70 p-3">
                     <div className="flex items-start justify-between gap-3">
@@ -1238,27 +1290,27 @@ export function PreTradeSnapshotForm({
                     {[
                       {
                         index: 1,
-                        title: '这笔的盈亏比结构来自哪？',
-                        hint: '人性与市场错配',
+                        title: '这笔的收益空间来自哪？',
+                        hint: '目标空间来源',
                         value: oddsStructureSource,
                         onChange: setOddsStructureSource,
-                        placeholder: '人性：谁在恐慌/狂热；市场：什么错配。说不清＝没有高盈亏比，只是赌。',
+                        placeholder: '目标在哪里、阻力/支撑密度如何、为什么空间足够厚。说不清＝目标不清楚。',
                       },
                       {
                         index: 2,
-                        title: '如果这个结构判断错了，最可能的原因是什么？',
-                        hint: '结构预演',
+                        title: '如果这个目标判断错了，最可能的原因是什么？',
+                        hint: '目标预演',
                         value: oddsStructurePremortem,
                         onChange: setOddsStructurePremortem,
-                        placeholder: '写清楚你可能误判了谁的情绪、哪段趋势/震荡周期，或哪里其实已经释放。',
+                        placeholder: '写清楚你可能误判了目标位、波动率、阻力密度，或环境其实不支持延展。',
                       },
                       {
                         index: 3,
-                        title: '哪些具体信号出现，意味着这个结构破坏了？',
-                        hint: '客观破坏信号',
+                        title: '哪些具体信号出现，意味着目标空间不成立？',
+                        hint: '目标失效信号',
                         value: oddsStructureBreakdownSignals,
                         onChange: setOddsStructureBreakdownSignals,
-                        placeholder: '写可被盘面验证的结构破坏信号，而不是主观感觉。',
+                        placeholder: '写可被盘面验证的目标失效信号，而不是主观感觉。',
                       },
                     ].map(q => {
                       const filled = q.value.trim().length > 0;
@@ -1288,35 +1340,32 @@ export function PreTradeSnapshotForm({
                           />
                           <div className="mt-1.5 flex items-center justify-between text-[10px] text-muted-foreground">
                             <span className="inline-flex h-4 items-center rounded bg-[#F0B90B]/10 px-1.5 text-[9px] font-medium text-[#D89B00]">
-                              结构
+                              目标
                             </span>
                           </div>
                         </label>
                       );
                     })}
                   </div>
-                {oddsStructure === 'with_crowd_released' && (
+                {(oddsStructure === 'odds_insufficient' || oddsStructure === 'target_unclear') && (
                   <div className="rounded-xl border border-[#F0B90B]/40 bg-[#F0B90B]/10 px-3 py-2 text-[11px] leading-relaxed text-[#D89B00]">
-                    稳固坏结构：向量已经释放，导致向下空间太大。盈亏比是筛子，这一笔默认该弃；空仓是选择，不是失败。
+                    {oddsStructure === 'target_unclear'
+                      ? '目标不清楚：看不出有效止盈区，不能计算计划盈亏比。系统默认建议空仓观望；仍要下单会进入二次确认。'
+                      : '盈亏比不足：止损太远或目标太近，即使方向对也不值得做。系统默认建议空仓观望；仍要下单会进入二次确认。'}
                   </div>
                 )}
-                {oddsStructure === 'neutral_choppy' && (
+                {edgeSource === 'no_clear_edge' && (
                   <div className="rounded-xl border border-[#F0B90B]/40 bg-[#F0B90B]/10 px-3 py-2 text-[11px] leading-relaxed text-[#D89B00]">
-                    持有小机会仓位警告：在震荡里开仓＝持有小机会仓位，比空仓更差。它占行动力，让你在大机会来时犹豫，错过后还会心理懈怠。空仓观望是推荐默认。
+                    无明确 edge：看不出来源，只是想交易。系统默认把它视为小机会仓位，推荐空仓观望；仍要下单会进入二次确认。
                   </div>
                 )}
-                {oddsStructure === 'neutral_choppy' && weakeningMainPerformance && (
+                {(oddsStructure === 'odds_insufficient' || oddsStructure === 'target_unclear' || edgeSource === 'no_clear_edge') && weakeningMainPerformance && (
                   <div className="rounded-xl border border-border/70 bg-background/70 px-3 py-2 text-[10px] leading-relaxed text-muted-foreground">
-                    近期实现 R 或胜率走弱：市场越差，筛子越紧；中性震荡里更该挑，默认空仓观望。
-                  </div>
-                )}
-                {oddsStructure === 'against_crowd_unreleased' && weakeningMainPerformance && (
-                  <div className="rounded-xl border border-border/70 bg-background/70 px-3 py-2 text-[10px] leading-relaxed text-muted-foreground">
-                    近期实现 R 或胜率走弱：即使是逆拥挤，也只做结构来源说得清的纯净机会；来源含糊时先空仓。
+                    近期实现 R 或胜率走弱：市场越差，筛子越紧；来源不清或目标不厚时更该空仓。
                   </div>
                 )}
                 {!oddsStructureReady && (
-                  <div className="text-[10px] font-mono text-[#F6465D]">必须先完成三态单选、R 回撤价与盈亏比结构三问。</div>
+                  <div className="text-[10px] font-mono text-[#F6465D]">必须先完成盈亏比目标五选、R 回撤价与目标空间三问。</div>
                 )}
                 </div>
               </section>
@@ -2422,9 +2471,9 @@ export function PreTradeSnapshotForm({
             <AlertDialogTitle className="text-[14px] text-foreground">仍要下这一笔？</AlertDialogTitle>
             <AlertDialogDescription className="text-[11px] leading-relaxed text-muted-foreground">
               {badOddsGate
-                ? '你已经把这笔判定为“顺情绪 / 追价”的坏结构。系统默认建议空仓观望；如果仍要下，等于明确接受这不是高盈亏比，而是在逆着筛子强行出手。'
+                ? '你已经把这笔判定为“盈亏比不足 / 目标不清楚”。系统默认建议空仓观望；如果仍要下，等于明确接受方向可能对，但目标空间不够厚。'
                 : smallOpportunityGate
-                  ? '你已经把这笔判定为“中性震荡”。在震荡里开仓＝持有小机会仓位，比空仓更差；如果仍要下，等于明确接受行动力被占用、未来大机会时更容易犹豫。'
+                  ? '你已经把这笔判定为“无明确 edge”。看不出来源，只是想交易；如果仍要下，等于明确接受行动力被一个模糊机会占用。'
                   : oppCostAnswer === 'unclear'
                     ? '你刚才回答：说不清 / 凭感觉。这意味着这一笔没有可解释的机会成本优势——典型的小机会仓位，比空仓更差；如果仍要下，等于明确接受用行动力去换一个模糊机会。'
                     : '你刚才回答：不做的机会成本并不更高。这意味着这一笔本质是在填补无聊——典型的小机会仓位，比空仓更差；如果仍要下，等于明确接受用行动力去换一个你自己都说不值得的机会。'}

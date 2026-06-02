@@ -394,7 +394,7 @@ export function PreTradeSnapshotDialog({
                   rows={4}
                   value={tooHardReason}
                   onChange={event => setTooHardReason(event.target.value)}
-                  placeholder="例如：结构看不懂 / 赔率不够 / 震荡成本太高 / 顺情绪追价已经释放 / 此刻状态不对"
+                  placeholder="例如：无明确 edge / 目标不清楚 / 盈亏比不足 / 不做也不亏 / 此刻状态不对"
                   className="mt-2 min-h-[110px] border-border bg-background text-[12px]"
                 />
               </label>
@@ -442,7 +442,7 @@ export function PreTradeSnapshotDialog({
                 rows={4}
                 value={tooHardReason}
                 onChange={event => setTooHardReason(event.target.value)}
-                placeholder="例如：结构看不懂 / 赔率不够 / 震荡成本太高 / 顺情绪追价已经释放 / 此刻状态不对"
+                placeholder="例如：无明确 edge / 目标不清楚 / 盈亏比不足 / 不做也不亏 / 此刻状态不对"
                 className="mt-2 min-h-[120px] border-border bg-background text-[12px]"
               />
             </label>

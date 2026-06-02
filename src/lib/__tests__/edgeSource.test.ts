@@ -23,13 +23,15 @@ describe('EDGE_SOURCE_OPTIONS', () => {
     }
   });
 
-  it('renders only the three actionable source checks in the new snapshot', () => {
+  it('renders the five source checks in the new snapshot', () => {
     expect(EDGE_SOURCE_OPTIONS.map((o) => o.id)).toEqual([
       'trend_follow',
       'breakout',
       'mean_reversion',
+      'squeeze_release',
+      'no_clear_edge',
     ]);
-    expect(EDGE_SOURCE_OPTIONS.filter((o) => o.isWarning)).toHaveLength(0);
+    expect(EDGE_SOURCE_OPTIONS.filter((o) => o.isWarning).map((o) => o.id)).toEqual(['no_clear_edge']);
   });
 });
 

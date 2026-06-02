@@ -35,19 +35,34 @@ export type HedgeBoundaryStance = "early" | "at_crossover" | "late";
 export type HedgeOrderMethod = "limit_preset" | "market_chase";
 /** Post-close verdict feeding the hedge calibration curve. */
 export type HedgeWorthIt = "yes" | "partial" | "no";
-export type OddsStructure = "against_crowd_unreleased" | "neutral_choppy" | "with_crowd_released";
+export type OddsStructure =
+  | "r1_easy"
+  | "r2_supported"
+  | "r3_open"
+  | "odds_insufficient"
+  | "target_unclear"
+  /** @deprecated legacy three-state odds structure */
+  | "against_crowd_unreleased"
+  /** @deprecated legacy three-state odds structure */
+  | "neutral_choppy"
+  /** @deprecated legacy three-state odds structure */
+  | "with_crowd_released";
 /**
- * Edge / 源头：这一单的不对称优势来自哪里。结构判定，不是涨幅预测。
+ * Edge / 源头：这笔交易靠什么赚钱。只识别市场机制，不判断是否值得下注。
  * 在快照时标注（属于 thesis 的一部分，避免事后归因），用于复盘「盈亏同源」分析。
  */
 export type EdgeSource =
-  | 'against_crowd'   // 逆拥挤 / 反人群结构
-  | 'trend_follow'    // 顺势 / 趋势惯性（警惕「贪天之功」）
-  | 'structure_level' // 关键结构位反应（支撑 / 阻力 / 区间边界）
-  | 'breakout'        // 突破 / 动量跟进
-  | 'mean_reversion'  // 均值回归 / 极端偏离修复
-  | 'event_catalyst'  // 事件 / 消息 / 资金费率等外部催化
-  | 'no_clear_edge';  // 说不清 / 凭感觉（填补无聊 → 小机会仓位）
+  | 'trend_follow'     // 顺势延续：趋势已经成立，靠惯性继续释放空间
+  | 'breakout'         // 突破扩张：关键结构被打开，靠波动率扩张赚钱
+  | 'mean_reversion'   // 均值回归：偏离过度，靠价格回到合理区间赚钱
+  | 'squeeze_release'  // 挤压释放：多空一方过度拥挤，靠被迫平仓推动行情
+  | 'no_clear_edge'    // 无明确 edge：看不出来源，只是想交易
+  /** @deprecated legacy edge source */
+  | 'against_crowd'
+  /** @deprecated legacy edge source */
+  | 'structure_level'
+  /** @deprecated legacy edge source */
+  | 'event_catalyst';
 /**
  * 小机会仓位的隐性成本记账：持有小机会仓位是「一等负向状态」，比空仓更差，
  * 因为它损耗的是行动力本身。只对被标记为小机会仓位的单子在复盘时追问。
@@ -520,24 +535,24 @@ export interface TradeJournal {
   pre_falsification_signal?: string | null;
   /** Optional basis for the binary probability slider. */
   pre_confidence_basis?: string | null;
-  /** Main order only: structural odds classification before entry. */
+  /** Main order only: payoff-target classification before entry. */
   pre_odds_structure?: OddsStructure | null;
-  /** Optional source note for the structural-odds classification. */
+  /** Optional source note for the payoff-target classification. */
   pre_odds_structure_source?: string | null;
-  /** Why the structural-odds classification could be wrong. */
+  /** Why the payoff-target classification could be wrong. */
   pre_odds_structure_premortem?: string | null;
-  /** Signals that mean the structural-odds thesis has broken. */
+  /** Signals that mean the payoff-target thesis has broken. */
   pre_odds_structure_breakdown_signals?: string | null;
   /** Account equity snapshot used to reconstruct the risk-anchor percentage. */
   pre_account_equity_usdt?: number | null;
 
   // ============ 《不对称思考》review layer (main order only) ============
   /**
-   * 机会成本问句（结构判定之后）：「与做相比，不做的机会成本更高吗？」
+   * 机会成本问句：「与做相比，不做的机会成本更高吗？」
    * true = 不做的代价更高（值得做）；false = 不做也不亏 → 填补无聊的「小机会仓位」。
    */
   pre_opportunity_cost_worth?: boolean | null;
-  /** Edge / 源头标签：这一单的不对称优势来自哪里（在快照标注，避免事后归因），用于盈亏同源。 */
+  /** Edge / 源头标签：这笔交易靠什么赚钱（在快照标注，避免事后归因），用于盈亏同源。 */
   pre_edge_source?: EdgeSource | null;
 
   // ============ Batch 24: Munger layer ============

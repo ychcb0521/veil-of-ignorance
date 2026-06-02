@@ -9,35 +9,47 @@ export interface EdgeSourceOption {
 }
 
 /**
- * Edge / 源头：这一单的不对称优势来自哪里。结构判定，不是涨幅预测。
+ * Edge / 源头：这笔交易靠什么赚钱。这里只识别市场机制，不判断是否值得下注。
  * 在快照时标注（属于 thesis 的一部分，避免事后归因），驱动复盘的「盈亏同源」分析。
  */
 export const EDGE_SOURCE_OPTIONS: readonly EdgeSourceOption[] = [
   {
     id: 'trend_follow',
-    label: '顺势',
-    description: '趋势刚起还是已延伸？只在趋势刚起、还没充分释放时，才可能是干净源头。',
+    label: '顺势延续',
+    description: '趋势已经成立，靠惯性继续释放空间。',
   },
   {
     id: 'breakout',
-    label: '突破',
-    description: '突破当下还是已加速远离？只在突破刚发生、结构刚被改写时，才值得占用行动力。',
+    label: '突破扩张',
+    description: '关键结构被打开，靠波动率扩张赚钱。',
   },
   {
     id: 'mean_reversion',
     label: '均值回归',
-    description: '偏离够不够极端？没有足够极端的偏离，均值回归很容易只是震荡里的小机会。',
+    description: '偏离过度，靠价格回到合理区间赚钱。',
+  },
+  {
+    id: 'squeeze_release',
+    label: '挤压释放',
+    description: '多空一方过度拥挤，靠被迫平仓推动行情。',
+  },
+  {
+    id: 'no_clear_edge',
+    label: '无明确 edge',
+    description: '看不出来源，只是想交易。',
+    isWarning: true,
   },
 ] as const;
 
 export const EDGE_SOURCE_LABELS: Record<EdgeSource, string> = {
-  against_crowd: '逆拥挤',
-  trend_follow: '顺势',
-  structure_level: '结构位',
-  breakout: '突破',
+  trend_follow: '顺势延续',
+  breakout: '突破扩张',
   mean_reversion: '均值回归',
+  squeeze_release: '挤压释放',
+  no_clear_edge: '无明确 edge',
+  against_crowd: '逆拥挤（旧）',
+  structure_level: '结构位',
   event_catalyst: '事件催化',
-  no_clear_edge: '说不清 / 凭感觉',
 };
 
 export interface EdgeSourcePnlStat {

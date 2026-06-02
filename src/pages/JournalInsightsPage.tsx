@@ -569,19 +569,23 @@ export default function JournalInsightsPage() {
       conclusion: opportunityCostConclusion(stanceDistribution, boundaryStanceRows.length),
     };
     const restraintCount = curTrades.filter(j => j.direction === 'no_entry' || j.post_outcome === 'no_entry').length;
+    const oddsStructureKeys = [
+      'r1_easy',
+      'r2_supported',
+      'r3_open',
+      'odds_insufficient',
+      'target_unclear',
+      'against_crowd_unreleased',
+      'neutral_choppy',
+      'with_crowd_released',
+    ] as const;
     const oddsStructureRows = mainOrders.filter((j): j is TradeJournal & { pre_odds_structure: OddsStructure } =>
-      j.pre_odds_structure === 'against_crowd_unreleased'
-      || j.pre_odds_structure === 'neutral_choppy'
-      || j.pre_odds_structure === 'with_crowd_released',
+      oddsStructureKeys.includes(j.pre_odds_structure as OddsStructure),
     );
     const oddsStructureProfile = {
       count: oddsStructureRows.length,
       legacyCount: mainOrders.filter(j => !j.pre_odds_structure).length,
-      items: ([
-        'against_crowd_unreleased',
-        'neutral_choppy',
-        'with_crowd_released',
-      ] as const).map(structure => {
+      items: oddsStructureKeys.map(structure => {
         const rows = oddsStructureRows.filter(j => j.pre_odds_structure === structure);
         const rValues = rows
           .map(j => j.post_r_multiple)
@@ -596,7 +600,10 @@ export default function JournalInsightsPage() {
       }),
     };
     const smallOpportunityRows = mainOrders.filter(j =>
-      j.pre_odds_structure === 'neutral_choppy'
+      j.pre_edge_source === 'no_clear_edge'
+      || j.pre_odds_structure === 'odds_insufficient'
+      || j.pre_odds_structure === 'target_unclear'
+      || j.pre_odds_structure === 'neutral_choppy'
       || j.pre_odds_structure === 'with_crowd_released',
     );
     const smallOpportunityExposureUsdt = smallOpportunityRows.reduce(
@@ -619,8 +626,12 @@ export default function JournalInsightsPage() {
     );
     const smallOpportunityProfile = {
       count: smallOpportunityRows.length,
-      neutralCount: smallOpportunityRows.filter(j => j.pre_odds_structure === 'neutral_choppy').length,
-      releasedCount: smallOpportunityRows.filter(j => j.pre_odds_structure === 'with_crowd_released').length,
+      neutralCount: smallOpportunityRows.filter(j =>
+        j.pre_edge_source === 'no_clear_edge' || j.pre_odds_structure === 'target_unclear',
+      ).length,
+      releasedCount: smallOpportunityRows.filter(j =>
+        j.pre_odds_structure === 'odds_insufficient' || j.pre_odds_structure === 'with_crowd_released',
+      ).length,
       exposureUsdt: smallOpportunityExposureUsdt,
       holdingHours: smallOpportunityHoldingHours,
       emptyCount: noTradeMainRows.length,
@@ -1352,13 +1363,13 @@ export default function JournalInsightsPage() {
           </section>
 
           <section className="border border-border rounded bg-card p-3">
-            <div className="text-[12px] font-medium mb-2">盈亏比结构分布</div>
+            <div className="text-[12px] font-medium mb-2">盈亏比目标分布</div>
             <div className="text-[10px] text-muted-foreground">
-              仅统计主力单开仓时记录的结构判定；旧版快照空值不进入三态分布。
+              仅统计主力单开仓时记录的目标空间判定；旧版快照空值不进入分布。
             </div>
             {stats.oddsStructureProfile.count === 0 ? (
               <div className="mt-4 text-[11px] text-muted-foreground">
-                数据积累中。等有更多带“盈亏比结构”的主力单后，这里会显示三态占比与各自实现 R 中位数。
+                数据积累中。等有更多带“盈亏比目标”的主力单后，这里会显示目标占比与各自实现 R 中位数。
               </div>
             ) : (
               <div className="mt-4 space-y-2">
@@ -1394,7 +1405,7 @@ export default function JournalInsightsPage() {
           <section className="border border-border rounded bg-card p-3">
             <div className="text-[12px] font-medium mb-2">小机会仓位 vs 空仓</div>
             <div className="text-[10px] text-muted-foreground">
-              中性震荡或顺情绪已释放结构下仍开仓，记为“小机会仓位”：这是负向指标；空仓观望是正向选择。
+              无明确 edge、目标不清楚或盈亏比不足时仍开仓，记为“小机会仓位”：这是负向指标；空仓观望是正向选择。
             </div>
             {stats.smallOpportunityProfile.count === 0 && stats.smallOpportunityProfile.emptyCount === 0 ? (
               <div className="mt-4 text-[11px] text-muted-foreground">
@@ -1409,11 +1420,11 @@ export default function JournalInsightsPage() {
                   </div>
                   <div className="mt-2 grid grid-cols-3 gap-2 text-[10px] text-muted-foreground">
                     <div>
-                      <div>震荡中性</div>
+                      <div>来源/目标问题</div>
                       <div className="font-mono text-foreground">{stats.smallOpportunityProfile.neutralCount}</div>
                     </div>
                     <div>
-                      <div>已释放追价</div>
+                      <div>目标不足</div>
                       <div className="font-mono text-foreground">{stats.smallOpportunityProfile.releasedCount}</div>
                     </div>
                     <div>
@@ -1431,7 +1442,7 @@ export default function JournalInsightsPage() {
                     <span className="font-mono">{stats.smallOpportunityProfile.emptyCount} 次</span>
                   </div>
                   <div className="mt-2 text-[10px] text-muted-foreground">
-                    空仓不是失败，而是把行动力留给真正高盈亏比结构。
+                    空仓不是失败，而是把行动力留给真正厚的目标空间。
                   </div>
                 </div>
               </div>
