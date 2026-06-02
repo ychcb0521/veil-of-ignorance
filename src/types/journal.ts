@@ -72,6 +72,27 @@ export type SmallPositionDrag =
   | 'attention_only'// 占用了注意力 / 心力，但没错过大机会
   | 'missed_bigger' // 钝化了敏感度，做小 / 错过了真正更大的机会
   | 'chain_reaction';// 引发后续乱做（无聊 → 乱做 → 复仇等连锁负向）
+/**
+ * 市场结构 regime（快照第 0 步）：先判断现在是什么市场，再决定能不能用某种打法。
+ * 追涨在单边里是对的、在震荡里是致命的；同一个动作换个结构就改变性质。
+ */
+export type MarketRegime =
+  | 'trending'    // 单边趋势：方向明确、惯性强 —— 顺势 / 突破有效，逆势接刀危险
+  | 'ranging'     // 震荡市：区间来回、无持续方向 —— 均值回归有效，追涨杀跌致命
+  | 'transition'; // 转换中：结构正在切换（突破临界 / 挤压释放）—— 方向尚未定型
+/**
+ * 入场阶段：你在这段行情的哪个位置入场。越靠末端，剩余空间越薄、止损越尴尬。
+ */
+export type EntryStage =
+  | 'early'   // 起步段：刚启动 / 刚突破，空间最厚、容错最大
+  | 'middle'  // 中段：方向已确认、已释放一部分空间
+  | 'late';   // 末端：情绪高潮 / 已释放很远，追价容错最小
+/**
+ * 止损质量：止损放在结构失效位是保护，放在噪音里（拍脑袋百分比）是送钱。
+ */
+export type StopQuality =
+  | 'structural'  // 结构失效位：跌破它，这一单的论点就错了 —— 保护
+  | 'arbitrary';  // 按百分比 / 资金量拍的：与结构无关 —— 噪音里送钱
 export type JournalSource = 'live' | 'retroactive_from_record';
 /** Training-set vs holdout-set discipline (anti-overfitting). */
 export type DatasetSplit = 'in_sample' | 'out_of_sample';
@@ -554,6 +575,16 @@ export interface TradeJournal {
   pre_opportunity_cost_worth?: boolean | null;
   /** Edge / 源头标签：这笔交易靠什么赚钱（在快照标注，避免事后归因），用于盈亏同源。 */
   pre_edge_source?: EdgeSource | null;
+
+  // ============ 市场结构层（main order only）：先判断结构，再决定打法 ============
+  /** 第 0 步 · 市场结构 regime（震荡 / 单边 / 转换中）。追涨在单边里对、在震荡里致命。 */
+  pre_market_regime?: MarketRegime | null;
+  /** 入场阶段（起步段 / 中段 / 末端）。末端追价是空间最薄、止损最尴尬的位置。 */
+  pre_entry_stage?: EntryStage | null;
+  /** 止损质量（结构失效位 / 拍脑袋百分比）。止损在结构位是保护，在噪音里是送钱。 */
+  pre_stop_quality?: StopQuality | null;
+  /** 快照时检测到「刚平就开」的连续单（持单 = 耐心）。true=被标记，false=已检查无，null=不适用。 */
+  pre_chase_after_close?: boolean | null;
 
   // ============ Batch 24: Munger layer ============
   /** 'trade' (default, incl. legacy no_entry decision record) or 'no_trade' (too-hard skip). */

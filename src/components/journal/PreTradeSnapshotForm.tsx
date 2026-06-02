@@ -32,6 +32,13 @@ import { computeDiscount, computeHedgeConvictionDiscount } from '@/lib/confidenc
 import { buildHedgeBoundaryBasis } from '@/lib/hedgeBoundaryBasis';
 import { ODDS_STRUCTURE_OPTIONS } from '@/lib/oddsStructure';
 import { EDGE_SOURCE_OPTIONS } from '@/lib/edgeSource';
+import {
+  MARKET_REGIME_OPTIONS,
+  ENTRY_STAGE_OPTIONS,
+  STOP_QUALITY_OPTIONS,
+  regimeEdgeMismatchHint,
+  entryStageWarning,
+} from '@/lib/snapshotStructure';
 import { recoveryGainPct, recoveryAsymmetryRatio } from '@/lib/structureResult';
 import {
   HEDGE_TYPES,
@@ -59,13 +66,16 @@ import type {
   ChecklistItem,
   DatasetSplit,
   EdgeSource,
+  EntryStage,
   HedgeBoundaryStance,
   HedgeOrderMethod,
   HedgeType,
   LegRole,
+  MarketRegime,
   OddsStructure,
   OrderKind,
   PainTag,
+  StopQuality,
   StrategyTemplate,
   TradeCampaign,
   TradeDirection,
@@ -113,6 +123,14 @@ export interface SnapshotPayload {
   pre_opportunity_cost_worth: boolean | null;
   /** Edge / 源头标签，用于盈亏同源分析。 */
   pre_edge_source: EdgeSource | null;
+  /** 第 0 步 · 市场结构 regime（震荡 / 单边 / 转换中）。主力单恒写，对冲单 / 弃单为 null。 */
+  pre_market_regime: MarketRegime | null;
+  /** 入场阶段（起步 / 中段 / 末端）。 */
+  pre_entry_stage: EntryStage | null;
+  /** 止损质量（结构失效位 / 拍脑袋百分比）。 */
+  pre_stop_quality: StopQuality | null;
+  /** 「刚平就开」连续单标记（持单 = 耐心）。true=被标记，false=已检查无，null=不适用。 */
+  pre_chase_after_close: boolean | null;
   // Deprecated snapshot fields kept in the payload shape for backwards-safe inserts.
   pre_mortem_text: string | null;
   pre_positive_expectancy: string | null;
@@ -180,6 +198,9 @@ interface Props {
     pre_odds_structure_breakdown_signals?: string | null;
     pre_opportunity_cost_worth?: boolean | null;
     pre_edge_source?: EdgeSource | null;
+    pre_market_regime?: MarketRegime | null;
+    pre_entry_stage?: EntryStage | null;
+    pre_stop_quality?: StopQuality | null;
   }) => void;
   onSubmit: (payload: SnapshotPayload) => Promise<void> | void;
 }
@@ -350,6 +371,10 @@ export function PreTradeSnapshotForm({
   // 《不对称思考》：先识别 edge/源头标签，再判断机会成本是否足够占用行动力。
   const [oppCostAnswer, setOppCostAnswer] = useState<OpportunityCostAnswer | null>(null);
   const [edgeSource, setEdgeSource] = useState<EdgeSource | null>(null);
+  // 市场结构层：第 0 步先判断 regime，再标注入场阶段与止损质量（仅主力单）。
+  const [marketRegime, setMarketRegime] = useState<MarketRegime | null>(null);
+  const [entryStage, setEntryStage] = useState<EntryStage | null>(null);
+  const [stopQuality, setStopQuality] = useState<StopQuality | null>(null);
   const [confirmBadOddsTradeOpen, setConfirmBadOddsTradeOpen] = useState(false);
   const [checked, setChecked] = useState<string[]>([]);
   const [userRules, setUserRules] = useState<TradingRule[]>([]);
@@ -528,6 +553,13 @@ export function PreTradeSnapshotForm({
   // 主力单必须给出 edge/源头与机会成本回答（对冲单与弃单记录不要求）。
   const edgeSourceReady = isHedge || !isTrade || edgeSource != null;
   const oppCostReady = isHedge || !isTrade || oppCostWorth != null;
+  // 市场结构层（仅主力单）：第 0 步 regime、入场阶段、止损质量。
+  const regimeReady = isHedge || !isTrade || marketRegime != null;
+  const entryStageReady = isHedge || !isTrade || entryStage != null;
+  const stopQualityReady = isHedge || !isTrade || stopQuality != null;
+  // 结构 ↔ 源头 / 阶段自洽软提示（绝不阻塞，只让你看见动作换个结构会变成什么）。
+  const regimeMismatchHint = regimeEdgeMismatchHint(marketRegime, edgeSource);
+  const entryStageHint = entryStageWarning(entryStage, edgeSource);
   const mentalReady = mental >= 3;
   // 对冲路径的可提交条件（见 spec §5）。把握性与必要性各自独立校验，互不推导。
   const hedgeReady = !isHedge || (
@@ -545,7 +577,10 @@ export function PreTradeSnapshotForm({
     && (isHedge ? hedgeReady : (maxLossValid && checklistPassed))
   );
   const canSubmit = mentalReady && tradeReady
-    && (isHedge || (decisionReady && oddsStructureReady && edgeSourceReady && oppCostReady));
+    && (isHedge || (
+      decisionReady && oddsStructureReady && edgeSourceReady && oppCostReady
+      && regimeReady && entryStageReady && stopQualityReady
+    ));
   const recentMainReviewed = historicalJournals.filter(j =>
     (j.journal_kind ?? 'trade') === 'trade'
     && j.order_kind === 'main'
@@ -710,6 +745,11 @@ export function PreTradeSnapshotForm({
     });
   }, [direction, orderKind, positionsMap, symbol, historicalJournals, leverage, priceMap, simulatedTime, betSizing]);
 
+  // 「刚平就开」连续单：复用持仓反馈体检里的 chase_after_close 信号，主力单持久化为标记。
+  const chaseAfterCloseFlag: boolean | null = isHedge || !isTrade
+    ? null
+    : positionFeedback.signals.some(sig => sig.kind === 'chase_after_close');
+
   const submit = async () => {
     if (!canSubmit || submitting) return;
     setSubmitting(true);
@@ -751,6 +791,10 @@ export function PreTradeSnapshotForm({
         pre_account_equity_usdt: accountEquity > 0 ? Number(accountEquity.toFixed(2)) : null,
         pre_opportunity_cost_worth: isHedge || !isTrade ? null : oppCostWorth,
         pre_edge_source: isHedge || !isTrade ? null : edgeSource,
+        pre_market_regime: isHedge || !isTrade ? null : marketRegime,
+        pre_entry_stage: isHedge || !isTrade ? null : entryStage,
+        pre_stop_quality: isHedge || !isTrade ? null : stopQuality,
+        pre_chase_after_close: chaseAfterCloseFlag,
         pre_mortem_text: null,
         pre_positive_expectancy: null,
         pre_invalidation_condition: null,
@@ -851,11 +895,13 @@ export function PreTradeSnapshotForm({
   const oddsDoneCount = [
     oddsStructure != null,
     plannedDrawdownPriceValid,
+    stopQuality != null,
     oddsStructureSource.trim().length > 0,
     oddsStructurePremortem.trim().length > 0,
     oddsStructureBreakdownSignals.trim().length > 0,
   ].filter(Boolean).length;
   const edgeOppDoneCount = [edgeSource != null, oppCostWorth != null].filter(Boolean).length;
+  const regimeDoneCount = [marketRegime != null, entryStage != null].filter(Boolean).length;
 
   // 心态自评卡片（批次 25：主力单与对冲单共用同一组件，行为一致——≤2 硬阻断）。
   const mentalRatingCard = (
@@ -975,6 +1021,90 @@ export function PreTradeSnapshotForm({
 
         {!isHedge && (
           <>
+            {isTrade && (
+              <section className={`${mainSurfaceCls} overflow-hidden`}>
+                <div className="flex items-start justify-between gap-3 border-b border-border/60 px-3.5 py-3">
+                  <div className="min-w-0">
+                    <div className={mainSectionTitleCls}>第 0 步 · 市场结构{requiredStar}</div>
+                    <div className={mainSectionHintCls}>
+                      先判断现在是什么结构，再决定能不能用某种打法。追涨在单边里对、在震荡里致命——同一个动作换个结构就改变性质。
+                    </div>
+                  </div>
+                  <span className={mainStatusChipCls}>{regimeDoneCount}/2</span>
+                </div>
+                <div className="space-y-3 px-3.5 py-3">
+                  <div>
+                    <div className="mb-1.5 text-[11px] font-medium text-foreground">当前是什么市场？</div>
+                    <div className="grid gap-2 sm:grid-cols-3">
+                      {MARKET_REGIME_OPTIONS.map(opt => {
+                        const active = marketRegime === opt.id;
+                        return (
+                          <button
+                            key={opt.id}
+                            type="button"
+                            onClick={() => setMarketRegime(opt.id)}
+                            className={`px-3 py-2 text-left ${active ? `rounded-xl ${selectedOptionCls}` : quietOptionCls}`}
+                          >
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="text-[11px] font-semibold">{opt.label}</span>
+                              {active && <span className="h-1.5 w-1.5 rounded-full bg-[#F0B90B]" />}
+                            </div>
+                            <div className="mt-1 text-[10px] leading-relaxed text-muted-foreground">{opt.description}</div>
+                            <div className="mt-1.5 space-y-0.5 text-[9px] leading-relaxed">
+                              <div className="text-[#0ECB81]">有效：{opt.worksWith}</div>
+                              <div className="text-[#F6465D]">致命：{opt.killsWith}</div>
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                    {regimeMismatchHint && (
+                      <div className="mt-2 flex items-start gap-2 rounded-lg border border-[#F0B90B]/30 bg-[#F0B90B]/5 px-2.5 py-2 text-[10px] leading-relaxed text-[#D89B00]">
+                        <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                        <span>{regimeMismatchHint}</span>
+                      </div>
+                    )}
+                  </div>
+
+                  <div>
+                    <div className="mb-1.5 text-[11px] font-medium text-foreground">你在哪个阶段入场？</div>
+                    <div className="grid gap-2 sm:grid-cols-3">
+                      {ENTRY_STAGE_OPTIONS.map(opt => {
+                        const active = entryStage === opt.id;
+                        const isLate = opt.id === 'late';
+                        return (
+                          <button
+                            key={opt.id}
+                            type="button"
+                            onClick={() => setEntryStage(opt.id)}
+                            className={`px-3 py-2 text-left ${
+                              active
+                                ? isLate
+                                  ? 'rounded-xl border border-[#F0B90B]/45 bg-[#F0B90B]/10 text-foreground'
+                                  : `rounded-xl ${selectedOptionCls}`
+                                : quietOptionCls
+                            }`}
+                          >
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="text-[11px] font-semibold">{opt.label}</span>
+                              {active && <span className="h-1.5 w-1.5 rounded-full bg-[#F0B90B]" />}
+                            </div>
+                            <div className="mt-1 text-[10px] leading-relaxed text-muted-foreground">{opt.description}</div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                    {entryStageHint && (
+                      <div className="mt-2 flex items-start gap-2 rounded-lg border border-[#F0B90B]/30 bg-[#F0B90B]/5 px-2.5 py-2 text-[10px] leading-relaxed text-[#D89B00]">
+                        <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                        <span>{entryStageHint}</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </section>
+            )}
+
             {isTrade && (
               <section className={`${mainSurfaceCls} overflow-hidden`}>
                 <div className="flex items-start justify-between gap-3 border-b border-border/60 px-3.5 py-3">
@@ -1117,7 +1247,7 @@ export function PreTradeSnapshotForm({
                       结构给出的收益空间够不够厚？这里只判断目标空间，不判断 edge 来源。
                     </div>
                   </div>
-                  <span className={mainStatusChipCls}>{oddsDoneCount}/5</span>
+                  <span className={mainStatusChipCls}>{oddsDoneCount}/6</span>
                 </div>
                 <div className="space-y-3 px-3.5 py-3">
                   <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
@@ -1204,6 +1334,37 @@ export function PreTradeSnapshotForm({
                         回撤价格必须在亏损方向：做多低于成本价，做空高于成本价。
                       </div>
                     )}
+                    <div className="mt-3 rounded-lg border border-border/55 bg-card/60 p-2.5">
+                      <div className="text-[10px] font-medium text-foreground">止损质量{requiredStar}</div>
+                      <div className="mt-0.5 text-[9px] leading-relaxed text-muted-foreground">
+                        这个回撤价是结构失效位，还是只是「我想亏这么多」？止损在结构位是保护，在噪音里是送钱。
+                      </div>
+                      <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                        {STOP_QUALITY_OPTIONS.map(opt => {
+                          const active = stopQuality === opt.id;
+                          return (
+                            <button
+                              key={opt.id}
+                              type="button"
+                              onClick={() => setStopQuality(opt.id)}
+                              className={`px-2.5 py-2 text-left ${
+                                active
+                                  ? opt.healthy
+                                    ? 'rounded-lg border border-[#0ECB81]/45 bg-[#0ECB81]/10 text-foreground'
+                                    : 'rounded-lg border border-[#F6465D]/45 bg-[#F6465D]/10 text-foreground'
+                                  : quietOptionCls
+                              }`}
+                            >
+                              <div className="flex items-center justify-between gap-2">
+                                <span className={`text-[11px] font-semibold ${active ? (opt.healthy ? 'text-[#0ECB81]' : 'text-[#F6465D]') : ''}`}>{opt.label}</span>
+                                {active && <span className={`h-1.5 w-1.5 rounded-full ${opt.healthy ? 'bg-[#0ECB81]' : 'bg-[#F6465D]'}`} />}
+                              </div>
+                              <div className="mt-1 text-[9px] leading-relaxed text-muted-foreground">{opt.description}</div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
                     <div className="relative mt-4 px-1 pb-6">
                       <Slider
                         value={[rDrawdownPctForSlider]}
@@ -2459,6 +2620,9 @@ export function PreTradeSnapshotForm({
                   pre_odds_structure_breakdown_signals: isHedge ? null : (oddsStructureBreakdownSignals.trim() || null),
                   pre_opportunity_cost_worth: isHedge ? null : oppCostWorth,
                   pre_edge_source: isHedge ? null : edgeSource,
+                  pre_market_regime: isHedge ? null : marketRegime,
+                  pre_entry_stage: isHedge ? null : entryStage,
+                  pre_stop_quality: isHedge ? null : stopQuality,
                 });
               }}
               disabled={submitting}
@@ -2491,6 +2655,9 @@ export function PreTradeSnapshotForm({
                   pre_odds_structure_breakdown_signals: isHedge ? null : (oddsStructureBreakdownSignals.trim() || null),
                   pre_opportunity_cost_worth: isHedge ? null : oppCostWorth,
                   pre_edge_source: isHedge ? null : edgeSource,
+                  pre_market_regime: isHedge ? null : marketRegime,
+                  pre_entry_stage: isHedge ? null : entryStage,
+                  pre_stop_quality: isHedge ? null : stopQuality,
                 });
                 return;
               }

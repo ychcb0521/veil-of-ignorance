@@ -95,6 +95,32 @@ describe('analyzePositionFeedback', () => {
     expect(r.signals.map(s => s.kind)).not.toContain('revenge_trade');
   });
 
+  it('flags 刚平就开 (chase_after_close) when a recent non-loss close sits inside the chase window', () => {
+    const r = analyzePositionFeedback(base({
+      recentCloses: [{ pnlUsdt: 120, closeTimeMs: NOW - 20 * 60_000 }], // a win 20min ago, inside 1h chase window
+    }));
+    const chase = r.signals.find(s => s.kind === 'chase_after_close');
+    expect(chase).toBeDefined();
+    expect(chase?.polarity).toBe('caution');
+    // 不是亏损平仓，所以不会升级为报复交易。
+    expect(r.signals.map(s => s.kind)).not.toContain('revenge_trade');
+  });
+
+  it('lets revenge (loss) take over chase_after_close — no double-counting inside the chase window', () => {
+    const r = analyzePositionFeedback(base({
+      recentCloses: [{ pnlUsdt: -120, closeTimeMs: NOW - 20 * 60_000 }], // a loss 20min ago, inside both windows
+    }));
+    expect(r.signals.map(s => s.kind)).toContain('revenge_trade');
+    expect(r.signals.map(s => s.kind)).not.toContain('chase_after_close');
+  });
+
+  it('does not flag chase_after_close for a non-loss close outside the chase window', () => {
+    const r = analyzePositionFeedback(base({
+      recentCloses: [{ pnlUsdt: 120, closeTimeMs: NOW - 2 * 60 * 60_000 }], // a win 2h ago, outside 1h chase window
+    }));
+    expect(r.signals.map(s => s.kind)).not.toContain('chase_after_close');
+  });
+
   it('returns no signals for a clean first entry', () => {
     const r = analyzePositionFeedback(base());
     expect(r.signals).toHaveLength(0);

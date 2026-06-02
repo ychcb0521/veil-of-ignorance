@@ -15,6 +15,7 @@ export type PositionSideLite = 'LONG' | 'SHORT';
 export type FeedbackSignalKind =
   | 'averaging_down'   // 向下摊平：给亏损中的同向持仓加仓
   | 'revenge_trade'    // 报复交易：刚在该标的亏损平仓后又立刻下单
+  | 'chase_after_close'// 刚平就开：刚在该标的平仓（盈/平）后又立刻下单（持单 = 耐心）
   | 'leverage_spiral'  // 杠杆螺旋：新单杠杆高于现有持仓
   | 'healthy_pyramid'  // 顺势加仓：给盈利中的同向持仓加仓（健康，但需服从封顶）
   | 'mathematical_lockin'; // 双边结构已锁定盈利，可考虑加仓/滚仓
@@ -57,6 +58,8 @@ export interface PositionFeedbackInput {
   nowMs: number;
   /** 报复检测窗口（毫秒），默认 4h。 */
   revengeWindowMs?: number;
+  /** 「刚平就开」连续单检测窗口（毫秒），默认 1h —— 比报复窗口更紧，强调「刚」。 */
+  chaseWindowMs?: number;
   /** 当前建议单笔最大亏损，用于在正反馈提示里回显约束。 */
   recommendedMaxLossUsdt?: number | null;
 }
@@ -72,6 +75,7 @@ export interface PositionFeedbackResult {
 }
 
 const DEFAULT_REVENGE_WINDOW_MS = 4 * 60 * 60_000;
+const DEFAULT_CHASE_WINDOW_MS = 60 * 60_000;
 
 const POLARITY_RANK: Record<FeedbackPolarity, number> = { danger: 0, caution: 1, healthy: 2 };
 
@@ -167,6 +171,23 @@ export function analyzePositionFeedback(input: PositionFeedbackInput): PositionF
       polarity: 'danger',
       title: '报复交易',
       detail: `最近 ${hours}h 内在该标的有 ${recentLosses.length} 笔亏损平仓。紧接着再下单，先确认这是新证据下的独立决策，而不是想把刚亏的赚回来。`,
+    });
+  }
+
+  // 3.5) 刚平就开（连续单）：很短窗口内刚在该标的平仓后又要下单。亏损平仓已升级为报复交易
+  //      (danger)，这里只覆盖盈利 / 打平的快速再进场——它不是报复，而是「持单 = 耐心」的失守。
+  const chaseWindowMs = input.chaseWindowMs ?? DEFAULT_CHASE_WINDOW_MS;
+  const inChaseWindow = (close: RecentCloseLite) =>
+    input.nowMs - close.closeTimeMs <= chaseWindowMs && input.nowMs - close.closeTimeMs >= 0;
+  const hasRecentLossInChase = input.recentCloses.some(c => c.pnlUsdt < 0 && inChaseWindow(c));
+  const recentNonLossReentry = input.recentCloses.filter(c => c.pnlUsdt >= 0 && inChaseWindow(c));
+  if (recentNonLossReentry.length > 0 && !hasRecentLossInChase) {
+    const minutes = Math.max(1, Math.round(chaseWindowMs / 60_000));
+    signals.push({
+      kind: 'chase_after_close',
+      polarity: 'caution',
+      title: '刚平就开',
+      detail: `最近 ${minutes} 分钟内刚在该标的平仓后又要下单。持单本身是一种耐心——先确认这是新结构给的独立机会，而不是刚平掉就手痒的连续单。`,
     });
   }
 

@@ -70,6 +70,9 @@ export function PreTradeSnapshotDialog({
   const [tooHardOddsStructureBreakdownSignals, setTooHardOddsStructureBreakdownSignals] = useState<string | null>(null);
   const [tooHardOppCostWorth, setTooHardOppCostWorth] = useState<boolean | null>(null);
   const [tooHardEdgeSource, setTooHardEdgeSource] = useState<SnapshotPayload['pre_edge_source']>(null);
+  const [tooHardMarketRegime, setTooHardMarketRegime] = useState<SnapshotPayload['pre_market_regime']>(null);
+  const [tooHardEntryStage, setTooHardEntryStage] = useState<SnapshotPayload['pre_entry_stage']>(null);
+  const [tooHardStopQuality, setTooHardStopQuality] = useState<SnapshotPayload['pre_stop_quality']>(null);
   const [savingTooHard, setSavingTooHard] = useState(false);
 
   // Pending-review gate: closed trades without post-review must be evaluated before new orders
@@ -95,6 +98,9 @@ export function PreTradeSnapshotDialog({
       setTooHardOddsStructureBreakdownSignals(null);
       setTooHardOppCostWorth(null);
       setTooHardEdgeSource(null);
+      setTooHardMarketRegime(null);
+      setTooHardEntryStage(null);
+      setTooHardStopQuality(null);
       if (!pausedRef.current) {
         pausedRef.current = true;
         onAutoPause?.();
@@ -186,6 +192,10 @@ export function PreTradeSnapshotDialog({
         pre_account_equity_usdt: payload.pre_account_equity_usdt,
         pre_opportunity_cost_worth: payload.pre_opportunity_cost_worth,
         pre_edge_source: payload.pre_edge_source,
+        pre_market_regime: payload.pre_market_regime,
+        pre_entry_stage: payload.pre_entry_stage,
+        pre_stop_quality: payload.pre_stop_quality,
+        pre_chase_after_close: payload.pre_chase_after_close,
         // Decision-quality fields
         pre_mortem_text: payload.pre_mortem_text,
         pre_positive_expectancy: payload.pre_positive_expectancy,
@@ -273,6 +283,9 @@ export function PreTradeSnapshotDialog({
         pre_odds_structure_breakdown_signals: tooHardOrderKind === 'main' ? tooHardOddsStructureBreakdownSignals : null,
         pre_opportunity_cost_worth: tooHardOrderKind === 'main' ? tooHardOppCostWorth : null,
         pre_edge_source: tooHardOrderKind === 'main' ? tooHardEdgeSource : null,
+        pre_market_regime: tooHardOrderKind === 'main' ? tooHardMarketRegime : null,
+        pre_entry_stage: tooHardOrderKind === 'main' ? tooHardEntryStage : null,
+        pre_stop_quality: tooHardOrderKind === 'main' ? tooHardStopQuality : null,
       });
       toast.success('已记录空仓观望决策');
       setTooHardOpen(false);
@@ -350,7 +363,7 @@ export function PreTradeSnapshotDialog({
       pricePrecision={pricePrecision}
       orderParams={orderParams ?? null}
       onCancel={() => onOpenChange(false)}
-      onTooHard={({ order_kind, pre_planned_stop_loss, pre_odds_structure, pre_odds_structure_source, pre_odds_structure_premortem, pre_odds_structure_breakdown_signals, pre_opportunity_cost_worth, pre_edge_source }) => {
+      onTooHard={({ order_kind, pre_planned_stop_loss, pre_odds_structure, pre_odds_structure_source, pre_odds_structure_premortem, pre_odds_structure_breakdown_signals, pre_opportunity_cost_worth, pre_edge_source, pre_market_regime, pre_entry_stage, pre_stop_quality }) => {
         setTooHardOrderKind(order_kind);
         setTooHardPlannedStopLoss(pre_planned_stop_loss ?? null);
         setTooHardOddsStructure(pre_odds_structure ?? null);
@@ -359,6 +372,9 @@ export function PreTradeSnapshotDialog({
         setTooHardOddsStructureBreakdownSignals(pre_odds_structure_breakdown_signals ?? null);
         setTooHardOppCostWorth(pre_opportunity_cost_worth ?? null);
         setTooHardEdgeSource(pre_edge_source ?? null);
+        setTooHardMarketRegime(pre_market_regime ?? null);
+        setTooHardEntryStage(pre_entry_stage ?? null);
+        setTooHardStopQuality(pre_stop_quality ?? null);
         if (order_kind === 'main' && pre_odds_structure && !tooHardReason.trim()) {
           setTooHardReason(pre_odds_structure_source?.trim() || '');
         }
