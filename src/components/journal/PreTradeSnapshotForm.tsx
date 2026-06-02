@@ -359,6 +359,8 @@ export function PreTradeSnapshotForm({
   const [falsificationSignal, setFalsificationSignal] = useState('');
   const [maxLossInput, setMaxLossInput] = useState('');
   const [mental, setMental] = useState<1 | 2 | 3 | 4 | 5>(3);
+  /** 心态满分时，用户是否手动展开了「慢思考脚手架」（评估性清单）。 */
+  const [evalExpandedAtMax, setEvalExpandedAtMax] = useState(false);
   const [painTags, setPainTags] = useState<PainTag[]>([]);
   const [cognitiveBiasTags, setCognitiveBiasTags] = useState<CognitiveBiasTagId[]>([]);
   const [confidencePct, setConfidencePct] = useState(50);
@@ -577,11 +579,15 @@ export function PreTradeSnapshotForm({
     currentMarginMode === 'isolated'
     && (isHedge ? hedgeReady : (maxLossValid && checklistPassed))
   );
+  // 芒格两层清单：排除性清单（一票否决：逐仓 + 心态≥3，含在 mentalReady/tradeReady）
+  // + 评估性清单（慢思考脚手架）。心态满分时，评估层降级为可选——不选也能开单。
+  const evaluativeReady = decisionReady && oddsStructureReady && edgeSourceReady && oppCostReady
+    && regimeReady && entryStageReady && stopQualityReady;
+  const evaluativeOptional = isTrade && !isHedge && mental === 5;
+  // 评估层非可选时强制展开（避免把"必填但隐藏"的字段藏起来造成无法提交的陷阱）。
+  const evaluativeOpen = evaluativeOptional ? evalExpandedAtMax : true;
   const canSubmit = mentalReady && tradeReady
-    && (isHedge || (
-      decisionReady && oddsStructureReady && edgeSourceReady && oppCostReady
-      && regimeReady && entryStageReady && stopQualityReady
-    ));
+    && (isHedge || evaluativeOptional || evaluativeReady);
   const recentMainReviewed = historicalJournals.filter(j =>
     (j.journal_kind ?? 'trade') === 'trade'
     && j.order_kind === 'main'
@@ -1022,6 +1028,49 @@ export function PreTradeSnapshotForm({
 
         {!isHedge && (
           <>
+            {/* === 第 1 层：排除性清单 · 一票否决（快速生死筛）=== */}
+            <section className="rounded-2xl border border-[#F6465D]/25 bg-[#F6465D]/[0.03] p-3 shadow-[0_16px_45px_rgba(15,23,42,0.045)]">
+              <div className="flex items-center justify-between gap-2">
+                <div className="text-[11px] font-semibold text-foreground">
+                  {isTrade ? '排除性清单 · 一票否决（快速生死筛）' : '心态自评 · 一票否决'}
+                </div>
+                {isTrade && (
+                  <span className="rounded-full bg-[#F6465D]/10 px-2 py-0.5 text-[9px] font-medium text-[#F6465D]">硬阻挡</span>
+                )}
+              </div>
+              <p className="mt-1 text-[10px] leading-relaxed text-muted-foreground">
+                {isTrade
+                  ? '任意一项不过 = 直接否决、不能开单：① 强制逐仓（见上）② 心态 ≥3。极短、刚性，正是「最不想用清单时最该用」的那张。'
+                  : '心态 ≤2 不记录该决策——先稳住状态再谈该不该开。'}
+              </p>
+              <div className="mt-2.5">{mentalRatingCard}</div>
+            </section>
+
+            {/* === 第 2 层：评估性清单 · 慢思考脚手架（心态满分时可选 / 折叠）=== */}
+            <Collapsible
+              open={evaluativeOpen}
+              onOpenChange={next => { if (evaluativeOptional) setEvalExpandedAtMax(next); }}
+              className="space-y-3.5"
+            >
+              {isTrade && (
+                <CollapsibleTrigger
+                  disabled={!evaluativeOptional}
+                  className={`${mainPanelTriggerCls} ${mainSurfaceCls} ${evaluativeOptional ? '' : 'cursor-default hover:bg-transparent'}`}
+                >
+                  <div className="min-w-0 text-left">
+                    <div className="text-[12px] font-semibold text-foreground">慢思考脚手架 · 评估性清单</div>
+                    <div className="mt-0.5 text-[10px] text-muted-foreground">
+                      {evaluativeOptional
+                        ? '心态满分已解锁：以下为可选脚手架，点开可填、不填也能开单（样本会缺这几列）。'
+                        : '逐项评估结构、源头、赔率与方向论点——开单前需要完成。'}
+                    </div>
+                  </div>
+                  {evaluativeOptional && (
+                    <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground transition-transform group-data-[state=open]:rotate-180" />
+                  )}
+                </CollapsibleTrigger>
+              )}
+              <CollapsibleContent className="space-y-3.5">
             {isTrade && (
               <section className={`${mainSurfaceCls} overflow-hidden`}>
                 <div className="flex items-start justify-between gap-3 border-b border-border/60 px-3.5 py-3">
@@ -1673,6 +1722,8 @@ export function PreTradeSnapshotForm({
                 })}
               </div>
             </section>
+              </CollapsibleContent>
+            </Collapsible>
 
             {isTrade && (
               <Collapsible className={`${mainSurfaceCls} overflow-hidden`}>
@@ -1727,7 +1778,7 @@ export function PreTradeSnapshotForm({
               </Collapsible>
             )}
 
-            <section className="grid gap-3 md:grid-cols-[1fr_170px]">
+            <section>
               {isTrade && (
                 <label className={`block ${mainSurfaceCls} p-3`}>
                   <div className={labelCls}>本次愿意承受最大亏损 USDT{requiredStar}</div>
@@ -1807,8 +1858,6 @@ export function PreTradeSnapshotForm({
                   )}
                 </label>
               )}
-
-              {mentalRatingCard}
             </section>
 
             {isTrade && betSizing && (

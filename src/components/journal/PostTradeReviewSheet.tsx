@@ -18,7 +18,12 @@ import { Pencil, ChevronDown, BrainCircuit, AlertTriangle } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useTradingContext } from '@/contexts/TradingContext';
 import { COGNITIVE_BIAS_LABELS } from '@/lib/cognitiveBiasTags';
-import { EDGE_SOURCE_OPTIONS, EDGE_SOURCE_LABELS } from '@/lib/edgeSource';
+import {
+  EDGE_SOURCE_OPTIONS, EDGE_SOURCE_LABELS,
+  aggregateEdgeSourceUsage, HAMMER_DOMINANCE_THRESHOLD, HAMMER_MIN_SAMPLES,
+} from '@/lib/edgeSource';
+import { regimeEdgeMismatchHint } from '@/lib/snapshotStructure';
+import { buildReflectionText, parseReflectionText } from '@/lib/reflectionFacts';
 import {
   classifyStructureResult,
   STRUCTURE_RESULT_QUADRANTS,
@@ -39,7 +44,7 @@ import {
 import {
   finalizeJournalReview, replacePhaseAssignments,
   listAssignmentsForJournal, countPatternOccurrencesLast30Days, listPatterns,
-  updateJournalDeepAnalysis, stampJournalCloseRealTime,
+  updateJournalDeepAnalysis, stampJournalCloseRealTime, listJournals,
 } from '@/lib/journalApi';
 import type { TradeJournal, TradeOutcome, ErrorTagPattern } from '@/types/journal';
 import { MENTAL_STATE_LABELS, PAIN_TAG_LABELS } from '@/types/journal';
@@ -84,6 +89,7 @@ export function PostTradeReviewSheet({
   const [tagNotes, setTagNotes] = useState<Record<string, string>>({});
   const [noErrors, setNoErrors] = useState(false);
   const [reflection, setReflection] = useState('');
+  const [reflectionFacts, setReflectionFacts] = useState('');
   const [correctAction, setCorrectAction] = useState('');
   const [exitReason, setExitReason] = useState('');
   const [resultSummary, setResultSummary] = useState('');
@@ -112,6 +118,8 @@ export function PostTradeReviewSheet({
   const [saving, setSaving] = useState(false);
   const [hotCounts, setHotCounts] = useState<Record<string, number>>({});
   const [allPatterns, setAllPatterns] = useState<ErrorTagPattern[]>([]);
+  /** 用户全部主力单（用于「工具箱集中度 / 铁锤人」体检，仅展示）。 */
+  const [allUserJournals, setAllUserJournals] = useState<TradeJournal[]>([]);
   const [sixStep, setSixStep] = useState<SixStepValue>(EMPTY_SIX_STEP);
   const [sixStepOpen, setSixStepOpen] = useState(false);
   /** Local override so the just-stamped close time renders immediately without re-fetch. */
@@ -132,7 +140,9 @@ export function PostTradeReviewSheet({
         post.forEach(a => { if (a.note) ns[a.pattern_id] = a.note; });
         setTagNotes(ns);
         setNoErrors(post.length === 0 && !!journal.post_reviewed_at);
-        setReflection(journal.post_reflection ?? '');
+        const parsedReflection = parseReflectionText(journal.post_reflection);
+        setReflectionFacts(parsedReflection.facts);
+        setReflection(parsedReflection.interpretation);
         setCorrectAction(journal.post_correct_action ?? '');
         setExitReason(tradeRecord?.exit_reason_text ?? '');
         setResultSummary(journal.post_result_summary ?? '');
@@ -162,6 +172,8 @@ export function PostTradeReviewSheet({
         setSixStepOpen(countCompletedSteps(pickSixStepValue(journal)) > 0);
         if (user) {
           listPatterns(user.id).then(setAllPatterns).catch(() => {});
+          // 拉取全部主力单做「工具箱集中度」体检（铁锤人自检），失败不阻塞复盘。
+          listJournals(user.id).then(setAllUserJournals).catch(() => {});
         }
         // Stamp the real close time on first open (idempotent — API noop if already set)
         if (!journal.post_reviewed_at && !journal.post_real_close_time) {
@@ -309,6 +321,23 @@ export function PostTradeReviewSheet({
   // 结构对／错的 2×2 排布（上排结构对、下排结构错；左列赢、右列亏）。
   const QUADRANT_GRID: StructureResultQuadrant[] = ['deserved_win', 'correct_loss', 'dangerous_win', 'deserved_loss'];
 
+  // 工具箱集中度体检（铁锤人自检，仅展示）：统计全部主力单各 edge 源头的使用频次。
+  const edgeConcentration = aggregateEdgeSourceUsage(allUserJournals);
+  const showConcentration = !isHedge
+    && journal.direction !== 'no_entry'
+    && edgeConcentration.total >= HAMMER_MIN_SAMPLES;
+  // 结构 × 源头错配率：用既有的 regimeEdgeMismatchHint 逐单判定，看「同一个动作换个结构」发生得有多频繁。
+  const regimeChecked = allUserJournals.filter(j =>
+    j.order_kind !== 'hedge'
+    && (j.journal_kind ?? 'trade') === 'trade'
+    && j.direction !== 'no_entry'
+    && j.pre_market_regime
+    && j.pre_edge_source,
+  );
+  const regimeMismatchCount = regimeChecked.filter(j =>
+    regimeEdgeMismatchHint(j.pre_market_regime, j.pre_edge_source) != null,
+  ).length;
+
   const tagsValid = noErrors || selectedTags.length >= 1;
   const reflectionValid = !!reflection.trim();
   const correctValid = !!correctAction.trim();
@@ -348,7 +377,7 @@ export function PostTradeReviewSheet({
         post_outcome: outcome,
         post_realized_pnl: pnl,
         post_r_multiple: finalR,
-        post_reflection: reflection.trim(),
+        post_reflection: buildReflectionText(reflectionFacts, reflection),
         post_correct_action: correctAction.trim(),
         post_result_summary: resultSummary.trim(),
         post_decision_quality: decisionQuality,
@@ -408,8 +437,9 @@ export function PostTradeReviewSheet({
   };
 
   const applySixStepToFields = () => {
-    const ref = `[场景] ${sixStep.post_error_scenario}\n[现实] ${sixStep.post_reality_feedback}\n[根因] ${sixStep.post_real_problem}`;
-    setReflection(ref);
+    // 场景 / 现实 是可观察事实 → 事实栏；根因是解释 → 解释栏。与「先事实后解释」分离对称。
+    setReflectionFacts(`[场景] ${sixStep.post_error_scenario}\n[现实] ${sixStep.post_reality_feedback}`);
+    setReflection(`[根因] ${sixStep.post_real_problem}`);
     if (sixStep.post_new_rule_draft) setCorrectAction(sixStep.post_new_rule_draft);
   };
 
@@ -930,6 +960,55 @@ export function PostTradeReviewSheet({
           </div>
         )}
 
+        {/* 工具箱集中度体检（铁锤人自检）— 仅展示，不阻塞 */}
+        {showConcentration && (
+          <div className={`space-y-2.5 px-4 py-4 ${sectionCardClass}`}>
+            <div className="flex items-center justify-between">
+              <div className="text-[12px] font-medium">工具箱集中度体检 · 铁锤人自检</div>
+              <span className="text-[10px] text-muted-foreground">{edgeConcentration.total} 笔主力单</span>
+            </div>
+            <p className="text-[10px] leading-relaxed text-muted-foreground">
+              统计你实际在用哪几招（与盈亏无关）。手里只有一把锤子，看什么都像钉子——越顺手的一招越危险。
+            </p>
+            <div className="space-y-1.5">
+              {edgeConcentration.usage.map(u => {
+                const isDom = edgeConcentration.dominant?.edge === u.edge;
+                const pct = Math.round(u.share * 100);
+                return (
+                  <div key={u.edge} className="flex items-center gap-2">
+                    <span className="w-[68px] shrink-0 text-[10px] text-foreground">{u.label}</span>
+                    <div className="h-2.5 flex-1 overflow-hidden rounded-full bg-background/70">
+                      <div
+                        className="h-full rounded-full"
+                        style={{
+                          width: `${Math.max(4, pct)}%`,
+                          background: isDom && edgeConcentration.isConcentrated ? '#F0B90B' : 'hsl(var(--muted-foreground) / 0.55)',
+                        }}
+                      />
+                    </div>
+                    <span className="w-[58px] shrink-0 text-right font-mono text-[10px] text-muted-foreground">{u.count}·{pct}%</span>
+                  </div>
+                );
+              })}
+            </div>
+            {edgeConcentration.isConcentrated ? (
+              <div className="rounded-lg border border-[#F0B90B]/30 bg-[#F0B90B]/5 px-3 py-2 text-[11px] leading-relaxed text-[#D89B00]">
+                ⚠ 你 {Math.round(edgeConcentration.dominant!.share * 100)}% 的主力单都用「{edgeConcentration.dominant!.label}」这一招。
+                问自己：是这一招真的最适合你遇到的市场，还是你只会这一招、所以什么行情都套它？
+              </div>
+            ) : (
+              <div className="rounded-lg border border-border/60 bg-background/60 px-3 py-2 text-[11px] leading-relaxed text-muted-foreground">
+                源头分布较分散，暂无明显「铁锤人」集中——继续保持工具箱里有多把锤子。
+              </div>
+            )}
+            {regimeChecked.length >= HAMMER_MIN_SAMPLES && regimeMismatchCount > 0 && (
+              <div className="text-[10px] leading-relaxed text-muted-foreground">
+                结构 × 源头错配：{regimeMismatchCount}/{regimeChecked.length} 笔（{Math.round((regimeMismatchCount / regimeChecked.length) * 100)}%）的源头与当时市场结构不自洽——同一个动作换个结构就改变性质。
+              </div>
+            )}
+          </div>
+        )}
+
         {!isHedge && journal.direction !== 'no_entry' && (
           <div className={`space-y-2 px-4 py-4 ${sectionCardClass}`}>
             <div className="flex items-center justify-between">
@@ -1326,17 +1405,34 @@ export function PostTradeReviewSheet({
           </CollapsibleContent>
         </Collapsible>
 
-        {/* (D) Reflection */}
-        <div className={`space-y-2 px-4 py-4 ${sectionCardClass}`}>
-          <Label className="text-[12px] font-medium">复盘文字（这笔交易里你真正学到了什么？）*</Label>
-          <Textarea
-            rows={4}
-            value={reflection}
-            onChange={e => setReflection(e.target.value)}
-            placeholder="例如：本次入场理由在事后看仍然成立，但仓位过重；止损位过近导致被洗出后又看着行情走出预期方向。下次应根据 ATR 设置止损宽度。"
-            className="text-[12px] bg-background/80 border-border/70 rounded-xl"
-          />
-          {!reflectionValid && <div className="text-[10px] text-[#F6465D] text-right font-mono">必填</div>}
+        {/* (D) Reflection — 事实 vs 解释 分离（把快照的双通道好设计搬到复盘） */}
+        <div className={`space-y-3 px-4 py-4 ${sectionCardClass}`}>
+          <div className="rounded-lg border border-[#5b8def]/25 bg-[#5b8def]/5 px-3 py-2 text-[10px] leading-relaxed text-muted-foreground">
+            先写盘面发生了什么事实，再写解释——别把它们混成一个自洽的故事。
+            事后回看时，人最容易把「发生了什么」和「为什么」压成一个完美闭环，再当成真相。
+          </div>
+          <div className="space-y-1.5">
+            <Label className="text-[11px] font-medium text-muted-foreground">① 盘面发生了什么（只写可观察的事实）</Label>
+            <Textarea
+              rows={3}
+              value={reflectionFacts}
+              onChange={e => setReflectionFacts(e.target.value)}
+              placeholder="例如：入场后价格先朝预期方向走了 0.8%，随后跌破入场价 1.2% 触发止损；止损后 40 分钟内反向走出 +3%。只记录看得见的价格 / 成交 / 时间，不写原因。"
+              className="text-[12px] bg-background/80 border-border/70 rounded-xl"
+            />
+            <p className="text-[10px] text-muted-foreground">软性项，可留空——但写下事实能挡住事后归因。</p>
+          </div>
+          <div className="space-y-1.5">
+            <Label className="text-[12px] font-medium">② 这笔交易里你真正学到了什么（解释）*</Label>
+            <Textarea
+              rows={4}
+              value={reflection}
+              onChange={e => setReflection(e.target.value)}
+              placeholder="例如：止损位放得过近（与结构无关，只是凭感觉），导致被噪音扫出后又看着行情走出预期方向。下次应根据结构失效位而非固定百分比设置止损。"
+              className="text-[12px] bg-background/80 border-border/70 rounded-xl"
+            />
+            {!reflectionValid && <div className="text-[10px] text-[#F6465D] text-right font-mono">必填</div>}
+          </div>
         </div>
 
         {/* (E) Counterfactual */}

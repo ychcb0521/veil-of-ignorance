@@ -145,6 +145,77 @@ export function aggregateEdgeSourcePnl(
   return [...byEdge.values()].sort((a, b) => b.trades - a.trades);
 }
 
+/** 集中度体检阈值：主导源头占比 ≥ 此值且样本 ≥ MIN 时，提示「铁锤人」风险。 */
+export const HAMMER_DOMINANCE_THRESHOLD = 0.6;
+/** 集中度体检最小样本量：低于此值不下结论（plural of anecdote is not data）。 */
+export const HAMMER_MIN_SAMPLES = 5;
+
+export interface EdgeSourceUsageStat {
+  edge: EdgeSource;
+  label: string;
+  count: number;
+  /** 占比 0..1。 */
+  share: number;
+}
+
+export interface EdgeSourceUsageLite {
+  pre_edge_source?: EdgeSource | null;
+  order_kind?: 'main' | 'hedge' | null;
+  journal_kind?: string | null;
+  direction?: string | null;
+}
+
+export interface EdgeConcentration {
+  /** 参与统计的主力入场单总数（已标 edge 源头）。 */
+  total: number;
+  /** 按出现频次降序的源头分布。 */
+  usage: EdgeSourceUsageStat[];
+  /** 占比最高的源头（total 为 0 时为 null）。 */
+  dominant: EdgeSourceUsageStat | null;
+  /** 是否「铁锤人」：主导源头占比 ≥ 阈值且样本充足。 */
+  isConcentrated: boolean;
+}
+
+/**
+ * 工具箱集中度（铁锤人自检）：统计主力入场单各 edge 源头的使用频次分布。
+ * 只看「你实际在用哪几招」，与盈亏无关 —— 越成功的一招越危险（铁锤人：手里有锤子，看什么都像钉子）。
+ * 只纳入主力单、trade 类、已入场（direction ≠ no_entry）、且已标 edge 源头的记录。
+ */
+export function aggregateEdgeSourceUsage(
+  journals: readonly EdgeSourceUsageLite[],
+): EdgeConcentration {
+  const counts = new Map<EdgeSource, number>();
+  let total = 0;
+
+  for (const j of journals) {
+    if (j.order_kind === 'hedge') continue;
+    if ((j.journal_kind ?? 'trade') !== 'trade') continue;
+    if (j.direction === 'no_entry') continue;
+    const edge = j.pre_edge_source;
+    if (!edge) continue;
+    counts.set(edge, (counts.get(edge) ?? 0) + 1);
+    total += 1;
+  }
+
+  const usage: EdgeSourceUsageStat[] = [...counts.entries()]
+    .map(([edge, count]) => ({
+      edge,
+      label: EDGE_SOURCE_LABELS[edge],
+      count,
+      share: total > 0 ? count / total : 0,
+    }))
+    .sort((a, b) => b.count - a.count);
+
+  const dominant = usage[0] ?? null;
+  const isConcentrated = Boolean(
+    dominant
+    && total >= HAMMER_MIN_SAMPLES
+    && dominant.share >= HAMMER_DOMINANCE_THRESHOLD,
+  );
+
+  return { total, usage, dominant, isConcentrated };
+}
+
 /**
  * Identify the edge that is BOTH a top winner and a top loser — the clearest
  * illustration of 盈亏同源. Returns null if no single edge dominates both sides.

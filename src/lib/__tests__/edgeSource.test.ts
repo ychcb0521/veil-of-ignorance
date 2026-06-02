@@ -2,10 +2,14 @@ import { describe, expect, it } from 'vitest';
 
 import {
   aggregateEdgeSourcePnl,
+  aggregateEdgeSourceUsage,
   findSameSourceEdge,
   EDGE_SOURCE_OPTIONS,
   EDGE_SOURCE_LABELS,
+  HAMMER_DOMINANCE_THRESHOLD,
+  HAMMER_MIN_SAMPLES,
   type EdgeSourceJournalLite,
+  type EdgeSourceUsageLite,
 } from '../edgeSource';
 
 function j(
@@ -66,6 +70,69 @@ describe('aggregateEdgeSourcePnl', () => {
       j('against_crowd', 'loss', -5),
     ]);
     expect(stats[0].edge).toBe('against_crowd');
+  });
+});
+
+describe('aggregateEdgeSourceUsage', () => {
+  function u(
+    edge: EdgeSourceUsageLite['pre_edge_source'],
+    extra: Partial<EdgeSourceUsageLite> = {},
+  ): EdgeSourceUsageLite {
+    return { pre_edge_source: edge, order_kind: 'main', direction: 'long', ...extra };
+  }
+
+  it('counts main-order entered trades by edge and excludes hedge / no_entry / untagged', () => {
+    const c = aggregateEdgeSourceUsage([
+      u('trend_follow'),
+      u('trend_follow'),
+      u('trend_follow'),
+      u('breakout'),
+      u('trend_follow', { order_kind: 'hedge' }), // hedge → excluded
+      u('trend_follow', { direction: 'no_entry' }), // no_entry → excluded
+      u(null), // untagged → excluded
+      u('mean_reversion', { journal_kind: 'no_trade' }), // not a trade → excluded
+    ]);
+
+    expect(c.total).toBe(4);
+    expect(c.usage[0]).toMatchObject({ edge: 'trend_follow', count: 3 });
+    expect(c.usage[0].share).toBeCloseTo(0.75, 5);
+    expect(c.dominant?.edge).toBe('trend_follow');
+  });
+
+  it('flags 铁锤人 when the dominant edge passes the threshold with enough samples', () => {
+    const journals = Array.from({ length: HAMMER_MIN_SAMPLES }, () => u('trend_follow'));
+    const c = aggregateEdgeSourceUsage(journals);
+    expect(c.dominant?.share).toBe(1);
+    expect(c.dominant!.share).toBeGreaterThanOrEqual(HAMMER_DOMINANCE_THRESHOLD);
+    expect(c.isConcentrated).toBe(true);
+  });
+
+  it('does not flag concentration below the minimum sample size', () => {
+    const c = aggregateEdgeSourceUsage([u('trend_follow'), u('trend_follow')]);
+    expect(c.dominant?.share).toBe(1);
+    expect(c.total).toBeLessThan(HAMMER_MIN_SAMPLES);
+    expect(c.isConcentrated).toBe(false);
+  });
+
+  it('does not flag when usage is spread across sources', () => {
+    const c = aggregateEdgeSourceUsage([
+      u('trend_follow'),
+      u('trend_follow'),
+      u('breakout'),
+      u('mean_reversion'),
+      u('squeeze_release'),
+      u('breakout'),
+    ]);
+    expect(c.total).toBe(6);
+    expect(c.isConcentrated).toBe(false);
+  });
+
+  it('returns an empty profile with no qualifying trades', () => {
+    const c = aggregateEdgeSourceUsage([]);
+    expect(c.total).toBe(0);
+    expect(c.usage).toEqual([]);
+    expect(c.dominant).toBeNull();
+    expect(c.isConcentrated).toBe(false);
   });
 });
 

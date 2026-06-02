@@ -443,7 +443,7 @@ function CounterfactualChannel({ journal, klines, selectedBranchId, onSelectBran
         {journal.post_reflection && (
           <div>
             <div className="text-[11px] text-muted-foreground mb-1">复盘</div>
-            <div className="border-l-2 border-[#5b8def] pl-3 text-[11px] text-foreground">
+            <div className="border-l-2 border-[#5b8def] pl-3 text-[11px] text-foreground whitespace-pre-line">
               {journal.post_reflection}
             </div>
           </div>
