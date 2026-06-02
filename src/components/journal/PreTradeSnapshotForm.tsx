@@ -279,6 +279,17 @@ const R_DRAWDOWN_STEP_PCT = 0.1;
 const formatOddsRatio = (value: number) => value.toFixed(1);
 const formatSigned = (value: number, digits = 2) => `${value >= 0 ? '+' : ''}${value.toFixed(digits)}`;
 
+function EdgeSourceTooltipContent({ option }: { option: (typeof EDGE_SOURCE_OPTIONS)[number] }) {
+  return (
+    <div className="max-w-[320px] space-y-1.5 text-[11px] leading-relaxed">
+      <div className="font-medium text-foreground">{option.label}</div>
+      <div><span className="text-[#F0B90B]">入场第一性原理：</span>{option.entryPrinciple}</div>
+      <div><span className="text-[#0ECB81]">好位置：</span>{option.goodLocation}</div>
+      <div><span className="text-[#F6465D]">坏位置：</span>{option.badLocation}</div>
+    </div>
+  );
+}
+
 function riskTone(pct: number | null) {
   if (pct == null) return 'text-muted-foreground';
   if (pct < 2) return 'text-[#0ECB81]';
@@ -963,45 +974,57 @@ export function PreTradeSnapshotForm({
                 <div className="space-y-3 px-3.5 py-3">
                   <div>
                     <div className="mb-1.5 text-[11px] font-medium text-foreground">这一单的 edge 来自哪种市场机制？</div>
-                    <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-                      {EDGE_SOURCE_OPTIONS.map(opt => {
-                        const active = edgeSource === opt.id;
-                        const warn = opt.isWarning;
-                        return (
-                          <button
-                            key={opt.id}
-                            type="button"
-                            onClick={() => setEdgeSource(opt.id)}
-                            className={`min-h-[66px] rounded-xl border px-3 py-2 text-left transition-colors ${
-                              active
-                                ? warn
-                                  ? 'border-[#F6465D]/70 bg-[#F6465D]/10 text-foreground shadow-sm'
-                                  : 'border-[#F0B90B]/70 bg-[#F0B90B]/10 text-foreground shadow-sm'
-                                : 'border-border/70 bg-background/80 text-muted-foreground hover:border-border hover:bg-accent/70'
-                            }`}
-                          >
-                            <div className="flex items-center justify-between gap-2">
-                              <span className="text-[11px] font-semibold">{opt.label}</span>
-                              {active && (
-                                <span className={`h-1.5 w-1.5 rounded-full ${warn ? 'bg-[#F6465D]' : 'bg-[#F0B90B]'}`} />
-                              )}
-                            </div>
-                            <div className="mt-1 text-[10px] leading-relaxed">{opt.description}</div>
-                          </button>
-                        );
-                      })}
-                    </div>
+                    <TooltipProvider delayDuration={120}>
+                      <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                        {EDGE_SOURCE_OPTIONS.map(opt => {
+                          const active = edgeSource === opt.id;
+                          const warn = opt.isWarning;
+                          return (
+                            <Tooltip key={opt.id}>
+                              <TooltipTrigger asChild>
+                                <button
+                                  type="button"
+                                  onClick={() => setEdgeSource(opt.id)}
+                                  className={`min-h-[66px] rounded-xl border px-3 py-2 text-left transition-colors ${
+                                    active
+                                      ? warn
+                                        ? 'border-[#F6465D]/70 bg-[#F6465D]/10 text-foreground shadow-sm'
+                                        : 'border-[#F0B90B]/70 bg-[#F0B90B]/10 text-foreground shadow-sm'
+                                      : 'border-border/70 bg-background/80 text-muted-foreground hover:border-border hover:bg-accent/70'
+                                  }`}
+                                >
+                                  <div className="flex items-center justify-between gap-2">
+                                    <span className="text-[11px] font-semibold">{opt.label}</span>
+                                    {active && (
+                                      <span className={`h-1.5 w-1.5 rounded-full ${warn ? 'bg-[#F6465D]' : 'bg-[#F0B90B]'}`} />
+                                    )}
+                                  </div>
+                                  <div className="mt-1 text-[10px] leading-relaxed">{opt.description}</div>
+                                </button>
+                              </TooltipTrigger>
+                              <TooltipContent side="top" align="start" className="border-border bg-card text-card-foreground shadow-lg">
+                                <EdgeSourceTooltipContent option={opt} />
+                              </TooltipContent>
+                            </Tooltip>
+                          );
+                        })}
+                      </div>
+                    </TooltipProvider>
                     <Collapsible className="mt-2 rounded-xl border border-border/60 bg-background/70">
                       <CollapsibleTrigger className="group flex w-full items-center justify-between gap-3 px-3 py-2 text-left">
                         <span className="text-[11px] font-medium text-muted-foreground">查看源头标签说明表</span>
                         <ChevronDown className="h-3.5 w-3.5 text-muted-foreground transition-transform group-data-[state=open]:rotate-180" />
                       </CollapsibleTrigger>
                       <CollapsibleContent className="border-t border-border/60 px-3 pb-3 pt-2">
-                        <div className="grid gap-1.5">
+                        <div className="grid gap-2">
                           {EDGE_SOURCE_OPTIONS.map(opt => (
-                            <div key={opt.id} className="grid gap-1 rounded-lg bg-muted/25 px-2.5 py-2 sm:grid-cols-[110px_1fr]">
+                            <div key={opt.id} className="rounded-lg bg-muted/25 px-2.5 py-2">
                               <div className={`text-[11px] font-semibold ${opt.isWarning ? 'text-[#F6465D]' : 'text-foreground'}`}>{opt.label}</div>
-                              <div className="text-[10px] leading-relaxed text-muted-foreground">{opt.description}</div>
+                              <div className="mt-1 grid gap-1 text-[10px] leading-relaxed text-muted-foreground md:grid-cols-3">
+                                <div><span className="text-[#F0B90B]">第一性原理：</span>{opt.entryPrinciple}</div>
+                                <div><span className="text-[#0ECB81]">好位置：</span>{opt.goodLocation}</div>
+                                <div><span className="text-[#F6465D]">坏位置：</span>{opt.badLocation}</div>
+                              </div>
                             </div>
                           ))}
                         </div>

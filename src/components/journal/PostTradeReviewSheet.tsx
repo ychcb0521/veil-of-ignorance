@@ -11,6 +11,7 @@ import { Input } from '@/components/ui/input';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { toast } from 'sonner';
 import { Pencil, ChevronDown, BrainCircuit, AlertTriangle } from 'lucide-react';
@@ -58,6 +59,17 @@ interface Props {
   tradeRecord?: TradeRecord | null;
   onReviewed?: (updated: TradeJournal) => void;
   onAutoPause?: () => void;
+}
+
+function EdgeSourceTooltipContent({ option }: { option: (typeof EDGE_SOURCE_OPTIONS)[number] }) {
+  return (
+    <div className="max-w-[320px] space-y-1.5 text-[11px] leading-relaxed">
+      <div className="font-medium text-foreground">{option.label}</div>
+      <div><span className="text-[#F0B90B]">入场第一性原理：</span>{option.entryPrinciple}</div>
+      <div><span className="text-[#0ECB81]">好位置：</span>{option.goodLocation}</div>
+      <div><span className="text-[#F6465D]">坏位置：</span>{option.badLocation}</div>
+    </div>
+  );
 }
 
 export function PostTradeReviewSheet({
@@ -880,28 +892,36 @@ export function PostTradeReviewSheet({
                 <p className="text-[10px] leading-relaxed text-muted-foreground">
                   这单开仓时没标 edge 源头（旧快照）。补一个，才能纳入「盈亏同源」统计：
                 </p>
-                <div className="grid grid-cols-2 gap-1.5">
-                  {EDGE_SOURCE_OPTIONS.map(opt => {
-                    const active = edgeSourceBackfill === opt.id;
-                    const warn = opt.isWarning;
-                    return (
-                      <button
-                        key={opt.id}
-                        type="button"
-                        onClick={() => setEdgeSourceBackfill(active ? null : opt.id)}
-                        className={`rounded-lg border px-2.5 py-1.5 text-left text-[11px] transition-colors ${
-                          active
-                            ? warn
-                              ? 'border-[#F6465D] bg-[#F6465D]/10 text-[#F6465D]'
-                              : 'border-[#F0B90B] bg-[#F0B90B]/10 text-foreground'
-                            : 'border-border bg-background text-muted-foreground hover:bg-accent'
-                        }`}
-                      >
-                        {opt.label}
-                      </button>
-                    );
-                  })}
-                </div>
+                <TooltipProvider delayDuration={120}>
+                  <div className="grid grid-cols-2 gap-1.5">
+                    {EDGE_SOURCE_OPTIONS.map(opt => {
+                      const active = edgeSourceBackfill === opt.id;
+                      const warn = opt.isWarning;
+                      return (
+                        <Tooltip key={opt.id}>
+                          <TooltipTrigger asChild>
+                            <button
+                              type="button"
+                              onClick={() => setEdgeSourceBackfill(active ? null : opt.id)}
+                              className={`rounded-lg border px-2.5 py-1.5 text-left text-[11px] transition-colors ${
+                                active
+                                  ? warn
+                                    ? 'border-[#F6465D] bg-[#F6465D]/10 text-[#F6465D]'
+                                    : 'border-[#F0B90B] bg-[#F0B90B]/10 text-foreground'
+                                  : 'border-border bg-background text-muted-foreground hover:bg-accent'
+                              }`}
+                            >
+                              {opt.label}
+                            </button>
+                          </TooltipTrigger>
+                          <TooltipContent side="top" align="start" className="border-border bg-card text-card-foreground shadow-lg">
+                            <EdgeSourceTooltipContent option={opt} />
+                          </TooltipContent>
+                        </Tooltip>
+                      );
+                    })}
+                  </div>
+                </TooltipProvider>
                 <p className="text-[10px] text-muted-foreground">软性项，可跳过 —— 但补全后历史「盈亏同源」会更准。</p>
               </div>
             )}

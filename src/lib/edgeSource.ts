@@ -4,6 +4,9 @@ export interface EdgeSourceOption {
   id: EdgeSource;
   label: string;
   description: string;
+  entryPrinciple: string;
+  goodLocation: string;
+  badLocation: string;
   /** Rendered as a caution state when this option is available in a specific flow. */
   isWarning?: boolean;
 }
@@ -17,26 +20,41 @@ export const EDGE_SOURCE_OPTIONS: readonly EdgeSourceOption[] = [
     id: 'trend_follow',
     label: '顺势延续',
     description: '趋势已经成立，靠惯性继续释放空间。',
+    entryPrinciple: '用低成本支点参与尚未结束的方向惯性。',
+    goodLocation: '趋势未破，回调到支点，止损近，后续空间仍在。',
+    badLocation: '趋势已经释放很远后追价。',
   },
   {
     id: 'breakout',
     label: '突破扩张',
     description: '关键结构被打开，靠波动率扩张赚钱。',
+    entryPrinciple: '在旧结构失效、新空间打开，但价格还没充分释放时入场。',
+    goodLocation: '旧区间被突破，市场接受新价格，失败成本清楚。',
+    badLocation: '只是价格越线，没有接受，或突破后追太晚。',
   },
   {
     id: 'mean_reversion',
     label: '均值回归',
     description: '偏离过度，靠价格回到合理区间赚钱。',
+    entryPrinciple: '等过度偏离后的边际动能衰竭，再用短止损博修复。',
+    goodLocation: '偏离极端，动能减弱，情绪释放充分，回归目标清楚。',
+    badLocation: '跌多就买、涨多就空，太早逆势接刀。',
   },
   {
     id: 'squeeze_release',
     label: '挤压释放',
     description: '多空一方过度拥挤，靠被迫平仓推动行情。',
+    entryPrinciple: '站在被迫交易流的上游，而不是情绪释放后的末端。',
+    goodLocation: '一方仓位拥挤，关键触发位临近，突破后会引发止损/爆仓/回补。',
+    badLocation: '等挤压已经完成才追，买到流动性尾巴。',
   },
   {
     id: 'no_clear_edge',
     label: '无明确 edge',
     description: '看不出来源，只是想交易。',
+    entryPrinciple: '没有机会源头，就没有入场资格。',
+    goodLocation: '能说清楚为什么有优势。',
+    badLocation: '只是想交易、怕错过、看起来要动。',
     isWarning: true,
   },
 ] as const;
