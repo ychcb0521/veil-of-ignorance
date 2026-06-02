@@ -74,6 +74,7 @@ import type {
 } from '@/types/journal';
 
 export type SnapshotMode = 'trade' | 'no_entry';
+type OpportunityCostAnswer = 'worth_it' | 'not_worth_it' | 'unclear';
 
 export interface TpLevel {
   price: string;
@@ -108,7 +109,7 @@ export interface SnapshotPayload {
   pre_odds_structure_premortem: string | null;
   pre_odds_structure_breakdown_signals: string | null;
   pre_account_equity_usdt: number | null;
-  /** 机会成本问句：不做的机会成本更高吗？false = 填补无聊的小机会仓位。 */
+  /** 机会成本问句：不做更亏吗？false = 填补无聊 / 凭感觉的小机会仓位。 */
   pre_opportunity_cost_worth: boolean | null;
   /** Edge / 源头标签，用于盈亏同源分析。 */
   pre_edge_source: EdgeSource | null;
@@ -329,7 +330,7 @@ export function PreTradeSnapshotForm({
   const [oddsStructurePremortem, setOddsStructurePremortem] = useState('');
   const [oddsStructureBreakdownSignals, setOddsStructureBreakdownSignals] = useState('');
   // 《不对称思考》：机会成本问句（结构判定之后）+ edge/源头标签（用于盈亏同源）。
-  const [oppCostWorth, setOppCostWorth] = useState<boolean | null>(null);
+  const [oppCostAnswer, setOppCostAnswer] = useState<OpportunityCostAnswer | null>(null);
   const [edgeSource, setEdgeSource] = useState<EdgeSource | null>(null);
   const [confirmBadOddsTradeOpen, setConfirmBadOddsTradeOpen] = useState(false);
   const [checked, setChecked] = useState<string[]>([]);
@@ -433,6 +434,7 @@ export function PreTradeSnapshotForm({
   const optionalCount = checklistItems.filter(i => !i.required && i.source !== 'rule' && checked.includes(i.id)).length;
   const optionalTotal = checklistItems.filter(i => !i.required && i.source !== 'rule').length;
   const optionalNeed = Math.min(2, optionalTotal);
+  const oppCostWorth = oppCostAnswer == null ? null : oppCostAnswer === 'worth_it';
 
   const maxLoss = Number(maxLossInput);
   const maxLossValid = Number.isFinite(maxLoss) && maxLoss > 0;
@@ -501,7 +503,7 @@ export function PreTradeSnapshotForm({
   })();
   const badOddsGate = isTrade && !isHedge && oddsStructure === 'with_crowd_released';
   const smallOpportunityGate = isTrade && !isHedge && oddsStructure === 'neutral_choppy';
-  // 机会成本答「否」= 不做也不亏 = 填补无聊的小机会仓位，与坏结构同样触发二次确认。
+  // 机会成本答「否 / 说不清」= 不做也不亏 / 凭感觉 = 小机会仓位，与坏结构同样触发二次确认。
   const boredomGate = isTrade && !isHedge && oppCostWorth === false;
   const oddsCautionGate = badOddsGate || smallOpportunityGate || boredomGate;
 
@@ -1095,47 +1097,55 @@ export function PreTradeSnapshotForm({
                         );
                       })}
                     </div>
-                    {edgeSource === 'no_clear_edge' && (
-                      <div className="mt-2 rounded-xl border border-[#F6465D]/40 bg-[#F6465D]/10 px-3 py-2 text-[11px] leading-relaxed text-[#F6465D]">
-                        说不清源头 = 没有可复制的 edge。盈亏同源里它通常只贡献亏损 —— 认真想想这是不是在填补无聊。
-                      </div>
-                    )}
                   </div>
 
                   <div className="rounded-xl border border-border/60 bg-background/70 p-3">
                     <div className="text-[12px] font-medium text-foreground">
-                      与做相比，不做的机会成本更高吗？是在浪费机会吗？
+                      不做更亏吗？是在浪费机会吗？
                     </div>
                     <div className="mt-0.5 text-[10px] leading-relaxed text-muted-foreground">
-                      如果答案是「否」，说明这单本质是在填补无聊，是典型的「小机会仓位」。
+                      「否」或「说不清」都说明这单没有足够机会成本优势，默认视为「小机会仓位」。
                     </div>
-                    <div className="mt-2.5 grid grid-cols-2 gap-2">
+                    <div className="mt-2.5 grid gap-2 sm:grid-cols-3">
                       <button
                         type="button"
-                        onClick={() => setOppCostWorth(true)}
-                        className={`h-10 rounded-lg border text-[12px] font-medium transition-colors ${
-                          oppCostWorth === true
+                        onClick={() => setOppCostAnswer('worth_it')}
+                        className={`min-h-[44px] rounded-lg border px-2 text-[12px] font-medium transition-colors ${
+                          oppCostAnswer === 'worth_it'
                             ? 'border-[#0ECB81]/60 bg-[#0ECB81]/10 text-[#0ECB81]'
                             : 'border-border/70 bg-background/80 text-muted-foreground hover:border-border hover:bg-accent/70'
                         }`}
                       >
-                        是 · 不做更亏，值得做
+                        是 · 不做更亏
                       </button>
                       <button
                         type="button"
-                        onClick={() => setOppCostWorth(false)}
-                        className={`h-10 rounded-lg border text-[12px] font-medium transition-colors ${
-                          oppCostWorth === false
+                        onClick={() => setOppCostAnswer('not_worth_it')}
+                        className={`min-h-[44px] rounded-lg border px-2 text-[12px] font-medium transition-colors ${
+                          oppCostAnswer === 'not_worth_it'
                             ? 'border-[#F6465D]/60 bg-[#F6465D]/10 text-[#F6465D]'
                             : 'border-border/70 bg-background/80 text-muted-foreground hover:border-border hover:bg-accent/70'
                         }`}
                       >
                         否 · 不做也不亏
                       </button>
+                      <button
+                        type="button"
+                        onClick={() => setOppCostAnswer('unclear')}
+                        className={`min-h-[44px] rounded-lg border px-2 text-[12px] font-medium transition-colors ${
+                          oppCostAnswer === 'unclear'
+                            ? 'border-[#F0B90B]/60 bg-[#F0B90B]/10 text-[#D89B00]'
+                            : 'border-border/70 bg-background/80 text-muted-foreground hover:border-border hover:bg-accent/70'
+                        }`}
+                      >
+                        说不清 / 凭感觉
+                      </button>
                     </div>
                     {oppCostWorth === false && (
                       <div className="mt-2 rounded-xl border border-[#F0B90B]/40 bg-[#F0B90B]/10 px-3 py-2 text-[11px] leading-relaxed text-[#D89B00]">
-                        小机会仓位警告：它占用行动力，比空仓更差。系统默认建议空仓观望；仍要下单会进入二次确认。
+                        {oppCostAnswer === 'unclear'
+                          ? '说不清 / 凭感觉 → 小机会仓位。没有可解释的机会成本优势，就不要用行动力去填补模糊感。系统默认建议空仓观望；仍要下单会进入二次确认。'
+                          : '小机会仓位警告：它占用行动力，比空仓更差。系统默认建议空仓观望；仍要下单会进入二次确认。'}
                       </div>
                     )}
                   </div>
@@ -2244,7 +2254,9 @@ export function PreTradeSnapshotForm({
                 ? '你已经把这笔判定为“顺情绪 / 追价”的坏结构。系统默认建议空仓观望；如果仍要下，等于明确接受这不是高盈亏比，而是在逆着筛子强行出手。'
                 : smallOpportunityGate
                   ? '你已经把这笔判定为“中性震荡”。在震荡里开仓＝持有小机会仓位，比空仓更差；如果仍要下，等于明确接受行动力被占用、未来大机会时更容易犹豫。'
-                  : '你刚才回答：不做的机会成本并不更高。这意味着这一笔本质是在填补无聊——典型的小机会仓位，比空仓更差；如果仍要下，等于明确接受用行动力去换一个你自己都说不值得的机会。'}
+                  : oppCostAnswer === 'unclear'
+                    ? '你刚才回答：说不清 / 凭感觉。这意味着这一笔没有可解释的机会成本优势——典型的小机会仓位，比空仓更差；如果仍要下，等于明确接受用行动力去换一个模糊机会。'
+                    : '你刚才回答：不做的机会成本并不更高。这意味着这一笔本质是在填补无聊——典型的小机会仓位，比空仓更差；如果仍要下，等于明确接受用行动力去换一个你自己都说不值得的机会。'}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <div className="rounded-lg border border-[#F0B90B]/35 bg-[#F0B90B]/10 px-3 py-2 text-[11px] leading-relaxed text-[#D89B00]">

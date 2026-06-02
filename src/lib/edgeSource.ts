@@ -4,7 +4,7 @@ export interface EdgeSourceOption {
   id: EdgeSource;
   label: string;
   description: string;
-  /** no_clear_edge is the honest "I don't have one" answer — rendered as a warning. */
+  /** Rendered as a caution state when this option is available in a specific flow. */
   isWarning?: boolean;
 }
 
@@ -14,40 +14,19 @@ export interface EdgeSourceOption {
  */
 export const EDGE_SOURCE_OPTIONS: readonly EdgeSourceOption[] = [
   {
-    id: 'against_crowd',
-    label: '逆拥挤',
-    description: '在拥挤交易释放前逆向布局，赌人群结构反转 → 结构性高盈亏比的正源头',
-  },
-  {
     id: 'trend_follow',
     label: '顺势',
-    description: '跟随已确立的趋势惯性。利润来自趋势本身 → 警惕把趋势的能力当成自己的（贪天之功）',
-  },
-  {
-    id: 'structure_level',
-    label: '结构位',
-    description: '在关键支撑 / 阻力 / 区间边界处，赌价格对结构的反应',
+    description: '趋势刚起还是已延伸？只在趋势刚起、还没充分释放时，才可能是干净源头。',
   },
   {
     id: 'breakout',
     label: '突破',
-    description: '区间 / 形态突破后的动量跟进，源头是结构被打破后的加速',
+    description: '突破当下还是已加速远离？只在突破刚发生、结构刚被改写时，才值得占用行动力。',
   },
   {
     id: 'mean_reversion',
     label: '均值回归',
-    description: '价格极端偏离后赌它修复回均值',
-  },
-  {
-    id: 'event_catalyst',
-    label: '事件催化',
-    description: '消息 / 数据 / 资金费率等外部催化驱动的波动',
-  },
-  {
-    id: 'no_clear_edge',
-    label: '说不清 / 凭感觉',
-    description: '没有明确的优势来源 → 多半在填补无聊，是典型的「小机会仓位」',
-    isWarning: true,
+    description: '偏离够不够极端？没有足够极端的偏离，均值回归很容易只是震荡里的小机会。',
   },
 ] as const;
 

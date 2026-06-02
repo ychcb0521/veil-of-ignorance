@@ -23,10 +23,13 @@ describe('EDGE_SOURCE_OPTIONS', () => {
     }
   });
 
-  it('only no_clear_edge is flagged as a warning', () => {
-    const warnings = EDGE_SOURCE_OPTIONS.filter((o) => o.isWarning);
-    expect(warnings).toHaveLength(1);
-    expect(warnings[0].id).toBe('no_clear_edge');
+  it('renders only the three actionable source checks in the new snapshot', () => {
+    expect(EDGE_SOURCE_OPTIONS.map((o) => o.id)).toEqual([
+      'trend_follow',
+      'breakout',
+      'mean_reversion',
+    ]);
+    expect(EDGE_SOURCE_OPTIONS.filter((o) => o.isWarning)).toHaveLength(0);
   });
 });
 
