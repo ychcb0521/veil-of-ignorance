@@ -441,6 +441,17 @@ export function PreTradeSnapshotForm({
   // 回撤的非对称：亏掉 X% 后要 +Y% 才能回本（Y 永远 > X，越深越离谱）。
   const recoveryPct = maxLossPct != null ? recoveryGainPct(maxLossPct) : null;
   const recoveryRatio = maxLossPct != null ? recoveryAsymmetryRatio(maxLossPct) : null;
+  const finiteRecoveryPct = recoveryPct != null && Number.isFinite(recoveryPct) ? recoveryPct : null;
+  const recoveryScaleMax = maxLossPct != null
+    ? Math.max(10, maxLossPct, finiteRecoveryPct ?? maxLossPct)
+    : 10;
+  const drawdownVisualWidth = maxLossPct != null
+    ? Math.min(100, (maxLossPct / recoveryScaleMax) * 100)
+    : 0;
+  const recoveryVisualWidth = finiteRecoveryPct != null
+    ? Math.min(100, (finiteRecoveryPct / recoveryScaleMax) * 100)
+    : 100;
+  const afterLossEquityPct = maxLossPct != null ? Math.max(0, 100 - maxLossPct) : null;
 
   const decisionReady = whyRight.trim().length > 0
     && failureReason.trim().length > 0
@@ -1295,31 +1306,59 @@ export function PreTradeSnapshotForm({
                     当前账户净值估算 {accountEquity > 0 ? accountEquity.toFixed(2) : '—'} USDT
                   </div>
                   {maxLossPct != null && recoveryPct != null && recoveryRatio != null && (
-                    <div className="mt-2.5 rounded-lg border border-border/60 bg-background/60 p-2.5">
-                      <div className="flex items-center justify-between text-[10px] text-muted-foreground">
-                        <span>回撤的非对称</span>
+                    <div className="mt-2.5 rounded-xl border border-border/60 bg-background/60 p-3">
+                      <div className="flex items-start justify-between gap-3 text-[10px] text-muted-foreground">
+                        <span className="font-medium text-foreground">回撤的非对称</span>
                         {Number.isFinite(recoveryPct) ? (
-                          <span className="font-mono text-[#F0B90B]">回本需 +{recoveryPct.toFixed(1)}%（{recoveryRatio.toFixed(2)}×）</span>
+                          <span className="text-right font-mono text-[#F0B90B]">亏 {maxLossPct.toFixed(1)}% 后，回本要爬 +{recoveryPct.toFixed(1)}%</span>
                         ) : (
-                          <span className="font-mono text-[#F6465D]">几乎无法回本</span>
+                          <span className="text-right font-mono text-[#F6465D]">几乎无法回本</span>
                         )}
                       </div>
-                      <div className="mt-1.5 space-y-1">
-                        <div className="flex items-center gap-2">
-                          <span className="w-12 shrink-0 text-[9px] text-[#F6465D]">亏 {maxLossPct.toFixed(1)}%</span>
-                          <div className="h-2 flex-1 overflow-hidden rounded-full bg-muted">
+                      <div className="mt-3 rounded-lg border border-border/50 bg-muted/20 p-2.5">
+                        <div className="grid grid-cols-[42px_1fr_58px] items-center gap-2">
+                          <span className="text-[9px] text-[#F6465D]">下坠</span>
+                          <div className="h-3 overflow-hidden rounded-full bg-background shadow-inner">
                             <div
                               className="h-full rounded-full bg-[#F6465D]"
-                              style={{ width: `${Number.isFinite(recoveryPct) ? Math.min(100, (maxLossPct / recoveryPct) * 100) : 100}%` }}
+                              style={{ width: `${drawdownVisualWidth}%` }}
                             />
                           </div>
+                          <span className="text-right font-mono text-[9px] text-[#F6465D]">-{maxLossPct.toFixed(1)}%</span>
                         </div>
-                        <div className="flex items-center gap-2">
-                          <span className="w-12 shrink-0 text-[9px] text-[#0ECB81]">回本</span>
-                          <div className="h-2 flex-1 overflow-hidden rounded-full bg-muted">
-                            <div className="h-full w-full rounded-full bg-[#0ECB81]" />
+                        <div className="mt-2 grid grid-cols-[42px_1fr_58px] items-center gap-2">
+                          <span className="text-[9px] text-[#0ECB81]">爬回</span>
+                          <div className="h-3 overflow-hidden rounded-full bg-background shadow-inner">
+                            <div
+                              className="h-full rounded-full bg-[#0ECB81]"
+                              style={{ width: `${recoveryVisualWidth}%` }}
+                            />
+                          </div>
+                          <span className="text-right font-mono text-[9px] text-[#0ECB81]">
+                            {finiteRecoveryPct != null ? `+${finiteRecoveryPct.toFixed(1)}%` : '+∞'}
+                          </span>
+                        </div>
+                        <div className="mt-2 flex items-center justify-between gap-1 text-center font-mono text-[9px]">
+                          <div className="rounded-md border border-border/50 bg-background px-2 py-1">
+                            <div className="text-muted-foreground">初始</div>
+                            <div className="text-foreground">100</div>
+                          </div>
+                          <div className="h-px flex-1 bg-[#F6465D]/40" />
+                          <div className="rounded-md border border-[#F6465D]/30 bg-[#F6465D]/5 px-2 py-1">
+                            <div className="text-[#F6465D]">低点</div>
+                            <div className="text-[#F6465D]">{afterLossEquityPct != null ? afterLossEquityPct.toFixed(1) : '—'}</div>
+                          </div>
+                          <div className="h-px flex-1 bg-[#0ECB81]/40" />
+                          <div className="rounded-md border border-[#0ECB81]/30 bg-[#0ECB81]/5 px-2 py-1">
+                            <div className="text-[#0ECB81]">回本</div>
+                            <div className="text-[#0ECB81]">100</div>
                           </div>
                         </div>
+                        {Number.isFinite(recoveryRatio) && (
+                          <div className="mt-2 rounded-md bg-background/70 px-2 py-1 text-[9px] leading-relaxed text-muted-foreground">
+                            同一把尺：回本路程是下坠的 <span className="font-mono text-[#F0B90B]">{recoveryRatio.toFixed(2)}×</span>。
+                          </div>
+                        )}
                       </div>
                       <div className="mt-1.5 text-[9px] leading-relaxed text-muted-foreground">
                         亏掉的要用更大的涨幅才能赚回来，越深越难（-50% 要 +100%，-90% 要 +900%）。
