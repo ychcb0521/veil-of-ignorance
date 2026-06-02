@@ -7,6 +7,8 @@ export interface EdgeSourceOption {
   entryPrinciple: string;
   goodLocation: string;
   badLocation: string;
+  waitForEntry: string;
+  avoidWaitingUntil: string;
   /** Rendered as a caution state when this option is available in a specific flow. */
   isWarning?: boolean;
 }
@@ -23,6 +25,8 @@ export const EDGE_SOURCE_OPTIONS: readonly EdgeSourceOption[] = [
     entryPrinciple: '用低成本支点参与尚未结束的方向惯性。',
     goodLocation: '趋势未破，回调到支点，止损近，后续空间仍在。',
     badLocation: '趋势已经释放很远后追价。',
+    waitForEntry: '等趋势回调到支点。',
+    avoidWaitingUntil: '不能等到趋势情绪高潮。',
   },
   {
     id: 'breakout',
@@ -31,6 +35,8 @@ export const EDGE_SOURCE_OPTIONS: readonly EdgeSourceOption[] = [
     entryPrinciple: '在旧结构失效、新空间打开，但价格还没充分释放时入场。',
     goodLocation: '旧区间被突破，市场接受新价格，失败成本清楚。',
     badLocation: '只是价格越线，没有接受，或突破后追太晚。',
+    waitForEntry: '等旧结构被市场接受为失效。',
+    avoidWaitingUntil: '不能等到新空间已经释放完。',
   },
   {
     id: 'mean_reversion',
@@ -39,6 +45,8 @@ export const EDGE_SOURCE_OPTIONS: readonly EdgeSourceOption[] = [
     entryPrinciple: '等过度偏离后的边际动能衰竭，再用短止损博修复。',
     goodLocation: '偏离极端，动能减弱，情绪释放充分，回归目标清楚。',
     badLocation: '跌多就买、涨多就空，太早逆势接刀。',
+    waitForEntry: '等偏离极端且动能衰竭。',
+    avoidWaitingUntil: '不能在惯性还强时逆势接刀。',
   },
   {
     id: 'squeeze_release',
@@ -47,6 +55,8 @@ export const EDGE_SOURCE_OPTIONS: readonly EdgeSourceOption[] = [
     entryPrinciple: '站在被迫交易流的上游，而不是情绪释放后的末端。',
     goodLocation: '一方仓位拥挤，关键触发位临近，突破后会引发止损/爆仓/回补。',
     badLocation: '等挤压已经完成才追，买到流动性尾巴。',
+    waitForEntry: '等拥挤仓位接近触发。',
+    avoidWaitingUntil: '不能等到被迫流已经释放完。',
   },
   {
     id: 'no_clear_edge',
@@ -55,6 +65,8 @@ export const EDGE_SOURCE_OPTIONS: readonly EdgeSourceOption[] = [
     entryPrinciple: '没有机会源头，就没有入场资格。',
     goodLocation: '能说清楚为什么有优势。',
     badLocation: '只是想交易、怕错过、看起来要动。',
+    waitForEntry: '等它变成明确 edge。',
+    avoidWaitingUntil: '不能为了交易而交易。',
     isWarning: true,
   },
 ] as const;

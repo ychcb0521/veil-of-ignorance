@@ -63,11 +63,13 @@ interface Props {
 
 function EdgeSourceTooltipContent({ option }: { option: (typeof EDGE_SOURCE_OPTIONS)[number] }) {
   return (
-    <div className="max-w-[320px] space-y-1.5 text-[11px] leading-relaxed">
+    <div className="max-w-[340px] space-y-1.5 text-[11px] leading-relaxed">
       <div className="font-medium text-foreground">{option.label}</div>
       <div><span className="text-[#F0B90B]">入场第一性原理：</span>{option.entryPrinciple}</div>
       <div><span className="text-[#0ECB81]">好位置：</span>{option.goodLocation}</div>
       <div><span className="text-[#F6465D]">坏位置：</span>{option.badLocation}</div>
+      <div><span className="text-[#F0B90B]">入场要等：</span>{option.waitForEntry}</div>
+      <div><span className="text-[#F6465D]">不能等到：</span>{option.avoidWaitingUntil}</div>
     </div>
   );
 }
