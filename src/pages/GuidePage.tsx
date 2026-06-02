@@ -528,6 +528,18 @@ export default function GuidePage() {
                 顺序不能颠倒：源头不清就别问空间，空间不够就别谈胜率。胜率不能弥补坏源头或坏结构；空仓观望是正向选择，不是“没做事”。
               </Highlight>
 
+              <SubTitle>两层清单：排除性（一票否决）在前，评估性（慢思考脚手架）在后</SubTitle>
+              <P>主力单快照按<strong>芒格的两层清单</strong>组织：一张<strong>极短、刚性的排除性清单（一票否决）</strong>放在最前面，一张<strong>较长的评估性清单</strong>收在后面。把已有的硬阻挡显式标成“一票否决层”，正是为了<strong>在最不想用清单的时候，仍然被迫先过这张清单</strong>。</P>
+              <P><strong>第一层 · 排除性清单（快速生死筛）</strong>用红框前置：<strong>任意一项不过 = 直接否决、不能开单</strong>——① 强制逐仓；② 心态 ≥3（即<strong>心态 ≤2 硬阻挡</strong>，不给“我知道但继续”的后门）。它只筛“此刻能不能交易”，不评估这单好不好。</P>
+              <P><strong>第二层 · 评估性清单（慢思考脚手架）</strong>把第 0 步结构、源头、盈亏比目标、胜率三问等较长内容收进一个可折叠区，行为随心态分变化：</P>
+              <ul className="list-disc pl-6 text-[14px] text-foreground/90 space-y-1">
+                <li><strong>心态非满分</strong>（可交易档但未到 5 分）：评估层<strong>强制展开、不能收起</strong>，逐项填完才能开单——维持“前面是快速生死筛、后面才是慢思考脚手架”的原始体验，也避免把“必填却被折叠隐藏”的字段藏起来造成无法提交。</li>
+                <li><strong>心态满分（5 分）</strong>：评估层<strong>降级为可选并默认折叠</strong>——点开可填、不填也能开单（对应样本列会缺失）。这是对“状态最好时往往最不想走流程”的让步，但排除层那张一票否决清单依然挡在前面。</li>
+              </ul>
+              <Highlight>
+                这一层只动主力单：对冲单不出现评估层触发器；未入场（“太难，不做这单”）时，第一层显示为“心态自评 · 一票否决”，先稳住状态再谈该不该开。
+              </Highlight>
+
               <SubTitle>第一步 · 源头：这一单靠什么赚钱（五选一）</SubTitle>
               <P>第一步先认领这一单的不对称优势来自哪种<strong>市场机制</strong>。这里<strong>只识别 edge 来源，不判断值不值得下注</strong>。它在<strong>开仓当时</strong>固定下来，作为“盈亏同源”的归类标签，避免事后归因。</P>
               <div className="overflow-x-auto">
@@ -822,6 +834,25 @@ export default function GuidePage() {
                 盈亏同源的意思是：当同一个源头<strong>既是你最大的盈利、又是最大的亏损来源</strong>时，那不是该砍掉的毛病，而是 edge 本身的两面。别在一次亏损后把对的做法一起砍掉。
               </Highlight>
 
+              <SubTitle>工具箱集中度体检 · 铁锤人自检</SubTitle>
+              <P>这块紧接源头校准，但换一个问题：<strong>不看盈亏，只看你实际在用哪几招。</strong> 它把你<strong>全部主力单</strong>的 edge 源头按使用频次画成一组占比条，对应芒格的<strong>“铁锤人”（man with a hammer）</strong>——<strong>手里只有一把锤子，看什么都像钉子；越顺手的一招越危险，越成功越危险。</strong></P>
+              <P>它遵守<strong>样本量纪律</strong>：只统计<strong>主力单、且已入场</strong>的交易，并且<strong>样本不足 5 笔时不下结论</strong>（逸闻的复数不是数据）。够样本后：</P>
+              <div className="overflow-x-auto">
+                <table className="w-full text-[11px] my-3 border border-border rounded overflow-hidden">
+                  <thead className="bg-muted/50">
+                    <tr>
+                      <th className="text-left px-3 py-2 font-medium text-foreground text-[10px]">情形</th>
+                      <th className="text-left px-3 py-2 font-medium text-foreground text-[10px]">系统态度</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr><td className="px-3 py-2 border-t border-border"><span style={{ color: '#D89B00' }}>单一源头占比 ≥60%</span></td><td className="px-3 py-2 border-t border-border">黄色警示：“你 X% 的主力单都用这一招”，并反问——是这一招真的最适合你遇到的市场，还是你只会这一招、所以什么行情都套它？</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border">分布较分散</td><td className="px-3 py-2 border-t border-border">提示工具箱里有多把锤子，继续保持</td></tr>
+                  </tbody>
+                </table>
+              </div>
+              <P>当结构 × 源头错配的样本也够时，再补一行：多少笔的源头<strong>与当时市场结构不自洽</strong>——同一个动作换个结构就改变性质。<strong>这块仅展示、不阻塞保存。</strong></P>
+
               <SubTitle>过程纠结度（先行指标）</SubTitle>
               <P>仅主力单出现。用 1–5 记录<strong>这一单做得有多纠结 / 多轻松</strong>：<strong>1 极度煎熬 → 2 纠结 → 3 一般 → 4 轻松 → 5 行云流水</strong>。它锚定一句话：<strong>交易最重要的不是赚钱，是轻松。</strong></P>
               <RedHighlight>
@@ -849,6 +880,28 @@ export default function GuidePage() {
               <RedHighlight>
                 持有小机会仓位是<strong>一等负向状态：它比空仓更糟</strong>——在悄悄损耗你的行动力与对大机会的敏感度。把它的成本记成账，下次才舍得空仓。
               </RedHighlight>
+
+              <SubTitle>真正学到了什么：先事实，后解释</SubTitle>
+              <P>复盘最后的“这笔真正学到了什么”，<strong>把快照里“信息事实 vs 判断”的双通道好设计对称地搬了过来</strong>，拆成两栏填写：</P>
+              <div className="overflow-x-auto">
+                <table className="w-full text-[11px] my-3 border border-border rounded overflow-hidden">
+                  <thead className="bg-muted/50">
+                    <tr>
+                      <th className="text-left px-3 py-2 font-medium text-foreground text-[10px]">栏位</th>
+                      <th className="text-left px-3 py-2 font-medium text-foreground text-[10px]">写什么</th>
+                      <th className="text-left px-3 py-2 font-medium text-foreground text-[10px]">约束</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr><td className="px-3 py-2 border-t border-border">① 盘面发生了什么</td><td className="px-3 py-2 border-t border-border">只写可观察的事实：价格 / 成交 / 时间，不写原因</td><td className="px-3 py-2 border-t border-border">软性，可留空——但写下事实能挡住事后归因</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border">② 真正学到了什么（解释）</td><td className="px-3 py-2 border-t border-border">你的归因，以及下次具体怎么改</td><td className="px-3 py-2 border-t border-border"><span style={{ color: '#F6465D' }}>必填</span></td></tr>
+                  </tbody>
+                </table>
+              </div>
+              <RedHighlight>
+                先事实、后解释，是为了对抗<strong>叙事谬误</strong>：事后回看时，人最容易把“发生了什么”和“为什么”压成一个<strong>自洽的完美闭环</strong>，再当成真相。两栏分开写，逼你先承认看见了什么，再解释为什么。
+              </RedHighlight>
+              <P className="mt-2">两栏合存进同一字段，<strong>不新增数据库列</strong>；<strong>旧版只有一段的复盘自动归为“解释”，历史记录不受影响</strong>。</P>
             </section>
 
             <section id="s3-4" className="scroll-mt-20">
