@@ -825,15 +825,17 @@ export function PreTradeSnapshotForm({
     : isHedge ? '确认对冲并下单'
     : oddsCautionGate ? '空仓观望 / 太难不做' : '确认并下单';
 
-  const labelCls = 'text-[11px] text-muted-foreground';
+  const labelCls = 'text-[11px] font-medium text-muted-foreground';
   const requiredStar = <span className="ml-0.5 text-[#F6465D]">*</span>;
-  const inputCls = 'h-9 border-border bg-background text-[12px] text-foreground font-mono';
-  const textareaCls = 'min-h-[116px] resize-none border-border bg-background text-[12px] text-foreground leading-relaxed shadow-inner';
-  const mainSurfaceCls = 'rounded-xl border border-border/70 bg-card/95 shadow-sm';
-  const mainPanelTriggerCls = 'group flex w-full items-center justify-between gap-3 px-3.5 py-3 text-left transition-colors hover:bg-accent/40';
+  const inputCls = 'h-9 rounded-lg border-border/70 bg-background/80 text-[12px] text-foreground font-mono shadow-none';
+  const textareaCls = 'min-h-[108px] resize-none rounded-lg border-border/70 bg-background/80 text-[12px] text-foreground leading-relaxed shadow-none';
+  const mainSurfaceCls = 'rounded-2xl border border-border/60 bg-card/95 shadow-[0_16px_45px_rgba(15,23,42,0.045)]';
+  const mainPanelTriggerCls = 'group flex w-full items-center justify-between gap-3 px-4 py-3 text-left transition-colors hover:bg-muted/30';
   const mainSectionTitleCls = 'text-[12px] font-semibold tracking-normal text-foreground';
   const mainSectionHintCls = 'mt-0.5 text-[10px] leading-relaxed text-muted-foreground';
-  const mainStatusChipCls = 'inline-flex h-5 items-center rounded-full border border-border/70 bg-background/80 px-2 text-[10px] font-medium text-muted-foreground';
+  const mainStatusChipCls = 'inline-flex h-5 items-center rounded-full border border-border/60 bg-muted/35 px-2 text-[10px] font-medium text-muted-foreground';
+  const quietOptionCls = 'rounded-xl border border-border/60 bg-background/65 text-muted-foreground transition-colors hover:border-border hover:bg-muted/35';
+  const selectedOptionCls = 'border-foreground/35 bg-foreground/[0.035] text-foreground shadow-[inset_0_0_0_1px_rgba(255,255,255,0.02)]';
   const hedgeAnchorCardCls = 'flex h-full flex-col rounded-lg border border-border/70 bg-card p-3.5 shadow-none transition-colors';
   const hedgeAnchorHeaderCls = 'min-h-[60px] border-b border-border/40 pb-2';
   const hedgeAnchorButtonBaseCls = 'h-10 rounded-md border text-[12px] font-medium transition-colors';
@@ -857,7 +859,7 @@ export function PreTradeSnapshotForm({
 
   // 心态自评卡片（批次 25：主力单与对冲单共用同一组件，行为一致——≤2 硬阻断）。
   const mentalRatingCard = (
-    <div className="rounded-xl border border-border/70 bg-card/95 p-3 shadow-sm">
+    <div className="rounded-2xl border border-border/60 bg-card/85 p-3 shadow-[0_10px_28px_rgba(15,23,42,0.035)]">
       <div className={labelCls}>心态自评{requiredStar}</div>
       <div className="mt-2 grid grid-cols-5 gap-1">
         {[1, 2, 3, 4, 5].map(score => (
@@ -865,10 +867,10 @@ export function PreTradeSnapshotForm({
             key={score}
             type="button"
             onClick={() => setMental(score as 1 | 2 | 3 | 4 | 5)}
-            className={`h-8 rounded text-[12px] font-medium transition-colors ${
+            className={`h-8 rounded-lg border text-[12px] font-medium transition-colors ${
               mental === score
-                ? 'bg-[#F0B90B] text-black'
-                : 'bg-muted text-muted-foreground hover:bg-muted/80'
+                ? 'border-foreground/35 bg-foreground/[0.035] text-foreground'
+                : 'border-border/50 bg-background/60 text-muted-foreground hover:bg-muted/35'
             }`}
           >
             {score}
@@ -885,27 +887,38 @@ export function PreTradeSnapshotForm({
 
   return (
     <div className="flex flex-col">
-      <div className="border-b border-border px-5 py-4">
-        <h2 className="text-[14px] font-medium text-foreground">
-          {mode === 'no_entry' ? "记录'该开没开'决策" : '开仓快照'}
-        </h2>
-        <p className="mt-1 text-[11px] text-muted-foreground font-mono">
-          {fmtTime(simulatedTime)} · {symbol} · {directionLabel(direction)}
-          {isTrade && lockedEntryPrice ? ` · 入场价 ${lockedEntryPrice.toFixed(pricePrecision)}` : ''}
-          {isTrade ? ` · ${currentLeverage}x` : ''}
-        </p>
+      <div className="border-b border-border/70 bg-card/80 px-5 py-4">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="min-w-0">
+            <h2 className="text-[15px] font-semibold tracking-normal text-foreground">
+              {mode === 'no_entry' ? "记录'该开没开'决策" : '开仓快照'}
+            </h2>
+            <p className="mt-1 text-[11px] text-muted-foreground font-mono">
+              {fmtTime(simulatedTime)} · {symbol} · {directionLabel(direction)}
+            </p>
+          </div>
+          {isTrade && (
+            <div className="flex flex-wrap justify-end gap-1.5 text-[10px]">
+              {lockedEntryPrice != null && (
+                <span className={mainStatusChipCls}>入场 {lockedEntryPrice.toFixed(pricePrecision)}</span>
+              )}
+              <span className={mainStatusChipCls}>{currentLeverage}x</span>
+              <span className={mainStatusChipCls}>{currentMarginMode === 'isolated' ? '逐仓' : '全仓'}</span>
+            </div>
+          )}
+        </div>
       </div>
 
-      <div className="space-y-4 px-5 py-4">
+      <div className="space-y-3.5 px-5 py-4">
         {isTrade && (
-          <section className="grid gap-2 md:grid-cols-2">
+          <section className="grid rounded-2xl border border-border/60 bg-muted/25 p-1 md:grid-cols-2">
             <button
               type="button"
               onClick={() => setOrderKind('main')}
-              className={`rounded border px-3 py-2 text-left transition-colors ${
+              className={`rounded-xl px-3 py-2 text-left transition-colors ${
                 orderKind === 'main'
-                  ? 'border-foreground bg-foreground/5 text-foreground'
-                  : 'border-border bg-card text-muted-foreground hover:bg-accent'
+                  ? 'bg-card text-foreground shadow-sm'
+                  : 'text-muted-foreground hover:bg-background/50'
               }`}
             >
               <div className="text-[12px] font-medium">主力单</div>
@@ -914,10 +927,10 @@ export function PreTradeSnapshotForm({
             <button
               type="button"
               onClick={() => setOrderKind('hedge')}
-              className={`rounded border px-3 py-2 text-left transition-colors ${
+              className={`rounded-xl px-3 py-2 text-left transition-colors ${
                 orderKind === 'hedge'
-                  ? 'border-[#F0B90B] bg-[#F0B90B]/10 text-foreground'
-                  : 'border-border bg-card text-muted-foreground hover:bg-accent'
+                  ? 'bg-card text-foreground shadow-sm'
+                  : 'text-muted-foreground hover:bg-background/50'
               }`}
             >
               <div className="text-[12px] font-medium">对冲单</div>
@@ -935,10 +948,10 @@ export function PreTradeSnapshotForm({
         )}
 
         {isTrade && (
-          <section className="rounded-xl border border-border/70 bg-card/95 p-3 shadow-sm">
+          <section className="rounded-2xl border border-border/60 bg-card/80 p-3 shadow-[0_10px_28px_rgba(15,23,42,0.035)]">
             <div className="flex items-center justify-between gap-3">
               <div>
-                <div className={labelCls}>仓位模式{requiredStar}</div>
+                <div className={labelCls}>硬约束 · 仓位模式{requiredStar}</div>
                 <div className={`mt-1 text-[13px] font-medium ${crossBlocked ? 'text-[#F6465D]' : 'text-[#0ECB81]'}`}>
                   {currentMarginMode === 'isolated' ? '逐仓' : '全仓'}
                 </div>
@@ -975,7 +988,7 @@ export function PreTradeSnapshotForm({
                 </div>
                 <div className="space-y-3 px-3.5 py-3">
                   <div>
-                    <div className="mb-1.5 text-[11px] font-medium text-foreground">这一单的 edge 来自哪种市场机制？</div>
+                    <div className="mb-1.5 text-[11px] font-medium text-foreground">这一单靠什么赚钱？</div>
                     <TooltipProvider delayDuration={120}>
                       <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
                         {EDGE_SOURCE_OPTIONS.map(opt => {
@@ -987,12 +1000,12 @@ export function PreTradeSnapshotForm({
                                 <button
                                   type="button"
                                   onClick={() => setEdgeSource(opt.id)}
-                                  className={`min-h-[66px] rounded-xl border px-3 py-2 text-left transition-colors ${
+                                  className={`min-h-[64px] px-3 py-2 text-left ${
                                     active
                                       ? warn
-                                        ? 'border-[#F6465D]/70 bg-[#F6465D]/10 text-foreground shadow-sm'
-                                        : 'border-[#F0B90B]/70 bg-[#F0B90B]/10 text-foreground shadow-sm'
-                                      : 'border-border/70 bg-background/80 text-muted-foreground hover:border-border hover:bg-accent/70'
+                                        ? 'rounded-xl border border-[#F6465D]/35 bg-[#F6465D]/5 text-foreground'
+                                        : `rounded-xl ${selectedOptionCls}`
+                                      : quietOptionCls
                                   }`}
                                 >
                                   <div className="flex items-center justify-between gap-2">
@@ -1013,7 +1026,7 @@ export function PreTradeSnapshotForm({
                       </div>
                     </TooltipProvider>
                     <div className="mt-2 grid gap-2 lg:grid-cols-[minmax(0,1fr)_320px]">
-                      <Collapsible className="rounded-xl border border-border/60 bg-background/70">
+                      <Collapsible className="rounded-xl border border-border/55 bg-background/55">
                         <CollapsibleTrigger className="group flex w-full items-center justify-between gap-3 px-3 py-2 text-left">
                           <span className="text-[11px] font-medium text-muted-foreground">查看源头标签说明表</span>
                           <ChevronDown className="h-3.5 w-3.5 text-muted-foreground transition-transform group-data-[state=open]:rotate-180" />
@@ -1035,19 +1048,19 @@ export function PreTradeSnapshotForm({
                           </div>
                         </CollapsibleContent>
                       </Collapsible>
-                      <Collapsible className="rounded-xl border border-[#F0B90B]/30 bg-[#F0B90B]/5">
+                      <Collapsible className="rounded-xl border border-border/55 bg-background/55">
                         <CollapsibleTrigger className="group flex w-full items-center justify-between gap-3 px-3 py-2 text-left">
-                          <span className="text-[11px] font-medium text-[#D89B00]">查看入场口诀</span>
-                          <ChevronDown className="h-3.5 w-3.5 text-[#D89B00] transition-transform group-data-[state=open]:rotate-180" />
+                          <span className="text-[11px] font-medium text-muted-foreground">查看入场口诀</span>
+                          <ChevronDown className="h-3.5 w-3.5 text-muted-foreground transition-transform group-data-[state=open]:rotate-180" />
                         </CollapsibleTrigger>
-                        <CollapsibleContent className="border-t border-[#F0B90B]/20 px-3 pb-3 pt-2 text-[10px] leading-relaxed text-muted-foreground">
+                        <CollapsibleContent className="border-t border-border/60 px-3 pb-3 pt-2 text-[10px] leading-relaxed text-muted-foreground">
                           顺势入场看支点、参与惯性；突破入场看接受、参与扩张；均值回归入场看衰竭、参与修复；挤压释放入场看触发、站在被迫交易流的上游。
                         </CollapsibleContent>
                       </Collapsible>
                     </div>
                   </div>
 
-                  <div className="rounded-xl border border-border/60 bg-background/70 p-3">
+                  <div className="rounded-xl border border-border/55 bg-background/55 p-3">
                     <div className="text-[12px] font-medium text-foreground">
                       不做更亏吗？是在浪费机会吗？
                     </div>
@@ -1058,10 +1071,10 @@ export function PreTradeSnapshotForm({
                       <button
                         type="button"
                         onClick={() => setOppCostAnswer('worth_it')}
-                        className={`min-h-[44px] rounded-lg border px-2 text-[12px] font-medium transition-colors ${
+                        className={`min-h-[42px] rounded-lg border px-2 text-[12px] font-medium transition-colors ${
                           oppCostAnswer === 'worth_it'
-                            ? 'border-[#0ECB81]/60 bg-[#0ECB81]/10 text-[#0ECB81]'
-                            : 'border-border/70 bg-background/80 text-muted-foreground hover:border-border hover:bg-accent/70'
+                            ? 'border-foreground/35 bg-foreground/[0.035] text-foreground'
+                            : 'border-border/60 bg-background/60 text-muted-foreground hover:bg-muted/35'
                         }`}
                       >
                         是 · 不做更亏
@@ -1069,10 +1082,10 @@ export function PreTradeSnapshotForm({
                       <button
                         type="button"
                         onClick={() => setOppCostAnswer('not_worth_it')}
-                        className={`min-h-[44px] rounded-lg border px-2 text-[12px] font-medium transition-colors ${
+                        className={`min-h-[42px] rounded-lg border px-2 text-[12px] font-medium transition-colors ${
                           oppCostAnswer === 'not_worth_it'
-                            ? 'border-[#F6465D]/60 bg-[#F6465D]/10 text-[#F6465D]'
-                            : 'border-border/70 bg-background/80 text-muted-foreground hover:border-border hover:bg-accent/70'
+                            ? 'border-[#F6465D]/35 bg-[#F6465D]/5 text-[#F6465D]'
+                            : 'border-border/60 bg-background/60 text-muted-foreground hover:bg-muted/35'
                         }`}
                       >
                         否 · 不做也不亏
@@ -1080,17 +1093,17 @@ export function PreTradeSnapshotForm({
                       <button
                         type="button"
                         onClick={() => setOppCostAnswer('unclear')}
-                        className={`min-h-[44px] rounded-lg border px-2 text-[12px] font-medium transition-colors ${
+                        className={`min-h-[42px] rounded-lg border px-2 text-[12px] font-medium transition-colors ${
                           oppCostAnswer === 'unclear'
-                            ? 'border-[#F0B90B]/60 bg-[#F0B90B]/10 text-[#D89B00]'
-                            : 'border-border/70 bg-background/80 text-muted-foreground hover:border-border hover:bg-accent/70'
+                            ? 'border-[#F0B90B]/35 bg-[#F0B90B]/5 text-[#D89B00]'
+                            : 'border-border/60 bg-background/60 text-muted-foreground hover:bg-muted/35'
                         }`}
                       >
                         说不清 / 凭感觉
                       </button>
                     </div>
                     {oppCostWorth === false && (
-                      <div className="mt-2 rounded-xl border border-[#F0B90B]/40 bg-[#F0B90B]/10 px-3 py-2 text-[11px] leading-relaxed text-[#D89B00]">
+                      <div className="mt-2 rounded-xl border border-[#F0B90B]/30 bg-[#F0B90B]/5 px-3 py-2 text-[11px] leading-relaxed text-[#D89B00]">
                         {oppCostAnswer === 'unclear'
                           ? '说不清 / 凭感觉 → 小机会仓位。没有可解释的机会成本优势，就不要用行动力去填补模糊感。系统默认建议空仓观望；仍要下单会进入二次确认。'
                           : '小机会仓位警告：它占用行动力，比空仓更差。系统默认建议空仓观望；仍要下单会进入二次确认。'}
@@ -1113,7 +1126,7 @@ export function PreTradeSnapshotForm({
                   <span className={mainStatusChipCls}>{oddsDoneCount}/5</span>
                 </div>
                 <div className="space-y-3 px-3.5 py-3">
-                  <div className="grid gap-2 lg:grid-cols-3">
+                  <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
                     {ODDS_STRUCTURE_OPTIONS.map(option => (
                       <button
                         key={option.id}
@@ -1128,10 +1141,10 @@ export function PreTradeSnapshotForm({
                             setConfirmBadOddsTradeOpen(false);
                           }
                         }}
-                        className={`min-h-[92px] rounded-xl border px-3 py-2.5 text-left transition-colors ${
+                        className={`min-h-[88px] px-3 py-2.5 text-left ${
                           oddsStructure === option.id
-                            ? 'border-[#F0B90B]/70 bg-[#F0B90B]/10 text-foreground shadow-sm'
-                            : 'border-border/70 bg-background/80 text-muted-foreground hover:border-border hover:bg-accent/70'
+                            ? `rounded-xl ${selectedOptionCls}`
+                            : quietOptionCls
                         }`}
                       >
                         <div className="flex items-center justify-between gap-2">
@@ -1144,7 +1157,7 @@ export function PreTradeSnapshotForm({
                       </button>
                     ))}
                   </div>
-                  <Collapsible className="rounded-xl border border-border/60 bg-background/70">
+                  <Collapsible className="rounded-xl border border-border/55 bg-background/55">
                     <CollapsibleTrigger className="group flex w-full items-center justify-between gap-3 px-3 py-2 text-left">
                       <span className="text-[11px] font-medium text-muted-foreground">查看盈亏比目标说明表</span>
                       <ChevronDown className="h-3.5 w-3.5 text-muted-foreground transition-transform group-data-[state=open]:rotate-180" />
@@ -1168,7 +1181,8 @@ export function PreTradeSnapshotForm({
                     </CollapsibleContent>
                   </Collapsible>
 
-                  <div className="rounded-xl border border-border/60 bg-background/70 p-3">
+                  <div className="grid gap-3 lg:grid-cols-2">
+                  <div className="rounded-xl border border-border/55 bg-background/55 p-3">
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
                         <div className="text-[11px] font-semibold text-foreground">R 回撤滑条 · 成本分母效应{requiredStar}</div>
@@ -1288,7 +1302,7 @@ export function PreTradeSnapshotForm({
                     )}
                   </div>
 
-                  <div className="rounded-xl border border-border/60 bg-background/70 p-3">
+                  <div className="rounded-xl border border-border/55 bg-background/55 p-3">
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
                         <div className="text-[11px] font-semibold text-foreground">盈亏比滑条</div>
@@ -1323,6 +1337,7 @@ export function PreTradeSnapshotForm({
                       </div>
                     </div>
                   </div>
+                  </div>
 
                   <div className="grid items-stretch gap-2 md:grid-cols-3">
                     {[
@@ -1355,14 +1370,14 @@ export function PreTradeSnapshotForm({
                       return (
                         <label
                           key={q.index}
-                          className="group flex h-full min-h-[236px] flex-col rounded-xl border bg-background/80 p-3 shadow-sm transition-colors"
+                          className="group flex h-full min-h-[210px] flex-col rounded-xl border border-border/60 bg-background/65 p-3 transition-colors"
                           style={{
                             borderColor: filled ? '#F0B90B' : 'hsl(var(--border))',
                             background: filled ? '#F0B90B0A' : undefined,
                           }}
                         >
                           <div className="mb-2.5 flex min-h-[46px] items-start gap-2.5">
-                            <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[#F0B90B] text-[11px] font-bold text-black">
+                            <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-[#F0B90B]/35 bg-background text-[11px] font-bold text-[#D89B00]">
                               {q.index}
                             </span>
                             <div className="min-w-0">
@@ -1374,7 +1389,7 @@ export function PreTradeSnapshotForm({
                             value={q.value}
                             onChange={event => q.onChange(event.target.value)}
                             placeholder={q.placeholder}
-                            className={`${textareaCls} min-h-[128px] flex-1 bg-background/95`}
+                            className={`${textareaCls} min-h-[116px] flex-1 bg-background/90`}
                           />
                           <div className="mt-1.5 flex items-center justify-between text-[10px] text-muted-foreground">
                             <span className="inline-flex h-4 items-center rounded bg-[#F0B90B]/10 px-1.5 text-[9px] font-medium text-[#D89B00]">
@@ -1460,7 +1475,7 @@ export function PreTradeSnapshotForm({
                   return (
                     <label
                       key={q.id}
-                      className="group flex h-full min-h-[236px] flex-col rounded-xl border bg-background/80 p-3 shadow-sm transition-colors"
+                      className="group flex h-full min-h-[210px] flex-col rounded-xl border border-border/60 bg-background/65 p-3 transition-colors"
                       style={{
                         borderColor: filled ? q.accent : 'hsl(var(--border))',
                         background: filled ? `${q.accent}0A` : undefined,
@@ -1468,8 +1483,8 @@ export function PreTradeSnapshotForm({
                     >
                       <div className="mb-2.5 flex min-h-[46px] items-start gap-2.5">
                         <span
-                          className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[11px] font-bold text-black"
-                          style={{ background: q.accent }}
+                          className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border bg-background text-[11px] font-bold"
+                          style={{ borderColor: `${q.accent}55`, color: q.accent }}
                         >
                           {q.index}
                         </span>
@@ -1484,7 +1499,7 @@ export function PreTradeSnapshotForm({
                         value={value}
                         onChange={event => onChange(event.target.value)}
                         placeholder={q.placeholder}
-                        className={`${textareaCls} min-h-[128px] flex-1 bg-background/95`}
+                        className={`${textareaCls} min-h-[116px] flex-1 bg-background/90`}
                       />
                       <div className="mt-1.5 flex items-center justify-between text-[10px] text-muted-foreground">
                         <span
@@ -2408,31 +2423,39 @@ export function PreTradeSnapshotForm({
         </Collapsible>
 
         {!isHedge && isTrade && (
-          <section className={`${mainSurfaceCls} p-3`}>
-            <div className="mb-2 flex items-center justify-between">
-              <div className="text-[12px] font-semibold text-foreground">开仓 Checklist{requiredStar}</div>
-              <div className={mainStatusChipCls}>
-                必填 {requiredCount}/{requiredTotal} · 可选 {optionalCount}/{optionalNeed}
+          <Collapsible className={`${mainSurfaceCls} overflow-hidden`}>
+            <CollapsibleTrigger className={mainPanelTriggerCls}>
+              <div className="min-w-0">
+                <div className="text-[12px] font-semibold text-foreground">开仓 Checklist{requiredStar}</div>
+                <div className="mt-0.5 text-[10px] text-muted-foreground">执行约束默认折叠，进度必须补齐。</div>
               </div>
-            </div>
-            <div className="grid gap-2 md:grid-cols-2">
-              {checklistItems.map(item => (
-                <label
-                  key={item.id}
-                  className="flex min-h-[36px] items-center gap-2 rounded-lg border border-border/60 bg-background/80 px-2.5 py-1.5 text-[12px]"
-                >
-                  <Checkbox
-                    checked={checked.includes(item.id)}
-                    onCheckedChange={value => toggleChecklist(item.id, Boolean(value))}
-                  />
-                  <span className="flex-1 leading-snug">
-                    {item.label}
-                    {item.required && <span className="ml-1 text-[10px] text-[#F0B90B]">必填</span>}
-                  </span>
-                </label>
-              ))}
-            </div>
-          </section>
+              <div className="flex shrink-0 items-center gap-3">
+                <div className={mainStatusChipCls}>
+                  必填 {requiredCount}/{requiredTotal} · 可选 {optionalCount}/{optionalNeed}
+                </div>
+                <ChevronDown className="h-4 w-4 text-muted-foreground transition-transform group-data-[state=open]:rotate-180" />
+              </div>
+            </CollapsibleTrigger>
+            <CollapsibleContent className="border-t border-border/60 px-3.5 py-3">
+              <div className="grid gap-2 md:grid-cols-2">
+                {checklistItems.map(item => (
+                  <label
+                    key={item.id}
+                    className="flex min-h-[36px] items-center gap-2 rounded-lg border border-border/55 bg-background/60 px-2.5 py-1.5 text-[12px]"
+                  >
+                    <Checkbox
+                      checked={checked.includes(item.id)}
+                      onCheckedChange={value => toggleChecklist(item.id, Boolean(value))}
+                    />
+                    <span className="flex-1 leading-snug">
+                      {item.label}
+                      {item.required && <span className="ml-1 text-[10px] text-[#D89B00]">必填</span>}
+                    </span>
+                  </label>
+                ))}
+              </div>
+            </CollapsibleContent>
+          </Collapsible>
         )}
       </div>
 
