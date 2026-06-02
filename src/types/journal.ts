@@ -36,6 +36,27 @@ export type HedgeOrderMethod = "limit_preset" | "market_chase";
 /** Post-close verdict feeding the hedge calibration curve. */
 export type HedgeWorthIt = "yes" | "partial" | "no";
 export type OddsStructure = "against_crowd_unreleased" | "neutral_choppy" | "with_crowd_released";
+/**
+ * Edge / 源头：这一单的不对称优势来自哪里。结构判定，不是涨幅预测。
+ * 在快照时标注（属于 thesis 的一部分，避免事后归因），用于复盘「盈亏同源」分析。
+ */
+export type EdgeSource =
+  | 'against_crowd'   // 逆拥挤 / 反人群结构
+  | 'trend_follow'    // 顺势 / 趋势惯性（警惕「贪天之功」）
+  | 'structure_level' // 关键结构位反应（支撑 / 阻力 / 区间边界）
+  | 'breakout'        // 突破 / 动量跟进
+  | 'mean_reversion'  // 均值回归 / 极端偏离修复
+  | 'event_catalyst'  // 事件 / 消息 / 资金费率等外部催化
+  | 'no_clear_edge';  // 说不清 / 凭感觉（填补无聊 → 小机会仓位）
+/**
+ * 小机会仓位的隐性成本记账：持有小机会仓位是「一等负向状态」，比空仓更差，
+ * 因为它损耗的是行动力本身。只对被标记为小机会仓位的单子在复盘时追问。
+ */
+export type SmallPositionDrag =
+  | 'none'          // 无明显拖累：是干净的小仓，没影响别的
+  | 'attention_only'// 占用了注意力 / 心力，但没错过大机会
+  | 'missed_bigger' // 钝化了敏感度，做小 / 错过了真正更大的机会
+  | 'chain_reaction';// 引发后续乱做（无聊 → 乱做 → 复仇等连锁负向）
 export type JournalSource = 'live' | 'retroactive_from_record';
 /** Training-set vs holdout-set discipline (anti-overfitting). */
 export type DatasetSplit = 'in_sample' | 'out_of_sample';
@@ -510,6 +531,15 @@ export interface TradeJournal {
   /** Account equity snapshot used to reconstruct the risk-anchor percentage. */
   pre_account_equity_usdt?: number | null;
 
+  // ============ 《不对称思考》review layer (main order only) ============
+  /**
+   * 机会成本问句（结构判定之后）：「与做相比，不做的机会成本更高吗？」
+   * true = 不做的代价更高（值得做）；false = 不做也不亏 → 填补无聊的「小机会仓位」。
+   */
+  pre_opportunity_cost_worth?: boolean | null;
+  /** Edge / 源头标签：这一单的不对称优势来自哪里（在快照标注，避免事后归因），用于盈亏同源。 */
+  pre_edge_source?: EdgeSource | null;
+
   // ============ Batch 24: Munger layer ============
   /** 'trade' (default, incl. legacy no_entry decision record) or 'no_trade' (too-hard skip). */
   journal_kind?: JournalKind;
@@ -623,6 +653,10 @@ export interface TradeJournal {
   post_result_summary?: string | null;
   /** Good/bad decision under information available at entry, independent of outcome. */
   post_decision_quality?: DecisionQuality | null;
+  /** 纠结度 / 轻松度（1 煎熬 … 5 行云流水）。过程质量的先行指标 —— 交易最重要的是轻松，不是赚钱。 */
+  post_struggle_level?: 1 | 2 | 3 | 4 | 5 | null;
+  /** 小机会仓位的隐性成本记账。仅对快照里被标记为小机会仓位的单子追问。 */
+  post_small_position_drag?: SmallPositionDrag | null;
   post_positive_expectancy_review?: string | null;
   post_premortem_review?: string | null;
   post_invalidation_review?: string | null;

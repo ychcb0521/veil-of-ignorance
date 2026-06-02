@@ -13,10 +13,20 @@ import { Label } from '@/components/ui/label';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { toast } from 'sonner';
-import { Pencil, ChevronDown, BrainCircuit } from 'lucide-react';
+import { Pencil, ChevronDown, BrainCircuit, AlertTriangle } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useTradingContext } from '@/contexts/TradingContext';
 import { COGNITIVE_BIAS_LABELS } from '@/lib/cognitiveBiasTags';
+import { EDGE_SOURCE_OPTIONS, EDGE_SOURCE_LABELS } from '@/lib/edgeSource';
+import {
+  classifyStructureResult,
+  STRUCTURE_RESULT_QUADRANTS,
+  STRUGGLE_LEVEL_LABELS,
+  STRUGGLE_LEVEL_HINTS,
+  SMALL_POSITION_DRAG_OPTIONS,
+  type StruggleLevel,
+  type StructureResultQuadrant,
+} from '@/lib/structureResult';
 import { parseHedgeBoundaryBasis } from '@/lib/hedgeBoundaryBasis';
 import { HEDGE_BOUNDARY_STANCE_LABELS, HEDGE_ORDER_METHOD_LABELS, HEDGE_TYPE_LABELS } from '@/lib/hedgeTypes';
 import {
@@ -70,6 +80,9 @@ export function PostTradeReviewSheet({
   const [invalidationReview, setInvalidationReview] = useState('');
   const [falsificationStatus, setFalsificationStatus] = useState<TradeJournal['exit_falsification_status']>(null);
   const [falsificationNote, setFalsificationNote] = useState('');
+  const [struggleLevel, setStruggleLevel] = useState<StruggleLevel | null>(null);
+  const [smallPositionDrag, setSmallPositionDrag] = useState<TradeJournal['post_small_position_drag']>(null);
+  const [edgeSourceBackfill, setEdgeSourceBackfill] = useState<TradeJournal['pre_edge_source']>(null);
   const [hedgeWorthIt, setHedgeWorthIt] = useState<TradeJournal['hedge_worth_it']>(null);
   const [opponentWasRight, setOpponentWasRight] = useState<boolean | null>(null);
   const [fiveStepGoal, setFiveStepGoal] = useState('');
@@ -117,6 +130,9 @@ export function PostTradeReviewSheet({
         setInvalidationReview(journal.post_invalidation_review ?? '');
         setFalsificationStatus(journal.exit_falsification_status ?? null);
         setFalsificationNote(journal.exit_falsification_note ?? '');
+        setStruggleLevel((journal.post_struggle_level as StruggleLevel | null) ?? null);
+        setSmallPositionDrag(journal.post_small_position_drag ?? null);
+        setEdgeSourceBackfill(journal.pre_edge_source ?? null);
         setHedgeWorthIt(journal.hedge_worth_it ?? null);
         setOpponentWasRight(journal.post_opponent_was_right ?? null);
         setFiveStepGoal(journal.post_five_step_goal ?? '');
@@ -260,6 +276,19 @@ export function PostTradeReviewSheet({
     ? (journal.pre_max_loss_usdt / journal.pre_account_equity_usdt) * 100
     : null;
 
+  // 结构 × 结果 四象限：结构轴 = 当时决策质量，结果轴 = 这单赢/亏。
+  const quadrantApplicable = journal.direction !== 'no_entry' && (outcome === 'win' || outcome === 'loss');
+  const quadrant = classifyStructureResult(decisionQuality, outcome);
+  // edge 源头：开仓已标则只读回显；旧快照漏标则允许复盘补标，纳入「盈亏同源」。
+  const showEdgeSource = !isHedge && journal.direction !== 'no_entry';
+  const capturedEdge = journal.pre_edge_source ?? null;
+  // 小机会仓位记账：开仓判定「不做也不亏」或结构为中性震荡时触发。
+  const showSmallPositionDrag = !isHedge
+    && journal.direction !== 'no_entry'
+    && (journal.pre_opportunity_cost_worth === false || journal.pre_odds_structure === 'neutral_choppy');
+  // 结构对／错的 2×2 排布（上排结构对、下排结构错；左列赢、右列亏）。
+  const QUADRANT_GRID: StructureResultQuadrant[] = ['deserved_win', 'correct_loss', 'dangerous_win', 'deserved_loss'];
+
   const tagsValid = noErrors || selectedTags.length >= 1;
   const reflectionValid = !!reflection.trim();
   const correctValid = !!correctAction.trim();
@@ -303,6 +332,10 @@ export function PostTradeReviewSheet({
         post_correct_action: correctAction.trim(),
         post_result_summary: resultSummary.trim(),
         post_decision_quality: decisionQuality,
+        post_struggle_level: struggleLevel,
+        post_small_position_drag: showSmallPositionDrag ? smallPositionDrag : null,
+        // 仅当开仓漏标 edge 且本次复盘补标时回写（不覆盖开仓已标的源头）。
+        ...(capturedEdge == null && edgeSourceBackfill != null ? { pre_edge_source: edgeSourceBackfill } : {}),
         post_positive_expectancy_review: buildOddsStructureReviewText(expectancyReview, oddsStructureReviewValue),
         post_premortem_review: premortemReview.trim(),
         post_invalidation_review: invalidationReview.trim(),
@@ -756,15 +789,188 @@ export function PostTradeReviewSheet({
               ))}
             </div>
             <p className="text-[10px] text-muted-foreground">坏结果不自动等于坏决策；好结果也不自动等于好决策。</p>
-            {outcome === 'win' && (
-              <p className="rounded border border-[#F0B90B]/40 bg-[#F0B90B]/10 px-2 py-1.5 text-[10px] leading-relaxed text-[#D89B00]">
-                {decisionQuality === 'good'
-                  ? '这笔赚钱了 — 但先确认它不是靠运气：如果当时推理错了、只是运气好，照样标成「坏决策」记下来。'
-                  : '赚钱但靠运气 = 坏决策。结果盈利不改判当时的推理质量，照样如实记下来。'}
-              </p>
+          </div>
+
+          {quadrantApplicable && (
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <Label className="text-[12px] font-medium">结构 × 结果</Label>
+                <span className="text-[10px] text-muted-foreground">机会是运气，优秀是结构</span>
+              </div>
+              <div className="grid grid-cols-2 gap-1.5">
+                {QUADRANT_GRID.map(cell => {
+                  const meta = STRUCTURE_RESULT_QUADRANTS[cell];
+                  const active = quadrant === cell;
+                  return (
+                    <div
+                      key={cell}
+                      className={`rounded-lg border px-2.5 py-2 leading-tight transition-colors ${
+                        active ? '' : 'border-border/60 bg-background/40'
+                      }`}
+                      style={active ? { borderColor: meta.accent, backgroundColor: `${meta.accent}1A` } : undefined}
+                    >
+                      <div
+                        className={`text-[11px] font-semibold ${active ? '' : 'text-muted-foreground'}`}
+                        style={active ? { color: meta.accent } : undefined}
+                      >
+                        {meta.label}
+                      </div>
+                      <div className="text-[9px] text-muted-foreground">
+                        {meta.structureSound ? '结构对' : '结构错'} · {meta.isWin ? '赢' : '亏'}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+              {quadrant ? (
+                <div
+                  className="flex gap-2 rounded-lg border px-3 py-2 text-[11px] leading-relaxed"
+                  style={{
+                    borderColor: `${STRUCTURE_RESULT_QUADRANTS[quadrant].accent}66`,
+                    backgroundColor: `${STRUCTURE_RESULT_QUADRANTS[quadrant].accent}14`,
+                    color: STRUCTURE_RESULT_QUADRANTS[quadrant].accent,
+                  }}
+                >
+                  {STRUCTURE_RESULT_QUADRANTS[quadrant].isDanger && (
+                    <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                  )}
+                  <span>
+                    <span className="font-semibold">{STRUCTURE_RESULT_QUADRANTS[quadrant].label}</span>
+                    ：{STRUCTURE_RESULT_QUADRANTS[quadrant].insight}
+                  </span>
+                </div>
+              ) : (
+                <p className="rounded border border-border/60 bg-background/40 px-2 py-1.5 text-[10px] leading-relaxed text-muted-foreground">
+                  决策质量标成了「混合」—— 先判成「好」或「坏」，才看得清这是「实力兑现」「危险盈利」还是「正确的亏损」。
+                </p>
+              )}
+            </div>
+          )}
+        </div>
+
+        {showEdgeSource && (
+          <div className={`space-y-2 px-4 py-4 ${sectionCardClass}`}>
+            <div className="flex items-center justify-between">
+              <div className="text-[12px] font-medium">源头校准 · 盈亏同源</div>
+              {capturedEdge && (
+                <span className="text-[10px] text-muted-foreground">开仓已标</span>
+              )}
+            </div>
+            {capturedEdge ? (
+              <div className="rounded-lg border border-border/60 bg-background/60 px-3 py-2 text-[11px] leading-relaxed">
+                <span className="text-muted-foreground">这一单的 edge 源头：</span>
+                <span className="font-medium text-foreground">{EDGE_SOURCE_LABELS[capturedEdge]}</span>
+                <p className="mt-1 text-[10px] text-muted-foreground">
+                  盈亏会归到这个源头下。当同一个源头既是你最大的盈利、又是最大的亏损来源时，就是「盈亏同源」—— 别砍掉对的做法。
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                <p className="text-[10px] leading-relaxed text-muted-foreground">
+                  这单开仓时没标 edge 源头（旧快照）。补一个，才能纳入「盈亏同源」统计：
+                </p>
+                <div className="grid grid-cols-2 gap-1.5">
+                  {EDGE_SOURCE_OPTIONS.map(opt => {
+                    const active = edgeSourceBackfill === opt.id;
+                    const warn = opt.isWarning;
+                    return (
+                      <button
+                        key={opt.id}
+                        type="button"
+                        onClick={() => setEdgeSourceBackfill(active ? null : opt.id)}
+                        className={`rounded-lg border px-2.5 py-1.5 text-left text-[11px] transition-colors ${
+                          active
+                            ? warn
+                              ? 'border-[#F6465D] bg-[#F6465D]/10 text-[#F6465D]'
+                              : 'border-[#F0B90B] bg-[#F0B90B]/10 text-foreground'
+                            : 'border-border bg-background text-muted-foreground hover:bg-accent'
+                        }`}
+                      >
+                        {opt.label}
+                      </button>
+                    );
+                  })}
+                </div>
+                <p className="text-[10px] text-muted-foreground">软性项，可跳过 —— 但补全后历史「盈亏同源」会更准。</p>
+              </div>
             )}
           </div>
-        </div>
+        )}
+
+        {!isHedge && journal.direction !== 'no_entry' && (
+          <div className={`space-y-2 px-4 py-4 ${sectionCardClass}`}>
+            <div className="flex items-center justify-between">
+              <div className="text-[12px] font-medium">过程纠结度 · 先行指标</div>
+              <span className="text-[10px] text-muted-foreground">最重要的不是赚钱，是轻松</span>
+            </div>
+            <div className="grid grid-cols-5 gap-1.5">
+              {([1, 2, 3, 4, 5] as StruggleLevel[]).map(lvl => {
+                const active = struggleLevel === lvl;
+                const accent = lvl <= 1 ? '#F6465D' : lvl === 2 ? '#D89B00' : lvl >= 4 ? '#0ECB81' : null;
+                return (
+                  <button
+                    key={lvl}
+                    type="button"
+                    onClick={() => setStruggleLevel(active ? null : lvl)}
+                    className={`flex h-auto flex-col items-center gap-0.5 rounded-lg border px-1 py-1.5 transition-colors ${
+                      active
+                        ? accent ? '' : 'border-foreground/40 bg-muted text-foreground'
+                        : 'border-border bg-background text-muted-foreground hover:bg-accent'
+                    }`}
+                    style={active && accent ? { borderColor: accent, backgroundColor: `${accent}1A`, color: accent } : undefined}
+                  >
+                    <span className="text-[13px] font-semibold leading-none">{lvl}</span>
+                    <span className="text-[9px] leading-tight">{STRUGGLE_LEVEL_LABELS[lvl]}</span>
+                  </button>
+                );
+              })}
+            </div>
+            {struggleLevel ? (
+              <p className="text-[10px] leading-relaxed text-muted-foreground">{STRUGGLE_LEVEL_HINTS[struggleLevel]}</p>
+            ) : (
+              <p className="text-[10px] text-muted-foreground">高纠结即使结果对，过程也已经亮黄灯 —— 它是亏损的先行指标。</p>
+            )}
+          </div>
+        )}
+
+        {showSmallPositionDrag && (
+          <div className="space-y-2 px-4 py-4 rounded-xl border border-[#F0B90B]/40 bg-[#F0B90B]/[0.04] shadow-[0_10px_30px_rgba(0,0,0,0.04)]">
+            <div className="text-[12px] font-medium text-[#D89B00]">小机会仓位记账</div>
+            <p className="text-[10px] leading-relaxed text-muted-foreground">
+              {journal.pre_opportunity_cost_worth === false
+                ? '开仓时你判定「不做也不亏」—— 这是典型的小机会仓位（多半在填补无聊）。它的隐性成本要被记下来：'
+                : '这是一单中性震荡结构 —— 最容易变成填补无聊的小仓。它的隐性成本要被记下来：'}
+            </p>
+            <div className="grid gap-1.5">
+              {SMALL_POSITION_DRAG_OPTIONS.map(opt => {
+                const active = smallPositionDrag === opt.id;
+                const accent = opt.severity === 0 ? '#0ECB81' : opt.severity === 1 ? '#F0B90B' : opt.severity === 2 ? '#D89B00' : '#F6465D';
+                return (
+                  <button
+                    key={opt.id}
+                    type="button"
+                    onClick={() => setSmallPositionDrag(active ? null : opt.id)}
+                    className={`rounded-lg border px-3 py-2 text-left transition-colors ${
+                      active ? '' : 'border-border bg-background hover:bg-accent'
+                    }`}
+                    style={active ? { borderColor: accent, backgroundColor: `${accent}14` } : undefined}
+                  >
+                    <div
+                      className={`text-[11px] font-medium ${active ? '' : 'text-foreground'}`}
+                      style={active ? { color: accent } : undefined}
+                    >
+                      {opt.label}
+                    </div>
+                    <div className="text-[10px] leading-tight text-muted-foreground">{opt.description}</div>
+                  </button>
+                );
+              })}
+            </div>
+            <p className="text-[10px] leading-relaxed text-muted-foreground">
+              持有小机会仓位是一等负向状态：它比空仓更糟 —— 在悄悄损耗你的行动力与对大机会的敏感度。
+            </p>
+          </div>
+        )}
 
         <div className={`space-y-3 px-4 py-4 ${sectionCardClass}`}>
           <div className="text-[12px] font-medium">下单前三问复核</div>

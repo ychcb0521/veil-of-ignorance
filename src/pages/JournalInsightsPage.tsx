@@ -28,6 +28,8 @@ import {
 import { computeTooHardBasketStats, type TooHardBasketStats } from '@/lib/noTradeHypothetical';
 import { HEDGE_BOUNDARY_STANCE_LABELS, HEDGE_WORTH_IT_SCORE } from '@/lib/hedgeTypes';
 import { ODDS_STRUCTURE_LABELS } from '@/lib/oddsStructure';
+import { aggregateEdgeSourcePnl, findSameSourceEdge } from '@/lib/edgeSource';
+import { STRUGGLE_LEVEL_LABELS } from '@/lib/structureResult';
 import { isHistoricalCampaign, PAIN_TAG_LABELS, PRINCIPLE_EVOLUTION_LEVEL_LABELS } from '@/types/journal';
 import type { HedgeBoundaryStance, OddsStructure, PainTag, PrincipleEvolutionLevel, TradeCampaign, TradeJournal } from '@/types/journal';
 
@@ -678,6 +680,44 @@ export default function JournalInsightsPage() {
         quality: j.post_decision_quality ?? 'mixed',
       }));
 
+    // 盈亏同源：按 edge 源头聚合主力单盈亏（仅 win/loss、已标源头）。
+    const edgeSourceStats = aggregateEdgeSourcePnl(mainOrders);
+    const sameSourceEdge = findSameSourceEdge(edgeSourceStats);
+    const edgeSourceProfile = {
+      stats: edgeSourceStats,
+      sameSourceEdge,
+      legacyCount: mainOrders.filter(j => !j.pre_edge_source && j.post_outcome && j.post_outcome !== 'no_entry' && j.post_outcome !== 'breakeven').length,
+      maxAbsPnl: edgeSourceStats.reduce(
+        (m, s) => Math.max(m, s.totalWinPnl, Math.abs(s.totalLossPnl)),
+        0,
+      ),
+    };
+
+    // 纠结度 × 结果：纠结度是先行指标 —— 看高纠结 vs 轻松的胜率/期望差。
+    const aggStruggle = (rows: TradeJournal[]) => {
+      const wins = rows.filter(j => j.post_outcome === 'win').length;
+      const rValues = rows
+        .map(j => j.post_r_multiple)
+        .filter((v): v is number => typeof v === 'number' && Number.isFinite(v));
+      return {
+        count: rows.length,
+        winRate: rows.length === 0 ? 0 : wins / rows.length,
+        avgR: rValues.length === 0 ? null : rValues.reduce((s, v) => s + v, 0) / rValues.length,
+        netPnl: rows.reduce((s, j) => s + (j.post_realized_pnl ?? 0), 0),
+      };
+    };
+    const struggleRows = reviewedMain.filter(j => j.post_struggle_level != null);
+    const struggleBuckets = ([1, 2, 3, 4, 5] as const).map(level => ({
+      level,
+      ...aggStruggle(struggleRows.filter(j => j.post_struggle_level === level)),
+    })).filter(b => b.count > 0);
+    const struggleProfile = {
+      count: struggleRows.length,
+      buckets: struggleBuckets,
+      high: aggStruggle(struggleRows.filter(j => (j.post_struggle_level ?? 3) <= 2)),
+      low: aggStruggle(struggleRows.filter(j => (j.post_struggle_level ?? 3) >= 4)),
+    };
+
     const painStats = (Object.keys(PAIN_TAG_LABELS) as PainTag[])
       .map(tag => {
         const rows = curTrades.filter(j => j.pre_pain_tags?.includes(tag));
@@ -717,6 +757,8 @@ export default function JournalInsightsPage() {
       restraintCount,
       oddsStructureProfile,
       smallOpportunityProfile,
+      edgeSourceProfile,
+      struggleProfile,
       campaignOutcome: {
         count: curCampaigns.length,
         winRate: curCampaigns.length === 0 ? 0 : campaignWinCount / curCampaigns.length,
@@ -1391,6 +1433,117 @@ export default function JournalInsightsPage() {
                   <div className="mt-2 text-[10px] text-muted-foreground">
                     空仓不是失败，而是把行动力留给真正高盈亏比结构。
                   </div>
+                </div>
+              </div>
+            )}
+          </section>
+
+          <section className="border border-border rounded bg-card p-3">
+            <div className="text-[12px] font-medium mb-2">盈亏同源 · edge 源头</div>
+            <div className="text-[10px] text-muted-foreground">
+              按主力单开仓标注的 edge 源头聚合盈亏。同一个源头既是最大盈利、又是最大亏损来源时，就是「盈亏同源」。
+            </div>
+            {stats.edgeSourceProfile.stats.length === 0 ? (
+              <div className="mt-4 text-[11px] text-muted-foreground">
+                数据积累中。给主力单标注 edge 源头、并完成平仓评价后，这里按源头拆出盈/亏分布。
+              </div>
+            ) : (
+              <div className="mt-3 space-y-2">
+                {stats.edgeSourceProfile.sameSourceEdge && (
+                  <div className="rounded border border-[#F0B90B]/40 bg-[#F0B90B]/[0.06] px-2.5 py-2 text-[10px] leading-relaxed text-[#D89B00]">
+                    「{stats.edgeSourceProfile.stats.find(s => s.edge === stats.edgeSourceProfile.sameSourceEdge)?.label}」既是你最大的盈利来源，也是最大的亏损来源 —— 这就是盈亏同源：别因为它的亏损去砍掉它的盈利。
+                  </div>
+                )}
+                {stats.edgeSourceProfile.stats.map(s => {
+                  const denom = stats.edgeSourceProfile.maxAbsPnl || 1;
+                  const isSame = s.edge === stats.edgeSourceProfile.sameSourceEdge;
+                  return (
+                    <div
+                      key={s.edge}
+                      className={`rounded border p-2 ${isSame ? 'border-[#F0B90B]/50 bg-[#F0B90B]/[0.04]' : 'border-border bg-background'}`}
+                    >
+                      <div className="flex items-center justify-between gap-2 text-[11px]">
+                        <span className="text-foreground">
+                          {s.label}
+                          {isSame && <span className="ml-1.5 rounded bg-[#F0B90B]/15 px-1 py-0.5 text-[9px] text-[#D89B00]">同源</span>}
+                        </span>
+                        <span className="font-mono text-muted-foreground">{s.trades} 笔 · W{s.wins}/L{s.losses}</span>
+                      </div>
+                      <div className="mt-2 space-y-1">
+                        <div className="flex items-center gap-2">
+                          <span className="w-7 shrink-0 text-[9px] text-muted-foreground">盈</span>
+                          <div className="h-2 flex-1 rounded bg-card overflow-hidden">
+                            <div className="h-full bg-[#0ECB81]" style={{ width: `${(s.totalWinPnl / denom) * 100}%` }} />
+                          </div>
+                          <span className="w-16 shrink-0 text-right font-mono text-[9px] text-[#0ECB81]">+{s.totalWinPnl.toFixed(0)}</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className="w-7 shrink-0 text-[9px] text-muted-foreground">亏</span>
+                          <div className="h-2 flex-1 rounded bg-card overflow-hidden">
+                            <div className="h-full bg-[#F6465D]" style={{ width: `${(Math.abs(s.totalLossPnl) / denom) * 100}%` }} />
+                          </div>
+                          <span className="w-16 shrink-0 text-right font-mono text-[9px] text-[#F6465D]">{s.totalLossPnl.toFixed(0)}</span>
+                        </div>
+                      </div>
+                      <div className="mt-1.5 text-right text-[10px] font-mono">
+                        净 <span className={s.netPnl >= 0 ? 'text-[#0ECB81]' : 'text-[#F6465D]'}>{s.netPnl >= 0 ? '+' : ''}{s.netPnl.toFixed(2)}</span>
+                      </div>
+                    </div>
+                  );
+                })}
+                {stats.edgeSourceProfile.legacyCount > 0 && (
+                  <div className="text-[10px] text-muted-foreground">
+                    另有 {stats.edgeSourceProfile.legacyCount} 笔已平仓主力单未标 edge 源头（旧快照），可在复盘时补标后纳入统计。
+                  </div>
+                )}
+              </div>
+            )}
+          </section>
+
+          <section className="border border-border rounded bg-card p-3">
+            <div className="text-[12px] font-medium mb-2">纠结度 × 结果 · 先行指标</div>
+            <div className="text-[10px] text-muted-foreground">
+              交易最重要的不是赚钱，是轻松。高纠结即使结果对，过程也已亮黄灯 —— 它是亏损的先行指标。
+            </div>
+            {stats.struggleProfile.count === 0 ? (
+              <div className="mt-4 text-[11px] text-muted-foreground">
+                数据积累中。复盘时记录「过程纠结度」后，这里对比高纠结 vs 轻松的胜率与期望。
+              </div>
+            ) : (
+              <div className="mt-3 space-y-3">
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="rounded border border-[#F6465D]/30 bg-[#F6465D]/5 p-2">
+                    <div className="text-[10px] text-[#F6465D]">高纠结（1–2）</div>
+                    <div className="mt-1 text-[10px] text-muted-foreground">
+                      {stats.struggleProfile.high.count} 笔 · 胜率 <span className="font-mono text-foreground">{pct(stats.struggleProfile.high.winRate)}</span>
+                    </div>
+                    <div className="text-[10px] text-muted-foreground">
+                      均 R <span className="font-mono text-foreground">{stats.struggleProfile.high.avgR == null ? '—' : `${stats.struggleProfile.high.avgR >= 0 ? '+' : ''}${stats.struggleProfile.high.avgR.toFixed(2)}`}</span>
+                    </div>
+                  </div>
+                  <div className="rounded border border-[#0ECB81]/30 bg-[#0ECB81]/5 p-2">
+                    <div className="text-[10px] text-[#0ECB81]">轻松（4–5）</div>
+                    <div className="mt-1 text-[10px] text-muted-foreground">
+                      {stats.struggleProfile.low.count} 笔 · 胜率 <span className="font-mono text-foreground">{pct(stats.struggleProfile.low.winRate)}</span>
+                    </div>
+                    <div className="text-[10px] text-muted-foreground">
+                      均 R <span className="font-mono text-foreground">{stats.struggleProfile.low.avgR == null ? '—' : `${stats.struggleProfile.low.avgR >= 0 ? '+' : ''}${stats.struggleProfile.low.avgR.toFixed(2)}`}</span>
+                    </div>
+                  </div>
+                </div>
+                <div className="space-y-1.5">
+                  {stats.struggleProfile.buckets.map(b => (
+                    <div key={b.level} className="flex items-center gap-2 text-[10px]">
+                      <span className="w-14 shrink-0 text-muted-foreground">{b.level} {STRUGGLE_LEVEL_LABELS[b.level]}</span>
+                      <div className="h-2 flex-1 rounded bg-background overflow-hidden">
+                        <div
+                          className="h-full"
+                          style={{ width: `${b.winRate * 100}%`, backgroundColor: b.winRate >= 0.5 ? '#0ECB81' : '#F6465D' }}
+                        />
+                      </div>
+                      <span className="w-20 shrink-0 text-right font-mono text-muted-foreground">{b.count}笔 {pct(b.winRate)}</span>
+                    </div>
+                  ))}
                 </div>
               </div>
             )}

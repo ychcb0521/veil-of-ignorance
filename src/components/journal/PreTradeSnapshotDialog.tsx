@@ -67,6 +67,8 @@ export function PreTradeSnapshotDialog({
   const [tooHardOddsStructureSource, setTooHardOddsStructureSource] = useState<string | null>(null);
   const [tooHardOddsStructurePremortem, setTooHardOddsStructurePremortem] = useState<string | null>(null);
   const [tooHardOddsStructureBreakdownSignals, setTooHardOddsStructureBreakdownSignals] = useState<string | null>(null);
+  const [tooHardOppCostWorth, setTooHardOppCostWorth] = useState<boolean | null>(null);
+  const [tooHardEdgeSource, setTooHardEdgeSource] = useState<SnapshotPayload['pre_edge_source']>(null);
   const [savingTooHard, setSavingTooHard] = useState(false);
 
   // Pending-review gate: closed trades without post-review must be evaluated before new orders
@@ -178,6 +180,8 @@ export function PreTradeSnapshotDialog({
         pre_odds_structure_premortem: payload.pre_odds_structure_premortem,
         pre_odds_structure_breakdown_signals: payload.pre_odds_structure_breakdown_signals,
         pre_account_equity_usdt: payload.pre_account_equity_usdt,
+        pre_opportunity_cost_worth: payload.pre_opportunity_cost_worth,
+        pre_edge_source: payload.pre_edge_source,
         // Decision-quality fields
         pre_mortem_text: payload.pre_mortem_text,
         pre_positive_expectancy: payload.pre_positive_expectancy,
@@ -262,6 +266,8 @@ export function PreTradeSnapshotDialog({
         pre_odds_structure_source: tooHardOrderKind === 'main' ? tooHardOddsStructureSource : null,
         pre_odds_structure_premortem: tooHardOrderKind === 'main' ? tooHardOddsStructurePremortem : null,
         pre_odds_structure_breakdown_signals: tooHardOrderKind === 'main' ? tooHardOddsStructureBreakdownSignals : null,
+        pre_opportunity_cost_worth: tooHardOrderKind === 'main' ? tooHardOppCostWorth : null,
+        pre_edge_source: tooHardOrderKind === 'main' ? tooHardEdgeSource : null,
       });
       toast.success('已记录空仓观望决策');
       setTooHardOpen(false);
@@ -339,12 +345,14 @@ export function PreTradeSnapshotDialog({
       pricePrecision={pricePrecision}
       orderParams={orderParams ?? null}
       onCancel={() => onOpenChange(false)}
-      onTooHard={({ order_kind, pre_odds_structure, pre_odds_structure_source, pre_odds_structure_premortem, pre_odds_structure_breakdown_signals }) => {
+      onTooHard={({ order_kind, pre_odds_structure, pre_odds_structure_source, pre_odds_structure_premortem, pre_odds_structure_breakdown_signals, pre_opportunity_cost_worth, pre_edge_source }) => {
         setTooHardOrderKind(order_kind);
         setTooHardOddsStructure(pre_odds_structure ?? null);
         setTooHardOddsStructureSource(pre_odds_structure_source ?? null);
         setTooHardOddsStructurePremortem(pre_odds_structure_premortem ?? null);
         setTooHardOddsStructureBreakdownSignals(pre_odds_structure_breakdown_signals ?? null);
+        setTooHardOppCostWorth(pre_opportunity_cost_worth ?? null);
+        setTooHardEdgeSource(pre_edge_source ?? null);
         if (order_kind === 'main' && pre_odds_structure && !tooHardReason.trim()) {
           setTooHardReason(pre_odds_structure_source?.trim() || '');
         }

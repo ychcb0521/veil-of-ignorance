@@ -31,6 +31,8 @@ import {
 import { computeDiscount, computeHedgeConvictionDiscount } from '@/lib/confidenceDiscount';
 import { buildHedgeBoundaryBasis } from '@/lib/hedgeBoundaryBasis';
 import { ODDS_STRUCTURE_OPTIONS } from '@/lib/oddsStructure';
+import { EDGE_SOURCE_OPTIONS } from '@/lib/edgeSource';
+import { recoveryGainPct, recoveryAsymmetryRatio } from '@/lib/structureResult';
 import {
   HEDGE_TYPES,
   HEDGE_DOWN_BRANCH_DEFAULTS,
@@ -56,6 +58,7 @@ import type { PlaceOrderParams } from '@/contexts/TradingContext';
 import type {
   ChecklistItem,
   DatasetSplit,
+  EdgeSource,
   HedgeBoundaryStance,
   HedgeOrderMethod,
   HedgeType,
@@ -105,6 +108,10 @@ export interface SnapshotPayload {
   pre_odds_structure_premortem: string | null;
   pre_odds_structure_breakdown_signals: string | null;
   pre_account_equity_usdt: number | null;
+  /** 机会成本问句：不做的机会成本更高吗？false = 填补无聊的小机会仓位。 */
+  pre_opportunity_cost_worth: boolean | null;
+  /** Edge / 源头标签，用于盈亏同源分析。 */
+  pre_edge_source: EdgeSource | null;
   // Deprecated snapshot fields kept in the payload shape for backwards-safe inserts.
   pre_mortem_text: string | null;
   pre_positive_expectancy: string | null;
@@ -169,6 +176,8 @@ interface Props {
     pre_odds_structure_source?: string | null;
     pre_odds_structure_premortem?: string | null;
     pre_odds_structure_breakdown_signals?: string | null;
+    pre_opportunity_cost_worth?: boolean | null;
+    pre_edge_source?: EdgeSource | null;
   }) => void;
   onSubmit: (payload: SnapshotPayload) => Promise<void> | void;
 }
@@ -240,9 +249,9 @@ const DECISION_QUESTIONS: DecisionQuestion[] = [
   {
     id: 'falsification',
     index: 3,
-    title: '什么 K 线 / 盘面信号会让你提前止损或拆仓？',
-    hint: '证伪点：必须可被盘面客观验证',
-    placeholder: '写成具体事件，例如「跌破 4h 关键支撑且 1h 量能放大」。',
+    title: '什么信号一旦触发，你就提前止损 / 拆仓？',
+    hint: '失效信号：可观测、可触发，不是「感觉不对」',
+    placeholder: '写成盘面会自己触发的事件——价位 / 形态 / 量能 / 时间。例：「跌破 4h 关键支撑且 1h 放量」。不能是「感觉要跌了」这种感受。',
     accent: '#F6465D',
     badgeText: '止',
   },
@@ -319,6 +328,9 @@ export function PreTradeSnapshotForm({
   const [oddsStructureSource, setOddsStructureSource] = useState('');
   const [oddsStructurePremortem, setOddsStructurePremortem] = useState('');
   const [oddsStructureBreakdownSignals, setOddsStructureBreakdownSignals] = useState('');
+  // 《不对称思考》：机会成本问句（结构判定之后）+ edge/源头标签（用于盈亏同源）。
+  const [oppCostWorth, setOppCostWorth] = useState<boolean | null>(null);
+  const [edgeSource, setEdgeSource] = useState<EdgeSource | null>(null);
   const [confirmBadOddsTradeOpen, setConfirmBadOddsTradeOpen] = useState(false);
   const [checked, setChecked] = useState<string[]>([]);
   const [userRules, setUserRules] = useState<TradingRule[]>([]);
@@ -426,6 +438,9 @@ export function PreTradeSnapshotForm({
   const maxLossValid = Number.isFinite(maxLoss) && maxLoss > 0;
   const maxLossPct = maxLossValid && accountEquity > 0 ? (maxLoss / accountEquity) * 100 : null;
   const maxLossPctLabel = maxLossPct == null ? '—' : `${maxLossPct.toFixed(1)}%`;
+  // 回撤的非对称：亏掉 X% 后要 +Y% 才能回本（Y 永远 > X，越深越离谱）。
+  const recoveryPct = maxLossPct != null ? recoveryGainPct(maxLossPct) : null;
+  const recoveryRatio = maxLossPct != null ? recoveryAsymmetryRatio(maxLossPct) : null;
 
   const decisionReady = whyRight.trim().length > 0
     && failureReason.trim().length > 0
@@ -436,6 +451,9 @@ export function PreTradeSnapshotForm({
     && oddsStructurePremortem.trim().length > 0
     && oddsStructureBreakdownSignals.trim().length > 0
   );
+  // 主力单必须给出 edge/源头与机会成本回答（对冲单与弃单记录不要求）。
+  const edgeSourceReady = isHedge || !isTrade || edgeSource != null;
+  const oppCostReady = isHedge || !isTrade || oppCostWorth != null;
   const mentalReady = mental >= 3;
   // 对冲路径的可提交条件（见 spec §5）。把握性与必要性各自独立校验，互不推导。
   const hedgeReady = !isHedge || (
@@ -452,7 +470,8 @@ export function PreTradeSnapshotForm({
     currentMarginMode === 'isolated'
     && (isHedge ? hedgeReady : (maxLossValid && checklistPassed))
   );
-  const canSubmit = mentalReady && tradeReady && (isHedge || (decisionReady && oddsStructureReady));
+  const canSubmit = mentalReady && tradeReady
+    && (isHedge || (decisionReady && oddsStructureReady && edgeSourceReady && oppCostReady));
   const recentMainReviewed = historicalJournals.filter(j =>
     (j.journal_kind ?? 'trade') === 'trade'
     && j.order_kind === 'main'
@@ -471,7 +490,9 @@ export function PreTradeSnapshotForm({
   })();
   const badOddsGate = isTrade && !isHedge && oddsStructure === 'with_crowd_released';
   const smallOpportunityGate = isTrade && !isHedge && oddsStructure === 'neutral_choppy';
-  const oddsCautionGate = badOddsGate || smallOpportunityGate;
+  // 机会成本答「否」= 不做也不亏 = 填补无聊的小机会仓位，与坏结构同样触发二次确认。
+  const boredomGate = isTrade && !isHedge && oppCostWorth === false;
+  const oddsCautionGate = badOddsGate || smallOpportunityGate || boredomGate;
 
   const toggleChecklist = (id: string, checkedValue: boolean) => {
     setChecked(prev => checkedValue ? Array.from(new Set([...prev, id])) : prev.filter(item => item !== id));
@@ -647,6 +668,8 @@ export function PreTradeSnapshotForm({
         pre_odds_structure_premortem: isHedge || !isTrade ? null : (oddsStructurePremortem.trim() || null),
         pre_odds_structure_breakdown_signals: isHedge || !isTrade ? null : (oddsStructureBreakdownSignals.trim() || null),
         pre_account_equity_usdt: accountEquity > 0 ? Number(accountEquity.toFixed(2)) : null,
+        pre_opportunity_cost_worth: isHedge || !isTrade ? null : oppCostWorth,
+        pre_edge_source: isHedge || !isTrade ? null : edgeSource,
         pre_mortem_text: null,
         pre_positive_expectancy: null,
         pre_invalidation_condition: null,
@@ -748,6 +771,7 @@ export function PreTradeSnapshotForm({
     oddsStructurePremortem.trim().length > 0,
     oddsStructureBreakdownSignals.trim().length > 0,
   ].filter(Boolean).length;
+  const edgeOppDoneCount = [edgeSource != null, oppCostWorth != null].filter(Boolean).length;
 
   // 心态自评卡片（批次 25：主力单与对冲单共用同一组件，行为一致——≤2 硬阻断）。
   const mentalRatingCard = (
@@ -1018,6 +1042,96 @@ export function PreTradeSnapshotForm({
               </section>
             )}
 
+            {isTrade && (
+              <section className={`${mainSurfaceCls} overflow-hidden`}>
+                <div className="flex items-start justify-between gap-3 border-b border-border/60 px-3.5 py-3">
+                  <div className="min-w-0">
+                    <div className={mainSectionTitleCls}>源头 · 机会成本{requiredStar}</div>
+                    <div className={mainSectionHintCls}>
+                      先认领这一单的 edge 来自哪里，再确认它到底值不值得占用你的行动力。
+                    </div>
+                  </div>
+                  <span className={mainStatusChipCls}>{edgeOppDoneCount}/2</span>
+                </div>
+                <div className="space-y-3 px-3.5 py-3">
+                  <div>
+                    <div className="mb-1.5 text-[11px] font-medium text-foreground">这一单的 edge / 源头（盈亏同源标签）</div>
+                    <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                      {EDGE_SOURCE_OPTIONS.map(opt => {
+                        const active = edgeSource === opt.id;
+                        const warn = opt.isWarning;
+                        return (
+                          <button
+                            key={opt.id}
+                            type="button"
+                            onClick={() => setEdgeSource(opt.id)}
+                            className={`min-h-[66px] rounded-xl border px-3 py-2 text-left transition-colors ${
+                              active
+                                ? warn
+                                  ? 'border-[#F6465D]/70 bg-[#F6465D]/10 text-foreground shadow-sm'
+                                  : 'border-[#F0B90B]/70 bg-[#F0B90B]/10 text-foreground shadow-sm'
+                                : 'border-border/70 bg-background/80 text-muted-foreground hover:border-border hover:bg-accent/70'
+                            }`}
+                          >
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="text-[11px] font-semibold">{opt.label}</span>
+                              {active && (
+                                <span className={`h-1.5 w-1.5 rounded-full ${warn ? 'bg-[#F6465D]' : 'bg-[#F0B90B]'}`} />
+                              )}
+                            </div>
+                            <div className="mt-1 text-[10px] leading-relaxed">{opt.description}</div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                    {edgeSource === 'no_clear_edge' && (
+                      <div className="mt-2 rounded-xl border border-[#F6465D]/40 bg-[#F6465D]/10 px-3 py-2 text-[11px] leading-relaxed text-[#F6465D]">
+                        说不清源头 = 没有可复制的 edge。盈亏同源里它通常只贡献亏损 —— 认真想想这是不是在填补无聊。
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="rounded-xl border border-border/60 bg-background/70 p-3">
+                    <div className="text-[12px] font-medium text-foreground">
+                      与做相比，不做的机会成本更高吗？是在浪费机会吗？
+                    </div>
+                    <div className="mt-0.5 text-[10px] leading-relaxed text-muted-foreground">
+                      如果答案是「否」，说明这单本质是在填补无聊，是典型的「小机会仓位」。
+                    </div>
+                    <div className="mt-2.5 grid grid-cols-2 gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setOppCostWorth(true)}
+                        className={`h-10 rounded-lg border text-[12px] font-medium transition-colors ${
+                          oppCostWorth === true
+                            ? 'border-[#0ECB81]/60 bg-[#0ECB81]/10 text-[#0ECB81]'
+                            : 'border-border/70 bg-background/80 text-muted-foreground hover:border-border hover:bg-accent/70'
+                        }`}
+                      >
+                        是 · 不做更亏，值得做
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setOppCostWorth(false)}
+                        className={`h-10 rounded-lg border text-[12px] font-medium transition-colors ${
+                          oppCostWorth === false
+                            ? 'border-[#F6465D]/60 bg-[#F6465D]/10 text-[#F6465D]'
+                            : 'border-border/70 bg-background/80 text-muted-foreground hover:border-border hover:bg-accent/70'
+                        }`}
+                      >
+                        否 · 不做也不亏
+                      </button>
+                    </div>
+                    {oppCostWorth === false && (
+                      <div className="mt-2 rounded-xl border border-[#F0B90B]/40 bg-[#F0B90B]/10 px-3 py-2 text-[11px] leading-relaxed text-[#D89B00]">
+                        小机会仓位警告：它占用行动力，比空仓更差。系统默认建议空仓观望；仍要下单会进入二次确认。
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </section>
+            )}
+
             <section className={`${isTrade ? mainSurfaceCls : ''} ${isTrade ? 'p-3.5' : ''}`}>
               <div className="mb-3 flex items-start justify-between gap-3">
                 <div className="min-w-0">
@@ -1180,6 +1294,38 @@ export function PreTradeSnapshotForm({
                   <div className="mt-1 text-[10px] text-muted-foreground">
                     当前账户净值估算 {accountEquity > 0 ? accountEquity.toFixed(2) : '—'} USDT
                   </div>
+                  {maxLossPct != null && recoveryPct != null && recoveryRatio != null && (
+                    <div className="mt-2.5 rounded-lg border border-border/60 bg-background/60 p-2.5">
+                      <div className="flex items-center justify-between text-[10px] text-muted-foreground">
+                        <span>回撤的非对称</span>
+                        {Number.isFinite(recoveryPct) ? (
+                          <span className="font-mono text-[#F0B90B]">回本需 +{recoveryPct.toFixed(1)}%（{recoveryRatio.toFixed(2)}×）</span>
+                        ) : (
+                          <span className="font-mono text-[#F6465D]">几乎无法回本</span>
+                        )}
+                      </div>
+                      <div className="mt-1.5 space-y-1">
+                        <div className="flex items-center gap-2">
+                          <span className="w-12 shrink-0 text-[9px] text-[#F6465D]">亏 {maxLossPct.toFixed(1)}%</span>
+                          <div className="h-2 flex-1 overflow-hidden rounded-full bg-muted">
+                            <div
+                              className="h-full rounded-full bg-[#F6465D]"
+                              style={{ width: `${Number.isFinite(recoveryPct) ? Math.min(100, (maxLossPct / recoveryPct) * 100) : 100}%` }}
+                            />
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className="w-12 shrink-0 text-[9px] text-[#0ECB81]">回本</span>
+                          <div className="h-2 flex-1 overflow-hidden rounded-full bg-muted">
+                            <div className="h-full w-full rounded-full bg-[#0ECB81]" />
+                          </div>
+                        </div>
+                      </div>
+                      <div className="mt-1.5 text-[9px] leading-relaxed text-muted-foreground">
+                        亏掉的要用更大的涨幅才能赚回来，越深越难（-50% 要 +100%，-90% 要 +900%）。
+                      </div>
+                    </div>
+                  )}
                 </label>
               )}
 
@@ -2005,6 +2151,8 @@ export function PreTradeSnapshotForm({
                   pre_odds_structure_source: isHedge ? null : (oddsStructureSource.trim() || null),
                   pre_odds_structure_premortem: isHedge ? null : (oddsStructurePremortem.trim() || null),
                   pre_odds_structure_breakdown_signals: isHedge ? null : (oddsStructureBreakdownSignals.trim() || null),
+                  pre_opportunity_cost_worth: isHedge ? null : oppCostWorth,
+                  pre_edge_source: isHedge ? null : edgeSource,
                 });
               }}
               disabled={submitting}
@@ -2034,6 +2182,8 @@ export function PreTradeSnapshotForm({
                   pre_odds_structure_source: isHedge ? null : (oddsStructureSource.trim() || null),
                   pre_odds_structure_premortem: isHedge ? null : (oddsStructurePremortem.trim() || null),
                   pre_odds_structure_breakdown_signals: isHedge ? null : (oddsStructureBreakdownSignals.trim() || null),
+                  pre_opportunity_cost_worth: isHedge ? null : oppCostWorth,
+                  pre_edge_source: isHedge ? null : edgeSource,
                 });
                 return;
               }
@@ -2053,7 +2203,9 @@ export function PreTradeSnapshotForm({
             <AlertDialogDescription className="text-[11px] leading-relaxed text-muted-foreground">
               {badOddsGate
                 ? '你已经把这笔判定为“顺情绪 / 追价”的坏结构。系统默认建议空仓观望；如果仍要下，等于明确接受这不是高盈亏比，而是在逆着筛子强行出手。'
-                : '你已经把这笔判定为“中性震荡”。在震荡里开仓＝持有小机会仓位，比空仓更差；如果仍要下，等于明确接受行动力被占用、未来大机会时更容易犹豫。'}
+                : smallOpportunityGate
+                  ? '你已经把这笔判定为“中性震荡”。在震荡里开仓＝持有小机会仓位，比空仓更差；如果仍要下，等于明确接受行动力被占用、未来大机会时更容易犹豫。'
+                  : '你刚才回答：不做的机会成本并不更高。这意味着这一笔本质是在填补无聊——典型的小机会仓位，比空仓更差；如果仍要下，等于明确接受用行动力去换一个你自己都说不值得的机会。'}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <div className="rounded-lg border border-[#F0B90B]/35 bg-[#F0B90B]/10 px-3 py-2 text-[11px] leading-relaxed text-[#D89B00]">
