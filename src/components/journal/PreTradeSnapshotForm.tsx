@@ -1254,44 +1254,61 @@ export function PreTradeSnapshotForm({
                   <span className={mainStatusChipCls}>{oddsDoneCount}/6</span>
                 </div>
                 <div className="space-y-3 px-3.5 py-3">
-                  <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
-                    {ODDS_STRUCTURE_OPTIONS.map(option => (
-                      <button
-                        key={option.id}
-                        type="button"
-                        onClick={() => {
-                          setOddsStructure(option.id);
-                          if (
-                            option.id !== 'odds_insufficient'
-                            && option.id !== 'target_unclear'
-                            && option.id !== 'with_crowd_released'
-                          ) {
-                            setConfirmBadOddsTradeOpen(false);
-                          }
-                        }}
-                        className={`min-h-[88px] px-3 py-2.5 text-left ${
-                          oddsStructure === option.id
-                            ? `rounded-xl ${selectedOptionCls}`
-                            : quietOptionCls
-                        }`}
-                      >
-                        <div className="flex items-center justify-between gap-2">
-                          <div className={`text-[11px] font-semibold ${
-                            option.id === 'odds_insufficient' || option.id === 'target_unclear'
-                              ? 'text-[#F6465D]'
-                              : ''
-                          }`}
-                          >
-                            {option.label}
-                          </div>
-                          {oddsStructure === option.id && (
-                            <span className="h-1.5 w-1.5 rounded-full bg-[#F0B90B]" />
-                          )}
-                        </div>
-                        <div className="mt-1.5 text-[10px] leading-relaxed">{option.description}</div>
-                      </button>
-                    ))}
-                  </div>
+                  <TooltipProvider delayDuration={120}>
+                    <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
+                      {ODDS_STRUCTURE_OPTIONS.map(option => (
+                        <Tooltip key={option.id}>
+                          <TooltipTrigger asChild>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setOddsStructure(option.id);
+                                if (
+                                  option.id !== 'odds_insufficient'
+                                  && option.id !== 'target_unclear'
+                                  && option.id !== 'with_crowd_released'
+                                ) {
+                                  setConfirmBadOddsTradeOpen(false);
+                                }
+                              }}
+                              className={`min-h-[58px] px-3 py-2.5 text-left ${
+                                oddsStructure === option.id
+                                  ? `rounded-xl ${selectedOptionCls}`
+                                  : quietOptionCls
+                              }`}
+                            >
+                              <div className="flex items-center justify-between gap-2">
+                                <div className={`text-[11px] font-semibold ${
+                                  option.id === 'odds_insufficient' || option.id === 'target_unclear'
+                                    ? 'text-[#F6465D]'
+                                    : ''
+                                }`}
+                                >
+                                  {option.label}
+                                </div>
+                                {oddsStructure === option.id && (
+                                  <span className="h-1.5 w-1.5 rounded-full bg-[#F0B90B]" />
+                                )}
+                              </div>
+                            </button>
+                          </TooltipTrigger>
+                          <TooltipContent side="top" align="start" className="max-w-[320px] border-border bg-card text-card-foreground shadow-lg">
+                            <div className="space-y-1.5 text-[11px] leading-relaxed">
+                              <div className={`font-medium ${
+                                option.id === 'odds_insufficient' || option.id === 'target_unclear'
+                                  ? 'text-[#F6465D]'
+                                  : 'text-foreground'
+                              }`}
+                              >
+                                {option.label}
+                              </div>
+                              <div className="text-muted-foreground">{option.description}</div>
+                            </div>
+                          </TooltipContent>
+                        </Tooltip>
+                      ))}
+                    </div>
+                  </TooltipProvider>
                   <div className="grid gap-3 lg:grid-cols-2">
                   <div className="rounded-xl border border-border/55 bg-background/55 p-3">
                     <div className="flex items-start justify-between gap-3">
