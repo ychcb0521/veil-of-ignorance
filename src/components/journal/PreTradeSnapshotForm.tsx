@@ -334,7 +334,7 @@ export function PreTradeSnapshotForm({
   const [oddsStructureSource, setOddsStructureSource] = useState('');
   const [oddsStructurePremortem, setOddsStructurePremortem] = useState('');
   const [oddsStructureBreakdownSignals, setOddsStructureBreakdownSignals] = useState('');
-  // 《不对称思考》：机会成本问句（结构判定之后）+ edge/源头标签（用于盈亏同源）。
+  // 《不对称思考》：先识别 edge/源头标签，再判断机会成本是否足够占用行动力。
   const [oppCostAnswer, setOppCostAnswer] = useState<OpportunityCostAnswer | null>(null);
   const [edgeSource, setEdgeSource] = useState<EdgeSource | null>(null);
   const [confirmBadOddsTradeOpen, setConfirmBadOddsTradeOpen] = useState(false);
@@ -946,9 +946,107 @@ export function PreTradeSnapshotForm({
               <section className={`${mainSurfaceCls} overflow-hidden`}>
                 <div className="flex items-start justify-between gap-3 border-b border-border/60 px-3.5 py-3">
                   <div className="min-w-0">
+                    <div className={mainSectionTitleCls}>源头 · 机会成本{requiredStar}</div>
+                    <div className={mainSectionHintCls}>
+                      先判断这一单靠什么机制赚钱：顺势、突破，还是均值回归。这里只识别 edge 来源，不判断是否值得下注。
+                    </div>
+                  </div>
+                  <span className={mainStatusChipCls}>{edgeOppDoneCount}/2</span>
+                </div>
+                <div className="space-y-3 px-3.5 py-3">
+                  <div>
+                    <div className="mb-1.5 text-[11px] font-medium text-foreground">这一单的 edge 来自哪种市场机制？</div>
+                    <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                      {EDGE_SOURCE_OPTIONS.map(opt => {
+                        const active = edgeSource === opt.id;
+                        const warn = opt.isWarning;
+                        return (
+                          <button
+                            key={opt.id}
+                            type="button"
+                            onClick={() => setEdgeSource(opt.id)}
+                            className={`min-h-[66px] rounded-xl border px-3 py-2 text-left transition-colors ${
+                              active
+                                ? warn
+                                  ? 'border-[#F6465D]/70 bg-[#F6465D]/10 text-foreground shadow-sm'
+                                  : 'border-[#F0B90B]/70 bg-[#F0B90B]/10 text-foreground shadow-sm'
+                                : 'border-border/70 bg-background/80 text-muted-foreground hover:border-border hover:bg-accent/70'
+                            }`}
+                          >
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="text-[11px] font-semibold">{opt.label}</span>
+                              {active && (
+                                <span className={`h-1.5 w-1.5 rounded-full ${warn ? 'bg-[#F6465D]' : 'bg-[#F0B90B]'}`} />
+                              )}
+                            </div>
+                            <div className="mt-1 text-[10px] leading-relaxed">{opt.description}</div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  <div className="rounded-xl border border-border/60 bg-background/70 p-3">
+                    <div className="text-[12px] font-medium text-foreground">
+                      不做更亏吗？是在浪费机会吗？
+                    </div>
+                    <div className="mt-0.5 text-[10px] leading-relaxed text-muted-foreground">
+                      「否」或「说不清」都说明这单没有足够机会成本优势，默认视为「小机会仓位」。
+                    </div>
+                    <div className="mt-2.5 grid gap-2 sm:grid-cols-3">
+                      <button
+                        type="button"
+                        onClick={() => setOppCostAnswer('worth_it')}
+                        className={`min-h-[44px] rounded-lg border px-2 text-[12px] font-medium transition-colors ${
+                          oppCostAnswer === 'worth_it'
+                            ? 'border-[#0ECB81]/60 bg-[#0ECB81]/10 text-[#0ECB81]'
+                            : 'border-border/70 bg-background/80 text-muted-foreground hover:border-border hover:bg-accent/70'
+                        }`}
+                      >
+                        是 · 不做更亏
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setOppCostAnswer('not_worth_it')}
+                        className={`min-h-[44px] rounded-lg border px-2 text-[12px] font-medium transition-colors ${
+                          oppCostAnswer === 'not_worth_it'
+                            ? 'border-[#F6465D]/60 bg-[#F6465D]/10 text-[#F6465D]'
+                            : 'border-border/70 bg-background/80 text-muted-foreground hover:border-border hover:bg-accent/70'
+                        }`}
+                      >
+                        否 · 不做也不亏
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setOppCostAnswer('unclear')}
+                        className={`min-h-[44px] rounded-lg border px-2 text-[12px] font-medium transition-colors ${
+                          oppCostAnswer === 'unclear'
+                            ? 'border-[#F0B90B]/60 bg-[#F0B90B]/10 text-[#D89B00]'
+                            : 'border-border/70 bg-background/80 text-muted-foreground hover:border-border hover:bg-accent/70'
+                        }`}
+                      >
+                        说不清 / 凭感觉
+                      </button>
+                    </div>
+                    {oppCostWorth === false && (
+                      <div className="mt-2 rounded-xl border border-[#F0B90B]/40 bg-[#F0B90B]/10 px-3 py-2 text-[11px] leading-relaxed text-[#D89B00]">
+                        {oppCostAnswer === 'unclear'
+                          ? '说不清 / 凭感觉 → 小机会仓位。没有可解释的机会成本优势，就不要用行动力去填补模糊感。系统默认建议空仓观望；仍要下单会进入二次确认。'
+                          : '小机会仓位警告：它占用行动力，比空仓更差。系统默认建议空仓观望；仍要下单会进入二次确认。'}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </section>
+            )}
+
+            {isTrade && (
+              <section className={`${mainSurfaceCls} overflow-hidden`}>
+                <div className="flex items-start justify-between gap-3 border-b border-border/60 px-3.5 py-3">
+                  <div className="min-w-0">
                     <div className={mainSectionTitleCls}>① 盈亏比轴 | 选择目标{requiredStar}</div>
                     <div className={mainSectionHintCls}>
-                      只问结构，不问方向、不问涨幅。做不做的筛子在这里；结构选定即固定。
+                      再判断这个 edge 现在处于什么价格结构：未释放、胶着，还是已过度释放。这里只判断下注质量。
                     </div>
                   </div>
                   <span className={mainStatusChipCls}>{oddsDoneCount}/5</span>
@@ -1220,104 +1318,6 @@ export function PreTradeSnapshotForm({
                 {!oddsStructureReady && (
                   <div className="text-[10px] font-mono text-[#F6465D]">必须先完成三态单选、R 回撤价与盈亏比结构三问。</div>
                 )}
-                </div>
-              </section>
-            )}
-
-            {isTrade && (
-              <section className={`${mainSurfaceCls} overflow-hidden`}>
-                <div className="flex items-start justify-between gap-3 border-b border-border/60 px-3.5 py-3">
-                  <div className="min-w-0">
-                    <div className={mainSectionTitleCls}>源头 · 机会成本{requiredStar}</div>
-                    <div className={mainSectionHintCls}>
-                      先认领这一单的 edge 来自哪里，再确认它到底值不值得占用你的行动力。
-                    </div>
-                  </div>
-                  <span className={mainStatusChipCls}>{edgeOppDoneCount}/2</span>
-                </div>
-                <div className="space-y-3 px-3.5 py-3">
-                  <div>
-                    <div className="mb-1.5 text-[11px] font-medium text-foreground">这一单的 edge / 源头（盈亏同源标签）</div>
-                    <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-                      {EDGE_SOURCE_OPTIONS.map(opt => {
-                        const active = edgeSource === opt.id;
-                        const warn = opt.isWarning;
-                        return (
-                          <button
-                            key={opt.id}
-                            type="button"
-                            onClick={() => setEdgeSource(opt.id)}
-                            className={`min-h-[66px] rounded-xl border px-3 py-2 text-left transition-colors ${
-                              active
-                                ? warn
-                                  ? 'border-[#F6465D]/70 bg-[#F6465D]/10 text-foreground shadow-sm'
-                                  : 'border-[#F0B90B]/70 bg-[#F0B90B]/10 text-foreground shadow-sm'
-                                : 'border-border/70 bg-background/80 text-muted-foreground hover:border-border hover:bg-accent/70'
-                            }`}
-                          >
-                            <div className="flex items-center justify-between gap-2">
-                              <span className="text-[11px] font-semibold">{opt.label}</span>
-                              {active && (
-                                <span className={`h-1.5 w-1.5 rounded-full ${warn ? 'bg-[#F6465D]' : 'bg-[#F0B90B]'}`} />
-                              )}
-                            </div>
-                            <div className="mt-1 text-[10px] leading-relaxed">{opt.description}</div>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-
-                  <div className="rounded-xl border border-border/60 bg-background/70 p-3">
-                    <div className="text-[12px] font-medium text-foreground">
-                      不做更亏吗？是在浪费机会吗？
-                    </div>
-                    <div className="mt-0.5 text-[10px] leading-relaxed text-muted-foreground">
-                      「否」或「说不清」都说明这单没有足够机会成本优势，默认视为「小机会仓位」。
-                    </div>
-                    <div className="mt-2.5 grid gap-2 sm:grid-cols-3">
-                      <button
-                        type="button"
-                        onClick={() => setOppCostAnswer('worth_it')}
-                        className={`min-h-[44px] rounded-lg border px-2 text-[12px] font-medium transition-colors ${
-                          oppCostAnswer === 'worth_it'
-                            ? 'border-[#0ECB81]/60 bg-[#0ECB81]/10 text-[#0ECB81]'
-                            : 'border-border/70 bg-background/80 text-muted-foreground hover:border-border hover:bg-accent/70'
-                        }`}
-                      >
-                        是 · 不做更亏
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setOppCostAnswer('not_worth_it')}
-                        className={`min-h-[44px] rounded-lg border px-2 text-[12px] font-medium transition-colors ${
-                          oppCostAnswer === 'not_worth_it'
-                            ? 'border-[#F6465D]/60 bg-[#F6465D]/10 text-[#F6465D]'
-                            : 'border-border/70 bg-background/80 text-muted-foreground hover:border-border hover:bg-accent/70'
-                        }`}
-                      >
-                        否 · 不做也不亏
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setOppCostAnswer('unclear')}
-                        className={`min-h-[44px] rounded-lg border px-2 text-[12px] font-medium transition-colors ${
-                          oppCostAnswer === 'unclear'
-                            ? 'border-[#F0B90B]/60 bg-[#F0B90B]/10 text-[#D89B00]'
-                            : 'border-border/70 bg-background/80 text-muted-foreground hover:border-border hover:bg-accent/70'
-                        }`}
-                      >
-                        说不清 / 凭感觉
-                      </button>
-                    </div>
-                    {oppCostWorth === false && (
-                      <div className="mt-2 rounded-xl border border-[#F0B90B]/40 bg-[#F0B90B]/10 px-3 py-2 text-[11px] leading-relaxed text-[#D89B00]">
-                        {oppCostAnswer === 'unclear'
-                          ? '说不清 / 凭感觉 → 小机会仓位。没有可解释的机会成本优势，就不要用行动力去填补模糊感。系统默认建议空仓观望；仍要下单会进入二次确认。'
-                          : '小机会仓位警告：它占用行动力，比空仓更差。系统默认建议空仓观望；仍要下单会进入二次确认。'}
-                      </div>
-                    )}
-                  </div>
                 </div>
               </section>
             )}
