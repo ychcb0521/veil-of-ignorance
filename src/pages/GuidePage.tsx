@@ -381,11 +381,9 @@ export default function GuidePage() {
               <div className="bg-card border border-border rounded p-6">
                 <FlowNode>选择历史时间与标的</FlowNode>
                 <FlowArrow />
-                <FlowNode>回放行情，等待符合策略的机会；看不懂、赔率不够、超出能力圈时，允许直接空仓观望</FlowNode>
+                <FlowNode>观看历史盘面走势，衡量是否出现下单时机；看不懂、赔率不够、超出能力圈时，允许直接空仓观望</FlowNode>
                 <FlowArrow />
-                <FlowNode accent>主力单先过盈亏比轴：三态结构、盈亏比滑条、1:1 锚点、具体期望值；中性震荡或顺情绪追价时，系统默认推荐“空仓观望 / 太难不做”</FlowNode>
-                <FlowArrow />
-                <FlowNode accent>若仍值得做，再填写胜率轴：决策三问（正/反/止）、二元预测概率、置信度 basis、最大亏损、心态自评、情绪标签、认知偏差自查、下注规模建议与 checklist</FlowNode>
+                <FlowNode accent>开仓前填写一个快照模块：主力单先过盈亏比轴（三态结构、盈亏比滑条、1:1 锚点、具体期望值），再过胜率轴（决策三问、二元预测概率、置信度 basis、最大亏损、心态自评、情绪标签、认知偏差自查、下注规模建议与 checklist）；中性震荡或顺情绪追价时，系统默认推荐“空仓观望 / 太难不做”</FlowNode>
                 <FlowArrow />
                 <FlowNode>下单、持仓、平仓；若左尾风险扩大，对冲单走独立的边界、必要性、把握性与双向预案快照</FlowNode>
                 <FlowArrow />
