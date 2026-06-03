@@ -300,22 +300,38 @@ function isMissingSocialFeatureError(error: { code?: string; message?: string } 
     || (/account_follows|trade_campaign_comments/i.test(message) && /schema cache|could not find|does not exist|column/i.test(message));
 }
 
+/**
+ * 「可选/新增」列模式：远程库可能尚未应用对应迁移、还没建这些列。
+ * 同一个常量有两个用途：
+ *   1) 匹配错误信息里出现的列名（判定这是「缺新列」而非约束错误）；
+ *   2) 按「列名」批量剥离——严重漂移时一次性删掉所有可选列（见 stripAllOptionalColumns）。
+ * 核心列（user_id/symbol/direction/pre_entry_reason/pre_mental_state/post_outcome…）
+ * 不在此模式内，永不会被误判或误删。仅用 i 标志（无 g），test() 无状态、可安全复用。
+ */
+const OPTIONAL_COLUMN_PATTERN = /trade_principles|pain_log_entries|pre_thesis_why_right|pre_premortem_failure_reason|pre_falsification_signal|pre_confidence_basis|pre_odds_structure|pre_odds_structure_source|pre_odds_structure_premortem|pre_odds_structure_breakdown_signals|pre_account_equity_usdt|pre_opportunity_cost_worth|pre_cheap_opportunity|pre_edge_source|pre_market_regime|pre_entry_stage|pre_stop_quality|pre_chase_after_close|pre_mortem_text|pre_positive_expectancy|pre_invalidation_condition|pre_calibration_win_pct|pre_confidence_interval_|pre_calibration_reference_class|pre_calibration_competence_basis|pre_calibration_update_signal|pre_dataset_split|pre_lollapalooza_score|pre_bankruptcy_estimate|pre_info_|pre_opponent_statement|pre_pain_tags|pre_cognitive_bias_tags|pre_triggered_principle_ids|pre_triggered_rule_ids|pre_executor_self|pre_designer_self|journal_kind|no_trade_reason|no_trade_would_be_entry_price|no_trade_direction|exit_falsification_status|exit_falsification_note|post_result_summary|post_decision_quality|post_struggle_level|post_small_position_drag|post_missed_high_odds_state|post_positive_expectancy_review|post_premortem_review|post_invalidation_review|post_five_step|post_opponent_was_right|post_proximate_cause|post_root_cause|post_design_intervention|post_intervention_type|post_execution_monitor|post_real_close_time|evolution_level|principle_id|hedge_type|hedge_boundary_price|hedge_boundary_basis|hedge_boundary_stance|hedge_lock_profit_pct|hedge_resolution_up|hedge_resolution_down|hedge_down_if_chop|hedge_down_if_trend|hedge_down_if_rebound|hedge_necessity_pct|hedge_safety_strength|hedge_safety_regularity|hedge_risk_magnitude|hedge_conviction_pct|hedge_friction_cost|hedge_order_method|hedge_worth_it/i;
+
 function isMissingDalioMetaLayerError(error: { code?: string; message?: string } | null): boolean {
   if (!error) return false;
   const message = error.message ?? '';
   return error.code === 'PGRST205'
     || error.code === 'PGRST204'
     || error.code === '42P01'
-    || (/trade_principles|pain_log_entries|pre_thesis_why_right|pre_premortem_failure_reason|pre_falsification_signal|pre_confidence_basis|pre_odds_structure|pre_odds_structure_source|pre_odds_structure_premortem|pre_odds_structure_breakdown_signals|pre_account_equity_usdt|pre_opportunity_cost_worth|pre_cheap_opportunity|pre_edge_source|pre_market_regime|pre_entry_stage|pre_stop_quality|pre_chase_after_close|pre_mortem_text|pre_positive_expectancy|pre_invalidation_condition|pre_calibration_win_pct|pre_confidence_interval_|pre_calibration_reference_class|pre_calibration_competence_basis|pre_calibration_update_signal|pre_dataset_split|pre_lollapalooza_score|pre_bankruptcy_estimate|pre_info_|pre_opponent_statement|pre_pain_tags|pre_cognitive_bias_tags|journal_kind|no_trade_reason|no_trade_would_be_entry_price|no_trade_direction|exit_falsification_status|exit_falsification_note|post_result_summary|post_decision_quality|post_struggle_level|post_small_position_drag|post_missed_high_odds_state|post_positive_expectancy_review|post_premortem_review|post_invalidation_review|post_five_step|post_opponent_was_right|post_real_close_time|evolution_level|principle_id|hedge_type|hedge_boundary_price|hedge_boundary_basis|hedge_boundary_stance|hedge_lock_profit_pct|hedge_resolution_up|hedge_resolution_down|hedge_down_if_chop|hedge_down_if_trend|hedge_down_if_rebound|hedge_necessity_pct|hedge_safety_strength|hedge_safety_regularity|hedge_risk_magnitude|hedge_conviction_pct|hedge_friction_cost|hedge_order_method|hedge_worth_it/i.test(message)
+    || (OPTIONAL_COLUMN_PATTERN.test(message)
       && /schema cache|could not find|does not exist|column/i.test(message));
 }
 
 export function missingSchemaColumn(error: { message?: string } | null): string | null {
   const message = error?.message ?? '';
+  // PGRST204: Could not find the 'pre_confidence_basis' column of 'trade_journals' …
   const quotedColumn = /['"]([a-zA-Z0-9_]+)['"]\s+column/i.exec(message);
   if (quotedColumn?.[1]) return quotedColumn[1];
   const columnOf = /column\s+['"]([a-zA-Z0-9_]+)['"]/i.exec(message);
-  return columnOf?.[1] ?? null;
+  if (columnOf?.[1]) return columnOf[1];
+  // Postgres 原生 42703（未加引号，可能带 schema/表前缀），如：
+  //   column trade_journals.pre_confidence_basis does not exist
+  // PostgREST 偶尔会透传这种信息——也要能解析出列名以便剥离。
+  const unquoted = /column\s+(?:[a-zA-Z0-9_]+\.)*([a-zA-Z0-9_]+)\s+does not exist/i.exec(message);
+  return unquoted?.[1] ?? null;
 }
 
 /**
@@ -340,6 +356,23 @@ export function isSchemaColumnMissingError(
     && missingSchemaColumn(error) != null;
 }
 
+/** 逐列剥离若干次仍缺列，即判定远程库「严重漂移」，转为一次性批量剥离，避免几十次往返。 */
+const BULK_STRIP_AFTER = 5;
+
+/**
+ * 一次性剥掉 payload 里所有「可选/新增」列（列名命中 OPTIONAL_COLUMN_PATTERN）。
+ * 仅在严重漂移时调用——此时远程库缺几十列，逐列往返太慢。核心列不在模式内，全部保留。
+ * 不在此处理 NOT NULL 兜底（pre_entry_reason），由调用方按 insert/update 语义决定。
+ */
+function stripAllOptionalColumns(payload: Record<string, unknown>): Record<string, unknown> {
+  const rest: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(payload)) {
+    if (OPTIONAL_COLUMN_PATTERN.test(key)) continue;
+    rest[key] = value;
+  }
+  return rest;
+}
+
 async function updateTradeJournalWithSchemaFallback(
   journalId: string,
   payload: Record<string, unknown>,
@@ -347,8 +380,12 @@ async function updateTradeJournalWithSchemaFallback(
   let nextPayload = { ...payload };
   let lastData: unknown = null;
   let lastError: { message: string; code?: string } | null = null;
+  let stripped = 0;
+  let bulkStripped = false;
+  // 远程库可能缺几十列，逐列剥离次数必须足够覆盖；原来固定 30 会在严重漂移时提前耗尽。
+  const maxAttempts = Object.keys(payload).length + 5;
 
-  for (let attempt = 0; attempt < 30; attempt += 1) {
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
     if (Object.keys(nextPayload).length === 0) return { data: lastData, error: null };
     const { data, error } = await supabase
       .from("trade_journals" as never)
@@ -362,9 +399,17 @@ async function updateTradeJournalWithSchemaFallback(
     if (!isMissingDalioMetaLayerError(error) && !isSchemaColumnMissingError(error)) return { data, error };
     const missing = missingSchemaColumn(error);
     if (!missing || !(missing in nextPayload)) return { data, error };
+    // 严重漂移：逐列剥到阈值仍缺列，一次性剥掉所有可选列（update 不需回填 pre_entry_reason，
+    // 因为目标行已存在、旧列早已有值，强行回填反而会覆盖既有理由）。
+    if (stripped >= BULK_STRIP_AFTER && !bulkStripped) {
+      nextPayload = stripAllOptionalColumns(nextPayload);
+      bulkStripped = true;
+      continue;
+    }
     const rest = { ...nextPayload };
     delete rest[missing];
     nextPayload = rest;
+    stripped += 1;
   }
 
   return { data: lastData, error: lastError };
@@ -384,8 +429,13 @@ export async function insertTradeJournalWithSchemaFallback(
   let nextPayload = { ...payload };
   let lastData: unknown = null;
   let lastError: { message: string; code?: string } | null = null;
+  let stripped = 0;
+  let bulkStripped = false;
+  // 远程库可能缺几十列，逐列剥离次数必须足够覆盖；原来固定 30 会在严重漂移时提前耗尽，
+  // 导致快照提交直接报错（line: "Could not find the 'pre_confidence_basis' column …"）。
+  const maxAttempts = Object.keys(payload).length + 5;
 
-  for (let attempt = 0; attempt < 30; attempt += 1) {
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
     const { data, error } = await supabase
       .from("trade_journals" as never)
       .insert(nextPayload as never)
@@ -397,13 +447,27 @@ export async function insertTradeJournalWithSchemaFallback(
     if (!isMissingDalioMetaLayerError(error) && !isSchemaColumnMissingError(error)) return { data, error };
     const missing = missingSchemaColumn(error);
     if (!missing || !(missing in nextPayload)) return { data, error };
+    // 严重漂移：逐列剥到阈值仍缺列，一次性剥掉所有可选列；若把 pre_thesis_why_right
+    // 也剥了，则把理由回填到 NOT NULL 旧列 pre_entry_reason（与逐列兜底保持一致）。
+    if (stripped >= BULK_STRIP_AFTER && !bulkStripped) {
+      const before = nextPayload;
+      const bulk = stripAllOptionalColumns(before);
+      if ('pre_thesis_why_right' in before && bulk.pre_entry_reason == null) {
+        bulk.pre_entry_reason = (payload.pre_thesis_why_right as string | null | undefined) ?? '';
+      }
+      nextPayload = bulk;
+      bulkStripped = true;
+      continue;
+    }
     const rest = { ...nextPayload };
     delete rest[missing];
-    // legacy 兜底：丢掉 pre_thesis_why_right 时，把理由回填到旧列 pre_entry_reason。
-    if (missing === 'pre_thesis_why_right' && rest.pre_entry_reason == null) {
+    // legacy 兜底：只要发生 schema-drift 重试，就把新版三问 A 回填到旧列 pre_entry_reason。
+    // 旧库可能还没执行 DROP NOT NULL；若这里继续带 null，会在剥掉缺列后又被 NOT NULL 卡住。
+    if (rest.pre_entry_reason == null) {
       rest.pre_entry_reason = (payload.pre_thesis_why_right as string | null | undefined) ?? '';
     }
     nextPayload = rest;
+    stripped += 1;
   }
 
   return { data: lastData, error: lastError };

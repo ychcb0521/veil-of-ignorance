@@ -88,4 +88,110 @@ describe('schema-cache column fallback', () => {
     expect(data as Record<string, unknown>).not.toHaveProperty('pre_confidence_basis');
     expect(data as Record<string, unknown>).not.toHaveProperty('pre_market_regime');
   });
+
+  it('先缺 pre_confidence_basis 时，也会把新版三问 A 回填到 legacy pre_entry_reason', async () => {
+    dbColumns = new Set([
+      'user_id',
+      'symbol',
+      'direction',
+      'pre_entry_reason',
+      'pre_thesis_why_right',
+      'id',
+    ]);
+
+    const { data, error } = await insertTradeJournalWithSchemaFallback({
+      user_id: 'u1',
+      symbol: 'BTCUSDT',
+      direction: 'long',
+      pre_entry_reason: null,
+      pre_thesis_why_right: '方向和结构一起给了正期望',
+      pre_confidence_basis: '我对这个结构有 57% 胜率信心',
+    });
+
+    expect(error).toBeNull();
+    const row = data as Record<string, unknown>;
+    expect(row.pre_entry_reason).toBe('方向和结构一起给了正期望');
+    expect(row.pre_thesis_why_right).toBe('方向和结构一起给了正期望');
+    expect(row).not.toHaveProperty('pre_confidence_basis');
+  });
+
+  it('解析 Postgres 原生 42703（未加引号 / 带表 / schema 前缀）的列名', () => {
+    expect(missingSchemaColumn({
+      message: 'column trade_journals.pre_confidence_basis does not exist',
+    })).toBe('pre_confidence_basis');
+    // 加引号的 42703 也能解析。
+    expect(missingSchemaColumn({
+      code: '42703',
+      message: 'column "pre_market_regime" does not exist',
+    })).toBe('pre_market_regime');
+    // schema 限定前缀（public.trade_journals.xxx）同样能解析。
+    expect(missingSchemaColumn({
+      message: 'column public.trade_journals.pre_edge_source does not exist',
+    })).toBe('pre_edge_source');
+  });
+
+  it('把 Postgres 42703「does not exist」识别为可剥离缺列', () => {
+    expect(isSchemaColumnMissingError({
+      code: '42703',
+      message: 'column trade_journals.pre_confidence_basis does not exist',
+    })).toBe(true);
+    // 即便没有 error.code，单凭「does not exist」文案＋可解析列名也能识别。
+    expect(isSchemaColumnMissingError({
+      message: 'column trade_journals.pre_confidence_basis does not exist',
+    })).toBe(true);
+  });
+
+  it('严重漂移：缺 >5 列触发批量剥离，核心列保留、提交仍成功（不再卡在 30 次上限）', async () => {
+    const { data, error } = await insertTradeJournalWithSchemaFallback({
+      user_id: 'u1',
+      symbol: 'BTCUSDT',
+      direction: 'long',
+      pre_entry_reason: '核心理由',
+      // 以下全部是远程库尚未建好的「可选/新增」列（>5，足以触发批量剥离）。
+      pre_confidence_basis: 'x',
+      pre_cheap_opportunity: 'cheap',
+      pre_market_regime: 'trend',
+      pre_odds_structure: 'r2_supported',
+      pre_entry_stage: 'early',
+      pre_stop_quality: 'structural',
+      pre_thesis_why_right: '论点',
+      journal_kind: 'trade',
+      exit_falsification_status: 'not_triggered',
+      hedge_type: null,
+      post_decision_quality: 'good',
+    });
+    expect(error).toBeNull();
+    const row = data as Record<string, unknown>;
+    // 核心列必须保留。
+    expect(row).toMatchObject({
+      user_id: 'u1', symbol: 'BTCUSDT', direction: 'long', pre_entry_reason: '核心理由',
+    });
+    // 所有可选列都应被剥离。
+    for (const k of [
+      'pre_confidence_basis', 'pre_cheap_opportunity', 'pre_market_regime', 'pre_odds_structure',
+      'pre_entry_stage', 'pre_stop_quality', 'pre_thesis_why_right', 'journal_kind',
+      'exit_falsification_status', 'hedge_type', 'post_decision_quality',
+    ]) {
+      expect(row).not.toHaveProperty(k);
+    }
+  });
+
+  it('批量剥离时 pre_entry_reason 为空，则从 pre_thesis_why_right 回填（NOT NULL 兜底）', async () => {
+    const { data, error } = await insertTradeJournalWithSchemaFallback({
+      user_id: 'u1',
+      symbol: 'BTCUSDT',
+      direction: 'long',
+      pre_entry_reason: null,
+      pre_confidence_basis: 'x',
+      pre_cheap_opportunity: 'cheap',
+      pre_market_regime: 'trend',
+      pre_odds_structure: 'r2_supported',
+      pre_entry_stage: 'early',
+      pre_thesis_why_right: '我的论点就是入场理由',
+    });
+    expect(error).toBeNull();
+    const row = data as Record<string, unknown>;
+    expect(row.pre_entry_reason).toBe('我的论点就是入场理由');
+    expect(row).not.toHaveProperty('pre_thesis_why_right');
+  });
 });
