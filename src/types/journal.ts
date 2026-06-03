@@ -73,6 +73,17 @@ export type SmallPositionDrag =
   | 'missed_bigger' // 钝化了敏感度，做小 / 错过了真正更大的机会
   | 'chain_reaction';// 引发后续乱做（无聊 → 乱做 → 复仇等连锁负向）
 /**
+ * 踏空高盈亏比结构 / 该重没重：与「小机会仓位」对称的一等负向状态。
+ * 小机会仓位 = 薄结构上浪费行动力；这里 = 厚结构出现时没上、上轻、或错过后补票。
+ */
+export type MissedHighOddsState =
+  | 'none'        // 没有明显踏空，执行与结构厚度匹配
+  | 'missed'      // 该做没做，厚结构被空仓踏空
+  | 'under_sized' // 该重没重，仓位暴露明显低于结构质量
+  | 'late_chase'; // 错过后补票，用差位置追回心理损失
+/** 快照里的“便宜机会”判断：便宜 = 用小成本拿到不对称暴露，不便宜/说不清都进入小机会仓位警惕。 */
+export type CheapOpportunityAnswer = 'cheap' | 'not_cheap' | 'unclear';
+/**
  * 市场结构 regime（快照第 0 步）：先判断现在是什么市场，再决定能不能用某种打法。
  * 追涨在单边里是对的、在震荡里是致命的；同一个动作换个结构就改变性质。
  */
@@ -571,8 +582,10 @@ export interface TradeJournal {
   /**
    * 机会成本问句：「与做相比，不做的机会成本更高吗？」
    * true = 不做的代价更高（值得做）；false = 不做也不亏 → 填补无聊的「小机会仓位」。
-   */
+  */
   pre_opportunity_cost_worth?: boolean | null;
+  /** 这是一个便宜的机会吗？cheap = 成本低且不对称；not_cheap / unclear = 机会成本不足或小机会仓位警惕。 */
+  pre_cheap_opportunity?: CheapOpportunityAnswer | null;
   /** Edge / 源头标签：这笔交易靠什么赚钱（在快照标注，避免事后归因），用于盈亏同源。 */
   pre_edge_source?: EdgeSource | null;
 
@@ -703,6 +716,8 @@ export interface TradeJournal {
   post_struggle_level?: 1 | 2 | 3 | 4 | 5 | null;
   /** 小机会仓位的隐性成本记账。仅对快照里被标记为小机会仓位的单子追问。 */
   post_small_position_drag?: SmallPositionDrag | null;
+  /** 踏空高盈亏比结构 / 该重没重。仅对快照里识别为厚结构的单子追问。 */
+  post_missed_high_odds_state?: MissedHighOddsState | null;
   post_positive_expectancy_review?: string | null;
   post_premortem_review?: string | null;
   post_invalidation_review?: string | null;

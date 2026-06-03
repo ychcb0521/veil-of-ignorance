@@ -30,6 +30,7 @@ import {
   STRUGGLE_LEVEL_LABELS,
   STRUGGLE_LEVEL_HINTS,
   SMALL_POSITION_DRAG_OPTIONS,
+  MISSED_HIGH_ODDS_OPTIONS,
   type StruggleLevel,
   type StructureResultQuadrant,
 } from '@/lib/structureResult';
@@ -102,6 +103,7 @@ export function PostTradeReviewSheet({
   const [falsificationNote, setFalsificationNote] = useState('');
   const [struggleLevel, setStruggleLevel] = useState<StruggleLevel | null>(null);
   const [smallPositionDrag, setSmallPositionDrag] = useState<TradeJournal['post_small_position_drag']>(null);
+  const [missedHighOddsState, setMissedHighOddsState] = useState<TradeJournal['post_missed_high_odds_state']>(null);
   const [edgeSourceBackfill, setEdgeSourceBackfill] = useState<TradeJournal['pre_edge_source']>(null);
   const [hedgeWorthIt, setHedgeWorthIt] = useState<TradeJournal['hedge_worth_it']>(null);
   const [opponentWasRight, setOpponentWasRight] = useState<boolean | null>(null);
@@ -156,6 +158,7 @@ export function PostTradeReviewSheet({
         setFalsificationNote(journal.exit_falsification_note ?? '');
         setStruggleLevel((journal.post_struggle_level as StruggleLevel | null) ?? null);
         setSmallPositionDrag(journal.post_small_position_drag ?? null);
+        setMissedHighOddsState(journal.post_missed_high_odds_state ?? null);
         setEdgeSourceBackfill(journal.pre_edge_source ?? null);
         setHedgeWorthIt(journal.hedge_worth_it ?? null);
         setOpponentWasRight(journal.post_opponent_was_right ?? null);
@@ -313,10 +316,21 @@ export function PostTradeReviewSheet({
     && journal.direction !== 'no_entry'
     && (
       journal.pre_opportunity_cost_worth === false
+      || journal.pre_cheap_opportunity === 'not_cheap'
+      || journal.pre_cheap_opportunity === 'unclear'
       || journal.pre_edge_source === 'no_clear_edge'
       || journal.pre_odds_structure === 'odds_insufficient'
       || journal.pre_odds_structure === 'target_unclear'
       || journal.pre_odds_structure === 'neutral_choppy'
+    );
+  // 厚结构没吃够：与「小机会仓位」对称。只在快照显示结构足够厚/便宜时追问。
+  const showMissedHighOddsState = !isHedge
+    && journal.direction !== 'no_entry'
+    && (
+      journal.pre_odds_structure === 'r2_supported'
+      || journal.pre_odds_structure === 'r3_open'
+      || journal.pre_odds_structure === 'against_crowd_unreleased'
+      || (journal.pre_opportunity_cost_worth === true && journal.pre_cheap_opportunity === 'cheap')
     );
   // 结构对／错的 2×2 排布（上排结构对、下排结构错；左列赢、右列亏）。
   const QUADRANT_GRID: StructureResultQuadrant[] = ['deserved_win', 'correct_loss', 'dangerous_win', 'deserved_loss'];
@@ -344,7 +358,13 @@ export function PostTradeReviewSheet({
   const exitReasonValid = journal.direction === 'no_entry' || !!exitReason.trim();
   const resultValid = !!resultSummary.trim();
   const decisionValid = !!decisionQuality;
-  const reviewLoopValid = !!expectancyReview.trim() && !!premortemReview.trim() && !!invalidationReview.trim();
+  const falsificationFactValid = !snapshotFalsification || falsificationStatus != null;
+  const oddsStructureFactValid = isHedge || !journal.pre_odds_structure || oddsStructureReviewValue != null;
+  const reviewLoopValid = !!expectancyReview.trim()
+    && !!premortemReview.trim()
+    && !!invalidationReview.trim()
+    && falsificationFactValid
+    && oddsStructureFactValid;
   const opponentValid = !journal.pre_opponent_statement || opponentWasRight !== null;
   const hedgeWorthItValid = !isHedge || hedgeWorthIt != null;
   const fiveStepValid = [
@@ -368,6 +388,14 @@ export function PostTradeReviewSheet({
   const sectionCardClass = 'rounded-xl border border-border/70 bg-card/70 shadow-[0_10px_30px_rgba(0,0,0,0.04)]';
   const subtleLabelClass = 'text-[11px] font-medium text-muted-foreground';
   const metricCardClass = 'rounded-xl border border-border/70 bg-background/70 px-3 py-3';
+  const factPillClass = 'inline-flex h-5 items-center rounded-full border border-border/60 bg-background/70 px-2 text-[10px] font-medium text-muted-foreground';
+  const cheapOpportunityLabel = journal.pre_cheap_opportunity === 'cheap'
+    ? '便宜机会'
+    : journal.pre_cheap_opportunity === 'not_cheap'
+      ? '不便宜'
+      : journal.pre_cheap_opportunity === 'unclear'
+        ? '说不清便宜'
+        : null;
 
   const handleSave = async () => {
     if (!canSave) return;
@@ -383,6 +411,7 @@ export function PostTradeReviewSheet({
         post_decision_quality: decisionQuality,
         post_struggle_level: struggleLevel,
         post_small_position_drag: showSmallPositionDrag ? smallPositionDrag : null,
+        post_missed_high_odds_state: showMissedHighOddsState ? missedHighOddsState : null,
         // 仅当开仓漏标 edge 且本次复盘补标时回写（不覆盖开仓已标的源头）。
         ...(capturedEdge == null && edgeSourceBackfill != null ? { pre_edge_source: edgeSourceBackfill } : {}),
         post_positive_expectancy_review: buildOddsStructureReviewText(expectancyReview, oddsStructureReviewValue),
@@ -601,6 +630,16 @@ export function PostTradeReviewSheet({
                   <span className="text-muted-foreground">盈亏比目标：</span>
                   {journal.pre_odds_structure ? ODDS_STRUCTURE_LABELS[journal.pre_odds_structure] : '旧版快照'}
                 </div>
+                {cheapOpportunityLabel && (
+                  <div className="rounded-lg border border-border/60 bg-background/60 px-3 py-2">
+                    <span className="text-muted-foreground">机会成本：</span>{cheapOpportunityLabel}
+                    {journal.pre_opportunity_cost_worth != null ? (
+                      <span className="text-muted-foreground">
+                        {' '}· {journal.pre_opportunity_cost_worth ? '不做更亏' : '不做也不亏'}
+                      </span>
+                    ) : null}
+                  </div>
+                )}
                 {journal.pre_planned_stop_loss != null && (
                   <div className="rounded-lg border border-border/60 bg-background/60 px-3 py-2">
                     <span className="text-muted-foreground">R 回撤价 / 目标失效价：</span>{journal.pre_planned_stop_loss.toFixed(2)}
@@ -750,66 +789,198 @@ export function PostTradeReviewSheet({
           </div>
         )}
 
-        {calibrationPct != null && (
-          <div className={`space-y-2 px-4 py-4 ${sectionCardClass}`}>
-            <div className="flex items-center justify-between gap-3">
-              <div className="text-[12px] font-medium">Calibration 比对</div>
-              {calibrationScore != null && (
-                <span className={`font-mono text-[11px] ${
-                  calibrationScore <= 0.2 ? 'text-[#0ECB81]' : calibrationScore <= 0.3 ? 'text-[#F0B90B]' : 'text-[#F6465D]'
-                }`}>
-                  Brier {calibrationScore.toFixed(3)}
-                </span>
-              )}
+        <div className={`space-y-3 px-4 py-4 ${sectionCardClass}`}>
+          <div>
+            <div className="text-[12px] font-semibold text-foreground">事实模块 · 只核验“反 / 止 / 置信”</div>
+            <div className="mt-0.5 text-[10px] leading-relaxed text-muted-foreground">
+              先回答快照里的假设有没有被市场碰到。这里不写事后故事，只核验差值。
             </div>
-            <div className="grid grid-cols-2 gap-2 text-[11px] font-mono">
-              <div className={metricCardClass}>
-                <div className="text-[10px] uppercase tracking-wide text-muted-foreground">开仓预测胜率</div>
-                <div>{calibrationPct.toFixed(0)}%</div>
-              </div>
-              {(journal.pre_confidence_interval_low_pct != null || journal.pre_confidence_interval_high_pct != null) && (
-                <div className={metricCardClass}>
-                  <div className="text-[10px] uppercase tracking-wide text-muted-foreground">90% 区间</div>
-                  <div>
-                    {journal.pre_confidence_interval_low_pct != null ? journal.pre_confidence_interval_low_pct.toFixed(0) : '—'}%
-                    ~
-                    {journal.pre_confidence_interval_high_pct != null ? journal.pre_confidence_interval_high_pct.toFixed(0) : '—'}%
-                  </div>
-                </div>
-              )}
-              <div className={metricCardClass}>
-                <div className="text-[10px] uppercase tracking-wide text-muted-foreground">平仓后结果</div>
-                <div className={outcome === 'win' ? 'text-[#0ECB81]' : outcome === 'loss' ? 'text-[#F6465D]' : 'text-muted-foreground'}>
-                  {calibrationOutcomeLabel}
-                </div>
-              </div>
-            </div>
-            {(journal.pre_calibration_reference_class || journal.pre_calibration_competence_basis || journal.pre_calibration_update_signal) && (
-              <div className="grid gap-2 text-[11px] leading-relaxed">
-                {journal.pre_calibration_reference_class && (
-                  <div className="rounded-lg border border-border/60 bg-background/60 px-3 py-2">
-                    <span className="text-muted-foreground">历史回溯：</span>{journal.pre_calibration_reference_class}
-                  </div>
-                )}
-                {journal.pre_calibration_competence_basis && (
-                  <div className="rounded-lg border border-border/60 bg-background/60 px-3 py-2">
-                    <span className="text-muted-foreground">能力圈依据：</span>{journal.pre_calibration_competence_basis}
-                  </div>
-                )}
-                {journal.pre_calibration_update_signal && (
-                  <div className="rounded-lg border border-border/60 bg-background/60 px-3 py-2">
-                    <span className="text-muted-foreground">更新检查：</span>{journal.pre_calibration_update_signal}
-                  </div>
-                )}
-              </div>
-            )}
-            {journal.pre_mortem_text && (
-              <div className="rounded-lg border border-border/60 bg-background/60 px-3 py-2 text-[11px] leading-relaxed">
-                <span className="text-muted-foreground">开仓前最担心：</span>{journal.pre_mortem_text}
-              </div>
-            )}
           </div>
-        )}
+
+          <div className="rounded-xl border border-border/60 bg-background/60 px-3 py-3 space-y-2">
+            <div className="flex items-center gap-2">
+              <span className={factPillClass}>反</span>
+              <div className="text-[12px] font-medium text-foreground">预设的亏损原因兑现没有？*</div>
+            </div>
+            {snapshotPremortem && (
+              <div className="rounded-lg border border-border/60 bg-card px-3 py-2 text-[11px] leading-relaxed">
+                <span className="text-muted-foreground">开仓前写下的反：</span>{snapshotPremortem}
+              </div>
+            )}
+            <Textarea
+              rows={2}
+              value={premortemReview}
+              onChange={e => setPremortemReview(e.target.value)}
+              placeholder="只写这个 pre-mortem 是否被碰到：命中 / 部分命中 / 没命中。先别解释为什么。"
+              className="text-[12px] bg-background/80 border-border/70 rounded-xl"
+            />
+          </div>
+
+          <div className="rounded-xl border border-border/60 bg-background/60 px-3 py-3 space-y-2">
+            <div className="flex items-center gap-2">
+              <span className={factPillClass}>止</span>
+              <div className="text-[12px] font-medium text-foreground">预设的证伪信号兑现没有？*</div>
+            </div>
+            {snapshotFalsification ? (
+              <>
+                <div className="rounded-lg border border-border/60 bg-card px-3 py-2 text-[11px] leading-relaxed">
+                  <span className="text-muted-foreground">开仓前写下的止：</span>{snapshotFalsification}
+                </div>
+                <div className="grid gap-2">
+                  {[
+                    { value: 'triggered_reacted', label: '触发了，我及时反应了' },
+                    { value: 'triggered_late', label: '触发了，但我反应晚了' },
+                    { value: 'not_triggered', label: '没触发，我是主观平仓' },
+                  ].map(option => (
+                    <button
+                      key={option.value}
+                      type="button"
+                      onClick={() => setFalsificationStatus(option.value as NonNullable<TradeJournal['exit_falsification_status']>)}
+                      className={`rounded-lg border px-3 py-2 text-left text-[11px] transition-colors ${
+                        falsificationStatus === option.value
+                          ? 'border-[#F0B90B] bg-[#F0B90B]/10 text-foreground'
+                          : 'border-border bg-background text-muted-foreground hover:bg-accent'
+                      }`}
+                    >
+                      {option.label}
+                    </button>
+                  ))}
+                </div>
+                <Textarea
+                  rows={2}
+                  value={falsificationNote}
+                  onChange={event => setFalsificationNote(event.target.value)}
+                  placeholder="证伪状态备注（可选）：例如触发时间、迟疑点、是否按计划拆仓。"
+                  className="text-[12px] bg-background/80 border-border/70 rounded-xl"
+                />
+                {!falsificationFactValid && <div className="text-right font-mono text-[10px] text-[#F6465D]">必选</div>}
+              </>
+            ) : (
+              <div className="rounded-lg border border-border/60 bg-card px-3 py-2 text-[11px] leading-relaxed text-muted-foreground">
+                旧版快照没有记录“止”的信号；仍需在下方事实备注里说明你如何认错或离场。
+              </div>
+            )}
+            <Textarea
+              rows={2}
+              value={invalidationReview}
+              onChange={e => setInvalidationReview(e.target.value)}
+              placeholder="只写证伪/拆仓信号有没有出现、你有没有按它执行。叙事解释放到下方模块。"
+              className="text-[12px] bg-background/80 border-border/70 rounded-xl"
+            />
+          </div>
+
+          {!isHedge && (
+            <div className="rounded-xl border border-border/60 bg-background/60 px-3 py-3 space-y-2">
+              <div className="flex items-center gap-2">
+                <span className={factPillClass}>结构</span>
+                <div className="text-[12px] font-medium text-foreground">你命名的结构破坏信号出现没有？*</div>
+              </div>
+              {journal.pre_odds_structure ? (
+                <div className="rounded-lg border border-border/60 bg-card px-3 py-2 text-[10px] leading-relaxed text-muted-foreground">
+                  当时目标：<span className="text-foreground">{ODDS_STRUCTURE_LABELS[journal.pre_odds_structure]}</span>
+                  {snapshotOddsBreakdown ? <span> · 破坏信号：{snapshotOddsBreakdown}</span> : null}
+                </div>
+              ) : (
+                <div className="rounded-lg border border-border/60 bg-card px-3 py-2 text-[11px] leading-relaxed text-muted-foreground">
+                  旧版快照未记录盈亏比结构；这项按事实备注补足。
+                </div>
+              )}
+              {journal.pre_odds_structure && (
+                <div className="grid gap-2">
+                  {[
+                    { value: 'right', label: '未出现', desc: '目标结构基本保持，破坏信号没有兑现' },
+                    { value: 'mixed', label: '部分出现', desc: '有破坏迹象，但不完整或我处理不清' },
+                    { value: 'wrong', label: '出现了', desc: '结构破坏信号兑现，目标假设失效' },
+                  ].map(option => (
+                    <button
+                      key={option.value}
+                      type="button"
+                      onClick={() => setOddsStructureReviewValue(option.value as OddsStructureReview)}
+                      className={`rounded-lg border px-3 py-2 text-left text-[11px] transition-colors ${
+                        oddsStructureReviewValue === option.value
+                          ? 'border-foreground bg-foreground/5 text-foreground'
+                          : 'border-border bg-background text-muted-foreground hover:bg-accent'
+                      }`}
+                    >
+                      <div className="font-medium">{option.label}</div>
+                      <div className="mt-0.5 text-[10px] leading-relaxed">{option.desc}</div>
+                    </button>
+                  ))}
+                </div>
+              )}
+              {!oddsStructureFactValid && <div className="text-right font-mono text-[10px] text-[#F6465D]">必选</div>}
+              <Textarea
+                rows={2}
+                value={expectancyReview}
+                onChange={e => setExpectancyReview(e.target.value)}
+                placeholder="只写目标空间/结构破坏是否被市场验证；不要用最后盈亏倒推。"
+                className="text-[12px] bg-background/80 border-border/70 rounded-xl"
+              />
+            </div>
+          )}
+
+          {isHedge && (
+            <div className="space-y-1.5">
+              <Label className="text-[12px] font-medium">正期望/保险价值事实备注 *</Label>
+              <Textarea
+                rows={2}
+                value={expectancyReview}
+                onChange={e => setExpectancyReview(e.target.value)}
+                placeholder="只写这份对冲保险有没有值回摩擦成本，先不写解释。"
+                className="text-[12px] bg-background/80 border-border/70 rounded-xl"
+              />
+            </div>
+          )}
+
+          {calibrationPct != null && (
+            <div className="rounded-xl border border-border/60 bg-background/60 px-3 py-3 space-y-2">
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2">
+                  <span className={factPillClass}>置信</span>
+                  <div className="text-[12px] font-medium text-foreground">进场钉的置信度被验证没有？</div>
+                </div>
+                {calibrationScore != null && (
+                  <span className={`font-mono text-[11px] ${
+                    calibrationScore <= 0.2 ? 'text-[#0ECB81]' : calibrationScore <= 0.3 ? 'text-[#F0B90B]' : 'text-[#F6465D]'
+                  }`}>
+                    Brier {calibrationScore.toFixed(3)}
+                  </span>
+                )}
+              </div>
+              <div className="grid grid-cols-2 gap-2 text-[11px] font-mono">
+                <div className={metricCardClass}>
+                  <div className="text-[10px] uppercase tracking-wide text-muted-foreground">开仓预测胜率</div>
+                  <div>{calibrationPct.toFixed(0)}%</div>
+                </div>
+                <div className={metricCardClass}>
+                  <div className="text-[10px] uppercase tracking-wide text-muted-foreground">平仓后结果</div>
+                  <div className={outcome === 'win' ? 'text-[#0ECB81]' : outcome === 'loss' ? 'text-[#F6465D]' : 'text-muted-foreground'}>
+                    {calibrationOutcomeLabel}
+                  </div>
+                </div>
+              </div>
+              {journal.pre_confidence_basis && (
+                <div className="rounded-lg border border-border/60 bg-card px-3 py-2 text-[11px] leading-relaxed">
+                  <span className="text-muted-foreground">当时给这个置信度的依据：</span>{journal.pre_confidence_basis}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        <div className={`space-y-2 px-4 py-4 ${sectionCardClass}`}>
+          <div className="text-[12px] font-semibold text-foreground">叙事模块 · 解释与规律上卷</div>
+          <div className="text-[10px] leading-relaxed text-muted-foreground">
+            事实核验完成后才写解释。目标不是多看一遍这笔，而是把误差上卷成 L5 可追踪的路径。
+          </div>
+          <div className="grid grid-cols-5 gap-1.5 text-center">
+            {['反差', '止差', '结构差', '置信差', '执行差'].map(item => (
+              <div key={item} className="rounded-lg border border-border/60 bg-background/60 px-2 py-2 text-[10px] text-muted-foreground">
+                {item}
+              </div>
+            ))}
+          </div>
+        </div>
 
         <div className={`space-y-3 px-4 py-4 ${sectionCardClass}`}>
           <div className="text-[12px] font-medium">结果与决策质量分离</div>
@@ -1051,9 +1222,13 @@ export function PostTradeReviewSheet({
             <p className="text-[10px] leading-relaxed text-muted-foreground">
               {journal.pre_opportunity_cost_worth === false
                 ? '开仓时你判定「不做也不亏」—— 这是典型的小机会仓位（多半在填补无聊）。它的隐性成本要被记下来：'
-                : journal.pre_edge_source === 'no_clear_edge'
-                  ? '开仓时你选择「无明确 edge」—— 看不出来源，只是想交易。它的隐性成本要被记下来：'
-                  : '开仓时你判定「目标不清楚 / 盈亏比不足」—— 方向可能对，但目标空间不够厚。它的隐性成本要被记下来：'}
+                : journal.pre_cheap_opportunity === 'not_cheap'
+                  ? '开仓时你判定「不是便宜机会」—— 方向可能对，但成本太厚。它的隐性成本要被记下来：'
+                  : journal.pre_cheap_opportunity === 'unclear'
+                    ? '开仓时你判定「说不清便宜不便宜」—— 成本优势不清。它的隐性成本要被记下来：'
+                    : journal.pre_edge_source === 'no_clear_edge'
+                      ? '开仓时你选择「无明确 edge」—— 看不出来源，只是想交易。它的隐性成本要被记下来：'
+                      : '开仓时你判定「目标不清楚 / 盈亏比不足」—— 方向可能对，但目标空间不够厚。它的隐性成本要被记下来：'}
             </p>
             <div className="grid gap-1.5">
               {SMALL_POSITION_DRAG_OPTIONS.map(opt => {
@@ -1086,142 +1261,49 @@ export function PostTradeReviewSheet({
           </div>
         )}
 
-        <div className={`space-y-3 px-4 py-4 ${sectionCardClass}`}>
-          <div className="text-[12px] font-medium">下单前三问复核</div>
-          {snapshotWhyRight && (
-            <div className="rounded-lg border border-border/60 bg-background/60 px-3 py-2 text-[11px] leading-relaxed">
-              <span className="text-muted-foreground">当时认为会对：</span>{snapshotWhyRight}
-            </div>
-          )}
-          {snapshotPremortem && (
-            <div className="rounded-lg border border-border/60 bg-background/60 px-3 py-2 text-[11px] leading-relaxed">
-              <span className="text-muted-foreground">当时预演的亏损原因：</span>{snapshotPremortem}
-            </div>
-          )}
-          {journal.pre_falsification_signal && (
-            <div className="rounded-xl border border-border/70 bg-background/70 px-3 py-3 space-y-3">
+        {showMissedHighOddsState && (
+          <div className="space-y-2 px-4 py-4 rounded-xl border border-[#F6465D]/30 bg-[#F6465D]/[0.035] shadow-[0_10px_30px_rgba(0,0,0,0.04)]">
+            <div className="flex items-start justify-between gap-3">
               <div>
-                <div className="text-[12px] font-medium text-foreground">证伪信号校验</div>
-                <div className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
-                  你开仓时写的证伪信号：
-                </div>
-                <div className="mt-1 rounded border border-border/60 bg-card px-3 py-2 text-[11px] leading-relaxed text-foreground">
-                  {journal.pre_falsification_signal}
-                </div>
+                <div className="text-[12px] font-medium text-[#F6465D]">踏空高盈亏比结构 / 该重没重</div>
+                <p className="mt-1 text-[10px] leading-relaxed text-muted-foreground">
+                  这是「小机会仓位」的对称负态：厚结构出现时没上、上轻了，或错过后补票，都会损耗系统的复利能力。
+                </p>
               </div>
-              <div className="space-y-2">
-                <Label className="text-[12px] font-medium">这个信号在平仓前触发了吗？</Label>
-                <div className="grid gap-2">
-                  {[
-                    { value: 'triggered_reacted', label: '触发了，我及时反应了' },
-                    { value: 'triggered_late', label: '触发了，但我反应晚了' },
-                    { value: 'not_triggered', label: '没触发，我是主观平仓' },
-                  ].map(option => (
-                    <button
-                      key={option.value}
-                      type="button"
-                      onClick={() => setFalsificationStatus(option.value as NonNullable<TradeJournal['exit_falsification_status']>)}
-                      className={`rounded-lg border px-3 py-2 text-left text-[11px] transition-colors ${
-                        falsificationStatus === option.value
-                          ? 'border-[#F0B90B] bg-[#F0B90B]/10 text-foreground'
-                          : 'border-border bg-background text-muted-foreground hover:bg-accent'
-                      }`}
-                    >
-                      {option.label}
-                    </button>
-                  ))}
-                </div>
-                <Textarea
-                  rows={2}
-                  value={falsificationNote}
-                  onChange={event => setFalsificationNote(event.target.value)}
-                  placeholder="备注（可选）"
-                  className="text-[12px] bg-background/80 border-border/70 rounded-xl"
-                />
-                <div className="text-[10px] text-muted-foreground">这项是软性校验，可跳过，不阻塞保存。</div>
-              </div>
+              <span className="shrink-0 rounded-full border border-[#F6465D]/25 px-2 py-0.5 text-[10px] text-[#F6465D]">
+                厚结构记账
+              </span>
             </div>
-          )}
-          <div className="space-y-1.5">
-            {!isHedge && (
-              <div className="rounded-xl border border-border/70 bg-background/70 px-3 py-3 space-y-2">
-                <div>
-                  <div className="text-[12px] font-medium text-foreground">盈亏比目标复核</div>
-                  <div className="mt-1 text-[10px] leading-relaxed text-muted-foreground">
-                    这是软性复盘项，只复核你当时对目标空间的判断、失效信号是否兑现，不强制填写。
-                  </div>
-                </div>
-                {journal.pre_odds_structure && (
-                  <div className="rounded-lg border border-border/60 bg-card px-3 py-2 text-[10px] leading-relaxed text-muted-foreground">
-                    当时目标：<span className="text-foreground">{ODDS_STRUCTURE_LABELS[journal.pre_odds_structure]}</span>
-                    {snapshotOddsBreakdown ? <span> · 破坏信号：{snapshotOddsBreakdown}</span> : null}
-                  </div>
-                )}
-                <div className="grid gap-2">
-                  {[
-                    { value: 'right', label: '对', desc: '当时判目标空间基本正确' },
-                    { value: 'mixed', label: '一般', desc: '部分对，但没看完整' },
-                    { value: 'wrong', label: '错', desc: '当时把目标空间看错了' },
-                  ].map(option => (
-                    <button
-                      key={option.value}
-                      type="button"
-                      onClick={() => setOddsStructureReviewValue(option.value as OddsStructureReview)}
-                      className={`rounded-lg border px-3 py-2 text-left text-[11px] transition-colors ${
-                        oddsStructureReviewValue === option.value
-                          ? 'border-foreground bg-foreground/5 text-foreground'
-                          : 'border-border bg-background text-muted-foreground hover:bg-accent'
-                      }`}
+            <div className="grid gap-1.5">
+              {MISSED_HIGH_ODDS_OPTIONS.map(opt => {
+                const active = missedHighOddsState === opt.id;
+                const accent = opt.severity === 0 ? '#0ECB81' : opt.severity === 1 ? '#F0B90B' : opt.severity === 2 ? '#D89B00' : '#F6465D';
+                return (
+                  <button
+                    key={opt.id}
+                    type="button"
+                    onClick={() => setMissedHighOddsState(active ? null : opt.id)}
+                    className={`rounded-lg border px-3 py-2 text-left transition-colors ${
+                      active ? '' : 'border-border bg-background hover:bg-accent'
+                    }`}
+                    style={active ? { borderColor: accent, backgroundColor: `${accent}14` } : undefined}
+                  >
+                    <div
+                      className={`text-[11px] font-medium ${active ? '' : 'text-foreground'}`}
+                      style={active ? { color: accent } : undefined}
                     >
-                      <div className="font-medium">{option.label}</div>
-                      <div className="mt-0.5 text-[10px] leading-relaxed">{option.desc}</div>
-                    </button>
-                  ))}
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setOddsStructureReviewValue(null)}
-                  className="text-[10px] text-muted-foreground transition-colors hover:text-foreground"
-                >
-                  清空此项
-                </button>
-              </div>
-            )}
-            <Label className="text-[12px] font-medium">正期望判断是否成立？*</Label>
-            <Textarea
-              rows={2}
-              value={expectancyReview}
-              onChange={e => setExpectancyReview(e.target.value)}
-              placeholder="复核当时的赔率、结构、胜率假设；不要用最终盈亏倒推。"
-              className="text-[12px] bg-background/80 border-border/70 rounded-xl"
-            />
-          </div>
-          <div className="space-y-1.5">
-            <Label className="text-[12px] font-medium">亏损原因是否命中 pre-mortem？*</Label>
-            <Textarea
-              rows={2}
-              value={premortemReview}
-              onChange={e => setPremortemReview(e.target.value)}
-              placeholder="如果亏损，是否正是开仓前担心的原因；如果盈利，风险是否仍真实存在。"
-              className="text-[12px] bg-background/80 border-border/70 rounded-xl"
-            />
-          </div>
-          {snapshotFalsification && (
-            <div className="rounded-lg border border-border/60 bg-background/60 px-3 py-2 text-[11px] leading-relaxed">
-              <span className="text-muted-foreground">当时证伪/拆仓信号：</span>{snapshotFalsification}
+                      {opt.label}
+                    </div>
+                    <div className="text-[10px] leading-tight text-muted-foreground">{opt.description}</div>
+                  </button>
+                );
+              })}
             </div>
-          )}
-          <div className="space-y-1.5">
-            <Label className="text-[12px] font-medium">证伪条件是否出现？你是否执行？*</Label>
-            <Textarea
-              rows={2}
-              value={invalidationReview}
-              onChange={e => setInvalidationReview(e.target.value)}
-              placeholder="记录市场是否给出反证、你是否承认反证并执行。"
-              className="text-[12px] bg-background/80 border-border/70 rounded-xl"
-            />
+            <p className="text-[10px] leading-relaxed text-muted-foreground">
+              小机会仓位惩罚的是「不该占用却占用了」；这一项惩罚的是「该暴露却没有充分暴露」。两边都在保护行动力。
+            </p>
           </div>
-        </div>
+        )}
 
         {journal.pre_opponent_statement && (
           <div className={`space-y-3 px-4 py-4 ${sectionCardClass}`}>
@@ -1259,41 +1341,41 @@ export function PostTradeReviewSheet({
 
         <div className={`space-y-3 px-4 py-4 ${sectionCardClass}`}>
           <div>
-            <div className="text-[12px] font-medium">Dalio 五步诊断</div>
+            <div className="text-[12px] font-medium">L5 规律上卷 · 五条命脉</div>
             <div className="text-[10px] text-muted-foreground mt-0.5">
-              目标、问题、诊断、设计、执行分开写；近因写动作，根因写性质。
+              不重看一千根 K 线，只把这笔压缩成：反差、止差、结构差、置信差、执行差。
             </div>
           </div>
           <div className="space-y-1.5">
             <Label className="text-[12px] font-medium">目标 *</Label>
             <Textarea rows={2} value={fiveStepGoal} onChange={e => setFiveStepGoal(e.target.value)}
-              placeholder="这条错题要把哪个可衡量指标改善到什么程度？"
+              placeholder="这条误差路径要把哪个元指标改善到什么程度？例如证伪延迟率、结构破坏误判率。"
               className="text-[12px] bg-background/80 border-border/70 rounded-xl" />
           </div>
           <div className="space-y-1.5">
             <Label className="text-[12px] font-medium">问题 *</Label>
             <Textarea rows={2} value={fiveStepProblem} onChange={e => setFiveStepProblem(e.target.value)}
-              placeholder="精准描述问题，不写“心态不好”这种空泛结论。"
+              placeholder="精准命名是哪条命脉出错：反、止、结构、置信，还是执行。"
               className="text-[12px] bg-background/80 border-border/70 rounded-xl" />
           </div>
           <div className="grid sm:grid-cols-2 gap-2">
             <div className="space-y-1.5">
               <Label className="text-[12px] font-medium">近因（我做了什么动作）*</Label>
               <Textarea rows={2} value={proximateCause} onChange={e => setProximateCause(e.target.value)}
-                placeholder="例如：提前拆掉对冲、追高加仓、没有执行证伪。"
+                placeholder="例如：证伪触发后迟疑、结构破坏信号出现仍持仓、置信度过高。"
                 className="text-[12px] bg-background/80 border-border/70 rounded-xl" />
             </div>
             <div className="space-y-1.5">
               <Label className="text-[12px] font-medium">根因（我是什么性质导致）*</Label>
               <Textarea rows={2} value={rootCause} onChange={e => setRootCause(e.target.value)}
-                placeholder="例如：对浮亏耐受力低、对陌生结构过度自信。"
+                placeholder="例如：对浮亏耐受力低、把震荡误读成趋势、对陌生结构过度自信。"
                 className="text-[12px] bg-background/80 border-border/70 rounded-xl" />
             </div>
           </div>
           <div className="space-y-1.5">
             <Label className="text-[12px] font-medium">设计干预 *</Label>
             <Textarea rows={2} value={designIntervention} onChange={e => setDesignIntervention(e.target.value)}
-              placeholder="针对根因设计干预：原则、规则、SOP 或觉察项。"
+              placeholder="把这条误差路径转成原则、规则、SOP 或觉察项。"
               className="text-[12px] bg-background/80 border-border/70 rounded-xl" />
           </div>
           <div className="grid sm:grid-cols-2 gap-2">
@@ -1328,7 +1410,7 @@ export function PostTradeReviewSheet({
           <div className="space-y-1.5">
             <Label className="text-[12px] font-medium">执行与监控 *</Label>
             <Textarea rows={2} value={executionMonitor} onChange={e => setExecutionMonitor(e.target.value)}
-              placeholder="干预如何上线？未来用哪个指标确认它是否有效？"
+              placeholder="干预如何上线？未来用哪个 L5 指标确认它是否有效？"
               className="text-[12px] bg-background/80 border-border/70 rounded-xl" />
           </div>
           {!fiveStepValid && <div className="text-[10px] text-[#F6465D] text-right font-mono">五步诊断必填</div>}
@@ -1389,9 +1471,9 @@ export function PostTradeReviewSheet({
           <CollapsibleTrigger className="w-full rounded-xl border border-border/70 bg-gradient-to-r from-card via-card to-accent/20 px-4 py-3 flex items-center gap-2 transition-colors hover:bg-accent/30 shadow-[0_10px_30px_rgba(0,0,0,0.04)]">
             <BrainCircuit className="w-3.5 h-3.5 text-[#F0B90B]" />
             <div className="flex-1 text-left">
-              <div className="text-[12px] font-medium text-foreground">进入六步深度分析（推荐）</div>
+              <div className="text-[12px] font-medium text-foreground">可选：补充单笔细节</div>
               <div className="text-[10px] text-muted-foreground">
-                比"复盘文字"+"反事实"更结构化。完成后下方两个字段可自动生成。
+                只在 L5 命脉仍说不清时展开；它服务于规律上卷，不替代事实核验。
               </div>
             </div>
             <ChevronDown className={`w-3.5 h-3.5 text-muted-foreground transition-transform ${sixStepOpen ? 'rotate-180' : ''}`} />

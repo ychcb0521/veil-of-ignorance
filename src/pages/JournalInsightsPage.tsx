@@ -29,7 +29,7 @@ import { computeTooHardBasketStats, type TooHardBasketStats } from '@/lib/noTrad
 import { HEDGE_BOUNDARY_STANCE_LABELS, HEDGE_WORTH_IT_SCORE } from '@/lib/hedgeTypes';
 import { ODDS_STRUCTURE_LABELS } from '@/lib/oddsStructure';
 import { aggregateEdgeSourcePnl, findSameSourceEdge } from '@/lib/edgeSource';
-import { STRUGGLE_LEVEL_LABELS } from '@/lib/structureResult';
+import { MISSED_HIGH_ODDS_LABELS, STRUGGLE_LEVEL_LABELS } from '@/lib/structureResult';
 import { isHistoricalCampaign, PAIN_TAG_LABELS, PRINCIPLE_EVOLUTION_LEVEL_LABELS } from '@/types/journal';
 import type { HedgeBoundaryStance, OddsStructure, PainTag, PrincipleEvolutionLevel, TradeCampaign, TradeJournal } from '@/types/journal';
 
@@ -636,6 +636,23 @@ export default function JournalInsightsPage() {
       holdingHours: smallOpportunityHoldingHours,
       emptyCount: noTradeMainRows.length,
     };
+    const highOddsRows = mainOrders.filter(j =>
+      j.pre_odds_structure === 'r2_supported'
+      || j.pre_odds_structure === 'r3_open'
+      || j.pre_odds_structure === 'against_crowd_unreleased'
+      || (j.pre_opportunity_cost_worth === true && j.pre_cheap_opportunity === 'cheap')
+    );
+    const missedHighOddsRows = highOddsRows.filter(j =>
+      j.post_missed_high_odds_state != null && j.post_missed_high_odds_state !== 'none',
+    );
+    const missedHighOddsProfile = {
+      eligibleCount: highOddsRows.length,
+      cleanCount: highOddsRows.filter(j => j.post_missed_high_odds_state === 'none').length,
+      count: missedHighOddsRows.length,
+      missedCount: missedHighOddsRows.filter(j => j.post_missed_high_odds_state === 'missed').length,
+      underSizedCount: missedHighOddsRows.filter(j => j.post_missed_high_odds_state === 'under_sized').length,
+      lateChaseCount: missedHighOddsRows.filter(j => j.post_missed_high_odds_state === 'late_chase').length,
+    };
 
     const reviewedMain = curTrades.filter(j => j.order_kind === 'main' && j.post_reviewed_at && j.post_outcome && j.post_outcome !== 'no_entry');
     const directionWins = reviewedMain.filter(j => j.post_outcome === 'win').length;
@@ -768,6 +785,7 @@ export default function JournalInsightsPage() {
       restraintCount,
       oddsStructureProfile,
       smallOpportunityProfile,
+      missedHighOddsProfile,
       edgeSourceProfile,
       struggleProfile,
       campaignOutcome: {
@@ -1443,6 +1461,50 @@ export default function JournalInsightsPage() {
                   </div>
                   <div className="mt-2 text-[10px] text-muted-foreground">
                     空仓不是失败，而是把行动力留给真正厚的目标空间。
+                  </div>
+                </div>
+              </div>
+            )}
+          </section>
+
+          <section className="border border-border rounded bg-card p-3">
+            <div className="text-[12px] font-medium mb-2">踏空高盈亏比结构 / 该重没重</div>
+            <div className="text-[10px] text-muted-foreground">
+              与“小机会仓位”对称：厚结构出现时没上、上轻或错过后补票，都是负向指标。
+            </div>
+            {stats.missedHighOddsProfile.eligibleCount === 0 ? (
+              <div className="mt-4 text-[11px] text-muted-foreground">
+                数据不足。后续会只统计快照里被标为 2R/3R、有成本优势或旧版逆拥挤的主力单。
+              </div>
+            ) : (
+              <div className="mt-4 grid gap-2">
+                <div className="rounded border border-[#F6465D]/30 bg-[#F6465D]/5 p-2">
+                  <div className="flex items-center justify-between text-[11px]">
+                    <span className="text-[#F6465D]">厚结构没吃够</span>
+                    <span className="font-mono">{stats.missedHighOddsProfile.count} 笔</span>
+                  </div>
+                  <div className="mt-2 grid grid-cols-3 gap-2 text-[10px] text-muted-foreground">
+                    <div>
+                      <div>{MISSED_HIGH_ODDS_LABELS.missed}</div>
+                      <div className="font-mono text-foreground">{stats.missedHighOddsProfile.missedCount}</div>
+                    </div>
+                    <div>
+                      <div>{MISSED_HIGH_ODDS_LABELS.under_sized}</div>
+                      <div className="font-mono text-foreground">{stats.missedHighOddsProfile.underSizedCount}</div>
+                    </div>
+                    <div>
+                      <div>{MISSED_HIGH_ODDS_LABELS.late_chase}</div>
+                      <div className="font-mono text-foreground">{stats.missedHighOddsProfile.lateChaseCount}</div>
+                    </div>
+                  </div>
+                </div>
+                <div className="rounded border border-[#0ECB81]/30 bg-[#0ECB81]/5 p-2">
+                  <div className="flex items-center justify-between text-[11px]">
+                    <span className="text-[#0ECB81]">结构厚度与暴露匹配</span>
+                    <span className="font-mono">{stats.missedHighOddsProfile.cleanCount} 笔</span>
+                  </div>
+                  <div className="mt-2 text-[10px] text-muted-foreground">
+                    当前周期共识别 {stats.missedHighOddsProfile.eligibleCount} 笔厚结构样本。
                   </div>
                 </div>
               </div>

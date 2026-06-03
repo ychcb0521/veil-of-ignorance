@@ -148,7 +148,7 @@ export default function JournalPlaybackPage() {
           <div className="px-6 py-3 max-w-[1600px] mx-auto w-full flex items-center justify-between gap-4">
             <div className="flex items-center gap-3 min-w-0">
               <BackButton />
-              <h1 className="text-[14px] font-medium shrink-0">单笔复现 · {journal.symbol}</h1>
+              <h1 className="text-[14px] font-medium shrink-0">L5 复盘 · {journal.symbol}</h1>
             </div>
             <div className="font-mono text-[11px] text-muted-foreground truncate flex-1 text-center hidden md:block">
               <span className={dirColor}>{dirLabel}</span>
@@ -183,7 +183,7 @@ export default function JournalPlaybackPage() {
                 onClick={() => {
                   window.dispatchEvent(new CustomEvent('replay:scroll-to-deep-analysis'));
                 }}>
-                <BrainCircuit className="w-3 h-3 mr-1" /> 深度分析
+                <BrainCircuit className="w-3 h-3 mr-1" /> L5 上卷
               </Button>
               <Button size="sm" variant="ghost" className="h-7 text-[11px]"
                 onClick={() => setEditOpen(true)}>
@@ -199,7 +199,7 @@ export default function JournalPlaybackPage() {
               <div className="min-h-0">{hindsightGuard}</div>
               {!isMobile && (
                 <div className="rounded border border-border bg-card p-4 text-[12px] text-muted-foreground leading-6">
-                  归因完成前，本页只保留开仓快照入口，不展示后续 K 线、结果解释或走势复盘。保存评价后系统会自动刷新并解锁回放。
+                  归因完成前，本页只保留开仓快照入口，不展示后续 K 线、结果解释或走势复盘。先完成“反 / 止 / 结构 / 置信”的事实核验，再把误差上卷到 L5。
                 </div>
               )}
             </div>

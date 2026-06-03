@@ -52,6 +52,8 @@ export function useBackgroundPrices() {
     setPositionsMap,
     setBalance,
     setTradeHistory,
+    tradingMode,
+    recordExecutionTrade,
   } = useTradingContext();
 
   const positionsMapRef = useRef(positionsMap);
@@ -246,6 +248,7 @@ export function useBackgroundPrices() {
               ],
             };
           });
+          recordExecutionTrade(order.tradingMode ?? tradingMode);
           toast.success(`条件单已触发：${symbol} ${order.side} @ ${fillPrice.toFixed(2)}`);
         }
       }
@@ -257,7 +260,7 @@ export function useBackgroundPrices() {
         }));
       }
     },
-    [setBalance, setPositionsMap, setOrdersMap, executeReduceOnlyTrigger],
+    [setBalance, setPositionsMap, setOrdersMap, executeReduceOnlyTrigger, recordExecutionTrade, tradingMode],
   );
 
   const pollBackgroundSymbols = useCallback(async () => {

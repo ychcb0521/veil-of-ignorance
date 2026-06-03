@@ -306,7 +306,7 @@ function isMissingDalioMetaLayerError(error: { code?: string; message?: string }
   return error.code === 'PGRST205'
     || error.code === 'PGRST204'
     || error.code === '42P01'
-    || (/trade_principles|pain_log_entries|pre_thesis_why_right|pre_premortem_failure_reason|pre_falsification_signal|pre_confidence_basis|pre_odds_structure|pre_odds_structure_source|pre_odds_structure_premortem|pre_odds_structure_breakdown_signals|pre_account_equity_usdt|pre_opportunity_cost_worth|pre_edge_source|pre_market_regime|pre_entry_stage|pre_stop_quality|pre_chase_after_close|pre_mortem_text|pre_positive_expectancy|pre_invalidation_condition|pre_calibration_win_pct|pre_confidence_interval_|pre_calibration_reference_class|pre_calibration_competence_basis|pre_calibration_update_signal|pre_dataset_split|pre_lollapalooza_score|pre_bankruptcy_estimate|pre_info_|pre_opponent_statement|pre_pain_tags|pre_cognitive_bias_tags|journal_kind|no_trade_reason|no_trade_would_be_entry_price|no_trade_direction|exit_falsification_status|exit_falsification_note|post_result_summary|post_decision_quality|post_struggle_level|post_small_position_drag|post_positive_expectancy_review|post_premortem_review|post_invalidation_review|post_five_step|post_opponent_was_right|post_real_close_time|evolution_level|principle_id|hedge_type|hedge_boundary_price|hedge_boundary_basis|hedge_boundary_stance|hedge_lock_profit_pct|hedge_resolution_up|hedge_resolution_down|hedge_down_if_chop|hedge_down_if_trend|hedge_down_if_rebound|hedge_necessity_pct|hedge_safety_strength|hedge_safety_regularity|hedge_risk_magnitude|hedge_conviction_pct|hedge_friction_cost|hedge_order_method|hedge_worth_it/i.test(message)
+    || (/trade_principles|pain_log_entries|pre_thesis_why_right|pre_premortem_failure_reason|pre_falsification_signal|pre_confidence_basis|pre_odds_structure|pre_odds_structure_source|pre_odds_structure_premortem|pre_odds_structure_breakdown_signals|pre_account_equity_usdt|pre_opportunity_cost_worth|pre_cheap_opportunity|pre_edge_source|pre_market_regime|pre_entry_stage|pre_stop_quality|pre_chase_after_close|pre_mortem_text|pre_positive_expectancy|pre_invalidation_condition|pre_calibration_win_pct|pre_confidence_interval_|pre_calibration_reference_class|pre_calibration_competence_basis|pre_calibration_update_signal|pre_dataset_split|pre_lollapalooza_score|pre_bankruptcy_estimate|pre_info_|pre_opponent_statement|pre_pain_tags|pre_cognitive_bias_tags|journal_kind|no_trade_reason|no_trade_would_be_entry_price|no_trade_direction|exit_falsification_status|exit_falsification_note|post_result_summary|post_decision_quality|post_struggle_level|post_small_position_drag|post_missed_high_odds_state|post_positive_expectancy_review|post_premortem_review|post_invalidation_review|post_five_step|post_opponent_was_right|post_real_close_time|evolution_level|principle_id|hedge_type|hedge_boundary_price|hedge_boundary_basis|hedge_boundary_stance|hedge_lock_profit_pct|hedge_resolution_up|hedge_resolution_down|hedge_down_if_chop|hedge_down_if_trend|hedge_down_if_rebound|hedge_necessity_pct|hedge_safety_strength|hedge_safety_regularity|hedge_risk_magnitude|hedge_conviction_pct|hedge_friction_cost|hedge_order_method|hedge_worth_it/i.test(message)
       && /schema cache|could not find|does not exist|column/i.test(message));
 }
 
@@ -2200,6 +2200,7 @@ export interface CreateNoTradeJournalInput {
   pre_odds_structure_premortem?: TradeJournal['pre_odds_structure_premortem'];
   pre_odds_structure_breakdown_signals?: TradeJournal['pre_odds_structure_breakdown_signals'];
   pre_opportunity_cost_worth?: TradeJournal['pre_opportunity_cost_worth'];
+  pre_cheap_opportunity?: TradeJournal['pre_cheap_opportunity'];
   pre_edge_source?: TradeJournal['pre_edge_source'];
   pre_market_regime?: TradeJournal['pre_market_regime'];
   pre_entry_stage?: TradeJournal['pre_entry_stage'];
@@ -2244,6 +2245,7 @@ export async function createNoTradeJournal(
     pre_odds_structure_premortem: input.pre_odds_structure_premortem?.trim() || null,
     pre_odds_structure_breakdown_signals: input.pre_odds_structure_breakdown_signals?.trim() || null,
     pre_opportunity_cost_worth: input.pre_opportunity_cost_worth ?? null,
+    pre_cheap_opportunity: input.pre_cheap_opportunity ?? null,
     pre_edge_source: input.pre_edge_source ?? null,
     pre_market_regime: input.pre_market_regime ?? null,
     pre_entry_stage: input.pre_entry_stage ?? null,
@@ -2569,6 +2571,7 @@ export interface FinalizeJournalInput {
   post_decision_quality?: TradeJournal['post_decision_quality'];
   post_struggle_level?: TradeJournal['post_struggle_level'];
   post_small_position_drag?: TradeJournal['post_small_position_drag'];
+  post_missed_high_odds_state?: TradeJournal['post_missed_high_odds_state'];
   /** 复盘时回填快照漏标的 edge 源头（旧快照），用于「盈亏同源」统计。 */
   pre_edge_source?: TradeJournal['pre_edge_source'];
   post_positive_expectancy_review?: string | null;

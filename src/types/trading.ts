@@ -27,6 +27,8 @@ export interface PendingOrder {
   marginMode: MarginMode;
   status: OrderStatus;
   createdAt: number;
+  /** Trading mode captured at placement, so later fills keep the original incentive weight. */
+  tradingMode?: "decision" | "direct";
 
   callbackRate?: number;
   trailingExecType?: "MARKET" | "LIMIT";

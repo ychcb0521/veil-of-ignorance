@@ -1,4 +1,4 @@
-import type { DecisionQuality, SmallPositionDrag, TradeOutcome } from '@/types/journal';
+import type { DecisionQuality, MissedHighOddsState, SmallPositionDrag, TradeOutcome } from '@/types/journal';
 
 // ============ 结构 × 结果 四象限 ============
 // 结构 = 下单当时（已知信息下）的决策质量；结果 = 这单赢还是亏。
@@ -169,4 +169,48 @@ export const SMALL_POSITION_DRAG_LABELS: Record<SmallPositionDrag, string> = {
   attention_only: '占用注意力',
   missed_bigger: '错过更大机会',
   chain_reaction: '引发连锁乱做',
+};
+
+// ============ 踏空高盈亏比结构 / 该重没重 ============
+
+export interface MissedHighOddsOption {
+  id: MissedHighOddsState;
+  label: string;
+  description: string;
+  /** Ordinal severity, for coloring (0 = none … 3 = worst). */
+  severity: 0 | 1 | 2 | 3;
+}
+
+export const MISSED_HIGH_ODDS_OPTIONS: readonly MissedHighOddsOption[] = [
+  {
+    id: 'none',
+    label: '没有明显踏空',
+    description: '结构厚度与实际暴露基本匹配，没有明显错过或做轻',
+    severity: 0,
+  },
+  {
+    id: 'missed',
+    label: '该做没做',
+    description: '高盈亏比结构被识别出来，但最后没有参与',
+    severity: 2,
+  },
+  {
+    id: 'under_sized',
+    label: '该重没重',
+    description: '结构足够厚，但仓位过轻，收益没有覆盖判断质量',
+    severity: 2,
+  },
+  {
+    id: 'late_chase',
+    label: '错过后补票',
+    description: '错过好位置后用差位置追回，等于把厚结构做薄',
+    severity: 3,
+  },
+] as const;
+
+export const MISSED_HIGH_ODDS_LABELS: Record<MissedHighOddsState, string> = {
+  none: '没有明显踏空',
+  missed: '该做没做',
+  under_sized: '该重没重',
+  late_chase: '错过后补票',
 };

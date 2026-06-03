@@ -153,6 +153,8 @@ const Index = () => {
     closeLiquidationModal,
     timeMode,
     setTimeMode,
+    tradingMode,
+    recordExecutionTrade,
     coinTimelines,
     setCoinTimelines,
     totalPositionCount,
@@ -1024,6 +1026,7 @@ const Index = () => {
                 ],
               };
             });
+            recordExecutionTrade(matchedOrder.tradingMode ?? tradingMode);
             toast.success(
               `委托成交: ${matchedOrder.side === "LONG" ? "开多" : "开空"} ${matchedOrder.quantity} @ ${actualFillPrice.toFixed(2)}`,
             );
@@ -1037,7 +1040,7 @@ const Index = () => {
         return { ...prev, [activeSymbol]: remaining };
       });
     }
-  }, [visibleData.length, activeSymbol]);
+  }, [visibleData.length, activeSymbol, recordExecutionTrade, tradingMode]);
 
   // ===== TWAP ENGINE =====
   useEffect(() => {

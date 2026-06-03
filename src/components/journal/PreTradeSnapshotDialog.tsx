@@ -69,6 +69,7 @@ export function PreTradeSnapshotDialog({
   const [tooHardOddsStructurePremortem, setTooHardOddsStructurePremortem] = useState<string | null>(null);
   const [tooHardOddsStructureBreakdownSignals, setTooHardOddsStructureBreakdownSignals] = useState<string | null>(null);
   const [tooHardOppCostWorth, setTooHardOppCostWorth] = useState<boolean | null>(null);
+  const [tooHardCheapOpportunity, setTooHardCheapOpportunity] = useState<SnapshotPayload['pre_cheap_opportunity']>(null);
   const [tooHardEdgeSource, setTooHardEdgeSource] = useState<SnapshotPayload['pre_edge_source']>(null);
   const [tooHardMarketRegime, setTooHardMarketRegime] = useState<SnapshotPayload['pre_market_regime']>(null);
   const [tooHardEntryStage, setTooHardEntryStage] = useState<SnapshotPayload['pre_entry_stage']>(null);
@@ -97,6 +98,7 @@ export function PreTradeSnapshotDialog({
       setTooHardOddsStructurePremortem(null);
       setTooHardOddsStructureBreakdownSignals(null);
       setTooHardOppCostWorth(null);
+      setTooHardCheapOpportunity(null);
       setTooHardEdgeSource(null);
       setTooHardMarketRegime(null);
       setTooHardEntryStage(null);
@@ -191,6 +193,7 @@ export function PreTradeSnapshotDialog({
         pre_odds_structure_breakdown_signals: payload.pre_odds_structure_breakdown_signals,
         pre_account_equity_usdt: payload.pre_account_equity_usdt,
         pre_opportunity_cost_worth: payload.pre_opportunity_cost_worth,
+        pre_cheap_opportunity: payload.pre_cheap_opportunity,
         pre_edge_source: payload.pre_edge_source,
         pre_market_regime: payload.pre_market_regime,
         pre_entry_stage: payload.pre_entry_stage,
@@ -282,6 +285,7 @@ export function PreTradeSnapshotDialog({
         pre_odds_structure_premortem: tooHardOrderKind === 'main' ? tooHardOddsStructurePremortem : null,
         pre_odds_structure_breakdown_signals: tooHardOrderKind === 'main' ? tooHardOddsStructureBreakdownSignals : null,
         pre_opportunity_cost_worth: tooHardOrderKind === 'main' ? tooHardOppCostWorth : null,
+        pre_cheap_opportunity: tooHardOrderKind === 'main' ? tooHardCheapOpportunity : null,
         pre_edge_source: tooHardOrderKind === 'main' ? tooHardEdgeSource : null,
         pre_market_regime: tooHardOrderKind === 'main' ? tooHardMarketRegime : null,
         pre_entry_stage: tooHardOrderKind === 'main' ? tooHardEntryStage : null,
@@ -363,7 +367,7 @@ export function PreTradeSnapshotDialog({
       pricePrecision={pricePrecision}
       orderParams={orderParams ?? null}
       onCancel={() => onOpenChange(false)}
-      onTooHard={({ order_kind, pre_planned_stop_loss, pre_odds_structure, pre_odds_structure_source, pre_odds_structure_premortem, pre_odds_structure_breakdown_signals, pre_opportunity_cost_worth, pre_edge_source, pre_market_regime, pre_entry_stage, pre_stop_quality }) => {
+      onTooHard={({ order_kind, pre_planned_stop_loss, pre_odds_structure, pre_odds_structure_source, pre_odds_structure_premortem, pre_odds_structure_breakdown_signals, pre_opportunity_cost_worth, pre_cheap_opportunity, pre_edge_source, pre_market_regime, pre_entry_stage, pre_stop_quality }) => {
         setTooHardOrderKind(order_kind);
         setTooHardPlannedStopLoss(pre_planned_stop_loss ?? null);
         setTooHardOddsStructure(pre_odds_structure ?? null);
@@ -371,6 +375,7 @@ export function PreTradeSnapshotDialog({
         setTooHardOddsStructurePremortem(pre_odds_structure_premortem ?? null);
         setTooHardOddsStructureBreakdownSignals(pre_odds_structure_breakdown_signals ?? null);
         setTooHardOppCostWorth(pre_opportunity_cost_worth ?? null);
+        setTooHardCheapOpportunity(pre_cheap_opportunity ?? null);
         setTooHardEdgeSource(pre_edge_source ?? null);
         setTooHardMarketRegime(pre_market_regime ?? null);
         setTooHardEntryStage(pre_entry_stage ?? null);

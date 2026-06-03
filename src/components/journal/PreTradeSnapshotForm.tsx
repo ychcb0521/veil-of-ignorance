@@ -64,6 +64,7 @@ import { calcUnrealizedPnl } from '@/types/trading';
 import type { PlaceOrderParams } from '@/contexts/TradingContext';
 import type {
   ChecklistItem,
+  CheapOpportunityAnswer,
   DatasetSplit,
   EdgeSource,
   EntryStage,
@@ -121,6 +122,8 @@ export interface SnapshotPayload {
   pre_account_equity_usdt: number | null;
   /** 机会成本问句：不做更亏吗？false = 填补无聊 / 凭感觉的小机会仓位。 */
   pre_opportunity_cost_worth: boolean | null;
+  /** 便宜机会问句：cheap = 用低成本拿到不对称暴露。 */
+  pre_cheap_opportunity: CheapOpportunityAnswer | null;
   /** Edge / 源头标签，用于盈亏同源分析。 */
   pre_edge_source: EdgeSource | null;
   /** 第 0 步 · 市场结构 regime（震荡 / 单边 / 转换中）。主力单恒写，对冲单 / 弃单为 null。 */
@@ -197,6 +200,7 @@ interface Props {
     pre_odds_structure_premortem?: string | null;
     pre_odds_structure_breakdown_signals?: string | null;
     pre_opportunity_cost_worth?: boolean | null;
+    pre_cheap_opportunity?: CheapOpportunityAnswer | null;
     pre_edge_source?: EdgeSource | null;
     pre_market_regime?: MarketRegime | null;
     pre_entry_stage?: EntryStage | null;
@@ -373,6 +377,7 @@ export function PreTradeSnapshotForm({
   const [oddsStructureBreakdownSignals, setOddsStructureBreakdownSignals] = useState('');
   // 《不对称思考》：先识别 edge/源头标签，再判断机会成本是否足够占用行动力。
   const [oppCostAnswer, setOppCostAnswer] = useState<OpportunityCostAnswer | null>(null);
+  const [cheapOpportunity, setCheapOpportunity] = useState<CheapOpportunityAnswer | null>(null);
   const [edgeSource, setEdgeSource] = useState<EdgeSource | null>(null);
   // 市场结构层：第 0 步先判断 regime，再标注入场阶段与止损质量（仅主力单）。
   const [marketRegime, setMarketRegime] = useState<MarketRegime | null>(null);
@@ -555,6 +560,7 @@ export function PreTradeSnapshotForm({
   );
   // 主力单必须给出 edge/源头与机会成本回答（对冲单与弃单记录不要求）。
   const edgeSourceReady = isHedge || !isTrade || edgeSource != null;
+  const cheapOpportunityReady = isHedge || !isTrade || cheapOpportunity != null;
   const oppCostReady = isHedge || !isTrade || oppCostWorth != null;
   // 市场结构层（仅主力单）：第 0 步 regime、入场阶段、止损质量。
   const regimeReady = isHedge || !isTrade || marketRegime != null;
@@ -581,7 +587,7 @@ export function PreTradeSnapshotForm({
   );
   // 芒格两层清单：排除性清单（一票否决：逐仓 + 心态≥3，含在 mentalReady/tradeReady）
   // + 评估性清单（慢思考脚手架）。心态满分时，评估层降级为可选——不选也能开单。
-  const evaluativeReady = decisionReady && oddsStructureReady && edgeSourceReady && oppCostReady
+  const evaluativeReady = decisionReady && oddsStructureReady && edgeSourceReady && cheapOpportunityReady && oppCostReady
     && regimeReady && entryStageReady && stopQualityReady;
   const evaluativeOptional = isTrade && !isHedge && mental === 5;
   // 评估层非可选时强制展开（避免把"必填但隐藏"的字段藏起来造成无法提交的陷阱）。
@@ -612,6 +618,8 @@ export function PreTradeSnapshotForm({
   const smallOpportunityGate = isTrade && !isHedge && (
     edgeSource === 'no_clear_edge'
     || oddsStructure === 'neutral_choppy'
+    || cheapOpportunity === 'not_cheap'
+    || cheapOpportunity === 'unclear'
   );
   // 机会成本答「否 / 说不清」= 不做也不亏 / 凭感觉 = 小机会仓位，与坏结构同样触发二次确认。
   const boredomGate = isTrade && !isHedge && oppCostWorth === false;
@@ -797,6 +805,7 @@ export function PreTradeSnapshotForm({
         pre_odds_structure_breakdown_signals: isHedge || !isTrade ? null : (oddsStructureBreakdownSignals.trim() || null),
         pre_account_equity_usdt: accountEquity > 0 ? Number(accountEquity.toFixed(2)) : null,
         pre_opportunity_cost_worth: isHedge || !isTrade ? null : oppCostWorth,
+        pre_cheap_opportunity: isHedge || !isTrade ? null : cheapOpportunity,
         pre_edge_source: isHedge || !isTrade ? null : edgeSource,
         pre_market_regime: isHedge || !isTrade ? null : marketRegime,
         pre_entry_stage: isHedge || !isTrade ? null : entryStage,
@@ -878,22 +887,26 @@ export function PreTradeSnapshotForm({
 
   const labelCls = 'text-[11px] font-medium text-muted-foreground';
   const requiredStar = <span className="ml-0.5 text-[#F6465D]">*</span>;
-  const inputCls = 'h-9 rounded-lg border-border/70 bg-background/80 text-[12px] text-foreground font-mono shadow-none';
-  const textareaCls = 'min-h-[108px] resize-none rounded-lg border-border/70 bg-background/80 text-[12px] text-foreground leading-relaxed shadow-none';
-  const mainSurfaceCls = 'rounded-2xl border border-border/60 bg-card/95 shadow-[0_16px_45px_rgba(15,23,42,0.045)]';
+  // === 统一表面 / 边框 / 高低体系（仅视觉）===
+  // Tier-1 卡片：bg-card + border/60 + 单一柔和阴影。
+  // Tier-2 嵌套面板 / 选项：bg-background/60 + border/60，扁平无阴影。
+  // Tier-3 控件（输入框）：bg-background + border/60。选中态：中性 foreground 轻提亮，品牌色只留给语义。
+  const inputCls = 'h-9 rounded-lg border-border/60 bg-background text-[12px] text-foreground font-mono shadow-none';
+  const textareaCls = 'min-h-[108px] resize-none rounded-lg border-border/60 bg-background text-[12px] text-foreground leading-relaxed shadow-none';
+  const mainSurfaceCls = 'rounded-2xl border border-border/60 bg-card shadow-[0_16px_45px_rgba(15,23,42,0.045)]';
   const mainPanelTriggerCls = 'group flex w-full items-center justify-between gap-3 px-4 py-3 text-left transition-colors hover:bg-muted/30';
   const mainSectionTitleCls = 'text-[12px] font-semibold tracking-normal text-foreground';
   const mainSectionHintCls = 'mt-0.5 text-[10px] leading-relaxed text-muted-foreground';
-  const mainStatusChipCls = 'inline-flex h-5 items-center rounded-full border border-border/60 bg-muted/35 px-2 text-[10px] font-medium text-muted-foreground';
-  const quietOptionCls = 'rounded-xl border border-border/60 bg-background/65 text-muted-foreground transition-colors hover:border-border hover:bg-muted/35';
-  const selectedOptionCls = 'border-foreground/35 bg-foreground/[0.035] text-foreground shadow-[inset_0_0_0_1px_rgba(255,255,255,0.02)]';
-  const hedgeAnchorCardCls = 'flex h-full flex-col rounded-lg border border-border/70 bg-card p-3.5 shadow-none transition-colors';
-  const hedgeAnchorHeaderCls = 'min-h-[60px] border-b border-border/40 pb-2';
-  const hedgeAnchorButtonBaseCls = 'h-10 rounded-md border text-[12px] font-medium transition-colors';
-  const hedgeAnchorButtonIdleCls = 'border-border/60 bg-muted/45 text-muted-foreground hover:border-border hover:bg-muted/70';
-  const hedgeAnchorButtonActiveCls = 'border-[#F0B90B]/55 bg-[#F0B90B]/10 text-foreground';
-  const hedgeScenarioCardCls = 'flex h-full flex-col rounded-xl border border-border/70 bg-card/95 p-3 shadow-sm transition-colors';
-  const hedgeScenarioTextareaCls = 'mt-2 min-h-[84px] flex-1 resize-none rounded-lg border-border bg-background/95 text-[12px] leading-relaxed shadow-inner';
+  const mainStatusChipCls = 'inline-flex h-5 items-center rounded-full border border-border/60 bg-muted/30 px-2 text-[10px] font-medium text-muted-foreground';
+  const quietOptionCls = 'rounded-xl border border-border/60 bg-background/60 text-muted-foreground transition-colors hover:border-border hover:bg-muted/40';
+  const selectedOptionCls = 'border-foreground/35 bg-foreground/[0.04] text-foreground';
+  const hedgeAnchorCardCls = 'flex h-full flex-col rounded-xl border border-border/60 bg-background/60 p-3.5 shadow-none transition-colors';
+  const hedgeAnchorHeaderCls = 'min-h-[60px] border-b border-border/60 pb-2';
+  const hedgeAnchorButtonBaseCls = 'h-10 rounded-lg border text-[12px] font-medium transition-colors';
+  const hedgeAnchorButtonIdleCls = 'border-border/60 bg-background/60 text-muted-foreground hover:border-border hover:bg-muted/40';
+  const hedgeAnchorButtonActiveCls = 'border-foreground/35 bg-foreground/[0.04] text-foreground';
+  const hedgeScenarioCardCls = 'flex h-full flex-col rounded-xl border border-border/60 bg-background/60 p-3 shadow-none transition-colors';
+  const hedgeScenarioTextareaCls = 'mt-2 min-h-[84px] flex-1 resize-none rounded-lg border-border/60 bg-background text-[12px] leading-relaxed shadow-none';
   const decisionDoneCount = [
     whyRight.trim().length > 0,
     failureReason.trim().length > 0,
@@ -907,7 +920,7 @@ export function PreTradeSnapshotForm({
     oddsStructurePremortem.trim().length > 0,
     oddsStructureBreakdownSignals.trim().length > 0,
   ].filter(Boolean).length;
-  const edgeOppDoneCount = [edgeSource != null, oppCostWorth != null].filter(Boolean).length;
+  const edgeOppDoneCount = [edgeSource != null, cheapOpportunity != null, oppCostWorth != null].filter(Boolean).length;
   const regimeDoneCount = [marketRegime != null, entryStage != null].filter(Boolean).length;
 
   // 心态自评卡片（批次 25：主力单与对冲单共用同一组件，行为一致——≤2 硬阻断）。
@@ -940,7 +953,7 @@ export function PreTradeSnapshotForm({
 
   return (
     <div className="flex flex-col">
-      <div className="border-b border-border/70 bg-card/80 px-5 py-4">
+      <div className="border-b border-border/60 bg-card px-5 py-4">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="min-w-0">
             <h2 className="text-[15px] font-semibold tracking-normal text-foreground">
@@ -993,7 +1006,7 @@ export function PreTradeSnapshotForm({
         )}
 
         {isHedge && (
-          <section className="rounded border border-[#F0B90B]/30 bg-accent/30 px-3 py-2.5">
+          <section className="rounded-xl border border-[#F0B90B]/30 bg-accent/30 px-3 py-2.5">
             <p className="text-[12px] italic leading-relaxed text-foreground">
               对冲不是下注，是把“未知、不可控的无限风险”，换成“已知、可衡量的极小摩擦成本”。
             </p>
@@ -1001,7 +1014,7 @@ export function PreTradeSnapshotForm({
         )}
 
         {isTrade && (
-          <section className="rounded-2xl border border-border/60 bg-card/80 p-3 shadow-[0_10px_28px_rgba(15,23,42,0.035)]">
+          <section className={`${mainSurfaceCls} p-3`}>
             <div className="flex items-center justify-between gap-3">
               <div>
                 <div className={labelCls}>硬约束 · 仓位模式{requiredStar}</div>
@@ -1012,7 +1025,7 @@ export function PreTradeSnapshotForm({
               <button
                 type="button"
                 onClick={() => setSymbolMarginMode(symbol, 'isolated')}
-                className="h-8 rounded bg-[#0ECB81] px-3 text-[12px] font-medium text-black transition-colors hover:bg-[#0ECB81]/90"
+                className="h-8 rounded-lg bg-[#0ECB81] px-3 text-[12px] font-medium text-black transition-colors hover:bg-[#0ECB81]/90"
               >
                 切换逐仓
               </button>
@@ -1182,7 +1195,7 @@ export function PreTradeSnapshotForm({
                       先判断这一单靠什么机制赚钱：顺势、突破，还是均值回归。这里只识别 edge 来源，不判断是否值得下注。
                     </div>
                   </div>
-                  <span className={mainStatusChipCls}>{edgeOppDoneCount}/2</span>
+                  <span className={mainStatusChipCls}>{edgeOppDoneCount}/3</span>
                 </div>
                 <div className="space-y-3 px-3.5 py-3">
                   <div>
@@ -1223,7 +1236,7 @@ export function PreTradeSnapshotForm({
                       </div>
                     </TooltipProvider>
                     <div className="mt-2">
-                      <Collapsible className="rounded-xl border border-border/55 bg-background/55">
+                      <Collapsible className="rounded-xl border border-border/60 bg-background/60">
                         <CollapsibleTrigger className="group flex w-full items-center justify-between gap-3 px-3 py-2 text-left">
                           <span className="text-[11px] font-medium text-muted-foreground">查看入场口诀</span>
                           <ChevronDown className="h-3.5 w-3.5 text-muted-foreground transition-transform group-data-[state=open]:rotate-180" />
@@ -1237,7 +1250,58 @@ export function PreTradeSnapshotForm({
                     </div>
                   </div>
 
-                  <div className="rounded-xl border border-border/55 bg-background/55 p-3">
+                  <div className="rounded-xl border border-border/60 bg-background/60 p-3">
+                    <div className="text-[12px] font-medium text-foreground">
+                      这是一个便宜的机会吗？
+                    </div>
+                    <div className="mt-0.5 text-[10px] leading-relaxed text-muted-foreground">
+                      便宜不是价格低，而是用小成本拿到不对称暴露：止损近、目标厚、不是追价补票。
+                    </div>
+                    <div className="mt-2.5 grid gap-2 sm:grid-cols-3">
+                      <button
+                        type="button"
+                        onClick={() => setCheapOpportunity('cheap')}
+                        className={`min-h-[42px] rounded-lg border px-2 text-[12px] font-medium transition-colors ${
+                          cheapOpportunity === 'cheap'
+                            ? 'border-foreground/35 bg-foreground/[0.035] text-foreground'
+                            : 'border-border/60 bg-background/60 text-muted-foreground hover:bg-muted/35'
+                        }`}
+                      >
+                        是 · 成本低
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setCheapOpportunity('not_cheap')}
+                        className={`min-h-[42px] rounded-lg border px-2 text-[12px] font-medium transition-colors ${
+                          cheapOpportunity === 'not_cheap'
+                            ? 'border-[#F6465D]/35 bg-[#F6465D]/5 text-[#F6465D]'
+                            : 'border-border/60 bg-background/60 text-muted-foreground hover:bg-muted/35'
+                        }`}
+                      >
+                        否 · 代价高
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setCheapOpportunity('unclear')}
+                        className={`min-h-[42px] rounded-lg border px-2 text-[12px] font-medium transition-colors ${
+                          cheapOpportunity === 'unclear'
+                            ? 'border-[#F0B90B]/35 bg-[#F0B90B]/5 text-[#D89B00]'
+                            : 'border-border/60 bg-background/60 text-muted-foreground hover:bg-muted/35'
+                        }`}
+                      >
+                        说不清
+                      </button>
+                    </div>
+                    {(cheapOpportunity === 'not_cheap' || cheapOpportunity === 'unclear') && (
+                      <div className="mt-2 rounded-xl border border-[#F0B90B]/30 bg-[#F0B90B]/5 px-3 py-2 text-[11px] leading-relaxed text-[#D89B00]">
+                        {cheapOpportunity === 'unclear'
+                          ? '说不清便宜不便宜 → 小机会仓位。没有成本优势的清晰证据，默认先空仓观望。'
+                          : '机会不便宜 → 小机会仓位。方向可能对，但行动成本太厚，系统默认建议空仓观望。'}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="rounded-xl border border-border/60 bg-background/60 p-3">
                     <div className="text-[12px] font-medium text-foreground">
                       不做更亏吗？是在浪费机会吗？
                     </div>
@@ -1359,7 +1423,7 @@ export function PreTradeSnapshotForm({
                     </div>
                   </TooltipProvider>
                   <div className="grid gap-3 lg:grid-cols-2">
-                  <div className="rounded-xl border border-border/55 bg-background/55 p-3">
+                  <div className="rounded-xl border border-border/60 bg-background/60 p-3">
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
                         <div className="text-[11px] font-semibold text-foreground">R 回撤滑条 · 成本分母效应{requiredStar}</div>
@@ -1433,7 +1497,7 @@ export function PreTradeSnapshotForm({
                         <div className="mt-3 grid gap-2">
                           <div className="grid grid-cols-[50px_1fr_64px] items-center gap-2">
                             <span className="text-[9px] text-[#F6465D]">下坠</span>
-                            <div className="h-3 overflow-hidden rounded-full bg-background shadow-inner">
+                            <div className="h-3 overflow-hidden rounded-full bg-muted/40">
                               <div
                                 className="h-full rounded-full bg-[#F6465D]"
                                 style={{ width: `${rDrawdownVisualWidth}%` }}
@@ -1443,7 +1507,7 @@ export function PreTradeSnapshotForm({
                           </div>
                           <div className="grid grid-cols-[50px_1fr_64px] items-center gap-2">
                             <span className="text-[9px] text-[#0ECB81]">爬回</span>
-                            <div className="h-3 overflow-hidden rounded-full bg-background shadow-inner">
+                            <div className="h-3 overflow-hidden rounded-full bg-muted/40">
                               <div
                                 className="h-full rounded-full bg-[#0ECB81]"
                                 style={{ width: `${rRecoveryVisualWidth}%` }}
@@ -1455,23 +1519,23 @@ export function PreTradeSnapshotForm({
                           </div>
                         </div>
                         <div className="mt-2 flex items-center justify-between gap-1 text-center font-mono text-[9px]">
-                          <div className="rounded-md border border-border/50 bg-background px-2 py-1">
+                          <div className="rounded-lg border border-border/50 bg-background px-2 py-1">
                             <div className="text-muted-foreground">成本</div>
                             <div className="text-foreground">100</div>
                           </div>
                           <div className="h-px flex-1 bg-[#F6465D]/40" />
-                          <div className="rounded-md border border-[#F6465D]/30 bg-[#F6465D]/5 px-2 py-1">
+                          <div className="rounded-lg border border-[#F6465D]/30 bg-[#F6465D]/5 px-2 py-1">
                             <div className="text-[#F6465D]">回撤后</div>
                             <div className="text-[#F6465D]">{rAfterDrawdownBasePct != null ? rAfterDrawdownBasePct.toFixed(1) : '—'}</div>
                           </div>
                           <div className="h-px flex-1 bg-[#0ECB81]/40" />
-                          <div className="rounded-md border border-[#0ECB81]/30 bg-[#0ECB81]/5 px-2 py-1">
+                          <div className="rounded-lg border border-[#0ECB81]/30 bg-[#0ECB81]/5 px-2 py-1">
                             <div className="text-[#0ECB81]">回到成本</div>
                             <div className="text-[#0ECB81]">100</div>
                           </div>
                         </div>
                         {Number.isFinite(rRecoveryRatio) && (
-                          <div className="mt-2 rounded-md bg-background/70 px-2 py-1 text-[9px] leading-relaxed text-muted-foreground">
+                          <div className="mt-2 rounded-lg bg-background/70 px-2 py-1 text-[9px] leading-relaxed text-muted-foreground">
                             分母变小后，回本路程是下坠的 <span className="font-mono text-[#F0B90B]">{rRecoveryRatio.toFixed(2)}×</span>。
                           </div>
                         )}
@@ -1479,7 +1543,7 @@ export function PreTradeSnapshotForm({
                     )}
                   </div>
 
-                  <div className="rounded-xl border border-border/55 bg-background/55 p-3">
+                  <div className="rounded-xl border border-border/60 bg-background/60 p-3">
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
                         <div className="text-[11px] font-semibold text-foreground">盈亏比滑条</div>
@@ -1578,7 +1642,7 @@ export function PreTradeSnapshotForm({
                       return (
                         <label
                           key={q.index}
-                          className="group flex h-full min-h-[210px] flex-col rounded-xl border border-border/60 bg-background/65 p-3 transition-colors"
+                          className="group flex h-full min-h-[210px] flex-col rounded-xl border border-border/60 bg-background/60 p-3 transition-colors"
                           style={{
                             borderColor: filled ? '#F0B90B' : 'hsl(var(--border))',
                             background: filled ? '#F0B90B0A' : undefined,
@@ -1600,7 +1664,7 @@ export function PreTradeSnapshotForm({
                             className={`${textareaCls} min-h-[116px] flex-1 bg-background/90`}
                           />
                           <div className="mt-1.5 flex items-center justify-between text-[10px] text-muted-foreground">
-                            <span className="inline-flex h-4 items-center rounded bg-[#F0B90B]/10 px-1.5 text-[9px] font-medium text-[#D89B00]">
+                            <span className="inline-flex h-4 items-center rounded-full bg-[#F0B90B]/10 px-1.5 text-[9px] font-medium text-[#D89B00]">
                               目标
                             </span>
                           </div>
@@ -1621,7 +1685,7 @@ export function PreTradeSnapshotForm({
                   </div>
                 )}
                 {(oddsStructure === 'odds_insufficient' || oddsStructure === 'target_unclear' || edgeSource === 'no_clear_edge') && weakeningMainPerformance && (
-                  <div className="rounded-xl border border-border/70 bg-background/70 px-3 py-2 text-[10px] leading-relaxed text-muted-foreground">
+                  <div className="rounded-xl border border-border/60 bg-background/60 px-3 py-2 text-[10px] leading-relaxed text-muted-foreground">
                     近期实现 R 或胜率走弱：市场越差，筛子越紧；来源不清或目标不厚时更该空仓。
                   </div>
                 )}
@@ -1635,7 +1699,7 @@ export function PreTradeSnapshotForm({
             <section className={`${isTrade ? mainSurfaceCls : ''} ${isTrade ? 'p-3.5' : ''}`}>
               <div className="mb-3 flex items-start justify-between gap-3">
                 <div className="min-w-0">
-                  <div className={isTrade ? mainSectionTitleCls : 'text-[12px] font-medium text-foreground'}>
+                  <div className={mainSectionTitleCls}>
                     {isTrade ? '② 胜率轴 | 校准你的判断（不是去挑高胜率的单）' : "决策三问"}
                     {requiredStar}
                   </div>
@@ -1683,7 +1747,7 @@ export function PreTradeSnapshotForm({
                   return (
                     <label
                       key={q.id}
-                      className="group flex h-full min-h-[210px] flex-col rounded-xl border border-border/60 bg-background/65 p-3 transition-colors"
+                      className="group flex h-full min-h-[210px] flex-col rounded-xl border border-border/60 bg-background/60 p-3 transition-colors"
                       style={{
                         borderColor: filled ? q.accent : 'hsl(var(--border))',
                         background: filled ? `${q.accent}0A` : undefined,
@@ -1711,7 +1775,7 @@ export function PreTradeSnapshotForm({
                       />
                       <div className="mt-1.5 flex items-center justify-between text-[10px] text-muted-foreground">
                         <span
-                          className="inline-flex h-4 items-center rounded px-1.5 text-[9px] font-medium"
+                          className="inline-flex h-4 items-center rounded-full px-1.5 text-[9px] font-medium"
                           style={{ background: `${q.accent}1A`, color: q.accent }}
                         >
                           {q.badgeText}
@@ -1761,7 +1825,7 @@ export function PreTradeSnapshotForm({
                     placeholder="我为什么有资格给这个置信度？"
                     className={`${inputCls} mt-3`}
                   />
-                  <div className="mt-3 rounded-xl border border-border/70 bg-background/70 px-3 py-2.5">
+                  <div className="mt-3 rounded-xl border border-border/60 bg-background/60 px-3 py-2.5">
                     <div className="text-[11px] font-medium text-foreground">芒格折扣 · 置信度安全边际</div>
                     <div className="mt-1 text-[12px] text-foreground">
                       {discount.source === 'personalized'
@@ -1809,7 +1873,7 @@ export function PreTradeSnapshotForm({
                       <div className="mt-3 rounded-lg border border-border/50 bg-muted/20 p-2.5">
                         <div className="grid grid-cols-[42px_1fr_58px] items-center gap-2">
                           <span className="text-[9px] text-[#F6465D]">下坠</span>
-                          <div className="h-3 overflow-hidden rounded-full bg-background shadow-inner">
+                          <div className="h-3 overflow-hidden rounded-full bg-muted/40">
                             <div
                               className="h-full rounded-full bg-[#F6465D]"
                               style={{ width: `${drawdownVisualWidth}%` }}
@@ -1819,7 +1883,7 @@ export function PreTradeSnapshotForm({
                         </div>
                         <div className="mt-2 grid grid-cols-[42px_1fr_58px] items-center gap-2">
                           <span className="text-[9px] text-[#0ECB81]">爬回</span>
-                          <div className="h-3 overflow-hidden rounded-full bg-background shadow-inner">
+                          <div className="h-3 overflow-hidden rounded-full bg-muted/40">
                             <div
                               className="h-full rounded-full bg-[#0ECB81]"
                               style={{ width: `${recoveryVisualWidth}%` }}
@@ -1830,23 +1894,23 @@ export function PreTradeSnapshotForm({
                           </span>
                         </div>
                         <div className="mt-2 flex items-center justify-between gap-1 text-center font-mono text-[9px]">
-                          <div className="rounded-md border border-border/50 bg-background px-2 py-1">
+                          <div className="rounded-lg border border-border/50 bg-background px-2 py-1">
                             <div className="text-muted-foreground">初始</div>
                             <div className="text-foreground">100</div>
                           </div>
                           <div className="h-px flex-1 bg-[#F6465D]/40" />
-                          <div className="rounded-md border border-[#F6465D]/30 bg-[#F6465D]/5 px-2 py-1">
+                          <div className="rounded-lg border border-[#F6465D]/30 bg-[#F6465D]/5 px-2 py-1">
                             <div className="text-[#F6465D]">低点</div>
                             <div className="text-[#F6465D]">{afterLossEquityPct != null ? afterLossEquityPct.toFixed(1) : '—'}</div>
                           </div>
                           <div className="h-px flex-1 bg-[#0ECB81]/40" />
-                          <div className="rounded-md border border-[#0ECB81]/30 bg-[#0ECB81]/5 px-2 py-1">
+                          <div className="rounded-lg border border-[#0ECB81]/30 bg-[#0ECB81]/5 px-2 py-1">
                             <div className="text-[#0ECB81]">回本</div>
                             <div className="text-[#0ECB81]">100</div>
                           </div>
                         </div>
                         {Number.isFinite(recoveryRatio) && (
-                          <div className="mt-2 rounded-md bg-background/70 px-2 py-1 text-[9px] leading-relaxed text-muted-foreground">
+                          <div className="mt-2 rounded-lg bg-background/70 px-2 py-1 text-[9px] leading-relaxed text-muted-foreground">
                             同一把尺：回本路程是下坠的 <span className="font-mono text-[#F0B90B]">{recoveryRatio.toFixed(2)}×</span>。
                           </div>
                         )}
@@ -1885,7 +1949,7 @@ export function PreTradeSnapshotForm({
                       ? 'border-[#0ECB81]/40 bg-[#0ECB81]/10'
                       : betSizing.expectedR < 0
                         ? 'border-[#F6465D]/40 bg-[#F6465D]/10'
-                        : 'border-border/70 bg-background/70'
+                        : 'border-border/60 bg-background/60'
                   }`}>
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
@@ -1995,16 +2059,16 @@ export function PreTradeSnapshotForm({
 
         {isHedge && (
           <>
-            <section className="rounded-lg border border-[#F0B90B]/25 bg-card p-3.5 shadow-sm">
+            <section className={`${mainSurfaceCls} p-3.5`}>
               <div className="flex items-start justify-between gap-3">
                 <div>
-                  <div className="text-[12px] font-medium text-foreground">问一 · 这是哪一类对冲？{requiredStar}</div>
+                  <div className={mainSectionTitleCls}>问一 · 这是哪一类对冲？{requiredStar}</div>
                   <div className="mt-0.5 text-[10px] text-muted-foreground">
                     先给这份保险定类别，再谈边界和大小。
                   </div>
                 </div>
                 {hedgeTypeMeta && (
-                  <div className="rounded-full bg-[#F0B90B]/12 px-2 py-1 text-[10px] font-medium text-[#F0B90B]">
+                  <div className={mainStatusChipCls}>
                     已选 {hedgeTypeMeta.label}
                   </div>
                 )}
@@ -2019,8 +2083,8 @@ export function PreTradeSnapshotForm({
                       onClick={() => selectHedgeType(type.id)}
                       className={`rounded-lg border px-3 py-3 text-left transition-colors ${
                         selected
-                          ? 'border-[#F0B90B] bg-[#F0B90B]/10 text-foreground'
-                          : 'border-border bg-background text-muted-foreground hover:bg-accent'
+                          ? 'border-foreground/35 bg-foreground/[0.04] text-foreground'
+                          : 'border-border/60 bg-background/60 text-muted-foreground hover:border-border hover:bg-muted/40'
                       }`}
                     >
                       <div className="text-[12px] font-medium">{type.label}</div>
@@ -2031,8 +2095,8 @@ export function PreTradeSnapshotForm({
               </div>
             </section>
 
-            <section className="rounded-lg border border-border bg-card p-3.5 shadow-sm">
-              <div className="text-[12px] font-medium text-foreground">问二 · 边界划在哪、比例多少？{requiredStar}</div>
+            <section className="rounded-2xl border border-border/60 bg-card p-3.5 shadow-[0_16px_45px_rgba(15,23,42,0.045)]">
+              <div className={mainSectionTitleCls}>问二 · 边界划在哪、比例多少？{requiredStar}</div>
               <div className="mt-3 grid gap-3 md:grid-cols-2">
                 <label className="block">
                   <div className={labelCls}>边界价{requiredStar}</div>
@@ -2044,7 +2108,7 @@ export function PreTradeSnapshotForm({
                   />
                 </label>
                 <div className="grid gap-3 md:col-span-2 md:grid-cols-3">
-                  <label className="block rounded-lg border border-border/70 bg-background/70 p-3">
+                  <label className="block rounded-lg border border-border/60 bg-background/60 p-3">
                     <div className="text-[11px] font-medium text-foreground">正 · 边界为什么会对？</div>
                     <Textarea
                       value={hedgeBoundaryWhyRight}
@@ -2052,7 +2116,7 @@ export function PreTradeSnapshotForm({
                       className={`${textareaCls} mt-2 min-h-[92px] bg-background`}
                     />
                   </label>
-                  <label className="block rounded-lg border border-border/70 bg-background/70 p-3">
+                  <label className="block rounded-lg border border-border/60 bg-background/60 p-3">
                     <div className="text-[11px] font-medium text-foreground">反 · 如果错，原因是什么？</div>
                     <Textarea
                       value={hedgeBoundaryFailureReason}
@@ -2060,7 +2124,7 @@ export function PreTradeSnapshotForm({
                       className={`${textareaCls} mt-2 min-h-[92px] bg-background`}
                     />
                   </label>
-                  <label className="block rounded-lg border border-border/70 bg-background/70 p-3">
+                  <label className="block rounded-lg border border-border/60 bg-background/60 p-3">
                     <div className="text-[11px] font-medium text-foreground">止 · 什么信号出现就意味着不再对了？</div>
                     <Textarea
                       value={hedgeBoundaryInvalidationSignal}
@@ -2069,7 +2133,7 @@ export function PreTradeSnapshotForm({
                     />
                   </label>
                 </div>
-                <div className="rounded-lg border border-border/70 bg-background/70 p-3 md:col-span-2">
+                <div className="rounded-lg border border-border/60 bg-background/60 p-3 md:col-span-2">
                   <div className={labelCls}>相对“机会=风险”的交叉点，你这条线放在哪？</div>
                   <div className="mt-2 flex flex-wrap gap-2">
                     {([
@@ -2083,8 +2147,8 @@ export function PreTradeSnapshotForm({
                         onClick={() => setHedgeBoundaryStance(value)}
                         className={`rounded-lg border px-3 py-2 text-left transition-colors ${
                           hedgeBoundaryStance === value
-                            ? 'border-[#F0B90B] bg-[#F0B90B]/10 text-foreground'
-                            : 'border-border bg-card text-muted-foreground hover:bg-accent'
+                            ? 'border-foreground/35 bg-foreground/[0.04] text-foreground'
+                            : 'border-border/60 bg-background/60 text-muted-foreground hover:border-border hover:bg-muted/40'
                         }`}
                       >
                         <div className="text-[11px] font-medium">{label}</div>
@@ -2115,13 +2179,13 @@ export function PreTradeSnapshotForm({
               </div>
             </section>
 
-            <section className="rounded-lg border border-border bg-card p-3.5 shadow-sm">
-              <div className="text-[12px] font-medium text-foreground">问三 · 向上怎么办、向下怎么办？{requiredStar}</div>
+            <section className="rounded-2xl border border-border/60 bg-card p-3.5 shadow-[0_16px_45px_rgba(15,23,42,0.045)]">
+              <div className={mainSectionTitleCls}>问三 · 向上怎么办、向下怎么办？{requiredStar}</div>
               <div className="mt-0.5 text-[10px] text-muted-foreground">
                 在还不知道往哪破的此刻就写死两边，到时候照着执行，而不是临场即兴。
               </div>
               <div className="mt-3 grid gap-3 xl:grid-cols-[minmax(0,1.05fr)_minmax(0,0.95fr)]">
-                <label className="block rounded-xl border border-border/70 bg-background/70 p-4 shadow-sm">
+                <label className="block rounded-xl border border-border/60 bg-background/60 p-4">
                   <div className="flex items-center gap-2">
                     <span className="inline-flex h-5 items-center rounded-full border border-[#0ECB81]/30 bg-[#0ECB81]/10 px-2 text-[10px] font-medium text-[#0ECB81]">
                       向上
@@ -2135,10 +2199,10 @@ export function PreTradeSnapshotForm({
                     value={hedgeResolutionUp}
                     onChange={event => setHedgeResolutionUp(event.target.value)}
                     placeholder={hedgeTypeMeta?.resolutionUpDefault ?? '先选择对冲类型'}
-                    className={`${textareaCls} mt-3 min-h-[142px] rounded-lg bg-background/95 shadow-inner`}
+                    className={`${textareaCls} mt-3 min-h-[142px]`}
                   />
                 </label>
-                <div className="rounded-xl border border-[#F0B90B]/20 bg-[linear-gradient(180deg,rgba(240,185,11,0.10),rgba(240,185,11,0.04))] p-4 shadow-sm">
+                <div className="rounded-xl border border-[#F0B90B]/20 bg-[linear-gradient(180deg,rgba(240,185,11,0.10),rgba(240,185,11,0.04))] p-4">
                   <div className="inline-flex h-5 items-center rounded-full border border-[#F0B90B]/30 bg-[#F0B90B]/10 px-2 text-[10px] font-medium text-[#D89B00]">
                     触发后先观察
                   </div>
@@ -2149,22 +2213,22 @@ export function PreTradeSnapshotForm({
                     下一个信号会告诉你走哪一支。现在就把三支都写死，到时候照着读，别临场即兴。
                   </div>
                   <div className="mt-3 grid gap-2 sm:grid-cols-3">
-                    <div className="rounded-lg border border-border/50 bg-background/70 px-3 py-2 text-[10px] leading-5 text-muted-foreground">
+                    <div className="rounded-lg border border-border/60 bg-background/60 px-3 py-2 text-[10px] leading-5 text-muted-foreground">
                       无信号
                       <div className="mt-0.5 font-medium text-foreground">震荡</div>
                     </div>
-                    <div className="rounded-lg border border-border/50 bg-background/70 px-3 py-2 text-[10px] leading-5 text-muted-foreground">
+                    <div className="rounded-lg border border-border/60 bg-background/60 px-3 py-2 text-[10px] leading-5 text-muted-foreground">
                       反向信号
                       <div className="mt-0.5 font-medium text-foreground">确认下行</div>
                     </div>
-                    <div className="rounded-lg border border-border/50 bg-background/70 px-3 py-2 text-[10px] leading-5 text-muted-foreground">
+                    <div className="rounded-lg border border-border/60 bg-background/60 px-3 py-2 text-[10px] leading-5 text-muted-foreground">
                       正向增强
                       <div className="mt-0.5 font-medium text-foreground">快速反弹</div>
                     </div>
                   </div>
                 </div>
               </div>
-              <div className="mt-4 rounded-xl border border-border/60 bg-background/40 p-4">
+              <div className="mt-4 rounded-xl border border-border/60 bg-background/60 p-4">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div>
                     <div className="text-[11px] font-semibold tracking-[0.01em] text-foreground">向下触发后的三种情境</div>
@@ -2243,8 +2307,8 @@ export function PreTradeSnapshotForm({
               )}
             </section>
 
-            <section className="rounded-lg border border-border bg-card p-3.5 shadow-sm">
-              <div className="text-[12px] font-medium text-foreground">必要性 · 外部先定大小{requiredStar}</div>
+            <section className="rounded-2xl border border-border/60 bg-card p-3.5 shadow-[0_16px_45px_rgba(15,23,42,0.045)]">
+              <div className={mainSectionTitleCls}>必要性 · 外部先定大小{requiredStar}</div>
               <div className="mt-0.5 text-[10px] text-muted-foreground">
                 = 尾部风险概率 × 风险绝对值。这份保险兜住的风险期望越大，对冲越该大。最大 = 与主仓等额。
               </div>
@@ -2322,7 +2386,7 @@ export function PreTradeSnapshotForm({
                   </div>
                 </div>
               </div>
-              <div className="mt-4 rounded-lg border border-border/70 bg-background/70 p-3">
+              <div className="mt-4 rounded-lg border border-border/60 bg-background/60 p-3">
                 <div className="flex items-center justify-between gap-3">
                   <div>
                     <div className="text-[11px] font-medium text-foreground">对冲必要性 / 占主仓比例{requiredStar}</div>
@@ -2358,20 +2422,20 @@ export function PreTradeSnapshotForm({
                     : '先给上面的三个客观锚点打分，系统再给出幽灵建议值。'}
                 </div>
                 {hedgeConsistencyHint && (
-                  <div className="mt-3 rounded border border-[#F0B90B]/35 bg-[#F0B90B]/10 px-3 py-2 text-[11px] text-[#D89B00]">
+                  <div className="mt-3 rounded-lg border border-[#F0B90B]/35 bg-[#F0B90B]/10 px-3 py-2 text-[11px] text-[#D89B00]">
                     {hedgeConsistencyHint}
                   </div>
                 )}
               </div>
             </section>
 
-            <section className="rounded-lg border border-border bg-card p-3.5 shadow-sm">
-              <div className="text-[12px] font-medium text-foreground">把握性 · 内部只定成色{requiredStar}</div>
+            <section className="rounded-2xl border border-border/60 bg-card p-3.5 shadow-[0_16px_45px_rgba(15,23,42,0.045)]">
+              <div className={mainSectionTitleCls}>把握性 · 内部只定成色{requiredStar}</div>
               <div className="mt-0.5 text-[10px] whitespace-pre-line text-muted-foreground">
                 这里不是“市场会不会按我想的走”，而是“我对必要性这个估计（尾部概率 × 烈度）有多确定”。
                 是冷静算出来的，还是被行情吓出来高估的？
               </div>
-              <div className="mt-4 rounded-lg border border-border/70 bg-background/70 p-3">
+              <div className="mt-4 rounded-lg border border-border/60 bg-background/60 p-3">
                 <div className="flex items-center justify-between gap-3">
                   <div className="text-[11px] font-medium text-foreground">把握性 · 我多确定“这个风险估计”是对的</div>
                   <div className="font-mono text-[16px] text-[#F0B90B]">{hedgeConvictionPct == null ? '—' : `${hedgeConvictionValue}%`}</div>
@@ -2385,7 +2449,7 @@ export function PreTradeSnapshotForm({
                     onValueChange={([value]) => setHedgeConvictionPct(clampProbability(value ?? 0))}
                   />
                 </div>
-                <div className="mt-3 rounded border border-border/70 bg-card px-3 py-2.5">
+                <div className="mt-3 rounded-lg border border-border/60 bg-background/60 px-3 py-2.5">
                   <div className="text-[11px] font-medium text-foreground">芒格折扣 · 对冲校准</div>
                   <div className="mt-1 text-[12px] text-foreground">
                     你的输入：{hedgeConvictionValue}% → 折扣后真实可能：{hedgeDiscount.discountedPct}%
@@ -2401,15 +2465,15 @@ export function PreTradeSnapshotForm({
                 低把握性意味着你对这个风险估计没底。在不对称原则下，没底是更该保护，而不是更少保护。
               </div>
               {hedgePanic && (
-                <div className="mt-3 rounded border border-[#F0B90B]/45 bg-[#F0B90B]/12 px-3 py-2.5 text-[12px] leading-relaxed text-[#D89B00]">
+                <div className="mt-3 rounded-lg border border-[#F0B90B]/45 bg-[#F0B90B]/12 px-3 py-2.5 text-[12px] leading-relaxed text-[#D89B00]">
                   你对“必要性这个估计”自己都没底，却下了重手。这是计划内的纪律，还是被行情吓出来高估了风险？
                 </div>
               )}
             </section>
 
             <section className="grid gap-3 lg:grid-cols-[1fr_200px]">
-              <div className="rounded-lg border border-border bg-card p-3.5 shadow-sm">
-                <div className="text-[12px] font-medium text-foreground">下单方式</div>
+              <div className="rounded-2xl border border-border/60 bg-card p-3.5 shadow-[0_16px_45px_rgba(15,23,42,0.045)]">
+                <div className={mainSectionTitleCls}>下单方式</div>
                 <div className="mt-3">
                   <div className="mt-2 flex flex-wrap gap-2">
                     {(Object.entries(HEDGE_ORDER_METHOD_LABELS) as [HedgeOrderMethod, string][]).map(([value, label]) => (
@@ -2419,8 +2483,8 @@ export function PreTradeSnapshotForm({
                         onClick={() => setHedgeOrderMethod(value)}
                         className={`inline-flex h-8 items-center rounded-full border px-3 text-[11px] transition-colors ${
                           hedgeOrderMethod === value
-                            ? 'border-[#F0B90B] bg-[#F0B90B]/10 text-[#F0B90B]'
-                            : 'border-border bg-background text-muted-foreground hover:bg-accent'
+                            ? 'border-foreground/35 bg-foreground/[0.04] text-foreground'
+                            : 'border-border/60 bg-background/60 text-muted-foreground hover:border-border hover:bg-muted/40'
                         }`}
                       >
                         {label}
@@ -2458,7 +2522,7 @@ export function PreTradeSnapshotForm({
                 const selectedCount = group.tags.filter(tag => painTags.includes(tag)).length;
                 return (
                   <Collapsible key={group.valence}>
-                    <div className="rounded-lg border border-border/70 bg-card/80 shadow-sm">
+                    <div className="rounded-xl border border-border/60 bg-background/60">
                       <CollapsibleTrigger
                         className="group flex w-full items-start justify-between gap-3 px-3 py-3 text-left"
                       >
@@ -2553,7 +2617,7 @@ export function PreTradeSnapshotForm({
                 const selectedCount = group.tags.filter(tag => cognitiveBiasTags.includes(tag)).length;
                 return (
                   <Collapsible key={group.category}>
-                    <div className="rounded-lg border border-border/70 bg-card/80 shadow-sm">
+                    <div className="rounded-xl border border-border/60 bg-background/60">
                       <CollapsibleTrigger
                         className="group flex w-full items-start justify-between gap-3 px-3 py-3 text-left"
                       >
@@ -2667,11 +2731,11 @@ export function PreTradeSnapshotForm({
         )}
       </div>
 
-      <div className="flex items-center justify-between gap-3 border-t border-border px-5 py-3">
+      <div className="flex items-center justify-between gap-3 border-t border-border/60 px-5 py-3">
         <button
           type="button"
           onClick={onCancel}
-          className="h-9 rounded px-3 text-[12px] text-muted-foreground transition-colors hover:bg-accent"
+          className="h-9 rounded-lg px-3 text-[12px] text-muted-foreground transition-colors hover:bg-accent"
         >
           取消
         </button>
@@ -2689,6 +2753,7 @@ export function PreTradeSnapshotForm({
                   pre_odds_structure_premortem: isHedge ? null : (oddsStructurePremortem.trim() || null),
                   pre_odds_structure_breakdown_signals: isHedge ? null : (oddsStructureBreakdownSignals.trim() || null),
                   pre_opportunity_cost_worth: isHedge ? null : oppCostWorth,
+                  pre_cheap_opportunity: isHedge ? null : cheapOpportunity,
                   pre_edge_source: isHedge ? null : edgeSource,
                   pre_market_regime: isHedge ? null : marketRegime,
                   pre_entry_stage: isHedge ? null : entryStage,
@@ -2696,7 +2761,7 @@ export function PreTradeSnapshotForm({
                 });
               }}
               disabled={submitting}
-              className="h-9 rounded border border-[#F0B90B]/40 px-4 text-[12px] font-medium text-[#F0B90B] transition-colors hover:bg-[#F0B90B]/10 disabled:cursor-not-allowed disabled:opacity-40"
+              className="h-9 rounded-lg border border-[#F0B90B]/40 px-4 text-[12px] font-medium text-[#F0B90B] transition-colors hover:bg-[#F0B90B]/10 disabled:cursor-not-allowed disabled:opacity-40"
             >
               空仓观望 / 太难不做
             </button>
@@ -2706,7 +2771,7 @@ export function PreTradeSnapshotForm({
               type="button"
               onClick={() => setConfirmBadOddsTradeOpen(true)}
               disabled={!canSubmit || submitting}
-              className="h-9 rounded border border-border px-4 text-[12px] font-medium text-foreground transition-colors hover:bg-accent disabled:cursor-not-allowed disabled:opacity-40"
+              className="h-9 rounded-lg border border-border/60 px-4 text-[12px] font-medium text-foreground transition-colors hover:bg-accent disabled:cursor-not-allowed disabled:opacity-40"
             >
               仍要下单
             </button>
@@ -2724,6 +2789,7 @@ export function PreTradeSnapshotForm({
                   pre_odds_structure_premortem: isHedge ? null : (oddsStructurePremortem.trim() || null),
                   pre_odds_structure_breakdown_signals: isHedge ? null : (oddsStructureBreakdownSignals.trim() || null),
                   pre_opportunity_cost_worth: isHedge ? null : oppCostWorth,
+                  pre_cheap_opportunity: isHedge ? null : cheapOpportunity,
                   pre_edge_source: isHedge ? null : edgeSource,
                   pre_market_regime: isHedge ? null : marketRegime,
                   pre_entry_stage: isHedge ? null : entryStage,
@@ -2734,7 +2800,7 @@ export function PreTradeSnapshotForm({
               void submit();
             }}
             disabled={oddsCautionGate ? submitting : (!canSubmit || submitting)}
-            className={`h-9 rounded px-4 text-[12px] font-medium transition-opacity disabled:cursor-not-allowed disabled:opacity-40 ${confirmBtnClass}`}
+            className={`h-9 rounded-lg px-4 text-[12px] font-medium transition-opacity disabled:cursor-not-allowed disabled:opacity-40 ${confirmBtnClass}`}
           >
             {confirmBtnText}
           </button>
@@ -2747,8 +2813,12 @@ export function PreTradeSnapshotForm({
             <AlertDialogDescription className="text-[11px] leading-relaxed text-muted-foreground">
               {badOddsGate
                 ? '你已经把这笔判定为“盈亏比不足 / 目标不清楚”。系统默认建议空仓观望；如果仍要下，等于明确接受方向可能对，但目标空间不够厚。'
-                : smallOpportunityGate
-                  ? '你已经把这笔判定为“无明确 edge”。看不出来源，只是想交易；如果仍要下，等于明确接受行动力被一个模糊机会占用。'
+                : cheapOpportunity === 'not_cheap'
+                  ? '你已经判定这不是一个便宜机会：止损成本、追价成本或目标厚度不划算。系统默认建议空仓观望；如果仍要下，等于明确接受用行动力换一个不便宜的暴露。'
+                  : cheapOpportunity === 'unclear'
+                    ? '你刚才回答：说不清便宜不便宜。这意味着这笔没有清晰成本优势——典型的小机会仓位；如果仍要下，等于明确接受用行动力去换一个模糊机会。'
+                    : smallOpportunityGate
+                      ? '你已经把这笔判定为“无明确 edge / 震荡小机会”。如果仍要下，等于明确接受行动力被一个模糊机会占用。'
                   : oppCostAnswer === 'unclear'
                     ? '你刚才回答：说不清 / 凭感觉。这意味着这一笔没有可解释的机会成本优势——典型的小机会仓位，比空仓更差；如果仍要下，等于明确接受用行动力去换一个模糊机会。'
                     : '你刚才回答：不做的机会成本并不更高。这意味着这一笔本质是在填补无聊——典型的小机会仓位，比空仓更差；如果仍要下，等于明确接受用行动力去换一个你自己都说不值得的机会。'}

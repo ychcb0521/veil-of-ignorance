@@ -27,6 +27,12 @@ import {
   MAINTENANCE_MARGIN_RATE, LIQUIDATION_FEE_RATE, FUNDING_RATE, FUNDING_HOURS, getTriggerOperator,
 } from '@/types/trading';
 import { resolveConditionalTriggerPrice, shouldRejectImmediateConditionalPlacement } from '@/lib/conditionalOrders';
+import {
+  createDefaultExecutionAssetState,
+  recordExecutionTrade as applyExecutionTradeReward,
+  settleNoTradePenalties,
+  type ExecutionAssetState,
+} from '@/lib/executionAssets';
 
 // ===== Types =====
 export type TimeMode = 'synced' | 'isolated';
@@ -111,6 +117,9 @@ interface TradingState {
    */
   tradingMode: TradingMode;
   setTradingMode: (v: TradingMode) => void;
+  executionAsset: ExecutionAssetState;
+  setExecutionAsset: (v: ExecutionAssetState | ((prev: ExecutionAssetState) => ExecutionAssetState)) => void;
+  recordExecutionTrade: (modeOverride?: TradingMode) => void;
   coinTimelines: CoinTimelinesMap;
   setCoinTimelines: (v: CoinTimelinesMap | ((prev: CoinTimelinesMap) => CoinTimelinesMap)) => void;
   totalPositionCount: number;
@@ -281,6 +290,10 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
   // === Multi-Timeline Mode ===
   const [timeMode, setTimeMode] = usePersistedState<TimeMode>('time_mode', 'synced');
   const [tradingMode, setTradingMode] = usePersistedState<TradingMode>('trading_mode', 'direct');
+  const [executionAsset, setExecutionAsset] = usePersistedState<ExecutionAssetState>(
+    'execution_asset_v1',
+    createDefaultExecutionAssetState(),
+  );
   const [coinTimelines, setCoinTimelines] = usePersistedState<CoinTimelinesMap>('coin_timelines_v2', {});
 
   // Stub for backward compat — isolated balances no longer used
@@ -291,6 +304,9 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
   const timeModeRef = useRef(timeMode);
   useEffect(() => { timeModeRef.current = timeMode; }, [timeMode]);
 
+  const tradingModeRef = useRef(tradingMode);
+  useEffect(() => { tradingModeRef.current = tradingMode; }, [tradingMode]);
+
   const priceMapRef = useRef(priceMap);
   useEffect(() => { priceMapRef.current = priceMap; }, [priceMap]);
 
@@ -299,6 +315,15 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
 
   const positionsMapRef = useRef(positionsMap);
   useEffect(() => { positionsMapRef.current = positionsMap; }, [positionsMap]);
+
+  useEffect(() => {
+    setExecutionAsset(prev => settleNoTradePenalties(prev));
+  }, [setExecutionAsset]);
+
+  const recordExecutionTrade = useCallback((modeOverride?: TradingMode) => {
+    const mode = modeOverride ?? tradingModeRef.current;
+    setExecutionAsset(prev => applyExecutionTradeReward(prev, mode));
+  }, [setExecutionAsset]);
 
   // Total position count across all symbols
   const totalPositionCount = useMemo(() => {
@@ -703,6 +728,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
         const existing = (prev[symbol] || []).filter(p => p.quantity > 1e-8);
         return { ...prev, [symbol]: [...existing, position] };
       });
+      recordExecutionTrade(tradingModeRef.current);
       toast.success(`最优价成交: ${order.side === 'LONG' ? '开多' : '开空'} ${order.quantity.toFixed(6)} @ ${position.entryPrice.toFixed(2)}`);
       return { id: position.id };
     }
@@ -722,6 +748,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
         const existing = (prev[symbol] || []).filter(p => p.quantity > 1e-8);
         return { ...prev, [symbol]: [...existing, position] };
       });
+      recordExecutionTrade(tradingModeRef.current);
       toast.success(`${order.side === 'LONG' ? '开多' : '开空'} ${order.quantity.toFixed(6)} @ ${position.entryPrice.toFixed(2)}`);
       return { id: position.id };
     }
@@ -746,6 +773,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
         price: startP + step * i, stopPrice: 0, quantity: qtyPerStep,
         leverage: order.leverage, marginMode: order.marginMode,
         status: 'NEW' as const, createdAt: now, parentScaledId: parentId,
+        tradingMode: tradingModeRef.current,
       }));
       setOrdersMap(prev => ({ ...prev, [symbol]: [...(prev[symbol] || []), ...newOrders] }));
       toast.info(`分段订单已挂出: ${count} 笔限价单`);
@@ -761,6 +789,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
         price: 0, stopPrice: 0, quantity: order.quantity,
         leverage: order.leverage, marginMode: order.marginMode,
         status: 'ACTIVE', createdAt: now,
+        tradingMode: tradingModeRef.current,
         twapTotalQty: order.quantity, twapFilledQty: 0,
         twapInterval: intervalMs, twapNextExecTime: now,
         twapEndTime: now + durationMs,
@@ -802,6 +831,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
       price: order.price, stopPrice: order.stopPrice, quantity: order.quantity,
       leverage: order.leverage, marginMode: order.marginMode,
       status: order.type === 'CONDITIONAL' ? 'PENDING' : 'NEW', createdAt: now,
+      tradingMode: tradingModeRef.current,
       callbackRate: order.callbackRate, trailingExecType: order.trailingExecType,
       trailingLimitPrice: order.trailingLimitPrice, trailingActivated: false,
       conditionalExecType: order.conditionalExecType, conditionalLimitPrice: order.conditionalLimitPrice,
@@ -810,7 +840,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
     setOrdersMap(prev => ({ ...prev, [symbol]: [...(prev[symbol] || []), newOrder] }));
     toast.info('委托已挂出');
     return { id: newOrder.id };
-  }, [getEffectiveTime]);
+  }, [getEffectiveTime, recordExecutionTrade]);
 
   // ===== Close Position — supports partial close via percentage (0-1] =====
   const handleClosePosition = useCallback((symbol: string, index: number, percentage: number = 1, method: 'manual' | 'sl' | 'tp1' | 'tp2' | 'tp3' | 'liquidation' = 'manual') => {
@@ -1112,6 +1142,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
     liquidationOpen, liquidationDetails, closeLiquidationModal,
     timeMode, setTimeMode,
     tradingMode, setTradingMode,
+    executionAsset, setExecutionAsset, recordExecutionTrade,
     coinTimelines, setCoinTimelines,
     totalPositionCount,
     getEffectiveTime,
