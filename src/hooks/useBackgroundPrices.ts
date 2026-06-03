@@ -248,7 +248,8 @@ export function useBackgroundPrices() {
               ],
             };
           });
-          recordExecutionTrade(order.tradingMode ?? tradingMode);
+          // 执行力资产只奖励做多开仓；做空都是辅助对冲单，不计分。
+          if (order.side === 'LONG') recordExecutionTrade(order.tradingMode ?? tradingMode);
           toast.success(`条件单已触发：${symbol} ${order.side} @ ${fillPrice.toFixed(2)}`);
         }
       }

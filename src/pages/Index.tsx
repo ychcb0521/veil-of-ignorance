@@ -1026,7 +1026,8 @@ const Index = () => {
                 ],
               };
             });
-            recordExecutionTrade(matchedOrder.tradingMode ?? tradingMode);
+            // 执行力资产只奖励做多开仓；做空都是辅助对冲单，不计分。
+            if (matchedOrder.side === 'LONG') recordExecutionTrade(matchedOrder.tradingMode ?? tradingMode);
             toast.success(
               `委托成交: ${matchedOrder.side === "LONG" ? "开多" : "开空"} ${matchedOrder.quantity} @ ${actualFillPrice.toFixed(2)}`,
             );

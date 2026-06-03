@@ -310,12 +310,34 @@ function isMissingDalioMetaLayerError(error: { code?: string; message?: string }
       && /schema cache|could not find|does not exist|column/i.test(message));
 }
 
-function missingSchemaColumn(error: { message?: string } | null): string | null {
+export function missingSchemaColumn(error: { message?: string } | null): string | null {
   const message = error?.message ?? '';
   const quotedColumn = /['"]([a-zA-Z0-9_]+)['"]\s+column/i.exec(message);
   if (quotedColumn?.[1]) return quotedColumn[1];
   const columnOf = /column\s+['"]([a-zA-Z0-9_]+)['"]/i.exec(message);
   return columnOf?.[1] ?? null;
+}
+
+/**
+ * 通用「列不在 schema 缓存里 / 列不存在」识别——不再依赖硬编码列名清单。
+ * 远程库落后于迁移时（例如还没建 pre_confidence_basis），PostgREST 会回
+ * PGRST204 + "Could not find the 'xxx' column ... in the schema cache"。
+ * 这类错误一律视为「可剥离该列后重试」，从而让提交在缺列时仍然成功。
+ * 注意：约束类错误（NOT NULL / 外键 / check）不算缺列，必须照常抛出。
+ */
+export function isSchemaColumnMissingError(
+  error: { code?: string; message?: string } | null,
+): boolean {
+  if (!error) return false;
+  // PostgREST: 列不在 schema 缓存(PGRST204) / 表缺失(PGRST205)；
+  // Postgres: 未定义列(42703) / 未定义表(42P01)。
+  if (error.code === 'PGRST204' || error.code === 'PGRST205'
+    || error.code === '42703' || error.code === '42P01') return true;
+  const message = error.message ?? '';
+  // 约束违反不是「缺列」——不要误剥离。
+  if (/violates|constraint/i.test(message)) return false;
+  return (/could not find the .*column|schema cache|does not exist/i.test(message))
+    && missingSchemaColumn(error) != null;
 }
 
 async function updateTradeJournalWithSchemaFallback(
@@ -337,7 +359,7 @@ async function updateTradeJournalWithSchemaFallback(
     lastData = data;
     lastError = error;
     if (!error) return { data, error: null };
-    if (!isMissingDalioMetaLayerError(error)) return { data, error };
+    if (!isMissingDalioMetaLayerError(error) && !isSchemaColumnMissingError(error)) return { data, error };
     const missing = missingSchemaColumn(error);
     if (!missing || !(missing in nextPayload)) return { data, error };
     const rest = { ...nextPayload };
@@ -356,7 +378,7 @@ async function updateTradeJournalWithSchemaFallback(
  * 唯一的特殊处理：旧库若连 pre_thesis_why_right 都没有，则把它的内容回填到 legacy
  * 的 pre_entry_reason（NOT NULL 兜底），与重构前的行为保持一致。
  */
-async function insertTradeJournalWithSchemaFallback(
+export async function insertTradeJournalWithSchemaFallback(
   payload: Record<string, unknown>,
 ): Promise<{ data: unknown; error: { message: string; code?: string } | null }> {
   let nextPayload = { ...payload };
@@ -372,7 +394,7 @@ async function insertTradeJournalWithSchemaFallback(
     lastData = data;
     lastError = error;
     if (!error) return { data, error: null };
-    if (!isMissingDalioMetaLayerError(error)) return { data, error };
+    if (!isMissingDalioMetaLayerError(error) && !isSchemaColumnMissingError(error)) return { data, error };
     const missing = missingSchemaColumn(error);
     if (!missing || !(missing in nextPayload)) return { data, error };
     const rest = { ...nextPayload };

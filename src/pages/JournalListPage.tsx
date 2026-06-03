@@ -1,55 +1,46 @@
 /**
- * /journal — 错题集主入口页（按模式聚类）
+ * /journal — 错题集。
+ *
+ * 唯一目的：看见错误、消除错误。所以只保留两件事：
+ *  1) 误差：快照时「你的预测」与最终「实际结果」的逐笔对照（核心）。
+ *  2) 盲区：系统算不出来、你没预想到的错误来源，手动记录。
+ * 另加一个「待复盘」入口，因为误差数据正是从复盘里来的。
  */
 import { useEffect, useMemo, useState } from 'react';
-import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { Maximize2, Minimize2, Tag } from 'lucide-react';
-import { BackButton } from '@/components/journal/BackButton';
+import { useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
+import { BackButton } from '@/components/journal/BackButton';
 import { useAuth } from '@/contexts/AuthContext';
-import { useIsMobile } from '@/hooks/use-mobile';
-import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
-import { Button } from '@/components/ui/button';
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { listAllJournalDataForUser, type BulkJournalData } from '@/lib/journalApi';
-import {
-  groupJournalsByPattern, sortClusters, computeMetaAlerts,
-} from '@/lib/journalAggregations';
-import { JournalFilterBar, getFilteredJournals } from '@/components/journal/JournalFilterBar';
-import { PatternClusterCard } from '@/components/journal/PatternClusterCard';
-import { JournalTimelineList } from '@/components/journal/JournalTimelineList';
+import { useBlindSpots } from '@/lib/blindSpots';
+import { PredictionErrorView } from '@/components/journal/PredictionErrorView';
+import { BlindSpotModule } from '@/components/journal/BlindSpotModule';
 import { UnreviewedJournalList } from '@/components/journal/UnreviewedJournalList';
-import { JournalStatsSidebar } from '@/components/journal/JournalStatsSidebar';
-import { JournalMetaAlerts } from '@/components/journal/JournalMetaAlerts';
 
-type SortKey = 'severity' | 'frequency' | 'pnl' | 'recent';
+type View = 'errors' | 'blindspots' | 'unreviewed';
 
 export default function JournalListPage() {
-  const nav = useNavigate();
   const { user } = useAuth();
-  const isMobile = useIsMobile();
   const [params, setParams] = useSearchParams();
 
   const [data, setData] = useState<BulkJournalData | null>(null);
   const [loading, setLoading] = useState(true);
-  const [largeDataset, setLargeDataset] = useState(false);
-  const [sortKey, setSortKey] = useState<SortKey>('severity');
-  const [expandAllSignal, setExpandAllSignal] = useState<boolean | null>(null);
 
-  const view = (params.get('view') ?? 'patterns') as 'patterns' | 'timeline' | 'unreviewed';
+  const blindSpots = useBlindSpots(user?.id);
+
+  const view = (params.get('view') ?? 'errors') as View;
 
   useEffect(() => {
     if (!user) return;
     (async () => {
       setLoading(true);
       try {
-        // 先粗查所有数据，> 1000 则限 90 天
         const all = await listAllJournalDataForUser(user.id);
+        // 数据量极大时只看最近 90 天，避免一次性拉全量。
         if (all.journals.length > 1000) {
-          setLargeDataset(true);
           const since = new Date(Date.now() - 90 * 86400000).toISOString();
-          const limited = await listAllJournalDataForUser(user.id, { dateFrom: since });
-          setData(limited);
+          setData(await listAllJournalDataForUser(user.id, { dateFrom: since }));
         } else {
           setData(all);
         }
@@ -61,48 +52,26 @@ export default function JournalListPage() {
     })();
   }, [user]);
 
-  const categoriesById = useMemo(
-    () => new Map((data?.categories ?? []).map(c => [c.id, c.name_zh])),
-    [data?.categories],
-  );
-
-  // 错题集只看真实交易；'太难'(no_trade) 记录是独立的"太难篮子"，只在元监控展示，不进列表/聚类/统计。
+  // 错题集只看真实交易；'太难'(no_trade) 记录只在元监控展示，不进误差。
   const tradeJournals = useMemo(
-    () => (data?.journals ?? []).filter(journal => (journal.journal_kind ?? 'trade') === 'trade'),
+    () => (data?.journals ?? []).filter(j => (j.journal_kind ?? 'trade') === 'trade'),
     [data?.journals],
-  );
-
-  const filteredJournals = useMemo(
-    () => (data ? getFilteredJournals(tradeJournals, params, categoriesById) : []),
-    [data, tradeJournals, params, categoriesById],
-  );
-
-  const clusters = useMemo(() => {
-    if (!data) return [];
-    const selectedCats = new Set((params.get('cats') ?? '').split(',').filter(Boolean));
-    let cs = groupJournalsByPattern(filteredJournals, data.assignments, data.patterns, data.categories);
-    if (selectedCats.size > 0) cs = cs.filter(c => selectedCats.has(c.category.id));
-    return sortClusters(cs, sortKey);
-  }, [data, filteredJournals, params, sortKey]);
-
-  const alerts = useMemo(
-    () => (data ? computeMetaAlerts(clusters, filteredJournals) : []),
-    [data, clusters, filteredJournals],
   );
   const unreviewedCount = useMemo(
-    () => (data?.journals ?? []).filter(journal => journal.trade_record_id && !journal.post_reviewed_at).length,
+    () => (data?.journals ?? []).filter(j => j.trade_record_id && !j.post_reviewed_at).length,
     [data?.journals],
   );
-
-  const rangeDays = useMemo(() => {
-    const r = params.get('range') ?? '30d';
-    return ({ '7d': 7, '30d': 30, '90d': 90, all: 9999 } as Record<string, number>)[r] ?? 30;
-  }, [params]);
 
   const setView = (v: string) => {
     const next = new URLSearchParams(params);
-    if (v === 'patterns') next.delete('view'); else next.set('view', v);
+    if (v === 'errors') next.delete('view');
+    else next.set('view', v);
     setParams(next, { replace: true });
+  };
+
+  const handleAddBlindSpot = (title: string) => {
+    blindSpots.add(title, '');
+    toast.success('已加入盲区');
   };
 
   if (loading || !data) {
@@ -113,133 +82,53 @@ export default function JournalListPage() {
     );
   }
 
-  const sidebar = (
-    <JournalStatsSidebar
-      journals={filteredJournals}
-      assignments={data.assignments.filter(a => filteredJournals.some(j => j.id === a.journal_id))}
-      clusters={clusters}
-      rangeDays={rangeDays}
-    />
-  );
-
   return (
     <div className="min-h-screen bg-background text-foreground">
-      {/* Header */}
       <header className="sticky top-0 z-20 bg-background/95 backdrop-blur-sm border-b border-border">
-        <div className="px-6 py-3 max-w-[1600px] mx-auto flex flex-wrap items-center gap-3">
+        <div className="px-6 py-3 max-w-[1000px] mx-auto flex flex-wrap items-center gap-3">
           <div className="flex items-center gap-3 min-w-0">
             <BackButton />
             <div className="min-w-0">
               <h1 className="text-[14px] font-medium leading-tight">错题集</h1>
               <div className="mt-0.5 truncate text-[10px] text-muted-foreground">
-                {filteredJournals.length} 条记录 · {clusters.length} 个模式 · {unreviewedCount} 条未评价
+                看见预测与现实的误差，然后消除它
               </div>
             </div>
           </div>
           <div className="flex-1" />
           <Tabs value={view} onValueChange={setView}>
             <TabsList className="h-8 bg-card">
-              <TabsTrigger value="patterns" className="text-[12px] h-7 px-3">按模式</TabsTrigger>
-              <TabsTrigger value="timeline" className="text-[12px] h-7 px-3">按时间</TabsTrigger>
-              <TabsTrigger value="unreviewed" className="text-[12px] h-7 px-3">未评价</TabsTrigger>
+              <TabsTrigger value="errors" className="text-[12px] h-7 px-3">误差</TabsTrigger>
+              <TabsTrigger value="blindspots" className="text-[12px] h-7 px-3">
+                盲区{blindSpots.items.length > 0 ? ` ${blindSpots.items.length}` : ''}
+              </TabsTrigger>
+              <TabsTrigger value="unreviewed" className="text-[12px] h-7 px-3">
+                待复盘{unreviewedCount > 0 ? ` ${unreviewedCount}` : ''}
+              </TabsTrigger>
             </TabsList>
           </Tabs>
-          <Link to="/journal/tags"
-            className="inline-flex h-8 items-center gap-1.5 rounded border border-border bg-card px-3 text-[12px] text-muted-foreground hover:bg-accent hover:text-foreground shrink-0">
-            <Tag className="w-3.5 h-3.5" /> 标签字典
-          </Link>
         </div>
       </header>
 
-      <JournalFilterBar journals={tradeJournals} categories={data.categories} />
-
-      <main className="max-w-[1600px] mx-auto px-6 py-4">
-        {largeDataset && (
-          <div className="mb-3 bg-[#F0B90B]/10 border border-[#F0B90B]/30 rounded px-3 py-1.5 text-[11px] text-[#F0B90B]">
-            数据量较大，已默认限制为最近 90 天
-          </div>
+      <main className="max-w-[1000px] mx-auto px-6 py-5">
+        {view === 'errors' && (
+          <PredictionErrorView journals={tradeJournals} onAddBlindSpot={handleAddBlindSpot} />
         )}
 
-        {isMobile && (
-          <Collapsible className="mb-3">
-            <CollapsibleTrigger asChild>
-              <Button variant="outline" size="sm" className="w-full h-8 text-[12px]">统计面板（点击展开）</Button>
-            </CollapsibleTrigger>
-            <CollapsibleContent className="mt-2">{sidebar}</CollapsibleContent>
-          </Collapsible>
+        {view === 'blindspots' && (
+          <BlindSpotModule items={blindSpots.items} onAdd={blindSpots.add} onRemove={blindSpots.remove} />
         )}
 
-        <div className={isMobile ? '' : 'grid grid-cols-[1fr_320px] gap-4'}>
-          <div className="min-w-0">
-            <JournalMetaAlerts alerts={alerts} />
-
-            {view === 'patterns' && (
-              <>
-                <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-                  <div className="text-[11px] text-muted-foreground">
-                    {clusters.length === 0 ? '暂无模式' : `当前 ${clusters.length} 个模式，来自 ${filteredJournals.length} 条记录`}
-                  </div>
-                  <div className="flex items-center gap-1.5">
-                    <select
-                      value={sortKey}
-                      onChange={event => setSortKey(event.target.value as SortKey)}
-                      className="h-8 rounded border border-border bg-card px-2 text-[11px]"
-                    >
-                      <option value="severity">严重度</option>
-                      <option value="frequency">频次</option>
-                      <option value="pnl">P&L</option>
-                      <option value="recent">最近</option>
-                    </select>
-                    <Button size="sm" variant="ghost" className="h-8 w-8 p-0" title="全部展开"
-                      onClick={() => setExpandAllSignal(true)}>
-                      <Maximize2 className="h-3.5 w-3.5" />
-                    </Button>
-                    <Button size="sm" variant="ghost" className="h-8 w-8 p-0" title="全部收起"
-                      onClick={() => setExpandAllSignal(false)}>
-                      <Minimize2 className="h-3.5 w-3.5" />
-                    </Button>
-                  </div>
-                </div>
-
-                {clusters.length === 0 ? (
-                  <div className="border border-border rounded p-10 text-center">
-                    <div className="text-[40px] mb-2">📚</div>
-                    <div className="text-[12px] text-muted-foreground">
-                      尚无可聚类的错误模式 — 完成首笔交易评价后这里会有内容
-                    </div>
-                  </div>
-                ) : (
-                  clusters.map(c => (
-                    <PatternClusterCard key={c.pattern.id} cluster={c} expandedSignal={expandAllSignal} />
-                  ))
-                )}
-              </>
-            )}
-
-            {view === 'timeline' && (
-              <JournalTimelineList
-                journals={filteredJournals}
-                assignments={data.assignments}
-                patterns={data.patterns}
-              />
-            )}
-
-            {view === 'unreviewed' && (
-              <UnreviewedJournalList
-                journals={tradeJournals}
-                onReviewed={() => {
-                  if (user) {
-                    listAllJournalDataForUser(user.id).then(setData).catch(e => toast.error(String(e)));
-                  }
-                }}
-              />
-            )}
-          </div>
-
-          {!isMobile && (
-            <div className="sticky top-[60px] self-start">{sidebar}</div>
-          )}
-        </div>
+        {view === 'unreviewed' && (
+          <UnreviewedJournalList
+            journals={tradeJournals}
+            onReviewed={() => {
+              if (user) {
+                listAllJournalDataForUser(user.id).then(setData).catch(e => toast.error(String(e)));
+              }
+            }}
+          />
+        )}
       </main>
     </div>
   );

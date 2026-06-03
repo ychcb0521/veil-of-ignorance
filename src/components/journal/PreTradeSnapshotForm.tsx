@@ -1860,6 +1860,9 @@ export function PreTradeSnapshotForm({
                   <div className="mt-1 text-[10px] text-muted-foreground">
                     当前账户净值估算 {accountEquity > 0 ? accountEquity.toFixed(2) : '—'} USDT
                   </div>
+                  <div className="mt-2 text-[10px] leading-relaxed text-muted-foreground">
+                    把下限焊死不是防守——正因为最坏情况被钉成这个数，你才敢多下、敢把仓位放到该放的位置，也才敢让赢家一路跑得更肥。
+                  </div>
                   {maxLossPct != null && recoveryPct != null && recoveryRatio != null && (
                     <div className="mt-2.5 rounded-xl border border-border/60 bg-background/60 p-3">
                       <div className="flex items-start justify-between gap-3 text-[10px] text-muted-foreground">

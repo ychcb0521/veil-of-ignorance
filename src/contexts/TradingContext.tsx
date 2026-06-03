@@ -728,7 +728,8 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
         const existing = (prev[symbol] || []).filter(p => p.quantity > 1e-8);
         return { ...prev, [symbol]: [...existing, position] };
       });
-      recordExecutionTrade(tradingModeRef.current);
+      // 执行力资产只奖励做多开仓：做空一律视为辅助对冲单，不计分。
+      if (order.side === 'LONG') recordExecutionTrade(tradingModeRef.current);
       toast.success(`最优价成交: ${order.side === 'LONG' ? '开多' : '开空'} ${order.quantity.toFixed(6)} @ ${position.entryPrice.toFixed(2)}`);
       return { id: position.id };
     }
@@ -748,7 +749,8 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
         const existing = (prev[symbol] || []).filter(p => p.quantity > 1e-8);
         return { ...prev, [symbol]: [...existing, position] };
       });
-      recordExecutionTrade(tradingModeRef.current);
+      // 执行力资产只奖励做多开仓：做空一律视为辅助对冲单，不计分。
+      if (order.side === 'LONG') recordExecutionTrade(tradingModeRef.current);
       toast.success(`${order.side === 'LONG' ? '开多' : '开空'} ${order.quantity.toFixed(6)} @ ${position.entryPrice.toFixed(2)}`);
       return { id: position.id };
     }

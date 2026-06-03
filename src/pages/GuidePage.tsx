@@ -319,6 +319,12 @@ export default function GuidePage() {
                 <p className="text-[24px] leading-relaxed text-foreground text-center">
                   封住下限，不是为了少亏，而是为了敢赢。
                 </p>
+                <p className="mt-4 text-[14px] leading-relaxed text-muted-foreground text-center">
+                  所以别把这些硬约束读成“风控”或“防守”。它们是<strong className="text-foreground">进攻的前提</strong>：正因为下限被焊死，你才敢多下、敢把仓位放到该放的位置，也才敢让每一个赢家一路跑得更肥。
+                </p>
+                <p className="mt-5 text-[20px] font-semibold leading-relaxed text-[#F0B90B] text-center">
+                  纪律的终极目的是进攻，不是防守。
+                </p>
               </div>
               <P>这一句把“保守”和“反脆弱”彻底分开：保守的人两端都收着；反脆弱的人锁死一端、敞开另一端。</P>
               <div className="overflow-x-auto">
@@ -1023,7 +1029,7 @@ export default function GuidePage() {
 
           <section id="s6" className="scroll-mt-20">
             <SectionTitle accent="#F6465D">6. 数据边界与硬约束</SectionTitle>
-            <P className="mb-3">这一节的每一条硬约束，本质上都在做同一件事：把<strong>下限</strong>钉死。它们不决定你能赚多少，只确保最坏情况发生时，你依然亏得起、活得下来——上限可以敞开，正是因为下限不会被击穿。</P>
+            <P className="mb-3">这一节的每一条硬约束，本质上都在做同一件事：把<strong>下限</strong>钉死。它们不决定你能赚多少，只确保最坏情况发生时，你依然亏得起、活得下来——上限可以敞开，正是因为下限不会被击穿。<strong>别把它们读成“风控”或“防守”：恰恰相反，下限被焊死，才是你敢多下、敢让每个赢家跑得更肥的前提——纪律的终极目的是进攻，不是防守。</strong></P>
             <div className="space-y-3">
               <P><strong>主力单与对冲单必须分开理解。</strong> 主力单评估方向与机会质量；对冲单评估风险管理。把两者混在一起，会污染 R 倍数、胜率和错误模式统计。</P>
               <P><strong>最大亏损是 R 倍数的分母。</strong> 它表达的是本次愿意承受的最大错误成本，不应被事后修改成更好看的数字。</P>

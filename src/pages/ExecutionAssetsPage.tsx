@@ -111,7 +111,7 @@ export default function ExecutionAssetsPage() {
         <section className="mt-4 rounded-2xl border border-border/70 bg-card">
           <div className="border-b border-border/70 px-5 py-4">
             <h2 className="text-[13px] font-semibold">积分规则</h2>
-            <p className="mt-1 text-[11px] text-muted-foreground">奖励真实开仓；挂单在真正成交时才计分。</p>
+            <p className="mt-1 text-[11px] text-muted-foreground">只记做多开仓；做空都是辅助对冲单，不计分。挂单在真正成交时才计分。</p>
           </div>
           <div className="grid gap-3 p-5 md:grid-cols-3">
             <div className="rounded-xl border border-[#0ECB81]/25 bg-[#0ECB81]/5 px-4 py-3">
