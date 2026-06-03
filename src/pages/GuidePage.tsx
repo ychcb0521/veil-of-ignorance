@@ -279,6 +279,19 @@ export default function GuidePage() {
         </div>
       </header>
 
+      {/* 使用说明开篇即点题：纪律的终极目的是进攻，不是防守。 */}
+      <div className="border-b border-[#F0B90B]/20 bg-gradient-to-b from-[#F0B90B]/10 to-transparent">
+        <div className="max-w-[1280px] mx-auto px-6 py-10 text-center">
+          <p className="text-[12px] tracking-wide text-muted-foreground">封住下限，不是为了少亏，而是为了敢赢——</p>
+          <p className="mt-2 text-[26px] md:text-[34px] font-bold leading-tight tracking-tight text-[#F0B90B]">
+            纪律的终极目的是进攻，不是防守！
+          </p>
+          <p className="mx-auto mt-3 max-w-2xl text-[12px] leading-relaxed text-muted-foreground">
+            别把这里的硬约束读成“风控”或“防守”。下限被焊死，正是你<strong className="text-foreground">敢多下、敢把仓位放到该放的位置、敢让每个赢家一路跑得更肥</strong>的前提。
+          </p>
+        </div>
+      </div>
+
       <div className="max-w-[1280px] mx-auto px-6 py-8 grid grid-cols-1 md:grid-cols-[240px_1fr] gap-8">
         <aside className="hidden md:block">
           <div className="sticky top-[72px] bg-card border border-border rounded p-3">
@@ -323,7 +336,7 @@ export default function GuidePage() {
                   所以别把这些硬约束读成“风控”或“防守”。它们是<strong className="text-foreground">进攻的前提</strong>：正因为下限被焊死，你才敢多下、敢把仓位放到该放的位置，也才敢让每一个赢家一路跑得更肥。
                 </p>
                 <p className="mt-5 text-[20px] font-semibold leading-relaxed text-[#F0B90B] text-center">
-                  纪律的终极目的是进攻，不是防守。
+                  纪律的终极目的是进攻，不是防守！
                 </p>
               </div>
               <P>这一句把“保守”和“反脆弱”彻底分开：保守的人两端都收着；反脆弱的人锁死一端、敞开另一端。</P>
