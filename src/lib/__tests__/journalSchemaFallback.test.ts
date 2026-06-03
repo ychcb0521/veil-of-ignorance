@@ -29,6 +29,19 @@ vi.mock('@/integrations/supabase/client', () => {
             },
           });
         }
+        const orderKind = payload.order_kind ?? 'main';
+        const violatesMainCompleteness = orderKind !== 'hedge'
+          && ['pre_risk_awareness', 'pre_risk_management', 'pre_checklist_items', 'pre_checklist_passed']
+            .some(k => payload[k] == null);
+        if (violatesMainCompleteness) {
+          return Promise.resolve({
+            data: null,
+            error: {
+              code: '23514',
+              message: 'new row for relation "trade_journals" violates check constraint "chk_main_order_completeness"',
+            },
+          });
+        }
         return Promise.resolve({ data: { id: 'journal-new', ...payload }, error: null });
       },
     };
@@ -41,6 +54,7 @@ import {
   insertTradeJournalWithSchemaFallback,
   missingSchemaColumn,
   isSchemaColumnMissingError,
+  normalizeMainOrderLegacyCompleteness,
 } from '../journalApi';
 
 const SCHEMA_CACHE_ERR = {
@@ -51,7 +65,17 @@ const SCHEMA_CACHE_ERR = {
 describe('schema-cache column fallback', () => {
   beforeEach(() => {
     // 远程库只建了基础列，尚未应用 v2 / cheap-opportunity / market-regime 等迁移。
-    dbColumns = new Set(['user_id', 'symbol', 'direction', 'pre_entry_reason', 'id']);
+    dbColumns = new Set([
+      'user_id',
+      'symbol',
+      'direction',
+      'pre_entry_reason',
+      'pre_risk_awareness',
+      'pre_risk_management',
+      'pre_checklist_items',
+      'pre_checklist_passed',
+      'id',
+    ]);
   });
 
   it('从 PostgREST 报错里解析出缺失的列名', () => {
@@ -69,6 +93,71 @@ describe('schema-cache column fallback', () => {
       code: '23502',
       message: 'null value in column "pre_entry_reason" violates not-null constraint',
     })).toBe(false);
+  });
+
+  it('新版主力单快照会生成旧完整性约束需要的镜像字段', () => {
+    const normalized = normalizeMainOrderLegacyCompleteness({
+      order_kind: 'main',
+      pre_entry_reason: null,
+      pre_risk_awareness: null,
+      pre_risk_management: null,
+      pre_checklist_items: null,
+      pre_checklist_passed: null,
+      pre_thesis_why_right: '方向和结构一起给了正期望',
+      pre_premortem_failure_reason: '如果亏完，多半是突破未被接受',
+      pre_falsification_signal: '跌回突破位下方',
+    });
+
+    expect(normalized.pre_entry_reason).toBe('方向和结构一起给了正期望');
+    expect(normalized.pre_risk_awareness).toBe('如果亏完，多半是突破未被接受');
+    expect(normalized.pre_risk_management).toBe('封死下限：这是让你敢多下、且每个赢家更肥的前提。证伪/结构破坏信号：跌回突破位下方');
+    expect(normalized.pre_checklist_items).toEqual([]);
+    expect(normalized.pre_checklist_passed).toBe(true);
+  });
+
+  it('对冲单不生成主力单 legacy 完整性字段', () => {
+    const normalized = normalizeMainOrderLegacyCompleteness({
+      order_kind: 'hedge',
+      pre_entry_reason: null,
+      pre_risk_awareness: null,
+      pre_risk_management: null,
+      pre_checklist_items: null,
+      pre_checklist_passed: null,
+    });
+
+    expect(normalized.pre_risk_awareness).toBeNull();
+    expect(normalized.pre_risk_management).toBeNull();
+    expect(normalized.pre_checklist_items).toBeNull();
+    expect(normalized.pre_checklist_passed).toBeNull();
+  });
+
+  it('旧表仍有 chk_main_order_completeness 时，确认下单插入也能跑通', async () => {
+    const { data, error } = await insertTradeJournalWithSchemaFallback({
+      user_id: 'u1',
+      symbol: 'BTCUSDT',
+      direction: 'long',
+      order_kind: 'main',
+      pre_entry_reason: null,
+      pre_risk_awareness: null,
+      pre_risk_management: null,
+      pre_checklist_items: null,
+      pre_checklist_passed: null,
+      pre_thesis_why_right: '方向和结构一起给了正期望',
+      pre_premortem_failure_reason: '如果亏完，多半是突破未被接受',
+      pre_falsification_signal: '跌回突破位下方',
+    });
+
+    expect(error).toBeNull();
+    expect(data).toMatchObject({
+      id: 'journal-new',
+      user_id: 'u1',
+      symbol: 'BTCUSDT',
+      pre_entry_reason: '方向和结构一起给了正期望',
+      pre_risk_awareness: '如果亏完，多半是突破未被接受',
+      pre_risk_management: '封死下限：这是让你敢多下、且每个赢家更肥的前提。证伪/结构破坏信号：跌回突破位下方',
+      pre_checklist_items: [],
+      pre_checklist_passed: true,
+    });
   });
 
   it('缺列时逐列剥离后仍能成功插入（提交闭环不被打断）', async () => {
@@ -95,6 +184,10 @@ describe('schema-cache column fallback', () => {
       'symbol',
       'direction',
       'pre_entry_reason',
+      'pre_risk_awareness',
+      'pre_risk_management',
+      'pre_checklist_items',
+      'pre_checklist_passed',
       'pre_thesis_why_right',
       'id',
     ]);

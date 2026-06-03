@@ -308,7 +308,7 @@ function isMissingSocialFeatureError(error: { code?: string; message?: string } 
  * 核心列（user_id/symbol/direction/pre_entry_reason/pre_mental_state/post_outcome…）
  * 不在此模式内，永不会被误判或误删。仅用 i 标志（无 g），test() 无状态、可安全复用。
  */
-const OPTIONAL_COLUMN_PATTERN = /trade_principles|pain_log_entries|pre_thesis_why_right|pre_premortem_failure_reason|pre_falsification_signal|pre_confidence_basis|pre_odds_structure|pre_odds_structure_source|pre_odds_structure_premortem|pre_odds_structure_breakdown_signals|pre_account_equity_usdt|pre_opportunity_cost_worth|pre_cheap_opportunity|pre_edge_source|pre_market_regime|pre_entry_stage|pre_stop_quality|pre_chase_after_close|pre_mortem_text|pre_positive_expectancy|pre_invalidation_condition|pre_calibration_win_pct|pre_confidence_interval_|pre_calibration_reference_class|pre_calibration_competence_basis|pre_calibration_update_signal|pre_dataset_split|pre_lollapalooza_score|pre_bankruptcy_estimate|pre_info_|pre_opponent_statement|pre_pain_tags|pre_cognitive_bias_tags|pre_triggered_principle_ids|pre_triggered_rule_ids|pre_executor_self|pre_designer_self|journal_kind|no_trade_reason|no_trade_would_be_entry_price|no_trade_direction|exit_falsification_status|exit_falsification_note|post_result_summary|post_decision_quality|post_struggle_level|post_small_position_drag|post_missed_high_odds_state|post_positive_expectancy_review|post_premortem_review|post_invalidation_review|post_five_step|post_opponent_was_right|post_proximate_cause|post_root_cause|post_design_intervention|post_intervention_type|post_execution_monitor|post_real_close_time|evolution_level|principle_id|hedge_type|hedge_boundary_price|hedge_boundary_basis|hedge_boundary_stance|hedge_lock_profit_pct|hedge_resolution_up|hedge_resolution_down|hedge_down_if_chop|hedge_down_if_trend|hedge_down_if_rebound|hedge_necessity_pct|hedge_safety_strength|hedge_safety_regularity|hedge_risk_magnitude|hedge_conviction_pct|hedge_friction_cost|hedge_order_method|hedge_worth_it/i;
+const OPTIONAL_COLUMN_PATTERN = /trade_principles|pain_log_entries|order_kind|pre_thesis_why_right|pre_premortem_failure_reason|pre_falsification_signal|pre_confidence_basis|pre_odds_structure|pre_odds_structure_source|pre_odds_structure_premortem|pre_odds_structure_breakdown_signals|pre_account_equity_usdt|pre_opportunity_cost_worth|pre_cheap_opportunity|pre_edge_source|pre_market_regime|pre_entry_stage|pre_stop_quality|pre_chase_after_close|pre_mortem_text|pre_positive_expectancy|pre_invalidation_condition|pre_calibration_win_pct|pre_confidence_interval_|pre_calibration_reference_class|pre_calibration_competence_basis|pre_calibration_update_signal|pre_dataset_split|pre_lollapalooza_score|pre_bankruptcy_estimate|pre_info_|pre_opponent_statement|pre_pain_tags|pre_cognitive_bias_tags|pre_triggered_principle_ids|pre_triggered_rule_ids|pre_executor_self|pre_designer_self|journal_kind|no_trade_reason|no_trade_would_be_entry_price|no_trade_direction|exit_falsification_status|exit_falsification_note|post_result_summary|post_decision_quality|post_struggle_level|post_small_position_drag|post_missed_high_odds_state|post_positive_expectancy_review|post_premortem_review|post_invalidation_review|post_five_step|post_opponent_was_right|post_proximate_cause|post_root_cause|post_design_intervention|post_intervention_type|post_execution_monitor|post_real_close_time|evolution_level|principle_id|hedge_type|hedge_boundary_price|hedge_boundary_basis|hedge_boundary_stance|hedge_lock_profit_pct|hedge_resolution_up|hedge_resolution_down|hedge_down_if_chop|hedge_down_if_trend|hedge_down_if_rebound|hedge_necessity_pct|hedge_safety_strength|hedge_safety_regularity|hedge_risk_magnitude|hedge_conviction_pct|hedge_friction_cost|hedge_order_method|hedge_worth_it/i;
 
 function isMissingDalioMetaLayerError(error: { code?: string; message?: string } | null): boolean {
   if (!error) return false;
@@ -373,6 +373,48 @@ function stripAllOptionalColumns(payload: Record<string, unknown>): Record<strin
   return rest;
 }
 
+function asNonEmptyString(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
+/**
+ * 兼容旧数据库约束 chk_main_order_completeness：
+ * 某些远程库已经有 order_kind，却仍要求主力单的旧字段
+ * pre_risk_awareness / pre_risk_management / pre_checklist_* 非空。
+ * 新版快照把风险拆到了三问、赔率结构与 checklist 里，所以插入前统一生成 legacy 镜像字段。
+ */
+export function normalizeMainOrderLegacyCompleteness(
+  payload: Record<string, unknown>,
+): Record<string, unknown> {
+  const next = { ...payload };
+  if (next.order_kind === 'hedge') return next;
+
+  if (next.pre_entry_reason == null) {
+    next.pre_entry_reason = asNonEmptyString(next.pre_thesis_why_right)
+      ?? asNonEmptyString(next.no_trade_reason)
+      ?? '[新版快照] 见决策三问与盈亏比轴';
+  }
+  if (next.pre_risk_awareness == null) {
+    next.pre_risk_awareness = asNonEmptyString(next.pre_premortem_failure_reason)
+      ?? asNonEmptyString(next.pre_odds_structure_premortem)
+      ?? '[新版快照] 亏损假设已记录在三问/盈亏比结构里';
+  }
+  if (next.pre_risk_management == null) {
+    const stopSignal = asNonEmptyString(next.pre_falsification_signal)
+      ?? asNonEmptyString(next.pre_odds_structure_breakdown_signals);
+    next.pre_risk_management = stopSignal
+      ? `封死下限：这是让你敢多下、且每个赢家更肥的前提。证伪/结构破坏信号：${stopSignal}`
+      : '封死下限：这是让你敢多下、且每个赢家更肥的前提。';
+  }
+  if (next.pre_checklist_items == null) {
+    next.pre_checklist_items = [];
+  }
+  if (next.pre_checklist_passed == null) {
+    next.pre_checklist_passed = true;
+  }
+  return next;
+}
+
 async function updateTradeJournalWithSchemaFallback(
   journalId: string,
   payload: Record<string, unknown>,
@@ -426,14 +468,14 @@ async function updateTradeJournalWithSchemaFallback(
 export async function insertTradeJournalWithSchemaFallback(
   payload: Record<string, unknown>,
 ): Promise<{ data: unknown; error: { message: string; code?: string } | null }> {
-  let nextPayload = { ...payload };
+  let nextPayload = normalizeMainOrderLegacyCompleteness(payload);
   let lastData: unknown = null;
   let lastError: { message: string; code?: string } | null = null;
   let stripped = 0;
   let bulkStripped = false;
   // 远程库可能缺几十列，逐列剥离次数必须足够覆盖；原来固定 30 会在严重漂移时提前耗尽，
   // 导致快照提交直接报错（line: "Could not find the 'pre_confidence_basis' column …"）。
-  const maxAttempts = Object.keys(payload).length + 5;
+  const maxAttempts = Object.keys(nextPayload).length + 5;
 
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
     const { data, error } = await supabase
