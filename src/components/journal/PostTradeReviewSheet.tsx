@@ -233,7 +233,7 @@ export function PostTradeReviewSheet({
         </Sheet>
       ) : (
         <Dialog open={isOpen} onOpenChange={onOpenChange}>
-          <DialogContent className="w-[calc(100vw-32px)] max-w-[860px] h-[60vh] p-0 bg-card border border-border text-foreground overflow-hidden">
+          <DialogContent className="w-[calc(100vw-32px)] max-w-[860px] h-[60vh] p-0 bg-card border border-border text-foreground overflow-hidden rounded-2xl shadow-2xl [&>button]:right-5 [&>button]:top-5">
             {placeholder}
           </DialogContent>
         </Dialog>
@@ -467,17 +467,46 @@ export function PostTradeReviewSheet({
       : outcome === 'breakeven'
         ? '实际保本'
         : '未入场';
+  const outcomeLabel = outcome === 'win'
+    ? 'WIN'
+    : outcome === 'loss'
+      ? 'LOSS'
+      : outcome === 'breakeven'
+        ? 'FLAT'
+        : 'NO TRADE';
+  const outcomeClass = outcome === 'win'
+    ? 'border-[#0ECB81]/30 bg-[#0ECB81]/10 text-[#0ECB81]'
+    : outcome === 'loss'
+      ? 'border-[#F6465D]/30 bg-[#F6465D]/10 text-[#F6465D]'
+      : 'border-border bg-muted text-muted-foreground';
+  const pnlClass = pnl > 0 ? 'text-[#0ECB81]' : pnl < 0 ? 'text-[#F6465D]' : 'text-muted-foreground';
+  const pnlLabel = `${pnl > 0 ? '+' : ''}${pnl.toFixed(2)} USDT`;
+  const rLabel = finalR != null ? `${finalR > 0 ? '+' : ''}${finalR.toFixed(2)}R` : '—R';
 
   const body = (
     <>
-      <div className="px-5 py-4 border-b border-border bg-gradient-to-b from-muted/25 to-background/80">
-        <div className="text-[15px] font-semibold tracking-[0.01em] text-foreground">平仓评价</div>
-        <div className="font-mono text-[11px] text-muted-foreground mt-0.5">
-          {journal.symbol} · {journal.direction} · 模拟时间 {fmtTime(journal.pre_simulated_time)}
+      <div className="shrink-0 border-b border-border bg-gradient-to-b from-muted/30 to-background/95 px-6 py-4 pr-14">
+        <div className="mx-auto flex w-full max-w-[780px] items-start justify-between gap-4">
+          <div className="min-w-0">
+            <div className="text-[15px] font-semibold tracking-[0.01em] text-foreground">平仓评价</div>
+            <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 font-mono text-[11px] text-muted-foreground">
+              <span>{journal.symbol}</span>
+              <span>·</span>
+              <span>{journal.direction}</span>
+              <span>·</span>
+              <span>模拟时间 {fmtTime(journal.pre_simulated_time)}</span>
+            </div>
+          </div>
+          <div className="hidden shrink-0 items-center gap-2 sm:flex">
+            <span className={`rounded-md border px-2 py-1 text-[11px] font-semibold ${outcomeClass}`}>{outcomeLabel}</span>
+            <span className={`font-mono text-[12px] ${pnlClass}`}>{rLabel}</span>
+            <span className={`font-mono text-[12px] ${pnlClass}`}>{pnlLabel}</span>
+          </div>
         </div>
       </div>
 
-      <div className="px-5 py-4 space-y-4 overflow-y-auto flex-1 bg-background">
+      <div className="flex-1 overflow-y-auto bg-muted/20 px-5 py-5">
+        <div className="mx-auto w-full max-w-[780px] space-y-4">
         {journal.source === 'retroactive_from_record' && (
           <div className="rounded border border-[#F0B90B]/30 bg-[#F0B90B]/10 px-3 py-2 text-[11px] text-[#F0B90B]">
             这是历史回填，事后复盘有效，但避免编造当时未存在的决策。
@@ -1454,20 +1483,23 @@ export function PostTradeReviewSheet({
         </div>
 
       </div>
+      </div>
 
-      <div className="px-5 py-3 border-t border-border flex justify-between items-center gap-2 shrink-0 bg-gradient-to-t from-muted/20 to-background">
-        {unreviewedBlock ? (
-          <span className="text-[10px] text-[#F6465D] font-medium">
-            🔒 评价完成前无法关闭 — 防止"静默关闭"丢失错题样本
-          </span>
-        ) : (
-          <Button variant="ghost" onClick={() => onOpenChange(false)} className="h-9 rounded-lg px-4 text-[12px] hover:bg-accent/60">取消</Button>
-        )}
-        <Button
-          onClick={handleSave}
-          disabled={!canSave}
-          className="h-9 rounded-lg px-4 text-[12px] bg-[#F0B90B] hover:bg-[#F0B90B]/90 text-black shadow-[0_10px_24px_rgba(240,185,11,0.18)] disabled:opacity-40 disabled:shadow-none"
-        >{saving ? '保存中...' : '保存评价'}</Button>
+      <div className="shrink-0 border-t border-border bg-background/95 px-6 py-3.5">
+        <div className="mx-auto flex w-full max-w-[780px] items-center justify-between gap-3">
+          {unreviewedBlock ? (
+            <span className="text-[11px] font-medium text-[#F6465D]">
+              完成评价后即可继续下一笔
+            </span>
+          ) : (
+            <Button variant="ghost" onClick={() => onOpenChange(false)} className="h-9 rounded-lg px-4 text-[12px] hover:bg-accent/60">取消</Button>
+          )}
+          <Button
+            onClick={handleSave}
+            disabled={!canSave}
+            className="h-9 rounded-lg px-5 text-[12px] bg-[#F0B90B] hover:bg-[#F0B90B]/90 text-black shadow-[0_10px_24px_rgba(240,185,11,0.18)] disabled:opacity-40 disabled:shadow-none"
+          >{saving ? '保存中...' : '保存评价'}</Button>
+        </div>
       </div>
     </>
   );
@@ -1491,7 +1523,7 @@ export function PostTradeReviewSheet({
   return (
     <Dialog open={isOpen} onOpenChange={guardedOpenChange}>
       <DialogContent
-        className="w-[calc(100vw-32px)] max-w-[860px] h-[92vh] overflow-hidden bg-background border border-border p-0 flex flex-col gap-0"
+        className="w-[calc(100vw-32px)] max-w-[860px] h-[92vh] overflow-hidden bg-background border border-border p-0 flex flex-col gap-0 rounded-2xl shadow-2xl [&>button]:right-5 [&>button]:top-5"
         onPointerDownOutside={unreviewedBlock ? e => e.preventDefault() : undefined}
         onEscapeKeyDown={unreviewedBlock ? e => e.preventDefault() : undefined}
         onInteractOutside={unreviewedBlock ? e => e.preventDefault() : undefined}
