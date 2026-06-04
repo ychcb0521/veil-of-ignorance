@@ -8,7 +8,6 @@ import { Sheet, SheetContent } from '@/components/ui/sheet';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Input } from '@/components/ui/input';
-import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
@@ -43,16 +42,14 @@ import {
   type OddsStructureReview,
 } from '@/lib/oddsStructure';
 import {
-  finalizeJournalReview, replacePhaseAssignments,
-  listAssignmentsForJournal, countPatternOccurrencesLast30Days, listPatterns,
+  finalizeJournalReview,
   updateJournalDeepAnalysis, stampJournalCloseRealTime, listJournals,
 } from '@/lib/journalApi';
-import type { TradeJournal, TradeOutcome, ErrorTagPattern } from '@/types/journal';
+import type { TradeJournal, TradeOutcome } from '@/types/journal';
 import { MENTAL_STATE_LABELS, PAIN_TAG_LABELS } from '@/types/journal';
 import type { PainTag } from '@/types/journal';
 import { formatBeijingTime } from '@/lib/timeFormat';
 import type { TradeRecord } from '@/types/trading';
-import { JournalTagPicker } from './JournalTagPicker';
 import {
   SixStepAnalysisForm, EMPTY_SIX_STEP, pickSixStepValue, countCompletedSteps,
   type SixStepValue,
@@ -86,9 +83,6 @@ export function PostTradeReviewSheet({
   const isMobile = useIsMobile();
   const { user } = useAuth();
   const { setTradeHistory } = useTradingContext();
-  const [selectedTags, setSelectedTags] = useState<string[]>([]);
-  const [tagNotes, setTagNotes] = useState<Record<string, string>>({});
-  const [noErrors, setNoErrors] = useState(false);
   const [reflection, setReflection] = useState('');
   const [reflectionFacts, setReflectionFacts] = useState('');
   const [correctAction, setCorrectAction] = useState('');
@@ -118,8 +112,6 @@ export function PostTradeReviewSheet({
   const [rMultipleOverride, setRMultipleOverride] = useState<string>('');
   const [editingR, setEditingR] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [hotCounts, setHotCounts] = useState<Record<string, number>>({});
-  const [allPatterns, setAllPatterns] = useState<ErrorTagPattern[]>([]);
   /** 用户全部主力单（用于「工具箱集中度 / 铁锤人」体检，仅展示）。 */
   const [allUserJournals, setAllUserJournals] = useState<TradeJournal[]>([]);
   const [sixStep, setSixStep] = useState<SixStepValue>(EMPTY_SIX_STEP);
@@ -135,13 +127,6 @@ export function PostTradeReviewSheet({
     setStampedCloseTime(null);
     (async () => {
       try {
-        const existing = await listAssignmentsForJournal(journal.id);
-        const post = existing.filter(a => a.tagged_phase === 'post');
-        setSelectedTags(post.map(a => a.pattern_id));
-        const ns: Record<string, string> = {};
-        post.forEach(a => { if (a.note) ns[a.pattern_id] = a.note; });
-        setTagNotes(ns);
-        setNoErrors(post.length === 0 && !!journal.post_reviewed_at);
         const parsedReflection = parseReflectionText(journal.post_reflection);
         setReflectionFacts(parsedReflection.facts);
         setReflection(parsedReflection.interpretation);
@@ -174,7 +159,6 @@ export function PostTradeReviewSheet({
         setSixStep(pickSixStepValue(journal));
         setSixStepOpen(countCompletedSteps(pickSixStepValue(journal)) > 0);
         if (user) {
-          listPatterns(user.id).then(setAllPatterns).catch(() => {});
           // 拉取全部主力单做「工具箱集中度」体检（铁锤人自检），失败不阻塞复盘。
           listJournals(user.id).then(setAllUserJournals).catch(() => {});
         }
@@ -190,24 +174,6 @@ export function PostTradeReviewSheet({
     return () => { pausedOnce.done = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen, journal?.id, tradeRecord?.id]);
-
-  // 计算频次告警
-  useEffect(() => {
-    if (!user || selectedTags.length === 0) { setHotCounts({}); return; }
-    let cancelled = false;
-    (async () => {
-      const entries = await Promise.all(
-        selectedTags.map(async id => {
-          try {
-            const n = await countPatternOccurrencesLast30Days(user.id, id);
-            return [id, n] as const;
-          } catch { return [id, 0] as const; }
-        }),
-      );
-      if (!cancelled) setHotCounts(Object.fromEntries(entries));
-    })();
-    return () => { cancelled = true; };
-  }, [selectedTags, user]);
 
   // Auto outcome — guard for null journal so hooks order is stable
   const pnl = tradeRecord?.pnl ?? journal?.post_realized_pnl ?? 0;
@@ -352,12 +318,12 @@ export function PostTradeReviewSheet({
     regimeEdgeMismatchHint(j.pre_market_regime, j.pre_edge_source) != null,
   ).length;
 
-  const tagsValid = noErrors || selectedTags.length >= 1;
   const reflectionValid = !!reflection.trim();
   const correctValid = !!correctAction.trim();
   const exitReasonValid = journal.direction === 'no_entry' || !!exitReason.trim();
   const resultValid = !!resultSummary.trim();
-  const decisionValid = !!decisionQuality;
+  const quadrantValid = !quadrantApplicable || !!quadrant;
+  const decisionValid = !quadrantApplicable || decisionQuality === 'good' || decisionQuality === 'bad';
   const falsificationFactValid = !snapshotFalsification || falsificationStatus != null;
   const oddsStructureFactValid = isHedge || !journal.pre_odds_structure || oddsStructureReviewValue != null;
   const reviewLoopValid = !!expectancyReview.trim()
@@ -375,15 +341,17 @@ export function PostTradeReviewSheet({
     designIntervention,
     executionMonitor,
   ].every(value => value.trim().length > 0);
-  const canSave = tagsValid && reflectionValid && correctValid && exitReasonValid && resultValid && decisionValid && reviewLoopValid && opponentValid && hedgeWorthItValid && fiveStepValid && !saving;
-
-  const hotWarnings = selectedTags
-    .map(id => {
-      const p = allPatterns.find(x => x.id === id);
-      const n = hotCounts[id] ?? 0;
-      return p && n >= 2 ? { pattern: p, count: n } : null;
-    })
-    .filter(Boolean) as { pattern: ErrorTagPattern; count: number }[];
+  const canSave = reflectionValid
+    && correctValid
+    && exitReasonValid
+    && resultValid
+    && decisionValid
+    && quadrantValid
+    && reviewLoopValid
+    && opponentValid
+    && hedgeWorthItValid
+    && fiveStepValid
+    && !saving;
 
   const sectionCardClass = 'rounded-xl border border-border/70 bg-card/70 shadow-[0_10px_30px_rgba(0,0,0,0.04)]';
   const subtleLabelClass = 'text-[11px] font-medium text-muted-foreground';
@@ -430,12 +398,6 @@ export function PostTradeReviewSheet({
         post_execution_monitor: executionMonitor.trim(),
         post_five_step_weak_point: fiveStepWeakPoint,
       });
-      const assignments = noErrors ? [] : selectedTags.map(id => ({
-        patternId: id,
-        phase: 'post' as const,
-        note: tagNotes[id] ?? null,
-      }));
-      await replacePhaseAssignments(journal.id, 'post', assignments);
       // Save deep analysis if any field was filled
       const hasDeep = Object.values(sixStep).some(v => String(v ?? '').trim().length > 0);
       if (hasDeep) {
@@ -534,11 +496,6 @@ export function PostTradeReviewSheet({
                   这笔在守卫上线前用了全仓
                 </span>
               )}
-              {!isSnapshotV2 && (
-                <span className="inline-block rounded px-2 py-0.5 text-[10px] bg-muted text-muted-foreground">
-                  旧版快照 v1
-                </span>
-              )}
             </div>
             <div className="border border-border/60 rounded-md bg-background/60 px-2.5 py-2 text-[10.5px] leading-relaxed">
               <div className="text-muted-foreground mb-1">实际操作时间（北京时间）</div>
@@ -601,7 +558,7 @@ export function PostTradeReviewSheet({
                   </div>
                 ) : (
                   <div className="rounded-lg border border-border/60 bg-background/60 px-3 py-2">
-                    <span className="text-muted-foreground">旧版向下预案：</span>{journal.hedge_resolution_down || '—'}
+                    <span className="text-muted-foreground">向下预案：</span>{journal.hedge_resolution_down || '—'}
                   </div>
                 )}
                 <div className="rounded-lg border border-border/60 bg-background/60 px-3 py-2">
@@ -628,7 +585,7 @@ export function PostTradeReviewSheet({
                 )}
                 <div className="rounded-lg border border-border/60 bg-background/60 px-3 py-2">
                   <span className="text-muted-foreground">盈亏比目标：</span>
-                  {journal.pre_odds_structure ? ODDS_STRUCTURE_LABELS[journal.pre_odds_structure] : '旧版快照'}
+                  {journal.pre_odds_structure ? ODDS_STRUCTURE_LABELS[journal.pre_odds_structure] : '—'}
                 </div>
                 {cheapOpportunityLabel && (
                   <div className="rounded-lg border border-border/60 bg-background/60 px-3 py-2">
@@ -657,11 +614,6 @@ export function PostTradeReviewSheet({
                       <span className="text-muted-foreground">目标失效信号：</span>{snapshotOddsBreakdown || '—'}
                     </div>
                   </>
-                )}
-                {isSnapshotV2 && !journal.pre_odds_structure && !isHedge && (
-                  <div className="rounded-lg border border-border/60 bg-background/60 px-3 py-2 text-muted-foreground">
-                    旧版快照：未记录盈亏比目标三问
-                  </div>
                 )}
               </div>
             ) : (
@@ -857,7 +809,7 @@ export function PostTradeReviewSheet({
               </>
             ) : (
               <div className="rounded-lg border border-border/60 bg-card px-3 py-2 text-[11px] leading-relaxed text-muted-foreground">
-                旧版快照没有记录“止”的信号；仍需在下方事实备注里说明你如何认错或离场。
+                本笔未记录预设证伪信号；在下方写清离场事实即可。
               </div>
             )}
             <Textarea
@@ -882,7 +834,7 @@ export function PostTradeReviewSheet({
                 </div>
               ) : (
                 <div className="rounded-lg border border-border/60 bg-card px-3 py-2 text-[11px] leading-relaxed text-muted-foreground">
-                  旧版快照未记录盈亏比结构；这项按事实备注补足。
+                  本笔未记录盈亏比结构；直接按实际盘面补充判断。
                 </div>
               )}
               {journal.pre_odds_structure && (
@@ -983,7 +935,7 @@ export function PostTradeReviewSheet({
         </div>
 
         <div className={`space-y-3 px-4 py-4 ${sectionCardClass}`}>
-          <div className="text-[12px] font-medium">结果与决策质量分离</div>
+          <div className="text-[12px] font-medium">结果复盘</div>
           <div className="space-y-1.5">
             <Label className="text-[12px] font-medium">这笔结果如何？*</Label>
             <Textarea
@@ -993,28 +945,6 @@ export function PostTradeReviewSheet({
               placeholder="只写结果事实：赚/亏/保本、平仓方式、是否达到原计划。"
               className="text-[12px] bg-background/80 border-border/70 rounded-xl"
             />
-          </div>
-          <div className="space-y-1.5">
-            <Label className="text-[12px] font-medium">按当时信息看，这笔决策质量如何？*</Label>
-            <div className="grid grid-cols-3 gap-2">
-              {[
-                { value: 'good', label: '好决策', className: 'border-[#0ECB81] bg-[#0ECB81]/10 text-[#0ECB81]' },
-                { value: 'mixed', label: '混合', className: 'border-[#F0B90B] bg-[#F0B90B]/10 text-[#F0B90B]' },
-                { value: 'bad', label: '坏决策', className: 'border-[#F6465D] bg-[#F6465D]/10 text-[#F6465D]' },
-              ].map(item => (
-                <button
-                  key={item.value}
-                  type="button"
-                  onClick={() => setDecisionQuality(item.value as TradeJournal['post_decision_quality'])}
-                  className={`h-9 rounded-lg border text-[11px] ${
-                    decisionQuality === item.value ? item.className : 'border-border bg-background text-muted-foreground hover:bg-accent'
-                  }`}
-                >
-                  {item.label}
-                </button>
-              ))}
-            </div>
-            <p className="text-[10px] text-muted-foreground">坏结果不自动等于坏决策；好结果也不自动等于好决策。</p>
           </div>
 
           {quadrantApplicable && (
@@ -1027,11 +957,22 @@ export function PostTradeReviewSheet({
                 {QUADRANT_GRID.map(cell => {
                   const meta = STRUCTURE_RESULT_QUADRANTS[cell];
                   const active = quadrant === cell;
+                  const selectable = meta.isWin === (outcome === 'win');
                   return (
-                    <div
+                    <button
                       key={cell}
+                      type="button"
+                      disabled={!selectable}
+                      onClick={() => {
+                        if (!selectable) return;
+                        setDecisionQuality(meta.structureSound ? 'good' : 'bad');
+                      }}
                       className={`rounded-lg border px-2.5 py-2 leading-tight transition-colors ${
-                        active ? '' : 'border-border/60 bg-background/40'
+                        active
+                          ? ''
+                          : selectable
+                            ? 'border-border/60 bg-background/40 hover:bg-accent/60'
+                            : 'border-border/40 bg-background/20 opacity-35 cursor-not-allowed'
                       }`}
                       style={active ? { borderColor: meta.accent, backgroundColor: `${meta.accent}1A` } : undefined}
                     >
@@ -1044,7 +985,7 @@ export function PostTradeReviewSheet({
                       <div className="text-[9px] text-muted-foreground">
                         {meta.structureSound ? '结构对' : '结构错'} · {meta.isWin ? '赢' : '亏'}
                       </div>
-                    </div>
+                    </button>
                   );
                 })}
               </div>
@@ -1067,7 +1008,7 @@ export function PostTradeReviewSheet({
                 </div>
               ) : (
                 <p className="rounded border border-border/60 bg-background/40 px-2 py-1.5 text-[10px] leading-relaxed text-muted-foreground">
-                  决策质量标成了「混合」—— 先判成「好」或「坏」，才看得清这是「实力兑现」「危险盈利」还是「正确的亏损」。
+                  请选择本笔落在哪一格。
                 </p>
               )}
             </div>
@@ -1438,34 +1379,6 @@ export function PostTradeReviewSheet({
           </div>
         </div>
 
-        {/* (C) Tags */}
-        {user && (
-          <div className={`space-y-2 px-4 py-4 ${sectionCardClass}`}>
-            <div className="flex items-center justify-between">
-              <Label className="text-[12px] font-medium">错误标签 *</Label>
-              <span className="text-[11px] text-muted-foreground">至少选 1 个，或勾选下方"本次无明显错误"</span>
-            </div>
-            <JournalTagPicker
-              userId={user.id}
-              selectedPatternIds={selectedTags}
-              notes={tagNotes}
-              onChange={(ids, ns) => { setSelectedTags(ids); setTagNotes(ns); }}
-              disabled={noErrors}
-            />
-            <label className="flex items-center gap-2 text-[12px] text-foreground cursor-pointer rounded-lg border border-border/60 bg-background/60 px-3 py-2">
-              <Checkbox
-                checked={noErrors}
-                onCheckedChange={v => {
-                  const next = !!v;
-                  setNoErrors(next);
-                  if (next) { setSelectedTags([]); setTagNotes({}); }
-                }}
-              />
-              ✓ 本次交易过程符合预期，无明显错误模式
-            </label>
-          </div>
-        )}
-
         {/* (C+) 六步深度分析（可选） */}
         <Collapsible open={sixStepOpen} onOpenChange={setSixStepOpen}>
           <CollapsibleTrigger className="w-full rounded-xl border border-border/70 bg-gradient-to-r from-card via-card to-accent/20 px-4 py-3 flex items-center gap-2 transition-colors hover:bg-accent/30 shadow-[0_10px_30px_rgba(0,0,0,0.04)]">
@@ -1533,17 +1446,6 @@ export function PostTradeReviewSheet({
           </div>
         </div>
 
-        {/* (F) Frequency warning */}
-        {hotWarnings.length > 0 && (
-          <div className="bg-[#F6465D]/8 border border-[#F6465D]/25 rounded-xl px-4 py-3 space-y-1 shadow-[0_10px_30px_rgba(246,70,93,0.08)]">
-            {hotWarnings.map(w => (
-              <div key={w.pattern.id} className="text-[12px] text-[#F6465D]">
-                ⚠ 模式「{w.pattern.pattern_name}」最近 30 天内已出现 {w.count} 次（含本次 = {w.count + 1} 次）。
-                满 3 次后，系统会在批次 6 强制要求你写一条新规则加入 checklist。
-              </div>
-            ))}
-          </div>
-        )}
       </div>
 
       <div className="px-5 py-3 border-t border-border flex justify-between items-center gap-2 shrink-0 bg-gradient-to-t from-muted/20 to-background">

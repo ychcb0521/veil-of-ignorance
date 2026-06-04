@@ -157,7 +157,7 @@ export function SixStepAnalysisForm({
               <div className="mt-2 pl-2">
                 {patternChips.length === 0 ? (
                   <div className="text-[10px] text-[#F6465D]">
-                    未打标签——请到上方"错误标签"区域选择
+                    暂无关联模式
                   </div>
                 ) : (
                   <div className="flex flex-wrap gap-1">
