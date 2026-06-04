@@ -1299,6 +1299,22 @@ const Index = () => {
   const handleJumpToSignal = useCallback(
     async (symbol: string, timeMs: number) => {
       const normalized = symbol.toUpperCase();
+
+      // 关键：先取数，确认拿到数据后，才改任何共享状态。
+      // 「信号库」（按信号自动启动）与「手动启动」必须相互独立——一次失败的跳转
+      // 绝不能污染手动模式。因此在 initLoad 成功前，不切换 activeSymbol、不清空行情、
+      // 不重置数据层；失败时直接返回，手动模式所见状态原封不动。
+      prevVisibleLenRef.current = 0;
+      cursorRef.current = 0;
+      gameLoopInitRef.current = false;
+
+      const data = await initLoad(normalized, interval, timeMs);
+      if (data.length === 0) {
+        toast.error("数据获取失败", { description: `无法加载 ${normalized} @ 该时间，请检查信号` });
+        return;
+      }
+
+      // 取数成功——此时才原子地切换标的并清理该标的的旧缓存。
       if (normalized !== activeSymbol) {
         setActiveSymbol(normalized);
         latestChartPriceRef.current = 0;
@@ -1308,16 +1324,6 @@ const Index = () => {
           delete next[normalized];
           return next;
         });
-        reset();
-      }
-      prevVisibleLenRef.current = 0;
-      cursorRef.current = 0;
-      gameLoopInitRef.current = false;
-
-      const data = await initLoad(normalized, interval, timeMs);
-      if (data.length === 0) {
-        toast.error("数据获取失败", { description: `无法加载 ${normalized} @ 该时间，请检查信号` });
-        return;
       }
       prevVisibleLenRef.current = 0;
       gameLoopInitRef.current = false;
@@ -1346,7 +1352,7 @@ const Index = () => {
     },
     [
       activeSymbol, interval, initLoad, sim, timeMode,
-      setActiveSymbol, setPriceMap, reset, setCoinTimelines, setSyncedOriginTime,
+      setActiveSymbol, setPriceMap, setCoinTimelines, setSyncedOriginTime,
     ],
   );
 

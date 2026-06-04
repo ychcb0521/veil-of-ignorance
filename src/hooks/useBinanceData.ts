@@ -30,13 +30,29 @@ export function intervalToMs(interval: string): number {
   return map[interval] || 60_000;
 }
 
+/** HTTP 状态码：可重试的「瞬时」错误（限流 429 / 418、网关与服务端抖动 5xx）。 */
+const RETRYABLE_STATUS = new Set([418, 429, 500, 502, 503, 504]);
+/** 单个批次取数的最大重试次数（不含首次）。 */
+const MAX_FETCH_RETRIES = 2;
+/** 重试退避基数（毫秒），按指数增长：250 → 500。 */
+const RETRY_BASE_MS = 250;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 /**
  * Fetch a single batch of klines from Binance fapi.
+ *
+ * 对 Binance REST 的瞬时限流（HTTP 429 / 418）与网关抖动（5xx）做有界指数退避重试：
+ * 「信号库」批量跳转 + 「手动启动」可能在短时间内连续打多次 klines 请求，偶发 429
+ * 不应直接冒泡成「数据获取失败」。重试用尽后仍失败才抛出 `API <status>`，交由上层处理。
  */
 async function fetchBatch(
   symbol: string,
   interval: string,
   params: { startTime?: number; endTime?: number; limit?: number },
+  attempt = 0,
 ): Promise<KlineData[]> {
   const qs = new URLSearchParams({
     symbol,
@@ -47,7 +63,13 @@ async function fetchBatch(
   if (params.endTime != null) qs.set("endTime", String(params.endTime));
 
   const res = await fetch(`https://fapi.binance.com/fapi/v1/klines?${qs}`);
-  if (!res.ok) throw new Error(`API ${res.status}`);
+  if (!res.ok) {
+    if (RETRYABLE_STATUS.has(res.status) && attempt < MAX_FETCH_RETRIES) {
+      await sleep(RETRY_BASE_MS * 2 ** attempt);
+      return fetchBatch(symbol, interval, params, attempt + 1);
+    }
+    throw new Error(`API ${res.status}`);
+  }
   const raw: any[][] = await res.json();
   return raw.map((k) => ({
     time: k[0] as number,
@@ -90,8 +112,6 @@ export function useBinanceData() {
       const requestId = ++initLoadRequestIdRef.current;
       setLoading(true);
       setError(null);
-      noMoreRef.current = false;
-      ctxRef.current = { symbol, interval };
 
       try {
         const [historyData, futureData] = await Promise.all([
@@ -112,7 +132,12 @@ export function useBinanceData() {
           return merged;
         }
 
+        // 仅在「确实拿到数据且本次请求仍是最新」时，才提交数据层上下文。
+        // 这样一次失败 / 被取代的取数不会改动 ctxRef / oldestRef / noMoreRef / allData——
+        // 失败的「信号库」跳转对「手动启动」所依赖的数据层是彻底的 no-op。
+        ctxRef.current = { symbol, interval };
         oldestRef.current = merged[0].time;
+        noMoreRef.current = false;
         setAllDataAndRef(merged);
         return merged;
       } catch (e: any) {

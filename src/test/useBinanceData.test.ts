@@ -131,7 +131,9 @@ describe("useBinanceData", () => {
   });
 
   it("handles API errors gracefully", async () => {
-    mockFetch.mockResolvedValueOnce({
+    // Persistent 429 on every attempt: fetchBatch retries with backoff, and once
+    // the bounded retries are exhausted the error must still surface as "API 429".
+    mockFetch.mockResolvedValue({
       ok: false,
       status: 429,
     });
@@ -143,6 +145,39 @@ describe("useBinanceData", () => {
     });
 
     expect(result.current.error).toBe("API 429");
+    expect(result.current.loading).toBe(false);
+  });
+
+  it("retries a transient 429 and recovers", async () => {
+    const now = 1_700_000_000_000;
+    const historyData = [[now - 60_000, "100", "110", "90", "105", "1000"]];
+
+    // Route by URL so the outcome never depends on history/future call ordering:
+    // the history endpoint is rate-limited once, then succeeds on the retry.
+    let historyCalls = 0;
+    mockFetch.mockImplementation((url: string) => {
+      if (typeof url === "string" && url.includes("startTime")) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve([]) }); // future batch
+      }
+      historyCalls += 1;
+      if (historyCalls === 1) {
+        return Promise.resolve({ ok: false, status: 429 }); // transient rate-limit
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve(historyData) }); // retry succeeds
+    });
+
+    const { result } = renderHook(() => useBinanceData());
+
+    // Assert on the resolved value of initLoad (not a re-render race): it returns the
+    // merged candles only if the retry recovered.
+    let data: unknown[] = [];
+    await act(async () => {
+      data = await result.current.initLoad("BTCUSDT", "1m", now);
+    });
+
+    expect(data).toHaveLength(1);
+    expect(historyCalls).toBe(2); // initial 429 + exactly one successful retry
+    expect(result.current.error).toBeNull();
     expect(result.current.loading).toBe(false);
   });
 
