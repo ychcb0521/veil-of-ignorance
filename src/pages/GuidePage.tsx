@@ -394,7 +394,7 @@ export default function GuidePage() {
 
           <section id="s2" className="scroll-mt-20">
             <SectionTitle accent="#0ECB81">2. 推荐使用流程</SectionTitle>
-            <P>如果只记一条路径，就按“筛掉坏结构 → 记录一笔决策 → 评价一笔结果 → 归类一类战役 / 错误 → 写入一条规则 → 用元监控验证”执行。</P>
+            <P>如果只记一条路径，就按“筛掉坏结构 → 记录一笔决策 → 评价一笔结果 → 看见预测误差与错误类型 → 归类战役 → 写入规则 → 用元监控验证”执行。</P>
 
             <section id="s2-1" className="scroll-mt-20">
               <SubTitle>2.1 交易训练闭环</SubTitle>
@@ -407,9 +407,9 @@ export default function GuidePage() {
                 <FlowArrow />
                 <FlowNode>下单、持仓、平仓；若左尾风险扩大，对冲单走独立的边界、必要性、把握性与双向预案快照</FlowNode>
                 <FlowArrow />
-                <FlowNode accent>平仓后评价：先把结果与决策质量分开，再摆进「结构 × 结果」四象限警惕“危险的盈利”；做证伪信号闭环、edge 源头的盈亏同源、过程纠结度与小机会仓位记账，回查失败剧本、置信度校准与具体期望值</FlowNode>
+                <FlowNode accent>平仓后评价：在居中评价弹窗里先完成「结构 × 结果」，再核对快照里写下的证伪信号、结构破坏信号与置信度是否被市场验证；事实模块负责对账，叙事模块只负责解释原因</FlowNode>
                 <FlowArrow />
-                <FlowNode>归类到交易战役或错题模式；重复错误写成规则，再到元监控里验证规则是否真的降低错误频次</FlowNode>
+                <FlowNode>归类到交易战役；错题集按“预测和结果之间的误差”自动汇总错误类型，重复出现的误差再写成规则，并到元监控里验证规则是否真的降低频次</FlowNode>
               </div>
               <Highlight>
                 闭环的关键不是“每次都下单”，而是每次都留下可学习样本：做了的单、没做的单、对冲的单、亏损的单、合规但亏的单，都要能被事后还原。
@@ -419,8 +419,8 @@ export default function GuidePage() {
             <section id="s2-2" className="scroll-mt-20">
               <SubTitle>2.2 每周复盘闭环</SubTitle>
               <ol className="list-decimal pl-6 text-[14px] text-foreground/90 space-y-1">
-                <li>打开错题集，优先处理“未评价”交易，先区分结果好坏与决策质量好坏。</li>
-                <li>查看按模式聚类的错误，也查看空仓观望、小机会仓位、盈亏比结构、edge 源头的盈亏同源、过程纠结度与胜率校准是否出现系统偏差。</li>
+                <li>打开错题集，优先处理“未评价”交易；评价完成后，重点看快照预测与最终结果之间的误差。</li>
+                <li>查看错误类型目录，也查看空仓观望、小机会仓位、踏空高盈亏比结构、edge 源头的盈亏同源、过程纠结度与胜率校准是否出现系统偏差。</li>
                 <li>对重复出现且造成亏损的模式做六步分析。</li>
                 <li>把结论写成下一次开仓前能判断的规则。</li>
                 <li>在元监控里检查：规则创建后，对应错误频次是否下降，期望值、置信度校准和战役级胜率是否改善。</li>
@@ -454,7 +454,7 @@ export default function GuidePage() {
                     <div className="text-[13px] font-semibold tracking-[0.01em] text-foreground">决策记录</div>
                   </div>
                   <div className="pt-3 text-[13px] leading-7 text-muted-foreground">
-                    完整的开仓快照（主力单按 <strong>源头 · 机会成本 → ① 盈亏比目标 → ② 胜率轴</strong> 三步：源头五选 + 机会成本三选；1R/2R/3R 目标五选 + R 回撤分母效应 + 目标空间三问 + 盈亏比滑条；决策三问、二元预测概率、最大亏损、心态自评、情绪标签、checklist 等）+ 平仓后强制评价 + 错题集自动归类 + 元监控统计 + 规则系统冷却。适合刻意训练同一类 setup、复盘高频错误模式、或对自己进行校准。
+                    完整的开仓快照（主力单按 <strong>源头 · 机会成本 → ① 盈亏比目标 → ② 胜率轴</strong> 三步：源头五选 + 机会成本三选；1R/2R/3R 目标五选 + R 回撤分母效应 + 目标空间三问 + 盈亏比滑条；决策三问、二元预测概率、最大亏损、心态自评、情绪标签、checklist 等）+ 平仓后强制评价 + 错题集自动归类 + 元监控统计 + 规则系统冷却。适合刻意训练同一类 setup、复盘高频错误类型、或对自己进行校准。
                   </div>
                 </div>
               </div>
@@ -469,10 +469,10 @@ export default function GuidePage() {
                   </thead>
                   <tbody>
                     <tr><td className="px-3 py-2 border-t border-border">点 Long / Short</td><td className="px-3 py-2 border-t border-border">立即成交，无弹窗</td><td className="px-3 py-2 border-t border-border">弹完整开仓快照</td></tr>
-                    <tr><td className="px-3 py-2 border-t border-border">平仓</td><td className="px-3 py-2 border-t border-border">静默成交</td><td className="px-3 py-2 border-t border-border">弹评价抽屉，不填完不能关</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border">平仓</td><td className="px-3 py-2 border-t border-border">静默成交</td><td className="px-3 py-2 border-t border-border">弹出居中评价弹窗，不填完不能关</td></tr>
                     <tr><td className="px-3 py-2 border-t border-border">交易战役归类</td><td className="px-3 py-2 border-t border-border">可走"裸 record 回填"事后归类</td><td className="px-3 py-2 border-t border-border">实时归类，事件链完整</td></tr>
                     <tr><td className="px-3 py-2 border-t border-border">错题集 / 元监控</td><td className="px-3 py-2 border-t border-border">不收录</td><td className="px-3 py-2 border-t border-border">全量收录、自动聚类、CI 与基线对比</td></tr>
-                    <tr><td className="px-3 py-2 border-t border-border">高频错误强制写规则</td><td className="px-3 py-2 border-t border-border">不触发</td><td className="px-3 py-2 border-t border-border">同一 pattern 30 天 ≥3 次自动弹窗</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border">高频错误强制写规则</td><td className="px-3 py-2 border-t border-border">不触发</td><td className="px-3 py-2 border-t border-border">同一错误类型 30 天 ≥3 次自动弹窗</td></tr>
                     <tr><td className="px-3 py-2 border-t border-border">致命单笔损失弹窗</td><td className="px-3 py-2 border-t border-border">不触发</td><td className="px-3 py-2 border-t border-border">单笔实亏 ≥2× 预设最大亏损时弹窗</td></tr>
                     <tr><td className="px-3 py-2 border-t border-border">心态 ≤2 / Lollapalooza 风险阻挡</td><td className="px-3 py-2 border-t border-border">不出现（无快照）</td><td className="px-3 py-2 border-t border-border">硬阻挡，不能下单</td></tr>
                   </tbody>
@@ -838,10 +838,11 @@ export default function GuidePage() {
 
             <section id="s3-3" className="scroll-mt-20">
               <SubTitle>3.4 平仓评价复盘</SubTitle>
-              <P>决策记录模式下，平仓会弹出<strong>评价抽屉</strong>，不填完不能关。第一步永远是把<strong>结果</strong>与<strong>决策质量</strong>分开：坏结果不自动等于坏决策，好结果也不自动等于好决策。下面几块把《不对称思考》的几条第一性原理落进这一步——它们都是<strong>软性项、不阻塞保存</strong>，但补全后历史统计会准得多。</P>
+              <P>决策记录模式下，平仓会打开一个与开仓快照同规格的<strong>居中评价弹窗</strong>，不完成评价不能离开。评价的重心不是重新讲一遍故事，而是把快照时的预测和最终实际结果对上：预设的证伪信号兑现没有，结构破坏信号出现没有，进场时钉下的置信度有没有被验证。</P>
+              <P>界面会把内容分成两类：<strong>事实模块</strong>负责核对“反”和“止”的假设，<strong>叙事模块</strong>才记录事后解释。先对账，再解释，避免复盘变成事后重新叙述。</P>
 
               <SubTitle>结构 × 结果四象限（警惕“危险的盈利”）</SubTitle>
-              <P>把上一步的两个判断交叉成一张 2×2：<strong>结构轴 = 当时的决策质量（对 / 错）</strong>，<strong>结果轴 = 这单赢 / 亏</strong>。一句话锚点：<strong>机会是运气，优秀是结构</strong>。</P>
+              <P><strong>结构 × 结果</strong>是平仓评价的核心判断，不再另设“按当时信息看，这笔决策质量如何”的独立问题。你只需要把这笔交易放进一张 2×2：<strong>结构轴 = 当时结构是否成立</strong>，<strong>结果轴 = 这单赢 / 亏</strong>。一句话锚点：<strong>机会是运气，优秀是结构</strong>。</P>
               <div className="overflow-x-auto">
                 <table className="w-full text-[11px] my-3 border border-border rounded overflow-hidden">
                   <thead className="bg-muted/50">
@@ -860,12 +861,12 @@ export default function GuidePage() {
                 </table>
               </div>
               <RedHighlight>
-                命中<strong>“危险的盈利”</strong>时，抽屉里会有红色警示图标。这是系统唯一要对你“喊”的一格——盈利会强化你刚刚犯的错，下次仓位更大、错得更狠。
+                命中<strong>“危险的盈利”</strong>时，评价弹窗会给出强警示。这是系统唯一要对你“喊”的一格：盈利会强化你刚刚犯的错，下次仓位更大、错得更狠。
               </RedHighlight>
-              <P className="mt-2">决策质量标成“混合”、或结果是两平 / 未入场时，不归入任何象限——系统会提示先判成“好”或“坏”才看得清。</P>
+              <P className="mt-2">如果结果是保本或未入场，不强行归入四象限；如果是赢或亏，就先选一格，再写叙事原因。</P>
 
               <SubTitle>证伪信号闭环</SubTitle>
-              <P>如果开仓快照里写过<strong>失效信号</strong>，评价抽屉会把它<strong>原样回显</strong>，再问一句：<strong>“这个信号在平仓前触发了吗？”</strong> 三选一——<strong>触发了，我及时反应了 / 触发了，但我反应晚了 / 没触发，我是主观平仓</strong>。这一步把“事前写的证伪点”和“事后真实的退出动作”对上，专治“写了止损条件却没执行”。可加备注，软性、可跳过。</P>
+              <P>如果开仓快照里写过<strong>失效信号</strong>，评价弹窗会把它<strong>原样回显</strong>，再问一句：<strong>“这个信号在平仓前触发了吗？”</strong> 三选一：<strong>触发了，我及时反应了 / 触发了，但我反应晚了 / 没触发，我是主观平仓</strong>。这一步把“事前写的证伪点”和“事后真实的退出动作”对上，专治“写了止损条件却没执行”。</P>
 
               <SubTitle>源头校准 · 盈亏同源</SubTitle>
               <P>这块承接快照里标的 <strong>edge / 源头</strong>：</P>
@@ -961,22 +962,41 @@ export default function GuidePage() {
 
           <section id="s4" className="scroll-mt-20 bg-accent/30 border border-border rounded-lg p-6">
             <SectionTitle accent="#B080FF">4. 复盘中心</SectionTitle>
-            <P>复盘中心负责把交易样本加工成能力。它的正确使用顺序是：先补评价，再打标签，再归类战役，再写规则，最后用元监控验证。</P>
+            <P>复盘中心负责把交易样本加工成能力。它的正确使用顺序是：先补评价，再看预测误差与错误类型，再归类战役，再写规则，最后用元监控验证。</P>
 
             <section id="s4-1" className="scroll-mt-20">
               <SubTitle>4.1 错题集</SubTitle>
-              <P>错题集按错误模式组织交易，而不是只按时间陈列交易。这里要解决的问题是：同一类错误是否在重复发生。</P>
+              <P>错题集不再以“多写几个标签”为中心，而是以<strong>快照预测与最终结果之间的误差</strong>为中心。它要回答的问题是：哪几类错误在重复发生，哪几类错误已经被守住，哪里还有你没有看见的盲区。</P>
               <KeyGrid>
-                <KeyCard title="按模式">
-                  默认视图。用于发现高频、近期、亏损严重的错误模式。
+                <KeyCard title="错误类型目录">
+                  默认视图。把已评价交易按可度量的错误类型汇总，重点看预测、证伪、结构、执行和心态行为之间的偏差。
                 </KeyCard>
-                <KeyCard title="按时间">
-                  用于追踪最近交易质量，适合补评价和逐笔检查执行。
+                <KeyCard title="0 计数">
+                  已复盘且可判断，但暂未命中某类错误时，该类型记为 0。这代表这条线暂时守住了，不是被隐藏。
                 </KeyCard>
-                <KeyCard title="标签字典">
-                  入口在错题集内部。用于维护错误大类和具体 pattern，避免复盘标签越来越散。
+                <KeyCard title="盲区">
+                  错题集最多保留一个盲区模块，用来手动补充系统暂时无法自动识别、但你明显反复踩到的东西。
                 </KeyCard>
               </KeyGrid>
+              <div className="overflow-x-auto">
+                <table className="w-full text-[11px] my-3 border border-border rounded overflow-hidden">
+                  <thead className="bg-muted/50">
+                    <tr>
+                      <th className="text-left px-3 py-2 font-medium text-foreground text-[10px]">显示状态</th>
+                      <th className="text-left px-3 py-2 font-medium text-foreground text-[10px]">含义</th>
+                      <th className="text-left px-3 py-2 font-medium text-foreground text-[10px]">应该怎么读</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr><td className="px-3 py-2 border-t border-border">k / N · x%</td><td className="px-3 py-2 border-t border-border">N 笔已评价交易可判断，其中 k 笔命中该错误类型</td><td className="px-3 py-2 border-t border-border">看频率、最近性和损失规模，决定是否写规则</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border">0 / N · 0%</td><td className="px-3 py-2 border-t border-border">N 笔已评价交易可判断，但暂未命中该错误类型</td><td className="px-3 py-2 border-t border-border">记为“守住”。0 是能力边界的一部分，不是空白</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border">不显示</td><td className="px-3 py-2 border-t border-border">样本缺少必要字段，或这类错误在当前样本中不可判断</td><td className="px-3 py-2 border-t border-border">不要把“不可判”读成“没有问题”</td></tr>
+                  </tbody>
+                </table>
+              </div>
+              <Highlight>
+                错题集的核心不是回看一千笔细节，而是把误差上卷成少数几条命脉：预测错在哪里、止损/证伪有没有执行、结构判断有没有偏、置信度是否校准、哪些盲区反复漏掉。
+              </Highlight>
             </section>
 
             <section id="s4-2" className="scroll-mt-20">
@@ -1005,9 +1025,9 @@ export default function GuidePage() {
 
             <section id="s4-3" className="scroll-mt-20">
               <SubTitle>4.3 元监控</SubTitle>
-              <P>元监控回答“系统是否真的让你变好”。不要只看漂亮图表，核心看规则创建后，对应错误模式是否在扣除自然学习曲线与 regression to mean 后仍然下降。</P>
+              <P>元监控回答“系统是否真的让你变好”。不要只看漂亮图表，核心看规则创建后，对应错误类型是否在扣除自然学习曲线与 regression to mean 后仍然下降。</P>
               <ul className="list-disc pl-6 text-[14px] text-foreground/90 space-y-1">
-                <li><strong>错误趋势</strong>：同一 pattern 的近期变化。</li>
+                <li><strong>错误趋势</strong>：同一错误类型的近期变化。</li>
                 <li><strong>规则有效性</strong>：规则上线后，对应错误是否减少，并与全局基线比较。</li>
                 <li><strong>置信区间</strong>：低样本下不把随机波动误读成进步。</li>
                 <li><strong>Calibration</strong>：比较开仓预测胜率与平仓结果，观察判断是否过度自信。</li>
@@ -1040,12 +1060,12 @@ export default function GuidePage() {
                   </thead>
                   <tbody>
                     <tr><td className="px-3 py-2 border-t border-border">六步深度分析</td><td className="px-3 py-2 border-t border-border">用户完成一笔交易的根因分析</td><td className="px-3 py-2 border-t border-border">Step 6 将结论转写为可检查规则，并可加入 checklist</td></tr>
-                    <tr><td className="px-3 py-2 border-t border-border">Critical 错误模式</td><td className="px-3 py-2 border-t border-border">同一 pattern 近期多次出现且平均亏损</td><td className="px-3 py-2 border-t border-border">系统强制弹出规则写入流程，避免重复错误继续裸奔</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border">Critical 错误类型</td><td className="px-3 py-2 border-t border-border">同一错误类型近期多次出现且平均亏损</td><td className="px-3 py-2 border-t border-border">系统强制弹出规则写入流程，避免重复错误继续裸奔</td></tr>
                     <tr><td className="px-3 py-2 border-t border-border">手动补充</td><td className="px-3 py-2 border-t border-border">用户发现某条原则需要前置到开仓前</td><td className="px-3 py-2 border-t border-border">在规则页直接写入，并决定是否启用、是否进入 checklist</td></tr>
                   </tbody>
                 </table>
               </div>
-              <P>生成原理是：先用错题集把单笔错误归入 pattern，再用复盘分析找出可操作的防错条件，最后把这个条件写成下次开仓前必须检查的规则。</P>
+              <P>生成原理是：先用错题集看见重复误差，再用复盘分析找出可操作的防错条件，最后把这个条件写成下次开仓前必须检查的规则。</P>
               <P>规则分四类：硬规则违反即阻断交易；核心规则必须进入 checklist；观察规则只记录不阻断；失效规则由元监控证明无效后归档。规则有权重，权重高的规则在 checklist 和元监控中优先展示。</P>
               <P>每条规则都有 0-5 的演化等级：0 是直觉，1 是已表述，2 是模式确认，3 是规则化，4 是算法化，5 是已证伪或已升级。升级必须依赖样本证据，不能靠当下感觉。</P>
               <P>规则修改属于“设计者-我”的工作。有进行中战役时，系统会锁定规则编辑，防止执行者-我在持仓压力下把规则重写成合理化借口。</P>
@@ -1068,10 +1088,10 @@ export default function GuidePage() {
             <SectionTitle accent="#F6465D">6. 数据边界与硬约束</SectionTitle>
             <P className="mb-3">这一节的每一条硬约束，本质上都在做同一件事：把<strong>下限</strong>钉死。它们不决定你能赚多少，只确保最坏情况发生时，你依然亏得起、活得下来——上限可以敞开，正是因为下限不会被击穿。<strong>别把它们读成“风控”或“防守”：恰恰相反，下限被焊死，才是你敢多下、敢让每个赢家跑得更肥的前提——纪律的终极目的是进攻，不是防守。</strong></P>
             <div className="space-y-3">
-              <P><strong>主力单与对冲单必须分开理解。</strong> 主力单评估方向与机会质量；对冲单评估风险管理。把两者混在一起，会污染 R 倍数、胜率和错误模式统计。</P>
+              <P><strong>主力单与对冲单必须分开理解。</strong> 主力单评估方向与机会质量；对冲单评估风险管理。把两者混在一起，会污染 R 倍数、胜率和错误类型统计。</P>
               <P><strong>最大亏损是 R 倍数的分母。</strong> 它表达的是本次愿意承受的最大错误成本，不应被事后修改成更好看的数字。</P>
               <P><strong>全仓是硬阻断。</strong> 系统训练阶段只允许逐仓。全仓会把单笔错误扩散到账户整体，违背“损失有界”的底层原则。</P>
-              <P><strong>平仓评价是硬阻断。</strong> 已平仓交易未完成评价、标签与归因前，不能开下一笔新仓。</P>
+              <P><strong>平仓评价是硬阻断。</strong> 已平仓交易未完成结构 × 结果、证伪核对与必要叙事前，不能开下一笔新仓。</P>
               <P><strong>低心态是硬阻断。</strong> 心态 ≤2 分时不能开仓，不提供“我知道但继续”的后门。</P>
               <P><strong>后见偏差必须隔离。</strong> 复现页在归因完成前隐藏后续走势，归因完成后才揭示行情路径。</P>
               <P><strong>历史回填不等于真实快照。</strong> 回填可以恢复交易结构，但无法恢复当时的理由、心态和风险认识。系统不会假装知道这些缺失信息。</P>
