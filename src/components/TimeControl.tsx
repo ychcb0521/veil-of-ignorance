@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import {
   Play, Pause, Square, Clock, Globe, Split, Lock, BookmarkX, Brain, Zap,
-  Database, ChevronDown, Upload, Plus, Trash2, X, ArrowRightCircle,
+  Database, ChevronDown, Upload, Plus, Trash2, X, ArrowRightCircle, CheckCircle2,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { formatUTC8 } from '@/lib/timeFormat';
@@ -75,6 +75,8 @@ export function TimeControl({
   const fileRef = useRef<HTMLInputElement>(null);
   const [signalLibOpen, setSignalLibOpen] = useState(false);
   const [signals, setSignals] = useState<TradeSignal[]>(() => loadSignals());
+  // 「上传 / 粘贴信号」窗口默认折叠成一个极小的隐形入口；仅当信号库为空时默认展开，方便首次导入。
+  const [importOpen, setImportOpen] = useState(() => signals.length === 0);
   const [importText, setImportText] = useState('');
   const [importErrors, setImportErrors] = useState<string[]>([]);
   const [query, setQuery] = useState('');
@@ -108,6 +110,19 @@ export function TimeControl({
     if (monthFilter) base = base.filter(s => signalMonthKey(s.timeMs) === monthFilter);
     return q ? base.filter(s => s.symbol.includes(q)) : base;
   }, [signals, query, monthFilter, sortMode]);
+
+  // 「被做过交易」的标的集合：已平仓记录(tradeHistory) ∪ 当前持仓(positionsMap)，
+  // 大写归一以匹配 sig.symbol。开仓即标记、平仓后仍保留——用于在信号库里识别已交易标的。
+  const tradedSymbols = useMemo(() => {
+    const set = new Set<string>();
+    for (const t of ctx.tradeHistory) {
+      if (t.symbol) set.add(t.symbol.toUpperCase());
+    }
+    for (const [sym, list] of Object.entries(ctx.positionsMap)) {
+      if (Array.isArray(list) && list.length > 0) set.add(sym.toUpperCase());
+    }
+    return set;
+  }, [ctx.tradeHistory, ctx.positionsMap]);
 
   const doImport = (text: string) => {
     const { signals: parsed, errors } = parseSignalText(text);
@@ -431,6 +446,20 @@ export function TimeControl({
       {/* 信号库折叠面板 */}
       {signalLibOpen && (
         <div className="mt-3 border-t border-border/60 pt-3">
+          {/* 极简「上传 / 粘贴信号」入口：默认近乎隐形，点开才展开导入窗口 */}
+          <button
+            onClick={() => setImportOpen(o => !o)}
+            title={importOpen ? '收起上传 / 粘贴信号' : '上传 / 粘贴信号'}
+            className={`flex items-center gap-1 text-[10px] transition-colors ${
+              importOpen ? 'text-primary' : 'text-muted-foreground/30 hover:text-muted-foreground'
+            }`}
+          >
+            <Upload className="h-3 w-3" />
+            <ChevronDown className={`h-2.5 w-2.5 transition-transform ${importOpen ? 'rotate-180' : ''}`} />
+          </button>
+
+          {importOpen && (
+          <div className="mt-2">
           <div className="mb-1.5 text-[10px] text-muted-foreground">
             上传 / 粘贴信号 · 支持「<span className="font-mono text-foreground">日期时间表头 + 多行标的</span>」或「<span className="font-mono text-foreground">标的, 时间, 兜底区</span>」· 时间按 UTC+8 · 标的自动补 USDT
           </div>
@@ -468,6 +497,8 @@ export function TimeControl({
               {importErrors.slice(0, 5).map((er, i) => <div key={i}>{er}</div>)}
               {importErrors.length > 5 && <div>…等 {importErrors.length} 行未识别</div>}
             </div>
+          )}
+          </div>
           )}
 
           <div className="mt-3">
@@ -519,7 +550,15 @@ export function TimeControl({
                       className="flex flex-1 items-center gap-2 overflow-hidden text-left"
                       title={`跳转到 ${sig.symbol} @ ${sig.timeLabel}`}
                     >
-                      <span className="w-24 shrink-0 font-mono text-[11px] font-medium text-foreground">{sig.symbol}</span>
+                      <span
+                        className="flex w-24 shrink-0 items-center gap-1 font-mono text-[11px] font-medium text-foreground"
+                        title={tradedSymbols.has(sig.symbol) ? '已交易过该标的' : undefined}
+                      >
+                        {tradedSymbols.has(sig.symbol) && (
+                          <CheckCircle2 className="h-3 w-3 shrink-0 text-[#0ecb81]" aria-label="已交易" />
+                        )}
+                        <span className="truncate">{sig.symbol}</span>
+                      </span>
                       <span className="shrink-0 font-mono text-[10px] text-muted-foreground">{sig.timeLabel}</span>
                       {sig.fallbackZone && (
                         <span className="truncate text-[10px] text-[#F0B90B]/90">兜底 {sig.fallbackZone}</span>
