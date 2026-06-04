@@ -42,14 +42,21 @@ describe('aggregateErrorTypes 基本行为', () => {
     expect(aggregateErrorTypes([])).toEqual([]);
   });
 
-  it('只返回 count>0 的类型（没犯过的错误不占版面）', () => {
-    // 一笔干净单：预测 40% 且亏损（不过度自信）、设了证伪信号、无其它信号 → 不产生任何错误类型
+  it('有样本可判但未命中 → 该类型记为 0', () => {
+    // 一笔干净单：预测 40% 且亏损（不过度自信）、设了证伪信号 → 对应可测类型记 0
     const clean = mk({
       pre_calibration_win_pct: 40,
       post_outcome: 'loss',
       pre_falsification_signal: '跌破前低',
     });
-    expect(aggregateErrorTypes([clean])).toEqual([]);
+    const types = aggregateErrorTypes([clean]);
+    const overconfident = byId(types, 'overconfident')!;
+    const noFalsification = byId(types, 'no_falsification_set')!;
+    expect(overconfident.count).toBe(0);
+    expect(overconfident.applicable).toBe(1);
+    expect(overconfident.rate).toBe(0);
+    expect(noFalsification.count).toBe(0);
+    expect(noFalsification.applicable).toBe(1);
   });
 
   it('过滤不可分析项：未复盘 / 对冲 / 太难 不计入', () => {
@@ -109,15 +116,15 @@ describe('各错误类型判定', () => {
     )!;
     expect(t.count).toBe(1);
     // 均值回归在震荡里是对的 → 不算
-    expect(byId(aggregateErrorTypes([mk({ pre_market_regime: 'ranging', pre_edge_source: 'mean_reversion' })]), 'chop_chase'))
-      .toBeUndefined();
+    expect(byId(aggregateErrorTypes([mk({ pre_market_regime: 'ranging', pre_edge_source: 'mean_reversion' })]), 'chop_chase')?.count)
+      .toBe(0);
   });
 
   it('带负面情绪入场：pre_pain_tags 含负向标签', () => {
     const t = byId(aggregateErrorTypes([mk({ pre_pain_tags: ['fomo', 'calm'] })]), 'negative_emotion_entry')!;
     expect(t.count).toBe(1);
     // 只有正向标签 → 不算
-    expect(byId(aggregateErrorTypes([mk({ pre_pain_tags: ['calm'] })]), 'negative_emotion_entry')).toBeUndefined();
+    expect(byId(aggregateErrorTypes([mk({ pre_pain_tags: ['calm'] })]), 'negative_emotion_entry')?.count).toBe(0);
   });
 
   it('煎熬交易：纠结度 ≤ 2', () => {

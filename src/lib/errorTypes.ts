@@ -378,7 +378,10 @@ function computeTrend(
 
 /**
  * 把每笔交易的错误信号聚合成「错误类型目录」。
- * 只返回 count > 0 的类型（没犯过的错误不占版面），按影响分从大到小排序。
+ * 返回所有「可测量」的类型（applicable > 0）：命中过的 count > 0；没命中但
+ * 有样本可判的记为 count 0（视图据此显示 0/N · 0%，即「守住了」）；完全没有
+ * 样本可判（applicable = 0）的类型省略。按影响分从大到小排序，count = 0 的
+ * 类型影响分为 0、自然沉到末尾。
  */
 export function aggregateErrorTypes(journals: TradeJournal[]): ErrorTypeAggregate[] {
   const base = journals.filter(isReviewedMainTrade);
@@ -386,8 +389,9 @@ export function aggregateErrorTypes(journals: TradeJournal[]): ErrorTypeAggregat
 
   for (const def of ERROR_TYPE_DEFS) {
     const applicable = base.filter(def.applicable);
+    // 没有任何样本可判定 → 无从记 0，省略；有样本但未命中 → 记为 count 0。
+    if (applicable.length === 0) continue;
     const hits = applicable.filter(def.detect);
-    if (hits.length === 0) continue;
 
     const instances: ErrorInstance[] = hits
       .map(j => ({

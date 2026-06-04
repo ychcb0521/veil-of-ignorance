@@ -84,7 +84,8 @@ function ErrorTypeCard({
   const [open, setOpen] = useState(false);
   const fam = ERROR_FAMILY_META[t.family];
   const ratePct = t.rate != null ? Math.round(t.rate * 100) : null;
-  const barPct = Math.max(6, Math.round((t.impactScore / maxImpact) * 100));
+  const isZero = t.count === 0;
+  const barPct = t.impactScore > 0 ? Math.max(6, Math.round((t.impactScore / maxImpact) * 100)) : 0;
 
   return (
     <div className="rounded-xl border border-border bg-card">
@@ -105,11 +106,16 @@ function ErrorTypeCard({
           <span className="truncate text-[13px] font-medium text-foreground">{t.title}</span>
         </div>
         <div className="flex shrink-0 items-center gap-3">
-          <span className="font-mono text-[12px] text-foreground">
+          <span className={`font-mono text-[12px] ${isZero ? 'text-[#0ECB81]' : 'text-foreground'}`}>
             {t.count}
             <span className="text-muted-foreground">/{t.applicable}</span>
             {ratePct != null && <span className="text-muted-foreground"> · {ratePct}%</span>}
           </span>
+          {isZero && (
+            <span className="rounded border border-[#0ECB81]/25 bg-[#0ECB81]/10 px-1.5 py-0.5 text-[10px] text-[#0ECB81]">
+              守住
+            </span>
+          )}
           <TrendPill trend={t.trend} />
         </div>
       </button>
@@ -121,7 +127,10 @@ function ErrorTypeCard({
           {t.totalCost != null && t.costUnit && <CostTag value={t.totalCost} unit={t.costUnit} />}
         </div>
         <div className="mt-2 h-1 w-full overflow-hidden rounded bg-muted">
-          <div className="h-full rounded bg-foreground/30" style={{ width: `${barPct}%` }} />
+          <div
+            className={`h-full rounded ${isZero ? 'bg-[#0ECB81]/55' : 'bg-foreground/30'}`}
+            style={{ width: `${barPct}%` }}
+          />
         </div>
       </div>
 
@@ -129,7 +138,11 @@ function ErrorTypeCard({
       {open && (
         <div className="space-y-1.5 border-t border-border/60 px-4 py-2.5">
           <div className="text-[10px] text-muted-foreground">证据 · {t.count} 笔（最近在前）</div>
-          {t.instances.map(inst => {
+          {isZero ? (
+            <div className="rounded-md border border-[#0ECB81]/25 bg-[#0ECB81]/5 px-3 py-2 text-[11px] text-[#0ECB81]">
+              已复盘样本中，这一类目前记为 0。
+            </div>
+          ) : t.instances.map(inst => {
             const j = inst.journal;
             const dateStr = new Date(j.pre_simulated_time).toLocaleDateString('zh-CN');
             return (
@@ -190,7 +203,7 @@ export function ErrorCatalogView({
   const gap = summary.overconfidenceGapPP;
   const gapTone =
     gap == null ? 'text-foreground' : gap > 8 ? 'text-[#F6465D]' : gap < -8 ? 'text-[#0ECB81]' : 'text-[#D89B00]';
-  const maxImpact = types.length ? types[0].impactScore : 1;
+  const maxImpact = Math.max(1, ...types.map(t => t.impactScore));
 
   return (
     <div className="space-y-4">
@@ -243,7 +256,7 @@ export function ErrorCatalogView({
       {/* 错误类型目录 */}
       {types.length === 0 ? (
         <div className="rounded-xl border border-dashed border-border px-4 py-8 text-center text-[12px] text-muted-foreground">
-          已复盘的交易里暂未归出可分类的错误类型 —— 继续记录与复盘，错误会自动归到这里。
+          暂无可测量的错误类型。继续完成快照与平仓评价后，这里会显示各类型的命中次数；未命中的类型记为 0。
         </div>
       ) : (
         <>
