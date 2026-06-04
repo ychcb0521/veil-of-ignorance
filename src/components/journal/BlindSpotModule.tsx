@@ -67,7 +67,7 @@ export function BlindSpotModule({
       {/* 列表 */}
       {items.length === 0 ? (
         <div className="rounded-xl border border-dashed border-border px-4 py-8 text-center text-[12px] text-muted-foreground">
-          还没有盲区记录。在左侧「误差」里看到「死法不在预案内」时，可一键加进来。
+          还没有盲区记录。在「错误类型」里展开「死法不在预案内」时，可一键加进来。
         </div>
       ) : (
         <div className="space-y-2">

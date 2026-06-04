@@ -1,10 +1,11 @@
 /**
  * /journal — 错题集。
  *
- * 唯一目的：看见错误、消除错误。所以只保留两件事：
- *  1) 误差：快照时「你的预测」与最终「实际结果」的逐笔对照（核心）。
+ * 唯一目的：看见错误、消除错误。单位是「错误类型」而非「一笔一笔的交易」：
+ *  1) 错误类型：把「快照预测 → 平仓结果」之间产生的误差（预测差值 / 反 / 止 /
+ *     结构 / 纪律 / 心态-行为）按类型归集，显示频率、趋势、代价（核心）。
  *  2) 盲区：系统算不出来、你没预想到的错误来源，手动记录。
- * 另加一个「待复盘」入口，因为误差数据正是从复盘里来的。
+ * 另加一个「待复盘」入口，因为错误数据正是从复盘里来的。
  */
 import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
@@ -14,7 +15,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { listAllJournalDataForUser, type BulkJournalData } from '@/lib/journalApi';
 import { useBlindSpots } from '@/lib/blindSpots';
-import { PredictionErrorView } from '@/components/journal/PredictionErrorView';
+import { ErrorCatalogView } from '@/components/journal/ErrorCatalogView';
 import { BlindSpotModule } from '@/components/journal/BlindSpotModule';
 import { UnreviewedJournalList } from '@/components/journal/UnreviewedJournalList';
 
@@ -91,14 +92,14 @@ export default function JournalListPage() {
             <div className="min-w-0">
               <h1 className="text-[14px] font-medium leading-tight">错题集</h1>
               <div className="mt-0.5 truncate text-[10px] text-muted-foreground">
-                看见预测与现实的误差，然后消除它
+                把错误按类型归集，看见它、消除它
               </div>
             </div>
           </div>
           <div className="flex-1" />
           <Tabs value={view} onValueChange={setView}>
             <TabsList className="h-8 bg-card">
-              <TabsTrigger value="errors" className="text-[12px] h-7 px-3">误差</TabsTrigger>
+              <TabsTrigger value="errors" className="text-[12px] h-7 px-3">错误类型</TabsTrigger>
               <TabsTrigger value="blindspots" className="text-[12px] h-7 px-3">
                 盲区{blindSpots.items.length > 0 ? ` ${blindSpots.items.length}` : ''}
               </TabsTrigger>
@@ -112,7 +113,7 @@ export default function JournalListPage() {
 
       <main className="max-w-[1000px] mx-auto px-6 py-5">
         {view === 'errors' && (
-          <PredictionErrorView journals={tradeJournals} onAddBlindSpot={handleAddBlindSpot} />
+          <ErrorCatalogView journals={tradeJournals} onAddBlindSpot={handleAddBlindSpot} />
         )}
 
         {view === 'blindspots' && (
