@@ -4,6 +4,9 @@ import {
   parseSignalText,
   mergeSignals,
   sortSignalsAlpha,
+  sortSignalsByTime,
+  signalMonthKey,
+  listSignalMonths,
   type TradeSignal,
 } from '@/lib/signalLibrary';
 
@@ -163,5 +166,59 @@ describe('sortSignalsAlpha', () => {
       'BTCUSDT@200',
       'ETHUSDT@50',
     ]);
+  });
+});
+
+describe('sortSignalsByTime', () => {
+  const mk = (id: string, symbol: string, timeMs: number): TradeSignal =>
+    ({ id, symbol, timeMs, timeLabel: 't', fallbackZone: '' });
+
+  it('defaults to newest-first (desc), tie-break by symbol asc', () => {
+    const list = [
+      mk('1', 'ETHUSDT', 100),
+      mk('2', 'BTCUSDT', 300),
+      mk('3', 'XRPUSDT', 200),
+      mk('4', 'AAVEUSDT', 300),
+    ];
+    expect(sortSignalsByTime(list).map(s => `${s.symbol}@${s.timeMs}`)).toEqual([
+      'AAVEUSDT@300',
+      'BTCUSDT@300',
+      'XRPUSDT@200',
+      'ETHUSDT@100',
+    ]);
+  });
+
+  it('asc puts earliest first', () => {
+    const list = [
+      mk('1', 'ETHUSDT', 100),
+      mk('2', 'BTCUSDT', 300),
+      mk('3', 'XRPUSDT', 200),
+    ];
+    expect(sortSignalsByTime(list, 'asc').map(s => s.timeMs)).toEqual([100, 200, 300]);
+  });
+});
+
+describe('signalMonthKey', () => {
+  it('groups by UTC+8 wall-clock month', () => {
+    expect(signalMonthKey(parseSignalTime('2026-04-29 18:27')!)).toBe('2026-04');
+    expect(signalMonthKey(parseSignalTime('2026-04-30 23:59')!)).toBe('2026-04');
+    // 5/1 02:00 UTC+8 是 4/30 18:00 UTC，但月份按 UTC+8 墙钟 → 2026-05
+    expect(signalMonthKey(parseSignalTime('2026-05-01 02:00')!)).toBe('2026-05');
+    expect(signalMonthKey(parseSignalTime('2026-01-01 00:00')!)).toBe('2026-01');
+  });
+});
+
+describe('listSignalMonths', () => {
+  it('returns distinct months, most recent first (cross-year)', () => {
+    const mk = (sym: string, t: string): TradeSignal => ({
+      id: sym, symbol: sym, timeMs: parseSignalTime(t)!, timeLabel: t, fallbackZone: '',
+    });
+    const months = listSignalMonths([
+      mk('A', '2026-03-10 10:00'),
+      mk('B', '2026-04-29 18:27'),
+      mk('C', '2026-04-01 09:00'),
+      mk('D', '2025-12-31 23:00'),
+    ]);
+    expect(months).toEqual(['2026-04', '2026-03', '2025-12']);
   });
 });

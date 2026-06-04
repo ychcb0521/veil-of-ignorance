@@ -7,7 +7,7 @@ import { toast } from 'sonner';
 import { formatUTC8 } from '@/lib/timeFormat';
 import {
   type TradeSignal,
-  loadSignals, saveSignals, parseSignalText, mergeSignals, sortSignalsAlpha,
+  loadSignals, saveSignals, parseSignalText, mergeSignals, sortSignalsAlpha, sortSignalsByTime, signalMonthKey,
 } from '@/lib/signalLibrary';
 import {
   Dialog,
@@ -78,14 +78,36 @@ export function TimeControl({
   const [importText, setImportText] = useState('');
   const [importErrors, setImportErrors] = useState<string[]>([]);
   const [query, setQuery] = useState('');
+  const [monthFilter, setMonthFilter] = useState(''); // '' = 全部月份
+  const [sortMode, setSortMode] = useState<'alpha' | 'time-desc' | 'time-asc'>('alpha');
 
   useEffect(() => { saveSignals(signals); }, [signals]);
 
+  // 信号里出现过的月份（按 UTC+8 墙钟），倒序 + 每月条数，喂给「按月份定位」下拉。
+  const monthOptions = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const s of signals) {
+      const k = signalMonthKey(s.timeMs);
+      counts.set(k, (counts.get(k) ?? 0) + 1);
+    }
+    return [...counts.entries()]
+      .sort((a, b) => b[0].localeCompare(a[0]))
+      .map(([month, count]) => ({ month, count }));
+  }, [signals]);
+
+  // 选中的月份若因删除 / 清空而消失，自动回到「全部月份」。
+  useEffect(() => {
+    if (monthFilter && !monthOptions.some(m => m.month === monthFilter)) setMonthFilter('');
+  }, [monthFilter, monthOptions]);
+
   const sortedFiltered = useMemo(() => {
     const q = query.trim().toUpperCase();
-    const base = sortSignalsAlpha(signals);
+    let base = sortMode === 'alpha'
+      ? sortSignalsAlpha(signals)
+      : sortSignalsByTime(signals, sortMode === 'time-asc' ? 'asc' : 'desc');
+    if (monthFilter) base = base.filter(s => signalMonthKey(s.timeMs) === monthFilter);
     return q ? base.filter(s => s.symbol.includes(q)) : base;
-  }, [signals, query]);
+  }, [signals, query, monthFilter, sortMode]);
 
   const doImport = (text: string) => {
     const { signals: parsed, errors } = parseSignalText(text);
@@ -449,16 +471,43 @@ export function TimeControl({
           )}
 
           <div className="mt-3">
-            <input
-              value={query}
-              onChange={e => setQuery(e.target.value)}
-              placeholder="筛选标的…"
-              className="input-dark mb-2 w-full text-[11px]"
-            />
+            <div className="mb-2 flex flex-wrap items-center gap-2">
+              {signals.length > 0 && (
+                <select
+                  value={sortMode}
+                  onChange={e => setSortMode(e.target.value as 'alpha' | 'time-desc' | 'time-asc')}
+                  title="排序方式"
+                  className="input-dark shrink-0 text-[11px]"
+                >
+                  <option value="alpha">标的 A→Z</option>
+                  <option value="time-desc">时间 新→旧</option>
+                  <option value="time-asc">时间 旧→新</option>
+                </select>
+              )}
+              {monthOptions.length > 0 && (
+                <select
+                  value={monthFilter}
+                  onChange={e => setMonthFilter(e.target.value)}
+                  title="按月份定位信号"
+                  className="input-dark shrink-0 font-mono text-[11px]"
+                >
+                  <option value="">全部月份（{signals.length}）</option>
+                  {monthOptions.map(({ month, count }) => (
+                    <option key={month} value={month}>{month}（{count}）</option>
+                  ))}
+                </select>
+              )}
+              <input
+                value={query}
+                onChange={e => setQuery(e.target.value)}
+                placeholder="筛选标的…"
+                className="input-dark min-w-[7rem] flex-1 text-[11px]"
+              />
+            </div>
             {sortedFiltered.length === 0 ? (
               <div className="rounded border border-dashed border-border/60 px-3 py-6 text-center text-[10px] text-muted-foreground">
                 {signals.length === 0
-                  ? '还没有信号。上传或粘贴「标的 + 时间 + 兜底区」后，这里会按字母顺序列出，点开即可越过手动输入、直接跳转盘面。'
+                  ? '还没有信号。上传或粘贴「标的 + 时间 + 兜底区」后，这里会列出（可按标的或时间排序），点开即可越过手动输入、直接跳转盘面。'
                   : '没有匹配的标的。'}
               </div>
             ) : (

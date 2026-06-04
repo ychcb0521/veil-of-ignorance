@@ -208,6 +208,33 @@ export function sortSignalsAlpha(list: TradeSignal[]): TradeSignal[] {
   });
 }
 
+/** 按时间排序：dir='desc' 最近在前（默认），'asc' 最早在前；同一时间按标的字母序稳定。 */
+export function sortSignalsByTime(list: TradeSignal[], dir: 'asc' | 'desc' = 'desc'): TradeSignal[] {
+  const k = dir === 'asc' ? 1 : -1;
+  return [...list].sort((a, b) => {
+    const t = (a.timeMs - b.timeMs) * k;
+    return t !== 0 ? t : a.symbol.localeCompare(b.symbol);
+  });
+}
+
+/**
+ * 取某条信号所属的「年-月」键（按 UTC+8 墙钟解释），如 `2026-04`。
+ * 用于信号库里「按月份定位」：与展示用的 timeLabel 同一时区语义。
+ */
+export function signalMonthKey(timeMs: number): string {
+  const d = new Date(timeMs + 8 * 3600_000);
+  const y = d.getUTCFullYear();
+  const mo = String(d.getUTCMonth() + 1).padStart(2, '0');
+  return `${y}-${mo}`;
+}
+
+/** 列出信号里出现过的所有月份（去重），按时间倒序——最近的月份排在最前。 */
+export function listSignalMonths(signals: TradeSignal[]): string[] {
+  const set = new Set<string>();
+  for (const s of signals) set.add(signalMonthKey(s.timeMs));
+  return [...set].sort((a, b) => b.localeCompare(a));
+}
+
 export function loadSignals(): TradeSignal[] {
   if (typeof window === 'undefined') return [];
   try {
