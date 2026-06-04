@@ -7,7 +7,10 @@
  * 充当一个轻量数据库；之后从按字母排序的下拉里点开某个标的，即可越过手动输入标的与
  * 时间，直接把时间机器跳到对应盘面。
  *
- * 解析刻意做得宽松：支持逗号 / 制表符 / 空白分隔，支持 `2024/01/15`、`HH:mm`、表头行。
+ * 解析刻意做得宽松，同时支持两种排版：
+ *   ① 区块格式（推荐）：一行「日期 时间」表头，其后多行「标的 [谢林兜底区] 兜底区」都继承该时间；
+ *   ② 行内格式：每行「标的, 时间, 兜底区」（逗号 / 制表符 / 空白分隔）。
+ * 另支持 `2024/01/15`、`HH:mm`、表头行、`#`//` 注释、`无` 日期标记、`补充` 前缀；标的自动补 USDT。
  * 时间语义与 TimeControl 里的手动输入完全一致——按 UTC+8 墙钟解释。
  */
 
@@ -28,6 +31,15 @@ export const SIGNAL_LIBRARY_STORAGE_KEY = 'veil.signalLibrary.v1';
 
 const HEADER_TIME_RE = /^(time|时间|日期|date)$/i;
 
+/** 「谢林兜底区」等兜底区标签：标签前是标的、标签后是价格/区间（两侧可无空格）。 */
+const FALLBACK_LABEL_RE = /谢林兜底区|兜底区|谢林/;
+/** 行首注释词（如「补充」「更新」），出现在标的前需剥离。 */
+const LEADING_ANNOT_RE = /^(补充|更新|新增)\s*/;
+/** 行首即完整日期时间 → 这是一条「日期表头」，其后多行标的都继承它（允许尾随「无」等注记）。 */
+const DATE_HEADER_RE = /^(\d{4}[-/]\d{1,2}[-/]\d{1,2}[ T]\d{1,2}:\d{2}(?::\d{2})?)/;
+/** 旧版同一行内联格式：`标的 <完整日期时间> 兜底区`（空白分隔）。 */
+const INLINE_DT_RE = /^(\S+)\s+(\d{4}[-/]\d{1,2}[-/]\d{1,2}[ T]\d{1,2}:\d{2}(?::\d{2})?)\s*([\s\S]*)$/;
+
 function makeId(): string {
   try {
     if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -46,70 +58,131 @@ function makeId(): string {
 export function parseSignalTime(raw: string): number | null {
   if (!raw) return null;
   const s = raw.trim().replace(/\//g, '-');
-  const m = /^(\d{4}-\d{2}-\d{2})[ T](\d{1,2}:\d{2}(?::\d{2})?)$/.exec(s);
+  const m = /^(\d{4})-(\d{1,2})-(\d{1,2})[ T](\d{1,2}):(\d{2})(?::(\d{2}))?$/.exec(s);
   if (!m) return null;
-  const datePart = m[1];
-  let timePart = m[2];
-  if (timePart.length <= 5) timePart += ':00'; // HH:mm -> HH:mm:00
-  // 补齐 H:mm -> 0H:mm 由 Date 解析容错处理；统一走 UTC 再减 8 小时得到 UTC+8 墙钟瞬时
-  const ms = new Date(`${datePart}T${timePart.padStart(8, '0')}Z`).getTime() - 8 * 3600_000;
+  const [, y, mo, d, h, mi, sec] = m;
+  // 月/日/时补零成合法 ISO，统一按 UTC 解析后减 8 小时 → 得到「UTC+8 墙钟」对应的瞬时。
+  const iso = `${y}-${mo.padStart(2, '0')}-${d.padStart(2, '0')}T${h.padStart(2, '0')}:${mi}:${(sec ?? '00').padStart(2, '0')}Z`;
+  const ms = new Date(iso).getTime() - 8 * 3600_000;
   return Number.isNaN(ms) ? null : ms;
 }
 
+/** 归一化标的：大写、去空格/斜杠；若无 USDT 计价后缀则补 USDT（与盘面永续交易对一致）。 */
 function normalizeSymbol(raw: string): string {
-  return raw.trim().toUpperCase().replace(/[\s/]/g, '');
+  const s = raw.trim().toUpperCase().replace(/[\s/]+/g, '');
+  if (!s) return '';
+  return s.endsWith('USDT') ? s : `${s}USDT`;
 }
 
 /**
- * 解析整段文本（多行）。每行一个信号：
- *   `标的, 时间, 兜底区`  或  `标的<制表符>时间<制表符>兜底区`  或  `标的 时间 兜底区`
- * 表头行、空行、`#` / `//` 注释行会被静默跳过；同一 标的@时间 自动去重。
+ * 解析「区块格式」里的一条标的行：`标的 [谢林兜底区] 兜底区`，
+ * 其中「谢林兜底区」是标签、可有可无、与两侧可无空格。
+ * 例：`naoris 0.107`、`tac 谢林兜底区 0.0127`、`M谢林兜底区 3.4（无）`、`补充on 谢林兜底区0.108`。
+ */
+function parseSymbolLine(line: string): { symbol: string; zone: string } {
+  const s = line.trim().replace(LEADING_ANNOT_RE, '');
+  const lm = FALLBACK_LABEL_RE.exec(s);
+  let symbolPart: string;
+  let zonePart: string;
+  if (lm) {
+    symbolPart = s.slice(0, lm.index);
+    zonePart = s.slice(lm.index + lm[0].length);
+  } else {
+    const m = /^(\S+)\s+([\s\S]*)$/.exec(s);
+    if (m) {
+      symbolPart = m[1];
+      zonePart = m[2];
+    } else {
+      symbolPart = s;
+      zonePart = '';
+    }
+  }
+  return { symbol: normalizeSymbol(symbolPart), zone: zonePart.trim() };
+}
+
+function pushSignal(
+  out: TradeSignal[],
+  seen: Set<string>,
+  symbol: string,
+  timeMs: number,
+  timeLabel: string,
+  fallbackZone: string,
+): void {
+  const key = `${symbol}@${timeMs}`;
+  if (seen.has(key)) return;
+  seen.add(key);
+  out.push({ id: makeId(), symbol, timeMs, timeLabel, fallbackZone });
+}
+
+/**
+ * 解析整段文本（多行），支持两种排版：
+ *   ① 区块格式：`2026-04-29 18:27` 这样的日期表头行设定「当前时间」，其后多行
+ *      `naoris 0.107` / `tac 谢林兜底区 0.0127` 等标的行都继承该时间；
+ *   ② 行内格式：`标的, 时间, 兜底区`（逗号 / 制表符 / 空白分隔，时间自带在行内）。
+ * 空行、`#`//` 注释、表头行、`无` 日期行会被静默跳过；同一 标的@时间 自动去重。
  */
 export function parseSignalText(text: string): { signals: TradeSignal[]; errors: string[] } {
   const errors: string[] = [];
   const out: TradeSignal[] = [];
   const seen = new Set<string>();
 
-  text.split(/\r?\n/).forEach((rawLine, idx) => {
-    const line = rawLine.trim();
-    if (!line || line.startsWith('#') || line.startsWith('//')) return;
+  // 「区块格式」核心：一条日期表头行设定当前时间，其后多行标的(+兜底区)都继承它。
+  let curTimeMs: number | null = null;
+  let curTimeLabel = '';
 
-    let parts = line.split(/[\t,]/).map(p => p.trim()).filter(Boolean);
-    if (parts.length < 2) {
-      // 空白分隔兜底：SYMBOL <date time> [zone...]
-      const m = /^(\S+)\s+(\d{4}[-/]\d{1,2}[-/]\d{1,2}[ T]\d{1,2}:\d{2}(?::\d{2})?)\s*(.*)$/.exec(line);
-      if (m) parts = [m[1], m[2], m[3].trim()].filter((p, i) => i < 2 || p.length > 0);
+  const lines = text.split(/\r?\n/);
+  for (let idx = 0; idx < lines.length; idx++) {
+    const line = lines[idx].trim();
+    if (!line || line.startsWith('#') || line.startsWith('//')) continue;
+
+    // 1) 日期表头：行首即完整日期时间（允许尾随「无 / （更新） / 空白」等注记）。
+    const dh = DATE_HEADER_RE.exec(line);
+    if (dh) {
+      const t = parseSignalTime(dh[1]);
+      if (t != null) {
+        curTimeMs = t;
+        curTimeLabel = dh[1].trim();
+        continue;
+      }
     }
-    if (parts.length < 2) {
-      errors.push(`第 ${idx + 1} 行无法解析：${line}`);
-      return;
+
+    // 2) 旧版自带时间格式：`标的, 时间, 兜底区`（逗号 / 制表符 / 全角逗号分隔）。
+    const parts = line.split(/[\t,，]/).map(p => p.trim()).filter(Boolean);
+    if (parts.length >= 2) {
+      if (HEADER_TIME_RE.test(parts[1])) continue; // 表头行静默跳过
+      const tOld = parseSignalTime(parts[1]);
+      if (tOld != null) {
+        const sym = normalizeSymbol(parts[0]);
+        if (sym) pushSignal(out, seen, sym, tOld, parts[1].trim(), parts.slice(2).join(' ').trim());
+        else errors.push(`第 ${idx + 1} 行缺少标的：${line}`);
+        continue;
+      }
     }
 
-    // 表头行静默跳过（第二列是 time/时间/日期/date）
-    if (HEADER_TIME_RE.test(parts[1])) return;
+    // 2b) 旧版空白分隔自带时间：`标的 <完整日期时间> 兜底区`。
+    const inline = INLINE_DT_RE.exec(line);
+    if (inline) {
+      const tInline = parseSignalTime(inline[2]);
+      if (tInline != null) {
+        const sym = normalizeSymbol(inline[1]);
+        if (sym) pushSignal(out, seen, sym, tInline, inline[2].trim(), inline[3].trim());
+        else errors.push(`第 ${idx + 1} 行缺少标的：${line}`);
+        continue;
+      }
+    }
 
-    const symbol = normalizeSymbol(parts[0]);
-    const timeMs = parseSignalTime(parts[1]);
+    // 3) 区块格式的标的行：时间继承自上方日期表头。
+    if (curTimeMs == null) {
+      errors.push(`第 ${idx + 1} 行无法解析（其上方缺少日期表头）：${line}`);
+      continue;
+    }
+    const { symbol, zone } = parseSymbolLine(line);
     if (!symbol) {
       errors.push(`第 ${idx + 1} 行缺少标的：${line}`);
-      return;
+      continue;
     }
-    if (timeMs == null) {
-      errors.push(`第 ${idx + 1} 行时间无法识别：${parts[1]}`);
-      return;
-    }
-
-    const key = `${symbol}@${timeMs}`;
-    if (seen.has(key)) return;
-    seen.add(key);
-    out.push({
-      id: makeId(),
-      symbol,
-      timeMs,
-      timeLabel: parts[1].trim(),
-      fallbackZone: parts.slice(2).join(' ').trim(),
-    });
-  });
+    pushSignal(out, seen, symbol, curTimeMs, curTimeLabel, zone);
+  }
 
   return { signals: out, errors };
 }

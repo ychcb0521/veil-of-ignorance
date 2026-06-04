@@ -20,6 +20,11 @@ describe('parseSignalTime', () => {
     expect(parseSignalTime('2024-01-15T16:00')).toBe(UTC8(2024, 1, 15, 16, 0, 0));
   });
 
+  it('pads single-digit month/day/hour into a valid instant', () => {
+    expect(parseSignalTime('2026-4-3 9:05')).toBe(UTC8(2026, 4, 3, 9, 5, 0));
+    expect(parseSignalTime('2026-04-29 18:27')).toBe(UTC8(2026, 4, 29, 18, 27, 0));
+  });
+
   it('returns null for unparseable input', () => {
     expect(parseSignalTime('not a time')).toBeNull();
     expect(parseSignalTime('')).toBeNull();
@@ -68,6 +73,65 @@ describe('parseSignalText', () => {
     expect(signals).toHaveLength(1);
     expect(signals[0].symbol).toBe('ETHUSDT');
     expect(errors).toHaveLength(1);
+  });
+});
+
+describe('parseSignalText - 区块格式（日期表头 + 继承时间）', () => {
+  it('日期表头下的多个标的继承同一时间，并自动补 USDT 后缀', () => {
+    const text = ['2026-04-29 18:27', 'naoris 0.107', 'Moodeng 0.0608'].join('\n');
+    const { signals, errors } = parseSignalText(text);
+    expect(errors).toHaveLength(0);
+    expect(signals).toHaveLength(2);
+    expect(signals.map(s => s.symbol)).toEqual(['NAORISUSDT', 'MOODENGUSDT']);
+    const t = UTC8(2026, 4, 29, 18, 27, 0);
+    expect(signals.every(s => s.timeMs === t)).toBe(true);
+    expect(signals[0].fallbackZone).toBe('0.107');
+  });
+
+  it('剥离「谢林兜底区」标签（无空格 / 标的紧贴 / 多空格变体），保留（无）注记', () => {
+    const text = [
+      '2026-04-20 21:40',
+      'scrt 谢林兜底区0.112',
+      'M谢林兜底区 3.4（无）',
+      'siren 谢林兜底区  1.12',
+    ].join('\n');
+    const { signals, errors } = parseSignalText(text);
+    expect(errors).toHaveLength(0);
+    expect(signals.map(s => `${s.symbol}=${s.fallbackZone}`)).toEqual([
+      'SCRTUSDT=0.112',
+      'MUSDT=3.4（无）',
+      'SIRENUSDT=1.12',
+    ]);
+  });
+
+  it('剥离「补充」前缀，时间仍继承自上方日期表头', () => {
+    const { signals, errors } = parseSignalText('2026-04-13 16:35\n补充on 谢林兜底区0.108');
+    expect(errors).toHaveLength(0);
+    expect(signals).toHaveLength(1);
+    expect(signals[0].symbol).toBe('ONUSDT');
+    expect(signals[0].timeMs).toBe(UTC8(2026, 4, 13, 16, 35, 0));
+    expect(signals[0].fallbackZone).toBe('0.108');
+  });
+
+  it('「无」日期行不产出信号也不报错', () => {
+    const text = ['2026-04-30 19:59无', '2026-04-29 18:27', 'naoris 0.107', '2026-04-27 15:13无'].join('\n');
+    const { signals, errors } = parseSignalText(text);
+    expect(errors).toHaveLength(0);
+    expect(signals).toHaveLength(1);
+    expect(signals[0].symbol).toBe('NAORISUSDT');
+  });
+
+  it('同一天不同时间是不同的快照锚点', () => {
+    const text = [
+      '2026-04-16 22:28',
+      'baby 谢林兜底区 0.159',
+      '2026-04-16 22:40',
+      'Based 谢林兜底区 0.18',
+    ].join('\n');
+    const { signals } = parseSignalText(text);
+    expect(signals).toHaveLength(2);
+    expect(signals[0].timeMs).toBe(UTC8(2026, 4, 16, 22, 28, 0));
+    expect(signals[1].timeMs).toBe(UTC8(2026, 4, 16, 22, 40, 0));
   });
 });
 

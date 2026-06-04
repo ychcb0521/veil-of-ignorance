@@ -91,7 +91,7 @@ export function TimeControl({
     const { signals: parsed, errors } = parseSignalText(text);
     setImportErrors(errors);
     if (parsed.length === 0) {
-      toast.error('没有可导入的信号', { description: errors[0] ?? '请按「标的, 时间, 兜底区」每行一条填写' });
+      toast.error('没有可导入的信号', { description: errors[0] ?? '请粘贴「日期时间表头 + 多行标的」或「标的, 时间, 兜底区」' });
       return;
     }
     const merged = mergeSignals(signals, parsed);
@@ -410,14 +410,14 @@ export function TimeControl({
       {signalLibOpen && (
         <div className="mt-3 border-t border-border/60 pt-3">
           <div className="mb-1.5 text-[10px] text-muted-foreground">
-            上传 / 粘贴信号 · 每行 <span className="font-mono text-foreground">标的, 时间, 兜底区</span> · 时间按 UTC+8（例：<span className="font-mono">BTCUSDT, 2024-01-15 16:00:00, 72000-74000</span>）
+            上传 / 粘贴信号 · 支持「<span className="font-mono text-foreground">日期时间表头 + 多行标的</span>」或「<span className="font-mono text-foreground">标的, 时间, 兜底区</span>」· 时间按 UTC+8 · 标的自动补 USDT
           </div>
           <textarea
             value={importText}
             onChange={e => setImportText(e.target.value)}
             rows={3}
             spellCheck={false}
-            placeholder={'BTCUSDT, 2024-01-15 16:00:00, 72000-74000\nETHUSDT, 2024-02-01 09:30, 2300'}
+            placeholder={'2026-04-29 18:27\nnaoris 0.107\nMoodeng 0.0608\n\n2026-04-28 21:00\ntac 谢林兜底区 0.0127'}
             className="input-dark w-full resize-y font-mono text-[11px]"
           />
           <div className="mt-1.5 flex flex-wrap items-center gap-2">
