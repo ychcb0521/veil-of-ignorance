@@ -1,9 +1,10 @@
 /**
- * 平仓评价抽屉 — 桌面 right Sheet / 移动 bottom Sheet
- * 注意：本抽屉一旦被打开（journal.post_reviewed_at == null）就不允许 dismiss。
+ * 平仓评价弹窗 — 桌面 centered Dialog / 移动 bottom Sheet
+ * 注意：本弹窗一旦被打开（journal.post_reviewed_at == null）就不允许 dismiss。
  *      用户必须填完字段并保存才能离开。这是为了堵住"静默关闭"漏洞。
  */
 import { useEffect, useMemo, useState } from 'react';
+import { Dialog, DialogContent } from '@/components/ui/dialog';
 import { Sheet, SheetContent } from '@/components/ui/sheet';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
@@ -221,16 +222,22 @@ export function PostTradeReviewSheet({
       </div>
     );
     return (
-      <Sheet open={isOpen} onOpenChange={onOpenChange}>
-        <SheetContent
-          side={isMobile ? 'bottom' : 'right'}
-          className={isMobile
-            ? 'h-[60vh] rounded-t-2xl p-0 bg-card border-t border-border text-foreground'
-            : 'w-[640px] sm:max-w-[640px] p-0 bg-card border-l border-border text-foreground'}
-        >
-          {placeholder}
-        </SheetContent>
-      </Sheet>
+      isMobile ? (
+        <Sheet open={isOpen} onOpenChange={onOpenChange}>
+          <SheetContent
+            side="bottom"
+            className="h-[60vh] rounded-t-2xl p-0 bg-card border-t border-border text-foreground"
+          >
+            {placeholder}
+          </SheetContent>
+        </Sheet>
+      ) : (
+        <Dialog open={isOpen} onOpenChange={onOpenChange}>
+          <DialogContent className="w-[calc(100vw-32px)] max-w-[860px] h-[60vh] p-0 bg-card border border-border text-foreground overflow-hidden">
+            {placeholder}
+          </DialogContent>
+        </Dialog>
+      )
     );
   }
 
@@ -1482,16 +1489,15 @@ export function PostTradeReviewSheet({
   }
 
   return (
-    <Sheet open={isOpen} onOpenChange={guardedOpenChange}>
-      <SheetContent
-        side="right"
-        className="w-[640px] sm:max-w-[640px] p-0 bg-background border-l border-border shadow-2xl flex flex-col"
+    <Dialog open={isOpen} onOpenChange={guardedOpenChange}>
+      <DialogContent
+        className="w-[calc(100vw-32px)] max-w-[860px] h-[92vh] overflow-hidden bg-background border border-border p-0 flex flex-col gap-0"
         onPointerDownOutside={unreviewedBlock ? e => e.preventDefault() : undefined}
         onEscapeKeyDown={unreviewedBlock ? e => e.preventDefault() : undefined}
         onInteractOutside={unreviewedBlock ? e => e.preventDefault() : undefined}
       >
         {body}
-      </SheetContent>
-    </Sheet>
+      </DialogContent>
+    </Dialog>
   );
 }
