@@ -438,7 +438,7 @@ export default function GuidePage() {
             <section id="s3-0" className="scroll-mt-20">
               <SubTitle>3.1 交易模式选择</SubTitle>
               <P>
-                时光机工具条右侧有一对开关：<strong>决策记录</strong> 与 <strong>直接交易</strong>。这是进入交易页后你做的第一个决定，也是整套系统里最大的一个分叉——它决定本次会话产生的数据是否进入复盘体系。系统默认 <strong>直接交易</strong>，需要训练时手动切换到决策记录。
+                交易页<strong>顶部 Header</strong>（标的选择器与右侧「复盘中心」之间）有一对开关：<strong>决策记录</strong> 与 <strong>直接交易</strong>。这是进入交易页后你做的第一个决定，也是整套系统里最大的一个分叉——它决定本次会话产生的数据是否进入复盘体系。系统默认 <strong>直接交易</strong>，需要训练时手动切换到决策记录。紧挨着它右侧那个极小、近乎隐形的符号，是另一组「<strong>同步 / 隔离</strong>」<strong>时间模式</strong>开关（点开才展开，详见 3.2）——那是切换币种时的时间推进方式，别和这里的交易模式混为一谈。
               </P>
               <div className="mt-4 grid gap-4 md:grid-cols-2">
                 <div className="flex h-full flex-col rounded-xl border border-border/70 bg-card/95 p-5 shadow-sm">
@@ -533,6 +533,30 @@ export default function GuidePage() {
               <Highlight>
                 时光机的价值不是“快进看答案”，而是在看不到未来的条件下，把同一类行情反复练到动作稳定。倍速只是提高训练密度，不能替代下单前的判断。
               </Highlight>
+
+              <SubTitle>多币种时间模式：同步 / 隔离</SubTitle>
+              <P>
+                在多个标的之间切换训练时，时光机有两种推进时间的方式。开关收在顶部 Header 那个极小、近乎隐形的符号里，<strong>点开才展开</strong>；系统默认 <strong>同步</strong>。
+              </P>
+              <div className="overflow-x-auto">
+                <table className="w-full text-[11px] my-3 border border-border rounded overflow-hidden">
+                  <thead className="bg-muted/50">
+                    <tr>
+                      <th className="text-left px-3 py-2 font-medium text-foreground text-[10px]">模式</th>
+                      <th className="text-left px-3 py-2 font-medium text-foreground text-[10px]">含义</th>
+                      <th className="text-left px-3 py-2 font-medium text-foreground text-[10px]">适用场景</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr><td className="px-3 py-2 border-t border-border">同步（默认）</td><td className="px-3 py-2 border-t border-border">所有标的共用同一个模拟时钟，切换币种时间不变</td><td className="px-3 py-2 border-t border-border">横向对比同一时刻的多个标的，维持统一盘面节奏</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border">隔离</td><td className="px-3 py-2 border-t border-border">每个标的有各自独立的时间轴与播放状态，互不影响</td><td className="px-3 py-2 border-t border-border">对单一标的反复回放，切走时不打断其它币种的推进</td></tr>
+                  </tbody>
+                </table>
+              </div>
+              <P>隔离模式下，时光机标题旁会显示<strong>「独立时间轴」</strong>角标，提醒你当前币种走的是自己的时钟。</P>
+              <RedHighlight>
+                <strong>切换守卫（下限优先）：</strong>手里还有持仓时<strong>禁止切换</strong>，必须先平仓；从隔离切回同步、但仍有币种在独立运行时，系统会弹窗列出运行中的币种，让你先跳转查看、或<strong>一键停止所有并切换</strong>。这是为了不让“切个模式”悄悄改变正在持仓 / 运行的标的的时间口径。
+              </RedHighlight>
             </section>
 
             <section id="s3-2" className="scroll-mt-20">
@@ -692,7 +716,7 @@ export default function GuidePage() {
                 </table>
               </div>
               <Highlight>
-                “太难”与“该开没开”不是一回事。“该开没开”是机会过去了才记录；“太难”是在开仓弹窗里当场作出的放弃决定。
+                “太难”与“未下单但全程观察”不是一回事。“未下单但全程观察”是你全程盯盘、当场没下单、事后才记录的中性快照——它既可能是“该开没开”（遗漏机会），也可能是“正确避开”（不该开），到底哪种留到复盘再判定；“太难”则是在开仓弹窗里当场作出的放弃决定。
               </Highlight>
 
               <SubTitle>对冲单快照：风险工具，不是方向下注</SubTitle>

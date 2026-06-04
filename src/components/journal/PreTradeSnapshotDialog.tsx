@@ -254,7 +254,7 @@ export function PreTradeSnapshotDialog({
         }
         toast.success('已记录开仓快照并提交订单');
       } else {
-        toast.success("已记录'该开没开'决策");
+        toast.success("已记录'未下单但全程观察'");
       }
       onOpenChange(false);
     } catch (e) {

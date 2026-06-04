@@ -957,7 +957,7 @@ export function PreTradeSnapshotForm({
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="min-w-0">
             <h2 className="text-[15px] font-semibold tracking-normal text-foreground">
-              {mode === 'no_entry' ? "记录'该开没开'决策" : '开仓快照'}
+              {mode === 'no_entry' ? '未下单但全程观察' : '开仓快照'}
             </h2>
             <p className="mt-1 text-[11px] text-muted-foreground font-mono">
               {fmtTime(simulatedTime)} · {symbol} · {directionLabel(direction)}
@@ -1706,7 +1706,7 @@ export function PreTradeSnapshotForm({
                   <div className={isTrade ? mainSectionHintCls : 'mt-0.5 text-[10px] text-muted-foreground'}>
                     {isTrade
                       ? '决策三问只问方向：正、反、止。胜率只用于事后校准。'
-                      : '记录这次“该开没开”的当时判断，后续复盘时用来校准遗漏机会。'}
+                      : '当场没下单、但全程观察了：记录此刻判断。复盘时再分这是“该开没开”（遗漏机会）还是“正确避开”（不该开），用来校准。'}
                   </div>
                 </div>
                 <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">

@@ -194,7 +194,7 @@ export type FiveStepWeakPoint = 'goal' | 'problem' | 'diagnosis' | 'design' | 'e
 export type InterventionType = 'principle' | 'rule' | 'sop' | 'awareness';
 
 // ============ Batch 24: Munger layer ============
-/** 'trade' = normal order (incl. the legacy "该开没开" decision record); 'no_trade' = Munger "too hard" skip. */
+/** 'trade' = normal order (incl. the 未下单但全程观察 / legacy 该开没开 decision record); 'no_trade' = Munger "too hard" skip. */
 export type JournalKind = 'trade' | 'no_trade';
 /** Result of checking the entry-time falsification signal against what actually happened before close. */
 export type ExitFalsificationStatus = 'triggered_reacted' | 'triggered_late' | 'not_triggered';

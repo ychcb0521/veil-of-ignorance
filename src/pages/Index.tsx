@@ -8,6 +8,7 @@ import { loadPersistedSimState } from "@/hooks/usePersistedState";
 import { usePersistedState, clearSimState } from "@/hooks/usePersistedState";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { TimeControl } from "@/components/TimeControl";
+import { SessionModeControls } from "@/components/SessionModeControls";
 import { CandlestickChart, type ChartImperativeApi } from "@/components/CandlestickChart";
 import { MultiChartLayout } from "@/components/MultiChartLayout";
 import { OrderBook } from "@/components/OrderBook";
@@ -1631,6 +1632,14 @@ const Index = () => {
             }}
           />
         </div>
+        <SessionModeControls
+          timeMode={timeMode}
+          onSetTimeMode={handleSetTimeMode}
+          onStopAllAndSwitchToSynced={handleStopAllAndSwitchToSynced}
+          totalPositionCount={totalPositionCount}
+          coinTimelines={coinTimelines}
+          onSymbolChange={handleSymbolChange}
+        />
         <div className="flex items-center gap-3 shrink-0">
           {loading && <span className="text-[10px] text-primary animate-pulse font-mono">加载历史数据...</span>}
           <JournalNavMenu
@@ -1658,12 +1667,8 @@ const Index = () => {
           onResume={handleResume}
           onStop={handleStop}
           onSetSpeed={handleSetSpeed}
-          onStopAllAndSwitchToSynced={handleStopAllAndSwitchToSynced}
           clockRef={clockRef}
           timeMode={timeMode}
-          onSetTimeMode={handleSetTimeMode}
-          totalPositionCount={totalPositionCount}
-          coinTimelines={coinTimelines}
           onSymbolChange={handleSymbolChange}
           onJumpToSignal={handleJumpToSignal}
           originTime={activeCoinState.originTime}
