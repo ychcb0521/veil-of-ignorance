@@ -1,7 +1,14 @@
-import { useState } from 'react';
-import { Play, Pause, Square, Clock, Globe, Split, Lock, BookmarkX, Brain, Zap } from 'lucide-react';
+import { useState, useEffect, useMemo, useRef } from 'react';
+import {
+  Play, Pause, Square, Clock, Globe, Split, Lock, BookmarkX, Brain, Zap,
+  Database, ChevronDown, Upload, Plus, Trash2, X, ArrowRightCircle,
+} from 'lucide-react';
 import { toast } from 'sonner';
 import { formatUTC8 } from '@/lib/timeFormat';
+import {
+  type TradeSignal,
+  loadSignals, saveSignals, parseSignalText, mergeSignals, sortSignalsAlpha,
+} from '@/lib/signalLibrary';
 import {
   Dialog,
   DialogContent,
@@ -33,6 +40,7 @@ interface Props {
   coinTimelines?: CoinTimelinesMap;
   onSymbolChange?: (symbol: string) => void;
   activeSymbol?: string;
+  onJumpToSignal?: (symbol: string, timeMs: number) => void;
 }
 
 const SPEED_OPTIONS = [1, 2, 5, 10, 30, 60, 180, 300, 900];
@@ -46,7 +54,7 @@ export function TimeControl({
   status, currentSimulatedTime, speed,
   onStart, onPause, onResume, onStop, onSetSpeed, onStopAllAndSwitchToSynced, clockRef,
   timeMode = 'synced', onSetTimeMode, totalPositionCount = 0,
-  originTime, coinTimelines = {}, onSymbolChange, activeSymbol,
+  originTime, coinTimelines = {}, onSymbolChange, activeSymbol, onJumpToSignal,
 }: Props) {
   const ctx = useTradingContext();
   const [noEntryOpen, setNoEntryOpen] = useState(false);
@@ -62,6 +70,59 @@ export function TimeControl({
   const [guardDialogOpen, setGuardDialogOpen] = useState(false);
   const [guardedCoins, setGuardedCoins] = useState<GuardedCoin[]>([]);
   const [isStoppingAll, setIsStoppingAll] = useState(false);
+
+  // ===== 信号库（Time Machine 旁的折叠接口）=====
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [signalLibOpen, setSignalLibOpen] = useState(false);
+  const [signals, setSignals] = useState<TradeSignal[]>(() => loadSignals());
+  const [importText, setImportText] = useState('');
+  const [importErrors, setImportErrors] = useState<string[]>([]);
+  const [query, setQuery] = useState('');
+
+  useEffect(() => { saveSignals(signals); }, [signals]);
+
+  const sortedFiltered = useMemo(() => {
+    const q = query.trim().toUpperCase();
+    const base = sortSignalsAlpha(signals);
+    return q ? base.filter(s => s.symbol.includes(q)) : base;
+  }, [signals, query]);
+
+  const doImport = (text: string) => {
+    const { signals: parsed, errors } = parseSignalText(text);
+    setImportErrors(errors);
+    if (parsed.length === 0) {
+      toast.error('没有可导入的信号', { description: errors[0] ?? '请按「标的, 时间, 兜底区」每行一条填写' });
+      return;
+    }
+    const merged = mergeSignals(signals, parsed);
+    const added = merged.length - signals.length;
+    setSignals(merged);
+    toast.success(`已导入 ${added} 条信号`, added < parsed.length ? { description: `${parsed.length - added} 条重复已跳过` } : undefined);
+  };
+
+  const handleImport = () => { doImport(importText); setImportText(''); };
+
+  const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => doImport(String(reader.result ?? ''));
+    reader.onerror = () => toast.error('文件读取失败');
+    reader.readAsText(file);
+    e.target.value = '';
+  };
+
+  const handleDeleteSignal = (id: string) => setSignals(prev => prev.filter(s => s.id !== id));
+  const handleClearSignals = () => { setSignals([]); setImportErrors([]); toast.message('信号库已清空'); };
+
+  const handleJumpSignal = (sig: TradeSignal) => {
+    if (!onJumpToSignal) {
+      onSymbolChange?.(sig.symbol);
+      return;
+    }
+    onJumpToSignal(sig.symbol, sig.timeMs);
+    setSignalLibOpen(false);
+  };
 
   const runningCoinEntries = Object.entries(coinTimelines)
     .filter(([, ct]) => ct.status === 'playing' || ct.status === 'paused')
@@ -262,6 +323,23 @@ export function TimeControl({
           )}
         </div>
 
+        <button
+          onClick={() => setSignalLibOpen(o => !o)}
+          title="信号库：上传「标的 + 时间 + 兜底区」，从下拉里点开标的即可直接跳转盘面"
+          className={`flex items-center gap-1.5 px-2 py-1 rounded border text-[10px] font-medium transition-colors ${
+            signalLibOpen
+              ? 'border-primary/40 bg-primary/15 text-primary'
+              : 'border-border/60 text-muted-foreground hover:text-foreground hover:bg-accent'
+          }`}
+        >
+          <Database className="w-3 h-3" />
+          信号库
+          {signals.length > 0 && (
+            <span className="ml-0.5 rounded-full bg-primary/20 px-1.5 font-mono text-[9px] text-primary">{signals.length}</span>
+          )}
+          <ChevronDown className={`w-3 h-3 transition-transform ${signalLibOpen ? 'rotate-180' : ''}`} />
+        </button>
+
         {status === 'stopped' && (
           <div className="flex items-center gap-2">
             <input
@@ -327,6 +405,98 @@ export function TimeControl({
           </>
         )}
       </div>
+
+      {/* 信号库折叠面板 */}
+      {signalLibOpen && (
+        <div className="mt-3 border-t border-border/60 pt-3">
+          <div className="mb-1.5 text-[10px] text-muted-foreground">
+            上传 / 粘贴信号 · 每行 <span className="font-mono text-foreground">标的, 时间, 兜底区</span> · 时间按 UTC+8（例：<span className="font-mono">BTCUSDT, 2024-01-15 16:00:00, 72000-74000</span>）
+          </div>
+          <textarea
+            value={importText}
+            onChange={e => setImportText(e.target.value)}
+            rows={3}
+            spellCheck={false}
+            placeholder={'BTCUSDT, 2024-01-15 16:00:00, 72000-74000\nETHUSDT, 2024-02-01 09:30, 2300'}
+            className="input-dark w-full resize-y font-mono text-[11px]"
+          />
+          <div className="mt-1.5 flex flex-wrap items-center gap-2">
+            <button onClick={handleImport} className="btn-long flex items-center gap-1 px-2 py-1 text-[10px] active:scale-[0.97]">
+              <Plus className="w-3 h-3" /> 导入
+            </button>
+            <button
+              onClick={() => fileRef.current?.click()}
+              className="flex items-center gap-1 rounded border border-border/60 px-2 py-1 text-[10px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+            >
+              <Upload className="w-3 h-3" /> 上传文件
+            </button>
+            <input ref={fileRef} type="file" accept=".csv,.txt,.tsv" className="hidden" onChange={handleFile} />
+            {signals.length > 0 && (
+              <button
+                onClick={handleClearSignals}
+                className="ml-auto flex items-center gap-1 rounded px-2 py-1 text-[10px] text-destructive transition-colors hover:bg-destructive/10"
+              >
+                <Trash2 className="w-3 h-3" /> 清空
+              </button>
+            )}
+          </div>
+
+          {importErrors.length > 0 && (
+            <div className="mt-1.5 space-y-0.5 text-[10px] text-destructive">
+              {importErrors.slice(0, 5).map((er, i) => <div key={i}>{er}</div>)}
+              {importErrors.length > 5 && <div>…等 {importErrors.length} 行未识别</div>}
+            </div>
+          )}
+
+          <div className="mt-3">
+            <input
+              value={query}
+              onChange={e => setQuery(e.target.value)}
+              placeholder="筛选标的…"
+              className="input-dark mb-2 w-full text-[11px]"
+            />
+            {sortedFiltered.length === 0 ? (
+              <div className="rounded border border-dashed border-border/60 px-3 py-6 text-center text-[10px] text-muted-foreground">
+                {signals.length === 0
+                  ? '还没有信号。上传或粘贴「标的 + 时间 + 兜底区」后，这里会按字母顺序列出，点开即可越过手动输入、直接跳转盘面。'
+                  : '没有匹配的标的。'}
+              </div>
+            ) : (
+              <div className="max-h-56 divide-y divide-border/40 overflow-y-auto rounded border border-border/60">
+                {sortedFiltered.map(sig => (
+                  <div key={sig.id} className="group flex items-center gap-2 px-2.5 py-1.5 hover:bg-accent/60">
+                    <button
+                      onClick={() => handleJumpSignal(sig)}
+                      className="flex flex-1 items-center gap-2 overflow-hidden text-left"
+                      title={`跳转到 ${sig.symbol} @ ${sig.timeLabel}`}
+                    >
+                      <span className="w-24 shrink-0 font-mono text-[11px] font-medium text-foreground">{sig.symbol}</span>
+                      <span className="shrink-0 font-mono text-[10px] text-muted-foreground">{sig.timeLabel}</span>
+                      {sig.fallbackZone && (
+                        <span className="truncate text-[10px] text-[#F0B90B]/90">兜底 {sig.fallbackZone}</span>
+                      )}
+                    </button>
+                    <button
+                      onClick={() => handleJumpSignal(sig)}
+                      className="shrink-0 text-primary transition-colors hover:text-primary/70"
+                      title="跳转盘面"
+                    >
+                      <ArrowRightCircle className="w-4 h-4" />
+                    </button>
+                    <button
+                      onClick={() => handleDeleteSignal(sig.id)}
+                      className="shrink-0 text-muted-foreground opacity-0 transition-opacity hover:text-destructive group-hover:opacity-100"
+                      title="删除该信号"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* No-entry snapshot dialog */}
       <PreTradeSnapshotDialog

@@ -1294,6 +1294,62 @@ const Index = () => {
     [activeSymbol, interval, initLoad, sim, timeMode, profile],
   );
 
+  // ===== Signal-library jump: switch symbol + start time machine atomically =====
+  // 从「信号库」下拉点开某标的时调用，越过手动输入标的/时间，直接定位盘面。
+  const handleJumpToSignal = useCallback(
+    async (symbol: string, timeMs: number) => {
+      const normalized = symbol.toUpperCase();
+      if (normalized !== activeSymbol) {
+        setActiveSymbol(normalized);
+        latestChartPriceRef.current = 0;
+        setPriceMap((prev) => {
+          if (!prev[normalized]) return prev;
+          const next = { ...prev };
+          delete next[normalized];
+          return next;
+        });
+        reset();
+      }
+      prevVisibleLenRef.current = 0;
+      cursorRef.current = 0;
+      gameLoopInitRef.current = false;
+
+      const data = await initLoad(normalized, interval, timeMs);
+      if (data.length === 0) {
+        toast.error("数据获取失败", { description: `无法加载 ${normalized} @ 该时间，请检查信号` });
+        return;
+      }
+      prevVisibleLenRef.current = 0;
+      gameLoopInitRef.current = false;
+
+      if (timeMode === "isolated") {
+        const now = Date.now();
+        setCoinTimelines((prev) => ({
+          ...prev,
+          [normalized]: {
+            status: "playing",
+            time: timeMs,
+            speed: 1,
+            historicalAnchorTime: timeMs,
+            realStartTime: now,
+            originTime: timeMs,
+          },
+        }));
+        if (sim.status === "stopped") sim.startSimulation(timeMs);
+      } else {
+        setSyncedOriginTime(timeMs);
+        sim.startSimulation(timeMs);
+      }
+      toast.success(`已跳转到 ${normalized}`, {
+        description: `时间机器已定位到信号时间 · 加载 ${data.length} 根K线`,
+      });
+    },
+    [
+      activeSymbol, interval, initLoad, sim, timeMode,
+      setActiveSymbol, setPriceMap, reset, setCoinTimelines, setSyncedOriginTime,
+    ],
+  );
+
   // ===== STATE GUARD: time mode switch =====
   const handleSetTimeMode = useCallback(
     (newMode: "synced" | "isolated") => {
@@ -1603,6 +1659,7 @@ const Index = () => {
           totalPositionCount={totalPositionCount}
           coinTimelines={coinTimelines}
           onSymbolChange={handleSymbolChange}
+          onJumpToSignal={handleJumpToSignal}
           originTime={activeCoinState.originTime}
           activeSymbol={activeSymbol}
         />
