@@ -45,8 +45,9 @@ const TOC: TocItem[] = [
     ],
   },
   { id: 's5', label: '5. 认知资产' },
-  { id: 's6', label: '6. 数据边界与硬约束' },
-  { id: 's7', label: '7. 判断标准' },
+  { id: 's6', label: '6. 执行力资产' },
+  { id: 's7', label: '7. 数据边界与硬约束' },
+  { id: 's8', label: '8. 判断标准' },
 ];
 
 const FLAT_TOC = TOC.flatMap(t => [t, ...(t.children ?? [])]);
@@ -1148,7 +1149,45 @@ export default function GuidePage() {
           </section>
 
           <section id="s6" className="scroll-mt-20">
-            <SectionTitle accent="#F6465D">6. 数据边界与硬约束</SectionTitle>
+            <SectionTitle accent="#0ECB81">6. 执行力资产</SectionTitle>
+            <P>认知资产记的是<strong>你知道什么</strong>，执行力资产记的是<strong>你做了多少</strong>——同一枚硬币的<strong>知</strong>与<strong>行</strong>两面。系统的底层方法是“用试错替代规划”，而试错的样本只能从“做”里长出来：不做，账户数字不会变红，你却永远停在原地。这笔看不见的机会成本，必须被系统看见、被定价、被累积成一份负债。</P>
+            <Highlight>
+              重复次数的加速器：<strong>做，比想更贵重。</strong>没去做带来的损失，必须被系统看见。
+            </Highlight>
+            <P>它和“封住下限”是同一件事的两面：正因为单笔亏损被锁死在受得起的数字里，你才<strong>敢多下、敢把该做的单真的做出来</strong>。执行力资产奖励的就是这个“敢做”，同时把“因为怕错而不做”的代价摆到台面上。</P>
+
+            <SubTitle>怎么计分</SubTitle>
+            <div className="overflow-x-auto">
+              <table className="w-full text-[11px] my-3 border border-border rounded overflow-hidden">
+                <thead className="bg-muted/50">
+                  <tr>
+                    <th className="text-left px-3 py-2 font-medium text-foreground text-[10px]">事件</th>
+                    <th className="text-left px-3 py-2 font-medium text-foreground text-[10px]">积分</th>
+                    <th className="text-left px-3 py-2 font-medium text-foreground text-[10px]">为什么是这个分</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr><td className="px-3 py-2 border-t border-border">决策记录模块交易</td><td className="px-3 py-2 border-t border-border font-mono text-[#0ECB81]">+999</td><td className="px-3 py-2 border-t border-border">留下一份完整可复盘样本：开仓快照 → 平仓评价 → 错题集 / 结构成熟度 / 规则 / 元监控</td></tr>
+                  <tr><td className="px-3 py-2 border-t border-border">直接交易</td><td className="px-3 py-2 border-t border-border font-mono text-[#D89B00]">+99</td><td className="px-3 py-2 border-t border-border">贴近真实执行节奏，但不沉淀可复盘样本</td></tr>
+                  <tr><td className="px-3 py-2 border-t border-border">自然日未交易</td><td className="px-3 py-2 border-t border-border font-mono text-[#F6465D]">-500</td><td className="px-3 py-2 border-t border-border">把“不做”的机会成本显性化；跟随模拟时间，按自然日结算</td></tr>
+                </tbody>
+              </table>
+            </div>
+            <P>决策记录交易是直接交易的 <strong>10.1×</strong> 权重——不是下单这个动作更重，而是它留下的样本会在系统里<strong>复利成能力</strong>，直接交易只换来执行手感。所以这页真正想拉高的不是总分，而是<strong>决策记录占比</strong>（决策记录交易 ÷ 全部计分交易）：占比越高，你的样本越可复盘。</P>
+
+            <SubTitle>什么算、什么不算</SubTitle>
+            <ul className="list-disc pl-6 text-[14px] text-foreground/90 space-y-1">
+              <li><strong>只记做多开仓。</strong>做空都是辅助对冲单，属于风险管理动作，不计执行力分。</li>
+              <li><strong>挂单成交才计分。</strong>挂出限价单只是意图，真正成交才算“做”——意图不计分，执行才计分。</li>
+              <li><strong>按自然日扣分。</strong>今天没有任何计分交易、到明天仍未交易，扣 500 分；日期跟随模拟时间，不是现实日期。</li>
+            </ul>
+            <RedHighlight>
+              执行力资产只衡量<strong>重复次数</strong>，不衡量对错——一笔亏损交易照样得分。质量交给复盘中心（错题集 / 结构成熟度 / 规则）去判，这里只负责让你“做得够多”。两条腿合起来才是目标：<strong>做得多 × 做得对</strong>。它专治的是另一种更隐蔽的失败——<strong>因为怕错而不做</strong>：在一个下限已被焊死的系统里，不做，往往才是最贵的那个错误。
+            </RedHighlight>
+          </section>
+
+          <section id="s7" className="scroll-mt-20">
+            <SectionTitle accent="#F6465D">7. 数据边界与硬约束</SectionTitle>
             <P className="mb-3">这一节的每一条硬约束，本质上都在做同一件事：把<strong>下限</strong>钉死。它们不决定你能赚多少，只确保最坏情况发生时，你依然亏得起、活得下来——上限可以敞开，正是因为下限不会被击穿。<strong>别把它们读成“风控”或“防守”：恰恰相反，下限被焊死，才是你敢多下、敢让每个赢家跑得更肥的前提——纪律的终极目的是进攻，不是防守。</strong></P>
             <div className="space-y-3">
               <P><strong>主力单与对冲单必须分开理解。</strong> 主力单评估方向与机会质量；对冲单评估风险管理。把两者混在一起，会污染 R 倍数、胜率和错误类型统计。</P>
@@ -1161,8 +1200,8 @@ export default function GuidePage() {
             </div>
           </section>
 
-          <section id="s7" className="scroll-mt-20">
-            <SectionTitle accent="#B080FF">7. 判断标准</SectionTitle>
+          <section id="s8" className="scroll-mt-20">
+            <SectionTitle accent="#B080FF">8. 判断标准</SectionTitle>
             <div className="bg-card border-l-4 border-[#F0B90B] rounded-r p-6 my-8">
               <p className="text-[24px] leading-relaxed text-foreground text-center">
                 “系统是否有效，不看你复盘写得多长，而看同一类错误是否越来越少。”

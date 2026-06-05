@@ -19,6 +19,7 @@ import type { EdgeSource, TradeJournal } from '@/types/journal';
 import { EDGE_SOURCE_LABELS } from '@/lib/edgeSource';
 import { analyzeTradeError, isAnalyzableTrade, type TradeErrorAnalysis } from '@/lib/predictionError';
 import { aggregateErrorTypes, type ErrorFamily } from '@/lib/errorTypes';
+import { classifyDeathDoor } from '@/lib/structureLoop';
 
 /** 成熟度档：混沌（还没建好）→ 成形中（误差在收敛）→ 成熟（可作过滤器）。 */
 export type MaturityTier = 'chaos' | 'forming' | 'mature';
@@ -236,20 +237,11 @@ export function aggregateStructureMaturity(journals: TradeJournal[]): StructureM
     let deathLate = 0;
     let deathBack = 0;
     for (const a of sorted) {
-      if ((a.journal.post_outcome ?? null) !== 'loss') continue;
-      switch (a.journal.exit_falsification_status) {
-        case 'triggered_reacted':
-          deathFront += 1;
-          break;
-        case 'triggered_late':
-          deathLate += 1;
-          break;
-        case 'not_triggered':
-          deathBack += 1;
-          break;
-        default:
-          break; // 未评价证伪状态 → 不计入分母
-      }
+      // 与单笔闭环判读共用同一死法门口径（未评价证伪状态 → null，不计入分母）。
+      const door = classifyDeathDoor(a.journal.post_outcome, a.journal.exit_falsification_status);
+      if (door === 'front') deathFront += 1;
+      else if (door === 'late') deathLate += 1;
+      else if (door === 'back') deathBack += 1;
     }
     const judgedDeaths = deathFront + deathLate + deathBack;
     const frontDoorDeathRate = judgedDeaths ? deathFront / judgedDeaths : null;

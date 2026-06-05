@@ -42,6 +42,7 @@ import {
   parseOddsStructureReviewText,
   type OddsStructureReview,
 } from '@/lib/oddsStructure';
+import { deriveLoopReadout, type LegTone } from '@/lib/structureLoop';
 import {
   finalizeJournalReview,
   updateJournalDeepAnalysis, stampJournalCloseRealTime, listJournals,
@@ -77,6 +78,14 @@ function EdgeSourceTooltipContent({ option }: { option: (typeof EDGE_SOURCE_OPTI
     </div>
   );
 }
+
+/** 闭环判读：腿色调 → 品牌色（库只给语义色调，视图在这里落到具体色值）。 */
+const LOOP_TONE_COLOR: Record<LegTone, string> = {
+  good: '#0ECB81',
+  warn: '#D89B00',
+  bad: '#F6465D',
+  muted: '#9AA0A6',
+};
 
 export function PostTradeReviewSheet({
   isOpen, onOpenChange, journal, tradeRecord, onReviewed, onAutoPause,
@@ -483,6 +492,53 @@ export function PostTradeReviewSheet({
   const pnlLabel = `${pnl > 0 ? '+' : ''}${pnl.toFixed(2)} USDT`;
   const rLabel = finalR != null ? `${finalR > 0 ? '+' : ''}${finalR.toFixed(2)}R` : '—R';
 
+  // ===== 结构闭环判读（看见 + 迭代）=====
+  // 你押的是一个闭环（正 / 反 / 止），不是一个 EV。把上面已核验的事实收口成一句裁决，
+  // 并在死法走「后门」（不在预案内）时给出迭代指令。仅主力方向单、有赢/亏结果时判读。
+  const loopReadoutApplicable = !isHedge && quadrantApplicable;
+  const hasFalsificationPlan = !!snapshotFalsification;
+  const loopReadout = deriveLoopReadout({
+    outcome,
+    quadrant,
+    oddsReview: oddsStructureReviewValue,
+    premortemReviewFilled: !!premortemReview.trim(),
+    falsificationStatus,
+    hasFalsificationPlan,
+  });
+  const loopVerdictMeta = (() => {
+    switch (loopReadout.verdict) {
+      case 'intact':
+        return {
+          accent: '#0ECB81',
+          title: outcome === 'win' ? '闭环完整 · 它怎么赢你清楚' : '闭环完整 · 真死时是按预案死的',
+          body:
+            outcome === 'win'
+              ? '正向预期兑现、事实可核验 —— 这是结构成熟度里的一个正向样本。'
+              : '它怎么赢你知道，它怎么死你也提前知道；这次亏损从「前门」走，闭环干净，纳入结构成熟。',
+        };
+      case 'lagged':
+        return {
+          accent: '#D89B00',
+          title: '闭环有迟滞 · 死法在预案内，但你反应晚了',
+          body: '信号触发了、你也看见了，却动手晚了 —— 这是执行差，不是结构差。把这个动作前置成机械触发（触发即离场），别留裁量空间。',
+        };
+      case 'gap':
+        return {
+          accent: '#F6465D',
+          title: '闭环有缺口 · 这次的死法不在你的预案里',
+          body: '你是主观平的，预设止损信号没被触发 —— 这是「后门死法」：结构里没建模的失败模式，最危险的尾部。胜率再准，后门死法过半也会把结构压回「成形中」、不给毕业。',
+        };
+      default:
+        return {
+          accent: '#9AA0A6',
+          title: hasFalsificationPlan ? '先核验「止」才能判读闭环' : '本笔没有预设止损信号',
+          body: hasFalsificationPlan
+            ? '上面的「止」还没选 —— 先回答证伪信号被触发没有，才能判这次死法走的是前门还是后门。'
+            : '开仓时没写下「什么信号出现就该离场」，所以无法判读死法门。下次开仓务必补「止」，否则每一次亏损都是后门死法。',
+        };
+    }
+  })();
+
   const body = (
     <>
       <div className="shrink-0 border-b border-border bg-gradient-to-b from-muted/30 to-background/95 px-6 py-4 pr-14">
@@ -779,9 +835,9 @@ export function PostTradeReviewSheet({
 
         <div className={`space-y-3 px-4 py-4 ${sectionCardClass}`}>
           <div>
-            <div className="text-[12px] font-semibold text-foreground">事实模块 · 只核验“反 / 止 / 置信”</div>
+            <div className="text-[12px] font-semibold text-foreground">事实模块 · 逐条核验闭环的腿（反 / 止 / 结构 / 置信）</div>
             <div className="mt-0.5 text-[10px] leading-relaxed text-muted-foreground">
-              先回答快照里的假设有没有被市场碰到。这里不写事后故事，只核验差值。
+              你押的是一个闭环。先逐条回答快照里的假设有没有被市场碰到 —— 这里只核验差值、不写事后故事；收口的闭环判读放到下面。
             </div>
           </div>
 
@@ -956,19 +1012,84 @@ export function PostTradeReviewSheet({
           )}
         </div>
 
-        <div className={`space-y-2 px-4 py-4 ${sectionCardClass}`}>
-          <div className="text-[12px] font-semibold text-foreground">叙事模块 · 解释与规律上卷</div>
-          <div className="text-[10px] leading-relaxed text-muted-foreground">
-            事实核验完成后才写解释。目标不是多看一遍这笔，而是把误差上卷成 L5 可追踪的路径。
-          </div>
-          <div className="grid grid-cols-5 gap-1.5 text-center">
-            {['反差', '止差', '结构差', '置信差', '执行差'].map(item => (
-              <div key={item} className="rounded-lg border border-border/60 bg-background/60 px-2 py-2 text-[10px] text-muted-foreground">
-                {item}
+        {loopReadoutApplicable && (
+          <div className={`space-y-3 px-4 py-4 ${sectionCardClass}`}>
+            <div>
+              <div className="text-[12px] font-semibold text-foreground">结构闭环判读 · 看见与迭代</div>
+              <div className="mt-0.5 text-[10px] leading-relaxed text-muted-foreground">
+                你押的是一个闭环（正 · 反 · 止），不是一个期望值。把上面核验过的事实收口成一句话 ——
+                它怎么赢你要清楚，它怎么死你也要提前知道；真死的时候，是按预案死的吗？
               </div>
-            ))}
+            </div>
+
+            <div className="grid gap-2 sm:grid-cols-3">
+              <div className="space-y-1.5 rounded-xl border border-border/60 bg-background/60 px-3 py-2.5">
+                <div className="flex items-center justify-between gap-2">
+                  <span className={factPillClass}>正</span>
+                  <span className="text-[10px] font-medium" style={{ color: LOOP_TONE_COLOR[loopReadout.zheng.tone] }}>
+                    {loopReadout.zheng.status}
+                  </span>
+                </div>
+                <div className="line-clamp-3 text-[10px] leading-relaxed text-muted-foreground">{snapshotWhyRight || '—'}</div>
+                {calibrationScore != null && (
+                  <div className="font-mono text-[10px] text-muted-foreground">
+                    Brier {calibrationScore.toFixed(2)} · 预测 {calibrationPct?.toFixed(0)}%
+                  </div>
+                )}
+              </div>
+
+              <div className="space-y-1.5 rounded-xl border border-border/60 bg-background/60 px-3 py-2.5">
+                <div className="flex items-center justify-between gap-2">
+                  <span className={factPillClass}>反</span>
+                  <span className="text-[10px] font-medium" style={{ color: LOOP_TONE_COLOR[loopReadout.fan.tone] }}>
+                    {loopReadout.fan.status}
+                  </span>
+                </div>
+                <div className="line-clamp-3 text-[10px] leading-relaxed text-muted-foreground">{snapshotPremortem || '—'}</div>
+              </div>
+
+              <div className="space-y-1.5 rounded-xl border border-border/60 bg-background/60 px-3 py-2.5">
+                <div className="flex items-center justify-between gap-2">
+                  <span className={factPillClass}>止</span>
+                  <span className="text-[10px] font-medium" style={{ color: LOOP_TONE_COLOR[loopReadout.zhi.tone] }}>
+                    {loopReadout.zhi.status}
+                  </span>
+                </div>
+                <div className="line-clamp-3 text-[10px] leading-relaxed text-muted-foreground">{snapshotFalsification || '—'}</div>
+              </div>
+            </div>
+
+            <div
+              className="flex gap-2 rounded-xl border px-3 py-2.5 text-[11px] leading-relaxed"
+              style={{
+                borderColor: `${loopVerdictMeta.accent}59`,
+                backgroundColor: `${loopVerdictMeta.accent}12`,
+                color: loopVerdictMeta.accent,
+              }}
+            >
+              {(loopReadout.verdict === 'gap' || loopReadout.verdict === 'lagged') && (
+                <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+              )}
+              <div className="space-y-0.5">
+                <div className="font-semibold">{loopVerdictMeta.title}</div>
+                <div className="text-muted-foreground">{loopVerdictMeta.body}</div>
+              </div>
+            </div>
+
+            {loopReadout.verdict === 'gap' && (
+              <div className="space-y-1.5 rounded-xl border border-[#F6465D]/35 bg-[#F6465D]/[0.05] px-3 py-3">
+                <div className="flex items-center gap-1.5 text-[11px] font-semibold text-[#F6465D]">
+                  <AlertTriangle className="h-3.5 w-3.5" /> 结构迭代 · 把这次的死法补进「止」预案
+                </div>
+                <p className="text-[10px] leading-relaxed text-muted-foreground">
+                  现在它从后门走。把刚才那个让你措手不及的信号，写成一条
+                  <span className="text-foreground">开仓前就能识别、触发即离场</span>
+                  的前置止损信号 —— 下次同样的死法就从前门走。落到下方「设计干预」并把干预类型设为「规则」，或在六步里写成新规则草稿、去复现页激活。
+                </p>
+              </div>
+            )}
           </div>
-        </div>
+        )}
 
         <div className={`space-y-3 px-4 py-4 ${sectionCardClass}`}>
           <div className="text-[12px] font-medium">结果复盘</div>
