@@ -38,9 +38,10 @@ const TOC: TocItem[] = [
     label: '4. 复盘中心',
     children: [
       { id: 's4-1', label: '4.1 错题集' },
-      { id: 's4-2', label: '4.2 交易战役' },
-      { id: 's4-3', label: '4.3 元监控' },
-      { id: 's4-4', label: '4.4 规则' },
+      { id: 's4-2', label: '4.2 结构成熟度' },
+      { id: 's4-3', label: '4.3 交易战役' },
+      { id: 's4-4', label: '4.4 元监控' },
+      { id: 's4-5', label: '4.5 规则' },
     ],
   },
   { id: 's5', label: '5. 认知资产' },
@@ -962,7 +963,7 @@ export default function GuidePage() {
 
           <section id="s4" className="scroll-mt-20 bg-accent/30 border border-border rounded-lg p-6">
             <SectionTitle accent="#B080FF">4. 复盘中心</SectionTitle>
-            <P>复盘中心负责把交易样本加工成能力。它的正确使用顺序是：先补评价，再看预测误差与错误类型，再归类战役，再写规则，最后用元监控验证。</P>
+            <P>复盘中心负责把交易样本加工成能力。它的正确使用顺序是：先补评价，再看预测误差与错误类型（并在结构成熟度里看哪些结构已经建好），再归类战役，再写规则，最后用元监控验证。</P>
 
             <section id="s4-1" className="scroll-mt-20">
               <SubTitle>4.1 错题集</SubTitle>
@@ -1000,7 +1001,69 @@ export default function GuidePage() {
             </section>
 
             <section id="s4-2" className="scroll-mt-20">
-              <SubTitle>4.2 交易战役</SubTitle>
+              <SubTitle>4.2 结构成熟度</SubTitle>
+              <P>结构成熟度和错题集用的是<strong>同一份预测误差</strong>，只是换一个切面：错题集按“错误<strong>种类</strong>”切，这里按“<strong>结构</strong>（edge 源头）”切。它回答的是另一个问题——<strong>哪一个结构我已经建好</strong>：误差低、而且稳，稳到可以拿它当过滤器去捕捉匹配的标的。</P>
+              <P><strong>你押的从来不是一个数，是一个结构闭环。</strong>期望值 <strong>E = P×b −(1−P)</strong> 只是这个闭环在“胜率×赔率”这一个切面上的标量投影——它必要，但只占一部分。结构本身是一套自洽的交易闭环：<strong>正</strong>（最大概率的正向走势预期）、<strong>反</strong>（与正向预期不符的判断准则）、<strong>止</strong>（什么具体信号一出就意味着正向预期开始失效）。这三件事，正是开仓快照里 <strong>正 / 反 / 止</strong> 三问在当时写下的。所以<strong>成熟 = 闭环成熟</strong>：不只胜率要校准，止损也要走“前门”。</P>
+              <P>这正是你给自己定的纪律的正面：<strong>纪律就是“建模”，从混沌中抽象出结构</strong>。它是错题集那条“错误 → 拦截规则”负向回路的<strong>正向镜像</strong>——负向回路把反复出现的错误升级成规则去<strong>封杀</strong>；这里把误差收敛的结构毕业成模型去<strong>复用</strong>。一个收口，一个放大。</P>
+              <KeyGrid>
+                <KeyCard title="按结构分桶">
+                  把已复盘、标了 edge 源头的真实主力单，按 edge 源头归集成一个个“结构”，各自算出独立的预测-误差画像。
+                </KeyCard>
+                <KeyCard title="成熟度阶梯">
+                  每个结构落在三档之一：混沌 → 成形中 → 成熟。判档只看校准误差是否低且稳，不看单笔盈亏。
+                </KeyCard>
+                <KeyCard title="成熟即过滤器">
+                  误差收敛到“低且稳”的结构毕业到「我的成熟结构」清单，连同它的模型模板（等什么 / 好位置 / 不做），当作下一步捕捉标的的清单。
+                </KeyCard>
+              </KeyGrid>
+              <P>每个结构卡片给出四个核心读数，外加误差趋势与止损死法门：</P>
+              <div className="overflow-x-auto">
+                <table className="w-full text-[11px] my-3 border border-border rounded overflow-hidden">
+                  <thead className="bg-muted/50">
+                    <tr>
+                      <th className="text-left px-3 py-2 font-medium text-foreground text-[10px]">读数</th>
+                      <th className="text-left px-3 py-2 font-medium text-foreground text-[10px]">含义</th>
+                      <th className="text-left px-3 py-2 font-medium text-foreground text-[10px]">怎么读</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr><td className="px-3 py-2 border-t border-border">预测 → 实际胜率</td><td className="px-3 py-2 border-t border-border">该结构的平均预测胜率，对照真实命中率</td><td className="px-3 py-2 border-t border-border">差距大 = 这个结构上你系统性高估或低估自己</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border">Brier（越低越准）</td><td className="px-3 py-2 border-t border-border">预测概率与结果之间的均方误差，0.25 是永远拍 50% 的基线</td><td className="px-3 py-2 border-t border-border">≤0.18 明显优于基线 = 准；&gt;0.25 = 还不如乱猜</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border">R 兑现缺口</td><td className="px-3 py-2 border-t border-border">事前定的目标 R 减去实际打到的 R</td><td className="px-3 py-2 border-t border-border">正且大 = 结构看对了却没拿住，盈亏比目标落空</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border">校准样本</td><td className="px-3 py-2 border-t border-border">进入胜率校准的样本数 / 该结构总下注数</td><td className="px-3 py-2 border-t border-border">不足 5 笔不判成熟——孤例不是数据</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border">误差趋势</td><td className="px-3 py-2 border-t border-border">新半段平均误差减旧半段（与错题集相反，这里误差越小越好）</td><td className="px-3 py-2 border-t border-border">收敛 = 在建模；发散 = 在退化；样本不足不下结论</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border">止 · 死法门</td><td className="px-3 py-2 border-t border-border">亏损是怎么死的：前门（按预案触发并止损）/ 晚门（看见了却晚动）/ 后门（死法不在预案内）</td><td className="px-3 py-2 border-t border-border">前门为主 = 失败模式已建模；后门多 = 没设防的尾巴</td></tr>
+                  </tbody>
+                </table>
+              </div>
+              <P>由这几项判出成熟度档位：</P>
+              <div className="overflow-x-auto">
+                <table className="w-full text-[11px] my-3 border border-border rounded overflow-hidden">
+                  <thead className="bg-muted/50">
+                    <tr>
+                      <th className="text-left px-3 py-2 font-medium text-foreground text-[10px]">档位</th>
+                      <th className="text-left px-3 py-2 font-medium text-foreground text-[10px]">判定</th>
+                      <th className="text-left px-3 py-2 font-medium text-foreground text-[10px]">含义</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr><td className="px-3 py-2 border-t border-border">成熟 · 可作过滤器</td><td className="px-3 py-2 border-t border-border">≥5 校准样本，Brier ≤0.18，误差不发散，且亏损多从前门走（后门死法不过半）</td><td className="px-3 py-2 border-t border-border">已建好的、可复用的模型，毕业进「我的成熟结构」</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border">成形中</td><td className="px-3 py-2 border-t border-border">Brier 在基线附近（≤0.25），或误差正在收敛</td><td className="px-3 py-2 border-t border-border">有苗头但还没稳，继续攒同结构样本</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border">混沌</td><td className="px-3 py-2 border-t border-border">样本不足，或误差大且不在收敛</td><td className="px-3 py-2 border-t border-border">结构还没建好，先别当它是 edge</td></tr>
+                  </tbody>
+                </table>
+              </div>
+              <P>每个结构卡片还会标出它<strong>最常栽的那一类错</strong>（直接复用错题集的错误类型，scope 到本结构），告诉你这个结构现在卡在哪——是过度自信、还是止损没执行、还是结构判错。点开卡片能看到押注该结构的每一笔证据，最近在前。</P>
+              <Highlight>
+                成熟结构清单是错题集的镜像产物：错题集把反复的错误收成规则去封杀，结构成熟度把收敛的结构毕业成过滤器去复用。<strong>误差做得够多，你才看得清哪个结构已经建好</strong>——把它挑出来，去过滤、去捕捉匹配它的标的。这就是从混沌里抽象出结构的全过程。
+              </Highlight>
+              <RedHighlight>
+                毕业有两道闸，少一道都不算成熟。其一，<strong>发散就退档</strong>：一个结构即使曾经成熟，一旦近期误差重新发散，就自动跌回成形中或混沌，成熟清单只保留当下仍然低且稳的那些。其二，<strong>后门死法一票压档</strong>：只要亏损里“死法不在预案内”过半，胜率再准也不给毕业——一个靠运气赢、却每次都死在预案外的结构，是没建模的尾巴，迟早爆。真正的成熟是：<strong>它怎么赢你知道，它怎么死你也提前知道，而且真死的时候你是按预案死的。</strong>
+              </RedHighlight>
+            </section>
+
+            <section id="s4-3" className="scroll-mt-20">
+              <SubTitle>4.3 交易战役</SubTitle>
               <P>战役是比单笔交易更高一层的复盘单位。一次战役由同一标的、同一主方向、明确开始结束、多个 leg 组成。</P>
               <div className="overflow-x-auto">
                 <table className="w-full text-[11px] my-3 border border-border rounded overflow-hidden">
@@ -1023,8 +1086,8 @@ export default function GuidePage() {
               <P>互关账户可以打开彼此的战役详情，并留下带可信度权重的留言评价。外部校验只评价“按当时信息看是否是好决策”，不是用后续走势倒推对错。</P>
             </section>
 
-            <section id="s4-3" className="scroll-mt-20">
-              <SubTitle>4.3 元监控</SubTitle>
+            <section id="s4-4" className="scroll-mt-20">
+              <SubTitle>4.4 元监控</SubTitle>
               <P>元监控回答“系统是否真的让你变好”。不要只看漂亮图表，核心看规则创建后，对应错误类型是否在扣除自然学习曲线与 regression to mean 后仍然下降。</P>
               <ul className="list-disc pl-6 text-[14px] text-foreground/90 space-y-1">
                 <li><strong>错误趋势</strong>：同一错误类型的近期变化。</li>
@@ -1045,8 +1108,8 @@ export default function GuidePage() {
               </RedHighlight>
             </section>
 
-            <section id="s4-4" className="scroll-mt-20">
-              <SubTitle>4.4 规则</SubTitle>
+            <section id="s4-5" className="scroll-mt-20">
+              <SubTitle>4.5 规则</SubTitle>
               <P>规则不是独立写出来的口号，而是复盘系统的输出。它来自已发生的交易错误，并被写回下一次开仓前的 checklist。</P>
               <P>规则生成有三条来源：</P>
               <div className="overflow-x-auto">

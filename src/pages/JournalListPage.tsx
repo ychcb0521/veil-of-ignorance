@@ -16,10 +16,11 @@ import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { listAllJournalDataForUser, type BulkJournalData } from '@/lib/journalApi';
 import { useBlindSpots } from '@/lib/blindSpots';
 import { ErrorCatalogView } from '@/components/journal/ErrorCatalogView';
+import { StructureMaturityView } from '@/components/journal/StructureMaturityView';
 import { BlindSpotModule } from '@/components/journal/BlindSpotModule';
 import { UnreviewedJournalList } from '@/components/journal/UnreviewedJournalList';
 
-type View = 'errors' | 'blindspots' | 'unreviewed';
+type View = 'errors' | 'structures' | 'blindspots' | 'unreviewed';
 
 export default function JournalListPage() {
   const { user } = useAuth();
@@ -100,6 +101,7 @@ export default function JournalListPage() {
           <Tabs value={view} onValueChange={setView}>
             <TabsList className="h-8 bg-card">
               <TabsTrigger value="errors" className="text-[12px] h-7 px-3">错误类型</TabsTrigger>
+              <TabsTrigger value="structures" className="text-[12px] h-7 px-3">结构成熟度</TabsTrigger>
               <TabsTrigger value="blindspots" className="text-[12px] h-7 px-3">
                 盲区{blindSpots.items.length > 0 ? ` ${blindSpots.items.length}` : ''}
               </TabsTrigger>
@@ -115,6 +117,8 @@ export default function JournalListPage() {
         {view === 'errors' && (
           <ErrorCatalogView journals={tradeJournals} onAddBlindSpot={handleAddBlindSpot} />
         )}
+
+        {view === 'structures' && <StructureMaturityView journals={tradeJournals} />}
 
         {view === 'blindspots' && (
           <BlindSpotModule items={blindSpots.items} onAdd={blindSpots.add} onRemove={blindSpots.remove} />
