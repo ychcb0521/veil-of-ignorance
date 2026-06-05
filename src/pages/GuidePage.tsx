@@ -288,7 +288,7 @@ export default function GuidePage() {
           <p className="mt-2 text-[26px] md:text-[34px] font-bold leading-tight tracking-tight text-[#F0B90B]">
             纪律的终极目的是进攻，不是防守！
           </p>
-          <p className="mx-auto mt-3 max-w-2xl text-[12px] leading-relaxed text-muted-foreground">
+          <p className="mt-3 text-[12px] leading-relaxed text-muted-foreground">
             别把这里的硬约束读成“风控”或“防守”。下限被焊死，正是你<strong className="text-foreground">敢多下、敢把仓位放到该放的位置、敢让每个赢家一路跑得更肥</strong>的前提。
           </p>
         </div>
