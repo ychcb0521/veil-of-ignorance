@@ -113,6 +113,15 @@ function removeUserScopedStorage(userId: string, key: string): void {
   }
 }
 
+/**
+ * 读取该用户的成交流水（本地存储，同步、零网络）。
+ * 错题集的「路径主动权」切面用它把每笔复盘 journal 接回 entry/exit/openTime/closeTime/
+ * exit_method —— 那些字段只在 TradeRecord 上，journal 里没有。
+ */
+export function listTradeHistoryForUser(userId: string): TradeRecord[] {
+  return readUserScopedStorage<TradeRecord[]>(userId, 'trade_history', []);
+}
+
 function deepClone<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
 }

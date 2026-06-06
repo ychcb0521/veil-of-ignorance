@@ -90,13 +90,19 @@ describe('成熟度判档', () => {
   });
 
   it('混沌：自信却屡屡落空（Brier 高）→ chaos，且主导误差为过度自信', () => {
+    // 给齐结构止损 + 可证伪信号，隔离出「过度自信」这一维度（否则会同时命中「无证伪点开仓」）。
+    const F: Partial<TradeJournal> = {
+      pre_stop_quality: 'structural',
+      pre_falsification_signal: '跌破前低',
+      pre_planned_stop_loss: 1,
+    };
     const r = aggregateStructureMaturity([
-      bet('breakout', 80, 'win', 1),
-      bet('breakout', 80, 'loss', 2),
-      bet('breakout', 80, 'win', 3),
-      bet('breakout', 80, 'loss', 4),
-      bet('breakout', 80, 'win', 5),
-      bet('breakout', 80, 'loss', 6),
+      bet('breakout', 80, 'win', 1, F),
+      bet('breakout', 80, 'loss', 2, F),
+      bet('breakout', 80, 'win', 3, F),
+      bet('breakout', 80, 'loss', 4, F),
+      bet('breakout', 80, 'win', 5, F),
+      bet('breakout', 80, 'loss', 6, F),
     ]);
     const t = byEdge(r, 'breakout')!;
     expect(t.brier).toBeGreaterThan(0.25);

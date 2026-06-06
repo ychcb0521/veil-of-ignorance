@@ -13,20 +13,24 @@ import { toast } from 'sonner';
 import { BackButton } from '@/components/journal/BackButton';
 import { useAuth } from '@/contexts/AuthContext';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { listAllJournalDataForUser, type BulkJournalData } from '@/lib/journalApi';
+import { listAllJournalDataForUser, listTradeHistoryForUser, type BulkJournalData } from '@/lib/journalApi';
+import type { TradeRecord } from '@/types/trading';
 import { useBlindSpots } from '@/lib/blindSpots';
 import { ErrorCatalogView } from '@/components/journal/ErrorCatalogView';
+import { FalsificationQualityView } from '@/components/journal/FalsificationQualityView';
+import { TradePathView } from '@/components/journal/TradePathView';
 import { StructureMaturityView } from '@/components/journal/StructureMaturityView';
 import { BlindSpotModule } from '@/components/journal/BlindSpotModule';
 import { UnreviewedJournalList } from '@/components/journal/UnreviewedJournalList';
 
-type View = 'errors' | 'structures' | 'blindspots' | 'unreviewed';
+type View = 'errors' | 'falsification' | 'path' | 'structures' | 'blindspots' | 'unreviewed';
 
 export default function JournalListPage() {
   const { user } = useAuth();
   const [params, setParams] = useSearchParams();
 
   const [data, setData] = useState<BulkJournalData | null>(null);
+  const [records, setRecords] = useState<TradeRecord[]>([]);
   const [loading, setLoading] = useState(true);
 
   const blindSpots = useBlindSpots(user?.id);
@@ -38,6 +42,8 @@ export default function JournalListPage() {
     (async () => {
       setLoading(true);
       try {
+        // 成交记录在 localStorage（即时），供「路径主动权」切面 join。
+        setRecords(listTradeHistoryForUser(user.id));
         const all = await listAllJournalDataForUser(user.id);
         // 数据量极大时只看最近 90 天，避免一次性拉全量。
         if (all.journals.length > 1000) {
@@ -101,6 +107,8 @@ export default function JournalListPage() {
           <Tabs value={view} onValueChange={setView}>
             <TabsList className="h-8 bg-card">
               <TabsTrigger value="errors" className="text-[12px] h-7 px-3">错误类型</TabsTrigger>
+              <TabsTrigger value="falsification" className="text-[12px] h-7 px-3">证伪质量</TabsTrigger>
+              <TabsTrigger value="path" className="text-[12px] h-7 px-3">主动权</TabsTrigger>
               <TabsTrigger value="structures" className="text-[12px] h-7 px-3">结构成熟度</TabsTrigger>
               <TabsTrigger value="blindspots" className="text-[12px] h-7 px-3">
                 盲区{blindSpots.items.length > 0 ? ` ${blindSpots.items.length}` : ''}
@@ -117,6 +125,10 @@ export default function JournalListPage() {
         {view === 'errors' && (
           <ErrorCatalogView journals={tradeJournals} onAddBlindSpot={handleAddBlindSpot} />
         )}
+
+        {view === 'falsification' && <FalsificationQualityView journals={tradeJournals} />}
+
+        {view === 'path' && <TradePathView journals={tradeJournals} records={records} />}
 
         {view === 'structures' && <StructureMaturityView journals={tradeJournals} />}
 

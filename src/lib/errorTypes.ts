@@ -11,6 +11,7 @@
  */
 import type { PainTag, TradeJournal } from '@/types/journal';
 import { EMOTION_TAG_META, PAIN_TAG_LABELS } from '@/types/journal';
+import { deriveFalsificationQuality } from '@/lib/falsificationQuality';
 
 /** 错误维度（与「快照 → 平仓」之间产生的错误种类对应）。 */
 export type ErrorFamily =
@@ -121,6 +122,20 @@ const isWinLoss = (j: TradeJournal): boolean =>
 const lossR = (j: TradeJournal): number | null =>
   j.post_outcome === 'loss' && typeof j.post_r_multiple === 'number' ? j.post_r_multiple : null;
 
+/** 逆势：趋势市里做均值回归（抄底 / 抄顶）= 逆着趋势。 */
+const isCounterTrend = (j: TradeJournal): boolean =>
+  j.pre_edge_source === 'mean_reversion' && j.pre_market_regime === 'trending';
+
+/** 把开仓快照折算成证伪质量评级（与「无证伪点开仓」错误同源）。 */
+const falsificationGradeOf = (j: TradeJournal) =>
+  deriveFalsificationQuality({
+    stopQuality: j.pre_stop_quality ?? null,
+    hasFalsificationSignal: !!(j.pre_falsification_signal && j.pre_falsification_signal.trim()),
+    hasFalsificationDeadline: false,
+    hasPlannedStop: j.pre_planned_stop_loss != null,
+    counterTrend: isCounterTrend(j),
+  }).grade;
+
 const MISSED_LABEL: Record<string, string> = {
   missed: '厚结构空仓踏空',
   under_sized: '该重没重',
@@ -217,6 +232,19 @@ const ERROR_TYPE_DEFS: ErrorTypeDef[] = [
     detect: j => !(j.pre_falsification_signal && j.pre_falsification_signal.trim()),
     detail: () => '入场时未设定证伪 / 退出信号',
   },
+  {
+    id: 'no_falsification_point',
+    family: 'falsification',
+    title: '无证伪点开仓 · 证伪贫瘠',
+    definition: '开仓即没有明确证伪点（止损非结构性，且没写下可证伪信号）—— 注定靠移动止损续命，是后门死法的母错误',
+    severity: 45,
+    costUnit: 'R',
+    applicable: isV2Snapshot,
+    detect: j => falsificationGradeOf(j) === 'poor',
+    detail: j =>
+      `证伪贫瘠 · 注定走后门${isCounterTrend(j) ? ' · 逆势' : ''}${j.post_outcome === 'loss' ? ` · ${fmtR(j.post_r_multiple)}` : ''}`,
+    cost: lossR,
+  },
   // ===== 结构 =====
   {
     id: 'late_stage_chase',
@@ -254,6 +282,19 @@ const ERROR_TYPE_DEFS: ErrorTypeDef[] = [
       && (j.pre_edge_source === 'trend_follow' || j.pre_edge_source === 'breakout'),
     detail: j =>
       `震荡市用${j.pre_edge_source === 'breakout' ? '突破' : '顺势'}打法${j.post_outcome === 'loss' ? ` · ${fmtR(j.post_r_multiple)}` : ''}`,
+    cost: lossR,
+  },
+  {
+    id: 'counter_trend_dip',
+    family: 'structure',
+    title: '逆势抄底',
+    definition: '趋势市里做均值回归（抄底 / 抄顶）—— 容错率低、没有明确证伪点，等于把选择权和主动权交了出去',
+    severity: 30,
+    costUnit: 'R',
+    applicable: j => j.pre_market_regime != null && j.pre_edge_source != null,
+    detect: isCounterTrend,
+    detail: j =>
+      `趋势市逆势均值回归${j.post_outcome === 'loss' ? ` · ${fmtR(j.post_r_multiple)}` : ''}`,
     cost: lossR,
   },
   // ===== 纪律 =====
