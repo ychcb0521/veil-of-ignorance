@@ -534,31 +534,43 @@ export function PostTradeReviewSheet({
       case 'intact':
         return {
           accent: '#0ECB81',
-          title: outcome === 'win' ? '闭环完整 · 它怎么赢你清楚' : '闭环完整 · 真死时是按预案死的',
+          badge: '闭环完整',
+          title: outcome === 'win' ? '这笔可以作为正向样本' : '亏损受控，按预案结束',
           body:
             outcome === 'win'
-              ? '正向预期兑现、事实可核验 —— 这是结构成熟度里的一个正向样本。'
-              : '它怎么赢你知道，它怎么死你也提前知道；这次亏损从「前门」走，闭环干净，纳入结构成熟。',
+              ? '正向预期兑现，并且事实可以核验。它会进入结构成熟度的正向样本。'
+              : '真亏的时候从「前门」走：该触发的信号触发了，你也按预案执行了。',
+          next: outcome === 'win'
+            ? '保存评价即可；后续在结构成熟度里看同类结构是否持续兑现。'
+            : '不要因为一笔合规亏损改规则；只记录它是这个 edge 的正常成本。',
         };
       case 'lagged':
         return {
           accent: '#D89B00',
-          title: '闭环有迟滞 · 死法在预案内，但你反应晚了',
-          body: '信号触发了、你也看见了，却动手晚了 —— 这是执行差，不是结构差。把这个动作前置成机械触发（触发即离场），别留裁量空间。',
+          badge: '执行迟滞',
+          title: '信号在预案内，但动作晚了',
+          body: '这不是结构没写对，而是看见以后没有立刻执行。问题在动作延迟，不在事后解释。',
+          next: '把这条信号改成机械动作：触发即离场、触发即拆仓，别留“再看看”的空间。',
         };
       case 'gap':
         return {
           accent: '#F6465D',
-          title: '闭环有缺口 · 这次的死法不在你的预案里',
-          body: '你是主观平的，预设止损信号没被触发 —— 这是「后门死法」：结构里没建模的失败模式，最危险的尾部。胜率再准，后门死法过半也会把结构压回「成形中」、不给毕业。',
+          badge: '预案缺口',
+          title: '这次的死法不在预案里',
+          body: '亏损不是按预设信号结束，而是从你没提前定义的地方钻出来。这个尾巴必须被前置。',
+          next: '把这次让你措手不及的盘面事实，写成下次开仓前的“止”：什么信号出现就离场。',
         };
       default:
         return {
           accent: '#9AA0A6',
-          title: hasFalsificationPlan ? '先核验「止」才能判读闭环' : '本笔没有预设止损信号',
+          badge: '待判读',
+          title: hasFalsificationPlan ? '先完成上方“止”的选择' : '本笔无法判死法门',
           body: hasFalsificationPlan
-            ? '上面的「止」还没选 —— 先回答证伪信号被触发没有，才能判这次死法走的是前门还是后门。'
-            : '开仓时没写下「什么信号出现就该离场」，所以无法判读死法门。下次开仓务必补「止」，否则每一次亏损都是后门死法。',
+            ? '上面的证伪状态还没选完，所以系统还不知道这次亏损是前门、晚门还是后门。'
+            : '开仓时没有写下可验证的“止”，这里不会把事后事实伪装成事前计划。',
+          next: hasFalsificationPlan
+            ? '回到上方“止”模块，先选证伪信号是否触发，再看这里的结论。'
+            : '先保存本次离场事实；下一次同类开仓，必须提前写清“什么信号出现就离场”。',
         };
     }
   })();
@@ -1026,11 +1038,15 @@ export function PostTradeReviewSheet({
 
         {loopReadoutApplicable && (
           <div className={`space-y-3 px-4 py-4 ${sectionCardClass}`}>
-            <div>
-              <div className="text-[12px] font-semibold text-foreground">结构闭环判读 · 看见与迭代</div>
-              <div className="mt-0.5 text-[10px] leading-relaxed text-muted-foreground">
-                你押的是一个闭环（正 · 反 · 止），不是一个期望值。把上面核验过的事实收口成一句话 ——
-                它怎么赢你要清楚，它怎么死你也要提前知道；真死的时候，是按预案死的吗？
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <div className="text-[12px] font-semibold text-foreground">结构闭环判读</div>
+                <div className="mt-0.5 text-[10px] leading-relaxed text-muted-foreground">
+                  这里不用再填写。系统把上方事实自动收口：看正、看反、看止，然后给出下一步。
+                </div>
+              </div>
+              <div className="rounded-full border border-border/70 bg-background px-2.5 py-1 text-[10px] text-muted-foreground">
+                读法：先看结论，再看下一步
               </div>
             </div>
 
@@ -1042,6 +1058,7 @@ export function PostTradeReviewSheet({
                     {loopReadout.zheng.status}
                   </span>
                 </div>
+                <div className="text-[10px] font-medium text-muted-foreground">看预期有没有兑现</div>
                 <div className="line-clamp-3 text-[10px] leading-relaxed text-muted-foreground">{snapshotWhyRight || '—'}</div>
                 {calibrationScore != null && (
                   <div className="font-mono text-[10px] text-muted-foreground">
@@ -1057,6 +1074,7 @@ export function PostTradeReviewSheet({
                     {loopReadout.fan.status}
                   </span>
                 </div>
+                <div className="text-[10px] font-medium text-muted-foreground">看亏损剧本有没有命中</div>
                 <div className="line-clamp-3 text-[10px] leading-relaxed text-muted-foreground">{snapshotPremortem || '—'}</div>
               </div>
 
@@ -1067,39 +1085,39 @@ export function PostTradeReviewSheet({
                     {loopReadout.zhi.status}
                   </span>
                 </div>
+                <div className="text-[10px] font-medium text-muted-foreground">看真亏时是不是按预案死</div>
                 <div className="line-clamp-3 text-[10px] leading-relaxed text-muted-foreground">{snapshotFalsification || '—'}</div>
               </div>
             </div>
 
             <div
-              className="flex gap-2 rounded-xl border px-3 py-2.5 text-[11px] leading-relaxed"
+              className="rounded-xl border px-3 py-3 text-[11px] leading-relaxed"
               style={{
                 borderColor: `${loopVerdictMeta.accent}59`,
                 backgroundColor: `${loopVerdictMeta.accent}12`,
-                color: loopVerdictMeta.accent,
               }}
             >
-              {(loopReadout.verdict === 'gap' || loopReadout.verdict === 'lagged') && (
-                <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-              )}
-              <div className="space-y-0.5">
-                <div className="font-semibold">{loopVerdictMeta.title}</div>
-                <div className="text-muted-foreground">{loopVerdictMeta.body}</div>
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <div className="min-w-0 space-y-1">
+                  <div className="flex items-center gap-2">
+                    {(loopReadout.verdict === 'gap' || loopReadout.verdict === 'lagged') && (
+                      <AlertTriangle className="h-3.5 w-3.5 shrink-0" style={{ color: loopVerdictMeta.accent }} />
+                    )}
+                    <span
+                      className="rounded-full border px-2 py-0.5 text-[10px] font-semibold"
+                      style={{ borderColor: `${loopVerdictMeta.accent}73`, color: loopVerdictMeta.accent }}
+                    >
+                      {loopVerdictMeta.badge}
+                    </span>
+                    <span className="font-semibold text-foreground">{loopVerdictMeta.title}</span>
+                  </div>
+                  <div className="text-muted-foreground">{loopVerdictMeta.body}</div>
+                </div>
+                <div className="rounded-lg border border-border/60 bg-card/80 px-3 py-2 text-[10px] leading-relaxed text-muted-foreground sm:w-[260px]">
+                  <span className="font-semibold text-foreground">下一步：</span>{loopVerdictMeta.next}
+                </div>
               </div>
             </div>
-
-            {loopReadout.verdict === 'gap' && (
-              <div className="space-y-1.5 rounded-xl border border-[#F6465D]/35 bg-[#F6465D]/[0.05] px-3 py-3">
-                <div className="flex items-center gap-1.5 text-[11px] font-semibold text-[#F6465D]">
-                  <AlertTriangle className="h-3.5 w-3.5" /> 结构迭代 · 把这次的死法补进「止」预案
-                </div>
-                <p className="text-[10px] leading-relaxed text-muted-foreground">
-                  现在它从后门走。把刚才那个让你措手不及的信号，写成一条
-                  <span className="text-foreground">开仓前就能识别、触发即离场</span>
-                  的前置止损信号 —— 下次同样的死法就从前门走。落到下方「设计干预」并把干预类型设为「规则」，或在六步里写成新规则草稿、去复现页激活。
-                </p>
-              </div>
-            )}
           </div>
         )}
 
