@@ -369,7 +369,7 @@ export default function GuidePage() {
                 <P><strong>L2，操作层。</strong> 它把 L1 的原则翻译成具体的规则和自查问题，回答的始终是同一件事：下次再遇到类似情况，我该问自己什么、该做什么、又绝对不能做什么。</P>
                 <P><strong>L3，现场决策层——也是整套系统的核心。</strong> 它不是单纯的记录，而是两种过程的结合：交易前，它带着 L2 的规则帮你做出这一笔的判断；与此同时，它又提前把未来复盘要用的数据钉下来——原始假设、置信度、情绪状态、认知偏差、风险暴露、执行依据。换句话说，它把本该盘后才做的诊断（L4），搬到了结果还没揭晓的这一刻。这正是它对抗事后美化的关键：当时写下的，才是当时的你，而不是那个已经知道结果、忍不住重新解释的你。</P>
                 <P><strong>L4，反思诊断层。</strong> 交易结束后，它负责拆解结果。它不只问这笔赚了还是亏了，而是追问：我做了什么动作？为什么这样做？这是规则的问题、执行的问题、情绪的问题，还是认知偏差的问题？</P>
-                <P><strong>L5，元监控层。</strong> 它不看单笔，只看整套方法是否真的有效。它用校准曲线、偏差光谱、规则有效性追踪、D-score vs R 这些工具，回答最根本的问题：你的规则有没有真的改善决策？复盘有没有真的减少重复错误？这套系统，有没有在真正进化？</P>
+                <P><strong>L5，元监控层。</strong> 它不看单笔，只看整套方法是否真的有效。它用校准曲线、偏差光谱、规则有效性追踪、结构 × 结果这些工具，回答最根本的问题：你的规则有没有真的改善决策？复盘有没有真的减少重复错误？这套系统，有没有在真正进化？</P>
               </div>
               <P>
                 这五层不是一条自上而下的命令链，而是一个闭环。往下走是约束：原则生成规则，规则进入现场，结果被诊断，诊断再汇进监控——这条线让你有纪律。往上走才是进化：真实交易数据暴露出问题，复盘把问题提炼成模式，模式沉淀为新规则，新规则最终反过来修正你最底层的信念。当 L5 的数据改写了 L1 的信念，这个环就闭合了一次——而每闭合一次，你就比上一次更接近市场真实的样子。
@@ -476,7 +476,7 @@ export default function GuidePage() {
                     <tr><td className="px-3 py-2 border-t border-border">错题集 / 元监控</td><td className="px-3 py-2 border-t border-border">不收录</td><td className="px-3 py-2 border-t border-border">全量收录、自动聚类、CI 与基线对比</td></tr>
                     <tr><td className="px-3 py-2 border-t border-border">高频错误强制写规则</td><td className="px-3 py-2 border-t border-border">不触发</td><td className="px-3 py-2 border-t border-border">同一错误类型 30 天 ≥3 次自动弹窗</td></tr>
                     <tr><td className="px-3 py-2 border-t border-border">致命单笔损失弹窗</td><td className="px-3 py-2 border-t border-border">不触发</td><td className="px-3 py-2 border-t border-border">单笔实亏 ≥2× 预设最大亏损时弹窗</td></tr>
-                    <tr><td className="px-3 py-2 border-t border-border">心态 ≤2 / Lollapalooza 风险阻挡</td><td className="px-3 py-2 border-t border-border">不出现（无快照）</td><td className="px-3 py-2 border-t border-border">硬阻挡，不能下单</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border">心态 ≤2 / 非逐仓 / 未完成评价</td><td className="px-3 py-2 border-t border-border">不出现（无快照）</td><td className="px-3 py-2 border-t border-border">硬阻挡，不能下单</td></tr>
                   </tbody>
                 </table>
               </div>
@@ -765,7 +765,7 @@ export default function GuidePage() {
                   <tbody>
                     <tr><td className="px-3 py-2 border-t border-border">信息偏差</td><td className="px-3 py-2 border-t border-border">我是不是只看见了想看的信息？</td><td className="px-3 py-2 border-t border-border">确认偏误、社会认同、权威偏误、光环效应、群体极化、峰终定律</td></tr>
                     <tr><td className="px-3 py-2 border-t border-border">判断偏差</td><td className="px-3 py-2 border-t border-border">我是不是把噪音当成规律？</td><td className="px-3 py-2 border-t border-border">叙事谬误、小样本偏差、黑天鹅盲区、零风险偏误、线性外推</td></tr>
-                    <tr><td className="px-3 py-2 border-t border-border">执行偏差</td><td className="px-3 py-2 border-t border-border">我是不是被盈亏和自尊绑架了？</td><td className="px-3 py-2 border-t border-border">锚定、沉没成本、现状偏差、承诺升级、拖延偏误、Lollapalooza 复合效应</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border">执行偏差</td><td className="px-3 py-2 border-t border-border">我是不是被盈亏和自尊绑架了？</td><td className="px-3 py-2 border-t border-border">锚定、沉没成本、现状偏差、承诺升级、拖延偏误、多重偏差叠加</td></tr>
                   </tbody>
                 </table>
               </div>
@@ -844,7 +844,7 @@ export default function GuidePage() {
               <P>界面会把内容分成两类：<strong>事实模块</strong>负责核对“反”和“止”的假设，<strong>叙事模块</strong>才记录事后解释。先对账，再解释，避免复盘变成事后重新叙述。</P>
 
               <SubTitle>结构 × 结果四象限（警惕“危险的盈利”）</SubTitle>
-              <P><strong>结构 × 结果</strong>是平仓评价的核心判断，不再另设“按当时信息看，这笔决策质量如何”的独立问题。你只需要把这笔交易放进一张 2×2：<strong>结构轴 = 当时结构是否成立</strong>，<strong>结果轴 = 这单赢 / 亏</strong>。一句话锚点：<strong>机会是运气，优秀是结构</strong>。</P>
+              <P><strong>结构 × 结果</strong>是平仓评价的核心判断，不再把同一个判断拆成额外问题。你只需要把这笔交易放进一张 2×2：<strong>结构轴 = 当时结构是否成立</strong>，<strong>结果轴 = 这单赢 / 亏</strong>。一句话锚点：<strong>机会是运气，优秀是结构</strong>。</P>
               <div className="overflow-x-auto">
                 <table className="w-full text-[11px] my-3 border border-border rounded overflow-hidden">
                   <thead className="bg-muted/50">
@@ -906,7 +906,7 @@ export default function GuidePage() {
               </RedHighlight>
 
               <SubTitle>小机会仓位记账</SubTitle>
-              <P>当开仓时机会成本答<strong>“否 · 不做也不亏”或“说不清 / 凭感觉”</strong>、源头选了<strong>“无明确 edge”</strong>、或盈亏比目标落在<strong>“盈亏比不足 / 目标不清楚”</strong>时（旧版“中性震荡”记录同样触发），抽屉会追加这块，把小机会仓位的<strong>隐性成本</strong>显式记下来，四选一：</P>
+              <P>当开仓时机会成本答<strong>“否 · 不做也不亏”或“说不清 / 凭感觉”</strong>、源头选了<strong>“无明确 edge”</strong>、或盈亏比目标落在<strong>“盈亏比不足 / 目标不清楚”</strong>时，评价弹窗会追加这块，把小机会仓位的<strong>隐性成本</strong>显式记下来，四选一：</P>
               <div className="overflow-x-auto">
                 <table className="w-full text-[11px] my-3 border border-border rounded overflow-hidden">
                   <thead className="bg-muted/50">
@@ -1084,7 +1084,7 @@ export default function GuidePage() {
               </div>
               <P>归类历史交易时，先输入或选择标的，再从该币种所有时间段的仓位历史记录中勾选一组相关交易。被选中的记录共同构成一次交易战役。</P>
               <P>实时战役与历史归类战役必须隔离。实时战役在开仓时归属；历史归类只加入历史战役，不把回填数据混进实时训练口径。</P>
-              <P>互关账户可以打开彼此的战役详情，并留下带可信度权重的留言评价。外部校验只评价“按当时信息看是否是好决策”，不是用后续走势倒推对错。</P>
+              <P>互关账户可以打开彼此的战役详情，并留下带可信度权重的留言评价。外部校验只评价当时结构、证伪与执行是否自洽，不用后续走势倒推对错。</P>
             </section>
 
             <section id="s4-4" className="scroll-mt-20">
@@ -1095,8 +1095,8 @@ export default function GuidePage() {
                 <li><strong>规则有效性</strong>：规则上线后，对应错误是否减少，并与全局基线比较。</li>
                 <li><strong>置信区间</strong>：低样本下不把随机波动误读成进步。</li>
                 <li><strong>Calibration</strong>：比较开仓预测胜率与平仓结果，观察判断是否过度自信。</li>
-                <li><strong>可信度向量</strong>：分别追踪方向判断、决策质量、反对者命中、快照完整度和校准能力。</li>
-                <li><strong>决策质量 vs 结果</strong>：用 D-score 与 R 的散点关系判断规则是否真有预测性。</li>
+                <li><strong>可信度向量</strong>：分别追踪方向判断、结构判断、反向假设命中、快照完整度和校准能力。</li>
+                <li><strong>结构 × 结果</strong>：观察结构成立与实际 R 之间是否有稳定关系，判断规则是否真有预测性。</li>
                 <li><strong>盈亏同源（edge 源头）</strong>：按 edge 源头聚合盈 / 亏，标出既是最大盈利、又是最大亏损来源的“同源”源头——它是 edge 的两面，不是该砍掉的毛病。</li>
                 <li><strong>纠结度 × 结果</strong>：把过程纠结度与后续胜率 / R 对照，验证“轻松”是不是真的正向先行指标，“煎熬”是不是真的预示亏损。</li>
                 <li><strong>情绪日志</strong>：按正向/中性/负向三类分组统计后续平均 R，识别最危险的心理入口；正向/中性标签同样进入对比，用来检验“自认为状态好”是否真的有正期望。</li>
