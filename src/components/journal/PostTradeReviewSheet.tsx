@@ -497,6 +497,30 @@ export function PostTradeReviewSheet({
   // 并在死法走「后门」（不在预案内）时给出迭代指令。仅主力方向单、有赢/亏结果时判读。
   const loopReadoutApplicable = !isHedge && quadrantApplicable;
   const hasFalsificationPlan = !!snapshotFalsification;
+  const hasOddsStructurePlan = !!journal.pre_odds_structure;
+  const hasOddsBreakdownPlan = !!snapshotOddsBreakdown.trim();
+  const falsificationFactTitle = hasFalsificationPlan
+    ? '预设的证伪信号兑现没有？*'
+    : '离场事实是什么？*';
+  const invalidationReviewPlaceholder = hasFalsificationPlan
+    ? '只写证伪/拆仓信号有没有出现、你有没有按它执行。叙事解释放到下方模块。'
+    : '只写离场前实际出现的盘面事实和你的执行动作；不要事后补写“本该有的止”。';
+  const oddsStructureFactTitle = hasOddsBreakdownPlan
+    ? '你命名的结构破坏信号出现没有？*'
+    : hasOddsStructurePlan
+      ? '目标空间假设被市场验证没有？*'
+      : '目标空间事实是什么？*';
+  const oddsReviewOptions: Array<{ value: OddsStructureReview; label: string; desc: string }> = hasOddsBreakdownPlan
+    ? [
+        { value: 'right', label: '未出现', desc: '目标结构基本保持，破坏信号没有兑现' },
+        { value: 'mixed', label: '部分出现', desc: '有破坏迹象，但不完整或我处理不清' },
+        { value: 'wrong', label: '出现了', desc: '结构破坏信号兑现，目标假设失效' },
+      ]
+    : [
+        { value: 'right', label: '兑现了', desc: '目标空间确实打开，结构假设基本成立' },
+        { value: 'mixed', label: '部分兑现', desc: '有空间但不干净，或兑现幅度不足' },
+        { value: 'wrong', label: '没兑现', desc: '目标空间没有打开，结构假设失效' },
+      ];
   const loopReadout = deriveLoopReadout({
     outcome,
     quadrant,
@@ -862,8 +886,8 @@ export function PostTradeReviewSheet({
 
           <div className="rounded-xl border border-border/60 bg-background/60 px-3 py-3 space-y-2">
             <div className="flex items-center gap-2">
-              <span className={factPillClass}>止</span>
-              <div className="text-[12px] font-medium text-foreground">预设的证伪信号兑现没有？*</div>
+              <span className={factPillClass}>{hasFalsificationPlan ? '止' : '离场'}</span>
+              <div className="text-[12px] font-medium text-foreground">{falsificationFactTitle}</div>
             </div>
             {snapshotFalsification ? (
               <>
@@ -899,16 +923,12 @@ export function PostTradeReviewSheet({
                 />
                 {!falsificationFactValid && <div className="text-right font-mono text-[10px] text-[#F6465D]">必选</div>}
               </>
-            ) : (
-              <div className="rounded-lg border border-border/60 bg-card px-3 py-2 text-[11px] leading-relaxed text-muted-foreground">
-                本笔未记录预设证伪信号；在下方写清离场事实即可。
-              </div>
-            )}
+            ) : null}
             <Textarea
               rows={2}
               value={invalidationReview}
               onChange={e => setInvalidationReview(e.target.value)}
-              placeholder="只写证伪/拆仓信号有没有出现、你有没有按它执行。叙事解释放到下方模块。"
+              placeholder={invalidationReviewPlaceholder}
               className="text-[12px] bg-background/80 border-border/70 rounded-xl"
             />
           </div>
@@ -917,29 +937,21 @@ export function PostTradeReviewSheet({
             <div className="rounded-xl border border-border/60 bg-background/60 px-3 py-3 space-y-2">
               <div className="flex items-center gap-2">
                 <span className={factPillClass}>结构</span>
-                <div className="text-[12px] font-medium text-foreground">你命名的结构破坏信号出现没有？*</div>
+                <div className="text-[12px] font-medium text-foreground">{oddsStructureFactTitle}</div>
               </div>
               {journal.pre_odds_structure ? (
                 <div className="rounded-lg border border-border/60 bg-card px-3 py-2 text-[10px] leading-relaxed text-muted-foreground">
                   当时目标：<span className="text-foreground">{ODDS_STRUCTURE_LABELS[journal.pre_odds_structure]}</span>
                   {snapshotOddsBreakdown ? <span> · 破坏信号：{snapshotOddsBreakdown}</span> : null}
                 </div>
-              ) : (
-                <div className="rounded-lg border border-border/60 bg-card px-3 py-2 text-[11px] leading-relaxed text-muted-foreground">
-                  本笔未记录盈亏比结构；直接按实际盘面补充判断。
-                </div>
-              )}
+              ) : null}
               {journal.pre_odds_structure && (
                 <div className="grid gap-2">
-                  {[
-                    { value: 'right', label: '未出现', desc: '目标结构基本保持，破坏信号没有兑现' },
-                    { value: 'mixed', label: '部分出现', desc: '有破坏迹象，但不完整或我处理不清' },
-                    { value: 'wrong', label: '出现了', desc: '结构破坏信号兑现，目标假设失效' },
-                  ].map(option => (
+                  {oddsReviewOptions.map(option => (
                     <button
                       key={option.value}
                       type="button"
-                      onClick={() => setOddsStructureReviewValue(option.value as OddsStructureReview)}
+                      onClick={() => setOddsStructureReviewValue(option.value)}
                       className={`rounded-lg border px-3 py-2 text-left text-[11px] transition-colors ${
                         oddsStructureReviewValue === option.value
                           ? 'border-foreground bg-foreground/5 text-foreground'
