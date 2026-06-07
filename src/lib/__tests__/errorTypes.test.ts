@@ -137,6 +137,32 @@ describe('各错误类型判定', () => {
     const t = byId(aggregateErrorTypes([mk({ post_decision_quality: 'bad', post_outcome: 'win' })]), 'lucky_bad_decision')!;
     expect(t.count).toBe(1);
   });
+
+  it('扛出来的赢：赢单路径质量为 dragged_win', () => {
+    const t = byId(
+      aggregateErrorTypes([mk({
+        post_outcome: 'win',
+        post_path_first_move: 'immediate_drawdown',
+        post_path_drawdown: 'meaningful',
+        post_path_win_quality: 'dragged_win',
+      })]),
+      'dragged_win',
+    )!;
+    expect(t.count).toBe(1);
+    expect(t.instances[0].detail).toContain('上来先水下');
+  });
+
+  it('路径失去主动权：上来先水下或有效浮亏', () => {
+    const t = byId(
+      aggregateErrorTypes([mk({
+        post_path_first_move: 'immediate_drawdown',
+        post_path_drawdown: 'none_or_shallow',
+      })]),
+      'lost_path_initiative',
+    )!;
+    expect(t.count).toBe(1);
+    expect(t.applicable).toBe(1);
+  });
 });
 
 describe('频率 / 趋势 / 排序', () => {

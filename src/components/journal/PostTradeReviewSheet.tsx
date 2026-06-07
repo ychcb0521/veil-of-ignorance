@@ -43,6 +43,7 @@ import {
   type OddsStructureReview,
 } from '@/lib/oddsStructure';
 import { deriveLoopReadout, type LegTone } from '@/lib/structureLoop';
+import { CLASS_META, classifyTradePathProxy } from '@/lib/tradePathFacet';
 import {
   finalizeJournalReview,
   updateJournalDeepAnalysis, stampJournalCloseRealTime, listJournals,
@@ -56,6 +57,40 @@ import {
   SixStepAnalysisForm, EMPTY_SIX_STEP, pickSixStepValue, countCompletedSteps,
   type SixStepValue,
 } from './SixStepAnalysisForm';
+
+const PATH_FIRST_MOVE_OPTIONS: Array<{
+  value: NonNullable<TradeJournal['post_path_first_move']>;
+  label: string;
+  desc: string;
+  accent: string;
+}> = [
+  { value: 'immediate_profit', label: '是，第一段就顺', desc: '开仓后很快站到浮盈，位置没有先付错成本。', accent: '#0ECB81' },
+  { value: 'immediate_drawdown', label: '不是，上来先水下', desc: '第一段就浮亏，主动权没有立刻站到你这边。', accent: '#F6465D' },
+  { value: 'unclear', label: '看不清', desc: '历史盘面不足，先不硬判。', accent: '#9AA0A6' },
+];
+
+const PATH_DRAWDOWN_OPTIONS: Array<{
+  value: NonNullable<TradeJournal['post_path_drawdown']>;
+  label: string;
+  desc: string;
+  accent: string;
+}> = [
+  { value: 'none_or_shallow', label: '没有或很浅', desc: '浮亏没有威胁结构，主动权基本在手。', accent: '#0ECB81' },
+  { value: 'meaningful', label: '有明显浮亏', desc: '这笔需要扛一段，路径质量打折。', accent: '#D89B00' },
+  { value: 'over_stop', label: '打到/越过止损', desc: '已经超过预案边界，主动权交出去了。', accent: '#F6465D' },
+  { value: 'unclear', label: '看不清', desc: '缺少足够路径信息，先留空白样本。', accent: '#9AA0A6' },
+];
+
+const PATH_WIN_QUALITY_OPTIONS: Array<{
+  value: Extract<NonNullable<TradeJournal['post_path_win_quality']>, 'clean_win' | 'dragged_win' | 'unclear'>;
+  label: string;
+  desc: string;
+  accent: string;
+}> = [
+  { value: 'clean_win', label: '不是，干净赢', desc: '赢来自位置和结构，不靠硬扛换来。', accent: '#0ECB81' },
+  { value: 'dragged_win', label: '是，扛出来的赢', desc: '终点赢了，但路径在训练坏习惯。', accent: '#F6465D' },
+  { value: 'unclear', label: '看不清', desc: '无法确认是否扛单，后续可用复现页补判。', accent: '#9AA0A6' },
+];
 
 interface Props {
   isOpen: boolean;
@@ -108,6 +143,10 @@ export function PostTradeReviewSheet({
   const [struggleLevel, setStruggleLevel] = useState<StruggleLevel | null>(null);
   const [smallPositionDrag, setSmallPositionDrag] = useState<TradeJournal['post_small_position_drag']>(null);
   const [missedHighOddsState, setMissedHighOddsState] = useState<TradeJournal['post_missed_high_odds_state']>(null);
+  const [pathFirstMove, setPathFirstMove] = useState<TradeJournal['post_path_first_move']>(null);
+  const [pathDrawdown, setPathDrawdown] = useState<TradeJournal['post_path_drawdown']>(null);
+  const [pathWinQuality, setPathWinQuality] = useState<TradeJournal['post_path_win_quality']>(null);
+  const [pathAgencyNote, setPathAgencyNote] = useState('');
   const [edgeSourceBackfill, setEdgeSourceBackfill] = useState<TradeJournal['pre_edge_source']>(null);
   const [hedgeWorthIt, setHedgeWorthIt] = useState<TradeJournal['hedge_worth_it']>(null);
   const [opponentWasRight, setOpponentWasRight] = useState<boolean | null>(null);
@@ -154,6 +193,10 @@ export function PostTradeReviewSheet({
         setStruggleLevel((journal.post_struggle_level as StruggleLevel | null) ?? null);
         setSmallPositionDrag(journal.post_small_position_drag ?? null);
         setMissedHighOddsState(journal.post_missed_high_odds_state ?? null);
+        setPathFirstMove(journal.post_path_first_move ?? null);
+        setPathDrawdown(journal.post_path_drawdown ?? null);
+        setPathWinQuality(journal.post_path_win_quality ?? (journal.post_outcome && journal.post_outcome !== 'win' ? 'not_win' : null));
+        setPathAgencyNote(journal.post_path_agency_note ?? '');
         setEdgeSourceBackfill(journal.pre_edge_source ?? null);
         setHedgeWorthIt(journal.hedge_worth_it ?? null);
         setOpponentWasRight(journal.post_opponent_was_right ?? null);
@@ -314,6 +357,9 @@ export function PostTradeReviewSheet({
       || journal.pre_odds_structure === 'against_crowd_unreleased'
       || (journal.pre_opportunity_cost_worth === true && journal.pre_cheap_opportunity === 'cheap')
     );
+  const showPathAgency = !isHedge && journal.direction !== 'no_entry';
+  const pathProxy = showPathAgency && tradeRecord ? classifyTradePathProxy(journal, tradeRecord) : null;
+  const pathWinQualityToSave = outcome === 'win' ? pathWinQuality : 'not_win';
   // 结构对／错的 2×2 排布（上排结构对、下排结构错；左列赢、右列亏）。
   const QUADRANT_GRID: StructureResultQuadrant[] = ['deserved_win', 'correct_loss', 'dangerous_win', 'deserved_loss'];
 
@@ -342,6 +388,8 @@ export function PostTradeReviewSheet({
   const decisionValid = !quadrantApplicable || decisionQuality === 'good' || decisionQuality === 'bad';
   const falsificationFactValid = !snapshotFalsification || falsificationStatus != null;
   const oddsStructureFactValid = isHedge || !journal.pre_odds_structure || oddsStructureReviewValue != null;
+  const pathAgencyValid = !showPathAgency
+    || (!!pathFirstMove && !!pathDrawdown && (outcome !== 'win' || !!pathWinQuality));
   const reviewLoopValid = !!expectancyReview.trim()
     && !!premortemReview.trim()
     && !!invalidationReview.trim()
@@ -364,6 +412,7 @@ export function PostTradeReviewSheet({
     && decisionValid
     && quadrantValid
     && reviewLoopValid
+    && pathAgencyValid
     && opponentValid
     && hedgeWorthItValid
     && fiveStepValid
@@ -396,6 +445,10 @@ export function PostTradeReviewSheet({
         post_struggle_level: struggleLevel,
         post_small_position_drag: showSmallPositionDrag ? smallPositionDrag : null,
         post_missed_high_odds_state: showMissedHighOddsState ? missedHighOddsState : null,
+        post_path_first_move: showPathAgency ? pathFirstMove : null,
+        post_path_drawdown: showPathAgency ? pathDrawdown : null,
+        post_path_win_quality: showPathAgency ? pathWinQualityToSave : null,
+        post_path_agency_note: showPathAgency ? (pathAgencyNote.trim() || null) : null,
         // 仅当开仓漏标 edge 且本次复盘补标时回写（不覆盖开仓已标的源头）。
         ...(capturedEdge == null && edgeSourceBackfill != null ? { pre_edge_source: edgeSourceBackfill } : {}),
         post_positive_expectancy_review: buildOddsStructureReviewText(expectancyReview, oddsStructureReviewValue),
@@ -1201,6 +1254,127 @@ export function PostTradeReviewSheet({
             </div>
           )}
         </div>
+
+        {showPathAgency && (
+          <div className={`space-y-3 px-4 py-4 ${sectionCardClass}`}>
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <div className="text-[12px] font-semibold text-foreground">路径 + 主动权</div>
+                <div className="mt-0.5 text-[10px] leading-relaxed text-muted-foreground">
+                  终点只告诉你赢亏，路径告诉你主动权在不在自己手里。赢单尤其要看是不是扛出来的。
+                </div>
+              </div>
+              {pathProxy && (
+                <div className="rounded-full border border-border/70 bg-background px-2.5 py-1 text-[10px] text-muted-foreground">
+                  系统初读：{pathProxy.label}
+                </div>
+              )}
+            </div>
+
+            {pathProxy && (
+              <div className="rounded-lg border border-border/60 bg-background/60 px-3 py-2 text-[10px] leading-relaxed text-muted-foreground">
+                {pathProxy.needsReplay
+                  ? '终点是赢，但赢单必须继续判路径：如果中途靠有效浮亏换回来，它不是干净样本。'
+                  : CLASS_META[pathProxy.cls].hint}
+              </div>
+            )}
+
+            <div className="grid gap-3 lg:grid-cols-3">
+              <div className="space-y-2">
+                <Label className="text-[12px] font-medium">上来是不是就盈利？*</Label>
+                <div className="grid gap-1.5">
+                  {PATH_FIRST_MOVE_OPTIONS.map(option => {
+                    const active = pathFirstMove === option.value;
+                    return (
+                      <button
+                        key={option.value}
+                        type="button"
+                        onClick={() => setPathFirstMove(active ? null : option.value)}
+                        className={`rounded-lg border px-3 py-2 text-left transition-colors ${
+                          active ? '' : 'border-border bg-background text-muted-foreground hover:bg-accent'
+                        }`}
+                        style={active ? { borderColor: option.accent, backgroundColor: `${option.accent}14` } : undefined}
+                      >
+                        <div className="text-[11px] font-medium" style={active ? { color: option.accent } : undefined}>
+                          {option.label}
+                        </div>
+                        <div className="mt-0.5 text-[10px] leading-tight text-muted-foreground">{option.desc}</div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <Label className="text-[12px] font-medium">中途有没有有效浮亏？*</Label>
+                <div className="grid gap-1.5">
+                  {PATH_DRAWDOWN_OPTIONS.map(option => {
+                    const active = pathDrawdown === option.value;
+                    return (
+                      <button
+                        key={option.value}
+                        type="button"
+                        onClick={() => setPathDrawdown(active ? null : option.value)}
+                        className={`rounded-lg border px-3 py-2 text-left transition-colors ${
+                          active ? '' : 'border-border bg-background text-muted-foreground hover:bg-accent'
+                        }`}
+                        style={active ? { borderColor: option.accent, backgroundColor: `${option.accent}14` } : undefined}
+                      >
+                        <div className="text-[11px] font-medium" style={active ? { color: option.accent } : undefined}>
+                          {option.label}
+                        </div>
+                        <div className="mt-0.5 text-[10px] leading-tight text-muted-foreground">{option.desc}</div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <Label className="text-[12px] font-medium">如果这笔赢了，是不是扛出来的？{outcome === 'win' ? '*' : ''}</Label>
+                {outcome === 'win' ? (
+                  <div className="grid gap-1.5">
+                    {PATH_WIN_QUALITY_OPTIONS.map(option => {
+                      const active = pathWinQuality === option.value;
+                      return (
+                        <button
+                          key={option.value}
+                          type="button"
+                          onClick={() => setPathWinQuality(active ? null : option.value)}
+                          className={`rounded-lg border px-3 py-2 text-left transition-colors ${
+                            active ? '' : 'border-border bg-background text-muted-foreground hover:bg-accent'
+                          }`}
+                          style={active ? { borderColor: option.accent, backgroundColor: `${option.accent}14` } : undefined}
+                        >
+                          <div className="text-[11px] font-medium" style={active ? { color: option.accent } : undefined}>
+                            {option.label}
+                          </div>
+                          <div className="mt-0.5 text-[10px] leading-tight text-muted-foreground">{option.desc}</div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className="rounded-lg border border-border/60 bg-background/60 px-3 py-3 text-[11px] leading-relaxed text-muted-foreground">
+                    非赢单不判“扛出来的赢”；本笔只记录第一段和浮亏路径。
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label className="text-[12px] font-medium">路径备注</Label>
+              <Textarea
+                rows={2}
+                value={pathAgencyNote}
+                onChange={event => setPathAgencyNote(event.target.value)}
+                placeholder="只写路径事实：第一段是否顺、中途最大浮亏大概发生在哪、是否靠扛回本。"
+                className="text-[12px] bg-background/80 border-border/70 rounded-xl"
+              />
+            </div>
+            {!pathAgencyValid && <div className="text-right font-mono text-[10px] text-[#F6465D]">路径主动权必选</div>}
+          </div>
+        )}
 
         {showEdgeSource && (
           <div className={`space-y-2 px-4 py-4 ${sectionCardClass}`}>

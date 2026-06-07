@@ -146,6 +146,17 @@ const DRAG_LABEL: Record<string, string> = {
   missed_bigger: '钝化敏感度、错过更大机会',
   chain_reaction: '引发后续连锁乱做',
 };
+const PATH_FIRST_MOVE_LABEL: Record<string, string> = {
+  immediate_profit: '第一段即盈利',
+  immediate_drawdown: '上来先水下',
+  unclear: '第一段看不清',
+};
+const PATH_DRAWDOWN_LABEL: Record<string, string> = {
+  none_or_shallow: '无有效浮亏',
+  meaningful: '经历有效浮亏',
+  over_stop: '浮亏打到 / 越过止损',
+  unclear: '浮亏路径看不清',
+};
 
 const ERROR_TYPE_DEFS: ErrorTypeDef[] = [
   // ===== 预测差值 =====
@@ -341,6 +352,33 @@ const ERROR_TYPE_DEFS: ErrorTypeDef[] = [
     applicable: j => j.post_small_position_drag != null,
     detect: j => !!j.post_small_position_drag && j.post_small_position_drag !== 'none',
     detail: j => DRAG_LABEL[j.post_small_position_drag as string] ?? '小机会仓位拖累',
+  },
+  {
+    id: 'dragged_win',
+    family: 'discipline',
+    title: '扛出来的赢',
+    definition: '赢了，但不是从第一手就顺，而是靠扛过有效浮亏换来 —— 它会把坏路径伪装成好结果',
+    severity: 35,
+    costUnit: null,
+    applicable: j => j.post_path_win_quality != null,
+    detect: j => j.post_path_win_quality === 'dragged_win',
+    detail: j =>
+      `${PATH_FIRST_MOVE_LABEL[j.post_path_first_move as string] ?? '路径未明'} · ${PATH_DRAWDOWN_LABEL[j.post_path_drawdown as string] ?? '浮亏未明'}`,
+  },
+  {
+    id: 'lost_path_initiative',
+    family: 'discipline',
+    title: '路径失去主动权',
+    definition: '上来先水下，或中途经历有效浮亏 / 跑到止损外 —— 说明这笔不是轻松站在优势里',
+    severity: 22,
+    costUnit: null,
+    applicable: j => j.post_path_first_move != null || j.post_path_drawdown != null,
+    detect: j =>
+      j.post_path_first_move === 'immediate_drawdown'
+      || j.post_path_drawdown === 'meaningful'
+      || j.post_path_drawdown === 'over_stop',
+    detail: j =>
+      `${PATH_FIRST_MOVE_LABEL[j.post_path_first_move as string] ?? '第一段未明'} · ${PATH_DRAWDOWN_LABEL[j.post_path_drawdown as string] ?? '浮亏未明'}`,
   },
   // ===== 心态-行为不匹配 =====
   {

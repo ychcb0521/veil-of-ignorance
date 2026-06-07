@@ -110,6 +110,12 @@ export type DatasetSplit = 'in_sample' | 'out_of_sample';
 export type DecisionQuality = 'good' | 'mixed' | 'bad';
 export type RuleCategory = 'hard' | 'core' | 'watch' | 'retired';
 export type PrincipleEvolutionLevel = 0 | 1 | 2 | 3 | 4 | 5;
+/** 平仓后路径主动权：开仓第一段是否立刻站到你这边。 */
+export type PostPathFirstMove = 'immediate_profit' | 'immediate_drawdown' | 'unclear';
+/** 平仓后路径主动权：持仓途中是否经历有效浮亏。 */
+export type PostPathDrawdown = 'none_or_shallow' | 'meaningful' | 'over_stop' | 'unclear';
+/** 平仓后路径主动权：赢单是不是靠扛出来的。非赢单记 not_win，避免把亏损误塞进赢单质量。 */
+export type PostPathWinQuality = 'clean_win' | 'dragged_win' | 'not_win' | 'unclear';
 export type PainTag =
   // 正向情绪 · 帮助执行规则（可放行，但不能替代规则）
   | 'calm'
@@ -718,6 +724,14 @@ export interface TradeJournal {
   post_small_position_drag?: SmallPositionDrag | null;
   /** 踏空高盈亏比结构 / 该重没重。仅对快照里识别为厚结构的单子追问。 */
   post_missed_high_odds_state?: MissedHighOddsState | null;
+  /** 路径 + 主动权：上来是不是就盈利。 */
+  post_path_first_move?: PostPathFirstMove | null;
+  /** 路径 + 主动权：中途有没有有效浮亏。 */
+  post_path_drawdown?: PostPathDrawdown | null;
+  /** 路径 + 主动权：赢单是不是「扛出来的」。 */
+  post_path_win_quality?: PostPathWinQuality | null;
+  /** 路径 + 主动权：补充路径事实，供主动权元层聚合。 */
+  post_path_agency_note?: string | null;
   post_positive_expectancy_review?: string | null;
   post_premortem_review?: string | null;
   post_invalidation_review?: string | null;

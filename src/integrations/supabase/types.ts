@@ -269,6 +269,10 @@ export type Database = {
           post_new_rule_draft: string | null
           post_original_hypothesis: string | null
           post_outcome: string | null
+          post_path_agency_note: string | null
+          post_path_drawdown: string | null
+          post_path_first_move: string | null
+          post_path_win_quality: string | null
           post_r_multiple: number | null
           post_real_problem: string | null
           post_reality_feedback: string | null
@@ -341,6 +345,10 @@ export type Database = {
           post_new_rule_draft?: string | null
           post_original_hypothesis?: string | null
           post_outcome?: string | null
+          post_path_agency_note?: string | null
+          post_path_drawdown?: string | null
+          post_path_first_move?: string | null
+          post_path_win_quality?: string | null
           post_r_multiple?: number | null
           post_real_problem?: string | null
           post_reality_feedback?: string | null
@@ -413,6 +421,10 @@ export type Database = {
           post_new_rule_draft?: string | null
           post_original_hypothesis?: string | null
           post_outcome?: string | null
+          post_path_agency_note?: string | null
+          post_path_drawdown?: string | null
+          post_path_first_move?: string | null
+          post_path_win_quality?: string | null
           post_r_multiple?: number | null
           post_real_problem?: string | null
           post_reality_feedback?: string | null
