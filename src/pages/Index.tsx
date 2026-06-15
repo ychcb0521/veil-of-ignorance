@@ -31,6 +31,7 @@ import { Link } from "react-router-dom";
 import { JournalNavMenu } from "@/components/journal/JournalNavMenu";
 import type { PendingOrder, OrderType } from "@/types/trading";
 import { calcFee, calcSlippage } from "@/types/trading";
+import type { ExecutionTradeSnapshot } from "@/lib/executionAssets";
 import type { AssetState } from "@/types/assets";
 import {
   Dialog,
@@ -1006,6 +1007,8 @@ const Index = () => {
             }
             const fee = calcFee(actualFillPrice, matchedOrder.quantity, isMaker);
             const margin = (matchedOrder.quantity * actualFillPrice) / matchedOrder.leverage;
+            const positionId = crypto.randomUUID();
+            const simulatedTime = getEffectiveTime(activeSymbol);
             setBalance((prev) => prev - margin - fee);
             setPositionsMap((prev) => {
               const existing = (prev[activeSymbol] || []).filter((position) => position.quantity > 1e-8);
@@ -1014,7 +1017,7 @@ const Index = () => {
                 [activeSymbol]: [
                   ...existing,
                   {
-                    id: crypto.randomUUID(),
+                    id: positionId,
                     side: matchedOrder.side,
                     entryPrice: actualFillPrice,
                     quantity: matchedOrder.quantity,
@@ -1022,13 +1025,28 @@ const Index = () => {
                     marginMode: matchedOrder.marginMode,
                     margin,
                     isolatedMargin: matchedOrder.marginMode === "isolated" ? margin : undefined,
-                    openTime: getEffectiveTime(activeSymbol),
+                    openTime: simulatedTime,
                   },
                 ],
               };
             });
             // 执行力资产只奖励做多开仓；做空都是辅助对冲单，不计分。
-            if (matchedOrder.side === 'LONG') recordExecutionTrade(matchedOrder.tradingMode ?? tradingMode);
+            if (matchedOrder.side === 'LONG') {
+              const trade: ExecutionTradeSnapshot = {
+                symbol: activeSymbol,
+                side: matchedOrder.side,
+                orderType: matchedOrder.type,
+                entryPrice: actualFillPrice,
+                quantity: matchedOrder.quantity,
+                leverage: matchedOrder.leverage,
+                marginMode: matchedOrder.marginMode,
+                margin,
+                notional: matchedOrder.quantity * actualFillPrice,
+                simulatedTime,
+                positionId,
+              };
+              recordExecutionTrade(matchedOrder.tradingMode ?? tradingMode, trade);
+            }
             toast.success(
               `委托成交: ${matchedOrder.side === "LONG" ? "开多" : "开空"} ${matchedOrder.quantity} @ ${actualFillPrice.toFixed(2)}`,
             );
@@ -1042,7 +1060,7 @@ const Index = () => {
         return { ...prev, [activeSymbol]: remaining };
       });
     }
-  }, [visibleData.length, activeSymbol, recordExecutionTrade, tradingMode]);
+  }, [visibleData.length, activeSymbol, recordExecutionTrade, tradingMode, getEffectiveTime]);
 
   // ===== TWAP ENGINE =====
   useEffect(() => {

@@ -33,6 +33,33 @@ describe('execution assets', () => {
     expect(s1.events[0]).toMatchObject({ type: 'direct_reward', points: EXECUTION_DIRECT_REWARD });
   });
 
+  it('stores the trade snapshot on rewarded trade events', () => {
+    const s0 = createDefaultExecutionAssetState(d('2026-06-03'));
+    const s1 = recordExecutionTrade(s0, 'decision', d('2026-06-03'), {
+      symbol: 'BTCUSDT',
+      side: 'LONG',
+      orderType: 'MARKET',
+      entryPrice: 105000,
+      quantity: 0.2,
+      leverage: 5,
+      marginMode: 'isolated',
+      margin: 4200,
+      notional: 21000,
+      simulatedTime: d('2026-06-03').getTime(),
+      positionId: 'pos-1',
+    });
+
+    expect(s1.events[0].trade).toMatchObject({
+      symbol: 'BTCUSDT',
+      side: 'LONG',
+      orderType: 'MARKET',
+      entryPrice: 105000,
+      quantity: 0.2,
+      leverage: 5,
+      positionId: 'pos-1',
+    });
+  });
+
   it('charges the previous day when no trade was recorded', () => {
     const s0 = createDefaultExecutionAssetState(d('2026-06-03'));
     const s1 = settleNoTradePenalties(s0, d('2026-06-04'));

@@ -6,6 +6,20 @@ export type ExecutionTradingMode = 'decision' | 'direct';
 
 export type ExecutionAssetEventType = 'decision_reward' | 'direct_reward' | 'no_trade_penalty';
 
+export interface ExecutionTradeSnapshot {
+  symbol: string;
+  side: string;
+  orderType: string;
+  entryPrice: number;
+  quantity: number;
+  leverage: number;
+  marginMode: string;
+  margin?: number | null;
+  notional?: number | null;
+  simulatedTime?: number | null;
+  positionId?: string | null;
+}
+
 export interface ExecutionAssetEvent {
   id: string;
   type: ExecutionAssetEventType;
@@ -13,6 +27,7 @@ export interface ExecutionAssetEvent {
   date: string;
   createdAt: number;
   label: string;
+  trade?: ExecutionTradeSnapshot | null;
 }
 
 export interface ExecutionAssetState {
@@ -65,7 +80,7 @@ function eventId(type: ExecutionAssetEventType, date: string): string {
 }
 
 function pushEvent(state: ExecutionAssetState, event: ExecutionAssetEvent): ExecutionAssetEvent[] {
-  return [event, ...(state.events ?? [])].slice(0, 80);
+  return [event, ...(state.events ?? [])];
 }
 
 function normalizeState(state: ExecutionAssetState | null | undefined, today: Date = new Date()): ExecutionAssetState {
@@ -121,6 +136,7 @@ export function recordExecutionTrade(
   rawState: ExecutionAssetState,
   mode: ExecutionTradingMode,
   today: Date = new Date(),
+  trade?: ExecutionTradeSnapshot | null,
 ): ExecutionAssetState {
   const settled = settleNoTradePenalties(rawState, today);
   const date = localDateKey(today);
@@ -134,6 +150,7 @@ export function recordExecutionTrade(
     date,
     createdAt: today.getTime(),
     label: isDecision ? '决策记录交易奖励' : '直接交易奖励',
+    trade: trade ?? null,
   };
 
   return {

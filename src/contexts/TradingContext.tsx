@@ -32,6 +32,7 @@ import {
   recordExecutionTrade as applyExecutionTradeReward,
   settleNoTradePenalties,
   type ExecutionAssetState,
+  type ExecutionTradeSnapshot,
 } from '@/lib/executionAssets';
 
 // ===== Types =====
@@ -119,7 +120,7 @@ interface TradingState {
   setTradingMode: (v: TradingMode) => void;
   executionAsset: ExecutionAssetState;
   setExecutionAsset: (v: ExecutionAssetState | ((prev: ExecutionAssetState) => ExecutionAssetState)) => void;
-  recordExecutionTrade: (modeOverride?: TradingMode) => void;
+  recordExecutionTrade: (modeOverride?: TradingMode, trade?: ExecutionTradeSnapshot | null) => void;
   coinTimelines: CoinTimelinesMap;
   setCoinTimelines: (v: CoinTimelinesMap | ((prev: CoinTimelinesMap) => CoinTimelinesMap)) => void;
   totalPositionCount: number;
@@ -320,9 +321,9 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
     setExecutionAsset(prev => settleNoTradePenalties(prev));
   }, [setExecutionAsset]);
 
-  const recordExecutionTrade = useCallback((modeOverride?: TradingMode) => {
+  const recordExecutionTrade = useCallback((modeOverride?: TradingMode, trade?: ExecutionTradeSnapshot | null) => {
     const mode = modeOverride ?? tradingModeRef.current;
-    setExecutionAsset(prev => applyExecutionTradeReward(prev, mode));
+    setExecutionAsset(prev => applyExecutionTradeReward(prev, mode, new Date(), trade));
   }, [setExecutionAsset]);
 
   // Total position count across all symbols
@@ -693,6 +694,25 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
     }
 
     const now = getEffectiveTime(symbol);
+    const buildExecutionTradeSnapshot = (
+      position: Position,
+      orderType: string,
+    ): ExecutionTradeSnapshot => {
+      const notional = position.entryPrice * position.quantity;
+      return {
+        symbol,
+        side: position.side,
+        orderType,
+        entryPrice: position.entryPrice,
+        quantity: position.quantity,
+        leverage: position.leverage,
+        marginMode: position.marginMode,
+        margin: position.margin,
+        notional,
+        simulatedTime: now,
+        positionId: position.id,
+      };
+    };
 
     if (order.type === 'CONDITIONAL') {
       const currentP = Number(effectiveCurrentPrice);
@@ -729,7 +749,9 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
         return { ...prev, [symbol]: [...existing, position] };
       });
       // 执行力资产只奖励做多开仓：做空一律视为辅助对冲单，不计分。
-      if (order.side === 'LONG') recordExecutionTrade(tradingModeRef.current);
+      if (order.side === 'LONG') {
+        recordExecutionTrade(tradingModeRef.current, buildExecutionTradeSnapshot(position, 'BEST'));
+      }
       toast.success(`最优价成交: ${order.side === 'LONG' ? '开多' : '开空'} ${order.quantity.toFixed(6)} @ ${position.entryPrice.toFixed(2)}`);
       return { id: position.id };
     }
@@ -750,7 +772,9 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
         return { ...prev, [symbol]: [...existing, position] };
       });
       // 执行力资产只奖励做多开仓：做空一律视为辅助对冲单，不计分。
-      if (order.side === 'LONG') recordExecutionTrade(tradingModeRef.current);
+      if (order.side === 'LONG') {
+        recordExecutionTrade(tradingModeRef.current, buildExecutionTradeSnapshot(position, order.type));
+      }
       toast.success(`${order.side === 'LONG' ? '开多' : '开空'} ${order.quantity.toFixed(6)} @ ${position.entryPrice.toFixed(2)}`);
       return { id: position.id };
     }

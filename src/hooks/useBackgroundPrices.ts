@@ -9,6 +9,7 @@ import { useEffect, useRef, useCallback } from "react";
 import { useTradingContext } from "@/contexts/TradingContext";
 import type { PendingOrder } from "@/types/trading";
 import { calcFee } from "@/types/trading";
+import type { ExecutionTradeSnapshot } from "@/lib/executionAssets";
 import { getConditionalTriggerDecisionFromRange } from "@/lib/conditionalOrders";
 import { toast } from "sonner";
 
@@ -226,6 +227,8 @@ export function useBackgroundPrices() {
           filledIds.push(order.id);
           const fee = calcFee(fillPrice, order.quantity, false);
           const margin = (order.quantity * fillPrice) / order.leverage;
+          const positionId = crypto.randomUUID();
+          const simulatedTime = sim.currentSimulatedTime;
 
           setBalance((prev) => prev - margin - fee);
           setPositionsMap((prev) => {
@@ -235,7 +238,7 @@ export function useBackgroundPrices() {
               [symbol]: [
                 ...existing,
                 {
-                  id: crypto.randomUUID(),
+                  id: positionId,
                   side: order.side,
                   entryPrice: fillPrice,
                   quantity: order.quantity,
@@ -243,13 +246,28 @@ export function useBackgroundPrices() {
                   marginMode: order.marginMode,
                   margin,
                   isolatedMargin: order.marginMode === "isolated" ? margin : undefined,
-                  openTime: Date.now(),
+                  openTime: simulatedTime,
                 },
               ],
             };
           });
           // 执行力资产只奖励做多开仓；做空都是辅助对冲单，不计分。
-          if (order.side === 'LONG') recordExecutionTrade(order.tradingMode ?? tradingMode);
+          if (order.side === 'LONG') {
+            const trade: ExecutionTradeSnapshot = {
+              symbol,
+              side: order.side,
+              orderType: order.type,
+              entryPrice: fillPrice,
+              quantity: order.quantity,
+              leverage: order.leverage,
+              marginMode: order.marginMode,
+              margin,
+              notional: order.quantity * fillPrice,
+              simulatedTime,
+              positionId,
+            };
+            recordExecutionTrade(order.tradingMode ?? tradingMode, trade);
+          }
           toast.success(`条件单已触发：${symbol} ${order.side} @ ${fillPrice.toFixed(2)}`);
         }
       }
@@ -261,7 +279,7 @@ export function useBackgroundPrices() {
         }));
       }
     },
-    [setBalance, setPositionsMap, setOrdersMap, executeReduceOnlyTrigger, recordExecutionTrade, tradingMode],
+    [setBalance, setPositionsMap, setOrdersMap, executeReduceOnlyTrigger, recordExecutionTrade, tradingMode, sim.currentSimulatedTime],
   );
 
   const pollBackgroundSymbols = useCallback(async () => {
