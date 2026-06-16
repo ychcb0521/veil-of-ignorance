@@ -52,7 +52,7 @@ function fmtStackedTime(value: string | number | null | undefined) {
   const date = typeof value === 'number' ? new Date(value) : new Date(value);
   if (Number.isNaN(date.getTime())) return '—';
   const pad = (n: number) => String(n).padStart(2, '0');
-  return `${pad(date.getMonth() + 1)}/${pad(date.getDate())}\n${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+  return `${date.getFullYear()}/${pad(date.getMonth() + 1)}/${pad(date.getDate())}\n${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
 }
 
 function roeFromRecord(record: TradeRecord | null) {
@@ -421,7 +421,7 @@ export default function JournalCampaignClassifyPage() {
                   <div>{emptyReason}</div>
                 </div>
               ) : (
-                <table className="w-full min-w-[1320px] text-[12px] font-mono tabular-nums">
+                <table className="w-full min-w-[1420px] text-[12px] font-mono tabular-nums">
                   <thead className="sticky top-0 z-10 bg-card">
                     <tr className="border-b border-border bg-muted/35 text-[11px] text-muted-foreground">
                       <th className="w-[48px] px-3 py-2 text-left font-medium">
@@ -436,7 +436,7 @@ export default function JournalCampaignClassifyPage() {
                           }}
                         />
                       </th>
-                      {['合约', '方向', '开仓均价', '平仓均价', '数量', '开仓时间', '平仓时间', '平仓方式', '平仓盈亏', '收益率(ROE)', '当前归属'].map(header => (
+                      {['合约', '方向', '开仓均价', '平仓均价', '数量', '开仓时间', '平仓时间', '操作时间', '平仓方式', '平仓盈亏', '收益率(ROE)', '当前归属'].map(header => (
                         <th key={header} className="px-3 py-2 text-left font-medium whitespace-nowrap">{header}</th>
                       ))}
                     </tr>
@@ -459,6 +459,7 @@ export default function JournalCampaignClassifyPage() {
                       const quantity = record?.quantity ?? null;
                       const pnl = record?.pnl ?? journal?.post_realized_pnl ?? null;
                       const roe = roeFromRecord(record);
+                      const operationTime = operationTimeForItem(item, journal, record);
                       return (
                         <tr
                           key={item.id}
@@ -494,6 +495,7 @@ export default function JournalCampaignClassifyPage() {
                           <td className="px-3 py-2 text-foreground whitespace-nowrap">{fmtAmount(quantity)}</td>
                           <td className="px-3 py-2 text-muted-foreground whitespace-pre-line">{fmtStackedTime(record?.openTime ?? journal?.pre_simulated_time)}</td>
                           <td className="px-3 py-2 text-muted-foreground whitespace-pre-line">{fmtStackedTime(record?.closeTime)}</td>
+                          <td className="px-3 py-2 text-muted-foreground whitespace-pre-line">{fmtStackedTime(operationTime)}</td>
                           <td className="px-3 py-2 whitespace-nowrap">{record ? exitMethodLabel(record) : '—'}</td>
                           <td className={`px-3 py-2 font-bold whitespace-nowrap ${typeof pnl !== 'number' ? 'text-muted-foreground' : pnl >= 0 ? 'text-[#0ECB81]' : 'text-[#F6465D]'}`}>
                             {fmtSignedUsdt(pnl)}
@@ -639,6 +641,20 @@ function itemTimeMs(item: ClassifiableItem) {
   return item.kind === 'journal'
     ? new Date(item.journal.pre_simulated_time).getTime()
     : (item.record.openTime || item.record.closeTime || 0);
+}
+
+function operationTimeForItem(
+  item: ClassifiableItem,
+  journal: TradeJournal | null,
+  record: TradeRecord | null,
+) {
+  if (journal) {
+    return journal.post_real_close_time ?? journal.pre_real_time ?? journal.created_at ?? journal.updated_at;
+  }
+  if (item.kind === 'orphanRecord') {
+    return record?.closeTime ?? record?.openTime ?? item.record.closeTime ?? item.record.openTime;
+  }
+  return record?.closeTime ?? record?.openTime ?? null;
 }
 
 function tradeRecordDirection(record: TradeRecord): 'long' | 'short' {

@@ -195,15 +195,16 @@ export function ClassifyAsNewCampaignDialog({ open, onOpenChange, items, onCreat
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-[760px] bg-card border-border">
-        <DialogHeader>
+      <DialogContent className="!flex !max-w-[1020px] !max-h-[calc(100vh-32px)] !w-[calc(100vw-32px)] !flex-col !gap-0 !overflow-hidden !p-0 bg-card border-border">
+        <DialogHeader className="shrink-0 border-b border-border px-6 py-4">
           <DialogTitle>归类为新战役</DialogTitle>
           <DialogDescription className="text-[11px]">
             {ordered.length} 个归类项 · {symbol}
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-4">
+        <div className="min-h-0 flex-1 overflow-y-auto px-6 py-4">
+          <div className="flex flex-col gap-4">
           {orphanCount > 0 && (
             <div className="rounded border border-[#F0B90B]/30 bg-[#F0B90B]/10 px-3 py-2 text-[11px] text-[#F0B90B]">
               本次选中含 {orphanCount} 条仓位历史记录。若全部来自仓位历史记录，将直接组成一次交易战役。
@@ -257,7 +258,7 @@ export function ClassifyAsNewCampaignDialog({ open, onOpenChange, items, onCreat
               </Button>
             </div>
 
-            <div className="overflow-x-auto rounded border border-border">
+            <div className="max-h-[44vh] overflow-auto rounded border border-border">
               <table className="w-full text-[11px]">
                 <thead className="bg-muted/30 text-muted-foreground">
                   <tr>
@@ -339,9 +340,10 @@ export function ClassifyAsNewCampaignDialog({ open, onOpenChange, items, onCreat
               {validation.warnings.map(warning => <div key={warning}>• {warning}</div>)}
             </div>
           )}
+          </div>
         </div>
 
-        <DialogFooter>
+        <DialogFooter className="shrink-0 border-t border-border bg-card px-6 py-4">
           <Button variant="ghost" onClick={() => onOpenChange(false)}>取消</Button>
           <Button
             className="bg-[#F0B90B] text-black hover:bg-[#F0B90B]/90 h-9"
