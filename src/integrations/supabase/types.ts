@@ -272,6 +272,7 @@ export type Database = {
           post_path_agency_note: string | null
           post_path_drawdown: string | null
           post_path_first_move: string | null
+          post_path_mode: string | null
           post_path_win_quality: string | null
           post_r_multiple: number | null
           post_real_problem: string | null
@@ -279,6 +280,7 @@ export type Database = {
           post_realized_pnl: number | null
           post_reflection: string | null
           post_reviewed_at: string | null
+          post_trade_agency_score: number | null
           pre_checklist_items: Json | null
           pre_checklist_passed: boolean | null
           pre_calibration_competence_basis: string | null
@@ -348,6 +350,7 @@ export type Database = {
           post_path_agency_note?: string | null
           post_path_drawdown?: string | null
           post_path_first_move?: string | null
+          post_path_mode?: string | null
           post_path_win_quality?: string | null
           post_r_multiple?: number | null
           post_real_problem?: string | null
@@ -355,6 +358,7 @@ export type Database = {
           post_realized_pnl?: number | null
           post_reflection?: string | null
           post_reviewed_at?: string | null
+          post_trade_agency_score?: number | null
           pre_checklist_items?: Json | null
           pre_checklist_passed?: boolean | null
           pre_calibration_competence_basis?: string | null
@@ -424,6 +428,7 @@ export type Database = {
           post_path_agency_note?: string | null
           post_path_drawdown?: string | null
           post_path_first_move?: string | null
+          post_path_mode?: string | null
           post_path_win_quality?: string | null
           post_r_multiple?: number | null
           post_real_problem?: string | null
@@ -431,6 +436,7 @@ export type Database = {
           post_realized_pnl?: number | null
           post_reflection?: string | null
           post_reviewed_at?: string | null
+          post_trade_agency_score?: number | null
           pre_checklist_items?: Json | null
           pre_checklist_passed?: boolean | null
           pre_calibration_competence_basis?: string | null

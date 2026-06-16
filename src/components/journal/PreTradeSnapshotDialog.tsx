@@ -416,7 +416,7 @@ export function PreTradeSnapshotDialog({
                   value={tooHardReason}
                   onChange={event => setTooHardReason(event.target.value)}
                   placeholder="例如：无明确 edge / 目标不清楚 / 盈亏比不足 / 不做也不亏 / 此刻状态不对"
-                  className="mt-2 min-h-[110px] border-border bg-background text-[12px]"
+                  className="mt-2 min-h-[110px] border-border bg-background text-[12px] text-muted-foreground/70 placeholder:text-muted-foreground/35 caret-foreground"
                 />
               </label>
               <div className="rounded border border-border bg-background/70 px-3 py-2 text-[11px] text-muted-foreground">
@@ -464,7 +464,7 @@ export function PreTradeSnapshotDialog({
                 value={tooHardReason}
                 onChange={event => setTooHardReason(event.target.value)}
                 placeholder="例如：无明确 edge / 目标不清楚 / 盈亏比不足 / 不做也不亏 / 此刻状态不对"
-                className="mt-2 min-h-[120px] border-border bg-background text-[12px]"
+                className="mt-2 min-h-[120px] border-border bg-background text-[12px] text-muted-foreground/70 placeholder:text-muted-foreground/35 caret-foreground"
               />
             </label>
             <div className="rounded border border-border bg-background/70 px-3 py-2 text-[11px] text-muted-foreground">

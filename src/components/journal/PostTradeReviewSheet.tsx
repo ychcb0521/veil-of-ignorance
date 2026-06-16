@@ -8,12 +8,11 @@ import { Dialog, DialogContent } from '@/components/ui/dialog';
 import { Sheet, SheetContent } from '@/components/ui/sheet';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
-import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { toast } from 'sonner';
-import { Pencil, ChevronDown, AlertTriangle } from 'lucide-react';
+import { ChevronDown, AlertTriangle } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { COGNITIVE_BIAS_LABELS } from '@/lib/cognitiveBiasTags';
 import {
@@ -43,7 +42,6 @@ import {
   groupMainStonesByFamily, MAIN_STONE_META, normalizeMainStoneTags,
   type MainStoneTag,
 } from '@/lib/mainStoneTags';
-import { CLASS_META, classifyTradePathProxy } from '@/lib/tradePathFacet';
 import {
   finalizeJournalReview,
   stampJournalCloseRealTime, listJournals,
@@ -54,38 +52,26 @@ import type { PainTag } from '@/types/journal';
 import { formatBeijingTime } from '@/lib/timeFormat';
 import type { TradeRecord } from '@/types/trading';
 
-const PATH_FIRST_MOVE_OPTIONS: Array<{
-  value: NonNullable<TradeJournal['post_path_first_move']>;
+const PATH_MODE_OPTIONS: Array<{
+  value: NonNullable<TradeJournal['post_path_mode']>;
   label: string;
   desc: string;
   accent: string;
 }> = [
-  { value: 'immediate_profit', label: '是，第一段就顺', desc: '开仓后很快站到浮盈，位置没有先付错成本。', accent: '#0ECB81' },
-  { value: 'immediate_drawdown', label: '不是，上来先水下', desc: '第一段就浮亏，主动权没有立刻站到你这边。', accent: '#F6465D' },
-  { value: 'unclear', label: '看不清', desc: '历史盘面不足，先不硬判。', accent: '#9AA0A6' },
+  { value: 'roll_position', label: '滚仓', desc: '顺着优势路径推进，把赢家继续养肥，而不是在第一段波动里急着收掉。', accent: '#0ECB81' },
+  { value: 'mirror_take_profit_1r', label: '1:1 镜像止盈', desc: '按风险镜像先兑现 1R，把主动权和心理带宽收回来。', accent: '#F0B90B' },
 ];
 
-const PATH_DRAWDOWN_OPTIONS: Array<{
-  value: NonNullable<TradeJournal['post_path_drawdown']>;
+const TRADE_AGENCY_SCORE_OPTIONS: Array<{
+  value: NonNullable<TradeJournal['post_trade_agency_score']>;
   label: string;
   desc: string;
   accent: string;
 }> = [
-  { value: 'none_or_shallow', label: '没有或很浅', desc: '浮亏没有威胁结构，主动权基本在手。', accent: '#0ECB81' },
-  { value: 'meaningful', label: '有明显浮亏', desc: '这笔需要扛一段，路径质量打折。', accent: '#D89B00' },
-  { value: 'over_stop', label: '打到/越过止损', desc: '已经超过预案边界，主动权交出去了。', accent: '#F6465D' },
-  { value: 'unclear', label: '看不清', desc: '缺少足够路径信息，先留空白样本。', accent: '#9AA0A6' },
-];
-
-const PATH_WIN_QUALITY_OPTIONS: Array<{
-  value: Extract<NonNullable<TradeJournal['post_path_win_quality']>, 'clean_win' | 'dragged_win' | 'unclear'>;
-  label: string;
-  desc: string;
-  accent: string;
-}> = [
-  { value: 'clean_win', label: '不是，干净赢', desc: '赢来自位置和结构，不靠硬扛换来。', accent: '#0ECB81' },
-  { value: 'dragged_win', label: '是，扛出来的赢', desc: '终点赢了，但路径在训练坏习惯。', accent: '#F6465D' },
-  { value: 'unclear', label: '看不清', desc: '无法确认是否扛单，后续可用复现页补判。', accent: '#9AA0A6' },
+  { value: 1, label: '1 · 完全被动', desc: '价格推着你走，离场主要来自疼痛、慌乱或被动触发。', accent: '#F6465D' },
+  { value: 2, label: '2 · 勉强可控', desc: '有计划，但执行时明显被波动牵着走。', accent: '#D89B00' },
+  { value: 3, label: '3 · 主动可控', desc: '基本按路径执行，关键动作没有被情绪接管。', accent: '#F0B90B' },
+  { value: 4, label: '4 · 完全主动', desc: '节奏、止盈、离场都由预案主导，市场只是触发条件。', accent: '#0ECB81' },
 ];
 
 interface Props {
@@ -105,12 +91,20 @@ const LOOP_TONE_COLOR: Record<LegTone, string> = {
   muted: '#9AA0A6',
 };
 
+const RESULT_REVIEW_LABELS: Record<StructureResultQuadrant, string> = {
+  deserved_win: '正当过程好结果',
+  correct_loss: '正当过程的坏结果',
+  dangerous_win: '错误过程的好结果',
+  deserved_loss: '错误过程的坏结构',
+};
+
+const reviewAnswerTextareaClass = 'text-[12px] text-muted-foreground/70 placeholder:text-muted-foreground/35 caret-foreground bg-background/80 border-border/70 rounded-xl';
+
 export function PostTradeReviewSheet({
   isOpen, onOpenChange, journal, tradeRecord, onReviewed, onAutoPause,
 }: Props) {
   const isMobile = useIsMobile();
   const { user } = useAuth();
-  const [resultSummary, setResultSummary] = useState('');
   const [decisionQuality, setDecisionQuality] = useState<TradeJournal['post_decision_quality']>('mixed');
   const [expectancyReview, setExpectancyReview] = useState('');
   const [oddsStructureReviewValue, setOddsStructureReviewValue] = useState<OddsStructureReview | null>(null);
@@ -121,10 +115,8 @@ export function PostTradeReviewSheet({
   const [struggleLevel, setStruggleLevel] = useState<StruggleLevel | null>(null);
   const [smallPositionDrag, setSmallPositionDrag] = useState<TradeJournal['post_small_position_drag']>(null);
   const [missedHighOddsState, setMissedHighOddsState] = useState<TradeJournal['post_missed_high_odds_state']>(null);
-  const [pathFirstMove, setPathFirstMove] = useState<TradeJournal['post_path_first_move']>(null);
-  const [pathDrawdown, setPathDrawdown] = useState<TradeJournal['post_path_drawdown']>(null);
-  const [pathWinQuality, setPathWinQuality] = useState<TradeJournal['post_path_win_quality']>(null);
-  const [pathAgencyNote, setPathAgencyNote] = useState('');
+  const [pathMode, setPathMode] = useState<TradeJournal['post_path_mode']>(null);
+  const [tradeAgencyScore, setTradeAgencyScore] = useState<TradeJournal['post_trade_agency_score']>(null);
   const [hedgeWorthIt, setHedgeWorthIt] = useState<TradeJournal['hedge_worth_it']>(null);
   const [opponentWasRight, setOpponentWasRight] = useState<boolean | null>(null);
   // ===== 平仓情绪侧复盘 · 七问 =====
@@ -137,7 +129,6 @@ export function PostTradeReviewSheet({
   const [emoMainStoneTags, setEmoMainStoneTags] = useState<MainStoneTag[]>([]);
   const [emoNextTimePlan, setEmoNextTimePlan] = useState('');
   const [rMultipleOverride, setRMultipleOverride] = useState<string>('');
-  const [editingR, setEditingR] = useState(false);
   const [saving, setSaving] = useState(false);
   /** 用户全部主力单（用于「工具箱集中度 / 铁锤人」体检，仅展示）。 */
   const [allUserJournals, setAllUserJournals] = useState<TradeJournal[]>([]);
@@ -152,7 +143,6 @@ export function PostTradeReviewSheet({
     setStampedCloseTime(null);
     (async () => {
       try {
-        setResultSummary(journal.post_result_summary ?? '');
         setDecisionQuality(journal.post_decision_quality ?? 'mixed');
         const parsedOddsStructureReview = parseOddsStructureReviewText(journal.post_positive_expectancy_review);
         setOddsStructureReviewValue(parsedOddsStructureReview.review);
@@ -164,10 +154,8 @@ export function PostTradeReviewSheet({
         setStruggleLevel((journal.post_struggle_level as StruggleLevel | null) ?? null);
         setSmallPositionDrag(journal.post_small_position_drag ?? null);
         setMissedHighOddsState(journal.post_missed_high_odds_state ?? null);
-        setPathFirstMove(journal.post_path_first_move ?? null);
-        setPathDrawdown(journal.post_path_drawdown ?? null);
-        setPathWinQuality(journal.post_path_win_quality ?? (journal.post_outcome && journal.post_outcome !== 'win' ? 'not_win' : null));
-        setPathAgencyNote(journal.post_path_agency_note ?? '');
+        setPathMode(journal.post_path_mode ?? null);
+        setTradeAgencyScore(journal.post_trade_agency_score ?? null);
         setHedgeWorthIt(journal.hedge_worth_it ?? null);
         setOpponentWasRight(journal.post_opponent_was_right ?? null);
         setEmoDisturbance(journal.post_emo_disturbance ?? '');
@@ -209,16 +197,6 @@ export function PostTradeReviewSheet({
   const finalR = rMultipleOverride !== '' && !isNaN(Number(rMultipleOverride))
     ? Number(rMultipleOverride)
     : computedR;
-
-  const holdDurationLabel = useMemo(() => {
-    if (!journal) return '—';
-    const start = new Date(journal.pre_simulated_time).getTime();
-    const end = tradeRecord?.closeTime ?? Date.now();
-    const diff = Math.max(0, end - start);
-    const h = Math.floor(diff / 3_600_000);
-    const m = Math.floor((diff % 3_600_000) / 60_000);
-    return `${h}h ${m}m`;
-  }, [journal, tradeRecord?.closeTime]);
 
   // Hard-block dismiss when an unreviewed journal is open. Editing an already-reviewed
   // journal stays freely dismissible.
@@ -322,9 +300,8 @@ export function PostTradeReviewSheet({
       || journal.pre_odds_structure === 'against_crowd_unreleased'
       || (journal.pre_opportunity_cost_worth === true && journal.pre_cheap_opportunity === 'cheap')
     );
-  const showPathAgency = !isHedge && journal.direction !== 'no_entry';
-  const pathProxy = showPathAgency && tradeRecord ? classifyTradePathProxy(journal, tradeRecord) : null;
-  const pathWinQualityToSave = outcome === 'win' ? pathWinQuality : 'not_win';
+  const showPathReview = !isHedge && journal.direction !== 'no_entry';
+  const showOpeningSnapshot = journal.source !== 'retroactive_from_record';
   // 结构对／错的 2×2 排布（上排结构对、下排结构错；左列赢、右列亏）。
   const QUADRANT_GRID: StructureResultQuadrant[] = ['deserved_win', 'correct_loss', 'dangerous_win', 'deserved_loss'];
 
@@ -345,13 +322,12 @@ export function PostTradeReviewSheet({
     regimeEdgeMismatchHint(j.pre_market_regime, j.pre_edge_source) != null,
   ).length;
 
-  const resultValid = !!resultSummary.trim();
+  const resultValid = !quadrantApplicable || !!quadrant;
   const quadrantValid = !quadrantApplicable || !!quadrant;
   const decisionValid = !quadrantApplicable || decisionQuality === 'good' || decisionQuality === 'bad';
   const falsificationFactValid = !snapshotFalsification || falsificationStatus != null;
   const oddsStructureFactValid = isHedge || !journal.pre_odds_structure || oddsStructureReviewValue != null;
-  const pathAgencyValid = !showPathAgency
-    || (!!pathFirstMove && !!pathDrawdown && (outcome !== 'win' || !!pathWinQuality));
+  const pathValid = !showPathReview || (!!pathMode && !!tradeAgencyScore);
   const reviewLoopValid = !!expectancyReview.trim()
     && !!premortemReview.trim()
     && !!invalidationReview.trim()
@@ -374,7 +350,7 @@ export function PostTradeReviewSheet({
     && decisionValid
     && quadrantValid
     && reviewLoopValid
-    && pathAgencyValid
+    && pathValid
     && opponentValid
     && hedgeWorthItValid
     && emoValid
@@ -402,15 +378,13 @@ export function PostTradeReviewSheet({
         post_r_multiple: finalR,
         post_reflection: journal.post_reflection ?? '',
         post_correct_action: journal.post_correct_action ?? '',
-        post_result_summary: resultSummary.trim(),
+        post_result_summary: quadrant ? RESULT_REVIEW_LABELS[quadrant] : (journal.post_result_summary ?? outcomeLabel),
         post_decision_quality: decisionQuality,
         post_struggle_level: struggleLevel,
         post_small_position_drag: showSmallPositionDrag ? smallPositionDrag : null,
         post_missed_high_odds_state: showMissedHighOddsState ? missedHighOddsState : null,
-        post_path_first_move: showPathAgency ? pathFirstMove : null,
-        post_path_drawdown: showPathAgency ? pathDrawdown : null,
-        post_path_win_quality: showPathAgency ? pathWinQualityToSave : null,
-        post_path_agency_note: showPathAgency ? (pathAgencyNote.trim() || null) : null,
+        post_path_mode: showPathReview ? pathMode : null,
+        post_trade_agency_score: showPathReview ? tradeAgencyScore : null,
         post_positive_expectancy_review: buildOddsStructureReviewText(expectancyReview, oddsStructureReviewValue),
         post_premortem_review: premortemReview.trim(),
         post_invalidation_review: invalidationReview.trim(),
@@ -581,7 +555,8 @@ export function PostTradeReviewSheet({
           </div>
         )}
         {/* (A) Snapshot */}
-        <Collapsible defaultOpen>
+        {showOpeningSnapshot && (
+        <Collapsible>
           <CollapsibleTrigger className={`w-full px-4 py-3 text-[11px] ${subtleLabelClass} flex items-center gap-1.5 hover:text-foreground transition-colors ${sectionCardClass}`}>
             <ChevronDown className="w-3 h-3" /> 开仓时的快照
           </CollapsibleTrigger>
@@ -770,6 +745,7 @@ export function PostTradeReviewSheet({
             )}
           </CollapsibleContent>
         </Collapsible>
+        )}
 
         {/* (B) Auto outcome */}
         {!tradeRecord && journal.direction !== 'no_entry' && (
@@ -777,42 +753,6 @@ export function PostTradeReviewSheet({
             未找到对应的成交记录，下方判定字段使用快照中保存的数据，必要时可手填 R 倍数覆盖。
           </div>
         )}
-        <div className={`grid grid-cols-2 sm:grid-cols-4 gap-3 text-[12px] font-mono ${sectionCardClass} p-3`}>
-          <div className={metricCardClass}>
-            <div className="text-[10px] uppercase tracking-wide text-muted-foreground">结果</div>
-            <div className={outcome === 'win' ? 'text-[#0ECB81]' : outcome === 'loss' ? 'text-[#F6465D]' : 'text-foreground'}>
-              {outcome}
-            </div>
-          </div>
-          <div className={metricCardClass}>
-            <div className="text-[10px] uppercase tracking-wide text-muted-foreground">实现 P&L</div>
-            <div className={pnl >= 0 ? 'text-[#0ECB81]' : 'text-[#F6465D]'}>
-              {pnl >= 0 ? '+' : ''}{pnl.toFixed(2)}
-            </div>
-          </div>
-          <div className={metricCardClass}>
-            <div className="text-[10px] uppercase tracking-wide text-muted-foreground flex items-center gap-1">
-              R 倍数
-              <button onClick={() => setEditingR(v => !v)}><Pencil className="w-2.5 h-2.5 text-muted-foreground hover:text-foreground" /></button>
-            </div>
-            {editingR ? (
-              <Input
-                value={rMultipleOverride}
-                onChange={e => setRMultipleOverride(e.target.value)}
-                onBlur={() => setEditingR(false)}
-                autoFocus
-                className="mt-1 h-7 text-[12px] bg-card border-border/70 font-mono rounded-md"
-              />
-            ) : (
-              <div>{finalR != null ? finalR.toFixed(2) + ' R' : '—'}</div>
-            )}
-          </div>
-          <div className={metricCardClass}>
-            <div className="text-[10px] uppercase tracking-wide text-muted-foreground">持仓时长</div>
-            <div>{holdDurationLabel}</div>
-          </div>
-        </div>
-
         {isHedge && (
           <div className={`space-y-3 px-4 py-4 ${sectionCardClass}`}>
             <div>
@@ -868,7 +808,7 @@ export function PostTradeReviewSheet({
               value={premortemReview}
               onChange={e => setPremortemReview(e.target.value)}
               placeholder="只写这个 pre-mortem 是否被碰到：命中 / 部分命中 / 没命中。先别解释为什么。"
-              className="text-[12px] bg-background/80 border-border/70 rounded-xl"
+              className={reviewAnswerTextareaClass}
             />
           </div>
 
@@ -907,7 +847,7 @@ export function PostTradeReviewSheet({
                   value={falsificationNote}
                   onChange={event => setFalsificationNote(event.target.value)}
                   placeholder="证伪状态备注（可选）：例如触发时间、迟疑点、是否按计划拆仓。"
-                  className="text-[12px] bg-background/80 border-border/70 rounded-xl"
+                  className={reviewAnswerTextareaClass}
                 />
                 {!falsificationFactValid && <div className="text-right font-mono text-[10px] text-[#F6465D]">必选</div>}
               </>
@@ -917,7 +857,7 @@ export function PostTradeReviewSheet({
               value={invalidationReview}
               onChange={e => setInvalidationReview(e.target.value)}
               placeholder={invalidationReviewPlaceholder}
-              className="text-[12px] bg-background/80 border-border/70 rounded-xl"
+              className={reviewAnswerTextareaClass}
             />
           </div>
 
@@ -958,7 +898,7 @@ export function PostTradeReviewSheet({
                 value={expectancyReview}
                 onChange={e => setExpectancyReview(e.target.value)}
                 placeholder="只写目标空间/结构破坏是否被市场验证；不要用最后盈亏倒推。"
-                className="text-[12px] bg-background/80 border-border/70 rounded-xl"
+                className={reviewAnswerTextareaClass}
               />
             </div>
           )}
@@ -971,7 +911,7 @@ export function PostTradeReviewSheet({
                 value={expectancyReview}
                 onChange={e => setExpectancyReview(e.target.value)}
                 placeholder="只写这份对冲保险有没有值回摩擦成本，先不写解释。"
-                className="text-[12px] bg-background/80 border-border/70 rounded-xl"
+                className={reviewAnswerTextareaClass}
               />
             </div>
           )}
@@ -1099,22 +1039,11 @@ export function PostTradeReviewSheet({
 
         <div className={`space-y-3 px-4 py-4 ${sectionCardClass}`}>
           <div className="text-[12px] font-medium">结果复盘</div>
-          <div className="space-y-1.5">
-            <Label className="text-[12px] font-medium">这笔结果如何？*</Label>
-            <Textarea
-              rows={2}
-              value={resultSummary}
-              onChange={e => setResultSummary(e.target.value)}
-              placeholder="只写结果事实：赚/亏/保本、平仓方式、是否达到原计划。"
-              className="text-[12px] bg-background/80 border-border/70 rounded-xl"
-            />
-          </div>
-
           {quadrantApplicable && (
             <div className="space-y-2">
               <div className="flex items-center justify-between">
-                <Label className="text-[12px] font-medium">结构 × 结果</Label>
-                <span className="text-[10px] text-muted-foreground">机会是运气，优秀是结构</span>
+                <Label className="text-[12px] font-medium">选择本笔归类 *</Label>
+                <span className="text-[10px] text-muted-foreground">好结果不等于好过程，坏结果不等于坏过程</span>
               </div>
               <div className="grid grid-cols-2 gap-1.5">
                 {QUADRANT_GRID.map(cell => {
@@ -1143,10 +1072,10 @@ export function PostTradeReviewSheet({
                         className={`text-[11px] font-semibold ${active ? '' : 'text-muted-foreground'}`}
                         style={active ? { color: meta.accent } : undefined}
                       >
-                        {meta.label}
+                        {RESULT_REVIEW_LABELS[cell]}
                       </div>
                       <div className="text-[9px] text-muted-foreground">
-                        {meta.structureSound ? '结构对' : '结构错'} · {meta.isWin ? '赢' : '亏'}
+                        {meta.structureSound ? '正当过程' : '错误过程'} · {meta.isWin ? '好结果' : '坏结果'}
                       </div>
                     </button>
                   );
@@ -1165,7 +1094,7 @@ export function PostTradeReviewSheet({
                     <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
                   )}
                   <span>
-                    <span className="font-semibold">{STRUCTURE_RESULT_QUADRANTS[quadrant].label}</span>
+                    <span className="font-semibold">{RESULT_REVIEW_LABELS[quadrant]}</span>
                     ：{STRUCTURE_RESULT_QUADRANTS[quadrant].insight}
                   </span>
                 </div>
@@ -1178,42 +1107,29 @@ export function PostTradeReviewSheet({
           )}
         </div>
 
-        {showPathAgency && (
+        {showPathReview && (
           <div className={`space-y-3 px-4 py-4 ${sectionCardClass}`}>
             <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
               <div>
-                <div className="text-[12px] font-semibold text-foreground">路径 + 主动权</div>
+                <div className="text-[12px] font-semibold text-foreground">路径</div>
                 <div className="mt-0.5 text-[10px] leading-relaxed text-muted-foreground">
-                  终点只告诉你赢亏，路径告诉你主动权在不在自己手里。赢单尤其要看是不是扛出来的。
+                  只记录这笔最终采用的路径，以及你在这条路径里的主动权。
                 </div>
               </div>
-              {pathProxy && (
-                <div className="rounded-full border border-border/70 bg-background px-2.5 py-1 text-[10px] text-muted-foreground">
-                  系统初读：{pathProxy.label}
-                </div>
-              )}
             </div>
 
-            {pathProxy && (
-              <div className="rounded-lg border border-border/60 bg-background/60 px-3 py-2 text-[10px] leading-relaxed text-muted-foreground">
-                {pathProxy.needsReplay
-                  ? '终点是赢，但赢单必须继续判路径：如果中途靠有效浮亏换回来，它不是干净样本。'
-                  : CLASS_META[pathProxy.cls].hint}
-              </div>
-            )}
-
-            <div className="grid gap-3 lg:grid-cols-3">
+            <div className="grid gap-3 md:grid-cols-2">
               <div className="space-y-2">
-                <Label className="text-[12px] font-medium">上来是不是就盈利？*</Label>
-                <div className="grid gap-1.5">
-                  {PATH_FIRST_MOVE_OPTIONS.map(option => {
-                    const active = pathFirstMove === option.value;
+                <Label className="text-[12px] font-medium">路径选择 *</Label>
+                <div className="grid gap-1.5 sm:grid-cols-2">
+                  {PATH_MODE_OPTIONS.map(option => {
+                    const active = pathMode === option.value;
                     return (
                       <button
                         key={option.value}
                         type="button"
-                        onClick={() => setPathFirstMove(active ? null : option.value)}
-                        className={`rounded-lg border px-3 py-2 text-left transition-colors ${
+                        onClick={() => setPathMode(active ? null : option.value)}
+                        className={`min-h-[82px] rounded-lg border px-3 py-2 text-left transition-colors ${
                           active ? '' : 'border-border bg-background text-muted-foreground hover:bg-accent'
                         }`}
                         style={active ? { borderColor: option.accent, backgroundColor: `${option.accent}14` } : undefined}
@@ -1229,16 +1145,16 @@ export function PostTradeReviewSheet({
               </div>
 
               <div className="space-y-2">
-                <Label className="text-[12px] font-medium">中途有没有有效浮亏？*</Label>
-                <div className="grid gap-1.5">
-                  {PATH_DRAWDOWN_OPTIONS.map(option => {
-                    const active = pathDrawdown === option.value;
+                <Label className="text-[12px] font-medium">交易主动权 *</Label>
+                <div className="grid gap-1.5 sm:grid-cols-2">
+                  {TRADE_AGENCY_SCORE_OPTIONS.map(option => {
+                    const active = tradeAgencyScore === option.value;
                     return (
                       <button
                         key={option.value}
                         type="button"
-                        onClick={() => setPathDrawdown(active ? null : option.value)}
-                        className={`rounded-lg border px-3 py-2 text-left transition-colors ${
+                        onClick={() => setTradeAgencyScore(active ? null : option.value)}
+                        className={`min-h-[82px] rounded-lg border px-3 py-2 text-left transition-colors ${
                           active ? '' : 'border-border bg-background text-muted-foreground hover:bg-accent'
                         }`}
                         style={active ? { borderColor: option.accent, backgroundColor: `${option.accent}14` } : undefined}
@@ -1252,50 +1168,8 @@ export function PostTradeReviewSheet({
                   })}
                 </div>
               </div>
-
-              <div className="space-y-2">
-                <Label className="text-[12px] font-medium">如果这笔赢了，是不是扛出来的？{outcome === 'win' ? '*' : ''}</Label>
-                {outcome === 'win' ? (
-                  <div className="grid gap-1.5">
-                    {PATH_WIN_QUALITY_OPTIONS.map(option => {
-                      const active = pathWinQuality === option.value;
-                      return (
-                        <button
-                          key={option.value}
-                          type="button"
-                          onClick={() => setPathWinQuality(active ? null : option.value)}
-                          className={`rounded-lg border px-3 py-2 text-left transition-colors ${
-                            active ? '' : 'border-border bg-background text-muted-foreground hover:bg-accent'
-                          }`}
-                          style={active ? { borderColor: option.accent, backgroundColor: `${option.accent}14` } : undefined}
-                        >
-                          <div className="text-[11px] font-medium" style={active ? { color: option.accent } : undefined}>
-                            {option.label}
-                          </div>
-                          <div className="mt-0.5 text-[10px] leading-tight text-muted-foreground">{option.desc}</div>
-                        </button>
-                      );
-                    })}
-                  </div>
-                ) : (
-                  <div className="rounded-lg border border-border/60 bg-background/60 px-3 py-3 text-[11px] leading-relaxed text-muted-foreground">
-                    非赢单不判“扛出来的赢”；本笔只记录第一段和浮亏路径。
-                  </div>
-                )}
-              </div>
             </div>
-
-            <div className="space-y-1.5">
-              <Label className="text-[12px] font-medium">路径备注</Label>
-              <Textarea
-                rows={2}
-                value={pathAgencyNote}
-                onChange={event => setPathAgencyNote(event.target.value)}
-                placeholder="只写路径事实：第一段是否顺、中途最大浮亏大概发生在哪、是否靠扛回本。"
-                className="text-[12px] bg-background/80 border-border/70 rounded-xl"
-              />
-            </div>
-            {!pathAgencyValid && <div className="text-right font-mono text-[10px] text-[#F6465D]">路径主动权必选</div>}
+            {!pathValid && <div className="text-right font-mono text-[10px] text-[#F6465D]">路径与交易主动权必选</div>}
           </div>
         )}
 
@@ -1523,7 +1397,7 @@ export function PostTradeReviewSheet({
               value={emoDisturbance}
               onChange={e => setEmoDisturbance(e.target.value)}
               placeholder="只写让你心里一震/一紧/一急的那个具体时刻：价格跳了、突然爆仓、有人喊单、止损被扫……"
-              className="text-[12px] bg-background/80 border-border/70 rounded-xl"
+              className={reviewAnswerTextareaClass}
             />
           </div>
 
@@ -1534,11 +1408,11 @@ export function PostTradeReviewSheet({
               value={emoFirstReaction}
               onChange={e => setEmoFirstReaction(e.target.value)}
               placeholder="没经过大脑那一下：想加仓、想砍掉、想躲开屏幕、想骂人、想截图发出去……写最原始的那个冲动。"
-              className="text-[12px] bg-background/80 border-border/70 rounded-xl"
+              className={reviewAnswerTextareaClass}
             />
           </div>
 
-          <div className="grid gap-2 sm:grid-cols-2">
+          <div className="space-y-3">
             <div className="space-y-1.5">
               <Label className="text-[12px] font-medium">③ 我其实想得到什么？*</Label>
               <Textarea
@@ -1546,7 +1420,7 @@ export function PostTradeReviewSheet({
                 value={emoWanted}
                 onChange={e => setEmoWanted(e.target.value)}
                 placeholder="不是「赚钱」这种正确答案。是更底层的东西：被认可、扳回上一笔、证明自己看对了、一次到位……"
-                className="text-[12px] bg-background/80 border-border/70 rounded-xl"
+                className={reviewAnswerTextareaClass}
               />
             </div>
             <div className="space-y-1.5">
@@ -1556,7 +1430,7 @@ export function PostTradeReviewSheet({
                 value={emoFeared}
                 onChange={e => setEmoFeared(e.target.value)}
                 placeholder="也不是「亏钱」这种表层答案。是更底层的东西：被打脸、错过、回吐、被嘲笑、不能再翻身……"
-                className="text-[12px] bg-background/80 border-border/70 rounded-xl"
+                className={reviewAnswerTextareaClass}
               />
             </div>
           </div>
@@ -1568,7 +1442,7 @@ export function PostTradeReviewSheet({
               value={emoExcuse}
               onChange={e => setEmoExcuse(e.target.value)}
               placeholder="当时是怎么把这个动作「说圆」的？「这次不一样」/「再等等就回来了」/「信号不算明显」/「破位需要确认」……"
-              className="text-[12px] bg-background/80 border-border/70 rounded-xl"
+              className={reviewAnswerTextareaClass}
             />
             <p className="text-[10px] text-muted-foreground">不是审判，是采证。把当时骗自己的那句话原样写下来。</p>
           </div>
@@ -1639,7 +1513,7 @@ export function PostTradeReviewSheet({
               value={emoMainStone}
               onChange={e => setEmoMainStone(e.target.value)}
               placeholder="用一句话补充：选中的标签具体长什么样？例如「就是怕上一笔亏了不甘心，这单本质是找回场子」。"
-              className="text-[12px] bg-background/80 border-border/70 rounded-xl"
+              className={reviewAnswerTextareaClass}
             />
             {!emoMainStoneValid && (
               <div className="text-right font-mono text-[10px] text-[#F6465D]">至少选一个标签，或写一句话</div>
@@ -1654,7 +1528,7 @@ export function PostTradeReviewSheet({
               value={emoNextTimePlan}
               onChange={e => setEmoNextTimePlan(e.target.value)}
               placeholder="不要写「我下次会冷静」。写一个动作级的预案：触发什么信号、做什么动作、不做什么动作。例如：再遇到这种快速跳价，先离开屏幕 5 分钟再决定加减仓。"
-              className="text-[12px] bg-background/80 border-border/70 rounded-xl"
+              className={reviewAnswerTextareaClass}
             />
             <p className="text-[10px] leading-relaxed text-muted-foreground">
               这块石头下次还会出现。提前写好动作，到时候才不用临场跟自己谈判。

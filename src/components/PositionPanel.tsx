@@ -113,11 +113,13 @@ export function PositionPanel({
     }
     if (lastCloseIdRef.current === latest.id) return;
     lastCloseIdRef.current = latest.id;
-    // Direct-trading mode: 弹一个轻量确认，让用户自由选择跳过或前往评价。
+    // Direct-trading mode: 只评价多单。空单默认跳过，不生成最小化复盘记录。
     // 选评价时，现场用 backfillJournalFromRecord 反向回填一个 journal，
     // 走的是和决策记录模式同一条 PostTradeReviewSheet 流程，统计上等价。
     if (tradingMode === 'direct') {
-      setDirectReviewPrompt(latest);
+      if (latest.side === 'LONG') {
+        setDirectReviewPrompt(latest);
+      }
       return;
     }
     const direction = latest.side === 'LONG' ? 'long' : 'short';
@@ -137,6 +139,10 @@ export function PositionPanel({
   /** Direct 模式确认评价：找已有 journal 或现场 backfill，然后开 PostTradeReviewSheet。 */
   const startDirectReview = async () => {
     if (!user || !directReviewPrompt) return;
+    if (directReviewPrompt.side !== 'LONG') {
+      setDirectReviewPrompt(null);
+      return;
+    }
     setDirectReviewLoading(true);
     try {
       // 幂等：同一条 record 多次平仓→评价不重复回填
@@ -174,7 +180,8 @@ export function PositionPanel({
       setJournalsByCompositeKey(ckey);
     } catch { /* silent */ }
   };
-  useEffect(() => { reloadJournals(); /* eslint-disable-next-line */ }, [user]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { reloadJournals(); }, [user]);
 
   const unreviewedCount = useMemo(
     () => Object.values(journalsByCompositeKey).filter(j => !j.post_reviewed_at).length,
@@ -494,7 +501,10 @@ export function PositionPanel({
                             ) : null}
                             <button
                               type="button"
-                              onClick={(e) => { e.stopPropagation(); !col.locked && toggleColumn(col.key); }}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                if (!col.locked) toggleColumn(col.key);
+                              }}
                               disabled={col.locked}
                               className={`w-4 h-4 rounded-sm border flex items-center justify-center transition-colors ${
                                 columnVisibility[col.key]

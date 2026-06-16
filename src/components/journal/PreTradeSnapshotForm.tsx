@@ -915,7 +915,7 @@ export function PreTradeSnapshotForm({
   // Tier-2 嵌套面板 / 选项：bg-background/60 + border/60，扁平无阴影。
   // Tier-3 控件（输入框）：bg-background + border/60。选中态：中性 foreground 轻提亮，品牌色只留给语义。
   const inputCls = 'h-9 rounded-lg border-border/60 bg-background text-[12px] text-foreground font-mono shadow-none';
-  const textareaCls = 'min-h-[108px] resize-none rounded-lg border-border/60 bg-background text-[12px] text-foreground leading-relaxed shadow-none';
+  const textareaCls = 'min-h-[108px] resize-none rounded-lg border-border/60 bg-background text-[12px] text-muted-foreground/70 placeholder:text-muted-foreground/35 caret-foreground leading-relaxed shadow-none';
   const mainSurfaceCls = 'rounded-2xl border border-border/60 bg-card shadow-[0_16px_45px_rgba(15,23,42,0.045)]';
   const mainPanelTriggerCls = 'group flex w-full items-center justify-between gap-3 px-4 py-3 text-left transition-colors hover:bg-muted/30';
   const mainSectionTitleCls = 'text-[12px] font-semibold tracking-normal text-foreground';
@@ -929,7 +929,7 @@ export function PreTradeSnapshotForm({
   const hedgeAnchorButtonIdleCls = 'border-border/60 bg-background/60 text-muted-foreground hover:border-border hover:bg-muted/40';
   const hedgeAnchorButtonActiveCls = 'border-foreground/35 bg-foreground/[0.04] text-foreground';
   const hedgeScenarioCardCls = 'flex h-full flex-col rounded-xl border border-border/60 bg-background/60 p-3 shadow-none transition-colors';
-  const hedgeScenarioTextareaCls = 'mt-2 min-h-[84px] flex-1 resize-none rounded-lg border-border/60 bg-background text-[12px] leading-relaxed shadow-none';
+  const hedgeScenarioTextareaCls = 'mt-2 min-h-[84px] flex-1 resize-none rounded-lg border-border/60 bg-background text-[12px] text-muted-foreground/70 placeholder:text-muted-foreground/35 caret-foreground leading-relaxed shadow-none';
   const decisionDoneCount = [
     whyRight.trim().length > 0,
     failureReason.trim().length > 0,
