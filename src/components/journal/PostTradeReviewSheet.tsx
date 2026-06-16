@@ -11,19 +11,15 @@ import { Textarea } from '@/components/ui/textarea';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { toast } from 'sonner';
-import { Pencil, ChevronDown, BrainCircuit, AlertTriangle } from 'lucide-react';
+import { Pencil, ChevronDown, AlertTriangle } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
-import { useTradingContext } from '@/contexts/TradingContext';
 import { COGNITIVE_BIAS_LABELS } from '@/lib/cognitiveBiasTags';
 import {
-  EDGE_SOURCE_OPTIONS, EDGE_SOURCE_LABELS,
   aggregateEdgeSourceUsage, HAMMER_DOMINANCE_THRESHOLD, HAMMER_MIN_SAMPLES,
 } from '@/lib/edgeSource';
 import { regimeEdgeMismatchHint } from '@/lib/snapshotStructure';
-import { buildReflectionText, parseReflectionText } from '@/lib/reflectionFacts';
 import {
   classifyStructureResult,
   STRUCTURE_RESULT_QUADRANTS,
@@ -50,17 +46,13 @@ import {
 import { CLASS_META, classifyTradePathProxy } from '@/lib/tradePathFacet';
 import {
   finalizeJournalReview,
-  updateJournalDeepAnalysis, stampJournalCloseRealTime, listJournals,
+  stampJournalCloseRealTime, listJournals,
 } from '@/lib/journalApi';
 import type { TradeJournal, TradeOutcome } from '@/types/journal';
 import { MENTAL_STATE_LABELS, PAIN_TAG_LABELS } from '@/types/journal';
 import type { PainTag } from '@/types/journal';
 import { formatBeijingTime } from '@/lib/timeFormat';
 import type { TradeRecord } from '@/types/trading';
-import {
-  SixStepAnalysisForm, EMPTY_SIX_STEP, pickSixStepValue, countCompletedSteps,
-  type SixStepValue,
-} from './SixStepAnalysisForm';
 
 const PATH_FIRST_MOVE_OPTIONS: Array<{
   value: NonNullable<TradeJournal['post_path_first_move']>;
@@ -105,19 +97,6 @@ interface Props {
   onAutoPause?: () => void;
 }
 
-function EdgeSourceTooltipContent({ option }: { option: (typeof EDGE_SOURCE_OPTIONS)[number] }) {
-  return (
-    <div className="max-w-[340px] space-y-1.5 text-[11px] leading-relaxed">
-      <div className="font-medium text-foreground">{option.label}</div>
-      <div><span className="text-[#F0B90B]">入场第一性原理：</span>{option.entryPrinciple}</div>
-      <div><span className="text-[#0ECB81]">好位置：</span>{option.goodLocation}</div>
-      <div><span className="text-[#F6465D]">坏位置：</span>{option.badLocation}</div>
-      <div><span className="text-[#F0B90B]">入场要等：</span>{option.waitForEntry}</div>
-      <div><span className="text-[#F6465D]">不能等到：</span>{option.avoidWaitingUntil}</div>
-    </div>
-  );
-}
-
 /** 闭环判读：腿色调 → 品牌色（库只给语义色调，视图在这里落到具体色值）。 */
 const LOOP_TONE_COLOR: Record<LegTone, string> = {
   good: '#0ECB81',
@@ -131,11 +110,6 @@ export function PostTradeReviewSheet({
 }: Props) {
   const isMobile = useIsMobile();
   const { user } = useAuth();
-  const { setTradeHistory } = useTradingContext();
-  const [reflection, setReflection] = useState('');
-  const [reflectionFacts, setReflectionFacts] = useState('');
-  const [correctAction, setCorrectAction] = useState('');
-  const [exitReason, setExitReason] = useState('');
   const [resultSummary, setResultSummary] = useState('');
   const [decisionQuality, setDecisionQuality] = useState<TradeJournal['post_decision_quality']>('mixed');
   const [expectancyReview, setExpectancyReview] = useState('');
@@ -151,7 +125,6 @@ export function PostTradeReviewSheet({
   const [pathDrawdown, setPathDrawdown] = useState<TradeJournal['post_path_drawdown']>(null);
   const [pathWinQuality, setPathWinQuality] = useState<TradeJournal['post_path_win_quality']>(null);
   const [pathAgencyNote, setPathAgencyNote] = useState('');
-  const [edgeSourceBackfill, setEdgeSourceBackfill] = useState<TradeJournal['pre_edge_source']>(null);
   const [hedgeWorthIt, setHedgeWorthIt] = useState<TradeJournal['hedge_worth_it']>(null);
   const [opponentWasRight, setOpponentWasRight] = useState<boolean | null>(null);
   const [fiveStepGoal, setFiveStepGoal] = useState('');
@@ -176,8 +149,6 @@ export function PostTradeReviewSheet({
   const [saving, setSaving] = useState(false);
   /** 用户全部主力单（用于「工具箱集中度 / 铁锤人」体检，仅展示）。 */
   const [allUserJournals, setAllUserJournals] = useState<TradeJournal[]>([]);
-  const [sixStep, setSixStep] = useState<SixStepValue>(EMPTY_SIX_STEP);
-  const [sixStepOpen, setSixStepOpen] = useState(false);
   /** Local override so the just-stamped close time renders immediately without re-fetch. */
   const [stampedCloseTime, setStampedCloseTime] = useState<string | null>(null);
   const pausedOnce = useState({ done: false })[0];
@@ -189,11 +160,6 @@ export function PostTradeReviewSheet({
     setStampedCloseTime(null);
     (async () => {
       try {
-        const parsedReflection = parseReflectionText(journal.post_reflection);
-        setReflectionFacts(parsedReflection.facts);
-        setReflection(parsedReflection.interpretation);
-        setCorrectAction(journal.post_correct_action ?? '');
-        setExitReason(tradeRecord?.exit_reason_text ?? '');
         setResultSummary(journal.post_result_summary ?? '');
         setDecisionQuality(journal.post_decision_quality ?? 'mixed');
         const parsedOddsStructureReview = parseOddsStructureReviewText(journal.post_positive_expectancy_review);
@@ -210,7 +176,6 @@ export function PostTradeReviewSheet({
         setPathDrawdown(journal.post_path_drawdown ?? null);
         setPathWinQuality(journal.post_path_win_quality ?? (journal.post_outcome && journal.post_outcome !== 'win' ? 'not_win' : null));
         setPathAgencyNote(journal.post_path_agency_note ?? '');
-        setEdgeSourceBackfill(journal.pre_edge_source ?? null);
         setHedgeWorthIt(journal.hedge_worth_it ?? null);
         setOpponentWasRight(journal.post_opponent_was_right ?? null);
         setFiveStepGoal(journal.post_five_step_goal ?? '');
@@ -230,8 +195,6 @@ export function PostTradeReviewSheet({
         setEmoMainStoneTags(normalizeMainStoneTags(journal.post_emo_main_stone_tags));
         setEmoNextTimePlan(journal.post_emo_next_time_plan ?? '');
         setRMultipleOverride(journal.post_r_multiple != null ? String(journal.post_r_multiple) : '');
-        setSixStep(pickSixStepValue(journal));
-        setSixStepOpen(countCompletedSteps(pickSixStepValue(journal)) > 0);
         if (user) {
           // 拉取全部主力单做「工具箱集中度」体检（铁锤人自检），失败不阻塞复盘。
           listJournals(user.id).then(setAllUserJournals).catch(() => {});
@@ -354,9 +317,6 @@ export function PostTradeReviewSheet({
   // 结构 × 结果 四象限：结构轴 = 当时决策质量，结果轴 = 这单赢/亏。
   const quadrantApplicable = journal.direction !== 'no_entry' && (outcome === 'win' || outcome === 'loss');
   const quadrant = classifyStructureResult(decisionQuality, outcome);
-  // edge 源头：开仓已标则只读回显；旧快照漏标则允许复盘补标，纳入「盈亏同源」。
-  const showEdgeSource = !isHedge && journal.direction !== 'no_entry';
-  const capturedEdge = journal.pre_edge_source ?? null;
   // 小机会仓位记账：机会成本不足、无明确 edge、目标不清或盈亏比不足时触发。
   const showSmallPositionDrag = !isHedge
     && journal.direction !== 'no_entry'
@@ -401,9 +361,6 @@ export function PostTradeReviewSheet({
     regimeEdgeMismatchHint(j.pre_market_regime, j.pre_edge_source) != null,
   ).length;
 
-  const reflectionValid = !!reflection.trim();
-  const correctValid = !!correctAction.trim();
-  const exitReasonValid = journal.direction === 'no_entry' || !!exitReason.trim();
   const resultValid = !!resultSummary.trim();
   const quadrantValid = !quadrantApplicable || !!quadrant;
   const decisionValid = !quadrantApplicable || decisionQuality === 'good' || decisionQuality === 'bad';
@@ -437,10 +394,7 @@ export function PostTradeReviewSheet({
   ].every(value => value.trim().length > 0);
   const emoMainStoneValid = emoMainStone.trim().length > 0 || emoMainStoneTags.length > 0;
   const emoValid = emoTextValid && emoMainStoneValid;
-  const canSave = reflectionValid
-    && correctValid
-    && exitReasonValid
-    && resultValid
+  const canSave = resultValid
     && decisionValid
     && quadrantValid
     && reviewLoopValid
@@ -471,8 +425,8 @@ export function PostTradeReviewSheet({
         post_outcome: outcome,
         post_realized_pnl: pnl,
         post_r_multiple: finalR,
-        post_reflection: buildReflectionText(reflectionFacts, reflection),
-        post_correct_action: correctAction.trim(),
+        post_reflection: journal.post_reflection ?? '',
+        post_correct_action: journal.post_correct_action ?? '',
         post_result_summary: resultSummary.trim(),
         post_decision_quality: decisionQuality,
         post_struggle_level: struggleLevel,
@@ -482,8 +436,6 @@ export function PostTradeReviewSheet({
         post_path_drawdown: showPathAgency ? pathDrawdown : null,
         post_path_win_quality: showPathAgency ? pathWinQualityToSave : null,
         post_path_agency_note: showPathAgency ? (pathAgencyNote.trim() || null) : null,
-        // 仅当开仓漏标 edge 且本次复盘补标时回写（不覆盖开仓已标的源头）。
-        ...(capturedEdge == null && edgeSourceBackfill != null ? { pre_edge_source: edgeSourceBackfill } : {}),
         post_positive_expectancy_review: buildOddsStructureReviewText(expectancyReview, oddsStructureReviewValue),
         post_premortem_review: premortemReview.trim(),
         post_invalidation_review: invalidationReview.trim(),
@@ -508,24 +460,6 @@ export function PostTradeReviewSheet({
         post_emo_main_stone_tags: emoMainStoneTags.length > 0 ? emoMainStoneTags : null,
         post_emo_next_time_plan: emoNextTimePlan.trim(),
       });
-      // Save deep analysis if any field was filled
-      const hasDeep = Object.values(sixStep).some(v => String(v ?? '').trim().length > 0);
-      if (hasDeep) {
-        try {
-          await updateJournalDeepAnalysis(journal.id, sixStep);
-          if (sixStep.post_new_rule_draft.trim().length > 0) {
-            toast.info('提示：Step 6 已写但未加入 checklist，可前往复现页激活');
-          }
-        } catch (e) {
-          console.warn('[deep] save failed', e);
-        }
-      }
-      if (tradeRecord?.id) {
-        const nextExitReason = exitReason.trim();
-        setTradeHistory(prev => prev.map(t => (
-          t.id === tradeRecord.id ? { ...t, exit_reason_text: nextExitReason } : t
-        )));
-      }
       toast.success('已保存平仓评价');
       window.dispatchEvent(new CustomEvent('journal:reviewed', { detail: { journalId: journal.id } }));
       onReviewed?.(updated);
@@ -536,25 +470,6 @@ export function PostTradeReviewSheet({
       setSaving(false);
     }
   };
-
-  const applySixStepToFields = () => {
-    // 场景 / 现实 是可观察事实 → 事实栏；根因是解释 → 解释栏。与「先事实后解释」分离对称。
-    setReflectionFacts(`[场景] ${sixStep.post_error_scenario}\n[现实] ${sixStep.post_reality_feedback}`);
-    setReflection(`[根因] ${sixStep.post_real_problem}`);
-    if (sixStep.post_new_rule_draft) setCorrectAction(sixStep.post_new_rule_draft);
-  };
-
-  const exitMethodLabel = (() => {
-    const m = tradeRecord?.action === 'LIQUIDATION' ? 'liquidation' : tradeRecord?.exit_method;
-    if (!m) return '—';
-    if (m === 'manual') return '手动';
-    if (m === 'sl') return '止损';
-    if (m === 'liquidation') return '爆仓';
-    if (m === 'tp1') return '止盈 1';
-    if (m === 'tp2') return '止盈 2';
-    if (m === 'tp3') return '止盈 3';
-    return m;
-  })();
 
   const fmtTime = (iso: string) =>
     new Date(iso).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
@@ -1417,63 +1332,6 @@ export function PostTradeReviewSheet({
           </div>
         )}
 
-        {showEdgeSource && (
-          <div className={`space-y-2 px-4 py-4 ${sectionCardClass}`}>
-            <div className="flex items-center justify-between">
-              <div className="text-[12px] font-medium">源头校准 · 盈亏同源</div>
-              {capturedEdge && (
-                <span className="text-[10px] text-muted-foreground">开仓已标</span>
-              )}
-            </div>
-            {capturedEdge ? (
-              <div className="rounded-lg border border-border/60 bg-background/60 px-3 py-2 text-[11px] leading-relaxed">
-                <span className="text-muted-foreground">这一单的 edge 源头：</span>
-                <span className="font-medium text-foreground">{EDGE_SOURCE_LABELS[capturedEdge]}</span>
-                <p className="mt-1 text-[10px] text-muted-foreground">
-                  盈亏会归到这个源头下。当同一个源头既是你最大的盈利、又是最大的亏损来源时，就是「盈亏同源」—— 别砍掉对的做法。
-                </p>
-              </div>
-            ) : (
-              <div className="space-y-2">
-                <p className="text-[10px] leading-relaxed text-muted-foreground">
-                  这单开仓时没标 edge 源头（旧快照）。补一个，才能纳入「盈亏同源」统计：
-                </p>
-                <TooltipProvider delayDuration={120}>
-                  <div className="grid grid-cols-2 gap-1.5">
-                    {EDGE_SOURCE_OPTIONS.map(opt => {
-                      const active = edgeSourceBackfill === opt.id;
-                      const warn = opt.isWarning;
-                      return (
-                        <Tooltip key={opt.id}>
-                          <TooltipTrigger asChild>
-                            <button
-                              type="button"
-                              onClick={() => setEdgeSourceBackfill(active ? null : opt.id)}
-                              className={`rounded-lg border px-2.5 py-1.5 text-left text-[11px] transition-colors ${
-                                active
-                                  ? warn
-                                    ? 'border-[#F6465D] bg-[#F6465D]/10 text-[#F6465D]'
-                                    : 'border-[#F0B90B] bg-[#F0B90B]/10 text-foreground'
-                                  : 'border-border bg-background text-muted-foreground hover:bg-accent'
-                              }`}
-                            >
-                              {opt.label}
-                            </button>
-                          </TooltipTrigger>
-                          <TooltipContent side="top" align="start" className="border-border bg-card text-card-foreground shadow-lg">
-                            <EdgeSourceTooltipContent option={opt} />
-                          </TooltipContent>
-                        </Tooltip>
-                      );
-                    })}
-                  </div>
-                </TooltipProvider>
-                <p className="text-[10px] text-muted-foreground">软性项，可跳过 —— 但补全后历史「盈亏同源」会更准。</p>
-              </div>
-            )}
-          </div>
-        )}
-
         {/* 工具箱集中度体检（铁锤人自检）— 仅展示，不阻塞 */}
         {showConcentration && (
           <div className={`space-y-2.5 px-4 py-4 ${sectionCardClass}`}>
@@ -1759,79 +1617,6 @@ export function PostTradeReviewSheet({
           {!fiveStepValid && <div className="text-[10px] text-[#F6465D] text-right font-mono">五步诊断必填</div>}
         </div>
 
-        <div className={`space-y-2 px-4 py-4 ${sectionCardClass}`}>
-          <div className="flex items-center justify-between gap-3">
-            <Label className="text-[12px] font-medium">出场原因 *</Label>
-            <span className="text-[11px] text-muted-foreground">出场方式：{exitMethodLabel}</span>
-          </div>
-          <Textarea
-            rows={3}
-            value={exitReason}
-            onChange={e => setExitReason(e.target.value)}
-            placeholder={
-              tradeRecord?.exit_method === 'manual' || tradeRecord?.action === 'LIQUIDATION'
-                ? '例如：跌破计划结构位后主动认错；或出现超预期波动，优先回收风险敞口。'
-                : '例如：止盈触发后没有再追；止损触发符合预案，因此按系统执行离场。'
-            }
-            className="text-[12px] bg-background/80 border-border/70 rounded-xl"
-          />
-          <div className="flex items-center justify-between">
-            <p className="text-[10px] text-muted-foreground">这里写的是你为什么在这个位置离场，不是这笔交易最后学到了什么。</p>
-            {!exitReasonValid && <span className="text-[10px] font-mono text-[#F6465D]">必填</span>}
-          </div>
-        </div>
-
-        {/* (C+) 六步深度分析（可选） */}
-        <Collapsible open={sixStepOpen} onOpenChange={setSixStepOpen}>
-          <CollapsibleTrigger className="w-full rounded-xl border border-border/70 bg-gradient-to-r from-card via-card to-accent/20 px-4 py-3 flex items-center gap-2 transition-colors hover:bg-accent/30 shadow-[0_10px_30px_rgba(0,0,0,0.04)]">
-            <BrainCircuit className="w-3.5 h-3.5 text-[#F0B90B]" />
-            <div className="flex-1 text-left">
-              <div className="text-[12px] font-medium text-foreground">可选：补充单笔细节</div>
-              <div className="text-[10px] text-muted-foreground">
-                只在 L5 命脉仍说不清时展开；它服务于规律上卷，不替代事实核验。
-              </div>
-            </div>
-            <ChevronDown className={`w-3.5 h-3.5 text-muted-foreground transition-transform ${sixStepOpen ? 'rotate-180' : ''}`} />
-          </CollapsibleTrigger>
-          <CollapsibleContent className="mt-2 space-y-2">
-            <SixStepAnalysisForm value={sixStep} onChange={setSixStep} />
-            <Button size="sm" variant="ghost" onClick={applySixStepToFields}
-              className="h-8 rounded-lg text-[10px] border border-border/70 bg-card/80 hover:bg-accent/60">
-              用六步内容回写下方字段
-            </Button>
-          </CollapsibleContent>
-        </Collapsible>
-
-        {/* (D) Reflection — 事实 vs 解释 分离（把快照的双通道好设计搬到复盘） */}
-        <div className={`space-y-3 px-4 py-4 ${sectionCardClass}`}>
-          <div className="rounded-lg border border-[#5b8def]/25 bg-[#5b8def]/5 px-3 py-2 text-[10px] leading-relaxed text-muted-foreground">
-            先写盘面发生了什么事实，再写解释——别把它们混成一个自洽的故事。
-            事后回看时，人最容易把「发生了什么」和「为什么」压成一个完美闭环，再当成真相。
-          </div>
-          <div className="space-y-1.5">
-            <Label className="text-[11px] font-medium text-muted-foreground">① 盘面发生了什么（只写可观察的事实）</Label>
-            <Textarea
-              rows={3}
-              value={reflectionFacts}
-              onChange={e => setReflectionFacts(e.target.value)}
-              placeholder="例如：入场后价格先朝预期方向走了 0.8%，随后跌破入场价 1.2% 触发止损；止损后 40 分钟内反向走出 +3%。只记录看得见的价格 / 成交 / 时间，不写原因。"
-              className="text-[12px] bg-background/80 border-border/70 rounded-xl"
-            />
-            <p className="text-[10px] text-muted-foreground">软性项，可留空——但写下事实能挡住事后归因。</p>
-          </div>
-          <div className="space-y-1.5">
-            <Label className="text-[12px] font-medium">② 这笔交易里你真正学到了什么（解释）*</Label>
-            <Textarea
-              rows={4}
-              value={reflection}
-              onChange={e => setReflection(e.target.value)}
-              placeholder="例如：止损位放得过近（与结构无关，只是凭感觉），导致被噪音扫出后又看着行情走出预期方向。下次应根据结构失效位而非固定百分比设置止损。"
-              className="text-[12px] bg-background/80 border-border/70 rounded-xl"
-            />
-            {!reflectionValid && <div className="text-[10px] text-[#F6465D] text-right font-mono">必填</div>}
-          </div>
-        </div>
-
         {/* (D2) 情绪侧复盘 · 七问 */}
         <div className={`space-y-3 px-4 py-4 ${sectionCardClass}`}>
           <div>
@@ -1989,22 +1774,6 @@ export function PostTradeReviewSheet({
           {!emoTextValid && (
             <div className="text-right font-mono text-[10px] text-[#F6465D]">情绪七问需填完</div>
           )}
-        </div>
-
-        {/* (E) Counterfactual */}
-        <div className={`space-y-2 px-4 py-4 ${sectionCardClass}`}>
-          <Label className="text-[12px] font-medium">如果重来一次，你会怎么做？*</Label>
-          <Textarea
-            rows={3}
-            value={correctAction}
-            onChange={e => setCorrectAction(e.target.value)}
-            placeholder="例如：止损位放在 X 而非 Y；分批入场 3 次而非一次满仓；不在心态 ≤3 分时开仓。"
-            className="text-[12px] bg-background/80 border-border/70 rounded-xl"
-          />
-          <div className="flex items-center justify-between">
-            <p className="text-[10px] text-muted-foreground">❗ 必须可执行——不是"下次更冷静"，而是"下次开仓前必须满足 checklist 第 N 项"</p>
-            {!correctValid && <span className="text-[10px] text-[#F6465D] font-mono">必填</span>}
-          </div>
         </div>
 
       </div>
