@@ -43,6 +43,10 @@ import {
   type OddsStructureReview,
 } from '@/lib/oddsStructure';
 import { deriveLoopReadout, type LegTone } from '@/lib/structureLoop';
+import {
+  groupMainStonesByFamily, MAIN_STONE_META, normalizeMainStoneTags,
+  type MainStoneTag,
+} from '@/lib/mainStoneTags';
 import { CLASS_META, classifyTradePathProxy } from '@/lib/tradePathFacet';
 import {
   finalizeJournalReview,
@@ -158,6 +162,15 @@ export function PostTradeReviewSheet({
   const [interventionType, setInterventionType] = useState<NonNullable<TradeJournal['post_intervention_type']>>('rule');
   const [executionMonitor, setExecutionMonitor] = useState('');
   const [fiveStepWeakPoint, setFiveStepWeakPoint] = useState<NonNullable<TradeJournal['post_five_step_weak_point']>>('diagnosis');
+  // ===== 平仓情绪侧复盘 · 七问 =====
+  const [emoDisturbance, setEmoDisturbance] = useState('');
+  const [emoFirstReaction, setEmoFirstReaction] = useState('');
+  const [emoWanted, setEmoWanted] = useState('');
+  const [emoFeared, setEmoFeared] = useState('');
+  const [emoExcuse, setEmoExcuse] = useState('');
+  const [emoMainStone, setEmoMainStone] = useState('');
+  const [emoMainStoneTags, setEmoMainStoneTags] = useState<MainStoneTag[]>([]);
+  const [emoNextTimePlan, setEmoNextTimePlan] = useState('');
   const [rMultipleOverride, setRMultipleOverride] = useState<string>('');
   const [editingR, setEditingR] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -208,6 +221,14 @@ export function PostTradeReviewSheet({
         setInterventionType(journal.post_intervention_type ?? 'rule');
         setExecutionMonitor(journal.post_execution_monitor ?? '');
         setFiveStepWeakPoint(journal.post_five_step_weak_point ?? 'diagnosis');
+        setEmoDisturbance(journal.post_emo_disturbance ?? '');
+        setEmoFirstReaction(journal.post_emo_first_reaction ?? '');
+        setEmoWanted(journal.post_emo_wanted ?? '');
+        setEmoFeared(journal.post_emo_feared ?? '');
+        setEmoExcuse(journal.post_emo_excuse ?? '');
+        setEmoMainStone(journal.post_emo_main_stone ?? '');
+        setEmoMainStoneTags(normalizeMainStoneTags(journal.post_emo_main_stone_tags));
+        setEmoNextTimePlan(journal.post_emo_next_time_plan ?? '');
         setRMultipleOverride(journal.post_r_multiple != null ? String(journal.post_r_multiple) : '');
         setSixStep(pickSixStepValue(journal));
         setSixStepOpen(countCompletedSteps(pickSixStepValue(journal)) > 0);
@@ -405,6 +426,17 @@ export function PostTradeReviewSheet({
     designIntervention,
     executionMonitor,
   ].every(value => value.trim().length > 0);
+  // 情绪侧七问：文字栏全部必填；主石头允许"文字 OR 至少 1 个标签"满足其一。
+  const emoTextValid = [
+    emoDisturbance,
+    emoFirstReaction,
+    emoWanted,
+    emoFeared,
+    emoExcuse,
+    emoNextTimePlan,
+  ].every(value => value.trim().length > 0);
+  const emoMainStoneValid = emoMainStone.trim().length > 0 || emoMainStoneTags.length > 0;
+  const emoValid = emoTextValid && emoMainStoneValid;
   const canSave = reflectionValid
     && correctValid
     && exitReasonValid
@@ -416,6 +448,7 @@ export function PostTradeReviewSheet({
     && opponentValid
     && hedgeWorthItValid
     && fiveStepValid
+    && emoValid
     && !saving;
 
   const sectionCardClass = 'rounded-xl border border-border/70 bg-card/70 shadow-[0_10px_30px_rgba(0,0,0,0.04)]';
@@ -466,6 +499,14 @@ export function PostTradeReviewSheet({
         post_intervention_type: interventionType,
         post_execution_monitor: executionMonitor.trim(),
         post_five_step_weak_point: fiveStepWeakPoint,
+        post_emo_disturbance: emoDisturbance.trim(),
+        post_emo_first_reaction: emoFirstReaction.trim(),
+        post_emo_wanted: emoWanted.trim(),
+        post_emo_feared: emoFeared.trim(),
+        post_emo_excuse: emoExcuse.trim(),
+        post_emo_main_stone: emoMainStone.trim() || null,
+        post_emo_main_stone_tags: emoMainStoneTags.length > 0 ? emoMainStoneTags : null,
+        post_emo_next_time_plan: emoNextTimePlan.trim(),
       });
       // Save deep analysis if any field was filled
       const hasDeep = Object.values(sixStep).some(v => String(v ?? '').trim().length > 0);
@@ -1789,6 +1830,165 @@ export function PostTradeReviewSheet({
             />
             {!reflectionValid && <div className="text-[10px] text-[#F6465D] text-right font-mono">必填</div>}
           </div>
+        </div>
+
+        {/* (D2) 情绪侧复盘 · 七问 */}
+        <div className={`space-y-3 px-4 py-4 ${sectionCardClass}`}>
+          <div>
+            <div className="text-[12px] font-semibold text-foreground">情绪侧复盘 · 七问</div>
+            <div className="mt-0.5 text-[10px] leading-relaxed text-muted-foreground">
+              不是分析盘面，是分析你自己。把这单底下真正动你的"那块石头"翻出来命名。
+            </div>
+          </div>
+
+          <div className="space-y-1.5">
+            <Label className="text-[12px] font-medium">① 这单最起波澜的事情是什么？*</Label>
+            <Textarea
+              rows={2}
+              value={emoDisturbance}
+              onChange={e => setEmoDisturbance(e.target.value)}
+              placeholder="只写让你心里一震/一紧/一急的那个具体时刻：价格跳了、突然爆仓、有人喊单、止损被扫……"
+              className="text-[12px] bg-background/80 border-border/70 rounded-xl"
+            />
+          </div>
+
+          <div className="space-y-1.5">
+            <Label className="text-[12px] font-medium">② 我的第一反应是什么？*</Label>
+            <Textarea
+              rows={2}
+              value={emoFirstReaction}
+              onChange={e => setEmoFirstReaction(e.target.value)}
+              placeholder="没经过大脑那一下：想加仓、想砍掉、想躲开屏幕、想骂人、想截图发出去……写最原始的那个冲动。"
+              className="text-[12px] bg-background/80 border-border/70 rounded-xl"
+            />
+          </div>
+
+          <div className="grid gap-2 sm:grid-cols-2">
+            <div className="space-y-1.5">
+              <Label className="text-[12px] font-medium">③ 我其实想得到什么？*</Label>
+              <Textarea
+                rows={3}
+                value={emoWanted}
+                onChange={e => setEmoWanted(e.target.value)}
+                placeholder="不是「赚钱」这种正确答案。是更底层的东西：被认可、扳回上一笔、证明自己看对了、一次到位……"
+                className="text-[12px] bg-background/80 border-border/70 rounded-xl"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-[12px] font-medium">④ 我其实在害怕什么？*</Label>
+              <Textarea
+                rows={3}
+                value={emoFeared}
+                onChange={e => setEmoFeared(e.target.value)}
+                placeholder="也不是「亏钱」这种表层答案。是更底层的东西：被打脸、错过、回吐、被嘲笑、不能再翻身……"
+                className="text-[12px] bg-background/80 border-border/70 rounded-xl"
+              />
+            </div>
+          </div>
+
+          <div className="space-y-1.5">
+            <Label className="text-[12px] font-medium">⑤ 我自己给自己找了一个什么样的理由？*</Label>
+            <Textarea
+              rows={2}
+              value={emoExcuse}
+              onChange={e => setEmoExcuse(e.target.value)}
+              placeholder="当时是怎么把这个动作「说圆」的？「这次不一样」/「再等等就回来了」/「信号不算明显」/「破位需要确认」……"
+              className="text-[12px] bg-background/80 border-border/70 rounded-xl"
+            />
+            <p className="text-[10px] text-muted-foreground">不是审判，是采证。把当时骗自己的那句话原样写下来。</p>
+          </div>
+
+          {/* ⑥ 主石头 */}
+          <div className="rounded-xl border border-[#F0B90B]/30 bg-[#F0B90B]/[0.04] px-3 py-3 space-y-3">
+            <div>
+              <Label className="text-[12px] font-medium text-[#D89B00]">⑥ 这单我捞起的主石头是什么？*</Label>
+              <p className="mt-0.5 text-[10px] leading-relaxed text-muted-foreground">
+                主石头 = 这单底下真正动你的那个原型（恐惧或贪婪的具体类型）。先选标签快速命名，再用文字补一句话。
+              </p>
+            </div>
+
+            <div className="space-y-2">
+              {groupMainStonesByFamily().map(group => (
+                <div key={group.family} className="space-y-1.5">
+                  <div className="flex items-center gap-2">
+                    <span
+                      className="rounded-full border px-2 py-0.5 text-[10px] font-medium"
+                      style={{ borderColor: `${group.meta.accent}66`, color: group.meta.accent }}
+                    >
+                      {group.meta.title}
+                    </span>
+                    <span className="text-[10px] text-muted-foreground">{group.meta.intro}</span>
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {group.stones.map(({ id, meta }) => {
+                      const active = emoMainStoneTags.includes(id);
+                      return (
+                        <button
+                          key={id}
+                          type="button"
+                          title={meta.oneLine}
+                          onClick={() => setEmoMainStoneTags(prev =>
+                            active ? prev.filter(t => t !== id) : [...prev, id],
+                          )}
+                          className={`rounded-full border px-2.5 py-1 text-[11px] transition-colors ${
+                            active ? '' : 'border-border bg-background text-muted-foreground hover:bg-accent'
+                          }`}
+                          style={active ? {
+                            borderColor: group.meta.accent,
+                            backgroundColor: `${group.meta.accent}1A`,
+                            color: group.meta.accent,
+                          } : undefined}
+                        >
+                          {meta.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {emoMainStoneTags.length > 0 && (
+              <div className="rounded-lg border border-border/60 bg-background/60 px-3 py-2 text-[10px] leading-relaxed text-muted-foreground space-y-1">
+                {emoMainStoneTags.map(tag => (
+                  <div key={tag}>
+                    <span className="font-medium text-foreground">{MAIN_STONE_META[tag].label}</span>
+                    ：{MAIN_STONE_META[tag].oneLine}
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <Textarea
+              rows={2}
+              value={emoMainStone}
+              onChange={e => setEmoMainStone(e.target.value)}
+              placeholder="用一句话补充：选中的标签具体长什么样？例如「就是怕上一笔亏了不甘心，这单本质是找回场子」。"
+              className="text-[12px] bg-background/80 border-border/70 rounded-xl"
+            />
+            {!emoMainStoneValid && (
+              <div className="text-right font-mono text-[10px] text-[#F6465D]">至少选一个标签，或写一句话</div>
+            )}
+          </div>
+
+          {/* ⑦ 下次预案 */}
+          <div className="rounded-xl border border-[#0ECB81]/30 bg-[#0ECB81]/[0.04] px-3 py-3 space-y-2">
+            <Label className="text-[12px] font-medium text-[#0ECB81]">⑦ 如果明天同样遇到一样的事情，我准备怎么选？*</Label>
+            <Textarea
+              rows={3}
+              value={emoNextTimePlan}
+              onChange={e => setEmoNextTimePlan(e.target.value)}
+              placeholder="不要写「我下次会冷静」。写一个动作级的预案：触发什么信号、做什么动作、不做什么动作。例如：再遇到这种快速跳价，先离开屏幕 5 分钟再决定加减仓。"
+              className="text-[12px] bg-background/80 border-border/70 rounded-xl"
+            />
+            <p className="text-[10px] leading-relaxed text-muted-foreground">
+              这块石头下次还会出现。提前写好动作，到时候才不用临场跟自己谈判。
+            </p>
+          </div>
+
+          {!emoTextValid && (
+            <div className="text-right font-mono text-[10px] text-[#F6465D]">情绪七问需填完</div>
+          )}
         </div>
 
         {/* (E) Counterfactual */}

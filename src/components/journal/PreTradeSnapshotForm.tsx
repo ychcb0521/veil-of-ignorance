@@ -57,7 +57,9 @@ import { analyzePositionFeedback, type FeedbackPolarity } from '@/lib/positionFe
 import { EMOTION_CATEGORIES, EMOTION_TAG_META } from '@/types/journal';
 import type { EmotionTagMeta, EmotionValence } from '@/types/journal';
 import { buildChecklist, isChecklistPassed } from '@/lib/defaultChecklist';
-import { listAllCampaigns, listJournals, listRules } from '@/lib/journalApi';
+import { listAllCampaigns, listJournals, listRules, listStopDoingItems } from '@/lib/journalApi';
+import { StopDoingListManagerDialog } from '@/components/journal/StopDoingListManagerDialog';
+import type { StopDoingItem } from '@/types/journal';
 import { useAuth } from '@/contexts/AuthContext';
 import { useTradingContext } from '@/contexts/TradingContext';
 import { calcUnrealizedPnl } from '@/types/trading';
@@ -159,6 +161,10 @@ export interface SnapshotPayload {
   pre_cognitive_bias_tags: string[] | null;
   pre_executor_self: string | null;
   pre_designer_self: string | null;
+  /** Stop Doing List：本笔确认勾选的全局条目 ID。 */
+  pre_stop_doing_acknowledged_ids: string[] | null;
+  /** Stop Doing List：本笔补充的一条临时项。 */
+  pre_stop_doing_ad_hoc: string | null;
   // 批次 25：对冲单专属快照字段（主力单恒为 null）。
   hedge_type: HedgeType | null;
   hedge_boundary_price: number | null;
@@ -386,6 +392,11 @@ export function PreTradeSnapshotForm({
   const [confirmBadOddsTradeOpen, setConfirmBadOddsTradeOpen] = useState(false);
   const [checked, setChecked] = useState<string[]>([]);
   const [userRules, setUserRules] = useState<TradingRule[]>([]);
+  // Stop Doing List：全局清单 + 本次勾选 + 临时一条
+  const [stopDoingItems, setStopDoingItems] = useState<StopDoingItem[]>([]);
+  const [stopDoingChecked, setStopDoingChecked] = useState<string[]>([]);
+  const [stopDoingAdHoc, setStopDoingAdHoc] = useState('');
+  const [stopDoingManagerOpen, setStopDoingManagerOpen] = useState(false);
   const [historicalJournals, setHistoricalJournals] = useState<TradeJournal[]>([]);
   const [historicalCampaigns, setHistoricalCampaigns] = useState<TradeCampaign[]>([]);
   const [submitting, setSubmitting] = useState(false);
@@ -417,6 +428,11 @@ export function PreTradeSnapshotForm({
   useEffect(() => {
     if (!user || !isTrade) return;
     listRules(user.id).then(setUserRules).catch(() => setUserRules([]));
+  }, [user, isTrade]);
+
+  useEffect(() => {
+    if (!user || !isTrade) return;
+    listStopDoingItems(user.id).then(setStopDoingItems).catch(() => setStopDoingItems([]));
   }, [user, isTrade]);
 
   useEffect(() => {
@@ -592,8 +608,13 @@ export function PreTradeSnapshotForm({
   const evaluativeOptional = isTrade && !isHedge && mental === 5;
   // 评估层非可选时强制展开（避免把"必填但隐藏"的字段藏起来造成无法提交的陷阱）。
   const evaluativeOpen = evaluativeOptional ? evalExpandedAtMax : true;
+  // Stop Doing List 硬阻挡：所有 active 条目必须本次勾选确认（仅 trade 模式生效；no_entry 跳过）。
+  const stopDoingReady = !isTrade
+    || stopDoingItems.length === 0
+    || stopDoingItems.every(it => stopDoingChecked.includes(it.id));
   const canSubmit = mentalReady && tradeReady
-    && (isHedge || evaluativeOptional || evaluativeReady);
+    && (isHedge || evaluativeOptional || evaluativeReady)
+    && stopDoingReady;
   const recentMainReviewed = historicalJournals.filter(j =>
     (j.journal_kind ?? 'trade') === 'trade'
     && j.order_kind === 'main'
@@ -835,6 +856,8 @@ export function PreTradeSnapshotForm({
         pre_cognitive_bias_tags: cognitiveBiasTags,
         pre_executor_self: null,
         pre_designer_self: null,
+        pre_stop_doing_acknowledged_ids: isTrade && stopDoingChecked.length > 0 ? [...stopDoingChecked] : null,
+        pre_stop_doing_ad_hoc: isTrade && stopDoingAdHoc.trim() ? stopDoingAdHoc.trim() : null,
         // 批次 25：对冲专属字段——仅在对冲路径写入，主力单恒为 null。
         hedge_type: isHedge ? hedgeType : null,
         hedge_boundary_price: isHedge && hedgeBoundaryValid ? Number(hedgeBoundary.toFixed(pricePrecision)) : null,
@@ -976,6 +999,84 @@ export function PreTradeSnapshotForm({
       </div>
 
       <div className="space-y-3.5 px-5 py-4">
+        {isTrade && (
+          <section className="rounded-2xl border border-[#F6465D]/30 bg-[#F6465D]/[0.04] p-3 shadow-[0_16px_45px_rgba(15,23,42,0.045)]">
+            <div className="flex items-center justify-between gap-2">
+              <div className="min-w-0">
+                <div className="text-[11px] font-semibold text-foreground">Stop Doing List · 开仓前自检</div>
+                <p className="mt-0.5 text-[10px] leading-relaxed text-muted-foreground">
+                  Munger：要确认自己不该做什么，往往比想清楚该做什么更重要。每条都必须逐条勾选确认「本次不会犯」，少一条就开不了。
+                </p>
+              </div>
+              <div className="flex items-center gap-1.5 shrink-0">
+                <span className={`rounded-full px-2 py-0.5 text-[9px] font-medium ${
+                  stopDoingReady ? 'bg-[#0ECB81]/15 text-[#0ECB81]' : 'bg-[#F6465D]/10 text-[#F6465D]'
+                }`}>
+                  {stopDoingItems.length === 0
+                    ? '清单为空'
+                    : `${stopDoingChecked.filter(id => stopDoingItems.some(it => it.id === id)).length}/${stopDoingItems.length}`}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setStopDoingManagerOpen(true)}
+                  className="rounded-md border border-border bg-background px-2 py-0.5 text-[10px] text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+                >
+                  维护清单
+                </button>
+              </div>
+            </div>
+
+            {stopDoingItems.length === 0 ? (
+              <div className="mt-2.5 rounded-lg border border-dashed border-border/60 bg-background/40 px-3 py-2 text-[11px] leading-relaxed text-muted-foreground">
+                你的 Stop Doing List 还是空的。建议先点右上「维护清单」加几条你决心不做的事——例如：「不在心态 ≤3 时开仓」「不追刚跑出去的单」。
+              </div>
+            ) : (
+              <ul className="mt-2.5 space-y-1.5">
+                {stopDoingItems.map(item => {
+                  const checked = stopDoingChecked.includes(item.id);
+                  return (
+                    <li key={item.id}>
+                      <label className={`flex items-start gap-2 rounded-lg border px-3 py-2 cursor-pointer transition-colors ${
+                        checked
+                          ? 'border-[#0ECB81]/40 bg-[#0ECB81]/[0.06]'
+                          : 'border-border bg-background/60 hover:bg-accent/40'
+                      }`}>
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={e => setStopDoingChecked(prev => e.target.checked
+                            ? [...prev, item.id]
+                            : prev.filter(id => id !== item.id))}
+                          className="mt-0.5 h-3.5 w-3.5 shrink-0 accent-[#0ECB81]"
+                        />
+                        <span className="text-[12px] leading-relaxed text-foreground">{item.text}</span>
+                      </label>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+
+            <div className="mt-2.5 space-y-1">
+              <label className="block text-[10px] font-medium text-muted-foreground">
+                这次特别要防的（可选，临时一条）
+              </label>
+              <input
+                value={stopDoingAdHoc}
+                onChange={e => setStopDoingAdHoc(e.target.value)}
+                placeholder="例如：今天身体不舒服，避免在 22:00 后追任何破位单。"
+                className="w-full rounded-lg border border-border/70 bg-background/80 px-3 py-1.5 text-[12px] text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-[#F0B90B]/40"
+              />
+            </div>
+
+            {!stopDoingReady && stopDoingItems.length > 0 && (
+              <div className="mt-2 text-[10px] text-[#F6465D] font-mono text-right">
+                未全部勾选 · 不能开仓
+              </div>
+            )}
+          </section>
+        )}
+
         {isTrade && (
           <section className="grid rounded-2xl border border-border/60 bg-muted/25 p-1 md:grid-cols-2">
             <button
@@ -2843,6 +2944,16 @@ export function PreTradeSnapshotForm({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <StopDoingListManagerDialog
+        isOpen={stopDoingManagerOpen}
+        onOpenChange={setStopDoingManagerOpen}
+        onChanged={next => {
+          setStopDoingItems(next);
+          // 移除已被禁用 / 删除的旧勾选
+          setStopDoingChecked(prev => prev.filter(id => next.some(it => it.id === id)));
+        }}
+      />
     </div>
   );
 }

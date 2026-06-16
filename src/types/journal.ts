@@ -706,6 +706,10 @@ export interface TradeJournal {
   pre_executor_self?: string | null;
   /** @deprecated v2 snapshot removed the executor/designer dialogue box. */
   pre_designer_self?: string | null;
+  /** Stop Doing List：本笔确认勾选的全局条目 ID。强制全勾才能提交。 */
+  pre_stop_doing_acknowledged_ids?: string[] | null;
+  /** Stop Doing List：本笔补充的"这次特别要防的一条"。 */
+  pre_stop_doing_ad_hoc?: string | null;
 
   // post-review
   post_outcome: TradeOutcome | null;
@@ -747,6 +751,24 @@ export interface TradeJournal {
   post_five_step_weak_point?: FiveStepWeakPoint | null;
   /** Real wall-clock time of position close (stamped on first review-sheet open). */
   post_real_close_time?: string | null;
+
+  // ============ 平仓情绪侧复盘 · 七问 ============
+  /** ① 这单最起波澜的事情是什么？ */
+  post_emo_disturbance?: string | null;
+  /** ② 我的第一反应是什么？ */
+  post_emo_first_reaction?: string | null;
+  /** ③ 我其实想得到什么？（贪婪本质） */
+  post_emo_wanted?: string | null;
+  /** ④ 我其实在害怕什么？（恐惧本质） */
+  post_emo_feared?: string | null;
+  /** ⑤ 我自己给自己找了一个什么样的理由？（合理化） */
+  post_emo_excuse?: string | null;
+  /** ⑥ 这单捞起的主石头：自由文本描述。 */
+  post_emo_main_stone?: string | null;
+  /** ⑥ 主石头快速选标签（恐惧 / 贪婪 / 自我保护 / 虚假掌控 原型）。 */
+  post_emo_main_stone_tags?: string[] | null;
+  /** ⑦ 如果明天同样遇到一样的事情，我准备怎么选？ */
+  post_emo_next_time_plan?: string | null;
 
   reason_was_rewritten: boolean;
   counterfactual_branches?: CounterfactualBranch[];
@@ -791,6 +813,20 @@ export interface TradingRule {
   snooze_until: string | null;
   /** Stamped when the rule first reaches (is_active && added_to_checklist). Drives cooldown. */
   activated_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/**
+ * Stop Doing List 全局条目：用户决心"不做"的事，开仓前必须勾选确认本次不会犯。
+ * 和 TradingRule（"应该做 X"）刻意分开，避免语义混淆。
+ */
+export interface StopDoingItem {
+  id: string;
+  user_id: string;
+  text: string;
+  is_active: boolean;
+  ui_order: number;
   created_at: string;
   updated_at: string;
 }

@@ -45,6 +45,7 @@ import type {
   TradeJournal,
   TradeOutcome,
   TradingRule,
+  StopDoingItem,
   CounterfactualBranch,
   CounterfactualBranchParams,
   CounterfactualBranchResult,
@@ -2735,6 +2736,15 @@ export interface FinalizeJournalInput {
   exit_falsification_note?: string | null;
   /** 批次 25：对冲单平仓回填的"值回成本"判定（仅对冲单使用）。 */
   hedge_worth_it?: TradeJournal['hedge_worth_it'];
+  // ===== 平仓情绪侧复盘 · 七问 =====
+  post_emo_disturbance?: string | null;
+  post_emo_first_reaction?: string | null;
+  post_emo_wanted?: string | null;
+  post_emo_feared?: string | null;
+  post_emo_excuse?: string | null;
+  post_emo_main_stone?: string | null;
+  post_emo_main_stone_tags?: string[] | null;
+  post_emo_next_time_plan?: string | null;
 }
 
 export async function finalizeJournalReview(
@@ -3301,4 +3311,58 @@ export async function promoteDraftToRule(
     .select()
     .single();
   return wrap("写入规则", error, data as unknown as TradingRule);
+}
+
+// ============ Stop Doing List ============
+
+/** 拉用户所有 active 的 Stop doing 条目。 */
+export async function listStopDoingItems(userId: string): Promise<StopDoingItem[]> {
+  const { data, error } = await supabase
+    .from("stop_doing_items" as never)
+    .select("*")
+    .eq("user_id", userId)
+    .eq("is_active", true)
+    .order("ui_order", { ascending: true })
+    .order("created_at", { ascending: true });
+  if (error) {
+    // 表还没建（迁移未跑）时静默返回空，不阻塞开仓表单。
+    if (/relation .* does not exist|stop_doing_items/i.test(error.message)) return [];
+    throw new Error(`加载 Stop doing list 失败：${error.message}`);
+  }
+  return (data ?? []) as unknown as StopDoingItem[];
+}
+
+export async function createStopDoingItem(
+  userId: string,
+  text: string,
+): Promise<StopDoingItem> {
+  const trimmed = text.trim();
+  if (!trimmed) throw new Error('Stop doing 条目内容不能为空');
+  const { data, error } = await supabase
+    .from("stop_doing_items" as never)
+    .insert({ user_id: userId, text: trimmed, is_active: true, ui_order: 0 } as never)
+    .select()
+    .single();
+  return wrap("新增 Stop doing 条目", error, data as unknown as StopDoingItem);
+}
+
+export async function updateStopDoingItem(
+  id: string,
+  patch: Partial<Pick<StopDoingItem, 'text' | 'is_active' | 'ui_order'>>,
+): Promise<StopDoingItem> {
+  const { data, error } = await supabase
+    .from("stop_doing_items" as never)
+    .update({ ...patch, updated_at: new Date().toISOString() } as never)
+    .eq("id", id)
+    .select()
+    .single();
+  return wrap("更新 Stop doing 条目", error, data as unknown as StopDoingItem);
+}
+
+export async function deleteStopDoingItem(id: string): Promise<void> {
+  const { error } = await supabase
+    .from("stop_doing_items" as never)
+    .delete()
+    .eq("id", id);
+  if (error) throw new Error(`删除 Stop doing 条目失败：${error.message}`);
 }

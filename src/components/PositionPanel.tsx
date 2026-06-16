@@ -30,6 +30,7 @@ import { PostTradeReviewSheet } from '@/components/journal/PostTradeReviewSheet'
 import { ExitMethodBadge } from '@/components/journal/ExitMethodBadge';
 import {
   findUnreviewedJournalForClose, listJournals,
+  listJournalsByTradeRecordId, backfillJournalFromRecord,
 } from '@/lib/journalApi';
 import type { TradeJournal } from '@/types/journal';
 
@@ -92,6 +93,9 @@ export function PositionPanel({
   const [reviewJournal, setReviewJournal] = useState<TradeJournal | null>(null);
   const [reviewTradeRecord, setReviewTradeRecord] = useState<TradeRecord | null>(null);
   const [reviewOpen, setReviewOpen] = useState(false);
+  /** Direct 模式下，平仓后弹的"是否前往评价"的轻量确认。每次都弹，不记忆。 */
+  const [directReviewPrompt, setDirectReviewPrompt] = useState<TradeRecord | null>(null);
+  const [directReviewLoading, setDirectReviewLoading] = useState(false);
   const [journalsByTradeId, setJournalsByTradeId] = useState<Record<string, TradeJournal>>({});
   const lastCloseIdRef = useRef<string | null>(null);
   const initialLoadRef = useRef(false);
@@ -109,9 +113,13 @@ export function PositionPanel({
     }
     if (lastCloseIdRef.current === latest.id) return;
     lastCloseIdRef.current = latest.id;
-    // Direct-trading mode: stay silent — no auto-popup, no toast. 1:1 Binance flow.
-    // Old journals (if any) can still be reviewed manually from /journal.
-    if (tradingMode === 'direct') return;
+    // Direct-trading mode: 弹一个轻量确认，让用户自由选择跳过或前往评价。
+    // 选评价时，现场用 backfillJournalFromRecord 反向回填一个 journal，
+    // 走的是和决策记录模式同一条 PostTradeReviewSheet 流程，统计上等价。
+    if (tradingMode === 'direct') {
+      setDirectReviewPrompt(latest);
+      return;
+    }
     const direction = latest.side === 'LONG' ? 'long' : 'short';
     findUnreviewedJournalForClose(user.id, latest.symbol, direction, latest.entryPrice)
       .then(j => {
@@ -125,6 +133,25 @@ export function PositionPanel({
       })
       .catch(e => toast.error(e instanceof Error ? e.message : String(e)));
   }, [tradeHistory, user, tradingMode]);
+
+  /** Direct 模式确认评价：找已有 journal 或现场 backfill，然后开 PostTradeReviewSheet。 */
+  const startDirectReview = async () => {
+    if (!user || !directReviewPrompt) return;
+    setDirectReviewLoading(true);
+    try {
+      // 幂等：同一条 record 多次平仓→评价不重复回填
+      const existing = await listJournalsByTradeRecordId(user.id, directReviewPrompt.id);
+      const journal = existing[0] ?? await backfillJournalFromRecord(directReviewPrompt);
+      setReviewJournal(journal);
+      setReviewTradeRecord(directReviewPrompt);
+      setReviewOpen(true);
+      setDirectReviewPrompt(null);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : String(e));
+    } finally {
+      setDirectReviewLoading(false);
+    }
+  };
 
   // Load all user journals for history-tab mapping (key by symbol+side+entry-price)
   const [journalsByCompositeKey, setJournalsByCompositeKey] = useState<Record<string, TradeJournal>>({});
@@ -1303,6 +1330,44 @@ export function PositionPanel({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Direct 模式：平仓后的"是否前往评价"轻提示 */}
+      <Dialog open={!!directReviewPrompt} onOpenChange={open => { if (!open) setDirectReviewPrompt(null); }}>
+        <DialogContent className="max-w-[420px]">
+          <DialogHeader>
+            <DialogTitle className="text-[14px]">刚平了一笔 — 要现在做平仓评价吗？</DialogTitle>
+            <DialogDescription className="text-[12px] leading-relaxed">
+              {directReviewPrompt ? (
+                <>
+                  <span className="font-mono">{directReviewPrompt.symbol}</span>
+                  {' '}·{' '}
+                  <span className={(directReviewPrompt.pnl ?? 0) >= 0 ? 'text-[#0ECB81]' : 'text-[#F6465D]'}>
+                    {(directReviewPrompt.pnl ?? 0) >= 0 ? '+' : ''}{(directReviewPrompt.pnl ?? 0).toFixed(2)} USDT
+                  </span>
+                  。直接交易没有开仓快照，选择评价会即时生成一条最小化记录，复盘会进入和决策记录模式同一套统计。
+                </>
+              ) : null}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="gap-2">
+            <Button
+              variant="ghost"
+              onClick={() => setDirectReviewPrompt(null)}
+              disabled={directReviewLoading}
+              className="text-[12px]"
+            >
+              跳过
+            </Button>
+            <Button
+              onClick={startDirectReview}
+              disabled={directReviewLoading}
+              className="bg-[#F0B90B] text-black hover:bg-[#F0B90B]/90 text-[12px]"
+            >
+              {directReviewLoading ? '准备中…' : '去评价'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Post-trade review sheet */}
       <PostTradeReviewSheet
