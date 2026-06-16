@@ -865,47 +865,38 @@ export default function GuidePage() {
             <section id="s3-3" className="scroll-mt-20">
               <SubTitle>3.4 平仓评价复盘</SubTitle>
               <P>决策记录模式下，平仓会打开一个与开仓快照同规格的<strong>居中评价弹窗</strong>，不完成评价不能离开。评价的重心不是重新讲一遍故事，而是把快照时的预测和最终实际结果对上：预设的证伪信号兑现没有，结构破坏信号出现没有，进场时钉下的置信度有没有被验证。</P>
-              <P>界面会把内容分成两类：<strong>事实模块</strong>负责核对“反”和“止”的假设，<strong>叙事模块</strong>才记录事后解释。先对账，再解释，避免复盘变成事后重新叙述。</P>
+              <P>弹窗按这条主线展开：<strong>事实模块</strong>逐条核验快照里押的<strong>反 / 止 / 结构 / 置信</strong>四条腿 → <strong>结果归类</strong>（结构 × 结果四象限）→ <strong>体检模块</strong>（铁锤人 / 纠结度 / 小机会仓位）→ <strong>情绪侧七问</strong>。先对账，再判读，最后翻动机，避免复盘变成事后重新叙述。</P>
 
-              <SubTitle>结构 × 结果四象限（警惕“危险的盈利”）</SubTitle>
-              <P><strong>结构 × 结果</strong>是平仓评价的核心判断，不再把同一个判断拆成额外问题。你只需要把这笔交易放进一张 2×2：<strong>结构轴 = 当时结构是否成立</strong>，<strong>结果轴 = 这单赢 / 亏</strong>。一句话锚点：<strong>机会是运气，优秀是结构</strong>。</P>
+              <SubTitle>事实模块 · 逐条核验闭环的四条腿（反 / 止 / 结构 / 置信）</SubTitle>
+              <P>弹窗会把开仓快照里写下的<strong>反（亏损剧本）</strong>、<strong>止（失效信号）</strong>、<strong>结构（目标空间）</strong>、<strong>置信（开仓预测胜率）</strong>逐条原样回显，问你这四个假设在持仓过程中分别被市场怎么对待。这里<strong>只核验差值、不写事后故事</strong>，避免把"发生了什么"和"为什么"压成一个自洽的完美闭环。</P>
+              <P><strong>"止"这条腿</strong>是其中最关键的子项：如果开仓时写过失效信号，这里会把它原样回显，再让你选三种状态之一：<strong>触发了，我及时反应了 / 触发了，但我反应晚了 / 没触发，我是主观平仓</strong>。这一步专治"写了止损条件却没执行"。</P>
+
+              <SubTitle>选择本笔归类（结构 × 结果四象限）</SubTitle>
+              <P>"结构 × 结果"是平仓评价的核心判断，不再把同一个判断拆成额外问题。你只需要把这笔交易放进一张 2×2：<strong>结构轴 = 这一笔的过程是不是正当的（与盈亏无关）</strong>，<strong>结果轴 = 这单赢 / 亏</strong>。一句话锚点：<strong>好结果不等于好过程，坏结果不等于坏过程</strong>。</P>
               <div className="overflow-x-auto">
                 <table className="w-full text-[11px] my-3 border border-border rounded overflow-hidden">
                   <thead className="bg-muted/50">
                     <tr>
                       <th className="text-left px-3 py-2 font-medium text-foreground text-[10px]">象限</th>
-                      <th className="text-left px-3 py-2 font-medium text-foreground text-[10px]">结构 · 结果</th>
+                      <th className="text-left px-3 py-2 font-medium text-foreground text-[10px]">过程 · 结果</th>
                       <th className="text-left px-3 py-2 font-medium text-foreground text-[10px]">该学到什么</th>
                     </tr>
                   </thead>
                   <tbody>
-                    <tr><td className="px-3 py-2 border-t border-border"><span style={{ color: '#0ECB81' }}>实力兑现</span></td><td className="px-3 py-2 border-t border-border">结构对 · 赢</td><td className="px-3 py-2 border-t border-border">可复制——记住你做对了什么，而不是记住你赚了多少</td></tr>
-                    <tr><td className="px-3 py-2 border-t border-border"><span style={{ color: '#F0B90B' }}>正确的亏损</span></td><td className="px-3 py-2 border-t border-border">结构对 · 亏</td><td className="px-3 py-2 border-t border-border">盈亏同源——它和你的盈利来自同一个源头，是 edge 的成本，别因一次亏损改掉对的做法</td></tr>
-                    <tr><td className="px-3 py-2 border-t border-border"><span style={{ color: '#F6465D' }}>危险的盈利</span></td><td className="px-3 py-2 border-t border-border">结构错 · 赢</td><td className="px-3 py-2 border-t border-border">最危险的一格：市场替你的错误买了单。别把趋势的能力当成自己的（贪天之功）——这次的赢会教你错误的经验</td></tr>
-                    <tr><td className="px-3 py-2 border-t border-border"><span style={{ color: '#D89B00' }}>应得的亏损</span></td><td className="px-3 py-2 border-t border-border">结构错 · 亏</td><td className="px-3 py-2 border-t border-border">结果诚实反映过程。要修正的是结构，不是运气</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border"><span style={{ color: '#0ECB81' }}>正当过程好结果</span></td><td className="px-3 py-2 border-t border-border">正当过程 · 好结果</td><td className="px-3 py-2 border-t border-border">可复制——记住你做对了什么，而不是记住你赚了多少</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border"><span style={{ color: '#F0B90B' }}>正当过程的坏结果</span></td><td className="px-3 py-2 border-t border-border">正当过程 · 坏结果</td><td className="px-3 py-2 border-t border-border">这种亏损是这个 edge 的成本，别因一次亏损改掉对的做法</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border"><span style={{ color: '#F6465D' }}>错误过程的好结果</span></td><td className="px-3 py-2 border-t border-border">错误过程 · 好结果</td><td className="px-3 py-2 border-t border-border">最危险的一格：市场替你的错误买了单。别把市场的能力当成自己的——这次的赢会教你错误的经验</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border"><span style={{ color: '#D89B00' }}>错误过程的坏结构</span></td><td className="px-3 py-2 border-t border-border">错误过程 · 坏结果</td><td className="px-3 py-2 border-t border-border">结果诚实反映过程。要修正的是结构，不是运气</td></tr>
                   </tbody>
                 </table>
               </div>
               <RedHighlight>
-                命中<strong>“危险的盈利”</strong>时，评价弹窗会给出强警示。这是系统唯一要对你“喊”的一格：盈利会强化你刚刚犯的错，下次仓位更大、错得更狠。
+                命中<strong>"错误过程的好结果"</strong>时，评价弹窗会给出强警示。这是系统唯一要对你"喊"的一格：盈利会强化你刚刚犯的错，下次仓位更大、错得更狠。
               </RedHighlight>
-              <P className="mt-2">如果结果是保本或未入场，不强行归入四象限；如果是赢或亏，就先选一格，再写叙事原因。</P>
-
-              <SubTitle>证伪信号闭环</SubTitle>
-              <P>如果开仓快照里写过<strong>失效信号</strong>，评价弹窗会把它<strong>原样回显</strong>，再问一句：<strong>“这个信号在平仓前触发了吗？”</strong> 三选一：<strong>触发了，我及时反应了 / 触发了，但我反应晚了 / 没触发，我是主观平仓</strong>。这一步把“事前写的证伪点”和“事后真实的退出动作”对上，专治“写了止损条件却没执行”。</P>
-
-              <SubTitle>源头校准 · 盈亏同源</SubTitle>
-              <P>这块承接快照里标的 <strong>edge / 源头</strong>：</P>
-              <ul className="list-disc pl-6 text-[14px] text-foreground/90 space-y-1">
-                <li><strong>开仓已标</strong>：只读回显，本次盈亏直接归到这个源头下，不允许事后改写。</li>
-                <li><strong>旧快照漏标</strong>：允许在此<strong>补标</strong>一个源头（软性，可跳过），让这笔也能进入“盈亏同源”统计。</li>
-              </ul>
-              <Highlight>
-                盈亏同源的意思是：当同一个源头<strong>既是你最大的盈利、又是最大的亏损来源</strong>时，那不是该砍掉的毛病，而是 edge 本身的两面。别在一次亏损后把对的做法一起砍掉。
-              </Highlight>
+              <P className="mt-2">如果结果是保本或未入场，不强行归入四象限；如果是赢或亏，就先选一格——按 UI 里"选择本笔归类"那 2×2 的可点格子，系统会自动只让你选与本笔结果一致的两格（赢的一行 / 亏的一行）。</P>
 
               <SubTitle>工具箱集中度体检 · 铁锤人自检</SubTitle>
-              <P>这块紧接源头校准，但换一个问题：<strong>不看盈亏，只看你实际在用哪几招。</strong> 它把你<strong>全部主力单</strong>的 edge 源头按使用频次画成一组占比条，对应芒格的<strong>“铁锤人”（man with a hammer）</strong>——<strong>手里只有一把锤子，看什么都像钉子；越顺手的一招越危险，越成功越危险。</strong></P>
+              <P>这块换一个问题：<strong>不看盈亏，只看你实际在用哪几招。</strong> 它把你<strong>全部主力单</strong>的 edge 源头按使用频次画成一组占比条，对应芒格的<strong>"铁锤人"（man with a hammer）</strong>——<strong>手里只有一把锤子，看什么都像钉子；越顺手的一招越危险，越成功越危险。</strong></P>
               <P>它遵守<strong>样本量纪律</strong>：只统计<strong>主力单、且已入场</strong>的交易，并且<strong>样本不足 5 笔时不下结论</strong>（逸闻的复数不是数据）。够样本后：</P>
               <div className="overflow-x-auto">
                 <table className="w-full text-[11px] my-3 border border-border rounded overflow-hidden">
@@ -951,30 +942,8 @@ export default function GuidePage() {
                 持有小机会仓位是<strong>一等负向状态：它比空仓更糟</strong>——在悄悄损耗你的行动力与对大机会的敏感度。把它的成本记成账，下次才舍得空仓。
               </RedHighlight>
 
-              <SubTitle>真正学到了什么：先事实，后解释</SubTitle>
-              <P>复盘最后的“这笔真正学到了什么”，<strong>把快照里“信息事实 vs 判断”的双通道好设计对称地搬了过来</strong>，拆成两栏填写：</P>
-              <div className="overflow-x-auto">
-                <table className="w-full text-[11px] my-3 border border-border rounded overflow-hidden">
-                  <thead className="bg-muted/50">
-                    <tr>
-                      <th className="text-left px-3 py-2 font-medium text-foreground text-[10px]">栏位</th>
-                      <th className="text-left px-3 py-2 font-medium text-foreground text-[10px]">写什么</th>
-                      <th className="text-left px-3 py-2 font-medium text-foreground text-[10px]">约束</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <tr><td className="px-3 py-2 border-t border-border">① 盘面发生了什么</td><td className="px-3 py-2 border-t border-border">只写可观察的事实：价格 / 成交 / 时间，不写原因</td><td className="px-3 py-2 border-t border-border">软性，可留空——但写下事实能挡住事后归因</td></tr>
-                    <tr><td className="px-3 py-2 border-t border-border">② 真正学到了什么（解释）</td><td className="px-3 py-2 border-t border-border">你的归因，以及下次具体怎么改</td><td className="px-3 py-2 border-t border-border"><span style={{ color: '#F6465D' }}>必填</span></td></tr>
-                  </tbody>
-                </table>
-              </div>
-              <RedHighlight>
-                先事实、后解释，是为了对抗<strong>叙事谬误</strong>：事后回看时，人最容易把“发生了什么”和“为什么”压成一个<strong>自洽的完美闭环</strong>，再当成真相。两栏分开写，逼你先承认看见了什么，再解释为什么。
-              </RedHighlight>
-              <P className="mt-2">两栏合存进同一字段，<strong>不新增数据库列</strong>；<strong>旧版只有一段的复盘自动归为“解释”，历史记录不受影响</strong>。</P>
-
               <SubTitle>情绪侧复盘 · 七问：把这单底下真正动你的那块石头翻出来</SubTitle>
-              <P>“事实 / 解释”两栏之后，复盘弹窗再追加一个独立模块——<strong>情绪侧七问</strong>。它不分析盘面，<strong>分析你自己</strong>：这一刀真正动你的不是图形，是你心里那块石头。它的位置紧贴“先事实、后解释”之后、“如果重来一次”之前——逻辑顺序是<strong>先看清动机，再写下次的动作</strong>。</P>
+              <P>评价弹窗最后一块是<strong>情绪侧七问</strong>。它不分析盘面，<strong>分析你自己</strong>：这一刀真正动你的不是图形，是你心里那块石头。前面几块都是在对账（事实是什么 / 归到哪一格 / 体检指标），到这里转向<strong>翻底层动机</strong>——先看清这单背后真正在驱动你的东西，再写下次再遇到时具体准备怎么做。</P>
               <div className="overflow-x-auto">
                 <table className="w-full text-[11px] my-3 border border-border rounded overflow-hidden">
                   <thead className="bg-muted/50">
@@ -1019,7 +988,7 @@ export default function GuidePage() {
               <RedHighlight>
                 七问<strong>全部必填</strong>（主石头允许“至少选一个标签或写一句话”满足其一）——它和评价的其他部分一样，<strong>不写完不能保存离开</strong>。这是逼自己面对底层动机，而不是停在“盘面分析”那一层假装收口。
               </RedHighlight>
-              <P className="mt-2">底层逻辑：这一笔会成为样本，进入<strong>结构 × 结果四象限</strong>、<strong>盈亏同源</strong>、<strong>铁锤人体检</strong>等结构层的统计；同时也会进入<strong>主石头统计</strong>——同一块石头反复出现，意味着你的下一步设计干预（L5 五步诊断里的“设计”）应该针对这块石头本身，而不是再讲一遍盘面。</P>
+              <P className="mt-2">底层逻辑：这一笔会成为样本，进入<strong>结构 × 结果四象限</strong>与<strong>铁锤人体检</strong>等结构层的统计；同时也会进入<strong>主石头统计</strong>——同一块石头反复出现，就是在告诉你下一步该针对的是这块石头本身，而不是再讲一遍盘面。</P>
             </section>
 
             <section id="s3-4" className="scroll-mt-20">
