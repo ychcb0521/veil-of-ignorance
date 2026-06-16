@@ -2817,8 +2817,17 @@ export async function finalizeJournalReview(
     // 本地镜像兜底：把被剥掉的字段在 localStorage 写一份，错题集 reload 时合并回去——
     // 用户单设备上始终能在错题集汇总看到自己填的内容，无视远程 schema 漂移。
     try {
-      const { data: auth } = await supabase.auth.getUser();
-      const userId = auth?.user?.id ?? null;
+      // 镜像 userId 必须可靠：优先取「刚 update 成功那行」自带的 user_id——它是核心列，
+      // .select() 一定带回，且与错题集 applyLocalMirror 用的 useAuth().user.id 同源。
+      // 仅当那行意外缺 user_id 时，才回退到本地 session（getSession 读 localStorage，不走网络）。
+      // 旧实现用 supabase.auth.getUser() 是一次网络请求，抖动/刷新时返回 null 会让
+      // mirrorDroppedColumns 静默跳过（它 if(!userId) return）→ 错题集汇总出现 0/N，
+      // 正是用户反复报告的「评价没记录进去」。
+      let userId = (baseJournal as { user_id?: string | null } | null)?.user_id ?? null;
+      if (!userId) {
+        const { data: sessionData } = await supabase.auth.getSession();
+        userId = sessionData?.session?.user?.id ?? null;
+      }
       mirrorDroppedColumns(userId, journalId, payload as Record<string, unknown>, allDropped);
     } catch (e) {
       console.warn('[journalApi] 本地镜像写入失败:', e);

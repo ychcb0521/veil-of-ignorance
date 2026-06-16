@@ -361,12 +361,17 @@ export function PostTradeReviewSheet({
         post_emo_main_stone_tags: emoMainStoneTags.length > 0 ? emoMainStoneTags : null,
         post_emo_next_time_plan: emoNextTimePlan.trim(),
       });
-      toast.success('已保存平仓评价');
+      // 提交永远是「成功」语义：基础字段已落远程库；若远程缺列，被剥掉的字段已写入本地镜像，
+      // 并会在错题集汇总里照常显示（applyLocalMirror 合并）。所以只发一条绿色成功提示，把
+      // 「缺列」降级成附注，而不是再弹一条看起来像报错的黄色信息。诚实保留：这些列暂未同步到
+      // 远程库、跨设备需要跑迁移——非最终解法，但本机功能闭环。
       if (drifted && drifted.length > 0) {
-        toast.info(
-          `远程数据库缺 ${drifted.length} 列（${drifted.slice(0, 3).join('、')}…），已本地兜底。`,
-          { description: '错题集汇总能正常看到你填的内容；想跨设备同步，请跑 supabase/migrations 里最新的 safety net 迁移。', duration: 6000 },
-        );
+        toast.success('已保存平仓评价', {
+          description: `已写入本机并显示在错题集汇总；其中 ${drifted.length} 项暂未同步到远程库（缺列）。需跨设备同步时，在 Supabase 跑最新 safety net 迁移即可。`,
+          duration: 6000,
+        });
+      } else {
+        toast.success('已保存平仓评价');
       }
       window.dispatchEvent(new CustomEvent('journal:reviewed', { detail: { journalId: journal.id } }));
       onReviewed?.(updated);
