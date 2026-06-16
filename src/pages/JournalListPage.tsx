@@ -5,7 +5,7 @@
  * 展开后看到的是历史全部主力单在这个问题上的答案分布 / 列表 / 数值统计。
  * 旁边并列三个 tab：结构成熟度、盲区（手动登记你没预想到的错）、待复盘。
  */
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import { BackButton } from '@/components/journal/BackButton';
@@ -31,26 +31,51 @@ export default function JournalListPage() {
 
   const view = (params.get('view') ?? 'summary') as View;
 
+  /**
+   * 重新拉数据。silent=true 时不切 loading（用于背景刷新，避免页面闪屏）。
+   * 用于：① mount 首次拉；② 平仓评价完成事件；③ 页面从隐藏切回可见；④ 待复盘列表完成评价回调。
+   */
+  const reloadData = useCallback(async (silent = false) => {
+    if (!user) return;
+    if (!silent) setLoading(true);
+    try {
+      const all = await listAllJournalDataForUser(user.id);
+      if (all.journals.length > 1000) {
+        const since = new Date(Date.now() - 90 * 86400000).toISOString();
+        setData(await listAllJournalDataForUser(user.id, { dateFrom: since }));
+      } else {
+        setData(all);
+      }
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : String(e));
+    } finally {
+      if (!silent) setLoading(false);
+    }
+  }, [user]);
+
+  useEffect(() => {
+    void reloadData(false);
+  }, [reloadData]);
+
+  /**
+   * 监听全局事件：
+   * - 'journal:reviewed' 由 PostTradeReviewSheet 保存评价时发出，覆盖
+   *   "用户在别处做完评价、回到错题集看不到"的核心场景；
+   * - 'visibilitychange' 兜底：用户从其他 tab / 窗口切回时也刷新一次。
+   */
   useEffect(() => {
     if (!user) return;
-    (async () => {
-      setLoading(true);
-      try {
-        const all = await listAllJournalDataForUser(user.id);
-        // 数据量极大时只看最近 90 天，避免一次性拉全量。
-        if (all.journals.length > 1000) {
-          const since = new Date(Date.now() - 90 * 86400000).toISOString();
-          setData(await listAllJournalDataForUser(user.id, { dateFrom: since }));
-        } else {
-          setData(all);
-        }
-      } catch (e) {
-        toast.error(e instanceof Error ? e.message : String(e));
-      } finally {
-        setLoading(false);
-      }
-    })();
-  }, [user]);
+    const onReviewed = () => { void reloadData(true); };
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') void reloadData(true);
+    };
+    window.addEventListener('journal:reviewed', onReviewed);
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      window.removeEventListener('journal:reviewed', onReviewed);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, [user, reloadData]);
 
   // 错题集只看真实交易；'太难'(no_trade) 记录只在元监控展示，不进误差。
   const tradeJournals = useMemo(
@@ -120,11 +145,7 @@ export default function JournalListPage() {
         {view === 'unreviewed' && (
           <UnreviewedJournalList
             journals={tradeJournals}
-            onReviewed={() => {
-              if (user) {
-                listAllJournalDataForUser(user.id).then(setData).catch(e => toast.error(String(e)));
-              }
-            }}
+            onReviewed={() => { void reloadData(true); }}
           />
         )}
       </main>
