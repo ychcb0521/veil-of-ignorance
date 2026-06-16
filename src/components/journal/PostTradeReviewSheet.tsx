@@ -37,7 +37,6 @@ import {
   parseOddsStructureReviewText,
   type OddsStructureReview,
 } from '@/lib/oddsStructure';
-import { deriveLoopReadout, type LegTone } from '@/lib/structureLoop';
 import {
   groupMainStonesByFamily, MAIN_STONE_META, normalizeMainStoneTags,
   type MainStoneTag,
@@ -82,14 +81,6 @@ interface Props {
   onReviewed?: (updated: TradeJournal) => void;
   onAutoPause?: () => void;
 }
-
-/** 闭环判读：腿色调 → 品牌色（库只给语义色调，视图在这里落到具体色值）。 */
-const LOOP_TONE_COLOR: Record<LegTone, string> = {
-  good: '#0ECB81',
-  warn: '#D89B00',
-  bad: '#F6465D',
-  muted: '#9AA0A6',
-};
 
 const RESULT_REVIEW_LABELS: Record<StructureResultQuadrant, string> = {
   deserved_win: '正当过程好结果',
@@ -442,10 +433,6 @@ export function PostTradeReviewSheet({
   const pnlLabel = `${pnl > 0 ? '+' : ''}${pnl.toFixed(2)} USDT`;
   const rLabel = finalR != null ? `${finalR > 0 ? '+' : ''}${finalR.toFixed(2)}R` : '—R';
 
-  // ===== 结构闭环判读（看见 + 迭代）=====
-  // 你押的是一个闭环（正 / 反 / 止），不是一个 EV。把上面已核验的事实收口成一句裁决，
-  // 并在死法走「后门」（不在预案内）时给出迭代指令。仅主力方向单、有赢/亏结果时判读。
-  const loopReadoutApplicable = !isHedge && quadrantApplicable;
   const hasFalsificationPlan = !!snapshotFalsification;
   const hasOddsStructurePlan = !!journal.pre_odds_structure;
   const hasOddsBreakdownPlan = !!snapshotOddsBreakdown.trim();
@@ -471,59 +458,6 @@ export function PostTradeReviewSheet({
         { value: 'mixed', label: '部分兑现', desc: '有空间但不干净，或兑现幅度不足' },
         { value: 'wrong', label: '没兑现', desc: '目标空间没有打开，结构假设失效' },
       ];
-  const loopReadout = deriveLoopReadout({
-    outcome,
-    quadrant,
-    oddsReview: oddsStructureReviewValue,
-    premortemReviewFilled: !!premortemReview.trim(),
-    falsificationStatus,
-    hasFalsificationPlan,
-  });
-  const loopVerdictMeta = (() => {
-    switch (loopReadout.verdict) {
-      case 'intact':
-        return {
-          accent: '#0ECB81',
-          badge: '闭环完整',
-          title: outcome === 'win' ? '这笔可以作为正向样本' : '亏损受控，按预案结束',
-          body:
-            outcome === 'win'
-              ? '正向预期兑现，并且事实可以核验。它会进入结构成熟度的正向样本。'
-              : '真亏的时候从「前门」走：该触发的信号触发了，你也按预案执行了。',
-          next: outcome === 'win'
-            ? '保存评价即可；后续在结构成熟度里看同类结构是否持续兑现。'
-            : '不要因为一笔合规亏损改规则；只记录它是这个 edge 的正常成本。',
-        };
-      case 'lagged':
-        return {
-          accent: '#D89B00',
-          badge: '执行迟滞',
-          title: '信号在预案内，但动作晚了',
-          body: '这不是结构没写对，而是看见以后没有立刻执行。问题在动作延迟，不在事后解释。',
-          next: '把这条信号改成机械动作：触发即离场、触发即拆仓，别留“再看看”的空间。',
-        };
-      case 'gap':
-        return {
-          accent: '#F6465D',
-          badge: '预案缺口',
-          title: '这次的死法不在预案里',
-          body: '亏损不是按预设信号结束，而是从你没提前定义的地方钻出来。这个尾巴必须被前置。',
-          next: '把这次让你措手不及的盘面事实，写成下次开仓前的“止”：什么信号出现就离场。',
-        };
-      default:
-        return {
-          accent: '#9AA0A6',
-          badge: '待判读',
-          title: hasFalsificationPlan ? '先完成上方“止”的选择' : '本笔无法判死法门',
-          body: hasFalsificationPlan
-            ? '上面的证伪状态还没选完，所以系统还不知道这次亏损是前门、晚门还是后门。'
-            : '开仓时没有写下可验证的“止”，这里不会把事后事实伪装成事前计划。',
-          next: hasFalsificationPlan
-            ? '回到上方“止”模块，先选证伪信号是否触发，再看这里的结论。'
-            : '先保存本次离场事实；下一次同类开仓，必须提前写清“什么信号出现就离场”。',
-        };
-    }
-  })();
 
   const body = (
     <>
@@ -951,91 +885,6 @@ export function PostTradeReviewSheet({
             </div>
           )}
         </div>
-
-        {loopReadoutApplicable && (
-          <div className={`space-y-3 px-4 py-4 ${sectionCardClass}`}>
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-              <div>
-                <div className="text-[12px] font-semibold text-foreground">结构闭环判读</div>
-                <div className="mt-0.5 text-[10px] leading-relaxed text-muted-foreground">
-                  这里不用再填写。系统把上方事实自动收口：看正、看反、看止，然后给出下一步。
-                </div>
-              </div>
-              <div className="rounded-full border border-border/70 bg-background px-2.5 py-1 text-[10px] text-muted-foreground">
-                读法：先看结论，再看下一步
-              </div>
-            </div>
-
-            <div className="grid gap-2 sm:grid-cols-3">
-              <div className="space-y-1.5 rounded-xl border border-border/60 bg-background/60 px-3 py-2.5">
-                <div className="flex items-center justify-between gap-2">
-                  <span className={factPillClass}>正</span>
-                  <span className="text-[10px] font-medium" style={{ color: LOOP_TONE_COLOR[loopReadout.zheng.tone] }}>
-                    {loopReadout.zheng.status}
-                  </span>
-                </div>
-                <div className="text-[10px] font-medium text-muted-foreground">看预期有没有兑现</div>
-                <div className="line-clamp-3 text-[10px] leading-relaxed text-muted-foreground">{snapshotWhyRight || '—'}</div>
-                {calibrationScore != null && (
-                  <div className="font-mono text-[10px] text-muted-foreground">
-                    Brier {calibrationScore.toFixed(2)} · 预测 {calibrationPct?.toFixed(0)}%
-                  </div>
-                )}
-              </div>
-
-              <div className="space-y-1.5 rounded-xl border border-border/60 bg-background/60 px-3 py-2.5">
-                <div className="flex items-center justify-between gap-2">
-                  <span className={factPillClass}>反</span>
-                  <span className="text-[10px] font-medium" style={{ color: LOOP_TONE_COLOR[loopReadout.fan.tone] }}>
-                    {loopReadout.fan.status}
-                  </span>
-                </div>
-                <div className="text-[10px] font-medium text-muted-foreground">看亏损剧本有没有命中</div>
-                <div className="line-clamp-3 text-[10px] leading-relaxed text-muted-foreground">{snapshotPremortem || '—'}</div>
-              </div>
-
-              <div className="space-y-1.5 rounded-xl border border-border/60 bg-background/60 px-3 py-2.5">
-                <div className="flex items-center justify-between gap-2">
-                  <span className={factPillClass}>止</span>
-                  <span className="text-[10px] font-medium" style={{ color: LOOP_TONE_COLOR[loopReadout.zhi.tone] }}>
-                    {loopReadout.zhi.status}
-                  </span>
-                </div>
-                <div className="text-[10px] font-medium text-muted-foreground">看真亏时是不是按预案死</div>
-                <div className="line-clamp-3 text-[10px] leading-relaxed text-muted-foreground">{snapshotFalsification || '—'}</div>
-              </div>
-            </div>
-
-            <div
-              className="rounded-xl border px-3 py-3 text-[11px] leading-relaxed"
-              style={{
-                borderColor: `${loopVerdictMeta.accent}59`,
-                backgroundColor: `${loopVerdictMeta.accent}12`,
-              }}
-            >
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                <div className="min-w-0 space-y-1">
-                  <div className="flex items-center gap-2">
-                    {(loopReadout.verdict === 'gap' || loopReadout.verdict === 'lagged') && (
-                      <AlertTriangle className="h-3.5 w-3.5 shrink-0" style={{ color: loopVerdictMeta.accent }} />
-                    )}
-                    <span
-                      className="rounded-full border px-2 py-0.5 text-[10px] font-semibold"
-                      style={{ borderColor: `${loopVerdictMeta.accent}73`, color: loopVerdictMeta.accent }}
-                    >
-                      {loopVerdictMeta.badge}
-                    </span>
-                    <span className="font-semibold text-foreground">{loopVerdictMeta.title}</span>
-                  </div>
-                  <div className="text-muted-foreground">{loopVerdictMeta.body}</div>
-                </div>
-                <div className="rounded-lg border border-border/60 bg-card/80 px-3 py-2 text-[10px] leading-relaxed text-muted-foreground sm:w-[260px]">
-                  <span className="font-semibold text-foreground">下一步：</span>{loopVerdictMeta.next}
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
 
         <div className={`space-y-3 px-4 py-4 ${sectionCardClass}`}>
           <div className="text-[12px] font-medium">结果复盘</div>
