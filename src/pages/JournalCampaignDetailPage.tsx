@@ -131,6 +131,10 @@ function buildDefaultWhatIfParams(campaign: TradeCampaign, legs: TradeJournal[])
   return buildPureSopParams(campaign, legs);
 }
 
+// 开单/平单竖线配色：多单蓝、空单橘（与持仓方向绑定，独立于 leg_role 的标记色）。
+const LEG_LONG_COLOR = '#2B80FF';
+const LEG_SHORT_COLOR = '#F7931A';
+
 function buildChartArtifacts(
   campaign: TradeCampaign,
   legs: TradeJournal[],
@@ -199,6 +203,13 @@ function buildChartArtifacts(
     if (leg.leg_role === 'main_open') { label = leg.direction === 'short' ? 'M↓' : 'M↑'; }
 
     markers.push({ time: record?.openTime ?? placedMs, price, shape, color, label });
+
+    // 按方向配色的开单/平单竖线：开单实线，平单虚线；多单蓝、空单橘。
+    const legDirColor = leg.direction === 'short' ? LEG_SHORT_COLOR : LEG_LONG_COLOR;
+    verticalLines.push({ time: record?.openTime ?? placedMs, color: legDirColor, width: 1.2, z: 3, dashed: false });
+    if (record) {
+      verticalLines.push({ time: record.closeTime, color: legDirColor, width: 1.2, z: 3, dashed: true });
+    }
 
     const cancelEvent = events.find(event => event.journal_id === leg.id && event.event_type === 'hedge_cancelled') ?? null;
     const startTime = placedMs;
@@ -412,11 +423,34 @@ export default function JournalCampaignDetailPage() {
     return campaign.closed_at ?? new Date(getEffectiveTime(campaign.symbol)).toISOString();
   }, [campaign, getEffectiveTime]);
 
+  // Legs 列表里所有腿的最早开单时间与最晚平单时间，用来撑开 K 线前后区间（需求②）。
+  const legTimeSpan = useMemo(() => {
+    let min = Infinity;
+    let max = -Infinity;
+    for (const leg of legs) {
+      const record = leg.trade_record_id
+        ? tradeRecords.find(item => item.id === leg.trade_record_id) ?? null
+        : null;
+      const openMs = record?.openTime ?? new Date(leg.pre_simulated_time).getTime();
+      if (Number.isFinite(openMs)) { min = Math.min(min, openMs); max = Math.max(max, openMs); }
+      if (record && Number.isFinite(record.closeTime)) {
+        min = Math.min(min, record.closeTime);
+        max = Math.max(max, record.closeTime);
+      }
+    }
+    return {
+      startMs: Number.isFinite(min) ? min : null,
+      endMs: Number.isFinite(max) ? max : null,
+    };
+  }, [legs, tradeRecords]);
+
   const { klines, loading: klinesLoading, error: klinesError, reload: reloadKlines } = useCampaignKlines(
     campaign?.symbol ?? '',
     campaign?.opened_at ?? new Date().toISOString(),
     effectiveClosedAt,
     interval,
+    legTimeSpan.startMs,
+    legTimeSpan.endMs,
   );
 
   const states = useMemo(

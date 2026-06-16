@@ -18,6 +18,12 @@ function statusForLeg(leg: TradeJournal, record: TradeRecord | null) {
   return { label: '进行中', className: 'text-muted-foreground' };
 }
 
+/** 统一成「MM-DD HH:mm」(UTC)，与既有 pre_simulated_time 的切片显示一致。 */
+function fmtClock(value: number | string): string {
+  const iso = typeof value === 'number' ? new Date(value).toISOString() : value;
+  return iso.replace('T', ' ').slice(5, 16);
+}
+
 export function CampaignLegsList({ legs, tradeRecords, onDetach }: Props) {
   const nav = useNavigate();
   const recordMap = useMemo(() => new Map(tradeRecords.map(record => [record.id, record])), [tradeRecords]);
@@ -27,7 +33,7 @@ export function CampaignLegsList({ legs, tradeRecords, onDetach }: Props) {
       <div className="grid grid-cols-[48px_120px_1fr_96px_92px_88px_72px_150px] text-[10px] text-muted-foreground bg-muted/40 py-2 px-3">
         <div>#</div>
         <div>角色</div>
-        <div>时间</div>
+        <div>开/平时间</div>
         <div>价格</div>
         <div>仓位</div>
         <div>状态</div>
@@ -37,7 +43,8 @@ export function CampaignLegsList({ legs, tradeRecords, onDetach }: Props) {
       {legs.map(leg => {
         const record = leg.trade_record_id ? recordMap.get(leg.trade_record_id) ?? null : null;
         const status = statusForLeg(leg, record);
-        const timeLabel = leg.pre_simulated_time.replace('T', ' ').slice(5, 16);
+        const openLabel = fmtClock(record?.openTime ?? leg.pre_simulated_time);
+        const closeLabel = record ? fmtClock(record.closeTime) : '—';
         const hedgeSummary = leg.order_kind === 'hedge' && leg.hedge_type
           ? `${HEDGE_TYPE_LABELS[leg.hedge_type]}${leg.hedge_necessity_pct != null ? ` · ${leg.hedge_necessity_pct.toFixed(0)}%` : ''}`
           : null;
@@ -56,7 +63,8 @@ export function CampaignLegsList({ legs, tradeRecords, onDetach }: Props) {
               )}
             </div>
             <div className="leading-tight">
-              <div>{timeLabel}</div>
+              <div><span className="text-muted-foreground">开 </span>{openLabel}</div>
+              <div><span className="text-muted-foreground">平 </span>{closeLabel}</div>
               {hedgeSummary && <div className="text-[10px] text-[#F0B90B]">{hedgeSummary}</div>}
             </div>
             <div>{(leg.pre_entry_price ?? record?.entryPrice ?? 0).toFixed(4)}</div>

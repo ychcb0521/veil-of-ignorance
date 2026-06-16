@@ -130,6 +130,8 @@ export interface AnalysisVerticalLine {
   time: number;
   color: string;
   width?: number;
+  /** Solid when false, dashed otherwise. Defaults to dashed for backward compat. */
+  dashed?: boolean;
 }
 
 export interface AnalysisChartAnnotations {
@@ -853,7 +855,7 @@ function CandlestickChartComponent({
         lock: true,
         styles: {
           line: {
-            style: LineType.Dashed,
+            style: (vertical.dashed ?? true) ? LineType.Dashed : LineType.Solid,
             dashedValue: [4, 4],
             size: vertical.width ?? 1,
             color: vertical.color,

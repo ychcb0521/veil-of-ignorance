@@ -33,6 +33,8 @@ export interface VerticalLine {
   color: string;
   width?: number;
   z?: number;
+  /** Solid when false, dashed otherwise. Defaults to dashed for backward compat. */
+  dashed?: boolean;
 }
 
 interface Props {
@@ -216,7 +218,8 @@ export function ReplayCandleChart({
         const x = xForTime(v.time);
         return (
           <line key={i} x1={x} x2={x} y1={CHART_PAD_TOP} y2={H - CHART_PAD_BOTTOM}
-            stroke={v.color} strokeWidth={v.width ?? 1} strokeDasharray="2 3" />
+            stroke={v.color} strokeWidth={v.width ?? 1}
+            strokeDasharray={(v.dashed ?? true) ? '2 3' : undefined} />
         );
       })}
 
