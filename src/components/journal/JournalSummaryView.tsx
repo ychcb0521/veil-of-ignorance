@@ -50,23 +50,45 @@ export function JournalSummaryView({ journals }: Props) {
         </div>
       </header>
 
-      <SummaryBlock title="开仓快照汇总" specs={PRE_FIELD_SPECS} journals={scopedJournals} />
-      <SummaryBlock title="平仓评价汇总" specs={POST_FIELD_SPECS} journals={scopedJournals} />
+      <SummaryBlock
+        title="开仓快照汇总"
+        accent="#F0B90B"
+        specs={PRE_FIELD_SPECS}
+        journals={scopedJournals}
+      />
+      <SummaryBlock
+        title="平仓评价汇总"
+        accent="#5b8def"
+        specs={POST_FIELD_SPECS}
+        journals={scopedJournals}
+      />
     </div>
   );
 }
 
 function SummaryBlock({
-  title, specs, journals,
+  title, accent, specs, journals,
 }: {
   title: string;
+  accent: string;
   specs: SummaryFieldSpec[];
   journals: TradeJournal[];
 }) {
   return (
-    <section className="rounded-xl border border-border/60 bg-card overflow-hidden">
-      <div className="border-b border-border/60 px-5 py-3">
-        <h3 className="text-[12px] font-semibold text-foreground">{title}</h3>
+    <section
+      className="rounded-xl border bg-card overflow-hidden"
+      style={{ borderColor: `${accent}40` }}
+    >
+      <div
+        className="border-b px-5 py-3"
+        style={{ borderBottomColor: `${accent}33`, backgroundColor: `${accent}0d` }}
+      >
+        <h3
+          className="text-[13px] font-bold tracking-wide"
+          style={{ color: accent }}
+        >
+          {title}
+        </h3>
       </div>
       <ul className="divide-y divide-border/60">
         {specs.map(spec => (
