@@ -13,6 +13,7 @@ import {
   simulateCampaign,
 } from '@/lib/campaignSimulationEngine';
 import { INITIAL_COGNITIVE_ASSETS } from '@/lib/cognitiveAssetsInitialContent';
+import { mirrorDroppedColumns } from '@/lib/journalLocalMirror';
 import { suggestLegRoles as suggestLegRolesHeuristic } from '@/lib/legRoleSuggestion';
 import type { CognitiveAssetsDoc, CognitiveAssetCategory, CognitiveAssetSection } from '@/types/cognitiveAssets';
 import type {
@@ -495,12 +496,13 @@ async function updateTradeJournalWithSchemaFallback(
  */
 export async function insertTradeJournalWithSchemaFallback(
   payload: Record<string, unknown>,
-): Promise<{ data: unknown; error: { message: string; code?: string } | null }> {
+): Promise<{ data: unknown; error: { message: string; code?: string } | null; droppedColumns: string[] }> {
   let nextPayload = normalizeMainOrderLegacyCompleteness(payload);
   let lastData: unknown = null;
   let lastError: { message: string; code?: string } | null = null;
   let stripped = 0;
   let bulkStripped = false;
+  const droppedColumns: string[] = [];
   // 远程库可能缺几十列，逐列剥离次数必须足够覆盖；原来固定 30 会在严重漂移时提前耗尽，
   // 导致快照提交直接报错（line: "Could not find the 'pre_confidence_basis' column …"）。
   const maxAttempts = Object.keys(nextPayload).length + 5;
@@ -513,14 +515,21 @@ export async function insertTradeJournalWithSchemaFallback(
       .single();
     lastData = data;
     lastError = error;
-    if (!error) return { data, error: null };
-    if (!isMissingDalioMetaLayerError(error) && !isSchemaColumnMissingError(error)) return { data, error };
+    if (!error) return { data, error: null, droppedColumns };
+    if (!isMissingDalioMetaLayerError(error) && !isSchemaColumnMissingError(error)) {
+      return { data, error, droppedColumns };
+    }
     const missing = missingSchemaColumn(error);
-    if (!missing || !(missing in nextPayload)) return { data, error };
+    if (!missing || !(missing in nextPayload)) return { data, error, droppedColumns };
     // 严重漂移：逐列剥到阈值仍缺列，一次性剥掉所有可选列；若把 pre_thesis_why_right
     // 也剥了，则把理由回填到 NOT NULL 旧列 pre_entry_reason（与逐列兜底保持一致）。
     if (stripped >= BULK_STRIP_AFTER && !bulkStripped) {
       const before = nextPayload;
+      for (const key of Object.keys(before)) {
+        if (OPTIONAL_COLUMN_PATTERN.test(key) && !droppedColumns.includes(key)) {
+          droppedColumns.push(key);
+        }
+      }
       const bulk = stripAllOptionalColumns(before);
       if ('pre_thesis_why_right' in before && bulk.pre_entry_reason == null) {
         bulk.pre_entry_reason = (payload.pre_thesis_why_right as string | null | undefined) ?? '';
@@ -531,6 +540,7 @@ export async function insertTradeJournalWithSchemaFallback(
     }
     const rest = { ...nextPayload };
     delete rest[missing];
+    if (!droppedColumns.includes(missing)) droppedColumns.push(missing);
     // legacy 兜底：只要发生 schema-drift 重试，就把新版三问 A 回填到旧列 pre_entry_reason。
     // 旧库可能还没执行 DROP NOT NULL；若这里继续带 null，会在剥掉缺列后又被 NOT NULL 卡住。
     if (rest.pre_entry_reason == null) {
@@ -540,7 +550,7 @@ export async function insertTradeJournalWithSchemaFallback(
     stripped += 1;
   }
 
-  return { data: lastData, error: lastError };
+  return { data: lastData, error: lastError, droppedColumns };
 }
 
 const BASE_POST_REVIEW_KEYS = new Set([
@@ -2322,8 +2332,17 @@ export async function stampJournalCloseRealTime(journalId: string): Promise<stri
 
 export async function createJournalPreSnapshot(input: CreateJournalPreInput): Promise<TradeJournal> {
   const payload = { ...input, pre_real_time: new Date().toISOString(), source: 'live' as const };
-  const { data, error } = await insertTradeJournalWithSchemaFallback(payload as Record<string, unknown>);
-  const journal = wrap("创建交易日记事前快照", error, data as unknown as TradeJournal);
+  const insertResult = await insertTradeJournalWithSchemaFallback(payload as Record<string, unknown>);
+  const journal = wrap("创建交易日记事前快照", insertResult.error, insertResult.data as unknown as TradeJournal);
+  if (insertResult.droppedColumns.length > 0) {
+    console.warn('[journalApi] 远程数据库缺以下列，本次快照的对应字段未保存：', insertResult.droppedColumns);
+    mirrorDroppedColumns(input.user_id, journal.id, payload as Record<string, unknown>, insertResult.droppedColumns);
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('journal:schemaDrift', {
+        detail: { droppedColumns: insertResult.droppedColumns, scope: 'snapshot' },
+      }));
+    }
+  }
   const painTags = input.pre_pain_tags ?? [];
   if (painTags.length > 0) {
     createPainLogEntries({
@@ -2488,6 +2507,13 @@ export async function updateJournalPostReview(
   const allDropped = [...baseResult.droppedColumns, ...extraResult.droppedColumns];
   if (allDropped.length > 0) {
     console.warn('[journalApi] 远程数据库缺以下列，本次复盘的对应字段未保存：', allDropped);
+    try {
+      const { data: auth } = await supabase.auth.getUser();
+      const userId = auth?.user?.id ?? null;
+      mirrorDroppedColumns(userId, id, payload as Record<string, unknown>, allDropped);
+    } catch (e) {
+      console.warn('[journalApi] 本地镜像写入失败:', e);
+    }
     if (typeof window !== 'undefined') {
       window.dispatchEvent(new CustomEvent('journal:schemaDrift', {
         detail: { droppedColumns: allDropped, scope: 'review' },
@@ -2788,7 +2814,15 @@ export async function finalizeJournalReview(
   const allDropped = [...baseResult.droppedColumns, ...extraResult.droppedColumns];
   if (allDropped.length > 0) {
     console.warn('[journalApi] 远程数据库缺以下列，本次评价的对应字段未保存：', allDropped);
-    // 通知 UI 弹明确警告——用户感受到「为什么我填的字段没出现在汇总里」
+    // 本地镜像兜底：把被剥掉的字段在 localStorage 写一份，错题集 reload 时合并回去——
+    // 用户单设备上始终能在错题集汇总看到自己填的内容，无视远程 schema 漂移。
+    try {
+      const { data: auth } = await supabase.auth.getUser();
+      const userId = auth?.user?.id ?? null;
+      mirrorDroppedColumns(userId, journalId, payload as Record<string, unknown>, allDropped);
+    } catch (e) {
+      console.warn('[journalApi] 本地镜像写入失败:', e);
+    }
     if (typeof window !== 'undefined') {
       window.dispatchEvent(new CustomEvent('journal:schemaDrift', {
         detail: { droppedColumns: allDropped, scope: 'finalize' },

@@ -12,6 +12,7 @@ import { BackButton } from '@/components/journal/BackButton';
 import { useAuth } from '@/contexts/AuthContext';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { listAllJournalDataForUser, type BulkJournalData } from '@/lib/journalApi';
+import { applyLocalMirror } from '@/lib/journalLocalMirror';
 import { useBlindSpots } from '@/lib/blindSpots';
 import { JournalSummaryView } from '@/components/journal/JournalSummaryView';
 import { StructureMaturityView } from '@/components/journal/StructureMaturityView';
@@ -40,11 +41,16 @@ export default function JournalListPage() {
     if (!silent) setLoading(true);
     try {
       const all = await listAllJournalDataForUser(user.id);
+      // 本地镜像兜底：远程库 schema 漂移时本地存了一份完整字段，合并回去——
+      // 用户单设备上始终能看到自己填的所有内容，不受远程缺列影响。
+      const applyMirror = (d: BulkJournalData): BulkJournalData =>
+        ({ ...d, journals: applyLocalMirror(user.id, d.journals) });
       if (all.journals.length > 1000) {
         const since = new Date(Date.now() - 90 * 86400000).toISOString();
-        setData(await listAllJournalDataForUser(user.id, { dateFrom: since }));
+        const partial = await listAllJournalDataForUser(user.id, { dateFrom: since });
+        setData(applyMirror(partial));
       } else {
-        setData(all);
+        setData(applyMirror(all));
       }
     } catch (e) {
       toast.error(e instanceof Error ? e.message : String(e));

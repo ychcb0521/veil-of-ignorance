@@ -363,9 +363,9 @@ export function PostTradeReviewSheet({
       });
       toast.success('已保存平仓评价');
       if (drifted && drifted.length > 0) {
-        toast.warning(
-          `保存完成，但远程数据库缺 ${drifted.length} 列（如 ${drifted.slice(0, 3).join('、')}…），这些字段未能落库。`,
-          { description: '请联系管理员跑 supabase/migrations 里最新的 safety net 迁移，否则错题集汇总会缺数据。', duration: 10000 },
+        toast.info(
+          `远程数据库缺 ${drifted.length} 列（${drifted.slice(0, 3).join('、')}…），已本地兜底。`,
+          { description: '错题集汇总能正常看到你填的内容；想跨设备同步，请跑 supabase/migrations 里最新的 safety net 迁移。', duration: 6000 },
         );
       }
       window.dispatchEvent(new CustomEvent('journal:reviewed', { detail: { journalId: journal.id } }));
