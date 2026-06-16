@@ -1,13 +1,13 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import {
   Play, Pause, Square, Clock, BookmarkX,
-  Database, ChevronDown, Upload, Plus, Trash2, X, ArrowRightCircle, CheckCircle2,
+  Database, ChevronDown, Upload, Download, Plus, Trash2, X, ArrowRightCircle, CheckCircle2,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { formatUTC8 } from '@/lib/timeFormat';
 import {
   type TradeSignal,
-  loadSignals, saveSignals, parseSignalText, mergeSignals, sortSignalsAlpha, sortSignalsByTime, signalMonthKey,
+  loadSignals, saveSignals, parseSignalText, serializeSignals, mergeSignals, sortSignalsAlpha, sortSignalsByTime, signalMonthKey,
 } from '@/lib/signalLibrary';
 import type { TimeMachineStatus } from '@/hooks/useTimeSimulator';
 import type { TimeMode } from '@/contexts/TradingContext';
@@ -131,6 +131,23 @@ export function TimeControl({
 
   const handleDeleteSignal = (id: string) => setSignals(prev => prev.filter(s => s.id !== id));
   const handleClearSignals = () => { setSignals([]); setImportErrors([]); toast.message('信号库已清空'); };
+
+  // 导出：把整库序列化成「区块格式」txt（与导入互逆，可原样再导入），触发浏览器下载。
+  const handleExportSignals = () => {
+    if (signals.length === 0) return;
+    const text = serializeSignals(signals);
+    const stamp = formatUTC8(Date.now()).replace(/[^\d]/g, '').slice(0, 12);
+    const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `signal-library-${stamp || 'export'}.txt`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    toast.success(`已导出 ${signals.length} 条信号`);
+  };
 
   const handleJumpSignal = (sig: TradeSignal) => {
     if (!onJumpToSignal) {
@@ -271,17 +288,28 @@ export function TimeControl({
       {/* 信号库折叠面板 */}
       {signalLibOpen && (
         <div className="mt-3 border-t border-border/60 pt-3">
-          {/* 极简「上传 / 粘贴信号」入口：默认近乎隐形，点开才展开导入窗口 */}
-          <button
-            onClick={() => setImportOpen(o => !o)}
-            title={importOpen ? '收起上传 / 粘贴信号' : '上传 / 粘贴信号'}
-            className={`flex items-center gap-1 text-[10px] transition-colors ${
-              importOpen ? 'text-primary' : 'text-muted-foreground/30 hover:text-muted-foreground'
-            }`}
-          >
-            <Upload className="h-3 w-3" />
-            <ChevronDown className={`h-2.5 w-2.5 transition-transform ${importOpen ? 'rotate-180' : ''}`} />
-          </button>
+          {/* 极简「上传 / 粘贴信号」+「导出」入口：默认近乎隐形，与列表融为一体 */}
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => setImportOpen(o => !o)}
+              title={importOpen ? '收起上传 / 粘贴信号' : '上传 / 粘贴信号'}
+              className={`flex items-center gap-1 text-[10px] transition-colors ${
+                importOpen ? 'text-primary' : 'text-muted-foreground/30 hover:text-muted-foreground'
+              }`}
+            >
+              <Upload className="h-3 w-3" />
+              <ChevronDown className={`h-2.5 w-2.5 transition-transform ${importOpen ? 'rotate-180' : ''}`} />
+            </button>
+            {signals.length > 0 && (
+              <button
+                onClick={handleExportSignals}
+                title="导出信号库为 txt（与导入互逆，可原样再导入）"
+                className="flex items-center text-[10px] text-muted-foreground/30 transition-colors hover:text-muted-foreground"
+              >
+                <Download className="h-3 w-3" />
+              </button>
+            )}
+          </div>
 
           {importOpen && (
           <div className="mt-2">

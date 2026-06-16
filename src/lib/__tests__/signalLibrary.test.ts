@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   parseSignalTime,
   parseSignalText,
+  serializeSignals,
   mergeSignals,
   sortSignalsAlpha,
   sortSignalsByTime,
@@ -195,6 +196,46 @@ describe('sortSignalsByTime', () => {
       mk('3', 'XRPUSDT', 200),
     ];
     expect(sortSignalsByTime(list, 'asc').map(s => s.timeMs)).toEqual([100, 200, 300]);
+  });
+});
+
+describe('serializeSignals ↔ parseSignalText 互逆（导出可原样再导入）', () => {
+  /** 比较两组信号在 {symbol,timeMs,fallbackZone} 上是否等价（忽略 id / timeLabel，按 symbol@time 排序）。 */
+  const canon = (list: TradeSignal[]) =>
+    [...list]
+      .sort((a, b) => (a.timeMs - b.timeMs) || a.symbol.localeCompare(b.symbol))
+      .map(s => `${s.symbol}@${s.timeMs}=${s.fallbackZone}`);
+
+  it('空库序列化为空串', () => {
+    expect(serializeSignals([])).toBe('');
+  });
+
+  it('导出后再解析，标的 / 时间 / 兜底区完全一致', () => {
+    const mk = (symbol: string, t: string, zone: string): TradeSignal =>
+      ({ id: symbol + t, symbol, timeMs: parseSignalTime(t)!, timeLabel: t, fallbackZone: zone });
+    const original: TradeSignal[] = [
+      mk('NAORISUSDT', '2026-04-29 18:27:00', '0.107'),
+      mk('MOODENGUSDT', '2026-04-29 18:27:00', ''),          // 同一时间 → 同一表头
+      mk('TACUSDT', '2026-04-28 21:00:30', '0.0127'),         // 带秒 → 不能丢
+      mk('BTCUSDT', '2024-01-15 16:00:00', '72000-74000'),    // 带空格的区间
+    ];
+    const { signals: reparsed, errors } = parseSignalText(serializeSignals(original));
+    expect(errors).toHaveLength(0);
+    expect(reparsed).toHaveLength(original.length);
+    expect(canon(reparsed)).toEqual(canon(original));
+  });
+
+  it('同一时间的多条信号归到一个日期表头下', () => {
+    const mk = (symbol: string, t: string): TradeSignal =>
+      ({ id: symbol, symbol, timeMs: parseSignalTime(t)!, timeLabel: t, fallbackZone: '' });
+    const text = serializeSignals([
+      mk('BUSDT', '2026-04-29 18:27:00'),
+      mk('AUSDT', '2026-04-29 18:27:00'),
+    ]);
+    // 只有一个日期表头行（出现一次），组内按标的字母序
+    const headerCount = text.split('\n').filter(l => /^\d{4}-/.test(l)).length;
+    expect(headerCount).toBe(1);
+    expect(text.indexOf('AUSDT')).toBeLessThan(text.indexOf('BUSDT'));
   });
 });
 

@@ -258,3 +258,44 @@ export function saveSignals(list: TradeSignal[]): void {
     /* ignore quota / serialization errors */
   }
 }
+
+/**
+ * 把 timeMs 还原成 `YYYY-MM-DD HH:mm:ss`（按 UTC+8 墙钟），用作导出时的「日期表头」。
+ * 必须带上秒——parseSignalTime 接受可选秒位，丢秒会让带秒信号在 re-import 时偏移。
+ */
+function formatSignalHeader(timeMs: number): string {
+  const d = new Date(timeMs + 8 * 3600_000);
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())} ${p(d.getUTCHours())}:${p(d.getUTCMinutes())}:${p(d.getUTCSeconds())}`;
+}
+
+/**
+ * 把信号库序列化成「区块格式」纯文本——与 parseSignalText 完全互逆，导出的文本能原样再导入。
+ * 同一时间的信号归到一个日期表头下，时间倒序（最近在前）、组内按标的字母序。
+ * 例：
+ *   2026-04-29 18:27:00
+ *   MOODENGUSDT 0.0608
+ *   NAORISUSDT 0.107
+ *
+ *   2026-04-28 21:00:00
+ *   TACUSDT 0.0127
+ */
+export function serializeSignals(signals: TradeSignal[]): string {
+  if (signals.length === 0) return '';
+  const byTime = new Map<number, TradeSignal[]>();
+  for (const s of signals) {
+    const arr = byTime.get(s.timeMs);
+    if (arr) arr.push(s);
+    else byTime.set(s.timeMs, [s]);
+  }
+  const times = [...byTime.keys()].sort((a, b) => b - a); // 最近的时间在前
+  const blocks = times.map(t => {
+    const group = [...(byTime.get(t) ?? [])].sort((a, b) => a.symbol.localeCompare(b.symbol));
+    const lines = [formatSignalHeader(t)];
+    for (const s of group) {
+      lines.push(s.fallbackZone ? `${s.symbol} ${s.fallbackZone}` : s.symbol);
+    }
+    return lines.join('\n');
+  });
+  return `${blocks.join('\n\n')}\n`;
+}
