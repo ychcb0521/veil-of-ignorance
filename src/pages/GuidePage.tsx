@@ -865,7 +865,7 @@ export default function GuidePage() {
             <section id="s3-3" className="scroll-mt-20">
               <SubTitle>3.4 平仓评价复盘</SubTitle>
               <P>决策记录模式下，平仓会打开一个与开仓快照同规格的<strong>居中评价弹窗</strong>，不完成评价不能离开。评价的重心不是重新讲一遍故事，而是把快照时的预测和最终实际结果对上：预设的证伪信号兑现没有，结构破坏信号出现没有，进场时钉下的置信度有没有被验证。</P>
-              <P>弹窗按这条主线展开：<strong>事实模块</strong>逐条核验快照里押的<strong>反 / 止 / 结构 / 置信</strong>四条腿 → <strong>结果归类</strong>（结构 × 结果四象限）→ <strong>体检模块</strong>（铁锤人 / 纠结度 / 小机会仓位）→ <strong>情绪侧七问</strong>。先对账，再判读，最后翻动机，避免复盘变成事后重新叙述。</P>
+              <P>弹窗按这条主线展开：<strong>事实模块</strong>逐条核验快照里押的<strong>反 / 止 / 结构 / 置信</strong>四条腿 → <strong>结果归类</strong>（结构 × 结果四象限）→ <strong>体检模块</strong>（过程纠结度 / 小机会仓位记账）→ <strong>情绪侧七问</strong>。先对账，再判读，最后翻动机，避免复盘变成事后重新叙述。</P>
 
               <SubTitle>事实模块 · 逐条核验闭环的四条腿（反 / 止 / 结构 / 置信）</SubTitle>
               <P>弹窗会把开仓快照里写下的<strong>反（亏损剧本）</strong>、<strong>止（失效信号）</strong>、<strong>结构（目标空间）</strong>、<strong>置信（开仓预测胜率）</strong>逐条原样回显，问你这四个假设在持仓过程中分别被市场怎么对待。这里<strong>只核验差值、不写事后故事</strong>，避免把"发生了什么"和"为什么"压成一个自洽的完美闭环。</P>
@@ -895,25 +895,6 @@ export default function GuidePage() {
               </RedHighlight>
               <P className="mt-2">如果结果是保本或未入场，不强行归入四象限；如果是赢或亏，就先选一格——按 UI 里"选择本笔归类"那 2×2 的可点格子，系统会自动只让你选与本笔结果一致的两格（赢的一行 / 亏的一行）。</P>
 
-              <SubTitle>工具箱集中度体检 · 铁锤人自检</SubTitle>
-              <P>这块换一个问题：<strong>不看盈亏，只看你实际在用哪几招。</strong> 它把你<strong>全部主力单</strong>的 edge 源头按使用频次画成一组占比条，对应芒格的<strong>"铁锤人"（man with a hammer）</strong>——<strong>手里只有一把锤子，看什么都像钉子；越顺手的一招越危险，越成功越危险。</strong></P>
-              <P>它遵守<strong>样本量纪律</strong>：只统计<strong>主力单、且已入场</strong>的交易，并且<strong>样本不足 5 笔时不下结论</strong>（逸闻的复数不是数据）。够样本后：</P>
-              <div className="overflow-x-auto">
-                <table className="w-full text-[11px] my-3 border border-border rounded overflow-hidden">
-                  <thead className="bg-muted/50">
-                    <tr>
-                      <th className="text-left px-3 py-2 font-medium text-foreground text-[10px]">情形</th>
-                      <th className="text-left px-3 py-2 font-medium text-foreground text-[10px]">系统态度</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <tr><td className="px-3 py-2 border-t border-border"><span style={{ color: '#D89B00' }}>单一源头占比 ≥60%</span></td><td className="px-3 py-2 border-t border-border">黄色警示：“你 X% 的主力单都用这一招”，并反问——是这一招真的最适合你遇到的市场，还是你只会这一招、所以什么行情都套它？</td></tr>
-                    <tr><td className="px-3 py-2 border-t border-border">分布较分散</td><td className="px-3 py-2 border-t border-border">提示工具箱里有多把锤子，继续保持</td></tr>
-                  </tbody>
-                </table>
-              </div>
-              <P>当结构 × 源头错配的样本也够时，再补一行：多少笔的源头<strong>与当时市场结构不自洽</strong>——同一个动作换个结构就改变性质。<strong>这块仅展示、不阻塞保存。</strong></P>
-
               <SubTitle>过程纠结度（先行指标）</SubTitle>
               <P>仅主力单出现。用 1–5 记录<strong>这一单做得有多纠结 / 多轻松</strong>：<strong>1 极度煎熬 → 2 纠结 → 3 一般 → 4 轻松 → 5 行云流水</strong>。它锚定一句话：<strong>交易最重要的不是赚钱，是轻松。</strong></P>
               <RedHighlight>
@@ -921,7 +902,7 @@ export default function GuidePage() {
               </RedHighlight>
 
               <SubTitle>小机会仓位记账</SubTitle>
-              <P>当开仓时机会成本答<strong>“否 · 不做也不亏”或“说不清 / 凭感觉”</strong>、源头选了<strong>“无明确 edge”</strong>、或盈亏比目标落在<strong>“盈亏比不足 / 目标不清楚”</strong>时，评价弹窗会追加这块，把小机会仓位的<strong>隐性成本</strong>显式记下来，四选一：</P>
+              <P>每一笔主力单都会让你自评一次「这一单的隐性成本」——四选一：</P>
               <div className="overflow-x-auto">
                 <table className="w-full text-[11px] my-3 border border-border rounded overflow-hidden">
                   <thead className="bg-muted/50">
@@ -931,13 +912,14 @@ export default function GuidePage() {
                     </tr>
                   </thead>
                   <tbody>
-                    <tr><td className="px-3 py-2 border-t border-border">无明显拖累</td><td className="px-3 py-2 border-t border-border">干净的小仓，没有影响别的判断或机会</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border">无明显拖累</td><td className="px-3 py-2 border-t border-border">干净的仓位，没有影响别的判断或机会——这一档就代表"这不是小机会仓"</td></tr>
                     <tr><td className="px-3 py-2 border-t border-border">占用注意力</td><td className="px-3 py-2 border-t border-border">占用了注意力 / 心力，但没错过大机会</td></tr>
                     <tr><td className="px-3 py-2 border-t border-border">错过更大机会</td><td className="px-3 py-2 border-t border-border">钝化了敏感度，做小了 / 错过了真正更大的机会</td></tr>
                     <tr><td className="px-3 py-2 border-t border-border">引发连锁乱做</td><td className="px-3 py-2 border-t border-border">引发后续乱做（无聊 → 乱做 → 复仇等连锁负向）</td></tr>
                   </tbody>
                 </table>
               </div>
+              <P><strong>设计上不再依赖开仓时的字段触发</strong>——以前要满足"不做也不亏 / 无明确 edge / 盈亏比不足"等条件这一块才出现，导致很多用户从来没看到过它。现在每一笔主力单平仓后都自评一次，"无明显拖累"自然兜底"这不是小机会"的情形。</P>
               <RedHighlight>
                 持有小机会仓位是<strong>一等负向状态：它比空仓更糟</strong>——在悄悄损耗你的行动力与对大机会的敏感度。把它的成本记成账，下次才舍得空仓。
               </RedHighlight>
@@ -988,7 +970,7 @@ export default function GuidePage() {
               <RedHighlight>
                 七问<strong>全部必填</strong>（主石头允许“至少选一个标签或写一句话”满足其一）——它和评价的其他部分一样，<strong>不写完不能保存离开</strong>。这是逼自己面对底层动机，而不是停在“盘面分析”那一层假装收口。
               </RedHighlight>
-              <P className="mt-2">底层逻辑：这一笔会成为样本，进入<strong>结构 × 结果四象限</strong>与<strong>铁锤人体检</strong>等结构层的统计；同时也会进入<strong>主石头统计</strong>——同一块石头反复出现，就是在告诉你下一步该针对的是这块石头本身，而不是再讲一遍盘面。</P>
+              <P className="mt-2">底层逻辑：这一笔会成为样本，进入<strong>结构 × 结果四象限</strong>与<strong>小机会仓位记账</strong>等结构层的统计；同时也会进入<strong>主石头统计</strong>——同一块石头反复出现，就是在告诉你下一步该针对的是这块石头本身，而不是再讲一遍盘面。</P>
             </section>
 
             <section id="s3-4" className="scroll-mt-20">

@@ -13,12 +13,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/component
 import { useIsMobile } from '@/hooks/use-mobile';
 import { toast } from 'sonner';
 import { ChevronDown, AlertTriangle } from 'lucide-react';
-import { useAuth } from '@/contexts/AuthContext';
 import { COGNITIVE_BIAS_LABELS } from '@/lib/cognitiveBiasTags';
-import {
-  aggregateEdgeSourceUsage, HAMMER_DOMINANCE_THRESHOLD, HAMMER_MIN_SAMPLES,
-} from '@/lib/edgeSource';
-import { regimeEdgeMismatchHint } from '@/lib/snapshotStructure';
 import {
   classifyStructureResult,
   STRUCTURE_RESULT_QUADRANTS,
@@ -43,7 +38,7 @@ import {
 } from '@/lib/mainStoneTags';
 import {
   finalizeJournalReview,
-  stampJournalCloseRealTime, listJournals,
+  stampJournalCloseRealTime,
 } from '@/lib/journalApi';
 import type { TradeJournal, TradeOutcome } from '@/types/journal';
 import { MENTAL_STATE_LABELS, PAIN_TAG_LABELS } from '@/types/journal';
@@ -95,7 +90,6 @@ export function PostTradeReviewSheet({
   isOpen, onOpenChange, journal, tradeRecord, onReviewed, onAutoPause,
 }: Props) {
   const isMobile = useIsMobile();
-  const { user } = useAuth();
   const [decisionQuality, setDecisionQuality] = useState<TradeJournal['post_decision_quality']>('mixed');
   const [expectancyReview, setExpectancyReview] = useState('');
   const [oddsStructureReviewValue, setOddsStructureReviewValue] = useState<OddsStructureReview | null>(null);
@@ -121,8 +115,6 @@ export function PostTradeReviewSheet({
   const [emoNextTimePlan, setEmoNextTimePlan] = useState('');
   const [rMultipleOverride, setRMultipleOverride] = useState<string>('');
   const [saving, setSaving] = useState(false);
-  /** 用户全部主力单（用于「工具箱集中度 / 铁锤人」体检，仅展示）。 */
-  const [allUserJournals, setAllUserJournals] = useState<TradeJournal[]>([]);
   /** Local override so the just-stamped close time renders immediately without re-fetch. */
   const [stampedCloseTime, setStampedCloseTime] = useState<string | null>(null);
   const pausedOnce = useState({ done: false })[0];
@@ -158,10 +150,6 @@ export function PostTradeReviewSheet({
         setEmoMainStoneTags(normalizeMainStoneTags(journal.post_emo_main_stone_tags));
         setEmoNextTimePlan(journal.post_emo_next_time_plan ?? '');
         setRMultipleOverride(journal.post_r_multiple != null ? String(journal.post_r_multiple) : '');
-        if (user) {
-          // 拉取全部主力单做「工具箱集中度」体检（铁锤人自检），失败不阻塞复盘。
-          listJournals(user.id).then(setAllUserJournals).catch(() => {});
-        }
         // Stamp the real close time on first open (idempotent — API noop if already set)
         if (!journal.post_reviewed_at && !journal.post_real_close_time) {
           const stamped = await stampJournalCloseRealTime(journal.id);
@@ -270,18 +258,9 @@ export function PostTradeReviewSheet({
   // 结构 × 结果 四象限：结构轴 = 当时决策质量，结果轴 = 这单赢/亏。
   const quadrantApplicable = journal.direction !== 'no_entry' && (outcome === 'win' || outcome === 'loss');
   const quadrant = classifyStructureResult(decisionQuality, outcome);
-  // 小机会仓位记账：机会成本不足、无明确 edge、目标不清或盈亏比不足时触发。
-  const showSmallPositionDrag = !isHedge
-    && journal.direction !== 'no_entry'
-    && (
-      journal.pre_opportunity_cost_worth === false
-      || journal.pre_cheap_opportunity === 'not_cheap'
-      || journal.pre_cheap_opportunity === 'unclear'
-      || journal.pre_edge_source === 'no_clear_edge'
-      || journal.pre_odds_structure === 'odds_insufficient'
-      || journal.pre_odds_structure === 'target_unclear'
-      || journal.pre_odds_structure === 'neutral_choppy'
-    );
+  // 小机会仓位记账：每一笔主力单都让用户自评一次"这单是不是隐性占用了你的行动力"。
+  // 选「无明显拖累」即代表"不是小机会"，无需强制阻断。
+  const showSmallPositionDrag = !isHedge && journal.direction !== 'no_entry';
   // 厚结构没吃够：与「小机会仓位」对称。只在快照显示结构足够厚/便宜时追问。
   const showMissedHighOddsState = !isHedge
     && journal.direction !== 'no_entry'
@@ -295,23 +274,6 @@ export function PostTradeReviewSheet({
   const showOpeningSnapshot = journal.source !== 'retroactive_from_record';
   // 结构对／错的 2×2 排布（上排结构对、下排结构错；左列赢、右列亏）。
   const QUADRANT_GRID: StructureResultQuadrant[] = ['deserved_win', 'correct_loss', 'dangerous_win', 'deserved_loss'];
-
-  // 工具箱集中度体检（铁锤人自检，仅展示）：统计全部主力单各 edge 源头的使用频次。
-  const edgeConcentration = aggregateEdgeSourceUsage(allUserJournals);
-  const showConcentration = !isHedge
-    && journal.direction !== 'no_entry'
-    && edgeConcentration.total >= HAMMER_MIN_SAMPLES;
-  // 结构 × 源头错配率：用既有的 regimeEdgeMismatchHint 逐单判定，看「同一个动作换个结构」发生得有多频繁。
-  const regimeChecked = allUserJournals.filter(j =>
-    j.order_kind !== 'hedge'
-    && (j.journal_kind ?? 'trade') === 'trade'
-    && j.direction !== 'no_entry'
-    && j.pre_market_regime
-    && j.pre_edge_source,
-  );
-  const regimeMismatchCount = regimeChecked.filter(j =>
-    regimeEdgeMismatchHint(j.pre_market_regime, j.pre_edge_source) != null,
-  ).length;
 
   const resultValid = !quadrantApplicable || !!quadrant;
   const quadrantValid = !quadrantApplicable || !!quadrant;
@@ -1019,55 +981,6 @@ export function PostTradeReviewSheet({
               </div>
             </div>
             {!pathValid && <div className="text-right font-mono text-[10px] text-[#F6465D]">路径与交易主动权必选</div>}
-          </div>
-        )}
-
-        {/* 工具箱集中度体检（铁锤人自检）— 仅展示，不阻塞 */}
-        {showConcentration && (
-          <div className={`space-y-2.5 px-4 py-4 ${sectionCardClass}`}>
-            <div className="flex items-center justify-between">
-              <div className="text-[12px] font-medium">工具箱集中度体检 · 铁锤人自检</div>
-              <span className="text-[10px] text-muted-foreground">{edgeConcentration.total} 笔主力单</span>
-            </div>
-            <p className="text-[10px] leading-relaxed text-muted-foreground">
-              统计你实际在用哪几招（与盈亏无关）。手里只有一把锤子，看什么都像钉子——越顺手的一招越危险。
-            </p>
-            <div className="space-y-1.5">
-              {edgeConcentration.usage.map(u => {
-                const isDom = edgeConcentration.dominant?.edge === u.edge;
-                const pct = Math.round(u.share * 100);
-                return (
-                  <div key={u.edge} className="flex items-center gap-2">
-                    <span className="w-[68px] shrink-0 text-[10px] text-foreground">{u.label}</span>
-                    <div className="h-2.5 flex-1 overflow-hidden rounded-full bg-background/70">
-                      <div
-                        className="h-full rounded-full"
-                        style={{
-                          width: `${Math.max(4, pct)}%`,
-                          background: isDom && edgeConcentration.isConcentrated ? '#F0B90B' : 'hsl(var(--muted-foreground) / 0.55)',
-                        }}
-                      />
-                    </div>
-                    <span className="w-[58px] shrink-0 text-right font-mono text-[10px] text-muted-foreground">{u.count}·{pct}%</span>
-                  </div>
-                );
-              })}
-            </div>
-            {edgeConcentration.isConcentrated ? (
-              <div className="rounded-lg border border-[#F0B90B]/30 bg-[#F0B90B]/5 px-3 py-2 text-[11px] leading-relaxed text-[#D89B00]">
-                ⚠ 你 {Math.round(edgeConcentration.dominant!.share * 100)}% 的主力单都用「{edgeConcentration.dominant!.label}」这一招。
-                问自己：是这一招真的最适合你遇到的市场，还是你只会这一招、所以什么行情都套它？
-              </div>
-            ) : (
-              <div className="rounded-lg border border-border/60 bg-background/60 px-3 py-2 text-[11px] leading-relaxed text-muted-foreground">
-                源头分布较分散，暂无明显「铁锤人」集中——继续保持工具箱里有多把锤子。
-              </div>
-            )}
-            {regimeChecked.length >= HAMMER_MIN_SAMPLES && regimeMismatchCount > 0 && (
-              <div className="text-[10px] leading-relaxed text-muted-foreground">
-                结构 × 源头错配：{regimeMismatchCount}/{regimeChecked.length} 笔（{Math.round((regimeMismatchCount / regimeChecked.length) * 100)}%）的源头与当时市场结构不自洽——同一个动作换个结构就改变性质。
-              </div>
-            )}
           </div>
         )}
 
