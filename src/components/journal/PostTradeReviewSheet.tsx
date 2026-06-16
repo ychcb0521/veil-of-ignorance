@@ -127,14 +127,6 @@ export function PostTradeReviewSheet({
   const [pathAgencyNote, setPathAgencyNote] = useState('');
   const [hedgeWorthIt, setHedgeWorthIt] = useState<TradeJournal['hedge_worth_it']>(null);
   const [opponentWasRight, setOpponentWasRight] = useState<boolean | null>(null);
-  const [fiveStepGoal, setFiveStepGoal] = useState('');
-  const [fiveStepProblem, setFiveStepProblem] = useState('');
-  const [proximateCause, setProximateCause] = useState('');
-  const [rootCause, setRootCause] = useState('');
-  const [designIntervention, setDesignIntervention] = useState('');
-  const [interventionType, setInterventionType] = useState<NonNullable<TradeJournal['post_intervention_type']>>('rule');
-  const [executionMonitor, setExecutionMonitor] = useState('');
-  const [fiveStepWeakPoint, setFiveStepWeakPoint] = useState<NonNullable<TradeJournal['post_five_step_weak_point']>>('diagnosis');
   // ===== 平仓情绪侧复盘 · 七问 =====
   const [emoDisturbance, setEmoDisturbance] = useState('');
   const [emoFirstReaction, setEmoFirstReaction] = useState('');
@@ -178,14 +170,6 @@ export function PostTradeReviewSheet({
         setPathAgencyNote(journal.post_path_agency_note ?? '');
         setHedgeWorthIt(journal.hedge_worth_it ?? null);
         setOpponentWasRight(journal.post_opponent_was_right ?? null);
-        setFiveStepGoal(journal.post_five_step_goal ?? '');
-        setFiveStepProblem(journal.post_five_step_problem ?? '');
-        setProximateCause(journal.post_proximate_cause ?? '');
-        setRootCause(journal.post_root_cause ?? '');
-        setDesignIntervention(journal.post_design_intervention ?? '');
-        setInterventionType(journal.post_intervention_type ?? 'rule');
-        setExecutionMonitor(journal.post_execution_monitor ?? '');
-        setFiveStepWeakPoint(journal.post_five_step_weak_point ?? 'diagnosis');
         setEmoDisturbance(journal.post_emo_disturbance ?? '');
         setEmoFirstReaction(journal.post_emo_first_reaction ?? '');
         setEmoWanted(journal.post_emo_wanted ?? '');
@@ -375,14 +359,6 @@ export function PostTradeReviewSheet({
     && oddsStructureFactValid;
   const opponentValid = !journal.pre_opponent_statement || opponentWasRight !== null;
   const hedgeWorthItValid = !isHedge || hedgeWorthIt != null;
-  const fiveStepValid = [
-    fiveStepGoal,
-    fiveStepProblem,
-    proximateCause,
-    rootCause,
-    designIntervention,
-    executionMonitor,
-  ].every(value => value.trim().length > 0);
   // 情绪侧七问：文字栏全部必填；主石头允许"文字 OR 至少 1 个标签"满足其一。
   const emoTextValid = [
     emoDisturbance,
@@ -401,7 +377,6 @@ export function PostTradeReviewSheet({
     && pathAgencyValid
     && opponentValid
     && hedgeWorthItValid
-    && fiveStepValid
     && emoValid
     && !saving;
 
@@ -443,14 +418,6 @@ export function PostTradeReviewSheet({
         exit_falsification_note: falsificationNote.trim() || null,
         hedge_worth_it: isHedge ? hedgeWorthIt : null,
         post_opponent_was_right: opponentWasRight,
-        post_five_step_goal: fiveStepGoal.trim(),
-        post_five_step_problem: fiveStepProblem.trim(),
-        post_proximate_cause: proximateCause.trim(),
-        post_root_cause: rootCause.trim(),
-        post_design_intervention: designIntervention.trim(),
-        post_intervention_type: interventionType,
-        post_execution_monitor: executionMonitor.trim(),
-        post_five_step_weak_point: fiveStepWeakPoint,
         post_emo_disturbance: emoDisturbance.trim(),
         post_emo_first_reaction: emoFirstReaction.trim(),
         post_emo_wanted: emoWanted.trim(),
@@ -1539,83 +1506,6 @@ export function PostTradeReviewSheet({
             {opponentWasRight === null && <div className="text-[10px] text-[#F6465D] text-right font-mono">必选</div>}
           </div>
         )}
-
-        <div className={`space-y-3 px-4 py-4 ${sectionCardClass}`}>
-          <div>
-            <div className="text-[12px] font-medium">L5 规律上卷 · 五条命脉</div>
-            <div className="text-[10px] text-muted-foreground mt-0.5">
-              不重看一千根 K 线，只把这笔压缩成：反差、止差、结构差、置信差、执行差。
-            </div>
-          </div>
-          <div className="space-y-1.5">
-            <Label className="text-[12px] font-medium">目标 *</Label>
-            <Textarea rows={2} value={fiveStepGoal} onChange={e => setFiveStepGoal(e.target.value)}
-              placeholder="这条误差路径要把哪个元指标改善到什么程度？例如证伪延迟率、结构破坏误判率。"
-              className="text-[12px] bg-background/80 border-border/70 rounded-xl" />
-          </div>
-          <div className="space-y-1.5">
-            <Label className="text-[12px] font-medium">问题 *</Label>
-            <Textarea rows={2} value={fiveStepProblem} onChange={e => setFiveStepProblem(e.target.value)}
-              placeholder="精准命名是哪条命脉出错：反、止、结构、置信，还是执行。"
-              className="text-[12px] bg-background/80 border-border/70 rounded-xl" />
-          </div>
-          <div className="grid sm:grid-cols-2 gap-2">
-            <div className="space-y-1.5">
-              <Label className="text-[12px] font-medium">近因（我做了什么动作）*</Label>
-              <Textarea rows={2} value={proximateCause} onChange={e => setProximateCause(e.target.value)}
-                placeholder="例如：证伪触发后迟疑、结构破坏信号出现仍持仓、置信度过高。"
-                className="text-[12px] bg-background/80 border-border/70 rounded-xl" />
-            </div>
-            <div className="space-y-1.5">
-              <Label className="text-[12px] font-medium">根因（我是什么性质导致）*</Label>
-              <Textarea rows={2} value={rootCause} onChange={e => setRootCause(e.target.value)}
-                placeholder="例如：对浮亏耐受力低、把震荡误读成趋势、对陌生结构过度自信。"
-                className="text-[12px] bg-background/80 border-border/70 rounded-xl" />
-            </div>
-          </div>
-          <div className="space-y-1.5">
-            <Label className="text-[12px] font-medium">设计干预 *</Label>
-            <Textarea rows={2} value={designIntervention} onChange={e => setDesignIntervention(e.target.value)}
-              placeholder="把这条误差路径转成原则、规则、SOP 或觉察项。"
-              className="text-[12px] bg-background/80 border-border/70 rounded-xl" />
-          </div>
-          <div className="grid sm:grid-cols-2 gap-2">
-            <div className="space-y-1.5">
-              <Label className="text-[12px] font-medium">干预类型 *</Label>
-              <select
-                value={interventionType}
-                onChange={e => setInterventionType(e.target.value as NonNullable<TradeJournal['post_intervention_type']>)}
-                className="h-9 rounded-xl border border-border/70 bg-background/80 px-3 text-[12px] w-full"
-              >
-                <option value="principle">L1 原则</option>
-                <option value="rule">L2 规则</option>
-                <option value="sop">SOP</option>
-                <option value="awareness">觉察项</option>
-              </select>
-            </div>
-            <div className="space-y-1.5">
-              <Label className="text-[12px] font-medium">最薄弱的一步 *</Label>
-              <select
-                value={fiveStepWeakPoint}
-                onChange={e => setFiveStepWeakPoint(e.target.value as NonNullable<TradeJournal['post_five_step_weak_point']>)}
-                className="h-9 rounded-xl border border-border/70 bg-background/80 px-3 text-[12px] w-full"
-              >
-                <option value="goal">目标</option>
-                <option value="problem">问题</option>
-                <option value="diagnosis">诊断</option>
-                <option value="design">设计</option>
-                <option value="execution">执行</option>
-              </select>
-            </div>
-          </div>
-          <div className="space-y-1.5">
-            <Label className="text-[12px] font-medium">执行与监控 *</Label>
-            <Textarea rows={2} value={executionMonitor} onChange={e => setExecutionMonitor(e.target.value)}
-              placeholder="干预如何上线？未来用哪个 L5 指标确认它是否有效？"
-              className="text-[12px] bg-background/80 border-border/70 rounded-xl" />
-          </div>
-          {!fiveStepValid && <div className="text-[10px] text-[#F6465D] text-right font-mono">五步诊断必填</div>}
-        </div>
 
         {/* (D2) 情绪侧复盘 · 七问 */}
         <div className={`space-y-3 px-4 py-4 ${sectionCardClass}`}>
