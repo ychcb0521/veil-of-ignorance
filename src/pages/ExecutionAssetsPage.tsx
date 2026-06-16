@@ -1,16 +1,21 @@
-import { type ReactNode, useMemo, useState } from 'react';
+import { type ReactNode, useMemo, useState, useCallback } from 'react';
 import {
   ArrowLeft,
   Activity,
   CalendarMinus,
   ChevronDown,
+  ChevronRight,
   Clock,
   Gauge,
+  LineChart,
   ListChecks,
+  Loader2,
   Trophy,
   Zap,
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
+import { toast } from 'sonner';
+import { useAuth } from '@/contexts/AuthContext';
 import { useTradingContext } from '@/contexts/TradingContext';
 import {
   EXECUTION_DECISION_REWARD,
@@ -19,9 +24,15 @@ import {
   executionTradeCount,
   localDateKey,
   type ExecutionAssetEvent,
+  type ExecutionTradeSnapshot,
 } from '@/lib/executionAssets';
+import {
+  backfillJournalFromRecord,
+  listJournalsByTradeRecordId,
+} from '@/lib/journalApi';
 import { formatUTC8 } from '@/lib/timeFormat';
 import { cn } from '@/lib/utils';
+import type { TradeRecord } from '@/types/trading';
 
 type DetailPanelKey = 'decision' | 'direct' | 'penalty' | 'share';
 
@@ -52,6 +63,80 @@ function sideLabel(side: string | null | undefined) {
   if (side === 'LONG') return '多';
   if (side === 'SHORT') return '空';
   return side || '—';
+}
+
+/**
+ * 按 symbol + side + 入场价 + 开仓时间，在 tradeHistory 里找对应的 CLOSE 记录。
+ * - 同一笔可能因部分平仓产生多条 CLOSE → 全部累加 pnl，closeTime 取最晚一条
+ * - 找不到任何 CLOSE → 视为持仓中
+ */
+interface MatchedClose {
+  records: TradeRecord[];
+  pnl: number;
+  fee: number;
+  netPnl: number;
+  closeTime: number;
+  /** Use this representative record as input to backfillJournalFromRecord. */
+  primaryRecord: TradeRecord;
+}
+function matchClosesForSnapshot(
+  snapshot: ExecutionTradeSnapshot | null | undefined,
+  history: TradeRecord[],
+): MatchedClose | null {
+  if (!snapshot) return null;
+  const targetOpen = snapshot.simulatedTime ?? null;
+  const PRICE_EPS = Math.max(snapshot.entryPrice * 1e-5, 1e-6);
+  const TIME_EPS = 1500; // 1.5s 容差，吃掉时间戳精度差
+  const matched = history.filter(record => (
+    record.action !== 'OPEN'
+    && record.symbol === snapshot.symbol
+    && record.side === snapshot.side
+    && Math.abs(record.entryPrice - snapshot.entryPrice) <= PRICE_EPS
+    && (targetOpen == null || Math.abs((record.openTime ?? 0) - targetOpen) <= TIME_EPS)
+  ));
+  if (matched.length === 0) return null;
+  const pnl = matched.reduce((sum, r) => sum + (r.pnl ?? 0), 0);
+  const fee = matched.reduce((sum, r) => sum + (r.fee ?? 0), 0);
+  const closeTime = matched.reduce((max, r) => Math.max(max, r.closeTime ?? 0), 0);
+  // 最大数量那条作 primary，更可能是完整平仓的代表记录
+  const primaryRecord = matched.reduce((best, r) => (r.quantity > best.quantity ? r : best), matched[0]);
+  return { records: matched, pnl, fee, netPnl: pnl, closeTime, primaryRecord };
+}
+
+/**
+ * 跳转到「持仓过程 K 线回放」：找现有 journal → 没有就 backfill 一条最小 journal → navigate('/journal/:id')
+ * 没登录或没匹配的 CLOSE 记录时给 toast，不跳。
+ */
+function useOpenPlaybackForSnapshot() {
+  const nav = useNavigate();
+  const { user } = useAuth();
+  const { tradeHistory } = useTradingContext();
+  const [busyId, setBusyId] = useState<string | null>(null);
+
+  const open = useCallback(async (event: ExecutionAssetEvent) => {
+    if (!user) { toast.error('请先登录后查看 K 线回放'); return; }
+    const matched = matchClosesForSnapshot(event.trade, tradeHistory);
+    if (!matched) { toast.info('这笔还未平仓，无法查看完整持仓过程'); return; }
+    setBusyId(event.id);
+    try {
+      const existing = await listJournalsByTradeRecordId(user.id, matched.primaryRecord.id);
+      const journal = existing[0] ?? await backfillJournalFromRecord(matched.primaryRecord);
+      nav(`/journal/${journal.id}`);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusyId(null);
+    }
+  }, [nav, tradeHistory, user]);
+
+  return { open, busyId };
+}
+
+function formatPnl(value: number) {
+  return `${value >= 0 ? '+' : ''}${value.toFixed(2)}`;
+}
+function pnlClass(value: number) {
+  return value > 0 ? 'text-[#0ECB81]' : value < 0 ? 'text-[#F6465D]' : 'text-muted-foreground';
 }
 
 function marginModeLabel(mode: string | null | undefined) {
@@ -153,9 +238,17 @@ function DetailItem({ label, value }: { label: string; value: ReactNode }) {
   );
 }
 
-function EventDetailCard({ event }: { event: ExecutionAssetEvent }) {
+function EventDetailCard({
+  event, matched, busy, onOpen,
+}: {
+  event: ExecutionAssetEvent;
+  matched: MatchedClose | null;
+  busy: boolean;
+  onOpen: (e: ExecutionAssetEvent) => void;
+}) {
   const trade = event.trade;
   const isPenalty = event.type === 'no_trade_penalty';
+  const canOpen = Boolean(trade) && matched != null;
 
   return (
     <div className="rounded-xl border border-border/60 bg-background/70 p-4">
@@ -180,15 +273,46 @@ function EventDetailCard({ event }: { event: ExecutionAssetEvent }) {
             <span className={`rounded-full border px-2 py-0.5 font-mono text-[11px] ${eventTone(event.type)}`}>
               {formatSigned(event.points)}
             </span>
+            {trade && (
+              <span className={cn(
+                'rounded-full border px-2 py-0.5 font-mono text-[11px]',
+                matched
+                  ? `${pnlClass(matched.netPnl)} border-current/30 bg-current/5`
+                  : 'border-border bg-muted text-muted-foreground',
+              )}>
+                {matched ? `${formatPnl(matched.netPnl)} USDT` : '持仓中'}
+              </span>
+            )}
           </div>
           <div className="mt-1 flex items-center gap-1.5 font-mono text-[10px] text-muted-foreground">
             <Clock className="h-3 w-3" />
             奖励日期 {event.date}
           </div>
         </div>
-        <div className="text-right text-[10px] text-muted-foreground">
-          <div>记录时间</div>
-          <div className="mt-1 font-mono text-foreground">{formatTime(event.createdAt)}</div>
+        <div className="flex flex-col items-end gap-2 text-right text-[10px] text-muted-foreground">
+          <div>
+            <div>记录时间</div>
+            <div className="mt-1 font-mono text-foreground">{formatTime(event.createdAt)}</div>
+          </div>
+          {trade && (
+            <button
+              type="button"
+              onClick={() => onOpen(event)}
+              disabled={!canOpen || busy}
+              className={cn(
+                'inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[11px] transition-colors',
+                canOpen && !busy
+                  ? 'border-[#F0B90B]/40 bg-[#F0B90B]/5 text-[#D89B00] hover:bg-[#F0B90B]/10'
+                  : 'border-border bg-muted/40 text-muted-foreground cursor-not-allowed',
+              )}
+              title={canOpen ? '查看这笔的持仓过程 K 线回放' : '这笔还未平仓，无法查看完整持仓过程'}
+            >
+              {busy
+                ? <Loader2 className="h-3 w-3 animate-spin" />
+                : <LineChart className="h-3 w-3" />}
+              K 线回放
+            </button>
+          )}
         </div>
       </div>
 
@@ -197,11 +321,19 @@ function EventDetailCard({ event }: { event: ExecutionAssetEvent }) {
           <DetailItem label="模拟开仓时间" value={formatTime(trade.simulatedTime)} />
           <DetailItem label="订单类型" value={orderTypeLabel(trade.orderType)} />
           <DetailItem label="开仓价" value={formatNumber(trade.entryPrice, 6)} />
+          {matched && <DetailItem label="平仓价（最末次）" value={formatNumber(matched.primaryRecord.exitPrice ?? null, 6)} />}
           <DetailItem label="数量" value={formatNumber(trade.quantity, 6)} />
           <DetailItem label="杠杆" value={`${formatNumber(trade.leverage, 2)}x`} />
           <DetailItem label="保证金模式" value={marginModeLabel(trade.marginMode)} />
           <DetailItem label="保证金" value={`${formatNumber(trade.margin, 2)} USDT`} />
           <DetailItem label="名义价值" value={`${formatNumber(trade.notional, 2)} USDT`} />
+          {matched && <DetailItem label="平仓时间" value={formatTime(matched.closeTime)} />}
+          {matched && (
+            <DetailItem
+              label="累计盈亏"
+              value={<span className={pnlClass(matched.netPnl)}>{formatPnl(matched.netPnl)} USDT</span>}
+            />
+          )}
           {trade.positionId && <DetailItem label="仓位 ID" value={trade.positionId} />}
         </div>
       ) : isPenalty ? (
@@ -217,7 +349,15 @@ function EventDetailCard({ event }: { event: ExecutionAssetEvent }) {
   );
 }
 
-function DetailPanel({ panelKey, events }: { panelKey: DetailPanelKey; events: ExecutionAssetEvent[] }) {
+function DetailPanel({
+  panelKey, events, tradeHistory, busyId, onOpen,
+}: {
+  panelKey: DetailPanelKey;
+  events: ExecutionAssetEvent[];
+  tradeHistory: TradeRecord[];
+  busyId: string | null;
+  onOpen: (e: ExecutionAssetEvent) => void;
+}) {
   const copy = PANEL_COPY[panelKey];
 
   return (
@@ -239,7 +379,13 @@ function DetailPanel({ panelKey, events }: { panelKey: DetailPanelKey; events: E
       ) : (
         <div className="max-h-[520px] space-y-2 overflow-y-auto pr-1">
           {events.map(event => (
-            <EventDetailCard key={event.id} event={event} />
+            <EventDetailCard
+              key={event.id}
+              event={event}
+              matched={matchClosesForSnapshot(event.trade, tradeHistory)}
+              busy={busyId === event.id}
+              onOpen={onOpen}
+            />
           ))}
         </div>
       )}
@@ -249,7 +395,8 @@ function DetailPanel({ panelKey, events }: { panelKey: DetailPanelKey; events: E
 
 export default function ExecutionAssetsPage() {
   const nav = useNavigate();
-  const { executionAsset } = useTradingContext();
+  const { executionAsset, tradeHistory } = useTradingContext();
+  const { open: openPlayback, busyId } = useOpenPlaybackForSnapshot();
   const [openPanel, setOpenPanel] = useState<DetailPanelKey | null>(null);
   const todayKey = localDateKey();
   const tradedToday = Boolean(executionAsset.tradedDates?.[todayKey]);
@@ -364,7 +511,15 @@ export default function ExecutionAssetsPage() {
             />
           </div>
 
-          {openPanel && <DetailPanel panelKey={openPanel} events={detailEvents[openPanel]} />}
+          {openPanel && (
+            <DetailPanel
+              panelKey={openPanel}
+              events={detailEvents[openPanel]}
+              tradeHistory={tradeHistory}
+              busyId={busyId}
+              onOpen={openPlayback}
+            />
+          )}
         </section>
 
         <section className="mt-4 rounded-2xl border border-border/70 bg-card">
@@ -389,8 +544,16 @@ export default function ExecutionAssetsPage() {
         </section>
 
         <section className="mt-4 rounded-2xl border border-border/70 bg-card">
-          <div className="border-b border-border/70 px-5 py-4">
-            <h2 className="text-[13px] font-semibold">最近积分流水</h2>
+          <div className="flex items-center justify-between gap-3 border-b border-border/70 px-5 py-4">
+            <div>
+              <h2 className="text-[13px] font-semibold">最近积分流水</h2>
+              <p className="mt-0.5 text-[10px] text-muted-foreground">
+                每条都对应一笔真实开仓。已平仓的可点「K 线回放」查看持仓过程；持仓中暂不可回放。
+              </p>
+            </div>
+            <div className="rounded-full border border-border/60 px-2.5 py-1 font-mono text-[11px] text-muted-foreground">
+              共 {executionAsset.events.length} 条
+            </div>
           </div>
           <div className="p-3">
             {executionAsset.events.length === 0 ? (
@@ -398,25 +561,82 @@ export default function ExecutionAssetsPage() {
                 还没有积分流水。下一次真实开仓后，这里会出现第一条记录。
               </div>
             ) : (
-              <div className="space-y-2">
-                {executionAsset.events.slice(0, 12).map(event => (
-                  <div
-                    key={event.id}
-                    className="flex items-center justify-between gap-3 rounded-xl border border-border/60 bg-background/70 px-4 py-3"
-                  >
-                    <div>
-                      <div className="text-[12px] font-medium">{event.trade?.symbol ?? event.label}</div>
-                      <div className="mt-0.5 font-mono text-[10px] text-muted-foreground">
-                        {event.date}
-                        {event.trade?.simulatedTime ? ` · ${formatTime(event.trade.simulatedTime)}` : ''}
-                      </div>
-                    </div>
-                    <div className={`rounded-full border px-2.5 py-1 font-mono text-[12px] ${eventTone(event.type)}`}>
-                      {formatSigned(event.points)}
-                    </div>
-                  </div>
-                ))}
-              </div>
+              <ul className="max-h-[520px] space-y-2 overflow-y-auto pr-1">
+                {executionAsset.events.map(event => {
+                  const matched = matchClosesForSnapshot(event.trade, tradeHistory);
+                  const canOpen = Boolean(event.trade) && matched != null;
+                  const busy = busyId === event.id;
+                  return (
+                    <li key={event.id}>
+                      <button
+                        type="button"
+                        onClick={() => canOpen && openPlayback(event)}
+                        disabled={!canOpen || busy}
+                        className={cn(
+                          'flex w-full items-center justify-between gap-3 rounded-xl border bg-background/70 px-4 py-3 text-left transition-colors',
+                          canOpen && !busy
+                            ? 'border-border/60 hover:border-[#F0B90B]/40 hover:bg-[#F0B90B]/[0.03]'
+                            : 'border-border/60 cursor-not-allowed opacity-95',
+                        )}
+                        title={
+                          !event.trade ? '此条无交易快照，无法查看回放'
+                          : !matched ? '这笔还未平仓，无法查看完整持仓过程'
+                          : '点击查看持仓过程 K 线回放'
+                        }
+                      >
+                        <div className="min-w-0 flex-1">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="text-[12px] font-medium">
+                              {event.trade?.symbol ?? event.label}
+                            </span>
+                            {event.trade?.side && (
+                              <span className={cn(
+                                'rounded px-1.5 py-0.5 text-[10px] font-semibold',
+                                event.trade.side === 'LONG'
+                                  ? 'bg-[#0ECB81]/10 text-[#0ECB81]'
+                                  : 'bg-[#F6465D]/10 text-[#F6465D]',
+                              )}>
+                                {sideLabel(event.trade.side)}
+                              </span>
+                            )}
+                            {event.trade && (
+                              <span className={cn(
+                                'rounded-full border px-2 py-0.5 font-mono text-[11px]',
+                                matched
+                                  ? `${pnlClass(matched.netPnl)} border-transparent bg-current/5`
+                                  : 'border-border bg-muted text-muted-foreground',
+                              )}>
+                                {matched ? `${formatPnl(matched.netPnl)} USDT` : '持仓中'}
+                              </span>
+                            )}
+                          </div>
+                          <div className="mt-0.5 font-mono text-[10px] text-muted-foreground">
+                            {event.date}
+                            {event.trade?.simulatedTime ? ` · ${formatTime(event.trade.simulatedTime)}` : ''}
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className={`rounded-full border px-2.5 py-1 font-mono text-[12px] ${eventTone(event.type)}`}>
+                            {formatSigned(event.points)}
+                          </span>
+                          {event.trade && (
+                            <span className={cn(
+                              'inline-flex h-7 w-7 items-center justify-center rounded-md',
+                              canOpen && !busy
+                                ? 'text-[#D89B00]'
+                                : 'text-muted-foreground/40',
+                            )}>
+                              {busy
+                                ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                : <ChevronRight className="h-3.5 w-3.5" />}
+                            </span>
+                          )}
+                        </div>
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
             )}
           </div>
         </section>
