@@ -448,7 +448,7 @@ export default function GuidePage() {
                     <div className="text-[13px] font-semibold tracking-[0.01em] text-foreground">直接交易（默认）</div>
                   </div>
                   <div className="pt-3 text-[13px] leading-7 text-muted-foreground">
-                    下单零弹窗、平仓零评价，节奏与币安 1:1。本模式下产生的交易仅进入持仓历史与交易战役归类，<strong>不进入</strong> 错题集、元监控、规则系统。适合熟悉的标的、流畅的执行、或只想观察盘面的场景。
+                    下单零弹窗、节奏与币安 1:1；<strong>平仓后弹一个轻量「跳过 / 去评价」提示</strong>，由你决定要不要把这一笔送进复盘。选「跳过」就只进入持仓历史与交易战役归类，<strong>不进入</strong>错题集、元监控、规则系统；选「去评价」会即时回填一条最小化记录，走和决策记录模式同一套平仓评价流程，从此进入同套统计。适合熟悉的标的、流畅的执行、或只想观察盘面的场景。
                   </div>
                 </div>
                 <div className="flex h-full flex-col rounded-xl border border-border/70 bg-card/95 p-5 shadow-sm">
@@ -471,9 +471,9 @@ export default function GuidePage() {
                   </thead>
                   <tbody>
                     <tr><td className="px-3 py-2 border-t border-border">点 Long / Short</td><td className="px-3 py-2 border-t border-border">立即成交，无弹窗</td><td className="px-3 py-2 border-t border-border">弹完整开仓快照</td></tr>
-                    <tr><td className="px-3 py-2 border-t border-border">平仓</td><td className="px-3 py-2 border-t border-border">静默成交</td><td className="px-3 py-2 border-t border-border">弹出居中评价弹窗，不填完不能关</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border">平仓</td><td className="px-3 py-2 border-t border-border">成交后弹「跳过 / 去评价」轻提示，每次都问；选评价即时回填走完整流程</td><td className="px-3 py-2 border-t border-border">弹出居中评价弹窗，不填完不能关</td></tr>
                     <tr><td className="px-3 py-2 border-t border-border">交易战役归类</td><td className="px-3 py-2 border-t border-border">可走"裸 record 回填"事后归类</td><td className="px-3 py-2 border-t border-border">实时归类，事件链完整</td></tr>
-                    <tr><td className="px-3 py-2 border-t border-border">错题集 / 元监控</td><td className="px-3 py-2 border-t border-border">不收录</td><td className="px-3 py-2 border-t border-border">全量收录、自动聚类、CI 与基线对比</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border">错题集 / 元监控</td><td className="px-3 py-2 border-t border-border">跳过 = 不收录；去评价 = 进入和决策记录同套统计</td><td className="px-3 py-2 border-t border-border">全量收录、自动聚类、CI 与基线对比</td></tr>
                     <tr><td className="px-3 py-2 border-t border-border">高频错误强制写规则</td><td className="px-3 py-2 border-t border-border">不触发</td><td className="px-3 py-2 border-t border-border">同一错误类型 30 天 ≥3 次自动弹窗</td></tr>
                     <tr><td className="px-3 py-2 border-t border-border">致命单笔损失弹窗</td><td className="px-3 py-2 border-t border-border">不触发</td><td className="px-3 py-2 border-t border-border">单笔实亏 ≥2× 预设最大亏损时弹窗</td></tr>
                     <tr><td className="px-3 py-2 border-t border-border">心态 ≤2 / 非逐仓 / 未完成评价</td><td className="px-3 py-2 border-t border-border">不出现（无快照）</td><td className="px-3 py-2 border-t border-border">硬阻挡，不能下单</td></tr>
@@ -564,6 +564,30 @@ export default function GuidePage() {
             <section id="s3-2" className="scroll-mt-20">
               <SubTitle>3.3 下单前快照</SubTitle>
               <P>开仓快照是系统的核心记录点。它固定“下单前的你”看到什么、相信什么、愿意亏多少、处在什么心态。但这里有一个必须先讲清的底层原则：<strong>主力单与对冲单不是同一类决策，不能用同一套问题去问。</strong> 主力单是在分布右尾下注，核心是“这次机会为什么值得押”；对冲单是在分布左尾买保险，核心是“什么时候裸拿已经变成负期望，应该让保险接管”。</P>
+
+              <SubTitle>零号关 · Stop Doing List：开仓前先过这张「我决心不做」</SubTitle>
+              <P>无论主力单还是对冲单，<strong>开仓快照打开后看到的第一块</strong>是一张红框的 <strong>Stop Doing List</strong>——你长期维护的「<strong>我决心不再做的事</strong>」清单。它的逻辑顺序在所有快照内容之前：<strong>先确认这一笔不会犯你已经决心戒掉的错，再谈结构、源头、赔率与胜率</strong>。</P>
+              <P>它的设计取自芒格的一句话：<strong>要确认自己不该做什么，往往比想清楚该做什么更重要</strong>。系统里有两张性质相反的清单：<strong>规则系统</strong>记录的是“我应该做 X”（积极指令），<strong>Stop Doing List</strong>记录的是“我决心不做 Y”（消极戒律）。两者刻意分开存放、互不污染，避免“应该做”和“不要做”混进同一张表后语义模糊。</P>
+              <div className="overflow-x-auto">
+                <table className="w-full text-[11px] my-3 border border-border rounded overflow-hidden">
+                  <thead className="bg-muted/50">
+                    <tr>
+                      <th className="text-left px-3 py-2 font-medium text-foreground text-[10px]">组成</th>
+                      <th className="text-left px-3 py-2 font-medium text-foreground text-[10px]">写什么</th>
+                      <th className="text-left px-3 py-2 font-medium text-foreground text-[10px]">作用</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr><td className="px-3 py-2 border-t border-border">全局清单</td><td className="px-3 py-2 border-t border-border">长期维护的「决心不做」条目，例如「不在心态 ≤ 3 时开仓」「不追刚跑出去的单」「不在 22:00 后下任何破位单」</td><td className="px-3 py-2 border-t border-border">每条都<strong>必须在本次勾选确认</strong>「这单不会犯」，少勾一条都开不了仓——<span style={{ color: '#F6465D' }}>硬阻挡</span></td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border">本次临时一条</td><td className="px-3 py-2 border-t border-border">这次特别要防的，例如「今天身体不舒服，避免追任何破位单」</td><td className="px-3 py-2 border-t border-border">可选，留作给自己定向加码的当下提醒</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border">维护清单按钮</td><td className="px-3 py-2 border-t border-border">右上「维护清单」按钮打开一个小窗口</td><td className="px-3 py-2 border-t border-border">在那里集中增 / 改 / 删条目；已写过的开仓记录不受影响</td></tr>
+                  </tbody>
+                </table>
+              </div>
+              <Highlight>
+                这是<strong>零号关</strong>：它放在排除性清单（一票否决）之上，比心态分、仓位模式更早出现。它筛的不是“此刻能不能交易”，而是“你这一刀会不会重复犯你已经决心戒掉的那类错”。
+              </Highlight>
+              <P><strong>降级行为：</strong>如果你的全局清单还是空的（或服务端表还没建），这一块会显示「清单为空」，<strong>不阻挡开仓</strong>，等价于退回原有流程。建议第一次进入时点「维护清单」加几条，把你最常踩的坑先固定下来。</P>
 
               <SubTitle>主力单快照：先判断结构（第 0 步），再走三步（源头 → 盈亏比目标 → 胜率）</SubTitle>
               <P><strong>主力单</strong>的第一性原理是：你是在押一段右尾收益，真正要回答的是<strong>这笔是否有正期望</strong>，而不是“我有多想下单”。但在押注之前，必须先回答一个更底层的问题——<strong>现在是什么市场</strong>。系统因此把主力单快照先收进<strong>第 0 步 · 市场结构</strong>（判断单边 / 震荡 / 转换、你在哪个阶段入场，计数 2/2），再把下注本身拆成三步，<strong>顺序本身就是纪律</strong>：第一步<strong>源头 · 机会成本</strong>（这一单靠什么机制赚钱、值不值得占用你的行动力，计数 2/2），第二步<strong>① 盈亏比目标</strong>（结构给的收益空间够不够厚，计数 6/6），第三步<strong>② 胜率轴</strong>（方向判断，只用于事后校准，计数 3/3）。</P>
@@ -948,6 +972,54 @@ export default function GuidePage() {
                 先事实、后解释，是为了对抗<strong>叙事谬误</strong>：事后回看时，人最容易把“发生了什么”和“为什么”压成一个<strong>自洽的完美闭环</strong>，再当成真相。两栏分开写，逼你先承认看见了什么，再解释为什么。
               </RedHighlight>
               <P className="mt-2">两栏合存进同一字段，<strong>不新增数据库列</strong>；<strong>旧版只有一段的复盘自动归为“解释”，历史记录不受影响</strong>。</P>
+
+              <SubTitle>情绪侧复盘 · 七问：把这单底下真正动你的那块石头翻出来</SubTitle>
+              <P>“事实 / 解释”两栏之后，复盘弹窗再追加一个独立模块——<strong>情绪侧七问</strong>。它不分析盘面，<strong>分析你自己</strong>：这一刀真正动你的不是图形，是你心里那块石头。它的位置紧贴“先事实、后解释”之后、“如果重来一次”之前——逻辑顺序是<strong>先看清动机，再写下次的动作</strong>。</P>
+              <div className="overflow-x-auto">
+                <table className="w-full text-[11px] my-3 border border-border rounded overflow-hidden">
+                  <thead className="bg-muted/50">
+                    <tr>
+                      <th className="text-left px-3 py-2 font-medium text-foreground text-[10px]">问题</th>
+                      <th className="text-left px-3 py-2 font-medium text-foreground text-[10px]">指向</th>
+                      <th className="text-left px-3 py-2 font-medium text-foreground text-[10px]">写法约束</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr><td className="px-3 py-2 border-t border-border">① 这单最起波澜的事情是什么？</td><td className="px-3 py-2 border-t border-border">情绪触发点</td><td className="px-3 py-2 border-t border-border">只写让你心里一震 / 一紧 / 一急的那个具体时刻</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border">② 我的第一反应是什么？</td><td className="px-3 py-2 border-t border-border">未经大脑的本能动作</td><td className="px-3 py-2 border-t border-border">写最原始的那一下冲动，而不是事后整理过的“合理动作”</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border">③ 我其实想得到什么？</td><td className="px-3 py-2 border-t border-border">贪婪本质</td><td className="px-3 py-2 border-t border-border">不是“赚钱”这种正确答案——是被认可、扳回上一笔、证明自己看对了等更底层的东西</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border">④ 我其实在害怕什么？</td><td className="px-3 py-2 border-t border-border">恐惧本质</td><td className="px-3 py-2 border-t border-border">也不是“亏钱”这种表层答案——是被打脸、错过、回吐、不能再翻身等更底层的东西</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border">⑤ 我自己给自己找了一个什么样的理由？</td><td className="px-3 py-2 border-t border-border">合理化（采证而非审判）</td><td className="px-3 py-2 border-t border-border">把当时骗自己的那句话<strong>原样写下来</strong>：“这次不一样”“再等等就回来了”“破位需要确认”</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border">⑥ 这单我捞起的<strong>主石头</strong>是什么？</td><td className="px-3 py-2 border-t border-border">恐惧 / 贪婪的具体原型</td><td className="px-3 py-2 border-t border-border">22 个标签按四族分组（恐惧 / 贪婪 / 自我保护 / 虚假掌控），允许多选 + 一句话补刀——<span style={{ color: '#F6465D' }}>至少选一个标签或写一句话</span></td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border">⑦ 如果明天同样遇到一样的事情，我准备怎么选？</td><td className="px-3 py-2 border-t border-border">动作级预案（不是口号）</td><td className="px-3 py-2 border-t border-border">不要写“我下次会冷静”——写触发什么信号、做什么动作、不做什么动作（例：再遇到这种快速跳价，先离开屏幕 5 分钟再加减仓）</td></tr>
+                  </tbody>
+                </table>
+              </div>
+              <P><strong>主石头</strong>是这块的核心，因为它是<strong>可统计的标签</strong>：</P>
+              <div className="overflow-x-auto">
+                <table className="w-full text-[11px] my-3 border border-border rounded overflow-hidden">
+                  <thead className="bg-muted/50">
+                    <tr>
+                      <th className="text-left px-3 py-2 font-medium text-foreground text-[10px]">族</th>
+                      <th className="text-left px-3 py-2 font-medium text-foreground text-[10px]">动机</th>
+                      <th className="text-left px-3 py-2 font-medium text-foreground text-[10px]">代表性原型</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr><td className="px-3 py-2 border-t border-border"><span style={{ color: '#F6465D' }}>恐惧</span></td><td className="px-3 py-2 border-t border-border">想“少受伤”</td><td className="px-3 py-2 border-t border-border">怕亏 / 怕回吐 / 踏空恐惧 / 怕落后 / 惊慌 / 弥散焦虑 / 羞耻 / 自怜</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border"><span style={{ color: '#F0B90B' }}>贪婪</span></td><td className="px-3 py-2 border-t border-border">想“多拿一点”</td><td className="px-3 py-2 border-t border-border">贪 / 暴富幻想 / 过度自信 / 证明自己 / 被剥夺感 / 复仇</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border"><span style={{ color: '#D89B00' }}>自我保护</span></td><td className="px-3 py-2 border-t border-border">持仓后才显形：保护的是过去的自己</td><td className="px-3 py-2 border-t border-border">沉没成本 / 不甘心 / 侥幸 / 否认 / 死扛 / 合理化</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border">虚假掌控</td><td className="px-3 py-2 border-t border-border">不是真的看见机会，是想用动作压住不确定</td><td className="px-3 py-2 border-t border-border">虚假安心 / 虚假掌控 / 无聊</td></tr>
+                  </tbody>
+                </table>
+              </div>
+              <Highlight>
+                标签 ID 沿用情绪标签体系的命名（fomo / greed / sunk_cost……），方便日后做<strong>交叉分析</strong>：开仓前自标的情绪 vs 事后回看的主石头，是不是同一种？
+              </Highlight>
+              <RedHighlight>
+                七问<strong>全部必填</strong>（主石头允许“至少选一个标签或写一句话”满足其一）——它和评价的其他部分一样，<strong>不写完不能保存离开</strong>。这是逼自己面对底层动机，而不是停在“盘面分析”那一层假装收口。
+              </RedHighlight>
+              <P className="mt-2">底层逻辑：这一笔会成为样本，进入<strong>结构 × 结果四象限</strong>、<strong>盈亏同源</strong>、<strong>铁锤人体检</strong>等结构层的统计；同时也会进入<strong>主石头统计</strong>——同一块石头反复出现，意味着你的下一步设计干预（L5 五步诊断里的“设计”）应该针对这块石头本身，而不是再讲一遍盘面。</P>
             </section>
 
             <section id="s3-4" className="scroll-mt-20">
