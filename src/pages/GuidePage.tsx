@@ -865,7 +865,7 @@ export default function GuidePage() {
             <section id="s3-3" className="scroll-mt-20">
               <SubTitle>3.4 平仓评价复盘</SubTitle>
               <P>决策记录模式下，平仓会打开一个与开仓快照同规格的<strong>居中评价弹窗</strong>，不完成评价不能离开。评价的重心不是重新讲一遍故事，而是把快照时的预测和最终实际结果对上：预设的证伪信号兑现没有，结构破坏信号出现没有，进场时钉下的置信度有没有被验证。</P>
-              <P>弹窗按这条主线展开：<strong>事实模块</strong>逐条核验快照里押的<strong>反 / 止 / 结构 / 置信</strong>四条腿 → <strong>结果归类</strong>（结构 × 结果四象限）→ <strong>体检模块</strong>（过程纠结度 / 小机会仓位记账）→ <strong>情绪侧七问</strong>。先对账，再判读，最后翻动机，避免复盘变成事后重新叙述。</P>
+              <P>弹窗按这条主线展开：<strong>事实模块</strong>逐条核验快照里押的<strong>反 / 止 / 结构 / 置信</strong>四条腿 → <strong>结果归类</strong>（结构 × 结果四象限）→ <strong>路径</strong>（滚仓 / 镜像止盈 + 交易主动权）→ <strong>体检模块</strong>（过程纠结度 / 小机会仓位记账 / 踏空高盈亏比结构）→ <strong>反对者陈述追踪</strong>（条件触发）→ <strong>情绪侧七问</strong>。先对账，再判读，最后翻动机，避免复盘变成事后重新叙述。</P>
 
               <SubTitle>事实模块 · 逐条核验闭环的四条腿（反 / 止 / 结构 / 置信）</SubTitle>
               <P>弹窗会把开仓快照里写下的<strong>反（亏损剧本）</strong>、<strong>止（失效信号）</strong>、<strong>结构（目标空间）</strong>、<strong>置信（开仓预测胜率）</strong>逐条原样回显，问你这四个假设在持仓过程中分别被市场怎么对待。这里<strong>只核验差值、不写事后故事</strong>，避免把"发生了什么"和"为什么"压成一个自洽的完美闭环。</P>
@@ -895,6 +895,42 @@ export default function GuidePage() {
               </RedHighlight>
               <P className="mt-2">如果结果是保本或未入场，不强行归入四象限；如果是赢或亏，就先选一格——按 UI 里"选择本笔归类"那 2×2 的可点格子，系统会自动只让你选与本笔结果一致的两格（赢的一行 / 亏的一行）。</P>
 
+              <SubTitle>路径 · 滚仓 vs 镜像止盈 + 交易主动权</SubTitle>
+              <P>归类之后追问一句：<strong>这一笔最终走的是哪条路径</strong>，以及<strong>你在这条路径里有多大主动权</strong>。它只记录这单实际的路径，不评对错。</P>
+              <div className="overflow-x-auto">
+                <table className="w-full text-[11px] my-3 border border-border rounded overflow-hidden">
+                  <thead className="bg-muted/50">
+                    <tr>
+                      <th className="text-left px-3 py-2 font-medium text-foreground text-[10px]">路径选择</th>
+                      <th className="text-left px-3 py-2 font-medium text-foreground text-[10px]">含义</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr><td className="px-3 py-2 border-t border-border"><span style={{ color: '#0ECB81' }}>滚仓</span></td><td className="px-3 py-2 border-t border-border">顺着优势路径推进，把赢家继续养肥，而不是在第一段波动里急着收掉</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border"><span style={{ color: '#F0B90B' }}>1:1 镜像止盈</span></td><td className="px-3 py-2 border-t border-border">按风险镜像先兑现 1R，把主动权和心理带宽收回来</td></tr>
+                  </tbody>
+                </table>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-[11px] my-3 border border-border rounded overflow-hidden">
+                  <thead className="bg-muted/50">
+                    <tr>
+                      <th className="text-left px-3 py-2 font-medium text-foreground text-[10px]">交易主动权（1–4）</th>
+                      <th className="text-left px-3 py-2 font-medium text-foreground text-[10px]">含义</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr><td className="px-3 py-2 border-t border-border"><span style={{ color: '#F6465D' }}>1 · 完全被动</span></td><td className="px-3 py-2 border-t border-border">价格推着你走，离场主要来自疼痛、慌乱或被动触发</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border"><span style={{ color: '#D89B00' }}>2 · 勉强可控</span></td><td className="px-3 py-2 border-t border-border">有计划，但执行时明显被波动牵着走</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border"><span style={{ color: '#F0B90B' }}>3 · 主动可控</span></td><td className="px-3 py-2 border-t border-border">基本按路径执行，关键动作没有被情绪接管</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border"><span style={{ color: '#0ECB81' }}>4 · 完全主动</span></td><td className="px-3 py-2 border-t border-border">节奏、止盈、离场都由预案主导，市场只是触发条件</td></tr>
+                  </tbody>
+                </table>
+              </div>
+              <Highlight>
+                这两项必选，仅对主力单且已入场出现。它和结果归类一起把"你的过程"刻画得更立体：<strong>同样赢一笔，被动滚出来 vs 主动按预案止盈，含金量完全不同</strong>。
+              </Highlight>
+
               <SubTitle>过程纠结度（先行指标）</SubTitle>
               <P>仅主力单出现。用 1–5 记录<strong>这一单做得有多纠结 / 多轻松</strong>：<strong>1 极度煎熬 → 2 纠结 → 3 一般 → 4 轻松 → 5 行云流水</strong>。它锚定一句话：<strong>交易最重要的不是赚钱，是轻松。</strong></P>
               <RedHighlight>
@@ -923,6 +959,36 @@ export default function GuidePage() {
               <RedHighlight>
                 持有小机会仓位是<strong>一等负向状态：它比空仓更糟</strong>——在悄悄损耗你的行动力与对大机会的敏感度。把它的成本记成账，下次才舍得空仓。
               </RedHighlight>
+
+              <SubTitle>踏空高盈亏比结构 / 该重没重（小机会仓位的对称负态）</SubTitle>
+              <P>当开仓时被识别为<strong>厚结构</strong>（盈亏比目标落在「2R 支撑 / 3R 打开 / 逆群未释放」，或机会成本明确"不做更亏 + 便宜机会"）时，平仓后追加这一块——它和"小机会仓位"<strong>互为对称</strong>：</P>
+              <div className="overflow-x-auto">
+                <table className="w-full text-[11px] my-3 border border-border rounded overflow-hidden">
+                  <thead className="bg-muted/50">
+                    <tr>
+                      <th className="text-left px-3 py-2 font-medium text-foreground text-[10px]">状态</th>
+                      <th className="text-left px-3 py-2 font-medium text-foreground text-[10px]">含义</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr><td className="px-3 py-2 border-t border-border"><span style={{ color: '#0ECB81' }}>没有明显踏空</span></td><td className="px-3 py-2 border-t border-border">结构厚度与实际暴露基本匹配，没有明显错过或做轻</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border"><span style={{ color: '#D89B00' }}>该做没做</span></td><td className="px-3 py-2 border-t border-border">高盈亏比结构被识别出来，但最后没有参与</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border"><span style={{ color: '#D89B00' }}>该重没重</span></td><td className="px-3 py-2 border-t border-border">结构足够厚，但仓位过轻，收益没有覆盖判断质量</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border"><span style={{ color: '#F6465D' }}>错过后补票</span></td><td className="px-3 py-2 border-t border-border">错过好位置后用差位置追回，等于把厚结构做薄</td></tr>
+                  </tbody>
+                </table>
+              </div>
+              <Highlight>
+                小机会仓位惩罚的是"<strong>不该占用却占用了</strong>"；这一项惩罚的是"<strong>该暴露却没有充分暴露</strong>"。两边都在保护行动力。
+              </Highlight>
+
+              <SubTitle>反对者陈述追踪（仅当开仓写过反对者时出现）</SubTitle>
+              <P>如果开仓快照里写下了一句<strong>反对者陈述</strong>（"如果我看错了，反对者会说什么"），平仓后这块会把它原样回显，再让你<strong>二选一</strong>：</P>
+              <ul className="list-disc pl-6 text-[14px] text-foreground/90 space-y-1">
+                <li><strong style={{ color: '#F6465D' }}>反对者命中</strong>：他当时说的那句话，事后真的应验了。这一笔本质上是没听反方话的代价。</li>
+                <li><strong style={{ color: '#0ECB81' }}>原方案成立</strong>：你的原始判断在这一笔上压过了反对者的担心。</li>
+              </ul>
+              <P>这块是<strong>事前反方意见的事后兑现</strong>：把"是不是有人会反对"和"反对者后来说对了没有"统计出来，避免下次又把反方意见当噪音过滤掉。</P>
 
               <SubTitle>情绪侧复盘 · 七问：把这单底下真正动你的那块石头翻出来</SubTitle>
               <P>评价弹窗最后一块是<strong>情绪侧七问</strong>。它不分析盘面，<strong>分析你自己</strong>：这一刀真正动你的不是图形，是你心里那块石头。前面几块都是在对账（事实是什么 / 归到哪一格 / 体检指标），到这里转向<strong>翻底层动机</strong>——先看清这单背后真正在驱动你的东西，再写下次再遇到时具体准备怎么做。</P>
@@ -991,37 +1057,43 @@ export default function GuidePage() {
 
             <section id="s4-1" className="scroll-mt-20">
               <SubTitle>4.1 错题集</SubTitle>
-              <P>错题集不再以“多写几个标签”为中心，而是以<strong>快照预测与最终结果之间的误差</strong>为中心。它要回答的问题是：哪几类错误在重复发生，哪几类错误已经被守住，哪里还有你没有看见的盲区。</P>
+              <P>错题集的单位不是<strong>一笔笔交易</strong>，也不是抽象的"错误类型代码"，而是<strong>开仓快照与平仓评价里每一个具体问题的历史答案分布</strong>。它要回答的是：所有历史主力单加起来，<strong>这道题我都填过些什么</strong>，分布在哪几格，命中过几次坑。</P>
+              <P>它一共有 <strong>4 个 tab</strong>：</P>
               <KeyGrid>
-                <KeyCard title="错误类型目录">
-                  默认视图。把已评价交易按可度量的错误类型汇总，重点看预测、证伪、结构、执行和心态行为之间的偏差。
+                <KeyCard title="汇总（默认）">
+                  上半「开仓快照汇总」+ 下半「平仓评价汇总」。每个问题独立折叠，展开看到的不是单笔，是所有历史主力单在这道问题上的答案汇总。
                 </KeyCard>
-                <KeyCard title="0 计数">
-                  已复盘且可判断，但暂未命中某类错误时，该类型记为 0。这代表这条线暂时守住了，不是被隐藏。
+                <KeyCard title="结构成熟度">
+                  按 edge 源头切面看哪一条结构闭环已经收敛到能复用的程度（详见 4.2）。
                 </KeyCard>
                 <KeyCard title="盲区">
-                  错题集最多保留一个盲区模块，用来手动补充系统暂时无法自动识别、但你明显反复踩到的东西。
+                  手动补充系统暂时算不出来、但你明显反复踩到的东西——它和"汇总"互补。
+                </KeyCard>
+                <KeyCard title="待复盘">
+                  已平仓但还没做评价的单子列表，是补全样本的入口。已平仓未评价会硬阻塞下一次开仓。
                 </KeyCard>
               </KeyGrid>
+              <P>下面只展开「汇总」这个核心 tab——它直接对接你在开仓快照与平仓评价里填的每一个问题，做了三种不同的渲染：</P>
               <div className="overflow-x-auto">
                 <table className="w-full text-[11px] my-3 border border-border rounded overflow-hidden">
                   <thead className="bg-muted/50">
                     <tr>
-                      <th className="text-left px-3 py-2 font-medium text-foreground text-[10px]">显示状态</th>
-                      <th className="text-left px-3 py-2 font-medium text-foreground text-[10px]">含义</th>
-                      <th className="text-left px-3 py-2 font-medium text-foreground text-[10px]">应该怎么读</th>
+                      <th className="text-left px-3 py-2 font-medium text-foreground text-[10px]">问题类型</th>
+                      <th className="text-left px-3 py-2 font-medium text-foreground text-[10px]">展开后看到的形式</th>
+                      <th className="text-left px-3 py-2 font-medium text-foreground text-[10px]">怎么读</th>
                     </tr>
                   </thead>
                   <tbody>
-                    <tr><td className="px-3 py-2 border-t border-border">k / N · x%</td><td className="px-3 py-2 border-t border-border">N 笔已评价交易可判断，其中 k 笔命中该错误类型</td><td className="px-3 py-2 border-t border-border">看频率、最近性和损失规模，决定是否写规则</td></tr>
-                    <tr><td className="px-3 py-2 border-t border-border">0 / N · 0%</td><td className="px-3 py-2 border-t border-border">N 笔已评价交易可判断，但暂未命中该错误类型</td><td className="px-3 py-2 border-t border-border">记为“守住”。0 是能力边界的一部分，不是空白</td></tr>
-                    <tr><td className="px-3 py-2 border-t border-border">不显示</td><td className="px-3 py-2 border-t border-border">样本缺少必要字段，或这类错误在当前样本中不可判断</td><td className="px-3 py-2 border-t border-border">不要把“不可判”读成“没有问题”</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border">单选 / 多选</td><td className="px-3 py-2 border-t border-border">每个选项一条进度条，附计数 + 百分比</td><td className="px-3 py-2 border-t border-border">看哪几个选项占比最高；危险选项（如「无明确 edge」「按百分比拍止损」）会标红，重在看高占比的危险项</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border">数值（心态分 / 纠结度 / 预测胜率 / 最大亏损）</td><td className="px-3 py-2 border-t border-border">均值 · 中位 · 极值 + 分桶分布条</td><td className="px-3 py-2 border-t border-border">看你在这个数值上的常住区，以及尾巴有没有失控</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border">文本（这笔为什么会对 / 亏完最可能原因 / 情绪七问等）</td><td className="px-3 py-2 border-t border-border">所有历史回答的完整列表，按时间倒序，带 symbol / 方向 / 时间 / 平仓结果着色</td><td className="px-3 py-2 border-t border-border">点击任意一条直接跳到那笔的 K 线回放页，看见"我当时说什么 + 行情后来怎么走"</td></tr>
                   </tbody>
                 </table>
               </div>
               <Highlight>
-                错题集的核心不是回看一千笔细节，而是把误差上卷成少数几条命脉：预测错在哪里、止损/证伪有没有执行、结构判断有没有偏、置信度是否校准、哪些盲区反复漏掉。
+                统计口径只看<strong>主力单</strong>（非对冲、非"太难"）——对冲单字段路径完全不同，混进来会让答案分布失真。
               </Highlight>
+              <P>汇总当前覆盖 <strong>17 个开仓字段</strong>（心态自评、市场结构、入场阶段、edge 源头、机会成本、便宜机会、盈亏比目标、止损质量、预测胜率、最大亏损、情绪标签、认知偏差、这笔为什么会对、亏完最可能原因、提前止损信号、反对者陈述、Stop Doing 临时一条）和 <strong>15 个平仓字段</strong>（结构归类、纠结度、证伪触发状态、小机会拖累、主石头标签 + 情绪七问的 7 个文字题 + 反 / 止 / 结构三个事实题）。新增字段只需要往字段 spec 里加一行就会自动出现。</P>
             </section>
 
             <section id="s4-2" className="scroll-mt-20">
