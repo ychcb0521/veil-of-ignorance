@@ -40,7 +40,6 @@ const TOC: TocItem[] = [
       { id: 's4-1', label: '4.1 错题集' },
       { id: 's4-2', label: '4.2 结构成熟度' },
       { id: 's4-3', label: '4.3 交易战役' },
-      { id: 's4-4', label: '4.4 元监控' },
       { id: 's4-5', label: '4.5 规则' },
     ],
   },
@@ -1180,28 +1179,6 @@ export default function GuidePage() {
               <P>归类历史交易时，先输入或选择标的，再从该币种所有时间段的仓位历史记录中勾选一组相关交易。被选中的记录共同构成一次交易战役。</P>
               <P>实时战役与历史归类战役必须隔离。实时战役在开仓时归属；历史归类只加入历史战役，不把回填数据混进实时训练口径。</P>
               <P>互关账户可以打开彼此的战役详情，并留下带可信度权重的留言评价。外部校验只评价当时结构、证伪与执行是否自洽，不用后续走势倒推对错。</P>
-            </section>
-
-            <section id="s4-4" className="scroll-mt-20">
-              <SubTitle>4.4 元监控</SubTitle>
-              <P>元监控回答“系统是否真的让你变好”。不要只看漂亮图表，核心看规则创建后，对应错误类型是否在扣除自然学习曲线与 regression to mean 后仍然下降。</P>
-              <ul className="list-disc pl-6 text-[14px] text-foreground/90 space-y-1">
-                <li><strong>错误趋势</strong>：同一错误类型的近期变化。</li>
-                <li><strong>规则有效性</strong>：规则上线后，对应错误是否减少，并与全局基线比较。</li>
-                <li><strong>置信区间</strong>：低样本下不把随机波动误读成进步。</li>
-                <li><strong>Calibration</strong>：比较开仓预测胜率与平仓结果，观察判断是否过度自信。</li>
-                <li><strong>可信度向量</strong>：分别追踪方向判断、结构判断、反向假设命中、快照完整度和校准能力。</li>
-                <li><strong>结构 × 结果</strong>：观察结构成立与实际 R 之间是否有稳定关系，判断规则是否真有预测性。</li>
-                <li><strong>盈亏同源（edge 源头）</strong>：按 edge 源头聚合盈 / 亏，标出既是最大盈利、又是最大亏损来源的“同源”源头——它是 edge 的两面，不是该砍掉的毛病。</li>
-                <li><strong>纠结度 × 结果</strong>：把过程纠结度与后续胜率 / R 对照，验证“轻松”是不是真的正向先行指标，“煎熬”是不是真的预示亏损。</li>
-                <li><strong>情绪日志</strong>：按正向/中性/负向三类分组统计后续平均 R，识别最危险的心理入口；正向/中性标签同样进入对比，用来检验“自认为状态好”是否真的有正期望。</li>
-                <li><strong>规则演化地图</strong>：查看规则从直觉、表述、模式确认、规则化到算法化的证据等级。</li>
-                <li><strong>订单类型分布</strong>：主力单与对冲单是否失衡。</li>
-                <li><strong>心态与时段</strong>：识别你的高质量状态与危险时段。</li>
-              </ul>
-              <RedHighlight>
-                元监控不是展示页，而是审计页。如果规则没有降低错误频次，就回到规则页重写。
-              </RedHighlight>
             </section>
 
             <section id="s4-5" className="scroll-mt-20">

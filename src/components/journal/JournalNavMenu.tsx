@@ -14,7 +14,7 @@ import {
 } from '@/components/ui/sheet';
 import {
   LayoutGrid, ChevronDown, CheckCheck,
-  Wallet, BookMarked, BookOpen, Layers, Gauge, ShieldCheck, Zap,
+  Wallet, BookMarked, BookOpen, Layers, ShieldCheck, Zap,
 } from 'lucide-react';
 
 interface NavItem {
@@ -62,7 +62,6 @@ function useNavItems(
       action: () => nav('/journal/campaigns'),
       isActive: () => loc.pathname === '/journal/campaigns' || loc.pathname.startsWith('/journal/campaigns/'),
     },
-    { key: 'insights', icon: Gauge, label: '元监控', action: () => nav('/journal/insights'), isActive: () => loc.pathname === '/journal/insights' },
     { key: 'rules', icon: ShieldCheck, label: '规则', action: () => nav('/journal/rules'), isActive: () => loc.pathname === '/journal/rules' },
   ];
 }
