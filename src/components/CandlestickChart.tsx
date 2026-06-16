@@ -164,6 +164,8 @@ interface Props {
   analysisMode?: boolean;
   /** Non-trading overlays rendered by replay and campaign review pages. */
   analysisAnnotations?: AnalysisChartAnnotations;
+  /** K 线时间轴的显示时区（IANA 名）。默认 Asia/Shanghai，与主交易页一致；战役页用 UTC。 */
+  timezone?: string;
 }
 
 // Convert our KlineData to klinecharts KLineData
@@ -333,6 +335,7 @@ function CandlestickChartComponent({
   onPricePicked,
   analysisMode = false,
   analysisAnnotations,
+  timezone = "Asia/Shanghai",
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<Chart | null>(null);
@@ -383,7 +386,7 @@ function CandlestickChartComponent({
 
     const chart = init(containerRef.current, {
       styles: theme === "light" ? LIGHT_STYLES : DARK_STYLES,
-      timezone: "Asia/Shanghai",
+      timezone,
     });
 
     if (!chart) return;

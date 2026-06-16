@@ -1093,6 +1093,13 @@ export default function GuidePage() {
                 统计口径只看<strong>主力单</strong>（非对冲、非"太难"）——对冲单字段路径完全不同，混进来会让答案分布失真。
               </Highlight>
               <P>汇总当前覆盖 <strong>17 个开仓字段</strong>（心态自评、市场结构、入场阶段、edge 源头、机会成本、便宜机会、盈亏比目标、止损质量、预测胜率、最大亏损、情绪标签、认知偏差、这笔为什么会对、亏完最可能原因、提前止损信号、反对者陈述、Stop Doing 临时一条）和 <strong>15 个平仓字段</strong>（结构归类、纠结度、证伪触发状态、小机会拖累、主石头标签 + 情绪七问的 7 个文字题 + 反 / 止 / 结构三个事实题）。新增字段只需要往字段 spec 里加一行就会自动出现。</P>
+              <SubTitle>提交永不丢：本机镜像兜底</SubTitle>
+              <P>
+                平仓评价提交后，<strong>一定会成功落库、并立即出现在「汇总」里</strong>，不存在"提交了却看不到"的情况。即使远程数据库还没建某些扩展列（你没跑最新迁移），提交也<strong>不会整笔失败</strong>——基础字段照常写远程，缺列的字段写入<strong>本机镜像</strong>，汇总同样读得到。所以右上角若提示"其中 N 项暂未同步到远程库（缺列）"，那不是报错：你填的内容已经在本机、汇总看得见，只是这几项还没同步到云端。
+              </P>
+              <RedHighlight>
+                本机镜像只兜<strong>当前这台设备</strong>的可见性，是过渡方案、非最终解。换设备或清浏览器缓存前，务必去 Supabase 跑最新 safety net 迁移把缺列补齐；否则那几项不会跟着账号跨设备走。
+              </RedHighlight>
             </section>
 
             <section id="s4-2" className="scroll-mt-20">
@@ -1179,6 +1186,36 @@ export default function GuidePage() {
               <P>归类历史交易时，先输入或选择标的，再从该币种所有时间段的仓位历史记录中勾选一组相关交易。被选中的记录共同构成一次交易战役。</P>
               <P>实时战役与历史归类战役必须隔离。实时战役在开仓时归属；历史归类只加入历史战役，不把回填数据混进实时训练口径。</P>
               <P>互关账户可以打开彼此的战役详情，并留下带可信度权重的留言评价。外部校验只评价当时结构、证伪与执行是否自洽，不用后续走势倒推对错。</P>
+
+              <SubTitle>战役详情页：K 线时间轴标注</SubTitle>
+              <P>
+                打开一次战役，上方是贯穿整段的 K 线回放，下方是 <strong>Legs 列表</strong>。两者共用同一条时间轴，对照着看就能还原整条战役的进出场节奏：
+              </P>
+              <ul className="list-disc pl-6 text-[14px] text-foreground/90 space-y-1">
+                <li><strong>Legs 列表每条腿都标明开仓时间与平仓时间</strong>（「开 …／平 …」两行）；还没平仓的腿，平仓时间显示「—」。</li>
+                <li><strong>K 线前后区间自动囊括</strong> Legs 列表里最早的开单与最晚的平单，保证每条腿的进出场都落在可视范围内，不会被裁到屏幕外。</li>
+                <li>时间轴上用<strong>彩色竖线</strong>标注每条腿的开单 / 平单时刻——颜色区分方向、线型区分动作（见下表）。</li>
+              </ul>
+              <div className="overflow-x-auto">
+                <table className="w-full text-[11px] my-3 border border-border rounded overflow-hidden">
+                  <thead className="bg-muted/50">
+                    <tr>
+                      <th className="text-left px-3 py-2 font-medium text-foreground text-[10px]">维度</th>
+                      <th className="text-left px-3 py-2 font-medium text-foreground text-[10px]">取值</th>
+                      <th className="text-left px-3 py-2 font-medium text-foreground text-[10px]">含义</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr><td className="px-3 py-2 border-t border-border">颜色</td><td className="px-3 py-2 border-t border-border"><span style={{ color: '#2B80FF' }}>蓝色</span></td><td className="px-3 py-2 border-t border-border">多单（long）</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border">颜色</td><td className="px-3 py-2 border-t border-border"><span style={{ color: '#F7931A' }}>橘色</span></td><td className="px-3 py-2 border-t border-border">空单（short）</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border">线型</td><td className="px-3 py-2 border-t border-border">实线</td><td className="px-3 py-2 border-t border-border">开单时刻</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border">线型</td><td className="px-3 py-2 border-t border-border">虚线</td><td className="px-3 py-2 border-t border-border">平单时刻</td></tr>
+                  </tbody>
+                </table>
+              </div>
+              <Highlight>
+                竖线只管"什么方向、什么时候进出"，价格线与三角标记管"在什么价位"。三者叠在同一张图上，整条战役的开、平、对冲、加仓节奏一眼看清。
+              </Highlight>
             </section>
 
             <section id="s4-5" className="scroll-mt-20">

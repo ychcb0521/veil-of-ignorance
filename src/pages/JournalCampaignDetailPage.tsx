@@ -1,6 +1,6 @@
-import { type ChangeEvent, useEffect, useMemo, useRef, useState } from 'react';
+import { type ChangeEvent, useEffect, useMemo, useState } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, Flag, Info, Layers, MessageSquare, Send, Sparkles, Target, Trash2, TrendingUp, UserPlus } from 'lucide-react';
+import { ArrowLeft, Info, Layers, MessageSquare, Send, Sparkles, Trash2, TrendingUp, UserPlus } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -13,18 +13,15 @@ import { type ChartMarker, type TimeBoundPriceLine, type VerticalLine } from '@/
 import { ReplayKlineChart } from '@/components/journal/ReplayKlineChart';
 import { StateMachineTimeline } from '@/components/journal/StateMachineTimeline';
 import { CampaignLegsList } from '@/components/journal/CampaignLegsList';
-import { DecisionAccuracyPanel } from '@/components/journal/DecisionAccuracyPanel';
-import { SopDeviationCard } from '@/components/journal/SopDeviationCard';
 import { EndCampaignDialog } from '@/components/journal/EndCampaignDialog';
 import { useAuth } from '@/contexts/AuthContext';
 import { useTradingContext } from '@/contexts/TradingContext';
 import { intervalToMs } from '@/hooks/useBinanceData';
-import { useCampaignKlines } from '@/hooks/useCampaignKlines';
+import { useCampaignKlines, CAMPAIGN_EDGE_PAD_MS } from '@/hooks/useCampaignKlines';
 import { buildPureSopParams } from '@/lib/campaignSimulationEngine';
 import {
   buildCampaignEventStream,
   computeDecisionAccuracy,
-  computeSopDeviation,
   deriveCampaignStates,
   shouldSuggestCampaignEnd,
 } from '@/lib/campaignAnalysis';
@@ -88,17 +85,6 @@ function chipForStatus(status: TradeCampaign['status']) {
     case 'closed_profit': return 'bg-[#0ECB81]/15 text-[#0ECB81]';
     case 'closed_loss': return 'bg-[#F6465D]/15 text-[#F6465D]';
     case 'abandoned': return 'bg-[#F0B90B]/10 text-[#F0B90B]';
-    default: return 'bg-muted text-muted-foreground';
-  }
-}
-
-function gradeClass(grade: string | null) {
-  switch (grade) {
-    case 'A': return 'bg-[#0ECB81]/15 text-[#0ECB81]';
-    case 'B': return 'bg-[#0ECB81]/10 text-foreground';
-    case 'C': return 'bg-[#F0B90B]/15 text-[#F0B90B]';
-    case 'D': return 'bg-[#F6465D]/10 text-[#F6465D]';
-    case 'F': return 'bg-[#F6465D]/20 text-[#F6465D] font-bold';
     default: return 'bg-muted text-muted-foreground';
   }
 }
@@ -373,7 +359,6 @@ export default function JournalCampaignDetailPage() {
   const [commentSaving, setCommentSaving] = useState(false);
   const [followeeId, setFolloweeId] = useState('');
   const [following, setFollowing] = useState(false);
-  const sopRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     if (!id || !user) return;
@@ -461,10 +446,6 @@ export default function JournalCampaignDetailPage() {
     () => (campaign ? computeDecisionAccuracy(campaign, legs, tradeRecords, klines) : null),
     [campaign, legs, tradeRecords, klines],
   );
-  const sop = useMemo(
-    () => (campaign ? computeSopDeviation(campaign, legs, tradeRecords) : null),
-    [campaign, legs, tradeRecords],
-  );
   const chart = useMemo(
     () => (campaign ? buildChartArtifacts(campaign, legs, tradeRecords) : { markers: [], timeBoundPriceLines: [], verticalLines: [], events: [] }),
     [campaign, legs, tradeRecords],
@@ -534,7 +515,7 @@ export default function JournalCampaignDetailPage() {
     };
   }, [campaign, hasPureSopBranch, deviationHydrated, klines]);
 
-  if (loading || !campaign || !accuracy || !sop) {
+  if (loading || !campaign || !accuracy) {
     return (
       <div className="min-h-screen bg-background p-6 space-y-4">
         <Skeleton className="h-16 w-full bg-card" />
@@ -544,13 +525,17 @@ export default function JournalCampaignDetailPage() {
     );
   }
 
-  // 主图当前时间游标：聚焦到某事件时用 focusTime，否则停在战役结束（或当前模拟时刻）。
+  // 主图当前时间游标：聚焦到某事件时用 focusTime，否则停在「最后一条腿的平/开时间 + 缓冲」。
+  // 关键：ReplayKlineChart 会用 `line.time <= currentTime` 过滤竖线/标记，并以 currentTime 作为可见区右沿。
+  // 旧实现停在 effectiveClosedAt（战役 closed_at / 当前模拟时刻），回填战役里它未必落在 Legs 的真实 K 线段上，
+  // 会把晚于它的开/平竖线全过滤掉、并把右沿拉到无关行情。改为对齐 legTimeSpan 末端即可保证每条腿的竖线都渲染。
   // 必须放在上面的 loading guard 之后——此时 campaign 一定非空；放在 guard 之前会在
   // 首帧（campaign 仍为 null）就解引用 campaign.opened_at 直接崩溃、整页白屏。
-  const chartCurrentTime = focusTime ?? new Date(effectiveClosedAt ?? campaign.opened_at).getTime();
+  const chartCurrentTime = focusTime
+    ?? (legTimeSpan.endMs != null
+      ? legTimeSpan.endMs + CAMPAIGN_EDGE_PAD_MS
+      : new Date(effectiveClosedAt ?? campaign.opened_at).getTime());
 
-  const totalPlannedMaxLoss = legs.reduce((sum: number, leg: TradeJournal) => sum + (leg.pre_max_loss_usdt ?? 0), 0);
-  const peakRMultiple = totalPlannedMaxLoss > 0 ? accuracy.campaign_max_profit_real / totalPlannedMaxLoss : null;
   const mainCount = legs.filter((leg: TradeJournal) => leg.leg_role === 'main_open' || leg.leg_role === 'reentry_main').length;
   const hedgeCount = legs.filter((leg: TradeJournal) => leg.leg_role?.startsWith('hedge_')).length;
   const tpCount = legs.filter((leg: TradeJournal) => leg.leg_role === 'mirror_tp').length;
@@ -746,7 +731,7 @@ export default function JournalCampaignDetailPage() {
           </div>
         )}
 
-        <section className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <section className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div className="bg-card border border-border rounded p-4 space-y-2 text-[12px]">
             <div className="font-medium">战役元数据</div>
             <div>开始：{fmtMdHm(campaign.opened_at)}</div>
@@ -778,22 +763,6 @@ export default function JournalCampaignDetailPage() {
             <div>盈利捕获率：{accuracy.profit_capture_ratio.toFixed(1)}%</div>
           </div>
 
-          <div className="bg-card border border-border rounded p-4 space-y-2 text-[12px]">
-            <div className="font-medium">R 倍数</div>
-            <div className={`font-mono text-[20px] ${pnlColor(campaign.final_r_multiple)}`}>最终 R̄：{campaign.final_r_multiple?.toFixed(2) ?? '—'}</div>
-            <div className={`font-mono ${pnlColor(peakRMultiple)}`}>峰值可达 R̄：{peakRMultiple != null ? peakRMultiple.toFixed(2) : '—'}</div>
-          </div>
-
-          <button
-            type="button"
-            onClick={() => sopRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
-            className="bg-card border border-border rounded p-4 text-left hover:bg-accent transition-colors"
-          >
-            <div className="font-medium text-[12px] mb-2">SOP 偏离度</div>
-            <div className="font-mono text-[28px]">{sop.score ?? '—'}/100</div>
-            <div className={`inline-flex mt-2 px-2 py-0.5 rounded text-[11px] ${gradeClass(sop.grade)}`}>{sop.grade ?? '—'}</div>
-            <div className="text-[10px] text-muted-foreground mt-2">查看下方详细 breakdown</div>
-          </button>
         </section>
 
         <section className="grid grid-cols-1 xl:grid-cols-[1fr_420px] gap-4">
@@ -910,23 +879,6 @@ export default function JournalCampaignDetailPage() {
                 ))}
               </div>
               <div className="flex-1" />
-              <div className="flex flex-wrap items-center gap-1">
-                <Button variant="ghost" size="sm" className="h-7 text-[10px]" onClick={() => setFocusTime(new Date(campaign.opened_at).getTime())}>→ 战役开始</Button>
-                {states.map((segment: typeof states[number]) => (
-                  <Button
-                    key={`${segment.state}-${segment.start_time}`}
-                    variant="ghost"
-                    size="sm"
-                    className="h-7 text-[10px]"
-                    onClick={() => {
-                      setFocusTime(new Date(segment.triggering_event?.timestamp ?? segment.start_time).getTime());
-                    }}
-                  >
-                    → {segment.state_label}
-                  </Button>
-                ))}
-                <Button variant="ghost" size="sm" className="h-7 text-[10px]" onClick={() => setFocusTime(new Date(effectiveClosedAt ?? campaign.opened_at).getTime())}>→ 战役结束</Button>
-              </div>
             </div>
             <div className="h-[480px] border border-border rounded overflow-hidden">
               {klinesLoading ? (
@@ -949,6 +901,7 @@ export default function JournalCampaignDetailPage() {
                   timeBoundPriceLines={displayPriceLines}
                   verticalLines={displayVerticalLines}
                   historyCandles={1440}
+                  timezone="UTC"
                 />
               )}
             </div>
@@ -968,37 +921,12 @@ export default function JournalCampaignDetailPage() {
           </div>
         </section>
 
-        <section className="grid grid-cols-1 xl:grid-cols-[1fr_420px] gap-4">
-          <div className="space-y-3">
-            <div className="flex items-center gap-2 text-[13px] font-medium">
-              <Layers className="w-4 h-4 text-muted-foreground" />
-              Legs 列表
-            </div>
-            <CampaignLegsList legs={legs} tradeRecords={tradeRecords} onDetach={setDetachTarget} />
-          </div>
-          <div className="space-y-3">
-            <div className="flex items-center gap-2 text-[13px] font-medium">
-              <Target className="w-4 h-4 text-muted-foreground" />
-              决策准确性
-            </div>
-            <DecisionAccuracyPanel result={accuracy} />
-          </div>
-        </section>
-
-        <section ref={sopRef} className="space-y-3">
+        <section className="space-y-3">
           <div className="flex items-center gap-2 text-[13px] font-medium">
-            <Flag className="w-4 h-4 text-muted-foreground" />
-            SOP 偏离度评分
+            <Layers className="w-4 h-4 text-muted-foreground" />
+            Legs 列表
           </div>
-          <SopDeviationCard
-            result={sop}
-            active={campaign.status === 'active'}
-            historicalWarning={retroactiveLegCount > 0}
-            onJumpToEvent={(eventIds) => {
-              const event = chart.events.find((item: typeof chart.events[number]) => eventIds.includes(item.id));
-              if (event) setFocusTime(new Date(event.timestamp).getTime());
-            }}
-          />
+          <CampaignLegsList legs={legs} tradeRecords={tradeRecords} onDetach={setDetachTarget} />
         </section>
 
         <section className="bg-card border border-border rounded p-6 mb-6 space-y-4">
@@ -1008,7 +936,7 @@ export default function JournalCampaignDetailPage() {
               反事实战役
             </div>
             <div className="text-[14px] text-foreground">
-              如果你严格按 SOP 执行这场战役，会发生什么？反事实战役用真实市场数据 + 标准 SOP 参数跑一遍，让 SOP 偏离度评分变成可折算的 USDT 代价。
+              如果你严格按 SOP 执行这场战役，会发生什么？反事实战役用真实市场数据 + 标准 SOP 参数跑一遍，把偏离代价折算成 USDT。
             </div>
           </div>
 

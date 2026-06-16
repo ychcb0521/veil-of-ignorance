@@ -13,6 +13,8 @@ interface Props {
   timeBoundPriceLines?: TimeBoundPriceLine[];
   verticalLines?: VerticalLine[];
   historyCandles?: number;
+  /** 透传给主图的时区；不传则沿用 CandlestickChart 默认（Asia/Shanghai）。 */
+  timezone?: string;
 }
 
 function findCursorIndex(klines: KlineData[], currentTime: number) {
@@ -53,6 +55,7 @@ export function ReplayKlineChart({
   timeBoundPriceLines = [],
   verticalLines = [],
   historyCandles = 720,
+  timezone,
 }: Props) {
   const cursorIdx = useMemo(() => findCursorIndex(klines, currentTime), [klines, currentTime]);
 
@@ -115,6 +118,7 @@ export function ReplayKlineChart({
       quantityPrecision={3}
       analysisMode
       analysisAnnotations={annotations}
+      timezone={timezone}
     />
   );
 }
