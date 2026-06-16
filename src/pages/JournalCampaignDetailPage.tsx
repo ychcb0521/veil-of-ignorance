@@ -412,7 +412,7 @@ export default function JournalCampaignDetailPage() {
     return campaign.closed_at ?? new Date(getEffectiveTime(campaign.symbol)).toISOString();
   }, [campaign, getEffectiveTime]);
 
-  const { klines, loading: klinesLoading } = useCampaignKlines(
+  const { klines, loading: klinesLoading, error: klinesError, reload: reloadKlines } = useCampaignKlines(
     campaign?.symbol ?? '',
     campaign?.opened_at ?? new Date().toISOString(),
     effectiveClosedAt,
@@ -459,7 +459,6 @@ export default function JournalCampaignDetailPage() {
     () => (campaign ? shouldSuggestCampaignEnd(campaign, legs, tradeRecords, pendingOrders, getEffectiveTime(campaign.symbol)) : false),
     [campaign, legs, tradeRecords, pendingOrders, getEffectiveTime],
   );
-  const chartCurrentTime = focusTime ?? new Date(effectiveClosedAt ?? campaign.opened_at).getTime();
   const pureSopDefaults = useMemo(
     () => (campaign ? buildDefaultWhatIfParams(campaign, legs) : null),
     [campaign, legs],
@@ -510,6 +509,11 @@ export default function JournalCampaignDetailPage() {
       </div>
     );
   }
+
+  // 主图当前时间游标：聚焦到某事件时用 focusTime，否则停在战役结束（或当前模拟时刻）。
+  // 必须放在上面的 loading guard 之后——此时 campaign 一定非空；放在 guard 之前会在
+  // 首帧（campaign 仍为 null）就解引用 campaign.opened_at 直接崩溃、整页白屏。
+  const chartCurrentTime = focusTime ?? new Date(effectiveClosedAt ?? campaign.opened_at).getTime();
 
   const totalPlannedMaxLoss = legs.reduce((sum: number, leg: TradeJournal) => sum + (leg.pre_max_loss_usdt ?? 0), 0);
   const peakRMultiple = totalPlannedMaxLoss > 0 ? accuracy.campaign_max_profit_real / totalPlannedMaxLoss : null;
@@ -893,6 +897,14 @@ export default function JournalCampaignDetailPage() {
             <div className="h-[480px] border border-border rounded overflow-hidden">
               {klinesLoading ? (
                 <div className="h-full flex items-center justify-center text-[12px] text-muted-foreground">加载 K 线…</div>
+              ) : klinesError ? (
+                <div className="h-full flex flex-col items-center justify-center gap-2 text-[12px] text-[#F6465D]">
+                  <div>K 线加载失败：{klinesError}</div>
+                  <div className="text-[11px] text-muted-foreground">可能是网络或交易所接口限制，并非战役数据本身的问题。</div>
+                  <Button variant="outline" size="sm" className="h-7 text-[11px]" onClick={reloadKlines}>重试</Button>
+                </div>
+              ) : klines.length === 0 ? (
+                <div className="h-full flex items-center justify-center text-[12px] text-muted-foreground">该时间段暂无 K 线数据</div>
               ) : (
                 <ReplayKlineChart
                   klines={klines}
