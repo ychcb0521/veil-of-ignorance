@@ -324,6 +324,13 @@ export function PostTradeReviewSheet({
   const handleSave = async () => {
     if (!canSave) return;
     setSaving(true);
+    // 在保存期间临时监听 schema drift 事件——只关心本次保存触发的，避免误捕历史的。
+    let drifted: string[] | null = null;
+    const onDrift = (ev: Event) => {
+      const detail = (ev as CustomEvent<{ droppedColumns: string[]; scope: string }>).detail;
+      if (detail?.scope === 'finalize') drifted = detail.droppedColumns;
+    };
+    window.addEventListener('journal:schemaDrift', onDrift);
     try {
       const updated = await finalizeJournalReview(journal.id, {
         post_outcome: outcome,
@@ -355,12 +362,19 @@ export function PostTradeReviewSheet({
         post_emo_next_time_plan: emoNextTimePlan.trim(),
       });
       toast.success('已保存平仓评价');
+      if (drifted && drifted.length > 0) {
+        toast.warning(
+          `保存完成，但远程数据库缺 ${drifted.length} 列（如 ${drifted.slice(0, 3).join('、')}…），这些字段未能落库。`,
+          { description: '请联系管理员跑 supabase/migrations 里最新的 safety net 迁移，否则错题集汇总会缺数据。', duration: 10000 },
+        );
+      }
       window.dispatchEvent(new CustomEvent('journal:reviewed', { detail: { journalId: journal.id } }));
       onReviewed?.(updated);
       onOpenChange(false);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : String(e));
     } finally {
+      window.removeEventListener('journal:schemaDrift', onDrift);
       setSaving(false);
     }
   };

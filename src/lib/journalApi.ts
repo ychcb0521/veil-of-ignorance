@@ -318,7 +318,7 @@ function isMissingSocialFeatureError(error: { code?: string; message?: string } 
  * 核心列（user_id/symbol/direction/pre_entry_reason/pre_mental_state/post_outcome…）
  * 不在此模式内，永不会被误判或误删。仅用 i 标志（无 g），test() 无状态、可安全复用。
  */
-const OPTIONAL_COLUMN_PATTERN = /trade_principles|pain_log_entries|campaign_id|leg_role|leg_sequence|order_kind|pre_thesis_why_right|pre_premortem_failure_reason|pre_falsification_signal|pre_confidence_basis|pre_odds_structure|pre_odds_structure_source|pre_odds_structure_premortem|pre_odds_structure_breakdown_signals|pre_account_equity_usdt|pre_opportunity_cost_worth|pre_cheap_opportunity|pre_edge_source|pre_market_regime|pre_entry_stage|pre_stop_quality|pre_chase_after_close|pre_mortem_text|pre_positive_expectancy|pre_invalidation_condition|pre_calibration_win_pct|pre_confidence_interval_|pre_calibration_reference_class|pre_calibration_competence_basis|pre_calibration_update_signal|pre_dataset_split|pre_lollapalooza_score|pre_bankruptcy_estimate|pre_info_|pre_opponent_statement|pre_pain_tags|pre_cognitive_bias_tags|pre_triggered_principle_ids|pre_triggered_rule_ids|pre_executor_self|pre_designer_self|journal_kind|no_trade_reason|no_trade_would_be_entry_price|no_trade_direction|exit_falsification_status|exit_falsification_note|post_result_summary|post_decision_quality|post_struggle_level|post_small_position_drag|post_missed_high_odds_state|post_path_|post_trade_agency_score|post_positive_expectancy_review|post_premortem_review|post_invalidation_review|post_five_step|post_opponent_was_right|post_proximate_cause|post_root_cause|post_design_intervention|post_intervention_type|post_execution_monitor|post_real_close_time|evolution_level|principle_id|hedge_type|hedge_boundary_price|hedge_boundary_basis|hedge_boundary_stance|hedge_lock_profit_pct|hedge_resolution_up|hedge_resolution_down|hedge_down_if_chop|hedge_down_if_trend|hedge_down_if_rebound|hedge_necessity_pct|hedge_safety_strength|hedge_safety_regularity|hedge_risk_magnitude|hedge_conviction_pct|hedge_friction_cost|hedge_order_method|hedge_worth_it/i;
+const OPTIONAL_COLUMN_PATTERN = /trade_principles|pain_log_entries|campaign_id|leg_role|leg_sequence|order_kind|pre_thesis_why_right|pre_premortem_failure_reason|pre_falsification_signal|pre_confidence_basis|pre_odds_structure|pre_odds_structure_source|pre_odds_structure_premortem|pre_odds_structure_breakdown_signals|pre_account_equity_usdt|pre_opportunity_cost_worth|pre_cheap_opportunity|pre_edge_source|pre_market_regime|pre_entry_stage|pre_stop_quality|pre_chase_after_close|pre_mortem_text|pre_positive_expectancy|pre_invalidation_condition|pre_calibration_win_pct|pre_confidence_interval_|pre_calibration_reference_class|pre_calibration_competence_basis|pre_calibration_update_signal|pre_dataset_split|pre_lollapalooza_score|pre_bankruptcy_estimate|pre_info_|pre_opponent_statement|pre_pain_tags|pre_cognitive_bias_tags|pre_triggered_principle_ids|pre_triggered_rule_ids|pre_executor_self|pre_designer_self|pre_stop_doing_acknowledged_ids|pre_stop_doing_ad_hoc|journal_kind|no_trade_reason|no_trade_would_be_entry_price|no_trade_direction|exit_falsification_status|exit_falsification_note|post_result_summary|post_decision_quality|post_struggle_level|post_small_position_drag|post_missed_high_odds_state|post_path_|post_trade_agency_score|post_positive_expectancy_review|post_premortem_review|post_invalidation_review|post_five_step|post_opponent_was_right|post_proximate_cause|post_root_cause|post_design_intervention|post_intervention_type|post_execution_monitor|post_real_close_time|post_emo_|evolution_level|principle_id|hedge_type|hedge_boundary_price|hedge_boundary_basis|hedge_boundary_stance|hedge_lock_profit_pct|hedge_resolution_up|hedge_resolution_down|hedge_down_if_chop|hedge_down_if_trend|hedge_down_if_rebound|hedge_necessity_pct|hedge_safety_strength|hedge_safety_regularity|hedge_risk_magnitude|hedge_conviction_pct|hedge_friction_cost|hedge_order_method|hedge_worth_it/i;
 
 function isMissingDalioMetaLayerError(error: { code?: string; message?: string } | null): boolean {
   if (!error) return false;
@@ -366,8 +366,16 @@ export function isSchemaColumnMissingError(
     && missingSchemaColumn(error) != null;
 }
 
-/** 逐列剥离若干次仍缺列，即判定远程库「严重漂移」，转为一次性批量剥离，避免几十次往返。 */
-const BULK_STRIP_AFTER = 5;
+/**
+ * 逐列剥离若干次仍缺列，即判定远程库「严重漂移」，转为一次性批量剥离，避免几十次往返。
+ *
+ * 阈值放宽到 40：远程库可能缺 8 个 post_emo_* + 2 个 pre_stop_doing_* + 4 个 post_path_* + …
+ * 简单加加就 20+ 列，原 5 次太激进——会在用户刚漏跑 1 个迁移的常见场景下就触发 bulk strip，
+ * 把所有 OPTIONAL_COLUMN_PATTERN 命中的可选列一起剥光，结果连早就存在的核心字段
+ * （post_decision_quality 等）也被牵连，extra payload 几乎全空——这正是错题集汇总
+ * 全 0/N 的根因。放宽到 40 让单列剥离能覆盖绝大多数 drift 场景，仅在极端漂移时才退回批量。
+ */
+const BULK_STRIP_AFTER = 40;
 
 /**
  * 一次性剥掉 payload 里所有「可选/新增」列（列名命中 OPTIONAL_COLUMN_PATTERN）。
@@ -428,17 +436,18 @@ export function normalizeMainOrderLegacyCompleteness(
 async function updateTradeJournalWithSchemaFallback(
   journalId: string,
   payload: Record<string, unknown>,
-): Promise<{ data: unknown; error: { message: string; code?: string } | null }> {
+): Promise<{ data: unknown; error: { message: string; code?: string } | null; droppedColumns: string[] }> {
   let nextPayload = { ...payload };
   let lastData: unknown = null;
   let lastError: { message: string; code?: string } | null = null;
   let stripped = 0;
   let bulkStripped = false;
+  const droppedColumns: string[] = [];
   // 远程库可能缺几十列，逐列剥离次数必须足够覆盖；原来固定 30 会在严重漂移时提前耗尽。
   const maxAttempts = Object.keys(payload).length + 5;
 
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
-    if (Object.keys(nextPayload).length === 0) return { data: lastData, error: null };
+    if (Object.keys(nextPayload).length === 0) return { data: lastData, error: null, droppedColumns };
     const { data, error } = await supabase
       .from("trade_journals" as never)
       .update(nextPayload as never)
@@ -447,13 +456,21 @@ async function updateTradeJournalWithSchemaFallback(
       .single();
     lastData = data;
     lastError = error;
-    if (!error) return { data, error: null };
-    if (!isMissingDalioMetaLayerError(error) && !isSchemaColumnMissingError(error)) return { data, error };
+    if (!error) return { data, error: null, droppedColumns };
+    if (!isMissingDalioMetaLayerError(error) && !isSchemaColumnMissingError(error)) {
+      return { data, error, droppedColumns };
+    }
     const missing = missingSchemaColumn(error);
-    if (!missing || !(missing in nextPayload)) return { data, error };
+    if (!missing || !(missing in nextPayload)) return { data, error, droppedColumns };
     // 严重漂移：逐列剥到阈值仍缺列，一次性剥掉所有可选列（update 不需回填 pre_entry_reason，
     // 因为目标行已存在、旧列早已有值，强行回填反而会覆盖既有理由）。
     if (stripped >= BULK_STRIP_AFTER && !bulkStripped) {
+      // 记录哪些字段被一次性剥掉，方便 finalize 给用户清晰提示。
+      for (const key of Object.keys(nextPayload)) {
+        if (OPTIONAL_COLUMN_PATTERN.test(key) && !droppedColumns.includes(key)) {
+          droppedColumns.push(key);
+        }
+      }
       nextPayload = stripAllOptionalColumns(nextPayload);
       bulkStripped = true;
       continue;
@@ -461,10 +478,11 @@ async function updateTradeJournalWithSchemaFallback(
     const rest = { ...nextPayload };
     delete rest[missing];
     nextPayload = rest;
+    if (!droppedColumns.includes(missing)) droppedColumns.push(missing);
     stripped += 1;
   }
 
-  return { data: lastData, error: lastError };
+  return { data: lastData, error: lastError, droppedColumns };
 }
 
 /**
@@ -2467,6 +2485,15 @@ export async function updateJournalPostReview(
   if (Object.keys(extra).length === 0) return baseJournal;
 
   const extraResult = await updateTradeJournalWithSchemaFallback(id, extra);
+  const allDropped = [...baseResult.droppedColumns, ...extraResult.droppedColumns];
+  if (allDropped.length > 0) {
+    console.warn('[journalApi] 远程数据库缺以下列，本次复盘的对应字段未保存：', allDropped);
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('journal:schemaDrift', {
+        detail: { droppedColumns: allDropped, scope: 'review' },
+      }));
+    }
+  }
   if (extraResult.error) {
     if (!isMissingDalioMetaLayerError(extraResult.error)) {
       console.warn('[journalApi] 保存扩展复盘字段失败:', extraResult.error);
@@ -2758,6 +2785,16 @@ export async function finalizeJournalReview(
   if (Object.keys(extra).length === 0) return baseJournal;
 
   const extraResult = await updateTradeJournalWithSchemaFallback(journalId, extra);
+  const allDropped = [...baseResult.droppedColumns, ...extraResult.droppedColumns];
+  if (allDropped.length > 0) {
+    console.warn('[journalApi] 远程数据库缺以下列，本次评价的对应字段未保存：', allDropped);
+    // 通知 UI 弹明确警告——用户感受到「为什么我填的字段没出现在汇总里」
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('journal:schemaDrift', {
+        detail: { droppedColumns: allDropped, scope: 'finalize' },
+      }));
+    }
+  }
   if (extraResult.error) {
     if (!isMissingDalioMetaLayerError(extraResult.error)) {
       console.warn('[journalApi] 保存扩展平仓评价字段失败:', extraResult.error);
