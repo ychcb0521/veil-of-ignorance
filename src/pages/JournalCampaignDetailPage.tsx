@@ -929,6 +929,7 @@ export default function JournalCampaignDetailPage() {
                   timeBoundPriceLines={displayPriceLines}
                   verticalLines={displayVerticalLines}
                   fitAll
+                  showLastPriceLine={false}
                   viewportCenterTime={chartViewportCenterTime}
                   timezone={LOCAL_TIME_ZONE}
                 />

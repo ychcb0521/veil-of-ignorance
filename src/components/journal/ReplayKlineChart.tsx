@@ -20,6 +20,8 @@ interface Props {
   timezone?: string;
   /** 战役详情：显示全部 K 线并缩放到铺满视口，使图表可见区间 == Legs 起止区间。 */
   fitAll?: boolean;
+  /** 是否显示最新价水平线；战役截取盘面默认关闭，避免干扰复盘标注。 */
+  showLastPriceLine?: boolean;
 }
 
 function inferPricePrecision(values: number[]) {
@@ -47,6 +49,7 @@ export function ReplayKlineChart({
   viewportCenterTime = null,
   timezone,
   fitAll = false,
+  showLastPriceLine = true,
 }: Props) {
   const replayData = useMemo(() => {
     // 战役详情用 fitAll：直接渲染全部已拉取的 K 线（fetchRange 已把区间收敛到 Legs 两端 + 缓冲），
@@ -108,6 +111,7 @@ export function ReplayKlineChart({
       analysisAnnotations={annotations}
       analysisFocusTime={viewportCenterTime ?? currentTime}
       analysisFitAll={fitAll}
+      showLastPriceLine={showLastPriceLine}
       timezone={timezone}
     />
   );

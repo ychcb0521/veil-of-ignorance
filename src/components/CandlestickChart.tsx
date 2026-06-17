@@ -170,6 +170,8 @@ interface Props {
   analysisFocusTime?: number | null;
   /** Analysis surfaces only: zoom so the ENTIRE dataset fits the viewport width (campaign chart → visible range == full legs span). Overrides anchor centering. */
   analysisFitAll?: boolean;
+  /** Whether to show the chart engine's latest-price horizontal mark. Campaign review turns this off to keep the extracted board clean. */
+  showLastPriceLine?: boolean;
   /** K 线时间轴的显示时区（IANA 名）。默认 Asia/Shanghai，与主交易页一致；战役页用 UTC。 */
   timezone?: string;
 }
@@ -324,6 +326,27 @@ const LIGHT_STYLES = {
   separator: { color: "#EAECEF" },
 };
 
+function chartStylesForMode(theme: string | undefined, showLastPriceLine: boolean) {
+  const baseStyle = theme === "light" ? LIGHT_STYLES : DARK_STYLES;
+  return {
+    ...baseStyle,
+    candle: {
+      ...baseStyle.candle,
+      priceMark: {
+        ...baseStyle.candle.priceMark,
+        last: {
+          ...baseStyle.candle.priceMark.last,
+          show: showLastPriceLine,
+          line: {
+            ...baseStyle.candle.priceMark.last.line,
+            show: showLastPriceLine,
+          },
+        },
+      },
+    },
+  };
+}
+
 function CandlestickChartComponent({
   data,
   symbol,
@@ -343,6 +366,7 @@ function CandlestickChartComponent({
   analysisAnnotations,
   analysisFocusTime = null,
   analysisFitAll = false,
+  showLastPriceLine = true,
   timezone = "Asia/Shanghai",
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -434,7 +458,7 @@ function CandlestickChartComponent({
     registerCustomIndicators();
 
     const chart = init(containerRef.current, {
-      styles: theme === "light" ? LIGHT_STYLES : DARK_STYLES,
+      styles: chartStylesForMode(theme, showLastPriceLine),
       timezone,
     });
 
@@ -513,7 +537,7 @@ function CandlestickChartComponent({
     const chart = chartRef.current;
     if (!chart) return;
 
-    const baseStyle = theme === "light" ? LIGHT_STYLES : DARK_STYLES;
+    const baseStyle = chartStylesForMode(theme, showLastPriceLine);
 
     // Inject custom tooltip formatter to use shorter labels (prevent overlap) and add Price Change Rate
     const styles = {
@@ -554,7 +578,7 @@ function CandlestickChartComponent({
     };
 
     chart.setStyles(styles);
-  }, [theme, pricePrecision]);
+  }, [theme, pricePrecision, showLastPriceLine]);
 
   // ============================================================
   // Price/Volume precision
