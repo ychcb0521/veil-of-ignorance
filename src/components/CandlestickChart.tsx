@@ -812,7 +812,7 @@ function CandlestickChartComponent({
     const visibleLow = Math.min(...data.map(item => item.low));
     const visibleHigh = Math.max(...data.map(item => item.high));
     const visibleRange = Math.max(visibleHigh - visibleLow, Math.abs(visibleHigh) * 0.0001, 1);
-    const verticalLabelValue = visibleLow + visibleRange * 0.035;
+    const verticalLabelValue = visibleLow + visibleRange * 0.025;
 
     for (const line of analysisAnnotations.priceLines ?? []) {
       if (!Number.isFinite(line.price)) continue;
@@ -923,7 +923,7 @@ function CandlestickChartComponent({
         styles: {
           line: {
             style: (vertical.dashed ?? true) ? LineType.Dashed : LineType.Solid,
-            dashedValue: [4, 4],
+            dashedValue: [3, 3],
             size: vertical.width ?? 1,
             color: vertical.color,
           },
@@ -940,9 +940,9 @@ function CandlestickChartComponent({
           styles: {
             text: {
               color: vertical.labelColor ?? vertical.color,
-              size: 8,
-              borderColor: "rgba(132, 142, 156, 0.18)",
-              backgroundColor: "rgba(11, 14, 17, 0.36)",
+              size: 7,
+              borderColor: "rgba(132, 142, 156, 0.14)",
+              backgroundColor: "rgba(11, 14, 17, 0.26)",
               borderRadius: 2,
               paddingLeft: 2,
               paddingRight: 2,

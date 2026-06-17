@@ -36,7 +36,7 @@ import {
   runAndPersistDeviationCosts,
   runAndPersistPureSop,
 } from '@/lib/journalApi';
-import { STRATEGY_TEMPLATES } from '@/lib/strategyTemplates';
+import { LEG_ROLE_LABELS, STRATEGY_TEMPLATES } from '@/lib/strategyTemplates';
 import type {
   CampaignCounterfactual,
   CampaignCounterfactualParams,
@@ -126,12 +126,22 @@ function buildDefaultWhatIfParams(campaign: TradeCampaign, legs: TradeJournal[])
 }
 
 // 开单/平单竖线配色：多单蓝、空单橘（与持仓方向绑定，独立于 leg_role 的标记色）。
-const LEG_LONG_LINE_COLOR = 'rgba(43,128,255,0.38)';
-const LEG_SHORT_LINE_COLOR = 'rgba(247,147,26,0.38)';
-const LEG_LONG_LABEL_COLOR = 'rgba(43,128,255,0.78)';
-const LEG_SHORT_LABEL_COLOR = 'rgba(247,147,26,0.78)';
-const CAMPAIGN_VERTICAL_LINE_WIDTH = 0.5;
-const LEG_VERTICAL_LINE_WIDTH = 0.65;
+// 这些线只负责定位，不抢 K 线主体。
+const LEG_LONG_LINE_COLOR = 'rgba(43,128,255,0.24)';
+const LEG_SHORT_LINE_COLOR = 'rgba(247,147,26,0.24)';
+const LEG_LONG_LABEL_COLOR = 'rgba(43,128,255,0.66)';
+const LEG_SHORT_LABEL_COLOR = 'rgba(247,147,26,0.66)';
+const CAMPAIGN_BOUNDARY_LINE_COLOR = 'rgba(132,142,156,0.12)';
+const CAMPAIGN_VERTICAL_LINE_WIDTH = 0.3;
+const LEG_VERTICAL_LINE_WIDTH = 0.45;
+
+function legRoleLabel(role: TradeJournal['leg_role']): string {
+  return role ? LEG_ROLE_LABELS[role] : '未归类';
+}
+
+function legRoleMarkerLabel(role: TradeJournal['leg_role']): string {
+  return legRoleLabel(role).replace(/开仓$/, '');
+}
 
 function buildChartArtifacts(
   campaign: TradeCampaign,
@@ -146,30 +156,16 @@ function buildChartArtifacts(
 
   verticalLines.push({
     time: new Date(campaign.opened_at).getTime(),
-    color: 'rgba(255,255,255,0.45)',
+    color: CAMPAIGN_BOUNDARY_LINE_COLOR,
     width: CAMPAIGN_VERTICAL_LINE_WIDTH,
     z: 1,
   });
   if (campaign.closed_at) {
     verticalLines.push({
       time: new Date(campaign.closed_at).getTime(),
-      color: 'rgba(255,255,255,0.45)',
+      color: CAMPAIGN_BOUNDARY_LINE_COLOR,
       width: CAMPAIGN_VERTICAL_LINE_WIDTH,
       z: 1,
-    });
-  }
-
-  const stateEvents = events.filter(event =>
-    event.event_type === 'mirror_tp_triggered' ||
-    event.event_type === 'hedge_triggered' ||
-    event.event_type === 'main_fully_closed',
-  );
-  for (const event of stateEvents) {
-    verticalLines.push({
-      time: new Date(event.timestamp).getTime(),
-      color: 'rgba(240,185,11,0.42)',
-      width: LEG_VERTICAL_LINE_WIDTH,
-      z: 2,
     });
   }
 
@@ -212,7 +208,7 @@ function buildChartArtifacts(
       width: LEG_VERTICAL_LINE_WIDTH,
       z: 3,
       dashed: false,
-      label: `${label}开`,
+      label: `${legRoleMarkerLabel(leg.leg_role)}·开仓`,
       labelColor: legLabelColor,
     });
     if (record) {
@@ -222,7 +218,7 @@ function buildChartArtifacts(
         width: LEG_VERTICAL_LINE_WIDTH,
         z: 3,
         dashed: true,
-        label: `${label}平`,
+        label: `${legRoleMarkerLabel(leg.leg_role)}·平仓`,
         labelColor: legLabelColor,
       });
     }
