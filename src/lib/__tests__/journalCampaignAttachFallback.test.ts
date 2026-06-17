@@ -281,4 +281,27 @@ describe('batchAttachToCampaign schema fallback', () => {
       ]),
     );
   });
+
+  it('does not block mixed historical batches when an executed main journal is assigned as a rolling hedge', async () => {
+    journalUpdateError = null;
+    campaignUpdateError = null;
+    journals = [
+      baseJournal(1, {
+        source: 'live',
+        order_kind: 'main',
+        trade_record_id: 'record-1',
+      }),
+    ];
+
+    await expect(batchAttachToCampaign('campaign-1', [
+      {
+        journalId: 'journal-1',
+        legRole: 'hedge_rolling',
+        legSequence: 1,
+        attachNote: 'classified retroactively',
+      },
+    ])).resolves.toBeUndefined();
+
+    expect(campaignUpdates.some(update => Array.isArray(update.actual_evolution))).toBe(true);
+  });
 });

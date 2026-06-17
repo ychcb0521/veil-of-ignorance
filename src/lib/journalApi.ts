@@ -176,6 +176,7 @@ type CognitiveAssetsRow = {
 const COGNITIVE_ASSETS_STORAGE_KEY = 'cognitive_assets_doc';
 const TRADE_CAMPAIGNS_STORAGE_KEY = 'trade_campaigns';
 const TRADE_CAMPAIGN_PREFS_STORAGE_KEY = 'trade_campaign_preferences';
+const ACCOUNT_FOLLOWS_STORAGE_KEY = 'account_follows';
 
 function getInitialCognitiveAssetsDoc(): CognitiveAssetsDoc {
   return deepClone(INITIAL_COGNITIVE_ASSETS);
@@ -347,6 +348,68 @@ function isMissingSocialFeatureError(error: { code?: string; message?: string } 
   return error.code === 'PGRST205'
     || error.code === '42P01'
     || (/account_follows|trade_campaign_comments/i.test(message) && /schema cache|could not find|does not exist|column/i.test(message));
+}
+
+function normalizeLocalFollows(raw: unknown): AccountFollow[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .filter((item): item is Partial<AccountFollow> => (
+      isRecord(item)
+      && typeof item.follower_id === 'string'
+      && typeof item.followee_id === 'string'
+    ))
+    .map(item => ({
+      id: typeof item.id === 'string' && item.id ? item.id : `local-follow-${item.follower_id}-${item.followee_id}`,
+      follower_id: item.follower_id as string,
+      followee_id: item.followee_id as string,
+      created_at: typeof item.created_at === 'string' && item.created_at ? item.created_at : new Date().toISOString(),
+    }));
+}
+
+function readLocalFollows(followerId: string): AccountFollow[] {
+  return normalizeLocalFollows(readUserScopedStorage<unknown>(followerId, ACCOUNT_FOLLOWS_STORAGE_KEY, []));
+}
+
+function writeLocalFollows(followerId: string, follows: AccountFollow[]): void {
+  writeUserScopedStorage(followerId, ACCOUNT_FOLLOWS_STORAGE_KEY, follows);
+}
+
+function makeLocalFollow(followerId: string, followeeId: string): AccountFollow {
+  return {
+    id: `local-follow-${followerId}-${followeeId}`,
+    follower_id: followerId,
+    followee_id: followeeId,
+    created_at: new Date().toISOString(),
+  };
+}
+
+function upsertLocalFollow(follow: AccountFollow): AccountFollow {
+  const rows = readLocalFollows(follow.follower_id);
+  const existing = rows.find(item => item.followee_id === follow.followee_id);
+  const nextFollow = existing ? { ...existing, ...follow, created_at: existing.created_at } : follow;
+  const next = existing
+    ? rows.map(item => item.followee_id === follow.followee_id ? nextFollow : item)
+    : [nextFollow, ...rows];
+  writeLocalFollows(follow.follower_id, next);
+  return nextFollow;
+}
+
+function removeLocalFollow(followerId: string, followeeId: string): void {
+  writeLocalFollows(followerId, readLocalFollows(followerId).filter(item => item.followee_id !== followeeId));
+}
+
+function hasLocalFollow(followerId: string, followeeId: string): boolean {
+  return readLocalFollows(followerId).some(item => item.followee_id === followeeId);
+}
+
+function mergeFollows(primary: AccountFollow[], fallback: AccountFollow[]): AccountFollow[] {
+  const seen = new Set<string>();
+  return [...primary, ...fallback].filter(item => {
+    const key = `${item.follower_id}:${item.followee_id}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 /**
@@ -1607,14 +1670,22 @@ export async function validateClassification(
   const occupied = selected.filter(item => item.journal.campaign_id != null);
   if (occupied.length > 0) errors.push('存在已归属到战役的 journal，请先解除归属');
 
-  if (input.strategyTemplate === 'main_dual_hedge_mirror_tp' && !selected.some(item => item.legRole === 'main_open')) {
+  if (
+    input.strategyTemplate === 'main_dual_hedge_mirror_tp' &&
+    !input.targetCampaignId &&
+    !selected.some(item => item.legRole === 'main_open')
+  ) {
     errors.push('main_dual_hedge_mirror_tp 模板必须包含 main_open 角色');
   }
 
   for (const item of selected) {
     const allowedKinds = LEG_ROLE_ORDER_KIND_COMPATIBILITY[item.legRole];
     if (item.journal.source !== 'retroactive_from_record' && !allowedKinds.includes(item.journal.order_kind)) {
-      errors.push(`角色 ${item.legRole} 与 journal ${item.journal.id} 的 order_kind 不兼容`);
+      if (item.journal.trade_record_id) {
+        warnings.push(`角色 ${item.legRole} 与 journal ${item.journal.id} 的原始订单类型不同，请确认这是按战役语义归类`);
+      } else {
+        errors.push(`角色 ${item.legRole} 与 journal ${item.journal.id} 的 order_kind 不兼容`);
+      }
     }
   }
 
@@ -2217,7 +2288,12 @@ export async function followAccount(followeeId: string): Promise<AccountFollow> 
     .upsert(payload as never, { onConflict: 'follower_id,followee_id' })
     .select()
     .single();
-  return wrap('关注账户', error, data as unknown as AccountFollow);
+  if (error && isMissingSocialFeatureError(error)) {
+    return upsertLocalFollow(makeLocalFollow(followerId, followeeId));
+  }
+  const row = wrap('关注账户', error, data as unknown as AccountFollow);
+  upsertLocalFollow(row);
+  return row;
 }
 
 export async function unfollowAccount(followeeId: string): Promise<void> {
@@ -2228,6 +2304,7 @@ export async function unfollowAccount(followeeId: string): Promise<void> {
     .eq('follower_id', followerId)
     .eq('followee_id', followeeId);
   if (error && !isMissingSocialFeatureError(error)) throw new Error(`取消关注失败：${error.message}`);
+  removeLocalFollow(followerId, followeeId);
 }
 
 export async function listMyFollows(): Promise<AccountFollow[]> {
@@ -2237,8 +2314,8 @@ export async function listMyFollows(): Promise<AccountFollow[]> {
     .select('*')
     .eq('follower_id', userId)
     .order('created_at', { ascending: false });
-  if (error && isMissingSocialFeatureError(error)) return [];
-  return wrap('加载关注列表', error, data as unknown as AccountFollow[]);
+  if (error && isMissingSocialFeatureError(error)) return readLocalFollows(userId);
+  return mergeFollows(wrap('加载关注列表', error, data as unknown as AccountFollow[]), readLocalFollows(userId));
 }
 
 export async function hasMutualFollow(userId: string, otherUserId: string): Promise<boolean> {
@@ -2261,11 +2338,12 @@ export async function hasMutualFollow(userId: string, otherUserId: string): Prom
     (outbound.error && isMissingSocialFeatureError(outbound.error)) ||
     (inbound.error && isMissingSocialFeatureError(inbound.error))
   ) {
-    return false;
+    return hasLocalFollow(userId, otherUserId) && hasLocalFollow(otherUserId, userId);
   }
   if (outbound.error && outbound.error.code !== 'PGRST116') throw new Error(`检查互关失败：${outbound.error.message}`);
   if (inbound.error && inbound.error.code !== 'PGRST116') throw new Error(`检查互关失败：${inbound.error.message}`);
-  return !!outbound.data && !!inbound.data;
+  return (!!outbound.data || hasLocalFollow(userId, otherUserId))
+    && (!!inbound.data || hasLocalFollow(otherUserId, userId));
 }
 
 export async function listCampaignComments(campaignId: string): Promise<CampaignComment[]> {
