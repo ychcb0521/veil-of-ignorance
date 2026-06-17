@@ -18,6 +18,8 @@ interface Props {
   viewportCenterTime?: number | null;
   /** 透传给主图的时区；不传则沿用 CandlestickChart 默认（Asia/Shanghai）。 */
   timezone?: string;
+  /** 战役详情：显示全部 K 线并缩放到铺满视口，使图表可见区间 == Legs 起止区间。 */
+  fitAll?: boolean;
 }
 
 function inferPricePrecision(values: number[]) {
@@ -44,10 +46,14 @@ export function ReplayKlineChart({
   historyCandles = 720,
   viewportCenterTime = null,
   timezone,
+  fitAll = false,
 }: Props) {
   const replayData = useMemo(() => {
+    // 战役详情用 fitAll：直接渲染全部已拉取的 K 线（fetchRange 已把区间收敛到 Legs 两端 + 缓冲），
+    // 由主图缩放到铺满视口；竖线/标记仍由下方 annotations 按 currentTime 过滤。
+    if (fitAll) return klines;
     return sliceReplayKlines(klines, currentTime, historyCandles, viewportCenterTime);
-  }, [klines, currentTime, historyCandles, viewportCenterTime]);
+  }, [fitAll, klines, currentTime, historyCandles, viewportCenterTime]);
 
   const pricePrecision = useMemo(() => inferPricePrecision([
     ...replayData.flatMap(item => [item.open, item.high, item.low, item.close]),
@@ -101,6 +107,7 @@ export function ReplayKlineChart({
       analysisMode
       analysisAnnotations={annotations}
       analysisFocusTime={viewportCenterTime ?? currentTime}
+      analysisFitAll={fitAll}
       timezone={timezone}
     />
   );

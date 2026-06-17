@@ -11,7 +11,6 @@ import { Textarea } from '@/components/ui/textarea';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { type ChartMarker, type TimeBoundPriceLine, type VerticalLine } from '@/components/journal/ReplayCandleChart';
 import { ReplayKlineChart } from '@/components/journal/ReplayKlineChart';
-import { StateMachineTimeline } from '@/components/journal/StateMachineTimeline';
 import { CampaignLegsList } from '@/components/journal/CampaignLegsList';
 import { EndCampaignDialog } from '@/components/journal/EndCampaignDialog';
 import { useAuth } from '@/contexts/AuthContext';
@@ -22,7 +21,6 @@ import { buildPureSopParams } from '@/lib/campaignSimulationEngine';
 import {
   buildCampaignEventStream,
   computeDecisionAccuracy,
-  deriveCampaignStates,
   shouldSuggestCampaignEnd,
 } from '@/lib/campaignAnalysis';
 import {
@@ -469,10 +467,6 @@ export default function JournalCampaignDetailPage() {
     legTimeSpan.endMs,
   );
 
-  const states = useMemo(
-    () => (campaign ? deriveCampaignStates(campaign, legs, tradeRecords) : []),
-    [campaign, legs, tradeRecords],
-  );
   const accuracy = useMemo(
     () => (campaign ? computeDecisionAccuracy(campaign, legs, tradeRecords, klines) : null),
     [campaign, legs, tradeRecords, klines],
@@ -937,7 +931,7 @@ export default function JournalCampaignDetailPage() {
                   markers={displayMarkers}
                   timeBoundPriceLines={displayPriceLines}
                   verticalLines={displayVerticalLines}
-                  historyCandles={1440}
+                  fitAll
                   viewportCenterTime={chartViewportCenterTime}
                   timezone="UTC"
                 />
@@ -948,14 +942,6 @@ export default function JournalCampaignDetailPage() {
                 实际轨迹（标准色）vs <span className="text-[#B080FF]">{selectedCounterfactual.label}</span>（紫色）
               </div>
             )}
-            <div className="mt-3">
-              <StateMachineTimeline
-                segments={states}
-                secondarySegments={selectedCounterfactual?.result.state_segments}
-                secondaryLabel={selectedCounterfactual?.label}
-                onJumpTo={setFocusTime}
-              />
-            </div>
           </div>
         </section>
 
