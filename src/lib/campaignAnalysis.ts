@@ -1,4 +1,5 @@
 import type { KlineData } from '@/hooks/useBinanceData';
+import { MAIN_ADD_ROLES } from '@/lib/strategyTemplates';
 import type { CampaignEvent, LegRole, TradeCampaign, TradeJournal } from '@/types/journal';
 import type { PendingOrder, TradeRecord } from '@/types/trading';
 
@@ -55,7 +56,7 @@ export interface SopDeviationResult {
 }
 
 const HEDGE_ROLES: LegRole[] = ['hedge_initial_a', 'hedge_initial_b', 'hedge_rolling'];
-const MAIN_ROLES: LegRole[] = ['main_open', 'reentry_main'];
+const MAIN_ROLES: LegRole[] = ['main_open', ...MAIN_ADD_ROLES, 'reentry_main'];
 const EPSILON = 0.0001;
 
 const toMs = (value: string) => new Date(value).getTime();
@@ -662,6 +663,12 @@ export function shouldSuggestCampaignEnd(
 
 const LEGEND: Record<Exclude<LegRole, 'standalone'>, string> = {
   main_open: '主力开仓',
+  main_add_1: '加仓1',
+  main_add_2: '加仓2',
+  main_add_3: '加仓3',
+  main_add_4: '加仓4',
+  main_add_5: '加仓5',
+  main_add_6: '加仓6',
   hedge_initial_a: '初始对冲 A',
   hedge_initial_b: '初始对冲 B',
   hedge_rolling: '滚动对冲',

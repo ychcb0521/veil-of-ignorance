@@ -38,6 +38,12 @@ const DIRECTION_STYLES: Record<string, string> = {
 
 const LEG_ABBR: Record<LegRole, string> = {
   main_open: 'M',
+  main_add_1: 'A1',
+  main_add_2: 'A2',
+  main_add_3: 'A3',
+  main_add_4: 'A4',
+  main_add_5: 'A5',
+  main_add_6: 'A6',
   hedge_initial_a: 'Ha',
   hedge_initial_b: 'Hb',
   hedge_rolling: 'R',
@@ -49,6 +55,12 @@ const LEG_ABBR: Record<LegRole, string> = {
 
 const LEG_CHIP_CLASS: Record<LegRole, string> = {
   main_open: 'bg-[#0ECB81]/10 text-[#0ECB81]',
+  main_add_1: 'bg-[#0ECB81]/10 text-[#0ECB81]',
+  main_add_2: 'bg-[#0ECB81]/10 text-[#0ECB81]',
+  main_add_3: 'bg-[#0ECB81]/10 text-[#0ECB81]',
+  main_add_4: 'bg-[#0ECB81]/10 text-[#0ECB81]',
+  main_add_5: 'bg-[#0ECB81]/10 text-[#0ECB81]',
+  main_add_6: 'bg-[#0ECB81]/10 text-[#0ECB81]',
   hedge_initial_a: 'bg-[#F6465D]/10 text-[#F6465D]',
   hedge_initial_b: 'bg-[#F6465D]/10 text-[#F6465D]',
   hedge_rolling: 'bg-[#B080FF]/10 text-[#B080FF]',

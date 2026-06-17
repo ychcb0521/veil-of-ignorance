@@ -1,5 +1,14 @@
 import type { LegRole, StrategyTemplate } from '@/types/journal';
 
+export const MAIN_ADD_ROLES = [
+  'main_add_1',
+  'main_add_2',
+  'main_add_3',
+  'main_add_4',
+  'main_add_5',
+  'main_add_6',
+] as const satisfies LegRole[];
+
 type ExpectedLeg = {
   role: LegRole;
   label: string;
@@ -23,13 +32,13 @@ export const STRATEGY_TEMPLATES: Record<StrategyTemplate, StrategyTemplateMeta> 
       { role: 'hedge_initial_b', label: '初始对冲 B（50% 仓位）', required: true },
       { role: 'mirror_tp', label: '镜像止盈委托（50% 仓位）', required: true },
     ],
-    rolling_roles: ['hedge_rolling', 'reentry_main', 'reentry_hedge'],
+    rolling_roles: ['main_add_1', 'main_add_2', 'main_add_3', 'hedge_rolling', 'reentry_main', 'reentry_hedge'],
   },
   main_only: {
     name: '纯主仓',
     description: '只有主力单，无对冲、无镜像止盈。',
     expected_legs: [{ role: 'main_open', label: '主力开仓', required: true }],
-    rolling_roles: [],
+    rolling_roles: ['main_add_1', 'main_add_2', 'main_add_3', 'main_add_4', 'main_add_5', 'main_add_6'],
   },
   custom: {
     name: '自定义',
@@ -41,6 +50,12 @@ export const STRATEGY_TEMPLATES: Record<StrategyTemplate, StrategyTemplateMeta> 
 
 export const LEG_ROLE_LABELS: Record<LegRole, string> = {
   main_open: '主力开仓',
+  main_add_1: '加仓1',
+  main_add_2: '加仓2',
+  main_add_3: '加仓3',
+  main_add_4: '加仓4',
+  main_add_5: '加仓5',
+  main_add_6: '加仓6',
   hedge_initial_a: '初始对冲 A',
   hedge_initial_b: '初始对冲 B',
   hedge_rolling: '滚动对冲',
@@ -52,11 +67,12 @@ export const LEG_ROLE_LABELS: Record<LegRole, string> = {
 
 export function getAssignableLegRoles(template: StrategyTemplate): LegRole[] {
   if (template === 'main_only') {
-    return ['main_open', 'reentry_main'];
+    return ['main_open', ...MAIN_ADD_ROLES, 'reentry_main'];
   }
   if (template === 'custom') {
     return [
       'main_open',
+      ...MAIN_ADD_ROLES,
       'hedge_initial_a',
       'hedge_initial_b',
       'hedge_rolling',
@@ -67,6 +83,7 @@ export function getAssignableLegRoles(template: StrategyTemplate): LegRole[] {
   }
   return [
     'main_open',
+    ...MAIN_ADD_ROLES,
     'hedge_initial_a',
     'hedge_initial_b',
     'hedge_rolling',

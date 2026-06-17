@@ -1,3 +1,4 @@
+import { MAIN_ADD_ROLES } from '@/lib/strategyTemplates';
 import type { LegRole, SuggestedLegRole, TradeJournal } from '@/types/journal';
 
 const THIRTY_MINUTES_MS = 30 * 60 * 1000;
@@ -20,6 +21,7 @@ export function suggestLegRoles(journals: TradeJournal[]): SuggestedLegRole[] {
 
   let initialHedgeCount = 0;
   let mainAssigned = false;
+  let mainAddCount = 0;
 
   for (let index = 0; index < sorted.length; index += 1) {
     const journal = sorted[index];
@@ -36,13 +38,14 @@ export function suggestLegRoles(journals: TradeJournal[]): SuggestedLegRole[] {
         reason = '时间最早的主力订单';
         mainAssigned = true;
       } else {
-        suggestedRole = 'reentry_main';
+        suggestedRole = MAIN_ADD_ROLES[Math.min(mainAddCount, MAIN_ADD_ROLES.length - 1)] ?? 'reentry_main';
+        mainAddCount += 1;
         if (previous && isTriggeredHedge(previous)) {
           confidence = 'medium';
           reason = '前一笔为已触发的对冲订单，推测为对冲后重入主仓';
         } else {
-          confidence = 'low';
-          reason = 'main_open 之后出现的主力订单';
+          confidence = 'medium';
+          reason = `main_open 之后出现的同向主力订单，建议作为 ${suggestedRole}`;
         }
       }
     } else if (journal.order_kind === 'hedge') {

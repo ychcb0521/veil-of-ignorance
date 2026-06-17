@@ -47,6 +47,12 @@ describe('ClassifyAsNewCampaignDialog', () => {
     expect(dialog.querySelector('[class*="overflow-y-auto"]')).toBeTruthy();
     expect(dialog.querySelector('[class*="overflow-auto"]')).toBeTruthy();
     expect(screen.getByRole('button', { name: '创建战役' })).toBeInTheDocument();
+    expect(screen.getByText('开仓时间')).toBeInTheDocument();
+    expect(screen.getByText('平仓时间')).toBeInTheDocument();
+    expect(screen.getByText('操作时间')).toBeInTheDocument();
+    expect(screen.getByText('开仓价')).toBeInTheDocument();
+    expect(screen.getByText('平仓价')).toBeInTheDocument();
+    expect(screen.getAllByText(/2026\//).length).toBeGreaterThan(0);
 
     await waitFor(() => {
       expect(screen.getAllByRole('combobox').length).toBeGreaterThan(1);
@@ -56,17 +62,14 @@ describe('ClassifyAsNewCampaignDialog', () => {
       .getAllByRole('combobox')
       .find((select): select is HTMLSelectElement =>
         select instanceof HTMLSelectElement &&
-        Array.from(select.options).some(option => option.value && option.value !== select.value),
+        Array.from(select.options).some(option => option.value === 'main_add_1'),
       );
 
     expect(roleSelect).toBeTruthy();
     if (!roleSelect) return;
+    expect(Array.from(roleSelect.options).some(option => option.textContent === '加仓1')).toBe(true);
 
-    const nextValue = Array.from(roleSelect.options).find(option => option.value && option.value !== roleSelect.value)?.value;
-    expect(nextValue).toBeTruthy();
-    if (!nextValue) return;
-
-    fireEvent.change(roleSelect, { target: { value: nextValue } });
-    expect(roleSelect.value).toBe(nextValue);
+    fireEvent.change(roleSelect, { target: { value: 'main_add_1' } });
+    expect(roleSelect.value).toBe('main_add_1');
   });
 });

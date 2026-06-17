@@ -16,6 +16,7 @@ import { INITIAL_COGNITIVE_ASSETS } from '@/lib/cognitiveAssetsInitialContent';
 import { mirrorDroppedColumns } from '@/lib/journalLocalMirror';
 import { suggestLegRoles as suggestLegRolesHeuristic } from '@/lib/legRoleSuggestion';
 import type { CognitiveAssetsDoc, CognitiveAssetCategory, CognitiveAssetSection } from '@/types/cognitiveAssets';
+import { MAIN_ADD_ROLES } from '@/lib/strategyTemplates';
 import type {
   CampaignCounterfactual,
   CampaignCounterfactualBranchKind,
@@ -80,7 +81,7 @@ function toCampaignEvent(row: unknown): CampaignEvent {
 
 function inferCampaignEventType(legRole: LegRole): CampaignEvent['event_type'] {
   if (legRole === 'standalone') return 'note';
-  if (legRole === 'main_open' || legRole === 'reentry_main') return 'main_opened';
+  if (legRole === 'main_open' || legRole === 'reentry_main' || MAIN_ADD_ROLES.includes(legRole)) return 'main_opened';
   if (legRole === 'mirror_tp') return 'mirror_tp_placed';
   return 'hedge_placed';
 }
@@ -175,6 +176,25 @@ function getInitialCognitiveAssetsDoc(): CognitiveAssetsDoc {
   return deepClone(INITIAL_COGNITIVE_ASSETS);
 }
 
+function withDefaultCognitiveAssetCategories(doc: CognitiveAssetsDoc): { doc: CognitiveAssetsDoc; changed: boolean } {
+  const initial = getInitialCognitiveAssetsDoc();
+  const existingIds = new Set(doc.categories.map(category => category.id));
+  const missingDefaults = initial.categories.filter(category => !existingIds.has(category.id));
+  if (missingDefaults.length === 0) {
+    return { doc, changed: false };
+  }
+  return {
+    doc: {
+      meta: {
+        title: initial.meta.title,
+        subtitle: `${initial.meta.subtitle} · 个人追加`,
+      },
+      categories: [...missingDefaults, ...doc.categories],
+    },
+    changed: true,
+  };
+}
+
 function isMissingCognitiveAssetsTableError(error: { code?: string; message?: string } | null): boolean {
   if (!error) return false;
   const message = error.message ?? '';
@@ -253,6 +273,12 @@ const RETRO_CLASSIFY_NOTE = 'classified retroactively';
 
 const LEG_ROLE_ORDER_KIND_COMPATIBILITY: Record<LegRole, Array<TradeJournal['order_kind']>> = {
   main_open: ['main'],
+  main_add_1: ['main'],
+  main_add_2: ['main'],
+  main_add_3: ['main'],
+  main_add_4: ['main'],
+  main_add_5: ['main'],
+  main_add_6: ['main'],
   hedge_initial_a: ['hedge'],
   hedge_initial_b: ['hedge'],
   hedge_rolling: ['hedge'],
@@ -292,6 +318,7 @@ function isMissingTradeJournalsFeatureError(error: { code?: string; message?: st
   const message = error.message ?? '';
   return error.code === 'PGRST205'
     || error.code === '42P01'
+    || (/trade_journals_leg_role_check|violates check constraint/i.test(message))
     || (/trade_journals|campaign_id|leg_role|leg_sequence/i.test(message) && /schema cache|could not find|does not exist|column/i.test(message));
 }
 
@@ -1568,6 +1595,21 @@ export async function batchAttachToCampaign(
     leg_role: journal.leg_role,
     leg_sequence: journal.leg_sequence,
   }));
+  const restoreOriginalJournalAssignments = async () => {
+    for (const snapshot of originalJournals) {
+      const { error: restoreErr } = await supabase
+        .from('trade_journals' as never)
+        .update({
+          campaign_id: snapshot.campaign_id,
+          leg_role: snapshot.leg_role,
+          leg_sequence: snapshot.leg_sequence,
+        } as never)
+        .eq('id', snapshot.id);
+      if (restoreErr && !isMissingTradeJournalsFeatureError(restoreErr)) {
+        console.warn('[journalApi] restore campaign assignment failed', restoreErr);
+      }
+    }
+  };
 
   const combinedSequence = [...existingLegs, ...journals]
     .sort((a, b) => journalTimeMs(a) - journalTimeMs(b))
@@ -1576,6 +1618,7 @@ export async function batchAttachToCampaign(
 
   const nextEvents: CampaignEvent[] = [...campaign.actual_evolution];
   const newLegs: TradeJournal[] = [];
+  let journalCampaignColumnsUnavailable = false;
 
   try {
     for (const assignment of assignments) {
@@ -1587,11 +1630,20 @@ export async function batchAttachToCampaign(
         leg_role: assignment.legRole,
         leg_sequence: nextSequence,
       };
-      const { error: updateErr } = await supabase
-        .from('trade_journals' as never)
-        .update(patch as never)
-        .eq('id', journal.id);
-      if (updateErr) throw new Error(`关联战役失败：${updateErr.message}`);
+      if (!journalCampaignColumnsUnavailable) {
+        const { error: updateErr } = await supabase
+          .from('trade_journals' as never)
+          .update(patch as never)
+          .eq('id', journal.id);
+        if (updateErr) {
+          if (isMissingTradeJournalsFeatureError(updateErr)) {
+            journalCampaignColumnsUnavailable = true;
+            await restoreOriginalJournalAssignments();
+          } else {
+            throw new Error(`关联战役失败：${updateErr.message}`);
+          }
+        }
+      }
 
       newLegs.push({ ...journal, ...patch });
       nextEvents.push({
@@ -1620,18 +1672,13 @@ export async function batchAttachToCampaign(
       .eq('id', campaignId);
     if (campaignErr) throw new Error(`更新战役事件流失败：${campaignErr.message}`);
 
-    await normalizeCampaignLegSequences(campaignId);
+    if (!journalCampaignColumnsUnavailable) {
+      await normalizeCampaignLegSequences(campaignId);
+    }
     await recomputeCampaignDerivedFields(campaignId);
   } catch (error) {
-    for (const snapshot of originalJournals) {
-      await supabase
-        .from('trade_journals' as never)
-        .update({
-          campaign_id: snapshot.campaign_id,
-          leg_role: snapshot.leg_role,
-          leg_sequence: snapshot.leg_sequence,
-        } as never)
-        .eq('id', snapshot.id);
+    if (!journalCampaignColumnsUnavailable) {
+      await restoreOriginalJournalAssignments();
     }
     await supabase
       .from('trade_campaigns' as never)
@@ -3175,7 +3222,13 @@ export async function getCognitiveAssets(userId: string): Promise<CognitiveAsset
 
 export async function ensureCognitiveAssetsExists(userId: string): Promise<CognitiveAssetsDoc> {
   const current = await getCognitiveAssets(userId);
-  if (current) return current;
+  if (current) {
+    const normalized = withDefaultCognitiveAssetCategories(current);
+    if (normalized.changed) {
+      await writeCognitiveAssetsDoc(userId, normalized.doc);
+    }
+    return normalized.doc;
+  }
   const initial = getInitialCognitiveAssetsDoc();
   await writeCognitiveAssetsDoc(userId, initial);
   return initial;

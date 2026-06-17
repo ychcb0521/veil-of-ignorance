@@ -23,9 +23,9 @@ import {
   isSupportedCognitiveAssetFile,
 } from '@/lib/documentImport';
 import {
-  deleteCognitiveAssetsDoc,
-  getCognitiveAssets,
+  ensureCognitiveAssetsExists,
   replaceCognitiveAssetsDoc,
+  resetAllCognitiveAssets,
 } from '@/lib/journalApi';
 import type { CognitiveAssetSection, CognitiveAssetsDoc } from '@/types/cognitiveAssets';
 
@@ -57,6 +57,49 @@ const DOCUMENT_ACCEPT = [
 function getFirstTocId(doc: CognitiveAssetsDoc | null): string {
   const firstCategory = doc?.categories[0];
   return firstCategory ? `category-${firstCategory.id}` : '';
+}
+
+function makeSafeId(value: string, fallback: string): string {
+  const safe = value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9\u4e00-\u9fa5]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .slice(0, 40);
+  return safe || fallback;
+}
+
+function appendCognitiveAssetsDoc(current: CognitiveAssetsDoc, addition: CognitiveAssetsDoc): CognitiveAssetsDoc {
+  const stamp = Date.now().toString(36);
+  const existingCategoryIds = new Set(current.categories.map(category => category.id));
+  const nextCategories = addition.categories.map((category, categoryIndex) => {
+    const baseCategoryId = makeSafeId(category.id || category.title, `upload_${categoryIndex + 1}`);
+    let categoryId = `upload_${stamp}_${baseCategoryId}`;
+    let suffix = 1;
+    while (existingCategoryIds.has(categoryId)) {
+      categoryId = `upload_${stamp}_${baseCategoryId}_${suffix}`;
+      suffix += 1;
+    }
+    existingCategoryIds.add(categoryId);
+    return {
+      ...category,
+      id: categoryId,
+      sections: category.sections.map((section, sectionIndex) => ({
+        ...section,
+        id: `${categoryId}_${makeSafeId(section.id || section.title, `section_${sectionIndex + 1}`)}`,
+      })),
+    };
+  });
+
+  return {
+    meta: {
+      ...current.meta,
+      subtitle: current.meta.subtitle.includes('个人追加')
+        ? current.meta.subtitle
+        : `${current.meta.subtitle} · 个人追加`,
+    },
+    categories: [...current.categories, ...nextCategories],
+  };
 }
 
 function clampTocLevel(level: number): number {
@@ -222,10 +265,10 @@ function UploadPanel({
           </div>
           <div className="min-w-0">
             <h2 className="text-[16px] font-medium text-foreground">
-              {hasDocument ? '替换认知资产文档' : '上传认知资产文档'}
+              {hasDocument ? '追加认知资产文档' : '上传认知资产文档'}
             </h2>
             <p className="mt-1 text-[12px] leading-5 text-muted-foreground">
-              支持 PDF / Word / TXT，上传后自动提取正文并生成类似“使用说明”的目录与阅读样式。
+              系统已内置默认认知资产。支持 PDF / Word / TXT，上传后会追加为新的阅读章节，并自动生成目录与正文样式。
             </p>
           </div>
         </div>
@@ -244,14 +287,14 @@ function UploadPanel({
                   ) : (
                     <Trash2 className="h-4 w-4 mr-1" />
                   )}
-                  删除当前
+                  恢复默认
                 </Button>
               </AlertDialogTrigger>
               <AlertDialogContent className="border-[#F6465D]/40">
                 <AlertDialogHeader>
-                  <AlertDialogTitle>删除当前认知资产文档？</AlertDialogTitle>
+                  <AlertDialogTitle>恢复系统默认认知资产？</AlertDialogTitle>
                   <AlertDialogDescription className="leading-6">
-                    删除后会回到上传模式。这个操作只删除当前生成的认知资产内容，不会影响交易记录或其他数据。
+                    这会移除后续追加或替换的认知资产内容，并恢复到系统内置的“纪律 · 道 · 法 · 术 · 心”。不会影响交易记录或其他数据。
                   </AlertDialogDescription>
                 </AlertDialogHeader>
                 <AlertDialogFooter>
@@ -261,7 +304,7 @@ function UploadPanel({
                     disabled={deleting}
                     className="bg-[#F6465D] text-white hover:bg-[#F6465D]/90"
                   >
-                    确认删除
+                    确认恢复
                   </AlertDialogAction>
                 </AlertDialogFooter>
               </AlertDialogContent>
@@ -278,7 +321,7 @@ function UploadPanel({
             ) : (
               <Upload className="h-4 w-4 mr-1" />
             )}
-            {importing ? '生成中' : '选择文档'}
+            {importing ? '生成中' : hasDocument ? '追加文档' : '选择文档'}
           </Button>
         </div>
       </div>
@@ -325,7 +368,7 @@ export default function CognitiveAssetsPage() {
     const load = async () => {
       setLoading(true);
       try {
-        const next = await getCognitiveAssets(user.id);
+        const next = await ensureCognitiveAssetsExists(user.id);
         setDoc(next);
         setActiveId(getFirstTocId(next));
         setUploadPanelOpen(false);
@@ -383,11 +426,13 @@ export default function CognitiveAssetsPage() {
     setImporting(true);
     try {
       const next = await buildCognitiveAssetsDocFromFile(file);
-      await replaceCognitiveAssetsDoc(user.id, next);
-      setDoc(next);
-      setActiveId(getFirstTocId(next));
+      const base = doc ?? await ensureCognitiveAssetsExists(user.id);
+      const merged = appendCognitiveAssetsDoc(base, next);
+      await replaceCognitiveAssetsDoc(user.id, merged);
+      setDoc(merged);
+      setActiveId(getFirstTocId(merged));
       setUploadPanelOpen(false);
-      toast.success('文档已生成认知资产阅读页');
+      toast.success('文档已追加到认知资产');
     } catch (error) {
       toast.error(error instanceof Error ? error.message : '文档生成失败');
     } finally {
@@ -416,11 +461,12 @@ export default function CognitiveAssetsPage() {
     if (!user?.id) return;
     setDeleting(true);
     try {
-      await deleteCognitiveAssetsDoc(user.id);
-      setDoc(null);
-      setActiveId('');
-      setUploadPanelOpen(true);
-      toast.success('当前认知资产文档已删除');
+      await resetAllCognitiveAssets(user.id);
+      const next = await ensureCognitiveAssetsExists(user.id);
+      setDoc(next);
+      setActiveId(getFirstTocId(next));
+      setUploadPanelOpen(false);
+      toast.success('已恢复系统默认认知资产');
     } catch (error) {
       toast.error(error instanceof Error ? error.message : '删除失败');
     } finally {

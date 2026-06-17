@@ -104,6 +104,12 @@ function branchKindLabel(kind: CampaignCounterfactual['branch_kind']) {
 function counterfactualLabel(role: string) {
   switch (role) {
     case 'main_open': return 'CF-M';
+    case 'main_add_1': return 'CF-A1';
+    case 'main_add_2': return 'CF-A2';
+    case 'main_add_3': return 'CF-A3';
+    case 'main_add_4': return 'CF-A4';
+    case 'main_add_5': return 'CF-A5';
+    case 'main_add_6': return 'CF-A6';
     case 'reentry_main': return 'CF-Re';
     case 'hedge_initial_a': return 'CF-Ha';
     case 'hedge_initial_b': return 'CF-Hb';
@@ -184,6 +190,7 @@ function buildChartArtifacts(
     if (leg.leg_role === 'hedge_initial_b') { label = 'Hb'; shape = 'triangle-down'; }
     if (leg.leg_role === 'hedge_rolling') { label = `Hr${rollingIndex++}`; shape = 'triangle-down'; }
     if (leg.leg_role === 'mirror_tp') { label = 'TP'; shape = 'square'; }
+    if (leg.leg_role?.startsWith('main_add_')) { label = `A${leg.leg_role.slice('main_add_'.length)}`; }
     if (leg.leg_role === 'reentry_main') { label = 'ReM'; }
     if (leg.leg_role === 'reentry_hedge') { label = 'ReH'; shape = 'triangle-down'; }
     if (leg.leg_role === 'main_open') { label = leg.direction === 'short' ? 'M↓' : 'M↑'; }
@@ -226,7 +233,7 @@ function buildChartArtifacts(
           label: 'M 减仓 50%',
         });
       }
-      if (leg.leg_role === 'main_open' || leg.leg_role === 'reentry_main') {
+      if (leg.leg_role === 'main_open' || leg.leg_role === 'reentry_main' || leg.leg_role?.startsWith('main_add_')) {
         markers.push({
           time: record.closeTime,
           price: record.exitPrice,
@@ -540,7 +547,7 @@ export default function JournalCampaignDetailPage() {
   const chartCurrentTime = focusTime ?? chartDefaultCurrentTime;
   const chartViewportCenterTime = focusTime ?? chartDefaultViewportCenterTime;
 
-  const mainCount = legs.filter((leg: TradeJournal) => leg.leg_role === 'main_open' || leg.leg_role === 'reentry_main').length;
+  const mainCount = legs.filter((leg: TradeJournal) => leg.leg_role === 'main_open' || leg.leg_role === 'reentry_main' || leg.leg_role?.startsWith('main_add_')).length;
   const hedgeCount = legs.filter((leg: TradeJournal) => leg.leg_role?.startsWith('hedge_')).length;
   const tpCount = legs.filter((leg: TradeJournal) => leg.leg_role === 'mirror_tp').length;
   const otherCount = Math.max(0, legs.length - mainCount - hedgeCount - tpCount);

@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
-import { getAssignableLegRoles, LEG_ROLE_LABELS, STRATEGY_TEMPLATES } from '@/lib/strategyTemplates';
+import { getAssignableLegRoles, LEG_ROLE_LABELS, MAIN_ADD_ROLES, STRATEGY_TEMPLATES } from '@/lib/strategyTemplates';
 import {
   appendCampaignEvent,
   batchAttachToCampaign,
@@ -40,8 +40,9 @@ const CONFIDENCE_DOT: Record<SuggestedLegRole['confidence'], string> = {
 
 function fmtLabel(value: string | number) {
   const d = new Date(value);
+  if (!Number.isFinite(d.getTime())) return '—';
   const pad = (n: number) => String(n).padStart(2, '0');
-  return `${pad(d.getMonth() + 1)}/${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  return `${d.getFullYear()}/${pad(d.getMonth() + 1)}/${pad(d.getDate())}\n${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 }
 
 function itemTimeMs(item: ClassifiableItem) {
@@ -52,6 +53,18 @@ function itemTimeMs(item: ClassifiableItem) {
 
 function itemTimeLabel(item: ClassifiableItem) {
   return fmtLabel(item.kind === 'journal' ? item.journal.pre_simulated_time : item.record.openTime);
+}
+
+function itemCloseTimeLabel(item: ClassifiableItem) {
+  if (item.kind === 'journal') return item.journal.post_real_close_time ? fmtLabel(item.journal.post_real_close_time) : '—';
+  return item.record.closeTime ? fmtLabel(item.record.closeTime) : '—';
+}
+
+function itemOperationTimeLabel(item: ClassifiableItem) {
+  if (item.kind === 'journal') {
+    return fmtLabel(item.journal.post_real_close_time ?? item.journal.pre_real_time ?? item.journal.updated_at ?? item.journal.created_at);
+  }
+  return fmtLabel(item.record.closeTime || item.record.openTime);
 }
 
 function itemSymbol(item: ClassifiableItem) {
@@ -67,6 +80,11 @@ function itemEntryPrice(item: ClassifiableItem) {
   return item.kind === 'journal' ? item.journal.pre_entry_price ?? 0 : item.record.entryPrice;
 }
 
+function itemExitPrice(item: ClassifiableItem) {
+  if (item.kind === 'journal') return null;
+  return item.record.exitPrice > 0 ? item.record.exitPrice : null;
+}
+
 function itemPositionSize(item: ClassifiableItem) {
   return item.kind === 'journal'
     ? item.journal.pre_position_size
@@ -77,6 +95,48 @@ function statusLabel(item: ClassifiableItem) {
   if (item.kind === 'orphanRecord') return '已成交';
   if (item.journal.trade_record_id) return '已成交';
   return item.journal.order_kind === 'hedge' ? '未触发取消' : '挂单中';
+}
+
+function priceLabel(value: number | null | undefined) {
+  return typeof value === 'number' && Number.isFinite(value) ? value.toFixed(4) : '—';
+}
+
+function suggestOrphanRecordRole(item: Extract<ClassifiableItem, { kind: 'orphanRecord' }>, index: number, ordered: ClassifiableItem[]): ClassifiableSuggestion {
+  if (index === 0) {
+    return {
+      itemId: item.id,
+      suggestedRole: 'main_open',
+      confidence: 'low',
+      reason: '第一条仓位历史记录默认作为主力开仓',
+    };
+  }
+
+  const main = ordered.find(candidate => candidate.id !== item.id && roleCandidateDirection(candidate) === roleCandidateDirection(ordered[0])) ?? ordered[0];
+  const sameDirection = itemDirection(item) === itemDirection(main);
+  if (sameDirection) {
+    const priorSameDirectionCount = ordered
+      .slice(0, index)
+      .filter(candidate => itemDirection(candidate) === itemDirection(item))
+      .length;
+    const addRole = MAIN_ADD_ROLES[Math.min(Math.max(priorSameDirectionCount - 1, 0), MAIN_ADD_ROLES.length - 1)] ?? 'main_add_1';
+    return {
+      itemId: item.id,
+      suggestedRole: addRole,
+      confidence: 'medium',
+      reason: '同向后续仓位，建议作为主力加仓 leg',
+    };
+  }
+
+  return {
+    itemId: item.id,
+    suggestedRole: 'hedge_rolling',
+    confidence: 'low',
+    reason: '反向历史成交更像滚动对冲或独立单，请按实际意图确认',
+  };
+}
+
+function roleCandidateDirection(item: ClassifiableItem): 'long' | 'short' {
+  return itemDirection(item);
 }
 
 function buildMixedValidation(
@@ -134,12 +194,7 @@ export function ClassifyAsNewCampaignDialog({ open, onOpenChange, items, onCreat
               reason: '未能推断角色，默认建议 main_open',
             };
       }
-      return {
-        itemId: item.id,
-        suggestedRole: index === 0 ? 'main_open' : 'standalone',
-        confidence: 'low',
-        reason: index === 0 ? '第一条仓位历史记录默认作为 main_open' : '后续仓位历史记录默认作为 standalone',
-      };
+      return suggestOrphanRecordRole(item, index, ordered);
     }),
     [journalSuggestions, ordered],
   );
@@ -264,10 +319,13 @@ export function ClassifyAsNewCampaignDialog({ open, onOpenChange, items, onCreat
                   <tr>
                     <th className="px-2 py-2 text-left">#</th>
                     <th className="px-2 py-2 text-left">订单类型</th>
-                    <th className="px-2 py-2 text-left">时间</th>
+                    <th className="px-2 py-2 text-left">开仓时间</th>
+                    <th className="px-2 py-2 text-left">平仓时间</th>
+                    <th className="px-2 py-2 text-left">操作时间</th>
                     <th className="px-2 py-2 text-left">类型</th>
                     <th className="px-2 py-2 text-left">方向</th>
-                    <th className="px-2 py-2 text-left">价格</th>
+                    <th className="px-2 py-2 text-left">开仓价</th>
+                    <th className="px-2 py-2 text-left">平仓价</th>
                     <th className="px-2 py-2 text-left">仓位</th>
                     <th className="px-2 py-2 text-left">状态</th>
                     <th className="px-2 py-2 text-left">建议角色</th>
@@ -286,12 +344,15 @@ export function ClassifyAsNewCampaignDialog({ open, onOpenChange, items, onCreat
                             {item.kind === 'journal' ? 'journal' : '裸 record'}
                           </span>
                         </td>
-                        <td className="px-2 py-2 font-mono">{itemTimeLabel(item)}</td>
+                        <td className="px-2 py-2 font-mono whitespace-pre-line">{itemTimeLabel(item)}</td>
+                        <td className="px-2 py-2 font-mono whitespace-pre-line">{itemCloseTimeLabel(item)}</td>
+                        <td className="px-2 py-2 font-mono whitespace-pre-line">{itemOperationTimeLabel(item)}</td>
                         <td className="px-2 py-2">{item.kind === 'journal' ? (item.journal.order_kind === 'main' ? '主力' : '对冲') : '历史成交'}</td>
                         <td className={`px-2 py-2 ${direction === 'short' ? 'text-[#F6465D]' : 'text-[#0ECB81]'}`}>
                           {direction === 'short' ? 'SHORT' : 'LONG'}
                         </td>
-                        <td className="px-2 py-2 font-mono">{itemEntryPrice(item).toFixed(4)}</td>
+                        <td className="px-2 py-2 font-mono">{priceLabel(itemEntryPrice(item))}</td>
+                        <td className="px-2 py-2 font-mono">{priceLabel(itemExitPrice(item))}</td>
                         <td className="px-2 py-2 font-mono">{itemPositionSize(item)?.toFixed(2) ?? '—'}</td>
                         <td className="px-2 py-2">{statusLabel(item)}</td>
                         <td className="px-2 py-2">

@@ -287,6 +287,12 @@ export type CampaignStatus =
 export type StrategyTemplate = 'main_dual_hedge_mirror_tp' | 'main_only' | 'custom';
 export type LegRole =
   | 'main_open'
+  | 'main_add_1'
+  | 'main_add_2'
+  | 'main_add_3'
+  | 'main_add_4'
+  | 'main_add_5'
+  | 'main_add_6'
   | 'hedge_initial_a'
   | 'hedge_initial_b'
   | 'hedge_rolling'
