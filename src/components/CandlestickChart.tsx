@@ -168,6 +168,8 @@ interface Props {
   analysisAnnotations?: AnalysisChartAnnotations;
   /** Optional analysis anchor used to center short replay/campaign windows instead of snapping to the latest candle. */
   analysisFocusTime?: number | null;
+  /** Analysis surfaces only: zoom so the ENTIRE dataset fits the viewport width (campaign chart → visible range == full legs span). Overrides anchor centering. */
+  analysisFitAll?: boolean;
   /** K 线时间轴的显示时区（IANA 名）。默认 Asia/Shanghai，与主交易页一致；战役页用 UTC。 */
   timezone?: string;
 }
@@ -340,6 +342,7 @@ function CandlestickChartComponent({
   analysisMode = false,
   analysisAnnotations,
   analysisFocusTime = null,
+  analysisFitAll = false,
   timezone = "Asia/Shanghai",
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -376,6 +379,31 @@ function CandlestickChartComponent({
     }
     return true;
   }, [analysisFocusTime, data.length]);
+
+  // Campaign review: zoom so the WHOLE dataset (= padded legs span) fits the viewport width.
+  // Without this, long spans at fine intervals (e.g. >24h at 1m) overflow the default bar space
+  // and the late legs sit off-screen — the chart's visible range no longer matches the legs span.
+  const fitAnalysisWindow = useCallback(() => {
+    const chart = chartRef.current;
+    if (!chart) return false;
+    const size = chart.getSize();
+    const chartWidth = size?.width ?? 0;
+    if (chartWidth <= 0 || data.length === 0) return false;
+    // Bar space that makes all bars span exactly the viewport width (klinecharts clamps to [1, 50]).
+    const target = chartWidth / data.length;
+    const barSpace = Number.isFinite(target) && target > 0 ? Math.min(Math.max(target, 1), 50) : 50;
+    chart.setBarSpace(barSpace);
+    // Narrower than viewport (few candles, capped at max bar space) → center; otherwise right-align.
+    const dataWidth = data.length * chart.getBarSpace();
+    const rightOffset = dataWidth < chartWidth ? (chartWidth - dataWidth) / 2 : 0;
+    chart.setOffsetRightDistance(rightOffset);
+    return true;
+  }, [data.length]);
+
+  const applyAnalysisViewport = useCallback(
+    () => (analysisFitAll ? fitAnalysisWindow() : centerAnalysisWindow()),
+    [analysisFitAll, fitAnalysisWindow, centerAnalysisWindow],
+  );
 
   // ============================================================
   // Clear overlays on symbol change to prevent cross-symbol pollution
@@ -590,10 +618,10 @@ function CandlestickChartComponent({
     ) {
       requestAnimationFrame(() => {
         chartRef.current?.scrollByDistance(0, 0);
-        // klinecharts v9 does not have fitContent. Analysis surfaces can provide
-        // an anchor timestamp so short campaign windows open around the relevant
-        // candles instead of snapping to the latest bar.
-        if (!centerAnalysisWindow()) {
+        // klinecharts v9 does not have fitContent. Analysis surfaces can fit the whole
+        // dataset to the viewport (campaign) or anchor short replay windows around the
+        // relevant candles instead of snapping to the latest bar.
+        if (!applyAnalysisViewport()) {
           chartRef.current?.scrollToRealTime();
         }
       });
@@ -603,14 +631,14 @@ function CandlestickChartComponent({
     prevOldestRef.current = currentOldest;
     prevNewestRef.current = lastCandle.timestamp as number;
     prevLastSigRef.current = lastSig;
-  }, [centerAnalysisWindow, data]);
+  }, [applyAnalysisViewport, data]);
 
   useEffect(() => {
     if (data.length === 0) return;
     requestAnimationFrame(() => {
-      centerAnalysisWindow();
+      applyAnalysisViewport();
     });
-  }, [centerAnalysisWindow, data]);
+  }, [applyAnalysisViewport, data]);
 
   // ============================================================
   // TRADE MARKERS — data-driven: clear all then redraw from tradeHistory
@@ -1275,6 +1303,7 @@ function areChartPropsEqual(prev: Props, next: Props) {
     prev.analysisMode === next.analysisMode &&
     prev.analysisAnnotations === next.analysisAnnotations &&
     prev.analysisFocusTime === next.analysisFocusTime &&
+    prev.analysisFitAll === next.analysisFitAll &&
     prev.timezone === next.timezone
   );
 }
