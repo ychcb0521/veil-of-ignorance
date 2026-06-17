@@ -1,9 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
-import type { ChangeEvent } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { FolderPlus, Layers } from 'lucide-react';
 import { BackButton } from '@/components/journal/BackButton';
-import { Input } from '@/components/ui/input';
 import { useAuth } from '@/contexts/AuthContext';
 import { listAllCampaigns, listVisibleCampaigns, getCampaignWithLegs } from '@/lib/journalApi';
 import { LEG_ROLE_LABELS, STRATEGY_TEMPLATES } from '@/lib/strategyTemplates';
@@ -13,14 +11,6 @@ type CampaignCardData = {
   campaign: TradeCampaign;
   legs: TradeJournal[];
 };
-
-const STATUS_OPTIONS: Array<{ value: CampaignStatus | 'all'; label: string }> = [
-  { value: 'all', label: '全部' },
-  { value: 'active', label: 'active' },
-  { value: 'closed_profit', label: 'closed_profit' },
-  { value: 'closed_loss', label: 'closed_loss' },
-  { value: 'abandoned', label: 'abandoned' },
-];
 
 const STATUS_STYLES: Record<string, string> = {
   active: 'bg-[#F0B90B]/15 text-[#F0B90B]',
@@ -88,10 +78,6 @@ export default function JournalCampaignsPage() {
   const nav = useNavigate();
   const location = useLocation();
   const { user } = useAuth();
-  const [status, setStatus] = useState<CampaignStatus | 'all'>('all');
-  const [symbol, setSymbol] = useState('');
-  const [dateFrom, setDateFrom] = useState('');
-  const [dateTo, setDateTo] = useState('');
   const [scope, setScope] = useState<'own' | 'mutual'>('own');
   const [loading, setLoading] = useState(true);
   const [rows, setRows] = useState<CampaignCardData[]>([]);
@@ -102,15 +88,9 @@ export default function JournalCampaignsPage() {
     (async () => {
       setLoading(true);
       try {
-        const filters = {
-          status,
-          symbol: symbol.trim() || undefined,
-          dateFrom: dateFrom ? `${dateFrom}T00:00:00.000Z` : undefined,
-          dateTo: dateTo ? `${dateTo}T23:59:59.999Z` : undefined,
-        };
         const campaigns = scope === 'own'
-          ? await listAllCampaigns(user.id, filters)
-          : (await listVisibleCampaigns(user.id, filters)).filter(campaign => campaign.user_id !== user.id);
+          ? await listAllCampaigns(user.id)
+          : (await listVisibleCampaigns(user.id)).filter(campaign => campaign.user_id !== user.id);
         const full = await Promise.all(
           campaigns.map(async campaign => {
             const details = await getCampaignWithLegs(campaign.id);
@@ -123,7 +103,7 @@ export default function JournalCampaignsPage() {
       }
     })();
     return () => { cancelled = true; };
-  }, [user, status, symbol, dateFrom, dateTo, scope]);
+  }, [user, scope]);
 
   const activeCount = useMemo(
     () => rows.filter((row: CampaignCardData) => row.campaign.status === 'active').length,
@@ -158,7 +138,7 @@ export default function JournalCampaignsPage() {
           </div>
         )}
 
-        <div className="grid grid-cols-1 md:grid-cols-5 gap-3 mb-4">
+        <div className="grid grid-cols-1 md:grid-cols-[minmax(220px,320px)] gap-3 mb-4">
           <div className="h-9 rounded-md border border-border bg-card p-1 flex items-center gap-1">
             {[
               { value: 'own', label: '我的战役' },
@@ -176,33 +156,6 @@ export default function JournalCampaignsPage() {
               </button>
             ))}
           </div>
-          <select
-            value={status}
-            onChange={(e: ChangeEvent<HTMLSelectElement>) => setStatus(e.target.value as CampaignStatus | 'all')}
-            className="h-9 rounded-md border border-border bg-card px-3 text-[12px]"
-          >
-            {STATUS_OPTIONS.map(option => (
-              <option key={option.value} value={option.value}>{option.label}</option>
-            ))}
-          </select>
-          <Input
-            value={symbol}
-            onChange={(e: ChangeEvent<HTMLInputElement>) => setSymbol(e.target.value.toUpperCase())}
-            placeholder="标的，例如 BTCUSDT"
-            className="h-9 text-[12px]"
-          />
-          <Input
-            type="date"
-            value={dateFrom}
-            onChange={(e: ChangeEvent<HTMLInputElement>) => setDateFrom(e.target.value)}
-            className="h-9 text-[12px]"
-          />
-          <Input
-            type="date"
-            value={dateTo}
-            onChange={(e: ChangeEvent<HTMLInputElement>) => setDateTo(e.target.value)}
-            className="h-9 text-[12px]"
-          />
         </div>
 
         {loading ? (
