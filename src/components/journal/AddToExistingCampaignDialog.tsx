@@ -49,7 +49,10 @@ function itemTimeLabel(item: ClassifiableItem) {
 }
 
 function itemCloseTimeLabel(item: ClassifiableItem) {
-  if (item.kind === 'journal') return item.journal.post_real_close_time ? fmtLabel(item.journal.post_real_close_time) : '—';
+  if (item.kind === 'journal') {
+    if (item.record?.closeTime) return fmtLabel(new Date(item.record.closeTime).toISOString());
+    return item.journal.post_real_close_time ? fmtLabel(item.journal.post_real_close_time) : '—';
+  }
   return item.record.closeTime ? fmtLabel(new Date(item.record.closeTime).toISOString()) : '—';
 }
 
@@ -74,7 +77,7 @@ function itemEntryPrice(item: ClassifiableItem) {
 }
 
 function itemExitPrice(item: ClassifiableItem) {
-  if (item.kind === 'journal') return null;
+  if (item.kind === 'journal') return item.record && item.record.exitPrice > 0 ? item.record.exitPrice : null;
   return item.record.exitPrice > 0 ? item.record.exitPrice : null;
 }
 

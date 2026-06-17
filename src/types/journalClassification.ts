@@ -6,6 +6,8 @@ export type ClassifiableItem =
       id: string;
       kind: 'journal';
       journal: TradeJournal;
+      /** 该 journal 已成交时关联的真实成交记录，用于显示实际平仓时间/平仓价。 */
+      record?: TradeRecord | null;
     }
   | {
       id: string;

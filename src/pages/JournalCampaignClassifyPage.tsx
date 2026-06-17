@@ -139,13 +139,18 @@ export default function JournalCampaignClassifyPage() {
     () => {
       const journalRecordIds = new Set(journals.map(journal => journal.trade_record_id).filter((value): value is string => Boolean(value)));
       return [
-        ...journals.map(journal => ({ id: `j_${journal.id}`, kind: 'journal' as const, journal })),
+        ...journals.map(journal => ({
+          id: `j_${journal.id}`,
+          kind: 'journal' as const,
+          journal,
+          record: journal.trade_record_id ? tradeRecordMap.get(journal.trade_record_id) ?? null : null,
+        })),
         ...classifiableTradeHistory
           .filter(record => !journalRecordIds.has(record.id))
           .map(record => ({ id: `r_${record.id}`, kind: 'orphanRecord' as const, record })),
       ].sort((a, b) => itemTimeMs(b) - itemTimeMs(a));
     },
-    [classifiableTradeHistory, journals],
+    [classifiableTradeHistory, journals, tradeRecordMap],
   );
   const allCandidateJournals = useMemo(
     () => [...journals].sort((a, b) => new Date(b.pre_simulated_time).getTime() - new Date(a.pre_simulated_time).getTime()),

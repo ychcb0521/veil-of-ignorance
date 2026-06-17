@@ -56,7 +56,12 @@ function itemTimeLabel(item: ClassifiableItem) {
 }
 
 function itemCloseTimeLabel(item: ClassifiableItem) {
-  if (item.kind === 'journal') return item.journal.post_real_close_time ? fmtLabel(item.journal.post_real_close_time) : '—';
+  if (item.kind === 'journal') {
+    // 已成交的腿优先取关联成交记录的实际平仓时间（与开仓时间同为 K 线时钟）；
+    // 未关联记录时回落到 journal 自身的真实平仓时间字段。
+    const close = item.record?.closeTime || item.journal.post_real_close_time;
+    return close ? fmtLabel(close) : '—';
+  }
   return item.record.closeTime ? fmtLabel(item.record.closeTime) : '—';
 }
 
@@ -81,7 +86,7 @@ function itemEntryPrice(item: ClassifiableItem) {
 }
 
 function itemExitPrice(item: ClassifiableItem) {
-  if (item.kind === 'journal') return null;
+  if (item.kind === 'journal') return item.record && item.record.exitPrice > 0 ? item.record.exitPrice : null;
   return item.record.exitPrice > 0 ? item.record.exitPrice : null;
 }
 
