@@ -38,7 +38,7 @@ import {
   runAndPersistDeviationCosts,
   runAndPersistPureSop,
 } from '@/lib/journalApi';
-import { LEG_ROLE_LABELS, STRATEGY_TEMPLATES } from '@/lib/strategyTemplates';
+import { STRATEGY_TEMPLATES } from '@/lib/strategyTemplates';
 import type {
   CampaignCounterfactual,
   CampaignCounterfactualParams,
@@ -59,10 +59,13 @@ function pnlColor(value: number | null) {
   return 'text-muted-foreground';
 }
 
-function fmtMdHm(value: string | null) {
+function fmtMdHm(value: string | null, utc = false) {
   if (!value) return '进行中';
   const d = new Date(value);
   const pad = (n: number) => String(n).padStart(2, '0');
+  if (utc) {
+    return `${pad(d.getUTCMonth() + 1)}/${pad(d.getUTCDate())} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`;
+  }
   return `${pad(d.getMonth() + 1)}/${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
@@ -130,12 +133,6 @@ const LEG_LONG_LABEL_COLOR = 'rgba(43,128,255,0.78)';
 const LEG_SHORT_LABEL_COLOR = 'rgba(247,147,26,0.78)';
 const CAMPAIGN_VERTICAL_LINE_WIDTH = 0.5;
 const LEG_VERTICAL_LINE_WIDTH = 0.65;
-
-function legEventLabel(role: TradeJournal['leg_role'], action: '开仓' | '平仓') {
-  const roleLabel = role ? LEG_ROLE_LABELS[role] ?? role : '未归类';
-  if (action === '开仓' && roleLabel.endsWith('开仓')) return roleLabel;
-  return `${roleLabel}${action}`;
-}
 
 function buildChartArtifacts(
   campaign: TradeCampaign,
@@ -216,7 +213,7 @@ function buildChartArtifacts(
       width: LEG_VERTICAL_LINE_WIDTH,
       z: 3,
       dashed: false,
-      label: legEventLabel(leg.leg_role, '开仓'),
+      label: `${label}开`,
       labelColor: legLabelColor,
     });
     if (record) {
@@ -226,7 +223,7 @@ function buildChartArtifacts(
         width: LEG_VERTICAL_LINE_WIDTH,
         z: 3,
         dashed: true,
-        label: legEventLabel(leg.leg_role, '平仓'),
+        label: `${label}平`,
         labelColor: legLabelColor,
       });
     }
@@ -772,8 +769,9 @@ export default function JournalCampaignDetailPage() {
         <section className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div className="bg-card border border-border rounded p-4 space-y-2 text-[12px]">
             <div className="font-medium">战役元数据</div>
-            <div>开始：{fmtMdHm(campaign.opened_at)}</div>
-            <div>结束：{fmtMdHm(campaign.closed_at)}</div>
+            <div className="text-muted-foreground">操作时间：{fmtMdHm(campaign.created_at)}</div>
+            <div>开始：{fmtMdHm(campaign.opened_at, true)}</div>
+            <div>结束：{fmtMdHm(campaign.closed_at, true)}</div>
             <div>持续时间：{fmtDuration(campaign.opened_at, campaign.closed_at)}</div>
             <div>legs 数：{legs.length} (主仓 {mainCount} / 对冲 {hedgeCount} / TP {tpCount} / 其他 {otherCount})</div>
             {retroactiveLegCount > 0 && (
@@ -791,6 +789,7 @@ export default function JournalCampaignDetailPage() {
                 </Tooltip>
               </div>
             )}
+            <div className="text-[11px] text-muted-foreground/70 pt-1">未标注的时间均为 K 线（模拟）时间。</div>
           </div>
 
           <div className="bg-card border border-border rounded p-4 space-y-2 text-[12px]">

@@ -1,13 +1,21 @@
 /**
- * 统一的子页面返回按钮：左上角 ArrowLeft，优先 navigate(-1)，否则回到 /
+ * 统一的子页面返回按钮：左上角 ArrowLeft。
+ * - 传入 to 时直接跳转到该路由（如列表页返回主界面 /）。
+ * - 未传 to 时优先 navigate(-1)，无历史则回到 /。
  */
 import { ArrowLeft } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 
-export function BackButton() {
+interface BackButtonProps {
+  /** 指定目标路由则直接跳转；否则走浏览器历史回退。 */
+  to?: string;
+}
+
+export function BackButton({ to }: BackButtonProps) {
   const nav = useNavigate();
   const handle = () => {
+    if (to) { nav(to); return; }
     if (window.history.length > 1) nav(-1);
     else nav('/');
   };

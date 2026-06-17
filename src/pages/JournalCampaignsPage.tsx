@@ -190,7 +190,7 @@ export default function JournalCampaignsPage() {
     <div className="min-h-screen bg-background text-foreground">
       <header className="sticky top-0 z-20 bg-background/95 backdrop-blur-sm border-b border-border">
         <div className="px-6 py-3 max-w-[1600px] mx-auto flex items-center gap-3">
-          <BackButton />
+          <BackButton to="/" />
           <div>
             <h1 className="text-[14px] font-medium">交易战役</h1>
             <p className="text-[11px] text-muted-foreground">复盘的高层单位</p>
