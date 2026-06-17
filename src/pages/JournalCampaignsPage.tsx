@@ -1,9 +1,16 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type MouseEvent } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { FolderPlus, Layers } from 'lucide-react';
+import { FolderPlus, Layers, Star, Trash2 } from 'lucide-react';
+import { toast } from 'sonner';
 import { BackButton } from '@/components/journal/BackButton';
 import { useAuth } from '@/contexts/AuthContext';
-import { listAllCampaigns, listVisibleCampaigns, getCampaignWithLegs } from '@/lib/journalApi';
+import {
+  deleteCampaign,
+  getCampaignWithLegs,
+  listAllCampaigns,
+  listVisibleCampaigns,
+  updateCampaignImportance,
+} from '@/lib/journalApi';
 import { LEG_ROLE_LABELS, STRATEGY_TEMPLATES } from '@/lib/strategyTemplates';
 import type { CampaignStatus, LegRole, TradeCampaign, TradeJournal } from '@/types/journal';
 
@@ -62,6 +69,23 @@ const LEG_CHIP_CLASS: Record<LegRole, string> = {
 
 const fmtTime = (iso: string | null) => (iso ? iso.replace('T', ' ').slice(0, 16) : '进行中');
 
+function importanceValue(campaign: Pick<TradeCampaign, 'importance_weight'>): number {
+  const value = Number(campaign.importance_weight);
+  if (!Number.isFinite(value)) return 0;
+  return Math.max(0, Math.min(5, Math.round(value)));
+}
+
+function campaignSortTime(campaign: Pick<TradeCampaign, 'opened_at' | 'created_at'>): number {
+  return new Date(campaign.opened_at || campaign.created_at).getTime() || 0;
+}
+
+function sortCampaignRows(rows: CampaignCardData[]): CampaignCardData[] {
+  return [...rows].sort((a, b) => (
+    importanceValue(b.campaign) - importanceValue(a.campaign)
+    || campaignSortTime(b.campaign) - campaignSortTime(a.campaign)
+  ));
+}
+
 function durationLabel(openedAt: string, closedAt: string | null) {
   const end = closedAt ? new Date(closedAt).getTime() : Date.now();
   const start = new Date(openedAt).getTime();
@@ -81,6 +105,7 @@ export default function JournalCampaignsPage() {
   const [scope, setScope] = useState<'own' | 'mutual'>('own');
   const [loading, setLoading] = useState(true);
   const [rows, setRows] = useState<CampaignCardData[]>([]);
+  const [busyCampaignId, setBusyCampaignId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!user) return;
@@ -97,7 +122,7 @@ export default function JournalCampaignsPage() {
             return { campaign, legs: details.legs };
           }),
         );
-        if (!cancelled) setRows(full);
+        if (!cancelled) setRows(sortCampaignRows(full));
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -109,6 +134,57 @@ export default function JournalCampaignsPage() {
     () => rows.filter((row: CampaignCardData) => row.campaign.status === 'active').length,
     [rows],
   );
+
+  const handleImportanceChange = async (
+    event: MouseEvent<HTMLButtonElement>,
+    campaign: TradeCampaign,
+    weight: number,
+  ) => {
+    event.stopPropagation();
+    if (!user || campaign.user_id !== user.id || busyCampaignId === campaign.id) return;
+
+    const previousRows = rows;
+    const nextWeight = importanceValue(campaign) === weight ? 0 : weight;
+    setBusyCampaignId(campaign.id);
+    setRows(prev => sortCampaignRows(prev.map(row => (
+      row.campaign.id === campaign.id
+        ? { ...row, campaign: { ...row.campaign, importance_weight: nextWeight } }
+        : row
+    ))));
+
+    try {
+      await updateCampaignImportance(campaign.id, nextWeight);
+      toast.success(nextWeight > 0 ? `重要性已设为 ${nextWeight}` : '已清除重要性评分');
+    } catch (error) {
+      setRows(previousRows);
+      toast.error(error instanceof Error ? error.message : String(error));
+    } finally {
+      setBusyCampaignId(null);
+    }
+  };
+
+  const handleDeleteCampaign = async (
+    event: MouseEvent<HTMLButtonElement>,
+    campaign: TradeCampaign,
+  ) => {
+    event.stopPropagation();
+    if (!user || campaign.user_id !== user.id || busyCampaignId === campaign.id) return;
+    const confirmed = window.confirm(`删除战役「${campaign.title}」？\n\n这会移除这个战役归档；已生成的交易记录不会被删除。`);
+    if (!confirmed) return;
+
+    const previousRows = rows;
+    setBusyCampaignId(campaign.id);
+    setRows(prev => prev.filter(row => row.campaign.id !== campaign.id));
+    try {
+      await deleteCampaign(campaign.id);
+      toast.success('战役已删除');
+    } catch (error) {
+      setRows(previousRows);
+      toast.error(error instanceof Error ? error.message : String(error));
+    } finally {
+      setBusyCampaignId(null);
+    }
+  };
 
   return (
     <div className="min-h-screen bg-background text-foreground">
@@ -172,6 +248,8 @@ export default function JournalCampaignsPage() {
           </div>
         ) : (
           rows.map(({ campaign, legs }) => {
+            const importance = importanceValue(campaign);
+            const isOwnCampaign = campaign.user_id === user?.id;
             const statusLabel = campaign.status === 'active'
               ? '进行中'
               : campaign.status === 'closed_profit'
@@ -202,8 +280,46 @@ export default function JournalCampaignsPage() {
                     )}
                     <span className="text-[11px] text-muted-foreground">{STRATEGY_TEMPLATES[campaign.strategy_template].name}</span>
                   </div>
-                  <div className={`px-2 py-0.5 rounded text-[11px] ${STATUS_STYLES[campaign.status] || 'bg-muted text-muted-foreground'}`}>
-                    {statusLabel}
+                  <div className="flex items-center gap-2" onClick={(event) => event.stopPropagation()}>
+                    {isOwnCampaign && (
+                      <div className="flex items-center gap-1 rounded border border-border bg-background/60 px-2 py-1">
+                        <span className="mr-0.5 text-[10px] text-muted-foreground">重要性</span>
+                        {[1, 2, 3, 4, 5].map(score => (
+                          <button
+                            key={score}
+                            type="button"
+                            disabled={busyCampaignId === campaign.id}
+                            title={`设为 ${score} 分`}
+                            onClick={(event) => handleImportanceChange(event, campaign, score)}
+                            className="inline-flex h-5 w-5 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-[#F0B90B]/10 hover:text-[#F0B90B] disabled:opacity-50"
+                          >
+                            <Star
+                              className={`h-3.5 w-3.5 ${score <= importance ? 'text-[#F0B90B]' : ''}`}
+                              fill={score <= importance ? 'currentColor' : 'none'}
+                            />
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                    {!isOwnCampaign && importance > 0 && (
+                      <span className="rounded border border-border bg-background/60 px-2 py-1 text-[10px] text-muted-foreground">
+                        重要性 {importance}/5
+                      </span>
+                    )}
+                    {isOwnCampaign && (
+                      <button
+                        type="button"
+                        disabled={busyCampaignId === campaign.id}
+                        title="删除战役"
+                        onClick={(event) => handleDeleteCampaign(event, campaign)}
+                        className="inline-flex h-7 w-7 items-center justify-center rounded border border-border text-muted-foreground transition-colors hover:border-[#F6465D]/40 hover:bg-[#F6465D]/10 hover:text-[#F6465D] disabled:opacity-50"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    )}
+                    <div className={`px-2 py-0.5 rounded text-[11px] ${STATUS_STYLES[campaign.status] || 'bg-muted text-muted-foreground'}`}>
+                      {statusLabel}
+                    </div>
                   </div>
                 </div>
 

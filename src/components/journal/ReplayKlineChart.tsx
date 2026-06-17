@@ -62,8 +62,8 @@ export function ReplayKlineChart({
     const dataEndTime = latestCandleTime + intervalMs;
     const cursorLine: VerticalLine = {
       time: Math.min(currentTime, latestCandleTime),
-      color: 'rgba(240, 185, 11, 0.85)',
-      width: 1.2,
+      color: 'rgba(240, 185, 11, 0.72)',
+      width: 0.8,
     };
 
     return {

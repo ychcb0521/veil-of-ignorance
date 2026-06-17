@@ -346,6 +346,7 @@ export interface TradeCampaign {
   final_r_multiple: number | null;
   peak_unrealized_pnl: number | null;
   peak_drawdown: number | null;
+  importance_weight: number;
   notes: string | null;
   actual_evolution: CampaignEvent[];
   created_at: string;

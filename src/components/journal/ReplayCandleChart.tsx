@@ -35,6 +35,8 @@ export interface VerticalLine {
   z?: number;
   /** Solid when false, dashed otherwise. Defaults to dashed for backward compat. */
   dashed?: boolean;
+  label?: string;
+  labelColor?: string;
 }
 
 interface Props {
@@ -217,15 +219,28 @@ export function ReplayCandleChart({
         if (v.time < bounds.minT || v.time > bounds.maxT) return null;
         const x = xForTime(v.time);
         return (
-          <line key={i} x1={x} x2={x} y1={CHART_PAD_TOP} y2={H - CHART_PAD_BOTTOM}
-            stroke={v.color} strokeWidth={v.width ?? 1}
-            strokeDasharray={(v.dashed ?? true) ? '2 3' : undefined} />
+          <g key={i}>
+            <line x1={x} x2={x} y1={CHART_PAD_TOP} y2={H - CHART_PAD_BOTTOM}
+              stroke={v.color} strokeWidth={v.width ?? 1}
+              strokeDasharray={(v.dashed ?? true) ? '2 3' : undefined} />
+            {v.label && (
+              <text
+                x={x + 3}
+                y={H - CHART_PAD_BOTTOM - 5}
+                fontSize="8"
+                fill={v.labelColor ?? v.color}
+                fontFamily="monospace"
+              >
+                {v.label}
+              </text>
+            )}
+          </g>
         );
       })}
 
       {/* current cursor (always topmost) */}
       <line x1={cursorX} x2={cursorX} y1={CHART_PAD_TOP} y2={H - CHART_PAD_BOTTOM}
-        stroke="rgba(240, 185, 11, 0.85)" strokeWidth={1.2} />
+        stroke="rgba(240, 185, 11, 0.72)" strokeWidth={0.8} />
 
       {/* markers */}
       {markers.map((m, i) => {

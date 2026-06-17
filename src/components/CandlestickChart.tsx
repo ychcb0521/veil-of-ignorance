@@ -132,6 +132,8 @@ export interface AnalysisVerticalLine {
   width?: number;
   /** Solid when false, dashed otherwise. Defaults to dashed for backward compat. */
   dashed?: boolean;
+  label?: string;
+  labelColor?: string;
 }
 
 export interface AnalysisChartAnnotations {
@@ -779,6 +781,10 @@ function CandlestickChartComponent({
     const lastValue = newest.close;
     const formatPrice = (value: number) => value.toFixed(pricePrecision);
     const clampTime = (time: number) => Math.min(Math.max(time, minTime), maxTime);
+    const visibleLow = Math.min(...data.map(item => item.low));
+    const visibleHigh = Math.max(...data.map(item => item.high));
+    const visibleRange = Math.max(visibleHigh - visibleLow, Math.abs(visibleHigh) * 0.0001, 1);
+    const verticalLabelValue = visibleLow + visibleRange * 0.035;
 
     for (const line of analysisAnnotations.priceLines ?? []) {
       if (!Number.isFinite(line.price)) continue;
@@ -895,6 +901,30 @@ function CandlestickChartComponent({
           },
         },
       } as OverlayCreate);
+
+      if (vertical.label) {
+        chart.createOverlay({
+          name: "simpleAnnotation",
+          id: "analysis_annotations",
+          points: [{ timestamp: vertical.time, value: verticalLabelValue }],
+          lock: true,
+          extendData: vertical.label,
+          styles: {
+            text: {
+              color: vertical.labelColor ?? vertical.color,
+              size: 8,
+              borderColor: "rgba(132, 142, 156, 0.18)",
+              backgroundColor: "rgba(11, 14, 17, 0.36)",
+              borderRadius: 2,
+              paddingLeft: 2,
+              paddingRight: 2,
+              paddingTop: 1,
+              paddingBottom: 1,
+            },
+            point: { color: "rgba(0,0,0,0)" },
+          },
+        } as OverlayCreate);
+      }
     }
 
     for (const marker of analysisAnnotations.markers ?? []) {

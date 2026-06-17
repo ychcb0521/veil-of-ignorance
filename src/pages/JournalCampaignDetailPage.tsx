@@ -38,7 +38,7 @@ import {
   runAndPersistDeviationCosts,
   runAndPersistPureSop,
 } from '@/lib/journalApi';
-import { STRATEGY_TEMPLATES } from '@/lib/strategyTemplates';
+import { LEG_ROLE_LABELS, STRATEGY_TEMPLATES } from '@/lib/strategyTemplates';
 import type {
   CampaignCounterfactual,
   CampaignCounterfactualParams,
@@ -124,8 +124,18 @@ function buildDefaultWhatIfParams(campaign: TradeCampaign, legs: TradeJournal[])
 }
 
 // 开单/平单竖线配色：多单蓝、空单橘（与持仓方向绑定，独立于 leg_role 的标记色）。
-const LEG_LONG_COLOR = '#2B80FF';
-const LEG_SHORT_COLOR = '#F7931A';
+const LEG_LONG_LINE_COLOR = 'rgba(43,128,255,0.38)';
+const LEG_SHORT_LINE_COLOR = 'rgba(247,147,26,0.38)';
+const LEG_LONG_LABEL_COLOR = 'rgba(43,128,255,0.78)';
+const LEG_SHORT_LABEL_COLOR = 'rgba(247,147,26,0.78)';
+const CAMPAIGN_VERTICAL_LINE_WIDTH = 0.5;
+const LEG_VERTICAL_LINE_WIDTH = 0.65;
+
+function legEventLabel(role: TradeJournal['leg_role'], action: '开仓' | '平仓') {
+  const roleLabel = role ? LEG_ROLE_LABELS[role] ?? role : '未归类';
+  if (action === '开仓' && roleLabel.endsWith('开仓')) return roleLabel;
+  return `${roleLabel}${action}`;
+}
 
 function buildChartArtifacts(
   campaign: TradeCampaign,
@@ -141,14 +151,14 @@ function buildChartArtifacts(
   verticalLines.push({
     time: new Date(campaign.opened_at).getTime(),
     color: 'rgba(255,255,255,0.45)',
-    width: 1,
+    width: CAMPAIGN_VERTICAL_LINE_WIDTH,
     z: 1,
   });
   if (campaign.closed_at) {
     verticalLines.push({
       time: new Date(campaign.closed_at).getTime(),
       color: 'rgba(255,255,255,0.45)',
-      width: 1,
+      width: CAMPAIGN_VERTICAL_LINE_WIDTH,
       z: 1,
     });
   }
@@ -161,8 +171,8 @@ function buildChartArtifacts(
   for (const event of stateEvents) {
     verticalLines.push({
       time: new Date(event.timestamp).getTime(),
-      color: 'rgba(240,185,11,0.6)',
-      width: 1.2,
+      color: 'rgba(240,185,11,0.42)',
+      width: LEG_VERTICAL_LINE_WIDTH,
       z: 2,
     });
   }
@@ -198,10 +208,27 @@ function buildChartArtifacts(
     markers.push({ time: record?.openTime ?? placedMs, price, shape, color, label });
 
     // 按方向配色的开单/平单竖线：开单实线，平单虚线；多单蓝、空单橘。
-    const legDirColor = leg.direction === 'short' ? LEG_SHORT_COLOR : LEG_LONG_COLOR;
-    verticalLines.push({ time: record?.openTime ?? placedMs, color: legDirColor, width: 1.2, z: 3, dashed: false });
+    const legDirColor = leg.direction === 'short' ? LEG_SHORT_LINE_COLOR : LEG_LONG_LINE_COLOR;
+    const legLabelColor = leg.direction === 'short' ? LEG_SHORT_LABEL_COLOR : LEG_LONG_LABEL_COLOR;
+    verticalLines.push({
+      time: record?.openTime ?? placedMs,
+      color: legDirColor,
+      width: LEG_VERTICAL_LINE_WIDTH,
+      z: 3,
+      dashed: false,
+      label: legEventLabel(leg.leg_role, '开仓'),
+      labelColor: legLabelColor,
+    });
     if (record) {
-      verticalLines.push({ time: record.closeTime, color: legDirColor, width: 1.2, z: 3, dashed: true });
+      verticalLines.push({
+        time: record.closeTime,
+        color: legDirColor,
+        width: LEG_VERTICAL_LINE_WIDTH,
+        z: 3,
+        dashed: true,
+        label: legEventLabel(leg.leg_role, '平仓'),
+        labelColor: legLabelColor,
+      });
     }
 
     const cancelEvent = events.find(event => event.journal_id === leg.id && event.event_type === 'hedge_cancelled') ?? null;
@@ -284,8 +311,8 @@ function buildCounterfactualChartArtifacts(
       });
       verticalLines.push({
         time,
-        color: 'rgba(176,128,255,0.55)',
-        width: 1,
+        color: 'rgba(176,128,255,0.38)',
+        width: LEG_VERTICAL_LINE_WIDTH,
         z: 2,
       });
     }
@@ -299,8 +326,8 @@ function buildCounterfactualChartArtifacts(
       });
       verticalLines.push({
         time,
-        color: 'rgba(176,128,255,0.55)',
-        width: 1,
+        color: 'rgba(176,128,255,0.38)',
+        width: LEG_VERTICAL_LINE_WIDTH,
         z: 2,
       });
     }

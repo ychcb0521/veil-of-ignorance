@@ -552,6 +552,7 @@ function buildSyntheticCampaignAndLegs(
     final_r_multiple: result.final_r_multiple,
     peak_unrealized_pnl: result.peak_unrealized_pnl,
     peak_drawdown: result.peak_drawdown,
+    importance_weight: 0,
     notes: null,
     actual_evolution: events.map((event, index) => ({
       id: `synthetic-event-${index + 1}`,

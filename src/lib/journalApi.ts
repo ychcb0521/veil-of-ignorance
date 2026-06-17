@@ -68,7 +68,11 @@ function wrap<T>(label: string, error: { message: string } | null, data: T | nul
 }
 
 function toCampaign(row: unknown): TradeCampaign {
-  return row as TradeCampaign;
+  const campaign = row as TradeCampaign;
+  return {
+    ...campaign,
+    importance_weight: normalizeCampaignImportance(campaign?.importance_weight),
+  };
 }
 
 function toCampaignCounterfactual(row: unknown): CampaignCounterfactual {
@@ -171,6 +175,7 @@ type CognitiveAssetsRow = {
 
 const COGNITIVE_ASSETS_STORAGE_KEY = 'cognitive_assets_doc';
 const TRADE_CAMPAIGNS_STORAGE_KEY = 'trade_campaigns';
+const TRADE_CAMPAIGN_PREFS_STORAGE_KEY = 'trade_campaign_preferences';
 
 function getInitialCognitiveAssetsDoc(): CognitiveAssetsDoc {
   return deepClone(INITIAL_COGNITIVE_ASSETS);
@@ -311,6 +316,12 @@ function isMissingTradeCampaignsTableError(error: { code?: string; message?: str
   return error.code === 'PGRST205'
     || error.code === '42P01'
     || (/trade_campaigns/i.test(message) && /schema cache|could not find|does not exist/i.test(message));
+}
+
+function isMissingCampaignImportanceColumnError(error: { code?: string; message?: string } | null): boolean {
+  if (!error) return false;
+  const message = error.message ?? '';
+  return /importance_weight/i.test(message) && /schema cache|could not find|does not exist|column/i.test(message);
 }
 
 function isMissingTradeJournalsFeatureError(error: { code?: string; message?: string } | null): boolean {
@@ -605,15 +616,32 @@ function isCampaignNotFoundError(error: { code?: string; message?: string } | nu
   return error.code === 'PGRST116' || /no rows|0 rows/i.test(message);
 }
 
+type LocalCampaignPreference = {
+  importance_weight?: number;
+};
+
+type LocalCampaignPreferenceMap = Record<string, LocalCampaignPreference>;
+
+function normalizeCampaignImportance(value: unknown): number {
+  const num = typeof value === 'number' ? value : Number(value);
+  if (!Number.isFinite(num)) return 0;
+  return Math.max(0, Math.min(5, Math.round(num)));
+}
+
 function normalizeLocalCampaigns(raw: unknown): TradeCampaign[] {
   if (!Array.isArray(raw)) return [];
-  return raw.filter((item): item is TradeCampaign => (
-    isRecord(item)
-    && typeof item.id === 'string'
-    && typeof item.user_id === 'string'
-    && typeof item.symbol === 'string'
-    && typeof item.title === 'string'
-  ));
+  return raw
+    .filter((item): item is TradeCampaign => (
+      isRecord(item)
+      && typeof item.id === 'string'
+      && typeof item.user_id === 'string'
+      && typeof item.symbol === 'string'
+      && typeof item.title === 'string'
+    ))
+    .map(campaign => ({
+      ...campaign,
+      importance_weight: normalizeCampaignImportance(campaign.importance_weight),
+    }));
 }
 
 function readLocalCampaigns(userId: string): TradeCampaign[] {
@@ -641,8 +669,66 @@ function findLocalCampaign(userId: string, campaignId: string): TradeCampaign | 
   return readLocalCampaigns(userId).find(item => item.id === campaignId) ?? null;
 }
 
+function normalizeLocalCampaignPreferences(raw: unknown): LocalCampaignPreferenceMap {
+  if (!isRecord(raw)) return {};
+  return Object.fromEntries(
+    Object.entries(raw)
+      .filter(([campaignId]) => typeof campaignId === 'string')
+      .map(([campaignId, value]) => [
+        campaignId,
+        { importance_weight: isRecord(value) ? normalizeCampaignImportance(value.importance_weight) : 0 },
+      ]),
+  );
+}
+
+function readLocalCampaignPreferences(userId: string): LocalCampaignPreferenceMap {
+  return normalizeLocalCampaignPreferences(readUserScopedStorage<unknown>(userId, TRADE_CAMPAIGN_PREFS_STORAGE_KEY, {}));
+}
+
+function writeLocalCampaignPreferences(userId: string, preferences: LocalCampaignPreferenceMap): void {
+  writeUserScopedStorage(userId, TRADE_CAMPAIGN_PREFS_STORAGE_KEY, preferences);
+}
+
+function upsertLocalCampaignPreference(userId: string, campaignId: string, patch: LocalCampaignPreference): void {
+  const current = readLocalCampaignPreferences(userId);
+  current[campaignId] = {
+    ...current[campaignId],
+    ...patch,
+    importance_weight: normalizeCampaignImportance(patch.importance_weight ?? current[campaignId]?.importance_weight),
+  };
+  writeLocalCampaignPreferences(userId, current);
+}
+
+function removeLocalCampaignPreference(userId: string, campaignId: string): void {
+  const current = readLocalCampaignPreferences(userId);
+  delete current[campaignId];
+  writeLocalCampaignPreferences(userId, current);
+}
+
+function withCampaignPreferences(userId: string, campaigns: TradeCampaign[]): TradeCampaign[] {
+  const preferences = readLocalCampaignPreferences(userId);
+  return sortCampaignsByImportance(campaigns.map(campaign => {
+    const localImportance = preferences[campaign.id]?.importance_weight;
+    return {
+      ...campaign,
+      importance_weight: normalizeCampaignImportance(localImportance ?? campaign.importance_weight),
+    };
+  }));
+}
+
+function campaignSortTime(campaign: Pick<TradeCampaign, 'opened_at' | 'created_at'>): number {
+  return new Date(campaign.opened_at || campaign.created_at).getTime() || 0;
+}
+
+function sortCampaignsByImportance(rows: TradeCampaign[]): TradeCampaign[] {
+  return [...rows].sort((a, b) => (
+    normalizeCampaignImportance(b.importance_weight) - normalizeCampaignImportance(a.importance_weight)
+    || campaignSortTime(b) - campaignSortTime(a)
+  ));
+}
+
 function applyCampaignFilters(rows: TradeCampaign[], filters?: ListCampaignFilters): TradeCampaign[] {
-  return rows
+  return sortCampaignsByImportance(rows
     .filter(campaign => {
       if (filters?.status && filters.status !== 'all' && campaign.status !== filters.status) return false;
       if (filters?.symbol && campaign.symbol !== filters.symbol) return false;
@@ -650,15 +736,14 @@ function applyCampaignFilters(rows: TradeCampaign[], filters?: ListCampaignFilte
       if (filters?.dateFrom && openedAt < new Date(filters.dateFrom).getTime()) return false;
       if (filters?.dateTo && openedAt > new Date(filters.dateTo).getTime()) return false;
       return true;
-    })
-    .sort((a, b) => new Date(b.opened_at).getTime() - new Date(a.opened_at).getTime());
+    }));
 }
 
 function mergeCampaigns(remote: TradeCampaign[], local: TradeCampaign[]): TradeCampaign[] {
   const merged = new Map<string, TradeCampaign>();
   local.forEach(campaign => merged.set(campaign.id, campaign));
   remote.forEach(campaign => merged.set(campaign.id, campaign));
-  return [...merged.values()].sort((a, b) => new Date(b.opened_at).getTime() - new Date(a.opened_at).getTime());
+  return sortCampaignsByImportance([...merged.values()]);
 }
 
 async function getAuthenticatedUserId(label: string): Promise<string> {
@@ -690,6 +775,7 @@ function buildLocalCampaignFromCreateInput(
     final_r_multiple: null,
     peak_unrealized_pnl: null,
     peak_drawdown: null,
+    importance_weight: 0,
     notes: input.notes ?? null,
     actual_evolution: [event],
     created_at: now,
@@ -985,6 +1071,30 @@ export async function updateCampaign(
   return wrap('更新战役', error, toCampaign(data));
 }
 
+export async function updateCampaignImportance(id: string, importanceWeight: number): Promise<number> {
+  const userId = await getAuthenticatedUserId('更新战役重要性');
+  const normalized = normalizeCampaignImportance(importanceWeight);
+  upsertLocalCampaignPreference(userId, id, { importance_weight: normalized });
+
+  const { error } = await supabase
+    .from('trade_campaigns' as never)
+    .update({ importance_weight: normalized } as never)
+    .eq('id', id);
+
+  if (error) {
+    if (isMissingTradeCampaignsTableError(error) || isCampaignNotFoundError(error) || isMissingCampaignImportanceColumnError(error)) {
+      return normalized;
+    }
+    throw new Error(`更新战役重要性失败：${error.message}`);
+  }
+
+  const local = findLocalCampaign(userId, id);
+  if (local) {
+    upsertLocalCampaign({ ...local, importance_weight: normalized, updated_at: new Date().toISOString() });
+  }
+  return normalized;
+}
+
 export async function closeCampaign(
   id: string,
   finalState: {
@@ -1009,12 +1119,14 @@ export async function deleteCampaign(id: string): Promise<void> {
     if (isMissingTradeCampaignsTableError(error) || isCampaignNotFoundError(error)) {
       const userId = await getAuthenticatedUserId('删除战役');
       removeLocalCampaign(userId, id);
+      removeLocalCampaignPreference(userId, id);
       return;
     }
     throw new Error(`删除战役失败：${error.message}`);
   }
   const userId = await getAuthenticatedUserId('删除战役');
   removeLocalCampaign(userId, id);
+  removeLocalCampaignPreference(userId, id);
 }
 
 export async function listActiveCampaigns(userId: string, symbol?: string): Promise<TradeCampaign[]> {
@@ -1027,10 +1139,10 @@ export async function listActiveCampaigns(userId: string, symbol?: string): Prom
   const { data, error } = await q.order('opened_at', { ascending: false });
   const local = applyCampaignFilters(readLocalCampaigns(userId), { status: 'active', symbol });
   if (error) {
-    if (isMissingTradeCampaignsTableError(error)) return local;
+    if (isMissingTradeCampaignsTableError(error)) return withCampaignPreferences(userId, local);
     return wrap('加载进行中的战役', error, (data ?? []).map(toCampaign));
   }
-  return mergeCampaigns((data ?? []).map(toCampaign), local);
+  return withCampaignPreferences(userId, mergeCampaigns((data ?? []).map(toCampaign), local));
 }
 
 export async function listAllCampaigns(
@@ -1045,10 +1157,10 @@ export async function listAllCampaigns(
   const { data, error } = await q.order('opened_at', { ascending: false });
   const local = applyCampaignFilters(readLocalCampaigns(userId), filters);
   if (error) {
-    if (isMissingTradeCampaignsTableError(error)) return local;
+    if (isMissingTradeCampaignsTableError(error)) return withCampaignPreferences(userId, local);
     return wrap('加载战役列表', error, (data ?? []).map(toCampaign));
   }
-  return mergeCampaigns((data ?? []).map(toCampaign), local);
+  return withCampaignPreferences(userId, mergeCampaigns((data ?? []).map(toCampaign), local));
 }
 
 export async function listVisibleCampaigns(
@@ -1063,10 +1175,10 @@ export async function listVisibleCampaigns(
   const { data, error } = await q.order('opened_at', { ascending: false });
   const local = applyCampaignFilters(readLocalCampaigns(userId), filters);
   if (error) {
-    if (isMissingTradeCampaignsTableError(error)) return local;
+    if (isMissingTradeCampaignsTableError(error)) return withCampaignPreferences(userId, local);
     return wrap('加载可见战役列表', error, (data ?? []).map(toCampaign));
   }
-  return mergeCampaigns((data ?? []).map(toCampaign), local);
+  return withCampaignPreferences(userId, mergeCampaigns((data ?? []).map(toCampaign), local));
 }
 
 export async function getCampaignWithLegs(
@@ -1087,6 +1199,8 @@ export async function getCampaignWithLegs(
   } else {
     resolvedCampaign = toCampaign(campaign);
   }
+  const resolvedUserId = resolvedCampaign.user_id;
+  resolvedCampaign = withCampaignPreferences(resolvedUserId, [resolvedCampaign])[0] ?? resolvedCampaign;
   if (!resolvedCampaign) throw new Error('加载战役失败：返回数据为空');
 
   const { data: legs, error: lErr } = await supabase
@@ -1746,6 +1860,7 @@ export async function createCampaignFromJournals(input: {
     final_r_multiple: null,
     peak_unrealized_pnl: null,
     peak_drawdown: null,
+    importance_weight: 0,
     notes: input.notes?.trim() || null,
     actual_evolution: [],
     created_at: new Date().toISOString(),
@@ -1877,6 +1992,7 @@ export async function createCampaignFromTradeRecords(input: {
     final_r_multiple: null,
     peak_unrealized_pnl: null,
     peak_drawdown: null,
+    importance_weight: 0,
     notes,
     actual_evolution: events,
     created_at: now,
