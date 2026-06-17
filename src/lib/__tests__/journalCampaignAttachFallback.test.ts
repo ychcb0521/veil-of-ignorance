@@ -5,10 +5,17 @@ import type { TradeRecord } from '@/types/trading';
 let campaign: TradeCampaign;
 let journals: TradeJournal[];
 let campaignUpdates: Array<Record<string, unknown>>;
+let campaignUpdateError: { code: string; message: string } | null;
+let journalUpdateError: { code: string; message: string } | null;
 
 const missingCampaignColumnError = {
   code: 'PGRST204',
   message: "Could not find the 'campaign_id' column of 'trade_journals' in the schema cache",
+};
+
+const missingCampaignTableError = {
+  code: 'PGRST205',
+  message: "Could not find the table 'public.trade_campaigns' in the schema cache",
 };
 
 function baseCampaign(events: CampaignEvent[] = []): TradeCampaign {
@@ -28,6 +35,7 @@ function baseCampaign(events: CampaignEvent[] = []): TradeCampaign {
     final_r_multiple: null,
     peak_unrealized_pnl: null,
     peak_drawdown: null,
+    importance_weight: 0,
     notes: null,
     actual_evolution: events.length > 0 ? events : [{
       id: 'event-historical-created',
@@ -116,12 +124,17 @@ vi.mock('@/integrations/supabase/client', () => {
 
     const resolveResult = () => {
       if (table === 'trade_campaigns') {
+        if (updatePayload) {
+          if (campaignUpdateError) return { data: null, error: campaignUpdateError };
+          campaignUpdates.push(updatePayload);
+          campaign = { ...campaign, ...updatePayload, updated_at: '2026-06-17T06:00:00.000Z' };
+        }
         return { data: campaign, error: null };
       }
       if (table === 'trade_journals') {
-        if (updatePayload) return { data: null, error: missingCampaignColumnError };
+        if (updatePayload) return { data: null, error: journalUpdateError };
         if (useInIds) return { data: journals, error: null };
-        if (filters.campaign_id) return { data: null, error: missingCampaignColumnError };
+        if (filters.campaign_id && journalUpdateError) return { data: null, error: journalUpdateError };
         return { data: journals, error: null };
       }
       return { data: null, error: null };
@@ -135,10 +148,6 @@ vi.mock('@/integrations/supabase/client', () => {
       },
       eq(column: string, value: unknown) {
         filters = { ...filters, [column]: value };
-        if (table === 'trade_campaigns' && updatePayload) {
-          campaignUpdates.push(updatePayload);
-          campaign = { ...campaign, ...updatePayload, updated_at: '2026-06-17T06:00:00.000Z' };
-        }
         return builder;
       },
       in() {
@@ -179,6 +188,9 @@ describe('batchAttachToCampaign schema fallback', () => {
       }),
     ];
     campaignUpdates = [];
+    campaignUpdateError = null;
+    journalUpdateError = missingCampaignColumnError;
+    localStorage.clear();
     localStorage.setItem('sim_user-1_trade_history', JSON.stringify([
       baseRecord(1),
       baseRecord(2, {
@@ -224,5 +236,49 @@ describe('batchAttachToCampaign schema fallback', () => {
       ]),
     );
     expect(campaignUpdates.some(update => Array.isArray(update.actual_evolution))).toBe(true);
+  });
+
+  it('falls back to the local campaign mirror when trade_campaigns event update is absent from schema cache', async () => {
+    journalUpdateError = null;
+    campaignUpdateError = missingCampaignTableError;
+
+    await expect(batchAttachToCampaign('campaign-1', [
+      {
+        journalId: 'journal-1',
+        legRole: 'main_open',
+        legSequence: 1,
+        attachNote: 'classified retroactively',
+      },
+      {
+        journalId: 'journal-2',
+        legRole: 'main_add_1',
+        legSequence: 2,
+        attachNote: 'classified retroactively',
+      },
+    ])).resolves.toBeUndefined();
+
+    const localCampaigns = JSON.parse(localStorage.getItem('sim_user-1_trade_campaigns') ?? '[]') as TradeCampaign[];
+    expect(localCampaigns).toHaveLength(1);
+    expect(localCampaigns[0]).toMatchObject({
+      id: 'campaign-1',
+      symbol: 'ASTERUSDT',
+      status: 'closed_profit',
+    });
+    expect(localCampaigns[0].actual_evolution).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          event_type: 'historical_leg_attached',
+          leg_role: 'main_open',
+          journal_id: 'journal-1',
+          trade_record_id: 'record-1',
+        }),
+        expect.objectContaining({
+          event_type: 'historical_leg_attached',
+          leg_role: 'main_add_1',
+          journal_id: 'journal-2',
+          trade_record_id: 'record-2',
+        }),
+      ]),
+    );
   });
 });

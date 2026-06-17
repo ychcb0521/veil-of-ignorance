@@ -1784,7 +1784,18 @@ export async function batchAttachToCampaign(
       .from('trade_campaigns' as never)
       .update(patch as never)
       .eq('id', campaignId);
-    if (campaignErr) throw new Error(`更新战役事件流失败：${campaignErr.message}`);
+    if (campaignErr) {
+      if (isMissingTradeCampaignsTableError(campaignErr) || isCampaignNotFoundError(campaignErr)) {
+        upsertLocalCampaign({
+          ...campaign,
+          ...patch,
+          actual_evolution: nextEvents,
+          updated_at: new Date().toISOString(),
+        });
+        return;
+      }
+      throw new Error(`更新战役事件流失败：${campaignErr.message}`);
+    }
 
     if (!journalCampaignColumnsUnavailable) {
       await normalizeCampaignLegSequences(campaignId);
@@ -1838,6 +1849,7 @@ export async function createCampaignFromJournals(input: {
   const userId = auth.user?.id;
   if (!userId) throw new Error('创建战役失败：用户未登录');
 
+  const now = new Date().toISOString();
   const tradeRecordMap = getTradeRecordMapForUser(userId);
   const draftLegs = orderedLegs.map(item => ({
     ...item.journal,
@@ -1863,8 +1875,8 @@ export async function createCampaignFromJournals(input: {
     importance_weight: 0,
     notes: input.notes?.trim() || null,
     actual_evolution: [],
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
+    created_at: now,
+    updated_at: now,
   } satisfies TradeCampaign;
   const derivedPatch = deriveCampaignPatchFromLegs(draftCampaign, draftLegs, tradeRecordMap);
   const payload = {
@@ -1892,7 +1904,7 @@ export async function createCampaignFromJournals(input: {
       price: null,
       size_usdt: null,
       notes: input.notes?.trim() || null,
-      recorded_at: new Date().toISOString(),
+      recorded_at: now,
     }],
   };
 
@@ -1901,7 +1913,20 @@ export async function createCampaignFromJournals(input: {
     .insert(payload as never)
     .select()
     .single();
-  const campaign = wrap('创建战役', error, toCampaign(data));
+  let campaign: TradeCampaign;
+  if (error && isMissingTradeCampaignsTableError(error)) {
+    campaign = {
+      ...draftCampaign,
+      ...derivedPatch,
+      status: derivedPatch.status ?? 'active',
+      actual_evolution: payload.actual_evolution,
+      created_at: now,
+      updated_at: now,
+    };
+    upsertLocalCampaign(campaign);
+  } else {
+    campaign = wrap('创建战役', error, toCampaign(data));
+  }
 
   try {
     await batchAttachToCampaign(
@@ -1920,6 +1945,7 @@ export async function createCampaignFromJournals(input: {
       .from('trade_campaigns' as never)
       .delete()
       .eq('id', campaign.id);
+    removeLocalCampaign(userId, campaign.id);
     throw attachError instanceof Error ? attachError : new Error(String(attachError));
   }
 }
