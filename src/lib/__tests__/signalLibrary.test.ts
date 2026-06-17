@@ -4,10 +4,14 @@ import {
   parseSignalText,
   serializeSignals,
   mergeSignals,
+  getDefaultSignals,
+  loadSignals,
+  saveSignals,
   sortSignalsAlpha,
   sortSignalsByTime,
   signalMonthKey,
   listSignalMonths,
+  SIGNAL_LIBRARY_STORAGE_KEY,
   type TradeSignal,
 } from '@/lib/signalLibrary';
 
@@ -261,5 +265,33 @@ describe('listSignalMonths', () => {
       mk('D', '2025-12-31 23:00'),
     ]);
     expect(months).toEqual(['2026-04', '2026-03', '2025-12']);
+  });
+});
+
+describe('default signal library', () => {
+  it('parses the bundled default library from the provided source text', () => {
+    const defaults = getDefaultSignals();
+    expect(defaults.length).toBeGreaterThan(250);
+    expect(defaults[0]).toMatchObject({
+      id: expect.stringMatching(/^default-JTOUSDT-/),
+      symbol: 'JTOUSDT',
+      fallbackZone: '0.708',
+    });
+    expect(defaults.some(s => s.symbol === 'PUMPBTCUSDT' && s.timeLabel === '2025-09-22 18:33:00')).toBe(true);
+    expect(defaults.some(s => s.symbol === 'PROMPTUSDT' && s.fallbackZone === '0.475')).toBe(true);
+  });
+
+  it('uses the bundled library only before the user has a local signal library', () => {
+    window.localStorage.removeItem(SIGNAL_LIBRARY_STORAGE_KEY);
+    expect(loadSignals().length).toBe(getDefaultSignals().length);
+
+    saveSignals([]);
+    expect(loadSignals()).toEqual([]);
+
+    const custom: TradeSignal[] = [
+      { id: 'custom-1', symbol: 'BTCUSDT', timeMs: 100, timeLabel: '2026-01-01 00:00:00', fallbackZone: '1' },
+    ];
+    saveSignals(custom);
+    expect(loadSignals()).toEqual(custom);
   });
 });

@@ -164,6 +164,8 @@ interface Props {
   analysisMode?: boolean;
   /** Non-trading overlays rendered by replay and campaign review pages. */
   analysisAnnotations?: AnalysisChartAnnotations;
+  /** Optional analysis anchor used to center short replay/campaign windows instead of snapping to the latest candle. */
+  analysisFocusTime?: number | null;
   /** K 线时间轴的显示时区（IANA 名）。默认 Asia/Shanghai，与主交易页一致；战役页用 UTC。 */
   timezone?: string;
 }
@@ -335,6 +337,7 @@ function CandlestickChartComponent({
   onPricePicked,
   analysisMode = false,
   analysisAnnotations,
+  analysisFocusTime = null,
   timezone = "Asia/Shanghai",
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -355,6 +358,22 @@ function CandlestickChartComponent({
   const crosshairPriceRef = useRef<number | null>(null);
 
   const activeIndicatorPanes = useRef<Map<string, string | null>>(new Map());
+
+  const centerAnalysisWindow = useCallback(() => {
+    const chart = chartRef.current;
+    if (!chart || typeof analysisFocusTime !== "number" || !Number.isFinite(analysisFocusTime)) return false;
+
+    chart.scrollToTimestamp(analysisFocusTime, 0);
+
+    const size = chart.getSize();
+    const chartWidth = size?.width ?? 0;
+    const dataWidth = data.length * chart.getBarSpace();
+    const centeredRightOffset = (chartWidth - dataWidth) / 2;
+    if (Number.isFinite(centeredRightOffset) && centeredRightOffset > 0) {
+      chart.setOffsetRightDistance(centeredRightOffset);
+    }
+    return true;
+  }, [analysisFocusTime, data.length]);
 
   // ============================================================
   // Clear overlays on symbol change to prevent cross-symbol pollution
@@ -569,8 +588,12 @@ function CandlestickChartComponent({
     ) {
       requestAnimationFrame(() => {
         chartRef.current?.scrollByDistance(0, 0);
-        // klinecharts v9 does not have fitContent; use scrollToRealTime to snap to latest
-        chartRef.current?.scrollToRealTime();
+        // klinecharts v9 does not have fitContent. Analysis surfaces can provide
+        // an anchor timestamp so short campaign windows open around the relevant
+        // candles instead of snapping to the latest bar.
+        if (!centerAnalysisWindow()) {
+          chartRef.current?.scrollToRealTime();
+        }
       });
     }
 
@@ -578,7 +601,14 @@ function CandlestickChartComponent({
     prevOldestRef.current = currentOldest;
     prevNewestRef.current = lastCandle.timestamp as number;
     prevLastSigRef.current = lastSig;
-  }, [data]);
+  }, [centerAnalysisWindow, data]);
+
+  useEffect(() => {
+    if (data.length === 0) return;
+    requestAnimationFrame(() => {
+      centerAnalysisWindow();
+    });
+  }, [centerAnalysisWindow, data]);
 
   // ============================================================
   // TRADE MARKERS — data-driven: clear all then redraw from tradeHistory
@@ -1213,7 +1243,9 @@ function areChartPropsEqual(prev: Props, next: Props) {
     prev.pickMode === next.pickMode &&
     prev.onPricePicked === next.onPricePicked &&
     prev.analysisMode === next.analysisMode &&
-    prev.analysisAnnotations === next.analysisAnnotations
+    prev.analysisAnnotations === next.analysisAnnotations &&
+    prev.analysisFocusTime === next.analysisFocusTime &&
+    prev.timezone === next.timezone
   );
 }
 

@@ -1874,20 +1874,21 @@ export async function detachJournalFromCampaign(journalId: string): Promise<void
       .eq('id', journal.id);
     if (journalErr) throw new Error(`解除归属失败：${journalErr.message}`);
 
+    const detachRecordedAt = new Date().toISOString();
     const nextEvents: CampaignEvent[] = [
-      ...campaign.actual_evolution,
+      ...campaign.actual_evolution.filter(event => event.journal_id !== journal.id),
       {
         id: crypto.randomUUID(),
-        timestamp: new Date().toISOString(),
+        timestamp: detachRecordedAt,
         event_type: 'note',
         leg_role: journal.leg_role,
-        journal_id: journal.id,
-        trade_record_id: journal.trade_record_id,
+        journal_id: null,
+        trade_record_id: null,
         pending_order_id: null,
         price: journal.pre_entry_price,
         size_usdt: journal.pre_position_size,
         notes: `leg ${journal.leg_role ?? 'unknown'} 已被解除归属（journal ${journal.id}）`,
-        recorded_at: new Date().toISOString(),
+        recorded_at: detachRecordedAt,
       },
     ];
     const { error: campaignErr } = await supabase
@@ -1907,6 +1908,67 @@ export async function detachJournalFromCampaign(journalId: string): Promise<void
       .from('trade_campaigns' as never)
       .update(originalCampaignPatch as never)
       .eq('id', campaign.id);
+    throw error instanceof Error ? error : new Error(String(error));
+  }
+}
+
+export async function detachCampaignLegFromCampaign(
+  campaignId: string,
+  leg: Pick<TradeJournal, 'id' | 'trade_record_id' | 'leg_role' | 'pre_entry_price' | 'pre_position_size' | 'source'>,
+): Promise<void> {
+  const isRecordBackedLeg = leg.id.startsWith('record-') || leg.source === 'retroactive_from_record';
+  if (!isRecordBackedLeg) {
+    await detachJournalFromCampaign(leg.id);
+    return;
+  }
+
+  const recordId = leg.trade_record_id ?? (leg.id.startsWith('record-') ? leg.id.slice('record-'.length) : null);
+  if (!recordId) {
+    throw new Error('解除归属失败：该历史成交 leg 缺少 trade_record_id，无法定位原始成交记录');
+  }
+
+  const { campaign } = await getCampaignWithLegs(campaignId);
+  const originalCampaignPatch = campaignSnapshotPatch(campaign);
+  const retainedEvents = campaign.actual_evolution.filter(event => event.trade_record_id !== recordId);
+  if (retainedEvents.length === campaign.actual_evolution.length) return;
+
+  const now = new Date().toISOString();
+  const nextEvents: CampaignEvent[] = [
+    ...retainedEvents,
+    {
+      id: crypto.randomUUID(),
+      timestamp: now,
+      event_type: 'note',
+      leg_role: leg.leg_role ?? null,
+      journal_id: null,
+      trade_record_id: null,
+      pending_order_id: null,
+      price: leg.pre_entry_price,
+      size_usdt: leg.pre_position_size,
+      notes: `leg ${leg.leg_role ?? 'unknown'} 已被解除归属（record ${recordId}）`,
+      recorded_at: now,
+    },
+  ];
+
+  try {
+    const { error } = await supabase
+      .from('trade_campaigns' as never)
+      .update({ actual_evolution: nextEvents } as never)
+      .eq('id', campaignId);
+    if (error) {
+      if (isMissingTradeCampaignsTableError(error) || isCampaignNotFoundError(error)) {
+        upsertLocalCampaign({ ...campaign, actual_evolution: nextEvents, updated_at: now });
+      } else {
+        throw new Error(`解除归属失败：${error.message}`);
+      }
+    }
+
+    await recomputeCampaignDerivedFields(campaignId);
+  } catch (error) {
+    await supabase
+      .from('trade_campaigns' as never)
+      .update(originalCampaignPatch as never)
+      .eq('id', campaignId);
     throw error instanceof Error ? error : new Error(String(error));
   }
 }

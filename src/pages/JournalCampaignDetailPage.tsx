@@ -27,7 +27,7 @@ import {
 } from '@/lib/campaignAnalysis';
 import {
   deleteCounterfactual,
-  detachJournalFromCampaign,
+  detachCampaignLegFromCampaign,
   createCampaignComment,
   followAccount,
   getCampaignFullData,
@@ -531,10 +531,14 @@ export default function JournalCampaignDetailPage() {
   // 会把晚于它的开/平竖线全过滤掉、并把右沿拉到无关行情。改为对齐 legTimeSpan 末端即可保证每条腿的竖线都渲染。
   // 必须放在上面的 loading guard 之后——此时 campaign 一定非空；放在 guard 之前会在
   // 首帧（campaign 仍为 null）就解引用 campaign.opened_at 直接崩溃、整页白屏。
-  const chartCurrentTime = focusTime
-    ?? (legTimeSpan.endMs != null
-      ? legTimeSpan.endMs + CAMPAIGN_EDGE_PAD_MS
-      : new Date(effectiveClosedAt ?? campaign.opened_at).getTime());
+  const chartDefaultCurrentTime = legTimeSpan.endMs != null
+    ? legTimeSpan.endMs + CAMPAIGN_EDGE_PAD_MS
+    : new Date(effectiveClosedAt ?? campaign.opened_at).getTime();
+  const chartDefaultViewportCenterTime = legTimeSpan.startMs != null && legTimeSpan.endMs != null
+    ? Math.round((legTimeSpan.startMs + legTimeSpan.endMs) / 2)
+    : chartDefaultCurrentTime;
+  const chartCurrentTime = focusTime ?? chartDefaultCurrentTime;
+  const chartViewportCenterTime = focusTime ?? chartDefaultViewportCenterTime;
 
   const mainCount = legs.filter((leg: TradeJournal) => leg.leg_role === 'main_open' || leg.leg_role === 'reentry_main').length;
   const hedgeCount = legs.filter((leg: TradeJournal) => leg.leg_role?.startsWith('hedge_')).length;
@@ -901,6 +905,7 @@ export default function JournalCampaignDetailPage() {
                   timeBoundPriceLines={displayPriceLines}
                   verticalLines={displayVerticalLines}
                   historyCandles={1440}
+                  viewportCenterTime={chartViewportCenterTime}
                   timezone="UTC"
                 />
               )}
@@ -1316,7 +1321,7 @@ export default function JournalCampaignDetailPage() {
                   if (!detachTarget) return;
                   try {
                     setDetaching(true);
-                    await detachJournalFromCampaign(detachTarget.id);
+                    await detachCampaignLegFromCampaign(campaign.id, detachTarget);
                     await refreshCampaign();
                     setDetachTarget(null);
                     toast.success('该 leg 已解除归属');

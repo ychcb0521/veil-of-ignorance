@@ -14,6 +14,8 @@
  * 时间语义与 TimeControl 里的手动输入完全一致——按 UTC+8 墙钟解释。
  */
 
+import { DEFAULT_SIGNAL_LIBRARY_TEXT } from './defaultSignalLibrary';
+
 export interface TradeSignal {
   /** 稳定 id，用于列表 key 与删除 */
   id: string;
@@ -235,18 +237,31 @@ export function listSignalMonths(signals: TradeSignal[]): string[] {
   return [...set].sort((a, b) => b.localeCompare(a));
 }
 
+let defaultSignalsCache: TradeSignal[] | null = null;
+
+export function getDefaultSignals(): TradeSignal[] {
+  if (!defaultSignalsCache) {
+    const { signals } = parseSignalText(DEFAULT_SIGNAL_LIBRARY_TEXT);
+    defaultSignalsCache = signals.map((s, index) => ({
+      ...s,
+      id: `default-${s.symbol}-${s.timeMs}-${index}`,
+    }));
+  }
+  return defaultSignalsCache.map(s => ({ ...s }));
+}
+
 export function loadSignals(): TradeSignal[] {
-  if (typeof window === 'undefined') return [];
+  if (typeof window === 'undefined') return getDefaultSignals();
   try {
     const raw = window.localStorage.getItem(SIGNAL_LIBRARY_STORAGE_KEY);
-    if (!raw) return [];
+    if (raw == null) return getDefaultSignals();
     const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
+    if (!Array.isArray(parsed)) return getDefaultSignals();
     return parsed.filter((s): s is TradeSignal =>
       s && typeof s.id === 'string' && typeof s.symbol === 'string'
       && typeof s.timeMs === 'number' && Number.isFinite(s.timeMs));
   } catch {
-    return [];
+    return getDefaultSignals();
   }
 }
 

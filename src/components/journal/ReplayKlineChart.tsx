@@ -1,6 +1,7 @@
 import { useMemo } from 'react';
 import { CandlestickChart, type AnalysisChartAnnotations } from '@/components/CandlestickChart';
 import type { KlineData } from '@/hooks/useBinanceData';
+import { sliceReplayKlines } from '@/lib/replayKlineWindow';
 import type { ChartMarker, PriceLine, TimeBoundPriceLine, VerticalLine } from './ReplayCandleChart';
 
 interface Props {
@@ -13,24 +14,10 @@ interface Props {
   timeBoundPriceLines?: TimeBoundPriceLine[];
   verticalLines?: VerticalLine[];
   historyCandles?: number;
+  /** Optional viewport anchor. `currentTime` still controls which future annotations are hidden. */
+  viewportCenterTime?: number | null;
   /** 透传给主图的时区；不传则沿用 CandlestickChart 默认（Asia/Shanghai）。 */
   timezone?: string;
-}
-
-function findCursorIndex(klines: KlineData[], currentTime: number) {
-  let lo = 0;
-  let hi = klines.length - 1;
-  let ans = -1;
-  while (lo <= hi) {
-    const mid = (lo + hi) >> 1;
-    if (klines[mid].time <= currentTime) {
-      ans = mid;
-      lo = mid + 1;
-    } else {
-      hi = mid - 1;
-    }
-  }
-  return ans;
 }
 
 function inferPricePrecision(values: number[]) {
@@ -55,17 +42,12 @@ export function ReplayKlineChart({
   timeBoundPriceLines = [],
   verticalLines = [],
   historyCandles = 720,
+  viewportCenterTime = null,
   timezone,
 }: Props) {
-  const cursorIdx = useMemo(() => findCursorIndex(klines, currentTime), [klines, currentTime]);
-
   const replayData = useMemo(() => {
-    if (klines.length === 0) return [];
-    if (cursorIdx < 0) return [];
-    const end = Math.max(0, cursorIdx) + 1;
-    const start = Math.max(0, end - historyCandles);
-    return klines.slice(start, end);
-  }, [klines, cursorIdx, historyCandles]);
+    return sliceReplayKlines(klines, currentTime, historyCandles, viewportCenterTime);
+  }, [klines, currentTime, historyCandles, viewportCenterTime]);
 
   const pricePrecision = useMemo(() => inferPricePrecision([
     ...replayData.flatMap(item => [item.open, item.high, item.low, item.close]),
@@ -118,6 +100,7 @@ export function ReplayKlineChart({
       quantityPrecision={3}
       analysisMode
       analysisAnnotations={annotations}
+      analysisFocusTime={viewportCenterTime ?? currentTime}
       timezone={timezone}
     />
   );
