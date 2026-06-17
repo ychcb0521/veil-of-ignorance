@@ -57,13 +57,14 @@ function pnlColor(value: number | null) {
   return 'text-muted-foreground';
 }
 
-function fmtMdHm(value: string | null, utc = false) {
+// 战役详情页统一用浏览器本地时区显示 K 线/模拟时间——与下方 Legs 列表（本地 getHours）
+// 和主图时间轴对齐。早先用 UTC 是因为误以为 Legs 列表是 UTC，实际它一直是本地时区。
+const LOCAL_TIME_ZONE = Intl.DateTimeFormat().resolvedOptions().timeZone;
+
+function fmtMdHm(value: string | null) {
   if (!value) return '进行中';
   const d = new Date(value);
   const pad = (n: number) => String(n).padStart(2, '0');
-  if (utc) {
-    return `${pad(d.getUTCMonth() + 1)}/${pad(d.getUTCDate())} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`;
-  }
   return `${pad(d.getMonth() + 1)}/${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
@@ -764,8 +765,8 @@ export default function JournalCampaignDetailPage() {
           <div className="bg-card border border-border rounded p-4 space-y-2 text-[12px]">
             <div className="font-medium">战役元数据</div>
             <div className="text-muted-foreground">操作时间：{fmtMdHm(campaign.created_at)}</div>
-            <div>开始：{fmtMdHm(campaign.opened_at, true)}</div>
-            <div>结束：{fmtMdHm(campaign.closed_at, true)}</div>
+            <div>开始：{fmtMdHm(campaign.opened_at)}</div>
+            <div>结束：{fmtMdHm(campaign.closed_at)}</div>
             <div>持续时间：{fmtDuration(campaign.opened_at, campaign.closed_at)}</div>
             <div>legs 数：{legs.length} (主仓 {mainCount} / 对冲 {hedgeCount} / TP {tpCount} / 其他 {otherCount})</div>
             {retroactiveLegCount > 0 && (
@@ -933,7 +934,7 @@ export default function JournalCampaignDetailPage() {
                   verticalLines={displayVerticalLines}
                   fitAll
                   viewportCenterTime={chartViewportCenterTime}
-                  timezone="UTC"
+                  timezone={LOCAL_TIME_ZONE}
                 />
               )}
             </div>
