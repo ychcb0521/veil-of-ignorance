@@ -85,6 +85,7 @@ describe('campaign selected leg markers', () => {
       width: SELECTED_LEG_VERTICAL_LINE_WIDTH,
       dashed: false,
       label: '加仓1·开仓',
+      alwaysVisible: true,
     });
     expect(lines[1]).toMatchObject({
       time: 222,
@@ -92,6 +93,7 @@ describe('campaign selected leg markers', () => {
       width: SELECTED_LEG_VERTICAL_LINE_WIDTH,
       dashed: true,
       label: '加仓1·平仓',
+      alwaysVisible: true,
     });
   });
 

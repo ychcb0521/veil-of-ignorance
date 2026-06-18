@@ -37,6 +37,8 @@ export interface VerticalLine {
   dashed?: boolean;
   label?: string;
   labelColor?: string;
+  /** User-pinned leg markers should remain visible even when replay currentTime is earlier. */
+  alwaysVisible?: boolean;
 }
 
 interface Props {

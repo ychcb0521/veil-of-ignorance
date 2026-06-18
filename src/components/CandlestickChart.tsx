@@ -376,6 +376,8 @@ function CandlestickChartComponent({
   const prevNewestRef = useRef<number>(0);
   const prevLastSigRef = useRef("");
   const prevSymbolRef = useRef<string>(symbol);
+  const analysisOverlayIdsRef = useRef<string[]>([]);
+  const analysisOverlayRunRef = useRef(0);
 
   const [indicators, setIndicators] = usePersistedState<IndicatorConfig[]>("indicators", []);
   const [showIndicatorPanel, setShowIndicatorPanel] = useState(false);
@@ -818,13 +820,31 @@ function CandlestickChartComponent({
     const chart = chartRef.current;
     if (!chart) return;
 
+    for (const overlayId of analysisOverlayIdsRef.current) {
+      try {
+        chart.removeOverlay(overlayId);
+      } catch {
+        // It may already have been removed by a chart reset.
+      }
+    }
+    analysisOverlayIdsRef.current = [];
     try {
       chart.removeOverlay("analysis_annotations");
-    } catch {
-      // Overlay group may not exist on the first render.
-    }
+    } catch {}
 
     if (!analysisAnnotations || data.length === 0) return;
+
+    const runId = ++analysisOverlayRunRef.current;
+    const nextOverlayIds: string[] = [];
+    const createAnalysisOverlay = (key: string, overlay: OverlayCreate) => {
+      const id = `analysis_annotations_${runId}_${nextOverlayIds.length}_${key}`;
+      chart.createOverlay({
+        ...overlay,
+        id,
+        paneId: "candle_pane",
+      } as OverlayCreate);
+      nextOverlayIds.push(id);
+    };
 
     const newest = data[data.length - 1];
     const inferredInterval = data.length > 1 ? Math.max(0, newest.time - data[data.length - 2].time) : 0;
@@ -840,9 +860,8 @@ function CandlestickChartComponent({
 
     for (const line of analysisAnnotations.priceLines ?? []) {
       if (!Number.isFinite(line.price)) continue;
-      chart.createOverlay({
+      createAnalysisOverlay("price", {
         name: "horizontalStraightLine",
-        id: "analysis_annotations",
         points: [{ timestamp: newest.time, value: line.price }],
         lock: true,
         styles: {
@@ -870,9 +889,8 @@ function CandlestickChartComponent({
       if (endTime <= startTime) continue;
       const color = line.dim ? `${line.color}55` : line.color;
 
-      chart.createOverlay({
+      createAnalysisOverlay("time-price", {
         name: "segment",
-        id: "analysis_annotations",
         points: [
           { timestamp: startTime, value: line.price },
           { timestamp: endTime, value: line.price },
@@ -889,9 +907,8 @@ function CandlestickChartComponent({
       } as OverlayCreate);
 
       if (line.title) {
-        chart.createOverlay({
+        createAnalysisOverlay("time-price-label", {
           name: "simpleAnnotation",
-          id: "analysis_annotations",
           points: [{ timestamp: startTime, value: line.price }],
           lock: true,
           extendData: line.title,
@@ -913,9 +930,8 @@ function CandlestickChartComponent({
       }
 
       if (line.endMarker === "x") {
-        chart.createOverlay({
+        createAnalysisOverlay("time-price-end", {
           name: "simpleAnnotation",
-          id: "analysis_annotations",
           points: [{ timestamp: endTime, value: line.price }],
           lock: true,
           extendData: "×",
@@ -939,9 +955,8 @@ function CandlestickChartComponent({
 
     for (const vertical of analysisAnnotations.verticalLines ?? []) {
       if (vertical.time < minTime || vertical.time > maxTime) continue;
-      chart.createOverlay({
+      createAnalysisOverlay("vertical", {
         name: "verticalStraightLine",
-        id: "analysis_annotations",
         points: [{ timestamp: vertical.time, value: lastValue }],
         lock: true,
         styles: {
@@ -955,9 +970,8 @@ function CandlestickChartComponent({
       } as OverlayCreate);
 
       if (vertical.label) {
-        chart.createOverlay({
+        createAnalysisOverlay("vertical-label", {
           name: "simpleAnnotation",
-          id: "analysis_annotations",
           points: [{ timestamp: vertical.time, value: verticalLabelValue }],
           lock: true,
           extendData: vertical.label,
@@ -987,9 +1001,8 @@ function CandlestickChartComponent({
         marker.shape === "square" ? "■" :
         "●";
 
-      chart.createOverlay({
+      createAnalysisOverlay("marker", {
         name: "simpleAnnotation",
-        id: "analysis_annotations",
         points: [{ timestamp: marker.time, value: marker.price }],
         lock: true,
         extendData: marker.label ? `${glyph} ${marker.label}` : glyph,
@@ -1009,6 +1022,7 @@ function CandlestickChartComponent({
         },
       } as OverlayCreate);
     }
+    analysisOverlayIdsRef.current = nextOverlayIds;
   }, [analysisAnnotations, data, pricePrecision]);
 
   useEffect(() => {

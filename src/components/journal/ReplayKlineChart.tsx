@@ -86,7 +86,7 @@ export function ReplayKlineChart({
           dim: line.dim,
         })),
       verticalLines: [
-        ...verticalLines.filter(line => line.time <= currentTime),
+        ...verticalLines.filter(line => line.alwaysVisible || line.time <= currentTime),
         cursorLine,
       ],
     };

@@ -39,6 +39,7 @@ export function buildSelectedLegVerticalLines(
       dashed: false,
       label: `${labelBase}·开仓`,
       labelColor: color,
+      alwaysVisible: true,
     });
 
     if (closeTime != null && Number.isFinite(closeTime)) {
@@ -50,6 +51,7 @@ export function buildSelectedLegVerticalLines(
         dashed: true,
         label: `${labelBase}·平仓`,
         labelColor: color,
+        alwaysVisible: true,
       });
     }
   }
