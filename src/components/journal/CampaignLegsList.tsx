@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ExternalLink } from 'lucide-react';
+import { Crosshair, ExternalLink } from 'lucide-react';
 import { LegRoleChip } from '@/components/journal/LegRoleChip';
 import { HEDGE_TYPE_LABELS } from '@/lib/hedgeTypes';
 import type { TradeJournal } from '@/types/journal';
@@ -9,6 +9,8 @@ import type { TradeRecord } from '@/types/trading';
 interface Props {
   legs: TradeJournal[];
   tradeRecords: TradeRecord[];
+  highlightedLegIds?: string[];
+  onToggleHighlight?: (leg: TradeJournal) => void;
   onDetach?: (leg: TradeJournal) => void;
 }
 
@@ -30,13 +32,20 @@ function operationTimeForLeg(leg: TradeJournal): string | number | null | undefi
   return leg.post_real_close_time ?? leg.pre_real_time ?? leg.created_at ?? leg.updated_at;
 }
 
-export function CampaignLegsList({ legs, tradeRecords, onDetach }: Props) {
+export function CampaignLegsList({
+  legs,
+  tradeRecords,
+  highlightedLegIds = [],
+  onToggleHighlight,
+  onDetach,
+}: Props) {
   const nav = useNavigate();
   const recordMap = useMemo(() => new Map(tradeRecords.map(record => [record.id, record])), [tradeRecords]);
+  const highlightedSet = useMemo(() => new Set(highlightedLegIds), [highlightedLegIds]);
 
   return (
     <div className="bg-card border border-border rounded overflow-hidden">
-      <div className="grid grid-cols-[48px_120px_1fr_96px_92px_88px_72px_150px] text-[10px] text-muted-foreground bg-muted/40 py-2 px-3">
+      <div className="grid grid-cols-[48px_120px_1fr_96px_92px_88px_72px_230px] text-[10px] text-muted-foreground bg-muted/40 py-2 px-3">
         <div>#</div>
         <div>角色</div>
         <div>时间</div>
@@ -49,6 +58,7 @@ export function CampaignLegsList({ legs, tradeRecords, onDetach }: Props) {
       {legs.map(leg => {
         const record = leg.trade_record_id ? recordMap.get(leg.trade_record_id) ?? null : null;
         const status = statusForLeg(leg, record);
+        const highlighted = highlightedSet.has(leg.id);
         const openLabel = fmtClock(record?.openTime ?? leg.pre_simulated_time);
         const closeLabel = record ? fmtClock(record.closeTime) : '—';
         const operationLabel = fmtClock(operationTimeForLeg(leg));
@@ -58,7 +68,9 @@ export function CampaignLegsList({ legs, tradeRecords, onDetach }: Props) {
         return (
           <div
             key={leg.id}
-            className="grid grid-cols-[48px_120px_1fr_96px_92px_88px_72px_150px] items-center text-[11px] font-mono py-2 px-3 border-b border-border/40 hover:bg-accent"
+            className={`grid grid-cols-[48px_120px_1fr_96px_92px_88px_72px_230px] items-center text-[11px] font-mono py-2 px-3 border-b border-border/40 hover:bg-accent ${
+              highlighted ? 'bg-[#002FA7]/5 ring-1 ring-inset ring-[#002FA7]/12' : ''
+            }`}
           >
             <div>{leg.leg_sequence ?? '—'}</div>
             <div className="flex items-center gap-1.5">
@@ -80,6 +92,20 @@ export function CampaignLegsList({ legs, tradeRecords, onDetach }: Props) {
             <div className={status.className}>{status.label}</div>
             <div>{leg.post_r_multiple != null ? leg.post_r_multiple.toFixed(2) : '—'}</div>
             <div className="flex items-center gap-3">
+              {onToggleHighlight && (
+                <button
+                  type="button"
+                  onClick={() => onToggleHighlight(leg)}
+                  className={`inline-flex items-center gap-1 rounded px-2 py-1 text-[10px] transition-colors ${
+                    highlighted
+                      ? 'bg-[#002FA7]/10 text-[#002FA7] hover:bg-[#002FA7]/15'
+                      : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+                  }`}
+                >
+                  <Crosshair className="w-3 h-3" />
+                  {highlighted ? '已标注' : '标到盘面'}
+                </button>
+              )}
               <button
                 type="button"
                 disabled={!leg.id}

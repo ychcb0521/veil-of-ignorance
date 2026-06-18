@@ -23,6 +23,7 @@ import {
   computeDecisionAccuracy,
   shouldSuggestCampaignEnd,
 } from '@/lib/campaignAnalysis';
+import { buildSelectedLegVerticalLines, legRoleMarkerLabel } from '@/lib/campaignLegMarkers';
 import {
   deleteCounterfactual,
   detachCampaignLegFromCampaign,
@@ -36,7 +37,7 @@ import {
   runAndPersistDeviationCosts,
   runAndPersistPureSop,
 } from '@/lib/journalApi';
-import { LEG_ROLE_LABELS, STRATEGY_TEMPLATES } from '@/lib/strategyTemplates';
+import { STRATEGY_TEMPLATES } from '@/lib/strategyTemplates';
 import type {
   CampaignCounterfactual,
   CampaignCounterfactualParams,
@@ -134,14 +135,6 @@ const LEG_SHORT_LABEL_COLOR = 'rgba(247,147,26,0.66)';
 const CAMPAIGN_BOUNDARY_LINE_COLOR = 'rgba(132,142,156,0.12)';
 const CAMPAIGN_VERTICAL_LINE_WIDTH = 0.3;
 const LEG_VERTICAL_LINE_WIDTH = 0.45;
-
-function legRoleLabel(role: TradeJournal['leg_role']): string {
-  return role ? LEG_ROLE_LABELS[role] : '未归类';
-}
-
-function legRoleMarkerLabel(role: TradeJournal['leg_role']): string {
-  return legRoleLabel(role).replace(/开仓$/, '');
-}
 
 function buildChartArtifacts(
   campaign: TradeCampaign,
@@ -377,6 +370,7 @@ export default function JournalCampaignDetailPage() {
   const [deviationHydrated, setDeviationHydrated] = useState(false);
   const [detachTarget, setDetachTarget] = useState<TradeJournal | null>(null);
   const [detaching, setDetaching] = useState(false);
+  const [selectedLegMarkerIds, setSelectedLegMarkerIds] = useState<string[]>([]);
   const [isOwner, setIsOwner] = useState(true);
   const [comments, setComments] = useState<CampaignComment[]>([]);
   const [commentsLoading, setCommentsLoading] = useState(false);
@@ -480,6 +474,10 @@ export default function JournalCampaignDetailPage() {
     () => buildCounterfactualChartArtifacts(selectedCounterfactual),
     [selectedCounterfactual],
   );
+  const selectedLegVerticalLines = useMemo(
+    () => buildSelectedLegVerticalLines(legs, tradeRecords, selectedLegMarkerIds),
+    [legs, tradeRecords, selectedLegMarkerIds],
+  );
   const displayMarkers = useMemo(
     () => [...chart.markers, ...counterfactualChart.markers],
     [chart.markers, counterfactualChart.markers],
@@ -489,8 +487,8 @@ export default function JournalCampaignDetailPage() {
     [chart.timeBoundPriceLines, counterfactualChart.timeBoundPriceLines],
   );
   const displayVerticalLines = useMemo(
-    () => [...chart.verticalLines, ...counterfactualChart.verticalLines],
-    [chart.verticalLines, counterfactualChart.verticalLines],
+    () => [...chart.verticalLines, ...counterfactualChart.verticalLines, ...selectedLegVerticalLines],
+    [chart.verticalLines, counterfactualChart.verticalLines, selectedLegVerticalLines],
   );
   const canSuggestEnd = useMemo(
     () => (campaign ? shouldSuggestCampaignEnd(campaign, legs, tradeRecords, pendingOrders, getEffectiveTime(campaign.symbol)) : false),
@@ -948,7 +946,20 @@ export default function JournalCampaignDetailPage() {
             <Layers className="w-4 h-4 text-muted-foreground" />
             Legs 列表
           </div>
-          <CampaignLegsList legs={legs} tradeRecords={tradeRecords} onDetach={setDetachTarget} />
+          <CampaignLegsList
+            legs={legs}
+            tradeRecords={tradeRecords}
+            highlightedLegIds={selectedLegMarkerIds}
+            onToggleHighlight={(leg) => {
+              setFocusTime(null);
+              setSelectedLegMarkerIds(prev => (
+                prev.includes(leg.id)
+                  ? prev.filter(item => item !== leg.id)
+                  : [...prev, leg.id]
+              ));
+            }}
+            onDetach={setDetachTarget}
+          />
         </section>
 
         <section className="bg-card border border-border rounded p-6 mb-6 space-y-4">
