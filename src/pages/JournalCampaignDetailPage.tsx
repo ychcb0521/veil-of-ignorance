@@ -349,7 +349,7 @@ export default function JournalCampaignDetailPage() {
   const [legs, setLegs] = useState<TradeJournal[]>([]);
   const [tradeRecords, setTradeRecords] = useState<TradeRecord[]>([]);
   const [pendingOrders, setPendingOrders] = useState<PendingOrder[]>([]);
-  const [interval, setInterval] = useState<Interval>('5m');
+  const [interval, setInterval] = useState<Interval>('1m');
   const [endOpen, setEndOpen] = useState(false);
   const [focusTime, setFocusTime] = useState<number | null>(null);
   const [counterfactuals, setCounterfactuals] = useState<CampaignCounterfactual[]>([]);
