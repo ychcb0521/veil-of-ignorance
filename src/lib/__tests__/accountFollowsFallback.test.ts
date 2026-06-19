@@ -20,7 +20,7 @@ const missingAccountFollowsError = {
 
 vi.mock('@/integrations/supabase/client', () => {
   function from(table: string) {
-    let operation: 'select' | 'upsert' | 'delete' = 'select';
+    let operation: 'select' | 'upsert' | 'insert' | 'delete' = 'select';
     let upsertPayload: Partial<MockFollow> | null = null;
     let filters: Record<string, unknown> = {};
 
@@ -48,6 +48,26 @@ vi.mock('@/integrations/supabase/client', () => {
         return { data: row, error: null };
       }
 
+      if (operation === 'insert') {
+        const followerId = String(upsertPayload?.follower_id ?? '');
+        const followeeId = String(upsertPayload?.followee_id ?? '');
+        const existing = mockState.remoteFollows.find(
+          row => row.follower_id === followerId && row.followee_id === followeeId,
+        );
+        // 已存在则模拟唯一约束冲突（与真实 Postgres 一致），驱动 followAccount 的幂等回查分支。
+        if (existing) {
+          return { data: null, error: { code: '23505', message: 'duplicate key value violates unique constraint "account_follows_follower_id_followee_id_key"' } };
+        }
+        const row: MockFollow = {
+          id: `remote-follow-${followerId}-${followeeId}`,
+          follower_id: followerId,
+          followee_id: followeeId,
+          created_at: '2026-06-17T10:00:00.000Z',
+        };
+        mockState.remoteFollows.unshift(row);
+        return { data: row, error: null };
+      }
+
       if (operation === 'delete') {
         mockState.remoteFollows = mockState.remoteFollows.filter(
           row => !Object.entries(filters).every(([key, value]) => row[key as keyof MockFollow] === value),
@@ -60,11 +80,16 @@ vi.mock('@/integrations/supabase/client', () => {
 
     const builder = {
       select() {
-        operation = operation === 'upsert' ? 'upsert' : 'select';
+        operation = operation === 'upsert' || operation === 'insert' ? operation : 'select';
         return builder;
       },
       upsert(payload: Partial<MockFollow>) {
         operation = 'upsert';
+        upsertPayload = payload;
+        return builder;
+      },
+      insert(payload: Partial<MockFollow>) {
+        operation = 'insert';
         upsertPayload = payload;
         return builder;
       },
@@ -165,5 +190,16 @@ describe('account follow schema fallback', () => {
     await expect(listMyFollows()).resolves.toMatchObject([
       { follower_id: 'user-a', followee_id: 'user-b' },
     ]);
+  });
+
+  it('treats re-following an already-followed account as idempotent (no upsert UPDATE)', async () => {
+    const first = await followAccount('user-b');
+    expect(first).toMatchObject({ follower_id: 'user-a', followee_id: 'user-b' });
+
+    // 第二次关注：远端 INSERT 命中唯一约束 23505。旧实现用 upsert→ON CONFLICT DO UPDATE，
+    // 会撞上 account_follows 缺失的 UPDATE/USING 策略而报错；新实现回查现有边、幂等返回。
+    const second = await followAccount('user-b');
+    expect(second).toMatchObject({ follower_id: 'user-a', followee_id: 'user-b' });
+    expect(mockState.remoteFollows).toHaveLength(1);
   });
 });

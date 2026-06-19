@@ -2283,13 +2283,29 @@ export async function followAccount(followeeId: string): Promise<AccountFollow> 
   const followerId = await getAuthenticatedUserId('关注账户');
   if (followerId === followeeId) throw new Error('不能关注自己');
   const payload = { follower_id: followerId, followee_id: followeeId };
+  // 关注边是不可变的：account_follows 只授予 SELECT/INSERT/DELETE，没有 UPDATE 策略。
+  // 因此用普通 INSERT，而不是 upsert——upsert 会生成 ON CONFLICT DO UPDATE，对「已关注」的
+  // 边触发 UPDATE，撞上缺失的 RLS USING 策略，报 "violates row-level security policy
+  // (USING expression) for table account_follows"。
   const { data, error } = await supabase
     .from('account_follows' as never)
-    .upsert(payload as never, { onConflict: 'follower_id,followee_id' })
+    .insert(payload as never)
     .select()
     .single();
   if (error && isMissingSocialFeatureError(error)) {
     return upsertLocalFollow(makeLocalFollow(followerId, followeeId));
+  }
+  // 已关注（唯一约束冲突）视为幂等成功：回查现有关注边返回，不报错。
+  if (error && error.code === '23505') {
+    const existing = await supabase
+      .from('account_follows' as never)
+      .select('*')
+      .eq('follower_id', followerId)
+      .eq('followee_id', followeeId)
+      .maybeSingle();
+    const existingRow = wrap('关注账户', existing.error, existing.data as unknown as AccountFollow);
+    upsertLocalFollow(existingRow);
+    return existingRow;
   }
   const row = wrap('关注账户', error, data as unknown as AccountFollow);
   upsertLocalFollow(row);
