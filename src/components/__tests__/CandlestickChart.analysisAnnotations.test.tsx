@@ -1,6 +1,7 @@
 import { render, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { CandlestickChart } from '@/components/CandlestickChart';
+import { TooltipProvider } from '@/components/ui/tooltip';
 import type { KlineData } from '@/hooks/useBinanceData';
 
 const mocks = vi.hoisted(() => {
@@ -19,6 +20,8 @@ const mocks = vi.hoisted(() => {
     getBarSpace: vi.fn(() => 8),
     setBarSpace: vi.fn(),
     setOffsetRightDistance: vi.fn(),
+    scrollByDistance: vi.fn(),
+    scrollToRealTime: vi.fn(),
     scrollToTimestamp: vi.fn(),
     convertFromPixel: vi.fn(),
   };
@@ -131,5 +134,73 @@ describe('CandlestickChart analysis annotations', () => {
         },
       },
     });
+  });
+
+  it('为反事实手动 Legs 创建可拖动时间竖线，并在拖动后回传新时间', async () => {
+    const handleDrag = vi.fn();
+
+    render(
+      <TooltipProvider>
+        <CandlestickChart
+          data={[candle(1000, 1), candle(2000, 1.2)]}
+          symbol="BTCUSDT"
+          rawSymbol="BTCUSDT"
+          draggableVerticalLines={[
+            {
+              id: 'leg-1:open',
+              time: 1000,
+              color: '#002FA7',
+              dashed: false,
+              label: '主力 开',
+            },
+            {
+              id: 'leg-1:close',
+              time: 2000,
+              color: '#3B0764',
+              dashed: true,
+              label: '主力 平',
+            },
+          ]}
+          onDragVerticalLine={handleDrag}
+        />
+      </TooltipProvider>,
+    );
+
+    await waitFor(() => {
+      expect(mocks.chart.createOverlay).toHaveBeenCalled();
+    });
+
+    const overlays = mocks.chart.createOverlay.mock.calls.map(([overlay]) => overlay);
+    const dragTimeOverlays = overlays.filter(overlay => String(overlay.id ?? '').startsWith('whatif_drag_time_'));
+    expect(dragTimeOverlays).toHaveLength(2);
+    expect(dragTimeOverlays[0]).toMatchObject({
+      name: 'verticalStraightLine',
+      paneId: 'candle_pane',
+      lock: false,
+      extendData: '主力 开',
+      styles: {
+        line: {
+          style: 'solid',
+          color: '#002FA7',
+          size: 1.2,
+        },
+      },
+    });
+    expect(dragTimeOverlays[1]).toMatchObject({
+      name: 'verticalStraightLine',
+      lock: false,
+      extendData: '主力 平',
+      styles: {
+        line: {
+          style: 'dashed',
+          color: '#3B0764',
+        },
+      },
+    });
+
+    dragTimeOverlays[0].onPressedMoveEnd?.({
+      overlay: { points: [{ timestamp: 1500 }] },
+    });
+    expect(handleDrag).toHaveBeenCalledWith('leg-1:open', 1500);
   });
 });

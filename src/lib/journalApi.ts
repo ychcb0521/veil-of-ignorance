@@ -11,6 +11,7 @@ import {
   buildPureSopParams,
   computeDeviationCosts,
   simulateCampaign,
+  simulateManualLegScenario,
 } from '@/lib/campaignSimulationEngine';
 import { INITIAL_COGNITIVE_ASSETS } from '@/lib/cognitiveAssetsInitialContent';
 import { mirrorDroppedColumns } from '@/lib/journalLocalMirror';
@@ -858,6 +859,30 @@ function tradeRecordDirection(record: Pick<TradeRecord, 'side'>): TradeJournal['
   return record.side === 'SHORT' ? 'short' : 'long';
 }
 
+function campaignMainDirection(campaign: Pick<TradeCampaign, 'direction'>): TradeJournal['direction'] {
+  return campaign.direction === 'main_short' ? 'short' : 'long';
+}
+
+function oppositeDirection(direction: TradeJournal['direction']): TradeJournal['direction'] {
+  return direction === 'short' ? 'long' : 'short';
+}
+
+function inferDirectionFromLegRole(
+  campaign: Pick<TradeCampaign, 'direction'>,
+  role: LegRole | null,
+  eventDirection?: TradeDirection | null,
+): TradeJournal['direction'] {
+  if (eventDirection === 'long' || eventDirection === 'short') return eventDirection;
+  const mainDirection = campaignMainDirection(campaign);
+  if (role?.startsWith('hedge_') || role === 'reentry_hedge') return oppositeDirection(mainDirection);
+  return mainDirection;
+}
+
+function inferOrderKindFromLegRole(role: LegRole | null): TradeJournal['order_kind'] {
+  if (role?.startsWith('hedge_') || role === 'reentry_hedge') return 'hedge';
+  return 'main';
+}
+
 function tradeRecordPositionSize(record: Pick<TradeRecord, 'entryPrice' | 'quantity'>): number {
   return Math.abs(record.entryPrice * record.quantity);
 }
@@ -874,6 +899,66 @@ function tradeRecordOutcome(record: Pick<TradeRecord, 'pnl'>): TradeOutcome {
   if (record.pnl > 0) return 'win';
   if (record.pnl < 0) return 'loss';
   return 'breakeven';
+}
+
+function campaignEventFromTradeRecord(
+  record: TradeRecord,
+  legRole: LegRole,
+  timestamp: string,
+  now: string,
+  overrides: Partial<CampaignEvent> = {},
+): CampaignEvent {
+  return {
+    id: crypto.randomUUID(),
+    timestamp,
+    event_type: 'historical_leg_attached',
+    leg_role: legRole,
+    journal_id: null,
+    trade_record_id: record.id,
+    pending_order_id: null,
+    price: record.entryPrice,
+    size_usdt: tradeRecordPositionSize(record),
+    notes: 'classified retroactively · 仓位历史记录',
+    recorded_at: now,
+    direction: tradeRecordDirection(record),
+    leverage: record.leverage,
+    open_time: toIso(record.openTime),
+    close_time: toIso(record.closeTime),
+    entry_price: record.entryPrice,
+    exit_price: record.exitPrice,
+    realized_pnl: record.pnl,
+    r_multiple: null,
+    ...overrides,
+  };
+}
+
+function campaignEventFromJournal(
+  journal: TradeJournal,
+  legRole: LegRole,
+  now: string,
+  notes: string | null,
+): CampaignEvent {
+  return {
+    id: crypto.randomUUID(),
+    timestamp: journal.pre_simulated_time,
+    event_type: 'historical_leg_attached',
+    leg_role: legRole,
+    journal_id: journal.id,
+    trade_record_id: journal.trade_record_id,
+    pending_order_id: null,
+    price: journal.pre_entry_price,
+    size_usdt: journal.pre_position_size,
+    notes,
+    recorded_at: now,
+    direction: journal.direction,
+    leverage: journal.leverage,
+    open_time: journal.pre_simulated_time,
+    close_time: journal.post_real_close_time ?? null,
+    entry_price: journal.pre_entry_price,
+    exit_price: null,
+    realized_pnl: journal.post_realized_pnl,
+    r_multiple: journal.post_r_multiple,
+  };
 }
 
 function synthesizeJournalFromRecord(
@@ -917,24 +1002,112 @@ function synthesizeJournalFromRecord(
     post_reflection: null,
     post_correct_action: null,
     post_reviewed_at: null,
+    post_real_close_time: toIso(record.closeTime),
     reason_was_rewritten: false,
     created_at: now,
     updated_at: now,
   };
 }
 
+function eventIdentity(event: CampaignEvent): string {
+  return event.journal_id ?? event.trade_record_id ?? event.id;
+}
+
+function isLegSourceEvent(event: CampaignEvent): boolean {
+  return Boolean(event.leg_role)
+    && (
+      event.event_type === 'historical_leg_attached' ||
+      event.event_type === 'main_opened' ||
+      event.event_type === 'hedge_placed' ||
+      event.event_type === 'hedge_triggered' ||
+      event.event_type === 'mirror_tp_placed' ||
+      event.event_type === 'mirror_tp_triggered'
+    );
+}
+
+function isLegCloseEvent(event: CampaignEvent, source: CampaignEvent): boolean {
+  const sameLeg = eventIdentity(event) === eventIdentity(source);
+  if (!sameLeg) return false;
+  if (source.leg_role === 'mirror_tp') return event.event_type === 'mirror_tp_triggered';
+  if (source.leg_role?.startsWith('hedge_') || source.leg_role === 'reentry_hedge') {
+    return event.event_type === 'campaign_closed';
+  }
+  return event.event_type === 'main_fully_closed' || event.event_type === 'main_partial_closed';
+}
+
+function synthesizeJournalFromEvent(
+  campaign: TradeCampaign,
+  event: CampaignEvent,
+  sequence: number,
+  closeEvent: CampaignEvent | null,
+): TradeJournal {
+  const now = event.recorded_at || new Date().toISOString();
+  const role = event.leg_role ?? 'standalone';
+  const direction = inferDirectionFromLegRole(campaign, role, event.direction);
+  const closeTime = event.close_time ?? closeEvent?.timestamp ?? campaign.closed_at ?? null;
+  const entryPrice = event.entry_price ?? event.price ?? null;
+  const exitPrice = event.exit_price ?? closeEvent?.price ?? null;
+  const id = event.journal_id
+    ?? (event.trade_record_id ? `record-${event.trade_record_id}` : `event-${event.id}`);
+
+  return {
+    id,
+    user_id: campaign.user_id,
+    trade_record_id: event.trade_record_id,
+    campaign_id: campaign.id,
+    leg_role: role,
+    leg_sequence: sequence,
+    source: 'retroactive_from_record',
+    symbol: campaign.symbol,
+    direction,
+    leverage: event.leverage ?? campaign.initial_leverage,
+    position_mode: 'isolated',
+    order_kind: inferOrderKindFromLegRole(role),
+    pre_simulated_time: event.open_time ?? event.timestamp,
+    pre_real_time: now,
+    pre_entry_price: entryPrice,
+    pre_planned_stop_loss: null,
+    pre_planned_take_profit: null,
+    pre_entry_reason: '[战役事件还原] 由被关注者原始战役事件流恢复',
+    pre_mental_state: 3,
+    pre_mental_trigger: null,
+    pre_risk_awareness: null,
+    pre_risk_management: null,
+    pre_checklist_items: null,
+    pre_checklist_passed: null,
+    pre_position_size: event.size_usdt,
+    pre_max_loss_usdt: null,
+    post_outcome: event.realized_pnl != null
+      ? tradeRecordOutcome({ pnl: event.realized_pnl })
+      : null,
+    post_realized_pnl: event.realized_pnl ?? null,
+    post_r_multiple: event.r_multiple ?? null,
+    post_reflection: null,
+    post_correct_action: null,
+    post_reviewed_at: null,
+    post_real_close_time: closeTime,
+    reason_was_rewritten: false,
+    created_at: now,
+    updated_at: closeTime ?? now,
+    ...(exitPrice != null ? { post_exit_price_snapshot: exitPrice } : {}),
+  } as TradeJournal;
+}
+
 function synthesizeCampaignLegsFromEvents(campaign: TradeCampaign): TradeJournal[] {
   const tradeRecordMap = getTradeRecordMapForUser(campaign.user_id);
   const seen = new Set<string>();
-  return (campaign.actual_evolution ?? [])
-    .filter(event => Boolean(event.trade_record_id))
-    .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime())
+  const events = [...(campaign.actual_evolution ?? [])]
+    .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+  return events
+    .filter(isLegSourceEvent)
     .flatMap((event) => {
-      if (!event.trade_record_id || seen.has(event.trade_record_id)) return [];
-      const record = tradeRecordMap.get(event.trade_record_id);
-      if (!record) return [];
-      seen.add(event.trade_record_id);
-      return [synthesizeJournalFromRecord(campaign, record, event, seen.size)];
+      const key = eventIdentity(event);
+      if (seen.has(key)) return [];
+      seen.add(key);
+      const record = event.trade_record_id ? tradeRecordMap.get(event.trade_record_id) ?? null : null;
+      if (record) return [synthesizeJournalFromRecord(campaign, record, event, seen.size)];
+      const closeEvent = events.find(item => item !== event && isLegCloseEvent(item, event)) ?? null;
+      return [synthesizeJournalFromEvent(campaign, event, seen.size, closeEvent)];
     });
 }
 
@@ -1831,19 +2004,12 @@ export async function batchAttachToCampaign(
       }
 
       newLegs.push({ ...journal, ...patch });
-      nextEvents.push({
-        id: crypto.randomUUID(),
-        timestamp: journal.pre_simulated_time,
-        event_type: 'historical_leg_attached',
-        leg_role: assignment.legRole,
-        journal_id: journal.id,
-        trade_record_id: journal.trade_record_id,
-        pending_order_id: null,
-        price: journal.pre_entry_price,
-        size_usdt: journal.pre_position_size,
-        notes: assignment.attachNote ? `${assignment.attachNote} · ${RETRO_CLASSIFY_NOTE}` : RETRO_CLASSIFY_NOTE,
-        recorded_at: new Date().toISOString(),
-      });
+      nextEvents.push(campaignEventFromJournal(
+        journal,
+        assignment.legRole,
+        new Date().toISOString(),
+        assignment.attachNote ? `${assignment.attachNote} · ${RETRO_CLASSIFY_NOTE}` : RETRO_CLASSIFY_NOTE,
+      ));
     }
 
     const tradeRecordMap = getTradeRecordMapForUser(campaign.user_id);
@@ -2059,19 +2225,12 @@ export async function createCampaignFromTradeRecords(input: {
       notes,
       recorded_at: now,
     },
-    ...ordered.map(({ record, legRole }) => ({
-      id: crypto.randomUUID(),
-      timestamp: toIso(tradeRecordTimeMs(record)) ?? openedAt,
-      event_type: 'historical_leg_attached' as const,
-      leg_role: legRole,
-      journal_id: null,
-      trade_record_id: record.id,
-      pending_order_id: null,
-      price: record.entryPrice,
-      size_usdt: tradeRecordPositionSize(record),
-      notes: 'classified retroactively · 仓位历史记录',
-      recorded_at: now,
-    })),
+    ...ordered.map(({ record, legRole }) => campaignEventFromTradeRecord(
+      record,
+      legRole,
+      toIso(tradeRecordTimeMs(record)) ?? openedAt,
+      now,
+    )),
   ];
   const campaign: TradeCampaign = {
     id: crypto.randomUUID(),
@@ -2401,20 +2560,21 @@ export async function deleteCounterfactual(id: string): Promise<void> {
   if (error) throw new Error(`删除反事实分支失败：${error.message}`);
 }
 
+function counterfactualTemplateFor(campaign: Pick<TradeCampaign, 'strategy_template'>): 'main_dual_hedge_mirror_tp' | 'main_only' {
+  return campaign.strategy_template === 'main_only' ? 'main_only' : 'main_dual_hedge_mirror_tp';
+}
+
 export async function runAndPersistPureSop(
   campaignId: string,
   klines: KlineData[],
 ): Promise<CampaignCounterfactual> {
   const { campaign, legs } = await getCampaignFullData(campaignId);
-  if (campaign.strategy_template === 'custom') {
-    throw new Error('自定义模板暂不支持反事实模拟');
-  }
   const params = buildPureSopParams(campaign, legs);
   if (!params) throw new Error('无法构建 Pure SOP 参数：缺少主仓战役数据');
   const result = simulateCampaign(
     params,
     klines,
-    campaign.strategy_template as 'main_dual_hedge_mirror_tp' | 'main_only',
+    counterfactualTemplateFor(campaign),
   );
   return createCounterfactual({
     campaign_id: campaignId,
@@ -2432,14 +2592,9 @@ export async function runAndPersistCustomCounterfactual(
   klines: KlineData[],
 ): Promise<CampaignCounterfactual> {
   const { campaign } = await getCampaignFullData(campaignId);
-  if (campaign.strategy_template === 'custom') {
-    throw new Error('自定义模板暂不支持反事实模拟');
-  }
-  const result = simulateCampaign(
-    params,
-    klines,
-    campaign.strategy_template as 'main_dual_hedge_mirror_tp' | 'main_only',
-  );
+  const result = (params.manual_legs?.some(leg => leg.enabled) ?? false)
+    ? simulateManualLegScenario(params, klines)
+    : simulateCampaign(params, klines, counterfactualTemplateFor(campaign));
   return createCounterfactual({
     campaign_id: campaignId,
     label,

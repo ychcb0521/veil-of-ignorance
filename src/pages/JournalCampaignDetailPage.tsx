@@ -81,6 +81,12 @@ function shortAccountId(value: string) {
   return value.length <= 12 ? value : `${value.slice(0, 6)}…${value.slice(-4)}`;
 }
 
+function safeTimeMs(value: string | number | null | undefined): number | null {
+  if (value == null) return null;
+  const ms = typeof value === 'number' ? value : new Date(value).getTime();
+  return Number.isFinite(ms) ? ms : null;
+}
+
 function chipForStatus(status: TradeCampaign['status']) {
   switch (status) {
     case 'active': return 'bg-[#F0B90B]/15 text-[#F0B90B]';
@@ -160,8 +166,11 @@ function buildChartArtifacts(
   let rollingIndex = 1;
   for (const leg of legs) {
     const record = leg.trade_record_id ? tradeRecords.find(item => item.id === leg.trade_record_id) ?? null : null;
-    const placedMs = new Date(leg.pre_simulated_time).getTime();
+    const placedMs = safeTimeMs(leg.pre_simulated_time) ?? new Date(campaign.opened_at).getTime();
+    const openTime = record?.openTime ?? placedMs;
+    const closeTime = record?.closeTime ?? safeTimeMs(leg.post_real_close_time);
     const price = leg.pre_entry_price ?? record?.entryPrice ?? 0;
+    const exitPrice = record?.exitPrice ?? leg.post_exit_price_snapshot ?? price;
     const color = leg.leg_role === 'mirror_tp'
       ? '#F0B90B'
       : leg.leg_role === 'hedge_rolling'
@@ -185,13 +194,13 @@ function buildChartArtifacts(
     if (leg.leg_role === 'reentry_hedge') { label = 'ReH'; shape = 'triangle-down'; }
     if (leg.leg_role === 'main_open') { label = leg.direction === 'short' ? 'M↓' : 'M↑'; }
 
-    markers.push({ time: record?.openTime ?? placedMs, price, shape, color, label });
+    markers.push({ time: openTime, price, shape, color, label });
 
     // 按方向配色的开单/平单竖线：开单实线，平单虚线；多单蓝、空单橘。
     const legDirColor = leg.direction === 'short' ? LEG_SHORT_LINE_COLOR : LEG_LONG_LINE_COLOR;
     const legLabelColor = leg.direction === 'short' ? LEG_SHORT_LABEL_COLOR : LEG_LONG_LABEL_COLOR;
     verticalLines.push({
-      time: record?.openTime ?? placedMs,
+      time: openTime,
       color: legDirColor,
       width: LEG_VERTICAL_LINE_WIDTH,
       z: 3,
@@ -199,9 +208,9 @@ function buildChartArtifacts(
       label: `${legRoleMarkerLabel(leg.leg_role)}·开仓`,
       labelColor: legLabelColor,
     });
-    if (record) {
+    if (closeTime != null) {
       verticalLines.push({
-        time: record.closeTime,
+        time: closeTime,
         color: legDirColor,
         width: LEG_VERTICAL_LINE_WIDTH,
         z: 3,
@@ -212,9 +221,9 @@ function buildChartArtifacts(
     }
 
     const cancelEvent = events.find(event => event.journal_id === leg.id && event.event_type === 'hedge_cancelled') ?? null;
-    const startTime = placedMs;
-    const endTime = record
-      ? (leg.leg_role === 'mirror_tp' ? record.closeTime : record.openTime)
+    const startTime = openTime;
+    const endTime = closeTime != null
+      ? (leg.leg_role === 'mirror_tp' ? closeTime : openTime)
       : cancelEvent
         ? new Date(cancelEvent.timestamp).getTime()
         : (campaign.closed_at ? new Date(campaign.closed_at).getTime() : Date.now());
@@ -230,11 +239,11 @@ function buildChartArtifacts(
       });
     }
 
-    if (record) {
+    if (closeTime != null) {
       if (leg.leg_role === 'mirror_tp') {
         markers.push({
-          time: record.closeTime,
-          price: record.exitPrice,
+          time: closeTime,
+          price: exitPrice,
           shape: 'circle',
           color: '#0ECB81',
           label: 'M 减仓 50%',
@@ -242,8 +251,8 @@ function buildChartArtifacts(
       }
       if (leg.leg_role === 'main_open' || leg.leg_role === 'reentry_main' || leg.leg_role?.startsWith('main_add_')) {
         markers.push({
-          time: record.closeTime,
-          price: record.exitPrice,
+          time: closeTime,
+          price: exitPrice,
           shape: 'square',
           color: '#2B80FF',
           label: 'M 全平',
@@ -429,9 +438,10 @@ export default function JournalCampaignDetailPage() {
         : null;
       const openMs = record?.openTime ?? new Date(leg.pre_simulated_time).getTime();
       if (Number.isFinite(openMs)) { min = Math.min(min, openMs); max = Math.max(max, openMs); }
-      if (record && Number.isFinite(record.closeTime)) {
-        min = Math.min(min, record.closeTime);
-        max = Math.max(max, record.closeTime);
+      const closeMs = record?.closeTime ?? safeTimeMs(leg.post_real_close_time);
+      if (closeMs != null) {
+        min = Math.min(min, closeMs);
+        max = Math.max(max, closeMs);
       }
     }
     return {
@@ -941,33 +951,27 @@ export default function JournalCampaignDetailPage() {
             </div>
           </div>
 
-          {campaign.strategy_template === 'custom' ? (
-            <div className="rounded border border-border bg-muted/40 px-4 py-4 text-[13px] text-muted-foreground">
-              自定义模板暂不支持反事实模拟。
-            </div>
-          ) : (
-            <>
-              <CampaignWhatIfEditor
-                campaign={campaign}
-                legs={legs}
-                klines={klines}
-                klinesLoading={klinesLoading}
-                interval={interval}
-                timezone={LOCAL_TIME_ZONE}
-                pureRunning={pureRunning}
-                whatIfRunning={whatIfRunning}
-                onRunPureSop={handleRunPureSop}
-                onRunWhatIf={handleRunWhatIf}
-              />
+          <CampaignWhatIfEditor
+            campaign={campaign}
+            legs={legs}
+            klines={klines}
+            klinesLoading={klinesLoading}
+            interval={interval}
+            timezone={LOCAL_TIME_ZONE}
+            pureRunning={pureRunning}
+            whatIfRunning={whatIfRunning}
+            onRunPureSop={handleRunPureSop}
+            onRunWhatIf={handleRunWhatIf}
+          />
 
-              <div className="space-y-2">
-                <div className="text-[13px] font-medium">已保存分支</div>
-                {counterfactuals.length === 0 ? (
-                  <div className="rounded border border-border bg-background/40 px-4 py-4 text-[12px] text-muted-foreground">
-                    还没有反事实分支。先运行 Pure SOP 或新建 What-if 分支。
-                  </div>
-                ) : (
-                  counterfactuals.map(branch => {
+          <div className="space-y-2">
+            <div className="text-[13px] font-medium">已保存分支</div>
+            {counterfactuals.length === 0 ? (
+              <div className="rounded border border-border bg-background/40 px-4 py-4 text-[12px] text-muted-foreground">
+                还没有反事实分支。先运行一键方案或新建 What-if 分支。
+              </div>
+            ) : (
+              counterfactuals.map(branch => {
                     const delta = branch.result.final_realized_pnl - actualPnl;
                     const active = branch.id === selectedCounterfactualId;
                     return (
@@ -1004,11 +1008,11 @@ export default function JournalCampaignDetailPage() {
                         </button>
                       </div>
                     );
-                  })
-                )}
-              </div>
+              })
+            )}
+          </div>
 
-              {hasPureSopBranch && (
+          {hasPureSopBranch && (
                 <div className="bg-card border border-border rounded p-4 mt-4 space-y-4">
                   <div className="flex items-end justify-between gap-4">
                     <div>
@@ -1073,8 +1077,6 @@ export default function JournalCampaignDetailPage() {
                     如果总代价 &lt; 10 USDT，本场偏离基本无害；如果 &gt; 100 USDT 或 &gt; 1% 账户，立即把对应违规升级为 checklist 强制规则。
                   </div>
                 </div>
-              )}
-            </>
           )}
         </section>
 

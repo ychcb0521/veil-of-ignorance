@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import type { KlineData } from '@/hooks/useBinanceData';
 import type { CampaignCounterfactualParams } from '@/types/journal';
 
-import { simulateCampaign } from '../campaignSimulationEngine';
+import { simulateCampaign, simulateManualLegScenario } from '../campaignSimulationEngine';
 
 const MIN = 60_000;
 const t0 = new Date('2024-01-01T00:00:00Z').getTime();
@@ -202,5 +202,67 @@ describe('simulateCampaign', () => {
     expect(result.final_realized_pnl).toBe(0);
     expect(result.events.length).toBeGreaterThan(0);
     expect(result.state_segments.length).toBeGreaterThan(0);
+  });
+
+  it('manual legs scenario replays edited legs and ignores disabled legs', () => {
+    const result = simulateManualLegScenario(
+      baseParams({
+        manual_legs: [
+          {
+            id: 'main',
+            leg_role: 'main_open',
+            direction: 'long',
+            open_time: new Date(t0).toISOString(),
+            close_time: new Date(t0 + 3 * MIN).toISOString(),
+            entry_price: 100,
+            exit_price: 108,
+            size_usdt: 1000,
+            leverage: 1,
+            enabled: true,
+          },
+          {
+            id: 'hedge',
+            leg_role: 'hedge_rolling',
+            direction: 'short',
+            open_time: new Date(t0 + MIN).toISOString(),
+            close_time: new Date(t0 + 2 * MIN).toISOString(),
+            entry_price: 104,
+            exit_price: 101,
+            size_usdt: 500,
+            leverage: 1,
+            enabled: true,
+          },
+          {
+            id: 'disabled',
+            leg_role: 'mirror_tp',
+            direction: 'long',
+            open_time: new Date(t0).toISOString(),
+            close_time: new Date(t0 + 3 * MIN).toISOString(),
+            entry_price: 100,
+            exit_price: 60,
+            size_usdt: 1000,
+            leverage: 1,
+            enabled: false,
+          },
+        ],
+      }),
+      [
+        k(0, 100, 101, 99, 100),
+        k(1, 100, 105, 100, 104),
+        k(2, 104, 105, 100, 101),
+        k(3, 101, 109, 100, 108),
+      ],
+    );
+
+    expect(result.final_realized_pnl).toBeCloseTo(94.4231, 4);
+    expect(result.events.map(event => event.event_type)).toEqual([
+      'manual_leg_opened',
+      'manual_leg_opened',
+      'manual_leg_closed',
+      'manual_leg_closed',
+    ]);
+    expect(result.legs_summary).toHaveLength(2);
+    expect(result.legs_summary.some(leg => leg.leg_role === 'mirror_tp')).toBe(false);
+    expect(result.state_segments[0]?.state).toBe('manual_legs');
   });
 });

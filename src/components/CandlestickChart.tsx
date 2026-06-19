@@ -151,6 +151,15 @@ export interface AnalysisDraggablePriceLine {
   label?: string;
 }
 
+/** A vertical time line the user can drag left/right (campaign What-if leg timing). */
+export interface AnalysisDraggableVerticalLine {
+  id: string;
+  time: number;
+  color: string;
+  dashed?: boolean;
+  label?: string;
+}
+
 interface Props {
   data: KlineData[];
   symbol: string;
@@ -184,6 +193,10 @@ interface Props {
   draggablePriceLines?: AnalysisDraggablePriceLine[];
   /** Fired on drag release with the line id and its new price. */
   onDragPriceLine?: (id: string, price: number) => void;
+  /** Draggable vertical time lines (campaign What-if leg open/close timing). */
+  draggableVerticalLines?: AnalysisDraggableVerticalLine[];
+  /** Fired on drag release with the line id and its new timestamp. */
+  onDragVerticalLine?: (id: string, time: number) => void;
   /** K 线时间轴的显示时区（IANA 名）。默认 Asia/Shanghai，与主交易页一致；战役页用 UTC。 */
   timezone?: string;
 }
@@ -381,6 +394,8 @@ function CandlestickChartComponent({
   showLastPriceLine = true,
   draggablePriceLines,
   onDragPriceLine,
+  draggableVerticalLines,
+  onDragVerticalLine,
   timezone = "Asia/Shanghai",
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -394,6 +409,8 @@ function CandlestickChartComponent({
   const dragOverlayIdsRef = useRef<string[]>([]);
   const onDragPriceLineRef = useRef(onDragPriceLine);
   onDragPriceLineRef.current = onDragPriceLine;
+  const onDragVerticalLineRef = useRef(onDragVerticalLine);
+  onDragVerticalLineRef.current = onDragVerticalLine;
   const analysisOverlayRunRef = useRef(0);
 
   const [indicators, setIndicators] = usePersistedState<IndicatorConfig[]>("indicators", []);
@@ -1042,8 +1059,8 @@ function CandlestickChartComponent({
     analysisOverlayIdsRef.current = nextOverlayIds;
   }, [analysisAnnotations, data, pricePrecision]);
 
-  // Campaign What-if: draggable horizontal price lines (hedge / TP triggers).
-  // Drag a line up/down → on release report the new price so the editor can recompute the offset.
+  // Campaign What-if: draggable horizontal price lines and vertical timing lines.
+  // Drag a price line up/down or a time line left/right, then report the new value on release.
   useEffect(() => {
     const chart = chartRef.current;
     if (!chart) return;
@@ -1051,11 +1068,14 @@ function CandlestickChartComponent({
       try { chart.removeOverlay(id); } catch {}
     }
     dragOverlayIdsRef.current = [];
-    if (!draggablePriceLines || draggablePriceLines.length === 0 || data.length === 0) return;
+    const priceLines = draggablePriceLines ?? [];
+    const verticalLines = draggableVerticalLines ?? [];
+    if ((priceLines.length === 0 && verticalLines.length === 0) || data.length === 0) return;
 
     const newest = data[data.length - 1];
+    const lastValue = newest.close;
     const ids: string[] = [];
-    for (const line of draggablePriceLines) {
+    for (const line of priceLines) {
       if (!Number.isFinite(line.price)) continue;
       const id = `whatif_drag_${line.id}`;
       chart.createOverlay({
@@ -1089,8 +1109,47 @@ function CandlestickChartComponent({
       } as OverlayCreate);
       ids.push(id);
     }
+    for (const line of verticalLines) {
+      if (!Number.isFinite(line.time)) continue;
+      const id = `whatif_drag_time_${line.id}`;
+      chart.createOverlay({
+        id,
+        name: "verticalStraightLine",
+        paneId: "candle_pane",
+        points: [{ timestamp: line.time, value: lastValue }],
+        lock: false,
+        styles: {
+          line: {
+            style: line.dashed ? LineType.Dashed : LineType.Solid,
+            dashedValue: [3, 3],
+            size: 1.2,
+            color: line.color,
+          },
+          text: {
+            color: "#FFFFFF",
+            size: 9,
+            borderColor: `${line.color}30`,
+            backgroundColor: line.color,
+            borderRadius: 2,
+            paddingLeft: 3,
+            paddingRight: 3,
+            paddingTop: 1,
+            paddingBottom: 1,
+          },
+        },
+        extendData: line.label ?? "",
+        onPressedMoveEnd: (event: { overlay?: { points?: Array<{ timestamp?: number }> } }) => {
+          const next = event?.overlay?.points?.[0]?.timestamp;
+          if (typeof next === "number" && Number.isFinite(next)) {
+            onDragVerticalLineRef.current?.(line.id, next);
+          }
+          return false;
+        },
+      } as OverlayCreate);
+      ids.push(id);
+    }
     dragOverlayIdsRef.current = ids;
-  }, [draggablePriceLines, data]);
+  }, [draggablePriceLines, draggableVerticalLines, data]);
 
   useEffect(() => {
     const chart = chartRef.current;
@@ -1411,6 +1470,8 @@ function areChartPropsEqual(prev: Props, next: Props) {
     prev.analysisFitAll === next.analysisFitAll &&
     prev.draggablePriceLines === next.draggablePriceLines &&
     prev.onDragPriceLine === next.onDragPriceLine &&
+    prev.draggableVerticalLines === next.draggableVerticalLines &&
+    prev.onDragVerticalLine === next.onDragVerticalLine &&
     prev.timezone === next.timezone
   );
 }

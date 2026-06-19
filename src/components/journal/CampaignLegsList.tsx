@@ -16,6 +16,7 @@ interface Props {
 
 function statusForLeg(leg: TradeJournal, record: TradeRecord | null) {
   if (record) return { label: '已平仓', className: 'text-[#0ECB81]' };
+  if (leg.post_real_close_time || leg.post_outcome) return { label: '已平仓', className: 'text-[#0ECB81]' };
   if (leg.leg_role === 'mirror_tp' || leg.leg_role?.startsWith('hedge_')) return { label: '挂单中', className: 'text-[#F0B90B]' };
   return { label: '进行中', className: 'text-muted-foreground' };
 }
@@ -60,7 +61,7 @@ export function CampaignLegsList({
         const status = statusForLeg(leg, record);
         const highlighted = highlightedSet.has(leg.id);
         const openLabel = fmtClock(record?.openTime ?? leg.pre_simulated_time);
-        const closeLabel = record ? fmtClock(record.closeTime) : '—';
+        const closeLabel = fmtClock(record?.closeTime ?? leg.post_real_close_time);
         const operationLabel = fmtClock(operationTimeForLeg(leg));
         const hedgeSummary = leg.order_kind === 'hedge' && leg.hedge_type
           ? `${HEDGE_TYPE_LABELS[leg.hedge_type]}${leg.hedge_necessity_pct != null ? ` · ${leg.hedge_necessity_pct.toFixed(0)}%` : ''}`

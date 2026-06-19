@@ -328,6 +328,19 @@ export interface CampaignEvent {
   size_usdt: number | null;
   notes: string | null;
   recorded_at: string;
+  /**
+   * Optional denormalized leg snapshot. These live inside actual_evolution JSON so
+   * mutual followers can reconstruct the owner's original campaign view without
+   * relying on the owner's browser-local trade history.
+   */
+  direction?: TradeDirection | null;
+  leverage?: number | null;
+  open_time?: string | null;
+  close_time?: string | null;
+  entry_price?: number | null;
+  exit_price?: number | null;
+  realized_pnl?: number | null;
+  r_multiple?: number | null;
 }
 
 export interface TradeCampaign {
@@ -397,6 +410,21 @@ export interface CampaignCounterfactualParams {
     delay_minutes: number;
     size_pct: number;
   };
+  /** Editable leg copy used by campaign-level manual What-if analysis. */
+  manual_legs?: CampaignCounterfactualManualLeg[];
+}
+
+export interface CampaignCounterfactualManualLeg {
+  id: string;
+  leg_role: string;
+  direction: 'long' | 'short';
+  open_time: string;
+  close_time: string;
+  entry_price: number;
+  exit_price: number;
+  size_usdt: number;
+  leverage: number;
+  enabled: boolean;
 }
 
 export interface CampaignCounterfactualEvent {
@@ -726,6 +754,8 @@ export interface TradeJournal {
   post_outcome: TradeOutcome | null;
   post_realized_pnl: number | null;
   post_r_multiple: number | null;
+  /** UI-only fallback for campaign event reconstruction; not a database column. */
+  post_exit_price_snapshot?: number | null;
   post_reflection: string | null;
   post_correct_action: string | null;
   post_reviewed_at: string | null;

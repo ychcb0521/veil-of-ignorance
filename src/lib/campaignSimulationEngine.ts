@@ -3,6 +3,7 @@ import { computeSopDeviation, type Deduction, type SopDeviationResult } from '@/
 import type {
   CampaignCounterfactualEvent,
   CampaignCounterfactualLegSummary,
+  CampaignCounterfactualManualLeg,
   CampaignCounterfactualParams,
   CampaignCounterfactualResult,
   CampaignCounterfactualStateSegment,
@@ -776,6 +777,141 @@ export function simulateCampaign(
   finalizeOpenPositions(state, klines[klines.length - 1]);
   finalizeStateSegments(state, klines[klines.length - 1].time);
   return buildResultFromState(state);
+}
+
+function validManualLeg(leg: CampaignCounterfactualManualLeg): boolean {
+  return !!leg.enabled
+    && Number.isFinite(leg.entry_price)
+    && Number.isFinite(leg.exit_price)
+    && Number.isFinite(leg.size_usdt)
+    && Number.isFinite(leg.leverage)
+    && leg.entry_price > 0
+    && leg.exit_price > 0
+    && leg.size_usdt > 0
+    && new Date(leg.open_time).getTime() > 0
+    && new Date(leg.close_time).getTime() > 0
+    && new Date(leg.close_time).getTime() >= new Date(leg.open_time).getTime();
+}
+
+function manualLegPnl(leg: CampaignCounterfactualManualLeg): number {
+  return pnlForClose(
+    leg.direction,
+    leg.entry_price,
+    leg.exit_price,
+    leg.size_usdt,
+    leg.leverage || 1,
+  );
+}
+
+export function simulateManualLegScenario(
+  params: CampaignCounterfactualParams,
+  klines: KlineData[],
+): CampaignCounterfactualResult {
+  const manualLegs = (params.manual_legs ?? [])
+    .filter(validManualLeg)
+    .sort((a, b) => new Date(a.open_time).getTime() - new Date(b.open_time).getTime());
+
+  if (manualLegs.length === 0) {
+    return {
+      final_realized_pnl: 0,
+      final_r_multiple: 0,
+      peak_unrealized_pnl: 0,
+      peak_drawdown: 0,
+      profit_capture_ratio: 0,
+      events: [],
+      legs_summary: [],
+      state_segments: [],
+      sop_score: 0,
+    };
+  }
+
+  const events = manualLegs
+    .flatMap<CampaignCounterfactualEvent>(leg => ([
+      {
+        timestamp: leg.open_time,
+        event_type: 'manual_leg_opened',
+        leg_role: leg.leg_role,
+        price: round(leg.entry_price),
+        size_usdt: round(leg.size_usdt),
+        notes: '手动 Legs 方案开仓',
+      },
+      {
+        timestamp: leg.close_time,
+        event_type: 'manual_leg_closed',
+        leg_role: leg.leg_role,
+        price: round(leg.exit_price),
+        size_usdt: round(leg.size_usdt),
+        notes: '手动 Legs 方案平仓',
+      },
+    ]))
+    .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+
+  const finalPnl = manualLegs.reduce((sum, leg) => sum + manualLegPnl(leg), 0);
+  let peakEquity = 0;
+  let troughEquity = 0;
+
+  if (klines.length > 0) {
+    for (const kline of klines) {
+      const equity = manualLegs.reduce((sum, leg) => {
+        const openMs = new Date(leg.open_time).getTime();
+        const closeMs = new Date(leg.close_time).getTime();
+        if (kline.time < openMs) return sum;
+        if (kline.time >= closeMs) return sum + manualLegPnl(leg);
+        return sum + pnlForClose(
+          leg.direction,
+          leg.entry_price,
+          kline.close,
+          leg.size_usdt,
+          leg.leverage || 1,
+        );
+      }, 0);
+      peakEquity = Math.max(peakEquity, equity);
+      troughEquity = Math.min(troughEquity, equity);
+    }
+  } else {
+    peakEquity = Math.max(0, finalPnl);
+    troughEquity = Math.min(0, finalPnl);
+  }
+
+  const firstTime = manualLegs[0].open_time;
+  const lastTime = manualLegs.reduce((latest, leg) => (
+    new Date(leg.close_time).getTime() > new Date(latest).getTime() ? leg.close_time : latest
+  ), manualLegs[0].close_time);
+  const mainLeg = manualLegs.find(leg => leg.leg_role === 'main_open') ?? manualLegs[0];
+  const plannedMaxLoss = mainLeg
+    ? Math.abs(manualLegPnl({
+      ...mainLeg,
+      exit_price: params.entry.direction === 'long'
+        ? params.entry.price * 0.98
+        : params.entry.price * 1.02,
+    }))
+    : 0;
+
+  return {
+    final_realized_pnl: round(finalPnl),
+    final_r_multiple: plannedMaxLoss > EPSILON ? round(finalPnl / plannedMaxLoss) : 0,
+    peak_unrealized_pnl: round(Math.max(0, peakEquity)),
+    peak_drawdown: round(Math.abs(Math.min(0, troughEquity))),
+    profit_capture_ratio: peakEquity > EPSILON
+      ? round(clamp((finalPnl / peakEquity) * 100, -999, 999))
+      : 0,
+    events,
+    legs_summary: manualLegs.map<CampaignCounterfactualLegSummary>(leg => ({
+      leg_role: leg.leg_role,
+      placed_at: leg.open_time,
+      trigger_price: round(leg.entry_price),
+      status: 'filled',
+      triggered_at: leg.close_time,
+      realized_pnl_usdt: round(manualLegPnl(leg)),
+    })),
+    state_segments: [{
+      state: 'manual_legs',
+      state_label: '手动 Legs 方案',
+      start_time: firstTime,
+      end_time: lastTime,
+    }],
+    sop_score: 0,
+  };
 }
 
 function inferActualParams(campaign: TradeCampaign, legs: TradeJournal[]): CampaignCounterfactualParams | null {
