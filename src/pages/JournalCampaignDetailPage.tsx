@@ -1,23 +1,22 @@
 import { type ChangeEvent, useEffect, useMemo, useState } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, Info, Layers, MessageSquare, Send, Sparkles, Trash2, TrendingUp, UserPlus } from 'lucide-react';
+import { ArrowLeft, Info, Layers, MessageSquare, Send, Sparkles, Trash2, UserPlus } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Switch } from '@/components/ui/switch';
 import { Textarea } from '@/components/ui/textarea';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { type ChartMarker, type TimeBoundPriceLine, type VerticalLine } from '@/components/journal/ReplayCandleChart';
 import { ReplayKlineChart } from '@/components/journal/ReplayKlineChart';
 import { CampaignLegsList } from '@/components/journal/CampaignLegsList';
+import { CampaignWhatIfEditor } from '@/components/journal/CampaignWhatIfEditor';
 import { EndCampaignDialog } from '@/components/journal/EndCampaignDialog';
 import { useAuth } from '@/contexts/AuthContext';
 import { useTradingContext } from '@/contexts/TradingContext';
 import { intervalToMs } from '@/hooks/useBinanceData';
 import { useCampaignKlines, CAMPAIGN_EDGE_PAD_MS } from '@/hooks/useCampaignKlines';
-import { buildPureSopParams } from '@/lib/campaignSimulationEngine';
 import {
   buildCampaignEventStream,
   computeDecisionAccuracy,
@@ -120,10 +119,6 @@ function counterfactualLabel(role: string) {
     case 'mirror_tp': return 'CF-TP';
     default: return 'CF';
   }
-}
-
-function buildDefaultWhatIfParams(campaign: TradeCampaign, legs: TradeJournal[]) {
-  return buildPureSopParams(campaign, legs);
 }
 
 // 开单/平单竖线配色：多单蓝、空单橘（与持仓方向绑定，独立于 leg_role 的标记色）。
@@ -360,10 +355,6 @@ export default function JournalCampaignDetailPage() {
   const [counterfactuals, setCounterfactuals] = useState<CampaignCounterfactual[]>([]);
   const [selectedCounterfactualId, setSelectedCounterfactualId] = useState<string | null>(null);
   const [pureRunning, setPureRunning] = useState(false);
-  const [whatIfOpen, setWhatIfOpen] = useState(false);
-  const [whatIfLabel, setWhatIfLabel] = useState('');
-  const [whatIfDescription, setWhatIfDescription] = useState('');
-  const [whatIfParams, setWhatIfParams] = useState<CampaignCounterfactualParams | null>(null);
   const [whatIfRunning, setWhatIfRunning] = useState(false);
   const [deviationCosts, setDeviationCosts] = useState<DeviationCost[]>([]);
   const [deviationLoading, setDeviationLoading] = useState(false);
@@ -494,10 +485,6 @@ export default function JournalCampaignDetailPage() {
     () => (campaign ? shouldSuggestCampaignEnd(campaign, legs, tradeRecords, pendingOrders, getEffectiveTime(campaign.symbol)) : false),
     [campaign, legs, tradeRecords, pendingOrders, getEffectiveTime],
   );
-  const pureSopDefaults = useMemo(
-    () => (campaign ? buildDefaultWhatIfParams(campaign, legs) : null),
-    [campaign, legs],
-  );
   const hasPureSopBranch = useMemo(
     () => counterfactuals.some(branch => branch.branch_kind === 'pure_sop'),
     [counterfactuals],
@@ -506,11 +493,6 @@ export default function JournalCampaignDetailPage() {
     () => legs.filter(leg => leg.source === 'retroactive_from_record').length,
     [legs],
   );
-
-  useEffect(() => {
-    if (!pureSopDefaults) return;
-    setWhatIfParams(pureSopDefaults);
-  }, [pureSopDefaults]);
 
   useEffect(() => {
     if (!campaign || campaign.strategy_template === 'custom') return;
@@ -643,23 +625,16 @@ export default function JournalCampaignDetailPage() {
     }
   };
 
-  const handleRunWhatIf = async () => {
-    if (!whatIfParams) return;
-    if (!whatIfLabel.trim()) {
-      toast.error('请填写分支标签');
-      return;
-    }
+  const handleRunWhatIf = async (label: string, params: CampaignCounterfactualParams) => {
     if (klinesLoading || klines.length === 0) {
       toast.error('K 线尚未加载完成，暂时无法运行 What-if');
       return;
     }
     try {
       setWhatIfRunning(true);
-      const branch = await runAndPersistCustomCounterfactual(campaign.id, whatIfLabel.trim(), whatIfParams, klines);
+      const branch = await runAndPersistCustomCounterfactual(campaign.id, label, params, klines);
       await reloadCounterfactuals(branch.id);
       setSelectedCounterfactualId(branch.id);
-      setWhatIfOpen(false);
-      setWhatIfDescription('');
       toast.success('What-if 分支已保存');
     } catch (error) {
       toast.error(error instanceof Error ? error.message : String(error));
@@ -707,13 +682,6 @@ export default function JournalCampaignDetailPage() {
     } finally {
       setDeviationLoading(false);
     }
-  };
-
-  const updateWhatIf = <K extends keyof CampaignCounterfactualParams>(
-    key: K,
-    value: CampaignCounterfactualParams[K],
-  ) => {
-    setWhatIfParams(prev => prev ? { ...prev, [key]: value } : prev);
   };
 
   return (
@@ -979,224 +947,18 @@ export default function JournalCampaignDetailPage() {
             </div>
           ) : (
             <>
-              <div className="bg-[#0ECB81]/5 border border-[#0ECB81]/30 rounded p-4 flex flex-col gap-3 lg:flex-row lg:items-center">
-                <div className="flex items-center gap-3 min-w-0">
-                  <div className="h-10 w-10 rounded-full bg-[#0ECB81]/15 flex items-center justify-center text-[#0ECB81]">
-                    <TrendingUp className="w-5 h-5" />
-                  </div>
-                  <div className="min-w-0">
-                    <div className="text-[14px] font-medium">Pure SOP 一键运行</div>
-                    <div className="text-[11px] text-muted-foreground">
-                      用你冷静时定下的 SOP 默认参数（基于战役模板）+ 这场战役实际的市场数据，跑一次完整模拟。
-                    </div>
-                  </div>
-                </div>
-                <div className="flex-1" />
-                <Button
-                  className="bg-[#0ECB81] text-black hover:bg-[#0ECB81]/90 h-9 text-[12px]"
-                  disabled={pureRunning || klinesLoading || klines.length === 0}
-                  onClick={handleRunPureSop}
-                >
-                  {pureRunning ? '运行中…' : '运行'}
-                </Button>
-              </div>
-
-              <details className="rounded border border-border bg-background/60 px-4 py-3 text-[12px]">
-                <summary className="cursor-pointer text-muted-foreground">查看 Pure SOP 默认参数</summary>
-                {pureSopDefaults && (
-                  <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-2 font-mono text-[11px]">
-                    <div>hedge_a_offset_pct: {pureSopDefaults.hedge_a.offset_pct.toFixed(1)}%</div>
-                    <div>hedge_b_offset_pct: {pureSopDefaults.hedge_b.offset_pct.toFixed(1)}%</div>
-                    <div>mirror_tp_offset_pct: {pureSopDefaults.mirror_tp.offset_pct.toFixed(1)}%</div>
-                    <div>mirror_tp_size_pct: {pureSopDefaults.mirror_tp.size_pct.toFixed(0)}%</div>
-                    <div>rolling.enabled: {pureSopDefaults.rolling.enabled ? 'true' : 'false'}</div>
-                    <div>rolling.trigger_rise_pct: {pureSopDefaults.rolling.trigger_rise_pct.toFixed(1)}%</div>
-                    <div>rolling.min_interval_minutes: {pureSopDefaults.rolling.min_interval_minutes}</div>
-                    <div>rolling.new_hedge_offset_pct: {pureSopDefaults.rolling.new_hedge_offset_pct.toFixed(1)}%</div>
-                    <div>rolling_hedge_size_pct: {pureSopDefaults.rolling.rolling_hedge_size_pct.toFixed(0)}%</div>
-                    <div>exit_rule: '{pureSopDefaults.exit_rule}'</div>
-                  </div>
-                )}
-              </details>
-
-              <div className="bg-card border border-border rounded p-4 space-y-4">
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <div className="text-[14px] font-medium">自定义 What-if 分支</div>
-                    <div className="text-[11px] text-muted-foreground">如果对冲位放在 X、镜像 TP 放在 Y、或直接不滚动，会怎样？</div>
-                  </div>
-                  <Button
-                    variant="outline"
-                    className="h-8 text-[12px]"
-                    onClick={() => setWhatIfOpen(prev => !prev)}
-                  >
-                    {whatIfOpen ? '收起' : '+ 新建 What-if 分支'}
-                  </Button>
-                </div>
-
-                {whatIfOpen && whatIfParams && (
-                  <div className="space-y-4">
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                      <div className="space-y-1.5">
-                        <label className="text-[11px] text-muted-foreground">分支标签</label>
-                        <Input
-                          value={whatIfLabel}
-                          placeholder="例如：对冲更宽 / 不滚动 / 单 hedge"
-                          onChange={(e: ChangeEvent<HTMLInputElement>) => setWhatIfLabel(e.target.value)}
-                          className="text-[12px]"
-                        />
-                      </div>
-                      <div className="space-y-1.5">
-                        <label className="text-[11px] text-muted-foreground">描述（可选）</label>
-                        <Textarea
-                          value={whatIfDescription}
-                          placeholder="记录这个分支想验证什么"
-                          onChange={(e: ChangeEvent<HTMLTextAreaElement>) => setWhatIfDescription(e.target.value)}
-                          className="min-h-[72px] text-[12px]"
-                        />
-                      </div>
-                    </div>
-
-                    <details open className="rounded border border-border bg-background/50 px-4 py-3">
-                      <summary className="cursor-pointer text-[12px] font-medium">Setup</summary>
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3">
-                        <Input
-                          type="number"
-                          value={whatIfParams.hedge_a.offset_pct}
-                          onChange={(e: ChangeEvent<HTMLInputElement>) => updateWhatIf('hedge_a', { ...whatIfParams.hedge_a, offset_pct: Number(e.target.value) })}
-                          className="text-[12px]"
-                          placeholder="hedge_a 偏移 %"
-                        />
-                        <Input
-                          type="number"
-                          value={whatIfParams.hedge_a.size_pct}
-                          onChange={(e: ChangeEvent<HTMLInputElement>) => updateWhatIf('hedge_a', { ...whatIfParams.hedge_a, size_pct: Number(e.target.value) })}
-                          className="text-[12px]"
-                          placeholder="hedge_a 仓位 %"
-                        />
-                        <Input
-                          type="number"
-                          value={whatIfParams.hedge_b.offset_pct}
-                          onChange={(e: ChangeEvent<HTMLInputElement>) => updateWhatIf('hedge_b', { ...whatIfParams.hedge_b, offset_pct: Number(e.target.value) })}
-                          className="text-[12px]"
-                          placeholder="hedge_b 偏移 %"
-                        />
-                        <Input
-                          type="number"
-                          value={whatIfParams.hedge_b.size_pct}
-                          onChange={(e: ChangeEvent<HTMLInputElement>) => updateWhatIf('hedge_b', { ...whatIfParams.hedge_b, size_pct: Number(e.target.value) })}
-                          className="text-[12px]"
-                          placeholder="hedge_b 仓位 %"
-                        />
-                        <Input
-                          type="number"
-                          value={whatIfParams.mirror_tp.offset_pct}
-                          onChange={(e: ChangeEvent<HTMLInputElement>) => updateWhatIf('mirror_tp', { ...whatIfParams.mirror_tp, offset_pct: Number(e.target.value) })}
-                          className="text-[12px]"
-                          placeholder="mirror_tp 偏移 %"
-                        />
-                        <Input
-                          type="number"
-                          value={whatIfParams.mirror_tp.size_pct}
-                          onChange={(e: ChangeEvent<HTMLInputElement>) => updateWhatIf('mirror_tp', { ...whatIfParams.mirror_tp, size_pct: Number(e.target.value) })}
-                          className="text-[12px]"
-                          placeholder="mirror_tp 仓位 %"
-                        />
-                      </div>
-                    </details>
-
-                    <details className="rounded border border-border bg-background/50 px-4 py-3">
-                      <summary className="cursor-pointer text-[12px] font-medium">Rolling</summary>
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3">
-                        <div className="flex items-center justify-between rounded border border-border px-3 py-2 text-[12px]">
-                          <span>启用滚动</span>
-                          <Switch
-                            checked={whatIfParams.rolling.enabled}
-                            onCheckedChange={(checked: boolean) => updateWhatIf('rolling', { ...whatIfParams.rolling, enabled: checked })}
-                          />
-                        </div>
-                        <Input
-                          type="number"
-                          value={whatIfParams.rolling.trigger_rise_pct}
-                          onChange={(e: ChangeEvent<HTMLInputElement>) => updateWhatIf('rolling', { ...whatIfParams.rolling, trigger_rise_pct: Number(e.target.value) })}
-                          className="text-[12px]"
-                          placeholder="触发上涨 %"
-                        />
-                        <Input
-                          type="number"
-                          value={whatIfParams.rolling.min_interval_minutes}
-                          onChange={(e: ChangeEvent<HTMLInputElement>) => updateWhatIf('rolling', { ...whatIfParams.rolling, min_interval_minutes: Number(e.target.value) })}
-                          className="text-[12px]"
-                          placeholder="最小间隔（分钟）"
-                        />
-                        <Input
-                          type="number"
-                          value={whatIfParams.rolling.new_hedge_offset_pct}
-                          onChange={(e: ChangeEvent<HTMLInputElement>) => updateWhatIf('rolling', { ...whatIfParams.rolling, new_hedge_offset_pct: Number(e.target.value) })}
-                          className="text-[12px]"
-                          placeholder="新 hedge 偏移 %"
-                        />
-                        <Input
-                          type="number"
-                          value={whatIfParams.rolling.rolling_hedge_size_pct}
-                          onChange={(e: ChangeEvent<HTMLInputElement>) => updateWhatIf('rolling', { ...whatIfParams.rolling, rolling_hedge_size_pct: Number(e.target.value) })}
-                          className="text-[12px]"
-                          placeholder="滚动 hedge 仓位 %"
-                        />
-                      </div>
-                    </details>
-
-                    <details className="rounded border border-border bg-background/50 px-4 py-3">
-                      <summary className="cursor-pointer text-[12px] font-medium">Exit</summary>
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3">
-                        <select
-                          value={whatIfParams.exit_rule}
-                          onChange={(e: ChangeEvent<HTMLSelectElement>) => updateWhatIf('exit_rule', e.target.value as CampaignCounterfactualParams['exit_rule'])}
-                          className="h-10 rounded border border-border bg-background px-3 text-[12px]"
-                        >
-                          <option value="close_all_on_hedge_trigger">close_all</option>
-                          <option value="reenter_after_hedge_trigger">reenter</option>
-                          <option value="manual_only">manual_only</option>
-                        </select>
-                        {whatIfParams.exit_rule === 'reenter_after_hedge_trigger' && (
-                          <>
-                            <Input
-                              type="number"
-                              value={whatIfParams.reentry?.delay_minutes ?? 30}
-                              onChange={(e: ChangeEvent<HTMLInputElement>) => updateWhatIf('reentry', {
-                                delay_minutes: Number(e.target.value),
-                                size_pct: whatIfParams.reentry?.size_pct ?? 100,
-                              })}
-                              className="text-[12px]"
-                              placeholder="延迟分钟"
-                            />
-                            <Input
-                              type="number"
-                              value={whatIfParams.reentry?.size_pct ?? 100}
-                              onChange={(e: ChangeEvent<HTMLInputElement>) => updateWhatIf('reentry', {
-                                delay_minutes: whatIfParams.reentry?.delay_minutes ?? 30,
-                                size_pct: Number(e.target.value),
-                              })}
-                              className="text-[12px]"
-                              placeholder="重入仓位 %"
-                            />
-                          </>
-                        )}
-                      </div>
-                    </details>
-
-                    <div className="flex justify-end">
-                      <Button
-                        className="bg-[#F0B90B] text-black hover:bg-[#F0B90B]/90 h-9 text-[12px]"
-                        disabled={whatIfRunning || !whatIfLabel.trim()}
-                        onClick={handleRunWhatIf}
-                      >
-                        {whatIfRunning ? '运行中…' : '运行分支'}
-                      </Button>
-                    </div>
-                  </div>
-                )}
-              </div>
+              <CampaignWhatIfEditor
+                campaign={campaign}
+                legs={legs}
+                klines={klines}
+                klinesLoading={klinesLoading}
+                interval={interval}
+                timezone={LOCAL_TIME_ZONE}
+                pureRunning={pureRunning}
+                whatIfRunning={whatIfRunning}
+                onRunPureSop={handleRunPureSop}
+                onRunWhatIf={handleRunWhatIf}
+              />
 
               <div className="space-y-2">
                 <div className="text-[13px] font-medium">已保存分支</div>

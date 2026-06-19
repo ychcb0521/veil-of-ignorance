@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import { CandlestickChart, type AnalysisChartAnnotations } from '@/components/CandlestickChart';
+import { CandlestickChart, type AnalysisChartAnnotations, type AnalysisDraggablePriceLine } from '@/components/CandlestickChart';
 import type { KlineData } from '@/hooks/useBinanceData';
 import { sliceReplayKlines } from '@/lib/replayKlineWindow';
 import type { ChartMarker, PriceLine, TimeBoundPriceLine, VerticalLine } from './ReplayCandleChart';
@@ -22,6 +22,10 @@ interface Props {
   fitAll?: boolean;
   /** 是否显示最新价水平线；战役截取盘面默认关闭，避免干扰复盘标注。 */
   showLastPriceLine?: boolean;
+  /** 可拖动的横向价格线（What-if 对冲/止盈触发价）。 */
+  draggablePriceLines?: AnalysisDraggablePriceLine[];
+  /** 拖动结束回调：返回线 id 和新价格。 */
+  onDragPriceLine?: (id: string, price: number) => void;
 }
 
 function inferPricePrecision(values: number[]) {
@@ -50,6 +54,8 @@ export function ReplayKlineChart({
   timezone,
   fitAll = false,
   showLastPriceLine = true,
+  draggablePriceLines,
+  onDragPriceLine,
 }: Props) {
   const replayData = useMemo(() => {
     // 战役详情用 fitAll：直接渲染全部已拉取的 K 线（fetchRange 已把区间收敛到 Legs 两端 + 缓冲），
@@ -112,6 +118,8 @@ export function ReplayKlineChart({
       analysisFocusTime={viewportCenterTime ?? currentTime}
       analysisFitAll={fitAll}
       showLastPriceLine={showLastPriceLine}
+      draggablePriceLines={draggablePriceLines}
+      onDragPriceLine={onDragPriceLine}
       timezone={timezone}
     />
   );

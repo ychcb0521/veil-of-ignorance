@@ -143,6 +143,14 @@ export interface AnalysisChartAnnotations {
   verticalLines?: AnalysisVerticalLine[];
 }
 
+/** A horizontal price line the user can drag up/down (campaign What-if hedge/TP triggers). */
+export interface AnalysisDraggablePriceLine {
+  id: string;
+  price: number;
+  color: string;
+  label?: string;
+}
+
 interface Props {
   data: KlineData[];
   symbol: string;
@@ -172,6 +180,10 @@ interface Props {
   analysisFitAll?: boolean;
   /** Whether to show the chart engine's latest-price horizontal mark. Campaign review turns this off to keep the extracted board clean. */
   showLastPriceLine?: boolean;
+  /** Draggable horizontal price lines (campaign What-if hedge/TP triggers). Drag up/down to change the trigger price. */
+  draggablePriceLines?: AnalysisDraggablePriceLine[];
+  /** Fired on drag release with the line id and its new price. */
+  onDragPriceLine?: (id: string, price: number) => void;
   /** K 线时间轴的显示时区（IANA 名）。默认 Asia/Shanghai，与主交易页一致；战役页用 UTC。 */
   timezone?: string;
 }
@@ -367,6 +379,8 @@ function CandlestickChartComponent({
   analysisFocusTime = null,
   analysisFitAll = false,
   showLastPriceLine = true,
+  draggablePriceLines,
+  onDragPriceLine,
   timezone = "Asia/Shanghai",
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -377,6 +391,9 @@ function CandlestickChartComponent({
   const prevLastSigRef = useRef("");
   const prevSymbolRef = useRef<string>(symbol);
   const analysisOverlayIdsRef = useRef<string[]>([]);
+  const dragOverlayIdsRef = useRef<string[]>([]);
+  const onDragPriceLineRef = useRef(onDragPriceLine);
+  onDragPriceLineRef.current = onDragPriceLine;
   const analysisOverlayRunRef = useRef(0);
 
   const [indicators, setIndicators] = usePersistedState<IndicatorConfig[]>("indicators", []);
@@ -1025,6 +1042,56 @@ function CandlestickChartComponent({
     analysisOverlayIdsRef.current = nextOverlayIds;
   }, [analysisAnnotations, data, pricePrecision]);
 
+  // Campaign What-if: draggable horizontal price lines (hedge / TP triggers).
+  // Drag a line up/down → on release report the new price so the editor can recompute the offset.
+  useEffect(() => {
+    const chart = chartRef.current;
+    if (!chart) return;
+    for (const id of dragOverlayIdsRef.current) {
+      try { chart.removeOverlay(id); } catch {}
+    }
+    dragOverlayIdsRef.current = [];
+    if (!draggablePriceLines || draggablePriceLines.length === 0 || data.length === 0) return;
+
+    const newest = data[data.length - 1];
+    const ids: string[] = [];
+    for (const line of draggablePriceLines) {
+      if (!Number.isFinite(line.price)) continue;
+      const id = `whatif_drag_${line.id}`;
+      chart.createOverlay({
+        id,
+        name: "horizontalStraightLine",
+        paneId: "candle_pane",
+        points: [{ timestamp: newest.time, value: line.price }],
+        lock: false,
+        styles: {
+          line: { style: LineType.Dashed, dashedValue: [4, 4], size: 1.5, color: line.color },
+          text: {
+            color: "#FFFFFF",
+            size: 10,
+            borderColor: `${line.color}60`,
+            backgroundColor: line.color,
+            borderRadius: 2,
+            paddingLeft: 3,
+            paddingRight: 3,
+            paddingTop: 1,
+            paddingBottom: 1,
+          },
+        },
+        extendData: line.label ?? "",
+        onPressedMoveEnd: (event: { overlay?: { points?: Array<{ value?: number }> } }) => {
+          const next = event?.overlay?.points?.[0]?.value;
+          if (typeof next === "number" && Number.isFinite(next)) {
+            onDragPriceLineRef.current?.(line.id, next);
+          }
+          return false;
+        },
+      } as OverlayCreate);
+      ids.push(id);
+    }
+    dragOverlayIdsRef.current = ids;
+  }, [draggablePriceLines, data]);
+
   useEffect(() => {
     const chart = chartRef.current;
     if (!chart) return;
@@ -1342,6 +1409,8 @@ function areChartPropsEqual(prev: Props, next: Props) {
     prev.analysisAnnotations === next.analysisAnnotations &&
     prev.analysisFocusTime === next.analysisFocusTime &&
     prev.analysisFitAll === next.analysisFitAll &&
+    prev.draggablePriceLines === next.draggablePriceLines &&
+    prev.onDragPriceLine === next.onDragPriceLine &&
     prev.timezone === next.timezone
   );
 }
