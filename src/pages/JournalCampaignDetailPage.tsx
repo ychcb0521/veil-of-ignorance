@@ -33,7 +33,6 @@ import {
   listCampaignComments,
   listCounterfactuals,
   runAndPersistCustomCounterfactual,
-  runAndPersistDeviationCosts,
   runAndPersistPureSop,
 } from '@/lib/journalApi';
 import { STRATEGY_TEMPLATES } from '@/lib/strategyTemplates';
@@ -41,7 +40,6 @@ import type {
   CampaignCounterfactual,
   CampaignCounterfactualParams,
   CampaignComment,
-  DeviationCost,
   TradeCampaign,
   TradeJournal,
 } from '@/types/journal';
@@ -367,9 +365,6 @@ export default function JournalCampaignDetailPage() {
   const [pendingCounterfactualId, setPendingCounterfactualId] = useState<string | null>(null);
   const [pureRunning, setPureRunning] = useState(false);
   const [whatIfRunning, setWhatIfRunning] = useState(false);
-  const [deviationCosts, setDeviationCosts] = useState<DeviationCost[]>([]);
-  const [deviationLoading, setDeviationLoading] = useState(false);
-  const [deviationHydrated, setDeviationHydrated] = useState(false);
   const [detachTarget, setDetachTarget] = useState<TradeJournal | null>(null);
   const [detaching, setDetaching] = useState(false);
   const [selectedLegMarkerIds, setSelectedLegMarkerIds] = useState<string[]>([]);
@@ -502,37 +497,15 @@ export default function JournalCampaignDetailPage() {
     () => (campaign ? shouldSuggestCampaignEnd(campaign, legs, tradeRecords, pendingOrders, getEffectiveTime(campaign.symbol)) : false),
     [campaign, legs, tradeRecords, pendingOrders, getEffectiveTime],
   );
-  const hasPureSopBranch = useMemo(
-    () => counterfactuals.some(branch => branch.branch_kind === 'pure_sop'),
+  // 已保存分支列表里隐藏自动生成的「修正分支」(补齐 X)，只保留 Pure SOP 与自定义 What-if。
+  const visibleBranches = useMemo(
+    () => counterfactuals.filter(branch => branch.branch_kind !== 'fix_one_deviation'),
     [counterfactuals],
   );
   const retroactiveLegCount = useMemo(
     () => legs.filter(leg => leg.source === 'retroactive_from_record').length,
     [legs],
   );
-
-  useEffect(() => {
-    if (!campaign || campaign.strategy_template === 'custom') return;
-    if (!hasPureSopBranch || deviationHydrated || klines.length === 0) return;
-    let cancelled = false;
-    (async () => {
-      try {
-        setDeviationLoading(true);
-        const costs = await runAndPersistDeviationCosts(campaign.id, klines);
-        if (cancelled) return;
-        setDeviationCosts(costs);
-        setDeviationHydrated(true);
-        setCounterfactuals(await listCounterfactuals(campaign.id));
-      } catch (error) {
-        if (!cancelled) toast.error(error instanceof Error ? error.message : String(error));
-      } finally {
-        if (!cancelled) setDeviationLoading(false);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [campaign, hasPureSopBranch, deviationHydrated, klines]);
 
   if (loading || !campaign || !accuracy) {
     return (
@@ -564,7 +537,6 @@ export default function JournalCampaignDetailPage() {
   const tpCount = legs.filter((leg: TradeJournal) => leg.leg_role === 'mirror_tp').length;
   const otherCount = Math.max(0, legs.length - mainCount - hedgeCount - tpCount);
   const actualPnl = campaign.final_realized_pnl ?? 0;
-  const totalDeviationCost = deviationCosts.reduce((sum, item) => sum + item.cost_usdt, 0);
   const selectedCounterfactualDelta = selectedCounterfactual
     ? selectedCounterfactual.result.final_realized_pnl - actualPnl
     : null;
@@ -633,17 +605,11 @@ export default function JournalCampaignDetailPage() {
       await reloadCounterfactuals(branch.id);
       setSelectedCounterfactualId(branch.id);
       setPendingCounterfactualId(branch.id);
-      setDeviationLoading(true);
-      const costs = await runAndPersistDeviationCosts(campaign.id, klines);
-      setDeviationCosts(costs);
-      setDeviationHydrated(true);
-      await reloadCounterfactuals(branch.id);
       toast.success('Pure SOP 结果已生成，请选择保存或删除');
     } catch (error) {
       toast.error(error instanceof Error ? error.message : String(error));
     } finally {
       setPureRunning(false);
-      setDeviationLoading(false);
     }
   };
 
@@ -702,33 +668,6 @@ export default function JournalCampaignDetailPage() {
       toast.success('已保存并刷新');
     } catch (error) {
       toast.error(error instanceof Error ? error.message : String(error));
-    }
-  };
-
-  const handleViewFixBranch = async (cost: DeviationCost) => {
-    if (!cost.source_deduction_id) return;
-    const existing = counterfactuals.find(branch => branch.source_deduction_id === cost.source_deduction_id);
-    if (existing) {
-      setSelectedCounterfactualId(existing.id);
-      return;
-    }
-    if (klinesLoading || klines.length === 0) {
-      toast.error('K 线尚未加载完成，暂时无法运行修正分支');
-      return;
-    }
-    try {
-      setDeviationLoading(true);
-      const costs = await runAndPersistDeviationCosts(campaign.id, klines);
-      setDeviationCosts(costs);
-      setDeviationHydrated(true);
-      const next = await listCounterfactuals(campaign.id);
-      setCounterfactuals(next);
-      const matched = next.find(branch => branch.source_deduction_id === cost.source_deduction_id);
-      if (matched) setSelectedCounterfactualId(matched.id);
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : String(error));
-    } finally {
-      setDeviationLoading(false);
     }
   };
 
@@ -1045,12 +984,12 @@ export default function JournalCampaignDetailPage() {
 
           <div className="space-y-2">
             <div className="text-[13px] font-medium">已保存分支</div>
-            {counterfactuals.length === 0 ? (
+            {visibleBranches.length === 0 ? (
               <div className="rounded border border-border bg-background/40 px-4 py-4 text-[12px] text-muted-foreground">
                 还没有反事实分支。先运行一键方案或新建 What-if 分支。
               </div>
             ) : (
-              counterfactuals.map(branch => {
+              visibleBranches.map(branch => {
                     const delta = branch.result.final_realized_pnl - actualPnl;
                     const active = branch.id === selectedCounterfactualId;
                     return (
@@ -1121,74 +1060,6 @@ export default function JournalCampaignDetailPage() {
                 SOP {selectedCounterfactual.result.sop_score} · {branchKindLabel(selectedCounterfactual.branch_kind)} · {fmtMdHm(selectedCounterfactual.created_at)}
               </div>
             </div>
-          )}
-
-          {hasPureSopBranch && (
-                <div className="bg-card border border-border rounded p-4 mt-4 space-y-4">
-                  <div className="flex items-center justify-between gap-4">
-                    <div>
-                      <div className="text-[13px] font-medium">
-                        SOP 偏离代价明细
-                      </div>
-                      <div className="text-[12px] text-muted-foreground mt-2">
-                        这里只解释规则缺口，不代表当前选中反事实分支的最终 P&L。
-                        合计 {totalDeviationCost >= 0 ? '+' : ''}{totalDeviationCost.toFixed(2)} USDT。
-                      </div>
-                    </div>
-                    {deviationLoading && <div className="text-[11px] text-muted-foreground">计算中…</div>}
-                  </div>
-
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-[11px]">
-                      <thead className="bg-background text-muted-foreground">
-                        <tr>
-                          <th className="text-left px-3 py-2">违规阶段</th>
-                          <th className="text-left px-3 py-2">违规描述</th>
-                          <th className="text-left px-3 py-2">修正后</th>
-                          <th className="text-right px-3 py-2">代价 (USDT)</th>
-                          <th className="text-right px-3 py-2">占账户 %</th>
-                          <th className="text-right px-3 py-2">操作</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {deviationCosts.map(cost => (
-                          <tr key={cost.source_deduction_id ?? `${cost.deduction_category}-${cost.deduction_reason}`} className="border-t border-border">
-                            <td className="px-3 py-2 capitalize">{cost.deduction_category}</td>
-                            <td className="px-3 py-2 text-foreground">{cost.deduction_reason}</td>
-                            <td className="px-3 py-2 text-muted-foreground">{cost.fix_description}</td>
-                            <td className={`px-3 py-2 text-right font-mono ${pnlColor(cost.cost_usdt)}`}>
-                              {cost.cost_usdt >= 0 ? '+' : ''}{cost.cost_usdt.toFixed(2)}
-                            </td>
-                            <td className={`px-3 py-2 text-right font-mono ${pnlColor(cost.cost_pct_of_account)}`}>
-                              {cost.cost_pct_of_account >= 0 ? '+' : ''}{cost.cost_pct_of_account.toFixed(2)}%
-                            </td>
-                            <td className="px-3 py-2 text-right">
-                              <Button
-                                variant="outline"
-                                className="h-8 text-[11px]"
-                                onClick={() => handleViewFixBranch(cost)}
-                              >
-                                查看修正分支
-                              </Button>
-                            </td>
-                          </tr>
-                        ))}
-                        {deviationCosts.length === 0 && (
-                          <tr>
-                            <td colSpan={6} className="px-3 py-5 text-center text-[12px] text-muted-foreground">
-                              {deviationLoading ? '正在计算偏离代价…' : '暂无可折算的 SOP 偏离代价'}
-                            </td>
-                          </tr>
-                        )}
-                      </tbody>
-                    </table>
-                  </div>
-
-                  <div className="rounded border border-[#F6465D]/35 bg-[#F6465D]/8 px-4 py-3 text-[13px] text-foreground">
-                    这张表是这套系统对你最锋利的一刀。每一条都是真金白银。
-                    如果总代价 &lt; 10 USDT，本场偏离基本无害；如果 &gt; 100 USDT 或 &gt; 1% 账户，立即把对应违规升级为 checklist 强制规则。
-                  </div>
-                </div>
           )}
         </section>
 
