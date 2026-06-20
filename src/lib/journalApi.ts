@@ -113,6 +113,26 @@ function writeUserScopedStorage<T>(userId: string, key: string, value: T): void 
   }
 }
 
+/** 用户对某条 SOP 偏离行的「违规阶段/违规描述/修正后」的手改覆盖（留空则视为清空，不回退自动值）。 */
+export interface CampaignDeviationNote {
+  category?: string;
+  reason?: string;
+  fix?: string;
+}
+const CAMPAIGN_DEVIATION_NOTES_STORAGE_KEY = 'campaign_deviation_notes';
+
+/** 读取某战役下、按行键存的偏离备注覆盖（用户作用域，本地持久化）。 */
+export function getCampaignDeviationNotes(userId: string, campaignId: string): Record<string, CampaignDeviationNote> {
+  const all = readUserScopedStorage<Record<string, Record<string, CampaignDeviationNote>>>(userId, CAMPAIGN_DEVIATION_NOTES_STORAGE_KEY, {});
+  return all[campaignId] ?? {};
+}
+
+export function saveCampaignDeviationNotes(userId: string, campaignId: string, notes: Record<string, CampaignDeviationNote>): void {
+  const all = readUserScopedStorage<Record<string, Record<string, CampaignDeviationNote>>>(userId, CAMPAIGN_DEVIATION_NOTES_STORAGE_KEY, {});
+  all[campaignId] = notes;
+  writeUserScopedStorage(userId, CAMPAIGN_DEVIATION_NOTES_STORAGE_KEY, all);
+}
+
 function removeUserScopedStorage(userId: string, key: string): void {
   try {
     localStorage.removeItem(`${getUserStoragePrefix(userId)}${key}`);

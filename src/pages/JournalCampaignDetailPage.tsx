@@ -28,11 +28,15 @@ import {
   detachCampaignLegFromCampaign,
   createCampaignComment,
   followAccount,
+  getCampaignDeviationNotes,
   getCampaignFullData,
   hasMutualFollow,
+  saveCampaignDeviationNotes,
+  type CampaignDeviationNote,
   listCampaignComments,
   listCounterfactuals,
   runAndPersistCustomCounterfactual,
+  runAndPersistDeviationCosts,
   runAndPersistPureSop,
 } from '@/lib/journalApi';
 import { STRATEGY_TEMPLATES } from '@/lib/strategyTemplates';
@@ -40,6 +44,7 @@ import type {
   CampaignCounterfactual,
   CampaignCounterfactualParams,
   CampaignComment,
+  DeviationCost,
   TradeCampaign,
   TradeJournal,
 } from '@/types/journal';
@@ -365,6 +370,12 @@ export default function JournalCampaignDetailPage() {
   const [pendingCounterfactualId, setPendingCounterfactualId] = useState<string | null>(null);
   const [pureRunning, setPureRunning] = useState(false);
   const [whatIfRunning, setWhatIfRunning] = useState(false);
+  const [deviationCosts, setDeviationCosts] = useState<DeviationCost[]>([]);
+  const [deviationLoading, setDeviationLoading] = useState(false);
+  const [deviationHydrated, setDeviationHydrated] = useState(false);
+  // 用户对偏离行三列文字的手改覆盖（按行键），来自本地持久化；保存后下次打开仍在。
+  const [deviationNotes, setDeviationNotes] = useState<Record<string, CampaignDeviationNote>>({});
+  const [deviationNotesSaving, setDeviationNotesSaving] = useState(false);
   const [detachTarget, setDetachTarget] = useState<TradeJournal | null>(null);
   const [detaching, setDetaching] = useState(false);
   const [selectedLegMarkerIds, setSelectedLegMarkerIds] = useState<string[]>([]);
@@ -497,6 +508,10 @@ export default function JournalCampaignDetailPage() {
     () => (campaign ? shouldSuggestCampaignEnd(campaign, legs, tradeRecords, pendingOrders, getEffectiveTime(campaign.symbol)) : false),
     [campaign, legs, tradeRecords, pendingOrders, getEffectiveTime],
   );
+  const hasPureSopBranch = useMemo(
+    () => counterfactuals.some(branch => branch.branch_kind === 'pure_sop'),
+    [counterfactuals],
+  );
   // 已保存分支列表里隐藏自动生成的「修正分支」(补齐 X)，只保留 Pure SOP 与自定义 What-if。
   const visibleBranches = useMemo(
     () => counterfactuals.filter(branch => branch.branch_kind !== 'fix_one_deviation'),
@@ -506,6 +521,35 @@ export default function JournalCampaignDetailPage() {
     () => legs.filter(leg => leg.source === 'retroactive_from_record').length,
     [legs],
   );
+
+  useEffect(() => {
+    if (!campaign || campaign.strategy_template === 'custom') return;
+    if (!hasPureSopBranch || deviationHydrated || klines.length === 0) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        setDeviationLoading(true);
+        const costs = await runAndPersistDeviationCosts(campaign.id, klines);
+        if (cancelled) return;
+        setDeviationCosts(costs);
+        setDeviationHydrated(true);
+        setCounterfactuals(await listCounterfactuals(campaign.id));
+      } catch (error) {
+        if (!cancelled) toast.error(error instanceof Error ? error.message : String(error));
+      } finally {
+        if (!cancelled) setDeviationLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [campaign, hasPureSopBranch, deviationHydrated, klines]);
+
+  // 载入该战役已保存的偏离备注覆盖（按战役所有者作用域）。
+  useEffect(() => {
+    if (!campaign) return;
+    setDeviationNotes(getCampaignDeviationNotes(campaign.user_id, campaign.id));
+  }, [campaign]);
 
   if (loading || !campaign || !accuracy) {
     return (
@@ -537,6 +581,7 @@ export default function JournalCampaignDetailPage() {
   const tpCount = legs.filter((leg: TradeJournal) => leg.leg_role === 'mirror_tp').length;
   const otherCount = Math.max(0, legs.length - mainCount - hedgeCount - tpCount);
   const actualPnl = campaign.final_realized_pnl ?? 0;
+  const totalDeviationCost = deviationCosts.reduce((sum, item) => sum + item.cost_usdt, 0);
   const selectedCounterfactualDelta = selectedCounterfactual
     ? selectedCounterfactual.result.final_realized_pnl - actualPnl
     : null;
@@ -605,11 +650,17 @@ export default function JournalCampaignDetailPage() {
       await reloadCounterfactuals(branch.id);
       setSelectedCounterfactualId(branch.id);
       setPendingCounterfactualId(branch.id);
+      setDeviationLoading(true);
+      const costs = await runAndPersistDeviationCosts(campaign.id, klines);
+      setDeviationCosts(costs);
+      setDeviationHydrated(true);
+      await reloadCounterfactuals(branch.id);
       toast.success('Pure SOP 结果已生成，请选择保存或删除');
     } catch (error) {
       toast.error(error instanceof Error ? error.message : String(error));
     } finally {
       setPureRunning(false);
+      setDeviationLoading(false);
     }
   };
 
@@ -668,6 +719,46 @@ export default function JournalCampaignDetailPage() {
       toast.success('已保存并刷新');
     } catch (error) {
       toast.error(error instanceof Error ? error.message : String(error));
+    }
+  };
+
+  const handleSaveDeviationNotes = () => {
+    if (!user || !campaign) return;
+    try {
+      setDeviationNotesSaving(true);
+      saveCampaignDeviationNotes(campaign.user_id, campaign.id, deviationNotes);
+      toast.success('偏离备注已保存');
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : String(error));
+    } finally {
+      setDeviationNotesSaving(false);
+    }
+  };
+
+  const handleViewFixBranch = async (cost: DeviationCost) => {
+    if (!cost.source_deduction_id) return;
+    const existing = counterfactuals.find(branch => branch.source_deduction_id === cost.source_deduction_id);
+    if (existing) {
+      setSelectedCounterfactualId(existing.id);
+      return;
+    }
+    if (klinesLoading || klines.length === 0) {
+      toast.error('K 线尚未加载完成，暂时无法运行修正分支');
+      return;
+    }
+    try {
+      setDeviationLoading(true);
+      const costs = await runAndPersistDeviationCosts(campaign.id, klines);
+      setDeviationCosts(costs);
+      setDeviationHydrated(true);
+      const next = await listCounterfactuals(campaign.id);
+      setCounterfactuals(next);
+      const matched = next.find(branch => branch.source_deduction_id === cost.source_deduction_id);
+      if (matched) setSelectedCounterfactualId(matched.id);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : String(error));
+    } finally {
+      setDeviationLoading(false);
     }
   };
 
@@ -1060,6 +1151,130 @@ export default function JournalCampaignDetailPage() {
                 SOP {selectedCounterfactual.result.sop_score} · {branchKindLabel(selectedCounterfactual.branch_kind)} · {fmtMdHm(selectedCounterfactual.created_at)}
               </div>
             </div>
+          )}
+
+          {hasPureSopBranch && (
+                <div className="bg-card border border-border rounded p-4 mt-4 space-y-4">
+                  <div className="flex items-center justify-between gap-4">
+                    <div>
+                      <div className="text-[13px] font-medium">
+                        SOP 偏离代价明细
+                      </div>
+                      <div className="text-[12px] text-muted-foreground mt-2">
+                        这里只解释规则缺口，不代表当前选中反事实分支的最终 P&L。
+                        合计 {totalDeviationCost >= 0 ? '+' : ''}{totalDeviationCost.toFixed(2)} USDT。
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      {deviationLoading && <div className="text-[11px] text-muted-foreground">计算中…</div>}
+                      {isOwner && (
+                        <Button
+                          variant="outline"
+                          className="h-8 text-[11px]"
+                          disabled={deviationNotesSaving}
+                          onClick={handleSaveDeviationNotes}
+                        >
+                          {deviationNotesSaving ? '保存中…' : '保存备注'}
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-[11px]">
+                      <thead className="bg-background text-muted-foreground">
+                        <tr>
+                          <th className="text-left px-3 py-2">违规阶段</th>
+                          <th className="text-left px-3 py-2">违规描述</th>
+                          <th className="text-left px-3 py-2">修正后</th>
+                          <th className="text-right px-3 py-2">代价 (USDT)</th>
+                          <th className="text-right px-3 py-2">占本场盈亏 %</th>
+                          <th className="text-right px-3 py-2">操作</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {deviationCosts.map(cost => {
+                          const rowKey = cost.source_deduction_id ?? `${cost.deduction_category}::${cost.deduction_reason}`;
+                          const note = deviationNotes[rowKey] ?? {};
+                          const categoryVal = note.category ?? cost.deduction_category ?? '';
+                          const reasonVal = note.reason ?? cost.deduction_reason ?? '';
+                          const fixVal = note.fix ?? cost.fix_description ?? '';
+                          // 占本场盈亏 %：以本战役实际总盈亏的绝对值为分母；分母为 0 时无法折算。
+                          const pctOfPnl = Math.abs(actualPnl) > 0 ? (cost.cost_usdt / Math.abs(actualPnl)) * 100 : null;
+                          const setField = (field: keyof CampaignDeviationNote, value: string) =>
+                            setDeviationNotes(prev => ({ ...prev, [rowKey]: { ...prev[rowKey], [field]: value } }));
+                          return (
+                          <tr key={rowKey} className="border-t border-border">
+                            <td className="px-3 py-2 align-top">
+                              {isOwner ? (
+                                <Input
+                                  value={categoryVal}
+                                  onChange={e => setField('category', e.target.value)}
+                                  placeholder="违规阶段（选填）"
+                                  className="h-8 text-[11px] capitalize"
+                                />
+                              ) : (
+                                <span className="capitalize">{categoryVal || '—'}</span>
+                              )}
+                            </td>
+                            <td className="px-3 py-2 align-top text-foreground">
+                              {isOwner ? (
+                                <Input
+                                  value={reasonVal}
+                                  onChange={e => setField('reason', e.target.value)}
+                                  placeholder="违规描述（选填）"
+                                  className="h-8 text-[11px]"
+                                />
+                              ) : (
+                                <span>{reasonVal || '—'}</span>
+                              )}
+                            </td>
+                            <td className="px-3 py-2 align-top text-muted-foreground">
+                              {isOwner ? (
+                                <Input
+                                  value={fixVal}
+                                  onChange={e => setField('fix', e.target.value)}
+                                  placeholder="修正后（选填）"
+                                  className="h-8 text-[11px]"
+                                />
+                              ) : (
+                                <span>{fixVal || '—'}</span>
+                              )}
+                            </td>
+                            <td className={`px-3 py-2 text-right font-mono align-top ${pnlColor(cost.cost_usdt)}`}>
+                              {cost.cost_usdt >= 0 ? '+' : ''}{cost.cost_usdt.toFixed(2)}
+                            </td>
+                            <td className={`px-3 py-2 text-right font-mono align-top ${pctOfPnl == null ? 'text-muted-foreground' : pnlColor(pctOfPnl)}`}>
+                              {pctOfPnl == null ? '—' : `${pctOfPnl >= 0 ? '+' : ''}${pctOfPnl.toFixed(2)}%`}
+                            </td>
+                            <td className="px-3 py-2 text-right align-top">
+                              <Button
+                                variant="outline"
+                                className="h-8 text-[11px]"
+                                onClick={() => handleViewFixBranch(cost)}
+                              >
+                                查看修正分支
+                              </Button>
+                            </td>
+                          </tr>
+                          );
+                        })}
+                        {deviationCosts.length === 0 && (
+                          <tr>
+                            <td colSpan={6} className="px-3 py-5 text-center text-[12px] text-muted-foreground">
+                              {deviationLoading ? '正在计算偏离代价…' : '暂无可折算的 SOP 偏离代价'}
+                            </td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  <div className="rounded border border-[#F6465D]/35 bg-[#F6465D]/8 px-4 py-3 text-[13px] text-foreground">
+                    这张表是这套系统对你最锋利的一刀。每一条都是真金白银。
+                    如果总代价 &lt; 10 USDT，本场偏离基本无害；如果 &gt; 100 USDT 或 &gt; 1% 账户，立即把对应违规升级为 checklist 强制规则。
+                  </div>
+                </div>
           )}
         </section>
 
