@@ -210,6 +210,7 @@ export function CampaignWhatIfEditor({
       const openMs = validTimeMs(leg.open_time);
       const closeMs = validTimeMs(leg.close_time);
       const labelPrefix = legRoleMarkerLabel(leg.leg_role);
+      const selected = selectedManualLegId === leg.id;
       return [
         openMs == null ? null : {
           id: `${leg.id}:open`,
@@ -219,6 +220,7 @@ export function CampaignWhatIfEditor({
           dashed: false,
           label: `${labelPrefix}·开仓`,
           labelColor: color,
+          selected,
         },
         closeMs == null ? null : {
           id: `${leg.id}:close`,
@@ -228,10 +230,11 @@ export function CampaignWhatIfEditor({
           dashed: true,
           label: `${labelPrefix}·平仓`,
           labelColor: color,
+          selected,
         },
       ].filter(Boolean) as AnalysisDraggableVerticalLine[];
     });
-  }, [activeManualLegs]);
+  }, [activeManualLegs, selectedManualLegId]);
 
   const handleDragVerticalLine = (id: string, time: number) => {
     const [legId, endpoint] = id.split(':');
@@ -379,9 +382,11 @@ export function CampaignWhatIfEditor({
                 return (
                   <tr
                     key={leg.id}
+                    onClick={() => setSelectedManualLegId(leg.id)}
                     className={[
-                      'border-t border-border transition-colors',
+                      'cursor-pointer border-t border-border transition-colors',
                       isSelected ? 'bg-[#F0B90B]/10 shadow-[inset_3px_0_0_rgba(240,185,11,0.8)]' : '',
+                      isSelected ? '' : 'hover:bg-muted/40',
                       leg.enabled ? '' : 'opacity-45',
                     ].filter(Boolean).join(' ')}
                   >
@@ -450,14 +455,19 @@ export function CampaignWhatIfEditor({
                     <td className="px-3 py-2 text-right">
                       <button
                         type="button"
-                        onClick={() => updateManualLeg(leg.id, { enabled: !leg.enabled })}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          setSelectedManualLegId(leg.id);
+                          updateManualLeg(leg.id, { enabled: !leg.enabled });
+                        }}
                         className="text-[11px] text-muted-foreground hover:text-foreground mr-3"
                       >
                         {leg.enabled ? '停用' : '启用'}
                       </button>
                       <button
                         type="button"
-                        onClick={() => {
+                        onClick={(event) => {
+                          event.stopPropagation();
                           setManualLegs(prev => prev.filter(item => item.id !== leg.id));
                           if (selectedManualLegId === leg.id) setSelectedManualLegId(null);
                         }}

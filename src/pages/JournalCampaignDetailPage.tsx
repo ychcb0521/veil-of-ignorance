@@ -45,7 +45,7 @@ import type {
   TradeCampaign,
   TradeJournal,
 } from '@/types/journal';
-import type { PendingOrder, TradeRecord } from '@/types/trading';
+import type { CampaignReverseHedgeOrder, PendingOrder, TradeRecord } from '@/types/trading';
 
 const INTERVALS = ['1m', '5m', '15m', '1h'] as const;
 type Interval = (typeof INTERVALS)[number];
@@ -358,6 +358,7 @@ export default function JournalCampaignDetailPage() {
   const [legs, setLegs] = useState<TradeJournal[]>([]);
   const [tradeRecords, setTradeRecords] = useState<TradeRecord[]>([]);
   const [pendingOrders, setPendingOrders] = useState<PendingOrder[]>([]);
+  const [reverseHedgeOrders, setReverseHedgeOrders] = useState<CampaignReverseHedgeOrder[]>([]);
   const [interval, setInterval] = useState<Interval>('1m');
   const [endOpen, setEndOpen] = useState(false);
   const [focusTime, setFocusTime] = useState<number | null>(null);
@@ -403,6 +404,7 @@ export default function JournalCampaignDetailPage() {
         setLegs(full.legs);
         setTradeRecords(full.tradeRecords);
         setPendingOrders(full.pendingOrders);
+        setReverseHedgeOrders(full.reverseHedgeOrders);
         setCounterfactuals(savedCounterfactuals);
         setSelectedCounterfactualId(prev => prev ?? savedCounterfactuals[0]?.id ?? null);
         setCommentsLoading(true);
@@ -574,6 +576,7 @@ export default function JournalCampaignDetailPage() {
     setLegs(full.legs);
     setTradeRecords(full.tradeRecords);
     setPendingOrders(full.pendingOrders);
+    setReverseHedgeOrders(full.reverseHedgeOrders);
   };
 
   const reloadCounterfactuals = async (keepSelectionId?: string | null) => {
@@ -962,6 +965,7 @@ export default function JournalCampaignDetailPage() {
           <CampaignLegsList
             legs={legs}
             tradeRecords={tradeRecords}
+            reverseHedgeOrders={reverseHedgeOrders}
             highlightedLegIds={selectedLegMarkerIds}
             onToggleHighlight={(leg) => {
               setFocusTime(null);

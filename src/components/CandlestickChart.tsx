@@ -160,6 +160,7 @@ export interface AnalysisDraggableVerticalLine {
   dashed?: boolean;
   label?: string;
   labelColor?: string;
+  selected?: boolean;
 }
 
 interface Props {
@@ -1127,6 +1128,8 @@ function CandlestickChartComponent({
       if (!Number.isFinite(line.time)) continue;
       if (line.time < minTime || line.time > maxTime) continue;
       const id = `whatif_drag_time_${line.id}`;
+      const isSelected = line.selected === true;
+      const lineSize = (line.width ?? 0.85) + (isSelected ? 0.75 : 0);
       chart.createOverlay({
         id,
         name: "verticalStraightLine",
@@ -1136,8 +1139,8 @@ function CandlestickChartComponent({
         styles: {
           line: {
             style: line.dashed ? LineType.Dashed : LineType.Solid,
-            dashedValue: [3, 3],
-            size: line.width ?? 0.85,
+            dashedValue: isSelected ? [4, 3] : [3, 3],
+            size: lineSize,
             color: line.color,
           },
         },
@@ -1177,9 +1180,9 @@ function CandlestickChartComponent({
           styles: {
             text: {
               color: line.labelColor ?? line.color,
-              size: 7,
-              borderColor: "rgba(132, 142, 156, 0.14)",
-              backgroundColor: "rgba(11, 14, 17, 0.26)",
+              size: isSelected ? 8 : 7,
+              borderColor: isSelected ? `${line.color}66` : "rgba(132, 142, 156, 0.14)",
+              backgroundColor: isSelected ? `${line.color}1F` : "rgba(11, 14, 17, 0.26)",
               borderRadius: 2,
               paddingLeft: 2,
               paddingRight: 2,

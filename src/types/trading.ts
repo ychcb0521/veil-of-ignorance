@@ -67,6 +67,34 @@ export interface PendingOrder {
   reducePercentage?: number;
 }
 
+/**
+ * Snapshot of a pending order captured at the moment it is cancelled.
+ * Cancelling normally just deletes the order from `ordersMap`; we persist this
+ * so campaign reviews can list 反向对冲挂单 (委托价 / 委托时间 / 取消时间).
+ */
+export interface CancelledOrderSnapshot {
+  id: string;
+  symbol: string;
+  side: OrderSide;
+  price: number;
+  quantity: number;
+  leverage: number;
+  /** 委托时间 (sim/K-line clock, same as PendingOrder.createdAt) */
+  createdAt: number;
+  /** 取消时间 (sim/K-line clock) */
+  cancelledAt: number;
+}
+
+/** One reverse-hedge order row shown in a campaign's 反向对冲挂单 section. */
+export interface CampaignReverseHedgeOrder {
+  id: string;
+  side: OrderSide;
+  price: number;
+  createdAt: number;
+  cancelledAt: number | null;
+  status: 'cancelled' | 'pending';
+}
+
 interface TriggerRange {
   high: number;
   low: number;

@@ -21,7 +21,7 @@ import { useTimeSimulator } from '@/hooks/useTimeSimulator';
 import { usePersistedState, loadPersistedSimState, saveSimState, clearSimState } from '@/hooks/usePersistedState';
 import { useAuth } from '@/contexts/AuthContext';
 import { toast } from 'sonner';
-import type { Position, PendingOrder, TradeRecord, OrderSide, OrderType, MarginMode, TriggerOperator } from '@/types/trading';
+import type { Position, PendingOrder, TradeRecord, OrderSide, OrderType, MarginMode, TriggerOperator, CancelledOrderSnapshot } from '@/types/trading';
 import {
   calcFee, calcUnrealizedPnl, calcSlippage,
   MAINTENANCE_MARGIN_RATE, LIQUIDATION_FEE_RATE, FUNDING_RATE, FUNDING_HOURS, getTriggerOperator,
@@ -255,6 +255,9 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
   const [interval, setInterval] = usePersistedState('interval', persistedSim?.interval ?? '1m');
   const [positionsMap, setPositionsMap] = usePersistedState<PositionsMap>('positions_map', {});
   const [ordersMap, setOrdersMap] = usePersistedState<OrdersMap>('orders_map', {});
+  // 撤单快照：撤单本身会把订单从 ordersMap 删掉，这里另存一份（含委托价/委托时间/取消时间），
+  // 供战役页展示「反向对冲挂单」。只追加、截断到最近 500 条。
+  const [, setCancelledOrders] = usePersistedState<CancelledOrderSnapshot[]>('cancelled_orders', []);
   const [priceMap, setPriceMap] = usePersistedState<PriceMap>('price_map', {});
   const [balance, setBalance] = usePersistedState('balance', initialCapital);
 
@@ -1044,12 +1047,35 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
 
   // ===== Cancel Order =====
   const handleCancelOrder = useCallback((symbol: string, orderId: string) => {
+    // 撤单即删——删之前先存一份快照（委托价/委托时间/取消时间），供战役页「反向对冲挂单」展示。
+    const order = (ordersMap[symbol] || []).find(o => o.id === orderId);
+    if (order) {
+      const cancelledAt = getEffectiveTime(symbol) || Date.now();
+      const orderPrice = order.price > 0
+        ? order.price
+        : (order.conditionalLimitPrice && order.conditionalLimitPrice > 0)
+          ? order.conditionalLimitPrice
+          : order.stopPrice;
+      setCancelledOrders(prev => [
+        ...prev,
+        {
+          id: order.id,
+          symbol,
+          side: order.side,
+          price: orderPrice,
+          quantity: order.quantity,
+          leverage: order.leverage,
+          createdAt: order.createdAt,
+          cancelledAt,
+        },
+      ].slice(-500));
+    }
     setOrdersMap(prev => ({
       ...prev,
       [symbol]: (prev[symbol] || []).filter(o => o.id !== orderId),
     }));
     toast.info('委托已撤销');
-  }, []);
+  }, [ordersMap, getEffectiveTime, setCancelledOrders]);
 
   // ===== Adjust Isolated Margin (add OR remove) =====
   // signedDelta > 0 = add (debit available, credit position margin)

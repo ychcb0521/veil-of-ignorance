@@ -54,7 +54,7 @@ import type {
   CounterfactualBranchResult,
 } from "@/types/journal";
 import { isHistoricalCampaign, ruleCooldownRemainingMs } from "@/types/journal";
-import type { PendingOrder, TradeRecord } from "@/types/trading";
+import type { PendingOrder, TradeRecord, CancelledOrderSnapshot, CampaignReverseHedgeOrder } from "@/types/trading";
 
 
 function wrap<T>(label: string, error: { message: string } | null, data: T | null): T {
@@ -1579,11 +1579,13 @@ export async function getCampaignFullData(
   legs: TradeJournal[];
   tradeRecords: TradeRecord[];
   pendingOrders: PendingOrder[];
+  reverseHedgeOrders: CampaignReverseHedgeOrder[];
 }> {
   const { campaign, legs } = await getCampaignWithLegs(campaignId);
   const userId = campaign.user_id;
   const tradeHistory = readUserScopedStorage<TradeRecord[]>(userId, 'trade_history', []);
   const ordersMap = readUserScopedStorage<Record<string, PendingOrder[]>>(userId, 'orders_map', {});
+  const cancelledOrders = readUserScopedStorage<CancelledOrderSnapshot[]>(userId, 'cancelled_orders', []);
   const legRecordIds = new Set(legs.map(leg => leg.trade_record_id).filter(Boolean));
   const openedAtMs = new Date(campaign.opened_at).getTime();
   const closedAtMs = campaign.closed_at ? new Date(campaign.closed_at).getTime() : Number.POSITIVE_INFINITY;
@@ -1602,6 +1604,39 @@ export async function getCampaignFullData(
     .flatMap(([symbol, orders]) => symbol === campaign.symbol ? orders : [])
     .filter(order => order.status === 'NEW' || order.status === 'PENDING' || order.status === 'ACTIVE');
 
+  // 反向对冲挂单：与主仓方向相反的、在战役期间委托的限价单（含已撤销 + 仍挂着）。
+  const reverseSide = campaign.direction === 'main_long' ? 'SHORT' : 'LONG';
+  const inWindow = (t: number) => Number.isFinite(t) && t >= openedAtMs && t <= closedAtMs;
+  const pendingOrderPrice = (order: PendingOrder) => (
+    order.price > 0
+      ? order.price
+      : (order.conditionalLimitPrice && order.conditionalLimitPrice > 0)
+        ? order.conditionalLimitPrice
+        : order.stopPrice
+  );
+  const reverseHedgeOrders: CampaignReverseHedgeOrder[] = [
+    ...cancelledOrders
+      .filter(order => order.symbol === campaign.symbol && order.side === reverseSide && inWindow(order.createdAt))
+      .map(order => ({
+        id: order.id,
+        side: order.side,
+        price: order.price,
+        createdAt: order.createdAt,
+        cancelledAt: order.cancelledAt,
+        status: 'cancelled' as const,
+      })),
+    ...pendingOrders
+      .filter(order => order.side === reverseSide && inWindow(order.createdAt))
+      .map(order => ({
+        id: order.id,
+        side: order.side,
+        price: pendingOrderPrice(order),
+        createdAt: order.createdAt,
+        cancelledAt: null,
+        status: 'pending' as const,
+      })),
+  ].sort((a, b) => a.createdAt - b.createdAt);
+
   // 本人视角（有成交记录）时，把平仓快照回写到腿上，使互关者也能读到一致的平仓信息。
   await healCampaignLegSnapshots(legs, tradeRecords);
 
@@ -1610,6 +1645,7 @@ export async function getCampaignFullData(
     legs: [...legs].sort((a, b) => (a.leg_sequence ?? 9999) - (b.leg_sequence ?? 9999)),
     tradeRecords,
     pendingOrders,
+    reverseHedgeOrders,
   };
 }
 
