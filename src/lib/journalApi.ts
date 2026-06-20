@@ -1461,6 +1461,50 @@ export async function getCampaignWithLegs(
   };
 }
 
+/**
+ * 把每条腿的平仓快照（平仓时间/平仓价/盈亏/结果）从本人的成交记录回写到「腿」自身。
+ * 这些数据原本只存在本人浏览器的本地成交记录里，互关者读不到——回写到 trade_journals 后，
+ * 互关者读腿就能看到与本人一致的平仓信息（详情页 Legs 列表与盘面标记都已优先读腿字段）。
+ * 幂等：只补缺失字段；只有本人（有成交记录）视角会触发，互关者 tradeRecords 为空直接跳过。
+ */
+async function healCampaignLegSnapshots(legs: TradeJournal[], tradeRecords: TradeRecord[]): Promise<void> {
+  if (tradeRecords.length === 0) return;
+  const recordMap = new Map(tradeRecords.map(record => [record.id, record]));
+  for (const leg of legs) {
+    if (!leg.trade_record_id) continue;
+    const record = recordMap.get(leg.trade_record_id);
+    if (!record) continue;
+    const full: Record<string, unknown> = {};
+    const safe: Record<string, unknown> = {};
+    if (!leg.post_real_close_time && Number.isFinite(record.closeTime) && record.closeTime > 0) {
+      const iso = new Date(record.closeTime).toISOString();
+      full.post_real_close_time = iso;
+      safe.post_real_close_time = iso;
+    }
+    if (!leg.post_outcome) {
+      const outcome = record.pnl > 0 ? 'win' : record.pnl < 0 ? 'loss' : 'breakeven';
+      full.post_outcome = outcome;
+      safe.post_outcome = outcome;
+    }
+    if (leg.post_realized_pnl == null) {
+      full.post_realized_pnl = record.pnl;
+      safe.post_realized_pnl = record.pnl;
+    }
+    if (leg.post_exit_price_snapshot == null && Number.isFinite(record.exitPrice) && record.exitPrice > 0) {
+      full.post_exit_price_snapshot = record.exitPrice;
+    }
+    if (Object.keys(full).length === 0) continue;
+    let { error } = await supabase.from('trade_journals' as never).update(full as never).eq('id', leg.id);
+    // post_exit_price_snapshot 在较旧的库里可能尚未建列——退回只写一定存在的列，保证平仓时间/状态先补上。
+    if (error && /post_exit_price_snapshot/i.test(error.message ?? '') && Object.keys(safe).length > 0) {
+      ({ error } = await supabase.from('trade_journals' as never).update(safe as never).eq('id', leg.id));
+    }
+    if (error && !isMissingTradeJournalsFeatureError(error)) {
+      console.warn('[journalApi] 回填战役腿平仓快照失败', error);
+    }
+  }
+}
+
 export async function getCampaignFullData(
   campaignId: string,
 ): Promise<{
@@ -1490,6 +1534,9 @@ export async function getCampaignFullData(
   const pendingOrders = Object.entries(ordersMap)
     .flatMap(([symbol, orders]) => symbol === campaign.symbol ? orders : [])
     .filter(order => order.status === 'NEW' || order.status === 'PENDING' || order.status === 'ACTIVE');
+
+  // 本人视角（有成交记录）时，把平仓快照回写到腿上，使互关者也能读到一致的平仓信息。
+  await healCampaignLegSnapshots(legs, tradeRecords);
 
   return {
     campaign,
