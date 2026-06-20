@@ -1070,6 +1070,7 @@ function synthesizeJournalFromRecord(
     post_correct_action: null,
     post_reviewed_at: null,
     post_real_close_time: toIso(record.closeTime),
+    post_exit_price_snapshot: record.exitPrice,
     reason_was_rewritten: false,
     created_at: now,
     updated_at: now,
@@ -1906,6 +1907,8 @@ export async function backfillJournalFromRecord(
     post_reflection: null,
     post_correct_action: null,
     post_reviewed_at: null,
+    post_real_close_time: toIso(record.closeTime),
+    post_exit_price_snapshot: record.exitPrice,
     reason_was_rewritten: false,
   };
 

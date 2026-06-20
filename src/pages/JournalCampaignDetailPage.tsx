@@ -993,6 +993,7 @@ export default function JournalCampaignDetailPage() {
           <CampaignWhatIfEditor
             campaign={campaign}
             legs={legs}
+            tradeRecords={tradeRecords}
             klines={klines}
             klinesLoading={klinesLoading}
             interval={interval}

@@ -20,10 +20,12 @@ import type {
   TradeCampaign,
   TradeJournal,
 } from '@/types/journal';
+import type { TradeRecord } from '@/types/trading';
 
 interface Props {
   campaign: TradeCampaign;
   legs: TradeJournal[];
+  tradeRecords: TradeRecord[];
   klines: KlineData[];
   klinesLoading: boolean;
   interval: string;
@@ -101,8 +103,10 @@ function buildManualLegs(
   params: CampaignCounterfactualParams,
   legs: TradeJournal[],
   klines: KlineData[],
+  tradeRecords: TradeRecord[],
 ): CampaignCounterfactualManualLeg[] {
   const fallbackClose = defaultCloseTime(params, klines);
+  const recordMap = new Map(tradeRecords.map(record => [record.id, record]));
   const ordered = [...legs].sort((a, b) => {
     const seqA = a.leg_sequence ?? 9999;
     const seqB = b.leg_sequence ?? 9999;
@@ -112,12 +116,17 @@ function buildManualLegs(
 
   return ordered
     .map((leg, index) => {
+      // 价格/平仓时间优先用真实成交记录（本人有），其次腿上的回填快照，最后才兜底，
+      // 避免「开仓价 == 平仓价」（快照缺失时退回开仓价）的问题。
+      const record = leg.trade_record_id ? recordMap.get(leg.trade_record_id) ?? null : null;
       const openTime = leg.pre_simulated_time || params.entry.time;
-      const closeTime = leg.post_real_close_time || fallbackClose;
+      const recordCloseIso = record?.closeTime ? new Date(record.closeTime).toISOString() : null;
+      const closeTime = recordCloseIso || leg.post_real_close_time || fallbackClose;
       const closeMs = validTimeMs(closeTime) ?? validTimeMs(fallbackClose) ?? validTimeMs(openTime) ?? Date.now();
       const openMs = validTimeMs(openTime) ?? closeMs;
       const normalizedClose = closeMs >= openMs ? closeTime : new Date(openMs).toISOString();
-      const entryPrice = leg.pre_entry_price ?? params.entry.price;
+      const entryPrice = leg.pre_entry_price ?? record?.entryPrice ?? params.entry.price;
+      const exitPrice = record?.exitPrice ?? leg.post_exit_price_snapshot ?? entryPrice;
       return {
         id: leg.id || `leg-${index}`,
         leg_role: leg.leg_role ?? 'standalone',
@@ -125,7 +134,7 @@ function buildManualLegs(
         open_time: openTime,
         close_time: normalizedClose,
         entry_price: entryPrice,
-        exit_price: leg.post_exit_price_snapshot ?? entryPrice,
+        exit_price: exitPrice,
         size_usdt: leg.pre_position_size ?? params.entry.size_usdt,
         leverage: leg.leverage ?? params.entry.leverage ?? 1,
         enabled: true,
@@ -137,6 +146,7 @@ function buildManualLegs(
 export function CampaignWhatIfEditor({
   campaign,
   legs,
+  tradeRecords,
   klines,
   klinesLoading,
   interval,
@@ -158,9 +168,9 @@ export function CampaignWhatIfEditor({
 
   useEffect(() => {
     setParams(baseDefaults);
-    if (baseDefaults) setManualLegs(buildManualLegs(baseDefaults, legs, klines));
+    if (baseDefaults) setManualLegs(buildManualLegs(baseDefaults, legs, klines, tradeRecords));
     setSelectedManualLegId(null);
-  }, [baseDefaults, legs, klines]);
+  }, [baseDefaults, legs, klines, tradeRecords]);
 
   const canRun = !klinesLoading && klines.length > 0;
   const chartCurrentTime = klines.length > 0
@@ -197,7 +207,7 @@ export function CampaignWhatIfEditor({
 
   const resetManualLegs = () => {
     if (!baseDefaults) return;
-    setManualLegs(buildManualLegs(baseDefaults, legs, klines));
+    setManualLegs(buildManualLegs(baseDefaults, legs, klines, tradeRecords));
     setParams(baseDefaults);
     setSelectedManualLegId(null);
   };

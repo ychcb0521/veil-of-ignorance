@@ -57,6 +57,26 @@ export function CampaignLegsList({
   const nav = useNavigate();
   const recordMap = useMemo(() => new Map(tradeRecords.map(record => [record.id, record])), [tradeRecords]);
   const highlightedSet = useMemo(() => new Set(highlightedLegIds), [highlightedLegIds]);
+  // 反向挂单归属：每条挂单只归到「委托时刻最近一次开仓」的那条腿，避免在多条腿重叠的时间窗里重复出现。
+  const reverseOrderLegMap = useMemo(() => {
+    const legOpens = legs
+      .map(leg => {
+        const rec = leg.trade_record_id ? recordMap.get(leg.trade_record_id) ?? null : null;
+        return { id: leg.id, openMs: timeMs(rec?.openTime ?? leg.pre_simulated_time) };
+      })
+      .filter((item): item is { id: string; openMs: number } => item.openMs != null)
+      .sort((a, b) => a.openMs - b.openMs);
+    const map = new Map<string, string>();
+    for (const order of reverseHedgeOrders) {
+      let assignedId: string | null = legOpens[0]?.id ?? null;
+      for (const { id, openMs } of legOpens) {
+        if (openMs <= order.createdAt) assignedId = id;
+        else break;
+      }
+      if (assignedId) map.set(order.id, assignedId);
+    }
+    return map;
+  }, [legs, reverseHedgeOrders, recordMap]);
 
   return (
     <div className="bg-card border border-border rounded overflow-hidden">
@@ -84,11 +104,7 @@ export function CampaignLegsList({
               const operationLabel = fmtClock(operationTimeForLeg(leg));
               const entryPriceValue = leg.pre_entry_price ?? record?.entryPrice ?? null;
               const exitPriceValue = record?.exitPrice ?? leg.post_exit_price_snapshot ?? null;
-              const openMs = timeMs(record?.openTime ?? leg.pre_simulated_time);
-              const closeMs = timeMs(record?.closeTime ?? leg.post_real_close_time) ?? Number.POSITIVE_INFINITY;
-              const reverseOrdersForLeg = openMs == null
-                ? []
-                : reverseHedgeOrders.filter(order => order.createdAt >= openMs && order.createdAt <= closeMs);
+              const reverseOrdersForLeg = reverseHedgeOrders.filter(order => reverseOrderLegMap.get(order.id) === leg.id);
               const hedgeSummary = leg.order_kind === 'hedge' && leg.hedge_type
                 ? `${HEDGE_TYPE_LABELS[leg.hedge_type]}${leg.hedge_necessity_pct != null ? ` · ${leg.hedge_necessity_pct.toFixed(0)}%` : ''}`
                 : null;
