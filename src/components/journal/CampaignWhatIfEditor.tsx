@@ -358,7 +358,7 @@ export function CampaignWhatIfEditor({
           )}
         </div>
 
-        <div className="max-h-[380px] overflow-auto rounded border border-border">
+        <div className="max-h-[320px] overflow-x-auto overflow-y-auto rounded border border-border">
           <table className="w-full min-w-[980px] text-[11px]">
             <thead className="sticky top-0 z-10 bg-muted/80 text-muted-foreground backdrop-blur supports-[backdrop-filter]:bg-muted/70">
               <tr>

@@ -363,6 +363,7 @@ export default function JournalCampaignDetailPage() {
   const [focusTime, setFocusTime] = useState<number | null>(null);
   const [counterfactuals, setCounterfactuals] = useState<CampaignCounterfactual[]>([]);
   const [selectedCounterfactualId, setSelectedCounterfactualId] = useState<string | null>(null);
+  const [pendingCounterfactualId, setPendingCounterfactualId] = useState<string | null>(null);
   const [pureRunning, setPureRunning] = useState(false);
   const [whatIfRunning, setWhatIfRunning] = useState(false);
   const [deviationCosts, setDeviationCosts] = useState<DeviationCost[]>([]);
@@ -471,6 +472,10 @@ export default function JournalCampaignDetailPage() {
     () => counterfactuals.find(branch => branch.id === selectedCounterfactualId) ?? null,
     [counterfactuals, selectedCounterfactualId],
   );
+  const pendingCounterfactual = useMemo(
+    () => counterfactuals.find(branch => branch.id === pendingCounterfactualId) ?? null,
+    [counterfactuals, pendingCounterfactualId],
+  );
   const counterfactualChart = useMemo(
     () => buildCounterfactualChartArtifacts(selectedCounterfactual),
     [selectedCounterfactual],
@@ -558,6 +563,9 @@ export default function JournalCampaignDetailPage() {
   const otherCount = Math.max(0, legs.length - mainCount - hedgeCount - tpCount);
   const actualPnl = campaign.final_realized_pnl ?? 0;
   const totalDeviationCost = deviationCosts.reduce((sum, item) => sum + item.cost_usdt, 0);
+  const selectedCounterfactualDelta = selectedCounterfactual
+    ? selectedCounterfactual.result.final_realized_pnl - actualPnl
+    : null;
   const canLeaveExternalComment = !isOwner;
 
   const refreshCampaign = async () => {
@@ -621,12 +629,13 @@ export default function JournalCampaignDetailPage() {
       const branch = await runAndPersistPureSop(campaign.id, klines);
       await reloadCounterfactuals(branch.id);
       setSelectedCounterfactualId(branch.id);
+      setPendingCounterfactualId(branch.id);
       setDeviationLoading(true);
       const costs = await runAndPersistDeviationCosts(campaign.id, klines);
       setDeviationCosts(costs);
       setDeviationHydrated(true);
       await reloadCounterfactuals(branch.id);
-      toast.success('Pure SOP 反事实已运行');
+      toast.success('Pure SOP 结果已生成，请选择保存或删除');
     } catch (error) {
       toast.error(error instanceof Error ? error.message : String(error));
     } finally {
@@ -645,7 +654,8 @@ export default function JournalCampaignDetailPage() {
       const branch = await runAndPersistCustomCounterfactual(campaign.id, label, params, klines);
       await reloadCounterfactuals(branch.id);
       setSelectedCounterfactualId(branch.id);
-      toast.success('What-if 分支已保存');
+      setPendingCounterfactualId(branch.id);
+      toast.success('What-if 结果已生成，请选择保存或删除');
     } catch (error) {
       toast.error(error instanceof Error ? error.message : String(error));
     } finally {
@@ -658,10 +668,35 @@ export default function JournalCampaignDetailPage() {
       await deleteCounterfactual(branchId);
       const next = counterfactuals.filter(branch => branch.id !== branchId);
       setCounterfactuals(next);
+      if (pendingCounterfactualId === branchId) {
+        setPendingCounterfactualId(null);
+      }
       if (selectedCounterfactualId === branchId) {
         setSelectedCounterfactualId(next[0]?.id ?? null);
       }
       toast.success('分支已删除');
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : String(error));
+    }
+  };
+
+  const handleDiscardGeneratedCounterfactual = async (branchId: string) => {
+    try {
+      await deleteCounterfactual(branchId);
+      setPendingCounterfactualId(null);
+      await reloadCounterfactuals(selectedCounterfactualId === branchId ? null : selectedCounterfactualId);
+      toast.success('已删除并刷新');
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : String(error));
+    }
+  };
+
+  const handleKeepGeneratedCounterfactual = async (branchId: string) => {
+    try {
+      await reloadCounterfactuals(branchId);
+      setSelectedCounterfactualId(branchId);
+      setPendingCounterfactualId(null);
+      toast.success('已保存并刷新');
     } catch (error) {
       toast.error(error instanceof Error ? error.message : String(error));
     }
@@ -966,6 +1001,43 @@ export default function JournalCampaignDetailPage() {
             onRunWhatIf={handleRunWhatIf}
           />
 
+          {pendingCounterfactual && (
+            <div className="rounded border border-[#F0B90B]/40 bg-[#F0B90B]/10 p-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+              <div className="min-w-0 space-y-1">
+                <div className="text-[13px] font-medium text-foreground">刚生成的反事实结果</div>
+                <div className="text-[12px] text-muted-foreground">
+                  {pendingCounterfactual.label} · 分支 P&L
+                  <span className={`ml-2 font-mono ${pnlColor(pendingCounterfactual.result.final_realized_pnl)}`}>
+                    {pendingCounterfactual.result.final_realized_pnl >= 0 ? '+' : ''}{pendingCounterfactual.result.final_realized_pnl.toFixed(2)}
+                  </span>
+                  <span className="mx-2">·</span>
+                  相对实际
+                  <span className={`ml-2 font-mono ${pnlColor(pendingCounterfactual.result.final_realized_pnl - actualPnl)}`}>
+                    {pendingCounterfactual.result.final_realized_pnl - actualPnl >= 0 ? '+' : ''}
+                    {(pendingCounterfactual.result.final_realized_pnl - actualPnl).toFixed(2)}
+                  </span>
+                </div>
+              </div>
+              <div className="flex shrink-0 items-center gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="h-9 text-[12px]"
+                  onClick={() => handleDiscardGeneratedCounterfactual(pendingCounterfactual.id)}
+                >
+                  删除并刷新
+                </Button>
+                <Button
+                  type="button"
+                  className="h-9 bg-[#F0B90B] text-black hover:bg-[#F0B90B]/90 text-[12px]"
+                  onClick={() => handleKeepGeneratedCounterfactual(pendingCounterfactual.id)}
+                >
+                  保存并刷新
+                </Button>
+              </div>
+            </div>
+          )}
+
           <div className="space-y-2">
             <div className="text-[13px] font-medium">已保存分支</div>
             {counterfactuals.length === 0 ? (
@@ -1014,15 +1086,48 @@ export default function JournalCampaignDetailPage() {
             )}
           </div>
 
+          {selectedCounterfactual && (
+            <div className="bg-card border border-border rounded p-4 mt-4 space-y-3">
+              <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+                <div>
+                  <div className="text-[13px] font-medium">所选分支结果</div>
+                  <div className="text-[12px] text-muted-foreground mt-1">
+                    这里展示当前高亮分支的模拟结果，与上方“已保存分支”保持同一口径。
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-3 text-right">
+                  <div>
+                    <div className="text-[11px] text-muted-foreground">分支 P&L</div>
+                    <div className={`font-mono text-[20px] ${pnlColor(selectedCounterfactual.result.final_realized_pnl)}`}>
+                      {selectedCounterfactual.result.final_realized_pnl >= 0 ? '+' : ''}
+                      {selectedCounterfactual.result.final_realized_pnl.toFixed(2)}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-[11px] text-muted-foreground">相对实际</div>
+                    <div className={`font-mono text-[20px] ${pnlColor(selectedCounterfactualDelta)}`}>
+                      {selectedCounterfactualDelta != null && selectedCounterfactualDelta >= 0 ? '+' : ''}
+                      {selectedCounterfactualDelta?.toFixed(2) ?? '-'}
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div className="rounded border border-border bg-background/50 px-3 py-2 text-[12px] text-muted-foreground">
+                SOP {selectedCounterfactual.result.sop_score} · {branchKindLabel(selectedCounterfactual.branch_kind)} · {fmtMdHm(selectedCounterfactual.created_at)}
+              </div>
+            </div>
+          )}
+
           {hasPureSopBranch && (
                 <div className="bg-card border border-border rounded p-4 mt-4 space-y-4">
-                  <div className="flex items-end justify-between gap-4">
+                  <div className="flex items-center justify-between gap-4">
                     <div>
-                      <div className={`font-mono text-[36px] leading-none ${pnlColor(totalDeviationCost)}`}>
-                        {totalDeviationCost >= 0 ? '+' : ''}{totalDeviationCost.toFixed(2)} USDT
+                      <div className="text-[13px] font-medium">
+                        SOP 偏离代价明细
                       </div>
                       <div className="text-[12px] text-muted-foreground mt-2">
-                        如果你严格按 SOP 执行，这场战役本可以多赚（或少亏）这么多。
+                        这里只解释规则缺口，不代表当前选中反事实分支的最终 P&L。
+                        合计 {totalDeviationCost >= 0 ? '+' : ''}{totalDeviationCost.toFixed(2)} USDT。
                       </div>
                     </div>
                     {deviationLoading && <div className="text-[11px] text-muted-foreground">计算中…</div>}
