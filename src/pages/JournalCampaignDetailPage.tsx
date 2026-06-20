@@ -28,7 +28,6 @@ import {
   detachCampaignLegFromCampaign,
   createCampaignComment,
   followAccount,
-  getCampaignDeviationNotes,
   getCampaignFullData,
   hasMutualFollow,
   saveCampaignDeviationNotes,
@@ -545,10 +544,10 @@ export default function JournalCampaignDetailPage() {
     };
   }, [campaign, hasPureSopBranch, deviationHydrated, klines]);
 
-  // 载入该战役已保存的偏离备注覆盖（按战役所有者作用域）。
+  // 载入该战役已保存的偏离备注（存在战役行上，互关者一并读到）。
   useEffect(() => {
     if (!campaign) return;
-    setDeviationNotes(getCampaignDeviationNotes(campaign.user_id, campaign.id));
+    setDeviationNotes(campaign.deviation_notes ?? {});
   }, [campaign]);
 
   if (loading || !campaign || !accuracy) {
@@ -722,11 +721,12 @@ export default function JournalCampaignDetailPage() {
     }
   };
 
-  const handleSaveDeviationNotes = () => {
+  const handleSaveDeviationNotes = async () => {
     if (!user || !campaign) return;
     try {
       setDeviationNotesSaving(true);
-      saveCampaignDeviationNotes(campaign.user_id, campaign.id, deviationNotes);
+      await saveCampaignDeviationNotes(campaign.id, deviationNotes);
+      setCampaign(prev => (prev ? { ...prev, deviation_notes: deviationNotes } : prev));
       toast.success('偏离备注已保存');
     } catch (error) {
       toast.error(error instanceof Error ? error.message : String(error));

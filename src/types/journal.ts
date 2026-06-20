@@ -343,6 +343,13 @@ export interface CampaignEvent {
   r_multiple?: number | null;
 }
 
+/** 用户对某条 SOP 偏离行的「违规阶段 / 违规描述 / 修正后」手改覆盖（留空＝清空，不回退自动值）。 */
+export interface CampaignDeviationNote {
+  category?: string;
+  reason?: string;
+  fix?: string;
+}
+
 export interface TradeCampaign {
   id: string;
   user_id: string;
@@ -362,6 +369,8 @@ export interface TradeCampaign {
   importance_weight: number;
   notes: string | null;
   actual_evolution: CampaignEvent[];
+  /** 「SOP 偏离代价明细」手填备注，按行键存；存在战役行上，互关者可读、仅本人可改。 */
+  deviation_notes: Record<string, CampaignDeviationNote>;
   created_at: string;
   updated_at: string;
 }

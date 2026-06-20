@@ -44,6 +44,7 @@ import type {
   TaggedPhase,
   TradePrinciple,
   TradeCampaign,
+  CampaignDeviationNote,
   TradeDirection,
   TradeJournal,
   TradeOutcome,
@@ -73,6 +74,7 @@ function toCampaign(row: unknown): TradeCampaign {
   return {
     ...campaign,
     importance_weight: normalizeCampaignImportance(campaign?.importance_weight),
+    deviation_notes: campaign?.deviation_notes ?? {},
   };
 }
 
@@ -113,24 +115,26 @@ function writeUserScopedStorage<T>(userId: string, key: string, value: T): void 
   }
 }
 
-/** 用户对某条 SOP 偏离行的「违规阶段/违规描述/修正后」的手改覆盖（留空则视为清空，不回退自动值）。 */
-export interface CampaignDeviationNote {
-  category?: string;
-  reason?: string;
-  fix?: string;
-}
-const CAMPAIGN_DEVIATION_NOTES_STORAGE_KEY = 'campaign_deviation_notes';
+export type { CampaignDeviationNote } from "@/types/journal";
 
-/** 读取某战役下、按行键存的偏离备注覆盖（用户作用域，本地持久化）。 */
-export function getCampaignDeviationNotes(userId: string, campaignId: string): Record<string, CampaignDeviationNote> {
-  const all = readUserScopedStorage<Record<string, Record<string, CampaignDeviationNote>>>(userId, CAMPAIGN_DEVIATION_NOTES_STORAGE_KEY, {});
-  return all[campaignId] ?? {};
-}
-
-export function saveCampaignDeviationNotes(userId: string, campaignId: string, notes: Record<string, CampaignDeviationNote>): void {
-  const all = readUserScopedStorage<Record<string, Record<string, CampaignDeviationNote>>>(userId, CAMPAIGN_DEVIATION_NOTES_STORAGE_KEY, {});
-  all[campaignId] = notes;
-  writeUserScopedStorage(userId, CAMPAIGN_DEVIATION_NOTES_STORAGE_KEY, all);
+/**
+ * 保存「SOP 偏离代价明细」手填备注到战役行（jsonb 列 deviation_notes）。读取走 campaign.deviation_notes，
+ * 已随 getCampaignFullData 一起返回。仅本人可写（trade_campaigns 的 UPDATE 策略 auth.uid()=user_id），
+ * 互关者读得到、改不动。迁移尚未应用（表/列缺失）时给出可执行的明确报错，绝不假装保存成功。
+ */
+export async function saveCampaignDeviationNotes(
+  campaignId: string,
+  notes: Record<string, CampaignDeviationNote>,
+): Promise<void> {
+  const { error } = await supabase
+    .from('trade_campaigns' as never)
+    .update({ deviation_notes: notes } as never)
+    .eq('id', campaignId);
+  if (!error) return;
+  if (isMissingTradeCampaignsTableError(error) || isSchemaColumnMissingError(error)) {
+    throw new Error('战役数据表/字段尚未就绪：请先在 Lovable 应用迁移并等待 schema 重载后再保存备注。');
+  }
+  throw new Error(error.message ?? '保存偏离备注失败');
 }
 
 function removeUserScopedStorage(userId: string, key: string): void {
@@ -929,6 +933,7 @@ function buildLocalCampaignFromCreateInput(
     importance_weight: 0,
     notes: input.notes ?? null,
     actual_evolution: [event],
+    deviation_notes: {},
     created_at: now,
     updated_at: now,
   };
