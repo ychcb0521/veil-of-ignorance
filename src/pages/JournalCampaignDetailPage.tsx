@@ -957,6 +957,8 @@ export default function JournalCampaignDetailPage() {
             klines={klines}
             klinesLoading={klinesLoading}
             interval={interval}
+            intervalOptions={INTERVALS}
+            onIntervalChange={(nextInterval) => setInterval(nextInterval as Interval)}
             timezone={LOCAL_TIME_ZONE}
             pureRunning={pureRunning}
             whatIfRunning={whatIfRunning}

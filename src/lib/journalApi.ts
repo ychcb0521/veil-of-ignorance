@@ -177,7 +177,9 @@ type CognitiveAssetsRow = {
 const COGNITIVE_ASSETS_STORAGE_KEY = 'cognitive_assets_doc';
 const TRADE_CAMPAIGNS_STORAGE_KEY = 'trade_campaigns';
 const TRADE_CAMPAIGN_PREFS_STORAGE_KEY = 'trade_campaign_preferences';
+const CAMPAIGN_COUNTERFACTUALS_STORAGE_KEY = 'campaign_counterfactuals';
 const ACCOUNT_FOLLOWS_STORAGE_KEY = 'account_follows';
+const MAX_LOCAL_CAMPAIGN_COUNTERFACTUALS = 50;
 
 function getInitialCognitiveAssetsDoc(): CognitiveAssetsDoc {
   return deepClone(INITIAL_COGNITIVE_ASSETS);
@@ -340,7 +342,8 @@ function isMissingCounterfactualsTableError(error: { code?: string; message?: st
   const message = error.message ?? '';
   return error.code === 'PGRST205'
     || error.code === '42P01'
-    || (/campaign_counterfactuals/i.test(message) && /schema cache|could not find|does not exist/i.test(message));
+    || (/campaign_counterfactuals|source_deduction_id|branch_kind|params|result/i.test(message)
+      && /schema cache|could not find|does not exist|column/i.test(message));
 }
 
 function isMissingSocialFeatureError(error: { code?: string; message?: string } | null): boolean {
@@ -808,6 +811,70 @@ function mergeCampaigns(remote: TradeCampaign[], local: TradeCampaign[]): TradeC
   local.forEach(campaign => merged.set(campaign.id, campaign));
   remote.forEach(campaign => merged.set(campaign.id, campaign));
   return sortCampaignsByImportance([...merged.values()]);
+}
+
+function counterfactualSortTime(branch: Pick<CampaignCounterfactual, 'created_at'>): number {
+  return new Date(branch.created_at).getTime() || 0;
+}
+
+function sortCounterfactuals(rows: CampaignCounterfactual[]): CampaignCounterfactual[] {
+  return [...rows].sort((a, b) => counterfactualSortTime(b) - counterfactualSortTime(a));
+}
+
+function normalizeLocalCampaignCounterfactuals(raw: unknown): CampaignCounterfactual[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .filter((item): item is CampaignCounterfactual => (
+      isRecord(item)
+      && typeof item.id === 'string'
+      && typeof item.user_id === 'string'
+      && typeof item.campaign_id === 'string'
+      && typeof item.label === 'string'
+      && typeof item.branch_kind === 'string'
+      && isRecord(item.params)
+      && isRecord(item.result)
+    ))
+    .map(item => ({
+      ...item,
+      source_deduction_id: typeof item.source_deduction_id === 'string' ? item.source_deduction_id : null,
+      created_at: typeof item.created_at === 'string' && item.created_at ? item.created_at : new Date().toISOString(),
+    }));
+}
+
+function readAllLocalCounterfactuals(userId: string): CampaignCounterfactual[] {
+  return normalizeLocalCampaignCounterfactuals(
+    readUserScopedStorage<unknown>(userId, CAMPAIGN_COUNTERFACTUALS_STORAGE_KEY, []),
+  );
+}
+
+function writeAllLocalCounterfactuals(userId: string, branches: CampaignCounterfactual[]): void {
+  writeUserScopedStorage(
+    userId,
+    CAMPAIGN_COUNTERFACTUALS_STORAGE_KEY,
+    sortCounterfactuals(branches).slice(0, MAX_LOCAL_CAMPAIGN_COUNTERFACTUALS),
+  );
+}
+
+function readLocalCounterfactuals(userId: string, campaignId: string): CampaignCounterfactual[] {
+  return sortCounterfactuals(readAllLocalCounterfactuals(userId).filter(branch => branch.campaign_id === campaignId));
+}
+
+function upsertLocalCounterfactual(branch: CampaignCounterfactual): CampaignCounterfactual {
+  const rows = readAllLocalCounterfactuals(branch.user_id);
+  const next = [branch, ...rows.filter(item => item.id !== branch.id)];
+  writeAllLocalCounterfactuals(branch.user_id, next);
+  return branch;
+}
+
+function removeLocalCounterfactual(userId: string, id: string): void {
+  writeAllLocalCounterfactuals(userId, readAllLocalCounterfactuals(userId).filter(branch => branch.id !== id));
+}
+
+function mergeCounterfactuals(remote: CampaignCounterfactual[], local: CampaignCounterfactual[]): CampaignCounterfactual[] {
+  const merged = new Map<string, CampaignCounterfactual>();
+  local.forEach(branch => merged.set(branch.id, branch));
+  remote.forEach(branch => merged.set(branch.id, branch));
+  return sortCounterfactuals([...merged.values()]);
 }
 
 async function getAuthenticatedUserId(label: string): Promise<string> {
@@ -2472,17 +2539,26 @@ export async function createCounterfactual(
     .insert(payload as never)
     .select()
     .single();
+  if (error && isMissingCounterfactualsTableError(error)) {
+    return upsertLocalCounterfactual(toCampaignCounterfactual({
+      id: crypto.randomUUID(),
+      ...payload,
+      created_at: new Date().toISOString(),
+    }));
+  }
   return wrap('创建反事实战役分支', error, toCampaignCounterfactual(data));
 }
 
 export async function listCounterfactuals(campaignId: string): Promise<CampaignCounterfactual[]> {
+  const userId = await getAuthenticatedUserId('加载反事实战役分支');
+  const local = readLocalCounterfactuals(userId, campaignId);
   const { data, error } = await supabase
     .from('campaign_counterfactuals' as never)
     .select('*')
     .eq('campaign_id', campaignId)
     .order('created_at', { ascending: false });
-  if (error && isMissingCounterfactualsTableError(error)) return [];
-  return wrap('加载反事实战役分支', error, (data ?? []).map(toCampaignCounterfactual));
+  if (error && isMissingCounterfactualsTableError(error)) return local;
+  return mergeCounterfactuals(wrap('加载反事实战役分支', error, (data ?? []).map(toCampaignCounterfactual)), local);
 }
 
 export async function followAccount(followeeId: string): Promise<AccountFollow> {
@@ -2600,11 +2676,13 @@ export async function createCampaignComment(input: {
 }
 
 export async function deleteCounterfactual(id: string): Promise<void> {
+  const userId = await getAuthenticatedUserId('删除反事实分支');
   const { error } = await supabase
     .from('campaign_counterfactuals' as never)
     .delete()
     .eq('id', id);
-  if (error) throw new Error(`删除反事实分支失败：${error.message}`);
+  if (error && !isMissingCounterfactualsTableError(error)) throw new Error(`删除反事实分支失败：${error.message}`);
+  removeLocalCounterfactual(userId, id);
 }
 
 function counterfactualTemplateFor(campaign: Pick<TradeCampaign, 'strategy_template'>): 'main_dual_hedge_mirror_tp' | 'main_only' {
@@ -2657,7 +2735,7 @@ export async function runAndPersistDeviationCosts(
 ): Promise<DeviationCost[]> {
   const { campaign, legs, tradeRecords } = await getCampaignFullData(campaignId);
   if (campaign.strategy_template === 'custom') return [];
-  const { initialCapital } = await getCurrentUserAndCapital();
+  const { userId, initialCapital } = await getCurrentUserAndCapital();
   const actualParams = buildActualSimulationParams(campaign, legs);
   if (!actualParams) return [];
   const actualResult = simulateCampaign(
@@ -2681,6 +2759,11 @@ export async function runAndPersistDeviationCosts(
 
   for (const cost of costs) {
     if (!cost.source_deduction_id) continue;
+    const localDuplicate = readLocalCounterfactuals(userId, campaignId).some(branch =>
+      branch.branch_kind === 'fix_one_deviation'
+      && branch.source_deduction_id === cost.source_deduction_id,
+    );
+    if (localDuplicate) continue;
     const existing = await supabase
       .from('campaign_counterfactuals' as never)
       .select('id')
@@ -2688,6 +2771,9 @@ export async function runAndPersistDeviationCosts(
       .eq('branch_kind', 'fix_one_deviation')
       .eq('source_deduction_id', cost.source_deduction_id)
       .limit(1);
+    if (existing.error && !isMissingCounterfactualsTableError(existing.error)) {
+      throw new Error(`检查修正分支失败：${existing.error.message}`);
+    }
     if ((existing.data ?? []).length > 0) continue;
     const fixBranch = buildDeviationFixParams(campaign, legs, tradeRecords, cost.source_deduction_id);
     if (!fixBranch) continue;

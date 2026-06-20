@@ -30,6 +30,8 @@ interface Props {
   draggableVerticalLines?: AnalysisDraggableVerticalLine[];
   /** 拖动结束回调：返回线 id 和新时间戳。 */
   onDragVerticalLine?: (id: string, time: number) => void;
+  /** 点击或拖动盘面竖线时，返回线 id。 */
+  onSelectVerticalLine?: (id: string) => void;
 }
 
 function inferPricePrecision(values: number[]) {
@@ -62,6 +64,7 @@ export function ReplayKlineChart({
   onDragPriceLine,
   draggableVerticalLines,
   onDragVerticalLine,
+  onSelectVerticalLine,
 }: Props) {
   const replayData = useMemo(() => {
     // 战役详情用 fitAll：直接渲染全部已拉取的 K 线（fetchRange 已把区间收敛到 Legs 两端 + 缓冲），
@@ -128,6 +131,7 @@ export function ReplayKlineChart({
       onDragPriceLine={onDragPriceLine}
       draggableVerticalLines={draggableVerticalLines}
       onDragVerticalLine={onDragVerticalLine}
+      onSelectVerticalLine={onSelectVerticalLine}
       timezone={timezone}
     />
   );

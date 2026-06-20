@@ -156,8 +156,10 @@ export interface AnalysisDraggableVerticalLine {
   id: string;
   time: number;
   color: string;
+  width?: number;
   dashed?: boolean;
   label?: string;
+  labelColor?: string;
 }
 
 interface Props {
@@ -197,6 +199,8 @@ interface Props {
   draggableVerticalLines?: AnalysisDraggableVerticalLine[];
   /** Fired on drag release with the line id and its new timestamp. */
   onDragVerticalLine?: (id: string, time: number) => void;
+  /** Fired when a draggable vertical line is selected on the chart. */
+  onSelectVerticalLine?: (id: string) => void;
   /** K 线时间轴的显示时区（IANA 名）。默认 Asia/Shanghai，与主交易页一致；战役页用 UTC。 */
   timezone?: string;
 }
@@ -396,6 +400,7 @@ function CandlestickChartComponent({
   onDragPriceLine,
   draggableVerticalLines,
   onDragVerticalLine,
+  onSelectVerticalLine,
   timezone = "Asia/Shanghai",
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -411,6 +416,8 @@ function CandlestickChartComponent({
   onDragPriceLineRef.current = onDragPriceLine;
   const onDragVerticalLineRef = useRef(onDragVerticalLine);
   onDragVerticalLineRef.current = onDragVerticalLine;
+  const onSelectVerticalLineRef = useRef(onSelectVerticalLine);
+  onSelectVerticalLineRef.current = onSelectVerticalLine;
   const analysisOverlayRunRef = useRef(0);
 
   const [indicators, setIndicators] = usePersistedState<IndicatorConfig[]>("indicators", []);
@@ -1074,6 +1081,13 @@ function CandlestickChartComponent({
 
     const newest = data[data.length - 1];
     const lastValue = newest.close;
+    const minTime = data[0].time;
+    const inferredInterval = data.length > 1 ? Math.max(0, newest.time - data[data.length - 2].time) : 0;
+    const maxTime = newest.time + inferredInterval;
+    const visibleLow = Math.min(...data.map(item => item.low));
+    const visibleHigh = Math.max(...data.map(item => item.high));
+    const visibleRange = Math.max(visibleHigh - visibleLow, Math.abs(visibleHigh) * 0.0001, 1);
+    const verticalLabelValue = visibleLow + visibleRange * 0.025;
     const ids: string[] = [];
     for (const line of priceLines) {
       if (!Number.isFinite(line.price)) continue;
@@ -1111,6 +1125,7 @@ function CandlestickChartComponent({
     }
     for (const line of verticalLines) {
       if (!Number.isFinite(line.time)) continue;
+      if (line.time < minTime || line.time > maxTime) continue;
       const id = `whatif_drag_time_${line.id}`;
       chart.createOverlay({
         id,
@@ -1122,23 +1137,25 @@ function CandlestickChartComponent({
           line: {
             style: line.dashed ? LineType.Dashed : LineType.Solid,
             dashedValue: [3, 3],
-            size: 1.2,
+            size: line.width ?? 0.85,
             color: line.color,
           },
-          text: {
-            color: "#FFFFFF",
-            size: 9,
-            borderColor: `${line.color}30`,
-            backgroundColor: line.color,
-            borderRadius: 2,
-            paddingLeft: 3,
-            paddingRight: 3,
-            paddingTop: 1,
-            paddingBottom: 1,
-          },
         },
-        extendData: line.label ?? "",
+        extendData: "",
+        onClick: () => {
+          onSelectVerticalLineRef.current?.(line.id);
+          return false;
+        },
+        onPressedMoveStart: () => {
+          onSelectVerticalLineRef.current?.(line.id);
+          return false;
+        },
+        onSelected: () => {
+          onSelectVerticalLineRef.current?.(line.id);
+          return false;
+        },
         onPressedMoveEnd: (event: { overlay?: { points?: Array<{ timestamp?: number }> } }) => {
+          onSelectVerticalLineRef.current?.(line.id);
           const next = event?.overlay?.points?.[0]?.timestamp;
           if (typeof next === "number" && Number.isFinite(next)) {
             onDragVerticalLineRef.current?.(line.id, next);
@@ -1147,6 +1164,33 @@ function CandlestickChartComponent({
         },
       } as OverlayCreate);
       ids.push(id);
+
+      if (line.label) {
+        const labelId = `whatif_drag_label_${line.id}`;
+        chart.createOverlay({
+          id: labelId,
+          name: "simpleAnnotation",
+          paneId: "candle_pane",
+          points: [{ timestamp: line.time, value: verticalLabelValue }],
+          lock: true,
+          extendData: line.label,
+          styles: {
+            text: {
+              color: line.labelColor ?? line.color,
+              size: 7,
+              borderColor: "rgba(132, 142, 156, 0.14)",
+              backgroundColor: "rgba(11, 14, 17, 0.26)",
+              borderRadius: 2,
+              paddingLeft: 2,
+              paddingRight: 2,
+              paddingTop: 1,
+              paddingBottom: 1,
+            },
+            point: { color: "rgba(0,0,0,0)" },
+          },
+        } as OverlayCreate);
+        ids.push(labelId);
+      }
     }
     dragOverlayIdsRef.current = ids;
   }, [draggablePriceLines, draggableVerticalLines, data]);
@@ -1472,6 +1516,7 @@ function areChartPropsEqual(prev: Props, next: Props) {
     prev.onDragPriceLine === next.onDragPriceLine &&
     prev.draggableVerticalLines === next.draggableVerticalLines &&
     prev.onDragVerticalLine === next.onDragVerticalLine &&
+    prev.onSelectVerticalLine === next.onSelectVerticalLine &&
     prev.timezone === next.timezone
   );
 }

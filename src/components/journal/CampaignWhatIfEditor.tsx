@@ -5,6 +5,12 @@ import { Input } from '@/components/ui/input';
 import { ReplayKlineChart } from '@/components/journal/ReplayKlineChart';
 import { type AnalysisDraggableVerticalLine } from '@/components/CandlestickChart';
 import { intervalToMs, type KlineData } from '@/hooks/useBinanceData';
+import {
+  SELECTED_LEG_LONG_LINE_COLOR,
+  SELECTED_LEG_SHORT_LINE_COLOR,
+  SELECTED_LEG_VERTICAL_LINE_WIDTH,
+  legRoleMarkerLabel,
+} from '@/lib/campaignLegMarkers';
 import { buildActualSimulationParams, buildPureSopParams } from '@/lib/campaignSimulationEngine';
 import { LEG_ROLE_LABELS } from '@/lib/strategyTemplates';
 import type {
@@ -21,15 +27,14 @@ interface Props {
   klines: KlineData[];
   klinesLoading: boolean;
   interval: string;
+  intervalOptions?: readonly string[];
+  onIntervalChange?: (interval: string) => void;
   timezone?: string;
   pureRunning: boolean;
   whatIfRunning: boolean;
   onRunPureSop: () => void;
   onRunWhatIf: (label: string, params: CampaignCounterfactualParams) => void;
 }
-
-const LONG_LINE = '#002FA7'; // Klein blue
-const SHORT_LINE = '#3B0764'; // deep purple
 
 const ROLE_OPTIONS: LegRole[] = [
   'main_open',
@@ -56,18 +61,6 @@ function round(value: number, digits: number = 4) {
 
 function roleLabel(role: string) {
   return LEG_ROLE_LABELS[role as LegRole] ?? role;
-}
-
-function shortRoleLabel(role: string) {
-  if (role === 'main_open') return 'M';
-  if (role.startsWith('main_add_')) return `加${role.replace('main_add_', '')}`;
-  if (role === 'hedge_initial_a') return 'H-A';
-  if (role === 'hedge_initial_b') return 'H-B';
-  if (role === 'hedge_rolling') return 'Hr';
-  if (role === 'mirror_tp') return 'TP';
-  if (role === 'reentry_main') return '再M';
-  if (role === 'reentry_hedge') return '再H';
-  return roleLabel(role).slice(0, 4);
 }
 
 function toLocalInputValue(iso: string) {
@@ -147,6 +140,8 @@ export function CampaignWhatIfEditor({
   klines,
   klinesLoading,
   interval,
+  intervalOptions = [],
+  onIntervalChange,
   timezone,
   pureRunning,
   whatIfRunning,
@@ -159,10 +154,12 @@ export function CampaignWhatIfEditor({
   const [params, setParams] = useState<CampaignCounterfactualParams | null>(baseDefaults);
   const [manualLegs, setManualLegs] = useState<CampaignCounterfactualManualLeg[]>([]);
   const [label, setLabel] = useState('');
+  const [selectedManualLegId, setSelectedManualLegId] = useState<string | null>(null);
 
   useEffect(() => {
     setParams(baseDefaults);
     if (baseDefaults) setManualLegs(buildManualLegs(baseDefaults, legs, klines));
+    setSelectedManualLegId(null);
   }, [baseDefaults, legs, klines]);
 
   const canRun = !klinesLoading && klines.length > 0;
@@ -179,10 +176,11 @@ export function CampaignWhatIfEditor({
     const now = params.entry.time;
     const lastTime = defaultCloseTime(params, klines);
     const lastPrice = klines[klines.length - 1]?.close ?? params.entry.price;
+    const id = `manual-${Date.now()}`;
     setManualLegs(prev => [
       ...prev,
       {
-        id: `manual-${Date.now()}`,
+        id,
         leg_role: 'hedge_rolling',
         direction: params.entry.direction === 'long' ? 'short' : 'long',
         open_time: now,
@@ -194,36 +192,42 @@ export function CampaignWhatIfEditor({
         enabled: true,
       },
     ]);
+    setSelectedManualLegId(id);
   };
 
   const resetManualLegs = () => {
     if (!baseDefaults) return;
     setManualLegs(buildManualLegs(baseDefaults, legs, klines));
     setParams(baseDefaults);
+    setSelectedManualLegId(null);
   };
 
   const activeManualLegs = manualLegs.filter(leg => leg.enabled);
 
   const verticalLines = useMemo<AnalysisDraggableVerticalLine[]>(() => {
     return activeManualLegs.flatMap(leg => {
-      const color = leg.direction === 'long' ? LONG_LINE : SHORT_LINE;
+      const color = leg.direction === 'long' ? SELECTED_LEG_LONG_LINE_COLOR : SELECTED_LEG_SHORT_LINE_COLOR;
       const openMs = validTimeMs(leg.open_time);
       const closeMs = validTimeMs(leg.close_time);
-      const labelPrefix = shortRoleLabel(leg.leg_role);
+      const labelPrefix = legRoleMarkerLabel(leg.leg_role);
       return [
         openMs == null ? null : {
           id: `${leg.id}:open`,
           time: openMs,
           color,
+          width: SELECTED_LEG_VERTICAL_LINE_WIDTH,
           dashed: false,
-          label: `${labelPrefix} 开`,
+          label: `${labelPrefix}·开仓`,
+          labelColor: color,
         },
         closeMs == null ? null : {
           id: `${leg.id}:close`,
           time: closeMs,
           color,
+          width: SELECTED_LEG_VERTICAL_LINE_WIDTH,
           dashed: true,
-          label: `${labelPrefix} 平`,
+          label: `${labelPrefix}·平仓`,
+          labelColor: color,
         },
       ].filter(Boolean) as AnalysisDraggableVerticalLine[];
     });
@@ -231,6 +235,7 @@ export function CampaignWhatIfEditor({
 
   const handleDragVerticalLine = (id: string, time: number) => {
     const [legId, endpoint] = id.split(':');
+    if (legId) setSelectedManualLegId(legId);
     const kline = nearestKline(klines, time);
     const iso = new Date(time).toISOString();
     if (endpoint === 'open') {
@@ -245,6 +250,11 @@ export function CampaignWhatIfEditor({
         exit_price: kline ? round(kline.close, 8) : undefined,
       });
     }
+  };
+
+  const handleSelectVerticalLine = (id: string) => {
+    const [legId] = id.split(':');
+    setSelectedManualLegId(legId || null);
   };
 
   const runManualScenario = () => {
@@ -293,7 +303,7 @@ export function CampaignWhatIfEditor({
           <div className="space-y-1 min-w-0">
             <div className="text-[14px] font-medium">Legs 副本 · 手动反事实</div>
             <div className="text-[11px] text-muted-foreground">
-              复制当前 Legs 后再调整。你可以改开/平时间、价格、仓位，也可以删除或增加对冲；拖动盘面竖线会同步回写时间与价格。
+              复制当前 Legs 后再调整。你可以改开/平时间、价格、仓位，也可以删除或增添；拖动盘面竖线会同步回写时间与价格。
             </div>
           </div>
           <div className="flex-1" />
@@ -304,12 +314,30 @@ export function CampaignWhatIfEditor({
             </Button>
             <Button variant="outline" className="h-8 text-[11px]" onClick={addHedgeLeg}>
               <Plus className="w-3.5 h-3.5 mr-1" />
-              增加对冲
+              增添
             </Button>
           </div>
         </div>
 
-        <div className="h-[320px] border border-border rounded overflow-hidden">
+        {onIntervalChange && intervalOptions.length > 0 && (
+          <div className="h-9 px-2 flex flex-wrap items-center gap-2">
+            <div className="flex items-center gap-1">
+              {intervalOptions.map(item => (
+                <button
+                  key={item}
+                  type="button"
+                  onClick={() => onIntervalChange(item)}
+                  className={`h-6 px-2 rounded text-[10px] font-mono ${interval === item ? 'bg-[#F0B90B] text-black' : 'bg-muted text-foreground'}`}
+                >
+                  {item}
+                </button>
+              ))}
+            </div>
+            <div className="flex-1" />
+          </div>
+        )}
+
+        <div className="h-[480px] border border-border rounded overflow-hidden">
           {klinesLoading ? (
             <div className="h-full flex items-center justify-center text-[12px] text-muted-foreground">加载 K 线…</div>
           ) : klines.length === 0 ? (
@@ -324,14 +352,15 @@ export function CampaignWhatIfEditor({
               showLastPriceLine={false}
               draggableVerticalLines={verticalLines}
               onDragVerticalLine={handleDragVerticalLine}
+              onSelectVerticalLine={handleSelectVerticalLine}
               timezone={timezone}
             />
           )}
         </div>
 
-        <div className="border border-border rounded overflow-x-auto">
+        <div className="max-h-[380px] overflow-auto rounded border border-border">
           <table className="w-full min-w-[980px] text-[11px]">
-            <thead className="bg-muted/40 text-muted-foreground">
+            <thead className="sticky top-0 z-10 bg-muted/80 text-muted-foreground backdrop-blur supports-[backdrop-filter]:bg-muted/70">
               <tr>
                 <th className="text-left px-3 py-2 w-10">#</th>
                 <th className="text-left px-3 py-2">角色</th>
@@ -345,92 +374,105 @@ export function CampaignWhatIfEditor({
               </tr>
             </thead>
             <tbody>
-              {manualLegs.map((leg, index) => (
-                <tr key={leg.id} className={`border-t border-border ${leg.enabled ? '' : 'opacity-45'}`}>
-                  <td className="px-3 py-2 font-mono">{index + 1}</td>
-                  <td className="px-3 py-2">
-                    <select
-                      className="h-8 w-full rounded border border-border bg-background px-2"
-                      value={leg.leg_role}
-                      onChange={(e: ChangeEvent<HTMLSelectElement>) => updateManualLeg(leg.id, { leg_role: e.target.value })}
-                    >
-                      {ROLE_OPTIONS.map(role => (
-                        <option key={role} value={role}>{roleLabel(role)}</option>
-                      ))}
-                    </select>
-                  </td>
-                  <td className="px-3 py-2">
-                    <select
-                      className="h-8 w-full rounded border border-border bg-background px-2"
-                      value={leg.direction}
-                      onChange={(e: ChangeEvent<HTMLSelectElement>) => updateManualLeg(leg.id, { direction: e.target.value as 'long' | 'short' })}
-                    >
-                      <option value="long">多</option>
-                      <option value="short">空</option>
-                    </select>
-                  </td>
-                  <td className="px-3 py-2">
-                    <Input
-                      type="datetime-local"
-                      className="h-8 text-[11px]"
-                      value={toLocalInputValue(leg.open_time)}
-                      onChange={(e: ChangeEvent<HTMLInputElement>) => updateManualLeg(leg.id, { open_time: fromLocalInputValue(e.target.value, leg.open_time) })}
-                    />
-                  </td>
-                  <td className="px-3 py-2">
-                    <Input
-                      type="datetime-local"
-                      className="h-8 text-[11px]"
-                      value={toLocalInputValue(leg.close_time)}
-                      onChange={(e: ChangeEvent<HTMLInputElement>) => updateManualLeg(leg.id, { close_time: fromLocalInputValue(e.target.value, leg.close_time) })}
-                    />
-                  </td>
-                  <td className="px-3 py-2">
-                    <Input
-                      type="number"
-                      className="h-8 text-[11px]"
-                      value={leg.entry_price}
-                      onChange={(e: ChangeEvent<HTMLInputElement>) => updateManualLeg(leg.id, { entry_price: Number(e.target.value) })}
-                    />
-                  </td>
-                  <td className="px-3 py-2">
-                    <Input
-                      type="number"
-                      className="h-8 text-[11px]"
-                      value={leg.exit_price}
-                      onChange={(e: ChangeEvent<HTMLInputElement>) => updateManualLeg(leg.id, { exit_price: Number(e.target.value) })}
-                    />
-                  </td>
-                  <td className="px-3 py-2">
-                    <Input
-                      type="number"
-                      className="h-8 text-[11px]"
-                      value={leg.size_usdt}
-                      onChange={(e: ChangeEvent<HTMLInputElement>) => updateManualLeg(leg.id, { size_usdt: Number(e.target.value) })}
-                    />
-                  </td>
-                  <td className="px-3 py-2 text-right">
-                    <button
-                      type="button"
-                      onClick={() => updateManualLeg(leg.id, { enabled: !leg.enabled })}
-                      className="text-[11px] text-muted-foreground hover:text-foreground mr-3"
-                    >
-                      {leg.enabled ? '停用' : '启用'}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setManualLegs(prev => prev.filter(item => item.id !== leg.id))}
-                      className="inline-flex h-8 w-8 items-center justify-center rounded text-muted-foreground hover:bg-[#F6465D]/10 hover:text-[#F6465D]"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
-                  </td>
-                </tr>
-              ))}
+              {manualLegs.map((leg, index) => {
+                const isSelected = selectedManualLegId === leg.id;
+                return (
+                  <tr
+                    key={leg.id}
+                    className={[
+                      'border-t border-border transition-colors',
+                      isSelected ? 'bg-[#F0B90B]/10 shadow-[inset_3px_0_0_rgba(240,185,11,0.8)]' : '',
+                      leg.enabled ? '' : 'opacity-45',
+                    ].filter(Boolean).join(' ')}
+                  >
+                    <td className="px-3 py-2 font-mono">{index + 1}</td>
+                    <td className="px-3 py-2">
+                      <select
+                        className="h-8 w-full rounded border border-border bg-background px-2"
+                        value={leg.leg_role}
+                        onChange={(e: ChangeEvent<HTMLSelectElement>) => updateManualLeg(leg.id, { leg_role: e.target.value })}
+                      >
+                        {ROLE_OPTIONS.map(role => (
+                          <option key={role} value={role}>{roleLabel(role)}</option>
+                        ))}
+                      </select>
+                    </td>
+                    <td className="px-3 py-2">
+                      <select
+                        className="h-8 w-full rounded border border-border bg-background px-2"
+                        value={leg.direction}
+                        onChange={(e: ChangeEvent<HTMLSelectElement>) => updateManualLeg(leg.id, { direction: e.target.value as 'long' | 'short' })}
+                      >
+                        <option value="long">多</option>
+                        <option value="short">空</option>
+                      </select>
+                    </td>
+                    <td className="px-3 py-2">
+                      <Input
+                        type="datetime-local"
+                        className="h-8 text-[11px]"
+                        value={toLocalInputValue(leg.open_time)}
+                        onChange={(e: ChangeEvent<HTMLInputElement>) => updateManualLeg(leg.id, { open_time: fromLocalInputValue(e.target.value, leg.open_time) })}
+                      />
+                    </td>
+                    <td className="px-3 py-2">
+                      <Input
+                        type="datetime-local"
+                        className="h-8 text-[11px]"
+                        value={toLocalInputValue(leg.close_time)}
+                        onChange={(e: ChangeEvent<HTMLInputElement>) => updateManualLeg(leg.id, { close_time: fromLocalInputValue(e.target.value, leg.close_time) })}
+                      />
+                    </td>
+                    <td className="px-3 py-2">
+                      <Input
+                        type="number"
+                        className="h-8 text-[11px]"
+                        value={leg.entry_price}
+                        onChange={(e: ChangeEvent<HTMLInputElement>) => updateManualLeg(leg.id, { entry_price: Number(e.target.value) })}
+                      />
+                    </td>
+                    <td className="px-3 py-2">
+                      <Input
+                        type="number"
+                        className="h-8 text-[11px]"
+                        value={leg.exit_price}
+                        onChange={(e: ChangeEvent<HTMLInputElement>) => updateManualLeg(leg.id, { exit_price: Number(e.target.value) })}
+                      />
+                    </td>
+                    <td className="px-3 py-2">
+                      <Input
+                        type="number"
+                        className="h-8 text-[11px]"
+                        value={leg.size_usdt}
+                        onChange={(e: ChangeEvent<HTMLInputElement>) => updateManualLeg(leg.id, { size_usdt: Number(e.target.value) })}
+                      />
+                    </td>
+                    <td className="px-3 py-2 text-right">
+                      <button
+                        type="button"
+                        onClick={() => updateManualLeg(leg.id, { enabled: !leg.enabled })}
+                        className="text-[11px] text-muted-foreground hover:text-foreground mr-3"
+                      >
+                        {leg.enabled ? '停用' : '启用'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setManualLegs(prev => prev.filter(item => item.id !== leg.id));
+                          if (selectedManualLegId === leg.id) setSelectedManualLegId(null);
+                        }}
+                        className="inline-flex h-8 w-8 items-center justify-center rounded text-muted-foreground hover:bg-[#F6465D]/10 hover:text-[#F6465D]"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
               {manualLegs.length === 0 && (
                 <tr>
                   <td colSpan={9} className="px-3 py-5 text-center text-[12px] text-muted-foreground">
-                    还没有可模拟的 leg。先点“增加对冲”，或回到归类页补全 Legs。
+                    还没有可模拟的 leg。先点“增添”，或回到归类页补全 Legs。
                   </td>
                 </tr>
               )}

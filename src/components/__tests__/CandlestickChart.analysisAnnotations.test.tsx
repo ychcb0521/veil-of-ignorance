@@ -138,6 +138,7 @@ describe('CandlestickChart analysis annotations', () => {
 
   it('为反事实手动 Legs 创建可拖动时间竖线，并在拖动后回传新时间', async () => {
     const handleDrag = vi.fn();
+    const handleSelect = vi.fn();
 
     render(
       <TooltipProvider>
@@ -151,17 +152,20 @@ describe('CandlestickChart analysis annotations', () => {
               time: 1000,
               color: '#002FA7',
               dashed: false,
-              label: '主力 开',
+              label: '主力·开仓',
+              labelColor: 'rgba(0,47,167,0.84)',
             },
             {
               id: 'leg-1:close',
               time: 2000,
               color: '#3B0764',
               dashed: true,
-              label: '主力 平',
+              label: '主力·平仓',
+              labelColor: 'rgba(54,24,91,0.84)',
             },
           ]}
           onDragVerticalLine={handleDrag}
+          onSelectVerticalLine={handleSelect}
         />
       </TooltipProvider>,
     );
@@ -177,19 +181,19 @@ describe('CandlestickChart analysis annotations', () => {
       name: 'verticalStraightLine',
       paneId: 'candle_pane',
       lock: false,
-      extendData: '主力 开',
+      extendData: '',
       styles: {
         line: {
           style: 'solid',
           color: '#002FA7',
-          size: 1.2,
+          size: 0.85,
         },
       },
     });
     expect(dragTimeOverlays[1]).toMatchObject({
       name: 'verticalStraightLine',
       lock: false,
-      extendData: '主力 平',
+      extendData: '',
       styles: {
         line: {
           style: 'dashed',
@@ -198,9 +202,43 @@ describe('CandlestickChart analysis annotations', () => {
       },
     });
 
+    const dragLabelOverlays = overlays.filter(overlay => String(overlay.id ?? '').startsWith('whatif_drag_label_'));
+    expect(dragLabelOverlays).toHaveLength(2);
+    expect(dragLabelOverlays[0]).toMatchObject({
+      name: 'simpleAnnotation',
+      paneId: 'candle_pane',
+      lock: true,
+      extendData: '主力·开仓',
+      styles: {
+        text: {
+          color: 'rgba(0,47,167,0.84)',
+          size: 7,
+          backgroundColor: 'rgba(11, 14, 17, 0.26)',
+        },
+        point: { color: 'rgba(0,0,0,0)' },
+      },
+    });
+    expect(dragLabelOverlays[1]).toMatchObject({
+      name: 'simpleAnnotation',
+      extendData: '主力·平仓',
+      styles: {
+        text: {
+          color: 'rgba(54,24,91,0.84)',
+        },
+      },
+    });
+
+    dragTimeOverlays[0].onClick?.();
+    expect(handleSelect).toHaveBeenCalledWith('leg-1:open');
+    dragTimeOverlays[0].onSelected?.();
+    expect(handleSelect).toHaveBeenCalledWith('leg-1:open');
+    dragTimeOverlays[1].onPressedMoveStart?.();
+    expect(handleSelect).toHaveBeenCalledWith('leg-1:close');
+
     dragTimeOverlays[0].onPressedMoveEnd?.({
       overlay: { points: [{ timestamp: 1500 }] },
     });
     expect(handleDrag).toHaveBeenCalledWith('leg-1:open', 1500);
+    expect(handleSelect).toHaveBeenCalledWith('leg-1:open');
   });
 });

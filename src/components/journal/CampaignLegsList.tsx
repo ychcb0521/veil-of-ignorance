@@ -56,79 +56,81 @@ export function CampaignLegsList({
         <div>R̄</div>
         <div>操作</div>
       </div>
-      {legs.map(leg => {
-        const record = leg.trade_record_id ? recordMap.get(leg.trade_record_id) ?? null : null;
-        const status = statusForLeg(leg, record);
-        const highlighted = highlightedSet.has(leg.id);
-        const openLabel = fmtClock(record?.openTime ?? leg.pre_simulated_time);
-        const closeLabel = fmtClock(record?.closeTime ?? leg.post_real_close_time);
-        const operationLabel = fmtClock(operationTimeForLeg(leg));
-        const hedgeSummary = leg.order_kind === 'hedge' && leg.hedge_type
-          ? `${HEDGE_TYPE_LABELS[leg.hedge_type]}${leg.hedge_necessity_pct != null ? ` · ${leg.hedge_necessity_pct.toFixed(0)}%` : ''}`
-          : null;
-        return (
-          <div
-            key={leg.id}
-            className={`grid grid-cols-[48px_120px_1fr_96px_92px_88px_72px_230px] items-center text-[11px] font-mono py-2 px-3 border-b border-border/40 hover:bg-accent ${
-              highlighted ? 'bg-[#002FA7]/5 ring-1 ring-inset ring-[#002FA7]/12' : ''
-            }`}
-          >
-            <div>{leg.leg_sequence ?? '—'}</div>
-            <div className="flex items-center gap-1.5">
-              {leg.leg_role ? <LegRoleChip role={leg.leg_role} /> : '—'}
-              {leg.source === 'retroactive_from_record' && (
-                <span className="inline-flex items-center rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
-                  回填
-                </span>
-              )}
-            </div>
-            <div className="leading-tight">
-              <div><span className="text-muted-foreground">开 </span>{openLabel}</div>
-              <div><span className="text-muted-foreground">平 </span>{closeLabel}</div>
-              <div><span className="text-muted-foreground">操作 </span>{operationLabel}</div>
-              {hedgeSummary && <div className="text-[10px] text-[#F0B90B]">{hedgeSummary}</div>}
-            </div>
-            <div>{(leg.pre_entry_price ?? record?.entryPrice ?? 0).toFixed(4)}</div>
-            <div>{leg.pre_position_size != null ? leg.pre_position_size.toFixed(2) : '—'}</div>
-            <div className={status.className}>{status.label}</div>
-            <div>{leg.post_r_multiple != null ? leg.post_r_multiple.toFixed(2) : '—'}</div>
-            <div className="flex items-center gap-3">
-              {onToggleHighlight && (
+      <div className="max-h-[380px] overflow-y-auto">
+        {legs.map(leg => {
+          const record = leg.trade_record_id ? recordMap.get(leg.trade_record_id) ?? null : null;
+          const status = statusForLeg(leg, record);
+          const highlighted = highlightedSet.has(leg.id);
+          const openLabel = fmtClock(record?.openTime ?? leg.pre_simulated_time);
+          const closeLabel = fmtClock(record?.closeTime ?? leg.post_real_close_time);
+          const operationLabel = fmtClock(operationTimeForLeg(leg));
+          const hedgeSummary = leg.order_kind === 'hedge' && leg.hedge_type
+            ? `${HEDGE_TYPE_LABELS[leg.hedge_type]}${leg.hedge_necessity_pct != null ? ` · ${leg.hedge_necessity_pct.toFixed(0)}%` : ''}`
+            : null;
+          return (
+            <div
+              key={leg.id}
+              className={`grid grid-cols-[48px_120px_1fr_96px_92px_88px_72px_230px] items-center text-[11px] font-mono py-2 px-3 border-b border-border/40 hover:bg-accent ${
+                highlighted ? 'bg-[#002FA7]/5 ring-1 ring-inset ring-[#002FA7]/12' : ''
+              }`}
+            >
+              <div>{leg.leg_sequence ?? '—'}</div>
+              <div className="flex items-center gap-1.5">
+                {leg.leg_role ? <LegRoleChip role={leg.leg_role} /> : '—'}
+                {leg.source === 'retroactive_from_record' && (
+                  <span className="inline-flex items-center rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
+                    回填
+                  </span>
+                )}
+              </div>
+              <div className="leading-tight">
+                <div><span className="text-muted-foreground">开 </span>{openLabel}</div>
+                <div><span className="text-muted-foreground">平 </span>{closeLabel}</div>
+                <div><span className="text-muted-foreground">操作 </span>{operationLabel}</div>
+                {hedgeSummary && <div className="text-[10px] text-[#F0B90B]">{hedgeSummary}</div>}
+              </div>
+              <div>{(leg.pre_entry_price ?? record?.entryPrice ?? 0).toFixed(4)}</div>
+              <div>{leg.pre_position_size != null ? leg.pre_position_size.toFixed(2) : '—'}</div>
+              <div className={status.className}>{status.label}</div>
+              <div>{leg.post_r_multiple != null ? leg.post_r_multiple.toFixed(2) : '—'}</div>
+              <div className="flex items-center gap-3">
+                {onToggleHighlight && (
+                  <button
+                    type="button"
+                    onClick={() => onToggleHighlight(leg)}
+                    className={`inline-flex items-center gap-1 rounded px-2 py-1 text-[10px] transition-colors ${
+                      highlighted
+                        ? 'bg-[#002FA7]/10 text-[#002FA7] hover:bg-[#002FA7]/15'
+                        : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+                    }`}
+                  >
+                    <Crosshair className="w-3 h-3" />
+                    {highlighted ? '已标注' : '标到盘面'}
+                  </button>
+                )}
                 <button
                   type="button"
-                  onClick={() => onToggleHighlight(leg)}
-                  className={`inline-flex items-center gap-1 rounded px-2 py-1 text-[10px] transition-colors ${
-                    highlighted
-                      ? 'bg-[#002FA7]/10 text-[#002FA7] hover:bg-[#002FA7]/15'
-                      : 'text-muted-foreground hover:bg-muted hover:text-foreground'
-                  }`}
+                  disabled={!leg.id}
+                  onClick={() => nav(`/journal/${leg.id}`)}
+                  className="inline-flex items-center gap-1 text-[10px] text-muted-foreground hover:text-foreground disabled:opacity-40"
                 >
-                  <Crosshair className="w-3 h-3" />
-                  {highlighted ? '已标注' : '标到盘面'}
+                  <ExternalLink className="w-3 h-3" />
+                  查看复盘
                 </button>
-              )}
-              <button
-                type="button"
-                disabled={!leg.id}
-                onClick={() => nav(`/journal/${leg.id}`)}
-                className="inline-flex items-center gap-1 text-[10px] text-muted-foreground hover:text-foreground disabled:opacity-40"
-              >
-                <ExternalLink className="w-3 h-3" />
-                查看复盘
-              </button>
-              {onDetach && (
-                <button
-                  type="button"
-                  onClick={() => onDetach(leg)}
-                  className="text-[10px] text-muted-foreground hover:text-[#F6465D]"
-                >
-                  解除
-                </button>
-              )}
+                {onDetach && (
+                  <button
+                    type="button"
+                    onClick={() => onDetach(leg)}
+                    className="text-[10px] text-muted-foreground hover:text-[#F6465D]"
+                  >
+                    解除
+                  </button>
+                )}
+              </div>
             </div>
-          </div>
-        );
-      })}
+          );
+        })}
+      </div>
     </div>
   );
 }
