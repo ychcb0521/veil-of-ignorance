@@ -1,6 +1,6 @@
 import { type ChangeEvent, useEffect, useMemo, useState } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, Info, Layers, MessageSquare, Send, Sparkles, Trash2, UserPlus } from 'lucide-react';
+import { ArrowLeft, Eye, EyeOff, Info, Layers, MessageSquare, Send, Sparkles, Trash2, UserPlus } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -491,17 +491,20 @@ export default function JournalCampaignDetailPage() {
     () => buildSelectedLegVerticalLines(legs, tradeRecords, selectedLegMarkerIds),
     [legs, tradeRecords, selectedLegMarkerIds],
   );
+  // 「补齐（紫色）」反事实对照层：可显示/隐藏（默认显示）；showCfLegend 控制标记说明展开。
+  const [showCfOverlay, setShowCfOverlay] = useState(true);
+  const [showCfLegend, setShowCfLegend] = useState(false);
   const displayMarkers = useMemo(
-    () => [...chart.markers, ...counterfactualChart.markers],
-    [chart.markers, counterfactualChart.markers],
+    () => [...chart.markers, ...(showCfOverlay ? counterfactualChart.markers : [])],
+    [chart.markers, counterfactualChart.markers, showCfOverlay],
   );
   const displayPriceLines = useMemo(
-    () => [...chart.timeBoundPriceLines, ...counterfactualChart.timeBoundPriceLines],
-    [chart.timeBoundPriceLines, counterfactualChart.timeBoundPriceLines],
+    () => [...chart.timeBoundPriceLines, ...(showCfOverlay ? counterfactualChart.timeBoundPriceLines : [])],
+    [chart.timeBoundPriceLines, counterfactualChart.timeBoundPriceLines, showCfOverlay],
   );
   const displayVerticalLines = useMemo(
-    () => [...chart.verticalLines, ...counterfactualChart.verticalLines, ...selectedLegVerticalLines],
-    [chart.verticalLines, counterfactualChart.verticalLines, selectedLegVerticalLines],
+    () => [...chart.verticalLines, ...(showCfOverlay ? counterfactualChart.verticalLines : []), ...selectedLegVerticalLines],
+    [chart.verticalLines, counterfactualChart.verticalLines, selectedLegVerticalLines, showCfOverlay],
   );
   const canSuggestEnd = useMemo(
     () => (campaign ? shouldSuggestCampaignEnd(campaign, legs, tradeRecords, pendingOrders, getEffectiveTime(campaign.symbol)) : false),
@@ -980,8 +983,48 @@ export default function JournalCampaignDetailPage() {
               )}
             </div>
             {selectedCounterfactual && (
-              <div className="mt-2 px-1 text-[11px] text-muted-foreground">
-                实际轨迹（标准色）vs <span className="text-[#B080FF]">{selectedCounterfactual.label}</span>（紫色）
+              <div className="mt-2 px-1 space-y-1.5">
+                <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                  <button
+                    type="button"
+                    onClick={() => setShowCfOverlay(v => !v)}
+                    title={showCfOverlay ? '隐藏补齐对照（紫色）' : '显示补齐对照（紫色）'}
+                    aria-label={showCfOverlay ? '隐藏补齐对照' : '显示补齐对照'}
+                    className="inline-flex items-center text-muted-foreground/50 hover:text-foreground transition-colors"
+                  >
+                    {showCfOverlay ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
+                  </button>
+                  {showCfOverlay ? (
+                    <span>实际轨迹（标准色）vs <span className="text-[#B080FF]">{selectedCounterfactual.label}</span>（紫色）</span>
+                  ) : (
+                    <span>实际轨迹（标准色）· <span className="text-[#B080FF]/70">{selectedCounterfactual.label}</span> 已隐藏</span>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => setShowCfLegend(v => !v)}
+                    title="标记说明"
+                    aria-label="标记说明"
+                    className="inline-flex items-center text-muted-foreground/40 hover:text-foreground transition-colors"
+                  >
+                    <Info className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+                {showCfLegend && (
+                  <div className="rounded border border-border/60 bg-muted/30 px-2.5 py-2 text-[10px] leading-relaxed text-muted-foreground">
+                    <div className="text-foreground/80 mb-1">
+                      CF = 反事实「补齐」分支（紫色虚拟轨迹，按标准 SOP 推演，不是真实成交）
+                    </div>
+                    <div className="flex flex-wrap gap-x-4 gap-y-0.5">
+                      <span>CF-M 主力开仓</span>
+                      <span>CF-A1~A6 加仓</span>
+                      <span>CF-Re 再入场主力</span>
+                      <span>CF-Ha / CF-Hb 初始对冲 a / b</span>
+                      <span>CF-Hr 滚动对冲</span>
+                      <span>CF-TP 镜像止盈</span>
+                      <span>CF-Exit 平仓</span>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
           </div>
