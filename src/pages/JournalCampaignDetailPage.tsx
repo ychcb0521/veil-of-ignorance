@@ -34,12 +34,14 @@ import {
   type CampaignDeviationNote,
   listCampaignComments,
   listCounterfactuals,
+  runAndPersistCustomCounterfactual,
   runAndPersistDeviationCosts,
   runAndPersistPureSop,
 } from '@/lib/journalApi';
 import { STRATEGY_TEMPLATES } from '@/lib/strategyTemplates';
 import type {
   CampaignCounterfactual,
+  CampaignCounterfactualParams,
   CampaignComment,
   DeviationCost,
   TradeCampaign,
@@ -366,6 +368,7 @@ export default function JournalCampaignDetailPage() {
   const [selectedCounterfactualId, setSelectedCounterfactualId] = useState<string | null>(null);
   const [pendingCounterfactualId, setPendingCounterfactualId] = useState<string | null>(null);
   const [pureRunning, setPureRunning] = useState(false);
+  const [whatIfRunning, setWhatIfRunning] = useState(false);
   const [deviationCosts, setDeviationCosts] = useState<DeviationCost[]>([]);
   const [deviationLoading, setDeviationLoading] = useState(false);
   const [deviationHydrated, setDeviationHydrated] = useState(false);
@@ -508,7 +511,7 @@ export default function JournalCampaignDetailPage() {
     () => counterfactuals.some(branch => branch.branch_kind === 'pure_sop'),
     [counterfactuals],
   );
-  // 已保存分支列表里隐藏自动生成的「修正分支」(补齐 X)，只保留 Pure SOP 与历史遗留的自定义 What-if。
+  // 已保存分支列表里隐藏自动生成的「修正分支」(补齐 X)，只保留 Pure SOP 与自定义 What-if。
   const visibleBranches = useMemo(
     () => counterfactuals.filter(branch => branch.branch_kind !== 'fix_one_deviation'),
     [counterfactuals],
@@ -657,6 +660,25 @@ export default function JournalCampaignDetailPage() {
     } finally {
       setPureRunning(false);
       setDeviationLoading(false);
+    }
+  };
+
+  const handleRunWhatIf = async (label: string, params: CampaignCounterfactualParams) => {
+    if (klinesLoading || klines.length === 0) {
+      toast.error('K 线尚未加载完成，暂时无法运行 What-if');
+      return;
+    }
+    try {
+      setWhatIfRunning(true);
+      const branch = await runAndPersistCustomCounterfactual(campaign.id, label, params, klines);
+      await reloadCounterfactuals(branch.id);
+      setSelectedCounterfactualId(branch.id);
+      setPendingCounterfactualId(branch.id);
+      toast.success('What-if 结果已生成，请选择保存或删除');
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : String(error));
+    } finally {
+      setWhatIfRunning(false);
     }
   };
 
@@ -1001,10 +1023,17 @@ export default function JournalCampaignDetailPage() {
           <CampaignWhatIfEditor
             campaign={campaign}
             legs={legs}
+            tradeRecords={tradeRecords}
             klines={klines}
             klinesLoading={klinesLoading}
+            interval={interval}
+            intervalOptions={INTERVALS}
+            onIntervalChange={(nextInterval) => setInterval(nextInterval as Interval)}
+            timezone={LOCAL_TIME_ZONE}
             pureRunning={pureRunning}
+            whatIfRunning={whatIfRunning}
             onRunPureSop={handleRunPureSop}
+            onRunWhatIf={handleRunWhatIf}
           />
 
           {pendingCounterfactual && (
@@ -1048,7 +1077,7 @@ export default function JournalCampaignDetailPage() {
             <div className="text-[13px] font-medium">已保存分支</div>
             {visibleBranches.length === 0 ? (
               <div className="rounded border border-border bg-background/40 px-4 py-4 text-[12px] text-muted-foreground">
-                还没有反事实分支。先点上方「一键运行」生成。
+                还没有反事实分支。先运行一键方案或新建 What-if 分支。
               </div>
             ) : (
               visibleBranches.map(branch => {
