@@ -547,6 +547,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
           quantity: pos.quantity, leverage: pos.leverage,
           pnl: amount, fee: Math.abs(fee), slippage: 0,
           openTime: now, closeTime: now,
+          closedRealAt: Date.now(),
         });
       }
     }
@@ -593,6 +594,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
           pnl: pnl - closeFee - liqFee, fee: closeFee + liqFee, slippage: 0,
           openTime: pos.openTime || 0, closeTime: getEffectiveTime(sym),
           exit_method: 'liquidation',
+          closedRealAt: Date.now(),
         }]);
 
         setPositionsMap(prev => ({
@@ -653,6 +655,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
               pnl: pnl - closeFee - liqFee, fee: closeFee + liqFee, slippage: 0,
               openTime: pos.openTime || 0, closeTime: getEffectiveTime(sym),
               exit_method: 'liquidation',
+              closedRealAt: Date.now(),
             });
           }
         }
@@ -963,6 +966,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
       quantity: closeQty, leverage: pos.leverage,
       pnl: pnl - fee, fee, slippage, openTime: pos.openTime || 0, closeTime: getEffectiveTime(symbol),
       exit_method: method,
+      closedRealAt: Date.now(),
     }]);
 
     const pctLabel = pct < 1 ? ` (${Math.round(pct * 100)}%)` : '';

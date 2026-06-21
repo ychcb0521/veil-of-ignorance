@@ -69,7 +69,8 @@ function itemOperationTimeLabel(item: ClassifiableItem) {
   if (item.kind === 'journal') {
     return fmtLabel(item.journal.post_real_close_time ?? item.journal.pre_real_time ?? item.journal.updated_at ?? item.journal.created_at);
   }
-  return fmtLabel(item.record.closeTime || item.record.openTime);
+  // 裸成交记录：操作时间只认真实钱包时钟(closedRealAt)，没有就「—」，不拿模拟 K 线时间冒充。
+  return item.record.closedRealAt ? fmtLabel(item.record.closedRealAt) : '—';
 }
 
 function itemSymbol(item: ClassifiableItem) {

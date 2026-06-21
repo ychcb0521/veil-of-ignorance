@@ -656,10 +656,11 @@ function operationTimeForItem(
   if (journal) {
     return journal.post_real_close_time ?? journal.pre_real_time ?? journal.created_at ?? journal.updated_at;
   }
+  // 裸成交记录：操作时间只认「真实钱包时钟」(closedRealAt)；没有就显示「—」，绝不拿模拟 K 线时间冒充真实操作时间。
   if (item.kind === 'orphanRecord') {
-    return record?.closeTime ?? record?.openTime ?? item.record.closeTime ?? item.record.openTime;
+    return record?.closedRealAt ?? item.record.closedRealAt ?? null;
   }
-  return record?.closeTime ?? record?.openTime ?? null;
+  return record?.closedRealAt ?? null;
 }
 
 function tradeRecordDirection(record: TradeRecord): 'long' | 'short' {

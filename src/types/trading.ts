@@ -129,6 +129,12 @@ export interface TradeRecord {
   slippage: number;
   openTime: number;
   closeTime: number;
+  /**
+   * 真实钱包时钟（Date.now()）下的「操作时刻」——交易员实际下这一刀的现实时间，
+   * 与 openTime/closeTime 的模拟 K 线时间严格区分。仅本字段上线后发生的成交才有；
+   * 老记录为 undefined（界面显示「—」，绝不退回模拟时间冒充真实操作时间）。
+   */
+  closedRealAt?: number;
   /** How the position was closed. Manual for user-initiated; sl/tp1-3 for triggered TP/SL; liquidation for forced close. */
   exit_method?: "manual" | "sl" | "tp1" | "tp2" | "tp3" | "liquidation";
   /** User-written reason recorded after the close, used for post-trade review and playback. */
