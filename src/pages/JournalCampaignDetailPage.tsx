@@ -501,33 +501,49 @@ export default function JournalCampaignDetailPage() {
     const fallbackEnd = campaign.closed_at
       ? new Date(campaign.closed_at).getTime()
       : (klines.length > 0 ? klines[klines.length - 1].time : 0);
-    const reverseSide = campaign.direction === 'main_long' ? 'SHORT' : 'LONG';
-    // 已撤销 / 仍挂着的反向委托（来自挂单快照）：黄色虚线，撤销处打 ×。
-    const placedLines: TimeBoundPriceLine[] = reverseHedgeOrders
+    // 所有反向委托空单（reverseHedgeOrders 三态）统一画黄色水平线：
+    // 已撤销/挂单中 = 虚线（撤销处 ×）；已触发成交 = 委托→触发虚线 + 触发→平仓实线。
+    return reverseHedgeOrders
       .filter(order => Number.isFinite(order.price) && order.price > 0)
-      .map(order => ({
-        price: order.price,
-        color: '#F0B90B',
-        startTime: order.createdAt,
-        endTime: order.cancelledAt ?? fallbackEnd,
-        dashed: true,
-        endMarker: order.cancelledAt ? ('x' as const) : null,
-        title: order.side === 'SHORT' ? '委托空' : '委托多',
-      }));
-    // 已触发(成交)的反向委托：来自相反方向的成交记录，按成交价画黄色实线(成交 → 平仓)。
-    const triggeredLines: TimeBoundPriceLine[] = tradeRecords
-      .filter(record => record.side === reverseSide && Number.isFinite(record.entryPrice) && record.entryPrice > 0)
-      .map(record => ({
-        price: record.entryPrice,
-        color: '#F0B90B',
-        startTime: record.openTime,
-        endTime: record.closeTime && record.closeTime > record.openTime ? record.closeTime : fallbackEnd,
-        dashed: false,
-        endMarker: null,
-        title: record.side === 'SHORT' ? '触发空' : '触发多',
-      }));
-    return [...placedLines, ...triggeredLines];
-  }, [campaign, reverseHedgeOrders, tradeRecords, klines]);
+      .flatMap(order => {
+        const sideLabel = order.side === 'SHORT' ? '空' : '多';
+        if (order.status === 'triggered') {
+          const triggeredAt = order.triggeredAt ?? order.createdAt;
+          const endTime = order.cancelledAt ?? fallbackEnd;
+          const segments: TimeBoundPriceLine[] = [];
+          if (Number.isFinite(triggeredAt) && triggeredAt > order.createdAt) {
+            segments.push({
+              price: order.price,
+              color: '#F0B90B',
+              startTime: order.createdAt,
+              endTime: triggeredAt,
+              dashed: true,
+              endMarker: null,
+              title: `委托${sideLabel}`,
+            });
+          }
+          segments.push({
+            price: order.price,
+            color: '#F0B90B',
+            startTime: Math.max(order.createdAt, triggeredAt),
+            endTime,
+            dashed: false,
+            endMarker: null,
+            title: `触发${sideLabel}`,
+          });
+          return segments;
+        }
+        return {
+          price: order.price,
+          color: '#F0B90B',
+          startTime: order.createdAt,
+          endTime: order.cancelledAt ?? fallbackEnd,
+          dashed: true,
+          endMarker: order.status === 'cancelled' && order.cancelledAt ? ('x' as const) : null,
+          title: `委托${sideLabel}`,
+        };
+      });
+  }, [campaign, reverseHedgeOrders, klines]);
   const displayMarkers = useMemo(
     () => [...chart.markers, ...(showCfOverlay ? counterfactualChart.markers : [])],
     [chart.markers, counterfactualChart.markers, showCfOverlay],

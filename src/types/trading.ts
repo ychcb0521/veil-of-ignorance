@@ -85,14 +85,45 @@ export interface CancelledOrderSnapshot {
   cancelledAt: number;
 }
 
-/** One reverse-hedge order row shown in a campaign's 反向对冲挂单 section. */
+/**
+ * Snapshot of a pending order captured at the moment it is triggered/filled.
+ * The original order disappears from `ordersMap` after fill; keeping this lets
+ * campaign charts draw the pre-trigger pending segment from the real order time.
+ */
+export interface FilledOrderSnapshot {
+  id: string;
+  symbol: string;
+  side: OrderSide;
+  /** Actual fill price after slippage/maker handling. */
+  price: number;
+  /** Raw trigger price from the k-line condition before slippage. */
+  triggerPrice: number;
+  quantity: number;
+  leverage: number;
+  /** 委托时间 (sim/K-line clock, same as PendingOrder.createdAt) */
+  createdAt: number;
+  /** 触发/成交时间 (sim/K-line clock) */
+  filledAt: number;
+  positionId?: string;
+}
+
+/**
+ * One reverse-hedge order row shown in a campaign's 反向对冲挂单 section.
+ * 三态：cancelled=已撤销、pending=仍挂单中、triggered=已触发成交。
+ * 字段语义随状态：
+ *  - cancelled/pending: price=委托价, createdAt=委托时间, cancelledAt=撤销时间(pending 为 null)。
+ *  - triggered:        price=成交价, createdAt=委托时间, triggeredAt=触发时间, cancelledAt=平仓时间(未平为 null)。
+ */
 export interface CampaignReverseHedgeOrder {
   id: string;
+  /** 成交后对应的 trade_history record id；用于在 Legs 列表里精确归属到对应 leg。 */
+  tradeRecordId?: string | null;
   side: OrderSide;
   price: number;
   createdAt: number;
+  triggeredAt?: number | null;
   cancelledAt: number | null;
-  status: 'cancelled' | 'pending';
+  status: 'cancelled' | 'pending' | 'triggered';
 }
 
 interface TriggerRange {

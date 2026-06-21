@@ -57,8 +57,14 @@ export function CampaignLegsList({
   const nav = useNavigate();
   const recordMap = useMemo(() => new Map(tradeRecords.map(record => [record.id, record])), [tradeRecords]);
   const highlightedSet = useMemo(() => new Set(highlightedLegIds), [highlightedLegIds]);
-  // 反向挂单归属：每条挂单只归到「委托时刻最近一次开仓」的那条腿，避免在多条腿重叠的时间窗里重复出现。
+  // 反向挂单归属：已触发的委托优先按成交记录精确归到自己的 leg；
+  // 未触发/已撤的挂单再归到「委托时刻最近一次开仓」的那条腿，避免在重叠时间窗里重复出现。
   const reverseOrderLegMap = useMemo(() => {
+    const legIdByTradeRecordId = new Map(
+      legs
+        .filter(leg => Boolean(leg.trade_record_id))
+        .map(leg => [leg.trade_record_id as string, leg.id]),
+    );
     const legOpens = legs
       .map(leg => {
         const rec = leg.trade_record_id ? recordMap.get(leg.trade_record_id) ?? null : null;
@@ -68,6 +74,14 @@ export function CampaignLegsList({
       .sort((a, b) => a.openMs - b.openMs);
     const map = new Map<string, string>();
     for (const order of reverseHedgeOrders) {
+      const directLegId = order.tradeRecordId
+        ? legIdByTradeRecordId.get(order.tradeRecordId)
+        : legIdByTradeRecordId.get(order.id);
+      if (directLegId) {
+        map.set(order.id, directLegId);
+        continue;
+      }
+
       let assignedId: string | null = legOpens[0]?.id ?? null;
       for (const { id, openMs } of legOpens) {
         if (openMs <= order.createdAt) assignedId = id;
@@ -149,12 +163,19 @@ export function CampaignLegsList({
                               {order.side === 'SHORT' ? '空' : '多'} {fmtPrice(order.price)}
                             </span>
                             <span className="text-[10px] text-muted-foreground">
-                              {order.status === 'pending' ? '挂单中' : '已撤'}
+                              {order.status === 'pending'
+                                ? '挂单中'
+                                : order.status === 'triggered'
+                                  ? '已触发'
+                                  : '已撤'}
                             </span>
                           </div>
                           <div className="text-[10px] text-muted-foreground">委 {fmtClock(order.createdAt)}</div>
+                          {order.status === 'triggered' && (
+                            <div className="text-[10px] text-muted-foreground">触 {fmtClock(order.triggeredAt)}</div>
+                          )}
                           <div className="text-[10px] text-muted-foreground">
-                            {order.cancelledAt ? `撤 ${fmtClock(order.cancelledAt)}` : '撤 —'}
+                            {order.cancelledAt ? `${order.status === 'triggered' ? '平' : '撤'} ${fmtClock(order.cancelledAt)}` : `${order.status === 'triggered' ? '平' : '撤'} —`}
                           </div>
                         </div>
                       ))

@@ -21,7 +21,17 @@ import { useTimeSimulator } from '@/hooks/useTimeSimulator';
 import { usePersistedState, loadPersistedSimState, saveSimState, clearSimState } from '@/hooks/usePersistedState';
 import { useAuth } from '@/contexts/AuthContext';
 import { toast } from 'sonner';
-import type { Position, PendingOrder, TradeRecord, OrderSide, OrderType, MarginMode, TriggerOperator, CancelledOrderSnapshot } from '@/types/trading';
+import type {
+  Position,
+  PendingOrder,
+  TradeRecord,
+  OrderSide,
+  OrderType,
+  MarginMode,
+  TriggerOperator,
+  CancelledOrderSnapshot,
+  FilledOrderSnapshot,
+} from '@/types/trading';
 import {
   calcFee, calcUnrealizedPnl, calcSlippage,
   MAINTENANCE_MARGIN_RATE, LIQUIDATION_FEE_RATE, FUNDING_RATE, FUNDING_HOURS, getTriggerOperator,
@@ -69,6 +79,8 @@ interface TradingState {
   setPositionsMap: (v: PositionsMap | ((prev: PositionsMap) => PositionsMap)) => void;
   ordersMap: OrdersMap;
   setOrdersMap: (v: OrdersMap | ((prev: OrdersMap) => OrdersMap)) => void;
+  filledOrders: FilledOrderSnapshot[];
+  setFilledOrders: (v: FilledOrderSnapshot[] | ((prev: FilledOrderSnapshot[]) => FilledOrderSnapshot[])) => void;
   priceMap: PriceMap;
   setPriceMap: (v: PriceMap | ((prev: PriceMap) => PriceMap)) => void;
   balance: number;
@@ -258,6 +270,8 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
   // 撤单快照：撤单本身会把订单从 ordersMap 删掉，这里另存一份（含委托价/委托时间/取消时间），
   // 供战役页展示「反向对冲挂单」。只追加、截断到最近 500 条。
   const [, setCancelledOrders] = usePersistedState<CancelledOrderSnapshot[]>('cancelled_orders', []);
+  // 成交快照：委托触发后订单会从 ordersMap 删除，这里保留“委托时间 → 触发时间”的桥。
+  const [filledOrders, setFilledOrders] = usePersistedState<FilledOrderSnapshot[]>('filled_orders', []);
   const [priceMap, setPriceMap] = usePersistedState<PriceMap>('price_map', {});
   const [balance, setBalance] = usePersistedState('balance', initialCapital);
 
@@ -1182,6 +1196,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
     interval, setInterval,
     positionsMap, setPositionsMap,
     ordersMap, setOrdersMap,
+    filledOrders, setFilledOrders,
     priceMap, setPriceMap,
     balance, setBalance,
     isolatedBalances: emptyIsolatedBalances,

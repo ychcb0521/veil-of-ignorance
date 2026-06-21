@@ -55,7 +55,13 @@ import type {
   CounterfactualBranchResult,
 } from "@/types/journal";
 import { isHistoricalCampaign, ruleCooldownRemainingMs } from "@/types/journal";
-import type { PendingOrder, TradeRecord, CancelledOrderSnapshot, CampaignReverseHedgeOrder } from "@/types/trading";
+import type {
+  PendingOrder,
+  TradeRecord,
+  CancelledOrderSnapshot,
+  FilledOrderSnapshot,
+  CampaignReverseHedgeOrder,
+} from "@/types/trading";
 
 
 function wrap<T>(label: string, error: { message: string } | null, data: T | null): T {
@@ -1612,6 +1618,7 @@ export async function getCampaignFullData(
   const tradeHistory = readUserScopedStorage<TradeRecord[]>(userId, 'trade_history', []);
   const ordersMap = readUserScopedStorage<Record<string, PendingOrder[]>>(userId, 'orders_map', {});
   const cancelledOrders = readUserScopedStorage<CancelledOrderSnapshot[]>(userId, 'cancelled_orders', []);
+  const filledOrders = readUserScopedStorage<FilledOrderSnapshot[]>(userId, 'filled_orders', []);
   const legRecordIds = new Set(legs.map(leg => leg.trade_record_id).filter(Boolean));
   const openedAtMs = new Date(campaign.opened_at).getTime();
   const closedAtMs = campaign.closed_at ? new Date(campaign.closed_at).getTime() : Number.POSITIVE_INFINITY;
@@ -1640,14 +1647,48 @@ export async function getCampaignFullData(
         ? order.conditionalLimitPrice
         : order.stopPrice
   );
+  const closeEnough = (a: number, b: number, relativeBase = Math.max(Math.abs(a), Math.abs(b), 1)) =>
+    Math.abs(a - b) <= Math.max(1e-8, relativeBase * 1e-6);
+  const matchedTriggeredRecordIds = new Set<string>();
+  const findRecordForFilledOrder = (order: FilledOrderSnapshot) => {
+    const match = tradeRecords.find(record =>
+      record.side === order.side &&
+      Math.abs(record.openTime - order.filledAt) <= 60_000 &&
+      closeEnough(record.entryPrice, order.price) &&
+      closeEnough(record.quantity, order.quantity, Math.max(Math.abs(record.quantity), Math.abs(order.quantity), 1))
+    );
+    if (match) matchedTriggeredRecordIds.add(match.id);
+    return match ?? null;
+  };
+  const triggeredReverseOrders = filledOrders
+    .filter(order =>
+      order.symbol === campaign.symbol &&
+      order.side === reverseSide &&
+      (inWindow(order.createdAt) || inWindow(order.filledAt))
+    )
+    .map(order => {
+      const record = findRecordForFilledOrder(order);
+      return {
+        id: order.id,
+        tradeRecordId: record?.id ?? null,
+        side: order.side,
+        price: order.price,
+        createdAt: order.createdAt,
+        triggeredAt: order.filledAt,
+        cancelledAt: record?.closeTime && record.closeTime > order.filledAt ? record.closeTime : null,
+        status: 'triggered' as const,
+      };
+    });
   const reverseHedgeOrders: CampaignReverseHedgeOrder[] = [
     ...cancelledOrders
       .filter(order => order.symbol === campaign.symbol && order.side === reverseSide && inWindow(order.createdAt))
       .map(order => ({
         id: order.id,
+        tradeRecordId: null,
         side: order.side,
         price: order.price,
         createdAt: order.createdAt,
+        triggeredAt: null,
         cancelledAt: order.cancelledAt,
         status: 'cancelled' as const,
       })),
@@ -1655,11 +1696,33 @@ export async function getCampaignFullData(
       .filter(order => order.side === reverseSide && inWindow(order.createdAt))
       .map(order => ({
         id: order.id,
+        tradeRecordId: null,
         side: order.side,
         price: pendingOrderPrice(order),
         createdAt: order.createdAt,
+        triggeredAt: null,
         cancelledAt: null,
         status: 'pending' as const,
+      })),
+    // 已触发(成交)的反向委托：优先来自触发快照（委托时间 → 触发时间 → 平仓时间）。
+    ...triggeredReverseOrders,
+    // 旧数据兜底：没有触发快照时，只能从成交记录开始画实线。
+    ...tradeRecords
+      .filter(record =>
+        record.side === reverseSide
+        && !matchedTriggeredRecordIds.has(record.id)
+        && Number.isFinite(record.entryPrice) && record.entryPrice > 0
+        && (inWindow(record.openTime) || inWindow(record.closeTime)),
+      )
+      .map(record => ({
+        id: record.id,
+        tradeRecordId: record.id,
+        side: record.side,
+        price: record.entryPrice,
+        createdAt: record.openTime,
+        triggeredAt: record.openTime,
+        cancelledAt: record.closeTime && record.closeTime > record.openTime ? record.closeTime : null,
+        status: 'triggered' as const,
       })),
   ].sort((a, b) => a.createdAt - b.createdAt);
 

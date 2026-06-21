@@ -126,6 +126,7 @@ const Index = () => {
     setPositionsMap,
     ordersMap,
     setOrdersMap,
+    setFilledOrders,
     priceMap,
     setPriceMap,
     balance,
@@ -1009,6 +1010,21 @@ const Index = () => {
             const margin = (matchedOrder.quantity * actualFillPrice) / matchedOrder.leverage;
             const positionId = crypto.randomUUID();
             const simulatedTime = getEffectiveTime(activeSymbol);
+            setFilledOrders((prev) => [
+              ...prev.filter((item) => item.id !== matchedOrder.id),
+              {
+                id: matchedOrder.id,
+                symbol: activeSymbol,
+                side: matchedOrder.side,
+                price: actualFillPrice,
+                triggerPrice: fillPrice,
+                quantity: matchedOrder.quantity,
+                leverage: matchedOrder.leverage,
+                createdAt: matchedOrder.createdAt,
+                filledAt: simulatedTime,
+                positionId,
+              },
+            ].slice(-500));
             setBalance((prev) => prev - margin - fee);
             setPositionsMap((prev) => {
               const existing = (prev[activeSymbol] || []).filter((position) => position.quantity > 1e-8);
@@ -1060,7 +1076,7 @@ const Index = () => {
         return { ...prev, [activeSymbol]: remaining };
       });
     }
-  }, [visibleData.length, activeSymbol, recordExecutionTrade, tradingMode, getEffectiveTime]);
+  }, [visibleData.length, activeSymbol, recordExecutionTrade, tradingMode, getEffectiveTime, setFilledOrders]);
 
   // ===== TWAP ENGINE =====
   useEffect(() => {
