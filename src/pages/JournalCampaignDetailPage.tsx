@@ -1116,6 +1116,7 @@ export default function JournalCampaignDetailPage() {
             whatIfRunning={whatIfRunning}
             onRunPureSop={handleRunPureSop}
             onRunWhatIf={handleRunWhatIf}
+            orderInfoPriceLines={showOrderInfo ? orderInfoPriceLines : []}
           />
 
           {pendingCounterfactual && (

@@ -3,6 +3,7 @@ import { Plus, RotateCcw, Trash2, TrendingUp } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { ReplayKlineChart } from '@/components/journal/ReplayKlineChart';
+import { type TimeBoundPriceLine } from '@/components/journal/ReplayCandleChart';
 import { type AnalysisDraggableVerticalLine } from '@/components/CandlestickChart';
 import { intervalToMs, type KlineData } from '@/hooks/useBinanceData';
 import {
@@ -36,6 +37,8 @@ interface Props {
   whatIfRunning: boolean;
   onRunPureSop: () => void;
   onRunWhatIf: (label: string, params: CampaignCounterfactualParams) => void;
+  /** 「委托空单（黄色）」挂单层：与原始战役盘面同一套数据，由父组件按开关传入；空数组即不显示。 */
+  orderInfoPriceLines?: TimeBoundPriceLine[];
 }
 
 const ROLE_OPTIONS: LegRole[] = [
@@ -157,6 +160,7 @@ export function CampaignWhatIfEditor({
   whatIfRunning,
   onRunPureSop,
   onRunWhatIf,
+  orderInfoPriceLines = [],
 }: Props) {
   const actualDefaults = useMemo(() => buildActualSimulationParams(campaign, legs, tradeRecords), [campaign, legs, tradeRecords]);
   const sopDefaults = useMemo(() => buildPureSopParams(campaign, legs, tradeRecords), [campaign, legs, tradeRecords]);
@@ -363,6 +367,7 @@ export function CampaignWhatIfEditor({
               symbol={campaign.symbol}
               fitAll
               showLastPriceLine={false}
+              timeBoundPriceLines={orderInfoPriceLines}
               draggableVerticalLines={verticalLines}
               onDragVerticalLine={handleDragVerticalLine}
               onSelectVerticalLine={handleSelectVerticalLine}
