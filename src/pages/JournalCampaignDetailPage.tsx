@@ -494,13 +494,36 @@ export default function JournalCampaignDetailPage() {
   // 「补齐（紫色）」反事实对照层：可显示/隐藏（默认显示）；showCfLegend 控制标记说明展开。
   const [showCfOverlay, setShowCfOverlay] = useState(true);
   const [showCfLegend, setShowCfLegend] = useState(false);
+  // 「委托空单（黄色）」挂单层：反向委托空单按委托价画成黄色水平线（委托时间 → 撤销时间），可显示/隐藏。
+  const [showOrderInfo, setShowOrderInfo] = useState(true);
+  const orderInfoPriceLines = useMemo<TimeBoundPriceLine[]>(() => {
+    if (!campaign) return [];
+    const fallbackEnd = campaign.closed_at
+      ? new Date(campaign.closed_at).getTime()
+      : (klines.length > 0 ? klines[klines.length - 1].time : 0);
+    return reverseHedgeOrders
+      .filter(order => Number.isFinite(order.price) && order.price > 0)
+      .map(order => ({
+        price: order.price,
+        color: '#F0B90B',
+        startTime: order.createdAt,
+        endTime: order.cancelledAt ?? fallbackEnd,
+        dashed: true,
+        endMarker: order.cancelledAt ? ('x' as const) : null,
+        title: order.side === 'SHORT' ? '委托空' : '委托多',
+      }));
+  }, [campaign, reverseHedgeOrders, klines]);
   const displayMarkers = useMemo(
     () => [...chart.markers, ...(showCfOverlay ? counterfactualChart.markers : [])],
     [chart.markers, counterfactualChart.markers, showCfOverlay],
   );
   const displayPriceLines = useMemo(
-    () => [...chart.timeBoundPriceLines, ...(showCfOverlay ? counterfactualChart.timeBoundPriceLines : [])],
-    [chart.timeBoundPriceLines, counterfactualChart.timeBoundPriceLines, showCfOverlay],
+    () => [
+      ...chart.timeBoundPriceLines,
+      ...(showCfOverlay ? counterfactualChart.timeBoundPriceLines : []),
+      ...(showOrderInfo ? orderInfoPriceLines : []),
+    ],
+    [chart.timeBoundPriceLines, counterfactualChart.timeBoundPriceLines, showCfOverlay, orderInfoPriceLines, showOrderInfo],
   );
   const displayVerticalLines = useMemo(
     () => [...chart.verticalLines, ...(showCfOverlay ? counterfactualChart.verticalLines : []), ...selectedLegVerticalLines],
@@ -982,6 +1005,22 @@ export default function JournalCampaignDetailPage() {
                 />
               )}
             </div>
+            {reverseHedgeOrders.length > 0 && (
+              <div className="mt-2 px-1 flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                <button
+                  type="button"
+                  onClick={() => setShowOrderInfo(v => !v)}
+                  title={showOrderInfo ? '隐藏委托空单（黄色）' : '显示委托空单（黄色）'}
+                  aria-label={showOrderInfo ? '隐藏委托空单' : '显示委托空单'}
+                  className="inline-flex items-center text-[#F0B90B]/60 hover:text-[#F0B90B] transition-colors"
+                >
+                  {showOrderInfo ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
+                </button>
+                <span>
+                  委托空单挂单（<span className="text-[#F0B90B]">黄色水平线</span>，按委托价{showOrderInfo ? '' : '·已隐藏'}）
+                </span>
+              </div>
+            )}
             {selectedCounterfactual && (
               <div className="mt-2 px-1 space-y-1.5">
                 <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
