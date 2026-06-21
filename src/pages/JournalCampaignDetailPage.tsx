@@ -1020,7 +1020,7 @@ export default function JournalCampaignDetailPage() {
                 />
               )}
             </div>
-            {reverseHedgeOrders.length > 0 && (
+            {orderInfoPriceLines.length > 0 && (
               <div className="mt-2 px-1 flex items-center gap-1.5 text-[11px] text-muted-foreground">
                 <button
                   type="button"

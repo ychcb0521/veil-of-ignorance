@@ -1192,7 +1192,7 @@ export default function GuidePage() {
                 打开一次战役，上方是贯穿整段的 K 线回放，下方是 <strong>Legs 列表</strong>。两者共用同一条时间轴，对照着看就能还原整条战役的进出场节奏：
               </P>
               <ul className="list-disc pl-6 text-[14px] text-foreground/90 space-y-1">
-                <li><strong>Legs 列表每条腿都标明开仓时间与平仓时间</strong>（「开 …／平 …」两行）；还没平仓的腿，平仓时间显示「—」。</li>
+                <li><strong>Legs 列表每条腿都标明开仓/平仓时间、开仓价/平仓价、仓位与状态</strong>；还没平仓的腿，平仓时间与平仓价显示「—」。每条腿还单独列出<strong>该腿期间挂的反向对冲空单</strong>（委托价 / 委托时间 / 取消时间）。</li>
                 <li><strong>K 线前后区间自动囊括</strong> Legs 列表里最早的开单与最晚的平单，保证每条腿的进出场都落在可视范围内，不会被裁到屏幕外。</li>
                 <li>时间轴上用<strong>彩色竖线</strong>标注每条腿的开单 / 平单时刻——颜色区分方向、线型区分动作（见下表）。</li>
               </ul>
@@ -1215,6 +1215,38 @@ export default function GuidePage() {
               </div>
               <Highlight>
                 竖线只管"什么方向、什么时候进出"，价格线与三角标记管"在什么价位"。三者叠在同一张图上，整条战役的开、平、对冲、加仓节奏一眼看清。
+              </Highlight>
+
+              <SubTitle>战役详情页：盘面叠加层（可显示/隐藏）</SubTitle>
+              <P>盘面下方有几个<strong>很隐形的小图标</strong>，用来按需开关叠加层，默认显示、可一键隐藏，避免信息互相打架：</P>
+              <ul className="list-disc pl-6 text-[14px] text-foreground/90 space-y-1">
+                <li>
+                  <span style={{ color: '#F0B90B' }}>黄色「委托空单」层</span>（眼睛图标）：把这段战役里<strong>所有与主仓相反方向的委托空单</strong>按价格画成水平线——<strong>虚线 + ×</strong> = 已撤销 / 仍挂单中，<strong>实线</strong> = 已触发成交。原始盘面与反事实编辑器盘面共用同一套数据、同一个开关。
+                </li>
+                <li>
+                  <span style={{ color: '#B080FF' }}>紫色「补齐 / Pure SOP」对照层</span>（眼睛图标）：把所选反事实分支按标准 SOP 推演出的虚拟轨迹叠在真实盘面上；旁边的 <strong>ⓘ</strong> 图标展开标记说明（CF-M 主力、CF-A1~A6 加仓、CF-Ha/CF-Hb 初始对冲、CF-Hr 滚动对冲、CF-TP 镜像止盈、CF-Exit 平仓）。紫色是<strong>虚拟推演、不是真实成交</strong>。
+                </li>
+              </ul>
+              <Highlight>
+                委托空单层只在该战役确实有反向委托时才出现；没有就不显示开关，保持盘面干净。
+              </Highlight>
+
+              <SubTitle>战役详情页：反事实推演与 SOP 偏离代价</SubTitle>
+              <P>
+                战役详情页可以做<strong>「如果当时按标准 SOP 走会怎样」</strong>的反事实推演。点<strong>「一键运行」</strong>用这段战役的真实行情、按标准参数（双向对冲 + 镜像止盈）跑一遍 Pure SOP，结果存成一个分支，叠在盘面上对照。
+              </P>
+              <ul className="list-disc pl-6 text-[14px] text-foreground/90 space-y-1">
+                <li>反事实的主力锚点<strong>以你的真实成交价 / 成交时间为准</strong>，紫色轨迹会精确贴合你实际开仓那根 K 线，对冲 / 止盈再从真实成交价按 SOP 偏移推算。</li>
+                <li>下方「Legs 副本 · 手动反事实」保留可视化编辑（盘面竖线 + 可编辑表格），用于查看与对照。</li>
+              </ul>
+              <P><strong>SOP 偏离代价明细</strong>把「标准 SOP 要求、但你这场缺的每条建仓腿」逐条折算成钱：</P>
+              <ul className="list-disc pl-6 text-[14px] text-foreground/90 space-y-1">
+                <li>每行 = 一条缺失的 SOP 腿（如缺初始对冲 A / B、缺 mirror_tp）。该模板要求主力 + 对冲 A + 对冲 B + mirror_tp 四条建仓腿，缺几条就列几行——和「你下了几个单」无关。</li>
+                <li><strong>代价 (USDT)</strong> 与 <strong>占本场盈亏 %</strong>（以本战役实际总盈亏的绝对值为分母）由引擎自动算出。</li>
+                <li>「违规阶段 / 违规描述 / 修正后」三列<strong>可手动改写</strong>，点「保存备注」存下；存在战役记录上，<strong>互关者也能读到</strong>，但只有本人能改。</li>
+              </ul>
+              <Highlight>
+                这张表是系统对执行最锋利的一刀：总代价很小说明这场偏离基本无害；一旦很大（例如超过账户的 1%），就该把对应违规升级成开仓前 checklist 的强制规则。
               </Highlight>
             </section>
 
