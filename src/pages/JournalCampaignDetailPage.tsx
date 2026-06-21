@@ -494,14 +494,16 @@ export default function JournalCampaignDetailPage() {
   // 「补齐（紫色）」反事实对照层：可显示/隐藏（默认显示）；showCfLegend 控制标记说明展开。
   const [showCfOverlay, setShowCfOverlay] = useState(true);
   const [showCfLegend, setShowCfLegend] = useState(false);
-  // 「委托空单（黄色）」挂单层：反向委托空单按委托价画成黄色水平线（委托时间 → 撤销时间），可显示/隐藏。
+  // 「委托空单（黄色）」挂单层：所有反向委托空单画成黄色水平线——已撤销/挂单中(虚线，撤销处×)、已触发成交(实线)，可显示/隐藏。
   const [showOrderInfo, setShowOrderInfo] = useState(true);
   const orderInfoPriceLines = useMemo<TimeBoundPriceLine[]>(() => {
     if (!campaign) return [];
     const fallbackEnd = campaign.closed_at
       ? new Date(campaign.closed_at).getTime()
       : (klines.length > 0 ? klines[klines.length - 1].time : 0);
-    return reverseHedgeOrders
+    const reverseSide = campaign.direction === 'main_long' ? 'SHORT' : 'LONG';
+    // 已撤销 / 仍挂着的反向委托（来自挂单快照）：黄色虚线，撤销处打 ×。
+    const placedLines: TimeBoundPriceLine[] = reverseHedgeOrders
       .filter(order => Number.isFinite(order.price) && order.price > 0)
       .map(order => ({
         price: order.price,
@@ -512,7 +514,20 @@ export default function JournalCampaignDetailPage() {
         endMarker: order.cancelledAt ? ('x' as const) : null,
         title: order.side === 'SHORT' ? '委托空' : '委托多',
       }));
-  }, [campaign, reverseHedgeOrders, klines]);
+    // 已触发(成交)的反向委托：来自相反方向的成交记录，按成交价画黄色实线(成交 → 平仓)。
+    const triggeredLines: TimeBoundPriceLine[] = tradeRecords
+      .filter(record => record.side === reverseSide && Number.isFinite(record.entryPrice) && record.entryPrice > 0)
+      .map(record => ({
+        price: record.entryPrice,
+        color: '#F0B90B',
+        startTime: record.openTime,
+        endTime: record.closeTime && record.closeTime > record.openTime ? record.closeTime : fallbackEnd,
+        dashed: false,
+        endMarker: null,
+        title: record.side === 'SHORT' ? '触发空' : '触发多',
+      }));
+    return [...placedLines, ...triggeredLines];
+  }, [campaign, reverseHedgeOrders, tradeRecords, klines]);
   const displayMarkers = useMemo(
     () => [...chart.markers, ...(showCfOverlay ? counterfactualChart.markers : [])],
     [chart.markers, counterfactualChart.markers, showCfOverlay],
