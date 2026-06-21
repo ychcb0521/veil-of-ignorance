@@ -914,12 +914,24 @@ export function simulateManualLegScenario(
   };
 }
 
-function inferActualParams(campaign: TradeCampaign, legs: TradeJournal[]): CampaignCounterfactualParams | null {
+function inferActualParams(
+  campaign: TradeCampaign,
+  legs: TradeJournal[],
+  tradeRecords: TradeRecord[] = [],
+): CampaignCounterfactualParams | null {
   const mainLeg = legs.find(leg => leg.leg_role === 'main_open') ?? legs.find(leg => leg.leg_role === 'reentry_main') ?? null;
   if (!mainLeg?.pre_entry_price || !mainLeg.pre_position_size || !mainLeg.leverage) return null;
 
+  // 反事实锚点以「真实成交」为准：主力腿有成交记录时用其成交价 / 成交时间，
+  // 让紫色推演轨迹精确贴合实际开仓那根 K 线；没有成交记录才退回计划值 pre_*。
+  const mainRecord = mainLeg.trade_record_id
+    ? tradeRecords.find(record => record.id === mainLeg.trade_record_id) ?? null
+    : null;
   const entryDirection: Direction = campaign.direction === 'main_short' ? 'short' : 'long';
-  const entryPrice = mainLeg.pre_entry_price;
+  const entryPrice = mainRecord?.entryPrice && mainRecord.entryPrice > 0 ? mainRecord.entryPrice : mainLeg.pre_entry_price;
+  const entryTime = mainRecord?.openTime && mainRecord.openTime > 0
+    ? new Date(mainRecord.openTime).toISOString()
+    : mainLeg.pre_simulated_time;
   const entrySize = mainLeg.pre_position_size;
   const hedgeA = legs.find(leg => leg.leg_role === 'hedge_initial_a') ?? null;
   const hedgeB = legs.find(leg => leg.leg_role === 'hedge_initial_b') ?? null;
@@ -957,7 +969,7 @@ function inferActualParams(campaign: TradeCampaign, legs: TradeJournal[]): Campa
 
   return {
     entry: {
-      time: mainLeg.pre_simulated_time,
+      time: entryTime,
       price: entryPrice,
       size_usdt: entrySize,
       direction: entryDirection,
@@ -998,8 +1010,8 @@ function inferActualParams(campaign: TradeCampaign, legs: TradeJournal[]): Campa
   };
 }
 
-export function buildPureSopParams(campaign: TradeCampaign, legs: TradeJournal[]): CampaignCounterfactualParams | null {
-  const actual = inferActualParams(campaign, legs);
+export function buildPureSopParams(campaign: TradeCampaign, legs: TradeJournal[], tradeRecords: TradeRecord[] = []): CampaignCounterfactualParams | null {
+  const actual = inferActualParams(campaign, legs, tradeRecords);
   if (!actual) return null;
   const isLong = actual.entry.direction === 'long';
   if (campaign.strategy_template === 'main_only') {
@@ -1121,7 +1133,7 @@ export function buildDeviationFixParams(
   sourceDeductionId: string,
 ): { params: CampaignCounterfactualParams; fix_description: string } | null {
   if (campaign.strategy_template === 'custom') return null;
-  const baseParams = inferActualParams(campaign, legs) ?? buildPureSopParams(campaign, legs);
+  const baseParams = inferActualParams(campaign, legs, tradeRecords) ?? buildPureSopParams(campaign, legs, tradeRecords);
   if (!baseParams) return null;
   const sop = computeSopDeviation(campaign, legs, tradeRecords);
   for (let index = 0; index < sop.deductions.length; index += 1) {
@@ -1139,8 +1151,8 @@ export function computeDeviationCosts(
 ): DeviationCost[] {
   if (actualCampaign.campaign.strategy_template === 'custom') return [];
   const template = actualCampaign.campaign.strategy_template as SupportedTemplate;
-  const baseParams = inferActualParams(actualCampaign.campaign, actualCampaign.legs)
-    ?? buildPureSopParams(actualCampaign.campaign, actualCampaign.legs);
+  const baseParams = inferActualParams(actualCampaign.campaign, actualCampaign.legs, actualCampaign.tradeRecords)
+    ?? buildPureSopParams(actualCampaign.campaign, actualCampaign.legs, actualCampaign.tradeRecords);
   if (!baseParams) return [];
   const sop: SopDeviationResult = computeSopDeviation(actualCampaign.campaign, actualCampaign.legs, actualCampaign.tradeRecords);
   const accountSize = actualResult.account_size_usdt ?? actualCampaign.account_size_usdt ?? DEFAULT_ACCOUNT_SIZE;
@@ -1163,6 +1175,6 @@ export function computeDeviationCosts(
   return costs.sort((a, b) => b.cost_usdt - a.cost_usdt);
 }
 
-export function buildActualSimulationParams(campaign: TradeCampaign, legs: TradeJournal[]) {
-  return inferActualParams(campaign, legs);
+export function buildActualSimulationParams(campaign: TradeCampaign, legs: TradeJournal[], tradeRecords: TradeRecord[] = []) {
+  return inferActualParams(campaign, legs, tradeRecords);
 }

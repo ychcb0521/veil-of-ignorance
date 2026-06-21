@@ -2757,8 +2757,8 @@ export async function runAndPersistPureSop(
   campaignId: string,
   klines: KlineData[],
 ): Promise<CampaignCounterfactual> {
-  const { campaign, legs } = await getCampaignFullData(campaignId);
-  const params = buildPureSopParams(campaign, legs);
+  const { campaign, legs, tradeRecords } = await getCampaignFullData(campaignId);
+  const params = buildPureSopParams(campaign, legs, tradeRecords);
   if (!params) throw new Error('无法构建 Pure SOP 参数：缺少主仓战役数据');
   const result = simulateCampaign(
     params,
@@ -2800,7 +2800,7 @@ export async function runAndPersistDeviationCosts(
   const { campaign, legs, tradeRecords } = await getCampaignFullData(campaignId);
   if (campaign.strategy_template === 'custom') return [];
   const { userId, initialCapital } = await getCurrentUserAndCapital();
-  const actualParams = buildActualSimulationParams(campaign, legs);
+  const actualParams = buildActualSimulationParams(campaign, legs, tradeRecords);
   if (!actualParams) return [];
   const actualResult = simulateCampaign(
     actualParams,

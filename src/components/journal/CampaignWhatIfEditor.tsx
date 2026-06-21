@@ -158,8 +158,8 @@ export function CampaignWhatIfEditor({
   onRunPureSop,
   onRunWhatIf,
 }: Props) {
-  const actualDefaults = useMemo(() => buildActualSimulationParams(campaign, legs), [campaign, legs]);
-  const sopDefaults = useMemo(() => buildPureSopParams(campaign, legs), [campaign, legs]);
+  const actualDefaults = useMemo(() => buildActualSimulationParams(campaign, legs, tradeRecords), [campaign, legs, tradeRecords]);
+  const sopDefaults = useMemo(() => buildPureSopParams(campaign, legs, tradeRecords), [campaign, legs, tradeRecords]);
   const baseDefaults = actualDefaults ?? sopDefaults;
   const [params, setParams] = useState<CampaignCounterfactualParams | null>(baseDefaults);
   const [manualLegs, setManualLegs] = useState<CampaignCounterfactualManualLeg[]>([]);
