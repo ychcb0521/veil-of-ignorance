@@ -1,5 +1,5 @@
 import type { KlineData } from '@/hooks/useBinanceData';
-import { MAIN_ADD_ROLES } from '@/lib/strategyTemplates';
+import { MAIN_ADD_ROLES, usesDualHedgeSop } from '@/lib/strategyTemplates';
 import type { CampaignEvent, LegRole, TradeCampaign, TradeJournal } from '@/types/journal';
 import type { PendingOrder, TradeRecord } from '@/types/trading';
 
@@ -196,7 +196,7 @@ export function deriveCampaignStates(
   const closeEvent = events.find(event => event.event_type === 'campaign_closed') ?? null;
   const exitStartMs = exitEvent ? toMs(exitEvent.timestamp) : (closeEvent ? toMs(closeEvent.timestamp) : endMs);
 
-  if (campaign.strategy_template !== 'main_dual_hedge_mirror_tp') {
+  if (!usesDualHedgeSop(campaign.strategy_template)) {
     const out: StateSegment[] = [];
     pushSegment(out, 'state_0_setup', '完整结构', startMs, exitStartMs, null);
     pushSegment(out, 'state_3_exit', '已退场', exitStartMs, closeEvent ? toMs(closeEvent.timestamp) : endMs, exitEvent);
@@ -506,7 +506,7 @@ export function computeSopDeviation(
     }
   }
 
-  if (campaign.strategy_template === 'main_dual_hedge_mirror_tp' && mainSize != null) {
+  if (usesDualHedgeSop(campaign.strategy_template) && mainSize != null) {
     for (const role of ['hedge_initial_a', 'hedge_initial_b'] as const) {
       const leg = liveLegs.find(item => item.leg_role === role) ?? null;
       if (leg && !toleranceEqual(legSize(leg), mainSize * 0.5, 0.05)) {
@@ -533,7 +533,7 @@ export function computeSopDeviation(
   }
 
   const mirrorTriggered = events.find(event => event.event_type === 'mirror_tp_triggered' && (!event.journal_id || !retroactiveLegIds.has(event.journal_id))) ?? null;
-  if (campaign.strategy_template === 'main_dual_hedge_mirror_tp' && mirrorTriggered) {
+  if (usesDualHedgeSop(campaign.strategy_template) && mirrorTriggered) {
     const tpMs = toMs(mirrorTriggered.timestamp);
     const cancelWithinFive = events.filter(event =>
       event.event_type === 'hedge_cancelled' &&
@@ -552,7 +552,7 @@ export function computeSopDeviation(
     }
   }
 
-  if (campaign.strategy_template === 'main_dual_hedge_mirror_tp') {
+  if (usesDualHedgeSop(campaign.strategy_template)) {
     const rollingLegs = liveLegs.filter(leg => leg.leg_role === 'hedge_rolling').sort((a, b) => toMs(a.pre_simulated_time) - toMs(b.pre_simulated_time));
     const orderedHedges = liveLegs
       .filter(leg => leg.leg_role && [...HEDGE_ROLES, 'reentry_hedge'].includes(leg.leg_role))

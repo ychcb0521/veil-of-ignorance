@@ -17,7 +17,7 @@ import { INITIAL_COGNITIVE_ASSETS } from '@/lib/cognitiveAssetsInitialContent';
 import { mirrorDroppedColumns } from '@/lib/journalLocalMirror';
 import { suggestLegRoles as suggestLegRolesHeuristic } from '@/lib/legRoleSuggestion';
 import type { CognitiveAssetsDoc, CognitiveAssetCategory, CognitiveAssetSection } from '@/types/cognitiveAssets';
-import { MAIN_ADD_ROLES } from '@/lib/strategyTemplates';
+import { MAIN_ADD_ROLES, usesDualHedgeSop } from '@/lib/strategyTemplates';
 import type {
   CampaignCounterfactual,
   CampaignCounterfactualBranchKind,
@@ -2085,11 +2085,11 @@ export async function validateClassification(
   if (occupied.length > 0) errors.push('存在已归属到战役的 journal，请先解除归属');
 
   if (
-    input.strategyTemplate === 'main_dual_hedge_mirror_tp' &&
+    usesDualHedgeSop(input.strategyTemplate) &&
     !input.targetCampaignId &&
     !selected.some(item => item.legRole === 'main_open')
   ) {
-    errors.push('main_dual_hedge_mirror_tp 模板必须包含 main_open 角色');
+    errors.push('双对冲/滚仓模板必须包含 main_open 角色');
   }
 
   for (const item of selected) {
@@ -2145,10 +2145,10 @@ export async function validateClassification(
   }
 
   if (
-    input.strategyTemplate === 'main_dual_hedge_mirror_tp' &&
+    usesDualHedgeSop(input.strategyTemplate) &&
     (!combined.some(leg => leg.leg_role === 'hedge_initial_a') || !combined.some(leg => leg.leg_role === 'hedge_initial_b'))
   ) {
-    warnings.push('main_dual_hedge_mirror_tp 模板缺少 hedge_initial_a 或 hedge_initial_b');
+    warnings.push('双对冲/滚仓模板缺少 hedge_initial_a 或 hedge_initial_b');
   }
 
   if (combined.length > 1) {
@@ -2868,7 +2868,7 @@ export async function runAndPersistDeviationCosts(
   const actualResult = simulateCampaign(
     actualParams,
     klines,
-    campaign.strategy_template as 'main_dual_hedge_mirror_tp' | 'main_only',
+    counterfactualTemplateFor(campaign),
   );
   const costs = computeDeviationCosts(
     {
@@ -2907,7 +2907,7 @@ export async function runAndPersistDeviationCosts(
     const fixResult = simulateCampaign(
       fixBranch.params,
       klines,
-      campaign.strategy_template as 'main_dual_hedge_mirror_tp' | 'main_only',
+      counterfactualTemplateFor(campaign),
     );
     await createCounterfactual({
       campaign_id: campaignId,

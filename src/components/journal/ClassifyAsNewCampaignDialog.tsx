@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
-import { getAssignableLegRoles, LEG_ROLE_LABELS, MAIN_ADD_ROLES, STRATEGY_TEMPLATES } from '@/lib/strategyTemplates';
+import { getAssignableLegRoles, LEG_ROLE_LABELS, MAIN_ADD_ROLES, STRATEGY_TEMPLATES, SELECTABLE_STRATEGY_TEMPLATES, usesDualHedgeSop } from '@/lib/strategyTemplates';
 import {
   appendCampaignEvent,
   batchAttachToCampaign,
@@ -155,8 +155,8 @@ function buildMixedValidation(
   const assigned = ordered.filter(item => roleMap[item.id]).map(item => ({ item, role: roleMap[item.id] as LegRole }));
   const symbols = new Set(ordered.map(itemSymbol));
   if (symbols.size > 1) errors.push('选中项跨多个 symbol');
-  if (strategyTemplate === 'main_dual_hedge_mirror_tp' && !assigned.some(item => item.role === 'main_open')) {
-    errors.push('main_dual_hedge_mirror_tp 模板必须包含 main_open 角色');
+  if (usesDualHedgeSop(strategyTemplate) && !assigned.some(item => item.role === 'main_open')) {
+    errors.push('双对冲/滚仓模板必须包含 main_open 角色');
   }
   if (assigned.length > 1) {
     const spanMs = itemTimeMs(assigned[assigned.length - 1].item) - itemTimeMs(assigned[0].item);
@@ -165,10 +165,10 @@ function buildMixedValidation(
     }
   }
   if (
-    strategyTemplate === 'main_dual_hedge_mirror_tp' &&
+    usesDualHedgeSop(strategyTemplate) &&
     (!assigned.some(item => item.role === 'hedge_initial_a') || !assigned.some(item => item.role === 'hedge_initial_b'))
   ) {
-    warnings.push('main_dual_hedge_mirror_tp 模板缺少 hedge_initial_a 或 hedge_initial_b');
+    warnings.push('双对冲/滚仓模板缺少 hedge_initial_a 或 hedge_initial_b');
   }
   return { ok: errors.length === 0, errors, warnings };
 }
@@ -284,8 +284,8 @@ export function ClassifyAsNewCampaignDialog({ open, onOpenChange, items, onCreat
                 onChange={(e: ChangeEvent<HTMLSelectElement>) => setStrategyTemplate(e.target.value as StrategyTemplate)}
                 className="h-10 w-full rounded border border-border bg-background px-3 text-[12px]"
               >
-                {Object.entries(STRATEGY_TEMPLATES).map(([value, meta]) => (
-                  <option key={value} value={value}>{meta.name}</option>
+                {SELECTABLE_STRATEGY_TEMPLATES.map(value => (
+                  <option key={value} value={value}>{STRATEGY_TEMPLATES[value].name}</option>
                 ))}
               </select>
             </div>

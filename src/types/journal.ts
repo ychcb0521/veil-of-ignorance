@@ -284,7 +284,7 @@ export type CampaignStatus =
   | 'closed_loss'
   | 'closed_breakeven'
   | 'abandoned';
-export type StrategyTemplate = 'main_dual_hedge_mirror_tp' | 'main_only' | 'custom';
+export type StrategyTemplate = 'main_dual_hedge_mirror_tp' | 'rolling' | 'main_only' | 'custom';
 export type LegRole =
   | 'main_open'
   | 'main_add_1'

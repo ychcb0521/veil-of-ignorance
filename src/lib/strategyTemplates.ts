@@ -34,6 +34,17 @@ export const STRATEGY_TEMPLATES: Record<StrategyTemplate, StrategyTemplateMeta> 
     ],
     rolling_roles: ['main_add_1', 'main_add_2', 'main_add_3', 'hedge_rolling', 'reentry_main', 'reentry_hedge'],
   },
+  rolling: {
+    name: '滚仓',
+    description: '与「主仓 + 双对冲 + 镜像止盈」同一套 SOP：开主力单时挂 2 个 50% 对冲 + 1 个 50% 镜像止盈，按滚动规则推进。',
+    expected_legs: [
+      { role: 'main_open', label: '主力开仓', required: true },
+      { role: 'hedge_initial_a', label: '初始对冲 A（50% 仓位）', required: true },
+      { role: 'hedge_initial_b', label: '初始对冲 B（50% 仓位）', required: true },
+      { role: 'mirror_tp', label: '镜像止盈委托（50% 仓位）', required: true },
+    ],
+    rolling_roles: ['main_add_1', 'main_add_2', 'main_add_3', 'hedge_rolling', 'reentry_main', 'reentry_hedge'],
+  },
   main_only: {
     name: '纯主仓',
     description: '只有主力单，无对冲、无镜像止盈。',
@@ -41,12 +52,24 @@ export const STRATEGY_TEMPLATES: Record<StrategyTemplate, StrategyTemplateMeta> 
     rolling_roles: ['main_add_1', 'main_add_2', 'main_add_3', 'main_add_4', 'main_add_5', 'main_add_6'],
   },
   custom: {
-    name: '自定义',
+    name: '其他',
     description: '不预设结构，每条 leg 由用户手动归类。',
     expected_legs: [],
     rolling_roles: [],
   },
 };
+
+/** 新建战役时可选的策略模板（隐藏 main_only：仅保留给历史数据渲染，不再新建）。 */
+export const SELECTABLE_STRATEGY_TEMPLATES: StrategyTemplate[] = [
+  'main_dual_hedge_mirror_tp',
+  'rolling',
+  'custom',
+];
+
+/** 「滚仓」与「主仓 + 双对冲 + 镜像止盈」共用同一套 SOP / 评分 / Pure SOP 推演。 */
+export function usesDualHedgeSop(template: StrategyTemplate): boolean {
+  return template === 'main_dual_hedge_mirror_tp' || template === 'rolling';
+}
 
 export const LEG_ROLE_LABELS: Record<LegRole, string> = {
   main_open: '主力开仓',
