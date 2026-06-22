@@ -115,9 +115,11 @@ function oppositeDirection(direction: Direction): Direction {
   return direction === 'long' ? 'short' : 'long';
 }
 
-function pnlForClose(direction: Direction, entryPrice: number, exitPrice: number, sizeUsdt: number, leverage: number) {
+function pnlForClose(direction: Direction, entryPrice: number, exitPrice: number, sizeUsdt: number, _leverage: number) {
   const sign = direction === 'long' ? 1 : -1;
-  return ((exitPrice - entryPrice) * sign * sizeUsdt / entryPrice) * leverage;
+  // sizeUsdt 是「名义仓位」(entryPrice×quantity)。绝对盈亏(USDT) = 价格变动比例 × 名义仓位；
+  // 杠杆只决定所需保证金与 ROE，不放大绝对盈亏，故不乘 leverage（与实盘引擎 calcUnrealizedPnl 同一口径）。
+  return (exitPrice - entryPrice) * sign * sizeUsdt / entryPrice;
 }
 
 function unrealizedForPosition(position: ActivePosition, markPrice: number) {
