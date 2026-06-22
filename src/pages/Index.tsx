@@ -441,7 +441,27 @@ const Index = () => {
       // === REGULAR CONDITIONAL OPEN PATH ===
       const fee = calcFee(entryPrice, order.quantity, false);
       const margin = (order.quantity * entryPrice) / order.leverage;
+      const positionId = crypto.randomUUID();
 
+      setFilledOrders((prev) => [
+        ...prev.filter((item) => item.id !== order.id),
+        {
+          id: order.id,
+          symbol,
+          side: order.side,
+          type: order.type,
+          reduceOnly: order.reduceOnly ?? false,
+          reduceKind: order.reduceKind ?? null,
+          linkedPositionId: order.linkedPositionId ?? null,
+          price: entryPrice,
+          triggerPrice,
+          quantity: order.quantity,
+          leverage: order.leverage,
+          createdAt: order.createdAt,
+          filledAt: openTime,
+          positionId,
+        },
+      ].slice(-500));
       setBalance((prev) => prev - margin - fee);
       setPositionsMap((prev) => {
         const existing = (prev[symbol] || []).filter((position) => position.quantity > 1e-8);
@@ -450,7 +470,7 @@ const Index = () => {
           [symbol]: [
             ...existing,
             {
-              id: crypto.randomUUID(),
+              id: positionId,
               side: order.side,
               entryPrice,
               quantity: order.quantity,
@@ -465,7 +485,7 @@ const Index = () => {
       });
       toast.success(`条件单已触发：${symbol} ${order.side} @ ${entryPrice.toFixed(2)}`);
     },
-    [setBalance, setPositionsMap, setOrdersMap, setTradeHistory],
+    [setBalance, setPositionsMap, setOrdersMap, setTradeHistory, setFilledOrders],
   );
 
   const runConditionalMatchingForSymbol = useCallback(
@@ -1016,6 +1036,10 @@ const Index = () => {
                 id: matchedOrder.id,
                 symbol: activeSymbol,
                 side: matchedOrder.side,
+                type: matchedOrder.type,
+                reduceOnly: matchedOrder.reduceOnly ?? false,
+                reduceKind: matchedOrder.reduceKind ?? null,
+                linkedPositionId: matchedOrder.linkedPositionId ?? null,
                 price: actualFillPrice,
                 triggerPrice: fillPrice,
                 quantity: matchedOrder.quantity,

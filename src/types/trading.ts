@@ -76,6 +76,12 @@ export interface CancelledOrderSnapshot {
   id: string;
   symbol: string;
   side: OrderSide;
+  /** Original order type, kept so campaign yellow layers can exclude TP/SL close orders. */
+  type?: OrderType;
+  /** True for reduce-only TP/SL close orders; yellow campaign layers only use opening orders. */
+  reduceOnly?: boolean;
+  reduceKind?: "TP" | "SL" | null;
+  linkedPositionId?: string | null;
   price: number;
   quantity: number;
   leverage: number;
@@ -94,6 +100,12 @@ export interface FilledOrderSnapshot {
   id: string;
   symbol: string;
   side: OrderSide;
+  /** Original order type, kept so campaign yellow layers can exclude TP/SL close orders. */
+  type?: OrderType;
+  /** True for reduce-only TP/SL close orders; yellow campaign layers only use opening orders. */
+  reduceOnly?: boolean;
+  reduceKind?: "TP" | "SL" | null;
+  linkedPositionId?: string | null;
   /** Actual fill price after slippage/maker handling. */
   price: number;
   /** Raw trigger price from the k-line condition before slippage. */

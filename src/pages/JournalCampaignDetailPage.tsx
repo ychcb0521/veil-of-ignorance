@@ -494,19 +494,18 @@ export default function JournalCampaignDetailPage() {
   // 「补齐（紫色）」反事实对照层：可显示/隐藏（默认显示）；showCfLegend 控制标记说明展开。
   const [showCfOverlay, setShowCfOverlay] = useState(true);
   const [showCfLegend, setShowCfLegend] = useState(false);
-  // 「委托空单（黄色）」挂单层：所有反向委托空单画成黄色水平线——已撤销/挂单中(虚线，撤销处×)、已触发成交(实线)，可显示/隐藏。
+  // 「委托空单（黄色）」挂单层：只画开仓性质的 SHORT 委托；止盈/止损平仓委托不进入这里。
   const [showOrderInfo, setShowOrderInfo] = useState(true);
   const orderInfoPriceLines = useMemo<TimeBoundPriceLine[]>(() => {
     if (!campaign) return [];
     const fallbackEnd = campaign.closed_at
       ? new Date(campaign.closed_at).getTime()
       : (klines.length > 0 ? klines[klines.length - 1].time : 0);
-    // 所有反向委托空单（reverseHedgeOrders 三态）统一画黄色水平线：
+    // 三态统一画黄色水平线：
     // 已撤销/挂单中 = 虚线（撤销处 ×）；已触发成交 = 委托→触发虚线 + 触发→平仓实线。
     return reverseHedgeOrders
-      .filter(order => Number.isFinite(order.price) && order.price > 0)
+      .filter(order => order.side === 'SHORT' && Number.isFinite(order.price) && order.price > 0)
       .flatMap(order => {
-        const sideLabel = order.side === 'SHORT' ? '空' : '多';
         if (order.status === 'triggered') {
           const triggeredAt = order.triggeredAt ?? order.createdAt;
           const endTime = order.cancelledAt ?? fallbackEnd;
@@ -519,7 +518,7 @@ export default function JournalCampaignDetailPage() {
               endTime: triggeredAt,
               dashed: true,
               endMarker: null,
-              title: `委托${sideLabel}`,
+              title: '委托空',
             });
           }
           segments.push({
@@ -529,7 +528,7 @@ export default function JournalCampaignDetailPage() {
             endTime,
             dashed: false,
             endMarker: null,
-            title: `触发${sideLabel}`,
+            title: '触发空',
           });
           return segments;
         }
@@ -540,7 +539,7 @@ export default function JournalCampaignDetailPage() {
           endTime: order.cancelledAt ?? fallbackEnd,
           dashed: true,
           endMarker: order.status === 'cancelled' && order.cancelledAt ? ('x' as const) : null,
-          title: `委托${sideLabel}`,
+          title: '委托空',
         };
       });
   }, [campaign, reverseHedgeOrders, klines]);

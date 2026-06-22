@@ -1637,8 +1637,17 @@ export async function getCampaignFullData(
     .flatMap(([symbol, orders]) => symbol === campaign.symbol ? orders : [])
     .filter(order => order.status === 'NEW' || order.status === 'PENDING' || order.status === 'ACTIVE');
 
-  // 反向对冲挂单：与主仓方向相反的、在战役期间委托的限价单（含已撤销 + 仍挂着）。
-  const reverseSide = campaign.direction === 'main_long' ? 'SHORT' : 'LONG';
+  // 黄色委托层只记录「开仓性质的委托空单」；止盈/止损等 reduce-only 平仓委托不进入这里。
+  const isOpeningShortOrder = (order: Pick<PendingOrder | CancelledOrderSnapshot | FilledOrderSnapshot, 'side'> & {
+    type?: PendingOrder['type'];
+    reduceOnly?: boolean;
+    reduceKind?: 'TP' | 'SL' | null;
+  }) =>
+    order.side === 'SHORT' &&
+    !order.reduceOnly &&
+    order.reduceKind == null &&
+    order.type !== 'LIMIT_TP_SL' &&
+    order.type !== 'MARKET_TP_SL';
   // 主力开仓「前 1 分钟内」挂的反向委托也算进本战役（提前布的对冲），所以窗口起点回退 60 秒。
   const PRE_MAIN_LOOKBACK_MS = 60_000;
   const inWindow = (t: number) => Number.isFinite(t) && t >= openedAtMs - PRE_MAIN_LOOKBACK_MS && t <= closedAtMs;
@@ -1665,7 +1674,7 @@ export async function getCampaignFullData(
   const triggeredReverseOrders = filledOrders
     .filter(order =>
       order.symbol === campaign.symbol &&
-      order.side === reverseSide &&
+      isOpeningShortOrder(order) &&
       (inWindow(order.createdAt) || inWindow(order.filledAt))
     )
     .map(order => {
@@ -1683,7 +1692,7 @@ export async function getCampaignFullData(
     });
   const reverseHedgeOrders: CampaignReverseHedgeOrder[] = [
     ...cancelledOrders
-      .filter(order => order.symbol === campaign.symbol && order.side === reverseSide && inWindow(order.createdAt))
+      .filter(order => order.symbol === campaign.symbol && isOpeningShortOrder(order) && inWindow(order.createdAt))
       .map(order => ({
         id: order.id,
         tradeRecordId: null,
@@ -1695,7 +1704,7 @@ export async function getCampaignFullData(
         status: 'cancelled' as const,
       })),
     ...pendingOrders
-      .filter(order => order.side === reverseSide && inWindow(order.createdAt))
+      .filter(order => isOpeningShortOrder(order) && inWindow(order.createdAt))
       .map(order => ({
         id: order.id,
         tradeRecordId: null,
@@ -1711,7 +1720,7 @@ export async function getCampaignFullData(
     // 旧数据兜底：没有触发快照时，只能从成交记录开始画实线。
     ...tradeRecords
       .filter(record =>
-        record.side === reverseSide
+        record.side === 'SHORT'
         && !matchedTriggeredRecordIds.has(record.id)
         && Number.isFinite(record.entryPrice) && record.entryPrice > 0
         && (inWindow(record.openTime) || inWindow(record.closeTime)),
