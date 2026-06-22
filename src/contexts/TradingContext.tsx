@@ -40,6 +40,7 @@ import { resolveConditionalTriggerPrice, shouldRejectImmediateConditionalPlaceme
 import {
   createDefaultExecutionAssetState,
   recordExecutionTrade as applyExecutionTradeReward,
+  recordCampaignCreated as applyCampaignReward,
   settleNoTradePenalties,
   type ExecutionAssetState,
   type ExecutionTradeSnapshot,
@@ -133,6 +134,8 @@ interface TradingState {
   executionAsset: ExecutionAssetState;
   setExecutionAsset: (v: ExecutionAssetState | ((prev: ExecutionAssetState) => ExecutionAssetState)) => void;
   recordExecutionTrade: (modeOverride?: TradingMode, trade?: ExecutionTradeSnapshot | null) => void;
+  /** 每创建一次交易战役调用一次，执行力资产 +1500 分。 */
+  recordCampaignCreated: () => void;
   coinTimelines: CoinTimelinesMap;
   setCoinTimelines: (v: CoinTimelinesMap | ((prev: CoinTimelinesMap) => CoinTimelinesMap)) => void;
   totalPositionCount: number;
@@ -341,6 +344,11 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
   const recordExecutionTrade = useCallback((modeOverride?: TradingMode, trade?: ExecutionTradeSnapshot | null) => {
     const mode = modeOverride ?? tradingModeRef.current;
     setExecutionAsset(prev => applyExecutionTradeReward(prev, mode, new Date(), trade));
+  }, [setExecutionAsset]);
+
+  // 每建一次交易战役 +1500 分（执行力资产新增类目）。
+  const recordCampaignCreated = useCallback(() => {
+    setExecutionAsset(prev => applyCampaignReward(prev, new Date()));
   }, [setExecutionAsset]);
 
   // Total position count across all symbols
@@ -1217,7 +1225,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
     liquidationOpen, liquidationDetails, closeLiquidationModal,
     timeMode, setTimeMode,
     tradingMode, setTradingMode,
-    executionAsset, setExecutionAsset, recordExecutionTrade,
+    executionAsset, setExecutionAsset, recordExecutionTrade, recordCampaignCreated,
     coinTimelines, setCoinTimelines,
     totalPositionCount,
     getEffectiveTime,

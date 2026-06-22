@@ -6,6 +6,7 @@ import {
   ChevronDown,
   ChevronRight,
   Clock,
+  Flag,
   Gauge,
   LineChart,
   ListChecks,
@@ -21,6 +22,7 @@ import {
   EXECUTION_DECISION_REWARD,
   EXECUTION_DIRECT_REWARD,
   EXECUTION_NO_TRADE_PENALTY,
+  EXECUTION_CAMPAIGN_REWARD,
   executionTradeCount,
   localDateKey,
   type ExecutionAssetEvent,
@@ -34,7 +36,7 @@ import { formatUTC8 } from '@/lib/timeFormat';
 import { cn } from '@/lib/utils';
 import type { TradeRecord } from '@/types/trading';
 
-type DetailPanelKey = 'decision' | 'direct' | 'penalty' | 'share';
+type DetailPanelKey = 'decision' | 'direct' | 'penalty' | 'campaign' | 'share';
 
 function formatSigned(points: number) {
   return `${points >= 0 ? '+' : ''}${points.toLocaleString()}`;
@@ -43,6 +45,7 @@ function formatSigned(points: number) {
 function eventTone(type: string) {
   if (type === 'decision_reward') return 'text-[#0ECB81] border-[#0ECB81]/25 bg-[#0ECB81]/5';
   if (type === 'direct_reward') return 'text-[#F0B90B] border-[#F0B90B]/25 bg-[#F0B90B]/5';
+  if (type === 'campaign_reward') return 'text-[#5BA3FF] border-[#5BA3FF]/25 bg-[#5BA3FF]/5';
   return 'text-[#F6465D] border-[#F6465D]/25 bg-[#F6465D]/5';
 }
 
@@ -178,6 +181,11 @@ const PANEL_COPY: Record<DetailPanelKey, { title: string; subtitle: string; empt
     subtitle: '自然日没有计分做多开仓时，系统记录一次 -500。',
     empty: '暂无未交易扣分日。',
   },
+  campaign: {
+    title: '创建交易战役明细',
+    subtitle: '每创建一次交易战役 +1500。',
+    empty: '暂无创建的交易战役。',
+  },
   share: {
     title: '决策记录占比明细',
     subtitle: '这里合并展示所有计分交易，用来观察可复盘样本占比。',
@@ -248,6 +256,7 @@ function EventDetailCard({
 }) {
   const trade = event.trade;
   const isPenalty = event.type === 'no_trade_penalty';
+  const isCampaign = event.type === 'campaign_reward';
   const canOpen = Boolean(trade) && matched != null;
 
   return (
@@ -340,6 +349,10 @@ function EventDetailCard({
         <div className="mt-4 rounded-lg border border-[#F6465D]/20 bg-[#F6465D]/5 px-3 py-2 text-[12px] text-muted-foreground">
           当日没有计分做多开仓，系统按自然日扣分。扣分日期：<span className="font-mono text-foreground">{event.date}</span>
         </div>
+      ) : isCampaign ? (
+        <div className="mt-4 rounded-lg border border-[#5BA3FF]/20 bg-[#5BA3FF]/5 px-3 py-2 text-[12px] text-muted-foreground">
+          创建一次交易战役 +{EXECUTION_CAMPAIGN_REWARD}。奖励日期：<span className="font-mono text-foreground">{event.date}</span>
+        </div>
       ) : (
         <div className="mt-4 rounded-lg border border-dashed border-border/70 px-3 py-2 text-[12px] text-muted-foreground">
           这条早期流水只保留了日期、类型与积分；之后产生的交易会自动记录完整单据信息。
@@ -411,6 +424,7 @@ export default function ExecutionAssetsPage() {
       decision,
       direct,
       penalty: events.filter(event => event.type === 'no_trade_penalty'),
+      campaign: events.filter(event => event.type === 'campaign_reward'),
       share: events.filter(event => event.type === 'decision_reward' || event.type === 'direct_reward'),
     };
   }, [executionAsset.events]);
@@ -472,7 +486,7 @@ export default function ExecutionAssetsPage() {
             </div>
           </div>
 
-          <div className="grid gap-3 p-5 md:grid-cols-4">
+          <div className="grid gap-3 p-5 sm:grid-cols-2 lg:grid-cols-5">
             <StatCard
               active={openPanel === 'decision'}
               icon={<Trophy className="h-4 w-4" />}
@@ -501,6 +515,15 @@ export default function ExecutionAssetsPage() {
               onClick={() => togglePanel('penalty')}
             />
             <StatCard
+              active={openPanel === 'campaign'}
+              icon={<Flag className="h-4 w-4" />}
+              value={String(executionAsset.campaignCount)}
+              label="建战役"
+              tone="text-[#5BA3FF]"
+              detail={<span className="font-mono text-[#5BA3FF]">每次 +{EXECUTION_CAMPAIGN_REWARD}</span>}
+              onClick={() => togglePanel('campaign')}
+            />
+            <StatCard
               active={openPanel === 'share'}
               icon={<ListChecks className="h-4 w-4" />}
               value={`${decisionShare.toFixed(0)}%`}
@@ -527,7 +550,7 @@ export default function ExecutionAssetsPage() {
             <h2 className="text-[13px] font-semibold">积分规则</h2>
             <p className="mt-1 text-[11px] text-muted-foreground">只记做多开仓；做空都是辅助对冲单，不计分。挂单在真正成交时才计分。</p>
           </div>
-          <div className="grid gap-3 p-5 md:grid-cols-3">
+          <div className="grid gap-3 p-5 sm:grid-cols-2 lg:grid-cols-4">
             <div className="rounded-xl border border-[#0ECB81]/25 bg-[#0ECB81]/5 px-4 py-3">
               <div className="text-[12px] font-medium">决策记录模块交易</div>
               <div className="mt-2 font-mono text-2xl text-[#0ECB81]">+999</div>
@@ -539,6 +562,10 @@ export default function ExecutionAssetsPage() {
             <div className="rounded-xl border border-[#F6465D]/25 bg-[#F6465D]/5 px-4 py-3">
               <div className="text-[12px] font-medium">自然日未交易</div>
               <div className="mt-2 font-mono text-2xl text-[#F6465D]">-500</div>
+            </div>
+            <div className="rounded-xl border border-[#5BA3FF]/25 bg-[#5BA3FF]/5 px-4 py-3">
+              <div className="text-[12px] font-medium">创建交易战役</div>
+              <div className="mt-2 font-mono text-2xl text-[#5BA3FF]">+1500</div>
             </div>
           </div>
         </section>

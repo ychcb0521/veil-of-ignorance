@@ -1,10 +1,11 @@
 export const EXECUTION_DECISION_REWARD = 999;
 export const EXECUTION_DIRECT_REWARD = 99;
 export const EXECUTION_NO_TRADE_PENALTY = 500;
+export const EXECUTION_CAMPAIGN_REWARD = 1500;
 
 export type ExecutionTradingMode = 'decision' | 'direct';
 
-export type ExecutionAssetEventType = 'decision_reward' | 'direct_reward' | 'no_trade_penalty';
+export type ExecutionAssetEventType = 'decision_reward' | 'direct_reward' | 'no_trade_penalty' | 'campaign_reward';
 
 export interface ExecutionTradeSnapshot {
   symbol: string;
@@ -34,6 +35,7 @@ export interface ExecutionAssetState {
   points: number;
   decisionTradeCount: number;
   directTradeCount: number;
+  campaignCount: number;
   penaltyDays: number;
   tradedDates: Record<string, true>;
   lastDailyCheckDate: string | null;
@@ -45,6 +47,7 @@ export function createDefaultExecutionAssetState(today: Date = new Date()): Exec
     points: 0,
     decisionTradeCount: 0,
     directTradeCount: 0,
+    campaignCount: 0,
     penaltyDays: 0,
     tradedDates: {},
     lastDailyCheckDate: localDateKey(today),
@@ -89,6 +92,7 @@ function normalizeState(state: ExecutionAssetState | null | undefined, today: Da
     points: Number.isFinite(base.points) ? base.points : 0,
     decisionTradeCount: Number.isFinite(base.decisionTradeCount) ? base.decisionTradeCount : 0,
     directTradeCount: Number.isFinite(base.directTradeCount) ? base.directTradeCount : 0,
+    campaignCount: Number.isFinite(base.campaignCount) ? base.campaignCount : 0,
     penaltyDays: Number.isFinite(base.penaltyDays) ? base.penaltyDays : 0,
     tradedDates: base.tradedDates ?? {},
     lastDailyCheckDate: base.lastDailyCheckDate ?? localDateKey(today),
@@ -161,6 +165,32 @@ export function recordExecutionTrade(
     tradedDates: { ...settled.tradedDates, [date]: true },
     lastDailyCheckDate: date,
     events: pushEvent(settled, event),
+  };
+}
+
+/**
+ * 每创建一次交易战役 +EXECUTION_CAMPAIGN_REWARD 分。只加分、记一笔 campaign_reward 事件，
+ * 不触碰每日「未交易扣分」逻辑（建战役不算当日交易，其余规则不变）。
+ */
+export function recordCampaignCreated(
+  rawState: ExecutionAssetState,
+  today: Date = new Date(),
+): ExecutionAssetState {
+  const state = normalizeState(rawState, today);
+  const date = localDateKey(today);
+  const event: ExecutionAssetEvent = {
+    id: eventId('campaign_reward', date),
+    type: 'campaign_reward',
+    points: EXECUTION_CAMPAIGN_REWARD,
+    date,
+    createdAt: today.getTime(),
+    label: '创建交易战役奖励',
+  };
+  return {
+    ...state,
+    points: state.points + EXECUTION_CAMPAIGN_REWARD,
+    campaignCount: state.campaignCount + 1,
+    events: pushEvent(state, event),
   };
 }
 

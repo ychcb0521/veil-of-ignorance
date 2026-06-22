@@ -73,7 +73,7 @@ function exitMethodLabel(record: TradeRecord | null) {
 export default function JournalCampaignClassifyPage() {
   const nav = useNavigate();
   const { user } = useAuth();
-  const { tradeHistory } = useTradingContext();
+  const { tradeHistory, recordCampaignCreated } = useTradingContext();
   const isMobile = useIsMobile();
   const [loading, setLoading] = useState(true);
   const [symbol, setSymbol] = useState('');
@@ -613,6 +613,7 @@ export default function JournalCampaignClassifyPage() {
         onOpenChange={setNewDialogOpen}
         items={selectedItems}
         onCreated={async (campaignId) => {
+          recordCampaignCreated();
           setSelectedIds(new Set());
           await loadData();
           nav(`/journal/campaigns/${campaignId}`);
