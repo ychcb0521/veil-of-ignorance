@@ -35,15 +35,18 @@ import {
   listCampaignComments,
   listCounterfactuals,
   runAndPersistCustomCounterfactual,
-  runAndPersistDeviationCosts,
-  runAndPersistPureSop,
 } from '@/lib/journalApi';
 import { STRATEGY_TEMPLATES } from '@/lib/strategyTemplates';
+import {
+  buildActualSimulationParams,
+  buildManualLegs,
+  computeManualLegDeviationCosts,
+  type ManualLegDeviationCost,
+} from '@/lib/campaignSimulationEngine';
 import type {
   CampaignCounterfactual,
   CampaignCounterfactualParams,
   CampaignComment,
-  DeviationCost,
   TradeCampaign,
   TradeJournal,
 } from '@/types/journal';
@@ -367,12 +370,8 @@ export default function JournalCampaignDetailPage() {
   const [counterfactuals, setCounterfactuals] = useState<CampaignCounterfactual[]>([]);
   const [selectedCounterfactualId, setSelectedCounterfactualId] = useState<string | null>(null);
   const [pendingCounterfactualId, setPendingCounterfactualId] = useState<string | null>(null);
-  const [pureRunning, setPureRunning] = useState(false);
   const [whatIfRunning, setWhatIfRunning] = useState(false);
-  const [deviationCosts, setDeviationCosts] = useState<DeviationCost[]>([]);
-  const [deviationLoading, setDeviationLoading] = useState(false);
-  const [deviationHydrated, setDeviationHydrated] = useState(false);
-  // 用户对偏离行三列文字的手改覆盖（按行键），来自本地持久化；保存后下次打开仍在。
+  // 用户对偏离行三列文字的手改覆盖（按行键 = legId），来自本地持久化；保存后下次打开仍在。
   const [deviationNotes, setDeviationNotes] = useState<Record<string, CampaignDeviationNote>>({});
   const [deviationNotesSaving, setDeviationNotesSaving] = useState(false);
   const [detachTarget, setDetachTarget] = useState<TradeJournal | null>(null);
@@ -563,10 +562,19 @@ export default function JournalCampaignDetailPage() {
     () => (campaign ? shouldSuggestCampaignEnd(campaign, legs, tradeRecords, pendingOrders, getEffectiveTime(campaign.symbol)) : false),
     [campaign, legs, tradeRecords, pendingOrders, getEffectiveTime],
   );
-  const hasPureSopBranch = useMemo(
-    () => counterfactuals.some(branch => branch.branch_kind === 'pure_sop'),
-    [counterfactuals],
-  );
+  // 偏离代价（手动调整 vs 原始）：取当前选中「手动运行」分支的 manual_legs，与原始基线 legs 逐腿对比。
+  // 合计 = 手动调整总盈亏 − 原始实盘总盈亏 = 原始错误的总代价。
+  const deviationLegCosts = useMemo<ManualLegDeviationCost[]>(() => {
+    if (!campaign || !selectedCounterfactual) return [];
+    const adjustedLegs = selectedCounterfactual.params?.manual_legs ?? [];
+    if (adjustedLegs.length === 0) return [];
+    const actualParams = buildActualSimulationParams(campaign, legs, tradeRecords);
+    if (!actualParams) return [];
+    const originalLegs = buildManualLegs(actualParams, legs, klines, tradeRecords);
+    return computeManualLegDeviationCosts(originalLegs, adjustedLegs);
+  }, [campaign, selectedCounterfactual, legs, tradeRecords, klines]);
+  // 门槛：选中分支是「手动运行」分支（带 manual_legs）才展示偏离明细。
+  const hasManualRunBranch = (selectedCounterfactual?.params?.manual_legs ?? []).length > 0;
   // 已保存分支列表里隐藏自动生成的「修正分支」(补齐 X)，只保留 Pure SOP 与自定义 What-if。
   const visibleBranches = useMemo(
     () => counterfactuals.filter(branch => branch.branch_kind !== 'fix_one_deviation'),
@@ -576,29 +584,6 @@ export default function JournalCampaignDetailPage() {
     () => legs.filter(leg => leg.source === 'retroactive_from_record').length,
     [legs],
   );
-
-  useEffect(() => {
-    if (!campaign || campaign.strategy_template === 'custom') return;
-    if (!hasPureSopBranch || deviationHydrated || klines.length === 0) return;
-    let cancelled = false;
-    (async () => {
-      try {
-        setDeviationLoading(true);
-        const costs = await runAndPersistDeviationCosts(campaign.id, klines);
-        if (cancelled) return;
-        setDeviationCosts(costs);
-        setDeviationHydrated(true);
-        setCounterfactuals(await listCounterfactuals(campaign.id));
-      } catch (error) {
-        if (!cancelled) toast.error(error instanceof Error ? error.message : String(error));
-      } finally {
-        if (!cancelled) setDeviationLoading(false);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [campaign, hasPureSopBranch, deviationHydrated, klines]);
 
   // 载入该战役已保存的偏离备注（存在战役行上，互关者一并读到）。
   useEffect(() => {
@@ -636,7 +621,7 @@ export default function JournalCampaignDetailPage() {
   const tpCount = legs.filter((leg: TradeJournal) => leg.leg_role === 'mirror_tp').length;
   const otherCount = Math.max(0, legs.length - mainCount - hedgeCount - tpCount);
   const actualPnl = campaign.final_realized_pnl ?? 0;
-  const totalDeviationCost = deviationCosts.reduce((sum, item) => sum + item.cost_usdt, 0);
+  const totalDeviationCost = deviationLegCosts.reduce((sum, item) => sum + item.cost_usdt, 0);
   const selectedCounterfactualDelta = selectedCounterfactual
     ? selectedCounterfactual.result.final_realized_pnl - actualPnl
     : null;
@@ -691,31 +676,6 @@ export default function JournalCampaignDetailPage() {
       toast.error(error instanceof Error ? error.message : String(error));
     } finally {
       setCommentSaving(false);
-    }
-  };
-
-  const handleRunPureSop = async () => {
-    if (klinesLoading || klines.length === 0) {
-      toast.error('K 线尚未加载完成，暂时无法运行 Pure SOP');
-      return;
-    }
-    try {
-      setPureRunning(true);
-      const branch = await runAndPersistPureSop(campaign.id, klines);
-      await reloadCounterfactuals(branch.id);
-      setSelectedCounterfactualId(branch.id);
-      setPendingCounterfactualId(branch.id);
-      setDeviationLoading(true);
-      const costs = await runAndPersistDeviationCosts(campaign.id, klines);
-      setDeviationCosts(costs);
-      setDeviationHydrated(true);
-      await reloadCounterfactuals(branch.id);
-      toast.success('Pure SOP 结果已生成，请选择保存或删除');
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : String(error));
-    } finally {
-      setPureRunning(false);
-      setDeviationLoading(false);
     }
   };
 
@@ -788,33 +748,6 @@ export default function JournalCampaignDetailPage() {
       toast.error(error instanceof Error ? error.message : String(error));
     } finally {
       setDeviationNotesSaving(false);
-    }
-  };
-
-  const handleViewFixBranch = async (cost: DeviationCost) => {
-    if (!cost.source_deduction_id) return;
-    const existing = counterfactuals.find(branch => branch.source_deduction_id === cost.source_deduction_id);
-    if (existing) {
-      setSelectedCounterfactualId(existing.id);
-      return;
-    }
-    if (klinesLoading || klines.length === 0) {
-      toast.error('K 线尚未加载完成，暂时无法运行修正分支');
-      return;
-    }
-    try {
-      setDeviationLoading(true);
-      const costs = await runAndPersistDeviationCosts(campaign.id, klines);
-      setDeviationCosts(costs);
-      setDeviationHydrated(true);
-      const next = await listCounterfactuals(campaign.id);
-      setCounterfactuals(next);
-      const matched = next.find(branch => branch.source_deduction_id === cost.source_deduction_id);
-      if (matched) setSelectedCounterfactualId(matched.id);
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : String(error));
-    } finally {
-      setDeviationLoading(false);
     }
   };
 
@@ -1128,7 +1061,7 @@ export default function JournalCampaignDetailPage() {
               反事实战役
             </div>
             <div className="text-[14px] text-foreground">
-              如果你严格按 SOP 执行这场战役，会发生什么？反事实战役用真实市场数据 + 标准 SOP 参数跑一遍，把偏离代价折算成 USDT。
+              如果当时换一种打法，会发生什么？在下方「Legs 副本」里手动调整各条腿，点「一键运行」用真实行情跑一遍；再把你的调整与原始战役逐腿对比，把原始错误的代价折算成 USDT。
             </div>
           </div>
 
@@ -1142,9 +1075,7 @@ export default function JournalCampaignDetailPage() {
             intervalOptions={INTERVALS}
             onIntervalChange={(nextInterval) => setInterval(nextInterval as Interval)}
             timezone={LOCAL_TIME_ZONE}
-            pureRunning={pureRunning}
             whatIfRunning={whatIfRunning}
-            onRunPureSop={handleRunPureSop}
             onRunWhatIf={handleRunWhatIf}
             orderInfoPriceLines={showOrderInfo ? orderInfoPriceLines : []}
           />
@@ -1266,20 +1197,19 @@ export default function JournalCampaignDetailPage() {
             </div>
           )}
 
-          {hasPureSopBranch && (
+          {hasManualRunBranch && (
                 <div className="bg-card border border-border rounded p-4 mt-4 space-y-4">
                   <div className="flex items-center justify-between gap-4">
                     <div>
                       <div className="text-[13px] font-medium">
-                        SOP 偏离代价明细
+                        偏离代价明细（手动调整 vs 原始）
                       </div>
                       <div className="text-[12px] text-muted-foreground mt-2">
-                        这里只解释规则缺口，不代表当前选中反事实分支的最终 P&L。
-                        合计 {totalDeviationCost >= 0 ? '+' : ''}{totalDeviationCost.toFixed(2)} USDT。
+                        把你手动调整后的 Legs 与原始战役逐腿对比，每条代价 = 调整后盈亏 − 原始盈亏。
+                        合计 {totalDeviationCost >= 0 ? '+' : ''}{totalDeviationCost.toFixed(2)} USDT = 原始错误的总代价。
                       </div>
                     </div>
                     <div className="flex items-center gap-3">
-                      {deviationLoading && <div className="text-[11px] text-muted-foreground">计算中…</div>}
                       {isOwner && (
                         <Button
                           variant="outline"
@@ -1306,12 +1236,12 @@ export default function JournalCampaignDetailPage() {
                         </tr>
                       </thead>
                       <tbody>
-                        {deviationCosts.map(cost => {
-                          const rowKey = cost.source_deduction_id ?? `${cost.deduction_category}::${cost.deduction_reason}`;
+                        {deviationLegCosts.map(cost => {
+                          const rowKey = cost.legId;
                           const note = deviationNotes[rowKey] ?? {};
-                          const categoryVal = note.category ?? cost.deduction_category ?? '';
-                          const reasonVal = note.reason ?? cost.deduction_reason ?? '';
-                          const fixVal = note.fix ?? cost.fix_description ?? '';
+                          const categoryVal = note.category ?? cost.leg_role ?? '';
+                          const reasonVal = note.reason ?? '';
+                          const fixVal = note.fix ?? '';
                           // 占本场盈亏 %：以本战役实际总盈亏的绝对值为分母；分母为 0 时无法折算。
                           const pctOfPnl = Math.abs(actualPnl) > 0 ? (cost.cost_usdt / Math.abs(actualPnl)) * 100 : null;
                           const setField = (field: keyof CampaignDeviationNote, value: string) =>
@@ -1364,18 +1294,18 @@ export default function JournalCampaignDetailPage() {
                               <Button
                                 variant="outline"
                                 className="h-8 text-[11px]"
-                                onClick={() => handleViewFixBranch(cost)}
+                                onClick={() => setSelectedLegMarkerIds([cost.legId])}
                               >
-                                查看修正分支
+                                标到盘面
                               </Button>
                             </td>
                           </tr>
                           );
                         })}
-                        {deviationCosts.length === 0 && (
+                        {deviationLegCosts.length === 0 && (
                           <tr>
                             <td colSpan={6} className="px-3 py-5 text-center text-[12px] text-muted-foreground">
-                              {deviationLoading ? '正在计算偏离代价…' : '暂无可折算的 SOP 偏离代价'}
+                              本次手动调整与原始战役无差异（合计 0）
                             </td>
                           </tr>
                         )}

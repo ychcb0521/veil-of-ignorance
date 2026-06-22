@@ -795,7 +795,7 @@ function validManualLeg(leg: CampaignCounterfactualManualLeg): boolean {
     && new Date(leg.close_time).getTime() >= new Date(leg.open_time).getTime();
 }
 
-function manualLegPnl(leg: CampaignCounterfactualManualLeg): number {
+export function manualLegPnl(leg: CampaignCounterfactualManualLeg): number {
   return pnlForClose(
     leg.direction,
     leg.entry_price,
@@ -803,6 +803,94 @@ function manualLegPnl(leg: CampaignCounterfactualManualLeg): number {
     leg.size_usdt,
     leg.leverage || 1,
   );
+}
+
+function manualTimeMs(value: string): number | null {
+  const time = new Date(value).getTime();
+  return Number.isFinite(time) ? time : null;
+}
+
+export function defaultCloseTime(params: CampaignCounterfactualParams, klines: KlineData[]): string {
+  const last = klines[klines.length - 1];
+  return last ? new Date(last.time).toISOString() : params.entry.time;
+}
+
+/**
+ * 把战役已归类的 legs 转成「手动反事实」可编辑的腿副本（编辑器初始值 + 偏离代价的原始基线共用）。
+ * 价格/平仓时间优先用真实成交记录，其次腿上的回填快照，最后才退回开仓价/末根 K 线。
+ */
+export function buildManualLegs(
+  params: CampaignCounterfactualParams,
+  legs: TradeJournal[],
+  klines: KlineData[],
+  tradeRecords: TradeRecord[],
+): CampaignCounterfactualManualLeg[] {
+  const fallbackClose = defaultCloseTime(params, klines);
+  const recordMap = new Map(tradeRecords.map(record => [record.id, record]));
+  const ordered = [...legs].sort((a, b) => {
+    const seqA = a.leg_sequence ?? 9999;
+    const seqB = b.leg_sequence ?? 9999;
+    if (seqA !== seqB) return seqA - seqB;
+    return new Date(a.pre_simulated_time).getTime() - new Date(b.pre_simulated_time).getTime();
+  });
+
+  return ordered
+    .map((leg, index) => {
+      const record = leg.trade_record_id ? recordMap.get(leg.trade_record_id) ?? null : null;
+      const openTime = leg.pre_simulated_time || params.entry.time;
+      const recordCloseIso = record?.closeTime ? new Date(record.closeTime).toISOString() : null;
+      const closeTime = recordCloseIso || leg.post_real_close_time || fallbackClose;
+      const closeMs = manualTimeMs(closeTime) ?? manualTimeMs(fallbackClose) ?? manualTimeMs(openTime) ?? Date.now();
+      const openMs = manualTimeMs(openTime) ?? closeMs;
+      const normalizedClose = closeMs >= openMs ? closeTime : new Date(openMs).toISOString();
+      const entryPrice = leg.pre_entry_price ?? record?.entryPrice ?? params.entry.price;
+      const exitPrice = record?.exitPrice ?? leg.post_exit_price_snapshot ?? entryPrice;
+      return {
+        id: leg.id || `leg-${index}`,
+        leg_role: leg.leg_role ?? 'standalone',
+        direction: leg.direction === 'short' ? 'short' : 'long',
+        open_time: openTime,
+        close_time: normalizedClose,
+        entry_price: entryPrice,
+        exit_price: exitPrice,
+        size_usdt: leg.pre_position_size ?? params.entry.size_usdt,
+        leverage: leg.leverage ?? params.entry.leverage ?? 1,
+        enabled: true,
+      } satisfies CampaignCounterfactualManualLeg;
+    })
+    .filter(leg => leg.entry_price > 0 && leg.size_usdt > 0);
+}
+
+export interface ManualLegDeviationCost {
+  legId: string;
+  leg_role: string;
+  cost_usdt: number;
+}
+
+/**
+ * 偏离代价（手动调整 vs 原始）逐腿拆分：
+ * 每条腿代价 = 调整后腿盈亏 − 原始腿盈亏（按 leg id 匹配）；新增腿 = 调整后盈亏；删除/停用腿 = −原始盈亏。
+ * 合计 = 手动调整总盈亏 − 原始总盈亏 = 原始错误的代价。仅返回 |代价| > EPSILON 的腿。
+ */
+export function computeManualLegDeviationCosts(
+  originalLegs: CampaignCounterfactualManualLeg[],
+  adjustedLegs: CampaignCounterfactualManualLeg[],
+): ManualLegDeviationCost[] {
+  const legPnl = (leg: CampaignCounterfactualManualLeg | undefined) =>
+    leg && leg.enabled && validManualLeg(leg) ? manualLegPnl(leg) : 0;
+  const origById = new Map(originalLegs.map(leg => [leg.id, leg]));
+  const adjById = new Map(adjustedLegs.map(leg => [leg.id, leg]));
+  const out: ManualLegDeviationCost[] = [];
+  for (const adj of adjustedLegs) {
+    const cost = legPnl(adj) - legPnl(origById.get(adj.id));
+    if (Math.abs(cost) > EPSILON) out.push({ legId: adj.id, leg_role: adj.leg_role, cost_usdt: round(cost, 2) });
+  }
+  for (const orig of originalLegs) {
+    if (adjById.has(orig.id)) continue;
+    const cost = -legPnl(orig);
+    if (Math.abs(cost) > EPSILON) out.push({ legId: orig.id, leg_role: orig.leg_role, cost_usdt: round(cost, 2) });
+  }
+  return out;
 }
 
 export function simulateManualLegScenario(

@@ -1,9 +1,14 @@
 import { describe, expect, it } from 'vitest';
 
 import type { KlineData } from '@/hooks/useBinanceData';
-import type { CampaignCounterfactualParams } from '@/types/journal';
+import type { CampaignCounterfactualManualLeg, CampaignCounterfactualParams } from '@/types/journal';
 
-import { simulateCampaign, simulateManualLegScenario } from '../campaignSimulationEngine';
+import {
+  computeManualLegDeviationCosts,
+  manualLegPnl,
+  simulateCampaign,
+  simulateManualLegScenario,
+} from '../campaignSimulationEngine';
 
 const MIN = 60_000;
 const t0 = new Date('2024-01-01T00:00:00Z').getTime();
@@ -264,5 +269,65 @@ describe('simulateCampaign', () => {
     expect(result.legs_summary).toHaveLength(2);
     expect(result.legs_summary.some(leg => leg.leg_role === 'mirror_tp')).toBe(false);
     expect(result.state_segments[0]?.state).toBe('manual_legs');
+  });
+});
+
+describe('computeManualLegDeviationCosts', () => {
+  const makeLeg = (
+    id: string,
+    leg_role: string,
+    direction: 'long' | 'short',
+    entry_price: number,
+    exit_price: number,
+    size_usdt: number,
+  ): CampaignCounterfactualManualLeg => ({
+    id,
+    leg_role,
+    direction,
+    open_time: new Date(t0).toISOString(),
+    close_time: new Date(t0 + 3 * MIN).toISOString(),
+    entry_price,
+    exit_price,
+    size_usdt,
+    leverage: 1,
+    enabled: true,
+  });
+
+  it('逐腿拆分：改腿 / 加腿 / 删腿，合计 = 手动调整总盈亏 − 原始总盈亏', () => {
+    const original = [
+      makeLeg('main', 'main_open', 'long', 100, 110, 1000), // +100
+      makeLeg('hedge', 'hedge_initial_a', 'short', 100, 105, 500), // -25
+      makeLeg('stable', 'mirror_tp', 'long', 100, 102, 100), // +2（未改动）
+    ];
+    const adjusted = [
+      makeLeg('main', 'main_open', 'long', 100, 120, 1000), // +200（改了出场价）
+      makeLeg('stable', 'mirror_tp', 'long', 100, 102, 100), // +2（不变）
+      makeLeg('manual-x', 'hedge_rolling', 'long', 100, 105, 200), // +10（新增腿）
+      // 'hedge' 在手动方案里被删除
+    ];
+
+    const costs = computeManualLegDeviationCosts(original, adjusted);
+
+    // 未改动的 'stable' 腿差额为 0，被过滤；改腿先按 adjusted 顺序、删腿排在最后。
+    expect(costs).toEqual([
+      { legId: 'main', leg_role: 'main_open', cost_usdt: 100 },
+      { legId: 'manual-x', leg_role: 'hedge_rolling', cost_usdt: 10 },
+      { legId: 'hedge', leg_role: 'hedge_initial_a', cost_usdt: 25 },
+    ]);
+
+    // 合计 = 手动调整总盈亏 − 原始总盈亏 = 原始错误的总代价。
+    const total = costs.reduce((sum, c) => sum + c.cost_usdt, 0);
+    const adjustedTotal = adjusted.reduce((sum, leg) => sum + manualLegPnl(leg), 0);
+    const originalTotal = original.reduce((sum, leg) => sum + manualLegPnl(leg), 0);
+    expect(total).toBeCloseTo(adjustedTotal - originalTotal, 4);
+    expect(total).toBe(135);
+  });
+
+  it('原始与调整完全一致时返回空数组', () => {
+    const legs = [
+      makeLeg('main', 'main_open', 'long', 100, 110, 1000),
+      makeLeg('hedge', 'hedge_initial_a', 'short', 100, 105, 500),
+    ];
+    expect(computeManualLegDeviationCosts(legs, legs.map(leg => ({ ...leg })))).toEqual([]);
   });
 });

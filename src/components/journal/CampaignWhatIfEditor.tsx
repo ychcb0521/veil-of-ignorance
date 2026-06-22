@@ -12,7 +12,7 @@ import {
   SELECTED_LEG_VERTICAL_LINE_WIDTH,
   legRoleMarkerLabel,
 } from '@/lib/campaignLegMarkers';
-import { buildActualSimulationParams, buildPureSopParams } from '@/lib/campaignSimulationEngine';
+import { buildActualSimulationParams, buildPureSopParams, buildManualLegs } from '@/lib/campaignSimulationEngine';
 import { LEG_ROLE_LABELS } from '@/lib/strategyTemplates';
 import type {
   CampaignCounterfactualManualLeg,
@@ -33,9 +33,7 @@ interface Props {
   intervalOptions?: readonly string[];
   onIntervalChange?: (interval: string) => void;
   timezone?: string;
-  pureRunning: boolean;
   whatIfRunning: boolean;
-  onRunPureSop: () => void;
   onRunWhatIf: (label: string, params: CampaignCounterfactualParams) => void;
   /** 「委托空单（黄色）」挂单层：与原始战役盘面同一套数据，由父组件按开关传入；空数组即不显示。 */
   orderInfoPriceLines?: TimeBoundPriceLine[];
@@ -102,50 +100,6 @@ function defaultCloseTime(params: CampaignCounterfactualParams, klines: KlineDat
   return last ? new Date(last.time).toISOString() : params.entry.time;
 }
 
-function buildManualLegs(
-  params: CampaignCounterfactualParams,
-  legs: TradeJournal[],
-  klines: KlineData[],
-  tradeRecords: TradeRecord[],
-): CampaignCounterfactualManualLeg[] {
-  const fallbackClose = defaultCloseTime(params, klines);
-  const recordMap = new Map(tradeRecords.map(record => [record.id, record]));
-  const ordered = [...legs].sort((a, b) => {
-    const seqA = a.leg_sequence ?? 9999;
-    const seqB = b.leg_sequence ?? 9999;
-    if (seqA !== seqB) return seqA - seqB;
-    return new Date(a.pre_simulated_time).getTime() - new Date(b.pre_simulated_time).getTime();
-  });
-
-  return ordered
-    .map((leg, index) => {
-      // 价格/平仓时间优先用真实成交记录（本人有），其次腿上的回填快照，最后才兜底，
-      // 避免「开仓价 == 平仓价」（快照缺失时退回开仓价）的问题。
-      const record = leg.trade_record_id ? recordMap.get(leg.trade_record_id) ?? null : null;
-      const openTime = leg.pre_simulated_time || params.entry.time;
-      const recordCloseIso = record?.closeTime ? new Date(record.closeTime).toISOString() : null;
-      const closeTime = recordCloseIso || leg.post_real_close_time || fallbackClose;
-      const closeMs = validTimeMs(closeTime) ?? validTimeMs(fallbackClose) ?? validTimeMs(openTime) ?? Date.now();
-      const openMs = validTimeMs(openTime) ?? closeMs;
-      const normalizedClose = closeMs >= openMs ? closeTime : new Date(openMs).toISOString();
-      const entryPrice = leg.pre_entry_price ?? record?.entryPrice ?? params.entry.price;
-      const exitPrice = record?.exitPrice ?? leg.post_exit_price_snapshot ?? entryPrice;
-      return {
-        id: leg.id || `leg-${index}`,
-        leg_role: leg.leg_role ?? 'standalone',
-        direction: leg.direction === 'short' ? 'short' : 'long',
-        open_time: openTime,
-        close_time: normalizedClose,
-        entry_price: entryPrice,
-        exit_price: exitPrice,
-        size_usdt: leg.pre_position_size ?? params.entry.size_usdt,
-        leverage: leg.leverage ?? params.entry.leverage ?? 1,
-        enabled: true,
-      } satisfies CampaignCounterfactualManualLeg;
-    })
-    .filter(leg => leg.entry_price > 0 && leg.size_usdt > 0);
-}
-
 export function CampaignWhatIfEditor({
   campaign,
   legs,
@@ -156,9 +110,7 @@ export function CampaignWhatIfEditor({
   intervalOptions = [],
   onIntervalChange,
   timezone,
-  pureRunning,
   whatIfRunning,
-  onRunPureSop,
   onRunWhatIf,
   orderInfoPriceLines = [],
 }: Props) {
@@ -276,7 +228,7 @@ export function CampaignWhatIfEditor({
 
   const runManualScenario = () => {
     if (!params) return;
-    const runLabel = label.trim() || 'Legs 调整方案';
+    const runLabel = label.trim() || '手动调整';
     onRunWhatIf(runLabel, {
       ...params,
       manual_legs: activeManualLegs,
@@ -299,19 +251,19 @@ export function CampaignWhatIfEditor({
             <TrendingUp className="w-5 h-5" />
           </div>
           <div className="min-w-0">
-            <div className="text-[14px] font-medium">一键运行（标准 SOP）</div>
+            <div className="text-[14px] font-medium">一键运行（按你手动调整的 Legs）</div>
             <div className="text-[11px] text-muted-foreground">
-              用这场战役的真实市场数据，按标准参数跑一遍。
+              用这场战役的真实行情，跑你在下方「Legs 副本·手动反事实」里调整后的 Legs。
             </div>
           </div>
         </div>
         <div className="flex-1" />
         <Button
           className="bg-[#0ECB81] text-black hover:bg-[#0ECB81]/90 h-9 text-[12px]"
-          disabled={pureRunning || !canRun}
-          onClick={onRunPureSop}
+          disabled={whatIfRunning || !canRun || activeManualLegs.length === 0}
+          onClick={runManualScenario}
         >
-          {pureRunning ? '运行中…' : '一键运行'}
+          {whatIfRunning ? '运行中…' : '一键运行'}
         </Button>
       </div>
 
