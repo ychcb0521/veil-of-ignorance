@@ -1639,7 +1639,9 @@ export async function getCampaignFullData(
 
   // 反向对冲挂单：与主仓方向相反的、在战役期间委托的限价单（含已撤销 + 仍挂着）。
   const reverseSide = campaign.direction === 'main_long' ? 'SHORT' : 'LONG';
-  const inWindow = (t: number) => Number.isFinite(t) && t >= openedAtMs && t <= closedAtMs;
+  // 主力开仓「前 1 分钟内」挂的反向委托也算进本战役（提前布的对冲），所以窗口起点回退 60 秒。
+  const PRE_MAIN_LOOKBACK_MS = 60_000;
+  const inWindow = (t: number) => Number.isFinite(t) && t >= openedAtMs - PRE_MAIN_LOOKBACK_MS && t <= closedAtMs;
   const pendingOrderPrice = (order: PendingOrder) => (
     order.price > 0
       ? order.price
