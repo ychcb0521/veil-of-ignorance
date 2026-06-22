@@ -77,11 +77,11 @@ function wrap<T>(label: string, error: { message: string } | null, data: T | nul
 
 function toCampaign(row: unknown): TradeCampaign {
   const campaign = row as TradeCampaign;
-  return {
+  return withLocalDeviationNotes({
     ...campaign,
     importance_weight: normalizeCampaignImportance(campaign?.importance_weight),
     deviation_notes: campaign?.deviation_notes ?? {},
-  };
+  });
 }
 
 function toCampaignCounterfactual(row: unknown): CampaignCounterfactual {
@@ -124,9 +124,8 @@ function writeUserScopedStorage<T>(userId: string, key: string, value: T): void 
 export type { CampaignDeviationNote } from "@/types/journal";
 
 /**
- * 保存「SOP 偏离代价明细」手填备注到战役行（jsonb 列 deviation_notes）。读取走 campaign.deviation_notes，
- * 已随 getCampaignFullData 一起返回。仅本人可写（trade_campaigns 的 UPDATE 策略 auth.uid()=user_id），
- * 互关者读得到、改不动。迁移尚未应用（表/列缺失）时给出可执行的明确报错，绝不假装保存成功。
+ * 保存「SOP 偏离代价明细」手填备注。云端列可用时写 trade_campaigns.deviation_notes；
+ * Lovable schema cache 尚未同步表/列时，落到本地用户作用域镜像，并由 toCampaign 自动合并回读。
  */
 export async function saveCampaignDeviationNotes(
   campaignId: string,
@@ -136,9 +135,27 @@ export async function saveCampaignDeviationNotes(
     .from('trade_campaigns' as never)
     .update({ deviation_notes: notes } as never)
     .eq('id', campaignId);
-  if (!error) return;
+  if (!error) {
+    try {
+      const userId = await getAuthenticatedUserId('保存偏离备注');
+      writeLocalCampaignDeviationNotes(userId, campaignId, notes);
+    } catch (mirrorError) {
+      console.warn('[journalApi] 远端偏离备注已保存，本地镜像写入跳过', mirrorError);
+    }
+    return;
+  }
   if (isMissingTradeCampaignsTableError(error) || isSchemaColumnMissingError(error)) {
-    throw new Error('战役数据表/字段尚未就绪：请先在 Lovable 应用迁移并等待 schema 重载后再保存备注。');
+    const userId = await getAuthenticatedUserId('保存偏离备注');
+    writeLocalCampaignDeviationNotes(userId, campaignId, notes);
+    const localCampaign = findLocalCampaign(userId, campaignId);
+    if (localCampaign) {
+      upsertLocalCampaign({
+        ...localCampaign,
+        deviation_notes: mergeDeviationNotes(localCampaign.deviation_notes, notes),
+        updated_at: new Date().toISOString(),
+      });
+    }
+    return;
   }
   throw new Error(error.message ?? '保存偏离备注失败');
 }
@@ -208,6 +225,7 @@ const COGNITIVE_ASSETS_STORAGE_KEY = 'cognitive_assets_doc';
 const TRADE_CAMPAIGNS_STORAGE_KEY = 'trade_campaigns';
 const TRADE_CAMPAIGN_PREFS_STORAGE_KEY = 'trade_campaign_preferences';
 const CAMPAIGN_COUNTERFACTUALS_STORAGE_KEY = 'campaign_counterfactuals';
+const CAMPAIGN_DEVIATION_NOTES_STORAGE_KEY = 'campaign_deviation_notes';
 const ACCOUNT_FOLLOWS_STORAGE_KEY = 'account_follows';
 const MAX_LOCAL_CAMPAIGN_COUNTERFACTUALS = 50;
 
@@ -725,6 +743,80 @@ function normalizeCampaignImportance(value: unknown): number {
   return Math.max(0, Math.min(5, Math.round(num)));
 }
 
+function normalizeCampaignDeviationNote(value: unknown): CampaignDeviationNote | null {
+  if (!isRecord(value)) return null;
+  return {
+    category: typeof value.category === 'string' ? value.category : undefined,
+    reason: typeof value.reason === 'string' ? value.reason : undefined,
+    fix: typeof value.fix === 'string' ? value.fix : undefined,
+  };
+}
+
+function normalizeCampaignDeviationNotes(raw: unknown): Record<string, CampaignDeviationNote> {
+  if (!isRecord(raw)) return {};
+  return Object.fromEntries(
+    Object.entries(raw)
+      .map(([key, value]) => [key, normalizeCampaignDeviationNote(value)] as const)
+      .filter((entry): entry is readonly [string, CampaignDeviationNote] => (
+        typeof entry[0] === 'string' && entry[1] !== null
+      )),
+  );
+}
+
+type LocalCampaignDeviationNotesMap = Record<string, Record<string, CampaignDeviationNote>>;
+
+function normalizeLocalCampaignDeviationNotesMap(raw: unknown): LocalCampaignDeviationNotesMap {
+  if (!isRecord(raw)) return {};
+  return Object.fromEntries(
+    Object.entries(raw)
+      .filter(([campaignId]) => typeof campaignId === 'string')
+      .map(([campaignId, notes]) => [campaignId, normalizeCampaignDeviationNotes(notes)]),
+  );
+}
+
+function readLocalCampaignDeviationNotesMap(userId: string): LocalCampaignDeviationNotesMap {
+  return normalizeLocalCampaignDeviationNotesMap(
+    readUserScopedStorage<unknown>(userId, CAMPAIGN_DEVIATION_NOTES_STORAGE_KEY, {}),
+  );
+}
+
+function readLocalCampaignDeviationNotes(userId: string, campaignId: string): Record<string, CampaignDeviationNote> {
+  return readLocalCampaignDeviationNotesMap(userId)[campaignId] ?? {};
+}
+
+function writeLocalCampaignDeviationNotes(
+  userId: string,
+  campaignId: string,
+  notes: Record<string, CampaignDeviationNote>,
+): void {
+  const current = readLocalCampaignDeviationNotesMap(userId);
+  current[campaignId] = normalizeCampaignDeviationNotes(notes);
+  writeUserScopedStorage(userId, CAMPAIGN_DEVIATION_NOTES_STORAGE_KEY, current);
+}
+
+function mergeDeviationNotes(
+  remote: Record<string, CampaignDeviationNote> | null | undefined,
+  local: Record<string, CampaignDeviationNote> | null | undefined,
+): Record<string, CampaignDeviationNote> {
+  return {
+    ...normalizeCampaignDeviationNotes(remote),
+    ...normalizeCampaignDeviationNotes(local),
+  };
+}
+
+function withLocalDeviationNotes(campaign: TradeCampaign): TradeCampaign {
+  const remoteNotes = normalizeCampaignDeviationNotes(campaign.deviation_notes);
+  const localNotes = campaign?.user_id && campaign?.id
+    ? readLocalCampaignDeviationNotes(campaign.user_id, campaign.id)
+    : {};
+  return {
+    ...campaign,
+    deviation_notes: Object.keys(remoteNotes).length > 0
+      ? { ...localNotes, ...remoteNotes }
+      : localNotes,
+  };
+}
+
 function normalizeLocalCampaigns(raw: unknown): TradeCampaign[] {
   if (!Array.isArray(raw)) return [];
   return raw
@@ -738,7 +830,9 @@ function normalizeLocalCampaigns(raw: unknown): TradeCampaign[] {
     .map(campaign => ({
       ...campaign,
       importance_weight: normalizeCampaignImportance(campaign.importance_weight),
-    }));
+      deviation_notes: normalizeCampaignDeviationNotes(campaign.deviation_notes),
+    }))
+    .map(withLocalDeviationNotes);
 }
 
 function readLocalCampaigns(userId: string): TradeCampaign[] {
