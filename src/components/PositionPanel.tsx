@@ -35,6 +35,7 @@ import {
   getPositionUnits,
   isCoinSettled,
   isPositionOpen,
+  settlementRoePct,
 } from '@/lib/tradingSettlement';
 import {
   findUnreviewedJournalForClose, listJournals,
@@ -650,7 +651,9 @@ export function PositionPanel({
                       totalPnl += calcUnrealizedPnl(c.position, mark);
                       notional += getPositionNotionalUsd(mg.symbol, c.position, mark);
                     }
-                    const roe = effectiveMargin > 0 ? (totalPnl / effectiveMargin) * 100 : 0;
+                    // 币本位：保证金按现价估值，ROE = 币盈亏/币保证金（与币安一致）；U本位维持原样。
+                    const roeMargin = isCoinGroup && totalMarginCoin > 0 && price > 0 ? totalMarginCoin * price : effectiveMargin;
+                    const roe = roeMargin > 0 ? (totalPnl / roeMargin) * 100 : 0;
                     const isProfit = totalPnl >= 0;
                     const marginRatio = notional > 0 ? ((effectiveMargin + totalPnl) / notional * 100) : 0;
                     const positionQtyLabel = isCoinGroup
@@ -946,7 +949,7 @@ export function PositionPanel({
                     else if (historySort === 'pct-desc' || historySort === 'pct-asc') {
                       const pct = (t: typeof sorted[0]) => {
                         const margin = getPositionNotionalUsd(t.symbol, t, t.entryPrice) / t.leverage;
-                        return margin > 0 ? t.pnl / margin : 0;
+                        return settlementRoePct(t.pnl, margin, t.entryPrice, t.exitPrice, isCoinSettled(t));
                       };
                       sorted.sort((a, b) => historySort === 'pct-desc' ? pct(b) - pct(a) : pct(a) - pct(b));
                     }
@@ -979,7 +982,7 @@ export function PositionPanel({
                       </td>
                       {(() => {
                         const margin = getPositionNotionalUsd(t.symbol, t, t.entryPrice) / t.leverage;
-                        const pct = margin > 0 ? (t.pnl / margin) * 100 : 0;
+                        const pct = settlementRoePct(t.pnl, margin, t.entryPrice, t.exitPrice, isCoinSettled(t));
                         return (
                           <td className={`px-3 py-2 font-bold ${pct >= 0 ? 'text-[#0ecb81]' : 'text-[#f6465d]'}`}>
                             {pct >= 0 ? '+' : ''}{pct.toFixed(2)}%
@@ -1067,7 +1070,7 @@ export function PositionPanel({
                     const tradeQuoteLabel = isCoinSettled(t) ? 'USD' : 'USDT';
                     const notionalUsd = t.notionalUsd ?? getPositionNotionalUsd(t.symbol, t, t.entryPrice);
                     const margin = t.margin > 0 ? t.margin : notionalUsd / t.leverage;
-                    const roe = margin > 0 ? (t.pnl / margin) * 100 : 0;
+                    const roe = settlementRoePct(t.pnl, margin, t.entryPrice, t.exitPrice, isCoinSettled(t));
                     const matchedJ = lookupJournalForRecord(t);
                     return (
                       <tr key={t.id} className="border-b border-gray-100 dark:border-[#2b3139]/50">

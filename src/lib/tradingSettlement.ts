@@ -86,6 +86,26 @@ export function getPositionNotionalUsd(
   return Number(item.quantity ?? 0) * px;
 }
 
+/**
+ * 结算口径下的 ROE%。
+ * U本位：pnl / 开仓保证金（线性）。
+ * 币本位：保证金本质是币，其 USD 值随价浮动；盈亏已按现价/平仓价折成 USD，
+ * 故分母也要按同一价格给保证金重新估值，ROE 才 = 币盈亏 / 币保证金（与币安一致）。
+ * markPrice：开仓中用当前标记价，已平仓用平仓价。
+ */
+export function settlementRoePct(
+  pnlUsd: number,
+  marginUsdAtEntry: number,
+  entryPrice: number,
+  markPrice: number,
+  isCoin: boolean,
+): number {
+  const margin = isCoin && entryPrice > 0 && markPrice > 0
+    ? marginUsdAtEntry * (markPrice / entryPrice)
+    : marginUsdAtEntry;
+  return margin > 0 ? (pnlUsd / margin) * 100 : 0;
+}
+
 export function getSettlementMarginParts(symbol: string, order: SettlementOrderLike, price: number) {
   if (isCoinSettled(order)) {
     const contracts = getCoinContracts(order);

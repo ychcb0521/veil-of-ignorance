@@ -301,6 +301,13 @@ export function calcUnrealizedPnl(pos: Position, currentPrice: number): number {
 export function calcROE(pos: Position, currentPrice: number): number {
   const pnl = calcUnrealizedPnl(pos, currentPrice);
   const effectiveMargin = pos.marginMode === "isolated" && pos.isolatedMargin != null ? pos.isolatedMargin : pos.margin;
+  if (pos.settlementMode === "coin") {
+    // 币本位：保证金本质是币，USD 值随价浮动。pnl 已按现价折成 USD，
+    // 故分母也按现价给保证金估值，ROE 才 = 币盈亏/币保证金（与币安一致），而非线性口径。
+    if (!(pos.entryPrice > 0) || !(currentPrice > 0) || !(effectiveMargin > 0)) return 0;
+    const marginUsdNow = (effectiveMargin / pos.entryPrice) * currentPrice;
+    return marginUsdNow > 0 ? (pnl / marginUsdNow) * 100 : 0;
+  }
   return effectiveMargin > 0 ? (pnl / effectiveMargin) * 100 : 0;
 }
 
