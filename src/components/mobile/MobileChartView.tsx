@@ -2,12 +2,13 @@ import { ArrowLeft, Clock, Play, Pause, Square, Calendar, ChevronDown } from 'lu
 import { formatUTC8 } from '@/lib/timeFormat';
 import { CandlestickChart } from '@/components/CandlestickChart';
 import type { KlineData } from '@/hooks/useBinanceData';
-import type { PositionsMap, PriceMap } from '@/contexts/TradingContext';
+import { useTradingContext, type PositionsMap, type PriceMap } from '@/contexts/TradingContext';
 import type { TimeMachineStatus } from '@/hooks/useTimeSimulator';
 import { useState } from 'react';
 import { WheelDateTimePicker } from './WheelPicker';
 import { MobileTimeframeSheet } from './MobileTimeframeSheet';
 import { TIMEFRAME_LABELS } from '@/hooks/useTimeframePrefs';
+import { getSettlementAsset } from '@/lib/coinMargined';
 
 interface Props {
   symbol: string;
@@ -40,7 +41,10 @@ export function MobileChartView(props: Props) {
   const [selectedDate, setSelectedDate] = useState(() => new Date('2024-01-15T00:00:00Z')); // 00:00 UTC = 08:00 UTC+8
   const [showPicker, setShowPicker] = useState(false);
   const [showTimeframeSheet, setShowTimeframeSheet] = useState(false);
-  const baseCoin = props.symbol.replace('USDT', '');
+  const { getSymbolSettlementMode } = useTradingContext();
+  const settlementMode = getSymbolSettlementMode(props.symbol);
+  const baseCoin = getSettlementAsset(props.symbol);
+  const quoteUnitLabel = settlementMode === 'coin' ? 'USD' : 'USDT';
 
   const formatSimTime = formatUTC8;
 
@@ -71,7 +75,7 @@ export function MobileChartView(props: Props) {
           <ArrowLeft className="w-5 h-5" />
         </button>
         <div className="flex items-center gap-1.5 flex-1">
-          <span className="text-sm font-bold font-mono text-foreground">{baseCoin}USDT</span>
+          <span className="text-sm font-bold font-mono text-foreground">{baseCoin}{quoteUnitLabel}</span>
           <span className="text-[9px] px-1 py-0.5 rounded bg-primary/10 text-primary">永续</span>
         </div>
         {last && (
@@ -185,7 +189,7 @@ export function MobileChartView(props: Props) {
         ) : (
           <CandlestickChart
             data={props.visibleData}
-            symbol={`${baseCoin}/USDT`}
+            symbol={`${baseCoin}/${quoteUnitLabel}`}
             onLoadOlder={props.onLoadOlder}
             loadingOlder={props.loadingOlder}
           />

@@ -1,11 +1,23 @@
 import { useState, useRef, useEffect, useMemo } from 'react';
-import type { OrderSide, OrderType, MarginMode } from '@/types/trading';
+import type { OrderSide, OrderType } from '@/types/trading';
 import { ORDER_TYPE_INFO, getMaxLeverageForNotional, getLeverageTierInfo, MAINTENANCE_MARGIN_RATE, calcUnrealizedPnl } from '@/types/trading';
 import { ChevronDown, Check, AlertTriangle, Crosshair, ArrowLeftRight, Calculator, Gauge, Info } from 'lucide-react';
 import type { PlaceOrderParams } from '@/contexts/TradingContext';
 import { useTradingContext } from '@/contexts/TradingContext';
-import { formatUSDT, formatPrice as fmtPrice } from '@/lib/formatters';
+import { formatUSDT } from '@/lib/formatters';
 import { PreTradeSnapshotDialog } from '@/components/journal/PreTradeSnapshotDialog';
+import {
+  coinContractsFromUsdNotional,
+  coinMarginAmount,
+  coinNotionalUsd,
+  formatCoinAmount,
+  getCoinMarginedContractSizeUsd,
+  getSettlementAsset,
+  roundCoinContracts,
+} from '@/lib/coinMargined';
+import {
+  getPositionNotionalUsd,
+} from '@/lib/tradingSettlement';
 
 // Re-export for convenience
 export type { PlaceOrderParams };
@@ -53,20 +65,24 @@ export function OrderPanel({
   crosshairPrice, pickMode, onPickModeChange, pickedPrice,
   onAutoPauseTimeMachine,
 }: Props) {
-  const baseCoin = symbol.replace('USDT', '') || 'BTC';
-
   // ===== Live account info pulled from context (for available balance + risk panel) =====
   const ctx = useTradingContext();
+  const settlementMode = ctx.getSymbolSettlementMode(symbol);
+  const isCoinMargined = settlementMode === 'coin';
+  const baseCoin = getSettlementAsset(symbol);
+  const contractSizeUsd = getCoinMarginedContractSizeUsd(symbol);
+  const quoteUnitLabel = isCoinMargined ? 'USD' : 'USDT';
   const positions = ctx.positionsMap[symbol] || [];
 
   let totalMargin = 0;
   let totalMaintenance = 0;
   let totalPnl = 0;
-  for (const ps of Object.values(ctx.positionsMap) as typeof positions[]) {
+  for (const [posSymbol, ps] of Object.entries(ctx.positionsMap) as [string, typeof positions][]) {
     for (const p of ps) {
+      const mark = ctx.priceMap[posSymbol] ?? p.entryPrice;
       totalMargin += p.margin;
-      totalMaintenance += p.quantity * (ctx.priceMap[symbol] ?? p.entryPrice) * MAINTENANCE_MARGIN_RATE;
-      totalPnl += calcUnrealizedPnl(p, ctx.priceMap[symbol] ?? p.entryPrice);
+      totalMaintenance += getPositionNotionalUsd(posSymbol, p, mark) * MAINTENANCE_MARGIN_RATE;
+      totalPnl += calcUnrealizedPnl(p, mark);
     }
   }
   const equity = ctx.balance + totalPnl;
@@ -149,26 +165,53 @@ export function OrderPanel({
 
   let effectiveQty = 0;
   let margin = 0;
-  if (currencyUnit === 'BASE') {
+  let marginCoin = 0;
+  let notionalValue = 0;
+  if (isCoinMargined) {
+    if (currencyUnit === 'BASE') {
+      effectiveQty = roundCoinContracts(inputAmount);
+      notionalValue = coinNotionalUsd(effectiveQty, contractSizeUsd);
+      marginCoin = coinMarginAmount(effectiveQty, effectivePrice, leverage, contractSizeUsd);
+      margin = marginCoin * effectivePrice;
+    } else if (usdtInputMode === 'ORDER_VALUE') {
+      effectiveQty = coinContractsFromUsdNotional(inputAmount, symbol, contractSizeUsd);
+      notionalValue = coinNotionalUsd(effectiveQty, contractSizeUsd);
+      marginCoin = coinMarginAmount(effectiveQty, effectivePrice, leverage, contractSizeUsd);
+      margin = marginCoin * effectivePrice;
+    } else {
+      marginCoin = inputAmount;
+      const targetNotional = marginCoin * effectivePrice * leverage;
+      effectiveQty = coinContractsFromUsdNotional(targetNotional, symbol, contractSizeUsd);
+      notionalValue = coinNotionalUsd(effectiveQty, contractSizeUsd);
+      marginCoin = coinMarginAmount(effectiveQty, effectivePrice, leverage, contractSizeUsd);
+      margin = marginCoin * effectivePrice;
+    }
+  } else if (currencyUnit === 'BASE') {
     effectiveQty = inputAmount;
     margin = (effectiveQty * effectivePrice) / leverage;
+    notionalValue = effectiveQty * effectivePrice;
   } else if (usdtInputMode === 'ORDER_VALUE') {
     effectiveQty = effectivePrice > 0 ? inputAmount / effectivePrice : 0;
     margin = inputAmount / leverage;
+    notionalValue = inputAmount;
   } else {
     margin = inputAmount;
     effectiveQty = effectivePrice > 0 ? (inputAmount * leverage) / effectivePrice : 0;
+    notionalValue = effectiveQty * effectivePrice;
   }
 
-  const notionalValue = effectiveQty * effectivePrice;
   const maxAllowedLeverage = getMaxLeverageForNotional(notionalValue);
   const leverageExceeded = leverage > maxAllowedLeverage && notionalValue > 0;
   const tierInfo = getLeverageTierInfo(notionalValue);
-  const orderDisabled = disabled || leverageExceeded || !!coolingOff;
+  const orderDisabled = disabled || leverageExceeded || !!coolingOff || (isCoinMargined && inputAmount > 0 && effectiveQty < 1);
 
   // Max buy/sell capacity in USDT (notional)
   const maxNotional = Math.max(0, available) * leverage;
-  const unitLabel = currencyUnit === 'BASE' ? baseCoin : 'USDT';
+  const unitLabel = currencyUnit === 'BASE' ? (isCoinMargined ? '张' : baseCoin) : (isCoinMargined ? (usdtInputMode === 'ORDER_VALUE' ? 'USD' : baseCoin) : 'USDT');
+  const maxNotionalUnit = isCoinMargined ? 'USD' : 'USDT';
+  const marginDisplay = isCoinMargined
+    ? `${formatCoinAmount(marginCoin, baseCoin)} ≈ ${formatUSDT(margin)} USDT`
+    : `${formatUSDT(margin)} USDT`;
 
   // ===== Handlers =====
   const fillBBO = () => {
@@ -178,11 +221,25 @@ export function OrderPanel({
   const applyPercent = (p: number) => {
     setPercent(p);
     if (currencyUnit === 'USDT') {
-      const target = usdtInputMode === 'ORDER_VALUE' ? maxNotional : Math.max(0, available);
-      setQuantity((target * (p / 100)).toFixed(2));
+      if (isCoinMargined) {
+        if (usdtInputMode === 'ORDER_VALUE') {
+          setQuantity((maxNotional * (p / 100)).toFixed(2));
+        } else {
+          const maxMarginCoin = effectivePrice > 0 ? Math.max(0, available) / effectivePrice : 0;
+          setQuantity((maxMarginCoin * (p / 100)).toFixed(6));
+        }
+      } else {
+        const target = usdtInputMode === 'ORDER_VALUE' ? maxNotional : Math.max(0, available);
+        setQuantity((target * (p / 100)).toFixed(2));
+      }
     } else {
-      const maxBase = effectivePrice > 0 ? maxNotional / effectivePrice : 0;
-      setQuantity((maxBase * (p / 100)).toFixed(quantityPrecision));
+      if (isCoinMargined) {
+        const targetContracts = Math.max(0, Math.floor((maxNotional * (p / 100)) / contractSizeUsd));
+        setQuantity(String(targetContracts));
+      } else {
+        const maxBase = effectivePrice > 0 ? maxNotional / effectivePrice : 0;
+        setQuantity((maxBase * (p / 100)).toFixed(quantityPrecision));
+      }
     }
   };
 
@@ -194,7 +251,8 @@ export function OrderPanel({
   const [snapshotEntryPrice, setSnapshotEntryPrice] = useState<number | null>(null);
 
   const buildOrderParams = (rawSide: OrderSide): PlaceOrderParams | null => {
-    if (orderDisabled || effectiveQty <= 0) return null;
+    const finalQty = isCoinMargined ? roundCoinContracts(effectiveQty) : effectiveQty;
+    if (orderDisabled || finalQty <= 0) return null;
     const finalType: OrderType = enableTpSl
       ? (orderType === 'MARKET' ? 'MARKET_TP_SL' : orderType === 'LIMIT' ? 'LIMIT_TP_SL' : orderType)
       : orderType;
@@ -203,9 +261,13 @@ export function OrderPanel({
       type: finalType,
       price: priceSelection === 'LIMIT' ? (parseFloat(price) || 0) : 0,
       stopPrice: parseFloat(stopPrice) || parseFloat(tpTrigger) || parseFloat(slTrigger) || 0,
-      quantity: effectiveQty,
+      quantity: finalQty,
       leverage,
       marginMode,
+      settlementMode,
+      settlementAsset: isCoinMargined ? baseCoin : 'USDT',
+      contractSizeUsd: isCoinMargined ? contractSizeUsd : undefined,
+      contracts: isCoinMargined ? finalQty : undefined,
       priceSelection,
       triggerType,
       currencyUnit,
@@ -272,10 +334,18 @@ export function OrderPanel({
           {leverage}x
         </button>
         <button
-          className="w-6 h-[22px] flex items-center justify-center rounded bg-secondary hover:bg-accent text-[11px] text-foreground/90 transition-colors"
-          title="单币模式"
+          onClick={() => {
+            const next = isCoinMargined ? 'usdt' : 'coin';
+            ctx.setSymbolSettlementMode(symbol, next);
+            setQuantity('');
+            setPercent(0);
+            setCurrencyUnit('USDT');
+            setUsdtInputMode('ORDER_VALUE');
+          }}
+          className="px-2 h-[22px] flex items-center justify-center rounded bg-secondary hover:bg-accent text-[11px] text-foreground/90 transition-colors"
+          title="合约结算方式"
         >
-          S
+          {isCoinMargined ? '币本位' : 'U本位'}
         </button>
 
         {onOpenCoolingOff && (
@@ -361,6 +431,9 @@ export function OrderPanel({
           <div className="text-muted-foreground">
             可用 <span className="text-foreground font-mono tabular-nums">{formatUSDT(available)}</span>
             <span className="text-muted-foreground/80 ml-1">USDT</span>
+            {isCoinMargined && effectivePrice > 0 && (
+              <span className="text-muted-foreground/60 ml-1">≈ {formatCoinAmount(Math.max(0, available) / effectivePrice, baseCoin)}</span>
+            )}
           </div>
           <div className="flex items-center gap-2 text-muted-foreground">
             <button className="hover:text-foreground transition-colors" title="资金划转">
@@ -384,7 +457,7 @@ export function OrderPanel({
                 placeholder={currentPrice > 0 ? currentPrice.toFixed(pricePrecision) : '0.00'}
                 className="flex-1 w-full min-w-0 bg-transparent text-right text-[13px] text-foreground font-mono tabular-nums outline-none placeholder:text-muted-foreground/60"
               />
-              <span className="text-[11px] text-muted-foreground/80 ml-2 shrink-0">USDT</span>
+              <span className="text-[11px] text-muted-foreground/80 ml-2 shrink-0">{quoteUnitLabel}</span>
             </div>
             <button
               onClick={fillBBO}
@@ -401,7 +474,7 @@ export function OrderPanel({
           <div className="flex items-center bg-secondary rounded-md h-9 px-3 w-full min-w-0">
             <span className="text-[11px] text-muted-foreground/80 mr-2 shrink-0">价格</span>
             <span className="flex-1 min-w-0 text-right text-[13px] text-muted-foreground truncate">市价</span>
-            <span className="text-[11px] text-muted-foreground/80 ml-2 shrink-0">USDT</span>
+            <span className="text-[11px] text-muted-foreground/80 ml-2 shrink-0">{quoteUnitLabel}</span>
           </div>
         )}
 
@@ -427,7 +500,7 @@ export function OrderPanel({
             >
               <Crosshair className="w-3.5 h-3.5" />
             </button>
-            <span className="text-[11px] text-muted-foreground/80 ml-2 shrink-0">USDT</span>
+            <span className="text-[11px] text-muted-foreground/80 ml-2 shrink-0">{quoteUnitLabel}</span>
           </div>
         )}
 
@@ -536,7 +609,7 @@ export function OrderPanel({
                 placeholder="触发价"
                 className="flex-1 bg-transparent text-right text-[12px] text-foreground font-mono outline-none placeholder:text-muted-foreground/60"
               />
-              <span className="text-[11px] text-muted-foreground/80 ml-2">USDT</span>
+              <span className="text-[11px] text-muted-foreground/80 ml-2">{quoteUnitLabel}</span>
             </div>
             <div className="flex items-center bg-secondary rounded-md h-8 px-3">
               <span className="text-[11px] text-trading-red mr-2">止损</span>
@@ -545,7 +618,7 @@ export function OrderPanel({
                 placeholder="触发价"
                 className="flex-1 bg-transparent text-right text-[12px] text-foreground font-mono outline-none placeholder:text-muted-foreground/60"
               />
-              <span className="text-[11px] text-muted-foreground/80 ml-2">USDT</span>
+              <span className="text-[11px] text-muted-foreground/80 ml-2">{quoteUnitLabel}</span>
             </div>
           </div>
         )}
@@ -579,12 +652,12 @@ export function OrderPanel({
         {/* Pre-trade calculation: left aligned for LONG, right aligned for SHORT */}
         <div className="grid grid-cols-2 gap-2 text-[10px] font-mono tabular-nums">
           <div className="text-left space-y-0.5">
-            <div className="text-muted-foreground/80">保证金 <span className="text-foreground/90">{formatUSDT(margin)}</span> USDT</div>
-            <div className="text-muted-foreground/80">可开 <span className="text-foreground/90">{formatUSDT(maxNotional)}</span> USDT</div>
+            <div className="text-muted-foreground/80">保证金 <span className="text-foreground/90">{marginDisplay}</span></div>
+            <div className="text-muted-foreground/80">可开 <span className="text-foreground/90">{formatUSDT(maxNotional)}</span> {maxNotionalUnit}</div>
           </div>
           <div className="text-right space-y-0.5">
-            <div className="text-muted-foreground/80">保证金 <span className="text-foreground/90">{formatUSDT(margin)}</span> USDT</div>
-            <div className="text-muted-foreground/80">可开 <span className="text-foreground/90">{formatUSDT(maxNotional)}</span> USDT</div>
+            <div className="text-muted-foreground/80">保证金 <span className="text-foreground/90">{marginDisplay}</span></div>
+            <div className="text-muted-foreground/80">可开 <span className="text-foreground/90">{formatUSDT(maxNotional)}</span> {maxNotionalUnit}</div>
           </div>
         </div>
 
@@ -626,7 +699,7 @@ export function OrderPanel({
           </div>
 
           <button className="w-full h-9 mt-1 rounded-md bg-secondary hover:bg-accent text-[12px] text-foreground font-medium transition-colors">
-            单币保证金模式
+            {isCoinMargined ? `${baseCoin} 币本位保证金模式` : '单币保证金模式'}
           </button>
         </div>
       </div>
@@ -639,10 +712,12 @@ export function OrderPanel({
             className="w-full text-left px-4 py-3 hover:bg-secondary transition-colors"
           >
             <div className="flex items-center justify-between">
-              <span className="text-sm text-foreground font-medium">{baseCoin}</span>
+              <span className="text-sm text-foreground font-medium">{isCoinMargined ? '张' : baseCoin}</span>
               {currencyUnit === 'BASE' && <Check className="w-4 h-4 text-primary" />}
             </div>
-            <p className="text-[11px] text-muted-foreground/80 mt-1">输入并显示以 {baseCoin} 表示的订单金额。</p>
+            <p className="text-[11px] text-muted-foreground/80 mt-1">
+              {isCoinMargined ? `按币本位合约张数输入；1 张 = ${contractSizeUsd} USD 面值。` : `输入并显示以 ${baseCoin} 表示的订单金额。`}
+            </p>
           </button>
           <div className="border-t border-border" />
           <button
@@ -650,17 +725,17 @@ export function OrderPanel({
             className="w-full text-left px-4 py-3 hover:bg-secondary transition-colors"
           >
             <div className="flex items-center justify-between">
-              <span className="text-sm text-foreground font-medium">USDT</span>
+              <span className="text-sm text-foreground font-medium">{isCoinMargined ? `USD / ${baseCoin}` : 'USDT'}</span>
               {currencyUnit === 'USDT' && <Check className="w-4 h-4 text-primary" />}
             </div>
             <p className="text-[11px] text-muted-foreground/80 mt-1">
-              输入并显示以 USDT 表示的订单金额。
+              {isCoinMargined ? `订单金额按 USD 名义价值；初始保证金按 ${baseCoin} 输入。` : '输入并显示以 USDT 表示的订单金额。'}
             </p>
             {currencyUnit === 'USDT' && (
               <div className="flex gap-3 mt-2 ml-1">
                 {([
-                  { value: 'ORDER_VALUE' as UsdtInputMode, label: '订单金额' },
-                  { value: 'INITIAL_MARGIN' as UsdtInputMode, label: '初始保证金' },
+                  { value: 'ORDER_VALUE' as UsdtInputMode, label: isCoinMargined ? 'USD名义价值' : '订单金额' },
+                  { value: 'INITIAL_MARGIN' as UsdtInputMode, label: isCoinMargined ? `${baseCoin}保证金` : '初始保证金' },
                 ]).map(m => (
                   <label key={m.value} className="flex items-center gap-1.5 cursor-pointer">
                     <span className={`w-3.5 h-3.5 rounded-full border-2 flex items-center justify-center ${
@@ -698,6 +773,12 @@ export function OrderPanel({
         initialPositionSizeUsdt={(() => {
           if (!pendingOrderParams) return null;
           const p = snapshotEntryPrice ?? currentPrice ?? 0;
+          if (pendingOrderParams.settlementMode === 'coin') {
+            return coinNotionalUsd(
+              pendingOrderParams.contracts ?? pendingOrderParams.quantity,
+              pendingOrderParams.contractSizeUsd ?? contractSizeUsd,
+            );
+          }
           return p > 0 ? Number((pendingOrderParams.quantity * p).toFixed(2)) : null;
         })()}
         onAutoPause={onAutoPauseTimeMachine}

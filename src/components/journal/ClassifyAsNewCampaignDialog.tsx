@@ -6,6 +6,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { getAssignableLegRoles, LEG_ROLE_LABELS, MAIN_ADD_ROLES, STRATEGY_TEMPLATES, SELECTABLE_STRATEGY_TEMPLATES, usesDualHedgeSop } from '@/lib/strategyTemplates';
+import { getPositionNotionalUsd } from '@/lib/tradingSettlement';
 import {
   appendCampaignEvent,
   batchAttachToCampaign,
@@ -94,7 +95,7 @@ function itemExitPrice(item: ClassifiableItem) {
 function itemPositionSize(item: ClassifiableItem) {
   return item.kind === 'journal'
     ? item.journal.pre_position_size
-    : item.record.entryPrice * item.record.quantity;
+    : getPositionNotionalUsd(item.record.symbol, item.record, item.record.entryPrice);
 }
 
 function statusLabel(item: ClassifiableItem) {

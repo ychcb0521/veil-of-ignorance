@@ -14,8 +14,10 @@ import { Switch } from '@/components/ui/switch';
 import { useAuth } from '@/contexts/AuthContext';
 import { useTradingContext } from '@/contexts/TradingContext';
 import { useIsMobile } from '@/hooks/use-mobile';
+import { getSettlementAsset } from '@/lib/coinMargined';
 import { detachJournalFromCampaign, listAllCampaigns, listUnclassifiedItems, suggestLegRoles } from '@/lib/journalApi';
 import { LEG_ROLE_LABELS } from '@/lib/strategyTemplates';
+import { getPositionNotionalUsd } from '@/lib/tradingSettlement';
 import type { TradeCampaign, TradeJournal } from '@/types/journal';
 import type { ClassifiableItem } from '@/types/journalClassification';
 import type { TradeRecord } from '@/types/trading';
@@ -43,8 +45,11 @@ function fmtRoe(value: number | null | undefined) {
   return `${value >= 0 ? '+' : ''}${value.toFixed(2)}%`;
 }
 
-function fmtContract(symbol: string | null | undefined) {
-  return symbol?.replace(/USDT$/, '/USDT') || '—';
+function fmtContractForItem(item: ClassifiableItem, record: TradeRecord | null) {
+  const symbol = itemSymbol(item);
+  if (!symbol) return '—';
+  const quote = record?.settlementMode === 'coin' ? 'USD' : 'USDT';
+  return `${getSettlementAsset(symbol)}/${quote}`;
 }
 
 function fmtStackedTime(value: string | number | null | undefined) {
@@ -57,7 +62,7 @@ function fmtStackedTime(value: string | number | null | undefined) {
 
 function roeFromRecord(record: TradeRecord | null) {
   if (!record || record.leverage <= 0) return null;
-  const margin = (record.quantity * record.entryPrice) / record.leverage;
+  const margin = getPositionNotionalUsd(record.symbol, record, record.entryPrice) / record.leverage;
   return margin > 0 ? (record.pnl / margin) * 100 : null;
 }
 
@@ -491,7 +496,7 @@ export default function JournalCampaignClassifyPage() {
                               }}
                             />
                           </td>
-                          <td className="px-3 py-2 text-foreground font-medium whitespace-nowrap">{fmtContract(itemSymbol(item))}</td>
+                          <td className="px-3 py-2 text-foreground font-medium whitespace-nowrap">{fmtContractForItem(item, record)}</td>
                           <td className={`px-3 py-2 font-bold whitespace-pre-line ${direction === 'short' ? 'text-[#F6465D]' : 'text-[#0ECB81]'}`}>
                             {direction === 'short' ? '空' : '多'}{leverage ? `\n${leverage}x` : ''}
                           </td>

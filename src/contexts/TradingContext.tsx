@@ -28,15 +28,30 @@ import type {
   OrderSide,
   OrderType,
   MarginMode,
+  SettlementMode,
   TriggerOperator,
   CancelledOrderSnapshot,
   FilledOrderSnapshot,
 } from '@/types/trading';
 import {
-  calcFee, calcUnrealizedPnl, calcSlippage,
+  calcUnrealizedPnl,
   MAINTENANCE_MARGIN_RATE, LIQUIDATION_FEE_RATE, FUNDING_RATE, FUNDING_HOURS, getTriggerOperator,
 } from '@/types/trading';
 import { resolveConditionalTriggerPrice, shouldRejectImmediateConditionalPlacement } from '@/lib/conditionalOrders';
+import {
+  POSITION_DUST_EPSILON,
+  closeSettlementPosition,
+  executeSettlementFill,
+  formatSettlementQuantity,
+  getPositionNotionalUsd,
+  getPositionUnits,
+  getSettlementFeeParts,
+  getSettlementMarginParts,
+  isCoinSettled,
+  isPositionOpen,
+  normalizeSettlementOrder,
+  scaleSettlementPosition,
+} from '@/lib/tradingSettlement';
 import {
   createDefaultExecutionAssetState,
   recordExecutionTrade as applyExecutionTradeReward,
@@ -103,10 +118,13 @@ interface TradingState {
   setQuantityPrecision: (v: number) => void;
   leverageMap: Record<string, number>;
   marginModeMap: Record<string, MarginMode>;
+  settlementModeMap: Record<string, SettlementMode>;
   getSymbolLeverage: (symbol: string) => number;
   setSymbolLeverage: (symbol: string, value: number | ((prev: number) => number)) => void;
   getSymbolMarginMode: (symbol: string) => MarginMode;
   setSymbolMarginMode: (symbol: string, mode: MarginMode) => void;
+  getSymbolSettlementMode: (symbol: string) => SettlementMode;
+  setSymbolSettlementMode: (symbol: string, mode: SettlementMode) => void;
   activeSymbols: string[];
   handlePlaceOrder: (symbol: string, order: PlaceOrderParams) => { id: string } | null;
   handleClosePosition: (symbol: string, index: number, percentage?: number, method?: 'manual' | 'sl' | 'tp1' | 'tp2' | 'tp3' | 'liquidation') => void;
@@ -160,6 +178,10 @@ export interface PlaceOrderParams {
   currencyUnit: 'BASE' | 'USDT';
   usdtInputMode: 'ORDER_VALUE' | 'INITIAL_MARGIN';
   inputAmount: number;
+  settlementMode?: SettlementMode;
+  settlementAsset?: string;
+  contractSizeUsd?: number;
+  contracts?: number;
   callbackRate?: number;
   trailingExecType?: 'MARKET' | 'LIMIT';
   trailingLimitPrice?: number;
@@ -202,42 +224,6 @@ function calcAvailable(balance: number, positionsMap: PositionsMap): number {
     }
   }
   return balance - totalCrossMargin;
-}
-
-function applySlippageIfTaker(price: number, quantity: number, side: OrderSide, isMaker: boolean): { fillPrice: number; slippage: number } {
-  if (isMaker) return { fillPrice: price, slippage: 0 };
-  const notional = price * quantity;
-  const slippedPrice = calcSlippage(price, notional, side);
-  return { fillPrice: slippedPrice, slippage: Math.abs(slippedPrice - price) * quantity };
-}
-
-function executeFill(
-  rawPrice: number,
-  order: { side: OrderSide; quantity: number; leverage: number; marginMode: MarginMode },
-  isMaker: boolean,
-  openTime: number = 0,
-): { fee: number; margin: number; slippage: number; position: Position } {
-  const { fillPrice, slippage } = applySlippageIfTaker(rawPrice, order.quantity, order.side, isMaker);
-  const fee = calcFee(fillPrice, order.quantity, isMaker);
-  const margin = (order.quantity * fillPrice) / order.leverage;
-
-  // PURE FACTORY: brand new Position with unique physical identity and hard-reset PnL basis
-  const position: Position = {
-    id: crypto.randomUUID(),
-    side: order.side,
-    entryPrice: fillPrice,
-    quantity: order.quantity,
-    leverage: order.leverage,
-    marginMode: order.marginMode,
-    margin,
-    isolatedMargin: order.marginMode === 'isolated' ? margin : undefined,
-    openTime,
-  };
-
-  console.log('[开仓核对] 瞬时入场价:', fillPrice, ' | 瞬时标记价:', rawPrice, ' | 如果这俩数字不同，就是组件传参延迟导致的脱节！');
-  console.log('[持仓实例]', { positionId: position.id, symbolHint: 'fresh-open', quantity: position.quantity, entryPrice: position.entryPrice });
-
-  return { fee, margin, slippage, position };
 }
 
 // ===== Provider =====
@@ -286,7 +272,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
       for (const [symbol, positions] of Object.entries(prev)) {
         const normalized = positions
           .filter(position => {
-            const keep = position.quantity > 1e-6;
+            const keep = isPositionOpen(position);
             if (!keep) changed = true;
             return keep;
           })
@@ -307,6 +293,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
   const [quantityPrecision, setQuantityPrecision] = useState(3);
   const [leverageMap, setLeverageMap] = usePersistedState<Record<string, number>>('symbol_leverage', {});
   const [marginModeMap, setMarginModeMap] = usePersistedState<Record<string, MarginMode>>('symbol_margin_mode', {});
+  const [settlementModeMap, setSettlementModeMap] = usePersistedState<Record<string, SettlementMode>>('symbol_settlement_mode', {});
 
   // === Multi-Timeline Mode ===
   const [timeMode, setTimeMode] = usePersistedState<TimeMode>('time_mode', 'synced');
@@ -485,6 +472,14 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
     setMarginModeMap(prev => ({ ...prev, [symbol]: mode }));
   }, [setMarginModeMap]);
 
+  const getSymbolSettlementMode = useCallback((symbol: string): SettlementMode => {
+    return settlementModeMap[symbol] ?? 'usdt';
+  }, [settlementModeMap]);
+
+  const setSymbolSettlementMode = useCallback((symbol: string, mode: SettlementMode) => {
+    setSettlementModeMap(prev => ({ ...prev, [symbol]: mode }));
+  }, [setSettlementModeMap]);
+
   useEffect(() => {
     setOrdersMap(prev => {
       let changed = false;
@@ -556,9 +551,10 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
       if (price <= 0 || positions.length === 0) continue;
 
       for (const pos of positions) {
-        const notional = pos.quantity * price;
+        const notional = getPositionNotionalUsd(sym, pos, price);
         const fee = notional * FUNDING_RATE;
         const amount = pos.side === 'LONG' ? -fee : fee;
+        const feeCoin = isCoinSettled(pos) && price > 0 ? Math.abs(fee) / price : undefined;
         totalFunding += amount;
         posCount++;
 
@@ -566,8 +562,12 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
           id: crypto.randomUUID(), symbol: sym, side: pos.side,
           type: 'FUNDING' as any, action: 'FUNDING',
           entryPrice: price, exitPrice: 0,
-          quantity: pos.quantity, leverage: pos.leverage,
+          quantity: getPositionUnits(pos), contracts: isCoinSettled(pos) ? getPositionUnits(pos) : undefined,
+          leverage: pos.leverage,
           pnl: amount, fee: Math.abs(fee), slippage: 0,
+          feeCoin, notionalUsd: notional,
+          settlementMode: pos.settlementMode, settlementAsset: pos.settlementAsset,
+          contractSizeUsd: pos.contractSizeUsd,
           openTime: now, closeTime: now,
           closedRealAt: Date.now(),
         });
@@ -601,19 +601,24 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
 
         const pnl = calcUnrealizedPnl(pos, price);
         const posEquity = pos.isolatedMargin + pnl;
-        const maintMargin = pos.quantity * price * MAINTENANCE_MARGIN_RATE;
+        const notional = getPositionNotionalUsd(sym, pos, price);
+        const maintMargin = notional * MAINTENANCE_MARGIN_RATE;
 
         if (posEquity > maintMargin) continue;
 
-        const closeFee = calcFee(price, pos.quantity, false);
-        const liqFee = pos.quantity * price * LIQUIDATION_FEE_RATE;
+        const { feeUsd: closeFee, feeCoin } = getSettlementFeeParts(sym, pos, price, false);
+        const liqFee = notional * LIQUIDATION_FEE_RATE;
 
         setTradeHistory(prev => [...prev, {
           id: crypto.randomUUID(), symbol: sym, side: pos.side,
           type: 'MARKET' as OrderType, action: 'LIQUIDATION' as const,
           entryPrice: pos.entryPrice, exitPrice: price,
-          quantity: pos.quantity, leverage: pos.leverage,
+          quantity: getPositionUnits(pos), contracts: isCoinSettled(pos) ? getPositionUnits(pos) : undefined,
+          leverage: pos.leverage,
           pnl: pnl - closeFee - liqFee, fee: closeFee + liqFee, slippage: 0,
+          feeCoin, notionalUsd: notional,
+          settlementMode: pos.settlementMode, settlementAsset: pos.settlementAsset,
+          contractSizeUsd: pos.contractSizeUsd,
           openTime: pos.openTime || 0, closeTime: getEffectiveTime(sym),
           exit_method: 'liquidation',
           closedRealAt: Date.now(),
@@ -625,7 +630,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
         }));
 
         // Isolated margin is lost — no change to global balance (it was already deducted at open)
-        toast.error(`🚨 逐仓爆仓: ${sym} ${pos.side === 'LONG' ? '多' : '空'} ${pos.quantity}`, {
+        toast.error(`🚨 逐仓爆仓: ${sym} ${pos.side === 'LONG' ? '多' : '空'} ${formatSettlementQuantity(pos, sym)}`, {
           description: `保证金 ${pos.isolatedMargin.toFixed(2)} USDT 已清零`,
           duration: 8000,
         });
@@ -643,7 +648,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
       for (const pos of positions) {
         if (pos.marginMode !== 'cross') continue;
         crossUnrealizedPnl += calcUnrealizedPnl(pos, price);
-        crossMaintenanceMargin += pos.quantity * price * MAINTENANCE_MARGIN_RATE;
+        crossMaintenanceMargin += getPositionNotionalUsd(sym, pos, price) * MAINTENANCE_MARGIN_RATE;
         crossPositionCount++;
       }
     }
@@ -665,16 +670,21 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
           for (const pos of positions) {
             if (pos.marginMode !== 'cross') continue;
             const pnl = calcUnrealizedPnl(pos, price);
-            const closeFee = calcFee(price, pos.quantity, false);
-            const liqFee = pos.quantity * price * LIQUIDATION_FEE_RATE;
+            const notional = getPositionNotionalUsd(sym, pos, price);
+            const { feeUsd: closeFee, feeCoin } = getSettlementFeeParts(sym, pos, price, false);
+            const liqFee = notional * LIQUIDATION_FEE_RATE;
             totalLoss += Math.abs(Math.min(0, pnl - closeFee - liqFee)) + liqFee;
 
             liqRecords.push({
               id: crypto.randomUUID(), symbol: sym, side: pos.side,
               type: 'MARKET' as OrderType, action: 'LIQUIDATION' as const,
               entryPrice: pos.entryPrice, exitPrice: price,
-              quantity: pos.quantity, leverage: pos.leverage,
+              quantity: getPositionUnits(pos), contracts: isCoinSettled(pos) ? getPositionUnits(pos) : undefined,
+              leverage: pos.leverage,
               pnl: pnl - closeFee - liqFee, fee: closeFee + liqFee, slippage: 0,
+              feeCoin, notionalUsd: notional,
+              settlementMode: pos.settlementMode, settlementAsset: pos.settlementAsset,
+              contractSizeUsd: pos.contractSizeUsd,
               openTime: pos.openTime || 0, closeTime: getEffectiveTime(sym),
               exit_method: 'liquidation',
               closedRealAt: Date.now(),
@@ -721,37 +731,48 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
       toast.error('无法获取当前价格'); return null;
     }
 
+    const normalizedOrder = normalizeSettlementOrder(symbol, {
+      ...order,
+      settlementMode: order.settlementMode ?? getSymbolSettlementMode(symbol),
+    });
+
     const now = getEffectiveTime(symbol);
     const buildExecutionTradeSnapshot = (
       position: Position,
       orderType: string,
     ): ExecutionTradeSnapshot => {
-      const notional = position.entryPrice * position.quantity;
+      const notional = getPositionNotionalUsd(symbol, position, position.entryPrice);
       return {
         symbol,
         side: position.side,
         orderType,
         entryPrice: position.entryPrice,
-        quantity: position.quantity,
+        quantity: getPositionUnits(position),
         leverage: position.leverage,
         marginMode: position.marginMode,
+        settlementMode: position.settlementMode,
+        settlementAsset: position.settlementAsset,
+        contractSizeUsd: position.contractSizeUsd,
+        contracts: position.contracts,
+        marginCoin: position.marginCoin,
         margin: position.margin,
         notional,
+        notionalUsd: notional,
         simulatedTime: now,
         positionId: position.id,
       };
     };
 
-    if (order.type === 'CONDITIONAL') {
+    if (normalizedOrder.type === 'CONDITIONAL') {
       const currentP = Number(effectiveCurrentPrice);
-      const triggerP = Number(order.stopPrice);
+      const triggerP = Number(normalizedOrder.stopPrice);
 
       if (!Number.isFinite(triggerP) || triggerP <= 0) {
         toast.error('触发价无效');
         return null;
       }
 
-      if (shouldRejectImmediateConditionalPlacement(order.side, currentP, triggerP)) {
+      if (shouldRejectImmediateConditionalPlacement(normalizedOrder.side, currentP, triggerP)) {
         toast.error('触发价设置不合理，订单将立即成交，请修改或使用市价单');
         return null;
       }
@@ -761,8 +782,8 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
     // Only CLOSE/LIQUIDATION/FUNDING produce realized PnL entries.
 
     // BEST PRICE (taker)
-    if (order.priceSelection === 'BEST') {
-      const { fee, margin, slippage, position } = executeFill(effectiveCurrentPrice, order, false, now);
+    if (normalizedOrder.priceSelection === 'BEST') {
+      const { fee, margin, slippage, position } = executeSettlementFill(symbol, effectiveCurrentPrice, normalizedOrder, false, now);
       const requiredMargin = margin + fee;
       if (requiredMargin > available) {
         toast.error('可用余额不足', {
@@ -773,20 +794,20 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
       setBalance(prev => prev - requiredMargin);
       setPositionsMap(prev => {
         // Filter out any ghost (near-zero) positions for this symbol before adding
-        const existing = (prev[symbol] || []).filter(p => p.quantity > 1e-8);
+        const existing = (prev[symbol] || []).filter(isPositionOpen);
         return { ...prev, [symbol]: [...existing, position] };
       });
       // 执行力资产只奖励做多开仓：做空一律视为辅助对冲单，不计分。
-      if (order.side === 'LONG') {
+      if (normalizedOrder.side === 'LONG') {
         recordExecutionTrade(tradingModeRef.current, buildExecutionTradeSnapshot(position, 'BEST'));
       }
-      toast.success(`最优价成交: ${order.side === 'LONG' ? '开多' : '开空'} ${order.quantity.toFixed(6)} @ ${position.entryPrice.toFixed(2)}`);
+      toast.success(`最优价成交: ${normalizedOrder.side === 'LONG' ? '开多' : '开空'} ${formatSettlementQuantity(position, symbol)} @ ${position.entryPrice.toFixed(2)}`);
       return { id: position.id };
     }
 
     // MARKET (taker with slippage)
-    if (order.type === 'MARKET') {
-      const { fee, margin, slippage, position } = executeFill(effectiveCurrentPrice, order, false, now);
+    if (normalizedOrder.type === 'MARKET') {
+      const { fee, margin, slippage, position } = executeSettlementFill(symbol, effectiveCurrentPrice, normalizedOrder, false, now);
       const requiredMargin = margin + fee;
       if (requiredMargin > available) {
         toast.error('可用余额不足', {
@@ -796,36 +817,42 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
       }
       setBalance(prev => prev - requiredMargin);
       setPositionsMap(prev => {
-        const existing = (prev[symbol] || []).filter(p => p.quantity > 1e-8);
+        const existing = (prev[symbol] || []).filter(isPositionOpen);
         return { ...prev, [symbol]: [...existing, position] };
       });
       // 执行力资产只奖励做多开仓：做空一律视为辅助对冲单，不计分。
-      if (order.side === 'LONG') {
-        recordExecutionTrade(tradingModeRef.current, buildExecutionTradeSnapshot(position, order.type));
+      if (normalizedOrder.side === 'LONG') {
+        recordExecutionTrade(tradingModeRef.current, buildExecutionTradeSnapshot(position, normalizedOrder.type));
       }
-      toast.success(`${order.side === 'LONG' ? '开多' : '开空'} ${order.quantity.toFixed(6)} @ ${position.entryPrice.toFixed(2)}`);
+      toast.success(`${normalizedOrder.side === 'LONG' ? '开多' : '开空'} ${formatSettlementQuantity(position, symbol)} @ ${position.entryPrice.toFixed(2)}`);
       return { id: position.id };
     }
 
     // POST ONLY
-    if (order.type === 'POST_ONLY') {
-      if (order.side === 'LONG' && order.price >= effectiveCurrentPrice) { toast.error('Post Only 被拒绝'); return null; }
-      if (order.side === 'SHORT' && order.price <= effectiveCurrentPrice) { toast.error('Post Only 被拒绝'); return null; }
+    if (normalizedOrder.type === 'POST_ONLY') {
+      if (normalizedOrder.side === 'LONG' && normalizedOrder.price >= effectiveCurrentPrice) { toast.error('Post Only 被拒绝'); return null; }
+      if (normalizedOrder.side === 'SHORT' && normalizedOrder.price <= effectiveCurrentPrice) { toast.error('Post Only 被拒绝'); return null; }
     }
 
     // SCALED
-    if (order.type === 'SCALED') {
-      const count = order.scaledCount || 5;
-      const startP = order.scaledStartPrice || 0;
-      const endP = order.scaledEndPrice || 0;
+    if (normalizedOrder.type === 'SCALED') {
+      const count = normalizedOrder.scaledCount || 5;
+      const startP = normalizedOrder.scaledStartPrice || 0;
+      const endP = normalizedOrder.scaledEndPrice || 0;
       if (count < 2 || startP <= 0 || endP <= 0) { toast.error('分段订单参数无效'); return null; }
       const step = (endP - startP) / (count - 1);
-      const qtyPerStep = order.quantity / count;
+      const qtyPerStep = isCoinSettled(normalizedOrder)
+        ? Math.max(1, Math.round(normalizedOrder.quantity / count))
+        : normalizedOrder.quantity / count;
       const parentId = crypto.randomUUID();
       const newOrders: PendingOrder[] = Array.from({ length: count }, (_, i) => ({
-        id: crypto.randomUUID(), side: order.side, type: 'LIMIT' as OrderType,
+        id: crypto.randomUUID(), side: normalizedOrder.side, type: 'LIMIT' as OrderType,
         price: startP + step * i, stopPrice: 0, quantity: qtyPerStep,
-        leverage: order.leverage, marginMode: order.marginMode,
+        leverage: normalizedOrder.leverage, marginMode: normalizedOrder.marginMode,
+        settlementMode: normalizedOrder.settlementMode,
+        settlementAsset: normalizedOrder.settlementAsset,
+        contractSizeUsd: normalizedOrder.contractSizeUsd,
+        contracts: isCoinSettled(normalizedOrder) ? qtyPerStep : undefined,
         status: 'NEW' as const, createdAt: now, parentScaledId: parentId,
         tradingMode: tradingModeRef.current,
       }));
@@ -835,16 +862,20 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
     }
 
     // TWAP
-    if (order.type === 'TWAP') {
-      const durationMs = (order.twapDuration || 60) * 60 * 1000;
-      const intervalMs = (order.twapInterval || 5) * 60 * 1000;
+    if (normalizedOrder.type === 'TWAP') {
+      const durationMs = (normalizedOrder.twapDuration || 60) * 60 * 1000;
+      const intervalMs = (normalizedOrder.twapInterval || 5) * 60 * 1000;
       const twapOrder: PendingOrder = {
-        id: crypto.randomUUID(), side: order.side, type: 'TWAP',
-        price: 0, stopPrice: 0, quantity: order.quantity,
-        leverage: order.leverage, marginMode: order.marginMode,
+        id: crypto.randomUUID(), side: normalizedOrder.side, type: 'TWAP',
+        price: 0, stopPrice: 0, quantity: normalizedOrder.quantity,
+        leverage: normalizedOrder.leverage, marginMode: normalizedOrder.marginMode,
+        settlementMode: normalizedOrder.settlementMode,
+        settlementAsset: normalizedOrder.settlementAsset,
+        contractSizeUsd: normalizedOrder.contractSizeUsd,
+        contracts: normalizedOrder.contracts,
         status: 'ACTIVE', createdAt: now,
         tradingMode: tradingModeRef.current,
-        twapTotalQty: order.quantity, twapFilledQty: 0,
+        twapTotalQty: normalizedOrder.quantity, twapFilledQty: 0,
         twapInterval: intervalMs, twapNextExecTime: now,
         twapEndTime: now + durationMs,
       };
@@ -854,8 +885,10 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
     }
 
     // All other pending types — strict margin pre-check
-    const estPrice = order.price > 0 ? order.price : effectiveCurrentPrice;
-    const estMargin = (order.quantity * estPrice) / order.leverage + calcFee(estPrice, order.quantity, true);
+    const estPrice = normalizedOrder.price > 0 ? normalizedOrder.price : effectiveCurrentPrice;
+    const { marginUsd } = getSettlementMarginParts(symbol, normalizedOrder, estPrice);
+    const { feeUsd } = getSettlementFeeParts(symbol, normalizedOrder, estPrice, true);
+    const estMargin = marginUsd + feeUsd;
     if (estMargin > available) {
       toast.error('可用余额不足', {
         description: `需要 ${estMargin.toFixed(2)} USDT，当前可用 ${available.toFixed(2)} USDT`,
@@ -866,69 +899,77 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
     // Determine trigger direction / operator at placement from the then-current price snapshot
     let triggerDirection: 'UP' | 'DOWN' | undefined;
     let operator: PendingOrder['operator'];
-    if (order.type === 'CONDITIONAL' && order.stopPrice > 0) {
-      operator = getTriggerOperator(order.stopPrice, effectiveCurrentPrice);
+    if (normalizedOrder.type === 'CONDITIONAL' && normalizedOrder.stopPrice > 0) {
+      operator = getTriggerOperator(normalizedOrder.stopPrice, effectiveCurrentPrice);
       triggerDirection = operator === '>=' ? 'UP' : 'DOWN';
-    } else if (['MARKET_TP_SL', 'LIMIT_TP_SL'].includes(order.type) && order.stopPrice > 0) {
-      if (order.stopPrice > effectiveCurrentPrice) {
+    } else if (['MARKET_TP_SL', 'LIMIT_TP_SL'].includes(normalizedOrder.type) && normalizedOrder.stopPrice > 0) {
+      if (normalizedOrder.stopPrice > effectiveCurrentPrice) {
         triggerDirection = 'UP';
-      } else if (order.stopPrice < effectiveCurrentPrice) {
+      } else if (normalizedOrder.stopPrice < effectiveCurrentPrice) {
         triggerDirection = 'DOWN';
       } else {
         // triggerPrice === currentPrice: default to safe side based on order side
-        triggerDirection = order.side === 'LONG' ? 'UP' : 'DOWN';
+        triggerDirection = normalizedOrder.side === 'LONG' ? 'UP' : 'DOWN';
       }
     }
 
     const newOrder: PendingOrder = {
-      id: crypto.randomUUID(), side: order.side, type: order.type,
-      price: order.price, stopPrice: order.stopPrice, quantity: order.quantity,
-      leverage: order.leverage, marginMode: order.marginMode,
-      status: order.type === 'CONDITIONAL' ? 'PENDING' : 'NEW', createdAt: now,
+      id: crypto.randomUUID(), side: normalizedOrder.side, type: normalizedOrder.type,
+      price: normalizedOrder.price, stopPrice: normalizedOrder.stopPrice, quantity: normalizedOrder.quantity,
+      leverage: normalizedOrder.leverage, marginMode: normalizedOrder.marginMode,
+      settlementMode: normalizedOrder.settlementMode,
+      settlementAsset: normalizedOrder.settlementAsset,
+      contractSizeUsd: normalizedOrder.contractSizeUsd,
+      contracts: normalizedOrder.contracts,
+      status: normalizedOrder.type === 'CONDITIONAL' ? 'PENDING' : 'NEW', createdAt: now,
       tradingMode: tradingModeRef.current,
-      callbackRate: order.callbackRate, trailingExecType: order.trailingExecType,
-      trailingLimitPrice: order.trailingLimitPrice, trailingActivated: false,
-      conditionalExecType: order.conditionalExecType, conditionalLimitPrice: order.conditionalLimitPrice,
+      callbackRate: normalizedOrder.callbackRate, trailingExecType: normalizedOrder.trailingExecType,
+      trailingLimitPrice: normalizedOrder.trailingLimitPrice, trailingActivated: false,
+      conditionalExecType: normalizedOrder.conditionalExecType, conditionalLimitPrice: normalizedOrder.conditionalLimitPrice,
       triggerDirection, operator,
     };
     setOrdersMap(prev => ({ ...prev, [symbol]: [...(prev[symbol] || []), newOrder] }));
     toast.info('委托已挂出');
     return { id: newOrder.id };
-  }, [getEffectiveTime, recordExecutionTrade]);
+  }, [getEffectiveTime, getSymbolSettlementMode, recordExecutionTrade]);
 
   // ===== Close Position — supports partial close via percentage (0-1] =====
   const handleClosePosition = useCallback((symbol: string, index: number, percentage: number = 1, method: 'manual' | 'sl' | 'tp1' | 'tp2' | 'tp3' | 'liquidation' = 'manual') => {
     const symbolPositions = positionsMapRef.current[symbol] || [];
     const pos = symbolPositions[index];
-    if (!pos || pos.quantity <= 0) return;
+    const totalUnits = getPositionUnits(pos);
+    if (!pos || totalUnits <= 0) return;
 
     const pct = Math.min(1, Math.max(0.01, percentage));
-    const closeQty = pos.quantity * pct;
+    let closeQty = totalUnits * pct;
+    if (isCoinSettled(pos)) closeQty = Math.max(1, Math.round(closeQty));
     const rawPrice = priceMapRef.current[symbol] || 0;
     if (rawPrice <= 0) { toast.error('无法获取当前价格'); return; }
 
-    const closeSide: OrderSide = pos.side === 'LONG' ? 'SHORT' : 'LONG';
-    const { fillPrice, slippage } = applySlippageIfTaker(rawPrice, closeQty, closeSide, false);
-    const pnl = pos.side === 'LONG'
-      ? (fillPrice - pos.entryPrice) * closeQty
-      : (pos.entryPrice - fillPrice) * closeQty;
-    const fee = calcFee(fillPrice, closeQty, false);
+    const {
+      fillPrice,
+      slippageUsd,
+      pnlUsd,
+      pnlCoin,
+      feeUsd,
+      feeCoin,
+      notionalUsd,
+    } = closeSettlementPosition(symbol, pos, rawPrice, closeQty, false);
 
     const closedMargin = pos.margin * pct;
     const closedIsoMargin = pos.isolatedMargin != null ? pos.isolatedMargin * pct : undefined;
 
     const returnedMargin = pos.marginMode === 'isolated' && closedIsoMargin != null
-      ? closedIsoMargin + pnl - fee
-      : closedMargin + pnl - fee;
+      ? closedIsoMargin + pnlUsd - feeUsd
+      : closedMargin + pnlUsd - feeUsd;
 
     // Credit to single global balance
     setBalance(prev => prev + Math.max(0, returnedMargin));
 
     // Determine if this position will be fully closed (for OCO cleanup)
     // Use Epsilon Threshold (1e-6) to defend against JS float precision dust
-    const POSITION_DUST_EPSILON = 1e-6;
-    const remainingQtyAfter = pos.quantity * (1 - pct);
-    const willFullyClose = pct >= 1 || remainingQtyAfter <= POSITION_DUST_EPSILON;
+    const remainingUnitsAfter = totalUnits - closeQty;
+    const willFullyClose = pct >= 1 || remainingUnitsAfter <= POSITION_DUST_EPSILON;
     const closedPositionId = pos.id;
 
     // Update or remove position — physical destruction on full close
@@ -936,25 +977,17 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
       const positions = [...(prev[symbol] || [])];
       if (willFullyClose) {
         // Physically remove by id (defensive: not just by index)
-        const filtered = positions.filter(p => p.id !== closedPositionId && p.quantity > POSITION_DUST_EPSILON);
+        const filtered = positions.filter(p => p.id !== closedPositionId && isPositionOpen(p));
         return { ...prev, [symbol]: filtered };
       }
       const remaining = positions[index];
-      const remainPct = 1 - pct;
-      const newQty = remaining.quantity * remainPct;
-      if (newQty <= POSITION_DUST_EPSILON) {
-        const filtered = positions.filter(p => p.id !== closedPositionId && p.quantity > POSITION_DUST_EPSILON);
+      if (remainingUnitsAfter <= POSITION_DUST_EPSILON) {
+        const filtered = positions.filter(p => p.id !== closedPositionId && isPositionOpen(p));
         return { ...prev, [symbol]: filtered };
       }
-      positions[index] = {
-        ...remaining,
-        quantity: newQty,
-        margin: remaining.margin * remainPct,
-        isolatedMargin: remaining.isolatedMargin != null
-          ? remaining.isolatedMargin * remainPct : undefined,
-      };
+      positions[index] = scaleSettlementPosition(remaining, remainingUnitsAfter);
       // Final sanitization sweep — drop any dust positions
-      return { ...prev, [symbol]: positions.filter(p => p.quantity > POSITION_DUST_EPSILON) };
+      return { ...prev, [symbol]: positions.filter(isPositionOpen) };
     });
 
     // OCO / linked TP-SL maintenance — drop ALL linked reduce-only orders on full close (orphan prevention)
@@ -971,10 +1004,14 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
           }
           // partial close: rescale the reduce-only quantity proportionally
           const remainPct = 1 - pct;
-          const newQty = o.quantity * remainPct;
+          const newQty = isCoinSettled(pos) ? Math.max(1, Math.round(o.quantity * remainPct)) : o.quantity * remainPct;
           if (newQty <= POSITION_DUST_EPSILON) { changed = true; continue; }
           changed = true;
-          next.push({ ...o, quantity: newQty });
+          next.push({
+            ...o,
+            quantity: newQty,
+            contracts: isCoinSettled(pos) ? newQty : o.contracts,
+          });
           continue;
         }
         next.push(o);
@@ -985,16 +1022,21 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
     setTradeHistory(prev => [...prev, {
       id: crypto.randomUUID(), symbol, side: pos.side, type: 'MARKET' as OrderType,
       action: 'CLOSE' as const, entryPrice: pos.entryPrice, exitPrice: fillPrice,
-      quantity: closeQty, leverage: pos.leverage,
-      pnl: pnl - fee, fee, slippage, openTime: pos.openTime || 0, closeTime: getEffectiveTime(symbol),
+      quantity: closeQty, contracts: isCoinSettled(pos) ? closeQty : undefined,
+      leverage: pos.leverage,
+      pnl: pnlUsd - feeUsd, pnlCoin, feeCoin,
+      fee: feeUsd, slippage: slippageUsd, notionalUsd,
+      settlementMode: pos.settlementMode, settlementAsset: pos.settlementAsset,
+      contractSizeUsd: pos.contractSizeUsd,
+      openTime: pos.openTime || 0, closeTime: getEffectiveTime(symbol),
       exit_method: method,
       closedRealAt: Date.now(),
     }]);
 
     const pctLabel = pct < 1 ? ` (${Math.round(pct * 100)}%)` : '';
-    const netPnl = pnl - fee;
+    const netPnl = pnlUsd - feeUsd;
     toast.success(`市价平仓成功，已结算盈亏：${netPnl >= 0 ? '+' : ''}${netPnl.toFixed(2)} USDT`, {
-      description: `${symbol}${pctLabel} @ ${fillPrice.toFixed(2)}`,
+      description: `${symbol} ${formatSettlementQuantity({ ...pos, quantity: closeQty, contracts: isCoinSettled(pos) ? closeQty : undefined }, symbol)}${pctLabel} @ ${fillPrice.toFixed(2)}`,
     });
   }, [getEffectiveTime]);
 
@@ -1006,7 +1048,10 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
     }
 
     const safePct = Math.min(100, Math.max(1, pct));
-    const closeQty = pos.quantity * (safePct / 100);
+    const totalUnits = getPositionUnits(pos);
+    const closeQty = isCoinSettled(pos)
+      ? Math.max(1, Math.round(totalUnits * (safePct / 100)))
+      : totalUnits * (safePct / 100);
     if (closeQty <= 0) {
       toast.error('平仓数量无效');
       return;
@@ -1041,6 +1086,9 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
           id: crypto.randomUUID(), side: closeSide, type: 'CONDITIONAL' as OrderType,
           price: 0, stopPrice: tp, quantity: closeQty,
           leverage: pos.leverage, marginMode: pos.marginMode,
+          settlementMode: pos.settlementMode, settlementAsset: pos.settlementAsset,
+          contractSizeUsd: pos.contractSizeUsd,
+          contracts: isCoinSettled(pos) ? closeQty : undefined,
           status: 'PENDING', createdAt: now,
           conditionalExecType: 'MARKET',
           operator: tpOperator, triggerDirection: tpOperator === '>=' ? 'UP' : 'DOWN',
@@ -1055,6 +1103,9 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
           id: crypto.randomUUID(), side: closeSide, type: 'CONDITIONAL' as OrderType,
           price: 0, stopPrice: sl, quantity: closeQty,
           leverage: pos.leverage, marginMode: pos.marginMode,
+          settlementMode: pos.settlementMode, settlementAsset: pos.settlementAsset,
+          contractSizeUsd: pos.contractSizeUsd,
+          contracts: isCoinSettled(pos) ? closeQty : undefined,
           status: 'PENDING', createdAt: now,
           conditionalExecType: 'MARKET',
           operator: slOperator, triggerDirection: slOperator === '>=' ? 'UP' : 'DOWN',
@@ -1094,7 +1145,11 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
           linkedPositionId: order.linkedPositionId ?? null,
           price: orderPrice,
           quantity: order.quantity,
+          contracts: order.contracts,
           leverage: order.leverage,
+          settlementMode: order.settlementMode,
+          settlementAsset: order.settlementAsset,
+          contractSizeUsd: order.contractSizeUsd,
           createdAt: order.createdAt,
           cancelledAt,
         },
@@ -1121,7 +1176,9 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
     }
 
     const currentMargin = pos.isolatedMargin ?? pos.margin;
-    const initialMargin = (pos.quantity * pos.entryPrice) / pos.leverage;
+    const initialMargin = isCoinSettled(pos)
+      ? pos.margin
+      : (pos.quantity * pos.entryPrice) / pos.leverage;
 
     if (signedDelta > 0) {
       // ADD
@@ -1133,7 +1190,14 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
         const arr = [...(prev[symbol] || [])];
         const p = arr[posIndex];
         if (!p) return prev;
-        arr[posIndex] = { ...p, isolatedMargin: (p.isolatedMargin ?? p.margin) + actual };
+        const price = priceMapRef.current[symbol] || p.entryPrice;
+        const coinDelta = isCoinSettled(p) && price > 0 ? actual / price : 0;
+        arr[posIndex] = {
+          ...p,
+          isolatedMargin: (p.isolatedMargin ?? p.margin) + actual,
+          margin: p.margin + actual,
+          marginCoin: p.marginCoin == null ? undefined : p.marginCoin + coinDelta,
+        };
         return { ...prev, [symbol]: arr };
       });
     } else {
@@ -1150,7 +1214,14 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
         const arr = [...(prev[symbol] || [])];
         const p = arr[posIndex];
         if (!p) return prev;
-        arr[posIndex] = { ...p, isolatedMargin: (p.isolatedMargin ?? p.margin) - actual };
+        const price = priceMapRef.current[symbol] || p.entryPrice;
+        const coinDelta = isCoinSettled(p) && price > 0 ? actual / price : 0;
+        arr[posIndex] = {
+          ...p,
+          isolatedMargin: (p.isolatedMargin ?? p.margin) - actual,
+          margin: Math.max(0, p.margin - actual),
+          marginCoin: p.marginCoin == null ? undefined : Math.max(0, p.marginCoin - coinDelta),
+        };
         return { ...prev, [symbol]: arr };
       });
     }
@@ -1217,7 +1288,10 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
     activeSymbolPositions, activeSymbolOrders,
     allPositions, allOrders,
     currentPrice, pricePrecision, quantityPrecision, setPricePrecision, setQuantityPrecision,
-    leverageMap, marginModeMap, getSymbolLeverage, setSymbolLeverage, getSymbolMarginMode, setSymbolMarginMode,
+    leverageMap, marginModeMap, settlementModeMap,
+    getSymbolLeverage, setSymbolLeverage,
+    getSymbolMarginMode, setSymbolMarginMode,
+    getSymbolSettlementMode, setSymbolSettlementMode,
     activeSymbols,
     handlePlaceOrder, handleClosePosition, handleCancelOrder, handlePlaceTpSl,
     handleAddIsolatedMargin, handleAdjustMargin, handleClearSymbolData,

@@ -1,7 +1,8 @@
 import { ArrowLeft, X } from 'lucide-react';
 import { OrderPanel } from '@/components/OrderPanel';
 import { PositionPanel } from '@/components/PositionPanel';
-import type { PlaceOrderParams, PositionsMap, OrdersMap, PriceMap } from '@/contexts/TradingContext';
+import { useTradingContext, type PlaceOrderParams, type PositionsMap, type OrdersMap, type PriceMap } from '@/contexts/TradingContext';
+import { getSettlementAsset } from '@/lib/coinMargined';
 import type { TradeRecord } from '@/types/trading';
 import { useState } from 'react';
 
@@ -28,7 +29,10 @@ export function MobileTradingView({
   onClosePosition, onCancelOrder, balance, onAutoPauseTimeMachine,
 }: Props) {
   const [bottomTab, setBottomTab] = useState('positions');
-  const baseCoin = symbol.replace('USDT', '');
+  const { getSymbolSettlementMode } = useTradingContext();
+  const settlementMode = getSymbolSettlementMode(symbol);
+  const baseCoin = getSettlementAsset(symbol);
+  const quoteUnitLabel = settlementMode === 'coin' ? 'USD' : 'USDT';
 
   return (
     <div className="h-screen flex flex-col bg-background">
@@ -37,7 +41,7 @@ export function MobileTradingView({
         <button onClick={onBack} className="p-1 text-muted-foreground hover:text-foreground">
           <ArrowLeft className="w-5 h-5" />
         </button>
-        <span className="text-sm font-bold font-mono text-foreground">{baseCoin}USDT</span>
+        <span className="text-sm font-bold font-mono text-foreground">{baseCoin}{quoteUnitLabel}</span>
         <span className="text-[9px] px-1 py-0.5 rounded bg-primary/10 text-primary">永续</span>
         <div className="ml-auto flex items-center gap-2">
           <span className="text-xs text-muted-foreground">可用</span>

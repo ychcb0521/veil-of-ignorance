@@ -5,6 +5,8 @@
  */
 import { useEffect, useMemo, useState } from 'react';
 import type { KlineData } from '@/hooks/useBinanceData';
+import { useTradingContext } from '@/contexts/TradingContext';
+import { getSettlementAsset } from '@/lib/coinMargined';
 
 const FUNDING_INTERVAL_HOURS = [0, 8, 16];
 const FUNDING_RATE = 0.0001; // 0.01%
@@ -43,8 +45,11 @@ function formatCountdown(ms: number): string {
 }
 
 export function TickerBar({ symbol, currentPrice, visibleData, pricePrecision, effectiveSimTime }: Props) {
-  const baseCoin = symbol.replace('USDT', '');
-  const display = `${baseCoin}USDT`;
+  const { getSymbolSettlementMode } = useTradingContext();
+  const settlementMode = getSymbolSettlementMode(symbol);
+  const quoteUnitLabel = settlementMode === 'coin' ? 'USD' : 'USDT';
+  const baseCoin = getSettlementAsset(symbol);
+  const display = `${baseCoin}${quoteUnitLabel}`;
 
   // 24h stats derived from last ~24h of candles (works regardless of interval)
   const stats = useMemo(() => {
@@ -144,7 +149,7 @@ export function TickerBar({ symbol, currentPrice, visibleData, pricePrecision, e
       <Stat label="24h 最高" value={formatNum(stats.high, pricePrecision)} />
       <Stat label="24h 最低" value={formatNum(stats.low, pricePrecision)} />
       <Stat label={`24h 成交量(${baseCoin})`} value={formatVolume(stats.volume / Math.max(currentPrice, 1))} />
-      <Stat label="24h 成交额(USDT)" value={formatVolume(stats.volume)} />
+      <Stat label={`24h 成交额(${quoteUnitLabel})`} value={formatVolume(stats.volume)} />
     </div>
   );
 }

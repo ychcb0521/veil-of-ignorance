@@ -3,6 +3,8 @@
  * 字段命名与数据库列名保持一致（snake_case），与 supabase/types.ts 风格统一。
  */
 
+import type { SettlementMode } from './trading';
+
 export const ERROR_CATEGORY_CODES = [
   "entry_reason",
   "hedge_stop",
@@ -610,6 +612,14 @@ export interface TradeJournal {
   pre_checklist_passed: boolean | null;
   /** @deprecated v2 snapshot infers this from pendingOrderParams instead of user input. */
   pre_position_size: number | null;
+  /** Entry snapshot settlement mode. Null means legacy USDT-M. */
+  pre_settlement_mode?: SettlementMode | null;
+  /** Margin/settlement asset for coin-margined snapshots. */
+  pre_settlement_asset?: string | null;
+  /** Coin-margined contract face value in USD. */
+  pre_contract_size_usd?: number | null;
+  /** Coin-margined contract count. */
+  pre_contracts?: number | null;
   pre_max_loss_usdt: number | null;
 
   // ============ Snapshot v2 fields (batch 23) ============

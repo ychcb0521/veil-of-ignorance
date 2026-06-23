@@ -1,5 +1,6 @@
 import type { KlineData } from '@/hooks/useBinanceData';
 import { MAIN_ADD_ROLES, usesDualHedgeSop } from '@/lib/strategyTemplates';
+import { getPositionNotionalUsd } from '@/lib/tradingSettlement';
 import type { CampaignEvent, LegRole, TradeCampaign, TradeJournal } from '@/types/journal';
 import type { PendingOrder, TradeRecord } from '@/types/trading';
 
@@ -77,6 +78,10 @@ function findTradeRecord(leg: TradeJournal, tradeRecords: TradeRecord[]): TradeR
   return tradeRecords.find(record => record.id === leg.trade_record_id) ?? null;
 }
 
+function tradeRecordNotionalUsd(record: TradeRecord, price = record.entryPrice): number {
+  return getPositionNotionalUsd(record.symbol, record, price || record.entryPrice);
+}
+
 export function buildCampaignEventStream(
   campaign: TradeCampaign,
   legs: TradeJournal[],
@@ -97,7 +102,7 @@ export function buildCampaignEventStream(
         trade_record_id: tradeRecord.id,
         pending_order_id: null,
         price: tradeRecord.exitPrice,
-        size_usdt: tradeRecord.exitPrice * tradeRecord.quantity,
+        size_usdt: tradeRecordNotionalUsd(tradeRecord, tradeRecord.exitPrice),
         notes: null,
         recorded_at: new Date(tradeRecord.closeTime).toISOString(),
       });
@@ -114,7 +119,7 @@ export function buildCampaignEventStream(
         trade_record_id: tradeRecord.id,
         pending_order_id: null,
         price: tradeRecord.entryPrice,
-        size_usdt: tradeRecord.entryPrice * tradeRecord.quantity,
+        size_usdt: tradeRecordNotionalUsd(tradeRecord, tradeRecord.entryPrice),
         notes: null,
         recorded_at: new Date(tradeRecord.openTime).toISOString(),
       });
@@ -122,8 +127,8 @@ export function buildCampaignEventStream(
     }
 
     if (leg.leg_role && MAIN_ROLES.includes(leg.leg_role)) {
-      const mainSize = leg.pre_position_size ?? (tradeRecord.entryPrice * tradeRecord.quantity);
-      const closedNotional = tradeRecord.exitPrice * tradeRecord.quantity;
+      const mainSize = leg.pre_position_size ?? tradeRecordNotionalUsd(tradeRecord, tradeRecord.entryPrice);
+      const closedNotional = tradeRecordNotionalUsd(tradeRecord, tradeRecord.exitPrice);
       const isPartial = mainSize > EPSILON && closedNotional < mainSize * 0.95;
       events.push({
         id: `synthetic-${leg.id}-${isPartial ? 'main-partial' : 'main-full'}`,

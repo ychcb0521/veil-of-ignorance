@@ -6,6 +6,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { LegRoleChip } from '@/components/journal/LegRoleChip';
 import { getAssignableLegRoles, LEG_ROLE_LABELS, MAIN_ADD_ROLES } from '@/lib/strategyTemplates';
 import { batchAttachToCampaign, batchBackfillAndAttach, suggestLegRoles, validateClassification } from '@/lib/journalApi';
+import { getPositionNotionalUsd } from '@/lib/tradingSettlement';
 import { isHistoricalCampaign } from '@/types/journal';
 import type {
   ClassificationValidationResult,
@@ -85,7 +86,7 @@ function itemExitPrice(item: ClassifiableItem) {
 function itemPositionSize(item: ClassifiableItem) {
   return item.kind === 'journal'
     ? item.journal.pre_position_size
-    : item.record.entryPrice * item.record.quantity;
+    : getPositionNotionalUsd(item.record.symbol, item.record, item.record.entryPrice);
 }
 
 function priceLabel(value: number | null | undefined) {

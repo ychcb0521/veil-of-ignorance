@@ -93,6 +93,16 @@ function DecisionChannel() {
     : journal.position_mode === 'cross'
       ? 'text-[#F6465D]'
       : 'text-muted-foreground';
+  const positionSizeText = journal.pre_settlement_mode === 'coin'
+    ? [
+        journal.pre_contracts != null ? `${journal.pre_contracts} 张` : null,
+        journal.pre_position_size != null ? `${journal.pre_position_size.toFixed(2)} USD名义` : null,
+        journal.pre_contract_size_usd != null ? `${journal.pre_contract_size_usd} USD/张` : null,
+        journal.pre_settlement_asset ? `保证金 ${journal.pre_settlement_asset}` : null,
+      ].filter(Boolean).join(' · ') || '—'
+    : journal.pre_position_size != null
+      ? `${journal.pre_position_size.toFixed(4)} USDT`
+      : '—';
 
   useEffect(() => {
     if (Math.abs(replayTime - tEntry) < 30_000 && replayTime >= tEntry) {
@@ -143,7 +153,7 @@ function DecisionChannel() {
         )}
         <div className="grid grid-cols-2 gap-2 font-mono text-[11px]">
           {!isSnapshotV2 && <Cell label="计划止盈" value={journal.pre_planned_take_profit?.toFixed(2) ?? '—'} />}
-          <Cell label="仓位" value={journal.pre_position_size?.toFixed(4) ?? '—'} />
+          <Cell label="仓位" value={positionSizeText} />
           <Cell label="杠杆" value={journal.leverage != null ? `${journal.leverage}x` : '—'} />
           <Cell label="仓位模式" value={positionModeLabel} valueClass={positionModeClass} />
           <Cell

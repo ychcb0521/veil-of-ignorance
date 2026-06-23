@@ -1,6 +1,8 @@
 import { useState, useMemo } from 'react';
 import { X, TrendingUp, TrendingDown, Target, Activity, BarChart3, Calendar, ChevronDown } from 'lucide-react';
 import type { TradeRecord } from '@/types/trading';
+import { getSettlementAsset } from '@/lib/coinMargined';
+import { getPositionNotionalUsd } from '@/lib/tradingSettlement';
 
 /* ===== Time range presets ===== */
 const TIME_RANGES = [
@@ -28,13 +30,14 @@ interface TradePair {
 
 export function TradePerformancePanel({ open, onClose, symbol, tradeHistory }: Props) {
   const [rangeKey, setRangeKey] = useState<string>('all');
-  const baseCoin = symbol.replace('USDT', '');
+  const baseCoin = getSettlementAsset(symbol);
 
   // Filter trades for this symbol
   const symbolTrades = useMemo(
     () => tradeHistory.filter(t => t.symbol === symbol),
     [tradeHistory, symbol],
   );
+  const quoteUnitLabel = symbolTrades.some(t => t.settlementMode === 'coin') ? 'USD' : 'USDT';
 
   // Apply time range filter
   const filteredTrades = useMemo(() => {
@@ -60,7 +63,7 @@ export function TradePerformancePanel({ open, onClose, symbol, tradeHistory }: P
       );
       if (match) {
         usedCloseIds.add(match.id);
-        const margin = (op.entryPrice * op.quantity) / op.leverage;
+        const margin = getPositionNotionalUsd(op.symbol, op, op.entryPrice) / op.leverage;
         pairs.push({
           open: op,
           close: match,
@@ -143,7 +146,7 @@ export function TradePerformancePanel({ open, onClose, symbol, tradeHistory }: P
         <div className="flex items-center justify-between px-5 py-3 border-b border-border shrink-0">
           <div className="flex items-center gap-3">
             <BarChart3 className="w-4 h-4 text-primary" />
-            <span className="text-sm font-bold text-foreground">{baseCoin}/USDT 交易绩效分析</span>
+            <span className="text-sm font-bold text-foreground">{baseCoin}/{quoteUnitLabel} 交易绩效分析</span>
             <span className="text-[10px] px-1.5 py-0.5 rounded bg-primary/10 text-primary">永续</span>
           </div>
           <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-accent text-muted-foreground hover:text-foreground transition-colors">

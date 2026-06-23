@@ -580,6 +580,10 @@ export type Database = {
           pre_planned_stop_loss: number | null
           pre_planned_take_profit: number | null
           pre_position_size: number | null
+          pre_settlement_mode: string | null
+          pre_settlement_asset: string | null
+          pre_contract_size_usd: number | null
+          pre_contracts: number | null
           pre_positive_expectancy: string | null
           pre_premortem_failure_reason: string | null
           pre_real_time: string
@@ -723,6 +727,10 @@ export type Database = {
           pre_planned_stop_loss?: number | null
           pre_planned_take_profit?: number | null
           pre_position_size?: number | null
+          pre_settlement_mode?: string | null
+          pre_settlement_asset?: string | null
+          pre_contract_size_usd?: number | null
+          pre_contracts?: number | null
           pre_positive_expectancy?: string | null
           pre_premortem_failure_reason?: string | null
           pre_real_time?: string
@@ -866,6 +874,10 @@ export type Database = {
           pre_planned_stop_loss?: number | null
           pre_planned_take_profit?: number | null
           pre_position_size?: number | null
+          pre_settlement_mode?: string | null
+          pre_settlement_asset?: string | null
+          pre_contract_size_usd?: number | null
+          pre_contracts?: number | null
           pre_positive_expectancy?: string | null
           pre_premortem_failure_reason?: string | null
           pre_real_time?: string

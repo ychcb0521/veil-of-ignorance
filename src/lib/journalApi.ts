@@ -15,6 +15,7 @@ import {
 } from '@/lib/campaignSimulationEngine';
 import { INITIAL_COGNITIVE_ASSETS } from '@/lib/cognitiveAssetsInitialContent';
 import { mirrorDroppedColumns } from '@/lib/journalLocalMirror';
+import { getPositionNotionalUsd } from '@/lib/tradingSettlement';
 import { suggestLegRoles as suggestLegRolesHeuristic } from '@/lib/legRoleSuggestion';
 import type { CognitiveAssetsDoc, CognitiveAssetCategory, CognitiveAssetSection } from '@/types/cognitiveAssets';
 import { MAIN_ADD_ROLES, usesDualHedgeSop } from '@/lib/strategyTemplates';
@@ -472,7 +473,7 @@ function mergeFollows(primary: AccountFollow[], fallback: AccountFollow[]): Acco
  * 核心列（user_id/symbol/direction/pre_entry_reason/pre_mental_state/post_outcome…）
  * 不在此模式内，永不会被误判或误删。仅用 i 标志（无 g），test() 无状态、可安全复用。
  */
-const OPTIONAL_COLUMN_PATTERN = /trade_principles|pain_log_entries|campaign_id|leg_role|leg_sequence|order_kind|pre_thesis_why_right|pre_premortem_failure_reason|pre_falsification_signal|pre_confidence_basis|pre_odds_structure|pre_odds_structure_source|pre_odds_structure_premortem|pre_odds_structure_breakdown_signals|pre_account_equity_usdt|pre_opportunity_cost_worth|pre_cheap_opportunity|pre_edge_source|pre_market_regime|pre_entry_stage|pre_stop_quality|pre_chase_after_close|pre_mortem_text|pre_positive_expectancy|pre_invalidation_condition|pre_calibration_win_pct|pre_confidence_interval_|pre_calibration_reference_class|pre_calibration_competence_basis|pre_calibration_update_signal|pre_dataset_split|pre_lollapalooza_score|pre_bankruptcy_estimate|pre_info_|pre_opponent_statement|pre_pain_tags|pre_cognitive_bias_tags|pre_triggered_principle_ids|pre_triggered_rule_ids|pre_executor_self|pre_designer_self|pre_stop_doing_acknowledged_ids|pre_stop_doing_ad_hoc|journal_kind|no_trade_reason|no_trade_would_be_entry_price|no_trade_direction|exit_falsification_status|exit_falsification_note|post_result_summary|post_decision_quality|post_struggle_level|post_small_position_drag|post_missed_high_odds_state|post_path_|post_trade_agency_score|post_positive_expectancy_review|post_premortem_review|post_invalidation_review|post_five_step|post_opponent_was_right|post_proximate_cause|post_root_cause|post_design_intervention|post_intervention_type|post_execution_monitor|post_real_close_time|post_emo_|evolution_level|principle_id|hedge_type|hedge_boundary_price|hedge_boundary_basis|hedge_boundary_stance|hedge_lock_profit_pct|hedge_resolution_up|hedge_resolution_down|hedge_down_if_chop|hedge_down_if_trend|hedge_down_if_rebound|hedge_necessity_pct|hedge_safety_strength|hedge_safety_regularity|hedge_risk_magnitude|hedge_conviction_pct|hedge_friction_cost|hedge_order_method|hedge_worth_it/i;
+const OPTIONAL_COLUMN_PATTERN = /trade_principles|pain_log_entries|campaign_id|leg_role|leg_sequence|order_kind|pre_settlement_mode|pre_settlement_asset|pre_contract_size_usd|pre_contracts|pre_thesis_why_right|pre_premortem_failure_reason|pre_falsification_signal|pre_confidence_basis|pre_odds_structure|pre_odds_structure_source|pre_odds_structure_premortem|pre_odds_structure_breakdown_signals|pre_account_equity_usdt|pre_opportunity_cost_worth|pre_cheap_opportunity|pre_edge_source|pre_market_regime|pre_entry_stage|pre_stop_quality|pre_chase_after_close|pre_mortem_text|pre_positive_expectancy|pre_invalidation_condition|pre_calibration_win_pct|pre_confidence_interval_|pre_calibration_reference_class|pre_calibration_competence_basis|pre_calibration_update_signal|pre_dataset_split|pre_lollapalooza_score|pre_bankruptcy_estimate|pre_info_|pre_opponent_statement|pre_pain_tags|pre_cognitive_bias_tags|pre_triggered_principle_ids|pre_triggered_rule_ids|pre_executor_self|pre_designer_self|pre_stop_doing_acknowledged_ids|pre_stop_doing_ad_hoc|journal_kind|no_trade_reason|no_trade_would_be_entry_price|no_trade_direction|exit_falsification_status|exit_falsification_note|post_result_summary|post_decision_quality|post_struggle_level|post_small_position_drag|post_missed_high_odds_state|post_path_|post_trade_agency_score|post_positive_expectancy_review|post_premortem_review|post_invalidation_review|post_five_step|post_opponent_was_right|post_proximate_cause|post_root_cause|post_design_intervention|post_intervention_type|post_execution_monitor|post_real_close_time|post_emo_|evolution_level|principle_id|hedge_type|hedge_boundary_price|hedge_boundary_basis|hedge_boundary_stance|hedge_lock_profit_pct|hedge_resolution_up|hedge_resolution_down|hedge_down_if_chop|hedge_down_if_trend|hedge_down_if_rebound|hedge_necessity_pct|hedge_safety_strength|hedge_safety_regularity|hedge_risk_magnitude|hedge_conviction_pct|hedge_friction_cost|hedge_order_method|hedge_worth_it/i;
 
 function isMissingDalioMetaLayerError(error: { code?: string; message?: string } | null): boolean {
   if (!error) return false;
@@ -1075,8 +1076,8 @@ function inferOrderKindFromLegRole(role: LegRole | null): TradeJournal['order_ki
   return 'main';
 }
 
-function tradeRecordPositionSize(record: Pick<TradeRecord, 'entryPrice' | 'quantity'>): number {
-  return Math.abs(record.entryPrice * record.quantity);
+function tradeRecordPositionSize(record: TradeRecord): number {
+  return Math.abs(getPositionNotionalUsd(record.symbol, record, record.entryPrice));
 }
 
 function toCampaignDirection(direction: TradeJournal['direction']): TradeCampaign['direction'] {
@@ -1187,6 +1188,10 @@ function synthesizeJournalFromRecord(
     pre_checklist_items: null,
     pre_checklist_passed: null,
     pre_position_size: tradeRecordPositionSize(record),
+    pre_settlement_mode: record.settlementMode ?? 'usdt',
+    pre_settlement_asset: record.settlementAsset ?? (record.settlementMode === 'coin' ? null : 'USDT'),
+    pre_contract_size_usd: record.contractSizeUsd ?? null,
+    pre_contracts: record.contracts ?? null,
     pre_max_loss_usdt: null,
     post_outcome: tradeRecordOutcome(record),
     post_realized_pnl: record.pnl,
@@ -1269,6 +1274,10 @@ function synthesizeJournalFromEvent(
     pre_checklist_items: null,
     pre_checklist_passed: null,
     pre_position_size: event.size_usdt,
+    pre_settlement_mode: null,
+    pre_settlement_asset: null,
+    pre_contract_size_usd: null,
+    pre_contracts: null,
     pre_max_loss_usdt: null,
     post_outcome: event.realized_pnl != null
       ? tradeRecordOutcome({ pnl: event.realized_pnl })
@@ -2093,6 +2102,10 @@ export async function backfillJournalFromRecord(
     pre_checklist_items: null,
     pre_checklist_passed: null,
     pre_position_size: tradeRecordPositionSize(record),
+    pre_settlement_mode: record.settlementMode ?? 'usdt',
+    pre_settlement_asset: record.settlementAsset ?? (record.settlementMode === 'coin' ? null : 'USDT'),
+    pre_contract_size_usd: record.contractSizeUsd ?? null,
+    pre_contracts: record.contracts ?? null,
     pre_max_loss_usdt: null,
     post_outcome: record.pnl > 0 ? 'win' : record.pnl < 0 ? 'loss' : 'breakeven',
     post_realized_pnl: record.pnl,
@@ -3271,6 +3284,10 @@ export async function createNoTradeJournal(
     pre_checklist_items: null,
     pre_checklist_passed: null,
     pre_position_size: null,
+    pre_settlement_mode: null,
+    pre_settlement_asset: null,
+    pre_contract_size_usd: null,
+    pre_contracts: null,
     pre_max_loss_usdt: null,
     pre_thesis_why_right: null,
     pre_premortem_failure_reason: null,

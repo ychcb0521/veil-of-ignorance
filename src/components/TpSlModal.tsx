@@ -1,8 +1,9 @@
 import { useState } from 'react';
-import type { Position } from '@/types/trading';
+import type { Position, SettlementMode } from '@/types/trading';
 import { Slider } from '@/components/ui/slider';
 import { X } from 'lucide-react';
 import { formatPrice } from '@/lib/formatters';
+import { getSettlementAsset } from '@/lib/coinMargined';
 
 interface Props {
   pos: Position;
@@ -11,13 +12,23 @@ interface Props {
   liqPrice: number;
   onClose: () => void;
   onConfirm: (tp: number | null, sl: number | null, pct: number) => void;
+  settlementMode?: SettlementMode;
 }
 
-export function TpSlModal({ pos, symbol, markPrice, liqPrice, onClose, onConfirm }: Props) {
+export function TpSlModal({
+  pos,
+  symbol,
+  markPrice,
+  liqPrice,
+  onClose,
+  onConfirm,
+  settlementMode = 'usdt',
+}: Props) {
   const [tpPrice, setTpPrice] = useState('');
   const [slPrice, setSlPrice] = useState('');
   const [pct, setPct] = useState(100);
-  const baseCoin = symbol.replace('USDT', '');
+  const baseCoin = getSettlementAsset(symbol);
+  const quoteUnitLabel = settlementMode === 'coin' ? 'USD' : 'USDT';
 
   const handleConfirm = () => {
     const tp = tpPrice ? parseFloat(tpPrice) : null;
@@ -49,7 +60,7 @@ export function TpSlModal({ pos, symbol, markPrice, liqPrice, onClose, onConfirm
           </div>
 
           <div className="text-[10px] text-muted-foreground text-center">
-            {baseCoin}/USDT 永续 ·{' '}
+            {baseCoin}/{quoteUnitLabel} 永续 ·{' '}
             <span className={pos.side === 'LONG' ? 'text-trading-green' : 'text-trading-red'}>
               {pos.side === 'LONG' ? '多' : '空'} {pos.leverage}x
             </span>

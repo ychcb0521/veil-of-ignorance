@@ -9,6 +9,8 @@ import { toast } from 'sonner';
 import type { Position } from '@/types/trading';
 import { calcLiquidationPrice } from '@/types/trading';
 import { formatPrice, formatUSDT } from '@/lib/formatters';
+import { formatCoinAmount, getSettlementAsset } from '@/lib/coinMargined';
+import { isCoinSettled } from '@/lib/tradingSettlement';
 
 interface Props {
   open: boolean;
@@ -29,11 +31,15 @@ export function AdjustMarginModal({
   const [mode, setMode] = useState<Mode>('add');
   const [amountStr, setAmountStr] = useState<string>('');
 
+  const isCoinMargined = isCoinSettled(position);
+  const baseCoin = getSettlementAsset(symbol);
+  const quoteUnitLabel = isCoinMargined ? 'USD' : 'USDT';
   const currentMargin = position.isolatedMargin ?? position.margin;
-  const initialMargin = (position.quantity * position.entryPrice) / position.leverage;
+  const initialMargin = isCoinMargined ? position.margin : (position.quantity * position.entryPrice) / position.leverage;
   const maxRemovable = Math.max(0, currentMargin - initialMargin);
   const maxAddable = Math.max(0, availableBalance);
   const max = mode === 'add' ? maxAddable : maxRemovable;
+  const maxCoin = isCoinMargined && position.entryPrice > 0 ? max / position.entryPrice : 0;
 
   const amount = useMemo(() => {
     const n = parseFloat(amountStr);
@@ -71,16 +77,17 @@ export function AdjustMarginModal({
   const handleConfirm = () => {
     if (!canSubmit) return;
     const signed = mode === 'add' ? amount : -amount;
+    const coinSuffix = isCoinMargined && position.entryPrice > 0
+      ? ` ≈ ${formatCoinAmount(amount / position.entryPrice, baseCoin)}`
+      : '';
     onConfirm(signed);
     toast.success('保证金调整成功', {
-      description: `${mode === 'add' ? '追加' : '减少'} ${amount.toFixed(2)} USDT`,
+      description: `${mode === 'add' ? '追加' : '减少'} ${amount.toFixed(2)} USDT${coinSuffix}`,
       position: 'top-center',
     });
     setAmountStr('');
     onClose();
   };
-
-  const baseCoin = symbol.replace('USDT', '');
 
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
@@ -88,7 +95,7 @@ export function AdjustMarginModal({
         <DialogHeader>
           <DialogTitle className="text-base">调整保证金</DialogTitle>
           <DialogDescription className="text-xs">
-            {baseCoin}/USDT 永续 ·{' '}
+            {baseCoin}/{quoteUnitLabel} 永续 ·{' '}
             <span className={position.side === 'LONG' ? 'text-trading-green' : 'text-trading-red'}>
               {position.side === 'LONG' ? '多' : '空'} {position.leverage}x
             </span>{' '}
@@ -110,6 +117,9 @@ export function AdjustMarginModal({
                 <div className="text-[11px] text-muted-foreground">
                   {mode === 'add' ? '可追加' : '可减少'}：
                   <span className="text-foreground font-mono ml-1">{formatUSDT(max)} USDT</span>
+                  {isCoinMargined && max > 0 && (
+                    <span className="text-muted-foreground/80 ml-1">≈ {formatCoinAmount(maxCoin, baseCoin)}</span>
+                  )}
                 </div>
               </div>
               <div className="relative">
@@ -132,7 +142,7 @@ export function AdjustMarginModal({
                   >
                     最大
                   </button>
-                  <span className="text-[11px] text-muted-foreground pr-2">USDT</span>
+                  <span className="text-[11px] text-muted-foreground pr-2">USDT{isCoinMargined ? '等值' : ''}</span>
                 </div>
               </div>
               {mode === 'remove' && maxRemovable <= 0 && (

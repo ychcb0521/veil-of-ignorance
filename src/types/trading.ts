@@ -13,6 +13,7 @@ export type OrderType =
   | "SCALED"; // 分段订单
 
 export type MarginMode = "cross" | "isolated";
+export type SettlementMode = "usdt" | "coin";
 export type OrderStatus = "NEW" | "PENDING" | "FILLED" | "CANCELED" | "TRIGGERED" | "ACTIVE";
 export type TriggerOperator = ">=" | "<=";
 
@@ -25,6 +26,14 @@ export interface PendingOrder {
   quantity: number;
   leverage: number;
   marginMode: MarginMode;
+  /** USDT linear contract by default; coin = Binance COIN-M inverse contract. */
+  settlementMode?: SettlementMode;
+  /** USDT for U本位; base coin (BTC/ETH/...) for 币本位. */
+  settlementAsset?: string;
+  /** COIN-M contract face value in USD, e.g. BTCUSD=100, most alts=10. */
+  contractSizeUsd?: number;
+  /** COIN-M order quantity in contracts/张. Mirrors quantity for coin-settled orders. */
+  contracts?: number;
   status: OrderStatus;
   createdAt: number;
   /** Trading mode captured at placement, so later fills keep the original incentive weight. */
@@ -85,6 +94,10 @@ export interface CancelledOrderSnapshot {
   price: number;
   quantity: number;
   leverage: number;
+  settlementMode?: SettlementMode;
+  settlementAsset?: string;
+  contractSizeUsd?: number;
+  contracts?: number;
   /** 委托时间 (sim/K-line clock, same as PendingOrder.createdAt) */
   createdAt: number;
   /** 取消时间 (sim/K-line clock) */
@@ -112,6 +125,10 @@ export interface FilledOrderSnapshot {
   triggerPrice: number;
   quantity: number;
   leverage: number;
+  settlementMode?: SettlementMode;
+  settlementAsset?: string;
+  contractSizeUsd?: number;
+  contracts?: number;
   /** 委托时间 (sim/K-line clock, same as PendingOrder.createdAt) */
   createdAt: number;
   /** 触发/成交时间 (sim/K-line clock) */
@@ -150,7 +167,13 @@ export interface Position {
   quantity: number;
   leverage: number;
   marginMode: MarginMode;
+  settlementMode?: SettlementMode;
+  settlementAsset?: string;
+  contractSizeUsd?: number;
+  contracts?: number;
   margin: number;
+  /** Coin-settled margin in the settlement asset; margin remains USD-equivalent for account equity. */
+  marginCoin?: number;
   /** For isolated positions: the segregated margin assigned to this position */
   isolatedMargin?: number;
   /** Simulated clock time when this position was opened */
@@ -167,6 +190,13 @@ export interface TradeRecord {
   exitPrice: number;
   quantity: number;
   leverage: number;
+  settlementMode?: SettlementMode;
+  settlementAsset?: string;
+  contractSizeUsd?: number;
+  contracts?: number;
+  notionalUsd?: number;
+  pnlCoin?: number;
+  feeCoin?: number;
   pnl: number;
   fee: number;
   slippage: number;
@@ -253,6 +283,15 @@ export const TAKER_FEE = 0.0004; // 0.04%
 export const MAKER_FEE = 0.0002; // 0.02%
 
 export function calcUnrealizedPnl(pos: Position, currentPrice: number): number {
+  if (pos.settlementMode === "coin") {
+    const contracts = Math.max(0, Math.round(pos.contracts ?? pos.quantity ?? 0));
+    const contractSizeUsd = pos.contractSizeUsd ?? 10;
+    if (!contracts || !(pos.entryPrice > 0) || !(currentPrice > 0)) return 0;
+    const coinPnl = pos.side === "LONG"
+      ? contracts * contractSizeUsd * (1 / pos.entryPrice - 1 / currentPrice)
+      : contracts * contractSizeUsd * (1 / currentPrice - 1 / pos.entryPrice);
+    return coinPnl * currentPrice;
+  }
   if (pos.side === "LONG") {
     return (currentPrice - pos.entryPrice) * pos.quantity;
   }
@@ -282,6 +321,23 @@ export function calcLiquidationPrice(pos: Position): number {
   if (!pos.quantity || pos.quantity <= 0 || !isFinite(pos.entryPrice)) return NaN;
 
   const mmr = MAINTENANCE_MARGIN_RATE;
+  if (pos.settlementMode === "coin") {
+    const contracts = Math.max(0, Math.round(pos.contracts ?? pos.quantity ?? 0));
+    const contractSizeUsd = pos.contractSizeUsd ?? 10;
+    if (!contracts || !(pos.entryPrice > 0)) return NaN;
+    const notionalUsd = contracts * contractSizeUsd;
+    const marginCoin = pos.marginCoin ?? (pos.margin / pos.entryPrice);
+    if (!(marginCoin > 0)) return NaN;
+
+    let liq: number;
+    if (pos.side === "LONG") {
+      liq = (notionalUsd * (1 + mmr)) / (marginCoin + notionalUsd / pos.entryPrice);
+    } else {
+      const denominator = notionalUsd / pos.entryPrice - marginCoin;
+      liq = denominator > 0 ? (notionalUsd * (1 - mmr)) / denominator : Infinity;
+    }
+    return Number.isFinite(liq) ? liq : NaN;
+  }
   const positionNotional = pos.quantity * pos.entryPrice;
   const mm = positionNotional * mmr;
 

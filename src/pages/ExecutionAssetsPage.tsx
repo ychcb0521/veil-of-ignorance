@@ -32,6 +32,12 @@ import {
   backfillJournalFromRecord,
   listJournalsByTradeRecordId,
 } from '@/lib/journalApi';
+import { formatCoinAmount, getSettlementAsset } from '@/lib/coinMargined';
+import {
+  formatSettlementQuantity,
+  getPositionNotionalUsd,
+  isCoinSettled,
+} from '@/lib/tradingSettlement';
 import { formatUTC8 } from '@/lib/timeFormat';
 import { cn } from '@/lib/utils';
 import type { TradeRecord } from '@/types/trading';
@@ -68,6 +74,28 @@ function sideLabel(side: string | null | undefined) {
   return side || '—';
 }
 
+function quoteLabel(item: { settlementMode?: string } | null | undefined) {
+  return item?.settlementMode === 'coin' ? 'USD' : 'USDT';
+}
+
+function formatSnapshotQuantity(trade: ExecutionTradeSnapshot) {
+  return formatSettlementQuantity(trade, trade.symbol);
+}
+
+function formatSnapshotMargin(trade: ExecutionTradeSnapshot) {
+  const margin = trade.margin ?? 0;
+  if (isCoinSettled(trade) && trade.marginCoin != null) {
+    const asset = trade.settlementAsset ?? getSettlementAsset(trade.symbol);
+    return `${formatCoinAmount(trade.marginCoin, asset)} ≈ ${formatNumber(margin, 2)} USDT`;
+  }
+  return `${formatNumber(margin, 2)} USDT`;
+}
+
+function formatSnapshotNotional(trade: ExecutionTradeSnapshot) {
+  const notional = trade.notionalUsd ?? trade.notional ?? getPositionNotionalUsd(trade.symbol, trade, trade.entryPrice);
+  return `${formatNumber(notional, 2)} ${quoteLabel(trade)}`;
+}
+
 /**
  * 按 symbol + side + 入场价 + 开仓时间，在 tradeHistory 里找对应的 CLOSE 记录。
  * - 同一笔可能因部分平仓产生多条 CLOSE → 全部累加 pnl，closeTime 取最晚一条
@@ -102,7 +130,9 @@ function matchClosesForSnapshot(
   const fee = matched.reduce((sum, r) => sum + (r.fee ?? 0), 0);
   const closeTime = matched.reduce((max, r) => Math.max(max, r.closeTime ?? 0), 0);
   // 最大数量那条作 primary，更可能是完整平仓的代表记录
-  const primaryRecord = matched.reduce((best, r) => (r.quantity > best.quantity ? r : best), matched[0]);
+  const primaryRecord = matched.reduce((best, r) => (
+    (r.contracts ?? r.quantity) > (best.contracts ?? best.quantity) ? r : best
+  ), matched[0]);
   return { records: matched, pnl, fee, netPnl: pnl, closeTime, primaryRecord };
 }
 
@@ -258,6 +288,9 @@ function EventDetailCard({
   const isPenalty = event.type === 'no_trade_penalty';
   const isCampaign = event.type === 'campaign_reward';
   const canOpen = Boolean(trade) && matched != null;
+  const tradeSymbol = trade
+    ? `${getSettlementAsset(trade.symbol)}/${quoteLabel(trade)}`
+    : null;
 
   return (
     <div className="rounded-xl border border-border/60 bg-background/70 p-4">
@@ -265,7 +298,7 @@ function EventDetailCard({
         <div>
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-[13px] font-semibold">
-              {trade?.symbol ?? (isPenalty ? '未交易扣分日' : event.label)}
+              {tradeSymbol ?? (isPenalty ? '未交易扣分日' : event.label)}
             </span>
             {trade?.side && (
               <span
@@ -331,11 +364,11 @@ function EventDetailCard({
           <DetailItem label="订单类型" value={orderTypeLabel(trade.orderType)} />
           <DetailItem label="开仓价" value={formatNumber(trade.entryPrice, 6)} />
           {matched && <DetailItem label="平仓价（最末次）" value={formatNumber(matched.primaryRecord.exitPrice ?? null, 6)} />}
-          <DetailItem label="数量" value={formatNumber(trade.quantity, 6)} />
+          <DetailItem label="数量" value={formatSnapshotQuantity(trade)} />
           <DetailItem label="杠杆" value={`${formatNumber(trade.leverage, 2)}x`} />
           <DetailItem label="保证金模式" value={marginModeLabel(trade.marginMode)} />
-          <DetailItem label="保证金" value={`${formatNumber(trade.margin, 2)} USDT`} />
-          <DetailItem label="名义价值" value={`${formatNumber(trade.notional, 2)} USDT`} />
+          <DetailItem label="保证金" value={formatSnapshotMargin(trade)} />
+          <DetailItem label="名义价值" value={formatSnapshotNotional(trade)} />
           {matched && <DetailItem label="平仓时间" value={formatTime(matched.closeTime)} />}
           {matched && (
             <DetailItem

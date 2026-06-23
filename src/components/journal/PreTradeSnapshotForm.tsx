@@ -62,7 +62,8 @@ import { StopDoingListManagerDialog } from '@/components/journal/StopDoingListMa
 import type { StopDoingItem } from '@/types/journal';
 import { useAuth } from '@/contexts/AuthContext';
 import { useTradingContext } from '@/contexts/TradingContext';
-import { calcUnrealizedPnl } from '@/types/trading';
+import { calcUnrealizedPnl, type SettlementMode } from '@/types/trading';
+import { getSettlementAsset } from '@/lib/coinMargined';
 import type { PlaceOrderParams } from '@/contexts/TradingContext';
 import type {
   ChecklistItem,
@@ -112,6 +113,10 @@ export interface SnapshotPayload {
   pre_checklist_items: ChecklistItem[] | null;
   pre_checklist_passed: boolean | null;
   pre_position_size: number | null;
+  pre_settlement_mode: SettlementMode | null;
+  pre_settlement_asset: string | null;
+  pre_contract_size_usd: number | null;
+  pre_contracts: number | null;
   pre_max_loss_usdt: number | null;
   pre_thesis_why_right: string | null;
   pre_premortem_failure_reason: string | null;
@@ -423,6 +428,14 @@ export function PreTradeSnapshotForm({
   const isHedge = isTrade && orderKind === 'hedge';
   const currentLeverage = getSymbolLeverage(symbol) ?? leverage;
   const currentMarginMode = getSymbolMarginMode(symbol) ?? 'cross';
+  const settlementMode: SettlementMode = orderParams?.settlementMode ?? 'usdt';
+  const settlementAsset = orderParams?.settlementAsset ?? (settlementMode === 'coin' ? getSettlementAsset(symbol) : 'USDT');
+  const contractSizeUsd = settlementMode === 'coin' && orderParams?.contractSizeUsd != null
+    ? orderParams.contractSizeUsd
+    : null;
+  const contracts = settlementMode === 'coin' && orderParams?.contracts != null
+    ? orderParams.contracts
+    : null;
   const crossBlocked = isTrade && currentMarginMode !== 'isolated';
 
   useEffect(() => {
@@ -481,6 +494,13 @@ export function PreTradeSnapshotForm({
   const inferredPositionSizeUsdt = useMemo(() => {
     if (initialPositionSizeUsdt != null && Number.isFinite(initialPositionSizeUsdt)) {
       return Number(initialPositionSizeUsdt.toFixed(2));
+    }
+    if (orderParams?.settlementMode === 'coin') {
+      const coinContracts = orderParams.contracts ?? orderParams.quantity;
+      const faceValue = orderParams.contractSizeUsd;
+      if (coinContracts && faceValue) {
+        return Number((coinContracts * faceValue).toFixed(2));
+      }
     }
     if (orderParams?.quantity && lockedEntryPrice) {
       return Number((orderParams.quantity * lockedEntryPrice).toFixed(2));
@@ -815,6 +835,10 @@ export function PreTradeSnapshotForm({
         pre_checklist_items: isHedge ? [] : (isTrade ? checklistItemsOut : []),
         pre_checklist_passed: isHedge ? true : (isTrade ? checklistPassed : true),
         pre_position_size: isTrade ? inferredPositionSizeUsdt : null,
+        pre_settlement_mode: isTrade ? settlementMode : null,
+        pre_settlement_asset: isTrade ? settlementAsset : null,
+        pre_contract_size_usd: isTrade && settlementMode === 'coin' ? contractSizeUsd : null,
+        pre_contracts: isTrade && settlementMode === 'coin' ? contracts : null,
         pre_max_loss_usdt: !isHedge && isTrade && maxLossValid ? Number(maxLoss.toFixed(2)) : null,
         pre_thesis_why_right: isHedge ? null : whyRight.trim(),
         pre_premortem_failure_reason: isHedge ? null : failureReason.trim(),

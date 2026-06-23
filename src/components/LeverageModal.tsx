@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
-import { getMaxLeverageForNotional, getLeverageTierInfo } from '@/types/trading';
+import { getMaxLeverageForNotional, getLeverageTierInfo, type SettlementMode } from '@/types/trading';
+import { getSettlementAsset } from '@/lib/coinMargined';
 import { Slider } from '@/components/ui/slider';
 import { Minus, Plus, X } from 'lucide-react';
 
@@ -10,16 +11,25 @@ interface Props {
   onConfirm: (leverage: number) => void;
   /** Optional notional for tier display */
   notional?: number;
+  settlementMode?: SettlementMode;
 }
 
 const MAX_LEVERAGE = 125;
 
-export function LeverageModal({ symbol, currentLeverage, onClose, onConfirm, notional = 0 }: Props) {
+export function LeverageModal({
+  symbol,
+  currentLeverage,
+  onClose,
+  onConfirm,
+  notional = 0,
+  settlementMode = 'usdt',
+}: Props) {
   const maxLev = notional > 0 ? getMaxLeverageForNotional(notional) : MAX_LEVERAGE;
   const [leverage, setLeverage] = useState(currentLeverage);
   const [inputValue, setInputValue] = useState(String(currentLeverage));
   const tierInfo = notional > 0 ? getLeverageTierInfo(notional) : null;
-  const baseCoin = symbol.replace('USDT', '');
+  const baseCoin = getSettlementAsset(symbol);
+  const quoteUnitLabel = settlementMode === 'coin' ? 'USD' : 'USDT';
 
   // Keep input in sync with slider/buttons
   useEffect(() => { setInputValue(String(leverage)); }, [leverage]);
@@ -62,7 +72,7 @@ export function LeverageModal({ symbol, currentLeverage, onClose, onConfirm, not
         <div className="px-4 py-4 space-y-5">
           {/* Symbol info */}
           <div className="text-xs text-muted-foreground text-center">
-            {baseCoin}/USDT 永续 · 当前 {currentLeverage}x
+            {baseCoin}/{quoteUnitLabel} 永续 · 当前 {currentLeverage}x
           </div>
 
           {/* Leverage display with +/- and direct input */}
@@ -113,7 +123,7 @@ export function LeverageModal({ symbol, currentLeverage, onClose, onConfirm, not
             <div className="rounded-lg bg-secondary/50 px-3 py-2 text-[11px] text-muted-foreground space-y-1">
               <div className="flex justify-between">
                 <span>名义价值</span>
-                <span className="font-mono">{notional.toFixed(2)} USDT</span>
+                <span className="font-mono">{notional.toFixed(2)} {quoteUnitLabel}</span>
               </div>
               <div className="flex justify-between">
                 <span>最大杠杆</span>
@@ -124,7 +134,7 @@ export function LeverageModal({ symbol, currentLeverage, onClose, onConfirm, not
 
           {/* Warning for unified leverage */}
           <div className="rounded-lg bg-amber-500/10 border border-amber-500/20 px-3 py-2 text-[10px] text-amber-400">
-            ⚠️ 杠杆倍数将同时应用于 {baseCoin}/USDT 的多单和空单
+            ⚠️ 杠杆倍数将同时应用于 {baseCoin}/{quoteUnitLabel} 的多单和空单
           </div>
 
           {/* Confirm button */}

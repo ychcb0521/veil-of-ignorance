@@ -1,7 +1,7 @@
 import { useState, useMemo, useEffect, useRef } from 'react';
 import { usePersistedState } from '@/hooks/usePersistedState';
 import type { Position, PendingOrder, TradeRecord } from '@/types/trading';
-import { calcUnrealizedPnl, calcROE, calcLiquidationPrice, MAINTENANCE_MARGIN_RATE } from '@/types/trading';
+import { calcUnrealizedPnl, calcLiquidationPrice } from '@/types/trading';
 import type { PositionsMap, OrdersMap, PriceMap } from '@/contexts/TradingContext';
 import { X, Trash2, ArrowUpDown, ArrowUp, ArrowDown, Plus, MoreVertical, ChevronDown, ChevronRight, GripVertical, Check } from 'lucide-react';
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover';
@@ -28,6 +28,14 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useTradingContext } from '@/contexts/TradingContext';
 import { PostTradeReviewSheet } from '@/components/journal/PostTradeReviewSheet';
 import { ExitMethodBadge } from '@/components/journal/ExitMethodBadge';
+import { getSettlementAsset } from '@/lib/coinMargined';
+import {
+  formatSettlementQuantity,
+  getPositionNotionalUsd,
+  getPositionUnits,
+  isCoinSettled,
+  isPositionOpen,
+} from '@/lib/tradingSettlement';
 import {
   findUnreviewedJournalForClose, listJournals,
   listJournalsByTradeRecordId, backfillJournalFromRecord,
@@ -207,11 +215,10 @@ export function PositionPanel({
     return <ArrowUpDown className="inline w-3 h-3 ml-0.5 opacity-40" />;
   };
   // VIEW-LEVEL SANITIZATION GUARD: drop any dust positions (defends against state leak / float precision)
-  const POSITION_DUST_EPSILON = 1e-6;
   const allPositions: { symbol: string; position: Position; index: number }[] = [];
   for (const [sym, positions] of Object.entries(positionsMap)) {
     positions.forEach((pos, i) => {
-      if (Number(pos.quantity) > POSITION_DUST_EPSILON) {
+      if (isPositionOpen(pos)) {
         allPositions.push({ symbol: sym, position: pos, index: i });
       }
     });
@@ -252,8 +259,9 @@ export function PositionPanel({
         });
       }
       const g = groups.get(key)!;
-      g.weightedEntryPrice = (g.weightedEntryPrice * g.totalQuantity + pos.entryPrice * pos.quantity) / (g.totalQuantity + pos.quantity);
-      g.totalQuantity += pos.quantity;
+      const units = getPositionUnits(pos);
+      g.weightedEntryPrice = (g.weightedEntryPrice * g.totalQuantity + pos.entryPrice * units) / (g.totalQuantity + units);
+      g.totalQuantity += units;
       g.totalMargin += pos.margin;
       if (pos.marginMode === 'isolated' && pos.isolatedMargin != null) {
         g.totalIsolatedMargin = (g.totalIsolatedMargin ?? 0) + pos.isolatedMargin;
@@ -623,16 +631,31 @@ export function PositionPanel({
                 <div className="p-3 space-y-3">
                   {mergedPositions.map((mg) => {
                     const price = priceMap[mg.symbol] || 0;
-                // Aggregate PnL across all children
-                let totalPnl = 0;
-                for (const c of mg.children) totalPnl += calcUnrealizedPnl(c.position, price);
-                const effectiveMargin = mg.totalIsolatedMargin != null ? mg.totalIsolatedMargin : mg.totalMargin;
-                const roe = effectiveMargin > 0 ? (totalPnl / effectiveMargin) * 100 : 0;
-                const isProfit = totalPnl >= 0;
-                const notional = mg.totalQuantity * price;
-                const marginRatio = notional > 0 ? ((effectiveMargin + totalPnl) / notional * 100) : 0;
-                const baseCoin = mg.symbol.replace('USDT', '');
-                const prec = getPrecision(mg.symbol);
+                    const firstChild = mg.children[0]?.position;
+                    const isCoinGroup = isCoinSettled(firstChild);
+                    const quoteUnitLabel = isCoinGroup ? 'USD' : 'USDT';
+                    const baseCoin = getSettlementAsset(mg.symbol);
+                    const totalUnits = mg.children.reduce((sum, c) => sum + getPositionUnits(c.position), 0);
+                    const totalMarginCoin = mg.children.reduce((sum, c) => sum + (c.position.marginCoin ?? 0), 0);
+                    const effectiveMargin = mg.totalIsolatedMargin != null ? mg.totalIsolatedMargin : mg.totalMargin;
+                    const effectiveMarginLabel = isCoinGroup && totalMarginCoin > 0
+                      ? `${totalMarginCoin.toFixed(8)} ${baseCoin} ≈ ${formatUSDT(effectiveMargin)} USDT`
+                      : formatUSDT(effectiveMargin);
+
+                    // Aggregate PnL/notional across all children.
+                    let totalPnl = 0;
+                    let notional = 0;
+                    for (const c of mg.children) {
+                      const mark = price || c.position.entryPrice;
+                      totalPnl += calcUnrealizedPnl(c.position, mark);
+                      notional += getPositionNotionalUsd(mg.symbol, c.position, mark);
+                    }
+                    const roe = effectiveMargin > 0 ? (totalPnl / effectiveMargin) * 100 : 0;
+                    const isProfit = totalPnl >= 0;
+                    const marginRatio = notional > 0 ? ((effectiveMargin + totalPnl) / notional * 100) : 0;
+                    const positionQtyLabel = isCoinGroup
+                      ? `${totalUnits} 张`
+                      : formatAmount(mg.totalQuantity);
 
                 // Compute aggregate liquidation price from the first child (approximation for merged)
                 // For merged positions use weighted entry to compute approximate liq
@@ -640,11 +663,16 @@ export function PositionPanel({
                   id: `merged_${mg.symbol}_${mg.side}`,
                   side: mg.side,
                   entryPrice: mg.weightedEntryPrice,
-                  quantity: mg.totalQuantity,
+                  quantity: totalUnits,
                   leverage: mg.leverage,
                   marginMode: mg.marginMode,
                   margin: mg.totalMargin,
                   isolatedMargin: mg.totalIsolatedMargin ?? undefined,
+                  settlementMode: firstChild?.settlementMode,
+                  settlementAsset: firstChild?.settlementAsset,
+                  contractSizeUsd: firstChild?.contractSizeUsd,
+                  contracts: isCoinGroup ? totalUnits : undefined,
+                  marginCoin: isCoinGroup ? totalMarginCoin : undefined,
                 };
                 const liq = calcLiquidationPrice(syntheticPos);
 
@@ -666,7 +694,7 @@ export function PositionPanel({
                     {/* Header */}
                     <div className="flex items-center gap-2 px-3 py-2 border-b border-border/50">
                       <span className="text-sm font-bold text-foreground font-mono">{baseCoin}</span>
-                      <span className="text-xs text-muted-foreground">/&nbsp;USDT 永续</span>
+                      <span className="text-xs text-muted-foreground">/&nbsp;{quoteUnitLabel} 永续</span>
                       <span
                         className={`ml-1 text-[10px] font-bold px-1.5 py-0.5 rounded ${
                           mg.side === 'LONG'
@@ -701,12 +729,12 @@ export function PositionPanel({
 
                     {/* Details Grid */}
                     <div className="grid grid-cols-3 gap-x-4 gap-y-2 px-3 pb-2.5">
-                      <DetailCell label="持仓数量" value={formatAmount(mg.totalQuantity)} />
+                      <DetailCell label="持仓数量" value={positionQtyLabel} />
                       <div className="min-w-0">
                         <div className="text-[10px] text-muted-foreground truncate">保证金</div>
                         <div className="flex items-center gap-1">
                           <span className="text-xs font-mono tabular-nums text-foreground">
-                            {formatUSDT(effectiveMargin)}
+                            {effectiveMarginLabel}
                           </span>
                           {mg.marginMode === 'isolated' && mg.children.length === 1 && onAdjustMargin && (
                             <button
@@ -803,11 +831,14 @@ export function PositionPanel({
                 </thead>
                 <tbody>
                   {allOrders.map(({ symbol, order }) => {
+                    const orderMark = order.price > 0 ? order.price : (priceMap[symbol] || 0);
+                    const orderQuoteLabel = isCoinSettled(order) ? 'USD' : 'USDT';
+                    const orderNotional = getPositionNotionalUsd(symbol, order, orderMark);
                     return (
                       <tr key={order.id} className="border-b border-gray-100 dark:border-[#2b3139]/50 hover:bg-gray-50 dark:hover:bg-white/5">
                         <td className="px-3 py-2">
-                          <span className="text-gray-900 dark:text-white font-medium">{symbol.replace('USDT', '')}</span>
-                          <span className="text-gray-500 dark:text-[#848e9c] text-[10px]">/USDT</span>
+                          <span className="text-gray-900 dark:text-white font-medium">{getSettlementAsset(symbol)}</span>
+                          <span className="text-gray-500 dark:text-[#848e9c] text-[10px]">/{orderQuoteLabel}</span>
                         </td>
                         <td className="px-3 py-2 text-gray-500 dark:text-[#848e9c]">
                           <div className="flex items-center gap-1.5 flex-wrap">
@@ -842,7 +873,9 @@ export function PositionPanel({
                             </span>
                           ) : '-'}
                         </td>
-                        <td className="px-3 py-2 text-gray-900 dark:text-white">{formatUSDT((order.price > 0 ? order.price : (priceMap[symbol] || 0)) * order.quantity)} USDT</td>
+                        <td className="px-3 py-2 text-gray-900 dark:text-white">
+                          {formatUSDT(orderNotional)} {orderQuoteLabel}
+                        </td>
                         <td className="px-3 py-2 text-gray-900 dark:text-white">{order.leverage}x</td>
                         <td className="px-3 py-2">
                           <Badge
@@ -885,9 +918,12 @@ export function PositionPanel({
                         className="bg-transparent border border-gray-200 dark:border-[#2b3139] rounded px-1 py-0.5 text-[11px] text-gray-500 dark:text-[#848e9c] cursor-pointer outline-none"
                       >
                         <option value="ALL">全部合约</option>
-                        {historySymbols.map(s => (
-                          <option key={s} value={s}>{s.replace('USDT', '/USDT')}</option>
-                        ))}
+                        {historySymbols.map(s => {
+                          const hasCoinTrades = tradeRecords.some(t => t.symbol === s && t.settlementMode === 'coin');
+                          return (
+                            <option key={s} value={s}>{getSettlementAsset(s)}/{hasCoinTrades ? 'USD' : 'USDT'}</option>
+                          );
+                        })}
                       </select>
                     </th>
                     {['操作', '方向', '开仓价', '平仓价', '数量', '开仓时间', '平仓时间'].map(h => (
@@ -908,13 +944,18 @@ export function PositionPanel({
                     if (historySort === 'pnl-desc') sorted.sort((a, b) => b.pnl - a.pnl);
                     else if (historySort === 'pnl-asc') sorted.sort((a, b) => a.pnl - b.pnl);
                     else if (historySort === 'pct-desc' || historySort === 'pct-asc') {
-                      const pct = (t: typeof sorted[0]) => { const m = (t.quantity * t.entryPrice) / t.leverage; return m > 0 ? t.pnl / m : 0; };
+                      const pct = (t: typeof sorted[0]) => {
+                        const margin = getPositionNotionalUsd(t.symbol, t, t.entryPrice) / t.leverage;
+                        return margin > 0 ? t.pnl / margin : 0;
+                      };
                       sorted.sort((a, b) => historySort === 'pct-desc' ? pct(b) - pct(a) : pct(a) - pct(b));
                     }
                     return sorted.slice(0, 100);
                   })().map(t => (
                     <tr key={t.id} className="border-b border-gray-100 dark:border-[#2b3139]/50">
-                      <td className="px-3 py-2 text-gray-900 dark:text-white">{t.symbol?.replace('USDT', '/USDT') || '-'}</td>
+                      <td className="px-3 py-2 text-gray-900 dark:text-white">
+                        {t.symbol ? `${getSettlementAsset(t.symbol)}/${t.settlementMode === 'coin' ? 'USD' : 'USDT'}` : '-'}
+                      </td>
                       <td className="px-3 py-2">
                         <span className={`text-[10px] px-1 py-0.5 rounded ${
                           t.action === 'LIQUIDATION' ? 'bg-[#f6465d]/20 text-[#f6465d]' :
@@ -928,14 +969,16 @@ export function PositionPanel({
                       </td>
                       <td className="px-3 py-2 text-gray-900 dark:text-white">{formatPrice(t.entryPrice, t.symbol)}</td>
                       <td className="px-3 py-2 text-gray-900 dark:text-white">{t.exitPrice > 0 ? formatPrice(t.exitPrice, t.symbol) : '-'}</td>
-                      <td className="px-3 py-2 text-gray-900 dark:text-white">{(t.quantity * t.entryPrice).toFixed(2)} USDT</td>
+                      <td className="px-3 py-2 text-gray-900 dark:text-white">
+                        {getPositionNotionalUsd(t.symbol, t, t.entryPrice).toFixed(2)} {t.settlementMode === 'coin' ? 'USD' : 'USDT'}
+                      </td>
                       <td className="px-3 py-2 text-gray-500 dark:text-[#848e9c]">{t.openTime && t.openTime > 0 ? new Date(t.openTime).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '-'}</td>
                       <td className="px-3 py-2 text-gray-500 dark:text-[#848e9c]">{t.closeTime ? new Date(t.closeTime).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '-'}</td>
                       <td className={`px-3 py-2 font-bold ${t.pnl >= 0 ? 'text-[#0ecb81]' : 'text-[#f6465d]'}`}>
                         {t.pnl >= 0 ? '+' : ''}{t.pnl.toFixed(2)}
                       </td>
                       {(() => {
-                        const margin = (t.quantity * t.entryPrice) / t.leverage;
+                        const margin = getPositionNotionalUsd(t.symbol, t, t.entryPrice) / t.leverage;
                         const pct = margin > 0 ? (t.pnl / margin) * 100 : 0;
                         return (
                           <td className={`px-3 py-2 font-bold ${pct >= 0 ? 'text-[#0ecb81]' : 'text-[#f6465d]'}`}>
@@ -972,15 +1015,18 @@ export function PositionPanel({
                     // Closing a LONG = sell; closing a SHORT = buy
                     const dirLabel = isLong ? '卖出平多' : '买入平空';
                     const dirColor = isLong ? 'text-[#f6465d]' : 'text-[#0ecb81]';
+                    const tradeQuoteLabel = isCoinSettled(t) ? 'USD' : 'USDT';
                     return (
                       <tr key={t.id} className="border-b border-gray-100 dark:border-[#2b3139]/50">
                         <td className="px-3 py-2 text-gray-500 dark:text-[#848e9c]">
                           {ts ? new Date(ts).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '-'}
                         </td>
-                        <td className="px-3 py-2 text-gray-900 dark:text-white">{t.symbol?.replace('USDT', '/USDT') || '-'}</td>
+                        <td className="px-3 py-2 text-gray-900 dark:text-white">
+                          {t.symbol ? `${getSettlementAsset(t.symbol)}/${tradeQuoteLabel}` : '-'}
+                        </td>
                         <td className={`px-3 py-2 font-bold ${dirColor}`}>{dirLabel}</td>
                         <td className="px-3 py-2 text-gray-900 dark:text-white">{formatPrice(t.exitPrice > 0 ? t.exitPrice : t.entryPrice, t.symbol)}</td>
-                        <td className="px-3 py-2 text-gray-900 dark:text-white">{formatAmount(t.quantity)}</td>
+                        <td className="px-3 py-2 text-gray-900 dark:text-white">{formatSettlementQuantity(t, t.symbol)}</td>
                         <td className={`px-3 py-2 font-bold ${t.pnl >= 0 ? 'text-[#0ecb81]' : 'text-[#f6465d]'}`}>
                           {formatSignedUSDT(t.pnl)}
                         </td>
@@ -1018,18 +1064,22 @@ export function PositionPanel({
                 </thead>
                 <tbody>
                   {tradeRecords.slice().reverse().slice(0, 100).map(t => {
-                    const margin = (t.quantity * t.entryPrice) / t.leverage;
+                    const tradeQuoteLabel = isCoinSettled(t) ? 'USD' : 'USDT';
+                    const notionalUsd = t.notionalUsd ?? getPositionNotionalUsd(t.symbol, t, t.entryPrice);
+                    const margin = t.margin > 0 ? t.margin : notionalUsd / t.leverage;
                     const roe = margin > 0 ? (t.pnl / margin) * 100 : 0;
                     const matchedJ = lookupJournalForRecord(t);
                     return (
                       <tr key={t.id} className="border-b border-gray-100 dark:border-[#2b3139]/50">
-                        <td className="px-3 py-2 text-gray-900 dark:text-white">{t.symbol?.replace('USDT', '/USDT') || '-'}</td>
+                        <td className="px-3 py-2 text-gray-900 dark:text-white">
+                          {t.symbol ? `${getSettlementAsset(t.symbol)}/${tradeQuoteLabel}` : '-'}
+                        </td>
                         <td className={`px-3 py-2 font-bold ${t.side === 'LONG' ? 'text-[#0ecb81]' : 'text-[#f6465d]'}`}>
                           {t.side === 'LONG' ? '多' : '空'} {t.leverage}x
                         </td>
                         <td className="px-3 py-2 text-gray-900 dark:text-white">{formatPrice(t.entryPrice, t.symbol)}</td>
                         <td className="px-3 py-2 text-gray-900 dark:text-white">{t.exitPrice > 0 ? formatPrice(t.exitPrice, t.symbol) : '-'}</td>
-                        <td className="px-3 py-2 text-gray-900 dark:text-white">{formatAmount(t.quantity)}</td>
+                        <td className="px-3 py-2 text-gray-900 dark:text-white">{formatSettlementQuantity(t, t.symbol)}</td>
                         <td className="px-3 py-2 text-gray-500 dark:text-[#848e9c]">
                           {t.openTime && t.openTime > 0 ? new Date(t.openTime).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '-'}
                         </td>
@@ -1093,11 +1143,13 @@ export function PositionPanel({
                       <td className="px-3 py-2 text-gray-500 dark:text-[#848e9c]">
                         {new Date(t.openTime).toLocaleString()}
                       </td>
-                      <td className="px-3 py-2 text-gray-900 dark:text-white">{t.symbol?.replace('USDT', '/USDT')}</td>
+                      <td className="px-3 py-2 text-gray-900 dark:text-white">
+                        {t.symbol ? `${getSettlementAsset(t.symbol)}/${t.settlementMode === 'coin' ? 'USD' : 'USDT'}` : '-'}
+                      </td>
                       <td className={`px-3 py-2 font-bold ${t.side === 'LONG' ? 'text-[#0ecb81]' : 'text-[#f6465d]'}`}>
                         {t.side === 'LONG' ? '多' : '空'}
                       </td>
-                      <td className="px-3 py-2 text-gray-900 dark:text-white">{(t.entryPrice * t.quantity).toFixed(2)}</td>
+                      <td className="px-3 py-2 text-gray-900 dark:text-white">{getPositionNotionalUsd(t.symbol, t, t.entryPrice).toFixed(2)}</td>
                       <td className="px-3 py-2 text-gray-500 dark:text-[#848e9c]">0.01%</td>
                       <td className={`px-3 py-2 font-bold ${t.pnl >= 0 ? 'text-[#0ecb81]' : 'text-[#f6465d]'}`}>
                         {t.pnl >= 0 ? '+' : ''}{t.pnl.toFixed(4)}
@@ -1189,7 +1241,12 @@ export function PositionPanel({
         <LeverageModal
           symbol={leverageModal.symbol}
           currentLeverage={leverageModal.pos.leverage}
-          notional={leverageModal.pos.entryPrice * leverageModal.pos.quantity}
+          settlementMode={leverageModal.pos.settlementMode}
+          notional={getPositionNotionalUsd(
+            leverageModal.symbol,
+            leverageModal.pos,
+            priceMap[leverageModal.symbol] || leverageModal.pos.entryPrice,
+          )}
           onClose={() => setLeverageModal(null)}
           onConfirm={(newLev) => {
             setSharedSymbolLeverage(leverageModal.symbol, newLev);
@@ -1202,6 +1259,7 @@ export function PositionPanel({
         <TpSlModal
           pos={tpslModal.pos}
           symbol={tpslModal.symbol}
+          settlementMode={tpslModal.pos.settlementMode}
           markPrice={priceMap[tpslModal.symbol] || 0}
           liqPrice={calcLiquidationPrice(tpslModal.pos)}
           onClose={() => setTpslModal(null)}
@@ -1278,11 +1336,17 @@ export function PositionPanel({
                   <SelectValue placeholder="请选择要清除的币种..." />
                 </SelectTrigger>
                 <SelectContent>
-                  {allTradedSymbols.map(sym => (
-                    <SelectItem key={sym} value={sym}>
-                      {sym.replace('USDT', '/USDT')}
-                    </SelectItem>
-                  ))}
+                  {allTradedSymbols.map(sym => {
+                    const hasCoinSettledData =
+                      (positionsMap[sym] ?? []).some(isCoinSettled) ||
+                      (ordersMap[sym] ?? []).some(isCoinSettled) ||
+                      tradeHistory.some(record => record.symbol === sym && isCoinSettled(record));
+                    return (
+                      <SelectItem key={sym} value={sym}>
+                        {getSettlementAsset(sym)}/{hasCoinSettledData ? 'USD' : 'USDT'}
+                      </SelectItem>
+                    );
+                  })}
                 </SelectContent>
               </Select>
             </div>

@@ -7,6 +7,13 @@ import {
 import { Slider } from '@/components/ui/slider';
 import { Button } from '@/components/ui/button';
 import { formatPrice, formatAmount, formatUSDT, formatSignedUSDT } from '@/lib/formatters';
+import { formatCoinAmount, getSettlementAsset } from '@/lib/coinMargined';
+import {
+  formatSettlementQuantity,
+  getPositionNotionalUsd,
+  getPositionUnits,
+  isCoinSettled,
+} from '@/lib/tradingSettlement';
 
 interface Props {
   open: boolean;
@@ -29,34 +36,59 @@ function roundQty(v: number) {
 }
 
 export function ClosePositionModal({ open, onClose, symbol, position, posIndex, currentPrice, pricePrecision, onConfirm }: Props) {
-  // Single source of truth: absolute close amount (in base coin)
-  const [closeAmount, setCloseAmount] = useState<number>(position.quantity);
+  const baseCoin = getSettlementAsset(symbol);
+  const isCoinMargined = isCoinSettled(position);
+  const totalUnits = getPositionUnits(position);
+  const minQty = isCoinMargined ? 1 : MIN_QTY;
+  const unitLabel = isCoinMargined ? '张' : baseCoin;
+  const quoteUnitLabel = isCoinMargined ? 'USD' : 'USDT';
+
+  const formatCloseUnits = (units: number) => (
+    isCoinMargined ? `${Math.round(units)} 张` : `${formatAmount(units, QTY_PRECISION)} ${baseCoin}`
+  );
+
+  const normalizeAmount = (v: number): number => (
+    isCoinMargined ? Math.max(0, Math.round(v)) : roundQty(v)
+  );
+
+  // Single source of truth: absolute close amount (base coin for U-M, contracts for COIN-M)
+  const [closeAmount, setCloseAmount] = useState<number>(() => normalizeAmount(totalUnits));
   // Raw input string so users can freely type (e.g. "0.", "0.00")
-  const [amountInput, setAmountInput] = useState<string>(roundQty(position.quantity).toString());
-  const baseCoin = symbol.replace('USDT', '');
+  const [amountInput, setAmountInput] = useState<string>(() => normalizeAmount(totalUnits).toString());
 
   // Reset when modal opens for a different position
   useEffect(() => {
     if (open) {
-      const initial = roundQty(position.quantity);
+      const initial = normalizeAmount(totalUnits);
       setCloseAmount(initial);
       setAmountInput(initial.toString());
     }
-  }, [open, position.quantity, position.id]);
+  }, [open, totalUnits, position.id, isCoinMargined]);
 
   const totalPnl = useMemo(() => calcUnrealizedPnl(position, currentPrice), [position, currentPrice]);
-  const ratio = position.quantity > 0 ? Math.min(1, Math.max(0, closeAmount / position.quantity)) : 0;
+  const ratio = totalUnits > 0 ? Math.min(1, Math.max(0, closeAmount / totalUnits)) : 0;
   const currentPercentage = ratio * 100;
   const sliderPct = Math.round(currentPercentage);
   const estimatedPnl = totalPnl * ratio;
   const isProfit = estimatedPnl >= 0;
-  const notionalValue = closeAmount * currentPrice;
+  const notionalValue = getPositionNotionalUsd(
+    symbol,
+    {
+      ...position,
+      quantity: isCoinMargined ? position.quantity : closeAmount,
+      contracts: isCoinMargined ? closeAmount : position.contracts,
+    },
+    currentPrice,
+  );
   const releasedMargin = position.margin * ratio;
+  const releasedMarginLabel = isCoinMargined && position.marginCoin != null
+    ? `${formatCoinAmount(position.marginCoin * ratio, baseCoin)} ≈ ${formatUSDT(releasedMargin)} USDT`
+    : `${formatUSDT(releasedMargin)} USDT`;
 
   const clampAmount = (v: number): number => {
     if (!isFinite(v) || isNaN(v) || v < 0) return 0;
-    if (v > position.quantity) return position.quantity;
-    return roundQty(v);
+    if (v > totalUnits) return normalizeAmount(totalUnits);
+    return normalizeAmount(v);
   };
 
   const setAmountFromInput = (raw: string) => {
@@ -66,10 +98,10 @@ export function ClosePositionModal({ open, onClose, symbol, position, posIndex, 
     // Live-update SoT but DO NOT clamp upward while typing — clamp on blur/submit
     if (parsed < 0) {
       setCloseAmount(0);
-    } else if (parsed > position.quantity) {
-      setCloseAmount(position.quantity);
+    } else if (parsed > totalUnits) {
+      setCloseAmount(normalizeAmount(totalUnits));
     } else {
-      setCloseAmount(parsed);
+      setCloseAmount(isCoinMargined ? Math.round(parsed) : parsed);
     }
   };
 
@@ -81,13 +113,13 @@ export function ClosePositionModal({ open, onClose, symbol, position, posIndex, 
   };
 
   const setFromPercent = (pct: number) => {
-    const next = clampAmount(position.quantity * (pct / 100));
+    const next = clampAmount(totalUnits * (pct / 100));
     setCloseAmount(next);
     setAmountInput(next.toString());
   };
 
   const handleMax = () => {
-    const max = roundQty(position.quantity);
+    const max = normalizeAmount(totalUnits);
     setCloseAmount(max);
     setAmountInput(max.toString());
   };
@@ -95,8 +127,8 @@ export function ClosePositionModal({ open, onClose, symbol, position, posIndex, 
   const handleConfirm = () => {
     const parsed = parseFloat(amountInput);
     const finalAmount = clampAmount(isNaN(parsed) ? closeAmount : parsed);
-    if (finalAmount < MIN_QTY || position.quantity <= 0) return;
-    const finalRatio = Math.min(1, finalAmount / position.quantity);
+    if (finalAmount < minQty || totalUnits <= 0) return;
+    const finalRatio = Math.min(1, finalAmount / totalUnits);
     onConfirm(symbol, posIndex, finalRatio);
     onClose();
   };
@@ -105,7 +137,7 @@ export function ClosePositionModal({ open, onClose, symbol, position, posIndex, 
     if (!v) onClose();
   };
 
-  const submitDisabled = closeAmount < MIN_QTY;
+  const submitDisabled = closeAmount < minQty;
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
@@ -117,7 +149,9 @@ export function ClosePositionModal({ open, onClose, symbol, position, posIndex, 
 
         {/* Position Info */}
         <div className="flex items-center gap-2 pb-2 border-b border-border">
-          <span className="text-sm font-bold font-mono text-foreground">{baseCoin}/USDT 永续</span>
+          <span className="text-sm font-bold font-mono text-foreground">
+            {baseCoin}/{quoteUnitLabel} 永续
+          </span>
           <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
             position.side === 'LONG'
               ? 'bg-trading-green/15 text-trading-green'
@@ -148,7 +182,7 @@ export function ClosePositionModal({ open, onClose, symbol, position, posIndex, 
           <div className="flex items-baseline justify-between">
             <span className="text-xs text-muted-foreground">平仓数量</span>
             <span className="text-[11px] font-mono text-muted-foreground">
-              可用 {roundQty(position.quantity)} {baseCoin}
+              可用 {formatCloseUnits(totalUnits)}
             </span>
           </div>
 
@@ -159,14 +193,14 @@ export function ClosePositionModal({ open, onClose, symbol, position, posIndex, 
               inputMode="decimal"
               value={amountInput}
               min={0}
-              max={position.quantity}
-              step={MIN_QTY}
+              max={totalUnits}
+              step={minQty}
               onChange={(e) => setAmountFromInput(e.target.value)}
               onBlur={handleAmountBlur}
               className="flex-1 h-full bg-transparent px-3 text-sm font-mono font-semibold text-foreground outline-none placeholder:text-muted-foreground [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-              placeholder="0.0000"
+              placeholder={isCoinMargined ? '0' : '0.0000'}
             />
-            <span className="px-2 text-xs font-medium text-muted-foreground select-none">{baseCoin}</span>
+            <span className="px-2 text-xs font-medium text-muted-foreground select-none">{unitLabel}</span>
             <button
               type="button"
               onClick={handleMax}
@@ -188,7 +222,7 @@ export function ClosePositionModal({ open, onClose, symbol, position, posIndex, 
             />
             <div className="flex items-center justify-between">
               <span className="text-[11px] text-muted-foreground font-mono">
-                ≈ {currentPercentage.toFixed(1)}% · {formatUSDT(notionalValue)} USDT
+                ≈ {currentPercentage.toFixed(1)}% · {formatUSDT(notionalValue)} {quoteUnitLabel}
               </span>
               <div className="flex gap-1">
                 {QUICK_PERCENTAGES.map(pct => {
@@ -216,19 +250,19 @@ export function ClosePositionModal({ open, onClose, symbol, position, posIndex, 
         <div className="rounded-lg border border-border bg-accent/30 p-3 space-y-2">
           <div className="flex items-center justify-between text-xs">
             <span className="text-muted-foreground">仓位总数量</span>
-            <span className="font-mono text-foreground">{formatAmount(position.quantity, QTY_PRECISION)} {baseCoin}</span>
+            <span className="font-mono text-foreground">{formatSettlementQuantity(position, symbol)}</span>
           </div>
           <div className="flex items-center justify-between text-xs">
             <span className="text-muted-foreground">平仓数量</span>
-            <span className="font-mono text-foreground">{formatAmount(closeAmount, QTY_PRECISION)} {baseCoin}</span>
+            <span className="font-mono text-foreground">{formatCloseUnits(closeAmount)}</span>
           </div>
           <div className="flex items-center justify-between text-xs">
             <span className="text-muted-foreground">平仓价值</span>
-            <span className="font-mono text-foreground">{formatUSDT(notionalValue)} USDT</span>
+            <span className="font-mono text-foreground">{formatUSDT(notionalValue)} {quoteUnitLabel}</span>
           </div>
           <div className="flex items-center justify-between text-xs">
             <span className="text-muted-foreground">预计退回保证金</span>
-            <span className="font-mono text-foreground">{formatUSDT(releasedMargin)} USDT</span>
+            <span className="font-mono text-foreground">{releasedMarginLabel}</span>
           </div>
           <div className="border-t border-border pt-2 flex items-center justify-between">
             <span className="text-xs font-medium text-muted-foreground">预计盈亏</span>

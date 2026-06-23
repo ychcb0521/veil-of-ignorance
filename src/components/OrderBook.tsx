@@ -6,6 +6,7 @@
 
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { getPriceStep } from '@/types/trading';
+import { useTradingContext } from '@/contexts/TradingContext';
 
 interface OrderBookEntry {
   price: number;
@@ -39,6 +40,8 @@ function generateDepth(basePrice: number, step: number, levels: number, isBid: b
 }
 
 export function OrderBook({ currentPrice, symbol, previousPrice, pricePrecision: propPrecision, onMinimize, onClose }: Props) {
+  const { getSymbolSettlementMode } = useTradingContext();
+  const quoteUnitLabel = getSymbolSettlementMode(symbol) === 'coin' ? 'USD' : 'USDT';
   const [seed, setSeed] = useState(0);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const prevPriceRef = useRef(currentPrice);
@@ -178,9 +181,9 @@ export function OrderBook({ currentPrice, symbol, previousPrice, pricePrecision:
 
       {/* Column headers (frozen) — 3 equal columns */}
       <div className="flex-none grid grid-cols-3 px-3 h-6 items-center text-[9px] text-gray-500 dark:text-[#848e9c] border-b border-gray-200 dark:border-[#2b3139]/60">
-        <span className="text-left">价格(USDT)</span>
-        <span className="text-right">数量(USDT)</span>
-        <span className="text-right">合计(USDT)</span>
+        <span className="text-left">价格({quoteUnitLabel})</span>
+        <span className="text-right">数量({quoteUnitLabel})</span>
+        <span className="text-right">合计({quoteUnitLabel})</span>
       </div>
 
       {/* Scrollable middle: asks + price + bids inside one scroll container */}

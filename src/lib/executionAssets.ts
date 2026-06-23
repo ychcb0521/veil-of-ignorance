@@ -15,8 +15,14 @@ export interface ExecutionTradeSnapshot {
   quantity: number;
   leverage: number;
   marginMode: string;
+  settlementMode?: 'usdt' | 'coin';
+  settlementAsset?: string;
+  contractSizeUsd?: number;
+  contracts?: number;
+  marginCoin?: number | null;
   margin?: number | null;
   notional?: number | null;
+  notionalUsd?: number | null;
   simulatedTime?: number | null;
   positionId?: string | null;
 }

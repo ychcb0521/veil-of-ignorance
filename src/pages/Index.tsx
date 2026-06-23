@@ -30,9 +30,20 @@ import { Wallet, Crosshair, BookOpen, Tag } from "lucide-react";
 import { Link } from "react-router-dom";
 import { JournalNavMenu } from "@/components/journal/JournalNavMenu";
 import type { PendingOrder, OrderType } from "@/types/trading";
-import { calcFee, calcSlippage } from "@/types/trading";
+import { calcUnrealizedPnl } from "@/types/trading";
 import type { ExecutionTradeSnapshot } from "@/lib/executionAssets";
 import type { AssetState } from "@/types/assets";
+import {
+  POSITION_DUST_EPSILON,
+  closeSettlementPosition,
+  executeSettlementFill,
+  formatSettlementQuantity,
+  getPositionNotionalUsd,
+  getPositionUnits,
+  isCoinSettled,
+  isPositionOpen,
+  scaleSettlementPosition,
+} from "@/lib/tradingSettlement";
 import {
   Dialog,
   DialogContent,
@@ -89,20 +100,10 @@ function matchOrdersOffline(pendingOrders: PendingOrder[], klines: KlineData[], 
       }
 
       if (triggered) {
-        const fee = calcFee(fillPrice, order.quantity, false);
-        const margin = (order.quantity * fillPrice) / order.leverage;
+        const symbol = (order as PendingOrder & { symbol?: string }).symbol || "BTCUSDT";
+        const { fee, margin, position } = executeSettlementFill(symbol, fillPrice, order, false, kline.time);
         bal -= margin + fee;
-        newPositions.push({
-          id: crypto.randomUUID(),
-          side: order.side,
-          entryPrice: fillPrice,
-          quantity: order.quantity,
-          leverage: order.leverage,
-          marginMode: order.marginMode,
-          margin,
-          isolatedMargin: order.marginMode === "isolated" ? margin : undefined,
-          openTime: kline.time,
-        });
+        newPositions.push(position);
       } else {
         stillPending.push(order);
       }
@@ -334,9 +335,11 @@ const Index = () => {
           console.log("[TP/SL Skip] linked position missing", { orderId: order.id, linkedId });
           return;
         }
-        const closeQty = Math.min(pos.quantity, order.quantity);
+        const posUnits = getPositionUnits(pos);
+        const orderUnits = getPositionUnits(order);
+        const closeQty = Math.min(posUnits, orderUnits);
         if (closeQty <= 0) return;
-        const pct = pos.quantity > 0 ? closeQty / pos.quantity : 1;
+        const pct = posUnits > 0 ? closeQty / posUnits : 1;
 
         console.log("[TP/SL Triggered]", {
           orderId: order.id,
@@ -344,40 +347,34 @@ const Index = () => {
           linkedId,
           posSide: pos.side,
           triggerPrice: entryPrice,
-          posQty: pos.quantity,
+          posQty: posUnits,
           closeQty,
         });
 
-        const fee = calcFee(entryPrice, closeQty, false);
-        const pnl =
-          pos.side === "LONG" ? (entryPrice - pos.entryPrice) * closeQty : (pos.entryPrice - entryPrice) * closeQty;
+        const { fillPrice, slippageUsd, pnlUsd, pnlCoin, feeUsd, feeCoin, notionalUsd } =
+          closeSettlementPosition(targetSymbol, pos, entryPrice, closeQty, false);
         const closedMargin = pos.margin * pct;
         const closedIso = pos.isolatedMargin != null ? pos.isolatedMargin * pct : undefined;
         const returnedMargin =
-          pos.marginMode === "isolated" && closedIso != null ? closedIso + pnl - fee : closedMargin + pnl - fee;
+          pos.marginMode === "isolated" && closedIso != null ? closedIso + pnlUsd - feeUsd : closedMargin + pnlUsd - feeUsd;
 
         setBalance((prev) => prev + Math.max(0, returnedMargin));
 
-        const willFullyClose = pct >= 1 || pos.quantity * (1 - pct) < 1e-6;
+        const willFullyClose = pct >= 1 || posUnits - closeQty <= POSITION_DUST_EPSILON;
 
         // Physical destruction by id (not by stale index)
         setPositionsMap((prev) => {
           const list = prev[targetSymbol] || [];
           if (willFullyClose) {
-            return { ...prev, [targetSymbol]: list.filter((p) => p.id !== linkedId && p.quantity > 1e-6) };
+            return { ...prev, [targetSymbol]: list.filter((p) => p.id !== linkedId && isPositionOpen(p)) };
           }
-          const remainPct = 1 - pct;
+          const remainingUnits = posUnits - closeQty;
           const next = list
             .map((p) => {
               if (p.id !== linkedId) return p;
-              return {
-                ...p,
-                quantity: p.quantity * remainPct,
-                margin: p.margin * remainPct,
-                isolatedMargin: p.isolatedMargin != null ? p.isolatedMargin * remainPct : undefined,
-              };
+              return scaleSettlementPosition(p, remainingUnits);
             })
-            .filter((p) => p.quantity > 1e-6);
+            .filter(isPositionOpen);
           return { ...prev, [targetSymbol]: next };
         });
 
@@ -395,13 +392,13 @@ const Index = () => {
                 continue;
               }
               // partial: rescale remaining linked orders
-              const newQty = o.quantity * (1 - pct);
-              if (newQty < 1e-8) {
+              const newQty = isCoinSettled(pos) ? Math.max(1, Math.round(o.quantity * (1 - pct))) : o.quantity * (1 - pct);
+              if (newQty <= POSITION_DUST_EPSILON) {
                 changed = true;
                 continue;
               }
               changed = true;
-              next.push({ ...o, quantity: newQty });
+              next.push({ ...o, quantity: newQty, contracts: isCoinSettled(pos) ? newQty : o.contracts });
               continue;
             }
             next.push(o);
@@ -418,12 +415,19 @@ const Index = () => {
             type: "MARKET" as OrderType,
             action: "CLOSE" as const,
             entryPrice: pos.entryPrice,
-            exitPrice: entryPrice,
+            exitPrice: fillPrice,
             quantity: closeQty,
+            contracts: isCoinSettled(pos) ? closeQty : undefined,
             leverage: pos.leverage,
-            pnl: pnl - fee,
-            fee,
-            slippage: 0,
+            pnl: pnlUsd - feeUsd,
+            pnlCoin,
+            feeCoin,
+            fee: feeUsd,
+            slippage: slippageUsd,
+            notionalUsd,
+            settlementMode: pos.settlementMode,
+            settlementAsset: pos.settlementAsset,
+            contractSizeUsd: pos.contractSizeUsd,
             openTime: pos.openTime || 0,
             closeTime: openTime,
             exit_method: order.reduceKind === "TP" ? "tp1" : order.reduceKind === "SL" ? "sl" : "manual",
@@ -431,7 +435,7 @@ const Index = () => {
         ]);
 
         const kindLabel = order.reduceKind === "TP" ? "止盈" : order.reduceKind === "SL" ? "止损" : "条件";
-        const net = pnl - fee;
+        const net = pnlUsd - feeUsd;
         toast.success(`${kindLabel}已触发：${targetSymbol} @ ${entryPrice.toFixed(2)}`, {
           description: `${net >= 0 ? "+" : ""}${net.toFixed(2)} USDT`,
         });
@@ -439,9 +443,7 @@ const Index = () => {
       }
 
       // === REGULAR CONDITIONAL OPEN PATH ===
-      const fee = calcFee(entryPrice, order.quantity, false);
-      const margin = (order.quantity * entryPrice) / order.leverage;
-      const positionId = crypto.randomUUID();
+      const { fee, margin, position } = executeSettlementFill(symbol, entryPrice, order, false, openTime);
 
       setFilledOrders((prev) => [
         ...prev.filter((item) => item.id !== order.id),
@@ -456,34 +458,25 @@ const Index = () => {
           price: entryPrice,
           triggerPrice,
           quantity: order.quantity,
+          contracts: order.contracts,
           leverage: order.leverage,
+          settlementMode: order.settlementMode,
+          settlementAsset: order.settlementAsset,
+          contractSizeUsd: order.contractSizeUsd,
           createdAt: order.createdAt,
           filledAt: openTime,
-          positionId,
+          positionId: position.id,
         },
       ].slice(-500));
       setBalance((prev) => prev - margin - fee);
       setPositionsMap((prev) => {
-        const existing = (prev[symbol] || []).filter((position) => position.quantity > 1e-8);
+        const existing = (prev[symbol] || []).filter(isPositionOpen);
         return {
           ...prev,
-          [symbol]: [
-            ...existing,
-            {
-              id: positionId,
-              side: order.side,
-              entryPrice,
-              quantity: order.quantity,
-              leverage: order.leverage,
-              marginMode: order.marginMode,
-              margin,
-              isolatedMargin: order.marginMode === "isolated" ? margin : undefined,
-              openTime,
-            },
-          ],
+          [symbol]: [...existing, position],
         };
       });
-      toast.success(`条件单已触发：${symbol} ${order.side} @ ${entryPrice.toFixed(2)}`);
+      toast.success(`条件单已触发：${symbol} ${order.side} ${formatSettlementQuantity(position, symbol)} @ ${entryPrice.toFixed(2)}`);
     },
     [setBalance, setPositionsMap, setOrdersMap, setTradeHistory, setFilledOrders],
   );
@@ -785,9 +778,7 @@ const Index = () => {
     for (const [sym, positions] of Object.entries(positionsMap)) {
       const price = priceMap[sym] || 0;
       for (const pos of positions) {
-        const pnl =
-          pos.side === "LONG" ? (price - pos.entryPrice) * pos.quantity : (pos.entryPrice - price) * pos.quantity;
-        unrealizedPnl += pnl;
+        unrealizedPnl += calcUnrealizedPnl(pos, price || pos.entryPrice);
       }
     }
     const totalBalance = balance + unrealizedPnl;
@@ -1015,21 +1006,16 @@ const Index = () => {
             }
 
             filledIds.push(matchedOrder.id);
-            let actualFillPrice = fillPrice;
-            let slippageAmount = 0;
-            if (!isMaker) {
-              const notional = fillPrice * matchedOrder.quantity;
-              actualFillPrice = calcSlippage(fillPrice, notional, matchedOrder.side, {
-                high: kline.high,
-                low: kline.low,
-                close: kline.close,
-              });
-              slippageAmount = Math.abs(actualFillPrice - fillPrice) * order.quantity;
-            }
-            const fee = calcFee(actualFillPrice, matchedOrder.quantity, isMaker);
-            const margin = (matchedOrder.quantity * actualFillPrice) / matchedOrder.leverage;
-            const positionId = crypto.randomUUID();
             const simulatedTime = getEffectiveTime(activeSymbol);
+            const { fee, margin, position } = executeSettlementFill(
+              activeSymbol,
+              fillPrice,
+              matchedOrder,
+              isMaker,
+              simulatedTime,
+              { high: kline.high, low: kline.low, close: kline.close },
+            );
+            const actualFillPrice = position.entryPrice;
             setFilledOrders((prev) => [
               ...prev.filter((item) => item.id !== matchedOrder.id),
               {
@@ -1043,31 +1029,22 @@ const Index = () => {
                 price: actualFillPrice,
                 triggerPrice: fillPrice,
                 quantity: matchedOrder.quantity,
+                contracts: matchedOrder.contracts,
                 leverage: matchedOrder.leverage,
+                settlementMode: matchedOrder.settlementMode,
+                settlementAsset: matchedOrder.settlementAsset,
+                contractSizeUsd: matchedOrder.contractSizeUsd,
                 createdAt: matchedOrder.createdAt,
                 filledAt: simulatedTime,
-                positionId,
+                positionId: position.id,
               },
             ].slice(-500));
             setBalance((prev) => prev - margin - fee);
             setPositionsMap((prev) => {
-              const existing = (prev[activeSymbol] || []).filter((position) => position.quantity > 1e-8);
+              const existing = (prev[activeSymbol] || []).filter(isPositionOpen);
               return {
                 ...prev,
-                [activeSymbol]: [
-                  ...existing,
-                  {
-                    id: positionId,
-                    side: matchedOrder.side,
-                    entryPrice: actualFillPrice,
-                    quantity: matchedOrder.quantity,
-                    leverage: matchedOrder.leverage,
-                    marginMode: matchedOrder.marginMode,
-                    margin,
-                    isolatedMargin: matchedOrder.marginMode === "isolated" ? margin : undefined,
-                    openTime: simulatedTime,
-                  },
-                ],
+                [activeSymbol]: [...existing, position],
               };
             });
             // 执行力资产只奖励做多开仓；做空都是辅助对冲单，不计分。
@@ -1077,18 +1054,24 @@ const Index = () => {
                 side: matchedOrder.side,
                 orderType: matchedOrder.type,
                 entryPrice: actualFillPrice,
-                quantity: matchedOrder.quantity,
+                quantity: getPositionUnits(position),
                 leverage: matchedOrder.leverage,
                 marginMode: matchedOrder.marginMode,
+                settlementMode: position.settlementMode,
+                settlementAsset: position.settlementAsset,
+                contractSizeUsd: position.contractSizeUsd,
+                contracts: position.contracts,
+                marginCoin: position.marginCoin,
                 margin,
-                notional: matchedOrder.quantity * actualFillPrice,
+                notional: getPositionNotionalUsd(activeSymbol, position, actualFillPrice),
+                notionalUsd: getPositionNotionalUsd(activeSymbol, position, actualFillPrice),
                 simulatedTime,
-                positionId,
+                positionId: position.id,
               };
               recordExecutionTrade(matchedOrder.tradingMode ?? tradingMode, trade);
             }
             toast.success(
-              `委托成交: ${matchedOrder.side === "LONG" ? "开多" : "开空"} ${matchedOrder.quantity} @ ${actualFillPrice.toFixed(2)}`,
+              `委托成交: ${matchedOrder.side === "LONG" ? "开多" : "开空"} ${formatSettlementQuantity(position, activeSymbol)} @ ${actualFillPrice.toFixed(2)}`,
             );
           } else if (convertToLimit) {
             remaining.push(updatedOrder);
@@ -1132,34 +1115,29 @@ const Index = () => {
               const intervalMs = order.twapInterval || 300000;
               const endTime = order.twapEndTime || order.createdAt + 3600000;
               const totalSlices = Math.max(1, Math.floor((endTime - order.createdAt) / intervalMs));
-              const sliceQty = totalQty / totalSlices;
+              const rawSliceQty = totalQty / totalSlices;
+              const sliceQty = isCoinSettled(order) ? Math.max(1, Math.round(rawSliceQty)) : rawSliceQty;
               const filledSoFar = order.twapFilledQty || 0;
 
-              if (filledSoFar + sliceQty <= totalQty + 0.0001 && now < endTime) {
-                const notional = price * sliceQty;
-                const slippedPrice = calcSlippage(price, notional, order.side); // TWAP: no kline volatility available
-                const slippageAmt = Math.abs(slippedPrice - price) * sliceQty;
-                const fee = calcFee(slippedPrice, sliceQty, false);
-                const margin = (sliceQty * slippedPrice) / order.leverage;
+              if (filledSoFar + sliceQty <= totalQty + (isCoinSettled(order) ? 0 : 0.0001) && now < endTime) {
+                const sliceOrder: PendingOrder = {
+                  ...order,
+                  quantity: sliceQty,
+                  contracts: isCoinSettled(order) ? sliceQty : order.contracts,
+                };
+                const { fee, margin, position } = executeSettlementFill(
+                  symbol,
+                  price,
+                  sliceOrder,
+                  false,
+                  getEffectiveTime(symbol),
+                );
                 setBalance((b) => b - margin - fee);
                 setPositionsMap((p) => {
-                  const existing = (p[symbol] || []).filter((position) => position.quantity > 1e-8);
+                  const existing = (p[symbol] || []).filter(isPositionOpen);
                   return {
                     ...p,
-                    [symbol]: [
-                      ...existing,
-                      {
-                        id: crypto.randomUUID(),
-                        side: order.side,
-                        entryPrice: slippedPrice,
-                        quantity: sliceQty,
-                        leverage: order.leverage,
-                        marginMode: order.marginMode,
-                        margin,
-                        isolatedMargin: order.marginMode === "isolated" ? margin : undefined,
-                        openTime: getEffectiveTime(symbol),
-                      },
-                    ],
+                    [symbol]: [...existing, position],
                   };
                 });
                 changed = true;
@@ -1180,7 +1158,7 @@ const Index = () => {
         return changed ? { ...prev, [symbol]: updated } : prev;
       });
     }
-  }, [effectiveSimTime, activeCoinState.status, ordersMap, priceMap]);
+  }, [effectiveSimTime, activeCoinState.status, ordersMap, priceMap, getEffectiveTime]);
 
   // ===== ISOLATED-MODE HANDLERS =====
   const handlePause = useCallback(() => {

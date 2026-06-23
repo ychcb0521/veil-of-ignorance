@@ -25,6 +25,8 @@ import {
 } from "klinecharts";
 import type { TradeRecord } from "@/types/trading";
 import type { KlineData } from "@/hooks/useBinanceData";
+import { getSettlementAsset } from "@/lib/coinMargined";
+import { getPositionNotionalUsd } from "@/lib/tradingSettlement";
 import { formatUTC8 } from "@/lib/timeFormat";
 import { useTheme } from "@/contexts/ThemeContext";
 
@@ -64,7 +66,7 @@ function pairTrades(trades: TradeRecord[]): TradePair[] {
     const match = closes.find((c) => !usedIds.has(c.id) && c.side === op.side && c.closeTime >= op.openTime);
     if (match) {
       usedIds.add(match.id);
-      const margin = (op.entryPrice * op.quantity) / op.leverage;
+      const margin = getPositionNotionalUsd(op.symbol, op, op.entryPrice) / op.leverage;
       pairs.push({
         open: op,
         close: match,
@@ -618,7 +620,8 @@ export function TradeInsightsPanel({ open, onClose, tradeHistory, initialSymbol,
 
   if (!open) return null;
 
-  const baseCoin = selectedCoin.replace("USDT", "");
+  const baseCoin = selectedCoin ? getSettlementAsset(selectedCoin) : "";
+  const quoteUnitLabel = filteredTrades.some((t) => t.settlementMode === "coin") ? "USD" : "USDT";
 
   return (
     <div className="fixed inset-0 z-[150] flex items-center justify-center" onClick={onClose}>
@@ -652,7 +655,7 @@ export function TradeInsightsPanel({ open, onClose, tradeHistory, initialSymbol,
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border bg-secondary text-sm font-mono font-bold text-foreground hover:bg-accent transition-colors"
             >
               <span className="w-2 h-2 rounded-full bg-primary" />
-              {baseCoin || "选择币种"}/USDT
+              {baseCoin || "选择币种"}/{quoteUnitLabel}
               <ChevronDown className="w-3 h-3 text-muted-foreground" />
             </button>
             {showCoinList && (
@@ -677,8 +680,9 @@ export function TradeInsightsPanel({ open, onClose, tradeHistory, initialSymbol,
                   <div className="p-4 text-center text-xs text-muted-foreground">暂无交易记录</div>
                 ) : (
                   filteredCoinList.map((coin) => {
-                    const base = coin.replace("USDT", "");
+                    const base = getSettlementAsset(coin);
                     const isActive = coin === selectedCoin;
+                    const coinQuoteLabel = tradeHistory.some((t) => t.symbol === coin && t.settlementMode === "coin") ? "USD" : "USDT";
                     return (
                       <button
                         key={coin}
@@ -691,7 +695,7 @@ export function TradeInsightsPanel({ open, onClose, tradeHistory, initialSymbol,
                           className={`w-1.5 h-1.5 rounded-full ${isActive ? "bg-primary" : "bg-muted-foreground/30"}`}
                         />
                         <span className="font-bold">{base}</span>
-                        <span className="text-muted-foreground">/USDT 永续</span>
+                        <span className="text-muted-foreground">/{coinQuoteLabel} 永续</span>
                       </button>
                     );
                   })
