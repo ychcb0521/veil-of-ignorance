@@ -92,6 +92,44 @@ function safeTimeMs(value: string | number | null | undefined): number | null {
   return Number.isFinite(ms) ? ms : null;
 }
 
+const REVERSE_ORDER_RECORD_MATCH_MS = 60_000;
+
+function closeEnoughPrice(a: number, b: number) {
+  return Math.abs(a - b) <= Math.max(1e-8, Math.max(Math.abs(a), Math.abs(b), 1) * 1e-6);
+}
+
+function findReverseOrderTradeRecord(order: CampaignReverseHedgeOrder, tradeRecords: TradeRecord[]) {
+  if (order.tradeRecordId) {
+    const byId = tradeRecords.find(record => record.id === order.tradeRecordId);
+    if (byId) return byId;
+  }
+  const triggeredAt = order.triggeredAt ?? order.createdAt;
+  return tradeRecords
+    .filter(record =>
+      record.side === order.side &&
+      Math.abs(record.openTime - triggeredAt) <= REVERSE_ORDER_RECORD_MATCH_MS &&
+      closeEnoughPrice(record.entryPrice, order.price)
+    )
+    .sort((a, b) => Math.abs(a.openTime - triggeredAt) - Math.abs(b.openTime - triggeredAt))[0] ?? null;
+}
+
+function dedupeReverseOrderLines(lines: TimeBoundPriceLine[]) {
+  const result = new Map<string, TimeBoundPriceLine>();
+  for (const line of lines) {
+    if (!Number.isFinite(line.startTime) || !Number.isFinite(line.endTime) || line.endTime <= line.startTime) continue;
+    const key = [
+      Math.round(line.price * 1e8),
+      Math.round(line.startTime / 1000),
+      Math.round(line.endTime / 1000),
+      line.dashed ? 'd' : 's',
+      line.endMarker ?? '',
+      line.title ?? '',
+    ].join(':');
+    if (!result.has(key)) result.set(key, line);
+  }
+  return Array.from(result.values()).sort((a, b) => a.startTime - b.startTime || a.endTime - b.endTime);
+}
+
 function chipForStatus(status: TradeCampaign['status']) {
   switch (status) {
     case 'active': return 'bg-[#F0B90B]/15 text-[#F0B90B]';
@@ -502,12 +540,14 @@ export default function JournalCampaignDetailPage() {
       : (klines.length > 0 ? klines[klines.length - 1].time : 0);
     // 三态统一画黄色水平线：
     // 已撤销/挂单中 = 虚线（撤销处 ×）；已触发成交 = 委托→触发虚线 + 触发→平仓实线。
-    return reverseHedgeOrders
+    const segments = reverseHedgeOrders
       .filter(order => order.side === 'SHORT' && Number.isFinite(order.price) && order.price > 0)
       .flatMap(order => {
         if (order.status === 'triggered') {
           const triggeredAt = order.triggeredAt ?? order.createdAt;
-          const endTime = order.cancelledAt ?? fallbackEnd;
+          const matchedRecord = findReverseOrderTradeRecord(order, tradeRecords);
+          const endTime = order.cancelledAt
+            ?? (matchedRecord?.closeTime && matchedRecord.closeTime > triggeredAt ? matchedRecord.closeTime : null);
           const segments: TimeBoundPriceLine[] = [];
           if (Number.isFinite(triggeredAt) && triggeredAt > order.createdAt) {
             segments.push({
@@ -520,15 +560,19 @@ export default function JournalCampaignDetailPage() {
               title: '委托空',
             });
           }
-          segments.push({
-            price: order.price,
-            color: '#F0B90B',
-            startTime: Math.max(order.createdAt, triggeredAt),
-            endTime,
-            dashed: false,
-            endMarker: null,
-            title: '触发空',
-          });
+          // 触发后的实线只能画到明确的平仓时间。没有平仓时间时不再兜底拉到战役结束，
+          // 否则会把已触发委托误画成一条过长的黄色实线。
+          if (endTime != null && endTime > triggeredAt) {
+            segments.push({
+              price: order.price,
+              color: '#F0B90B',
+              startTime: Math.max(order.createdAt, triggeredAt),
+              endTime,
+              dashed: false,
+              endMarker: null,
+              title: '触发空',
+            });
+          }
           return segments;
         }
         return {
@@ -541,7 +585,8 @@ export default function JournalCampaignDetailPage() {
           title: '委托空',
         };
       });
-  }, [campaign, reverseHedgeOrders, klines]);
+    return dedupeReverseOrderLines(segments);
+  }, [campaign, reverseHedgeOrders, tradeRecords, klines]);
   const displayMarkers = useMemo(
     () => [...chart.markers, ...(showCfOverlay ? counterfactualChart.markers : [])],
     [chart.markers, counterfactualChart.markers, showCfOverlay],

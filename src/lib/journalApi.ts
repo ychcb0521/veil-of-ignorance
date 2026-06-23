@@ -62,6 +62,7 @@ import type {
   CancelledOrderSnapshot,
   FilledOrderSnapshot,
   CampaignReverseHedgeOrder,
+  OrderSide,
 } from "@/types/trading";
 
 
@@ -1722,20 +1723,17 @@ export async function getCampaignFullData(
   const ordersMap = readUserScopedStorage<Record<string, PendingOrder[]>>(userId, 'orders_map', {});
   const cancelledOrders = readUserScopedStorage<CancelledOrderSnapshot[]>(userId, 'cancelled_orders', []);
   const filledOrders = readUserScopedStorage<FilledOrderSnapshot[]>(userId, 'filled_orders', []);
-  const legRecordIds = new Set(legs.map(leg => leg.trade_record_id).filter(Boolean));
+  const legRecordIds = new Set(
+    legs
+      .map(leg => leg.trade_record_id)
+      .filter((id): id is string => Boolean(id)),
+  );
   const openedAtMs = new Date(campaign.opened_at).getTime();
   const closedAtMs = campaign.closed_at ? new Date(campaign.closed_at).getTime() : Number.POSITIVE_INFINITY;
 
-  const tradeRecords = tradeHistory.filter(record =>
-    legRecordIds.has(record.id) ||
-    (
-      record.symbol === campaign.symbol &&
-      (
-        (record.openTime >= openedAtMs && record.openTime <= closedAtMs) ||
-        (record.closeTime >= openedAtMs && record.closeTime <= closedAtMs)
-      )
-    ),
-  );
+  // 战役详情只展示用户归类进来的 legs；同标的同时间窗口内未选中的交易不能混入盘面。
+  const tradeRecords = tradeHistory.filter(record => legRecordIds.has(record.id));
+  const tradeRecordById = new Map(tradeRecords.map(record => [record.id, record]));
   const pendingOrders = Object.entries(ordersMap)
     .flatMap(([symbol, orders]) => symbol === campaign.symbol ? orders : [])
     .filter(order => order.status === 'NEW' || order.status === 'PENDING' || order.status === 'ACTIVE');
@@ -1763,14 +1761,90 @@ export async function getCampaignFullData(
   );
   const closeEnough = (a: number, b: number, relativeBase = Math.max(Math.abs(a), Math.abs(b), 1)) =>
     Math.abs(a - b) <= Math.max(1e-8, relativeBase * 1e-6);
+  const ORDER_LEG_MATCH_MS = 60_000;
+  const selectedLegSignatures = legs
+    .map(leg => {
+      const record = leg.trade_record_id ? tradeRecordById.get(leg.trade_record_id) ?? null : null;
+      const price = record?.entryPrice ?? leg.pre_entry_price ?? null;
+      const time = record?.openTime ?? journalTimeMs(leg);
+      const side: OrderSide = record?.side ?? (leg.direction === 'short' ? 'SHORT' : 'LONG');
+      const quantity = record?.quantity ?? (
+        price && price > 0 && leg.pre_position_size != null
+          ? Math.abs(leg.pre_position_size / price)
+          : null
+      );
+      return {
+        legId: leg.id,
+        recordId: leg.trade_record_id,
+        side,
+        time,
+        price,
+        quantity,
+      };
+    })
+    .filter(signature =>
+      Number.isFinite(signature.time) &&
+      signature.price != null &&
+      Number.isFinite(signature.price) &&
+      signature.price > 0
+    );
+  const findSelectedLegForOrder = (
+    side: OrderSide,
+    time: number,
+    price: number,
+    quantity?: number | null,
+  ) => {
+    const candidates = selectedLegSignatures
+      .filter(signature =>
+        signature.side === side &&
+        Math.abs(signature.time - time) <= ORDER_LEG_MATCH_MS &&
+        signature.price != null &&
+        closeEnough(signature.price, price)
+      )
+      .sort((a, b) => {
+        const timeDelta = Math.abs(a.time - time) - Math.abs(b.time - time);
+        if (timeDelta !== 0) return timeDelta;
+        const quantityA = a.quantity != null && quantity != null
+          ? Math.abs(a.quantity - quantity)
+          : Number.POSITIVE_INFINITY;
+        const quantityB = b.quantity != null && quantity != null
+          ? Math.abs(b.quantity - quantity)
+          : Number.POSITIVE_INFINITY;
+        return quantityA - quantityB;
+      });
+    if (quantity != null) {
+      const strictQuantityMatch = candidates.find(signature =>
+        signature.quantity != null &&
+        closeEnough(signature.quantity, quantity, Math.max(Math.abs(signature.quantity), Math.abs(quantity), 1))
+      );
+      if (strictQuantityMatch) return strictQuantityMatch;
+    }
+    return candidates[0] ?? null;
+  };
+  const orderBelongsToSelectedLeg = (
+    side: OrderSide,
+    time: number,
+    price: number,
+    quantity?: number | null,
+  ) => Boolean(findSelectedLegForOrder(side, time, price, quantity));
   const matchedTriggeredRecordIds = new Set<string>();
   const findRecordForFilledOrder = (order: FilledOrderSnapshot) => {
-    const match = tradeRecords.find(record =>
-      record.side === order.side &&
-      Math.abs(record.openTime - order.filledAt) <= 60_000 &&
-      closeEnough(record.entryPrice, order.price) &&
+    const candidates = tradeRecords
+      .filter(record =>
+        record.side === order.side &&
+        Math.abs(record.openTime - order.filledAt) <= 60_000 &&
+        closeEnough(record.entryPrice, order.price)
+      )
+      .sort((a, b) => {
+        const timeDelta = Math.abs(a.openTime - order.filledAt) - Math.abs(b.openTime - order.filledAt);
+        if (timeDelta !== 0) return timeDelta;
+        return Math.abs(a.entryPrice - order.price) - Math.abs(b.entryPrice - order.price);
+      });
+    const strictQuantityMatch = candidates.find(record =>
       closeEnough(record.quantity, order.quantity, Math.max(Math.abs(record.quantity), Math.abs(order.quantity), 1))
     );
+    // 老数据里 filled_orders 与 trade_history 的数量口径可能不同；时间+价格已经足够把触发快照接回真实平仓记录。
+    const match = strictQuantityMatch ?? candidates[0] ?? null;
     if (match) matchedTriggeredRecordIds.add(match.id);
     return match ?? null;
   };
@@ -1782,6 +1856,10 @@ export async function getCampaignFullData(
     )
     .map(order => {
       const record = findRecordForFilledOrder(order);
+      const selectedLeg = record
+        ? selectedLegSignatures.find(signature => signature.recordId === record.id) ?? null
+        : findSelectedLegForOrder(order.side, order.filledAt, order.price, order.quantity);
+      if (!selectedLeg) return null;
       return {
         id: order.id,
         tradeRecordId: record?.id ?? null,
@@ -1792,10 +1870,16 @@ export async function getCampaignFullData(
         cancelledAt: record?.closeTime && record.closeTime > order.filledAt ? record.closeTime : null,
         status: 'triggered' as const,
       };
-    });
-  const reverseHedgeOrders: CampaignReverseHedgeOrder[] = [
+    })
+    .filter((order): order is CampaignReverseHedgeOrder => Boolean(order));
+  const rawReverseHedgeOrders: CampaignReverseHedgeOrder[] = [
     ...cancelledOrders
-      .filter(order => order.symbol === campaign.symbol && isOpeningShortOrder(order) && inWindow(order.createdAt))
+      .filter(order =>
+        order.symbol === campaign.symbol &&
+        isOpeningShortOrder(order) &&
+        inWindow(order.createdAt) &&
+        orderBelongsToSelectedLeg(order.side, order.createdAt, order.price, order.quantity)
+      )
       .map(order => ({
         id: order.id,
         tradeRecordId: null,
@@ -1807,7 +1891,13 @@ export async function getCampaignFullData(
         status: 'cancelled' as const,
       })),
     ...pendingOrders
-      .filter(order => isOpeningShortOrder(order) && inWindow(order.createdAt))
+      .filter(order => {
+        const price = pendingOrderPrice(order);
+        return isOpeningShortOrder(order) &&
+          inWindow(order.createdAt) &&
+          Number.isFinite(price) &&
+          orderBelongsToSelectedLeg(order.side, order.createdAt, price, order.quantity);
+      })
       .map(order => ({
         id: order.id,
         tradeRecordId: null,
@@ -1838,7 +1928,28 @@ export async function getCampaignFullData(
         cancelledAt: record.closeTime && record.closeTime > record.openTime ? record.closeTime : null,
         status: 'triggered' as const,
       })),
-  ].sort((a, b) => a.createdAt - b.createdAt);
+  ];
+  const reverseOrderScore = (order: CampaignReverseHedgeOrder) => {
+    const statusScore = order.status === 'triggered' ? 30 : order.status === 'cancelled' ? 20 : 10;
+    return statusScore
+      + (order.tradeRecordId ? 4 : 0)
+      + (order.triggeredAt ? 2 : 0)
+      + (order.cancelledAt ? 1 : 0);
+  };
+  const reverseOrderDedupeKey = (order: CampaignReverseHedgeOrder) => {
+    if (order.tradeRecordId) return `record:${order.tradeRecordId}`;
+    if (order.id) return `id:${order.id}`;
+    const time = order.status === 'triggered' ? order.triggeredAt ?? order.createdAt : order.createdAt;
+    return `${order.side}:${order.status}:${Math.round(order.price * 1e8)}:${Math.round(time / 1000)}`;
+  };
+  const reverseHedgeOrders = Array.from(rawReverseHedgeOrders.reduce((map, order) => {
+    const key = reverseOrderDedupeKey(order);
+    const current = map.get(key);
+    if (!current || reverseOrderScore(order) > reverseOrderScore(current)) {
+      map.set(key, order);
+    }
+    return map;
+  }, new Map<string, CampaignReverseHedgeOrder>()).values()).sort((a, b) => a.createdAt - b.createdAt);
 
   // 本人视角（有成交记录）时，把平仓快照回写到腿上，使互关者也能读到一致的平仓信息。
   await healCampaignLegSnapshots(legs, tradeRecords);

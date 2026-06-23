@@ -1,16 +1,17 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { TradeCampaign } from '@/types/journal';
+import type { TradeCampaign, TradeJournal } from '@/types/journal';
 import type { CancelledOrderSnapshot, FilledOrderSnapshot, PendingOrder, TradeRecord } from '@/types/trading';
 
 const t = (iso: string) => Date.parse(iso);
 
 let campaign: TradeCampaign;
+let journals: TradeJournal[];
 
 vi.mock('@/integrations/supabase/client', () => {
   function from(table: string) {
     const resolveResult = () => {
       if (table === 'trade_campaigns') return { data: campaign, error: null };
-      if (table === 'trade_journals') return { data: [], error: null };
+      if (table === 'trade_journals') return { data: journals, error: null };
       return { data: null, error: null };
     };
 
@@ -41,9 +42,40 @@ vi.mock('@/integrations/supabase/client', () => {
 
 import { getCampaignFullData } from '../journalApi';
 
+const makeLeg = (overrides: Partial<TradeJournal>): TradeJournal => ({
+  id: overrides.id ?? `leg-${Math.random().toString(36).slice(2)}`,
+  user_id: 'user-1',
+  trade_record_id: null,
+  campaign_id: 'campaign-1',
+  leg_role: 'hedge_rolling',
+  leg_sequence: null,
+  source: 'post_review',
+  symbol: 'ASTERUSDT',
+  direction: 'short',
+  leverage: 5,
+  position_mode: 'isolated',
+  order_kind: 'trade',
+  pre_simulated_time: '2025-09-20T10:00:00.000Z',
+  pre_real_time: '2025-09-20T10:00:00.000Z',
+  pre_entry_price: null,
+  pre_planned_stop_loss: null,
+  pre_planned_take_profit: null,
+  pre_entry_reason: null,
+  pre_mental_state: 3,
+  pre_mental_trigger: null,
+  pre_risk_awareness: null,
+  pre_risk_management: null,
+  pre_checklist_items: null,
+  pre_checklist_passed: null,
+  pre_position_size: null,
+  pre_max_loss_usdt: null,
+  ...overrides,
+} as TradeJournal);
+
 describe('getCampaignFullData reverse hedge order layer', () => {
   beforeEach(() => {
     localStorage.clear();
+    journals = [];
     campaign = {
       id: 'campaign-1',
       user_id: 'user-1',
@@ -180,6 +212,30 @@ describe('getCampaignFullData reverse hedge order layer', () => {
       openTime: filledAt,
       closeTime,
     }];
+    journals = [
+      makeLeg({
+        id: 'leg-triggered-short',
+        trade_record_id: 'record-short-position',
+        leg_sequence: 1,
+        pre_simulated_time: new Date(filledAt).toISOString(),
+        pre_entry_price: 1.2,
+        pre_position_size: 120,
+      }),
+      makeLeg({
+        id: 'leg-cancelled-short',
+        leg_sequence: 2,
+        pre_simulated_time: new Date(t('2025-09-20T10:04:00.000Z')).toISOString(),
+        pre_entry_price: 1.19,
+        pre_position_size: 119,
+      }),
+      makeLeg({
+        id: 'leg-pending-short',
+        leg_sequence: 3,
+        pre_simulated_time: new Date(t('2025-09-20T10:08:00.000Z')).toISOString(),
+        pre_entry_price: 1.18,
+        pre_position_size: 118,
+      }),
+    ];
 
     localStorage.setItem('sim_user-1_filled_orders', JSON.stringify(filledOrders));
     localStorage.setItem('sim_user-1_cancelled_orders', JSON.stringify(cancelledOrders));
@@ -204,5 +260,189 @@ describe('getCampaignFullData reverse hedge order layer', () => {
       triggeredAt: filledAt,
       cancelledAt: closeTime,
     });
+  });
+
+  it('已触发委托按时间和价格接回成交记录，避免同一笔触发委托重复成两条线', async () => {
+    const createdAt = t('2025-09-20T10:01:00.000Z');
+    const filledAt = t('2025-09-20T10:05:00.000Z');
+    const closeTime = t('2025-09-20T10:20:00.000Z');
+    const filledOrders: FilledOrderSnapshot[] = [
+      {
+        id: 'short-open-order',
+        symbol: 'ASTERUSDT',
+        side: 'SHORT',
+        type: 'CONDITIONAL',
+        reduceOnly: false,
+        reduceKind: null,
+        price: 1.2,
+        triggerPrice: 1.2,
+        quantity: 99,
+        leverage: 5,
+        createdAt,
+        filledAt,
+        positionId: 'short-position',
+      },
+      {
+        id: 'short-open-order',
+        symbol: 'ASTERUSDT',
+        side: 'SHORT',
+        type: 'CONDITIONAL',
+        reduceOnly: false,
+        reduceKind: null,
+        price: 1.2,
+        triggerPrice: 1.2,
+        quantity: 99,
+        leverage: 5,
+        createdAt,
+        filledAt,
+        positionId: 'short-position',
+      },
+    ];
+    const tradeHistory: TradeRecord[] = [{
+      id: 'record-short-position',
+      symbol: 'ASTERUSDT',
+      side: 'SHORT',
+      type: 'MARKET',
+      action: 'CLOSE',
+      entryPrice: 1.2,
+      exitPrice: 1.1,
+      quantity: 100,
+      leverage: 5,
+      pnl: 10,
+      fee: 0,
+      slippage: 0,
+      openTime: filledAt,
+      closeTime,
+    }];
+    journals = [
+      makeLeg({
+        id: 'leg-triggered-short',
+        trade_record_id: 'record-short-position',
+        pre_simulated_time: new Date(filledAt).toISOString(),
+        pre_entry_price: 1.2,
+        pre_position_size: 120,
+      }),
+    ];
+
+    localStorage.setItem('sim_user-1_filled_orders', JSON.stringify(filledOrders));
+    localStorage.setItem('sim_user-1_trade_history', JSON.stringify(tradeHistory));
+
+    const { reverseHedgeOrders } = await getCampaignFullData(campaign.id);
+
+    expect(reverseHedgeOrders).toHaveLength(1);
+    expect(reverseHedgeOrders[0]).toMatchObject({
+      id: 'short-open-order',
+      tradeRecordId: 'record-short-position',
+      status: 'triggered',
+      createdAt,
+      triggeredAt: filledAt,
+      cancelledAt: closeTime,
+    });
+  });
+
+  it('不会把同标的同窗口但未归入 legs 的成交和委托混入战役', async () => {
+    const selectedCreatedAt = t('2025-09-20T10:01:00.000Z');
+    const selectedFilledAt = t('2025-09-20T10:05:00.000Z');
+    const unselectedCreatedAt = t('2025-09-20T10:06:00.000Z');
+    const unselectedFilledAt = t('2025-09-20T10:10:00.000Z');
+    const selectedRecord: TradeRecord = {
+      id: 'selected-short-record',
+      symbol: 'ASTERUSDT',
+      side: 'SHORT',
+      type: 'MARKET',
+      action: 'CLOSE',
+      entryPrice: 1.2,
+      exitPrice: 1.1,
+      quantity: 100,
+      leverage: 5,
+      pnl: 10,
+      fee: 0,
+      slippage: 0,
+      openTime: selectedFilledAt,
+      closeTime: t('2025-09-20T10:18:00.000Z'),
+    };
+    const unselectedRecord: TradeRecord = {
+      ...selectedRecord,
+      id: 'unselected-short-record',
+      entryPrice: 1.4,
+      exitPrice: 1.3,
+      openTime: unselectedFilledAt,
+      closeTime: t('2025-09-20T10:25:00.000Z'),
+    };
+    const filledOrders: FilledOrderSnapshot[] = [
+      {
+        id: 'selected-short-order',
+        symbol: 'ASTERUSDT',
+        side: 'SHORT',
+        type: 'CONDITIONAL',
+        reduceOnly: false,
+        reduceKind: null,
+        price: 1.2,
+        triggerPrice: 1.2,
+        quantity: 100,
+        leverage: 5,
+        createdAt: selectedCreatedAt,
+        filledAt: selectedFilledAt,
+      },
+      {
+        id: 'unselected-short-order',
+        symbol: 'ASTERUSDT',
+        side: 'SHORT',
+        type: 'CONDITIONAL',
+        reduceOnly: false,
+        reduceKind: null,
+        price: 1.4,
+        triggerPrice: 1.4,
+        quantity: 100,
+        leverage: 5,
+        createdAt: unselectedCreatedAt,
+        filledAt: unselectedFilledAt,
+      },
+    ];
+    const cancelledOrders: CancelledOrderSnapshot[] = [{
+      id: 'unselected-cancelled-short',
+      symbol: 'ASTERUSDT',
+      side: 'SHORT',
+      type: 'CONDITIONAL',
+      reduceOnly: false,
+      reduceKind: null,
+      price: 1.39,
+      quantity: 100,
+      leverage: 5,
+      createdAt: t('2025-09-20T10:12:00.000Z'),
+      cancelledAt: t('2025-09-20T10:13:00.000Z'),
+    }];
+    const pendingOrder: PendingOrder = {
+      id: 'unselected-pending-short',
+      side: 'SHORT',
+      type: 'CONDITIONAL',
+      price: 1.38,
+      stopPrice: 1.38,
+      quantity: 100,
+      leverage: 5,
+      marginMode: 'isolated',
+      status: 'PENDING',
+      createdAt: t('2025-09-20T10:14:00.000Z'),
+    };
+    journals = [
+      makeLeg({
+        id: 'selected-leg',
+        trade_record_id: selectedRecord.id,
+        pre_simulated_time: new Date(selectedFilledAt).toISOString(),
+        pre_entry_price: 1.2,
+        pre_position_size: 120,
+      }),
+    ];
+
+    localStorage.setItem('sim_user-1_trade_history', JSON.stringify([selectedRecord, unselectedRecord]));
+    localStorage.setItem('sim_user-1_filled_orders', JSON.stringify(filledOrders));
+    localStorage.setItem('sim_user-1_cancelled_orders', JSON.stringify(cancelledOrders));
+    localStorage.setItem('sim_user-1_orders_map', JSON.stringify({ ASTERUSDT: [pendingOrder] }));
+
+    const { tradeRecords, reverseHedgeOrders } = await getCampaignFullData(campaign.id);
+
+    expect(tradeRecords.map(record => record.id)).toEqual(['selected-short-record']);
+    expect(reverseHedgeOrders.map(order => order.id)).toEqual(['selected-short-order']);
+    expect(reverseHedgeOrders[0].tradeRecordId).toBe('selected-short-record');
   });
 });
