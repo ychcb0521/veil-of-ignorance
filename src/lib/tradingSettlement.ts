@@ -2,6 +2,7 @@ import {
   calcFee,
   calcSlippage,
   calcUnrealizedPnl,
+  MAINTENANCE_MARGIN_RATE,
   MAKER_FEE,
   TAKER_FEE,
   type MarginMode,
@@ -87,23 +88,26 @@ export function getPositionNotionalUsd(
 }
 
 /**
- * 结算口径下的 ROE%。
- * U本位：pnl / 开仓保证金（线性）。
- * 币本位：保证金本质是币，其 USD 值随价浮动；盈亏已按现价/平仓价折成 USD，
- * 故分母也要按同一价格给保证金重新估值，ROE 才 = 币盈亏 / 币保证金（与币安一致）。
- * markPrice：开仓中用当前标记价，已平仓用平仓价。
+ * ROE% = 未实现盈亏(USD) / 初始保证金(USD)。
+ * 初始保证金 = 名义价值@开仓 / 杠杆（固定不变、不含追加保证金），U本位与币本位统一同一口径。
  */
-export function settlementRoePct(
+export function settlementRoePct(pnlUsd: number, initialMarginUsd: number): number {
+  return initialMarginUsd > 0 ? (pnlUsd / initialMarginUsd) * 100 : 0;
+}
+
+/**
+ * 结算口径下的保证金比率% = 维持保证金 / 保证金余额（与币安一致：亏损越大越逼近 100% = 爆仓）。
+ * 维持保证金 = 标记价名义价值 × 维持保证金率（notionalUsdAtMark 对 U本位/币本位都是 USD 名义）。
+ * 保证金余额 = 按标记价估值的保证金 + 未实现盈亏(USD)；币本位的保证金需先按现价折算（与 ROE 同口径）。
+ * 余额 ≤ 0 视为已触及强平，返回 100。
+ */
+export function settlementMarginRatioPct(
+  notionalUsdAtMark: number,
+  marginUsdValuedAtMark: number,
   pnlUsd: number,
-  marginUsdAtEntry: number,
-  entryPrice: number,
-  markPrice: number,
-  isCoin: boolean,
 ): number {
-  const margin = isCoin && entryPrice > 0 && markPrice > 0
-    ? marginUsdAtEntry * (markPrice / entryPrice)
-    : marginUsdAtEntry;
-  return margin > 0 ? (pnlUsd / margin) * 100 : 0;
+  const marginBalance = marginUsdValuedAtMark + pnlUsd;
+  return marginBalance > 0 ? (notionalUsdAtMark * MAINTENANCE_MARGIN_RATE / marginBalance) * 100 : 100;
 }
 
 export function getSettlementMarginParts(symbol: string, order: SettlementOrderLike, price: number) {

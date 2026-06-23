@@ -340,7 +340,11 @@ describe('getCampaignFullData reverse hedge order layer', () => {
     });
   });
 
-  it('不会把同标的同窗口但未归入 legs 的成交和委托混入战役', async () => {
+  it('成交 legs 只保留所选，委托空单保留整个战役期间的全部开空委托', async () => {
+    const preWindowCancelledCreatedAt = t('2025-09-20T09:57:00.000Z');
+    const preWindowPendingCreatedAt = t('2025-09-20T09:58:00.000Z');
+    const preWindowTriggeredCreatedAt = t('2025-09-20T09:58:30.000Z');
+    const preWindowTriggeredFilledAt = t('2025-09-20T10:03:00.000Z');
     const selectedCreatedAt = t('2025-09-20T10:01:00.000Z');
     const selectedFilledAt = t('2025-09-20T10:05:00.000Z');
     const unselectedCreatedAt = t('2025-09-20T10:06:00.000Z');
@@ -369,7 +373,29 @@ describe('getCampaignFullData reverse hedge order layer', () => {
       openTime: unselectedFilledAt,
       closeTime: t('2025-09-20T10:25:00.000Z'),
     };
+    const preWindowTriggeredRecord: TradeRecord = {
+      ...selectedRecord,
+      id: 'pre-window-triggered-short-record',
+      entryPrice: 1.45,
+      exitPrice: 1.33,
+      openTime: preWindowTriggeredFilledAt,
+      closeTime: t('2025-09-20T10:15:00.000Z'),
+    };
     const filledOrders: FilledOrderSnapshot[] = [
+      {
+        id: 'pre-window-triggered-short-order',
+        symbol: 'ASTERUSDT',
+        side: 'SHORT',
+        type: 'CONDITIONAL',
+        reduceOnly: false,
+        reduceKind: null,
+        price: 1.45,
+        triggerPrice: 1.45,
+        quantity: 100,
+        leverage: 5,
+        createdAt: preWindowTriggeredCreatedAt,
+        filledAt: preWindowTriggeredFilledAt,
+      },
       {
         id: 'selected-short-order',
         symbol: 'ASTERUSDT',
@@ -399,19 +425,46 @@ describe('getCampaignFullData reverse hedge order layer', () => {
         filledAt: unselectedFilledAt,
       },
     ];
-    const cancelledOrders: CancelledOrderSnapshot[] = [{
-      id: 'unselected-cancelled-short',
-      symbol: 'ASTERUSDT',
+    const cancelledOrders: CancelledOrderSnapshot[] = [
+      {
+        id: 'pre-window-cancelled-short',
+        symbol: 'ASTERUSDT',
+        side: 'SHORT',
+        type: 'CONDITIONAL',
+        reduceOnly: false,
+        reduceKind: null,
+        price: 1.46,
+        quantity: 100,
+        leverage: 5,
+        createdAt: preWindowCancelledCreatedAt,
+        cancelledAt: t('2025-09-20T10:02:00.000Z'),
+      },
+      {
+        id: 'unselected-cancelled-short',
+        symbol: 'ASTERUSDT',
+        side: 'SHORT',
+        type: 'CONDITIONAL',
+        reduceOnly: false,
+        reduceKind: null,
+        price: 1.39,
+        quantity: 100,
+        leverage: 5,
+        createdAt: t('2025-09-20T10:12:00.000Z'),
+        cancelledAt: t('2025-09-20T10:13:00.000Z'),
+      },
+    ];
+    const preWindowPendingOrder: PendingOrder = {
+      id: 'pre-window-pending-short',
       side: 'SHORT',
       type: 'CONDITIONAL',
-      reduceOnly: false,
-      reduceKind: null,
-      price: 1.39,
+      price: 1.47,
+      stopPrice: 1.47,
       quantity: 100,
       leverage: 5,
-      createdAt: t('2025-09-20T10:12:00.000Z'),
-      cancelledAt: t('2025-09-20T10:13:00.000Z'),
-    }];
+      marginMode: 'isolated',
+      status: 'PENDING',
+      createdAt: preWindowPendingCreatedAt,
+    };
     const pendingOrder: PendingOrder = {
       id: 'unselected-pending-short',
       side: 'SHORT',
@@ -434,15 +487,25 @@ describe('getCampaignFullData reverse hedge order layer', () => {
       }),
     ];
 
-    localStorage.setItem('sim_user-1_trade_history', JSON.stringify([selectedRecord, unselectedRecord]));
+    localStorage.setItem('sim_user-1_trade_history', JSON.stringify([selectedRecord, unselectedRecord, preWindowTriggeredRecord]));
     localStorage.setItem('sim_user-1_filled_orders', JSON.stringify(filledOrders));
     localStorage.setItem('sim_user-1_cancelled_orders', JSON.stringify(cancelledOrders));
-    localStorage.setItem('sim_user-1_orders_map', JSON.stringify({ ASTERUSDT: [pendingOrder] }));
+    localStorage.setItem('sim_user-1_orders_map', JSON.stringify({ ASTERUSDT: [preWindowPendingOrder, pendingOrder] }));
 
     const { tradeRecords, reverseHedgeOrders } = await getCampaignFullData(campaign.id);
 
     expect(tradeRecords.map(record => record.id)).toEqual(['selected-short-record']);
-    expect(reverseHedgeOrders.map(order => order.id)).toEqual(['selected-short-order']);
-    expect(reverseHedgeOrders[0].tradeRecordId).toBe('selected-short-record');
+    expect(reverseHedgeOrders.map(order => order.id)).toEqual([
+      'pre-window-cancelled-short',
+      'pre-window-pending-short',
+      'pre-window-triggered-short-order',
+      'selected-short-order',
+      'unselected-short-order',
+      'unselected-cancelled-short',
+      'unselected-pending-short',
+    ]);
+    expect(reverseHedgeOrders[2].tradeRecordId).toBe('pre-window-triggered-short-record');
+    expect(reverseHedgeOrders[3].tradeRecordId).toBe('selected-short-record');
+    expect(reverseHedgeOrders[4].tradeRecordId).toBe('unselected-short-record');
   });
 });

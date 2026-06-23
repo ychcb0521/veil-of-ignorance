@@ -1,4 +1,4 @@
-import { type ChangeEvent, useEffect, useMemo, useState } from 'react';
+import { type ChangeEvent, useCallback, useEffect, useMemo, useState } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { ArrowLeft, Eye, EyeOff, Info, Layers, MessageSquare, Send, Sparkles, Trash2, UserPlus } from 'lucide-react';
 import { toast } from 'sonner';
@@ -71,6 +71,26 @@ function fmtMdHm(value: string | null) {
   const d = new Date(value);
   const pad = (n: number) => String(n).padStart(2, '0');
   return `${pad(d.getMonth() + 1)}/${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+function fmtReverseOrderChipTime(value: number | null | undefined) {
+  if (!value) return '—';
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return '—';
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${pad(d.getMonth() + 1)}/${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+function fmtReverseOrderChipPrice(value: number | null | undefined) {
+  if (value == null || !Number.isFinite(value)) return '—';
+  if (Math.abs(value) >= 1) return value.toFixed(4);
+  return value.toPrecision(6);
+}
+
+function reverseOrderStatusText(order: CampaignReverseHedgeOrder) {
+  if (order.status === 'triggered') return '已触发';
+  if (order.status === 'cancelled') return '已撤';
+  return '挂单中';
 }
 
 function fmtDuration(start: string, end: string | null) {
@@ -533,6 +553,61 @@ export default function JournalCampaignDetailPage() {
   const [showCfLegend, setShowCfLegend] = useState(false);
   // 「委托空单（黄色）」挂单层：只画开仓性质的 SHORT 委托；止盈/止损平仓委托不进入这里。
   const [showOrderInfo, setShowOrderInfo] = useState(true);
+  const [showReverseOrderManager, setShowReverseOrderManager] = useState(false);
+  const [hiddenReverseHedgeOrderIds, setHiddenReverseHedgeOrderIds] = useState<string[]>([]);
+  const hiddenReverseOrderStorageKey = useMemo(
+    () => (campaign ? `campaign:${campaign.id}:hidden-reverse-hedge-orders` : null),
+    [campaign?.id],
+  );
+  useEffect(() => {
+    if (!hiddenReverseOrderStorageKey) {
+      setHiddenReverseHedgeOrderIds([]);
+      return;
+    }
+    try {
+      const raw = window.localStorage.getItem(hiddenReverseOrderStorageKey);
+      const parsed = raw ? JSON.parse(raw) : [];
+      setHiddenReverseHedgeOrderIds(Array.isArray(parsed) ? parsed.filter(item => typeof item === 'string') : []);
+    } catch {
+      setHiddenReverseHedgeOrderIds([]);
+    }
+  }, [hiddenReverseOrderStorageKey]);
+  const persistHiddenReverseHedgeOrderIds = useCallback((next: string[]) => {
+    if (!hiddenReverseOrderStorageKey) return;
+    try {
+      if (next.length === 0) {
+        window.localStorage.removeItem(hiddenReverseOrderStorageKey);
+      } else {
+        window.localStorage.setItem(hiddenReverseOrderStorageKey, JSON.stringify(next));
+      }
+    } catch {
+      // 本地隐藏偏好失败不影响战役数据。
+    }
+  }, [hiddenReverseOrderStorageKey]);
+  const hideReverseHedgeOrder = useCallback((orderId: string) => {
+    setHiddenReverseHedgeOrderIds(prev => {
+      if (prev.includes(orderId)) return prev;
+      const next = [...prev, orderId];
+      persistHiddenReverseHedgeOrderIds(next);
+      return next;
+    });
+  }, [persistHiddenReverseHedgeOrderIds]);
+  const restoreHiddenReverseHedgeOrders = useCallback(() => {
+    setHiddenReverseHedgeOrderIds([]);
+    persistHiddenReverseHedgeOrderIds([]);
+  }, [persistHiddenReverseHedgeOrderIds]);
+  const hiddenReverseOrderSet = useMemo(
+    () => new Set(hiddenReverseHedgeOrderIds),
+    [hiddenReverseHedgeOrderIds],
+  );
+  const visibleReverseHedgeOrders = useMemo(
+    () => reverseHedgeOrders.filter(order => !hiddenReverseOrderSet.has(order.id)),
+    [reverseHedgeOrders, hiddenReverseOrderSet],
+  );
+  const hiddenReverseOrderCount = useMemo(
+    () => reverseHedgeOrders.filter(order => hiddenReverseOrderSet.has(order.id)).length,
+    [reverseHedgeOrders, hiddenReverseOrderSet],
+  );
   const orderInfoPriceLines = useMemo<TimeBoundPriceLine[]>(() => {
     if (!campaign) return [];
     const fallbackEnd = campaign.closed_at
@@ -540,7 +615,7 @@ export default function JournalCampaignDetailPage() {
       : (klines.length > 0 ? klines[klines.length - 1].time : 0);
     // 三态统一画黄色水平线：
     // 已撤销/挂单中 = 虚线（撤销处 ×）；已触发成交 = 委托→触发虚线 + 触发→平仓实线。
-    const segments = reverseHedgeOrders
+    const segments = visibleReverseHedgeOrders
       .filter(order => order.side === 'SHORT' && Number.isFinite(order.price) && order.price > 0)
       .flatMap(order => {
         if (order.status === 'triggered') {
@@ -586,7 +661,7 @@ export default function JournalCampaignDetailPage() {
         };
       });
     return dedupeReverseOrderLines(segments);
-  }, [campaign, reverseHedgeOrders, tradeRecords, klines]);
+  }, [campaign, visibleReverseHedgeOrders, tradeRecords, klines]);
   const displayMarkers = useMemo(
     () => [...chart.markers, ...(showCfOverlay ? counterfactualChart.markers : [])],
     [chart.markers, counterfactualChart.markers, showCfOverlay],
@@ -1013,20 +1088,61 @@ export default function JournalCampaignDetailPage() {
                 />
               )}
             </div>
-            {orderInfoPriceLines.length > 0 && (
-              <div className="mt-2 px-1 flex items-center gap-1.5 text-[11px] text-muted-foreground">
-                <button
-                  type="button"
-                  onClick={() => setShowOrderInfo(v => !v)}
-                  title={showOrderInfo ? '隐藏委托空单（黄色）' : '显示委托空单（黄色）'}
-                  aria-label={showOrderInfo ? '隐藏委托空单' : '显示委托空单'}
-                  className="inline-flex items-center text-[#F0B90B]/60 hover:text-[#F0B90B] transition-colors"
-                >
-                  {showOrderInfo ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
-                </button>
-                <span>
-                  委托空单挂单（<span className="text-[#F0B90B]">黄色水平线</span>，按委托价{showOrderInfo ? '' : '·已隐藏'}）
-                </span>
+            {reverseHedgeOrders.length > 0 && (
+              <div className="mt-2 px-1 space-y-1.5">
+                <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
+                  <button
+                    type="button"
+                    onClick={() => setShowOrderInfo(v => !v)}
+                    title={showOrderInfo ? '隐藏委托空单（黄色）' : '显示委托空单（黄色）'}
+                    aria-label={showOrderInfo ? '隐藏委托空单' : '显示委托空单'}
+                    className="inline-flex items-center text-[#F0B90B]/60 hover:text-[#F0B90B] transition-colors"
+                  >
+                    {showOrderInfo ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
+                  </button>
+                  <span>
+                    委托空单挂单（<span className="text-[#F0B90B]">黄色水平线</span>，按委托价{showOrderInfo ? '' : '·已隐藏'}）
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setShowReverseOrderManager(v => !v)}
+                    className="ml-1 rounded px-1.5 py-0.5 text-[10px] text-muted-foreground/55 hover:bg-muted hover:text-foreground transition-colors"
+                  >
+                    {showReverseOrderManager ? '收起' : '管理'}
+                  </button>
+                  {hiddenReverseOrderCount > 0 && (
+                    <button
+                      type="button"
+                      onClick={restoreHiddenReverseHedgeOrders}
+                      className="rounded px-1.5 py-0.5 text-[10px] text-muted-foreground/55 hover:bg-muted hover:text-foreground transition-colors"
+                    >
+                      恢复 {hiddenReverseOrderCount}
+                    </button>
+                  )}
+                </div>
+                {showReverseOrderManager && showOrderInfo && visibleReverseHedgeOrders.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5 pl-5">
+                    {visibleReverseHedgeOrders.map(order => (
+                      <div
+                        key={order.id}
+                        className="group inline-flex items-center gap-1 rounded border border-border/40 bg-muted/20 px-2 py-1 text-[10px] text-muted-foreground"
+                      >
+                        <span className="text-[#F0B90B]/80">{reverseOrderStatusText(order)}</span>
+                        <span>{fmtReverseOrderChipTime(order.createdAt)}</span>
+                        <span>@ {fmtReverseOrderChipPrice(order.price)}</span>
+                        <button
+                          type="button"
+                          onClick={() => hideReverseHedgeOrder(order.id)}
+                          title="从盘面隐藏这条委托空单"
+                          aria-label="从盘面隐藏这条委托空单"
+                          className="ml-0.5 inline-flex items-center text-muted-foreground/30 opacity-0 transition-opacity hover:text-[#F6465D] group-hover:opacity-100"
+                        >
+                          <EyeOff className="w-3 h-3" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
             {selectedCounterfactual && (
@@ -1085,7 +1201,7 @@ export default function JournalCampaignDetailPage() {
           <CampaignLegsList
             legs={legs}
             tradeRecords={tradeRecords}
-            reverseHedgeOrders={reverseHedgeOrders}
+            reverseHedgeOrders={visibleReverseHedgeOrders}
             highlightedLegIds={selectedLegMarkerIds}
             onToggleHighlight={(leg) => {
               setFocusTime(null);
@@ -1095,6 +1211,7 @@ export default function JournalCampaignDetailPage() {
                   : [...prev, leg.id]
               ));
             }}
+            onHideReverseHedgeOrder={(order) => hideReverseHedgeOrder(order.id)}
             onDetach={setDetachTarget}
           />
         </section>

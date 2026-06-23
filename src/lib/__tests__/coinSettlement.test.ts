@@ -6,7 +6,7 @@ import {
   coinPnlAmount,
   getCoinMarginedContractSizeUsd,
 } from '@/lib/coinMargined';
-import { settlementRoePct } from '@/lib/tradingSettlement';
+import { settlementRoePct, settlementMarginRatioPct } from '@/lib/tradingSettlement';
 import {
   calcUnrealizedPnl,
   calcLiquidationPrice,
@@ -81,28 +81,59 @@ describe('币本位（反向合约）核心公式', () => {
   });
 });
 
-describe('币本位 ROE — 必须用币口径（与币安一致），不是线性口径', () => {
-  // 价涨 10%、10x：反向 ROE = 杠杆×(平−开)/平 = 90.909%（不是线性的 100%）
-  const inverseRoe = lev * (mark - entry) / mark * 100; // 90.909...
-  const linearRoe = lev * (mark - entry) / entry * 100; // 100
+describe('ROE 分母 = 固定初始保证金（名义@开仓/杠杆），U本位/币本位统一同一口径', () => {
+  // 初始保证金(USD) = 名义@开仓/杠杆 = (张数×面值)/杠杆，固定、不随价格变、不含追加。
+  const initialMarginUsd = notionalUsd / lev; // 1000/10 = 100
+  // 统一口径下，币本位 ROE = pnl(USD)/初始保证金 = 杠杆×(平−开)/开（与线性同一式）。
+  const fixedRoe = lev * (mark - entry) / entry * 100; // 100
 
-  it('calcROE(coin) = 90.9%（回归：不能再是 100%）', () => {
-    const roe = calcROE(coinPos('LONG'), mark);
-    expect(roe).toBeCloseTo(inverseRoe, 6);
-    expect(roe).not.toBeCloseTo(linearRoe, 2);
+  it('calcROE(coin)：用固定初始保证金做分母（= 杠杆×(平−开)/开）', () => {
+    expect(calcROE(coinPos('LONG'), mark)).toBeCloseTo(fixedRoe, 6);
   });
 
-  it('calcROE(coin) 逐仓口径同样走币基准', () => {
-    expect(calcROE(coinPos('LONG', 'isolated'), mark)).toBeCloseTo(inverseRoe, 6);
+  it('calcROE(coin) 逐仓同口径（追加保证金不进分母）', () => {
+    expect(calcROE(coinPos('LONG', 'isolated'), mark)).toBeCloseTo(fixedRoe, 6);
   });
 
-  it('settlementRoePct：币本位按 mark 价给保证金估值 → 90.9%', () => {
-    const marginUsdEntry = notionalUsd / lev; // 100，= 开仓 USD 保证金
-    const pnlUsd = contracts * M * (1 / entry - 1 / mark) * mark; // ≈100
-    expect(settlementRoePct(pnlUsd, marginUsdEntry, entry, mark, true)).toBeCloseTo(inverseRoe, 6);
+  it('settlementRoePct = pnl / 初始保证金（U本位/币本位同一函数）', () => {
+    const pnlUsd = contracts * M * (1 / entry - 1 / mark) * mark; // 币本位 pnl(USD)
+    expect(settlementRoePct(pnlUsd, initialMarginUsd)).toBeCloseTo(fixedRoe, 6);
+    expect(settlementRoePct(100, 100)).toBeCloseTo(100, 9); // U本位示例
+  });
+});
+
+describe('保证金比率 = 维持保证金/保证金余额（与币安一致，亏损越大越逼近 100%）', () => {
+  // 截图实测（ACT 5x 逐仓，MMR=0.4%）：
+  // U本位 多 109,601,052.1701 张，开仓 0.045670
+  const qty = 109601052.1701;
+  const entryU = 0.045670;
+  const marginU = 1001100; // 开仓 USD 保证金
+  const ratioU = (markP: number) => {
+    const notional = qty * markP;
+    const pnl = qty * (markP - entryU);
+    return settlementMarginRatioPct(notional, marginU, pnl);
+  };
+
+  it('U本位：mark 0.039750 → ≈4.95%（旧错误公式是 8.09%）', () => {
+    expect(ratioU(0.039750)).toBeCloseTo(4.95, 1);
   });
 
-  it('settlementRoePct：U本位原样 pnl/保证金（线性 100%）', () => {
-    expect(settlementRoePct(100, 100, entry, mark, false)).toBeCloseTo(100, 9);
+  it('U本位：价越跌、亏越多 → 比率越高（方向必须对）', () => {
+    expect(ratioU(0.041140)).toBeCloseTo(3.57, 1);
+    expect(ratioU(0.039750)).toBeGreaterThan(ratioU(0.041140));
+  });
+
+  it('币本位：保证金按现价估值后 → ≈1.42%（旧错误公式是 30.10%）', () => {
+    // 空 500000 张 @0.045570，面值 10，标记 0.040967
+    const notionalUsd2 = 500000 * 10;            // 5,000,000 恒定
+    const marginCoin = notionalUsd2 / (0.045570 * 5);
+    const markP = 0.040967;
+    const marginValuedAtMark = marginCoin * markP;
+    const pnlUsd = 500000 * 10 * (1 / markP - 1 / 0.045570) * markP; // 空：币盈亏×标记
+    expect(settlementMarginRatioPct(notionalUsd2, marginValuedAtMark, pnlUsd)).toBeCloseTo(1.42, 1);
+  });
+
+  it('保证金余额 ≤ 0（已触及强平）→ 返回 100', () => {
+    expect(settlementMarginRatioPct(5_000_000, 1000, -2000)).toBe(100);
   });
 });

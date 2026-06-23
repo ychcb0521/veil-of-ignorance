@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Crosshair, ExternalLink } from 'lucide-react';
+import { Crosshair, ExternalLink, EyeOff } from 'lucide-react';
 import { LegRoleChip } from '@/components/journal/LegRoleChip';
 import { HEDGE_TYPE_LABELS } from '@/lib/hedgeTypes';
 import type { TradeJournal } from '@/types/journal';
@@ -12,6 +12,7 @@ interface Props {
   reverseHedgeOrders?: CampaignReverseHedgeOrder[];
   highlightedLegIds?: string[];
   onToggleHighlight?: (leg: TradeJournal) => void;
+  onHideReverseHedgeOrder?: (order: CampaignReverseHedgeOrder) => void;
   onDetach?: (leg: TradeJournal) => void;
 }
 
@@ -52,6 +53,7 @@ export function CampaignLegsList({
   reverseHedgeOrders = [],
   highlightedLegIds = [],
   onToggleHighlight,
+  onHideReverseHedgeOrder,
   onDetach,
 }: Props) {
   const nav = useNavigate();
@@ -156,19 +158,35 @@ export function CampaignLegsList({
                       reverseOrdersForLeg.map(order => (
                         <div
                           key={order.id}
-                          className="rounded border border-border/50 bg-muted/30 px-2 py-1 leading-tight"
+                          className="group rounded border border-border/50 bg-muted/30 px-2 py-1 leading-tight"
                         >
                           <div className="flex items-center justify-between gap-2">
                             <span className={order.side === 'SHORT' ? 'text-[#6D28D9]' : 'text-[#002FA7]'}>
                               {order.side === 'SHORT' ? '空' : '多'} {fmtPrice(order.price)}
                             </span>
-                            <span className="text-[10px] text-muted-foreground">
-                              {order.status === 'pending'
-                                ? '挂单中'
-                                : order.status === 'triggered'
-                                  ? '已触发'
-                                  : '已撤'}
-                            </span>
+                            <div className="flex items-center gap-1">
+                              <span className="text-[10px] text-muted-foreground">
+                                {order.status === 'pending'
+                                  ? '挂单中'
+                                  : order.status === 'triggered'
+                                    ? '已触发'
+                                    : '已撤'}
+                              </span>
+                              {onHideReverseHedgeOrder && (
+                                <button
+                                  type="button"
+                                  onClick={(event) => {
+                                    event.stopPropagation();
+                                    onHideReverseHedgeOrder(order);
+                                  }}
+                                  title="从盘面隐藏这条委托空单"
+                                  aria-label="从盘面隐藏这条委托空单"
+                                  className="inline-flex items-center text-muted-foreground/25 opacity-0 transition-opacity hover:text-[#F6465D] group-hover:opacity-100"
+                                >
+                                  <EyeOff className="w-3 h-3" />
+                                </button>
+                              )}
+                            </div>
                           </div>
                           <div className="text-[10px] text-muted-foreground">委 {fmtClock(order.createdAt)}</div>
                           {order.status === 'triggered' && (

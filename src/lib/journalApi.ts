@@ -62,7 +62,6 @@ import type {
   CancelledOrderSnapshot,
   FilledOrderSnapshot,
   CampaignReverseHedgeOrder,
-  OrderSide,
 } from "@/types/trading";
 
 
@@ -1733,7 +1732,6 @@ export async function getCampaignFullData(
 
   // 战役详情只展示用户归类进来的 legs；同标的同时间窗口内未选中的交易不能混入盘面。
   const tradeRecords = tradeHistory.filter(record => legRecordIds.has(record.id));
-  const tradeRecordById = new Map(tradeRecords.map(record => [record.id, record]));
   const pendingOrders = Object.entries(ordersMap)
     .flatMap(([symbol, orders]) => symbol === campaign.symbol ? orders : [])
     .filter(order => order.status === 'NEW' || order.status === 'PENDING' || order.status === 'ACTIVE');
@@ -1749,9 +1747,16 @@ export async function getCampaignFullData(
     order.reduceKind == null &&
     order.type !== 'LIMIT_TP_SL' &&
     order.type !== 'MARKET_TP_SL';
-  // 主力开仓「前 1 分钟内」挂的反向委托也算进本战役（提前布的对冲），所以窗口起点回退 60 秒。
+  // 黄色委托层按「战役时间窗」取全部开空委托；保留一个短暂前置缓冲，覆盖开主力时提前挂好的对冲空单。
   const PRE_MAIN_LOOKBACK_MS = 60_000;
-  const inWindow = (t: number) => Number.isFinite(t) && t >= openedAtMs - PRE_MAIN_LOOKBACK_MS && t <= closedAtMs;
+  const orderWindowStartMs = openedAtMs - PRE_MAIN_LOOKBACK_MS;
+  const orderWindowEndMs = closedAtMs;
+  const inWindow = (t: number) => Number.isFinite(t) && t >= orderWindowStartMs && t <= orderWindowEndMs;
+  const overlapsOrderWindow = (start: number, end?: number | null) => {
+    if (!Number.isFinite(start)) return false;
+    const normalizedEnd = end == null || !Number.isFinite(end) ? Number.POSITIVE_INFINITY : end;
+    return start <= orderWindowEndMs && normalizedEnd >= orderWindowStartMs;
+  };
   const pendingOrderPrice = (order: PendingOrder) => (
     order.price > 0
       ? order.price
@@ -1761,78 +1766,14 @@ export async function getCampaignFullData(
   );
   const closeEnough = (a: number, b: number, relativeBase = Math.max(Math.abs(a), Math.abs(b), 1)) =>
     Math.abs(a - b) <= Math.max(1e-8, relativeBase * 1e-6);
-  const ORDER_LEG_MATCH_MS = 60_000;
-  const selectedLegSignatures = legs
-    .map(leg => {
-      const record = leg.trade_record_id ? tradeRecordById.get(leg.trade_record_id) ?? null : null;
-      const price = record?.entryPrice ?? leg.pre_entry_price ?? null;
-      const time = record?.openTime ?? journalTimeMs(leg);
-      const side: OrderSide = record?.side ?? (leg.direction === 'short' ? 'SHORT' : 'LONG');
-      const quantity = record?.quantity ?? (
-        price && price > 0 && leg.pre_position_size != null
-          ? Math.abs(leg.pre_position_size / price)
-          : null
-      );
-      return {
-        legId: leg.id,
-        recordId: leg.trade_record_id,
-        side,
-        time,
-        price,
-        quantity,
-      };
-    })
-    .filter(signature =>
-      Number.isFinite(signature.time) &&
-      signature.price != null &&
-      Number.isFinite(signature.price) &&
-      signature.price > 0
-    );
-  const findSelectedLegForOrder = (
-    side: OrderSide,
-    time: number,
-    price: number,
-    quantity?: number | null,
-  ) => {
-    const candidates = selectedLegSignatures
-      .filter(signature =>
-        signature.side === side &&
-        Math.abs(signature.time - time) <= ORDER_LEG_MATCH_MS &&
-        signature.price != null &&
-        closeEnough(signature.price, price)
-      )
-      .sort((a, b) => {
-        const timeDelta = Math.abs(a.time - time) - Math.abs(b.time - time);
-        if (timeDelta !== 0) return timeDelta;
-        const quantityA = a.quantity != null && quantity != null
-          ? Math.abs(a.quantity - quantity)
-          : Number.POSITIVE_INFINITY;
-        const quantityB = b.quantity != null && quantity != null
-          ? Math.abs(b.quantity - quantity)
-          : Number.POSITIVE_INFINITY;
-        return quantityA - quantityB;
-      });
-    if (quantity != null) {
-      const strictQuantityMatch = candidates.find(signature =>
-        signature.quantity != null &&
-        closeEnough(signature.quantity, quantity, Math.max(Math.abs(signature.quantity), Math.abs(quantity), 1))
-      );
-      if (strictQuantityMatch) return strictQuantityMatch;
-    }
-    return candidates[0] ?? null;
-  };
-  const orderBelongsToSelectedLeg = (
-    side: OrderSide,
-    time: number,
-    price: number,
-    quantity?: number | null,
-  ) => Boolean(findSelectedLegForOrder(side, time, price, quantity));
+  const ORDER_RECORD_MATCH_MS = 60_000;
   const matchedTriggeredRecordIds = new Set<string>();
+  const campaignSymbolTradeRecords = tradeHistory.filter(record => record.symbol === campaign.symbol);
   const findRecordForFilledOrder = (order: FilledOrderSnapshot) => {
-    const candidates = tradeRecords
+    const candidates = campaignSymbolTradeRecords
       .filter(record =>
         record.side === order.side &&
-        Math.abs(record.openTime - order.filledAt) <= 60_000 &&
+        Math.abs(record.openTime - order.filledAt) <= ORDER_RECORD_MATCH_MS &&
         closeEnough(record.entryPrice, order.price)
       )
       .sort((a, b) => {
@@ -1852,14 +1793,10 @@ export async function getCampaignFullData(
     .filter(order =>
       order.symbol === campaign.symbol &&
       isOpeningShortOrder(order) &&
-      (inWindow(order.createdAt) || inWindow(order.filledAt))
+      overlapsOrderWindow(order.createdAt, order.filledAt)
     )
     .map(order => {
       const record = findRecordForFilledOrder(order);
-      const selectedLeg = record
-        ? selectedLegSignatures.find(signature => signature.recordId === record.id) ?? null
-        : findSelectedLegForOrder(order.side, order.filledAt, order.price, order.quantity);
-      if (!selectedLeg) return null;
       return {
         id: order.id,
         tradeRecordId: record?.id ?? null,
@@ -1877,8 +1814,7 @@ export async function getCampaignFullData(
       .filter(order =>
         order.symbol === campaign.symbol &&
         isOpeningShortOrder(order) &&
-        inWindow(order.createdAt) &&
-        orderBelongsToSelectedLeg(order.side, order.createdAt, order.price, order.quantity)
+        overlapsOrderWindow(order.createdAt, order.cancelledAt)
       )
       .map(order => ({
         id: order.id,
@@ -1894,9 +1830,8 @@ export async function getCampaignFullData(
       .filter(order => {
         const price = pendingOrderPrice(order);
         return isOpeningShortOrder(order) &&
-          inWindow(order.createdAt) &&
-          Number.isFinite(price) &&
-          orderBelongsToSelectedLeg(order.side, order.createdAt, price, order.quantity);
+          overlapsOrderWindow(order.createdAt) &&
+          Number.isFinite(price);
       })
       .map(order => ({
         id: order.id,

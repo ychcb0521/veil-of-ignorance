@@ -35,6 +35,7 @@ import {
   getPositionUnits,
   isCoinSettled,
   isPositionOpen,
+  settlementMarginRatioPct,
   settlementRoePct,
 } from '@/lib/tradingSettlement';
 import {
@@ -643,19 +644,23 @@ export function PositionPanel({
                       ? `${totalMarginCoin.toFixed(8)} ${baseCoin} ≈ ${formatUSDT(effectiveMargin)} USDT`
                       : formatUSDT(effectiveMargin);
 
-                    // Aggregate PnL/notional across all children.
+                    // Aggregate PnL / notional / 初始保证金 across all children.
                     let totalPnl = 0;
                     let notional = 0;
+                    let initialMargin = 0;
                     for (const c of mg.children) {
                       const mark = price || c.position.entryPrice;
                       totalPnl += calcUnrealizedPnl(c.position, mark);
                       notional += getPositionNotionalUsd(mg.symbol, c.position, mark);
+                      // 初始保证金 = 名义@开仓 / 杠杆（固定、不含追加保证金），U本位/币本位统一同一口径。
+                      initialMargin += getPositionNotionalUsd(mg.symbol, c.position, c.position.entryPrice) / c.position.leverage;
                     }
-                    // 币本位：保证金按现价估值，ROE = 币盈亏/币保证金（与币安一致）；U本位维持原样。
-                    const roeMargin = isCoinGroup && totalMarginCoin > 0 && price > 0 ? totalMarginCoin * price : effectiveMargin;
-                    const roe = roeMargin > 0 ? (totalPnl / roeMargin) * 100 : 0;
+                    // ROE 分母统一固定为初始保证金。
+                    const roe = initialMargin > 0 ? (totalPnl / initialMargin) * 100 : 0;
                     const isProfit = totalPnl >= 0;
-                    const marginRatio = notional > 0 ? ((effectiveMargin + totalPnl) / notional * 100) : 0;
+                    // 保证金比率（与币安一致）：维持保证金 / 保证金余额；余额含追加保证金，币本位按现价估值。
+                    const markValuedMargin = isCoinGroup && totalMarginCoin > 0 && price > 0 ? totalMarginCoin * price : effectiveMargin;
+                    const marginRatio = settlementMarginRatioPct(notional, markValuedMargin, totalPnl);
                     const positionQtyLabel = isCoinGroup
                       ? `${totalUnits} 张`
                       : formatAmount(mg.totalQuantity);
@@ -948,8 +953,8 @@ export function PositionPanel({
                     else if (historySort === 'pnl-asc') sorted.sort((a, b) => a.pnl - b.pnl);
                     else if (historySort === 'pct-desc' || historySort === 'pct-asc') {
                       const pct = (t: typeof sorted[0]) => {
-                        const margin = getPositionNotionalUsd(t.symbol, t, t.entryPrice) / t.leverage;
-                        return settlementRoePct(t.pnl, margin, t.entryPrice, t.exitPrice, isCoinSettled(t));
+                        const initialMargin = getPositionNotionalUsd(t.symbol, t, t.entryPrice) / t.leverage;
+                        return settlementRoePct(t.pnl, initialMargin);
                       };
                       sorted.sort((a, b) => historySort === 'pct-desc' ? pct(b) - pct(a) : pct(a) - pct(b));
                     }
@@ -981,8 +986,8 @@ export function PositionPanel({
                         {t.pnl >= 0 ? '+' : ''}{t.pnl.toFixed(2)}
                       </td>
                       {(() => {
-                        const margin = getPositionNotionalUsd(t.symbol, t, t.entryPrice) / t.leverage;
-                        const pct = settlementRoePct(t.pnl, margin, t.entryPrice, t.exitPrice, isCoinSettled(t));
+                        const initialMargin = getPositionNotionalUsd(t.symbol, t, t.entryPrice) / t.leverage;
+                        const pct = settlementRoePct(t.pnl, initialMargin);
                         return (
                           <td className={`px-3 py-2 font-bold ${pct >= 0 ? 'text-[#0ecb81]' : 'text-[#f6465d]'}`}>
                             {pct >= 0 ? '+' : ''}{pct.toFixed(2)}%
@@ -1069,8 +1074,9 @@ export function PositionPanel({
                   {tradeRecords.slice().reverse().slice(0, 100).map(t => {
                     const tradeQuoteLabel = isCoinSettled(t) ? 'USD' : 'USDT';
                     const notionalUsd = t.notionalUsd ?? getPositionNotionalUsd(t.symbol, t, t.entryPrice);
-                    const margin = t.margin > 0 ? t.margin : notionalUsd / t.leverage;
-                    const roe = settlementRoePct(t.pnl, margin, t.entryPrice, t.exitPrice, isCoinSettled(t));
+                    // ROE 分母 = 初始保证金 = 名义@开仓/杠杆（固定、不含追加），与开仓中持仓同口径。
+                    const initialMargin = notionalUsd / t.leverage;
+                    const roe = settlementRoePct(t.pnl, initialMargin);
                     const matchedJ = lookupJournalForRecord(t);
                     return (
                       <tr key={t.id} className="border-b border-gray-100 dark:border-[#2b3139]/50">
