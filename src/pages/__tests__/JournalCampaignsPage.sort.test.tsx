@@ -14,6 +14,7 @@ const campaigns: TradeCampaign[] = [
     title: 'High Importance',
     opened_at: '2026-01-01T00:00:00.000Z',
     closed_at: '2026-01-02T00:00:00.000Z',
+    initial_main_size_usdt: 100,
     final_realized_pnl: 10,
     importance_weight: 5,
   }),
@@ -22,6 +23,7 @@ const campaigns: TradeCampaign[] = [
     title: 'Newest Operation',
     opened_at: '2026-03-01T00:00:00.000Z',
     closed_at: '2026-03-02T00:00:00.000Z',
+    initial_main_size_usdt: 1000,
     final_realized_pnl: 50,
     importance_weight: 1,
   }),
@@ -30,6 +32,7 @@ const campaigns: TradeCampaign[] = [
     title: 'Best PnL',
     opened_at: '2026-02-01T00:00:00.000Z',
     closed_at: '2026-02-02T00:00:00.000Z',
+    initial_main_size_usdt: 100000,
     final_realized_pnl: 1000,
     importance_weight: 0,
   }),
@@ -38,6 +41,7 @@ const campaigns: TradeCampaign[] = [
     title: 'Late Close',
     opened_at: '2025-12-01T00:00:00.000Z',
     closed_at: '2026-04-01T00:00:00.000Z',
+    initial_main_size_usdt: 50,
     final_realized_pnl: 20,
     importance_weight: 2,
   }),
@@ -99,7 +103,7 @@ function makeCampaign(overrides: Partial<TradeCampaign>): TradeCampaign {
     title: overrides.title ?? 'Campaign',
     opened_at: overrides.opened_at ?? now,
     closed_at: overrides.closed_at ?? null,
-    initial_main_size_usdt: null,
+    initial_main_size_usdt: overrides.initial_main_size_usdt ?? null,
     initial_leverage: null,
     final_realized_pnl: overrides.final_realized_pnl ?? null,
     final_r_multiple: null,
@@ -204,6 +208,17 @@ describe('JournalCampaignsPage sorting', () => {
     fireEvent.click(screen.getByTestId('campaign-sort-pnl'));
     expect(screen.getByTestId('campaign-sort-pnl')).toHaveAttribute('data-sort-direction', 'asc');
     expect(cardOrder()).toEqual(['High Importance', 'Late Close', 'Newest Operation', 'Best PnL']);
+
+    fireEvent.click(screen.getByTestId('campaign-sort-pnlPct'));
+    expect(screen.getByTestId('campaign-sort-pnlPct')).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByTestId('campaign-sort-pnlPct')).toHaveAttribute('data-sort-direction', 'desc');
+    expect(screen.getByTestId('campaign-sort-pnlPct')).toHaveAttribute('aria-label', '盈亏百分比，从大到小排序');
+    expect(cardOrder()).toEqual(['Late Close', 'High Importance', 'Newest Operation', 'Best PnL']);
+
+    fireEvent.click(screen.getByTestId('campaign-sort-pnlPct'));
+    expect(screen.getByTestId('campaign-sort-pnlPct')).toHaveAttribute('data-sort-direction', 'asc');
+    expect(screen.getByTestId('campaign-sort-pnlPct')).toHaveAttribute('aria-label', '盈亏百分比，从小到大排序');
+    expect(cardOrder()).toEqual(['Best PnL', 'Newest Operation', 'High Importance', 'Late Close']);
 
     fireEvent.click(screen.getByTestId('campaign-sort-alpha'));
     expect(screen.getByTestId('campaign-sort-alpha')).toHaveAttribute('aria-pressed', 'true');

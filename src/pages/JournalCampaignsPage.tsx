@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type MouseEvent } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { ArrowDown, ArrowUp, FolderPlus, Layers, Star, Trash2 } from 'lucide-react';
+import { ArrowDown, ArrowUp, FolderPlus, Layers, Percent, Star, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { BackButton } from '@/components/journal/BackButton';
 import { useAuth } from '@/contexts/AuthContext';
@@ -19,7 +19,7 @@ type CampaignCardData = {
   legs: TradeJournal[];
 };
 
-type CampaignSortMode = 'importance' | 'time' | 'pnl' | 'alpha';
+type CampaignSortMode = 'importance' | 'time' | 'pnl' | 'pnlPct' | 'alpha';
 type CampaignSortDirection = 'asc' | 'desc';
 
 type CampaignSortState = {
@@ -27,10 +27,11 @@ type CampaignSortState = {
   direction: CampaignSortDirection;
 };
 
-const SORT_OPTIONS: { value: CampaignSortMode; label: string }[] = [
+const SORT_OPTIONS: { value: CampaignSortMode; label: string; subtleIcon?: 'percent' }[] = [
   { value: 'importance', label: '重要性' },
   { value: 'time', label: '操作时间' },
   { value: 'pnl', label: '盈亏' },
+  { value: 'pnlPct', label: '盈亏百分比', subtleIcon: 'percent' },
   { value: 'alpha', label: '字母' },
 ];
 
@@ -121,6 +122,13 @@ function pnlSortValue(campaign: Pick<TradeCampaign, 'final_realized_pnl'>): numb
   return Number.isFinite(value) ? value : Number.NaN;
 }
 
+function pnlPctSortValue(campaign: Pick<TradeCampaign, 'final_realized_pnl' | 'initial_main_size_usdt'>): number {
+  const pnl = Number(campaign.final_realized_pnl);
+  const base = Math.abs(Number(campaign.initial_main_size_usdt));
+  if (!Number.isFinite(pnl) || !Number.isFinite(base) || base <= 0) return Number.NaN;
+  return (pnl / base) * 100;
+}
+
 function compareNumber(a: number, b: number, direction: CampaignSortDirection): number {
   return direction === 'asc' ? a - b : b - a;
 }
@@ -141,19 +149,33 @@ function compareAlpha(
   return direction === 'asc' ? result : -result;
 }
 
-function comparePnl(
-  a: Pick<TradeCampaign, 'final_realized_pnl'>,
-  b: Pick<TradeCampaign, 'final_realized_pnl'>,
+function compareFiniteMetric(
+  aValue: number,
+  bValue: number,
   direction: CampaignSortDirection,
 ): number {
-  const aValue = pnlSortValue(a);
-  const bValue = pnlSortValue(b);
   const aFinite = Number.isFinite(aValue);
   const bFinite = Number.isFinite(bValue);
   if (!aFinite && !bFinite) return 0;
   if (!aFinite) return 1;
   if (!bFinite) return -1;
   return compareNumber(aValue, bValue, direction);
+}
+
+function comparePnl(
+  a: Pick<TradeCampaign, 'final_realized_pnl'>,
+  b: Pick<TradeCampaign, 'final_realized_pnl'>,
+  direction: CampaignSortDirection,
+): number {
+  return compareFiniteMetric(pnlSortValue(a), pnlSortValue(b), direction);
+}
+
+function comparePnlPct(
+  a: Pick<TradeCampaign, 'final_realized_pnl' | 'initial_main_size_usdt'>,
+  b: Pick<TradeCampaign, 'final_realized_pnl' | 'initial_main_size_usdt'>,
+  direction: CampaignSortDirection,
+): number {
+  return compareFiniteMetric(pnlPctSortValue(a), pnlPctSortValue(b), direction);
 }
 
 function sortCampaignRows(rows: CampaignCardData[], sort: CampaignSortState): CampaignCardData[] {
@@ -171,6 +193,13 @@ function sortCampaignRows(rows: CampaignCardData[], sort: CampaignSortState): Ca
     }
     if (sort.mode === 'pnl') {
       return comparePnl(a.campaign, b.campaign, sort.direction)
+        || importanceDesc
+        || timeDesc
+        || alphaAsc;
+    }
+    if (sort.mode === 'pnlPct') {
+      return comparePnlPct(a.campaign, b.campaign, sort.direction)
+        || comparePnl(a.campaign, b.campaign, sort.direction)
         || importanceDesc
         || timeDesc
         || alphaAsc;
@@ -366,11 +395,15 @@ export default function JournalCampaignsPage() {
                       : 'border-transparent text-muted-foreground/50 hover:text-foreground/65'
                   }`}
                 >
-                  <span>{option.label}</span>
+                  {option.subtleIcon === 'percent' ? (
+                    <Percent className={`h-3 w-3 ${active ? 'opacity-55' : 'opacity-35'}`} />
+                  ) : (
+                    <span>{option.label}</span>
+                  )}
                   {active && (
                     direction === 'desc'
-                      ? <ArrowDown className="h-3 w-3 opacity-60" />
-                      : <ArrowUp className="h-3 w-3 opacity-60" />
+                      ? <ArrowDown className="h-3 w-3 opacity-45" />
+                      : <ArrowUp className="h-3 w-3 opacity-45" />
                   )}
                 </button>
               );
