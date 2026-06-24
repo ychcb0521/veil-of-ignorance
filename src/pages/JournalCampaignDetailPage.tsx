@@ -23,7 +23,6 @@ import {
   shouldSuggestCampaignEnd,
 } from '@/lib/campaignAnalysis';
 import { buildSelectedLegVerticalLines, legRoleMarkerLabel } from '@/lib/campaignLegMarkers';
-import { buildCampaignMainOrderPriceLines, isMainStartLeg } from '@/lib/campaignMainOrderLines';
 import {
   deleteCounterfactual,
   detachCampaignLegFromCampaign,
@@ -164,6 +163,10 @@ const CAMPAIGN_BOUNDARY_LINE_COLOR = 'rgba(132,142,156,0.12)';
 const CAMPAIGN_VERTICAL_LINE_WIDTH = 0.3;
 const LEG_VERTICAL_LINE_WIDTH = 0.45;
 
+function isMainStartLeg(leg: Pick<TradeJournal, 'leg_role'>): boolean {
+  return leg.leg_role === 'main_open' || leg.leg_role === 'reentry_main';
+}
+
 function buildChartArtifacts(
   campaign: TradeCampaign,
   legs: TradeJournal[],
@@ -217,9 +220,9 @@ function buildChartArtifacts(
     if (leg.leg_role === 'hedge_rolling') { label = `Hr${rollingIndex++}`; shape = 'triangle-down'; }
     if (leg.leg_role === 'mirror_tp') { label = 'TP'; shape = 'square'; }
     if (leg.leg_role?.startsWith('main_add_')) { label = `A${leg.leg_role.slice('main_add_'.length)}`; }
-    if (leg.leg_role === 'reentry_main') { label = 'ReM'; }
+    if (leg.leg_role === 'reentry_main') { label = '再入主力'; }
     if (leg.leg_role === 'reentry_hedge') { label = 'ReH'; shape = 'triangle-down'; }
-    if (leg.leg_role === 'main_open') { label = leg.direction === 'short' ? 'M↓' : 'M↑'; }
+    if (leg.leg_role === 'main_open') { label = '主力开始'; }
 
     markers.push({ time: openTime, price, shape, color, label });
 
@@ -585,27 +588,17 @@ export default function JournalCampaignDetailPage() {
       : (klines.length > 0 ? klines[klines.length - 1].time : 0);
     return buildCampaignReverseOrderPriceLines(visibleReverseHedgeOrders, tradeRecords, fallbackEnd);
   }, [campaign, visibleReverseHedgeOrders, tradeRecords, klines]);
-  const mainOrderPriceLines = useMemo<TimeBoundPriceLine[]>(() => {
-    if (!campaign) return [];
-    const fallbackEnd = campaign.closed_at
-      ? new Date(campaign.closed_at).getTime()
-      : (klines.length > 0
-        ? klines[klines.length - 1].time
-        : legTimeSpan.endMs ?? new Date(effectiveClosedAt ?? campaign.opened_at).getTime());
-    return buildCampaignMainOrderPriceLines(legs, tradeRecords, fallbackEnd);
-  }, [campaign, legs, tradeRecords, klines, legTimeSpan.endMs, effectiveClosedAt]);
   const displayMarkers = useMemo(
     () => [...chart.markers, ...(showCfOverlay ? counterfactualChart.markers : [])],
     [chart.markers, counterfactualChart.markers, showCfOverlay],
   );
   const displayPriceLines = useMemo(
     () => [
-      ...mainOrderPriceLines,
       ...chart.timeBoundPriceLines,
       ...(showCfOverlay ? counterfactualChart.timeBoundPriceLines : []),
       ...(showOrderInfo ? orderInfoPriceLines : []),
     ],
-    [mainOrderPriceLines, chart.timeBoundPriceLines, counterfactualChart.timeBoundPriceLines, showCfOverlay, orderInfoPriceLines, showOrderInfo],
+    [chart.timeBoundPriceLines, counterfactualChart.timeBoundPriceLines, showCfOverlay, orderInfoPriceLines, showOrderInfo],
   );
   const displayVerticalLines = useMemo(
     () => [...chart.verticalLines, ...(showCfOverlay ? counterfactualChart.verticalLines : []), ...selectedLegVerticalLines],

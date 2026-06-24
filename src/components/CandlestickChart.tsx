@@ -134,6 +134,8 @@ export interface AnalysisVerticalLine {
   dashed?: boolean;
   label?: string;
   labelColor?: string;
+  /** Keep important campaign anchors visible by clamping them to the rendered data edge. */
+  alwaysVisible?: boolean;
 }
 
 export interface AnalysisChartAnnotations {
@@ -996,10 +998,12 @@ function CandlestickChartComponent({
     }
 
     for (const vertical of analysisAnnotations.verticalLines ?? []) {
-      if (vertical.time < minTime || vertical.time > maxTime) continue;
+      if (!Number.isFinite(vertical.time)) continue;
+      if (!vertical.alwaysVisible && (vertical.time < minTime || vertical.time > maxTime)) continue;
+      const verticalTime = vertical.alwaysVisible ? clampTime(vertical.time) : vertical.time;
       createAnalysisOverlay("vertical", {
         name: "verticalStraightLine",
-        points: [{ timestamp: vertical.time, value: lastValue }],
+        points: [{ timestamp: verticalTime, value: lastValue }],
         lock: true,
         styles: {
           line: {
@@ -1014,7 +1018,7 @@ function CandlestickChartComponent({
       if (vertical.label) {
         createAnalysisOverlay("vertical-label", {
           name: "simpleAnnotation",
-          points: [{ timestamp: vertical.time, value: verticalLabelValue }],
+          points: [{ timestamp: verticalTime, value: verticalLabelValue }],
           lock: true,
           extendData: vertical.label,
           styles: {

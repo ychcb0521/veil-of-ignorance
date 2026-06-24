@@ -52,6 +52,7 @@ describe('ReplayKlineChart annotations', () => {
 
     const latest = mocks.annotations.at(-1);
     expect(latest?.verticalLines?.some(line => line.time === 3000 && line.label === '主力·平仓')).toBe(true);
+    expect(latest?.verticalLines?.some(line => line.time === 3000 && line.alwaysVisible === true)).toBe(true);
     expect(latest?.verticalLines?.some(line => line.time === 4000 && line.label === '未来普通线')).toBe(false);
   });
 });
