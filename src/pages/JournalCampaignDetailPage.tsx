@@ -22,6 +22,7 @@ import {
   computeDecisionAccuracy,
   shouldSuggestCampaignEnd,
 } from '@/lib/campaignAnalysis';
+import { buildCampaignChartContentTimeSpan, pickCampaignOverviewInterval, type CampaignChartInterval } from '@/lib/campaignChartContentSpan';
 import { buildSelectedLegVerticalLines, legRoleMarkerLabel } from '@/lib/campaignLegMarkers';
 import {
   deleteCounterfactual,
@@ -54,7 +55,7 @@ import type {
 import type { CampaignReverseHedgeOrder, PendingOrder, TradeRecord } from '@/types/trading';
 
 const INTERVALS = ['1m', '5m', '15m', '1h'] as const;
-type Interval = (typeof INTERVALS)[number];
+type Interval = CampaignChartInterval;
 
 function pnlColor(value: number | null) {
   if (value == null) return 'text-muted-foreground';
@@ -392,6 +393,7 @@ export default function JournalCampaignDetailPage() {
   const [pendingOrders, setPendingOrders] = useState<PendingOrder[]>([]);
   const [reverseHedgeOrders, setReverseHedgeOrders] = useState<CampaignReverseHedgeOrder[]>([]);
   const [interval, setInterval] = useState<Interval>('1m');
+  const [intervalTouched, setIntervalTouched] = useState(false);
   const [endOpen, setEndOpen] = useState(false);
   const [focusTime, setFocusTime] = useState<number | null>(null);
   const [counterfactuals, setCounterfactuals] = useState<CampaignCounterfactual[]>([]);
@@ -484,13 +486,32 @@ export default function JournalCampaignDetailPage() {
     };
   }, [legs, tradeRecords]);
 
+  const selectedCounterfactual = useMemo(
+    () => counterfactuals.find(branch => branch.id === selectedCounterfactualId) ?? null,
+    [counterfactuals, selectedCounterfactualId],
+  );
+  const chartContentTimeSpan = useMemo(
+    () => buildCampaignChartContentTimeSpan(campaign, legs, tradeRecords, reverseHedgeOrders, selectedCounterfactual),
+    [campaign, legs, tradeRecords, reverseHedgeOrders, selectedCounterfactual],
+  );
+  const overviewInterval = useMemo(
+    () => pickCampaignOverviewInterval(chartContentTimeSpan),
+    [chartContentTimeSpan],
+  );
+
+  useEffect(() => {
+    if (!intervalTouched && interval !== overviewInterval) {
+      setInterval(overviewInterval);
+    }
+  }, [interval, intervalTouched, overviewInterval]);
+
   const { klines, loading: klinesLoading, error: klinesError, reload: reloadKlines } = useCampaignKlines(
     campaign?.symbol ?? '',
     campaign?.opened_at ?? new Date().toISOString(),
     effectiveClosedAt,
     interval,
-    legTimeSpan.startMs,
-    legTimeSpan.endMs,
+    chartContentTimeSpan.startMs ?? legTimeSpan.startMs,
+    chartContentTimeSpan.endMs ?? legTimeSpan.endMs,
   );
 
   const accuracy = useMemo(
@@ -500,10 +521,6 @@ export default function JournalCampaignDetailPage() {
   const chart = useMemo(
     () => (campaign ? buildChartArtifacts(campaign, legs, tradeRecords) : { markers: [], timeBoundPriceLines: [], verticalLines: [], events: [] }),
     [campaign, legs, tradeRecords],
-  );
-  const selectedCounterfactual = useMemo(
-    () => counterfactuals.find(branch => branch.id === selectedCounterfactualId) ?? null,
-    [counterfactuals, selectedCounterfactualId],
   );
   const pendingCounterfactual = useMemo(
     () => counterfactuals.find(branch => branch.id === pendingCounterfactualId) ?? null,
@@ -647,17 +664,16 @@ export default function JournalCampaignDetailPage() {
     );
   }
 
-  // 主图当前时间游标：聚焦到某事件时用 focusTime，否则停在「最后一条腿的平/开时间 + 缓冲」。
+  // 主图当前时间游标：聚焦到某事件时用 focusTime，否则停在「全部盘面内容的最后时间 + 缓冲」。
   // 关键：ReplayKlineChart 会用 `line.time <= currentTime` 过滤竖线/标记，并以 currentTime 作为可见区右沿。
-  // 旧实现停在 effectiveClosedAt（战役 closed_at / 当前模拟时刻），回填战役里它未必落在 Legs 的真实 K 线段上，
-  // 会把晚于它的开/平竖线全过滤掉、并把右沿拉到无关行情。改为对齐 legTimeSpan 末端即可保证每条腿的竖线都渲染。
+  // 这里用 chartContentTimeSpan（legs + 委托空单 + 反事实层 + 战役边界），确保默认盘面把上方标注全部囊括进去。
   // 必须放在上面的 loading guard 之后——此时 campaign 一定非空；放在 guard 之前会在
   // 首帧（campaign 仍为 null）就解引用 campaign.opened_at 直接崩溃、整页白屏。
-  const chartDefaultCurrentTime = legTimeSpan.endMs != null
-    ? legTimeSpan.endMs + CAMPAIGN_EDGE_PAD_MS
+  const chartDefaultCurrentTime = chartContentTimeSpan.endMs != null
+    ? chartContentTimeSpan.endMs + CAMPAIGN_EDGE_PAD_MS
     : new Date(effectiveClosedAt ?? campaign.opened_at).getTime();
-  const chartDefaultViewportCenterTime = legTimeSpan.startMs != null && legTimeSpan.endMs != null
-    ? Math.round((legTimeSpan.startMs + legTimeSpan.endMs) / 2)
+  const chartDefaultViewportCenterTime = chartContentTimeSpan.startMs != null && chartContentTimeSpan.endMs != null
+    ? Math.round((chartContentTimeSpan.startMs + chartContentTimeSpan.endMs) / 2)
     : chartDefaultCurrentTime;
   const chartCurrentTime = focusTime ?? chartDefaultCurrentTime;
   const chartViewportCenterTime = focusTime ?? chartDefaultViewportCenterTime;
@@ -978,7 +994,10 @@ export default function JournalCampaignDetailPage() {
                   <button
                     key={item}
                     type="button"
-                    onClick={() => setInterval(item)}
+                    onClick={() => {
+                      setIntervalTouched(true);
+                      setInterval(item);
+                    }}
                     className={`h-6 px-2 rounded text-[10px] font-mono ${interval === item ? 'bg-[#F0B90B] text-black' : 'bg-muted text-foreground'}`}
                   >
                     {item}
