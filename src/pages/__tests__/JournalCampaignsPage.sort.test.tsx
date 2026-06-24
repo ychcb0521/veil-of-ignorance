@@ -13,6 +13,7 @@ const campaigns: TradeCampaign[] = [
     id: 'high-importance',
     title: 'High Importance',
     opened_at: '2026-01-01T00:00:00.000Z',
+    closed_at: '2026-01-02T00:00:00.000Z',
     final_realized_pnl: 10,
     importance_weight: 5,
   }),
@@ -20,6 +21,7 @@ const campaigns: TradeCampaign[] = [
     id: 'newest',
     title: 'Newest Operation',
     opened_at: '2026-03-01T00:00:00.000Z',
+    closed_at: '2026-03-02T00:00:00.000Z',
     final_realized_pnl: 50,
     importance_weight: 1,
   }),
@@ -27,8 +29,17 @@ const campaigns: TradeCampaign[] = [
     id: 'best-pnl',
     title: 'Best PnL',
     opened_at: '2026-02-01T00:00:00.000Z',
+    closed_at: '2026-02-02T00:00:00.000Z',
     final_realized_pnl: 1000,
     importance_weight: 0,
+  }),
+  makeCampaign({
+    id: 'late-close',
+    title: 'Late Close',
+    opened_at: '2025-12-01T00:00:00.000Z',
+    closed_at: '2026-04-01T00:00:00.000Z',
+    final_realized_pnl: 20,
+    importance_weight: 2,
   }),
 ];
 
@@ -91,37 +102,39 @@ describe('JournalCampaignsPage sorting', () => {
       </MemoryRouter>,
     );
 
-    await waitFor(() => expect(screen.getAllByTestId('campaign-card')).toHaveLength(3));
+    await waitFor(() => expect(screen.getAllByTestId('campaign-card')).toHaveLength(4));
 
-    expect(cardOrder()).toEqual(['Newest Operation', 'Best PnL', 'High Importance']);
+    expect(cardOrder()).toEqual(['Late Close', 'Newest Operation', 'Best PnL', 'High Importance']);
     expect(screen.getByTestId('campaign-sort-time')).toHaveAttribute('aria-pressed', 'true');
     expect(screen.getByTestId('campaign-sort-time')).toHaveAttribute('data-sort-direction', 'desc');
+    expect(screen.getByTestId('campaign-sort-time')).toHaveAttribute('aria-label', '操作时间，从大到小排序');
 
     fireEvent.click(screen.getByTestId('campaign-sort-time'));
     expect(screen.getByTestId('campaign-sort-time')).toHaveAttribute('aria-pressed', 'true');
     expect(screen.getByTestId('campaign-sort-time')).toHaveAttribute('data-sort-direction', 'asc');
-    expect(cardOrder()).toEqual(['High Importance', 'Best PnL', 'Newest Operation']);
+    expect(screen.getByTestId('campaign-sort-time')).toHaveAttribute('aria-label', '操作时间，从小到大排序');
+    expect(cardOrder()).toEqual(['High Importance', 'Best PnL', 'Newest Operation', 'Late Close']);
 
     fireEvent.click(screen.getByTestId('campaign-sort-importance'));
     expect(screen.getByTestId('campaign-sort-importance')).toHaveAttribute('aria-pressed', 'true');
     expect(screen.getByTestId('campaign-sort-importance')).toHaveAttribute('data-sort-direction', 'desc');
-    expect(cardOrder()).toEqual(['High Importance', 'Newest Operation', 'Best PnL']);
+    expect(cardOrder()).toEqual(['High Importance', 'Late Close', 'Newest Operation', 'Best PnL']);
 
     fireEvent.click(screen.getByTestId('campaign-sort-importance'));
     expect(screen.getByTestId('campaign-sort-importance')).toHaveAttribute('data-sort-direction', 'asc');
-    expect(cardOrder()).toEqual(['Best PnL', 'Newest Operation', 'High Importance']);
+    expect(cardOrder()).toEqual(['Best PnL', 'Newest Operation', 'Late Close', 'High Importance']);
 
     fireEvent.click(screen.getByTestId('campaign-sort-time'));
     expect(screen.getByTestId('campaign-sort-time')).toHaveAttribute('data-sort-direction', 'desc');
-    expect(cardOrder()).toEqual(['Newest Operation', 'Best PnL', 'High Importance']);
+    expect(cardOrder()).toEqual(['Late Close', 'Newest Operation', 'Best PnL', 'High Importance']);
 
     fireEvent.click(screen.getByTestId('campaign-sort-pnl'));
     expect(screen.getByTestId('campaign-sort-pnl')).toHaveAttribute('aria-pressed', 'true');
     expect(screen.getByTestId('campaign-sort-pnl')).toHaveAttribute('data-sort-direction', 'desc');
-    expect(cardOrder()).toEqual(['Best PnL', 'Newest Operation', 'High Importance']);
+    expect(cardOrder()).toEqual(['Best PnL', 'Newest Operation', 'Late Close', 'High Importance']);
 
     fireEvent.click(screen.getByTestId('campaign-sort-pnl'));
     expect(screen.getByTestId('campaign-sort-pnl')).toHaveAttribute('data-sort-direction', 'asc');
-    expect(cardOrder()).toEqual(['High Importance', 'Newest Operation', 'Best PnL']);
+    expect(cardOrder()).toEqual(['High Importance', 'Late Close', 'Newest Operation', 'Best PnL']);
   });
 });

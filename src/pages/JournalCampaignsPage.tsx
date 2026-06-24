@@ -89,8 +89,21 @@ function importanceValue(campaign: Pick<TradeCampaign, 'importance_weight'>): nu
   return Math.max(0, Math.min(5, Math.round(value)));
 }
 
-function campaignSortTime(campaign: Pick<TradeCampaign, 'opened_at' | 'created_at'>): number {
-  return new Date(campaign.opened_at || campaign.created_at).getTime() || 0;
+function safeTimeValue(value: string | null | undefined): number | null {
+  if (!value) return null;
+  const time = new Date(value).getTime();
+  return Number.isFinite(time) ? time : null;
+}
+
+function campaignSortTime(campaign: Pick<TradeCampaign, 'opened_at' | 'closed_at' | 'created_at' | 'actual_evolution'>): number {
+  const eventTimes = (campaign.actual_evolution ?? [])
+    .flatMap(event => [event.close_time, event.open_time, event.recorded_at])
+    .map(safeTimeValue)
+    .filter((time): time is number => time != null);
+  const campaignTimes = [campaign.closed_at, campaign.opened_at, campaign.created_at]
+    .map(safeTimeValue)
+    .filter((time): time is number => time != null);
+  return Math.max(0, ...campaignTimes, ...eventTimes);
 }
 
 function pnlSortValue(campaign: Pick<TradeCampaign, 'final_realized_pnl'>): number {
@@ -100,6 +113,10 @@ function pnlSortValue(campaign: Pick<TradeCampaign, 'final_realized_pnl'>): numb
 
 function compareNumber(a: number, b: number, direction: CampaignSortDirection): number {
   return direction === 'asc' ? a - b : b - a;
+}
+
+function sortDirectionLabel(direction: CampaignSortDirection): string {
+  return direction === 'desc' ? '从大到小' : '从小到大';
 }
 
 function comparePnl(
@@ -298,29 +315,34 @@ export default function JournalCampaignsPage() {
           </div>
           <div className="flex items-center gap-2 self-start px-0.5 py-0.5 text-[10px] text-muted-foreground/45 md:self-auto">
             <span className="select-none">排序</span>
-            {SORT_OPTIONS.map(option => (
-              <button
-                key={option.value}
-                type="button"
-                aria-pressed={sortState.mode === option.value}
-                aria-label={`${option.label}${sortState.mode === option.value ? (sortState.direction === 'desc' ? '，降序' : '，升序') : ''}`}
-                data-sort-direction={sortState.mode === option.value ? sortState.direction : undefined}
-                data-testid={`campaign-sort-${option.value}`}
-                onClick={() => handleSortChange(option.value)}
-                className={`inline-flex h-6 items-center gap-0.5 rounded-sm border-b px-0.5 transition-colors ${
-                  sortState.mode === option.value
-                    ? 'border-muted-foreground/30 text-foreground/70'
-                    : 'border-transparent text-muted-foreground/50 hover:text-foreground/65'
-                }`}
-              >
-                <span>{option.label}</span>
-                {sortState.mode === option.value && (
-                  sortState.direction === 'desc'
-                    ? <ArrowDown className="h-3 w-3 opacity-60" />
-                    : <ArrowUp className="h-3 w-3 opacity-60" />
-                )}
-              </button>
-            ))}
+            {SORT_OPTIONS.map(option => {
+              const active = sortState.mode === option.value;
+              const direction = active ? sortState.direction : 'desc';
+              return (
+                <button
+                  key={option.value}
+                  type="button"
+                  aria-pressed={active}
+                  aria-label={`${option.label}，${sortDirectionLabel(direction)}排序`}
+                  title={`按${option.label}${sortDirectionLabel(direction)}排序${active ? '；再次点击切换方向' : ''}`}
+                  data-sort-direction={active ? direction : undefined}
+                  data-testid={`campaign-sort-${option.value}`}
+                  onClick={() => handleSortChange(option.value)}
+                  className={`inline-flex h-6 items-center gap-0.5 rounded-sm border-b px-0.5 transition-colors ${
+                    active
+                      ? 'border-muted-foreground/30 text-foreground/70'
+                      : 'border-transparent text-muted-foreground/50 hover:text-foreground/65'
+                  }`}
+                >
+                  <span>{option.label}</span>
+                  {active && (
+                    direction === 'desc'
+                      ? <ArrowDown className="h-3 w-3 opacity-60" />
+                      : <ArrowUp className="h-3 w-3 opacity-60" />
+                  )}
+                </button>
+              );
+            })}
           </div>
         </div>
 
