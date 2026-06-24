@@ -136,5 +136,16 @@ describe('JournalCampaignsPage sorting', () => {
     fireEvent.click(screen.getByTestId('campaign-sort-pnl'));
     expect(screen.getByTestId('campaign-sort-pnl')).toHaveAttribute('data-sort-direction', 'asc');
     expect(cardOrder()).toEqual(['High Importance', 'Late Close', 'Newest Operation', 'Best PnL']);
+
+    fireEvent.click(screen.getByTestId('campaign-sort-alpha'));
+    expect(screen.getByTestId('campaign-sort-alpha')).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByTestId('campaign-sort-alpha')).toHaveAttribute('data-sort-direction', 'asc');
+    expect(screen.getByTestId('campaign-sort-alpha')).toHaveAttribute('aria-label', '字母，A 到 Z排序');
+    expect(cardOrder()).toEqual(['Best PnL', 'High Importance', 'Late Close', 'Newest Operation']);
+
+    fireEvent.click(screen.getByTestId('campaign-sort-alpha'));
+    expect(screen.getByTestId('campaign-sort-alpha')).toHaveAttribute('data-sort-direction', 'desc');
+    expect(screen.getByTestId('campaign-sort-alpha')).toHaveAttribute('aria-label', '字母，Z 到 A排序');
+    expect(cardOrder()).toEqual(['Newest Operation', 'Late Close', 'High Importance', 'Best PnL']);
   });
 });

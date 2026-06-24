@@ -19,7 +19,7 @@ type CampaignCardData = {
   legs: TradeJournal[];
 };
 
-type CampaignSortMode = 'importance' | 'time' | 'pnl';
+type CampaignSortMode = 'importance' | 'time' | 'pnl' | 'alpha';
 type CampaignSortDirection = 'asc' | 'desc';
 
 type CampaignSortState = {
@@ -31,7 +31,13 @@ const SORT_OPTIONS: { value: CampaignSortMode; label: string }[] = [
   { value: 'importance', label: '重要性' },
   { value: 'time', label: '操作时间' },
   { value: 'pnl', label: '盈亏' },
+  { value: 'alpha', label: '字母' },
 ];
+
+const CAMPAIGN_TITLE_COLLATOR = new Intl.Collator(['zh-Hans-CN', 'en'], {
+  numeric: true,
+  sensitivity: 'base',
+});
 
 const STATUS_STYLES: Record<string, string> = {
   active: 'bg-[#F0B90B]/15 text-[#F0B90B]',
@@ -108,8 +114,20 @@ function compareNumber(a: number, b: number, direction: CampaignSortDirection): 
   return direction === 'asc' ? a - b : b - a;
 }
 
-function sortDirectionLabel(direction: CampaignSortDirection): string {
+function sortDirectionLabel(direction: CampaignSortDirection, mode?: CampaignSortMode): string {
+  if (mode === 'alpha') return direction === 'asc' ? 'A 到 Z' : 'Z 到 A';
   return direction === 'desc' ? '从大到小' : '从小到大';
+}
+
+function compareAlpha(
+  a: Pick<TradeCampaign, 'title' | 'symbol'>,
+  b: Pick<TradeCampaign, 'title' | 'symbol'>,
+  direction: CampaignSortDirection,
+): number {
+  const aValue = (a.title || a.symbol || '').trim();
+  const bValue = (b.title || b.symbol || '').trim();
+  const result = CAMPAIGN_TITLE_COLLATOR.compare(aValue, bValue);
+  return direction === 'asc' ? result : -result;
 }
 
 function comparePnl(
@@ -132,20 +150,30 @@ function sortCampaignRows(rows: CampaignCardData[], sort: CampaignSortState): Ca
     const importanceDesc = compareNumber(importanceValue(a.campaign), importanceValue(b.campaign), 'desc');
     const timeDesc = compareNumber(campaignSortTime(a.campaign), campaignSortTime(b.campaign), 'desc');
     const pnlDesc = comparePnl(a.campaign, b.campaign, 'desc');
+    const alphaAsc = compareAlpha(a.campaign, b.campaign, 'asc');
 
     if (sort.mode === 'time') {
       return compareNumber(campaignSortTime(a.campaign), campaignSortTime(b.campaign), sort.direction)
         || importanceDesc
-        || pnlDesc;
+        || pnlDesc
+        || alphaAsc;
     }
     if (sort.mode === 'pnl') {
       return comparePnl(a.campaign, b.campaign, sort.direction)
         || importanceDesc
-        || timeDesc;
+        || timeDesc
+        || alphaAsc;
+    }
+    if (sort.mode === 'alpha') {
+      return compareAlpha(a.campaign, b.campaign, sort.direction)
+        || timeDesc
+        || importanceDesc
+        || pnlDesc;
     }
     return compareNumber(importanceValue(a.campaign), importanceValue(b.campaign), sort.direction)
       || timeDesc
-      || pnlDesc;
+      || pnlDesc
+      || alphaAsc;
   });
 }
 
@@ -233,7 +261,7 @@ export default function JournalCampaignsPage() {
     setSortState(current => (
       current.mode === mode
         ? { mode, direction: current.direction === 'desc' ? 'asc' : 'desc' }
-        : { mode, direction: 'desc' }
+        : { mode, direction: mode === 'alpha' ? 'asc' : 'desc' }
     ));
   };
 
@@ -316,8 +344,8 @@ export default function JournalCampaignsPage() {
                   key={option.value}
                   type="button"
                   aria-pressed={active}
-                  aria-label={`${option.label}，${sortDirectionLabel(direction)}排序`}
-                  title={`按${option.label}${sortDirectionLabel(direction)}排序${active ? '；再次点击切换方向' : ''}`}
+                  aria-label={`${option.label}，${sortDirectionLabel(direction, option.value)}排序`}
+                  title={`按${option.label}${sortDirectionLabel(direction, option.value)}排序${active ? '；再次点击切换方向' : ''}`}
                   data-sort-direction={active ? direction : undefined}
                   data-testid={`campaign-sort-${option.value}`}
                   onClick={() => handleSortChange(option.value)}
