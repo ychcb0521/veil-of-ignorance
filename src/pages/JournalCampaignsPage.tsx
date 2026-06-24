@@ -19,6 +19,14 @@ type CampaignCardData = {
   legs: TradeJournal[];
 };
 
+type CampaignSortMode = 'importance' | 'time' | 'pnl';
+
+const SORT_OPTIONS: { value: CampaignSortMode; label: string }[] = [
+  { value: 'importance', label: '重要性' },
+  { value: 'time', label: '操作时间' },
+  { value: 'pnl', label: '盈亏' },
+];
+
 const STATUS_STYLES: Record<string, string> = {
   active: 'bg-[#F0B90B]/15 text-[#F0B90B]',
   closed_profit: 'bg-[#0ECB81]/15 text-[#0ECB81]',
@@ -79,11 +87,21 @@ function campaignSortTime(campaign: Pick<TradeCampaign, 'opened_at' | 'created_a
   return new Date(campaign.opened_at || campaign.created_at).getTime() || 0;
 }
 
-function sortCampaignRows(rows: CampaignCardData[]): CampaignCardData[] {
-  return [...rows].sort((a, b) => (
-    importanceValue(b.campaign) - importanceValue(a.campaign)
-    || campaignSortTime(b.campaign) - campaignSortTime(a.campaign)
-  ));
+function pnlSortValue(campaign: Pick<TradeCampaign, 'final_realized_pnl'>): number {
+  const value = Number(campaign.final_realized_pnl);
+  return Number.isFinite(value) ? value : Number.NEGATIVE_INFINITY;
+}
+
+function sortCampaignRows(rows: CampaignCardData[], mode: CampaignSortMode): CampaignCardData[] {
+  return [...rows].sort((a, b) => {
+    const importanceDelta = importanceValue(b.campaign) - importanceValue(a.campaign);
+    const timeDelta = campaignSortTime(b.campaign) - campaignSortTime(a.campaign);
+    const pnlDelta = pnlSortValue(b.campaign) - pnlSortValue(a.campaign);
+
+    if (mode === 'time') return timeDelta || importanceDelta || pnlDelta;
+    if (mode === 'pnl') return pnlDelta || importanceDelta || timeDelta;
+    return importanceDelta || timeDelta || pnlDelta;
+  });
 }
 
 function durationLabel(openedAt: string, closedAt: string | null) {
@@ -106,6 +124,7 @@ export default function JournalCampaignsPage() {
   const [loading, setLoading] = useState(true);
   const [rows, setRows] = useState<CampaignCardData[]>([]);
   const [busyCampaignId, setBusyCampaignId] = useState<string | null>(null);
+  const [sortMode, setSortMode] = useState<CampaignSortMode>('importance');
 
   useEffect(() => {
     if (!user) return;
@@ -122,7 +141,7 @@ export default function JournalCampaignsPage() {
             return { campaign, legs: details.legs };
           }),
         );
-        if (!cancelled) setRows(sortCampaignRows(full));
+        if (!cancelled) setRows(full);
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -146,11 +165,11 @@ export default function JournalCampaignsPage() {
     const previousRows = rows;
     const nextWeight = importanceValue(campaign) === weight ? 0 : weight;
     setBusyCampaignId(campaign.id);
-    setRows(prev => sortCampaignRows(prev.map(row => (
+    setRows(prev => prev.map(row => (
       row.campaign.id === campaign.id
         ? { ...row, campaign: { ...row.campaign, importance_weight: nextWeight } }
         : row
-    ))));
+    )));
 
     try {
       await updateCampaignImportance(campaign.id, nextWeight);
@@ -162,6 +181,8 @@ export default function JournalCampaignsPage() {
       setBusyCampaignId(null);
     }
   };
+
+  const sortedRows = useMemo(() => sortCampaignRows(rows, sortMode), [rows, sortMode]);
 
   const handleDeleteCampaign = async (
     event: MouseEvent<HTMLButtonElement>,
@@ -214,7 +235,7 @@ export default function JournalCampaignsPage() {
           </div>
         )}
 
-        <div className="grid grid-cols-1 md:grid-cols-[minmax(220px,320px)] gap-3 mb-4">
+        <div className="mb-4 flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
           <div className="h-9 rounded-md border border-border bg-card p-1 flex items-center gap-1">
             {[
               { value: 'own', label: '我的战役' },
@@ -232,11 +253,30 @@ export default function JournalCampaignsPage() {
               </button>
             ))}
           </div>
+          <div className="flex items-center gap-1 self-start rounded-md border border-transparent bg-transparent px-1 py-0.5 text-[10px] text-muted-foreground md:self-auto">
+            <span className="px-1.5">排序</span>
+            {SORT_OPTIONS.map(option => (
+              <button
+                key={option.value}
+                type="button"
+                aria-pressed={sortMode === option.value}
+                data-testid={`campaign-sort-${option.value}`}
+                onClick={() => setSortMode(option.value)}
+                className={`h-6 rounded px-2 transition-colors ${
+                  sortMode === option.value
+                    ? 'border border-border bg-card text-foreground shadow-[0_1px_4px_rgba(15,23,42,0.04)]'
+                    : 'border border-transparent text-muted-foreground/70 hover:bg-muted/60 hover:text-foreground'
+                }`}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
         </div>
 
         {loading ? (
           <div className="border border-border rounded p-10 text-center text-[12px] text-muted-foreground">加载中…</div>
-        ) : rows.length === 0 ? (
+        ) : sortedRows.length === 0 ? (
           <div className="border border-border rounded p-10 text-center space-y-2">
             <div className="mx-auto w-10 h-10 rounded-full bg-accent flex items-center justify-center">
               <Layers className="w-5 h-5 text-muted-foreground" />
@@ -247,7 +287,7 @@ export default function JournalCampaignsPage() {
             </div>
           </div>
         ) : (
-          rows.map(({ campaign, legs }) => {
+          sortedRows.map(({ campaign, legs }) => {
             const importance = importanceValue(campaign);
             const isOwnCampaign = campaign.user_id === user?.id;
             const statusLabel = campaign.status === 'active'
@@ -262,6 +302,7 @@ export default function JournalCampaignsPage() {
             return (
               <div
                 key={campaign.id}
+                data-testid="campaign-card"
                 onClick={() => nav(`/journal/campaigns/${campaign.id}${location.search}`)}
                 className="bg-card border border-border rounded p-4 mb-3 cursor-pointer hover:bg-accent transition-colors"
               >

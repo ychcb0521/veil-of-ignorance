@@ -1,0 +1,107 @@
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
+import { describe, expect, it, vi } from 'vitest';
+import type { TradeCampaign } from '@/types/journal';
+import JournalCampaignsPage from '../JournalCampaignsPage';
+
+const { mockUser } = vi.hoisted(() => ({
+  mockUser: { id: 'user-1' },
+}));
+
+const campaigns: TradeCampaign[] = [
+  makeCampaign({
+    id: 'high-importance',
+    title: 'High Importance',
+    opened_at: '2026-01-01T00:00:00.000Z',
+    final_realized_pnl: 10,
+    importance_weight: 5,
+  }),
+  makeCampaign({
+    id: 'newest',
+    title: 'Newest Operation',
+    opened_at: '2026-03-01T00:00:00.000Z',
+    final_realized_pnl: 50,
+    importance_weight: 1,
+  }),
+  makeCampaign({
+    id: 'best-pnl',
+    title: 'Best PnL',
+    opened_at: '2026-02-01T00:00:00.000Z',
+    final_realized_pnl: 1000,
+    importance_weight: 0,
+  }),
+];
+
+vi.mock('@/contexts/AuthContext', () => ({
+  useAuth: () => ({
+    user: mockUser,
+  }),
+}));
+
+vi.mock('@/lib/journalApi', () => ({
+  deleteCampaign: vi.fn(),
+  getCampaignWithLegs: vi.fn(async (id: string) => ({
+    campaign: campaigns.find(campaign => campaign.id === id),
+    legs: [],
+  })),
+  listAllCampaigns: vi.fn(async () => campaigns),
+  listVisibleCampaigns: vi.fn(async () => []),
+  updateCampaignImportance: vi.fn(async (_id: string, weight: number) => weight),
+}));
+
+function makeCampaign(overrides: Partial<TradeCampaign>): TradeCampaign {
+  const now = '2026-01-01T00:00:00.000Z';
+  return {
+    id: overrides.id ?? 'campaign',
+    user_id: 'user-1',
+    symbol: 'BTCUSDT',
+    direction: 'main_long',
+    status: 'closed_profit',
+    strategy_template: 'custom',
+    title: overrides.title ?? 'Campaign',
+    opened_at: overrides.opened_at ?? now,
+    closed_at: overrides.closed_at ?? null,
+    initial_main_size_usdt: null,
+    initial_leverage: null,
+    final_realized_pnl: overrides.final_realized_pnl ?? null,
+    final_r_multiple: null,
+    peak_unrealized_pnl: null,
+    peak_drawdown: null,
+    importance_weight: overrides.importance_weight ?? 0,
+    notes: null,
+    actual_evolution: [],
+    deviation_notes: {},
+    created_at: overrides.created_at ?? now,
+    updated_at: overrides.updated_at ?? now,
+  };
+}
+
+function cardOrder(): string[] {
+  return screen.getAllByTestId('campaign-card').map(card => {
+    const text = card.textContent ?? '';
+    return campaigns.find(campaign => text.includes(campaign.title))?.title ?? '';
+  });
+}
+
+describe('JournalCampaignsPage sorting', () => {
+  it('switches quietly between importance, operation time, and pnl sorting', async () => {
+    render(
+      <MemoryRouter initialEntries={['/journal/campaigns']}>
+        <JournalCampaignsPage />
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => expect(screen.getAllByTestId('campaign-card')).toHaveLength(3));
+
+    expect(cardOrder()).toEqual(['High Importance', 'Newest Operation', 'Best PnL']);
+    expect(screen.getByTestId('campaign-sort-importance')).toHaveAttribute('aria-pressed', 'true');
+
+    fireEvent.click(screen.getByTestId('campaign-sort-time'));
+    expect(screen.getByTestId('campaign-sort-time')).toHaveAttribute('aria-pressed', 'true');
+    expect(cardOrder()).toEqual(['Newest Operation', 'Best PnL', 'High Importance']);
+
+    fireEvent.click(screen.getByTestId('campaign-sort-pnl'));
+    expect(screen.getByTestId('campaign-sort-pnl')).toHaveAttribute('aria-pressed', 'true');
+    expect(cardOrder()).toEqual(['Best PnL', 'Newest Operation', 'High Importance']);
+  });
+});
