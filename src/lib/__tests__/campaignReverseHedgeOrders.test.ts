@@ -135,6 +135,19 @@ describe('getCampaignFullData reverse hedge order layer', () => {
         filledAt: t('2025-09-20T10:06:00.000Z'),
       },
       {
+        id: 'legacy-linked-tp-filled',
+        symbol: 'ASTERUSDT',
+        side: 'SHORT',
+        type: 'CONDITIONAL',
+        price: 1.31,
+        triggerPrice: 1.31,
+        quantity: 100,
+        leverage: 5,
+        createdAt: t('2025-09-20T10:02:30.000Z'),
+        filledAt: t('2025-09-20T10:06:30.000Z'),
+        linkedPositionId: 'main-long-position',
+      },
+      {
         id: 'long-open-order',
         symbol: 'ASTERUSDT',
         side: 'LONG',
@@ -174,6 +187,18 @@ describe('getCampaignFullData reverse hedge order layer', () => {
         createdAt: t('2025-09-20T10:04:00.000Z'),
         cancelledAt: t('2025-09-20T10:09:00.000Z'),
       },
+      {
+        id: 'legacy-linked-tp-cancelled',
+        symbol: 'ASTERUSDT',
+        side: 'SHORT',
+        type: 'CONDITIONAL',
+        price: 1.33,
+        quantity: 100,
+        leverage: 5,
+        createdAt: t('2025-09-20T10:04:30.000Z'),
+        cancelledAt: t('2025-09-20T10:09:30.000Z'),
+        linkedPositionId: 'main-long-position',
+      },
     ];
     const pendingShortOpen: PendingOrder = {
       id: 'short-pending-open',
@@ -195,6 +220,15 @@ describe('getCampaignFullData reverse hedge order layer', () => {
       reduceKind: 'TP',
       price: 1.34,
       stopPrice: 1.34,
+    };
+    const legacyLinkedPendingTp: PendingOrder = {
+      ...pendingShortOpen,
+      id: 'legacy-linked-pending-tp',
+      price: 1.35,
+      stopPrice: 1.35,
+      createdAt: t('2025-09-20T10:08:30.000Z'),
+      linkedPositionId: 'main-long-position',
+      reducePositionSide: 'LONG',
     };
     const tradeHistory: TradeRecord[] = [{
       id: 'record-short-position',
@@ -239,7 +273,7 @@ describe('getCampaignFullData reverse hedge order layer', () => {
 
     localStorage.setItem('sim_user-1_filled_orders', JSON.stringify(filledOrders));
     localStorage.setItem('sim_user-1_cancelled_orders', JSON.stringify(cancelledOrders));
-    localStorage.setItem('sim_user-1_orders_map', JSON.stringify({ ASTERUSDT: [pendingShortOpen, pendingShortTp] }));
+    localStorage.setItem('sim_user-1_orders_map', JSON.stringify({ ASTERUSDT: [pendingShortOpen, pendingShortTp, legacyLinkedPendingTp] }));
     localStorage.setItem('sim_user-1_trade_history', JSON.stringify(tradeHistory));
 
     const { reverseHedgeOrders } = await getCampaignFullData(campaign.id);
@@ -247,8 +281,11 @@ describe('getCampaignFullData reverse hedge order layer', () => {
 
     expect(ids).toEqual(['short-open-order', 'short-cancelled-open', 'short-pending-open']);
     expect(ids).not.toContain('tp-close-order');
+    expect(ids).not.toContain('legacy-linked-tp-filled');
     expect(ids).not.toContain('short-cancelled-tp');
+    expect(ids).not.toContain('legacy-linked-tp-cancelled');
     expect(ids).not.toContain('short-pending-tp');
+    expect(ids).not.toContain('legacy-linked-pending-tp');
     expect(ids).not.toContain('long-open-order');
 
     expect(reverseHedgeOrders[0]).toMatchObject({

@@ -1736,17 +1736,22 @@ export async function getCampaignFullData(
     .flatMap(([symbol, orders]) => symbol === campaign.symbol ? orders : [])
     .filter(order => order.status === 'NEW' || order.status === 'PENDING' || order.status === 'ACTIVE');
 
-  // 黄色委托层只记录「开仓性质的委托空单」；止盈/止损等 reduce-only 平仓委托不进入这里。
-  const isOpeningShortOrder = (order: Pick<PendingOrder | CancelledOrderSnapshot | FilledOrderSnapshot, 'side'> & {
+  // 黄色委托层只记录「开仓性质的委托空单」；止盈/止损等平仓委托不进入这里。
+  const isPositionClosingOrder = (order: Pick<PendingOrder | CancelledOrderSnapshot | FilledOrderSnapshot, 'side'> & {
     type?: PendingOrder['type'];
     reduceOnly?: boolean;
     reduceKind?: 'TP' | 'SL' | null;
+    linkedPositionId?: string | null;
+    reducePositionSide?: PendingOrder['reducePositionSide'] | null;
   }) =>
-    order.side === 'SHORT' &&
-    !order.reduceOnly &&
-    order.reduceKind == null &&
-    order.type !== 'LIMIT_TP_SL' &&
-    order.type !== 'MARKET_TP_SL';
+    order.reduceOnly === true ||
+    order.reduceKind != null ||
+    Boolean(order.linkedPositionId) ||
+    Boolean(order.reducePositionSide) ||
+    order.type === 'LIMIT_TP_SL' ||
+    order.type === 'MARKET_TP_SL';
+  const isOpeningShortOrder = (order: Parameters<typeof isPositionClosingOrder>[0]) =>
+    order.side === 'SHORT' && !isPositionClosingOrder(order);
   // 黄色委托层按「战役时间窗」取全部开空委托；保留一个短暂前置缓冲，覆盖开主力时提前挂好的对冲空单。
   const PRE_MAIN_LOOKBACK_MS = 60_000;
   const orderWindowStartMs = openedAtMs - PRE_MAIN_LOOKBACK_MS;
