@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type MouseEvent } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { FolderPlus, Layers, Star, Trash2 } from 'lucide-react';
+import { ArrowDown, ArrowUp, FolderPlus, Layers, Star, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { BackButton } from '@/components/journal/BackButton';
 import { useAuth } from '@/contexts/AuthContext';
@@ -20,6 +20,12 @@ type CampaignCardData = {
 };
 
 type CampaignSortMode = 'importance' | 'time' | 'pnl';
+type CampaignSortDirection = 'asc' | 'desc';
+
+type CampaignSortState = {
+  mode: CampaignSortMode;
+  direction: CampaignSortDirection;
+};
 
 const SORT_OPTIONS: { value: CampaignSortMode; label: string }[] = [
   { value: 'importance', label: '重要性' },
@@ -89,18 +95,47 @@ function campaignSortTime(campaign: Pick<TradeCampaign, 'opened_at' | 'created_a
 
 function pnlSortValue(campaign: Pick<TradeCampaign, 'final_realized_pnl'>): number {
   const value = Number(campaign.final_realized_pnl);
-  return Number.isFinite(value) ? value : Number.NEGATIVE_INFINITY;
+  return Number.isFinite(value) ? value : Number.NaN;
 }
 
-function sortCampaignRows(rows: CampaignCardData[], mode: CampaignSortMode): CampaignCardData[] {
-  return [...rows].sort((a, b) => {
-    const importanceDelta = importanceValue(b.campaign) - importanceValue(a.campaign);
-    const timeDelta = campaignSortTime(b.campaign) - campaignSortTime(a.campaign);
-    const pnlDelta = pnlSortValue(b.campaign) - pnlSortValue(a.campaign);
+function compareNumber(a: number, b: number, direction: CampaignSortDirection): number {
+  return direction === 'asc' ? a - b : b - a;
+}
 
-    if (mode === 'time') return timeDelta || importanceDelta || pnlDelta;
-    if (mode === 'pnl') return pnlDelta || importanceDelta || timeDelta;
-    return importanceDelta || timeDelta || pnlDelta;
+function comparePnl(
+  a: Pick<TradeCampaign, 'final_realized_pnl'>,
+  b: Pick<TradeCampaign, 'final_realized_pnl'>,
+  direction: CampaignSortDirection,
+): number {
+  const aValue = pnlSortValue(a);
+  const bValue = pnlSortValue(b);
+  const aFinite = Number.isFinite(aValue);
+  const bFinite = Number.isFinite(bValue);
+  if (!aFinite && !bFinite) return 0;
+  if (!aFinite) return 1;
+  if (!bFinite) return -1;
+  return compareNumber(aValue, bValue, direction);
+}
+
+function sortCampaignRows(rows: CampaignCardData[], sort: CampaignSortState): CampaignCardData[] {
+  return [...rows].sort((a, b) => {
+    const importanceDesc = compareNumber(importanceValue(a.campaign), importanceValue(b.campaign), 'desc');
+    const timeDesc = compareNumber(campaignSortTime(a.campaign), campaignSortTime(b.campaign), 'desc');
+    const pnlDesc = comparePnl(a.campaign, b.campaign, 'desc');
+
+    if (sort.mode === 'time') {
+      return compareNumber(campaignSortTime(a.campaign), campaignSortTime(b.campaign), sort.direction)
+        || importanceDesc
+        || pnlDesc;
+    }
+    if (sort.mode === 'pnl') {
+      return comparePnl(a.campaign, b.campaign, sort.direction)
+        || importanceDesc
+        || timeDesc;
+    }
+    return compareNumber(importanceValue(a.campaign), importanceValue(b.campaign), sort.direction)
+      || timeDesc
+      || pnlDesc;
   });
 }
 
@@ -124,7 +159,7 @@ export default function JournalCampaignsPage() {
   const [loading, setLoading] = useState(true);
   const [rows, setRows] = useState<CampaignCardData[]>([]);
   const [busyCampaignId, setBusyCampaignId] = useState<string | null>(null);
-  const [sortMode, setSortMode] = useState<CampaignSortMode>('importance');
+  const [sortState, setSortState] = useState<CampaignSortState>({ mode: 'time', direction: 'desc' });
 
   useEffect(() => {
     if (!user) return;
@@ -182,7 +217,15 @@ export default function JournalCampaignsPage() {
     }
   };
 
-  const sortedRows = useMemo(() => sortCampaignRows(rows, sortMode), [rows, sortMode]);
+  const sortedRows = useMemo(() => sortCampaignRows(rows, sortState), [rows, sortState]);
+
+  const handleSortChange = (mode: CampaignSortMode) => {
+    setSortState(current => (
+      current.mode === mode
+        ? { mode, direction: current.direction === 'desc' ? 'asc' : 'desc' }
+        : { mode, direction: 'desc' }
+    ));
+  };
 
   const handleDeleteCampaign = async (
     event: MouseEvent<HTMLButtonElement>,
@@ -253,22 +296,29 @@ export default function JournalCampaignsPage() {
               </button>
             ))}
           </div>
-          <div className="flex items-center gap-1 self-start rounded-md border border-transparent bg-transparent px-1 py-0.5 text-[10px] text-muted-foreground md:self-auto">
-            <span className="px-1.5">排序</span>
+          <div className="flex items-center gap-2 self-start px-0.5 py-0.5 text-[10px] text-muted-foreground/45 md:self-auto">
+            <span className="select-none">排序</span>
             {SORT_OPTIONS.map(option => (
               <button
                 key={option.value}
                 type="button"
-                aria-pressed={sortMode === option.value}
+                aria-pressed={sortState.mode === option.value}
+                aria-label={`${option.label}${sortState.mode === option.value ? (sortState.direction === 'desc' ? '，降序' : '，升序') : ''}`}
+                data-sort-direction={sortState.mode === option.value ? sortState.direction : undefined}
                 data-testid={`campaign-sort-${option.value}`}
-                onClick={() => setSortMode(option.value)}
-                className={`h-6 rounded px-2 transition-colors ${
-                  sortMode === option.value
-                    ? 'border border-border bg-card text-foreground shadow-[0_1px_4px_rgba(15,23,42,0.04)]'
-                    : 'border border-transparent text-muted-foreground/70 hover:bg-muted/60 hover:text-foreground'
+                onClick={() => handleSortChange(option.value)}
+                className={`inline-flex h-6 items-center gap-0.5 rounded-sm border-b px-0.5 transition-colors ${
+                  sortState.mode === option.value
+                    ? 'border-muted-foreground/30 text-foreground/70'
+                    : 'border-transparent text-muted-foreground/50 hover:text-foreground/65'
                 }`}
               >
-                {option.label}
+                <span>{option.label}</span>
+                {sortState.mode === option.value && (
+                  sortState.direction === 'desc'
+                    ? <ArrowDown className="h-3 w-3 opacity-60" />
+                    : <ArrowUp className="h-3 w-3 opacity-60" />
+                )}
               </button>
             ))}
           </div>

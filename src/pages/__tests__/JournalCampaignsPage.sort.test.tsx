@@ -84,7 +84,7 @@ function cardOrder(): string[] {
 }
 
 describe('JournalCampaignsPage sorting', () => {
-  it('switches quietly between importance, operation time, and pnl sorting', async () => {
+  it('defaults to operation time and toggles sort direction for each field', async () => {
     render(
       <MemoryRouter initialEntries={['/journal/campaigns']}>
         <JournalCampaignsPage />
@@ -93,15 +93,35 @@ describe('JournalCampaignsPage sorting', () => {
 
     await waitFor(() => expect(screen.getAllByTestId('campaign-card')).toHaveLength(3));
 
-    expect(cardOrder()).toEqual(['High Importance', 'Newest Operation', 'Best PnL']);
-    expect(screen.getByTestId('campaign-sort-importance')).toHaveAttribute('aria-pressed', 'true');
+    expect(cardOrder()).toEqual(['Newest Operation', 'Best PnL', 'High Importance']);
+    expect(screen.getByTestId('campaign-sort-time')).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByTestId('campaign-sort-time')).toHaveAttribute('data-sort-direction', 'desc');
 
     fireEvent.click(screen.getByTestId('campaign-sort-time'));
     expect(screen.getByTestId('campaign-sort-time')).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByTestId('campaign-sort-time')).toHaveAttribute('data-sort-direction', 'asc');
+    expect(cardOrder()).toEqual(['High Importance', 'Best PnL', 'Newest Operation']);
+
+    fireEvent.click(screen.getByTestId('campaign-sort-importance'));
+    expect(screen.getByTestId('campaign-sort-importance')).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByTestId('campaign-sort-importance')).toHaveAttribute('data-sort-direction', 'desc');
+    expect(cardOrder()).toEqual(['High Importance', 'Newest Operation', 'Best PnL']);
+
+    fireEvent.click(screen.getByTestId('campaign-sort-importance'));
+    expect(screen.getByTestId('campaign-sort-importance')).toHaveAttribute('data-sort-direction', 'asc');
+    expect(cardOrder()).toEqual(['Best PnL', 'Newest Operation', 'High Importance']);
+
+    fireEvent.click(screen.getByTestId('campaign-sort-time'));
+    expect(screen.getByTestId('campaign-sort-time')).toHaveAttribute('data-sort-direction', 'desc');
     expect(cardOrder()).toEqual(['Newest Operation', 'Best PnL', 'High Importance']);
 
     fireEvent.click(screen.getByTestId('campaign-sort-pnl'));
     expect(screen.getByTestId('campaign-sort-pnl')).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByTestId('campaign-sort-pnl')).toHaveAttribute('data-sort-direction', 'desc');
     expect(cardOrder()).toEqual(['Best PnL', 'Newest Operation', 'High Importance']);
+
+    fireEvent.click(screen.getByTestId('campaign-sort-pnl'));
+    expect(screen.getByTestId('campaign-sort-pnl')).toHaveAttribute('data-sort-direction', 'asc');
+    expect(cardOrder()).toEqual(['High Importance', 'Newest Operation', 'Best PnL']);
   });
 });
