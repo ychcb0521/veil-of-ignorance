@@ -93,6 +93,10 @@ function reverseOrderStatusText(order: CampaignReverseHedgeOrder) {
   return '挂单中';
 }
 
+function isDisplayableReverseHedgeOrder(order: CampaignReverseHedgeOrder) {
+  return order.side === 'SHORT' && Number.isFinite(order.price) && order.price > 0;
+}
+
 function fmtDuration(start: string, end: string | null) {
   const from = new Date(start).getTime();
   const to = end ? new Date(end).getTime() : Date.now();
@@ -600,13 +604,17 @@ export default function JournalCampaignDetailPage() {
     () => new Set(hiddenReverseHedgeOrderIds),
     [hiddenReverseHedgeOrderIds],
   );
+  const displayableReverseHedgeOrders = useMemo(
+    () => reverseHedgeOrders.filter(isDisplayableReverseHedgeOrder),
+    [reverseHedgeOrders],
+  );
   const visibleReverseHedgeOrders = useMemo(
-    () => reverseHedgeOrders.filter(order => !hiddenReverseOrderSet.has(order.id)),
-    [reverseHedgeOrders, hiddenReverseOrderSet],
+    () => displayableReverseHedgeOrders.filter(order => !hiddenReverseOrderSet.has(order.id)),
+    [displayableReverseHedgeOrders, hiddenReverseOrderSet],
   );
   const hiddenReverseOrderCount = useMemo(
-    () => reverseHedgeOrders.filter(order => hiddenReverseOrderSet.has(order.id)).length,
-    [reverseHedgeOrders, hiddenReverseOrderSet],
+    () => displayableReverseHedgeOrders.filter(order => hiddenReverseOrderSet.has(order.id)).length,
+    [displayableReverseHedgeOrders, hiddenReverseOrderSet],
   );
   const orderInfoPriceLines = useMemo<TimeBoundPriceLine[]>(() => {
     if (!campaign) return [];
@@ -616,7 +624,6 @@ export default function JournalCampaignDetailPage() {
     // 三态统一画黄色水平线：
     // 已撤销/挂单中 = 虚线（撤销处 ×）；已触发成交 = 委托→触发虚线 + 触发→平仓实线。
     const segments = visibleReverseHedgeOrders
-      .filter(order => order.side === 'SHORT' && Number.isFinite(order.price) && order.price > 0)
       .flatMap(order => {
         if (order.status === 'triggered') {
           const triggeredAt = order.triggeredAt ?? order.createdAt;
@@ -1088,7 +1095,7 @@ export default function JournalCampaignDetailPage() {
                 />
               )}
             </div>
-            {reverseHedgeOrders.length > 0 && (
+            {displayableReverseHedgeOrders.length > 0 && (
               <div className="mt-2 px-1 space-y-1.5">
                 <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
                   <button

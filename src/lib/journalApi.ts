@@ -1767,7 +1767,6 @@ export async function getCampaignFullData(
   const closeEnough = (a: number, b: number, relativeBase = Math.max(Math.abs(a), Math.abs(b), 1)) =>
     Math.abs(a - b) <= Math.max(1e-8, relativeBase * 1e-6);
   const ORDER_RECORD_MATCH_MS = 60_000;
-  const matchedTriggeredRecordIds = new Set<string>();
   const campaignSymbolTradeRecords = tradeHistory.filter(record => record.symbol === campaign.symbol);
   const findRecordForFilledOrder = (order: FilledOrderSnapshot) => {
     const candidates = campaignSymbolTradeRecords
@@ -1785,9 +1784,7 @@ export async function getCampaignFullData(
       closeEnough(record.quantity, order.quantity, Math.max(Math.abs(record.quantity), Math.abs(order.quantity), 1))
     );
     // 老数据里 filled_orders 与 trade_history 的数量口径可能不同；时间+价格已经足够把触发快照接回真实平仓记录。
-    const match = strictQuantityMatch ?? candidates[0] ?? null;
-    if (match) matchedTriggeredRecordIds.add(match.id);
-    return match ?? null;
+    return strictQuantityMatch ?? candidates[0] ?? null;
   };
   const triggeredReverseOrders = filledOrders
     .filter(order =>
@@ -1842,27 +1839,10 @@ export async function getCampaignFullData(
         triggeredAt: null,
         cancelledAt: null,
         status: 'pending' as const,
-      })),
-    // 已触发(成交)的反向委托：优先来自触发快照（委托时间 → 触发时间 → 平仓时间）。
+    })),
+    // 已触发(成交)的反向委托：只来自真实委托触发快照（委托时间 → 触发时间 → 平仓时间）。
+    // 不再用普通 SHORT 成交记录兜底，避免把手动/市价空单误显示成「委托空单」。
     ...triggeredReverseOrders,
-    // 旧数据兜底：没有触发快照时，只能从成交记录开始画实线。
-    ...tradeRecords
-      .filter(record =>
-        record.side === 'SHORT'
-        && !matchedTriggeredRecordIds.has(record.id)
-        && Number.isFinite(record.entryPrice) && record.entryPrice > 0
-        && (inWindow(record.openTime) || inWindow(record.closeTime)),
-      )
-      .map(record => ({
-        id: record.id,
-        tradeRecordId: record.id,
-        side: record.side,
-        price: record.entryPrice,
-        createdAt: record.openTime,
-        triggeredAt: record.openTime,
-        cancelledAt: record.closeTime && record.closeTime > record.openTime ? record.closeTime : null,
-        status: 'triggered' as const,
-      })),
   ];
   const reverseOrderScore = (order: CampaignReverseHedgeOrder) => {
     const statusScore = order.status === 'triggered' ? 30 : order.status === 'cancelled' ? 20 : 10;

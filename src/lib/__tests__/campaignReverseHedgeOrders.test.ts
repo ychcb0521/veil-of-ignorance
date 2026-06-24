@@ -340,6 +340,43 @@ describe('getCampaignFullData reverse hedge order layer', () => {
     });
   });
 
+  it('不会把没有委托快照的普通 SHORT 成交记录兜底成委托空单', async () => {
+    const openTime = t('2025-09-20T10:05:00.000Z');
+    const closeTime = t('2025-09-20T10:20:00.000Z');
+    const tradeHistory: TradeRecord[] = [{
+      id: 'manual-short-record',
+      symbol: 'ASTERUSDT',
+      side: 'SHORT',
+      type: 'MARKET',
+      action: 'CLOSE',
+      entryPrice: 1.2,
+      exitPrice: 1.1,
+      quantity: 100,
+      leverage: 5,
+      pnl: 10,
+      fee: 0,
+      slippage: 0,
+      openTime,
+      closeTime,
+    }];
+    journals = [
+      makeLeg({
+        id: 'manual-short-leg',
+        trade_record_id: 'manual-short-record',
+        pre_simulated_time: new Date(openTime).toISOString(),
+        pre_entry_price: 1.2,
+        pre_position_size: 120,
+      }),
+    ];
+
+    localStorage.setItem('sim_user-1_trade_history', JSON.stringify(tradeHistory));
+
+    const { tradeRecords, reverseHedgeOrders } = await getCampaignFullData(campaign.id);
+
+    expect(tradeRecords.map(record => record.id)).toEqual(['manual-short-record']);
+    expect(reverseHedgeOrders).toEqual([]);
+  });
+
   it('成交 legs 只保留所选，委托空单保留整个战役期间的全部开空委托', async () => {
     const preWindowCancelledCreatedAt = t('2025-09-20T09:57:00.000Z');
     const preWindowPendingCreatedAt = t('2025-09-20T09:58:00.000Z');
