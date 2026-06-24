@@ -29,13 +29,12 @@ import { toast } from "sonner";
 import { Wallet, Crosshair, BookOpen, Tag } from "lucide-react";
 import { Link } from "react-router-dom";
 import { JournalNavMenu } from "@/components/journal/JournalNavMenu";
-import type { PendingOrder, OrderType } from "@/types/trading";
+import type { PendingOrder } from "@/types/trading";
 import { calcUnrealizedPnl } from "@/types/trading";
 import type { ExecutionTradeSnapshot } from "@/lib/executionAssets";
 import type { AssetState } from "@/types/assets";
 import {
   POSITION_DUST_EPSILON,
-  closeSettlementPosition,
   executeSettlementFill,
   formatSettlementQuantity,
   getPositionNotionalUsd,
@@ -43,6 +42,7 @@ import {
   isCoinSettled,
   isPositionOpen,
   scaleSettlementPosition,
+  settlePositionClose,
 } from "@/lib/tradingSettlement";
 import {
   Dialog,
@@ -336,10 +336,11 @@ const Index = () => {
           return;
         }
         const posUnits = getPositionUnits(pos);
-        const orderUnits = getPositionUnits(order);
-        const closeQty = Math.min(posUnits, orderUnits);
-        if (closeQty <= 0) return;
-        const pct = posUnits > 0 ? closeQty / posUnits : 1;
+        const closeUnits = Math.min(posUnits, getPositionUnits(order));
+        const exitMethod = order.reduceKind === "TP" ? "tp1" : order.reduceKind === "SL" ? "sl" : "manual";
+        const settledClose = settlePositionClose(targetSymbol, pos, entryPrice, closeUnits, openTime, exitMethod);
+        if (!settledClose) return;
+        const { closeQty, pct, remainingUnits, willFullyClose, returnedMargin, record, fillPrice, netPnl } = settledClose;
 
         console.log("[TP/SL Triggered]", {
           orderId: order.id,
@@ -351,16 +352,7 @@ const Index = () => {
           closeQty,
         });
 
-        const { fillPrice, slippageUsd, pnlUsd, pnlCoin, feeUsd, feeCoin, notionalUsd } =
-          closeSettlementPosition(targetSymbol, pos, entryPrice, closeQty, false);
-        const closedMargin = pos.margin * pct;
-        const closedIso = pos.isolatedMargin != null ? pos.isolatedMargin * pct : undefined;
-        const returnedMargin =
-          pos.marginMode === "isolated" && closedIso != null ? closedIso + pnlUsd - feeUsd : closedMargin + pnlUsd - feeUsd;
-
         setBalance((prev) => prev + Math.max(0, returnedMargin));
-
-        const willFullyClose = pct >= 1 || posUnits - closeQty <= POSITION_DUST_EPSILON;
 
         // Physical destruction by id (not by stale index)
         setPositionsMap((prev) => {
@@ -368,7 +360,6 @@ const Index = () => {
           if (willFullyClose) {
             return { ...prev, [targetSymbol]: list.filter((p) => p.id !== linkedId && isPositionOpen(p)) };
           }
-          const remainingUnits = posUnits - closeQty;
           const next = list
             .map((p) => {
               if (p.id !== linkedId) return p;
@@ -392,7 +383,9 @@ const Index = () => {
                 continue;
               }
               // partial: rescale remaining linked orders
-              const newQty = isCoinSettled(pos) ? Math.max(1, Math.round(o.quantity * (1 - pct))) : o.quantity * (1 - pct);
+              const newQty = isCoinSettled(pos)
+                ? Math.max(1, Math.round(getPositionUnits(o) * (1 - pct)))
+                : getPositionUnits(o) * (1 - pct);
               if (newQty <= POSITION_DUST_EPSILON) {
                 changed = true;
                 continue;
@@ -406,38 +399,11 @@ const Index = () => {
           return changed ? { ...prev, [targetSymbol]: next } : prev;
         });
 
-        setTradeHistory((prev) => [
-          ...prev,
-          {
-            id: crypto.randomUUID(),
-            symbol: targetSymbol,
-            side: pos.side,
-            type: "MARKET" as OrderType,
-            action: "CLOSE" as const,
-            entryPrice: pos.entryPrice,
-            exitPrice: fillPrice,
-            quantity: closeQty,
-            contracts: isCoinSettled(pos) ? closeQty : undefined,
-            leverage: pos.leverage,
-            pnl: pnlUsd - feeUsd,
-            pnlCoin,
-            feeCoin,
-            fee: feeUsd,
-            slippage: slippageUsd,
-            notionalUsd,
-            settlementMode: pos.settlementMode,
-            settlementAsset: pos.settlementAsset,
-            contractSizeUsd: pos.contractSizeUsd,
-            openTime: pos.openTime || 0,
-            closeTime: openTime,
-            exit_method: order.reduceKind === "TP" ? "tp1" : order.reduceKind === "SL" ? "sl" : "manual",
-          },
-        ]);
+        setTradeHistory((prev) => [...prev, record]);
 
         const kindLabel = order.reduceKind === "TP" ? "止盈" : order.reduceKind === "SL" ? "止损" : "条件";
-        const net = pnlUsd - feeUsd;
-        toast.success(`${kindLabel}已触发：${targetSymbol} @ ${entryPrice.toFixed(2)}`, {
-          description: `${net >= 0 ? "+" : ""}${net.toFixed(2)} USDT`,
+        toast.success(`${kindLabel}已触发：${targetSymbol} @ ${fillPrice.toFixed(2)}`, {
+          description: `${netPnl >= 0 ? "+" : ""}${netPnl.toFixed(2)} USDT`,
         });
         return;
       }

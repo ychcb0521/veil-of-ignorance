@@ -46,7 +46,8 @@ const TOC: TocItem[] = [
   { id: 's5', label: '5. 认知资产' },
   { id: 's6', label: '6. 执行力资产' },
   { id: 's7', label: '7. 数据边界与硬约束' },
-  { id: 's8', label: '8. 判断标准' },
+  { id: 's8', label: '8. 注意事项' },
+  { id: 's9', label: '9. 判断标准' },
 ];
 
 const FLAT_TOC = TOC.flatMap(t => [t, ...(t.children ?? [])]);
@@ -1342,7 +1343,30 @@ export default function GuidePage() {
           </section>
 
           <section id="s8" className="scroll-mt-20">
-            <SectionTitle accent="#B080FF">8. 判断标准</SectionTitle>
+            <SectionTitle accent="#F0B90B">8. 注意事项</SectionTitle>
+            <P>这里专门记录与币安界面不完全一致的特殊口径。遇到这类差异时，以本系统说明为准；原因通常是为了让训练样本、复盘统计和 U本位 / 币本位之间保持可比较。</P>
+            <div className="overflow-x-auto">
+              <table className="w-full text-[11px] my-3 border border-border rounded overflow-hidden">
+                <thead className="bg-muted/50">
+                  <tr>
+                    <th className="text-left px-3 py-2 font-medium text-foreground text-[10px]">事项</th>
+                    <th className="text-left px-3 py-2 font-medium text-foreground text-[10px]">本系统口径</th>
+                    <th className="text-left px-3 py-2 font-medium text-foreground text-[10px]">为什么这样做</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td className="px-3 py-2 border-t border-border font-medium">ROE 分母</td>
+                    <td className="px-3 py-2 border-t border-border">U本位与币本位合约的 ROE 分母统一固定为开仓时的初始保证金；后续追加保证金不计入 ROE 分母，只影响保证金余额、强平风险和保证金比率。</td>
+                    <td className="px-3 py-2 border-t border-border">追加保证金是延长生存时间的动作，不是降低这笔交易原始收益率的动作。看 ROE 时，读的是这笔交易相对初始风险资本的效率；看爆仓风险时，再看保证金余额和保证金比率。</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          <section id="s9" className="scroll-mt-20">
+            <SectionTitle accent="#B080FF">9. 判断标准</SectionTitle>
             <div className="bg-card border-l-4 border-[#F0B90B] rounded-r p-6 my-8">
               <p className="text-[24px] leading-relaxed text-foreground text-center">
                 “系统是否有效，不看你复盘写得多长，而看同一类错误是否越来越少。”

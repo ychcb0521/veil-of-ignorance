@@ -1,4 +1,4 @@
-import { type ReactNode, useMemo, useState, useCallback } from 'react';
+import { type ReactNode, useEffect, useMemo, useState, useCallback } from 'react';
 import {
   ArrowLeft,
   Activity,
@@ -30,6 +30,7 @@ import {
 } from '@/lib/executionAssets';
 import {
   backfillJournalFromRecord,
+  listAllCampaigns,
   listJournalsByTradeRecordId,
 } from '@/lib/journalApi';
 import { formatCoinAmount, getSettlementAsset } from '@/lib/coinMargined';
@@ -41,6 +42,7 @@ import {
 import { formatUTC8 } from '@/lib/timeFormat';
 import { cn } from '@/lib/utils';
 import type { TradeRecord } from '@/types/trading';
+import type { TradeCampaign } from '@/types/journal';
 
 type DetailPanelKey = 'decision' | 'direct' | 'penalty' | 'campaign' | 'share';
 
@@ -277,13 +279,15 @@ function DetailItem({ label, value }: { label: string; value: ReactNode }) {
 }
 
 function EventDetailCard({
-  event, matched, busy, onOpen,
+  event, matched, busy, onOpen, campaignById,
 }: {
   event: ExecutionAssetEvent;
   matched: MatchedClose | null;
   busy: boolean;
   onOpen: (e: ExecutionAssetEvent) => void;
+  campaignById: Record<string, TradeCampaign>;
 }) {
+  const nav = useNavigate();
   const trade = event.trade;
   const isPenalty = event.type === 'no_trade_penalty';
   const isCampaign = event.type === 'campaign_reward';
@@ -383,9 +387,37 @@ function EventDetailCard({
           当日没有计分做多开仓，系统按自然日扣分。扣分日期：<span className="font-mono text-foreground">{event.date}</span>
         </div>
       ) : isCampaign ? (
-        <div className="mt-4 rounded-lg border border-[#5BA3FF]/20 bg-[#5BA3FF]/5 px-3 py-2 text-[12px] text-muted-foreground">
-          创建一次交易战役 +{EXECUTION_CAMPAIGN_REWARD}。奖励日期：<span className="font-mono text-foreground">{event.date}</span>
-        </div>
+        (() => {
+          const camp = event.campaignId ? campaignById[event.campaignId] : null;
+          if (!camp) {
+            // 还没记 ID 的老事件，或战役已被删除 → 退回原来的笼统展示。
+            return (
+              <div className="mt-4 rounded-lg border border-[#5BA3FF]/20 bg-[#5BA3FF]/5 px-3 py-2 text-[12px] text-muted-foreground">
+                创建一次交易战役 +{EXECUTION_CAMPAIGN_REWARD}。奖励日期：<span className="font-mono text-foreground">{event.date}</span>
+                {event.campaignId ? '（战役已删除）' : ''}
+              </div>
+            );
+          }
+          return (
+            <button
+              type="button"
+              onClick={() => nav(`/journal/campaigns/${camp.id}`)}
+              className="mt-4 flex w-full items-center justify-between gap-3 rounded-lg border border-[#5BA3FF]/30 bg-[#5BA3FF]/5 px-3 py-2 text-left transition-colors hover:bg-[#5BA3FF]/10"
+              title="点击查看这场战役"
+            >
+              <div className="min-w-0">
+                <div className="truncate text-[12px] font-medium text-foreground">{camp.title || '未命名战役'}</div>
+                <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 font-mono text-[10px] text-muted-foreground">
+                  <span>{camp.symbol}</span>
+                  <span>建于 {formatTime(new Date(camp.opened_at).getTime())}</span>
+                  <span className="truncate">ID {camp.id.slice(0, 8)}</span>
+                  <span className="text-[#5BA3FF]">+{EXECUTION_CAMPAIGN_REWARD}</span>
+                </div>
+              </div>
+              <ChevronRight className="h-4 w-4 shrink-0 text-[#5BA3FF]" />
+            </button>
+          );
+        })()
       ) : (
         <div className="mt-4 rounded-lg border border-dashed border-border/70 px-3 py-2 text-[12px] text-muted-foreground">
           这条早期流水只保留了日期、类型与积分；之后产生的交易会自动记录完整单据信息。
@@ -396,13 +428,14 @@ function EventDetailCard({
 }
 
 function DetailPanel({
-  panelKey, events, tradeHistory, busyId, onOpen,
+  panelKey, events, tradeHistory, busyId, onOpen, campaignById,
 }: {
   panelKey: DetailPanelKey;
   events: ExecutionAssetEvent[];
   tradeHistory: TradeRecord[];
   busyId: string | null;
   onOpen: (e: ExecutionAssetEvent) => void;
+  campaignById: Record<string, TradeCampaign>;
 }) {
   const copy = PANEL_COPY[panelKey];
 
@@ -431,6 +464,7 @@ function DetailPanel({
               matched={matchClosesForSnapshot(event.trade, tradeHistory)}
               busy={busyId === event.id}
               onOpen={onOpen}
+              campaignById={campaignById}
             />
           ))}
         </div>
@@ -441,13 +475,31 @@ function DetailPanel({
 
 export default function ExecutionAssetsPage() {
   const nav = useNavigate();
-  const { executionAsset, tradeHistory } = useTradingContext();
+  const { executionAsset, tradeHistory, reconcileCampaignRewards } = useTradingContext();
+  const { user } = useAuth();
   const { open: openPlayback, busyId } = useOpenPlaybackForSnapshot();
   const [openPanel, setOpenPanel] = useState<DetailPanelKey | null>(null);
+  const [campaignById, setCampaignById] = useState<Record<string, TradeCampaign>>({});
   const todayKey = localDateKey();
   const tradedToday = Boolean(executionAsset.tradedDates?.[todayKey]);
   const totalTrades = executionTradeCount(executionAsset);
   const decisionShare = totalTrades > 0 ? (executionAsset.decisionTradeCount / totalTrades) * 100 : 0;
+
+  // 进页面即对账：用真实战役 ID 列表补齐任何漏记的「建战役 +1500」（幂等，自愈），
+  // 使「建战役」积分始终等于真实创建过的战役数，不依赖某个 UI 回调是否被触发。
+  useEffect(() => {
+    if (!user?.id) return;
+    let cancelled = false;
+    listAllCampaigns(user.id)
+      .then(campaigns => {
+        if (cancelled) return;
+        reconcileCampaignRewards(campaigns.map(c => c.id));
+        // 留存战役以便「建战役」明细按 campaignId 显示标题/标的/时间并可点进。
+        setCampaignById(Object.fromEntries(campaigns.map(c => [c.id, c])));
+      })
+      .catch(() => { /* 离线 / 无战役表时静默，不影响页面 */ });
+    return () => { cancelled = true; };
+  }, [user?.id, reconcileCampaignRewards]);
 
   const detailEvents = useMemo(() => {
     const events = executionAsset.events ?? [];
@@ -574,6 +626,7 @@ export default function ExecutionAssetsPage() {
               tradeHistory={tradeHistory}
               busyId={busyId}
               onOpen={openPlayback}
+              campaignById={campaignById}
             />
           )}
         </section>

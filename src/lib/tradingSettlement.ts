@@ -9,6 +9,7 @@ import {
   type OrderSide,
   type Position,
   type SettlementMode,
+  type TradeRecord,
 } from "@/types/trading";
 import {
   coinAmountToUsd,
@@ -240,6 +241,92 @@ export function closeSettlementPosition(
     feeUsd,
     feeCoin,
     notionalUsd: getPositionNotionalUsd(symbol, orderLike, fillPrice),
+  };
+}
+
+export interface SettledPositionClose {
+  closeQty: number;
+  pct: number;
+  remainingUnits: number;
+  willFullyClose: boolean;
+  returnedMargin: number;
+  record: TradeRecord;
+  fillPrice: number;
+  netPnl: number;
+}
+
+export function settlePositionClose(
+  symbol: string,
+  pos: Position,
+  rawPrice: number,
+  closeUnits: number,
+  closeTime: number,
+  exitMethod: NonNullable<TradeRecord["exit_method"]> = "manual",
+  closedRealAt = Date.now(),
+): SettledPositionClose | null {
+  const totalUnits = getPositionUnits(pos);
+  if (totalUnits <= POSITION_DUST_EPSILON) return null;
+  if (!Number.isFinite(rawPrice) || rawPrice <= 0 || !Number.isFinite(closeUnits)) return null;
+
+  const boundedCloseUnits = Math.min(totalUnits, Math.max(0, closeUnits));
+  const closeQty = isCoinSettled(pos)
+    ? Math.min(totalUnits, Math.max(1, Math.round(boundedCloseUnits)))
+    : boundedCloseUnits;
+  if (closeQty <= POSITION_DUST_EPSILON) return null;
+
+  const pct = totalUnits > 0 ? closeQty / totalUnits : 1;
+  const remainingUnits = totalUnits - closeQty;
+  const willFullyClose = pct >= 1 || remainingUnits <= POSITION_DUST_EPSILON;
+  const {
+    fillPrice,
+    slippageUsd,
+    pnlUsd,
+    pnlCoin,
+    feeUsd,
+    feeCoin,
+    notionalUsd,
+  } = closeSettlementPosition(symbol, pos, rawPrice, closeQty, false);
+
+  const closedMargin = pos.margin * pct;
+  const closedIsoMargin = pos.isolatedMargin != null ? pos.isolatedMargin * pct : undefined;
+  const returnedMargin = pos.marginMode === "isolated" && closedIsoMargin != null
+    ? closedIsoMargin + pnlUsd - feeUsd
+    : closedMargin + pnlUsd - feeUsd;
+  const netPnl = pnlUsd - feeUsd;
+
+  return {
+    closeQty,
+    pct,
+    remainingUnits,
+    willFullyClose,
+    returnedMargin,
+    fillPrice,
+    netPnl,
+    record: {
+      id: crypto.randomUUID(),
+      symbol,
+      side: pos.side,
+      type: "MARKET",
+      action: "CLOSE",
+      entryPrice: pos.entryPrice,
+      exitPrice: fillPrice,
+      quantity: closeQty,
+      contracts: isCoinSettled(pos) ? closeQty : undefined,
+      leverage: pos.leverage,
+      pnl: netPnl,
+      pnlCoin,
+      feeCoin,
+      fee: feeUsd,
+      slippage: slippageUsd,
+      notionalUsd,
+      settlementMode: pos.settlementMode,
+      settlementAsset: pos.settlementAsset,
+      contractSizeUsd: pos.contractSizeUsd,
+      openTime: pos.openTime || 0,
+      closeTime,
+      exit_method: exitMethod,
+      closedRealAt,
+    },
   };
 }
 

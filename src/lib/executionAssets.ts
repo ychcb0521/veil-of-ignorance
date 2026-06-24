@@ -35,6 +35,8 @@ export interface ExecutionAssetEvent {
   createdAt: number;
   label: string;
   trade?: ExecutionTradeSnapshot | null;
+  /** campaign_reward 事件归属的战役 ID，用于幂等与可追溯。 */
+  campaignId?: string | null;
 }
 
 export interface ExecutionAssetState {
@@ -46,6 +48,8 @@ export interface ExecutionAssetState {
   tradedDates: Record<string, true>;
   lastDailyCheckDate: string | null;
   events: ExecutionAssetEvent[];
+  /** 已发过 +1500 的战役 ID，避免对账时重复加分。 */
+  rewardedCampaignIds: string[];
 }
 
 export function createDefaultExecutionAssetState(today: Date = new Date()): ExecutionAssetState {
@@ -58,6 +62,7 @@ export function createDefaultExecutionAssetState(today: Date = new Date()): Exec
     tradedDates: {},
     lastDailyCheckDate: localDateKey(today),
     events: [],
+    rewardedCampaignIds: [],
   };
 }
 
@@ -103,6 +108,7 @@ function normalizeState(state: ExecutionAssetState | null | undefined, today: Da
     tradedDates: base.tradedDates ?? {},
     lastDailyCheckDate: base.lastDailyCheckDate ?? localDateKey(today),
     events: Array.isArray(base.events) ? base.events : [],
+    rewardedCampaignIds: Array.isArray(base.rewardedCampaignIds) ? Array.from(new Set(base.rewardedCampaignIds)) : [],
   };
 }
 
@@ -174,29 +180,77 @@ export function recordExecutionTrade(
   };
 }
 
-/**
- * 每创建一次交易战役 +EXECUTION_CAMPAIGN_REWARD 分。只加分、记一笔 campaign_reward 事件，
- * 不触碰每日「未交易扣分」逻辑（建战役不算当日交易，其余规则不变）。
- */
-export function recordCampaignCreated(
-  rawState: ExecutionAssetState,
-  today: Date = new Date(),
-): ExecutionAssetState {
-  const state = normalizeState(rawState, today);
+function campaignRewardEvent(campaignId: string | null, today: Date): ExecutionAssetEvent {
   const date = localDateKey(today);
-  const event: ExecutionAssetEvent = {
+  return {
     id: eventId('campaign_reward', date),
     type: 'campaign_reward',
     points: EXECUTION_CAMPAIGN_REWARD,
     date,
     createdAt: today.getTime(),
     label: '创建交易战役奖励',
+    campaignId,
   };
+}
+
+/**
+ * 每创建一次交易战役 +EXECUTION_CAMPAIGN_REWARD 分。只加分、记一笔 campaign_reward 事件，
+ * 不触碰每日「未交易扣分」逻辑（建战役不算当日交易，其余规则不变）。
+ * 传入 campaignId 时按 ID 幂等：同一场战役只加一次（防止重复触发 / 与对账重复）。
+ */
+export function recordCampaignCreated(
+  rawState: ExecutionAssetState,
+  campaignId: string | null = null,
+  today: Date = new Date(),
+): ExecutionAssetState {
+  const state = normalizeState(rawState, today);
+  if (campaignId && state.rewardedCampaignIds.includes(campaignId)) return state;
   return {
     ...state,
     points: state.points + EXECUTION_CAMPAIGN_REWARD,
     campaignCount: state.campaignCount + 1,
-    events: pushEvent(state, event),
+    rewardedCampaignIds: campaignId ? [...state.rewardedCampaignIds, campaignId] : state.rewardedCampaignIds,
+    events: pushEvent(state, campaignRewardEvent(campaignId, today)),
+  };
+}
+
+/**
+ * 用「用户实际拥有的战役 ID 列表」对账，自愈任何漏记的 +1500：
+ * 每个还没奖励过的战役补一笔，幂等（已奖励的不再加）。
+ * 历史上通过事件计过分但未记 ID 的（campaignCount > 已记 ID 数），按数量补种为已奖励，避免重复加分。
+ * 在执行力资产页加载时调用即可，让「建战役」积分始终等于真实战役数。
+ */
+export function reconcileCampaignRewards(
+  rawState: ExecutionAssetState,
+  campaignIds: string[],
+  today: Date = new Date(),
+): ExecutionAssetState {
+  const state = normalizeState(rawState, today);
+  const known = new Set(state.rewardedCampaignIds);
+  const untrackedRewarded = Math.max(0, state.campaignCount - known.size);
+  const uniqueCampaignIds = Array.from(new Set(campaignIds.filter(Boolean)));
+  const candidates = uniqueCampaignIds.filter(id => !known.has(id));
+  // 旧版只计了数没记 ID 的那部分，先按数量补种为已奖励，绝不重复加分。
+  for (const id of candidates.slice(0, untrackedRewarded)) known.add(id);
+  const toAward = candidates.slice(untrackedRewarded);
+
+  if (toAward.length === 0) {
+    const nextCount = Math.max(state.campaignCount, known.size);
+    if (known.size === state.rewardedCampaignIds.length && nextCount === state.campaignCount) return state;
+    return { ...state, campaignCount: nextCount, rewardedCampaignIds: [...known] };
+  }
+
+  const events: ExecutionAssetEvent[] = [];
+  for (const id of toAward) {
+    known.add(id);
+    events.push(campaignRewardEvent(id, today));
+  }
+  return {
+    ...state,
+    points: state.points + EXECUTION_CAMPAIGN_REWARD * toAward.length,
+    campaignCount: Math.max(state.campaignCount, known.size),
+    rewardedCampaignIds: [...known],
+    events: [...events, ...state.events],
   };
 }
 

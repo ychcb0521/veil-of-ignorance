@@ -57,6 +57,7 @@ import {
   createDefaultExecutionAssetState,
   recordExecutionTrade as applyExecutionTradeReward,
   recordCampaignCreated as applyCampaignReward,
+  reconcileCampaignRewards as applyCampaignReconcile,
   settleNoTradePenalties,
   type ExecutionAssetState,
   type ExecutionTradeSnapshot,
@@ -153,8 +154,10 @@ interface TradingState {
   executionAsset: ExecutionAssetState;
   setExecutionAsset: (v: ExecutionAssetState | ((prev: ExecutionAssetState) => ExecutionAssetState)) => void;
   recordExecutionTrade: (modeOverride?: TradingMode, trade?: ExecutionTradeSnapshot | null) => void;
-  /** 每创建一次交易战役调用一次，执行力资产 +1500 分。 */
-  recordCampaignCreated: () => void;
+  /** 每创建一次交易战役调用一次，执行力资产 +1500 分；传 campaignId 按战役幂等。 */
+  recordCampaignCreated: (campaignId?: string | null) => void;
+  /** 用「用户实际战役 ID 列表」对账，补齐漏记的 +1500（幂等，自愈）。 */
+  reconcileCampaignRewards: (campaignIds: string[]) => void;
   coinTimelines: CoinTimelinesMap;
   setCoinTimelines: (v: CoinTimelinesMap | ((prev: CoinTimelinesMap) => CoinTimelinesMap)) => void;
   totalPositionCount: number;
@@ -344,9 +347,14 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
     setExecutionAsset(prev => applyExecutionTradeReward(prev, mode, new Date(), trade));
   }, [setExecutionAsset]);
 
-  // 每建一次交易战役 +1500 分（执行力资产新增类目）。
-  const recordCampaignCreated = useCallback(() => {
-    setExecutionAsset(prev => applyCampaignReward(prev, new Date()));
+  // 每建一次交易战役 +1500 分（执行力资产新增类目）；按 campaignId 幂等。
+  const recordCampaignCreated = useCallback((campaignId?: string | null) => {
+    setExecutionAsset(prev => applyCampaignReward(prev, campaignId ?? null, new Date()));
+  }, [setExecutionAsset]);
+
+  // 用真实战役 ID 列表对账，补齐任何漏记的 +1500（幂等，自愈）。
+  const reconcileCampaignRewards = useCallback((campaignIds: string[]) => {
+    setExecutionAsset(prev => applyCampaignReconcile(prev, campaignIds, new Date()));
   }, [setExecutionAsset]);
 
   // Total position count across all symbols
@@ -1310,7 +1318,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
     liquidationOpen, liquidationDetails, closeLiquidationModal,
     timeMode, setTimeMode,
     tradingMode, setTradingMode,
-    executionAsset, setExecutionAsset, recordExecutionTrade, recordCampaignCreated,
+    executionAsset, setExecutionAsset, recordExecutionTrade, recordCampaignCreated, reconcileCampaignRewards,
     coinTimelines, setCoinTimelines,
     totalPositionCount,
     getEffectiveTime,

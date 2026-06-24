@@ -11,6 +11,14 @@ import type { PendingOrder } from "@/types/trading";
 import { calcFee } from "@/types/trading";
 import type { ExecutionTradeSnapshot } from "@/lib/executionAssets";
 import { getConditionalTriggerDecisionFromRange } from "@/lib/conditionalOrders";
+import {
+  POSITION_DUST_EPSILON,
+  getPositionUnits,
+  isCoinSettled,
+  isPositionOpen,
+  scaleSettlementPosition,
+  settlePositionClose,
+} from "@/lib/tradingSettlement";
 import { toast } from "sonner";
 
 interface KlinePrice {
@@ -70,42 +78,36 @@ export function useBackgroundPrices() {
     (symbol: string, order: PendingOrder, triggerPrice: number) => {
       const targetSymbol = order.reduceSymbol || symbol;
       const positions = positionsMapRef.current[targetSymbol] || [];
-      const idx = positions.findIndex((p) => p.id === order.linkedPositionId);
-      if (idx === -1) return;
-      const pos = positions[idx];
-      const closeQty = Math.min(pos.quantity, order.quantity);
-      if (closeQty <= 0) return;
-      const pct = pos.quantity > 0 ? closeQty / pos.quantity : 1;
-
-      const fee = calcFee(triggerPrice, closeQty, false);
-      const pnl =
-        pos.side === "LONG"
-          ? (triggerPrice - pos.entryPrice) * closeQty
-          : (pos.entryPrice - triggerPrice) * closeQty;
-      const closedMargin = pos.margin * pct;
-      const closedIso = pos.isolatedMargin != null ? pos.isolatedMargin * pct : undefined;
-      const returnedMargin =
-        pos.marginMode === "isolated" && closedIso != null ? closedIso + pnl - fee : closedMargin + pnl - fee;
+      const linkedId = order.linkedPositionId;
+      const pos = positions.find((p) => p.id === linkedId);
+      if (!pos) return;
+      const posUnits = getPositionUnits(pos);
+      const closeUnits = Math.min(posUnits, getPositionUnits(order));
+      const exitMethod = order.reduceKind === "TP" ? "tp1" : order.reduceKind === "SL" ? "sl" : "manual";
+      const settledClose = settlePositionClose(
+        targetSymbol,
+        pos,
+        triggerPrice,
+        closeUnits,
+        sim.currentSimulatedTime,
+        exitMethod,
+      );
+      if (!settledClose) return;
+      const { pct, remainingUnits, willFullyClose, returnedMargin, record, fillPrice, netPnl } = settledClose;
 
       setBalance((prev) => prev + Math.max(0, returnedMargin));
 
-      const willFullyClose = pct >= 1 || pos.quantity * (1 - pct) < 1e-8;
-      const linkedId = pos.id;
-
       setPositionsMap((prev) => {
-        const list = [...(prev[targetSymbol] || [])];
+        const list = prev[targetSymbol] || [];
         if (willFullyClose) {
-          list.splice(idx, 1);
-        } else {
-          const remainPct = 1 - pct;
-          list[idx] = {
-            ...pos,
-            quantity: pos.quantity * remainPct,
-            margin: pos.margin * remainPct,
-            isolatedMargin: pos.isolatedMargin != null ? pos.isolatedMargin * remainPct : undefined,
-          };
+          return { ...prev, [targetSymbol]: list.filter((p) => p.id !== linkedId && isPositionOpen(p)) };
         }
-        return { ...prev, [targetSymbol]: list.filter((p) => p.quantity > 1e-8) };
+        return {
+          ...prev,
+          [targetSymbol]: list
+            .map((p) => (p.id === linkedId ? scaleSettlementPosition(p, remainingUnits) : p))
+            .filter(isPositionOpen),
+        };
       });
 
       setOrdersMap((prev) => {
@@ -122,13 +124,15 @@ export function useBackgroundPrices() {
               changed = true;
               continue;
             }
-            const newQty = o.quantity * (1 - pct);
-            if (newQty < 1e-8) {
+            const newQty = isCoinSettled(pos)
+              ? Math.max(1, Math.round(getPositionUnits(o) * (1 - pct)))
+              : getPositionUnits(o) * (1 - pct);
+            if (newQty <= POSITION_DUST_EPSILON) {
               changed = true;
               continue;
             }
             changed = true;
-            next.push({ ...o, quantity: newQty });
+            next.push({ ...o, quantity: newQty, contracts: isCoinSettled(pos) ? newQty : o.contracts });
             continue;
           }
           next.push(o);
@@ -136,30 +140,11 @@ export function useBackgroundPrices() {
         return changed ? { ...prev, [targetSymbol]: next } : prev;
       });
 
-      setTradeHistory((prev) => [
-        ...prev,
-        {
-          id: crypto.randomUUID(),
-          symbol: targetSymbol,
-          side: pos.side,
-          type: "MARKET",
-          action: "CLOSE",
-          entryPrice: pos.entryPrice,
-          exitPrice: triggerPrice,
-          quantity: closeQty,
-          leverage: pos.leverage,
-          pnl: pnl - fee,
-          fee,
-          slippage: 0,
-          openTime: pos.openTime || 0,
-          closeTime: sim.currentSimulatedTime,
-        },
-      ]);
+      setTradeHistory((prev) => [...prev, record]);
 
       const kindLabel = order.reduceKind === "TP" ? "止盈" : order.reduceKind === "SL" ? "止损" : "条件";
-      const net = pnl - fee;
-      toast.success(`${kindLabel}已触发：${targetSymbol} @ ${triggerPrice.toFixed(2)}`, {
-        description: `${net >= 0 ? "+" : ""}${net.toFixed(2)} USDT`,
+      toast.success(`${kindLabel}已触发：${targetSymbol} @ ${fillPrice.toFixed(2)}`, {
+        description: `${netPnl >= 0 ? "+" : ""}${netPnl.toFixed(2)} USDT`,
       });
     },
     [setBalance, setPositionsMap, setOrdersMap, setTradeHistory, sim.currentSimulatedTime],
