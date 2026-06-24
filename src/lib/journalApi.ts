@@ -1767,6 +1767,7 @@ export async function getCampaignFullData(
   const closeEnough = (a: number, b: number, relativeBase = Math.max(Math.abs(a), Math.abs(b), 1)) =>
     Math.abs(a - b) <= Math.max(1e-8, relativeBase * 1e-6);
   const ORDER_RECORD_MATCH_MS = 60_000;
+  const LEGACY_ORDER_RECORD_MATCH_MS = 15 * 60_000;
   const isCloseLikeTradeRecord = (record: TradeRecord) => record.action === 'CLOSE' || record.action === 'LIQUIDATION';
   const campaignSymbolTradeRecords = tradeHistory.filter(record =>
     record.symbol === campaign.symbol &&
@@ -1778,6 +1779,10 @@ export async function getCampaignFullData(
   const orderUnits = (order: FilledOrderSnapshot) => (
     Number.isFinite(order.contracts) && order.contracts != null ? order.contracts : order.quantity
   );
+  const closeEnoughLegacyPrice = (a: number, b: number) =>
+    Math.abs(a - b) <= Math.max(1e-8, Math.max(Math.abs(a), Math.abs(b), 1) * 0.005);
+  const closeEnoughUnits = (a: number, b: number) =>
+    closeEnough(a, b, Math.max(Math.abs(a), Math.abs(b), 1));
   const resolveFilledOrderCloseRecord = (order: FilledOrderSnapshot, records: TradeRecord[]) => {
     const sorted = records
       .filter(record => record.closeTime > order.filledAt)
@@ -1828,11 +1833,27 @@ export async function getCampaignFullData(
         if (timeDelta !== 0) return timeDelta;
         return Math.abs(a.entryPrice - order.price) - Math.abs(b.entryPrice - order.price);
       });
-    const strictQuantityMatches = candidates.filter(record =>
-      closeEnough(record.quantity, order.quantity, Math.max(Math.abs(record.quantity), Math.abs(order.quantity), 1))
-    );
+    const strictQuantityMatches = candidates.filter(record => closeEnoughUnits(closeUnits(record), orderUnits(order)));
+    if (candidates.length > 0 || strictQuantityMatches.length > 0) {
+      // 老数据里 filled_orders 与 trade_history 的数量口径可能不同；时间+价格已经足够把触发快照接回真实平仓记录。
+      return resolveFilledOrderCloseRecord(order, strictQuantityMatches.length > 0 ? strictQuantityMatches : candidates);
+    }
+
+    const legacyCandidates = campaignSymbolTradeRecords
+      .filter(record => {
+        if (record.side !== order.side || record.closeTime <= order.filledAt) return false;
+        const openDelta = Math.abs(record.openTime - order.filledAt);
+        if (openDelta > LEGACY_ORDER_RECORD_MATCH_MS) return false;
+        return closeEnoughLegacyPrice(record.entryPrice, order.price) ||
+          closeEnoughUnits(closeUnits(record), orderUnits(order));
+      })
+      .sort((a, b) => {
+        const timeDelta = Math.abs(a.openTime - order.filledAt) - Math.abs(b.openTime - order.filledAt);
+        if (timeDelta !== 0) return timeDelta;
+        return Math.abs(a.entryPrice - order.price) - Math.abs(b.entryPrice - order.price);
+      });
     // 老数据里 filled_orders 与 trade_history 的数量口径可能不同；时间+价格已经足够把触发快照接回真实平仓记录。
-    return resolveFilledOrderCloseRecord(order, strictQuantityMatches.length > 0 ? strictQuantityMatches : candidates);
+    return resolveFilledOrderCloseRecord(order, legacyCandidates);
   };
   const triggeredReverseOrders = filledOrders
     .filter(order =>

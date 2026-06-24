@@ -101,8 +101,19 @@ function safeTimeValue(value: string | null | undefined): number | null {
   return Number.isFinite(time) ? time : null;
 }
 
-function campaignSortTime(campaign: Pick<TradeCampaign, 'opened_at' | 'created_at'>): number {
-  return safeTimeValue(campaign.opened_at) ?? safeTimeValue(campaign.created_at) ?? 0;
+function legRealOperationTime(leg: Pick<TradeJournal, 'post_real_close_time' | 'pre_real_time' | 'created_at' | 'updated_at'>): number | null {
+  return safeTimeValue(leg.post_real_close_time)
+    ?? safeTimeValue(leg.pre_real_time)
+    ?? safeTimeValue(leg.created_at)
+    ?? safeTimeValue(leg.updated_at);
+}
+
+function campaignSortTime(row: CampaignCardData): number {
+  const legTimes = row.legs
+    .map(legRealOperationTime)
+    .filter((time): time is number => time != null);
+  if (legTimes.length > 0) return Math.max(...legTimes);
+  return safeTimeValue(row.campaign.created_at) ?? safeTimeValue(row.campaign.opened_at) ?? 0;
 }
 
 function pnlSortValue(campaign: Pick<TradeCampaign, 'final_realized_pnl'>): number {
@@ -148,12 +159,12 @@ function comparePnl(
 function sortCampaignRows(rows: CampaignCardData[], sort: CampaignSortState): CampaignCardData[] {
   return [...rows].sort((a, b) => {
     const importanceDesc = compareNumber(importanceValue(a.campaign), importanceValue(b.campaign), 'desc');
-    const timeDesc = compareNumber(campaignSortTime(a.campaign), campaignSortTime(b.campaign), 'desc');
+    const timeDesc = compareNumber(campaignSortTime(a), campaignSortTime(b), 'desc');
     const pnlDesc = comparePnl(a.campaign, b.campaign, 'desc');
     const alphaAsc = compareAlpha(a.campaign, b.campaign, 'asc');
 
     if (sort.mode === 'time') {
-      return compareNumber(campaignSortTime(a.campaign), campaignSortTime(b.campaign), sort.direction)
+      return compareNumber(campaignSortTime(a), campaignSortTime(b), sort.direction)
         || importanceDesc
         || pnlDesc
         || alphaAsc;
