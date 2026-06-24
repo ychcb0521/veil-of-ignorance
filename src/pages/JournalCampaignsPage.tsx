@@ -95,15 +95,8 @@ function safeTimeValue(value: string | null | undefined): number | null {
   return Number.isFinite(time) ? time : null;
 }
 
-function campaignSortTime(campaign: Pick<TradeCampaign, 'opened_at' | 'closed_at' | 'created_at' | 'actual_evolution'>): number {
-  const eventTimes = (campaign.actual_evolution ?? [])
-    .flatMap(event => [event.close_time, event.open_time, event.recorded_at])
-    .map(safeTimeValue)
-    .filter((time): time is number => time != null);
-  const campaignTimes = [campaign.closed_at, campaign.opened_at, campaign.created_at]
-    .map(safeTimeValue)
-    .filter((time): time is number => time != null);
-  return Math.max(0, ...campaignTimes, ...eventTimes);
+function campaignSortTime(campaign: Pick<TradeCampaign, 'opened_at' | 'created_at'>): number {
+  return safeTimeValue(campaign.opened_at) ?? safeTimeValue(campaign.created_at) ?? 0;
 }
 
 function pnlSortValue(campaign: Pick<TradeCampaign, 'final_realized_pnl'>): number {

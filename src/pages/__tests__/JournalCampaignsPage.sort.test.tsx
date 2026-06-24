@@ -104,7 +104,7 @@ describe('JournalCampaignsPage sorting', () => {
 
     await waitFor(() => expect(screen.getAllByTestId('campaign-card')).toHaveLength(4));
 
-    expect(cardOrder()).toEqual(['Late Close', 'Newest Operation', 'Best PnL', 'High Importance']);
+    expect(cardOrder()).toEqual(['Newest Operation', 'Best PnL', 'High Importance', 'Late Close']);
     expect(screen.getByTestId('campaign-sort-time')).toHaveAttribute('aria-pressed', 'true');
     expect(screen.getByTestId('campaign-sort-time')).toHaveAttribute('data-sort-direction', 'desc');
     expect(screen.getByTestId('campaign-sort-time')).toHaveAttribute('aria-label', '操作时间，从大到小排序');
@@ -113,7 +113,7 @@ describe('JournalCampaignsPage sorting', () => {
     expect(screen.getByTestId('campaign-sort-time')).toHaveAttribute('aria-pressed', 'true');
     expect(screen.getByTestId('campaign-sort-time')).toHaveAttribute('data-sort-direction', 'asc');
     expect(screen.getByTestId('campaign-sort-time')).toHaveAttribute('aria-label', '操作时间，从小到大排序');
-    expect(cardOrder()).toEqual(['High Importance', 'Best PnL', 'Newest Operation', 'Late Close']);
+    expect(cardOrder()).toEqual(['Late Close', 'High Importance', 'Best PnL', 'Newest Operation']);
 
     fireEvent.click(screen.getByTestId('campaign-sort-importance'));
     expect(screen.getByTestId('campaign-sort-importance')).toHaveAttribute('aria-pressed', 'true');
@@ -126,7 +126,7 @@ describe('JournalCampaignsPage sorting', () => {
 
     fireEvent.click(screen.getByTestId('campaign-sort-time'));
     expect(screen.getByTestId('campaign-sort-time')).toHaveAttribute('data-sort-direction', 'desc');
-    expect(cardOrder()).toEqual(['Late Close', 'Newest Operation', 'Best PnL', 'High Importance']);
+    expect(cardOrder()).toEqual(['Newest Operation', 'Best PnL', 'High Importance', 'Late Close']);
 
     fireEvent.click(screen.getByTestId('campaign-sort-pnl'));
     expect(screen.getByTestId('campaign-sort-pnl')).toHaveAttribute('aria-pressed', 'true');
