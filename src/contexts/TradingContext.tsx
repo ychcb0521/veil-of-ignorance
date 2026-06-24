@@ -52,6 +52,7 @@ import {
   normalizeSettlementOrder,
   scaleSettlementPosition,
 } from '@/lib/tradingSettlement';
+import { getPriceDecimals } from '@/lib/formatters';
 import {
   createDefaultExecutionAssetState,
   recordExecutionTrade as applyExecutionTradeReward,
@@ -289,7 +290,17 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
     });
   }, [setPositionsMap]);
   const [tradeHistory, setTradeHistory] = usePersistedState<TradeRecord[]>('trade_history', []);
-  const [pricePrecision, setPricePrecision] = useState(2);
+  // 价格精度按当前价位自动推导（低价币更细）。修复两件事：①价格显示更精确；
+  // ②图表 Y 轴能贴合行情——klinecharts 的刻度最小步长受精度限制，精度太粗（固定 2 位）
+  // 会让 0.12 这种币只能按 0.01 画刻度，把 Y 轴撑成 0.08~0.17 一大片留白、蜡烛挤成一条。
+  const activeSymbolPrice = priceMap[activeSymbol] ?? 0;
+  const pricePrecision = useMemo(
+    () => (activeSymbolPrice > 0 ? getPriceDecimals(activeSymbolPrice) : 2),
+    [activeSymbolPrice],
+  );
+  const setPricePrecision = useCallback((_v: number) => {
+    /* 精度已由价位自动推导，保留空实现以兼容旧接口 */
+  }, []);
   const [quantityPrecision, setQuantityPrecision] = useState(3);
   const [leverageMap, setLeverageMap] = usePersistedState<Record<string, number>>('symbol_leverage', {});
   const [marginModeMap, setMarginModeMap] = usePersistedState<Record<string, MarginMode>>('symbol_margin_mode', {});
