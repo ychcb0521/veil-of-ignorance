@@ -23,6 +23,7 @@ import {
   shouldSuggestCampaignEnd,
 } from '@/lib/campaignAnalysis';
 import { buildSelectedLegVerticalLines, legRoleMarkerLabel } from '@/lib/campaignLegMarkers';
+import { buildCampaignMainOrderPriceLines, isMainStartLeg } from '@/lib/campaignMainOrderLines';
 import {
   deleteCounterfactual,
   detachCampaignLegFromCampaign,
@@ -225,14 +226,16 @@ function buildChartArtifacts(
     // 按方向配色的开单/平单竖线：开单实线，平单虚线；多单蓝、空单橘。
     const legDirColor = leg.direction === 'short' ? LEG_SHORT_LINE_COLOR : LEG_LONG_LINE_COLOR;
     const legLabelColor = leg.direction === 'short' ? LEG_SHORT_LABEL_COLOR : LEG_LONG_LABEL_COLOR;
+    const isPrimaryMainStart = isMainStartLeg(leg);
     verticalLines.push({
       time: openTime,
       color: legDirColor,
-      width: LEG_VERTICAL_LINE_WIDTH,
-      z: 3,
+      width: isPrimaryMainStart ? LEG_VERTICAL_LINE_WIDTH * 1.8 : LEG_VERTICAL_LINE_WIDTH,
+      z: isPrimaryMainStart ? 5 : 3,
       dashed: false,
       label: `${legRoleMarkerLabel(leg.leg_role)}·开仓`,
       labelColor: legLabelColor,
+      alwaysVisible: isPrimaryMainStart,
     });
     if (closeTime != null) {
       verticalLines.push({
@@ -582,17 +585,27 @@ export default function JournalCampaignDetailPage() {
       : (klines.length > 0 ? klines[klines.length - 1].time : 0);
     return buildCampaignReverseOrderPriceLines(visibleReverseHedgeOrders, tradeRecords, fallbackEnd);
   }, [campaign, visibleReverseHedgeOrders, tradeRecords, klines]);
+  const mainOrderPriceLines = useMemo<TimeBoundPriceLine[]>(() => {
+    if (!campaign) return [];
+    const fallbackEnd = campaign.closed_at
+      ? new Date(campaign.closed_at).getTime()
+      : (klines.length > 0
+        ? klines[klines.length - 1].time
+        : legTimeSpan.endMs ?? new Date(effectiveClosedAt ?? campaign.opened_at).getTime());
+    return buildCampaignMainOrderPriceLines(legs, tradeRecords, fallbackEnd);
+  }, [campaign, legs, tradeRecords, klines, legTimeSpan.endMs, effectiveClosedAt]);
   const displayMarkers = useMemo(
     () => [...chart.markers, ...(showCfOverlay ? counterfactualChart.markers : [])],
     [chart.markers, counterfactualChart.markers, showCfOverlay],
   );
   const displayPriceLines = useMemo(
     () => [
+      ...mainOrderPriceLines,
       ...chart.timeBoundPriceLines,
       ...(showCfOverlay ? counterfactualChart.timeBoundPriceLines : []),
       ...(showOrderInfo ? orderInfoPriceLines : []),
     ],
-    [chart.timeBoundPriceLines, counterfactualChart.timeBoundPriceLines, showCfOverlay, orderInfoPriceLines, showOrderInfo],
+    [mainOrderPriceLines, chart.timeBoundPriceLines, counterfactualChart.timeBoundPriceLines, showCfOverlay, orderInfoPriceLines, showOrderInfo],
   );
   const displayVerticalLines = useMemo(
     () => [...chart.verticalLines, ...(showCfOverlay ? counterfactualChart.verticalLines : []), ...selectedLegVerticalLines],
