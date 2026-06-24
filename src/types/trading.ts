@@ -182,6 +182,8 @@ export interface Position {
 
 export interface TradeRecord {
   id: string;
+  /** Position that produced this close/funding/liquidation record when known. */
+  positionId?: string | null;
   symbol: string;
   side: OrderSide;
   type: OrderType | "FUNDING";

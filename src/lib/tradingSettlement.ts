@@ -304,6 +304,7 @@ export function settlePositionClose(
     netPnl,
     record: {
       id: crypto.randomUUID(),
+      positionId: pos.id,
       symbol,
       side: pos.side,
       type: "MARKET",

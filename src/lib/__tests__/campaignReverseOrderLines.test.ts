@@ -94,6 +94,29 @@ describe('buildCampaignReverseOrderPriceLines', () => {
     });
   });
 
+  it('ends triggered solid segment at the explicit manual close time before fallback end', () => {
+    const createdAt = t('2026-01-01T10:00:00.000Z');
+    const triggeredAt = t('2026-01-01T10:05:00.000Z');
+    const manualCloseTime = t('2026-01-01T10:12:00.000Z');
+    const fallbackEnd = t('2026-01-01T10:30:00.000Z');
+
+    const lines = buildCampaignReverseOrderPriceLines([
+      makeShortOrder({
+        id: 'triggered-open-short',
+        status: 'triggered',
+        createdAt,
+        triggeredAt,
+        cancelledAt: manualCloseTime,
+      }),
+    ], [], fallbackEnd);
+
+    expect(lines.find(line => line.title === '触发空')).toMatchObject({
+      startTime: triggeredAt,
+      endTime: manualCloseTime,
+      dashed: false,
+    });
+  });
+
   it('keeps non-short orders out of the campaign short-order layer', () => {
     const lines = buildCampaignReverseOrderPriceLines([
       makeShortOrder({ id: 'long-order', side: 'LONG', status: 'triggered', triggeredAt: t('2026-01-01T10:05:00.000Z') }),

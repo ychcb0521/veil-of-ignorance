@@ -340,6 +340,62 @@ describe('getCampaignFullData reverse hedge order layer', () => {
     });
   });
 
+  it('已触发委托优先按仓位 ID 接回手动拆仓时间', async () => {
+    const createdAt = t('2025-09-20T10:01:00.000Z');
+    const filledAt = t('2025-09-20T10:05:00.000Z');
+    const manualCloseTime = t('2025-09-20T10:12:00.000Z');
+    const filledOrders: FilledOrderSnapshot[] = [
+      {
+        id: 'triggered-short-order',
+        symbol: 'ASTERUSDT',
+        side: 'SHORT',
+        type: 'CONDITIONAL',
+        reduceOnly: false,
+        reduceKind: null,
+        price: 1.2,
+        triggerPrice: 1.2,
+        quantity: 100,
+        leverage: 5,
+        createdAt,
+        filledAt,
+        positionId: 'triggered-short-position',
+      },
+    ];
+    const tradeHistory: TradeRecord[] = [{
+      id: 'manual-close-triggered-short',
+      positionId: 'triggered-short-position',
+      symbol: 'ASTERUSDT',
+      side: 'SHORT',
+      type: 'MARKET',
+      action: 'CLOSE',
+      entryPrice: 1.2009,
+      exitPrice: 1.16,
+      quantity: 100,
+      leverage: 5,
+      pnl: 4,
+      fee: 0,
+      slippage: 0,
+      openTime: filledAt + 180_000,
+      closeTime: manualCloseTime,
+      exit_method: 'manual',
+    }];
+
+    localStorage.setItem('sim_user-1_filled_orders', JSON.stringify(filledOrders));
+    localStorage.setItem('sim_user-1_trade_history', JSON.stringify(tradeHistory));
+
+    const { reverseHedgeOrders } = await getCampaignFullData(campaign.id);
+
+    expect(reverseHedgeOrders).toHaveLength(1);
+    expect(reverseHedgeOrders[0]).toMatchObject({
+      id: 'triggered-short-order',
+      tradeRecordId: 'manual-close-triggered-short',
+      status: 'triggered',
+      createdAt,
+      triggeredAt: filledAt,
+      cancelledAt: manualCloseTime,
+    });
+  });
+
   it('不会把没有委托快照的普通 SHORT 成交记录兜底成委托空单', async () => {
     const openTime = t('2025-09-20T10:05:00.000Z');
     const closeTime = t('2025-09-20T10:20:00.000Z');

@@ -630,6 +630,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
 
         setTradeHistory(prev => [...prev, {
           id: crypto.randomUUID(), symbol: sym, side: pos.side,
+          positionId: pos.id,
           type: 'MARKET' as OrderType, action: 'LIQUIDATION' as const,
           entryPrice: pos.entryPrice, exitPrice: price,
           quantity: getPositionUnits(pos), contracts: isCoinSettled(pos) ? getPositionUnits(pos) : undefined,
@@ -696,6 +697,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
 
             liqRecords.push({
               id: crypto.randomUUID(), symbol: sym, side: pos.side,
+              positionId: pos.id,
               type: 'MARKET' as OrderType, action: 'LIQUIDATION' as const,
               entryPrice: pos.entryPrice, exitPrice: price,
               quantity: getPositionUnits(pos), contracts: isCoinSettled(pos) ? getPositionUnits(pos) : undefined,
@@ -1040,6 +1042,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
 
     setTradeHistory(prev => [...prev, {
       id: crypto.randomUUID(), symbol, side: pos.side, type: 'MARKET' as OrderType,
+      positionId: pos.id,
       action: 'CLOSE' as const, entryPrice: pos.entryPrice, exitPrice: fillPrice,
       quantity: closeQty, contracts: isCoinSettled(pos) ? closeQty : undefined,
       leverage: pos.leverage,

@@ -1767,8 +1767,22 @@ export async function getCampaignFullData(
   const closeEnough = (a: number, b: number, relativeBase = Math.max(Math.abs(a), Math.abs(b), 1)) =>
     Math.abs(a - b) <= Math.max(1e-8, relativeBase * 1e-6);
   const ORDER_RECORD_MATCH_MS = 60_000;
-  const campaignSymbolTradeRecords = tradeHistory.filter(record => record.symbol === campaign.symbol);
+  const isCloseLikeTradeRecord = (record: TradeRecord) => record.action === 'CLOSE' || record.action === 'LIQUIDATION';
+  const campaignSymbolTradeRecords = tradeHistory.filter(record =>
+    record.symbol === campaign.symbol &&
+    isCloseLikeTradeRecord(record)
+  );
   const findRecordForFilledOrder = (order: FilledOrderSnapshot) => {
+    if (order.positionId) {
+      const byPositionId = campaignSymbolTradeRecords
+        .filter(record =>
+          record.positionId === order.positionId &&
+          record.side === order.side &&
+          record.closeTime > order.filledAt
+        )
+        .sort((a, b) => a.closeTime - b.closeTime)[0] ?? null;
+      if (byPositionId) return byPositionId;
+    }
     const candidates = campaignSymbolTradeRecords
       .filter(record =>
         record.side === order.side &&
