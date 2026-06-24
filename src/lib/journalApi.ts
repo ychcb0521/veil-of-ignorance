@@ -1772,15 +1772,49 @@ export async function getCampaignFullData(
     record.symbol === campaign.symbol &&
     isCloseLikeTradeRecord(record)
   );
+  const closeUnits = (record: TradeRecord) => (
+    Number.isFinite(record.contracts) && record.contracts != null ? record.contracts : record.quantity
+  );
+  const orderUnits = (order: FilledOrderSnapshot) => (
+    Number.isFinite(order.contracts) && order.contracts != null ? order.contracts : order.quantity
+  );
+  const resolveFilledOrderCloseRecord = (order: FilledOrderSnapshot, records: TradeRecord[]) => {
+    const sorted = records
+      .filter(record => record.closeTime > order.filledAt)
+      .sort((a, b) => a.closeTime - b.closeTime);
+    if (sorted.length === 0) return null;
+
+    const expectedUnits = orderUnits(order);
+    if (!Number.isFinite(expectedUnits) || expectedUnits <= 0) {
+      return sorted.find(record => record.exit_method === 'manual') ?? sorted[sorted.length - 1];
+    }
+
+    let closedUnits = 0;
+    let finalCloseRecord: TradeRecord | null = null;
+    for (const record of sorted) {
+      closedUnits += closeUnits(record);
+      if (!finalCloseRecord && closeEnough(closedUnits, expectedUnits, Math.max(Math.abs(expectedUnits), 1))) {
+        finalCloseRecord = record;
+      }
+      if (
+        record.exit_method === 'manual' &&
+        closedUnits >= expectedUnits - Math.max(1e-8, Math.abs(expectedUnits) * 1e-6)
+      ) {
+        return record;
+      }
+    }
+
+    return finalCloseRecord ?? sorted[sorted.length - 1];
+  };
   const findRecordForFilledOrder = (order: FilledOrderSnapshot) => {
     if (order.positionId) {
-      const byPositionId = campaignSymbolTradeRecords
-        .filter(record =>
+      const byPositionId = resolveFilledOrderCloseRecord(
+        order,
+        campaignSymbolTradeRecords.filter(record =>
           record.positionId === order.positionId &&
-          record.side === order.side &&
-          record.closeTime > order.filledAt
-        )
-        .sort((a, b) => a.closeTime - b.closeTime)[0] ?? null;
+          record.side === order.side
+        ),
+      );
       if (byPositionId) return byPositionId;
     }
     const candidates = campaignSymbolTradeRecords
@@ -1794,11 +1828,11 @@ export async function getCampaignFullData(
         if (timeDelta !== 0) return timeDelta;
         return Math.abs(a.entryPrice - order.price) - Math.abs(b.entryPrice - order.price);
       });
-    const strictQuantityMatch = candidates.find(record =>
+    const strictQuantityMatches = candidates.filter(record =>
       closeEnough(record.quantity, order.quantity, Math.max(Math.abs(record.quantity), Math.abs(order.quantity), 1))
     );
     // 老数据里 filled_orders 与 trade_history 的数量口径可能不同；时间+价格已经足够把触发快照接回真实平仓记录。
-    return strictQuantityMatch ?? candidates[0] ?? null;
+    return resolveFilledOrderCloseRecord(order, strictQuantityMatches.length > 0 ? strictQuantityMatches : candidates);
   };
   const triggeredReverseOrders = filledOrders
     .filter(order =>
