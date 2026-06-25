@@ -92,7 +92,7 @@ function SummaryBlock({
       </div>
       <ul className="divide-y divide-border/60">
         {specs.map(spec => (
-          <li key={String(spec.key)}>
+          <li key={spec.id ?? String(spec.key)}>
             <FieldRow spec={spec} journals={journals} />
           </li>
         ))}

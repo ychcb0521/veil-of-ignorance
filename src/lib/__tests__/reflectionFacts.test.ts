@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  buildCloseReviewReflectionText,
+  CLOSE_REVIEW_AUDIT_SEPARATOR_CORE,
+  emptyCloseReviewAuditAnswers,
+  getCloseReviewAuditAnswer,
+  parseCloseReviewReflectionText,
   buildReflectionText,
   parseReflectionText,
   REFLECTION_SEPARATOR_CORE,
@@ -23,6 +28,53 @@ describe('buildReflectionText', () => {
   it('trims both segments', () => {
     const out = buildReflectionText('  事实  ', '  解释  ');
     expect(out).toBe(`事实\n\n${REFLECTION_SEPARATOR_CORE}\n\n解释`);
+  });
+});
+
+describe('close review audit reflection helpers', () => {
+  it('stores the three close-review audit answers in a readable block', () => {
+    const answers = emptyCloseReviewAuditAnswers();
+    answers.decision_basis = '证据来自放量突破，不是为了扳回上一笔。';
+    answers.cycle_stage = '仍在右侧趋势中，没有把震荡期待错套进来。';
+    answers.trend_stop = '跌破预设失效位后止住，没有反复乱动。';
+
+    const stored = buildCloseReviewReflectionText('旧版复盘仍保留', answers);
+
+    expect(stored).toContain('旧版复盘仍保留');
+    expect(stored).toContain(CLOSE_REVIEW_AUDIT_SEPARATOR_CORE);
+    expect(getCloseReviewAuditAnswer(stored, 'decision_basis')).toBe(answers.decision_basis);
+    expect(getCloseReviewAuditAnswer(stored, 'cycle_stage')).toBe(answers.cycle_stage);
+    expect(getCloseReviewAuditAnswer(stored, 'trend_stop')).toBe(answers.trend_stop);
+  });
+
+  it('keeps legacy reflection text separate when parsing', () => {
+    const answers = emptyCloseReviewAuditAnswers();
+    answers.decision_basis = '事实驱动。';
+    answers.cycle_stage = '阶段识别正确。';
+    answers.trend_stop = '没有乱动。';
+
+    const parsed = parseCloseReviewReflectionText(buildCloseReviewReflectionText('老文本', answers));
+
+    expect(parsed.legacyText).toBe('老文本');
+    expect(parsed.answers).toEqual(answers);
+  });
+
+  it('replaces an old audit block instead of duplicating it', () => {
+    const first = emptyCloseReviewAuditAnswers();
+    first.decision_basis = '旧答案';
+    first.cycle_stage = '旧阶段';
+    first.trend_stop = '旧止';
+
+    const second = emptyCloseReviewAuditAnswers();
+    second.decision_basis = '新答案';
+    second.cycle_stage = '新阶段';
+    second.trend_stop = '新止';
+
+    const updated = buildCloseReviewReflectionText(buildCloseReviewReflectionText('老文本', first), second);
+
+    expect(updated.match(new RegExp(CLOSE_REVIEW_AUDIT_SEPARATOR_CORE, 'g'))?.length).toBe(1);
+    expect(getCloseReviewAuditAnswer(updated, 'decision_basis')).toBe('新答案');
+    expect(parseCloseReviewReflectionText(updated).legacyText).toBe('老文本');
   });
 });
 

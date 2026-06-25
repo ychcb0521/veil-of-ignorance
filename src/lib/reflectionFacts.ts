@@ -21,6 +21,45 @@ export interface ReflectionParts {
   interpretation: string;
 }
 
+export const CLOSE_REVIEW_AUDIT_SEPARATOR_CORE = '———（平仓评价三问）———';
+
+export const CLOSE_REVIEW_AUDIT_QUESTIONS = [
+  {
+    key: 'decision_basis',
+    title: '① 客观事实还是自洽借口',
+    question: '这笔交易中，我是基于客观事实做出的决策，还是为了满足内在的“贪婪/恐惧”或“不愿认错”而强行找借口自洽？',
+    placeholder: '写具体证据：哪些是可观察事实，哪些只是为了安抚贪婪、恐惧或不愿认错。',
+  },
+  {
+    key: 'cycle_stage',
+    title: '② 周期阶段是否辨认准确',
+    question: '这笔交易中，我是否准确辨认了市场当前的“周期阶段”，还是在用错位的期待去逆势强求？',
+    placeholder: '写当时所处阶段、支持它的事实，以及有没有把上一阶段/下一阶段的期待错套到现在。',
+  },
+  {
+    key: 'trend_stop',
+    title: '③ 顺势而止其所当止',
+    question: '这在交易进行的过程中，我是否做到了“顺势而止其所当止”，没有因为乱动而额外制造麻烦？',
+    placeholder: '写该止的地方是否止住了、该顺的地方是否顺住了，哪些额外动作是在制造麻烦。',
+  },
+] as const;
+
+export type CloseReviewAuditKey = typeof CLOSE_REVIEW_AUDIT_QUESTIONS[number]['key'];
+export type CloseReviewAuditAnswers = Record<CloseReviewAuditKey, string>;
+
+export interface CloseReviewReflectionParts {
+  /** `post_reflection` 中不属于三问 block 的历史文本。保存时会原样保留。 */
+  legacyText: string;
+  answers: CloseReviewAuditAnswers;
+}
+
+export function emptyCloseReviewAuditAnswers(): CloseReviewAuditAnswers {
+  return CLOSE_REVIEW_AUDIT_QUESTIONS.reduce((acc, question) => {
+    acc[question.key] = '';
+    return acc;
+  }, {} as CloseReviewAuditAnswers);
+}
+
 /**
  * 把「事实」「解释」两段拼成写库字符串。
  * 没有事实 → 退化为纯解释（与旧版单字段完全一致，保证向后兼容）。
@@ -45,4 +84,60 @@ export function parseReflectionText(raw: string | null | undefined): ReflectionP
     facts: text.slice(0, idx).trim(),
     interpretation: text.slice(idx + REFLECTION_SEPARATOR_CORE.length).trim(),
   };
+}
+
+function auditMarkerFor(key: CloseReviewAuditKey): string {
+  const question = CLOSE_REVIEW_AUDIT_QUESTIONS.find(item => item.key === key);
+  return `【${question?.title ?? key}】`;
+}
+
+function buildCloseReviewAuditBlock(answers: CloseReviewAuditAnswers): string {
+  const body = CLOSE_REVIEW_AUDIT_QUESTIONS.map(question => {
+    const answer = (answers[question.key] ?? '').trim();
+    return `${auditMarkerFor(question.key)}\n${answer}`;
+  }).join('\n\n');
+  return `${CLOSE_REVIEW_AUDIT_SEPARATOR_CORE}\n\n${body}`;
+}
+
+export function parseCloseReviewReflectionText(raw: string | null | undefined): CloseReviewReflectionParts {
+  const text = (raw ?? '').replace(/\r\n/g, '\n');
+  const idx = text.indexOf(CLOSE_REVIEW_AUDIT_SEPARATOR_CORE);
+  const answers = emptyCloseReviewAuditAnswers();
+
+  if (idx === -1) {
+    return { legacyText: text.trim(), answers };
+  }
+
+  const legacyText = text.slice(0, idx).trim();
+  const auditBlock = text.slice(idx + CLOSE_REVIEW_AUDIT_SEPARATOR_CORE.length).trim();
+
+  for (const question of CLOSE_REVIEW_AUDIT_QUESTIONS) {
+    const marker = auditMarkerFor(question.key);
+    const start = auditBlock.indexOf(marker);
+    if (start === -1) continue;
+
+    const answerStart = start + marker.length;
+    const nextMarkerStarts = CLOSE_REVIEW_AUDIT_QUESTIONS
+      .map(item => auditBlock.indexOf(auditMarkerFor(item.key), answerStart))
+      .filter(nextStart => nextStart !== -1);
+    const answerEnd = nextMarkerStarts.length > 0 ? Math.min(...nextMarkerStarts) : auditBlock.length;
+    answers[question.key] = auditBlock.slice(answerStart, answerEnd).trim();
+  }
+
+  return { legacyText, answers };
+}
+
+export function buildCloseReviewReflectionText(
+  raw: string | null | undefined,
+  answers: CloseReviewAuditAnswers,
+): string {
+  const { legacyText } = parseCloseReviewReflectionText(raw);
+  return [legacyText, buildCloseReviewAuditBlock(answers)].filter(Boolean).join('\n\n');
+}
+
+export function getCloseReviewAuditAnswer(
+  raw: string | null | undefined,
+  key: CloseReviewAuditKey,
+): string {
+  return parseCloseReviewReflectionText(raw).answers[key];
 }

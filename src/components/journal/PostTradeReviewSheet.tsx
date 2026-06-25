@@ -37,6 +37,14 @@ import {
   type MainStoneTag,
 } from '@/lib/mainStoneTags';
 import {
+  buildCloseReviewReflectionText,
+  CLOSE_REVIEW_AUDIT_QUESTIONS,
+  emptyCloseReviewAuditAnswers,
+  parseCloseReviewReflectionText,
+  type CloseReviewAuditAnswers,
+  type CloseReviewAuditKey,
+} from '@/lib/reflectionFacts';
+import {
   finalizeJournalReview,
   stampJournalCloseRealTime,
 } from '@/lib/journalApi';
@@ -104,6 +112,7 @@ export function PostTradeReviewSheet({
   const [tradeAgencyScore, setTradeAgencyScore] = useState<TradeJournal['post_trade_agency_score']>(null);
   const [hedgeWorthIt, setHedgeWorthIt] = useState<TradeJournal['hedge_worth_it']>(null);
   const [opponentWasRight, setOpponentWasRight] = useState<boolean | null>(null);
+  const [closeReviewAuditAnswers, setCloseReviewAuditAnswers] = useState<CloseReviewAuditAnswers>(() => emptyCloseReviewAuditAnswers());
   // ===== 平仓情绪侧复盘 · 七问 =====
   const [emoDisturbance, setEmoDisturbance] = useState('');
   const [emoFirstReaction, setEmoFirstReaction] = useState('');
@@ -141,6 +150,7 @@ export function PostTradeReviewSheet({
         setTradeAgencyScore(journal.post_trade_agency_score ?? null);
         setHedgeWorthIt(journal.hedge_worth_it ?? null);
         setOpponentWasRight(journal.post_opponent_was_right ?? null);
+        setCloseReviewAuditAnswers(parseCloseReviewReflectionText(journal.post_reflection).answers);
         setEmoDisturbance(journal.post_emo_disturbance ?? '');
         setEmoFirstReaction(journal.post_emo_first_reaction ?? '');
         setEmoWanted(journal.post_emo_wanted ?? '');
@@ -271,6 +281,7 @@ export function PostTradeReviewSheet({
       || (journal.pre_opportunity_cost_worth === true && journal.pre_cheap_opportunity === 'cheap')
     );
   const showPathReview = !isHedge && journal.direction !== 'no_entry';
+  const showCloseReviewAudit = journal.direction !== 'no_entry';
   const showOpeningSnapshot = journal.source !== 'retroactive_from_record';
   // 结构对／错的 2×2 排布（上排结构对、下排结构错；左列赢、右列亏）。
   const QUADRANT_GRID: StructureResultQuadrant[] = ['deserved_win', 'correct_loss', 'dangerous_win', 'deserved_loss'];
@@ -288,6 +299,8 @@ export function PostTradeReviewSheet({
     && oddsStructureFactValid;
   const opponentValid = !journal.pre_opponent_statement || opponentWasRight !== null;
   const hedgeWorthItValid = !isHedge || hedgeWorthIt != null;
+  const closeReviewAuditValid = !showCloseReviewAudit
+    || CLOSE_REVIEW_AUDIT_QUESTIONS.every(question => closeReviewAuditAnswers[question.key].trim().length > 0);
   // 情绪侧七问：文字栏全部必填；主石头允许"文字 OR 至少 1 个标签"满足其一。
   const emoTextValid = [
     emoDisturbance,
@@ -306,6 +319,7 @@ export function PostTradeReviewSheet({
     && pathValid
     && opponentValid
     && hedgeWorthItValid
+    && closeReviewAuditValid
     && emoValid
     && !saving;
 
@@ -336,7 +350,9 @@ export function PostTradeReviewSheet({
         post_outcome: outcome,
         post_realized_pnl: pnl,
         post_r_multiple: finalR,
-        post_reflection: journal.post_reflection ?? '',
+        post_reflection: showCloseReviewAudit
+          ? buildCloseReviewReflectionText(journal.post_reflection, closeReviewAuditAnswers)
+          : (journal.post_reflection ?? ''),
         post_correct_action: journal.post_correct_action ?? '',
         post_result_summary: quadrant ? RESULT_REVIEW_LABELS[quadrant] : (journal.post_result_summary ?? outcomeLabel),
         post_decision_quality: decisionQuality,
@@ -382,6 +398,10 @@ export function PostTradeReviewSheet({
       window.removeEventListener('journal:schemaDrift', onDrift);
       setSaving(false);
     }
+  };
+
+  const handleCloseAuditChange = (key: CloseReviewAuditKey, value: string) => {
+    setCloseReviewAuditAnswers(prev => ({ ...prev, [key]: value }));
   };
 
   const fmtTime = (iso: string) =>
@@ -1159,6 +1179,37 @@ export function PostTradeReviewSheet({
               </button>
             </div>
             {opponentWasRight === null && <div className="text-[10px] text-[#F6465D] text-right font-mono">必选</div>}
+          </div>
+        )}
+
+        {showCloseReviewAudit && (
+          <div className={`space-y-3 px-4 py-4 ${sectionCardClass}`}>
+            <div>
+              <div className="text-[12px] font-semibold text-foreground">出场自审 · 三问</div>
+              <div className="mt-0.5 text-[10px] leading-relaxed text-muted-foreground">
+                只回答这次真实发生的动作和判断，防止用结果倒推一个漂亮故事。
+              </div>
+            </div>
+
+            <div className="space-y-3">
+              {CLOSE_REVIEW_AUDIT_QUESTIONS.map(question => (
+                <div key={question.key} className="space-y-1.5">
+                  <Label className="text-[12px] font-medium">{question.title} *</Label>
+                  <p className="text-[10px] leading-relaxed text-muted-foreground">{question.question}</p>
+                  <Textarea
+                    rows={2}
+                    value={closeReviewAuditAnswers[question.key]}
+                    onChange={event => handleCloseAuditChange(question.key, event.target.value)}
+                    placeholder={question.placeholder}
+                    className={reviewAnswerTextareaClass}
+                  />
+                </div>
+              ))}
+            </div>
+
+            {!closeReviewAuditValid && (
+              <div className="text-right font-mono text-[10px] text-[#F6465D]">出场自审三问需填完</div>
+            )}
           </div>
         )}
 

@@ -18,15 +18,19 @@ import {
 import { ODDS_STRUCTURE_LABELS } from '@/lib/oddsStructure';
 import { SMALL_POSITION_DRAG_LABELS, STRUGGLE_LEVEL_LABELS } from '@/lib/structureResult';
 import { MAIN_STONE_META, type MainStoneTag } from '@/lib/mainStoneTags';
+import { getCloseReviewAuditAnswer } from '@/lib/reflectionFacts';
 
 // =========== 类型 ===========
 
 export type SummaryFieldType = 'enum' | 'multi' | 'text' | 'numeric';
 
 export interface SummaryFieldSpec {
+  /** Stable row id when several specs derive from the same database column. */
+  id?: string;
   key: keyof TradeJournal;
   label: string;
   type: SummaryFieldType;
+  getValue?: (journal: TradeJournal) => unknown;
   /** 解释这道问题在表单里问的是什么。 */
   hint?: string;
   /** enum / multi 用：值 → 显示文案。 */
@@ -107,6 +111,10 @@ function fmtTimeIso(j: TradeJournal): string {
   return j.pre_simulated_time ?? j.created_at ?? '';
 }
 
+function getFieldValue(journal: TradeJournal, spec: SummaryFieldSpec): unknown {
+  return spec.getValue ? spec.getValue(journal) : journal[spec.key];
+}
+
 export function summarizeField(journals: TradeJournal[], spec: SummaryFieldSpec): FieldSummary {
   const total = journals.length;
   switch (spec.type) {
@@ -121,7 +129,7 @@ function summarizeEnum(journals: TradeJournal[], spec: SummaryFieldSpec, total: 
   const counts = new Map<string, number>();
   let filled = 0;
   for (const j of journals) {
-    const v = j[spec.key] as unknown;
+    const v = getFieldValue(j, spec);
     if (!isFilled(v)) continue;
     filled += 1;
     const key = String(v);
@@ -144,7 +152,7 @@ function summarizeMulti(journals: TradeJournal[], spec: SummaryFieldSpec, total:
   let filled = 0;
   let selections = 0;
   for (const j of journals) {
-    const v = j[spec.key] as unknown;
+    const v = getFieldValue(j, spec);
     if (!Array.isArray(v) || v.length === 0) continue;
     filled += 1;
     for (const tag of v) {
@@ -168,7 +176,7 @@ function summarizeMulti(journals: TradeJournal[], spec: SummaryFieldSpec, total:
 function summarizeNumeric(journals: TradeJournal[], spec: SummaryFieldSpec, total: number): NumericSummary {
   const values: number[] = [];
   for (const j of journals) {
-    const raw = j[spec.key] as unknown;
+    const raw = getFieldValue(j, spec);
     const n = typeof raw === 'number' ? raw : raw == null ? null : Number(raw);
     if (n != null && Number.isFinite(n)) values.push(n);
   }
@@ -231,7 +239,7 @@ function formatRange(n: number): string {
 function summarizeText(journals: TradeJournal[], spec: SummaryFieldSpec, total: number): TextSummary {
   const answers: TextAnswer[] = [];
   for (const j of journals) {
-    const v = j[spec.key] as unknown;
+    const v = getFieldValue(j, spec);
     if (typeof v !== 'string' || v.trim().length === 0) continue;
     answers.push({
       journalId: j.id,
@@ -325,6 +333,30 @@ export const POST_FIELD_SPECS: SummaryFieldSpec[] = [
   { key: 'post_premortem_review', label: '反 · 预设亏损原因兑现没有', type: 'text', hint: '事实模块·反。' },
   { key: 'post_invalidation_review', label: '止 · 离场 / 证伪事实', type: 'text', hint: '事实模块·止。' },
   { key: 'post_positive_expectancy_review', label: '结构 · 目标空间假设的实际表现', type: 'text', hint: '事实模块·结构。' },
+  {
+    id: 'post_reflection_decision_basis',
+    key: 'post_reflection',
+    label: '出场自审 ① 客观事实还是自洽借口',
+    type: 'text',
+    hint: '是否基于事实，还是被贪婪 / 恐惧 / 不愿认错驱动。',
+    getValue: journal => getCloseReviewAuditAnswer(journal.post_reflection, 'decision_basis'),
+  },
+  {
+    id: 'post_reflection_cycle_stage',
+    key: 'post_reflection',
+    label: '出场自审 ② 周期阶段是否辨认准确',
+    type: 'text',
+    hint: '是否识别了当下周期阶段，而不是用错位期待逆势强求。',
+    getValue: journal => getCloseReviewAuditAnswer(journal.post_reflection, 'cycle_stage'),
+  },
+  {
+    id: 'post_reflection_trend_stop',
+    key: 'post_reflection',
+    label: '出场自审 ③ 顺势而止其所当止',
+    type: 'text',
+    hint: '是否顺势、止在该止处，并避免乱动制造麻烦。',
+    getValue: journal => getCloseReviewAuditAnswer(journal.post_reflection, 'trend_stop'),
+  },
   { key: 'post_emo_disturbance', label: '情绪七问 ① 这单最起波澜的事', type: 'text' },
   { key: 'post_emo_first_reaction', label: '情绪七问 ② 我的第一反应', type: 'text' },
   { key: 'post_emo_wanted', label: '情绪七问 ③ 我其实想得到什么', type: 'text', hint: '贪婪本质。' },
