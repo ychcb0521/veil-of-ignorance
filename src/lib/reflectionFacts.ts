@@ -21,7 +21,8 @@ export interface ReflectionParts {
   interpretation: string;
 }
 
-export const CLOSE_REVIEW_AUDIT_SEPARATOR_CORE = '———（平仓评价三问）———';
+export const CLOSE_REVIEW_AUDIT_SEPARATOR_CORE = '———（平仓评价自审）———';
+const LEGACY_CLOSE_REVIEW_AUDIT_SEPARATOR_CORES = ['———（平仓评价三问）———'];
 
 export const CLOSE_REVIEW_AUDIT_QUESTIONS = [
   {
@@ -41,6 +42,12 @@ export const CLOSE_REVIEW_AUDIT_QUESTIONS = [
     title: '③ 顺势而止其所当止',
     question: '这在交易进行的过程中，我是否做到了“顺势而止其所当止”，没有因为乱动而额外制造麻烦？',
     placeholder: '写该止的地方是否止住了、该顺的地方是否顺住了，哪些额外动作是在制造麻烦。',
+  },
+  {
+    key: 'schelling_floor_weight',
+    title: '④ 谢林兜底区权重',
+    question: '全程有无给谢林兜底区该有的权重？',
+    placeholder: '写清楚：是否把谢林兜底区当成硬权重 / 高优先级锚点；如果没有，是被哪种噪音、期待或仓位压力挤掉了。',
   },
 ] as const;
 
@@ -101,15 +108,18 @@ function buildCloseReviewAuditBlock(answers: CloseReviewAuditAnswers): string {
 
 export function parseCloseReviewReflectionText(raw: string | null | undefined): CloseReviewReflectionParts {
   const text = (raw ?? '').replace(/\r\n/g, '\n');
-  const idx = text.indexOf(CLOSE_REVIEW_AUDIT_SEPARATOR_CORE);
+  const separator = [CLOSE_REVIEW_AUDIT_SEPARATOR_CORE, ...LEGACY_CLOSE_REVIEW_AUDIT_SEPARATOR_CORES]
+    .map(core => ({ core, idx: text.indexOf(core) }))
+    .filter(match => match.idx !== -1)
+    .sort((a, b) => a.idx - b.idx)[0];
   const answers = emptyCloseReviewAuditAnswers();
 
-  if (idx === -1) {
+  if (!separator) {
     return { legacyText: text.trim(), answers };
   }
 
-  const legacyText = text.slice(0, idx).trim();
-  const auditBlock = text.slice(idx + CLOSE_REVIEW_AUDIT_SEPARATOR_CORE.length).trim();
+  const legacyText = text.slice(0, separator.idx).trim();
+  const auditBlock = text.slice(separator.idx + separator.core.length).trim();
 
   for (const question of CLOSE_REVIEW_AUDIT_QUESTIONS) {
     const marker = auditMarkerFor(question.key);

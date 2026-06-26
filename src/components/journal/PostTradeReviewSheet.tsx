@@ -1185,7 +1185,7 @@ export function PostTradeReviewSheet({
         {showCloseReviewAudit && (
           <div className={`space-y-3 px-4 py-4 ${sectionCardClass}`}>
             <div>
-              <div className="text-[12px] font-semibold text-foreground">出场自审 · 三问</div>
+              <div className="text-[12px] font-semibold text-foreground">出场自审 · 四问</div>
               <div className="mt-0.5 text-[10px] leading-relaxed text-muted-foreground">
                 只回答这次真实发生的动作和判断，防止用结果倒推一个漂亮故事。
               </div>
@@ -1208,7 +1208,7 @@ export function PostTradeReviewSheet({
             </div>
 
             {!closeReviewAuditValid && (
-              <div className="text-right font-mono text-[10px] text-[#F6465D]">出场自审三问需填完</div>
+              <div className="text-right font-mono text-[10px] text-[#F6465D]">出场自审四问需填完</div>
             )}
           </div>
         )}
