@@ -39,6 +39,7 @@ import {
 import {
   buildCloseReviewReflectionText,
   CLOSE_REVIEW_AUDIT_QUESTIONS,
+  CLOSE_REVIEW_SCHELLING_FLOOR_QUESTION,
   emptyCloseReviewAuditAnswers,
   parseCloseReviewReflectionText,
   type CloseReviewAuditAnswers,
@@ -299,6 +300,8 @@ export function PostTradeReviewSheet({
     && oddsStructureFactValid;
   const opponentValid = !journal.pre_opponent_statement || opponentWasRight !== null;
   const hedgeWorthItValid = !isHedge || hedgeWorthIt != null;
+  const schellingFloorValid = !showCloseReviewAudit
+    || closeReviewAuditAnswers.schelling_floor_weight.trim().length > 0;
   const closeReviewAuditValid = !showCloseReviewAudit
     || CLOSE_REVIEW_AUDIT_QUESTIONS.every(question => closeReviewAuditAnswers[question.key].trim().length > 0);
   // 情绪侧七问：文字栏全部必填；主石头允许"文字 OR 至少 1 个标签"满足其一。
@@ -319,6 +322,7 @@ export function PostTradeReviewSheet({
     && pathValid
     && opponentValid
     && hedgeWorthItValid
+    && schellingFloorValid
     && closeReviewAuditValid
     && emoValid
     && !saving;
@@ -726,6 +730,24 @@ export function PostTradeReviewSheet({
             <div className="mt-0.5 text-[10px] leading-relaxed text-muted-foreground">
               你押的是一个闭环。先逐条回答快照里的假设有没有被市场碰到 —— 这里只核验差值、不写事后故事；收口的闭环判读放到下面。
             </div>
+          </div>
+
+          <div className="rounded-xl border border-border/60 bg-background/60 px-3 py-3 space-y-2">
+            <div className="flex items-center gap-2">
+              <span className={factPillClass}>兜底</span>
+              <div className="text-[12px] font-medium text-foreground">谢林兜底区权重 *</div>
+            </div>
+            <p className="text-[10px] leading-relaxed text-muted-foreground">
+              {CLOSE_REVIEW_SCHELLING_FLOOR_QUESTION.question}
+            </p>
+            <Textarea
+              rows={2}
+              value={closeReviewAuditAnswers.schelling_floor_weight}
+              onChange={event => handleCloseAuditChange('schelling_floor_weight', event.target.value)}
+              placeholder={CLOSE_REVIEW_SCHELLING_FLOOR_QUESTION.placeholder}
+              className={reviewAnswerTextareaClass}
+            />
+            {!schellingFloorValid && <div className="text-right font-mono text-[10px] text-[#F6465D]">必填</div>}
           </div>
 
           <div className="rounded-xl border border-border/60 bg-background/60 px-3 py-3 space-y-2">
@@ -1185,7 +1207,7 @@ export function PostTradeReviewSheet({
         {showCloseReviewAudit && (
           <div className={`space-y-3 px-4 py-4 ${sectionCardClass}`}>
             <div>
-              <div className="text-[12px] font-semibold text-foreground">出场自审 · 四问</div>
+              <div className="text-[12px] font-semibold text-foreground">出场自审 · 三问</div>
               <div className="mt-0.5 text-[10px] leading-relaxed text-muted-foreground">
                 只回答这次真实发生的动作和判断，防止用结果倒推一个漂亮故事。
               </div>
@@ -1208,7 +1230,7 @@ export function PostTradeReviewSheet({
             </div>
 
             {!closeReviewAuditValid && (
-              <div className="text-right font-mono text-[10px] text-[#F6465D]">出场自审四问需填完</div>
+              <div className="text-right font-mono text-[10px] text-[#F6465D]">出场自审三问需填完</div>
             )}
           </div>
         )}

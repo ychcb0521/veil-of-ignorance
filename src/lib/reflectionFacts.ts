@@ -24,6 +24,13 @@ export interface ReflectionParts {
 export const CLOSE_REVIEW_AUDIT_SEPARATOR_CORE = '———（平仓评价自审）———';
 const LEGACY_CLOSE_REVIEW_AUDIT_SEPARATOR_CORES = ['———（平仓评价三问）———'];
 
+export const CLOSE_REVIEW_SCHELLING_FLOOR_QUESTION = {
+  key: 'schelling_floor_weight',
+  title: '谢林兜底区权重',
+  question: '全程有无给谢林兜底区该有的权重？',
+  placeholder: '写清楚：是否把谢林兜底区当成硬权重 / 高优先级锚点；如果没有，是被哪种噪音、期待或仓位压力挤掉了。',
+} as const;
+
 export const CLOSE_REVIEW_AUDIT_QUESTIONS = [
   {
     key: 'decision_basis',
@@ -43,25 +50,24 @@ export const CLOSE_REVIEW_AUDIT_QUESTIONS = [
     question: '这在交易进行的过程中，我是否做到了“顺势而止其所当止”，没有因为乱动而额外制造麻烦？',
     placeholder: '写该止的地方是否止住了、该顺的地方是否顺住了，哪些额外动作是在制造麻烦。',
   },
-  {
-    key: 'schelling_floor_weight',
-    title: '④ 谢林兜底区权重',
-    question: '全程有无给谢林兜底区该有的权重？',
-    placeholder: '写清楚：是否把谢林兜底区当成硬权重 / 高优先级锚点；如果没有，是被哪种噪音、期待或仓位压力挤掉了。',
-  },
 ] as const;
 
-export type CloseReviewAuditKey = typeof CLOSE_REVIEW_AUDIT_QUESTIONS[number]['key'];
+const CLOSE_REVIEW_STORED_QUESTIONS = [
+  CLOSE_REVIEW_SCHELLING_FLOOR_QUESTION,
+  ...CLOSE_REVIEW_AUDIT_QUESTIONS,
+] as const;
+
+export type CloseReviewAuditKey = typeof CLOSE_REVIEW_STORED_QUESTIONS[number]['key'];
 export type CloseReviewAuditAnswers = Record<CloseReviewAuditKey, string>;
 
 export interface CloseReviewReflectionParts {
-  /** `post_reflection` 中不属于三问 block 的历史文本。保存时会原样保留。 */
+  /** `post_reflection` 中不属于自审 block 的历史文本。保存时会原样保留。 */
   legacyText: string;
   answers: CloseReviewAuditAnswers;
 }
 
 export function emptyCloseReviewAuditAnswers(): CloseReviewAuditAnswers {
-  return CLOSE_REVIEW_AUDIT_QUESTIONS.reduce((acc, question) => {
+  return CLOSE_REVIEW_STORED_QUESTIONS.reduce((acc, question) => {
     acc[question.key] = '';
     return acc;
   }, {} as CloseReviewAuditAnswers);
@@ -94,12 +100,18 @@ export function parseReflectionText(raw: string | null | undefined): ReflectionP
 }
 
 function auditMarkerFor(key: CloseReviewAuditKey): string {
-  const question = CLOSE_REVIEW_AUDIT_QUESTIONS.find(item => item.key === key);
+  const question = CLOSE_REVIEW_STORED_QUESTIONS.find(item => item.key === key);
   return `【${question?.title ?? key}】`;
 }
 
+function auditMarkersFor(key: CloseReviewAuditKey): string[] {
+  const markers = [auditMarkerFor(key)];
+  if (key === 'schelling_floor_weight') markers.push('【④ 谢林兜底区权重】');
+  return markers;
+}
+
 function buildCloseReviewAuditBlock(answers: CloseReviewAuditAnswers): string {
-  const body = CLOSE_REVIEW_AUDIT_QUESTIONS.map(question => {
+  const body = CLOSE_REVIEW_STORED_QUESTIONS.map(question => {
     const answer = (answers[question.key] ?? '').trim();
     return `${auditMarkerFor(question.key)}\n${answer}`;
   }).join('\n\n');
@@ -121,14 +133,16 @@ export function parseCloseReviewReflectionText(raw: string | null | undefined): 
   const legacyText = text.slice(0, separator.idx).trim();
   const auditBlock = text.slice(separator.idx + separator.core.length).trim();
 
-  for (const question of CLOSE_REVIEW_AUDIT_QUESTIONS) {
-    const marker = auditMarkerFor(question.key);
-    const start = auditBlock.indexOf(marker);
-    if (start === -1) continue;
+  for (const question of CLOSE_REVIEW_STORED_QUESTIONS) {
+    const markerMatch = auditMarkersFor(question.key)
+      .map(marker => ({ marker, start: auditBlock.indexOf(marker) }))
+      .filter(match => match.start !== -1)
+      .sort((a, b) => a.start - b.start)[0];
+    if (!markerMatch) continue;
 
-    const answerStart = start + marker.length;
-    const nextMarkerStarts = CLOSE_REVIEW_AUDIT_QUESTIONS
-      .map(item => auditBlock.indexOf(auditMarkerFor(item.key), answerStart))
+    const answerStart = markerMatch.start + markerMatch.marker.length;
+    const nextMarkerStarts = CLOSE_REVIEW_STORED_QUESTIONS
+      .flatMap(item => auditMarkersFor(item.key).map(marker => auditBlock.indexOf(marker, answerStart)))
       .filter(nextStart => nextStart !== -1);
     const answerEnd = nextMarkerStarts.length > 0 ? Math.min(...nextMarkerStarts) : auditBlock.length;
     answers[question.key] = auditBlock.slice(answerStart, answerEnd).trim();

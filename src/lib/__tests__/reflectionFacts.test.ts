@@ -105,6 +105,27 @@ describe('close review audit reflection helpers', () => {
     expect(parsed.answers.trend_stop).toBe('没有乱动。');
     expect(parsed.answers.schelling_floor_weight).toBe('');
   });
+
+  it('parses the previous fourth-question Schelling marker', () => {
+    const stored = [
+      '———（平仓评价自审）———',
+      '【① 客观事实还是自洽借口】',
+      '事实驱动。',
+      '',
+      '【② 周期阶段是否辨认准确】',
+      '阶段正确。',
+      '',
+      '【③ 顺势而止其所当止】',
+      '没有乱动。',
+      '',
+      '【④ 谢林兜底区权重】',
+      '旧版本保存的兜底区权重答案。',
+    ].join('\n');
+
+    const parsed = parseCloseReviewReflectionText(stored);
+
+    expect(parsed.answers.schelling_floor_weight).toBe('旧版本保存的兜底区权重答案。');
+  });
 });
 
 describe('parseReflectionText', () => {
