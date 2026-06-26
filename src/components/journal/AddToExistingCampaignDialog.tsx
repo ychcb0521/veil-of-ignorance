@@ -4,6 +4,7 @@ import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { LegRoleChip } from '@/components/journal/LegRoleChip';
+import { classifiableOperationTime } from '@/lib/classifiableOperationTime';
 import { getAssignableLegRoles, LEG_ROLE_LABELS, MAIN_ADD_ROLES } from '@/lib/strategyTemplates';
 import { batchAttachToCampaign, batchBackfillAndAttach, suggestLegRoles, validateClassification } from '@/lib/journalApi';
 import { getPositionNotionalUsd } from '@/lib/tradingSettlement';
@@ -32,8 +33,8 @@ const CONFIDENCE_DOT: Record<SuggestedLegRole['confidence'], string> = {
   low: 'bg-muted-foreground',
 };
 
-function fmtLabel(iso: string) {
-  const d = new Date(iso);
+function fmtLabel(value: string | number) {
+  const d = new Date(value);
   if (!Number.isFinite(d.getTime())) return '—';
   const pad = (n: number) => String(n).padStart(2, '0');
   return `${d.getFullYear()}/${pad(d.getMonth() + 1)}/${pad(d.getDate())}\n${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
@@ -58,11 +59,8 @@ function itemCloseTimeLabel(item: ClassifiableItem) {
 }
 
 function itemOperationTimeLabel(item: ClassifiableItem) {
-  if (item.kind === 'journal') {
-    return fmtLabel(item.journal.post_real_close_time ?? item.journal.pre_real_time ?? item.journal.updated_at ?? item.journal.created_at);
-  }
-  // 裸成交记录：操作时间只认真实钱包时钟(closedRealAt)，没有就「—」，不拿模拟 K 线时间冒充。
-  return item.record.closedRealAt ? fmtLabel(new Date(item.record.closedRealAt).toISOString()) : '—';
+  const operationTime = classifiableOperationTime(item);
+  return operationTime ? fmtLabel(operationTime) : '—';
 }
 
 function itemSymbol(item: ClassifiableItem) {

@@ -14,6 +14,7 @@ import { Switch } from '@/components/ui/switch';
 import { useAuth } from '@/contexts/AuthContext';
 import { useTradingContext } from '@/contexts/TradingContext';
 import { useIsMobile } from '@/hooks/use-mobile';
+import { classifiableOperationTime } from '@/lib/classifiableOperationTime';
 import { getSettlementAsset } from '@/lib/coinMargined';
 import { detachJournalFromCampaign, listAllCampaigns, listUnclassifiedItems, suggestLegRoles } from '@/lib/journalApi';
 import { LEG_ROLE_LABELS } from '@/lib/strategyTemplates';
@@ -469,7 +470,7 @@ export default function JournalCampaignClassifyPage() {
                       const quantity = record?.quantity ?? null;
                       const pnl = record?.pnl ?? journal?.post_realized_pnl ?? null;
                       const roe = roeFromRecord(record);
-                      const operationTime = operationTimeForItem(item, journal, record);
+                      const operationTime = operationTimeForItem(item, record);
                       return (
                         <tr
                           key={item.id}
@@ -656,17 +657,9 @@ function itemTimeMs(item: ClassifiableItem) {
 
 function operationTimeForItem(
   item: ClassifiableItem,
-  journal: TradeJournal | null,
   record: TradeRecord | null,
 ) {
-  if (journal) {
-    return journal.post_real_close_time ?? journal.pre_real_time ?? journal.created_at ?? journal.updated_at;
-  }
-  // 裸成交记录：操作时间只认「真实钱包时钟」(closedRealAt)；没有就显示「—」，绝不拿模拟 K 线时间冒充真实操作时间。
-  if (item.kind === 'orphanRecord') {
-    return record?.closedRealAt ?? item.record.closedRealAt ?? null;
-  }
-  return record?.closedRealAt ?? null;
+  return classifiableOperationTime(item, record);
 }
 
 function tradeRecordDirection(record: TradeRecord): 'long' | 'short' {

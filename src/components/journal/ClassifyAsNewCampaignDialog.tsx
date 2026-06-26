@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
+import { classifiableOperationTime } from '@/lib/classifiableOperationTime';
 import { getAssignableLegRoles, LEG_ROLE_LABELS, MAIN_ADD_ROLES, STRATEGY_TEMPLATES, SELECTABLE_STRATEGY_TEMPLATES, usesDualHedgeSop } from '@/lib/strategyTemplates';
 import { getPositionNotionalUsd } from '@/lib/tradingSettlement';
 import {
@@ -67,11 +68,8 @@ function itemCloseTimeLabel(item: ClassifiableItem) {
 }
 
 function itemOperationTimeLabel(item: ClassifiableItem) {
-  if (item.kind === 'journal') {
-    return fmtLabel(item.journal.post_real_close_time ?? item.journal.pre_real_time ?? item.journal.updated_at ?? item.journal.created_at);
-  }
-  // 裸成交记录：操作时间只认真实钱包时钟(closedRealAt)，没有就「—」，不拿模拟 K 线时间冒充。
-  return item.record.closedRealAt ? fmtLabel(item.record.closedRealAt) : '—';
+  const operationTime = classifiableOperationTime(item);
+  return operationTime ? fmtLabel(operationTime) : '—';
 }
 
 function itemSymbol(item: ClassifiableItem) {
