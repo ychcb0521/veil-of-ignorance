@@ -1039,8 +1039,45 @@ function CandlestickChartComponent({
       }
     }
 
-    for (const marker of analysisAnnotations.markers ?? []) {
-      if (!Number.isFinite(marker.price) || marker.time < minTime || marker.time > maxTime) continue;
+    // 同一时间（同一竖线）上多个事件标签会叠在一起看不清：按价格在垂直方向「最小必要」错开——
+    // 价格本就拉得开的保持原位，太近的才上移约一个标签高度，既看清又不丢信息（其余不变）。
+    const visibleMarkers = (analysisAnnotations.markers ?? []).filter(
+      (m) => Number.isFinite(m.price) && m.time >= minTime && m.time <= maxTime,
+    );
+    let markerLaneGap = 0;
+    if (visibleMarkers.length > 0 && data.length > 0) {
+      let lo = Infinity;
+      let hi = -Infinity;
+      for (const d of data) {
+        if (d.low < lo) lo = d.low;
+        if (d.high > hi) hi = d.high;
+      }
+      const range = Math.max(hi - lo, Math.abs(hi) * 1e-4, 1e-9);
+      markerLaneGap = range * 0.05; // ≈ 一个标签高度
+    }
+    const markersByTime = new Map<number, AnalysisChartMarker[]>();
+    for (const m of visibleMarkers) {
+      const arr = markersByTime.get(m.time);
+      if (arr) arr.push(m);
+      else markersByTime.set(m.time, [m]);
+    }
+    const placedMarkers: Array<{ marker: AnalysisChartMarker; value: number }> = [];
+    for (const group of markersByTime.values()) {
+      if (group.length === 1) {
+        placedMarkers.push({ marker: group[0], value: group[0].price });
+        continue;
+      }
+      // 自下而上：相邻标签至少相隔 markerLaneGap；够开的保持原位（位移最小）。
+      const sorted = [...group].sort((a, b) => a.price - b.price);
+      let prevValue = -Infinity;
+      for (const m of sorted) {
+        const value = Math.max(m.price, prevValue + markerLaneGap);
+        placedMarkers.push({ marker: m, value });
+        prevValue = value;
+      }
+    }
+
+    for (const { marker, value } of placedMarkers) {
       const glyph =
         marker.shape === "triangle-up" ? "▲" :
         marker.shape === "triangle-down" ? "▼" :
@@ -1049,7 +1086,7 @@ function CandlestickChartComponent({
 
       createAnalysisOverlay("marker", {
         name: "simpleAnnotation",
-        points: [{ timestamp: marker.time, value: marker.price }],
+        points: [{ timestamp: marker.time, value }],
         lock: true,
         extendData: marker.label ? `${glyph} ${marker.label}` : glyph,
         styles: {
