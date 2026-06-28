@@ -24,6 +24,12 @@ import { BarChart3, X, ListOrdered, Eye, EyeOff } from "lucide-react";
 import { usePersistedState } from "@/hooks/usePersistedState";
 import type { TradeRecord } from "@/types/trading";
 import { registerCustomIndicators, CUSTOM_INDICATOR_MAP } from "@/lib/customIndicators";
+import {
+  FLOATING_LABEL_HEIGHT,
+  layoutAnalysisFloatingLabels,
+  type AnalysisFloatingLabel,
+  type AnalysisFloatingLabelCandidate,
+} from "@/lib/analysisFloatingLabels";
 
 // Mapping from our indicator IDs to klinecharts indicator names (built-in + custom)
 const KLINE_INDICATOR_MAP: Record<string, string> = { ...CUSTOM_INDICATOR_MAP };
@@ -430,9 +436,22 @@ function CandlestickChartComponent({
   const [drawingsVisible, setDrawingsVisible] = useState(true);
   const [activeDrawingTool, setActiveDrawingTool] = useState<string | null>(null);
   const { theme } = useTheme();
+  const [analysisFloatingLabels, setAnalysisFloatingLabels] = useState<AnalysisFloatingLabel[]>([]);
+  const [analysisViewportWidth, setAnalysisViewportWidth] = useState(0);
   const crosshairPriceRef = useRef<number | null>(null);
 
   const activeIndicatorPanes = useRef<Map<string, string | null>>(new Map());
+
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const updateWidth = () => setAnalysisViewportWidth(Math.round(el.clientWidth));
+    updateWidth();
+    if (typeof ResizeObserver === "undefined") return;
+    const resizeObserver = new ResizeObserver(updateWidth);
+    resizeObserver.observe(el);
+    return () => resizeObserver.disconnect();
+  }, []);
 
   const centerAnalysisWindow = useCallback(() => {
     const chart = chartRef.current;
@@ -875,11 +894,13 @@ function CandlestickChartComponent({
     try {
       chart.removeOverlay("analysis_annotations");
     } catch {}
+    setAnalysisFloatingLabels([]);
 
     if (!analysisAnnotations || data.length === 0) return;
 
     const runId = ++analysisOverlayRunRef.current;
     const nextOverlayIds: string[] = [];
+    const floatingLabelCandidates: AnalysisFloatingLabelCandidate[] = [];
     const createAnalysisOverlay = (key: string, overlay: OverlayCreate) => {
       const id = `analysis_annotations_${runId}_${nextOverlayIds.length}_${key}`;
       chart.createOverlay({
@@ -897,10 +918,28 @@ function CandlestickChartComponent({
     const lastValue = newest.close;
     const formatPrice = (value: number) => value.toFixed(pricePrecision);
     const clampTime = (time: number) => Math.min(Math.max(time, minTime), maxTime);
-    const visibleLow = Math.min(...data.map(item => item.low));
-    const visibleHigh = Math.max(...data.map(item => item.high));
-    const visibleRange = Math.max(visibleHigh - visibleLow, Math.abs(visibleHigh) * 0.0001, 1);
-    const verticalLabelValue = visibleLow + visibleRange * 0.025;
+    const labelXForTime = (time: number) => {
+      try {
+        const coordinate = chart.convertToPixel(
+          { timestamp: clampTime(time), value: lastValue },
+          { paneId: "candle_pane" },
+        );
+        const point = Array.isArray(coordinate) ? coordinate[0] : coordinate;
+        return typeof point?.x === "number" && Number.isFinite(point.x) ? point.x : undefined;
+      } catch {
+        return undefined;
+      }
+    };
+    const addFloatingLabel = (id: string, time: number, text: string | undefined, color: string) => {
+      if (!text || !Number.isFinite(time)) return;
+      floatingLabelCandidates.push({
+        id: `${floatingLabelCandidates.length}-${id}`,
+        time: clampTime(time),
+        text,
+        color,
+        x: labelXForTime(time),
+      });
+    };
 
     for (const line of analysisAnnotations.priceLines ?? []) {
       if (!Number.isFinite(line.price)) continue;
@@ -951,49 +990,11 @@ function CandlestickChartComponent({
       } as OverlayCreate);
 
       if (line.title) {
-        createAnalysisOverlay("time-price-label", {
-          name: "simpleAnnotation",
-          points: [{ timestamp: startTime, value: line.price }],
-          lock: true,
-          extendData: line.title,
-          styles: {
-            text: {
-              color: "#FFFFFF",
-              size: 10,
-              borderColor: `${line.color}50`,
-              backgroundColor: line.color,
-              borderRadius: 2,
-              paddingLeft: 3,
-              paddingRight: 3,
-              paddingTop: 1,
-              paddingBottom: 1,
-            },
-            point: { color: line.color },
-          },
-        } as OverlayCreate);
+        addFloatingLabel(`time-price-${startTime}-${line.price}-${line.title}`, startTime, line.title, line.color);
       }
 
       if (line.endMarker === "x") {
-        createAnalysisOverlay("time-price-end", {
-          name: "simpleAnnotation",
-          points: [{ timestamp: endTime, value: line.price }],
-          lock: true,
-          extendData: "×",
-          styles: {
-            text: {
-              color: "#FFFFFF",
-              size: 10,
-              borderColor: `${line.color}50`,
-              backgroundColor: line.color,
-              borderRadius: 2,
-              paddingLeft: 3,
-              paddingRight: 3,
-              paddingTop: 1,
-              paddingBottom: 1,
-            },
-            point: { color: line.color },
-          },
-        } as OverlayCreate);
+        addFloatingLabel(`time-price-end-${endTime}-${line.price}`, endTime, "×", line.color);
       }
     }
 
@@ -1016,31 +1017,17 @@ function CandlestickChartComponent({
       } as OverlayCreate);
 
       if (vertical.label) {
-        createAnalysisOverlay("vertical-label", {
-          name: "simpleAnnotation",
-          points: [{ timestamp: verticalTime, value: verticalLabelValue }],
-          lock: true,
-          extendData: vertical.label,
-          styles: {
-            text: {
-              color: vertical.labelColor ?? vertical.color,
-              size: 7,
-              borderColor: "rgba(132, 142, 156, 0.14)",
-              backgroundColor: "rgba(11, 14, 17, 0.26)",
-              borderRadius: 2,
-              paddingLeft: 2,
-              paddingRight: 2,
-              paddingTop: 1,
-              paddingBottom: 1,
-            },
-            point: { color: "rgba(0,0,0,0)" },
-          },
-        } as OverlayCreate);
+        addFloatingLabel(
+          `vertical-${verticalTime}-${vertical.label}`,
+          verticalTime,
+          vertical.label,
+          vertical.labelColor ?? vertical.color,
+        );
       }
     }
 
-    // 同一时间（同一竖线）上多个事件标签会叠在一起看不清：按价格在垂直方向「最小必要」错开——
-    // 价格本就拉得开的保持原位，太近的才上移约一个标签高度，既看清又不丢信息（其余不变）。
+    // Same-time event labels are laid out in a fixed pixel band below; keep the
+    // tiny glyphs on price only as anchors so vertical zoom cannot crush labels.
     const visibleMarkers = (analysisAnnotations.markers ?? []).filter(
       (m) => Number.isFinite(m.price) && m.time >= minTime && m.time <= maxTime,
     );
@@ -1084,20 +1071,27 @@ function CandlestickChartComponent({
         marker.shape === "square" ? "■" :
         "●";
 
+      addFloatingLabel(
+        `marker-${marker.time}-${marker.price}-${marker.label ?? glyph}`,
+        marker.time,
+        marker.label ? `${glyph} ${marker.label}` : glyph,
+        marker.color,
+      );
+
       createAnalysisOverlay("marker", {
         name: "simpleAnnotation",
         points: [{ timestamp: marker.time, value }],
         lock: true,
-        extendData: marker.label ? `${glyph} ${marker.label}` : glyph,
+        extendData: glyph,
         styles: {
           text: {
             color: "#FFFFFF",
-            size: 10,
+            size: 9,
             borderColor: `${marker.color}50`,
             backgroundColor: marker.color,
             borderRadius: 2,
-            paddingLeft: 3,
-            paddingRight: 3,
+            paddingLeft: 2,
+            paddingRight: 2,
             paddingTop: 1,
             paddingBottom: 1,
           },
@@ -1105,8 +1099,15 @@ function CandlestickChartComponent({
         },
       } as OverlayCreate);
     }
+    setAnalysisFloatingLabels(
+      layoutAnalysisFloatingLabels(floatingLabelCandidates, {
+        minTime,
+        maxTime,
+        width: analysisViewportWidth || containerRef.current?.clientWidth || 0,
+      }),
+    );
     analysisOverlayIdsRef.current = nextOverlayIds;
-  }, [analysisAnnotations, data, pricePrecision]);
+  }, [analysisAnnotations, data, pricePrecision, analysisViewportWidth]);
 
   // Campaign What-if: draggable horizontal price lines and vertical timing lines.
   // Drag a price line up/down or a time line left/right, then report the new value on release.
@@ -1424,6 +1425,37 @@ function CandlestickChartComponent({
             cursor: activeDrawingTool || pickMode ? "crosshair" : "default",
           }}
         />
+
+        {analysisMode && analysisFloatingLabels.length > 0 && (
+          <div
+            className="pointer-events-none absolute inset-y-0 right-0 z-[8] overflow-visible"
+            style={{ left: analysisMode ? 0 : 34 }}
+          >
+            {analysisFloatingLabels.map((label) => (
+              <div
+                key={label.id}
+                data-analysis-label={label.id}
+                className="absolute flex items-center justify-center rounded-[3px] border font-bold"
+                style={{
+                  left: label.left,
+                  top: label.top,
+                  width: label.width,
+                  height: FLOATING_LABEL_HEIGHT,
+                  color: label.color,
+                  borderColor: label.color,
+                  backgroundColor: theme === "light" ? "rgba(255, 255, 255, 0.86)" : "rgba(11, 14, 17, 0.72)",
+                  boxShadow: theme === "light" ? "0 1px 3px rgba(15, 23, 42, 0.10)" : "0 1px 3px rgba(0, 0, 0, 0.28)",
+                  fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
+                  fontSize: 10,
+                  lineHeight: "14px",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                {label.text}
+              </div>
+            ))}
+          </div>
+        )}
 
         {!analysisMode && (
           <DrawingToolbar

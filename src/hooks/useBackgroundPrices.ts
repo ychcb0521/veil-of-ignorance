@@ -20,34 +20,9 @@ import {
   settlePositionClose,
 } from "@/lib/tradingSettlement";
 import { toast } from "sonner";
+import { fetchCanonicalTimePriceAt, type CanonicalTimePrice } from "@/lib/canonicalTimePrice";
 
-interface KlinePrice {
-  high: number;
-  low: number;
-  close: number;
-}
-
-async function fetchLatestPrice(symbol: string, interval: string, endTime: number): Promise<KlinePrice | null> {
-  try {
-    const qs = new URLSearchParams({
-      symbol,
-      interval,
-      limit: "1",
-      endTime: String(endTime),
-    });
-    const res = await fetch(`https://fapi.binance.com/fapi/v1/klines?${qs}`);
-    if (!res.ok) return null;
-    const raw: any[][] = await res.json();
-    if (raw.length === 0) return null;
-    return {
-      high: parseFloat(raw[0][2]),
-      low: parseFloat(raw[0][3]),
-      close: parseFloat(raw[0][4]),
-    };
-  } catch {
-    return null;
-  }
-}
+type KlinePrice = CanonicalTimePrice;
 
 export function useBackgroundPrices() {
   const {
@@ -270,7 +245,6 @@ export function useBackgroundPrices() {
   const pollBackgroundSymbols = useCallback(async () => {
     if (!sim.isRunning || pollingRef.current) return;
 
-    const fetchInterval = "1m";
     const now = sim.currentSimulatedTime;
     const MIN_POLL_MS = 1000;
     if (now - lastPollRef.current < MIN_POLL_MS) return;
@@ -288,7 +262,7 @@ export function useBackgroundPrices() {
       for (let i = 0; i < backgroundSymbols.length; i += batchSize) {
         const batch = backgroundSymbols.slice(i, i + batchSize);
         const results = await Promise.all(
-          batch.map((sym) => fetchLatestPrice(sym, fetchInterval, now).then((r) => ({ sym, r }))),
+          batch.map((sym) => fetchCanonicalTimePriceAt(sym, now).then((r) => ({ sym, r })).catch(() => ({ sym, r: null }))),
         );
         for (const { sym, r } of results) {
           if (r) newPrices[sym] = r;

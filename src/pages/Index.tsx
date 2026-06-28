@@ -25,6 +25,8 @@ import { LiquidationModal } from "@/components/LiquidationModal";
 import { TradeInsightsPanel } from "@/components/TradeInsightsPanel";
 import { CoolingOffModal, useCoolingOff } from "@/components/CoolingOffModal";
 import { getConditionalTriggerDecisionFromRange } from "@/lib/conditionalOrders";
+import { fetchCanonicalTimePriceAt } from "@/lib/canonicalTimePrice";
+import { applyCurrentPriceToVisibleData } from "@/lib/visibleDataPrice";
 import { toast } from "sonner";
 import { Wallet, Crosshair, BookOpen, Tag } from "lucide-react";
 import { Link } from "react-router-dom";
@@ -229,24 +231,10 @@ const Index = () => {
 
   const visibleData = useMemo(() => getVisibleData(effectiveSimTime, iMs), [getVisibleData, effectiveSimTime, iMs]);
 
-  const displayData = useMemo(() => {
-    if (visibleData.length === 0 || currentPrice <= 0) return visibleData;
-    // Sanity check: don't apply currentPrice if it's wildly different from the candle's range
-    // This prevents stale persisted prices from creating extreme wicks on symbol switch
-    const last = visibleData[visibleData.length - 1];
-    const mid = (last.high + last.low) / 2;
-    if (mid > 0) {
-      const ratio = currentPrice / mid;
-      if (ratio > 3 || ratio < 0.33) return visibleData; // skip if >3x deviation
-    }
-    const next = [...visibleData];
-    const newLast = { ...last };
-    newLast.close = currentPrice;
-    newLast.high = Math.max(newLast.high, currentPrice);
-    newLast.low = Math.min(newLast.low, currentPrice);
-    next[next.length - 1] = newLast;
-    return next;
-  }, [visibleData, currentPrice]);
+  const displayData = useMemo(
+    () => applyCurrentPriceToVisibleData(visibleData, currentPrice),
+    [visibleData, currentPrice],
+  );
 
   const latestVisiblePrice = useMemo(() => {
     const latest = visibleData[visibleData.length - 1];
@@ -281,6 +269,8 @@ const Index = () => {
   const priceProtectionRef = useRef(priceProtection);
   const ordersMapRef = useRef(ordersMap);
   const positionsMapRef = useRef(positionsMap);
+  const priceMapRef = useRef(priceMap);
+  const canonicalPriceRequestRef = useRef(0);
   const conditionalTriggerLocksRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
@@ -304,6 +294,38 @@ const Index = () => {
   useEffect(() => {
     positionsMapRef.current = positionsMap;
   }, [positionsMap]);
+  useEffect(() => {
+    priceMapRef.current = priceMap;
+  }, [priceMap]);
+
+  const refreshCanonicalPrice = useCallback(
+    async (symbol: string, time: number) => {
+      if (!symbol || !Number.isFinite(time) || time <= 0) return;
+      const requestId = ++canonicalPriceRequestRef.current;
+      const price = await fetchCanonicalTimePriceAt(symbol, time).catch(() => null);
+      if (requestId !== canonicalPriceRequestRef.current || !price || price.close <= 0) return;
+
+      latestChartPriceRef.current = price.close;
+      setPriceMap((prev) => {
+        if (prev[symbol] === price.close) return prev;
+        return { ...prev, [symbol]: price.close };
+      });
+    },
+    [setPriceMap],
+  );
+
+  const canonicalPriceRefreshTime = useMemo(() => {
+    if (activeCoinState.status === "playing") {
+      return Math.floor(effectiveSimTime / 1000) * 1000;
+    }
+    return effectiveSimTime;
+  }, [activeCoinState.status, effectiveSimTime]);
+
+  useEffect(() => {
+    if (activeCoinState.status === "stopped" || canonicalPriceRefreshTime <= 0) return;
+    void refreshCanonicalPrice(activeSymbol, canonicalPriceRefreshTime);
+  }, [activeSymbol, interval, activeCoinState.status, canonicalPriceRefreshTime, refreshCanonicalPrice]);
+
   useEffect(() => {
     const activeOrderIds = new Set(
       Object.values(ordersMap).flatMap((symbolOrders) => symbolOrders.map((order) => order.id)),
@@ -599,26 +621,27 @@ const Index = () => {
               if (candle.time <= activeSimTime) {
                 const isLiveCandle = candle.time + iMs > Date.now() - 60000;
                 const progress = Math.max(0, Math.min(1, (activeSimTime - candle.time) / iMs));
-                const close = isLiveCandle ? candle.close : candle.open + (candle.close - candle.open) * progress;
+                const interpClose = isLiveCandle ? candle.close : candle.open + (candle.close - candle.open) * progress;
                 const hlReveal = Math.min(1, progress * 1.5);
                 const rawHigh = isLiveCandle ? candle.high : candle.open + (candle.high - candle.open) * hlReveal;
                 const rawLow = isLiveCandle ? candle.low : candle.open + (candle.low - candle.open) * hlReveal;
+                // 撮合仍用「周期插值」的 high/low（行为完全不变）
+                const matchHigh = isLiveCandle ? candle.high : Math.max(candle.open, interpClose, rawHigh);
+                const matchLow = isLiveCandle ? candle.low : Math.min(candle.open, interpClose, rawLow);
+                // 显示价统一用「该时刻 1m 价」（priceMap，useBackgroundPrices 每秒更新），使各周期一致；
+                // 偏差过大（疑似切标的残留）或冷启动拉不到时，退回周期插值，不会更糟。
+                const livePx = priceMapRef.current[activeSym];
+                const r = livePx > 0 && interpClose > 0 ? livePx / interpClose : 0;
+                const close = r >= 0.2 && r <= 5 ? livePx : interpClose;
                 api.updateData({
                   timestamp: candle.time,
                   open: candle.open,
-                  high: isLiveCandle ? candle.high : Math.max(candle.open, close, rawHigh),
-                  low: isLiveCandle ? candle.low : Math.min(candle.open, close, rawLow),
+                  high: Math.max(matchHigh, close),
+                  low: Math.min(matchLow, close),
                   close,
                   volume: candle.volume * progress,
                 });
-                runConditionalMatchingForSymbol(
-                  activeSym,
-                  {
-                    high: isLiveCandle ? candle.high : Math.max(candle.open, close, rawHigh),
-                    low: isLiveCandle ? candle.low : Math.min(candle.open, close, rawLow),
-                  },
-                  activeSimTime,
-                );
+                runConditionalMatchingForSymbol(activeSym, { high: matchHigh, low: matchLow }, activeSimTime);
                 latestChartPriceRef.current = close;
               }
             }
@@ -694,26 +717,27 @@ const Index = () => {
             if (candle.time <= simTime) {
               const isLiveCandle = candle.time + iMs > Date.now() - 60000;
               const progress = Math.max(0, Math.min(1, (simTime - candle.time) / iMs));
-              const close = isLiveCandle ? candle.close : candle.open + (candle.close - candle.open) * progress;
+              const interpClose = isLiveCandle ? candle.close : candle.open + (candle.close - candle.open) * progress;
               const hlReveal = Math.min(1, progress * 1.5);
               const rawHigh = isLiveCandle ? candle.high : candle.open + (candle.high - candle.open) * hlReveal;
               const rawLow = isLiveCandle ? candle.low : candle.open + (candle.low - candle.open) * hlReveal;
+              // 撮合仍用「周期插值」的 high/low（行为完全不变）
+              const matchHigh = isLiveCandle ? candle.high : Math.max(candle.open, interpClose, rawHigh);
+              const matchLow = isLiveCandle ? candle.low : Math.min(candle.open, interpClose, rawLow);
+              // 显示价统一用「该时刻 1m 价」（priceMap，useBackgroundPrices 每秒更新），使各周期一致；
+              // 偏差过大（疑似切标的残留）或冷启动拉不到时，退回周期插值，不会更糟。
+              const livePx = priceMapRef.current[activeSymbolRef.current];
+              const r = livePx > 0 && interpClose > 0 ? livePx / interpClose : 0;
+              const close = r >= 0.2 && r <= 5 ? livePx : interpClose;
               api.updateData({
                 timestamp: candle.time,
                 open: candle.open,
-                high: isLiveCandle ? candle.high : Math.max(candle.open, close, rawHigh),
-                low: isLiveCandle ? candle.low : Math.min(candle.open, close, rawLow),
+                high: Math.max(matchHigh, close),
+                low: Math.min(matchLow, close),
                 close,
                 volume: candle.volume * progress,
               });
-              runConditionalMatchingForSymbol(
-                activeSymbolRef.current,
-                {
-                  high: isLiveCandle ? candle.high : Math.max(candle.open, close, rawHigh),
-                  low: isLiveCandle ? candle.low : Math.min(candle.open, close, rawLow),
-                },
-                simTime,
-              );
+              runConditionalMatchingForSymbol(activeSymbolRef.current, { high: matchHigh, low: matchLow }, simTime);
               latestChartPriceRef.current = close;
             }
           }
@@ -792,20 +816,19 @@ const Index = () => {
   }, [balance, positionsMap, priceMap, tradeHistory, activeCoinState.time, profile]);
 
   useEffect(() => {
-    if (visibleData.length === 0) return;
-    const refPrice = Number(latestChartPriceRef.current || 0);
-    const visPrice = Number(latestVisiblePrice || 0);
-    const ratio = refPrice > 0 && visPrice > 0 ? refPrice / visPrice : 1;
-    const isCrossSymbolPollution = ratio > 5 || ratio < 0.2;
-    const candidate = Number(refPrice > 0 && !isCrossSymbolPollution ? refPrice : visPrice);
-    if (!Number.isFinite(candidate) || candidate <= 0) return;
+    const canonicalPrice = Number(currentPrice || 0);
+    if (Number.isFinite(canonicalPrice) && canonicalPrice > 0) {
+      latestChartPriceRef.current = canonicalPrice;
+      return;
+    }
 
-    latestChartPriceRef.current = candidate;
-    setPriceMap((prev) => {
-      if (prev[activeSymbol] === candidate) return prev;
-      return { ...prev, [activeSymbol]: candidate };
-    });
-  }, [latestVisiblePrice, visibleData, activeSymbol]);
+    const visPrice = Number(latestVisiblePrice || 0);
+    if (Number.isFinite(visPrice) && visPrice > 0) {
+      // Local fallback only. Do not write interval-derived prices into priceMap,
+      // otherwise each timeframe overwrites the shared "latest price".
+      latestChartPriceRef.current = visPrice;
+    }
+  }, [latestVisiblePrice, currentPrice]);
 
   const prevVisibleLenRef = useRef(0);
 
