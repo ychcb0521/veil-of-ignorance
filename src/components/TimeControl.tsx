@@ -42,6 +42,8 @@ export function TimeControl({
   const ctx = useTradingContext();
   const [noEntryOpen, setNoEntryOpen] = useState(false);
   const [noEntrySimTime, setNoEntrySimTime] = useState<number>(Date.now());
+  const [visualSpeed, setVisualSpeed] = useState(speed);
+  const speedPointerDownRef = useRef<number | null>(null);
   const noEntrySymbol = activeSymbol || 'BTCUSDT';
 
   const openNoEntry = () => {
@@ -64,6 +66,7 @@ export function TimeControl({
   const [sortMode, setSortMode] = useState<'alpha' | 'time-desc' | 'time-asc'>('alpha');
 
   useEffect(() => { saveSignals(signals); }, [signals]);
+  useEffect(() => { setVisualSpeed(speed); }, [speed]);
 
   // 信号里出现过的月份（按 UTC+8 墙钟），倒序 + 每月条数，喂给「按月份定位」下拉。
   const monthOptions = useMemo(() => {
@@ -168,10 +171,24 @@ export function TimeControl({
     <div className="flex items-center gap-1">
       {SPEED_OPTIONS.map(s => (
         <button
+          type="button"
           key={s}
-          onClick={() => onSetSpeed(s)}
+          onPointerDown={(event) => {
+            if (event.button !== 0) return;
+            speedPointerDownRef.current = s;
+            setVisualSpeed(s);
+            onSetSpeed(s);
+          }}
+          onClick={() => {
+            if (speedPointerDownRef.current === s) {
+              speedPointerDownRef.current = null;
+              return;
+            }
+            setVisualSpeed(s);
+            onSetSpeed(s);
+          }}
           className={`px-2 py-1 rounded text-xs font-mono transition-all duration-100 ease-out active:scale-[0.95] ${
-            speed === s
+            visualSpeed === s
               ? 'bg-primary text-primary-foreground'
               : 'bg-secondary text-secondary-foreground hover:bg-accent'
           }`}

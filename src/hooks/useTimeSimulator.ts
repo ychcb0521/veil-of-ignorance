@@ -141,7 +141,11 @@ export function useTimeSimulator(initialState?: Partial<PersistedTimeSim>) {
 
   const setSpeed = useCallback((speed: number) => {
     setState(prev => {
-      if (prev.status !== 'playing' || !prev.realStartTime || !prev.historicalAnchorTime) return prev;
+      if (prev.status === 'paused') {
+        syncCore({ speed });
+        return { ...prev, speed };
+      }
+      if (prev.status !== 'playing' || !prev.realStartTime || prev.historicalAnchorTime == null) return prev;
       const now = Date.now();
       const currentSim = prev.historicalAnchorTime + (now - prev.realStartTime) * prev.speed;
       currentTimeRef.current = currentSim;

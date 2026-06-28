@@ -2,6 +2,7 @@ import { SymbolSelector } from '@/components/SymbolSelector';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import { Play, Pause, Clock } from 'lucide-react';
 import { formatUTC8 } from '@/lib/timeFormat';
+import { useEffect, useRef, useState } from 'react';
 
 interface Props {
   symbol: string;
@@ -23,6 +24,12 @@ export function MobileHeader({
   isRunning, currentSimulatedTime, speed, onStart, onStop, onSetSpeed,
 }: Props) {
   const formatSimTime = formatUTC8;
+  const [visualSpeed, setVisualSpeed] = useState(speed);
+  const speedPointerDownRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    setVisualSpeed(speed);
+  }, [speed]);
 
   return (
     <div className="border-b border-border bg-card">
@@ -46,9 +53,25 @@ export function MobileHeader({
             </button>
             <div className="flex items-center gap-0.5 shrink-0">
               {SPEED_OPTIONS.map(s => (
-                <button key={s} onClick={() => onSetSpeed(s)}
+                <button
+                  key={s}
+                  type="button"
+                  onPointerDown={(event) => {
+                    if (event.button !== 0) return;
+                    speedPointerDownRef.current = s;
+                    setVisualSpeed(s);
+                    onSetSpeed(s);
+                  }}
+                  onClick={() => {
+                    if (speedPointerDownRef.current === s) {
+                      speedPointerDownRef.current = null;
+                      return;
+                    }
+                    setVisualSpeed(s);
+                    onSetSpeed(s);
+                  }}
                   className={`px-1.5 py-0.5 rounded text-[10px] font-mono transition-colors ${
-                    speed === s ? 'bg-primary text-primary-foreground' : 'text-muted-foreground'
+                    visualSpeed === s ? 'bg-primary text-primary-foreground' : 'text-muted-foreground'
                   }`}
                 >
                   {s}x
