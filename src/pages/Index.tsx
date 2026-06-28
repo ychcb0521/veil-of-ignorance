@@ -271,7 +271,6 @@ const Index = () => {
   const latestChartPriceRef = useRef(currentPrice || 0);
   const activeDisplayPriceRef = useRef(activeDisplayPrice || currentPrice || 0);
   const renderedDisplayPriceRef = useRef(activeDisplayPrice || currentPrice || 0);
-  const displayCandleBoundsRef = useRef<{ timestamp: number; wallTime: number; high: number; low: number } | null>(null);
   const canonicalPriceSampleRef = useRef<{ symbol: string; simTime: number; wallTime: number } | null>(null);
   // Keep ref synced with currentPrice from context as a fallback
   useEffect(() => {
@@ -364,95 +363,42 @@ const Index = () => {
     });
   }, [ordersMap]);
 
-  const DISPLAY_PRICE_FLUSH_MS = 25;
-  const DISPLAY_PRICE_SMOOTHING_MS = 34;
+  const DISPLAY_PRICE_FLUSH_MS = 33;
+  const DISPLAY_PRICE_SMOOTHING_MS = 42;
   const DISPLAY_PRICE_SNAP_RATIO = 0.08;
   const REACT_FLUSH_MS = 250;
   const PERSIST_MS = 500;
   const CANONICAL_PRICE_MAX_SIM_AGE_MS = 90_000;
 
-  const flushDisplayPrice = useCallback(
-    (price: number, now: number) => {
-      if (!Number.isFinite(price) || price <= 0) return price;
-      const previous = activeDisplayPriceRef.current;
-      const base = Number.isFinite(previous) && previous > 0 ? previous : price;
-      const minStep = Math.max(1e-10, price * 1e-7);
-      const elapsed =
-        lastDisplayPriceFrameRef.current > 0
-          ? Math.max(0, Math.min(120, now - lastDisplayPriceFrameRef.current))
-          : DISPLAY_PRICE_FLUSH_MS;
-      lastDisplayPriceFrameRef.current = now;
+  const flushDisplayPrice = useCallback((price: number, now: number) => {
+    if (!Number.isFinite(price) || price <= 0) return price;
+    const previous = activeDisplayPriceRef.current;
+    const base = Number.isFinite(previous) && previous > 0 ? previous : price;
+    const minStep = Math.max(1e-10, price * 1e-7);
+    const elapsed =
+      lastDisplayPriceFrameRef.current > 0
+        ? Math.max(0, Math.min(120, now - lastDisplayPriceFrameRef.current))
+        : DISPLAY_PRICE_FLUSH_MS;
+    lastDisplayPriceFrameRef.current = now;
 
-      const ratioGap = Math.abs(price - base) / price;
-      const alpha = 1 - Math.exp(-elapsed / DISPLAY_PRICE_SMOOTHING_MS);
-      let next =
-        base <= 0 || ratioGap >= DISPLAY_PRICE_SNAP_RATIO
-          ? price
-          : base + (price - base) * Math.max(0.18, Math.min(0.72, alpha));
-      if (Math.abs(price - next) < minStep) next = price;
+    const ratioGap = Math.abs(price - base) / price;
+    const alpha = 1 - Math.exp(-elapsed / DISPLAY_PRICE_SMOOTHING_MS);
+    let next =
+      base <= 0 || ratioGap >= DISPLAY_PRICE_SNAP_RATIO
+        ? price
+        : base + (price - base) * Math.max(0.18, Math.min(0.72, alpha));
+    if (Math.abs(price - next) < minStep) next = price;
 
-      activeDisplayPriceRef.current = next;
-      const rendered = renderedDisplayPriceRef.current;
-      if (now - lastDisplayPriceFlushRef.current < DISPLAY_PRICE_FLUSH_MS && Math.abs(next - rendered) < minStep) {
-        return next;
-      }
-      lastDisplayPriceFlushRef.current = now;
-      renderedDisplayPriceRef.current = next;
-      setActiveDisplayPrice((prev) => (Math.abs(prev - next) < minStep ? prev : next));
+    activeDisplayPriceRef.current = next;
+    const rendered = renderedDisplayPriceRef.current;
+    if (now - lastDisplayPriceFlushRef.current < DISPLAY_PRICE_FLUSH_MS && Math.abs(next - rendered) < minStep) {
       return next;
-    },
-    [DISPLAY_PRICE_FLUSH_MS, DISPLAY_PRICE_SMOOTHING_MS, DISPLAY_PRICE_SNAP_RATIO],
-  );
-
-  const getDisplayCandleBounds = useCallback(
-    (timestamp: number, open: number, targetHigh: number, targetLow: number, displayClose: number, now: number) => {
-      const fallbackHigh = Math.max(open, displayClose, targetHigh);
-      const fallbackLow = Math.min(open, displayClose, targetLow);
-      if (!Number.isFinite(timestamp) || !Number.isFinite(open) || !Number.isFinite(displayClose)) {
-        return { high: fallbackHigh, low: fallbackLow };
-      }
-
-      const previous = displayCandleBoundsRef.current;
-      const sameCandle = previous?.timestamp === timestamp;
-      const targetVisibleHigh = Math.max(open, displayClose, targetHigh);
-      const targetVisibleLow = Math.min(open, displayClose, targetLow);
-
-      if (!sameCandle) {
-        const baseHigh = Math.max(open, displayClose);
-        const baseLow = Math.min(open, displayClose);
-        const initialHigh = baseHigh + (targetVisibleHigh - baseHigh) * 0.28;
-        const initialLow = baseLow + (targetVisibleLow - baseLow) * 0.28;
-        displayCandleBoundsRef.current = {
-          timestamp,
-          wallTime: now,
-          high: initialHigh,
-          low: initialLow,
-        };
-        return { high: initialHigh, low: initialLow };
-      }
-
-      const elapsed = Math.max(0, Math.min(120, now - previous.wallTime));
-      const alpha = 1 - Math.exp(-elapsed / DISPLAY_PRICE_SMOOTHING_MS);
-      const strength = Math.max(0.3, Math.min(0.9, alpha));
-      const highBase = Math.max(previous.high, open, displayClose);
-      const lowBase = Math.min(previous.low, open, displayClose);
-      const minStep = Math.max(1e-10, displayClose * 1e-7);
-
-      let high = highBase + (targetVisibleHigh - highBase) * strength;
-      let low = lowBase + (targetVisibleLow - lowBase) * strength;
-      if (Math.abs(targetVisibleHigh - high) < minStep) high = targetVisibleHigh;
-      if (Math.abs(targetVisibleLow - low) < minStep) low = targetVisibleLow;
-
-      displayCandleBoundsRef.current = {
-        timestamp,
-        wallTime: now,
-        high,
-        low,
-      };
-      return { high: Math.max(high, open, displayClose), low: Math.min(low, open, displayClose) };
-    },
-    [DISPLAY_PRICE_SMOOTHING_MS],
-  );
+    }
+    lastDisplayPriceFlushRef.current = now;
+    renderedDisplayPriceRef.current = next;
+    setActiveDisplayPrice((prev) => (Math.abs(prev - next) < minStep ? prev : next));
+    return next;
+  }, []);
 
   const createTriggeredConditionalPosition = useCallback(
     (symbol: string, order: PendingOrder, triggerPrice: number, openTime: number) => {
@@ -755,19 +701,11 @@ const Index = () => {
                 const r = canonicalFresh && livePx > 0 && interpClose > 0 ? livePx / interpClose : 0;
                 const close = r >= 0.2 && r <= 5 ? livePx : interpClose;
                 const displayClose = flushDisplayPrice(close, now);
-                const displayBounds = getDisplayCandleBounds(
-                  candle.time,
-                  candle.open,
-                  matchHigh,
-                  matchLow,
-                  displayClose,
-                  now,
-                );
                 api.updateData({
                   timestamp: candle.time,
                   open: candle.open,
-                  high: displayBounds.high,
-                  low: displayBounds.low,
+                  high: Math.max(matchHigh, displayClose),
+                  low: Math.min(matchLow, displayClose),
                   close: displayClose,
                   volume: candle.volume * progress,
                 });
@@ -867,19 +805,11 @@ const Index = () => {
               const r = canonicalFresh && livePx > 0 && interpClose > 0 ? livePx / interpClose : 0;
               const close = r >= 0.2 && r <= 5 ? livePx : interpClose;
               const displayClose = flushDisplayPrice(close, now);
-              const displayBounds = getDisplayCandleBounds(
-                candle.time,
-                candle.open,
-                matchHigh,
-                matchLow,
-                displayClose,
-                now,
-              );
               api.updateData({
                 timestamp: candle.time,
                 open: candle.open,
-                high: displayBounds.high,
-                low: displayBounds.low,
+                high: Math.max(matchHigh, displayClose),
+                low: Math.min(matchLow, displayClose),
                 close: displayClose,
                 volume: candle.volume * progress,
               });
@@ -905,7 +835,7 @@ const Index = () => {
 
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
-  }, [shouldRunEngine, iMs, runConditionalMatchingForSymbol, flushDisplayPrice, getDisplayCandleBounds]);
+  }, [shouldRunEngine, iMs, runConditionalMatchingForSymbol, flushDisplayPrice]);
 
   // Build asset state for AssetOverview
   const assetState = useMemo<AssetState>(() => {
@@ -968,7 +898,6 @@ const Index = () => {
       if (activeCoinState.status !== "playing") {
         activeDisplayPriceRef.current = canonicalPrice;
         renderedDisplayPriceRef.current = canonicalPrice;
-        displayCandleBoundsRef.current = null;
         lastDisplayPriceFrameRef.current = 0;
         setActiveDisplayPrice(canonicalPrice);
       }
@@ -983,7 +912,6 @@ const Index = () => {
       if (activeCoinState.status !== "playing") {
         activeDisplayPriceRef.current = visPrice;
         renderedDisplayPriceRef.current = visPrice;
-        displayCandleBoundsRef.current = null;
         lastDisplayPriceFrameRef.current = 0;
         setActiveDisplayPrice(visPrice);
       }
@@ -995,7 +923,6 @@ const Index = () => {
     if (resetPrice > 0) {
       activeDisplayPriceRef.current = resetPrice;
       renderedDisplayPriceRef.current = resetPrice;
-      displayCandleBoundsRef.current = null;
       lastDisplayPriceFrameRef.current = 0;
       setActiveDisplayPrice(resetPrice);
     }
