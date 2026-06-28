@@ -722,8 +722,20 @@ const Index = () => {
           setCoinTimelines((prev) => {
             const next = { ...prev };
             for (const [sym, ct] of Object.entries(updates)) {
+              const latest = prev[sym];
+              if (
+                latest &&
+                (latest.status !== ct.status ||
+                  latest.speed !== ct.speed ||
+                  latest.realStartTime !== ct.realStartTime ||
+                  latest.historicalAnchorTime !== ct.historicalAnchorTime)
+              ) {
+                next[sym] = latest;
+                continue;
+              }
               next[sym] = ct;
             }
+            coinTimelinesRef.current = next;
             return next;
           });
           // Sync sim React state for matching/liquidation engines (using active coin's time)
@@ -1290,8 +1302,8 @@ const Index = () => {
         const now = Date.now();
         setCoinTimelines((prev) => {
           const ct = prev[activeSymbol];
-          if (!ct || ct.status !== "playing")
-            return {
+          if (!ct || ct.status !== "playing") {
+            const next = {
               ...prev,
               [activeSymbol]: {
                 ...(ct || {
@@ -1304,14 +1316,19 @@ const Index = () => {
                 speed,
               },
             };
+            coinTimelinesRef.current = next;
+            return next;
+          }
           const currentTime =
             ct.historicalAnchorTime != null && ct.realStartTime
               ? ct.historicalAnchorTime + (now - ct.realStartTime) * ct.speed
               : ct.time;
-          return {
+          const next = {
             ...prev,
             [activeSymbol]: { ...ct, speed, time: currentTime, historicalAnchorTime: currentTime, realStartTime: now },
           };
+          coinTimelinesRef.current = next;
+          return next;
         });
       } else {
         sim.setSpeed(speed);
