@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { CandlestickChart } from '@/components/CandlestickChart';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import type { KlineData } from '@/hooks/useBinanceData';
-import { layoutAnalysisFloatingLabels } from '@/lib/analysisFloatingLabels';
+import { FLOATING_LABEL_HEIGHT, layoutAnalysisFloatingLabels } from '@/lib/analysisFloatingLabels';
 
 const mocks = vi.hoisted(() => {
   const chart = {
@@ -25,6 +25,10 @@ const mocks = vi.hoisted(() => {
     scrollToRealTime: vi.fn(),
     scrollToTimestamp: vi.fn(),
     convertFromPixel: vi.fn(),
+    convertToPixel: vi.fn((point: any) => {
+      const value = Array.isArray(point) ? point[0] : point;
+      return { x: typeof value?.timestamp === 'number' ? value.timestamp / 10 : 0, y: 0 };
+    }),
   };
 
   return {
@@ -41,6 +45,11 @@ vi.mock('klinecharts', () => ({
   registerIndicator: mocks.registerIndicator,
   CandleType: { CandleSolid: 'candle_solid' },
   LineType: { Dashed: 'dashed', Solid: 'solid' },
+  ActionType: {
+    OnScroll: 'onScroll',
+    OnZoom: 'onZoom',
+    OnVisibleRangeChange: 'onVisibleRangeChange',
+  },
   TooltipShowRule: { FollowCross: 'follow_cross' },
   TooltipShowType: { Standard: 'standard' },
 }));
@@ -54,7 +63,7 @@ const labelsOverlap = (
   a: ReturnType<typeof layoutAnalysisFloatingLabels>[number],
   b: ReturnType<typeof layoutAnalysisFloatingLabels>[number],
 ) => {
-  const height = 18;
+  const height = FLOATING_LABEL_HEIGHT;
   return !(a.left + a.width <= b.left || b.left + b.width <= a.left || a.top + height <= b.top || b.top + height <= a.top);
 };
 
@@ -72,6 +81,10 @@ function candle(time: number, close = 1): KlineData {
 describe('CandlestickChart analysis annotations', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.chart.convertToPixel.mockImplementation((point: any) => {
+      const value = Array.isArray(point) ? point[0] : point;
+      return { x: typeof value?.timestamp === 'number' ? value.timestamp / 10 : 0, y: 0 };
+    });
     vi.stubGlobal('ResizeObserver', ResizeObserverMock);
   });
 
@@ -143,6 +156,77 @@ describe('CandlestickChart analysis annotations', () => {
         },
       },
     });
+    expect(mocks.chart.subscribeAction).toHaveBeenCalledWith('onScroll', expect.any(Function));
+    expect(mocks.chart.subscribeAction).toHaveBeenCalledWith('onZoom', expect.any(Function));
+    expect(mocks.chart.subscribeAction).toHaveBeenCalledWith('onVisibleRangeChange', expect.any(Function));
+  });
+
+  it('图表滚动或缩放后，浮层标注会按当前 K 线坐标重新定位', async () => {
+    render(
+      <CandlestickChart
+        data={[candle(1000, 1), candle(2000, 1.2)]}
+        symbol="BTCUSDT"
+        rawSymbol="BTCUSDT"
+        analysisMode
+        analysisAnnotations={{
+          verticalLines: [
+            {
+              time: 1000,
+              color: '#3B82F6',
+              width: 0.85,
+              dashed: true,
+              label: '主力开始',
+            },
+          ],
+        }}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(document.querySelector('[data-analysis-label]')).not.toBeNull();
+    });
+    const before = (document.querySelector('[data-analysis-label]') as HTMLElement).style.left;
+    const scrollCallback = mocks.chart.subscribeAction.mock.calls.find(([type]) => type === 'onScroll')?.[1];
+    expect(scrollCallback).toEqual(expect.any(Function));
+
+    mocks.chart.convertToPixel.mockImplementation(() => ({ x: 260, y: 0 }));
+    scrollCallback?.();
+
+    await waitFor(() => {
+      expect((document.querySelector('[data-analysis-label]') as HTMLElement).style.left).not.toEqual(before);
+    });
+  });
+
+  it('委托空线段结束点不再额外显示 × 浮层标注', async () => {
+    render(
+      <CandlestickChart
+        data={[candle(1000, 1), candle(2000, 1.2)]}
+        symbol="BTCUSDT"
+        rawSymbol="BTCUSDT"
+        analysisMode
+        analysisAnnotations={{
+          timeBoundPriceLines: [
+            {
+              startTime: 1000,
+              endTime: 2000,
+              price: 1.1,
+              color: '#F0B90B',
+              title: '委托空',
+              dashed: true,
+              endMarker: 'x',
+            },
+          ],
+        }}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(document.querySelector('[data-analysis-label]')).not.toBeNull();
+    });
+
+    const labelTexts = Array.from(document.querySelectorAll('[data-analysis-label]')).map((label) => label.textContent);
+    expect(labelTexts).toContain('委托空');
+    expect(labelTexts).not.toContain('×');
   });
 
   it('为反事实手动 Legs 创建可拖动时间竖线，并在拖动后回传新时间', async () => {
@@ -266,6 +350,8 @@ describe('layoutAnalysisFloatingLabels', () => {
 
     expect(labels).toHaveLength(5);
     expect(labels.map(label => label.text)).toEqual(['主力开始', 'TP', 'M 全平', '委托空', '×']);
+    expect(new Set(labels.map(label => label.left))).toHaveLength(1);
+    expect(new Set(labels.map(label => label.width))).toHaveLength(1);
 
     for (let i = 0; i < labels.length; i += 1) {
       for (let j = i + 1; j < labels.length; j += 1) {

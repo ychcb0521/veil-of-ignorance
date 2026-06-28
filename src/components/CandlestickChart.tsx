@@ -9,6 +9,7 @@ import {
   dispose,
   CandleType,
   LineType,
+  ActionType,
   TooltipShowRule,
   TooltipShowType,
   type Chart,
@@ -937,7 +938,35 @@ function CandlestickChartComponent({
         time: clampTime(time),
         text,
         color,
-        x: labelXForTime(time),
+      });
+    };
+    let floatingLabelFrame: number | null = null;
+    const runFloatingLabelLayout = () => {
+      const chartSize = chart.getSize?.();
+      const width = analysisViewportWidth || containerRef.current?.clientWidth || chartSize?.width || 0;
+      const projectedCandidates = floatingLabelCandidates.map((candidate) => ({
+        ...candidate,
+        x: labelXForTime(candidate.time),
+      }));
+      setAnalysisFloatingLabels(
+        layoutAnalysisFloatingLabels(projectedCandidates, {
+          minTime,
+          maxTime,
+          width,
+        }),
+      );
+    };
+    const scheduleFloatingLabelLayout = () => {
+      if (typeof window === "undefined" || typeof window.requestAnimationFrame !== "function") {
+        runFloatingLabelLayout();
+        return;
+      }
+      if (floatingLabelFrame != null) {
+        window.cancelAnimationFrame(floatingLabelFrame);
+      }
+      floatingLabelFrame = window.requestAnimationFrame(() => {
+        floatingLabelFrame = null;
+        runFloatingLabelLayout();
       });
     };
 
@@ -993,9 +1022,6 @@ function CandlestickChartComponent({
         addFloatingLabel(`time-price-${startTime}-${line.price}-${line.title}`, startTime, line.title, line.color);
       }
 
-      if (line.endMarker === "x") {
-        addFloatingLabel(`time-price-end-${endTime}-${line.price}`, endTime, "×", line.color);
-      }
     }
 
     for (const vertical of analysisAnnotations.verticalLines ?? []) {
@@ -1099,14 +1125,25 @@ function CandlestickChartComponent({
         },
       } as OverlayCreate);
     }
-    setAnalysisFloatingLabels(
-      layoutAnalysisFloatingLabels(floatingLabelCandidates, {
-        minTime,
-        maxTime,
-        width: analysisViewportWidth || containerRef.current?.clientWidth || 0,
-      }),
-    );
+    scheduleFloatingLabelLayout();
+    const viewportActions = [ActionType.OnScroll, ActionType.OnZoom, ActionType.OnVisibleRangeChange];
+    for (const action of viewportActions) {
+      chart.subscribeAction(action, scheduleFloatingLabelLayout);
+    }
     analysisOverlayIdsRef.current = nextOverlayIds;
+
+    return () => {
+      for (const action of viewportActions) {
+        try {
+          chart.unsubscribeAction(action, scheduleFloatingLabelLayout);
+        } catch {
+          // The chart can be disposed before React tears this effect down.
+        }
+      }
+      if (floatingLabelFrame != null && typeof window !== "undefined" && typeof window.cancelAnimationFrame === "function") {
+        window.cancelAnimationFrame(floatingLabelFrame);
+      }
+    };
   }, [analysisAnnotations, data, pricePrecision, analysisViewportWidth]);
 
   // Campaign What-if: draggable horizontal price lines and vertical timing lines.
@@ -1435,7 +1472,7 @@ function CandlestickChartComponent({
               <div
                 key={label.id}
                 data-analysis-label={label.id}
-                className="absolute flex items-center justify-center rounded-[3px] border font-bold"
+                className="absolute flex items-center justify-center rounded-[3px] border font-semibold"
                 style={{
                   left: label.left,
                   top: label.top,
@@ -1443,11 +1480,12 @@ function CandlestickChartComponent({
                   height: FLOATING_LABEL_HEIGHT,
                   color: label.color,
                   borderColor: label.color,
-                  backgroundColor: theme === "light" ? "rgba(255, 255, 255, 0.86)" : "rgba(11, 14, 17, 0.72)",
-                  boxShadow: theme === "light" ? "0 1px 3px rgba(15, 23, 42, 0.10)" : "0 1px 3px rgba(0, 0, 0, 0.28)",
+                  backgroundColor: theme === "light" ? "rgba(255, 255, 255, 0.34)" : "rgba(11, 14, 17, 0.28)",
+                  boxShadow: theme === "light" ? "0 1px 2px rgba(15, 23, 42, 0.04)" : "0 1px 2px rgba(0, 0, 0, 0.12)",
                   fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
-                  fontSize: 10,
-                  lineHeight: "14px",
+                  fontSize: 8,
+                  lineHeight: "10px",
+                  opacity: 0.82,
                   whiteSpace: "nowrap",
                 }}
               >
