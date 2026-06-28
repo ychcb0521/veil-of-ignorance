@@ -3,6 +3,7 @@ export interface AnalysisFloatingLabelCandidate {
   time: number;
   text: string;
   color: string;
+  emphasis?: "main-add";
   x?: number;
 }
 
@@ -14,16 +15,16 @@ export interface AnalysisFloatingLabel extends AnalysisFloatingLabelCandidate {
 }
 
 const FLOATING_LABEL_TOP = 42;
-export const FLOATING_LABEL_HEIGHT = 14;
+export const FLOATING_LABEL_HEIGHT = 12;
 const FLOATING_LABEL_LANE_GAP = 1;
 const FLOATING_LABEL_X_GAP = 4;
 
 const estimateAnalysisLabelWidth = (text: string) => {
   const visualUnits = Array.from(text).reduce((sum, char) => {
     const code = char.codePointAt(0) ?? 0;
-    return sum + (code > 255 ? 1.45 : 1);
+    return sum + (code > 255 ? 1.35 : 1);
   }, 0);
-  return Math.ceil(Math.min(190, Math.max(18, visualUnits * 5.6 + 12)));
+  return Math.ceil(Math.min(170, Math.max(16, visualUnits * 5 + 10)));
 };
 
 const clampNumber = (value: number, min: number, max: number) => {
@@ -86,6 +87,7 @@ export function layoutAnalysisFloatingLabels(
         time: label.time,
         text: label.text,
         color: label.color,
+        emphasis: label.emphasis,
         left: group.left,
         width: group.width,
         lane,

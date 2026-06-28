@@ -197,7 +197,7 @@ describe('CandlestickChart analysis annotations', () => {
     });
   });
 
-  it('委托空线段结束点不再额外显示 × 浮层标注', async () => {
+  it('委托空撤单结束点显示 ×，并带对应撤单竖线', async () => {
     render(
       <CandlestickChart
         data={[candle(1000, 1), candle(2000, 1.2)]}
@@ -226,7 +226,138 @@ describe('CandlestickChart analysis annotations', () => {
 
     const labelTexts = Array.from(document.querySelectorAll('[data-analysis-label]')).map((label) => label.textContent);
     expect(labelTexts).toContain('委托空');
-    expect(labelTexts).not.toContain('×');
+    expect(labelTexts).toContain('×');
+
+    const overlays = mocks.chart.createOverlay.mock.calls.map(([overlay]) => overlay);
+    const startVertical = overlays.find(
+      overlay => overlay.name === 'verticalStraightLine' && overlay.points?.[0]?.timestamp === 1000,
+    );
+    const cancelVertical = overlays.find(
+      overlay => overlay.name === 'verticalStraightLine' && overlay.points?.[0]?.timestamp === 2000,
+    );
+    expect(startVertical).toMatchObject({
+      points: [{ timestamp: 1000, value: 1.1 }],
+      styles: {
+        line: {
+          style: 'dashed',
+          color: '#F0B90B66',
+          size: 0.75,
+        },
+      },
+    });
+    expect(cancelVertical).toMatchObject({
+      points: [{ timestamp: 2000, value: 1.1 }],
+      styles: {
+        line: {
+          style: 'dashed',
+          color: '#F0B90B88',
+          size: 0.75,
+        },
+      },
+    });
+  });
+
+  it('同一时间重复的委托空标注和竖线会合并为一个', async () => {
+    render(
+      <CandlestickChart
+        data={[candle(1000, 1), candle(2000, 1.2)]}
+        symbol="BTCUSDT"
+        rawSymbol="BTCUSDT"
+        analysisMode
+        analysisAnnotations={{
+          timeBoundPriceLines: [
+            {
+              startTime: 1000,
+              endTime: 2000,
+              price: 1.1,
+              color: '#F0B90B',
+              title: '委托空',
+              dashed: true,
+            },
+            {
+              startTime: 1000,
+              endTime: 2000,
+              price: 1.15,
+              color: '#F0B90B',
+              title: '委托空',
+              dashed: true,
+            },
+          ],
+        }}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(document.querySelector('[data-analysis-label]')).not.toBeNull();
+    });
+
+    const labelTexts = Array.from(document.querySelectorAll('[data-analysis-label]')).map((label) => label.textContent);
+    expect(labelTexts.filter(text => text === '委托空')).toHaveLength(1);
+
+    const overlays = mocks.chart.createOverlay.mock.calls.map(([overlay]) => overlay);
+    const reverseOrderVerticals = overlays.filter(
+      overlay => overlay.name === 'verticalStraightLine' && overlay.styles?.line?.color === '#F0B90B66',
+    );
+    expect(reverseOrderVerticals).toHaveLength(1);
+  });
+
+  it('加仓标注颜色更重且加粗，普通标注保持更小字号', async () => {
+    render(
+      <CandlestickChart
+        data={[candle(1000, 1), candle(2000, 1.2)]}
+        symbol="BTCUSDT"
+        rawSymbol="BTCUSDT"
+        analysisMode
+        analysisAnnotations={{
+          verticalLines: [
+            {
+              time: 1000,
+              color: '#0ECB81',
+              label: '加仓1·开仓',
+              dashed: false,
+            },
+          ],
+          markers: [
+            {
+              time: 1000,
+              price: 1,
+              color: '#0ECB81',
+              shape: 'triangle-up',
+              label: 'A1',
+            },
+            {
+              time: 2000,
+              price: 1.2,
+              color: '#F0B90B',
+              shape: 'square',
+              label: 'TP',
+            },
+          ],
+        }}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(Array.from(document.querySelectorAll('[data-analysis-label]')).some(label => label.textContent?.includes('A1'))).toBe(true);
+    });
+
+    const labels = Array.from(document.querySelectorAll('[data-analysis-label]')) as HTMLElement[];
+    const addLabel = labels.find(label => label.textContent?.includes('A1'));
+    const normalLabel = labels.find(label => label.textContent?.includes('TP'));
+    const labelTexts = labels.map(label => label.textContent);
+    expect(labelTexts).not.toContain('加仓1·开仓');
+    expect(addLabel?.style.fontWeight).toBe('800');
+    expect(addLabel?.style.fontSize).toBe('8px');
+    expect(normalLabel?.style.fontSize).toBe('7px');
+
+    const overlays = mocks.chart.createOverlay.mock.calls.map(([overlay]) => overlay);
+    const addMarkerOverlay = overlays.find(
+      overlay => overlay.name === 'simpleAnnotation' && overlay.points?.[0]?.timestamp === 1000,
+    );
+    expect(addMarkerOverlay?.styles?.text).toMatchObject({
+      size: 10,
+      backgroundColor: '#008F5A',
+    });
   });
 
   it('为反事实手动 Legs 创建可拖动时间竖线，并在拖动后回传新时间', async () => {

@@ -79,6 +79,19 @@ const OVERLAY_INDICATOR_IDS = new Set([
   "VWAP",
 ]);
 
+const MAIN_ADD_MARKER_PATTERN = /^A\d+$/;
+
+const isMainAddLabel = (label?: string) => MAIN_ADD_MARKER_PATTERN.test(label?.trim() ?? "");
+
+const strengthenAnalysisColor = (color: string) => {
+  const normalized = color.trim();
+  if (normalized.toUpperCase() === "#0ECB81") return "#008F5A";
+  if (normalized.toUpperCase() === "#2B80FF") return "#005BD6";
+  const rgba = normalized.match(/^rgba\((\d+),\s*(\d+),\s*(\d+),\s*[\d.]+\)$/i);
+  if (rgba) return `rgba(${rgba[1]}, ${rgba[2]}, ${rgba[3]}, 0.92)`;
+  return color;
+};
+
 // Overlay tool name mapping for klinecharts built-in overlays
 const OVERLAY_MAP: Record<string, string> = {
   TrendLine: "segment",
@@ -919,6 +932,14 @@ function CandlestickChartComponent({
     const lastValue = newest.close;
     const formatPrice = (value: number) => value.toFixed(pricePrecision);
     const clampTime = (time: number) => Math.min(Math.max(time, minTime), maxTime);
+    const visibleMarkerCandidates = (analysisAnnotations.markers ?? []).filter(
+      (m) => Number.isFinite(m.price) && m.time >= minTime && m.time <= maxTime,
+    );
+    const visibleMarkerLabelTimes = new Set(
+      visibleMarkerCandidates
+        .filter((marker) => !!marker.label)
+        .map((marker) => marker.time),
+    );
     const labelXForTime = (time: number) => {
       try {
         const coordinate = chart.convertToPixel(
@@ -931,13 +952,26 @@ function CandlestickChartComponent({
         return undefined;
       }
     };
-    const addFloatingLabel = (id: string, time: number, text: string | undefined, color: string) => {
+    const floatingLabelKeys = new Set<string>();
+    const addFloatingLabel = (
+      id: string,
+      time: number,
+      text: string | undefined,
+      color: string,
+      emphasis?: AnalysisFloatingLabelCandidate["emphasis"],
+    ) => {
       if (!text || !Number.isFinite(time)) return;
+      const labelTime = clampTime(time);
+      const normalizedText = text.trim();
+      const labelKey = `${Math.round(labelTime / 1000)}:${normalizedText}:${emphasis ?? ""}`;
+      if (floatingLabelKeys.has(labelKey)) return;
+      floatingLabelKeys.add(labelKey);
       floatingLabelCandidates.push({
         id: `${floatingLabelCandidates.length}-${id}`,
-        time: clampTime(time),
-        text,
+        time: labelTime,
+        text: normalizedText,
         color,
+        emphasis,
       });
     };
     let floatingLabelFrame: number | null = null;
@@ -970,6 +1004,7 @@ function CandlestickChartComponent({
       });
     };
 
+    const timePriceEventVerticalKeys = new Set<string>();
     for (const line of analysisAnnotations.priceLines ?? []) {
       if (!Number.isFinite(line.price)) continue;
       createAnalysisOverlay("price", {
@@ -1018,6 +1053,47 @@ function CandlestickChartComponent({
         },
       } as OverlayCreate);
 
+      if (line.title === "委托空") {
+        const startVerticalKey = `${line.title}:${Math.round(startTime / 1000)}`;
+        if (!timePriceEventVerticalKeys.has(startVerticalKey)) {
+          timePriceEventVerticalKeys.add(startVerticalKey);
+          createAnalysisOverlay("time-price-start", {
+            name: "verticalStraightLine",
+            points: [{ timestamp: startTime, value: line.price }],
+            lock: true,
+            styles: {
+              line: {
+                style: LineType.Dashed,
+                dashedValue: [2, 3],
+                size: 0.75,
+                color: `${line.color}66`,
+              },
+            },
+          } as OverlayCreate);
+        }
+
+        if (line.endMarker === "x") {
+          const cancelVerticalKey = `${line.title}:cancel:${Math.round(endTime / 1000)}`;
+          if (!timePriceEventVerticalKeys.has(cancelVerticalKey)) {
+            timePriceEventVerticalKeys.add(cancelVerticalKey);
+            createAnalysisOverlay("time-price-cancel", {
+              name: "verticalStraightLine",
+              points: [{ timestamp: endTime, value: line.price }],
+              lock: true,
+              styles: {
+                line: {
+                  style: LineType.Dashed,
+                  dashedValue: [2, 3],
+                  size: 0.75,
+                  color: `${line.color}88`,
+                },
+              },
+            } as OverlayCreate);
+          }
+          addFloatingLabel(`time-price-cancel-${endTime}-${line.price}`, endTime, "×", line.color);
+        }
+      }
+
       if (line.title) {
         addFloatingLabel(`time-price-${startTime}-${line.price}-${line.title}`, startTime, line.title, line.color);
       }
@@ -1042,21 +1118,20 @@ function CandlestickChartComponent({
         },
       } as OverlayCreate);
 
-      if (vertical.label) {
+      if (vertical.label && !visibleMarkerLabelTimes.has(vertical.time)) {
         addFloatingLabel(
           `vertical-${verticalTime}-${vertical.label}`,
           verticalTime,
           vertical.label,
           vertical.labelColor ?? vertical.color,
+          vertical.label.includes("加仓") ? "main-add" : undefined,
         );
       }
     }
 
     // Same-time event labels are laid out in a fixed pixel band below; keep the
     // tiny glyphs on price only as anchors so vertical zoom cannot crush labels.
-    const visibleMarkers = (analysisAnnotations.markers ?? []).filter(
-      (m) => Number.isFinite(m.price) && m.time >= minTime && m.time <= maxTime,
-    );
+    const visibleMarkers = visibleMarkerCandidates;
     let markerLaneGap = 0;
     if (visibleMarkers.length > 0 && data.length > 0) {
       let lo = Infinity;
@@ -1096,12 +1171,15 @@ function CandlestickChartComponent({
         marker.shape === "triangle-down" ? "▼" :
         marker.shape === "square" ? "■" :
         "●";
+      const isMainAddMarker = isMainAddLabel(marker.label);
+      const markerColor = isMainAddMarker ? strengthenAnalysisColor(marker.color) : marker.color;
 
       addFloatingLabel(
         `marker-${marker.time}-${marker.price}-${marker.label ?? glyph}`,
         marker.time,
         marker.label ? `${glyph} ${marker.label}` : glyph,
-        marker.color,
+        markerColor,
+        isMainAddMarker ? "main-add" : undefined,
       );
 
       createAnalysisOverlay("marker", {
@@ -1112,16 +1190,16 @@ function CandlestickChartComponent({
         styles: {
           text: {
             color: "#FFFFFF",
-            size: 9,
-            borderColor: `${marker.color}50`,
-            backgroundColor: marker.color,
+            size: isMainAddMarker ? 10 : 8,
+            borderColor: `${markerColor}70`,
+            backgroundColor: markerColor,
             borderRadius: 2,
             paddingLeft: 2,
             paddingRight: 2,
             paddingTop: 1,
             paddingBottom: 1,
           },
-          point: { color: marker.color },
+          point: { color: markerColor },
         },
       } as OverlayCreate);
     }
@@ -1468,30 +1546,39 @@ function CandlestickChartComponent({
             className="pointer-events-none absolute inset-y-0 right-0 z-[8] overflow-visible"
             style={{ left: analysisMode ? 0 : 34 }}
           >
-            {analysisFloatingLabels.map((label) => (
-              <div
-                key={label.id}
-                data-analysis-label={label.id}
-                className="absolute flex items-center justify-center rounded-[3px] border font-semibold"
-                style={{
-                  left: label.left,
-                  top: label.top,
-                  width: label.width,
-                  height: FLOATING_LABEL_HEIGHT,
-                  color: label.color,
-                  borderColor: label.color,
-                  backgroundColor: theme === "light" ? "rgba(255, 255, 255, 0.34)" : "rgba(11, 14, 17, 0.28)",
-                  boxShadow: theme === "light" ? "0 1px 2px rgba(15, 23, 42, 0.04)" : "0 1px 2px rgba(0, 0, 0, 0.12)",
-                  fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
-                  fontSize: 8,
-                  lineHeight: "10px",
-                  opacity: 0.82,
-                  whiteSpace: "nowrap",
-                }}
-              >
-                {label.text}
-              </div>
-            ))}
+            {analysisFloatingLabels.map((label) => {
+              const emphasized = label.emphasis === "main-add";
+              const labelColor = emphasized ? strengthenAnalysisColor(label.color) : label.color;
+              return (
+                <div
+                  key={label.id}
+                  data-analysis-label={label.id}
+                  className="absolute flex items-center justify-center rounded-[3px] border"
+                  style={{
+                    left: label.left,
+                    top: label.top,
+                    width: label.width,
+                    height: FLOATING_LABEL_HEIGHT,
+                    color: labelColor,
+                    borderColor: labelColor,
+                    backgroundColor: theme === "light"
+                      ? emphasized ? "rgba(255, 255, 255, 0.46)" : "rgba(255, 255, 255, 0.28)"
+                      : emphasized ? "rgba(11, 14, 17, 0.36)" : "rgba(11, 14, 17, 0.22)",
+                    boxShadow: emphasized
+                      ? (theme === "light" ? "0 1px 2px rgba(15, 23, 42, 0.08)" : "0 1px 2px rgba(0, 0, 0, 0.18)")
+                      : "none",
+                    fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
+                    fontSize: emphasized ? 8 : 7,
+                    fontWeight: emphasized ? 800 : 600,
+                    lineHeight: emphasized ? "10px" : "9px",
+                    opacity: emphasized ? 0.96 : 0.76,
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  {label.text}
+                </div>
+              );
+            })}
           </div>
         )}
 
