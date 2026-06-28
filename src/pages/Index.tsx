@@ -231,9 +231,17 @@ const Index = () => {
 
   const visibleData = useMemo(() => getVisibleData(effectiveSimTime, iMs), [getVisibleData, effectiveSimTime, iMs]);
 
+  const [activeDisplayPrice, setActiveDisplayPrice] = useState(() => currentPrice || 0);
+  const displayCurrentPrice = activeDisplayPrice > 0 ? activeDisplayPrice : currentPrice;
+  const displayPriceMap = useMemo(() => {
+    if (!displayCurrentPrice || displayCurrentPrice <= 0) return priceMap;
+    if (priceMap[activeSymbol] === displayCurrentPrice) return priceMap;
+    return { ...priceMap, [activeSymbol]: displayCurrentPrice };
+  }, [activeSymbol, displayCurrentPrice, priceMap]);
+
   const displayData = useMemo(
-    () => applyCurrentPriceToVisibleData(visibleData, currentPrice),
-    [visibleData, currentPrice],
+    () => applyCurrentPriceToVisibleData(visibleData, displayCurrentPrice),
+    [visibleData, displayCurrentPrice],
   );
 
   const latestVisiblePrice = useMemo(() => {
@@ -254,22 +262,33 @@ const Index = () => {
   const clockRef = useRef<HTMLSpanElement>(null);
 
   const lastReactFlushRef = useRef(0);
+  const lastDisplayPriceFrameRef = useRef(0);
+  const lastDisplayPriceFlushRef = useRef(0);
   const lastPersistRef = useRef(0);
   const timeModeRef = useRef(timeMode);
   const activeSymbolRef = useRef(activeSymbol);
   const coinTimelinesRef = useRef(coinTimelines);
   const latestChartPriceRef = useRef(currentPrice || 0);
+  const activeDisplayPriceRef = useRef(activeDisplayPrice || currentPrice || 0);
+  const renderedDisplayPriceRef = useRef(activeDisplayPrice || currentPrice || 0);
+  const canonicalPriceSampleRef = useRef<{ symbol: string; simTime: number; wallTime: number } | null>(null);
   // Keep ref synced with currentPrice from context as a fallback
   useEffect(() => {
     if (currentPrice > 0 && latestChartPriceRef.current <= 0) {
       latestChartPriceRef.current = currentPrice;
     }
   }, [currentPrice]);
+  useEffect(() => {
+    activeDisplayPriceRef.current = activeDisplayPrice;
+    renderedDisplayPriceRef.current = activeDisplayPrice;
+  }, [activeDisplayPrice]);
   const effectiveSimTimeRef = useRef(effectiveSimTime);
   const priceProtectionRef = useRef(priceProtection);
   const ordersMapRef = useRef(ordersMap);
   const positionsMapRef = useRef(positionsMap);
   const priceMapRef = useRef(priceMap);
+  const currentPriceRef = useRef(currentPrice);
+  const latestVisiblePriceRef = useRef(latestVisiblePrice);
   const canonicalPriceRequestRef = useRef(0);
   const conditionalTriggerLocksRef = useRef<Set<string>>(new Set());
 
@@ -297,6 +316,12 @@ const Index = () => {
   useEffect(() => {
     priceMapRef.current = priceMap;
   }, [priceMap]);
+  useEffect(() => {
+    currentPriceRef.current = currentPrice;
+  }, [currentPrice]);
+  useEffect(() => {
+    latestVisiblePriceRef.current = latestVisiblePrice;
+  }, [latestVisiblePrice]);
 
   const refreshCanonicalPrice = useCallback(
     async (symbol: string, time: number) => {
@@ -305,6 +330,7 @@ const Index = () => {
       const price = await fetchCanonicalTimePriceAt(symbol, time).catch(() => null);
       if (requestId !== canonicalPriceRequestRef.current || !price || price.close <= 0) return;
 
+      canonicalPriceSampleRef.current = { symbol, simTime: time, wallTime: Date.now() };
       latestChartPriceRef.current = price.close;
       setPriceMap((prev) => {
         if (prev[symbol] === price.close) return prev;
@@ -337,8 +363,42 @@ const Index = () => {
     });
   }, [ordersMap]);
 
-  const REACT_FLUSH_MS = 800;
+  const DISPLAY_PRICE_FLUSH_MS = 33;
+  const DISPLAY_PRICE_SMOOTHING_MS = 42;
+  const DISPLAY_PRICE_SNAP_RATIO = 0.08;
+  const REACT_FLUSH_MS = 250;
   const PERSIST_MS = 500;
+  const CANONICAL_PRICE_MAX_SIM_AGE_MS = 90_000;
+
+  const flushDisplayPrice = useCallback((price: number, now: number) => {
+    if (!Number.isFinite(price) || price <= 0) return price;
+    const previous = activeDisplayPriceRef.current;
+    const base = Number.isFinite(previous) && previous > 0 ? previous : price;
+    const minStep = Math.max(1e-10, price * 1e-7);
+    const elapsed =
+      lastDisplayPriceFrameRef.current > 0
+        ? Math.max(0, Math.min(120, now - lastDisplayPriceFrameRef.current))
+        : DISPLAY_PRICE_FLUSH_MS;
+    lastDisplayPriceFrameRef.current = now;
+
+    const ratioGap = Math.abs(price - base) / price;
+    const alpha = 1 - Math.exp(-elapsed / DISPLAY_PRICE_SMOOTHING_MS);
+    let next =
+      base <= 0 || ratioGap >= DISPLAY_PRICE_SNAP_RATIO
+        ? price
+        : base + (price - base) * Math.max(0.18, Math.min(0.72, alpha));
+    if (Math.abs(price - next) < minStep) next = price;
+
+    activeDisplayPriceRef.current = next;
+    const rendered = renderedDisplayPriceRef.current;
+    if (now - lastDisplayPriceFlushRef.current < DISPLAY_PRICE_FLUSH_MS && Math.abs(next - rendered) < minStep) {
+      return next;
+    }
+    lastDisplayPriceFlushRef.current = now;
+    renderedDisplayPriceRef.current = next;
+    setActiveDisplayPrice((prev) => (Math.abs(prev - next) < minStep ? prev : next));
+    return next;
+  }, []);
 
   const createTriggeredConditionalPosition = useCallback(
     (symbol: string, order: PendingOrder, triggerPrice: number, openTime: number) => {
@@ -614,7 +674,10 @@ const Index = () => {
                 });
               }
               const settledClose = Number(data[cursorRef.current - 1]?.close);
-              if (Number.isFinite(settledClose) && settledClose > 0) latestChartPriceRef.current = settledClose;
+              if (Number.isFinite(settledClose) && settledClose > 0) {
+                latestChartPriceRef.current = settledClose;
+                flushDisplayPrice(settledClose, now);
+              }
             }
             if (cursorRef.current < data.length) {
               const candle = data[cursorRef.current];
@@ -631,14 +694,19 @@ const Index = () => {
                 // 显示价统一用「该时刻 1m 价」（priceMap，useBackgroundPrices 每秒更新），使各周期一致；
                 // 偏差过大（疑似切标的残留）或冷启动拉不到时，退回周期插值，不会更糟。
                 const livePx = priceMapRef.current[activeSym];
-                const r = livePx > 0 && interpClose > 0 ? livePx / interpClose : 0;
+                const canonicalSample = canonicalPriceSampleRef.current;
+                const canonicalFresh =
+                  canonicalSample?.symbol === activeSym &&
+                  Math.abs(activeSimTime - canonicalSample.simTime) <= CANONICAL_PRICE_MAX_SIM_AGE_MS;
+                const r = canonicalFresh && livePx > 0 && interpClose > 0 ? livePx / interpClose : 0;
                 const close = r >= 0.2 && r <= 5 ? livePx : interpClose;
+                const displayClose = flushDisplayPrice(close, now);
                 api.updateData({
                   timestamp: candle.time,
                   open: candle.open,
-                  high: Math.max(matchHigh, close),
-                  low: Math.min(matchLow, close),
-                  close,
+                  high: Math.max(matchHigh, displayClose),
+                  low: Math.min(matchLow, displayClose),
+                  close: displayClose,
                   volume: candle.volume * progress,
                 });
                 runConditionalMatchingForSymbol(activeSym, { high: matchHigh, low: matchLow }, activeSimTime);
@@ -710,7 +778,10 @@ const Index = () => {
               });
             }
             const settledClose = Number(data[cursorRef.current - 1]?.close);
-            if (Number.isFinite(settledClose) && settledClose > 0) latestChartPriceRef.current = settledClose;
+            if (Number.isFinite(settledClose) && settledClose > 0) {
+              latestChartPriceRef.current = settledClose;
+              flushDisplayPrice(settledClose, now);
+            }
           }
           if (cursorRef.current < data.length) {
             const candle = data[cursorRef.current];
@@ -727,14 +798,19 @@ const Index = () => {
               // 显示价统一用「该时刻 1m 价」（priceMap，useBackgroundPrices 每秒更新），使各周期一致；
               // 偏差过大（疑似切标的残留）或冷启动拉不到时，退回周期插值，不会更糟。
               const livePx = priceMapRef.current[activeSymbolRef.current];
-              const r = livePx > 0 && interpClose > 0 ? livePx / interpClose : 0;
+              const canonicalSample = canonicalPriceSampleRef.current;
+              const canonicalFresh =
+                canonicalSample?.symbol === activeSymbolRef.current &&
+                Math.abs(simTime - canonicalSample.simTime) <= CANONICAL_PRICE_MAX_SIM_AGE_MS;
+              const r = canonicalFresh && livePx > 0 && interpClose > 0 ? livePx / interpClose : 0;
               const close = r >= 0.2 && r <= 5 ? livePx : interpClose;
+              const displayClose = flushDisplayPrice(close, now);
               api.updateData({
                 timestamp: candle.time,
                 open: candle.open,
-                high: Math.max(matchHigh, close),
-                low: Math.min(matchLow, close),
-                close,
+                high: Math.max(matchHigh, displayClose),
+                low: Math.min(matchLow, displayClose),
+                close: displayClose,
                 volume: candle.volume * progress,
               });
               runConditionalMatchingForSymbol(activeSymbolRef.current, { high: matchHigh, low: matchLow }, simTime);
@@ -759,14 +835,14 @@ const Index = () => {
 
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
-  }, [shouldRunEngine, iMs, runConditionalMatchingForSymbol]);
+  }, [shouldRunEngine, iMs, runConditionalMatchingForSymbol, flushDisplayPrice]);
 
   // Build asset state for AssetOverview
   const assetState = useMemo<AssetState>(() => {
     const initialCapital = profile?.initial_capital ?? 1_000_000;
     let unrealizedPnl = 0;
     for (const [sym, positions] of Object.entries(positionsMap)) {
-      const price = priceMap[sym] || 0;
+      const price = displayPriceMap[sym] || 0;
       for (const pos of positions) {
         unrealizedPnl += calcUnrealizedPnl(pos, price || pos.entryPrice);
       }
@@ -813,12 +889,18 @@ const Index = () => {
       history,
       dailyPnl,
     };
-  }, [balance, positionsMap, priceMap, tradeHistory, activeCoinState.time, profile]);
+  }, [balance, positionsMap, displayPriceMap, tradeHistory, activeCoinState.time, profile]);
 
   useEffect(() => {
     const canonicalPrice = Number(currentPrice || 0);
     if (Number.isFinite(canonicalPrice) && canonicalPrice > 0) {
       latestChartPriceRef.current = canonicalPrice;
+      if (activeCoinState.status !== "playing") {
+        activeDisplayPriceRef.current = canonicalPrice;
+        renderedDisplayPriceRef.current = canonicalPrice;
+        lastDisplayPriceFrameRef.current = 0;
+        setActiveDisplayPrice(canonicalPrice);
+      }
       return;
     }
 
@@ -827,8 +909,24 @@ const Index = () => {
       // Local fallback only. Do not write interval-derived prices into priceMap,
       // otherwise each timeframe overwrites the shared "latest price".
       latestChartPriceRef.current = visPrice;
+      if (activeCoinState.status !== "playing") {
+        activeDisplayPriceRef.current = visPrice;
+        renderedDisplayPriceRef.current = visPrice;
+        lastDisplayPriceFrameRef.current = 0;
+        setActiveDisplayPrice(visPrice);
+      }
     }
-  }, [latestVisiblePrice, currentPrice]);
+  }, [activeCoinState.status, latestVisiblePrice, currentPrice]);
+
+  useEffect(() => {
+    const resetPrice = currentPriceRef.current || latestVisiblePriceRef.current || 0;
+    if (resetPrice > 0) {
+      activeDisplayPriceRef.current = resetPrice;
+      renderedDisplayPriceRef.current = resetPrice;
+      lastDisplayPriceFrameRef.current = 0;
+      setActiveDisplayPrice(resetPrice);
+    }
+  }, [activeSymbol, interval]);
 
   const prevVisibleLenRef = useRef(0);
 
@@ -1614,13 +1712,13 @@ const Index = () => {
         visibleData={displayData}
         onLoadOlder={loadOlder}
         loadingOlder={loadingOlder}
-        currentPrice={currentPrice}
-        disabled={activeCoinState.status === "stopped" || currentPrice === 0}
+        currentPrice={displayCurrentPrice}
+        disabled={activeCoinState.status === "stopped" || displayCurrentPrice === 0}
         onPlaceOrder={handlePlaceOrderForActiveSymbol}
         balance={balance}
         positionsMap={positionsMap}
         ordersMap={ordersMap}
-        priceMap={priceMap}
+        priceMap={displayPriceMap}
         tradeHistory={tradeHistory}
         activeSymbol={activeSymbol}
         onClosePosition={handleClosePositionForSymbol}
@@ -1705,7 +1803,7 @@ const Index = () => {
         <AccountInfo
           balance={balance}
           positionsMap={positionsMap}
-          priceMap={priceMap}
+          priceMap={displayPriceMap}
           timeMode={timeMode}
           activeSymbol={activeSymbol}
         />
@@ -1725,7 +1823,7 @@ const Index = () => {
                   {/* Ticker bar (fixed strip, not resizable) */}
                   <TickerBar
                     symbol={activeSymbol}
-                    currentPrice={currentPrice}
+                    currentPrice={displayCurrentPrice}
                     visibleData={displayData}
                     pricePrecision={pricePrecision}
                     effectiveSimTime={effectiveSimTime}
@@ -1809,7 +1907,7 @@ const Index = () => {
                                   <div className="h-full w-full flex flex-col min-h-0 overflow-hidden border-b border-gray-200 dark:border-[#2b3139]">
                                     <OrderBook
                                       symbol={activeSymbol}
-                                      currentPrice={currentPrice}
+                                      currentPrice={displayCurrentPrice}
                                       pricePrecision={pricePrecision}
                                       onMinimize={() => setIsRecentTradesOpen((v) => !v)}
                                       onClose={() => setIsOrderBookOpen(false)}
@@ -1826,7 +1924,7 @@ const Index = () => {
                                     <ResizablePanel defaultSize={40} minSize={20}>
                                       <div className="h-full w-full flex flex-col min-h-0 overflow-hidden">
                                         <RecentTrades
-                                          currentPrice={currentPrice}
+                                          currentPrice={displayCurrentPrice}
                                           pricePrecision={pricePrecision}
                                           onMinimize={() => setIsRecentTradesOpen(false)}
                                           onClose={() => setIsRecentTradesOpen(false)}
@@ -1875,7 +1973,7 @@ const Index = () => {
                     positionsMap={positionsMap}
                     ordersMap={ordersMap}
                     tradeHistory={tradeHistory}
-                    priceMap={priceMap}
+                    priceMap={displayPriceMap}
                     activeSymbol={activeSymbol}
                     onClosePosition={handleClosePositionForSymbol}
                     onCancelOrder={handleCancelOrderForSymbol}
@@ -1903,8 +2001,8 @@ const Index = () => {
             <div className="flex flex-col flex-1 h-full min-h-0 w-full min-w-[300px] overflow-hidden bg-white dark:bg-[#1e2329] border-l border-gray-200 dark:border-[#2b3139]">
               <OrderPanel
                 symbol={activeSymbol}
-                currentPrice={currentPrice}
-                disabled={activeCoinState.status === "stopped" || currentPrice === 0}
+                currentPrice={displayCurrentPrice}
+                disabled={activeCoinState.status === "stopped" || displayCurrentPrice === 0}
                 onPlaceOrder={handlePlaceOrderForActiveSymbol}
                 pricePrecision={pricePrecision}
                 quantityPrecision={quantityPrecision}
