@@ -6,7 +6,9 @@ import { cn } from '@/lib/utils';
 import type { AssetState, DailySymbolPnL } from '@/types/assets';
 import { formatUTC8 } from '@/lib/timeFormat';
 import {
-  summarizeOperationPnlDetailsByRange,
+  dailyPnlFromDetails,
+  filterAssetHistoryByRange,
+  filterOperationPnlDetailsByRange,
   summarizeOperationPnlDetailsForDate,
   type AssetReportRange,
 } from '@/lib/assetReport';
@@ -79,7 +81,7 @@ export function AssetReportModal({ open, onClose, assets }: Props) {
   const [campaigns, setCampaigns] = useState<TradeCampaign[]>([]);
   const [journalRecordCampaignPairs, setJournalRecordCampaignPairs] = useState<Array<{ recordId: string; campaignId: string }>>([]);
   const [campaignLoadError, setCampaignLoadError] = useState<string | null>(null);
-  const { history, dailyPnl } = assets;
+  const { history } = assets;
 
   useEffect(() => {
     if (!open) return;
@@ -121,16 +123,7 @@ export function AssetReportModal({ open, onClose, assets }: Props) {
 
   // Filter history by range
   const filteredHistory = useMemo(() => {
-    if (history.length === 0) return [];
-    const now = history[history.length - 1]?.timestamp ?? Date.now();
-    const rangeMs: Record<TimeRange, number> = {
-      '7d': 7 * 86400_000,
-      '30d': 30 * 86400_000,
-      '90d': 90 * 86400_000,
-      'all': Infinity,
-    };
-    const cutoff = now - rangeMs[range];
-    return history.filter(s => s.timestamp >= cutoff);
+    return filterAssetHistoryByRange(history, range);
   }, [history, range]);
 
   // Chart data
@@ -142,10 +135,20 @@ export function AssetReportModal({ open, onClose, assets }: Props) {
     }));
   }, [filteredHistory]);
 
+  const rangedDailyPnlDetails = useMemo(
+    () => filterOperationPnlDetailsByRange(assets.dailyPnlDetails, range),
+    [assets.dailyPnlDetails, range],
+  );
+
+  const rangedDailyPnl = useMemo(
+    () => dailyPnlFromDetails(rangedDailyPnlDetails),
+    [rangedDailyPnlDetails],
+  );
+
   // Summary for the selected range or selected calendar day, based on record-level real operation time.
   const rangeStats = useMemo(() => {
     if (selectedDate) {
-      const selected = summarizeOperationPnlDetailsForDate(assets.dailyPnlDetails, selectedDate);
+      const selected = summarizeOperationPnlDetailsForDate(rangedDailyPnlDetails, selectedDate);
       return {
         totalPnl: selected.pnl,
         totalTrades: selected.trades,
@@ -153,25 +156,31 @@ export function AssetReportModal({ open, onClose, assets }: Props) {
         tradesLabel: `${formatDayLabel(selectedDate)} 笔数`,
       };
     }
-    const summary = summarizeOperationPnlDetailsByRange(assets.dailyPnlDetails, range);
+    const summary = rangedDailyPnlDetails.reduce(
+      (acc, day) => ({
+        totalPnl: acc.totalPnl + day.pnl,
+        totalTrades: acc.totalTrades + day.trades,
+      }),
+      { totalPnl: 0, totalTrades: 0 },
+    );
     return {
-      totalPnl: summary.pnl,
-      totalTrades: summary.trades,
+      totalPnl: summary.totalPnl,
+      totalTrades: summary.totalTrades,
       pnlLabel: '交易盈亏总额',
       tradesLabel: '交易笔数',
     };
-  }, [assets.dailyPnlDetails, range, selectedDate]);
+  }, [rangedDailyPnlDetails, selectedDate]);
 
   // Build a map for calendar day PnL
   const pnlMap = useMemo(() => {
     const map = new Map<string, number>();
-    dailyPnl.forEach(d => map.set(d.date, d.pnl));
+    rangedDailyPnl.forEach(d => map.set(d.date, d.pnl));
     return map;
-  }, [dailyPnl]);
+  }, [rangedDailyPnl]);
 
   const dailyDetailMap = useMemo(
-    () => new Map(assets.dailyPnlDetails.map(item => [item.date, item])),
-    [assets.dailyPnlDetails],
+    () => new Map(rangedDailyPnlDetails.map(item => [item.date, item])),
+    [rangedDailyPnlDetails],
   );
 
   const selectedDayDetail = selectedDate ? dailyDetailMap.get(selectedDate) ?? null : null;
@@ -193,14 +202,14 @@ export function AssetReportModal({ open, onClose, assets }: Props) {
 
   // Outlier detection: top/bottom 5% by absolute PnL
   const outlierDates = useMemo(() => {
-    if (dailyPnl.length < 5) return new Set<string>();
-    const sorted = [...dailyPnl].sort((a, b) => a.pnl - b.pnl);
+    if (rangedDailyPnl.length < 5) return new Set<string>();
+    const sorted = [...rangedDailyPnl].sort((a, b) => a.pnl - b.pnl);
     const n = Math.max(1, Math.ceil(sorted.length * 0.05));
     const outliers = new Set<string>();
     for (let i = 0; i < n; i++) outliers.add(sorted[i].date);
     for (let i = sorted.length - n; i < sorted.length; i++) outliers.add(sorted[i].date);
     return outliers;
-  }, [dailyPnl]);
+  }, [rangedDailyPnl]);
 
   // Calendar state
   const [calMonth, setCalMonth] = useState(new Date());

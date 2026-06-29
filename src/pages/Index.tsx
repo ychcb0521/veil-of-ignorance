@@ -27,7 +27,7 @@ import { CoolingOffModal, useCoolingOff } from "@/components/CoolingOffModal";
 import { getConditionalTriggerDecisionFromRange } from "@/lib/conditionalOrders";
 import { fetchCanonicalTimePriceAt } from "@/lib/canonicalTimePrice";
 import { applyCurrentPriceToVisibleData } from "@/lib/visibleDataPrice";
-import { buildOperationDailyPnl, buildOperationDailyPnlDetails, pnlForOperationDate } from "@/lib/assetReport";
+import { buildOperationAssetHistory, buildOperationDailyPnl, buildOperationDailyPnlDetails, pnlForOperationDate } from "@/lib/assetReport";
 import { toast } from "sonner";
 import { Wallet, Crosshair, BookOpen, Tag } from "lucide-react";
 import { Link } from "react-router-dom";
@@ -866,14 +866,11 @@ const Index = () => {
     const todayPnl = todayRealizedPnl + unrealizedPnl;
     const todayPnlPct = initialCapital > 0 ? (todayPnl / initialCapital) * 100 : 0;
 
-    const history = tradeHistory
-      .filter((t) => t.closeTime > 0)
-      .map((t, i, arr) => ({
-        timestamp: t.closeTime,
-        totalBalance: initialCapital + arr.slice(0, i + 1).reduce((s, x) => s + (x.pnl || 0), 0),
-      }));
-    if (history.length === 0 || totalBalance !== history[history.length - 1]?.totalBalance) {
-      history.push({ timestamp: activeCoinState.time || Date.now(), totalBalance });
+    const history = buildOperationAssetHistory(tradeHistory, initialCapital);
+    const latestOperationTime = history[history.length - 1]?.timestamp ?? null;
+    const lastHistoryBalance = history[history.length - 1]?.totalBalance ?? null;
+    if (history.length === 0 || lastHistoryBalance == null || Math.abs(totalBalance - lastHistoryBalance) > 1e-8) {
+      history.push({ timestamp: latestOperationTime ?? Date.now(), totalBalance });
     }
 
     const dailyPnlDetails = buildOperationDailyPnlDetails(tradeHistory);
@@ -898,7 +895,7 @@ const Index = () => {
       dailyPnl,
       dailyPnlDetails,
     };
-  }, [balance, positionsMap, displayPriceMap, tradeHistory, activeCoinState.time, profile]);
+  }, [balance, positionsMap, displayPriceMap, tradeHistory, profile]);
 
   useEffect(() => {
     const canonicalPrice = Number(currentPrice || 0);

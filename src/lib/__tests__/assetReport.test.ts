@@ -1,9 +1,13 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  buildOperationAssetHistory,
   buildOperationDailyPnlDetails,
   buildOperationDailyPnl,
+  dailyPnlFromDetails,
+  filterAssetHistoryByRange,
   filterDailyPnlByRange,
+  filterOperationPnlDetailsByRange,
   operationDateKey,
   pnlForOperationDate,
   summarizeOperationPnlDetailsByRange,
@@ -177,6 +181,73 @@ describe('asset report trade summaries', () => {
     expect(summarizeOperationPnlDetailsForDate(details, '2026-06-29')).toEqual({
       pnl: 150,
       trades: 2,
+    });
+  });
+
+  it('builds the asset curve by chronological operation time instead of time-machine close time', () => {
+    const firstOperation = Date.parse('2026-06-22T10:00:00.000Z');
+    const secondOperation = Date.parse('2026-06-29T10:00:00.000Z');
+
+    const history = buildOperationAssetHistory([
+      record({
+        id: 'second',
+        pnl: 300,
+        closedRealAt: secondOperation,
+        closeTime: Date.parse('2026-02-19T06:34:00.000Z'),
+      }),
+      record({
+        id: 'first',
+        pnl: 100,
+        closedRealAt: firstOperation,
+        closeTime: Date.parse('2026-04-10T00:00:00.000Z'),
+      }),
+    ], 1_000);
+
+    expect(history).toEqual([
+      { timestamp: firstOperation, totalBalance: 1_100 },
+      { timestamp: secondOperation, totalBalance: 1_400 },
+    ]);
+  });
+
+  it('filters asset curve ranges from the latest real operation time and returns sorted points', () => {
+    const oldPoint = { timestamp: Date.parse('2026-04-10T00:00:00.000Z'), totalBalance: 1_100 };
+    const inside7d = { timestamp: Date.parse('2026-06-23T10:00:00.000Z'), totalBalance: 1_300 };
+    const latest = { timestamp: Date.parse('2026-06-29T10:00:00.000Z'), totalBalance: 1_400 };
+
+    expect(filterAssetHistoryByRange([latest, oldPoint, inside7d], '7d')).toEqual([
+      inside7d,
+      latest,
+    ]);
+    expect(filterAssetHistoryByRange([latest, oldPoint, inside7d], '30d')).toEqual([
+      inside7d,
+      latest,
+    ]);
+    expect(filterAssetHistoryByRange([latest, oldPoint, inside7d], '90d')).toEqual([
+      oldPoint,
+      inside7d,
+      latest,
+    ]);
+  });
+
+  it('rebuilds calendar details from only the records inside the selected range', () => {
+    const now = Date.parse('2026-06-29T10:00:00.000Z');
+    const justOutside7d = now - 7 * 86400_000 - 1;
+    const sameCalendarDayInside7d = now - 7 * 86400_000 + 1;
+    const details = buildOperationDailyPnlDetails([
+      record({ id: 'outside', symbol: 'POWERUSDT', pnl: 1000, closedRealAt: justOutside7d }),
+      record({ id: 'inside', symbol: 'POWERUSDT', pnl: 200, closedRealAt: sameCalendarDayInside7d }),
+      record({ id: 'latest', symbol: 'SAGAUSDT', pnl: -50, closedRealAt: now }),
+    ]);
+
+    const rangedDetails = filterOperationPnlDetailsByRange(details, '7d', now);
+
+    expect(dailyPnlFromDetails(rangedDetails)).toEqual([
+      { date: '2026-06-22', pnl: 200, trades: 1 },
+      { date: '2026-06-29', pnl: -50, trades: 1 },
+    ]);
+    expect(summarizeOperationPnlDetailsForDate(rangedDetails, '2026-06-22')).toEqual({
+      pnl: 200,
+      trades: 1,
     });
   });
 });
