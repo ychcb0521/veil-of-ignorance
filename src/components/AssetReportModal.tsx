@@ -129,8 +129,9 @@ export function AssetReportModal({ open, onClose, assets }: Props) {
   // Chart data
   const chartData = useMemo(() => {
     return filteredHistory.map(s => ({
-      time: formatUTC8(s.timestamp).slice(5, 16), // MM-DD HH:mm
+      timestamp: s.timestamp,
       date: formatUTC8(s.timestamp).slice(0, 10),
+      time: formatUTC8(s.timestamp).slice(5, 16), // MM-DD HH:mm
       value: s.totalBalance,
     }));
   }, [filteredHistory]);
@@ -239,6 +240,9 @@ export function AssetReportModal({ open, onClose, assets }: Props) {
   const startVal = chartData.length > 0 ? chartData[0].value : 0;
   const endVal = chartData.length > 0 ? chartData[chartData.length - 1].value : 0;
   const isUp = endVal >= startVal;
+  const chartKey = chartData.length > 0
+    ? `${range}-${chartData.length}-${chartData[0].timestamp}-${chartData[chartData.length - 1].timestamp}`
+    : `${range}-empty`;
 
   const ranges: { key: TimeRange; label: string }[] = [
     { key: '7d', label: '7天' },
@@ -285,7 +289,7 @@ export function AssetReportModal({ open, onClose, assets }: Props) {
           </div>
 
           {/* Asset Line Chart */}
-          <div className="bg-secondary/30 rounded-lg p-4 border border-border/50">
+          <div data-testid="asset-report-chart" className="bg-secondary/30 rounded-lg p-4 border border-border/50">
             <div className="flex items-center justify-between mb-3">
               <span className="text-xs text-muted-foreground font-medium">资产变化曲线</span>
               <div className="flex items-center gap-3 text-[10px] font-mono">
@@ -300,7 +304,7 @@ export function AssetReportModal({ open, onClose, assets }: Props) {
             </div>
             <div className="h-[200px]">
               {chartData.length > 0 ? (
-                <ResponsiveContainer width="100%" height="100%">
+                <ResponsiveContainer key={chartKey} width="100%" height="100%">
                   <AreaChart data={chartData} margin={{ top: 5, right: 5, bottom: 5, left: 5 }}>
                     <defs>
                       <linearGradient id="assetGrad" x1="0" y1="0" x2="0" y2="1">
@@ -310,11 +314,15 @@ export function AssetReportModal({ open, onClose, assets }: Props) {
                     </defs>
                     <CartesianGrid strokeDasharray="3 3" stroke="hsl(220, 15%, 15%)" />
                     <XAxis
-                      dataKey="time"
+                      dataKey="timestamp"
+                      type="number"
+                      scale="time"
+                      domain={['dataMin', 'dataMax']}
                       tick={{ fontSize: 10, fill: 'hsl(220, 10%, 50%)' }}
                       tickLine={false}
                       axisLine={false}
                       interval="preserveStartEnd"
+                      tickFormatter={(v: number) => formatUTC8(v).slice(5, 16)}
                     />
                     <YAxis
                       tick={{ fontSize: 10, fill: 'hsl(220, 10%, 50%)' }}
@@ -332,6 +340,7 @@ export function AssetReportModal({ open, onClose, assets }: Props) {
                         fontFamily: 'JetBrains Mono, monospace',
                       }}
                       labelStyle={{ color: 'hsl(220, 10%, 50%)' }}
+                      labelFormatter={(value: number) => formatUTC8(value)}
                       formatter={(value: number) => [`$${value.toLocaleString(undefined, { minimumFractionDigits: 2 })}`, '总资产']}
                     />
                     <Area

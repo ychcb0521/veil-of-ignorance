@@ -213,12 +213,16 @@ describe('asset report trade summaries', () => {
     const oldPoint = { timestamp: Date.parse('2026-04-10T00:00:00.000Z'), totalBalance: 1_100 };
     const inside7d = { timestamp: Date.parse('2026-06-23T10:00:00.000Z'), totalBalance: 1_300 };
     const latest = { timestamp: Date.parse('2026-06-29T10:00:00.000Z'), totalBalance: 1_400 };
+    const sevenDayCutoff = Date.parse('2026-06-22T10:00:00.000Z');
+    const thirtyDayCutoff = Date.parse('2026-05-30T10:00:00.000Z');
 
     expect(filterAssetHistoryByRange([latest, oldPoint, inside7d], '7d')).toEqual([
+      { timestamp: sevenDayCutoff, totalBalance: 1_100 },
       inside7d,
       latest,
     ]);
     expect(filterAssetHistoryByRange([latest, oldPoint, inside7d], '30d')).toEqual([
+      { timestamp: thirtyDayCutoff, totalBalance: 1_100 },
       inside7d,
       latest,
     ]);

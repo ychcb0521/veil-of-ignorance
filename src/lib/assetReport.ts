@@ -205,7 +205,13 @@ export function filterAssetHistoryByRange(
 
   const latestTimestamp = sortedHistory[sortedHistory.length - 1].timestamp;
   const cutoff = latestTimestamp - RANGE_MS[range];
-  return sortedHistory.filter(item => item.timestamp >= cutoff && item.timestamp <= latestTimestamp);
+  const ranged = sortedHistory.filter(item => item.timestamp >= cutoff && item.timestamp <= latestTimestamp);
+  const previous = [...sortedHistory].reverse().find(item => item.timestamp < cutoff);
+  if (!previous || ranged[0]?.timestamp === cutoff) return ranged;
+  return [
+    { timestamp: cutoff, totalBalance: previous.totalBalance },
+    ...ranged,
+  ];
 }
 
 export function filterOperationPnlDetailsByRange(
