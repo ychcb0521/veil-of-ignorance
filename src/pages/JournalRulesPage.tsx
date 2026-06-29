@@ -42,7 +42,8 @@ import {
 } from '@/lib/journalApi';
 import {
   buildCampaignDeviationRuleTextFromNote,
-  normalizeDeviationRuleText,
+  campaignDeviationRuleSourceKeys,
+  normalizeDeviationRuleSourceKey,
 } from '@/lib/campaignDeviationRules';
 import { cn } from '@/lib/utils';
 import type {
@@ -116,28 +117,49 @@ function getRemoteRuleCampaignId(rule: TradingRule): string | null {
   return typeof value === 'string' && value ? value : null;
 }
 
-function getRuleCampaignId(rule: TradingRule, localSources: Map<string, string>): string | null {
-  return getRemoteRuleCampaignId(rule) ?? localSources.get(normalizeDeviationRuleText(rule.rule_text)) ?? null;
+interface RuleCampaignSourceIndex {
+  exact: Map<string, string>;
+  loose: Map<string, string>;
 }
 
-function buildCampaignSourceMap(
+function setSourceKey(map: Map<string, string>, key: string | null | undefined, campaignId: string): void {
+  const normalized = normalizeDeviationRuleSourceKey(key);
+  if (normalized && !map.has(normalized)) map.set(normalized, campaignId);
+}
+
+function getRuleCampaignId(rule: TradingRule, sources: RuleCampaignSourceIndex): string | null {
+  const remoteCampaignId = getRemoteRuleCampaignId(rule);
+  if (remoteCampaignId) return remoteCampaignId;
+
+  const keys = campaignDeviationRuleSourceKeys(rule.rule_text);
+  for (const key of keys) {
+    const exactCampaignId = sources.exact.get(key);
+    if (exactCampaignId) return exactCampaignId;
+  }
+  for (const key of keys.slice(1)) {
+    const looseCampaignId = sources.loose.get(key);
+    if (looseCampaignId) return looseCampaignId;
+  }
+  return null;
+}
+
+function buildCampaignSourceIndex(
   campaigns: TradeCampaign[],
   localSources: Record<string, string>,
-): Map<string, string> {
-  const map = new Map<string, string>();
+): RuleCampaignSourceIndex {
+  const exact = new Map<string, string>();
+  const loose = new Map<string, string>();
   for (const campaign of campaigns) {
     for (const note of Object.values(campaign.deviation_notes ?? {})) {
       const ruleText = buildCampaignDeviationRuleTextFromNote(note);
-      if (ruleText && !map.has(ruleText)) {
-        map.set(ruleText, campaign.id);
-      }
+      setSourceKey(exact, ruleText, campaign.id);
+      setSourceKey(loose, note.fix, campaign.id);
     }
   }
   for (const [ruleText, campaignId] of Object.entries(localSources)) {
-    const normalized = normalizeDeviationRuleText(ruleText);
-    if (normalized && campaignId) map.set(normalized, campaignId);
+    setSourceKey(exact, ruleText, campaignId);
   }
-  return map;
+  return { exact, loose };
 }
 
 export default function JournalRulesPage() {
@@ -192,7 +214,7 @@ export default function JournalRulesPage() {
   const patternMap = useMemo(() => new Map(patterns.map(p => [p.id, p])), [patterns]);
   const campaignMap = useMemo(() => new Map(campaigns.map(campaign => [campaign.id, campaign])), [campaigns]);
   const ruleCampaignSources = useMemo(
-    () => buildCampaignSourceMap(campaigns, localRuleSources),
+    () => buildCampaignSourceIndex(campaigns, localRuleSources),
     [campaigns, localRuleSources],
   );
   const designBlocked = activeCampaigns.length > 0;

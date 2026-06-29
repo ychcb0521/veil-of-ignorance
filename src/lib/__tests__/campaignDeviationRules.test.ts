@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildCampaignDeviationRuleDrafts,
+  campaignDeviationRuleSourceKeys,
+  normalizeDeviationRuleSourceKey,
   normalizeDeviationRuleText,
 } from '@/lib/campaignDeviationRules';
 import type { ManualLegDeviationCost } from '@/lib/campaignSimulationEngine';
@@ -72,5 +74,14 @@ describe('campaign deviation rule drafts', () => {
 
   it('规则文本归一化会清理多余空白', () => {
     expect(normalizeDeviationRuleText('  A   B \n C  ')).toBe('A B C');
+  });
+
+  it('来源匹配 key 会兼容旧规则里的空格和英文冒号', () => {
+    const oldRuleText = '【战役偏离】违规操作： hedge_rolling: 新的支撑位产生的时候突然在用旧的支撑位。修正后的规则：在“裸奔阶段”，当有新的支撑位产生的时候，要迅速把对冲挪到新的支撑位';
+    const fix = '在“裸奔阶段”，当有新的支撑位产生的时候，要迅速把对冲挪到新的支撑位';
+
+    expect(campaignDeviationRuleSourceKeys(oldRuleText)).toContain(
+      normalizeDeviationRuleSourceKey(fix),
+    );
   });
 });

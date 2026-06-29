@@ -28,6 +28,22 @@ export function normalizeDeviationRuleText(value: string): string {
   return cleanText(value);
 }
 
+export function normalizeDeviationRuleSourceKey(value: string | null | undefined): string {
+  return cleanText(value).replace(/\s*[:：]\s*/g, '：');
+}
+
+export function campaignDeviationRuleSourceKeys(value: string): string[] {
+  const fullText = normalizeDeviationRuleSourceKey(value);
+  if (!fullText) return [];
+
+  const keys = [fullText];
+  const fixMatch = /修正后的规则：(.+)$/u.exec(fullText);
+  const fixText = normalizeDeviationRuleSourceKey(fixMatch?.[1]);
+  if (fixText) keys.push(fixText);
+
+  return Array.from(new Set(keys));
+}
+
 export function buildCampaignDeviationRuleTextFromNote(
   note: CampaignDeviationNote,
   cost?: ManualLegDeviationCost,

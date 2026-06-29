@@ -40,6 +40,12 @@ function formatDayLabel(date: string): string {
   return `${month}/${day}`;
 }
 
+function operationDateAnchorMs(date: string | null | undefined): number | null {
+  if (!date) return null;
+  const parsed = Date.parse(`${date}T12:00:00+08:00`);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
 function buildCampaignSummaries(
   symbolDetail: DailySymbolPnL,
   recordCampaignMap: Map<string, TradeCampaign>,
@@ -138,13 +144,34 @@ export function AssetReportModal({ open, onClose, assets }: Props) {
     }));
   }, [filteredHistory]);
 
-  // Summary for filtered range
+  const rangeAnchorTime = useMemo(() => {
+    const latestOperationDate = dailyPnl[dailyPnl.length - 1]?.date ?? null;
+    return operationDateAnchorMs(latestOperationDate)
+      ?? history[history.length - 1]?.timestamp
+      ?? Date.now();
+  }, [dailyPnl, history]);
+
+  const filteredDailyPnl = useMemo(
+    () => filterDailyPnlByRange(dailyPnl, range, rangeAnchorTime),
+    [dailyPnl, range, rangeAnchorTime],
+  );
+
+  // Summary for the selected range or selected calendar day.
   const rangeStats = useMemo(() => {
-    const filtered = filterDailyPnlByRange(dailyPnl, range);
+    if (selectedDate) {
+      const selected = assets.dailyPnlDetails.find(item => item.date === selectedDate);
+      return {
+        totalPnl: selected?.pnl ?? 0,
+        totalTrades: selected?.trades ?? 0,
+        pnlLabel: `${formatDayLabel(selectedDate)} 盈亏`,
+        tradesLabel: `${formatDayLabel(selectedDate)} 笔数`,
+      };
+    }
+    const filtered = filteredDailyPnl;
     const totalPnl = filtered.reduce((s, d) => s + d.pnl, 0);
     const totalTrades = filtered.reduce((s, d) => s + d.trades, 0);
-    return { totalPnl, totalTrades };
-  }, [dailyPnl, range]);
+    return { totalPnl, totalTrades, pnlLabel: '交易盈亏总额', tradesLabel: '交易笔数' };
+  }, [assets.dailyPnlDetails, filteredDailyPnl, selectedDate]);
 
   // Build a map for calendar day PnL
   const pnlMap = useMemo(() => {
@@ -243,7 +270,10 @@ export function AssetReportModal({ open, onClose, assets }: Props) {
             {ranges.map(r => (
               <button
                 key={r.key}
-                onClick={() => setRange(r.key)}
+                onClick={() => {
+                  setRange(r.key);
+                  setSelectedDate(null);
+                }}
                 className={cn(
                   'px-3 py-1.5 rounded-md text-xs font-medium transition-all',
                   range === r.key
@@ -324,7 +354,7 @@ export function AssetReportModal({ open, onClose, assets }: Props) {
           {/* Trading Analysis */}
           <div className="grid grid-cols-2 gap-3">
             <div className="bg-secondary/30 rounded-lg p-4 border border-border/50">
-              <div className="text-[10px] text-muted-foreground font-medium mb-1.5 uppercase tracking-wider">交易盈亏总额</div>
+              <div className="text-[10px] text-muted-foreground font-medium mb-1.5 uppercase tracking-wider">{rangeStats.pnlLabel}</div>
               <div className={cn(
                 'font-mono text-lg font-bold',
                 rangeStats.totalPnl >= 0 ? 'trading-green' : 'trading-red'
@@ -333,7 +363,7 @@ export function AssetReportModal({ open, onClose, assets }: Props) {
               </div>
             </div>
             <div className="bg-secondary/30 rounded-lg p-4 border border-border/50">
-              <div className="text-[10px] text-muted-foreground font-medium mb-1.5 uppercase tracking-wider">交易笔数</div>
+              <div className="text-[10px] text-muted-foreground font-medium mb-1.5 uppercase tracking-wider">{rangeStats.tradesLabel}</div>
               <div className="font-mono text-lg font-bold text-foreground">
                 {rangeStats.totalTrades}
               </div>
@@ -363,7 +393,10 @@ export function AssetReportModal({ open, onClose, assets }: Props) {
             {/* Month navigation */}
             <div className="flex items-center justify-between mb-2">
               <button
-                onClick={() => setCalMonth(prev => new Date(prev.getFullYear(), prev.getMonth() - 1, 1))}
+                onClick={() => {
+                  setCalMonth(prev => new Date(prev.getFullYear(), prev.getMonth() - 1, 1));
+                  setSelectedDate(null);
+                }}
                 className="p-1 rounded hover:bg-secondary text-muted-foreground"
               >
                 <ChevronLeft className="w-4 h-4" />
@@ -372,7 +405,10 @@ export function AssetReportModal({ open, onClose, assets }: Props) {
                 {calMonth.getFullYear()}年{calMonth.getMonth() + 1}月
               </span>
               <button
-                onClick={() => setCalMonth(prev => new Date(prev.getFullYear(), prev.getMonth() + 1, 1))}
+                onClick={() => {
+                  setCalMonth(prev => new Date(prev.getFullYear(), prev.getMonth() + 1, 1));
+                  setSelectedDate(null);
+                }}
                 className="p-1 rounded hover:bg-secondary text-muted-foreground"
               >
                 <ChevronRight className="w-4 h-4" />
