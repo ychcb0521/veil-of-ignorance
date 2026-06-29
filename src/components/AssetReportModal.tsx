@@ -5,12 +5,13 @@ import { Calendar } from '@/components/ui/calendar';
 import { cn } from '@/lib/utils';
 import type { AssetState, AssetSnapshot, DailyPnL } from '@/types/assets';
 import { formatUTC8 } from '@/lib/timeFormat';
+import { filterDailyPnlByRange, type AssetReportRange } from '@/lib/assetReport';
 import {
   LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, Area, AreaChart,
   CartesianGrid,
 } from 'recharts';
 
-type TimeRange = '7d' | '30d' | '90d' | 'all';
+type TimeRange = AssetReportRange;
 
 interface Props {
   open: boolean;
@@ -47,13 +48,7 @@ export function AssetReportModal({ open, onClose, assets }: Props) {
 
   // Summary for filtered range
   const rangeStats = useMemo(() => {
-    const filtered = dailyPnl.filter(d => {
-      if (range === 'all') return true;
-      const days = range === '7d' ? 7 : range === '30d' ? 30 : 90;
-      const cutoff = new Date();
-      cutoff.setDate(cutoff.getDate() - days);
-      return new Date(d.date) >= cutoff;
-    });
+    const filtered = filterDailyPnlByRange(dailyPnl, range);
     const totalPnl = filtered.reduce((s, d) => s + d.pnl, 0);
     const totalTrades = filtered.reduce((s, d) => s + d.trades, 0);
     return { totalPnl, totalTrades };

@@ -12,7 +12,12 @@ import {
   computeDeviationCosts,
   simulateCampaign,
   simulateManualLegScenario,
+  type ManualLegDeviationCost,
 } from '@/lib/campaignSimulationEngine';
+import {
+  buildCampaignDeviationRuleDrafts,
+  normalizeDeviationRuleText,
+} from '@/lib/campaignDeviationRules';
 import { INITIAL_COGNITIVE_ASSETS } from '@/lib/cognitiveAssetsInitialContent';
 import { mirrorDroppedColumns } from '@/lib/journalLocalMirror';
 import { getPositionNotionalUsd } from '@/lib/tradingSettlement';
@@ -3734,6 +3739,12 @@ export interface CreateRuleInput {
   trigger_threshold?: number;
 }
 
+export interface SyncCampaignDeviationRulesResult {
+  drafts: number;
+  created: number;
+  skipped: number;
+}
+
 // ============ Batch 3 additions ============
 
 export interface FinalizeJournalInput {
@@ -3970,6 +3981,46 @@ export async function createRule(input: CreateRuleInput): Promise<TradingRule> {
     .select()
     .single();
   return wrap("创建交易规则", error, data as unknown as TradingRule);
+}
+
+export async function syncCampaignDeviationRulesToChecklist(
+  userId: string,
+  notes: Record<string, CampaignDeviationNote>,
+  costs: ManualLegDeviationCost[],
+): Promise<SyncCampaignDeviationRulesResult> {
+  const drafts = buildCampaignDeviationRuleDrafts(notes, costs);
+  if (drafts.length === 0) return { drafts: 0, created: 0, skipped: 0 };
+
+  const existingRules = await listRules(userId);
+  const existingTexts = new Set(
+    existingRules.map(rule => normalizeDeviationRuleText(rule.rule_text)),
+  );
+
+  let created = 0;
+  let skipped = 0;
+  for (const draft of drafts) {
+    const normalized = normalizeDeviationRuleText(draft.ruleText);
+    if (existingTexts.has(normalized)) {
+      skipped += 1;
+      continue;
+    }
+
+    await createRule({
+      user_id: userId,
+      source_pattern_id: null,
+      rule_text: normalized,
+      is_active: true,
+      added_to_checklist: true,
+      required: false,
+      rule_category: 'core',
+      weight: 70,
+      evolution_level: 3,
+    });
+    existingTexts.add(normalized);
+    created += 1;
+  }
+
+  return { drafts: drafts.length, created, skipped };
 }
 
 export async function markRuleAddedToChecklist(ruleId: string): Promise<void> {

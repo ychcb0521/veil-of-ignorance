@@ -205,18 +205,18 @@ export function SessionModeControls({
       {guardDialogOpen && (
         <Dialog open={guardDialogOpen} onOpenChange={handleDialogOpenChange}>
           <DialogContent
-            className="sm:max-w-md"
+            className="flex max-h-[calc(100vh-32px)] flex-col gap-0 overflow-hidden p-0 sm:max-w-md"
             onClick={(e) => e.stopPropagation()}
             onPointerDown={(e) => e.stopPropagation()}
           >
-            <DialogHeader>
+            <DialogHeader className="shrink-0 px-6 pt-6 pb-4">
               <DialogTitle>无法切换模式</DialogTitle>
               <DialogDescription>
                 当前仍有币种处于独立运行状态。请先查看或停止这些币种，再切换到同步模式。
               </DialogDescription>
             </DialogHeader>
 
-            <div className="space-y-2">
+            <div className="min-h-0 flex-1 overflow-y-auto px-6 pb-4">
               <div className="rounded-lg border border-border bg-card/60 p-3">
                 <div className="mb-2 text-xs font-medium text-muted-foreground">运行中的币种</div>
                 <div className="flex flex-col gap-2">
@@ -236,7 +236,7 @@ export function SessionModeControls({
               </div>
             </div>
 
-            <DialogFooter>
+            <DialogFooter className="shrink-0 border-t border-border/60 px-6 py-4">
               <button
                 type="button"
                 onClick={() => setGuardDialogOpen(false)}

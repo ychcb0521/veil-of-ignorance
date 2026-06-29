@@ -32,6 +32,7 @@ import {
   getCampaignFullData,
   hasMutualFollow,
   saveCampaignDeviationNotes,
+  syncCampaignDeviationRulesToChecklist,
   type CampaignDeviationNote,
   listCampaignComments,
   listCounterfactuals,
@@ -804,8 +805,15 @@ export default function JournalCampaignDetailPage() {
     try {
       setDeviationNotesSaving(true);
       await saveCampaignDeviationNotes(campaign.id, deviationNotes);
+      const syncResult = await syncCampaignDeviationRulesToChecklist(user.id, deviationNotes, deviationLegCosts);
       setCampaign(prev => (prev ? { ...prev, deviation_notes: deviationNotes } : prev));
-      toast.success('偏离备注已保存');
+      if (syncResult.created > 0) {
+        toast.success(`偏离备注已保存，并同步 ${syncResult.created} 条规则`);
+      } else if (syncResult.drafts > 0) {
+        toast.success('偏离备注已保存，规则已在复盘中心中');
+      } else {
+        toast.success('偏离备注已保存');
+      }
     } catch (error) {
       toast.error(error instanceof Error ? error.message : String(error));
     } finally {
@@ -1314,6 +1322,7 @@ export default function JournalCampaignDetailPage() {
                       <div className="text-[12px] text-muted-foreground mt-2">
                         把你手动调整后的 Legs 与原始战役逐腿对比，每条代价 = 调整后盈亏 − 原始盈亏。
                         合计 {totalDeviationCost >= 0 ? '+' : ''}{totalDeviationCost.toFixed(2)} USDT = 原始错误的总代价。
+                        保存后会把已填写的「修正后」汇总进复盘中心的规则。
                       </div>
                     </div>
                     <div className="flex items-center gap-3">
