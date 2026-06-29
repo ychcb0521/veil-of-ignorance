@@ -4,6 +4,17 @@ import type { TradeRecord } from '@/types/trading';
 
 export type AssetReportRange = '7d' | '30d' | '90d' | 'all';
 
+export interface OperationPnlSummary {
+  pnl: number;
+  trades: number;
+}
+
+const RANGE_MS: Record<Exclude<AssetReportRange, 'all'>, number> = {
+  '7d': 7 * 86400_000,
+  '30d': 30 * 86400_000,
+  '90d': 90 * 86400_000,
+};
+
 export function tradeRecordOperationTime(record: TradeRecord): number | null {
   const time = record.closedRealAt;
   return Number.isFinite(time) && time != null && time > 0 ? time : null;
@@ -83,6 +94,50 @@ export function buildOperationDailyPnlDetails(records: TradeRecord[]): DailyPnLD
       };
     })
     .sort((a, b) => a.date.localeCompare(b.date));
+}
+
+function flattenDailyPnlRecords(details: DailyPnLDetail[]): DailyTradePnLRecord[] {
+  return details.flatMap(day => day.symbols.flatMap(symbol => symbol.records));
+}
+
+function summarizeDailyPnlRecords(records: DailyTradePnLRecord[]): OperationPnlSummary {
+  return {
+    pnl: records.reduce((sum, record) => sum + record.pnl, 0),
+    trades: records.length,
+  };
+}
+
+export function latestOperationTimeFromDetails(details: DailyPnLDetail[]): number | null {
+  let latest: number | null = null;
+  for (const record of flattenDailyPnlRecords(details)) {
+    if (!Number.isFinite(record.operationTime) || record.operationTime <= 0) continue;
+    latest = latest == null ? record.operationTime : Math.max(latest, record.operationTime);
+  }
+  return latest;
+}
+
+export function summarizeOperationPnlDetailsByRange(
+  details: DailyPnLDetail[],
+  range: AssetReportRange,
+  now = latestOperationTimeFromDetails(details) ?? Date.now(),
+): OperationPnlSummary {
+  const records = flattenDailyPnlRecords(details)
+    .filter(record => Number.isFinite(record.operationTime) && record.operationTime > 0);
+  if (range === 'all') return summarizeDailyPnlRecords(records);
+
+  const cutoff = now - RANGE_MS[range];
+  return summarizeDailyPnlRecords(
+    records.filter(record => record.operationTime >= cutoff && record.operationTime <= now),
+  );
+}
+
+export function summarizeOperationPnlDetailsForDate(
+  details: DailyPnLDetail[],
+  date: string,
+): OperationPnlSummary {
+  const day = details.find(item => item.date === date);
+  if (!day) return { pnl: 0, trades: 0 };
+  return summarizeDailyPnlRecords(flattenDailyPnlRecords([day]));
 }
 
 export function filterDailyPnlByRange(

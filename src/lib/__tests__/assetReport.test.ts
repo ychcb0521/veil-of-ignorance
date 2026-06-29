@@ -6,6 +6,8 @@ import {
   filterDailyPnlByRange,
   operationDateKey,
   pnlForOperationDate,
+  summarizeOperationPnlDetailsByRange,
+  summarizeOperationPnlDetailsForDate,
   tradeRecordOperationTime,
 } from '../assetReport';
 import type { TradeRecord } from '@/types/trading';
@@ -139,5 +141,42 @@ describe('asset report trade summaries', () => {
     ]);
 
     expect(pnlForOperationDate(dailyPnl, now)).toBe(100);
+  });
+
+  it('summarizes selected report ranges by record-level operation time', () => {
+    const now = Date.parse('2026-06-29T10:00:00.000Z');
+    const justOutside7d = now - 7 * 86400_000 - 1;
+    const justInside7d = now - 7 * 86400_000 + 1;
+    const details = buildOperationDailyPnlDetails([
+      record({ id: 'outside-7d', pnl: 1000, closedRealAt: justOutside7d }),
+      record({ id: 'inside-7d', pnl: 200, closedRealAt: justInside7d }),
+      record({ id: 'latest', pnl: -50, closedRealAt: now }),
+    ]);
+
+    expect(summarizeOperationPnlDetailsByRange(details, '7d', now)).toEqual({
+      pnl: 150,
+      trades: 2,
+    });
+    expect(summarizeOperationPnlDetailsByRange(details, '30d', now)).toEqual({
+      pnl: 1150,
+      trades: 3,
+    });
+    expect(summarizeOperationPnlDetailsByRange(details, 'all', now)).toEqual({
+      pnl: 1150,
+      trades: 3,
+    });
+  });
+
+  it('summarizes a selected calendar date from daily details', () => {
+    const details = buildOperationDailyPnlDetails([
+      record({ id: 'previous-day', pnl: 1000, closedRealAt: Date.parse('2026-06-28T10:00:00.000Z') }),
+      record({ id: 'day-win', pnl: 200, closedRealAt: Date.parse('2026-06-29T08:00:00.000Z') }),
+      record({ id: 'day-loss', pnl: -50, closedRealAt: Date.parse('2026-06-29T10:00:00.000Z') }),
+    ]);
+
+    expect(summarizeOperationPnlDetailsForDate(details, '2026-06-29')).toEqual({
+      pnl: 150,
+      trades: 2,
+    });
   });
 });

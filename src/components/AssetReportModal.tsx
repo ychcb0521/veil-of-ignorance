@@ -5,7 +5,11 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { cn } from '@/lib/utils';
 import type { AssetState, DailySymbolPnL } from '@/types/assets';
 import { formatUTC8 } from '@/lib/timeFormat';
-import { filterDailyPnlByRange, type AssetReportRange } from '@/lib/assetReport';
+import {
+  summarizeOperationPnlDetailsByRange,
+  summarizeOperationPnlDetailsForDate,
+  type AssetReportRange,
+} from '@/lib/assetReport';
 import { useAuth } from '@/contexts/AuthContext';
 import { listAllCampaigns, listUnclassifiedJournals } from '@/lib/journalApi';
 import type { TradeCampaign } from '@/types/journal';
@@ -38,12 +42,6 @@ function formatSignedMoney(value: number): string {
 function formatDayLabel(date: string): string {
   const [, month, day] = date.split('-');
   return `${month}/${day}`;
-}
-
-function operationDateAnchorMs(date: string | null | undefined): number | null {
-  if (!date) return null;
-  const parsed = Date.parse(`${date}T12:00:00+08:00`);
-  return Number.isFinite(parsed) ? parsed : null;
 }
 
 function buildCampaignSummaries(
@@ -144,34 +142,25 @@ export function AssetReportModal({ open, onClose, assets }: Props) {
     }));
   }, [filteredHistory]);
 
-  const rangeAnchorTime = useMemo(() => {
-    const latestOperationDate = dailyPnl[dailyPnl.length - 1]?.date ?? null;
-    return operationDateAnchorMs(latestOperationDate)
-      ?? history[history.length - 1]?.timestamp
-      ?? Date.now();
-  }, [dailyPnl, history]);
-
-  const filteredDailyPnl = useMemo(
-    () => filterDailyPnlByRange(dailyPnl, range, rangeAnchorTime),
-    [dailyPnl, range, rangeAnchorTime],
-  );
-
-  // Summary for the selected range or selected calendar day.
+  // Summary for the selected range or selected calendar day, based on record-level real operation time.
   const rangeStats = useMemo(() => {
     if (selectedDate) {
-      const selected = assets.dailyPnlDetails.find(item => item.date === selectedDate);
+      const selected = summarizeOperationPnlDetailsForDate(assets.dailyPnlDetails, selectedDate);
       return {
-        totalPnl: selected?.pnl ?? 0,
-        totalTrades: selected?.trades ?? 0,
+        totalPnl: selected.pnl,
+        totalTrades: selected.trades,
         pnlLabel: `${formatDayLabel(selectedDate)} 盈亏`,
         tradesLabel: `${formatDayLabel(selectedDate)} 笔数`,
       };
     }
-    const filtered = filteredDailyPnl;
-    const totalPnl = filtered.reduce((s, d) => s + d.pnl, 0);
-    const totalTrades = filtered.reduce((s, d) => s + d.trades, 0);
-    return { totalPnl, totalTrades, pnlLabel: '交易盈亏总额', tradesLabel: '交易笔数' };
-  }, [assets.dailyPnlDetails, filteredDailyPnl, selectedDate]);
+    const summary = summarizeOperationPnlDetailsByRange(assets.dailyPnlDetails, range);
+    return {
+      totalPnl: summary.pnl,
+      totalTrades: summary.trades,
+      pnlLabel: '交易盈亏总额',
+      tradesLabel: '交易笔数',
+    };
+  }, [assets.dailyPnlDetails, range, selectedDate]);
 
   // Build a map for calendar day PnL
   const pnlMap = useMemo(() => {
