@@ -1186,6 +1186,7 @@ export default function GuidePage() {
               </div>
               <P>归类历史交易时，先输入或选择标的，再从该币种所有时间段的仓位历史记录中勾选一组相关交易。被选中的记录共同构成一次交易战役。</P>
               <P>实时战役与历史归类战役必须隔离。实时战役在开仓时归属；历史归类只加入历史战役，不把回填数据混进实时训练口径。</P>
+              <P>战役列表顶部有一组很轻的排序入口，默认按<strong>真实操作时间</strong>排序；也可以按重要性、盈亏金额、盈亏百分比、字母顺序切换，并支持从大到小 / 从小到大双向排序。这里的操作时间指客观发生时间，不是时间机器里的模拟时间。</P>
               <P>互关账户可以打开彼此的战役详情，并留下带可信度权重的留言评价。外部校验只评价当时结构、证伪与执行是否自洽，不用后续走势倒推对错。</P>
 
               <SubTitle>战役详情页：K 线时间轴标注</SubTitle>
@@ -1196,6 +1197,7 @@ export default function GuidePage() {
                 <li><strong>Legs 列表每条腿都标明开仓/平仓时间、开仓价/平仓价、仓位与状态</strong>；还没平仓的腿，平仓时间与平仓价显示「—」。每条腿还单独列出<strong>该腿期间挂的反向对冲空单</strong>（委托价 / 委托时间 / 取消时间）。</li>
                 <li><strong>K 线前后区间自动囊括</strong> Legs 列表里最早的开单与最晚的平单，保证每条腿的进出场都落在可视范围内，不会被裁到屏幕外。</li>
                 <li>时间轴上用<strong>彩色竖线</strong>标注每条腿的开单 / 平单时刻——颜色区分方向、线型区分动作（见下表）。</li>
+                <li>同一时间出现多个事件时，标注会在垂直方向错开并对齐，且会跟随对应 K 线一起移动；缩放或拖动画面时不会丢失事件信息。</li>
               </ul>
               <div className="overflow-x-auto">
                 <table className="w-full text-[11px] my-3 border border-border rounded overflow-hidden">
@@ -1222,7 +1224,7 @@ export default function GuidePage() {
               <P>盘面下方有几个<strong>很隐形的小图标</strong>，用来按需开关叠加层，默认显示、可一键隐藏，避免信息互相打架：</P>
               <ul className="list-disc pl-6 text-[14px] text-foreground/90 space-y-1">
                 <li>
-                  <span style={{ color: '#F0B90B' }}>黄色「委托空单」层</span>（眼睛图标）：把这段战役里<strong>所有与主仓相反方向的委托空单</strong>按价格画成水平线——<strong>虚线 + ×</strong> = 已撤销 / 仍挂单中，<strong>实线</strong> = 已触发成交。原始盘面与反事实编辑器盘面共用同一套数据、同一个开关。
+                  <span style={{ color: '#F0B90B' }}>黄色「委托空单」层</span>（眼睛图标）：只呈现这段战役里<strong>真正用于对冲的委托空单</strong>，不包含维多的多单，也不包含委托止盈挂单。委托价画成水平线，委托 / 撤单都有对应竖线；<strong>虚线 + ×</strong> = 已撤销 / 仍挂单中，<strong>实线</strong> = 已触发成交。触发后的线段只延续到这条对冲被手动拆掉的时间点；如果期间没有手动拆掉，就延续到战役平仓时间。原始盘面与反事实编辑器盘面共用同一套数据、同一个开关。
                 </li>
                 <li>
                   <span style={{ color: '#B080FF' }}>紫色「补齐 / Pure SOP」对照层</span>（眼睛图标）：把所选反事实分支按标准 SOP 推演出的虚拟轨迹叠在真实盘面上；旁边的 <strong>ⓘ</strong> 图标展开标记说明（CF-M 主力、CF-A1~A6 加仓、CF-Ha/CF-Hb 初始对冲、CF-Hr 滚动对冲、CF-TP 镜像止盈、CF-Exit 平仓）。紫色是<strong>虚拟推演、不是真实成交</strong>。
@@ -1245,16 +1247,17 @@ export default function GuidePage() {
                 <li>每行 = 一条缺失的 SOP 腿（如缺初始对冲 A / B、缺 mirror_tp）。该模板要求主力 + 对冲 A + 对冲 B + mirror_tp 四条建仓腿，缺几条就列几行——和「你下了几个单」无关。</li>
                 <li><strong>代价 (USDT)</strong> 与 <strong>占本场盈亏 %</strong>（以本战役实际总盈亏的绝对值为分母）由引擎自动算出。</li>
                 <li>「违规阶段 / 违规描述 / 修正后」三列<strong>可手动改写</strong>，点「保存备注」存下；存在战役记录上，<strong>互关者也能读到</strong>，但只有本人能改。</li>
+                <li>只要填写了「修正后」，保存时系统会把这条内容连同「违规阶段 / 违规描述」汇总成一条<strong>战役偏离规则</strong>，自动写入复盘中心的「规则」页；重复保存同一条规则不会重复创建。</li>
               </ul>
               <Highlight>
-                这张表是系统对执行最锋利的一刀：总代价很小说明这场偏离基本无害；一旦很大（例如超过账户的 1%），就该把对应违规升级成开仓前 checklist 的强制规则。
+                这张表是系统对执行最锋利的一刀：总代价很小说明这场偏离基本无害；一旦很大（例如超过账户的 1%），就该把对应违规升级成开仓前 checklist 的强制规则。系统会先把它写成核心 checklist 规则；你再到规则页判断是否需要升级为必填或硬规则。
               </Highlight>
             </section>
 
             <section id="s4-5" className="scroll-mt-20">
               <SubTitle>4.5 规则</SubTitle>
               <P>规则不是独立写出来的口号，而是复盘系统的输出。它来自已发生的交易错误，并被写回下一次开仓前的 checklist。</P>
-              <P>规则生成有三条来源：</P>
+              <P>规则生成有四条来源：</P>
               <div className="overflow-x-auto">
                 <table className="w-full text-[11px] my-3 border border-border rounded overflow-hidden">
                   <thead className="bg-muted/50">
@@ -1267,11 +1270,12 @@ export default function GuidePage() {
                   <tbody>
                     <tr><td className="px-3 py-2 border-t border-border">六步深度分析</td><td className="px-3 py-2 border-t border-border">用户完成一笔交易的根因分析</td><td className="px-3 py-2 border-t border-border">Step 6 将结论转写为可检查规则，并可加入 checklist</td></tr>
                     <tr><td className="px-3 py-2 border-t border-border">Critical 错误类型</td><td className="px-3 py-2 border-t border-border">同一错误类型近期多次出现且平均亏损</td><td className="px-3 py-2 border-t border-border">系统强制弹出规则写入流程，避免重复错误继续裸奔</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border">交易战役偏离明细</td><td className="px-3 py-2 border-t border-border">反事实分支里填写了「修正后」</td><td className="px-3 py-2 border-t border-border">保存偏离备注时，系统把「违规操作 + 修正后的规则」写成核心 checklist 规则，并按规则文本去重</td></tr>
                     <tr><td className="px-3 py-2 border-t border-border">手动补充</td><td className="px-3 py-2 border-t border-border">用户发现某条原则需要前置到开仓前</td><td className="px-3 py-2 border-t border-border">在规则页直接写入，并决定是否启用、是否进入 checklist</td></tr>
                   </tbody>
                 </table>
               </div>
-              <P>生成原理是：先用错题集看见重复误差，再用复盘分析找出可操作的防错条件，最后把这个条件写成下次开仓前必须检查的规则。</P>
+              <P>生成原理是：先用错题集看见重复误差，或用交易战役反事实看见某个偏离动作真实付出了多少钱；再把原因压缩成可操作的防错条件，最后写成下次开仓前必须检查的规则。</P>
               <P>规则分四类：硬规则违反即阻断交易；核心规则必须进入 checklist；观察规则只记录不阻断；失效规则由元监控证明无效后归档。规则有权重，权重高的规则在 checklist 和元监控中优先展示。</P>
               <P>每条规则都有 0-5 的演化等级：0 是直觉，1 是已表述，2 是模式确认，3 是规则化，4 是算法化，5 是已证伪或已升级。升级必须依赖样本证据，不能靠当下感觉。</P>
               <P>规则修改属于“设计者-我”的工作。有进行中战役时，系统会锁定规则编辑，防止执行者-我在持仓压力下把规则重写成合理化借口。</P>

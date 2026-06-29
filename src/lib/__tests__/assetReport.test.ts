@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  buildOperationDailyPnlDetails,
   buildOperationDailyPnl,
   filterDailyPnlByRange,
   operationDateKey,
@@ -50,6 +51,66 @@ describe('asset report trade summaries', () => {
 
     expect(tradeRecordOperationTime(oldRecord)).toBeNull();
     expect(buildOperationDailyPnl([oldRecord])).toEqual([]);
+    expect(buildOperationDailyPnlDetails([oldRecord])).toEqual([]);
+  });
+
+  it('groups operation-day detail by traded symbol with record-level PnL', () => {
+    const day = Date.parse('2026-06-29T06:57:49.000Z');
+
+    expect(buildOperationDailyPnlDetails([
+      record({ id: 'power-win', symbol: 'POWERUSDT', pnl: 100, fee: 2, closedRealAt: day + 2_000 }),
+      record({ id: 'jelly-loss', symbol: 'JELLYJELLYUSDT', pnl: -25, fee: 1, closedRealAt: day + 1_000 }),
+      record({ id: 'power-add', symbol: 'POWERUSDT', pnl: 40, closedRealAt: day + 3_000 }),
+    ])).toEqual([
+      {
+        date: '2026-06-29',
+        pnl: 115,
+        trades: 3,
+        symbols: [
+          {
+            symbol: 'POWERUSDT',
+            pnl: 140,
+            trades: 2,
+            records: [
+              {
+                id: 'power-win',
+                symbol: 'POWERUSDT',
+                side: 'LONG',
+                action: 'CLOSE',
+                pnl: 100,
+                fee: 2,
+                operationTime: day + 2_000,
+              },
+              {
+                id: 'power-add',
+                symbol: 'POWERUSDT',
+                side: 'LONG',
+                action: 'CLOSE',
+                pnl: 40,
+                fee: 0,
+                operationTime: day + 3_000,
+              },
+            ],
+          },
+          {
+            symbol: 'JELLYJELLYUSDT',
+            pnl: -25,
+            trades: 1,
+            records: [
+              {
+                id: 'jelly-loss',
+                symbol: 'JELLYJELLYUSDT',
+                side: 'LONG',
+                action: 'CLOSE',
+                pnl: -25,
+                fee: 1,
+                operationTime: day + 1_000,
+              },
+            ],
+          },
+        ],
+      },
+    ]);
   });
 
   it('filters summary rows by operation date range', () => {

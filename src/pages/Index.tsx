@@ -27,7 +27,7 @@ import { CoolingOffModal, useCoolingOff } from "@/components/CoolingOffModal";
 import { getConditionalTriggerDecisionFromRange } from "@/lib/conditionalOrders";
 import { fetchCanonicalTimePriceAt } from "@/lib/canonicalTimePrice";
 import { applyCurrentPriceToVisibleData } from "@/lib/visibleDataPrice";
-import { buildOperationDailyPnl } from "@/lib/assetReport";
+import { buildOperationDailyPnl, buildOperationDailyPnlDetails } from "@/lib/assetReport";
 import { toast } from "sonner";
 import { Wallet, Crosshair, BookOpen, Tag } from "lucide-react";
 import { Link } from "react-router-dom";
@@ -875,6 +875,7 @@ const Index = () => {
     }
 
     const dailyPnl = buildOperationDailyPnl(tradeHistory);
+    const dailyPnlDetails = buildOperationDailyPnlDetails(tradeHistory);
 
     const futuresBalance = totalBalance;
     return {
@@ -894,6 +895,7 @@ const Index = () => {
       ],
       history,
       dailyPnl,
+      dailyPnlDetails,
     };
   }, [balance, positionsMap, displayPriceMap, tradeHistory, activeCoinState.time, profile]);
 

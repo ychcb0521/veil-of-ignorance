@@ -1,17 +1,28 @@
-import { useState, useMemo } from 'react';
-import { X, TrendingUp, TrendingDown, BarChart3, Calendar as CalendarIcon, ChevronLeft, ChevronRight } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { BarChart3, Calendar as CalendarIcon, ChevronLeft, ChevronRight, ExternalLink } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { Calendar } from '@/components/ui/calendar';
 import { cn } from '@/lib/utils';
-import type { AssetState, AssetSnapshot, DailyPnL } from '@/types/assets';
+import type { AssetState, DailySymbolPnL } from '@/types/assets';
 import { formatUTC8 } from '@/lib/timeFormat';
 import { filterDailyPnlByRange, type AssetReportRange } from '@/lib/assetReport';
+import { useAuth } from '@/contexts/AuthContext';
+import { listAllCampaigns, listUnclassifiedJournals } from '@/lib/journalApi';
+import type { TradeCampaign } from '@/types/journal';
 import {
-  LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, Area, AreaChart,
+  XAxis, YAxis, Tooltip, ResponsiveContainer, Area, AreaChart,
   CartesianGrid,
 } from 'recharts';
 
 type TimeRange = AssetReportRange;
+
+interface CampaignPnlSummary {
+  key: string;
+  campaign: TradeCampaign | null;
+  title: string;
+  pnl: number;
+  trades: number;
+}
 
 interface Props {
   open: boolean;
@@ -19,9 +30,90 @@ interface Props {
   assets: AssetState;
 }
 
+function formatSignedMoney(value: number): string {
+  const sign = value >= 0 ? '+' : '';
+  return `${sign}$${value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+function formatDayLabel(date: string): string {
+  const [, month, day] = date.split('-');
+  return `${month}/${day}`;
+}
+
+function buildCampaignSummaries(
+  symbolDetail: DailySymbolPnL,
+  recordCampaignMap: Map<string, TradeCampaign>,
+): CampaignPnlSummary[] {
+  const rows = new Map<string, CampaignPnlSummary>();
+  for (const record of symbolDetail.records) {
+    const campaign = recordCampaignMap.get(record.id) ?? null;
+    const key = campaign?.id ?? 'unclassified';
+    const current = rows.get(key) ?? {
+      key,
+      campaign,
+      title: campaign?.title ?? '未归类交易',
+      pnl: 0,
+      trades: 0,
+    };
+    current.pnl += record.pnl;
+    current.trades += 1;
+    rows.set(key, current);
+  }
+
+  return [...rows.values()].sort((a, b) => {
+    if (a.campaign && !b.campaign) return -1;
+    if (!a.campaign && b.campaign) return 1;
+    return Math.abs(b.pnl) - Math.abs(a.pnl) || a.title.localeCompare(b.title);
+  });
+}
+
 export function AssetReportModal({ open, onClose, assets }: Props) {
+  const nav = useNavigate();
+  const { user } = useAuth();
   const [range, setRange] = useState<TimeRange>('30d');
-  const { history, dailyPnl, todayPnl, todayPnlPct } = assets;
+  const [selectedDate, setSelectedDate] = useState<string | null>(null);
+  const [campaigns, setCampaigns] = useState<TradeCampaign[]>([]);
+  const [journalRecordCampaignPairs, setJournalRecordCampaignPairs] = useState<Array<{ recordId: string; campaignId: string }>>([]);
+  const [campaignLoadError, setCampaignLoadError] = useState<string | null>(null);
+  const { history, dailyPnl } = assets;
+
+  useEffect(() => {
+    if (!open) return;
+    if (!user?.id) {
+      setCampaigns([]);
+      setJournalRecordCampaignPairs([]);
+      return;
+    }
+
+    let cancelled = false;
+    setCampaignLoadError(null);
+    Promise.all([
+      listAllCampaigns(user.id, { status: 'all' }),
+      listUnclassifiedJournals(user.id, { includeClassified: true }),
+    ])
+      .then(([campaignRows, journalRows]) => {
+        if (cancelled) return;
+        setCampaigns(campaignRows);
+        setJournalRecordCampaignPairs(
+          journalRows
+            .filter(journal => journal.trade_record_id && journal.campaign_id)
+            .map(journal => ({
+              recordId: journal.trade_record_id!,
+              campaignId: journal.campaign_id!,
+            })),
+        );
+      })
+      .catch(error => {
+        if (cancelled) return;
+        setCampaigns([]);
+        setJournalRecordCampaignPairs([]);
+        setCampaignLoadError(error instanceof Error ? error.message : String(error));
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [open, user?.id]);
 
   // Filter history by range
   const filteredHistory = useMemo(() => {
@@ -60,6 +152,28 @@ export function AssetReportModal({ open, onClose, assets }: Props) {
     dailyPnl.forEach(d => map.set(d.date, d.pnl));
     return map;
   }, [dailyPnl]);
+
+  const dailyDetailMap = useMemo(
+    () => new Map(assets.dailyPnlDetails.map(item => [item.date, item])),
+    [assets.dailyPnlDetails],
+  );
+
+  const selectedDayDetail = selectedDate ? dailyDetailMap.get(selectedDate) ?? null : null;
+
+  const recordCampaignMap = useMemo(() => {
+    const map = new Map<string, TradeCampaign>();
+    const campaignById = new Map(campaigns.map(campaign => [campaign.id, campaign]));
+    campaigns.forEach(campaign => {
+      (campaign.actual_evolution ?? []).forEach(event => {
+        if (event.trade_record_id) map.set(event.trade_record_id, campaign);
+      });
+    });
+    journalRecordCampaignPairs.forEach(pair => {
+      const campaign = campaignById.get(pair.campaignId);
+      if (campaign) map.set(pair.recordId, campaign);
+    });
+    return map;
+  }, [campaigns, journalRecordCampaignPairs]);
 
   // Outlier detection: top/bottom 5% by absolute PnL
   const outlierDates = useMemo(() => {
@@ -107,6 +221,11 @@ export function AssetReportModal({ open, onClose, assets }: Props) {
     { key: '90d', label: '90天' },
     { key: 'all', label: '全部' },
   ];
+
+  const goToCampaign = (campaignId: string) => {
+    onClose();
+    nav(`/journal/campaigns/${campaignId}`);
+  };
 
   return (
     <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
@@ -274,14 +393,18 @@ export function AssetReportModal({ open, onClose, assets }: Props) {
                 const isLoss = hasPnl && cell.pnl! < 0;
                 const isOutlier = outlierDates.has(cell.date);
                 return (
-                  <div
+                  <button
+                    type="button"
                     key={i}
+                    onClick={() => setSelectedDate(cell.date)}
                     className={cn(
-                      'h-12 rounded-md flex flex-col items-center justify-center text-center relative',
+                      'h-12 rounded-md flex flex-col items-center justify-center text-center relative transition-colors',
+                      'hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/70',
                       isProfit && 'bg-[hsl(160,72%,43%)]/15',
                       isLoss && 'bg-[hsl(354,91%,62%)]/15',
                       !hasPnl && 'bg-secondary/20',
                       isOutlier && 'ring-2 ring-yellow-400/70 ring-inset',
+                      selectedDate === cell.date && 'ring-2 ring-primary ring-inset',
                     )}
                   >
                     <span className="text-[10px] text-muted-foreground leading-none">{cell.day}</span>
@@ -297,9 +420,122 @@ export function AssetReportModal({ open, onClose, assets }: Props) {
                     ) : (
                       <span className="text-[9px] text-muted-foreground/30 leading-tight mt-0.5">-</span>
                     )}
-                  </div>
+                  </button>
                 );
               })}
+            </div>
+
+            <div className="mt-3 rounded-md border border-border/50 bg-background/50 p-3">
+              {selectedDate ? (
+                selectedDayDetail ? (
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <div className="text-[11px] font-medium text-foreground">
+                          {selectedDate} 当日交易
+                        </div>
+                        <div className="text-[10px] text-muted-foreground">
+                          {selectedDayDetail.symbols.length} 个币种 · {selectedDayDetail.trades} 笔
+                          {campaignLoadError ? ' · 战役归属暂不可用' : ''}
+                        </div>
+                      </div>
+                      <div className={cn(
+                        'font-mono text-[13px] font-bold',
+                        selectedDayDetail.pnl >= 0 ? 'trading-green' : 'trading-red',
+                      )}>
+                        {formatSignedMoney(selectedDayDetail.pnl)}
+                      </div>
+                    </div>
+
+                    <div className="space-y-1.5 max-h-[210px] overflow-y-auto pr-1">
+                      {selectedDayDetail.symbols.map(symbolDetail => {
+                        const campaignSummaries = buildCampaignSummaries(symbolDetail, recordCampaignMap);
+                        const linkedCampaigns = campaignSummaries.filter(row => row.campaign);
+                        const uniqueCampaign = linkedCampaigns.length === 1 ? linkedCampaigns[0].campaign : null;
+                        return (
+                          <div key={symbolDetail.symbol} className="rounded-md border border-border/50 bg-card/50 p-2">
+                            <button
+                              type="button"
+                              disabled={!uniqueCampaign}
+                              onClick={() => uniqueCampaign && goToCampaign(uniqueCampaign.id)}
+                              className={cn(
+                                'w-full flex items-center justify-between gap-3 text-left',
+                                uniqueCampaign ? 'hover:text-primary transition-colors' : 'cursor-default',
+                              )}
+                            >
+                              <div className="min-w-0">
+                                <div className="flex items-center gap-2 min-w-0">
+                                  <span className="font-mono text-[12px] font-semibold text-foreground truncate">
+                                    {symbolDetail.symbol}
+                                  </span>
+                                  <span className="text-[10px] text-muted-foreground">
+                                    {symbolDetail.trades} 笔
+                                  </span>
+                                  {uniqueCampaign && <ExternalLink className="w-3 h-3 text-muted-foreground shrink-0" />}
+                                </div>
+                                <div className="text-[10px] text-muted-foreground truncate">
+                                  {linkedCampaigns.length === 0
+                                    ? '未归类到交易战役'
+                                    : linkedCampaigns.length === 1
+                                      ? linkedCampaigns[0].title
+                                      : `${linkedCampaigns.length} 个交易战役`}
+                                </div>
+                              </div>
+                              <div className={cn(
+                                'font-mono text-[12px] font-bold shrink-0',
+                                symbolDetail.pnl >= 0 ? 'trading-green' : 'trading-red',
+                              )}>
+                                {formatSignedMoney(symbolDetail.pnl)}
+                              </div>
+                            </button>
+
+                            {(campaignSummaries.length > 1 || linkedCampaigns.length !== 1) && (
+                              <div className="mt-1.5 space-y-1">
+                                {campaignSummaries.map(row => (
+                                  row.campaign ? (
+                                    <button
+                                      key={row.key}
+                                      type="button"
+                                      onClick={() => goToCampaign(row.campaign!.id)}
+                                      className="w-full flex items-center justify-between gap-2 rounded border border-border/40 bg-background/60 px-2 py-1 text-left hover:border-primary/50 hover:text-primary transition-colors"
+                                    >
+                                      <span className="truncate text-[10px]">{row.title}</span>
+                                      <span className={cn(
+                                        'font-mono text-[10px] shrink-0',
+                                        row.pnl >= 0 ? 'trading-green' : 'trading-red',
+                                      )}>
+                                        {formatSignedMoney(row.pnl)} · {row.trades} 笔
+                                      </span>
+                                    </button>
+                                  ) : (
+                                    <div
+                                      key={row.key}
+                                      className="flex items-center justify-between gap-2 rounded border border-border/30 bg-background/40 px-2 py-1 text-[10px] text-muted-foreground"
+                                    >
+                                      <span>{row.title}</span>
+                                      <span className={cn('font-mono', row.pnl >= 0 ? 'trading-green' : 'trading-red')}>
+                                        {formatSignedMoney(row.pnl)} · {row.trades} 笔
+                                      </span>
+                                    </div>
+                                  )
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="text-[11px] text-muted-foreground">
+                    {formatDayLabel(selectedDate)} 没有可按真实操作时间归集的交易记录。
+                  </div>
+                )
+              ) : (
+                <div className="text-[11px] text-muted-foreground">
+                  点击日历中的日期，查看当天交易过的币种、盈亏和对应交易战役。
+                </div>
+              )}
             </div>
           </div>
         </div>
