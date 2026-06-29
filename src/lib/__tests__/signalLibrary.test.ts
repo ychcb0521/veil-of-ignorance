@@ -12,8 +12,11 @@ import {
   signalMonthKey,
   listSignalMonths,
   SIGNAL_LIBRARY_STORAGE_KEY,
+  SIGNAL_LIBRARY_DEFAULT_VERSION,
+  SIGNAL_LIBRARY_DEFAULT_VERSION_KEY,
   type TradeSignal,
 } from '@/lib/signalLibrary';
+import { DEFAULT_SIGNAL_LIBRARY_TEXT } from '@/lib/defaultSignalLibrary';
 
 const UTC8 = (y: number, mo: number, d: number, h: number, mi: number, s = 0) =>
   Date.UTC(y, mo - 1, d, h, mi, s) - 8 * 3600_000;
@@ -270,19 +273,26 @@ describe('listSignalMonths', () => {
 
 describe('default signal library', () => {
   it('parses the bundled default library from the provided source text', () => {
+    const parsedDefault = parseSignalText(DEFAULT_SIGNAL_LIBRARY_TEXT);
+    expect(parsedDefault.errors).toHaveLength(0);
+
     const defaults = getDefaultSignals();
-    expect(defaults.length).toBeGreaterThan(250);
+    expect(defaults.length).toBe(parsedDefault.signals.length);
+    expect(defaults.length).toBeGreaterThan(850);
     expect(defaults[0]).toMatchObject({
-      id: expect.stringMatching(/^default-JTOUSDT-/),
-      symbol: 'JTOUSDT',
-      fallbackZone: '0.708',
+      id: expect.stringMatching(/^default-RAVEUSDT-/),
+      symbol: 'RAVEUSDT',
+      fallbackZone: '0.477',
     });
+    expect(defaults.some(s => s.symbol === 'KGENUSDT' && s.timeLabel === '2026-06-28 02:36:00' && s.fallbackZone === '0.221')).toBe(true);
+    expect(defaults.some(s => s.symbol === 'BLUAIUSDT' && s.timeLabel === '2026-06-06 17:09:00' && s.fallbackZone === '0.017')).toBe(true);
     expect(defaults.some(s => s.symbol === 'PUMPBTCUSDT' && s.timeLabel === '2025-09-22 18:33:00')).toBe(true);
     expect(defaults.some(s => s.symbol === 'PROMPTUSDT' && s.fallbackZone === '0.475')).toBe(true);
   });
 
   it('uses the bundled library only before the user has a local signal library', () => {
     window.localStorage.removeItem(SIGNAL_LIBRARY_STORAGE_KEY);
+    window.localStorage.removeItem(SIGNAL_LIBRARY_DEFAULT_VERSION_KEY);
     expect(loadSignals().length).toBe(getDefaultSignals().length);
 
     saveSignals([]);
@@ -292,6 +302,36 @@ describe('default signal library', () => {
       { id: 'custom-1', symbol: 'BTCUSDT', timeMs: 100, timeLabel: '2026-01-01 00:00:00', fallbackZone: '1' },
     ];
     saveSignals(custom);
+    expect(loadSignals()).toEqual(custom);
+  });
+
+  it('migrates an old saved bundled library by merging in the updated defaults', () => {
+    const oldBundled: TradeSignal[] = [
+      {
+        id: 'default-JTOUSDT-old',
+        symbol: 'JTOUSDT',
+        timeMs: parseSignalTime('2026-06-15 23:14:00')!,
+        timeLabel: '2026-06-15 23:14:00',
+        fallbackZone: '0.708',
+      },
+    ];
+    window.localStorage.setItem(SIGNAL_LIBRARY_STORAGE_KEY, JSON.stringify(oldBundled));
+    window.localStorage.removeItem(SIGNAL_LIBRARY_DEFAULT_VERSION_KEY);
+
+    const migrated = loadSignals();
+
+    expect(migrated.some(s => s.symbol === 'JTOUSDT' && s.timeLabel === '2026-06-15 23:14:00')).toBe(true);
+    expect(migrated.some(s => s.symbol === 'RAVEUSDT' && s.timeLabel === '2026-06-29 16:19:00')).toBe(true);
+    expect(window.localStorage.getItem(SIGNAL_LIBRARY_DEFAULT_VERSION_KEY)).toBe(SIGNAL_LIBRARY_DEFAULT_VERSION);
+  });
+
+  it('does not merge bundled defaults into a legacy custom-only library', () => {
+    const custom: TradeSignal[] = [
+      { id: 'custom-legacy', symbol: 'BTCUSDT', timeMs: 100, timeLabel: '2026-01-01 00:00:00', fallbackZone: '1' },
+    ];
+    window.localStorage.setItem(SIGNAL_LIBRARY_STORAGE_KEY, JSON.stringify(custom));
+    window.localStorage.removeItem(SIGNAL_LIBRARY_DEFAULT_VERSION_KEY);
+
     expect(loadSignals()).toEqual(custom);
   });
 });

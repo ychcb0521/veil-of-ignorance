@@ -30,6 +30,8 @@ export interface TradeSignal {
 }
 
 export const SIGNAL_LIBRARY_STORAGE_KEY = 'veil.signalLibrary.v1';
+export const SIGNAL_LIBRARY_DEFAULT_VERSION = '202606292355';
+export const SIGNAL_LIBRARY_DEFAULT_VERSION_KEY = 'veil.signalLibrary.defaultVersion';
 
 const HEADER_TIME_RE = /^(time|时间|日期|date)$/i;
 
@@ -257,9 +259,19 @@ export function loadSignals(): TradeSignal[] {
     if (raw == null) return getDefaultSignals();
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) return getDefaultSignals();
-    return parsed.filter((s): s is TradeSignal =>
+    const localSignals = parsed.filter((s): s is TradeSignal =>
       s && typeof s.id === 'string' && typeof s.symbol === 'string'
       && typeof s.timeMs === 'number' && Number.isFinite(s.timeMs));
+    if (localSignals.length === 0) return [];
+
+    const localVersion = window.localStorage.getItem(SIGNAL_LIBRARY_DEFAULT_VERSION_KEY);
+    const carriesBundledDefaults = localSignals.some(s => s.id.startsWith('default-'));
+    if (localVersion !== SIGNAL_LIBRARY_DEFAULT_VERSION && carriesBundledDefaults) {
+      const merged = mergeSignals(localSignals, getDefaultSignals());
+      saveSignals(merged);
+      return merged;
+    }
+    return localSignals;
   } catch {
     return getDefaultSignals();
   }
@@ -269,6 +281,7 @@ export function saveSignals(list: TradeSignal[]): void {
   if (typeof window === 'undefined') return;
   try {
     window.localStorage.setItem(SIGNAL_LIBRARY_STORAGE_KEY, JSON.stringify(list));
+    window.localStorage.setItem(SIGNAL_LIBRARY_DEFAULT_VERSION_KEY, SIGNAL_LIBRARY_DEFAULT_VERSION);
   } catch {
     /* ignore quota / serialization errors */
   }
