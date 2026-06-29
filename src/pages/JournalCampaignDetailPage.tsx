@@ -1192,6 +1192,9 @@ export default function JournalCampaignDetailPage() {
             timezone={LOCAL_TIME_ZONE}
             whatIfRunning={whatIfRunning}
             onRunWhatIf={handleRunWhatIf}
+            baseMarkers={chart.markers}
+            baseTimeBoundPriceLines={chart.timeBoundPriceLines}
+            baseVerticalLines={chart.verticalLines}
             orderInfoPriceLines={showOrderInfo ? orderInfoPriceLines : []}
           />
 

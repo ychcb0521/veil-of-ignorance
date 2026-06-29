@@ -40,44 +40,11 @@ function dedupeReverseOrderLines(lines: TimeBoundPriceLine[]) {
     ].join(':');
     if (!result.has(key)) result.set(key, line);
   }
-  return Array.from(result.values()).sort((a, b) => a.startTime - b.startTime || a.endTime - b.endTime);
-}
-
-function keepDashedReverseOrderIntervalsVisible(lines: TimeBoundPriceLine[]) {
-  const dashedLines = lines.filter(line => line.dashed);
-  const solidLines = lines.filter(line => !line.dashed);
-  const trimmedSolidLines = solidLines.flatMap(line => {
-    const blockers = dashedLines
-      .filter(dashedLine =>
-        closeEnoughPrice(dashedLine.price, line.price) &&
-        dashedLine.startTime < line.endTime &&
-        dashedLine.endTime > line.startTime
-      )
-      .sort((a, b) => a.startTime - b.startTime || a.endTime - b.endTime);
-    let intervals = [{ startTime: line.startTime, endTime: line.endTime }];
-    for (const blocker of blockers) {
-      intervals = intervals.flatMap(interval => {
-        const overlapStart = Math.max(interval.startTime, blocker.startTime);
-        const overlapEnd = Math.min(interval.endTime, blocker.endTime);
-        if (overlapEnd <= overlapStart) return [interval];
-        const nextIntervals: typeof intervals = [];
-        if (interval.startTime < overlapStart) {
-          nextIntervals.push({ startTime: interval.startTime, endTime: overlapStart });
-        }
-        if (overlapEnd < interval.endTime) {
-          nextIntervals.push({ startTime: overlapEnd, endTime: interval.endTime });
-        }
-        return nextIntervals;
-      });
-    }
-    return intervals.map(interval => ({
-      ...line,
-      startTime: interval.startTime,
-      endTime: interval.endTime,
-    }));
-  });
-
-  return [...dashedLines, ...trimmedSolidLines];
+  return Array.from(result.values()).sort((a, b) =>
+    Number(Boolean(b.dashed)) - Number(Boolean(a.dashed))
+    || a.startTime - b.startTime
+    || a.endTime - b.endTime
+  );
 }
 
 export function buildCampaignReverseOrderPriceLines(
@@ -130,5 +97,5 @@ export function buildCampaignReverseOrderPriceLines(
       };
     });
 
-  return dedupeReverseOrderLines(keepDashedReverseOrderIntervalsVisible(segments));
+  return dedupeReverseOrderLines(segments);
 }

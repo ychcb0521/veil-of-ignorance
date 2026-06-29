@@ -3,7 +3,7 @@ import { Plus, RotateCcw, Trash2, TrendingUp } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { ReplayKlineChart } from '@/components/journal/ReplayKlineChart';
-import { type TimeBoundPriceLine } from '@/components/journal/ReplayCandleChart';
+import { type ChartMarker, type TimeBoundPriceLine, type VerticalLine } from '@/components/journal/ReplayCandleChart';
 import { type AnalysisDraggableVerticalLine } from '@/components/CandlestickChart';
 import { intervalToMs, type KlineData } from '@/hooks/useBinanceData';
 import {
@@ -35,6 +35,12 @@ interface Props {
   timezone?: string;
   whatIfRunning: boolean;
   onRunWhatIf: (label: string, params: CampaignCounterfactualParams) => void;
+  /** 原始交易战役盘面标记：反事实盘面用作只读背景，避免丢失原始上下文。 */
+  baseMarkers?: ChartMarker[];
+  /** 原始交易战役盘面横向区间线：对冲/TP 等只读背景。 */
+  baseTimeBoundPriceLines?: TimeBoundPriceLine[];
+  /** 原始交易战役盘面竖线：开仓、平仓和战役边界只读背景。 */
+  baseVerticalLines?: VerticalLine[];
   /** 「委托空单（黄色）」挂单层：与原始战役盘面同一套数据，由父组件按开关传入；空数组即不显示。 */
   orderInfoPriceLines?: TimeBoundPriceLine[];
 }
@@ -112,6 +118,9 @@ export function CampaignWhatIfEditor({
   timezone,
   whatIfRunning,
   onRunWhatIf,
+  baseMarkers = [],
+  baseTimeBoundPriceLines = [],
+  baseVerticalLines = [],
   orderInfoPriceLines = [],
 }: Props) {
   const actualDefaults = useMemo(() => buildActualSimulationParams(campaign, legs, tradeRecords), [campaign, legs, tradeRecords]);
@@ -319,7 +328,12 @@ export function CampaignWhatIfEditor({
               symbol={campaign.symbol}
               fitAll
               showLastPriceLine={false}
-              timeBoundPriceLines={orderInfoPriceLines}
+              markers={baseMarkers}
+              timeBoundPriceLines={[
+                ...baseTimeBoundPriceLines,
+                ...orderInfoPriceLines,
+              ]}
+              verticalLines={baseVerticalLines}
               draggableVerticalLines={verticalLines}
               onDragVerticalLine={handleDragVerticalLine}
               onSelectVerticalLine={handleSelectVerticalLine}
