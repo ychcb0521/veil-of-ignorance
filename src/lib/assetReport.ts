@@ -29,6 +29,15 @@ export function buildOperationDailyPnl(records: TradeRecord[]): DailyPnL[] {
     .sort((a, b) => a.date.localeCompare(b.date));
 }
 
+export function pnlForOperationDate(
+  dailyPnl: DailyPnL[],
+  timestamp = Date.now(),
+): number {
+  const date = operationDateKey(timestamp);
+  if (!date) return 0;
+  return dailyPnl.find(item => item.date === date)?.pnl ?? 0;
+}
+
 export function buildOperationDailyPnlDetails(records: TradeRecord[]): DailyPnLDetail[] {
   const dailyMap = new Map<string, Map<string, DailyTradePnLRecord[]>>();
 

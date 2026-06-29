@@ -5,6 +5,7 @@ import {
   buildOperationDailyPnl,
   filterDailyPnlByRange,
   operationDateKey,
+  pnlForOperationDate,
   tradeRecordOperationTime,
 } from '../assetReport';
 import type { TradeRecord } from '@/types/trading';
@@ -127,5 +128,16 @@ describe('asset report trade summaries', () => {
       { date: '2026-06-29', pnl: 30, trades: 2 },
     ]);
     expect(filterDailyPnlByRange(dailyPnl, 'all', today)).toEqual(dailyPnl);
+  });
+
+  it('returns only the PnL for the objective operation date', () => {
+    const now = Date.parse('2026-06-29T06:57:49.000Z');
+    const dailyPnl = buildOperationDailyPnl([
+      record({ id: 'previous-day', pnl: 999, closedRealAt: Date.parse('2026-06-28T10:00:00.000Z') }),
+      record({ id: 'today-win', pnl: 125, closedRealAt: now }),
+      record({ id: 'today-loss', pnl: -25, closedRealAt: now + 60_000 }),
+    ]);
+
+    expect(pnlForOperationDate(dailyPnl, now)).toBe(100);
   });
 });
