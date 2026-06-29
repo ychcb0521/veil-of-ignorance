@@ -71,11 +71,12 @@ vi.mock('@/integrations/supabase/client', () => ({
   },
 }));
 
-import { syncCampaignDeviationRulesToChecklist } from '@/lib/journalApi';
+import { getLocalTradingRuleSourceCampaigns, syncCampaignDeviationRulesToChecklist } from '@/lib/journalApi';
 
 describe('syncCampaignDeviationRulesToChecklist', () => {
   beforeEach(() => {
     mocks.reset();
+    localStorage.clear();
   });
 
   it('把偏离明细里的修正规则写入交易规则 checklist', async () => {
@@ -89,6 +90,7 @@ describe('syncCampaignDeviationRulesToChecklist', () => {
         },
       },
       [{ legId: 'leg-1', leg_role: 'Hedge_rolling', cost_usdt: 963.64 }],
+      'campaign-1',
     );
 
     expect(result).toEqual({ drafts: 1, created: 1, skipped: 0 });
@@ -104,6 +106,9 @@ describe('syncCampaignDeviationRulesToChecklist', () => {
       evolution_level: 3,
     });
     expect(mocks.tables.trading_rules[0].activated_at).toBeTruthy();
+    expect(getLocalTradingRuleSourceCampaigns('user-1')).toEqual({
+      '【战役偏离】违规操作：滚动对冲：触发后手动拆掉太早。修正后的规则：触发后的委托空只延续到手动拆掉时间点': 'campaign-1',
+    });
   });
 
   it('再次同步同一条规则时不重复创建', async () => {
@@ -114,10 +119,13 @@ describe('syncCampaignDeviationRulesToChecklist', () => {
     };
     const costs = [{ legId: 'leg-1', leg_role: 'Hedge_rolling', cost_usdt: 100 }];
 
-    await syncCampaignDeviationRulesToChecklist('user-1', notes, costs);
-    const result = await syncCampaignDeviationRulesToChecklist('user-1', notes, costs);
+    await syncCampaignDeviationRulesToChecklist('user-1', notes, costs, 'campaign-1');
+    const result = await syncCampaignDeviationRulesToChecklist('user-1', notes, costs, 'campaign-1');
 
     expect(result).toEqual({ drafts: 1, created: 0, skipped: 1 });
     expect(mocks.tables.trading_rules).toHaveLength(1);
+    expect(getLocalTradingRuleSourceCampaigns('user-1')).toEqual({
+      '【战役偏离】违规操作：Hedge_rolling。修正后的规则：当前偏离必须先写成可检查规则': 'campaign-1',
+    });
   });
 });

@@ -232,6 +232,7 @@ const TRADE_CAMPAIGNS_STORAGE_KEY = 'trade_campaigns';
 const TRADE_CAMPAIGN_PREFS_STORAGE_KEY = 'trade_campaign_preferences';
 const CAMPAIGN_COUNTERFACTUALS_STORAGE_KEY = 'campaign_counterfactuals';
 const CAMPAIGN_DEVIATION_NOTES_STORAGE_KEY = 'campaign_deviation_notes';
+const TRADING_RULE_SOURCE_CAMPAIGNS_STORAGE_KEY = 'trading_rule_source_campaigns';
 const ACCOUNT_FOLLOWS_STORAGE_KEY = 'account_follows';
 const MAX_LOCAL_CAMPAIGN_COUNTERFACTUALS = 50;
 
@@ -798,6 +799,30 @@ function writeLocalCampaignDeviationNotes(
   const current = readLocalCampaignDeviationNotesMap(userId);
   current[campaignId] = normalizeCampaignDeviationNotes(notes);
   writeUserScopedStorage(userId, CAMPAIGN_DEVIATION_NOTES_STORAGE_KEY, current);
+}
+
+function readLocalTradingRuleSourceCampaigns(userId: string): Record<string, string> {
+  const raw = readUserScopedStorage<unknown>(userId, TRADING_RULE_SOURCE_CAMPAIGNS_STORAGE_KEY, {});
+  if (!isRecord(raw)) return {};
+  return Object.entries(raw).reduce<Record<string, string>>((acc, [ruleText, campaignId]) => {
+    if (typeof campaignId !== 'string' || !campaignId) return acc;
+    const normalized = normalizeDeviationRuleText(ruleText);
+    if (normalized) acc[normalized] = campaignId;
+    return acc;
+  }, {});
+}
+
+function writeLocalTradingRuleSourceCampaign(userId: string, ruleText: string, campaignId: string): void {
+  const normalized = normalizeDeviationRuleText(ruleText);
+  if (!normalized || !campaignId) return;
+  writeUserScopedStorage(userId, TRADING_RULE_SOURCE_CAMPAIGNS_STORAGE_KEY, {
+    ...readLocalTradingRuleSourceCampaigns(userId),
+    [normalized]: campaignId,
+  });
+}
+
+export function getLocalTradingRuleSourceCampaigns(userId: string): Record<string, string> {
+  return readLocalTradingRuleSourceCampaigns(userId);
 }
 
 function mergeDeviationNotes(
@@ -3987,6 +4012,7 @@ export async function syncCampaignDeviationRulesToChecklist(
   userId: string,
   notes: Record<string, CampaignDeviationNote>,
   costs: ManualLegDeviationCost[],
+  sourceCampaignId?: string,
 ): Promise<SyncCampaignDeviationRulesResult> {
   const drafts = buildCampaignDeviationRuleDrafts(notes, costs);
   if (drafts.length === 0) return { drafts: 0, created: 0, skipped: 0 };
@@ -4000,6 +4026,9 @@ export async function syncCampaignDeviationRulesToChecklist(
   let skipped = 0;
   for (const draft of drafts) {
     const normalized = normalizeDeviationRuleText(draft.ruleText);
+    if (sourceCampaignId) {
+      writeLocalTradingRuleSourceCampaign(userId, normalized, sourceCampaignId);
+    }
     if (existingTexts.has(normalized)) {
       skipped += 1;
       continue;

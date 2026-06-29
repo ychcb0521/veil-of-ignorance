@@ -28,6 +28,15 @@ export function normalizeDeviationRuleText(value: string): string {
   return cleanText(value);
 }
 
+export function buildCampaignDeviationRuleTextFromNote(
+  note: CampaignDeviationNote,
+  cost?: ManualLegDeviationCost,
+): string | null {
+  const fix = cleanText(note.fix);
+  if (!fix) return null;
+  return normalizeDeviationRuleText(buildRuleText(buildViolationText(note, cost), fix));
+}
+
 export function buildCampaignDeviationRuleDrafts(
   notes: Record<string, CampaignDeviationNote>,
   costs: ManualLegDeviationCost[],
@@ -44,7 +53,8 @@ export function buildCampaignDeviationRuleDrafts(
     if (!fix) continue;
 
     const violation = buildViolationText(note, cost);
-    const ruleText = buildRuleText(violation, fix);
+    const ruleText = buildCampaignDeviationRuleTextFromNote(note, cost);
+    if (!ruleText) continue;
     const normalized = normalizeDeviationRuleText(ruleText);
     if (seenRuleTexts.has(normalized)) continue;
     seenRuleTexts.add(normalized);

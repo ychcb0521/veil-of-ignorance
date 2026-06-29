@@ -805,7 +805,7 @@ export default function JournalCampaignDetailPage() {
     try {
       setDeviationNotesSaving(true);
       await saveCampaignDeviationNotes(campaign.id, deviationNotes);
-      const syncResult = await syncCampaignDeviationRulesToChecklist(user.id, deviationNotes, deviationLegCosts);
+      const syncResult = await syncCampaignDeviationRulesToChecklist(user.id, deviationNotes, deviationLegCosts, campaign.id);
       setCampaign(prev => (prev ? { ...prev, deviation_notes: deviationNotes } : prev));
       if (syncResult.created > 0) {
         toast.success(`偏离备注已保存，并同步 ${syncResult.created} 条规则`);
