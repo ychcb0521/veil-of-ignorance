@@ -94,6 +94,92 @@ describe('buildCampaignReverseOrderPriceLines', () => {
     });
   });
 
+  it('keeps overlapping pending short-order ranges dashed instead of covering them with a solid segment', () => {
+    const createdAt = t('2026-01-01T10:00:00.000Z');
+    const triggeredAt = t('2026-01-01T10:05:00.000Z');
+    const fallbackEnd = t('2026-01-01T10:30:00.000Z');
+
+    const lines = buildCampaignReverseOrderPriceLines([
+      makeShortOrder({
+        id: 'triggered-open-short',
+        status: 'triggered',
+        createdAt,
+        triggeredAt,
+      }),
+      makeShortOrder({
+        id: 'still-pending-same-price-short',
+        status: 'pending',
+        createdAt: triggeredAt,
+      }),
+    ], [], fallbackEnd);
+
+    expect(lines).toEqual([
+      expect.objectContaining({
+        title: '委托空',
+        startTime: createdAt,
+        endTime: triggeredAt,
+        dashed: true,
+      }),
+      expect.objectContaining({
+        title: '委托空',
+        startTime: triggeredAt,
+        endTime: fallbackEnd,
+        dashed: true,
+      }),
+    ]);
+    expect(lines.some(line => line.title === '触发空')).toBe(false);
+  });
+
+  it('only trims the solid triggered segment where a dashed pending order overlaps it', () => {
+    const createdAt = t('2026-01-01T10:00:00.000Z');
+    const triggeredAt = t('2026-01-01T10:05:00.000Z');
+    const pendingAt = t('2026-01-01T10:12:00.000Z');
+    const cancelledAt = t('2026-01-01T10:18:00.000Z');
+    const fallbackEnd = t('2026-01-01T10:30:00.000Z');
+
+    const lines = buildCampaignReverseOrderPriceLines([
+      makeShortOrder({
+        id: 'triggered-open-short',
+        status: 'triggered',
+        createdAt,
+        triggeredAt,
+      }),
+      makeShortOrder({
+        id: 'cancelled-same-price-short',
+        status: 'cancelled',
+        createdAt: pendingAt,
+        cancelledAt,
+      }),
+    ], [], fallbackEnd);
+
+    expect(lines).toEqual([
+      expect.objectContaining({
+        title: '委托空',
+        startTime: createdAt,
+        endTime: triggeredAt,
+        dashed: true,
+      }),
+      expect.objectContaining({
+        title: '触发空',
+        startTime: triggeredAt,
+        endTime: pendingAt,
+        dashed: false,
+      }),
+      expect.objectContaining({
+        title: '委托空',
+        startTime: pendingAt,
+        endTime: cancelledAt,
+        dashed: true,
+      }),
+      expect.objectContaining({
+        title: '触发空',
+        startTime: cancelledAt,
+        endTime: fallbackEnd,
+        dashed: false,
+      }),
+    ]);
+  });
+
   it('ends triggered solid segment at the explicit manual close time before fallback end', () => {
     const createdAt = t('2026-01-01T10:00:00.000Z');
     const triggeredAt = t('2026-01-01T10:05:00.000Z');
