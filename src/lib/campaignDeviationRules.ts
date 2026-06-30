@@ -32,6 +32,18 @@ export function normalizeDeviationRuleSourceKey(value: string | null | undefined
   return cleanText(value).replace(/\s*[:：]\s*/g, '：');
 }
 
+export function normalizeDeviationRuleLooseKey(value: string | null | undefined): string {
+  return normalizeDeviationRuleSourceKey(value)
+    .replace(/[“”]/g, '"')
+    .replace(/[‘’]/g, "'")
+    .replace(/[，,]+/g, '，')
+    .replace(/[。．.]+/g, '。')
+    .replace(/[；;]+/g, '；')
+    .replace(/[！!]+/g, '！')
+    .replace(/[？?]+/g, '？')
+    .replace(/\s+/g, '');
+}
+
 export function campaignDeviationRuleSourceKeys(value: string): string[] {
   const fullText = normalizeDeviationRuleSourceKey(value);
   if (!fullText) return [];

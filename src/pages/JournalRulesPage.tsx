@@ -43,6 +43,7 @@ import {
 import {
   buildCampaignDeviationRuleTextFromNote,
   campaignDeviationRuleSourceKeys,
+  normalizeDeviationRuleLooseKey,
   normalizeDeviationRuleSourceKey,
 } from '@/lib/campaignDeviationRules';
 import { cn } from '@/lib/utils';
@@ -127,6 +128,11 @@ function setSourceKey(map: Map<string, string>, key: string | null | undefined, 
   if (normalized && !map.has(normalized)) map.set(normalized, campaignId);
 }
 
+function setLooseSourceKey(map: Map<string, string>, key: string | null | undefined, campaignId: string): void {
+  const normalized = normalizeDeviationRuleLooseKey(key);
+  if (normalized && !map.has(normalized)) map.set(normalized, campaignId);
+}
+
 function getRuleCampaignId(rule: TradingRule, sources: RuleCampaignSourceIndex): string | null {
   const remoteCampaignId = getRemoteRuleCampaignId(rule);
   if (remoteCampaignId) return remoteCampaignId;
@@ -136,8 +142,8 @@ function getRuleCampaignId(rule: TradingRule, sources: RuleCampaignSourceIndex):
     const exactCampaignId = sources.exact.get(key);
     if (exactCampaignId) return exactCampaignId;
   }
-  for (const key of keys.slice(1)) {
-    const looseCampaignId = sources.loose.get(key);
+  for (const key of keys) {
+    const looseCampaignId = sources.loose.get(normalizeDeviationRuleLooseKey(key));
     if (looseCampaignId) return looseCampaignId;
   }
   return null;
@@ -153,11 +159,13 @@ function buildCampaignSourceIndex(
     for (const note of Object.values(campaign.deviation_notes ?? {})) {
       const ruleText = buildCampaignDeviationRuleTextFromNote(note);
       setSourceKey(exact, ruleText, campaign.id);
-      setSourceKey(loose, note.fix, campaign.id);
+      setLooseSourceKey(loose, ruleText, campaign.id);
+      setLooseSourceKey(loose, note.fix, campaign.id);
     }
   }
   for (const [ruleText, campaignId] of Object.entries(localSources)) {
     setSourceKey(exact, ruleText, campaignId);
+    setLooseSourceKey(loose, ruleText, campaignId);
   }
   return { exact, loose };
 }

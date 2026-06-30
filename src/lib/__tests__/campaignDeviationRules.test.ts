@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   buildCampaignDeviationRuleDrafts,
   campaignDeviationRuleSourceKeys,
+  normalizeDeviationRuleLooseKey,
   normalizeDeviationRuleSourceKey,
   normalizeDeviationRuleText,
 } from '@/lib/campaignDeviationRules';
@@ -83,5 +84,10 @@ describe('campaign deviation rule drafts', () => {
     expect(campaignDeviationRuleSourceKeys(oldRuleText)).toContain(
       normalizeDeviationRuleSourceKey(fix),
     );
+  });
+
+  it('宽松来源 key 会兼容重复标点和多余空格', () => {
+    expect(normalizeDeviationRuleLooseKey(' 入场价格低于谢林点时，不能开单！  更不能用浅的支撑位。。 '))
+      .toBe(normalizeDeviationRuleLooseKey('入场价格低于谢林点时，不能开单!更不能用浅的支撑位。'));
   });
 });
