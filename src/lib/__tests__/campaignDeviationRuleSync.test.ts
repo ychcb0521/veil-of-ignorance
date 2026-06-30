@@ -71,7 +71,11 @@ vi.mock('@/integrations/supabase/client', () => ({
   },
 }));
 
-import { getLocalTradingRuleSourceCampaigns, syncCampaignDeviationRulesToChecklist } from '@/lib/journalApi';
+import {
+  getLocalTradingRuleSourceCampaignIndex,
+  getLocalTradingRuleSourceCampaigns,
+  syncCampaignDeviationRulesToChecklist,
+} from '@/lib/journalApi';
 
 describe('syncCampaignDeviationRulesToChecklist', () => {
   beforeEach(() => {
@@ -109,6 +113,9 @@ describe('syncCampaignDeviationRulesToChecklist', () => {
     expect(getLocalTradingRuleSourceCampaigns('user-1')).toEqual({
       '【战役偏离】违规操作：滚动对冲：触发后手动拆掉太早。修正后的规则：触发后的委托空只延续到手动拆掉时间点': 'campaign-1',
     });
+    expect(getLocalTradingRuleSourceCampaignIndex('user-1').byRuleId).toEqual({
+      'rule-1': 'campaign-1',
+    });
   });
 
   it('再次同步同一条规则时不重复创建', async () => {
@@ -126,6 +133,9 @@ describe('syncCampaignDeviationRulesToChecklist', () => {
     expect(mocks.tables.trading_rules).toHaveLength(1);
     expect(getLocalTradingRuleSourceCampaigns('user-1')).toEqual({
       '【战役偏离】违规操作：Hedge_rolling。修正后的规则：当前偏离必须先写成可检查规则': 'campaign-1',
+    });
+    expect(getLocalTradingRuleSourceCampaignIndex('user-1').byRuleId).toEqual({
+      'rule-1': 'campaign-1',
     });
   });
 });

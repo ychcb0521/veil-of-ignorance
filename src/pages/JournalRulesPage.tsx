@@ -30,9 +30,10 @@ import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import {
+  bindLocalTradingRuleSourceCampaign,
   createPrinciple,
   deleteRule,
-  getLocalTradingRuleSourceCampaigns,
+  getLocalTradingRuleSourceCampaignIndex,
   listActiveCampaigns,
   listAllCampaigns,
   listPatterns,
@@ -119,6 +120,7 @@ function getRemoteRuleCampaignId(rule: TradingRule): string | null {
 }
 
 interface RuleCampaignSourceIndex {
+  byRuleId: Map<string, string>;
   exact: Map<string, string>;
   loose: Map<string, string>;
 }
@@ -137,6 +139,9 @@ function getRuleCampaignId(rule: TradingRule, sources: RuleCampaignSourceIndex):
   const remoteCampaignId = getRemoteRuleCampaignId(rule);
   if (remoteCampaignId) return remoteCampaignId;
 
+  const stableCampaignId = sources.byRuleId.get(rule.id);
+  if (stableCampaignId) return stableCampaignId;
+
   const keys = campaignDeviationRuleSourceKeys(rule.rule_text);
   for (const key of keys) {
     const exactCampaignId = sources.exact.get(key);
@@ -151,10 +156,14 @@ function getRuleCampaignId(rule: TradingRule, sources: RuleCampaignSourceIndex):
 
 function buildCampaignSourceIndex(
   campaigns: TradeCampaign[],
-  localSources: Record<string, string>,
+  localSources: { byText: Record<string, string>; byRuleId: Record<string, string> },
 ): RuleCampaignSourceIndex {
+  const byRuleId = new Map<string, string>();
   const exact = new Map<string, string>();
   const loose = new Map<string, string>();
+  for (const [ruleId, campaignId] of Object.entries(localSources.byRuleId)) {
+    if (ruleId && campaignId && !byRuleId.has(ruleId)) byRuleId.set(ruleId, campaignId);
+  }
   for (const campaign of campaigns) {
     for (const note of Object.values(campaign.deviation_notes ?? {})) {
       const ruleText = buildCampaignDeviationRuleTextFromNote(note);
@@ -163,11 +172,11 @@ function buildCampaignSourceIndex(
       setLooseSourceKey(loose, note.fix, campaign.id);
     }
   }
-  for (const [ruleText, campaignId] of Object.entries(localSources)) {
+  for (const [ruleText, campaignId] of Object.entries(localSources.byText)) {
     setSourceKey(exact, ruleText, campaignId);
     setLooseSourceKey(loose, ruleText, campaignId);
   }
-  return { exact, loose };
+  return { byRuleId, exact, loose };
 }
 
 export default function JournalRulesPage() {
@@ -178,7 +187,10 @@ export default function JournalRulesPage() {
   const [principles, setPrinciples] = useState<TradePrinciple[]>([]);
   const [activeCampaigns, setActiveCampaigns] = useState<TradeCampaign[]>([]);
   const [campaigns, setCampaigns] = useState<TradeCampaign[]>([]);
-  const [localRuleSources, setLocalRuleSources] = useState<Record<string, string>>({});
+  const [localRuleSources, setLocalRuleSources] = useState<{ byText: Record<string, string>; byRuleId: Record<string, string> }>({
+    byText: {},
+    byRuleId: {},
+  });
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editText, setEditText] = useState('');
   const [newPrincipleTitle, setNewPrincipleTitle] = useState('');
@@ -209,7 +221,7 @@ export default function JournalRulesPage() {
       setActiveCampaigns(c);
       setPrinciples(pr);
       setCampaigns(allCampaigns);
-      setLocalRuleSources(getLocalTradingRuleSourceCampaigns(user.id));
+      setLocalRuleSources(getLocalTradingRuleSourceCampaignIndex(user.id));
     } catch (e) {
       toast.error(e instanceof Error ? e.message : String(e));
     } finally {
@@ -225,6 +237,28 @@ export default function JournalRulesPage() {
     () => buildCampaignSourceIndex(campaigns, localRuleSources),
     [campaigns, localRuleSources],
   );
+
+  useEffect(() => {
+    if (!user?.id || rules.length === 0) return;
+    const migratedRuleSources: Record<string, string> = {};
+    for (const rule of rules) {
+      if (getRemoteRuleCampaignId(rule) || ruleCampaignSources.byRuleId.has(rule.id)) continue;
+      const campaignId = getRuleCampaignId(rule, ruleCampaignSources);
+      if (!campaignId) continue;
+      bindLocalTradingRuleSourceCampaign(user.id, rule.id, campaignId);
+      migratedRuleSources[rule.id] = campaignId;
+    }
+    if (Object.keys(migratedRuleSources).length > 0) {
+      setLocalRuleSources(prev => ({
+        ...prev,
+        byRuleId: {
+          ...prev.byRuleId,
+          ...migratedRuleSources,
+        },
+      }));
+    }
+  }, [ruleCampaignSources, rules, user?.id]);
+
   const designBlocked = activeCampaigns.length > 0;
   const evolutionCounts = useMemo(() => {
     const counts = new Map<number, number>();
