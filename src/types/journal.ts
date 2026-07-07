@@ -803,6 +803,10 @@ export interface TradeJournal {
   post_positive_expectancy_review?: string | null;
   post_premortem_review?: string | null;
   post_invalidation_review?: string | null;
+  /** Post-close review of the entry-time payoff/risk basis. */
+  post_entry_payoff_basis_review?: string | null;
+  /** Post-close review of the entry-time win-rate basis. */
+  post_entry_win_rate_basis_review?: string | null;
   post_opponent_was_right?: boolean | null;
   /** Dalio five-step diagnosis. */
   post_five_step_goal?: string | null;

@@ -82,6 +82,8 @@ const FINALIZE_INPUT: FinalizeJournalInput = {
   post_emo_excuse: '告诉自己见好就收',
   post_emo_next_time_plan: '等结构破坏信号再动',
   post_decision_quality: 'bad',
+  post_entry_payoff_basis_review: '当时把目标空间估得太满，没扣掉上方密集抛压',
+  post_entry_win_rate_basis_review: '当时胜率依据只看了最近两根 K，样本太窄',
 };
 
 /** 错题集汇总加载时，server 拉回的那一行（缺扩展列，只有基础字段）。 */
@@ -99,6 +101,7 @@ function serverRow(): TradeJournal {
 }
 
 const emoSpec = POST_FIELD_SPECS.find(s => s.key === 'post_emo_disturbance')!;
+const payoffBasisSpec = POST_FIELD_SPECS.find(s => s.key === 'post_entry_payoff_basis_review')!;
 
 describe('平仓评价 → 本地镜像 → 错题集汇总（闭环）', () => {
   beforeEach(() => {
@@ -128,6 +131,19 @@ describe('平仓评价 → 本地镜像 → 错题集汇总（闭环）', () => 
     const merged = applyLocalMirror(OWNER, [serverRow()]);
     expect((merged[0] as Record<string, unknown>).post_emo_disturbance).toBe('价格一回撤我就慌');
     const after = summarizeField(merged as TradeJournal[], emoSpec);
+    expect(after.filled).toBe(1);
+  });
+
+  it('新增的建仓依据复盘字段也走同一条本地镜像兜底链路', async () => {
+    const before = summarizeField([serverRow()], payoffBasisSpec);
+    expect(before.filled).toBe(0);
+
+    await finalizeJournalReview('journal-1', FINALIZE_INPUT);
+
+    const merged = applyLocalMirror(OWNER, [serverRow()]);
+    expect((merged[0] as Record<string, unknown>).post_entry_payoff_basis_review)
+      .toBe('当时把目标空间估得太满，没扣掉上方密集抛压');
+    const after = summarizeField(merged as TradeJournal[], payoffBasisSpec);
     expect(after.filled).toBe(1);
   });
 

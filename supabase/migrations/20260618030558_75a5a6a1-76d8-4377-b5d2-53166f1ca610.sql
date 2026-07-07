@@ -277,7 +277,9 @@ ALTER TABLE public.trade_journals
   ADD COLUMN IF NOT EXISTS post_decision_quality text,
   ADD COLUMN IF NOT EXISTS post_positive_expectancy_review text,
   ADD COLUMN IF NOT EXISTS post_premortem_review text,
-  ADD COLUMN IF NOT EXISTS post_invalidation_review text;
+  ADD COLUMN IF NOT EXISTS post_invalidation_review text,
+  ADD COLUMN IF NOT EXISTS post_entry_payoff_basis_review text,
+  ADD COLUMN IF NOT EXISTS post_entry_win_rate_basis_review text;
 
 DO $$ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='trade_journals_decision_quality_check' AND conrelid='public.trade_journals'::regclass) THEN

@@ -53,6 +53,8 @@ ALTER TABLE public.trade_journals
   ADD COLUMN IF NOT EXISTS post_positive_expectancy_review         text,
   ADD COLUMN IF NOT EXISTS post_premortem_review                   text,
   ADD COLUMN IF NOT EXISTS post_invalidation_review                text,
+  ADD COLUMN IF NOT EXISTS post_entry_payoff_basis_review          text,
+  ADD COLUMN IF NOT EXISTS post_entry_win_rate_basis_review        text,
   ADD COLUMN IF NOT EXISTS post_opponent_was_right                 boolean,
   ADD COLUMN IF NOT EXISTS post_real_close_time                    timestamptz,
   ADD COLUMN IF NOT EXISTS exit_falsification_status               text,

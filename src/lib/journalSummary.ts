@@ -341,6 +341,8 @@ export const POST_FIELD_SPECS: SummaryFieldSpec[] = [
   { key: 'post_premortem_review', label: '反 · 预设亏损原因兑现没有', type: 'text', hint: '事实模块·反。' },
   { key: 'post_invalidation_review', label: '止 · 离场 / 证伪事实', type: 'text', hint: '事实模块·止。' },
   { key: 'post_positive_expectancy_review', label: '结构 · 目标空间假设的实际表现', type: 'text', hint: '事实模块·结构。' },
+  { key: 'post_entry_payoff_basis_review', label: '建仓时盈亏权衡依据复盘', type: 'text', hint: '当时收益空间大于风险的依据，事后是否站住。' },
+  { key: 'post_entry_win_rate_basis_review', label: '建仓时胜率权衡依据复盘', type: 'text', hint: '当时胜率/置信度依据，事后是否被校准。' },
   {
     id: 'post_reflection_decision_basis',
     key: 'post_reflection',

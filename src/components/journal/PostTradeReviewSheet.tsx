@@ -102,6 +102,8 @@ export function PostTradeReviewSheet({
   const [decisionQuality, setDecisionQuality] = useState<TradeJournal['post_decision_quality']>('mixed');
   const [expectancyReview, setExpectancyReview] = useState('');
   const [oddsStructureReviewValue, setOddsStructureReviewValue] = useState<OddsStructureReview | null>(null);
+  const [payoffBasisReview, setPayoffBasisReview] = useState('');
+  const [winRateBasisReview, setWinRateBasisReview] = useState('');
   const [premortemReview, setPremortemReview] = useState('');
   const [invalidationReview, setInvalidationReview] = useState('');
   const [falsificationStatus, setFalsificationStatus] = useState<TradeJournal['exit_falsification_status']>(null);
@@ -140,6 +142,8 @@ export function PostTradeReviewSheet({
         const parsedOddsStructureReview = parseOddsStructureReviewText(journal.post_positive_expectancy_review);
         setOddsStructureReviewValue(parsedOddsStructureReview.review);
         setExpectancyReview(parsedOddsStructureReview.body);
+        setPayoffBasisReview(journal.post_entry_payoff_basis_review ?? '');
+        setWinRateBasisReview(journal.post_entry_win_rate_basis_review ?? '');
         setPremortemReview(journal.post_premortem_review ?? '');
         setInvalidationReview(journal.post_invalidation_review ?? '');
         setFalsificationStatus(journal.exit_falsification_status ?? null);
@@ -284,6 +288,23 @@ export function PostTradeReviewSheet({
   const showPathReview = !isHedge && journal.direction !== 'no_entry';
   const showCloseReviewAudit = journal.direction !== 'no_entry';
   const showOpeningSnapshot = journal.source !== 'retroactive_from_record';
+  const hasEntryPayoffBasisPlan = !isHedge && journal.direction !== 'no_entry' && Boolean(
+    journal.pre_odds_structure
+    || snapshotOddsSource.trim()
+    || snapshotOddsPremortem.trim()
+    || snapshotOddsBreakdown.trim()
+    || journal.pre_opportunity_cost_worth != null
+    || journal.pre_cheap_opportunity
+    || journal.pre_max_loss_usdt != null
+    || journal.pre_planned_stop_loss != null,
+  );
+  const hasEntryWinRateBasisPlan = !isHedge && journal.direction !== 'no_entry' && Boolean(
+    journal.pre_calibration_win_pct != null
+    || journal.pre_confidence_basis?.trim()
+    || journal.pre_calibration_reference_class?.trim()
+    || journal.pre_calibration_competence_basis?.trim()
+    || journal.pre_calibration_update_signal?.trim(),
+  );
   // 结构对／错的 2×2 排布（上排结构对、下排结构错；左列赢、右列亏）。
   const QUADRANT_GRID: StructureResultQuadrant[] = ['deserved_win', 'correct_loss', 'dangerous_win', 'deserved_loss'];
 
@@ -298,6 +319,8 @@ export function PostTradeReviewSheet({
     && !!invalidationReview.trim()
     && falsificationFactValid
     && oddsStructureFactValid;
+  const entryBasisReviewValid = (!hasEntryPayoffBasisPlan || payoffBasisReview.trim().length > 0)
+    && (!hasEntryWinRateBasisPlan || winRateBasisReview.trim().length > 0);
   const opponentValid = !journal.pre_opponent_statement || opponentWasRight !== null;
   const hedgeWorthItValid = !isHedge || hedgeWorthIt != null;
   const schellingFloorValid = !showCloseReviewAudit
@@ -319,6 +342,7 @@ export function PostTradeReviewSheet({
     && decisionValid
     && quadrantValid
     && reviewLoopValid
+    && entryBasisReviewValid
     && pathValid
     && opponentValid
     && hedgeWorthItValid
@@ -338,6 +362,32 @@ export function PostTradeReviewSheet({
       : journal.pre_cheap_opportunity === 'unclear'
         ? '说不清便宜'
         : null;
+  const payoffTargetLabel = journal.pre_odds_structure ? ODDS_STRUCTURE_LABELS[journal.pre_odds_structure] : null;
+  const opportunityCostLabel = journal.pre_opportunity_cost_worth == null
+    ? null
+    : journal.pre_opportunity_cost_worth
+      ? '不做更亏'
+      : '不做也不亏';
+  const maxLossBasisLabel = journal.pre_max_loss_usdt == null
+    ? null
+    : `${journal.pre_max_loss_usdt.toFixed(2)} USDT${riskAnchorPct != null ? ` · 占当时账户 ${riskAnchorPct.toFixed(1)}%` : ''}`;
+  const entryPayoffBasisFacts = [
+    { label: '盈亏比目标', value: payoffTargetLabel },
+    { label: '收益空间来自', value: snapshotOddsSource.trim() || null },
+    { label: '目标判断错因', value: snapshotOddsPremortem.trim() || null },
+    { label: '目标失效信号', value: snapshotOddsBreakdown.trim() || null },
+    { label: '机会成本', value: opportunityCostLabel },
+    { label: '便宜程度', value: cheapOpportunityLabel },
+    { label: '风险预算', value: maxLossBasisLabel },
+    { label: 'R 回撤价 / 目标失效价', value: journal.pre_planned_stop_loss != null ? journal.pre_planned_stop_loss.toFixed(2) : null },
+  ].filter((item): item is { label: string; value: string } => Boolean(item.value));
+  const entryWinRateBasisFacts = [
+    { label: '开仓预测胜率', value: journal.pre_calibration_win_pct != null ? `${journal.pre_calibration_win_pct.toFixed(0)}%` : null },
+    { label: '当时依据', value: journal.pre_confidence_basis?.trim() || null },
+    { label: '旧参照类', value: journal.pre_calibration_reference_class?.trim() || null },
+    { label: '旧能力边界', value: journal.pre_calibration_competence_basis?.trim() || null },
+    { label: '旧更新信号', value: journal.pre_calibration_update_signal?.trim() || null },
+  ].filter((item): item is { label: string; value: string } => Boolean(item.value));
 
   const handleSave = async () => {
     if (!canSave) return;
@@ -368,6 +418,8 @@ export function PostTradeReviewSheet({
         post_positive_expectancy_review: buildOddsStructureReviewText(expectancyReview, oddsStructureReviewValue),
         post_premortem_review: premortemReview.trim(),
         post_invalidation_review: invalidationReview.trim(),
+        post_entry_payoff_basis_review: hasEntryPayoffBasisPlan ? payoffBasisReview.trim() : null,
+        post_entry_win_rate_basis_review: hasEntryWinRateBasisPlan ? winRateBasisReview.trim() : null,
         exit_falsification_status: falsificationStatus,
         exit_falsification_note: falsificationNote.trim() || null,
         hedge_worth_it: isHedge ? hedgeWorthIt : null,
@@ -860,6 +912,38 @@ export function PostTradeReviewSheet({
             </div>
           )}
 
+          {hasEntryPayoffBasisPlan && (
+            <div className="rounded-xl border border-border/60 bg-background/60 px-3 py-3 space-y-2">
+              <div className="flex items-center gap-2">
+                <span className={factPillClass}>盈亏</span>
+                <div className="text-[12px] font-medium text-foreground">建仓时盈亏权衡依据复盘 *</div>
+              </div>
+              <p className="text-[10px] leading-relaxed text-muted-foreground">
+                回看当时“收益空间值得承担这笔风险”的依据：不是问最后赚没赚，而是问那条权衡逻辑有没有站住。
+              </p>
+              {entryPayoffBasisFacts.length > 0 && (
+                <div className="grid gap-2 md:grid-cols-2">
+                  {entryPayoffBasisFacts.map(item => (
+                    <div key={item.label} className="rounded-lg border border-border/60 bg-card px-3 py-2 text-[11px] leading-relaxed">
+                      <div className="text-[10px] text-muted-foreground">{item.label}</div>
+                      <div className="mt-0.5 text-foreground">{item.value}</div>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <Textarea
+                rows={2}
+                value={payoffBasisReview}
+                onChange={event => setPayoffBasisReview(event.target.value)}
+                placeholder="例如：目标空间估计是否过厚？止损成本是否被低估？机会成本/便宜程度判断是否成立？"
+                className={reviewAnswerTextareaClass}
+              />
+              {hasEntryPayoffBasisPlan && payoffBasisReview.trim().length === 0 && (
+                <div className="text-right font-mono text-[10px] text-[#F6465D]">必填</div>
+              )}
+            </div>
+          )}
+
           {isHedge && (
             <div className="space-y-1.5">
               <Label className="text-[12px] font-medium">正期望/保险价值事实备注 *</Label>
@@ -873,12 +957,12 @@ export function PostTradeReviewSheet({
             </div>
           )}
 
-          {calibrationPct != null && (
+          {hasEntryWinRateBasisPlan && (
             <div className="rounded-xl border border-border/60 bg-background/60 px-3 py-3 space-y-2">
               <div className="flex items-center justify-between gap-3">
                 <div className="flex items-center gap-2">
                   <span className={factPillClass}>置信</span>
-                  <div className="text-[12px] font-medium text-foreground">进场钉的置信度被验证没有？</div>
+                  <div className="text-[12px] font-medium text-foreground">建仓时胜率权衡依据复盘 *</div>
                 </div>
                 {calibrationScore != null && (
                   <span className={`font-mono text-[11px] ${
@@ -888,22 +972,42 @@ export function PostTradeReviewSheet({
                   </span>
                 )}
               </div>
-              <div className="grid grid-cols-2 gap-2 text-[11px] font-mono">
-                <div className={metricCardClass}>
-                  <div className="text-[10px] uppercase tracking-wide text-muted-foreground">开仓预测胜率</div>
-                  <div>{calibrationPct.toFixed(0)}%</div>
-                </div>
-                <div className={metricCardClass}>
-                  <div className="text-[10px] uppercase tracking-wide text-muted-foreground">平仓后结果</div>
-                  <div className={outcome === 'win' ? 'text-[#0ECB81]' : outcome === 'loss' ? 'text-[#F6465D]' : 'text-muted-foreground'}>
-                    {calibrationOutcomeLabel}
+              <p className="text-[10px] leading-relaxed text-muted-foreground">
+                胜率不是结果分数，是当时对“这件事有多可能发生”的权衡。这里复盘参照类、样本和能力边界有没有错配。
+              </p>
+              {calibrationPct != null && (
+                <div className="grid grid-cols-2 gap-2 text-[11px] font-mono">
+                  <div className={metricCardClass}>
+                    <div className="text-[10px] uppercase tracking-wide text-muted-foreground">开仓预测胜率</div>
+                    <div>{calibrationPct.toFixed(0)}%</div>
+                  </div>
+                  <div className={metricCardClass}>
+                    <div className="text-[10px] uppercase tracking-wide text-muted-foreground">平仓后结果</div>
+                    <div className={outcome === 'win' ? 'text-[#0ECB81]' : outcome === 'loss' ? 'text-[#F6465D]' : 'text-muted-foreground'}>
+                      {calibrationOutcomeLabel}
+                    </div>
                   </div>
                 </div>
-              </div>
-              {journal.pre_confidence_basis && (
-                <div className="rounded-lg border border-border/60 bg-card px-3 py-2 text-[11px] leading-relaxed">
-                  <span className="text-muted-foreground">当时给这个置信度的依据：</span>{journal.pre_confidence_basis}
+              )}
+              {entryWinRateBasisFacts.length > 0 && (
+                <div className="grid gap-2 md:grid-cols-2">
+                  {entryWinRateBasisFacts.map(item => (
+                    <div key={item.label} className="rounded-lg border border-border/60 bg-card px-3 py-2 text-[11px] leading-relaxed">
+                      <div className="text-[10px] text-muted-foreground">{item.label}</div>
+                      <div className="mt-0.5 text-foreground">{item.value}</div>
+                    </div>
+                  ))}
                 </div>
+              )}
+              <Textarea
+                rows={2}
+                value={winRateBasisReview}
+                onChange={event => setWinRateBasisReview(event.target.value)}
+                placeholder="例如：参照类是否选错？有没有高估自己识别周期/结构的能力？哪些信息实际降低了当时胜率？"
+                className={reviewAnswerTextareaClass}
+              />
+              {hasEntryWinRateBasisPlan && winRateBasisReview.trim().length === 0 && (
+                <div className="text-right font-mono text-[10px] text-[#F6465D]">必填</div>
               )}
             </div>
           )}
