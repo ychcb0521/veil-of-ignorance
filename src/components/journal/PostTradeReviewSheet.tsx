@@ -77,15 +77,26 @@ const TRADE_AGENCY_SCORE_OPTIONS: Array<{
   { value: 4, label: '4 · 完全主动', desc: '节奏、止盈、离场都由预案主导，市场只是触发条件。', accent: '#0ECB81' },
 ];
 
-const ENTRY_ESTIMATE_REVIEW_OPTIONS: Array<{
+const ENTRY_PAYOFF_ESTIMATE_OPTIONS: Array<{
   value: NonNullable<TradeJournal['post_entry_payoff_estimate_grade']>;
   label: string;
   desc: string;
   accent: string;
 }> = [
-  { value: 'underestimated', label: '低估了', desc: '实际空间/概率比建仓时估得更好', accent: '#0ECB81' },
-  { value: 'accurate', label: '基本准确', desc: '建仓时估计与实际路径大体一致', accent: '#F0B90B' },
-  { value: 'overestimated', label: '高估了', desc: '实际空间/概率比建仓时估得更差', accent: '#F6465D' },
+  { value: 'rr_1_2', label: '1:1-2:1', desc: '薄优势，主要靠执行质量', accent: '#9AA0A6' },
+  { value: 'rr_2_5', label: '2:1-5:1', desc: '中高盈亏比，空间有弹性', accent: '#F0B90B' },
+  { value: 'rr_gt_5', label: '>5:1', desc: '厚结构，不对称空间明显', accent: '#0ECB81' },
+];
+
+const ENTRY_WIN_RATE_ESTIMATE_OPTIONS: Array<{
+  value: NonNullable<TradeJournal['post_entry_win_rate_estimate_grade']>;
+  label: string;
+  desc: string;
+  accent: string;
+}> = [
+  { value: 'wr_lt_50', label: '<50%', desc: '低胜率，必须依赖高赔率', accent: '#F6465D' },
+  { value: 'wr_50_80', label: '50-80%', desc: '中高胜率，仍需防错判', accent: '#F0B90B' },
+  { value: 'wr_gt_80', label: '>80%', desc: '高确定性，重点看代价', accent: '#0ECB81' },
 ];
 
 interface Props {
@@ -950,7 +961,7 @@ export function PostTradeReviewSheet({
               <div className="space-y-2">
                 <Label className="text-[12px] font-medium">建仓时盈亏比估计 *</Label>
                 <div className="grid gap-1.5 sm:grid-cols-3">
-                  {ENTRY_ESTIMATE_REVIEW_OPTIONS.map(option => {
+                  {ENTRY_PAYOFF_ESTIMATE_OPTIONS.map(option => {
                     const active = payoffEstimateGrade === option.value;
                     return (
                       <button
@@ -974,7 +985,7 @@ export function PostTradeReviewSheet({
                   rows={2}
                   value={payoffBasisReview}
                   onChange={event => setPayoffBasisReview(event.target.value)}
-                  placeholder="填空：当时对盈亏比的估计哪里准、哪里偏？"
+                  placeholder="填空：当时为什么判断这一档盈亏比？后来验证哪里对、哪里偏？"
                   className={reviewAnswerTextareaClass}
                 />
                 {(!payoffEstimateGrade || payoffBasisReview.trim().length === 0) && (
@@ -985,7 +996,7 @@ export function PostTradeReviewSheet({
               <div className="space-y-2">
                 <Label className="text-[12px] font-medium">建仓时的胜率估计 *</Label>
                 <div className="grid gap-1.5 sm:grid-cols-3">
-                  {ENTRY_ESTIMATE_REVIEW_OPTIONS.map(option => {
+                  {ENTRY_WIN_RATE_ESTIMATE_OPTIONS.map(option => {
                     const active = winRateEstimateGrade === option.value;
                     return (
                       <button
@@ -1009,7 +1020,7 @@ export function PostTradeReviewSheet({
                   rows={2}
                   value={winRateBasisReview}
                   onChange={event => setWinRateBasisReview(event.target.value)}
-                  placeholder="填空：当时对胜率的估计哪里准、哪里偏？"
+                  placeholder="填空：当时为什么判断这一档胜率？后来验证哪里对、哪里偏？"
                   className={reviewAnswerTextareaClass}
                 />
                 {(!winRateEstimateGrade || winRateBasisReview.trim().length === 0) && (

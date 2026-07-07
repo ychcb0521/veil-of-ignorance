@@ -82,8 +82,8 @@ const FINALIZE_INPUT: FinalizeJournalInput = {
   post_emo_excuse: '告诉自己见好就收',
   post_emo_next_time_plan: '等结构破坏信号再动',
   post_decision_quality: 'bad',
-  post_entry_payoff_estimate_grade: 'overestimated',
-  post_entry_win_rate_estimate_grade: 'overestimated',
+  post_entry_payoff_estimate_grade: 'rr_2_5',
+  post_entry_win_rate_estimate_grade: 'wr_50_80',
   post_entry_payoff_basis_review: '当时把目标空间估得太满，没扣掉上方密集抛压',
   post_entry_win_rate_basis_review: '当时胜率依据只看了最近两根 K，样本太窄',
 };
@@ -144,7 +144,7 @@ describe('平仓评价 → 本地镜像 → 错题集汇总（闭环）', () => 
     await finalizeJournalReview('journal-1', FINALIZE_INPUT);
 
     const merged = applyLocalMirror(OWNER, [serverRow()]);
-    expect((merged[0] as Record<string, unknown>).post_entry_payoff_estimate_grade).toBe('overestimated');
+    expect((merged[0] as Record<string, unknown>).post_entry_payoff_estimate_grade).toBe('rr_2_5');
     expect((merged[0] as Record<string, unknown>).post_entry_payoff_basis_review)
       .toBe('当时把目标空间估得太满，没扣掉上方密集抛压');
     expect(summarizeField(merged as TradeJournal[], payoffGradeSpec).filled).toBe(1);

@@ -323,15 +323,25 @@ const FALSIFICATION_STATUS_ACCENTS: Record<string, string> = {
   triggered_late: '#F6465D',
   not_triggered: '#D89B00',
 };
-const ENTRY_ESTIMATE_GRADE_LABELS: Record<string, string> = {
-  underestimated: '低估了',
-  accurate: '基本准确',
-  overestimated: '高估了',
+const ENTRY_PAYOFF_ESTIMATE_LABELS: Record<string, string> = {
+  rr_1_2: '1:1-2:1',
+  rr_2_5: '2:1-5:1',
+  rr_gt_5: '>5:1',
 };
-const ENTRY_ESTIMATE_GRADE_ACCENTS: Record<string, string> = {
-  underestimated: '#0ECB81',
-  accurate: '#F0B90B',
-  overestimated: '#F6465D',
+const ENTRY_PAYOFF_ESTIMATE_ACCENTS: Record<string, string> = {
+  rr_1_2: '#9AA0A6',
+  rr_2_5: '#F0B90B',
+  rr_gt_5: '#0ECB81',
+};
+const ENTRY_WIN_RATE_ESTIMATE_LABELS: Record<string, string> = {
+  wr_lt_50: '<50%',
+  wr_50_80: '50-80%',
+  wr_gt_80: '>80%',
+};
+const ENTRY_WIN_RATE_ESTIMATE_ACCENTS: Record<string, string> = {
+  wr_lt_50: '#F6465D',
+  wr_50_80: '#F0B90B',
+  wr_gt_80: '#0ECB81',
 };
 
 export const POST_FIELD_SPECS: SummaryFieldSpec[] = [
@@ -351,10 +361,10 @@ export const POST_FIELD_SPECS: SummaryFieldSpec[] = [
   { key: 'post_premortem_review', label: '反 · 预设亏损原因兑现没有', type: 'text', hint: '事实模块·反。' },
   { key: 'post_invalidation_review', label: '止 · 离场 / 证伪事实', type: 'text', hint: '事实模块·止。' },
   { key: 'post_positive_expectancy_review', label: '结构 · 目标空间假设的实际表现', type: 'text', hint: '事实模块·结构。' },
-  { key: 'post_entry_payoff_estimate_grade', label: '建仓时盈亏比估计 · 档位', type: 'enum', optionLabels: ENTRY_ESTIMATE_GRADE_LABELS, optionAccents: ENTRY_ESTIMATE_GRADE_ACCENTS, hint: '低估 / 基本准确 / 高估。' },
-  { key: 'post_entry_payoff_basis_review', label: '建仓时盈亏比估计 · 说明', type: 'text', hint: '填空说明：当时盈亏比估计哪里准、哪里偏。' },
-  { key: 'post_entry_win_rate_estimate_grade', label: '建仓时胜率估计 · 档位', type: 'enum', optionLabels: ENTRY_ESTIMATE_GRADE_LABELS, optionAccents: ENTRY_ESTIMATE_GRADE_ACCENTS, hint: '低估 / 基本准确 / 高估。' },
-  { key: 'post_entry_win_rate_basis_review', label: '建仓时胜率估计 · 说明', type: 'text', hint: '填空说明：当时胜率估计哪里准、哪里偏。' },
+  { key: 'post_entry_payoff_estimate_grade', label: '建仓时盈亏比估计 · 档位', type: 'enum', optionLabels: ENTRY_PAYOFF_ESTIMATE_LABELS, optionAccents: ENTRY_PAYOFF_ESTIMATE_ACCENTS, hint: '1:1-2:1 / 2:1-5:1 / >5:1。' },
+  { key: 'post_entry_payoff_basis_review', label: '建仓时盈亏比估计 · 说明', type: 'text', hint: '填空说明：当时为什么判断这一档盈亏比，后来验证哪里对、哪里偏。' },
+  { key: 'post_entry_win_rate_estimate_grade', label: '建仓时胜率估计 · 档位', type: 'enum', optionLabels: ENTRY_WIN_RATE_ESTIMATE_LABELS, optionAccents: ENTRY_WIN_RATE_ESTIMATE_ACCENTS, hint: '<50% / 50-80% / >80%。' },
+  { key: 'post_entry_win_rate_basis_review', label: '建仓时胜率估计 · 说明', type: 'text', hint: '填空说明：当时为什么判断这一档胜率，后来验证哪里对、哪里偏。' },
   {
     id: 'post_reflection_decision_basis',
     key: 'post_reflection',
