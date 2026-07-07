@@ -389,6 +389,7 @@ export type Database = {
       trade_campaigns: {
         Row: {
           actual_evolution: Json
+          campaign_code: string
           closed_at: string | null
           created_at: string
           direction: string
@@ -411,6 +412,7 @@ export type Database = {
         }
         Insert: {
           actual_evolution?: Json
+          campaign_code?: string
           closed_at?: string | null
           created_at?: string
           direction: string
@@ -433,6 +435,7 @@ export type Database = {
         }
         Update: {
           actual_evolution?: Json
+          campaign_code?: string
           closed_at?: string | null
           created_at?: string
           direction?: string

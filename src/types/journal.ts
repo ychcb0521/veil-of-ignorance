@@ -357,6 +357,8 @@ export interface CampaignDeviationNote {
 export interface TradeCampaign {
   id: string;
   user_id: string;
+  /** Globally unique human-facing campaign code. Database-generated when available. */
+  campaign_code: string;
   symbol: string;
   direction: 'main_long' | 'main_short';
   status: CampaignStatus;

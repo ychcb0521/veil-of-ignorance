@@ -1,6 +1,6 @@
-import { type ChangeEvent, useCallback, useEffect, useMemo, useState } from 'react';
+import { type ChangeEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, Eye, EyeOff, Info, Layers, MessageSquare, Send, Sparkles, Trash2, UserPlus } from 'lucide-react';
+import { ArrowLeft, Download, Eye, EyeOff, Info, Layers, MessageSquare, Send, Sparkles, Trash2, UserPlus } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -24,6 +24,7 @@ import {
 } from '@/lib/campaignAnalysis';
 import { buildCampaignChartContentTimeSpan, pickCampaignOverviewInterval, type CampaignChartInterval } from '@/lib/campaignChartContentSpan';
 import { buildSelectedLegVerticalLines, legRoleMarkerLabel } from '@/lib/campaignLegMarkers';
+import { exportCampaignBoardPng } from '@/lib/campaignLegsPngExport';
 import {
   deleteCounterfactual,
   detachCampaignLegFromCampaign,
@@ -407,6 +408,8 @@ export default function JournalCampaignDetailPage() {
   const [detachTarget, setDetachTarget] = useState<TradeJournal | null>(null);
   const [detaching, setDetaching] = useState(false);
   const [selectedLegMarkerIds, setSelectedLegMarkerIds] = useState<string[]>([]);
+  const [legsExporting, setLegsExporting] = useState(false);
+  const campaignChartExportRef = useRef<HTMLDivElement | null>(null);
   const [isOwner, setIsOwner] = useState(true);
   const [comments, setComments] = useState<CampaignComment[]>([]);
   const [commentsLoading, setCommentsLoading] = useState(false);
@@ -821,6 +824,25 @@ export default function JournalCampaignDetailPage() {
     }
   };
 
+  const handleExportCampaignBoardPng = async () => {
+    if (!campaign || legsExporting) return;
+    try {
+      setLegsExporting(true);
+      const fileName = await exportCampaignBoardPng({
+        campaign,
+        legs,
+        tradeRecords,
+        reverseHedgeOrders: visibleReverseHedgeOrders,
+        chartElement: campaignChartExportRef.current,
+      });
+      toast.success('K 线盘面与 Legs 列表已保存为 PNG', { description: fileName });
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : String(error));
+    } finally {
+      setLegsExporting(false);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-background text-foreground">
       <header className="sticky top-0 z-20 bg-background/95 backdrop-blur-sm border-b border-border">
@@ -836,6 +858,12 @@ export default function JournalCampaignDetailPage() {
             <div className="min-w-0">
               <h1 className="text-[14px] font-medium truncate">{campaign.title}</h1>
               <div className="font-mono text-[11px] text-muted-foreground flex flex-wrap items-center gap-2">
+                <span
+                  className="rounded border border-border bg-card px-1.5 py-0.5 text-[10px]"
+                  title={`战役编号 ${campaign.campaign_code}`}
+                >
+                  {campaign.campaign_code}
+                </span>
                 <span>{campaign.symbol}</span>
                 <span className={`px-2 py-0.5 rounded ${campaign.direction === 'main_long' ? 'bg-[#0ECB81]/10 text-[#0ECB81]' : 'bg-[#F6465D]/10 text-[#F6465D]'}`}>
                   {campaign.direction === 'main_long' ? '主多' : '主空'}
@@ -1014,7 +1042,7 @@ export default function JournalCampaignDetailPage() {
               </div>
               <div className="flex-1" />
             </div>
-            <div className="h-[480px] border border-border rounded overflow-hidden">
+            <div ref={campaignChartExportRef} className="h-[480px] border border-border rounded overflow-hidden">
               {klinesLoading ? (
                 <div className="h-full flex items-center justify-center text-[12px] text-muted-foreground">加载 K 线…</div>
               ) : klinesError ? (
@@ -1147,9 +1175,23 @@ export default function JournalCampaignDetailPage() {
         </section>
 
         <section className="space-y-3">
-          <div className="flex items-center gap-2 text-[13px] font-medium">
-            <Layers className="w-4 h-4 text-muted-foreground" />
-            Legs 列表
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2 text-[13px] font-medium">
+              <Layers className="w-4 h-4 text-muted-foreground" />
+              Legs 列表
+            </div>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={legsExporting || legs.length === 0}
+              onClick={handleExportCampaignBoardPng}
+              className="h-7 gap-1.5 px-2 text-[11px] text-muted-foreground hover:text-foreground"
+              title="保存当前 K 线盘面与完整 Legs 列表为高清 PNG"
+            >
+              <Download className="h-3.5 w-3.5" />
+              {legsExporting ? '生成中' : 'PNG'}
+            </Button>
           </div>
           <CampaignLegsList
             legs={legs}

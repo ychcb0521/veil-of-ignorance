@@ -292,7 +292,7 @@ export function AddToExistingCampaignDialog({
                 >
                   {sortedCampaigns.map(item => (
                     <option key={item.campaign.id} value={item.campaign.id}>
-                      {item.campaign.symbol === symbol ? '★ ' : ''}{item.campaign.title} · {fmtLabel(item.campaign.opened_at)} · {item.legs.length} legs · {item.campaign.status}
+                      {item.campaign.symbol === symbol ? '★ ' : ''}{item.campaign.campaign_code} · {item.campaign.title} · {fmtLabel(item.campaign.opened_at)} · {item.legs.length} legs · {item.campaign.status}
                     </option>
                   ))}
                 </select>
@@ -300,7 +300,12 @@ export function AddToExistingCampaignDialog({
 
               {target && (
                 <div className="rounded border border-border bg-muted/20 p-3 text-[11px] space-y-2">
-                  <div>{target.campaign.title}</div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="rounded border border-border bg-background px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
+                      {target.campaign.campaign_code}
+                    </span>
+                    <span>{target.campaign.title}</span>
+                  </div>
                   <div className="text-muted-foreground">
                     {target.campaign.direction} · opened_at {fmtLabel(target.campaign.opened_at)} · 现有 {target.legs.length} 个 legs
                   </div>

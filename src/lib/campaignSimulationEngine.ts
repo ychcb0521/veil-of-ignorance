@@ -542,6 +542,7 @@ function buildSyntheticCampaignAndLegs(
   const syntheticCampaign: TradeCampaign = {
     id: 'synthetic-campaign',
     user_id: 'synthetic-user',
+    campaign_code: 'C-SYNTHETIC',
     symbol: 'SIM',
     direction: directionToCampaign(params.entry.direction),
     status: result.final_realized_pnl > 0 ? 'closed_profit' : result.final_realized_pnl < 0 ? 'closed_loss' : 'closed_breakeven',

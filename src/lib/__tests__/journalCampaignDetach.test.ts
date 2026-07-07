@@ -9,6 +9,7 @@ function buildCampaign(events: CampaignEvent[]): TradeCampaign {
   return {
     id: 'campaign-1',
     user_id: 'user-1',
+    campaign_code: 'C00000001',
     symbol: 'TSTUSDT',
     direction: 'main_long',
     status: 'closed_loss',
@@ -22,8 +23,10 @@ function buildCampaign(events: CampaignEvent[]): TradeCampaign {
     final_r_multiple: null,
     peak_unrealized_pnl: null,
     peak_drawdown: null,
+    importance_weight: 0,
     notes: null,
     actual_evolution: events,
+    deviation_notes: {},
     created_at: '2026-05-04T13:10:00.000Z',
     updated_at: '2026-05-04T14:40:00.000Z',
   };

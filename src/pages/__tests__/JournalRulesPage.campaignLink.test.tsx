@@ -30,6 +30,7 @@ vi.mock('@/lib/journalApi', () => ({
     {
       id: 'campaign-1',
       user_id: 'user-1',
+      campaign_code: 'C00000001',
       symbol: 'POWERUSDT',
       direction: 'main_long',
       status: 'closed_profit',

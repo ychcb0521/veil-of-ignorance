@@ -24,9 +24,12 @@ ALTER TABLE public.trade_journals
 END IF; END $guard1$;
 
 -- ===== 20260524153000_trade_campaigns.sql =====
+CREATE SEQUENCE IF NOT EXISTS public.trade_campaign_code_seq;
+
 CREATE TABLE IF NOT EXISTS public.trade_campaigns (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  campaign_code text NOT NULL DEFAULT ('C' || lpad(nextval('public.trade_campaign_code_seq')::text, 8, '0')),
   symbol text NOT NULL,
   direction text NOT NULL CHECK (direction IN ('main_long', 'main_short')),
   status text NOT NULL DEFAULT 'active'
@@ -53,6 +56,7 @@ GRANT ALL ON public.trade_campaigns TO service_role;
 
 CREATE INDEX IF NOT EXISTS idx_trade_campaigns_user_status ON public.trade_campaigns(user_id, status);
 CREATE INDEX IF NOT EXISTS idx_trade_campaigns_user_symbol ON public.trade_campaigns(user_id, symbol);
+CREATE UNIQUE INDEX IF NOT EXISTS trade_campaigns_campaign_code_key ON public.trade_campaigns(campaign_code);
 
 ALTER TABLE public.trade_campaigns ENABLE ROW LEVEL SECURITY;
 

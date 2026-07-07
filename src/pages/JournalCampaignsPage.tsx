@@ -446,6 +446,12 @@ export default function JournalCampaignsPage() {
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div className="flex items-center gap-2 flex-wrap">
                     <span className={`inline-flex h-2.5 w-2.5 rounded-full ${STATUS_STYLES[campaign.status] || 'bg-muted'}`} />
+                    <span
+                      className="rounded border border-border bg-background/70 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground"
+                      title={`战役编号 ${campaign.campaign_code}`}
+                    >
+                      {campaign.campaign_code}
+                    </span>
                     <div className="text-[13px] font-medium">{campaign.title}</div>
                     <span className={`px-2 py-0.5 rounded text-[10px] ${DIRECTION_STYLES[campaign.direction] || 'bg-muted text-muted-foreground'}`}>
                       {campaign.direction === 'main_short' ? '主空' : '主多'}

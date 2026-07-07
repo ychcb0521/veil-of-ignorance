@@ -81,10 +81,22 @@ function wrap<T>(label: string, error: { message: string } | null, data: T | nul
   return data;
 }
 
+function fallbackCampaignCode(id: unknown): string {
+  const normalizedId = typeof id === 'string' ? id.trim().replace(/-/g, '').toUpperCase() : '';
+  return normalizedId ? `C-${normalizedId}` : 'C-UNKNOWN';
+}
+
+function normalizeCampaignCode(value: unknown, id: unknown): string {
+  return typeof value === 'string' && value.trim().length > 0
+    ? value.trim()
+    : fallbackCampaignCode(id);
+}
+
 function toCampaign(row: unknown): TradeCampaign {
   const campaign = row as TradeCampaign;
   return withLocalDeviationNotes({
     ...campaign,
+    campaign_code: normalizeCampaignCode(campaign?.campaign_code, campaign?.id),
     importance_weight: normalizeCampaignImportance(campaign?.importance_weight),
     deviation_notes: campaign?.deviation_notes ?? {},
   });
@@ -904,6 +916,7 @@ function normalizeLocalCampaigns(raw: unknown): TradeCampaign[] {
     ))
     .map(campaign => ({
       ...campaign,
+      campaign_code: normalizeCampaignCode(campaign.campaign_code, campaign.id),
       importance_weight: normalizeCampaignImportance(campaign.importance_weight),
       deviation_notes: normalizeCampaignDeviationNotes(campaign.deviation_notes),
     }))
@@ -1089,9 +1102,11 @@ function buildLocalCampaignFromCreateInput(
   event: CampaignEvent,
 ): TradeCampaign {
   const now = new Date().toISOString();
+  const id = crypto.randomUUID();
   return {
-    id: crypto.randomUUID(),
+    id,
     user_id: userId,
+    campaign_code: fallbackCampaignCode(id),
     symbol: input.symbol,
     direction: input.direction,
     status: 'active',
@@ -2626,9 +2641,11 @@ export async function createCampaignFromJournals(input: {
     leg_role: item.legRole,
     leg_sequence: item.legSequence,
   }));
+  const draftCampaignId = crypto.randomUUID();
   const draftCampaign = {
-    id: crypto.randomUUID(),
+    id: draftCampaignId,
     user_id: userId,
+    campaign_code: fallbackCampaignCode(draftCampaignId),
     symbol: mainOpen.symbol,
     direction: toCampaignDirection(mainOpen.direction),
     status: 'planned' as CampaignStatus,
@@ -2645,6 +2662,7 @@ export async function createCampaignFromJournals(input: {
     importance_weight: 0,
     notes: input.notes?.trim() || null,
     actual_evolution: [],
+    deviation_notes: {},
     created_at: now,
     updated_at: now,
   } satisfies TradeCampaign;
@@ -2765,9 +2783,11 @@ export async function createCampaignFromTradeRecords(input: {
       now,
     )),
   ];
+  const campaignId = crypto.randomUUID();
   const campaign: TradeCampaign = {
-    id: crypto.randomUUID(),
+    id: campaignId,
     user_id: userId,
+    campaign_code: fallbackCampaignCode(campaignId),
     symbol: mainItem.record.symbol,
     direction: mainItem.record.side === 'SHORT' ? 'main_short' : 'main_long',
     status: closedAt ? closedStatus : 'active',
@@ -2784,13 +2804,36 @@ export async function createCampaignFromTradeRecords(input: {
     importance_weight: 0,
     notes,
     actual_evolution: events,
+    deviation_notes: {},
     created_at: now,
     updated_at: now,
+  };
+  const payload = {
+    id: campaign.id,
+    user_id: campaign.user_id,
+    symbol: campaign.symbol,
+    direction: campaign.direction,
+    status: campaign.status,
+    strategy_template: campaign.strategy_template,
+    title: campaign.title,
+    opened_at: campaign.opened_at,
+    closed_at: campaign.closed_at,
+    initial_main_size_usdt: campaign.initial_main_size_usdt,
+    initial_leverage: campaign.initial_leverage,
+    final_realized_pnl: campaign.final_realized_pnl,
+    final_r_multiple: campaign.final_r_multiple,
+    peak_unrealized_pnl: campaign.peak_unrealized_pnl,
+    peak_drawdown: campaign.peak_drawdown,
+    importance_weight: campaign.importance_weight,
+    notes: campaign.notes,
+    actual_evolution: campaign.actual_evolution,
+    created_at: campaign.created_at,
+    updated_at: campaign.updated_at,
   };
 
   const { data, error } = await supabase
     .from('trade_campaigns' as never)
-    .insert(campaign as never)
+    .insert(payload as never)
     .select()
     .single();
   if (error) {
