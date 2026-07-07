@@ -81,6 +81,11 @@ export function campaignKlineTitleName(campaign: TradeCampaign): string {
   return `${campaign.symbol} ${dateSlug(campaign.opened_at)} ${campaignOutcomeSlug(campaign.status)}`;
 }
 
+function campaignExportFileBaseName(campaign: TradeCampaign): string {
+  const code = campaign.campaign_code?.trim();
+  return code ? `${campaignKlineTitleName(campaign)} 编号 ${code}` : campaignKlineTitleName(campaign);
+}
+
 function safeFileName(value: string): string {
   return value
     .replace(/[\\/:*?"<>|]/g, ' ')
@@ -448,7 +453,7 @@ function drawSectionLabel(ctx: CanvasRenderingContext2D, label: string, x: numbe
 export async function exportCampaignLegsListPng(input: ExportInput): Promise<string> {
   const title = campaignKlineTitleName(input.campaign);
   const legsCanvas = buildCampaignLegsListCanvas(input, { includeHeader: true });
-  return downloadCanvas(legsCanvas.canvas, `${safeFileName(title)}.png`);
+  return downloadCanvas(legsCanvas.canvas, `${safeFileName(campaignExportFileBaseName(input.campaign))}.png`);
 }
 
 export async function exportCampaignBoardPng(input: CampaignBoardExportInput): Promise<string> {
@@ -500,5 +505,5 @@ export async function exportCampaignBoardPng(input: CampaignBoardExportInput): P
   ctx.fillStyle = '#94A3B8';
   ctx.fillText(`导出时间 ${fmtClock(new Date().toISOString())}`, MARGIN_X, height - 16, width - MARGIN_X * 2);
 
-  return downloadCanvas(rendered.canvas, `${safeFileName(title)}.png`);
+  return downloadCanvas(rendered.canvas, `${safeFileName(campaignExportFileBaseName(input.campaign))}.png`);
 }
