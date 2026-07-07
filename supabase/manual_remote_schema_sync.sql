@@ -35,6 +35,8 @@ ALTER TABLE public.trade_journals
   ADD COLUMN IF NOT EXISTS post_positive_expectancy_review text,
   ADD COLUMN IF NOT EXISTS post_premortem_review           text,
   ADD COLUMN IF NOT EXISTS post_invalidation_review        text,
+  ADD COLUMN IF NOT EXISTS post_entry_payoff_estimate_grade text,
+  ADD COLUMN IF NOT EXISTS post_entry_win_rate_estimate_grade text,
   ADD COLUMN IF NOT EXISTS post_entry_payoff_basis_review  text,
   ADD COLUMN IF NOT EXISTS post_entry_win_rate_basis_review text,
   ADD COLUMN IF NOT EXISTS pre_calibration_win_pct         numeric,

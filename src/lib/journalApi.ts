@@ -3838,6 +3838,8 @@ export interface FinalizeJournalInput {
   post_positive_expectancy_review?: string | null;
   post_premortem_review?: string | null;
   post_invalidation_review?: string | null;
+  post_entry_payoff_estimate_grade?: TradeJournal['post_entry_payoff_estimate_grade'];
+  post_entry_win_rate_estimate_grade?: TradeJournal['post_entry_win_rate_estimate_grade'];
   post_entry_payoff_basis_review?: string | null;
   post_entry_win_rate_basis_review?: string | null;
   post_opponent_was_right?: boolean | null;

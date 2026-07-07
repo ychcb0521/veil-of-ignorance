@@ -323,6 +323,16 @@ const FALSIFICATION_STATUS_ACCENTS: Record<string, string> = {
   triggered_late: '#F6465D',
   not_triggered: '#D89B00',
 };
+const ENTRY_ESTIMATE_GRADE_LABELS: Record<string, string> = {
+  underestimated: '低估了',
+  accurate: '基本准确',
+  overestimated: '高估了',
+};
+const ENTRY_ESTIMATE_GRADE_ACCENTS: Record<string, string> = {
+  underestimated: '#0ECB81',
+  accurate: '#F0B90B',
+  overestimated: '#F6465D',
+};
 
 export const POST_FIELD_SPECS: SummaryFieldSpec[] = [
   { key: 'post_decision_quality', label: '选择本笔归类（结构 × 结果四象限的"结构轴"）', type: 'enum', optionLabels: DECISION_QUALITY_LABELS, optionAccents: DECISION_QUALITY_ACCENTS, hint: '过程是否正当——与盈亏无关。' },
@@ -341,8 +351,10 @@ export const POST_FIELD_SPECS: SummaryFieldSpec[] = [
   { key: 'post_premortem_review', label: '反 · 预设亏损原因兑现没有', type: 'text', hint: '事实模块·反。' },
   { key: 'post_invalidation_review', label: '止 · 离场 / 证伪事实', type: 'text', hint: '事实模块·止。' },
   { key: 'post_positive_expectancy_review', label: '结构 · 目标空间假设的实际表现', type: 'text', hint: '事实模块·结构。' },
-  { key: 'post_entry_payoff_basis_review', label: '建仓时盈亏权衡依据复盘', type: 'text', hint: '当时收益空间大于风险的依据，事后是否站住。' },
-  { key: 'post_entry_win_rate_basis_review', label: '建仓时胜率权衡依据复盘', type: 'text', hint: '当时胜率/置信度依据，事后是否被校准。' },
+  { key: 'post_entry_payoff_estimate_grade', label: '建仓时盈亏比估计 · 档位', type: 'enum', optionLabels: ENTRY_ESTIMATE_GRADE_LABELS, optionAccents: ENTRY_ESTIMATE_GRADE_ACCENTS, hint: '低估 / 基本准确 / 高估。' },
+  { key: 'post_entry_payoff_basis_review', label: '建仓时盈亏比估计 · 说明', type: 'text', hint: '填空说明：当时盈亏比估计哪里准、哪里偏。' },
+  { key: 'post_entry_win_rate_estimate_grade', label: '建仓时胜率估计 · 档位', type: 'enum', optionLabels: ENTRY_ESTIMATE_GRADE_LABELS, optionAccents: ENTRY_ESTIMATE_GRADE_ACCENTS, hint: '低估 / 基本准确 / 高估。' },
+  { key: 'post_entry_win_rate_basis_review', label: '建仓时胜率估计 · 说明', type: 'text', hint: '填空说明：当时胜率估计哪里准、哪里偏。' },
   {
     id: 'post_reflection_decision_basis',
     key: 'post_reflection',

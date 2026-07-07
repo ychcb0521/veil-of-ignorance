@@ -110,6 +110,7 @@ export type JournalSource = 'live' | 'retroactive_from_record';
 /** Training-set vs holdout-set discipline (anti-overfitting). */
 export type DatasetSplit = 'in_sample' | 'out_of_sample';
 export type DecisionQuality = 'good' | 'mixed' | 'bad';
+export type EntryEstimateGrade = 'underestimated' | 'accurate' | 'overestimated';
 export type RuleCategory = 'hard' | 'core' | 'watch' | 'retired';
 export type PrincipleEvolutionLevel = 0 | 1 | 2 | 3 | 4 | 5;
 /** @deprecated 旧版路径复盘：开仓第一段是否立刻站到你这边。 */
@@ -803,9 +804,13 @@ export interface TradeJournal {
   post_positive_expectancy_review?: string | null;
   post_premortem_review?: string | null;
   post_invalidation_review?: string | null;
-  /** Post-close review of the entry-time payoff/risk basis. */
+  /** Post-close grade for the entry-time payoff/risk estimate. */
+  post_entry_payoff_estimate_grade?: EntryEstimateGrade | null;
+  /** Post-close grade for the entry-time win-rate estimate. */
+  post_entry_win_rate_estimate_grade?: EntryEstimateGrade | null;
+  /** Post-close note for the entry-time payoff/risk estimate. */
   post_entry_payoff_basis_review?: string | null;
-  /** Post-close review of the entry-time win-rate basis. */
+  /** Post-close note for the entry-time win-rate estimate. */
   post_entry_win_rate_basis_review?: string | null;
   post_opponent_was_right?: boolean | null;
   /** Dalio five-step diagnosis. */

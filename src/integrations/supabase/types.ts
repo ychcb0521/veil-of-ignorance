@@ -505,7 +505,9 @@ export type Database = {
           post_emo_wanted: string | null
           post_error_scenario: string | null
           post_error_type_summary: string | null
+          post_entry_payoff_estimate_grade: string | null
           post_entry_payoff_basis_review: string | null
+          post_entry_win_rate_estimate_grade: string | null
           post_entry_win_rate_basis_review: string | null
           post_execution_monitor: string | null
           post_five_step_goal: string | null
@@ -654,7 +656,9 @@ export type Database = {
           post_emo_wanted?: string | null
           post_error_scenario?: string | null
           post_error_type_summary?: string | null
+          post_entry_payoff_estimate_grade?: string | null
           post_entry_payoff_basis_review?: string | null
+          post_entry_win_rate_estimate_grade?: string | null
           post_entry_win_rate_basis_review?: string | null
           post_execution_monitor?: string | null
           post_five_step_goal?: string | null
@@ -803,7 +807,9 @@ export type Database = {
           post_emo_wanted?: string | null
           post_error_scenario?: string | null
           post_error_type_summary?: string | null
+          post_entry_payoff_estimate_grade?: string | null
           post_entry_payoff_basis_review?: string | null
+          post_entry_win_rate_estimate_grade?: string | null
           post_entry_win_rate_basis_review?: string | null
           post_execution_monitor?: string | null
           post_five_step_goal?: string | null
