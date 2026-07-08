@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { buildCampaignChartContentTimeSpan, pickCampaignOverviewInterval } from '@/lib/campaignChartContentSpan';
+import { CAMPAIGN_EDGE_PAD_MS, buildCampaignKlineTimeWindow } from '@/hooks/useCampaignKlines';
 import type { CampaignCounterfactual, TradeCampaign, TradeJournal } from '@/types/journal';
 import type { CampaignReverseHedgeOrder, TradeRecord } from '@/types/trading';
 
@@ -201,5 +202,50 @@ describe('pickCampaignOverviewInterval', () => {
       startMs: t('2026-01-01T00:00:00.000Z'),
       endMs: t('2026-02-10T00:00:00.000Z'),
     })).toBe('1h');
+  });
+});
+
+describe('buildCampaignKlineTimeWindow', () => {
+  it('把战役内容放在中间 1/3，前后各补同等长度 K 线', () => {
+    const openedAtMs = t('2026-01-02T00:00:00.000Z');
+    const closedAtMs = t('2026-01-02T02:00:00.000Z');
+    const window = buildCampaignKlineTimeWindow(
+      openedAtMs,
+      closedAtMs,
+      t('2026-01-02T00:30:00.000Z'),
+      t('2026-01-02T02:30:00.000Z'),
+    );
+
+    expect(window).toEqual({
+      fromTime: t('2026-01-01T22:30:00.000Z'),
+      toTime: t('2026-01-02T04:30:00.000Z'),
+      contentStartMs: t('2026-01-02T00:30:00.000Z'),
+      contentEndMs: t('2026-01-02T02:30:00.000Z'),
+      contextMs: 2 * 60 * 60_000,
+    });
+    expect(window.contentStartMs! - window.fromTime).toBe(window.contextMs);
+    expect(window.toTime - window.contentEndMs!).toBe(window.contextMs);
+  });
+
+  it('单点内容区间用最小缓冲兜底，空区间保留旧宽松窗口', () => {
+    const openedAtMs = t('2026-01-02T00:00:00.000Z');
+    const closedAtMs = t('2026-01-02T02:00:00.000Z');
+    const singlePoint = t('2026-01-02T00:30:00.000Z');
+
+    expect(buildCampaignKlineTimeWindow(openedAtMs, closedAtMs, singlePoint, singlePoint)).toEqual({
+      fromTime: singlePoint - CAMPAIGN_EDGE_PAD_MS,
+      toTime: singlePoint + CAMPAIGN_EDGE_PAD_MS,
+      contentStartMs: singlePoint,
+      contentEndMs: singlePoint,
+      contextMs: CAMPAIGN_EDGE_PAD_MS,
+    });
+
+    expect(buildCampaignKlineTimeWindow(openedAtMs, closedAtMs, null, null)).toEqual({
+      fromTime: t('2026-01-01T18:00:00.000Z'),
+      toTime: t('2026-01-02T04:00:00.000Z'),
+      contentStartMs: null,
+      contentEndMs: null,
+      contextMs: null,
+    });
   });
 });

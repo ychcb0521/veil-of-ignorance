@@ -2,10 +2,57 @@ import { useMemo } from 'react';
 import { useReplayKlines } from '@/hooks/useReplayKlines';
 
 /**
- * 战役 K 线在 Legs 区间两端各留的缓冲，避免首/尾竖线贴边、并给指标一点回看。
- * 同一常量也用于主图游标（chartCurrentTime），保证游标不超出已拉取的数据范围。
+ * 退化区间（只有一个事件时间点）时保留的最小上下文，避免 K 线窗口为 0。
+ * 正常战役会用“战役跨度本身”作为前后上下文，使图上形成：
+ * 开始前 1/3、战役过程 1/3、结束后 1/3。
  */
 export const CAMPAIGN_EDGE_PAD_MS = 15 * 60_000;
+
+export type CampaignKlineTimeWindow = {
+  fromTime: number;
+  toTime: number;
+  contentStartMs: number | null;
+  contentEndMs: number | null;
+  contextMs: number | null;
+};
+
+export function buildCampaignKlineTimeWindow(
+  openedAtMs: number,
+  closedAtMs: number,
+  spanStartMs: number | null = null,
+  spanEndMs: number | null = null,
+): CampaignKlineTimeWindow {
+  const hasStart = spanStartMs != null && Number.isFinite(spanStartMs);
+  const hasEnd = spanEndMs != null && Number.isFinite(spanEndMs);
+  if (hasStart && hasEnd) {
+    if (spanEndMs > spanStartMs) {
+      const contextMs = spanEndMs - spanStartMs;
+      return {
+        fromTime: spanStartMs - contextMs,
+        toTime: spanEndMs + contextMs,
+        contentStartMs: spanStartMs,
+        contentEndMs: spanEndMs,
+        contextMs,
+      };
+    }
+    return {
+      fromTime: spanStartMs - CAMPAIGN_EDGE_PAD_MS,
+      toTime: spanEndMs + CAMPAIGN_EDGE_PAD_MS,
+      contentStartMs: spanStartMs,
+      contentEndMs: spanEndMs,
+      contextMs: CAMPAIGN_EDGE_PAD_MS,
+    };
+  }
+
+  // 空战役或历史数据异常时，保留原来的宽松兜底，避免旧数据突然没有上下文。
+  return {
+    fromTime: openedAtMs - 6 * 60 * 60_000,
+    toTime: closedAtMs + 2 * 60 * 60_000,
+    contentStartMs: null,
+    contentEndMs: null,
+    contextMs: null,
+  };
+}
 
 export function useCampaignKlines(
   symbol: string,
@@ -18,23 +65,18 @@ export function useCampaignKlines(
 ) {
   const openedAtMs = useMemo(() => new Date(openedAt).getTime(), [openedAt]);
   const closedAtMs = useMemo(() => new Date(closedAt ?? Date.now()).getTime(), [closedAt]);
-  // 有 Legs 区间时，K 线窗口 = 区间两端各留 CAMPAIGN_EDGE_PAD_MS，完全对齐 Legs 的开/平时间；
-  // 不再用 campaign.opened_at/closed_at 撑开窗口——回填战役的这两个时间未必落在 Legs 的真实 K 线段上。
-  // 只有在拿不到 Legs 区间（空战役）时，才退回旧的「开仓前 6h、平仓后 2h」兜底。
-  const fromTime = useMemo(
-    () => (spanStartMs != null ? spanStartMs - CAMPAIGN_EDGE_PAD_MS : openedAtMs - 6 * 60 * 60_000),
-    [openedAtMs, spanStartMs],
-  );
-  const toTime = useMemo(
-    () => (spanEndMs != null ? spanEndMs + CAMPAIGN_EDGE_PAD_MS : closedAtMs + 2 * 60 * 60_000),
-    [closedAtMs, spanEndMs],
+  // 有 Legs/委托/反事实内容区间时，K 线窗口 = 内容跨度前后各补一整段同等时长：
+  // [开始前上下文] [完整战役内容] [结束后上下文]，三段各占 1/3。
+  // 不再用固定 15 分钟撑开窗口——长战役需要成比例的前后行情。
+  const window = useMemo(
+    () => buildCampaignKlineTimeWindow(openedAtMs, closedAtMs, spanStartMs, spanEndMs),
+    [closedAtMs, openedAtMs, spanEndMs, spanStartMs],
   );
 
   return {
-    ...useReplayKlines(symbol, fromTime, toTime, interval),
+    ...useReplayKlines(symbol, window.fromTime, window.toTime, interval),
     openedAtMs,
     closedAtMs,
-    fromTime,
-    toTime,
+    ...window,
   };
 }

@@ -16,7 +16,7 @@ import { EndCampaignDialog } from '@/components/journal/EndCampaignDialog';
 import { useAuth } from '@/contexts/AuthContext';
 import { useTradingContext } from '@/contexts/TradingContext';
 import { intervalToMs } from '@/hooks/useBinanceData';
-import { useCampaignKlines, CAMPAIGN_EDGE_PAD_MS } from '@/hooks/useCampaignKlines';
+import { useCampaignKlines } from '@/hooks/useCampaignKlines';
 import {
   buildCampaignEventStream,
   computeDecisionAccuracy,
@@ -509,7 +509,13 @@ export default function JournalCampaignDetailPage() {
     }
   }, [interval, intervalTouched, overviewInterval]);
 
-  const { klines, loading: klinesLoading, error: klinesError, reload: reloadKlines } = useCampaignKlines(
+  const {
+    klines,
+    loading: klinesLoading,
+    error: klinesError,
+    reload: reloadKlines,
+    toTime: campaignKlineToTime,
+  } = useCampaignKlines(
     campaign?.symbol ?? '',
     campaign?.opened_at ?? new Date().toISOString(),
     effectiveClosedAt,
@@ -668,14 +674,13 @@ export default function JournalCampaignDetailPage() {
     );
   }
 
-  // 主图当前时间游标：聚焦到某事件时用 focusTime，否则停在「全部盘面内容的最后时间 + 缓冲」。
+  // 主图当前时间游标：聚焦到某事件时用 focusTime，否则停在已拉取 K 线窗口的最右端。
   // 关键：ReplayKlineChart 会用 `line.time <= currentTime` 过滤竖线/标记，并以 currentTime 作为可见区右沿。
-  // 这里用 chartContentTimeSpan（legs + 委托空单 + 反事实层 + 战役边界），确保默认盘面把上方标注全部囊括进去。
+  // useCampaignKlines 已经把窗口扩成「开始前 1/3 + 战役内容 1/3 + 结束后 1/3」，
+  // 所以这里直接用窗口右端，确保默认盘面把结束后的上下文也纳入。
   // 必须放在上面的 loading guard 之后——此时 campaign 一定非空；放在 guard 之前会在
   // 首帧（campaign 仍为 null）就解引用 campaign.opened_at 直接崩溃、整页白屏。
-  const chartDefaultCurrentTime = chartContentTimeSpan.endMs != null
-    ? chartContentTimeSpan.endMs + CAMPAIGN_EDGE_PAD_MS
-    : new Date(effectiveClosedAt ?? campaign.opened_at).getTime();
+  const chartDefaultCurrentTime = campaignKlineToTime;
   const chartDefaultViewportCenterTime = chartContentTimeSpan.startMs != null && chartContentTimeSpan.endMs != null
     ? Math.round((chartContentTimeSpan.startMs + chartContentTimeSpan.endMs) / 2)
     : chartDefaultCurrentTime;
