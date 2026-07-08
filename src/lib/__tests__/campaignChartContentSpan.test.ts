@@ -227,6 +227,24 @@ describe('buildCampaignKlineTimeWindow', () => {
     expect(window.toTime - window.contentEndMs!).toBe(window.contextMs);
   });
 
+  it('默认总览周期按扩展后的三段窗口计算，老战役打开时也会重新撑开盘面', () => {
+    const window = buildCampaignKlineTimeWindow(
+      t('2026-01-02T00:00:00.000Z'),
+      t('2026-01-02T15:00:00.000Z'),
+      t('2026-01-02T00:00:00.000Z'),
+      t('2026-01-02T15:00:00.000Z'),
+    );
+
+    expect(pickCampaignOverviewInterval({
+      startMs: t('2026-01-02T00:00:00.000Z'),
+      endMs: t('2026-01-02T15:00:00.000Z'),
+    })).toBe('1m');
+    expect(pickCampaignOverviewInterval({
+      startMs: window.fromTime,
+      endMs: window.toTime,
+    })).toBe('5m');
+  });
+
   it('单点内容区间用最小缓冲兜底，空区间保留旧宽松窗口', () => {
     const openedAtMs = t('2026-01-02T00:00:00.000Z');
     const closedAtMs = t('2026-01-02T02:00:00.000Z');

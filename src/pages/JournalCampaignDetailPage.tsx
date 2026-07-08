@@ -16,7 +16,7 @@ import { EndCampaignDialog } from '@/components/journal/EndCampaignDialog';
 import { useAuth } from '@/contexts/AuthContext';
 import { useTradingContext } from '@/contexts/TradingContext';
 import { intervalToMs } from '@/hooks/useBinanceData';
-import { useCampaignKlines } from '@/hooks/useCampaignKlines';
+import { buildCampaignKlineTimeWindow, useCampaignKlines } from '@/hooks/useCampaignKlines';
 import {
   buildCampaignEventStream,
   computeDecisionAccuracy,
@@ -498,9 +498,29 @@ export default function JournalCampaignDetailPage() {
     () => buildCampaignChartContentTimeSpan(campaign, legs, tradeRecords, reverseHedgeOrders, selectedCounterfactual),
     [campaign, legs, tradeRecords, reverseHedgeOrders, selectedCounterfactual],
   );
+  const campaignKlineTimeWindow = useMemo(() => {
+    const openedAtMs = campaign ? new Date(campaign.opened_at).getTime() : Date.now();
+    const closedAtMs = new Date(effectiveClosedAt).getTime();
+    return buildCampaignKlineTimeWindow(
+      openedAtMs,
+      closedAtMs,
+      chartContentTimeSpan.startMs ?? legTimeSpan.startMs,
+      chartContentTimeSpan.endMs ?? legTimeSpan.endMs,
+    );
+  }, [
+    campaign?.opened_at,
+    chartContentTimeSpan.endMs,
+    chartContentTimeSpan.startMs,
+    effectiveClosedAt,
+    legTimeSpan.endMs,
+    legTimeSpan.startMs,
+  ]);
   const overviewInterval = useMemo(
-    () => pickCampaignOverviewInterval(chartContentTimeSpan),
-    [chartContentTimeSpan],
+    () => pickCampaignOverviewInterval({
+      startMs: campaignKlineTimeWindow.fromTime,
+      endMs: campaignKlineTimeWindow.toTime,
+    }),
+    [campaignKlineTimeWindow.fromTime, campaignKlineTimeWindow.toTime],
   );
 
   useEffect(() => {
@@ -514,6 +534,7 @@ export default function JournalCampaignDetailPage() {
     loading: klinesLoading,
     error: klinesError,
     reload: reloadKlines,
+    fromTime: campaignKlineFromTime,
     toTime: campaignKlineToTime,
   } = useCampaignKlines(
     campaign?.symbol ?? '',
@@ -681,9 +702,7 @@ export default function JournalCampaignDetailPage() {
   // 必须放在上面的 loading guard 之后——此时 campaign 一定非空；放在 guard 之前会在
   // 首帧（campaign 仍为 null）就解引用 campaign.opened_at 直接崩溃、整页白屏。
   const chartDefaultCurrentTime = campaignKlineToTime;
-  const chartDefaultViewportCenterTime = chartContentTimeSpan.startMs != null && chartContentTimeSpan.endMs != null
-    ? Math.round((chartContentTimeSpan.startMs + chartContentTimeSpan.endMs) / 2)
-    : chartDefaultCurrentTime;
+  const chartDefaultViewportCenterTime = Math.round((campaignKlineFromTime + campaignKlineToTime) / 2);
   const chartCurrentTime = focusTime ?? chartDefaultCurrentTime;
   const chartViewportCenterTime = focusTime ?? chartDefaultViewportCenterTime;
 
@@ -1060,6 +1079,7 @@ export default function JournalCampaignDetailPage() {
                 <div className="h-full flex items-center justify-center text-[12px] text-muted-foreground">该时间段暂无 K 线数据</div>
               ) : (
                 <ReplayKlineChart
+                  key={`${campaign.id}:${interval}:${campaignKlineFromTime}:${campaignKlineToTime}`}
                   klines={klines}
                   currentTime={chartCurrentTime}
                   intervalMs={intervalToMs(interval)}

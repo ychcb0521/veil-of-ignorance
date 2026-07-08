@@ -681,7 +681,18 @@ function CandlestickChartComponent({
     const lastSig = `${lastCandle.timestamp}|${lastCandle.open}|${lastCandle.high}|${lastCandle.low}|${lastCandle.close}|${lastCandle.volume}`;
 
     const wasPrepend =
-      prevDataLenRef.current > 0 && data.length > prevDataLenRef.current && currentOldest < prevOldestRef.current;
+      prevDataLenRef.current > 0 &&
+      data.length > prevDataLenRef.current &&
+      currentOldest < prevOldestRef.current &&
+      lastCandle.timestamp === prevNewestRef.current;
+    const isSmallAppend =
+      data.length > prevDataLenRef.current &&
+      data.length - prevDataLenRef.current <= 2 &&
+      currentOldest === prevOldestRef.current;
+    const isSameBarUpdate =
+      data.length === prevDataLenRef.current &&
+      currentOldest === prevOldestRef.current &&
+      lastCandle.timestamp === prevNewestRef.current;
 
     const unchangedSnapshot =
       data.length === prevDataLenRef.current &&
@@ -690,7 +701,7 @@ function CandlestickChartComponent({
 
     if (unchangedSnapshot) return;
 
-    const needsFit = prevDataLenRef.current === 0;
+    const needsFit = prevDataLenRef.current === 0 || (!wasPrepend && !isSmallAppend && !isSameBarUpdate);
 
     if (wasPrepend) {
       // Older data prepended — feed older portion via applyMoreData
@@ -700,10 +711,10 @@ function CandlestickChartComponent({
     } else if (prevDataLenRef.current === 0) {
       // Initial load
       chart.applyNewData(klineData, true);
-    } else if (data.length > prevDataLenRef.current && data.length - prevDataLenRef.current <= 2) {
+    } else if (isSmallAppend) {
       // New candle appended (sim tick)
       chart.updateData(lastCandle);
-    } else if (data.length === prevDataLenRef.current && lastCandle.timestamp === prevNewestRef.current) {
+    } else if (isSameBarUpdate) {
       // Same bar evolving: only update last candle to keep crosshair/interaction state stable
       chart.updateData(lastCandle);
     } else {
@@ -713,11 +724,7 @@ function CandlestickChartComponent({
 
     // Auto-fit content on initial load or full data replacement to fill the viewport
     if (
-      needsFit ||
-      (!wasPrepend &&
-        prevDataLenRef.current > 0 &&
-        data.length !== prevDataLenRef.current &&
-        !(data.length > prevDataLenRef.current && data.length - prevDataLenRef.current <= 2))
+      needsFit
     ) {
       requestAnimationFrame(() => {
         chartRef.current?.scrollByDistance(0, 0);
