@@ -3986,6 +3986,34 @@ export async function listJournalsByTradeRecordId(
   return wrap("按交易记录查询日记", error, data as unknown as TradeJournal[]);
 }
 
+export async function syncTradeRecordCorrectionToJournals(record: TradeRecord): Promise<TradeJournal[]> {
+  const userId = await getAuthenticatedUserId("同步成交记录修正");
+  const journals = await listJournalsByTradeRecordId(userId, record.id);
+  if (journals.length === 0) return [];
+
+  const entryIso = toIso(record.openTime);
+  const closeIso = toIso(record.closeTime);
+  const patch: Record<string, unknown> = {
+    pre_entry_price: record.entryPrice,
+    pre_position_size: tradeRecordPositionSize(record),
+    post_outcome: tradeRecordOutcome(record),
+    post_realized_pnl: record.pnl,
+    post_exit_price_snapshot: record.exitPrice,
+  };
+  if (entryIso) patch.pre_simulated_time = entryIso;
+  if (closeIso) patch.post_real_close_time = closeIso;
+
+  const updated: TradeJournal[] = [];
+  for (const journal of journals) {
+    const result = await updateTradeJournalWithSchemaFallback(journal.id, patch);
+    if (result.error) {
+      throw new Error(`同步成交记录修正失败：${result.error.message}`);
+    }
+    updated.push({ ...journal, ...((result.data as Partial<TradeJournal> | null) ?? patch) } as TradeJournal);
+  }
+  return updated;
+}
+
 export async function findUnreviewedJournals(userId: string): Promise<TradeJournal[]> {
   const { data, error } = await supabase
     .from("trade_journals" as never)

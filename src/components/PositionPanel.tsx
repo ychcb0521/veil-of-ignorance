@@ -3,7 +3,7 @@ import { usePersistedState } from '@/hooks/usePersistedState';
 import type { Position, PendingOrder, TradeRecord } from '@/types/trading';
 import { calcUnrealizedPnl, calcLiquidationPrice } from '@/types/trading';
 import type { PositionsMap, OrdersMap, PriceMap } from '@/contexts/TradingContext';
-import { X, Trash2, ArrowUpDown, ArrowUp, ArrowDown, Plus, MoreVertical, ChevronDown, ChevronRight, GripVertical, Check } from 'lucide-react';
+import { X, Trash2, ArrowUpDown, ArrowUp, ArrowDown, Plus, MoreVertical, ChevronDown, ChevronRight, GripVertical, Check, Pencil } from 'lucide-react';
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover';
 import { toast } from 'sonner';
 import { LeverageModal } from '@/components/LeverageModal';
@@ -40,7 +40,7 @@ import {
 } from '@/lib/tradingSettlement';
 import {
   findUnreviewedJournalForClose, listJournals,
-  listJournalsByTradeRecordId, backfillJournalFromRecord,
+  listJournalsByTradeRecordId, backfillJournalFromRecord, syncTradeRecordCorrectionToJournals,
 } from '@/lib/journalApi';
 import type { TradeJournal } from '@/types/journal';
 
@@ -75,13 +75,110 @@ function getSymbolPrecision(price: number): number {
   return 6;
 }
 
+type TradeRecordRepairForm = {
+  entryPrice: string;
+  exitPrice: string;
+  openTime: string;
+  closeTime: string;
+};
+
+function formatDateTimeLocal(ms?: number | null): string {
+  if (!ms || !Number.isFinite(ms)) return '';
+  const date = new Date(ms);
+  const pad = (value: number) => String(value).padStart(2, '0');
+  return [
+    date.getFullYear(),
+    '-',
+    pad(date.getMonth() + 1),
+    '-',
+    pad(date.getDate()),
+    'T',
+    pad(date.getHours()),
+    ':',
+    pad(date.getMinutes()),
+    ':',
+    pad(date.getSeconds()),
+  ].join('');
+}
+
+function parsePositiveNumber(value: string, label: string): number {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    throw new Error(`${label}必须是大于 0 的数字`);
+  }
+  return parsed;
+}
+
+function parseDateTimeLocal(value: string, label: string): number {
+  const parsed = new Date(value).getTime();
+  if (!value || !Number.isFinite(parsed)) {
+    throw new Error(`${label}不是有效时间`);
+  }
+  return parsed;
+}
+
+function buildCorrectedTradeRecord(record: TradeRecord, form: TradeRecordRepairForm): TradeRecord {
+  const entryPrice = parsePositiveNumber(form.entryPrice, '开仓均价');
+  const exitPrice = parsePositiveNumber(form.exitPrice, '平仓均价');
+  const openTime = parseDateTimeLocal(form.openTime, '开仓时间');
+  const closeTime = parseDateTimeLocal(form.closeTime, '平仓时间');
+  if (closeTime < openTime) {
+    throw new Error('平仓时间不能早于开仓时间');
+  }
+
+  const coinSettled = isCoinSettled(record);
+  const quantity = coinSettled
+    ? Math.max(1, Math.round(record.contracts ?? record.quantity ?? 0))
+    : record.quantity;
+  const notionalUsd = getPositionNotionalUsd(
+    record.symbol,
+    {
+      ...record,
+      entryPrice,
+      quantity,
+      contracts: coinSettled ? quantity : record.contracts,
+    },
+    entryPrice,
+  );
+  const syntheticPosition: Position = {
+    id: record.positionId ?? record.id,
+    side: record.side,
+    entryPrice,
+    quantity,
+    leverage: record.leverage,
+    marginMode: 'isolated',
+    settlementMode: record.settlementMode ?? 'usdt',
+    settlementAsset: record.settlementAsset ?? (coinSettled ? getSettlementAsset(record.symbol) : 'USDT'),
+    contractSizeUsd: record.contractSizeUsd,
+    contracts: coinSettled ? quantity : record.contracts,
+    margin: record.leverage > 0 ? notionalUsd / record.leverage : 0,
+    openTime,
+  };
+  const grossPnl = calcUnrealizedPnl(syntheticPosition, exitPrice);
+  const fee = Number.isFinite(record.fee) ? record.fee : 0;
+  const pnl = grossPnl - fee;
+
+  return {
+    ...record,
+    entryPrice,
+    exitPrice,
+    quantity,
+    contracts: coinSettled ? quantity : record.contracts,
+    openTime,
+    closeTime,
+    notionalUsd,
+    pnl,
+    pnlCoin: coinSettled && exitPrice > 0 ? grossPnl / exitPrice : record.pnlCoin,
+  };
+}
+
 export function PositionPanel({
   positionsMap, ordersMap, tradeHistory, priceMap, activeSymbol,
   onClosePosition, onCancelOrder, onAddIsolatedMargin, onAdjustMargin, availableBalance = 0, balance = 0, initialCapital = 1_000_000,
   onClearSymbolData,
   activeTab, onTabChange, onCloseAllPositions, pricePrecision, onPlaceTpSl,
 }: Props) {
-  const { setSymbolLeverage: setSharedSymbolLeverage, tradingMode } = useTradingContext();
+  const { setSymbolLeverage: setSharedSymbolLeverage, tradingMode, setTradeHistory, setBalance } = useTradingContext();
   const [leverageModal, setLeverageModal] = useState<{ symbol: string; index: number; pos: Position } | null>(null);
   const [tpslModal, setTpslModal] = useState<{ symbol: string; index: number; pos: Position } | null>(null);
   const [closeModal, setCloseModal] = useState<{ symbol: string; index: number; pos: Position } | null>(null);
@@ -107,6 +204,14 @@ export function PositionPanel({
   const [directReviewPrompt, setDirectReviewPrompt] = useState<TradeRecord | null>(null);
   const [directReviewLoading, setDirectReviewLoading] = useState(false);
   const [journalsByTradeId, setJournalsByTradeId] = useState<Record<string, TradeJournal>>({});
+  const [repairRecord, setRepairRecord] = useState<TradeRecord | null>(null);
+  const [repairForm, setRepairForm] = useState<TradeRecordRepairForm>({
+    entryPrice: '',
+    exitPrice: '',
+    openTime: '',
+    closeTime: '',
+  });
+  const [repairSaving, setRepairSaving] = useState(false);
   const lastCloseIdRef = useRef<string | null>(null);
   const initialLoadRef = useRef(false);
 
@@ -200,7 +305,56 @@ export function PositionPanel({
 
   const lookupJournalForRecord = (t: TradeRecord): TradeJournal | null => {
     const k = `${t.symbol}_${t.side}_${t.entryPrice.toFixed(4)}`;
-    return journalsByCompositeKey[k] ?? null;
+    return journalsByTradeId[t.id] ?? journalsByCompositeKey[k] ?? null;
+  };
+
+  const openTradeRecordRepair = (record: TradeRecord) => {
+    setRepairRecord(record);
+    setRepairForm({
+      entryPrice: String(record.entryPrice || ''),
+      exitPrice: String(record.exitPrice || ''),
+      openTime: formatDateTimeLocal(record.openTime),
+      closeTime: formatDateTimeLocal(record.closeTime),
+    });
+  };
+
+  const handleSaveTradeRecordRepair = async () => {
+    if (!repairRecord) return;
+    let corrected: TradeRecord;
+    try {
+      corrected = buildCorrectedTradeRecord(repairRecord, repairForm);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : String(error));
+      return;
+    }
+
+    setRepairSaving(true);
+    try {
+      const synced = user ? await syncTradeRecordCorrectionToJournals(corrected) : [];
+      const pnlDelta = corrected.pnl - repairRecord.pnl;
+      setTradeHistory(prev => prev.map(item => item.id === corrected.id ? corrected : item));
+      if (Number.isFinite(pnlDelta) && Math.abs(pnlDelta) > 1e-10) {
+        setBalance(prev => prev + pnlDelta);
+      }
+      if (synced.length > 0) {
+        setJournalsByTradeId(prev => {
+          const next = { ...prev };
+          for (const journal of synced) {
+            if (journal.trade_record_id) next[journal.trade_record_id] = journal;
+          }
+          return next;
+        });
+        await reloadJournals();
+      }
+      toast.success('真实成交记录已修正', {
+        description: `PnL 调整 ${pnlDelta >= 0 ? '+' : ''}${pnlDelta.toFixed(4)} USDT`,
+      });
+      setRepairRecord(null);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : String(error));
+    } finally {
+      setRepairSaving(false);
+    }
   };
 
   const toggleSort = (field: 'pnl' | 'pct') => {
@@ -1065,7 +1219,7 @@ export function PositionPanel({
               <table className="w-full text-[11px] font-mono tabular-nums">
                 <thead className="sticky top-0 bg-white dark:bg-[#1e2329] z-10">
                   <tr className="text-gray-500 dark:text-[#848e9c] border-b border-gray-200 dark:border-[#2b3139]">
-                    {['合约', '方向', '开仓均价', '平仓均价', '数量', '开仓时间', '平仓时间', '平仓方式', '平仓盈亏', '收益率(ROE)', '评价状态'].map(h => (
+                    {['合约', '方向', '开仓均价', '平仓均价', '数量', '开仓时间', '平仓时间', '平仓方式', '平仓盈亏', '收益率(ROE)', '评价状态', '修正'].map(h => (
                       <th key={h} className="px-3 py-1.5 text-left font-medium whitespace-nowrap">{h}</th>
                     ))}
                   </tr>
@@ -1120,6 +1274,17 @@ export function PositionPanel({
                               className="h-6 px-2 text-[10px] bg-[#F0B90B] hover:bg-[#F0B90B]/90 text-black"
                             >评价</Button>
                           )}
+                        </td>
+                        <td className="px-3 py-2">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => openTradeRecordRepair(t)}
+                            className="h-6 px-2 text-[10px] text-muted-foreground hover:text-foreground"
+                          >
+                            <Pencil className="w-3 h-3 mr-1" />
+                            修正
+                          </Button>
                         </td>
                       </tr>
                     );
@@ -1319,6 +1484,94 @@ export function PositionPanel({
             </Button>
             <Button variant="destructive" size="sm" onClick={handleCloseAll}>
               确认全平
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={!!repairRecord}
+        onOpenChange={open => {
+          if (!open && !repairSaving) setRepairRecord(null);
+        }}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="text-[14px]">修正真实成交记录</DialogTitle>
+            <DialogDescription className="text-[12px] leading-relaxed">
+              仅在旧成交记录本身有误时使用。系统会按修正后的成交价重算 PnL，并同步更新绑定的战役/journal 快照。
+            </DialogDescription>
+          </DialogHeader>
+
+          {repairRecord && (
+            <div className="space-y-3 py-1">
+              <div className="rounded-md border border-border/60 bg-muted/30 px-3 py-2 text-[11px] text-muted-foreground">
+                <span className="font-mono text-foreground">{repairRecord.symbol}</span>
+                {' · '}
+                <span>{repairRecord.side === 'LONG' ? '多' : '空'} {repairRecord.leverage}x</span>
+                {' · 手续费沿用 '}
+                <span className="font-mono">{repairRecord.fee.toFixed(4)} USDT</span>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <label className="space-y-1">
+                  <span className="text-[11px] text-muted-foreground">开仓均价</span>
+                  <input
+                    type="number"
+                    step="any"
+                    value={repairForm.entryPrice}
+                    onChange={event => setRepairForm(prev => ({ ...prev, entryPrice: event.target.value }))}
+                    className="h-8 w-full rounded-md border border-border bg-background px-2 text-xs font-mono text-foreground outline-none focus:border-[#F0B90B]"
+                  />
+                </label>
+                <label className="space-y-1">
+                  <span className="text-[11px] text-muted-foreground">平仓均价</span>
+                  <input
+                    type="number"
+                    step="any"
+                    value={repairForm.exitPrice}
+                    onChange={event => setRepairForm(prev => ({ ...prev, exitPrice: event.target.value }))}
+                    className="h-8 w-full rounded-md border border-border bg-background px-2 text-xs font-mono text-foreground outline-none focus:border-[#F0B90B]"
+                  />
+                </label>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <label className="space-y-1">
+                  <span className="text-[11px] text-muted-foreground">开仓时间</span>
+                  <input
+                    type="datetime-local"
+                    step="1"
+                    value={repairForm.openTime}
+                    onChange={event => setRepairForm(prev => ({ ...prev, openTime: event.target.value }))}
+                    className="h-8 w-full rounded-md border border-border bg-background px-2 text-xs font-mono text-foreground outline-none focus:border-[#F0B90B]"
+                  />
+                </label>
+                <label className="space-y-1">
+                  <span className="text-[11px] text-muted-foreground">平仓时间</span>
+                  <input
+                    type="datetime-local"
+                    step="1"
+                    value={repairForm.closeTime}
+                    onChange={event => setRepairForm(prev => ({ ...prev, closeTime: event.target.value }))}
+                    className="h-8 w-full rounded-md border border-border bg-background px-2 text-xs font-mono text-foreground outline-none focus:border-[#F0B90B]"
+                  />
+                </label>
+              </div>
+            </div>
+          )}
+
+          <DialogFooter className="gap-2">
+            <Button variant="outline" size="sm" onClick={() => setRepairRecord(null)} disabled={repairSaving}>
+              取消
+            </Button>
+            <Button
+              size="sm"
+              onClick={handleSaveTradeRecordRepair}
+              disabled={repairSaving}
+              className="bg-[#F0B90B] text-black hover:bg-[#F0B90B]/90"
+            >
+              {repairSaving ? '修正中…' : '确认修正'}
             </Button>
           </DialogFooter>
         </DialogContent>
