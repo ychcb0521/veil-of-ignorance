@@ -1523,6 +1523,128 @@ async function recomputeCampaignDerivedFields(campaignId: string): Promise<Trade
   return wrap('重算战役元数据', error, toCampaign(data));
 }
 
+function campaignEventMatchesTradeRecord(event: CampaignEvent, record: TradeRecord, journalIds: Set<string>): boolean {
+  return event.trade_record_id === record.id || (event.journal_id != null && journalIds.has(event.journal_id));
+}
+
+function normalizeCampaignEventForTradeRecord(event: CampaignEvent, record: TradeRecord): CampaignEvent {
+  const openIso = toIso(record.openTime);
+  const closeIso = toIso(record.closeTime);
+  const next: CampaignEvent = {
+    ...event,
+    trade_record_id: record.id,
+    direction: tradeRecordDirection(record),
+    leverage: record.leverage,
+    open_time: openIso,
+    close_time: closeIso,
+    entry_price: record.entryPrice,
+    exit_price: record.exitPrice,
+    realized_pnl: record.pnl,
+    size_usdt: tradeRecordPositionSize(record),
+  };
+  if (
+    event.event_type === 'main_partial_closed' ||
+    event.event_type === 'main_fully_closed' ||
+    event.event_type === 'mirror_tp_triggered'
+  ) {
+    next.timestamp = closeIso ?? event.timestamp;
+    next.price = record.exitPrice;
+  } else if (event.event_type === 'hedge_triggered') {
+    next.timestamp = openIso ?? event.timestamp;
+    next.price = record.entryPrice;
+  }
+  return next;
+}
+
+async function syncTradeRecordCorrectionToCampaigns(record: TradeRecord, journals: TradeJournal[]): Promise<void> {
+  const campaignIds = Array.from(new Set(journals.map(journal => journal.campaign_id).filter((id): id is string => Boolean(id))));
+  if (campaignIds.length === 0) return;
+  const journalIds = new Set(journals.map(journal => journal.id));
+
+  for (const campaignId of campaignIds) {
+    const { campaign, legs } = await getCampaignWithLegs(campaignId);
+    const tradeRecordMap = getTradeRecordMapForUser(campaign.user_id);
+    tradeRecordMap.set(record.id, record);
+    const derived = deriveCampaignPatchFromLegs(campaign, legs, tradeRecordMap);
+    const actual_evolution = (campaign.actual_evolution ?? []).map(event => (
+      campaignEventMatchesTradeRecord(event, record, journalIds)
+        ? normalizeCampaignEventForTradeRecord(event, record)
+        : event
+    ));
+    const patch: MutableCampaignPatch = { ...derived, actual_evolution };
+    const { data, error } = await supabase
+      .from('trade_campaigns' as never)
+      .update(patch as never)
+      .eq('id', campaignId)
+      .select()
+      .single();
+    if (error) {
+      if (isMissingTradeCampaignsTableError(error) || isCampaignNotFoundError(error)) {
+        upsertLocalCampaign({
+          ...campaign,
+          ...patch,
+          updated_at: new Date().toISOString(),
+        });
+        continue;
+      }
+      throw new Error(`同步战役平仓时间失败：${error.message}`);
+    }
+    upsertLocalCampaign(toCampaign(data));
+  }
+}
+
+function hasCompleteTradeRecordsForCampaign(legs: TradeJournal[], tradeRecordMap: Map<string, TradeRecord>): boolean {
+  return legs.length > 0 && legs.every(leg => Boolean(leg.trade_record_id) && tradeRecordMap.has(leg.trade_record_id as string));
+}
+
+function campaignPatchChanged(campaign: TradeCampaign, patch: MutableCampaignPatch): boolean {
+  const fields: Array<keyof MutableCampaignPatch> = [
+    'opened_at',
+    'closed_at',
+    'direction',
+    'status',
+    'initial_main_size_usdt',
+    'initial_leverage',
+    'final_realized_pnl',
+    'final_r_multiple',
+  ];
+  return fields.some(field => patch[field] !== undefined && campaign[field] !== patch[field]);
+}
+
+async function healCampaignSummarySnapshots(
+  campaign: TradeCampaign,
+  legs: TradeJournal[],
+  tradeRecords: TradeRecord[],
+): Promise<TradeCampaign> {
+  const tradeRecordMap = new Map(tradeRecords.map(record => [record.id, record]));
+  if (!hasCompleteTradeRecordsForCampaign(legs, tradeRecordMap)) return campaign;
+  const patch = deriveCampaignPatchFromLegs(campaign, legs, tradeRecordMap);
+  if (!campaignPatchChanged(campaign, patch)) return campaign;
+
+  const { data, error } = await supabase
+    .from('trade_campaigns' as never)
+    .update(patch as never)
+    .eq('id', campaign.id)
+    .select()
+    .single();
+  if (error) {
+    if (isMissingTradeCampaignsTableError(error) || isCampaignNotFoundError(error)) {
+      const local = {
+        ...campaign,
+        ...patch,
+        updated_at: new Date().toISOString(),
+      };
+      upsertLocalCampaign(local);
+      return local;
+    }
+    console.warn('[journalApi] 回填战役汇总平仓时间失败', error);
+    return { ...campaign, ...patch };
+  }
+  const updated = toCampaign(data);
+  upsertLocalCampaign(updated);
+  return updated;
+}
+
 export interface CreateCampaignInput {
   symbol: string;
   direction: 'main_long' | 'main_short';
@@ -2049,9 +2171,10 @@ export async function getCampaignFullData(
 
   // 本人视角（有成交记录）时，把平仓快照回写到腿上，使互关者也能读到一致的平仓信息。
   await healCampaignLegSnapshots(legs, tradeRecords);
+  const healedCampaign = await healCampaignSummarySnapshots(campaign, legs, tradeRecords);
 
   return {
-    campaign,
+    campaign: healedCampaign,
     legs: [...legs].sort((a, b) => (a.leg_sequence ?? 9999) - (b.leg_sequence ?? 9999)),
     tradeRecords,
     pendingOrders,
@@ -4011,6 +4134,7 @@ export async function syncTradeRecordCorrectionToJournals(record: TradeRecord): 
     }
     updated.push({ ...journal, ...((result.data as Partial<TradeJournal> | null) ?? patch) } as TradeJournal);
   }
+  await syncTradeRecordCorrectionToCampaigns(record, updated);
   return updated;
 }
 

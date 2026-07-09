@@ -82,12 +82,83 @@ function tradeRecordNotionalUsd(record: TradeRecord, price = record.entryPrice):
   return getPositionNotionalUsd(record.symbol, record, price || record.entryPrice);
 }
 
+function eventTradeRecord(
+  event: CampaignEvent,
+  tradeRecords: TradeRecord[],
+  journalRecordIds: Map<string, string>,
+): TradeRecord | null {
+  const recordId = event.trade_record_id ?? (event.journal_id ? journalRecordIds.get(event.journal_id) ?? null : null);
+  if (!recordId) return null;
+  return tradeRecords.find(record => record.id === recordId) ?? null;
+}
+
+function isCanonicalSyntheticEvent(event: CampaignEvent, leg: TradeJournal | null): boolean {
+  if (!leg?.leg_role) return false;
+  if (leg.leg_role === 'mirror_tp') return event.event_type === 'mirror_tp_triggered';
+  if (HEDGE_ROLES.includes(leg.leg_role)) return event.event_type === 'hedge_triggered';
+  if (MAIN_ROLES.includes(leg.leg_role)) {
+    return event.event_type === 'main_partial_closed' || event.event_type === 'main_fully_closed';
+  }
+  return false;
+}
+
+function normalizeEventSnapshotFromRecord(event: CampaignEvent, record: TradeRecord): CampaignEvent {
+  const openIso = toIso(record.openTime);
+  const closeIso = toIso(record.closeTime);
+  const next: CampaignEvent = {
+    ...event,
+    trade_record_id: record.id,
+    direction: record.side === 'SHORT' ? 'short' : 'long',
+    leverage: record.leverage,
+    open_time: openIso,
+    close_time: closeIso,
+    entry_price: record.entryPrice,
+    exit_price: record.exitPrice,
+    realized_pnl: record.pnl,
+  };
+
+  if (
+    event.event_type === 'main_partial_closed' ||
+    event.event_type === 'main_fully_closed' ||
+    event.event_type === 'mirror_tp_triggered'
+  ) {
+    next.timestamp = closeIso;
+    next.price = record.exitPrice;
+    next.size_usdt = tradeRecordNotionalUsd(record, record.exitPrice);
+  } else if (event.event_type === 'hedge_triggered') {
+    next.timestamp = openIso;
+    next.price = record.entryPrice;
+    next.size_usdt = tradeRecordNotionalUsd(record, record.entryPrice);
+  }
+
+  return next;
+}
+
 export function buildCampaignEventStream(
   campaign: TradeCampaign,
   legs: TradeJournal[],
   tradeRecords: TradeRecord[],
 ): CampaignEvent[] {
-  const events: CampaignEvent[] = [...(campaign.actual_evolution ?? [])].map(event => ({ ...event }));
+  const legByJournalId = new Map(legs.map(leg => [leg.id, leg]));
+  const legByRecordId = new Map(
+    legs
+      .filter(leg => Boolean(leg.trade_record_id))
+      .map(leg => [leg.trade_record_id as string, leg]),
+  );
+  const journalRecordIds = new Map(
+    legs
+      .filter(leg => Boolean(leg.trade_record_id))
+      .map(leg => [leg.id, leg.trade_record_id as string]),
+  );
+  const events: CampaignEvent[] = [...(campaign.actual_evolution ?? [])].flatMap(event => {
+    const record = eventTradeRecord(event, tradeRecords, journalRecordIds);
+    if (!record) return [{ ...event }];
+    const leg = (event.journal_id ? legByJournalId.get(event.journal_id) ?? null : null)
+      ?? legByRecordId.get(record.id)
+      ?? null;
+    const normalized = normalizeEventSnapshotFromRecord(event, record);
+    return isCanonicalSyntheticEvent(normalized, leg) ? [] : [normalized];
+  });
 
   for (const leg of legs) {
     const tradeRecord = findTradeRecord(leg, tradeRecords);
