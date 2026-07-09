@@ -161,6 +161,48 @@ describe('CandlestickChart analysis annotations', () => {
     expect(mocks.chart.subscribeAction).toHaveBeenCalledWith('onVisibleRangeChange', expect.any(Function));
   });
 
+  it('同一时间多个标记仍按真实价格落点，不为避让改动 marker value', async () => {
+    render(
+      <CandlestickChart
+        data={[candle(1000, 1), candle(2000, 1.2)]}
+        symbol="BTCUSDT"
+        rawSymbol="BTCUSDT"
+        analysisMode
+        analysisAnnotations={{
+          markers: [
+            {
+              time: 1000,
+              price: 1,
+              color: '#0ECB81',
+              shape: 'triangle-up',
+              label: 'M',
+            },
+            {
+              time: 1000,
+              price: 1.005,
+              color: '#2B80FF',
+              shape: 'square',
+              label: 'M 全平',
+            },
+          ],
+        }}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(mocks.chart.createOverlay).toHaveBeenCalled();
+    });
+
+    const markerOverlays = mocks.chart.createOverlay.mock.calls
+      .map(([overlay]) => overlay)
+      .filter(overlay => overlay.name === 'simpleAnnotation');
+
+    expect(markerOverlays.map(overlay => overlay.points?.[0])).toEqual([
+      { timestamp: 1000, value: 1 },
+      { timestamp: 1000, value: 1.005 },
+    ]);
+  });
+
   it('图表滚动或缩放后，浮层标注会按当前 K 线坐标重新定位', async () => {
     render(
       <CandlestickChart

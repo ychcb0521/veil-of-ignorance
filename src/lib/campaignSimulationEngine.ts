@@ -844,7 +844,7 @@ export function buildManualLegs(
       const closeMs = manualTimeMs(closeTime) ?? manualTimeMs(fallbackClose) ?? manualTimeMs(openTime) ?? Date.now();
       const openMs = manualTimeMs(openTime) ?? closeMs;
       const normalizedClose = closeMs >= openMs ? closeTime : new Date(openMs).toISOString();
-      const entryPrice = leg.pre_entry_price ?? record?.entryPrice ?? params.entry.price;
+      const entryPrice = record?.entryPrice ?? leg.pre_entry_price ?? params.entry.price;
       const exitPrice = record?.exitPrice ?? leg.post_exit_price_snapshot ?? entryPrice;
       return {
         id: leg.id || `leg-${index}`,

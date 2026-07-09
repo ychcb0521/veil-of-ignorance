@@ -1137,42 +1137,10 @@ function CandlestickChartComponent({
     }
 
     // Same-time event labels are laid out in a fixed pixel band below; keep the
-    // tiny glyphs on price only as anchors so vertical zoom cannot crush labels.
+    // tiny glyphs anchored to their exact prices. Do not nudge marker values for
+    // overlap avoidance, because these anchors are used to audit fill prices.
     const visibleMarkers = visibleMarkerCandidates;
-    let markerLaneGap = 0;
-    if (visibleMarkers.length > 0 && data.length > 0) {
-      let lo = Infinity;
-      let hi = -Infinity;
-      for (const d of data) {
-        if (d.low < lo) lo = d.low;
-        if (d.high > hi) hi = d.high;
-      }
-      const range = Math.max(hi - lo, Math.abs(hi) * 1e-4, 1e-9);
-      markerLaneGap = range * 0.05; // ≈ 一个标签高度
-    }
-    const markersByTime = new Map<number, AnalysisChartMarker[]>();
-    for (const m of visibleMarkers) {
-      const arr = markersByTime.get(m.time);
-      if (arr) arr.push(m);
-      else markersByTime.set(m.time, [m]);
-    }
-    const placedMarkers: Array<{ marker: AnalysisChartMarker; value: number }> = [];
-    for (const group of markersByTime.values()) {
-      if (group.length === 1) {
-        placedMarkers.push({ marker: group[0], value: group[0].price });
-        continue;
-      }
-      // 自下而上：相邻标签至少相隔 markerLaneGap；够开的保持原位（位移最小）。
-      const sorted = [...group].sort((a, b) => a.price - b.price);
-      let prevValue = -Infinity;
-      for (const m of sorted) {
-        const value = Math.max(m.price, prevValue + markerLaneGap);
-        placedMarkers.push({ marker: m, value });
-        prevValue = value;
-      }
-    }
-
-    for (const { marker, value } of placedMarkers) {
+    for (const marker of visibleMarkers) {
       const glyph =
         marker.shape === "triangle-up" ? "▲" :
         marker.shape === "triangle-down" ? "▼" :
@@ -1191,7 +1159,7 @@ function CandlestickChartComponent({
 
       createAnalysisOverlay("marker", {
         name: "simpleAnnotation",
-        points: [{ timestamp: marker.time, value }],
+        points: [{ timestamp: marker.time, value: marker.price }],
         lock: true,
         extendData: glyph,
         styles: {

@@ -180,7 +180,7 @@ function buildRows(input: ExportInput): ExportRow[] {
     const openLabel = fmtClock(record?.openTime ?? leg.pre_simulated_time);
     const closeLabel = fmtClock(record?.closeTime ?? leg.post_real_close_time);
     const operationLabel = fmtClock(operationTimeForLeg(leg));
-    const entryPriceValue = leg.pre_entry_price ?? record?.entryPrice ?? null;
+    const entryPriceValue = record?.entryPrice ?? leg.pre_entry_price ?? null;
     const exitPriceValue = record?.exitPrice ?? leg.post_exit_price_snapshot ?? null;
     const hedgeSummary = leg.order_kind === 'hedge' && leg.hedge_type
       ? `${HEDGE_TYPE_LABELS[leg.hedge_type]}${leg.hedge_necessity_pct != null ? ` · ${leg.hedge_necessity_pct.toFixed(0)}%` : ''}`

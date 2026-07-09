@@ -202,7 +202,7 @@ function buildChartArtifacts(
     const placedMs = safeTimeMs(leg.pre_simulated_time) ?? new Date(campaign.opened_at).getTime();
     const openTime = record?.openTime ?? placedMs;
     const closeTime = record?.closeTime ?? safeTimeMs(leg.post_real_close_time);
-    const price = leg.pre_entry_price ?? record?.entryPrice ?? 0;
+    const price = record?.entryPrice ?? leg.pre_entry_price ?? 0;
     const exitPrice = record?.exitPrice ?? leg.post_exit_price_snapshot ?? price;
     const color = leg.leg_role === 'mirror_tp'
       ? '#F0B90B'

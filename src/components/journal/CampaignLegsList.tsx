@@ -118,7 +118,7 @@ export function CampaignLegsList({
               const openLabel = fmtClock(record?.openTime ?? leg.pre_simulated_time);
               const closeLabel = fmtClock(record?.closeTime ?? leg.post_real_close_time);
               const operationLabel = fmtClock(operationTimeForLeg(leg));
-              const entryPriceValue = leg.pre_entry_price ?? record?.entryPrice ?? null;
+              const entryPriceValue = record?.entryPrice ?? leg.pre_entry_price ?? null;
               const exitPriceValue = record?.exitPrice ?? leg.post_exit_price_snapshot ?? null;
               const reverseOrdersForLeg = reverseHedgeOrders.filter(order => reverseOrderLegMap.get(order.id) === leg.id);
               const hedgeSummary = leg.order_kind === 'hedge' && leg.hedge_type

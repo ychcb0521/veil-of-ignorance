@@ -1756,33 +1756,51 @@ export async function getCampaignWithLegs(
  * 把每条腿的平仓快照（平仓时间/平仓价/盈亏/结果）从本人的成交记录回写到「腿」自身。
  * 这些数据原本只存在本人浏览器的本地成交记录里，互关者读不到——回写到 trade_journals 后，
  * 互关者读腿就能看到与本人一致的平仓信息（详情页 Legs 列表与盘面标记都已优先读腿字段）。
- * 幂等：只补缺失字段；只有本人（有成交记录）视角会触发，互关者 tradeRecords 为空直接跳过。
+ * 幂等：以真实成交记录为准修正缺失或旧错字段；只有本人（有成交记录）视角会触发，
+ * 互关者 tradeRecords 为空直接跳过。
  */
 async function healCampaignLegSnapshots(legs: TradeJournal[], tradeRecords: TradeRecord[]): Promise<void> {
   if (tradeRecords.length === 0) return;
   const recordMap = new Map(tradeRecords.map(record => [record.id, record]));
+  const differsNumber = (current: number | null | undefined, expected: number) => {
+    if (!Number.isFinite(expected)) return false;
+    if (current == null || !Number.isFinite(current)) return true;
+    return Math.abs(current - expected) > Math.max(1e-12, Math.abs(expected) * 1e-10);
+  };
+  const differsTime = (current: string | null | undefined, expectedMs: number) => {
+    if (!Number.isFinite(expectedMs) || expectedMs <= 0) return false;
+    if (!current) return true;
+    const currentMs = new Date(current).getTime();
+    return !Number.isFinite(currentMs) || currentMs !== expectedMs;
+  };
   for (const leg of legs) {
     if (!leg.trade_record_id) continue;
     const record = recordMap.get(leg.trade_record_id);
     if (!record) continue;
     const full: Record<string, unknown> = {};
     const safe: Record<string, unknown> = {};
-    if (!leg.post_real_close_time && Number.isFinite(record.closeTime) && record.closeTime > 0) {
+    if (differsTime(leg.post_real_close_time, record.closeTime)) {
       const iso = new Date(record.closeTime).toISOString();
       full.post_real_close_time = iso;
       safe.post_real_close_time = iso;
+      leg.post_real_close_time = iso;
     }
-    if (!leg.post_outcome) {
-      const outcome = record.pnl > 0 ? 'win' : record.pnl < 0 ? 'loss' : 'breakeven';
-      full.post_outcome = outcome;
-      safe.post_outcome = outcome;
+    if (Number.isFinite(record.pnl)) {
+      const outcome = tradeRecordOutcome(record);
+      if (leg.post_outcome !== outcome) {
+        full.post_outcome = outcome;
+        safe.post_outcome = outcome;
+        leg.post_outcome = outcome;
+      }
     }
-    if (leg.post_realized_pnl == null) {
+    if (differsNumber(leg.post_realized_pnl, record.pnl)) {
       full.post_realized_pnl = record.pnl;
       safe.post_realized_pnl = record.pnl;
+      leg.post_realized_pnl = record.pnl;
     }
-    if (leg.post_exit_price_snapshot == null && Number.isFinite(record.exitPrice) && record.exitPrice > 0) {
+    if (Number.isFinite(record.exitPrice) && record.exitPrice > 0 && differsNumber(leg.post_exit_price_snapshot, record.exitPrice)) {
       full.post_exit_price_snapshot = record.exitPrice;
+      leg.post_exit_price_snapshot = record.exitPrice;
     }
     if (Object.keys(full).length === 0) continue;
     let { error } = await supabase.from('trade_journals' as never).update(full as never).eq('id', leg.id);
