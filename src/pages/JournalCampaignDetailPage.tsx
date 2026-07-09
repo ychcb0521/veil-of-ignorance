@@ -23,6 +23,13 @@ import {
   shouldSuggestCampaignEnd,
 } from '@/lib/campaignAnalysis';
 import { buildCampaignChartContentTimeSpan, pickCampaignOverviewInterval, type CampaignChartInterval } from '@/lib/campaignChartContentSpan';
+import { fetchCanonicalTimePriceAt } from '@/lib/canonicalTimePrice';
+import {
+  buildLegExitPriceCorrection,
+  resolveLegExecution,
+  type LegExitPriceCorrection,
+  type LegExitPriceCorrections,
+} from '@/lib/campaignLegExecution';
 import { buildSelectedLegVerticalLines, legRoleMarkerLabel } from '@/lib/campaignLegMarkers';
 import { exportCampaignBoardPng } from '@/lib/campaignLegsPngExport';
 import {
@@ -174,6 +181,7 @@ function buildChartArtifacts(
   campaign: TradeCampaign,
   legs: TradeJournal[],
   tradeRecords: TradeRecord[],
+  legExitPriceCorrections: LegExitPriceCorrections = {},
 ) {
   const events = buildCampaignEventStream(campaign, legs, tradeRecords);
   const eventMap = new Map(events.map(event => [event.journal_id ?? event.id, event]));
@@ -199,11 +207,11 @@ function buildChartArtifacts(
   let rollingIndex = 1;
   for (const leg of legs) {
     const record = leg.trade_record_id ? tradeRecords.find(item => item.id === leg.trade_record_id) ?? null : null;
-    const placedMs = safeTimeMs(leg.pre_simulated_time) ?? new Date(campaign.opened_at).getTime();
-    const openTime = record?.openTime ?? placedMs;
-    const closeTime = record?.closeTime ?? safeTimeMs(leg.post_real_close_time);
-    const price = record?.entryPrice ?? leg.pre_entry_price ?? 0;
-    const exitPrice = record?.exitPrice ?? leg.post_exit_price_snapshot ?? price;
+    const resolved = resolveLegExecution(leg, record, legExitPriceCorrections);
+    const openTime = resolved.openTime ?? new Date(campaign.opened_at).getTime();
+    const closeTime = resolved.closeTime;
+    const price = resolved.entryPrice ?? 0;
+    const exitPrice = resolved.exitPrice ?? price;
     const color = leg.leg_role === 'mirror_tp'
       ? '#F0B90B'
       : leg.leg_role === 'hedge_rolling'
@@ -392,6 +400,7 @@ export default function JournalCampaignDetailPage() {
   const [campaign, setCampaign] = useState<TradeCampaign | null>(null);
   const [legs, setLegs] = useState<TradeJournal[]>([]);
   const [tradeRecords, setTradeRecords] = useState<TradeRecord[]>([]);
+  const [legExitPriceCorrections, setLegExitPriceCorrections] = useState<LegExitPriceCorrections>({});
   const [pendingOrders, setPendingOrders] = useState<PendingOrder[]>([]);
   const [reverseHedgeOrders, setReverseHedgeOrders] = useState<CampaignReverseHedgeOrder[]>([]);
   const [interval, setInterval] = useState<Interval>('1m');
@@ -545,13 +554,53 @@ export default function JournalCampaignDetailPage() {
     chartContentTimeSpan.endMs ?? legTimeSpan.endMs,
   );
 
+  useEffect(() => {
+    if (!campaign || legs.length === 0 || tradeRecords.length === 0) {
+      setLegExitPriceCorrections({});
+      return;
+    }
+
+    let cancelled = false;
+    const recordMap = new Map(tradeRecords.map(record => [record.id, record]));
+    const candidates = legs
+      .map(leg => {
+        const record = leg.trade_record_id ? recordMap.get(leg.trade_record_id) ?? null : null;
+        return record && record.closeTime > 0 ? { leg, record } : null;
+      })
+      .filter((item): item is { leg: TradeJournal; record: TradeRecord } => item != null);
+
+    if (candidates.length === 0) {
+      setLegExitPriceCorrections({});
+      return;
+    }
+
+    (async () => {
+      const entries = await Promise.all(
+        candidates.map(async ({ leg, record }) => {
+          const canonical = await fetchCanonicalTimePriceAt(campaign.symbol, record.closeTime).catch(() => null);
+          const correction = buildLegExitPriceCorrection(record.exitPrice, canonical);
+          return correction ? [leg.id, correction] as const : null;
+        }),
+      );
+      if (cancelled) return;
+      const correctionEntries = entries.filter((entry): entry is readonly [string, LegExitPriceCorrection] => entry != null);
+      setLegExitPriceCorrections(
+        Object.fromEntries(correctionEntries),
+      );
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [campaign?.symbol, legs, tradeRecords]);
+
   const accuracy = useMemo(
     () => (campaign ? computeDecisionAccuracy(campaign, legs, tradeRecords, klines) : null),
     [campaign, legs, tradeRecords, klines],
   );
   const chart = useMemo(
-    () => (campaign ? buildChartArtifacts(campaign, legs, tradeRecords) : { markers: [], timeBoundPriceLines: [], verticalLines: [], events: [] }),
-    [campaign, legs, tradeRecords],
+    () => (campaign ? buildChartArtifacts(campaign, legs, tradeRecords, legExitPriceCorrections) : { markers: [], timeBoundPriceLines: [], verticalLines: [], events: [] }),
+    [campaign, legs, tradeRecords, legExitPriceCorrections],
   );
   const pendingCounterfactual = useMemo(
     () => counterfactuals.find(branch => branch.id === pendingCounterfactualId) ?? null,
@@ -1221,6 +1270,7 @@ export default function JournalCampaignDetailPage() {
           <CampaignLegsList
             legs={legs}
             tradeRecords={tradeRecords}
+            legExitPriceCorrections={legExitPriceCorrections}
             reverseHedgeOrders={visibleReverseHedgeOrders}
             highlightedLegIds={selectedLegMarkerIds}
             onToggleHighlight={(leg) => {

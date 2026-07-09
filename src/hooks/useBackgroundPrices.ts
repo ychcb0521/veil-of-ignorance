@@ -37,6 +37,7 @@ export function useBackgroundPrices() {
     setBalance,
     setTradeHistory,
     tradingMode,
+    getEffectiveTime,
     recordExecutionTrade,
   } = useTradingContext();
 
@@ -59,12 +60,13 @@ export function useBackgroundPrices() {
       const posUnits = getPositionUnits(pos);
       const closeUnits = Math.min(posUnits, getPositionUnits(order));
       const exitMethod = order.reduceKind === "TP" ? "tp1" : order.reduceKind === "SL" ? "sl" : "manual";
+      const closeTime = getEffectiveTime(targetSymbol);
       const settledClose = settlePositionClose(
         targetSymbol,
         pos,
         triggerPrice,
         closeUnits,
-        sim.currentSimulatedTime,
+        closeTime,
         exitMethod,
       );
       if (!settledClose) return;
@@ -122,7 +124,7 @@ export function useBackgroundPrices() {
         description: `${netPnl >= 0 ? "+" : ""}${netPnl.toFixed(2)} USDT`,
       });
     },
-    [setBalance, setPositionsMap, setOrdersMap, setTradeHistory, sim.currentSimulatedTime],
+    [getEffectiveTime, setBalance, setPositionsMap, setOrdersMap, setTradeHistory],
   );
 
   // Simple matching for background symbols
@@ -188,7 +190,7 @@ export function useBackgroundPrices() {
           const fee = calcFee(fillPrice, order.quantity, false);
           const margin = (order.quantity * fillPrice) / order.leverage;
           const positionId = crypto.randomUUID();
-          const simulatedTime = sim.currentSimulatedTime;
+          const simulatedTime = getEffectiveTime(symbol);
 
           setBalance((prev) => prev - margin - fee);
           setPositionsMap((prev) => {
@@ -239,13 +241,13 @@ export function useBackgroundPrices() {
         }));
       }
     },
-    [setBalance, setPositionsMap, setOrdersMap, executeReduceOnlyTrigger, recordExecutionTrade, tradingMode, sim.currentSimulatedTime],
+    [setBalance, setPositionsMap, setOrdersMap, executeReduceOnlyTrigger, recordExecutionTrade, tradingMode, getEffectiveTime],
   );
 
   const pollBackgroundSymbols = useCallback(async () => {
     if (!sim.isRunning || pollingRef.current) return;
 
-    const now = sim.currentSimulatedTime;
+    const now = Date.now();
     const MIN_POLL_MS = 1000;
     if (now - lastPollRef.current < MIN_POLL_MS) return;
 
@@ -262,7 +264,10 @@ export function useBackgroundPrices() {
       for (let i = 0; i < backgroundSymbols.length; i += batchSize) {
         const batch = backgroundSymbols.slice(i, i + batchSize);
         const results = await Promise.all(
-          batch.map((sym) => fetchCanonicalTimePriceAt(sym, now).then((r) => ({ sym, r })).catch(() => ({ sym, r: null }))),
+          batch.map((sym) => {
+            const effectiveTime = getEffectiveTime(sym);
+            return fetchCanonicalTimePriceAt(sym, effectiveTime).then((r) => ({ sym, r })).catch(() => ({ sym, r: null }));
+          }),
         );
         for (const { sym, r } of results) {
           if (r) newPrices[sym] = r;
@@ -292,6 +297,7 @@ export function useBackgroundPrices() {
   }, [
     sim.isRunning,
     sim.currentSimulatedTime,
+    getEffectiveTime,
     activeSymbol,
     activeSymbols,
     ordersMap,

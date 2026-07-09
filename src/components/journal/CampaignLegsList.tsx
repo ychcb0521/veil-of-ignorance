@@ -2,6 +2,7 @@ import { useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Crosshair, ExternalLink, EyeOff } from 'lucide-react';
 import { LegRoleChip } from '@/components/journal/LegRoleChip';
+import { resolveLegExecution, type LegExitPriceCorrections } from '@/lib/campaignLegExecution';
 import { HEDGE_TYPE_LABELS } from '@/lib/hedgeTypes';
 import type { TradeJournal } from '@/types/journal';
 import type { CampaignReverseHedgeOrder, TradeRecord } from '@/types/trading';
@@ -9,6 +10,7 @@ import type { CampaignReverseHedgeOrder, TradeRecord } from '@/types/trading';
 interface Props {
   legs: TradeJournal[];
   tradeRecords: TradeRecord[];
+  legExitPriceCorrections?: LegExitPriceCorrections;
   reverseHedgeOrders?: CampaignReverseHedgeOrder[];
   highlightedLegIds?: string[];
   onToggleHighlight?: (leg: TradeJournal) => void;
@@ -50,6 +52,7 @@ function fmtPrice(value: number | null | undefined): string {
 export function CampaignLegsList({
   legs,
   tradeRecords,
+  legExitPriceCorrections = {},
   reverseHedgeOrders = [],
   highlightedLegIds = [],
   onToggleHighlight,
@@ -113,13 +116,17 @@ export function CampaignLegsList({
           <div className="max-h-[380px] overflow-y-auto">
             {legs.map(leg => {
               const record = leg.trade_record_id ? recordMap.get(leg.trade_record_id) ?? null : null;
+              const execution = resolveLegExecution(leg, record, legExitPriceCorrections);
               const status = statusForLeg(leg, record);
               const highlighted = highlightedSet.has(leg.id);
-              const openLabel = fmtClock(record?.openTime ?? leg.pre_simulated_time);
-              const closeLabel = fmtClock(record?.closeTime ?? leg.post_real_close_time);
+              const openLabel = fmtClock(execution.openTime ?? leg.pre_simulated_time);
+              const closeLabel = fmtClock(execution.closeTime ?? leg.post_real_close_time);
               const operationLabel = fmtClock(operationTimeForLeg(leg));
-              const entryPriceValue = record?.entryPrice ?? leg.pre_entry_price ?? null;
-              const exitPriceValue = record?.exitPrice ?? leg.post_exit_price_snapshot ?? null;
+              const entryPriceValue = execution.entryPrice;
+              const exitPriceValue = execution.exitPrice;
+              const exitCorrectionTitle = execution.exitCorrection
+                ? `原 TradeRecord 平仓价 ${fmtPrice(execution.exitCorrection.originalExitPrice)} 超出该平仓时刻 1m K 线范围 ${fmtPrice(execution.exitCorrection.candleLow)}-${fmtPrice(execution.exitCorrection.candleHigh)}，本页按 K 线时价显示。`
+                : undefined;
               const reverseOrdersForLeg = reverseHedgeOrders.filter(order => reverseOrderLegMap.get(order.id) === leg.id);
               const hedgeSummary = leg.order_kind === 'hedge' && leg.hedge_type
                 ? `${HEDGE_TYPE_LABELS[leg.hedge_type]}${leg.hedge_necessity_pct != null ? ` · ${leg.hedge_necessity_pct.toFixed(0)}%` : ''}`
@@ -147,7 +154,7 @@ export function CampaignLegsList({
                     {hedgeSummary && <div className="text-[10px] text-[#F0B90B]">{hedgeSummary}</div>}
                   </div>
                   <div>{fmtPrice(entryPriceValue)}</div>
-                  <div>{fmtPrice(exitPriceValue)}</div>
+                  <div title={exitCorrectionTitle}>{fmtPrice(exitPriceValue)}</div>
                   <div>{leg.pre_position_size != null ? leg.pre_position_size.toFixed(2) : '—'}</div>
                   <div className={status.className}>{status.label}</div>
                   <div>{leg.post_r_multiple != null ? leg.post_r_multiple.toFixed(2) : '—'}</div>
