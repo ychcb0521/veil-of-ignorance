@@ -212,6 +212,12 @@ describe('JournalCampaignsPage sorting', () => {
     await waitFor(() => expect(screen.getAllByTestId('campaign-card')).toHaveLength(4));
 
     expect(cardOrder()).toEqual(['High Importance', 'Best PnL', 'Late Close', 'Newest Operation']);
+    expect(screen.getAllByTestId('campaign-operation-time').map(node => node.textContent)).toEqual([
+      '操作时间：2026-04-03 08:00',
+      '操作时间：2026-03-02 08:00',
+      '操作时间：2026-02-01 08:00',
+      '操作时间：2026-01-10 08:00',
+    ]);
     expect(screen.getByTestId('campaign-sort-time')).toHaveAttribute('aria-pressed', 'true');
     expect(screen.getByTestId('campaign-sort-time')).toHaveAttribute('data-sort-direction', 'desc');
     expect(screen.getByTestId('campaign-sort-time')).toHaveAttribute('aria-label', '操作时间，从大到小排序');

@@ -14,6 +14,7 @@ import {
 } from '@/lib/journalApi';
 import { LEG_ROLE_LABELS, STRATEGY_TEMPLATES } from '@/lib/strategyTemplates';
 import { campaignOperationTime, tradeRecordsForJournals } from '@/lib/objectiveOperationTime';
+import { formatBeijingTime } from '@/lib/timeFormat';
 import type { CampaignStatus, LegRole, TradeCampaign, TradeJournal } from '@/types/journal';
 import type { TradeRecord } from '@/types/trading';
 
@@ -93,6 +94,9 @@ const LEG_CHIP_CLASS: Record<LegRole, string> = {
 };
 
 const fmtTime = (iso: string | null) => (iso ? iso.replace('T', ' ').slice(0, 16) : '进行中');
+const fmtOperationTime = (time: number | null) => (
+  time == null ? '—' : formatBeijingTime(time).slice(0, 16)
+);
 
 function importanceValue(campaign: Pick<TradeCampaign, 'importance_weight'>): number {
   const value = Number(campaign.importance_weight);
@@ -416,9 +420,10 @@ export default function JournalCampaignsPage() {
             </div>
           </div>
         ) : (
-          sortedRows.map(({ campaign, legs }) => {
+          sortedRows.map(({ campaign, legs, tradeRecords }) => {
             const importance = importanceValue(campaign);
             const isOwnCampaign = campaign.user_id === user?.id;
+            const operationTime = campaignOperationTime(legs, tradeRecords);
             const statusLabel = campaign.status === 'active'
               ? '进行中'
               : campaign.status === 'closed_profit'
@@ -499,13 +504,16 @@ export default function JournalCampaignsPage() {
                   </div>
                 </div>
 
-                <div className="mt-3 grid grid-cols-1 md:grid-cols-4 gap-2 text-[11px] font-mono text-muted-foreground">
+                <div className="mt-3 grid grid-cols-1 gap-2 text-[11px] font-mono text-muted-foreground md:grid-cols-2 xl:grid-cols-[1.35fr_0.85fr_0.9fr_0.75fr_1fr]">
                   <div>{fmtTime(campaign.opened_at)} → {fmtTime(campaign.closed_at)}</div>
                   <div>含 {legs.length} legs · 持续 {durationLabel(campaign.opened_at, campaign.closed_at)}</div>
                   <div>
                     已实现 P&L：{campaign.final_realized_pnl == null ? '—' : campaign.final_realized_pnl.toFixed(2)}
                   </div>
                   <div>峰值浮盈：{campaign.status === 'active' ? '批次 17 计算' : (campaign.peak_unrealized_pnl ?? '—')}</div>
+                  <div data-testid="campaign-operation-time">
+                    操作时间：{fmtOperationTime(operationTime)}
+                  </div>
                 </div>
 
                 <div className="mt-3 flex flex-wrap gap-1.5">
