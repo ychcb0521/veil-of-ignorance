@@ -4,6 +4,7 @@ import { Crosshair, ExternalLink, EyeOff } from 'lucide-react';
 import { LegRoleChip } from '@/components/journal/LegRoleChip';
 import { resolveLegExecution, type LegExitPriceCorrections } from '@/lib/campaignLegExecution';
 import { HEDGE_TYPE_LABELS } from '@/lib/hedgeTypes';
+import { buildTradeRecordLookup, journalOperationTime } from '@/lib/objectiveOperationTime';
 import type { TradeJournal } from '@/types/journal';
 import type { CampaignReverseHedgeOrder, TradeRecord } from '@/types/trading';
 
@@ -20,7 +21,7 @@ interface Props {
 
 function statusForLeg(leg: TradeJournal, record: TradeRecord | null) {
   if (record) return { label: '已平仓', className: 'text-[#0ECB81]' };
-  if (leg.post_real_close_time || leg.post_outcome) return { label: '已平仓', className: 'text-[#0ECB81]' };
+  if (leg.post_simulated_close_time || leg.post_real_close_time || leg.post_outcome) return { label: '已平仓', className: 'text-[#0ECB81]' };
   if (leg.leg_role === 'mirror_tp' || leg.leg_role?.startsWith('hedge_')) return { label: '挂单中', className: 'text-[#F0B90B]' };
   return { label: '进行中', className: 'text-muted-foreground' };
 }
@@ -31,10 +32,6 @@ function fmtClock(value: number | string | null | undefined): string {
   if (Number.isNaN(date.getTime())) return '—';
   const pad = (n: number) => String(n).padStart(2, '0');
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
-}
-
-function operationTimeForLeg(leg: TradeJournal): string | number | null | undefined {
-  return leg.post_real_close_time ?? leg.pre_real_time ?? leg.created_at ?? leg.updated_at;
 }
 
 function timeMs(value: number | string | null | undefined): number | null {
@@ -60,7 +57,7 @@ export function CampaignLegsList({
   onDetach,
 }: Props) {
   const nav = useNavigate();
-  const recordMap = useMemo(() => new Map(tradeRecords.map(record => [record.id, record])), [tradeRecords]);
+  const recordMap = useMemo(() => buildTradeRecordLookup(tradeRecords), [tradeRecords]);
   const highlightedSet = useMemo(() => new Set(highlightedLegIds), [highlightedLegIds]);
   // 反向挂单归属：已触发的委托优先按成交记录精确归到自己的 leg；
   // 未触发/已撤的挂单再归到「委托时刻最近一次开仓」的那条腿，避免在重叠时间窗里重复出现。
@@ -120,8 +117,8 @@ export function CampaignLegsList({
               const status = statusForLeg(leg, record);
               const highlighted = highlightedSet.has(leg.id);
               const openLabel = fmtClock(execution.openTime ?? leg.pre_simulated_time);
-              const closeLabel = fmtClock(execution.closeTime ?? leg.post_real_close_time);
-              const operationLabel = fmtClock(operationTimeForLeg(leg));
+              const closeLabel = fmtClock(execution.closeTime);
+              const operationLabel = fmtClock(journalOperationTime(leg, record));
               const entryPriceValue = execution.entryPrice;
               const exitPriceValue = execution.exitPrice;
               const exitCorrectionTitle = execution.exitCorrection

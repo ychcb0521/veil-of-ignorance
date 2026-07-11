@@ -825,8 +825,10 @@ export interface TradeJournal {
   post_intervention_type?: InterventionType | null;
   post_execution_monitor?: string | null;
   post_five_step_weak_point?: FiveStepWeakPoint | null;
-  /** Real wall-clock time of position close (stamped on first review-sheet open). */
+  /** Real wallet-clock time of the close action; never contains shifted K-line time. */
   post_real_close_time?: string | null;
+  /** Simulated/time-machine close used by charts and replay. */
+  post_simulated_close_time?: string | null;
 
   // ============ 平仓情绪侧复盘 · 七问 ============
   /** ① 这单最起波澜的事情是什么？ */

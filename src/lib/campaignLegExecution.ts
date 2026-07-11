@@ -1,4 +1,5 @@
 import type { CanonicalTimePrice } from '@/lib/canonicalTimePrice';
+import { journalSimulatedCloseTime } from '@/lib/objectiveOperationTime';
 import { getPositionNotionalUsd } from '@/lib/tradingSettlement';
 import type { TradeJournal } from '@/types/journal';
 import type { TradeRecord } from '@/types/trading';
@@ -61,7 +62,7 @@ export function resolveLegExecution(
 ): ResolvedLegExecution {
   const exitCorrection = exitCorrections[leg.id] ?? null;
   const openTime = record?.openTime ?? safeTimeMs(leg.pre_simulated_time);
-  const closeTime = record?.closeTime ?? safeTimeMs(leg.post_real_close_time);
+  const closeTime = record?.closeTime ?? journalSimulatedCloseTime(leg);
   const entryPrice = record?.entryPrice ?? leg.pre_entry_price ?? null;
   const rawExitPrice = record?.exitPrice ?? leg.post_exit_price_snapshot ?? null;
   const exitPrice = exitCorrection?.exitPrice ?? rawExitPrice;

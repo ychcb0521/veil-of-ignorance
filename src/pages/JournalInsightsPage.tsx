@@ -7,6 +7,7 @@ import { BackButton } from '@/components/journal/BackButton';
 import { Slider } from '@/components/ui/slider';
 import { toast } from 'sonner';
 import { useAuth } from '@/contexts/AuthContext';
+import { useTradingContext } from '@/contexts/TradingContext';
 import { computeBiasSpectrum } from '@/lib/biasSpectrum';
 import {
   listAllCampaigns,
@@ -29,6 +30,7 @@ import { computeTooHardBasketStats, type TooHardBasketStats } from '@/lib/noTrad
 import { HEDGE_BOUNDARY_STANCE_LABELS, HEDGE_WORTH_IT_SCORE } from '@/lib/hedgeTypes';
 import { ODDS_STRUCTURE_LABELS } from '@/lib/oddsStructure';
 import { aggregateEdgeSourcePnl, findSameSourceEdge } from '@/lib/edgeSource';
+import { buildTradeRecordLookup, journalCloseOperationTime } from '@/lib/objectiveOperationTime';
 import { MISSED_HIGH_ODDS_LABELS, STRUGGLE_LEVEL_LABELS } from '@/lib/structureResult';
 import { isHistoricalCampaign, PAIN_TAG_LABELS, PRINCIPLE_EVOLUTION_LEVEL_LABELS } from '@/types/journal';
 import type { HedgeBoundaryStance, OddsStructure, PainTag, PrincipleEvolutionLevel, TradeCampaign, TradeJournal } from '@/types/journal';
@@ -304,6 +306,7 @@ async function loadCampaignEconomicStats(userId: string): Promise<CampaignEconom
 
 export default function JournalInsightsPage() {
   const { user } = useAuth();
+  const { tradeHistory } = useTradingContext();
   const [data, setData] = useState<BulkJournalData | null>(null);
   const [campaigns, setCampaigns] = useState<TradeCampaign[]>([]);
   const [campaignEconomic, setCampaignEconomic] = useState<CampaignEconomicStats | null>(null);
@@ -312,6 +315,10 @@ export default function JournalInsightsPage() {
   const [range, setRange] = useState<Range>(30);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const tradeRecordLookup = useMemo(
+    () => buildTradeRecordLookup(tradeHistory),
+    [tradeHistory],
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -611,12 +618,10 @@ export default function JournalInsightsPage() {
       0,
     );
     const smallOpportunityHoldingHours = smallOpportunityRows.reduce((sum, journal) => {
+      if (journal.source === 'retroactive_from_record') return sum;
       const openedAt = new Date(journal.pre_real_time).getTime();
-      const closedAt = journal.post_real_close_time
-        ? new Date(journal.post_real_close_time).getTime()
-        : journal.post_reviewed_at
-          ? new Date(journal.post_reviewed_at).getTime()
-          : NaN;
+      const record = journal.trade_record_id ? tradeRecordLookup.get(journal.trade_record_id) ?? null : null;
+      const closedAt = journalCloseOperationTime(journal, record) ?? NaN;
       if (!Number.isFinite(openedAt) || !Number.isFinite(closedAt) || closedAt <= openedAt) return sum;
       return sum + (closedAt - openedAt) / 3_600_000;
     }, 0);
@@ -803,7 +808,7 @@ export default function JournalInsightsPage() {
       },
       crossCount,
     };
-  }, [campaigns, data, range]);
+  }, [campaigns, data, range, tradeRecordLookup]);
 
   const biasSpectrum = useMemo(
     () => computeBiasSpectrum(data?.journals ?? [], 90),

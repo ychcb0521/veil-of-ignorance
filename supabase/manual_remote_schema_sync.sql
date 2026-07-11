@@ -46,7 +46,15 @@ ALTER TABLE public.trade_journals
   ADD COLUMN IF NOT EXISTS pre_mortem_text                 text,
   ADD COLUMN IF NOT EXISTS pre_positive_expectancy         text,
   ADD COLUMN IF NOT EXISTS pre_invalidation_condition      text,
-  ADD COLUMN IF NOT EXISTS post_real_close_time            timestamptz;
+  ADD COLUMN IF NOT EXISTS post_real_close_time            timestamptz,
+  ADD COLUMN IF NOT EXISTS post_simulated_close_time       timestamptz;
+
+UPDATE public.trade_journals
+SET
+  post_simulated_close_time = COALESCE(post_simulated_close_time, post_real_close_time),
+  post_real_close_time = NULL
+WHERE source = 'retroactive_from_record'
+  AND post_real_close_time IS NOT NULL;
 
 -- ---- Dalio / principles meta layer (20260529143000) -------------------------
 ALTER TABLE public.trade_journals

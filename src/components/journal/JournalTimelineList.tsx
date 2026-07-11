@@ -9,6 +9,12 @@ import { useTradingContext } from '@/contexts/TradingContext';
 import { formatPrice } from '@/lib/formatters';
 import { HEDGE_TYPE_LABELS } from '@/lib/hedgeTypes';
 import { formatBeijingTimeShort } from '@/lib/timeFormat';
+import {
+  buildTradeRecordLookup,
+  journalCloseOperationTime,
+  journalOpenOperationTime,
+  journalSimulatedCloseTime,
+} from '@/lib/objectiveOperationTime';
 import type { JournalTagAssignment, ErrorTagPattern, TradeJournal } from '@/types/journal';
 
 interface Props {
@@ -55,7 +61,7 @@ export function JournalTimelineList({ journals, assignments, patterns }: Props) 
   const [page, setPage] = useState(0);
   const { tradeHistory } = useTradingContext();
   const tradeRecordMap = useMemo(
-    () => new Map(tradeHistory.map(t => [t.id, t])),
+    () => buildTradeRecordLookup(tradeHistory),
     [tradeHistory],
   );
 
@@ -94,10 +100,10 @@ export function JournalTimelineList({ journals, assignments, patterns }: Props) 
         {pageRows.map(j => {
           const tags = tagsByJournal.get(j.id) ?? [];
           const tr = j.trade_record_id ? tradeRecordMap.get(j.trade_record_id) ?? null : null;
-          const openRealBeijing = formatBeijingTimeShort(j.pre_real_time);
-          const closeRealBeijing = formatBeijingTimeShort(j.post_real_close_time);
+          const openRealBeijing = formatBeijingTimeShort(journalOpenOperationTime(j));
+          const closeRealBeijing = formatBeijingTimeShort(journalCloseOperationTime(j, tr));
           const openSim = fmtTime(tr?.openTime) ?? fmtTime(j.pre_simulated_time);
-          const closeSim = fmtTime(tr?.closeTime);
+          const closeSim = fmtTime(tr?.closeTime ?? journalSimulatedCloseTime(j));
           const entryP = tr?.entryPrice ?? j.pre_entry_price ?? null;
           const exitP = tr && tr.exitPrice > 0 ? tr.exitPrice : null;
           const hedgeSummary = j.order_kind === 'hedge' && j.hedge_type

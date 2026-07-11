@@ -1,5 +1,6 @@
 import type { ClassifiableItem } from '@/types/journalClassification';
 import type { TradeRecord } from '@/types/trading';
+import { tradeRecordOperationTime } from '@/lib/objectiveOperationTime';
 
 /**
  * 操作时间 = 真实钱包时钟下交易员实际操作的客观时间。
@@ -9,7 +10,6 @@ export function classifiableOperationTime(
   item: ClassifiableItem,
   linkedRecord?: TradeRecord | null,
 ): number | null {
-  return linkedRecord?.closedRealAt
-    ?? (item.kind === 'journal' ? item.record?.closedRealAt : item.record.closedRealAt)
-    ?? null;
+  return tradeRecordOperationTime(linkedRecord)
+    ?? tradeRecordOperationTime(item.kind === 'journal' ? item.record : item.record);
 }

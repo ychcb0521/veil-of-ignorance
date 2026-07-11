@@ -1,5 +1,6 @@
 import type { CampaignCounterfactual, TradeCampaign, TradeJournal } from '@/types/journal';
 import type { CampaignReverseHedgeOrder, TradeRecord } from '@/types/trading';
+import { buildTradeRecordLookup, journalSimulatedCloseTime } from '@/lib/objectiveOperationTime';
 
 export type CampaignChartContentTimeSpan = {
   startMs: number | null;
@@ -41,11 +42,11 @@ export function buildCampaignChartContentTimeSpan(
     appendTime(times, safeTimeMs(campaign.closed_at));
   }
 
-  const recordMap = new Map(tradeRecords.map(record => [record.id, record]));
+  const recordMap = buildTradeRecordLookup(tradeRecords);
   for (const leg of legs) {
     const record = leg.trade_record_id ? recordMap.get(leg.trade_record_id) ?? null : null;
     appendTime(times, record?.openTime ?? safeTimeMs(leg.pre_simulated_time));
-    appendTime(times, record?.closeTime ?? safeTimeMs(leg.post_real_close_time));
+    appendTime(times, record?.closeTime ?? journalSimulatedCloseTime(leg));
   }
 
   for (const order of reverseHedgeOrders) {

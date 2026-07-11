@@ -20,6 +20,10 @@ import {
 } from '@/lib/campaignDeviationRules';
 import { INITIAL_COGNITIVE_ASSETS } from '@/lib/cognitiveAssetsInitialContent';
 import { mirrorDroppedColumns } from '@/lib/journalLocalMirror';
+import {
+  buildTradeRecordLookup,
+  tradeRecordOperationTime,
+} from '@/lib/objectiveOperationTime';
 import { getPositionNotionalUsd } from '@/lib/tradingSettlement';
 import { suggestLegRoles as suggestLegRolesHeuristic } from '@/lib/legRoleSuggestion';
 import type { CognitiveAssetsDoc, CognitiveAssetCategory, CognitiveAssetSection } from '@/types/cognitiveAssets';
@@ -492,7 +496,7 @@ function mergeFollows(primary: AccountFollow[], fallback: AccountFollow[]): Acco
  * 核心列（user_id/symbol/direction/pre_entry_reason/pre_mental_state/post_outcome…）
  * 不在此模式内，永不会被误判或误删。仅用 i 标志（无 g），test() 无状态、可安全复用。
  */
-const OPTIONAL_COLUMN_PATTERN = /trade_principles|pain_log_entries|campaign_id|leg_role|leg_sequence|order_kind|pre_settlement_mode|pre_settlement_asset|pre_contract_size_usd|pre_contracts|pre_thesis_why_right|pre_premortem_failure_reason|pre_falsification_signal|pre_confidence_basis|pre_odds_structure|pre_odds_structure_source|pre_odds_structure_premortem|pre_odds_structure_breakdown_signals|pre_account_equity_usdt|pre_opportunity_cost_worth|pre_cheap_opportunity|pre_edge_source|pre_market_regime|pre_entry_stage|pre_stop_quality|pre_chase_after_close|pre_mortem_text|pre_positive_expectancy|pre_invalidation_condition|pre_calibration_win_pct|pre_confidence_interval_|pre_calibration_reference_class|pre_calibration_competence_basis|pre_calibration_update_signal|pre_dataset_split|pre_lollapalooza_score|pre_bankruptcy_estimate|pre_info_|pre_opponent_statement|pre_pain_tags|pre_cognitive_bias_tags|pre_triggered_principle_ids|pre_triggered_rule_ids|pre_executor_self|pre_designer_self|pre_stop_doing_acknowledged_ids|pre_stop_doing_ad_hoc|journal_kind|no_trade_reason|no_trade_would_be_entry_price|no_trade_direction|exit_falsification_status|exit_falsification_note|post_result_summary|post_decision_quality|post_struggle_level|post_small_position_drag|post_missed_high_odds_state|post_path_|post_trade_agency_score|post_positive_expectancy_review|post_premortem_review|post_invalidation_review|post_entry_|post_five_step|post_opponent_was_right|post_proximate_cause|post_root_cause|post_design_intervention|post_intervention_type|post_execution_monitor|post_real_close_time|post_emo_|evolution_level|principle_id|hedge_type|hedge_boundary_price|hedge_boundary_basis|hedge_boundary_stance|hedge_lock_profit_pct|hedge_resolution_up|hedge_resolution_down|hedge_down_if_chop|hedge_down_if_trend|hedge_down_if_rebound|hedge_necessity_pct|hedge_safety_strength|hedge_safety_regularity|hedge_risk_magnitude|hedge_conviction_pct|hedge_friction_cost|hedge_order_method|hedge_worth_it/i;
+const OPTIONAL_COLUMN_PATTERN = /trade_principles|pain_log_entries|campaign_id|leg_role|leg_sequence|order_kind|pre_settlement_mode|pre_settlement_asset|pre_contract_size_usd|pre_contracts|pre_thesis_why_right|pre_premortem_failure_reason|pre_falsification_signal|pre_confidence_basis|pre_odds_structure|pre_odds_structure_source|pre_odds_structure_premortem|pre_odds_structure_breakdown_signals|pre_account_equity_usdt|pre_opportunity_cost_worth|pre_cheap_opportunity|pre_edge_source|pre_market_regime|pre_entry_stage|pre_stop_quality|pre_chase_after_close|pre_mortem_text|pre_positive_expectancy|pre_invalidation_condition|pre_calibration_win_pct|pre_confidence_interval_|pre_calibration_reference_class|pre_calibration_competence_basis|pre_calibration_update_signal|pre_dataset_split|pre_lollapalooza_score|pre_bankruptcy_estimate|pre_info_|pre_opponent_statement|pre_pain_tags|pre_cognitive_bias_tags|pre_triggered_principle_ids|pre_triggered_rule_ids|pre_executor_self|pre_designer_self|pre_stop_doing_acknowledged_ids|pre_stop_doing_ad_hoc|journal_kind|no_trade_reason|no_trade_would_be_entry_price|no_trade_direction|exit_falsification_status|exit_falsification_note|post_result_summary|post_decision_quality|post_struggle_level|post_small_position_drag|post_missed_high_odds_state|post_path_|post_trade_agency_score|post_positive_expectancy_review|post_premortem_review|post_invalidation_review|post_entry_|post_five_step|post_opponent_was_right|post_proximate_cause|post_root_cause|post_design_intervention|post_intervention_type|post_execution_monitor|post_real_close_time|post_simulated_close_time|post_emo_|evolution_level|principle_id|hedge_type|hedge_boundary_price|hedge_boundary_basis|hedge_boundary_stance|hedge_lock_profit_pct|hedge_resolution_up|hedge_resolution_down|hedge_down_if_chop|hedge_down_if_trend|hedge_down_if_rebound|hedge_necessity_pct|hedge_safety_strength|hedge_safety_regularity|hedge_risk_magnitude|hedge_conviction_pct|hedge_friction_cost|hedge_order_method|hedge_worth_it/i;
 
 function isMissingDalioMetaLayerError(error: { code?: string; message?: string } | null): boolean {
   if (!error) return false;
@@ -1235,7 +1239,8 @@ function campaignEventFromJournal(
     direction: journal.direction,
     leverage: journal.leverage,
     open_time: journal.pre_simulated_time,
-    close_time: journal.post_real_close_time ?? null,
+    close_time: journal.post_simulated_close_time
+      ?? (journal.source === 'retroactive_from_record' ? journal.post_real_close_time : null),
     entry_price: journal.pre_entry_price,
     exit_price: null,
     realized_pnl: journal.post_realized_pnl,
@@ -1288,7 +1293,8 @@ function synthesizeJournalFromRecord(
     post_reflection: null,
     post_correct_action: null,
     post_reviewed_at: null,
-    post_real_close_time: toIso(record.closeTime),
+    post_real_close_time: toIso(tradeRecordOperationTime(record)),
+    post_simulated_close_time: toIso(record.closeTime),
     post_exit_price_snapshot: record.exitPrice,
     reason_was_rewritten: false,
     created_at: now,
@@ -1376,10 +1382,11 @@ function synthesizeJournalFromEvent(
     post_reflection: null,
     post_correct_action: null,
     post_reviewed_at: null,
-    post_real_close_time: closeTime,
+    post_real_close_time: null,
+    post_simulated_close_time: closeTime,
     reason_was_rewritten: false,
     created_at: now,
-    updated_at: closeTime ?? now,
+    updated_at: now,
     ...(exitPrice != null ? { post_exit_price_snapshot: exitPrice } : {}),
   } as TradeJournal;
 }
@@ -1429,7 +1436,7 @@ async function getJournalsByIds(journalIds: string[]): Promise<TradeJournal[]> {
 
 function getTradeRecordMapForUser(userId: string) {
   const tradeHistory = readUserScopedStorage<TradeRecord[]>(userId, 'trade_history', []);
-  return new Map(tradeHistory.map(record => [record.id, record]));
+  return buildTradeRecordLookup(tradeHistory);
 }
 
 function deriveCampaignPatchFromLegs(
@@ -1616,7 +1623,7 @@ async function healCampaignSummarySnapshots(
   legs: TradeJournal[],
   tradeRecords: TradeRecord[],
 ): Promise<TradeCampaign> {
-  const tradeRecordMap = new Map(tradeRecords.map(record => [record.id, record]));
+  const tradeRecordMap = buildTradeRecordLookup(tradeRecords);
   if (!hasCompleteTradeRecordsForCampaign(legs, tradeRecordMap)) return campaign;
   const patch = deriveCampaignPatchFromLegs(campaign, legs, tradeRecordMap);
   if (!campaignPatchChanged(campaign, patch)) return campaign;
@@ -1883,7 +1890,7 @@ export async function getCampaignWithLegs(
  */
 async function healCampaignLegSnapshots(legs: TradeJournal[], tradeRecords: TradeRecord[]): Promise<void> {
   if (tradeRecords.length === 0) return;
-  const recordMap = new Map(tradeRecords.map(record => [record.id, record]));
+  const recordMap = buildTradeRecordLookup(tradeRecords);
   const differsNumber = (current: number | null | undefined, expected: number) => {
     if (!Number.isFinite(expected)) return false;
     if (current == null || !Number.isFinite(current)) return true;
@@ -1901,11 +1908,25 @@ async function healCampaignLegSnapshots(legs: TradeJournal[], tradeRecords: Trad
     if (!record) continue;
     const full: Record<string, unknown> = {};
     const safe: Record<string, unknown> = {};
-    if (differsTime(leg.post_real_close_time, record.closeTime)) {
+    if (differsTime(leg.post_simulated_close_time, record.closeTime)) {
       const iso = new Date(record.closeTime).toISOString();
+      full.post_simulated_close_time = iso;
+      leg.post_simulated_close_time = iso;
+    }
+    const realCloseTime = tradeRecordOperationTime(record);
+    if (realCloseTime != null && differsTime(leg.post_real_close_time, realCloseTime)) {
+      const iso = new Date(realCloseTime).toISOString();
       full.post_real_close_time = iso;
       safe.post_real_close_time = iso;
       leg.post_real_close_time = iso;
+    } else if (
+      realCloseTime == null
+      && leg.source === 'retroactive_from_record'
+      && new Date(leg.post_real_close_time ?? 0).getTime() === record.closeTime
+    ) {
+      full.post_real_close_time = null;
+      safe.post_real_close_time = null;
+      leg.post_real_close_time = null;
     }
     if (Number.isFinite(record.pnl)) {
       const outcome = tradeRecordOutcome(record);
@@ -1927,7 +1948,7 @@ async function healCampaignLegSnapshots(legs: TradeJournal[], tradeRecords: Trad
     if (Object.keys(full).length === 0) continue;
     let { error } = await supabase.from('trade_journals' as never).update(full as never).eq('id', leg.id);
     // post_exit_price_snapshot 在较旧的库里可能尚未建列——退回只写一定存在的列，保证平仓时间/状态先补上。
-    if (error && /post_exit_price_snapshot/i.test(error.message ?? '') && Object.keys(safe).length > 0) {
+    if (error && /post_exit_price_snapshot|post_simulated_close_time/i.test(error.message ?? '') && Object.keys(safe).length > 0) {
       ({ error } = await supabase.from('trade_journals' as never).update(safe as never).eq('id', leg.id));
     }
     if (error && !isMissingTradeJournalsFeatureError(error)) {
@@ -1960,7 +1981,10 @@ export async function getCampaignFullData(
   const closedAtMs = campaign.closed_at ? new Date(campaign.closed_at).getTime() : Number.POSITIVE_INFINITY;
 
   // 战役详情只展示用户归类进来的 legs；同标的同时间窗口内未选中的交易不能混入盘面。
-  const tradeRecords = tradeHistory.filter(record => legRecordIds.has(record.id));
+  const tradeRecords = tradeHistory.filter(record => (
+    legRecordIds.has(record.id)
+    || Boolean(record.positionId && legRecordIds.has(record.positionId))
+  ));
   const pendingOrders = Object.entries(ordersMap)
     .flatMap(([symbol, orders]) => symbol === campaign.symbol ? orders : [])
     .filter(order => order.status === 'NEW' || order.status === 'PENDING' || order.status === 'ACTIVE');
@@ -2443,7 +2467,8 @@ export async function backfillJournalFromRecord(
     post_reflection: null,
     post_correct_action: null,
     post_reviewed_at: null,
-    post_real_close_time: toIso(record.closeTime),
+    post_real_close_time: toIso(tradeRecordOperationTime(record)),
+    post_simulated_close_time: toIso(record.closeTime),
     post_exit_price_snapshot: record.exitPrice,
     reason_was_rewritten: false,
   };
@@ -3537,11 +3562,15 @@ export async function updateJournalTradeRef(journalId: string, tradeRecordId: st
 }
 
 /**
- * Stamp the real wall-clock close time. Idempotent: only writes if currently NULL,
- * so re-opening the review sheet later doesn't overwrite the original close moment.
- * Returns the new ISO string if a write happened, or null if already stamped.
+ * Persist the objective close time captured by TradeRecord.closedRealAt. The record is
+ * authoritative, so this also repairs legacy rows polluted with shifted K-line time.
+ * Returns the objective ISO string if a write happened, or null if already correct.
  */
-export async function stampJournalCloseRealTime(journalId: string): Promise<string | null> {
+export async function stampJournalCloseRealTime(
+  journalId: string,
+  closedRealAt: number | null | undefined,
+): Promise<string | null> {
+  if (!Number.isFinite(closedRealAt) || closedRealAt == null || closedRealAt <= 0) return null;
   const { data: cur, error: gErr } = await supabase
     .from("trade_journals" as never)
     .select("post_real_close_time")
@@ -3552,18 +3581,17 @@ export async function stampJournalCloseRealTime(journalId: string): Promise<stri
     return null;
   }
   const row = cur as unknown as { post_real_close_time: string | null } | null;
-  if (row?.post_real_close_time) return null;
-  const now = new Date().toISOString();
+  const objectiveCloseTime = new Date(closedRealAt).toISOString();
+  if (row?.post_real_close_time && new Date(row.post_real_close_time).getTime() === closedRealAt) return null;
   const { error } = await supabase
     .from("trade_journals" as never)
-    .update({ post_real_close_time: now } as never)
-    .eq("id", journalId)
-    .is("post_real_close_time", null);
+    .update({ post_real_close_time: objectiveCloseTime } as never)
+    .eq("id", journalId);
   if (error) {
     console.warn("[journalApi] 写入 post_real_close_time 失败:", error);
     return null;
   }
-  return now;
+  return objectiveCloseTime;
 }
 
 export async function createJournalPreSnapshot(input: CreateJournalPreInput): Promise<TradeJournal> {
@@ -4124,7 +4152,9 @@ export async function syncTradeRecordCorrectionToJournals(record: TradeRecord): 
     post_exit_price_snapshot: record.exitPrice,
   };
   if (entryIso) patch.pre_simulated_time = entryIso;
-  if (closeIso) patch.post_real_close_time = closeIso;
+  if (closeIso) patch.post_simulated_close_time = closeIso;
+  const objectiveCloseIso = toIso(tradeRecordOperationTime(record));
+  if (objectiveCloseIso) patch.post_real_close_time = objectiveCloseIso;
 
   const updated: TradeJournal[] = [];
   for (const journal of journals) {

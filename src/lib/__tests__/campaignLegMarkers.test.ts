@@ -97,7 +97,7 @@ describe('campaign selected leg markers', () => {
     });
   });
 
-  it('空单使用深紫色，并在没有 trade record 时回落到 journal 时间', () => {
+  it('空单使用深紫色，并在没有 trade record 时回落到 journal 模拟平仓时间', () => {
     const closeIso = '2025-09-20T18:00:00.000Z';
     const lines = buildSelectedLegVerticalLines(
       [journal({
@@ -105,7 +105,7 @@ describe('campaign selected leg markers', () => {
         direction: 'short',
         leg_role: 'hedge_rolling',
         pre_simulated_time: '2025-09-20T17:00:00.000Z',
-        post_real_close_time: closeIso,
+        post_simulated_close_time: closeIso,
       })],
       [],
       ['hedge'],

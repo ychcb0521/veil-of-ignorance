@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { describe, expect, it, vi } from 'vitest';
 import type { TradeCampaign, TradeJournal } from '@/types/journal';
+import type { TradeRecord } from '@/types/trading';
 import JournalCampaignsPage from '../JournalCampaignsPage';
 
 const { mockUser } = vi.hoisted(() => ({
@@ -51,28 +52,41 @@ const legsByCampaign: Record<string, TradeJournal[]> = {
   'high-importance': [
     makeLeg({
       id: 'high-importance-leg',
+      trade_record_id: 'high-importance-record',
       pre_real_time: '2026-04-03T00:00:00.000Z',
+      post_real_close_time: '2025-12-01T00:00:00.000Z',
     }),
   ],
   newest: [
     makeLeg({
       id: 'newest-leg',
+      trade_record_id: 'newest-record',
       pre_real_time: '2026-01-10T00:00:00.000Z',
+      post_real_close_time: '2026-12-01T00:00:00.000Z',
     }),
   ],
   'best-pnl': [
     makeLeg({
       id: 'best-pnl-leg',
+      trade_record_id: 'best-pnl-record',
       pre_real_time: '2026-03-02T00:00:00.000Z',
     }),
   ],
   'late-close': [
     makeLeg({
       id: 'late-close-leg',
+      trade_record_id: 'late-close-record',
       pre_real_time: '2026-02-01T00:00:00.000Z',
     }),
   ],
 };
+
+const tradeHistory: TradeRecord[] = [
+  makeRecord('high-importance-record', '2026-04-03T00:00:00.000Z'),
+  makeRecord('newest-record', '2026-01-10T00:00:00.000Z'),
+  makeRecord('best-pnl-record', '2026-03-02T00:00:00.000Z'),
+  makeRecord('late-close-record', '2026-02-01T00:00:00.000Z'),
+];
 
 vi.mock('@/contexts/AuthContext', () => ({
   useAuth: () => ({
@@ -87,9 +101,30 @@ vi.mock('@/lib/journalApi', () => ({
     legs: legsByCampaign[id] ?? [],
   })),
   listAllCampaigns: vi.fn(async () => campaigns),
+  listTradeHistoryForUser: vi.fn(() => tradeHistory),
   listVisibleCampaigns: vi.fn(async () => []),
   updateCampaignImportance: vi.fn(async (_id: string, weight: number) => weight),
 }));
+
+function makeRecord(id: string, objectiveTime: string): TradeRecord {
+  return {
+    id,
+    symbol: 'BTCUSDT',
+    side: 'LONG',
+    type: 'MARKET',
+    action: 'CLOSE',
+    entryPrice: 100,
+    exitPrice: 110,
+    quantity: 1,
+    leverage: 1,
+    pnl: 10,
+    fee: 0,
+    slippage: 0,
+    openTime: Date.parse('2025-01-01T00:00:00.000Z'),
+    closeTime: Date.parse('2025-01-01T01:00:00.000Z'),
+    closedRealAt: Date.parse(objectiveTime),
+  };
+}
 
 function makeCampaign(overrides: Partial<TradeCampaign>): TradeCampaign {
   const now = '2026-01-01T00:00:00.000Z';
@@ -123,7 +158,7 @@ function makeLeg(overrides: Partial<TradeJournal>): TradeJournal {
   return {
     id: overrides.id ?? 'leg',
     user_id: 'user-1',
-    trade_record_id: null,
+    trade_record_id: overrides.trade_record_id ?? null,
     campaign_id: overrides.campaign_id ?? null,
     leg_role: 'main_open',
     leg_sequence: null,

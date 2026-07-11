@@ -1,6 +1,7 @@
 import type { KlineData } from '@/hooks/useBinanceData';
 import { MAIN_ADD_ROLES, usesDualHedgeSop } from '@/lib/strategyTemplates';
 import { getPositionNotionalUsd } from '@/lib/tradingSettlement';
+import { buildTradeRecordLookup } from '@/lib/objectiveOperationTime';
 import type { CampaignEvent, LegRole, TradeCampaign, TradeJournal } from '@/types/journal';
 import type { PendingOrder, TradeRecord } from '@/types/trading';
 
@@ -75,7 +76,7 @@ function legSize(leg: TradeJournal): number | null {
 
 function findTradeRecord(leg: TradeJournal, tradeRecords: TradeRecord[]): TradeRecord | null {
   if (!leg.trade_record_id) return null;
-  return tradeRecords.find(record => record.id === leg.trade_record_id) ?? null;
+  return buildTradeRecordLookup(tradeRecords).get(leg.trade_record_id) ?? null;
 }
 
 function tradeRecordNotionalUsd(record: TradeRecord, price = record.entryPrice): number {
@@ -89,7 +90,7 @@ function eventTradeRecord(
 ): TradeRecord | null {
   const recordId = event.trade_record_id ?? (event.journal_id ? journalRecordIds.get(event.journal_id) ?? null : null);
   if (!recordId) return null;
-  return tradeRecords.find(record => record.id === recordId) ?? null;
+  return buildTradeRecordLookup(tradeRecords).get(recordId) ?? null;
 }
 
 function isCanonicalSyntheticEvent(event: CampaignEvent, leg: TradeJournal | null): boolean {

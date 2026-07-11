@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { LegRoleChip } from '@/components/journal/LegRoleChip';
 import { classifiableOperationTime } from '@/lib/classifiableOperationTime';
+import { journalSimulatedCloseTime } from '@/lib/objectiveOperationTime';
 import { getAssignableLegRoles, LEG_ROLE_LABELS, MAIN_ADD_ROLES } from '@/lib/strategyTemplates';
 import { batchAttachToCampaign, batchBackfillAndAttach, suggestLegRoles, validateClassification } from '@/lib/journalApi';
 import { getPositionNotionalUsd } from '@/lib/tradingSettlement';
@@ -53,7 +54,8 @@ function itemTimeLabel(item: ClassifiableItem) {
 function itemCloseTimeLabel(item: ClassifiableItem) {
   if (item.kind === 'journal') {
     if (item.record?.closeTime) return fmtLabel(new Date(item.record.closeTime).toISOString());
-    return item.journal.post_real_close_time ? fmtLabel(item.journal.post_real_close_time) : '—';
+    const simulatedCloseTime = journalSimulatedCloseTime(item.journal);
+    return simulatedCloseTime ? fmtLabel(simulatedCloseTime) : '—';
   }
   return item.record.closeTime ? fmtLabel(new Date(item.record.closeTime).toISOString()) : '—';
 }

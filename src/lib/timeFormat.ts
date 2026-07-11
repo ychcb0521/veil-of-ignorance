@@ -13,9 +13,9 @@ export function formatUTC8(ts: number): string {
  * Format an ISO timestamp string as Beijing time (UTC+8).
  * Output: "YYYY-MM-DD HH:mm:ss"
  */
-export function formatBeijingTime(iso: string | null | undefined): string {
-  if (!iso) return '—';
-  const t = new Date(iso).getTime();
+export function formatBeijingTime(value: string | number | null | undefined): string {
+  if (!value) return '—';
+  const t = typeof value === 'number' ? value : new Date(value).getTime();
   if (isNaN(t)) return '—';
   return formatUTC8(t);
 }
@@ -24,9 +24,9 @@ export function formatBeijingTime(iso: string | null | undefined): string {
  * Compact Beijing time for list cards (no year).
  * Output: "MM-DD HH:mm"
  */
-export function formatBeijingTimeShort(iso: string | null | undefined): string {
-  if (!iso) return '—';
-  const t = new Date(iso).getTime();
+export function formatBeijingTimeShort(value: string | number | null | undefined): string {
+  if (!value) return '—';
+  const t = typeof value === 'number' ? value : new Date(value).getTime();
   if (isNaN(t)) return '—';
   return formatUTC8(t).slice(5, 16); // "MM-DD HH:mm"
 }

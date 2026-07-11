@@ -1,4 +1,9 @@
 import { HEDGE_TYPE_LABELS } from '@/lib/hedgeTypes';
+import {
+  buildTradeRecordLookup,
+  journalOperationTime,
+  journalSimulatedCloseTime,
+} from '@/lib/objectiveOperationTime';
 import { LEG_ROLE_LABELS } from '@/lib/strategyTemplates';
 import type { TradeCampaign, TradeJournal } from '@/types/journal';
 import type { CampaignReverseHedgeOrder, TradeRecord } from '@/types/trading';
@@ -101,10 +106,6 @@ function fmtClock(value: number | string | null | undefined): string {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
-function operationTimeForLeg(leg: TradeJournal): string | number | null | undefined {
-  return leg.post_real_close_time ?? leg.pre_real_time ?? leg.created_at ?? leg.updated_at;
-}
-
 function timeMs(value: number | string | null | undefined): number | null {
   if (!value) return null;
   const ms = typeof value === 'number' ? value : new Date(value).getTime();
@@ -118,7 +119,7 @@ function fmtPrice(value: number | null | undefined): string {
 }
 
 function statusForLeg(leg: TradeJournal, record: TradeRecord | null): { label: string; color: string } {
-  if (record || leg.post_real_close_time || leg.post_outcome) return { label: '已平仓', color: '#0ECB81' };
+  if (record || leg.post_simulated_close_time || leg.post_real_close_time || leg.post_outcome) return { label: '已平仓', color: '#0ECB81' };
   if (leg.leg_role === 'mirror_tp' || leg.leg_role?.startsWith('hedge_')) return { label: '挂单中', color: '#D89B00' };
   return { label: '进行中', color: '#848E9C' };
 }
@@ -134,7 +135,7 @@ function buildReverseOrderLegMap(
   tradeRecords: TradeRecord[],
   reverseHedgeOrders: CampaignReverseHedgeOrder[],
 ): Map<string, string> {
-  const recordMap = new Map(tradeRecords.map(record => [record.id, record]));
+  const recordMap = buildTradeRecordLookup(tradeRecords);
   const legIdByTradeRecordId = new Map(
     legs
       .filter(leg => Boolean(leg.trade_record_id))
@@ -170,7 +171,7 @@ function buildReverseOrderLegMap(
 }
 
 function buildRows(input: ExportInput): ExportRow[] {
-  const recordMap = new Map(input.tradeRecords.map(record => [record.id, record]));
+  const recordMap = buildTradeRecordLookup(input.tradeRecords);
   const reverseOrderLegMap = buildReverseOrderLegMap(input.legs, input.tradeRecords, input.reverseHedgeOrders);
 
   return input.legs.map(leg => {
@@ -178,8 +179,8 @@ function buildRows(input: ExportInput): ExportRow[] {
     const status = statusForLeg(leg, record);
     const roleLabel = leg.leg_role ? LEG_ROLE_LABELS[leg.leg_role] ?? leg.leg_role : '—';
     const openLabel = fmtClock(record?.openTime ?? leg.pre_simulated_time);
-    const closeLabel = fmtClock(record?.closeTime ?? leg.post_real_close_time);
-    const operationLabel = fmtClock(operationTimeForLeg(leg));
+    const closeLabel = fmtClock(record?.closeTime ?? journalSimulatedCloseTime(leg));
+    const operationLabel = fmtClock(journalOperationTime(leg, record));
     const entryPriceValue = record?.entryPrice ?? leg.pre_entry_price ?? null;
     const exitPriceValue = record?.exitPrice ?? leg.post_exit_price_snapshot ?? null;
     const hedgeSummary = leg.order_kind === 'hedge' && leg.hedge_type

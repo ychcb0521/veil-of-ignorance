@@ -21,6 +21,11 @@ import { ContextChannelsStack } from '@/components/journal/ContextChannelsStack'
 import { PostTradeReviewSheet } from '@/components/journal/PostTradeReviewSheet';
 import { BackButton } from '@/components/journal/BackButton';
 import { formatBeijingTime } from '@/lib/timeFormat';
+import {
+  buildTradeRecordLookup,
+  journalCloseOperationTime,
+  journalOpenOperationTime,
+} from '@/lib/objectiveOperationTime';
 
 function outcomeColor(o: string | null) {
   switch (o) {
@@ -87,8 +92,12 @@ export default function JournalPlaybackPage() {
 
   const tradeRecord: TradeRecord | null = useMemo(() => {
     if (!journal?.trade_record_id) return null;
-    return tradeHistory.find(t => t.id === journal.trade_record_id) ?? null;
+    return buildTradeRecordLookup(tradeHistory).get(journal.trade_record_id) ?? null;
   }, [journal, tradeHistory]);
+  const objectiveCloseTime = useMemo(
+    () => journal ? journalCloseOperationTime(journal, tradeRecord) : null,
+    [journal, tradeRecord],
+  );
 
   if (loading || !journal) {
     return (
@@ -157,11 +166,11 @@ export default function JournalPlaybackPage() {
               )}
               {' · 模拟 '}{fmtSimTime}
               <span className="ml-2 text-foreground/70">
-                · 实际开仓 <span className="text-foreground">{formatBeijingTime(journal.pre_real_time)}</span>
+                · 实际开仓 <span className="text-foreground">{formatBeijingTime(journalOpenOperationTime(journal))}</span>
               </span>
-              {journal.post_real_close_time && (
+              {objectiveCloseTime != null && (
                 <span className="ml-2 text-foreground/70">
-                  · 平仓 <span className="text-foreground">{formatBeijingTime(journal.post_real_close_time)}</span>
+                  · 平仓 <span className="text-foreground">{formatBeijingTime(objectiveCloseTime)}</span>
                 </span>
               )}
             </div>

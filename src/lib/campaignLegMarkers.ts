@@ -1,4 +1,5 @@
 import { LEG_ROLE_LABELS } from '@/lib/strategyTemplates';
+import { buildTradeRecordLookup, journalSimulatedCloseTime } from '@/lib/objectiveOperationTime';
 import type { VerticalLine } from '@/components/journal/ReplayCandleChart';
 import type { TradeJournal } from '@/types/journal';
 import type { TradeRecord } from '@/types/trading';
@@ -19,7 +20,7 @@ export function buildSelectedLegVerticalLines(
 ): VerticalLine[] {
   if (selectedLegIds.length === 0) return [];
   const selected = new Set(selectedLegIds);
-  const recordMap = new Map(tradeRecords.map(record => [record.id, record]));
+  const recordMap = buildTradeRecordLookup(tradeRecords);
   const verticalLines: VerticalLine[] = [];
 
   for (const leg of legs) {
@@ -27,7 +28,7 @@ export function buildSelectedLegVerticalLines(
     const record = leg.trade_record_id ? recordMap.get(leg.trade_record_id) ?? null : null;
     const openTime = record?.openTime ?? new Date(leg.pre_simulated_time).getTime();
     if (!Number.isFinite(openTime)) continue;
-    const closeTime = record?.closeTime ?? (leg.post_real_close_time ? new Date(leg.post_real_close_time).getTime() : null);
+    const closeTime = record?.closeTime ?? journalSimulatedCloseTime(leg);
     const color = leg.direction === 'short' ? SELECTED_LEG_SHORT_LINE_COLOR : SELECTED_LEG_LONG_LINE_COLOR;
     const labelBase = legRoleMarkerLabel(leg.leg_role);
 

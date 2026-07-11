@@ -1,4 +1,5 @@
 import { formatUTC8 } from '@/lib/timeFormat';
+import { tradeRecordOperationTime } from '@/lib/objectiveOperationTime';
 import type { AssetSnapshot, DailyPnL, DailyPnLDetail, DailyTradePnLRecord } from '@/types/assets';
 import type { TradeRecord } from '@/types/trading';
 
@@ -15,10 +16,7 @@ const RANGE_MS: Record<Exclude<AssetReportRange, 'all'>, number> = {
   '90d': 90 * 86400_000,
 };
 
-export function tradeRecordOperationTime(record: TradeRecord): number | null {
-  const time = record.closedRealAt;
-  return Number.isFinite(time) && time != null && time > 0 ? time : null;
-}
+export { tradeRecordOperationTime } from '@/lib/objectiveOperationTime';
 
 export function operationDateKey(timestamp: number): string | null {
   if (!Number.isFinite(timestamp) || timestamp <= 0) return null;

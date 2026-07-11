@@ -32,6 +32,7 @@ import {
 } from '@/lib/campaignLegExecution';
 import { buildSelectedLegVerticalLines, legRoleMarkerLabel } from '@/lib/campaignLegMarkers';
 import { exportCampaignBoardPng } from '@/lib/campaignLegsPngExport';
+import { campaignOperationTime, buildTradeRecordLookup, journalSimulatedCloseTime } from '@/lib/objectiveOperationTime';
 import {
   deleteCounterfactual,
   detachCampaignLegFromCampaign,
@@ -185,6 +186,7 @@ function buildChartArtifacts(
 ) {
   const events = buildCampaignEventStream(campaign, legs, tradeRecords);
   const eventMap = new Map(events.map(event => [event.journal_id ?? event.id, event]));
+  const tradeRecordLookup = buildTradeRecordLookup(tradeRecords);
   const markers: ChartMarker[] = [];
   const timeBoundPriceLines: TimeBoundPriceLine[] = [];
   const verticalLines: VerticalLine[] = [];
@@ -206,7 +208,7 @@ function buildChartArtifacts(
 
   let rollingIndex = 1;
   for (const leg of legs) {
-    const record = leg.trade_record_id ? tradeRecords.find(item => item.id === leg.trade_record_id) ?? null : null;
+    const record = leg.trade_record_id ? tradeRecordLookup.get(leg.trade_record_id) ?? null : null;
     const resolved = resolveLegExecution(leg, record, legExitPriceCorrections);
     const openTime = resolved.openTime ?? new Date(campaign.opened_at).getTime();
     const closeTime = resolved.closeTime;
@@ -476,6 +478,14 @@ export default function JournalCampaignDetailPage() {
     if (!campaign) return null;
     return campaign.closed_at ?? new Date(getEffectiveTime(campaign.symbol)).toISOString();
   }, [campaign, getEffectiveTime]);
+  const objectiveOperationTime = useMemo(
+    () => campaignOperationTime(legs, tradeRecords),
+    [legs, tradeRecords],
+  );
+  const tradeRecordLookup = useMemo(
+    () => buildTradeRecordLookup(tradeRecords),
+    [tradeRecords],
+  );
 
   // Legs 列表里所有腿的最早开单时间与最晚平单时间，用来撑开 K 线前后区间（需求②）。
   const legTimeSpan = useMemo(() => {
@@ -483,11 +493,11 @@ export default function JournalCampaignDetailPage() {
     let max = -Infinity;
     for (const leg of legs) {
       const record = leg.trade_record_id
-        ? tradeRecords.find(item => item.id === leg.trade_record_id) ?? null
+        ? tradeRecordLookup.get(leg.trade_record_id) ?? null
         : null;
       const openMs = record?.openTime ?? new Date(leg.pre_simulated_time).getTime();
       if (Number.isFinite(openMs)) { min = Math.min(min, openMs); max = Math.max(max, openMs); }
-      const closeMs = record?.closeTime ?? safeTimeMs(leg.post_real_close_time);
+      const closeMs = record?.closeTime ?? journalSimulatedCloseTime(leg);
       if (closeMs != null) {
         min = Math.min(min, closeMs);
         max = Math.max(max, closeMs);
@@ -497,7 +507,7 @@ export default function JournalCampaignDetailPage() {
       startMs: Number.isFinite(min) ? min : null,
       endMs: Number.isFinite(max) ? max : null,
     };
-  }, [legs, tradeRecords]);
+  }, [legs, tradeRecordLookup]);
 
   const selectedCounterfactual = useMemo(
     () => counterfactuals.find(branch => branch.id === selectedCounterfactualId) ?? null,
@@ -517,7 +527,7 @@ export default function JournalCampaignDetailPage() {
       chartContentTimeSpan.endMs ?? legTimeSpan.endMs,
     );
   }, [
-    campaign?.opened_at,
+    campaign,
     chartContentTimeSpan.endMs,
     chartContentTimeSpan.startMs,
     effectiveClosedAt,
@@ -561,7 +571,7 @@ export default function JournalCampaignDetailPage() {
     }
 
     let cancelled = false;
-    const recordMap = new Map(tradeRecords.map(record => [record.id, record]));
+    const recordMap = buildTradeRecordLookup(tradeRecords);
     const candidates = legs
       .map(leg => {
         const record = leg.trade_record_id ? recordMap.get(leg.trade_record_id) ?? null : null;
@@ -592,7 +602,7 @@ export default function JournalCampaignDetailPage() {
     return () => {
       cancelled = true;
     };
-  }, [campaign?.symbol, legs, tradeRecords]);
+  }, [campaign, legs, tradeRecords]);
 
   const accuracy = useMemo(
     () => (campaign ? computeDecisionAccuracy(campaign, legs, tradeRecords, klines) : null),
@@ -623,7 +633,7 @@ export default function JournalCampaignDetailPage() {
   const [hiddenReverseHedgeOrderIds, setHiddenReverseHedgeOrderIds] = useState<string[]>([]);
   const hiddenReverseOrderStorageKey = useMemo(
     () => (campaign ? `campaign:${campaign.id}:hidden-reverse-hedge-orders` : null),
-    [campaign?.id],
+    [campaign],
   );
   useEffect(() => {
     if (!hiddenReverseOrderStorageKey) {
@@ -964,7 +974,9 @@ export default function JournalCampaignDetailPage() {
         <section className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div className="bg-card border border-border rounded p-4 space-y-2 text-[12px]">
             <div className="font-medium">战役元数据</div>
-            <div className="text-muted-foreground">操作时间：{fmtMdHm(campaign.created_at)}</div>
+            <div className="text-muted-foreground">
+              操作时间：{objectiveOperationTime == null ? '—' : fmtMdHm(new Date(objectiveOperationTime).toISOString())}
+            </div>
             <div>开始：{fmtMdHm(campaign.opened_at)}</div>
             <div>结束：{fmtMdHm(campaign.closed_at)}</div>
             <div>持续时间：{fmtDuration(campaign.opened_at, campaign.closed_at)}</div>

@@ -533,6 +533,7 @@ export type Database = {
           post_proximate_cause: string | null
           post_r_multiple: number | null
           post_real_close_time: string | null
+          post_simulated_close_time: string | null
           post_real_problem: string | null
           post_reality_feedback: string | null
           post_realized_pnl: number | null
@@ -684,6 +685,7 @@ export type Database = {
           post_proximate_cause?: string | null
           post_r_multiple?: number | null
           post_real_close_time?: string | null
+          post_simulated_close_time?: string | null
           post_real_problem?: string | null
           post_reality_feedback?: string | null
           post_realized_pnl?: number | null
@@ -835,6 +837,7 @@ export type Database = {
           post_proximate_cause?: string | null
           post_r_multiple?: number | null
           post_real_close_time?: string | null
+          post_simulated_close_time?: string | null
           post_real_problem?: string | null
           post_reality_feedback?: string | null
           post_realized_pnl?: number | null

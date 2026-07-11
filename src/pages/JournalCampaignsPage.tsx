@@ -7,16 +7,20 @@ import { useAuth } from '@/contexts/AuthContext';
 import {
   deleteCampaign,
   getCampaignWithLegs,
+  listTradeHistoryForUser,
   listAllCampaigns,
   listVisibleCampaigns,
   updateCampaignImportance,
 } from '@/lib/journalApi';
 import { LEG_ROLE_LABELS, STRATEGY_TEMPLATES } from '@/lib/strategyTemplates';
+import { campaignOperationTime, tradeRecordsForJournals } from '@/lib/objectiveOperationTime';
 import type { CampaignStatus, LegRole, TradeCampaign, TradeJournal } from '@/types/journal';
+import type { TradeRecord } from '@/types/trading';
 
 type CampaignCardData = {
   campaign: TradeCampaign;
   legs: TradeJournal[];
+  tradeRecords: TradeRecord[];
 };
 
 type CampaignSortMode = 'importance' | 'time' | 'pnl' | 'pnlPct' | 'alpha';
@@ -96,25 +100,8 @@ function importanceValue(campaign: Pick<TradeCampaign, 'importance_weight'>): nu
   return Math.max(0, Math.min(5, Math.round(value)));
 }
 
-function safeTimeValue(value: string | null | undefined): number | null {
-  if (!value) return null;
-  const time = new Date(value).getTime();
-  return Number.isFinite(time) ? time : null;
-}
-
-function legRealOperationTime(leg: Pick<TradeJournal, 'post_real_close_time' | 'pre_real_time' | 'created_at' | 'updated_at'>): number | null {
-  return safeTimeValue(leg.post_real_close_time)
-    ?? safeTimeValue(leg.pre_real_time)
-    ?? safeTimeValue(leg.created_at)
-    ?? safeTimeValue(leg.updated_at);
-}
-
 function campaignSortTime(row: CampaignCardData): number {
-  const legTimes = row.legs
-    .map(legRealOperationTime)
-    .filter((time): time is number => time != null);
-  if (legTimes.length > 0) return Math.max(...legTimes);
-  return safeTimeValue(row.campaign.created_at) ?? safeTimeValue(row.campaign.opened_at) ?? 0;
+  return campaignOperationTime(row.legs, row.tradeRecords) ?? 0;
 }
 
 function pnlSortValue(campaign: Pick<TradeCampaign, 'final_realized_pnl'>): number {
@@ -248,10 +235,15 @@ export default function JournalCampaignsPage() {
         const campaigns = scope === 'own'
           ? await listAllCampaigns(user.id)
           : (await listVisibleCampaigns(user.id)).filter(campaign => campaign.user_id !== user.id);
+        const tradeHistory = scope === 'own' ? listTradeHistoryForUser(user.id) : [];
         const full = await Promise.all(
           campaigns.map(async campaign => {
             const details = await getCampaignWithLegs(campaign.id);
-            return { campaign, legs: details.legs };
+            return {
+              campaign,
+              legs: details.legs,
+              tradeRecords: tradeRecordsForJournals(details.legs, tradeHistory),
+            };
           }),
         );
         if (!cancelled) setRows(full);

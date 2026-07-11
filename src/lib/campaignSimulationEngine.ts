@@ -1,5 +1,6 @@
 import type { KlineData } from '@/hooks/useBinanceData';
 import { computeSopDeviation, type Deduction, type SopDeviationResult } from '@/lib/campaignAnalysis';
+import { buildTradeRecordLookup, journalSimulatedCloseTime } from '@/lib/objectiveOperationTime';
 import type {
   CampaignCounterfactualEvent,
   CampaignCounterfactualLegSummary,
@@ -827,7 +828,7 @@ export function buildManualLegs(
   tradeRecords: TradeRecord[],
 ): CampaignCounterfactualManualLeg[] {
   const fallbackClose = defaultCloseTime(params, klines);
-  const recordMap = new Map(tradeRecords.map(record => [record.id, record]));
+  const recordMap = buildTradeRecordLookup(tradeRecords);
   const ordered = [...legs].sort((a, b) => {
     const seqA = a.leg_sequence ?? 9999;
     const seqB = b.leg_sequence ?? 9999;
@@ -840,7 +841,10 @@ export function buildManualLegs(
       const record = leg.trade_record_id ? recordMap.get(leg.trade_record_id) ?? null : null;
       const openTime = leg.pre_simulated_time || params.entry.time;
       const recordCloseIso = record?.closeTime ? new Date(record.closeTime).toISOString() : null;
-      const closeTime = recordCloseIso || leg.post_real_close_time || fallbackClose;
+      const simulatedCloseMs = journalSimulatedCloseTime(leg);
+      const closeTime = recordCloseIso
+        || (simulatedCloseMs ? new Date(simulatedCloseMs).toISOString() : null)
+        || fallbackClose;
       const closeMs = manualTimeMs(closeTime) ?? manualTimeMs(fallbackClose) ?? manualTimeMs(openTime) ?? Date.now();
       const openMs = manualTimeMs(openTime) ?? closeMs;
       const normalizedClose = closeMs >= openMs ? closeTime : new Date(openMs).toISOString();
@@ -1016,7 +1020,7 @@ function inferActualParams(
   // 反事实锚点以「真实成交」为准：主力腿有成交记录时用其成交价 / 成交时间，
   // 让紫色推演轨迹精确贴合实际开仓那根 K 线；没有成交记录才退回计划值 pre_*。
   const mainRecord = mainLeg.trade_record_id
-    ? tradeRecords.find(record => record.id === mainLeg.trade_record_id) ?? null
+    ? buildTradeRecordLookup(tradeRecords).get(mainLeg.trade_record_id) ?? null
     : null;
   const entryDirection: Direction = campaign.direction === 'main_short' ? 'short' : 'long';
   const entryPrice = mainRecord?.entryPrice && mainRecord.entryPrice > 0 ? mainRecord.entryPrice : mainLeg.pre_entry_price;

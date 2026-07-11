@@ -49,6 +49,11 @@ import {
   finalizeJournalReview,
   stampJournalCloseRealTime,
 } from '@/lib/journalApi';
+import {
+  journalCloseOperationTime,
+  journalOpenOperationTime,
+  tradeRecordOperationTime,
+} from '@/lib/objectiveOperationTime';
 import type { TradeJournal, TradeOutcome } from '@/types/journal';
 import { MENTAL_STATE_LABELS, PAIN_TAG_LABELS } from '@/types/journal';
 import type { PainTag } from '@/types/journal';
@@ -191,9 +196,10 @@ export function PostTradeReviewSheet({
         setEmoMainStoneTags(normalizeMainStoneTags(journal.post_emo_main_stone_tags));
         setEmoNextTimePlan(journal.post_emo_next_time_plan ?? '');
         setRMultipleOverride(journal.post_r_multiple != null ? String(journal.post_r_multiple) : '');
-        // Stamp the real close time on first open (idempotent — API noop if already set)
-        if (!journal.post_reviewed_at && !journal.post_real_close_time) {
-          const stamped = await stampJournalCloseRealTime(journal.id);
+        // Repair/persist only the objective wallet timestamp captured at the close action.
+        const recordCloseTime = tradeRecordOperationTime(tradeRecord);
+        if (recordCloseTime != null) {
+          const stamped = await stampJournalCloseRealTime(journal.id, recordCloseTime);
           if (stamped) setStampedCloseTime(stamped);
         }
       } catch (e) {
@@ -560,11 +566,14 @@ export function PostTradeReviewSheet({
             </div>
             <div className="border border-border/60 rounded-md bg-background/60 px-2.5 py-2 text-[10.5px] leading-relaxed">
               <div className="text-muted-foreground mb-1">实际操作时间（北京时间）</div>
-              <div>开仓：<span className="text-foreground">{formatBeijingTime(journal.pre_real_time)}</span></div>
+              <div>开仓：<span className="text-foreground">{formatBeijingTime(journalOpenOperationTime(journal))}</span></div>
               <div>
                 平仓：
                 <span className="text-foreground">
-                  {formatBeijingTime(journal.post_real_close_time ?? stampedCloseTime)}
+                  {formatBeijingTime(
+                    stampedCloseTime
+                      ?? journalCloseOperationTime(journal, tradeRecord),
+                  )}
                 </span>
               </div>
             </div>

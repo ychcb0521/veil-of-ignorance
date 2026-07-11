@@ -6,6 +6,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { classifiableOperationTime } from '@/lib/classifiableOperationTime';
+import { journalSimulatedCloseTime } from '@/lib/objectiveOperationTime';
 import { getAssignableLegRoles, LEG_ROLE_LABELS, MAIN_ADD_ROLES, STRATEGY_TEMPLATES, SELECTABLE_STRATEGY_TEMPLATES, usesDualHedgeSop } from '@/lib/strategyTemplates';
 import { getPositionNotionalUsd } from '@/lib/tradingSettlement';
 import {
@@ -61,7 +62,7 @@ function itemCloseTimeLabel(item: ClassifiableItem) {
   if (item.kind === 'journal') {
     // 已成交的腿优先取关联成交记录的实际平仓时间（与开仓时间同为 K 线时钟）；
     // 未关联记录时回落到 journal 自身的真实平仓时间字段。
-    const close = item.record?.closeTime || item.journal.post_real_close_time;
+    const close = item.record?.closeTime || journalSimulatedCloseTime(item.journal);
     return close ? fmtLabel(close) : '—';
   }
   return item.record.closeTime ? fmtLabel(item.record.closeTime) : '—';
