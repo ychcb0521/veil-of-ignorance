@@ -7,12 +7,14 @@ const {
   mockReconcileCampaignRewards,
   mockReconcilePostTradeReviewRewards,
   mockSettleCampaignMissingPenalties,
+  mockWaiveCampaignBackedDirectPenalties,
   mockListAllCampaigns,
   mockListJournals,
 } = vi.hoisted(() => ({
   mockReconcileCampaignRewards: vi.fn(),
   mockReconcilePostTradeReviewRewards: vi.fn(),
   mockSettleCampaignMissingPenalties: vi.fn(),
+  mockWaiveCampaignBackedDirectPenalties: vi.fn(),
   mockListAllCampaigns: vi.fn(async () => [{
     id: 'campaign-1',
     symbol: 'BTCUSDT',
@@ -70,6 +72,7 @@ vi.mock('@/contexts/TradingContext', () => ({
     reconcileCampaignRewards: mockReconcileCampaignRewards,
     reconcilePostTradeReviewRewards: mockReconcilePostTradeReviewRewards,
     settleCampaignMissingPenalties: mockSettleCampaignMissingPenalties,
+    waiveCampaignBackedDirectPenalties: mockWaiveCampaignBackedDirectPenalties,
   }),
 }));
 

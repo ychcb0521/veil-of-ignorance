@@ -64,6 +64,7 @@ import {
   migrateExecutionAssetScoringV2 as applyScoringMigration,
   settleNoTradePenalties,
   settleCampaignMissingPenalties as applySettleCampaignMissing,
+  waiveCampaignBackedDirectPenalties as applyWaiveDirectPenalties,
   type CampaignCreationRef,
   type CompletedExecutionReview,
   type ExecutionAssetState,
@@ -173,6 +174,7 @@ interface TradingState {
   recordObservationLogged: () => void;
   /** 用权威战役列表结算「当天交易过某标的却没为它建战役」的 −300（按标的、永久）。 */
   settleCampaignMissingPenalties: (campaigns: CampaignCreationRef[]) => void;
+  waiveCampaignBackedDirectPenalties: (campaigns: CampaignCreationRef[]) => void;
   coinTimelines: CoinTimelinesMap;
   setCoinTimelines: (v: CoinTimelinesMap | ((prev: CoinTimelinesMap) => CoinTimelinesMap)) => void;
   totalPositionCount: number;
@@ -392,6 +394,11 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
   // 用权威战役列表结算「交易过却当天没建战役」的 −300（按标的、永久、幂等）。
   const settleCampaignMissingPenalties = useCallback((campaigns: CampaignCreationRef[]) => {
     setExecutionAsset(prev => applySettleCampaignMissing(prev, campaigns, new Date()));
+  }, [setExecutionAsset]);
+
+  // 直接交易罚免除：当天已为该标的建战役的直接单不扣分（历史+新单，幂等）。
+  const waiveCampaignBackedDirectPenalties = useCallback((campaigns: CampaignCreationRef[]) => {
+    setExecutionAsset(prev => applyWaiveDirectPenalties(prev, campaigns, new Date()));
   }, [setExecutionAsset]);
 
   // Total position count across all symbols
@@ -1360,7 +1367,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
     tradingMode, setTradingMode,
     executionAsset, setExecutionAsset, recordExecutionTrade, recordCampaignCreated, reconcileCampaignRewards,
     recordPostTradeReviewCompleted, reconcilePostTradeReviewRewards,
-    recordObservationLogged, settleCampaignMissingPenalties,
+    recordObservationLogged, settleCampaignMissingPenalties, waiveCampaignBackedDirectPenalties,
     coinTimelines, setCoinTimelines,
     totalPositionCount,
     getEffectiveTime,
