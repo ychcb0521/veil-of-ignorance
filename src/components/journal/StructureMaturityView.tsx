@@ -18,6 +18,7 @@ import {
   Minus,
 } from 'lucide-react';
 import type { TradeJournal } from '@/types/journal';
+import { journalRecordPath } from '@/lib/journalCampaignNavigation';
 import {
   aggregateStructureMaturity,
   type MaturityTier,
@@ -171,8 +172,9 @@ function StructureCard({ s }: { s: StructureMaturity }) {
             return (
               <Link
                 key={j.id}
-                to={`/journal/${j.id}`}
+                to={journalRecordPath(j.id, j.campaign_id)}
                 className="flex items-center gap-2 rounded-md border border-border/60 bg-background/60 px-3 py-1.5 text-[11px] hover:underline"
+                title={j.campaign_id ? '点击跳到对应交易战役' : '该记录尚未归入战役，点击查看单笔回放'}
               >
                 <span className="font-mono text-foreground">{j.symbol}</span>
                 <span className="text-muted-foreground">·</span>

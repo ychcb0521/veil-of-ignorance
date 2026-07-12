@@ -16,8 +16,9 @@ import type { TradeJournal } from '@/types/journal';
 import {
   PRE_FIELD_SPECS, POST_FIELD_SPECS, summarizeField,
   OUTCOME_LABEL, OUTCOME_COLOR,
-  type FieldSummary, type SummaryFieldSpec, type EnumBucket,
+  type FieldSummary, type SummaryFieldSpec, type EnumBucket, type TextAnswer,
 } from '@/lib/journalSummary';
+import { journalRecordPath } from '@/lib/journalCampaignNavigation';
 
 interface Props {
   journals: TradeJournal[];
@@ -41,7 +42,7 @@ export function JournalSummaryView({ journals }: Props) {
             <h2 className="text-[13px] font-semibold text-foreground">所有单子的汇总</h2>
             <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
               把开仓快照与平仓评价里每个问题展开 —— 看到的不是单笔，是历史全部主力单在这个问题上的答案。
-              选项题看分布条；文本题看完整历史回答列表（点击跳到该笔回放）；数值题看均值与分布。
+              选项题看分布条；文本题看完整历史回答列表（点击跳到对应交易战役）；数值题看均值与分布。
             </p>
           </div>
           <span className="rounded-full border border-border/60 px-3 py-1 font-mono text-[11px] text-muted-foreground">
@@ -203,7 +204,7 @@ function fmtNumber(n: number | null): string {
   return n.toFixed(2);
 }
 
-function TextList({ answers }: { answers: Array<{ journalId: string; symbol: string; direction: string | null; timeIso: string; outcome: string | null; text: string }> }) {
+function TextList({ answers }: { answers: TextAnswer[] }) {
   const nav = useNavigate();
   return (
     <div className="space-y-2">
@@ -213,9 +214,9 @@ function TextList({ answers }: { answers: Array<{ journalId: string; symbol: str
           <li key={a.journalId}>
             <button
               type="button"
-              onClick={() => nav(`/journal/${a.journalId}`)}
+              onClick={() => nav(journalRecordPath(a.journalId, a.campaignId))}
               className="w-full rounded-lg border border-border/60 bg-background/70 px-3 py-2 text-left hover:border-[#F0B90B]/40 hover:bg-[#F0B90B]/[0.03] transition-colors"
-              title="点击跳到该笔回放"
+              title={a.campaignId ? '点击跳到对应交易战役' : '该记录尚未归入战役，点击查看单笔回放'}
             >
               <div className="flex items-center gap-2 text-[10px] font-mono text-muted-foreground">
                 <span className="text-foreground">{a.symbol}</span>

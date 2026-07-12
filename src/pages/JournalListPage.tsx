@@ -11,13 +11,15 @@ import { toast } from 'sonner';
 import { BackButton } from '@/components/journal/BackButton';
 import { useAuth } from '@/contexts/AuthContext';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { listAllJournalDataForUser, type BulkJournalData } from '@/lib/journalApi';
+import { listAllCampaigns, listAllJournalDataForUser, type BulkJournalData } from '@/lib/journalApi';
 import { applyLocalMirror } from '@/lib/journalLocalMirror';
+import { buildJournalCampaignIdIndex } from '@/lib/journalCampaignNavigation';
 import { useBlindSpots } from '@/lib/blindSpots';
 import { JournalSummaryView } from '@/components/journal/JournalSummaryView';
 import { StructureMaturityView } from '@/components/journal/StructureMaturityView';
 import { BlindSpotModule } from '@/components/journal/BlindSpotModule';
 import { UnreviewedJournalList } from '@/components/journal/UnreviewedJournalList';
+import type { TradeCampaign } from '@/types/journal';
 
 type View = 'summary' | 'structures' | 'blindspots' | 'unreviewed';
 
@@ -26,6 +28,7 @@ export default function JournalListPage() {
   const [params, setParams] = useSearchParams();
 
   const [data, setData] = useState<BulkJournalData | null>(null);
+  const [campaigns, setCampaigns] = useState<TradeCampaign[]>([]);
   const [loading, setLoading] = useState(true);
 
   const blindSpots = useBlindSpots(user?.id);
@@ -40,6 +43,7 @@ export default function JournalListPage() {
     if (!user) return;
     if (!silent) setLoading(true);
     try {
+      const campaignsPromise = listAllCampaigns(user.id).catch(() => [] as TradeCampaign[]);
       const all = await listAllJournalDataForUser(user.id);
       // 本地镜像兜底：远程库 schema 漂移时本地存了一份完整字段，合并回去——
       // 用户单设备上始终能看到自己填的所有内容，不受远程缺列影响。
@@ -48,8 +52,10 @@ export default function JournalListPage() {
       if (all.journals.length > 1000) {
         const since = new Date(Date.now() - 90 * 86400000).toISOString();
         const partial = await listAllJournalDataForUser(user.id, { dateFrom: since });
+        setCampaigns(await campaignsPromise);
         setData(applyMirror(partial));
       } else {
+        setCampaigns(await campaignsPromise);
         setData(applyMirror(all));
       }
     } catch (e) {
@@ -88,6 +94,14 @@ export default function JournalListPage() {
     () => (data?.journals ?? []).filter(j => (j.journal_kind ?? 'trade') === 'trade'),
     [data?.journals],
   );
+  const navigableTradeJournals = useMemo(() => {
+    const index = buildJournalCampaignIdIndex(tradeJournals, campaigns);
+    return tradeJournals.map(journal => (
+      index[journal.id] && journal.campaign_id !== index[journal.id]
+        ? { ...journal, campaign_id: index[journal.id] }
+        : journal
+    ));
+  }, [campaigns, tradeJournals]);
   const unreviewedCount = useMemo(
     () => (data?.journals ?? []).filter(j => j.trade_record_id && !j.post_reviewed_at).length,
     [data?.journals],
@@ -139,10 +153,10 @@ export default function JournalListPage() {
 
       <main className="max-w-[1000px] mx-auto px-6 py-5">
         {view === 'summary' && (
-          <JournalSummaryView journals={tradeJournals} />
+          <JournalSummaryView journals={navigableTradeJournals} />
         )}
 
-        {view === 'structures' && <StructureMaturityView journals={tradeJournals} />}
+        {view === 'structures' && <StructureMaturityView journals={navigableTradeJournals} />}
 
         {view === 'blindspots' && (
           <BlindSpotModule items={blindSpots.items} onAdd={blindSpots.add} onRemove={blindSpots.remove} />

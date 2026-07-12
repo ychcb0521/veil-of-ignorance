@@ -70,6 +70,7 @@ export interface MultiSummary {
 
 export interface TextAnswer {
   journalId: string;
+  campaignId: string | null;
   symbol: string;
   direction: string | null;
   timeIso: string;
@@ -243,6 +244,7 @@ function summarizeText(journals: TradeJournal[], spec: SummaryFieldSpec, total: 
     if (typeof v !== 'string' || v.trim().length === 0) continue;
     answers.push({
       journalId: j.id,
+      campaignId: j.campaign_id ?? null,
       symbol: j.symbol,
       direction: j.direction ?? null,
       timeIso: fmtTimeIso(j),
