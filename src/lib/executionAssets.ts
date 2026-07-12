@@ -6,6 +6,8 @@ export const EXECUTION_CAMPAIGN_REWARD = 300;
 export const EXECUTION_REVIEW_REWARD = 1000;
 /** 当天交易过的标的若当天没为它新建战役，每个标的扣的分。 */
 export const EXECUTION_CAMPAIGN_MISSING_PENALTY = 300;
+/** 计分口径版本。旧状态(≤1)首次加载时会把历史事件按当前权重重算一次。 */
+export const EXECUTION_SCORING_VERSION = 2;
 
 export type ExecutionTradingMode = 'decision' | 'direct';
 
@@ -73,6 +75,8 @@ export interface ExecutionAssetState {
   rewardedCampaignIds: string[];
   /** 已发过 +EXECUTION_REVIEW_REWARD 的平仓评价 journal ID，避免编辑评价时重复加分。 */
   rewardedReviewJournalIds: string[];
+  /** 计分口径版本；缺省(旧状态)按 1 处理，触发一次历史重算迁移。 */
+  scoringVersion?: number;
 }
 
 export interface CompletedExecutionReview {
@@ -103,6 +107,7 @@ export function createDefaultExecutionAssetState(today: Date = new Date()): Exec
     events: [],
     rewardedCampaignIds: [],
     rewardedReviewJournalIds: [],
+    scoringVersion: EXECUTION_SCORING_VERSION,
   };
 }
 
@@ -166,6 +171,7 @@ function normalizeState(state: ExecutionAssetState | null | undefined, today: Da
     events,
     rewardedCampaignIds: Array.isArray(base.rewardedCampaignIds) ? Array.from(new Set(base.rewardedCampaignIds)) : [],
     rewardedReviewJournalIds,
+    scoringVersion: base.scoringVersion,
   };
 }
 
@@ -505,4 +511,63 @@ export function reconcilePostTradeReviewRewards(
 
 export function executionTradeCount(state: ExecutionAssetState): number {
   return (state.decisionTradeCount ?? 0) + (state.directTradeCount ?? 0);
+}
+
+/**
+ * 历史重算迁移(v1 → v2):把旧权重下记录的历史事件按当前权重重新定价、并重算总分。
+ *   复盘 +1000 · 决策 +600 · 建战役 +300 · 未练习 −1000 · 缺战役 −300
+ *   直接交易：从「每一笔订单」改为「每当日标的一笔 −600」——同一标的当天多笔,只保留最早一笔扣分、其余置 0。
+ * 「缺战役 −300」是新规,只从新数据起算、不追溯(用户定:只重算已有类型)。
+ * 靠 `scoringVersion` 幂等,只在旧状态首次加载时跑一次;每次点数变动本就配一条事件,故 Σevent = 总分,可从事件流重建。
+ */
+export function migrateExecutionAssetScoringV2(rawState: ExecutionAssetState): ExecutionAssetState {
+  const state = normalizeState(rawState);
+  if ((state.scoringVersion ?? 1) >= EXECUTION_SCORING_VERSION) {
+    return state.scoringVersion === EXECUTION_SCORING_VERSION ? state : { ...state, scoringVersion: EXECUTION_SCORING_VERSION };
+  }
+
+  const seenDirect = new Set<string>(); // `${date}|${symbol}`：当日该标的是否已计过直接交易罚
+  let points = 0;
+  let directTradeCount = 0;
+
+  // events 是「新在前」；按时间正序遍历以对直接交易「保留当日该标的最早一笔」。
+  const repriced = [...state.events].reverse().map(event => {
+    switch (event.type) {
+      case 'decision_reward':
+        points += EXECUTION_DECISION_REWARD;
+        return { ...event, points: EXECUTION_DECISION_REWARD };
+      case 'campaign_reward':
+        points += EXECUTION_CAMPAIGN_REWARD;
+        return { ...event, points: EXECUTION_CAMPAIGN_REWARD };
+      case 'review_reward':
+        points += EXECUTION_REVIEW_REWARD;
+        return { ...event, points: EXECUTION_REVIEW_REWARD };
+      case 'no_trade_penalty':
+        points -= EXECUTION_NO_TRADE_PENALTY;
+        return { ...event, points: -EXECUTION_NO_TRADE_PENALTY };
+      case 'campaign_missing_penalty':
+        points -= EXECUTION_CAMPAIGN_MISSING_PENALTY;
+        return { ...event, points: -EXECUTION_CAMPAIGN_MISSING_PENALTY };
+      case 'direct_reward': {
+        const key = `${event.date}|${event.trade?.symbol ?? '__nosym__'}`;
+        // 同标的当天多笔并作一笔：丢弃重复,只留最早那笔扣 −EXECUTION_DIRECT_PENALTY(流水每条=一次计分动作)。
+        if (seenDirect.has(key)) return null;
+        seenDirect.add(key);
+        directTradeCount += 1;
+        points -= EXECUTION_DIRECT_PENALTY;
+        return { ...event, points: -EXECUTION_DIRECT_PENALTY, label: '直接交易扣分' };
+      }
+      default:
+        points += event.points;
+        return event;
+    }
+  }).filter(Boolean).reverse() as ExecutionAssetEvent[]; // 去掉被并笔的重复,复原「新在前」
+
+  return {
+    ...state,
+    points,
+    directTradeCount,
+    events: repriced,
+    scoringVersion: EXECUTION_SCORING_VERSION,
+  };
 }

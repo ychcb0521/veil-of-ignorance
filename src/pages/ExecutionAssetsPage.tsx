@@ -328,7 +328,7 @@ function EventDetailCard({
         <div>
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-[13px] font-semibold">
-              {tradeSymbol ?? (isPenalty ? '未交易扣分日' : event.label)}
+              {tradeSymbol ?? (isPenalty ? '未练习扣分日' : event.label)}
             </span>
             {trade?.side && (
               <span
@@ -736,6 +736,11 @@ export default function ExecutionAssetsPage() {
               <div className="text-[12px] font-medium">创建交易战役</div>
               <div className="mt-2 font-mono text-2xl text-[#5BA3FF]">+{EXECUTION_CAMPAIGN_REWARD}</div>
             </div>
+            {/* 下排与上排逐列镜像：复盘↔未练习、决策↔直接、建战役↔未建战役（同额反号）。 */}
+            <div className="rounded-xl border border-[#F6465D]/25 bg-[#F6465D]/5 px-4 py-3">
+              <div className="text-[12px] font-medium">自然日未练习</div>
+              <div className="mt-2 font-mono text-2xl text-[#F6465D]">-{EXECUTION_NO_TRADE_PENALTY}</div>
+            </div>
             <div className="rounded-xl border border-[#F6465D]/25 bg-[#F6465D]/5 px-4 py-3">
               <div className="text-[12px] font-medium">直接交易（每标的）</div>
               <div className="mt-2 font-mono text-2xl text-[#F6465D]">-{EXECUTION_DIRECT_PENALTY}</div>
@@ -743,10 +748,6 @@ export default function ExecutionAssetsPage() {
             <div className="rounded-xl border border-[#D89B00]/25 bg-[#D89B00]/5 px-4 py-3">
               <div className="text-[12px] font-medium">标的未建战役（每标的）</div>
               <div className="mt-2 font-mono text-2xl text-[#D89B00]">-{EXECUTION_CAMPAIGN_MISSING_PENALTY}</div>
-            </div>
-            <div className="rounded-xl border border-[#F6465D]/25 bg-[#F6465D]/5 px-4 py-3">
-              <div className="text-[12px] font-medium">自然日未练习</div>
-              <div className="mt-2 font-mono text-2xl text-[#F6465D]">-{EXECUTION_NO_TRADE_PENALTY}</div>
             </div>
           </div>
         </section>

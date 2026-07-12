@@ -61,6 +61,7 @@ import {
   reconcileCampaignRewards as applyCampaignReconcile,
   reconcilePostTradeReviewRewards as applyReviewReconcile,
   recordPracticeLogged as applyPracticeLogged,
+  migrateExecutionAssetScoringV2 as applyScoringMigration,
   settleNoTradePenalties,
   settleCampaignMissingPenalties as applySettleCampaignMissing,
   type CampaignCreationRef,
@@ -353,7 +354,8 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => { positionsMapRef.current = positionsMap; }, [positionsMap]);
 
   useEffect(() => {
-    setExecutionAsset(prev => settleNoTradePenalties(prev));
+    // 先按当前权重把历史事件重算一次(幂等)，再结算未练习欠账。
+    setExecutionAsset(prev => settleNoTradePenalties(applyScoringMigration(prev)));
   }, [setExecutionAsset]);
 
   const recordExecutionTrade = useCallback((modeOverride?: TradingMode, trade?: ExecutionTradeSnapshot | null) => {

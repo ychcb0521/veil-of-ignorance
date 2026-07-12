@@ -8,6 +8,8 @@ import {
   EXECUTION_DIRECT_PENALTY,
   EXECUTION_NO_TRADE_PENALTY,
   EXECUTION_REVIEW_REWARD,
+  EXECUTION_SCORING_VERSION,
+  migrateExecutionAssetScoringV2,
   recordCampaignCreated,
   recordPostTradeReviewCompleted,
   recordPracticeLogged,
@@ -320,5 +322,54 @@ describe('Option A：弃单 / 复盘算当天练习，清「未交易 −1000」
       { journalId: 'old', reviewedAt: d('2026-06-02') },
     ], d('2026-06-10'));
     expect(s1.tradedDates['2026-06-02']).toBeUndefined();
+  });
+});
+
+describe('历史重算迁移 v1→v2（按新权重重算已有事件，缺战役不追溯）', () => {
+  // 旧权重下记录的历史事件（新在前）：决策999 / 直接99×2(同标的同日) / 未交易-500 / 建战役1500 / 复盘666
+  const legacyState = () => ({
+    ...createDefaultExecutionAssetState(d('2026-06-10')),
+    scoringVersion: undefined,
+    points: 999 + 99 + 99 - 500 + 1500 + 666,
+    directTradeCount: 2,
+    events: [
+      { id: 'e6', type: 'review_reward', points: 666, date: '2026-06-05', createdAt: 6, label: '完成平仓评价奖励', journalId: 'j1' },
+      { id: 'e5', type: 'campaign_reward', points: 1500, date: '2026-06-04', createdAt: 5, label: '创建交易战役奖励', campaignId: 'c1' },
+      { id: 'e4', type: 'no_trade_penalty', points: -500, date: '2026-06-03', createdAt: 4, label: 'x' },
+      { id: 'e3', type: 'direct_reward', points: 99, date: '2026-06-02', createdAt: 3, label: '直接交易奖励', trade: trade('BTCUSDT') },
+      { id: 'e2', type: 'direct_reward', points: 99, date: '2026-06-02', createdAt: 2, label: '直接交易奖励', trade: trade('BTCUSDT') },
+      { id: 'e1', type: 'decision_reward', points: 999, date: '2026-06-01', createdAt: 1, label: '决策记录交易奖励', trade: trade('ETHUSDT') },
+    ],
+  }) as unknown as ReturnType<typeof createDefaultExecutionAssetState>;
+
+  it('按新权重重算并重求和；直接交易按当日标的去重', () => {
+    const m = migrateExecutionAssetScoringV2(legacyState());
+    // 决策+600, 直接BTC(两笔→一笔)-600, 未练习-1000, 建战役+300, 复盘+1000
+    expect(m.points).toBe(600 - 600 - 1000 + 300 + 1000);
+    expect(m.directTradeCount).toBe(1);
+    expect(m.scoringVersion).toBe(EXECUTION_SCORING_VERSION);
+    const byId = Object.fromEntries(m.events.map(e => [e.id, e.points]));
+    expect(byId.e1).toBe(600);   // decision
+    expect(byId.e4).toBe(-1000); // no_trade
+    expect(byId.e5).toBe(300);   // campaign
+    expect(byId.e6).toBe(1000);  // review
+    // 两笔同标的同日直接交易：最早一笔留 -600，重复的被并笔丢弃（流水每条=一次计分动作）
+    expect(byId.e2).toBe(-600);
+    expect(byId.e3).toBeUndefined();
+    expect(m.events).toHaveLength(5);
+  });
+
+  it('幂等：已迁移(v2)状态再迁移不变', () => {
+    const once = migrateExecutionAssetScoringV2(legacyState());
+    const twice = migrateExecutionAssetScoringV2(once);
+    expect(twice.points).toBe(once.points);
+    expect(twice.events.map(e => e.points)).toEqual(once.events.map(e => e.points));
+  });
+
+  it('全新状态(默认已是 v2)：迁移为空操作', () => {
+    const fresh = createDefaultExecutionAssetState(d('2026-06-10'));
+    const m = migrateExecutionAssetScoringV2(fresh);
+    expect(m.points).toBe(0);
+    expect(m.scoringVersion).toBe(EXECUTION_SCORING_VERSION);
   });
 });

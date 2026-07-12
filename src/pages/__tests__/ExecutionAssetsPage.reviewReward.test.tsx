@@ -100,12 +100,13 @@ describe('ExecutionAssetsPage review reward', () => {
     expect(Array.from(screen.getByTestId('execution-rule-grid').children).map(card => (
       card.textContent?.replace(/\s+/g, '')
     ))).toEqual([
+      // 逐列镜像：复盘↔未练习、决策↔直接、建战役↔未建战役（同额反号）
       '完成平仓评价+1000',
       '决策记录交易+600',
       '创建交易战役+300',
+      '自然日未练习-1000',
       '直接交易（每标的）-600',
       '标的未建战役（每标的）-300',
-      '自然日未练习-1000',
     ]);
 
     await waitFor(() => {
