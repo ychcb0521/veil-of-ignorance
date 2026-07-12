@@ -1,4 +1,4 @@
-import type { DecisionQuality, MissedHighOddsState, SmallPositionDrag, TradeOutcome } from '@/types/journal';
+import type { DecisionQuality, MissedHighOddsState, SituationHandling, SituationKind, SmallPositionDrag, TradeOutcome } from '@/types/journal';
 
 // ============ 结构 × 结果 四象限 ============
 // 结构 = 下单当时（已知信息下）的决策质量；结果 = 这单赢还是亏。
@@ -170,6 +170,75 @@ export const SMALL_POSITION_DRAG_LABELS: Record<SmallPositionDrag, string> = {
   missed_bigger: '错过更大机会',
   chain_reaction: '引发连锁乱做',
 };
+
+// ============ 情境 × 处理 记账（取代旧「小机会仓位记账」）============
+// 一手的本质不一定是小机会：可能是小机会 / 大机会 / 大危机，每种都有「处理得当 / 不得当」。
+
+export const SITUATION_KIND_META: Record<SituationKind, { label: string; hint: string }> = {
+  small: { label: '小机会', hint: '目标不厚 / 盈亏比不足的小仓或弃单' },
+  big_opp: { label: '大机会', hint: '厚结构、真正值得重仓的机会' },
+  crisis: { label: '大危机', hint: '可能造成大损失、需要回避或对冲的局面' },
+};
+
+export interface SituationHandlingOption {
+  id: SituationHandling;
+  situation: SituationKind;
+  /** true = 处理得当（好），false = 处理不得当（错） */
+  handledWell: boolean;
+  label: string;
+  description: string;
+  /** 0 = 得当；越大越糟，用于着色 */
+  severity: 0 | 2 | 3;
+}
+
+export const SITUATION_HANDLING_OPTIONS: readonly SituationHandlingOption[] = [
+  { id: 'small_clean', situation: 'small', handledWell: true, label: '干净处理', description: '识别为小机会——干净小仓或正确弃单，没占心力、没错过别的、没引发乱做', severity: 0 },
+  { id: 'small_dragged', situation: 'small', handledWell: false, label: '被它拖累', description: '被小机会拖累：占用心力 / 钝化敏感度错过更大 / 引发连锁乱做', severity: 2 },
+  { id: 'big_opp_seized', situation: 'big_opp', handledWell: true, label: '把握住了', description: '识别为大机会，且上对仓位、吃够了', severity: 0 },
+  { id: 'big_opp_missed', situation: 'big_opp', handledWell: false, label: '没把握住', description: '大机会却做小了 / 踏空 / 过早跑，把大机会做成小结果', severity: 3 },
+  { id: 'crisis_avoided', situation: 'crisis', handledWell: true, label: '避开了', description: '识别为大危机，成功回避或对冲住——把无限风险换成可控摩擦', severity: 0 },
+  { id: 'crisis_hit', situation: 'crisis', handledWell: false, label: '没避开', description: '大危机却踩进去——没回避 / 没对冲，被打穿', severity: 3 },
+] as const;
+
+export const SITUATION_HANDLING_LABELS: Record<SituationHandling, string> = {
+  small_clean: '小机会·干净处理',
+  small_dragged: '小机会·被它拖累',
+  big_opp_seized: '大机会·把握住了',
+  big_opp_missed: '大机会·没把握住',
+  crisis_avoided: '大危机·避开了',
+  crisis_hit: '大危机·没避开',
+};
+
+/** 展示用统一标签：新值走情境×处理，旧值（none/attention_only/…）沿用小机会一档旧标签。 */
+export const SITUATION_HANDLING_ALL_LABELS: Record<string, string> = {
+  ...SITUATION_HANDLING_LABELS,
+  ...SMALL_POSITION_DRAG_LABELS,
+};
+
+/** 旧值 → 新六格的映射，供打开历史 journal 时把它落到对应格。 */
+const LEGACY_SITUATION_MAP: Record<SmallPositionDrag, SituationHandling> = {
+  none: 'small_clean',
+  attention_only: 'small_dragged',
+  missed_bigger: 'small_dragged',
+  chain_reaction: 'small_dragged',
+};
+
+export function normalizeSituationHandling(
+  value: SituationHandling | SmallPositionDrag | null | undefined,
+): SituationHandling | null {
+  if (!value) return null;
+  if (value in SITUATION_HANDLING_LABELS) return value as SituationHandling;
+  return LEGACY_SITUATION_MAP[value as SmallPositionDrag] ?? null;
+}
+
+/** 是否「处理不得当」= 该记为错误。新值看 handledWell；旧值 none 为好、其余为错。 */
+export function situationHandledPoorly(
+  value: SituationHandling | SmallPositionDrag | null | undefined,
+): boolean {
+  const normalized = normalizeSituationHandling(value);
+  if (!normalized) return false;
+  return SITUATION_HANDLING_OPTIONS.find(o => o.id === normalized)?.handledWell === false;
+}
 
 // ============ 踏空高盈亏比结构 / 该重没重 ============
 

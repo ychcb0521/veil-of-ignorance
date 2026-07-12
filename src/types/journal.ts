@@ -75,6 +75,19 @@ export type SmallPositionDrag =
   | 'missed_bigger' // 钝化了敏感度，做小 / 错过了真正更大的机会
   | 'chain_reaction';// 引发后续乱做（无聊 → 乱做 → 复仇等连锁负向）
 /**
+ * 情境 × 处理 记账（取代旧「小机会仓位记账」）：一手的本质不一定是小机会——
+ * 它可能是小机会 / 大机会 / 大危机，每种都有「处理得当 / 处理不得当」之分。
+ * 复用 post_small_position_drag 文本列存储；旧值（none/attention_only/…）按小机会一档向后兼容。
+ */
+export type SituationKind = 'small' | 'big_opp' | 'crisis';
+export type SituationHandling =
+  | 'small_clean'     // 小机会·干净处理：识别为小机会，干净小仓 / 正确弃单，没被拖累
+  | 'small_dragged'   // 小机会·被它拖累：占心力 / 钝化错过更大 / 引发连锁乱做
+  | 'big_opp_seized'  // 大机会·把握住了：上对仓位、吃够了
+  | 'big_opp_missed'  // 大机会·没把握住：做小 / 踏空 / 过早跑，把大做成小
+  | 'crisis_avoided'  // 大危机·避开了：回避或对冲住，无限风险换可控摩擦
+  | 'crisis_hit';     // 大危机·没避开：没回避 / 没对冲，被打穿
+/**
  * 踏空高盈亏比结构 / 该重没重：与「小机会仓位」对称的一等负向状态。
  * 小机会仓位 = 薄结构上浪费行动力；这里 = 厚结构出现时没上、上轻、或错过后补票。
  */
@@ -789,7 +802,7 @@ export interface TradeJournal {
   /** 纠结度 / 轻松度（1 煎熬 … 5 行云流水）。过程质量的先行指标 —— 交易最重要的是轻松，不是赚钱。 */
   post_struggle_level?: 1 | 2 | 3 | 4 | 5 | null;
   /** 小机会仓位的隐性成本记账。仅对快照里被标记为小机会仓位的单子追问。 */
-  post_small_position_drag?: SmallPositionDrag | null;
+  post_small_position_drag?: SmallPositionDrag | SituationHandling | null;
   /** 踏空高盈亏比结构 / 该重没重。仅对快照里识别为厚结构的单子追问。 */
   post_missed_high_odds_state?: MissedHighOddsState | null;
   /** @deprecated 旧版路径复盘：上来是不是就盈利。 */

@@ -19,11 +19,14 @@ import {
   STRUCTURE_RESULT_QUADRANTS,
   STRUGGLE_LEVEL_LABELS,
   STRUGGLE_LEVEL_HINTS,
-  SMALL_POSITION_DRAG_OPTIONS,
+  SITUATION_HANDLING_OPTIONS,
+  SITUATION_KIND_META,
+  normalizeSituationHandling,
   MISSED_HIGH_ODDS_OPTIONS,
   type StruggleLevel,
   type StructureResultQuadrant,
 } from '@/lib/structureResult';
+import type { SituationKind } from '@/types/journal';
 import { parseHedgeBoundaryBasis } from '@/lib/hedgeBoundaryBasis';
 import { HEDGE_BOUNDARY_STANCE_LABELS, HEDGE_ORDER_METHOD_LABELS, HEDGE_TYPE_LABELS } from '@/lib/hedgeTypes';
 import {
@@ -182,7 +185,7 @@ export function PostTradeReviewSheet({
         setFalsificationStatus(journal.exit_falsification_status ?? null);
         setFalsificationNote(journal.exit_falsification_note ?? '');
         setStruggleLevel((journal.post_struggle_level as StruggleLevel | null) ?? null);
-        setSmallPositionDrag(journal.post_small_position_drag ?? null);
+        setSmallPositionDrag(normalizeSituationHandling(journal.post_small_position_drag));
         setMissedHighOddsState(journal.post_missed_high_odds_state ?? null);
         setPathMode(journal.post_path_mode ?? null);
         setTradeAgencyScore(journal.post_trade_agency_score ?? null);
@@ -307,9 +310,9 @@ export function PostTradeReviewSheet({
   // 结构 × 结果 四象限：结构轴 = 当时决策质量，结果轴 = 这单赢/亏。
   const quadrantApplicable = journal.direction !== 'no_entry' && (outcome === 'win' || outcome === 'loss');
   const quadrant = classifyStructureResult(decisionQuality, outcome);
-  // 小机会仓位记账：每一笔主力单都让用户自评一次"这单是不是隐性占用了你的行动力"。
-  // 选「无明显拖累」即代表"不是小机会"，无需强制阻断。
-  const showSmallPositionDrag = !isHedge && journal.direction !== 'no_entry';
+  // 情境 × 处理 记账：给每一手定性——小机会 / 大机会 / 大危机，各有处理得当 / 不得当。
+  // 覆盖所有交易类型（主力入场 / 对冲 / 弃单都可自评），选「得当」即非错误、不阻断。
+  const showSmallPositionDrag = true;
   // 厚结构没吃够：与「小机会仓位」对称。只在快照显示结构足够厚/便宜时追问。
   const showMissedHighOddsState = !isHedge
     && journal.direction !== 'no_entry'
@@ -1216,46 +1219,52 @@ export function PostTradeReviewSheet({
         )}
 
         {showSmallPositionDrag && (
-          <div className="space-y-2 px-4 py-4 rounded-xl border border-[#F0B90B]/40 bg-[#F0B90B]/[0.04] shadow-[0_10px_30px_rgba(0,0,0,0.04)]">
-            <div className="text-[12px] font-medium text-[#D89B00]">小机会仓位记账</div>
+          <div className="space-y-3 px-4 py-4 rounded-xl border border-[#F0B90B]/40 bg-[#F0B90B]/[0.04] shadow-[0_10px_30px_rgba(0,0,0,0.04)]">
+            <div className="text-[12px] font-medium text-[#D89B00]">情境 × 处理 记账</div>
             <p className="text-[10px] leading-relaxed text-muted-foreground">
-              {journal.pre_opportunity_cost_worth === false
-                ? '开仓时你判定「不做也不亏」—— 这是典型的小机会仓位（多半在填补无聊）。它的隐性成本要被记下来：'
-                : journal.pre_cheap_opportunity === 'not_cheap'
-                  ? '开仓时你判定「不是便宜机会」—— 方向可能对，但成本太厚。它的隐性成本要被记下来：'
-                  : journal.pre_cheap_opportunity === 'unclear'
-                    ? '开仓时你判定「说不清便宜不便宜」—— 成本优势不清。它的隐性成本要被记下来：'
-                    : journal.pre_edge_source === 'no_clear_edge'
-                      ? '开仓时你选择「无明确 edge」—— 看不出来源，只是想交易。它的隐性成本要被记下来：'
-                      : '开仓时你判定「目标不清楚 / 盈亏比不足」—— 方向可能对，但目标空间不够厚。它的隐性成本要被记下来：'}
+              先给这一手定性 —— 它本质是<strong className="text-foreground">小机会 / 大机会 / 大危机</strong>哪一种？再看你处理得当没有。默认「它是小机会」往往就看错了：大机会没把握住、大危机没避开，都是更贵的错。
             </p>
-            <div className="grid gap-1.5">
-              {SMALL_POSITION_DRAG_OPTIONS.map(opt => {
-                const active = smallPositionDrag === opt.id;
-                const accent = opt.severity === 0 ? '#0ECB81' : opt.severity === 1 ? '#F0B90B' : opt.severity === 2 ? '#D89B00' : '#F6465D';
+            <div className="space-y-2.5">
+              {(['small', 'big_opp', 'crisis'] as SituationKind[]).map(kind => {
+                const meta = SITUATION_KIND_META[kind];
+                const opts = SITUATION_HANDLING_OPTIONS.filter(o => o.situation === kind);
                 return (
-                  <button
-                    key={opt.id}
-                    type="button"
-                    onClick={() => setSmallPositionDrag(active ? null : opt.id)}
-                    className={`rounded-lg border px-3 py-2 text-left transition-colors ${
-                      active ? '' : 'border-border bg-background hover:bg-accent'
-                    }`}
-                    style={active ? { borderColor: accent, backgroundColor: `${accent}14` } : undefined}
-                  >
-                    <div
-                      className={`text-[11px] font-medium ${active ? '' : 'text-foreground'}`}
-                      style={active ? { color: accent } : undefined}
-                    >
-                      {opt.label}
+                  <div key={kind} className="rounded-lg border border-border/60 bg-background/40 p-2">
+                    <div className="mb-1.5 flex items-baseline gap-2 px-1">
+                      <span className="text-[11px] font-medium text-foreground">{meta.label}</span>
+                      <span className="text-[9px] text-muted-foreground">{meta.hint}</span>
                     </div>
-                    <div className="text-[10px] leading-tight text-muted-foreground">{opt.description}</div>
-                  </button>
+                    <div className="grid grid-cols-2 gap-1.5">
+                      {opts.map(opt => {
+                        const active = smallPositionDrag === opt.id;
+                        const accent = opt.severity === 0 ? '#0ECB81' : opt.severity === 2 ? '#D89B00' : '#F6465D';
+                        return (
+                          <button
+                            key={opt.id}
+                            type="button"
+                            onClick={() => setSmallPositionDrag(active ? null : opt.id)}
+                            className={`rounded-lg border px-3 py-2 text-left transition-colors ${
+                              active ? '' : 'border-border bg-background hover:bg-accent'
+                            }`}
+                            style={active ? { borderColor: accent, backgroundColor: `${accent}14` } : undefined}
+                          >
+                            <div
+                              className={`text-[11px] font-medium ${active ? '' : 'text-foreground'}`}
+                              style={active ? { color: accent } : undefined}
+                            >
+                              {opt.handledWell ? '得当 · ' : '不得当 · '}{opt.label}
+                            </div>
+                            <div className="text-[10px] leading-tight text-muted-foreground">{opt.description}</div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
                 );
               })}
             </div>
             <p className="text-[10px] leading-relaxed text-muted-foreground">
-              持有小机会仓位是一等负向状态：它比空仓更糟 —— 在悄悄损耗你的行动力与对大机会的敏感度。
+              六格穷尽「情境 × 处理」：得当（绿）是好过程；不得当（黄 / 红）才进错题集。空仓 / 弃单也是一种处理 —— 正确回避大危机是得当，过度回避错过大机会是不得当。
             </p>
           </div>
         )}

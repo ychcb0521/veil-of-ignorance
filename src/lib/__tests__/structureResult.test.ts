@@ -5,6 +5,10 @@ import {
   recoveryGainPct,
   recoveryAsymmetryRatio,
   STRUCTURE_RESULT_QUADRANTS,
+  SITUATION_HANDLING_OPTIONS,
+  SITUATION_HANDLING_ALL_LABELS,
+  normalizeSituationHandling,
+  situationHandledPoorly,
 } from '../structureResult';
 
 describe('classifyStructureResult', () => {
@@ -78,5 +82,51 @@ describe('recoveryAsymmetryRatio', () => {
   it('clamps to 1 for non-positive loss and Infinity for wipeout', () => {
     expect(recoveryAsymmetryRatio(0)).toBe(1);
     expect(recoveryAsymmetryRatio(100)).toBe(Infinity);
+  });
+});
+
+describe('情境 × 处理 记账（含旧值向后兼容）', () => {
+  it('六格穷尽 小机会 / 大机会 / 大危机 × 得当 / 不得当', () => {
+    expect(SITUATION_HANDLING_OPTIONS).toHaveLength(6);
+    const bySituation = (s: string) => SITUATION_HANDLING_OPTIONS.filter(o => o.situation === s);
+    for (const kind of ['small', 'big_opp', 'crisis']) {
+      const pair = bySituation(kind);
+      expect(pair).toHaveLength(2);
+      expect(pair.map(o => o.handledWell).sort()).toEqual([false, true]);
+    }
+  });
+
+  it('situationHandledPoorly：仅「不得当」六格 + 旧的非 none 值算错误', () => {
+    // 新值·得当 → 非错误
+    expect(situationHandledPoorly('small_clean')).toBe(false);
+    expect(situationHandledPoorly('big_opp_seized')).toBe(false);
+    expect(situationHandledPoorly('crisis_avoided')).toBe(false);
+    // 新值·不得当 → 错误
+    expect(situationHandledPoorly('small_dragged')).toBe(true);
+    expect(situationHandledPoorly('big_opp_missed')).toBe(true);
+    expect(situationHandledPoorly('crisis_hit')).toBe(true);
+    // 旧值：none 好、其余错
+    expect(situationHandledPoorly('none')).toBe(false);
+    expect(situationHandledPoorly('attention_only')).toBe(true);
+    expect(situationHandledPoorly('missed_bigger')).toBe(true);
+    expect(situationHandledPoorly('chain_reaction')).toBe(true);
+    // 空 → 非错误
+    expect(situationHandledPoorly(null)).toBe(false);
+    expect(situationHandledPoorly(undefined)).toBe(false);
+  });
+
+  it('normalizeSituationHandling：旧值落到对应新格，新值原样返回', () => {
+    expect(normalizeSituationHandling('none')).toBe('small_clean');
+    expect(normalizeSituationHandling('attention_only')).toBe('small_dragged');
+    expect(normalizeSituationHandling('missed_bigger')).toBe('small_dragged');
+    expect(normalizeSituationHandling('chain_reaction')).toBe('small_dragged');
+    expect(normalizeSituationHandling('crisis_hit')).toBe('crisis_hit');
+    expect(normalizeSituationHandling(null)).toBeNull();
+  });
+
+  it('统一标签覆盖新值与旧值', () => {
+    expect(SITUATION_HANDLING_ALL_LABELS.big_opp_missed).toBe('大机会·没把握住');
+    expect(SITUATION_HANDLING_ALL_LABELS.crisis_avoided).toBe('大危机·避开了');
+    expect(SITUATION_HANDLING_ALL_LABELS.none).toBe('无明显拖累'); // 旧值仍可展示
   });
 });

@@ -12,6 +12,7 @@
 import type { PainTag, TradeJournal } from '@/types/journal';
 import { EMOTION_TAG_META, PAIN_TAG_LABELS } from '@/types/journal';
 import { deriveFalsificationQuality } from '@/lib/falsificationQuality';
+import { situationHandledPoorly, SITUATION_HANDLING_ALL_LABELS } from '@/lib/structureResult';
 
 /** 错误维度（与「快照 → 平仓」之间产生的错误种类对应）。 */
 export type ErrorFamily =
@@ -140,11 +141,6 @@ const MISSED_LABEL: Record<string, string> = {
   missed: '厚结构空仓踏空',
   under_sized: '该重没重',
   late_chase: '错过后追票',
-};
-const DRAG_LABEL: Record<string, string> = {
-  attention_only: '占用注意力 / 心力',
-  missed_bigger: '钝化敏感度、错过更大机会',
-  chain_reaction: '引发后续连锁乱做',
 };
 const PATH_FIRST_MOVE_LABEL: Record<string, string> = {
   immediate_profit: '第一段即盈利',
@@ -345,13 +341,13 @@ const ERROR_TYPE_DEFS: ErrorTypeDef[] = [
   {
     id: 'small_position_drag',
     family: 'discipline',
-    title: '小机会仓位拖累',
-    definition: '持有小机会仓位损耗了行动力（比空仓更差的一等负向状态）',
+    title: '情境处理不当',
+    definition: '把这一手的情境（小机会 / 大机会 / 大危机）处理错了：小机会被拖累、大机会没把握住、或大危机没避开',
     severity: 20,
     costUnit: null,
     applicable: j => j.post_small_position_drag != null,
-    detect: j => !!j.post_small_position_drag && j.post_small_position_drag !== 'none',
-    detail: j => DRAG_LABEL[j.post_small_position_drag as string] ?? '小机会仓位拖累',
+    detect: j => situationHandledPoorly(j.post_small_position_drag),
+    detail: j => SITUATION_HANDLING_ALL_LABELS[j.post_small_position_drag as string] ?? '情境处理不当',
   },
   {
     id: 'dragged_win',

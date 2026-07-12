@@ -16,7 +16,7 @@ import {
   MARKET_REGIME_LABELS, ENTRY_STAGE_LABELS, STOP_QUALITY_LABELS,
 } from '@/lib/snapshotStructure';
 import { ODDS_STRUCTURE_LABELS } from '@/lib/oddsStructure';
-import { SMALL_POSITION_DRAG_LABELS, STRUGGLE_LEVEL_LABELS } from '@/lib/structureResult';
+import { SITUATION_HANDLING_ALL_LABELS, STRUGGLE_LEVEL_LABELS } from '@/lib/structureResult';
 import { MAIN_STONE_META, type MainStoneTag } from '@/lib/mainStoneTags';
 import { getCloseReviewAuditAnswer } from '@/lib/reflectionFacts';
 
@@ -350,7 +350,7 @@ export const POST_FIELD_SPECS: SummaryFieldSpec[] = [
   { key: 'post_decision_quality', label: '选择本笔归类（结构 × 结果四象限的"结构轴"）', type: 'enum', optionLabels: DECISION_QUALITY_LABELS, optionAccents: DECISION_QUALITY_ACCENTS, hint: '过程是否正当——与盈亏无关。' },
   { key: 'post_struggle_level', label: '过程纠结度（1 极煎熬 → 5 行云流水）', type: 'numeric', numericMin: 1, numericMax: 5, numericLabels: STRUGGLE_LEVEL_LABELS as unknown as Record<string, string>, hint: '亏损的先行指标。' },
   { key: 'exit_falsification_status', label: '证伪信号触发状态（止）', type: 'enum', optionLabels: FALSIFICATION_STATUS_LABELS, optionAccents: FALSIFICATION_STATUS_ACCENTS, hint: '事前的止 vs 事后真实退出动作。' },
-  { key: 'post_small_position_drag', label: '小机会仓位 · 隐性成本', type: 'enum', optionLabels: SMALL_POSITION_DRAG_LABELS, hint: '每笔主力单都自评一次：「无明显拖累」即代表这不是小机会仓。' },
+  { key: 'post_small_position_drag', label: '这一手 · 情境 × 处理', type: 'enum', optionLabels: SITUATION_HANDLING_ALL_LABELS, hint: '给这一手定性：小机会 / 大机会 / 大危机，各有处理得当 / 不得当。' },
   { key: 'post_emo_main_stone_tags', label: '主石头标签（恐惧 / 贪婪 / 自我保护 / 虚假掌控）', type: 'multi', optionLabels: MAIN_STONE_LABELS, hint: '可统计的复盘动机原型。' },
   {
     id: 'post_reflection_schelling_floor_weight',
