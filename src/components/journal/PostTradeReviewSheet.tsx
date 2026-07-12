@@ -59,6 +59,7 @@ import { MENTAL_STATE_LABELS, PAIN_TAG_LABELS } from '@/types/journal';
 import type { PainTag } from '@/types/journal';
 import { formatBeijingTime } from '@/lib/timeFormat';
 import type { TradeRecord } from '@/types/trading';
+import { useTradingContext } from '@/contexts/TradingContext';
 
 const PATH_MODE_OPTIONS: Array<{
   value: NonNullable<TradeJournal['post_path_mode']>;
@@ -126,6 +127,7 @@ export function PostTradeReviewSheet({
   isOpen, onOpenChange, journal, tradeRecord, onReviewed, onAutoPause,
 }: Props) {
   const isMobile = useIsMobile();
+  const { recordPostTradeReviewCompleted } = useTradingContext();
   const [decisionQuality, setDecisionQuality] = useState<TradeJournal['post_decision_quality']>('mixed');
   const [expectancyReview, setExpectancyReview] = useState('');
   const [oddsStructureReviewValue, setOddsStructureReviewValue] = useState<OddsStructureReview | null>(null);
@@ -430,6 +432,7 @@ export function PostTradeReviewSheet({
         post_emo_main_stone_tags: emoMainStoneTags.length > 0 ? emoMainStoneTags : null,
         post_emo_next_time_plan: emoNextTimePlan.trim(),
       });
+      recordPostTradeReviewCompleted(journal.id, updated.post_reviewed_at);
       // 提交永远是「成功」语义：基础字段已落远程库；若远程缺列，被剥掉的字段已写入本地镜像，
       // 并会在错题集汇总里照常显示（applyLocalMirror 合并）。所以只发一条绿色成功提示，把
       // 「缺列」降级成附注，而不是再弹一条看起来像报错的黄色信息。诚实保留：这些列暂未同步到

@@ -6,8 +6,11 @@ import {
   EXECUTION_DECISION_REWARD,
   EXECUTION_DIRECT_REWARD,
   EXECUTION_NO_TRADE_PENALTY,
+  EXECUTION_REVIEW_REWARD,
   recordCampaignCreated,
+  recordPostTradeReviewCompleted,
   reconcileCampaignRewards,
+  reconcilePostTradeReviewRewards,
   recordExecutionTrade,
   settleNoTradePenalties,
 } from '../executionAssets';
@@ -80,6 +83,54 @@ describe('execution assets', () => {
 
     expect(s2.points).toBe(EXECUTION_DECISION_REWARD);
     expect(s2.penaltyDays).toBe(0);
+  });
+});
+
+describe('平仓评价 +666（按 journal ID 幂等 + 历史对账）', () => {
+  it('首次完成评价 +666、计数 +1，并记录 journal ID', () => {
+    const s0 = createDefaultExecutionAssetState(d('2026-06-03'));
+    const s1 = recordPostTradeReviewCompleted(s0, 'journal-1', d('2026-06-04'));
+
+    expect(s1.points).toBe(EXECUTION_REVIEW_REWARD);
+    expect(s1.reviewCount).toBe(1);
+    expect(s1.rewardedReviewJournalIds).toEqual(['journal-1']);
+    expect(s1.events[0]).toMatchObject({
+      type: 'review_reward',
+      points: EXECUTION_REVIEW_REWARD,
+      journalId: 'journal-1',
+      date: '2026-06-04',
+    });
+  });
+
+  it('同一评价后续编辑不重复奖励', () => {
+    const s0 = createDefaultExecutionAssetState(d('2026-06-03'));
+    const s1 = recordPostTradeReviewCompleted(s0, 'journal-1', d('2026-06-04'));
+    const s2 = recordPostTradeReviewCompleted(s1, 'journal-1', d('2026-06-05'));
+
+    expect(s2.points).toBe(EXECUTION_REVIEW_REWARD);
+    expect(s2.reviewCount).toBe(1);
+    expect(s2.events).toHaveLength(1);
+  });
+
+  it('对账会按原评价时间补齐历史评价，并保持流水从新到旧', () => {
+    const s0 = createDefaultExecutionAssetState(d('2026-06-10'));
+    const s1 = reconcilePostTradeReviewRewards(s0, [
+      { journalId: 'journal-a', reviewedAt: '2026-06-02T01:00:00.000Z' },
+      { journalId: 'journal-b', reviewedAt: '2026-06-04T01:00:00.000Z' },
+      { journalId: 'journal-a', reviewedAt: '2026-06-02T01:00:00.000Z' },
+    ], d('2026-06-10'));
+
+    expect(s1.points).toBe(EXECUTION_REVIEW_REWARD * 2);
+    expect(s1.reviewCount).toBe(2);
+    expect(new Set(s1.rewardedReviewJournalIds)).toEqual(new Set(['journal-a', 'journal-b']));
+    expect(s1.events.map(event => event.journalId)).toEqual(['journal-b', 'journal-a']);
+
+    const s2 = reconcilePostTradeReviewRewards(s1, [
+      { journalId: 'journal-a', reviewedAt: '2026-06-02T01:00:00.000Z' },
+      { journalId: 'journal-b', reviewedAt: '2026-06-04T01:00:00.000Z' },
+    ], d('2026-06-11'));
+    expect(s2.points).toBe(EXECUTION_REVIEW_REWARD * 2);
+    expect(s2.events).toHaveLength(2);
   });
 });
 

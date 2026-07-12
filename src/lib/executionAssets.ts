@@ -2,10 +2,16 @@ export const EXECUTION_DECISION_REWARD = 999;
 export const EXECUTION_DIRECT_REWARD = 99;
 export const EXECUTION_NO_TRADE_PENALTY = 500;
 export const EXECUTION_CAMPAIGN_REWARD = 1500;
+export const EXECUTION_REVIEW_REWARD = 666;
 
 export type ExecutionTradingMode = 'decision' | 'direct';
 
-export type ExecutionAssetEventType = 'decision_reward' | 'direct_reward' | 'no_trade_penalty' | 'campaign_reward';
+export type ExecutionAssetEventType =
+  | 'decision_reward'
+  | 'direct_reward'
+  | 'no_trade_penalty'
+  | 'campaign_reward'
+  | 'review_reward';
 
 export interface ExecutionTradeSnapshot {
   symbol: string;
@@ -37,6 +43,8 @@ export interface ExecutionAssetEvent {
   trade?: ExecutionTradeSnapshot | null;
   /** campaign_reward 事件归属的战役 ID，用于幂等与可追溯。 */
   campaignId?: string | null;
+  /** review_reward 事件归属的 journal ID，用于幂等与可追溯。 */
+  journalId?: string | null;
 }
 
 export interface ExecutionAssetState {
@@ -44,12 +52,20 @@ export interface ExecutionAssetState {
   decisionTradeCount: number;
   directTradeCount: number;
   campaignCount: number;
+  reviewCount: number;
   penaltyDays: number;
   tradedDates: Record<string, true>;
   lastDailyCheckDate: string | null;
   events: ExecutionAssetEvent[];
   /** 已发过 +1500 的战役 ID，避免对账时重复加分。 */
   rewardedCampaignIds: string[];
+  /** 已发过 +666 的平仓评价 journal ID，避免编辑评价时重复加分。 */
+  rewardedReviewJournalIds: string[];
+}
+
+export interface CompletedExecutionReview {
+  journalId: string;
+  reviewedAt?: Date | number | string | null;
 }
 
 export function createDefaultExecutionAssetState(today: Date = new Date()): ExecutionAssetState {
@@ -58,11 +74,13 @@ export function createDefaultExecutionAssetState(today: Date = new Date()): Exec
     decisionTradeCount: 0,
     directTradeCount: 0,
     campaignCount: 0,
+    reviewCount: 0,
     penaltyDays: 0,
     tradedDates: {},
     lastDailyCheckDate: localDateKey(today),
     events: [],
     rewardedCampaignIds: [],
+    rewardedReviewJournalIds: [],
   };
 }
 
@@ -99,16 +117,29 @@ function pushEvent(state: ExecutionAssetState, event: ExecutionAssetEvent): Exec
 
 function normalizeState(state: ExecutionAssetState | null | undefined, today: Date = new Date()): ExecutionAssetState {
   const base = state ?? createDefaultExecutionAssetState(today);
+  const events = Array.isArray(base.events) ? base.events : [];
+  const reviewIdsFromEvents = events
+    .filter(event => event.type === 'review_reward' && event.journalId)
+    .map(event => event.journalId as string);
+  const rewardedReviewJournalIds = Array.from(new Set([
+    ...(Array.isArray(base.rewardedReviewJournalIds) ? base.rewardedReviewJournalIds : []),
+    ...reviewIdsFromEvents,
+  ]));
   return {
     points: Number.isFinite(base.points) ? base.points : 0,
     decisionTradeCount: Number.isFinite(base.decisionTradeCount) ? base.decisionTradeCount : 0,
     directTradeCount: Number.isFinite(base.directTradeCount) ? base.directTradeCount : 0,
     campaignCount: Number.isFinite(base.campaignCount) ? base.campaignCount : 0,
+    reviewCount: Math.max(
+      Number.isFinite(base.reviewCount) ? base.reviewCount : 0,
+      rewardedReviewJournalIds.length,
+    ),
     penaltyDays: Number.isFinite(base.penaltyDays) ? base.penaltyDays : 0,
     tradedDates: base.tradedDates ?? {},
     lastDailyCheckDate: base.lastDailyCheckDate ?? localDateKey(today),
-    events: Array.isArray(base.events) ? base.events : [],
+    events,
     rewardedCampaignIds: Array.isArray(base.rewardedCampaignIds) ? Array.from(new Set(base.rewardedCampaignIds)) : [],
+    rewardedReviewJournalIds,
   };
 }
 
@@ -250,6 +281,82 @@ export function reconcileCampaignRewards(
     points: state.points + EXECUTION_CAMPAIGN_REWARD * toAward.length,
     campaignCount: Math.max(state.campaignCount, known.size),
     rewardedCampaignIds: [...known],
+    events: [...events, ...state.events],
+  };
+}
+
+function validEventDate(value: Date | number | string | null | undefined, fallback: Date): Date {
+  const date = value instanceof Date ? value : value == null ? fallback : new Date(value);
+  return Number.isFinite(date.getTime()) ? date : fallback;
+}
+
+function reviewRewardEvent(journalId: string, reviewedAt: Date): ExecutionAssetEvent {
+  const date = localDateKey(reviewedAt);
+  return {
+    id: eventId('review_reward', date),
+    type: 'review_reward',
+    points: EXECUTION_REVIEW_REWARD,
+    date,
+    createdAt: reviewedAt.getTime(),
+    label: '完成平仓评价奖励',
+    journalId,
+  };
+}
+
+/** 完成一笔平仓评价 +666；同一个 journal 无论后续编辑多少次都只奖励一次。 */
+export function recordPostTradeReviewCompleted(
+  rawState: ExecutionAssetState,
+  journalId: string,
+  reviewedAt: Date | number | string | null = new Date(),
+): ExecutionAssetState {
+  const completedAt = validEventDate(reviewedAt, new Date());
+  const state = normalizeState(rawState, completedAt);
+  if (!journalId || state.rewardedReviewJournalIds.includes(journalId)) return state;
+  return {
+    ...state,
+    points: state.points + EXECUTION_REVIEW_REWARD,
+    reviewCount: state.reviewCount + 1,
+    rewardedReviewJournalIds: [...state.rewardedReviewJournalIds, journalId],
+    events: pushEvent(state, reviewRewardEvent(journalId, completedAt)),
+  };
+}
+
+/**
+ * 用数据库中已完成的平仓评价对账，给历史漏记记录补 +666。
+ * journal ID 是唯一凭证，评价文字后续修改不会影响奖励归属，也不会重复计分。
+ */
+export function reconcilePostTradeReviewRewards(
+  rawState: ExecutionAssetState,
+  reviews: CompletedExecutionReview[],
+  today: Date = new Date(),
+): ExecutionAssetState {
+  const state = normalizeState(rawState, today);
+  const known = new Set(state.rewardedReviewJournalIds);
+  const untrackedRewarded = Math.max(0, state.reviewCount - known.size);
+  const uniqueReviews = Array.from(
+    new Map(reviews.filter(review => review.journalId).map(review => [review.journalId, review])).values(),
+  );
+  const candidates = uniqueReviews.filter(review => !known.has(review.journalId));
+
+  for (const review of candidates.slice(0, untrackedRewarded)) known.add(review.journalId);
+  const toAward = candidates.slice(untrackedRewarded);
+
+  if (toAward.length === 0) {
+    const nextCount = Math.max(state.reviewCount, known.size);
+    if (known.size === state.rewardedReviewJournalIds.length && nextCount === state.reviewCount) return state;
+    return { ...state, reviewCount: nextCount, rewardedReviewJournalIds: [...known] };
+  }
+
+  const events = toAward
+    .map(review => reviewRewardEvent(review.journalId, validEventDate(review.reviewedAt, today)))
+    .sort((a, b) => b.createdAt - a.createdAt);
+  for (const review of toAward) known.add(review.journalId);
+
+  return {
+    ...state,
+    points: state.points + EXECUTION_REVIEW_REWARD * toAward.length,
+    reviewCount: Math.max(state.reviewCount, known.size),
+    rewardedReviewJournalIds: [...known],
     events: [...events, ...state.events],
   };
 }

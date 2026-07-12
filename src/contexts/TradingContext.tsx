@@ -57,8 +57,11 @@ import {
   createDefaultExecutionAssetState,
   recordExecutionTrade as applyExecutionTradeReward,
   recordCampaignCreated as applyCampaignReward,
+  recordPostTradeReviewCompleted as applyPostTradeReviewReward,
   reconcileCampaignRewards as applyCampaignReconcile,
+  reconcilePostTradeReviewRewards as applyReviewReconcile,
   settleNoTradePenalties,
+  type CompletedExecutionReview,
   type ExecutionAssetState,
   type ExecutionTradeSnapshot,
 } from '@/lib/executionAssets';
@@ -158,6 +161,10 @@ interface TradingState {
   recordCampaignCreated: (campaignId?: string | null) => void;
   /** 用「用户实际战役 ID 列表」对账，补齐漏记的 +1500（幂等，自愈）。 */
   reconcileCampaignRewards: (campaignIds: string[]) => void;
+  /** 每完成一次平仓评价 +666；同一个 journal 后续编辑不重复计分。 */
+  recordPostTradeReviewCompleted: (journalId: string, reviewedAt?: Date | number | string | null) => void;
+  /** 用历史已完成评价对账，补齐漏记的 +666（按 journal ID 幂等）。 */
+  reconcilePostTradeReviewRewards: (reviews: CompletedExecutionReview[]) => void;
   coinTimelines: CoinTimelinesMap;
   setCoinTimelines: (v: CoinTimelinesMap | ((prev: CoinTimelinesMap) => CoinTimelinesMap)) => void;
   totalPositionCount: number;
@@ -355,6 +362,17 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
   // 用真实战役 ID 列表对账，补齐任何漏记的 +1500（幂等，自愈）。
   const reconcileCampaignRewards = useCallback((campaignIds: string[]) => {
     setExecutionAsset(prev => applyCampaignReconcile(prev, campaignIds, new Date()));
+  }, [setExecutionAsset]);
+
+  const recordPostTradeReviewCompleted = useCallback((
+    journalId: string,
+    reviewedAt?: Date | number | string | null,
+  ) => {
+    setExecutionAsset(prev => applyPostTradeReviewReward(prev, journalId, reviewedAt ?? new Date()));
+  }, [setExecutionAsset]);
+
+  const reconcilePostTradeReviewRewards = useCallback((reviews: CompletedExecutionReview[]) => {
+    setExecutionAsset(prev => applyReviewReconcile(prev, reviews, new Date()));
   }, [setExecutionAsset]);
 
   // Total position count across all symbols
@@ -1322,6 +1340,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
     timeMode, setTimeMode,
     tradingMode, setTradingMode,
     executionAsset, setExecutionAsset, recordExecutionTrade, recordCampaignCreated, reconcileCampaignRewards,
+    recordPostTradeReviewCompleted, reconcilePostTradeReviewRewards,
     coinTimelines, setCoinTimelines,
     totalPositionCount,
     getEffectiveTime,

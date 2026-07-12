@@ -1315,6 +1315,7 @@ export default function GuidePage() {
                 <tbody>
                   <tr><td className="px-3 py-2 border-t border-border">决策记录模块交易</td><td className="px-3 py-2 border-t border-border font-mono text-[#0ECB81]">+999</td><td className="px-3 py-2 border-t border-border">留下一份完整可复盘样本：开仓快照 → 平仓评价 → 错题集 / 结构成熟度 / 规则 / 元监控</td></tr>
                   <tr><td className="px-3 py-2 border-t border-border">直接交易</td><td className="px-3 py-2 border-t border-border font-mono text-[#D89B00]">+99</td><td className="px-3 py-2 border-t border-border">贴近真实执行节奏，但不沉淀可复盘样本</td></tr>
+                  <tr><td className="px-3 py-2 border-t border-border">完成平仓评价</td><td className="px-3 py-2 border-t border-border font-mono text-[#B080FF]">+666</td><td className="px-3 py-2 border-t border-border">把一次交易闭合为可复用的评价样本；同一笔后续编辑不重复计分</td></tr>
                   <tr><td className="px-3 py-2 border-t border-border">自然日未交易</td><td className="px-3 py-2 border-t border-border font-mono text-[#F6465D]">-500</td><td className="px-3 py-2 border-t border-border">把“不做”的机会成本显性化；跟随模拟时间，按自然日结算</td></tr>
                 </tbody>
               </table>
@@ -1325,6 +1326,7 @@ export default function GuidePage() {
             <ul className="list-disc pl-6 text-[14px] text-foreground/90 space-y-1">
               <li><strong>只记做多开仓。</strong>做空都是辅助对冲单，属于风险管理动作，不计执行力分。</li>
               <li><strong>挂单成交才计分。</strong>挂出限价单只是意图，真正成交才算“做”——意图不计分，执行才计分。</li>
+              <li><strong>平仓评价完成才计分。</strong>保存成功后奖励 666 分；系统按 journal ID 识别，同一评价反复修改不会重复奖励。</li>
               <li><strong>按自然日扣分。</strong>今天没有任何计分交易、到明天仍未交易，扣 500 分；日期跟随模拟时间，不是现实日期。</li>
             </ul>
             <RedHighlight>

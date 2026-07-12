@@ -3,6 +3,7 @@ import {
   ArrowLeft,
   Activity,
   CalendarMinus,
+  ClipboardCheck,
   ChevronDown,
   ChevronRight,
   Clock,
@@ -23,6 +24,7 @@ import {
   EXECUTION_DIRECT_REWARD,
   EXECUTION_NO_TRADE_PENALTY,
   EXECUTION_CAMPAIGN_REWARD,
+  EXECUTION_REVIEW_REWARD,
   executionTradeCount,
   localDateKey,
   type ExecutionAssetEvent,
@@ -31,6 +33,7 @@ import {
 import {
   backfillJournalFromRecord,
   listAllCampaigns,
+  listJournals,
   listJournalsByTradeRecordId,
 } from '@/lib/journalApi';
 import { formatCoinAmount, getSettlementAsset } from '@/lib/coinMargined';
@@ -44,7 +47,7 @@ import { cn } from '@/lib/utils';
 import type { TradeRecord } from '@/types/trading';
 import type { TradeCampaign } from '@/types/journal';
 
-type DetailPanelKey = 'decision' | 'direct' | 'penalty' | 'campaign' | 'share';
+type DetailPanelKey = 'decision' | 'direct' | 'penalty' | 'campaign' | 'review' | 'share';
 
 function formatSigned(points: number) {
   return `${points >= 0 ? '+' : ''}${points.toLocaleString()}`;
@@ -54,6 +57,7 @@ function eventTone(type: string) {
   if (type === 'decision_reward') return 'text-[#0ECB81] border-[#0ECB81]/25 bg-[#0ECB81]/5';
   if (type === 'direct_reward') return 'text-[#F0B90B] border-[#F0B90B]/25 bg-[#F0B90B]/5';
   if (type === 'campaign_reward') return 'text-[#5BA3FF] border-[#5BA3FF]/25 bg-[#5BA3FF]/5';
+  if (type === 'review_reward') return 'text-[#B080FF] border-[#B080FF]/25 bg-[#B080FF]/5';
   return 'text-[#F6465D] border-[#F6465D]/25 bg-[#F6465D]/5';
 }
 
@@ -218,6 +222,11 @@ const PANEL_COPY: Record<DetailPanelKey, { title: string; subtitle: string; empt
     subtitle: '每创建一次交易战役 +1500。',
     empty: '暂无创建的交易战役。',
   },
+  review: {
+    title: '平仓评价明细',
+    subtitle: '每完成一笔平仓评价 +666；后续编辑不重复计分。',
+    empty: '暂无已完成的平仓评价。',
+  },
   share: {
     title: '决策记录占比明细',
     subtitle: '这里合并展示所有计分交易，用来观察可复盘样本占比。',
@@ -291,6 +300,7 @@ function EventDetailCard({
   const trade = event.trade;
   const isPenalty = event.type === 'no_trade_penalty';
   const isCampaign = event.type === 'campaign_reward';
+  const isReview = event.type === 'review_reward';
   const canOpen = Boolean(trade) && matched != null;
   const tradeSymbol = trade
     ? `${getSettlementAsset(trade.symbol)}/${quoteLabel(trade)}`
@@ -418,6 +428,27 @@ function EventDetailCard({
             </button>
           );
         })()
+      ) : isReview ? (
+        event.journalId ? (
+          <button
+            type="button"
+            onClick={() => nav(`/journal/${event.journalId}`)}
+            className="mt-4 flex w-full items-center justify-between gap-3 rounded-lg border border-[#B080FF]/30 bg-[#B080FF]/5 px-3 py-2 text-left transition-colors hover:bg-[#B080FF]/10"
+            title="点击查看这笔平仓评价"
+          >
+            <div>
+              <div className="text-[12px] font-medium text-foreground">已完成平仓评价</div>
+              <div className="mt-0.5 font-mono text-[10px] text-muted-foreground">
+                评价于 {formatTime(event.createdAt)} · +{EXECUTION_REVIEW_REWARD}
+              </div>
+            </div>
+            <ChevronRight className="h-4 w-4 shrink-0 text-[#B080FF]" />
+          </button>
+        ) : (
+          <div className="mt-4 rounded-lg border border-[#B080FF]/20 bg-[#B080FF]/5 px-3 py-2 text-[12px] text-muted-foreground">
+            完成一次平仓评价 +{EXECUTION_REVIEW_REWARD}。
+          </div>
+        )
       ) : (
         <div className="mt-4 rounded-lg border border-dashed border-border/70 px-3 py-2 text-[12px] text-muted-foreground">
           这条早期流水只保留了日期、类型与积分；之后产生的交易会自动记录完整单据信息。
@@ -475,7 +506,12 @@ function DetailPanel({
 
 export default function ExecutionAssetsPage() {
   const nav = useNavigate();
-  const { executionAsset, tradeHistory, reconcileCampaignRewards } = useTradingContext();
+  const {
+    executionAsset,
+    tradeHistory,
+    reconcileCampaignRewards,
+    reconcilePostTradeReviewRewards,
+  } = useTradingContext();
   const { user } = useAuth();
   const { open: openPlayback, busyId } = useOpenPlaybackForSnapshot();
   const [openPanel, setOpenPanel] = useState<DetailPanelKey | null>(null);
@@ -485,8 +521,7 @@ export default function ExecutionAssetsPage() {
   const totalTrades = executionTradeCount(executionAsset);
   const decisionShare = totalTrades > 0 ? (executionAsset.decisionTradeCount / totalTrades) * 100 : 0;
 
-  // 进页面即对账：用真实战役 ID 列表补齐任何漏记的「建战役 +1500」（幂等，自愈），
-  // 使「建战役」积分始终等于真实创建过的战役数，不依赖某个 UI 回调是否被触发。
+  // 进页面即对账：按真实战役 ID 和已完成评价的 journal ID 补齐漏记奖励；两类都幂等自愈。
   useEffect(() => {
     if (!user?.id) return;
     let cancelled = false;
@@ -498,8 +533,18 @@ export default function ExecutionAssetsPage() {
         setCampaignById(Object.fromEntries(campaigns.map(c => [c.id, c])));
       })
       .catch(() => { /* 离线 / 无战役表时静默，不影响页面 */ });
+    listJournals(user.id)
+      .then(journals => {
+        if (cancelled) return;
+        reconcilePostTradeReviewRewards(
+          journals
+            .filter(journal => Boolean(journal.post_reviewed_at))
+            .map(journal => ({ journalId: journal.id, reviewedAt: journal.post_reviewed_at })),
+        );
+      })
+      .catch(() => { /* 离线 / 无 journal 表时静默，不影响页面 */ });
     return () => { cancelled = true; };
-  }, [user?.id, reconcileCampaignRewards]);
+  }, [user?.id, reconcileCampaignRewards, reconcilePostTradeReviewRewards]);
 
   const detailEvents = useMemo(() => {
     const events = executionAsset.events ?? [];
@@ -510,6 +555,7 @@ export default function ExecutionAssetsPage() {
       direct,
       penalty: events.filter(event => event.type === 'no_trade_penalty'),
       campaign: events.filter(event => event.type === 'campaign_reward'),
+      review: events.filter(event => event.type === 'review_reward'),
       share: events.filter(event => event.type === 'decision_reward' || event.type === 'direct_reward'),
     };
   }, [executionAsset.events]);
@@ -571,7 +617,7 @@ export default function ExecutionAssetsPage() {
             </div>
           </div>
 
-          <div className="grid gap-3 p-5 sm:grid-cols-2 lg:grid-cols-5">
+          <div className="grid gap-3 p-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
             <StatCard
               active={openPanel === 'decision'}
               icon={<Trophy className="h-4 w-4" />}
@@ -609,6 +655,15 @@ export default function ExecutionAssetsPage() {
               onClick={() => togglePanel('campaign')}
             />
             <StatCard
+              active={openPanel === 'review'}
+              icon={<ClipboardCheck className="h-4 w-4" />}
+              value={String(executionAsset.reviewCount ?? 0)}
+              label="平仓评价"
+              tone="text-[#B080FF]"
+              detail={<span className="font-mono text-[#B080FF]">每次 +{EXECUTION_REVIEW_REWARD}</span>}
+              onClick={() => togglePanel('review')}
+            />
+            <StatCard
               active={openPanel === 'share'}
               icon={<ListChecks className="h-4 w-4" />}
               value={`${decisionShare.toFixed(0)}%`}
@@ -634,9 +689,9 @@ export default function ExecutionAssetsPage() {
         <section className="mt-4 rounded-2xl border border-border/70 bg-card">
           <div className="border-b border-border/70 px-5 py-4">
             <h2 className="text-[13px] font-semibold">积分规则</h2>
-            <p className="mt-1 text-[11px] text-muted-foreground">只记做多开仓；做空都是辅助对冲单，不计分。挂单在真正成交时才计分。</p>
+            <p className="mt-1 text-[11px] text-muted-foreground">开仓积分只记做多；做空对冲不计分。平仓评价完成后独立奖励，重复编辑不重复计分。</p>
           </div>
-          <div className="grid gap-3 p-5 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="grid gap-3 p-5 sm:grid-cols-2 lg:grid-cols-5">
             <div className="rounded-xl border border-[#0ECB81]/25 bg-[#0ECB81]/5 px-4 py-3">
               <div className="text-[12px] font-medium">决策记录模块交易</div>
               <div className="mt-2 font-mono text-2xl text-[#0ECB81]">+999</div>
@@ -653,6 +708,10 @@ export default function ExecutionAssetsPage() {
               <div className="text-[12px] font-medium">创建交易战役</div>
               <div className="mt-2 font-mono text-2xl text-[#5BA3FF]">+1500</div>
             </div>
+            <div className="rounded-xl border border-[#B080FF]/25 bg-[#B080FF]/5 px-4 py-3">
+              <div className="text-[12px] font-medium">完成平仓评价</div>
+              <div className="mt-2 font-mono text-2xl text-[#B080FF]">+666</div>
+            </div>
           </div>
         </section>
 
@@ -661,7 +720,7 @@ export default function ExecutionAssetsPage() {
             <div>
               <h2 className="text-[13px] font-semibold">最近积分流水</h2>
               <p className="mt-0.5 text-[10px] text-muted-foreground">
-                每条都对应一笔真实开仓。已平仓的可点「K 线回放」查看持仓过程；持仓中暂不可回放。
+                每条对应一次计分动作。交易奖励可查看 K 线回放，平仓评价奖励可进入对应复盘。
               </p>
             </div>
             <div className="rounded-full border border-border/60 px-2.5 py-1 font-mono text-[11px] text-muted-foreground">
@@ -671,28 +730,36 @@ export default function ExecutionAssetsPage() {
           <div className="p-3">
             {executionAsset.events.length === 0 ? (
               <div className="rounded-xl border border-dashed border-border/70 px-4 py-8 text-center text-[12px] text-muted-foreground">
-                还没有积分流水。下一次真实开仓后，这里会出现第一条记录。
+                还没有积分流水。下一次计分动作完成后，这里会出现第一条记录。
               </div>
             ) : (
               <ul className="max-h-[520px] space-y-2 overflow-y-auto pr-1">
                 {executionAsset.events.map(event => {
                   const matched = matchClosesForSnapshot(event.trade, tradeHistory);
                   const canOpen = Boolean(event.trade) && matched != null;
+                  const canOpenReview = event.type === 'review_reward' && Boolean(event.journalId);
+                  const canInteract = canOpen || canOpenReview;
                   const busy = busyId === event.id;
                   return (
                     <li key={event.id}>
                       <button
                         type="button"
-                        onClick={() => canOpen && openPlayback(event)}
-                        disabled={!canOpen || busy}
+                        onClick={() => {
+                          if (canOpen) openPlayback(event);
+                          else if (canOpenReview && event.journalId) nav(`/journal/${event.journalId}`);
+                        }}
+                        disabled={!canInteract || busy}
                         className={cn(
                           'flex w-full items-center justify-between gap-3 rounded-xl border bg-background/70 px-4 py-3 text-left transition-colors',
-                          canOpen && !busy
-                            ? 'border-border/60 hover:border-[#F0B90B]/40 hover:bg-[#F0B90B]/[0.03]'
+                          canInteract && !busy
+                            ? event.type === 'review_reward'
+                              ? 'border-border/60 hover:border-[#B080FF]/40 hover:bg-[#B080FF]/[0.03]'
+                              : 'border-border/60 hover:border-[#F0B90B]/40 hover:bg-[#F0B90B]/[0.03]'
                             : 'border-border/60 cursor-not-allowed opacity-95',
                         )}
                         title={
-                          !event.trade ? '此条无交易快照，无法查看回放'
+                          canOpenReview ? '点击查看这笔平仓评价'
+                          : !event.trade ? '此条无交易快照，无法查看回放'
                           : !matched ? '这笔还未平仓，无法查看完整持仓过程'
                           : '点击查看持仓过程 K 线回放'
                         }
@@ -732,11 +799,11 @@ export default function ExecutionAssetsPage() {
                           <span className={`rounded-full border px-2.5 py-1 font-mono text-[12px] ${eventTone(event.type)}`}>
                             {formatSigned(event.points)}
                           </span>
-                          {event.trade && (
+                          {(event.trade || canOpenReview) && (
                             <span className={cn(
                               'inline-flex h-7 w-7 items-center justify-center rounded-md',
-                              canOpen && !busy
-                                ? 'text-[#D89B00]'
+                              canInteract && !busy
+                                ? event.type === 'review_reward' ? 'text-[#B080FF]' : 'text-[#D89B00]'
                                 : 'text-muted-foreground/40',
                             )}>
                               {busy
