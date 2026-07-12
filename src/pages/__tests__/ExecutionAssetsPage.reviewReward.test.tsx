@@ -11,7 +11,10 @@ const {
 } = vi.hoisted(() => ({
   mockReconcileCampaignRewards: vi.fn(),
   mockReconcilePostTradeReviewRewards: vi.fn(),
-  mockListAllCampaigns: vi.fn(async () => []),
+  mockListAllCampaigns: vi.fn(async () => [{
+    id: 'campaign-1',
+    created_at: '2026-07-10T00:00:00.000Z',
+  }]),
   mockListJournals: vi.fn(async () => [{
     id: 'journal-1',
     post_reviewed_at: '2026-07-11T08:00:00.000Z',
@@ -25,10 +28,10 @@ vi.mock('@/contexts/AuthContext', () => ({
 vi.mock('@/contexts/TradingContext', () => ({
   useTradingContext: () => ({
     executionAsset: {
-      points: 666,
+      points: 2265,
       decisionTradeCount: 0,
       directTradeCount: 0,
-      campaignCount: 0,
+      campaignCount: 1,
       reviewCount: 1,
       penaltyDays: 0,
       tradedDates: {},
@@ -41,8 +44,23 @@ vi.mock('@/contexts/TradingContext', () => ({
         createdAt: Date.parse('2026-07-11T08:00:00.000Z'),
         label: '完成平仓评价奖励',
         journalId: 'journal-1',
+      }, {
+        id: 'direct-event-1',
+        type: 'direct_reward',
+        points: 99,
+        date: '2026-07-12',
+        createdAt: Date.parse('2026-07-12T02:00:00.000Z'),
+        label: '直接交易奖励',
+      }, {
+        id: 'campaign-event-1',
+        type: 'campaign_reward',
+        points: 1500,
+        date: '2026-07-13',
+        createdAt: Date.parse('2026-07-13T02:00:00.000Z'),
+        label: '创建交易战役奖励',
+        campaignId: 'campaign-1',
       }],
-      rewardedCampaignIds: [],
+      rewardedCampaignIds: ['campaign-1'],
       rewardedReviewJournalIds: ['journal-1'],
     },
     tradeHistory: [],
@@ -74,6 +92,26 @@ describe('ExecutionAssetsPage review reward', () => {
       journalId: 'journal-1',
       reviewedAt: '2026-07-11T08:00:00.000Z',
     }]));
+
+    expect(Array.from(screen.getByTestId('execution-rule-grid').children).map(card => (
+      card.textContent?.replace(/\s+/g, '')
+    ))).toEqual([
+      '创建交易战役+1500',
+      '决策记录模块交易+999',
+      '完成平仓评价+666',
+      '直接交易+99',
+      '自然日未交易-500',
+    ]);
+
+    await waitFor(() => {
+      const recentEvents = Array.from(screen.getByTestId('recent-execution-events').children);
+      expect(recentEvents[0]).toHaveTextContent('直接交易奖励');
+      expect(recentEvents[0]).toHaveTextContent('操作时间 2026-07-12 10:00:00');
+      expect(recentEvents[1]).toHaveTextContent('完成平仓评价奖励');
+      expect(recentEvents[1]).toHaveTextContent('操作时间 2026-07-11 16:00:00');
+      expect(recentEvents[2]).toHaveTextContent('创建交易战役奖励');
+      expect(recentEvents[2]).toHaveTextContent('操作时间 2026-07-10 08:00:00');
+    });
 
     const reviewCard = screen.getByText('平仓评价').closest('button');
     expect(reviewCard).not.toBeNull();

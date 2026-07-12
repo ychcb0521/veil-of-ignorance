@@ -74,6 +74,20 @@ function formatTime(value: number | null | undefined) {
   return formatUTC8(value);
 }
 
+function executionEventOperationTime(
+  event: ExecutionAssetEvent,
+  campaignById: Record<string, TradeCampaign>,
+): number {
+  if (event.type === 'campaign_reward' && event.campaignId) {
+    const campaignCreatedAt = campaignById[event.campaignId]?.created_at;
+    const campaignTime = campaignCreatedAt ? new Date(campaignCreatedAt).getTime() : Number.NaN;
+    if (Number.isFinite(campaignTime)) return campaignTime;
+  }
+  if (Number.isFinite(event.createdAt)) return event.createdAt;
+  const dateFallback = new Date(`${event.date}T00:00:00+08:00`).getTime();
+  return Number.isFinite(dateFallback) ? dateFallback : 0;
+}
+
 function sideLabel(side: string | null | undefined) {
   if (side === 'LONG') return '多';
   if (side === 'SHORT') return '空';
@@ -302,6 +316,7 @@ function EventDetailCard({
   const isCampaign = event.type === 'campaign_reward';
   const isReview = event.type === 'review_reward';
   const canOpen = Boolean(trade) && matched != null;
+  const operationTime = executionEventOperationTime(event, campaignById);
   const tradeSymbol = trade
     ? `${getSettlementAsset(trade.symbol)}/${quoteLabel(trade)}`
     : null;
@@ -347,8 +362,8 @@ function EventDetailCard({
         </div>
         <div className="flex flex-col items-end gap-2 text-right text-[10px] text-muted-foreground">
           <div>
-            <div>记录时间</div>
-            <div className="mt-1 font-mono text-foreground">{formatTime(event.createdAt)}</div>
+            <div>操作时间</div>
+            <div className="mt-1 font-mono text-foreground">{formatTime(operationTime)}</div>
           </div>
           {trade && (
             <button
@@ -560,6 +575,17 @@ export default function ExecutionAssetsPage() {
     };
   }, [executionAsset.events]);
 
+  const recentEvents = useMemo(() => (
+    (executionAsset.events ?? [])
+      .map((event, index) => ({
+        event,
+        index,
+        operationTime: executionEventOperationTime(event, campaignById),
+      }))
+      .sort((a, b) => b.operationTime - a.operationTime || a.index - b.index)
+      .map(item => item.event)
+  ), [executionAsset.events, campaignById]);
+
   const togglePanel = (panel: DetailPanelKey) => {
     setOpenPanel(current => (current === panel ? null : panel));
   };
@@ -691,10 +717,18 @@ export default function ExecutionAssetsPage() {
             <h2 className="text-[13px] font-semibold">积分规则</h2>
             <p className="mt-1 text-[11px] text-muted-foreground">开仓积分只记做多；做空对冲不计分。平仓评价完成后独立奖励，重复编辑不重复计分。</p>
           </div>
-          <div className="grid gap-3 p-5 sm:grid-cols-2 lg:grid-cols-5">
+          <div data-testid="execution-rule-grid" className="grid gap-3 p-5 sm:grid-cols-2 lg:grid-cols-5">
+            <div className="rounded-xl border border-[#5BA3FF]/25 bg-[#5BA3FF]/5 px-4 py-3">
+              <div className="text-[12px] font-medium">创建交易战役</div>
+              <div className="mt-2 font-mono text-2xl text-[#5BA3FF]">+1500</div>
+            </div>
             <div className="rounded-xl border border-[#0ECB81]/25 bg-[#0ECB81]/5 px-4 py-3">
               <div className="text-[12px] font-medium">决策记录模块交易</div>
               <div className="mt-2 font-mono text-2xl text-[#0ECB81]">+999</div>
+            </div>
+            <div className="rounded-xl border border-[#B080FF]/25 bg-[#B080FF]/5 px-4 py-3">
+              <div className="text-[12px] font-medium">完成平仓评价</div>
+              <div className="mt-2 font-mono text-2xl text-[#B080FF]">+666</div>
             </div>
             <div className="rounded-xl border border-[#F0B90B]/25 bg-[#F0B90B]/5 px-4 py-3">
               <div className="text-[12px] font-medium">直接交易</div>
@@ -703,14 +737,6 @@ export default function ExecutionAssetsPage() {
             <div className="rounded-xl border border-[#F6465D]/25 bg-[#F6465D]/5 px-4 py-3">
               <div className="text-[12px] font-medium">自然日未交易</div>
               <div className="mt-2 font-mono text-2xl text-[#F6465D]">-500</div>
-            </div>
-            <div className="rounded-xl border border-[#5BA3FF]/25 bg-[#5BA3FF]/5 px-4 py-3">
-              <div className="text-[12px] font-medium">创建交易战役</div>
-              <div className="mt-2 font-mono text-2xl text-[#5BA3FF]">+1500</div>
-            </div>
-            <div className="rounded-xl border border-[#B080FF]/25 bg-[#B080FF]/5 px-4 py-3">
-              <div className="text-[12px] font-medium">完成平仓评价</div>
-              <div className="mt-2 font-mono text-2xl text-[#B080FF]">+666</div>
             </div>
           </div>
         </section>
@@ -724,24 +750,25 @@ export default function ExecutionAssetsPage() {
               </p>
             </div>
             <div className="rounded-full border border-border/60 px-2.5 py-1 font-mono text-[11px] text-muted-foreground">
-              共 {executionAsset.events.length} 条
+              共 {recentEvents.length} 条
             </div>
           </div>
           <div className="p-3">
-            {executionAsset.events.length === 0 ? (
+            {recentEvents.length === 0 ? (
               <div className="rounded-xl border border-dashed border-border/70 px-4 py-8 text-center text-[12px] text-muted-foreground">
                 还没有积分流水。下一次计分动作完成后，这里会出现第一条记录。
               </div>
             ) : (
-              <ul className="max-h-[520px] space-y-2 overflow-y-auto pr-1">
-                {executionAsset.events.map(event => {
+              <ul data-testid="recent-execution-events" className="max-h-[520px] space-y-2 overflow-y-auto pr-1">
+                {recentEvents.map(event => {
                   const matched = matchClosesForSnapshot(event.trade, tradeHistory);
                   const canOpen = Boolean(event.trade) && matched != null;
                   const canOpenReview = event.type === 'review_reward' && Boolean(event.journalId);
                   const canInteract = canOpen || canOpenReview;
                   const busy = busyId === event.id;
+                  const operationTime = executionEventOperationTime(event, campaignById);
                   return (
-                    <li key={event.id}>
+                    <li key={event.id} data-operation-time={operationTime}>
                       <button
                         type="button"
                         onClick={() => {
@@ -791,8 +818,8 @@ export default function ExecutionAssetsPage() {
                             )}
                           </div>
                           <div className="mt-0.5 font-mono text-[10px] text-muted-foreground">
-                            {event.date}
-                            {event.trade?.simulatedTime ? ` · ${formatTime(event.trade.simulatedTime)}` : ''}
+                            操作时间 {formatTime(operationTime)}
+                            {event.trade?.simulatedTime ? ` · 盘面时间 ${formatTime(event.trade.simulatedTime)}` : ''}
                           </div>
                         </div>
                         <div className="flex items-center gap-2">
