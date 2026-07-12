@@ -258,6 +258,8 @@ export function PreTradeSnapshotDialog({
         }
         toast.success('已记录开仓快照并提交订单');
       } else {
+        // 未下单但全程观察 = 当天有练习：清「未交易 −1000」（Option A）。下单成交会经 recordExecutionTrade 自行打标。
+        trading.recordObservationLogged();
         toast.success("已记录'未下单但全程观察'");
       }
       onOpenChange(false);
@@ -295,6 +297,8 @@ export function PreTradeSnapshotDialog({
         pre_entry_stage: tooHardOrderKind === 'main' ? tooHardEntryStage : null,
         pre_stop_quality: tooHardOrderKind === 'main' ? tooHardStopQuality : null,
       });
+      // 空仓观望 / 太难不做 = 当天有练习：清「未交易 −1000」（Option A）。
+      trading.recordObservationLogged();
       toast.success('已记录空仓观望决策');
       setTooHardOpen(false);
       onOpenChange(false);

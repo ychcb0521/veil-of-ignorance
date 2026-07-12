@@ -1,8 +1,11 @@
-export const EXECUTION_DECISION_REWARD = 999;
-export const EXECUTION_DIRECT_REWARD = 99;
-export const EXECUTION_NO_TRADE_PENALTY = 500;
-export const EXECUTION_CAMPAIGN_REWARD = 1500;
-export const EXECUTION_REVIEW_REWARD = 666;
+export const EXECUTION_DECISION_REWARD = 600;
+/** 直接交易（未走决策模块）按「当日标的」去重后，每个标的扣的分。 */
+export const EXECUTION_DIRECT_PENALTY = 600;
+export const EXECUTION_NO_TRADE_PENALTY = 1000;
+export const EXECUTION_CAMPAIGN_REWARD = 300;
+export const EXECUTION_REVIEW_REWARD = 1000;
+/** 当天交易过的标的若当天没为它新建战役，每个标的扣的分。 */
+export const EXECUTION_CAMPAIGN_MISSING_PENALTY = 300;
 
 export type ExecutionTradingMode = 'decision' | 'direct';
 
@@ -11,6 +14,7 @@ export type ExecutionAssetEventType =
   | 'direct_reward'
   | 'no_trade_penalty'
   | 'campaign_reward'
+  | 'campaign_missing_penalty'
   | 'review_reward';
 
 export interface ExecutionTradeSnapshot {
@@ -54,18 +58,32 @@ export interface ExecutionAssetState {
   campaignCount: number;
   reviewCount: number;
   penaltyDays: number;
+  /** 缺战役扣分的「标的×日」笔数（用于展示）。 */
+  campaignMissingCount: number;
   tradedDates: Record<string, true>;
+  /** 每个自然日交易过的去重标的（决策/直接都记），供缺战役结算 + 直接交易按标的去重。 */
+  tradedSymbolsByDate: Record<string, string[]>;
+  /** 每个自然日已经扣过「直接交易」罚的标的，用于同标的当天只罚一次。 */
+  directPenalizedByDate: Record<string, string[]>;
   lastDailyCheckDate: string | null;
+  /** 「缺战役扣分」的独立结算游标，与未交易结算互不影响。 */
+  lastCampaignCheckDate: string | null;
   events: ExecutionAssetEvent[];
-  /** 已发过 +1500 的战役 ID，避免对账时重复加分。 */
+  /** 已发过 +EXECUTION_CAMPAIGN_REWARD 的战役 ID，避免对账时重复加分。 */
   rewardedCampaignIds: string[];
-  /** 已发过 +666 的平仓评价 journal ID，避免编辑评价时重复加分。 */
+  /** 已发过 +EXECUTION_REVIEW_REWARD 的平仓评价 journal ID，避免编辑评价时重复加分。 */
   rewardedReviewJournalIds: string[];
 }
 
 export interface CompletedExecutionReview {
   journalId: string;
   reviewedAt?: Date | number | string | null;
+}
+
+/** 权威战役列表里用于「当天是否为某标的建过战役」判定的最小信息。 */
+export interface CampaignCreationRef {
+  symbol: string;
+  createdAt: Date | number | string | null;
 }
 
 export function createDefaultExecutionAssetState(today: Date = new Date()): ExecutionAssetState {
@@ -76,8 +94,12 @@ export function createDefaultExecutionAssetState(today: Date = new Date()): Exec
     campaignCount: 0,
     reviewCount: 0,
     penaltyDays: 0,
+    campaignMissingCount: 0,
     tradedDates: {},
+    tradedSymbolsByDate: {},
+    directPenalizedByDate: {},
     lastDailyCheckDate: localDateKey(today),
+    lastCampaignCheckDate: localDateKey(today),
     events: [],
     rewardedCampaignIds: [],
     rewardedReviewJournalIds: [],
@@ -135,8 +157,12 @@ function normalizeState(state: ExecutionAssetState | null | undefined, today: Da
       rewardedReviewJournalIds.length,
     ),
     penaltyDays: Number.isFinite(base.penaltyDays) ? base.penaltyDays : 0,
+    campaignMissingCount: Number.isFinite(base.campaignMissingCount) ? base.campaignMissingCount : 0,
     tradedDates: base.tradedDates ?? {},
+    tradedSymbolsByDate: base.tradedSymbolsByDate ?? {},
+    directPenalizedByDate: base.directPenalizedByDate ?? {},
     lastDailyCheckDate: base.lastDailyCheckDate ?? localDateKey(today),
+    lastCampaignCheckDate: base.lastCampaignCheckDate ?? base.lastDailyCheckDate ?? localDateKey(today),
     events,
     rewardedCampaignIds: Array.isArray(base.rewardedCampaignIds) ? Array.from(new Set(base.rewardedCampaignIds)) : [],
     rewardedReviewJournalIds,
@@ -164,7 +190,7 @@ export function settleNoTradePenalties(
         points: -EXECUTION_NO_TRADE_PENALTY,
         date: cursor,
         createdAt: today.getTime(),
-        label: `${cursor} 未交易，执行力资产扣分`,
+        label: `${cursor} 未练习，执行力资产扣分`,
       };
       state = {
         ...state,
@@ -179,6 +205,63 @@ export function settleNoTradePenalties(
   return { ...state, lastDailyCheckDate: todayKey };
 }
 
+/**
+ * 缺战役结算：某个已过去的自然日交易过的标的，若当天没有为它新建战役 → 每个标的 −EXECUTION_CAMPAIGN_MISSING_PENALTY。
+ * 战役覆盖以权威 campaign 列表为准（symbol + created_at 落在当天），而非状态钩子，避免漏记造成永久误罚。
+ * 走独立游标 lastCampaignCheckDate，只结算 < today 的自然日，一天只结算一次（永久、幂等）。
+ */
+export function settleCampaignMissingPenalties(
+  rawState: ExecutionAssetState,
+  campaigns: CampaignCreationRef[],
+  today: Date = new Date(),
+): ExecutionAssetState {
+  let state = normalizeState(rawState, today);
+  const todayKey = localDateKey(today);
+  const startKey = state.lastCampaignCheckDate ?? todayKey;
+
+  if (compareDateKeys(startKey, todayKey) >= 0) {
+    return { ...state, lastCampaignCheckDate: todayKey };
+  }
+
+  // 「某日为某标的建过战役」的集合，供 O(1) 判定。
+  const createdByDate = new Map<string, Set<string>>();
+  for (const campaign of campaigns ?? []) {
+    if (!campaign || !campaign.symbol) continue;
+    const key = localDateKey(validEventDate(campaign.createdAt, today));
+    const set = createdByDate.get(key) ?? new Set<string>();
+    set.add(campaign.symbol);
+    createdByDate.set(key, set);
+  }
+
+  let cursor = startKey;
+  while (compareDateKeys(cursor, todayKey) < 0) {
+    const traded = state.tradedSymbolsByDate[cursor] ?? [];
+    if (traded.length > 0) {
+      const created = createdByDate.get(cursor) ?? new Set<string>();
+      for (const symbol of traded) {
+        if (created.has(symbol)) continue;
+        const event: ExecutionAssetEvent = {
+          id: eventId('campaign_missing_penalty', cursor),
+          type: 'campaign_missing_penalty',
+          points: -EXECUTION_CAMPAIGN_MISSING_PENALTY,
+          date: cursor,
+          createdAt: today.getTime(),
+          label: `${cursor} ${symbol} 未建战役，执行力资产扣分`,
+        };
+        state = {
+          ...state,
+          points: state.points - EXECUTION_CAMPAIGN_MISSING_PENALTY,
+          campaignMissingCount: state.campaignMissingCount + 1,
+          events: pushEvent(state, event),
+        };
+      }
+    }
+    cursor = addDays(cursor, 1);
+  }
+
+  return { ...state, lastCampaignCheckDate: todayKey };
+}
+
 export function recordExecutionTrade(
   rawState: ExecutionAssetState,
   mode: ExecutionTradingMode,
@@ -188,25 +271,60 @@ export function recordExecutionTrade(
   const settled = settleNoTradePenalties(rawState, today);
   const date = localDateKey(today);
   const isDecision = mode === 'decision';
-  const points = isDecision ? EXECUTION_DECISION_REWARD : EXECUTION_DIRECT_REWARD;
-  const type: ExecutionAssetEventType = isDecision ? 'decision_reward' : 'direct_reward';
-  const event: ExecutionAssetEvent = {
-    id: eventId(type, date),
-    type,
-    points,
-    date,
-    createdAt: today.getTime(),
-    label: isDecision ? '决策记录交易奖励' : '直接交易奖励',
-    trade: trade ?? null,
+  const symbol = trade?.symbol ?? null;
+
+  // 交易过的标的当天去重登记（供缺战役结算）；直接交易的按标的去重另用 directPenalizedByDate。
+  const daySymbols = settled.tradedSymbolsByDate[date] ?? [];
+  const nextDaySymbols = symbol && !daySymbols.includes(symbol) ? [...daySymbols, symbol] : daySymbols;
+
+  const base: ExecutionAssetState = {
+    ...settled,
+    tradedDates: { ...settled.tradedDates, [date]: true },
+    tradedSymbolsByDate: { ...settled.tradedSymbolsByDate, [date]: nextDaySymbols },
+    lastDailyCheckDate: date,
   };
 
+  // 决策记录交易：每笔都 +EXECUTION_DECISION_REWARD（不按标的去重）。
+  if (isDecision) {
+    const event: ExecutionAssetEvent = {
+      id: eventId('decision_reward', date),
+      type: 'decision_reward',
+      points: EXECUTION_DECISION_REWARD,
+      date,
+      createdAt: today.getTime(),
+      label: '决策记录交易奖励',
+      trade: trade ?? null,
+    };
+    return {
+      ...base,
+      points: settled.points + EXECUTION_DECISION_REWARD,
+      decisionTradeCount: settled.decisionTradeCount + 1,
+      events: pushEvent(settled, event),
+    };
+  }
+
+  // 直接交易：同一标的当天只扣一次 −EXECUTION_DIRECT_PENALTY；再次交易只算练习、不重复扣分。
+  const penalizedToday = settled.directPenalizedByDate[date] ?? [];
+  if (symbol != null && penalizedToday.includes(symbol)) {
+    return base;
+  }
+  const event: ExecutionAssetEvent = {
+    id: eventId('direct_reward', date),
+    type: 'direct_reward',
+    points: -EXECUTION_DIRECT_PENALTY,
+    date,
+    createdAt: today.getTime(),
+    label: '直接交易扣分',
+    trade: trade ?? null,
+  };
   return {
-    ...settled,
-    points: settled.points + points,
-    decisionTradeCount: settled.decisionTradeCount + (isDecision ? 1 : 0),
-    directTradeCount: settled.directTradeCount + (isDecision ? 0 : 1),
-    tradedDates: { ...settled.tradedDates, [date]: true },
-    lastDailyCheckDate: date,
+    ...base,
+    points: settled.points - EXECUTION_DIRECT_PENALTY,
+    directTradeCount: settled.directTradeCount + 1,
+    directPenalizedByDate: {
+      ...settled.directPenalizedByDate,
+      [date]: symbol != null ? [...penalizedToday, symbol] : penalizedToday,
+    },
     events: pushEvent(settled, event),
   };
 }
@@ -246,7 +364,7 @@ export function recordCampaignCreated(
 }
 
 /**
- * 用「用户实际拥有的战役 ID 列表」对账，自愈任何漏记的 +1500：
+ * 用「用户实际拥有的战役 ID 列表」对账，自愈任何漏记的 +EXECUTION_CAMPAIGN_REWARD：
  * 每个还没奖励过的战役补一笔，幂等（已奖励的不再加）。
  * 历史上通过事件计过分但未记 ID 的（campaignCount > 已记 ID 数），按数量补种为已奖励，避免重复加分。
  * 在执行力资产页加载时调用即可，让「建战役」积分始终等于真实战役数。
@@ -303,7 +421,11 @@ function reviewRewardEvent(journalId: string, reviewedAt: Date): ExecutionAssetE
   };
 }
 
-/** 完成一笔平仓评价 +666；同一个 journal 无论后续编辑多少次都只奖励一次。 */
+/**
+ * 完成一笔平仓评价 +EXECUTION_REVIEW_REWARD；同一个 journal 无论后续编辑多少次都只奖励一次。
+ * 完成复盘 = 当天有练习：给评价当天打上练习标记，从而清掉当天的「未交易 −1000」（Option A）。
+ * 只有这条实时路径打练习标记；对账 reconcile 绝不打标（守「永久不回填」）。
+ */
 export function recordPostTradeReviewCompleted(
   rawState: ExecutionAssetState,
   journalId: string,
@@ -312,18 +434,38 @@ export function recordPostTradeReviewCompleted(
   const completedAt = validEventDate(reviewedAt, new Date());
   const state = normalizeState(rawState, completedAt);
   if (!journalId || state.rewardedReviewJournalIds.includes(journalId)) return state;
+  const date = localDateKey(completedAt);
   return {
     ...state,
     points: state.points + EXECUTION_REVIEW_REWARD,
     reviewCount: state.reviewCount + 1,
+    tradedDates: { ...state.tradedDates, [date]: true },
     rewardedReviewJournalIds: [...state.rewardedReviewJournalIds, journalId],
     events: pushEvent(state, reviewRewardEvent(journalId, completedAt)),
   };
 }
 
 /**
- * 用数据库中已完成的平仓评价对账，给历史漏记记录补 +666。
+ * 弃单 / 空仓观察 = 当天有练习：给当天打练习标记，从而清掉「未交易 −1000」（Option A）。
+ * 不加分、不登记交易标的、不涉及战役——它就是「到场了、分析了、纪律性地决定不下场」。
+ */
+export function recordPracticeLogged(
+  rawState: ExecutionAssetState,
+  today: Date = new Date(),
+): ExecutionAssetState {
+  const state = normalizeState(rawState, today);
+  const date = localDateKey(today);
+  if (state.tradedDates[date]) return state;
+  return {
+    ...state,
+    tradedDates: { ...state.tradedDates, [date]: true },
+  };
+}
+
+/**
+ * 用数据库中已完成的平仓评价对账，给历史漏记记录补 +EXECUTION_REVIEW_REWARD。
  * journal ID 是唯一凭证，评价文字后续修改不会影响奖励归属，也不会重复计分。
+ * 注意：对账绝不打「练习标记」，以免回填历史某天、变相撤销已成立的未交易扣分。
  */
 export function reconcilePostTradeReviewRewards(
   rawState: ExecutionAssetState,

@@ -6,13 +6,16 @@ import ExecutionAssetsPage from '../ExecutionAssetsPage';
 const {
   mockReconcileCampaignRewards,
   mockReconcilePostTradeReviewRewards,
+  mockSettleCampaignMissingPenalties,
   mockListAllCampaigns,
   mockListJournals,
 } = vi.hoisted(() => ({
   mockReconcileCampaignRewards: vi.fn(),
   mockReconcilePostTradeReviewRewards: vi.fn(),
+  mockSettleCampaignMissingPenalties: vi.fn(),
   mockListAllCampaigns: vi.fn(async () => [{
     id: 'campaign-1',
+    symbol: 'BTCUSDT',
     created_at: '2026-07-10T00:00:00.000Z',
   }]),
   mockListJournals: vi.fn(async () => [{
@@ -66,6 +69,7 @@ vi.mock('@/contexts/TradingContext', () => ({
     tradeHistory: [],
     reconcileCampaignRewards: mockReconcileCampaignRewards,
     reconcilePostTradeReviewRewards: mockReconcilePostTradeReviewRewards,
+    settleCampaignMissingPenalties: mockSettleCampaignMissingPenalties,
   }),
 }));
 
@@ -96,11 +100,12 @@ describe('ExecutionAssetsPage review reward', () => {
     expect(Array.from(screen.getByTestId('execution-rule-grid').children).map(card => (
       card.textContent?.replace(/\s+/g, '')
     ))).toEqual([
-      '自然日未交易-500',
-      '创建交易战役+1500',
-      '决策记录模块交易+999',
-      '完成平仓评价+666',
-      '直接交易+99',
+      '完成平仓评价+1000',
+      '决策记录交易+600',
+      '创建交易战役+300',
+      '直接交易（每标的）-600',
+      '标的未建战役（每标的）-300',
+      '自然日未练习-1000',
     ]);
 
     await waitFor(() => {

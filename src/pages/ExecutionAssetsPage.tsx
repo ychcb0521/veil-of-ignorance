@@ -21,9 +21,10 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useTradingContext } from '@/contexts/TradingContext';
 import {
   EXECUTION_DECISION_REWARD,
-  EXECUTION_DIRECT_REWARD,
+  EXECUTION_DIRECT_PENALTY,
   EXECUTION_NO_TRADE_PENALTY,
   EXECUTION_CAMPAIGN_REWARD,
+  EXECUTION_CAMPAIGN_MISSING_PENALTY,
   EXECUTION_REVIEW_REWARD,
   executionTradeCount,
   localDateKey,
@@ -55,7 +56,7 @@ function formatSigned(points: number) {
 
 function eventTone(type: string) {
   if (type === 'decision_reward') return 'text-[#0ECB81] border-[#0ECB81]/25 bg-[#0ECB81]/5';
-  if (type === 'direct_reward') return 'text-[#F0B90B] border-[#F0B90B]/25 bg-[#F0B90B]/5';
+  if (type === 'direct_reward') return 'text-[#F6465D] border-[#F6465D]/25 bg-[#F6465D]/5';
   if (type === 'campaign_reward') return 'text-[#5BA3FF] border-[#5BA3FF]/25 bg-[#5BA3FF]/5';
   if (type === 'review_reward') return 'text-[#B080FF] border-[#B080FF]/25 bg-[#B080FF]/5';
   return 'text-[#F6465D] border-[#F6465D]/25 bg-[#F6465D]/5';
@@ -218,27 +219,27 @@ function orderTypeLabel(type: string | null | undefined) {
 const PANEL_COPY: Record<DetailPanelKey, { title: string; subtitle: string; empty: string }> = {
   decision: {
     title: '决策记录交易明细',
-    subtitle: '通过决策记录模式完成的做多开仓，每笔 +999。',
+    subtitle: `通过决策记录模式完成的做多开仓，每笔 +${EXECUTION_DECISION_REWARD}（不按标的去重）。`,
     empty: '暂无决策记录交易。',
   },
   direct: {
     title: '直接交易明细',
-    subtitle: '未经过快照流程的直接做多开仓，每笔 +99。',
+    subtitle: `未经过快照流程的直接做多开仓，按当日标的去重，每个标的 -${EXECUTION_DIRECT_PENALTY}。`,
     empty: '暂无直接交易。',
   },
   penalty: {
-    title: '未交易扣分日明细',
-    subtitle: '自然日没有计分做多开仓时，系统记录一次 -500。',
-    empty: '暂无未交易扣分日。',
+    title: '未练习扣分日明细',
+    subtitle: `自然日没有任何练习（下单 / 弃单 / 复盘）时，系统记录一次 -${EXECUTION_NO_TRADE_PENALTY}，永久不可逆。`,
+    empty: '暂无未练习扣分日。',
   },
   campaign: {
     title: '创建交易战役明细',
-    subtitle: '每创建一次交易战役 +1500。',
+    subtitle: `每创建一次交易战役 +${EXECUTION_CAMPAIGN_REWARD}。`,
     empty: '暂无创建的交易战役。',
   },
   review: {
     title: '平仓评价明细',
-    subtitle: '每完成一笔平仓评价 +666；后续编辑不重复计分。',
+    subtitle: `每完成一笔平仓评价 +${EXECUTION_REVIEW_REWARD}；后续编辑不重复计分。`,
     empty: '暂无已完成的平仓评价。',
   },
   share: {
@@ -526,6 +527,7 @@ export default function ExecutionAssetsPage() {
     tradeHistory,
     reconcileCampaignRewards,
     reconcilePostTradeReviewRewards,
+    settleCampaignMissingPenalties,
   } = useTradingContext();
   const { user } = useAuth();
   const { open: openPlayback, busyId } = useOpenPlaybackForSnapshot();
@@ -544,6 +546,8 @@ export default function ExecutionAssetsPage() {
       .then(campaigns => {
         if (cancelled) return;
         reconcileCampaignRewards(campaigns.map(c => c.id));
+        // 用权威战役列表结算「交易过某标的却没在当天为它建战役」的 −300（按标的、永久、幂等）。
+        settleCampaignMissingPenalties(campaigns.map(c => ({ symbol: c.symbol, createdAt: c.created_at })));
         // 留存战役以便「建战役」明细按 campaignId 显示标题/标的/时间并可点进。
         setCampaignById(Object.fromEntries(campaigns.map(c => [c.id, c])));
       })
@@ -559,7 +563,7 @@ export default function ExecutionAssetsPage() {
       })
       .catch(() => { /* 离线 / 无 journal 表时静默，不影响页面 */ });
     return () => { cancelled = true; };
-  }, [user?.id, reconcileCampaignRewards, reconcilePostTradeReviewRewards]);
+  }, [user?.id, reconcileCampaignRewards, reconcilePostTradeReviewRewards, settleCampaignMissingPenalties]);
 
   const detailEvents = useMemo(() => {
     const events = executionAsset.events ?? [];
@@ -628,16 +632,16 @@ export default function ExecutionAssetsPage() {
                   今日状态
                 </div>
                 <div className="mt-1 text-[12px] text-muted-foreground">
-                  {tradedToday ? '今天已有交易，已守住执行力日线。' : `今天还没有交易；到明天仍未交易，将扣 ${EXECUTION_NO_TRADE_PENALTY} 分。`}
+                  {tradedToday ? '今天已练习，已守住执行力日线。' : `今天还没练习；到明天仍未练习，将扣 ${EXECUTION_NO_TRADE_PENALTY} 分（下单 / 弃单 / 复盘任一即算练习）。`}
                 </div>
               </div>
               <div className="rounded-xl border border-border/60 bg-background/70 px-3 py-3">
                 <div className="flex items-center gap-2 text-[12px] font-medium">
                   <Gauge className="h-4 w-4" />
-                  加速器
+                  方向盘
                 </div>
                 <div className="mt-1 text-[12px] text-muted-foreground">
-                  决策记录交易是直接交易的 <span className="font-mono text-foreground">10.1x</span> 权重。
+                  决策交易 <span className="font-mono text-[#0ECB81]">+{EXECUTION_DECISION_REWARD}</span>，直接交易 <span className="font-mono text-[#F6465D]">−{EXECUTION_DIRECT_PENALTY}</span>：同额反号，慢想加分、乱下扣分。
                 </div>
               </div>
             </div>
@@ -658,15 +662,15 @@ export default function ExecutionAssetsPage() {
               icon={<Zap className="h-4 w-4" />}
               value={String(executionAsset.directTradeCount)}
               label="直接交易"
-              tone="text-[#F0B90B]"
-              detail={<span className="font-mono text-[#F0B90B]">每次 +{EXECUTION_DIRECT_REWARD}</span>}
+              tone="text-[#F6465D]"
+              detail={<span className="font-mono text-[#F6465D]">每标的 −{EXECUTION_DIRECT_PENALTY}</span>}
               onClick={() => togglePanel('direct')}
             />
             <StatCard
               active={openPanel === 'penalty'}
               icon={<CalendarMinus className="h-4 w-4" />}
               value={String(executionAsset.penaltyDays)}
-              label="未交易扣分日"
+              label="未练习扣分日"
               tone="text-[#F6465D]"
               detail={<span className="font-mono text-[#F6465D]">每天 -{EXECUTION_NO_TRADE_PENALTY}</span>}
               onClick={() => togglePanel('penalty')}
@@ -715,28 +719,34 @@ export default function ExecutionAssetsPage() {
         <section className="mt-4 rounded-2xl border border-border/70 bg-card">
           <div className="border-b border-border/70 px-5 py-4">
             <h2 className="text-[13px] font-semibold">积分规则</h2>
-            <p className="mt-1 text-[11px] text-muted-foreground">开仓积分只记做多；做空对冲不计分。平仓评价完成后独立奖励，重复编辑不重复计分。</p>
+            <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
+              开仓只记做多，做空对冲不计分。直接交易按当日标的去重（同标的多笔只扣一次）。当天交易过的标的须当天为其建战役，否则每个标的扣分。下单 / 弃单 / 复盘任一即算当天已练习；整日未练习扣分，且永久不可逆。平仓评价完成后独立奖励，重复编辑不重复计分。
+            </p>
           </div>
-          <div data-testid="execution-rule-grid" className="grid gap-3 p-5 sm:grid-cols-2 lg:grid-cols-5">
-            <div className="rounded-xl border border-[#F6465D]/25 bg-[#F6465D]/5 px-4 py-3">
-              <div className="text-[12px] font-medium">自然日未交易</div>
-              <div className="mt-2 font-mono text-2xl text-[#F6465D]">-500</div>
+          <div data-testid="execution-rule-grid" className="grid gap-3 p-5 sm:grid-cols-2 lg:grid-cols-3">
+            <div className="rounded-xl border border-[#B080FF]/25 bg-[#B080FF]/5 px-4 py-3">
+              <div className="text-[12px] font-medium">完成平仓评价</div>
+              <div className="mt-2 font-mono text-2xl text-[#B080FF]">+{EXECUTION_REVIEW_REWARD}</div>
+            </div>
+            <div className="rounded-xl border border-[#0ECB81]/25 bg-[#0ECB81]/5 px-4 py-3">
+              <div className="text-[12px] font-medium">决策记录交易</div>
+              <div className="mt-2 font-mono text-2xl text-[#0ECB81]">+{EXECUTION_DECISION_REWARD}</div>
             </div>
             <div className="rounded-xl border border-[#5BA3FF]/25 bg-[#5BA3FF]/5 px-4 py-3">
               <div className="text-[12px] font-medium">创建交易战役</div>
-              <div className="mt-2 font-mono text-2xl text-[#5BA3FF]">+1500</div>
+              <div className="mt-2 font-mono text-2xl text-[#5BA3FF]">+{EXECUTION_CAMPAIGN_REWARD}</div>
             </div>
-            <div className="rounded-xl border border-[#0ECB81]/25 bg-[#0ECB81]/5 px-4 py-3">
-              <div className="text-[12px] font-medium">决策记录模块交易</div>
-              <div className="mt-2 font-mono text-2xl text-[#0ECB81]">+999</div>
+            <div className="rounded-xl border border-[#F6465D]/25 bg-[#F6465D]/5 px-4 py-3">
+              <div className="text-[12px] font-medium">直接交易（每标的）</div>
+              <div className="mt-2 font-mono text-2xl text-[#F6465D]">-{EXECUTION_DIRECT_PENALTY}</div>
             </div>
-            <div className="rounded-xl border border-[#B080FF]/25 bg-[#B080FF]/5 px-4 py-3">
-              <div className="text-[12px] font-medium">完成平仓评价</div>
-              <div className="mt-2 font-mono text-2xl text-[#B080FF]">+666</div>
+            <div className="rounded-xl border border-[#D89B00]/25 bg-[#D89B00]/5 px-4 py-3">
+              <div className="text-[12px] font-medium">标的未建战役（每标的）</div>
+              <div className="mt-2 font-mono text-2xl text-[#D89B00]">-{EXECUTION_CAMPAIGN_MISSING_PENALTY}</div>
             </div>
-            <div className="rounded-xl border border-[#F0B90B]/25 bg-[#F0B90B]/5 px-4 py-3">
-              <div className="text-[12px] font-medium">直接交易</div>
-              <div className="mt-2 font-mono text-2xl text-[#D89B00]">+99</div>
+            <div className="rounded-xl border border-[#F6465D]/25 bg-[#F6465D]/5 px-4 py-3">
+              <div className="text-[12px] font-medium">自然日未练习</div>
+              <div className="mt-2 font-mono text-2xl text-[#F6465D]">-{EXECUTION_NO_TRADE_PENALTY}</div>
             </div>
           </div>
         </section>

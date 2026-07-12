@@ -60,7 +60,10 @@ import {
   recordPostTradeReviewCompleted as applyPostTradeReviewReward,
   reconcileCampaignRewards as applyCampaignReconcile,
   reconcilePostTradeReviewRewards as applyReviewReconcile,
+  recordPracticeLogged as applyPracticeLogged,
   settleNoTradePenalties,
+  settleCampaignMissingPenalties as applySettleCampaignMissing,
+  type CampaignCreationRef,
   type CompletedExecutionReview,
   type ExecutionAssetState,
   type ExecutionTradeSnapshot,
@@ -157,14 +160,18 @@ interface TradingState {
   executionAsset: ExecutionAssetState;
   setExecutionAsset: (v: ExecutionAssetState | ((prev: ExecutionAssetState) => ExecutionAssetState)) => void;
   recordExecutionTrade: (modeOverride?: TradingMode, trade?: ExecutionTradeSnapshot | null) => void;
-  /** 每创建一次交易战役调用一次，执行力资产 +1500 分；传 campaignId 按战役幂等。 */
+  /** 每创建一次交易战役调用一次，执行力资产 +300 分；传 campaignId 按战役幂等。 */
   recordCampaignCreated: (campaignId?: string | null) => void;
-  /** 用「用户实际战役 ID 列表」对账，补齐漏记的 +1500（幂等，自愈）。 */
+  /** 用「用户实际战役 ID 列表」对账，补齐漏记的 +300（幂等，自愈）。 */
   reconcileCampaignRewards: (campaignIds: string[]) => void;
-  /** 每完成一次平仓评价 +666；同一个 journal 后续编辑不重复计分。 */
+  /** 每完成一次平仓评价 +1000；同一个 journal 后续编辑不重复计分。完成评价即算当天已练习。 */
   recordPostTradeReviewCompleted: (journalId: string, reviewedAt?: Date | number | string | null) => void;
-  /** 用历史已完成评价对账，补齐漏记的 +666（按 journal ID 幂等）。 */
+  /** 用历史已完成评价对账，补齐漏记的 +1000（按 journal ID 幂等）。 */
   reconcilePostTradeReviewRewards: (reviews: CompletedExecutionReview[]) => void;
+  /** 弃单 / 空仓观察记录后调用，标记当天已练习，清「未交易 −1000」（Option A）。 */
+  recordObservationLogged: () => void;
+  /** 用权威战役列表结算「当天交易过某标的却没为它建战役」的 −300（按标的、永久）。 */
+  settleCampaignMissingPenalties: (campaigns: CampaignCreationRef[]) => void;
   coinTimelines: CoinTimelinesMap;
   setCoinTimelines: (v: CoinTimelinesMap | ((prev: CoinTimelinesMap) => CoinTimelinesMap)) => void;
   totalPositionCount: number;
@@ -373,6 +380,16 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
 
   const reconcilePostTradeReviewRewards = useCallback((reviews: CompletedExecutionReview[]) => {
     setExecutionAsset(prev => applyReviewReconcile(prev, reviews, new Date()));
+  }, [setExecutionAsset]);
+
+  // 弃单 / 空仓观察 = 当天有练习：标记当天已练习，清「未交易 −1000」（Option A）。
+  const recordObservationLogged = useCallback(() => {
+    setExecutionAsset(prev => applyPracticeLogged(prev, new Date()));
+  }, [setExecutionAsset]);
+
+  // 用权威战役列表结算「交易过却当天没建战役」的 −300（按标的、永久、幂等）。
+  const settleCampaignMissingPenalties = useCallback((campaigns: CampaignCreationRef[]) => {
+    setExecutionAsset(prev => applySettleCampaignMissing(prev, campaigns, new Date()));
   }, [setExecutionAsset]);
 
   // Total position count across all symbols
@@ -1341,6 +1358,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
     tradingMode, setTradingMode,
     executionAsset, setExecutionAsset, recordExecutionTrade, recordCampaignCreated, reconcileCampaignRewards,
     recordPostTradeReviewCompleted, reconcilePostTradeReviewRewards,
+    recordObservationLogged, settleCampaignMissingPenalties,
     coinTimelines, setCoinTimelines,
     totalPositionCount,
     getEffectiveTime,
