@@ -1300,7 +1300,7 @@ export default function GuidePage() {
             <Highlight>
               重复次数的加速器：<strong>做，比想更贵重。</strong>没去做带来的损失，必须被系统看见。
             </Highlight>
-            <P>它和“封住下限”是同一件事的两面：正因为单笔亏损被锁死在受得起的数字里，你才<strong>敢多下、敢把该做的单真的做出来</strong>。执行力资产奖励的就是这个“敢做”，同时把“因为怕错而不做”的代价摆到台面上。</P>
+            <P>它和“封住下限”是同一件事的两面：正因为单笔亏损被锁死在受得起的数字里，你才<strong>敢多下、敢把该做的单真的做出来</strong>。执行力资产奖励的是<strong>有结构地敢做</strong>——带着决策快照 / 战役 / 复盘去做；同时把“无结构地乱下”和“因为怕错而不做”的代价，一起摆到台面上。</P>
 
             <SubTitle>怎么计分</SubTitle>
             <div className="overflow-x-auto">
@@ -1313,24 +1313,29 @@ export default function GuidePage() {
                   </tr>
                 </thead>
                 <tbody>
-                  <tr><td className="px-3 py-2 border-t border-border">决策记录模块交易</td><td className="px-3 py-2 border-t border-border font-mono text-[#0ECB81]">+999</td><td className="px-3 py-2 border-t border-border">留下一份完整可复盘样本：开仓快照 → 平仓评价 → 错题集 / 结构成熟度 / 规则 / 元监控</td></tr>
-                  <tr><td className="px-3 py-2 border-t border-border">直接交易</td><td className="px-3 py-2 border-t border-border font-mono text-[#D89B00]">+99</td><td className="px-3 py-2 border-t border-border">贴近真实执行节奏，但不沉淀可复盘样本</td></tr>
-                  <tr><td className="px-3 py-2 border-t border-border">完成平仓评价</td><td className="px-3 py-2 border-t border-border font-mono text-[#B080FF]">+666</td><td className="px-3 py-2 border-t border-border">把一次交易闭合为可复用的评价样本；同一笔后续编辑不重复计分</td></tr>
-                  <tr><td className="px-3 py-2 border-t border-border">自然日未交易</td><td className="px-3 py-2 border-t border-border font-mono text-[#F6465D]">-500</td><td className="px-3 py-2 border-t border-border">把“不做”的机会成本显性化；跟随模拟时间，按自然日结算</td></tr>
+                  <tr><td className="px-3 py-2 border-t border-border">完成平仓评价</td><td className="px-3 py-2 border-t border-border font-mono text-[#B080FF]">+1000</td><td className="px-3 py-2 border-t border-border">把一次交易闭合成可复盘的评价样本——错题集 / 结构成熟度的数据全从这里来；同一笔后续编辑不重复计分</td></tr>
+                  <tr><td className="px-3 py-2 border-t border-border">决策记录模块交易</td><td className="px-3 py-2 border-t border-border font-mono text-[#0ECB81]">+600</td><td className="px-3 py-2 border-t border-border">走决策模块下单，留下完整样本：开仓快照 → 平仓评价 → 错题集 / 结构成熟度 / 规则 / 元监控</td></tr>
+                  <tr><td className="px-3 py-2 border-t border-border">创建交易战役</td><td className="px-3 py-2 border-t border-border font-mono text-[#5BA3FF]">+300</td><td className="px-3 py-2 border-t border-border">为交易搭出结构（头仓 / 加仓 / 对冲的多腿计划）；按战役 ID 幂等，同一场只加一次</td></tr>
+                  <tr><td className="px-3 py-2 border-t border-border">自然日未练习</td><td className="px-3 py-2 border-t border-border font-mono text-[#F6465D]">-1000</td><td className="px-3 py-2 border-t border-border">一整天没有任何练习动作；<strong>永久不可逆</strong>——后续再练也不退这笔，跟随模拟时间按自然日结算</td></tr>
+                  <tr><td className="px-3 py-2 border-t border-border">直接交易（每标的）</td><td className="px-3 py-2 border-t border-border font-mono text-[#F6465D]">-600</td><td className="px-3 py-2 border-t border-border">未走决策模块、无结构地下单；按当日标的去重（同标的多笔只扣一次），<strong>当天已为该标的建战役则免罚</strong></td></tr>
+                  <tr><td className="px-3 py-2 border-t border-border">标的未建战役（每标的）</td><td className="px-3 py-2 border-t border-border font-mono text-[#D89B00]">-300</td><td className="px-3 py-2 border-t border-border">当天交易过的标的，当天没为它建战役；按标的、永久、幂等</td></tr>
                 </tbody>
               </table>
             </div>
-            <P>决策记录交易是直接交易的 <strong>10.1×</strong> 权重——不是下单这个动作更重，而是它留下的样本会在系统里<strong>复利成能力</strong>，直接交易只换来执行手感。所以这页真正想拉高的不是总分，而是<strong>决策记录占比</strong>（决策记录交易 ÷ 全部计分交易）：占比越高，你的样本越可复盘。</P>
+            <P>六个类目是<strong>三对镜像（同额反号）</strong>：复盘 +1000 ↔ 未练习 −1000、决策 +600 ↔ 直接 −600、建战役 +300 ↔ 未建战役 −300。每一对都在问同一件事——<strong>你有没有给这次「做」配上结构</strong>。加分那侧是「带着快照 / 评价 / 战役去做」，扣分那侧是「无结构地乱下、或干脆不练」。所以这页真正想拉高的不是总分，而是让每次「做」都落到加分那侧：<strong>决策记录占比越高、每个交易日的标的都当天建过战役、每天至少留下一次练习</strong>，分数自然往上走。</P>
 
             <SubTitle>什么算、什么不算</SubTitle>
             <ul className="list-disc pl-6 text-[14px] text-foreground/90 space-y-1">
               <li><strong>只记做多开仓。</strong>做空都是辅助对冲单，属于风险管理动作，不计执行力分。</li>
               <li><strong>挂单成交才计分。</strong>挂出限价单只是意图，真正成交才算“做”——意图不计分，执行才计分。</li>
-              <li><strong>平仓评价完成才计分。</strong>保存成功后奖励 666 分；系统按 journal ID 识别，同一评价反复修改不会重复奖励。</li>
-              <li><strong>按自然日扣分。</strong>今天没有任何计分交易、到明天仍未交易，扣 500 分；日期跟随模拟时间，不是现实日期。</li>
+              <li><strong>“当天已练习” = 下单 / 弃单（太难不做）/ 完成复盘，任一即可。</strong>只要当天留下其中任一动作，就清掉当天的“未练习 −1000”——练的是决策周期，不是必须下注。</li>
+              <li><strong>平仓评价完成才计分。</strong>保存成功后 +1000；系统按 journal ID 识别，同一评价反复修改不会重复奖励。</li>
+              <li><strong>“未练习”扣分永久不可逆。</strong>某个自然日没有任何练习，就永久记一笔 −1000，后面再怎么练、再盈利都不退这笔——单笔亏损能被后续盈利覆盖，断更不能。按模拟时间的自然日结算。</li>
+              <li><strong>直接交易罚 × 建战役联动。</strong>直接交易 −600 按当日标的去重；若当天已为该标的建过战役，则免这笔 −600——战役即结构，被战役覆盖的直接单不算“无结构乱下”。</li>
+              <li><strong>历史按同一把尺重算。</strong>旧数据首次加载会按当前权重重算一次（直接交易按当日标的去重），让新旧记录可比。</li>
             </ul>
             <RedHighlight>
-              执行力资产只衡量<strong>重复次数</strong>，不衡量对错——一笔亏损交易照样得分。质量交给复盘中心（错题集 / 结构成熟度 / 规则）去判，这里只负责让你“做得够多”。两条腿合起来才是目标：<strong>做得多 × 做得对</strong>。它专治的是另一种更隐蔽的失败——<strong>因为怕错而不做</strong>：在一个下限已被焊死的系统里，不做，往往才是最贵的那个错误。
+              执行力资产不判<strong>单笔对错</strong>——一笔亏损的决策单照样 +600；但它判你做得<strong>有没有结构</strong>：带着快照 / 战役 / 评价去做加分，无结构地乱下、或干脆不练，扣分。对错（质量）交给复盘中心（错题集 / 结构成熟度 / 规则）去判，这里管的是<strong>做得够多 × 做得有结构</strong>。它专治的是那种更隐蔽的失败——<strong>因为怕错而不做</strong>：在一个下限已被焊死的系统里，不做，往往才是最贵的那个错误。
             </RedHighlight>
           </section>
 
