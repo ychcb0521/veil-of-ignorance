@@ -718,6 +718,10 @@ export default function ExecutionAssetsPage() {
             <p className="mt-1 text-[11px] text-muted-foreground">开仓积分只记做多；做空对冲不计分。平仓评价完成后独立奖励，重复编辑不重复计分。</p>
           </div>
           <div data-testid="execution-rule-grid" className="grid gap-3 p-5 sm:grid-cols-2 lg:grid-cols-5">
+            <div className="rounded-xl border border-[#F6465D]/25 bg-[#F6465D]/5 px-4 py-3">
+              <div className="text-[12px] font-medium">自然日未交易</div>
+              <div className="mt-2 font-mono text-2xl text-[#F6465D]">-500</div>
+            </div>
             <div className="rounded-xl border border-[#5BA3FF]/25 bg-[#5BA3FF]/5 px-4 py-3">
               <div className="text-[12px] font-medium">创建交易战役</div>
               <div className="mt-2 font-mono text-2xl text-[#5BA3FF]">+1500</div>
@@ -733,10 +737,6 @@ export default function ExecutionAssetsPage() {
             <div className="rounded-xl border border-[#F0B90B]/25 bg-[#F0B90B]/5 px-4 py-3">
               <div className="text-[12px] font-medium">直接交易</div>
               <div className="mt-2 font-mono text-2xl text-[#D89B00]">+99</div>
-            </div>
-            <div className="rounded-xl border border-[#F6465D]/25 bg-[#F6465D]/5 px-4 py-3">
-              <div className="text-[12px] font-medium">自然日未交易</div>
-              <div className="mt-2 font-mono text-2xl text-[#F6465D]">-500</div>
             </div>
           </div>
         </section>

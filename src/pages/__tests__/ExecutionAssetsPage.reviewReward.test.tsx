@@ -96,11 +96,11 @@ describe('ExecutionAssetsPage review reward', () => {
     expect(Array.from(screen.getByTestId('execution-rule-grid').children).map(card => (
       card.textContent?.replace(/\s+/g, '')
     ))).toEqual([
+      '自然日未交易-500',
       '创建交易战役+1500',
       '决策记录模块交易+999',
       '完成平仓评价+666',
       '直接交易+99',
-      '自然日未交易-500',
     ]);
 
     await waitFor(() => {
