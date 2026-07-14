@@ -1979,15 +1979,24 @@ export async function getCampaignFullData(
   );
   const openedAtMs = new Date(campaign.opened_at).getTime();
   const closedAtMs = campaign.closed_at ? new Date(campaign.closed_at).getTime() : Number.POSITIVE_INFINITY;
+  // 委托 / 挂单按「挂单时间(委托时间)」归属到战役：委托时间须落在 [开主力-5min, 平仓] 内。
+  // 前置 5 分钟缓冲覆盖开主力前提前挂好的对冲空单；用挂单时间(而非生命周期重叠)可避免上一场战役的委托泄漏进来。
+  const PRE_MAIN_LOOKBACK_MS = 5 * 60_000;
+  const orderWindowStartMs = openedAtMs - PRE_MAIN_LOOKBACK_MS;
+  const orderWindowEndMs = closedAtMs;
+  // 归属只看挂单时间：委托时间落在窗口内即属本战役。Number.isFinite 守卫兼顾 NaN 与开放战役(end=Infinity)。
+  const inWindow = (t: number) => Number.isFinite(t) && t >= orderWindowStartMs && t <= orderWindowEndMs;
 
   // 战役详情只展示用户归类进来的 legs；同标的同时间窗口内未选中的交易不能混入盘面。
   const tradeRecords = tradeHistory.filter(record => (
     legRecordIds.has(record.id)
     || Boolean(record.positionId && legRecordIds.has(record.positionId))
   ));
+  // 持仓面板 / 结束建议用的挂单也按挂单时间归属，避免同标的另一场战役的实时挂单混进本战役。
   const pendingOrders = Object.entries(ordersMap)
     .flatMap(([symbol, orders]) => symbol === campaign.symbol ? orders : [])
-    .filter(order => order.status === 'NEW' || order.status === 'PENDING' || order.status === 'ACTIVE');
+    .filter(order => (order.status === 'NEW' || order.status === 'PENDING' || order.status === 'ACTIVE')
+      && inWindow(order.createdAt));
 
   // 黄色委托层只记录「开仓性质的委托空单」；止盈/止损等平仓委托不进入这里。
   const isPositionClosingOrder = (order: Pick<PendingOrder | CancelledOrderSnapshot | FilledOrderSnapshot, 'side'> & {
@@ -2005,13 +2014,6 @@ export async function getCampaignFullData(
     order.type === 'MARKET_TP_SL';
   const isOpeningShortOrder = (order: Parameters<typeof isPositionClosingOrder>[0]) =>
     order.side === 'SHORT' && !isPositionClosingOrder(order);
-  // 黄色委托层按「挂单时间(委托时间)」把开空委托归属到战役：委托时间须落在 [开主力-5min, 平仓] 内。
-  // 前置 5 分钟缓冲覆盖开主力前提前挂好的对冲空单；改用挂单时间(而非生命周期重叠)可避免上一场战役的委托泄漏进来。
-  const PRE_MAIN_LOOKBACK_MS = 5 * 60_000;
-  const orderWindowStartMs = openedAtMs - PRE_MAIN_LOOKBACK_MS;
-  const orderWindowEndMs = closedAtMs;
-  // 归属只看挂单时间：委托时间落在窗口内即属本战役。Number.isFinite 守卫兼顾 NaN 与开放战役(end=Infinity)。
-  const inWindow = (t: number) => Number.isFinite(t) && t >= orderWindowStartMs && t <= orderWindowEndMs;
   const pendingOrderPrice = (order: PendingOrder) => (
     order.price > 0
       ? order.price

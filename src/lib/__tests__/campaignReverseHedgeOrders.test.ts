@@ -830,4 +830,32 @@ describe('getCampaignFullData reverse hedge order layer', () => {
     // 三笔都因挂单时间(09:20)早于 windowStart(09:55) 被排除。
     expect(reverseHedgeOrders).toEqual([]);
   });
+
+  it('持仓面板挂单也按挂单时间归属：早于窗口的实时挂单不进本战役', async () => {
+    // 战役 10:00–10:30，windowStart 09:55。同标的两笔实时挂单，只有窗口内那笔属本战役。
+    const inWindowPending: PendingOrder = {
+      id: 'in-window-pending',
+      side: 'SHORT',
+      type: 'CONDITIONAL',
+      price: 1.2,
+      stopPrice: 1.2,
+      quantity: 100,
+      leverage: 5,
+      marginMode: 'isolated',
+      status: 'PENDING',
+      createdAt: t('2025-09-20T10:10:00.000Z'),
+    };
+    const preWindowPending: PendingOrder = {
+      ...inWindowPending,
+      id: 'pre-window-pending',
+      createdAt: t('2025-09-20T09:20:00.000Z'), // 早于 windowStart 09:55（属上一场战役）
+    };
+
+    journals = [];
+    localStorage.setItem('sim_user-1_trade_history', JSON.stringify([]));
+    localStorage.setItem('sim_user-1_orders_map', JSON.stringify({ ASTERUSDT: [inWindowPending, preWindowPending] }));
+
+    const { pendingOrders } = await getCampaignFullData(campaign.id);
+    expect(pendingOrders.map(order => order.id)).toEqual(['in-window-pending']);
+  });
 });
