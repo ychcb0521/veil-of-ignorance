@@ -26,6 +26,7 @@ import {
   EXECUTION_CAMPAIGN_REWARD,
   EXECUTION_CAMPAIGN_MISSING_PENALTY,
   EXECUTION_REVIEW_REWARD,
+  EXECUTION_REVIEW_MISSING_PENALTY,
   executionTradeCount,
   localDateKey,
   type ExecutionAssetEvent,
@@ -528,6 +529,7 @@ export default function ExecutionAssetsPage() {
     reconcileCampaignRewards,
     reconcilePostTradeReviewRewards,
     settleCampaignMissingPenalties,
+    reconcileReviewMissingPenalties,
   } = useTradingContext();
   const { user } = useAuth();
   const { open: openPlayback, busyId } = useOpenPlaybackForSnapshot();
@@ -561,10 +563,20 @@ export default function ExecutionAssetsPage() {
             .filter(journal => Boolean(journal.post_reviewed_at))
             .map(journal => ({ journalId: journal.id, reviewedAt: journal.post_reviewed_at })),
         );
+        // 未做平仓评价 −1000（可翻转）：已平仓、有成交记录的主力单，未复盘挂罚、补做即翻回 +1000。
+        reconcileReviewMissingPenalties(
+          journals
+            .filter(journal =>
+              (journal.journal_kind ?? 'trade') === 'trade'
+              && (journal.order_kind ?? 'main') === 'main'
+              && Boolean(journal.trade_record_id),
+            )
+            .map(journal => ({ journalId: journal.id, reviewed: Boolean(journal.post_reviewed_at) })),
+        );
       })
       .catch(() => { /* 离线 / 无 journal 表时静默，不影响页面 */ });
     return () => { cancelled = true; };
-  }, [user?.id, reconcileCampaignRewards, reconcilePostTradeReviewRewards, settleCampaignMissingPenalties]);
+  }, [user?.id, reconcileCampaignRewards, reconcilePostTradeReviewRewards, settleCampaignMissingPenalties, reconcileReviewMissingPenalties]);
 
   const detailEvents = useMemo(() => {
     const events = executionAsset.events ?? [];
@@ -737,10 +749,10 @@ export default function ExecutionAssetsPage() {
               <div className="text-[12px] font-medium">创建交易战役</div>
               <div className="mt-2 font-mono text-2xl text-[#5BA3FF]">+{EXECUTION_CAMPAIGN_REWARD}</div>
             </div>
-            {/* 下排与上排逐列镜像：复盘↔未练习、决策↔直接、建战役↔未建战役（同额反号）。 */}
+            {/* 下排与上排逐列镜像（做 vs 不做，同额反号）：完成评价↔未做评价、决策↔直接、建战役↔未建战役。 */}
             <div className="rounded-xl border border-[#F6465D]/25 bg-[#F6465D]/5 px-4 py-3">
-              <div className="text-[12px] font-medium">自然日未练习</div>
-              <div className="mt-2 font-mono text-2xl text-[#F6465D]">-{EXECUTION_NO_TRADE_PENALTY}</div>
+              <div className="text-[12px] font-medium">未做平仓评价</div>
+              <div className="mt-2 font-mono text-2xl text-[#F6465D]">-{EXECUTION_REVIEW_MISSING_PENALTY}</div>
             </div>
             <div className="rounded-xl border border-[#F6465D]/25 bg-[#F6465D]/5 px-4 py-3">
               <div className="text-[12px] font-medium">直接交易（每标的）</div>
@@ -749,6 +761,11 @@ export default function ExecutionAssetsPage() {
             <div className="rounded-xl border border-[#D89B00]/25 bg-[#D89B00]/5 px-4 py-3">
               <div className="text-[12px] font-medium">标的未建战役（每标的）</div>
               <div className="mt-2 font-mono text-2xl text-[#D89B00]">-{EXECUTION_CAMPAIGN_MISSING_PENALTY}</div>
+            </div>
+            {/* 断更是头号大罪：无正向镜像、独占一行、最重且永久不可逆。 */}
+            <div className="rounded-xl border border-[#F6465D]/40 bg-[#F6465D]/10 px-4 py-3 sm:col-span-2 lg:col-span-3">
+              <div className="text-[12px] font-medium">自然日未练习</div>
+              <div className="mt-2 font-mono text-2xl text-[#F6465D]">-{EXECUTION_NO_TRADE_PENALTY}</div>
             </div>
           </div>
         </section>

@@ -1,13 +1,15 @@
 export const EXECUTION_DECISION_REWARD = 600;
 /** 直接交易（未走决策模块）按「当日标的」去重后，每个标的扣的分。 */
 export const EXECUTION_DIRECT_PENALTY = 600;
-export const EXECUTION_NO_TRADE_PENALTY = 1000;
+export const EXECUTION_NO_TRADE_PENALTY = 2000;
 export const EXECUTION_CAMPAIGN_REWARD = 300;
 export const EXECUTION_REVIEW_REWARD = 1000;
+/** 未做平仓评价（可翻转镜像）：已平仓主力单没复盘扣的分；补做复盘后该罚被撤、翻回 +EXECUTION_REVIEW_REWARD。 */
+export const EXECUTION_REVIEW_MISSING_PENALTY = 1000;
 /** 当天交易过的标的若当天没为它新建战役，每个标的扣的分。 */
 export const EXECUTION_CAMPAIGN_MISSING_PENALTY = 300;
-/** 计分口径版本。旧状态(≤1)首次加载时会把历史事件按当前权重重算一次。 */
-export const EXECUTION_SCORING_VERSION = 2;
+/** 计分口径版本。旧状态(<当前版本)首次加载时会把历史事件按当前权重重算一次（含未练习 −2000）。 */
+export const EXECUTION_SCORING_VERSION = 3;
 
 export type ExecutionTradingMode = 'decision' | 'direct';
 
@@ -17,7 +19,14 @@ export type ExecutionAssetEventType =
   | 'no_trade_penalty'
   | 'campaign_reward'
   | 'campaign_missing_penalty'
-  | 'review_reward';
+  | 'review_reward'
+  | 'review_missing_penalty';
+
+/** 已平仓、有成交记录的主力单的复盘状态（供「未做平仓评价」可翻转结算）。 */
+export interface ClosedMainTradeReviewState {
+  journalId: string;
+  reviewed: boolean;
+}
 
 export interface ExecutionTradeSnapshot {
   symbol: string;
@@ -602,15 +611,72 @@ export function reconcilePostTradeReviewRewards(
   };
 }
 
+function reviewMissingEvent(journalId: string, today: Date): ExecutionAssetEvent {
+  const date = localDateKey(today);
+  return {
+    id: eventId('review_missing_penalty', date),
+    type: 'review_missing_penalty',
+    points: -EXECUTION_REVIEW_MISSING_PENALTY,
+    date,
+    createdAt: today.getTime(),
+    label: '未做平仓评价扣分',
+    journalId,
+  };
+}
+
+/**
+ * 未做平仓评价 −EXECUTION_REVIEW_MISSING_PENALTY（可翻转镜像，与 review_reward 互斥）：
+ * 已平仓、有成交记录的主力单没复盘就挂一笔 −1000；一旦补做复盘（该 journal 进入已复盘集合），
+ * 这笔罚被撤销、退分，而 +EXECUTION_REVIEW_REWARD 由复盘奖励另行给出 —— 净效果是 −1000 翻成 +1000。
+ * 事件流即真相：按「当前未复盘主力单集合」增删 review_missing_penalty 事件，幂等（同集合再跑不变）。
+ * 复盘价值随时可回收，故此罚可翻转，不同于「未练习」的永久不可逆。
+ */
+export function reconcileReviewMissingPenalties(
+  rawState: ExecutionAssetState,
+  closedMainTrades: ClosedMainTradeReviewState[],
+  today: Date = new Date(),
+): ExecutionAssetState {
+  const state = normalizeState(rawState, today);
+  const shouldPenalize = new Set(
+    (closedMainTrades ?? []).filter(t => t?.journalId && !t.reviewed).map(t => t.journalId),
+  );
+  const currentlyPenalized = new Set(
+    state.events
+      .filter(event => event.type === 'review_missing_penalty' && event.journalId)
+      .map(event => event.journalId as string),
+  );
+  const toAdd = [...shouldPenalize].filter(id => !currentlyPenalized.has(id));
+
+  // 撤销不再该罚的（已补复盘 / 已不在集合）：删掉其 review_missing_penalty 事件并退分。
+  let removed = 0;
+  const kept = state.events.filter(event => {
+    if (event.type === 'review_missing_penalty' && event.journalId && !shouldPenalize.has(event.journalId)) {
+      removed += 1;
+      return false;
+    }
+    return true;
+  });
+
+  if (toAdd.length === 0 && removed === 0) return state;
+
+  const added = toAdd.map(journalId => reviewMissingEvent(journalId, today));
+  const pointsDelta = EXECUTION_REVIEW_MISSING_PENALTY * (removed - toAdd.length);
+  return {
+    ...state,
+    points: state.points + pointsDelta,
+    events: [...added, ...kept],
+  };
+}
+
 export function executionTradeCount(state: ExecutionAssetState): number {
   return (state.decisionTradeCount ?? 0) + (state.directTradeCount ?? 0);
 }
 
 /**
- * 历史重算迁移(v1 → v2):把旧权重下记录的历史事件按当前权重重新定价、并重算总分。
- *   复盘 +1000 · 决策 +600 · 建战役 +300 · 未练习 −1000 · 缺战役 −300
- *   直接交易：从「每一笔订单」改为「每当日标的一笔 −600」——同一标的当天多笔,只保留最早一笔扣分、其余置 0。
- * 「缺战役 −300」是新规,只从新数据起算、不追溯(用户定:只重算已有类型)。
+ * 历史重算迁移：把旧权重下记录的历史事件按「当前」权重重新定价、并重算总分（升到 EXECUTION_SCORING_VERSION）。
+ *   复盘 +1000 · 决策 +600 · 建战役 +300 · 未练习 −2000 · 缺战役 −300 · 未做平仓评价 −1000
+ *   直接交易：从「每一笔订单」改为「每当日标的一笔 −600」——同一标的当天多笔,只保留最早一笔扣分、其余丢弃。
+ * 权重调整（如未练习 −1000→−2000）对已有类型一律重算；「缺战役 −300」等新规不追溯（只重算已有事件）。
  * 靠 `scoringVersion` 幂等,只在旧状态首次加载时跑一次;每次点数变动本就配一条事件,故 Σevent = 总分,可从事件流重建。
  */
 export function migrateExecutionAssetScoringV2(rawState: ExecutionAssetState): ExecutionAssetState {
@@ -641,6 +707,9 @@ export function migrateExecutionAssetScoringV2(rawState: ExecutionAssetState): E
       case 'campaign_missing_penalty':
         points -= EXECUTION_CAMPAIGN_MISSING_PENALTY;
         return { ...event, points: -EXECUTION_CAMPAIGN_MISSING_PENALTY };
+      case 'review_missing_penalty':
+        points -= EXECUTION_REVIEW_MISSING_PENALTY;
+        return { ...event, points: -EXECUTION_REVIEW_MISSING_PENALTY };
       case 'direct_reward': {
         const key = `${event.date}|${event.trade?.symbol ?? '__nosym__'}`;
         // 同标的当天多笔并作一笔：丢弃重复,只留最早那笔扣 −EXECUTION_DIRECT_PENALTY(流水每条=一次计分动作)。

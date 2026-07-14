@@ -1316,21 +1316,22 @@ export default function GuidePage() {
                   <tr><td className="px-3 py-2 border-t border-border">完成平仓评价</td><td className="px-3 py-2 border-t border-border font-mono text-[#B080FF]">+1000</td><td className="px-3 py-2 border-t border-border">把一次交易闭合成可复盘的评价样本——错题集 / 结构成熟度的数据全从这里来；同一笔后续编辑不重复计分</td></tr>
                   <tr><td className="px-3 py-2 border-t border-border">决策记录模块交易</td><td className="px-3 py-2 border-t border-border font-mono text-[#0ECB81]">+600</td><td className="px-3 py-2 border-t border-border">走决策模块下单，留下完整样本：开仓快照 → 平仓评价 → 错题集 / 结构成熟度 / 规则 / 元监控</td></tr>
                   <tr><td className="px-3 py-2 border-t border-border">创建交易战役</td><td className="px-3 py-2 border-t border-border font-mono text-[#5BA3FF]">+300</td><td className="px-3 py-2 border-t border-border">为交易搭出结构（头仓 / 加仓 / 对冲的多腿计划）；按战役 ID 幂等，同一场只加一次</td></tr>
-                  <tr><td className="px-3 py-2 border-t border-border">自然日未练习</td><td className="px-3 py-2 border-t border-border font-mono text-[#F6465D]">-1000</td><td className="px-3 py-2 border-t border-border">一整天没有任何练习动作；<strong>永久不可逆</strong>——后续再练也不退这笔，跟随模拟时间按自然日结算</td></tr>
-                  <tr><td className="px-3 py-2 border-t border-border">直接交易（每标的）</td><td className="px-3 py-2 border-t border-border font-mono text-[#F6465D]">-600</td><td className="px-3 py-2 border-t border-border">未走决策模块、无结构地下单；按当日标的去重（同标的多笔只扣一次），<strong>当天已为该标的建战役则免罚</strong></td></tr>
+                  <tr><td className="px-3 py-2 border-t border-border">未做平仓评价</td><td className="px-3 py-2 border-t border-border font-mono text-[#F6465D]">-1000</td><td className="px-3 py-2 border-t border-border">已平仓、有成交记录的主力单没做复盘就扣；<strong>可翻转</strong>——事后补做复盘，这 −1000 撤销并翻成 +1000（2000 分摆动，催你清空待复盘）</td></tr>
+                  <tr><td className="px-3 py-2 border-t border-border">直接交易（每标的）</td><td className="px-3 py-2 border-t border-border font-mono text-[#F6465D]">-600</td><td className="px-3 py-2 border-t border-border">未走决策模块、无结构地下单；按当日标的去重（同标的多笔只扣一次）</td></tr>
                   <tr><td className="px-3 py-2 border-t border-border">标的未建战役（每标的）</td><td className="px-3 py-2 border-t border-border font-mono text-[#D89B00]">-300</td><td className="px-3 py-2 border-t border-border">当天交易过的标的，当天没为它建战役；按标的、永久、幂等</td></tr>
+                  <tr><td className="px-3 py-2 border-t border-border">自然日未练习</td><td className="px-3 py-2 border-t border-border font-mono text-[#F6465D]">-2000</td><td className="px-3 py-2 border-t border-border"><strong>头号大罪</strong>：一整天没有任何练习动作；无正向镜像、<strong>永久不可逆</strong>——后续再练也不退这笔，按模拟时间的自然日结算</td></tr>
                 </tbody>
               </table>
             </div>
-            <P>六个类目是<strong>三对镜像（同额反号）</strong>：复盘 +1000 ↔ 未练习 −1000、决策 +600 ↔ 直接 −600、建战役 +300 ↔ 未建战役 −300。每一对都在问同一件事——<strong>你有没有给这次「做」配上结构</strong>。加分那侧是「带着快照 / 评价 / 战役去做」，扣分那侧是「无结构地乱下、或干脆不练」。所以这页真正想拉高的不是总分，而是让每次「做」都落到加分那侧：<strong>决策记录占比越高、每个交易日的标的都当天建过战役、每天至少留下一次练习</strong>，分数自然往上走。</P>
+            <P>七个类目里，前六个是<strong>三对镜像（做 vs 不做，同额反号）</strong>：完成评价 +1000 ↔ 未做评价 −1000、决策 +600 ↔ 直接 −600、建战役 +300 ↔ 未建战役 −300。每一对都在问同一件事——<strong>这一步你做了没有、做得有没有结构</strong>。第七个「自然日未练习 −2000」没有正向镜像、独占一档且最重：练习是一切样本的源头，<strong>断更是头号大罪</strong>。所以这页想拉高的不是总分，而是让每次「做」都落到加分那侧、且<strong>每天至少留一次练习</strong>。</P>
 
             <SubTitle>什么算、什么不算</SubTitle>
             <ul className="list-disc pl-6 text-[14px] text-foreground/90 space-y-1">
               <li><strong>只记做多开仓。</strong>做空都是辅助对冲单，属于风险管理动作，不计执行力分。</li>
               <li><strong>挂单成交才计分。</strong>挂出限价单只是意图，真正成交才算“做”——意图不计分，执行才计分。</li>
-              <li><strong>“当天已练习” = 下单 / 弃单（太难不做）/ 完成复盘，任一即可。</strong>只要当天留下其中任一动作，就清掉当天的“未练习 −1000”——练的是决策周期，不是必须下注。</li>
-              <li><strong>平仓评价完成才计分。</strong>保存成功后 +1000；系统按 journal ID 识别，同一评价反复修改不会重复奖励。</li>
-              <li><strong>“未练习”扣分永久不可逆。</strong>某个自然日没有任何练习，就永久记一笔 −1000，后面再怎么练、再盈利都不退这笔——单笔亏损能被后续盈利覆盖，断更不能。按模拟时间的自然日结算。</li>
+              <li><strong>“当天已练习” = 下单 / 弃单（太难不做）/ 完成复盘，任一即可。</strong>只要当天留下其中任一动作，就清掉当天的“未练习 −2000”——练的是决策周期，不是必须下注。</li>
+              <li><strong>平仓评价：做 +1000、不做 −1000，可翻转。</strong>已平仓的主力单没复盘挂 −1000；<strong>事后补做复盘，这 −1000 撤销并翻成 +1000</strong>（2000 分摆动，催你清空待复盘）。系统按 journal ID 识别，反复编辑不重复计分。之所以可翻转而非永久：复盘价值随时可回收，不像断更不可逆。</li>
+              <li><strong>“未练习”扣分永久不可逆、且最重（−2000）。</strong>某个自然日没有任何练习，就永久记一笔 −2000，后面再怎么练、再盈利都不退这笔——单笔亏损能被后续盈利覆盖，断更不能。按模拟时间的自然日结算。</li>
               <li><strong>六项各自独立计分、互不联动。</strong>直接交易 −600 只看「这笔有没有走决策模块」，与是否建战役无关——战役是「计划层」结构、决策记录是「每单层」结构，两者分别度量，不互相抵扣。</li>
               <li><strong>历史按同一把尺重算。</strong>旧数据首次加载会按当前权重重算一次（直接交易按当日标的去重），让新旧记录可比。</li>
             </ul>
