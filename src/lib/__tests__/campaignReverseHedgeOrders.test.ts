@@ -769,4 +769,65 @@ describe('getCampaignFullData reverse hedge order layer', () => {
     expect(reverseHedgeOrders[3].tradeRecordId).toBe('selected-short-record');
     expect(reverseHedgeOrders[4].tradeRecordId).toBe('unselected-short-record');
   });
+
+  it('上一场战役挂出的开空委托(挂单时间早于窗口)不泄漏进本战役', async () => {
+    // 战役 10:00–10:30，5min 缓冲 → windowStart 09:55。下面三笔都在 09:20 挂出(早主力 35min，远在窗口外)，
+    // 但分别在窗口内「撤销 / 成交 / 仍挂单」——旧 overlap 逻辑会按撤单/成交时间(或缺下界)把它们泄漏进来。
+    const prevCampaignPlacedAt = t('2025-09-20T09:20:00.000Z');
+
+    const cancelledOrders: CancelledOrderSnapshot[] = [
+      {
+        id: 'prev-campaign-cancelled-short',
+        symbol: 'ASTERUSDT',
+        side: 'SHORT',
+        type: 'CONDITIONAL',
+        reduceOnly: false,
+        reduceKind: null,
+        price: 1.5,
+        quantity: 100,
+        leverage: 5,
+        createdAt: prevCampaignPlacedAt,
+        cancelledAt: t('2025-09-20T10:10:00.000Z'), // 撤销落在窗口内
+      },
+    ];
+    const filledOrders: FilledOrderSnapshot[] = [
+      {
+        id: 'prev-campaign-triggered-short',
+        symbol: 'ASTERUSDT',
+        side: 'SHORT',
+        type: 'CONDITIONAL',
+        reduceOnly: false,
+        reduceKind: null,
+        price: 1.5,
+        triggerPrice: 1.5,
+        quantity: 100,
+        leverage: 5,
+        createdAt: prevCampaignPlacedAt,
+        filledAt: t('2025-09-20T10:05:00.000Z'), // 成交落在窗口内
+      },
+    ];
+    const prevCampaignPending: PendingOrder = {
+      id: 'prev-campaign-pending-short',
+      side: 'SHORT',
+      type: 'CONDITIONAL',
+      price: 1.5,
+      stopPrice: 1.5,
+      quantity: 100,
+      leverage: 5,
+      marginMode: 'isolated',
+      status: 'PENDING',
+      createdAt: prevCampaignPlacedAt, // 仍挂单，但挂单时间早于窗口
+    };
+
+    journals = [];
+    localStorage.setItem('sim_user-1_trade_history', JSON.stringify([]));
+    localStorage.setItem('sim_user-1_filled_orders', JSON.stringify(filledOrders));
+    localStorage.setItem('sim_user-1_cancelled_orders', JSON.stringify(cancelledOrders));
+    localStorage.setItem('sim_user-1_orders_map', JSON.stringify({ ASTERUSDT: [prevCampaignPending] }));
+
+    const { reverseHedgeOrders } = await getCampaignFullData(campaign.id);
+
+    // 三笔都因挂单时间(09:20)早于 windowStart(09:55) 被排除。
+    expect(reverseHedgeOrders).toEqual([]);
+  });
 });

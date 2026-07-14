@@ -2005,16 +2005,13 @@ export async function getCampaignFullData(
     order.type === 'MARKET_TP_SL';
   const isOpeningShortOrder = (order: Parameters<typeof isPositionClosingOrder>[0]) =>
     order.side === 'SHORT' && !isPositionClosingOrder(order);
-  // 黄色委托层按「战役时间窗」取全部开空委托；保留一个短暂前置缓冲，覆盖开主力时提前挂好的对冲空单。
-  const PRE_MAIN_LOOKBACK_MS = 60_000;
+  // 黄色委托层按「挂单时间(委托时间)」把开空委托归属到战役：委托时间须落在 [开主力-5min, 平仓] 内。
+  // 前置 5 分钟缓冲覆盖开主力前提前挂好的对冲空单；改用挂单时间(而非生命周期重叠)可避免上一场战役的委托泄漏进来。
+  const PRE_MAIN_LOOKBACK_MS = 5 * 60_000;
   const orderWindowStartMs = openedAtMs - PRE_MAIN_LOOKBACK_MS;
   const orderWindowEndMs = closedAtMs;
+  // 归属只看挂单时间：委托时间落在窗口内即属本战役。Number.isFinite 守卫兼顾 NaN 与开放战役(end=Infinity)。
   const inWindow = (t: number) => Number.isFinite(t) && t >= orderWindowStartMs && t <= orderWindowEndMs;
-  const overlapsOrderWindow = (start: number, end?: number | null) => {
-    if (!Number.isFinite(start)) return false;
-    const normalizedEnd = end == null || !Number.isFinite(end) ? Number.POSITIVE_INFINITY : end;
-    return start <= orderWindowEndMs && normalizedEnd >= orderWindowStartMs;
-  };
   const pendingOrderPrice = (order: PendingOrder) => (
     order.price > 0
       ? order.price
@@ -2117,7 +2114,7 @@ export async function getCampaignFullData(
     .filter(order =>
       order.symbol === campaign.symbol &&
       isOpeningShortOrder(order) &&
-      overlapsOrderWindow(order.createdAt, order.filledAt)
+      inWindow(order.createdAt)
     )
     .map(order => {
       const record = findRecordForFilledOrder(order);
@@ -2138,7 +2135,7 @@ export async function getCampaignFullData(
       .filter(order =>
         order.symbol === campaign.symbol &&
         isOpeningShortOrder(order) &&
-        overlapsOrderWindow(order.createdAt, order.cancelledAt)
+        inWindow(order.createdAt)
       )
       .map(order => ({
         id: order.id,
@@ -2154,7 +2151,7 @@ export async function getCampaignFullData(
       .filter(order => {
         const price = pendingOrderPrice(order);
         return isOpeningShortOrder(order) &&
-          overlapsOrderWindow(order.createdAt) &&
+          inWindow(order.createdAt) &&
           Number.isFinite(price);
       })
       .map(order => ({
