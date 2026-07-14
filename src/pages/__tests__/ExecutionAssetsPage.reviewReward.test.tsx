@@ -1,5 +1,5 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { MemoryRouter } from 'react-router-dom';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import ExecutionAssetsPage from '../ExecutionAssetsPage';
 
@@ -99,6 +99,10 @@ describe('ExecutionAssetsPage review reward', () => {
       journalId: 'journal-1',
       reviewedAt: '2026-07-11T08:00:00.000Z',
     }]));
+    expect(mockReconcileCampaignRewards).toHaveBeenCalledWith([{
+      id: 'campaign-1',
+      createdAt: '2026-07-10T00:00:00.000Z',
+    }]);
 
     expect(Array.from(screen.getByTestId('execution-rule-grid').children).map(card => (
       card.textContent?.replace(/\s+/g, '')
@@ -129,5 +133,29 @@ describe('ExecutionAssetsPage review reward', () => {
     expect(screen.getByText('平仓评价明细')).toBeInTheDocument();
     expect(screen.getAllByText('完成平仓评价奖励').length).toBeGreaterThanOrEqual(1);
     expect(screen.getAllByText('+666').length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('opens the corresponding campaign when its reward score is clicked', async () => {
+    render(
+      <MemoryRouter initialEntries={['/execution-assets']}>
+        <Routes>
+          <Route path="/execution-assets" element={<ExecutionAssetsPage />} />
+          <Route path="/journal/campaigns/:campaignId" element={<div>已进入对应交易战役</div>} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    const campaignEvent = await waitFor(() => {
+      const item = document.querySelector('[data-event-id="campaign-event-1"]');
+      expect(item).not.toBeNull();
+      expect(within(item as HTMLElement).getByRole('button')).toHaveAttribute(
+        'title',
+        '点击进入对应的交易战役',
+      );
+      return item as HTMLElement;
+    });
+
+    fireEvent.click(within(campaignEvent).getByText('+1,500'));
+    expect(await screen.findByText('已进入对应交易战役')).toBeInTheDocument();
   });
 });

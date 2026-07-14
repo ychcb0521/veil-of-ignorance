@@ -90,6 +90,12 @@ export interface CampaignCreationRef {
   createdAt: Date | number | string | null;
 }
 
+/** 创建战役奖励对账所需的稳定标识与客观创建时间。 */
+export interface CampaignRewardRef {
+  id: string;
+  createdAt?: Date | number | string | null;
+}
+
 export function createDefaultExecutionAssetState(today: Date = new Date()): ExecutionAssetState {
   return {
     points: 0,
@@ -380,16 +386,89 @@ export function recordExecutionTrade(
   };
 }
 
-function campaignRewardEvent(campaignId: string | null, today: Date): ExecutionAssetEvent {
-  const date = localDateKey(today);
+function campaignRewardEvent(campaignId: string | null, createdAt: Date): ExecutionAssetEvent {
+  const date = localDateKey(createdAt);
   return {
     id: eventId('campaign_reward', date),
     type: 'campaign_reward',
     points: EXECUTION_CAMPAIGN_REWARD,
     date,
-    createdAt: today.getTime(),
+    createdAt: createdAt.getTime(),
     label: '创建交易战役奖励',
     campaignId,
+  };
+}
+
+function normalizeCampaignRewardRefs(
+  campaigns: Array<string | CampaignRewardRef>,
+  fallback: Date,
+): Array<{ id: string; createdAt: Date }> {
+  const byId = new Map<string, { id: string; createdAt: Date }>();
+  for (const campaign of campaigns) {
+    const id = typeof campaign === 'string' ? campaign : campaign?.id;
+    if (!id || byId.has(id)) continue;
+    const rawCreatedAt = typeof campaign === 'string' ? null : campaign.createdAt;
+    byId.set(id, { id, createdAt: validEventDate(rawCreatedAt, fallback) });
+  }
+  return [...byId.values()];
+}
+
+/**
+ * 旧版 campaign_reward 只记录了加分时间，没有保存战役 ID。
+ * 以同一自然日优先、客观创建时间最近为次序做一对一匹配；写回 ID 后，后续跳转不再依赖文字。
+ */
+function bindLegacyCampaignRewardEvents(
+  events: ExecutionAssetEvent[],
+  campaigns: Array<{ id: string; createdAt: Date }>,
+  rewardedCampaignIds: string[],
+): { events: ExecutionAssetEvent[]; changed: boolean } {
+  const linkedIds = new Set(
+    events
+      .filter(event => event.type === 'campaign_reward' && event.campaignId)
+      .map(event => event.campaignId as string),
+  );
+  const rewardedIds = new Set(rewardedCampaignIds);
+  const preferred = campaigns.filter(campaign => rewardedIds.has(campaign.id) && !linkedIds.has(campaign.id));
+  const fallback = campaigns.filter(campaign => !rewardedIds.has(campaign.id) && !linkedIds.has(campaign.id));
+  const unbound = events
+    .map((event, index) => ({ event, index }))
+    .filter(({ event }) => event.type === 'campaign_reward' && !event.campaignId)
+    .sort((a, b) => a.event.createdAt - b.event.createdAt || a.index - b.index);
+
+  if ((preferred.length === 0 && fallback.length === 0) || unbound.length === 0) {
+    return { events, changed: false };
+  }
+
+  const assignments = new Map<number, string>();
+  for (const { event, index } of unbound) {
+    const available = preferred.length > 0 ? preferred : fallback;
+    if (available.length === 0) break;
+    const eventTime = Number.isFinite(event.createdAt)
+      ? event.createdAt
+      : new Date(`${event.date}T00:00:00+08:00`).getTime();
+    const sameDayIndexes = available
+      .map((campaign, candidateIndex) => ({ campaign, candidateIndex }))
+      .filter(({ campaign }) => localDateKey(campaign.createdAt) === event.date);
+    const candidates = sameDayIndexes.length > 0
+      ? sameDayIndexes
+      : available.map((campaign, candidateIndex) => ({ campaign, candidateIndex }));
+    candidates.sort((a, b) => (
+      Math.abs(a.campaign.createdAt.getTime() - eventTime)
+      - Math.abs(b.campaign.createdAt.getTime() - eventTime)
+      || a.campaign.createdAt.getTime() - b.campaign.createdAt.getTime()
+      || a.campaign.id.localeCompare(b.campaign.id)
+    ));
+    const match = candidates[0];
+    assignments.set(index, match.campaign.id);
+    available.splice(match.candidateIndex, 1);
+  }
+
+  if (assignments.size === 0) return { events, changed: false };
+  return {
+    events: events.map((event, index) => (
+      assignments.has(index) ? { ...event, campaignId: assignments.get(index) } : event
+    )),
+    changed: true,
   };
 }
 
@@ -415,35 +494,49 @@ export function recordCampaignCreated(
 }
 
 /**
- * 用「用户实际拥有的战役 ID 列表」对账，自愈任何漏记的 +EXECUTION_CAMPAIGN_REWARD：
+ * 用用户实际拥有的战役 ID + 创建时间对账，自愈任何漏记的 +EXECUTION_CAMPAIGN_REWARD：
  * 每个还没奖励过的战役补一笔，幂等（已奖励的不再加）。
  * 历史上通过事件计过分但未记 ID 的（campaignCount > 已记 ID 数），按数量补种为已奖励，避免重复加分。
+ * 旧版无 ID 的奖励流水会按客观创建时间绑定到战役，之后永久按 ID 跳转。
  * 在执行力资产页加载时调用即可，让「建战役」积分始终等于真实战役数。
  */
 export function reconcileCampaignRewards(
   rawState: ExecutionAssetState,
-  campaignIds: string[],
+  campaigns: Array<string | CampaignRewardRef>,
   today: Date = new Date(),
 ): ExecutionAssetState {
-  const state = normalizeState(rawState, today);
-  const known = new Set(state.rewardedCampaignIds);
+  const normalized = normalizeState(rawState, today);
+  const campaignRefs = normalizeCampaignRewardRefs(campaigns, today);
+  const legacyBinding = bindLegacyCampaignRewardEvents(
+    normalized.events,
+    campaignRefs,
+    normalized.rewardedCampaignIds,
+  );
+  const state = legacyBinding.changed ? { ...normalized, events: legacyBinding.events } : normalized;
+  const eventCampaignIds = state.events
+    .filter(event => event.type === 'campaign_reward' && event.campaignId)
+    .map(event => event.campaignId as string);
+  const known = new Set([...state.rewardedCampaignIds, ...eventCampaignIds]);
   const untrackedRewarded = Math.max(0, state.campaignCount - known.size);
-  const uniqueCampaignIds = Array.from(new Set(campaignIds.filter(Boolean)));
-  const candidates = uniqueCampaignIds.filter(id => !known.has(id));
+  const candidates = campaignRefs.filter(campaign => !known.has(campaign.id));
   // 旧版只计了数没记 ID 的那部分，先按数量补种为已奖励，绝不重复加分。
-  for (const id of candidates.slice(0, untrackedRewarded)) known.add(id);
+  for (const campaign of candidates.slice(0, untrackedRewarded)) known.add(campaign.id);
   const toAward = candidates.slice(untrackedRewarded);
 
   if (toAward.length === 0) {
     const nextCount = Math.max(state.campaignCount, known.size);
-    if (known.size === state.rewardedCampaignIds.length && nextCount === state.campaignCount) return state;
+    if (
+      !legacyBinding.changed
+      && known.size === state.rewardedCampaignIds.length
+      && nextCount === state.campaignCount
+    ) return state;
     return { ...state, campaignCount: nextCount, rewardedCampaignIds: [...known] };
   }
 
   const events: ExecutionAssetEvent[] = [];
-  for (const id of toAward) {
-    known.add(id);
-    events.push(campaignRewardEvent(id, today));
+  for (const campaign of toAward) {
+    known.add(campaign.id);
+    events.push(campaignRewardEvent(campaign.id, campaign.createdAt));
   }
   return {
     ...state,

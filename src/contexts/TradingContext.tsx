@@ -66,6 +66,7 @@ import {
   settleCampaignMissingPenalties as applySettleCampaignMissing,
   waiveCampaignBackedDirectPenalties as applyWaiveDirectPenalties,
   type CampaignCreationRef,
+  type CampaignRewardRef,
   type CompletedExecutionReview,
   type ExecutionAssetState,
   type ExecutionTradeSnapshot,
@@ -164,8 +165,8 @@ interface TradingState {
   recordExecutionTrade: (modeOverride?: TradingMode, trade?: ExecutionTradeSnapshot | null) => void;
   /** 每创建一次交易战役调用一次，执行力资产 +300 分；传 campaignId 按战役幂等。 */
   recordCampaignCreated: (campaignId?: string | null) => void;
-  /** 用「用户实际战役 ID 列表」对账，补齐漏记的 +300（幂等，自愈）。 */
-  reconcileCampaignRewards: (campaignIds: string[]) => void;
+  /** 用真实战役 ID 与创建时间对账，补齐漏记奖励并绑定旧流水（幂等，自愈）。 */
+  reconcileCampaignRewards: (campaigns: CampaignRewardRef[]) => void;
   /** 每完成一次平仓评价 +1000；同一个 journal 后续编辑不重复计分。完成评价即算当天已练习。 */
   recordPostTradeReviewCompleted: (journalId: string, reviewedAt?: Date | number | string | null) => void;
   /** 用历史已完成评价对账，补齐漏记的 +1000（按 journal ID 幂等）。 */
@@ -370,9 +371,9 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
     setExecutionAsset(prev => applyCampaignReward(prev, campaignId ?? null, new Date()));
   }, [setExecutionAsset]);
 
-  // 用真实战役 ID 列表对账，补齐任何漏记的 +1500（幂等，自愈）。
-  const reconcileCampaignRewards = useCallback((campaignIds: string[]) => {
-    setExecutionAsset(prev => applyCampaignReconcile(prev, campaignIds, new Date()));
+  // 用真实战役 ID + 创建时间对账：补齐漏记奖励，并让旧流水永久绑定到对应战役。
+  const reconcileCampaignRewards = useCallback((campaigns: CampaignRewardRef[]) => {
+    setExecutionAsset(prev => applyCampaignReconcile(prev, campaigns, new Date()));
   }, [setExecutionAsset]);
 
   const recordPostTradeReviewCompleted = useCallback((

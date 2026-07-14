@@ -9,6 +9,7 @@ import {
   EXECUTION_NO_TRADE_PENALTY,
   EXECUTION_REVIEW_REWARD,
   EXECUTION_SCORING_VERSION,
+  localDateKey,
   migrateExecutionAssetScoringV2,
   recordCampaignCreated,
   recordPostTradeReviewCompleted,
@@ -32,7 +33,7 @@ const trade = (symbol: string) => ({
   marginMode: 'isolated',
 });
 
-const d = (iso: string) => new Date(`${iso}T12:00:00`);
+const d = (iso: string) => new Date(iso.includes('T') ? iso : `${iso}T12:00:00`);
 
 describe('execution assets', () => {
   it('rewards decision-record trades with the accelerator weight', () => {
@@ -251,6 +252,62 @@ describe('建战役 +1500（按 ID 幂等 + 对账自愈）', () => {
     const s2 = reconcileCampaignRewards(s1, ['a', 'b', 'c', 'd'], d('2026-06-03'));
     expect(s2.points).toBe(EXECUTION_CAMPAIGN_REWARD * 4);
     expect(s2.campaignCount).toBe(4);
+  });
+
+  it('给旧版无 ID 的奖励流水按真实创建时间回填对应战役，且不重复计分', () => {
+    const firstTime = d('2026-06-03T09:10:00+08:00');
+    const secondTime = d('2026-06-04T11:20:00+08:00');
+    const legacy = {
+      ...createDefaultExecutionAssetState(d('2026-06-05')),
+      points: EXECUTION_CAMPAIGN_REWARD * 2,
+      campaignCount: 2,
+      rewardedCampaignIds: ['campaign-b', 'campaign-a'],
+      events: [
+        {
+          id: 'legacy-b',
+          type: 'campaign_reward',
+          points: EXECUTION_CAMPAIGN_REWARD,
+          date: localDateKey(secondTime),
+          createdAt: secondTime.getTime(),
+          label: '创建交易战役奖励',
+        },
+        {
+          id: 'legacy-a',
+          type: 'campaign_reward',
+          points: EXECUTION_CAMPAIGN_REWARD,
+          date: localDateKey(firstTime),
+          createdAt: firstTime.getTime(),
+          label: '创建交易战役奖励',
+        },
+      ],
+    } as ReturnType<typeof createDefaultExecutionAssetState>;
+
+    const reconciled = reconcileCampaignRewards(legacy, [
+      { id: 'campaign-b', createdAt: d('2026-06-04T11:20:02+08:00') },
+      { id: 'campaign-new', createdAt: d('2026-06-05T12:00:00+08:00') },
+      { id: 'campaign-a', createdAt: d('2026-06-03T09:10:01+08:00') },
+    ], d('2026-06-05T13:00:00+08:00'));
+
+    expect(reconciled.points).toBe(EXECUTION_CAMPAIGN_REWARD * 3);
+    expect(reconciled.campaignCount).toBe(3);
+    expect(Object.fromEntries(reconciled.events.map(event => [event.id, event.campaignId]))).toMatchObject({
+      'legacy-a': 'campaign-a',
+      'legacy-b': 'campaign-b',
+    });
+    const newEvent = reconciled.events.find(event => event.campaignId === 'campaign-new');
+    expect(newEvent).toMatchObject({
+      type: 'campaign_reward',
+      date: '2026-06-05',
+      createdAt: d('2026-06-05T12:00:00+08:00').getTime(),
+    });
+
+    const rerun = reconcileCampaignRewards(reconciled, [
+      { id: 'campaign-a', createdAt: firstTime },
+      { id: 'campaign-b', createdAt: secondTime },
+      { id: 'campaign-new', createdAt: d('2026-06-05T12:00:00+08:00') },
+    ], d('2026-06-06'));
+    expect(rerun.points).toBe(reconciled.points);
+    expect(rerun.events).toHaveLength(reconciled.events.length);
   });
 });
 

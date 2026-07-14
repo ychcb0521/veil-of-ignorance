@@ -546,7 +546,7 @@ export default function ExecutionAssetsPage() {
     listAllCampaigns(user.id)
       .then(campaigns => {
         if (cancelled) return;
-        reconcileCampaignRewards(campaigns.map(c => c.id));
+        reconcileCampaignRewards(campaigns.map(c => ({ id: c.id, createdAt: c.created_at })));
         const campaignRefs = campaigns.map(c => ({ symbol: c.symbol, createdAt: c.created_at }));
         // 用权威战役列表结算「交易过某标的却没在当天为它建战役」的 −300（按标的、永久、幂等）。
         settleCampaignMissingPenalties(campaignRefs);
@@ -779,16 +779,21 @@ export default function ExecutionAssetsPage() {
                   const matched = matchClosesForSnapshot(event.trade, tradeHistory);
                   const canOpen = Boolean(event.trade) && matched != null;
                   const canOpenReview = event.type === 'review_reward' && Boolean(event.journalId);
-                  const canInteract = canOpen || canOpenReview;
+                  const campaign = event.type === 'campaign_reward' && event.campaignId
+                    ? campaignById[event.campaignId]
+                    : null;
+                  const canOpenCampaign = Boolean(campaign);
+                  const canInteract = canOpen || canOpenReview || canOpenCampaign;
                   const busy = busyId === event.id;
                   const operationTime = executionEventOperationTime(event, campaignById);
                   return (
-                    <li key={event.id} data-operation-time={operationTime}>
+                    <li key={event.id} data-event-id={event.id} data-operation-time={operationTime}>
                       <button
                         type="button"
                         onClick={() => {
                           if (canOpen) openPlayback(event);
                           else if (canOpenReview && event.journalId) nav(`/journal/${event.journalId}`);
+                          else if (canOpenCampaign && campaign) nav(`/journal/campaigns/${campaign.id}`);
                         }}
                         disabled={!canInteract || busy}
                         className={cn(
@@ -796,11 +801,16 @@ export default function ExecutionAssetsPage() {
                           canInteract && !busy
                             ? event.type === 'review_reward'
                               ? 'border-border/60 hover:border-[#B080FF]/40 hover:bg-[#B080FF]/[0.03]'
+                              : event.type === 'campaign_reward'
+                                ? 'border-border/60 hover:border-[#5BA3FF]/40 hover:bg-[#5BA3FF]/[0.03]'
                               : 'border-border/60 hover:border-[#F0B90B]/40 hover:bg-[#F0B90B]/[0.03]'
                             : 'border-border/60 cursor-not-allowed opacity-95',
                         )}
                         title={
                           canOpenReview ? '点击查看这笔平仓评价'
+                          : canOpenCampaign ? '点击进入对应的交易战役'
+                          : event.type === 'campaign_reward' && event.campaignId ? '对应战役已删除'
+                          : event.type === 'campaign_reward' ? '正在匹配历史奖励对应的战役'
                           : !event.trade ? '此条无交易快照，无法查看回放'
                           : !matched ? '这笔还未平仓，无法查看完整持仓过程'
                           : '点击查看持仓过程 K 线回放'
@@ -841,11 +851,15 @@ export default function ExecutionAssetsPage() {
                           <span className={`rounded-full border px-2.5 py-1 font-mono text-[12px] ${eventTone(event.type)}`}>
                             {formatSigned(event.points)}
                           </span>
-                          {(event.trade || canOpenReview) && (
+                          {(event.trade || canOpenReview || canOpenCampaign) && (
                             <span className={cn(
                               'inline-flex h-7 w-7 items-center justify-center rounded-md',
                               canInteract && !busy
-                                ? event.type === 'review_reward' ? 'text-[#B080FF]' : 'text-[#D89B00]'
+                                ? event.type === 'review_reward'
+                                  ? 'text-[#B080FF]'
+                                  : event.type === 'campaign_reward'
+                                    ? 'text-[#5BA3FF]'
+                                    : 'text-[#D89B00]'
                                 : 'text-muted-foreground/40',
                             )}>
                               {busy
