@@ -274,51 +274,6 @@ export function settleCampaignMissingPenalties(
   return { ...state, lastCampaignCheckDate: todayKey };
 }
 
-/**
- * 直接交易罚 × 「当天建战役」联动：某笔「直接交易 −EXECUTION_DIRECT_PENALTY」若其标的当天已建过战役，则免罚
- * ——战役本身就是结构，被战役覆盖的直接单不算「无结构乱下」。移除该 direct_reward 事件并退回分数。
- * 覆盖历史与新单；用权威 campaign 列表（symbol + created_at 落当天）判定；只做减免、绝不新增缺战役罚。
- * 移除即幂等（再跑找不到已免的事件、不会重复退分）。
- */
-export function waiveCampaignBackedDirectPenalties(
-  rawState: ExecutionAssetState,
-  campaigns: CampaignCreationRef[],
-  today: Date = new Date(),
-): ExecutionAssetState {
-  const state = normalizeState(rawState, today);
-
-  const createdByDate = new Map<string, Set<string>>();
-  for (const campaign of campaigns ?? []) {
-    if (!campaign || !campaign.symbol) continue;
-    const key = localDateKey(validEventDate(campaign.createdAt, today));
-    const set = createdByDate.get(key) ?? new Set<string>();
-    set.add(campaign.symbol);
-    createdByDate.set(key, set);
-  }
-
-  let refunded = 0;
-  let waived = 0;
-  const events = state.events.filter(event => {
-    if (event.type !== 'direct_reward' || event.points >= 0) return true;
-    const symbol = event.trade?.symbol;
-    if (symbol && createdByDate.get(event.date)?.has(symbol)) {
-      refunded += -event.points; // points 为负(−EXECUTION_DIRECT_PENALTY)，退回其绝对值
-      waived += 1;
-      return false; // 当天已为该标的建战役 → 免罚，移除这条直接交易扣分
-    }
-    return true;
-  });
-
-  if (waived === 0) return state;
-
-  return {
-    ...state,
-    points: state.points + refunded,
-    directTradeCount: Math.max(0, state.directTradeCount - waived),
-    events,
-  };
-}
-
 export function recordExecutionTrade(
   rawState: ExecutionAssetState,
   mode: ExecutionTradingMode,

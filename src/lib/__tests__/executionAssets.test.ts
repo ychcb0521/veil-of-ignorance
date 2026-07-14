@@ -19,7 +19,6 @@ import {
   recordExecutionTrade,
   settleCampaignMissingPenalties,
   settleNoTradePenalties,
-  waiveCampaignBackedDirectPenalties,
 } from '../executionAssets';
 
 /** 造一笔带 symbol 的成交快照，仅填计分逻辑读取的字段。 */
@@ -352,60 +351,6 @@ describe('缺战役结算 −300（当天必须新建，按标的累计，永久
     const settled = settleCampaignMissingPenalties(s0, [], d('2026-06-06'));
     expect(settled.campaignMissingCount).toBe(0);
     expect(settled.points).toBe(0);
-  });
-});
-
-describe('直接交易罚 × 建战役联动：当天建战役则免直接交易罚', () => {
-  // 06-03 直接交易 BTC + ETH，各扣一次 −EXECUTION_DIRECT_PENALTY。
-  const twoDirect = () => {
-    let s = recordExecutionTrade(createDefaultExecutionAssetState(d('2026-06-03')), 'direct', d('2026-06-03'), trade('BTCUSDT'));
-    s = recordExecutionTrade(s, 'direct', d('2026-06-03'), trade('ETHUSDT'));
-    return s;
-  };
-
-  it('当天为 BTC 建了战役 → 撤销 BTC 的直接交易扣分并退回分数', () => {
-    const s = twoDirect();
-    expect(s.directTradeCount).toBe(2);
-    expect(s.points).toBe(-EXECUTION_DIRECT_PENALTY * 2);
-    const w = waiveCampaignBackedDirectPenalties(s, [{ symbol: 'BTCUSDT', createdAt: d('2026-06-03') }], d('2026-06-04'));
-    expect(w.points).toBe(-EXECUTION_DIRECT_PENALTY); // 退回 BTC 的一份
-    expect(w.directTradeCount).toBe(1);
-    const directSymbols = w.events.filter(e => e.type === 'direct_reward').map(e => e.trade?.symbol);
-    expect(directSymbols).toEqual(['ETHUSDT']); // BTC 那条被移除
-  });
-
-  it('无战役 → 不减免', () => {
-    const s = twoDirect();
-    const w = waiveCampaignBackedDirectPenalties(s, [], d('2026-06-04'));
-    expect(w.points).toBe(-EXECUTION_DIRECT_PENALTY * 2);
-    expect(w.directTradeCount).toBe(2);
-  });
-
-  it('战役建在别的日子（非交易当天）→ 不减免', () => {
-    const s = twoDirect();
-    const w = waiveCampaignBackedDirectPenalties(s, [{ symbol: 'BTCUSDT', createdAt: d('2026-06-04') }], d('2026-06-05'));
-    expect(w.points).toBe(-EXECUTION_DIRECT_PENALTY * 2);
-    expect(w.directTradeCount).toBe(2);
-  });
-
-  it('两个标的都当天建了战役 → 全免、分数归零', () => {
-    const s = twoDirect();
-    const w = waiveCampaignBackedDirectPenalties(s, [
-      { symbol: 'BTCUSDT', createdAt: d('2026-06-03') },
-      { symbol: 'ETHUSDT', createdAt: d('2026-06-03') },
-    ], d('2026-06-04'));
-    expect(w.points).toBe(0);
-    expect(w.directTradeCount).toBe(0);
-    expect(w.events.filter(e => e.type === 'direct_reward')).toHaveLength(0);
-  });
-
-  it('幂等：再跑一次不重复退分', () => {
-    const s = twoDirect();
-    const refs = [{ symbol: 'BTCUSDT', createdAt: d('2026-06-03') }];
-    const once = waiveCampaignBackedDirectPenalties(s, refs, d('2026-06-04'));
-    const twice = waiveCampaignBackedDirectPenalties(once, refs, d('2026-06-05'));
-    expect(twice.points).toBe(once.points);
-    expect(twice.directTradeCount).toBe(once.directTradeCount);
   });
 });
 

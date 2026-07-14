@@ -528,7 +528,6 @@ export default function ExecutionAssetsPage() {
     reconcileCampaignRewards,
     reconcilePostTradeReviewRewards,
     settleCampaignMissingPenalties,
-    waiveCampaignBackedDirectPenalties,
   } = useTradingContext();
   const { user } = useAuth();
   const { open: openPlayback, busyId } = useOpenPlaybackForSnapshot();
@@ -550,8 +549,6 @@ export default function ExecutionAssetsPage() {
         const campaignRefs = campaigns.map(c => ({ symbol: c.symbol, createdAt: c.created_at }));
         // 用权威战役列表结算「交易过某标的却没在当天为它建战役」的 −300（按标的、永久、幂等）。
         settleCampaignMissingPenalties(campaignRefs);
-        // 直接交易罚与建战役联动：当天已为该标的建战役的直接单免罚（历史+新单，幂等，只减免）。
-        waiveCampaignBackedDirectPenalties(campaignRefs);
         // 留存战役以便「建战役」明细按 campaignId 显示标题/标的/时间并可点进。
         setCampaignById(Object.fromEntries(campaigns.map(c => [c.id, c])));
       })
@@ -567,7 +564,7 @@ export default function ExecutionAssetsPage() {
       })
       .catch(() => { /* 离线 / 无 journal 表时静默，不影响页面 */ });
     return () => { cancelled = true; };
-  }, [user?.id, reconcileCampaignRewards, reconcilePostTradeReviewRewards, settleCampaignMissingPenalties, waiveCampaignBackedDirectPenalties]);
+  }, [user?.id, reconcileCampaignRewards, reconcilePostTradeReviewRewards, settleCampaignMissingPenalties]);
 
   const detailEvents = useMemo(() => {
     const events = executionAsset.events ?? [];
@@ -724,7 +721,7 @@ export default function ExecutionAssetsPage() {
           <div className="border-b border-border/70 px-5 py-4">
             <h2 className="text-[13px] font-semibold">积分规则</h2>
             <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
-              开仓只记做多，做空对冲不计分。直接交易按当日标的去重（同标的多笔只扣一次）；若当天已为该标的建过战役，则该标的免「直接交易」扣分——战役即结构。当天交易过的标的须当天为其建战役，否则每个标的扣「未建战役」分。下单 / 弃单 / 复盘任一即算当天已练习；整日未练习扣分，且永久不可逆。平仓评价完成后独立奖励，重复编辑不重复计分。
+              开仓只记做多，做空对冲不计分。六项各自独立计分、互不联动。直接交易按当日标的去重（同标的多笔只扣一次）。当天交易过的标的须当天为其建战役，否则每个标的扣「未建战役」分。下单 / 弃单 / 复盘任一即算当天已练习；整日未练习扣分，且永久不可逆。平仓评价完成后独立奖励，重复编辑不重复计分。
             </p>
           </div>
           <div data-testid="execution-rule-grid" className="grid gap-3 p-5 sm:grid-cols-2 lg:grid-cols-3">
