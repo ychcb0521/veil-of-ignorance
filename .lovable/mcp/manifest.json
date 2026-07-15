@@ -1,0 +1,149 @@
+{
+  "version": 1,
+  "sdk_version": "0.22.0",
+  "path": "/functions/v1/mcp",
+  "auth": {
+    "type": "oauth",
+    "issuer": "https://pyvndfzpbsgzinqxairn.supabase.co/auth/v1",
+    "accepted_audiences": [
+      "authenticated"
+    ]
+  },
+  "mcp": {
+    "server": {
+      "name": "trading-journal-mcp",
+      "version": "0.1.0",
+      "title": "交易复盘中心 MCP"
+    },
+    "tools": [
+      {
+        "name": "whoami",
+        "title": "Who am I",
+        "description": "Return the signed-in user's profile: user id, email, display name, initial capital, initialized state.",
+        "annotations": {
+          "readOnlyHint": true,
+          "idempotentHint": true,
+          "openWorldHint": false
+        },
+        "inputSchema": {
+          "$schema": "http://json-schema.org/draft-07/schema#",
+          "type": "object",
+          "properties": {}
+        },
+        "outputSchema": null
+      },
+      {
+        "name": "list_recent_journals",
+        "title": "List recent trade journals",
+        "description": "List the signed-in user's most recent trade journal entries (错题集), newest first. Returns id, symbol, direction, outcome, entry reason, and simulated time.",
+        "annotations": {
+          "readOnlyHint": true,
+          "idempotentHint": true,
+          "openWorldHint": false
+        },
+        "inputSchema": {
+          "$schema": "http://json-schema.org/draft-07/schema#",
+          "type": "object",
+          "properties": {
+            "limit": {
+              "default": 10,
+              "description": "Max journals to return (1-50).",
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 50
+            },
+            "symbol": {
+              "description": "Optional symbol filter, e.g. BTCUSDT.",
+              "type": "string"
+            },
+            "outcome": {
+              "type": "string",
+              "enum": [
+                "win",
+                "loss",
+                "breakeven",
+                "no_entry"
+              ]
+            }
+          }
+        },
+        "outputSchema": null
+      },
+      {
+        "name": "get_journal",
+        "title": "Get trade journal by id",
+        "description": "Fetch one full trade journal row (pre-trade snapshot + post-trade review) for the signed-in user.",
+        "annotations": {
+          "readOnlyHint": true,
+          "idempotentHint": true,
+          "openWorldHint": false
+        },
+        "inputSchema": {
+          "$schema": "http://json-schema.org/draft-07/schema#",
+          "type": "object",
+          "properties": {
+            "journal_id": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+              "description": "Trade journal UUID."
+            }
+          },
+          "required": [
+            "journal_id"
+          ]
+        },
+        "outputSchema": null
+      },
+      {
+        "name": "list_error_patterns",
+        "title": "List error tag patterns",
+        "description": "List the signed-in user's error tag patterns (个人错题标签), sorted by occurrence count. Useful for seeing which mistake patterns recur most.",
+        "annotations": {
+          "readOnlyHint": true,
+          "idempotentHint": true,
+          "openWorldHint": false
+        },
+        "inputSchema": {
+          "$schema": "http://json-schema.org/draft-07/schema#",
+          "type": "object",
+          "properties": {
+            "include_archived": {
+              "default": false,
+              "type": "boolean"
+            },
+            "limit": {
+              "default": 30,
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            }
+          }
+        },
+        "outputSchema": null
+      },
+      {
+        "name": "list_trading_rules",
+        "title": "List trading rules",
+        "description": "List the signed-in user's trading rules (checklist derived from the error catalog).",
+        "annotations": {
+          "readOnlyHint": true,
+          "idempotentHint": true,
+          "openWorldHint": false
+        },
+        "inputSchema": {
+          "$schema": "http://json-schema.org/draft-07/schema#",
+          "type": "object",
+          "properties": {
+            "only_active": {
+              "default": true,
+              "description": "Only return rules where is_active = true.",
+              "type": "boolean"
+            }
+          }
+        },
+        "outputSchema": null
+      }
+    ]
+  }
+}
