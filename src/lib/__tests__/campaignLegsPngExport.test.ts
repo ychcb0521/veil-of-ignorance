@@ -75,6 +75,16 @@ describe('campaign PNG overview', () => {
     expect(pnl['战役编号']).toBe('C-ABC123');
   });
 
+  it('亏损战役的盈利捕获率保留负号', () => {
+    const negativeInput = input();
+    negativeInput.pnlOverview.profitCaptureRatio = -37.25;
+
+    const overview = buildCampaignBoardOverview(negativeInput);
+    const pnl = Object.fromEntries(overview.pnlItems.map(item => [item.label, item.value]));
+
+    expect(pnl['盈利捕获率']).toBe('-37.25%');
+  });
+
   it('按完整 legs 数据导出滚动区域外的所有行与末行信息', () => {
     const manyLegs = Array.from({ length: 14 }, (_, index) => ({
       id: `leg-${index + 1}`,

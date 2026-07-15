@@ -58,15 +58,12 @@ export interface SopDeviationResult {
 }
 
 const HEDGE_ROLES: LegRole[] = ['hedge_initial_a', 'hedge_initial_b', 'hedge_rolling'];
+const INITIAL_HEDGE_ROLES: LegRole[] = ['hedge_initial_a', 'hedge_initial_b'];
 const MAIN_ROLES: LegRole[] = ['main_open', ...MAIN_ADD_ROLES, 'reentry_main'];
 const EPSILON = 0.0001;
 
 const toMs = (value: string) => new Date(value).getTime();
 const toIso = (value: number) => new Date(value).toISOString();
-
-function clamp(value: number, min: number, max: number) {
-  return Math.min(max, Math.max(min, value));
-}
 
 function legSize(leg: TradeJournal): number | null {
   if (leg.pre_position_size != null) return leg.pre_position_size;
@@ -81,6 +78,71 @@ function findTradeRecord(leg: TradeJournal, tradeRecords: TradeRecord[]): TradeR
 
 function tradeRecordNotionalUsd(record: TradeRecord, price = record.entryPrice): number {
   return getPositionNotionalUsd(record.symbol, record, price || record.entryPrice);
+}
+
+function firstPositiveNumber(...values: Array<number | null | undefined>): number | null {
+  const value = values.find(candidate => Number.isFinite(candidate) && Number(candidate) > EPSILON);
+  return value == null ? null : Number(value);
+}
+
+/**
+ * Initial risk anchor used by 盈利捕获率:
+ * main notional x the widest distance from the original main entry to hedge A/B.
+ * Planned hedge prices stay authoritative because the denominator describes the
+ * risk known before execution; actual fills are only a fallback for old records.
+ */
+export function computeInitialExpectedMaxLoss(
+  campaign: TradeCampaign,
+  legs: TradeJournal[],
+  tradeRecords: TradeRecord[],
+): number {
+  const mainLeg = legs
+    .filter(leg => leg.leg_role === 'main_open')
+    .sort((a, b) => toMs(a.pre_simulated_time) - toMs(b.pre_simulated_time))[0] ?? null;
+  const mainRecord = mainLeg ? findTradeRecord(mainLeg, tradeRecords) : null;
+  const mainEvent = (campaign.actual_evolution ?? []).find(event =>
+    event.leg_role === 'main_open' && firstPositiveNumber(event.entry_price, event.price) != null,
+  ) ?? null;
+  const entryPrice = firstPositiveNumber(
+    mainRecord?.entryPrice,
+    mainLeg?.pre_entry_price,
+    mainEvent?.entry_price,
+    mainEvent?.price,
+  );
+  const recordNotional = mainRecord ? tradeRecordNotionalUsd(mainRecord, mainRecord.entryPrice) : null;
+  const mainNotional = firstPositiveNumber(
+    recordNotional,
+    mainLeg?.pre_position_size,
+    campaign.initial_main_size_usdt,
+    mainEvent?.size_usdt,
+  );
+  if (entryPrice == null || mainNotional == null) return 0;
+
+  const hedgePrices = INITIAL_HEDGE_ROLES.flatMap(role => {
+    const roleLegs = legs
+      .filter(leg => leg.leg_role === role)
+      .sort((a, b) => toMs(a.pre_simulated_time) - toMs(b.pre_simulated_time));
+    const plannedLeg = roleLegs.find(leg => firstPositiveNumber(leg.pre_entry_price) != null) ?? null;
+    const plannedPrice = firstPositiveNumber(plannedLeg?.pre_entry_price);
+    if (plannedPrice != null) return [plannedPrice];
+
+    const recordLeg = roleLegs.find(leg => findTradeRecord(leg, tradeRecords) != null) ?? null;
+    const recordPrice = recordLeg
+      ? firstPositiveNumber(findTradeRecord(recordLeg, tradeRecords)?.entryPrice)
+      : null;
+    if (recordPrice != null) return [recordPrice];
+
+    const event = (campaign.actual_evolution ?? [])
+      .filter(item => item.leg_role === role)
+      .sort((a, b) => toMs(a.timestamp) - toMs(b.timestamp))
+      .find(item => firstPositiveNumber(item.entry_price, item.price) != null);
+    const eventPrice = firstPositiveNumber(event?.entry_price, event?.price);
+    return eventPrice == null ? [] : [eventPrice];
+  });
+  if (hedgePrices.length === 0) return 0;
+
+  const widestRiskRate = Math.max(...hedgePrices.map(price => Math.abs(price - entryPrice) / entryPrice));
+  return widestRiskRate * mainNotional;
 }
 
 function eventTradeRecord(
@@ -505,7 +567,10 @@ export function computeDecisionAccuracy(
   }
 
   const realized = campaign.final_realized_pnl ?? tradeRecords.reduce((sum, record) => sum + (record.pnl || 0), 0);
-  const profit_capture_ratio = maxProfit > EPSILON ? clamp((realized / maxProfit) * 100, 0, 100) : 0;
+  const initialExpectedMaxLoss = computeInitialExpectedMaxLoss(campaign, legs, tradeRecords);
+  const profit_capture_ratio = initialExpectedMaxLoss > EPSILON
+    ? (realized / initialExpectedMaxLoss) * 100
+    : 0;
 
   return {
     hedge_precision,
