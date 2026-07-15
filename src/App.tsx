@@ -21,6 +21,7 @@ import CognitiveAssetsPage from "./pages/CognitiveAssetsPage.tsx";
 import ExecutionAssetsPage from "./pages/ExecutionAssetsPage.tsx";
 import GuidePage from "./pages/GuidePage.tsx";
 import NotFound from "./pages/NotFound.tsx";
+import OAuthConsent from "./pages/OAuthConsent.tsx";
 import { MandatoryRuleQueueRoot } from "./components/journal/MandatoryRuleQueueRoot.tsx";
 
 const queryClient = new QueryClient();
