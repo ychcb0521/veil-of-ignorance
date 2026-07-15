@@ -74,6 +74,8 @@ const BOARD_OVERVIEW_H = 154;
 const BOARD_SECTION_GAP = 18;
 const BOARD_SECTION_LABEL_H = 28;
 const BOARD_FOOTER_H = 34;
+const MAX_CANVAS_SIDE_PX = 32_000;
+const MAX_CANVAS_AREA_PX = 180_000_000;
 
 function campaignOutcomeSlug(status: TradeCampaign['status']): string {
   if (status === 'closed_profit') return 'profit';
@@ -277,6 +279,13 @@ export function buildCampaignLegsExportRows(input: ExportInput): CampaignLegsExp
   });
 }
 
+export function campaignLegsExportCanvasHeight(input: ExportInput, includeHeader = false): number {
+  const rows = buildCampaignLegsExportRows(input);
+  return (includeHeader ? HEADER_H + FOOTER_H : 0)
+    + TABLE_HEADER_H
+    + rows.reduce((sum, row) => sum + row.height, 0);
+}
+
 function exportScale(): number {
   return Math.min(Math.max(window.devicePixelRatio || 2, 2), 3);
 }
@@ -286,15 +295,21 @@ function createRenderedCanvas(width: number, height: number, scale = exportScale
   ctx: CanvasRenderingContext2D;
   rendered: RenderedCanvas;
 } {
+  // Chromium/Safari silently truncate or blank canvases that exceed their backing-store
+  // limit. Keep the logical height fully content-driven, lowering only pixel density for
+  // exceptionally long campaigns so the final rows are never lost.
+  const sideScale = Math.min(MAX_CANVAS_SIDE_PX / width, MAX_CANVAS_SIDE_PX / height);
+  const areaScale = Math.sqrt(MAX_CANVAS_AREA_PX / Math.max(1, width * height));
+  const fittedScale = Math.max(0.1, Math.min(scale, sideScale, areaScale));
   const canvas = document.createElement('canvas');
-  canvas.width = Math.ceil(width * scale);
-  canvas.height = Math.ceil(height * scale);
+  canvas.width = Math.ceil(width * fittedScale);
+  canvas.height = Math.ceil(height * fittedScale);
   canvas.style.width = `${width}px`;
   canvas.style.height = `${height}px`;
   const ctx = canvas.getContext('2d');
   if (!ctx) throw new Error('无法创建 PNG 画布');
-  ctx.setTransform(scale, 0, 0, scale, 0, 0);
-  return { canvas, ctx, rendered: { canvas, width, height, scale } };
+  ctx.setTransform(fittedScale, 0, 0, fittedScale, 0, 0);
+  return { canvas, ctx, rendered: { canvas, width, height, scale: fittedScale } };
 }
 
 function fillRoundedRect(

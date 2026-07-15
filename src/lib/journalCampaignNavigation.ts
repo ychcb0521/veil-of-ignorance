@@ -50,3 +50,14 @@ export function buildJournalCampaignIdIndex(
 export function journalRecordPath(journalId: string, campaignId?: string | null): string {
   return campaignId ? `/journal/campaigns/${campaignId}` : `/journal/${journalId}`;
 }
+
+export type JournalReviewLinkMode = 'edit' | 'required';
+
+/**
+ * Build a review link from the stable journal ID. The review text is deliberately
+ * not part of the identity, so later edits never break an execution-ledger link.
+ */
+export function journalReviewPath(journalId: string, mode: JournalReviewLinkMode): string {
+  const params = new URLSearchParams({ review: mode, from: 'execution-assets' });
+  return `/journal/${encodeURIComponent(journalId)}?${params.toString()}`;
+}

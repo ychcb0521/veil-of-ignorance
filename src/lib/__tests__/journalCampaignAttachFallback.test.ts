@@ -224,14 +224,20 @@ describe('batchAttachToCampaign schema fallback', () => {
         expect.objectContaining({
           event_type: 'historical_leg_attached',
           leg_role: 'main_open',
+          leg_sequence: 1,
           journal_id: 'journal-1',
           trade_record_id: 'record-1',
+          order_kind: 'main',
+          exit_price: 1.167,
         }),
         expect.objectContaining({
           event_type: 'historical_leg_attached',
           leg_role: 'main_add_1',
+          leg_sequence: 2,
           journal_id: 'journal-2',
           trade_record_id: 'record-2',
+          order_kind: 'main',
+          exit_price: 1.2594,
         }),
       ]),
     );
@@ -368,6 +374,78 @@ describe('batchAttachToCampaign schema fallback', () => {
       post_realized_pnl: 120,
       post_outcome: 'win',
       post_exit_price_snapshot: 1.167,
+    });
+  });
+
+  it('merges event-only historical legs into a partially persisted historical campaign', async () => {
+    const firstOpen = '2025-09-20T09:00:00.000Z';
+    const secondOpen = '2025-09-20T09:20:00.000Z';
+    const closeTime = '2025-09-20T10:10:00.000Z';
+    const historicalEvent = (
+      id: string,
+      recordId: string,
+      role: 'main_open' | 'main_add_1',
+      openTime: string,
+      entryPrice: number,
+    ): CampaignEvent => ({
+      id,
+      timestamp: openTime,
+      event_type: 'historical_leg_attached',
+      leg_role: role,
+      journal_id: `journal-${recordId}`,
+      trade_record_id: recordId,
+      pending_order_id: null,
+      price: entryPrice,
+      size_usdt: 1000,
+      notes: '历史归类',
+      recorded_at: '2026-06-17T06:00:00.000Z',
+      direction: 'long',
+      leverage: 7,
+      open_time: openTime,
+      close_time: closeTime,
+      entry_price: entryPrice,
+      exit_price: 1.2,
+      realized_pnl: 100,
+      r_multiple: null,
+    });
+    campaign = baseCampaign([
+      {
+        id: 'event-created',
+        timestamp: firstOpen,
+        event_type: 'historical_classification_created',
+        leg_role: null,
+        journal_id: null,
+        trade_record_id: null,
+        pending_order_id: null,
+        price: null,
+        size_usdt: null,
+        notes: null,
+        recorded_at: '2026-06-17T06:00:00.000Z',
+      },
+      historicalEvent('event-first', 'record-1', 'main_open', firstOpen, 1.08),
+      historicalEvent('event-second', 'record-2', 'main_add_1', secondOpen, 1.1),
+    ]);
+    journals = [baseJournal(1, {
+      id: 'journal-record-1',
+      campaign_id: 'campaign-1',
+      leg_role: 'main_open',
+      leg_sequence: 1,
+      pre_simulated_time: firstOpen,
+      post_exit_price_snapshot: null,
+    })];
+    localStorage.clear();
+
+    const result = await getCampaignWithLegs('campaign-1');
+
+    expect(result.legs).toHaveLength(2);
+    expect(result.legs.map(leg => leg.trade_record_id)).toEqual(['record-1', 'record-2']);
+    expect(result.legs[0].post_exit_price_snapshot).toBe(1.2);
+    expect(result.legs[1]).toMatchObject({
+      leg_sequence: 2,
+      leg_role: 'main_add_1',
+      pre_simulated_time: secondOpen,
+      pre_entry_price: 1.1,
+      post_exit_price_snapshot: 1.2,
     });
   });
 });

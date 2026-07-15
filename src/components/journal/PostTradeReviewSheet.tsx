@@ -115,6 +115,8 @@ interface Props {
   tradeRecord?: TradeRecord | null;
   onReviewed?: (updated: TradeJournal) => void;
   onAutoPause?: () => void;
+  /** Force this entry point to remain open until a successful save completes. */
+  requireSaveBeforeClose?: boolean;
 }
 
 const RESULT_REVIEW_LABELS: Record<StructureResultQuadrant, string> = {
@@ -128,6 +130,7 @@ const reviewAnswerTextareaClass = 'text-[12px] text-muted-foreground/70 placehol
 
 export function PostTradeReviewSheet({
   isOpen, onOpenChange, journal, tradeRecord, onReviewed, onAutoPause,
+  requireSaveBeforeClose = false,
 }: Props) {
   const isMobile = useIsMobile();
   const { recordPostTradeReviewCompleted } = useTradingContext();
@@ -229,11 +232,11 @@ export function PostTradeReviewSheet({
     ? Number(rMultipleOverride)
     : computedR;
 
-  // Hard-block dismiss when an unreviewed journal is open. Editing an already-reviewed
-  // journal stays freely dismissible.
-  const unreviewedBlock = !!journal && !journal.post_reviewed_at;
+  // Unreviewed journals and explicit required-review links cannot be dismissed.
+  // Editing an already-reviewed journal from a normal link remains freely dismissible.
+  const dismissBlocked = requireSaveBeforeClose || (!!journal && !journal.post_reviewed_at);
   const guardedOpenChange = (next: boolean) => {
-    if (!next && unreviewedBlock) {
+    if (!next && dismissBlocked) {
       toast.error('请先完成本笔平仓评价，再离开');
       return;
     }
@@ -252,17 +255,25 @@ export function PostTradeReviewSheet({
     );
     return (
       isMobile ? (
-        <Sheet open={isOpen} onOpenChange={onOpenChange}>
+        <Sheet open={isOpen} onOpenChange={guardedOpenChange}>
           <SheetContent
             side="bottom"
             className="h-[60vh] rounded-t-2xl p-0 bg-card border-t border-border text-foreground"
+            onPointerDownOutside={dismissBlocked ? e => e.preventDefault() : undefined}
+            onEscapeKeyDown={dismissBlocked ? e => e.preventDefault() : undefined}
+            onInteractOutside={dismissBlocked ? e => e.preventDefault() : undefined}
           >
             {placeholder}
           </SheetContent>
         </Sheet>
       ) : (
-        <Dialog open={isOpen} onOpenChange={onOpenChange}>
-          <DialogContent className="w-[calc(100vw-32px)] max-w-[860px] h-[60vh] p-0 bg-card border border-border text-foreground overflow-hidden rounded-2xl shadow-2xl [&>button]:right-5 [&>button]:top-5">
+        <Dialog open={isOpen} onOpenChange={guardedOpenChange}>
+          <DialogContent
+            className="w-[calc(100vw-32px)] max-w-[860px] h-[60vh] p-0 bg-card border border-border text-foreground overflow-hidden rounded-2xl shadow-2xl [&>button]:right-5 [&>button]:top-5"
+            onPointerDownOutside={dismissBlocked ? e => e.preventDefault() : undefined}
+            onEscapeKeyDown={dismissBlocked ? e => e.preventDefault() : undefined}
+            onInteractOutside={dismissBlocked ? e => e.preventDefault() : undefined}
+          >
             {placeholder}
           </DialogContent>
         </Dialog>
@@ -1551,7 +1562,7 @@ export function PostTradeReviewSheet({
 
       <div className="shrink-0 border-t border-border bg-background/95 px-6 py-3.5">
         <div className="mx-auto flex w-full max-w-[780px] items-center justify-between gap-3">
-          {unreviewedBlock ? (
+          {dismissBlocked ? (
             <span className="text-[11px] font-medium text-[#F6465D]">
               完成评价后即可继续下一笔
             </span>
@@ -1574,9 +1585,9 @@ export function PostTradeReviewSheet({
         <SheetContent
           side="bottom"
           className="h-[92vh] rounded-t-2xl p-0 bg-background border-t border-border flex flex-col"
-          onPointerDownOutside={unreviewedBlock ? e => e.preventDefault() : undefined}
-          onEscapeKeyDown={unreviewedBlock ? e => e.preventDefault() : undefined}
-          onInteractOutside={unreviewedBlock ? e => e.preventDefault() : undefined}
+          onPointerDownOutside={dismissBlocked ? e => e.preventDefault() : undefined}
+          onEscapeKeyDown={dismissBlocked ? e => e.preventDefault() : undefined}
+          onInteractOutside={dismissBlocked ? e => e.preventDefault() : undefined}
         >
           {body}
         </SheetContent>
@@ -1588,9 +1599,9 @@ export function PostTradeReviewSheet({
     <Dialog open={isOpen} onOpenChange={guardedOpenChange}>
       <DialogContent
         className="w-[calc(100vw-32px)] max-w-[860px] h-[92vh] overflow-hidden bg-background border border-border p-0 flex flex-col gap-0 rounded-2xl shadow-2xl [&>button]:right-5 [&>button]:top-5"
-        onPointerDownOutside={unreviewedBlock ? e => e.preventDefault() : undefined}
-        onEscapeKeyDown={unreviewedBlock ? e => e.preventDefault() : undefined}
-        onInteractOutside={unreviewedBlock ? e => e.preventDefault() : undefined}
+        onPointerDownOutside={dismissBlocked ? e => e.preventDefault() : undefined}
+        onEscapeKeyDown={dismissBlocked ? e => e.preventDefault() : undefined}
+        onInteractOutside={dismissBlocked ? e => e.preventDefault() : undefined}
       >
         {body}
       </DialogContent>

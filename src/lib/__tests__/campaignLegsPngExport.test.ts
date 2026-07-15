@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   buildCampaignBoardOverview,
   buildCampaignLegsExportRows,
+  campaignLegsExportCanvasHeight,
   type CampaignBoardExportInput,
 } from '@/lib/campaignLegsPngExport';
 import type { TradeCampaign, TradeJournal } from '@/types/journal';
@@ -96,6 +97,15 @@ describe('campaign PNG overview', () => {
     expect(rows.at(-1)?.cells[0][0].text).toBe('14');
     expect(rows.at(-1)?.cells[3][0].text).toBe('113.0000');
     expect(rows.at(-1)?.cells[5][0].text).toBe('1013.00');
+    expect(campaignLegsExportCanvasHeight({
+      ...input(),
+      legs: manyLegs,
+      reverseHedgeOrders: [],
+    })).toBeGreaterThan(campaignLegsExportCanvasHeight({
+      ...input(),
+      legs: manyLegs.slice(0, 3),
+      reverseHedgeOrders: [],
+    }));
   });
 
   it('完整保留反向挂单与平仓价校正明细', () => {

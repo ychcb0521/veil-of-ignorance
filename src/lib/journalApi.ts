@@ -22,6 +22,7 @@ import { INITIAL_COGNITIVE_ASSETS } from '@/lib/cognitiveAssetsInitialContent';
 import { applyLocalMirror, mirrorDroppedColumns, reconcileLocalMirror } from '@/lib/journalLocalMirror';
 import {
   buildTradeRecordLookup,
+  journalOperationTime,
   tradeRecordOperationTime,
 } from '@/lib/objectiveOperationTime';
 import { getPositionNotionalUsd } from '@/lib/tradingSettlement';
@@ -1208,8 +1209,10 @@ function campaignEventFromTradeRecord(
     recorded_at: now,
     direction: tradeRecordDirection(record),
     leverage: record.leverage,
+    order_kind: inferOrderKindFromLegRole(legRole),
     open_time: toIso(record.openTime),
     close_time: toIso(record.closeTime),
+    operation_time: toIso(tradeRecordOperationTime(record)),
     entry_price: record.entryPrice,
     exit_price: record.exitPrice,
     realized_pnl: record.pnl,
@@ -1223,7 +1226,10 @@ function campaignEventFromJournal(
   legRole: LegRole,
   now: string,
   notes: string | null,
+  record: TradeRecord | null = null,
 ): CampaignEvent {
+  const recordOpenTime = record ? toIso(record.openTime) : null;
+  const recordCloseTime = record ? toIso(record.closeTime) : null;
   return {
     id: crypto.randomUUID(),
     timestamp: journal.pre_simulated_time,
@@ -1232,18 +1238,23 @@ function campaignEventFromJournal(
     journal_id: journal.id,
     trade_record_id: journal.trade_record_id,
     pending_order_id: null,
-    price: journal.pre_entry_price,
-    size_usdt: journal.pre_position_size,
+    price: record?.entryPrice ?? journal.pre_entry_price,
+    size_usdt: record ? tradeRecordPositionSize(record) : journal.pre_position_size,
     notes,
     recorded_at: now,
-    direction: journal.direction,
-    leverage: journal.leverage,
-    open_time: journal.pre_simulated_time,
-    close_time: journal.post_simulated_close_time
+    direction: record ? tradeRecordDirection(record) : journal.direction,
+    leverage: record?.leverage ?? journal.leverage,
+    leg_sequence: journal.leg_sequence,
+    order_kind: journal.order_kind,
+    hedge_type: journal.hedge_type ?? null,
+    hedge_necessity_pct: journal.hedge_necessity_pct ?? null,
+    open_time: recordOpenTime ?? journal.pre_simulated_time,
+    close_time: recordCloseTime ?? journal.post_simulated_close_time
       ?? (journal.source === 'retroactive_from_record' ? journal.post_real_close_time : null),
-    entry_price: journal.pre_entry_price,
-    exit_price: null,
-    realized_pnl: journal.post_realized_pnl,
+    operation_time: toIso(journalOperationTime(journal, record)),
+    entry_price: record?.entryPrice ?? journal.pre_entry_price,
+    exit_price: record?.exitPrice ?? journal.post_exit_price_snapshot ?? null,
+    realized_pnl: record?.pnl ?? journal.post_realized_pnl,
     r_multiple: journal.post_r_multiple,
   };
 }
@@ -1262,13 +1273,13 @@ function synthesizeJournalFromRecord(
     trade_record_id: record.id,
     campaign_id: campaign.id,
     leg_role: event.leg_role ?? 'standalone',
-    leg_sequence: sequence,
+    leg_sequence: event.leg_sequence ?? sequence,
     source: 'retroactive_from_record',
     symbol: record.symbol,
     direction: tradeRecordDirection(record),
     leverage: record.leverage,
     position_mode: 'isolated',
-    order_kind: event.leg_role?.startsWith('hedge_') ? 'hedge' : 'main',
+    order_kind: event.order_kind ?? (event.leg_role?.startsWith('hedge_') ? 'hedge' : 'main'),
     pre_simulated_time: timestamp,
     pre_real_time: now,
     pre_entry_price: record.entryPrice,
@@ -1287,6 +1298,8 @@ function synthesizeJournalFromRecord(
     pre_contract_size_usd: record.contractSizeUsd ?? null,
     pre_contracts: record.contracts ?? null,
     pre_max_loss_usdt: null,
+    hedge_type: event.hedge_type ?? null,
+    hedge_necessity_pct: event.hedge_necessity_pct ?? null,
     post_outcome: tradeRecordOutcome(record),
     post_realized_pnl: record.pnl,
     post_r_multiple: null,
@@ -1349,13 +1362,13 @@ function synthesizeJournalFromEvent(
     trade_record_id: event.trade_record_id,
     campaign_id: campaign.id,
     leg_role: role,
-    leg_sequence: sequence,
+    leg_sequence: event.leg_sequence ?? sequence,
     source: 'retroactive_from_record',
     symbol: campaign.symbol,
     direction,
     leverage: event.leverage ?? campaign.initial_leverage,
     position_mode: 'isolated',
-    order_kind: inferOrderKindFromLegRole(role),
+    order_kind: event.order_kind ?? inferOrderKindFromLegRole(role),
     pre_simulated_time: event.open_time ?? event.timestamp,
     pre_real_time: now,
     pre_entry_price: entryPrice,
@@ -1374,6 +1387,8 @@ function synthesizeJournalFromEvent(
     pre_contract_size_usd: null,
     pre_contracts: null,
     pre_max_loss_usdt: null,
+    hedge_type: event.hedge_type ?? null,
+    hedge_necessity_pct: event.hedge_necessity_pct ?? null,
     post_outcome: event.realized_pnl != null
       ? tradeRecordOutcome({ pnl: event.realized_pnl })
       : null,
@@ -1382,7 +1397,7 @@ function synthesizeJournalFromEvent(
     post_reflection: null,
     post_correct_action: null,
     post_reviewed_at: null,
-    post_real_close_time: null,
+    post_real_close_time: event.operation_time ?? null,
     post_simulated_close_time: closeTime,
     reason_was_rewritten: false,
     created_at: now,
@@ -1407,6 +1422,54 @@ function synthesizeCampaignLegsFromEvents(campaign: TradeCampaign): TradeJournal
       const closeEvent = events.find(item => item !== event && isLegCloseEvent(item, event)) ?? null;
       return [synthesizeJournalFromEvent(campaign, event, seen.size, closeEvent)];
     });
+}
+
+function mergeCampaignLegSnapshots(primary: TradeJournal, fallback: TradeJournal): TradeJournal {
+  const merged = { ...fallback, ...primary } as TradeJournal;
+  for (const key of Object.keys(fallback) as Array<keyof TradeJournal>) {
+    if (primary[key] == null && fallback[key] != null) {
+      (merged as Record<keyof TradeJournal, unknown>)[key] = fallback[key];
+    }
+  }
+  return merged;
+}
+
+/**
+ * Historical campaigns may contain a partially persisted trade_journals set while
+ * actual_evolution still has every classified leg. Merge both sources so an older
+ * campaign never loses the event-only rows in its detail view or PNG export.
+ */
+function mergeHistoricalCampaignLegs(
+  databaseLegs: TradeJournal[],
+  eventLegs: TradeJournal[],
+): TradeJournal[] {
+  const merged = [...databaseLegs];
+  const indexById = new Map(merged.map((leg, index) => [leg.id, index]));
+  const indexByRecordId = new Map(
+    merged.flatMap((leg, index) => leg.trade_record_id ? [[leg.trade_record_id, index] as const] : []),
+  );
+
+  for (const eventLeg of eventLegs) {
+    const existingIndex = indexById.get(eventLeg.id)
+      ?? (eventLeg.trade_record_id ? indexByRecordId.get(eventLeg.trade_record_id) : undefined);
+    if (existingIndex == null) {
+      const nextIndex = merged.length;
+      merged.push(eventLeg);
+      indexById.set(eventLeg.id, nextIndex);
+      if (eventLeg.trade_record_id) indexByRecordId.set(eventLeg.trade_record_id, nextIndex);
+      continue;
+    }
+    merged[existingIndex] = mergeCampaignLegSnapshots(merged[existingIndex], eventLeg);
+  }
+
+  return merged
+    .sort((a, b) => {
+      const sequenceA = a.leg_sequence ?? Number.POSITIVE_INFINITY;
+      const sequenceB = b.leg_sequence ?? Number.POSITIVE_INFINITY;
+      if (sequenceA !== sequenceB) return sequenceA - sequenceB;
+      return journalTimeMs(a) - journalTimeMs(b);
+    })
+    .map((leg, index) => ({ ...leg, leg_sequence: index + 1 }));
 }
 
 function campaignSnapshotPatch(campaign: TradeCampaign): MutableCampaignPatch {
@@ -1542,6 +1605,7 @@ function normalizeCampaignEventForTradeRecord(event: CampaignEvent, record: Trad
     trade_record_id: record.id,
     direction: tradeRecordDirection(record),
     leverage: record.leverage,
+    operation_time: toIso(tradeRecordOperationTime(record)),
     open_time: openIso,
     close_time: closeIso,
     entry_price: record.entryPrice,
@@ -1872,12 +1936,13 @@ export async function getCampaignWithLegs(
     throw new Error(`加载战役 legs 失败：${lErr.message}`);
   }
   const dbLegs = (legs ?? []) as unknown as TradeJournal[];
-  const syntheticLegs = dbLegs.length > 0 || !resolvedCampaign
-    ? []
-    : synthesizeCampaignLegsFromEvents(resolvedCampaign);
+  const syntheticLegs = synthesizeCampaignLegsFromEvents(resolvedCampaign);
+  const resolvedLegs = isHistoricalCampaign(resolvedCampaign)
+    ? mergeHistoricalCampaignLegs(dbLegs, syntheticLegs)
+    : (dbLegs.length > 0 ? dbLegs : syntheticLegs);
   return {
     campaign: resolvedCampaign,
-    legs: dbLegs.length > 0 ? dbLegs : syntheticLegs,
+    legs: resolvedLegs,
   };
 }
 
@@ -2690,6 +2755,7 @@ export async function batchAttachToCampaign(
   const nextEvents: CampaignEvent[] = [...campaign.actual_evolution];
   const newLegs: TradeJournal[] = [];
   let journalCampaignColumnsUnavailable = false;
+  const tradeRecordMap = getTradeRecordMapForUser(campaign.user_id);
 
   try {
     for (const assignment of assignments) {
@@ -2718,14 +2784,14 @@ export async function batchAttachToCampaign(
 
       newLegs.push({ ...journal, ...patch });
       nextEvents.push(campaignEventFromJournal(
-        journal,
+        { ...journal, ...patch },
         assignment.legRole,
         new Date().toISOString(),
         assignment.attachNote ? `${assignment.attachNote} · ${RETRO_CLASSIFY_NOTE}` : RETRO_CLASSIFY_NOTE,
+        journal.trade_record_id ? tradeRecordMap.get(journal.trade_record_id) ?? null : null,
       ));
     }
 
-    const tradeRecordMap = getTradeRecordMapForUser(campaign.user_id);
     const patch = {
       ...deriveCampaignPatchFromLegs(campaign, [...existingLegs, ...newLegs], tradeRecordMap),
       actual_evolution: nextEvents,
@@ -2941,11 +3007,12 @@ export async function createCampaignFromTradeRecords(input: {
       notes,
       recorded_at: now,
     },
-    ...ordered.map(({ record, legRole }) => campaignEventFromTradeRecord(
+    ...ordered.map(({ record, legRole, legSequence }) => campaignEventFromTradeRecord(
       record,
       legRole,
       toIso(tradeRecordTimeMs(record)) ?? openedAt,
       now,
+      { leg_sequence: legSequence },
     )),
   ];
   const campaignId = crypto.randomUUID();

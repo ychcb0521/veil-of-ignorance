@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import ExecutionAssetsPage from '../ExecutionAssetsPage';
 
@@ -60,6 +60,16 @@ vi.mock('@/contexts/TradingContext', () => ({
         createdAt: Date.parse('2026-07-11T08:00:00.000Z'),
         label: '完成平仓评价奖励',
         journalId: 'journal-1',
+      }, {
+        id: 'review-missing-event-1',
+        type: 'review_missing_penalty',
+        points: -1000,
+        date: '2026-07-09',
+        createdAt: Date.parse('2026-07-14T08:00:00.000Z'),
+        operationTime: Date.parse('2026-07-09T08:00:00.000Z'),
+        label: '未做平仓评价扣分',
+        journalId: 'journal-missing',
+        reviewSymbol: 'ETHUSDT',
       }, {
         id: 'direct-event-1',
         type: 'direct_reward',
@@ -177,4 +187,43 @@ describe('ExecutionAssetsPage review reward', () => {
     fireEvent.click(within(campaignEvent).getByText('+1,500'));
     expect(await screen.findByText('已进入对应交易战役')).toBeInTheDocument();
   });
+
+  it.each([
+    {
+      eventId: 'review-event-1',
+      score: '+666',
+      expected: '/journal/journal-1?review=edit&from=execution-assets',
+      title: '点击查看、编辑并保存这笔平仓评价',
+    },
+    {
+      eventId: 'review-missing-event-1',
+      score: '-1,000',
+      expected: '/journal/journal-missing?review=required&from=execution-assets',
+      title: '点击开始并完成这笔平仓评价',
+    },
+  ])('opens the correct review mode for $eventId', async ({ eventId, score, expected, title }) => {
+    render(
+      <MemoryRouter initialEntries={['/execution-assets']}>
+        <Routes>
+          <Route path="/execution-assets" element={<ExecutionAssetsPage />} />
+          <Route path="/journal/:journalId" element={<LocationProbe />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    const item = await waitFor(() => {
+      const found = document.querySelector(`[data-event-id="${eventId}"]`);
+      expect(found).not.toBeNull();
+      expect(within(found as HTMLElement).getByRole('button')).toHaveAttribute('title', title);
+      return found as HTMLElement;
+    });
+    fireEvent.click(within(item).getByText(score));
+
+    expect(await screen.findByTestId('review-destination')).toHaveTextContent(expected);
+  });
 });
+
+function LocationProbe() {
+  const location = useLocation();
+  return <div data-testid="review-destination">{location.pathname}{location.search}</div>;
+}

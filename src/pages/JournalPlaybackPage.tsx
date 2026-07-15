@@ -1,8 +1,8 @@
 /**
  * /journal/:id — 单笔交易五通道复现页
  */
-import { useEffect, useMemo, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useBeforeUnload, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { AlertOctagon, Pencil, BrainCircuit } from 'lucide-react';
 import { toast } from 'sonner';
 import { useAuth } from '@/contexts/AuthContext';
@@ -46,7 +46,9 @@ function pnlColor(v: number) {
 export default function JournalPlaybackPage() {
   const { id } = useParams<{ id: string }>();
   const nav = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { user } = useAuth();
+  const userId = user?.id;
   const { tradeHistory } = useTradingContext();
   const isMobile = useIsMobile();
 
@@ -57,16 +59,21 @@ export default function JournalPlaybackPage() {
   const [loading, setLoading] = useState(true);
   const [editOpen, setEditOpen] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
+  const reviewSavedRef = useRef(false);
+  const reviewParam = searchParams.get('review');
+  const requestedReviewMode = reviewParam === 'edit' || reviewParam === 'required'
+    ? reviewParam
+    : null;
 
   useEffect(() => {
-    if (!id || !user) return;
+    if (!id || !userId) return;
     let cancelled = false;
     setLoading(true);
     (async () => {
       try {
         const j = await getJournalById(id);
         if (cancelled) return;
-        if (!j || j.user_id !== user.id) {
+        if (!j || j.user_id !== userId) {
           toast.error('该交易日记不存在或无权访问');
           nav('/journal');
           return;
@@ -74,8 +81,8 @@ export default function JournalPlaybackPage() {
         setJournal(j);
         const [as, ps, bulk] = await Promise.all([
           listAssignmentsForJournal(j.id),
-          listPatterns(user.id, { includeArchived: true }),
-          listAllJournalDataForUser(user.id),
+          listPatterns(userId, { includeArchived: true }),
+          listAllJournalDataForUser(userId),
         ]);
         if (cancelled) return;
         setAssignments(as);
@@ -88,7 +95,15 @@ export default function JournalPlaybackPage() {
       }
     })();
     return () => { cancelled = true; };
-  }, [id, user, nav, reloadKey]);
+  }, [id, userId, nav, reloadKey]);
+
+  useEffect(() => {
+    reviewSavedRef.current = false;
+  }, [id, requestedReviewMode]);
+
+  useEffect(() => {
+    if (journal?.id && requestedReviewMode) setEditOpen(true);
+  }, [journal?.id, requestedReviewMode]);
 
   const tradeRecord: TradeRecord | null = useMemo(() => {
     if (!journal?.trade_record_id) return null;
@@ -98,6 +113,35 @@ export default function JournalPlaybackPage() {
     () => journal ? journalCloseOperationTime(journal, tradeRecord) : null,
     [journal, tradeRecord],
   );
+  const requiredReviewPending = Boolean(
+    requestedReviewMode === 'required'
+    && journal
+    && !journal.post_reviewed_at
+    && !reviewSavedRef.current,
+  );
+  const guardRequiredReviewUnload = useCallback((event: BeforeUnloadEvent) => {
+    if (!requiredReviewPending) return;
+    event.preventDefault();
+    event.returnValue = '';
+  }, [requiredReviewPending]);
+  useBeforeUnload(guardRequiredReviewUnload);
+
+  const clearReviewRequest = useCallback(() => {
+    if (!requestedReviewMode) return;
+    const next = new URLSearchParams(searchParams);
+    next.delete('review');
+    next.delete('from');
+    setSearchParams(next, { replace: true });
+  }, [requestedReviewMode, searchParams, setSearchParams]);
+
+  const handleReviewOpenChange = (open: boolean) => {
+    if (!open && requiredReviewPending && !reviewSavedRef.current) {
+      toast.error('请先完成并保存本笔平仓评价，再离开');
+      return;
+    }
+    setEditOpen(open);
+    if (!open) clearReviewRequest();
+  };
 
   if (loading || !journal) {
     return (
@@ -231,11 +275,15 @@ export default function JournalPlaybackPage() {
 
         <PostTradeReviewSheet
           isOpen={editOpen}
-          onOpenChange={setEditOpen}
+          onOpenChange={handleReviewOpenChange}
           journal={journal}
           tradeRecord={tradeRecord}
-          onReviewed={() => {
+          requireSaveBeforeClose={requiredReviewPending}
+          onReviewed={updated => {
+            reviewSavedRef.current = true;
+            setJournal(updated);
             setEditOpen(false);
+            clearReviewRequest();
             setReloadKey(k => k + 1);
           }}
         />

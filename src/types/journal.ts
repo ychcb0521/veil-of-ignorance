@@ -352,8 +352,14 @@ export interface CampaignEvent {
    */
   direction?: TradeDirection | null;
   leverage?: number | null;
+  leg_sequence?: number | null;
+  order_kind?: OrderKind | null;
+  hedge_type?: HedgeType | null;
+  hedge_necessity_pct?: number | null;
   open_time?: string | null;
   close_time?: string | null;
+  /** Objective, unshifted wallet-clock operation time when the leg was closed. */
+  operation_time?: string | null;
   entry_price?: number | null;
   exit_price?: number | null;
   realized_pnl?: number | null;

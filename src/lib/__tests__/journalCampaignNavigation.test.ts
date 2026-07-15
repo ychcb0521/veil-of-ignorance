@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import type { TradeCampaign, TradeJournal } from '@/types/journal';
-import { buildJournalCampaignIdIndex, journalRecordPath } from '../journalCampaignNavigation';
+import {
+  buildJournalCampaignIdIndex,
+  journalRecordPath,
+  journalReviewPath,
+} from '../journalCampaignNavigation';
 
 describe('journal campaign navigation', () => {
   it('prefers the stable campaign_id and repairs legacy rows only from unique IDs', () => {
@@ -26,6 +30,15 @@ describe('journal campaign navigation', () => {
     });
     expect(journalRecordPath('direct', 'campaign-direct')).toBe('/journal/campaigns/campaign-direct');
     expect(journalRecordPath('ambiguous', null)).toBe('/journal/ambiguous');
+  });
+
+  it('builds stable edit and required-review links from the journal ID', () => {
+    expect(journalReviewPath('journal/with space', 'edit')).toBe(
+      '/journal/journal%2Fwith%20space?review=edit&from=execution-assets',
+    );
+    expect(journalReviewPath('journal-2', 'required')).toBe(
+      '/journal/journal-2?review=required&from=execution-assets',
+    );
   });
 });
 

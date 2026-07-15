@@ -50,6 +50,7 @@ import { cn } from '@/lib/utils';
 import type { TradeRecord } from '@/types/trading';
 import type { TradeCampaign } from '@/types/journal';
 import { buildObjectiveLongMainReviewItems } from '@/lib/unreviewedLongMainTrades';
+import { journalReviewPath } from '@/lib/journalCampaignNavigation';
 
 type DetailPanelKey = 'decision' | 'direct' | 'penalty' | 'campaign' | 'review' | 'review_missing' | 'share';
 
@@ -327,6 +328,9 @@ function EventDetailCard({
   const isReview = event.type === 'review_reward';
   const isReviewMissing = event.type === 'review_missing_penalty';
   const canOpen = Boolean(trade) && matched != null;
+  const reviewPath = event.journalId && (isReview || isReviewMissing)
+    ? journalReviewPath(event.journalId, isReviewMissing ? 'required' : 'edit')
+    : null;
   const operationTime = executionEventOperationTime(event, campaignById);
   const tradeSymbol = trade
     ? `${getSettlementAsset(trade.symbol)}/${quoteLabel(trade)}`
@@ -455,12 +459,12 @@ function EventDetailCard({
           );
         })()
       ) : isReviewMissing ? (
-        event.journalId ? (
+        reviewPath ? (
           <button
             type="button"
-            onClick={() => nav(`/journal/${event.journalId}`)}
+            onClick={() => nav(reviewPath)}
             className="mt-4 flex w-full items-center justify-between gap-3 rounded-lg border border-[#F6465D]/25 bg-[#F6465D]/5 px-3 py-2 text-left transition-colors hover:bg-[#F6465D]/10"
-            title="点击补做这笔平仓评价"
+            title="点击开始并完成这笔平仓评价"
           >
             <div className="min-w-0">
               <div className="truncate text-[12px] font-medium text-foreground">
@@ -478,12 +482,12 @@ function EventDetailCard({
           </div>
         )
       ) : isReview ? (
-        event.journalId ? (
+        reviewPath ? (
           <button
             type="button"
-            onClick={() => nav(`/journal/${event.journalId}`)}
+            onClick={() => nav(reviewPath)}
             className="mt-4 flex w-full items-center justify-between gap-3 rounded-lg border border-[#B080FF]/30 bg-[#B080FF]/5 px-3 py-2 text-left transition-colors hover:bg-[#B080FF]/10"
-            title="点击查看这笔平仓评价"
+            title="点击查看、编辑并保存这笔平仓评价"
           >
             <div>
               <div className="text-[12px] font-medium text-foreground">已完成平仓评价</div>
@@ -859,7 +863,14 @@ export default function ExecutionAssetsPage() {
                 {recentEvents.map(event => {
                   const matched = matchClosesForSnapshot(event.trade, tradeHistory);
                   const canOpen = Boolean(event.trade) && matched != null;
-                  const canOpenReview = (event.type === 'review_reward' || event.type === 'review_missing_penalty') && Boolean(event.journalId);
+                  const reviewPath = event.journalId
+                    && (event.type === 'review_reward' || event.type === 'review_missing_penalty')
+                    ? journalReviewPath(
+                        event.journalId,
+                        event.type === 'review_missing_penalty' ? 'required' : 'edit',
+                      )
+                    : null;
+                  const canOpenReview = Boolean(reviewPath);
                   const campaign = event.type === 'campaign_reward' && event.campaignId
                     ? campaignById[event.campaignId]
                     : null;
@@ -873,7 +884,7 @@ export default function ExecutionAssetsPage() {
                         type="button"
                         onClick={() => {
                           if (canOpen) openPlayback(event);
-                          else if (canOpenReview && event.journalId) nav(`/journal/${event.journalId}`);
+                          else if (reviewPath) nav(reviewPath);
                           else if (canOpenCampaign && campaign) nav(`/journal/campaigns/${campaign.id}`);
                         }}
                         disabled={!canInteract || busy}
@@ -888,7 +899,10 @@ export default function ExecutionAssetsPage() {
                             : 'border-border/60 cursor-not-allowed opacity-95',
                         )}
                         title={
-                          canOpenReview ? '点击查看这笔平仓评价'
+                          reviewPath
+                            ? event.type === 'review_missing_penalty'
+                              ? '点击开始并完成这笔平仓评价'
+                              : '点击查看、编辑并保存这笔平仓评价'
                           : canOpenCampaign ? '点击进入对应的交易战役'
                           : event.type === 'campaign_reward' && event.campaignId ? '对应战役已删除'
                           : event.type === 'campaign_reward' ? '正在匹配历史奖励对应的战役'
