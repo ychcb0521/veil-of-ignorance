@@ -165,7 +165,7 @@ interface TradingState {
   setExecutionAsset: (v: ExecutionAssetState | ((prev: ExecutionAssetState) => ExecutionAssetState)) => void;
   recordExecutionTrade: (modeOverride?: TradingMode, trade?: ExecutionTradeSnapshot | null) => void;
   /** 每创建一次交易战役调用一次，执行力资产 +300 分；传 campaignId 按战役幂等。 */
-  recordCampaignCreated: (campaignId?: string | null) => void;
+  recordCampaignCreated: (campaign?: string | CampaignRewardRef | null) => void;
   /** 用真实战役 ID 与创建时间对账，补齐漏记奖励并绑定旧流水（幂等，自愈）。 */
   reconcileCampaignRewards: (campaigns: CampaignRewardRef[]) => void;
   /** 每完成一次平仓评价 +1000；同一个 journal 后续编辑不重复计分。完成评价即算当天已练习。 */
@@ -368,9 +368,9 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
     setExecutionAsset(prev => applyExecutionTradeReward(prev, mode, new Date(), trade));
   }, [setExecutionAsset]);
 
-  // 每建一次交易战役 +1500 分（执行力资产新增类目）；按 campaignId 幂等。
-  const recordCampaignCreated = useCallback((campaignId?: string | null) => {
-    setExecutionAsset(prev => applyCampaignReward(prev, campaignId ?? null, new Date()));
+  // 建战役按「自然日 × 标的」+300；同日同标的只计一次，并与未建战役 −300 互斥。
+  const recordCampaignCreated = useCallback((campaign?: string | CampaignRewardRef | null) => {
+    setExecutionAsset(prev => applyCampaignReward(prev, campaign ?? null, new Date()));
   }, [setExecutionAsset]);
 
   // 用真实战役 ID + 创建时间对账：补齐漏记奖励，并让旧流水永久绑定到对应战役。
@@ -394,7 +394,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
     setExecutionAsset(prev => applyPracticeLogged(prev, new Date()));
   }, [setExecutionAsset]);
 
-  // 用权威战役列表结算「交易过却当天没建战役」的 −300（按标的、永久、幂等）。
+  // 用权威战役列表结算「交易过却当天没建战役」的 −300；与同日同标的建战役奖励互斥。
   const settleCampaignMissingPenalties = useCallback((campaigns: CampaignCreationRef[]) => {
     setExecutionAsset(prev => applySettleCampaignMissing(prev, campaigns, new Date()));
   }, [setExecutionAsset]);

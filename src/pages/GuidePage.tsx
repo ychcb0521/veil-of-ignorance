@@ -1044,7 +1044,7 @@ export default function GuidePage() {
               <P>底部历史区用于检查执行结果。重点关注三类记录：未评价交易、仓位历史记录、平仓方式。</P>
               <ul className="list-disc pl-6 text-[14px] text-foreground/90 space-y-1">
                 <li><strong>未评价交易</strong>：优先补齐。已平仓未评价会硬阻塞下一次开仓。</li>
-                <li><strong>仓位历史记录</strong>：可用于归类历史交易，组成一次交易战役。</li>
+                <li><strong>仓位历史记录</strong>：可用于归类历史交易，组成一次交易战役；误点“跳过”的主力多单可从“评价状态”列重新发起评价，已评价记录可直接打开原评价。</li>
                 <li><strong>平仓方式</strong>：区分手动、止损、止盈、爆仓，判断你是在执行系统还是被情绪驱动。</li>
                 <li><strong>克制记录</strong>：记录“我忍住没下的单”，它和实际下单一样进入元监控。</li>
               </ul>
@@ -1070,7 +1070,7 @@ export default function GuidePage() {
                   手动补充系统暂时算不出来、但你明显反复踩到的东西——它和"汇总"互补。
                 </KeyCard>
                 <KeyCard title="待复盘">
-                  已平仓但还没做评价的单子列表，是补全样本的入口。已平仓未评价会硬阻塞下一次开仓。
+                  只汇总拥有客观操作时间的主力多单，并覆盖全部历史记录（包括旧 position ID 关联）。顶部按标的列出未评价笔数；列表显示未经时间机器移位的操作时间，可一键切换从新到旧 / 从旧到新，并直接补做评价。
                 </KeyCard>
               </KeyGrid>
               <P>下面只展开「汇总」这个核心 tab——它直接对接你在开仓快照与平仓评价里填的每一个问题，做了三种不同的渲染：</P>
@@ -1315,10 +1315,10 @@ export default function GuidePage() {
                 <tbody>
                   <tr><td className="px-3 py-2 border-t border-border">完成平仓评价</td><td className="px-3 py-2 border-t border-border font-mono text-[#B080FF]">+1000</td><td className="px-3 py-2 border-t border-border">把一次交易闭合成可复盘的评价样本——错题集 / 结构成熟度的数据全从这里来；同一笔后续编辑不重复计分</td></tr>
                   <tr><td className="px-3 py-2 border-t border-border">决策记录模块交易</td><td className="px-3 py-2 border-t border-border font-mono text-[#0ECB81]">+600</td><td className="px-3 py-2 border-t border-border">走决策模块下单，留下完整样本：开仓快照 → 平仓评价 → 错题集 / 结构成熟度 / 规则 / 元监控</td></tr>
-                  <tr><td className="px-3 py-2 border-t border-border">创建交易战役</td><td className="px-3 py-2 border-t border-border font-mono text-[#5BA3FF]">+300</td><td className="px-3 py-2 border-t border-border">为交易搭出结构（头仓 / 加仓 / 对冲的多腿计划）；按战役 ID 幂等，同一场只加一次</td></tr>
+                  <tr><td className="px-3 py-2 border-t border-border">创建交易战役</td><td className="px-3 py-2 border-t border-border font-mono text-[#5BA3FF]">+300</td><td className="px-3 py-2 border-t border-border">按“自然日 × 标的”计分；同日同标的建一场或多场都只奖励一次</td></tr>
                   <tr><td className="px-3 py-2 border-t border-border">未做平仓评价</td><td className="px-3 py-2 border-t border-border font-mono text-[#F6465D]">-1000</td><td className="px-3 py-2 border-t border-border">已平仓、有成交记录的主力单没做复盘就扣；<strong>可翻转</strong>——事后补做复盘，这 −1000 撤销并翻成 +1000（2000 分摆动，催你清空待复盘）</td></tr>
                   <tr><td className="px-3 py-2 border-t border-border">直接交易（每标的）</td><td className="px-3 py-2 border-t border-border font-mono text-[#F6465D]">-600</td><td className="px-3 py-2 border-t border-border">未走决策模块、无结构地下单；按当日标的去重（同标的多笔只扣一次）</td></tr>
-                  <tr><td className="px-3 py-2 border-t border-border">标的未建战役（每标的）</td><td className="px-3 py-2 border-t border-border font-mono text-[#D89B00]">-300</td><td className="px-3 py-2 border-t border-border">当天交易过的标的，当天没为它建战役；按标的、永久、幂等</td></tr>
+                  <tr><td className="px-3 py-2 border-t border-border">标的未建战役（每标的）</td><td className="px-3 py-2 border-t border-border font-mono text-[#D89B00]">-300</td><td className="px-3 py-2 border-t border-border">当天交易过但没建战役；与同日同标的“建战役 +300”互斥，后补战役会自动撤罚翻转</td></tr>
                   <tr><td className="px-3 py-2 border-t border-border">自然日未练习</td><td className="px-3 py-2 border-t border-border font-mono text-[#F6465D]">-2000</td><td className="px-3 py-2 border-t border-border"><strong>头号大罪</strong>：一整天没有任何练习动作；无正向镜像、<strong>永久不可逆</strong>——后续再练也不退这笔，按模拟时间的自然日结算</td></tr>
                 </tbody>
               </table>

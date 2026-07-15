@@ -619,7 +619,11 @@ export default function JournalCampaignClassifyPage() {
         onOpenChange={setNewDialogOpen}
         items={selectedItems}
         onCreated={async (campaignId) => {
-          recordCampaignCreated(campaignId);
+          recordCampaignCreated({
+            id: campaignId,
+            symbol: itemSymbol(selectedItems[0]),
+            createdAt: new Date(),
+          });
           setSelectedIds(new Set());
           await loadData();
           nav(`/journal/campaigns/${campaignId}`);

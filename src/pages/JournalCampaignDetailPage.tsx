@@ -917,8 +917,13 @@ export default function JournalCampaignDetailPage() {
         tradeRecords,
         reverseHedgeOrders: visibleReverseHedgeOrders,
         chartElement: campaignChartExportRef.current,
+        pnlOverview: {
+          campaignMaxProfitReal: accuracy.campaign_max_profit_real,
+          campaignMaxDrawdownReal: accuracy.campaign_max_drawdown_real,
+          profitCaptureRatio: accuracy.profit_capture_ratio,
+        },
       });
-      toast.success('K 线盘面与 Legs 列表已保存为 PNG', { description: fileName });
+      toast.success('交易战役完整图片已保存为 PNG', { description: fileName });
     } catch (error) {
       toast.error(error instanceof Error ? error.message : String(error));
     } finally {
@@ -1273,7 +1278,7 @@ export default function JournalCampaignDetailPage() {
               disabled={legsExporting || legs.length === 0}
               onClick={handleExportCampaignBoardPng}
               className="h-7 gap-1.5 px-2 text-[11px] text-muted-foreground hover:text-foreground"
-              title="保存当前 K 线盘面与完整 Legs 列表为高清 PNG"
+              title="保存战役原数据、盈亏概览、当前 K 线盘面与完整 Legs 列表为高清 PNG"
             >
               <Download className="h-3.5 w-3.5" />
               {legsExporting ? '生成中' : 'PNG'}

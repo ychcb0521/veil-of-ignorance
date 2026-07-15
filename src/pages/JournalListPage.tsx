@@ -10,6 +10,7 @@ import { useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import { BackButton } from '@/components/journal/BackButton';
 import { useAuth } from '@/contexts/AuthContext';
+import { useTradingContext } from '@/contexts/TradingContext';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { listAllCampaigns, listAllJournalDataForUser, type BulkJournalData } from '@/lib/journalApi';
 import { applyLocalMirror } from '@/lib/journalLocalMirror';
@@ -20,11 +21,13 @@ import { StructureMaturityView } from '@/components/journal/StructureMaturityVie
 import { BlindSpotModule } from '@/components/journal/BlindSpotModule';
 import { UnreviewedJournalList } from '@/components/journal/UnreviewedJournalList';
 import type { TradeCampaign } from '@/types/journal';
+import { buildUnreviewedLongMainItems } from '@/lib/unreviewedLongMainTrades';
 
 type View = 'summary' | 'structures' | 'blindspots' | 'unreviewed';
 
 export default function JournalListPage() {
   const { user } = useAuth();
+  const { tradeHistory } = useTradingContext();
   const [params, setParams] = useSearchParams();
 
   const [data, setData] = useState<BulkJournalData | null>(null);
@@ -49,15 +52,9 @@ export default function JournalListPage() {
       // 用户单设备上始终能看到自己填的所有内容，不受远程缺列影响。
       const applyMirror = (d: BulkJournalData): BulkJournalData =>
         ({ ...d, journals: applyLocalMirror(user.id, d.journals) });
-      if (all.journals.length > 1000) {
-        const since = new Date(Date.now() - 90 * 86400000).toISOString();
-        const partial = await listAllJournalDataForUser(user.id, { dateFrom: since });
-        setCampaigns(await campaignsPromise);
-        setData(applyMirror(partial));
-      } else {
-        setCampaigns(await campaignsPromise);
-        setData(applyMirror(all));
-      }
+      // API 已分页拉全历史；不再在记录多时退化为最近 90 天，否则待复盘与汇总会漏币种。
+      setCampaigns(await campaignsPromise);
+      setData(applyMirror(all));
     } catch (e) {
       toast.error(e instanceof Error ? e.message : String(e));
     } finally {
@@ -103,8 +100,8 @@ export default function JournalListPage() {
     ));
   }, [campaigns, tradeJournals]);
   const unreviewedCount = useMemo(
-    () => (data?.journals ?? []).filter(j => j.trade_record_id && !j.post_reviewed_at).length,
-    [data?.journals],
+    () => buildUnreviewedLongMainItems(data?.journals ?? [], tradeHistory).length,
+    [data?.journals, tradeHistory],
   );
 
   const setView = (v: string) => {

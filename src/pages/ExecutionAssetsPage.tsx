@@ -4,6 +4,7 @@ import {
   Activity,
   CalendarMinus,
   ClipboardCheck,
+  ClipboardX,
   ChevronDown,
   ChevronRight,
   Clock,
@@ -48,8 +49,9 @@ import { formatUTC8 } from '@/lib/timeFormat';
 import { cn } from '@/lib/utils';
 import type { TradeRecord } from '@/types/trading';
 import type { TradeCampaign } from '@/types/journal';
+import { buildObjectiveLongMainReviewItems } from '@/lib/unreviewedLongMainTrades';
 
-type DetailPanelKey = 'decision' | 'direct' | 'penalty' | 'campaign' | 'review' | 'share';
+type DetailPanelKey = 'decision' | 'direct' | 'penalty' | 'campaign' | 'review' | 'review_missing' | 'share';
 
 function formatSigned(points: number) {
   return `${points >= 0 ? '+' : ''}${points.toLocaleString()}`;
@@ -80,6 +82,7 @@ function executionEventOperationTime(
   event: ExecutionAssetEvent,
   campaignById: Record<string, TradeCampaign>,
 ): number {
+  if (event.operationTime != null && Number.isFinite(event.operationTime)) return event.operationTime;
   if (event.type === 'campaign_reward' && event.campaignId) {
     const campaignCreatedAt = campaignById[event.campaignId]?.created_at;
     const campaignTime = campaignCreatedAt ? new Date(campaignCreatedAt).getTime() : Number.NaN;
@@ -235,13 +238,18 @@ const PANEL_COPY: Record<DetailPanelKey, { title: string; subtitle: string; empt
   },
   campaign: {
     title: '创建交易战役明细',
-    subtitle: `每创建一次交易战役 +${EXECUTION_CAMPAIGN_REWARD}。`,
+    subtitle: `按“自然日 × 标的”计分：当天同一标的建一场或多场战役都只 +${EXECUTION_CAMPAIGN_REWARD}，并与未建战役扣分互斥。`,
     empty: '暂无创建的交易战役。',
   },
   review: {
     title: '平仓评价明细',
     subtitle: `每完成一笔平仓评价 +${EXECUTION_REVIEW_REWARD}；后续编辑不重复计分。`,
     empty: '暂无已完成的平仓评价。',
+  },
+  review_missing: {
+    title: '未做平仓评价明细',
+    subtitle: `只统计拥有真实操作时间的主力多单；每笔 -${EXECUTION_REVIEW_MISSING_PENALTY}，补做评价后自动撤销。`,
+    empty: '暂无未做平仓评价的主力多单。',
   },
   share: {
     title: '决策记录占比明细',
@@ -317,6 +325,7 @@ function EventDetailCard({
   const isPenalty = event.type === 'no_trade_penalty';
   const isCampaign = event.type === 'campaign_reward';
   const isReview = event.type === 'review_reward';
+  const isReviewMissing = event.type === 'review_missing_penalty';
   const canOpen = Boolean(trade) && matched != null;
   const operationTime = executionEventOperationTime(event, campaignById);
   const tradeSymbol = trade
@@ -329,7 +338,7 @@ function EventDetailCard({
         <div>
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-[13px] font-semibold">
-              {tradeSymbol ?? (isPenalty ? '未练习扣分日' : event.label)}
+              {tradeSymbol ?? event.reviewSymbol ?? (isPenalty ? '未练习扣分日' : event.label)}
             </span>
             {trade?.side && (
               <span
@@ -445,6 +454,29 @@ function EventDetailCard({
             </button>
           );
         })()
+      ) : isReviewMissing ? (
+        event.journalId ? (
+          <button
+            type="button"
+            onClick={() => nav(`/journal/${event.journalId}`)}
+            className="mt-4 flex w-full items-center justify-between gap-3 rounded-lg border border-[#F6465D]/25 bg-[#F6465D]/5 px-3 py-2 text-left transition-colors hover:bg-[#F6465D]/10"
+            title="点击补做这笔平仓评价"
+          >
+            <div className="min-w-0">
+              <div className="truncate text-[12px] font-medium text-foreground">
+                {event.reviewSymbol || '主力多单'} · 未做平仓评价
+              </div>
+              <div className="mt-0.5 font-mono text-[10px] text-muted-foreground">
+                操作于 {formatTime(operationTime)} · -{EXECUTION_REVIEW_MISSING_PENALTY}
+              </div>
+            </div>
+            <ChevronRight className="h-4 w-4 shrink-0 text-[#F6465D]" />
+          </button>
+        ) : (
+          <div className="mt-4 rounded-lg border border-[#F6465D]/20 bg-[#F6465D]/5 px-3 py-2 text-[12px] text-muted-foreground">
+            这笔历史主力多单尚未完成平仓评价。
+          </div>
+        )
       ) : isReview ? (
         event.journalId ? (
           <button
@@ -486,6 +518,19 @@ function DetailPanel({
   campaignById: Record<string, TradeCampaign>;
 }) {
   const copy = PANEL_COPY[panelKey];
+  const [operationSort, setOperationSort] = useState<'desc' | 'asc'>('desc');
+  const displayedEvents = useMemo(() => {
+    if (panelKey !== 'review_missing') return events;
+    return [...events].sort((a, b) => {
+      const difference = executionEventOperationTime(a, campaignById) - executionEventOperationTime(b, campaignById);
+      return operationSort === 'asc' ? difference : -difference;
+    });
+  }, [campaignById, events, operationSort, panelKey]);
+  const missingSymbolCount = useMemo(() => (
+    panelKey === 'review_missing'
+      ? new Set(events.map(event => event.reviewSymbol).filter(Boolean)).size
+      : 0
+  ), [events, panelKey]);
 
   return (
     <div className="border-t border-border/70 px-5 py-4">
@@ -494,8 +539,21 @@ function DetailPanel({
           <h2 className="text-[13px] font-semibold">{copy.title}</h2>
           <p className="mt-1 text-[11px] text-muted-foreground">{copy.subtitle}</p>
         </div>
-        <div className="rounded-full border border-border/60 px-2.5 py-1 font-mono text-[11px] text-muted-foreground">
-          {events.length} 条
+        <div className="flex items-center gap-2">
+          {panelKey === 'review_missing' && (
+            <button
+              type="button"
+              onClick={() => setOperationSort(current => current === 'desc' ? 'asc' : 'desc')}
+              className="inline-flex items-center gap-1 rounded-md border border-border/60 px-2.5 py-1 text-[11px] text-muted-foreground hover:text-foreground"
+              aria-label={`操作时间${operationSort === 'desc' ? '从新到旧' : '从旧到新'}排序；点击切换`}
+            >
+              <Clock className="h-3 w-3" />
+              操作时间 {operationSort === 'desc' ? '↓' : '↑'}
+            </button>
+          )}
+          <div className="rounded-full border border-border/60 px-2.5 py-1 font-mono text-[11px] text-muted-foreground">
+            {panelKey === 'review_missing' ? `${missingSymbolCount} 标的 · ` : ''}{events.length} 条
+          </div>
         </div>
       </div>
 
@@ -505,7 +563,7 @@ function DetailPanel({
         </div>
       ) : (
         <div className="max-h-[520px] space-y-2 overflow-y-auto pr-1">
-          {events.map(event => (
+          {displayedEvents.map(event => (
             <EventDetailCard
               key={event.id}
               event={event}
@@ -547,9 +605,9 @@ export default function ExecutionAssetsPage() {
     listAllCampaigns(user.id)
       .then(campaigns => {
         if (cancelled) return;
-        reconcileCampaignRewards(campaigns.map(c => ({ id: c.id, createdAt: c.created_at })));
+        reconcileCampaignRewards(campaigns.map(c => ({ id: c.id, symbol: c.symbol, createdAt: c.created_at })));
         const campaignRefs = campaigns.map(c => ({ symbol: c.symbol, createdAt: c.created_at }));
-        // 用权威战役列表结算「交易过某标的却没在当天为它建战役」的 −300（按标的、永久、幂等）。
+        // 用权威战役列表结算「自然日 × 标的」建/未建战役互斥积分，并修复历史冲突。
         settleCampaignMissingPenalties(campaignRefs);
         // 留存战役以便「建战役」明细按 campaignId 显示标题/标的/时间并可点进。
         setCampaignById(Object.fromEntries(campaigns.map(c => [c.id, c])));
@@ -565,18 +623,17 @@ export default function ExecutionAssetsPage() {
         );
         // 未做平仓评价 −1000（可翻转）：已平仓、有成交记录的主力单，未复盘挂罚、补做即翻回 +1000。
         reconcileReviewMissingPenalties(
-          journals
-            .filter(journal =>
-              (journal.journal_kind ?? 'trade') === 'trade'
-              && (journal.order_kind ?? 'main') === 'main'
-              && Boolean(journal.trade_record_id),
-            )
-            .map(journal => ({ journalId: journal.id, reviewed: Boolean(journal.post_reviewed_at) })),
+          buildObjectiveLongMainReviewItems(journals, tradeHistory).map(item => ({
+            journalId: item.journal.id,
+            reviewed: item.reviewed,
+            symbol: item.symbol,
+            operationTime: item.operationTime,
+          })),
         );
       })
       .catch(() => { /* 离线 / 无 journal 表时静默，不影响页面 */ });
     return () => { cancelled = true; };
-  }, [user?.id, reconcileCampaignRewards, reconcilePostTradeReviewRewards, settleCampaignMissingPenalties, reconcileReviewMissingPenalties]);
+  }, [user?.id, tradeHistory, reconcileCampaignRewards, reconcilePostTradeReviewRewards, settleCampaignMissingPenalties, reconcileReviewMissingPenalties]);
 
   const detailEvents = useMemo(() => {
     const events = executionAsset.events ?? [];
@@ -588,6 +645,7 @@ export default function ExecutionAssetsPage() {
       penalty: events.filter(event => event.type === 'no_trade_penalty'),
       campaign: events.filter(event => event.type === 'campaign_reward'),
       review: events.filter(event => event.type === 'review_reward'),
+      review_missing: events.filter(event => event.type === 'review_missing_penalty'),
       share: events.filter(event => event.type === 'decision_reward' || event.type === 'direct_reward'),
     };
   }, [executionAsset.events]);
@@ -660,7 +718,7 @@ export default function ExecutionAssetsPage() {
             </div>
           </div>
 
-          <div className="grid gap-3 p-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+          <div className="grid gap-3 p-5 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7">
             <StatCard
               active={openPanel === 'decision'}
               icon={<Trophy className="h-4 w-4" />}
@@ -707,6 +765,15 @@ export default function ExecutionAssetsPage() {
               onClick={() => togglePanel('review')}
             />
             <StatCard
+              active={openPanel === 'review_missing'}
+              icon={<ClipboardX className="h-4 w-4" />}
+              value={String(detailEvents.review_missing.length)}
+              label="未做评价"
+              tone="text-[#F6465D]"
+              detail={<span className="font-mono text-[#F6465D]">主力多单 -{EXECUTION_REVIEW_MISSING_PENALTY}</span>}
+              onClick={() => togglePanel('review_missing')}
+            />
+            <StatCard
               active={openPanel === 'share'}
               icon={<ListChecks className="h-4 w-4" />}
               value={`${decisionShare.toFixed(0)}%`}
@@ -733,7 +800,7 @@ export default function ExecutionAssetsPage() {
           <div className="border-b border-border/70 px-5 py-4">
             <h2 className="text-[13px] font-semibold">积分规则</h2>
             <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
-              开仓只记做多，做空对冲不计分。六项各自独立计分、互不联动。直接交易按当日标的去重（同标的多笔只扣一次）。当天交易过的标的须当天为其建战役，否则每个标的扣「未建战役」分。下单 / 弃单 / 复盘任一即算当天已练习；整日未练习扣分，且永久不可逆。平仓评价完成后独立奖励，重复编辑不重复计分。
+              开仓只记做多，做空对冲不计分。直接交易按当日标的去重（同标的多笔只扣一次）。“建战役 / 未建战役”按自然日 × 标的互斥结算：同日同标的多场战役只奖励一次，先扣未建后补齐战役会自动撤罚并改为奖励。下单 / 弃单 / 复盘任一即算当天已练习；整日未练习扣分，且永久不可逆。平仓评价完成后独立奖励，重复编辑不重复计分。
             </p>
           </div>
           <div data-testid="execution-rule-grid" className="grid gap-3 p-5 sm:grid-cols-2 lg:grid-cols-3">
@@ -792,7 +859,7 @@ export default function ExecutionAssetsPage() {
                 {recentEvents.map(event => {
                   const matched = matchClosesForSnapshot(event.trade, tradeHistory);
                   const canOpen = Boolean(event.trade) && matched != null;
-                  const canOpenReview = event.type === 'review_reward' && Boolean(event.journalId);
+                  const canOpenReview = (event.type === 'review_reward' || event.type === 'review_missing_penalty') && Boolean(event.journalId);
                   const campaign = event.type === 'campaign_reward' && event.campaignId
                     ? campaignById[event.campaignId]
                     : null;
@@ -833,7 +900,7 @@ export default function ExecutionAssetsPage() {
                         <div className="min-w-0 flex-1">
                           <div className="flex flex-wrap items-center gap-2">
                             <span className="text-[12px] font-medium">
-                              {event.trade?.symbol ?? event.label}
+                              {event.trade?.symbol ?? event.reviewSymbol ?? event.label}
                             </span>
                             {event.trade?.side && (
                               <span className={cn(

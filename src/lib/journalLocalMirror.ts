@@ -60,6 +60,38 @@ export function mirrorDroppedColumns(
 }
 
 /**
+ * 一次评价保存后的镜像对账：仍被远程 schema 丢弃的字段更新本地值，已经成功写入
+ * 远程库的字段删除旧镜像，避免旧副本在下次读取时覆盖用户刚保存的新答案。
+ */
+export function reconcileLocalMirror(
+  userId: string | null | undefined,
+  journalId: string,
+  fullPayload: Record<string, unknown>,
+  droppedColumns: string[],
+): void {
+  if (!userId || !journalId) return;
+  const store = readStore();
+  const userStore = store[userId] ?? {};
+  const journalMirror = userStore[journalId] ?? {};
+  const dropped = new Set(droppedColumns);
+
+  for (const [column, value] of Object.entries(fullPayload)) {
+    if (dropped.has(column)) journalMirror[column] = value;
+    else delete journalMirror[column];
+  }
+
+  if (Object.keys(journalMirror).length > 0) {
+    userStore[journalId] = journalMirror;
+    store[userId] = userStore;
+  } else {
+    delete userStore[journalId];
+    if (Object.keys(userStore).length > 0) store[userId] = userStore;
+    else delete store[userId];
+  }
+  writeStore(store);
+}
+
+/**
  * 把本地镜像 merge 到从 server 拉回的 journals 上。
  * - 本地有值就覆盖（本地是"用户真的填了"的事实）。
  * - 本地没有的字段保持 server 值。

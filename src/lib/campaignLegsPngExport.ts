@@ -1,6 +1,7 @@
 import { HEDGE_TYPE_LABELS } from '@/lib/hedgeTypes';
 import {
   buildTradeRecordLookup,
+  campaignOperationTime,
   journalOperationTime,
   journalSimulatedCloseTime,
 } from '@/lib/objectiveOperationTime';
@@ -15,8 +16,13 @@ type ExportInput = {
   reverseHedgeOrders: CampaignReverseHedgeOrder[];
 };
 
-type CampaignBoardExportInput = ExportInput & {
+export type CampaignBoardExportInput = ExportInput & {
   chartElement: HTMLElement | null;
+  pnlOverview: {
+    campaignMaxProfitReal: number;
+    campaignMaxDrawdownReal: number;
+    profitCaptureRatio: number;
+  };
 };
 
 type CellLine = {
@@ -62,6 +68,7 @@ const ROW_PAD_Y = 12;
 const LINE_H = 17;
 const FOOTER_H = 24;
 const BOARD_HEADER_H = 92;
+const BOARD_OVERVIEW_H = 154;
 const BOARD_SECTION_GAP = 18;
 const BOARD_SECTION_LABEL_H = 28;
 const BOARD_FOOTER_H = 34;
@@ -116,6 +123,38 @@ function fmtPrice(value: number | null | undefined): string {
   if (value == null || !Number.isFinite(value)) return '—';
   if (Math.abs(value) >= 1) return value.toFixed(4);
   return value.toPrecision(6);
+}
+
+function fmtAmount(value: number | null | undefined, suffix = ''): string {
+  if (value == null || !Number.isFinite(value)) return '—';
+  return `${value.toFixed(2)}${suffix}`;
+}
+
+function fmtCampaignDuration(start: string, end: string | null): string {
+  const from = new Date(start).getTime();
+  const to = end ? new Date(end).getTime() : Date.now();
+  if (!Number.isFinite(from) || !Number.isFinite(to)) return '—';
+  const minutes = Math.max(0, Math.floor((to - from) / 60_000));
+  return `${Math.floor(minutes / 60)} 小时 ${minutes % 60} 分钟`;
+}
+
+function campaignStatusLabel(status: TradeCampaign['status']): string {
+  if (status === 'closed_profit') return '盈利结束';
+  if (status === 'closed_loss') return '亏损结束';
+  if (status === 'closed_breakeven') return '平盈结束';
+  if (status === 'abandoned') return '已放弃';
+  return '进行中';
+}
+
+function campaignLegCounts(legs: TradeJournal[]) {
+  const main = legs.filter(leg =>
+    leg.leg_role === 'main_open'
+    || leg.leg_role === 'reentry_main'
+    || leg.leg_role?.startsWith('main_add_'),
+  ).length;
+  const hedge = legs.filter(leg => leg.leg_role?.startsWith('hedge_')).length;
+  const tp = legs.filter(leg => leg.leg_role === 'mirror_tp').length;
+  return { main, hedge, tp, other: Math.max(0, legs.length - main - hedge - tp) };
 }
 
 function statusForLeg(leg: TradeJournal, record: TradeRecord | null): { label: string; color: string } {
@@ -451,6 +490,79 @@ function drawSectionLabel(ctx: CanvasRenderingContext2D, label: string, x: numbe
   ctx.fillText(label, x, y + 18);
 }
 
+type OverviewItem = {
+  label: string;
+  value: string;
+  color?: string;
+};
+
+export type CampaignBoardOverview = {
+  metadataItems: OverviewItem[];
+  pnlItems: OverviewItem[];
+};
+
+/** 导出图顶部两块摘要的唯一数据源，避免页面字段演进时漏掉战役原数据或盈亏信息。 */
+export function buildCampaignBoardOverview(input: CampaignBoardExportInput): CampaignBoardOverview {
+  const legCounts = campaignLegCounts(input.legs);
+  const operationTime = campaignOperationTime(input.legs, input.tradeRecords);
+  const realizedPnl = input.campaign.final_realized_pnl;
+  return {
+    metadataItems: [
+      { label: '操作时间', value: operationTime == null ? '—' : fmtClock(operationTime) },
+      { label: '方向 / 状态', value: `${input.campaign.direction === 'main_long' ? '主多' : '主空'} / ${campaignStatusLabel(input.campaign.status)}` },
+      { label: '战役开始', value: fmtClock(input.campaign.opened_at) },
+      { label: '战役结束', value: fmtClock(input.campaign.closed_at) },
+      { label: '持续时间', value: fmtCampaignDuration(input.campaign.opened_at, input.campaign.closed_at) },
+      { label: '策略', value: input.campaign.strategy_template },
+      { label: 'Legs 构成', value: `共 ${input.legs.length} · 主仓 ${legCounts.main} / 对冲 ${legCounts.hedge} / TP ${legCounts.tp} / 其他 ${legCounts.other}` },
+      { label: '初始主仓 / 杠杆', value: `${fmtAmount(input.campaign.initial_main_size_usdt, ' USDT')} / ${input.campaign.initial_leverage == null ? '—' : `${input.campaign.initial_leverage.toFixed(0)}x`}` },
+    ],
+    pnlItems: [
+      {
+        label: '已实现 P&L',
+        value: fmtAmount(realizedPnl, ' USDT'),
+        color: realizedPnl == null ? '#64748B' : realizedPnl > 0 ? '#0ECB81' : realizedPnl < 0 ? '#F6465D' : '#64748B',
+      },
+      { label: '最终 R', value: fmtAmount(input.campaign.final_r_multiple) },
+      { label: '峰值浮盈', value: fmtAmount(input.pnlOverview.campaignMaxProfitReal, ' USDT'), color: '#0ECB81' },
+      { label: '最大回撤', value: fmtAmount(input.pnlOverview.campaignMaxDrawdownReal, ' USDT'), color: '#F6465D' },
+      { label: '盈利捕获率', value: fmtAmount(input.pnlOverview.profitCaptureRatio, '%') },
+      { label: '战役编号', value: input.campaign.campaign_code || '—' },
+    ],
+  };
+}
+
+function drawOverviewPanel(
+  ctx: CanvasRenderingContext2D,
+  title: string,
+  items: OverviewItem[],
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+) {
+  fillRoundedRect(ctx, x, y, width, height, 10, '#FFFFFF');
+  strokeRoundedRect(ctx, x, y, width, height, 10, '#E5E7EB', 1);
+  ctx.font = '700 14px ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+  ctx.fillStyle = '#334155';
+  ctx.fillText(title, x + 16, y + 25, width - 32);
+
+  const columns = 2;
+  const columnWidth = (width - 32) / columns;
+  items.forEach((item, index) => {
+    const column = index % columns;
+    const row = Math.floor(index / columns);
+    const itemX = x + 16 + column * columnWidth;
+    const itemY = y + 52 + row * 27;
+    ctx.font = '500 11px ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+    ctx.fillStyle = '#64748B';
+    ctx.fillText(item.label, itemX, itemY, columnWidth - 12);
+    ctx.font = '600 12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace';
+    ctx.fillStyle = item.color ?? '#1F2937';
+    ctx.fillText(item.value, itemX, itemY + 16, columnWidth - 12);
+  });
+}
+
 export async function exportCampaignLegsListPng(input: ExportInput): Promise<string> {
   const title = campaignKlineTitleName(input.campaign);
   const legsCanvas = buildCampaignLegsListCanvas(input, { includeHeader: true });
@@ -461,10 +573,13 @@ export async function exportCampaignBoardPng(input: CampaignBoardExportInput): P
   const title = campaignKlineTitleName(input.campaign);
   const chart = captureCampaignChartCanvas(input.chartElement);
   const legs = buildCampaignLegsListCanvas(input, { includeHeader: false, scale: chart.scale });
+  const overview = buildCampaignBoardOverview(input);
   const width = Math.max(TABLE_WIDTH + MARGIN_X * 2, chart.width + MARGIN_X * 2);
   const chartDisplayWidth = width - MARGIN_X * 2;
   const chartDisplayHeight = chart.height * (chartDisplayWidth / chart.width);
   const height = BOARD_HEADER_H
+    + BOARD_OVERVIEW_H
+    + BOARD_SECTION_GAP
     + BOARD_SECTION_LABEL_H
     + chartDisplayHeight
     + BOARD_SECTION_GAP
@@ -482,13 +597,20 @@ export async function exportCampaignBoardPng(input: CampaignBoardExportInput): P
   ctx.font = '600 12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace';
   ctx.fillStyle = '#64748B';
   ctx.fillText(
-    `编号 ${input.campaign.campaign_code} · K 线盘面（当前视图）+ Legs 列表 · 共 ${input.legs.length} legs`,
+    `编号 ${input.campaign.campaign_code} · 战役原数据 + 盈亏概览 + K 线盘面（当前视图）+ Legs 列表`,
     MARGIN_X,
     68,
     width - MARGIN_X * 2,
   );
 
   let y = BOARD_HEADER_H;
+  const contentWidth = width - MARGIN_X * 2;
+  const overviewGap = 16;
+  const overviewWidth = (contentWidth - overviewGap) / 2;
+  drawOverviewPanel(ctx, '战役原数据', overview.metadataItems, MARGIN_X, y, overviewWidth, BOARD_OVERVIEW_H);
+  drawOverviewPanel(ctx, '盈亏概览', overview.pnlItems, MARGIN_X + overviewWidth + overviewGap, y, overviewWidth, BOARD_OVERVIEW_H);
+  y += BOARD_OVERVIEW_H + BOARD_SECTION_GAP;
+
   drawSectionLabel(ctx, 'K 线盘面（当前视图）', MARGIN_X, y);
   y += BOARD_SECTION_LABEL_H;
   fillRoundedRect(ctx, MARGIN_X - 10, y - 10, chartDisplayWidth + 20, chartDisplayHeight + 20, 12, '#FFFFFF');

@@ -8,8 +8,8 @@ export const EXECUTION_REVIEW_REWARD = 1000;
 export const EXECUTION_REVIEW_MISSING_PENALTY = 1000;
 /** 当天交易过的标的若当天没为它新建战役，每个标的扣的分。 */
 export const EXECUTION_CAMPAIGN_MISSING_PENALTY = 300;
-/** 计分口径版本。旧状态(<当前版本)首次加载时会把历史事件按当前权重重算一次（含未练习 −2000）。 */
-export const EXECUTION_SCORING_VERSION = 3;
+/** 计分口径版本。v4 起「建/未建战役」统一按自然日 × 标的互斥计分。 */
+export const EXECUTION_SCORING_VERSION = 4;
 
 export type ExecutionTradingMode = 'decision' | 'direct';
 
@@ -26,6 +26,8 @@ export type ExecutionAssetEventType =
 export interface ClosedMainTradeReviewState {
   journalId: string;
   reviewed: boolean;
+  symbol?: string | null;
+  operationTime?: Date | number | string | null;
 }
 
 export interface ExecutionTradeSnapshot {
@@ -58,8 +60,14 @@ export interface ExecutionAssetEvent {
   trade?: ExecutionTradeSnapshot | null;
   /** campaign_reward 事件归属的战役 ID，用于幂等与可追溯。 */
   campaignId?: string | null;
+  /** 建/未建战役事件对应的标准化标的；与 date 共同构成唯一计分主键。 */
+  campaignSymbol?: string | null;
   /** review_reward 事件归属的 journal ID，用于幂等与可追溯。 */
   journalId?: string | null;
+  /** 未做评价事件对应的标的，用于按标的汇总。 */
+  reviewSymbol?: string | null;
+  /** 真实、未经时间机器移位的客观操作时间。 */
+  operationTime?: number | null;
 }
 
 export interface ExecutionAssetState {
@@ -102,6 +110,7 @@ export interface CampaignCreationRef {
 /** 创建战役奖励对账所需的稳定标识与客观创建时间。 */
 export interface CampaignRewardRef {
   id: string;
+  symbol?: string | null;
   createdAt?: Date | number | string | null;
 }
 
@@ -147,6 +156,31 @@ function addDays(key: string, days: number): string {
 function compareDateKeys(a: string, b: string): number {
   if (a === b) return 0;
   return a < b ? -1 : 1;
+}
+
+function normalizeExecutionSymbol(symbol: string | null | undefined): string | null {
+  const normalized = symbol?.trim().toUpperCase() ?? '';
+  return normalized || null;
+}
+
+function campaignScoreKey(date: string, symbol: string | null | undefined): string | null {
+  const normalized = normalizeExecutionSymbol(symbol);
+  return normalized ? `${date}|${normalized}` : null;
+}
+
+function campaignSymbolFromEvent(event: ExecutionAssetEvent): string | null {
+  const explicit = normalizeExecutionSymbol(event.campaignSymbol);
+  if (explicit) return explicit;
+  if (event.type !== 'campaign_missing_penalty') return null;
+  const prefix = `${event.date} `;
+  if (!event.label.startsWith(prefix)) return null;
+  const remainder = event.label.slice(prefix.length);
+  const markerIndex = remainder.indexOf(' 未建战役');
+  return normalizeExecutionSymbol(markerIndex >= 0 ? remainder.slice(0, markerIndex) : null);
+}
+
+function campaignEventScoreKey(event: ExecutionAssetEvent): string | null {
+  return campaignScoreKey(event.date, campaignSymbolFromEvent(event));
 }
 
 function eventId(type: ExecutionAssetEventType, date: string): string {
@@ -229,7 +263,8 @@ export function settleNoTradePenalties(
 /**
  * 缺战役结算：某个已过去的自然日交易过的标的，若当天没有为它新建战役 → 每个标的 −EXECUTION_CAMPAIGN_MISSING_PENALTY。
  * 战役覆盖以权威 campaign 列表为准（symbol + created_at 落在当天），而非状态钩子，避免漏记造成永久误罚。
- * 走独立游标 lastCampaignCheckDate，只结算 < today 的自然日，一天只结算一次（永久、幂等）。
+ * 同一「自然日 × 标的」的已建/未建互斥：权威列表后来补齐时会撤掉旧罚并退分；重复罚也会自动归并。
+ * 走独立游标 lastCampaignCheckDate，只为尚未结算的 < today 自然日新增罚分。
  */
 export function settleCampaignMissingPenalties(
   rawState: ExecutionAssetState,
@@ -240,27 +275,63 @@ export function settleCampaignMissingPenalties(
   const todayKey = localDateKey(today);
   const startKey = state.lastCampaignCheckDate ?? todayKey;
 
+  // 「某日为某标的建过战役」的集合，供 O(1) 判定。
+  const createdByDate = new Map<string, Set<string>>();
+  const createdKeys = new Set<string>();
+  for (const campaign of campaigns ?? []) {
+    if (!campaign || !campaign.symbol) continue;
+    const key = localDateKey(validEventDate(campaign.createdAt, today));
+    const symbol = normalizeExecutionSymbol(campaign.symbol);
+    if (!symbol) continue;
+    const set = createdByDate.get(key) ?? new Set<string>();
+    set.add(symbol);
+    createdByDate.set(key, set);
+    createdKeys.add(`${key}|${symbol}`);
+  }
+
+  // 先修复历史：已建战役与未建罚分不能共存；同一日同一标的重复罚只留一笔。
+  const seenMissingKeys = new Set<string>();
+  let removedMissing = 0;
+  const reconciledEvents = state.events.filter(event => {
+    if (event.type !== 'campaign_missing_penalty') return true;
+    const key = campaignEventScoreKey(event);
+    if (!key) return true;
+    if (createdKeys.has(key) || seenMissingKeys.has(key)) {
+      removedMissing += 1;
+      return false;
+    }
+    seenMissingKeys.add(key);
+    return true;
+  }).map(event => {
+    if (event.type !== 'campaign_missing_penalty' || event.campaignSymbol) return event;
+    return { ...event, campaignSymbol: campaignSymbolFromEvent(event) };
+  });
+  if (removedMissing > 0 || reconciledEvents !== state.events) {
+    state = {
+      ...state,
+      points: state.points + removedMissing * EXECUTION_CAMPAIGN_MISSING_PENALTY,
+      campaignMissingCount: Math.max(0, state.campaignMissingCount - removedMissing),
+      events: reconciledEvents,
+    };
+  }
+
   if (compareDateKeys(startKey, todayKey) >= 0) {
     return { ...state, lastCampaignCheckDate: todayKey };
   }
 
-  // 「某日为某标的建过战役」的集合，供 O(1) 判定。
-  const createdByDate = new Map<string, Set<string>>();
-  for (const campaign of campaigns ?? []) {
-    if (!campaign || !campaign.symbol) continue;
-    const key = localDateKey(validEventDate(campaign.createdAt, today));
-    const set = createdByDate.get(key) ?? new Set<string>();
-    set.add(campaign.symbol);
-    createdByDate.set(key, set);
-  }
-
   let cursor = startKey;
   while (compareDateKeys(cursor, todayKey) < 0) {
-    const traded = state.tradedSymbolsByDate[cursor] ?? [];
+    const traded = Array.from(new Set(
+      (state.tradedSymbolsByDate[cursor] ?? [])
+        .map(normalizeExecutionSymbol)
+        .filter((symbol): symbol is string => Boolean(symbol)),
+    ));
     if (traded.length > 0) {
       const created = createdByDate.get(cursor) ?? new Set<string>();
       for (const symbol of traded) {
         if (created.has(symbol)) continue;
+        const scoreKey = `${cursor}|${symbol}`;
+        if (seenMissingKeys.has(scoreKey)) continue;
         const event: ExecutionAssetEvent = {
           id: eventId('campaign_missing_penalty', cursor),
           type: 'campaign_missing_penalty',
@@ -268,7 +339,9 @@ export function settleCampaignMissingPenalties(
           date: cursor,
           createdAt: today.getTime(),
           label: `${cursor} ${symbol} 未建战役，执行力资产扣分`,
+          campaignSymbol: symbol,
         };
+        seenMissingKeys.add(scoreKey);
         state = {
           ...state,
           points: state.points - EXECUTION_CAMPAIGN_MISSING_PENALTY,
@@ -292,7 +365,7 @@ export function recordExecutionTrade(
   const settled = settleNoTradePenalties(rawState, today);
   const date = localDateKey(today);
   const isDecision = mode === 'decision';
-  const symbol = trade?.symbol ?? null;
+  const symbol = normalizeExecutionSymbol(trade?.symbol);
 
   // 交易过的标的当天去重登记（供缺战役结算）；直接交易的按标的去重另用 directPenalizedByDate。
   const daySymbols = settled.tradedSymbolsByDate[date] ?? [];
@@ -350,7 +423,15 @@ export function recordExecutionTrade(
   };
 }
 
-function campaignRewardEvent(campaignId: string | null, createdAt: Date): ExecutionAssetEvent {
+type NormalizedCampaignRewardRef = {
+  id: string;
+  symbol: string | null;
+  createdAt: Date;
+  scoreKey: string;
+};
+
+function campaignRewardEvent(campaign: Pick<NormalizedCampaignRewardRef, 'id' | 'symbol' | 'createdAt'>): ExecutionAssetEvent {
+  const { id: campaignId, symbol, createdAt } = campaign;
   const date = localDateKey(createdAt);
   return {
     id: eventId('campaign_reward', date),
@@ -360,19 +441,27 @@ function campaignRewardEvent(campaignId: string | null, createdAt: Date): Execut
     createdAt: createdAt.getTime(),
     label: '创建交易战役奖励',
     campaignId,
+    campaignSymbol: symbol,
   };
 }
 
 function normalizeCampaignRewardRefs(
   campaigns: Array<string | CampaignRewardRef>,
   fallback: Date,
-): Array<{ id: string; createdAt: Date }> {
-  const byId = new Map<string, { id: string; createdAt: Date }>();
+): NormalizedCampaignRewardRef[] {
+  const byId = new Map<string, NormalizedCampaignRewardRef>();
   for (const campaign of campaigns) {
     const id = typeof campaign === 'string' ? campaign : campaign?.id;
     if (!id || byId.has(id)) continue;
     const rawCreatedAt = typeof campaign === 'string' ? null : campaign.createdAt;
-    byId.set(id, { id, createdAt: validEventDate(rawCreatedAt, fallback) });
+    const createdAt = validEventDate(rawCreatedAt, fallback);
+    const symbol = normalizeExecutionSymbol(typeof campaign === 'string' ? null : campaign.symbol);
+    byId.set(id, {
+      id,
+      symbol,
+      createdAt,
+      scoreKey: campaignScoreKey(localDateKey(createdAt), symbol) ?? `campaign:${id}`,
+    });
   }
   return [...byId.values()];
 }
@@ -383,7 +472,7 @@ function normalizeCampaignRewardRefs(
  */
 function bindLegacyCampaignRewardEvents(
   events: ExecutionAssetEvent[],
-  campaigns: Array<{ id: string; createdAt: Date }>,
+  campaigns: NormalizedCampaignRewardRef[],
   rewardedCampaignIds: string[],
 ): { events: ExecutionAssetEvent[]; changed: boolean } {
   const linkedIds = new Set(
@@ -437,32 +526,72 @@ function bindLegacyCampaignRewardEvents(
 }
 
 /**
- * 每创建一次交易战役 +EXECUTION_CAMPAIGN_REWARD 分。只加分、记一笔 campaign_reward 事件，
- * 不触碰每日「未交易扣分」逻辑（建战役不算当日交易，其余规则不变）。
- * 传入 campaignId 时按 ID 幂等：同一场战役只加一次（防止重复触发 / 与对账重复）。
+ * 创建交易战役奖励按「自然日 × 标的」计一次。同一天同一标的多建战役不重复奖励；
+ * 若该计分单元此前已有「未建战役 −300」，则撤罚退分并改记「已建战役 +300」。
+ * 旧调用只传字符串 ID 时保留按 ID 幂等的兼容行为；新调用应传 CampaignRewardRef。
  */
 export function recordCampaignCreated(
   rawState: ExecutionAssetState,
-  campaignId: string | null = null,
+  campaign: string | CampaignRewardRef | null = null,
   today: Date = new Date(),
 ): ExecutionAssetState {
   const state = normalizeState(rawState, today);
-  if (campaignId && state.rewardedCampaignIds.includes(campaignId)) return state;
+  const campaignId = typeof campaign === 'string' ? campaign : campaign?.id ?? null;
+  const createdAt = validEventDate(typeof campaign === 'string' ? null : campaign?.createdAt, today);
+  const symbol = normalizeExecutionSymbol(typeof campaign === 'string' ? null : campaign?.symbol);
+  const scoreKey = campaignScoreKey(localDateKey(createdAt), symbol);
+  const alreadyRewarded = state.events.some(event => (
+    event.type === 'campaign_reward'
+    && (
+      (scoreKey != null && campaignEventScoreKey(event) === scoreKey)
+      || (campaignId != null && event.campaignId === campaignId)
+    )
+  ));
+  const matchingMissing = scoreKey == null
+    ? []
+    : state.events.filter(event => event.type === 'campaign_missing_penalty' && campaignEventScoreKey(event) === scoreKey);
+  const eventsWithoutConflict = matchingMissing.length === 0
+    ? state.events
+    : state.events.filter(event => !matchingMissing.includes(event));
+  const rewardedCampaignIds = campaignId && !state.rewardedCampaignIds.includes(campaignId)
+    ? [...state.rewardedCampaignIds, campaignId]
+    : state.rewardedCampaignIds;
+
+  if (alreadyRewarded || (scoreKey == null && campaignId && state.rewardedCampaignIds.includes(campaignId))) {
+    return {
+      ...state,
+      points: state.points + matchingMissing.length * EXECUTION_CAMPAIGN_MISSING_PENALTY,
+      campaignMissingCount: Math.max(0, state.campaignMissingCount - matchingMissing.length),
+      rewardedCampaignIds,
+      events: eventsWithoutConflict.map(event => (
+        event.type === 'campaign_reward'
+        && campaignId != null
+        && event.campaignId === campaignId
+        && symbol
+          ? { ...event, campaignSymbol: symbol }
+          : event
+      )),
+    };
+  }
+
+  const reward = campaignRewardEvent({ id: campaignId ?? '', symbol, createdAt });
+  if (!campaignId) reward.campaignId = null;
   return {
     ...state,
-    points: state.points + EXECUTION_CAMPAIGN_REWARD,
+    points: state.points
+      + EXECUTION_CAMPAIGN_REWARD
+      + matchingMissing.length * EXECUTION_CAMPAIGN_MISSING_PENALTY,
     campaignCount: state.campaignCount + 1,
-    rewardedCampaignIds: campaignId ? [...state.rewardedCampaignIds, campaignId] : state.rewardedCampaignIds,
-    events: pushEvent(state, campaignRewardEvent(campaignId, today)),
+    campaignMissingCount: Math.max(0, state.campaignMissingCount - matchingMissing.length),
+    rewardedCampaignIds,
+    events: [reward, ...eventsWithoutConflict],
   };
 }
 
 /**
- * 用用户实际拥有的战役 ID + 创建时间对账，自愈任何漏记的 +EXECUTION_CAMPAIGN_REWARD：
- * 每个还没奖励过的战役补一笔，幂等（已奖励的不再加）。
- * 历史上通过事件计过分但未记 ID 的（campaignCount > 已记 ID 数），按数量补种为已奖励，避免重复加分。
- * 旧版无 ID 的奖励流水会按客观创建时间绑定到战役，之后永久按 ID 跳转。
- * 在执行力资产页加载时调用即可，让「建战役」积分始终等于真实战役数。
+ * 用完整权威战役列表按「自然日 × 标的」重建奖励：每个计分单元恰好一笔 +300，
+ * 同组多个战役合并为一笔并保留代表战役 ID；与同组「未建战役 −300」冲突时撤罚退分。
+ * 旧版没有 symbol 的调用按 campaign ID 分组，保持兼容；页面对账必须传 symbol 才启用新口径。
  */
 export function reconcileCampaignRewards(
   rawState: ExecutionAssetState,
@@ -477,37 +606,80 @@ export function reconcileCampaignRewards(
     normalized.rewardedCampaignIds,
   );
   const state = legacyBinding.changed ? { ...normalized, events: legacyBinding.events } : normalized;
-  const eventCampaignIds = state.events
-    .filter(event => event.type === 'campaign_reward' && event.campaignId)
-    .map(event => event.campaignId as string);
-  const known = new Set([...state.rewardedCampaignIds, ...eventCampaignIds]);
-  const untrackedRewarded = Math.max(0, state.campaignCount - known.size);
-  const candidates = campaignRefs.filter(campaign => !known.has(campaign.id));
-  // 旧版只计了数没记 ID 的那部分，先按数量补种为已奖励，绝不重复加分。
-  for (const campaign of candidates.slice(0, untrackedRewarded)) known.add(campaign.id);
-  const toAward = candidates.slice(untrackedRewarded);
+  if (campaignRefs.length === 0) return state;
 
-  if (toAward.length === 0) {
-    const nextCount = Math.max(state.campaignCount, known.size);
-    if (
-      !legacyBinding.changed
-      && known.size === state.rewardedCampaignIds.length
-      && nextCount === state.campaignCount
-    ) return state;
-    return { ...state, campaignCount: nextCount, rewardedCampaignIds: [...known] };
+  const refById = new Map(campaignRefs.map(ref => [ref.id, ref]));
+  const enrichedEvents = state.events.map(event => {
+    if (event.type !== 'campaign_reward' || event.campaignSymbol || !event.campaignId) return event;
+    const ref = refById.get(event.campaignId);
+    return ref?.symbol ? { ...event, campaignSymbol: ref.symbol } : event;
+  });
+  const groups = new Map<string, NormalizedCampaignRewardRef[]>();
+  for (const ref of campaignRefs) {
+    const group = groups.get(ref.scoreKey) ?? [];
+    group.push(ref);
+    groups.set(ref.scoreKey, group);
+  }
+  for (const group of groups.values()) {
+    group.sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime() || a.id.localeCompare(b.id));
   }
 
-  const events: ExecutionAssetEvent[] = [];
-  for (const campaign of toAward) {
-    known.add(campaign.id);
-    events.push(campaignRewardEvent(campaign.id, campaign.createdAt));
+  const oldRewardEvents = enrichedEvents.filter(event => event.type === 'campaign_reward');
+  const paidCount = Math.max(state.campaignCount, oldRewardEvents.length);
+  const rebuiltRewardEvents: ExecutionAssetEvent[] = [];
+  const usedEventIds = new Set<string>();
+  for (const [scoreKey, group] of groups) {
+    const groupIds = new Set(group.map(ref => ref.id));
+    const existing = oldRewardEvents.find(event => (
+      !usedEventIds.has(event.id)
+      && (
+        (event.campaignId != null && groupIds.has(event.campaignId))
+        || campaignEventScoreKey(event) === scoreKey
+      )
+    ));
+    const representative = existing?.campaignId && groupIds.has(existing.campaignId)
+      ? refById.get(existing.campaignId) ?? group[0]
+      : group[0];
+    if (existing) usedEventIds.add(existing.id);
+    rebuiltRewardEvents.push(existing
+      ? {
+          ...existing,
+          campaignId: representative.id,
+          campaignSymbol: representative.symbol,
+          date: localDateKey(representative.createdAt),
+          createdAt: representative.createdAt.getTime(),
+          points: EXECUTION_CAMPAIGN_REWARD,
+        }
+      : campaignRewardEvent(representative));
   }
+  rebuiltRewardEvents.sort((a, b) => b.createdAt - a.createdAt || b.id.localeCompare(a.id));
+
+  const realScoreKeys = new Set(
+    [...groups.keys()].filter(key => key.includes('|')),
+  );
+  let removedMissing = 0;
+  const otherEvents = enrichedEvents.filter(event => {
+    if (event.type === 'campaign_reward') return false;
+    if (event.type === 'campaign_missing_penalty') {
+      const key = campaignEventScoreKey(event);
+      if (key && realScoreKeys.has(key)) {
+        removedMissing += 1;
+        return false;
+      }
+    }
+    return true;
+  });
+
+  const desiredCount = groups.size;
   return {
     ...state,
-    points: state.points + EXECUTION_CAMPAIGN_REWARD * toAward.length,
-    campaignCount: Math.max(state.campaignCount, known.size),
-    rewardedCampaignIds: [...known],
-    events: [...events, ...state.events],
+    points: state.points
+      + (desiredCount - paidCount) * EXECUTION_CAMPAIGN_REWARD
+      + removedMissing * EXECUTION_CAMPAIGN_MISSING_PENALTY,
+    campaignCount: desiredCount,
+    campaignMissingCount: Math.max(0, state.campaignMissingCount - removedMissing),
+    rewardedCampaignIds: campaignRefs.map(ref => ref.id),
+    events: [...rebuiltRewardEvents, ...otherEvents],
   };
 }
 
@@ -611,8 +783,9 @@ export function reconcilePostTradeReviewRewards(
   };
 }
 
-function reviewMissingEvent(journalId: string, today: Date): ExecutionAssetEvent {
-  const date = localDateKey(today);
+function reviewMissingEvent(trade: ClosedMainTradeReviewState, today: Date): ExecutionAssetEvent {
+  const operationTime = validEventDate(trade.operationTime, today);
+  const date = localDateKey(operationTime);
   return {
     id: eventId('review_missing_penalty', date),
     type: 'review_missing_penalty',
@@ -620,7 +793,9 @@ function reviewMissingEvent(journalId: string, today: Date): ExecutionAssetEvent
     date,
     createdAt: today.getTime(),
     label: '未做平仓评价扣分',
-    journalId,
+    journalId: trade.journalId,
+    reviewSymbol: normalizeExecutionSymbol(trade.symbol),
+    operationTime: operationTime.getTime(),
   };
 }
 
@@ -637,15 +812,17 @@ export function reconcileReviewMissingPenalties(
   today: Date = new Date(),
 ): ExecutionAssetState {
   const state = normalizeState(rawState, today);
-  const shouldPenalize = new Set(
-    (closedMainTrades ?? []).filter(t => t?.journalId && !t.reviewed).map(t => t.journalId),
+  const shouldPenalize = new Map(
+    (closedMainTrades ?? [])
+      .filter(t => t?.journalId && !t.reviewed)
+      .map(t => [t.journalId, t] as const),
   );
   const currentlyPenalized = new Set(
     state.events
       .filter(event => event.type === 'review_missing_penalty' && event.journalId)
       .map(event => event.journalId as string),
   );
-  const toAdd = [...shouldPenalize].filter(id => !currentlyPenalized.has(id));
+  const toAdd = [...shouldPenalize.values()].filter(trade => !currentlyPenalized.has(trade.journalId));
 
   // 撤销不再该罚的（已补复盘 / 已不在集合）：删掉其 review_missing_penalty 事件并退分。
   let removed = 0;
@@ -657,14 +834,31 @@ export function reconcileReviewMissingPenalties(
     return true;
   });
 
-  if (toAdd.length === 0 && removed === 0) return state;
-
-  const added = toAdd.map(journalId => reviewMissingEvent(journalId, today));
+  let enrichedChanged = false;
+  const enriched = kept.map(event => {
+    if (event.type !== 'review_missing_penalty' || !event.journalId) return event;
+    const trade = shouldPenalize.get(event.journalId);
+    if (!trade) return event;
+    const operationTime = validEventDate(trade.operationTime, new Date(event.operationTime ?? event.createdAt));
+    const reviewSymbol = normalizeExecutionSymbol(trade.symbol);
+    if (event.date === localDateKey(operationTime)
+      && event.reviewSymbol === reviewSymbol
+      && event.operationTime === operationTime.getTime()) return event;
+    enrichedChanged = true;
+    return {
+      ...event,
+      date: localDateKey(operationTime),
+      reviewSymbol,
+      operationTime: operationTime.getTime(),
+    };
+  });
+  if (toAdd.length === 0 && removed === 0 && !enrichedChanged) return state;
+  const added = toAdd.map(trade => reviewMissingEvent(trade, today));
   const pointsDelta = EXECUTION_REVIEW_MISSING_PENALTY * (removed - toAdd.length);
   return {
     ...state,
     points: state.points + pointsDelta,
-    events: [...added, ...kept],
+    events: [...added, ...enriched],
   };
 }
 

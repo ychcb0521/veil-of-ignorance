@@ -524,7 +524,16 @@ export function PostTradeReviewSheet({
       <div className="shrink-0 border-b border-border bg-gradient-to-b from-muted/30 to-background/95 px-6 py-4 pr-14">
         <div className="mx-auto flex w-full max-w-[780px] items-start justify-between gap-4">
           <div className="min-w-0">
-            <div className="text-[15px] font-semibold tracking-[0.01em] text-foreground">平仓评价</div>
+            <div className="flex items-center gap-2">
+              <div className="text-[15px] font-semibold tracking-[0.01em] text-foreground">
+                {journal.post_reviewed_at ? '编辑平仓评价' : '平仓评价'}
+              </div>
+              {journal.post_reviewed_at && (
+                <span className="rounded-full border border-[#0ECB81]/30 bg-[#0ECB81]/10 px-2 py-0.5 text-[10px] font-medium text-[#0ECB81]">
+                  已载入原评价
+                </span>
+              )}
+            </div>
             <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 font-mono text-[11px] text-muted-foreground">
               <span>{journal.symbol}</span>
               <span>·</span>

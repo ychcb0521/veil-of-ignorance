@@ -3,7 +3,7 @@ import { usePersistedState } from '@/hooks/usePersistedState';
 import type { Position, PendingOrder, TradeRecord } from '@/types/trading';
 import { calcUnrealizedPnl, calcLiquidationPrice } from '@/types/trading';
 import type { PositionsMap, OrdersMap, PriceMap } from '@/contexts/TradingContext';
-import { X, Trash2, ArrowUpDown, ArrowUp, ArrowDown, Plus, MoreVertical, ChevronDown, ChevronRight, GripVertical, Check, Pencil } from 'lucide-react';
+import { X, Trash2, ArrowUpDown, ArrowUp, ArrowDown, Plus, MoreVertical, ChevronDown, ChevronRight, GripVertical, Check, Loader2, Pencil } from 'lucide-react';
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover';
 import { toast } from 'sonner';
 import { LeverageModal } from '@/components/LeverageModal';
@@ -40,7 +40,7 @@ import {
 } from '@/lib/tradingSettlement';
 import {
   findUnreviewedJournalForClose, listJournals,
-  listJournalsByTradeRecordId, backfillJournalFromRecord, syncTradeRecordCorrectionToJournals,
+  getJournalById, listJournalsByTradeRecordId, backfillJournalFromRecord, syncTradeRecordCorrectionToJournals,
 } from '@/lib/journalApi';
 import type { TradeJournal } from '@/types/journal';
 
@@ -203,6 +203,7 @@ export function PositionPanel({
   /** Direct 模式下，平仓后弹的"是否前往评价"的轻量确认。每次都弹，不记忆。 */
   const [directReviewPrompt, setDirectReviewPrompt] = useState<TradeRecord | null>(null);
   const [directReviewLoading, setDirectReviewLoading] = useState(false);
+  const [historyReviewLoadingId, setHistoryReviewLoadingId] = useState<string | null>(null);
   const [journalsByTradeId, setJournalsByTradeId] = useState<Record<string, TradeJournal>>({});
   const [repairRecord, setRepairRecord] = useState<TradeRecord | null>(null);
   const [repairForm, setRepairForm] = useState<TradeRecordRepairForm>({
@@ -283,7 +284,10 @@ export function PositionPanel({
       const map: Record<string, TradeJournal> = {};
       const ckey: Record<string, TradeJournal> = {};
       all.forEach(j => {
-        if (j.trade_record_id) map[j.trade_record_id] = j;
+        if (j.trade_record_id) {
+          const current = map[j.trade_record_id];
+          if (!current || (j.post_reviewed_at && !current.post_reviewed_at)) map[j.trade_record_id] = j;
+        }
         if (j.pre_entry_price != null && j.direction !== 'no_entry') {
           const side = j.direction === 'long' ? 'LONG' : 'SHORT';
           const k = `${j.symbol}_${side}_${j.pre_entry_price.toFixed(4)}`;
@@ -305,7 +309,50 @@ export function PositionPanel({
 
   const lookupJournalForRecord = (t: TradeRecord): TradeJournal | null => {
     const k = `${t.symbol}_${t.side}_${t.entryPrice.toFixed(4)}`;
-    return journalsByTradeId[t.id] ?? journalsByCompositeKey[k] ?? null;
+    return journalsByTradeId[t.id]
+      ?? (t.positionId ? journalsByTradeId[t.positionId] : null)
+      ?? journalsByCompositeKey[k]
+      ?? null;
+  };
+
+  /**
+   * 仓位历史统一入口：已有评价直接打开；曾点“跳过”而没有 journal 的主力多单，
+   * 先按 close-record id / 历史 position id 幂等查找，仍不存在才回填一条最小 journal。
+   */
+  const openHistoryReview = async (record: TradeRecord, knownJournal?: TradeJournal | null) => {
+    if (!user) {
+      toast.error('请先登录后进行平仓评价');
+      return;
+    }
+    setHistoryReviewLoadingId(record.id);
+    try {
+      let journal = knownJournal ?? lookupJournalForRecord(record);
+      if (!journal) {
+        const refs = Array.from(new Set([record.id, record.positionId].filter((id): id is string => Boolean(id))));
+        for (const ref of refs) {
+          const existing = await listJournalsByTradeRecordId(user.id, ref);
+          if (existing.length > 0) {
+            journal = existing.find(item => Boolean(item.post_reviewed_at)) ?? existing[0];
+            break;
+          }
+        }
+      }
+      if (!journal) journal = await backfillJournalFromRecord(record);
+
+      // 列表数据只负责快速匹配状态。打开编辑器前按稳定 journal id 重新读取完整记录，
+      // 并合并 schema 漂移期间保存在本机的评价字段，避免旧评价显示残缺。
+      const freshJournal = await getJournalById(journal.id);
+      if (freshJournal) journal = freshJournal;
+
+      setReviewJournal(journal);
+      setReviewTradeRecord(record);
+      setReviewOpen(true);
+      void reloadJournals();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : String(error));
+    } finally {
+      setHistoryReviewLoadingId(null);
+    }
   };
 
   const openTradeRecordRepair = (record: TradeRecord) => {
@@ -1260,19 +1307,42 @@ export function PositionPanel({
                         </td>
                         <td className="px-3 py-2 w-[80px]">
                           {!matchedJ ? (
-                            <span className="text-muted-foreground">—</span>
+                            t.side === 'LONG' ? (
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                onClick={() => { void openHistoryReview(t); }}
+                                disabled={historyReviewLoadingId === t.id}
+                                className="h-6 px-2 text-[10px] text-[#D89B00] hover:bg-[#F0B90B]/10 hover:text-[#D89B00]"
+                                title="补做这笔平仓评价"
+                              >
+                                {historyReviewLoadingId === t.id && <Loader2 className="mr-1 h-3 w-3 animate-spin" />}
+                                评价
+                              </Button>
+                            ) : <span className="text-muted-foreground">—</span>
                           ) : matchedJ.post_reviewed_at ? (
                             <button
-                              onClick={() => { setReviewJournal(matchedJ); setReviewTradeRecord(t); setReviewOpen(true); }}
-                              className="flex items-center gap-1 text-[10px] text-muted-foreground hover:text-foreground"
+                              type="button"
+                              onClick={() => { void openHistoryReview(t, matchedJ); }}
+                              disabled={historyReviewLoadingId === t.id}
+                              className="flex items-center gap-1 text-[10px] text-[#0ECB81] hover:underline disabled:opacity-50"
+                              title="打开已完成的平仓评价"
                             >
-                              <Check className="w-3 h-3 text-[#0ecb81]" /> 已评价
+                              {historyReviewLoadingId === t.id
+                                ? <Loader2 className="h-3 w-3 animate-spin" />
+                                : <Check className="h-3 w-3" />}
+                              查看评价
                             </button>
                           ) : (
                             <Button
-                              onClick={() => { setReviewJournal(matchedJ); setReviewTradeRecord(t); setReviewOpen(true); }}
+                              type="button"
+                              onClick={() => { void openHistoryReview(t, matchedJ); }}
+                              disabled={historyReviewLoadingId === t.id}
                               className="h-6 px-2 text-[10px] bg-[#F0B90B] hover:bg-[#F0B90B]/90 text-black"
-                            >评价</Button>
+                            >
+                              {historyReviewLoadingId === t.id && <Loader2 className="mr-1 h-3 w-3 animate-spin" />}
+                              评价
+                            </Button>
                           )}
                         </td>
                         <td className="px-3 py-2">

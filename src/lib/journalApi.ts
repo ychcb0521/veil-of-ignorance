@@ -19,7 +19,7 @@ import {
   normalizeDeviationRuleText,
 } from '@/lib/campaignDeviationRules';
 import { INITIAL_COGNITIVE_ASSETS } from '@/lib/cognitiveAssetsInitialContent';
-import { mirrorDroppedColumns } from '@/lib/journalLocalMirror';
+import { applyLocalMirror, mirrorDroppedColumns, reconcileLocalMirror } from '@/lib/journalLocalMirror';
 import {
   buildTradeRecordLookup,
   tradeRecordOperationTime,
@@ -3803,6 +3803,30 @@ export interface ListJournalFilters {
   dateRange?: { from: string; to: string };
 }
 
+const JOURNAL_PAGE_SIZE = 1000;
+
+async function listJournalRowsPaged(
+  userId: string,
+  filters?: { symbol?: string; outcome?: TradeOutcome; dateFrom?: string; dateTo?: string },
+): Promise<TradeJournal[]> {
+  const rows: TradeJournal[] = [];
+  for (let from = 0; ; from += JOURNAL_PAGE_SIZE) {
+    let query = supabase.from('trade_journals' as never).select('*').eq('user_id', userId);
+    if (filters?.symbol) query = query.eq('symbol', filters.symbol);
+    if (filters?.outcome) query = query.eq('post_outcome', filters.outcome);
+    if (filters?.dateFrom) query = query.gte('pre_simulated_time', filters.dateFrom);
+    if (filters?.dateTo) query = query.lte('pre_simulated_time', filters.dateTo);
+    const { data, error } = await query
+      .order('id', { ascending: true })
+      .range(from, from + JOURNAL_PAGE_SIZE - 1);
+    if (error) throw error;
+    const page = (data ?? []) as unknown as TradeJournal[];
+    rows.push(...page);
+    if (page.length < JOURNAL_PAGE_SIZE) break;
+  }
+  return rows;
+}
+
 export async function listJournals(
   userId: string,
   filters?: ListJournalFilters,
@@ -3830,18 +3854,19 @@ export async function listJournals(
       }
       const { data, error } = await q.order("pre_simulated_time", { ascending: false });
       if (error) throw error;
-      return (data ?? []) as unknown as TradeJournal[];
+      return applyLocalMirror(userId, (data ?? []) as unknown as TradeJournal[]);
     }
 
-    let q = supabase.from("trade_journals" as never).select("*").eq("user_id", userId);
-    if (filters?.symbol) q = q.eq("symbol", filters.symbol);
-    if (filters?.outcome) q = q.eq("post_outcome", filters.outcome);
-    if (filters?.dateRange) {
-      q = q.gte("pre_simulated_time", filters.dateRange.from).lte("pre_simulated_time", filters.dateRange.to);
-    }
-    const { data, error } = await q.order("pre_simulated_time", { ascending: false });
-    if (error) throw error;
-    return (data ?? []) as unknown as TradeJournal[];
+    const rows = await listJournalRowsPaged(userId, {
+      symbol: filters?.symbol,
+      outcome: filters?.outcome,
+      dateFrom: filters?.dateRange?.from,
+      dateTo: filters?.dateRange?.to,
+    });
+    return applyLocalMirror(userId, rows).sort((a, b) => (
+      new Date(b.pre_simulated_time).getTime() - new Date(a.pre_simulated_time).getTime()
+      || a.id.localeCompare(b.id)
+    ));
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     console.error("[journalApi] 加载交易日记失败:", e);
@@ -3859,7 +3884,9 @@ export async function getJournalById(id: string): Promise<TradeJournal | null> {
     console.error("[journalApi] 获取交易日记失败:", error);
     throw new Error(`获取交易日记失败：${error.message}`);
   }
-  return (data as unknown as TradeJournal) ?? null;
+  const journal = (data as unknown as TradeJournal) ?? null;
+  if (!journal) return null;
+  return applyLocalMirror(journal.user_id, [journal])[0] ?? journal;
 }
 
 // ============ Dalio L1 / L5 meta layer ============
@@ -4089,6 +4116,16 @@ export async function finalizeJournalReview(
 
   const extraResult = await updateTradeJournalWithSchemaFallback(journalId, extra);
   const allDropped = [...baseResult.droppedColumns, ...extraResult.droppedColumns];
+  let mirrorUserId = (baseJournal as { user_id?: string | null } | null)?.user_id ?? null;
+  try {
+    if (!mirrorUserId) {
+      const { data: sessionData } = await supabase.auth.getSession();
+      mirrorUserId = sessionData?.session?.user?.id ?? null;
+    }
+    reconcileLocalMirror(mirrorUserId, journalId, payload as Record<string, unknown>, allDropped);
+  } catch (error) {
+    console.warn('[journalApi] 本地评价镜像对账失败:', error);
+  }
   if (allDropped.length > 0) {
     console.warn('[journalApi] 远程数据库缺以下列，本次评价的对应字段未保存：', allDropped);
     // 本地镜像兜底：把被剥掉的字段在 localStorage 写一份，错题集 reload 时合并回去——
@@ -4100,12 +4137,7 @@ export async function finalizeJournalReview(
       // 旧实现用 supabase.auth.getUser() 是一次网络请求，抖动/刷新时返回 null 会让
       // mirrorDroppedColumns 静默跳过（它 if(!userId) return）→ 错题集汇总出现 0/N，
       // 正是用户反复报告的「评价没记录进去」。
-      let userId = (baseJournal as { user_id?: string | null } | null)?.user_id ?? null;
-      if (!userId) {
-        const { data: sessionData } = await supabase.auth.getSession();
-        userId = sessionData?.session?.user?.id ?? null;
-      }
-      mirrorDroppedColumns(userId, journalId, payload as Record<string, unknown>, allDropped);
+      mirrorDroppedColumns(mirrorUserId, journalId, payload as Record<string, unknown>, allDropped);
     } catch (e) {
       console.warn('[journalApi] 本地镜像写入失败:', e);
     }
@@ -4133,7 +4165,8 @@ export async function listJournalsByTradeRecordId(
     .select("*")
     .eq("user_id", userId)
     .eq("trade_record_id", tradeRecordId);
-  return wrap("按交易记录查询日记", error, data as unknown as TradeJournal[]);
+  const rows = wrap("按交易记录查询日记", error, data as unknown as TradeJournal[]);
+  return applyLocalMirror(userId, rows);
 }
 
 export async function syncTradeRecordCorrectionToJournals(record: TradeRecord): Promise<TradeJournal[]> {
@@ -4387,26 +4420,43 @@ export interface BulkJournalData {
   painEntries: PainLogEntry[];
 }
 
+async function listJournalAssignmentsPaged(userId: string): Promise<JournalTagAssignment[]> {
+  const rows: JournalTagAssignment[] = [];
+  for (let from = 0; ; from += JOURNAL_PAGE_SIZE) {
+    const { data, error } = await supabase
+      .from('journal_tag_assignments' as never)
+      .select('*')
+      .eq('user_id', userId)
+      .order('id', { ascending: true })
+      .range(from, from + JOURNAL_PAGE_SIZE - 1);
+    if (error) throw error;
+    const page = (data ?? []) as unknown as JournalTagAssignment[];
+    rows.push(...page);
+    if (page.length < JOURNAL_PAGE_SIZE) break;
+  }
+  return rows;
+}
+
 export async function listAllJournalDataForUser(
   userId: string,
   filters?: BulkJournalFilters,
 ): Promise<BulkJournalData> {
-  let jq = supabase.from("trade_journals" as never).select("*").eq("user_id", userId);
-  if (filters?.dateFrom) jq = jq.gte("pre_simulated_time", filters.dateFrom);
-  if (filters?.dateTo) jq = jq.lte("pre_simulated_time", filters.dateTo);
-  if (filters?.symbol) jq = jq.eq("symbol", filters.symbol);
-  if (filters?.outcome) jq = jq.eq("post_outcome", filters.outcome);
-
-  const aq = supabase.from("journal_tag_assignments" as never).select("*").eq("user_id", userId);
+  const journalsPromise = listJournalRowsPaged(userId, filters);
+  const assignmentsPromise = listJournalAssignmentsPaged(userId);
   const pq = supabase.from("error_tag_patterns" as never).select("*").eq("user_id", userId);
   const cq = supabase.from("error_tag_categories" as never).select("*").order("sort_order", { ascending: true });
   const rq = supabase.from("trading_rules" as never).select("*").eq("user_id", userId);
   const ppq = supabase.from('trade_principles' as never).select('*').eq('user_id', userId);
   const plq = supabase.from('pain_log_entries' as never).select('*').eq('user_id', userId);
 
-  const [jr, ar, pr, cr, rr, ppr, plr] = await Promise.all([jq, aq, pq, cq, rq, ppq, plq]);
-  if (jr.error) throw new Error(`加载日记失败：${jr.error.message}`);
-  if (ar.error) throw new Error(`加载标签关联失败：${ar.error.message}`);
+  let journals: TradeJournal[];
+  let assignments: JournalTagAssignment[];
+  try {
+    [journals, assignments] = await Promise.all([journalsPromise, assignmentsPromise]);
+  } catch (error) {
+    throw new Error(`加载完整错题集失败：${error instanceof Error ? error.message : String(error)}`);
+  }
+  const [pr, cr, rr, ppr, plr] = await Promise.all([pq, cq, rq, ppq, plq]);
   if (pr.error) throw new Error(`加载错误模式失败：${pr.error.message}`);
   if (cr.error) throw new Error(`加载分类失败：${cr.error.message}`);
   if (rr.error) throw new Error(`加载规则失败：${rr.error.message}`);
@@ -4414,8 +4464,8 @@ export async function listAllJournalDataForUser(
   if (plr.error && !isMissingDalioMetaLayerError(plr.error)) throw new Error(`加载痛苦日志失败：${plr.error.message}`);
 
   return {
-    journals: (jr.data ?? []) as unknown as TradeJournal[],
-    assignments: (ar.data ?? []) as unknown as JournalTagAssignment[],
+    journals,
+    assignments,
     patterns: (pr.data ?? []) as unknown as ErrorTagPattern[],
     categories: (cr.data ?? []) as unknown as ErrorTagCategory[],
     rules: (rr.data ?? []) as unknown as TradingRule[],

@@ -151,6 +151,18 @@ describe('平仓评价 → 本地镜像 → 错题集汇总（闭环）', () => 
     expect(summarizeField(merged as TradeJournal[], payoffBasisSpec).filled).toBe(1);
   });
 
+  it('远程列补齐后再次编辑，会清除旧镜像并显示刚保存的新答案', async () => {
+    await finalizeJournalReview('journal-1', FINALIZE_INPUT);
+
+    dbColumns.add('post_emo_disturbance');
+    const edited = { ...FINALIZE_INPUT, post_emo_disturbance: '修改后的完整评价' };
+    await finalizeJournalReview('journal-1', edited);
+
+    const remoteRow = { ...serverRow(), post_emo_disturbance: '修改后的完整评价' };
+    const merged = applyLocalMirror(OWNER, [remoteRow]);
+    expect((merged[0] as Record<string, unknown>).post_emo_disturbance).toBe('修改后的完整评价');
+  });
+
   it('回归：即便 auth.getUser() 抖动返回 null，镜像仍用「行自带 user_id」写入 → 汇总不再 0/N', async () => {
     getUserResult = null;   // 旧实现会让 userId=null、镜像被静默跳过。
     sessionUser = null;     // 连本地 session 也读不到，逼迫只能走「行自带 user_id」。

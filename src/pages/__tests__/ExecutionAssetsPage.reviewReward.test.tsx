@@ -10,6 +10,7 @@ const {
   mockReconcileReviewMissingPenalties,
   mockListAllCampaigns,
   mockListJournals,
+  mockTradeHistory,
 } = vi.hoisted(() => ({
   mockReconcileCampaignRewards: vi.fn(),
   mockReconcilePostTradeReviewRewards: vi.fn(),
@@ -22,8 +23,18 @@ const {
   }]),
   mockListJournals: vi.fn(async () => [{
     id: 'journal-1',
+    journal_kind: 'trade',
+    order_kind: 'main',
+    direction: 'long',
+    symbol: 'BTCUSDT',
+    trade_record_id: 'record-1',
     post_reviewed_at: '2026-07-11T08:00:00.000Z',
   }]),
+  mockTradeHistory: [{
+    id: 'record-1',
+    symbol: 'BTCUSDT',
+    closedRealAt: Date.parse('2026-06-22T04:05:06.000Z'),
+  }],
 }));
 
 vi.mock('@/contexts/AuthContext', () => ({
@@ -68,7 +79,7 @@ vi.mock('@/contexts/TradingContext', () => ({
       rewardedCampaignIds: ['campaign-1'],
       rewardedReviewJournalIds: ['journal-1'],
     },
-    tradeHistory: [],
+    tradeHistory: mockTradeHistory,
     reconcileCampaignRewards: mockReconcileCampaignRewards,
     reconcilePostTradeReviewRewards: mockReconcilePostTradeReviewRewards,
     settleCampaignMissingPenalties: mockSettleCampaignMissingPenalties,
@@ -101,7 +112,14 @@ describe('ExecutionAssetsPage review reward', () => {
     }]));
     expect(mockReconcileCampaignRewards).toHaveBeenCalledWith([{
       id: 'campaign-1',
+      symbol: 'BTCUSDT',
       createdAt: '2026-07-10T00:00:00.000Z',
+    }]);
+    expect(mockReconcileReviewMissingPenalties).toHaveBeenCalledWith([{
+      journalId: 'journal-1',
+      reviewed: true,
+      symbol: 'BTCUSDT',
+      operationTime: Date.parse('2026-06-22T04:05:06.000Z'),
     }]);
 
     expect(Array.from(screen.getByTestId('execution-rule-grid').children).map(card => (
