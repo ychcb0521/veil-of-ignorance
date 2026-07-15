@@ -916,6 +916,7 @@ export default function JournalCampaignDetailPage() {
         legs,
         tradeRecords,
         reverseHedgeOrders: visibleReverseHedgeOrders,
+        legExitPriceCorrections,
         chartElement: campaignChartExportRef.current,
         pnlOverview: {
           campaignMaxProfitReal: accuracy.campaign_max_profit_real,

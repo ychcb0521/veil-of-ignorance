@@ -3,9 +3,9 @@ import {
   buildTradeRecordLookup,
   campaignOperationTime,
   journalOperationTime,
-  journalSimulatedCloseTime,
 } from '@/lib/objectiveOperationTime';
 import { LEG_ROLE_LABELS } from '@/lib/strategyTemplates';
+import { resolveLegExecution, type LegExitPriceCorrections } from '@/lib/campaignLegExecution';
 import type { TradeCampaign, TradeJournal } from '@/types/journal';
 import type { CampaignReverseHedgeOrder, TradeRecord } from '@/types/trading';
 
@@ -14,6 +14,7 @@ type ExportInput = {
   legs: TradeJournal[];
   tradeRecords: TradeRecord[];
   reverseHedgeOrders: CampaignReverseHedgeOrder[];
+  legExitPriceCorrections?: LegExitPriceCorrections;
 };
 
 export type CampaignBoardExportInput = ExportInput & {
@@ -25,14 +26,15 @@ export type CampaignBoardExportInput = ExportInput & {
   };
 };
 
-type CellLine = {
+export type CampaignLegsExportCellLine = {
   text: string;
   color?: string;
   bold?: boolean;
 };
 
-type ExportRow = {
-  cells: CellLine[][];
+export type CampaignLegsExportRow = {
+  legId: string;
+  cells: CampaignLegsExportCellLine[][];
   height: number;
 };
 
@@ -209,26 +211,27 @@ function buildReverseOrderLegMap(
   return map;
 }
 
-function buildRows(input: ExportInput): ExportRow[] {
+export function buildCampaignLegsExportRows(input: ExportInput): CampaignLegsExportRow[] {
   const recordMap = buildTradeRecordLookup(input.tradeRecords);
   const reverseOrderLegMap = buildReverseOrderLegMap(input.legs, input.tradeRecords, input.reverseHedgeOrders);
 
   return input.legs.map(leg => {
     const record = leg.trade_record_id ? recordMap.get(leg.trade_record_id) ?? null : null;
+    const execution = resolveLegExecution(leg, record, input.legExitPriceCorrections);
     const status = statusForLeg(leg, record);
     const roleLabel = leg.leg_role ? LEG_ROLE_LABELS[leg.leg_role] ?? leg.leg_role : '—';
-    const openLabel = fmtClock(record?.openTime ?? leg.pre_simulated_time);
-    const closeLabel = fmtClock(record?.closeTime ?? journalSimulatedCloseTime(leg));
+    const openLabel = fmtClock(execution.openTime ?? leg.pre_simulated_time);
+    const closeLabel = fmtClock(execution.closeTime);
     const operationLabel = fmtClock(journalOperationTime(leg, record));
-    const entryPriceValue = record?.entryPrice ?? leg.pre_entry_price ?? null;
-    const exitPriceValue = record?.exitPrice ?? leg.post_exit_price_snapshot ?? null;
+    const entryPriceValue = execution.entryPrice;
+    const exitPriceValue = execution.exitPrice;
     const hedgeSummary = leg.order_kind === 'hedge' && leg.hedge_type
       ? `${HEDGE_TYPE_LABELS[leg.hedge_type]}${leg.hedge_necessity_pct != null ? ` · ${leg.hedge_necessity_pct.toFixed(0)}%` : ''}`
       : null;
     const reverseOrdersForLeg = input.reverseHedgeOrders.filter(order => reverseOrderLegMap.get(order.id) === leg.id);
-    const reverseLines: CellLine[] = reverseOrdersForLeg.length === 0
+    const reverseLines: CampaignLegsExportCellLine[] = reverseOrdersForLeg.length === 0
       ? [{ text: '—', color: '#848E9C' }]
-      : reverseOrdersForLeg.flatMap((order, index): CellLine[] => {
+      : reverseOrdersForLeg.flatMap((order, index): CampaignLegsExportCellLine[] => {
           const sideColor = order.side === 'SHORT' ? '#6D28D9' : '#002FA7';
           return [
             ...(index > 0 ? [{ text: '', color: '#848E9C' }] : []),
@@ -239,7 +242,14 @@ function buildRows(input: ExportInput): ExportRow[] {
           ];
         });
 
-    const cells: CellLine[][] = [
+    const exitPriceLines: CampaignLegsExportCellLine[] = [
+      { text: fmtPrice(exitPriceValue), bold: Boolean(execution.exitCorrection) },
+      ...(execution.exitCorrection ? [
+        { text: `原 ${fmtPrice(execution.exitCorrection.originalExitPrice)}`, color: '#848E9C' },
+        { text: `K线 ${fmtPrice(execution.exitCorrection.candleLow)}-${fmtPrice(execution.exitCorrection.candleHigh)}`, color: '#848E9C' },
+      ] : []),
+    ];
+    const cells: CampaignLegsExportCellLine[][] = [
       [{ text: String(leg.leg_sequence ?? '—') }],
       [
         { text: roleLabel, bold: true },
@@ -252,7 +262,7 @@ function buildRows(input: ExportInput): ExportRow[] {
         ...(hedgeSummary ? [{ text: hedgeSummary, color: '#D89B00' }] : []),
       ],
       [{ text: fmtPrice(entryPriceValue) }],
-      [{ text: fmtPrice(exitPriceValue) }],
+      exitPriceLines,
       [{ text: leg.pre_position_size != null ? leg.pre_position_size.toFixed(2) : '—' }],
       [{ text: status.label, color: status.color, bold: true }],
       [{ text: leg.post_r_multiple != null ? leg.post_r_multiple.toFixed(2) : '—' }],
@@ -260,6 +270,7 @@ function buildRows(input: ExportInput): ExportRow[] {
     ];
     const maxLines = Math.max(...cells.map(cell => cell.length));
     return {
+      legId: leg.id,
       cells,
       height: Math.max(58, ROW_PAD_Y * 2 + maxLines * LINE_H),
     };
@@ -320,7 +331,7 @@ function strokeRoundedRect(
 
 function drawLines(
   ctx: CanvasRenderingContext2D,
-  lines: CellLine[],
+  lines: CampaignLegsExportCellLine[],
   x: number,
   y: number,
   maxWidth: number,
@@ -332,7 +343,7 @@ function drawLines(
   });
 }
 
-function drawLegsTable(ctx: CanvasRenderingContext2D, rows: ExportRow[], startY: number) {
+function drawLegsTable(ctx: CanvasRenderingContext2D, rows: CampaignLegsExportRow[], startY: number) {
   let y = startY;
   let x = MARGIN_X;
   ctx.fillStyle = '#EEF2F7';
@@ -364,7 +375,7 @@ function drawLegsTable(ctx: CanvasRenderingContext2D, rows: ExportRow[], startY:
 }
 
 function buildCampaignLegsListCanvas(input: ExportInput, options: LegsCanvasOptions = {}): RenderedCanvas {
-  const rows = buildRows(input);
+  const rows = buildCampaignLegsExportRows(input);
   const includeHeader = options.includeHeader ?? true;
   const headerHeight = includeHeader ? HEADER_H : 0;
   const footerHeight = includeHeader ? FOOTER_H : 0;
@@ -618,7 +629,7 @@ export async function exportCampaignBoardPng(input: CampaignBoardExportInput): P
   ctx.drawImage(chart.canvas, MARGIN_X, y, chartDisplayWidth, chartDisplayHeight);
 
   y += chartDisplayHeight + BOARD_SECTION_GAP;
-  drawSectionLabel(ctx, 'Legs 列表（完整）', MARGIN_X, y);
+  drawSectionLabel(ctx, `Legs 列表（完整展开 ${input.legs.length}/${input.legs.length} 条）`, MARGIN_X, y);
   y += BOARD_SECTION_LABEL_H;
   fillRoundedRect(ctx, MARGIN_X - 10, y - 10, TABLE_WIDTH + 20, legs.height + 20, 12, '#FFFFFF');
   strokeRoundedRect(ctx, MARGIN_X - 10, y - 10, TABLE_WIDTH + 20, legs.height + 20, 12, '#E5E7EB', 1);
