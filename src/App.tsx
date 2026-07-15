@@ -40,11 +40,25 @@ function AppRoutes() {
     );
   }
 
-  // Not authenticated or email not confirmed → auth page
+  const isConsentRoute =
+    typeof window !== 'undefined' && window.location.pathname === '/.lovable/oauth/consent';
+
+  // Not authenticated or email not confirmed → auth page (URL is preserved,
+  // so after sign-in the consent route below matches automatically).
   if (!user || !user.email_confirmed_at) {
     return (
       <Routes>
         <Route path="*" element={<AuthPage />} />
+      </Routes>
+    );
+  }
+
+  // OAuth consent must be reachable even before onboarding — it belongs to
+  // the auth surface, not the app shell.
+  if (isConsentRoute) {
+    return (
+      <Routes>
+        <Route path="/.lovable/oauth/consent" element={<OAuthConsent />} />
       </Routes>
     );
   }
