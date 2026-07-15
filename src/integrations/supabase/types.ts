@@ -389,7 +389,6 @@ export type Database = {
       trade_campaigns: {
         Row: {
           actual_evolution: Json
-          campaign_code: string
           closed_at: string | null
           created_at: string
           direction: string
@@ -412,7 +411,6 @@ export type Database = {
         }
         Insert: {
           actual_evolution?: Json
-          campaign_code?: string
           closed_at?: string | null
           created_at?: string
           direction: string
@@ -435,7 +433,6 @@ export type Database = {
         }
         Update: {
           actual_evolution?: Json
-          campaign_code?: string
           closed_at?: string | null
           created_at?: string
           direction?: string
@@ -508,10 +505,6 @@ export type Database = {
           post_emo_wanted: string | null
           post_error_scenario: string | null
           post_error_type_summary: string | null
-          post_entry_payoff_estimate_grade: string | null
-          post_entry_payoff_basis_review: string | null
-          post_entry_win_rate_estimate_grade: string | null
-          post_entry_win_rate_basis_review: string | null
           post_execution_monitor: string | null
           post_five_step_goal: string | null
           post_five_step_problem: string | null
@@ -533,7 +526,6 @@ export type Database = {
           post_proximate_cause: string | null
           post_r_multiple: number | null
           post_real_close_time: string | null
-          post_simulated_close_time: string | null
           post_real_problem: string | null
           post_reality_feedback: string | null
           post_realized_pnl: number | null
@@ -588,10 +580,6 @@ export type Database = {
           pre_planned_stop_loss: number | null
           pre_planned_take_profit: number | null
           pre_position_size: number | null
-          pre_settlement_mode: string | null
-          pre_settlement_asset: string | null
-          pre_contract_size_usd: number | null
-          pre_contracts: number | null
           pre_positive_expectancy: string | null
           pre_premortem_failure_reason: string | null
           pre_real_time: string
@@ -660,10 +648,6 @@ export type Database = {
           post_emo_wanted?: string | null
           post_error_scenario?: string | null
           post_error_type_summary?: string | null
-          post_entry_payoff_estimate_grade?: string | null
-          post_entry_payoff_basis_review?: string | null
-          post_entry_win_rate_estimate_grade?: string | null
-          post_entry_win_rate_basis_review?: string | null
           post_execution_monitor?: string | null
           post_five_step_goal?: string | null
           post_five_step_problem?: string | null
@@ -685,7 +669,6 @@ export type Database = {
           post_proximate_cause?: string | null
           post_r_multiple?: number | null
           post_real_close_time?: string | null
-          post_simulated_close_time?: string | null
           post_real_problem?: string | null
           post_reality_feedback?: string | null
           post_realized_pnl?: number | null
@@ -740,10 +723,6 @@ export type Database = {
           pre_planned_stop_loss?: number | null
           pre_planned_take_profit?: number | null
           pre_position_size?: number | null
-          pre_settlement_mode?: string | null
-          pre_settlement_asset?: string | null
-          pre_contract_size_usd?: number | null
-          pre_contracts?: number | null
           pre_positive_expectancy?: string | null
           pre_premortem_failure_reason?: string | null
           pre_real_time?: string
@@ -812,10 +791,6 @@ export type Database = {
           post_emo_wanted?: string | null
           post_error_scenario?: string | null
           post_error_type_summary?: string | null
-          post_entry_payoff_estimate_grade?: string | null
-          post_entry_payoff_basis_review?: string | null
-          post_entry_win_rate_estimate_grade?: string | null
-          post_entry_win_rate_basis_review?: string | null
           post_execution_monitor?: string | null
           post_five_step_goal?: string | null
           post_five_step_problem?: string | null
@@ -837,7 +812,6 @@ export type Database = {
           post_proximate_cause?: string | null
           post_r_multiple?: number | null
           post_real_close_time?: string | null
-          post_simulated_close_time?: string | null
           post_real_problem?: string | null
           post_reality_feedback?: string | null
           post_realized_pnl?: number | null
@@ -892,10 +866,6 @@ export type Database = {
           pre_planned_stop_loss?: number | null
           pre_planned_take_profit?: number | null
           pre_position_size?: number | null
-          pre_settlement_mode?: string | null
-          pre_settlement_asset?: string | null
-          pre_contract_size_usd?: number | null
-          pre_contracts?: number | null
           pre_positive_expectancy?: string | null
           pre_premortem_failure_reason?: string | null
           pre_real_time?: string
