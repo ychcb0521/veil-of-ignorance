@@ -9,9 +9,9 @@ import {
   ChevronRight,
   Clock,
   Flag,
+  FlagOff,
   Gauge,
   LineChart,
-  ListChecks,
   Loader2,
   Trophy,
   Zap,
@@ -28,8 +28,8 @@ import {
   EXECUTION_CAMPAIGN_MISSING_PENALTY,
   EXECUTION_REVIEW_REWARD,
   EXECUTION_REVIEW_MISSING_PENALTY,
-  executionTradeCount,
   localDateKey,
+  summarizeExecutionAssetEvents,
   type ExecutionAssetEvent,
   type ExecutionTradeSnapshot,
 } from '@/lib/executionAssets';
@@ -52,7 +52,7 @@ import type { TradeCampaign } from '@/types/journal';
 import { buildObjectiveLongMainReviewItems } from '@/lib/unreviewedLongMainTrades';
 import { journalReviewPath } from '@/lib/journalCampaignNavigation';
 
-type DetailPanelKey = 'decision' | 'direct' | 'penalty' | 'campaign' | 'review' | 'review_missing' | 'share';
+type DetailPanelKey = 'decision' | 'direct' | 'penalty' | 'campaign' | 'campaign_missing' | 'review' | 'review_missing';
 
 function formatSigned(points: number) {
   return `${points >= 0 ? '+' : ''}${points.toLocaleString()}`;
@@ -92,6 +92,48 @@ function executionEventOperationTime(
   if (Number.isFinite(event.createdAt)) return event.createdAt;
   const dateFallback = new Date(`${event.date}T00:00:00+08:00`).getTime();
   return Number.isFinite(dateFallback) ? dateFallback : 0;
+}
+
+function normalizedEventSymbol(value: string | null | undefined) {
+  return value?.trim().toUpperCase() ?? '';
+}
+
+function relatedCampaignTradeEvents(
+  event: ExecutionAssetEvent,
+  allEvents: readonly ExecutionAssetEvent[],
+) {
+  if (event.type !== 'campaign_missing_penalty') return [];
+  const symbol = normalizedEventSymbol(event.campaignSymbol);
+  if (!symbol) return [];
+  return allEvents.filter(candidate => (
+    (candidate.type === 'decision_reward' || candidate.type === 'direct_reward')
+    && candidate.date === event.date
+    && normalizedEventSymbol(candidate.trade?.symbol) === symbol
+  ));
+}
+
+function executionEventSortTime(
+  event: ExecutionAssetEvent,
+  campaignById: Record<string, TradeCampaign>,
+  allEvents: readonly ExecutionAssetEvent[],
+) {
+  const related = relatedCampaignTradeEvents(event, allEvents);
+  if (related.length > 0) {
+    return Math.min(...related.map(item => executionEventOperationTime(item, campaignById)));
+  }
+  if (event.type === 'no_trade_penalty' || event.type === 'campaign_missing_penalty') {
+    const dateTime = new Date(`${event.date}T00:00:00+08:00`).getTime();
+    if (Number.isFinite(dateTime)) return dateTime;
+  }
+  return executionEventOperationTime(event, campaignById);
+}
+
+function campaignClassifyPath(event: ExecutionAssetEvent) {
+  const params = new URLSearchParams();
+  if (event.campaignSymbol) params.set('symbol', event.campaignSymbol);
+  params.set('dateFrom', event.date);
+  params.set('dateTo', event.date);
+  return `/journal/campaigns/classify?${params.toString()}`;
 }
 
 function sideLabel(side: string | null | undefined) {
@@ -172,7 +214,7 @@ function useOpenPlaybackForSnapshot() {
   const { tradeHistory } = useTradingContext();
   const [busyId, setBusyId] = useState<string | null>(null);
 
-  const open = useCallback(async (event: ExecutionAssetEvent) => {
+  const openJournal = useCallback(async (event: ExecutionAssetEvent, destination: 'playback' | 'review') => {
     if (!user) { toast.error('请先登录后查看 K 线回放'); return; }
     const matched = matchClosesForSnapshot(event.trade, tradeHistory);
     if (!matched) { toast.info('这笔还未平仓，无法查看完整持仓过程'); return; }
@@ -180,7 +222,11 @@ function useOpenPlaybackForSnapshot() {
     try {
       const existing = await listJournalsByTradeRecordId(user.id, matched.primaryRecord.id);
       const journal = existing[0] ?? await backfillJournalFromRecord(matched.primaryRecord);
-      nav(`/journal/${journal.id}`);
+      if (destination === 'review') {
+        nav(journalReviewPath(journal.id, journal.post_reviewed_at ? 'edit' : 'required'));
+      } else {
+        nav(`/journal/${journal.id}`);
+      }
     } catch (e) {
       toast.error(e instanceof Error ? e.message : String(e));
     } finally {
@@ -188,7 +234,16 @@ function useOpenPlaybackForSnapshot() {
     }
   }, [nav, tradeHistory, user]);
 
-  return { open, busyId };
+  const open = useCallback(
+    (event: ExecutionAssetEvent) => openJournal(event, 'playback'),
+    [openJournal],
+  );
+  const openReview = useCallback(
+    (event: ExecutionAssetEvent) => openJournal(event, 'review'),
+    [openJournal],
+  );
+
+  return { open, openReview, busyId };
 }
 
 function formatPnl(value: number) {
@@ -242,6 +297,11 @@ const PANEL_COPY: Record<DetailPanelKey, { title: string; subtitle: string; empt
     subtitle: `按“自然日 × 标的”计分：当天同一标的建一场或多场战役都只 +${EXECUTION_CAMPAIGN_REWARD}，并与未建战役扣分互斥。`,
     empty: '暂无创建的交易战役。',
   },
+  campaign_missing: {
+    title: '未建交易战役明细',
+    subtitle: `按“自然日 × 标的”统计，每个标的 -${EXECUTION_CAMPAIGN_MISSING_PENALTY}；补建对应战役后会撤销扣分并翻为奖励。`,
+    empty: '暂无未建战役的标的。',
+  },
   review: {
     title: '平仓评价明细',
     subtitle: `每完成一笔平仓评价 +${EXECUTION_REVIEW_REWARD}；后续编辑不重复计分。`,
@@ -252,15 +312,11 @@ const PANEL_COPY: Record<DetailPanelKey, { title: string; subtitle: string; empt
     subtitle: `只统计拥有真实操作时间的主力多单；每笔 -${EXECUTION_REVIEW_MISSING_PENALTY}，补做评价后自动撤销。`,
     empty: '暂无未做平仓评价的主力多单。',
   },
-  share: {
-    title: '决策记录占比明细',
-    subtitle: '这里合并展示所有计分交易，用来观察可复盘样本占比。',
-    empty: '暂无可计分交易。',
-  },
 };
 
 function StatCard({
   active,
+  summaryKey,
   icon,
   value,
   label,
@@ -269,6 +325,7 @@ function StatCard({
   onClick,
 }: {
   active: boolean;
+  summaryKey: DetailPanelKey;
   icon: ReactNode;
   value: string;
   label: string;
@@ -279,6 +336,7 @@ function StatCard({
   return (
     <button
       type="button"
+      data-summary-key={summaryKey}
       onClick={onClick}
       className={cn(
         'group rounded-xl border bg-background/70 p-4 text-left transition-all hover:-translate-y-0.5 hover:border-foreground/20 hover:shadow-sm',
@@ -313,25 +371,34 @@ function DetailItem({ label, value }: { label: string; value: ReactNode }) {
 }
 
 function EventDetailCard({
-  event, matched, busy, onOpen, campaignById,
+  event, matched, busy, onOpen, onOpenReview, campaignById, allEvents,
 }: {
   event: ExecutionAssetEvent;
   matched: MatchedClose | null;
   busy: boolean;
   onOpen: (e: ExecutionAssetEvent) => void;
+  onOpenReview: (e: ExecutionAssetEvent) => void;
   campaignById: Record<string, TradeCampaign>;
+  allEvents: ExecutionAssetEvent[];
 }) {
   const nav = useNavigate();
   const trade = event.trade;
   const isPenalty = event.type === 'no_trade_penalty';
   const isCampaign = event.type === 'campaign_reward';
+  const isCampaignMissing = event.type === 'campaign_missing_penalty';
   const isReview = event.type === 'review_reward';
   const isReviewMissing = event.type === 'review_missing_penalty';
+  const isDirect = event.type === 'direct_reward';
   const canOpen = Boolean(trade) && matched != null;
   const reviewPath = event.journalId && (isReview || isReviewMissing)
     ? journalReviewPath(event.journalId, isReviewMissing ? 'required' : 'edit')
     : null;
-  const operationTime = executionEventOperationTime(event, campaignById);
+  const relatedTrades = relatedCampaignTradeEvents(event, allEvents);
+  const relatedTradeTimes = relatedTrades
+    .map(item => executionEventOperationTime(item, campaignById))
+    .filter(Number.isFinite)
+    .sort((a, b) => a - b);
+  const operationTime = executionEventSortTime(event, campaignById, allEvents);
   const tradeSymbol = trade
     ? `${getSettlementAsset(trade.symbol)}/${quoteLabel(trade)}`
     : null;
@@ -372,7 +439,7 @@ function EventDetailCard({
           </div>
           <div className="mt-1 flex items-center gap-1.5 font-mono text-[10px] text-muted-foreground">
             <Clock className="h-3 w-3" />
-            奖励日期 {event.date}
+            计分日期 {event.date}
           </div>
         </div>
         <div className="flex flex-col items-end gap-2 text-right text-[10px] text-muted-foreground">
@@ -403,28 +470,58 @@ function EventDetailCard({
       </div>
 
       {trade ? (
-        <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
-          <DetailItem label="模拟开仓时间" value={formatTime(trade.simulatedTime)} />
-          <DetailItem label="订单类型" value={orderTypeLabel(trade.orderType)} />
-          <DetailItem label="开仓价" value={formatNumber(trade.entryPrice, 6)} />
-          {matched && <DetailItem label="平仓价（最末次）" value={formatNumber(matched.primaryRecord.exitPrice ?? null, 6)} />}
-          <DetailItem label="数量" value={formatSnapshotQuantity(trade)} />
-          <DetailItem label="杠杆" value={`${formatNumber(trade.leverage, 2)}x`} />
-          <DetailItem label="保证金模式" value={marginModeLabel(trade.marginMode)} />
-          <DetailItem label="保证金" value={formatSnapshotMargin(trade)} />
-          <DetailItem label="名义价值" value={formatSnapshotNotional(trade)} />
-          {matched && <DetailItem label="平仓时间" value={formatTime(matched.closeTime)} />}
-          {matched && (
-            <DetailItem
-              label="累计盈亏"
-              value={<span className={pnlClass(matched.netPnl)}>{formatPnl(matched.netPnl)} USDT</span>}
-            />
+        <>
+          <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+            <DetailItem label="盘面开仓时间" value={formatTime(trade.simulatedTime)} />
+            <DetailItem label="真实操作时间" value={formatTime(operationTime)} />
+            <DetailItem label="订单类型" value={orderTypeLabel(trade.orderType)} />
+            <DetailItem label="开仓价" value={formatNumber(trade.entryPrice, 6)} />
+            {matched && <DetailItem label="平仓价（最末次）" value={formatNumber(matched.primaryRecord.exitPrice ?? null, 6)} />}
+            <DetailItem label="数量" value={formatSnapshotQuantity(trade)} />
+            <DetailItem label="杠杆" value={`${formatNumber(trade.leverage, 2)}x`} />
+            <DetailItem label="保证金模式" value={marginModeLabel(trade.marginMode)} />
+            <DetailItem label="保证金" value={formatSnapshotMargin(trade)} />
+            <DetailItem label="名义价值" value={formatSnapshotNotional(trade)} />
+            {matched && <DetailItem label="平仓时间" value={formatTime(matched.closeTime)} />}
+            {matched && (
+              <DetailItem
+                label="累计盈亏"
+                value={<span className={pnlClass(matched.netPnl)}>{formatPnl(matched.netPnl)} USDT</span>}
+              />
+            )}
+            {trade.positionId && <DetailItem label="仓位 ID" value={trade.positionId} />}
+          </div>
+          {isDirect && matched && (
+            <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-[#F6465D]/20 bg-[#F6465D]/5 px-3 py-2">
+              <div className="text-[11px] text-muted-foreground">
+                直接交易扣分不伪造为决策记录；你仍可补做完整平仓评价，把这笔变成可复盘样本。
+              </div>
+              <button
+                type="button"
+                onClick={() => onOpenReview(event)}
+                disabled={busy}
+                className="inline-flex items-center gap-1 rounded-md border border-[#B080FF]/35 bg-background px-2.5 py-1.5 text-[11px] text-[#8B5CF6] transition-colors hover:bg-[#B080FF]/10 disabled:cursor-wait disabled:opacity-60"
+              >
+                {busy ? <Loader2 className="h-3 w-3 animate-spin" /> : <ClipboardCheck className="h-3 w-3" />}
+                查看 / 补做平仓评价
+              </button>
+            </div>
           )}
-          {trade.positionId && <DetailItem label="仓位 ID" value={trade.positionId} />}
-        </div>
+        </>
       ) : isPenalty ? (
-        <div className="mt-4 rounded-lg border border-[#F6465D]/20 bg-[#F6465D]/5 px-3 py-2 text-[12px] text-muted-foreground">
-          当日没有计分做多开仓，系统按自然日扣分。扣分日期：<span className="font-mono text-foreground">{event.date}</span>
+        <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-[#F6465D]/20 bg-[#F6465D]/5 px-3 py-2 text-[12px] text-muted-foreground">
+          <div>
+            当日没有下单、弃单或复盘记录。扣分日期：<span className="font-mono text-foreground">{event.date}</span>
+            <div className="mt-1 text-[10px]">历史自然日不能事后伪造练习记录；可以从今天重新建立连续记录。</div>
+          </div>
+          <button
+            type="button"
+            onClick={() => nav('/')}
+            className="inline-flex items-center gap-1 rounded-md border border-[#F6465D]/25 bg-background px-2.5 py-1.5 text-[11px] text-[#F6465D] hover:bg-[#F6465D]/5"
+          >
+            <Activity className="h-3 w-3" />
+            去练习
+          </button>
         </div>
       ) : isCampaign ? (
         (() => {
@@ -458,6 +555,35 @@ function EventDetailCard({
             </button>
           );
         })()
+      ) : isCampaignMissing ? (
+        <div className="mt-4 rounded-lg border border-[#D89B00]/25 bg-[#D89B00]/5 px-3 py-3">
+          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+            <DetailItem label="标的" value={event.campaignSymbol || '—'} />
+            <DetailItem label="交易日期" value={event.date} />
+            <DetailItem label="当日计分交易" value={`${relatedTrades.length} 条`} />
+            <DetailItem
+              label="真实操作时间"
+              value={relatedTradeTimes.length > 0
+                ? `${formatTime(relatedTradeTimes[0])}${relatedTradeTimes.length > 1 ? ` → ${formatTime(relatedTradeTimes.at(-1))}` : ''}`
+                : '历史流水未保留'}
+            />
+          </div>
+          <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+            <div className="text-[11px] text-muted-foreground">
+              补建这个“日期 × 标的”的战役后，-{EXECUTION_CAMPAIGN_MISSING_PENALTY} 会撤销，并改记 +{EXECUTION_CAMPAIGN_REWARD}。
+            </div>
+            <button
+              type="button"
+              onClick={() => nav(campaignClassifyPath(event))}
+              className="inline-flex items-center gap-1 rounded-md border border-[#D89B00]/35 bg-background px-2.5 py-1.5 text-[11px] text-[#D89B00] transition-colors hover:bg-[#D89B00]/10"
+              title="按对应标的和日期筛选，并补建交易战役"
+            >
+              <Flag className="h-3 w-3" />
+              补建战役
+              <ChevronRight className="h-3 w-3" />
+            </button>
+          </div>
+        </div>
       ) : isReviewMissing ? (
         reviewPath ? (
           <button
@@ -512,24 +638,26 @@ function EventDetailCard({
 }
 
 function DetailPanel({
-  panelKey, events, tradeHistory, busyId, onOpen, campaignById,
+  panelKey, events, allEvents, tradeHistory, busyId, onOpen, onOpenReview, campaignById,
 }: {
   panelKey: DetailPanelKey;
   events: ExecutionAssetEvent[];
+  allEvents: ExecutionAssetEvent[];
   tradeHistory: TradeRecord[];
   busyId: string | null;
   onOpen: (e: ExecutionAssetEvent) => void;
+  onOpenReview: (e: ExecutionAssetEvent) => void;
   campaignById: Record<string, TradeCampaign>;
 }) {
   const copy = PANEL_COPY[panelKey];
   const [operationSort, setOperationSort] = useState<'desc' | 'asc'>('desc');
   const displayedEvents = useMemo(() => {
-    if (panelKey !== 'review_missing') return events;
     return [...events].sort((a, b) => {
-      const difference = executionEventOperationTime(a, campaignById) - executionEventOperationTime(b, campaignById);
+      const difference = executionEventSortTime(a, campaignById, allEvents)
+        - executionEventSortTime(b, campaignById, allEvents);
       return operationSort === 'asc' ? difference : -difference;
     });
-  }, [campaignById, events, operationSort, panelKey]);
+  }, [allEvents, campaignById, events, operationSort]);
   const missingSymbolCount = useMemo(() => (
     panelKey === 'review_missing'
       ? new Set(events.map(event => event.reviewSymbol).filter(Boolean)).size
@@ -544,17 +672,15 @@ function DetailPanel({
           <p className="mt-1 text-[11px] text-muted-foreground">{copy.subtitle}</p>
         </div>
         <div className="flex items-center gap-2">
-          {panelKey === 'review_missing' && (
-            <button
-              type="button"
-              onClick={() => setOperationSort(current => current === 'desc' ? 'asc' : 'desc')}
-              className="inline-flex items-center gap-1 rounded-md border border-border/60 px-2.5 py-1 text-[11px] text-muted-foreground hover:text-foreground"
-              aria-label={`操作时间${operationSort === 'desc' ? '从新到旧' : '从旧到新'}排序；点击切换`}
-            >
-              <Clock className="h-3 w-3" />
-              操作时间 {operationSort === 'desc' ? '↓' : '↑'}
-            </button>
-          )}
+          <button
+            type="button"
+            onClick={() => setOperationSort(current => current === 'desc' ? 'asc' : 'desc')}
+            className="inline-flex items-center gap-1 rounded-md border border-border/60 px-2.5 py-1 text-[11px] text-muted-foreground hover:text-foreground"
+            aria-label={`操作时间${operationSort === 'desc' ? '从新到旧' : '从旧到新'}排序；点击切换`}
+          >
+            <Clock className="h-3 w-3" />
+            操作时间 {operationSort === 'desc' ? '↓' : '↑'}
+          </button>
           <div className="rounded-full border border-border/60 px-2.5 py-1 font-mono text-[11px] text-muted-foreground">
             {panelKey === 'review_missing' ? `${missingSymbolCount} 标的 · ` : ''}{events.length} 条
           </div>
@@ -574,7 +700,9 @@ function DetailPanel({
               matched={matchClosesForSnapshot(event.trade, tradeHistory)}
               busy={busyId === event.id}
               onOpen={onOpen}
+              onOpenReview={onOpenReview}
               campaignById={campaignById}
+              allEvents={allEvents}
             />
           ))}
         </div>
@@ -594,13 +722,15 @@ export default function ExecutionAssetsPage() {
     reconcileReviewMissingPenalties,
   } = useTradingContext();
   const { user } = useAuth();
-  const { open: openPlayback, busyId } = useOpenPlaybackForSnapshot();
+  const { open: openPlayback, openReview: openSnapshotReview, busyId } = useOpenPlaybackForSnapshot();
   const [openPanel, setOpenPanel] = useState<DetailPanelKey | null>(null);
   const [campaignById, setCampaignById] = useState<Record<string, TradeCampaign>>({});
   const todayKey = localDateKey();
   const tradedToday = Boolean(executionAsset.tradedDates?.[todayKey]);
-  const totalTrades = executionTradeCount(executionAsset);
-  const decisionShare = totalTrades > 0 ? (executionAsset.decisionTradeCount / totalTrades) * 100 : 0;
+  const eventSummary = useMemo(
+    () => summarizeExecutionAssetEvents(executionAsset.events),
+    [executionAsset.events],
+  );
 
   // 进页面即对账：按真实战役 ID 和已完成评价的 journal ID 补齐漏记奖励；两类都幂等自愈。
   useEffect(() => {
@@ -648,9 +778,9 @@ export default function ExecutionAssetsPage() {
       direct,
       penalty: events.filter(event => event.type === 'no_trade_penalty'),
       campaign: events.filter(event => event.type === 'campaign_reward'),
+      campaign_missing: events.filter(event => event.type === 'campaign_missing_penalty'),
       review: events.filter(event => event.type === 'review_reward'),
       review_missing: events.filter(event => event.type === 'review_missing_penalty'),
-      share: events.filter(event => event.type === 'decision_reward' || event.type === 'direct_reward'),
     };
   }, [executionAsset.events]);
 
@@ -659,7 +789,7 @@ export default function ExecutionAssetsPage() {
       .map((event, index) => ({
         event,
         index,
-        operationTime: executionEventOperationTime(event, campaignById),
+        operationTime: executionEventSortTime(event, campaignById, executionAsset.events ?? []),
       }))
       .sort((a, b) => b.operationTime - a.operationTime || a.index - b.index)
       .map(item => item.event)
@@ -718,73 +848,84 @@ export default function ExecutionAssetsPage() {
                 <div className="mt-1 text-[12px] text-muted-foreground">
                   决策交易 <span className="font-mono text-[#0ECB81]">+{EXECUTION_DECISION_REWARD}</span>，直接交易 <span className="font-mono text-[#F6465D]">−{EXECUTION_DIRECT_PENALTY}</span>：同额反号，慢想加分、乱下扣分。
                 </div>
+                <div className="mt-2 text-[10px] text-muted-foreground">
+                  当前决策记录占比 <span className="font-mono text-foreground">{eventSummary.decisionShare.toFixed(0)}%</span>
+                  <span className="ml-1">（{eventSummary.decisionCount}/{eventSummary.totalTradeCount}）</span>
+                </div>
               </div>
             </div>
           </div>
 
-          <div className="grid gap-3 p-5 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7">
+          <div data-testid="execution-summary-grid" className="grid gap-3 p-5 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7">
             <StatCard
-              active={openPanel === 'decision'}
-              icon={<Trophy className="h-4 w-4" />}
-              value={String(executionAsset.decisionTradeCount)}
-              label="决策记录交易"
-              tone="text-[#0ECB81]"
-              detail={<span className="font-mono text-[#0ECB81]">每次 +{EXECUTION_DECISION_REWARD}</span>}
-              onClick={() => togglePanel('decision')}
-            />
-            <StatCard
-              active={openPanel === 'direct'}
-              icon={<Zap className="h-4 w-4" />}
-              value={String(executionAsset.directTradeCount)}
-              label="直接交易"
-              tone="text-[#F6465D]"
-              detail={<span className="font-mono text-[#F6465D]">每标的 −{EXECUTION_DIRECT_PENALTY}</span>}
-              onClick={() => togglePanel('direct')}
-            />
-            <StatCard
+              summaryKey="penalty"
               active={openPanel === 'penalty'}
               icon={<CalendarMinus className="h-4 w-4" />}
-              value={String(executionAsset.penaltyDays)}
+              value={String(eventSummary.noTradePenaltyCount)}
               label="未练习扣分日"
               tone="text-[#F6465D]"
               detail={<span className="font-mono text-[#F6465D]">每天 -{EXECUTION_NO_TRADE_PENALTY}</span>}
               onClick={() => togglePanel('penalty')}
             />
             <StatCard
-              active={openPanel === 'campaign'}
-              icon={<Flag className="h-4 w-4" />}
-              value={String(executionAsset.campaignCount)}
-              label="建战役"
-              tone="text-[#5BA3FF]"
-              detail={<span className="font-mono text-[#5BA3FF]">每次 +{EXECUTION_CAMPAIGN_REWARD}</span>}
-              onClick={() => togglePanel('campaign')}
+              summaryKey="review_missing"
+              active={openPanel === 'review_missing'}
+              icon={<ClipboardX className="h-4 w-4" />}
+              value={String(eventSummary.reviewMissingCount)}
+              label="未做评价"
+              tone="text-[#F6465D]"
+              detail={<span className="font-mono text-[#F6465D]">每笔 -{EXECUTION_REVIEW_MISSING_PENALTY}</span>}
+              onClick={() => togglePanel('review_missing')}
             />
             <StatCard
+              summaryKey="direct"
+              active={openPanel === 'direct'}
+              icon={<Zap className="h-4 w-4" />}
+              value={String(eventSummary.directCount)}
+              label="直接交易"
+              tone="text-[#F6465D]"
+              detail={<span className="font-mono text-[#F6465D]">每标的 −{EXECUTION_DIRECT_PENALTY}</span>}
+              onClick={() => togglePanel('direct')}
+            />
+            <StatCard
+              summaryKey="campaign_missing"
+              active={openPanel === 'campaign_missing'}
+              icon={<FlagOff className="h-4 w-4" />}
+              value={String(eventSummary.campaignMissingCount)}
+              label="未建战役"
+              tone="text-[#D89B00]"
+              detail={<span className="font-mono text-[#D89B00]">每标的 -{EXECUTION_CAMPAIGN_MISSING_PENALTY}</span>}
+              onClick={() => togglePanel('campaign_missing')}
+            />
+            <StatCard
+              summaryKey="review"
               active={openPanel === 'review'}
               icon={<ClipboardCheck className="h-4 w-4" />}
-              value={String(executionAsset.reviewCount ?? 0)}
+              value={String(eventSummary.reviewCount)}
               label="平仓评价"
               tone="text-[#B080FF]"
               detail={<span className="font-mono text-[#B080FF]">每次 +{EXECUTION_REVIEW_REWARD}</span>}
               onClick={() => togglePanel('review')}
             />
             <StatCard
-              active={openPanel === 'review_missing'}
-              icon={<ClipboardX className="h-4 w-4" />}
-              value={String(detailEvents.review_missing.length)}
-              label="未做评价"
-              tone="text-[#F6465D]"
-              detail={<span className="font-mono text-[#F6465D]">主力多单 -{EXECUTION_REVIEW_MISSING_PENALTY}</span>}
-              onClick={() => togglePanel('review_missing')}
+              summaryKey="decision"
+              active={openPanel === 'decision'}
+              icon={<Trophy className="h-4 w-4" />}
+              value={String(eventSummary.decisionCount)}
+              label="决策记录交易"
+              tone="text-[#0ECB81]"
+              detail={<span className="font-mono text-[#0ECB81]">每次 +{EXECUTION_DECISION_REWARD}</span>}
+              onClick={() => togglePanel('decision')}
             />
             <StatCard
-              active={openPanel === 'share'}
-              icon={<ListChecks className="h-4 w-4" />}
-              value={`${decisionShare.toFixed(0)}%`}
-              label="决策记录占比"
-              tone="text-muted-foreground"
-              detail={<span className="text-muted-foreground">越高，样本越可复盘。</span>}
-              onClick={() => togglePanel('share')}
+              summaryKey="campaign"
+              active={openPanel === 'campaign'}
+              icon={<Flag className="h-4 w-4" />}
+              value={String(eventSummary.campaignCount)}
+              label="建战役"
+              tone="text-[#5BA3FF]"
+              detail={<span className="font-mono text-[#5BA3FF]">每次 +{EXECUTION_CAMPAIGN_REWARD}</span>}
+              onClick={() => togglePanel('campaign')}
             />
           </div>
 
@@ -792,9 +933,11 @@ export default function ExecutionAssetsPage() {
             <DetailPanel
               panelKey={openPanel}
               events={detailEvents[openPanel]}
+              allEvents={executionAsset.events ?? []}
               tradeHistory={tradeHistory}
               busyId={busyId}
               onOpen={openPlayback}
+              onOpenReview={openSnapshotReview}
               campaignById={campaignById}
             />
           )}
@@ -875,9 +1018,14 @@ export default function ExecutionAssetsPage() {
                     ? campaignById[event.campaignId]
                     : null;
                   const canOpenCampaign = Boolean(campaign);
-                  const canInteract = canOpen || canOpenReview || canOpenCampaign;
+                  const isCampaignMissing = event.type === 'campaign_missing_penalty';
+                  const canInteract = canOpen || canOpenReview || canOpenCampaign || isCampaignMissing;
                   const busy = busyId === event.id;
-                  const operationTime = executionEventOperationTime(event, campaignById);
+                  const operationTime = executionEventSortTime(
+                    event,
+                    campaignById,
+                    executionAsset.events ?? [],
+                  );
                   return (
                     <li key={event.id} data-event-id={event.id} data-operation-time={operationTime}>
                       <button
@@ -886,6 +1034,7 @@ export default function ExecutionAssetsPage() {
                           if (canOpen) openPlayback(event);
                           else if (reviewPath) nav(reviewPath);
                           else if (canOpenCampaign && campaign) nav(`/journal/campaigns/${campaign.id}`);
+                          else if (isCampaignMissing) nav(campaignClassifyPath(event));
                         }}
                         disabled={!canInteract || busy}
                         className={cn(
@@ -904,6 +1053,7 @@ export default function ExecutionAssetsPage() {
                               ? '点击开始并完成这笔平仓评价'
                               : '点击查看、编辑并保存这笔平仓评价'
                           : canOpenCampaign ? '点击进入对应的交易战役'
+                          : isCampaignMissing ? '点击按对应标的和日期补建交易战役'
                           : event.type === 'campaign_reward' && event.campaignId ? '对应战役已删除'
                           : event.type === 'campaign_reward' ? '正在匹配历史奖励对应的战役'
                           : !event.trade ? '此条无交易快照，无法查看回放'
@@ -938,7 +1088,7 @@ export default function ExecutionAssetsPage() {
                             )}
                           </div>
                           <div className="mt-0.5 font-mono text-[10px] text-muted-foreground">
-                            操作时间 {formatTime(operationTime)}
+                            {event.type === 'no_trade_penalty' ? `扣分日期 ${event.date}` : `操作时间 ${formatTime(operationTime)}`}
                             {event.trade?.simulatedTime ? ` · 盘面时间 ${formatTime(event.trade.simulatedTime)}` : ''}
                           </div>
                         </div>
@@ -946,7 +1096,7 @@ export default function ExecutionAssetsPage() {
                           <span className={`rounded-full border px-2.5 py-1 font-mono text-[12px] ${eventTone(event.type)}`}>
                             {formatSigned(event.points)}
                           </span>
-                          {(event.trade || canOpenReview || canOpenCampaign) && (
+                          {(event.trade || canOpenReview || canOpenCampaign || isCampaignMissing) && (
                             <span className={cn(
                               'inline-flex h-7 w-7 items-center justify-center rounded-md',
                               canInteract && !busy

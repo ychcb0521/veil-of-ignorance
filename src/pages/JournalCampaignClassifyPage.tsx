@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { ChangeEvent } from 'react';
 import { toast } from 'sonner';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { AlertCircle, ChevronDown, Filter } from 'lucide-react';
 import { BackButton } from '@/components/journal/BackButton';
 import { AddToExistingCampaignDialog } from '@/components/journal/AddToExistingCampaignDialog';
@@ -78,16 +78,19 @@ function exitMethodLabel(record: TradeRecord | null) {
 
 export default function JournalCampaignClassifyPage() {
   const nav = useNavigate();
+  const [searchParams] = useSearchParams();
   const { user } = useAuth();
   const { tradeHistory, recordCampaignCreated } = useTradingContext();
   const isMobile = useIsMobile();
   const [loading, setLoading] = useState(true);
-  const [symbol, setSymbol] = useState('');
-  const [dateFrom, setDateFrom] = useState('');
-  const [dateTo, setDateTo] = useState('');
+  const [symbol, setSymbol] = useState(() => searchParams.get('symbol')?.trim().toUpperCase() ?? '');
+  const [dateFrom, setDateFrom] = useState(() => searchParams.get('dateFrom') ?? '');
+  const [dateTo, setDateTo] = useState(() => searchParams.get('dateTo') ?? '');
   const [onlyUnclassified, setOnlyUnclassified] = useState(true);
   const [onlyClosed, setOnlyClosed] = useState(false);
-  const [filtersOpen, setFiltersOpen] = useState(false);
+  const [filtersOpen, setFiltersOpen] = useState(() => (
+    searchParams.has('symbol') || searchParams.has('dateFrom') || searchParams.has('dateTo')
+  ));
   const [journals, setJournals] = useState<TradeJournal[]>([]);
   const [campaignBundles, setCampaignBundles] = useState<CampaignBundle[]>([]);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());

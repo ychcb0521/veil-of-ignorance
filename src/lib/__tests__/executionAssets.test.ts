@@ -21,6 +21,8 @@ import {
   recordExecutionTrade,
   settleCampaignMissingPenalties,
   settleNoTradePenalties,
+  summarizeExecutionAssetEvents,
+  type ExecutionAssetEvent,
 } from '../executionAssets';
 
 /** 造一笔带 symbol 的成交快照，仅填计分逻辑读取的字段。 */
@@ -37,6 +39,40 @@ const trade = (symbol: string) => ({
 const d = (iso: string) => new Date(iso.includes('T') ? iso : `${iso}T12:00:00`);
 
 describe('execution assets', () => {
+  it('derives every summary-card count from the current effective event ledger', () => {
+    const event = (type: ExecutionAssetEvent['type'], id: string): ExecutionAssetEvent => ({
+      id,
+      type,
+      points: 0,
+      date: '2026-07-15',
+      createdAt: 1,
+      label: id,
+    });
+    const summary = summarizeExecutionAssetEvents([
+      event('decision_reward', 'd1'),
+      event('decision_reward', 'd2'),
+      event('direct_reward', 'x1'),
+      event('no_trade_penalty', 'n1'),
+      event('campaign_reward', 'c1'),
+      event('campaign_missing_penalty', 'cm1'),
+      event('review_reward', 'r1'),
+      event('review_missing_penalty', 'rm1'),
+      event('review_missing_penalty', 'rm2'),
+    ]);
+
+    expect(summary).toEqual({
+      decisionCount: 2,
+      directCount: 1,
+      noTradePenaltyCount: 1,
+      campaignCount: 1,
+      campaignMissingCount: 1,
+      reviewCount: 1,
+      reviewMissingCount: 2,
+      totalTradeCount: 3,
+      decisionShare: (2 / 3) * 100,
+    });
+  });
+
   it('rewards decision-record trades with the accelerator weight', () => {
     const s0 = createDefaultExecutionAssetState(d('2026-06-03'));
     const s1 = recordExecutionTrade(s0, 'decision', d('2026-06-03'));

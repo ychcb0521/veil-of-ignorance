@@ -10,6 +10,7 @@ const {
   mockReconcileReviewMissingPenalties,
   mockListAllCampaigns,
   mockListJournals,
+  mockListJournalsByTradeRecordId,
   mockTradeHistory,
 } = vi.hoisted(() => ({
   mockReconcileCampaignRewards: vi.fn(),
@@ -30,9 +31,23 @@ const {
     trade_record_id: 'record-1',
     post_reviewed_at: '2026-07-11T08:00:00.000Z',
   }]),
+  mockListJournalsByTradeRecordId: vi.fn(async () => [{
+    id: 'journal-direct',
+    post_reviewed_at: null,
+  }]),
   mockTradeHistory: [{
     id: 'record-1',
     symbol: 'BTCUSDT',
+    action: 'CLOSE',
+    side: 'LONG',
+    entryPrice: 100,
+    exitPrice: 110,
+    quantity: 1,
+    contracts: 1,
+    pnl: 10,
+    fee: 0,
+    openTime: Date.parse('2026-07-12T01:00:00.000Z'),
+    closeTime: Date.parse('2026-07-12T03:00:00.000Z'),
     closedRealAt: Date.parse('2026-06-22T04:05:06.000Z'),
   }],
 }));
@@ -77,6 +92,16 @@ vi.mock('@/contexts/TradingContext', () => ({
         date: '2026-07-12',
         createdAt: Date.parse('2026-07-12T02:00:00.000Z'),
         label: '直接交易奖励',
+        trade: {
+          symbol: 'BTCUSDT',
+          side: 'LONG',
+          orderType: 'MARKET',
+          entryPrice: 100,
+          quantity: 1,
+          leverage: 1,
+          marginMode: 'cross',
+          simulatedTime: Date.parse('2026-07-12T01:00:00.000Z'),
+        },
       }, {
         id: 'campaign-event-1',
         type: 'campaign_reward',
@@ -85,6 +110,28 @@ vi.mock('@/contexts/TradingContext', () => ({
         createdAt: Date.parse('2026-07-13T02:00:00.000Z'),
         label: '创建交易战役奖励',
         campaignId: 'campaign-1',
+      }, {
+        id: 'no-trade-event-1',
+        type: 'no_trade_penalty',
+        points: -2000,
+        date: '2026-07-08',
+        createdAt: Date.parse('2026-07-09T00:00:00.000Z'),
+        label: '2026-07-08 未练习，执行力资产扣分',
+      }, {
+        id: 'campaign-missing-event-1',
+        type: 'campaign_missing_penalty',
+        points: -300,
+        date: '2026-07-07',
+        createdAt: Date.parse('2026-07-08T00:00:00.000Z'),
+        label: '2026-07-07 SOLUSDT 未建战役，执行力资产扣分',
+        campaignSymbol: 'SOLUSDT',
+      }, {
+        id: 'decision-event-1',
+        type: 'decision_reward',
+        points: 600,
+        date: '2026-07-06',
+        createdAt: Date.parse('2026-07-06T02:00:00.000Z'),
+        label: '决策记录交易奖励',
       }],
       rewardedCampaignIds: ['campaign-1'],
       rewardedReviewJournalIds: ['journal-1'],
@@ -101,7 +148,7 @@ vi.mock('@/lib/journalApi', () => ({
   backfillJournalFromRecord: vi.fn(),
   listAllCampaigns: mockListAllCampaigns,
   listJournals: mockListJournals,
-  listJournalsByTradeRecordId: vi.fn(async () => []),
+  listJournalsByTradeRecordId: mockListJournalsByTradeRecordId,
 }));
 
 describe('ExecutionAssetsPage review reward', () => {
@@ -145,9 +192,30 @@ describe('ExecutionAssetsPage review reward', () => {
       '自然日未练习-2000',
     ]);
 
+    const summaryCards = Array.from(screen.getByTestId('execution-summary-grid').children);
+    expect(summaryCards.map(card => card.getAttribute('data-summary-key'))).toEqual([
+      'penalty',
+      'review_missing',
+      'direct',
+      'campaign_missing',
+      'review',
+      'decision',
+      'campaign',
+    ]);
+    expect(summaryCards.map(card => card.textContent?.replace(/\s+/g, ''))).toEqual([
+      '1未练习扣分日每天-2000点击查看明细',
+      '1未做评价每笔-1000点击查看明细',
+      '1直接交易每标的−600点击查看明细',
+      '1未建战役每标的-300点击查看明细',
+      '1平仓评价每次+1000点击查看明细',
+      '1决策记录交易每次+600点击查看明细',
+      '1建战役每次+300点击查看明细',
+    ]);
+
     await waitFor(() => {
       const recentEvents = Array.from(screen.getByTestId('recent-execution-events').children);
-      expect(recentEvents[0]).toHaveTextContent('直接交易奖励');
+      expect(recentEvents[0]).toHaveTextContent('BTCUSDT');
+      expect(recentEvents[0]).toHaveTextContent('+99');
       expect(recentEvents[0]).toHaveTextContent('操作时间 2026-07-12 10:00:00');
       expect(recentEvents[1]).toHaveTextContent('完成平仓评价奖励');
       expect(recentEvents[1]).toHaveTextContent('操作时间 2026-07-11 16:00:00');
@@ -186,6 +254,44 @@ describe('ExecutionAssetsPage review reward', () => {
 
     fireEvent.click(within(campaignEvent).getByText('+1,500'));
     expect(await screen.findByText('已进入对应交易战役')).toBeInTheDocument();
+  });
+
+  it('opens a missing-campaign deduction with the exact symbol and operation date prefilled', async () => {
+    render(
+      <MemoryRouter initialEntries={['/execution-assets']}>
+        <Routes>
+          <Route path="/execution-assets" element={<ExecutionAssetsPage />} />
+          <Route path="/journal/campaigns/classify" element={<LocationProbe />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(screen.getByText('未建战役'));
+    expect(await screen.findByText('未建交易战役明细')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /补建战役/ }));
+
+    expect(await screen.findByTestId('review-destination')).toHaveTextContent(
+      '/journal/campaigns/classify?symbol=SOLUSDT&dateFrom=2026-07-07&dateTo=2026-07-07',
+    );
+  });
+
+  it('lets a direct-trade deduction open a required post-trade review as remediation', async () => {
+    render(
+      <MemoryRouter initialEntries={['/execution-assets']}>
+        <Routes>
+          <Route path="/execution-assets" element={<ExecutionAssetsPage />} />
+          <Route path="/journal/:journalId" element={<LocationProbe />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(screen.getByText('直接交易'));
+    expect(await screen.findByText('直接交易明细')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '查看 / 补做平仓评价' }));
+
+    expect(await screen.findByTestId('review-destination')).toHaveTextContent(
+      '/journal/journal-direct?review=required&from=execution-assets',
+    );
   });
 
   it.each([

@@ -96,6 +96,56 @@ export interface ExecutionAssetState {
   scoringVersion?: number;
 }
 
+export interface ExecutionAssetEventSummary {
+  decisionCount: number;
+  directCount: number;
+  noTradePenaltyCount: number;
+  campaignCount: number;
+  campaignMissingCount: number;
+  reviewCount: number;
+  reviewMissingCount: number;
+  totalTradeCount: number;
+  decisionShare: number;
+}
+
+/**
+ * 统计卡以当前有效流水为唯一口径。可补救罚分会在对账时从流水删除，
+ * 因此不能再混用可能滞后的累计字段，否则卡片数量会与展开后的明细不一致。
+ */
+export function summarizeExecutionAssetEvents(
+  events: readonly ExecutionAssetEvent[] | null | undefined,
+): ExecutionAssetEventSummary {
+  const counts = {
+    decisionCount: 0,
+    directCount: 0,
+    noTradePenaltyCount: 0,
+    campaignCount: 0,
+    campaignMissingCount: 0,
+    reviewCount: 0,
+    reviewMissingCount: 0,
+  };
+
+  for (const event of events ?? []) {
+    switch (event.type) {
+      case 'decision_reward': counts.decisionCount += 1; break;
+      case 'direct_reward': counts.directCount += 1; break;
+      case 'no_trade_penalty': counts.noTradePenaltyCount += 1; break;
+      case 'campaign_reward': counts.campaignCount += 1; break;
+      case 'campaign_missing_penalty': counts.campaignMissingCount += 1; break;
+      case 'review_reward': counts.reviewCount += 1; break;
+      case 'review_missing_penalty': counts.reviewMissingCount += 1; break;
+      default: break;
+    }
+  }
+
+  const totalTradeCount = counts.decisionCount + counts.directCount;
+  return {
+    ...counts,
+    totalTradeCount,
+    decisionShare: totalTradeCount > 0 ? (counts.decisionCount / totalTradeCount) * 100 : 0,
+  };
+}
+
 export interface CompletedExecutionReview {
   journalId: string;
   reviewedAt?: Date | number | string | null;
