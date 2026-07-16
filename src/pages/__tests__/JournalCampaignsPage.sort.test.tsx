@@ -273,16 +273,7 @@ describe('JournalCampaignsPage sorting', () => {
     expect(screen.getByTestId('campaign-sort-pnl')).toHaveAttribute('data-sort-direction', 'asc');
     expect(cardOrder()).toEqual(['High Importance', 'Late Close', 'Newest Operation', 'Best PnL']);
 
-    fireEvent.click(screen.getByTestId('campaign-sort-pnlPct'));
-    expect(screen.getByTestId('campaign-sort-pnlPct')).toHaveAttribute('aria-pressed', 'true');
-    expect(screen.getByTestId('campaign-sort-pnlPct')).toHaveAttribute('data-sort-direction', 'desc');
-    expect(screen.getByTestId('campaign-sort-pnlPct')).toHaveAttribute('aria-label', '盈亏百分比，从大到小排序');
-    expect(cardOrder()).toEqual(['Late Close', 'High Importance', 'Newest Operation', 'Best PnL']);
-
-    fireEvent.click(screen.getByTestId('campaign-sort-pnlPct'));
-    expect(screen.getByTestId('campaign-sort-pnlPct')).toHaveAttribute('data-sort-direction', 'asc');
-    expect(screen.getByTestId('campaign-sort-pnlPct')).toHaveAttribute('aria-label', '盈亏百分比，从小到大排序');
-    expect(cardOrder()).toEqual(['Best PnL', 'Newest Operation', 'High Importance', 'Late Close']);
+    expect(screen.queryByTestId('campaign-sort-pnlPct')).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByTestId('campaign-sort-captureRate'));
     expect(screen.getByTestId('campaign-sort-captureRate')).toHaveAttribute('aria-pressed', 'true');

@@ -36,6 +36,7 @@ export interface MirrorTpCapture {
 export interface DecisionAccuracyResult {
   hedge_precision: HedgePrecision[];
   mirror_tp_capture: MirrorTpCapture | null;
+  initial_expected_max_loss: number;
   profit_capture_ratio: number;
   campaign_max_drawdown_real: number;
   campaign_max_profit_real: number;
@@ -237,6 +238,11 @@ export function computeProfitCaptureRatio(
   );
   if (initialExpectedMaxLoss <= EPSILON) return 0;
   return (computeRealizedPnl(campaign, legs, tradeRecords) / initialExpectedMaxLoss) * 100;
+}
+
+export function formatCampaignPayoffRatio(value: number, percentDigits = 1): string {
+  if (!Number.isFinite(value)) return '—';
+  return `${value.toFixed(percentDigits)}%（${(value / 100).toFixed(2)}）`;
 }
 
 function eventTradeRecord(
@@ -661,6 +667,12 @@ export function computeDecisionAccuracy(
     maxDrawdown = Math.min(maxDrawdown, total);
   }
 
+  const initial_expected_max_loss = computeInitialExpectedMaxLoss(
+    campaign,
+    legs,
+    tradeRecords,
+    reverseHedgeOrders,
+  );
   const profit_capture_ratio = computeProfitCaptureRatio(
     campaign,
     legs,
@@ -671,6 +683,7 @@ export function computeDecisionAccuracy(
   return {
     hedge_precision,
     mirror_tp_capture,
+    initial_expected_max_loss,
     profit_capture_ratio,
     campaign_max_drawdown_real: Math.abs(maxDrawdown),
     campaign_max_profit_real: maxProfit,

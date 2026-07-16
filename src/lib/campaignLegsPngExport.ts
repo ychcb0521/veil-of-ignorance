@@ -6,6 +6,7 @@ import {
 } from '@/lib/objectiveOperationTime';
 import { LEG_ROLE_LABELS } from '@/lib/strategyTemplates';
 import { resolveLegExecution, type LegExitPriceCorrections } from '@/lib/campaignLegExecution';
+import { formatCampaignPayoffRatio } from '@/lib/campaignAnalysis';
 import type { TradeCampaign, TradeJournal } from '@/types/journal';
 import type { CampaignReverseHedgeOrder, TradeRecord } from '@/types/trading';
 
@@ -22,6 +23,7 @@ export type CampaignBoardExportInput = ExportInput & {
   pnlOverview: {
     campaignMaxProfitReal: number;
     campaignMaxDrawdownReal: number;
+    initialExpectedMaxLoss: number;
     profitCaptureRatio: number;
   };
 };
@@ -552,7 +554,8 @@ export function buildCampaignBoardOverview(input: CampaignBoardExportInput): Cam
       { label: '最终 R', value: fmtAmount(input.campaign.final_r_multiple) },
       { label: '峰值浮盈', value: fmtAmount(input.pnlOverview.campaignMaxProfitReal, ' USDT'), color: '#0ECB81' },
       { label: '最大回撤', value: fmtAmount(input.pnlOverview.campaignMaxDrawdownReal, ' USDT'), color: '#F6465D' },
-      { label: '盈亏比', value: fmtAmount(input.pnlOverview.profitCaptureRatio, '%') },
+      { label: '最大预期亏损', value: fmtAmount(input.pnlOverview.initialExpectedMaxLoss, ' USDT'), color: '#F6465D' },
+      { label: '盈亏比', value: formatCampaignPayoffRatio(input.pnlOverview.profitCaptureRatio, 2) },
       { label: '战役编号', value: input.campaign.campaign_code || '—' },
     ],
   };

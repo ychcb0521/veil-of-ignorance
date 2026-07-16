@@ -1,5 +1,5 @@
 import { Progress } from '@/components/ui/progress';
-import type { DecisionAccuracyResult } from '@/lib/campaignAnalysis';
+import { formatCampaignPayoffRatio, type DecisionAccuracyResult } from '@/lib/campaignAnalysis';
 
 interface Props {
   result: DecisionAccuracyResult;
@@ -83,7 +83,7 @@ export function DecisionAccuracyPanel({ result }: Props) {
           <div className="text-[12px] font-medium">盈亏比</div>
           <div className="text-[10px] text-muted-foreground">已实现盈亏 ÷ 最初预期最大亏损额</div>
         </div>
-        <div className="font-mono text-[18px]">{result.profit_capture_ratio.toFixed(1)}%</div>
+        <div className="font-mono text-[18px]">{formatCampaignPayoffRatio(result.profit_capture_ratio)}</div>
         <Progress value={result.profit_capture_ratio} className="h-2 bg-muted [&>div]:bg-[#F0B90B]" />
         <div className={`text-[11px] ${payoffRatioVerdict.className}`}>
           {payoffRatioVerdict.text}

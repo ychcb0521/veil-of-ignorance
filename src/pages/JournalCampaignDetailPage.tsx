@@ -20,6 +20,7 @@ import { buildCampaignKlineTimeWindow, useCampaignKlines } from '@/hooks/useCamp
 import {
   buildCampaignEventStream,
   computeDecisionAccuracy,
+  formatCampaignPayoffRatio,
   shouldSuggestCampaignEnd,
 } from '@/lib/campaignAnalysis';
 import { buildCampaignChartContentTimeSpan, pickCampaignOverviewInterval, type CampaignChartInterval } from '@/lib/campaignChartContentSpan';
@@ -921,6 +922,7 @@ export default function JournalCampaignDetailPage() {
         pnlOverview: {
           campaignMaxProfitReal: accuracy.campaign_max_profit_real,
           campaignMaxDrawdownReal: accuracy.campaign_max_drawdown_real,
+          initialExpectedMaxLoss: accuracy.initial_expected_max_loss,
           profitCaptureRatio: accuracy.profit_capture_ratio,
         },
       });
@@ -1010,7 +1012,8 @@ export default function JournalCampaignDetailPage() {
             <div className={pnlColor(campaign.final_realized_pnl)}>已实现 P&L：{campaign.final_realized_pnl?.toFixed(2) ?? '—'} USDT</div>
             <div>峰值浮盈：{accuracy.campaign_max_profit_real.toFixed(2)}</div>
             <div>最大回撤：{accuracy.campaign_max_drawdown_real.toFixed(2)}</div>
-            <div>盈亏比：{accuracy.profit_capture_ratio.toFixed(1)}%</div>
+            <div>最大预期亏损：{accuracy.initial_expected_max_loss.toFixed(2)} USDT</div>
+            <div>盈亏比：{formatCampaignPayoffRatio(accuracy.profit_capture_ratio)}</div>
           </div>
 
         </section>

@@ -3,6 +3,7 @@ import {
   computeDecisionAccuracy,
   computeInitialExpectedMaxLoss,
   computeProfitCaptureRatio,
+  formatCampaignPayoffRatio,
 } from '@/lib/campaignAnalysis';
 import type { TradeCampaign, TradeJournal } from '@/types/journal';
 import type { TradeRecord } from '@/types/trading';
@@ -90,6 +91,11 @@ function markAsHistorical(campaign: TradeCampaign) {
 }
 
 describe('campaign profit capture ratio', () => {
+  it('formats the percentage with its numeric multiple', () => {
+    expect(formatCampaignPayoffRatio(150)).toBe('150.0%（1.50）');
+    expect(formatCampaignPayoffRatio(-50)).toBe('-50.0%（-0.50）');
+  });
+
   it('uses actual main entry/notional and the farther initial hedge A/B boundary', () => {
     const campaign = makeCampaign(600);
     const legs = [
@@ -101,7 +107,9 @@ describe('campaign profit capture ratio', () => {
 
     // Actual main: 102 x 100 = 10,200 USDT; farthest hedge B is 12/102 away.
     expect(computeInitialExpectedMaxLoss(campaign, legs, records)).toBeCloseTo(1_200, 8);
-    expect(computeDecisionAccuracy(campaign, legs, records, []).profit_capture_ratio).toBeCloseTo(50, 8);
+    const accuracy = computeDecisionAccuracy(campaign, legs, records, []);
+    expect(accuracy.initial_expected_max_loss).toBeCloseTo(1_200, 8);
+    expect(accuracy.profit_capture_ratio).toBeCloseTo(50, 8);
   });
 
   it('preserves the minus sign when realized P&L is negative', () => {

@@ -51,6 +51,7 @@ function input(): CampaignBoardExportInput {
     pnlOverview: {
       campaignMaxProfitReal: 5200,
       campaignMaxDrawdownReal: -800,
+      initialExpectedMaxLoss: 1800,
       profitCaptureRatio: 66.48,
     },
   };
@@ -71,7 +72,8 @@ describe('campaign PNG overview', () => {
     expect(pnl['最终 R']).toBe('2.40');
     expect(pnl['峰值浮盈']).toBe('5200.00 USDT');
     expect(pnl['最大回撤']).toBe('-800.00 USDT');
-    expect(pnl['盈亏比']).toBe('66.48%');
+    expect(pnl['最大预期亏损']).toBe('1800.00 USDT');
+    expect(pnl['盈亏比']).toBe('66.48%（0.66）');
     expect(pnl['战役编号']).toBe('C-ABC123');
   });
 
@@ -82,7 +84,7 @@ describe('campaign PNG overview', () => {
     const overview = buildCampaignBoardOverview(negativeInput);
     const pnl = Object.fromEntries(overview.pnlItems.map(item => [item.label, item.value]));
 
-    expect(pnl['盈亏比']).toBe('-37.25%');
+    expect(pnl['盈亏比']).toBe('-37.25%（-0.37）');
   });
 
   it('按完整 legs 数据导出滚动区域外的所有行与末行信息', () => {
