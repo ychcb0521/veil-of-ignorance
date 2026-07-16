@@ -2,7 +2,7 @@ import type { KlineData } from '@/hooks/useBinanceData';
 import { MAIN_ADD_ROLES, usesDualHedgeSop } from '@/lib/strategyTemplates';
 import { getPositionNotionalUsd } from '@/lib/tradingSettlement';
 import { buildTradeRecordLookup } from '@/lib/objectiveOperationTime';
-import type { CampaignEvent, LegRole, TradeCampaign, TradeJournal } from '@/types/journal';
+import { isHistoricalCampaign, type CampaignEvent, type LegRole, type TradeCampaign, type TradeJournal } from '@/types/journal';
 import type { CampaignReverseHedgeOrder, PendingOrder, TradeRecord } from '@/types/trading';
 
 export interface StateSegment {
@@ -86,10 +86,11 @@ function firstPositiveNumber(...values: Array<number | null | undefined>): numbe
 }
 
 /**
- * Initial risk anchor used by 盈利捕获率:
+ * Initial risk anchor used by 盈亏比:
  * main notional x the widest distance from the original main entry to hedge A/B.
- * Planned hedge prices stay authoritative because the denominator describes the
- * risk known before execution; actual fills are only a fallback for old records.
+ * The denominator describes risk known before execution. Historical role legs
+ * are reconstructed from fills, so preserved order snapshots take precedence;
+ * actual fill prices are only a fallback when no original snapshot survives.
  */
 export function computeInitialExpectedMaxLoss(
   campaign: TradeCampaign,
@@ -118,6 +119,7 @@ export function computeInitialExpectedMaxLoss(
     mainEvent?.size_usdt,
   );
   if (entryPrice == null || mainNotional == null) return 0;
+  const historical = isHistoricalCampaign(campaign);
 
   const roleHedgePrices = INITIAL_HEDGE_ROLES.flatMap(role => {
     const roleLegs = legs
@@ -140,13 +142,26 @@ export function computeInitialExpectedMaxLoss(
     const eventPrice = firstPositiveNumber(event?.entry_price, event?.price);
     return eventPrice == null ? [] : [eventPrice];
   });
-  const hedgePrices = [...roleHedgePrices];
-  if (hedgePrices.length < INITIAL_HEDGE_ROLES.length) {
-    const expectedSide = campaign.direction === 'main_long' ? 'SHORT' : 'LONG';
-    const initialReversePrices = [...reverseHedgeOrders]
-      .filter(order => order.side === expectedSide && firstPositiveNumber(order.price) != null)
-      .sort((a, b) => a.createdAt - b.createdAt)
-      .map(order => order.price);
+  const expectedSide = campaign.direction === 'main_long' ? 'SHORT' : 'LONG';
+  const initialReversePrices: number[] = [];
+  for (const order of [...reverseHedgeOrders]
+    .filter(item => item.side === expectedSide && firstPositiveNumber(item.price) != null)
+    .sort((a, b) => a.createdAt - b.createdAt)) {
+    const duplicate = initialReversePrices.some(existing =>
+      Math.abs(existing - order.price) <= Math.max(EPSILON, Math.abs(existing) * 1e-6),
+    );
+    if (!duplicate) initialReversePrices.push(order.price);
+    if (initialReversePrices.length >= INITIAL_HEDGE_ROLES.length) break;
+  }
+
+  // Historical A/B legs are reconstructed from fills, so their entry prices can
+  // include slippage. When original order snapshots exist, those snapshots are
+  // the only valid ex-ante risk boundary. Role prices remain the fallback for
+  // older campaigns that have no preserved order history at all.
+  const hedgePrices = historical && initialReversePrices.length > 0
+    ? [...initialReversePrices]
+    : [...roleHedgePrices];
+  if (hedgePrices.length < INITIAL_HEDGE_ROLES.length && !historical) {
     for (const price of initialReversePrices) {
       const duplicate = hedgePrices.some(existing =>
         Math.abs(existing - price) <= Math.max(EPSILON, Math.abs(existing) * 1e-6),
@@ -169,38 +184,41 @@ function computeRealizedPnl(
   const campaignPnl = Number.isFinite(campaign.final_realized_pnl)
     ? Number(campaign.final_realized_pnl)
     : null;
-  const isHistorical = (campaign.actual_evolution ?? []).some(event =>
-    event.event_type === 'historical_classification_created' || event.event_type === 'historical_leg_attached',
-  );
-  // Some early historical rows persisted 0 as a placeholder. For those rows,
-  // prefer the preserved leg/event snapshots; a non-zero campaign summary stays authoritative.
-  if (campaignPnl != null && (campaignPnl !== 0 || !isHistorical)) return campaignPnl;
+  const historical = isHistoricalCampaign(campaign);
+  if (campaignPnl != null && !historical) return campaignPnl;
 
   const recordMap = buildTradeRecordLookup(tradeRecords);
-  const legPnlByIdentity = new Map<string, number>();
-  for (const leg of legs) {
-    const record = leg.trade_record_id ? recordMap.get(leg.trade_record_id) ?? null : null;
-    const pnl = record?.pnl ?? leg.post_realized_pnl;
-    if (!Number.isFinite(pnl)) continue;
-    legPnlByIdentity.set(leg.trade_record_id ?? leg.id, Number(pnl));
-  }
-  if (legPnlByIdentity.size > 0) {
-    return Array.from(legPnlByIdentity.values()).reduce((sum, pnl) => sum + pnl, 0);
-  }
+  const pnlByIdentity = new Map<string, number>();
 
-  const eventPnlByIdentity = new Map<string, number>();
+  // Lowest-priority historical source first; later sources overwrite the same
+  // trade identity without adding it twice.
+  const legById = new Map(legs.map(leg => [leg.id, leg]));
   for (const event of [...(campaign.actual_evolution ?? [])]
     .sort((a, b) => toMs(a.timestamp) - toMs(b.timestamp))) {
     if (!Number.isFinite(event.realized_pnl)) continue;
-    const identity = event.trade_record_id ?? event.journal_id ?? event.id;
-    eventPnlByIdentity.set(identity, Number(event.realized_pnl));
-  }
-  if (eventPnlByIdentity.size > 0) {
-    return Array.from(eventPnlByIdentity.values()).reduce((sum, pnl) => sum + pnl, 0);
+    if (!event.leg_role && !event.trade_record_id && !event.journal_id) continue;
+    const linkedLeg = event.journal_id ? legById.get(event.journal_id) ?? null : null;
+    const recordReference = event.trade_record_id ?? linkedLeg?.trade_record_id;
+    const identity = recordReference
+      ? recordMap.get(recordReference)?.id ?? recordReference
+      : null;
+    pnlByIdentity.set(identity ? `record:${identity}` : `journal:${event.journal_id ?? event.id}`, Number(event.realized_pnl));
   }
 
-  if (tradeRecords.length > 0) {
-    return tradeRecords.reduce((sum, record) => sum + (Number.isFinite(record.pnl) ? record.pnl : 0), 0);
+  for (const leg of legs) {
+    const record = leg.trade_record_id ? recordMap.get(leg.trade_record_id) ?? null : null;
+    const pnl = leg.post_realized_pnl;
+    if (!Number.isFinite(pnl)) continue;
+    const identity = record?.id ?? leg.trade_record_id;
+    pnlByIdentity.set(identity ? `record:${identity}` : `journal:${leg.id}`, Number(pnl));
+  }
+  for (const record of tradeRecords) {
+    if (!Number.isFinite(record.pnl)) continue;
+    pnlByIdentity.set(`record:${record.id}`, Number(record.pnl));
+  }
+
+  if (pnlByIdentity.size > 0) {
+    return Array.from(pnlByIdentity.values()).reduce((sum, pnl) => sum + pnl, 0);
   }
   return campaignPnl ?? 0;
 }

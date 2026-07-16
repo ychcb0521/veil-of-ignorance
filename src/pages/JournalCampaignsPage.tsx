@@ -38,7 +38,7 @@ const SORT_OPTIONS: { value: CampaignSortMode; label: string; subtleIcon?: 'perc
   { value: 'time', label: '操作时间' },
   { value: 'pnl', label: '盈亏' },
   { value: 'pnlPct', label: '盈亏百分比', subtleIcon: 'percent' },
-  { value: 'captureRate', label: '盈利捕获率', subtleIcon: 'capture' },
+  { value: 'captureRate', label: '盈亏比', subtleIcon: 'capture' },
   { value: 'alpha', label: '字母' },
 ];
 

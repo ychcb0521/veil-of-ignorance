@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   computeDecisionAccuracy,
   computeInitialExpectedMaxLoss,
+  computeProfitCaptureRatio,
 } from '@/lib/campaignAnalysis';
 import type { TradeCampaign, TradeJournal } from '@/types/journal';
 import type { TradeRecord } from '@/types/trading';
@@ -70,6 +71,22 @@ function makeMainRecord(): TradeRecord {
     openTime: Date.parse(openedAt),
     closeTime: Date.parse(closedAt),
   };
+}
+
+function markAsHistorical(campaign: TradeCampaign) {
+  campaign.actual_evolution = [{
+    id: 'historical-created',
+    timestamp: openedAt,
+    event_type: 'historical_classification_created',
+    leg_role: null,
+    journal_id: null,
+    trade_record_id: null,
+    pending_order_id: null,
+    price: null,
+    size_usdt: null,
+    notes: null,
+    recorded_at: openedAt,
+  }];
 }
 
 describe('campaign profit capture ratio', () => {
@@ -152,25 +169,79 @@ describe('campaign profit capture ratio', () => {
 
   it('replaces a legacy historical zero placeholder with preserved leg P&L', () => {
     const campaign = makeCampaign(0);
-    campaign.actual_evolution = [{
-      id: 'historical-created',
-      timestamp: openedAt,
-      event_type: 'historical_classification_created',
-      leg_role: null,
-      journal_id: null,
-      trade_record_id: null,
-      pending_order_id: null,
-      price: null,
-      size_usdt: null,
-      notes: null,
-      recorded_at: openedAt,
-    }];
+    markAsHistorical(campaign);
     const legs = [
       { ...makeLeg('main', 'main_open', 100), post_realized_pnl: 700 },
       { ...makeLeg('hedge-a', 'hedge_initial_a', 90), post_realized_pnl: -200 },
     ];
 
     expect(computeDecisionAccuracy(campaign, legs, [], []).profit_capture_ratio).toBeCloseTo(50, 8);
+  });
+
+  it('recomputes historical P&L from preserved trades instead of a stale non-zero campaign summary', () => {
+    const campaign = makeCampaign(999);
+    markAsHistorical(campaign);
+    const legs = [
+      { ...makeLeg('main', 'main_open', 100), post_realized_pnl: 700 },
+      { ...makeLeg('hedge-a', 'hedge_initial_a', 90), post_realized_pnl: -200 },
+    ];
+
+    expect(computeProfitCaptureRatio(campaign, legs, [])).toBeCloseTo(50, 8);
+  });
+
+  it('uses the original historical trigger price instead of the slipped hedge fill', () => {
+    const campaign = makeCampaign(500);
+    markAsHistorical(campaign);
+    const legs = [
+      { ...makeLeg('main', 'main_open', 100), post_realized_pnl: 500 },
+      makeLeg('hedge-a', 'hedge_initial_a', 94),
+    ];
+    const reverseOrders = [{
+      id: 'initial-a',
+      side: 'SHORT' as const,
+      price: 95,
+      fillPrice: 94,
+      createdAt: 1,
+      triggeredAt: 2,
+      cancelledAt: 3,
+      status: 'triggered' as const,
+    }];
+
+    expect(computeInitialExpectedMaxLoss(campaign, legs, [], reverseOrders)).toBeCloseTo(500, 8);
+    expect(computeProfitCaptureRatio(campaign, legs, [], reverseOrders)).toBeCloseTo(100, 8);
+  });
+
+  it('deduplicates legacy position IDs and current record IDs for the same historical trade', () => {
+    const campaign = makeCampaign(999);
+    markAsHistorical(campaign);
+    campaign.actual_evolution.push({
+      id: 'legacy-main-event',
+      timestamp: closedAt,
+      event_type: 'historical_leg_attached',
+      leg_role: 'main_open',
+      journal_id: 'main',
+      trade_record_id: 'legacy-position-id',
+      pending_order_id: null,
+      price: 100,
+      size_usdt: 10_000,
+      notes: null,
+      recorded_at: closedAt,
+      realized_pnl: 500,
+    });
+    const legs = [
+      { ...makeLeg('main', 'main_open', 100, 'legacy-position-id'), post_realized_pnl: 500 },
+      makeLeg('hedge-a', 'hedge_initial_a', 90),
+    ];
+    const records = [{
+      ...makeMainRecord(),
+      id: 'current-close-record-id',
+      positionId: 'legacy-position-id',
+      entryPrice: 100,
+      quantity: 100,
+      pnl: 500,
+    }];
+
+    expect(computeProfitCaptureRatio(campaign, legs, records)).toBeCloseTo(50, 8);
   });
 
   it('recovers missing historical A/B prices from the earliest reverse-order snapshots', () => {

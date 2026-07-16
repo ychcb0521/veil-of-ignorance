@@ -141,14 +141,18 @@ export interface FilledOrderSnapshot {
  * 三态：cancelled=已撤销、pending=仍挂单中、triggered=已触发成交。
  * 字段语义随状态：
  *  - cancelled/pending: price=委托价, createdAt=委托时间, cancelledAt=撤销时间(pending 为 null)。
- *  - triggered:        price=成交价, createdAt=委托时间, triggeredAt=触发时间, cancelledAt=平仓时间(未平为 null)。
+ *  - triggered:        price=原委托触发价, fillPrice=成交价, createdAt=委托时间,
+ *                      triggeredAt=触发时间, cancelledAt=平仓时间(未平为 null)。
  */
 export interface CampaignReverseHedgeOrder {
   id: string;
   /** 成交后对应的 trade_history record id；用于在 Legs 列表里精确归属到对应 leg。 */
   tradeRecordId?: string | null;
   side: OrderSide;
+  /** Original pending/trigger price. Profit-capture risk must use this value, never the slipped fill. */
   price: number;
+  /** Actual fill after slippage when the order triggered. */
+  fillPrice?: number | null;
   createdAt: number;
   triggeredAt?: number | null;
   cancelledAt: number | null;

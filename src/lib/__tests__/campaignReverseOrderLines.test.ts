@@ -10,6 +10,7 @@ function makeShortOrder(overrides: Partial<CampaignReverseHedgeOrder>): Campaign
     tradeRecordId: overrides.tradeRecordId ?? null,
     side: overrides.side ?? 'SHORT',
     price: overrides.price ?? 1.2,
+    fillPrice: overrides.fillPrice ?? null,
     createdAt: overrides.createdAt ?? t('2026-01-01T10:00:00.000Z'),
     triggeredAt: overrides.triggeredAt ?? null,
     cancelledAt: overrides.cancelledAt ?? null,
@@ -88,6 +89,33 @@ describe('buildCampaignReverseOrderPriceLines', () => {
     ], fallbackEnd);
 
     expect(lines.find(line => line.title === '触发空')).toMatchObject({
+      startTime: triggeredAt,
+      endTime: closeTime,
+      dashed: false,
+    });
+  });
+
+  it('matches a triggered order by its actual fill while drawing the original trigger price', () => {
+    const createdAt = t('2026-01-01T10:00:00.000Z');
+    const triggeredAt = t('2026-01-01T10:05:00.000Z');
+    const closeTime = t('2026-01-01T10:16:00.000Z');
+    const fallbackEnd = t('2026-01-01T10:30:00.000Z');
+
+    const lines = buildCampaignReverseOrderPriceLines([
+      makeShortOrder({
+        id: 'slipped-triggered-short',
+        status: 'triggered',
+        price: 1.2,
+        fillPrice: 1.201,
+        createdAt,
+        triggeredAt,
+      }),
+    ], [
+      makeRecord({ id: 'slipped-record', entryPrice: 1.201, openTime: triggeredAt, closeTime }),
+    ], fallbackEnd);
+
+    expect(lines.find(line => line.title === '触发空')).toMatchObject({
+      price: 1.2,
       startTime: triggeredAt,
       endTime: closeTime,
       dashed: false,

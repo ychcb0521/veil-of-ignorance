@@ -17,11 +17,12 @@ function findReverseOrderTradeRecord(order: CampaignReverseHedgeOrder, tradeReco
     if (byId) return byId;
   }
   const triggeredAt = order.triggeredAt ?? order.createdAt;
+  const fillPrice = order.fillPrice ?? order.price;
   return tradeRecords
     .filter(record =>
       record.side === order.side &&
       Math.abs(record.openTime - triggeredAt) <= REVERSE_ORDER_RECORD_MATCH_MS &&
-      closeEnoughPrice(record.entryPrice, order.price)
+      (closeEnoughPrice(record.entryPrice, fillPrice) || closeEnoughPrice(record.entryPrice, order.price))
     )
     .sort((a, b) => Math.abs(a.openTime - triggeredAt) - Math.abs(b.openTime - triggeredAt))[0] ?? null;
 }

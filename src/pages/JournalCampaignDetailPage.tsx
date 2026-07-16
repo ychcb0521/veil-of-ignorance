@@ -1010,7 +1010,7 @@ export default function JournalCampaignDetailPage() {
             <div className={pnlColor(campaign.final_realized_pnl)}>已实现 P&L：{campaign.final_realized_pnl?.toFixed(2) ?? '—'} USDT</div>
             <div>峰值浮盈：{accuracy.campaign_max_profit_real.toFixed(2)}</div>
             <div>最大回撤：{accuracy.campaign_max_drawdown_real.toFixed(2)}</div>
-            <div>盈利捕获率：{accuracy.profit_capture_ratio.toFixed(1)}%</div>
+            <div>盈亏比：{accuracy.profit_capture_ratio.toFixed(1)}%</div>
           </div>
 
         </section>

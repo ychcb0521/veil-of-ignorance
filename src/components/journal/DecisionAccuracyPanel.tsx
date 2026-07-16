@@ -14,11 +14,11 @@ const verdictClass = (verdict: string) => {
 };
 
 export function DecisionAccuracyPanel({ result }: Props) {
-  const captureVerdict = result.profit_capture_ratio >= 85
-    ? { text: '高效捕获', className: 'text-[#0ECB81]' }
+  const payoffRatioVerdict = result.profit_capture_ratio >= 85
+    ? { text: '盈亏比充足', className: 'text-[#0ECB81]' }
     : result.profit_capture_ratio >= 60
-      ? { text: '中等捕获', className: 'text-muted-foreground' }
-      : { text: '严重低于潜力', className: 'text-[#F6465D]' };
+      ? { text: '盈亏比一般', className: 'text-muted-foreground' }
+      : { text: '盈亏比偏低', className: 'text-[#F6465D]' };
 
   return (
     <div className="bg-card border border-border rounded p-4 space-y-4">
@@ -80,14 +80,14 @@ export function DecisionAccuracyPanel({ result }: Props) {
 
       <section className="space-y-2">
         <div>
-          <div className="text-[12px] font-medium">总体盈利捕获</div>
-          <div className="text-[10px] text-muted-foreground">战役期间最大可能盈利的实际捕获比例</div>
+          <div className="text-[12px] font-medium">盈亏比</div>
+          <div className="text-[10px] text-muted-foreground">已实现盈亏 ÷ 最初预期最大亏损额</div>
         </div>
         <div className="font-mono text-[18px]">{result.profit_capture_ratio.toFixed(1)}%</div>
         <Progress value={result.profit_capture_ratio} className="h-2 bg-muted [&>div]:bg-[#F0B90B]" />
-        <div className={`text-[11px] ${captureVerdict.className}`}>
-          {captureVerdict.text}
-          {result.profit_capture_ratio < 60 ? ' · 你砍亏太狠 / 跑得太早' : ''}
+        <div className={`text-[11px] ${payoffRatioVerdict.className}`}>
+          {payoffRatioVerdict.text}
+          {result.profit_capture_ratio < 60 ? ' · 实际盈亏相对初始风险偏低' : ''}
         </div>
       </section>
     </div>

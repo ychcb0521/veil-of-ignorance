@@ -2185,11 +2185,15 @@ export async function getCampaignFullData(
     )
     .map(order => {
       const record = findRecordForFilledOrder(order);
+      const originalTriggerPrice = Number.isFinite(order.triggerPrice) && order.triggerPrice > 0
+        ? order.triggerPrice
+        : order.price;
       return {
         id: order.id,
         tradeRecordId: record?.id ?? null,
         side: order.side,
-        price: order.price,
+        price: originalTriggerPrice,
+        fillPrice: order.price,
         createdAt: order.createdAt,
         triggeredAt: order.filledAt,
         cancelledAt: record?.closeTime && record.closeTime > order.filledAt ? record.closeTime : null,

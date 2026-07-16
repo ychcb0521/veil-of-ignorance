@@ -552,7 +552,7 @@ export function buildCampaignBoardOverview(input: CampaignBoardExportInput): Cam
       { label: '最终 R', value: fmtAmount(input.campaign.final_r_multiple) },
       { label: '峰值浮盈', value: fmtAmount(input.pnlOverview.campaignMaxProfitReal, ' USDT'), color: '#0ECB81' },
       { label: '最大回撤', value: fmtAmount(input.pnlOverview.campaignMaxDrawdownReal, ' USDT'), color: '#F6465D' },
-      { label: '盈利捕获率', value: fmtAmount(input.pnlOverview.profitCaptureRatio, '%') },
+      { label: '盈亏比', value: fmtAmount(input.pnlOverview.profitCaptureRatio, '%') },
       { label: '战役编号', value: input.campaign.campaign_code || '—' },
     ],
   };

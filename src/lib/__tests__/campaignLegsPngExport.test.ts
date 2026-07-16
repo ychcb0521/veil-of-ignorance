@@ -71,18 +71,18 @@ describe('campaign PNG overview', () => {
     expect(pnl['最终 R']).toBe('2.40');
     expect(pnl['峰值浮盈']).toBe('5200.00 USDT');
     expect(pnl['最大回撤']).toBe('-800.00 USDT');
-    expect(pnl['盈利捕获率']).toBe('66.48%');
+    expect(pnl['盈亏比']).toBe('66.48%');
     expect(pnl['战役编号']).toBe('C-ABC123');
   });
 
-  it('亏损战役的盈利捕获率保留负号', () => {
+  it('亏损战役的盈亏比保留负号', () => {
     const negativeInput = input();
     negativeInput.pnlOverview.profitCaptureRatio = -37.25;
 
     const overview = buildCampaignBoardOverview(negativeInput);
     const pnl = Object.fromEntries(overview.pnlItems.map(item => [item.label, item.value]));
 
-    expect(pnl['盈利捕获率']).toBe('-37.25%');
+    expect(pnl['盈亏比']).toBe('-37.25%');
   });
 
   it('按完整 legs 数据导出滚动区域外的所有行与末行信息', () => {
