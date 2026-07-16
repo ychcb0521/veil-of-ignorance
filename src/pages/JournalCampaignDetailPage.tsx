@@ -605,8 +605,8 @@ export default function JournalCampaignDetailPage() {
   }, [campaign, legs, tradeRecords]);
 
   const accuracy = useMemo(
-    () => (campaign ? computeDecisionAccuracy(campaign, legs, tradeRecords, klines) : null),
-    [campaign, legs, tradeRecords, klines],
+    () => (campaign ? computeDecisionAccuracy(campaign, legs, tradeRecords, klines, reverseHedgeOrders) : null),
+    [campaign, legs, tradeRecords, klines, reverseHedgeOrders],
   );
   const chart = useMemo(
     () => (campaign ? buildChartArtifacts(campaign, legs, tradeRecords, legExitPriceCorrections) : { markers: [], timeBoundPriceLines: [], verticalLines: [], events: [] }),

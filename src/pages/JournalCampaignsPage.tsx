@@ -1,19 +1,19 @@
 import { useEffect, useMemo, useState, type MouseEvent } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { ArrowDown, ArrowUp, FolderPlus, Layers, Percent, Star, Trash2 } from 'lucide-react';
+import { ArrowDown, ArrowUp, FolderPlus, Layers, Percent, Star, Target, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { BackButton } from '@/components/journal/BackButton';
 import { useAuth } from '@/contexts/AuthContext';
 import {
   deleteCampaign,
-  getCampaignWithLegs,
-  listTradeHistoryForUser,
+  getCampaignFullData,
   listAllCampaigns,
   listVisibleCampaigns,
   updateCampaignImportance,
 } from '@/lib/journalApi';
+import { computeProfitCaptureRatio } from '@/lib/campaignAnalysis';
 import { LEG_ROLE_LABELS, STRATEGY_TEMPLATES } from '@/lib/strategyTemplates';
-import { campaignOperationTime, tradeRecordsForJournals } from '@/lib/objectiveOperationTime';
+import { campaignOperationTime } from '@/lib/objectiveOperationTime';
 import { formatBeijingTime } from '@/lib/timeFormat';
 import type { CampaignStatus, LegRole, TradeCampaign, TradeJournal } from '@/types/journal';
 import type { TradeRecord } from '@/types/trading';
@@ -22,9 +22,10 @@ type CampaignCardData = {
   campaign: TradeCampaign;
   legs: TradeJournal[];
   tradeRecords: TradeRecord[];
+  profitCaptureRatio: number;
 };
 
-type CampaignSortMode = 'importance' | 'time' | 'pnl' | 'pnlPct' | 'alpha';
+type CampaignSortMode = 'importance' | 'time' | 'pnl' | 'pnlPct' | 'captureRate' | 'alpha';
 type CampaignSortDirection = 'asc' | 'desc';
 
 type CampaignSortState = {
@@ -32,11 +33,12 @@ type CampaignSortState = {
   direction: CampaignSortDirection;
 };
 
-const SORT_OPTIONS: { value: CampaignSortMode; label: string; subtleIcon?: 'percent' }[] = [
+const SORT_OPTIONS: { value: CampaignSortMode; label: string; subtleIcon?: 'percent' | 'capture' }[] = [
   { value: 'importance', label: '重要性' },
   { value: 'time', label: '操作时间' },
   { value: 'pnl', label: '盈亏' },
   { value: 'pnlPct', label: '盈亏百分比', subtleIcon: 'percent' },
+  { value: 'captureRate', label: '盈利捕获率', subtleIcon: 'capture' },
   { value: 'alpha', label: '字母' },
 ];
 
@@ -195,6 +197,13 @@ function sortCampaignRows(rows: CampaignCardData[], sort: CampaignSortState): Ca
         || timeDesc
         || alphaAsc;
     }
+    if (sort.mode === 'captureRate') {
+      return compareFiniteMetric(a.profitCaptureRatio, b.profitCaptureRatio, sort.direction)
+        || comparePnl(a.campaign, b.campaign, sort.direction)
+        || importanceDesc
+        || timeDesc
+        || alphaAsc;
+    }
     if (sort.mode === 'alpha') {
       return compareAlpha(a.campaign, b.campaign, sort.direction)
         || timeDesc
@@ -239,14 +248,19 @@ export default function JournalCampaignsPage() {
         const campaigns = scope === 'own'
           ? await listAllCampaigns(user.id)
           : (await listVisibleCampaigns(user.id)).filter(campaign => campaign.user_id !== user.id);
-        const tradeHistory = scope === 'own' ? listTradeHistoryForUser(user.id) : [];
         const full = await Promise.all(
           campaigns.map(async campaign => {
-            const details = await getCampaignWithLegs(campaign.id);
+            const details = await getCampaignFullData(campaign.id);
             return {
-              campaign,
+              campaign: details.campaign,
               legs: details.legs,
-              tradeRecords: tradeRecordsForJournals(details.legs, tradeHistory),
+              tradeRecords: details.tradeRecords,
+              profitCaptureRatio: computeProfitCaptureRatio(
+                details.campaign,
+                details.legs,
+                details.tradeRecords,
+                details.reverseHedgeOrders,
+              ),
             };
           }),
         );
@@ -393,6 +407,8 @@ export default function JournalCampaignsPage() {
                 >
                   {option.subtleIcon === 'percent' ? (
                     <Percent className={`h-3 w-3 ${active ? 'opacity-55' : 'opacity-35'}`} />
+                  ) : option.subtleIcon === 'capture' ? (
+                    <Target className={`h-3 w-3 ${active ? 'opacity-55' : 'opacity-35'}`} />
                   ) : (
                     <span>{option.label}</span>
                   )}

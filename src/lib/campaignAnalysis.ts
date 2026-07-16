@@ -3,7 +3,7 @@ import { MAIN_ADD_ROLES, usesDualHedgeSop } from '@/lib/strategyTemplates';
 import { getPositionNotionalUsd } from '@/lib/tradingSettlement';
 import { buildTradeRecordLookup } from '@/lib/objectiveOperationTime';
 import type { CampaignEvent, LegRole, TradeCampaign, TradeJournal } from '@/types/journal';
-import type { PendingOrder, TradeRecord } from '@/types/trading';
+import type { CampaignReverseHedgeOrder, PendingOrder, TradeRecord } from '@/types/trading';
 
 export interface StateSegment {
   state: 'state_0_setup' | 'state_1_lockin' | 'state_2_rolling' | 'state_3_exit';
@@ -95,6 +95,7 @@ export function computeInitialExpectedMaxLoss(
   campaign: TradeCampaign,
   legs: TradeJournal[],
   tradeRecords: TradeRecord[],
+  reverseHedgeOrders: CampaignReverseHedgeOrder[] = [],
 ): number {
   const mainLeg = legs
     .filter(leg => leg.leg_role === 'main_open')
@@ -118,7 +119,7 @@ export function computeInitialExpectedMaxLoss(
   );
   if (entryPrice == null || mainNotional == null) return 0;
 
-  const hedgePrices = INITIAL_HEDGE_ROLES.flatMap(role => {
+  const roleHedgePrices = INITIAL_HEDGE_ROLES.flatMap(role => {
     const roleLegs = legs
       .filter(leg => leg.leg_role === role)
       .sort((a, b) => toMs(a.pre_simulated_time) - toMs(b.pre_simulated_time));
@@ -139,10 +140,85 @@ export function computeInitialExpectedMaxLoss(
     const eventPrice = firstPositiveNumber(event?.entry_price, event?.price);
     return eventPrice == null ? [] : [eventPrice];
   });
+  const hedgePrices = [...roleHedgePrices];
+  if (hedgePrices.length < INITIAL_HEDGE_ROLES.length) {
+    const expectedSide = campaign.direction === 'main_long' ? 'SHORT' : 'LONG';
+    const initialReversePrices = [...reverseHedgeOrders]
+      .filter(order => order.side === expectedSide && firstPositiveNumber(order.price) != null)
+      .sort((a, b) => a.createdAt - b.createdAt)
+      .map(order => order.price);
+    for (const price of initialReversePrices) {
+      const duplicate = hedgePrices.some(existing =>
+        Math.abs(existing - price) <= Math.max(EPSILON, Math.abs(existing) * 1e-6),
+      );
+      if (!duplicate) hedgePrices.push(price);
+      if (hedgePrices.length >= INITIAL_HEDGE_ROLES.length) break;
+    }
+  }
   if (hedgePrices.length === 0) return 0;
 
   const widestRiskRate = Math.max(...hedgePrices.map(price => Math.abs(price - entryPrice) / entryPrice));
   return widestRiskRate * mainNotional;
+}
+
+function computeRealizedPnl(
+  campaign: TradeCampaign,
+  legs: TradeJournal[],
+  tradeRecords: TradeRecord[],
+): number {
+  const campaignPnl = Number.isFinite(campaign.final_realized_pnl)
+    ? Number(campaign.final_realized_pnl)
+    : null;
+  const isHistorical = (campaign.actual_evolution ?? []).some(event =>
+    event.event_type === 'historical_classification_created' || event.event_type === 'historical_leg_attached',
+  );
+  // Some early historical rows persisted 0 as a placeholder. For those rows,
+  // prefer the preserved leg/event snapshots; a non-zero campaign summary stays authoritative.
+  if (campaignPnl != null && (campaignPnl !== 0 || !isHistorical)) return campaignPnl;
+
+  const recordMap = buildTradeRecordLookup(tradeRecords);
+  const legPnlByIdentity = new Map<string, number>();
+  for (const leg of legs) {
+    const record = leg.trade_record_id ? recordMap.get(leg.trade_record_id) ?? null : null;
+    const pnl = record?.pnl ?? leg.post_realized_pnl;
+    if (!Number.isFinite(pnl)) continue;
+    legPnlByIdentity.set(leg.trade_record_id ?? leg.id, Number(pnl));
+  }
+  if (legPnlByIdentity.size > 0) {
+    return Array.from(legPnlByIdentity.values()).reduce((sum, pnl) => sum + pnl, 0);
+  }
+
+  const eventPnlByIdentity = new Map<string, number>();
+  for (const event of [...(campaign.actual_evolution ?? [])]
+    .sort((a, b) => toMs(a.timestamp) - toMs(b.timestamp))) {
+    if (!Number.isFinite(event.realized_pnl)) continue;
+    const identity = event.trade_record_id ?? event.journal_id ?? event.id;
+    eventPnlByIdentity.set(identity, Number(event.realized_pnl));
+  }
+  if (eventPnlByIdentity.size > 0) {
+    return Array.from(eventPnlByIdentity.values()).reduce((sum, pnl) => sum + pnl, 0);
+  }
+
+  if (tradeRecords.length > 0) {
+    return tradeRecords.reduce((sum, record) => sum + (Number.isFinite(record.pnl) ? record.pnl : 0), 0);
+  }
+  return campaignPnl ?? 0;
+}
+
+export function computeProfitCaptureRatio(
+  campaign: TradeCampaign,
+  legs: TradeJournal[],
+  tradeRecords: TradeRecord[],
+  reverseHedgeOrders: CampaignReverseHedgeOrder[] = [],
+): number {
+  const initialExpectedMaxLoss = computeInitialExpectedMaxLoss(
+    campaign,
+    legs,
+    tradeRecords,
+    reverseHedgeOrders,
+  );
+  if (initialExpectedMaxLoss <= EPSILON) return 0;
+  return (computeRealizedPnl(campaign, legs, tradeRecords) / initialExpectedMaxLoss) * 100;
 }
 
 function eventTradeRecord(
@@ -446,6 +522,7 @@ export function computeDecisionAccuracy(
   legs: TradeJournal[],
   tradeRecords: TradeRecord[],
   klines: KlineData[],
+  reverseHedgeOrders: CampaignReverseHedgeOrder[] = [],
 ): DecisionAccuracyResult {
   const isLongCampaign = campaign.direction === 'main_long';
   const endMs = campaignEndMs(campaign, tradeRecords);
@@ -566,11 +643,12 @@ export function computeDecisionAccuracy(
     maxDrawdown = Math.min(maxDrawdown, total);
   }
 
-  const realized = campaign.final_realized_pnl ?? tradeRecords.reduce((sum, record) => sum + (record.pnl || 0), 0);
-  const initialExpectedMaxLoss = computeInitialExpectedMaxLoss(campaign, legs, tradeRecords);
-  const profit_capture_ratio = initialExpectedMaxLoss > EPSILON
-    ? (realized / initialExpectedMaxLoss) * 100
-    : 0;
+  const profit_capture_ratio = computeProfitCaptureRatio(
+    campaign,
+    legs,
+    tradeRecords,
+    reverseHedgeOrders,
+  );
 
   return {
     hedge_precision,

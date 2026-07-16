@@ -64,12 +64,22 @@ const legsByCampaign: Record<string, TradeJournal[]> = {
       pre_real_time: '2026-01-10T00:00:00.000Z',
       post_real_close_time: '2026-12-01T00:00:00.000Z',
     }),
+    makeLeg({
+      id: 'newest-hedge',
+      leg_role: 'hedge_initial_a',
+      pre_entry_price: 80,
+    }),
   ],
   'best-pnl': [
     makeLeg({
       id: 'best-pnl-leg',
       trade_record_id: 'best-pnl-record',
       pre_real_time: '2026-03-02T00:00:00.000Z',
+    }),
+    makeLeg({
+      id: 'best-pnl-hedge',
+      leg_role: 'hedge_initial_a',
+      pre_entry_price: 98,
     }),
   ],
   'late-close': [
@@ -78,14 +88,25 @@ const legsByCampaign: Record<string, TradeJournal[]> = {
       trade_record_id: 'late-close-record',
       pre_real_time: '2026-02-01T00:00:00.000Z',
     }),
+    makeLeg({
+      id: 'late-close-hedge',
+      leg_role: 'hedge_initial_a',
+      pre_entry_price: 50,
+    }),
+  ],
+};
+
+const reverseOrdersByCampaign = {
+  'high-importance': [
+    { id: 'high-importance-hedge', side: 'SHORT', price: 90, createdAt: 1, status: 'pending' as const },
   ],
 };
 
 const tradeHistory: TradeRecord[] = [
-  makeRecord('high-importance-record', '2026-04-03T00:00:00.000Z'),
-  makeRecord('newest-record', '2026-01-10T00:00:00.000Z'),
-  makeRecord('best-pnl-record', '2026-03-02T00:00:00.000Z'),
-  makeRecord('late-close-record', '2026-02-01T00:00:00.000Z'),
+  makeRecord('high-importance-record', '2026-04-03T00:00:00.000Z', 1),
+  makeRecord('newest-record', '2026-01-10T00:00:00.000Z', 10),
+  makeRecord('best-pnl-record', '2026-03-02T00:00:00.000Z', 1_000),
+  makeRecord('late-close-record', '2026-02-01T00:00:00.000Z', 0.5),
 ];
 
 vi.mock('@/contexts/AuthContext', () => ({
@@ -96,17 +117,19 @@ vi.mock('@/contexts/AuthContext', () => ({
 
 vi.mock('@/lib/journalApi', () => ({
   deleteCampaign: vi.fn(),
-  getCampaignWithLegs: vi.fn(async (id: string) => ({
+  getCampaignFullData: vi.fn(async (id: string) => ({
     campaign: campaigns.find(campaign => campaign.id === id),
     legs: legsByCampaign[id] ?? [],
+    tradeRecords: tradeHistory.filter(record => (legsByCampaign[id] ?? []).some(leg => leg.trade_record_id === record.id)),
+    pendingOrders: [],
+    reverseHedgeOrders: reverseOrdersByCampaign[id as keyof typeof reverseOrdersByCampaign] ?? [],
   })),
   listAllCampaigns: vi.fn(async () => campaigns),
-  listTradeHistoryForUser: vi.fn(() => tradeHistory),
   listVisibleCampaigns: vi.fn(async () => []),
   updateCampaignImportance: vi.fn(async (_id: string, weight: number) => weight),
 }));
 
-function makeRecord(id: string, objectiveTime: string): TradeRecord {
+function makeRecord(id: string, objectiveTime: string, quantity: number): TradeRecord {
   return {
     id,
     symbol: 'BTCUSDT',
@@ -115,7 +138,7 @@ function makeRecord(id: string, objectiveTime: string): TradeRecord {
     action: 'CLOSE',
     entryPrice: 100,
     exitPrice: 110,
-    quantity: 1,
+    quantity,
     leverage: 1,
     pnl: 10,
     fee: 0,
@@ -160,7 +183,7 @@ function makeLeg(overrides: Partial<TradeJournal>): TradeJournal {
     user_id: 'user-1',
     trade_record_id: overrides.trade_record_id ?? null,
     campaign_id: overrides.campaign_id ?? null,
-    leg_role: 'main_open',
+    leg_role: overrides.leg_role ?? 'main_open',
     leg_sequence: null,
     source: 'post_review',
     symbol: 'BTCUSDT',
@@ -170,7 +193,7 @@ function makeLeg(overrides: Partial<TradeJournal>): TradeJournal {
     order_kind: 'main',
     pre_simulated_time: overrides.pre_simulated_time ?? now,
     pre_real_time: overrides.pre_real_time ?? now,
-    pre_entry_price: null,
+    pre_entry_price: overrides.pre_entry_price ?? null,
     pre_planned_stop_loss: null,
     pre_planned_take_profit: null,
     pre_entry_reason: null,
@@ -260,6 +283,17 @@ describe('JournalCampaignsPage sorting', () => {
     expect(screen.getByTestId('campaign-sort-pnlPct')).toHaveAttribute('data-sort-direction', 'asc');
     expect(screen.getByTestId('campaign-sort-pnlPct')).toHaveAttribute('aria-label', '盈亏百分比，从小到大排序');
     expect(cardOrder()).toEqual(['Best PnL', 'Newest Operation', 'High Importance', 'Late Close']);
+
+    fireEvent.click(screen.getByTestId('campaign-sort-captureRate'));
+    expect(screen.getByTestId('campaign-sort-captureRate')).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByTestId('campaign-sort-captureRate')).toHaveAttribute('data-sort-direction', 'desc');
+    expect(screen.getByTestId('campaign-sort-captureRate')).toHaveAttribute('aria-label', '盈利捕获率，从大到小排序');
+    expect(cardOrder()).toEqual(['High Importance', 'Late Close', 'Best PnL', 'Newest Operation']);
+
+    fireEvent.click(screen.getByTestId('campaign-sort-captureRate'));
+    expect(screen.getByTestId('campaign-sort-captureRate')).toHaveAttribute('data-sort-direction', 'asc');
+    expect(screen.getByTestId('campaign-sort-captureRate')).toHaveAttribute('aria-label', '盈利捕获率，从小到大排序');
+    expect(cardOrder()).toEqual(['Newest Operation', 'Best PnL', 'Late Close', 'High Importance']);
 
     fireEvent.click(screen.getByTestId('campaign-sort-alpha'));
     expect(screen.getByTestId('campaign-sort-alpha')).toHaveAttribute('aria-pressed', 'true');

@@ -98,40 +98,92 @@ describe('campaign profit capture ratio', () => {
     expect(computeDecisionAccuracy(campaign, legs, [], []).profit_capture_ratio).toBeCloseTo(-50, 8);
   });
 
-  it('falls back to the saved campaign event data for historical campaigns', () => {
-    const campaign = makeCampaign(125);
+  it('fills historical campaigns from saved leg snapshots when the campaign summary and local records are absent', () => {
+    const campaign = makeCampaign(0);
+    campaign.final_realized_pnl = null;
+    campaign.initial_main_size_usdt = 5_000;
+    const legs = [
+      { ...makeLeg('main', 'main_open', 200), pre_position_size: 5_000, post_realized_pnl: 175 },
+      { ...makeLeg('hedge-b', 'hedge_initial_b', 190), pre_position_size: 2_500, post_realized_pnl: -50 },
+    ];
+
+    expect(computeInitialExpectedMaxLoss(campaign, legs, [])).toBeCloseTo(250, 8);
+    expect(computeDecisionAccuracy(campaign, legs, [], []).profit_capture_ratio).toBeCloseTo(50, 8);
+  });
+
+  it('fills event-only historical campaigns without requiring local trade records', () => {
+    const campaign = makeCampaign(0);
+    campaign.final_realized_pnl = null;
     campaign.initial_main_size_usdt = 5_000;
     campaign.actual_evolution = [
       {
         id: 'main-event',
         timestamp: openedAt,
-        event_type: 'main_opened',
+        event_type: 'historical_leg_attached',
         leg_role: 'main_open',
-        journal_id: null,
-        trade_record_id: null,
+        journal_id: 'main-journal',
+        trade_record_id: 'main-history-record',
         pending_order_id: null,
         price: 200,
         size_usdt: 5_000,
         notes: null,
         recorded_at: openedAt,
+        realized_pnl: 175,
       },
       {
         id: 'hedge-event',
         timestamp: openedAt,
-        event_type: 'hedge_placed',
+        event_type: 'historical_leg_attached',
         leg_role: 'hedge_initial_b',
-        journal_id: null,
-        trade_record_id: null,
+        journal_id: 'hedge-journal',
+        trade_record_id: 'hedge-history-record',
         pending_order_id: null,
         price: 190,
         size_usdt: 2_500,
         notes: null,
         recorded_at: openedAt,
+        realized_pnl: -50,
       },
     ];
 
     expect(computeInitialExpectedMaxLoss(campaign, [], [])).toBeCloseTo(250, 8);
     expect(computeDecisionAccuracy(campaign, [], [], []).profit_capture_ratio).toBeCloseTo(50, 8);
+  });
+
+  it('replaces a legacy historical zero placeholder with preserved leg P&L', () => {
+    const campaign = makeCampaign(0);
+    campaign.actual_evolution = [{
+      id: 'historical-created',
+      timestamp: openedAt,
+      event_type: 'historical_classification_created',
+      leg_role: null,
+      journal_id: null,
+      trade_record_id: null,
+      pending_order_id: null,
+      price: null,
+      size_usdt: null,
+      notes: null,
+      recorded_at: openedAt,
+    }];
+    const legs = [
+      { ...makeLeg('main', 'main_open', 100), post_realized_pnl: 700 },
+      { ...makeLeg('hedge-a', 'hedge_initial_a', 90), post_realized_pnl: -200 },
+    ];
+
+    expect(computeDecisionAccuracy(campaign, legs, [], []).profit_capture_ratio).toBeCloseTo(50, 8);
+  });
+
+  it('recovers missing historical A/B prices from the earliest reverse-order snapshots', () => {
+    const campaign = makeCampaign(500);
+    const legs = [makeLeg('main', 'main_open', 100)];
+    const reverseOrders = [
+      { id: 'a', side: 'SHORT', price: 96, createdAt: 1, cancelledAt: 2, status: 'cancelled' as const },
+      { id: 'b', side: 'SHORT', price: 90, createdAt: 2, cancelledAt: 3, status: 'cancelled' as const },
+      { id: 'rolling', side: 'SHORT', price: 80, createdAt: 3, cancelledAt: 4, status: 'cancelled' as const },
+    ];
+
+    expect(computeInitialExpectedMaxLoss(campaign, legs, [], reverseOrders)).toBeCloseTo(1_000, 8);
+    expect(computeDecisionAccuracy(campaign, legs, [], [], reverseOrders).profit_capture_ratio).toBeCloseTo(50, 8);
   });
 
   it('returns zero when no initial hedge price is available', () => {
