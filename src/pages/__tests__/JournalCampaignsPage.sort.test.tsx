@@ -1,7 +1,6 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { describe, expect, it, vi } from 'vitest';
-import { TooltipProvider } from '@/components/ui/tooltip';
 import type { TradeCampaign, TradeJournal } from '@/types/journal';
 import type { TradeRecord } from '@/types/trading';
 import JournalCampaignsPage from '../JournalCampaignsPage';
@@ -239,11 +238,9 @@ function cardOrder(): string[] {
 describe('JournalCampaignsPage sorting', () => {
   it('defaults to operation time and toggles sort direction for each field', async () => {
     render(
-      <TooltipProvider delayDuration={0}>
-        <MemoryRouter initialEntries={['/journal/campaigns']}>
-          <JournalCampaignsPage />
-        </MemoryRouter>
-      </TooltipProvider>,
+      <MemoryRouter initialEntries={['/journal/campaigns']}>
+        <JournalCampaignsPage />
+      </MemoryRouter>,
     );
 
     await waitFor(() => expect(screen.getAllByTestId('campaign-card')).toHaveLength(4));
@@ -268,11 +265,16 @@ describe('JournalCampaignsPage sorting', () => {
     expect(screen.getByTestId('campaign-valid-count')).toHaveTextContent('有效战役（3）');
     expect(screen.getByTestId('campaign-valid-count')).toHaveAttribute(
       'aria-label',
-      '有效战役 3 场，其中盈利 2 场，亏损 1 场',
+      '有效战役 3 场，其中盈利 2 场，亏损 1 场，点击查看最大预期亏损计算说明',
     );
-    fireEvent.pointerMove(screen.getByTestId('campaign-valid-count'));
-    expect((await screen.findAllByText('盈利战役：2 场')).length).toBeGreaterThan(0);
-    expect(screen.getAllByText('亏损战役：1 场').length).toBeGreaterThan(0);
+    fireEvent.click(screen.getByTestId('campaign-valid-count'));
+    expect(screen.getByText('有效战役与最大预期亏损')).toBeInTheDocument();
+    expect(screen.getByText(/Lᵢ = 主力名义仓位 × max/)).toBeInTheDocument();
+    expect(screen.getByText(/历史战役优先使用保存的原始委托价/)).toBeInTheDocument();
+    expect(screen.getByText(/只有战役已结束/)).toBeInTheDocument();
+    expect(screen.getByText('盈利').parentElement).toHaveTextContent('盈利2');
+    expect(screen.getByText('亏损').parentElement).toHaveTextContent('亏损1');
+    fireEvent.click(screen.getByTestId('campaign-valid-count'));
     expect(screen.getByTestId('campaign-win-rate')).toHaveTextContent('胜率（66.67%）');
     expect(screen.getByTestId('campaign-win-rate')).toHaveAttribute(
       'aria-label',
@@ -370,11 +372,9 @@ describe('JournalCampaignsPage sorting', () => {
     mockListDeletedCampaigns.mockResolvedValue([deletedCampaign]);
 
     render(
-      <TooltipProvider delayDuration={0}>
-        <MemoryRouter initialEntries={['/journal/campaigns']}>
-          <JournalCampaignsPage />
-        </MemoryRouter>
-      </TooltipProvider>,
+      <MemoryRouter initialEntries={['/journal/campaigns']}>
+        <JournalCampaignsPage />
+      </MemoryRouter>,
     );
 
     await waitFor(() => expect(screen.getAllByTestId('campaign-card')).toHaveLength(4));

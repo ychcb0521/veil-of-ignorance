@@ -5,7 +5,6 @@ import { toast } from 'sonner';
 import { BackButton } from '@/components/journal/BackButton';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useAuth } from '@/contexts/AuthContext';
 import {
   deleteCampaign,
@@ -44,7 +43,7 @@ type CampaignSortState = {
   direction: CampaignSortDirection;
 };
 
-type CampaignFormulaPopover = 'captureRate' | 'winRate' | 'averagePayoffRatio' | 'expectedValue';
+type CampaignFormulaPopover = 'captureRate' | 'validCampaigns' | 'winRate' | 'averagePayoffRatio' | 'expectedValue';
 
 const SORT_OPTIONS: { value: CampaignSortMode; label: string }[] = [
   { value: 'importance', label: '重要性' },
@@ -587,26 +586,40 @@ export default function JournalCampaignsPage() {
                 </Popover>
               );
             })}
-            <Tooltip delayDuration={120}>
-              <TooltipTrigger asChild>
-                <span
-                  tabIndex={0}
+            <Popover
+              open={formulaPopover === 'validCampaigns'}
+              onOpenChange={open => handleFormulaPopoverChange('validCampaigns', open)}
+            >
+              <PopoverTrigger asChild>
+                <button
+                  type="button"
                   data-testid="campaign-valid-count"
-                  aria-label={`有效战役 ${validCampaignCount} 场，其中盈利 ${performance.winCount} 场，亏损 ${performance.lossCount} 场${breakevenCampaignCount > 0 ? `，盈亏平衡 ${breakevenCampaignCount} 场` : ''}`}
-                  className="ml-0.5 inline-flex h-6 cursor-help select-none items-center border-l border-border/60 pl-2 text-foreground/60 outline-none transition-colors hover:text-foreground/80 focus-visible:text-foreground/80"
+                  aria-label={`有效战役 ${validCampaignCount} 场，其中盈利 ${performance.winCount} 场，亏损 ${performance.lossCount} 场${breakevenCampaignCount > 0 ? `，盈亏平衡 ${breakevenCampaignCount} 场` : ''}，点击查看最大预期亏损计算说明`}
+                  title="点击查看有效战役与最大预期亏损说明"
+                  onClick={event => openFormulaPopover(event, 'validCampaigns')}
+                  className="ml-0.5 inline-flex h-6 select-none items-center border-b border-l border-dashed border-muted-foreground/30 border-l-border/60 pl-2 text-foreground/60 transition-colors hover:text-foreground/80"
                 >
                   有效战役（{validCampaignCount}）
-                </span>
-              </TooltipTrigger>
-              <TooltipContent side="bottom" align="end" className="space-y-1 text-[11px]">
-                <div>盈利战役：{performance.winCount} 场</div>
-                <div>亏损战役：{performance.lossCount} 场</div>
-                {breakevenCampaignCount > 0 && <div>盈亏平衡：{breakevenCampaignCount} 场</div>}
-                <div className="border-t border-border/60 pt-1 text-muted-foreground">
-                  仅统计存在有效初始最大预期亏损的已结束战役
+                </button>
+              </PopoverTrigger>
+              <PopoverContent align="end" className="w-96 border-border bg-card p-3 text-[11px]">
+                <div className="font-medium text-foreground">有效战役与最大预期亏损</div>
+                <div className="mt-2 rounded bg-muted/60 px-2 py-1.5 font-mono leading-relaxed text-foreground">
+                  Lᵢ = 主力名义仓位 × max（|主力开仓价 − 初始对冲 A 价|，|主力开仓价 − 初始对冲 B 价|）÷ 主力开仓价
                 </div>
-              </TooltipContent>
-            </Tooltip>
+                <div className="mt-2 space-y-1 text-muted-foreground">
+                  <div>若 A、B 都存在，取离主力开仓价更远的一档；只有一档时使用该档。</div>
+                  <div>历史战役优先使用保存的原始委托价，不使用触发成交后的滑点价；旧记录缺失委托快照时，才回退到 Legs、成交记录或事件数据。</div>
+                  <div>只有战役已结束，且主力开仓价、主力名义仓位、初始对冲价完整，使 Lᵢ 为有限正数时，才属于有效战役。</div>
+                  <div>无有效 Lᵢ 的战役不参与盈亏比、胜率、平均盈亏比与期望值统计。</div>
+                </div>
+                <div className="mt-2 grid grid-cols-3 gap-1 border-t border-border/60 pt-2 text-center">
+                  <div><span className="text-muted-foreground">盈利</span><strong className="ml-1 text-[#0ECB81]">{performance.winCount}</strong></div>
+                  <div><span className="text-muted-foreground">亏损</span><strong className="ml-1 text-[#F6465D]">{performance.lossCount}</strong></div>
+                  <div><span className="text-muted-foreground">盈亏平衡</span><strong className="ml-1 text-foreground">{breakevenCampaignCount}</strong></div>
+                </div>
+              </PopoverContent>
+            </Popover>
             <Popover
               open={formulaPopover === 'winRate'}
               onOpenChange={open => handleFormulaPopoverChange('winRate', open)}
