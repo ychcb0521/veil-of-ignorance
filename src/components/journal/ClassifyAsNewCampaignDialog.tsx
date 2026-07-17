@@ -16,7 +16,7 @@ import {
   createCampaign,
   createCampaignFromJournals,
   createCampaignFromTradeRecords,
-  deleteCampaign,
+  permanentlyDeleteCampaign,
   suggestLegRoles,
   validateClassification,
 } from '@/lib/journalApi';
@@ -502,7 +502,7 @@ export function ClassifyAsNewCampaignDialog({ open, onOpenChange, items, onCreat
                       );
                     }
                   } catch (error) {
-                    await deleteCampaign(campaign.id).catch(() => undefined);
+                    await permanentlyDeleteCampaign(campaign.id).catch(() => undefined);
                     throw error;
                   }
                 }

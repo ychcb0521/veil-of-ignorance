@@ -1,18 +1,26 @@
 import { useEffect, useMemo, useState, type MouseEvent } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { ArrowDown, ArrowUp, FolderPlus, Layers, Star, Trash2 } from 'lucide-react';
+import { ArchiveRestore, ArrowDown, ArrowUp, FolderPlus, Layers, RotateCcw, Star, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { BackButton } from '@/components/journal/BackButton';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { useAuth } from '@/contexts/AuthContext';
 import {
   deleteCampaign,
   getCampaignFullData,
   listAllCampaigns,
+  listDeletedCampaigns,
   listVisibleCampaigns,
+  permanentlyDeleteCampaign,
+  restoreCampaign,
   updateCampaignImportance,
 } from '@/lib/journalApi';
-import { computeProfitCaptureRatio } from '@/lib/campaignAnalysis';
+import {
+  computeInitialExpectedMaxLoss,
+  computeProfitCaptureRatio,
+  formatCampaignPayoffRatio,
+} from '@/lib/campaignAnalysis';
 import { summarizeCampaignPerformance } from '@/lib/kellySizing';
 import { LEG_ROLE_LABELS, STRATEGY_TEMPLATES } from '@/lib/strategyTemplates';
 import { campaignOperationTime } from '@/lib/objectiveOperationTime';
@@ -24,7 +32,7 @@ type CampaignCardData = {
   campaign: TradeCampaign;
   legs: TradeJournal[];
   tradeRecords: TradeRecord[];
-  profitCaptureRatio: number;
+  profitCaptureRatio: number | null;
 };
 
 type CampaignSortMode = 'importance' | 'time' | 'captureRate' | 'alpha';
@@ -99,6 +107,9 @@ const fmtTime = (iso: string | null) => (iso ? iso.replace('T', ' ').slice(0, 16
 const fmtOperationTime = (time: number | null) => (
   time == null ? '—' : formatBeijingTime(time).slice(0, 16)
 );
+const fmtDeletedTime = (iso: string | null | undefined) => (
+  iso ? formatBeijingTime(new Date(iso).getTime()).slice(0, 16) : '—'
+);
 
 function importanceValue(campaign: Pick<TradeCampaign, 'importance_weight'>): number {
   const value = Number(campaign.importance_weight);
@@ -157,7 +168,10 @@ function comparePnl(
 }
 
 function sortCampaignRows(rows: CampaignCardData[], sort: CampaignSortState): CampaignCardData[] {
-  return [...rows].sort((a, b) => {
+  const visibleRows = sort.mode === 'captureRate'
+    ? rows.filter(row => row.profitCaptureRatio != null && Number.isFinite(row.profitCaptureRatio))
+    : rows;
+  return [...visibleRows].sort((a, b) => {
     const importanceDesc = compareNumber(importanceValue(a.campaign), importanceValue(b.campaign), 'desc');
     const timeDesc = compareNumber(campaignSortTime(a), campaignSortTime(b), 'desc');
     const pnlDesc = comparePnl(a.campaign, b.campaign, 'desc');
@@ -170,7 +184,11 @@ function sortCampaignRows(rows: CampaignCardData[], sort: CampaignSortState): Ca
         || alphaAsc;
     }
     if (sort.mode === 'captureRate') {
-      return compareFiniteMetric(a.profitCaptureRatio, b.profitCaptureRatio, sort.direction)
+      return compareFiniteMetric(
+        a.profitCaptureRatio ?? Number.NaN,
+        b.profitCaptureRatio ?? Number.NaN,
+        sort.direction,
+      )
         || comparePnl(a.campaign, b.campaign, sort.direction)
         || importanceDesc
         || timeDesc
@@ -210,6 +228,10 @@ export default function JournalCampaignsPage() {
   const [rows, setRows] = useState<CampaignCardData[]>([]);
   const [busyCampaignId, setBusyCampaignId] = useState<string | null>(null);
   const [sortState, setSortState] = useState<CampaignSortState>({ mode: 'time', direction: 'desc' });
+  const [deletedOpen, setDeletedOpen] = useState(false);
+  const [deletedLoading, setDeletedLoading] = useState(false);
+  const [deletedCampaigns, setDeletedCampaigns] = useState<TradeCampaign[]>([]);
+  const [deletedBusyId, setDeletedBusyId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!user) return;
@@ -223,16 +245,24 @@ export default function JournalCampaignsPage() {
         const full = await Promise.all(
           campaigns.map(async campaign => {
             const details = await getCampaignFullData(campaign.id);
+            const initialExpectedMaxLoss = computeInitialExpectedMaxLoss(
+              details.campaign,
+              details.legs,
+              details.tradeRecords,
+              details.reverseHedgeOrders,
+            );
             return {
               campaign: details.campaign,
               legs: details.legs,
               tradeRecords: details.tradeRecords,
-              profitCaptureRatio: computeProfitCaptureRatio(
-                details.campaign,
-                details.legs,
-                details.tradeRecords,
-                details.reverseHedgeOrders,
-              ),
+              profitCaptureRatio: Number.isFinite(initialExpectedMaxLoss) && initialExpectedMaxLoss > 0
+                ? computeProfitCaptureRatio(
+                  details.campaign,
+                  details.legs,
+                  details.tradeRecords,
+                  details.reverseHedgeOrders,
+                )
+                : null,
             };
           }),
         );
@@ -243,6 +273,19 @@ export default function JournalCampaignsPage() {
     })();
     return () => { cancelled = true; };
   }, [user, scope]);
+
+  useEffect(() => {
+    if (!user) return;
+    let cancelled = false;
+    listDeletedCampaigns(user.id)
+      .then(campaigns => {
+        if (!cancelled) setDeletedCampaigns(campaigns);
+      })
+      .catch(() => {
+        if (!cancelled) setDeletedCampaigns([]);
+      });
+    return () => { cancelled = true; };
+  }, [user]);
 
   const activeCount = useMemo(
     () => rows.filter((row: CampaignCardData) => row.campaign.status === 'active').length,
@@ -281,7 +324,7 @@ export default function JournalCampaignsPage() {
   const performance = useMemo(
     () => summarizeCampaignPerformance(rows.map(row => ({
       campaign: row.campaign,
-      payoffRatio: row.profitCaptureRatio / 100,
+      payoffRatio: row.profitCaptureRatio == null ? null : row.profitCaptureRatio / 100,
     }))),
     [rows],
   );
@@ -305,7 +348,7 @@ export default function JournalCampaignsPage() {
   ) => {
     event.stopPropagation();
     if (!user || campaign.user_id !== user.id || busyCampaignId === campaign.id) return;
-    const confirmed = window.confirm(`删除战役「${campaign.title}」？\n\n这会移除这个战役归档；已生成的交易记录不会被删除。`);
+    const confirmed = window.confirm(`删除战役「${campaign.title}」？\n\n战役会移到“已删除”，之后仍可恢复；已生成的交易记录不会被删除。`);
     if (!confirmed) return;
 
     const previousRows = rows;
@@ -313,12 +356,84 @@ export default function JournalCampaignsPage() {
     setRows(prev => prev.filter(row => row.campaign.id !== campaign.id));
     try {
       await deleteCampaign(campaign.id);
-      toast.success('战役已删除');
+      setDeletedCampaigns(current => [
+        { ...campaign, deleted_at: new Date().toISOString() },
+        ...current.filter(item => item.id !== campaign.id),
+      ]);
+      toast.success('战役已移到已删除，可随时恢复');
     } catch (error) {
       setRows(previousRows);
       toast.error(error instanceof Error ? error.message : String(error));
     } finally {
       setBusyCampaignId(null);
+    }
+  };
+
+  const handleDeletedOpenChange = async (open: boolean) => {
+    setDeletedOpen(open);
+    if (!open || !user) return;
+    setDeletedLoading(true);
+    try {
+      setDeletedCampaigns(await listDeletedCampaigns(user.id));
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : String(error));
+    } finally {
+      setDeletedLoading(false);
+    }
+  };
+
+  const handleRestoreCampaign = async (campaign: TradeCampaign) => {
+    if (!user || deletedBusyId) return;
+    setDeletedBusyId(campaign.id);
+    try {
+      await restoreCampaign(campaign.id);
+      setDeletedCampaigns(current => current.filter(item => item.id !== campaign.id));
+      if (scope === 'own') {
+        const details = await getCampaignFullData(campaign.id);
+        const initialExpectedMaxLoss = computeInitialExpectedMaxLoss(
+          details.campaign,
+          details.legs,
+          details.tradeRecords,
+          details.reverseHedgeOrders,
+        );
+        const restoredRow: CampaignCardData = {
+          campaign: { ...details.campaign, deleted_at: null },
+          legs: details.legs,
+          tradeRecords: details.tradeRecords,
+          profitCaptureRatio: Number.isFinite(initialExpectedMaxLoss) && initialExpectedMaxLoss > 0
+            ? computeProfitCaptureRatio(
+              details.campaign,
+              details.legs,
+              details.tradeRecords,
+              details.reverseHedgeOrders,
+            )
+            : null,
+        };
+        setRows(current => [restoredRow, ...current.filter(item => item.campaign.id !== campaign.id)]);
+      }
+      toast.success('战役已恢复');
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : String(error));
+    } finally {
+      setDeletedBusyId(null);
+    }
+  };
+
+  const handlePermanentDeleteCampaign = async (campaign: TradeCampaign) => {
+    if (deletedBusyId) return;
+    const confirmed = window.confirm(
+      `永久删除战役「${campaign.title}」？\n\n此操作无法恢复；原始交易记录不会被删除。`,
+    );
+    if (!confirmed) return;
+    setDeletedBusyId(campaign.id);
+    try {
+      await permanentlyDeleteCampaign(campaign.id);
+      setDeletedCampaigns(current => current.filter(item => item.id !== campaign.id));
+      toast.success('战役已永久删除');
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : String(error));
+    } finally {
+      setDeletedBusyId(null);
     }
   };
 
@@ -339,6 +454,17 @@ export default function JournalCampaignsPage() {
           >
             <FolderPlus className="w-3.5 h-3.5" />
             归类历史交易
+          </button>
+          <button
+            type="button"
+            onClick={() => void handleDeletedOpenChange(true)}
+            title="已删除战役"
+            aria-label={`已删除战役，共 ${deletedCampaigns.length} 场`}
+            data-testid="deleted-campaigns-entry"
+            className="inline-flex h-8 items-center gap-1 rounded border border-transparent px-1.5 text-[10px] text-muted-foreground/45 transition-colors hover:border-border/60 hover:bg-accent hover:text-muted-foreground"
+          >
+            <ArchiveRestore className="h-3.5 w-3.5" />
+            {deletedCampaigns.length > 0 && <span>{deletedCampaigns.length}</span>}
           </button>
         </div>
       </header>
@@ -379,7 +505,7 @@ export default function JournalCampaignsPage() {
                   type="button"
                   aria-pressed={active}
                   aria-label={`${option.label}，${sortDirectionLabel(direction, option.value)}排序`}
-                  title={`按${option.label}${sortDirectionLabel(direction, option.value)}排序${active ? '；再次点击切换方向' : ''}`}
+                  title={`按${option.label}${sortDirectionLabel(direction, option.value)}排序${active ? '；再次点击切换方向' : ''}${option.value === 'captureRate' ? '；未设置最大预期亏损的战役不显示' : ''}`}
                   data-sort-direction={active ? direction : undefined}
                   data-testid={`campaign-sort-${option.value}`}
                   onClick={() => handleSortChange(option.value)}
@@ -429,13 +555,14 @@ export default function JournalCampaignsPage() {
                 <div className="mt-2 rounded bg-muted/60 px-2 py-1.5 font-mono text-foreground">
                   E = P(赢) × b − (1 − P(赢))
                 </div>
-                {performance.winRate != null && performance.payoffRatio != null && performance.expectedR != null ? (
+                {performance.expectedWinRate != null && performance.payoffRatio != null && performance.expectedR != null ? (
                   <div className="mt-2 space-y-1 text-muted-foreground">
                     <div className="font-mono">
-                      = {(performance.winRate * 100).toFixed(2)}% × {performance.payoffRatio.toFixed(2)} − {((1 - performance.winRate) * 100).toFixed(2)}%
+                      = {(performance.expectedWinRate * 100).toFixed(2)}% × {performance.payoffRatio.toFixed(2)} − {((1 - performance.expectedWinRate) * 100).toFixed(2)}%
                     </div>
                     <div className="font-mono text-foreground">= {expectedRLabel}</div>
                     <div>b = 所有战役盈亏比之和 ÷ 有效战役数</div>
+                    <div>P(赢) 仅统计设置了最大预期亏损的有效战役</div>
                   </div>
                 ) : (
                   <div className="mt-2 text-muted-foreground">
@@ -454,13 +581,19 @@ export default function JournalCampaignsPage() {
             <div className="mx-auto w-10 h-10 rounded-full bg-accent flex items-center justify-center">
               <Layers className="w-5 h-5 text-muted-foreground" />
             </div>
-            <div className="text-[13px] font-medium">{scope === 'own' ? '尚无战役' : '暂无互关可见战役'}</div>
+            <div className="text-[13px] font-medium">
+              {sortState.mode === 'captureRate' && rows.length > 0
+                ? '暂无可计算盈亏比的战役'
+                : scope === 'own' ? '尚无战役' : '暂无互关可见战役'}
+            </div>
             <div className="text-[12px] text-muted-foreground">
-              {scope === 'own' ? '你下次开主力单时会自动创建第一个战役' : '双方互关后，对方战役会出现在这里'}
+              {sortState.mode === 'captureRate' && rows.length > 0
+                ? '未设置初始最大预期亏损的战役不会进入盈亏比排序'
+                : scope === 'own' ? '你下次开主力单时会自动创建第一个战役' : '双方互关后，对方战役会出现在这里'}
             </div>
           </div>
         ) : (
-          sortedRows.map(({ campaign, legs, tradeRecords }) => {
+          sortedRows.map(({ campaign, legs, tradeRecords, profitCaptureRatio }) => {
             const importance = importanceValue(campaign);
             const isOwnCampaign = campaign.user_id === user?.id;
             const operationTime = campaignOperationTime(legs, tradeRecords);
@@ -550,7 +683,9 @@ export default function JournalCampaignsPage() {
                   <div>
                     已实现 P&L：{campaign.final_realized_pnl == null ? '—' : campaign.final_realized_pnl.toFixed(2)}
                   </div>
-                  <div>峰值浮盈：{campaign.status === 'active' ? '批次 17 计算' : (campaign.peak_unrealized_pnl ?? '—')}</div>
+                  <div data-testid="campaign-payoff-ratio">
+                    盈亏比：{profitCaptureRatio == null ? '—' : formatCampaignPayoffRatio(profitCaptureRatio, 2)}
+                  </div>
                   <div data-testid="campaign-operation-time">
                     操作时间：{fmtOperationTime(operationTime)}
                   </div>
@@ -576,6 +711,72 @@ export default function JournalCampaignsPage() {
           })
         )}
       </main>
+      <Dialog open={deletedOpen} onOpenChange={open => void handleDeletedOpenChange(open)}>
+        <DialogContent className="max-h-[78vh] max-w-2xl overflow-hidden border-border bg-background p-0 sm:rounded-md">
+          <DialogHeader className="border-b border-border px-5 py-4 pr-12">
+            <DialogTitle className="flex items-center gap-2 text-[14px] font-medium">
+              <ArchiveRestore className="h-4 w-4 text-muted-foreground" />
+              已删除战役
+            </DialogTitle>
+            <DialogDescription className="text-[11px]">
+              删除的战役不会进入列表与统计；恢复后会回到原来的战役记录。
+            </DialogDescription>
+          </DialogHeader>
+          <div className="max-h-[60vh] overflow-y-auto px-5 py-2">
+            {deletedLoading ? (
+              <div className="py-12 text-center text-[12px] text-muted-foreground">加载中…</div>
+            ) : deletedCampaigns.length === 0 ? (
+              <div className="py-12 text-center">
+                <ArchiveRestore className="mx-auto h-5 w-5 text-muted-foreground/45" />
+                <div className="mt-2 text-[12px] text-muted-foreground">暂无已删除战役</div>
+              </div>
+            ) : (
+              deletedCampaigns.map(campaign => (
+                <div
+                  key={campaign.id}
+                  data-testid="deleted-campaign-row"
+                  className="flex flex-col gap-3 border-b border-border/70 py-3 last:border-b-0 sm:flex-row sm:items-center"
+                >
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="truncate text-[12px] font-medium">{campaign.title}</span>
+                      <span className="rounded bg-muted px-1.5 py-0.5 font-mono text-[9px] text-muted-foreground">
+                        {campaign.campaign_code}
+                      </span>
+                    </div>
+                    <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-muted-foreground">
+                      <span>{campaign.symbol}</span>
+                      <span>删除于 {fmtDeletedTime(campaign.deleted_at)}</span>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1.5 self-end sm:self-auto">
+                    <button
+                      type="button"
+                      disabled={deletedBusyId != null}
+                      onClick={() => void handleRestoreCampaign(campaign)}
+                      data-testid={`restore-campaign-${campaign.id}`}
+                      className="inline-flex h-7 items-center gap-1 rounded border border-border px-2 text-[11px] text-foreground/80 transition-colors hover:bg-accent disabled:opacity-50"
+                    >
+                      <RotateCcw className="h-3.5 w-3.5" />
+                      恢复
+                    </button>
+                    <button
+                      type="button"
+                      disabled={deletedBusyId != null}
+                      title="永久删除"
+                      aria-label={`永久删除 ${campaign.title}`}
+                      onClick={() => void handlePermanentDeleteCampaign(campaign)}
+                      className="inline-flex h-7 w-7 items-center justify-center rounded text-muted-foreground/60 transition-colors hover:bg-[#F6465D]/10 hover:text-[#F6465D] disabled:opacity-50"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

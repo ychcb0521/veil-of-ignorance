@@ -572,6 +572,8 @@ function buildSyntheticCampaignAndLegs(
       notes: event.notes,
       recorded_at: event.timestamp,
     })),
+    deviation_notes: {},
+    deleted_at: null,
     created_at: params.entry.time,
     updated_at: closedAt,
   };

@@ -104,6 +104,7 @@ function toCampaign(row: unknown): TradeCampaign {
     campaign_code: normalizeCampaignCode(campaign?.campaign_code, campaign?.id),
     importance_weight: normalizeCampaignImportance(campaign?.importance_weight),
     deviation_notes: campaign?.deviation_notes ?? {},
+    deleted_at: campaign?.deleted_at ?? null,
   });
 }
 
@@ -399,6 +400,12 @@ function isMissingCampaignImportanceColumnError(error: { code?: string; message?
   if (!error) return false;
   const message = error.message ?? '';
   return /importance_weight/i.test(message) && /schema cache|could not find|does not exist|column/i.test(message);
+}
+
+function isMissingCampaignDeletedAtColumnError(error: { code?: string; message?: string } | null): boolean {
+  if (!error) return false;
+  const message = error.message ?? '';
+  return /deleted_at/i.test(message) && /schema cache|could not find|does not exist|column/i.test(message);
 }
 
 function isMissingTradeJournalsFeatureError(error: { code?: string; message?: string } | null): boolean {
@@ -924,6 +931,7 @@ function normalizeLocalCampaigns(raw: unknown): TradeCampaign[] {
       campaign_code: normalizeCampaignCode(campaign.campaign_code, campaign.id),
       importance_weight: normalizeCampaignImportance(campaign.importance_weight),
       deviation_notes: normalizeCampaignDeviationNotes(campaign.deviation_notes),
+      deleted_at: campaign.deleted_at ?? null,
     }))
     .map(withLocalDeviationNotes);
 }
@@ -1025,9 +1033,27 @@ function applyCampaignFilters(rows: TradeCampaign[], filters?: ListCampaignFilte
 
 function mergeCampaigns(remote: TradeCampaign[], local: TradeCampaign[]): TradeCampaign[] {
   const merged = new Map<string, TradeCampaign>();
-  local.forEach(campaign => merged.set(campaign.id, campaign));
   remote.forEach(campaign => merged.set(campaign.id, campaign));
+  local.forEach(campaign => {
+    // A local tombstone must win while the deployed schema is still catching up.
+    if (!merged.has(campaign.id) || campaign.deleted_at != null) {
+      merged.set(campaign.id, campaign);
+    }
+  });
   return sortCampaignsByImportance([...merged.values()]);
+}
+
+function activeCampaignRows(rows: TradeCampaign[]): TradeCampaign[] {
+  return rows.filter(campaign => campaign.deleted_at == null);
+}
+
+function deletedCampaignRows(rows: TradeCampaign[]): TradeCampaign[] {
+  return rows
+    .filter(campaign => campaign.deleted_at != null)
+    .sort((a, b) => (
+      new Date(b.deleted_at ?? 0).getTime() - new Date(a.deleted_at ?? 0).getTime()
+      || campaignSortTime(b) - campaignSortTime(a)
+    ));
 }
 
 function counterfactualSortTime(branch: Pick<CampaignCounterfactual, 'created_at'>): number {
@@ -1129,6 +1155,7 @@ function buildLocalCampaignFromCreateInput(
     notes: input.notes ?? null,
     actual_evolution: [event],
     deviation_notes: {},
+    deleted_at: null,
     created_at: now,
     updated_at: now,
   };
@@ -1830,21 +1857,80 @@ export async function closeCampaign(
   return updateCampaign(id, finalState);
 }
 
+async function campaignForDeletionFallback(userId: string, id: string): Promise<TradeCampaign | null> {
+  const local = findLocalCampaign(userId, id);
+  const { data, error } = await supabase
+    .from('trade_campaigns' as never)
+    .select('*')
+    .eq('id', id)
+    .eq('user_id', userId)
+    .maybeSingle();
+  if (error) {
+    if (isMissingTradeCampaignsTableError(error) || isCampaignNotFoundError(error)) return local;
+    throw new Error(`读取待删除战役失败：${error.message}`);
+  }
+  return data ? toCampaign(data) : local;
+}
+
 export async function deleteCampaign(id: string): Promise<void> {
+  const userId = await getAuthenticatedUserId('删除战役');
+  const fallbackCampaign = await campaignForDeletionFallback(userId, id);
+  const deletedAt = new Date().toISOString();
   const { error } = await supabase
     .from('trade_campaigns' as never)
-    .delete()
-    .eq('id', id);
+    .update({ deleted_at: deletedAt } as never)
+    .eq('id', id)
+    .eq('user_id', userId);
   if (error) {
-    if (isMissingTradeCampaignsTableError(error) || isCampaignNotFoundError(error)) {
-      const userId = await getAuthenticatedUserId('删除战役');
-      removeLocalCampaign(userId, id);
-      removeLocalCampaignPreference(userId, id);
+    if (
+      isMissingTradeCampaignsTableError(error)
+      || isCampaignNotFoundError(error)
+      || isMissingCampaignDeletedAtColumnError(error)
+    ) {
+      if (fallbackCampaign) {
+        upsertLocalCampaign({ ...fallbackCampaign, deleted_at: deletedAt, updated_at: deletedAt });
+      }
       return;
     }
     throw new Error(`删除战役失败：${error.message}`);
   }
-  const userId = await getAuthenticatedUserId('删除战役');
+
+  if (fallbackCampaign) {
+    upsertLocalCampaign({ ...fallbackCampaign, deleted_at: deletedAt, updated_at: deletedAt });
+  }
+}
+
+export async function restoreCampaign(id: string): Promise<void> {
+  const userId = await getAuthenticatedUserId('恢复战役');
+  const local = findLocalCampaign(userId, id);
+  const restoredAt = new Date().toISOString();
+  const { error } = await supabase
+    .from('trade_campaigns' as never)
+    .update({ deleted_at: null } as never)
+    .eq('id', id)
+    .eq('user_id', userId);
+  if (error && !(
+    isMissingTradeCampaignsTableError(error)
+    || isCampaignNotFoundError(error)
+    || isMissingCampaignDeletedAtColumnError(error)
+  )) {
+    throw new Error(`恢复战役失败：${error.message}`);
+  }
+  if (local) {
+    upsertLocalCampaign({ ...local, deleted_at: null, updated_at: restoredAt });
+  }
+}
+
+export async function permanentlyDeleteCampaign(id: string): Promise<void> {
+  const userId = await getAuthenticatedUserId('永久删除战役');
+  const { error } = await supabase
+    .from('trade_campaigns' as never)
+    .delete()
+    .eq('id', id)
+    .eq('user_id', userId);
+  if (error && !(isMissingTradeCampaignsTableError(error) || isCampaignNotFoundError(error))) {
+    throw new Error(`永久删除战役失败：${error.message}`);
+  }
   removeLocalCampaign(userId, id);
   removeLocalCampaignPreference(userId, id);
 }
@@ -1859,10 +1945,10 @@ export async function listActiveCampaigns(userId: string, symbol?: string): Prom
   const { data, error } = await q.order('opened_at', { ascending: false });
   const local = applyCampaignFilters(readLocalCampaigns(userId), { status: 'active', symbol });
   if (error) {
-    if (isMissingTradeCampaignsTableError(error)) return withCampaignPreferences(userId, local);
+    if (isMissingTradeCampaignsTableError(error)) return withCampaignPreferences(userId, activeCampaignRows(local));
     return wrap('加载进行中的战役', error, (data ?? []).map(toCampaign));
   }
-  return withCampaignPreferences(userId, mergeCampaigns((data ?? []).map(toCampaign), local));
+  return withCampaignPreferences(userId, activeCampaignRows(mergeCampaigns((data ?? []).map(toCampaign), local)));
 }
 
 export async function listAllCampaigns(
@@ -1877,10 +1963,10 @@ export async function listAllCampaigns(
   const { data, error } = await q.order('opened_at', { ascending: false });
   const local = applyCampaignFilters(readLocalCampaigns(userId), filters);
   if (error) {
-    if (isMissingTradeCampaignsTableError(error)) return withCampaignPreferences(userId, local);
+    if (isMissingTradeCampaignsTableError(error)) return withCampaignPreferences(userId, activeCampaignRows(local));
     return wrap('加载战役列表', error, (data ?? []).map(toCampaign));
   }
-  return withCampaignPreferences(userId, mergeCampaigns((data ?? []).map(toCampaign), local));
+  return withCampaignPreferences(userId, activeCampaignRows(mergeCampaigns((data ?? []).map(toCampaign), local)));
 }
 
 export async function listVisibleCampaigns(
@@ -1895,10 +1981,29 @@ export async function listVisibleCampaigns(
   const { data, error } = await q.order('opened_at', { ascending: false });
   const local = applyCampaignFilters(readLocalCampaigns(userId), filters);
   if (error) {
-    if (isMissingTradeCampaignsTableError(error)) return withCampaignPreferences(userId, local);
+    if (isMissingTradeCampaignsTableError(error)) return withCampaignPreferences(userId, activeCampaignRows(local));
     return wrap('加载可见战役列表', error, (data ?? []).map(toCampaign));
   }
-  return withCampaignPreferences(userId, mergeCampaigns((data ?? []).map(toCampaign), local));
+  return withCampaignPreferences(userId, activeCampaignRows(mergeCampaigns((data ?? []).map(toCampaign), local)));
+}
+
+export async function listDeletedCampaigns(userId: string): Promise<TradeCampaign[]> {
+  const { data, error } = await supabase
+    .from('trade_campaigns' as never)
+    .select('*')
+    .eq('user_id', userId)
+    .order('updated_at', { ascending: false });
+  const local = readLocalCampaigns(userId);
+  if (error) {
+    if (isMissingTradeCampaignsTableError(error)) {
+      return deletedCampaignRows(withCampaignPreferences(userId, local));
+    }
+    return wrap('加载已删除战役', error, [] as TradeCampaign[]);
+  }
+  return deletedCampaignRows(withCampaignPreferences(
+    userId,
+    mergeCampaigns((data ?? []).map(toCampaign), local),
+  ));
 }
 
 export async function getCampaignWithLegs(
@@ -2898,6 +3003,7 @@ export async function createCampaignFromJournals(input: {
     notes: input.notes?.trim() || null,
     actual_evolution: [],
     deviation_notes: {},
+    deleted_at: null,
     created_at: now,
     updated_at: now,
   } satisfies TradeCampaign;
@@ -3041,6 +3147,7 @@ export async function createCampaignFromTradeRecords(input: {
     notes,
     actual_evolution: events,
     deviation_notes: {},
+    deleted_at: null,
     created_at: now,
     updated_at: now,
   };

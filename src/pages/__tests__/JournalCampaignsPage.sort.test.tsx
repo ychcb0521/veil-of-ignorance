@@ -5,8 +5,11 @@ import type { TradeCampaign, TradeJournal } from '@/types/journal';
 import type { TradeRecord } from '@/types/trading';
 import JournalCampaignsPage from '../JournalCampaignsPage';
 
-const { mockUser } = vi.hoisted(() => ({
+const { mockUser, mockListDeletedCampaigns, mockRestoreCampaign, mockPermanentlyDeleteCampaign } = vi.hoisted(() => ({
   mockUser: { id: 'user-1' },
+  mockListDeletedCampaigns: vi.fn(async () => []),
+  mockRestoreCampaign: vi.fn(async () => undefined),
+  mockPermanentlyDeleteCampaign: vi.fn(async () => undefined),
 }));
 
 const campaigns: TradeCampaign[] = [
@@ -49,6 +52,14 @@ const campaigns: TradeCampaign[] = [
   }),
 ];
 
+const deletedCampaign = makeCampaign({
+  id: 'deleted-campaign',
+  title: 'Deleted Campaign',
+  opened_at: '2025-11-01T00:00:00.000Z',
+  closed_at: '2025-11-02T00:00:00.000Z',
+  deleted_at: '2026-07-17T03:00:00.000Z',
+});
+
 const legsByCampaign: Record<string, TradeJournal[]> = {
   'high-importance': [
     makeLeg({
@@ -64,11 +75,6 @@ const legsByCampaign: Record<string, TradeJournal[]> = {
       trade_record_id: 'newest-record',
       pre_real_time: '2026-01-10T00:00:00.000Z',
       post_real_close_time: '2026-12-01T00:00:00.000Z',
-    }),
-    makeLeg({
-      id: 'newest-hedge',
-      leg_role: 'hedge_initial_a',
-      pre_entry_price: 80,
     }),
   ],
   'best-pnl': [
@@ -119,14 +125,17 @@ vi.mock('@/contexts/AuthContext', () => ({
 vi.mock('@/lib/journalApi', () => ({
   deleteCampaign: vi.fn(),
   getCampaignFullData: vi.fn(async (id: string) => ({
-    campaign: campaigns.find(campaign => campaign.id === id),
+    campaign: [...campaigns, deletedCampaign].find(campaign => campaign.id === id),
     legs: legsByCampaign[id] ?? [],
     tradeRecords: tradeHistory.filter(record => (legsByCampaign[id] ?? []).some(leg => leg.trade_record_id === record.id)),
     pendingOrders: [],
     reverseHedgeOrders: reverseOrdersByCampaign[id as keyof typeof reverseOrdersByCampaign] ?? [],
   })),
   listAllCampaigns: vi.fn(async () => campaigns),
+  listDeletedCampaigns: mockListDeletedCampaigns,
   listVisibleCampaigns: vi.fn(async () => []),
+  permanentlyDeleteCampaign: mockPermanentlyDeleteCampaign,
+  restoreCampaign: mockRestoreCampaign,
   updateCampaignImportance: vi.fn(async (_id: string, weight: number) => weight),
 }));
 
@@ -172,6 +181,7 @@ function makeCampaign(overrides: Partial<TradeCampaign>): TradeCampaign {
     notes: null,
     actual_evolution: [],
     deviation_notes: {},
+    deleted_at: overrides.deleted_at ?? null,
     created_at: overrides.created_at ?? now,
     updated_at: overrides.updated_at ?? now,
   };
@@ -242,6 +252,13 @@ describe('JournalCampaignsPage sorting', () => {
       '操作时间：2026-02-01 08:00',
       '操作时间：2026-01-10 08:00',
     ]);
+    expect(screen.getAllByTestId('campaign-payoff-ratio').map(node => node.textContent)).toEqual([
+      '盈亏比：100.00%（1.00）',
+      '盈亏比：50.00%（0.50）',
+      '盈亏比：-80.00%（-0.80）',
+      '盈亏比：—',
+    ]);
+    expect(screen.queryByText(/峰值浮盈/)).not.toBeInTheDocument();
     expect(screen.getByTestId('campaign-sort-time')).toHaveAttribute('aria-pressed', 'true');
     expect(screen.getByTestId('campaign-sort-time')).toHaveAttribute('data-sort-direction', 'desc');
     expect(screen.getByTestId('campaign-sort-time')).toHaveAttribute('aria-label', '操作时间，从大到小排序');
@@ -250,15 +267,16 @@ describe('JournalCampaignsPage sorting', () => {
       'aria-label',
       '盈利战役 3 场，亏损战役 1 场，胜率 75.00%',
     );
-    expect(screen.getByTestId('campaign-average-payoff-ratio')).toHaveTextContent('平均盈亏比（0.24）');
+    expect(screen.getByTestId('campaign-average-payoff-ratio')).toHaveTextContent('平均盈亏比（0.23）');
     expect(screen.getByTestId('campaign-average-payoff-ratio')).toHaveAttribute(
       'aria-label',
-      '平均盈亏比 0.24，共 4 场战役',
+      '平均盈亏比 0.23，共 3 场战役',
     );
-    expect(screen.getByTestId('campaign-expected-value')).toHaveTextContent('期望值（-0.07R）');
+    expect(screen.getByTestId('campaign-expected-value')).toHaveTextContent('期望值（-0.18R）');
     fireEvent.click(screen.getByTestId('campaign-expected-value'));
     expect(screen.getByText('E = P(赢) × b − (1 − P(赢))')).toBeInTheDocument();
-    expect(screen.getByText('= -0.07R')).toBeInTheDocument();
+    expect(screen.getByText('= -0.18R')).toBeInTheDocument();
+    expect(screen.getByText('P(赢) 仅统计设置了最大预期亏损的有效战役')).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: '互关可见' }));
     await waitFor(() => expect(screen.getByTestId('campaign-win-rate')).toHaveTextContent('胜率（—）'));
@@ -267,8 +285,8 @@ describe('JournalCampaignsPage sorting', () => {
     fireEvent.click(screen.getByRole('button', { name: '我的战役' }));
     await waitFor(() => expect(screen.getAllByTestId('campaign-card')).toHaveLength(4));
     expect(screen.getByTestId('campaign-win-rate')).toHaveTextContent('胜率（75.00%）');
-    expect(screen.getByTestId('campaign-average-payoff-ratio')).toHaveTextContent('平均盈亏比（0.24）');
-    expect(screen.getByTestId('campaign-expected-value')).toHaveTextContent('期望值（-0.07R）');
+    expect(screen.getByTestId('campaign-average-payoff-ratio')).toHaveTextContent('平均盈亏比（0.23）');
+    expect(screen.getByTestId('campaign-expected-value')).toHaveTextContent('期望值（-0.18R）');
 
     fireEvent.click(screen.getByTestId('campaign-sort-time'));
     expect(screen.getByTestId('campaign-sort-time')).toHaveAttribute('aria-pressed', 'true');
@@ -297,12 +315,12 @@ describe('JournalCampaignsPage sorting', () => {
     expect(screen.getByTestId('campaign-sort-captureRate')).toHaveAttribute('aria-pressed', 'true');
     expect(screen.getByTestId('campaign-sort-captureRate')).toHaveAttribute('data-sort-direction', 'desc');
     expect(screen.getByTestId('campaign-sort-captureRate')).toHaveAttribute('aria-label', '盈亏比，从大到小排序');
-    expect(cardOrder()).toEqual(['High Importance', 'Best PnL', 'Newest Operation', 'Late Close']);
+    expect(cardOrder()).toEqual(['High Importance', 'Best PnL', 'Late Close']);
 
     fireEvent.click(screen.getByTestId('campaign-sort-captureRate'));
     expect(screen.getByTestId('campaign-sort-captureRate')).toHaveAttribute('data-sort-direction', 'asc');
     expect(screen.getByTestId('campaign-sort-captureRate')).toHaveAttribute('aria-label', '盈亏比，从小到大排序');
-    expect(cardOrder()).toEqual(['Late Close', 'Newest Operation', 'Best PnL', 'High Importance']);
+    expect(cardOrder()).toEqual(['Late Close', 'Best PnL', 'High Importance']);
 
     fireEvent.click(screen.getByTestId('campaign-sort-alpha'));
     expect(screen.getByTestId('campaign-sort-alpha')).toHaveAttribute('aria-pressed', 'true');
@@ -314,5 +332,27 @@ describe('JournalCampaignsPage sorting', () => {
     expect(screen.getByTestId('campaign-sort-alpha')).toHaveAttribute('data-sort-direction', 'desc');
     expect(screen.getByTestId('campaign-sort-alpha')).toHaveAttribute('aria-label', '字母，Z 到 A排序');
     expect(cardOrder()).toEqual(['Newest Operation', 'Late Close', 'High Importance', 'Best PnL']);
+  });
+
+  it('opens the subtle deleted-campaign entry and restores a campaign', async () => {
+    mockListDeletedCampaigns.mockResolvedValue([deletedCampaign]);
+
+    render(
+      <MemoryRouter initialEntries={['/journal/campaigns']}>
+        <JournalCampaignsPage />
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => expect(screen.getAllByTestId('campaign-card')).toHaveLength(4));
+    await waitFor(() => expect(screen.getByTestId('deleted-campaigns-entry')).toHaveTextContent('1'));
+    fireEvent.click(screen.getByTestId('deleted-campaigns-entry'));
+
+    expect(await screen.findByText('Deleted Campaign')).toBeInTheDocument();
+    expect(screen.getByText('删除于 2026-07-17 11:00')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId('restore-campaign-deleted-campaign'));
+    await waitFor(() => expect(mockRestoreCampaign).toHaveBeenCalledWith('deleted-campaign'));
+    await waitFor(() => expect(screen.queryByTestId('deleted-campaign-row')).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.getAllByTestId('campaign-card')).toHaveLength(5));
   });
 });

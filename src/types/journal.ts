@@ -396,6 +396,8 @@ export interface TradeCampaign {
   actual_evolution: CampaignEvent[];
   /** 「SOP 偏离代价明细」手填备注，按行键存；存在战役行上，互关者可读、仅本人可改。 */
   deviation_notes: Record<string, CampaignDeviationNote>;
+  /** Soft-delete timestamp. Deleted campaigns stay recoverable until permanently removed. */
+  deleted_at?: string | null;
   created_at: string;
   updated_at: string;
 }

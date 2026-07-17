@@ -38,13 +38,14 @@ export interface CampaignPerformanceSummary {
   lossCount: number;
   payoffRatio: number | null;
   payoffRatioSampleCount: number;
+  expectedWinRate: number | null;
   expectedR: number | null;
 }
 
 export interface CampaignPerformanceSample {
   campaign: TradeCampaign;
   /** 单场战役盈亏比的数字形式，例如 150% 传入 1.5。 */
-  payoffRatio: number;
+  payoffRatio: number | null;
 }
 
 export interface ProfitUpsideAdvice {
@@ -204,7 +205,9 @@ function isResolvedCampaign(campaign: TradeCampaign): boolean {
  *   E = p·b − (1 − p)
  *
  * 胜率只使用已结束且非盈亏平衡的战役；平均盈亏比严格按当前列表中
- * 所有有效单场盈亏比做算术平均，亏损战役的负值原样参与。
+ * 有初始最大预期亏损、已有结束结果的单场盈亏比做算术平均，亏损战役
+ * 的负值原样参与。期望值使用同一批有效样本的胜率，避免无风险分母的
+ * 历史战役间接污染 E。
  */
 export function summarizeCampaignPerformance(samples: CampaignPerformanceSample[]): CampaignPerformanceSummary {
   const resolved = samples.map(sample => sample.campaign).filter(isResolvedCampaign);
@@ -212,14 +215,20 @@ export function summarizeCampaignPerformance(samples: CampaignPerformanceSample[
   const losses = resolved.filter(campaign => (campaign.final_realized_pnl ?? 0) < 0);
   const outcomeCount = wins.length + losses.length;
   const winRate = outcomeCount > 0 ? wins.length / outcomeCount : null;
-  const payoffRatios = samples
-    .map(sample => sample.payoffRatio)
-    .filter(value => Number.isFinite(value));
+  const payoffSamples = samples.filter(sample => (
+    isResolvedCampaign(sample.campaign)
+    && typeof sample.payoffRatio === 'number'
+    && Number.isFinite(sample.payoffRatio)
+  ));
+  const payoffRatios = payoffSamples.map(sample => sample.payoffRatio as number);
   const payoffRatio = payoffRatios.length > 0
     ? payoffRatios.reduce((sum, value) => sum + value, 0) / payoffRatios.length
     : null;
-  const expectedR = winRate != null && payoffRatio != null
-    ? winRate * payoffRatio - (1 - winRate)
+  const expectedOutcomes = payoffSamples.filter(sample => (sample.campaign.final_realized_pnl ?? 0) !== 0);
+  const expectedWins = expectedOutcomes.filter(sample => (sample.campaign.final_realized_pnl ?? 0) > 0);
+  const expectedWinRate = expectedOutcomes.length > 0 ? expectedWins.length / expectedOutcomes.length : null;
+  const expectedR = expectedWinRate != null && payoffRatio != null
+    ? expectedWinRate * payoffRatio - (1 - expectedWinRate)
     : null;
 
   return {
@@ -228,6 +237,7 @@ export function summarizeCampaignPerformance(samples: CampaignPerformanceSample[
     lossCount: losses.length,
     payoffRatio,
     payoffRatioSampleCount: payoffRatios.length,
+    expectedWinRate,
     expectedR,
   };
 }
