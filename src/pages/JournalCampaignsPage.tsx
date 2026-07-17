@@ -330,6 +330,9 @@ export default function JournalCampaignsPage() {
   );
   const winRateLabel = performance.winRate == null ? '—' : `${(performance.winRate * 100).toFixed(2)}%`;
   const payoffRatioLabel = performance.payoffRatio == null ? '—' : performance.payoffRatio.toFixed(2);
+  const payoffRatioSum = performance.payoffRatio == null
+    ? null
+    : performance.payoffRatio * performance.payoffRatioSampleCount;
   const expectedRLabel = performance.expectedR == null
     ? '—'
     : `${performance.expectedR >= 0 ? '+' : ''}${performance.expectedR.toFixed(2)}R`;
@@ -499,9 +502,8 @@ export default function JournalCampaignsPage() {
             {SORT_OPTIONS.map(option => {
               const active = sortState.mode === option.value;
               const direction = active ? sortState.direction : 'desc';
-              return (
+              const sortButton = (
                 <button
-                  key={option.value}
                   type="button"
                   aria-pressed={active}
                   aria-label={`${option.label}，${sortDirectionLabel(direction, option.value)}排序`}
@@ -523,22 +525,90 @@ export default function JournalCampaignsPage() {
                   )}
                 </button>
               );
+              if (option.value !== 'captureRate') {
+                return <span key={option.value}>{sortButton}</span>;
+              }
+              return (
+                <Popover key={option.value}>
+                  <PopoverTrigger asChild>{sortButton}</PopoverTrigger>
+                  <PopoverContent align="end" className="w-80 border-border bg-card p-3 text-[11px]">
+                    <div className="font-medium text-foreground">单场盈亏比计算公式</div>
+                    <div className="mt-2 rounded bg-muted/60 px-2 py-1.5 font-mono text-foreground">
+                      bᵢ = 已实现盈亏ᵢ ÷ 初始最大预期亏损ᵢ
+                    </div>
+                    <div className="mt-2 space-y-1 text-muted-foreground">
+                      <div>初始最大预期亏损：</div>
+                      <div className="rounded border border-border/60 px-2 py-1.5 font-mono leading-relaxed text-foreground/85">
+                        Lᵢ = 主力名义仓位 × max（|开仓价 − 对冲 A 价|，|开仓价 − 对冲 B 价|）÷ 开仓价
+                      </div>
+                      <div>排序使用带正负号的 bᵢ：盈利为正，亏损为负。</div>
+                      <div>没有有效初始最大预期亏损的战役不参与排序。</div>
+                    </div>
+                  </PopoverContent>
+                </Popover>
+              );
             })}
-            <span
-              data-testid="campaign-win-rate"
-              aria-label={`盈利战役 ${performance.winCount} 场，亏损战役 ${performance.lossCount} 场，胜率 ${winRateLabel}`}
-              title={`盈利战役 ${performance.winCount} 场 · 亏损战役 ${performance.lossCount} 场`}
-              className="ml-0.5 select-none border-l border-border/60 pl-2 text-foreground/60"
-            >
-              胜率（{winRateLabel}）
-            </span>
-            <span
-              data-testid="campaign-average-payoff-ratio"
-              aria-label={`平均盈亏比 ${payoffRatioLabel}，共 ${performance.payoffRatioSampleCount} 场战役`}
-              className="select-none text-foreground/60"
-            >
-              平均盈亏比（{payoffRatioLabel}）
-            </span>
+            <Popover>
+              <PopoverTrigger asChild>
+                <button
+                  type="button"
+                  data-testid="campaign-win-rate"
+                  aria-label={`盈利战役 ${performance.winCount} 场，亏损战役 ${performance.lossCount} 场，胜率 ${winRateLabel}`}
+                  title="点击查看胜率计算公式"
+                  className="ml-0.5 h-6 select-none border-b border-l border-dashed border-muted-foreground/30 border-l-border/60 pl-2 text-foreground/60 transition-colors hover:text-foreground/80"
+                >
+                  胜率（{winRateLabel}）
+                </button>
+              </PopoverTrigger>
+              <PopoverContent align="end" className="w-72 border-border bg-card p-3 text-[11px]">
+                <div className="font-medium text-foreground">胜率计算公式</div>
+                <div className="mt-2 rounded bg-muted/60 px-2 py-1.5 font-mono text-foreground">
+                  P(赢) = 盈利战役数 ÷（盈利战役数 + 亏损战役数）
+                </div>
+                {performance.winRate != null ? (
+                  <div className="mt-2 space-y-1 text-muted-foreground">
+                    <div className="font-mono">
+                      = {performance.winCount} ÷（{performance.winCount} + {performance.lossCount}）
+                    </div>
+                    <div className="font-mono text-foreground">= {winRateLabel}</div>
+                    <div>进行中、盈亏平衡和已删除战役不计入。</div>
+                  </div>
+                ) : (
+                  <div className="mt-2 text-muted-foreground">当前列表没有可计算胜率的已结束战役。</div>
+                )}
+              </PopoverContent>
+            </Popover>
+            <Popover>
+              <PopoverTrigger asChild>
+                <button
+                  type="button"
+                  data-testid="campaign-average-payoff-ratio"
+                  aria-label={`平均盈亏比 ${payoffRatioLabel}，共 ${performance.payoffRatioSampleCount} 场战役`}
+                  title="点击查看平均盈亏比计算公式"
+                  className="h-6 select-none border-b border-dashed border-muted-foreground/30 text-foreground/60 transition-colors hover:text-foreground/80"
+                >
+                  平均盈亏比（{payoffRatioLabel}）
+                </button>
+              </PopoverTrigger>
+              <PopoverContent align="end" className="w-72 border-border bg-card p-3 text-[11px]">
+                <div className="font-medium text-foreground">平均盈亏比计算公式</div>
+                <div className="mt-2 rounded bg-muted/60 px-2 py-1.5 font-mono text-foreground">
+                  b̄ = Σ 单场盈亏比 bᵢ ÷ 有效战役数 N
+                </div>
+                {performance.payoffRatio != null && payoffRatioSum != null ? (
+                  <div className="mt-2 space-y-1 text-muted-foreground">
+                    <div className="font-mono">
+                      = {payoffRatioSum.toFixed(2)} ÷ {performance.payoffRatioSampleCount}
+                    </div>
+                    <div className="font-mono text-foreground">= {payoffRatioLabel}</div>
+                    <div>亏损战役的负盈亏比原样参与求和。</div>
+                    <div>没有有效初始最大预期亏损的战役不计入 N。</div>
+                  </div>
+                ) : (
+                  <div className="mt-2 text-muted-foreground">当前列表没有带有效盈亏比的战役。</div>
+                )}
+              </PopoverContent>
+            </Popover>
             <Popover>
               <PopoverTrigger asChild>
                 <button

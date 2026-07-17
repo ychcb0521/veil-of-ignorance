@@ -625,9 +625,55 @@ export default function JournalCampaignDetailPage() {
     () => buildSelectedLegVerticalLines(legs, tradeRecords, selectedLegMarkerIds),
     [legs, tradeRecords, selectedLegMarkerIds],
   );
-  // 「补齐（紫色）」反事实对照层：可显示/隐藏（默认显示）；showCfLegend 控制标记说明展开。
-  const [showCfOverlay, setShowCfOverlay] = useState(true);
+  // 「补齐（紫色）」反事实对照层按分支独立显示/隐藏，避免隐藏 hedge_b 后
+  // 切换到其他 What-if 分支时也被连带隐藏。
+  const [hiddenCounterfactualIds, setHiddenCounterfactualIds] = useState<string[]>([]);
   const [showCfLegend, setShowCfLegend] = useState(false);
+  const hiddenCounterfactualStorageKey = useMemo(
+    () => (campaign ? `campaign:${campaign.id}:hidden-counterfactual-overlays` : null),
+    [campaign],
+  );
+  useEffect(() => {
+    if (!hiddenCounterfactualStorageKey) {
+      setHiddenCounterfactualIds([]);
+      return;
+    }
+    try {
+      const raw = window.localStorage.getItem(hiddenCounterfactualStorageKey);
+      const parsed = raw ? JSON.parse(raw) : [];
+      setHiddenCounterfactualIds(Array.isArray(parsed) ? parsed.filter(item => typeof item === 'string') : []);
+    } catch {
+      setHiddenCounterfactualIds([]);
+    }
+  }, [hiddenCounterfactualStorageKey]);
+  const persistHiddenCounterfactualIds = useCallback((next: string[]) => {
+    if (!hiddenCounterfactualStorageKey) return;
+    try {
+      if (next.length === 0) {
+        window.localStorage.removeItem(hiddenCounterfactualStorageKey);
+      } else {
+        window.localStorage.setItem(hiddenCounterfactualStorageKey, JSON.stringify(next));
+      }
+    } catch {
+      // 本地显示偏好失败不影响反事实战役数据。
+    }
+  }, [hiddenCounterfactualStorageKey]);
+  const hiddenCounterfactualSet = useMemo(
+    () => new Set(hiddenCounterfactualIds),
+    [hiddenCounterfactualIds],
+  );
+  const showSelectedCounterfactual = selectedCounterfactual != null
+    && !hiddenCounterfactualSet.has(selectedCounterfactual.id);
+  const toggleSelectedCounterfactual = useCallback(() => {
+    if (!selectedCounterfactual) return;
+    setHiddenCounterfactualIds(prev => {
+      const next = prev.includes(selectedCounterfactual.id)
+        ? prev.filter(item => item !== selectedCounterfactual.id)
+        : [...prev, selectedCounterfactual.id];
+      persistHiddenCounterfactualIds(next);
+      return next;
+    });
+  }, [persistHiddenCounterfactualIds, selectedCounterfactual]);
   // 「委托空单（黄色）」挂单层：只画开仓性质的 SHORT 委托；止盈/止损平仓委托不进入这里。
   const [showOrderInfo, setShowOrderInfo] = useState(true);
   const [showReverseOrderManager, setShowReverseOrderManager] = useState(false);
@@ -697,20 +743,20 @@ export default function JournalCampaignDetailPage() {
     return buildCampaignReverseOrderPriceLines(visibleReverseHedgeOrders, tradeRecords, fallbackEnd);
   }, [campaign, visibleReverseHedgeOrders, tradeRecords, klines]);
   const displayMarkers = useMemo(
-    () => [...chart.markers, ...(showCfOverlay ? counterfactualChart.markers : [])],
-    [chart.markers, counterfactualChart.markers, showCfOverlay],
+    () => [...chart.markers, ...(showSelectedCounterfactual ? counterfactualChart.markers : [])],
+    [chart.markers, counterfactualChart.markers, showSelectedCounterfactual],
   );
   const displayPriceLines = useMemo(
     () => [
       ...chart.timeBoundPriceLines,
-      ...(showCfOverlay ? counterfactualChart.timeBoundPriceLines : []),
+      ...(showSelectedCounterfactual ? counterfactualChart.timeBoundPriceLines : []),
       ...(showOrderInfo ? orderInfoPriceLines : []),
     ],
-    [chart.timeBoundPriceLines, counterfactualChart.timeBoundPriceLines, showCfOverlay, orderInfoPriceLines, showOrderInfo],
+    [chart.timeBoundPriceLines, counterfactualChart.timeBoundPriceLines, showSelectedCounterfactual, orderInfoPriceLines, showOrderInfo],
   );
   const displayVerticalLines = useMemo(
-    () => [...chart.verticalLines, ...(showCfOverlay ? counterfactualChart.verticalLines : []), ...selectedLegVerticalLines],
-    [chart.verticalLines, counterfactualChart.verticalLines, selectedLegVerticalLines, showCfOverlay],
+    () => [...chart.verticalLines, ...(showSelectedCounterfactual ? counterfactualChart.verticalLines : []), ...selectedLegVerticalLines],
+    [chart.verticalLines, counterfactualChart.verticalLines, selectedLegVerticalLines, showSelectedCounterfactual],
   );
   const canSuggestEnd = useMemo(
     () => (campaign ? shouldSuggestCampaignEnd(campaign, legs, tradeRecords, pendingOrders, getEffectiveTime(campaign.symbol)) : false),
@@ -1226,18 +1272,19 @@ export default function JournalCampaignDetailPage() {
                 <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
                   <button
                     type="button"
-                    onClick={() => setShowCfOverlay(v => !v)}
-                    title={showCfOverlay ? '隐藏补齐对照（紫色）' : '显示补齐对照（紫色）'}
-                    aria-label={showCfOverlay ? '隐藏补齐对照' : '显示补齐对照'}
-                    className="inline-flex items-center text-muted-foreground/50 hover:text-foreground transition-colors"
+                    onClick={toggleSelectedCounterfactual}
+                    title={showSelectedCounterfactual ? `隐藏${selectedCounterfactual.label}` : `显示${selectedCounterfactual.label}`}
+                    aria-label={showSelectedCounterfactual ? `隐藏${selectedCounterfactual.label}` : `显示${selectedCounterfactual.label}`}
+                    aria-pressed={showSelectedCounterfactual}
+                    className="inline-flex items-center gap-1.5 text-muted-foreground/60 hover:text-foreground transition-colors"
                   >
-                    {showCfOverlay ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
+                    {showSelectedCounterfactual ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
+                    {showSelectedCounterfactual ? (
+                      <span>实际轨迹（标准色）vs <span className="text-[#B080FF]">{selectedCounterfactual.label}</span>（紫色）</span>
+                    ) : (
+                      <span>实际轨迹（标准色）· <span className="text-[#B080FF]/70">{selectedCounterfactual.label}</span> 已隐藏</span>
+                    )}
                   </button>
-                  {showCfOverlay ? (
-                    <span>实际轨迹（标准色）vs <span className="text-[#B080FF]">{selectedCounterfactual.label}</span>（紫色）</span>
-                  ) : (
-                    <span>实际轨迹（标准色）· <span className="text-[#B080FF]/70">{selectedCounterfactual.label}</span> 已隐藏</span>
-                  )}
                   <button
                     type="button"
                     onClick={() => setShowCfLegend(v => !v)}

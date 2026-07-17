@@ -267,11 +267,21 @@ describe('JournalCampaignsPage sorting', () => {
       'aria-label',
       '盈利战役 3 场，亏损战役 1 场，胜率 75.00%',
     );
+    fireEvent.click(screen.getByTestId('campaign-win-rate'));
+    expect(screen.getByText('胜率计算公式')).toBeInTheDocument();
+    expect(screen.getByText('P(赢) = 盈利战役数 ÷（盈利战役数 + 亏损战役数）')).toBeInTheDocument();
+    expect(screen.getByText('= 3 ÷（3 + 1）')).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('campaign-win-rate'));
     expect(screen.getByTestId('campaign-average-payoff-ratio')).toHaveTextContent('平均盈亏比（0.23）');
     expect(screen.getByTestId('campaign-average-payoff-ratio')).toHaveAttribute(
       'aria-label',
       '平均盈亏比 0.23，共 3 场战役',
     );
+    fireEvent.click(screen.getByTestId('campaign-average-payoff-ratio'));
+    expect(screen.getByText('平均盈亏比计算公式')).toBeInTheDocument();
+    expect(screen.getByText('b̄ = Σ 单场盈亏比 bᵢ ÷ 有效战役数 N')).toBeInTheDocument();
+    expect(screen.getByText('= 0.70 ÷ 3')).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('campaign-average-payoff-ratio'));
     expect(screen.getByTestId('campaign-expected-value')).toHaveTextContent('期望值（-0.18R）');
     fireEvent.click(screen.getByTestId('campaign-expected-value'));
     expect(screen.getByText('E = P(赢) × b − (1 − P(赢))')).toBeInTheDocument();
@@ -315,6 +325,8 @@ describe('JournalCampaignsPage sorting', () => {
     expect(screen.getByTestId('campaign-sort-captureRate')).toHaveAttribute('aria-pressed', 'true');
     expect(screen.getByTestId('campaign-sort-captureRate')).toHaveAttribute('data-sort-direction', 'desc');
     expect(screen.getByTestId('campaign-sort-captureRate')).toHaveAttribute('aria-label', '盈亏比，从大到小排序');
+    expect(screen.getByText('单场盈亏比计算公式')).toBeInTheDocument();
+    expect(screen.getByText('bᵢ = 已实现盈亏ᵢ ÷ 初始最大预期亏损ᵢ')).toBeInTheDocument();
     expect(cardOrder()).toEqual(['High Importance', 'Best PnL', 'Late Close']);
 
     fireEvent.click(screen.getByTestId('campaign-sort-captureRate'));
