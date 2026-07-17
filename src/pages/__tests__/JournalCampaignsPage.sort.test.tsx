@@ -332,7 +332,16 @@ describe('JournalCampaignsPage sorting', () => {
     fireEvent.click(screen.getByTestId('campaign-sort-captureRate'));
     expect(screen.getByTestId('campaign-sort-captureRate')).toHaveAttribute('data-sort-direction', 'asc');
     expect(screen.getByTestId('campaign-sort-captureRate')).toHaveAttribute('aria-label', '盈亏比，从小到大排序');
+    expect(screen.getByText('单场盈亏比计算公式')).toBeInTheDocument();
     expect(cardOrder()).toEqual(['Late Close', 'Best PnL', 'High Importance']);
+
+    fireEvent.click(screen.getByTestId('campaign-win-rate'));
+    expect(screen.queryByText('单场盈亏比计算公式')).not.toBeInTheDocument();
+    expect(screen.getByText('胜率计算公式')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId('campaign-average-payoff-ratio'));
+    expect(screen.queryByText('胜率计算公式')).not.toBeInTheDocument();
+    expect(screen.getByText('平均盈亏比计算公式')).toBeInTheDocument();
 
     fireEvent.click(screen.getByTestId('campaign-sort-alpha'));
     expect(screen.getByTestId('campaign-sort-alpha')).toHaveAttribute('aria-pressed', 'true');

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type MouseEvent } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { ArchiveRestore, ArrowDown, ArrowUp, FolderPlus, Layers, RotateCcw, Star, Trash2 } from 'lucide-react';
+import { ArchiveRestore, ArrowDown, ArrowUp, FolderPlus, Layers, RotateCcw, Sigma, Star, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { BackButton } from '@/components/journal/BackButton';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -42,6 +42,8 @@ type CampaignSortState = {
   mode: CampaignSortMode;
   direction: CampaignSortDirection;
 };
+
+type CampaignFormulaPopover = 'captureRate' | 'winRate' | 'averagePayoffRatio' | 'expectedValue';
 
 const SORT_OPTIONS: { value: CampaignSortMode; label: string }[] = [
   { value: 'importance', label: '重要性' },
@@ -228,6 +230,7 @@ export default function JournalCampaignsPage() {
   const [rows, setRows] = useState<CampaignCardData[]>([]);
   const [busyCampaignId, setBusyCampaignId] = useState<string | null>(null);
   const [sortState, setSortState] = useState<CampaignSortState>({ mode: 'time', direction: 'desc' });
+  const [formulaPopover, setFormulaPopover] = useState<CampaignFormulaPopover | null>(null);
   const [deletedOpen, setDeletedOpen] = useState(false);
   const [deletedLoading, setDeletedLoading] = useState(false);
   const [deletedCampaigns, setDeletedCampaigns] = useState<TradeCampaign[]>([]);
@@ -343,6 +346,24 @@ export default function JournalCampaignsPage() {
         ? { mode, direction: current.direction === 'desc' ? 'asc' : 'desc' }
         : { mode, direction: mode === 'alpha' ? 'asc' : 'desc' }
     ));
+  };
+
+  const openFormulaPopover = (
+    event: MouseEvent<HTMLButtonElement>,
+    formula: CampaignFormulaPopover,
+  ) => {
+    event.preventDefault();
+    setFormulaPopover(formula);
+  };
+
+  const handleFormulaPopoverChange = (
+    formula: CampaignFormulaPopover,
+    open: boolean,
+  ) => {
+    setFormulaPopover(current => {
+      if (open) return formula;
+      return current === formula ? null : current;
+    });
   };
 
   const handleDeleteCampaign = async (
@@ -510,7 +531,12 @@ export default function JournalCampaignsPage() {
                   title={`按${option.label}${sortDirectionLabel(direction, option.value)}排序${active ? '；再次点击切换方向' : ''}${option.value === 'captureRate' ? '；未设置最大预期亏损的战役不显示' : ''}`}
                   data-sort-direction={active ? direction : undefined}
                   data-testid={`campaign-sort-${option.value}`}
-                  onClick={() => handleSortChange(option.value)}
+                  onClick={(event) => {
+                    handleSortChange(option.value);
+                    if (option.value === 'captureRate') {
+                      openFormulaPopover(event, 'captureRate');
+                    }
+                  }}
                   className={`inline-flex h-6 items-center gap-0.5 rounded-sm border-b px-0.5 transition-colors ${
                     active
                       ? 'border-muted-foreground/30 text-foreground/70'
@@ -518,6 +544,9 @@ export default function JournalCampaignsPage() {
                   }`}
                 >
                   <span>{option.label}</span>
+                  {option.value === 'captureRate' && (
+                    <Sigma aria-hidden="true" className="h-2.5 w-2.5 opacity-35" />
+                  )}
                   {active && (
                     direction === 'desc'
                       ? <ArrowDown className="h-3 w-3 opacity-45" />
@@ -529,7 +558,11 @@ export default function JournalCampaignsPage() {
                 return <span key={option.value}>{sortButton}</span>;
               }
               return (
-                <Popover key={option.value}>
+                <Popover
+                  key={option.value}
+                  open={formulaPopover === 'captureRate'}
+                  onOpenChange={open => handleFormulaPopoverChange('captureRate', open)}
+                >
                   <PopoverTrigger asChild>{sortButton}</PopoverTrigger>
                   <PopoverContent align="end" className="w-80 border-border bg-card p-3 text-[11px]">
                     <div className="font-medium text-foreground">单场盈亏比计算公式</div>
@@ -548,16 +581,21 @@ export default function JournalCampaignsPage() {
                 </Popover>
               );
             })}
-            <Popover>
+            <Popover
+              open={formulaPopover === 'winRate'}
+              onOpenChange={open => handleFormulaPopoverChange('winRate', open)}
+            >
               <PopoverTrigger asChild>
                 <button
                   type="button"
                   data-testid="campaign-win-rate"
                   aria-label={`盈利战役 ${performance.winCount} 场，亏损战役 ${performance.lossCount} 场，胜率 ${winRateLabel}`}
                   title="点击查看胜率计算公式"
-                  className="ml-0.5 h-6 select-none border-b border-l border-dashed border-muted-foreground/30 border-l-border/60 pl-2 text-foreground/60 transition-colors hover:text-foreground/80"
+                  onClick={event => openFormulaPopover(event, 'winRate')}
+                  className="ml-0.5 inline-flex h-6 select-none items-center gap-0.5 border-b border-l border-dashed border-muted-foreground/30 border-l-border/60 pl-2 text-foreground/60 transition-colors hover:text-foreground/80"
                 >
                   胜率（{winRateLabel}）
+                  <Sigma aria-hidden="true" className="h-2.5 w-2.5 opacity-35" />
                 </button>
               </PopoverTrigger>
               <PopoverContent align="end" className="w-72 border-border bg-card p-3 text-[11px]">
@@ -578,16 +616,21 @@ export default function JournalCampaignsPage() {
                 )}
               </PopoverContent>
             </Popover>
-            <Popover>
+            <Popover
+              open={formulaPopover === 'averagePayoffRatio'}
+              onOpenChange={open => handleFormulaPopoverChange('averagePayoffRatio', open)}
+            >
               <PopoverTrigger asChild>
                 <button
                   type="button"
                   data-testid="campaign-average-payoff-ratio"
                   aria-label={`平均盈亏比 ${payoffRatioLabel}，共 ${performance.payoffRatioSampleCount} 场战役`}
                   title="点击查看平均盈亏比计算公式"
-                  className="h-6 select-none border-b border-dashed border-muted-foreground/30 text-foreground/60 transition-colors hover:text-foreground/80"
+                  onClick={event => openFormulaPopover(event, 'averagePayoffRatio')}
+                  className="inline-flex h-6 select-none items-center gap-0.5 border-b border-dashed border-muted-foreground/30 text-foreground/60 transition-colors hover:text-foreground/80"
                 >
                   平均盈亏比（{payoffRatioLabel}）
+                  <Sigma aria-hidden="true" className="h-2.5 w-2.5 opacity-35" />
                 </button>
               </PopoverTrigger>
               <PopoverContent align="end" className="w-72 border-border bg-card p-3 text-[11px]">
@@ -609,13 +652,17 @@ export default function JournalCampaignsPage() {
                 )}
               </PopoverContent>
             </Popover>
-            <Popover>
+            <Popover
+              open={formulaPopover === 'expectedValue'}
+              onOpenChange={open => handleFormulaPopoverChange('expectedValue', open)}
+            >
               <PopoverTrigger asChild>
                 <button
                   type="button"
                   data-testid="campaign-expected-value"
                   className="h-6 rounded-sm border-b border-dashed border-muted-foreground/30 px-0.5 text-foreground/60 transition-colors hover:text-foreground/80"
                   aria-label={`期望值 ${expectedRLabel}，点击查看计算公式`}
+                  onClick={event => openFormulaPopover(event, 'expectedValue')}
                 >
                   期望值（{expectedRLabel}）
                 </button>
