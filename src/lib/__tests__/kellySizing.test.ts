@@ -118,7 +118,7 @@ describe('estimateCampaignSizingStats', () => {
 });
 
 describe('summarizeCampaignPerformance', () => {
-  it('computes live win rate, average payoff ratio, and expected R without a sample threshold', () => {
+  it('uses only campaigns with valid expected-loss denominators for every live metric', () => {
     const samples = [
       { campaign: campaign({ final_realized_pnl: 10, status: 'closed_profit' }), payoffRatio: 1 },
       { campaign: campaign({ final_realized_pnl: 50, status: 'closed_profit' }), payoffRatio: 0.25 },
@@ -128,13 +128,30 @@ describe('summarizeCampaignPerformance', () => {
     ];
 
     const result = summarizeCampaignPerformance(samples);
-    expect(result.winRate).toBeCloseTo(0.8, 8);
+    expect(result.winRate).toBeCloseTo(0.75, 8);
     expect(result.payoffRatio).toBeCloseTo(0.2375, 8);
     expect(result.payoffRatioSampleCount).toBe(4);
     expect(result.expectedR).toBeCloseTo(-0.071875, 8);
     expect(result.expectedWinRate).toBeCloseTo(0.75, 8);
-    expect(result.winCount).toBe(4);
+    expect(result.winCount).toBe(3);
     expect(result.lossCount).toBe(1);
+  });
+
+  it('excludes invalid-denominator wins and losses from every performance metric', () => {
+    const result = summarizeCampaignPerformance([
+      { campaign: campaign({ final_realized_pnl: 100, status: 'closed_profit' }), payoffRatio: 2 },
+      { campaign: campaign({ final_realized_pnl: -50, status: 'closed_loss' }), payoffRatio: -1 },
+      { campaign: campaign({ final_realized_pnl: 900, status: 'closed_profit' }), payoffRatio: null },
+      { campaign: campaign({ final_realized_pnl: -800, status: 'closed_loss' }), payoffRatio: null },
+    ]);
+
+    expect(result.winRate).toBeCloseTo(0.5, 8);
+    expect(result.winCount).toBe(1);
+    expect(result.lossCount).toBe(1);
+    expect(result.payoffRatio).toBeCloseTo(0.5, 8);
+    expect(result.payoffRatioSampleCount).toBe(2);
+    expect(result.expectedWinRate).toBeCloseTo(0.5, 8);
+    expect(result.expectedR).toBeCloseTo(-0.25, 8);
   });
 
   it('excludes unresolved campaigns even when they carry a provisional ratio', () => {

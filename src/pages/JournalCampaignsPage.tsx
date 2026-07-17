@@ -609,7 +609,8 @@ export default function JournalCampaignsPage() {
                       = {performance.winCount} ÷（{performance.winCount} + {performance.lossCount}）
                     </div>
                     <div className="font-mono text-foreground">= {winRateLabel}</div>
-                    <div>进行中、盈亏平衡和已删除战役不计入。</div>
+                    <div>仅统计存在有效初始最大预期亏损的已结束战役。</div>
+                    <div>进行中、盈亏平衡、已删除及分母无效的战役不计入胜负。</div>
                   </div>
                 ) : (
                   <div className="mt-2 text-muted-foreground">当前列表没有可计算胜率的已结束战役。</div>

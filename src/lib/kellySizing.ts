@@ -204,29 +204,26 @@ function isResolvedCampaign(campaign: TradeCampaign): boolean {
  *   b = Σ 单场战役盈亏比 / 有有效盈亏比的战役数
  *   E = p·b − (1 − p)
  *
- * 胜率只使用已结束且非盈亏平衡的战役；平均盈亏比严格按当前列表中
- * 有初始最大预期亏损、已有结束结果的单场盈亏比做算术平均，亏损战役
- * 的负值原样参与。期望值使用同一批有效样本的胜率，避免无风险分母的
- * 历史战役间接污染 E。
+ * 所有指标先使用同一个有效战役集合：已结束，并且存在由初始最大预期
+ * 亏损计算出的有限盈亏比。胜率再从其中排除盈亏平衡战役；平均盈亏比
+ * 对有效集合做算术平均，亏损战役的负值原样参与。这样没有风险分母的
+ * 历史战役不会进入胜率、平均盈亏比或期望值。
  */
 export function summarizeCampaignPerformance(samples: CampaignPerformanceSample[]): CampaignPerformanceSummary {
-  const resolved = samples.map(sample => sample.campaign).filter(isResolvedCampaign);
-  const wins = resolved.filter(campaign => (campaign.final_realized_pnl ?? 0) > 0);
-  const losses = resolved.filter(campaign => (campaign.final_realized_pnl ?? 0) < 0);
-  const outcomeCount = wins.length + losses.length;
-  const winRate = outcomeCount > 0 ? wins.length / outcomeCount : null;
   const payoffSamples = samples.filter(sample => (
     isResolvedCampaign(sample.campaign)
     && typeof sample.payoffRatio === 'number'
     && Number.isFinite(sample.payoffRatio)
   ));
+  const outcomeSamples = payoffSamples.filter(sample => (sample.campaign.final_realized_pnl ?? 0) !== 0);
+  const wins = outcomeSamples.filter(sample => (sample.campaign.final_realized_pnl ?? 0) > 0);
+  const losses = outcomeSamples.filter(sample => (sample.campaign.final_realized_pnl ?? 0) < 0);
+  const winRate = outcomeSamples.length > 0 ? wins.length / outcomeSamples.length : null;
   const payoffRatios = payoffSamples.map(sample => sample.payoffRatio as number);
   const payoffRatio = payoffRatios.length > 0
     ? payoffRatios.reduce((sum, value) => sum + value, 0) / payoffRatios.length
     : null;
-  const expectedOutcomes = payoffSamples.filter(sample => (sample.campaign.final_realized_pnl ?? 0) !== 0);
-  const expectedWins = expectedOutcomes.filter(sample => (sample.campaign.final_realized_pnl ?? 0) > 0);
-  const expectedWinRate = expectedOutcomes.length > 0 ? expectedWins.length / expectedOutcomes.length : null;
+  const expectedWinRate = winRate;
   const expectedR = expectedWinRate != null && payoffRatio != null
     ? expectedWinRate * payoffRatio - (1 - expectedWinRate)
     : null;
