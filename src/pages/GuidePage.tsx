@@ -1167,7 +1167,7 @@ export default function GuidePage() {
 
             <section id="s4-3" className="scroll-mt-20">
               <SubTitle>4.3 交易战役</SubTitle>
-              <P>战役是比单笔交易更高一层的复盘单位。一次战役由同一标的、同一主方向、明确开始结束、多个 leg 组成。</P>
+              <P>战役是比单笔交易更高一层的复盘单位。一次战役由同一标的、同一主方向、明确开始结束、多个 leg 组成。每场战役都会生成一个全局唯一的<strong>战役编号</strong>；编号与生成过程绑定，不会因标题、备注或规则文字被修改而改变。</P>
               <div className="overflow-x-auto">
                 <table className="w-full text-[11px] my-3 border border-border rounded overflow-hidden">
                   <thead className="bg-muted/50">
@@ -1186,7 +1186,29 @@ export default function GuidePage() {
               </div>
               <P>归类历史交易时，先输入或选择标的，再从该币种所有时间段的仓位历史记录中勾选一组相关交易。被选中的记录共同构成一次交易战役。</P>
               <P>实时战役与历史归类战役必须隔离。实时战役在开仓时归属；历史归类只加入历史战役，不把回填数据混进实时训练口径。</P>
-              <P>战役列表顶部有一组很轻的排序入口，默认按<strong>真实操作时间</strong>排序；也可以按重要性、盈亏比、字母顺序切换，并支持从大到小 / 从小到大双向排序。排序项旁实时显示当前列表的<strong>胜率、平均盈亏比与期望值</strong>：胜率 = 盈利战役 ÷（盈利战役 + 亏损战役）；平均盈亏比是所有<strong>已设置初始最大预期亏损且已有结束结果</strong>的单场盈亏比（百分数先还原为数字，亏损保留负号）的算术平均，即盈亏比之和 ÷ 有效战役数；期望值使用同一批有效战役的胜率计算。未设置初始最大预期亏损的历史战役不进入平均盈亏比、期望值和盈亏比排序。点击期望值可以查看代入后的公式。这里的操作时间指客观发生时间，不是时间机器里的模拟时间。</P>
+              <P>列表中的每场战役直接显示战役编号、已实现盈亏、盈亏比和真实操作时间。顶部排序默认按<strong>真实操作时间</strong>，也可以按重要性、盈亏比或字母顺序切换；再次点击同一排序项，可在从大到小 / 从小到大之间切换。这里的操作时间是客观发生时间，不是无知之幕时间机器里的模拟时间。</P>
+              <P><strong>战役级统计统一使用同一个有效样本口径：</strong>战役已经结束，并且存在大于 0 的初始最大预期亏损。计算如下：</P>
+              <div className="overflow-x-auto">
+                <table className="w-full text-[11px] my-3 border border-border rounded overflow-hidden">
+                  <thead className="bg-muted/50">
+                    <tr>
+                      <th className="text-left px-3 py-2 font-medium text-foreground text-[10px]">指标</th>
+                      <th className="text-left px-3 py-2 font-medium text-foreground text-[10px]">公式</th>
+                      <th className="text-left px-3 py-2 font-medium text-foreground text-[10px]">有效口径</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr><td className="px-3 py-2 border-t border-border">初始最大预期亏损 Lᵢ</td><td className="px-3 py-2 border-t border-border">主力名义仓位 × max（|开仓价 − 初始对冲 A 价|，|开仓价 − 初始对冲 B 价|）÷ 开仓价</td><td className="px-3 py-2 border-t border-border">至少存在一个有效的初始对冲 A / B 价格；取可用价格中的最大距离</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border">单场盈亏比 bᵢ</td><td className="px-3 py-2 border-t border-border">已实现盈亏ᵢ ÷ Lᵢ</td><td className="px-3 py-2 border-t border-border">盈利为正，亏损为负；页面同时显示百分数和括号内数字</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border">胜率 P(赢)</td><td className="px-3 py-2 border-t border-border">有效盈利战役数 ÷（有效盈利战役数 + 有效亏损战役数）</td><td className="px-3 py-2 border-t border-border">只统计有效且非盈亏平衡的已结束战役</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border">平均盈亏比 b̄</td><td className="px-3 py-2 border-t border-border">Σ 单场盈亏比 bᵢ ÷ 有效战役数 N</td><td className="px-3 py-2 border-t border-border">亏损的负盈亏比原样参与求和</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border">期望值 E</td><td className="px-3 py-2 border-t border-border">P(赢) × b̄ −（1 − P(赢)）</td><td className="px-3 py-2 border-t border-border">胜率与平均盈亏比来自同一批有效战役</td></tr>
+                  </tbody>
+                </table>
+              </div>
+              <RedHighlight>
+                没有初始最大预期亏损，就没有可用分母，因此该战役的盈亏比显示「—」。它不会进入盈亏比排序，也不会进入胜率、平均盈亏比和期望值。点击列表顶部的<strong>盈亏比、胜率、平均盈亏比或期望值</strong>，可以查看公式及当前列表数据的代入过程。
+              </RedHighlight>
               <P>删除战役采用可恢复模式：战役会从正常列表、统计和互关可见范围中移出，但 Legs 与交易记录不会随之消失。列表标题栏右侧的低对比度回收图标可打开“已删除战役”，从中恢复原战役；只有在回收区再次选择“永久删除”时，战役归档才会真正移除。</P>
               <P>互关账户可以打开彼此的战役详情，并留下带可信度权重的留言评价。外部校验只评价当时结构、证伪与执行是否自洽，不用后续走势倒推对错。</P>
 
@@ -1196,8 +1218,10 @@ export default function GuidePage() {
               </P>
               <ul className="list-disc pl-6 text-[14px] text-foreground/90 space-y-1">
                 <li><strong>Legs 列表每条腿都标明开仓/平仓时间、开仓价/平仓价、仓位与状态</strong>；还没平仓的腿，平仓时间与平仓价显示「—」。每条腿还单独列出<strong>该腿期间挂的反向对冲空单</strong>（委托价 / 委托时间 / 取消时间）。</li>
-                <li><strong>K 线前后区间自动囊括</strong> Legs 列表里最早的开单与最晚的平单，保证每条腿的进出场都落在可视范围内，不会被裁到屏幕外。</li>
+                <li><strong>K 线默认按三段式窗口自适应</strong>：战役内容占中间 1/3，开始前与结束后各补一段同等长度的行情。系统会按总跨度自动选择 1m / 5m / 15m / 1h 总览周期，因此已经存在的长战役也能完整看到前因、战役过程和后续走势。</li>
+                <li>内容区间会囊括 Legs、委托空单和当前反事实分支的最早 / 最晚事件，保证所有开平仓与挂单信息都落在默认可视范围内。</li>
                 <li>时间轴上用<strong>彩色竖线</strong>标注每条腿的开单 / 平单时刻——颜色区分方向、线型区分动作（见下表）。</li>
+                <li>主力开始只做一个简洁标记与较醒目的竖线，不额外绘制主力水平线；即使战役跨度很长，这条开始线也会保留。</li>
                 <li>同一时间出现多个事件时，标注会在垂直方向错开并对齐，且会跟随对应 K 线一起移动；缩放或拖动画面时不会丢失事件信息。</li>
               </ul>
               <div className="overflow-x-auto">
@@ -1221,14 +1245,22 @@ export default function GuidePage() {
                 竖线只管"什么方向、什么时候进出"，价格线与三角标记管"在什么价位"。三者叠在同一张图上，整条战役的开、平、对冲、加仓节奏一眼看清。
               </Highlight>
 
+              <SubTitle>战役详情页：盈亏概览与高清 PNG</SubTitle>
+              <P>详情页的<strong>盈亏概览</strong>统一展示已实现盈亏、峰值浮盈、最大回撤、初始最大预期亏损和盈亏比。这里的盈亏比使用上方同一公式，不是用峰值浮盈替代实际结果。</P>
+              <ul className="list-disc pl-6 text-[14px] text-foreground/90 space-y-1">
+                <li>点击 Legs 列表右上角的 <strong>PNG</strong>，会把<strong>战役原数据、盈亏概览、当前已经拖动 / 缩放好的 K 线视图，以及完整 Legs 列表</strong>导出到同一张高清图片。</li>
+                <li>Legs 导出不受页面滚动区域限制；未滚动出来的腿、时间、价格、仓位、状态与反向挂单也会完整展开。图片高度随内容自动增长。</li>
+                <li>文件名采用「标的 + 战役日期 + profit / loss + 战役编号」，例如 <strong>BTCDOMUSDT 2025-07-24 loss 编号 C-…</strong>，便于批量交给 AI 分析时保持唯一对应。</li>
+              </ul>
+
               <SubTitle>战役详情页：盘面叠加层（可显示/隐藏）</SubTitle>
               <P>盘面下方有几个<strong>很隐形的小图标</strong>，用来按需开关叠加层，默认显示、可一键隐藏，避免信息互相打架：</P>
               <ul className="list-disc pl-6 text-[14px] text-foreground/90 space-y-1">
                 <li>
-                  <span style={{ color: '#F0B90B' }}>黄色「委托空单」层</span>（眼睛图标）：只呈现这段战役里<strong>真正用于对冲的委托空单</strong>，不包含维多的多单，也不包含委托止盈挂单。委托价画成水平线，委托 / 撤单都有对应竖线；<strong>虚线 + ×</strong> = 已撤销 / 仍挂单中，<strong>实线</strong> = 已触发成交。触发后的线段只延续到这条对冲被手动拆掉的时间点；如果期间没有手动拆掉，就延续到战役平仓时间。原始盘面与反事实编辑器盘面共用同一套数据、同一个开关。
+                  <span style={{ color: '#F0B90B' }}>黄色「委托空单」层</span>（眼睛图标）：只呈现这段战役里<strong>真正用于对冲的委托空单</strong>，不包含维多的多单，也不包含委托止盈挂单。挂单从委托时间开始画虚线；撤单时以 <strong>×</strong> 结束，仍挂单时虚线延续。若被触发，触发前保持虚线，触发后改为实线；实线只延续到这条对冲被手动拆掉的时间点，期间没有手动拆掉时才延续到战役平仓时间。每条委托空单都可单独隐藏，并可从「恢复」入口重新显示；原始盘面与反事实编辑器共用同一套委托数据。
                 </li>
                 <li>
-                  <span style={{ color: '#B080FF' }}>紫色「补齐 / Pure SOP」对照层</span>（眼睛图标）：把所选反事实分支按标准 SOP 推演出的虚拟轨迹叠在真实盘面上；旁边的 <strong>ⓘ</strong> 图标展开标记说明（CF-M 主力、CF-A1~A6 加仓、CF-Ha/CF-Hb 初始对冲、CF-Hr 滚动对冲、CF-TP 镜像止盈、CF-Exit 平仓）。紫色是<strong>虚拟推演、不是真实成交</strong>。
+                  <span style={{ color: '#B080FF' }}>紫色「补齐 / Pure SOP」对照层</span>（眼睛图标）：把当前选中的反事实分支按标准 SOP 推演出的虚拟轨迹叠在真实盘面上；旁边的 <strong>ⓘ</strong> 图标展开标记说明（CF-M 主力、CF-A1~A6 加仓、CF-Ha/CF-Hb 初始对冲、CF-Hr 滚动对冲、CF-TP 镜像止盈、CF-Exit 平仓）。每个分支独立记忆显示 / 隐藏状态：隐藏「补齐 hedge_b」不会连带隐藏其他 What-if 分支。紫色是<strong>虚拟推演、不是真实成交</strong>。
                 </li>
               </ul>
               <Highlight>
@@ -1241,6 +1273,7 @@ export default function GuidePage() {
               </P>
               <ul className="list-disc pl-6 text-[14px] text-foreground/90 space-y-1">
                 <li>反事实的主力锚点<strong>以你的真实成交价 / 成交时间为准</strong>，紫色轨迹会精确贴合你实际开仓那根 K 线，对冲 / 止盈再从真实成交价按 SOP 偏移推算。</li>
+                <li>反事实盘面以原始战役的 K 线、真实事件标记、竖线、区间线和委托空单为只读背景，再叠加紫色虚拟轨迹；不会为了显示反事实而丢掉原始盘面信息。</li>
                 <li>下方「Legs 副本 · 手动反事实」保留可视化编辑（盘面竖线 + 可编辑表格），用于查看与对照。</li>
               </ul>
               <P><strong>SOP 偏离代价明细</strong>把「标准 SOP 要求、但你这场缺的每条建仓腿」逐条折算成钱：</P>
