@@ -5,6 +5,7 @@ import { toast } from 'sonner';
 import { BackButton } from '@/components/journal/BackButton';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useAuth } from '@/contexts/AuthContext';
 import {
   deleteCampaign,
@@ -333,6 +334,11 @@ export default function JournalCampaignsPage() {
   );
   const winRateLabel = performance.winRate == null ? '—' : `${(performance.winRate * 100).toFixed(2)}%`;
   const payoffRatioLabel = performance.payoffRatio == null ? '—' : performance.payoffRatio.toFixed(2);
+  const validCampaignCount = performance.payoffRatioSampleCount;
+  const breakevenCampaignCount = Math.max(
+    0,
+    validCampaignCount - performance.winCount - performance.lossCount,
+  );
   const payoffRatioSum = performance.payoffRatio == null
     ? null
     : performance.payoffRatio * performance.payoffRatioSampleCount;
@@ -581,6 +587,26 @@ export default function JournalCampaignsPage() {
                 </Popover>
               );
             })}
+            <Tooltip delayDuration={120}>
+              <TooltipTrigger asChild>
+                <span
+                  tabIndex={0}
+                  data-testid="campaign-valid-count"
+                  aria-label={`有效战役 ${validCampaignCount} 场，其中盈利 ${performance.winCount} 场，亏损 ${performance.lossCount} 场${breakevenCampaignCount > 0 ? `，盈亏平衡 ${breakevenCampaignCount} 场` : ''}`}
+                  className="ml-0.5 inline-flex h-6 cursor-help select-none items-center border-l border-border/60 pl-2 text-foreground/60 outline-none transition-colors hover:text-foreground/80 focus-visible:text-foreground/80"
+                >
+                  有效战役（{validCampaignCount}）
+                </span>
+              </TooltipTrigger>
+              <TooltipContent side="bottom" align="end" className="space-y-1 text-[11px]">
+                <div>盈利战役：{performance.winCount} 场</div>
+                <div>亏损战役：{performance.lossCount} 场</div>
+                {breakevenCampaignCount > 0 && <div>盈亏平衡：{breakevenCampaignCount} 场</div>}
+                <div className="border-t border-border/60 pt-1 text-muted-foreground">
+                  仅统计存在有效初始最大预期亏损的已结束战役
+                </div>
+              </TooltipContent>
+            </Tooltip>
             <Popover
               open={formulaPopover === 'winRate'}
               onOpenChange={open => handleFormulaPopoverChange('winRate', open)}
@@ -592,7 +618,7 @@ export default function JournalCampaignsPage() {
                   aria-label={`盈利战役 ${performance.winCount} 场，亏损战役 ${performance.lossCount} 场，胜率 ${winRateLabel}`}
                   title="点击查看胜率计算公式"
                   onClick={event => openFormulaPopover(event, 'winRate')}
-                  className="ml-0.5 inline-flex h-6 select-none items-center gap-0.5 border-b border-l border-dashed border-muted-foreground/30 border-l-border/60 pl-2 text-foreground/60 transition-colors hover:text-foreground/80"
+                  className="inline-flex h-6 select-none items-center gap-0.5 border-b border-dashed border-muted-foreground/30 text-foreground/60 transition-colors hover:text-foreground/80"
                 >
                   胜率（{winRateLabel}）
                   <Sigma aria-hidden="true" className="h-2.5 w-2.5 opacity-35" />

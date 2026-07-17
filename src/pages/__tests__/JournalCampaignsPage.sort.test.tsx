@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { describe, expect, it, vi } from 'vitest';
+import { TooltipProvider } from '@/components/ui/tooltip';
 import type { TradeCampaign, TradeJournal } from '@/types/journal';
 import type { TradeRecord } from '@/types/trading';
 import JournalCampaignsPage from '../JournalCampaignsPage';
@@ -238,9 +239,11 @@ function cardOrder(): string[] {
 describe('JournalCampaignsPage sorting', () => {
   it('defaults to operation time and toggles sort direction for each field', async () => {
     render(
-      <MemoryRouter initialEntries={['/journal/campaigns']}>
-        <JournalCampaignsPage />
-      </MemoryRouter>,
+      <TooltipProvider delayDuration={0}>
+        <MemoryRouter initialEntries={['/journal/campaigns']}>
+          <JournalCampaignsPage />
+        </MemoryRouter>
+      </TooltipProvider>,
     );
 
     await waitFor(() => expect(screen.getAllByTestId('campaign-card')).toHaveLength(4));
@@ -262,6 +265,14 @@ describe('JournalCampaignsPage sorting', () => {
     expect(screen.getByTestId('campaign-sort-time')).toHaveAttribute('aria-pressed', 'true');
     expect(screen.getByTestId('campaign-sort-time')).toHaveAttribute('data-sort-direction', 'desc');
     expect(screen.getByTestId('campaign-sort-time')).toHaveAttribute('aria-label', '操作时间，从大到小排序');
+    expect(screen.getByTestId('campaign-valid-count')).toHaveTextContent('有效战役（3）');
+    expect(screen.getByTestId('campaign-valid-count')).toHaveAttribute(
+      'aria-label',
+      '有效战役 3 场，其中盈利 2 场，亏损 1 场',
+    );
+    fireEvent.pointerMove(screen.getByTestId('campaign-valid-count'));
+    expect((await screen.findAllByText('盈利战役：2 场')).length).toBeGreaterThan(0);
+    expect(screen.getAllByText('亏损战役：1 场').length).toBeGreaterThan(0);
     expect(screen.getByTestId('campaign-win-rate')).toHaveTextContent('胜率（66.67%）');
     expect(screen.getByTestId('campaign-win-rate')).toHaveAttribute(
       'aria-label',
@@ -359,9 +370,11 @@ describe('JournalCampaignsPage sorting', () => {
     mockListDeletedCampaigns.mockResolvedValue([deletedCampaign]);
 
     render(
-      <MemoryRouter initialEntries={['/journal/campaigns']}>
-        <JournalCampaignsPage />
-      </MemoryRouter>,
+      <TooltipProvider delayDuration={0}>
+        <MemoryRouter initialEntries={['/journal/campaigns']}>
+          <JournalCampaignsPage />
+        </MemoryRouter>
+      </TooltipProvider>,
     );
 
     await waitFor(() => expect(screen.getAllByTestId('campaign-card')).toHaveLength(4));
