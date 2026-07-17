@@ -3,6 +3,7 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { ArrowDown, ArrowUp, FolderPlus, Layers, Star, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { BackButton } from '@/components/journal/BackButton';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { useAuth } from '@/contexts/AuthContext';
 import {
   deleteCampaign,
@@ -12,6 +13,7 @@ import {
   updateCampaignImportance,
 } from '@/lib/journalApi';
 import { computeProfitCaptureRatio } from '@/lib/campaignAnalysis';
+import { summarizeCampaignPerformance } from '@/lib/kellySizing';
 import { LEG_ROLE_LABELS, STRATEGY_TEMPLATES } from '@/lib/strategyTemplates';
 import { campaignOperationTime } from '@/lib/objectiveOperationTime';
 import { formatBeijingTime } from '@/lib/timeFormat';
@@ -154,17 +156,6 @@ function comparePnl(
   return compareFiniteMetric(pnlSortValue(a), pnlSortValue(b), direction);
 }
 
-function campaignWinRate(rows: CampaignCardData[]) {
-  const wins = rows.filter(row => row.campaign.status === 'closed_profit').length;
-  const losses = rows.filter(row => row.campaign.status === 'closed_loss').length;
-  const resolved = wins + losses;
-  return {
-    wins,
-    losses,
-    percentage: resolved > 0 ? (wins / resolved) * 100 : null,
-  };
-}
-
 function sortCampaignRows(rows: CampaignCardData[], sort: CampaignSortState): CampaignCardData[] {
   return [...rows].sort((a, b) => {
     const importanceDesc = compareNumber(importanceValue(a.campaign), importanceValue(b.campaign), 'desc');
@@ -287,8 +278,15 @@ export default function JournalCampaignsPage() {
   };
 
   const sortedRows = useMemo(() => sortCampaignRows(rows, sortState), [rows, sortState]);
-  const winRate = useMemo(() => campaignWinRate(rows), [rows]);
-  const winRateLabel = winRate.percentage == null ? '—' : `${winRate.percentage.toFixed(2)}%`;
+  const performance = useMemo(
+    () => summarizeCampaignPerformance(rows.map(row => row.campaign)),
+    [rows],
+  );
+  const winRateLabel = performance.winRate == null ? '—' : `${(performance.winRate * 100).toFixed(2)}%`;
+  const payoffRatioLabel = performance.payoffRatio == null ? '—' : performance.payoffRatio.toFixed(2);
+  const expectedRLabel = performance.expectedR == null
+    ? '—'
+    : `${performance.expectedR >= 0 ? '+' : ''}${performance.expectedR.toFixed(2)}R`;
 
   const handleSortChange = (mode: CampaignSortMode) => {
     setSortState(current => (
@@ -399,12 +397,50 @@ export default function JournalCampaignsPage() {
             })}
             <span
               data-testid="campaign-win-rate"
-              aria-label={`盈利战役 ${winRate.wins} 场，亏损战役 ${winRate.losses} 场，胜率 ${winRateLabel}`}
-              title={`盈利战役 ${winRate.wins} 场 · 亏损战役 ${winRate.losses} 场`}
+              aria-label={`盈利战役 ${performance.winCount} 场，亏损战役 ${performance.lossCount} 场，胜率 ${winRateLabel}`}
+              title={`盈利战役 ${performance.winCount} 场 · 亏损战役 ${performance.lossCount} 场`}
               className="ml-0.5 select-none border-l border-border/60 pl-2 text-foreground/60"
             >
               胜率（{winRateLabel}）
             </span>
+            <span
+              data-testid="campaign-average-payoff-ratio"
+              aria-label={`平均盈亏比 ${payoffRatioLabel}`}
+              className="select-none text-foreground/60"
+            >
+              平均盈亏比（{payoffRatioLabel}）
+            </span>
+            <Popover>
+              <PopoverTrigger asChild>
+                <button
+                  type="button"
+                  data-testid="campaign-expected-value"
+                  className="h-6 rounded-sm border-b border-dashed border-muted-foreground/30 px-0.5 text-foreground/60 transition-colors hover:text-foreground/80"
+                  aria-label={`期望值 ${expectedRLabel}，点击查看计算公式`}
+                >
+                  期望值（{expectedRLabel}）
+                </button>
+              </PopoverTrigger>
+              <PopoverContent align="end" className="w-72 border-border bg-card p-3 text-[11px]">
+                <div className="font-medium text-foreground">期望值计算公式</div>
+                <div className="mt-2 rounded bg-muted/60 px-2 py-1.5 font-mono text-foreground">
+                  E = P(赢) × b − (1 − P(赢))
+                </div>
+                {performance.winRate != null && performance.payoffRatio != null && performance.expectedR != null ? (
+                  <div className="mt-2 space-y-1 text-muted-foreground">
+                    <div className="font-mono">
+                      = {(performance.winRate * 100).toFixed(2)}% × {performance.payoffRatio.toFixed(2)} − {((1 - performance.winRate) * 100).toFixed(2)}%
+                    </div>
+                    <div className="font-mono text-foreground">= {expectedRLabel}</div>
+                    <div>b = 平均盈利战役 P&L ÷ 平均亏损战役 |P&L|</div>
+                  </div>
+                ) : (
+                  <div className="mt-2 text-muted-foreground">
+                    至少需要一场有有效 P&L 的盈利战役和一场亏损战役，才能计算平均盈亏比与期望值。
+                  </div>
+                )}
+              </PopoverContent>
+            </Popover>
           </div>
         </div>
 

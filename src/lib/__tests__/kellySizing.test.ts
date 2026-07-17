@@ -7,6 +7,7 @@ import {
   deriveProfitUpsideAdvice,
   estimateCampaignSizingStats,
   estimatePayoffRatio,
+  summarizeCampaignPerformance,
   RUIN_PROBABILITY_TARGET,
   DEFAULT_PAYOFF_RATIO,
 } from '../kellySizing';
@@ -113,6 +114,36 @@ describe('estimateCampaignSizingStats', () => {
     expect(result.winRate).toBeCloseTo(6 / 11, 5);
     expect(result.payoffRatio).toBeCloseTo(2, 5);
     expect(result.winRateSampleCount).toBe(11);
+  });
+});
+
+describe('summarizeCampaignPerformance', () => {
+  it('computes live win rate, average payoff ratio, and expected R without a sample threshold', () => {
+    const campaigns = [
+      campaign({ final_realized_pnl: 10, status: 'closed_profit' }),
+      campaign({ final_realized_pnl: 50, status: 'closed_profit' }),
+      campaign({ final_realized_pnl: 1_000, status: 'closed_profit' }),
+      campaign({ final_realized_pnl: -20, status: 'closed_loss' }),
+      campaign({ final_realized_pnl: 0, status: 'closed_breakeven' }),
+      campaign({ final_realized_pnl: null, status: 'active' }),
+    ];
+
+    const result = summarizeCampaignPerformance(campaigns);
+    expect(result.winRate).toBeCloseTo(0.75, 8);
+    expect(result.payoffRatio).toBeCloseTo(53 / 3, 8);
+    expect(result.expectedR).toBeCloseTo(13, 8);
+    expect(result.winCount).toBe(3);
+    expect(result.lossCount).toBe(1);
+  });
+
+  it('leaves payoff ratio and expected value empty until both outcomes exist', () => {
+    const result = summarizeCampaignPerformance([
+      campaign({ final_realized_pnl: 100, status: 'closed_profit' }),
+    ]);
+
+    expect(result.winRate).toBe(1);
+    expect(result.payoffRatio).toBeNull();
+    expect(result.expectedR).toBeNull();
   });
 });
 

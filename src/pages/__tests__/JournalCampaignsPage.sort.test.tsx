@@ -44,7 +44,7 @@ const campaigns: TradeCampaign[] = [
     opened_at: '2025-12-01T00:00:00.000Z',
     closed_at: '2026-04-01T00:00:00.000Z',
     initial_main_size_usdt: 50,
-    final_realized_pnl: 20,
+    final_realized_pnl: -20,
     importance_weight: 2,
   }),
 ];
@@ -250,12 +250,21 @@ describe('JournalCampaignsPage sorting', () => {
       'aria-label',
       '盈利战役 3 场，亏损战役 1 场，胜率 75.00%',
     );
+    expect(screen.getByTestId('campaign-average-payoff-ratio')).toHaveTextContent('平均盈亏比（17.67）');
+    expect(screen.getByTestId('campaign-expected-value')).toHaveTextContent('期望值（+13.00R）');
+    fireEvent.click(screen.getByTestId('campaign-expected-value'));
+    expect(screen.getByText('E = P(赢) × b − (1 − P(赢))')).toBeInTheDocument();
+    expect(screen.getByText('= +13.00R')).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: '互关可见' }));
     await waitFor(() => expect(screen.getByTestId('campaign-win-rate')).toHaveTextContent('胜率（—）'));
+    expect(screen.getByTestId('campaign-average-payoff-ratio')).toHaveTextContent('平均盈亏比（—）');
+    expect(screen.getByTestId('campaign-expected-value')).toHaveTextContent('期望值（—）');
     fireEvent.click(screen.getByRole('button', { name: '我的战役' }));
     await waitFor(() => expect(screen.getAllByTestId('campaign-card')).toHaveLength(4));
     expect(screen.getByTestId('campaign-win-rate')).toHaveTextContent('胜率（75.00%）');
+    expect(screen.getByTestId('campaign-average-payoff-ratio')).toHaveTextContent('平均盈亏比（17.67）');
+    expect(screen.getByTestId('campaign-expected-value')).toHaveTextContent('期望值（+13.00R）');
 
     fireEvent.click(screen.getByTestId('campaign-sort-time'));
     expect(screen.getByTestId('campaign-sort-time')).toHaveAttribute('aria-pressed', 'true');
@@ -284,12 +293,12 @@ describe('JournalCampaignsPage sorting', () => {
     expect(screen.getByTestId('campaign-sort-captureRate')).toHaveAttribute('aria-pressed', 'true');
     expect(screen.getByTestId('campaign-sort-captureRate')).toHaveAttribute('data-sort-direction', 'desc');
     expect(screen.getByTestId('campaign-sort-captureRate')).toHaveAttribute('aria-label', '盈亏比，从大到小排序');
-    expect(cardOrder()).toEqual(['High Importance', 'Late Close', 'Best PnL', 'Newest Operation']);
+    expect(cardOrder()).toEqual(['High Importance', 'Best PnL', 'Newest Operation', 'Late Close']);
 
     fireEvent.click(screen.getByTestId('campaign-sort-captureRate'));
     expect(screen.getByTestId('campaign-sort-captureRate')).toHaveAttribute('data-sort-direction', 'asc');
     expect(screen.getByTestId('campaign-sort-captureRate')).toHaveAttribute('aria-label', '盈亏比，从小到大排序');
-    expect(cardOrder()).toEqual(['Newest Operation', 'Best PnL', 'Late Close', 'High Importance']);
+    expect(cardOrder()).toEqual(['Late Close', 'Newest Operation', 'Best PnL', 'High Importance']);
 
     fireEvent.click(screen.getByTestId('campaign-sort-alpha'));
     expect(screen.getByTestId('campaign-sort-alpha')).toHaveAttribute('aria-pressed', 'true');

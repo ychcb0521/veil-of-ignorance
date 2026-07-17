@@ -32,6 +32,16 @@ export interface CampaignSizingStats {
   payoffLossCount: number;
 }
 
+export interface CampaignPerformanceSummary {
+  winRate: number | null;
+  winCount: number;
+  lossCount: number;
+  averageWinPnl: number | null;
+  averageLossPnl: number | null;
+  payoffRatio: number | null;
+  expectedR: number | null;
+}
+
 export interface ProfitUpsideAdvice {
   title: string;
   detail: string;
@@ -180,6 +190,45 @@ function isResolvedCampaign(campaign: TradeCampaign): boolean {
     && typeof campaign.final_realized_pnl === 'number'
     && Number.isFinite(campaign.final_realized_pnl)
   );
+}
+
+/**
+ * 当前战役列表的描述性统计，不设最小样本门槛：
+ *   p = 盈利战役 /（盈利战役 + 亏损战役）
+ *   b = 平均盈利 P&L / 平均亏损 |P&L|
+ *   E = p·b − (1 − p)
+ *
+ * 盈亏平衡与进行中的战役不进入上述统计；结果按最终 P&L 的正负判定，
+ * 避免历史状态标签与客观结果偶发不一致时污染计算。
+ */
+export function summarizeCampaignPerformance(campaigns: TradeCampaign[]): CampaignPerformanceSummary {
+  const resolved = campaigns.filter(isResolvedCampaign);
+  const wins = resolved.filter(campaign => (campaign.final_realized_pnl ?? 0) > 0);
+  const losses = resolved.filter(campaign => (campaign.final_realized_pnl ?? 0) < 0);
+  const outcomeCount = wins.length + losses.length;
+  const winRate = outcomeCount > 0 ? wins.length / outcomeCount : null;
+  const averageWinPnl = wins.length > 0
+    ? wins.reduce((sum, campaign) => sum + (campaign.final_realized_pnl ?? 0), 0) / wins.length
+    : null;
+  const averageLossPnl = losses.length > 0
+    ? losses.reduce((sum, campaign) => sum + Math.abs(campaign.final_realized_pnl ?? 0), 0) / losses.length
+    : null;
+  const payoffRatio = averageWinPnl != null && averageLossPnl != null && averageLossPnl > 0
+    ? averageWinPnl / averageLossPnl
+    : null;
+  const expectedR = winRate != null && payoffRatio != null
+    ? winRate * payoffRatio - (1 - winRate)
+    : null;
+
+  return {
+    winRate,
+    winCount: wins.length,
+    lossCount: losses.length,
+    averageWinPnl,
+    averageLossPnl,
+    payoffRatio,
+    expectedR,
+  };
 }
 
 /**
