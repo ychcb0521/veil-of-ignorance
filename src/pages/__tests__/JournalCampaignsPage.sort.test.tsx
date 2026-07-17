@@ -40,6 +40,7 @@ const campaigns: TradeCampaign[] = [
   makeCampaign({
     id: 'late-close',
     title: 'Late Close',
+    status: 'closed_loss',
     opened_at: '2025-12-01T00:00:00.000Z',
     closed_at: '2026-04-01T00:00:00.000Z',
     initial_main_size_usdt: 50,
@@ -156,7 +157,7 @@ function makeCampaign(overrides: Partial<TradeCampaign>): TradeCampaign {
     user_id: 'user-1',
     symbol: 'BTCUSDT',
     direction: 'main_long',
-    status: 'closed_profit',
+    status: overrides.status ?? 'closed_profit',
     strategy_template: 'custom',
     title: overrides.title ?? 'Campaign',
     opened_at: overrides.opened_at ?? now,
@@ -244,6 +245,17 @@ describe('JournalCampaignsPage sorting', () => {
     expect(screen.getByTestId('campaign-sort-time')).toHaveAttribute('aria-pressed', 'true');
     expect(screen.getByTestId('campaign-sort-time')).toHaveAttribute('data-sort-direction', 'desc');
     expect(screen.getByTestId('campaign-sort-time')).toHaveAttribute('aria-label', '操作时间，从大到小排序');
+    expect(screen.getByTestId('campaign-win-rate')).toHaveTextContent('胜率（75.00%）');
+    expect(screen.getByTestId('campaign-win-rate')).toHaveAttribute(
+      'aria-label',
+      '盈利战役 3 场，亏损战役 1 场，胜率 75.00%',
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '互关可见' }));
+    await waitFor(() => expect(screen.getByTestId('campaign-win-rate')).toHaveTextContent('胜率（—）'));
+    fireEvent.click(screen.getByRole('button', { name: '我的战役' }));
+    await waitFor(() => expect(screen.getAllByTestId('campaign-card')).toHaveLength(4));
+    expect(screen.getByTestId('campaign-win-rate')).toHaveTextContent('胜率（75.00%）');
 
     fireEvent.click(screen.getByTestId('campaign-sort-time'));
     expect(screen.getByTestId('campaign-sort-time')).toHaveAttribute('aria-pressed', 'true');
@@ -264,18 +276,11 @@ describe('JournalCampaignsPage sorting', () => {
     expect(screen.getByTestId('campaign-sort-time')).toHaveAttribute('data-sort-direction', 'desc');
     expect(cardOrder()).toEqual(['High Importance', 'Best PnL', 'Late Close', 'Newest Operation']);
 
-    fireEvent.click(screen.getByTestId('campaign-sort-pnl'));
-    expect(screen.getByTestId('campaign-sort-pnl')).toHaveAttribute('aria-pressed', 'true');
-    expect(screen.getByTestId('campaign-sort-pnl')).toHaveAttribute('data-sort-direction', 'desc');
-    expect(cardOrder()).toEqual(['Best PnL', 'Newest Operation', 'Late Close', 'High Importance']);
-
-    fireEvent.click(screen.getByTestId('campaign-sort-pnl'));
-    expect(screen.getByTestId('campaign-sort-pnl')).toHaveAttribute('data-sort-direction', 'asc');
-    expect(cardOrder()).toEqual(['High Importance', 'Late Close', 'Newest Operation', 'Best PnL']);
-
+    expect(screen.queryByTestId('campaign-sort-pnl')).not.toBeInTheDocument();
     expect(screen.queryByTestId('campaign-sort-pnlPct')).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByTestId('campaign-sort-captureRate'));
+    expect(screen.getByTestId('campaign-sort-captureRate')).toHaveTextContent('盈亏比');
     expect(screen.getByTestId('campaign-sort-captureRate')).toHaveAttribute('aria-pressed', 'true');
     expect(screen.getByTestId('campaign-sort-captureRate')).toHaveAttribute('data-sort-direction', 'desc');
     expect(screen.getByTestId('campaign-sort-captureRate')).toHaveAttribute('aria-label', '盈亏比，从大到小排序');

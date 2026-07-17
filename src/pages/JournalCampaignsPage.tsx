@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type MouseEvent } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { ArrowDown, ArrowUp, FolderPlus, Layers, Star, Target, Trash2 } from 'lucide-react';
+import { ArrowDown, ArrowUp, FolderPlus, Layers, Star, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { BackButton } from '@/components/journal/BackButton';
 import { useAuth } from '@/contexts/AuthContext';
@@ -25,7 +25,7 @@ type CampaignCardData = {
   profitCaptureRatio: number;
 };
 
-type CampaignSortMode = 'importance' | 'time' | 'pnl' | 'captureRate' | 'alpha';
+type CampaignSortMode = 'importance' | 'time' | 'captureRate' | 'alpha';
 type CampaignSortDirection = 'asc' | 'desc';
 
 type CampaignSortState = {
@@ -33,11 +33,10 @@ type CampaignSortState = {
   direction: CampaignSortDirection;
 };
 
-const SORT_OPTIONS: { value: CampaignSortMode; label: string; subtleIcon?: 'capture' }[] = [
+const SORT_OPTIONS: { value: CampaignSortMode; label: string }[] = [
   { value: 'importance', label: '重要性' },
   { value: 'time', label: '操作时间' },
-  { value: 'pnl', label: '盈亏' },
-  { value: 'captureRate', label: '盈亏比', subtleIcon: 'capture' },
+  { value: 'captureRate', label: '盈亏比' },
   { value: 'alpha', label: '字母' },
 ];
 
@@ -155,6 +154,17 @@ function comparePnl(
   return compareFiniteMetric(pnlSortValue(a), pnlSortValue(b), direction);
 }
 
+function campaignWinRate(rows: CampaignCardData[]) {
+  const wins = rows.filter(row => row.campaign.status === 'closed_profit').length;
+  const losses = rows.filter(row => row.campaign.status === 'closed_loss').length;
+  const resolved = wins + losses;
+  return {
+    wins,
+    losses,
+    percentage: resolved > 0 ? (wins / resolved) * 100 : null,
+  };
+}
+
 function sortCampaignRows(rows: CampaignCardData[], sort: CampaignSortState): CampaignCardData[] {
   return [...rows].sort((a, b) => {
     const importanceDesc = compareNumber(importanceValue(a.campaign), importanceValue(b.campaign), 'desc');
@@ -166,12 +176,6 @@ function sortCampaignRows(rows: CampaignCardData[], sort: CampaignSortState): Ca
       return compareNumber(campaignSortTime(a), campaignSortTime(b), sort.direction)
         || importanceDesc
         || pnlDesc
-        || alphaAsc;
-    }
-    if (sort.mode === 'pnl') {
-      return comparePnl(a.campaign, b.campaign, sort.direction)
-        || importanceDesc
-        || timeDesc
         || alphaAsc;
     }
     if (sort.mode === 'captureRate') {
@@ -283,6 +287,8 @@ export default function JournalCampaignsPage() {
   };
 
   const sortedRows = useMemo(() => sortCampaignRows(rows, sortState), [rows, sortState]);
+  const winRate = useMemo(() => campaignWinRate(rows), [rows]);
+  const winRateLabel = winRate.percentage == null ? '—' : `${winRate.percentage.toFixed(2)}%`;
 
   const handleSortChange = (mode: CampaignSortMode) => {
     setSortState(current => (
@@ -361,7 +367,7 @@ export default function JournalCampaignsPage() {
               </button>
             ))}
           </div>
-          <div className="flex items-center gap-2 self-start px-0.5 py-0.5 text-[10px] text-muted-foreground/45 md:self-auto">
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 self-start px-0.5 py-0.5 text-[10px] text-muted-foreground/45 md:self-auto md:justify-end">
             <span className="select-none">排序</span>
             {SORT_OPTIONS.map(option => {
               const active = sortState.mode === option.value;
@@ -382,11 +388,7 @@ export default function JournalCampaignsPage() {
                       : 'border-transparent text-muted-foreground/50 hover:text-foreground/65'
                   }`}
                 >
-                  {option.subtleIcon === 'capture' ? (
-                    <Target className={`h-3 w-3 ${active ? 'opacity-55' : 'opacity-35'}`} />
-                  ) : (
-                    <span>{option.label}</span>
-                  )}
+                  <span>{option.label}</span>
                   {active && (
                     direction === 'desc'
                       ? <ArrowDown className="h-3 w-3 opacity-45" />
@@ -395,6 +397,14 @@ export default function JournalCampaignsPage() {
                 </button>
               );
             })}
+            <span
+              data-testid="campaign-win-rate"
+              aria-label={`盈利战役 ${winRate.wins} 场，亏损战役 ${winRate.losses} 场，胜率 ${winRateLabel}`}
+              title={`盈利战役 ${winRate.wins} 场 · 亏损战役 ${winRate.losses} 场`}
+              className="ml-0.5 select-none border-l border-border/60 pl-2 text-foreground/60"
+            >
+              胜率（{winRateLabel}）
+            </span>
           </div>
         </div>
 
