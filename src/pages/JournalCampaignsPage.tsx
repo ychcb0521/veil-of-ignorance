@@ -279,7 +279,10 @@ export default function JournalCampaignsPage() {
 
   const sortedRows = useMemo(() => sortCampaignRows(rows, sortState), [rows, sortState]);
   const performance = useMemo(
-    () => summarizeCampaignPerformance(rows.map(row => row.campaign)),
+    () => summarizeCampaignPerformance(rows.map(row => ({
+      campaign: row.campaign,
+      payoffRatio: row.profitCaptureRatio / 100,
+    }))),
     [rows],
   );
   const winRateLabel = performance.winRate == null ? '—' : `${(performance.winRate * 100).toFixed(2)}%`;
@@ -405,7 +408,7 @@ export default function JournalCampaignsPage() {
             </span>
             <span
               data-testid="campaign-average-payoff-ratio"
-              aria-label={`平均盈亏比 ${payoffRatioLabel}`}
+              aria-label={`平均盈亏比 ${payoffRatioLabel}，共 ${performance.payoffRatioSampleCount} 场战役`}
               className="select-none text-foreground/60"
             >
               平均盈亏比（{payoffRatioLabel}）
@@ -432,11 +435,11 @@ export default function JournalCampaignsPage() {
                       = {(performance.winRate * 100).toFixed(2)}% × {performance.payoffRatio.toFixed(2)} − {((1 - performance.winRate) * 100).toFixed(2)}%
                     </div>
                     <div className="font-mono text-foreground">= {expectedRLabel}</div>
-                    <div>b = 平均盈利战役 P&L ÷ 平均亏损战役 |P&L|</div>
+                    <div>b = 所有战役盈亏比之和 ÷ 有效战役数</div>
                   </div>
                 ) : (
                   <div className="mt-2 text-muted-foreground">
-                    至少需要一场有有效 P&L 的盈利战役和一场亏损战役，才能计算平均盈亏比与期望值。
+                    当前列表需要至少一场有有效盈亏比的战役，并且要有可计算的胜率，才能得到期望值。
                   </div>
                 )}
               </PopoverContent>

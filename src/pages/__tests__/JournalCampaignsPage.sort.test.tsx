@@ -250,11 +250,15 @@ describe('JournalCampaignsPage sorting', () => {
       'aria-label',
       '盈利战役 3 场，亏损战役 1 场，胜率 75.00%',
     );
-    expect(screen.getByTestId('campaign-average-payoff-ratio')).toHaveTextContent('平均盈亏比（17.67）');
-    expect(screen.getByTestId('campaign-expected-value')).toHaveTextContent('期望值（+13.00R）');
+    expect(screen.getByTestId('campaign-average-payoff-ratio')).toHaveTextContent('平均盈亏比（0.24）');
+    expect(screen.getByTestId('campaign-average-payoff-ratio')).toHaveAttribute(
+      'aria-label',
+      '平均盈亏比 0.24，共 4 场战役',
+    );
+    expect(screen.getByTestId('campaign-expected-value')).toHaveTextContent('期望值（-0.07R）');
     fireEvent.click(screen.getByTestId('campaign-expected-value'));
     expect(screen.getByText('E = P(赢) × b − (1 − P(赢))')).toBeInTheDocument();
-    expect(screen.getByText('= +13.00R')).toBeInTheDocument();
+    expect(screen.getByText('= -0.07R')).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: '互关可见' }));
     await waitFor(() => expect(screen.getByTestId('campaign-win-rate')).toHaveTextContent('胜率（—）'));
@@ -263,8 +267,8 @@ describe('JournalCampaignsPage sorting', () => {
     fireEvent.click(screen.getByRole('button', { name: '我的战役' }));
     await waitFor(() => expect(screen.getAllByTestId('campaign-card')).toHaveLength(4));
     expect(screen.getByTestId('campaign-win-rate')).toHaveTextContent('胜率（75.00%）');
-    expect(screen.getByTestId('campaign-average-payoff-ratio')).toHaveTextContent('平均盈亏比（17.67）');
-    expect(screen.getByTestId('campaign-expected-value')).toHaveTextContent('期望值（+13.00R）');
+    expect(screen.getByTestId('campaign-average-payoff-ratio')).toHaveTextContent('平均盈亏比（0.24）');
+    expect(screen.getByTestId('campaign-expected-value')).toHaveTextContent('期望值（-0.07R）');
 
     fireEvent.click(screen.getByTestId('campaign-sort-time'));
     expect(screen.getByTestId('campaign-sort-time')).toHaveAttribute('aria-pressed', 'true');

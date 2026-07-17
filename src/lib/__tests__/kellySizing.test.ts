@@ -119,30 +119,32 @@ describe('estimateCampaignSizingStats', () => {
 
 describe('summarizeCampaignPerformance', () => {
   it('computes live win rate, average payoff ratio, and expected R without a sample threshold', () => {
-    const campaigns = [
-      campaign({ final_realized_pnl: 10, status: 'closed_profit' }),
-      campaign({ final_realized_pnl: 50, status: 'closed_profit' }),
-      campaign({ final_realized_pnl: 1_000, status: 'closed_profit' }),
-      campaign({ final_realized_pnl: -20, status: 'closed_loss' }),
-      campaign({ final_realized_pnl: 0, status: 'closed_breakeven' }),
-      campaign({ final_realized_pnl: null, status: 'active' }),
+    const samples = [
+      { campaign: campaign({ final_realized_pnl: 10, status: 'closed_profit' }), payoffRatio: 1 },
+      { campaign: campaign({ final_realized_pnl: 50, status: 'closed_profit' }), payoffRatio: 0.25 },
+      { campaign: campaign({ final_realized_pnl: 1_000, status: 'closed_profit' }), payoffRatio: 0.5 },
+      { campaign: campaign({ final_realized_pnl: -20, status: 'closed_loss' }), payoffRatio: -0.8 },
     ];
 
-    const result = summarizeCampaignPerformance(campaigns);
+    const result = summarizeCampaignPerformance(samples);
     expect(result.winRate).toBeCloseTo(0.75, 8);
-    expect(result.payoffRatio).toBeCloseTo(53 / 3, 8);
-    expect(result.expectedR).toBeCloseTo(13, 8);
+    expect(result.payoffRatio).toBeCloseTo(0.2375, 8);
+    expect(result.payoffRatioSampleCount).toBe(4);
+    expect(result.expectedR).toBeCloseTo(-0.071875, 8);
     expect(result.winCount).toBe(3);
     expect(result.lossCount).toBe(1);
   });
 
-  it('leaves payoff ratio and expected value empty until both outcomes exist', () => {
+  it('averages every valid campaign ratio and leaves expected value empty until win rate exists', () => {
     const result = summarizeCampaignPerformance([
-      campaign({ final_realized_pnl: 100, status: 'closed_profit' }),
+      { campaign: campaign({ final_realized_pnl: null, status: 'active' }), payoffRatio: 2 },
+      { campaign: campaign({ final_realized_pnl: null, status: 'active' }), payoffRatio: -0.5 },
+      { campaign: campaign({ final_realized_pnl: null, status: 'active' }), payoffRatio: Number.NaN },
     ]);
 
-    expect(result.winRate).toBe(1);
-    expect(result.payoffRatio).toBeNull();
+    expect(result.winRate).toBeNull();
+    expect(result.payoffRatio).toBe(0.75);
+    expect(result.payoffRatioSampleCount).toBe(2);
     expect(result.expectedR).toBeNull();
   });
 });
