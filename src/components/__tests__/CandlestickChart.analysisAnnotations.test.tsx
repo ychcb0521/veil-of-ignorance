@@ -18,6 +18,7 @@ const mocks = vi.hoisted(() => {
     createOverlay: vi.fn(),
     removeOverlay: vi.fn(),
     getSize: vi.fn(() => ({ width: 1000, height: 520 })),
+    getDataList: vi.fn(() => []),
     getBarSpace: vi.fn(() => 8),
     setBarSpace: vi.fn(),
     setOffsetRightDistance: vi.fn(),
@@ -27,7 +28,12 @@ const mocks = vi.hoisted(() => {
     convertFromPixel: vi.fn(),
     convertToPixel: vi.fn((point: any) => {
       const value = Array.isArray(point) ? point[0] : point;
-      return { x: typeof value?.timestamp === 'number' ? value.timestamp / 10 : 0, y: 0 };
+      return {
+        x: typeof value?.dataIndex === 'number'
+          ? value.dataIndex * 100 + 50
+          : typeof value?.timestamp === 'number' ? value.timestamp / 10 : 0,
+        y: 0,
+      };
     }),
   };
 
@@ -46,6 +52,7 @@ vi.mock('klinecharts', () => ({
   CandleType: { CandleSolid: 'candle_solid' },
   LineType: { Dashed: 'dashed', Solid: 'solid' },
   ActionType: {
+    OnDataReady: 'onDataReady',
     OnScroll: 'onScroll',
     OnZoom: 'onZoom',
     OnVisibleRangeChange: 'onVisibleRangeChange',
@@ -83,7 +90,12 @@ describe('CandlestickChart analysis annotations', () => {
     vi.clearAllMocks();
     mocks.chart.convertToPixel.mockImplementation((point: any) => {
       const value = Array.isArray(point) ? point[0] : point;
-      return { x: typeof value?.timestamp === 'number' ? value.timestamp / 10 : 0, y: 0 };
+      return {
+        x: typeof value?.dataIndex === 'number'
+          ? value.dataIndex * 100 + 50
+          : typeof value?.timestamp === 'number' ? value.timestamp / 10 : 0,
+        y: 0,
+      };
     });
     vi.stubGlobal('ResizeObserver', ResizeObserverMock);
   });
@@ -198,8 +210,8 @@ describe('CandlestickChart analysis annotations', () => {
       .filter(overlay => overlay.name === 'simpleAnnotation');
 
     expect(markerOverlays.map(overlay => overlay.points?.[0])).toEqual([
-      { timestamp: 1000, value: 1 },
-      { timestamp: 1000, value: 1.005 },
+      { timestamp: 1000, dataIndex: 0, value: 1 },
+      { timestamp: 1000, dataIndex: 0, value: 1.005 },
     ]);
   });
 
@@ -235,8 +247,65 @@ describe('CandlestickChart analysis annotations', () => {
     zoomCallback?.();
 
     await waitFor(() => {
-      expect(mocks.chart.resize).toHaveBeenCalled();
+      expect(mocks.chart.scrollByDistance).toHaveBeenCalledWith(0, 0);
       expect((document.querySelector('[data-analysis-label]') as HTMLElement).style.left).not.toEqual(before);
+    });
+  });
+
+  it('旧战役的非整周期事件会绑定到最近的真实 K 线索引', async () => {
+    render(
+      <CandlestickChart
+        data={[candle(1000, 1), candle(2000, 1.1), candle(3000, 1.2)]}
+        symbol="BTCUSDT"
+        rawSymbol="BTCUSDT"
+        analysisMode
+        analysisAnnotations={{
+          markers: [{
+            time: 2400,
+            price: 1.1,
+            color: '#0ECB81',
+            shape: 'triangle-up',
+            label: 'A1',
+          }],
+        }}
+      />,
+    );
+
+    await waitFor(() => {
+      const markerOverlay = mocks.chart.createOverlay.mock.calls
+        .map(([overlay]) => overlay)
+        .find(overlay => overlay.name === 'simpleAnnotation');
+      expect(markerOverlay?.points?.[0]).toEqual(expect.objectContaining({
+        timestamp: 2000,
+        dataIndex: 1,
+      }));
+      expect(mocks.chart.convertToPixel).toHaveBeenCalledWith(
+        expect.objectContaining({ dataIndex: 1 }),
+        { paneId: 'candle_pane' },
+      );
+    });
+  });
+
+  it('历史 K 线异步载入完成后再统一自适应并重绘原生盘面', async () => {
+    render(
+      <CandlestickChart
+        data={[candle(1000, 1), candle(2000, 1.1), candle(3000, 1.2)]}
+        symbol="BTCUSDT"
+        rawSymbol="BTCUSDT"
+        analysisMode
+        analysisFitAll
+      />,
+    );
+
+    const dataReadyCallbacks = mocks.chart.subscribeAction.mock.calls
+      .filter(([type]) => type === 'onDataReady')
+      .map(([, callback]) => callback);
+    expect(dataReadyCallbacks.length).toBeGreaterThan(0);
+    dataReadyCallbacks.forEach(callback => callback());
+
+    await waitFor(() => {
+      expect(mocks.chart.setBarSpace).toHaveBeenCalled();
+      expect(mocks.chart.scrollByDistance).toHaveBeenCalledWith(0, 0);
     });
   });
 
