@@ -1,6 +1,10 @@
 import type { KlineData } from '@/hooks/useBinanceData';
 import { computeSopDeviation, type Deduction, type SopDeviationResult } from '@/lib/campaignAnalysis';
-import { buildTradeRecordLookup, journalSimulatedCloseTime } from '@/lib/objectiveOperationTime';
+import {
+  resolveLegExecution,
+  type LegExitPriceCorrections,
+} from '@/lib/campaignLegExecution';
+import { buildTradeRecordLookup } from '@/lib/objectiveOperationTime';
 import type {
   CampaignCounterfactualEvent,
   CampaignCounterfactualLegSummary,
@@ -821,13 +825,15 @@ export function defaultCloseTime(params: CampaignCounterfactualParams, klines: K
 
 /**
  * 把战役已归类的 legs 转成「手动反事实」可编辑的腿副本（编辑器初始值 + 偏离代价的原始基线共用）。
- * 价格/平仓时间优先用真实成交记录，其次腿上的回填快照，最后才退回开仓价/末根 K 线。
+ * 开平时间与价格复用原始 Legs 列表的统一成交解析；历史异常平仓价先应用 K 线校正，
+ * 缺少成交记录时再退回腿上的快照，仍缺失才使用开仓价/末根 K 线。
  */
 export function buildManualLegs(
   params: CampaignCounterfactualParams,
   legs: TradeJournal[],
   klines: KlineData[],
   tradeRecords: TradeRecord[],
+  exitPriceCorrections: LegExitPriceCorrections = {},
 ): CampaignCounterfactualManualLeg[] {
   const fallbackClose = defaultCloseTime(params, klines);
   const recordMap = buildTradeRecordLookup(tradeRecords);
@@ -841,17 +847,18 @@ export function buildManualLegs(
   return ordered
     .map((leg, index) => {
       const record = leg.trade_record_id ? recordMap.get(leg.trade_record_id) ?? null : null;
-      const openTime = leg.pre_simulated_time || params.entry.time;
-      const recordCloseIso = record?.closeTime ? new Date(record.closeTime).toISOString() : null;
-      const simulatedCloseMs = journalSimulatedCloseTime(leg);
-      const closeTime = recordCloseIso
-        || (simulatedCloseMs ? new Date(simulatedCloseMs).toISOString() : null)
-        || fallbackClose;
+      const execution = resolveLegExecution(leg, record, exitPriceCorrections);
+      const openTime = execution.openTime != null
+        ? new Date(execution.openTime).toISOString()
+        : leg.pre_simulated_time || params.entry.time;
+      const closeTime = execution.closeTime != null
+        ? new Date(execution.closeTime).toISOString()
+        : fallbackClose;
       const closeMs = manualTimeMs(closeTime) ?? manualTimeMs(fallbackClose) ?? manualTimeMs(openTime) ?? Date.now();
       const openMs = manualTimeMs(openTime) ?? closeMs;
       const normalizedClose = closeMs >= openMs ? closeTime : new Date(openMs).toISOString();
-      const entryPrice = record?.entryPrice ?? leg.pre_entry_price ?? params.entry.price;
-      const exitPrice = record?.exitPrice ?? leg.post_exit_price_snapshot ?? entryPrice;
+      const entryPrice = execution.entryPrice ?? params.entry.price;
+      const exitPrice = execution.exitPrice ?? entryPrice;
       return {
         id: leg.id || `leg-${index}`,
         leg_role: leg.leg_role ?? 'standalone',

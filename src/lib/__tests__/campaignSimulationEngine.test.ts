@@ -1,9 +1,15 @@
 import { describe, expect, it } from 'vitest';
 
 import type { KlineData } from '@/hooks/useBinanceData';
-import type { CampaignCounterfactualManualLeg, CampaignCounterfactualParams } from '@/types/journal';
+import type {
+  CampaignCounterfactualManualLeg,
+  CampaignCounterfactualParams,
+  TradeJournal,
+} from '@/types/journal';
+import type { TradeRecord } from '@/types/trading';
 
 import {
+  buildManualLegs,
   computeManualLegDeviationCosts,
   manualLegPnl,
   simulateCampaign,
@@ -269,6 +275,96 @@ describe('simulateCampaign', () => {
     expect(result.legs_summary).toHaveLength(2);
     expect(result.legs_summary.some(leg => leg.leg_role === 'mirror_tp')).toBe(false);
     expect(result.state_segments[0]?.state).toBe('manual_legs');
+  });
+});
+
+describe('buildManualLegs', () => {
+  it('与原始 Legs 列表共用成交记录时间和历史平仓价校正', () => {
+    const record = {
+      id: 'close-record-1',
+      positionId: 'position-1',
+      symbol: 'ALPACAUSDT',
+      side: 'LONG',
+      type: 'MARKET',
+      action: 'CLOSE',
+      entryPrice: 0.165244,
+      exitPrice: 0.19867,
+      quantity: 100,
+      leverage: 3,
+      pnl: 10,
+      fee: 0,
+      slippage: 0,
+      openTime: t0 + MIN,
+      closeTime: t0 + 3 * MIN,
+    } satisfies TradeRecord;
+    const leg = {
+      id: 'leg-1',
+      trade_record_id: 'position-1',
+      leg_sequence: 1,
+      source: 'live',
+      leg_role: 'main_open',
+      direction: 'long',
+      pre_simulated_time: new Date(t0).toISOString(),
+      pre_entry_price: 0.15,
+      pre_position_size: 2_000,
+      leverage: 3,
+      post_simulated_close_time: new Date(t0 + 2 * MIN).toISOString(),
+      post_exit_price_snapshot: 0.19,
+    } as TradeJournal;
+
+    const manualLegs = buildManualLegs(
+      baseParams(),
+      [leg],
+      [k(0, 0.16, 0.17, 0.15, 0.16), k(3, 0.19, 0.191, 0.186, 0.1895)],
+      [record],
+      {
+        'leg-1': {
+          exitPrice: 0.1895,
+          originalExitPrice: 0.19867,
+          candleLow: 0.186,
+          candleHigh: 0.191,
+        },
+      },
+    );
+
+    expect(manualLegs).toEqual([expect.objectContaining({
+      open_time: new Date(record.openTime).toISOString(),
+      close_time: new Date(record.closeTime).toISOString(),
+      entry_price: record.entryPrice,
+      exit_price: 0.1895,
+      size_usdt: 2_000,
+      leverage: 3,
+    })]);
+  });
+
+  it('没有成交记录时保留腿上的开平仓快照', () => {
+    const openTime = new Date(t0 + MIN).toISOString();
+    const closeTime = new Date(t0 + 2 * MIN).toISOString();
+    const leg = {
+      id: 'snapshot-leg',
+      trade_record_id: null,
+      leg_sequence: 1,
+      source: 'retroactive_from_record',
+      leg_role: 'hedge_initial_a',
+      direction: 'short',
+      pre_simulated_time: openTime,
+      pre_entry_price: 101,
+      pre_position_size: 500,
+      leverage: 2,
+      post_simulated_close_time: closeTime,
+      post_exit_price_snapshot: 98,
+    } as TradeJournal;
+
+    expect(buildManualLegs(baseParams(), [leg], [], [])).toEqual([
+      expect.objectContaining({
+        open_time: openTime,
+        close_time: closeTime,
+        entry_price: 101,
+        exit_price: 98,
+        size_usdt: 500,
+        leverage: 2,
+      }),
+    ]);
   });
 });
 

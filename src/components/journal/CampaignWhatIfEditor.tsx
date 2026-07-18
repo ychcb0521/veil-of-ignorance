@@ -12,6 +12,7 @@ import {
   SELECTED_LEG_VERTICAL_LINE_WIDTH,
   legRoleMarkerLabel,
 } from '@/lib/campaignLegMarkers';
+import type { LegExitPriceCorrections } from '@/lib/campaignLegExecution';
 import { buildActualSimulationParams, buildPureSopParams, buildManualLegs } from '@/lib/campaignSimulationEngine';
 import { LEG_ROLE_LABELS } from '@/lib/strategyTemplates';
 import type {
@@ -27,6 +28,7 @@ interface Props {
   campaign: TradeCampaign;
   legs: TradeJournal[];
   tradeRecords: TradeRecord[];
+  legExitPriceCorrections: LegExitPriceCorrections;
   klines: KlineData[];
   klinesLoading: boolean;
   interval: string;
@@ -110,6 +112,7 @@ export function CampaignWhatIfEditor({
   campaign,
   legs,
   tradeRecords,
+  legExitPriceCorrections,
   klines,
   klinesLoading,
   interval,
@@ -133,9 +136,9 @@ export function CampaignWhatIfEditor({
 
   useEffect(() => {
     setParams(baseDefaults);
-    if (baseDefaults) setManualLegs(buildManualLegs(baseDefaults, legs, klines, tradeRecords));
+    if (baseDefaults) setManualLegs(buildManualLegs(baseDefaults, legs, klines, tradeRecords, legExitPriceCorrections));
     setSelectedManualLegId(null);
-  }, [baseDefaults, legs, klines, tradeRecords]);
+  }, [baseDefaults, legs, klines, tradeRecords, legExitPriceCorrections]);
 
   const canRun = !klinesLoading && klines.length > 0;
   const chartCurrentTime = klines.length > 0
@@ -172,7 +175,7 @@ export function CampaignWhatIfEditor({
 
   const resetManualLegs = () => {
     if (!baseDefaults) return;
-    setManualLegs(buildManualLegs(baseDefaults, legs, klines, tradeRecords));
+    setManualLegs(buildManualLegs(baseDefaults, legs, klines, tradeRecords, legExitPriceCorrections));
     setParams(baseDefaults);
     setSelectedManualLegId(null);
   };

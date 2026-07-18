@@ -770,9 +770,9 @@ export default function JournalCampaignDetailPage() {
     if (adjustedLegs.length === 0) return [];
     const actualParams = buildActualSimulationParams(campaign, legs, tradeRecords);
     if (!actualParams) return [];
-    const originalLegs = buildManualLegs(actualParams, legs, klines, tradeRecords);
+    const originalLegs = buildManualLegs(actualParams, legs, klines, tradeRecords, legExitPriceCorrections);
     return computeManualLegDeviationCosts(originalLegs, adjustedLegs);
-  }, [campaign, selectedCounterfactual, legs, tradeRecords, klines]);
+  }, [campaign, selectedCounterfactual, legs, tradeRecords, klines, legExitPriceCorrections]);
   // 门槛：选中分支是「手动运行」分支（带 manual_legs）才展示偏离明细。
   const hasManualRunBranch = (selectedCounterfactual?.params?.manual_legs ?? []).length > 0;
   // 已保存分支列表里隐藏自动生成的「修正分支」(补齐 X)，只保留 Pure SOP 与自定义 What-if。
@@ -1369,6 +1369,7 @@ export default function JournalCampaignDetailPage() {
             campaign={campaign}
             legs={legs}
             tradeRecords={tradeRecords}
+            legExitPriceCorrections={legExitPriceCorrections}
             klines={klines}
             klinesLoading={klinesLoading}
             interval={interval}
