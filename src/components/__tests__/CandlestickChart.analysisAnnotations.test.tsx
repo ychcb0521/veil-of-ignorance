@@ -203,7 +203,7 @@ describe('CandlestickChart analysis annotations', () => {
     ]);
   });
 
-  it('图表滚动或缩放后，浮层标注会按当前 K 线坐标重新定位', async () => {
+  it('图表滚动或缩放后，先重绘 K 线画布，再按当前坐标重新定位浮层标注', async () => {
     render(
       <CandlestickChart
         data={[candle(1000, 1), candle(2000, 1.2)]}
@@ -228,13 +228,14 @@ describe('CandlestickChart analysis annotations', () => {
       expect(document.querySelector('[data-analysis-label]')).not.toBeNull();
     });
     const before = (document.querySelector('[data-analysis-label]') as HTMLElement).style.left;
-    const scrollCallback = mocks.chart.subscribeAction.mock.calls.find(([type]) => type === 'onScroll')?.[1];
-    expect(scrollCallback).toEqual(expect.any(Function));
+    const zoomCallback = mocks.chart.subscribeAction.mock.calls.find(([type]) => type === 'onZoom')?.[1];
+    expect(zoomCallback).toEqual(expect.any(Function));
 
     mocks.chart.convertToPixel.mockImplementation(() => ({ x: 260, y: 0 }));
-    scrollCallback?.();
+    zoomCallback?.();
 
     await waitFor(() => {
+      expect(mocks.chart.resize).toHaveBeenCalled();
       expect((document.querySelector('[data-analysis-label]') as HTMLElement).style.left).not.toEqual(before);
     });
   });

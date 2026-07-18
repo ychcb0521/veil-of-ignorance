@@ -997,8 +997,9 @@ function CandlestickChartComponent({
         }),
       );
     };
-    const scheduleFloatingLabelLayout = () => {
+    const scheduleFloatingLabelLayout = (syncChartViewport = false) => {
       if (typeof window === "undefined" || typeof window.requestAnimationFrame !== "function") {
+        if (syncChartViewport) chart.resize();
         runFloatingLabelLayout();
         return;
       }
@@ -1007,6 +1008,10 @@ function CandlestickChartComponent({
       }
       floatingLabelFrame = window.requestAnimationFrame(() => {
         floatingLabelFrame = null;
+        // With dense fit-all datasets, klinecharts v9 can update its time-scale
+        // coordinates before its canvases repaint. Redraw the native panes first
+        // so candles, native overlays, and the HTML label layer stay on one frame.
+        if (syncChartViewport) chart.resize();
         runFloatingLabelLayout();
       });
     };
@@ -1180,15 +1185,16 @@ function CandlestickChartComponent({
     }
     scheduleFloatingLabelLayout();
     const viewportActions = [ActionType.OnScroll, ActionType.OnZoom, ActionType.OnVisibleRangeChange];
+    const syncFloatingLabelsWithChart = () => scheduleFloatingLabelLayout(true);
     for (const action of viewportActions) {
-      chart.subscribeAction(action, scheduleFloatingLabelLayout);
+      chart.subscribeAction(action, syncFloatingLabelsWithChart);
     }
     analysisOverlayIdsRef.current = nextOverlayIds;
 
     return () => {
       for (const action of viewportActions) {
         try {
-          chart.unsubscribeAction(action, scheduleFloatingLabelLayout);
+          chart.unsubscribeAction(action, syncFloatingLabelsWithChart);
         } catch {
           // The chart can be disposed before React tears this effect down.
         }
