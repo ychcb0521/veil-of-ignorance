@@ -1186,7 +1186,9 @@ export default function GuidePage() {
               </div>
               <P>归类历史交易时，先输入或选择标的，再从该币种所有时间段的仓位历史记录中勾选一组相关交易。被选中的记录共同构成一次交易战役。</P>
               <P>实时战役与历史归类战役必须隔离。实时战役在开仓时归属；历史归类只加入历史战役，不把回填数据混进实时训练口径。</P>
-              <P>列表中的每场战役直接显示战役编号、已实现盈亏、盈亏比和真实操作时间。顶部排序默认按<strong>真实操作时间</strong>，也可以按重要性、盈亏比或字母顺序切换；再次点击同一排序项，可在从大到小 / 从小到大之间切换。指标区同时显示<strong>有效战役（数量）</strong>；点击后可查看最大预期亏损的公式、数据回退口径，以及其中盈利、亏损与盈亏平衡战役的数量。这里的操作时间是客观发生时间，不是无知之幕时间机器里的模拟时间。</P>
+              <P>列表中的每场战役直接显示战役编号、已实现盈亏、盈亏比、单场算术期望、单场几何期望和真实操作时间。顶部排序默认按<strong>真实操作时间</strong>，也可以按重要性、盈亏比、算术期望、几何期望或字母顺序切换；再次点击同一排序项，可在从大到小 / 从小到大之间切换。指标区同时显示<strong>有效战役（数量）</strong>；点击后可查看最大预期亏损的公式、数据回退口径，以及其中盈利、亏损与盈亏平衡战役的数量。这里的操作时间是客观发生时间，不是无知之幕时间机器里的模拟时间。</P>
+
+              <SubTitle>交易战役列表：期望值系列</SubTitle>
               <P><strong>战役级统计统一使用同一个有效样本口径：</strong>战役已经结束，并且存在大于 0 的初始最大预期亏损。计算如下：</P>
               <div className="overflow-x-auto">
                 <table className="w-full text-[11px] my-3 border border-border rounded overflow-hidden">
@@ -1206,6 +1208,8 @@ export default function GuidePage() {
                     <tr><td className="px-3 py-2 border-t border-border">单场算术期望 Eᵢ</td><td className="px-3 py-2 border-t border-border">P(赢) × bᵢ −（1 − P(赢)）</td><td className="px-3 py-2 border-t border-border">使用实时有效战役胜率与该场带符号盈亏比</td></tr>
                     <tr><td className="px-3 py-2 border-t border-border">单场风险比例 xᵢ</td><td className="px-3 py-2 border-t border-border">Lᵢ ÷ 主力开仓时账户总资产 Aᵢ</td><td className="px-3 py-2 border-t border-border">Aᵢ 只使用主力开仓 journal 保存的账户权益快照</td></tr>
                     <tr><td className="px-3 py-2 border-t border-border">单场几何期望 Gᵢ</td><td className="px-3 py-2 border-t border-border">(1+bᵢ·xᵢ)^P(赢) × (1−xᵢ)^(1−P(赢)) − 1</td><td className="px-3 py-2 border-t border-border">bᵢ 可为负；缺少 Aᵢ 时不估算、不参与几何期望排序</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border">汇总 Kelly 仓位 x*</td><td className="px-3 py-2 border-t border-border">b̄ &gt; 0 时：max（0，（P(赢)·b̄ −（1−P(赢)））÷ b̄）；b̄ ≤ 0 时为 0</td><td className="px-3 py-2 border-t border-border">由当前有效样本推导的模型最优风险比例，不是各场实际 xᵢ 的平均值</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border">汇总几何期望 G</td><td className="px-3 py-2 border-t border-border">(1+b̄·x*)^P(赢) × (1−x*)^(1−P(赢)) − 1</td><td className="px-3 py-2 border-t border-border">表示在历史总体参数和 Kelly 最优仓位下的理论每笔复利率</td></tr>
                   </tbody>
                 </table>
               </div>
@@ -1213,6 +1217,41 @@ export default function GuidePage() {
                 没有初始最大预期亏损，就没有可用分母，因此该战役的盈亏比显示「—」。它不会进入盈亏比排序，也不会进入胜率、平均盈亏比和期望值。点击列表顶部的<strong>盈亏比、胜率、平均盈亏比或期望值</strong>，可以查看公式及当前列表数据的代入过程。
               </RedHighlight>
               <P>单场几何期望还要求主力开仓时保存了账户总资产快照。系统不会拿当前资产替代历史资产：旧战役若缺少该快照，仍可计算盈亏比与算术期望，但单场几何期望显示「—」，并从几何期望排序中排除。</P>
+
+              <SubTitle>算术期望与几何期望怎么读</SubTitle>
+              <div className="overflow-x-auto">
+                <table className="w-full text-[11px] my-3 border border-border rounded overflow-hidden">
+                  <thead className="bg-muted/50">
+                    <tr>
+                      <th className="text-left px-3 py-2 font-medium text-foreground text-[10px]">指标</th>
+                      <th className="text-left px-3 py-2 font-medium text-foreground text-[10px]">回答的问题</th>
+                      <th className="text-left px-3 py-2 font-medium text-foreground text-[10px]">不能说明什么</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr><td className="px-3 py-2 border-t border-border">汇总算术期望 E</td><td className="px-3 py-2 border-t border-border">按当前胜率与平均盈亏比，每承担 1R 风险的平均加法收益是多少</td><td className="px-3 py-2 border-t border-border">不反映仓位大小、波动拖累与复利路径</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border">汇总几何期望 G</td><td className="px-3 py-2 border-t border-border">若按模型 Kelly 仓位重复同类战役，理论资本每笔按什么速度复利</td><td className="px-3 py-2 border-t border-border">不是实际历史收益率，也不是对下一笔的保证</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border">单场算术期望 Eᵢ</td><td className="px-3 py-2 border-t border-border">把该场事后实际 bᵢ 放回当前总体胜率后，得到怎样的 R 值</td><td className="px-3 py-2 border-t border-border">不是该场建仓时已经知道的事前期望</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border">单场几何期望 Gᵢ</td><td className="px-3 py-2 border-t border-border">该场实际盈亏结构与当时真实风险比例，对长期复利结构形成怎样的影响</td><td className="px-3 py-2 border-t border-border">不能仅凭一场结果判断策略未来必然盈利或亏损</td></tr>
+                  </tbody>
+                </table>
+              </div>
+              <Highlight>
+                单场 Eᵢ 与 Gᵢ 使用的是事后实际盈亏比 bᵢ，因此它们是复盘指标，不是纯粹的事前预测。真正的事前期望需要使用建仓当时估计的胜率、预期盈利倍数和预期最大亏损比例。
+              </Highlight>
+
+              <SubTitle>几何期望为负意味着什么</SubTitle>
+              <P>几何期望小于 0，表示相应的复利增长因子小于 1：如果在相同胜率、盈亏结构和风险比例下反复执行，理论账户资产会随次数按复利方式缩水。例如几何期望为 −5%/笔，对应的理论路径约为「初始资产 × 0.95ⁿ」。</P>
+              <ul className="list-disc pl-6 text-[14px] text-foreground/90 space-y-1">
+                <li><strong>bᵢ 为正但 Gᵢ 为负：</strong>通常说明胜率不足、盈亏空间不够，或该场风险比例 xᵢ 过大，波动拖累已经吞掉算术优势。</li>
+                <li><strong>bᵢ 为负导致 Gᵢ 为负：</strong>主要描述这场历史结果确实侵蚀了资本；它不等于同类策略未来必然是负期望。</li>
+                <li><strong>算术期望为正但几何期望为负：</strong>表示方向上可能仍有平均优势，但下注过重，长期路径仍可能缩水甚至归零。</li>
+                <li><strong>xᵢ ≥ 100%，或 1+bᵢ·xᵢ ≤ 0：</strong>代表最大预期亏损足以击穿账户权益，单场几何期望按 −100% 处理。</li>
+              </ul>
+              <RedHighlight>
+                几何期望为正不是“这场交易正确”的证明，几何期望为负也不是对未来的判决。它首先是一把检查赔率、胜率与仓位是否共同支持长期复利的尺子。
+              </RedHighlight>
+
               <P>删除战役采用可恢复模式：战役会从正常列表、统计和互关可见范围中移出，但 Legs 与交易记录不会随之消失。列表标题栏右侧的低对比度回收图标可打开“已删除战役”，从中恢复原战役；只有在回收区再次选择“永久删除”时，战役归档才会真正移除。</P>
               <P>互关账户可以打开彼此的战役详情，并留下带可信度权重的留言评价。外部校验只评价当时结构、证伪与执行是否自洽，不用后续走势倒推对错。</P>
 
