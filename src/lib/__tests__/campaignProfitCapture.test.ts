@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   computeDecisionAccuracy,
   computeCampaignInitialRiskFraction,
+  computeInitialExpectedMaxDrawdownPct,
   computeInitialExpectedMaxLoss,
   computeProfitCaptureRatio,
   formatCampaignPayoffRatio,
@@ -108,6 +109,7 @@ describe('campaign profit capture ratio', () => {
     const records = [makeMainRecord()];
 
     // Actual main: 102 x 100 = 10,200 USDT; farthest hedge B is 12/102 away.
+    expect(computeInitialExpectedMaxDrawdownPct(campaign, legs, records)).toBeCloseTo((12 / 102) * 100, 8);
     expect(computeInitialExpectedMaxLoss(campaign, legs, records)).toBeCloseTo(1_200, 8);
     const accuracy = computeDecisionAccuracy(campaign, legs, records, []);
     expect(accuracy.initial_expected_max_loss).toBeCloseTo(1_200, 8);
@@ -275,6 +277,7 @@ describe('campaign profit capture ratio', () => {
     }];
 
     expect(computeInitialExpectedMaxLoss(campaign, legs, [], reverseOrders)).toBeCloseTo(500, 8);
+    expect(computeInitialExpectedMaxDrawdownPct(campaign, legs, [], reverseOrders)).toBeCloseTo(5, 8);
     expect(computeProfitCaptureRatio(campaign, legs, [], reverseOrders)).toBeCloseTo(100, 8);
   });
 
@@ -329,6 +332,7 @@ describe('campaign profit capture ratio', () => {
     const legs = [makeLeg('main', 'main_open', 100)];
 
     expect(computeInitialExpectedMaxLoss(campaign, legs, [])).toBe(0);
+    expect(computeInitialExpectedMaxDrawdownPct(campaign, legs, [])).toBe(0);
     expect(computeDecisionAccuracy(campaign, legs, [], []).profit_capture_ratio).toBe(0);
   });
 });

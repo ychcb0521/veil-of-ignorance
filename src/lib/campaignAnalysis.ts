@@ -92,19 +92,23 @@ function findInitialMainLeg(legs: TradeJournal[]): TradeJournal | null {
     .sort((a, b) => toMs(a.pre_simulated_time) - toMs(b.pre_simulated_time))[0] ?? null;
 }
 
+interface InitialRiskAnchor {
+  mainNotional: number;
+  drawdownFraction: number;
+}
+
 /**
- * Initial risk anchor used by 盈亏比:
- * main notional x the widest distance from the original main entry to hedge A/B.
- * The denominator describes risk known before execution. Historical role legs
- * are reconstructed from fills, so preserved order snapshots take precedence;
- * actual fill prices are only a fallback when no original snapshot survives.
+ * Resolve the shared initial risk anchor used by maximum drawdown percentage
+ * and maximum expected loss. Historical role legs are reconstructed from
+ * fills, so preserved order snapshots take precedence; actual fill prices are
+ * only a fallback when no original snapshot survives.
  */
-export function computeInitialExpectedMaxLoss(
+function resolveInitialRiskAnchor(
   campaign: TradeCampaign,
   legs: TradeJournal[],
   tradeRecords: TradeRecord[],
   reverseHedgeOrders: CampaignReverseHedgeOrder[] = [],
-): number {
+): InitialRiskAnchor | null {
   const mainLeg = findInitialMainLeg(legs);
   const mainRecord = mainLeg ? findTradeRecord(mainLeg, tradeRecords) : null;
   const mainEvent = (campaign.actual_evolution ?? []).find(event =>
@@ -123,7 +127,7 @@ export function computeInitialExpectedMaxLoss(
     campaign.initial_main_size_usdt,
     mainEvent?.size_usdt,
   );
-  if (entryPrice == null || mainNotional == null) return 0;
+  if (entryPrice == null || mainNotional == null) return null;
   const historical = isHistoricalCampaign(campaign);
 
   const roleHedgePrices = INITIAL_HEDGE_ROLES.flatMap(role => {
@@ -175,10 +179,40 @@ export function computeInitialExpectedMaxLoss(
       if (hedgePrices.length >= INITIAL_HEDGE_ROLES.length) break;
     }
   }
-  if (hedgePrices.length === 0) return 0;
+  if (hedgePrices.length === 0) return null;
 
-  const widestRiskRate = Math.max(...hedgePrices.map(price => Math.abs(price - entryPrice) / entryPrice));
-  return widestRiskRate * mainNotional;
+  return {
+    mainNotional,
+    drawdownFraction: Math.max(...hedgePrices.map(price => Math.abs(price - entryPrice) / entryPrice)),
+  };
+}
+
+/**
+ * max(|main entry - initial hedge A|, |main entry - initial hedge B|)
+ * divided by the main entry price, expressed in percentage points.
+ */
+export function computeInitialExpectedMaxDrawdownPct(
+  campaign: TradeCampaign,
+  legs: TradeJournal[],
+  tradeRecords: TradeRecord[],
+  reverseHedgeOrders: CampaignReverseHedgeOrder[] = [],
+): number {
+  const anchor = resolveInitialRiskAnchor(campaign, legs, tradeRecords, reverseHedgeOrders);
+  return anchor == null ? 0 : anchor.drawdownFraction * 100;
+}
+
+/**
+ * Initial maximum expected loss used by payoff ratio:
+ * main notional x initial maximum expected drawdown fraction.
+ */
+export function computeInitialExpectedMaxLoss(
+  campaign: TradeCampaign,
+  legs: TradeJournal[],
+  tradeRecords: TradeRecord[],
+  reverseHedgeOrders: CampaignReverseHedgeOrder[] = [],
+): number {
+  const anchor = resolveInitialRiskAnchor(campaign, legs, tradeRecords, reverseHedgeOrders);
+  return anchor == null ? 0 : anchor.drawdownFraction * anchor.mainNotional;
 }
 
 export interface CampaignInitialRiskFraction {

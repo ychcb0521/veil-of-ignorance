@@ -19,6 +19,7 @@ import {
   updateCampaignImportance,
 } from '@/lib/journalApi';
 import {
+  computeInitialExpectedMaxDrawdownPct,
   computeInitialExpectedMaxLoss,
   computeProfitCaptureRatio,
   formatCampaignPayoffRatio,
@@ -43,8 +44,8 @@ type CampaignCardData = {
   tradeRecords: TradeRecord[];
   profitCaptureRatio: number | null;
   initialExpectedMaxLoss: number;
+  initialExpectedMaxDrawdownPct: number;
   opportunityQuality: number | null;
-  opportunityQualitySource: 'post' | 'pre' | null;
 };
 
 type CampaignDisplayData = CampaignCardData & {
@@ -165,41 +166,24 @@ function campaignSortTime(row: CampaignCardData): number {
 
 function resolveCampaignOpportunityQuality(
   campaign: TradeCampaign,
-  legs: TradeJournal[],
   profitCaptureRatio: number | null,
-): {
-  value: number | null;
-  source: 'post' | 'pre' | null;
-} {
+  initialExpectedMaxDrawdownPct: number,
+): number | null {
   const resolved = ['closed_profit', 'closed_loss', 'closed_breakeven'].includes(campaign.status)
     && Number.isFinite(campaign.final_realized_pnl);
-  if (!resolved || profitCaptureRatio == null || !Number.isFinite(profitCaptureRatio)) {
-    return { value: null, source: null };
+  if (
+    !resolved
+    || profitCaptureRatio == null
+    || !Number.isFinite(profitCaptureRatio)
+    || !Number.isFinite(initialExpectedMaxDrawdownPct)
+    || initialExpectedMaxDrawdownPct <= 0
+  ) {
+    return null;
   }
-  const mainLeg = [...legs]
-    .filter(leg => leg.leg_role === 'main_open' || (leg.leg_role == null && leg.order_kind === 'main'))
-    .sort((a, b) => {
-      const aSequence = a.leg_sequence ?? Number.MAX_SAFE_INTEGER;
-      const bSequence = b.leg_sequence ?? Number.MAX_SAFE_INTEGER;
-      if (aSequence !== bSequence) return aSequence - bSequence;
-      return new Date(a.pre_real_time || a.pre_simulated_time).getTime()
-        - new Date(b.pre_real_time || b.pre_simulated_time).getTime();
-    })[0];
-  if (!mainLeg) return { value: null, source: null };
-
-  const postValue = computeRealizedOpportunityQuality({
+  return computeRealizedOpportunityQuality({
     payoffRatio: profitCaptureRatio / 100,
-    drawdownPct: mainLeg.post_opportunity_quality_drawdown_pct,
+    drawdownPct: initialExpectedMaxDrawdownPct,
   });
-  if (postValue != null) return { value: postValue, source: 'post' };
-
-  const preValue = computeRealizedOpportunityQuality({
-    payoffRatio: profitCaptureRatio / 100,
-    drawdownPct: mainLeg.pre_opportunity_quality_drawdown_pct,
-  });
-  return preValue == null
-    ? { value: null, source: null }
-    : { value: preValue, source: 'pre' };
 }
 
 function pnlSortValue(campaign: Pick<TradeCampaign, 'final_realized_pnl'>): number {
@@ -431,6 +415,12 @@ export default function JournalCampaignsPage() {
               details.tradeRecords,
               details.reverseHedgeOrders,
             );
+            const initialExpectedMaxDrawdownPct = computeInitialExpectedMaxDrawdownPct(
+              details.campaign,
+              details.legs,
+              details.tradeRecords,
+              details.reverseHedgeOrders,
+            );
             const profitCaptureRatio = Number.isFinite(initialExpectedMaxLoss) && initialExpectedMaxLoss > 0
               ? computeProfitCaptureRatio(
                 details.campaign,
@@ -441,8 +431,8 @@ export default function JournalCampaignsPage() {
               : null;
             const opportunityQuality = resolveCampaignOpportunityQuality(
               details.campaign,
-              details.legs,
               profitCaptureRatio,
+              initialExpectedMaxDrawdownPct,
             );
             return {
               campaign: details.campaign,
@@ -450,8 +440,8 @@ export default function JournalCampaignsPage() {
               tradeRecords: details.tradeRecords,
               profitCaptureRatio,
               initialExpectedMaxLoss,
-              opportunityQuality: opportunityQuality.value,
-              opportunityQualitySource: opportunityQuality.source,
+              initialExpectedMaxDrawdownPct,
+              opportunityQuality,
             };
           }),
         );
@@ -528,8 +518,6 @@ export default function JournalCampaignsPage() {
     return {
       average: samples.length > 0 ? sum / samples.length : null,
       sampleCount: samples.length,
-      postCount: samples.filter(row => row.opportunityQualitySource === 'post').length,
-      preCount: samples.filter(row => row.opportunityQualitySource === 'pre').length,
     };
   }, [rows]);
   const displayRows = useMemo<CampaignDisplayData[]>(
@@ -659,6 +647,12 @@ export default function JournalCampaignsPage() {
           details.tradeRecords,
           details.reverseHedgeOrders,
         );
+        const initialExpectedMaxDrawdownPct = computeInitialExpectedMaxDrawdownPct(
+          details.campaign,
+          details.legs,
+          details.tradeRecords,
+          details.reverseHedgeOrders,
+        );
         const profitCaptureRatio = Number.isFinite(initialExpectedMaxLoss) && initialExpectedMaxLoss > 0
           ? computeProfitCaptureRatio(
             details.campaign,
@@ -669,8 +663,8 @@ export default function JournalCampaignsPage() {
           : null;
         const opportunityQuality = resolveCampaignOpportunityQuality(
           details.campaign,
-          details.legs,
           profitCaptureRatio,
+          initialExpectedMaxDrawdownPct,
         );
         const restoredRow: CampaignCardData = {
           campaign: { ...details.campaign, deleted_at: null },
@@ -678,8 +672,8 @@ export default function JournalCampaignsPage() {
           tradeRecords: details.tradeRecords,
           profitCaptureRatio,
           initialExpectedMaxLoss,
-          opportunityQuality: opportunityQuality.value,
-          opportunityQualitySource: opportunityQuality.source,
+          initialExpectedMaxDrawdownPct,
+          opportunityQuality,
         };
         setRows(current => [restoredRow, ...current.filter(item => item.campaign.id !== campaign.id)]);
       }
@@ -781,7 +775,7 @@ export default function JournalCampaignsPage() {
               const invalidCampaignHint = option.value === 'geometricExpectancy'
                 ? '；缺少最大预期亏损的战役不显示；旧战役缺少开仓资产快照时按当前总资产估算'
                 : option.value === 'opportunityQuality'
-                  ? '；缺少实际盈亏比或回撤百分点的战役不显示'
+                  ? '；缺少实际盈亏比或初始最大回撤百分比的战役不显示'
                 : formula != null
                   ? '；未设置最大预期亏损的战役不显示'
                   : '';
@@ -844,13 +838,16 @@ export default function JournalCampaignsPage() {
                       <>
                         <div className="font-medium text-foreground">单场机会质量计算公式</div>
                         <div className="mt-2 rounded bg-muted/60 px-2 py-1.5 font-mono text-foreground">
-                          Qᵢ = 实际盈亏比 bᵢ ÷ 预期回撤百分点 dᵢ
+                          Qᵢ = 实际盈亏比 bᵢ ÷ 初始最大回撤百分点 dᵢ
                         </div>
                         <div className="mt-2 space-y-1 text-muted-foreground">
                           <div>bᵢ = 已实现盈亏ᵢ ÷ 初始最大预期亏损ᵢ，盈利为正、亏损为负。</div>
-                          <div>dᵢ 优先使用平仓评价中的回撤评估；缺失时使用开仓快照中的回撤判断。</div>
+                          <div className="rounded border border-border/60 px-2 py-1.5 font-mono leading-relaxed text-foreground/85">
+                            dᵢ = max（|主力开仓价 − 初始对冲 A 价|，|主力开仓价 − 初始对冲 B 价|）÷ 主力开仓价 × 100
+                          </div>
                           <div>2% 回撤按 2 计算，不按 0.02 计算。</div>
-                          <div>缺少实际盈亏比或有效回撤百分点的战役不参与排序。</div>
+                          <div>历史战役沿用最大预期亏损的价格解析规则：原始委托快照优先，缺失时才回退到角色记录。</div>
+                          <div>缺少实际盈亏比、主力开仓价或初始对冲 A/B 价格的战役不参与排序。</div>
                         </div>
                       </>
                     ) : formula === 'arithmeticExpectancy' ? (
@@ -1092,13 +1089,15 @@ export default function JournalCampaignsPage() {
                   Qᵢ = bᵢ ÷ dᵢ，Q̄ = ΣQᵢ ÷ N
                 </div>
                 <div className="mt-2 space-y-1 text-muted-foreground">
-                  <div>bᵢ = 该战役带正负号的实际盈亏比；dᵢ = 预期最大回撤百分点。</div>
+                  <div>bᵢ = 该战役带正负号的实际盈亏比；dᵢ = 初始最大回撤百分点。</div>
                   <div>实际盈亏比 = 已实现盈亏 ÷ 初始最大预期亏损；亏损战役的 Q 保留负号。</div>
+                  <div className="rounded border border-border/60 px-2 py-1.5 font-mono leading-relaxed text-foreground/85">
+                    dᵢ = max（|主力开仓价 − 初始对冲 A 价|，|主力开仓价 − 初始对冲 B 价|）÷ 主力开仓价 × 100
+                  </div>
                   <div>2% 回撤按 2 计算，不按 0.02 计算。例：实际盈亏比 5、回撤 2%，Q = 2.50。</div>
-                  <div>dᵢ 优先采用平仓评价中的回撤评估；未评价时使用开仓快照的回撤判断。</div>
-                  <div>缺少实际盈亏比或有效回撤百分点的战役不纳入平均。</div>
+                  <div>缺少实际盈亏比、主力开仓价或初始对冲 A/B 价格的战役不纳入平均。</div>
                   <div className="border-t border-border/60 pt-1.5">
-                    当前 N = {opportunityQualityStats.sampleCount}：平仓回撤评估 {opportunityQualityStats.postCount} 场，开仓回撤判断 {opportunityQualityStats.preCount} 场。
+                    当前 N = {opportunityQualityStats.sampleCount} 场。
                   </div>
                 </div>
               </PopoverContent>
@@ -1129,7 +1128,7 @@ export default function JournalCampaignsPage() {
                 ? sortState.mode === 'geometricExpectancy'
                   ? '旧战役缺少开仓资产快照时会按当前总资产估算；缺少初始最大预期亏损的战役仍不会进入当前排序'
                   : sortState.mode === 'opportunityQuality'
-                    ? '缺少实际盈亏比或有效回撤百分点的战役不会进入当前排序'
+                    ? '缺少实际盈亏比、主力开仓价或初始对冲 A/B 价格的战役不会进入当前排序'
                     : '未设置初始最大预期亏损的战役不会进入当前排序'
                 : scope === 'own' ? '你下次开主力单时会自动创建第一个战役' : '双方互关后，对方战役会出现在这里'}
             </div>
@@ -1140,8 +1139,8 @@ export default function JournalCampaignsPage() {
             legs,
             tradeRecords,
             profitCaptureRatio,
+            initialExpectedMaxDrawdownPct,
             opportunityQuality,
-            opportunityQualitySource,
             initialRiskFraction,
             initialRiskSource,
             riskAccountEquity,
@@ -1243,8 +1242,8 @@ export default function JournalCampaignsPage() {
                   <div
                     data-testid="campaign-opportunity-quality-value"
                     title={opportunityQuality == null
-                      ? '需要已结束战役的实际盈亏比，以及开仓或平仓评价中的有效回撤百分点'
-                      : `Q = 实际盈亏比 ÷ ${opportunityQualitySource === 'post' ? '平仓回撤评估' : '开仓回撤判断'}`}
+                      ? '需要已结束战役的实际盈亏比、主力开仓价和至少一个初始对冲 A/B 价格'
+                      : `Q = 实际盈亏比 ${(profitCaptureRatio! / 100).toFixed(2)} ÷ 初始最大回撤 ${initialExpectedMaxDrawdownPct.toFixed(2)}%`}
                   >
                     机会质量：{formatOpportunityQuality(opportunityQuality)}
                   </div>
