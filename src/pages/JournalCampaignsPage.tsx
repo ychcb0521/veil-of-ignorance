@@ -26,12 +26,15 @@ import {
   resolveCampaignInitialRiskFraction,
 } from '@/lib/campaignAnalysis';
 import type { CampaignInitialRiskSource } from '@/lib/campaignAnalysis';
+import {
+  computeCampaignExpectancies,
+  formatArithmeticExpectancy,
+  formatGeometricExpectancy,
+  resolveCampaignOpportunityQuality,
+} from '@/lib/campaignMetrics';
 import { summarizeCampaignPerformance } from '@/lib/kellySizing';
 import { computeGeometricExpectancy } from '@/lib/geometricExpectancy';
-import {
-  computeRealizedOpportunityQuality,
-  formatOpportunityQuality,
-} from '@/lib/opportunityQuality';
+import { formatOpportunityQuality } from '@/lib/opportunityQuality';
 import { LEG_ROLE_LABELS, STRATEGY_TEMPLATES } from '@/lib/strategyTemplates';
 import { campaignOperationTime } from '@/lib/objectiveOperationTime';
 import { formatBeijingTime } from '@/lib/timeFormat';
@@ -164,28 +167,6 @@ function campaignSortTime(row: CampaignCardData): number {
   return campaignOperationTime(row.legs, row.tradeRecords) ?? 0;
 }
 
-function resolveCampaignOpportunityQuality(
-  campaign: TradeCampaign,
-  profitCaptureRatio: number | null,
-  initialExpectedMaxDrawdownPct: number,
-): number | null {
-  const resolved = ['closed_profit', 'closed_loss', 'closed_breakeven'].includes(campaign.status)
-    && Number.isFinite(campaign.final_realized_pnl);
-  if (
-    !resolved
-    || profitCaptureRatio == null
-    || !Number.isFinite(profitCaptureRatio)
-    || !Number.isFinite(initialExpectedMaxDrawdownPct)
-    || initialExpectedMaxDrawdownPct <= 0
-  ) {
-    return null;
-  }
-  return computeRealizedOpportunityQuality({
-    payoffRatio: profitCaptureRatio / 100,
-    drawdownPct: initialExpectedMaxDrawdownPct,
-  });
-}
-
 function pnlSortValue(campaign: Pick<TradeCampaign, 'final_realized_pnl'>): number {
   const value = Number(campaign.final_realized_pnl);
   return Number.isFinite(value) ? value : Number.NaN;
@@ -230,42 +211,6 @@ function comparePnl(
   direction: CampaignSortDirection,
 ): number {
   return compareFiniteMetric(pnlSortValue(a), pnlSortValue(b), direction);
-}
-
-function computeCampaignExpectancies(
-  profitCaptureRatio: number | null,
-  winRate: number | null,
-  campaignDrawdownFraction: number | null,
-): Pick<CampaignDisplayData, 'arithmeticExpectancy' | 'geometricExpectancy'> {
-  if (
-    profitCaptureRatio == null
-    || winRate == null
-    || !Number.isFinite(profitCaptureRatio)
-    || !Number.isFinite(winRate)
-  ) {
-    return { arithmeticExpectancy: null, geometricExpectancy: null };
-  }
-  const payoffRatio = profitCaptureRatio / 100;
-  const arithmeticExpectancy = winRate * payoffRatio - (1 - winRate);
-  const geometric = campaignDrawdownFraction != null && Number.isFinite(campaignDrawdownFraction)
-    ? computeGeometricExpectancy(winRate, payoffRatio, campaignDrawdownFraction)
-    : null;
-  return {
-    arithmeticExpectancy,
-    geometricExpectancy: geometric?.geometricEdge ?? null,
-  };
-}
-
-function formatArithmeticExpectancy(value: number | null): string {
-  if (value == null || !Number.isFinite(value)) return '—';
-  const normalized = Math.abs(value) < 0.0005 ? 0 : value;
-  return `${normalized >= 0 ? '+' : ''}${normalized.toFixed(2)}R`;
-}
-
-function formatGeometricExpectancy(value: number | null): string {
-  if (value == null || !Number.isFinite(value)) return '—';
-  const normalized = Math.abs(value) < 0.0005 ? 0 : value;
-  return `${normalized >= 0 ? '+' : ''}${(normalized * 100).toFixed(1)}%/笔`;
 }
 
 function sortCampaignRows(rows: CampaignDisplayData[], sort: CampaignSortState): CampaignDisplayData[] {

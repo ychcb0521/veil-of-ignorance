@@ -17,12 +17,23 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useTradingContext } from '@/contexts/TradingContext';
 import { intervalToMs } from '@/hooks/useBinanceData';
 import { buildCampaignKlineTimeWindow, useCampaignKlines } from '@/hooks/useCampaignKlines';
+import { computeCurrentAccountEquity } from '@/lib/accountEquity';
 import {
   buildCampaignEventStream,
   computeDecisionAccuracy,
+  computeInitialExpectedMaxDrawdownPct,
+  computeInitialExpectedMaxLoss,
+  computeProfitCaptureRatio,
   formatCampaignPayoffRatio,
+  resolveCampaignInitialRiskFraction,
   shouldSuggestCampaignEnd,
 } from '@/lib/campaignAnalysis';
+import {
+  computeCampaignExpectancies,
+  formatArithmeticExpectancy,
+  formatGeometricExpectancy,
+  resolveCampaignOpportunityQuality,
+} from '@/lib/campaignMetrics';
 import { buildCampaignChartContentTimeSpan, pickCampaignOverviewInterval, type CampaignChartInterval } from '@/lib/campaignChartContentSpan';
 import { fetchCanonicalTimePriceAt } from '@/lib/canonicalTimePrice';
 import {
@@ -41,13 +52,17 @@ import {
   followAccount,
   getCampaignFullData,
   hasMutualFollow,
+  listAllCampaigns,
   saveCampaignDeviationNotes,
   syncCampaignDeviationRulesToChecklist,
   type CampaignDeviationNote,
   listCampaignComments,
   listCounterfactuals,
+  listVisibleCampaigns,
   runAndPersistCustomCounterfactual,
 } from '@/lib/journalApi';
+import { summarizeCampaignPerformance, type CampaignPerformanceSummary } from '@/lib/kellySizing';
+import { formatOpportunityQuality } from '@/lib/opportunityQuality';
 import { STRATEGY_TEMPLATES } from '@/lib/strategyTemplates';
 import {
   buildActualSimulationParams,
@@ -393,12 +408,41 @@ function buildCounterfactualChartArtifacts(
   return { markers, timeBoundPriceLines, verticalLines };
 }
 
+async function loadAccountCampaignPerformance(
+  ownerUserId: string,
+  viewerUserId: string,
+): Promise<CampaignPerformanceSummary> {
+  const campaigns = ownerUserId === viewerUserId
+    ? await listAllCampaigns(ownerUserId)
+    : (await listVisibleCampaigns(viewerUserId)).filter(item => item.user_id === ownerUserId);
+  const samples = await Promise.all(campaigns.map(async item => {
+    const details = await getCampaignFullData(item.id);
+    const initialExpectedMaxLoss = computeInitialExpectedMaxLoss(
+      details.campaign,
+      details.legs,
+      details.tradeRecords,
+      details.reverseHedgeOrders,
+    );
+    const payoffRatio = Number.isFinite(initialExpectedMaxLoss) && initialExpectedMaxLoss > 0
+      ? computeProfitCaptureRatio(
+        details.campaign,
+        details.legs,
+        details.tradeRecords,
+        details.reverseHedgeOrders,
+      ) / 100
+      : null;
+    return { campaign: details.campaign, payoffRatio };
+  }));
+
+  return summarizeCampaignPerformance(samples);
+}
+
 export default function JournalCampaignDetailPage() {
   const { id } = useParams<{ id: string }>();
   const nav = useNavigate();
   const location = useLocation();
   const { user } = useAuth();
-  const { getEffectiveTime } = useTradingContext();
+  const { getEffectiveTime, balance, positionsMap, priceMap } = useTradingContext();
   const [loading, setLoading] = useState(true);
   const [campaign, setCampaign] = useState<TradeCampaign | null>(null);
   const [legs, setLegs] = useState<TradeJournal[]>([]);
@@ -430,6 +474,9 @@ export default function JournalCampaignDetailPage() {
   const [commentSaving, setCommentSaving] = useState(false);
   const [followeeId, setFolloweeId] = useState('');
   const [following, setFollowing] = useState(false);
+  const [campaignPerformance, setCampaignPerformance] = useState<CampaignPerformanceSummary | null>(null);
+  const [campaignPerformanceLoading, setCampaignPerformanceLoading] = useState(false);
+  const [campaignPerformanceError, setCampaignPerformanceError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!id || !user) return;
@@ -474,6 +521,30 @@ export default function JournalCampaignDetailPage() {
     })();
     return () => { cancelled = true; };
   }, [id, user, nav, location.search]);
+
+  useEffect(() => {
+    if (!campaign || !user) return;
+    let cancelled = false;
+    setCampaignPerformance(null);
+    setCampaignPerformanceError(null);
+    setCampaignPerformanceLoading(true);
+    loadAccountCampaignPerformance(campaign.user_id, user.id)
+      .then(summary => {
+        if (!cancelled) setCampaignPerformance(summary);
+      })
+      .catch(error => {
+        if (!cancelled) {
+          setCampaignPerformanceError(error instanceof Error ? error.message : String(error));
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setCampaignPerformanceLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [campaign, user]);
 
   const effectiveClosedAt = useMemo(() => {
     if (!campaign) return null;
@@ -609,6 +680,54 @@ export default function JournalCampaignDetailPage() {
     () => (campaign ? computeDecisionAccuracy(campaign, legs, tradeRecords, klines, reverseHedgeOrders) : null),
     [campaign, legs, tradeRecords, klines, reverseHedgeOrders],
   );
+  const currentAccountEquity = useMemo(
+    () => computeCurrentAccountEquity(balance, positionsMap, priceMap),
+    [balance, positionsMap, priceMap],
+  );
+  const campaignMetricValues = useMemo(() => {
+    if (!campaign || !accuracy) return null;
+    const profitCaptureRatio = accuracy.initial_expected_max_loss > 0
+      ? accuracy.profit_capture_ratio
+      : null;
+    const initialExpectedMaxDrawdownPct = computeInitialExpectedMaxDrawdownPct(
+      campaign,
+      legs,
+      tradeRecords,
+      reverseHedgeOrders,
+    );
+    const opportunityQuality = resolveCampaignOpportunityQuality(
+      campaign,
+      profitCaptureRatio,
+      initialExpectedMaxDrawdownPct,
+    );
+    const initialRisk = resolveCampaignInitialRiskFraction(
+      accuracy.initial_expected_max_loss,
+      legs,
+      isOwner ? currentAccountEquity : null,
+    );
+    const expectancies = computeCampaignExpectancies(
+      profitCaptureRatio,
+      campaignPerformance?.expectedWinRate ?? null,
+      initialRisk?.drawdownFraction ?? null,
+    );
+
+    return {
+      profitCaptureRatio,
+      initialExpectedMaxDrawdownPct,
+      opportunityQuality,
+      initialRisk,
+      ...expectancies,
+    };
+  }, [
+    accuracy,
+    campaign,
+    campaignPerformance?.expectedWinRate,
+    currentAccountEquity,
+    isOwner,
+    legs,
+    reverseHedgeOrders,
+    tradeRecords,
+  ]);
   const chart = useMemo(
     () => (campaign ? buildChartArtifacts(campaign, legs, tradeRecords, legExitPriceCorrections) : { markers: [], timeBoundPriceLines: [], verticalLines: [], events: [] }),
     [campaign, legs, tradeRecords, legExitPriceCorrections],
@@ -1053,13 +1172,99 @@ export default function JournalCampaignDetailPage() {
             <div className="text-[11px] text-muted-foreground/70 pt-1">未标注的时间均为 K 线（模拟）时间。</div>
           </div>
 
-          <div className="bg-card border border-border rounded p-4 space-y-2 text-[12px]">
+          <div className="bg-card border border-border rounded p-4 text-[12px]">
             <div className="font-medium">盈亏概览</div>
-            <div className={pnlColor(campaign.final_realized_pnl)}>已实现 P&L：{campaign.final_realized_pnl?.toFixed(2) ?? '—'} USDT</div>
-            <div>峰值浮盈：{accuracy.campaign_max_profit_real.toFixed(2)}</div>
-            <div>最大回撤：{accuracy.campaign_max_drawdown_real.toFixed(2)}</div>
-            <div>最大预期亏损：{accuracy.initial_expected_max_loss.toFixed(2)} USDT</div>
-            <div>盈亏比：{formatCampaignPayoffRatio(accuracy.profit_capture_ratio)}</div>
+            <div className="mt-3 grid grid-cols-1 gap-x-8 gap-y-2 sm:grid-cols-2">
+              <div className="flex items-baseline justify-between gap-3">
+                <span className="text-muted-foreground">已实现 P&amp;L</span>
+                <span className={`font-mono ${pnlColor(campaign.final_realized_pnl)}`}>
+                  {campaign.final_realized_pnl?.toFixed(2) ?? '—'} USDT
+                </span>
+              </div>
+              <div className="flex items-baseline justify-between gap-3">
+                <span className="text-muted-foreground">峰值浮盈</span>
+                <span className="font-mono">{accuracy.campaign_max_profit_real.toFixed(2)}</span>
+              </div>
+              <div className="flex items-baseline justify-between gap-3">
+                <span className="text-muted-foreground">最大回撤</span>
+                <span className="font-mono">{accuracy.campaign_max_drawdown_real.toFixed(2)}</span>
+              </div>
+              <div className="flex items-baseline justify-between gap-3">
+                <span className="text-muted-foreground">最大预期亏损</span>
+                <span className="font-mono">
+                  {accuracy.initial_expected_max_loss > 0 ? `${accuracy.initial_expected_max_loss.toFixed(2)} USDT` : '—'}
+                </span>
+              </div>
+              <div
+                className="flex items-baseline justify-between gap-3"
+                title="d = max(|主力开仓价 − 初始对冲 A 价|, |主力开仓价 − 初始对冲 B 价|) ÷ 主力开仓价"
+              >
+                <span className="text-muted-foreground">初始最大回撤</span>
+                <span className="font-mono">
+                  {campaignMetricValues && campaignMetricValues.initialExpectedMaxDrawdownPct > 0
+                    ? `${campaignMetricValues.initialExpectedMaxDrawdownPct.toFixed(2)}%`
+                    : '—'}
+                </span>
+              </div>
+              <div
+                className="flex items-baseline justify-between gap-3"
+                title="盈亏比 = 已实现盈亏 ÷ 初始最大预期亏损"
+              >
+                <span className="text-muted-foreground">盈亏比</span>
+                <span className={`font-mono ${pnlColor(campaignMetricValues?.profitCaptureRatio ?? null)}`}>
+                  {campaignMetricValues?.profitCaptureRatio == null
+                    ? '—'
+                    : formatCampaignPayoffRatio(campaignMetricValues.profitCaptureRatio)}
+                </span>
+              </div>
+              <div
+                className="flex items-baseline justify-between gap-3"
+                title={campaignMetricValues?.opportunityQuality == null
+                  ? '需要已结束战役的实际盈亏比、主力开仓价和至少一个初始对冲 A/B 价格'
+                  : `Q = 实际盈亏比 ${(campaignMetricValues.profitCaptureRatio! / 100).toFixed(2)} ÷ 初始最大回撤 ${campaignMetricValues.initialExpectedMaxDrawdownPct.toFixed(2)}%`}
+              >
+                <span className="text-muted-foreground">机会质量</span>
+                <span className={`font-mono ${pnlColor(campaignMetricValues?.opportunityQuality ?? null)}`}>
+                  {formatOpportunityQuality(campaignMetricValues?.opportunityQuality ?? null)}
+                </span>
+              </div>
+              <div
+                className="flex items-baseline justify-between gap-3"
+                title={campaignPerformance?.expectedWinRate != null && campaignMetricValues?.profitCaptureRatio != null
+                  ? `E = ${(campaignPerformance.expectedWinRate * 100).toFixed(2)}% × ${(campaignMetricValues.profitCaptureRatio / 100).toFixed(2)} − ${((1 - campaignPerformance.expectedWinRate) * 100).toFixed(2)}%`
+                  : '需要当前战役的有效盈亏比与同一账户有效战役胜率'}
+              >
+                <span className="text-muted-foreground">算术期望</span>
+                <span className={`font-mono ${pnlColor(campaignMetricValues?.arithmeticExpectancy ?? null)}`}>
+                  {formatArithmeticExpectancy(campaignMetricValues?.arithmeticExpectancy ?? null)}
+                </span>
+              </div>
+              <div
+                className="flex items-baseline justify-between gap-3"
+                title={campaignMetricValues?.initialRisk == null
+                  ? '需要有效的最大预期亏损和主力开仓账户总资产；历史战役可使用今日当前总资产回退估算'
+                  : `G = (1+b·x)^P · (1−x)^(1−P)；x = ${(campaignMetricValues.initialRisk.drawdownFraction * 100).toFixed(2)}%`}
+              >
+                <span className="text-muted-foreground">几何期望</span>
+                <span className={`font-mono ${pnlColor(campaignMetricValues?.geometricExpectancy ?? null)}`}>
+                  {formatGeometricExpectancy(campaignMetricValues?.geometricExpectancy ?? null)}
+                </span>
+              </div>
+            </div>
+            <div className="mt-3 border-t border-border/70 pt-2 text-[10px] text-muted-foreground">
+              {campaignPerformanceLoading
+                ? '正在按同一账户的有效战役口径计算期望…'
+                : campaignPerformanceError
+                  ? `期望口径加载失败：${campaignPerformanceError}`
+                  : campaignPerformance?.expectedWinRate == null
+                    ? '暂无可计算胜率的有效战役样本。'
+                    : `期望口径：${campaignPerformance.payoffRatioSampleCount} 场有效战役，实时胜率 ${(campaignPerformance.expectedWinRate * 100).toFixed(2)}%。`}
+              {campaignMetricValues?.initialRisk?.source === 'current_account_fallback'
+                ? ' 本场几何期望的资产分母使用今日当前总账户资产估算。'
+                : campaignMetricValues?.initialRisk?.source === 'main_open_snapshot'
+                  ? ' 本场几何期望的资产分母使用主力开仓实时总资产快照。'
+                  : ''}
+            </div>
           </div>
 
         </section>

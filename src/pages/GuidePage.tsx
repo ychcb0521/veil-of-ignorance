@@ -1295,7 +1295,7 @@ export default function GuidePage() {
               </Highlight>
 
               <SubTitle>战役详情页：盈亏概览与高清 PNG</SubTitle>
-              <P>详情页的<strong>盈亏概览</strong>统一展示已实现盈亏、峰值浮盈、最大回撤、初始最大预期亏损和盈亏比。这里的盈亏比使用上方同一公式，不是用峰值浮盈替代实际结果。</P>
+              <P>详情页的<strong>盈亏概览</strong>统一展示已实现盈亏、峰值浮盈、最大回撤、初始最大预期亏损、初始最大回撤、盈亏比、机会质量、单场算术期望和单场几何期望。这些数据与战役列表使用同一套公式：期望指标使用同一账户当前的有效战役胜率，历史战役的几何期望在缺少开仓资产快照时才使用今日当前总资产估算。</P>
               <ul className="list-disc pl-6 text-[14px] text-foreground/90 space-y-1">
                 <li>点击 Legs 列表右上角的 <strong>PNG</strong>，会把<strong>战役原数据、盈亏概览、当前已经拖动 / 缩放好的 K 线视图，以及完整 Legs 列表</strong>导出到同一张高清图片。</li>
                 <li>Legs 导出不受页面滚动区域限制；未滚动出来的腿、时间、价格、仓位、状态与反向挂单也会完整展开。图片高度随内容自动增长。</li>
