@@ -37,15 +37,12 @@ import { calcUnrealizedPnl } from "@/types/trading";
 import type { ExecutionTradeSnapshot } from "@/lib/executionAssets";
 import type { AssetState } from "@/types/assets";
 import {
-  POSITION_DUST_EPSILON,
   executeSettlementFill,
   formatSettlementQuantity,
   getPositionNotionalUsd,
   getPositionUnits,
   isCoinSettled,
   isPositionOpen,
-  scaleSettlementPosition,
-  settlePositionClose,
 } from "@/lib/tradingSettlement";
 import {
   Dialog,
@@ -137,7 +134,6 @@ const Index = () => {
     setBalance,
     isolatedBalances,
     tradeHistory,
-    setTradeHistory,
     activeSymbolPositions,
     activeSymbolOrders,
     allPositions,
@@ -152,6 +148,7 @@ const Index = () => {
     handleClosePosition,
     handleCancelOrder,
     handlePlaceTpSl,
+    executeReduceOnlyTrigger,
     handleAddIsolatedMargin,
     handleAdjustMargin,
     handleClearSymbolData,
@@ -286,12 +283,12 @@ const Index = () => {
   const effectiveSimTimeRef = useRef(effectiveSimTime);
   const priceProtectionRef = useRef(priceProtection);
   const ordersMapRef = useRef(ordersMap);
-  const positionsMapRef = useRef(positionsMap);
   const priceMapRef = useRef(priceMap);
   const currentPriceRef = useRef(currentPrice);
   const latestVisiblePriceRef = useRef(latestVisiblePrice);
   const canonicalPriceRequestRef = useRef(0);
   const conditionalTriggerLocksRef = useRef<Set<string>>(new Set());
+  const conditionalTriggerRetryAtRef = useRef(new Map<string, number>());
 
   useEffect(() => {
     timeModeRef.current = timeMode;
@@ -311,9 +308,6 @@ const Index = () => {
   useEffect(() => {
     ordersMapRef.current = ordersMap;
   }, [ordersMap]);
-  useEffect(() => {
-    positionsMapRef.current = positionsMap;
-  }, [positionsMap]);
   useEffect(() => {
     priceMapRef.current = priceMap;
   }, [priceMap]);
@@ -362,6 +356,11 @@ const Index = () => {
         conditionalTriggerLocksRef.current.delete(orderId);
       }
     });
+    conditionalTriggerRetryAtRef.current.forEach((_retryAt, orderId) => {
+      if (!activeOrderIds.has(orderId)) {
+        conditionalTriggerRetryAtRef.current.delete(orderId);
+      }
+    });
   }, [ordersMap]);
 
   const DISPLAY_PRICE_FLUSH_MS = 33;
@@ -404,94 +403,15 @@ const Index = () => {
   const createTriggeredConditionalPosition = useCallback(
     (symbol: string, order: PendingOrder, triggerPrice: number, openTime: number) => {
       const entryPrice = Number(triggerPrice);
-      if (!Number.isFinite(entryPrice) || entryPrice <= 0) return;
+      if (!Number.isFinite(entryPrice) || entryPrice <= 0) return false;
 
-      // === REDUCE-ONLY (TP/SL) PATH: close the linked position atomically ===
       if (order.reduceOnly && order.linkedPositionId) {
-        const targetSymbol = order.reduceSymbol || symbol;
-        // CRITICAL: read live positions via ref to bypass stale closures during high-speed ticks
-        const positions = positionsMapRef.current[targetSymbol] || [];
-        const linkedId = order.linkedPositionId;
-        const pos = positions.find((p) => p.id === linkedId);
-        if (!pos) {
-          // Linked position no longer exists (manual close happened) — silently drop
-          console.log("[TP/SL Skip] linked position missing", { orderId: order.id, linkedId });
-          return;
-        }
-        const posUnits = getPositionUnits(pos);
-        const closeUnits = Math.min(posUnits, getPositionUnits(order));
-        const exitMethod = order.reduceKind === "TP" ? "tp1" : order.reduceKind === "SL" ? "sl" : "manual";
-        const settledClose = settlePositionClose(targetSymbol, pos, entryPrice, closeUnits, openTime, exitMethod);
-        if (!settledClose) return;
-        const { closeQty, pct, remainingUnits, willFullyClose, returnedMargin, record, fillPrice, netPnl } = settledClose;
-
-        console.log("[TP/SL Triggered]", {
-          orderId: order.id,
-          kind: order.reduceKind,
-          linkedId,
-          posSide: pos.side,
-          triggerPrice: entryPrice,
-          posQty: posUnits,
-          closeQty,
-        });
-
-        setBalance((prev) => prev + Math.max(0, returnedMargin));
-
-        // Physical destruction by id (not by stale index)
-        setPositionsMap((prev) => {
-          const list = prev[targetSymbol] || [];
-          if (willFullyClose) {
-            return { ...prev, [targetSymbol]: list.filter((p) => p.id !== linkedId && isPositionOpen(p)) };
-          }
-          const next = list
-            .map((p) => {
-              if (p.id !== linkedId) return p;
-              return scaleSettlementPosition(p, remainingUnits);
-            })
-            .filter(isPositionOpen);
-          return { ...prev, [targetSymbol]: next };
-        });
-
-        // OCO: drop the sibling TP/SL bound to the same position
-        setOrdersMap((prev) => {
-          const list = prev[targetSymbol] || [];
-          if (list.length === 0) return prev;
-          let changed = false;
-          const next: PendingOrder[] = [];
-          for (const o of list) {
-            if (o.id === order.id) continue; // current already moved out by caller
-            if (o.reduceOnly && o.linkedPositionId === linkedId) {
-              if (willFullyClose) {
-                changed = true;
-                continue;
-              }
-              // partial: rescale remaining linked orders
-              const newQty = isCoinSettled(pos)
-                ? Math.max(1, Math.round(getPositionUnits(o) * (1 - pct)))
-                : getPositionUnits(o) * (1 - pct);
-              if (newQty <= POSITION_DUST_EPSILON) {
-                changed = true;
-                continue;
-              }
-              changed = true;
-              next.push({ ...o, quantity: newQty, contracts: isCoinSettled(pos) ? newQty : o.contracts });
-              continue;
-            }
-            next.push(o);
-          }
-          return changed ? { ...prev, [targetSymbol]: next } : prev;
-        });
-
-        setTradeHistory((prev) => [...prev, record]);
-
-        const kindLabel = order.reduceKind === "TP" ? "止盈" : order.reduceKind === "SL" ? "止损" : "条件";
-        toast.success(`${kindLabel}已触发：${targetSymbol} @ ${fillPrice.toFixed(2)}`, {
-          description: `${netPnl >= 0 ? "+" : ""}${netPnl.toFixed(2)} USDT`,
-        });
-        return;
+        return executeReduceOnlyTrigger(symbol, order, entryPrice, openTime).ok;
       }
 
-      // === REGULAR CONDITIONAL OPEN PATH ===
+      const liveOrder = (ordersMapRef.current[symbol] || []).find((candidate) => candidate.id === order.id);
+      if (!liveOrder) return false;
+
       const { fee, margin, position } = executeSettlementFill(symbol, entryPrice, order, false, openTime);
 
       setFilledOrders((prev) => [
@@ -525,9 +445,16 @@ const Index = () => {
           [symbol]: [...existing, position],
         };
       });
+      const nextOrdersMap = {
+        ...ordersMapRef.current,
+        [symbol]: (ordersMapRef.current[symbol] || []).filter((candidate) => candidate.id !== order.id),
+      };
+      ordersMapRef.current = nextOrdersMap;
+      setOrdersMap(nextOrdersMap);
       toast.success(`条件单已触发：${symbol} ${order.side} ${formatSettlementQuantity(position, symbol)} @ ${entryPrice.toFixed(2)}`);
+      return true;
     },
-    [setBalance, setPositionsMap, setOrdersMap, setTradeHistory, setFilledOrders],
+    [executeReduceOnlyTrigger, setBalance, setFilledOrders, setOrdersMap, setPositionsMap],
   );
 
   const runConditionalMatchingForSymbol = useCallback(
@@ -544,58 +471,31 @@ const Index = () => {
         return;
       }
 
-      const triggeredOrders: Array<{ order: PendingOrder; triggerPrice: number }> = [];
-
-      setOrdersMap((prev) => {
-        const orders = prev[symbol] || [];
-        if (orders.length === 0) return prev;
-
-        let changed = false;
-        const remaining: PendingOrder[] = [];
-
-        for (const order of orders) {
-          try {
-            if (order.type !== "CONDITIONAL") {
-              remaining.push(order);
-              continue;
-            }
-
-            if (order.status !== "PENDING" || conditionalTriggerLocksRef.current.has(order.id)) {
-              remaining.push(order);
-              continue;
-            }
-
-            const decision = getConditionalTriggerDecisionFromRange(order, candle);
-            if (!decision?.triggered) {
-              remaining.push(order);
-              continue;
-            }
-
-            conditionalTriggerLocksRef.current.add(order.id);
-            triggeredOrders.push({
-              order: { ...order, status: "FILLED" as const },
-              triggerPrice: decision.triggerPriceNum,
-            });
-            changed = true;
-          } catch (err) {
-            // Defensive: never let a single bad order break the matching loop
-            console.error("[TP/SL Match Error]", { orderId: order?.id, err });
-            remaining.push(order);
-          }
-        }
-
-        return changed ? { ...prev, [symbol]: remaining } : prev;
-      });
-
-      triggeredOrders.forEach(({ order, triggerPrice }) => {
+      for (const order of symbolOrders) {
         try {
-          createTriggeredConditionalPosition(symbol, order, triggerPrice, openTime);
+          if (order.type !== "CONDITIONAL" || order.status !== "PENDING") continue;
+          if (conditionalTriggerLocksRef.current.has(order.id)) continue;
+          if ((conditionalTriggerRetryAtRef.current.get(order.id) || 0) > Date.now()) continue;
+
+          const decision = getConditionalTriggerDecisionFromRange(order, candle);
+          if (!decision?.triggered) continue;
+
+          conditionalTriggerLocksRef.current.add(order.id);
+          const executed = createTriggeredConditionalPosition(symbol, order, decision.triggerPriceNum, openTime);
+          if (!executed) {
+            conditionalTriggerLocksRef.current.delete(order.id);
+            conditionalTriggerRetryAtRef.current.set(order.id, Date.now() + 500);
+          } else {
+            conditionalTriggerRetryAtRef.current.delete(order.id);
+          }
         } catch (err) {
           console.error("[TP/SL Execute Error]", { orderId: order?.id, err });
+          conditionalTriggerLocksRef.current.delete(order.id);
+          conditionalTriggerRetryAtRef.current.set(order.id, Date.now() + 500);
         }
-      });
+      }
     },
-    [createTriggeredConditionalPosition, setOrdersMap],
+    [createTriggeredConditionalPosition],
   );
 
   // ===== UNIFIED GAME LOOP =====

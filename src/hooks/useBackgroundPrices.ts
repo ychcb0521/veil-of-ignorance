@@ -11,14 +11,6 @@ import type { PendingOrder } from "@/types/trading";
 import { calcFee } from "@/types/trading";
 import type { ExecutionTradeSnapshot } from "@/lib/executionAssets";
 import { getConditionalTriggerDecisionFromRange } from "@/lib/conditionalOrders";
-import {
-  POSITION_DUST_EPSILON,
-  getPositionUnits,
-  isCoinSettled,
-  isPositionOpen,
-  scaleSettlementPosition,
-  settlePositionClose,
-} from "@/lib/tradingSettlement";
 import { toast } from "sonner";
 import { fetchCanonicalTimePriceAt, type CanonicalTimePrice } from "@/lib/canonicalTimePrice";
 
@@ -31,101 +23,17 @@ export function useBackgroundPrices() {
     activeSymbols,
     setPriceMap,
     ordersMap,
-    positionsMap,
     setOrdersMap,
     setPositionsMap,
     setBalance,
-    setTradeHistory,
     tradingMode,
     getEffectiveTime,
     recordExecutionTrade,
+    executeReduceOnlyTrigger,
   } = useTradingContext();
-
-  const positionsMapRef = useRef(positionsMap);
-  useEffect(() => {
-    positionsMapRef.current = positionsMap;
-  }, [positionsMap]);
 
   const lastPollRef = useRef<number>(0);
   const pollingRef = useRef(false);
-
-  // Reduce-only TP/SL execution: closes the linked position atomically + OCO
-  const executeReduceOnlyTrigger = useCallback(
-    (symbol: string, order: PendingOrder, triggerPrice: number) => {
-      const targetSymbol = order.reduceSymbol || symbol;
-      const positions = positionsMapRef.current[targetSymbol] || [];
-      const linkedId = order.linkedPositionId;
-      const pos = positions.find((p) => p.id === linkedId);
-      if (!pos) return;
-      const posUnits = getPositionUnits(pos);
-      const closeUnits = Math.min(posUnits, getPositionUnits(order));
-      const exitMethod = order.reduceKind === "TP" ? "tp1" : order.reduceKind === "SL" ? "sl" : "manual";
-      const closeTime = getEffectiveTime(targetSymbol);
-      const settledClose = settlePositionClose(
-        targetSymbol,
-        pos,
-        triggerPrice,
-        closeUnits,
-        closeTime,
-        exitMethod,
-      );
-      if (!settledClose) return;
-      const { pct, remainingUnits, willFullyClose, returnedMargin, record, fillPrice, netPnl } = settledClose;
-
-      setBalance((prev) => prev + Math.max(0, returnedMargin));
-
-      setPositionsMap((prev) => {
-        const list = prev[targetSymbol] || [];
-        if (willFullyClose) {
-          return { ...prev, [targetSymbol]: list.filter((p) => p.id !== linkedId && isPositionOpen(p)) };
-        }
-        return {
-          ...prev,
-          [targetSymbol]: list
-            .map((p) => (p.id === linkedId ? scaleSettlementPosition(p, remainingUnits) : p))
-            .filter(isPositionOpen),
-        };
-      });
-
-      setOrdersMap((prev) => {
-        const list = prev[targetSymbol] || [];
-        let changed = false;
-        const next: PendingOrder[] = [];
-        for (const o of list) {
-          if (o.id === order.id) {
-            changed = true;
-            continue;
-          }
-          if (o.reduceOnly && o.linkedPositionId === linkedId) {
-            if (willFullyClose) {
-              changed = true;
-              continue;
-            }
-            const newQty = isCoinSettled(pos)
-              ? Math.max(1, Math.round(getPositionUnits(o) * (1 - pct)))
-              : getPositionUnits(o) * (1 - pct);
-            if (newQty <= POSITION_DUST_EPSILON) {
-              changed = true;
-              continue;
-            }
-            changed = true;
-            next.push({ ...o, quantity: newQty, contracts: isCoinSettled(pos) ? newQty : o.contracts });
-            continue;
-          }
-          next.push(o);
-        }
-        return changed ? { ...prev, [targetSymbol]: next } : prev;
-      });
-
-      setTradeHistory((prev) => [...prev, record]);
-
-      const kindLabel = order.reduceKind === "TP" ? "止盈" : order.reduceKind === "SL" ? "止损" : "条件";
-      toast.success(`${kindLabel}已触发：${targetSymbol} @ ${fillPrice.toFixed(2)}`, {
-        description: `${netPnl >= 0 ? "+" : ""}${netPnl.toFixed(2)} USDT`,
-      });
-    },
-    [getEffectiveTime, setBalance, setPositionsMap, setOrdersMap, setTradeHistory],
-  );
 
   // Simple matching for background symbols
   const matchBackgroundOrders = useCallback(
@@ -180,8 +88,7 @@ export function useBackgroundPrices() {
         if (triggered) {
           // === REDUCE-ONLY (TP/SL) PATH ===
           if (order.reduceOnly && order.linkedPositionId) {
-            filledIds.push(order.id);
-            executeReduceOnlyTrigger(symbol, order, fillPrice);
+            executeReduceOnlyTrigger(symbol, order, fillPrice, getEffectiveTime(order.reduceSymbol || symbol));
             continue;
           }
 
@@ -251,8 +158,11 @@ export function useBackgroundPrices() {
     const MIN_POLL_MS = 1000;
     if (now - lastPollRef.current < MIN_POLL_MS) return;
 
-    const backgroundSymbols = Array.from(new Set([...activeSymbols, activeSymbol]));
-    if (backgroundSymbols.length === 0) return;
+    const priceSymbols = Array.from(new Set([...activeSymbols, activeSymbol]));
+    if (priceSymbols.length === 0) return;
+    // Keep refreshing the visible symbol's canonical price, but never match its
+    // orders here: Index's candle engine owns that path.
+    const backgroundOrderSymbols = priceSymbols.filter((symbol) => symbol !== activeSymbol);
 
     pollingRef.current = true;
     lastPollRef.current = now;
@@ -261,8 +171,8 @@ export function useBackgroundPrices() {
       const batchSize = 10;
       const newPrices: Record<string, KlinePrice> = {};
 
-      for (let i = 0; i < backgroundSymbols.length; i += batchSize) {
-        const batch = backgroundSymbols.slice(i, i + batchSize);
+      for (let i = 0; i < priceSymbols.length; i += batchSize) {
+        const batch = priceSymbols.slice(i, i + batchSize);
         const results = await Promise.all(
           batch.map((sym) => {
             const effectiveTime = getEffectiveTime(sym);
@@ -284,7 +194,7 @@ export function useBackgroundPrices() {
         });
       }
 
-      for (const sym of backgroundSymbols) {
+      for (const sym of backgroundOrderSymbols) {
         const kline = newPrices[sym];
         if (!kline) continue;
         const orders = ordersMap[sym];
@@ -296,7 +206,6 @@ export function useBackgroundPrices() {
     }
   }, [
     sim.isRunning,
-    sim.currentSimulatedTime,
     getEffectiveTime,
     activeSymbol,
     activeSymbols,

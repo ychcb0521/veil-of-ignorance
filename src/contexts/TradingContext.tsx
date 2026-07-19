@@ -52,6 +52,10 @@ import {
   normalizeSettlementOrder,
   scaleSettlementPosition,
 } from '@/lib/tradingSettlement';
+import {
+  planReduceOnlyTrigger,
+  type ReduceOnlyTriggerExecution,
+} from '@/lib/reduceOnlyOrderExecution';
 import { getPriceDecimals } from '@/lib/formatters';
 import {
   createDefaultExecutionAssetState,
@@ -142,6 +146,12 @@ interface TradingState {
   handleClosePosition: (symbol: string, index: number, percentage?: number, method?: 'manual' | 'sl' | 'tp1' | 'tp2' | 'tp3' | 'liquidation') => void;
   handleCancelOrder: (symbol: string, orderId: string) => void;
   handlePlaceTpSl: (symbol: string, pos: Position, tp: number | null, sl: number | null, pct: number) => void;
+  executeReduceOnlyTrigger: (
+    symbol: string,
+    order: PendingOrder,
+    triggerPrice: number,
+    closeTime?: number,
+  ) => ReduceOnlyTriggerExecution;
   handleAddIsolatedMargin: (symbol: string, posIndex: number, amount: number) => void;
   handleAdjustMargin: (symbol: string, posIndex: number, signedDelta: number) => void;
   handleClearSymbolData: (symbol: string) => void;
@@ -278,8 +288,24 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
 
   const [activeSymbol, setActiveSymbol] = usePersistedState('symbol', persistedSim?.symbol ?? 'BTCUSDT');
   const [interval, setInterval] = usePersistedState('interval', persistedSim?.interval ?? '1m');
-  const [positionsMap, setPositionsMap] = usePersistedState<PositionsMap>('positions_map', {});
-  const [ordersMap, setOrdersMap] = usePersistedState<OrdersMap>('orders_map', {});
+  const [positionsMap, setPositionsMapState] = usePersistedState<PositionsMap>('positions_map', {});
+  const positionsMapRef = useRef(positionsMap);
+  positionsMapRef.current = positionsMap;
+  const setPositionsMap = useCallback((value: PositionsMap | ((prev: PositionsMap) => PositionsMap)) => {
+    const next = typeof value === 'function' ? value(positionsMapRef.current) : value;
+    positionsMapRef.current = next;
+    setPositionsMapState(next);
+  }, [setPositionsMapState]);
+
+  const [ordersMap, setOrdersMapState] = usePersistedState<OrdersMap>('orders_map', {});
+  const ordersMapRef = useRef(ordersMap);
+  ordersMapRef.current = ordersMap;
+  const reduceOnlyDeferredReasonRef = useRef(new Map<string, string>());
+  const setOrdersMap = useCallback((value: OrdersMap | ((prev: OrdersMap) => OrdersMap)) => {
+    const next = typeof value === 'function' ? value(ordersMapRef.current) : value;
+    ordersMapRef.current = next;
+    setOrdersMapState(next);
+  }, [setOrdersMapState]);
   // 撤单快照：撤单本身会把订单从 ordersMap 删掉，这里另存一份（含委托价/委托时间/取消时间），
   // 供战役页展示「反向对冲挂单」。只追加、截断到最近 500 条。
   const [, setCancelledOrders] = usePersistedState<CancelledOrderSnapshot[]>('cancelled_orders', []);
@@ -354,9 +380,6 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
 
   const balanceRef = useRef(balance);
   useEffect(() => { balanceRef.current = balance; }, [balance]);
-
-  const positionsMapRef = useRef(positionsMap);
-  useEffect(() => { positionsMapRef.current = positionsMap; }, [positionsMap]);
 
   useEffect(() => {
     // 先按当前权重把历史事件重算一次(幂等)，再结算未练习欠账。
@@ -1191,6 +1214,53 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
     });
   }, [getEffectiveTime]);
 
+  const executeReduceOnlyTrigger = useCallback((
+    symbol: string,
+    order: PendingOrder,
+    triggerPrice: number,
+    closeTime = getEffectiveTime(order.reduceSymbol || symbol),
+  ): ReduceOnlyTriggerExecution => {
+    const execution = planReduceOnlyTrigger({
+      symbol,
+      order,
+      triggerPrice,
+      closeTime,
+      positions: positionsMapRef.current,
+      orders: ordersMapRef.current,
+    });
+
+    if (!execution.ok) {
+      const previousReason = reduceOnlyDeferredReasonRef.current.get(order.id);
+      if (execution.reason === 'order_missing') {
+        reduceOnlyDeferredReasonRef.current.delete(order.id);
+      } else if (previousReason !== execution.reason) {
+        reduceOnlyDeferredReasonRef.current.set(order.id, execution.reason);
+        console.warn('[TP/SL Execute Deferred]', {
+          orderId: order.id,
+          linkedPositionId: order.linkedPositionId,
+          reason: execution.reason,
+        });
+      }
+      return execution;
+    }
+
+    reduceOnlyDeferredReasonRef.current.delete(order.id);
+    setPositionsMap((prev) => ({ ...prev, [execution.targetSymbol]: execution.positions }));
+    setOrdersMap((prev) => ({ ...prev, [execution.targetSymbol]: execution.orders }));
+    setBalance((prev) => prev + Math.max(0, execution.returnedMargin));
+    setTradeHistory((prev) => [...prev, execution.record]);
+    setFilledOrders((prev) => [
+      ...prev.filter((item) => item.id !== execution.filledOrder.id),
+      execution.filledOrder,
+    ].slice(-500));
+
+    const kindLabel = order.reduceKind === 'TP' ? '止盈' : order.reduceKind === 'SL' ? '止损' : '条件';
+    toast.success(`${kindLabel}已触发：${execution.targetSymbol} @ ${execution.fillPrice.toFixed(2)}`, {
+      description: `${execution.netPnl >= 0 ? '+' : ''}${execution.netPnl.toFixed(2)} USDT`,
+    });
+    return execution;
+  }, [getEffectiveTime, setBalance, setFilledOrders, setOrdersMap, setPositionsMap, setTradeHistory]);
+
   // ===== Cancel Order =====
   const handleCancelOrder = useCallback((symbol: string, orderId: string) => {
     // 撤单即删——删之前先存一份快照（委托价/委托时间/取消时间），供战役页「反向对冲挂单」展示。
@@ -1362,7 +1432,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
     getSymbolMarginMode, setSymbolMarginMode,
     getSymbolSettlementMode, setSymbolSettlementMode,
     activeSymbols,
-    handlePlaceOrder, handleClosePosition, handleCancelOrder, handlePlaceTpSl,
+    handlePlaceOrder, handleClosePosition, handleCancelOrder, handlePlaceTpSl, executeReduceOnlyTrigger,
     handleAddIsolatedMargin, handleAdjustMargin, handleClearSymbolData,
     fundingRate: FUNDING_RATE,
     liquidationOpen, liquidationDetails, closeLiquidationModal,
