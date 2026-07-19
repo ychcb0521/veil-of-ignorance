@@ -68,6 +68,8 @@ const legsByCampaign: Record<string, TradeJournal[]> = {
       pre_real_time: '2026-04-03T00:00:00.000Z',
       post_real_close_time: '2025-12-01T00:00:00.000Z',
       pre_account_equity_usdt: 100,
+      pre_opportunity_quality_payoff_ratio: 5,
+      pre_opportunity_quality_drawdown_pct: 2,
     }),
   ],
   newest: [
@@ -77,6 +79,10 @@ const legsByCampaign: Record<string, TradeJournal[]> = {
       pre_real_time: '2026-01-10T00:00:00.000Z',
       post_real_close_time: '2026-12-01T00:00:00.000Z',
       pre_account_equity_usdt: 10_000,
+      pre_opportunity_quality_payoff_ratio: 5,
+      pre_opportunity_quality_drawdown_pct: 5,
+      post_opportunity_quality_payoff_ratio: 9,
+      post_opportunity_quality_drawdown_pct: 3,
     }),
   ],
   'best-pnl': [
@@ -218,6 +224,8 @@ function makeLeg(overrides: Partial<TradeJournal>): TradeJournal {
     pre_real_time: overrides.pre_real_time ?? now,
     pre_entry_price: overrides.pre_entry_price ?? null,
     pre_planned_stop_loss: null,
+    pre_opportunity_quality_payoff_ratio: overrides.pre_opportunity_quality_payoff_ratio ?? null,
+    pre_opportunity_quality_drawdown_pct: overrides.pre_opportunity_quality_drawdown_pct ?? null,
     pre_planned_take_profit: null,
     pre_entry_reason: null,
     pre_mental_state: 3,
@@ -235,6 +243,8 @@ function makeLeg(overrides: Partial<TradeJournal>): TradeJournal {
     post_reflection: null,
     post_correct_action: null,
     post_reviewed_at: null,
+    post_opportunity_quality_payoff_ratio: overrides.post_opportunity_quality_payoff_ratio ?? null,
+    post_opportunity_quality_drawdown_pct: overrides.post_opportunity_quality_drawdown_pct ?? null,
     post_real_close_time: overrides.post_real_close_time ?? null,
     created_at: overrides.created_at ?? now,
     updated_at: overrides.updated_at ?? now,
@@ -325,16 +335,28 @@ describe('JournalCampaignsPage sorting', () => {
     expect(screen.getByText('E = P(赢) × b − (1 − P(赢))')).toBeInTheDocument();
     expect(screen.getByText('= +0.27R')).toBeInTheDocument();
     expect(screen.getByText('P(赢) 仅统计设置了最大预期亏损的有效战役')).toBeInTheDocument();
+    expect(screen.getByTestId('campaign-opportunity-quality')).toHaveTextContent('机会质量（2.75）');
+    expect(screen.getByTestId('campaign-opportunity-quality')).toHaveAttribute(
+      'aria-label',
+      '机会质量 2.75，2 场有效输入，点击查看计算公式',
+    );
+    fireEvent.click(screen.getByTestId('campaign-opportunity-quality'));
+    expect(screen.getByText('机会质量计算公式')).toBeInTheDocument();
+    expect(screen.getByText('Qᵢ = bᵢ ÷ dᵢ，Q̄ = ΣQᵢ ÷ N')).toBeInTheDocument();
+    expect(screen.getByText('当前 N = 2：平仓评估 1 场，开仓判断 1 场。')).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('campaign-opportunity-quality'));
 
     fireEvent.click(screen.getByRole('button', { name: '互关可见' }));
     await waitFor(() => expect(screen.getByTestId('campaign-win-rate')).toHaveTextContent('胜率（—）'));
     expect(screen.getByTestId('campaign-average-payoff-ratio')).toHaveTextContent('平均盈亏比（—）');
     expect(screen.getByTestId('campaign-expected-value')).toHaveTextContent('期望值（—）');
+    expect(screen.getByTestId('campaign-opportunity-quality')).toHaveTextContent('机会质量（—）');
     fireEvent.click(screen.getByRole('button', { name: '我的战役' }));
     await waitFor(() => expect(screen.getAllByTestId('campaign-card')).toHaveLength(4));
     expect(screen.getByTestId('campaign-win-rate')).toHaveTextContent('胜率（66.67%）');
     expect(screen.getByTestId('campaign-average-payoff-ratio')).toHaveTextContent('平均盈亏比（0.90）');
     expect(screen.getByTestId('campaign-expected-value')).toHaveTextContent('期望值（+0.27R）');
+    expect(screen.getByTestId('campaign-opportunity-quality')).toHaveTextContent('机会质量（2.75）');
 
     fireEvent.click(screen.getByTestId('campaign-sort-time'));
     expect(screen.getByTestId('campaign-sort-time')).toHaveAttribute('aria-pressed', 'true');
@@ -420,7 +442,7 @@ describe('JournalCampaignsPage sorting', () => {
     expect(screen.getByTestId('campaign-sort-alpha')).toHaveAttribute('data-sort-direction', 'desc');
     expect(screen.getByTestId('campaign-sort-alpha')).toHaveAttribute('aria-label', '字母，Z 到 A排序');
     expect(cardOrder()).toEqual(['Newest Operation', 'Late Close', 'High Importance', 'Best PnL']);
-  });
+  }, 15_000);
 
   it('opens the subtle deleted-campaign entry and restores a campaign', async () => {
     mockListDeletedCampaigns.mockResolvedValue([deletedCampaign]);

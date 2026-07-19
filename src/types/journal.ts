@@ -622,6 +622,10 @@ export interface TradeJournal {
   pre_entry_price: number | null;
   /** @deprecated v2 snapshot no longer records stop-loss in this field. */
   pre_planned_stop_loss: number | null;
+  /** Opportunity-quality input captured at entry: expected payoff ratio b (e.g. 5 = 5:1). */
+  pre_opportunity_quality_payoff_ratio?: number | null;
+  /** Opportunity-quality input captured at entry: expected drawdown in percentage points. */
+  pre_opportunity_quality_drawdown_pct?: number | null;
   /** @deprecated v2 snapshot does not collect TP levels; order-level TP/SL stays outside the snapshot. */
   pre_planned_take_profit: number | null;
   /** @deprecated v2 snapshot uses pre_thesis_why_right; legacy journals may still display this. */
@@ -830,6 +834,10 @@ export interface TradeJournal {
   post_invalidation_review?: string | null;
   /** Post-close bucket for the entry-time payoff/risk estimate. */
   post_entry_payoff_estimate_grade?: EntryPayoffEstimateGrade | null;
+  /** Retrospective opportunity-quality input: expected payoff ratio b. */
+  post_opportunity_quality_payoff_ratio?: number | null;
+  /** Retrospective opportunity-quality input: expected drawdown in percentage points. */
+  post_opportunity_quality_drawdown_pct?: number | null;
   /** Post-close bucket for the entry-time win-rate estimate. */
   post_entry_win_rate_estimate_grade?: EntryWinRateEstimateGrade | null;
   /** Post-close note for the entry-time payoff/risk estimate. */

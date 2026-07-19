@@ -8,6 +8,7 @@ import { Dialog, DialogContent } from '@/components/ui/dialog';
 import { Sheet, SheetContent } from '@/components/ui/sheet';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
+import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { useIsMobile } from '@/hooks/use-mobile';
@@ -63,6 +64,7 @@ import type { PainTag } from '@/types/journal';
 import { formatBeijingTime } from '@/lib/timeFormat';
 import type { TradeRecord } from '@/types/trading';
 import { useTradingContext } from '@/contexts/TradingContext';
+import { computeOpportunityQuality, formatOpportunityQuality } from '@/lib/opportunityQuality';
 
 const PATH_MODE_OPTIONS: Array<{
   value: NonNullable<TradeJournal['post_path_mode']>;
@@ -141,6 +143,8 @@ export function PostTradeReviewSheet({
   const [winRateEstimateGrade, setWinRateEstimateGrade] = useState<TradeJournal['post_entry_win_rate_estimate_grade']>(null);
   const [payoffBasisReview, setPayoffBasisReview] = useState('');
   const [winRateBasisReview, setWinRateBasisReview] = useState('');
+  const [opportunityQualityPayoffInput, setOpportunityQualityPayoffInput] = useState('');
+  const [opportunityQualityDrawdownInput, setOpportunityQualityDrawdownInput] = useState('');
   const [premortemReview, setPremortemReview] = useState('');
   const [invalidationReview, setInvalidationReview] = useState('');
   const [falsificationStatus, setFalsificationStatus] = useState<TradeJournal['exit_falsification_status']>(null);
@@ -183,6 +187,16 @@ export function PostTradeReviewSheet({
         setWinRateEstimateGrade(journal.post_entry_win_rate_estimate_grade ?? null);
         setPayoffBasisReview(journal.post_entry_payoff_basis_review ?? '');
         setWinRateBasisReview(journal.post_entry_win_rate_basis_review ?? '');
+        setOpportunityQualityPayoffInput(String(
+          journal.post_opportunity_quality_payoff_ratio
+          ?? journal.pre_opportunity_quality_payoff_ratio
+          ?? '',
+        ));
+        setOpportunityQualityDrawdownInput(String(
+          journal.post_opportunity_quality_drawdown_pct
+          ?? journal.pre_opportunity_quality_drawdown_pct
+          ?? '',
+        ));
         setPremortemReview(journal.post_premortem_review ?? '');
         setInvalidationReview(journal.post_invalidation_review ?? '');
         setFalsificationStatus(journal.exit_falsification_status ?? null);
@@ -337,6 +351,12 @@ export function PostTradeReviewSheet({
   const showCloseReviewAudit = journal.direction !== 'no_entry';
   const showOpeningSnapshot = journal.source !== 'retroactive_from_record';
   const showEntryEstimateReview = !isHedge && journal.direction !== 'no_entry';
+  const opportunityQualityPayoff = Number(opportunityQualityPayoffInput);
+  const opportunityQualityDrawdown = Number(opportunityQualityDrawdownInput);
+  const reviewedOpportunityQuality = computeOpportunityQuality({
+    payoffRatio: opportunityQualityPayoff,
+    drawdownPct: opportunityQualityDrawdown,
+  });
   // 结构对／错的 2×2 排布（上排结构对、下排结构错；左列赢、右列亏）。
   const QUADRANT_GRID: StructureResultQuadrant[] = ['deserved_win', 'correct_loss', 'dangerous_win', 'deserved_loss'];
 
@@ -357,6 +377,7 @@ export function PostTradeReviewSheet({
       && payoffBasisReview.trim().length > 0
       && winRateEstimateGrade != null
       && winRateBasisReview.trim().length > 0
+      && reviewedOpportunityQuality != null
     );
   const opponentValid = !journal.pre_opponent_statement || opponentWasRight !== null;
   const hedgeWorthItValid = !isHedge || hedgeWorthIt != null;
@@ -430,6 +451,12 @@ export function PostTradeReviewSheet({
         post_premortem_review: premortemReview.trim(),
         post_invalidation_review: invalidationReview.trim(),
         post_entry_payoff_estimate_grade: showEntryEstimateReview ? payoffEstimateGrade : null,
+        post_opportunity_quality_payoff_ratio: showEntryEstimateReview && reviewedOpportunityQuality != null
+          ? opportunityQualityPayoff
+          : null,
+        post_opportunity_quality_drawdown_pct: showEntryEstimateReview && reviewedOpportunityQuality != null
+          ? opportunityQualityDrawdown
+          : null,
         post_entry_win_rate_estimate_grade: showEntryEstimateReview ? winRateEstimateGrade : null,
         post_entry_payoff_basis_review: showEntryEstimateReview ? payoffBasisReview.trim() : null,
         post_entry_win_rate_basis_review: showEntryEstimateReview ? winRateBasisReview.trim() : null,
@@ -991,6 +1018,72 @@ export function PostTradeReviewSheet({
               <div className="flex items-center gap-2">
                 <span className={factPillClass}>估计</span>
                 <div className="text-[12px] font-medium text-foreground">建仓时估计复盘 *</div>
+              </div>
+
+              <div className="rounded-xl border border-[#F0B90B]/35 bg-[#F0B90B]/[0.04] p-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <div className="text-[12px] font-medium text-foreground">机会质量评估 *</div>
+                    <div className="mt-0.5 text-[10px] leading-relaxed text-muted-foreground">
+                      回看当时真正可见的预期盈亏比与结构性回撤，不用最终结果倒推。Q = b ÷ d。
+                    </div>
+                  </div>
+                  <div className="shrink-0 text-right font-mono">
+                    <div className="text-[18px] font-semibold text-[#F0B90B]">
+                      {formatOpportunityQuality(reviewedOpportunityQuality)}
+                    </div>
+                    <div className="text-[9px] text-muted-foreground">机会质量 Q</div>
+                  </div>
+                </div>
+                <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                  <label className="block">
+                    <div className="text-[10px] font-medium text-muted-foreground">预期盈亏比 b</div>
+                    <div className="relative mt-1.5">
+                      <Input
+                        type="number"
+                        min="0.01"
+                        step="0.01"
+                        value={opportunityQualityPayoffInput}
+                        onChange={event => setOpportunityQualityPayoffInput(event.target.value)}
+                        inputMode="decimal"
+                        placeholder="例如 5"
+                        className="pr-9 font-mono"
+                      />
+                      <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[10px] text-muted-foreground">:1</span>
+                    </div>
+                  </label>
+                  <label className="block">
+                    <div className="text-[10px] font-medium text-muted-foreground">预期最大回撤 d</div>
+                    <div className="relative mt-1.5">
+                      <Input
+                        type="number"
+                        min="0.01"
+                        step="0.01"
+                        value={opportunityQualityDrawdownInput}
+                        onChange={event => setOpportunityQualityDrawdownInput(event.target.value)}
+                        inputMode="decimal"
+                        placeholder="例如 2"
+                        className="pr-9 font-mono"
+                      />
+                      <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[10px] text-muted-foreground">%</span>
+                    </div>
+                  </label>
+                </div>
+                {reviewedOpportunityQuality != null ? (
+                  <div className="mt-2 font-mono text-[10px] text-muted-foreground">
+                    Q = {opportunityQualityPayoff.toFixed(2)} ÷ {opportunityQualityDrawdown.toFixed(2)} = <span className="text-foreground">{formatOpportunityQuality(reviewedOpportunityQuality)}</span>
+                  </div>
+                ) : (
+                  <div className="mt-2 text-right font-mono text-[10px] text-[#F6465D]">两项都必须是大于 0 的数字</div>
+                )}
+                {(journal.pre_opportunity_quality_payoff_ratio != null || journal.pre_opportunity_quality_drawdown_pct != null) && (
+                  <div className="mt-2 border-t border-border/60 pt-2 text-[10px] text-muted-foreground">
+                    开仓判断：b = {journal.pre_opportunity_quality_payoff_ratio ?? '—'}，d = {journal.pre_opportunity_quality_drawdown_pct ?? '—'}%，Q = {formatOpportunityQuality(computeOpportunityQuality({
+                      payoffRatio: journal.pre_opportunity_quality_payoff_ratio,
+                      drawdownPct: journal.pre_opportunity_quality_drawdown_pct,
+                    }))}
+                  </div>
+                )}
               </div>
 
               <div className="space-y-2">

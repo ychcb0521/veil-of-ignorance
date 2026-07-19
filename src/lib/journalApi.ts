@@ -4255,6 +4255,8 @@ export interface FinalizeJournalInput {
   post_premortem_review?: string | null;
   post_invalidation_review?: string | null;
   post_entry_payoff_estimate_grade?: TradeJournal['post_entry_payoff_estimate_grade'];
+  post_opportunity_quality_payoff_ratio?: TradeJournal['post_opportunity_quality_payoff_ratio'];
+  post_opportunity_quality_drawdown_pct?: TradeJournal['post_opportunity_quality_drawdown_pct'];
   post_entry_win_rate_estimate_grade?: TradeJournal['post_entry_win_rate_estimate_grade'];
   post_entry_payoff_basis_review?: string | null;
   post_entry_win_rate_basis_review?: string | null;

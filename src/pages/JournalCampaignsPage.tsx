@@ -27,6 +27,7 @@ import {
 import type { CampaignInitialRiskSource } from '@/lib/campaignAnalysis';
 import { summarizeCampaignPerformance } from '@/lib/kellySizing';
 import { computeGeometricExpectancy } from '@/lib/geometricExpectancy';
+import { computeOpportunityQuality, formatOpportunityQuality } from '@/lib/opportunityQuality';
 import { LEG_ROLE_LABELS, STRATEGY_TEMPLATES } from '@/lib/strategyTemplates';
 import { campaignOperationTime } from '@/lib/objectiveOperationTime';
 import { formatBeijingTime } from '@/lib/timeFormat';
@@ -39,6 +40,8 @@ type CampaignCardData = {
   tradeRecords: TradeRecord[];
   profitCaptureRatio: number | null;
   initialExpectedMaxLoss: number;
+  opportunityQuality: number | null;
+  opportunityQualitySource: 'post' | 'pre' | null;
 };
 
 type CampaignDisplayData = CampaignCardData & {
@@ -71,7 +74,8 @@ type CampaignFormulaPopover =
   | 'winRate'
   | 'averagePayoffRatio'
   | 'expectedValue'
-  | 'geometricEdge';
+  | 'geometricEdge'
+  | 'opportunityQuality';
 
 const SORT_OPTIONS: { value: CampaignSortMode; label: string }[] = [
   { value: 'importance', label: '重要性' },
@@ -151,6 +155,36 @@ function importanceValue(campaign: Pick<TradeCampaign, 'importance_weight'>): nu
 
 function campaignSortTime(row: CampaignCardData): number {
   return campaignOperationTime(row.legs, row.tradeRecords) ?? 0;
+}
+
+function resolveCampaignOpportunityQuality(legs: TradeJournal[]): {
+  value: number | null;
+  source: 'post' | 'pre' | null;
+} {
+  const mainLeg = [...legs]
+    .filter(leg => leg.leg_role === 'main_open' || (leg.leg_role == null && leg.order_kind === 'main'))
+    .sort((a, b) => {
+      const aSequence = a.leg_sequence ?? Number.MAX_SAFE_INTEGER;
+      const bSequence = b.leg_sequence ?? Number.MAX_SAFE_INTEGER;
+      if (aSequence !== bSequence) return aSequence - bSequence;
+      return new Date(a.pre_real_time || a.pre_simulated_time).getTime()
+        - new Date(b.pre_real_time || b.pre_simulated_time).getTime();
+    })[0];
+  if (!mainLeg) return { value: null, source: null };
+
+  const postValue = computeOpportunityQuality({
+    payoffRatio: mainLeg.post_opportunity_quality_payoff_ratio,
+    drawdownPct: mainLeg.post_opportunity_quality_drawdown_pct,
+  });
+  if (postValue != null) return { value: postValue, source: 'post' };
+
+  const preValue = computeOpportunityQuality({
+    payoffRatio: mainLeg.pre_opportunity_quality_payoff_ratio,
+    drawdownPct: mainLeg.pre_opportunity_quality_drawdown_pct,
+  });
+  return preValue == null
+    ? { value: null, source: null }
+    : { value: preValue, source: 'pre' };
 }
 
 function pnlSortValue(campaign: Pick<TradeCampaign, 'final_realized_pnl'>): number {
@@ -364,6 +398,7 @@ export default function JournalCampaignsPage() {
               details.tradeRecords,
               details.reverseHedgeOrders,
             );
+            const opportunityQuality = resolveCampaignOpportunityQuality(details.legs);
             return {
               campaign: details.campaign,
               legs: details.legs,
@@ -377,6 +412,8 @@ export default function JournalCampaignsPage() {
                 )
                 : null,
               initialExpectedMaxLoss,
+              opportunityQuality: opportunityQuality.value,
+              opportunityQualitySource: opportunityQuality.source,
             };
           }),
         );
@@ -445,6 +482,18 @@ export default function JournalCampaignsPage() {
     () => computeGeometricExpectancy(performance.expectedWinRate, performance.payoffRatio),
     [performance.expectedWinRate, performance.payoffRatio],
   );
+  const opportunityQualityStats = useMemo(() => {
+    const samples = rows.filter(row => (
+      row.opportunityQuality != null && Number.isFinite(row.opportunityQuality)
+    ));
+    const sum = samples.reduce((total, row) => total + (row.opportunityQuality ?? 0), 0);
+    return {
+      average: samples.length > 0 ? sum / samples.length : null,
+      sampleCount: samples.length,
+      postCount: samples.filter(row => row.opportunityQualitySource === 'post').length,
+      preCount: samples.filter(row => row.opportunityQualitySource === 'pre').length,
+    };
+  }, [rows]);
   const displayRows = useMemo<CampaignDisplayData[]>(
     () => rows.map(row => {
       const initialRisk = resolveCampaignInitialRiskFraction(
@@ -490,6 +539,7 @@ export default function JournalCampaignsPage() {
   const optimalFractionLabel = geometric == null || geometric.optimalFraction <= 0
     ? '—'
     : `${(geometric.optimalFraction * 100).toFixed(1)}%`;
+  const opportunityQualityLabel = formatOpportunityQuality(opportunityQualityStats.average);
 
   const handleSortChange = (mode: CampaignSortMode) => {
     setSortState(current => (
@@ -571,6 +621,7 @@ export default function JournalCampaignsPage() {
           details.tradeRecords,
           details.reverseHedgeOrders,
         );
+        const opportunityQuality = resolveCampaignOpportunityQuality(details.legs);
         const restoredRow: CampaignCardData = {
           campaign: { ...details.campaign, deleted_at: null },
           legs: details.legs,
@@ -584,6 +635,8 @@ export default function JournalCampaignsPage() {
             )
             : null,
           initialExpectedMaxLoss,
+          opportunityQuality: opportunityQuality.value,
+          opportunityQualitySource: opportunityQuality.source,
         };
         setRows(current => [restoredRow, ...current.filter(item => item.campaign.id !== campaign.id)]);
       }
@@ -955,6 +1008,38 @@ export default function JournalCampaignsPage() {
                 ) : (
                   <div className="mt-2 text-muted-foreground">需要可计算的胜率与盈亏比才能得到几何期望。</div>
                 )}
+              </PopoverContent>
+            </Popover>
+            <Popover
+              open={formulaPopover === 'opportunityQuality'}
+              onOpenChange={open => handleFormulaPopoverChange('opportunityQuality', open)}
+            >
+              <PopoverTrigger asChild>
+                <button
+                  type="button"
+                  data-testid="campaign-opportunity-quality"
+                  className="h-6 rounded-sm border-b border-dashed border-muted-foreground/30 px-0.5 text-foreground/60 transition-colors hover:text-foreground/80"
+                  aria-label={`机会质量 ${opportunityQualityLabel}，${opportunityQualityStats.sampleCount} 场有效输入，点击查看计算公式`}
+                  title="点击查看机会质量计算公式"
+                  onClick={event => openFormulaPopover(event, 'opportunityQuality')}
+                >
+                  机会质量（{opportunityQualityLabel}）
+                </button>
+              </PopoverTrigger>
+              <PopoverContent align="end" className="w-80 border-border bg-card p-3 text-[11px]">
+                <div className="font-medium text-foreground">机会质量计算公式</div>
+                <div className="mt-2 rounded bg-muted/60 px-2 py-1.5 font-mono text-foreground">
+                  Qᵢ = bᵢ ÷ dᵢ，Q̄ = ΣQᵢ ÷ N
+                </div>
+                <div className="mt-2 space-y-1 text-muted-foreground">
+                  <div>bᵢ = 该战役当时估计的预期盈亏比；dᵢ = 预期最大回撤百分点。</div>
+                  <div>2% 回撤按 2 计算，不按 0.02 计算。例：5:1 与 2% 回撤得 Q = 2.50。</div>
+                  <div>优先采用平仓评价中的复盘评估；未评价时使用开仓快照的当时判断。</div>
+                  <div>缺少任意一个数字或数值非正的战役不纳入平均。</div>
+                  <div className="border-t border-border/60 pt-1.5">
+                    当前 N = {opportunityQualityStats.sampleCount}：平仓评估 {opportunityQualityStats.postCount} 场，开仓判断 {opportunityQualityStats.preCount} 场。
+                  </div>
+                </div>
               </PopoverContent>
             </Popover>
           </div>

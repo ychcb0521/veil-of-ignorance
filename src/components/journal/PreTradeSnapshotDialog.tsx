@@ -173,6 +173,8 @@ export function PreTradeSnapshotDialog({
         pre_entry_price: lockedPrice,
         order_kind: payload.order_kind,
         pre_planned_stop_loss: payload.pre_planned_stop_loss,
+        pre_opportunity_quality_payoff_ratio: payload.pre_opportunity_quality_payoff_ratio,
+        pre_opportunity_quality_drawdown_pct: payload.pre_opportunity_quality_drawdown_pct,
         pre_planned_take_profit: payload.pre_planned_take_profit,
         pre_entry_reason: payload.pre_entry_reason,
         pre_mental_state: payload.pre_mental_state,

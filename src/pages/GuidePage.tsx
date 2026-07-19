@@ -681,6 +681,10 @@ export default function GuidePage() {
                 <li>回撤逼近极端时显示 <strong>“几乎无法回本”</strong>，把“损失有界”这条硬约束变成体感。</li>
               </ul>
 
+              <SubTitle>第二步 · 机会质量判断</SubTitle>
+              <P>开仓快照会把已有的<strong>预期盈亏比 b</strong>与<strong>预期最大回撤 d</strong>同步到机会质量模块，也可以直接输入两个数字。系统自动计算 <strong>Q = b ÷ d</strong>；其中 d 按百分点使用，回撤 2% 就填 2，不填 0.02。例如预期盈亏比 5:1、预期回撤 2%，机会质量为 2.50。</P>
+              <P>这个数字表示：在预期盈亏比不变时，结构性回撤越小，同一最大亏损预算可以承载的头仓越厚，机会质量越高。它不是预期利润，也不受杠杆数字本身影响；回撤必须来自真实的结构失效位，不能为了抬高 Q 人为缩小分母。</P>
+
               <SubTitle>第二步 · 目标空间三问</SubTitle>
               <P>画完分母效应，<strong>① 盈亏比目标</strong> 还要写三问。它和胜率轴的决策三问<strong>结构平行，但只问“空间”不问“方向”</strong>——专门逼你把“目标空间”这件事写成可校准证据：</P>
               <div className="overflow-x-auto">
@@ -866,6 +870,7 @@ export default function GuidePage() {
               <SubTitle>3.4 平仓评价复盘</SubTitle>
               <P>决策记录模式下，平仓会打开一个与开仓快照同规格的<strong>居中评价弹窗</strong>，不完成评价不能离开。评价的重心不是重新讲一遍故事，而是把快照时的预测和最终实际结果对上：预设的证伪信号兑现没有，结构破坏信号出现没有，进场时钉下的置信度有没有被验证。</P>
               <P>弹窗按这条主线展开：<strong>事实模块</strong>逐条核验快照里押的<strong>反 / 止 / 结构 / 置信</strong>四条腿 → <strong>结果归类</strong>（结构 × 结果四象限）→ <strong>路径</strong>（滚仓 / 镜像止盈 + 交易主动权）→ <strong>体检模块</strong>（过程纠结度 / 小机会仓位记账 / 踏空高盈亏比结构）→ <strong>反对者陈述追踪</strong>（条件触发）→ <strong>情绪侧七问</strong>。先对账，再判读，最后翻动机，避免复盘变成事后重新叙述。</P>
+              <P><strong>机会质量评估</strong>会在平仓时再输入当时可见的 b 与 d，并自动计算 Q。它默认带入开仓判断，但允许你根据复盘修正并保存；评估要回到当时的信息集，不能用最终盈亏倒推一个完美预测。</P>
 
               <SubTitle>事实模块 · 逐条核验闭环的四条腿（反 / 止 / 结构 / 置信）</SubTitle>
               <P>弹窗会把开仓快照里写下的<strong>反（亏损剧本）</strong>、<strong>止（失效信号）</strong>、<strong>结构（目标空间）</strong>、<strong>置信（开仓预测胜率）</strong>逐条原样回显，问你这四个假设在持仓过程中分别被市场怎么对待。这里<strong>只核验差值、不写事后故事</strong>，避免把"发生了什么"和"为什么"压成一个自洽的完美闭环。</P>
@@ -1205,6 +1210,7 @@ export default function GuidePage() {
                     <tr><td className="px-3 py-2 border-t border-border">胜率 P(赢)</td><td className="px-3 py-2 border-t border-border">有效盈利战役数 ÷（有效盈利战役数 + 有效亏损战役数）</td><td className="px-3 py-2 border-t border-border">只统计有效且非盈亏平衡的已结束战役</td></tr>
                     <tr><td className="px-3 py-2 border-t border-border">平均盈亏比 b̄</td><td className="px-3 py-2 border-t border-border">Σ 单场盈亏比 bᵢ ÷ 有效战役数 N</td><td className="px-3 py-2 border-t border-border">亏损的负盈亏比原样参与求和</td></tr>
                     <tr><td className="px-3 py-2 border-t border-border">期望值 E</td><td className="px-3 py-2 border-t border-border">P(赢) × b̄ −（1 − P(赢)）</td><td className="px-3 py-2 border-t border-border">胜率与平均盈亏比来自同一批有效战役</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border">机会质量 Qᵢ / Q̄</td><td className="px-3 py-2 border-t border-border">Qᵢ = 预期盈亏比 bᵢ ÷ 预期回撤百分点 dᵢ；Q̄ = ΣQᵢ ÷ N</td><td className="px-3 py-2 border-t border-border">优先使用平仓评估，未评价时使用开仓判断；缺少任一正数的战役不纳入 N</td></tr>
                     <tr><td className="px-3 py-2 border-t border-border">单场算术期望 Eᵢ</td><td className="px-3 py-2 border-t border-border">P(赢) × bᵢ −（1 − P(赢)）</td><td className="px-3 py-2 border-t border-border">使用实时有效战役胜率与该场带符号盈亏比</td></tr>
                     <tr><td className="px-3 py-2 border-t border-border">单场风险比例 xᵢ</td><td className="px-3 py-2 border-t border-border">Lᵢ ÷ 主力开仓时账户总资产 Aᵢ</td><td className="px-3 py-2 border-t border-border">优先使用主力开仓快照；旧战役缺失时用今日当前总资产估算</td></tr>
                     <tr><td className="px-3 py-2 border-t border-border">单场几何期望 Gᵢ</td><td className="px-3 py-2 border-t border-border">(1+bᵢ·xᵢ)^P(赢) × (1−xᵢ)^(1−P(赢)) − 1</td><td className="px-3 py-2 border-t border-border">bᵢ 可为负；缺少有效 Lᵢ 或可用 Aᵢ 时不估算</td></tr>
