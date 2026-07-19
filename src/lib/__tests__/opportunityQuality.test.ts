@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
-import { computeOpportunityQuality, formatOpportunityQuality } from '../opportunityQuality';
+import {
+  computeOpportunityQuality,
+  computeRealizedOpportunityQuality,
+  formatOpportunityQuality,
+} from '../opportunityQuality';
 
 describe('opportunity quality', () => {
   it('divides the expected payoff ratio by drawdown percentage points', () => {
@@ -21,5 +25,12 @@ describe('opportunity quality', () => {
     expect(computeOpportunityQuality({ payoffRatio: 5, drawdownPct: 0 })).toBeNull();
     expect(computeOpportunityQuality({ payoffRatio: -1, drawdownPct: 2 })).toBeNull();
     expect(computeOpportunityQuality({ payoffRatio: 5, drawdownPct: Number.NaN })).toBeNull();
+  });
+
+  it('keeps the sign of the actual payoff ratio for closed campaigns', () => {
+    expect(computeRealizedOpportunityQuality({ payoffRatio: 3, drawdownPct: 2 })).toBe(1.5);
+    expect(computeRealizedOpportunityQuality({ payoffRatio: -0.8, drawdownPct: 4 })).toBe(-0.2);
+    expect(computeRealizedOpportunityQuality({ payoffRatio: 0, drawdownPct: 2 })).toBe(0);
+    expect(computeRealizedOpportunityQuality({ payoffRatio: 3, drawdownPct: 0 })).toBeNull();
   });
 });

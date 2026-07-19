@@ -27,7 +27,10 @@ import {
 import type { CampaignInitialRiskSource } from '@/lib/campaignAnalysis';
 import { summarizeCampaignPerformance } from '@/lib/kellySizing';
 import { computeGeometricExpectancy } from '@/lib/geometricExpectancy';
-import { computeOpportunityQuality, formatOpportunityQuality } from '@/lib/opportunityQuality';
+import {
+  computeRealizedOpportunityQuality,
+  formatOpportunityQuality,
+} from '@/lib/opportunityQuality';
 import { LEG_ROLE_LABELS, STRATEGY_TEMPLATES } from '@/lib/strategyTemplates';
 import { campaignOperationTime } from '@/lib/objectiveOperationTime';
 import { formatBeijingTime } from '@/lib/timeFormat';
@@ -56,6 +59,7 @@ type CampaignSortMode =
   | 'importance'
   | 'time'
   | 'captureRate'
+  | 'opportunityQuality'
   | 'arithmeticExpectancy'
   | 'geometricExpectancy'
   | 'alpha';
@@ -75,12 +79,14 @@ type CampaignFormulaPopover =
   | 'averagePayoffRatio'
   | 'expectedValue'
   | 'geometricEdge'
+  | 'opportunityQualitySort'
   | 'opportunityQuality';
 
 const SORT_OPTIONS: { value: CampaignSortMode; label: string }[] = [
   { value: 'importance', label: '重要性' },
   { value: 'time', label: '操作时间' },
   { value: 'captureRate', label: '盈亏比' },
+  { value: 'opportunityQuality', label: '机会质量' },
   { value: 'arithmeticExpectancy', label: '算术期望' },
   { value: 'geometricExpectancy', label: '几何期望' },
   { value: 'alpha', label: '字母' },
@@ -157,10 +163,19 @@ function campaignSortTime(row: CampaignCardData): number {
   return campaignOperationTime(row.legs, row.tradeRecords) ?? 0;
 }
 
-function resolveCampaignOpportunityQuality(legs: TradeJournal[]): {
+function resolveCampaignOpportunityQuality(
+  campaign: TradeCampaign,
+  legs: TradeJournal[],
+  profitCaptureRatio: number | null,
+): {
   value: number | null;
   source: 'post' | 'pre' | null;
 } {
+  const resolved = ['closed_profit', 'closed_loss', 'closed_breakeven'].includes(campaign.status)
+    && Number.isFinite(campaign.final_realized_pnl);
+  if (!resolved || profitCaptureRatio == null || !Number.isFinite(profitCaptureRatio)) {
+    return { value: null, source: null };
+  }
   const mainLeg = [...legs]
     .filter(leg => leg.leg_role === 'main_open' || (leg.leg_role == null && leg.order_kind === 'main'))
     .sort((a, b) => {
@@ -172,14 +187,14 @@ function resolveCampaignOpportunityQuality(legs: TradeJournal[]): {
     })[0];
   if (!mainLeg) return { value: null, source: null };
 
-  const postValue = computeOpportunityQuality({
-    payoffRatio: mainLeg.post_opportunity_quality_payoff_ratio,
+  const postValue = computeRealizedOpportunityQuality({
+    payoffRatio: profitCaptureRatio / 100,
     drawdownPct: mainLeg.post_opportunity_quality_drawdown_pct,
   });
   if (postValue != null) return { value: postValue, source: 'post' };
 
-  const preValue = computeOpportunityQuality({
-    payoffRatio: mainLeg.pre_opportunity_quality_payoff_ratio,
+  const preValue = computeRealizedOpportunityQuality({
+    payoffRatio: profitCaptureRatio / 100,
     drawdownPct: mainLeg.pre_opportunity_quality_drawdown_pct,
   });
   return preValue == null
@@ -274,6 +289,9 @@ function sortCampaignRows(rows: CampaignDisplayData[], sort: CampaignSortState):
     if (sort.mode === 'captureRate') {
       return row.profitCaptureRatio != null && Number.isFinite(row.profitCaptureRatio);
     }
+    if (sort.mode === 'opportunityQuality') {
+      return row.opportunityQuality != null && Number.isFinite(row.opportunityQuality);
+    }
     if (sort.mode === 'arithmeticExpectancy') {
       return row.arithmeticExpectancy != null && Number.isFinite(row.arithmeticExpectancy);
     }
@@ -301,6 +319,21 @@ function sortCampaignRows(rows: CampaignDisplayData[], sort: CampaignSortState):
         sort.direction,
       )
         || comparePnl(a.campaign, b.campaign, sort.direction)
+        || importanceDesc
+        || timeDesc
+        || alphaAsc;
+    }
+    if (sort.mode === 'opportunityQuality') {
+      return compareFiniteMetric(
+        a.opportunityQuality ?? Number.NaN,
+        b.opportunityQuality ?? Number.NaN,
+        sort.direction,
+      )
+        || compareFiniteMetric(
+          a.profitCaptureRatio ?? Number.NaN,
+          b.profitCaptureRatio ?? Number.NaN,
+          sort.direction,
+        )
         || importanceDesc
         || timeDesc
         || alphaAsc;
@@ -398,19 +431,24 @@ export default function JournalCampaignsPage() {
               details.tradeRecords,
               details.reverseHedgeOrders,
             );
-            const opportunityQuality = resolveCampaignOpportunityQuality(details.legs);
+            const profitCaptureRatio = Number.isFinite(initialExpectedMaxLoss) && initialExpectedMaxLoss > 0
+              ? computeProfitCaptureRatio(
+                details.campaign,
+                details.legs,
+                details.tradeRecords,
+                details.reverseHedgeOrders,
+              )
+              : null;
+            const opportunityQuality = resolveCampaignOpportunityQuality(
+              details.campaign,
+              details.legs,
+              profitCaptureRatio,
+            );
             return {
               campaign: details.campaign,
               legs: details.legs,
               tradeRecords: details.tradeRecords,
-              profitCaptureRatio: Number.isFinite(initialExpectedMaxLoss) && initialExpectedMaxLoss > 0
-                ? computeProfitCaptureRatio(
-                  details.campaign,
-                  details.legs,
-                  details.tradeRecords,
-                  details.reverseHedgeOrders,
-                )
-                : null,
+              profitCaptureRatio,
               initialExpectedMaxLoss,
               opportunityQuality: opportunityQuality.value,
               opportunityQualitySource: opportunityQuality.source,
@@ -621,19 +659,24 @@ export default function JournalCampaignsPage() {
           details.tradeRecords,
           details.reverseHedgeOrders,
         );
-        const opportunityQuality = resolveCampaignOpportunityQuality(details.legs);
+        const profitCaptureRatio = Number.isFinite(initialExpectedMaxLoss) && initialExpectedMaxLoss > 0
+          ? computeProfitCaptureRatio(
+            details.campaign,
+            details.legs,
+            details.tradeRecords,
+            details.reverseHedgeOrders,
+          )
+          : null;
+        const opportunityQuality = resolveCampaignOpportunityQuality(
+          details.campaign,
+          details.legs,
+          profitCaptureRatio,
+        );
         const restoredRow: CampaignCardData = {
           campaign: { ...details.campaign, deleted_at: null },
           legs: details.legs,
           tradeRecords: details.tradeRecords,
-          profitCaptureRatio: Number.isFinite(initialExpectedMaxLoss) && initialExpectedMaxLoss > 0
-            ? computeProfitCaptureRatio(
-              details.campaign,
-              details.legs,
-              details.tradeRecords,
-              details.reverseHedgeOrders,
-            )
-            : null,
+          profitCaptureRatio,
           initialExpectedMaxLoss,
           opportunityQuality: opportunityQuality.value,
           opportunityQualitySource: opportunityQuality.source,
@@ -728,13 +771,17 @@ export default function JournalCampaignsPage() {
             {SORT_OPTIONS.map(option => {
               const active = sortState.mode === option.value;
               const direction = active ? sortState.direction : 'desc';
-              const formula: CampaignFormulaPopover | null = option.value === 'captureRate'
-                || option.value === 'arithmeticExpectancy'
-                || option.value === 'geometricExpectancy'
-                ? option.value
-                : null;
+              const formula: CampaignFormulaPopover | null = option.value === 'opportunityQuality'
+                ? 'opportunityQualitySort'
+                : option.value === 'captureRate'
+                  || option.value === 'arithmeticExpectancy'
+                  || option.value === 'geometricExpectancy'
+                  ? option.value
+                  : null;
               const invalidCampaignHint = option.value === 'geometricExpectancy'
                 ? '；缺少最大预期亏损的战役不显示；旧战役缺少开仓资产快照时按当前总资产估算'
+                : option.value === 'opportunityQuality'
+                  ? '；缺少实际盈亏比或回撤百分点的战役不显示'
                 : formula != null
                   ? '；未设置最大预期亏损的战役不显示'
                   : '';
@@ -791,6 +838,19 @@ export default function JournalCampaignsPage() {
                           </div>
                           <div>排序使用带正负号的 bᵢ：盈利为正，亏损为负。</div>
                           <div>没有有效初始最大预期亏损的战役不参与排序。</div>
+                        </div>
+                      </>
+                    ) : formula === 'opportunityQualitySort' ? (
+                      <>
+                        <div className="font-medium text-foreground">单场机会质量计算公式</div>
+                        <div className="mt-2 rounded bg-muted/60 px-2 py-1.5 font-mono text-foreground">
+                          Qᵢ = 实际盈亏比 bᵢ ÷ 预期回撤百分点 dᵢ
+                        </div>
+                        <div className="mt-2 space-y-1 text-muted-foreground">
+                          <div>bᵢ = 已实现盈亏ᵢ ÷ 初始最大预期亏损ᵢ，盈利为正、亏损为负。</div>
+                          <div>dᵢ 优先使用平仓评价中的回撤评估；缺失时使用开仓快照中的回撤判断。</div>
+                          <div>2% 回撤按 2 计算，不按 0.02 计算。</div>
+                          <div>缺少实际盈亏比或有效回撤百分点的战役不参与排序。</div>
                         </div>
                       </>
                     ) : formula === 'arithmeticExpectancy' ? (
@@ -1019,7 +1079,7 @@ export default function JournalCampaignsPage() {
                   type="button"
                   data-testid="campaign-opportunity-quality"
                   className="h-6 rounded-sm border-b border-dashed border-muted-foreground/30 px-0.5 text-foreground/60 transition-colors hover:text-foreground/80"
-                  aria-label={`机会质量 ${opportunityQualityLabel}，${opportunityQualityStats.sampleCount} 场有效输入，点击查看计算公式`}
+                  aria-label={`机会质量 ${opportunityQualityLabel}，${opportunityQualityStats.sampleCount} 场有效战役，点击查看计算公式`}
                   title="点击查看机会质量计算公式"
                   onClick={event => openFormulaPopover(event, 'opportunityQuality')}
                 >
@@ -1032,12 +1092,13 @@ export default function JournalCampaignsPage() {
                   Qᵢ = bᵢ ÷ dᵢ，Q̄ = ΣQᵢ ÷ N
                 </div>
                 <div className="mt-2 space-y-1 text-muted-foreground">
-                  <div>bᵢ = 该战役当时估计的预期盈亏比；dᵢ = 预期最大回撤百分点。</div>
-                  <div>2% 回撤按 2 计算，不按 0.02 计算。例：5:1 与 2% 回撤得 Q = 2.50。</div>
-                  <div>优先采用平仓评价中的复盘评估；未评价时使用开仓快照的当时判断。</div>
-                  <div>缺少任意一个数字或数值非正的战役不纳入平均。</div>
+                  <div>bᵢ = 该战役带正负号的实际盈亏比；dᵢ = 预期最大回撤百分点。</div>
+                  <div>实际盈亏比 = 已实现盈亏 ÷ 初始最大预期亏损；亏损战役的 Q 保留负号。</div>
+                  <div>2% 回撤按 2 计算，不按 0.02 计算。例：实际盈亏比 5、回撤 2%，Q = 2.50。</div>
+                  <div>dᵢ 优先采用平仓评价中的回撤评估；未评价时使用开仓快照的回撤判断。</div>
+                  <div>缺少实际盈亏比或有效回撤百分点的战役不纳入平均。</div>
                   <div className="border-t border-border/60 pt-1.5">
-                    当前 N = {opportunityQualityStats.sampleCount}：平仓评估 {opportunityQualityStats.postCount} 场，开仓判断 {opportunityQualityStats.preCount} 场。
+                    当前 N = {opportunityQualityStats.sampleCount}：平仓回撤评估 {opportunityQualityStats.postCount} 场，开仓回撤判断 {opportunityQualityStats.preCount} 场。
                   </div>
                 </div>
               </PopoverContent>
@@ -1054,18 +1115,22 @@ export default function JournalCampaignsPage() {
             </div>
             <div className="text-[13px] font-medium">
               {(sortState.mode === 'captureRate'
+                || sortState.mode === 'opportunityQuality'
                 || sortState.mode === 'arithmeticExpectancy'
                 || sortState.mode === 'geometricExpectancy') && rows.length > 0
-                ? `暂无可计算${sortState.mode === 'captureRate' ? '盈亏比' : sortState.mode === 'arithmeticExpectancy' ? '算术期望' : '几何期望'}的战役`
+                ? `暂无可计算${sortState.mode === 'captureRate' ? '盈亏比' : sortState.mode === 'opportunityQuality' ? '机会质量' : sortState.mode === 'arithmeticExpectancy' ? '算术期望' : '几何期望'}的战役`
                 : scope === 'own' ? '尚无战役' : '暂无互关可见战役'}
             </div>
             <div className="text-[12px] text-muted-foreground">
               {(sortState.mode === 'captureRate'
+                || sortState.mode === 'opportunityQuality'
                 || sortState.mode === 'arithmeticExpectancy'
                 || sortState.mode === 'geometricExpectancy') && rows.length > 0
                 ? sortState.mode === 'geometricExpectancy'
                   ? '旧战役缺少开仓资产快照时会按当前总资产估算；缺少初始最大预期亏损的战役仍不会进入当前排序'
-                  : '未设置初始最大预期亏损的战役不会进入当前排序'
+                  : sortState.mode === 'opportunityQuality'
+                    ? '缺少实际盈亏比或有效回撤百分点的战役不会进入当前排序'
+                    : '未设置初始最大预期亏损的战役不会进入当前排序'
                 : scope === 'own' ? '你下次开主力单时会自动创建第一个战役' : '双方互关后，对方战役会出现在这里'}
             </div>
           </div>
@@ -1075,6 +1140,8 @@ export default function JournalCampaignsPage() {
             legs,
             tradeRecords,
             profitCaptureRatio,
+            opportunityQuality,
+            opportunityQualitySource,
             initialRiskFraction,
             initialRiskSource,
             riskAccountEquity,
@@ -1164,7 +1231,7 @@ export default function JournalCampaignsPage() {
                   </div>
                 </div>
 
-                <div className="mt-3 grid grid-cols-1 gap-2 text-[11px] font-mono text-muted-foreground md:grid-cols-2 xl:grid-cols-[1.25fr_0.7fr_0.78fr_0.7fr_0.72fr_0.78fr_0.9fr]">
+                <div className="mt-3 grid grid-cols-1 gap-2 text-[11px] font-mono text-muted-foreground md:grid-cols-2 xl:grid-cols-[1.18fr_0.65fr_0.72fr_0.65fr_0.62fr_0.62fr_0.64fr_0.82fr]">
                   <div>{fmtTime(campaign.opened_at)} → {fmtTime(campaign.closed_at)}</div>
                   <div>含 {legs.length} legs · 持续 {durationLabel(campaign.opened_at, campaign.closed_at)}</div>
                   <div>
@@ -1172,6 +1239,14 @@ export default function JournalCampaignsPage() {
                   </div>
                   <div data-testid="campaign-payoff-ratio">
                     盈亏比：{profitCaptureRatio == null ? '—' : formatCampaignPayoffRatio(profitCaptureRatio, 2)}
+                  </div>
+                  <div
+                    data-testid="campaign-opportunity-quality-value"
+                    title={opportunityQuality == null
+                      ? '需要已结束战役的实际盈亏比，以及开仓或平仓评价中的有效回撤百分点'
+                      : `Q = 实际盈亏比 ÷ ${opportunityQualitySource === 'post' ? '平仓回撤评估' : '开仓回撤判断'}`}
+                  >
+                    机会质量：{formatOpportunityQuality(opportunityQuality)}
                   </div>
                   <div
                     data-testid="campaign-arithmetic-expectancy"

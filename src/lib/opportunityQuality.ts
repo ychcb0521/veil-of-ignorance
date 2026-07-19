@@ -17,6 +17,22 @@ export function computeOpportunityQuality({
   return ratio / drawdown;
 }
 
+/**
+ * Closed-campaign opportunity quality uses the signed realized payoff ratio.
+ * A losing campaign therefore keeps a negative quality instead of being dropped.
+ */
+export function computeRealizedOpportunityQuality({
+  payoffRatio,
+  drawdownPct,
+}: OpportunityQualityInput): number | null {
+  const ratio = Number(payoffRatio);
+  const drawdown = Number(drawdownPct);
+  if (!Number.isFinite(ratio) || !Number.isFinite(drawdown) || drawdown <= 0) {
+    return null;
+  }
+  return ratio / drawdown;
+}
+
 export function formatOpportunityQuality(value: number | null | undefined, digits = 2): string {
   return value != null && Number.isFinite(value) ? value.toFixed(digits) : '—';
 }
