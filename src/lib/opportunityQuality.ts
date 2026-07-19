@@ -18,8 +18,9 @@ export function computeOpportunityQuality({
 }
 
 /**
- * Closed-campaign opportunity quality uses the signed realized payoff ratio.
- * A losing campaign therefore keeps a negative quality instead of being dropped.
+ * Closed-campaign opportunity quality uses the ABSOLUTE realized payoff ratio.
+ * 机会质量衡量的是这次机会的「量级」（|盈亏比| ÷ 回撤），只看幅度、不看盈亏方向——
+ * 盈利 / 亏损另由胜率与盈亏列表达。亏损战役因此保留其正的机会质量，而非被记成负数。
  */
 export function computeRealizedOpportunityQuality({
   payoffRatio,
@@ -30,7 +31,7 @@ export function computeRealizedOpportunityQuality({
   if (!Number.isFinite(ratio) || !Number.isFinite(drawdown) || drawdown <= 0) {
     return null;
   }
-  return ratio / drawdown;
+  return Math.abs(ratio) / drawdown;
 }
 
 export function formatOpportunityQuality(value: number | null | undefined, digits = 2): string {

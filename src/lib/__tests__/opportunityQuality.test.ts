@@ -27,9 +27,11 @@ describe('opportunity quality', () => {
     expect(computeOpportunityQuality({ payoffRatio: 5, drawdownPct: Number.NaN })).toBeNull();
   });
 
-  it('keeps the sign of the actual payoff ratio for closed campaigns', () => {
+  it('机会质量取盈亏比的绝对值（只看量级、不看盈亏方向）', () => {
     expect(computeRealizedOpportunityQuality({ payoffRatio: 3, drawdownPct: 2 })).toBe(1.5);
-    expect(computeRealizedOpportunityQuality({ payoffRatio: -0.8, drawdownPct: 4 })).toBe(-0.2);
+    // 亏损战役：|−0.8| ÷ 4 = 0.2（正数，不再是 −0.2）
+    expect(computeRealizedOpportunityQuality({ payoffRatio: -0.8, drawdownPct: 4 })).toBe(0.2);
+    expect(computeRealizedOpportunityQuality({ payoffRatio: -3, drawdownPct: 2 })).toBe(1.5); // 与 +3 同质量
     expect(computeRealizedOpportunityQuality({ payoffRatio: 0, drawdownPct: 2 })).toBe(0);
     expect(computeRealizedOpportunityQuality({ payoffRatio: 3, drawdownPct: 0 })).toBeNull();
   });

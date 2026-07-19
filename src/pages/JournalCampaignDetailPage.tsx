@@ -1221,7 +1221,7 @@ export default function JournalCampaignDetailPage() {
                 className="flex items-baseline justify-between gap-3"
                 title={campaignMetricValues?.opportunityQuality == null
                   ? '需要已结束战役的实际盈亏比、主力开仓价和至少一个初始对冲 A/B 价格'
-                  : `Q = 实际盈亏比 ${(campaignMetricValues.profitCaptureRatio! / 100).toFixed(2)} ÷ 初始最大回撤 ${campaignMetricValues.initialExpectedMaxDrawdownPct.toFixed(2)}%`}
+                  : `Q = |实际盈亏比 ${(campaignMetricValues.profitCaptureRatio! / 100).toFixed(2)}| ÷ 初始最大回撤 ${campaignMetricValues.initialExpectedMaxDrawdownPct.toFixed(2)}%`}
               >
                 <span className="text-muted-foreground">机会质量</span>
                 <span className={`font-mono ${pnlColor(campaignMetricValues?.opportunityQuality ?? null)}`}>

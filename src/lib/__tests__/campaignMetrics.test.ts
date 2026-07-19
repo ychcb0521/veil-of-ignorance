@@ -37,14 +37,14 @@ function campaign(overrides: Partial<TradeCampaign> = {}): TradeCampaign {
 }
 
 describe('campaign metrics shared by list and detail pages', () => {
-  it('keeps the sign of realized opportunity quality for a resolved loss', () => {
+  it('机会质量取盈亏比绝对值：亏损战役也是正的量级', () => {
     const value = resolveCampaignOpportunityQuality(
       campaign({ status: 'closed_loss', final_realized_pnl: -80 }),
       -80,
       4,
     );
 
-    expect(value).toBeCloseTo(-0.2, 8);
+    expect(value).toBeCloseTo(0.2, 8); // |−80/100| ÷ 4 = 0.2
   });
 
   it('does not calculate opportunity quality for an active campaign', () => {

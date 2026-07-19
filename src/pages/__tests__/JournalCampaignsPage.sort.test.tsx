@@ -286,7 +286,7 @@ describe('JournalCampaignsPage sorting', () => {
     expect(screen.getAllByTestId('campaign-opportunity-quality-value').map(node => node.textContent)).toEqual([
       '机会质量：0.30',
       '机会质量：0.25',
-      '机会质量：-0.02',
+      '机会质量：0.02', // |−0.80| ÷ 40% = 0.02（盈亏比取绝对值）
       '机会质量：—',
     ]);
     expect(screen.getAllByTestId('campaign-arithmetic-expectancy').map(node => node.textContent)).toEqual([
@@ -343,15 +343,15 @@ describe('JournalCampaignsPage sorting', () => {
     expect(screen.getByText('E = P(赢) × b − (1 − P(赢))')).toBeInTheDocument();
     expect(screen.getByText('= +0.27R')).toBeInTheDocument();
     expect(screen.getByText('P(赢) 仅统计设置了最大预期亏损的有效战役')).toBeInTheDocument();
-    expect(screen.getByTestId('campaign-opportunity-quality')).toHaveTextContent('机会质量（0.18）');
+    expect(screen.getByTestId('campaign-opportunity-quality')).toHaveTextContent('机会质量（0.19）');
     expect(screen.getByTestId('campaign-opportunity-quality')).toHaveAttribute(
       'aria-label',
-      '机会质量 0.18，3 场有效战役，点击查看计算公式',
+      '机会质量 0.19，3 场有效战役，点击查看计算公式',
     );
     fireEvent.click(screen.getByTestId('campaign-opportunity-quality'));
     expect(screen.getByText('机会质量计算公式')).toBeInTheDocument();
-    expect(screen.getByText('Qᵢ = bᵢ ÷ dᵢ，Q̄ = ΣQᵢ ÷ N')).toBeInTheDocument();
-    expect(screen.getByText('实际盈亏比 = 已实现盈亏 ÷ 初始最大预期亏损；亏损战役的 Q 保留负号。')).toBeInTheDocument();
+    expect(screen.getByText('Qᵢ = |bᵢ| ÷ dᵢ，Q̄ = ΣQᵢ ÷ N')).toBeInTheDocument();
+    expect(screen.getByText('机会质量取 |bᵢ| 绝对值：只衡量这次机会的量级，不看盈亏方向（盈亏由胜率 / 盈亏列表达），亏损战役也是正的量级。')).toBeInTheDocument();
     expect(screen.getByText(/dᵢ = max（\|主力开仓价 − 初始对冲 A 价\|/)).toBeInTheDocument();
     expect(screen.getByText('当前 N = 3 场。')).toBeInTheDocument();
     fireEvent.click(screen.getByTestId('campaign-opportunity-quality'));
@@ -366,7 +366,7 @@ describe('JournalCampaignsPage sorting', () => {
     expect(screen.getByTestId('campaign-win-rate')).toHaveTextContent('胜率（66.67%）');
     expect(screen.getByTestId('campaign-average-payoff-ratio')).toHaveTextContent('平均盈亏比（0.90）');
     expect(screen.getByTestId('campaign-expected-value')).toHaveTextContent('期望值（+0.27R）');
-    expect(screen.getByTestId('campaign-opportunity-quality')).toHaveTextContent('机会质量（0.18）');
+    expect(screen.getByTestId('campaign-opportunity-quality')).toHaveTextContent('机会质量（0.19）');
 
     fireEvent.click(screen.getByTestId('campaign-sort-time'));
     expect(screen.getByTestId('campaign-sort-time')).toHaveAttribute('aria-pressed', 'true');
@@ -410,7 +410,7 @@ describe('JournalCampaignsPage sorting', () => {
     expect(screen.getByTestId('campaign-sort-opportunityQuality')).toHaveAttribute('data-sort-direction', 'desc');
     expect(screen.getByTestId('campaign-sort-opportunityQuality')).toHaveAttribute('aria-label', '机会质量，从大到小排序');
     expect(screen.getByText('单场机会质量计算公式')).toBeInTheDocument();
-    expect(screen.getByText('Qᵢ = 实际盈亏比 bᵢ ÷ 初始最大回撤百分点 dᵢ')).toBeInTheDocument();
+    expect(screen.getByText('Qᵢ = |实际盈亏比 bᵢ| ÷ 初始最大回撤百分点 dᵢ')).toBeInTheDocument();
     expect(cardOrder()).toEqual(['High Importance', 'Best PnL', 'Late Close']);
 
     fireEvent.click(screen.getByTestId('campaign-sort-opportunityQuality'));
