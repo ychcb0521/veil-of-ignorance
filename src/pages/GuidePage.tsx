@@ -1206,8 +1206,8 @@ export default function GuidePage() {
                     <tr><td className="px-3 py-2 border-t border-border">平均盈亏比 b̄</td><td className="px-3 py-2 border-t border-border">Σ 单场盈亏比 bᵢ ÷ 有效战役数 N</td><td className="px-3 py-2 border-t border-border">亏损的负盈亏比原样参与求和</td></tr>
                     <tr><td className="px-3 py-2 border-t border-border">期望值 E</td><td className="px-3 py-2 border-t border-border">P(赢) × b̄ −（1 − P(赢)）</td><td className="px-3 py-2 border-t border-border">胜率与平均盈亏比来自同一批有效战役</td></tr>
                     <tr><td className="px-3 py-2 border-t border-border">单场算术期望 Eᵢ</td><td className="px-3 py-2 border-t border-border">P(赢) × bᵢ −（1 − P(赢)）</td><td className="px-3 py-2 border-t border-border">使用实时有效战役胜率与该场带符号盈亏比</td></tr>
-                    <tr><td className="px-3 py-2 border-t border-border">单场风险比例 xᵢ</td><td className="px-3 py-2 border-t border-border">Lᵢ ÷ 主力开仓时账户总资产 Aᵢ</td><td className="px-3 py-2 border-t border-border">Aᵢ 只使用主力开仓 journal 保存的账户权益快照</td></tr>
-                    <tr><td className="px-3 py-2 border-t border-border">单场几何期望 Gᵢ</td><td className="px-3 py-2 border-t border-border">(1+bᵢ·xᵢ)^P(赢) × (1−xᵢ)^(1−P(赢)) − 1</td><td className="px-3 py-2 border-t border-border">bᵢ 可为负；缺少 Aᵢ 时不估算、不参与几何期望排序</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border">单场风险比例 xᵢ</td><td className="px-3 py-2 border-t border-border">Lᵢ ÷ 主力开仓时账户总资产 Aᵢ</td><td className="px-3 py-2 border-t border-border">优先使用主力开仓快照；旧战役缺失时用今日当前总资产估算</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border">单场几何期望 Gᵢ</td><td className="px-3 py-2 border-t border-border">(1+bᵢ·xᵢ)^P(赢) × (1−xᵢ)^(1−P(赢)) − 1</td><td className="px-3 py-2 border-t border-border">bᵢ 可为负；缺少有效 Lᵢ 或可用 Aᵢ 时不估算</td></tr>
                     <tr><td className="px-3 py-2 border-t border-border">汇总 Kelly 仓位 x*</td><td className="px-3 py-2 border-t border-border">b̄ &gt; 0 时：max（0，（P(赢)·b̄ −（1−P(赢)））÷ b̄）；b̄ ≤ 0 时为 0</td><td className="px-3 py-2 border-t border-border">由当前有效样本推导的模型最优风险比例，不是各场实际 xᵢ 的平均值</td></tr>
                     <tr><td className="px-3 py-2 border-t border-border">汇总几何期望 G</td><td className="px-3 py-2 border-t border-border">(1+b̄·x*)^P(赢) × (1−x*)^(1−P(赢)) − 1</td><td className="px-3 py-2 border-t border-border">表示在历史总体参数和 Kelly 最优仓位下的理论每笔复利率</td></tr>
                   </tbody>
@@ -1216,7 +1216,7 @@ export default function GuidePage() {
               <RedHighlight>
                 没有初始最大预期亏损，就没有可用分母，因此该战役的盈亏比显示「—」。它不会进入盈亏比排序，也不会进入胜率、平均盈亏比和期望值。点击列表顶部的<strong>盈亏比、胜率、平均盈亏比或期望值</strong>，可以查看公式及当前列表数据的代入过程。
               </RedHighlight>
-              <P>单场几何期望还要求主力开仓时保存了账户总资产快照。系统不会拿当前资产替代历史资产：旧战役若缺少该快照，仍可计算盈亏比与算术期望，但单场几何期望显示「—」，并从几何期望排序中排除。</P>
+              <P>单场几何期望优先使用主力开仓时固化的实时账户总资产快照，该值不会被后续资产变化改写。旧战役若因字段上线较晚而缺少快照，系统会用<strong>今日当前总账户资产</strong>作为替代分母，使历史战役仍可计算和排序；这个回退值是历史估算而非当时资产的还原，会随当前账户资产实时更新。互关账户缺少快照时，不会借用本人的账户资产。</P>
 
               <SubTitle>算术期望与几何期望怎么读</SubTitle>
               <div className="overflow-x-auto">

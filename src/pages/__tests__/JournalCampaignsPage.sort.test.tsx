@@ -126,6 +126,14 @@ vi.mock('@/contexts/AuthContext', () => ({
   }),
 }));
 
+vi.mock('@/contexts/TradingContext', () => ({
+  useTradingContext: () => ({
+    balance: 100_000,
+    positionsMap: {},
+    priceMap: {},
+  }),
+}));
+
 vi.mock('@/lib/journalApi', () => ({
   deleteCampaign: vi.fn(),
   getCampaignFullData: vi.fn(async (id: string) => ({
@@ -393,6 +401,7 @@ describe('JournalCampaignsPage sorting', () => {
     expect(screen.getByText('单场几何期望计算公式')).toBeInTheDocument();
     expect(screen.getByText(/Gᵢ = \(1\+bᵢ·xᵢ\)/)).toBeInTheDocument();
     expect(screen.getByText('xᵢ = 该战役初始最大预期亏损 Lᵢ ÷ 主力开仓时账户总资产 Aᵢ')).toBeInTheDocument();
+    expect(screen.getByText(/旧战役缺少快照时，使用今日当前总账户资产作为历史估算：100000.00 USDT/)).toBeInTheDocument();
     expect(screen.getByText(/bᵢ < 0 时仍按该场真实 xᵢ/)).toBeInTheDocument();
     expect(cardOrder()).toEqual(['High Importance', 'Best PnL', 'Late Close']);
 

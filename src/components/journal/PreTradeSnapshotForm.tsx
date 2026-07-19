@@ -62,7 +62,8 @@ import { StopDoingListManagerDialog } from '@/components/journal/StopDoingListMa
 import type { StopDoingItem } from '@/types/journal';
 import { useAuth } from '@/contexts/AuthContext';
 import { useTradingContext } from '@/contexts/TradingContext';
-import { calcUnrealizedPnl, type SettlementMode } from '@/types/trading';
+import { computeCurrentAccountEquity } from '@/lib/accountEquity';
+import type { SettlementMode } from '@/types/trading';
 import { getSettlementAsset } from '@/lib/coinMargined';
 import type { PlaceOrderParams } from '@/contexts/TradingContext';
 import type {
@@ -475,21 +476,10 @@ export function PreTradeSnapshotForm({
     return () => { cancelled = true; };
   }, [user]);
 
-  const accountEquity = useMemo(() => {
-    let equity = Number.isFinite(balance) ? balance : 0;
-    for (const [positionSymbol, positions] of Object.entries(positionsMap)) {
-      for (const position of positions) {
-        const markPrice = priceMap[positionSymbol] ?? position.entryPrice;
-        const pnl = calcUnrealizedPnl(position, markPrice);
-        if (position.marginMode === 'isolated') {
-          equity += (position.isolatedMargin ?? position.margin ?? 0) + pnl;
-        } else {
-          equity += pnl;
-        }
-      }
-    }
-    return Math.max(0, equity);
-  }, [balance, positionsMap, priceMap]);
+  const accountEquity = useMemo(
+    () => computeCurrentAccountEquity(balance, positionsMap, priceMap),
+    [balance, positionsMap, priceMap],
+  );
 
   const inferredPositionSizeUsdt = useMemo(() => {
     if (initialPositionSizeUsdt != null && Number.isFinite(initialPositionSizeUsdt)) {

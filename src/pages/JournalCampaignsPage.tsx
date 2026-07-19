@@ -6,6 +6,8 @@ import { BackButton } from '@/components/journal/BackButton';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { useAuth } from '@/contexts/AuthContext';
+import { useTradingContext } from '@/contexts/TradingContext';
+import { computeCurrentAccountEquity } from '@/lib/accountEquity';
 import {
   deleteCampaign,
   getCampaignFullData,
@@ -17,11 +19,12 @@ import {
   updateCampaignImportance,
 } from '@/lib/journalApi';
 import {
-  computeCampaignInitialRiskFraction,
   computeInitialExpectedMaxLoss,
   computeProfitCaptureRatio,
   formatCampaignPayoffRatio,
+  resolveCampaignInitialRiskFraction,
 } from '@/lib/campaignAnalysis';
+import type { CampaignInitialRiskSource } from '@/lib/campaignAnalysis';
 import { summarizeCampaignPerformance } from '@/lib/kellySizing';
 import { computeGeometricExpectancy } from '@/lib/geometricExpectancy';
 import { LEG_ROLE_LABELS, STRATEGY_TEMPLATES } from '@/lib/strategyTemplates';
@@ -35,10 +38,13 @@ type CampaignCardData = {
   legs: TradeJournal[];
   tradeRecords: TradeRecord[];
   profitCaptureRatio: number | null;
-  initialRiskFraction: number | null;
+  initialExpectedMaxLoss: number;
 };
 
 type CampaignDisplayData = CampaignCardData & {
+  initialRiskFraction: number | null;
+  initialRiskSource: CampaignInitialRiskSource | null;
+  riskAccountEquity: number | null;
   arithmeticExpectancy: number | null;
   geometricExpectancy: number | null;
 };
@@ -324,6 +330,11 @@ export default function JournalCampaignsPage() {
   const nav = useNavigate();
   const location = useLocation();
   const { user } = useAuth();
+  const { balance, positionsMap, priceMap } = useTradingContext();
+  const currentAccountEquity = useMemo(
+    () => computeCurrentAccountEquity(balance, positionsMap, priceMap),
+    [balance, positionsMap, priceMap],
+  );
   const [scope, setScope] = useState<'own' | 'mutual'>('own');
   const [loading, setLoading] = useState(true);
   const [rows, setRows] = useState<CampaignCardData[]>([]);
@@ -353,7 +364,6 @@ export default function JournalCampaignsPage() {
               details.tradeRecords,
               details.reverseHedgeOrders,
             );
-            const initialRisk = computeCampaignInitialRiskFraction(initialExpectedMaxLoss, details.legs);
             return {
               campaign: details.campaign,
               legs: details.legs,
@@ -366,7 +376,7 @@ export default function JournalCampaignsPage() {
                   details.reverseHedgeOrders,
                 )
                 : null,
-              initialRiskFraction: initialRisk?.drawdownFraction ?? null,
+              initialExpectedMaxLoss,
             };
           }),
         );
@@ -436,15 +446,26 @@ export default function JournalCampaignsPage() {
     [performance.expectedWinRate, performance.payoffRatio],
   );
   const displayRows = useMemo<CampaignDisplayData[]>(
-    () => rows.map(row => ({
-      ...row,
-      ...computeCampaignExpectancies(
-        row.profitCaptureRatio,
-        performance.expectedWinRate,
-        row.initialRiskFraction,
-      ),
-    })),
-    [rows, performance.expectedWinRate],
+    () => rows.map(row => {
+      const initialRisk = resolveCampaignInitialRiskFraction(
+        row.initialExpectedMaxLoss,
+        row.legs,
+        row.campaign.user_id === user?.id ? currentAccountEquity : null,
+      );
+      const initialRiskFraction = initialRisk?.drawdownFraction ?? null;
+      return {
+        ...row,
+        initialRiskFraction,
+        initialRiskSource: initialRisk?.source ?? null,
+        riskAccountEquity: initialRisk?.accountEquityAtMainOpen ?? null,
+        ...computeCampaignExpectancies(
+          row.profitCaptureRatio,
+          performance.expectedWinRate,
+          initialRiskFraction,
+        ),
+      };
+    }),
+    [rows, performance.expectedWinRate, currentAccountEquity, user?.id],
   );
   const sortedRows = useMemo(
     () => sortCampaignRows(displayRows, sortState),
@@ -550,7 +571,6 @@ export default function JournalCampaignsPage() {
           details.tradeRecords,
           details.reverseHedgeOrders,
         );
-        const initialRisk = computeCampaignInitialRiskFraction(initialExpectedMaxLoss, details.legs);
         const restoredRow: CampaignCardData = {
           campaign: { ...details.campaign, deleted_at: null },
           legs: details.legs,
@@ -563,7 +583,7 @@ export default function JournalCampaignsPage() {
               details.reverseHedgeOrders,
             )
             : null,
-          initialRiskFraction: initialRisk?.drawdownFraction ?? null,
+          initialExpectedMaxLoss,
         };
         setRows(current => [restoredRow, ...current.filter(item => item.campaign.id !== campaign.id)]);
       }
@@ -661,7 +681,7 @@ export default function JournalCampaignsPage() {
                 ? option.value
                 : null;
               const invalidCampaignHint = option.value === 'geometricExpectancy'
-                ? '；缺少最大预期亏损或主力开仓账户总资产的战役不显示'
+                ? '；缺少最大预期亏损的战役不显示；旧战役缺少开仓资产快照时按当前总资产估算'
                 : formula != null
                   ? '；未设置最大预期亏损的战役不显示'
                   : '';
@@ -743,11 +763,13 @@ export default function JournalCampaignsPage() {
                           <div className="rounded border border-border/60 px-2 py-1.5 font-mono leading-relaxed text-foreground/85">
                             xᵢ = 该战役初始最大预期亏损 Lᵢ ÷ 主力开仓时账户总资产 Aᵢ
                           </div>
-                          <div>Aᵢ 只读取该战役主力开仓快照保存的账户总资产，不使用当前资产或后续 Leg 的资产。</div>
+                          <div>Aᵢ 优先读取主力开仓时固化的实时总资产快照，后续资产变化不会改写该值。</div>
+                          <div>旧战役缺少快照时，使用今日当前总账户资产作为历史估算：{currentAccountEquity > 0 ? `${currentAccountEquity.toFixed(2)} USDT` : '当前不可用'}；该估算会随当前账户资产更新。</div>
+                          <div>互关账户缺少快照时不会借用本人的账户资产。</div>
                           <div>P(赢) 使用当前有效战役实时胜率：{winRateLabel}；bᵢ 使用该战役带正负号的实际盈亏比。</div>
                           <div>bᵢ &lt; 0 时仍按该场真实 xᵢ 进入公式，不会归零。</div>
                           <div>若 xᵢ ≥ 100% 或 1+bᵢ·xᵢ ≤ 0，代表该风险比例下资本被击穿，几何期望记为 −100%。</div>
-                          <div>缺少有效初始最大预期亏损或主力开仓账户总资产快照的战役不参与几何期望排序。</div>
+                          <div>缺少有效初始最大预期亏损，或既无开仓快照也无可用当前资产的战役，不参与几何期望排序。</div>
                         </div>
                       </>
                     )}
@@ -957,7 +979,7 @@ export default function JournalCampaignsPage() {
                 || sortState.mode === 'arithmeticExpectancy'
                 || sortState.mode === 'geometricExpectancy') && rows.length > 0
                 ? sortState.mode === 'geometricExpectancy'
-                  ? '缺少初始最大预期亏损或主力开仓账户总资产的战役不会进入当前排序'
+                  ? '旧战役缺少开仓资产快照时会按当前总资产估算；缺少初始最大预期亏损的战役仍不会进入当前排序'
                   : '未设置初始最大预期亏损的战役不会进入当前排序'
                 : scope === 'own' ? '你下次开主力单时会自动创建第一个战役' : '双方互关后，对方战役会出现在这里'}
             </div>
@@ -969,6 +991,8 @@ export default function JournalCampaignsPage() {
             tradeRecords,
             profitCaptureRatio,
             initialRiskFraction,
+            initialRiskSource,
+            riskAccountEquity,
             arithmeticExpectancy,
             geometricExpectancy,
           }) => {
@@ -1073,8 +1097,10 @@ export default function JournalCampaignsPage() {
                   <div
                     data-testid="campaign-geometric-expectancy"
                     title={initialRiskFraction == null
-                      ? '缺少主力开仓时账户总资产快照，无法计算单场几何期望'
-                      : `xᵢ = 最大预期亏损 ÷ 主力开仓账户总资产 = ${(initialRiskFraction * 100).toFixed(2)}%`}
+                      ? '缺少有效初始最大预期亏损，或没有可用的账户总资产，无法计算单场几何期望'
+                      : initialRiskSource === 'current_account_fallback'
+                        ? `历史估算：xᵢ = 最大预期亏损 ÷ 今日当前总账户资产 ${riskAccountEquity?.toFixed(2) ?? '—'} = ${(initialRiskFraction * 100).toFixed(2)}%`
+                        : `xᵢ = 最大预期亏损 ÷ 主力开仓实时总资产快照 ${riskAccountEquity?.toFixed(2) ?? '—'} = ${(initialRiskFraction * 100).toFixed(2)}%`}
                   >
                     几何期望：{formatGeometricExpectancy(geometricExpectancy)}
                   </div>

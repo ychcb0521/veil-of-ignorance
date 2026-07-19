@@ -5,6 +5,7 @@ import {
   computeInitialExpectedMaxLoss,
   computeProfitCaptureRatio,
   formatCampaignPayoffRatio,
+  resolveCampaignInitialRiskFraction,
 } from '@/lib/campaignAnalysis';
 import type { TradeCampaign, TradeJournal } from '@/types/journal';
 import type { TradeRecord } from '@/types/trading';
@@ -135,6 +136,39 @@ describe('campaign profit capture ratio', () => {
 
     expect(computeCampaignInitialRiskFraction(1_200, legs)).toBeNull();
     expect(computeCampaignInitialRiskFraction(0, legs)).toBeNull();
+  });
+
+  it('prefers the immutable main-entry snapshot over a current-account fallback', () => {
+    const legs = [
+      { ...makeLeg('main', 'main_open', 100), pre_account_equity_usdt: 80_000 },
+    ];
+
+    expect(resolveCampaignInitialRiskFraction(1_200, legs, 40_000)).toEqual({
+      initialExpectedMaxLoss: 1_200,
+      accountEquityAtMainOpen: 80_000,
+      drawdownFraction: 0.015,
+      source: 'main_open_snapshot',
+    });
+  });
+
+  it('uses current total account equity when a legacy campaign has no main-entry snapshot', () => {
+    const legs = [makeLeg('main', 'main_open', 100)];
+
+    expect(resolveCampaignInitialRiskFraction(1_200, legs, 40_000)).toEqual({
+      initialExpectedMaxLoss: 1_200,
+      accountEquityAtMainOpen: 40_000,
+      drawdownFraction: 0.03,
+      source: 'current_account_fallback',
+    });
+    expect(resolveCampaignInitialRiskFraction(1_200, legs, 80_000)?.drawdownFraction).toBe(0.015);
+  });
+
+  it('rejects a fallback when expected loss or current account equity is unavailable', () => {
+    const legs = [makeLeg('main', 'main_open', 100)];
+
+    expect(resolveCampaignInitialRiskFraction(1_200, legs, null)).toBeNull();
+    expect(resolveCampaignInitialRiskFraction(1_200, legs, 0)).toBeNull();
+    expect(resolveCampaignInitialRiskFraction(0, legs, 40_000)).toBeNull();
   });
 
   it('preserves the minus sign when realized P&L is negative', () => {

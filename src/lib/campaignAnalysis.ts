@@ -190,6 +190,12 @@ export interface CampaignInitialRiskFraction {
   drawdownFraction: number;
 }
 
+export type CampaignInitialRiskSource = 'main_open_snapshot' | 'current_account_fallback';
+
+export interface ResolvedCampaignInitialRiskFraction extends CampaignInitialRiskFraction {
+  source: CampaignInitialRiskSource;
+}
+
 /**
  * Reconstruct the actual capital fraction risked by one campaign.
  *
@@ -209,6 +215,39 @@ export function computeCampaignInitialRiskFraction(
     initialExpectedMaxLoss,
     accountEquityAtMainOpen,
     drawdownFraction: initialExpectedMaxLoss / accountEquityAtMainOpen,
+  };
+}
+
+/**
+ * Resolve one campaign's risk fraction without overwriting historical data.
+ * A saved main-entry snapshot always wins. The live-account fallback exists
+ * only for legacy rows that predate that snapshot field.
+ */
+export function resolveCampaignInitialRiskFraction(
+  initialExpectedMaxLoss: number,
+  legs: TradeJournal[],
+  currentAccountEquityFallback: number | null = null,
+): ResolvedCampaignInitialRiskFraction | null {
+  const captured = computeCampaignInitialRiskFraction(initialExpectedMaxLoss, legs);
+  if (captured) {
+    return { ...captured, source: 'main_open_snapshot' };
+  }
+
+  const fallbackEquity = Number(currentAccountEquityFallback);
+  if (
+    !Number.isFinite(initialExpectedMaxLoss)
+    || initialExpectedMaxLoss <= EPSILON
+    || !Number.isFinite(fallbackEquity)
+    || fallbackEquity <= EPSILON
+  ) {
+    return null;
+  }
+
+  return {
+    initialExpectedMaxLoss,
+    accountEquityAtMainOpen: fallbackEquity,
+    drawdownFraction: initialExpectedMaxLoss / fallbackEquity,
+    source: 'current_account_fallback',
   };
 }
 
