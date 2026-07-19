@@ -34,6 +34,7 @@ import {
 } from '@/lib/campaignMetrics';
 import { summarizeCampaignPerformance } from '@/lib/kellySizing';
 import { computeGeometricExpectancy } from '@/lib/geometricExpectancy';
+import { campaignAchievedMirrorTp, summarizeMirrorTp } from '@/lib/mirrorTpSummary';
 import { formatOpportunityQuality } from '@/lib/opportunityQuality';
 import { LEG_ROLE_LABELS, STRATEGY_TEMPLATES } from '@/lib/strategyTemplates';
 import { campaignOperationTime } from '@/lib/objectiveOperationTime';
@@ -79,6 +80,7 @@ type CampaignFormulaPopover =
   | 'arithmeticExpectancy'
   | 'geometricExpectancy'
   | 'validCampaigns'
+  | 'mirrorTp'
   | 'winRate'
   | 'averagePayoffRatio'
   | 'expectedValue'
@@ -455,6 +457,16 @@ export default function JournalCampaignsPage() {
     () => computeGeometricExpectancy(performance.expectedWinRate, performance.payoffRatio),
     [performance.expectedWinRate, performance.payoffRatio],
   );
+  // 镜像止盈达成统计（战役维度，全表口径）。
+  const mirrorTp = useMemo(
+    () => summarizeMirrorTp(rows.map(row => ({
+      achieved: campaignAchievedMirrorTp(row.legs, row.tradeRecords),
+      realizedPnl: row.campaign.final_realized_pnl ?? null,
+    }))),
+    [rows],
+  );
+  const mirrorTpRateLabel = mirrorTp.achievedRatePct == null ? '—' : `${mirrorTp.achievedRatePct.toFixed(0)}%`;
+  const mirrorTpWinRateLabel = mirrorTp.achievedWinRatePct == null ? '—' : `${mirrorTp.achievedWinRatePct.toFixed(0)}%`;
   const opportunityQualityStats = useMemo(() => {
     const samples = rows.filter(row => (
       row.opportunityQuality != null && Number.isFinite(row.opportunityQuality)
@@ -864,6 +876,42 @@ export default function JournalCampaignsPage() {
                   <div><span className="text-muted-foreground">亏损</span><strong className="ml-1 text-[#F6465D]">{performance.lossCount}</strong></div>
                   <div><span className="text-muted-foreground">盈亏平衡</span><strong className="ml-1 text-foreground">{breakevenCampaignCount}</strong></div>
                 </div>
+              </PopoverContent>
+            </Popover>
+            <Popover
+              open={formulaPopover === 'mirrorTp'}
+              onOpenChange={open => handleFormulaPopoverChange('mirrorTp', open)}
+            >
+              <PopoverTrigger asChild>
+                <button
+                  type="button"
+                  data-testid="campaign-mirror-tp"
+                  aria-label={`镜像止盈达成率 ${mirrorTpRateLabel}，实现 ${mirrorTp.achieved} 场（盈利 ${mirrorTp.achievedWin} 场、亏损 ${mirrorTp.achievedLoss} 场），未实现 ${mirrorTp.notAchieved} 场，点击查看说明`}
+                  title="点击查看镜像止盈达成说明"
+                  onClick={event => openFormulaPopover(event, 'mirrorTp')}
+                  className="ml-0.5 inline-flex h-6 select-none items-center border-b border-l border-dashed border-muted-foreground/30 border-l-border/60 pl-2 text-foreground/60 transition-colors hover:text-foreground/80"
+                >
+                  镜像止盈（{mirrorTpRateLabel}）
+                </button>
+              </PopoverTrigger>
+              <PopoverContent align="end" className="w-96 border-border bg-card p-3 text-[11px]">
+                <div className="font-medium text-foreground">镜像止盈达成统计</div>
+                <div className="mt-2 space-y-1 text-muted-foreground">
+                  <div>「实现镜像止盈」= 该战役的镜像止盈委托真正成交（触发后进入「已锁定不亏」）。口径为当前列表全部 {mirrorTp.total} 场战役。</div>
+                  <div>达成率 = 实现 ÷ 全部；达成盈利率 = 实现且盈利 ÷ 实现（盈亏按战役已实现盈亏判定）。</div>
+                </div>
+                <div className="mt-2 grid grid-cols-2 gap-1 border-t border-border/60 pt-2 text-center">
+                  <div><span className="text-muted-foreground">实现</span><strong className="ml-1 text-foreground">{mirrorTp.achieved}</strong><span className="ml-1 text-muted-foreground">（{mirrorTpRateLabel}）</span></div>
+                  <div><span className="text-muted-foreground">未实现</span><strong className="ml-1 text-foreground">{mirrorTp.notAchieved}</strong></div>
+                </div>
+                <div className="mt-1 grid grid-cols-3 gap-1 text-center">
+                  <div><span className="text-muted-foreground">实现·盈利</span><strong className="ml-1 text-[#0ECB81]">{mirrorTp.achievedWin}</strong></div>
+                  <div><span className="text-muted-foreground">实现·亏损</span><strong className="ml-1 text-[#F6465D]">{mirrorTp.achievedLoss}</strong></div>
+                  <div><span className="text-muted-foreground">达成盈利率</span><strong className="ml-1 text-foreground">{mirrorTpWinRateLabel}</strong></div>
+                </div>
+                {mirrorTp.achievedNeutral > 0 ? (
+                  <div className="mt-1 text-center text-muted-foreground">其中 {mirrorTp.achievedNeutral} 场进行中 / 打平（未计入盈亏）。</div>
+                ) : null}
               </PopoverContent>
             </Popover>
             <Popover
