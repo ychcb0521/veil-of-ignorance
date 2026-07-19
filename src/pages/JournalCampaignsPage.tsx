@@ -22,6 +22,7 @@ import {
   formatCampaignPayoffRatio,
 } from '@/lib/campaignAnalysis';
 import { summarizeCampaignPerformance } from '@/lib/kellySizing';
+import { computeGeometricExpectancy } from '@/lib/geometricExpectancy';
 import { LEG_ROLE_LABELS, STRATEGY_TEMPLATES } from '@/lib/strategyTemplates';
 import { campaignOperationTime } from '@/lib/objectiveOperationTime';
 import { formatBeijingTime } from '@/lib/timeFormat';
@@ -43,7 +44,7 @@ type CampaignSortState = {
   direction: CampaignSortDirection;
 };
 
-type CampaignFormulaPopover = 'captureRate' | 'validCampaigns' | 'winRate' | 'averagePayoffRatio' | 'expectedValue';
+type CampaignFormulaPopover = 'captureRate' | 'validCampaigns' | 'winRate' | 'averagePayoffRatio' | 'expectedValue' | 'geometricEdge';
 
 const SORT_OPTIONS: { value: CampaignSortMode; label: string }[] = [
   { value: 'importance', label: '重要性' },
@@ -344,6 +345,17 @@ export default function JournalCampaignsPage() {
   const expectedRLabel = performance.expectedR == null
     ? '—'
     : `${performance.expectedR >= 0 ? '+' : ''}${performance.expectedR.toFixed(2)}R`;
+  // 几何期望（每笔）：算术期望的复利升级，看得见波动拖累。用 Kelly 最优仓位 x* 折算复利潜力。
+  const geometric = useMemo(
+    () => computeGeometricExpectancy(performance.expectedWinRate, performance.payoffRatio),
+    [performance.expectedWinRate, performance.payoffRatio],
+  );
+  const geometricEdgeLabel = geometric == null
+    ? '—'
+    : `${geometric.geometricEdge >= 0 ? '+' : ''}${(geometric.geometricEdge * 100).toFixed(1)}%`;
+  const optimalFractionLabel = geometric == null || geometric.optimalFraction <= 0
+    ? '—'
+    : `${(geometric.optimalFraction * 100).toFixed(1)}%`;
 
   const handleSortChange = (mode: CampaignSortMode) => {
     setSortState(current => (
@@ -725,6 +737,44 @@ export default function JournalCampaignsPage() {
                   <div className="mt-2 text-muted-foreground">
                     当前列表需要至少一场有有效盈亏比的战役，并且要有可计算的胜率，才能得到期望值。
                   </div>
+                )}
+              </PopoverContent>
+            </Popover>
+            <Popover
+              open={formulaPopover === 'geometricEdge'}
+              onOpenChange={open => handleFormulaPopoverChange('geometricEdge', open)}
+            >
+              <PopoverTrigger asChild>
+                <button
+                  type="button"
+                  data-testid="campaign-geometric-edge"
+                  className="h-6 rounded-sm border-b border-dashed border-muted-foreground/30 px-0.5 text-foreground/60 transition-colors hover:text-foreground/80"
+                  aria-label={`几何期望 ${geometricEdgeLabel} 每笔，点击查看计算公式`}
+                  onClick={event => openFormulaPopover(event, 'geometricEdge')}
+                >
+                  几何期望（{geometricEdgeLabel}/笔）
+                </button>
+              </PopoverTrigger>
+              <PopoverContent align="end" className="w-80 border-border bg-card p-3 text-[11px]">
+                <div className="font-medium text-foreground">几何期望（每笔复利率）计算公式</div>
+                <div className="mt-2 rounded bg-muted/60 px-2 py-1.5 font-mono text-foreground">
+                  G = (1+b·x)^P(赢) · (1−x)^(1−P(赢))，几何期望 = G − 1
+                </div>
+                {geometric != null && performance.expectedWinRate != null && performance.payoffRatio != null ? (
+                  <div className="mt-2 space-y-1 text-muted-foreground">
+                    <div className="font-mono">
+                      x* = ({(performance.expectedWinRate * 100).toFixed(1)}% × {performance.payoffRatio.toFixed(2)} − {((1 - performance.expectedWinRate) * 100).toFixed(1)}%) ÷ {performance.payoffRatio.toFixed(2)} = {optimalFractionLabel}
+                    </div>
+                    <div className="font-mono text-foreground">G − 1 = {geometricEdgeLabel}/笔（在最优仓位 x* 下）</div>
+                    <div>x = 每笔按资金比例的最大预期回撤；这里取令复利最大的 Kelly 最优 x*（= 下方「最优仓位」）。</div>
+                    <div>它与算术期望（{expectedRLabel}）的差 = <span className="text-foreground">波动拖累</span>：押太大时算术为正、几何却翻负、本金长期归零。</div>
+                    {geometric.bleeds ? (
+                      <div className="text-[#F6465D]">当前为长期缩水（G&lt;1）——这套 edge 不该按此仓位下注。</div>
+                    ) : null}
+                    <div className="border-t border-border/60 pt-1.5 font-mono text-foreground">最优仓位 x*：{optimalFractionLabel}</div>
+                  </div>
+                ) : (
+                  <div className="mt-2 text-muted-foreground">需要可计算的胜率与盈亏比才能得到几何期望。</div>
                 )}
               </PopoverContent>
             </Popover>
