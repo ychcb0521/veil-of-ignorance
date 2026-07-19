@@ -71,6 +71,29 @@ describe('computeGeometricExpectancy', () => {
     expect(r!.growthFactor).toBeCloseTo(1.4532, 3);
   });
 
+  it('显式固定正仓位时，b<0 进入公式并产生负几何期望', () => {
+    const r = computeGeometricExpectancy(0.6, -0.8, 0.2);
+    expect(r!.drawdownFraction).toBe(0.2);
+    expect(r!.growthFactor).toBeCloseTo(Math.pow(0.84, 0.6) * Math.pow(0.8, 0.4), 10);
+    expect(r!.geometricEdge).toBeLessThan(0);
+    expect(r!.bleeds).toBe(true);
+  });
+
+  it('显式给 x=0 时尊重不下注，不回退到该场自己的 Kelly 仓位', () => {
+    const r = computeGeometricExpectancy(0.6, 10, 0);
+    expect(r!.optimalFraction).toBeCloseTo(0.56, 10);
+    expect(r!.drawdownFraction).toBe(0);
+    expect(r!.growthFactor).toBe(1);
+    expect(r!.geometricEdge).toBe(0);
+  });
+
+  it('实际风险比例 x≥1 时不截断，按账户权益被击穿处理', () => {
+    const r = computeGeometricExpectancy(0.6, 2, 1.2);
+    expect(r!.drawdownFraction).toBe(1.2);
+    expect(r!.growthFactor).toBe(0);
+    expect(r!.geometricEdge).toBe(-1);
+  });
+
   it('负 edge → x*=0、G=1、几何期望 0（不该下注）', () => {
     const r = computeGeometricExpectancy(0.4, 1);
     expect(r!.optimalFraction).toBe(0);

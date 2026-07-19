@@ -86,6 +86,12 @@ function firstPositiveNumber(...values: Array<number | null | undefined>): numbe
   return value == null ? null : Number(value);
 }
 
+function findInitialMainLeg(legs: TradeJournal[]): TradeJournal | null {
+  return legs
+    .filter(leg => leg.leg_role === 'main_open')
+    .sort((a, b) => toMs(a.pre_simulated_time) - toMs(b.pre_simulated_time))[0] ?? null;
+}
+
 /**
  * Initial risk anchor used by 盈亏比:
  * main notional x the widest distance from the original main entry to hedge A/B.
@@ -99,9 +105,7 @@ export function computeInitialExpectedMaxLoss(
   tradeRecords: TradeRecord[],
   reverseHedgeOrders: CampaignReverseHedgeOrder[] = [],
 ): number {
-  const mainLeg = legs
-    .filter(leg => leg.leg_role === 'main_open')
-    .sort((a, b) => toMs(a.pre_simulated_time) - toMs(b.pre_simulated_time))[0] ?? null;
+  const mainLeg = findInitialMainLeg(legs);
   const mainRecord = mainLeg ? findTradeRecord(mainLeg, tradeRecords) : null;
   const mainEvent = (campaign.actual_evolution ?? []).find(event =>
     event.leg_role === 'main_open' && firstPositiveNumber(event.entry_price, event.price) != null,
@@ -175,6 +179,37 @@ export function computeInitialExpectedMaxLoss(
 
   const widestRiskRate = Math.max(...hedgePrices.map(price => Math.abs(price - entryPrice) / entryPrice));
   return widestRiskRate * mainNotional;
+}
+
+export interface CampaignInitialRiskFraction {
+  /** Initial maximum expected loss L_i in USDT. */
+  initialExpectedMaxLoss: number;
+  /** Account equity snapshot A_i captured immediately before the main entry. */
+  accountEquityAtMainOpen: number;
+  /** Actual fraction of account equity at risk: x_i = L_i / A_i. */
+  drawdownFraction: number;
+}
+
+/**
+ * Reconstruct the actual capital fraction risked by one campaign.
+ *
+ * The denominator must be the immutable account-equity snapshot attached to
+ * the initial main leg. Current equity and later-leg snapshots are not valid
+ * substitutes because they would introduce hindsight into historical results.
+ */
+export function computeCampaignInitialRiskFraction(
+  initialExpectedMaxLoss: number,
+  legs: TradeJournal[],
+): CampaignInitialRiskFraction | null {
+  if (!Number.isFinite(initialExpectedMaxLoss) || initialExpectedMaxLoss <= EPSILON) return null;
+  const mainLeg = findInitialMainLeg(legs);
+  const accountEquityAtMainOpen = Number(mainLeg?.pre_account_equity_usdt);
+  if (!Number.isFinite(accountEquityAtMainOpen) || accountEquityAtMainOpen <= EPSILON) return null;
+  return {
+    initialExpectedMaxLoss,
+    accountEquityAtMainOpen,
+    drawdownFraction: initialExpectedMaxLoss / accountEquityAtMainOpen,
+  };
 }
 
 function computeRealizedPnl(

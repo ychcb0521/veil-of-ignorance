@@ -17,6 +17,7 @@ import {
   updateCampaignImportance,
 } from '@/lib/journalApi';
 import {
+  computeCampaignInitialRiskFraction,
   computeInitialExpectedMaxLoss,
   computeProfitCaptureRatio,
   formatCampaignPayoffRatio,
@@ -34,6 +35,7 @@ type CampaignCardData = {
   legs: TradeJournal[];
   tradeRecords: TradeRecord[];
   profitCaptureRatio: number | null;
+  initialRiskFraction: number | null;
 };
 
 type CampaignDisplayData = CampaignCardData & {
@@ -194,6 +196,7 @@ function comparePnl(
 function computeCampaignExpectancies(
   profitCaptureRatio: number | null,
   winRate: number | null,
+  campaignDrawdownFraction: number | null,
 ): Pick<CampaignDisplayData, 'arithmeticExpectancy' | 'geometricExpectancy'> {
   if (
     profitCaptureRatio == null
@@ -205,7 +208,9 @@ function computeCampaignExpectancies(
   }
   const payoffRatio = profitCaptureRatio / 100;
   const arithmeticExpectancy = winRate * payoffRatio - (1 - winRate);
-  const geometric = computeGeometricExpectancy(winRate, payoffRatio);
+  const geometric = campaignDrawdownFraction != null && Number.isFinite(campaignDrawdownFraction)
+    ? computeGeometricExpectancy(winRate, payoffRatio, campaignDrawdownFraction)
+    : null;
   return {
     arithmeticExpectancy,
     geometricExpectancy: geometric?.geometricEdge ?? null,
@@ -225,17 +230,18 @@ function formatGeometricExpectancy(value: number | null): string {
 }
 
 function sortCampaignRows(rows: CampaignDisplayData[], sort: CampaignSortState): CampaignDisplayData[] {
-  const expectationMode = sort.mode === 'arithmeticExpectancy' || sort.mode === 'geometricExpectancy';
-  const visibleRows = sort.mode === 'captureRate' || expectationMode
-    ? rows.filter(row => (
-      row.profitCaptureRatio != null
-      && Number.isFinite(row.profitCaptureRatio)
-      && (!expectationMode || (
-        row.arithmeticExpectancy != null
-        && row.geometricExpectancy != null
-      ))
-    ))
-    : rows;
+  const visibleRows = rows.filter(row => {
+    if (sort.mode === 'captureRate') {
+      return row.profitCaptureRatio != null && Number.isFinite(row.profitCaptureRatio);
+    }
+    if (sort.mode === 'arithmeticExpectancy') {
+      return row.arithmeticExpectancy != null && Number.isFinite(row.arithmeticExpectancy);
+    }
+    if (sort.mode === 'geometricExpectancy') {
+      return row.geometricExpectancy != null && Number.isFinite(row.geometricExpectancy);
+    }
+    return true;
+  });
   return [...visibleRows].sort((a, b) => {
     const importanceDesc = compareNumber(importanceValue(a.campaign), importanceValue(b.campaign), 'desc');
     const timeDesc = compareNumber(campaignSortTime(a), campaignSortTime(b), 'desc');
@@ -347,6 +353,7 @@ export default function JournalCampaignsPage() {
               details.tradeRecords,
               details.reverseHedgeOrders,
             );
+            const initialRisk = computeCampaignInitialRiskFraction(initialExpectedMaxLoss, details.legs);
             return {
               campaign: details.campaign,
               legs: details.legs,
@@ -359,6 +366,7 @@ export default function JournalCampaignsPage() {
                   details.reverseHedgeOrders,
                 )
                 : null,
+              initialRiskFraction: initialRisk?.drawdownFraction ?? null,
             };
           }),
         );
@@ -423,10 +431,18 @@ export default function JournalCampaignsPage() {
     }))),
     [rows],
   );
+  const geometric = useMemo(
+    () => computeGeometricExpectancy(performance.expectedWinRate, performance.payoffRatio),
+    [performance.expectedWinRate, performance.payoffRatio],
+  );
   const displayRows = useMemo<CampaignDisplayData[]>(
     () => rows.map(row => ({
       ...row,
-      ...computeCampaignExpectancies(row.profitCaptureRatio, performance.expectedWinRate),
+      ...computeCampaignExpectancies(
+        row.profitCaptureRatio,
+        performance.expectedWinRate,
+        row.initialRiskFraction,
+      ),
     })),
     [rows, performance.expectedWinRate],
   );
@@ -447,11 +463,6 @@ export default function JournalCampaignsPage() {
   const expectedRLabel = performance.expectedR == null
     ? '—'
     : `${performance.expectedR >= 0 ? '+' : ''}${performance.expectedR.toFixed(2)}R`;
-  // 几何期望（每笔）：算术期望的复利升级，看得见波动拖累。用 Kelly 最优仓位 x* 折算复利潜力。
-  const geometric = useMemo(
-    () => computeGeometricExpectancy(performance.expectedWinRate, performance.payoffRatio),
-    [performance.expectedWinRate, performance.payoffRatio],
-  );
   const geometricEdgeLabel = geometric == null
     ? '—'
     : `${geometric.geometricEdge >= 0 ? '+' : ''}${(geometric.geometricEdge * 100).toFixed(1)}%`;
@@ -539,6 +550,7 @@ export default function JournalCampaignsPage() {
           details.tradeRecords,
           details.reverseHedgeOrders,
         );
+        const initialRisk = computeCampaignInitialRiskFraction(initialExpectedMaxLoss, details.legs);
         const restoredRow: CampaignCardData = {
           campaign: { ...details.campaign, deleted_at: null },
           legs: details.legs,
@@ -551,6 +563,7 @@ export default function JournalCampaignsPage() {
               details.reverseHedgeOrders,
             )
             : null,
+          initialRiskFraction: initialRisk?.drawdownFraction ?? null,
         };
         setRows(current => [restoredRow, ...current.filter(item => item.campaign.id !== campaign.id)]);
       }
@@ -647,13 +660,17 @@ export default function JournalCampaignsPage() {
                 || option.value === 'geometricExpectancy'
                 ? option.value
                 : null;
-              const excludesInvalidCampaigns = formula != null;
+              const invalidCampaignHint = option.value === 'geometricExpectancy'
+                ? '；缺少最大预期亏损或主力开仓账户总资产的战役不显示'
+                : formula != null
+                  ? '；未设置最大预期亏损的战役不显示'
+                  : '';
               const sortButton = (
                 <button
                   type="button"
                   aria-pressed={active}
                   aria-label={`${option.label}，${sortDirectionLabel(direction, option.value)}排序`}
-                  title={`按${option.label}${sortDirectionLabel(direction, option.value)}排序${active ? '；再次点击切换方向' : ''}${excludesInvalidCampaigns ? '；未设置最大预期亏损的战役不显示' : ''}`}
+                  title={`按${option.label}${sortDirectionLabel(direction, option.value)}排序${active ? '；再次点击切换方向' : ''}${invalidCampaignHint}`}
                   data-sort-direction={active ? direction : undefined}
                   data-testid={`campaign-sort-${option.value}`}
                   onClick={(event) => {
@@ -720,13 +737,17 @@ export default function JournalCampaignsPage() {
                       <>
                         <div className="font-medium text-foreground">单场几何期望计算公式</div>
                         <div className="mt-2 rounded bg-muted/60 px-2 py-1.5 font-mono text-foreground">
-                          Gᵢ = (1+bᵢ·xᵢ*)^P(赢) · (1−xᵢ*)^(1−P(赢)) − 1
+                          Gᵢ = (1+bᵢ·xᵢ)^P(赢) · (1−xᵢ)^(1−P(赢)) − 1
                         </div>
                         <div className="mt-2 space-y-1 text-muted-foreground">
-                          <div>xᵢ* = max（0，Eᵢ ÷ bᵢ），仅在 bᵢ &gt; 0 时成立，并限制在 0 到 100% 之间。</div>
-                          <div>P(赢) 使用当前有效战役实时胜率：{winRateLabel}；bᵢ 使用该战役盈亏比。</div>
-                          <div>若单场算术期望不为正，最优仓位为 0，几何期望为 0。</div>
-                          <div>缺少有效初始最大预期亏损的战役不参与排序。</div>
+                          <div className="rounded border border-border/60 px-2 py-1.5 font-mono leading-relaxed text-foreground/85">
+                            xᵢ = 该战役初始最大预期亏损 Lᵢ ÷ 主力开仓时账户总资产 Aᵢ
+                          </div>
+                          <div>Aᵢ 只读取该战役主力开仓快照保存的账户总资产，不使用当前资产或后续 Leg 的资产。</div>
+                          <div>P(赢) 使用当前有效战役实时胜率：{winRateLabel}；bᵢ 使用该战役带正负号的实际盈亏比。</div>
+                          <div>bᵢ &lt; 0 时仍按该场真实 xᵢ 进入公式，不会归零。</div>
+                          <div>若 xᵢ ≥ 100% 或 1+bᵢ·xᵢ ≤ 0，代表该风险比例下资本被击穿，几何期望记为 −100%。</div>
+                          <div>缺少有效初始最大预期亏损或主力开仓账户总资产快照的战役不参与几何期望排序。</div>
                         </div>
                       </>
                     )}
@@ -935,7 +956,9 @@ export default function JournalCampaignsPage() {
               {(sortState.mode === 'captureRate'
                 || sortState.mode === 'arithmeticExpectancy'
                 || sortState.mode === 'geometricExpectancy') && rows.length > 0
-                ? '未设置初始最大预期亏损的战役不会进入当前排序'
+                ? sortState.mode === 'geometricExpectancy'
+                  ? '缺少初始最大预期亏损或主力开仓账户总资产的战役不会进入当前排序'
+                  : '未设置初始最大预期亏损的战役不会进入当前排序'
                 : scope === 'own' ? '你下次开主力单时会自动创建第一个战役' : '双方互关后，对方战役会出现在这里'}
             </div>
           </div>
@@ -945,6 +968,7 @@ export default function JournalCampaignsPage() {
             legs,
             tradeRecords,
             profitCaptureRatio,
+            initialRiskFraction,
             arithmeticExpectancy,
             geometricExpectancy,
           }) => {
@@ -1048,7 +1072,9 @@ export default function JournalCampaignsPage() {
                   </div>
                   <div
                     data-testid="campaign-geometric-expectancy"
-                    title="按当前有效战役胜率、该战役盈亏比及 Kelly 最优仓位计算"
+                    title={initialRiskFraction == null
+                      ? '缺少主力开仓时账户总资产快照，无法计算单场几何期望'
+                      : `xᵢ = 最大预期亏损 ÷ 主力开仓账户总资产 = ${(initialRiskFraction * 100).toFixed(2)}%`}
                   >
                     几何期望：{formatGeometricExpectancy(geometricExpectancy)}
                   </div>

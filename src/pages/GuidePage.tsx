@@ -1203,12 +1203,16 @@ export default function GuidePage() {
                     <tr><td className="px-3 py-2 border-t border-border">胜率 P(赢)</td><td className="px-3 py-2 border-t border-border">有效盈利战役数 ÷（有效盈利战役数 + 有效亏损战役数）</td><td className="px-3 py-2 border-t border-border">只统计有效且非盈亏平衡的已结束战役</td></tr>
                     <tr><td className="px-3 py-2 border-t border-border">平均盈亏比 b̄</td><td className="px-3 py-2 border-t border-border">Σ 单场盈亏比 bᵢ ÷ 有效战役数 N</td><td className="px-3 py-2 border-t border-border">亏损的负盈亏比原样参与求和</td></tr>
                     <tr><td className="px-3 py-2 border-t border-border">期望值 E</td><td className="px-3 py-2 border-t border-border">P(赢) × b̄ −（1 − P(赢)）</td><td className="px-3 py-2 border-t border-border">胜率与平均盈亏比来自同一批有效战役</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border">单场算术期望 Eᵢ</td><td className="px-3 py-2 border-t border-border">P(赢) × bᵢ −（1 − P(赢)）</td><td className="px-3 py-2 border-t border-border">使用实时有效战役胜率与该场带符号盈亏比</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border">单场风险比例 xᵢ</td><td className="px-3 py-2 border-t border-border">Lᵢ ÷ 主力开仓时账户总资产 Aᵢ</td><td className="px-3 py-2 border-t border-border">Aᵢ 只使用主力开仓 journal 保存的账户权益快照</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border">单场几何期望 Gᵢ</td><td className="px-3 py-2 border-t border-border">(1+bᵢ·xᵢ)^P(赢) × (1−xᵢ)^(1−P(赢)) − 1</td><td className="px-3 py-2 border-t border-border">bᵢ 可为负；缺少 Aᵢ 时不估算、不参与几何期望排序</td></tr>
                   </tbody>
                 </table>
               </div>
               <RedHighlight>
                 没有初始最大预期亏损，就没有可用分母，因此该战役的盈亏比显示「—」。它不会进入盈亏比排序，也不会进入胜率、平均盈亏比和期望值。点击列表顶部的<strong>盈亏比、胜率、平均盈亏比或期望值</strong>，可以查看公式及当前列表数据的代入过程。
               </RedHighlight>
+              <P>单场几何期望还要求主力开仓时保存了账户总资产快照。系统不会拿当前资产替代历史资产：旧战役若缺少该快照，仍可计算盈亏比与算术期望，但单场几何期望显示「—」，并从几何期望排序中排除。</P>
               <P>删除战役采用可恢复模式：战役会从正常列表、统计和互关可见范围中移出，但 Legs 与交易记录不会随之消失。列表标题栏右侧的低对比度回收图标可打开“已删除战役”，从中恢复原战役；只有在回收区再次选择“永久删除”时，战役归档才会真正移除。</P>
               <P>互关账户可以打开彼此的战役详情，并留下带可信度权重的留言评价。外部校验只评价当时结构、证伪与执行是否自洽，不用后续走势倒推对错。</P>
 

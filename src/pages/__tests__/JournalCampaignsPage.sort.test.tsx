@@ -19,7 +19,7 @@ const campaigns: TradeCampaign[] = [
     opened_at: '2026-01-01T00:00:00.000Z',
     closed_at: '2026-01-02T00:00:00.000Z',
     initial_main_size_usdt: 100,
-    final_realized_pnl: 10,
+    final_realized_pnl: 30,
     importance_weight: 5,
   }),
   makeCampaign({
@@ -67,6 +67,7 @@ const legsByCampaign: Record<string, TradeJournal[]> = {
       trade_record_id: 'high-importance-record',
       pre_real_time: '2026-04-03T00:00:00.000Z',
       post_real_close_time: '2025-12-01T00:00:00.000Z',
+      pre_account_equity_usdt: 100,
     }),
   ],
   newest: [
@@ -75,6 +76,7 @@ const legsByCampaign: Record<string, TradeJournal[]> = {
       trade_record_id: 'newest-record',
       pre_real_time: '2026-01-10T00:00:00.000Z',
       post_real_close_time: '2026-12-01T00:00:00.000Z',
+      pre_account_equity_usdt: 10_000,
     }),
   ],
   'best-pnl': [
@@ -82,6 +84,7 @@ const legsByCampaign: Record<string, TradeJournal[]> = {
       id: 'best-pnl-leg',
       trade_record_id: 'best-pnl-record',
       pre_real_time: '2026-03-02T00:00:00.000Z',
+      pre_account_equity_usdt: 40_000,
     }),
     makeLeg({
       id: 'best-pnl-hedge',
@@ -94,6 +97,7 @@ const legsByCampaign: Record<string, TradeJournal[]> = {
       id: 'late-close-leg',
       trade_record_id: 'late-close-record',
       pre_real_time: '2026-02-01T00:00:00.000Z',
+      pre_account_equity_usdt: 500,
     }),
     makeLeg({
       id: 'late-close-hedge',
@@ -216,6 +220,7 @@ function makeLeg(overrides: Partial<TradeJournal>): TradeJournal {
     pre_checklist_passed: null,
     pre_position_size: null,
     pre_max_loss_usdt: null,
+    pre_account_equity_usdt: overrides.pre_account_equity_usdt ?? null,
     post_outcome: null,
     post_realized_pnl: null,
     post_r_multiple: null,
@@ -253,21 +258,21 @@ describe('JournalCampaignsPage sorting', () => {
       '操作时间：2026-01-10 08:00',
     ]);
     expect(screen.getAllByTestId('campaign-payoff-ratio').map(node => node.textContent)).toEqual([
-      '盈亏比：100.00%（1.00）',
+      '盈亏比：300.00%（3.00）',
       '盈亏比：50.00%（0.50）',
       '盈亏比：-80.00%（-0.80）',
       '盈亏比：—',
     ]);
     expect(screen.getAllByTestId('campaign-arithmetic-expectancy').map(node => node.textContent)).toEqual([
-      '算术期望：+0.33R',
+      '算术期望：+1.67R',
       '算术期望：+0.00R',
       '算术期望：-0.87R',
       '算术期望：—',
     ]);
     expect(screen.getAllByTestId('campaign-geometric-expectancy').map(node => node.textContent)).toEqual([
-      '几何期望：+5.8%/笔',
-      '几何期望：+0.0%/笔',
-      '几何期望：+0.0%/笔',
+      '几何期望：+15.0%/笔',
+      '几何期望：-0.1%/笔',
+      '几何期望：-4.3%/笔',
       '几何期望：—',
     ]);
     expect(screen.queryByText(/峰值浮盈/)).not.toBeInTheDocument();
@@ -297,20 +302,20 @@ describe('JournalCampaignsPage sorting', () => {
     expect(screen.getByText('P(赢) = 盈利战役数 ÷（盈利战役数 + 亏损战役数）')).toBeInTheDocument();
     expect(screen.getByText('= 2 ÷（2 + 1）')).toBeInTheDocument();
     fireEvent.click(screen.getByTestId('campaign-win-rate'));
-    expect(screen.getByTestId('campaign-average-payoff-ratio')).toHaveTextContent('平均盈亏比（0.23）');
+    expect(screen.getByTestId('campaign-average-payoff-ratio')).toHaveTextContent('平均盈亏比（0.90）');
     expect(screen.getByTestId('campaign-average-payoff-ratio')).toHaveAttribute(
       'aria-label',
-      '平均盈亏比 0.23，共 3 场战役',
+      '平均盈亏比 0.90，共 3 场战役',
     );
     fireEvent.click(screen.getByTestId('campaign-average-payoff-ratio'));
     expect(screen.getByText('平均盈亏比计算公式')).toBeInTheDocument();
     expect(screen.getByText('b̄ = Σ 单场盈亏比 bᵢ ÷ 有效战役数 N')).toBeInTheDocument();
-    expect(screen.getByText('= 0.70 ÷ 3')).toBeInTheDocument();
+    expect(screen.getByText('= 2.70 ÷ 3')).toBeInTheDocument();
     fireEvent.click(screen.getByTestId('campaign-average-payoff-ratio'));
-    expect(screen.getByTestId('campaign-expected-value')).toHaveTextContent('期望值（-0.18R）');
+    expect(screen.getByTestId('campaign-expected-value')).toHaveTextContent('期望值（+0.27R）');
     fireEvent.click(screen.getByTestId('campaign-expected-value'));
     expect(screen.getByText('E = P(赢) × b − (1 − P(赢))')).toBeInTheDocument();
-    expect(screen.getByText('= -0.18R')).toBeInTheDocument();
+    expect(screen.getByText('= +0.27R')).toBeInTheDocument();
     expect(screen.getByText('P(赢) 仅统计设置了最大预期亏损的有效战役')).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: '互关可见' }));
@@ -320,8 +325,8 @@ describe('JournalCampaignsPage sorting', () => {
     fireEvent.click(screen.getByRole('button', { name: '我的战役' }));
     await waitFor(() => expect(screen.getAllByTestId('campaign-card')).toHaveLength(4));
     expect(screen.getByTestId('campaign-win-rate')).toHaveTextContent('胜率（66.67%）');
-    expect(screen.getByTestId('campaign-average-payoff-ratio')).toHaveTextContent('平均盈亏比（0.23）');
-    expect(screen.getByTestId('campaign-expected-value')).toHaveTextContent('期望值（-0.18R）');
+    expect(screen.getByTestId('campaign-average-payoff-ratio')).toHaveTextContent('平均盈亏比（0.90）');
+    expect(screen.getByTestId('campaign-expected-value')).toHaveTextContent('期望值（+0.27R）');
 
     fireEvent.click(screen.getByTestId('campaign-sort-time'));
     expect(screen.getByTestId('campaign-sort-time')).toHaveAttribute('aria-pressed', 'true');
@@ -386,7 +391,9 @@ describe('JournalCampaignsPage sorting', () => {
     expect(screen.getByTestId('campaign-sort-geometricExpectancy')).toHaveAttribute('data-sort-direction', 'desc');
     expect(screen.getByTestId('campaign-sort-geometricExpectancy')).toHaveAttribute('aria-label', '几何期望，从大到小排序');
     expect(screen.getByText('单场几何期望计算公式')).toBeInTheDocument();
-    expect(screen.getByText(/Gᵢ = \(1\+bᵢ·xᵢ\*\)/)).toBeInTheDocument();
+    expect(screen.getByText(/Gᵢ = \(1\+bᵢ·xᵢ\)/)).toBeInTheDocument();
+    expect(screen.getByText('xᵢ = 该战役初始最大预期亏损 Lᵢ ÷ 主力开仓时账户总资产 Aᵢ')).toBeInTheDocument();
+    expect(screen.getByText(/bᵢ < 0 时仍按该场真实 xᵢ/)).toBeInTheDocument();
     expect(cardOrder()).toEqual(['High Importance', 'Best PnL', 'Late Close']);
 
     fireEvent.click(screen.getByTestId('campaign-sort-geometricExpectancy'));

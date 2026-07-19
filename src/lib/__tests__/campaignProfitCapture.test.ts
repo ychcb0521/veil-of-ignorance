@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   computeDecisionAccuracy,
+  computeCampaignInitialRiskFraction,
   computeInitialExpectedMaxLoss,
   computeProfitCaptureRatio,
   formatCampaignPayoffRatio,
@@ -110,6 +111,30 @@ describe('campaign profit capture ratio', () => {
     const accuracy = computeDecisionAccuracy(campaign, legs, records, []);
     expect(accuracy.initial_expected_max_loss).toBeCloseTo(1_200, 8);
     expect(accuracy.profit_capture_ratio).toBeCloseTo(50, 8);
+  });
+
+  it('uses the initial main-entry equity snapshot to compute the campaign risk fraction', () => {
+    const legs = [
+      { ...makeLeg('main', 'main_open', 100), pre_account_equity_usdt: 80_000 },
+      { ...makeLeg('hedge-a', 'hedge_initial_a', 94), pre_account_equity_usdt: 70_000 },
+    ];
+
+    const risk = computeCampaignInitialRiskFraction(1_200, legs);
+    expect(risk).toEqual({
+      initialExpectedMaxLoss: 1_200,
+      accountEquityAtMainOpen: 80_000,
+      drawdownFraction: 0.015,
+    });
+  });
+
+  it('does not substitute a later-leg or current equity when the main snapshot is missing', () => {
+    const legs = [
+      makeLeg('main', 'main_open', 100),
+      { ...makeLeg('hedge-a', 'hedge_initial_a', 94), pre_account_equity_usdt: 70_000 },
+    ];
+
+    expect(computeCampaignInitialRiskFraction(1_200, legs)).toBeNull();
+    expect(computeCampaignInitialRiskFraction(0, legs)).toBeNull();
   });
 
   it('preserves the minus sign when realized P&L is negative', () => {

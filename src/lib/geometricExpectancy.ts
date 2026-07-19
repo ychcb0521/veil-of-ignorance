@@ -58,7 +58,9 @@ export interface GeometricExpectancy {
 
 /**
  * 计算几何期望。未给 drawdownFraction 时用 Kelly 最优 x*（= 该 edge 在最优下注下的复利潜力，
- * 与 n 无关、可横向排序）。给了 drawdownFraction（如复用 T4「最大预期回撤 x」）则按实际仓位算。
+ * 与 n 无关、可横向排序）。给了 drawdownFraction（包括显式的 0）则按该实际仓位算；
+ * 这也允许带符号的 b<0 在固定正仓位下呈现负几何期望，而不是被最优仓位 0 吞掉。
+ * 实际 x 不封顶：x≥1 代表最大预期亏损已经覆盖全部账户权益，几何增长按 0 处理。
  * 入参不足（p / b 缺失）→ null。
  */
 export function computeGeometricExpectancy(
@@ -70,8 +72,8 @@ export function computeGeometricExpectancy(
     return null;
   }
   const optimalFraction = optimalDrawdownFraction(winRate, payoffRatio);
-  const x = drawdownFraction != null && Number.isFinite(drawdownFraction) && drawdownFraction > 0
-    ? Math.min(drawdownFraction, 0.999)
+  const x = drawdownFraction != null && Number.isFinite(drawdownFraction)
+    ? Math.max(0, drawdownFraction)
     : optimalFraction;
   const growthFactor = geometricGrowthFactor(winRate, payoffRatio, x);
   return {
