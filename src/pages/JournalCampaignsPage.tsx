@@ -36,7 +36,18 @@ type CampaignCardData = {
   profitCaptureRatio: number | null;
 };
 
-type CampaignSortMode = 'importance' | 'time' | 'captureRate' | 'alpha';
+type CampaignDisplayData = CampaignCardData & {
+  arithmeticExpectancy: number | null;
+  geometricExpectancy: number | null;
+};
+
+type CampaignSortMode =
+  | 'importance'
+  | 'time'
+  | 'captureRate'
+  | 'arithmeticExpectancy'
+  | 'geometricExpectancy'
+  | 'alpha';
 type CampaignSortDirection = 'asc' | 'desc';
 
 type CampaignSortState = {
@@ -44,12 +55,22 @@ type CampaignSortState = {
   direction: CampaignSortDirection;
 };
 
-type CampaignFormulaPopover = 'captureRate' | 'validCampaigns' | 'winRate' | 'averagePayoffRatio' | 'expectedValue' | 'geometricEdge';
+type CampaignFormulaPopover =
+  | 'captureRate'
+  | 'arithmeticExpectancy'
+  | 'geometricExpectancy'
+  | 'validCampaigns'
+  | 'winRate'
+  | 'averagePayoffRatio'
+  | 'expectedValue'
+  | 'geometricEdge';
 
 const SORT_OPTIONS: { value: CampaignSortMode; label: string }[] = [
   { value: 'importance', label: '重要性' },
   { value: 'time', label: '操作时间' },
   { value: 'captureRate', label: '盈亏比' },
+  { value: 'arithmeticExpectancy', label: '算术期望' },
+  { value: 'geometricExpectancy', label: '几何期望' },
   { value: 'alpha', label: '字母' },
 ];
 
@@ -170,9 +191,50 @@ function comparePnl(
   return compareFiniteMetric(pnlSortValue(a), pnlSortValue(b), direction);
 }
 
-function sortCampaignRows(rows: CampaignCardData[], sort: CampaignSortState): CampaignCardData[] {
-  const visibleRows = sort.mode === 'captureRate'
-    ? rows.filter(row => row.profitCaptureRatio != null && Number.isFinite(row.profitCaptureRatio))
+function computeCampaignExpectancies(
+  profitCaptureRatio: number | null,
+  winRate: number | null,
+): Pick<CampaignDisplayData, 'arithmeticExpectancy' | 'geometricExpectancy'> {
+  if (
+    profitCaptureRatio == null
+    || winRate == null
+    || !Number.isFinite(profitCaptureRatio)
+    || !Number.isFinite(winRate)
+  ) {
+    return { arithmeticExpectancy: null, geometricExpectancy: null };
+  }
+  const payoffRatio = profitCaptureRatio / 100;
+  const arithmeticExpectancy = winRate * payoffRatio - (1 - winRate);
+  const geometric = computeGeometricExpectancy(winRate, payoffRatio);
+  return {
+    arithmeticExpectancy,
+    geometricExpectancy: geometric?.geometricEdge ?? null,
+  };
+}
+
+function formatArithmeticExpectancy(value: number | null): string {
+  if (value == null || !Number.isFinite(value)) return '—';
+  const normalized = Math.abs(value) < 0.0005 ? 0 : value;
+  return `${normalized >= 0 ? '+' : ''}${normalized.toFixed(2)}R`;
+}
+
+function formatGeometricExpectancy(value: number | null): string {
+  if (value == null || !Number.isFinite(value)) return '—';
+  const normalized = Math.abs(value) < 0.0005 ? 0 : value;
+  return `${normalized >= 0 ? '+' : ''}${(normalized * 100).toFixed(1)}%/笔`;
+}
+
+function sortCampaignRows(rows: CampaignDisplayData[], sort: CampaignSortState): CampaignDisplayData[] {
+  const expectationMode = sort.mode === 'arithmeticExpectancy' || sort.mode === 'geometricExpectancy';
+  const visibleRows = sort.mode === 'captureRate' || expectationMode
+    ? rows.filter(row => (
+      row.profitCaptureRatio != null
+      && Number.isFinite(row.profitCaptureRatio)
+      && (!expectationMode || (
+        row.arithmeticExpectancy != null
+        && row.geometricExpectancy != null
+      ))
+    ))
     : rows;
   return [...visibleRows].sort((a, b) => {
     const importanceDesc = compareNumber(importanceValue(a.campaign), importanceValue(b.campaign), 'desc');
@@ -193,6 +255,36 @@ function sortCampaignRows(rows: CampaignCardData[], sort: CampaignSortState): Ca
         sort.direction,
       )
         || comparePnl(a.campaign, b.campaign, sort.direction)
+        || importanceDesc
+        || timeDesc
+        || alphaAsc;
+    }
+    if (sort.mode === 'arithmeticExpectancy') {
+      return compareFiniteMetric(
+        a.arithmeticExpectancy ?? Number.NaN,
+        b.arithmeticExpectancy ?? Number.NaN,
+        sort.direction,
+      )
+        || compareFiniteMetric(
+          a.geometricExpectancy ?? Number.NaN,
+          b.geometricExpectancy ?? Number.NaN,
+          sort.direction,
+        )
+        || importanceDesc
+        || timeDesc
+        || alphaAsc;
+    }
+    if (sort.mode === 'geometricExpectancy') {
+      return compareFiniteMetric(
+        a.geometricExpectancy ?? Number.NaN,
+        b.geometricExpectancy ?? Number.NaN,
+        sort.direction,
+      )
+        || compareFiniteMetric(
+          a.arithmeticExpectancy ?? Number.NaN,
+          b.arithmeticExpectancy ?? Number.NaN,
+          sort.direction,
+        )
         || importanceDesc
         || timeDesc
         || alphaAsc;
@@ -324,13 +416,23 @@ export default function JournalCampaignsPage() {
     }
   };
 
-  const sortedRows = useMemo(() => sortCampaignRows(rows, sortState), [rows, sortState]);
   const performance = useMemo(
     () => summarizeCampaignPerformance(rows.map(row => ({
       campaign: row.campaign,
       payoffRatio: row.profitCaptureRatio == null ? null : row.profitCaptureRatio / 100,
     }))),
     [rows],
+  );
+  const displayRows = useMemo<CampaignDisplayData[]>(
+    () => rows.map(row => ({
+      ...row,
+      ...computeCampaignExpectancies(row.profitCaptureRatio, performance.expectedWinRate),
+    })),
+    [rows, performance.expectedWinRate],
+  );
+  const sortedRows = useMemo(
+    () => sortCampaignRows(displayRows, sortState),
+    [displayRows, sortState],
   );
   const winRateLabel = performance.winRate == null ? '—' : `${(performance.winRate * 100).toFixed(2)}%`;
   const payoffRatioLabel = performance.payoffRatio == null ? '—' : performance.payoffRatio.toFixed(2);
@@ -540,19 +642,23 @@ export default function JournalCampaignsPage() {
             {SORT_OPTIONS.map(option => {
               const active = sortState.mode === option.value;
               const direction = active ? sortState.direction : 'desc';
+              const formula: CampaignFormulaPopover | null = option.value === 'captureRate'
+                || option.value === 'arithmeticExpectancy'
+                || option.value === 'geometricExpectancy'
+                ? option.value
+                : null;
+              const excludesInvalidCampaigns = formula != null;
               const sortButton = (
                 <button
                   type="button"
                   aria-pressed={active}
                   aria-label={`${option.label}，${sortDirectionLabel(direction, option.value)}排序`}
-                  title={`按${option.label}${sortDirectionLabel(direction, option.value)}排序${active ? '；再次点击切换方向' : ''}${option.value === 'captureRate' ? '；未设置最大预期亏损的战役不显示' : ''}`}
+                  title={`按${option.label}${sortDirectionLabel(direction, option.value)}排序${active ? '；再次点击切换方向' : ''}${excludesInvalidCampaigns ? '；未设置最大预期亏损的战役不显示' : ''}`}
                   data-sort-direction={active ? direction : undefined}
                   data-testid={`campaign-sort-${option.value}`}
                   onClick={(event) => {
                     handleSortChange(option.value);
-                    if (option.value === 'captureRate') {
-                      openFormulaPopover(event, 'captureRate');
-                    }
+                    if (formula) openFormulaPopover(event, formula);
                   }}
                   className={`inline-flex h-6 items-center gap-0.5 rounded-sm border-b px-0.5 transition-colors ${
                     active
@@ -561,7 +667,7 @@ export default function JournalCampaignsPage() {
                   }`}
                 >
                   <span>{option.label}</span>
-                  {option.value === 'captureRate' && (
+                  {formula && (
                     <Sigma aria-hidden="true" className="h-2.5 w-2.5 opacity-35" />
                   )}
                   {active && (
@@ -571,29 +677,59 @@ export default function JournalCampaignsPage() {
                   )}
                 </button>
               );
-              if (option.value !== 'captureRate') {
+              if (!formula) {
                 return <span key={option.value}>{sortButton}</span>;
               }
               return (
                 <Popover
                   key={option.value}
-                  open={formulaPopover === 'captureRate'}
-                  onOpenChange={open => handleFormulaPopoverChange('captureRate', open)}
+                  open={formulaPopover === formula}
+                  onOpenChange={open => handleFormulaPopoverChange(formula, open)}
                 >
                   <PopoverTrigger asChild>{sortButton}</PopoverTrigger>
                   <PopoverContent align="end" className="w-80 border-border bg-card p-3 text-[11px]">
-                    <div className="font-medium text-foreground">单场盈亏比计算公式</div>
-                    <div className="mt-2 rounded bg-muted/60 px-2 py-1.5 font-mono text-foreground">
-                      bᵢ = 已实现盈亏ᵢ ÷ 初始最大预期亏损ᵢ
-                    </div>
-                    <div className="mt-2 space-y-1 text-muted-foreground">
-                      <div>初始最大预期亏损：</div>
-                      <div className="rounded border border-border/60 px-2 py-1.5 font-mono leading-relaxed text-foreground/85">
-                        Lᵢ = 主力名义仓位 × max（|开仓价 − 对冲 A 价|，|开仓价 − 对冲 B 价|）÷ 开仓价
-                      </div>
-                      <div>排序使用带正负号的 bᵢ：盈利为正，亏损为负。</div>
-                      <div>没有有效初始最大预期亏损的战役不参与排序。</div>
-                    </div>
+                    {formula === 'captureRate' ? (
+                      <>
+                        <div className="font-medium text-foreground">单场盈亏比计算公式</div>
+                        <div className="mt-2 rounded bg-muted/60 px-2 py-1.5 font-mono text-foreground">
+                          bᵢ = 已实现盈亏ᵢ ÷ 初始最大预期亏损ᵢ
+                        </div>
+                        <div className="mt-2 space-y-1 text-muted-foreground">
+                          <div>初始最大预期亏损：</div>
+                          <div className="rounded border border-border/60 px-2 py-1.5 font-mono leading-relaxed text-foreground/85">
+                            Lᵢ = 主力名义仓位 × max（|开仓价 − 对冲 A 价|，|开仓价 − 对冲 B 价|）÷ 开仓价
+                          </div>
+                          <div>排序使用带正负号的 bᵢ：盈利为正，亏损为负。</div>
+                          <div>没有有效初始最大预期亏损的战役不参与排序。</div>
+                        </div>
+                      </>
+                    ) : formula === 'arithmeticExpectancy' ? (
+                      <>
+                        <div className="font-medium text-foreground">单场算术期望计算公式</div>
+                        <div className="mt-2 rounded bg-muted/60 px-2 py-1.5 font-mono text-foreground">
+                          Eᵢ = P(赢) × bᵢ −（1 − P(赢)）
+                        </div>
+                        <div className="mt-2 space-y-1 text-muted-foreground">
+                          <div>P(赢) 使用当前有效战役实时胜率：{winRateLabel}。</div>
+                          <div>bᵢ 使用该战役带正负号的实际盈亏比。</div>
+                          <div>算术期望按 R 展示，并随有效战役样本实时更新。</div>
+                          <div>缺少有效初始最大预期亏损的战役不参与排序。</div>
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <div className="font-medium text-foreground">单场几何期望计算公式</div>
+                        <div className="mt-2 rounded bg-muted/60 px-2 py-1.5 font-mono text-foreground">
+                          Gᵢ = (1+bᵢ·xᵢ*)^P(赢) · (1−xᵢ*)^(1−P(赢)) − 1
+                        </div>
+                        <div className="mt-2 space-y-1 text-muted-foreground">
+                          <div>xᵢ* = max（0，Eᵢ ÷ bᵢ），仅在 bᵢ &gt; 0 时成立，并限制在 0 到 100% 之间。</div>
+                          <div>P(赢) 使用当前有效战役实时胜率：{winRateLabel}；bᵢ 使用该战役盈亏比。</div>
+                          <div>若单场算术期望不为正，最优仓位为 0，几何期望为 0。</div>
+                          <div>缺少有效初始最大预期亏损的战役不参与排序。</div>
+                        </div>
+                      </>
+                    )}
                   </PopoverContent>
                 </Popover>
               );
@@ -623,7 +759,7 @@ export default function JournalCampaignsPage() {
                   <div>若 A、B 都存在，取离主力开仓价更远的一档；只有一档时使用该档。</div>
                   <div>历史战役优先使用保存的原始委托价，不使用触发成交后的滑点价；旧记录缺失委托快照时，才回退到 Legs、成交记录或事件数据。</div>
                   <div>只有战役已结束，且主力开仓价、主力名义仓位、初始对冲价完整，使 Lᵢ 为有限正数时，才属于有效战役。</div>
-                  <div>无有效 Lᵢ 的战役不参与盈亏比、胜率、平均盈亏比与期望值统计。</div>
+                  <div>无有效 Lᵢ 的战役不参与盈亏比、胜率、平均盈亏比、算术期望与几何期望统计。</div>
                 </div>
                 <div className="mt-2 grid grid-cols-3 gap-1 border-t border-border/60 pt-2 text-center">
                   <div><span className="text-muted-foreground">盈利</span><strong className="ml-1 text-[#0ECB81]">{performance.winCount}</strong></div>
@@ -789,18 +925,29 @@ export default function JournalCampaignsPage() {
               <Layers className="w-5 h-5 text-muted-foreground" />
             </div>
             <div className="text-[13px] font-medium">
-              {sortState.mode === 'captureRate' && rows.length > 0
-                ? '暂无可计算盈亏比的战役'
+              {(sortState.mode === 'captureRate'
+                || sortState.mode === 'arithmeticExpectancy'
+                || sortState.mode === 'geometricExpectancy') && rows.length > 0
+                ? `暂无可计算${sortState.mode === 'captureRate' ? '盈亏比' : sortState.mode === 'arithmeticExpectancy' ? '算术期望' : '几何期望'}的战役`
                 : scope === 'own' ? '尚无战役' : '暂无互关可见战役'}
             </div>
             <div className="text-[12px] text-muted-foreground">
-              {sortState.mode === 'captureRate' && rows.length > 0
-                ? '未设置初始最大预期亏损的战役不会进入盈亏比排序'
+              {(sortState.mode === 'captureRate'
+                || sortState.mode === 'arithmeticExpectancy'
+                || sortState.mode === 'geometricExpectancy') && rows.length > 0
+                ? '未设置初始最大预期亏损的战役不会进入当前排序'
                 : scope === 'own' ? '你下次开主力单时会自动创建第一个战役' : '双方互关后，对方战役会出现在这里'}
             </div>
           </div>
         ) : (
-          sortedRows.map(({ campaign, legs, tradeRecords, profitCaptureRatio }) => {
+          sortedRows.map(({
+            campaign,
+            legs,
+            tradeRecords,
+            profitCaptureRatio,
+            arithmeticExpectancy,
+            geometricExpectancy,
+          }) => {
             const importance = importanceValue(campaign);
             const isOwnCampaign = campaign.user_id === user?.id;
             const operationTime = campaignOperationTime(legs, tradeRecords);
@@ -884,7 +1031,7 @@ export default function JournalCampaignsPage() {
                   </div>
                 </div>
 
-                <div className="mt-3 grid grid-cols-1 gap-2 text-[11px] font-mono text-muted-foreground md:grid-cols-2 xl:grid-cols-[1.35fr_0.85fr_0.9fr_0.75fr_1fr]">
+                <div className="mt-3 grid grid-cols-1 gap-2 text-[11px] font-mono text-muted-foreground md:grid-cols-2 xl:grid-cols-[1.25fr_0.7fr_0.78fr_0.7fr_0.72fr_0.78fr_0.9fr]">
                   <div>{fmtTime(campaign.opened_at)} → {fmtTime(campaign.closed_at)}</div>
                   <div>含 {legs.length} legs · 持续 {durationLabel(campaign.opened_at, campaign.closed_at)}</div>
                   <div>
@@ -892,6 +1039,18 @@ export default function JournalCampaignsPage() {
                   </div>
                   <div data-testid="campaign-payoff-ratio">
                     盈亏比：{profitCaptureRatio == null ? '—' : formatCampaignPayoffRatio(profitCaptureRatio, 2)}
+                  </div>
+                  <div
+                    data-testid="campaign-arithmetic-expectancy"
+                    title="Eᵢ = 当前有效战役胜率 × 该战役盈亏比 − 亏损概率"
+                  >
+                    算术期望：{formatArithmeticExpectancy(arithmeticExpectancy)}
+                  </div>
+                  <div
+                    data-testid="campaign-geometric-expectancy"
+                    title="按当前有效战役胜率、该战役盈亏比及 Kelly 最优仓位计算"
+                  >
+                    几何期望：{formatGeometricExpectancy(geometricExpectancy)}
                   </div>
                   <div data-testid="campaign-operation-time">
                     操作时间：{fmtOperationTime(operationTime)}

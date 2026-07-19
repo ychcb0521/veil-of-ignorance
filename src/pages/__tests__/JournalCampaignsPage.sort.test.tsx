@@ -258,6 +258,18 @@ describe('JournalCampaignsPage sorting', () => {
       '盈亏比：-80.00%（-0.80）',
       '盈亏比：—',
     ]);
+    expect(screen.getAllByTestId('campaign-arithmetic-expectancy').map(node => node.textContent)).toEqual([
+      '算术期望：+0.33R',
+      '算术期望：+0.00R',
+      '算术期望：-0.87R',
+      '算术期望：—',
+    ]);
+    expect(screen.getAllByTestId('campaign-geometric-expectancy').map(node => node.textContent)).toEqual([
+      '几何期望：+5.8%/笔',
+      '几何期望：+0.0%/笔',
+      '几何期望：+0.0%/笔',
+      '几何期望：—',
+    ]);
     expect(screen.queryByText(/峰值浮盈/)).not.toBeInTheDocument();
     expect(screen.getByTestId('campaign-sort-time')).toHaveAttribute('aria-pressed', 'true');
     expect(screen.getByTestId('campaign-sort-time')).toHaveAttribute('data-sort-direction', 'desc');
@@ -355,6 +367,32 @@ describe('JournalCampaignsPage sorting', () => {
     fireEvent.click(screen.getByTestId('campaign-average-payoff-ratio'));
     expect(screen.queryByText('胜率计算公式')).not.toBeInTheDocument();
     expect(screen.getByText('平均盈亏比计算公式')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId('campaign-sort-arithmeticExpectancy'));
+    expect(screen.getByTestId('campaign-sort-arithmeticExpectancy')).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByTestId('campaign-sort-arithmeticExpectancy')).toHaveAttribute('data-sort-direction', 'desc');
+    expect(screen.getByTestId('campaign-sort-arithmeticExpectancy')).toHaveAttribute('aria-label', '算术期望，从大到小排序');
+    expect(screen.getByText('单场算术期望计算公式')).toBeInTheDocument();
+    expect(screen.getByText('Eᵢ = P(赢) × bᵢ −（1 − P(赢)）')).toBeInTheDocument();
+    expect(cardOrder()).toEqual(['High Importance', 'Best PnL', 'Late Close']);
+
+    fireEvent.click(screen.getByTestId('campaign-sort-arithmeticExpectancy'));
+    expect(screen.getByTestId('campaign-sort-arithmeticExpectancy')).toHaveAttribute('data-sort-direction', 'asc');
+    expect(screen.getByTestId('campaign-sort-arithmeticExpectancy')).toHaveAttribute('aria-label', '算术期望，从小到大排序');
+    expect(cardOrder()).toEqual(['Late Close', 'Best PnL', 'High Importance']);
+
+    fireEvent.click(screen.getByTestId('campaign-sort-geometricExpectancy'));
+    expect(screen.getByTestId('campaign-sort-geometricExpectancy')).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByTestId('campaign-sort-geometricExpectancy')).toHaveAttribute('data-sort-direction', 'desc');
+    expect(screen.getByTestId('campaign-sort-geometricExpectancy')).toHaveAttribute('aria-label', '几何期望，从大到小排序');
+    expect(screen.getByText('单场几何期望计算公式')).toBeInTheDocument();
+    expect(screen.getByText(/Gᵢ = \(1\+bᵢ·xᵢ\*\)/)).toBeInTheDocument();
+    expect(cardOrder()).toEqual(['High Importance', 'Best PnL', 'Late Close']);
+
+    fireEvent.click(screen.getByTestId('campaign-sort-geometricExpectancy'));
+    expect(screen.getByTestId('campaign-sort-geometricExpectancy')).toHaveAttribute('data-sort-direction', 'asc');
+    expect(screen.getByTestId('campaign-sort-geometricExpectancy')).toHaveAttribute('aria-label', '几何期望，从小到大排序');
+    expect(cardOrder()).toEqual(['Late Close', 'Best PnL', 'High Importance']);
 
     fireEvent.click(screen.getByTestId('campaign-sort-alpha'));
     expect(screen.getByTestId('campaign-sort-alpha')).toHaveAttribute('aria-pressed', 'true');
