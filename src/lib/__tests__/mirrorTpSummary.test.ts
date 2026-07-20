@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { campaignAchievedMirrorTp, summarizeMirrorTp } from '../mirrorTpSummary';
+import { campaignAchievedMirrorTp, mirrorTpRank, summarizeMirrorTp } from '../mirrorTpSummary';
 import type { TradeJournal } from '@/types/journal';
 import type { TradeRecord } from '@/types/trading';
 
@@ -21,6 +21,16 @@ describe('campaignAchievedMirrorTp', () => {
 
   it('没有 mirror_tp 腿 → 未达成', () => {
     expect(campaignAchievedMirrorTp([leg({ leg_role: 'main_open', trade_record_id: 'r0' })], [rec('r0')])).toBe(false);
+  });
+});
+
+describe('mirrorTpRank（排序权重）', () => {
+  it('实现·盈利 > 实现·打平/进行中 > 实现·亏损 > 未实现', () => {
+    expect(mirrorTpRank(true, 100)).toBe(3);  // 实现·盈利
+    expect(mirrorTpRank(true, 0)).toBe(2);    // 实现·打平
+    expect(mirrorTpRank(true, null)).toBe(2); // 实现·进行中
+    expect(mirrorTpRank(true, -50)).toBe(1);  // 实现·亏损
+    expect(mirrorTpRank(false, 999)).toBe(0); // 未实现（不管盈亏）
   });
 });
 

@@ -34,7 +34,7 @@ import {
 } from '@/lib/campaignMetrics';
 import { summarizeCampaignPerformance } from '@/lib/kellySizing';
 import { computeGeometricExpectancy } from '@/lib/geometricExpectancy';
-import { campaignAchievedMirrorTp, summarizeMirrorTp } from '@/lib/mirrorTpSummary';
+import { campaignAchievedMirrorTp, mirrorTpRank, summarizeMirrorTp } from '@/lib/mirrorTpSummary';
 import { formatOpportunityQuality } from '@/lib/opportunityQuality';
 import { LEG_ROLE_LABELS, STRATEGY_TEMPLATES } from '@/lib/strategyTemplates';
 import { campaignOperationTime } from '@/lib/objectiveOperationTime';
@@ -67,6 +67,7 @@ type CampaignSortMode =
   | 'opportunityQuality'
   | 'arithmeticExpectancy'
   | 'geometricExpectancy'
+  | 'mirrorTp'
   | 'alpha';
 type CampaignSortDirection = 'asc' | 'desc';
 
@@ -95,6 +96,7 @@ const SORT_OPTIONS: { value: CampaignSortMode; label: string }[] = [
   { value: 'opportunityQuality', label: '机会质量' },
   { value: 'arithmeticExpectancy', label: '算术期望' },
   { value: 'geometricExpectancy', label: '几何期望' },
+  { value: 'mirrorTp', label: '镜像止盈' },
   { value: 'alpha', label: '字母' },
 ];
 
@@ -180,6 +182,7 @@ function compareNumber(a: number, b: number, direction: CampaignSortDirection): 
 
 function sortDirectionLabel(direction: CampaignSortDirection, mode?: CampaignSortMode): string {
   if (mode === 'alpha') return direction === 'asc' ? 'A 到 Z' : 'Z 到 A';
+  if (mode === 'mirrorTp') return direction === 'desc' ? '生效在前' : '未实现在前';
   return direction === 'desc' ? '从大到小' : '从小到大';
 }
 
@@ -213,6 +216,14 @@ function comparePnl(
   direction: CampaignSortDirection,
 ): number {
   return compareFiniteMetric(pnlSortValue(a), pnlSortValue(b), direction);
+}
+
+/** 每场战役的镜像止盈排序权重（成交判定 + 盈亏 → mirrorTpRank）。 */
+function rowMirrorTpRank(row: CampaignDisplayData): number {
+  return mirrorTpRank(
+    campaignAchievedMirrorTp(row.legs, row.tradeRecords),
+    row.campaign.final_realized_pnl ?? null,
+  );
 }
 
 function sortCampaignRows(rows: CampaignDisplayData[], sort: CampaignSortState): CampaignDisplayData[] {
@@ -295,6 +306,13 @@ function sortCampaignRows(rows: CampaignDisplayData[], sort: CampaignSortState):
           b.arithmeticExpectancy ?? Number.NaN,
           sort.direction,
         )
+        || importanceDesc
+        || timeDesc
+        || alphaAsc;
+    }
+    if (sort.mode === 'mirrorTp') {
+      return compareNumber(rowMirrorTpRank(a), rowMirrorTpRank(b), sort.direction)
+        || pnlDesc
         || importanceDesc
         || timeDesc
         || alphaAsc;
@@ -1143,6 +1161,15 @@ export default function JournalCampaignsPage() {
             const importance = importanceValue(campaign);
             const isOwnCampaign = campaign.user_id === user?.id;
             const operationTime = campaignOperationTime(legs, tradeRecords);
+            const mirrorTpStatus = !campaignAchievedMirrorTp(legs, tradeRecords)
+              ? '未实现'
+              : !Number.isFinite(Number(campaign.final_realized_pnl))
+                ? '实现·进行中'
+                : Number(campaign.final_realized_pnl) > 0
+                  ? '实现·盈利'
+                  : Number(campaign.final_realized_pnl) < 0
+                    ? '实现·亏损'
+                    : '实现·打平';
             const statusLabel = campaign.status === 'active'
               ? '进行中'
               : campaign.status === 'closed_profit'
@@ -1223,7 +1250,7 @@ export default function JournalCampaignsPage() {
                   </div>
                 </div>
 
-                <div className="mt-3 grid grid-cols-1 gap-2 text-[11px] font-mono text-muted-foreground md:grid-cols-2 xl:grid-cols-[1.18fr_0.65fr_0.72fr_0.65fr_0.62fr_0.62fr_0.64fr_0.82fr]">
+                <div className="mt-3 grid grid-cols-1 gap-2 text-[11px] font-mono text-muted-foreground md:grid-cols-2 xl:grid-cols-[1.18fr_0.65fr_0.72fr_0.65fr_0.62fr_0.62fr_0.64fr_0.72fr_0.82fr]">
                   <div>{fmtTime(campaign.opened_at)} → {fmtTime(campaign.closed_at)}</div>
                   <div>含 {legs.length} legs · 持续 {durationLabel(campaign.opened_at, campaign.closed_at)}</div>
                   <div>
@@ -1255,6 +1282,9 @@ export default function JournalCampaignsPage() {
                         : `xᵢ = 最大预期亏损 ÷ 主力开仓实时总资产快照 ${riskAccountEquity?.toFixed(2) ?? '—'} = ${(initialRiskFraction * 100).toFixed(2)}%`}
                   >
                     几何期望：{formatGeometricExpectancy(geometricExpectancy)}
+                  </div>
+                  <div data-testid="campaign-mirror-tp-status">
+                    镜像止盈：<span className={mirrorTpStatus === '实现·盈利' ? 'text-[#0ECB81]' : mirrorTpStatus === '实现·亏损' ? 'text-[#F6465D]' : ''}>{mirrorTpStatus}</span>
                   </div>
                   <div data-testid="campaign-operation-time">
                     操作时间：{fmtOperationTime(operationTime)}

@@ -38,6 +38,18 @@ export function campaignAchievedMirrorTp(legs: TradeJournal[], tradeRecords: Tra
   );
 }
 
+/**
+ * 镜像止盈排序权重：实现·盈利(3) > 实现·打平 / 进行中(2) > 实现·亏损(1) > 未实现(0)。
+ * 降序把「镜像止盈生效且赚钱」的战役排在最前。
+ */
+export function mirrorTpRank(achieved: boolean, realizedPnl: number | null): number {
+  if (!achieved) return 0;
+  if (realizedPnl == null || !Number.isFinite(realizedPnl)) return 2; // 实现·进行中
+  if (realizedPnl > 0) return 3;
+  if (realizedPnl < 0) return 1;
+  return 2; // 实现·打平
+}
+
 export function summarizeMirrorTp(campaigns: MirrorTpCampaignInput[]): MirrorTpSummary {
   const total = campaigns.length;
   const achievedList = campaigns.filter(campaign => campaign.achieved);
