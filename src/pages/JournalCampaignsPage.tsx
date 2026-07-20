@@ -76,6 +76,12 @@ type CampaignSortState = {
   direction: CampaignSortDirection;
 };
 
+type CampaignListScope = 'own' | 'mutual';
+
+type CampaignListNavigationState = {
+  fromCampaignList: true;
+};
+
 type CampaignFormulaPopover =
   | 'captureRate'
   | 'arithmeticExpectancy'
@@ -99,6 +105,26 @@ const SORT_OPTIONS: { value: CampaignSortMode; label: string }[] = [
   { value: 'mirrorTp', label: '镜像止盈' },
   { value: 'alpha', label: '字母' },
 ];
+
+const DEFAULT_CAMPAIGN_SORT: CampaignSortState = { mode: 'time', direction: 'desc' };
+const CAMPAIGN_LIST_SCROLL_KEY_PREFIX = 'journal-campaign-list-scroll:';
+
+function parseCampaignListParams(search: string): {
+  scope: CampaignListScope;
+  sort: CampaignSortState;
+} {
+  const params = new URLSearchParams(search);
+  const scope: CampaignListScope = params.get('scope') === 'mutual' ? 'mutual' : 'own';
+  const requestedMode = params.get('sort');
+  const mode = SORT_OPTIONS.some(option => option.value === requestedMode)
+    ? requestedMode as CampaignSortMode
+    : DEFAULT_CAMPAIGN_SORT.mode;
+  const requestedDirection = params.get('direction');
+  const direction = requestedDirection === 'asc' || requestedDirection === 'desc'
+    ? requestedDirection
+    : mode === 'alpha' ? 'asc' : 'desc';
+  return { scope, sort: { mode, direction } };
+}
 
 const CAMPAIGN_TITLE_COLLATOR = new Intl.Collator(['zh-Hans-CN', 'en'], {
   numeric: true,
@@ -345,22 +371,33 @@ function durationLabel(openedAt: string, closedAt: string | null) {
 export default function JournalCampaignsPage() {
   const nav = useNavigate();
   const location = useLocation();
+  const initialListParams = useMemo(() => parseCampaignListParams(location.search), [location.search]);
   const { user } = useAuth();
   const { balance, positionsMap, priceMap } = useTradingContext();
   const currentAccountEquity = useMemo(
     () => computeCurrentAccountEquity(balance, positionsMap, priceMap),
     [balance, positionsMap, priceMap],
   );
-  const [scope, setScope] = useState<'own' | 'mutual'>('own');
+  const [scope, setScope] = useState<CampaignListScope>(initialListParams.scope);
   const [loading, setLoading] = useState(true);
   const [rows, setRows] = useState<CampaignCardData[]>([]);
   const [busyCampaignId, setBusyCampaignId] = useState<string | null>(null);
-  const [sortState, setSortState] = useState<CampaignSortState>({ mode: 'time', direction: 'desc' });
+  const [sortState, setSortState] = useState<CampaignSortState>(initialListParams.sort);
   const [formulaPopover, setFormulaPopover] = useState<CampaignFormulaPopover | null>(null);
   const [deletedOpen, setDeletedOpen] = useState(false);
   const [deletedLoading, setDeletedLoading] = useState(false);
   const [deletedCampaigns, setDeletedCampaigns] = useState<TradeCampaign[]>([]);
   const [deletedBusyId, setDeletedBusyId] = useState<string | null>(null);
+
+  useEffect(() => {
+    const next = parseCampaignListParams(location.search);
+    setScope(current => current === next.scope ? current : next.scope);
+    setSortState(current => (
+      current.mode === next.sort.mode && current.direction === next.sort.direction
+        ? current
+        : next.sort
+    ));
+  }, [location.search]);
 
   useEffect(() => {
     if (!user) return;
@@ -430,6 +467,17 @@ export default function JournalCampaignsPage() {
       });
     return () => { cancelled = true; };
   }, [user]);
+
+  useEffect(() => {
+    if (loading) return;
+    const storageKey = `${CAMPAIGN_LIST_SCROLL_KEY_PREFIX}${location.key}`;
+    const savedScroll = Number(sessionStorage.getItem(storageKey));
+    if (!Number.isFinite(savedScroll) || savedScroll < 0) return;
+    sessionStorage.removeItem(storageKey);
+    if (savedScroll === 0) return;
+    const frame = window.requestAnimationFrame(() => window.scrollTo({ top: savedScroll }));
+    return () => window.cancelAnimationFrame(frame);
+  }, [loading, location.key]);
 
   const activeCount = useMemo(
     () => rows.filter((row: CampaignCardData) => row.campaign.status === 'active').length,
@@ -543,12 +591,34 @@ export default function JournalCampaignsPage() {
     : `${(geometric.optimalFraction * 100).toFixed(1)}%`;
   const opportunityQualityLabel = formatOpportunityQuality(opportunityQualityStats.average);
 
+  const updateListParams = (nextScope: CampaignListScope, nextSort: CampaignSortState) => {
+    const params = new URLSearchParams(location.search);
+    params.set('scope', nextScope);
+    params.set('sort', nextSort.mode);
+    params.set('direction', nextSort.direction);
+    const search = params.toString();
+    nav({ pathname: location.pathname, search: search ? `?${search}` : '' }, { replace: true });
+  };
+
+  const handleScopeChange = (nextScope: CampaignListScope) => {
+    if (nextScope === scope) return;
+    setScope(nextScope);
+    updateListParams(nextScope, sortState);
+  };
+
   const handleSortChange = (mode: CampaignSortMode) => {
-    setSortState(current => (
-      current.mode === mode
-        ? { mode, direction: current.direction === 'desc' ? 'asc' : 'desc' }
-        : { mode, direction: mode === 'alpha' ? 'asc' : 'desc' }
-    ));
+    const nextSort: CampaignSortState = sortState.mode === mode
+      ? { mode, direction: sortState.direction === 'desc' ? 'asc' : 'desc' }
+      : { mode, direction: mode === 'alpha' ? 'asc' : 'desc' };
+    setSortState(nextSort);
+    updateListParams(scope, nextSort);
+  };
+
+  const handleCampaignOpen = (campaignId: string) => {
+    const storageKey = `${CAMPAIGN_LIST_SCROLL_KEY_PREFIX}${location.key}`;
+    sessionStorage.setItem(storageKey, String(window.scrollY));
+    const state: CampaignListNavigationState = { fromCampaignList: true };
+    nav(`/journal/campaigns/${campaignId}${location.search}`, { state });
   };
 
   const openFormulaPopover = (
@@ -727,7 +797,7 @@ export default function JournalCampaignsPage() {
               <button
                 key={option.value}
                 type="button"
-                onClick={() => setScope(option.value as 'own' | 'mutual')}
+                onClick={() => handleScopeChange(option.value as CampaignListScope)}
                 className={`h-7 flex-1 rounded text-[11px] transition-colors ${
                   scope === option.value ? 'bg-[#F0B90B] text-black' : 'text-muted-foreground hover:bg-accent hover:text-foreground'
                 }`}
@@ -1184,7 +1254,7 @@ export default function JournalCampaignsPage() {
               <div
                 key={campaign.id}
                 data-testid="campaign-card"
-                onClick={() => nav(`/journal/campaigns/${campaign.id}${location.search}`)}
+                onClick={() => handleCampaignOpen(campaign.id)}
                 className="bg-card border border-border rounded p-4 mb-3 cursor-pointer hover:bg-accent transition-colors"
               >
                 <div className="flex flex-wrap items-center justify-between gap-3">

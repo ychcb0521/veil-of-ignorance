@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import { describe, expect, it, vi } from 'vitest';
 import type { TradeCampaign, TradeJournal } from '@/types/journal';
 import type { TradeRecord } from '@/types/trading';
@@ -260,7 +260,38 @@ function cardOrder(): string[] {
   });
 }
 
+function LocationProbe() {
+  const location = useLocation();
+  const state = location.state as { fromCampaignList?: boolean } | null;
+  return (
+    <div data-testid="location-probe">
+      {location.pathname}{location.search}|{state?.fromCampaignList ? 'from-list' : 'direct'}
+    </div>
+  );
+}
+
 describe('JournalCampaignsPage sorting', () => {
+  it('restores list parameters from the URL and carries them into campaign detail navigation', async () => {
+    render(
+      <MemoryRouter initialEntries={['/journal/campaigns?scope=own&sort=importance&direction=asc']}>
+        <Routes>
+          <Route path="/journal/campaigns" element={<JournalCampaignsPage />} />
+          <Route path="/journal/campaigns/:id" element={<LocationProbe />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => expect(screen.getAllByTestId('campaign-card')).toHaveLength(4));
+    expect(screen.getByRole('button', { name: '我的战役' })).toHaveClass('bg-[#F0B90B]');
+    expect(screen.getByTestId('campaign-sort-importance')).toHaveAttribute('data-sort-direction', 'asc');
+    expect(cardOrder()).toEqual(['Best PnL', 'Newest Operation', 'Late Close', 'High Importance']);
+
+    fireEvent.click(screen.getAllByTestId('campaign-card')[0]);
+    expect(screen.getByTestId('location-probe')).toHaveTextContent(
+      '/journal/campaigns/best-pnl?scope=own&sort=importance&direction=asc|from-list',
+    );
+  });
+
   it('defaults to operation time and toggles sort direction for each field', async () => {
     render(
       <MemoryRouter initialEntries={['/journal/campaigns']}>

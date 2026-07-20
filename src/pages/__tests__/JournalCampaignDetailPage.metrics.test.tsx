@@ -1,5 +1,5 @@
-import { render, screen, waitFor } from '@testing-library/react';
-import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import { describe, expect, it, vi } from 'vitest';
 import type { TradeCampaign, TradeJournal } from '@/types/journal';
 import JournalCampaignDetailPage from '../JournalCampaignDetailPage';
@@ -134,7 +134,38 @@ vi.mock('@/components/journal/CampaignLegsList', () => ({ CampaignLegsList: () =
 vi.mock('@/components/journal/CampaignWhatIfEditor', () => ({ CampaignWhatIfEditor: () => null }));
 vi.mock('@/components/journal/EndCampaignDialog', () => ({ EndCampaignDialog: () => null }));
 
+function ListLocationProbe() {
+  const location = useLocation();
+  return <div data-testid="list-location-probe">{location.pathname}{location.search}</div>;
+}
+
 describe('JournalCampaignDetailPage metrics', () => {
+  it('returns to the exact campaign-list history state when opened from the list', async () => {
+    const listLocation = '/journal/campaigns?scope=own&sort=opportunityQuality&direction=asc';
+    render(
+      <MemoryRouter
+        initialEntries={[
+          listLocation,
+          {
+            pathname: '/journal/campaigns/winner',
+            search: '?scope=own&sort=opportunityQuality&direction=asc',
+            state: { fromCampaignList: true },
+          },
+        ]}
+        initialIndex={1}
+      >
+        <Routes>
+          <Route path="/journal/campaigns" element={<ListLocationProbe />} />
+          <Route path="/journal/campaigns/:id" element={<JournalCampaignDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => expect(screen.getByText('winner campaign')).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: '返回进入前的交易战役列表' }));
+    expect(screen.getByTestId('list-location-probe')).toHaveTextContent(listLocation);
+  });
+
   it('shows the same payoff, opportunity-quality and expectancy metrics as the campaign list', async () => {
     render(
       <MemoryRouter initialEntries={['/journal/campaigns/winner']}>
@@ -151,5 +182,22 @@ describe('JournalCampaignDetailPage metrics', () => {
     await waitFor(() => expect(screen.getByText('+0.50R')).toBeInTheDocument());
     expect(screen.getByText('+0.5%/笔')).toBeInTheDocument();
     expect(screen.getByText(/2 场有效战役，实时胜率 50.00%/)).toBeInTheDocument();
+
+    for (const label of [
+      '已实现 P&L',
+      '峰值浮盈',
+      '最大回撤',
+      '最大预期亏损',
+      '初始最大回撤',
+      '盈亏比',
+      '机会质量',
+      '算术期望',
+      '几何期望',
+    ]) {
+      expect(screen.getByRole('button', { name: `${label}说明` })).toBeInTheDocument();
+    }
+
+    fireEvent.click(screen.getByRole('button', { name: '机会质量说明' }));
+    expect(await screen.findByText(/Q = 实际盈亏比 b ÷ 初始最大回撤百分点 d/)).toBeInTheDocument();
   });
 });

@@ -1,10 +1,11 @@
-import { type ChangeEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { type ChangeEvent, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { ArrowLeft, Download, Eye, EyeOff, Info, Layers, MessageSquare, Send, Sparkles, Trash2, UserPlus } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Textarea } from '@/components/ui/textarea';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
@@ -83,11 +84,43 @@ import type { CampaignReverseHedgeOrder, PendingOrder, TradeRecord } from '@/typ
 const INTERVALS = ['1m', '5m', '15m', '1h'] as const;
 type Interval = CampaignChartInterval;
 
+type CampaignDetailNavigationState = {
+  fromCampaignList?: boolean;
+};
+
 function pnlColor(value: number | null) {
   if (value == null) return 'text-muted-foreground';
   if (value > 0) return 'text-[#0ECB81]';
   if (value < 0) return 'text-[#F6465D]';
   return 'text-muted-foreground';
+}
+
+function PnlMetricLabel({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <span className="group/metric inline-flex items-center gap-0.5 text-muted-foreground">
+      <span>{label}</span>
+      <Popover>
+        <PopoverTrigger asChild>
+          <button
+            type="button"
+            aria-label={`${label}说明`}
+            className="inline-flex h-4 w-4 shrink-0 items-center justify-center text-muted-foreground opacity-20 transition-opacity hover:opacity-80 focus-visible:opacity-80 focus-visible:outline-none group-hover/metric:opacity-40"
+          >
+            <Info className="h-2.5 w-2.5" />
+          </button>
+        </PopoverTrigger>
+        <PopoverContent
+          align="start"
+          side="bottom"
+          sideOffset={4}
+          className="w-72 border-border bg-card p-3 text-[11px] leading-relaxed shadow-md"
+        >
+          <div className="font-medium text-foreground">{label}</div>
+          <div className="mt-1.5 space-y-1.5 text-muted-foreground">{children}</div>
+        </PopoverContent>
+      </Popover>
+    </span>
+  );
 }
 
 // 战役详情页统一用浏览器本地时区显示 K 线/模拟时间——与下方 Legs 列表（本地 getHours）
@@ -442,6 +475,7 @@ export default function JournalCampaignDetailPage() {
   const nav = useNavigate();
   const location = useLocation();
   const { user } = useAuth();
+  const viewerUserId = user?.id ?? null;
   const { getEffectiveTime, balance, positionsMap, priceMap } = useTradingContext();
   const [loading, setLoading] = useState(true);
   const [campaign, setCampaign] = useState<TradeCampaign | null>(null);
@@ -479,7 +513,7 @@ export default function JournalCampaignDetailPage() {
   const [campaignPerformanceError, setCampaignPerformanceError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!id || !user) return;
+    if (!id || !viewerUserId) return;
     let cancelled = false;
     (async () => {
       setLoading(true);
@@ -489,8 +523,8 @@ export default function JournalCampaignDetailPage() {
           listCounterfactuals(id),
         ]);
         if (cancelled) return;
-        const ownCampaign = full.campaign.user_id === user.id;
-        const mutual = ownCampaign ? true : await hasMutualFollow(user.id, full.campaign.user_id);
+        const ownCampaign = full.campaign.user_id === viewerUserId;
+        const mutual = ownCampaign ? true : await hasMutualFollow(viewerUserId, full.campaign.user_id);
         if (!mutual) {
           nav(`/journal/campaigns${location.search}`);
           return;
@@ -520,15 +554,17 @@ export default function JournalCampaignDetailPage() {
       }
     })();
     return () => { cancelled = true; };
-  }, [id, user, nav, location.search]);
+  }, [id, viewerUserId, nav, location.search]);
+
+  const campaignOwnerId = campaign?.user_id ?? null;
 
   useEffect(() => {
-    if (!campaign || !user) return;
+    if (!campaignOwnerId || !viewerUserId) return;
     let cancelled = false;
     setCampaignPerformance(null);
     setCampaignPerformanceError(null);
     setCampaignPerformanceLoading(true);
-    loadAccountCampaignPerformance(campaign.user_id, user.id)
+    loadAccountCampaignPerformance(campaignOwnerId, viewerUserId)
       .then(summary => {
         if (!cancelled) setCampaignPerformance(summary);
       })
@@ -544,7 +580,7 @@ export default function JournalCampaignDetailPage() {
     return () => {
       cancelled = true;
     };
-  }, [campaign, user]);
+  }, [campaignOwnerId, viewerUserId]);
 
   const effectiveClosedAt = useMemo(() => {
     if (!campaign) return null;
@@ -1099,6 +1135,15 @@ export default function JournalCampaignDetailPage() {
     }
   };
 
+  const handleBackToCampaigns = () => {
+    const navigationState = location.state as CampaignDetailNavigationState | null;
+    if (navigationState?.fromCampaignList) {
+      nav(-1);
+      return;
+    }
+    nav(`/journal/campaigns${location.search}`);
+  };
+
   return (
     <div className="min-h-screen bg-background text-foreground">
       <header className="sticky top-0 z-20 bg-background/95 backdrop-blur-sm border-b border-border">
@@ -1106,7 +1151,9 @@ export default function JournalCampaignDetailPage() {
           <div className="flex items-center gap-3 min-w-0">
             <button
               type="button"
-              onClick={() => nav(`/journal/campaigns${location.search}`)}
+              onClick={handleBackToCampaigns}
+              aria-label="返回进入前的交易战役列表"
+              title="返回进入前的列表状态"
               className="h-8 w-8 rounded flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-card"
             >
               <ArrowLeft className="w-4 h-4" />
@@ -1176,76 +1223,95 @@ export default function JournalCampaignDetailPage() {
             <div className="font-medium">盈亏概览</div>
             <div className="mt-3 grid grid-cols-1 gap-x-8 gap-y-2 sm:grid-cols-2">
               <div className="flex items-baseline justify-between gap-3">
-                <span className="text-muted-foreground">已实现 P&amp;L</span>
+                <PnlMetricLabel label="已实现 P&L">
+                  <p>本场战役所有已平仓 Legs 的实际盈亏合计，包括主仓、加仓、对冲与止盈的已实现结果。</p>
+                  <div className="rounded bg-muted/60 px-2 py-1 font-mono text-foreground">已实现 P&amp;L = Σ 各已平仓 Leg 盈亏</div>
+                </PnlMetricLabel>
                 <span className={`font-mono ${pnlColor(campaign.final_realized_pnl)}`}>
                   {campaign.final_realized_pnl?.toFixed(2) ?? '—'} USDT
                 </span>
               </div>
               <div className="flex items-baseline justify-between gap-3">
-                <span className="text-muted-foreground">峰值浮盈</span>
+                <PnlMetricLabel label="峰值浮盈">
+                  <p>战役期间同一时刻所有活跃 Legs 合计浮动盈亏的最高值，用来观察这场战役曾经提供过多厚的浮盈垫。</p>
+                  <p>按当前 K 线粒度的收盘价采样，不等同于逐笔成交的瞬时最高值。</p>
+                </PnlMetricLabel>
                 <span className="font-mono">{accuracy.campaign_max_profit_real.toFixed(2)}</span>
               </div>
               <div className="flex items-baseline justify-between gap-3">
-                <span className="text-muted-foreground">最大回撤</span>
+                <PnlMetricLabel label="最大回撤">
+                  <p>战役期间所有活跃 Legs 合计浮盈相对于零盈亏线的最深浮亏绝对值。</p>
+                  <p>这里表示「最深浮亏」，不是从峰值浮盈到后续低点的峰谷回撤。</p>
+                </PnlMetricLabel>
                 <span className="font-mono">{accuracy.campaign_max_drawdown_real.toFixed(2)}</span>
               </div>
               <div className="flex items-baseline justify-between gap-3">
-                <span className="text-muted-foreground">最大预期亏损</span>
+                <PnlMetricLabel label="最大预期亏损">
+                  <p>主力头仓在初始对冲 A/B 风险边界下预先承担的最大亏损额，是盈亏比的风险分母。</p>
+                  <div className="rounded bg-muted/60 px-2 py-1 font-mono text-foreground">最大预期亏损 = 主力开仓名义仓位 × 初始最大回撤比例</div>
+                </PnlMetricLabel>
                 <span className="font-mono">
                   {accuracy.initial_expected_max_loss > 0 ? `${accuracy.initial_expected_max_loss.toFixed(2)} USDT` : '—'}
                 </span>
               </div>
-              <div
-                className="flex items-baseline justify-between gap-3"
-                title="d = max(|主力开仓价 − 初始对冲 A 价|, |主力开仓价 − 初始对冲 B 价|) ÷ 主力开仓价"
-              >
-                <span className="text-muted-foreground">初始最大回撤</span>
+              <div className="flex items-baseline justify-between gap-3">
+                <PnlMetricLabel label="初始最大回撤">
+                  <p>主力开仓价到初始对冲 A/B 中更远一条风险边界的价格距离，占主力开仓价的百分比。</p>
+                  <div className="rounded bg-muted/60 px-2 py-1 font-mono text-foreground">
+                    d = max（|主力价 − A 价|，|主力价 − B 价|）÷ 主力价 × 100%
+                  </div>
+                </PnlMetricLabel>
                 <span className="font-mono">
                   {campaignMetricValues && campaignMetricValues.initialExpectedMaxDrawdownPct > 0
                     ? `${campaignMetricValues.initialExpectedMaxDrawdownPct.toFixed(2)}%`
                     : '—'}
                 </span>
               </div>
-              <div
-                className="flex items-baseline justify-between gap-3"
-                title="盈亏比 = 已实现盈亏 ÷ 初始最大预期亏损"
-              >
-                <span className="text-muted-foreground">盈亏比</span>
+              <div className="flex items-baseline justify-between gap-3">
+                <PnlMetricLabel label="盈亏比">
+                  <p>本场已实现结果相对于初始风险分母的倍数。盈利为正，亏损保留负号。</p>
+                  <div className="rounded bg-muted/60 px-2 py-1 font-mono text-foreground">b = 已实现 P&amp;L ÷ 最大预期亏损</div>
+                  <p>百分数后括号内是数字倍数，例如 200%（2.00）表示 2R。</p>
+                </PnlMetricLabel>
                 <span className={`font-mono ${pnlColor(campaignMetricValues?.profitCaptureRatio ?? null)}`}>
                   {campaignMetricValues?.profitCaptureRatio == null
                     ? '—'
                     : formatCampaignPayoffRatio(campaignMetricValues.profitCaptureRatio)}
                 </span>
               </div>
-              <div
-                className="flex items-baseline justify-between gap-3"
-                title={campaignMetricValues?.opportunityQuality == null
-                  ? '需要已结束战役的实际盈亏比、主力开仓价和至少一个初始对冲 A/B 价格'
-                  : `Q = |实际盈亏比 ${(campaignMetricValues.profitCaptureRatio! / 100).toFixed(2)}| ÷ 初始最大回撤 ${campaignMetricValues.initialExpectedMaxDrawdownPct.toFixed(2)}%`}
-              >
-                <span className="text-muted-foreground">机会质量</span>
+              <div className="flex items-baseline justify-between gap-3">
+                <PnlMetricLabel label="机会质量">
+                  <p>用实际盈亏比衡量每 1 个初始回撤百分点换来的结果。相同盈亏比下，初始回撤越小，机会质量越高。</p>
+                  <div className="rounded bg-muted/60 px-2 py-1 font-mono text-foreground">Q = 实际盈亏比 b ÷ 初始最大回撤百分点 d</div>
+                  <p>回撤 2% 时 d 按 2 计，不按 0.02 计；亏损战役保留负号。</p>
+                </PnlMetricLabel>
                 <span className={`font-mono ${pnlColor(campaignMetricValues?.opportunityQuality ?? null)}`}>
                   {formatOpportunityQuality(campaignMetricValues?.opportunityQuality ?? null)}
                 </span>
               </div>
-              <div
-                className="flex items-baseline justify-between gap-3"
-                title={campaignPerformance?.expectedWinRate != null && campaignMetricValues?.profitCaptureRatio != null
-                  ? `E = ${(campaignPerformance.expectedWinRate * 100).toFixed(2)}% × ${(campaignMetricValues.profitCaptureRatio / 100).toFixed(2)} − ${((1 - campaignPerformance.expectedWinRate) * 100).toFixed(2)}%`
-                  : '需要当前战役的有效盈亏比与同一账户有效战役胜率'}
-              >
-                <span className="text-muted-foreground">算术期望</span>
+              <div className="flex items-baseline justify-between gap-3">
+                <PnlMetricLabel label="算术期望">
+                  <p>按同一账户当前有效战役胜率 P，与本场带正负号的实际盈亏比 b，计算每承担 1R 风险的加法期望。</p>
+                  <div className="rounded bg-muted/60 px-2 py-1 font-mono text-foreground">E = P × b −（1 − P）</div>
+                  {campaignPerformance?.expectedWinRate != null && campaignMetricValues?.profitCaptureRatio != null ? (
+                    <p className="font-mono text-foreground">
+                      本场：{(campaignPerformance.expectedWinRate * 100).toFixed(2)}% × {(campaignMetricValues.profitCaptureRatio / 100).toFixed(2)} − {((1 - campaignPerformance.expectedWinRate) * 100).toFixed(2)}%
+                    </p>
+                  ) : <p>缺少有效盈亏比或有效战役胜率时不计算。</p>}
+                </PnlMetricLabel>
                 <span className={`font-mono ${pnlColor(campaignMetricValues?.arithmeticExpectancy ?? null)}`}>
                   {formatArithmeticExpectancy(campaignMetricValues?.arithmeticExpectancy ?? null)}
                 </span>
               </div>
-              <div
-                className="flex items-baseline justify-between gap-3"
-                title={campaignMetricValues?.initialRisk == null
-                  ? '需要有效的最大预期亏损和主力开仓账户总资产；历史战役可使用今日当前总资产回退估算'
-                  : `G = (1+b·x)^P · (1−x)^(1−P)；x = ${(campaignMetricValues.initialRisk.drawdownFraction * 100).toFixed(2)}%`}
-              >
-                <span className="text-muted-foreground">几何期望</span>
+              <div className="flex items-baseline justify-between gap-3">
+                <PnlMetricLabel label="几何期望">
+                  <p>把胜率 P、本场实际盈亏比 b 和本场资产风险比例 x 放入复利路径，衡量这场战役对长期资本增长的影响。</p>
+                  <div className="rounded bg-muted/60 px-2 py-1 font-mono text-foreground">G = (1+b·x)^P · (1−x)^(1−P)；几何期望 = G − 1</div>
+                  <p>x = 最大预期亏损 ÷ 主力开仓时账户总资产。历史战役缺快照时，才使用今日当前总资产估算。</p>
+                  {campaignMetricValues?.initialRisk ? (
+                    <p className="font-mono text-foreground">本场 x = {(campaignMetricValues.initialRisk.drawdownFraction * 100).toFixed(2)}%</p>
+                  ) : <p>缺少有效最大预期亏损或账户资产分母时不计算。</p>}
+                </PnlMetricLabel>
                 <span className={`font-mono ${pnlColor(campaignMetricValues?.geometricExpectancy ?? null)}`}>
                   {formatGeometricExpectancy(campaignMetricValues?.geometricExpectancy ?? null)}
                 </span>
