@@ -1,4 +1,4 @@
-import { type ChangeEvent, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { type ChangeEvent, type ReactNode, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { ArrowLeft, Download, Eye, EyeOff, Info, Layers, MessageSquare, Send, Sparkles, Trash2, UserPlus } from 'lucide-react';
 import { toast } from 'sonner';
@@ -511,6 +511,10 @@ export default function JournalCampaignDetailPage() {
   const [campaignPerformance, setCampaignPerformance] = useState<CampaignPerformanceSummary | null>(null);
   const [campaignPerformanceLoading, setCampaignPerformanceLoading] = useState(false);
   const [campaignPerformanceError, setCampaignPerformanceError] = useState<string | null>(null);
+
+  useLayoutEffect(() => {
+    window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
+  }, [id]);
 
   useEffect(() => {
     if (!id || !viewerUserId) return;

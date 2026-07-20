@@ -1,8 +1,19 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { TradeCampaign, TradeJournal } from '@/types/journal';
 import JournalCampaignDetailPage from '../JournalCampaignDetailPage';
+
+const scrollToMock = vi.fn();
+
+beforeEach(() => {
+  scrollToMock.mockClear();
+  Object.defineProperty(window, 'scrollTo', {
+    configurable: true,
+    writable: true,
+    value: scrollToMock,
+  });
+});
 
 const { campaigns, detailsById } = vi.hoisted(() => {
   const makeCampaign = (
@@ -161,6 +172,7 @@ describe('JournalCampaignDetailPage metrics', () => {
       </MemoryRouter>,
     );
 
+    expect(scrollToMock).toHaveBeenCalledWith({ top: 0, left: 0, behavior: 'auto' });
     await waitFor(() => expect(screen.getByText('winner campaign')).toBeInTheDocument());
     fireEvent.click(screen.getByRole('button', { name: '返回进入前的交易战役列表' }));
     expect(screen.getByTestId('list-location-probe')).toHaveTextContent(listLocation);
