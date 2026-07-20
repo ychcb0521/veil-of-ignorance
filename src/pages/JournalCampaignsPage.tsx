@@ -484,6 +484,7 @@ export default function JournalCampaignsPage() {
     [rows],
   );
   const mirrorTpRateLabel = mirrorTp.achievedRatePct == null ? '—' : `${mirrorTp.achievedRatePct.toFixed(0)}%`;
+  const mirrorTpNotAchievedRateLabel = mirrorTp.notAchievedRatePct == null ? '—' : `${mirrorTp.notAchievedRatePct.toFixed(0)}%`;
   const mirrorTpWinRateLabel = mirrorTp.achievedWinRatePct == null ? '—' : `${mirrorTp.achievedWinRatePct.toFixed(0)}%`;
   const opportunityQualityStats = useMemo(() => {
     const samples = rows.filter(row => (
@@ -904,7 +905,7 @@ export default function JournalCampaignsPage() {
                 <button
                   type="button"
                   data-testid="campaign-mirror-tp"
-                  aria-label={`镜像止盈达成率 ${mirrorTpRateLabel}，实现 ${mirrorTp.achieved} 场（盈利 ${mirrorTp.achievedWin} 场、亏损 ${mirrorTp.achievedLoss} 场），未实现 ${mirrorTp.notAchieved} 场，点击查看说明`}
+                  aria-label={`镜像止盈达成率 ${mirrorTpRateLabel}，实现 ${mirrorTp.achieved} 场（盈利 ${mirrorTp.achievedWin} 场、亏损 ${mirrorTp.achievedLoss} 场），未实现 ${mirrorTp.notAchieved} 场（${mirrorTpNotAchievedRateLabel}），点击查看说明`}
                   title="点击查看镜像止盈达成说明"
                   onClick={event => openFormulaPopover(event, 'mirrorTp')}
                   className="ml-0.5 inline-flex h-6 select-none items-center border-b border-l border-dashed border-muted-foreground/30 border-l-border/60 pl-2 text-foreground/60 transition-colors hover:text-foreground/80"
@@ -920,7 +921,7 @@ export default function JournalCampaignsPage() {
                 </div>
                 <div className="mt-2 grid grid-cols-2 gap-1 border-t border-border/60 pt-2 text-center">
                   <div><span className="text-muted-foreground">实现</span><strong className="ml-1 text-foreground">{mirrorTp.achieved}</strong><span className="ml-1 text-muted-foreground">（{mirrorTpRateLabel}）</span></div>
-                  <div><span className="text-muted-foreground">未实现</span><strong className="ml-1 text-foreground">{mirrorTp.notAchieved}</strong></div>
+                  <div><span className="text-muted-foreground">未实现</span><strong className="ml-1 text-foreground">{mirrorTp.notAchieved}</strong><span className="ml-1 text-muted-foreground">（{mirrorTpNotAchievedRateLabel}）</span></div>
                 </div>
                 <div className="mt-1 grid grid-cols-3 gap-1 text-center">
                   <div><span className="text-muted-foreground">实现·盈利</span><strong className="ml-1 text-[#0ECB81]">{mirrorTp.achievedWin}</strong></div>

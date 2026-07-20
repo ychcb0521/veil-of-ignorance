@@ -24,6 +24,8 @@ export interface MirrorTpSummary {
   achievedNeutral: number;
   /** 达成率 = achieved / total。total=0 → null。 */
   achievedRatePct: number | null;
+  /** 未达成率 = notAchieved / total。total=0 → null。 */
+  notAchievedRatePct: number | null;
   /** 达成里的盈利率 = achievedWin / achieved。achieved=0 → null。 */
   achievedWinRatePct: number | null;
 }
@@ -64,6 +66,7 @@ export function summarizeMirrorTp(campaigns: MirrorTpCampaignInput[]): MirrorTpS
     achievedLoss,
     achievedNeutral: achieved - achievedWin - achievedLoss,
     achievedRatePct: total > 0 ? (achieved / total) * 100 : null,
+    notAchievedRatePct: total > 0 ? ((total - achieved) / total) * 100 : null,
     achievedWinRatePct: achieved > 0 ? (achievedWin / achieved) * 100 : null,
   };
 }

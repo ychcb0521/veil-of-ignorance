@@ -50,6 +50,7 @@ describe('summarizeMirrorTp', () => {
     expect(s.achievedLoss).toBe(1);
     expect(s.achievedNeutral).toBe(2);
     expect(s.achievedRatePct).toBeCloseTo(80, 10);
+    expect(s.notAchievedRatePct).toBeCloseTo(20, 10);
     expect(s.achievedWinRatePct).toBeCloseTo(25, 10);
   });
 
@@ -57,12 +58,14 @@ describe('summarizeMirrorTp', () => {
     const s = summarizeMirrorTp([]);
     expect(s.total).toBe(0);
     expect(s.achievedRatePct).toBeNull();
+    expect(s.notAchievedRatePct).toBeNull();
     expect(s.achievedWinRatePct).toBeNull();
   });
 
-  it('全未达成 → 达成率 0、盈利率 null', () => {
+  it('全未达成 → 达成率 0、未达成率 100、盈利率 null', () => {
     const s = summarizeMirrorTp([{ achieved: false, realizedPnl: 10 }, { achieved: false, realizedPnl: -10 }]);
     expect(s.achievedRatePct).toBe(0);
+    expect(s.notAchievedRatePct).toBe(100);
     expect(s.achievedWinRatePct).toBeNull();
   });
 });
