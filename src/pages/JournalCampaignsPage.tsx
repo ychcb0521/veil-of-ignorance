@@ -1402,8 +1402,8 @@ export default function JournalCampaignsPage() {
 
                 <div className="flex flex-wrap items-center gap-y-1 border-t border-border/65 bg-muted/[0.08] px-4 py-1.5 sm:px-5">
                   <div className="inline-flex h-7 shrink-0 items-center gap-1.5 border-r border-border/60 px-3 first:pl-0" data-testid="campaign-expected-drawdown-pct">
-                    <span className="text-[9px] text-muted-foreground/65">预期回撤：</span>
-                    <span className="whitespace-nowrap font-mono text-[10px] tabular-nums text-foreground/80">
+                    <span className="text-[10px] text-muted-foreground/70">预期回撤：</span>
+                    <span className="whitespace-nowrap font-mono text-[10px] font-medium tabular-nums text-foreground/85">
                       {initialExpectedMaxDrawdownPct > 0 ? `${initialExpectedMaxDrawdownPct.toFixed(2)}%` : '—'}
                     </span>
                   </div>
@@ -1414,12 +1414,12 @@ export default function JournalCampaignsPage() {
                       : `Q = 实际盈亏比 ${(profitCaptureRatio! / 100).toFixed(2)} ÷ 预期回撤 ${initialExpectedMaxDrawdownPct.toFixed(2)}%`}
                     className="inline-flex h-7 shrink-0 items-center gap-1.5 border-r border-border/60 px-3"
                   >
-                    <span className="text-[9px] text-muted-foreground/65">机会质量：</span>
-                    <span className="whitespace-nowrap font-mono text-[10px] tabular-nums text-foreground/80">{formatOpportunityQuality(opportunityQuality)}</span>
+                    <span className="text-[10px] text-muted-foreground/70">机会质量：</span>
+                    <span className="whitespace-nowrap font-mono text-[10px] font-medium tabular-nums text-foreground/85">{formatOpportunityQuality(opportunityQuality)}</span>
                   </div>
                   <div className="inline-flex h-7 shrink-0 items-center gap-1.5 border-r border-border/60 px-3" data-testid="campaign-payoff-ratio">
-                    <span className="text-[9px] text-muted-foreground/65">盈亏比：</span>
-                    <span className="whitespace-nowrap font-mono text-[10px] tabular-nums text-foreground/80">
+                    <span className="text-[10px] text-muted-foreground/70">盈亏比：</span>
+                    <span className="whitespace-nowrap font-mono text-[10px] font-medium tabular-nums text-foreground/85">
                       {profitCaptureRatio == null ? '—' : formatCampaignPayoffRatio(profitCaptureRatio, 2)}
                     </span>
                   </div>
@@ -1428,7 +1428,7 @@ export default function JournalCampaignsPage() {
                     title="Eᵢ = 当前有效战役胜率 × 该战役盈亏比 − 亏损概率"
                     className="inline-flex h-7 shrink-0 items-center gap-1.5 border-r border-border/60 px-3"
                   >
-                    <span className="text-[9px] text-muted-foreground/65">算术期望：</span>
+                    <span className="text-[10px] text-muted-foreground/70">算术期望：</span>
                     <span className={`whitespace-nowrap font-mono text-[10px] font-medium tabular-nums ${arithmeticTone}`}>{formatArithmeticExpectancy(arithmeticExpectancy)}</span>
                   </div>
                   <div
@@ -1440,12 +1440,12 @@ export default function JournalCampaignsPage() {
                         : `xᵢ = 最大预期亏损 ÷ 主力开仓实时总资产快照 ${riskAccountEquity?.toFixed(2) ?? '—'} = ${(initialRiskFraction * 100).toFixed(2)}%`}
                     className="inline-flex h-7 shrink-0 items-center gap-1.5 border-r border-border/60 px-3"
                   >
-                    <span className="text-[9px] text-muted-foreground/65">几何期望：</span>
+                    <span className="text-[10px] text-muted-foreground/70">几何期望：</span>
                     <span className={`whitespace-nowrap font-mono text-[10px] font-medium tabular-nums ${geometricTone}`}>{formatGeometricExpectancy(geometricExpectancy)}</span>
                   </div>
                   <div className="inline-flex h-7 shrink-0 items-center gap-1.5 px-3" data-testid="campaign-mirror-tp-status">
-                    <span className="text-[9px] text-muted-foreground/65">镜像止盈：</span>
-                    <span className={`whitespace-nowrap font-mono text-[10px] tabular-nums ${mirrorTpStatus === '实现·盈利' ? 'text-[#0ECB81]' : mirrorTpStatus === '实现·亏损' ? 'text-[#F6465D]' : 'text-foreground/80'}`}>{mirrorTpStatus}</span>
+                    <span className="text-[10px] text-muted-foreground/70">镜像止盈：</span>
+                    <span className={`whitespace-nowrap font-mono text-[10px] font-medium tabular-nums ${mirrorTpStatus === '实现·盈利' ? 'text-[#0ECB81]' : mirrorTpStatus === '实现·亏损' ? 'text-[#F6465D]' : 'text-foreground/85'}`}>{mirrorTpStatus}</span>
                   </div>
                 </div>
 
