@@ -51,6 +51,7 @@ vi.mock('klinecharts', () => ({
   registerIndicator: mocks.registerIndicator,
   CandleType: { CandleSolid: 'candle_solid' },
   LineType: { Dashed: 'dashed', Solid: 'solid' },
+  DomPosition: { Root: 'root', Main: 'main', YAxis: 'yAxis' },
   ActionType: {
     OnDataReady: 'onDataReady',
     OnScroll: 'onScroll',
@@ -309,8 +310,13 @@ describe('CandlestickChart analysis annotations', () => {
     });
   });
 
-  it('预载二十一倍数据时只把指定的三倍区间铺满为默认视口', async () => {
+  it('预载二十一倍数据时把指定三倍区间铺满，并让持仓段位于默认视口正中', async () => {
     const data = Array.from({ length: 100 }, (_, index) => candle(index * 1000, 1 + index / 100));
+    mocks.chart.convertToPixel.mockImplementation((point: any) => {
+      const value = Array.isArray(point) ? point[0] : point;
+      if (value?.timestamp === 29_500) return { x: 987.5, y: 0 };
+      return { x: 0, y: 0 };
+    });
     render(
       <CandlestickChart
         data={data}
@@ -332,6 +338,7 @@ describe('CandlestickChart analysis annotations', () => {
       expect(mocks.chart.setBarSpace).toHaveBeenCalledWith(25);
       expect(mocks.chart.setOffsetRightDistance).toHaveBeenCalledWith(0);
       expect(mocks.chart.scrollToTimestamp).toHaveBeenCalledWith(29_500, 0);
+      expect(mocks.chart.scrollByDistance).toHaveBeenCalledWith(-487.5, 0);
     });
   });
 

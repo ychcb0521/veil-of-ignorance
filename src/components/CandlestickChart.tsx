@@ -10,6 +10,7 @@ import {
   CandleType,
   LineType,
   ActionType,
+  DomPosition,
   TooltipShowRule,
   TooltipShowType,
   type Chart,
@@ -494,7 +495,7 @@ function CandlestickChartComponent({
   const fitAnalysisWindow = useCallback(() => {
     const chart = chartRef.current;
     if (!chart) return false;
-    const size = chart.getSize();
+    const size = chart.getSize("candle_pane", DomPosition.Main) ?? chart.getSize();
     const chartWidth = size?.width ?? 0;
     if (chartWidth <= 0 || data.length === 0) return false;
 
@@ -518,7 +519,23 @@ function CandlestickChartComponent({
 
     if (hasVisibleRange) {
       chart.setOffsetRightDistance(0);
-      chart.scrollToTimestamp((analysisVisibleStartTime + analysisVisibleEndTime) / 2, 0);
+      const visibleCenterTime = (analysisVisibleStartTime + analysisVisibleEndTime) / 2;
+      chart.scrollToTimestamp(visibleCenterTime, 0);
+
+      // KlineCharts aligns scrollToTimestamp with the right edge. Correct that native
+      // position in pixels so the campaign (the middle third of the default window)
+      // sits at the exact center while candles and annotations keep one time scale.
+      const centerPixel = chart.convertToPixel(
+        { timestamp: visibleCenterTime },
+        { paneId: "candle_pane" },
+      );
+      const centerX = Array.isArray(centerPixel) ? centerPixel[0]?.x : centerPixel?.x;
+      if (typeof centerX === "number" && Number.isFinite(centerX)) {
+        const centerCorrection = chartWidth / 2 - centerX;
+        if (Math.abs(centerCorrection) > 0.5) {
+          chart.scrollByDistance(centerCorrection, 0);
+        }
+      }
       return true;
     }
 
