@@ -4,6 +4,10 @@ import { CandlestickChart } from '@/components/CandlestickChart';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import type { KlineData } from '@/hooks/useBinanceData';
 import { FLOATING_LABEL_HEIGHT, layoutAnalysisFloatingLabels } from '@/lib/analysisFloatingLabels';
+import {
+  ANALYSIS_BAND_LABEL_OVERLAY,
+  createAnalysisBandLabelFigures,
+} from '@/lib/analysisBandLabelOverlay';
 
 const mocks = vi.hoisted(() => {
   type ChartCandle = {
@@ -15,6 +19,7 @@ const mocks = vi.hoisted(() => {
     volume: number;
   };
   const dataList: ChartCandle[] = [];
+  const registeredOverlays = new Map<string, any>();
   const chart = {
     resize: vi.fn(),
     subscribeAction: vi.fn(),
@@ -36,6 +41,7 @@ const mocks = vi.hoisted(() => {
       callback?.();
     }),
     createOverlay: vi.fn(),
+    overrideOverlay: vi.fn(),
     removeOverlay: vi.fn(),
     getSize: vi.fn(() => ({ width: 1000, height: 520 })),
     getDataList: vi.fn(() => dataList),
@@ -63,6 +69,9 @@ const mocks = vi.hoisted(() => {
     init: vi.fn(() => chart),
     dispose: vi.fn(),
     registerIndicator: vi.fn(),
+    registerOverlay: vi.fn((template: any) => registeredOverlays.set(template.name, template)),
+    getSupportedOverlays: vi.fn(() => Array.from(registeredOverlays.keys())),
+    registeredOverlays,
   };
 });
 
@@ -70,8 +79,11 @@ vi.mock('klinecharts', () => ({
   init: mocks.init,
   dispose: mocks.dispose,
   registerIndicator: mocks.registerIndicator,
+  registerOverlay: mocks.registerOverlay,
+  getSupportedOverlays: mocks.getSupportedOverlays,
   CandleType: { CandleSolid: 'candle_solid' },
   LineType: { Dashed: 'dashed', Solid: 'solid' },
+  PolygonType: { StrokeFill: 'stroke_fill' },
   DomPosition: { Root: 'root', Main: 'main', YAxis: 'yAxis' },
   ActionType: {
     OnDataReady: 'onDataReady',
@@ -106,6 +118,12 @@ function candle(time: number, close = 1): KlineData {
     volume: 1,
   };
 }
+
+const getBandOverlay = () => mocks.chart.createOverlay.mock.calls
+  .map(([overlay]) => overlay)
+  .find(overlay => overlay.name === ANALYSIS_BAND_LABEL_OVERLAY);
+
+const getBandLabelTexts = () => getBandOverlay()?.extendData?.labels?.map((label: any) => label.text) ?? [];
 
 describe('CandlestickChart analysis annotations', () => {
   beforeEach(() => {
@@ -195,9 +213,14 @@ describe('CandlestickChart analysis annotations', () => {
     expect(
       overlays.flatMap(overlay => overlay.points ?? []).every(point => !('dataIndex' in point)),
     ).toBe(true);
-    expect(mocks.chart.subscribeAction).toHaveBeenCalledWith('onScroll', expect.any(Function));
-    expect(mocks.chart.subscribeAction).toHaveBeenCalledWith('onZoom', expect.any(Function));
-    expect(mocks.chart.subscribeAction).toHaveBeenCalledWith('onVisibleRangeChange', expect.any(Function));
+    const bandOverlay = overlays.find(overlay => overlay.name === ANALYSIS_BAND_LABEL_OVERLAY);
+    expect(bandOverlay?.points).toEqual([
+      { timestamp: 2000, value: 1.2 },
+      { timestamp: 1000, value: 1.2 },
+    ]);
+    expect(document.querySelector('[data-analysis-label]')).toBeNull();
+    expect(mocks.chart.subscribeAction).not.toHaveBeenCalledWith('onScroll', expect.any(Function));
+    expect(mocks.chart.subscribeAction).not.toHaveBeenCalledWith('onZoom', expect.any(Function));
   });
 
   it('隐藏反事实层时按组彻底清除紫色原生图层和浮动标签', async () => {
@@ -232,8 +255,7 @@ describe('CandlestickChart analysis annotations', () => {
     );
 
     await waitFor(() => {
-      const labels = Array.from(document.querySelectorAll('[data-analysis-label]')).map(label => label.textContent);
-      expect(labels.some(label => label?.includes('CF-'))).toBe(true);
+      expect(getBandLabelTexts().some((label: string) => label.includes('CF-'))).toBe(true);
     });
     expect(mocks.chart.createOverlay.mock.calls.map(([overlay]) => overlay)).toEqual(
       expect.arrayContaining([
@@ -253,9 +275,7 @@ describe('CandlestickChart analysis annotations', () => {
       />,
     );
 
-    await waitFor(() => {
-      expect(document.querySelectorAll('[data-analysis-label]')).toHaveLength(0);
-    });
+    await waitFor(() => expect(getBandOverlay()).toBeUndefined());
     expect(mocks.chart.removeOverlay).toHaveBeenCalledWith({ groupId: 'analysis_annotations' });
     expect(mocks.chart.createOverlay).not.toHaveBeenCalled();
   });
@@ -302,7 +322,7 @@ describe('CandlestickChart analysis annotations', () => {
     ]);
   });
 
-  it('图表滚动或缩放后按当前时间坐标重新定位浮层，且不反向触发滚动反馈', async () => {
+  it('图表滚动或缩放时标签由原生覆盖物坐标重绘，不存在独立 DOM 位移反馈', async () => {
     render(
       <CandlestickChart
         data={[candle(1000, 1), candle(2000, 1.2)]}
@@ -323,24 +343,26 @@ describe('CandlestickChart analysis annotations', () => {
       />,
     );
 
-    await waitFor(() => {
-      expect(document.querySelector('[data-analysis-label]')).not.toBeNull();
-    });
-    const before = (document.querySelector('[data-analysis-label]') as HTMLElement).style.left;
-    const zoomCallback = mocks.chart.subscribeAction.mock.calls.find(([type]) => type === 'onZoom')?.[1];
-    expect(zoomCallback).toEqual(expect.any(Function));
+    await waitFor(() => expect(getBandOverlay()).toBeDefined());
+    const overlay = getBandOverlay();
+    const before = createAnalysisBandLabelFigures({
+      overlay,
+      coordinates: [{ x: 120, y: 0 }],
+      bounding: { width: 1000, height: 520 },
+    } as any);
+    const after = createAnalysisBandLabelFigures({
+      overlay,
+      coordinates: [{ x: 410, y: 0 }],
+      bounding: { width: 1000, height: 520 },
+    } as any);
 
-    mocks.chart.convertToPixel.mockImplementation(() => ({ x: 260, y: 0 }));
-    mocks.chart.scrollByDistance.mockClear();
-    zoomCallback?.();
-
-    await waitFor(() => {
-      expect((document.querySelector('[data-analysis-label]') as HTMLElement).style.left).not.toEqual(before);
-    });
+    expect(before[0].attrs.x).toBe(120);
+    expect(after[0].attrs.x).toBe(410);
+    expect(document.querySelector('[data-analysis-label]')).toBeNull();
     expect(mocks.chart.scrollByDistance).not.toHaveBeenCalled();
   });
 
-  it('历史图表坐标在缩放事件之后异步更新时，标签仍持续绑定同一根 K 线', async () => {
+  it('历史图表标签和 K 线共用同一原生时间点，不注册手势追踪循环', async () => {
     render(
       <CandlestickChart
         data={[candle(1000, 1), candle(2000, 1.2)]}
@@ -357,20 +379,10 @@ describe('CandlestickChart analysis annotations', () => {
       />,
     );
 
-    await waitFor(() => {
-      expect(document.querySelector('[data-analysis-label]')).not.toBeNull();
-    });
-    const before = (document.querySelector('[data-analysis-label]') as HTMLElement).style.left;
-    const zoomCallback = mocks.chart.subscribeAction.mock.calls.find(([type]) => type === 'onZoom')?.[1];
-    expect(zoomCallback).toEqual(expect.any(Function));
-
-    act(() => zoomCallback?.());
-    await new Promise(resolve => setTimeout(resolve, 40));
-    mocks.chart.convertToPixel.mockImplementation(() => ({ x: 410, y: 0 }));
-
-    await waitFor(() => {
-      expect((document.querySelector('[data-analysis-label]') as HTMLElement).style.left).not.toEqual(before);
-    });
+    await waitFor(() => expect(getBandOverlay()).toBeDefined());
+    expect(getBandOverlay()?.points).toEqual([{ timestamp: 1000, value: 1.2 }]);
+    expect(mocks.chart.subscribeAction).not.toHaveBeenCalledWith('onZoom', expect.any(Function));
+    expect(mocks.chart.subscribeAction).not.toHaveBeenCalledWith('onScroll', expect.any(Function));
   });
 
   it('旧战役的非整周期事件会绑定到最近的真实 K 线时间戳', async () => {
@@ -399,10 +411,7 @@ describe('CandlestickChart analysis annotations', () => {
       expect(markerOverlay?.points?.[0]).toEqual(expect.objectContaining({
         timestamp: 2000,
       }));
-      expect(mocks.chart.convertToPixel).toHaveBeenCalledWith(
-        expect.objectContaining({ timestamp: 2000 }),
-        { paneId: 'candle_pane' },
-      );
+      expect(getBandOverlay()?.points?.[0]).toEqual({ timestamp: 2000, value: 1.2 });
     });
   });
 
@@ -597,6 +606,50 @@ describe('CandlestickChart analysis annotations', () => {
     });
   });
 
+  it('历史数据等价重渲染不会覆盖用户已经完成的平移或缩放视窗', async () => {
+    const initialData = Array.from({ length: 100 }, (_, index) => candle(index * 1000, 1 + index / 100));
+    const stableAnnotations = {
+      verticalLines: [{ time: 20_000, color: '#3B82F6', label: '主力开始' }],
+    };
+    const { rerender } = render(
+      <CandlestickChart
+        data={initialData}
+        symbol="HIFIUSDT"
+        rawSymbol="HIFIUSDT"
+        analysisMode
+        analysisFitAll
+        analysisAnnotations={stableAnnotations}
+        analysisVisibleStartTime={10_000}
+        analysisVisibleEndTime={49_000}
+      />,
+    );
+
+    await waitFor(() => expect(mocks.chart.setBarSpace).toHaveBeenCalled());
+    mocks.chart.setBarSpace.mockClear();
+    mocks.chart.setOffsetRightDistance.mockClear();
+    mocks.chart.scrollToTimestamp.mockClear();
+    mocks.chart.scrollByDistance.mockClear();
+
+    rerender(
+      <CandlestickChart
+        data={initialData.map(item => ({ ...item }))}
+        symbol="HIFIUSDT"
+        rawSymbol="HIFIUSDT"
+        analysisMode
+        analysisFitAll
+        analysisAnnotations={stableAnnotations}
+        analysisVisibleStartTime={10_000}
+        analysisVisibleEndTime={49_000}
+      />,
+    );
+
+    await act(async () => Promise.resolve());
+    expect(mocks.chart.setBarSpace).not.toHaveBeenCalled();
+    expect(mocks.chart.setOffsetRightDistance).not.toHaveBeenCalled();
+    expect(mocks.chart.scrollToTimestamp).not.toHaveBeenCalled();
+    expect(mocks.chart.scrollByDistance).not.toHaveBeenCalled();
+  });
+
   it('委托空撤单结束点显示 ×，并带对应撤单竖线', async () => {
     render(
       <CandlestickChart
@@ -620,11 +673,9 @@ describe('CandlestickChart analysis annotations', () => {
       />,
     );
 
-    await waitFor(() => {
-      expect(document.querySelector('[data-analysis-label]')).not.toBeNull();
-    });
+    await waitFor(() => expect(getBandOverlay()).toBeDefined());
 
-    const labelTexts = Array.from(document.querySelectorAll('[data-analysis-label]')).map((label) => label.textContent);
+    const labelTexts = getBandLabelTexts();
     expect(labelTexts).toContain('委托空');
     expect(labelTexts).toContain('×');
 
@@ -687,11 +738,9 @@ describe('CandlestickChart analysis annotations', () => {
       />,
     );
 
-    await waitFor(() => {
-      expect(document.querySelector('[data-analysis-label]')).not.toBeNull();
-    });
+    await waitFor(() => expect(getBandOverlay()).toBeDefined());
 
-    const labelTexts = Array.from(document.querySelectorAll('[data-analysis-label]')).map((label) => label.textContent);
+    const labelTexts = getBandLabelTexts();
     expect(labelTexts.filter(text => text === '委托空')).toHaveLength(1);
 
     const overlays = mocks.chart.createOverlay.mock.calls.map(([overlay]) => overlay);
@@ -737,18 +786,21 @@ describe('CandlestickChart analysis annotations', () => {
       />,
     );
 
-    await waitFor(() => {
-      expect(Array.from(document.querySelectorAll('[data-analysis-label]')).some(label => label.textContent?.includes('A1'))).toBe(true);
-    });
+    await waitFor(() => expect(getBandLabelTexts().some((label: string) => label.includes('A1'))).toBe(true));
 
-    const labels = Array.from(document.querySelectorAll('[data-analysis-label]')) as HTMLElement[];
-    const addLabel = labels.find(label => label.textContent?.includes('A1'));
-    const normalLabel = labels.find(label => label.textContent?.includes('TP'));
-    const labelTexts = labels.map(label => label.textContent);
+    const bandOverlay = getBandOverlay();
+    const labelTexts = getBandLabelTexts();
     expect(labelTexts).not.toContain('加仓1·开仓');
-    expect(addLabel?.style.fontWeight).toBe('800');
-    expect(addLabel?.style.fontSize).toBe('8px');
-    expect(normalLabel?.style.fontSize).toBe('7px');
+    const figures = createAnalysisBandLabelFigures({
+      overlay: bandOverlay,
+      coordinates: bandOverlay.points.map((_point: any, index: number) => ({ x: 100 + index * 200, y: 0 })),
+      bounding: { width: 1000, height: 520 },
+    } as any);
+    const addLabel = figures.find(figure => figure.attrs.text.includes('A1'));
+    const normalLabel = figures.find(figure => figure.attrs.text.includes('TP'));
+    expect(addLabel?.styles?.weight).toBe(800);
+    expect(addLabel?.styles?.size).toBe(8);
+    expect(normalLabel?.styles?.size).toBe(7);
 
     const overlays = mocks.chart.createOverlay.mock.calls.map(([overlay]) => overlay);
     const addMarkerOverlay = overlays.find(

@@ -27,11 +27,13 @@ import { usePersistedState } from "@/hooks/usePersistedState";
 import type { TradeRecord } from "@/types/trading";
 import { registerCustomIndicators, CUSTOM_INDICATOR_MAP } from "@/lib/customIndicators";
 import {
-  FLOATING_LABEL_HEIGHT,
-  layoutAnalysisFloatingLabels,
-  type AnalysisFloatingLabel,
   type AnalysisFloatingLabelCandidate,
 } from "@/lib/analysisFloatingLabels";
+import {
+  ANALYSIS_BAND_LABEL_OVERLAY,
+  registerAnalysisBandLabelOverlay,
+  type AnalysisBandLabelOverlayData,
+} from "@/lib/analysisBandLabelOverlay";
 
 // Mapping from our indicator IDs to klinecharts indicator names (built-in + custom)
 const KLINE_INDICATOR_MAP: Record<string, string> = { ...CUSTOM_INDICATOR_MAP };
@@ -460,23 +462,23 @@ function CandlestickChartComponent({
   const [drawingsVisible, setDrawingsVisible] = useState(true);
   const [activeDrawingTool, setActiveDrawingTool] = useState<string | null>(null);
   const { theme } = useTheme();
-  const [analysisFloatingLabels, setAnalysisFloatingLabels] = useState<AnalysisFloatingLabel[]>([]);
-  const [analysisViewportWidth, setAnalysisViewportWidth] = useState(0);
   const [analysisDataReadyRevision, setAnalysisDataReadyRevision] = useState(0);
   const crosshairPriceRef = useRef<number | null>(null);
 
   const activeIndicatorPanes = useRef<Map<string, string | null>>(new Map());
 
-  useEffect(() => {
-    const el = containerRef.current;
-    if (!el) return;
-    const updateWidth = () => setAnalysisViewportWidth(Math.round(el.clientWidth));
-    updateWidth();
-    if (typeof ResizeObserver === "undefined") return;
-    const resizeObserver = new ResizeObserver(updateWidth);
-    resizeObserver.observe(el);
-    return () => resizeObserver.disconnect();
-  }, []);
+  const hasAnalysisVisibleRange = typeof analysisVisibleStartTime === "number"
+    && Number.isFinite(analysisVisibleStartTime)
+    && typeof analysisVisibleEndTime === "number"
+    && Number.isFinite(analysisVisibleEndTime)
+    && analysisVisibleEndTime > analysisVisibleStartTime;
+  const analysisVisibleCandleCount = hasAnalysisVisibleRange
+    ? data.reduce((count, item) => (
+        item.time >= analysisVisibleStartTime && item.time <= analysisVisibleEndTime
+          ? count + 1
+          : count
+      ), 0)
+    : data.length;
 
   const centerAnalysisWindow = useCallback(() => {
     const chart = chartRef.current;
@@ -503,25 +505,13 @@ function CandlestickChartComponent({
     const chartWidth = size?.width ?? 0;
     if (chartWidth <= 0 || data.length === 0) return false;
 
-    const hasVisibleRange = typeof analysisVisibleStartTime === "number"
-      && Number.isFinite(analysisVisibleStartTime)
-      && typeof analysisVisibleEndTime === "number"
-      && Number.isFinite(analysisVisibleEndTime)
-      && analysisVisibleEndTime > analysisVisibleStartTime;
-    const visibleCount = hasVisibleRange
-      ? data.reduce((count, item) => (
-          item.time >= analysisVisibleStartTime && item.time <= analysisVisibleEndTime
-            ? count + 1
-            : count
-        ), 0)
-      : data.length;
-    const fittedCount = visibleCount > 0 ? visibleCount : data.length;
+    const fittedCount = analysisVisibleCandleCount > 0 ? analysisVisibleCandleCount : data.length;
     // Bar space that makes the initial range span the viewport (klinecharts clamps to [1, 50]).
     const target = chartWidth / fittedCount;
     const barSpace = Number.isFinite(target) && target > 0 ? Math.min(Math.max(target, 1), 50) : 50;
     chart.setBarSpace(barSpace);
 
-    if (hasVisibleRange) {
+    if (hasAnalysisVisibleRange) {
       chart.setOffsetRightDistance(0);
       const visibleCenterTime = (analysisVisibleStartTime + analysisVisibleEndTime) / 2;
       chart.scrollToTimestamp(visibleCenterTime, 0);
@@ -548,7 +538,13 @@ function CandlestickChartComponent({
     const rightOffset = dataWidth < chartWidth ? (chartWidth - dataWidth) / 2 : 0;
     chart.setOffsetRightDistance(rightOffset);
     return true;
-  }, [analysisVisibleEndTime, analysisVisibleStartTime, data]);
+  }, [
+    analysisVisibleCandleCount,
+    analysisVisibleEndTime,
+    analysisVisibleStartTime,
+    data.length,
+    hasAnalysisVisibleRange,
+  ]);
 
   const applyAnalysisViewport = useCallback(
     () => (analysisFitAll ? fitAnalysisWindow() : centerAnalysisWindow()),
@@ -583,6 +579,7 @@ function CandlestickChartComponent({
 
     // Register custom indicators before chart init to ensure klinecharts knows them
     registerCustomIndicators();
+    registerAnalysisBandLabelOverlay();
 
     const chart = init(containerRef.current, {
       styles: chartStylesForMode(theme, showLastPriceLine),
@@ -992,9 +989,7 @@ function CandlestickChartComponent({
     const chart = chartRef.current;
     if (!chart) return;
 
-    // Invalidate every pending label-layout callback before clearing the old layer.
-    // Counterfactual visibility can change while a viewport callback is queued; without
-    // this revision guard, that stale callback can put already-hidden purple labels back.
+    // Invalidate pending native-axis retries before clearing the old layer.
     const runId = ++analysisOverlayRunRef.current;
 
     for (const overlayId of analysisOverlayIdsRef.current) {
@@ -1011,8 +1006,6 @@ function CandlestickChartComponent({
       // markers, vertical lines and bounded price lines together.
       chart.removeOverlay({ groupId: ANALYSIS_ANNOTATION_GROUP_ID });
     } catch {}
-    setAnalysisFloatingLabels([]);
-
     if (!analysisAnnotations || data.length === 0) return;
 
     const nextOverlayIds: string[] = [];
@@ -1025,12 +1018,13 @@ function CandlestickChartComponent({
         groupId: ANALYSIS_ANNOTATION_GROUP_ID,
         paneId: "candle_pane",
       } as OverlayCreate);
-      nextOverlayIds.push(typeof createdId === "string" ? createdId : id);
+      const overlayId = typeof createdId === "string" ? createdId : id;
+      nextOverlayIds.push(overlayId);
+      return overlayId;
     };
 
     // Use the chart engine's committed data list as the single time-coordinate
-    // authority. Native overlays and HTML labels now bind to the exact same candle
-    // timestamps even after a long historical snapshot is replaced asynchronously.
+    // authority. Every line, marker and label binds to these exact timestamps.
     const nativeData = chart.getDataList();
     const propTimeAxisSig = data.map(item => item.time).join(",");
     const nativeTimeAxisSig = nativeData.map(item => item.timestamp).join(",");
@@ -1092,18 +1086,6 @@ function CandlestickChartComponent({
         .filter((marker) => !!marker.label)
         .map((marker) => marker.time),
     );
-    const labelXForTime = (time: number) => {
-      try {
-        const coordinate = chart.convertToPixel(
-          { timestamp: time, value: lastValue },
-          { paneId: "candle_pane" },
-        );
-        const point = Array.isArray(coordinate) ? coordinate[0] : coordinate;
-        return typeof point?.x === "number" && Number.isFinite(point.x) ? point.x : undefined;
-      } catch {
-        return undefined;
-      }
-    };
     const floatingLabelKeys = new Set<string>();
     const addFloatingLabel = (
       id: string,
@@ -1126,64 +1108,6 @@ function CandlestickChartComponent({
         emphasis,
       });
     };
-    let floatingLabelFrame: number | null = null;
-    let floatingLabelTrackingFrame: number | null = null;
-    let floatingLabelTrackingUntil = 0;
-    let lastFloatingLabelSignature = "";
-    const runFloatingLabelLayout = () => {
-      if (analysisOverlayRunRef.current !== runId) return;
-      const chartSize = chart.getSize?.();
-      const width = analysisViewportWidth || containerRef.current?.clientWidth || chartSize?.width || 0;
-      const projectedCandidates = floatingLabelCandidates.map((candidate) => ({
-        ...candidate,
-        x: labelXForTime(candidate.time),
-      }));
-      const nextLabels = layoutAnalysisFloatingLabels(projectedCandidates, {
-        minTime,
-        maxTime,
-        width,
-      });
-      const nextSignature = nextLabels
-        .map(label => `${label.id}:${label.left.toFixed(2)}:${label.top}:${label.width}`)
-        .join("|");
-      if (nextSignature === lastFloatingLabelSignature) return;
-      lastFloatingLabelSignature = nextSignature;
-      setAnalysisFloatingLabels(nextLabels);
-    };
-    const scheduleFloatingLabelLayout = () => {
-      if (typeof window === "undefined" || typeof window.requestAnimationFrame !== "function") {
-        runFloatingLabelLayout();
-        return;
-      }
-      if (floatingLabelFrame != null) {
-        window.cancelAnimationFrame(floatingLabelFrame);
-      }
-      floatingLabelFrame = window.requestAnimationFrame(() => {
-        floatingLabelFrame = null;
-        if (analysisOverlayRunRef.current !== runId) return;
-        runFloatingLabelLayout();
-      });
-    };
-    const trackFloatingLabels = (timestamp: number) => {
-      floatingLabelTrackingFrame = null;
-      if (analysisOverlayRunRef.current !== runId) return;
-      runFloatingLabelLayout();
-      if (timestamp < floatingLabelTrackingUntil) {
-        floatingLabelTrackingFrame = window.requestAnimationFrame(trackFloatingLabels);
-      }
-    };
-    const trackFloatingLabelsThroughViewportChange = (durationMs = 420) => {
-      if (typeof window === "undefined" || typeof window.requestAnimationFrame !== "function") {
-        runFloatingLabelLayout();
-        return;
-      }
-      const now = typeof performance !== "undefined" ? performance.now() : Date.now();
-      floatingLabelTrackingUntil = Math.max(floatingLabelTrackingUntil, now + durationMs);
-      if (floatingLabelTrackingFrame == null) {
-        floatingLabelTrackingFrame = window.requestAnimationFrame(trackFloatingLabels);
-      }
-    };
-
     const timePriceEventVerticalKeys = new Set<string>();
     for (const line of analysisAnnotations.priceLines ?? []) {
       if (!Number.isFinite(line.price)) continue;
@@ -1351,53 +1275,32 @@ function CandlestickChartComponent({
         },
       } as OverlayCreate);
     }
-    scheduleFloatingLabelLayout();
-    const viewportActions = [ActionType.OnDataReady, ActionType.OnScroll, ActionType.OnZoom, ActionType.OnVisibleRangeChange];
-    const syncFloatingLabelsWithChart = () => trackFloatingLabelsThroughViewportChange();
-    for (const action of viewportActions) {
-      chart.subscribeAction(action, syncFloatingLabelsWithChart);
+    if (floatingLabelCandidates.length > 0) {
+      createAnalysisOverlay("band-labels", {
+        name: ANALYSIS_BAND_LABEL_OVERLAY,
+        points: floatingLabelCandidates.map(label => ({
+          timestamp: label.time,
+          value: lastValue,
+        })),
+        lock: true,
+        zLevel: 20,
+        extendData: {
+          labels: floatingLabelCandidates,
+          theme,
+        } satisfies AnalysisBandLabelOverlayData,
+      } as OverlayCreate);
     }
-    // KlineCharts can emit scroll/zoom actions before a dense historical time scale
-    // finishes recalculating. Track through the whole pointer/wheel gesture as a DOM
-    // fallback so the HTML labels use the same frame-by-frame timestamp projection as
-    // native candles and overlays, even for old 51x snapshots.
-    const chartContainer = containerRef.current;
-    const handleViewportPointerDown = () => trackFloatingLabelsThroughViewportChange(520);
-    const handleViewportPointerMove = (event: PointerEvent) => {
-      if (event.buttons !== 0) trackFloatingLabelsThroughViewportChange(520);
-    };
-    const handleViewportWheel = () => trackFloatingLabelsThroughViewportChange(520);
-    chartContainer?.addEventListener("pointerdown", handleViewportPointerDown, { passive: true });
-    chartContainer?.addEventListener("pointermove", handleViewportPointerMove, { passive: true });
-    chartContainer?.addEventListener("wheel", handleViewportWheel, { passive: true });
     analysisOverlayIdsRef.current = nextOverlayIds;
 
     return () => {
-      for (const action of viewportActions) {
-        try {
-          chart.unsubscribeAction(action, syncFloatingLabelsWithChart);
-        } catch {
-          // The chart can be disposed before React tears this effect down.
-        }
-      }
-      chartContainer?.removeEventListener("pointerdown", handleViewportPointerDown);
-      chartContainer?.removeEventListener("pointermove", handleViewportPointerMove);
-      chartContainer?.removeEventListener("wheel", handleViewportWheel);
-      if (floatingLabelFrame != null && typeof window !== "undefined" && typeof window.cancelAnimationFrame === "function") {
-        window.cancelAnimationFrame(floatingLabelFrame);
-      }
-      if (floatingLabelTrackingFrame != null && typeof window !== "undefined" && typeof window.cancelAnimationFrame === "function") {
-        window.cancelAnimationFrame(floatingLabelTrackingFrame);
-      }
       if (analysisOverlayRunRef.current === runId) {
         try {
           chart.removeOverlay({ groupId: ANALYSIS_ANNOTATION_GROUP_ID });
         } catch {}
         analysisOverlayIdsRef.current = [];
-        setAnalysisFloatingLabels([]);
       }
     };
-  }, [analysisAnnotations, data, pricePrecision, analysisViewportWidth, analysisDataReadyRevision]);
+  }, [analysisAnnotations, data, pricePrecision, analysisDataReadyRevision, theme]);
 
   // Campaign What-if: draggable horizontal price lines and vertical timing lines.
   // Drag a price line up/down or a time line left/right, then report the new value on release.
@@ -1715,47 +1618,6 @@ function CandlestickChartComponent({
             cursor: activeDrawingTool || pickMode ? "crosshair" : "default",
           }}
         />
-
-        {analysisMode && analysisFloatingLabels.length > 0 && (
-          <div
-            className="pointer-events-none absolute inset-y-0 right-0 z-[8] overflow-visible"
-            style={{ left: analysisMode ? 0 : 34 }}
-          >
-            {analysisFloatingLabels.map((label) => {
-              const emphasized = label.emphasis === "main-add";
-              const labelColor = emphasized ? strengthenAnalysisColor(label.color) : label.color;
-              return (
-                <div
-                  key={label.id}
-                  data-analysis-label={label.id}
-                  className="absolute flex items-center justify-center rounded-[3px] border"
-                  style={{
-                    left: label.left,
-                    top: label.top,
-                    width: label.width,
-                    height: FLOATING_LABEL_HEIGHT,
-                    color: labelColor,
-                    borderColor: labelColor,
-                    backgroundColor: theme === "light"
-                      ? emphasized ? "rgba(255, 255, 255, 0.46)" : "rgba(255, 255, 255, 0.28)"
-                      : emphasized ? "rgba(11, 14, 17, 0.36)" : "rgba(11, 14, 17, 0.22)",
-                    boxShadow: emphasized
-                      ? (theme === "light" ? "0 1px 2px rgba(15, 23, 42, 0.08)" : "0 1px 2px rgba(0, 0, 0, 0.18)")
-                      : "none",
-                    fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
-                    fontSize: emphasized ? 8 : 7,
-                    fontWeight: emphasized ? 800 : 600,
-                    lineHeight: emphasized ? "10px" : "9px",
-                    opacity: emphasized ? 0.96 : 0.76,
-                    whiteSpace: "nowrap",
-                  }}
-                >
-                  {label.text}
-                </div>
-              );
-            })}
-          </div>
-        )}
 
         {!analysisMode && (
           <DrawingToolbar
