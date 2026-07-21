@@ -2,19 +2,34 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CampaignBoardExportInput } from '@/lib/campaignLegsPngExport';
-import type { TradeCampaign, TradeJournal } from '@/types/journal';
+import type { CampaignCounterfactual, TradeCampaign, TradeJournal } from '@/types/journal';
 import JournalCampaignDetailPage from '../JournalCampaignDetailPage';
 
 const scrollToMock = vi.fn();
-const { exportCampaignBoardPngMock, replayVisibleRanges } = vi.hoisted(() => ({
+const {
+  exportCampaignBoardPngMock,
+  listCounterfactualsMock,
+  replayVisibleRanges,
+  replayAnnotationSnapshots,
+} = vi.hoisted(() => ({
   exportCampaignBoardPngMock: vi.fn(async (_input: CampaignBoardExportInput) => 'BTCUSDT campaign.png'),
+  listCounterfactualsMock: vi.fn(async () => [] as CampaignCounterfactual[]),
   replayVisibleRanges: [] as Array<{ start: number; end: number }>,
+  replayAnnotationSnapshots: [] as Array<{
+    markerLabels: string[];
+    priceLineTitles: string[];
+    verticalColors: string[];
+  }>,
 }));
 
 beforeEach(() => {
+  window.localStorage.clear();
   scrollToMock.mockClear();
   exportCampaignBoardPngMock.mockClear();
+  listCounterfactualsMock.mockReset();
+  listCounterfactualsMock.mockResolvedValue([]);
   replayVisibleRanges.length = 0;
+  replayAnnotationSnapshots.length = 0;
   Object.defineProperty(window, 'scrollTo', {
     configurable: true,
     writable: true,
@@ -157,16 +172,27 @@ vi.mock('@/lib/journalApi', () => ({
   getCampaignFullData: vi.fn(async (id: string) => detailsById[id]),
   listAllCampaigns: vi.fn(async () => campaigns),
   listVisibleCampaigns: vi.fn(async () => campaigns),
-  listCounterfactuals: vi.fn(async () => []),
+  listCounterfactuals: listCounterfactualsMock,
   listCampaignComments: vi.fn(async () => []),
   hasMutualFollow: vi.fn(async () => true),
 }));
 
 vi.mock('@/components/journal/ReplayKlineChart', () => ({
-  ReplayKlineChart: (props: { initialVisibleStartTime: number; initialVisibleEndTime: number }) => {
+  ReplayKlineChart: (props: {
+    initialVisibleStartTime: number;
+    initialVisibleEndTime: number;
+    markers?: Array<{ label?: string }>;
+    timeBoundPriceLines?: Array<{ title?: string }>;
+    verticalLines?: Array<{ color: string }>;
+  }) => {
     replayVisibleRanges.push({
       start: props.initialVisibleStartTime,
       end: props.initialVisibleEndTime,
+    });
+    replayAnnotationSnapshots.push({
+      markerLabels: (props.markers ?? []).map(marker => marker.label ?? ''),
+      priceLineTitles: (props.timeBoundPriceLines ?? []).map(line => line.title ?? ''),
+      verticalColors: (props.verticalLines ?? []).map(line => line.color),
     });
     return <div data-testid="campaign-chart" />;
   },
@@ -242,6 +268,100 @@ describe('JournalCampaignDetailPage metrics', () => {
     expect(screen.getByTestId('list-location-probe')).toHaveTextContent(listLocation);
   });
 
+  it('一键隐藏会同时移除反事实 marker、水平线和竖线', async () => {
+    const branch = {
+      id: 'counterfactual-1',
+      user_id: 'user-1',
+      campaign_id: 'winner',
+      label: '测试反事实',
+      branch_kind: 'custom_what_if',
+      source_deduction_id: null,
+      params: {
+        entry: {
+          time: '2026-01-01T00:10:00.000Z',
+          price: 100,
+          size_usdt: 1_000,
+          direction: 'long',
+          leverage: 1,
+        },
+        hedge_a: { offset_pct: 2, size_pct: 50 },
+        hedge_b: { offset_pct: 4, size_pct: 50 },
+        mirror_tp: { offset_pct: 2, size_pct: 50 },
+        rolling: {
+          enabled: false,
+          trigger_rise_pct: 0,
+          min_interval_minutes: 5,
+          new_hedge_offset_pct: 2,
+          rolling_hedge_size_pct: 50,
+        },
+        exit_rule: 'manual_only',
+      },
+      result: {
+        final_realized_pnl: 10,
+        final_r_multiple: 1,
+        peak_unrealized_pnl: 20,
+        peak_drawdown: 5,
+        profit_capture_ratio: 50,
+        events: [
+          {
+            timestamp: '2026-01-01T00:10:00.000Z',
+            event_type: 'main_opened',
+            leg_role: 'main_open',
+            price: 100,
+            size_usdt: 1_000,
+            notes: '',
+          },
+          {
+            timestamp: '2026-01-01T00:20:00.000Z',
+            event_type: 'hedge_triggered',
+            leg_role: 'hedge_initial_a',
+            price: 98,
+            size_usdt: 500,
+            notes: '',
+          },
+        ],
+        legs_summary: [{
+          leg_role: 'hedge_initial_a',
+          placed_at: '2026-01-01T00:10:00.000Z',
+          trigger_price: 98,
+          status: 'filled',
+          triggered_at: '2026-01-01T00:20:00.000Z',
+          realized_pnl_usdt: 0,
+        }],
+        state_segments: [],
+        sop_score: 100,
+      },
+      created_at: '2026-01-01T02:00:00.000Z',
+    } satisfies CampaignCounterfactual;
+    listCounterfactualsMock.mockResolvedValue([branch]);
+
+    render(
+      <MemoryRouter initialEntries={['/journal/campaigns/winner']}>
+        <Routes>
+          <Route path="/journal/campaigns/:id" element={<JournalCampaignDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    const hideButton = await screen.findByRole('button', { name: '隐藏测试反事实' });
+    await waitFor(() => {
+      const latest = replayAnnotationSnapshots.at(-1);
+      expect(latest?.markerLabels.some(label => label.startsWith('CF-'))).toBe(true);
+      expect(latest?.priceLineTitles.some(title => title.startsWith('CF-'))).toBe(true);
+      expect(latest?.verticalColors.some(color => color.includes('176,128,255'))).toBe(true);
+    });
+
+    fireEvent.click(hideButton);
+
+    await waitFor(() => {
+      const latest = replayAnnotationSnapshots.at(-1);
+      expect(latest?.markerLabels.some(label => label.startsWith('CF-'))).toBe(false);
+      expect(latest?.priceLineTitles.some(title => title.startsWith('CF-'))).toBe(false);
+      expect(latest?.verticalColors.some(color => color.includes('176,128,255'))).toBe(false);
+    });
+    expect(screen.getByRole('button', { name: '显示测试反事实' })).toHaveAttribute('aria-pressed', 'false');
+  });
+
   it('shows the same payoff, opportunity-quality and expectancy metrics as the campaign list', async () => {
     render(
       <MemoryRouter initialEntries={['/journal/campaigns/winner']}>
@@ -261,8 +381,8 @@ describe('JournalCampaignDetailPage metrics', () => {
 
     for (const label of [
       '已实现 P&L',
+      '杠杆倍数',
       '峰值浮盈',
-      '最大回撤',
       '最大预期亏损',
       '预期最大回撤百分比',
       '盈亏比',
@@ -272,6 +392,7 @@ describe('JournalCampaignDetailPage metrics', () => {
     ]) {
       expect(screen.getByRole('button', { name: `${label}说明` })).toBeInTheDocument();
     }
+    expect(screen.queryByRole('button', { name: '最大回撤说明' })).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: '机会质量说明' }));
     expect(await screen.findByText(/Q = 实际盈亏比 b ÷ 预期最大回撤百分点 d/)).toBeInTheDocument();
@@ -279,10 +400,11 @@ describe('JournalCampaignDetailPage metrics', () => {
     fireEvent.click(screen.getByRole('button', { name: 'PNG' }));
     await waitFor(() => expect(exportCampaignBoardPngMock).toHaveBeenCalledTimes(1));
     const exportInput = exportCampaignBoardPngMock.mock.calls[0][0];
+    expect(exportInput.chartInterval).toBe('1m');
     expect(exportInput.pnlOverview.items.map(item => item.label)).toEqual([
       '已实现 P&L',
+      '杠杆倍数',
       '峰值浮盈',
-      '最大回撤',
       '最大预期亏损',
       '预期最大回撤百分比',
       '盈亏比',

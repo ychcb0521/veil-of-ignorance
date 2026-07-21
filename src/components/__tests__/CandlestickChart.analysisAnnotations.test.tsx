@@ -174,6 +174,66 @@ describe('CandlestickChart analysis annotations', () => {
     expect(mocks.chart.subscribeAction).toHaveBeenCalledWith('onVisibleRangeChange', expect.any(Function));
   });
 
+  it('隐藏反事实层时按组彻底清除紫色原生图层和浮动标签', async () => {
+    const data = [candle(1000, 1), candle(2000, 1.2)];
+    const { rerender } = render(
+      <CandlestickChart
+        data={data}
+        symbol="BTCUSDT"
+        rawSymbol="BTCUSDT"
+        analysisMode
+        analysisAnnotations={{
+          markers: [{
+            time: 1000,
+            price: 1,
+            color: '#B080FF',
+            shape: 'triangle-up',
+            label: 'CF-M',
+          }],
+          timeBoundPriceLines: [{
+            startTime: 1000,
+            endTime: 2000,
+            price: 1.1,
+            color: '#B080FF',
+            title: 'CF-Ha',
+          }],
+          verticalLines: [{
+            time: 1000,
+            color: 'rgba(176,128,255,0.38)',
+          }],
+        }}
+      />,
+    );
+
+    await waitFor(() => {
+      const labels = Array.from(document.querySelectorAll('[data-analysis-label]')).map(label => label.textContent);
+      expect(labels.some(label => label?.includes('CF-'))).toBe(true);
+    });
+    expect(mocks.chart.createOverlay.mock.calls.map(([overlay]) => overlay)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ groupId: 'analysis_annotations' }),
+      ]),
+    );
+
+    mocks.chart.createOverlay.mockClear();
+    mocks.chart.removeOverlay.mockClear();
+    rerender(
+      <CandlestickChart
+        data={data}
+        symbol="BTCUSDT"
+        rawSymbol="BTCUSDT"
+        analysisMode
+        analysisAnnotations={{}}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(document.querySelectorAll('[data-analysis-label]')).toHaveLength(0);
+    });
+    expect(mocks.chart.removeOverlay).toHaveBeenCalledWith({ groupId: 'analysis_annotations' });
+    expect(mocks.chart.createOverlay).not.toHaveBeenCalled();
+  });
+
   it('同一时间多个标记仍按真实价格落点，不为避让改动 marker value', async () => {
     render(
       <CandlestickChart

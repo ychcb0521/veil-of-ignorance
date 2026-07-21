@@ -1,9 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import type { TradeCampaign } from '@/types/journal';
+import type { TradeCampaign, TradeJournal } from '@/types/journal';
+import type { TradeRecord } from '@/types/trading';
 import {
   computeCampaignExpectancies,
   formatArithmeticExpectancy,
+  formatCampaignLeverage,
   formatGeometricExpectancy,
+  resolveCampaignMainLeverage,
   resolveCampaignOpportunityQuality,
 } from '../campaignMetrics';
 
@@ -37,6 +40,33 @@ function campaign(overrides: Partial<TradeCampaign> = {}): TradeCampaign {
 }
 
 describe('campaign metrics shared by list and detail pages', () => {
+  it('resolves main leverage from live and historical campaign sources', () => {
+    const mainLeg = {
+      id: 'main-leg',
+      leg_role: 'main_open',
+      trade_record_id: 'record-1',
+      leverage: 6,
+    } as TradeJournal;
+    const linkedRecord = { id: 'record-1', leverage: 7 } as TradeRecord;
+
+    expect(resolveCampaignMainLeverage(campaign(), [mainLeg], [linkedRecord])).toBe(6);
+    expect(resolveCampaignMainLeverage(
+      campaign({ initial_leverage: null }),
+      [{ ...mainLeg, leverage: null }],
+      [linkedRecord],
+    )).toBe(7);
+    expect(resolveCampaignMainLeverage(campaign({
+      initial_leverage: null,
+      actual_evolution: [{
+        event_type: 'main_opened',
+        leverage: 5,
+      } as TradeCampaign['actual_evolution'][number]],
+    }), [], [])).toBe(5);
+    expect(formatCampaignLeverage(6)).toBe('6x');
+    expect(formatCampaignLeverage(6.5)).toBe('6.5x');
+    expect(formatCampaignLeverage(null)).toBe('—');
+  });
+
   it('机会质量取盈亏比绝对值：亏损战役也是正的量级', () => {
     const value = resolveCampaignOpportunityQuality(
       campaign({ status: 'closed_loss', final_realized_pnl: -80 }),

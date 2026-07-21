@@ -1,13 +1,12 @@
-import { type ChangeEvent, type ReactNode, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { type ReactNode, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, Download, Eye, EyeOff, Info, Layers, MessageSquare, Send, Sparkles, Trash2, UserPlus } from 'lucide-react';
+import { ArrowLeft, Download, Eye, EyeOff, Info, Layers, Sparkles, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Textarea } from '@/components/ui/textarea';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { type ChartMarker, type TimeBoundPriceLine, type VerticalLine } from '@/components/journal/ReplayCandleChart';
 import { ReplayKlineChart } from '@/components/journal/ReplayKlineChart';
@@ -38,7 +37,9 @@ import {
 import {
   computeCampaignExpectancies,
   formatArithmeticExpectancy,
+  formatCampaignLeverage,
   formatGeometricExpectancy,
+  resolveCampaignMainLeverage,
   resolveCampaignOpportunityQuality,
 } from '@/lib/campaignMetrics';
 import { buildCampaignChartContentTimeSpan, pickCampaignOverviewInterval, type CampaignChartInterval } from '@/lib/campaignChartContentSpan';
@@ -55,15 +56,12 @@ import { campaignOperationTime, buildTradeRecordLookup, journalSimulatedCloseTim
 import {
   deleteCounterfactual,
   detachCampaignLegFromCampaign,
-  createCampaignComment,
-  followAccount,
   getCampaignFullData,
   hasMutualFollow,
   listAllCampaigns,
   saveCampaignDeviationNotes,
   syncCampaignDeviationRulesToChecklist,
   type CampaignDeviationNote,
-  listCampaignComments,
   listCounterfactuals,
   listVisibleCampaigns,
   runAndPersistCustomCounterfactual,
@@ -81,7 +79,6 @@ import { buildCampaignReverseOrderPriceLines, isDisplayableReverseHedgeOrder } f
 import type {
   CampaignCounterfactual,
   CampaignCounterfactualParams,
-  CampaignComment,
   TradeCampaign,
   TradeJournal,
 } from '@/types/journal';
@@ -177,10 +174,6 @@ function fmtDuration(start: string, end: string | null) {
   const hours = Math.floor(mins / 60);
   const rest = mins % 60;
   return `${hours} 小时 ${rest} 分钟`;
-}
-
-function shortAccountId(value: string) {
-  return value.length <= 12 ? value : `${value.slice(0, 6)}…${value.slice(-4)}`;
 }
 
 function safeTimeMs(value: string | number | null | undefined): number | null {
@@ -518,13 +511,6 @@ export default function JournalCampaignDetailPage() {
   const [legsExporting, setLegsExporting] = useState(false);
   const campaignChartExportRef = useRef<HTMLDivElement | null>(null);
   const [isOwner, setIsOwner] = useState(true);
-  const [comments, setComments] = useState<CampaignComment[]>([]);
-  const [commentsLoading, setCommentsLoading] = useState(false);
-  const [commentText, setCommentText] = useState('');
-  const [commentScore, setCommentScore] = useState(3);
-  const [commentSaving, setCommentSaving] = useState(false);
-  const [followeeId, setFolloweeId] = useState('');
-  const [following, setFollowing] = useState(false);
   const [campaignPerformance, setCampaignPerformance] = useState<CampaignPerformanceSummary | null>(null);
   const [campaignPerformanceLoading, setCampaignPerformanceLoading] = useState(false);
   const [campaignPerformanceError, setCampaignPerformanceError] = useState<string | null>(null);
@@ -562,13 +548,6 @@ export default function JournalCampaignDetailPage() {
         setReverseHedgeOrders(full.reverseHedgeOrders);
         setCounterfactuals(savedCounterfactuals);
         setSelectedCounterfactualId(prev => prev ?? savedCounterfactuals[0]?.id ?? null);
-        setCommentsLoading(true);
-        try {
-          const nextComments = await listCampaignComments(full.campaign.id);
-          if (!cancelled) setComments(nextComments);
-        } finally {
-          if (!cancelled) setCommentsLoading(false);
-        }
       } catch (error) {
         if (!cancelled) {
           toast.error(error instanceof Error ? error.message : String(error));
@@ -802,6 +781,7 @@ export default function JournalCampaignDetailPage() {
     const geometricExpectancy = campaignMetricValues?.geometricExpectancy ?? null;
     const expectedDrawdownPct = campaignMetricValues?.initialExpectedMaxDrawdownPct ?? 0;
     const expectedWinRate = campaignPerformance?.expectedWinRate ?? null;
+    const mainLeverage = resolveCampaignMainLeverage(campaign, legs, tradeRecords);
 
     return [
       {
@@ -818,6 +798,18 @@ export default function JournalCampaignDetailPage() {
         ),
       },
       {
+        key: 'mainLeverage',
+        label: '杠杆倍数',
+        value: formatCampaignLeverage(mainLeverage),
+        help: (
+          <>
+            <p>本场战役主力头仓开仓时使用的杠杆倍数，不把后续加仓或对冲腿的杠杆混入。</p>
+            <p>历史战役依次从主力 Leg、关联成交记录、战役初始字段和主力开仓事件回填。</p>
+            <p>杠杆影响保证金占用与 ROE；名义仓位已经确定时，不再额外放大绝对盈亏。</p>
+          </>
+        ),
+      },
+      {
         key: 'peakUnrealizedPnl',
         label: '峰值浮盈',
         value: accuracy.campaign_max_profit_real.toFixed(2),
@@ -825,17 +817,6 @@ export default function JournalCampaignDetailPage() {
           <>
             <p>战役期间同一时刻所有活跃 Legs 合计浮动盈亏的最高值，用来观察这场战役曾经提供过多厚的浮盈垫。</p>
             <p>按当前 K 线粒度的收盘价采样，不等同于逐笔成交的瞬时最高值。</p>
-          </>
-        ),
-      },
-      {
-        key: 'maxDrawdown',
-        label: '最大回撤',
-        value: accuracy.campaign_max_drawdown_real.toFixed(2),
-        help: (
-          <>
-            <p>战役期间所有活跃 Legs 合计浮盈相对于零盈亏线的最深浮亏绝对值。</p>
-            <p>这里表示「最深浮亏」，不是从峰值浮盈到后续低点的峰谷回撤。</p>
           </>
         ),
       },
@@ -929,7 +910,7 @@ export default function JournalCampaignDetailPage() {
         ),
       },
     ];
-  }, [accuracy, campaign, campaignMetricValues, campaignPerformance?.expectedWinRate]);
+  }, [accuracy, campaign, campaignMetricValues, campaignPerformance?.expectedWinRate, legs, tradeRecords]);
   const campaignPnlOverviewNote = useMemo(() => {
     const expectationNote = campaignPerformanceLoading
       ? '正在按同一账户的有效战役口径计算期望…'
@@ -1163,7 +1144,6 @@ export default function JournalCampaignDetailPage() {
   const selectedCounterfactualDelta = selectedCounterfactual
     ? selectedCounterfactual.result.final_realized_pnl - actualPnl
     : null;
-  const canLeaveExternalComment = !isOwner;
 
   const refreshCampaign = async () => {
     const full = await getCampaignFullData(campaign.id);
@@ -1178,43 +1158,6 @@ export default function JournalCampaignDetailPage() {
     const next = await listCounterfactuals(campaign.id);
     setCounterfactuals(next);
     setSelectedCounterfactualId(keepSelectionId ?? next[0]?.id ?? null);
-  };
-
-  const handleFollowAccount = async () => {
-    const target = followeeId.trim();
-    if (!target || target === user?.id) {
-      toast.error('请输入对方的用户 ID');
-      return;
-    }
-    try {
-      setFollowing(true);
-      await followAccount(target);
-      setFolloweeId('');
-      toast.success('已关注。双方互关后，可查看并评价彼此的交易战役');
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : String(error));
-    } finally {
-      setFollowing(false);
-    }
-  };
-
-  const handleCreateComment = async () => {
-    if (!commentText.trim()) return;
-    try {
-      setCommentSaving(true);
-      const next = await createCampaignComment({
-        campaignId: campaign.id,
-        body: commentText.trim(),
-        believabilityScore: commentScore,
-      });
-      setComments(prev => [next, ...prev]);
-      setCommentText('');
-      toast.success('可信度评价已写入');
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : String(error));
-    } finally {
-      setCommentSaving(false);
-    }
   };
 
   const handleRunWhatIf = async (label: string, params: CampaignCounterfactualParams) => {
@@ -1307,6 +1250,7 @@ export default function JournalCampaignDetailPage() {
         reverseHedgeOrders: visibleReverseHedgeOrders,
         legExitPriceCorrections,
         chartElement: campaignChartExportRef.current,
+        chartInterval: interval,
         pnlOverview: {
           items: campaignPnlOverviewItems.map(({ key, label, value, color }) => ({
             key,
@@ -1424,104 +1368,6 @@ export default function JournalCampaignDetailPage() {
             </div>
           </div>
 
-        </section>
-
-        <section className="grid grid-cols-1 xl:grid-cols-[1fr_420px] gap-4">
-          <div className="bg-card border border-border rounded p-4 space-y-3">
-            <div className="flex items-center gap-2 text-[13px] font-medium">
-              <MessageSquare className="w-4 h-4 text-muted-foreground" />
-              可信度加权外部校验
-            </div>
-            {canLeaveExternalComment && (
-              <div className="rounded border border-border bg-background/60 p-3 space-y-3">
-                <div className="grid grid-cols-1 md:grid-cols-[1fr_140px] gap-2">
-                  <Textarea
-                    value={commentText}
-                    onChange={(event: ChangeEvent<HTMLTextAreaElement>) => setCommentText(event.target.value)}
-                    placeholder="按当时信息评价这场战役的决策质量、证伪条件和风险控制。"
-                    className="min-h-[92px] text-[12px]"
-                  />
-                  <div className="space-y-2">
-                    <label className="text-[11px] text-muted-foreground">可信度权重</label>
-                    <select
-                      value={commentScore}
-                      onChange={(event: ChangeEvent<HTMLSelectElement>) => setCommentScore(Number(event.target.value))}
-                      className="h-9 w-full rounded border border-border bg-background px-2 text-[12px]"
-                    >
-                      {[1, 2, 3, 4, 5].map(score => (
-                        <option key={score} value={score}>{score}</option>
-                      ))}
-                    </select>
-                    <Button
-                      disabled={!commentText.trim() || commentSaving}
-                      onClick={handleCreateComment}
-                      className="w-full h-9 bg-[#F0B90B] text-black hover:bg-[#F0B90B]/90 text-[12px]"
-                    >
-                      <Send className="w-3.5 h-3.5 mr-1.5" />
-                      {commentSaving ? '写入中…' : '留言评价'}
-                    </Button>
-                  </div>
-                </div>
-              </div>
-            )}
-            <div className="space-y-2">
-              {commentsLoading ? (
-                <div className="text-[12px] text-muted-foreground">加载留言中…</div>
-              ) : comments.length === 0 ? (
-                <div className="rounded border border-border bg-background/50 px-3 py-4 text-[12px] text-muted-foreground">
-                  暂无互关账户评价。
-                </div>
-              ) : (
-                comments.map(comment => (
-                  <div key={comment.id} className="rounded border border-border bg-background/60 px-3 py-2">
-                    <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
-                      <span className="font-mono">{shortAccountId(comment.user_id)}</span>
-                      <span>可信度 {comment.believability_score}/5</span>
-                      <span className="ml-auto font-mono">{fmtMdHm(comment.created_at)}</span>
-                    </div>
-                    <div className="mt-1 text-[12px] leading-relaxed whitespace-pre-wrap">{comment.body}</div>
-                  </div>
-                ))
-              )}
-            </div>
-          </div>
-          <div className="bg-card border border-border rounded p-4 space-y-3">
-            <div className="flex items-center gap-2 text-[13px] font-medium">
-              <UserPlus className="w-4 h-4 text-muted-foreground" />
-              互关账户
-            </div>
-            {isOwner ? (
-              <>
-                <div className="rounded border border-border bg-background/60 px-3 py-2 text-[12px]">
-                  <div className="text-muted-foreground">你的用户 ID</div>
-                  <div className="mt-1 font-mono break-all">{user?.id}</div>
-                </div>
-                <div className="flex gap-2">
-                  <Input
-                    value={followeeId}
-                    onChange={(event: ChangeEvent<HTMLInputElement>) => setFolloweeId(event.target.value)}
-                    placeholder="输入对方用户 ID"
-                    className="h-9 text-[12px]"
-                  />
-                  <Button
-                    variant="outline"
-                    className="h-9 shrink-0 text-[12px]"
-                    disabled={following || !followeeId.trim()}
-                    onClick={handleFollowAccount}
-                  >
-                    {following ? '关注中…' : '关注'}
-                  </Button>
-                </div>
-                <div className="text-[11px] text-muted-foreground leading-relaxed">
-                  双方都关注后，彼此可打开对方战役详情页并留下带权重的外部校验评价。
-                </div>
-              </>
-            ) : (
-              <div className="text-[12px] text-muted-foreground leading-relaxed">
-                你正在查看互关账户的交易战役。你的留言会作为外部校验进入这场战役的可信度加权记录。
-              </div>
-            )}
-          </div>
         </section>
 
         <section className="space-y-3">

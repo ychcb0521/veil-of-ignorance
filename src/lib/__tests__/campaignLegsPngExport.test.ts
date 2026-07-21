@@ -3,6 +3,7 @@ import {
   buildCampaignBoardOverview,
   buildCampaignLegsExportRows,
   campaignLegsExportCanvasHeight,
+  formatCampaignChartInterval,
   type CampaignBoardExportInput,
 } from '@/lib/campaignLegsPngExport';
 import type { TradeCampaign, TradeJournal } from '@/types/journal';
@@ -48,6 +49,7 @@ function input(): CampaignBoardExportInput {
     tradeRecords: [],
     reverseHedgeOrders: [],
     chartElement: null,
+    chartInterval: '5m',
     pnlOverview: {
       items: [
         { key: 'realizedPnl', label: '已实现 P&L', value: '3456.78 USDT', color: '#0ECB81' },
@@ -72,6 +74,7 @@ describe('campaign PNG overview', () => {
     const pnl = Object.fromEntries(overview.pnlItems.map(item => [item.label, item.value]));
 
     expect(metadata['操作时间']).not.toBe('—');
+    expect(metadata['K 线周期']).toBe('5分钟线');
     expect(metadata['方向 / 状态']).toBe('主多 / 盈利结束');
     expect(metadata['持续时间']).toBe('2 小时 30 分钟');
     expect(metadata['Legs 构成']).toBe('共 3 · 主仓 1 / 对冲 1 / TP 1 / 其他 0');
@@ -88,6 +91,13 @@ describe('campaign PNG overview', () => {
     expect(pnl['算术期望']).toBe('+0.18R');
     expect(pnl['几何期望']).toBe('+0.4%/笔');
     expect(overview.pnlNote).toContain('37 场有效战役');
+  });
+
+  it('将常用 K 线周期转换为完整的中文线型名称', () => {
+    expect(formatCampaignChartInterval('1m')).toBe('1分钟线');
+    expect(formatCampaignChartInterval('15m')).toBe('15分钟线');
+    expect(formatCampaignChartInterval('1h')).toBe('1小时线');
+    expect(formatCampaignChartInterval('1d')).toBe('日线');
   });
 
   it('亏损战役的盈亏比保留负号', () => {

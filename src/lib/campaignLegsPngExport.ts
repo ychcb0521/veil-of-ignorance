@@ -19,6 +19,7 @@ type ExportInput = {
 
 export type CampaignBoardExportInput = ExportInput & {
   chartElement: HTMLElement | null;
+  chartInterval: string;
   pnlOverview: {
     items: CampaignBoardPnlItem[];
     note?: string;
@@ -154,6 +155,19 @@ function campaignStatusLabel(status: TradeCampaign['status']): string {
   if (status === 'closed_breakeven') return '平盈结束';
   if (status === 'abandoned') return '已放弃';
   return '进行中';
+}
+
+export function formatCampaignChartInterval(interval: string): string {
+  const normalized = interval.trim();
+  const match = normalized.match(/^(\d+)([mhdwM])$/);
+  if (!match) return normalized || '—';
+  const amount = Number(match[1]);
+  const unit = match[2];
+  if (unit === 'm') return `${amount}分钟线`;
+  if (unit === 'h') return `${amount}小时线`;
+  if (unit === 'd') return amount === 1 ? '日线' : `${amount}日线`;
+  if (unit === 'w') return amount === 1 ? '周线' : `${amount}周线`;
+  return amount === 1 ? '月线' : `${amount}月线`;
 }
 
 function campaignLegCounts(legs: TradeJournal[]) {
@@ -538,9 +552,11 @@ export type CampaignBoardOverview = {
 export function buildCampaignBoardOverview(input: CampaignBoardExportInput): CampaignBoardOverview {
   const legCounts = campaignLegCounts(input.legs);
   const operationTime = campaignOperationTime(input.legs, input.tradeRecords);
+  const chartIntervalLabel = formatCampaignChartInterval(input.chartInterval);
   return {
     metadataItems: [
       { label: '操作时间', value: operationTime == null ? '—' : fmtClock(operationTime) },
+      { label: 'K 线周期', value: chartIntervalLabel },
       { label: '方向 / 状态', value: `${input.campaign.direction === 'main_long' ? '主多' : '主空'} / ${campaignStatusLabel(input.campaign.status)}` },
       { label: '战役开始', value: fmtClock(input.campaign.opened_at) },
       { label: '战役结束', value: fmtClock(input.campaign.closed_at) },
@@ -648,6 +664,7 @@ export async function exportCampaignLegsListPng(input: ExportInput): Promise<str
 
 export async function exportCampaignBoardPng(input: CampaignBoardExportInput): Promise<string> {
   const title = campaignKlineTitleName(input.campaign);
+  const chartIntervalLabel = formatCampaignChartInterval(input.chartInterval);
   const chart = captureCampaignChartCanvas(input.chartElement);
   const legs = buildCampaignLegsListCanvas(input, { includeHeader: false, scale: chart.scale });
   const overview = buildCampaignBoardOverview(input);
@@ -681,7 +698,7 @@ export async function exportCampaignBoardPng(input: CampaignBoardExportInput): P
   ctx.font = '600 12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace';
   ctx.fillStyle = '#64748B';
   ctx.fillText(
-    `编号 ${input.campaign.campaign_code} · 战役原数据 + 盈亏概览 + K 线盘面（当前视图）+ Legs 列表`,
+    `编号 ${input.campaign.campaign_code} · 周期 ${chartIntervalLabel} · 战役原数据 + 盈亏概览 + K 线盘面（当前视图）+ Legs 列表`,
     MARGIN_X,
     68,
     width - MARGIN_X * 2,
@@ -692,7 +709,7 @@ export async function exportCampaignBoardPng(input: CampaignBoardExportInput): P
   drawOverviewPanel(ctx, '盈亏概览', overview.pnlItems, overview.pnlNote, MARGIN_X + overviewWidth + overviewGap, y, overviewWidth, overviewHeight);
   y += overviewHeight + BOARD_SECTION_GAP;
 
-  drawSectionLabel(ctx, 'K 线盘面（当前视图）', MARGIN_X, y);
+  drawSectionLabel(ctx, `K 线盘面（${chartIntervalLabel} · 当前视图）`, MARGIN_X, y);
   y += BOARD_SECTION_LABEL_H;
   fillRoundedRect(ctx, MARGIN_X - 10, y - 10, chartDisplayWidth + 20, chartDisplayHeight + 20, 12, '#FFFFFF');
   strokeRoundedRect(ctx, MARGIN_X - 10, y - 10, chartDisplayWidth + 20, chartDisplayHeight + 20, 12, '#E5E7EB', 1);

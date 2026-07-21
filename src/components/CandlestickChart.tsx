@@ -81,6 +81,7 @@ const OVERLAY_INDICATOR_IDS = new Set([
 ]);
 
 const MAIN_ADD_MARKER_PATTERN = /^A\d+$/;
+const ANALYSIS_ANNOTATION_GROUP_ID = "analysis_annotations";
 
 const isMainAddLabel = (label?: string) => MAIN_ADD_MARKER_PATTERN.test(label?.trim() ?? "");
 
@@ -965,6 +966,11 @@ function CandlestickChartComponent({
     const chart = chartRef.current;
     if (!chart) return;
 
+    // Invalidate every pending label-layout callback before clearing the old layer.
+    // Counterfactual visibility can change while a viewport callback is queued; without
+    // this revision guard, that stale callback can put already-hidden purple labels back.
+    const runId = ++analysisOverlayRunRef.current;
+
     for (const overlayId of analysisOverlayIdsRef.current) {
       try {
         chart.removeOverlay(overlayId);
@@ -974,23 +980,26 @@ function CandlestickChartComponent({
     }
     analysisOverlayIdsRef.current = [];
     try {
-      chart.removeOverlay("analysis_annotations");
+      // IDs returned by KlineCharts are not guaranteed to match caller-supplied IDs in
+      // every reset path. Group removal is the authoritative, atomic cleanup and removes
+      // markers, vertical lines and bounded price lines together.
+      chart.removeOverlay({ groupId: ANALYSIS_ANNOTATION_GROUP_ID });
     } catch {}
     setAnalysisFloatingLabels([]);
 
     if (!analysisAnnotations || data.length === 0) return;
 
-    const runId = ++analysisOverlayRunRef.current;
     const nextOverlayIds: string[] = [];
     const floatingLabelCandidates: AnalysisFloatingLabelCandidate[] = [];
     const createAnalysisOverlay = (key: string, overlay: OverlayCreate) => {
       const id = `analysis_annotations_${runId}_${nextOverlayIds.length}_${key}`;
-      chart.createOverlay({
+      const createdId = chart.createOverlay({
         ...overlay,
         id,
+        groupId: ANALYSIS_ANNOTATION_GROUP_ID,
         paneId: "candle_pane",
       } as OverlayCreate);
-      nextOverlayIds.push(id);
+      nextOverlayIds.push(typeof createdId === "string" ? createdId : id);
     };
 
     const newest = data[data.length - 1];
@@ -1062,6 +1071,7 @@ function CandlestickChartComponent({
     };
     let floatingLabelFrame: number | null = null;
     const runFloatingLabelLayout = () => {
+      if (analysisOverlayRunRef.current !== runId) return;
       const chartSize = chart.getSize?.();
       const width = analysisViewportWidth || containerRef.current?.clientWidth || chartSize?.width || 0;
       const projectedCandidates = floatingLabelCandidates.map((candidate) => ({
@@ -1087,6 +1097,7 @@ function CandlestickChartComponent({
       }
       floatingLabelFrame = window.requestAnimationFrame(() => {
         floatingLabelFrame = null;
+        if (analysisOverlayRunRef.current !== runId) return;
         // Keep both layers on the native candle data index. resize() can be a
         // no-op when dimensions are unchanged; zero-distance scroll always
         // invalidates every KlineCharts v9 pane without changing the viewport.
@@ -1283,6 +1294,13 @@ function CandlestickChartComponent({
       }
       if (floatingLabelFrame != null && typeof window !== "undefined" && typeof window.cancelAnimationFrame === "function") {
         window.cancelAnimationFrame(floatingLabelFrame);
+      }
+      if (analysisOverlayRunRef.current === runId) {
+        try {
+          chart.removeOverlay({ groupId: ANALYSIS_ANNOTATION_GROUP_ID });
+        } catch {}
+        analysisOverlayIdsRef.current = [];
+        setAnalysisFloatingLabels([]);
       }
     };
   }, [analysisAnnotations, data, pricePrecision, analysisViewportWidth]);
