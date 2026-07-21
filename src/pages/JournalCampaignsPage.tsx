@@ -13,7 +13,6 @@ import {
   getCampaignFullData,
   listAllCampaigns,
   listDeletedCampaigns,
-  listVisibleCampaigns,
   permanentlyDeleteCampaign,
   restoreCampaign,
   updateCampaignImportance,
@@ -77,8 +76,6 @@ type CampaignSortState = {
   direction: CampaignSortDirection;
 };
 
-type CampaignListScope = 'own' | 'mutual';
-
 type CampaignListNavigationState = {
   fromCampaignList: true;
 };
@@ -112,12 +109,8 @@ const SORT_OPTIONS: { value: CampaignSortMode; label: string }[] = [
 const DEFAULT_CAMPAIGN_SORT: CampaignSortState = { mode: 'time', direction: 'desc' };
 const CAMPAIGN_LIST_SCROLL_KEY_PREFIX = 'journal-campaign-list-scroll:';
 
-function parseCampaignListParams(search: string): {
-  scope: CampaignListScope;
-  sort: CampaignSortState;
-} {
+function parseCampaignListParams(search: string): CampaignSortState {
   const params = new URLSearchParams(search);
-  const scope: CampaignListScope = params.get('scope') === 'mutual' ? 'mutual' : 'own';
   const requestedMode = params.get('sort');
   const mode = SORT_OPTIONS.some(option => option.value === requestedMode)
     ? requestedMode as CampaignSortMode
@@ -126,7 +119,7 @@ function parseCampaignListParams(search: string): {
   const direction = requestedDirection === 'asc' || requestedDirection === 'desc'
     ? requestedDirection
     : mode === 'alpha' ? 'asc' : 'desc';
-  return { scope, sort: { mode, direction } };
+  return { mode, direction };
 }
 
 const CAMPAIGN_TITLE_COLLATOR = new Intl.Collator(['zh-Hans-CN', 'en'], {
@@ -388,18 +381,17 @@ function durationLabel(openedAt: string, closedAt: string | null) {
 export default function JournalCampaignsPage() {
   const nav = useNavigate();
   const location = useLocation();
-  const initialListParams = useMemo(() => parseCampaignListParams(location.search), [location.search]);
+  const initialSortState = useMemo(() => parseCampaignListParams(location.search), [location.search]);
   const { user } = useAuth();
   const { balance, positionsMap, priceMap } = useTradingContext();
   const currentAccountEquity = useMemo(
     () => computeCurrentAccountEquity(balance, positionsMap, priceMap),
     [balance, positionsMap, priceMap],
   );
-  const [scope, setScope] = useState<CampaignListScope>(initialListParams.scope);
   const [loading, setLoading] = useState(true);
   const [rows, setRows] = useState<CampaignCardData[]>([]);
   const [busyCampaignId, setBusyCampaignId] = useState<string | null>(null);
-  const [sortState, setSortState] = useState<CampaignSortState>(initialListParams.sort);
+  const [sortState, setSortState] = useState<CampaignSortState>(initialSortState);
   const [formulaPopover, setFormulaPopover] = useState<CampaignFormulaPopover | null>(null);
   const [deletedOpen, setDeletedOpen] = useState(false);
   const [deletedLoading, setDeletedLoading] = useState(false);
@@ -408,13 +400,17 @@ export default function JournalCampaignsPage() {
 
   useEffect(() => {
     const next = parseCampaignListParams(location.search);
-    setScope(current => current === next.scope ? current : next.scope);
     setSortState(current => (
-      current.mode === next.sort.mode && current.direction === next.sort.direction
+      current.mode === next.mode && current.direction === next.direction
         ? current
-        : next.sort
+        : next
     ));
-  }, [location.search]);
+    const params = new URLSearchParams(location.search);
+    if (!params.has('scope')) return;
+    params.delete('scope');
+    const search = params.toString();
+    nav({ pathname: location.pathname, search: search ? `?${search}` : '' }, { replace: true });
+  }, [location.pathname, location.search, nav]);
 
   useEffect(() => {
     if (!user) return;
@@ -422,9 +418,7 @@ export default function JournalCampaignsPage() {
     (async () => {
       setLoading(true);
       try {
-        const campaigns = scope === 'own'
-          ? await listAllCampaigns(user.id)
-          : (await listVisibleCampaigns(user.id)).filter(campaign => campaign.user_id !== user.id);
+        const campaigns = await listAllCampaigns(user.id);
         const full = await Promise.all(
           campaigns.map(async campaign => {
             const details = await getCampaignFullData(campaign.id);
@@ -470,7 +464,7 @@ export default function JournalCampaignsPage() {
       }
     })();
     return () => { cancelled = true; };
-  }, [user, scope]);
+  }, [user]);
 
   useEffect(() => {
     if (!user) return;
@@ -608,19 +602,13 @@ export default function JournalCampaignsPage() {
     : `${(geometric.optimalFraction * 100).toFixed(1)}%`;
   const opportunityQualityLabel = formatOpportunityQuality(opportunityQualityStats.average);
 
-  const updateListParams = (nextScope: CampaignListScope, nextSort: CampaignSortState) => {
+  const updateListParams = (nextSort: CampaignSortState) => {
     const params = new URLSearchParams(location.search);
-    params.set('scope', nextScope);
+    params.delete('scope');
     params.set('sort', nextSort.mode);
     params.set('direction', nextSort.direction);
     const search = params.toString();
     nav({ pathname: location.pathname, search: search ? `?${search}` : '' }, { replace: true });
-  };
-
-  const handleScopeChange = (nextScope: CampaignListScope) => {
-    if (nextScope === scope) return;
-    setScope(nextScope);
-    updateListParams(nextScope, sortState);
   };
 
   const handleSortChange = (mode: CampaignSortMode) => {
@@ -628,7 +616,7 @@ export default function JournalCampaignsPage() {
       ? { mode, direction: sortState.direction === 'desc' ? 'asc' : 'desc' }
       : { mode, direction: mode === 'alpha' ? 'asc' : 'desc' };
     setSortState(nextSort);
-    updateListParams(scope, nextSort);
+    updateListParams(nextSort);
   };
 
   const handleCampaignOpen = (campaignId: string) => {
@@ -702,44 +690,42 @@ export default function JournalCampaignsPage() {
     try {
       await restoreCampaign(campaign.id);
       setDeletedCampaigns(current => current.filter(item => item.id !== campaign.id));
-      if (scope === 'own') {
-        const details = await getCampaignFullData(campaign.id);
-        const initialExpectedMaxLoss = computeInitialExpectedMaxLoss(
+      const details = await getCampaignFullData(campaign.id);
+      const initialExpectedMaxLoss = computeInitialExpectedMaxLoss(
+        details.campaign,
+        details.legs,
+        details.tradeRecords,
+        details.reverseHedgeOrders,
+      );
+      const initialExpectedMaxDrawdownPct = computeInitialExpectedMaxDrawdownPct(
+        details.campaign,
+        details.legs,
+        details.tradeRecords,
+        details.reverseHedgeOrders,
+      );
+      const profitCaptureRatio = Number.isFinite(initialExpectedMaxLoss) && initialExpectedMaxLoss > 0
+        ? computeProfitCaptureRatio(
           details.campaign,
           details.legs,
           details.tradeRecords,
           details.reverseHedgeOrders,
-        );
-        const initialExpectedMaxDrawdownPct = computeInitialExpectedMaxDrawdownPct(
-          details.campaign,
-          details.legs,
-          details.tradeRecords,
-          details.reverseHedgeOrders,
-        );
-        const profitCaptureRatio = Number.isFinite(initialExpectedMaxLoss) && initialExpectedMaxLoss > 0
-          ? computeProfitCaptureRatio(
-            details.campaign,
-            details.legs,
-            details.tradeRecords,
-            details.reverseHedgeOrders,
-          )
-          : null;
-        const opportunityQuality = resolveCampaignOpportunityQuality(
-          details.campaign,
-          profitCaptureRatio,
-          initialExpectedMaxDrawdownPct,
-        );
-        const restoredRow: CampaignCardData = {
-          campaign: { ...details.campaign, deleted_at: null },
-          legs: details.legs,
-          tradeRecords: details.tradeRecords,
-          profitCaptureRatio,
-          initialExpectedMaxLoss,
-          initialExpectedMaxDrawdownPct,
-          opportunityQuality,
-        };
-        setRows(current => [restoredRow, ...current.filter(item => item.campaign.id !== campaign.id)]);
-      }
+        )
+        : null;
+      const opportunityQuality = resolveCampaignOpportunityQuality(
+        details.campaign,
+        profitCaptureRatio,
+        initialExpectedMaxDrawdownPct,
+      );
+      const restoredRow: CampaignCardData = {
+        campaign: { ...details.campaign, deleted_at: null },
+        legs: details.legs,
+        tradeRecords: details.tradeRecords,
+        profitCaptureRatio,
+        initialExpectedMaxLoss,
+        initialExpectedMaxDrawdownPct,
+        opportunityQuality,
+      };
+      setRows(current => [restoredRow, ...current.filter(item => item.campaign.id !== campaign.id)]);
       toast.success('战役已恢复');
     } catch (error) {
       toast.error(error instanceof Error ? error.message : String(error));
@@ -805,24 +791,7 @@ export default function JournalCampaignsPage() {
           </div>
         )}
 
-        <div className="mb-4 flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-          <div className="h-9 rounded-md border border-border bg-card p-1 flex items-center gap-1">
-            {[
-              { value: 'own', label: '我的战役' },
-              { value: 'mutual', label: '互关可见' },
-            ].map(option => (
-              <button
-                key={option.value}
-                type="button"
-                onClick={() => handleScopeChange(option.value as CampaignListScope)}
-                className={`h-7 flex-1 rounded text-[11px] transition-colors ${
-                  scope === option.value ? 'bg-[#F0B90B] text-black' : 'text-muted-foreground hover:bg-accent hover:text-foreground'
-                }`}
-              >
-                {option.label}
-              </button>
-            ))}
-          </div>
+        <div className="mb-4 flex justify-end">
           <div className="flex w-full flex-col gap-3 self-start md:w-auto md:items-end md:self-auto">
             <div
               data-testid="campaign-sort-controls"
@@ -1244,7 +1213,7 @@ export default function JournalCampaignsPage() {
                 || sortState.mode === 'arithmeticExpectancy'
                 || sortState.mode === 'geometricExpectancy') && rows.length > 0
                 ? `暂无可计算${sortState.mode === 'captureRate' ? '盈亏比' : sortState.mode === 'expectedDrawdownPct' ? '预期最大回撤百分比' : sortState.mode === 'opportunityQuality' ? '机会质量' : sortState.mode === 'arithmeticExpectancy' ? '算术期望' : '几何期望'}的战役`
-                : scope === 'own' ? '尚无战役' : '暂无互关可见战役'}
+                : '尚无战役'}
             </div>
             <div className="text-[12px] text-muted-foreground">
               {(sortState.mode === 'captureRate'
@@ -1259,7 +1228,7 @@ export default function JournalCampaignsPage() {
                     : sortState.mode === 'expectedDrawdownPct'
                       ? '缺少主力开仓价或初始对冲 A/B 价格的战役不会进入当前排序'
                     : '未设置初始最大预期亏损的战役不会进入当前排序'
-                : scope === 'own' ? '你下次开主力单时会自动创建第一个战役' : '双方互关后，对方战役会出现在这里'}
+                : '你下次开主力单时会自动创建第一个战役'}
             </div>
           </div>
         ) : (

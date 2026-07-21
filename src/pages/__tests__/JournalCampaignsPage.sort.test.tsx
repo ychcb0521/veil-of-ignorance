@@ -153,7 +153,6 @@ vi.mock('@/lib/journalApi', () => ({
   })),
   listAllCampaigns: vi.fn(async () => campaigns),
   listDeletedCampaigns: mockListDeletedCampaigns,
-  listVisibleCampaigns: vi.fn(async () => []),
   permanentlyDeleteCampaign: mockPermanentlyDeleteCampaign,
   restoreCampaign: mockRestoreCampaign,
   updateCampaignImportance: vi.fn(async (_id: string, weight: number) => weight),
@@ -271,9 +270,9 @@ function LocationProbe() {
 }
 
 describe('JournalCampaignsPage sorting', () => {
-  it('restores list parameters from the URL and carries them into campaign detail navigation', async () => {
+  it('removes the legacy mutual scope while preserving sort parameters and detail navigation', async () => {
     render(
-      <MemoryRouter initialEntries={['/journal/campaigns?scope=own&sort=importance&direction=asc']}>
+      <MemoryRouter initialEntries={['/journal/campaigns?scope=mutual&sort=importance&direction=asc']}>
         <Routes>
           <Route path="/journal/campaigns" element={<JournalCampaignsPage />} />
           <Route path="/journal/campaigns/:id" element={<LocationProbe />} />
@@ -282,13 +281,14 @@ describe('JournalCampaignsPage sorting', () => {
     );
 
     await waitFor(() => expect(screen.getAllByTestId('campaign-card')).toHaveLength(4));
-    expect(screen.getByRole('button', { name: '我的战役' })).toHaveClass('bg-[#F0B90B]');
+    expect(screen.queryByRole('button', { name: '我的战役' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '互关可见' })).not.toBeInTheDocument();
     expect(screen.getByTestId('campaign-sort-importance')).toHaveAttribute('data-sort-direction', 'asc');
     expect(cardOrder()).toEqual(['Best PnL', 'Newest Operation', 'Late Close', 'High Importance']);
 
     fireEvent.click(screen.getAllByTestId('campaign-card')[0]);
     expect(screen.getByTestId('location-probe')).toHaveTextContent(
-      '/journal/campaigns/best-pnl?scope=own&sort=importance&direction=asc|from-list',
+      '/journal/campaigns/best-pnl?sort=importance&direction=asc|from-list',
     );
   });
 
@@ -397,18 +397,6 @@ describe('JournalCampaignsPage sorting', () => {
     expect(screen.getByText(/dᵢ = max（\|主力开仓价 − 初始对冲 A 价\|/)).toBeInTheDocument();
     expect(screen.getByText('当前 N = 3 场。')).toBeInTheDocument();
     fireEvent.click(screen.getByTestId('campaign-opportunity-quality'));
-
-    fireEvent.click(screen.getByRole('button', { name: '互关可见' }));
-    await waitFor(() => expect(screen.getByTestId('campaign-win-rate')).toHaveTextContent('胜率（—）'));
-    expect(screen.getByTestId('campaign-average-payoff-ratio')).toHaveTextContent('平均盈亏比（—）');
-    expect(screen.getByTestId('campaign-expected-value')).toHaveTextContent('期望值（—）');
-    expect(screen.getByTestId('campaign-opportunity-quality')).toHaveTextContent('机会质量（—）');
-    fireEvent.click(screen.getByRole('button', { name: '我的战役' }));
-    await waitFor(() => expect(screen.getAllByTestId('campaign-card')).toHaveLength(4));
-    expect(screen.getByTestId('campaign-win-rate')).toHaveTextContent('胜率（66.67%）');
-    expect(screen.getByTestId('campaign-average-payoff-ratio')).toHaveTextContent('平均盈亏比（0.90）');
-    expect(screen.getByTestId('campaign-expected-value')).toHaveTextContent('期望值（+0.27R）');
-    expect(screen.getByTestId('campaign-opportunity-quality')).toHaveTextContent('机会质量（0.19）');
 
     fireEvent.click(screen.getByTestId('campaign-sort-time'));
     expect(screen.getByTestId('campaign-sort-time')).toHaveAttribute('aria-pressed', 'true');
