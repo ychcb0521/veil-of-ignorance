@@ -342,6 +342,11 @@ describe('JournalCampaignsPage sorting', () => {
     expect(screen.getByTestId('campaign-sort-time')).toHaveAttribute('aria-pressed', 'true');
     expect(screen.getByTestId('campaign-sort-time')).toHaveAttribute('data-sort-direction', 'desc');
     expect(screen.getByTestId('campaign-sort-time')).toHaveAttribute('aria-label', '操作时间，从大到小排序');
+    const sortControls = screen.getByTestId('campaign-sort-controls');
+    const metricsStrip = screen.getByTestId('campaign-metrics-strip');
+    expect(sortControls).not.toContainElement(screen.getByTestId('campaign-valid-count'));
+    expect(metricsStrip).toContainElement(screen.getByTestId('campaign-valid-count'));
+    expect(metricsStrip).toContainElement(screen.getByTestId('campaign-opportunity-quality'));
     expect(screen.getByTestId('campaign-valid-count')).toHaveTextContent('有效战役（3）');
     expect(screen.getByTestId('campaign-valid-count')).toHaveAttribute(
       'aria-label',

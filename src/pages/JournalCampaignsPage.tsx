@@ -823,9 +823,13 @@ export default function JournalCampaignsPage() {
               </button>
             ))}
           </div>
-          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 self-start px-0.5 py-0.5 text-[10px] text-muted-foreground/45 md:self-auto md:justify-end">
-            <span className="select-none">排序</span>
-            {SORT_OPTIONS.map(option => {
+          <div className="flex w-full flex-col gap-3 self-start md:w-auto md:items-end md:self-auto">
+            <div
+              data-testid="campaign-sort-controls"
+              className="order-2 flex flex-wrap items-center gap-x-2 gap-y-1 px-0.5 py-0.5 text-[10px] text-muted-foreground/45 md:justify-end"
+            >
+              <span className="select-none">排序</span>
+              {SORT_OPTIONS.map(option => {
               const active = sortState.mode === option.value;
               const direction = active ? sortState.direction : 'desc';
               const formula: CampaignFormulaPopover | null = option.value === 'opportunityQuality'
@@ -964,7 +968,13 @@ export default function JournalCampaignsPage() {
                   </PopoverContent>
                 </Popover>
               );
-            })}
+              })}
+            </div>
+            <div
+              data-testid="campaign-metrics-strip"
+              className="order-1 flex flex-wrap items-center gap-x-2.5 gap-y-1 rounded-md border border-[#F0B90B]/20 bg-[#F0B90B]/[0.055] px-2.5 py-1.5 text-[10px] text-muted-foreground/55 shadow-sm md:justify-end"
+            >
+              <span className="select-none border-r border-[#F0B90B]/20 pr-2 text-[#B88700]/70">统计</span>
             <Popover
               open={formulaPopover === 'validCampaigns'}
               onOpenChange={open => handleFormulaPopoverChange('validCampaigns', open)}
@@ -976,7 +986,7 @@ export default function JournalCampaignsPage() {
                   aria-label={`有效战役 ${validCampaignCount} 场，其中盈利 ${performance.winCount} 场，亏损 ${performance.lossCount} 场${breakevenCampaignCount > 0 ? `，盈亏平衡 ${breakevenCampaignCount} 场` : ''}，点击查看最大预期亏损计算说明`}
                   title="点击查看有效战役与最大预期亏损说明"
                   onClick={event => openFormulaPopover(event, 'validCampaigns')}
-                  className="ml-0.5 inline-flex h-6 select-none items-center border-b border-l border-dashed border-muted-foreground/30 border-l-border/60 pl-2 text-foreground/60 transition-colors hover:text-foreground/80"
+                  className="inline-flex h-6 select-none items-center border-b border-dashed border-muted-foreground/30 px-0.5 text-foreground/60 transition-colors hover:text-foreground/80"
                 >
                   有效战役（{validCampaignCount}）
                 </button>
@@ -1010,7 +1020,7 @@ export default function JournalCampaignsPage() {
                   aria-label={`镜像止盈达成率 ${mirrorTpRateLabel}，实现 ${mirrorTp.achieved} 场（盈利 ${mirrorTp.achievedWin} 场、亏损 ${mirrorTp.achievedLoss} 场），未实现 ${mirrorTp.notAchieved} 场（${mirrorTpNotAchievedRateLabel}），点击查看说明`}
                   title="点击查看镜像止盈达成说明"
                   onClick={event => openFormulaPopover(event, 'mirrorTp')}
-                  className="ml-0.5 inline-flex h-6 select-none items-center border-b border-l border-dashed border-muted-foreground/30 border-l-border/60 pl-2 text-foreground/60 transition-colors hover:text-foreground/80"
+                  className="inline-flex h-6 select-none items-center border-b border-dashed border-muted-foreground/30 px-0.5 text-foreground/60 transition-colors hover:text-foreground/80"
                 >
                   镜像止盈（{mirrorTpRateLabel}）
                 </button>
@@ -1216,6 +1226,7 @@ export default function JournalCampaignsPage() {
                 </div>
               </PopoverContent>
             </Popover>
+          </div>
           </div>
         </div>
 
