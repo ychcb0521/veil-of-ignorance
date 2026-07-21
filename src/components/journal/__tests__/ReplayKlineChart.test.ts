@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { KlineData } from '@/hooks/useBinanceData';
-import { findReplayCursorIndex, sliceReplayKlines } from '@/lib/replayKlineWindow';
+import { findReplayCursorIndex, normalizeReplayKlines, sliceReplayKlines } from '@/lib/replayKlineWindow';
 
 function candle(time: number): KlineData {
   return {
@@ -34,5 +34,20 @@ describe('ReplayKlineChart windowing', () => {
   it('二分游标选择不超过目标时间的最后一根 K 线', () => {
     expect(findReplayCursorIndex(klines, 10.5)).toBe(10);
     expect(findReplayCursorIndex(klines, -1)).toBe(-1);
+  });
+
+  it('历史分页 K 线会按时间升序、去重并清除无效数据', () => {
+    const duplicate = { ...candle(2000), close: 9 };
+    const invalid = { ...candle(4000), high: Number.NaN };
+    const normalized = normalizeReplayKlines([
+      candle(3000),
+      candle(2000),
+      candle(1000),
+      duplicate,
+      invalid,
+    ]);
+
+    expect(normalized.map(item => item.time)).toEqual([1000, 2000, 3000]);
+    expect(normalized[1].close).toBe(9);
   });
 });

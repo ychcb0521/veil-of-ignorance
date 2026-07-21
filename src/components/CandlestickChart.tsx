@@ -439,6 +439,7 @@ function CandlestickChartComponent({
   const prevOldestRef = useRef<number>(0);
   const prevNewestRef = useRef<number>(0);
   const prevLastSigRef = useRef("");
+  const prevTimeAxisSigRef = useRef("");
   const prevSymbolRef = useRef<string>(symbol);
   const analysisOverlayIdsRef = useRef<string[]>([]);
   const dragOverlayIdsRef = useRef<string[]>([]);
@@ -568,6 +569,7 @@ function CandlestickChartComponent({
       prevOldestRef.current = 0;
       prevNewestRef.current = 0;
       prevLastSigRef.current = "";
+      prevTimeAxisSigRef.current = "";
       prevSymbolRef.current = symbol;
     }
   }, [symbol]);
@@ -754,6 +756,11 @@ function CandlestickChartComponent({
     const currentOldest = data[0].time;
     const lastCandle = klineData[klineData.length - 1];
     const lastSig = `${lastCandle.timestamp}|${lastCandle.open}|${lastCandle.high}|${lastCandle.low}|${lastCandle.close}|${lastCandle.volume}`;
+    // Analysis windows are static snapshots and can be replaced with corrected
+    // historical candles while retaining the same first/last candle. Include every
+    // timestamp so that replacement cannot be mistaken for a last-bar update.
+    const timeAxisSig = analysisMode ? data.map(item => item.time).join(",") : "";
+    const sameTimeAxis = !analysisMode || timeAxisSig === prevTimeAxisSigRef.current;
 
     const wasPrepend =
       prevDataLenRef.current > 0 &&
@@ -767,12 +774,14 @@ function CandlestickChartComponent({
     const isSameBarUpdate =
       data.length === prevDataLenRef.current &&
       currentOldest === prevOldestRef.current &&
-      lastCandle.timestamp === prevNewestRef.current;
+      lastCandle.timestamp === prevNewestRef.current &&
+      sameTimeAxis;
 
     const unchangedSnapshot =
       data.length === prevDataLenRef.current &&
       currentOldest === prevOldestRef.current &&
-      lastSig === prevLastSigRef.current;
+      lastSig === prevLastSigRef.current &&
+      sameTimeAxis;
 
     if (unchangedSnapshot) return;
 
@@ -803,7 +812,8 @@ function CandlestickChartComponent({
     prevOldestRef.current = currentOldest;
     prevNewestRef.current = lastCandle.timestamp as number;
     prevLastSigRef.current = lastSig;
-  }, [applyAnalysisViewport, data]);
+    prevTimeAxisSigRef.current = timeAxisSig;
+  }, [analysisMode, applyAnalysisViewport, data]);
 
   useEffect(() => {
     if (data.length === 0) return;
@@ -1006,9 +1016,26 @@ function CandlestickChartComponent({
       nextOverlayIds.push(typeof createdId === "string" ? createdId : id);
     };
 
-    const newest = data[data.length - 1];
-    const inferredInterval = data.length > 1 ? Math.max(0, newest.time - data[data.length - 2].time) : 0;
-    const minTime = data[0].time;
+    // Use the chart engine's committed data list as the single time-coordinate
+    // authority. Native overlays and HTML labels now bind to the exact same candle
+    // timestamps even after a long historical snapshot is replaced asynchronously.
+    const nativeData = chart.getDataList();
+    const propTimeAxisSig = data.map(item => item.time).join(",");
+    const nativeTimeAxisSig = nativeData.map(item => item.timestamp).join(",");
+    if (nativeData.length > 0 && (
+      nativeData.length !== data.length
+      || nativeTimeAxisSig !== propTimeAxisSig
+    )) {
+      return;
+    }
+    const axisData = nativeData.length > 0
+      ? nativeData.map(item => ({ time: item.timestamp, close: item.close }))
+      : data.map(item => ({ time: item.time, close: item.close }));
+    const newest = axisData[axisData.length - 1];
+    const inferredInterval = axisData.length > 1
+      ? Math.max(0, newest.time - axisData[axisData.length - 2].time)
+      : 0;
+    const minTime = axisData[0].time;
     const maxTime = newest.time + inferredInterval;
     const lastValue = newest.close;
     const formatPrice = (value: number) => value.toFixed(pricePrecision);
@@ -1016,18 +1043,18 @@ function CandlestickChartComponent({
     const bindTimeToCandle = (time: number) => {
       const target = clampTime(time);
       let low = 0;
-      let high = data.length - 1;
+      let high = axisData.length - 1;
       while (low < high) {
         const middle = Math.floor((low + high) / 2);
-        if (data[middle].time < target) low = middle + 1;
+        if (axisData[middle].time < target) low = middle + 1;
         else high = middle;
       }
       const rightIndex = low;
       const leftIndex = Math.max(0, rightIndex - 1);
-      const dataIndex = Math.abs(data[leftIndex].time - target) <= Math.abs(data[rightIndex].time - target)
+      const dataIndex = Math.abs(axisData[leftIndex].time - target) <= Math.abs(axisData[rightIndex].time - target)
         ? leftIndex
         : rightIndex;
-      return data[dataIndex].time;
+      return axisData[dataIndex].time;
     };
     const visibleMarkerCandidates = (analysisAnnotations.markers ?? []).filter(
       (m) => Number.isFinite(m.price) && m.time >= minTime && m.time <= maxTime,
@@ -1760,15 +1787,16 @@ function areChartPropsEqual(prev: Props, next: Props) {
   const prevLast = prevLen > 0 ? prev.data[prevLen - 1] : null;
   const nextLast = nextLen > 0 ? next.data[nextLen - 1] : null;
 
-  const sameDataShape =
-    prevLen === nextLen &&
-    prevFirst === nextFirst &&
-    (prevLast?.time ?? 0) === (nextLast?.time ?? 0) &&
-    (prevLast?.open ?? 0) === (nextLast?.open ?? 0) &&
-    (prevLast?.high ?? 0) === (nextLast?.high ?? 0) &&
-    (prevLast?.low ?? 0) === (nextLast?.low ?? 0) &&
-    (prevLast?.close ?? 0) === (nextLast?.close ?? 0) &&
-    (prevLast?.volume ?? 0) === (nextLast?.volume ?? 0);
+  const sameDataShape = (prev.analysisMode || next.analysisMode)
+    ? prev.data === next.data
+    : prevLen === nextLen &&
+      prevFirst === nextFirst &&
+      (prevLast?.time ?? 0) === (nextLast?.time ?? 0) &&
+      (prevLast?.open ?? 0) === (nextLast?.open ?? 0) &&
+      (prevLast?.high ?? 0) === (nextLast?.high ?? 0) &&
+      (prevLast?.low ?? 0) === (nextLast?.low ?? 0) &&
+      (prevLast?.close ?? 0) === (nextLast?.close ?? 0) &&
+      (prevLast?.volume ?? 0) === (nextLast?.volume ?? 0);
 
   return (
     sameDataShape &&

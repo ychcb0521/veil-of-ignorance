@@ -1,5 +1,35 @@
 import type { KlineData } from '@/hooks/useBinanceData';
 
+/**
+ * KlineCharts uses a binary-search time scale, so analysis data must be strictly
+ * ascending and contain exactly one candle per timestamp. Historical windows can
+ * arrive in overlapping pages or include stale duplicate rows from legacy data.
+ */
+export function normalizeReplayKlines(klines: KlineData[]): KlineData[] {
+  const byTime = new Map<number, KlineData>();
+
+  for (const item of klines) {
+    const time = Math.trunc(item.time);
+    if (
+      !Number.isFinite(time)
+      || !Number.isFinite(item.open)
+      || !Number.isFinite(item.high)
+      || !Number.isFinite(item.low)
+      || !Number.isFinite(item.close)
+    ) {
+      continue;
+    }
+
+    byTime.set(time, {
+      ...item,
+      time,
+      volume: Number.isFinite(item.volume) ? item.volume : 0,
+    });
+  }
+
+  return Array.from(byTime.values()).sort((a, b) => a.time - b.time);
+}
+
 export function findReplayCursorIndex(klines: KlineData[], currentTime: number) {
   let lo = 0;
   let hi = klines.length - 1;

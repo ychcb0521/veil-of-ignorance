@@ -6,19 +6,36 @@ import type { KlineData } from '@/hooks/useBinanceData';
 import { FLOATING_LABEL_HEIGHT, layoutAnalysisFloatingLabels } from '@/lib/analysisFloatingLabels';
 
 const mocks = vi.hoisted(() => {
+  type ChartCandle = {
+    timestamp: number;
+    open: number;
+    high: number;
+    low: number;
+    close: number;
+    volume: number;
+  };
+  const dataList: ChartCandle[] = [];
   const chart = {
     resize: vi.fn(),
     subscribeAction: vi.fn(),
     unsubscribeAction: vi.fn(),
     setStyles: vi.fn(),
     setPriceVolumePrecision: vi.fn(),
-    applyNewData: vi.fn(),
-    applyMoreData: vi.fn(),
-    updateData: vi.fn(),
+    applyNewData: vi.fn((nextData: ChartCandle[]) => {
+      dataList.splice(0, dataList.length, ...nextData);
+    }),
+    applyMoreData: vi.fn((olderData: ChartCandle[]) => {
+      dataList.splice(0, 0, ...olderData);
+    }),
+    updateData: vi.fn((nextCandle: ChartCandle) => {
+      const last = dataList[dataList.length - 1];
+      if (last?.timestamp === nextCandle.timestamp) dataList[dataList.length - 1] = nextCandle;
+      else dataList.push(nextCandle);
+    }),
     createOverlay: vi.fn(),
     removeOverlay: vi.fn(),
     getSize: vi.fn(() => ({ width: 1000, height: 520 })),
-    getDataList: vi.fn(() => []),
+    getDataList: vi.fn(() => dataList),
     getBarSpace: vi.fn(() => 8),
     setBarSpace: vi.fn(),
     setOffsetRightDistance: vi.fn(),
@@ -39,6 +56,7 @@ const mocks = vi.hoisted(() => {
 
   return {
     chart,
+    dataList,
     init: vi.fn(() => chart),
     dispose: vi.fn(),
     registerIndicator: vi.fn(),
@@ -89,6 +107,7 @@ function candle(time: number, close = 1): KlineData {
 describe('CandlestickChart analysis annotations', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.dataList.length = 0;
     mocks.chart.convertToPixel.mockImplementation((point: any) => {
       const value = Array.isArray(point) ? point[0] : point;
       return {
@@ -348,6 +367,55 @@ describe('CandlestickChart analysis annotations', () => {
         { paneId: 'candle_pane' },
       );
     });
+  });
+
+  it('旧战役首尾未变但中间时间轴修正时会整段重载并重新绑定标注', async () => {
+    const annotations = {
+      markers: [{
+        time: 2400,
+        price: 1.1,
+        color: '#0ECB81',
+        shape: 'triangle-up' as const,
+        label: 'A1',
+      }],
+    };
+    const { rerender } = render(
+      <CandlestickChart
+        data={[candle(1000, 1), candle(2000, 1.1), candle(3000, 1.2)]}
+        symbol="HIFIUSDT"
+        rawSymbol="HIFIUSDT"
+        analysisMode
+        analysisAnnotations={annotations}
+      />,
+    );
+
+    await waitFor(() => {
+      const markerOverlay = mocks.chart.createOverlay.mock.calls
+        .map(([overlay]) => overlay)
+        .find(overlay => overlay.name === 'simpleAnnotation');
+      expect(markerOverlay?.points?.[0]?.timestamp).toBe(2000);
+    });
+
+    mocks.chart.applyNewData.mockClear();
+    mocks.chart.createOverlay.mockClear();
+    rerender(
+      <CandlestickChart
+        data={[candle(1000, 1), candle(2500, 1.1), candle(3000, 1.2)]}
+        symbol="HIFIUSDT"
+        rawSymbol="HIFIUSDT"
+        analysisMode
+        analysisAnnotations={annotations}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(mocks.chart.applyNewData).toHaveBeenCalled();
+      const markerOverlay = mocks.chart.createOverlay.mock.calls
+        .map(([overlay]) => overlay)
+        .find(overlay => overlay.name === 'simpleAnnotation');
+      expect(markerOverlay?.points?.[0]?.timestamp).toBe(2500);
+    });
+    expect(mocks.chart.getDataList().map(item => item.timestamp)).toEqual([1000, 2500, 3000]);
   });
 
   it('历史 K 线异步载入完成后再统一自适应并重绘原生盘面', async () => {

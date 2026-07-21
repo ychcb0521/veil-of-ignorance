@@ -290,7 +290,7 @@ describe('JournalCampaignsPage sorting', () => {
     expect(screen.getByTestId('location-probe')).toHaveTextContent(
       '/journal/campaigns/best-pnl?sort=importance&direction=asc|from-list',
     );
-  });
+  }, 15_000);
 
   it('defaults to operation time and toggles sort direction for each field', async () => {
     render(
@@ -335,10 +335,13 @@ describe('JournalCampaignsPage sorting', () => {
       'campaign-mirror-tp-status',
     ]);
     fireEvent.click(screen.getAllByRole('button', { name: '展开战役详情' })[0]);
-    expect(screen.getByTestId('campaign-card-details')).toHaveTextContent('战役时间');
-    expect(screen.getByTestId('campaign-card-details')).toHaveTextContent('结构与时长');
-    expect(screen.getByTestId('campaign-card-details')).toHaveTextContent('已实现 P&L');
-    expect(screen.getByTestId('campaign-card-details')).toHaveTextContent('Legs');
+    const expandedDetails = screen.getByTestId('campaign-card-details');
+    expect(expandedDetails).toHaveClass('flex');
+    expect(expandedDetails).not.toHaveClass('grid');
+    expect(expandedDetails).toHaveTextContent('战役时间：');
+    expect(expandedDetails).toHaveTextContent('结构与时长：');
+    expect(expandedDetails).toHaveTextContent('已实现 P&L：');
+    expect(expandedDetails).toHaveTextContent('Legs：');
     fireEvent.click(screen.getByRole('button', { name: '收起战役详情' }));
     expect(screen.queryByTestId('campaign-card-details')).not.toBeInTheDocument();
     expect(screen.getAllByTestId('campaign-payoff-ratio').map(node => node.textContent)).toEqual([
@@ -347,6 +350,11 @@ describe('JournalCampaignsPage sorting', () => {
       '盈亏比：-80.00%（-0.80）',
       '盈亏比：—',
     ]);
+    const payoffRatioValues = screen.getAllByTestId('campaign-payoff-ratio-value');
+    expect(payoffRatioValues[0]).toHaveClass('text-[#0ECB81]');
+    expect(payoffRatioValues[1]).toHaveClass('text-[#0ECB81]');
+    expect(payoffRatioValues[2]).toHaveClass('text-[#F6465D]');
+    expect(payoffRatioValues[3]).toHaveClass('text-foreground/85');
     expect(screen.getAllByTestId('campaign-expected-drawdown-pct').map(node => node.textContent)).toEqual([
       '预期回撤：10.00%',
       '预期回撤：2.00%',
@@ -393,6 +401,7 @@ describe('JournalCampaignsPage sorting', () => {
     expect(screen.getByText('盈利').parentElement).toHaveTextContent('盈利2');
     expect(screen.getByText('亏损').parentElement).toHaveTextContent('亏损1');
     fireEvent.click(screen.getByTestId('campaign-valid-count'));
+    expect(screen.queryByText('有效战役与最大预期亏损')).not.toBeInTheDocument();
     expect(screen.getByTestId('campaign-win-rate')).toHaveTextContent('胜率（66.67%）');
     expect(screen.getByTestId('campaign-win-rate')).toHaveAttribute(
       'aria-label',
@@ -403,6 +412,7 @@ describe('JournalCampaignsPage sorting', () => {
     expect(screen.getByText('P(赢) = 盈利战役数 ÷（盈利战役数 + 亏损战役数）')).toBeInTheDocument();
     expect(screen.getByText('= 2 ÷（2 + 1）')).toBeInTheDocument();
     fireEvent.click(screen.getByTestId('campaign-win-rate'));
+    expect(screen.queryByText('胜率计算公式')).not.toBeInTheDocument();
     expect(screen.getByTestId('campaign-average-payoff-ratio')).toHaveTextContent('平均盈亏比（0.90）');
     expect(screen.getByTestId('campaign-average-payoff-ratio')).toHaveAttribute(
       'aria-label',

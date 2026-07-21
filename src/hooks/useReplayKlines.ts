@@ -3,6 +3,7 @@
  */
 import { useEffect, useState } from 'react';
 import { intervalToMs, type KlineData } from '@/hooks/useBinanceData';
+import { normalizeReplayKlines } from '@/lib/replayKlineWindow';
 
 async function fetchRange(
   symbol: string,
@@ -43,7 +44,7 @@ async function fetchRange(
     cursor = next;
     if (raw.length < limit) break;
   }
-  return out;
+  return normalizeReplayKlines(out);
 }
 
 export interface UseReplayKlinesResult {

@@ -7,15 +7,18 @@ import type { KlineData } from '@/hooks/useBinanceData';
 const mocks = vi.hoisted(() => ({
   annotations: [] as AnalysisChartAnnotations[],
   visibleRanges: [] as Array<{ start: number | null | undefined; end: number | null | undefined }>,
+  datasets: [] as KlineData[][],
 }));
 
 vi.mock('@/components/CandlestickChart', () => ({
   CandlestickChart: (props: {
+    data: KlineData[];
     analysisAnnotations?: AnalysisChartAnnotations;
     analysisVisibleStartTime?: number | null;
     analysisVisibleEndTime?: number | null;
   }) => {
     if (props.analysisAnnotations) mocks.annotations.push(props.analysisAnnotations);
+    mocks.datasets.push(props.data);
     mocks.visibleRanges.push({
       start: props.analysisVisibleStartTime,
       end: props.analysisVisibleEndTime,
@@ -39,6 +42,7 @@ describe('ReplayKlineChart annotations', () => {
   beforeEach(() => {
     mocks.annotations.length = 0;
     mocks.visibleRanges.length = 0;
+    mocks.datasets.length = 0;
   });
 
   it('用户手动标注的 leg 竖线会越过回放时间过滤，普通未来竖线仍隐藏', async () => {
@@ -81,5 +85,21 @@ describe('ReplayKlineChart annotations', () => {
 
     await waitFor(() => expect(mocks.visibleRanges.length).toBeGreaterThan(0));
     expect(mocks.visibleRanges.at(-1)).toEqual({ start: 9000, end: 12_000 });
+  });
+
+  it('传给主图的旧战役 K 线时间轴始终严格递增且不重复', async () => {
+    render(
+      <ReplayKlineChart
+        klines={[candle(3000), candle(1000), candle(2000), { ...candle(2000), close: 7 }]}
+        currentTime={3000}
+        intervalMs={1000}
+        symbol="HIFIUSDT"
+        fitAll
+      />,
+    );
+
+    await waitFor(() => expect(mocks.datasets.length).toBeGreaterThan(0));
+    expect(mocks.datasets.at(-1)?.map(item => item.time)).toEqual([1000, 2000, 3000]);
+    expect(mocks.datasets.at(-1)?.[1].close).toBe(7);
   });
 });
