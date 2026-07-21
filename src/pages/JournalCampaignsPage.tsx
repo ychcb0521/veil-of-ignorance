@@ -17,7 +17,7 @@ import {
 import { toast } from 'sonner';
 import { BackButton } from '@/components/journal/BackButton';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Popover, PopoverAnchor, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { useAuth } from '@/contexts/AuthContext';
 import { useTradingContext } from '@/contexts/TradingContext';
 import { computeCurrentAccountEquity } from '@/lib/accountEquity';
@@ -147,6 +147,15 @@ const STATUS_STYLES: Record<string, string> = {
   closed_breakeven: 'bg-muted text-muted-foreground',
   planned: 'bg-muted text-muted-foreground',
   abandoned: 'bg-[#848E9C]/15 text-[#848E9C]',
+};
+
+const STATUS_ACCENT_STYLES: Record<string, string> = {
+  active: 'bg-[#F0B90B]',
+  closed_profit: 'bg-[#0ECB81]',
+  closed_loss: 'bg-[#F6465D]',
+  closed_breakeven: 'bg-[#848E9C]',
+  planned: 'bg-[#848E9C]',
+  abandoned: 'bg-[#848E9C]',
 };
 
 const DIRECTION_STYLES: Record<string, string> = {
@@ -645,6 +654,7 @@ export default function JournalCampaignsPage() {
     formula: CampaignFormulaPopover,
   ) => {
     event.preventDefault();
+    event.stopPropagation();
     setFormulaPopover(formula);
   };
 
@@ -839,25 +849,23 @@ export default function JournalCampaignsPage() {
                   || option.value === 'geometricExpectancy'
                   ? option.value
                   : null;
-              const invalidCampaignHint = option.value === 'geometricExpectancy'
-                ? '；缺少最大预期亏损的战役不显示；旧战役缺少开仓资产快照时按当前总资产估算'
-                : option.value === 'opportunityQuality'
-                  ? '；缺少实际盈亏比或预期回撤的战役不显示'
-                : option.value === 'expectedDrawdownPct'
-                  ? '；缺少主力开仓价或初始对冲 A/B 价格的战役不显示'
-                : formula != null
-                  ? '；未设置最大预期亏损的战役不显示'
-                  : '';
               const sortButton = (
                 <button
                   type="button"
                   aria-pressed={active}
                   aria-label={`${option.label}，${sortDirectionLabel(direction, option.value)}排序`}
-                  title={`按${option.label}${sortDirectionLabel(direction, option.value)}排序${active ? '；再次点击切换方向' : ''}${invalidCampaignHint}`}
+                  title={`按${option.label}${sortDirectionLabel(direction, option.value)}排序${active ? '；再次单击切换方向' : ''}`}
                   data-sort-direction={active ? direction : undefined}
                   data-testid={`campaign-sort-${option.value}`}
                   onClick={(event) => {
+                    if (event.detail > 1) return;
+                    setFormulaPopover(null);
                     handleSortChange(option.value);
+                  }}
+                  onDoubleClick={(event) => {
+                    if (formula) openFormulaPopover(event, formula);
+                  }}
+                  onContextMenu={(event) => {
                     if (formula) openFormulaPopover(event, formula);
                   }}
                   className={`inline-flex h-7 items-center gap-1 rounded border px-2 transition-colors ${
@@ -886,7 +894,7 @@ export default function JournalCampaignsPage() {
                   open={formulaPopover === formula}
                   onOpenChange={open => handleFormulaPopoverChange(formula, open)}
                 >
-                  <PopoverTrigger asChild>{sortButton}</PopoverTrigger>
+                  <PopoverAnchor asChild>{sortButton}</PopoverAnchor>
                   <PopoverContent align="end" className="w-80 border-border bg-card p-3 text-[11px]">
                     {formula === 'captureRate' ? (
                       <>
@@ -1314,11 +1322,11 @@ export default function JournalCampaignsPage() {
                 key={campaign.id}
                 data-testid="campaign-card"
                 onClick={() => handleCampaignOpen(campaign.id)}
-                className="group relative mb-2.5 cursor-pointer overflow-hidden rounded-md border border-border/80 bg-card transition-[border-color,box-shadow,background-color] hover:border-foreground/15 hover:bg-accent/20 hover:shadow-[0_6px_20px_rgba(15,23,42,0.05)]"
+                className="group relative mb-3.5 cursor-pointer overflow-hidden rounded-md border border-border bg-card shadow-[0_2px_7px_rgba(15,23,42,0.055)] transition-[border-color,box-shadow,background-color] last:mb-0 hover:border-foreground/20 hover:bg-accent/20 hover:shadow-[0_7px_22px_rgba(15,23,42,0.08)]"
               >
                 <span
                   aria-hidden="true"
-                  className={`absolute inset-y-0 left-0 w-0.5 ${STATUS_STYLES[campaign.status] || 'bg-muted'}`}
+                  className={`absolute inset-y-0 left-0 w-[3px] opacity-65 ${STATUS_ACCENT_STYLES[campaign.status] || 'bg-muted-foreground'}`}
                 />
                 <div className="flex flex-col gap-2 px-4 py-2.5 sm:px-5 lg:flex-row lg:items-center lg:justify-between">
                   <div className="flex min-w-0 flex-1 items-center gap-2.5">

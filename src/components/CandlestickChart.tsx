@@ -460,6 +460,7 @@ function CandlestickChartComponent({
   const { theme } = useTheme();
   const [analysisFloatingLabels, setAnalysisFloatingLabels] = useState<AnalysisFloatingLabel[]>([]);
   const [analysisViewportWidth, setAnalysisViewportWidth] = useState(0);
+  const [analysisDataReadyRevision, setAnalysisDataReadyRevision] = useState(0);
   const crosshairPriceRef = useRef<number | null>(null);
 
   const activeIndicatorPanes = useRef<Map<string, string | null>>(new Map());
@@ -720,6 +721,9 @@ function CandlestickChartComponent({
     if (!chart) return;
     let frame: number | null = null;
     const handleDataReady = () => {
+      // KlineCharts commits long historical snapshots asynchronously. Rebuild the
+      // timestamp-bound annotation layer after that native commit completes.
+      setAnalysisDataReadyRevision((revision) => revision + 1);
       if (!pendingAnalysisViewportRef.current) return;
       pendingAnalysisViewportRef.current = false;
       if (frame != null) window.cancelAnimationFrame(frame);
@@ -1023,20 +1027,20 @@ function CandlestickChartComponent({
       const dataIndex = Math.abs(data[leftIndex].time - target) <= Math.abs(data[rightIndex].time - target)
         ? leftIndex
         : rightIndex;
-      return { time: data[dataIndex].time, dataIndex };
+      return data[dataIndex].time;
     };
     const visibleMarkerCandidates = (analysisAnnotations.markers ?? []).filter(
       (m) => Number.isFinite(m.price) && m.time >= minTime && m.time <= maxTime,
-    ).map(marker => ({ ...marker, ...bindTimeToCandle(marker.time) }));
+    ).map(marker => ({ ...marker, time: bindTimeToCandle(marker.time) }));
     const visibleMarkerLabelTimes = new Set(
       visibleMarkerCandidates
         .filter((marker) => !!marker.label)
         .map((marker) => marker.time),
     );
-    const labelXForDataIndex = (dataIndex: number) => {
+    const labelXForTime = (time: number) => {
       try {
         const coordinate = chart.convertToPixel(
-          { dataIndex, value: lastValue },
+          { timestamp: time, value: lastValue },
           { paneId: "candle_pane" },
         );
         const point = Array.isArray(coordinate) ? coordinate[0] : coordinate;
@@ -1054,8 +1058,7 @@ function CandlestickChartComponent({
       emphasis?: AnalysisFloatingLabelCandidate["emphasis"],
     ) => {
       if (!text || !Number.isFinite(time)) return;
-      const anchor = bindTimeToCandle(time);
-      const labelTime = anchor.time;
+      const labelTime = bindTimeToCandle(time);
       const normalizedText = text.trim();
       const labelKey = `${Math.round(labelTime / 1000)}:${normalizedText}:${emphasis ?? ""}`;
       if (floatingLabelKeys.has(labelKey)) return;
@@ -1063,7 +1066,6 @@ function CandlestickChartComponent({
       floatingLabelCandidates.push({
         id: `${floatingLabelCandidates.length}-${id}`,
         time: labelTime,
-        dataIndex: anchor.dataIndex,
         text: normalizedText,
         color,
         emphasis,
@@ -1076,7 +1078,7 @@ function CandlestickChartComponent({
       const width = analysisViewportWidth || containerRef.current?.clientWidth || chartSize?.width || 0;
       const projectedCandidates = floatingLabelCandidates.map((candidate) => ({
         ...candidate,
-        x: candidate.dataIndex == null ? undefined : labelXForDataIndex(candidate.dataIndex),
+        x: labelXForTime(candidate.time),
       }));
       setAnalysisFloatingLabels(
         layoutAnalysisFloatingLabels(projectedCandidates, {
@@ -1086,9 +1088,8 @@ function CandlestickChartComponent({
         }),
       );
     };
-    const scheduleFloatingLabelLayout = (syncChartViewport = false) => {
+    const scheduleFloatingLabelLayout = () => {
       if (typeof window === "undefined" || typeof window.requestAnimationFrame !== "function") {
-        if (syncChartViewport) chart.scrollByDistance(0, 0);
         runFloatingLabelLayout();
         return;
       }
@@ -1098,10 +1099,6 @@ function CandlestickChartComponent({
       floatingLabelFrame = window.requestAnimationFrame(() => {
         floatingLabelFrame = null;
         if (analysisOverlayRunRef.current !== runId) return;
-        // Keep both layers on the native candle data index. resize() can be a
-        // no-op when dimensions are unchanged; zero-distance scroll always
-        // invalidates every KlineCharts v9 pane without changing the viewport.
-        if (syncChartViewport) chart.scrollByDistance(0, 0);
         runFloatingLabelLayout();
       });
     };
@@ -1111,7 +1108,7 @@ function CandlestickChartComponent({
       if (!Number.isFinite(line.price)) continue;
       createAnalysisOverlay("price", {
         name: "horizontalStraightLine",
-        points: [{ timestamp: newest.time, dataIndex: data.length - 1, value: line.price }],
+        points: [{ timestamp: newest.time, value: line.price }],
         lock: true,
         styles: {
           line: {
@@ -1133,18 +1130,16 @@ function CandlestickChartComponent({
 
     for (const line of analysisAnnotations.timeBoundPriceLines ?? []) {
       if (!Number.isFinite(line.price)) continue;
-      const startAnchor = bindTimeToCandle(line.startTime);
-      const endAnchor = bindTimeToCandle(line.endTime);
-      const startTime = startAnchor.time;
-      const endTime = endAnchor.time;
+      const startTime = bindTimeToCandle(line.startTime);
+      const endTime = bindTimeToCandle(line.endTime);
       if (endTime <= startTime) continue;
       const color = line.dim ? `${line.color}55` : line.color;
 
       createAnalysisOverlay("time-price", {
         name: "segment",
         points: [
-          { timestamp: startTime, dataIndex: startAnchor.dataIndex, value: line.price },
-          { timestamp: endTime, dataIndex: endAnchor.dataIndex, value: line.price },
+          { timestamp: startTime, value: line.price },
+          { timestamp: endTime, value: line.price },
         ],
         lock: true,
         styles: {
@@ -1163,7 +1158,7 @@ function CandlestickChartComponent({
           timePriceEventVerticalKeys.add(startVerticalKey);
           createAnalysisOverlay("time-price-start", {
             name: "verticalStraightLine",
-            points: [{ timestamp: startTime, dataIndex: startAnchor.dataIndex, value: line.price }],
+            points: [{ timestamp: startTime, value: line.price }],
             lock: true,
             styles: {
               line: {
@@ -1182,7 +1177,7 @@ function CandlestickChartComponent({
             timePriceEventVerticalKeys.add(cancelVerticalKey);
             createAnalysisOverlay("time-price-cancel", {
               name: "verticalStraightLine",
-              points: [{ timestamp: endTime, dataIndex: endAnchor.dataIndex, value: line.price }],
+              points: [{ timestamp: endTime, value: line.price }],
               lock: true,
               styles: {
                 line: {
@@ -1207,11 +1202,10 @@ function CandlestickChartComponent({
     for (const vertical of analysisAnnotations.verticalLines ?? []) {
       if (!Number.isFinite(vertical.time)) continue;
       if (!vertical.alwaysVisible && (vertical.time < minTime || vertical.time > maxTime)) continue;
-      const verticalAnchor = bindTimeToCandle(vertical.time);
-      const verticalTime = verticalAnchor.time;
+      const verticalTime = bindTimeToCandle(vertical.time);
       createAnalysisOverlay("vertical", {
         name: "verticalStraightLine",
-        points: [{ timestamp: verticalTime, dataIndex: verticalAnchor.dataIndex, value: lastValue }],
+        points: [{ timestamp: verticalTime, value: lastValue }],
         lock: true,
         styles: {
           line: {
@@ -1257,7 +1251,7 @@ function CandlestickChartComponent({
 
       createAnalysisOverlay("marker", {
         name: "simpleAnnotation",
-        points: [{ timestamp: marker.time, dataIndex: marker.dataIndex, value: marker.price }],
+        points: [{ timestamp: marker.time, value: marker.price }],
         lock: true,
         extendData: glyph,
         styles: {
@@ -1278,7 +1272,7 @@ function CandlestickChartComponent({
     }
     scheduleFloatingLabelLayout();
     const viewportActions = [ActionType.OnDataReady, ActionType.OnScroll, ActionType.OnZoom, ActionType.OnVisibleRangeChange];
-    const syncFloatingLabelsWithChart = () => scheduleFloatingLabelLayout(true);
+    const syncFloatingLabelsWithChart = () => scheduleFloatingLabelLayout();
     for (const action of viewportActions) {
       chart.subscribeAction(action, syncFloatingLabelsWithChart);
     }
@@ -1303,7 +1297,7 @@ function CandlestickChartComponent({
         setAnalysisFloatingLabels([]);
       }
     };
-  }, [analysisAnnotations, data, pricePrecision, analysisViewportWidth]);
+  }, [analysisAnnotations, data, pricePrecision, analysisViewportWidth, analysisDataReadyRevision]);
 
   // Campaign What-if: draggable horizontal price lines and vertical timing lines.
   // Drag a price line up/down or a time line left/right, then report the new value on release.

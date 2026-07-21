@@ -458,14 +458,17 @@ describe('JournalCampaignsPage sorting', () => {
     expect(screen.getByTestId('campaign-sort-captureRate')).toHaveAttribute('aria-pressed', 'true');
     expect(screen.getByTestId('campaign-sort-captureRate')).toHaveAttribute('data-sort-direction', 'desc');
     expect(screen.getByTestId('campaign-sort-captureRate')).toHaveAttribute('aria-label', '盈亏比，从大到小排序');
-    expect(screen.getByText('单场盈亏比计算公式')).toBeInTheDocument();
-    expect(screen.getByText('bᵢ = 已实现盈亏ᵢ ÷ 初始最大预期亏损ᵢ')).toBeInTheDocument();
+    expect(screen.queryByText('单场盈亏比计算公式')).not.toBeInTheDocument();
     expect(cardOrder()).toEqual(['High Importance', 'Best PnL', 'Late Close']);
 
     fireEvent.click(screen.getByTestId('campaign-sort-captureRate'));
     expect(screen.getByTestId('campaign-sort-captureRate')).toHaveAttribute('data-sort-direction', 'asc');
     expect(screen.getByTestId('campaign-sort-captureRate')).toHaveAttribute('aria-label', '盈亏比，从小到大排序');
+    expect(screen.queryByText('单场盈亏比计算公式')).not.toBeInTheDocument();
+    fireEvent.doubleClick(screen.getByTestId('campaign-sort-captureRate'));
     expect(screen.getByText('单场盈亏比计算公式')).toBeInTheDocument();
+    expect(screen.getByText('bᵢ = 已实现盈亏ᵢ ÷ 初始最大预期亏损ᵢ')).toBeInTheDocument();
+    expect(screen.getByTestId('campaign-sort-captureRate')).toHaveAttribute('data-sort-direction', 'asc');
     expect(cardOrder()).toEqual(['Late Close', 'Best PnL', 'High Importance']);
 
     fireEvent.click(screen.getByTestId('campaign-sort-expectedDrawdownPct'));
@@ -475,8 +478,7 @@ describe('JournalCampaignsPage sorting', () => {
       'aria-label',
       '预期回撤，从大到小排序',
     );
-    expect(screen.getByText('预期回撤计算公式')).toBeInTheDocument();
-    expect(screen.getByText(/dᵢ = max（\|主力开仓价 − 初始对冲 A 价\|/)).toBeInTheDocument();
+    expect(screen.queryByText('预期回撤计算公式')).not.toBeInTheDocument();
     expect(cardOrder()).toEqual(['Late Close', 'High Importance', 'Best PnL']);
 
     fireEvent.click(screen.getByTestId('campaign-sort-expectedDrawdownPct'));
@@ -485,14 +487,17 @@ describe('JournalCampaignsPage sorting', () => {
       'aria-label',
       '预期回撤，从小到大排序',
     );
+    fireEvent.contextMenu(screen.getByTestId('campaign-sort-expectedDrawdownPct'));
+    expect(screen.getByText('预期回撤计算公式')).toBeInTheDocument();
+    expect(screen.getByText(/dᵢ = max（\|主力开仓价 − 初始对冲 A 价\|/)).toBeInTheDocument();
+    expect(screen.getByTestId('campaign-sort-expectedDrawdownPct')).toHaveAttribute('data-sort-direction', 'asc');
     expect(cardOrder()).toEqual(['Best PnL', 'High Importance', 'Late Close']);
 
     fireEvent.click(screen.getByTestId('campaign-sort-opportunityQuality'));
     expect(screen.getByTestId('campaign-sort-opportunityQuality')).toHaveAttribute('aria-pressed', 'true');
     expect(screen.getByTestId('campaign-sort-opportunityQuality')).toHaveAttribute('data-sort-direction', 'desc');
     expect(screen.getByTestId('campaign-sort-opportunityQuality')).toHaveAttribute('aria-label', '机会质量，从大到小排序');
-    expect(screen.getByText('单场机会质量计算公式')).toBeInTheDocument();
-    expect(screen.getByText('Qᵢ = |实际盈亏比 bᵢ| ÷ 预期回撤百分点 dᵢ')).toBeInTheDocument();
+    expect(screen.queryByText('单场机会质量计算公式')).not.toBeInTheDocument();
     expect(cardOrder()).toEqual(['High Importance', 'Best PnL', 'Late Close']);
 
     fireEvent.click(screen.getByTestId('campaign-sort-opportunityQuality'));
@@ -512,8 +517,7 @@ describe('JournalCampaignsPage sorting', () => {
     expect(screen.getByTestId('campaign-sort-arithmeticExpectancy')).toHaveAttribute('aria-pressed', 'true');
     expect(screen.getByTestId('campaign-sort-arithmeticExpectancy')).toHaveAttribute('data-sort-direction', 'desc');
     expect(screen.getByTestId('campaign-sort-arithmeticExpectancy')).toHaveAttribute('aria-label', '算术期望，从大到小排序');
-    expect(screen.getByText('单场算术期望计算公式')).toBeInTheDocument();
-    expect(screen.getByText('Eᵢ = P(赢) × bᵢ −（1 − P(赢)）')).toBeInTheDocument();
+    expect(screen.queryByText('单场算术期望计算公式')).not.toBeInTheDocument();
     expect(cardOrder()).toEqual(['High Importance', 'Best PnL', 'Late Close']);
 
     fireEvent.click(screen.getByTestId('campaign-sort-arithmeticExpectancy'));
@@ -525,11 +529,7 @@ describe('JournalCampaignsPage sorting', () => {
     expect(screen.getByTestId('campaign-sort-geometricExpectancy')).toHaveAttribute('aria-pressed', 'true');
     expect(screen.getByTestId('campaign-sort-geometricExpectancy')).toHaveAttribute('data-sort-direction', 'desc');
     expect(screen.getByTestId('campaign-sort-geometricExpectancy')).toHaveAttribute('aria-label', '几何期望，从大到小排序');
-    expect(screen.getByText('单场几何期望计算公式')).toBeInTheDocument();
-    expect(screen.getByText(/Gᵢ = \(1\+bᵢ·xᵢ\)/)).toBeInTheDocument();
-    expect(screen.getByText('xᵢ = 该战役初始最大预期亏损 Lᵢ ÷ 主力开仓时账户总资产 Aᵢ')).toBeInTheDocument();
-    expect(screen.getByText(/旧战役缺少快照时，使用今日当前总账户资产作为历史估算：100000.00 USDT/)).toBeInTheDocument();
-    expect(screen.getByText(/bᵢ < 0 时仍按该场真实 xᵢ/)).toBeInTheDocument();
+    expect(screen.queryByText('单场几何期望计算公式')).not.toBeInTheDocument();
     expect(cardOrder()).toEqual(['High Importance', 'Best PnL', 'Late Close']);
 
     fireEvent.click(screen.getByTestId('campaign-sort-geometricExpectancy'));

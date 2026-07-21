@@ -1,4 +1,4 @@
-import { render, waitFor } from '@testing-library/react';
+import { act, render, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { CandlestickChart } from '@/components/CandlestickChart';
 import { TooltipProvider } from '@/components/ui/tooltip';
@@ -169,6 +169,9 @@ describe('CandlestickChart analysis annotations', () => {
         },
       },
     });
+    expect(
+      overlays.flatMap(overlay => overlay.points ?? []).every(point => !('dataIndex' in point)),
+    ).toBe(true);
     expect(mocks.chart.subscribeAction).toHaveBeenCalledWith('onScroll', expect.any(Function));
     expect(mocks.chart.subscribeAction).toHaveBeenCalledWith('onZoom', expect.any(Function));
     expect(mocks.chart.subscribeAction).toHaveBeenCalledWith('onVisibleRangeChange', expect.any(Function));
@@ -271,12 +274,12 @@ describe('CandlestickChart analysis annotations', () => {
       .filter(overlay => overlay.name === 'simpleAnnotation');
 
     expect(markerOverlays.map(overlay => overlay.points?.[0])).toEqual([
-      { timestamp: 1000, dataIndex: 0, value: 1 },
-      { timestamp: 1000, dataIndex: 0, value: 1.005 },
+      { timestamp: 1000, value: 1 },
+      { timestamp: 1000, value: 1.005 },
     ]);
   });
 
-  it('图表滚动或缩放后，先重绘 K 线画布，再按当前坐标重新定位浮层标注', async () => {
+  it('图表滚动或缩放后按当前时间坐标重新定位浮层，且不反向触发滚动反馈', async () => {
     render(
       <CandlestickChart
         data={[candle(1000, 1), candle(2000, 1.2)]}
@@ -305,15 +308,16 @@ describe('CandlestickChart analysis annotations', () => {
     expect(zoomCallback).toEqual(expect.any(Function));
 
     mocks.chart.convertToPixel.mockImplementation(() => ({ x: 260, y: 0 }));
+    mocks.chart.scrollByDistance.mockClear();
     zoomCallback?.();
 
     await waitFor(() => {
-      expect(mocks.chart.scrollByDistance).toHaveBeenCalledWith(0, 0);
       expect((document.querySelector('[data-analysis-label]') as HTMLElement).style.left).not.toEqual(before);
     });
+    expect(mocks.chart.scrollByDistance).not.toHaveBeenCalled();
   });
 
-  it('旧战役的非整周期事件会绑定到最近的真实 K 线索引', async () => {
+  it('旧战役的非整周期事件会绑定到最近的真实 K 线时间戳', async () => {
     render(
       <CandlestickChart
         data={[candle(1000, 1), candle(2000, 1.1), candle(3000, 1.2)]}
@@ -338,10 +342,9 @@ describe('CandlestickChart analysis annotations', () => {
         .find(overlay => overlay.name === 'simpleAnnotation');
       expect(markerOverlay?.points?.[0]).toEqual(expect.objectContaining({
         timestamp: 2000,
-        dataIndex: 1,
       }));
       expect(mocks.chart.convertToPixel).toHaveBeenCalledWith(
-        expect.objectContaining({ dataIndex: 1 }),
+        expect.objectContaining({ timestamp: 2000 }),
         { paneId: 'candle_pane' },
       );
     });
@@ -362,11 +365,56 @@ describe('CandlestickChart analysis annotations', () => {
       .filter(([type]) => type === 'onDataReady')
       .map(([, callback]) => callback);
     expect(dataReadyCallbacks.length).toBeGreaterThan(0);
-    dataReadyCallbacks.forEach(callback => callback());
+    act(() => {
+      dataReadyCallbacks.forEach(callback => callback());
+    });
 
     await waitFor(() => {
       expect(mocks.chart.setBarSpace).toHaveBeenCalled();
       expect(mocks.chart.scrollByDistance).toHaveBeenCalledWith(0, 0);
+    });
+  });
+
+  it('长历史数据原生提交完成后会按同一时间戳重建标注层', async () => {
+    const data = Array.from({ length: 2400 }, (_, index) => candle(index * 60_000, 1 + index / 10_000));
+    render(
+      <CandlestickChart
+        data={data}
+        symbol="HIFIUSDT"
+        rawSymbol="HIFIUSDT"
+        analysisMode
+        analysisAnnotations={{
+          markers: [{
+            time: 90_001,
+            price: 1.1,
+            color: '#0ECB81',
+            shape: 'triangle-up',
+            label: 'M',
+          }],
+        }}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(mocks.chart.createOverlay.mock.calls.some(([overlay]) => overlay.name === 'simpleAnnotation')).toBe(true);
+    });
+    mocks.chart.createOverlay.mockClear();
+
+    const dataReadyCallbacks = mocks.chart.subscribeAction.mock.calls
+      .filter(([type]) => type === 'onDataReady')
+      .map(([, callback]) => callback);
+    act(() => {
+      dataReadyCallbacks.forEach(callback => callback());
+    });
+
+    await waitFor(() => {
+      const markerOverlay = mocks.chart.createOverlay.mock.calls
+        .map(([overlay]) => overlay)
+        .find(overlay => overlay.name === 'simpleAnnotation');
+      expect(markerOverlay?.points?.[0]).toEqual({
+        timestamp: 120_000,
+        value: 1.1,
+      });
     });
   });
 
@@ -392,7 +440,9 @@ describe('CandlestickChart analysis annotations', () => {
     const dataReadyCallbacks = mocks.chart.subscribeAction.mock.calls
       .filter(([type]) => type === 'onDataReady')
       .map(([, callback]) => callback);
-    dataReadyCallbacks.forEach(callback => callback());
+    act(() => {
+      dataReadyCallbacks.forEach(callback => callback());
+    });
 
     await waitFor(() => {
       expect(mocks.chart.setBarSpace).toHaveBeenCalledWith(25);

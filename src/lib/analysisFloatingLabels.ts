@@ -1,8 +1,6 @@
 export interface AnalysisFloatingLabelCandidate {
   id: string;
   time: number;
-  /** Exact candle index used by the native chart layer for horizontal positioning. */
-  dataIndex?: number;
   text: string;
   color: string;
   emphasis?: "main-add";
