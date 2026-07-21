@@ -5,6 +5,7 @@ import {
   ArchiveRestore,
   ArrowDown,
   ArrowUp,
+  ChevronDown,
   FolderPlus,
   Layers,
   RotateCcw,
@@ -109,9 +110,9 @@ type CampaignFormulaPopover =
 const SORT_OPTIONS: { value: CampaignSortMode; label: string }[] = [
   { value: 'importance', label: '重要性' },
   { value: 'time', label: '操作时间' },
-  { value: 'captureRate', label: '盈亏比' },
-  { value: 'expectedDrawdownPct', label: '预期最大回撤百分比' },
+  { value: 'expectedDrawdownPct', label: '预期回撤' },
   { value: 'opportunityQuality', label: '机会质量' },
+  { value: 'captureRate', label: '盈亏比' },
   { value: 'arithmeticExpectancy', label: '算术期望' },
   { value: 'geometricExpectancy', label: '几何期望' },
   { value: 'mirrorTp', label: '镜像止盈' },
@@ -409,6 +410,7 @@ export default function JournalCampaignsPage() {
   const [deletedLoading, setDeletedLoading] = useState(false);
   const [deletedCampaigns, setDeletedCampaigns] = useState<TradeCampaign[]>([]);
   const [deletedBusyId, setDeletedBusyId] = useState<string | null>(null);
+  const [expandedCampaignIds, setExpandedCampaignIds] = useState<Set<string>>(() => new Set());
 
   useEffect(() => {
     const next = parseCampaignListParams(location.search);
@@ -696,6 +698,19 @@ export default function JournalCampaignsPage() {
     }
   };
 
+  const handleCampaignDetailsToggle = (
+    event: MouseEvent<HTMLButtonElement>,
+    campaignId: string,
+  ) => {
+    event.stopPropagation();
+    setExpandedCampaignIds(current => {
+      const next = new Set(current);
+      if (next.has(campaignId)) next.delete(campaignId);
+      else next.add(campaignId);
+      return next;
+    });
+  };
+
   const handleRestoreCampaign = async (campaign: TradeCampaign) => {
     if (!user || deletedBusyId) return;
     setDeletedBusyId(campaign.id);
@@ -827,7 +842,7 @@ export default function JournalCampaignsPage() {
               const invalidCampaignHint = option.value === 'geometricExpectancy'
                 ? '；缺少最大预期亏损的战役不显示；旧战役缺少开仓资产快照时按当前总资产估算'
                 : option.value === 'opportunityQuality'
-                  ? '；缺少实际盈亏比或预期最大回撤百分比的战役不显示'
+                  ? '；缺少实际盈亏比或预期回撤的战役不显示'
                 : option.value === 'expectedDrawdownPct'
                   ? '；缺少主力开仓价或初始对冲 A/B 价格的战役不显示'
                 : formula != null
@@ -890,7 +905,7 @@ export default function JournalCampaignsPage() {
                       </>
                     ) : formula === 'expectedDrawdownPct' ? (
                       <>
-                        <div className="font-medium text-foreground">预期最大回撤百分比计算公式</div>
+                        <div className="font-medium text-foreground">预期回撤计算公式</div>
                         <div className="mt-2 rounded bg-muted/60 px-2 py-1.5 font-mono text-foreground">
                           dᵢ = max（|主力开仓价 − 初始对冲 A 价|，|主力开仓价 − 初始对冲 B 价|）÷ 主力开仓价 × 100%
                         </div>
@@ -904,7 +919,7 @@ export default function JournalCampaignsPage() {
                       <>
                         <div className="font-medium text-foreground">单场机会质量计算公式</div>
                         <div className="mt-2 rounded bg-muted/60 px-2 py-1.5 font-mono text-foreground">
-                          Qᵢ = |实际盈亏比 bᵢ| ÷ 预期最大回撤百分点 dᵢ
+                          Qᵢ = |实际盈亏比 bᵢ| ÷ 预期回撤百分点 dᵢ
                         </div>
                         <div className="mt-2 space-y-1 text-muted-foreground">
                           <div>bᵢ = 已实现盈亏ᵢ ÷ 初始最大预期亏损ᵢ；机会质量取 |bᵢ| 绝对值——只看这次机会的量级，不看盈亏方向（盈亏由胜率 / 盈亏列表达）。</div>
@@ -955,9 +970,9 @@ export default function JournalCampaignsPage() {
             </div>
             <div
               data-testid="campaign-metrics-strip"
-              className="order-1 grid grid-cols-2 items-center gap-1 bg-[#F0B90B]/[0.045] px-3 py-3 text-[10px] text-muted-foreground sm:px-4 md:grid-cols-4 xl:grid-cols-[auto_repeat(7,minmax(0,1fr))]"
+              className="order-1 flex flex-wrap items-center gap-x-1 gap-y-1 bg-[#F0B90B]/[0.045] px-3 py-2.5 text-[10px] text-muted-foreground sm:px-4"
             >
-              <span className="col-span-2 inline-flex h-8 select-none items-center gap-1.5 font-medium text-[#9B7600] md:col-span-4 xl:col-span-1 xl:border-r xl:border-[#F0B90B]/20 xl:pr-4">
+              <span className="mr-1 inline-flex h-7 shrink-0 select-none items-center gap-1.5 border-r border-[#F0B90B]/20 pr-3 font-medium text-[#9B7600]">
                 <Activity className="h-3.5 w-3.5" />
                 统计概览
               </span>
@@ -972,7 +987,7 @@ export default function JournalCampaignsPage() {
                   aria-label={`有效战役 ${validCampaignCount} 场，其中盈利 ${performance.winCount} 场，亏损 ${performance.lossCount} 场${breakevenCampaignCount > 0 ? `，盈亏平衡 ${breakevenCampaignCount} 场` : ''}，点击查看最大预期亏损计算说明`}
                   title="点击查看有效战役与最大预期亏损说明"
                   onClick={event => openFormulaPopover(event, 'validCampaigns')}
-                  className="inline-flex min-h-8 w-full select-none items-center justify-start rounded border border-transparent px-2 text-foreground/65 transition-colors hover:border-[#F0B90B]/15 hover:bg-background/70 hover:text-foreground xl:justify-center"
+                  className="inline-flex h-7 shrink-0 select-none items-center justify-center whitespace-nowrap rounded border border-transparent px-2 text-foreground/65 transition-colors hover:border-[#F0B90B]/15 hover:bg-background/70 hover:text-foreground"
                 >
                   有效战役（{validCampaignCount}）
                 </button>
@@ -1006,7 +1021,7 @@ export default function JournalCampaignsPage() {
                   aria-label={`镜像止盈达成率 ${mirrorTpRateLabel}，实现 ${mirrorTp.achieved} 场（盈利 ${mirrorTp.achievedWin} 场、亏损 ${mirrorTp.achievedLoss} 场），未实现 ${mirrorTp.notAchieved} 场（${mirrorTpNotAchievedRateLabel}），点击查看说明`}
                   title="点击查看镜像止盈达成说明"
                   onClick={event => openFormulaPopover(event, 'mirrorTp')}
-                  className="inline-flex min-h-8 w-full select-none items-center justify-start rounded border border-transparent px-2 text-foreground/65 transition-colors hover:border-[#F0B90B]/15 hover:bg-background/70 hover:text-foreground xl:justify-center"
+                  className="inline-flex h-7 shrink-0 select-none items-center justify-center whitespace-nowrap rounded border border-transparent px-2 text-foreground/65 transition-colors hover:border-[#F0B90B]/15 hover:bg-background/70 hover:text-foreground"
                 >
                   镜像止盈（{mirrorTpRateLabel}）
                 </button>
@@ -1042,7 +1057,7 @@ export default function JournalCampaignsPage() {
                   aria-label={`盈利战役 ${performance.winCount} 场，亏损战役 ${performance.lossCount} 场，胜率 ${winRateLabel}`}
                   title="点击查看胜率计算公式"
                   onClick={event => openFormulaPopover(event, 'winRate')}
-                  className="inline-flex min-h-8 w-full select-none items-center justify-start gap-1 rounded border border-transparent px-2 text-foreground/65 transition-colors hover:border-[#F0B90B]/15 hover:bg-background/70 hover:text-foreground xl:justify-center"
+                  className="inline-flex h-7 shrink-0 select-none items-center justify-center gap-1 whitespace-nowrap rounded border border-transparent px-2 text-foreground/65 transition-colors hover:border-[#F0B90B]/15 hover:bg-background/70 hover:text-foreground"
                 >
                   胜率（{winRateLabel}）
                   <Sigma aria-hidden="true" className="h-2.5 w-2.5 opacity-35" />
@@ -1078,7 +1093,7 @@ export default function JournalCampaignsPage() {
                   aria-label={`平均盈亏比 ${payoffRatioLabel}，共 ${performance.payoffRatioSampleCount} 场战役`}
                   title="点击查看平均盈亏比计算公式"
                   onClick={event => openFormulaPopover(event, 'averagePayoffRatio')}
-                  className="inline-flex min-h-8 w-full select-none items-center justify-start gap-1 rounded border border-transparent px-2 text-foreground/65 transition-colors hover:border-[#F0B90B]/15 hover:bg-background/70 hover:text-foreground xl:justify-center"
+                  className="inline-flex h-7 shrink-0 select-none items-center justify-center gap-1 whitespace-nowrap rounded border border-transparent px-2 text-foreground/65 transition-colors hover:border-[#F0B90B]/15 hover:bg-background/70 hover:text-foreground"
                 >
                   平均盈亏比（{payoffRatioLabel}）
                   <Sigma aria-hidden="true" className="h-2.5 w-2.5 opacity-35" />
@@ -1111,7 +1126,7 @@ export default function JournalCampaignsPage() {
                 <button
                   type="button"
                   data-testid="campaign-expected-value"
-                  className="inline-flex min-h-8 w-full items-center justify-start rounded border border-transparent px-2 text-foreground/65 transition-colors hover:border-[#F0B90B]/15 hover:bg-background/70 hover:text-foreground xl:justify-center"
+                  className="inline-flex h-7 shrink-0 items-center justify-center whitespace-nowrap rounded border border-transparent px-2 text-foreground/65 transition-colors hover:border-[#F0B90B]/15 hover:bg-background/70 hover:text-foreground"
                   aria-label={`期望值 ${expectedRLabel}，点击查看计算公式`}
                   onClick={event => openFormulaPopover(event, 'expectedValue')}
                 >
@@ -1147,7 +1162,7 @@ export default function JournalCampaignsPage() {
                 <button
                   type="button"
                   data-testid="campaign-geometric-edge"
-                  className="inline-flex min-h-8 w-full items-center justify-start rounded border border-transparent px-2 text-foreground/65 transition-colors hover:border-[#F0B90B]/15 hover:bg-background/70 hover:text-foreground xl:justify-center"
+                  className="inline-flex h-7 shrink-0 items-center justify-center whitespace-nowrap rounded border border-transparent px-2 text-foreground/65 transition-colors hover:border-[#F0B90B]/15 hover:bg-background/70 hover:text-foreground"
                   aria-label={`几何期望 ${geometricEdgeLabel} 每笔，点击查看计算公式`}
                   onClick={event => openFormulaPopover(event, 'geometricEdge')}
                 >
@@ -1185,7 +1200,7 @@ export default function JournalCampaignsPage() {
                 <button
                   type="button"
                   data-testid="campaign-opportunity-quality"
-                  className="inline-flex min-h-8 w-full items-center justify-start rounded border border-transparent px-2 text-foreground/65 transition-colors hover:border-[#F0B90B]/15 hover:bg-background/70 hover:text-foreground xl:justify-center"
+                  className="inline-flex h-7 shrink-0 items-center justify-center whitespace-nowrap rounded border border-transparent px-2 text-foreground/65 transition-colors hover:border-[#F0B90B]/15 hover:bg-background/70 hover:text-foreground"
                   aria-label={`机会质量 ${opportunityQualityLabel}，${opportunityQualityStats.sampleCount} 场有效战役，点击查看计算公式`}
                   title="点击查看机会质量计算公式"
                   onClick={event => openFormulaPopover(event, 'opportunityQuality')}
@@ -1199,7 +1214,7 @@ export default function JournalCampaignsPage() {
                   Qᵢ = |bᵢ| ÷ dᵢ，Q̄ = ΣQᵢ ÷ N
                 </div>
                 <div className="mt-2 space-y-1 text-muted-foreground">
-                  <div>bᵢ = 该战役实际盈亏比 = 已实现盈亏 ÷ 初始最大预期亏损；dᵢ = 预期最大回撤百分点。</div>
+                  <div>bᵢ = 该战役实际盈亏比 = 已实现盈亏 ÷ 初始最大预期亏损；dᵢ = 预期回撤百分点。</div>
                   <div>机会质量取 |bᵢ| 绝对值：只衡量这次机会的量级，不看盈亏方向（盈亏由胜率 / 盈亏列表达），亏损战役也是正的量级。</div>
                   <div className="rounded border border-border/60 px-2 py-1.5 font-mono leading-relaxed text-foreground/85">
                     dᵢ = max（|主力开仓价 − 初始对冲 A 价|，|主力开仓价 − 初始对冲 B 价|）÷ 主力开仓价 × 100
@@ -1229,7 +1244,7 @@ export default function JournalCampaignsPage() {
                 || sortState.mode === 'opportunityQuality'
                 || sortState.mode === 'arithmeticExpectancy'
                 || sortState.mode === 'geometricExpectancy') && rows.length > 0
-                ? `暂无可计算${sortState.mode === 'captureRate' ? '盈亏比' : sortState.mode === 'expectedDrawdownPct' ? '预期最大回撤百分比' : sortState.mode === 'opportunityQuality' ? '机会质量' : sortState.mode === 'arithmeticExpectancy' ? '算术期望' : '几何期望'}的战役`
+                ? `暂无可计算${sortState.mode === 'captureRate' ? '盈亏比' : sortState.mode === 'expectedDrawdownPct' ? '预期回撤' : sortState.mode === 'opportunityQuality' ? '机会质量' : sortState.mode === 'arithmeticExpectancy' ? '算术期望' : '几何期望'}的战役`
                 : '尚无战役'}
             </div>
             <div className="text-[12px] text-muted-foreground">
@@ -1293,6 +1308,7 @@ export default function JournalCampaignsPage() {
             const geometricTone = geometricExpectancy == null || geometricExpectancy === 0
               ? 'text-foreground/80'
               : geometricExpectancy > 0 ? 'text-[#0ECB81]' : 'text-[#F6465D]';
+            const detailsExpanded = expandedCampaignIds.has(campaign.id);
             return (
               <div
                 key={campaign.id}
@@ -1315,6 +1331,15 @@ export default function JournalCampaignsPage() {
                         </span>
                         <span className="rounded bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground">{campaign.symbol}</span>
                         <span className="text-[10px] text-muted-foreground/80">{STRATEGY_TEMPLATES[campaign.strategy_template].name}</span>
+                        <span
+                          data-testid="campaign-operation-time"
+                          className="ml-1 inline-flex items-center gap-1 border-l border-border/70 pl-2 text-[9px] text-muted-foreground/65"
+                        >
+                          操作时间：
+                          <span className="whitespace-nowrap font-mono text-[10px] tabular-nums text-foreground/75">
+                            {fmtOperationTime(operationTime)}
+                          </span>
+                        </span>
                       </div>
                       <span
                         className="mt-1.5 inline-flex rounded border border-border/80 bg-background/55 px-1.5 py-0.5 font-mono text-[9px] text-muted-foreground/75"
@@ -1325,6 +1350,16 @@ export default function JournalCampaignsPage() {
                     </div>
                   </div>
                   <div className="flex shrink-0 flex-wrap items-center gap-1.5 self-end lg:self-start" onClick={(event) => event.stopPropagation()}>
+                    <button
+                      type="button"
+                      aria-expanded={detailsExpanded}
+                      aria-label={detailsExpanded ? '收起战役详情' : '展开战役详情'}
+                      title={detailsExpanded ? '收起战役详情' : '展开战役详情'}
+                      onClick={(event) => handleCampaignDetailsToggle(event, campaign.id)}
+                      className="inline-flex h-8 w-8 items-center justify-center rounded border border-transparent text-muted-foreground/55 transition-colors hover:border-border/80 hover:bg-background/65 hover:text-foreground"
+                    >
+                      <ChevronDown className={`h-3.5 w-3.5 transition-transform ${detailsExpanded ? 'rotate-180' : ''}`} />
+                    </button>
                     {isOwnCampaign && (
                       <div className="flex h-8 items-center gap-0.5 rounded border border-border/80 bg-background/55 px-2">
                         <span className="mr-1 text-[9px] text-muted-foreground">重要性</span>
@@ -1367,42 +1402,9 @@ export default function JournalCampaignsPage() {
                   </div>
                 </div>
 
-                <div className="border-y border-border/65 bg-muted/[0.12]">
-                  <dl className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-[1.35fr_0.8fr_0.8fr_0.9fr]">
-                    <div className="min-w-0 px-4 py-3 sm:px-5">
-                      <dt className="text-[9px] text-muted-foreground/70">战役时间</dt>
-                      <dd className="mt-1 whitespace-nowrap font-mono text-[11px] tabular-nums text-foreground/80">
-                        {fmtTime(campaign.opened_at)} → {fmtTime(campaign.closed_at)}
-                      </dd>
-                    </div>
-                    <div className="min-w-0 px-4 py-3 sm:px-5">
-                      <dt className="text-[9px] text-muted-foreground/70">结构与时长</dt>
-                      <dd className="mt-1 whitespace-nowrap font-mono text-[11px] tabular-nums text-foreground/80">
-                        {legs.length} legs · {durationLabel(campaign.opened_at, campaign.closed_at)}
-                      </dd>
-                    </div>
-                    <div className="min-w-0 px-4 py-3 sm:px-5">
-                      <dt className="text-[9px] text-muted-foreground/70">已实现 P&amp;L</dt>
-                      <dd className={`mt-1 whitespace-nowrap font-mono text-[12px] font-medium tabular-nums ${realizedPnlTone}`}>
-                        {realizedPnl == null ? '—' : realizedPnl.toFixed(2)}
-                      </dd>
-                    </div>
-                    <div className="min-w-0 px-4 py-3 sm:px-5" data-testid="campaign-operation-time">
-                      <span className="block text-[9px] text-muted-foreground/70">操作时间：</span>
-                      <span className="mt-1 block whitespace-nowrap font-mono text-[11px] tabular-nums text-foreground/80">{fmtOperationTime(operationTime)}</span>
-                    </div>
-                  </dl>
-                </div>
-
-                <div className="grid grid-cols-2 gap-y-1 px-2 py-2 sm:grid-cols-3 lg:grid-cols-6">
-                  <div className="min-w-0 px-3 py-2" data-testid="campaign-payoff-ratio">
-                    <span className="block text-[9px] text-muted-foreground/70">盈亏比：</span>
-                    <span className="mt-1 block whitespace-nowrap font-mono text-[11px] tabular-nums text-foreground/80">
-                      {profitCaptureRatio == null ? '—' : formatCampaignPayoffRatio(profitCaptureRatio, 2)}
-                    </span>
-                  </div>
+                <div className="grid grid-cols-2 gap-y-1 border-t border-border/65 bg-muted/[0.08] px-2 py-2 sm:grid-cols-3 lg:grid-cols-6">
                   <div className="min-w-0 px-3 py-2" data-testid="campaign-expected-drawdown-pct">
-                    <span className="block text-[9px] text-muted-foreground/70">预期最大回撤：</span>
+                    <span className="block text-[9px] text-muted-foreground/70">预期回撤：</span>
                     <span className="mt-1 block whitespace-nowrap font-mono text-[11px] tabular-nums text-foreground/80">
                       {initialExpectedMaxDrawdownPct > 0 ? `${initialExpectedMaxDrawdownPct.toFixed(2)}%` : '—'}
                     </span>
@@ -1411,11 +1413,17 @@ export default function JournalCampaignsPage() {
                     data-testid="campaign-opportunity-quality-value"
                     title={opportunityQuality == null
                       ? '需要已结束战役的实际盈亏比、主力开仓价和至少一个初始对冲 A/B 价格'
-                      : `Q = 实际盈亏比 ${(profitCaptureRatio! / 100).toFixed(2)} ÷ 预期最大回撤 ${initialExpectedMaxDrawdownPct.toFixed(2)}%`}
+                      : `Q = 实际盈亏比 ${(profitCaptureRatio! / 100).toFixed(2)} ÷ 预期回撤 ${initialExpectedMaxDrawdownPct.toFixed(2)}%`}
                     className="min-w-0 px-3 py-2"
                   >
                     <span className="block text-[9px] text-muted-foreground/70">机会质量：</span>
                     <span className="mt-1 block whitespace-nowrap font-mono text-[11px] tabular-nums text-foreground/80">{formatOpportunityQuality(opportunityQuality)}</span>
+                  </div>
+                  <div className="min-w-0 px-3 py-2" data-testid="campaign-payoff-ratio">
+                    <span className="block text-[9px] text-muted-foreground/70">盈亏比：</span>
+                    <span className="mt-1 block whitespace-nowrap font-mono text-[11px] tabular-nums text-foreground/80">
+                      {profitCaptureRatio == null ? '—' : formatCampaignPayoffRatio(profitCaptureRatio, 2)}
+                    </span>
                   </div>
                   <div
                     data-testid="campaign-arithmetic-expectancy"
@@ -1443,25 +1451,52 @@ export default function JournalCampaignsPage() {
                   </div>
                 </div>
 
-                <div className="flex min-h-11 flex-wrap items-center gap-1.5 border-t border-border/60 px-4 py-2.5 sm:px-5">
-                  <span className="mr-1 inline-flex items-center gap-1 text-[9px] text-muted-foreground/60">
-                    <Layers className="h-3 w-3" />
-                    Legs
-                  </span>
-                  {legs.length === 0 ? (
-                    <span className="text-[10px] text-muted-foreground">暂无 legs</span>
-                  ) : (
-                    legs.map((leg: TradeJournal) => (
-                      <span
-                        key={leg.id}
-                        title={leg.leg_role ? LEG_ROLE_LABELS[leg.leg_role] : '未归类'}
-                        className={`px-2 py-0.5 rounded text-[10px] ${leg.leg_role ? LEG_CHIP_CLASS[leg.leg_role] : 'bg-muted text-muted-foreground'}`}
-                      >
-                        {leg.leg_role ? LEG_ABBR[leg.leg_role] : '?'}
-                      </span>
-                    ))
-                  )}
-                </div>
+                {detailsExpanded && (
+                  <dl
+                    data-testid="campaign-card-details"
+                    className="grid grid-cols-1 border-t border-border/60 bg-background/35 sm:grid-cols-2 xl:grid-cols-[1.35fr_0.75fr_0.75fr_1.6fr]"
+                  >
+                    <div className="min-w-0 px-4 py-3 sm:px-5">
+                      <dt className="text-[9px] text-muted-foreground/70">战役时间</dt>
+                      <dd className="mt-1 whitespace-nowrap font-mono text-[11px] tabular-nums text-foreground/80">
+                        {fmtTime(campaign.opened_at)} → {fmtTime(campaign.closed_at)}
+                      </dd>
+                    </div>
+                    <div className="min-w-0 px-4 py-3 sm:px-5">
+                      <dt className="text-[9px] text-muted-foreground/70">结构与时长</dt>
+                      <dd className="mt-1 whitespace-nowrap font-mono text-[11px] tabular-nums text-foreground/80">
+                        {legs.length} legs · {durationLabel(campaign.opened_at, campaign.closed_at)}
+                      </dd>
+                    </div>
+                    <div className="min-w-0 px-4 py-3 sm:px-5">
+                      <dt className="text-[9px] text-muted-foreground/70">已实现 P&amp;L</dt>
+                      <dd className={`mt-1 whitespace-nowrap font-mono text-[12px] font-medium tabular-nums ${realizedPnlTone}`}>
+                        {realizedPnl == null ? '—' : realizedPnl.toFixed(2)}
+                      </dd>
+                    </div>
+                    <div className="min-w-0 px-4 py-3 sm:px-5">
+                      <dt className="inline-flex items-center gap-1 text-[9px] text-muted-foreground/60">
+                        <Layers className="h-3 w-3" />
+                        Legs
+                      </dt>
+                      <dd className="mt-1 flex min-h-5 flex-wrap items-center gap-1.5">
+                        {legs.length === 0 ? (
+                          <span className="text-[10px] text-muted-foreground">暂无 legs</span>
+                        ) : (
+                          legs.map((leg: TradeJournal) => (
+                            <span
+                              key={leg.id}
+                              title={leg.leg_role ? LEG_ROLE_LABELS[leg.leg_role] : '未归类'}
+                              className={`rounded px-2 py-0.5 text-[10px] ${leg.leg_role ? LEG_CHIP_CLASS[leg.leg_role] : 'bg-muted text-muted-foreground'}`}
+                            >
+                              {leg.leg_role ? LEG_ABBR[leg.leg_role] : '?'}
+                            </span>
+                          ))
+                        )}
+                      </dd>
+                    </div>
+                  </dl>
+                )}
               </div>
             );
           })

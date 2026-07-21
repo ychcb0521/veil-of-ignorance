@@ -384,7 +384,7 @@ describe('JournalCampaignDetailPage metrics', () => {
       '杠杆倍数',
       '峰值浮盈',
       '最大预期亏损',
-      '预期最大回撤百分比',
+      '预期回撤',
       '盈亏比',
       '机会质量',
       '算术期望',
@@ -395,7 +395,7 @@ describe('JournalCampaignDetailPage metrics', () => {
     expect(screen.queryByRole('button', { name: '最大回撤说明' })).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: '机会质量说明' }));
-    expect(await screen.findByText(/Q = 实际盈亏比 b ÷ 预期最大回撤百分点 d/)).toBeInTheDocument();
+    expect(await screen.findByText(/Q = 实际盈亏比 b ÷ 预期回撤百分点 d/)).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'PNG' }));
     await waitFor(() => expect(exportCampaignBoardPngMock).toHaveBeenCalledTimes(1));
@@ -406,7 +406,7 @@ describe('JournalCampaignDetailPage metrics', () => {
       '杠杆倍数',
       '峰值浮盈',
       '最大预期亏损',
-      '预期最大回撤百分比',
+      '预期回撤',
       '盈亏比',
       '机会质量',
       '算术期望',

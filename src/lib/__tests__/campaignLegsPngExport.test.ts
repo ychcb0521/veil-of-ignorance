@@ -56,7 +56,7 @@ function input(): CampaignBoardExportInput {
         { key: 'peakUnrealizedPnl', label: '峰值浮盈', value: '5200.00' },
         { key: 'maxDrawdown', label: '最大回撤', value: '-800.00' },
         { key: 'initialExpectedMaxLoss', label: '最大预期亏损', value: '1800.00 USDT' },
-        { key: 'expectedMaxDrawdownPct', label: '预期最大回撤百分比', value: '3.20%' },
+        { key: 'expectedMaxDrawdownPct', label: '预期回撤', value: '3.20%' },
         { key: 'payoffRatio', label: '盈亏比', value: '66.48%（0.66）', color: '#0ECB81' },
         { key: 'opportunityQuality', label: '机会质量', value: '0.21', color: '#0ECB81' },
         { key: 'arithmeticExpectancy', label: '算术期望', value: '+0.18R', color: '#0ECB81' },
@@ -85,7 +85,7 @@ describe('campaign PNG overview', () => {
     expect(pnl['峰值浮盈']).toBe('5200.00');
     expect(pnl['最大回撤']).toBe('-800.00');
     expect(pnl['最大预期亏损']).toBe('1800.00 USDT');
-    expect(pnl['预期最大回撤百分比']).toBe('3.20%');
+    expect(pnl['预期回撤']).toBe('3.20%');
     expect(pnl['盈亏比']).toBe('66.48%（0.66）');
     expect(pnl['机会质量']).toBe('0.21');
     expect(pnl['算术期望']).toBe('+0.18R');

@@ -829,13 +829,13 @@ export default function JournalCampaignDetailPage() {
         help: (
           <>
             <p>主力头仓在初始对冲 A/B 风险边界下预先承担的最大亏损额，是盈亏比的风险分母。</p>
-            <div className="rounded bg-muted/60 px-2 py-1 font-mono text-foreground">最大预期亏损 = 主力开仓名义仓位 × 预期最大回撤比例</div>
+            <div className="rounded bg-muted/60 px-2 py-1 font-mono text-foreground">最大预期亏损 = 主力开仓名义仓位 × 预期回撤比例</div>
           </>
         ),
       },
       {
         key: 'expectedMaxDrawdownPct',
-        label: '预期最大回撤百分比',
+        label: '预期回撤',
         value: expectedDrawdownPct > 0 ? `${expectedDrawdownPct.toFixed(2)}%` : '—',
         help: (
           <>
@@ -869,7 +869,7 @@ export default function JournalCampaignDetailPage() {
         help: (
           <>
             <p>用实际盈亏比衡量每 1 个初始回撤百分点换来的结果。相同盈亏比下，初始回撤越小，机会质量越高。</p>
-            <div className="rounded bg-muted/60 px-2 py-1 font-mono text-foreground">Q = 实际盈亏比 b ÷ 预期最大回撤百分点 d</div>
+            <div className="rounded bg-muted/60 px-2 py-1 font-mono text-foreground">Q = 实际盈亏比 b ÷ 预期回撤百分点 d</div>
             <p>回撤 2% 时 d 按 2 计，不按 0.02 计；亏损战役保留负号。</p>
           </>
         ),

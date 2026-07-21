@@ -1210,8 +1210,8 @@ export default function GuidePage() {
                     <tr><td className="px-3 py-2 border-t border-border">胜率 P(赢)</td><td className="px-3 py-2 border-t border-border">有效盈利战役数 ÷（有效盈利战役数 + 有效亏损战役数）</td><td className="px-3 py-2 border-t border-border">只统计有效且非盈亏平衡的已结束战役</td></tr>
                     <tr><td className="px-3 py-2 border-t border-border">平均盈亏比 b̄</td><td className="px-3 py-2 border-t border-border">Σ 单场盈亏比 bᵢ ÷ 有效战役数 N</td><td className="px-3 py-2 border-t border-border">亏损的负盈亏比原样参与求和</td></tr>
                     <tr><td className="px-3 py-2 border-t border-border">期望值 E</td><td className="px-3 py-2 border-t border-border">P(赢) × b̄ −（1 − P(赢)）</td><td className="px-3 py-2 border-t border-border">胜率与平均盈亏比来自同一批有效战役</td></tr>
-                    <tr><td className="px-3 py-2 border-t border-border">预期最大回撤百分比 dᵢ</td><td className="px-3 py-2 border-t border-border">max（|主力开仓价 − 初始对冲 A 价|，|主力开仓价 − 初始对冲 B 价|）÷ 主力开仓价 × 100%</td><td className="px-3 py-2 border-t border-border">至少存在一个有效初始对冲价格；支持列表双向排序，缺少价格的战役不参与排序</td></tr>
-                    <tr><td className="px-3 py-2 border-t border-border">机会质量 Qᵢ / Q̄</td><td className="px-3 py-2 border-t border-border">Qᵢ = 实际盈亏比 bᵢ ÷ 预期最大回撤百分点 dᵢ；Q̄ = ΣQᵢ ÷ N</td><td className="px-3 py-2 border-t border-border">bᵢ 保留盈亏正负号；历史价格沿用初始最大预期亏损的同一解析口径；缺少实际盈亏比、主力价或初始对冲价时不纳入统计和排序</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border">预期回撤 dᵢ</td><td className="px-3 py-2 border-t border-border">max（|主力开仓价 − 初始对冲 A 价|，|主力开仓价 − 初始对冲 B 价|）÷ 主力开仓价 × 100%</td><td className="px-3 py-2 border-t border-border">至少存在一个有效初始对冲价格；支持列表双向排序，缺少价格的战役不参与排序</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border">机会质量 Qᵢ / Q̄</td><td className="px-3 py-2 border-t border-border">Qᵢ = 实际盈亏比 bᵢ ÷ 预期回撤百分点 dᵢ；Q̄ = ΣQᵢ ÷ N</td><td className="px-3 py-2 border-t border-border">bᵢ 保留盈亏正负号；历史价格沿用初始最大预期亏损的同一解析口径；缺少实际盈亏比、主力价或初始对冲价时不纳入统计和排序</td></tr>
                     <tr><td className="px-3 py-2 border-t border-border">单场算术期望 Eᵢ</td><td className="px-3 py-2 border-t border-border">P(赢) × bᵢ −（1 − P(赢)）</td><td className="px-3 py-2 border-t border-border">使用实时有效战役胜率与该场带符号盈亏比</td></tr>
                     <tr><td className="px-3 py-2 border-t border-border">单场风险比例 xᵢ</td><td className="px-3 py-2 border-t border-border">Lᵢ ÷ 主力开仓时账户总资产 Aᵢ</td><td className="px-3 py-2 border-t border-border">优先使用主力开仓快照；旧战役缺失时用今日当前总资产估算</td></tr>
                     <tr><td className="px-3 py-2 border-t border-border">单场几何期望 Gᵢ</td><td className="px-3 py-2 border-t border-border">(1+bᵢ·xᵢ)^P(赢) × (1−xᵢ)^(1−P(赢)) − 1</td><td className="px-3 py-2 border-t border-border">bᵢ 可为负；缺少有效 Lᵢ 或可用 Aᵢ 时不估算</td></tr>
@@ -1296,7 +1296,7 @@ export default function GuidePage() {
               </Highlight>
 
               <SubTitle>战役详情页：盈亏概览与高清 PNG</SubTitle>
-              <P>详情页的<strong>盈亏概览</strong>统一展示已实现盈亏、主力开仓杠杆倍数、峰值浮盈、初始最大预期亏损、预期最大回撤百分比、盈亏比、机会质量、单场算术期望和单场几何期望。杠杆优先读取主力 Leg，历史记录缺失时再从关联成交、战役初始字段或主力开仓事件回填。每个指标名旁的低透明度 <strong>i</strong> 图标都可点击，会折叠展开该指标的含义、公式和数据口径，不会挤压页面布局。这些数据与战役列表使用同一套公式：预期最大回撤百分比支持双向排序；期望指标使用同一账户当前的有效战役胜率，历史战役的几何期望在缺少开仓资产快照时才使用今日当前总资产估算。</P>
+              <P>详情页的<strong>盈亏概览</strong>统一展示已实现盈亏、主力开仓杠杆倍数、峰值浮盈、初始最大预期亏损、预期回撤、盈亏比、机会质量、单场算术期望和单场几何期望。杠杆优先读取主力 Leg，历史记录缺失时再从关联成交、战役初始字段或主力开仓事件回填。每个指标名旁的低透明度 <strong>i</strong> 图标都可点击，会折叠展开该指标的含义、公式和数据口径，不会挤压页面布局。这些数据与战役列表使用同一套公式：预期回撤支持双向排序；期望指标使用同一账户当前的有效战役胜率，历史战役的几何期望在缺少开仓资产快照时才使用今日当前总资产估算。</P>
               <ul className="list-disc pl-6 text-[14px] text-foreground/90 space-y-1">
                 <li>点击 Legs 列表右上角的 <strong>PNG</strong>，会把<strong>战役原数据、盈亏概览、当前 K 线周期、已经拖动 / 缩放好的 K 线视图，以及完整 Legs 列表</strong>导出到同一张高清图片。周期会以「1分钟线」「5分钟线」「15分钟线」或「1小时线」写入图片。</li>
                 <li>图片中的<strong>盈亏概览</strong>与详情页共用同一份指标清单；以后详情页新增盈亏指标时，导出图会自动同步收录，并随指标数量自动增加高度。</li>
