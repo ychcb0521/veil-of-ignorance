@@ -44,7 +44,7 @@ import {
   type LegExitPriceCorrections,
 } from '@/lib/campaignLegExecution';
 import { buildSelectedLegVerticalLines, legRoleMarkerLabel } from '@/lib/campaignLegMarkers';
-import { exportCampaignBoardPng } from '@/lib/campaignLegsPngExport';
+import { exportCampaignBoardPng, type CampaignBoardPnlItem } from '@/lib/campaignLegsPngExport';
 import { campaignOperationTime, buildTradeRecordLookup, journalSimulatedCloseTime } from '@/lib/objectiveOperationTime';
 import {
   deleteCounterfactual,
@@ -88,11 +88,21 @@ type CampaignDetailNavigationState = {
   fromCampaignList?: boolean;
 };
 
+type CampaignPnlOverviewItem = CampaignBoardPnlItem & {
+  help: ReactNode;
+  valueClassName?: string;
+};
+
 function pnlColor(value: number | null) {
   if (value == null) return 'text-muted-foreground';
   if (value > 0) return 'text-[#0ECB81]';
   if (value < 0) return 'text-[#F6465D]';
   return 'text-muted-foreground';
+}
+
+function pnlExportColor(value: number | null): string {
+  if (value == null || value === 0) return '#64748B';
+  return value > 0 ? '#0ECB81' : '#F6465D';
 }
 
 function PnlMetricLabel({ label, children }: { label: string; children: ReactNode }) {
@@ -648,10 +658,10 @@ export default function JournalCampaignDetailPage() {
   ]);
   const overviewInterval = useMemo(
     () => pickCampaignOverviewInterval({
-      startMs: campaignKlineTimeWindow.fromTime,
-      endMs: campaignKlineTimeWindow.toTime,
+      startMs: campaignKlineTimeWindow.defaultFromTime,
+      endMs: campaignKlineTimeWindow.defaultToTime,
     }),
-    [campaignKlineTimeWindow.fromTime, campaignKlineTimeWindow.toTime],
+    [campaignKlineTimeWindow.defaultFromTime, campaignKlineTimeWindow.defaultToTime],
   );
 
   useEffect(() => {
@@ -767,6 +777,163 @@ export default function JournalCampaignDetailPage() {
     legs,
     reverseHedgeOrders,
     tradeRecords,
+  ]);
+  const campaignPnlOverviewItems = useMemo<CampaignPnlOverviewItem[]>(() => {
+    if (!campaign || !accuracy) return [];
+    const realizedPnl = campaign.final_realized_pnl;
+    const payoffRatio = campaignMetricValues?.profitCaptureRatio ?? null;
+    const opportunityQuality = campaignMetricValues?.opportunityQuality ?? null;
+    const arithmeticExpectancy = campaignMetricValues?.arithmeticExpectancy ?? null;
+    const geometricExpectancy = campaignMetricValues?.geometricExpectancy ?? null;
+    const expectedDrawdownPct = campaignMetricValues?.initialExpectedMaxDrawdownPct ?? 0;
+    const expectedWinRate = campaignPerformance?.expectedWinRate ?? null;
+
+    return [
+      {
+        key: 'realizedPnl',
+        label: '已实现 P&L',
+        value: realizedPnl == null ? '—' : `${realizedPnl.toFixed(2)} USDT`,
+        color: pnlExportColor(realizedPnl),
+        valueClassName: pnlColor(realizedPnl),
+        help: (
+          <>
+            <p>本场战役所有已平仓 Legs 的实际盈亏合计，包括主仓、加仓、对冲与止盈的已实现结果。</p>
+            <div className="rounded bg-muted/60 px-2 py-1 font-mono text-foreground">已实现 P&amp;L = Σ 各已平仓 Leg 盈亏</div>
+          </>
+        ),
+      },
+      {
+        key: 'peakUnrealizedPnl',
+        label: '峰值浮盈',
+        value: accuracy.campaign_max_profit_real.toFixed(2),
+        help: (
+          <>
+            <p>战役期间同一时刻所有活跃 Legs 合计浮动盈亏的最高值，用来观察这场战役曾经提供过多厚的浮盈垫。</p>
+            <p>按当前 K 线粒度的收盘价采样，不等同于逐笔成交的瞬时最高值。</p>
+          </>
+        ),
+      },
+      {
+        key: 'maxDrawdown',
+        label: '最大回撤',
+        value: accuracy.campaign_max_drawdown_real.toFixed(2),
+        help: (
+          <>
+            <p>战役期间所有活跃 Legs 合计浮盈相对于零盈亏线的最深浮亏绝对值。</p>
+            <p>这里表示「最深浮亏」，不是从峰值浮盈到后续低点的峰谷回撤。</p>
+          </>
+        ),
+      },
+      {
+        key: 'initialExpectedMaxLoss',
+        label: '最大预期亏损',
+        value: accuracy.initial_expected_max_loss > 0
+          ? `${accuracy.initial_expected_max_loss.toFixed(2)} USDT`
+          : '—',
+        help: (
+          <>
+            <p>主力头仓在初始对冲 A/B 风险边界下预先承担的最大亏损额，是盈亏比的风险分母。</p>
+            <div className="rounded bg-muted/60 px-2 py-1 font-mono text-foreground">最大预期亏损 = 主力开仓名义仓位 × 预期最大回撤比例</div>
+          </>
+        ),
+      },
+      {
+        key: 'expectedMaxDrawdownPct',
+        label: '预期最大回撤百分比',
+        value: expectedDrawdownPct > 0 ? `${expectedDrawdownPct.toFixed(2)}%` : '—',
+        help: (
+          <>
+            <p>主力开仓价到初始对冲 A/B 中更远一条风险边界的价格距离，占主力开仓价的百分比。</p>
+            <div className="rounded bg-muted/60 px-2 py-1 font-mono text-foreground">
+              d = max（|主力价 − A 价|，|主力价 − B 价|）÷ 主力价 × 100%
+            </div>
+          </>
+        ),
+      },
+      {
+        key: 'payoffRatio',
+        label: '盈亏比',
+        value: payoffRatio == null ? '—' : formatCampaignPayoffRatio(payoffRatio),
+        color: pnlExportColor(payoffRatio),
+        valueClassName: pnlColor(payoffRatio),
+        help: (
+          <>
+            <p>本场已实现结果相对于初始风险分母的倍数。盈利为正，亏损保留负号。</p>
+            <div className="rounded bg-muted/60 px-2 py-1 font-mono text-foreground">b = 已实现 P&amp;L ÷ 最大预期亏损</div>
+            <p>百分数后括号内是数字倍数，例如 200%（2.00）表示 2R。</p>
+          </>
+        ),
+      },
+      {
+        key: 'opportunityQuality',
+        label: '机会质量',
+        value: formatOpportunityQuality(opportunityQuality),
+        color: pnlExportColor(opportunityQuality),
+        valueClassName: pnlColor(opportunityQuality),
+        help: (
+          <>
+            <p>用实际盈亏比衡量每 1 个初始回撤百分点换来的结果。相同盈亏比下，初始回撤越小，机会质量越高。</p>
+            <div className="rounded bg-muted/60 px-2 py-1 font-mono text-foreground">Q = 实际盈亏比 b ÷ 预期最大回撤百分点 d</div>
+            <p>回撤 2% 时 d 按 2 计，不按 0.02 计；亏损战役保留负号。</p>
+          </>
+        ),
+      },
+      {
+        key: 'arithmeticExpectancy',
+        label: '算术期望',
+        value: formatArithmeticExpectancy(arithmeticExpectancy),
+        color: pnlExportColor(arithmeticExpectancy),
+        valueClassName: pnlColor(arithmeticExpectancy),
+        help: (
+          <>
+            <p>按同一账户当前有效战役胜率 P，与本场带正负号的实际盈亏比 b，计算每承担 1R 风险的加法期望。</p>
+            <div className="rounded bg-muted/60 px-2 py-1 font-mono text-foreground">E = P × b −（1 − P）</div>
+            {expectedWinRate != null && payoffRatio != null ? (
+              <p className="font-mono text-foreground">
+                本场：{(expectedWinRate * 100).toFixed(2)}% × {(payoffRatio / 100).toFixed(2)} − {((1 - expectedWinRate) * 100).toFixed(2)}%
+              </p>
+            ) : <p>缺少有效盈亏比或有效战役胜率时不计算。</p>}
+          </>
+        ),
+      },
+      {
+        key: 'geometricExpectancy',
+        label: '几何期望',
+        value: formatGeometricExpectancy(geometricExpectancy),
+        color: pnlExportColor(geometricExpectancy),
+        valueClassName: pnlColor(geometricExpectancy),
+        help: (
+          <>
+            <p>把胜率 P、本场实际盈亏比 b 和本场资产风险比例 x 放入复利路径，衡量这场战役对长期资本增长的影响。</p>
+            <div className="rounded bg-muted/60 px-2 py-1 font-mono text-foreground">G = (1+b·x)^P · (1−x)^(1−P)；几何期望 = G − 1</div>
+            <p>x = 最大预期亏损 ÷ 主力开仓时账户总资产。历史战役缺快照时，才使用今日当前总资产估算。</p>
+            {campaignMetricValues?.initialRisk ? (
+              <p className="font-mono text-foreground">本场 x = {(campaignMetricValues.initialRisk.drawdownFraction * 100).toFixed(2)}%</p>
+            ) : <p>缺少有效最大预期亏损或账户资产分母时不计算。</p>}
+          </>
+        ),
+      },
+    ];
+  }, [accuracy, campaign, campaignMetricValues, campaignPerformance?.expectedWinRate]);
+  const campaignPnlOverviewNote = useMemo(() => {
+    const expectationNote = campaignPerformanceLoading
+      ? '正在按同一账户的有效战役口径计算期望…'
+      : campaignPerformanceError
+        ? `期望口径加载失败：${campaignPerformanceError}`
+        : campaignPerformance?.expectedWinRate == null
+          ? '暂无可计算胜率的有效战役样本。'
+          : `期望口径：${campaignPerformance.payoffRatioSampleCount} 场有效战役，实时胜率 ${(campaignPerformance.expectedWinRate * 100).toFixed(2)}%。`;
+    const riskNote = campaignMetricValues?.initialRisk?.source === 'current_account_fallback'
+      ? ' 本场几何期望的资产分母使用今日当前总账户资产估算。'
+      : campaignMetricValues?.initialRisk?.source === 'main_open_snapshot'
+        ? ' 本场几何期望的资产分母使用主力开仓实时总资产快照。'
+        : '';
+    return `${expectationNote}${riskNote}`;
+  }, [
+    campaignMetricValues?.initialRisk?.source,
+    campaignPerformance,
+    campaignPerformanceError,
+    campaignPerformanceLoading,
   ]);
   const chart = useMemo(
     () => (campaign ? buildChartArtifacts(campaign, legs, tradeRecords, legExitPriceCorrections) : { markers: [], timeBoundPriceLines: [], verticalLines: [], events: [] }),
@@ -960,14 +1127,15 @@ export default function JournalCampaignDetailPage() {
     );
   }
 
-  // 主图当前时间游标：聚焦到某事件时用 focusTime，否则停在已拉取 K 线窗口的最右端。
+  // 主图当前时间游标：聚焦到某事件时用 focusTime，否则停在默认三倍窗口的最右端。
   // 关键：ReplayKlineChart 会用 `line.time <= currentTime` 过滤竖线/标记，并以 currentTime 作为可见区右沿。
-  // useCampaignKlines 已经把窗口扩成「开始前 1/3 + 战役内容 1/3 + 结束后 1/3」，
-  // 所以这里直接用窗口右端，确保默认盘面把结束后的上下文也纳入。
+  // 数据层实际预载 21 倍范围；首次打开仍只铺满「前 1 倍 + 战役 1 倍 + 后 1 倍」。
   // 必须放在上面的 loading guard 之后——此时 campaign 一定非空；放在 guard 之前会在
   // 首帧（campaign 仍为 null）就解引用 campaign.opened_at 直接崩溃、整页白屏。
-  const chartDefaultCurrentTime = campaignKlineToTime;
-  const chartDefaultViewportCenterTime = Math.round((campaignKlineFromTime + campaignKlineToTime) / 2);
+  const chartDefaultCurrentTime = campaignKlineTimeWindow.defaultToTime;
+  const chartDefaultViewportCenterTime = Math.round(
+    (campaignKlineTimeWindow.defaultFromTime + campaignKlineTimeWindow.defaultToTime) / 2,
+  );
   const chartCurrentTime = focusTime ?? chartDefaultCurrentTime;
   const chartViewportCenterTime = focusTime ?? chartDefaultViewportCenterTime;
 
@@ -1125,10 +1293,13 @@ export default function JournalCampaignDetailPage() {
         legExitPriceCorrections,
         chartElement: campaignChartExportRef.current,
         pnlOverview: {
-          campaignMaxProfitReal: accuracy.campaign_max_profit_real,
-          campaignMaxDrawdownReal: accuracy.campaign_max_drawdown_real,
-          initialExpectedMaxLoss: accuracy.initial_expected_max_loss,
-          profitCaptureRatio: accuracy.profit_capture_ratio,
+          items: campaignPnlOverviewItems.map(({ key, label, value, color }) => ({
+            key,
+            label,
+            value,
+            color,
+          })),
+          note: campaignPnlOverviewNote,
         },
       });
       toast.success('交易战役完整图片已保存为 PNG', { description: fileName });
@@ -1226,114 +1397,15 @@ export default function JournalCampaignDetailPage() {
           <div className="bg-card border border-border rounded p-4 text-[12px]">
             <div className="font-medium">盈亏概览</div>
             <div className="mt-3 grid grid-cols-1 gap-x-8 gap-y-2 sm:grid-cols-2">
-              <div className="flex items-baseline justify-between gap-3">
-                <PnlMetricLabel label="已实现 P&L">
-                  <p>本场战役所有已平仓 Legs 的实际盈亏合计，包括主仓、加仓、对冲与止盈的已实现结果。</p>
-                  <div className="rounded bg-muted/60 px-2 py-1 font-mono text-foreground">已实现 P&amp;L = Σ 各已平仓 Leg 盈亏</div>
-                </PnlMetricLabel>
-                <span className={`font-mono ${pnlColor(campaign.final_realized_pnl)}`}>
-                  {campaign.final_realized_pnl?.toFixed(2) ?? '—'} USDT
-                </span>
-              </div>
-              <div className="flex items-baseline justify-between gap-3">
-                <PnlMetricLabel label="峰值浮盈">
-                  <p>战役期间同一时刻所有活跃 Legs 合计浮动盈亏的最高值，用来观察这场战役曾经提供过多厚的浮盈垫。</p>
-                  <p>按当前 K 线粒度的收盘价采样，不等同于逐笔成交的瞬时最高值。</p>
-                </PnlMetricLabel>
-                <span className="font-mono">{accuracy.campaign_max_profit_real.toFixed(2)}</span>
-              </div>
-              <div className="flex items-baseline justify-between gap-3">
-                <PnlMetricLabel label="最大回撤">
-                  <p>战役期间所有活跃 Legs 合计浮盈相对于零盈亏线的最深浮亏绝对值。</p>
-                  <p>这里表示「最深浮亏」，不是从峰值浮盈到后续低点的峰谷回撤。</p>
-                </PnlMetricLabel>
-                <span className="font-mono">{accuracy.campaign_max_drawdown_real.toFixed(2)}</span>
-              </div>
-              <div className="flex items-baseline justify-between gap-3">
-                <PnlMetricLabel label="最大预期亏损">
-                  <p>主力头仓在初始对冲 A/B 风险边界下预先承担的最大亏损额，是盈亏比的风险分母。</p>
-                  <div className="rounded bg-muted/60 px-2 py-1 font-mono text-foreground">最大预期亏损 = 主力开仓名义仓位 × 初始最大回撤比例</div>
-                </PnlMetricLabel>
-                <span className="font-mono">
-                  {accuracy.initial_expected_max_loss > 0 ? `${accuracy.initial_expected_max_loss.toFixed(2)} USDT` : '—'}
-                </span>
-              </div>
-              <div className="flex items-baseline justify-between gap-3">
-                <PnlMetricLabel label="初始最大回撤">
-                  <p>主力开仓价到初始对冲 A/B 中更远一条风险边界的价格距离，占主力开仓价的百分比。</p>
-                  <div className="rounded bg-muted/60 px-2 py-1 font-mono text-foreground">
-                    d = max（|主力价 − A 价|，|主力价 − B 价|）÷ 主力价 × 100%
-                  </div>
-                </PnlMetricLabel>
-                <span className="font-mono">
-                  {campaignMetricValues && campaignMetricValues.initialExpectedMaxDrawdownPct > 0
-                    ? `${campaignMetricValues.initialExpectedMaxDrawdownPct.toFixed(2)}%`
-                    : '—'}
-                </span>
-              </div>
-              <div className="flex items-baseline justify-between gap-3">
-                <PnlMetricLabel label="盈亏比">
-                  <p>本场已实现结果相对于初始风险分母的倍数。盈利为正，亏损保留负号。</p>
-                  <div className="rounded bg-muted/60 px-2 py-1 font-mono text-foreground">b = 已实现 P&amp;L ÷ 最大预期亏损</div>
-                  <p>百分数后括号内是数字倍数，例如 200%（2.00）表示 2R。</p>
-                </PnlMetricLabel>
-                <span className={`font-mono ${pnlColor(campaignMetricValues?.profitCaptureRatio ?? null)}`}>
-                  {campaignMetricValues?.profitCaptureRatio == null
-                    ? '—'
-                    : formatCampaignPayoffRatio(campaignMetricValues.profitCaptureRatio)}
-                </span>
-              </div>
-              <div className="flex items-baseline justify-between gap-3">
-                <PnlMetricLabel label="机会质量">
-                  <p>用实际盈亏比衡量每 1 个初始回撤百分点换来的结果。相同盈亏比下，初始回撤越小，机会质量越高。</p>
-                  <div className="rounded bg-muted/60 px-2 py-1 font-mono text-foreground">Q = 实际盈亏比 b ÷ 初始最大回撤百分点 d</div>
-                  <p>回撤 2% 时 d 按 2 计，不按 0.02 计；亏损战役保留负号。</p>
-                </PnlMetricLabel>
-                <span className={`font-mono ${pnlColor(campaignMetricValues?.opportunityQuality ?? null)}`}>
-                  {formatOpportunityQuality(campaignMetricValues?.opportunityQuality ?? null)}
-                </span>
-              </div>
-              <div className="flex items-baseline justify-between gap-3">
-                <PnlMetricLabel label="算术期望">
-                  <p>按同一账户当前有效战役胜率 P，与本场带正负号的实际盈亏比 b，计算每承担 1R 风险的加法期望。</p>
-                  <div className="rounded bg-muted/60 px-2 py-1 font-mono text-foreground">E = P × b −（1 − P）</div>
-                  {campaignPerformance?.expectedWinRate != null && campaignMetricValues?.profitCaptureRatio != null ? (
-                    <p className="font-mono text-foreground">
-                      本场：{(campaignPerformance.expectedWinRate * 100).toFixed(2)}% × {(campaignMetricValues.profitCaptureRatio / 100).toFixed(2)} − {((1 - campaignPerformance.expectedWinRate) * 100).toFixed(2)}%
-                    </p>
-                  ) : <p>缺少有效盈亏比或有效战役胜率时不计算。</p>}
-                </PnlMetricLabel>
-                <span className={`font-mono ${pnlColor(campaignMetricValues?.arithmeticExpectancy ?? null)}`}>
-                  {formatArithmeticExpectancy(campaignMetricValues?.arithmeticExpectancy ?? null)}
-                </span>
-              </div>
-              <div className="flex items-baseline justify-between gap-3">
-                <PnlMetricLabel label="几何期望">
-                  <p>把胜率 P、本场实际盈亏比 b 和本场资产风险比例 x 放入复利路径，衡量这场战役对长期资本增长的影响。</p>
-                  <div className="rounded bg-muted/60 px-2 py-1 font-mono text-foreground">G = (1+b·x)^P · (1−x)^(1−P)；几何期望 = G − 1</div>
-                  <p>x = 最大预期亏损 ÷ 主力开仓时账户总资产。历史战役缺快照时，才使用今日当前总资产估算。</p>
-                  {campaignMetricValues?.initialRisk ? (
-                    <p className="font-mono text-foreground">本场 x = {(campaignMetricValues.initialRisk.drawdownFraction * 100).toFixed(2)}%</p>
-                  ) : <p>缺少有效最大预期亏损或账户资产分母时不计算。</p>}
-                </PnlMetricLabel>
-                <span className={`font-mono ${pnlColor(campaignMetricValues?.geometricExpectancy ?? null)}`}>
-                  {formatGeometricExpectancy(campaignMetricValues?.geometricExpectancy ?? null)}
-                </span>
-              </div>
+              {campaignPnlOverviewItems.map(item => (
+                <div key={item.key} className="flex items-baseline justify-between gap-3">
+                  <PnlMetricLabel label={item.label}>{item.help}</PnlMetricLabel>
+                  <span className={`font-mono ${item.valueClassName ?? ''}`}>{item.value}</span>
+                </div>
+              ))}
             </div>
             <div className="mt-3 border-t border-border/70 pt-2 text-[10px] text-muted-foreground">
-              {campaignPerformanceLoading
-                ? '正在按同一账户的有效战役口径计算期望…'
-                : campaignPerformanceError
-                  ? `期望口径加载失败：${campaignPerformanceError}`
-                  : campaignPerformance?.expectedWinRate == null
-                    ? '暂无可计算胜率的有效战役样本。'
-                    : `期望口径：${campaignPerformance.payoffRatioSampleCount} 场有效战役，实时胜率 ${(campaignPerformance.expectedWinRate * 100).toFixed(2)}%。`}
-              {campaignMetricValues?.initialRisk?.source === 'current_account_fallback'
-                ? ' 本场几何期望的资产分母使用今日当前总账户资产估算。'
-                : campaignMetricValues?.initialRisk?.source === 'main_open_snapshot'
-                  ? ' 本场几何期望的资产分母使用主力开仓实时总资产快照。'
-                  : ''}
+              {campaignPnlOverviewNote}
             </div>
           </div>
 
@@ -1479,6 +1551,8 @@ export default function JournalCampaignDetailPage() {
                   timeBoundPriceLines={displayPriceLines}
                   verticalLines={displayVerticalLines}
                   fitAll
+                  initialVisibleStartTime={campaignKlineTimeWindow.defaultFromTime}
+                  initialVisibleEndTime={campaignKlineTimeWindow.defaultToTime}
                   showLastPriceLine={false}
                   viewportCenterTime={chartViewportCenterTime}
                   timezone={LOCAL_TIME_ZONE}

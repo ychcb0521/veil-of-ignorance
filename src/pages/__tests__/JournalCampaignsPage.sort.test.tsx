@@ -314,6 +314,12 @@ describe('JournalCampaignsPage sorting', () => {
       '盈亏比：-80.00%（-0.80）',
       '盈亏比：—',
     ]);
+    expect(screen.getAllByTestId('campaign-expected-drawdown-pct').map(node => node.textContent)).toEqual([
+      '预期最大回撤：10.00%',
+      '预期最大回撤：2.00%',
+      '预期最大回撤：50.00%',
+      '预期最大回撤：—',
+    ]);
     expect(screen.getAllByTestId('campaign-opportunity-quality-value').map(node => node.textContent)).toEqual([
       '机会质量：0.30',
       '机会质量：0.25',
@@ -436,12 +442,31 @@ describe('JournalCampaignsPage sorting', () => {
     expect(screen.getByText('单场盈亏比计算公式')).toBeInTheDocument();
     expect(cardOrder()).toEqual(['Late Close', 'Best PnL', 'High Importance']);
 
+    fireEvent.click(screen.getByTestId('campaign-sort-expectedDrawdownPct'));
+    expect(screen.getByTestId('campaign-sort-expectedDrawdownPct')).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByTestId('campaign-sort-expectedDrawdownPct')).toHaveAttribute('data-sort-direction', 'desc');
+    expect(screen.getByTestId('campaign-sort-expectedDrawdownPct')).toHaveAttribute(
+      'aria-label',
+      '预期最大回撤百分比，从大到小排序',
+    );
+    expect(screen.getByText('预期最大回撤百分比计算公式')).toBeInTheDocument();
+    expect(screen.getByText(/dᵢ = max（\|主力开仓价 − 初始对冲 A 价\|/)).toBeInTheDocument();
+    expect(cardOrder()).toEqual(['Late Close', 'High Importance', 'Best PnL']);
+
+    fireEvent.click(screen.getByTestId('campaign-sort-expectedDrawdownPct'));
+    expect(screen.getByTestId('campaign-sort-expectedDrawdownPct')).toHaveAttribute('data-sort-direction', 'asc');
+    expect(screen.getByTestId('campaign-sort-expectedDrawdownPct')).toHaveAttribute(
+      'aria-label',
+      '预期最大回撤百分比，从小到大排序',
+    );
+    expect(cardOrder()).toEqual(['Best PnL', 'High Importance', 'Late Close']);
+
     fireEvent.click(screen.getByTestId('campaign-sort-opportunityQuality'));
     expect(screen.getByTestId('campaign-sort-opportunityQuality')).toHaveAttribute('aria-pressed', 'true');
     expect(screen.getByTestId('campaign-sort-opportunityQuality')).toHaveAttribute('data-sort-direction', 'desc');
     expect(screen.getByTestId('campaign-sort-opportunityQuality')).toHaveAttribute('aria-label', '机会质量，从大到小排序');
     expect(screen.getByText('单场机会质量计算公式')).toBeInTheDocument();
-    expect(screen.getByText('Qᵢ = |实际盈亏比 bᵢ| ÷ 初始最大回撤百分点 dᵢ')).toBeInTheDocument();
+    expect(screen.getByText('Qᵢ = |实际盈亏比 bᵢ| ÷ 预期最大回撤百分点 dᵢ')).toBeInTheDocument();
     expect(cardOrder()).toEqual(['High Importance', 'Best PnL', 'Late Close']);
 
     fireEvent.click(screen.getByTestId('campaign-sort-opportunityQuality'));

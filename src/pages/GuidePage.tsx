@@ -1210,7 +1210,8 @@ export default function GuidePage() {
                     <tr><td className="px-3 py-2 border-t border-border">胜率 P(赢)</td><td className="px-3 py-2 border-t border-border">有效盈利战役数 ÷（有效盈利战役数 + 有效亏损战役数）</td><td className="px-3 py-2 border-t border-border">只统计有效且非盈亏平衡的已结束战役</td></tr>
                     <tr><td className="px-3 py-2 border-t border-border">平均盈亏比 b̄</td><td className="px-3 py-2 border-t border-border">Σ 单场盈亏比 bᵢ ÷ 有效战役数 N</td><td className="px-3 py-2 border-t border-border">亏损的负盈亏比原样参与求和</td></tr>
                     <tr><td className="px-3 py-2 border-t border-border">期望值 E</td><td className="px-3 py-2 border-t border-border">P(赢) × b̄ −（1 − P(赢)）</td><td className="px-3 py-2 border-t border-border">胜率与平均盈亏比来自同一批有效战役</td></tr>
-                    <tr><td className="px-3 py-2 border-t border-border">机会质量 Qᵢ / Q̄</td><td className="px-3 py-2 border-t border-border">Qᵢ = 实际盈亏比 bᵢ ÷ 初始最大回撤百分点 dᵢ；dᵢ = max（|主力开仓价 − 初始对冲 A 价|，|主力开仓价 − 初始对冲 B 价|）÷ 主力开仓价 × 100；Q̄ = ΣQᵢ ÷ N</td><td className="px-3 py-2 border-t border-border">bᵢ 保留盈亏正负号；历史价格沿用初始最大预期亏损的同一解析口径；缺少实际盈亏比、主力价或初始对冲价时不纳入统计和排序</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border">预期最大回撤百分比 dᵢ</td><td className="px-3 py-2 border-t border-border">max（|主力开仓价 − 初始对冲 A 价|，|主力开仓价 − 初始对冲 B 价|）÷ 主力开仓价 × 100%</td><td className="px-3 py-2 border-t border-border">至少存在一个有效初始对冲价格；支持列表双向排序，缺少价格的战役不参与排序</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border">机会质量 Qᵢ / Q̄</td><td className="px-3 py-2 border-t border-border">Qᵢ = 实际盈亏比 bᵢ ÷ 预期最大回撤百分点 dᵢ；Q̄ = ΣQᵢ ÷ N</td><td className="px-3 py-2 border-t border-border">bᵢ 保留盈亏正负号；历史价格沿用初始最大预期亏损的同一解析口径；缺少实际盈亏比、主力价或初始对冲价时不纳入统计和排序</td></tr>
                     <tr><td className="px-3 py-2 border-t border-border">单场算术期望 Eᵢ</td><td className="px-3 py-2 border-t border-border">P(赢) × bᵢ −（1 − P(赢)）</td><td className="px-3 py-2 border-t border-border">使用实时有效战役胜率与该场带符号盈亏比</td></tr>
                     <tr><td className="px-3 py-2 border-t border-border">单场风险比例 xᵢ</td><td className="px-3 py-2 border-t border-border">Lᵢ ÷ 主力开仓时账户总资产 Aᵢ</td><td className="px-3 py-2 border-t border-border">优先使用主力开仓快照；旧战役缺失时用今日当前总资产估算</td></tr>
                     <tr><td className="px-3 py-2 border-t border-border">单场几何期望 Gᵢ</td><td className="px-3 py-2 border-t border-border">(1+bᵢ·xᵢ)^P(赢) × (1−xᵢ)^(1−P(赢)) − 1</td><td className="px-3 py-2 border-t border-border">bᵢ 可为负；缺少有效 Lᵢ 或可用 Aᵢ 时不估算</td></tr>
@@ -1267,7 +1268,7 @@ export default function GuidePage() {
               </P>
               <ul className="list-disc pl-6 text-[14px] text-foreground/90 space-y-1">
                 <li><strong>Legs 列表每条腿都标明开仓/平仓时间、开仓价/平仓价、仓位与状态</strong>；还没平仓的腿，平仓时间与平仓价显示「—」。每条腿还单独列出<strong>该腿期间挂的反向对冲空单</strong>（委托价 / 委托时间 / 取消时间）。</li>
-                <li><strong>K 线默认按三段式窗口自适应</strong>：战役内容占中间 1/3，开始前与结束后各补一段同等长度的行情。系统会按总跨度自动选择 1m / 5m / 15m / 1h 总览周期，因此已经存在的长战役也能完整看到前因、战役过程和后续走势。</li>
+                <li><strong>K 线默认按三段式窗口自适应</strong>：首次打开时，战役内容占中间 1/3，开始前与结束后各显示一段同等长度的行情；底层同时预载战役左右各 10 倍的行情，完整可浏览范围为 21 倍。继续缩小或拖动盘面即可按需查看更远的前因与后续走势，历史战役同样适用。</li>
                 <li>内容区间会囊括 Legs、委托空单和当前反事实分支的最早 / 最晚事件，保证所有开平仓与挂单信息都落在默认可视范围内。</li>
                 <li>时间轴上用<strong>彩色竖线</strong>标注每条腿的开单 / 平单时刻——颜色区分方向、线型区分动作（见下表）。</li>
                 <li>主力开始只做一个简洁标记与较醒目的竖线，不额外绘制主力水平线；即使战役跨度很长，这条开始线也会保留。</li>
@@ -1295,9 +1296,10 @@ export default function GuidePage() {
               </Highlight>
 
               <SubTitle>战役详情页：盈亏概览与高清 PNG</SubTitle>
-              <P>详情页的<strong>盈亏概览</strong>统一展示已实现盈亏、峰值浮盈、最大回撤、初始最大预期亏损、初始最大回撤、盈亏比、机会质量、单场算术期望和单场几何期望。每个指标名旁的低透明度 <strong>i</strong> 图标都可点击，会折叠展开该指标的含义、公式和数据口径，不会挤压页面布局。这些数据与战役列表使用同一套公式：期望指标使用同一账户当前的有效战役胜率，历史战役的几何期望在缺少开仓资产快照时才使用今日当前总资产估算。</P>
+              <P>详情页的<strong>盈亏概览</strong>统一展示已实现盈亏、峰值浮盈、最大回撤、初始最大预期亏损、预期最大回撤百分比、盈亏比、机会质量、单场算术期望和单场几何期望。每个指标名旁的低透明度 <strong>i</strong> 图标都可点击，会折叠展开该指标的含义、公式和数据口径，不会挤压页面布局。这些数据与战役列表使用同一套公式：预期最大回撤百分比支持双向排序；期望指标使用同一账户当前的有效战役胜率，历史战役的几何期望在缺少开仓资产快照时才使用今日当前总资产估算。</P>
               <ul className="list-disc pl-6 text-[14px] text-foreground/90 space-y-1">
                 <li>点击 Legs 列表右上角的 <strong>PNG</strong>，会把<strong>战役原数据、盈亏概览、当前已经拖动 / 缩放好的 K 线视图，以及完整 Legs 列表</strong>导出到同一张高清图片。</li>
+                <li>图片中的<strong>盈亏概览</strong>与详情页共用同一份指标清单；以后详情页新增盈亏指标时，导出图会自动同步收录，并随指标数量自动增加高度。</li>
                 <li>Legs 导出不受页面滚动区域限制；未滚动出来的腿、时间、价格、仓位、状态与反向挂单也会完整展开。图片高度随内容自动增长。</li>
                 <li>文件名采用「标的 + 战役日期 + profit / loss + 战役编号」，例如 <strong>BTCDOMUSDT 2025-07-24 loss 编号 C-…</strong>，便于批量交给 AI 分析时保持唯一对应。</li>
               </ul>

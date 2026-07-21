@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { buildCampaignChartContentTimeSpan, pickCampaignOverviewInterval } from '@/lib/campaignChartContentSpan';
-import { CAMPAIGN_EDGE_PAD_MS, buildCampaignKlineTimeWindow } from '@/hooks/useCampaignKlines';
+import {
+  CAMPAIGN_AVAILABLE_CONTEXT_MULTIPLIER,
+  CAMPAIGN_EDGE_PAD_MS,
+  buildCampaignKlineTimeWindow,
+} from '@/hooks/useCampaignKlines';
 import type { CampaignCounterfactual, TradeCampaign, TradeJournal } from '@/types/journal';
 import type { CampaignReverseHedgeOrder, TradeRecord } from '@/types/trading';
 
@@ -206,7 +210,7 @@ describe('pickCampaignOverviewInterval', () => {
 });
 
 describe('buildCampaignKlineTimeWindow', () => {
-  it('把战役内容放在中间 1/3，前后各补同等长度 K 线', () => {
+  it('默认显示三倍窗口，同时预载左右各十倍的完整二十一倍范围', () => {
     const openedAtMs = t('2026-01-02T00:00:00.000Z');
     const closedAtMs = t('2026-01-02T02:00:00.000Z');
     const window = buildCampaignKlineTimeWindow(
@@ -217,14 +221,20 @@ describe('buildCampaignKlineTimeWindow', () => {
     );
 
     expect(window).toEqual({
-      fromTime: t('2026-01-01T22:30:00.000Z'),
-      toTime: t('2026-01-02T04:30:00.000Z'),
+      fromTime: t('2026-01-01T04:30:00.000Z'),
+      toTime: t('2026-01-02T22:30:00.000Z'),
+      defaultFromTime: t('2026-01-01T22:30:00.000Z'),
+      defaultToTime: t('2026-01-02T04:30:00.000Z'),
       contentStartMs: t('2026-01-02T00:30:00.000Z'),
       contentEndMs: t('2026-01-02T02:30:00.000Z'),
       contextMs: 2 * 60 * 60_000,
+      availableContextMs: 20 * 60 * 60_000,
     });
-    expect(window.contentStartMs! - window.fromTime).toBe(window.contextMs);
-    expect(window.toTime - window.contentEndMs!).toBe(window.contextMs);
+    expect(window.contentStartMs! - window.defaultFromTime).toBe(window.contextMs);
+    expect(window.defaultToTime - window.contentEndMs!).toBe(window.contextMs);
+    expect(window.contentStartMs! - window.fromTime).toBe(window.availableContextMs);
+    expect(window.toTime - window.contentEndMs!).toBe(window.availableContextMs);
+    expect(window.availableContextMs).toBe(window.contextMs! * CAMPAIGN_AVAILABLE_CONTEXT_MULTIPLIER);
   });
 
   it('默认总览周期按扩展后的三段窗口计算，老战役打开时也会重新撑开盘面', () => {
@@ -240,8 +250,8 @@ describe('buildCampaignKlineTimeWindow', () => {
       endMs: t('2026-01-02T15:00:00.000Z'),
     })).toBe('1m');
     expect(pickCampaignOverviewInterval({
-      startMs: window.fromTime,
-      endMs: window.toTime,
+      startMs: window.defaultFromTime,
+      endMs: window.defaultToTime,
     })).toBe('5m');
   });
 
@@ -251,19 +261,25 @@ describe('buildCampaignKlineTimeWindow', () => {
     const singlePoint = t('2026-01-02T00:30:00.000Z');
 
     expect(buildCampaignKlineTimeWindow(openedAtMs, closedAtMs, singlePoint, singlePoint)).toEqual({
-      fromTime: singlePoint - CAMPAIGN_EDGE_PAD_MS,
-      toTime: singlePoint + CAMPAIGN_EDGE_PAD_MS,
+      fromTime: singlePoint - CAMPAIGN_EDGE_PAD_MS * CAMPAIGN_AVAILABLE_CONTEXT_MULTIPLIER,
+      toTime: singlePoint + CAMPAIGN_EDGE_PAD_MS * CAMPAIGN_AVAILABLE_CONTEXT_MULTIPLIER,
+      defaultFromTime: singlePoint - CAMPAIGN_EDGE_PAD_MS,
+      defaultToTime: singlePoint + CAMPAIGN_EDGE_PAD_MS,
       contentStartMs: singlePoint,
       contentEndMs: singlePoint,
       contextMs: CAMPAIGN_EDGE_PAD_MS,
+      availableContextMs: CAMPAIGN_EDGE_PAD_MS * CAMPAIGN_AVAILABLE_CONTEXT_MULTIPLIER,
     });
 
     expect(buildCampaignKlineTimeWindow(openedAtMs, closedAtMs, null, null)).toEqual({
       fromTime: t('2026-01-01T18:00:00.000Z'),
       toTime: t('2026-01-02T04:00:00.000Z'),
+      defaultFromTime: t('2026-01-01T18:00:00.000Z'),
+      defaultToTime: t('2026-01-02T04:00:00.000Z'),
       contentStartMs: null,
       contentEndMs: null,
       contextMs: null,
+      availableContextMs: null,
     });
   });
 });

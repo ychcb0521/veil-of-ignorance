@@ -18,8 +18,11 @@ interface Props {
   viewportCenterTime?: number | null;
   /** 透传给主图的时区；不传则沿用 CandlestickChart 默认（Asia/Shanghai）。 */
   timezone?: string;
-  /** 战役详情：显示全部 K 线并缩放到铺满视口，使图表可见区间 == Legs 起止区间。 */
+  /** 战役详情：保留全部 K 线，并把指定的初始时间范围缩放到铺满视口。 */
   fitAll?: boolean;
+  /** fitAll 时首次铺满的时间范围；完整 klines 仍保留，缩小后可查看范围外数据。 */
+  initialVisibleStartTime?: number | null;
+  initialVisibleEndTime?: number | null;
   /** 是否显示最新价水平线；战役截取盘面默认关闭，避免干扰复盘标注。 */
   showLastPriceLine?: boolean;
   /** 可拖动的横向价格线（What-if 对冲/止盈触发价）。 */
@@ -59,6 +62,8 @@ export function ReplayKlineChart({
   viewportCenterTime = null,
   timezone,
   fitAll = false,
+  initialVisibleStartTime = null,
+  initialVisibleEndTime = null,
   showLastPriceLine = true,
   draggablePriceLines,
   onDragPriceLine,
@@ -126,6 +131,8 @@ export function ReplayKlineChart({
       analysisAnnotations={annotations}
       analysisFocusTime={viewportCenterTime ?? currentTime}
       analysisFitAll={fitAll}
+      analysisVisibleStartTime={initialVisibleStartTime}
+      analysisVisibleEndTime={initialVisibleEndTime}
       showLastPriceLine={showLastPriceLine}
       draggablePriceLines={draggablePriceLines}
       onDragPriceLine={onDragPriceLine}

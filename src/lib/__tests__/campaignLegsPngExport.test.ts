@@ -49,10 +49,18 @@ function input(): CampaignBoardExportInput {
     reverseHedgeOrders: [],
     chartElement: null,
     pnlOverview: {
-      campaignMaxProfitReal: 5200,
-      campaignMaxDrawdownReal: -800,
-      initialExpectedMaxLoss: 1800,
-      profitCaptureRatio: 66.48,
+      items: [
+        { key: 'realizedPnl', label: '已实现 P&L', value: '3456.78 USDT', color: '#0ECB81' },
+        { key: 'peakUnrealizedPnl', label: '峰值浮盈', value: '5200.00' },
+        { key: 'maxDrawdown', label: '最大回撤', value: '-800.00' },
+        { key: 'initialExpectedMaxLoss', label: '最大预期亏损', value: '1800.00 USDT' },
+        { key: 'expectedMaxDrawdownPct', label: '预期最大回撤百分比', value: '3.20%' },
+        { key: 'payoffRatio', label: '盈亏比', value: '66.48%（0.66）', color: '#0ECB81' },
+        { key: 'opportunityQuality', label: '机会质量', value: '0.21', color: '#0ECB81' },
+        { key: 'arithmeticExpectancy', label: '算术期望', value: '+0.18R', color: '#0ECB81' },
+        { key: 'geometricExpectancy', label: '几何期望', value: '+0.4%/笔', color: '#0ECB81' },
+      ],
+      note: '期望口径：37 场有效战役，实时胜率 48.65%。',
     },
   };
 }
@@ -68,23 +76,47 @@ describe('campaign PNG overview', () => {
     expect(metadata['持续时间']).toBe('2 小时 30 分钟');
     expect(metadata['Legs 构成']).toBe('共 3 · 主仓 1 / 对冲 1 / TP 1 / 其他 0');
     expect(metadata['初始主仓 / 杠杆']).toBe('12000.00 USDT / 6x');
+    expect(metadata['最终 R']).toBe('2.40');
+    expect(metadata['战役编号']).toBe('C-ABC123');
     expect(pnl['已实现 P&L']).toBe('3456.78 USDT');
-    expect(pnl['最终 R']).toBe('2.40');
-    expect(pnl['峰值浮盈']).toBe('5200.00 USDT');
-    expect(pnl['最大回撤']).toBe('-800.00 USDT');
+    expect(pnl['峰值浮盈']).toBe('5200.00');
+    expect(pnl['最大回撤']).toBe('-800.00');
     expect(pnl['最大预期亏损']).toBe('1800.00 USDT');
+    expect(pnl['预期最大回撤百分比']).toBe('3.20%');
     expect(pnl['盈亏比']).toBe('66.48%（0.66）');
-    expect(pnl['战役编号']).toBe('C-ABC123');
+    expect(pnl['机会质量']).toBe('0.21');
+    expect(pnl['算术期望']).toBe('+0.18R');
+    expect(pnl['几何期望']).toBe('+0.4%/笔');
+    expect(overview.pnlNote).toContain('37 场有效战役');
   });
 
   it('亏损战役的盈亏比保留负号', () => {
     const negativeInput = input();
-    negativeInput.pnlOverview.profitCaptureRatio = -37.25;
+    negativeInput.pnlOverview.items = negativeInput.pnlOverview.items.map(item => (
+      item.key === 'payoffRatio' ? { ...item, value: '-37.25%（-0.37）', color: '#F6465D' } : item
+    ));
 
     const overview = buildCampaignBoardOverview(negativeInput);
     const pnl = Object.fromEntries(overview.pnlItems.map(item => [item.label, item.value]));
 
     expect(pnl['盈亏比']).toBe('-37.25%（-0.37）');
+  });
+
+  it('新增盈亏指标时自动进入导出摘要', () => {
+    const futureInput = input();
+    futureInput.pnlOverview.items.push({
+      key: 'futureMetric',
+      label: '未来新增指标',
+      value: '42.00',
+    });
+
+    const overview = buildCampaignBoardOverview(futureInput);
+
+    expect(overview.pnlItems).toContainEqual(expect.objectContaining({
+      key: 'futureMetric',
+      label: '未来新增指标',
+      value: '42.00',
+    }));
   });
 
   it('按完整 legs 数据导出滚动区域外的所有行与末行信息', () => {

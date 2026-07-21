@@ -309,6 +309,32 @@ describe('CandlestickChart analysis annotations', () => {
     });
   });
 
+  it('预载二十一倍数据时只把指定的三倍区间铺满为默认视口', async () => {
+    const data = Array.from({ length: 100 }, (_, index) => candle(index * 1000, 1 + index / 100));
+    render(
+      <CandlestickChart
+        data={data}
+        symbol="BTCUSDT"
+        rawSymbol="BTCUSDT"
+        analysisMode
+        analysisFitAll
+        analysisVisibleStartTime={10_000}
+        analysisVisibleEndTime={49_000}
+      />,
+    );
+
+    const dataReadyCallbacks = mocks.chart.subscribeAction.mock.calls
+      .filter(([type]) => type === 'onDataReady')
+      .map(([, callback]) => callback);
+    dataReadyCallbacks.forEach(callback => callback());
+
+    await waitFor(() => {
+      expect(mocks.chart.setBarSpace).toHaveBeenCalledWith(25);
+      expect(mocks.chart.setOffsetRightDistance).toHaveBeenCalledWith(0);
+      expect(mocks.chart.scrollToTimestamp).toHaveBeenCalledWith(29_500, 0);
+    });
+  });
+
   it('委托空撤单结束点显示 ×，并带对应撤单竖线', async () => {
     render(
       <CandlestickChart

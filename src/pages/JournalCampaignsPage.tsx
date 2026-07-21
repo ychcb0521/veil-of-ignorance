@@ -64,6 +64,7 @@ type CampaignSortMode =
   | 'importance'
   | 'time'
   | 'captureRate'
+  | 'expectedDrawdownPct'
   | 'opportunityQuality'
   | 'arithmeticExpectancy'
   | 'geometricExpectancy'
@@ -84,6 +85,7 @@ type CampaignListNavigationState = {
 
 type CampaignFormulaPopover =
   | 'captureRate'
+  | 'expectedDrawdownPct'
   | 'arithmeticExpectancy'
   | 'geometricExpectancy'
   | 'validCampaigns'
@@ -99,6 +101,7 @@ const SORT_OPTIONS: { value: CampaignSortMode; label: string }[] = [
   { value: 'importance', label: '重要性' },
   { value: 'time', label: '操作时间' },
   { value: 'captureRate', label: '盈亏比' },
+  { value: 'expectedDrawdownPct', label: '预期最大回撤百分比' },
   { value: 'opportunityQuality', label: '机会质量' },
   { value: 'arithmeticExpectancy', label: '算术期望' },
   { value: 'geometricExpectancy', label: '几何期望' },
@@ -257,6 +260,10 @@ function sortCampaignRows(rows: CampaignDisplayData[], sort: CampaignSortState):
     if (sort.mode === 'captureRate') {
       return row.profitCaptureRatio != null && Number.isFinite(row.profitCaptureRatio);
     }
+    if (sort.mode === 'expectedDrawdownPct') {
+      return Number.isFinite(row.initialExpectedMaxDrawdownPct)
+        && row.initialExpectedMaxDrawdownPct > 0;
+    }
     if (sort.mode === 'opportunityQuality') {
       return row.opportunityQuality != null && Number.isFinite(row.opportunityQuality);
     }
@@ -287,6 +294,16 @@ function sortCampaignRows(rows: CampaignDisplayData[], sort: CampaignSortState):
         sort.direction,
       )
         || comparePnl(a.campaign, b.campaign, sort.direction)
+        || importanceDesc
+        || timeDesc
+        || alphaAsc;
+    }
+    if (sort.mode === 'expectedDrawdownPct') {
+      return compareNumber(
+        a.initialExpectedMaxDrawdownPct,
+        b.initialExpectedMaxDrawdownPct,
+        sort.direction,
+      )
         || importanceDesc
         || timeDesc
         || alphaAsc;
@@ -814,6 +831,7 @@ export default function JournalCampaignsPage() {
               const formula: CampaignFormulaPopover | null = option.value === 'opportunityQuality'
                 ? 'opportunityQualitySort'
                 : option.value === 'captureRate'
+                  || option.value === 'expectedDrawdownPct'
                   || option.value === 'arithmeticExpectancy'
                   || option.value === 'geometricExpectancy'
                   ? option.value
@@ -821,7 +839,9 @@ export default function JournalCampaignsPage() {
               const invalidCampaignHint = option.value === 'geometricExpectancy'
                 ? '；缺少最大预期亏损的战役不显示；旧战役缺少开仓资产快照时按当前总资产估算'
                 : option.value === 'opportunityQuality'
-                  ? '；缺少实际盈亏比或初始最大回撤百分比的战役不显示'
+                  ? '；缺少实际盈亏比或预期最大回撤百分比的战役不显示'
+                : option.value === 'expectedDrawdownPct'
+                  ? '；缺少主力开仓价或初始对冲 A/B 价格的战役不显示'
                 : formula != null
                   ? '；未设置最大预期亏损的战役不显示'
                   : '';
@@ -880,11 +900,23 @@ export default function JournalCampaignsPage() {
                           <div>没有有效初始最大预期亏损的战役不参与排序。</div>
                         </div>
                       </>
+                    ) : formula === 'expectedDrawdownPct' ? (
+                      <>
+                        <div className="font-medium text-foreground">预期最大回撤百分比计算公式</div>
+                        <div className="mt-2 rounded bg-muted/60 px-2 py-1.5 font-mono text-foreground">
+                          dᵢ = max（|主力开仓价 − 初始对冲 A 价|，|主力开仓价 − 初始对冲 B 价|）÷ 主力开仓价 × 100%
+                        </div>
+                        <div className="mt-2 space-y-1 text-muted-foreground">
+                          <div>取初始对冲 A/B 中离主力开仓价更远的风险边界；只有一个有效价格时使用该价格。</div>
+                          <div>历史战役优先使用保存的原始委托快照，缺失时才回退到角色记录。</div>
+                          <div>缺少主力开仓价或所有初始对冲价格的战役不参与排序。</div>
+                        </div>
+                      </>
                     ) : formula === 'opportunityQualitySort' ? (
                       <>
                         <div className="font-medium text-foreground">单场机会质量计算公式</div>
                         <div className="mt-2 rounded bg-muted/60 px-2 py-1.5 font-mono text-foreground">
-                          Qᵢ = |实际盈亏比 bᵢ| ÷ 初始最大回撤百分点 dᵢ
+                          Qᵢ = |实际盈亏比 bᵢ| ÷ 预期最大回撤百分点 dᵢ
                         </div>
                         <div className="mt-2 space-y-1 text-muted-foreground">
                           <div>bᵢ = 已实现盈亏ᵢ ÷ 初始最大预期亏损ᵢ；机会质量取 |bᵢ| 绝对值——只看这次机会的量级，不看盈亏方向（盈亏由胜率 / 盈亏列表达）。</div>
@@ -1171,7 +1203,7 @@ export default function JournalCampaignsPage() {
                   Qᵢ = |bᵢ| ÷ dᵢ，Q̄ = ΣQᵢ ÷ N
                 </div>
                 <div className="mt-2 space-y-1 text-muted-foreground">
-                  <div>bᵢ = 该战役实际盈亏比 = 已实现盈亏 ÷ 初始最大预期亏损；dᵢ = 初始最大回撤百分点。</div>
+                  <div>bᵢ = 该战役实际盈亏比 = 已实现盈亏 ÷ 初始最大预期亏损；dᵢ = 预期最大回撤百分点。</div>
                   <div>机会质量取 |bᵢ| 绝对值：只衡量这次机会的量级，不看盈亏方向（盈亏由胜率 / 盈亏列表达），亏损战役也是正的量级。</div>
                   <div className="rounded border border-border/60 px-2 py-1.5 font-mono leading-relaxed text-foreground/85">
                     dᵢ = max（|主力开仓价 − 初始对冲 A 价|，|主力开仓价 − 初始对冲 B 价|）÷ 主力开仓价 × 100
@@ -1196,14 +1228,16 @@ export default function JournalCampaignsPage() {
             </div>
             <div className="text-[13px] font-medium">
               {(sortState.mode === 'captureRate'
+                || sortState.mode === 'expectedDrawdownPct'
                 || sortState.mode === 'opportunityQuality'
                 || sortState.mode === 'arithmeticExpectancy'
                 || sortState.mode === 'geometricExpectancy') && rows.length > 0
-                ? `暂无可计算${sortState.mode === 'captureRate' ? '盈亏比' : sortState.mode === 'opportunityQuality' ? '机会质量' : sortState.mode === 'arithmeticExpectancy' ? '算术期望' : '几何期望'}的战役`
+                ? `暂无可计算${sortState.mode === 'captureRate' ? '盈亏比' : sortState.mode === 'expectedDrawdownPct' ? '预期最大回撤百分比' : sortState.mode === 'opportunityQuality' ? '机会质量' : sortState.mode === 'arithmeticExpectancy' ? '算术期望' : '几何期望'}的战役`
                 : scope === 'own' ? '尚无战役' : '暂无互关可见战役'}
             </div>
             <div className="text-[12px] text-muted-foreground">
               {(sortState.mode === 'captureRate'
+                || sortState.mode === 'expectedDrawdownPct'
                 || sortState.mode === 'opportunityQuality'
                 || sortState.mode === 'arithmeticExpectancy'
                 || sortState.mode === 'geometricExpectancy') && rows.length > 0
@@ -1211,6 +1245,8 @@ export default function JournalCampaignsPage() {
                   ? '旧战役缺少开仓资产快照时会按当前总资产估算；缺少初始最大预期亏损的战役仍不会进入当前排序'
                   : sortState.mode === 'opportunityQuality'
                     ? '缺少实际盈亏比、主力开仓价或初始对冲 A/B 价格的战役不会进入当前排序'
+                    : sortState.mode === 'expectedDrawdownPct'
+                      ? '缺少主力开仓价或初始对冲 A/B 价格的战役不会进入当前排序'
                     : '未设置初始最大预期亏损的战役不会进入当前排序'
                 : scope === 'own' ? '你下次开主力单时会自动创建第一个战役' : '双方互关后，对方战役会出现在这里'}
             </div>
@@ -1321,7 +1357,7 @@ export default function JournalCampaignsPage() {
                   </div>
                 </div>
 
-                <div className="mt-3 grid grid-cols-1 gap-2 text-[11px] font-mono text-muted-foreground md:grid-cols-2 xl:grid-cols-[1.18fr_0.65fr_0.72fr_0.65fr_0.62fr_0.62fr_0.64fr_0.72fr_0.82fr]">
+                <div className="mt-3 grid grid-cols-1 gap-2 text-[11px] font-mono text-muted-foreground md:grid-cols-2 xl:grid-cols-[1.15fr_0.62fr_0.68fr_0.62fr_0.76fr_0.58fr_0.58fr_0.60fr_0.68fr_0.78fr]">
                   <div>{fmtTime(campaign.opened_at)} → {fmtTime(campaign.closed_at)}</div>
                   <div>含 {legs.length} legs · 持续 {durationLabel(campaign.opened_at, campaign.closed_at)}</div>
                   <div>
@@ -1330,11 +1366,14 @@ export default function JournalCampaignsPage() {
                   <div data-testid="campaign-payoff-ratio">
                     盈亏比：{profitCaptureRatio == null ? '—' : formatCampaignPayoffRatio(profitCaptureRatio, 2)}
                   </div>
+                  <div data-testid="campaign-expected-drawdown-pct">
+                    预期最大回撤：{initialExpectedMaxDrawdownPct > 0 ? `${initialExpectedMaxDrawdownPct.toFixed(2)}%` : '—'}
+                  </div>
                   <div
                     data-testid="campaign-opportunity-quality-value"
                     title={opportunityQuality == null
                       ? '需要已结束战役的实际盈亏比、主力开仓价和至少一个初始对冲 A/B 价格'
-                      : `Q = 实际盈亏比 ${(profitCaptureRatio! / 100).toFixed(2)} ÷ 初始最大回撤 ${initialExpectedMaxDrawdownPct.toFixed(2)}%`}
+                      : `Q = 实际盈亏比 ${(profitCaptureRatio! / 100).toFixed(2)} ÷ 预期最大回撤 ${initialExpectedMaxDrawdownPct.toFixed(2)}%`}
                   >
                     机会质量：{formatOpportunityQuality(opportunityQuality)}
                   </div>

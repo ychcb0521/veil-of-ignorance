@@ -210,8 +210,11 @@ interface Props {
   analysisAnnotations?: AnalysisChartAnnotations;
   /** Optional analysis anchor used to center short replay/campaign windows instead of snapping to the latest candle. */
   analysisFocusTime?: number | null;
-  /** Analysis surfaces only: zoom so the ENTIRE dataset fits the viewport width (campaign chart → visible range == full legs span). Overrides anchor centering. */
+  /** Analysis surfaces only: fit the requested initial range, or the entire dataset when no range is supplied. */
   analysisFitAll?: boolean;
+  /** Optional initial range fitted by analysisFitAll while retaining data outside it for later zoom-out/panning. */
+  analysisVisibleStartTime?: number | null;
+  analysisVisibleEndTime?: number | null;
   /** Whether to show the chart engine's latest-price horizontal mark. Campaign review turns this off to keep the extracted board clean. */
   showLastPriceLine?: boolean;
   /** Draggable horizontal price lines (campaign What-if hedge/TP triggers). Drag up/down to change the trigger price. */
@@ -418,6 +421,8 @@ function CandlestickChartComponent({
   analysisAnnotations,
   analysisFocusTime = null,
   analysisFitAll = false,
+  analysisVisibleStartTime = null,
+  analysisVisibleEndTime = null,
   showLastPriceLine = true,
   draggablePriceLines,
   onDragPriceLine,
@@ -484,25 +489,45 @@ function CandlestickChartComponent({
     return true;
   }, [analysisFocusTime, data.length]);
 
-  // Campaign review: zoom so the WHOLE dataset (= padded legs span) fits the viewport width.
-  // Without this, long spans at fine intervals (e.g. >24h at 1m) overflow the default bar space
-  // and the late legs sit off-screen — the chart's visible range no longer matches the legs span.
+  // Campaign review: keep the complete prefetched dataset, but initially fit only the requested
+  // three-part range. Users can then zoom out/pan into the wider prefetched context.
   const fitAnalysisWindow = useCallback(() => {
     const chart = chartRef.current;
     if (!chart) return false;
     const size = chart.getSize();
     const chartWidth = size?.width ?? 0;
     if (chartWidth <= 0 || data.length === 0) return false;
-    // Bar space that makes all bars span exactly the viewport width (klinecharts clamps to [1, 50]).
-    const target = chartWidth / data.length;
+
+    const hasVisibleRange = typeof analysisVisibleStartTime === "number"
+      && Number.isFinite(analysisVisibleStartTime)
+      && typeof analysisVisibleEndTime === "number"
+      && Number.isFinite(analysisVisibleEndTime)
+      && analysisVisibleEndTime > analysisVisibleStartTime;
+    const visibleCount = hasVisibleRange
+      ? data.reduce((count, item) => (
+          item.time >= analysisVisibleStartTime && item.time <= analysisVisibleEndTime
+            ? count + 1
+            : count
+        ), 0)
+      : data.length;
+    const fittedCount = visibleCount > 0 ? visibleCount : data.length;
+    // Bar space that makes the initial range span the viewport (klinecharts clamps to [1, 50]).
+    const target = chartWidth / fittedCount;
     const barSpace = Number.isFinite(target) && target > 0 ? Math.min(Math.max(target, 1), 50) : 50;
     chart.setBarSpace(barSpace);
-    // Narrower than viewport (few candles, capped at max bar space) → center; otherwise right-align.
+
+    if (hasVisibleRange) {
+      chart.setOffsetRightDistance(0);
+      chart.scrollToTimestamp((analysisVisibleStartTime + analysisVisibleEndTime) / 2, 0);
+      return true;
+    }
+
+    // No explicit range: retain the previous fit-all behavior.
     const dataWidth = data.length * chart.getBarSpace();
     const rightOffset = dataWidth < chartWidth ? (chartWidth - dataWidth) / 2 : 0;
     chart.setOffsetRightDistance(rightOffset);
     return true;
-  }, [data.length]);
+  }, [analysisVisibleEndTime, analysisVisibleStartTime, data]);
 
   const applyAnalysisViewport = useCallback(
     () => (analysisFitAll ? fitAnalysisWindow() : centerAnalysisWindow()),
@@ -1734,6 +1759,8 @@ function areChartPropsEqual(prev: Props, next: Props) {
     prev.analysisAnnotations === next.analysisAnnotations &&
     prev.analysisFocusTime === next.analysisFocusTime &&
     prev.analysisFitAll === next.analysisFitAll &&
+    prev.analysisVisibleStartTime === next.analysisVisibleStartTime &&
+    prev.analysisVisibleEndTime === next.analysisVisibleEndTime &&
     prev.draggablePriceLines === next.draggablePriceLines &&
     prev.onDragPriceLine === next.onDragPriceLine &&
     prev.draggableVerticalLines === next.draggableVerticalLines &&

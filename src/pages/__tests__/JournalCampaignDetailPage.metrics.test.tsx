@@ -1,13 +1,18 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { CampaignBoardExportInput } from '@/lib/campaignLegsPngExport';
 import type { TradeCampaign, TradeJournal } from '@/types/journal';
 import JournalCampaignDetailPage from '../JournalCampaignDetailPage';
 
 const scrollToMock = vi.fn();
+const { exportCampaignBoardPngMock } = vi.hoisted(() => ({
+  exportCampaignBoardPngMock: vi.fn(async (_input: CampaignBoardExportInput) => 'BTCUSDT campaign.png'),
+}));
 
 beforeEach(() => {
   scrollToMock.mockClear();
+  exportCampaignBoardPngMock.mockClear();
   Object.defineProperty(window, 'scrollTo', {
     configurable: true,
     writable: true,
@@ -118,6 +123,8 @@ vi.mock('@/hooks/useCampaignKlines', () => ({
   buildCampaignKlineTimeWindow: () => ({
     fromTime: Date.parse('2025-12-31T23:00:00.000Z'),
     toTime: Date.parse('2026-01-01T02:00:00.000Z'),
+    defaultFromTime: Date.parse('2025-12-31T23:30:00.000Z'),
+    defaultToTime: Date.parse('2026-01-01T01:30:00.000Z'),
   }),
   useCampaignKlines: () => ({
     klines: [],
@@ -144,6 +151,13 @@ vi.mock('@/components/journal/ReplayKlineChart', () => ({
 vi.mock('@/components/journal/CampaignLegsList', () => ({ CampaignLegsList: () => null }));
 vi.mock('@/components/journal/CampaignWhatIfEditor', () => ({ CampaignWhatIfEditor: () => null }));
 vi.mock('@/components/journal/EndCampaignDialog', () => ({ EndCampaignDialog: () => null }));
+vi.mock('@/lib/campaignLegsPngExport', async importOriginal => {
+  const actual = await importOriginal<typeof import('@/lib/campaignLegsPngExport')>();
+  return {
+    ...actual,
+    exportCampaignBoardPng: exportCampaignBoardPngMock,
+  };
+});
 
 function ListLocationProbe() {
   const location = useLocation();
@@ -200,7 +214,7 @@ describe('JournalCampaignDetailPage metrics', () => {
       '峰值浮盈',
       '最大回撤',
       '最大预期亏损',
-      '初始最大回撤',
+      '预期最大回撤百分比',
       '盈亏比',
       '机会质量',
       '算术期望',
@@ -210,6 +224,22 @@ describe('JournalCampaignDetailPage metrics', () => {
     }
 
     fireEvent.click(screen.getByRole('button', { name: '机会质量说明' }));
-    expect(await screen.findByText(/Q = 实际盈亏比 b ÷ 初始最大回撤百分点 d/)).toBeInTheDocument();
+    expect(await screen.findByText(/Q = 实际盈亏比 b ÷ 预期最大回撤百分点 d/)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'PNG' }));
+    await waitFor(() => expect(exportCampaignBoardPngMock).toHaveBeenCalledTimes(1));
+    const exportInput = exportCampaignBoardPngMock.mock.calls[0][0];
+    expect(exportInput.pnlOverview.items.map(item => item.label)).toEqual([
+      '已实现 P&L',
+      '峰值浮盈',
+      '最大回撤',
+      '最大预期亏损',
+      '预期最大回撤百分比',
+      '盈亏比',
+      '机会质量',
+      '算术期望',
+      '几何期望',
+    ]);
+    expect(exportInput.pnlOverview.note).toContain('2 场有效战役，实时胜率 50.00%');
   });
 });
