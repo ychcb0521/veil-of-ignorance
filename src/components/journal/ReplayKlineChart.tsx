@@ -72,7 +72,7 @@ export function ReplayKlineChart({
   onSelectVerticalLine,
 }: Props) {
   const replayData = useMemo(() => {
-    // 战役详情用 fitAll：直接渲染全部已拉取的 K 线（开始前上下文 + 战役内容 + 结束后上下文），
+    // 战役详情用 fitAll：直接渲染全部已拉取的 K 线（最多 51 倍时间范围），
     // 由主图缩放到铺满视口；竖线/标记仍由下方 annotations 按 currentTime 过滤。
     if (fitAll) return klines;
     return sliceReplayKlines(klines, currentTime, historyCandles, viewportCenterTime);

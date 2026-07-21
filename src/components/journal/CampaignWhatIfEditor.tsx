@@ -7,6 +7,12 @@ import { type ChartMarker, type TimeBoundPriceLine, type VerticalLine } from '@/
 import { type AnalysisDraggableVerticalLine } from '@/components/CandlestickChart';
 import { intervalToMs, type KlineData } from '@/hooks/useBinanceData';
 import {
+  CAMPAIGN_VIEW_MULTIPLIERS,
+  buildCampaignKlineVisibleRange,
+  type CampaignKlineTimeWindow,
+  type CampaignViewMultiplier,
+} from '@/hooks/useCampaignKlines';
+import {
   SELECTED_LEG_LONG_LINE_COLOR,
   SELECTED_LEG_SHORT_LINE_COLOR,
   SELECTED_LEG_VERTICAL_LINE_WIDTH,
@@ -34,6 +40,8 @@ interface Props {
   interval: string;
   intervalOptions?: readonly string[];
   onIntervalChange?: (interval: string) => void;
+  /** 与原始战役盘面共用的完整时间窗口；反事实盘面默认只显示战役本身的 1 倍范围。 */
+  klineTimeWindow: CampaignKlineTimeWindow;
   timezone?: string;
   whatIfRunning: boolean;
   onRunWhatIf: (label: string, params: CampaignCounterfactualParams) => void;
@@ -62,6 +70,11 @@ const ROLE_OPTIONS: LegRole[] = [
   'reentry_main',
   'reentry_hedge',
   'standalone',
+];
+
+const COUNTERFACTUAL_VIEW_MULTIPLIERS: readonly CampaignViewMultiplier[] = [
+  1,
+  ...CAMPAIGN_VIEW_MULTIPLIERS,
 ];
 
 function round(value: number, digits: number = 4) {
@@ -118,6 +131,7 @@ export function CampaignWhatIfEditor({
   interval,
   intervalOptions = [],
   onIntervalChange,
+  klineTimeWindow,
   timezone,
   whatIfRunning,
   onRunWhatIf,
@@ -133,6 +147,15 @@ export function CampaignWhatIfEditor({
   const [manualLegs, setManualLegs] = useState<CampaignCounterfactualManualLeg[]>([]);
   const [label, setLabel] = useState('');
   const [selectedManualLegId, setSelectedManualLegId] = useState<string | null>(null);
+  const [chartRangeMultiplier, setChartRangeMultiplier] = useState<CampaignViewMultiplier>(1);
+
+  const chartVisibleRange = useMemo(
+    () => buildCampaignKlineVisibleRange(klineTimeWindow, chartRangeMultiplier),
+    [chartRangeMultiplier, klineTimeWindow],
+  );
+  const chartViewportCenterTime = Math.round(
+    (chartVisibleRange.fromTime + chartVisibleRange.toTime) / 2,
+  );
 
   useEffect(() => {
     setParams(baseDefaults);
@@ -140,10 +163,12 @@ export function CampaignWhatIfEditor({
     setSelectedManualLegId(null);
   }, [baseDefaults, legs, klines, tradeRecords, legExitPriceCorrections]);
 
+  useEffect(() => {
+    setChartRangeMultiplier(1);
+  }, [campaign.id]);
+
   const canRun = !klinesLoading && klines.length > 0;
-  const chartCurrentTime = klines.length > 0
-    ? klines[klines.length - 1].time + intervalToMs(interval)
-    : Date.now();
+  const chartCurrentTime = chartVisibleRange.toTime;
 
   const updateManualLeg = (id: string, patch: Partial<CampaignCounterfactualManualLeg>) => {
     setManualLegs(prev => prev.map(leg => (leg.id === id ? { ...leg, ...patch } : leg)));
@@ -300,8 +325,8 @@ export function CampaignWhatIfEditor({
           </div>
         </div>
 
-        {onIntervalChange && intervalOptions.length > 0 && (
-          <div className="h-9 px-2 flex flex-wrap items-center gap-2">
+        <div className="min-h-9 px-2 py-1 flex flex-wrap items-center gap-2">
+          {onIntervalChange && intervalOptions.length > 0 && (
             <div className="flex items-center gap-1">
               {intervalOptions.map(item => (
                 <button
@@ -314,9 +339,31 @@ export function CampaignWhatIfEditor({
                 </button>
               ))}
             </div>
-            <div className="flex-1" />
+          )}
+          {onIntervalChange && intervalOptions.length > 0 && (
+            <div className="h-4 w-px bg-border/70" />
+          )}
+          <div className="flex items-center gap-0.5" aria-label="反事实 K 线显示范围">
+            {COUNTERFACTUAL_VIEW_MULTIPLIERS.map(multiplier => (
+              <button
+                key={multiplier}
+                type="button"
+                title={`反事实盘面显示 ${multiplier} 倍战役时间范围`}
+                aria-label={`反事实盘面显示 ${multiplier} 倍战役时间范围`}
+                aria-pressed={chartRangeMultiplier === multiplier}
+                onClick={() => setChartRangeMultiplier(multiplier)}
+                className={`h-5 min-w-6 rounded px-1 text-[9px] font-mono transition-colors ${
+                  chartRangeMultiplier === multiplier
+                    ? 'bg-foreground/85 text-background'
+                    : 'text-muted-foreground/70 hover:bg-muted hover:text-foreground'
+                }`}
+              >
+                {multiplier}x
+              </button>
+            ))}
           </div>
-        )}
+          <div className="flex-1" />
+        </div>
 
         <div className="h-[480px] border border-border rounded overflow-hidden">
           {klinesLoading ? (
@@ -330,7 +377,10 @@ export function CampaignWhatIfEditor({
               intervalMs={intervalToMs(interval)}
               symbol={campaign.symbol}
               fitAll
+              initialVisibleStartTime={chartVisibleRange.fromTime}
+              initialVisibleEndTime={chartVisibleRange.toTime}
               showLastPriceLine={false}
+              viewportCenterTime={chartViewportCenterTime}
               markers={baseMarkers}
               timeBoundPriceLines={[
                 ...baseTimeBoundPriceLines,

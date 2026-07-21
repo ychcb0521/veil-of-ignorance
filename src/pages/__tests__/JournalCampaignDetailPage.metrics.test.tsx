@@ -6,13 +6,15 @@ import type { TradeCampaign, TradeJournal } from '@/types/journal';
 import JournalCampaignDetailPage from '../JournalCampaignDetailPage';
 
 const scrollToMock = vi.fn();
-const { exportCampaignBoardPngMock } = vi.hoisted(() => ({
+const { exportCampaignBoardPngMock, replayVisibleRanges } = vi.hoisted(() => ({
   exportCampaignBoardPngMock: vi.fn(async (_input: CampaignBoardExportInput) => 'BTCUSDT campaign.png'),
+  replayVisibleRanges: [] as Array<{ start: number; end: number }>,
 }));
 
 beforeEach(() => {
   scrollToMock.mockClear();
   exportCampaignBoardPngMock.mockClear();
+  replayVisibleRanges.length = 0;
   Object.defineProperty(window, 'scrollTo', {
     configurable: true,
     writable: true,
@@ -119,22 +121,37 @@ vi.mock('@/contexts/TradingContext', () => ({
   }),
 }));
 
-vi.mock('@/hooks/useCampaignKlines', () => ({
-  buildCampaignKlineTimeWindow: () => ({
-    fromTime: Date.parse('2025-12-31T23:00:00.000Z'),
-    toTime: Date.parse('2026-01-01T02:00:00.000Z'),
-    defaultFromTime: Date.parse('2025-12-31T23:30:00.000Z'),
-    defaultToTime: Date.parse('2026-01-01T01:30:00.000Z'),
-  }),
-  useCampaignKlines: () => ({
-    klines: [],
-    loading: false,
-    error: null,
-    reload: vi.fn(),
-    fromTime: Date.parse('2025-12-31T23:00:00.000Z'),
-    toTime: Date.parse('2026-01-01T02:00:00.000Z'),
-  }),
-}));
+vi.mock('@/hooks/useCampaignKlines', async importOriginal => {
+  const actual = await importOriginal<typeof import('@/hooks/useCampaignKlines')>();
+  return {
+    ...actual,
+    buildCampaignKlineTimeWindow: () => ({
+      fromTime: Date.parse('2025-12-31T07:30:00.000Z'),
+      toTime: Date.parse('2026-01-01T17:30:00.000Z'),
+      defaultFromTime: Date.parse('2025-12-31T23:30:00.000Z'),
+      defaultToTime: Date.parse('2026-01-01T01:30:00.000Z'),
+      contentStartMs: Date.parse('2026-01-01T00:10:00.000Z'),
+      contentEndMs: Date.parse('2026-01-01T00:50:00.000Z'),
+      contextMs: 40 * 60_000,
+      availableContextMs: 1_000 * 60_000,
+    }),
+    useCampaignKlines: () => ({
+      klines: [{
+        time: Date.parse('2026-01-01T00:00:00.000Z'),
+        open: 100,
+        high: 101,
+        low: 99,
+        close: 100,
+        volume: 1,
+      }],
+      loading: false,
+      error: null,
+      reload: vi.fn(),
+      fromTime: Date.parse('2025-12-31T07:30:00.000Z'),
+      toTime: Date.parse('2026-01-01T17:30:00.000Z'),
+    }),
+  };
+});
 
 vi.mock('@/lib/journalApi', () => ({
   getCampaignFullData: vi.fn(async (id: string) => detailsById[id]),
@@ -146,7 +163,13 @@ vi.mock('@/lib/journalApi', () => ({
 }));
 
 vi.mock('@/components/journal/ReplayKlineChart', () => ({
-  ReplayKlineChart: () => <div data-testid="campaign-chart" />,
+  ReplayKlineChart: (props: { initialVisibleStartTime: number; initialVisibleEndTime: number }) => {
+    replayVisibleRanges.push({
+      start: props.initialVisibleStartTime,
+      end: props.initialVisibleEndTime,
+    });
+    return <div data-testid="campaign-chart" />;
+  },
 }));
 vi.mock('@/components/journal/CampaignLegsList', () => ({ CampaignLegsList: () => null }));
 vi.mock('@/components/journal/CampaignWhatIfEditor', () => ({ CampaignWhatIfEditor: () => null }));
@@ -165,6 +188,33 @@ function ListLocationProbe() {
 }
 
 describe('JournalCampaignDetailPage metrics', () => {
+  it('defaults to 3x and jumps to the selected centered K-line range', async () => {
+    render(
+      <MemoryRouter initialEntries={['/journal/campaigns/winner']}>
+        <Routes>
+          <Route path="/journal/campaigns/:id" element={<JournalCampaignDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    const button3x = await screen.findByRole('button', { name: '显示 3 倍战役时间范围' });
+    expect(button3x).toHaveAttribute('aria-pressed', 'true');
+    for (const multiplier of [2, 3, 5, 11, 21, 31, 41, 51]) {
+      expect(screen.getByRole('button', { name: `显示 ${multiplier} 倍战役时间范围` })).toBeInTheDocument();
+    }
+    await waitFor(() => expect(replayVisibleRanges.at(-1)).toEqual({
+      start: Date.parse('2025-12-31T23:30:00.000Z'),
+      end: Date.parse('2026-01-01T01:30:00.000Z'),
+    }));
+
+    fireEvent.click(screen.getByRole('button', { name: '显示 51 倍战役时间范围' }));
+    await waitFor(() => expect(replayVisibleRanges.at(-1)).toEqual({
+      start: Date.parse('2025-12-31T07:30:00.000Z'),
+      end: Date.parse('2026-01-01T17:30:00.000Z'),
+    }));
+    expect(screen.getByRole('button', { name: '显示 51 倍战役时间范围' })).toHaveAttribute('aria-pressed', 'true');
+  }, 10_000);
+
   it('returns to the exact campaign-list history state when opened from the list', async () => {
     const listLocation = '/journal/campaigns?scope=own&sort=opportunityQuality&direction=asc';
     render(

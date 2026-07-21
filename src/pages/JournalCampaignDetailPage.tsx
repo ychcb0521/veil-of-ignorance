@@ -17,7 +17,13 @@ import { EndCampaignDialog } from '@/components/journal/EndCampaignDialog';
 import { useAuth } from '@/contexts/AuthContext';
 import { useTradingContext } from '@/contexts/TradingContext';
 import { intervalToMs } from '@/hooks/useBinanceData';
-import { buildCampaignKlineTimeWindow, useCampaignKlines } from '@/hooks/useCampaignKlines';
+import {
+  CAMPAIGN_VIEW_MULTIPLIERS,
+  buildCampaignKlineTimeWindow,
+  buildCampaignKlineVisibleRange,
+  useCampaignKlines,
+  type CampaignViewMultiplier,
+} from '@/hooks/useCampaignKlines';
 import { computeCurrentAccountEquity } from '@/lib/accountEquity';
 import {
   buildCampaignEventStream,
@@ -496,6 +502,7 @@ export default function JournalCampaignDetailPage() {
   const [reverseHedgeOrders, setReverseHedgeOrders] = useState<CampaignReverseHedgeOrder[]>([]);
   const [interval, setInterval] = useState<Interval>('1m');
   const [intervalTouched, setIntervalTouched] = useState(false);
+  const [chartRangeMultiplier, setChartRangeMultiplier] = useState<CampaignViewMultiplier>(3);
   const [endOpen, setEndOpen] = useState(false);
   const [focusTime, setFocusTime] = useState<number | null>(null);
   const [counterfactuals, setCounterfactuals] = useState<CampaignCounterfactual[]>([]);
@@ -524,6 +531,10 @@ export default function JournalCampaignDetailPage() {
 
   useLayoutEffect(() => {
     window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
+  }, [id]);
+
+  useEffect(() => {
+    setChartRangeMultiplier(3);
   }, [id]);
 
   useEffect(() => {
@@ -662,6 +673,10 @@ export default function JournalCampaignDetailPage() {
       endMs: campaignKlineTimeWindow.defaultToTime,
     }),
     [campaignKlineTimeWindow.defaultFromTime, campaignKlineTimeWindow.defaultToTime],
+  );
+  const campaignKlineVisibleRange = useMemo(
+    () => buildCampaignKlineVisibleRange(campaignKlineTimeWindow, chartRangeMultiplier),
+    [campaignKlineTimeWindow, chartRangeMultiplier],
   );
 
   useEffect(() => {
@@ -1127,14 +1142,14 @@ export default function JournalCampaignDetailPage() {
     );
   }
 
-  // 主图当前时间游标：聚焦到某事件时用 focusTime，否则停在默认三倍窗口的最右端。
+  // 主图当前时间游标：聚焦到某事件时用 focusTime，否则停在当前倍率窗口的最右端。
   // 关键：ReplayKlineChart 会用 `line.time <= currentTime` 过滤竖线/标记，并以 currentTime 作为可见区右沿。
-  // 数据层实际预载 21 倍范围；首次打开仍只铺满「前 1 倍 + 战役 1 倍 + 后 1 倍」。
+  // 数据层实际预载 51 倍范围；首次打开仍只铺满「前 1 倍 + 战役 1 倍 + 后 1 倍」。
   // 必须放在上面的 loading guard 之后——此时 campaign 一定非空；放在 guard 之前会在
   // 首帧（campaign 仍为 null）就解引用 campaign.opened_at 直接崩溃、整页白屏。
-  const chartDefaultCurrentTime = campaignKlineTimeWindow.defaultToTime;
+  const chartDefaultCurrentTime = campaignKlineVisibleRange.toTime;
   const chartDefaultViewportCenterTime = Math.round(
-    (campaignKlineTimeWindow.defaultFromTime + campaignKlineTimeWindow.defaultToTime) / 2,
+    (campaignKlineVisibleRange.fromTime + campaignKlineVisibleRange.toTime) / 2,
   );
   const chartCurrentTime = focusTime ?? chartDefaultCurrentTime;
   const chartViewportCenterTime = focusTime ?? chartDefaultViewportCenterTime;
@@ -1527,6 +1542,29 @@ export default function JournalCampaignDetailPage() {
                   </button>
                 ))}
               </div>
+              <div className="h-4 w-px bg-border/70" />
+              <div className="flex items-center gap-0.5" aria-label="K 线显示范围">
+                {CAMPAIGN_VIEW_MULTIPLIERS.map(multiplier => (
+                  <button
+                    key={multiplier}
+                    type="button"
+                    title={`显示 ${multiplier} 倍战役时间范围`}
+                    aria-label={`显示 ${multiplier} 倍战役时间范围`}
+                    aria-pressed={chartRangeMultiplier === multiplier}
+                    onClick={() => {
+                      setFocusTime(null);
+                      setChartRangeMultiplier(multiplier);
+                    }}
+                    className={`h-5 min-w-6 rounded px-1 text-[9px] font-mono transition-colors ${
+                      chartRangeMultiplier === multiplier
+                        ? 'bg-foreground/85 text-background'
+                        : 'text-muted-foreground/70 hover:bg-muted hover:text-foreground'
+                    }`}
+                  >
+                    {multiplier}x
+                  </button>
+                ))}
+              </div>
               <div className="flex-1" />
             </div>
             <div ref={campaignChartExportRef} className="h-[480px] border border-border rounded overflow-hidden">
@@ -1551,8 +1589,8 @@ export default function JournalCampaignDetailPage() {
                   timeBoundPriceLines={displayPriceLines}
                   verticalLines={displayVerticalLines}
                   fitAll
-                  initialVisibleStartTime={campaignKlineTimeWindow.defaultFromTime}
-                  initialVisibleEndTime={campaignKlineTimeWindow.defaultToTime}
+                  initialVisibleStartTime={campaignKlineVisibleRange.fromTime}
+                  initialVisibleEndTime={campaignKlineVisibleRange.toTime}
                   showLastPriceLine={false}
                   viewportCenterTime={chartViewportCenterTime}
                   timezone={LOCAL_TIME_ZONE}
@@ -1724,6 +1762,7 @@ export default function JournalCampaignDetailPage() {
             interval={interval}
             intervalOptions={INTERVALS}
             onIntervalChange={(nextInterval) => setInterval(nextInterval as Interval)}
+            klineTimeWindow={campaignKlineTimeWindow}
             timezone={LOCAL_TIME_ZONE}
             whatIfRunning={whatIfRunning}
             onRunWhatIf={handleRunWhatIf}

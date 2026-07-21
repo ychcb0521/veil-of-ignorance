@@ -310,7 +310,7 @@ describe('CandlestickChart analysis annotations', () => {
     });
   });
 
-  it('预载二十一倍数据时把指定三倍区间铺满，并让持仓段位于默认视口正中', async () => {
+  it('预载五十一倍数据时把指定三倍区间铺满，并让持仓段位于默认视口正中', async () => {
     const data = Array.from({ length: 100 }, (_, index) => candle(index * 1000, 1 + index / 100));
     mocks.chart.convertToPixel.mockImplementation((point: any) => {
       const value = Array.isArray(point) ? point[0] : point;

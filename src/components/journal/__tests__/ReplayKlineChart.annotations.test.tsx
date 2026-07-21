@@ -69,7 +69,7 @@ describe('ReplayKlineChart annotations', () => {
   it('保留完整 K 线数据，同时把默认三倍时间范围透传给初始视口', async () => {
     render(
       <ReplayKlineChart
-        klines={Array.from({ length: 21 }, (_, index) => candle(index * 1000))}
+        klines={Array.from({ length: 51 }, (_, index) => candle(index * 1000))}
         currentTime={20_000}
         intervalMs={1000}
         symbol="BTCUSDT"

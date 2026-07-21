@@ -4,6 +4,7 @@ import {
   CAMPAIGN_AVAILABLE_CONTEXT_MULTIPLIER,
   CAMPAIGN_EDGE_PAD_MS,
   buildCampaignKlineTimeWindow,
+  buildCampaignKlineVisibleRange,
 } from '@/hooks/useCampaignKlines';
 import type { CampaignCounterfactual, TradeCampaign, TradeJournal } from '@/types/journal';
 import type { CampaignReverseHedgeOrder, TradeRecord } from '@/types/trading';
@@ -210,7 +211,7 @@ describe('pickCampaignOverviewInterval', () => {
 });
 
 describe('buildCampaignKlineTimeWindow', () => {
-  it('默认显示三倍窗口，同时预载左右各十倍的完整二十一倍范围', () => {
+  it('默认显示三倍窗口，同时预载左右各二十五倍的完整五十一倍范围', () => {
     const openedAtMs = t('2026-01-02T00:00:00.000Z');
     const closedAtMs = t('2026-01-02T02:00:00.000Z');
     const window = buildCampaignKlineTimeWindow(
@@ -221,20 +222,46 @@ describe('buildCampaignKlineTimeWindow', () => {
     );
 
     expect(window).toEqual({
-      fromTime: t('2026-01-01T04:30:00.000Z'),
-      toTime: t('2026-01-02T22:30:00.000Z'),
+      fromTime: t('2025-12-30T22:30:00.000Z'),
+      toTime: t('2026-01-04T04:30:00.000Z'),
       defaultFromTime: t('2026-01-01T22:30:00.000Z'),
       defaultToTime: t('2026-01-02T04:30:00.000Z'),
       contentStartMs: t('2026-01-02T00:30:00.000Z'),
       contentEndMs: t('2026-01-02T02:30:00.000Z'),
       contextMs: 2 * 60 * 60_000,
-      availableContextMs: 20 * 60 * 60_000,
+      availableContextMs: 50 * 60 * 60_000,
     });
     expect(window.contentStartMs! - window.defaultFromTime).toBe(window.contextMs);
     expect(window.defaultToTime - window.contentEndMs!).toBe(window.contextMs);
     expect(window.contentStartMs! - window.fromTime).toBe(window.availableContextMs);
     expect(window.toTime - window.contentEndMs!).toBe(window.availableContextMs);
     expect(window.availableContextMs).toBe(window.contextMs! * CAMPAIGN_AVAILABLE_CONTEXT_MULTIPLIER);
+  });
+
+  it('各倍率都围绕战役内容居中，一倍只显示战役本身', () => {
+    const window = buildCampaignKlineTimeWindow(
+      t('2026-01-02T00:00:00.000Z'),
+      t('2026-01-02T03:00:00.000Z'),
+      t('2026-01-02T00:30:00.000Z'),
+      t('2026-01-02T02:30:00.000Z'),
+    );
+
+    expect(buildCampaignKlineVisibleRange(window, 1)).toEqual({
+      fromTime: t('2026-01-02T00:30:00.000Z'),
+      toTime: t('2026-01-02T02:30:00.000Z'),
+    });
+    expect(buildCampaignKlineVisibleRange(window, 2)).toEqual({
+      fromTime: t('2026-01-01T23:30:00.000Z'),
+      toTime: t('2026-01-02T03:30:00.000Z'),
+    });
+    expect(buildCampaignKlineVisibleRange(window, 3)).toEqual({
+      fromTime: window.defaultFromTime,
+      toTime: window.defaultToTime,
+    });
+    expect(buildCampaignKlineVisibleRange(window, 51)).toEqual({
+      fromTime: window.fromTime,
+      toTime: window.toTime,
+    });
   });
 
   it('默认总览周期按扩展后的三段窗口计算，老战役打开时也会重新撑开盘面', () => {
