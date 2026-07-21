@@ -67,14 +67,14 @@ describe('campaign metrics shared by list and detail pages', () => {
     expect(formatCampaignLeverage(null)).toBe('—');
   });
 
-  it('机会质量取盈亏比绝对值：亏损战役也是正的量级', () => {
+  it('战役机会质量将小于 1 的实际盈亏比统一按 1 计算', () => {
     const value = resolveCampaignOpportunityQuality(
       campaign({ status: 'closed_loss', final_realized_pnl: -80 }),
       -80,
       4,
     );
 
-    expect(value).toBeCloseTo(0.2, 8); // |−80/100| ÷ 4 = 0.2
+    expect(value).toBeCloseTo(0.25, 8); // max（−80/100, 1） ÷ 4 = 0.25
   });
 
   it('does not calculate opportunity quality for an active campaign', () => {

@@ -936,10 +936,11 @@ export default function JournalCampaignsPage() {
                       <>
                         <div className="font-medium text-foreground">单场机会质量计算公式</div>
                         <div className="mt-2 rounded bg-muted/60 px-2 py-1.5 font-mono text-foreground">
-                          Qᵢ = |实际盈亏比 bᵢ| ÷ 预期回撤百分点 dᵢ
+                          bᵢ* = max（bᵢ, 1），Qᵢ = bᵢ* ÷ 预期回撤百分点 dᵢ
                         </div>
                         <div className="mt-2 space-y-1 text-muted-foreground">
-                          <div>bᵢ = 已实现盈亏ᵢ ÷ 初始最大预期亏损ᵢ；机会质量取 |bᵢ| 绝对值——只看这次机会的量级，不看盈亏方向（盈亏由胜率 / 盈亏列表达）。</div>
+                          <div>bᵢ = 已实现盈亏ᵢ ÷ 初始最大预期亏损ᵢ。</div>
+                          <div>实际盈亏比 bᵢ 小于 1（包括等于 0 或为负数）时统一按 1 计算；不取绝对值。</div>
                           <div className="rounded border border-border/60 px-2 py-1.5 font-mono leading-relaxed text-foreground/85">
                             dᵢ = max（|主力开仓价 − 初始对冲 A 价|，|主力开仓价 − 初始对冲 B 价|）÷ 主力开仓价 × 100
                           </div>
@@ -1228,15 +1229,15 @@ export default function JournalCampaignsPage() {
               <PopoverContent align="end" className="w-80 border-border bg-card p-3 text-[11px]">
                 <div className="font-medium text-foreground">机会质量计算公式</div>
                 <div className="mt-2 rounded bg-muted/60 px-2 py-1.5 font-mono text-foreground">
-                  Qᵢ = |bᵢ| ÷ dᵢ，Q̄ = ΣQᵢ ÷ N
+                  bᵢ* = max（bᵢ, 1），Qᵢ = bᵢ* ÷ dᵢ，Q̄ = ΣQᵢ ÷ N
                 </div>
                 <div className="mt-2 space-y-1 text-muted-foreground">
                   <div>bᵢ = 该战役实际盈亏比 = 已实现盈亏 ÷ 初始最大预期亏损；dᵢ = 预期回撤百分点。</div>
-                  <div>机会质量取 |bᵢ| 绝对值：只衡量这次机会的量级，不看盈亏方向（盈亏由胜率 / 盈亏列表达），亏损战役也是正的量级。</div>
+                  <div>实际盈亏比 bᵢ 小于 1（包括等于 0 或为负数）时统一按 1 计算；不取绝对值。</div>
                   <div className="rounded border border-border/60 px-2 py-1.5 font-mono leading-relaxed text-foreground/85">
                     dᵢ = max（|主力开仓价 − 初始对冲 A 价|，|主力开仓价 − 初始对冲 B 价|）÷ 主力开仓价 × 100
                   </div>
-                  <div>2% 回撤按 2 计算，不按 0.02 计算。例：实际盈亏比 5、回撤 2%，Q = 2.50。</div>
+                  <div>2% 回撤按 2 计算，不按 0.02 计算。例：实际盈亏比 0.5、回撤 2%，b* = 1，Q = 0.50。</div>
                   <div>缺少实际盈亏比、主力开仓价或初始对冲 A/B 价格的战役不纳入平均。</div>
                   <div className="border-t border-border/60 pt-1.5">
                     当前 N = {opportunityQualityStats.sampleCount} 场。

@@ -395,7 +395,7 @@ describe('JournalCampaignDetailPage metrics', () => {
     expect(screen.queryByRole('button', { name: '最大回撤说明' })).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: '机会质量说明' }));
-    expect(await screen.findByText(/Q = 实际盈亏比 b ÷ 预期回撤百分点 d/)).toBeInTheDocument();
+    expect(await screen.findByText(/b\* = max（实际盈亏比 b, 1）；Q = b\* ÷ 预期回撤百分点 d/)).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'PNG' }));
     await waitFor(() => expect(exportCampaignBoardPngMock).toHaveBeenCalledTimes(1));

@@ -27,12 +27,13 @@ describe('opportunity quality', () => {
     expect(computeOpportunityQuality({ payoffRatio: 5, drawdownPct: Number.NaN })).toBeNull();
   });
 
-  it('机会质量取盈亏比的绝对值（只看量级、不看盈亏方向）', () => {
+  it('实际盈亏比小于 1 时按 1 计算，不取绝对值', () => {
     expect(computeRealizedOpportunityQuality({ payoffRatio: 3, drawdownPct: 2 })).toBe(1.5);
-    // 亏损战役：|−0.8| ÷ 4 = 0.2（正数，不再是 −0.2）
-    expect(computeRealizedOpportunityQuality({ payoffRatio: -0.8, drawdownPct: 4 })).toBe(0.2);
-    expect(computeRealizedOpportunityQuality({ payoffRatio: -3, drawdownPct: 2 })).toBe(1.5); // 与 +3 同质量
-    expect(computeRealizedOpportunityQuality({ payoffRatio: 0, drawdownPct: 2 })).toBe(0);
+    expect(computeRealizedOpportunityQuality({ payoffRatio: 0.5, drawdownPct: 2 })).toBe(0.5);
+    expect(computeRealizedOpportunityQuality({ payoffRatio: -0.8, drawdownPct: 4 })).toBe(0.25);
+    expect(computeRealizedOpportunityQuality({ payoffRatio: -3, drawdownPct: 2 })).toBe(0.5);
+    expect(computeRealizedOpportunityQuality({ payoffRatio: 0, drawdownPct: 2 })).toBe(0.5);
+    expect(computeRealizedOpportunityQuality({ payoffRatio: null, drawdownPct: 2 })).toBeNull();
     expect(computeRealizedOpportunityQuality({ payoffRatio: 3, drawdownPct: 0 })).toBeNull();
   });
 });

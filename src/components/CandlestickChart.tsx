@@ -450,6 +450,7 @@ function CandlestickChartComponent({
   const onSelectVerticalLineRef = useRef(onSelectVerticalLine);
   onSelectVerticalLineRef.current = onSelectVerticalLine;
   const analysisOverlayRunRef = useRef(0);
+  const analysisAxisRetryRef = useRef({ signature: "", attempts: 0 });
   const pendingAnalysisViewportRef = useRef(false);
 
   const [indicators, setIndicators] = usePersistedState<IndicatorConfig[]>("indicators", []);
@@ -789,23 +790,34 @@ function CandlestickChartComponent({
     // Set before feeding data so even a fast OnDataReady emission observes it.
     if (needsFit) pendingAnalysisViewportRef.current = true;
 
+    const notifyAnalysisDataCommitted = analysisMode
+      ? () => {
+          // On the first synchronous commit the annotation effect has not run yet,
+          // so its normal pass already sees the final native axis. A later callback
+          // means an async historical commit finished after that pass and must rebuild.
+          if (analysisOverlayRunRef.current > 0) {
+            setAnalysisDataReadyRevision((revision) => revision + 1);
+          }
+        }
+      : undefined;
+
     if (wasPrepend) {
       // Older data prepended — feed older portion via applyMoreData
       const newCount = data.length - prevDataLenRef.current;
       const olderData = klineData.slice(0, newCount);
-      chart.applyMoreData(olderData, true);
+      chart.applyMoreData(olderData, true, notifyAnalysisDataCommitted);
     } else if (prevDataLenRef.current === 0) {
       // Initial load
-      chart.applyNewData(klineData, true);
+      chart.applyNewData(klineData, true, notifyAnalysisDataCommitted);
     } else if (isSmallAppend) {
       // New candle appended (sim tick)
-      chart.updateData(lastCandle);
+      chart.updateData(lastCandle, notifyAnalysisDataCommitted);
     } else if (isSameBarUpdate) {
       // Same bar evolving: only update last candle to keep crosshair/interaction state stable
-      chart.updateData(lastCandle);
+      chart.updateData(lastCandle, notifyAnalysisDataCommitted);
     } else {
       // Data replaced (symbol/interval/window replacement)
-      chart.applyNewData(klineData, true);
+      chart.applyNewData(klineData, true, notifyAnalysisDataCommitted);
     }
 
     prevDataLenRef.current = data.length;
@@ -1022,15 +1034,31 @@ function CandlestickChartComponent({
     const nativeData = chart.getDataList();
     const propTimeAxisSig = data.map(item => item.time).join(",");
     const nativeTimeAxisSig = nativeData.map(item => item.timestamp).join(",");
-    if (nativeData.length > 0 && (
-      nativeData.length !== data.length
+    if (
+      nativeData.length === 0
+      || nativeData.length !== data.length
       || nativeTimeAxisSig !== propTimeAxisSig
-    )) {
+    ) {
+      // Large legacy snapshots are committed asynchronously by KlineCharts. Never
+      // create timestamp overlays against an empty or stale native index: doing so
+      // makes the engine cache a screen position and is the reason some historical
+      // campaigns could move their labels independently from their candles.
+      const retrySignature = `${data.length}:${propTimeAxisSig}`;
+      if (analysisAxisRetryRef.current.signature !== retrySignature) {
+        analysisAxisRetryRef.current = { signature: retrySignature, attempts: 0 };
+      }
+      if (analysisAxisRetryRef.current.attempts < 120 && typeof window !== "undefined") {
+        analysisAxisRetryRef.current.attempts += 1;
+        const retryFrame = window.requestAnimationFrame(() => {
+          if (analysisOverlayRunRef.current !== runId || chartRef.current !== chart) return;
+          setAnalysisDataReadyRevision((revision) => revision + 1);
+        });
+        return () => window.cancelAnimationFrame(retryFrame);
+      }
       return;
     }
-    const axisData = nativeData.length > 0
-      ? nativeData.map(item => ({ time: item.timestamp, close: item.close }))
-      : data.map(item => ({ time: item.time, close: item.close }));
+    analysisAxisRetryRef.current = { signature: `${data.length}:${propTimeAxisSig}`, attempts: 0 };
+    const axisData = nativeData.map(item => ({ time: item.timestamp, close: item.close }));
     const newest = axisData[axisData.length - 1];
     const inferredInterval = axisData.length > 1
       ? Math.max(0, newest.time - axisData[axisData.length - 2].time)
@@ -1099,6 +1127,9 @@ function CandlestickChartComponent({
       });
     };
     let floatingLabelFrame: number | null = null;
+    let floatingLabelTrackingFrame: number | null = null;
+    let floatingLabelTrackingUntil = 0;
+    let lastFloatingLabelSignature = "";
     const runFloatingLabelLayout = () => {
       if (analysisOverlayRunRef.current !== runId) return;
       const chartSize = chart.getSize?.();
@@ -1107,13 +1138,17 @@ function CandlestickChartComponent({
         ...candidate,
         x: labelXForTime(candidate.time),
       }));
-      setAnalysisFloatingLabels(
-        layoutAnalysisFloatingLabels(projectedCandidates, {
-          minTime,
-          maxTime,
-          width,
-        }),
-      );
+      const nextLabels = layoutAnalysisFloatingLabels(projectedCandidates, {
+        minTime,
+        maxTime,
+        width,
+      });
+      const nextSignature = nextLabels
+        .map(label => `${label.id}:${label.left.toFixed(2)}:${label.top}:${label.width}`)
+        .join("|");
+      if (nextSignature === lastFloatingLabelSignature) return;
+      lastFloatingLabelSignature = nextSignature;
+      setAnalysisFloatingLabels(nextLabels);
     };
     const scheduleFloatingLabelLayout = () => {
       if (typeof window === "undefined" || typeof window.requestAnimationFrame !== "function") {
@@ -1128,6 +1163,25 @@ function CandlestickChartComponent({
         if (analysisOverlayRunRef.current !== runId) return;
         runFloatingLabelLayout();
       });
+    };
+    const trackFloatingLabels = (timestamp: number) => {
+      floatingLabelTrackingFrame = null;
+      if (analysisOverlayRunRef.current !== runId) return;
+      runFloatingLabelLayout();
+      if (timestamp < floatingLabelTrackingUntil) {
+        floatingLabelTrackingFrame = window.requestAnimationFrame(trackFloatingLabels);
+      }
+    };
+    const trackFloatingLabelsThroughViewportChange = (durationMs = 420) => {
+      if (typeof window === "undefined" || typeof window.requestAnimationFrame !== "function") {
+        runFloatingLabelLayout();
+        return;
+      }
+      const now = typeof performance !== "undefined" ? performance.now() : Date.now();
+      floatingLabelTrackingUntil = Math.max(floatingLabelTrackingUntil, now + durationMs);
+      if (floatingLabelTrackingFrame == null) {
+        floatingLabelTrackingFrame = window.requestAnimationFrame(trackFloatingLabels);
+      }
     };
 
     const timePriceEventVerticalKeys = new Set<string>();
@@ -1299,10 +1353,23 @@ function CandlestickChartComponent({
     }
     scheduleFloatingLabelLayout();
     const viewportActions = [ActionType.OnDataReady, ActionType.OnScroll, ActionType.OnZoom, ActionType.OnVisibleRangeChange];
-    const syncFloatingLabelsWithChart = () => scheduleFloatingLabelLayout();
+    const syncFloatingLabelsWithChart = () => trackFloatingLabelsThroughViewportChange();
     for (const action of viewportActions) {
       chart.subscribeAction(action, syncFloatingLabelsWithChart);
     }
+    // KlineCharts can emit scroll/zoom actions before a dense historical time scale
+    // finishes recalculating. Track through the whole pointer/wheel gesture as a DOM
+    // fallback so the HTML labels use the same frame-by-frame timestamp projection as
+    // native candles and overlays, even for old 51x snapshots.
+    const chartContainer = containerRef.current;
+    const handleViewportPointerDown = () => trackFloatingLabelsThroughViewportChange(520);
+    const handleViewportPointerMove = (event: PointerEvent) => {
+      if (event.buttons !== 0) trackFloatingLabelsThroughViewportChange(520);
+    };
+    const handleViewportWheel = () => trackFloatingLabelsThroughViewportChange(520);
+    chartContainer?.addEventListener("pointerdown", handleViewportPointerDown, { passive: true });
+    chartContainer?.addEventListener("pointermove", handleViewportPointerMove, { passive: true });
+    chartContainer?.addEventListener("wheel", handleViewportWheel, { passive: true });
     analysisOverlayIdsRef.current = nextOverlayIds;
 
     return () => {
@@ -1313,8 +1380,14 @@ function CandlestickChartComponent({
           // The chart can be disposed before React tears this effect down.
         }
       }
+      chartContainer?.removeEventListener("pointerdown", handleViewportPointerDown);
+      chartContainer?.removeEventListener("pointermove", handleViewportPointerMove);
+      chartContainer?.removeEventListener("wheel", handleViewportWheel);
       if (floatingLabelFrame != null && typeof window !== "undefined" && typeof window.cancelAnimationFrame === "function") {
         window.cancelAnimationFrame(floatingLabelFrame);
+      }
+      if (floatingLabelTrackingFrame != null && typeof window !== "undefined" && typeof window.cancelAnimationFrame === "function") {
+        window.cancelAnimationFrame(floatingLabelTrackingFrame);
       }
       if (analysisOverlayRunRef.current === runId) {
         try {

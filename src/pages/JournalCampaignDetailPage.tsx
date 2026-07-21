@@ -868,9 +868,9 @@ export default function JournalCampaignDetailPage() {
         valueClassName: pnlColor(opportunityQuality),
         help: (
           <>
-            <p>用实际盈亏比衡量每 1 个初始回撤百分点换来的结果。相同盈亏比下，初始回撤越小，机会质量越高。</p>
-            <div className="rounded bg-muted/60 px-2 py-1 font-mono text-foreground">Q = 实际盈亏比 b ÷ 预期回撤百分点 d</div>
-            <p>回撤 2% 时 d 按 2 计，不按 0.02 计；亏损战役保留负号。</p>
+            <p>先将本场实际盈亏比设置下限为 1，再衡量每 1 个预期回撤百分点对应的机会质量。</p>
+            <div className="rounded bg-muted/60 px-2 py-1 font-mono text-foreground">b* = max（实际盈亏比 b, 1）；Q = b* ÷ 预期回撤百分点 d</div>
+            <p>实际盈亏比小于 1（包括等于 0 或为负数）时统一按 1 计算，不取绝对值。回撤 2% 时 d 按 2 计，不按 0.02 计。</p>
           </>
         ),
       },

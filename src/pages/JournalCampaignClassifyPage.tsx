@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ChangeEvent } from 'react';
 import { toast } from 'sonner';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { AlertCircle, Check, ChevronDown, Loader2 } from 'lucide-react';
+import { AlertCircle, Check, ChevronDown, Loader2, Search } from 'lucide-react';
 import { BackButton } from '@/components/journal/BackButton';
 import { AddToExistingCampaignDialog } from '@/components/journal/AddToExistingCampaignDialog';
 import { ClassifyAsNewCampaignDialog } from '@/components/journal/ClassifyAsNewCampaignDialog';
@@ -83,7 +83,9 @@ export default function JournalCampaignClassifyPage() {
   const dateFrom = searchParams.get('dateFrom') ?? '';
   const dateTo = searchParams.get('dateTo') ?? '';
   const [optionsOpen, setOptionsOpen] = useState(false);
-  const [optionFilter, setOptionFilter] = useState('');
+  const [activeOptionIndex, setActiveOptionIndex] = useState(-1);
+  const optionsContainerRef = useRef<HTMLDivElement>(null);
+  const optionRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const [journals, setJournals] = useState<TradeJournal[]>([]);
   const [orphanRecords, setOrphanRecords] = useState<TradeRecord[]>([]);
   const [campaignBundles, setCampaignBundles] = useState<CampaignBundle[]>([]);
@@ -168,16 +170,16 @@ export default function JournalCampaignClassifyPage() {
   );
   const availableSymbols = useMemo(
     () =>
-      [...new Set(allItems.map(itemSymbol).map(value => value?.trim()).filter((value): value is string => Boolean(value)))]
+      [...new Set(allItems.map(itemSymbol).map(value => value?.trim().toUpperCase()).filter((value): value is string => Boolean(value)))]
         .sort((a, b) => a.localeCompare(b)),
     [allItems],
   );
   const visibleSymbols = useMemo(() => {
-    const normalized = optionFilter.trim().toUpperCase();
+    const normalized = symbol.trim().toUpperCase();
     return normalized
-      ? availableSymbols.filter(item => item.includes(normalized))
+      ? availableSymbols.filter(item => item.startsWith(normalized))
       : availableSymbols;
-  }, [availableSymbols, optionFilter]);
+  }, [availableSymbols, symbol]);
   const suggestionMap = useMemo(
     () => new Map(suggestLegRoles(filteredForSuggestions(allCandidateJournals)).map(item => [item.journalId, item])),
     [allCandidateJournals],
@@ -186,7 +188,7 @@ export default function JournalCampaignClassifyPage() {
   const symbolScoped = useMemo(
     () => {
       const normalized = symbol.trim().toUpperCase();
-      return allItems.filter(item => !normalized || itemSymbol(item).toUpperCase().includes(normalized));
+      return allItems.filter(item => !normalized || itemSymbol(item).toUpperCase().startsWith(normalized));
     },
     [allItems, symbol],
   );
@@ -252,15 +254,37 @@ export default function JournalCampaignClassifyPage() {
     setSelectedIds(prev => new Set([...prev].filter(id => validIds.has(id))));
   }, [allItems]);
 
-  const openOptions = () => {
-    setOptionFilter('');
-    setOptionsOpen(true);
-  };
+  useEffect(() => {
+    setActiveOptionIndex(optionsOpen && visibleSymbols.length > 0 ? 0 : -1);
+  }, [optionsOpen, visibleSymbols]);
+
+  useEffect(() => {
+    if (!optionsOpen || activeOptionIndex < 0) return;
+    const activeOption = optionRefs.current[activeOptionIndex];
+    if (typeof activeOption?.scrollIntoView === 'function') {
+      activeOption.scrollIntoView({ block: 'nearest' });
+    }
+  }, [activeOptionIndex, optionsOpen]);
+
+  useEffect(() => {
+    if (!optionsOpen) return;
+
+    const closeOnOutsidePointer = (event: PointerEvent) => {
+      if (!optionsContainerRef.current?.contains(event.target as Node)) {
+        setOptionsOpen(false);
+      }
+    };
+
+    document.addEventListener('pointerdown', closeOnOutsidePointer);
+    return () => document.removeEventListener('pointerdown', closeOnOutsidePointer);
+  }, [optionsOpen]);
+
+  const openOptions = () => setOptionsOpen(true);
 
   const chooseSymbol = (nextSymbol: string) => {
     setSymbol(nextSymbol);
-    setOptionFilter('');
     setOptionsOpen(false);
+    setActiveOptionIndex(-1);
     setSelectedIds(new Set());
   };
 
@@ -289,10 +313,19 @@ export default function JournalCampaignClassifyPage() {
 
       <main className="mx-auto max-w-[1600px] px-6 py-4">
         <div
+          ref={optionsContainerRef}
           className="relative"
           onMouseEnter={openOptions}
-          onMouseLeave={() => setOptionsOpen(false)}
+          onBlur={event => {
+            if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+              setOptionsOpen(false);
+            }
+          }}
         >
+          <Search
+            aria-hidden="true"
+            className="pointer-events-none absolute left-3 top-3 h-4 w-4 text-muted-foreground"
+          />
           <Input
             autoFocus
             value={symbol}
@@ -300,69 +333,119 @@ export default function JournalCampaignClassifyPage() {
             onChange={(event: ChangeEvent<HTMLInputElement>) => {
               const nextValue = event.target.value.toUpperCase();
               setSymbol(nextValue);
-              setOptionFilter(nextValue);
               setOptionsOpen(true);
               setSelectedIds(new Set());
             }}
             onKeyDown={event => {
-              if (event.key === 'Escape') setOptionsOpen(false);
-              if (event.key === 'ArrowDown') setOptionsOpen(true);
+              if (event.key === 'Escape') {
+                event.preventDefault();
+                setOptionsOpen(false);
+                return;
+              }
+              if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+                event.preventDefault();
+                setOptionsOpen(true);
+                setActiveOptionIndex(current => {
+                  if (visibleSymbols.length === 0) return -1;
+                  if (current < 0) return event.key === 'ArrowDown' ? 0 : visibleSymbols.length - 1;
+                  const delta = event.key === 'ArrowDown' ? 1 : -1;
+                  return (current + delta + visibleSymbols.length) % visibleSymbols.length;
+                });
+                return;
+              }
+              if (event.key === 'Home' && optionsOpen && visibleSymbols.length > 0) {
+                event.preventDefault();
+                setActiveOptionIndex(0);
+                return;
+              }
+              if (event.key === 'End' && optionsOpen && visibleSymbols.length > 0) {
+                event.preventDefault();
+                setActiveOptionIndex(visibleSymbols.length - 1);
+                return;
+              }
+              if (event.key === 'Enter' && optionsOpen && activeOptionIndex >= 0) {
+                const activeSymbol = visibleSymbols[activeOptionIndex];
+                if (activeSymbol) {
+                  event.preventDefault();
+                  chooseSymbol(activeSymbol);
+                }
+              }
             }}
             placeholder="输入标的名称，例如 RAVEUSDT"
             aria-label="标的名称"
             aria-controls="campaign-symbol-options"
             aria-expanded={optionsOpen}
             aria-autocomplete="list"
+            aria-activedescendant={optionsOpen && activeOptionIndex >= 0 ? `campaign-symbol-option-${activeOptionIndex}` : undefined}
             role="combobox"
-            className="h-10 pr-10 text-[13px]"
+            className="h-10 pl-9 pr-10 text-[13px]"
           />
-          <ChevronDown
-            aria-hidden="true"
-            className={`pointer-events-none absolute right-3 top-3 h-4 w-4 text-muted-foreground transition-transform duration-150 ${optionsOpen ? 'rotate-180' : ''}`}
-          />
+          <button
+            type="button"
+            aria-label={optionsOpen ? '收起标的选项' : '展开标的选项'}
+            onMouseDown={event => event.preventDefault()}
+            onClick={() => setOptionsOpen(current => !current)}
+            className="absolute right-1 top-1 flex h-8 w-8 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+          >
+            <ChevronDown
+              aria-hidden="true"
+              className={`h-4 w-4 transition-transform duration-150 ease-out ${optionsOpen ? 'rotate-180' : ''}`}
+            />
+          </button>
 
-          {optionsOpen ? (
-            <div
-              id="campaign-symbol-options"
-              role="listbox"
-              aria-label="可选标的"
-              className="absolute inset-x-0 top-[calc(100%+6px)] z-40 overflow-hidden rounded border border-border bg-popover shadow-lg"
-            >
-              <div className="flex h-8 items-center justify-between border-b border-border/70 px-3 text-[10px] text-muted-foreground">
-                <span>全部可选标的</span>
-                <span>{availableSymbols.length}</span>
-              </div>
-              <div className="max-h-72 overflow-y-auto p-1.5">
-                {loading && availableSymbols.length === 0 ? (
-                  <div className="flex h-16 items-center justify-center gap-2 text-[11px] text-muted-foreground">
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                    正在读取历史标的
-                  </div>
-                ) : visibleSymbols.length > 0 ? (
-                  <div className="grid grid-cols-[repeat(auto-fill,minmax(132px,1fr))] gap-1">
-                    {visibleSymbols.map(item => (
-                      <button
-                        key={item}
-                        type="button"
-                        role="option"
-                        aria-selected={item === symbol.trim()}
-                        onMouseDown={event => event.preventDefault()}
-                        onClick={() => chooseSymbol(item)}
-                        className="flex h-8 min-w-0 items-center justify-between gap-2 rounded px-2.5 text-left text-[11px] font-medium text-foreground transition-colors hover:bg-accent focus-visible:bg-accent focus-visible:outline-none"
-                      >
-                        <span className="truncate">{item}</span>
-                        {item === symbol.trim() ? <Check className="h-3.5 w-3.5 shrink-0 text-[#D99B00]" /> : null}
-                      </button>
-                    ))}
-                  </div>
-                ) : (
-                  <div className="flex h-16 items-center justify-center text-[11px] text-muted-foreground">
-                    {availableSymbols.length === 0 ? '暂无可归类的历史标的' : `没有匹配“${optionFilter}”的标的`}
-                  </div>
-                )}
-              </div>
+          <div
+            id="campaign-symbol-options"
+            role="listbox"
+            aria-label="可选标的"
+            aria-hidden={!optionsOpen}
+            className={`absolute inset-x-0 top-[calc(100%+6px)] z-40 origin-top overflow-hidden rounded border border-border bg-popover shadow-lg transition-[opacity,transform] duration-150 ease-out ${
+              optionsOpen
+                ? 'pointer-events-auto translate-y-0 opacity-100'
+                : 'pointer-events-none -translate-y-1 opacity-0'
+            }`}
+          >
+            <div className="flex h-8 items-center justify-between border-b border-border/70 px-3 text-[10px] text-muted-foreground">
+              <span>{symbol.trim() ? '匹配标的' : '全部可选标的'}</span>
+              <span>{symbol.trim() ? `${visibleSymbols.length} / ${availableSymbols.length}` : availableSymbols.length}</span>
             </div>
-          ) : null}
+            <div className="max-h-72 overflow-y-auto overscroll-contain p-1.5">
+              {loading && availableSymbols.length === 0 ? (
+                <div className="flex h-16 items-center justify-center gap-2 text-[11px] text-muted-foreground">
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  正在读取历史标的
+                </div>
+              ) : visibleSymbols.length > 0 ? (
+                <div className="grid grid-cols-[repeat(auto-fill,minmax(132px,1fr))] gap-1">
+                  {visibleSymbols.map((item, index) => (
+                    <button
+                      ref={element => {
+                        optionRefs.current[index] = element;
+                      }}
+                      id={`campaign-symbol-option-${index}`}
+                      key={item}
+                      type="button"
+                      role="option"
+                      tabIndex={optionsOpen ? 0 : -1}
+                      aria-selected={item === symbol.trim().toUpperCase()}
+                      onMouseEnter={() => setActiveOptionIndex(index)}
+                      onMouseDown={event => event.preventDefault()}
+                      onClick={() => chooseSymbol(item)}
+                      className={`flex h-8 min-w-0 items-center justify-between gap-2 rounded px-2.5 text-left text-[11px] font-medium text-foreground transition-colors duration-100 focus-visible:outline-none ${
+                        activeOptionIndex === index ? 'bg-accent' : 'hover:bg-accent/70'
+                      }`}
+                    >
+                      <span className="truncate">{item}</span>
+                      {item === symbol.trim().toUpperCase() ? <Check className="h-3.5 w-3.5 shrink-0 text-[#D99B00]" /> : null}
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <div className="flex h-16 items-center justify-center text-[11px] text-muted-foreground">
+                  {availableSymbols.length === 0 ? '暂无可归类的历史标的' : `没有以“${symbol.trim()}”开头的标的`}
+                </div>
+              )}
+            </div>
+          </div>
         </div>
 
         {symbol.trim() ? (

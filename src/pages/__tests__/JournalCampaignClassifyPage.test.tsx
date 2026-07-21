@@ -34,6 +34,32 @@ const { mockListUnclassifiedItems, mockTradeHistory, mockUser } = vi.hoisted(() 
       openTime: Date.parse('2026-07-02T01:00:00Z'),
       closeTime: Date.parse('2026-07-02T02:00:00Z'),
     },
+    {
+      id: 'ace-close',
+      symbol: 'ACEUSDT',
+      action: 'CLOSE',
+      side: 'LONG',
+      leverage: 4,
+      entryPrice: 1,
+      exitPrice: 1.1,
+      quantity: 100,
+      pnl: 10,
+      openTime: Date.parse('2026-07-04T01:00:00Z'),
+      closeTime: Date.parse('2026-07-04T02:00:00Z'),
+    },
+    {
+      id: 'coai-close',
+      symbol: 'COAIUSDT',
+      action: 'CLOSE',
+      side: 'LONG',
+      leverage: 4,
+      entryPrice: 1,
+      exitPrice: 1.1,
+      quantity: 100,
+      pnl: 10,
+      openTime: Date.parse('2026-07-05T01:00:00Z'),
+      closeTime: Date.parse('2026-07-05T02:00:00Z'),
+    },
     { id: 'open-record', symbol: 'OPENUSDT', action: 'OPEN' },
   ],
   mockListUnclassifiedItems: vi.fn(async () => ({
@@ -134,5 +160,48 @@ describe('JournalCampaignClassifyPage', () => {
 
     expect(await screen.findByText('ETH/USDT')).toBeInTheDocument();
     expect(screen.getByRole('table')).toBeInTheDocument();
+  });
+
+  it('narrows symbols and records from the first typed character without resetting on hover', async () => {
+    render(
+      <MemoryRouter initialEntries={['/journal/campaigns/classify']}>
+        <JournalCampaignClassifyPage />
+      </MemoryRouter>,
+    );
+
+    const input = screen.getByRole('combobox', { name: '标的名称' });
+    fireEvent.change(input, { target: { value: 'a' } });
+
+    expect(input).toHaveValue('A');
+    expect(await screen.findByRole('option', { name: 'ACEUSDT' })).toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: 'COAIUSDT' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: 'BTCUSDT' })).not.toBeInTheDocument();
+    expect(await screen.findByText('ACE/USDT')).toBeInTheDocument();
+    expect(screen.queryByText('COAI/USDT')).not.toBeInTheDocument();
+
+    fireEvent.mouseEnter(input.parentElement!);
+    expect(input).toHaveValue('A');
+    expect(screen.getByRole('option', { name: 'ACEUSDT' })).toBeInTheDocument();
+  });
+
+  it('supports keyboard selection and closes the options on outside pointer input', async () => {
+    render(
+      <MemoryRouter initialEntries={['/journal/campaigns/classify']}>
+        <JournalCampaignClassifyPage />
+      </MemoryRouter>,
+    );
+
+    const input = screen.getByRole('combobox', { name: '标的名称' });
+    fireEvent.change(input, { target: { value: 'b' } });
+    expect(await screen.findByRole('option', { name: 'BTCUSDT' })).toBeInTheDocument();
+
+    fireEvent.keyDown(input, { key: 'Enter' });
+    expect(input).toHaveValue('BTCUSDT');
+    expect(screen.queryByRole('option', { name: 'BTCUSDT' })).not.toBeInTheDocument();
+
+    fireEvent.focus(input);
+    expect(await screen.findByRole('option', { name: 'BTCUSDT' })).toBeInTheDocument();
+    fireEvent.pointerDown(document.body);
+    expect(screen.queryByRole('option', { name: 'BTCUSDT' })).not.toBeInTheDocument();
   });
 });

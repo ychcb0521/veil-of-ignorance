@@ -21,16 +21,19 @@ const mocks = vi.hoisted(() => {
     unsubscribeAction: vi.fn(),
     setStyles: vi.fn(),
     setPriceVolumePrecision: vi.fn(),
-    applyNewData: vi.fn((nextData: ChartCandle[]) => {
+    applyNewData: vi.fn((nextData: ChartCandle[], _more?: boolean, callback?: () => void) => {
       dataList.splice(0, dataList.length, ...nextData);
+      callback?.();
     }),
-    applyMoreData: vi.fn((olderData: ChartCandle[]) => {
+    applyMoreData: vi.fn((olderData: ChartCandle[], _more?: boolean, callback?: () => void) => {
       dataList.splice(0, 0, ...olderData);
+      callback?.();
     }),
-    updateData: vi.fn((nextCandle: ChartCandle) => {
+    updateData: vi.fn((nextCandle: ChartCandle, callback?: () => void) => {
       const last = dataList[dataList.length - 1];
       if (last?.timestamp === nextCandle.timestamp) dataList[dataList.length - 1] = nextCandle;
       else dataList.push(nextCandle);
+      callback?.();
     }),
     createOverlay: vi.fn(),
     removeOverlay: vi.fn(),
@@ -108,6 +111,7 @@ describe('CandlestickChart analysis annotations', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.dataList.length = 0;
+    mocks.chart.getDataList.mockImplementation(() => mocks.dataList);
     mocks.chart.convertToPixel.mockImplementation((point: any) => {
       const value = Array.isArray(point) ? point[0] : point;
       return {
@@ -336,6 +340,39 @@ describe('CandlestickChart analysis annotations', () => {
     expect(mocks.chart.scrollByDistance).not.toHaveBeenCalled();
   });
 
+  it('历史图表坐标在缩放事件之后异步更新时，标签仍持续绑定同一根 K 线', async () => {
+    render(
+      <CandlestickChart
+        data={[candle(1000, 1), candle(2000, 1.2)]}
+        symbol="HIFIUSDT"
+        rawSymbol="HIFIUSDT"
+        analysisMode
+        analysisAnnotations={{
+          verticalLines: [{
+            time: 1000,
+            color: '#3B82F6',
+            label: '主力开始',
+          }],
+        }}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(document.querySelector('[data-analysis-label]')).not.toBeNull();
+    });
+    const before = (document.querySelector('[data-analysis-label]') as HTMLElement).style.left;
+    const zoomCallback = mocks.chart.subscribeAction.mock.calls.find(([type]) => type === 'onZoom')?.[1];
+    expect(zoomCallback).toEqual(expect.any(Function));
+
+    act(() => zoomCallback?.());
+    await new Promise(resolve => setTimeout(resolve, 40));
+    mocks.chart.convertToPixel.mockImplementation(() => ({ x: 410, y: 0 }));
+
+    await waitFor(() => {
+      expect((document.querySelector('[data-analysis-label]') as HTMLElement).style.left).not.toEqual(before);
+    });
+  });
+
   it('旧战役的非整周期事件会绑定到最近的真实 K 线时间戳', async () => {
     render(
       <CandlestickChart
@@ -483,6 +520,46 @@ describe('CandlestickChart analysis annotations', () => {
         timestamp: 120_000,
         value: 1.1,
       });
+    });
+  });
+
+  it('历史 K 线原生时间轴尚未提交时不提前创建屏幕脱钩标注', async () => {
+    let nativeReady = false;
+    mocks.chart.getDataList.mockImplementation(() => nativeReady ? mocks.dataList : []);
+    render(
+      <CandlestickChart
+        data={[candle(1000, 1), candle(2000, 1.1), candle(3000, 1.2)]}
+        symbol="HIFIUSDT"
+        rawSymbol="HIFIUSDT"
+        analysisMode
+        analysisAnnotations={{
+          markers: [{
+            time: 2400,
+            price: 1.1,
+            color: '#0ECB81',
+            shape: 'triangle-up',
+            label: 'A1',
+          }],
+        }}
+      />,
+    );
+
+    await act(async () => {
+      await new Promise(resolve => setTimeout(resolve, 20));
+    });
+    expect(mocks.chart.createOverlay.mock.calls.some(([overlay]) => overlay.name === 'simpleAnnotation')).toBe(false);
+
+    nativeReady = true;
+    const dataReadyCallbacks = mocks.chart.subscribeAction.mock.calls
+      .filter(([type]) => type === 'onDataReady')
+      .map(([, callback]) => callback);
+    act(() => dataReadyCallbacks.forEach(callback => callback()));
+
+    await waitFor(() => {
+      const markerOverlay = mocks.chart.createOverlay.mock.calls
+        .map(([overlay]) => overlay)
+        .find(overlay => overlay.name === 'simpleAnnotation');
+      expect(markerOverlay?.points?.[0]).toEqual({ timestamp: 2000, value: 1.1 });
     });
   });
 

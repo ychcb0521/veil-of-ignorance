@@ -1189,9 +1189,19 @@ export default function GuidePage() {
                   </tbody>
                 </table>
               </div>
-              <P>归类历史交易时，先输入或选择标的，再从该币种所有时间段的仓位历史记录中勾选一组相关交易。被选中的记录共同构成一次交易战役。</P>
+              <SubTitle>归类历史交易</SubTitle>
+              <P>进入「归类历史交易」后，搜索框会在获得焦点或鼠标移入时展开<strong>全部可选标的</strong>；也可以继续输入文字缩小范围。选择标的后，系统才加载该币种所有可归类的 journal 与仓位历史记录，避免无关信息铺满页面。</P>
+              <P>记录表会完整显示方向、杠杆、开平仓价格、数量、开平仓时间、<strong>真实操作时间</strong>、平仓方式、盈亏和 ROE。勾选相关记录后，可以「归类为新战役」，也可以「加入现有战役」；新建完成后会直接进入对应战役详情。被选中的记录共同构成一次交易战役。</P>
               <P>实时战役与历史归类战役必须隔离。实时战役在开仓时归属；历史归类只加入历史战役，不把回填数据混进实时训练口径。</P>
-              <P>列表中的每场战役直接显示战役编号、已实现盈亏、盈亏比、单场算术期望、单场几何期望和真实操作时间。顶部排序默认按<strong>真实操作时间</strong>，也可以按重要性、盈亏比、算术期望、几何期望或字母顺序切换；再次点击同一排序项，可在从大到小 / 从小到大之间切换。指标区同时显示<strong>有效战役（数量）</strong>；点击后可查看最大预期亏损的公式、数据回退口径，以及其中盈利、亏损与盈亏平衡战役的数量。这里的操作时间是客观发生时间，不是无知之幕时间机器里的模拟时间。</P>
+
+              <SubTitle>战役列表与折叠卡片</SubTitle>
+              <P>战役卡片默认只保留两层核心信息：第一层是标题、方向、标的、策略、唯一编号、<strong>真实操作时间</strong>、重要性与结束状态；第二层是预期回撤、机会质量、盈亏比、单场算术期望、单场几何期望与镜像止盈状态。指标为正时使用绿色、为负时使用红色，无法计算时显示「—」。</P>
+              <P>点击卡片右侧的小箭头，会在卡片内部展开战役时间、结构与时长、已实现盈亏和完整 Legs 标签；再次点击即收起。点击卡片其他区域会进入战役详情，详情始终从页面顶部打开；从详情左上角返回时，会恢复进入前的排序参数、方向和列表滚动位置。</P>
+
+              <SubTitle>统计概览与排序</SubTitle>
+              <P>「统计概览」与「排序方式」分成上下两行：概览汇总有效战役、镜像止盈、胜率、平均盈亏比、期望值、几何期望与机会质量；排序行只负责改变战役顺序，避免统计与操作混在一起。</P>
+              <P>统计指标<strong>单击一次</strong>展开公式、有效样本和当前代入值，再单击一次关闭。排序按钮<strong>单击</strong>只执行排序；再次单击同一按钮，在升序与降序之间切换。需要查看排序指标公式时，使用<strong>双击或右键</strong>，不会因为查看说明而误改排序方向。</P>
+              <P>默认按<strong>真实操作时间</strong>从新到旧排序；还可以按重要性、预期回撤、机会质量、盈亏比、算术期望、几何期望、镜像止盈或字母顺序双向排序。这里的操作时间是客观发生时间，不是无知之幕时间机器里的模拟时间。</P>
 
               <SubTitle>交易战役列表：期望值系列</SubTitle>
               <P><strong>战役级统计统一使用同一个有效样本口径：</strong>战役已经结束，并且存在大于 0 的初始最大预期亏损。计算如下：</P>
@@ -1211,7 +1221,7 @@ export default function GuidePage() {
                     <tr><td className="px-3 py-2 border-t border-border">平均盈亏比 b̄</td><td className="px-3 py-2 border-t border-border">Σ 单场盈亏比 bᵢ ÷ 有效战役数 N</td><td className="px-3 py-2 border-t border-border">亏损的负盈亏比原样参与求和</td></tr>
                     <tr><td className="px-3 py-2 border-t border-border">期望值 E</td><td className="px-3 py-2 border-t border-border">P(赢) × b̄ −（1 − P(赢)）</td><td className="px-3 py-2 border-t border-border">胜率与平均盈亏比来自同一批有效战役</td></tr>
                     <tr><td className="px-3 py-2 border-t border-border">预期回撤 dᵢ</td><td className="px-3 py-2 border-t border-border">max（|主力开仓价 − 初始对冲 A 价|，|主力开仓价 − 初始对冲 B 价|）÷ 主力开仓价 × 100%</td><td className="px-3 py-2 border-t border-border">至少存在一个有效初始对冲价格；支持列表双向排序，缺少价格的战役不参与排序</td></tr>
-                    <tr><td className="px-3 py-2 border-t border-border">机会质量 Qᵢ / Q̄</td><td className="px-3 py-2 border-t border-border">Qᵢ = 实际盈亏比 bᵢ ÷ 预期回撤百分点 dᵢ；Q̄ = ΣQᵢ ÷ N</td><td className="px-3 py-2 border-t border-border">bᵢ 保留盈亏正负号；历史价格沿用初始最大预期亏损的同一解析口径；缺少实际盈亏比、主力价或初始对冲价时不纳入统计和排序</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border">机会质量 Qᵢ / Q̄</td><td className="px-3 py-2 border-t border-border">bᵢ* = max（实际盈亏比 bᵢ, 1）；Qᵢ = bᵢ* ÷ 预期回撤百分点 dᵢ；Q̄ = ΣQᵢ ÷ N</td><td className="px-3 py-2 border-t border-border">实际盈亏比小于 1（包括等于 0 或为负数）时统一按 1 计算，不取绝对值。历史价格沿用初始最大预期亏损的同一解析口径</td></tr>
                     <tr><td className="px-3 py-2 border-t border-border">单场算术期望 Eᵢ</td><td className="px-3 py-2 border-t border-border">P(赢) × bᵢ −（1 − P(赢)）</td><td className="px-3 py-2 border-t border-border">使用实时有效战役胜率与该场带符号盈亏比</td></tr>
                     <tr><td className="px-3 py-2 border-t border-border">单场风险比例 xᵢ</td><td className="px-3 py-2 border-t border-border">Lᵢ ÷ 主力开仓时账户总资产 Aᵢ</td><td className="px-3 py-2 border-t border-border">优先使用主力开仓快照；旧战役缺失时用今日当前总资产估算</td></tr>
                     <tr><td className="px-3 py-2 border-t border-border">单场几何期望 Gᵢ</td><td className="px-3 py-2 border-t border-border">(1+bᵢ·xᵢ)^P(赢) × (1−xᵢ)^(1−P(赢)) − 1</td><td className="px-3 py-2 border-t border-border">bᵢ 可为负；缺少有效 Lᵢ 或可用 Aᵢ 时不估算</td></tr>
@@ -1221,9 +1231,9 @@ export default function GuidePage() {
                 </table>
               </div>
               <RedHighlight>
-                没有初始最大预期亏损，就没有可用分母，因此该战役的盈亏比显示「—」。它不会进入盈亏比排序，也不会进入胜率、平均盈亏比和期望值。点击列表顶部的<strong>盈亏比、胜率、平均盈亏比或期望值</strong>，可以查看公式及当前列表数据的代入过程。
+                没有初始最大预期亏损，就没有可用分母，因此该战役的盈亏比显示「—」。它不会进入盈亏比排序，也不会进入胜率、平均盈亏比和期望值。统计概览中的指标可单击查看公式；排序行中的公式指标需双击或右键查看，单击只负责排序。
               </RedHighlight>
-              <P>单场几何期望优先使用主力开仓时固化的实时账户总资产快照，该值不会被后续资产变化改写。旧战役若因字段上线较晚而缺少快照，系统会用<strong>今日当前总账户资产</strong>作为替代分母，使历史战役仍可计算和排序；这个回退值是历史估算而非当时资产的还原，会随当前账户资产实时更新。互关账户缺少快照时，不会借用本人的账户资产。</P>
+              <P>单场几何期望优先使用主力开仓时固化的实时账户总资产快照，该值不会被后续资产变化改写。旧战役若因字段上线较晚而缺少快照，系统会用<strong>今日当前总账户资产</strong>作为替代分母，使历史战役仍可计算和排序；这个回退值是历史估算而非当时资产的还原，会随当前账户资产实时更新。</P>
 
               <SubTitle>算术期望与几何期望怎么读</SubTitle>
               <div className="overflow-x-auto">
@@ -1260,8 +1270,6 @@ export default function GuidePage() {
               </RedHighlight>
 
               <P>删除战役采用可恢复模式：战役会从正常列表和统计中移出，但 Legs 与交易记录不会随之消失。列表标题栏右侧的低对比度回收图标可打开“已删除战役”，从中恢复原战役；只有在回收区再次选择“永久删除”时，战役归档才会真正移除。</P>
-              <P>互关账户可以打开彼此的战役详情，用于共享已开放的战役复盘信息。</P>
-
               <SubTitle>战役详情页：K 线时间轴标注</SubTitle>
               <P>
                 打开一次战役，上方是贯穿整段的 K 线回放，下方是 <strong>Legs 列表</strong>。两者共用同一条时间轴，对照着看就能还原整条战役的进出场节奏：
@@ -1296,7 +1304,7 @@ export default function GuidePage() {
               </Highlight>
 
               <SubTitle>战役详情页：盈亏概览与高清 PNG</SubTitle>
-              <P>详情页的<strong>盈亏概览</strong>统一展示已实现盈亏、主力开仓杠杆倍数、峰值浮盈、初始最大预期亏损、预期回撤、盈亏比、机会质量、单场算术期望和单场几何期望。杠杆优先读取主力 Leg，历史记录缺失时再从关联成交、战役初始字段或主力开仓事件回填。每个指标名旁的低透明度 <strong>i</strong> 图标都可点击，会折叠展开该指标的含义、公式和数据口径，不会挤压页面布局。这些数据与战役列表使用同一套公式：预期回撤支持双向排序；期望指标使用同一账户当前的有效战役胜率，历史战役的几何期望在缺少开仓资产快照时才使用今日当前总资产估算。</P>
+              <P>详情页的<strong>盈亏概览</strong>统一展示已实现盈亏、主力开仓杠杆倍数、峰值浮盈、最大预期亏损、预期回撤、盈亏比、机会质量、单场算术期望和单场几何期望。杠杆优先读取主力 Leg，历史记录缺失时再从关联成交、战役初始字段或主力开仓事件回填。每个指标名旁的低透明度 <strong>i</strong> 图标都可点击，会折叠展开该指标的含义、公式和数据口径，不会挤压页面布局。这些数据与战役列表使用同一套公式：预期回撤支持双向排序；机会质量先取 <strong>b* = max（实际盈亏比, 1）</strong>，再用 <strong>b* ÷ 预期回撤百分点</strong>计算，不取绝对值；期望指标使用同一账户当前的有效战役胜率，历史战役的几何期望在缺少开仓资产快照时才使用今日当前总资产估算。</P>
               <ul className="list-disc pl-6 text-[14px] text-foreground/90 space-y-1">
                 <li>点击 Legs 列表右上角的 <strong>PNG</strong>，会把<strong>战役原数据、盈亏概览、当前 K 线周期、已经拖动 / 缩放好的 K 线视图，以及完整 Legs 列表</strong>导出到同一张高清图片。周期会以「1分钟线」「5分钟线」「15分钟线」或「1小时线」写入图片。</li>
                 <li>图片中的<strong>盈亏概览</strong>与详情页共用同一份指标清单；以后详情页新增盈亏指标时，导出图会自动同步收录，并随指标数量自动增加高度。</li>
@@ -1331,7 +1339,7 @@ export default function GuidePage() {
               <ul className="list-disc pl-6 text-[14px] text-foreground/90 space-y-1">
                 <li>每行 = 一条缺失的 SOP 腿（如缺初始对冲 A / B、缺 mirror_tp）。该模板要求主力 + 对冲 A + 对冲 B + mirror_tp 四条建仓腿，缺几条就列几行——和「你下了几个单」无关。</li>
                 <li><strong>代价 (USDT)</strong> 与 <strong>占本场盈亏 %</strong>（以本战役实际总盈亏的绝对值为分母）由引擎自动算出。</li>
-                <li>「违规阶段 / 违规描述 / 修正后」三列<strong>可手动改写</strong>，点「保存备注」存下；存在战役记录上，<strong>互关者也能读到</strong>，但只有本人能改。</li>
+                <li>「违规阶段 / 违规描述 / 修正后」三列<strong>可手动改写</strong>，点「保存备注」后写入该战役记录；再次进入这场战役仍会保留。</li>
                 <li>只要填写了「修正后」，保存时系统会把这条内容连同「违规阶段 / 违规描述」汇总成一条<strong>战役偏离规则</strong>，自动写入复盘中心的「规则」页；重复保存同一条规则不会重复创建。</li>
               </ul>
               <Highlight>
