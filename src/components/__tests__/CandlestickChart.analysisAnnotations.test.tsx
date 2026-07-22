@@ -1,6 +1,6 @@
 import { act, render, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { CandlestickChart } from '@/components/CandlestickChart';
+import { CandlestickChart, hashTimeAxis } from '@/components/CandlestickChart';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import type { KlineData } from '@/hooks/useBinanceData';
 import { FLOATING_LABEL_HEIGHT, layoutAnalysisFloatingLabels } from '@/lib/analysisFloatingLabels';
@@ -1042,6 +1042,32 @@ describe('CandlestickChart analysis annotations', () => {
     });
     expect(handleDrag).toHaveBeenCalledWith('leg-1:open', 1500);
     expect(handleSelect).toHaveBeenCalledWith('leg-1:open');
+  });
+});
+
+describe('hashTimeAxis', () => {
+  const sig = (times: number[]) => hashTimeAxis(times.length, i => times[i]);
+
+  it('是确定性的，并在签名里编码长度', () => {
+    expect(sig([1000, 2000, 3000])).toBe(sig([1000, 2000, 3000]));
+    expect(sig([1000, 2000, 3000]).startsWith('3:')).toBe(true);
+    expect(sig([]).startsWith('0:')).toBe(true);
+  });
+
+  it('检测到中间时间戳被修正（历史战役整段重载的判据）', () => {
+    // 首尾不变、只改中间——旧桥用 join 字符串能查到，哈希也必须查到。
+    expect(sig([1000, 2000, 3000])).not.toBe(sig([1000, 2500, 3000]));
+  });
+
+  it('对顺序敏感，并区分插入 / 删除', () => {
+    expect(sig([1000, 2000])).not.toBe(sig([2000, 1000]));
+    expect(sig([1000, 2000, 3000])).not.toBe(sig([1000, 2000]));
+  });
+
+  it('区分毫秒级相邻的大时间戳（跨 2^32 高位）', () => {
+    expect(sig([1_700_000_000_000])).not.toBe(sig([1_700_000_060_000]));
+    expect(sig([1_700_000_000_000, 1_700_000_060_000]))
+      .not.toBe(sig([1_700_000_060_000, 1_700_000_000_000]));
   });
 });
 

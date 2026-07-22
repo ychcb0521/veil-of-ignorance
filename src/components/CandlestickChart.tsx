@@ -3,7 +3,7 @@
  * Uses applyNewData / updateData / applyMoreData for data feeding.
  */
 
-import React, { useEffect, useRef, useCallback, useState, memo } from "react";
+import React, { useEffect, useRef, useCallback, useMemo, useState, memo } from "react";
 import {
   init,
   dispose,
@@ -410,6 +410,30 @@ function chartStylesForMode(theme: string | undefined, showLastPriceLine: boolea
   };
 }
 
+/**
+ * Cheap, order-sensitive signature of a candle time axis. An integer FNV-1a
+ * rolling hash over every timestamp detects any inserted / removed / shifted
+ * candle (middle corrections included) without allocating a large array or a
+ * ~180KB comma-joined string. This matters because the analysis-overlay effect
+ * compares the prop axis against KlineCharts' async-committed native axis and
+ * can retry up to 120× while a large legacy snapshot commits — building join
+ * strings there cost ~4ms each at 15k candles (~1s of jank per historical
+ * campaign); the hash keeps each pass sub-millisecond so historical charts are
+ * as smooth as the newest ones.
+ */
+export function hashTimeAxis(count: number, timeAt: (index: number) => number): string {
+  let hash = 2166136261 >>> 0;
+  for (let index = 0; index < count; index += 1) {
+    const time = timeAt(index);
+    hash = (hash ^ (time & 0xffffffff)) >>> 0;
+    hash = Math.imul(hash, 16777619) >>> 0;
+    const high = Math.floor(time / 0x100000000);
+    hash = (hash ^ high) >>> 0;
+    hash = Math.imul(hash, 16777619) >>> 0;
+  }
+  return `${count}:${hash}`;
+}
+
 function CandlestickChartComponent({
   data,
   symbol,
@@ -483,6 +507,14 @@ function CandlestickChartComponent({
           : count
       ), 0)
     : data.length;
+
+  // Prop-axis signature is stable across the async-commit retry loop (data is
+  // unchanged while the native index catches up), so memoize it once instead of
+  // rehashing every retry.
+  const propTimeAxisSignature = useMemo(
+    () => hashTimeAxis(data.length, index => data[index].time),
+    [data],
+  );
 
   const centerAnalysisWindow = useCallback(() => {
     const chart = chartRef.current;
@@ -780,9 +812,10 @@ function CandlestickChartComponent({
     const lastCandle = klineData[klineData.length - 1];
     const lastSig = `${lastCandle.timestamp}|${lastCandle.open}|${lastCandle.high}|${lastCandle.low}|${lastCandle.close}|${lastCandle.volume}`;
     // Analysis windows are static snapshots and can be replaced with corrected
-    // historical candles while retaining the same first/last candle. Include every
-    // timestamp so that replacement cannot be mistaken for a last-bar update.
-    const timeAxisSig = analysisMode ? data.map(item => item.time).join(",") : "";
+    // historical candles while retaining the same first/last candle. Hash every
+    // timestamp so that replacement cannot be mistaken for a last-bar update,
+    // without paying an O(n) string join on large historical snapshots.
+    const timeAxisSig = analysisMode ? propTimeAxisSignature : "";
     const sameTimeAxis = !analysisMode || timeAxisSig === prevTimeAxisSigRef.current;
 
     const wasPrepend =
@@ -847,7 +880,7 @@ function CandlestickChartComponent({
     prevNewestRef.current = lastCandle.timestamp as number;
     prevLastSigRef.current = lastSig;
     prevTimeAxisSigRef.current = timeAxisSig;
-  }, [analysisMode, applyAnalysisViewport, data]);
+  }, [analysisMode, applyAnalysisViewport, data, propTimeAxisSignature]);
 
   useEffect(() => {
     if (data.length === 0) return;
@@ -1053,8 +1086,8 @@ function CandlestickChartComponent({
     // Use the chart engine's committed data list as the single time-coordinate
     // authority. Every line, marker and label binds to these exact timestamps.
     const nativeData = chart.getDataList();
-    const propTimeAxisSig = data.map(item => item.time).join(",");
-    const nativeTimeAxisSig = nativeData.map(item => item.timestamp).join(",");
+    const propTimeAxisSig = propTimeAxisSignature;
+    const nativeTimeAxisSig = hashTimeAxis(nativeData.length, index => nativeData[index].timestamp as number);
     if (
       nativeData.length === 0
       || nativeData.length !== data.length
@@ -1064,7 +1097,7 @@ function CandlestickChartComponent({
       // create timestamp overlays against an empty or stale native index: doing so
       // makes the engine cache a screen position and is the reason some historical
       // campaigns could move their labels independently from their candles.
-      const retrySignature = `${data.length}:${propTimeAxisSig}`;
+      const retrySignature = propTimeAxisSig;
       if (analysisAxisRetryRef.current.signature !== retrySignature) {
         analysisAxisRetryRef.current = { signature: retrySignature, attempts: 0 };
       }
@@ -1078,7 +1111,7 @@ function CandlestickChartComponent({
       }
       return;
     }
-    analysisAxisRetryRef.current = { signature: `${data.length}:${propTimeAxisSig}`, attempts: 0 };
+    analysisAxisRetryRef.current = { signature: propTimeAxisSig, attempts: 0 };
     const axisData = nativeData.map(item => ({ time: item.timestamp, close: item.close }));
     const newest = axisData[axisData.length - 1];
     const inferredInterval = axisData.length > 1
@@ -1327,7 +1360,7 @@ function CandlestickChartComponent({
         analysisOverlayIdsRef.current = [];
       }
     };
-  }, [analysisAnnotations, data, pricePrecision, analysisDataReadyRevision, theme]);
+  }, [analysisAnnotations, data, pricePrecision, analysisDataReadyRevision, theme, propTimeAxisSignature]);
 
   // Campaign What-if: draggable horizontal price lines and vertical timing lines.
   // Drag a price line up/down or a time line left/right, then report the new value on release.
@@ -1347,8 +1380,15 @@ function CandlestickChartComponent({
     const minTime = data[0].time;
     const inferredInterval = data.length > 1 ? Math.max(0, newest.time - data[data.length - 2].time) : 0;
     const maxTime = newest.time + inferredInterval;
-    const visibleLow = Math.min(...data.map(item => item.low));
-    const visibleHigh = Math.max(...data.map(item => item.high));
+    // Loop, not Math.min(...data.map()): spreading a large historical window as
+    // function args is both slow and can overflow the argument-count limit.
+    let visibleLow = Infinity;
+    let visibleHigh = -Infinity;
+    for (let index = 0; index < data.length; index += 1) {
+      const item = data[index];
+      if (item.low < visibleLow) visibleLow = item.low;
+      if (item.high > visibleHigh) visibleHigh = item.high;
+    }
     const visibleRange = Math.max(visibleHigh - visibleLow, Math.abs(visibleHigh) * 0.0001, 1);
     const verticalLabelValue = visibleLow + visibleRange * 0.025;
     const ids: string[] = [];
