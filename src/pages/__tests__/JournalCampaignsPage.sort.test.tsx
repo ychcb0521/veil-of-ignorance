@@ -395,7 +395,8 @@ describe('JournalCampaignsPage sorting', () => {
     );
     fireEvent.click(screen.getByTestId('campaign-valid-count'));
     expect(screen.getByText('有效战役与最大预期亏损')).toBeInTheDocument();
-    expect(screen.getByText(/Lᵢ = 主力名义仓位 × max/)).toBeInTheDocument();
+    expect(screen.getByText(/Lᵢ = 主方向总名义仓位 × max/)).toBeInTheDocument();
+    expect(screen.getByText(/多战役包含全部多单（包括 TP）/)).toBeInTheDocument();
     expect(screen.getByText(/历史战役优先使用保存的原始委托价/)).toBeInTheDocument();
     expect(screen.getByText(/只有战役已结束/)).toBeInTheDocument();
     expect(screen.getByText('盈利').parentElement).toHaveTextContent('盈利2');

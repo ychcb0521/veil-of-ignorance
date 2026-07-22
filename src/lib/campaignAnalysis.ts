@@ -61,6 +61,12 @@ export interface SopDeviationResult {
 const HEDGE_ROLES: LegRole[] = ['hedge_initial_a', 'hedge_initial_b', 'hedge_rolling'];
 const INITIAL_HEDGE_ROLES: LegRole[] = ['hedge_initial_a', 'hedge_initial_b'];
 const MAIN_ROLES: LegRole[] = ['main_open', ...MAIN_ADD_ROLES, 'reentry_main'];
+const MAIN_SIDE_ROLES: LegRole[] = [...MAIN_ROLES, 'mirror_tp'];
+const POSITION_ENTRY_EVENT_TYPES = new Set<CampaignEvent['event_type']>([
+  'historical_leg_attached',
+  'main_opened',
+  'mirror_tp_placed',
+]);
 const EPSILON = 0.0001;
 
 const toMs = (value: string) => new Date(value).getTime();
@@ -93,8 +99,112 @@ function findInitialMainLeg(legs: TradeJournal[]): TradeJournal | null {
 }
 
 interface InitialRiskAnchor {
-  mainNotional: number;
+  mainSideNotional: number;
   drawdownFraction: number;
+}
+
+function campaignMainDirection(campaign: TradeCampaign): 'long' | 'short' {
+  return campaign.direction === 'main_short' ? 'short' : 'long';
+}
+
+function isMainSidePosition(
+  campaign: TradeCampaign,
+  role: LegRole | null,
+  direction: TradeJournal['direction'] | null | undefined,
+): boolean {
+  if (role && (HEDGE_ROLES.includes(role) || role === 'reentry_hedge')) return false;
+  if (direction === 'long' || direction === 'short') {
+    return direction === campaignMainDirection(campaign);
+  }
+  return role != null && MAIN_SIDE_ROLES.includes(role);
+}
+
+function resolvedRecordIdentity(record: TradeRecord | null): string | null {
+  return record ? `record:${record.id}` : null;
+}
+
+function positionIdentity(
+  record: TradeRecord | null,
+  recordReference: string | null | undefined,
+  journalId: string | null | undefined,
+  fallback: string,
+): string {
+  return resolvedRecordIdentity(record)
+    ?? (recordReference ? `record-ref:${recordReference}` : null)
+    ?? (journalId ? `journal:${journalId}` : fallback);
+}
+
+/**
+ * Sum every position on the campaign's main side. For a long campaign this is
+ * every long leg (M, TP, additions and re-entries); reverse hedge legs are
+ * excluded. Event snapshots fill legacy campaigns that no longer have local
+ * journals, while stable record/journal identities prevent double counting.
+ */
+function resolveMainSideNotional(
+  campaign: TradeCampaign,
+  legs: TradeJournal[],
+  tradeRecords: TradeRecord[],
+  mainLeg: TradeJournal | null,
+  mainRecord: TradeRecord | null,
+  mainEvent: CampaignEvent | null,
+): number | null {
+  const recordLookup = buildTradeRecordLookup(tradeRecords);
+  const notionals = new Map<string, number>();
+  const representedJournalIds = new Set(legs.map(leg => leg.id));
+
+  const mainNotional = firstPositiveNumber(
+    mainRecord ? tradeRecordNotionalUsd(mainRecord, mainRecord.entryPrice) : null,
+    mainLeg?.pre_position_size,
+    campaign.initial_main_size_usdt,
+    mainEvent?.size_usdt,
+  );
+  if (mainNotional != null) {
+    notionals.set(
+      positionIdentity(
+        mainRecord,
+        mainLeg?.trade_record_id ?? mainEvent?.trade_record_id,
+        mainLeg?.id ?? mainEvent?.journal_id,
+        'campaign:initial-main',
+      ),
+      mainNotional,
+    );
+  }
+
+  for (const leg of legs) {
+    if (!isMainSidePosition(campaign, leg.leg_role, leg.direction)) continue;
+    const record = leg.trade_record_id ? recordLookup.get(leg.trade_record_id) ?? null : null;
+    const notional = firstPositiveNumber(
+      record ? tradeRecordNotionalUsd(record, record.entryPrice) : null,
+      leg.pre_position_size,
+    );
+    if (notional == null) continue;
+    const identity = positionIdentity(record, leg.trade_record_id, leg.id, `journal:${leg.id}`);
+    if (!notionals.has(identity)) notionals.set(identity, notional);
+  }
+
+  for (const event of [...(campaign.actual_evolution ?? [])]
+    .sort((a, b) => toMs(a.timestamp) - toMs(b.timestamp))) {
+    if (!POSITION_ENTRY_EVENT_TYPES.has(event.event_type)) continue;
+    if (!isMainSidePosition(campaign, event.leg_role, event.direction)) continue;
+    if (event.journal_id && representedJournalIds.has(event.journal_id)) continue;
+
+    const record = event.trade_record_id ? recordLookup.get(event.trade_record_id) ?? null : null;
+    const notional = firstPositiveNumber(
+      record ? tradeRecordNotionalUsd(record, record.entryPrice) : null,
+      event.size_usdt,
+    );
+    if (notional == null) continue;
+    const identity = positionIdentity(
+      record,
+      event.trade_record_id,
+      event.journal_id,
+      `event:${event.id}`,
+    );
+    if (!notionals.has(identity)) notionals.set(identity, notional);
+  }
+
+  const total = Array.from(notionals.values()).reduce((sum, notional) => sum + notional, 0);
+  return total > EPSILON ? total : null;
 }
 
 /**
@@ -120,14 +230,15 @@ function resolveInitialRiskAnchor(
     mainEvent?.entry_price,
     mainEvent?.price,
   );
-  const recordNotional = mainRecord ? tradeRecordNotionalUsd(mainRecord, mainRecord.entryPrice) : null;
-  const mainNotional = firstPositiveNumber(
-    recordNotional,
-    mainLeg?.pre_position_size,
-    campaign.initial_main_size_usdt,
-    mainEvent?.size_usdt,
+  const mainSideNotional = resolveMainSideNotional(
+    campaign,
+    legs,
+    tradeRecords,
+    mainLeg,
+    mainRecord,
+    mainEvent,
   );
-  if (entryPrice == null || mainNotional == null) return null;
+  if (entryPrice == null || mainSideNotional == null) return null;
   const historical = isHistoricalCampaign(campaign);
 
   const roleHedgePrices = INITIAL_HEDGE_ROLES.flatMap(role => {
@@ -182,7 +293,7 @@ function resolveInitialRiskAnchor(
   if (hedgePrices.length === 0) return null;
 
   return {
-    mainNotional,
+    mainSideNotional,
     drawdownFraction: Math.max(...hedgePrices.map(price => Math.abs(price - entryPrice) / entryPrice)),
   };
 }
@@ -203,7 +314,9 @@ export function computeInitialExpectedMaxDrawdownPct(
 
 /**
  * Initial maximum expected loss used by payoff ratio:
- * main notional x initial maximum expected drawdown fraction.
+ * total notional of every main-side position x initial maximum expected
+ * drawdown fraction. A long campaign includes M, TP and every other long leg;
+ * a short campaign applies the same rule to all short legs.
  */
 export function computeInitialExpectedMaxLoss(
   campaign: TradeCampaign,
@@ -212,7 +325,7 @@ export function computeInitialExpectedMaxLoss(
   reverseHedgeOrders: CampaignReverseHedgeOrder[] = [],
 ): number {
   const anchor = resolveInitialRiskAnchor(campaign, legs, tradeRecords, reverseHedgeOrders);
-  return anchor == null ? 0 : anchor.drawdownFraction * anchor.mainNotional;
+  return anchor == null ? 0 : anchor.drawdownFraction * anchor.mainSideNotional;
 }
 
 export interface CampaignInitialRiskFraction {

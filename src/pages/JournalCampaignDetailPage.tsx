@@ -828,8 +828,9 @@ export default function JournalCampaignDetailPage() {
           : '—',
         help: (
           <>
-            <p>主力头仓在初始对冲 A/B 风险边界下预先承担的最大亏损额，是盈亏比的风险分母。</p>
-            <div className="rounded bg-muted/60 px-2 py-1 font-mono text-foreground">最大预期亏损 = 主力开仓名义仓位 × 预期回撤比例</div>
+            <p>战役全部主方向仓位在初始对冲 A/B 风险边界下承担的最大亏损额，是盈亏比的风险分母。</p>
+            <div className="rounded bg-muted/60 px-2 py-1 font-mono text-foreground">最大预期亏损 = 主方向总名义仓位 × 预期回撤比例</div>
+            <p>多战役统计全部多单（包括 M、TP、加仓与重入）；空战役对称统计全部空单。反向对冲不计入。</p>
           </>
         ),
       },

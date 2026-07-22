@@ -116,6 +116,145 @@ describe('campaign profit capture ratio', () => {
     expect(accuracy.profit_capture_ratio).toBeCloseTo(50, 8);
   });
 
+  it('uses every long position including TP and additions for a long campaign', () => {
+    const campaign = makeCampaign(600);
+    const legs = [
+      makeLeg('main', 'main_open', 100, 'main-record'),
+      { ...makeLeg('tp', 'mirror_tp', 112), direction: 'long' as const, pre_position_size: 5_000 },
+      { ...makeLeg('add-1', 'main_add_1', 106), direction: 'long' as const, pre_position_size: 3_000 },
+      { ...makeLeg('hedge-a', 'hedge_initial_a', 96), pre_position_size: 20_000 },
+      { ...makeLeg('hedge-b', 'hedge_initial_b', 90), pre_position_size: 20_000 },
+    ];
+    campaign.actual_evolution = [
+      {
+        id: 'duplicate-main-event',
+        timestamp: openedAt,
+        event_type: 'main_opened',
+        leg_role: 'main_open',
+        journal_id: 'main',
+        trade_record_id: 'main-record',
+        pending_order_id: null,
+        price: 102,
+        size_usdt: 10_200,
+        notes: null,
+        recorded_at: openedAt,
+        direction: 'long',
+      },
+      {
+        id: 'duplicate-tp-event',
+        timestamp: openedAt,
+        event_type: 'mirror_tp_placed',
+        leg_role: 'mirror_tp',
+        journal_id: 'tp',
+        trade_record_id: null,
+        pending_order_id: 'tp-order',
+        price: 112,
+        size_usdt: 5_000,
+        notes: null,
+        recorded_at: openedAt,
+        direction: 'long',
+      },
+    ];
+
+    // M 10,200 + TP 5,000 + A1 3,000 = 18,200; reverse hedges are excluded.
+    const expectedLoss = 18_200 * (12 / 102);
+    expect(computeInitialExpectedMaxLoss(campaign, legs, [makeMainRecord()])).toBeCloseTo(expectedLoss, 8);
+    expect(computeProfitCaptureRatio(campaign, legs, [makeMainRecord()])).toBeCloseTo((600 / expectedLoss) * 100, 8);
+  });
+
+  it('applies the same all-main-side rule to short campaigns', () => {
+    const campaign = makeCampaign(-300);
+    campaign.direction = 'main_short';
+    const legs = [
+      { ...makeLeg('main', 'main_open', 100), direction: 'short' as const, pre_position_size: 10_000 },
+      { ...makeLeg('tp', 'mirror_tp', 88), direction: 'short' as const, pre_position_size: 5_000 },
+      { ...makeLeg('hedge-a', 'hedge_initial_a', 110), direction: 'long' as const, pre_position_size: 30_000 },
+    ];
+
+    expect(computeInitialExpectedMaxLoss(campaign, legs, [])).toBeCloseTo(1_500, 8);
+  });
+
+  it('reconstructs every main-side position from event-only historical campaigns', () => {
+    const campaign = makeCampaign(450);
+    campaign.initial_main_size_usdt = null;
+    campaign.actual_evolution = [
+      {
+        id: 'historical-main',
+        timestamp: openedAt,
+        event_type: 'historical_leg_attached',
+        leg_role: 'main_open',
+        journal_id: 'main-journal',
+        trade_record_id: 'main-history-record',
+        pending_order_id: null,
+        price: 100,
+        size_usdt: 5_000,
+        notes: null,
+        recorded_at: openedAt,
+        direction: 'long',
+      },
+      {
+        id: 'historical-tp',
+        timestamp: openedAt,
+        event_type: 'historical_leg_attached',
+        leg_role: 'mirror_tp',
+        journal_id: 'tp-journal',
+        trade_record_id: 'tp-history-record',
+        pending_order_id: null,
+        price: 108,
+        size_usdt: 2_500,
+        notes: null,
+        recorded_at: openedAt,
+        direction: 'long',
+      },
+      {
+        id: 'historical-tp-duplicate',
+        timestamp: openedAt,
+        event_type: 'mirror_tp_placed',
+        leg_role: 'mirror_tp',
+        journal_id: 'legacy-tp-journal-copy',
+        trade_record_id: 'tp-history-record',
+        pending_order_id: null,
+        price: 108,
+        size_usdt: 2_500,
+        notes: null,
+        recorded_at: openedAt,
+        direction: 'long',
+      },
+      {
+        id: 'historical-add',
+        timestamp: openedAt,
+        event_type: 'historical_leg_attached',
+        leg_role: 'main_add_1',
+        journal_id: 'add-journal',
+        trade_record_id: 'add-history-record',
+        pending_order_id: null,
+        price: 103,
+        size_usdt: 1_500,
+        notes: null,
+        recorded_at: openedAt,
+        direction: 'long',
+      },
+      {
+        id: 'historical-hedge',
+        timestamp: openedAt,
+        event_type: 'historical_leg_attached',
+        leg_role: 'hedge_initial_a',
+        journal_id: 'hedge-journal',
+        trade_record_id: 'hedge-history-record',
+        pending_order_id: null,
+        price: 95,
+        size_usdt: 50_000,
+        notes: null,
+        recorded_at: openedAt,
+        direction: 'short',
+      },
+    ];
+
+    // Historical M 5,000 + TP 2,500 + A1 1,500 = 9,000; 5% risk boundary.
+    expect(computeInitialExpectedMaxLoss(campaign, [], [])).toBeCloseTo(450, 8);
+    expect(computeProfitCaptureRatio(campaign, [], [])).toBeCloseTo(100, 8);
+  });
+
   it('uses the initial main-entry equity snapshot to compute the campaign risk fraction', () => {
     const legs = [
       { ...makeLeg('main', 'main_open', 100), pre_account_equity_usdt: 80_000 },

@@ -1215,7 +1215,7 @@ export default function GuidePage() {
                     </tr>
                   </thead>
                   <tbody>
-                    <tr><td className="px-3 py-2 border-t border-border">初始最大预期亏损 Lᵢ</td><td className="px-3 py-2 border-t border-border">主力名义仓位 × max（|开仓价 − 初始对冲 A 价|，|开仓价 − 初始对冲 B 价|）÷ 开仓价</td><td className="px-3 py-2 border-t border-border">至少存在一个有效的初始对冲 A / B 价格；取可用价格中的最大距离</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border">初始最大预期亏损 Lᵢ</td><td className="px-3 py-2 border-t border-border">主方向总名义仓位 × max（|开仓价 − 初始对冲 A 价|，|开仓价 − 初始对冲 B 价|）÷ 开仓价</td><td className="px-3 py-2 border-t border-border">主方向总名义仓位为所有同方向 Legs 去重求和：多战役包含 M、TP、加仓与重入，空战役对称处理；反向对冲不计入。至少存在一个有效初始对冲价格</td></tr>
                     <tr><td className="px-3 py-2 border-t border-border">单场盈亏比 bᵢ</td><td className="px-3 py-2 border-t border-border">已实现盈亏ᵢ ÷ Lᵢ</td><td className="px-3 py-2 border-t border-border">盈利为正，亏损为负；页面同时显示百分数和括号内数字</td></tr>
                     <tr><td className="px-3 py-2 border-t border-border">胜率 P(赢)</td><td className="px-3 py-2 border-t border-border">有效盈利战役数 ÷（有效盈利战役数 + 有效亏损战役数）</td><td className="px-3 py-2 border-t border-border">只统计有效且非盈亏平衡的已结束战役</td></tr>
                     <tr><td className="px-3 py-2 border-t border-border">平均盈亏比 b̄</td><td className="px-3 py-2 border-t border-border">Σ 单场盈亏比 bᵢ ÷ 有效战役数 N</td><td className="px-3 py-2 border-t border-border">亏损的负盈亏比原样参与求和</td></tr>
