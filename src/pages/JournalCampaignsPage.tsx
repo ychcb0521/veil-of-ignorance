@@ -914,9 +914,9 @@ export default function JournalCampaignsPage() {
                         <div className="mt-2 space-y-1 text-muted-foreground">
                           <div>初始最大预期亏损：</div>
                           <div className="rounded border border-border/60 px-2 py-1.5 font-mono leading-relaxed text-foreground/85">
-                            Lᵢ = 主方向总名义仓位 × max（|开仓价 − 对冲 A 价|，|开仓价 − 对冲 B 价|）÷ 开仓价
+                            Lᵢ = 主力开仓名义仓位 × max（|开仓价 − 对冲 A 价|，|开仓价 − 对冲 B 价|）÷ 开仓价
                           </div>
-                          <div>主方向总名义仓位包含 M、TP、所有同方向加仓与重入仓位；反向对冲不计入。</div>
+                          <div>主力开仓名义仓位为入场时 M 加镜像的真实全暴露；后续加仓、重入和反向对冲不计入。</div>
                           <div>排序使用带正负号的 bᵢ：盈利为正，亏损为负。</div>
                           <div>没有有效初始最大预期亏损的战役不参与排序。</div>
                         </div>
@@ -1014,13 +1014,13 @@ export default function JournalCampaignsPage() {
               <PopoverContent align="end" className="w-96 border-border bg-card p-3 text-[11px]">
                 <div className="font-medium text-foreground">有效战役与最大预期亏损</div>
                 <div className="mt-2 rounded bg-muted/60 px-2 py-1.5 font-mono leading-relaxed text-foreground">
-                  Lᵢ = 主方向总名义仓位 × max（|主力开仓价 − 初始对冲 A 价|，|主力开仓价 − 初始对冲 B 价|）÷ 主力开仓价
+                  Lᵢ = 主力开仓名义仓位 × max（|主力开仓价 − 初始对冲 A 价|，|主力开仓价 − 初始对冲 B 价|）÷ 主力开仓价
                 </div>
                 <div className="mt-2 space-y-1 text-muted-foreground">
-                  <div>主方向总名义仓位按所有同方向 Legs 去重求和：多战役包含全部多单（包括 TP），空战役对称统计全部空单；反向对冲不计入。</div>
+                  <div>主力开仓名义仓位按初始 M 与镜像 Legs 去重求和，采用镜像 TP 落袋前的真实全暴露；后续加仓、重入和反向对冲不计入。</div>
                   <div>若 A、B 都存在，取离主力开仓价更远的一档；只有一档时使用该档。</div>
                   <div>历史战役优先使用保存的原始委托价，不使用触发成交后的滑点价；旧记录缺失委托快照时，才回退到 Legs、成交记录或事件数据。</div>
-                  <div>只有战役已结束，且主力开仓价、主方向总名义仓位、初始对冲价完整，使 Lᵢ 为有限正数时，才属于有效战役。</div>
+                  <div>只有战役已结束，且主力开仓价、主力开仓名义仓位、初始对冲价完整，使 Lᵢ 为有限正数时，才属于有效战役。</div>
                   <div>无有效 Lᵢ 的战役不参与盈亏比、胜率、平均盈亏比、算术期望与几何期望统计。</div>
                 </div>
                 <div className="mt-2 grid grid-cols-3 gap-1 border-t border-border/60 pt-2 text-center">

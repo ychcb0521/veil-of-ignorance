@@ -26,6 +26,7 @@ import {
 import { computeCurrentAccountEquity } from '@/lib/accountEquity';
 import {
   buildCampaignEventStream,
+  computeInitialMainExposureNotional,
   computeDecisionAccuracy,
   computeInitialExpectedMaxDrawdownPct,
   computeInitialExpectedMaxLoss,
@@ -94,6 +95,7 @@ type CampaignDetailNavigationState = {
 type CampaignPnlOverviewItem = CampaignBoardPnlItem & {
   help: ReactNode;
   valueClassName?: string;
+  rightColumn?: boolean;
 };
 
 function pnlColor(value: number | null) {
@@ -782,6 +784,10 @@ export default function JournalCampaignDetailPage() {
     const expectedDrawdownPct = campaignMetricValues?.initialExpectedMaxDrawdownPct ?? 0;
     const expectedWinRate = campaignPerformance?.expectedWinRate ?? null;
     const mainLeverage = resolveCampaignMainLeverage(campaign, legs, tradeRecords);
+    const initialMainExposureNotional = computeInitialMainExposureNotional(campaign, legs, tradeRecords);
+    const todayAccountEquity = isOwner && Number.isFinite(currentAccountEquity) && currentAccountEquity > 0
+      ? currentAccountEquity
+      : null;
 
     return [
       {
@@ -810,12 +816,28 @@ export default function JournalCampaignDetailPage() {
         ),
       },
       {
+        key: 'initialMainExposureNotional',
+        label: '主力开仓名义仓位',
+        value: initialMainExposureNotional > 0
+          ? `${initialMainExposureNotional.toFixed(2)} USDT`
+          : '—',
+        help: (
+          <>
+            <p>入场时主方向的全部初始敞口：M 加镜像仓位，按镜像 TP 落袋之前的真实全暴露计算。</p>
+            <div className="rounded bg-muted/60 px-2 py-1 font-mono text-foreground">主力开仓名义仓位 = 初始 M 名义仓位 + 初始镜像名义仓位</div>
+            <p>后续加仓、重入仓位和反向对冲均不计入；历史战役从成交记录、Leg 快照及事件流去重还原。</p>
+          </>
+        ),
+      },
+      {
         key: 'peakUnrealizedPnl',
         label: '峰值浮盈',
         value: accuracy.campaign_max_profit_real.toFixed(2),
         help: (
           <>
-            <p>战役期间同一时刻所有活跃 Legs 合计浮动盈亏的最高值，用来观察这场战役曾经提供过多厚的浮盈垫。</p>
+            <p>战役期间某一时点的未实现盈亏，加上截至该时点已经落袋的盈亏之后，所得累计战役权益的最高值。</p>
+            <div className="rounded bg-muted/60 px-2 py-1 font-mono text-foreground">峰值浮盈 = maxₜ（未实现盈亏ₜ + 累计已实现盈亏ₜ）</div>
+            <p>已落袋部分包含镜像 TP 的已实现盈亏，因此可以与战役最终盈利直接比较。</p>
             <p>按当前 K 线粒度的收盘价采样，不等同于逐笔成交的瞬时最高值。</p>
           </>
         ),
@@ -828,9 +850,9 @@ export default function JournalCampaignDetailPage() {
           : '—',
         help: (
           <>
-            <p>战役全部主方向仓位在初始对冲 A/B 风险边界下承担的最大亏损额，是盈亏比的风险分母。</p>
-            <div className="rounded bg-muted/60 px-2 py-1 font-mono text-foreground">最大预期亏损 = 主方向总名义仓位 × 预期回撤比例</div>
-            <p>多战役统计全部多单（包括 M、TP、加仓与重入）；空战役对称统计全部空单。反向对冲不计入。</p>
+            <p>入场时 M 加镜像的真实全暴露，在初始对冲 A/B 风险边界下承担的最大亏损额，是盈亏比的风险分母。</p>
+            <div className="rounded bg-muted/60 px-2 py-1 font-mono text-foreground">最大预期亏损 = 主力开仓名义仓位 × 预期回撤比例</div>
+            <p>后续加仓、重入仓位和反向对冲不计入主力开仓名义仓位。</p>
           </>
         ),
       },
@@ -910,8 +932,29 @@ export default function JournalCampaignDetailPage() {
           </>
         ),
       },
+      {
+        key: 'todayAccountEquity',
+        label: '今日账户总资产',
+        value: todayAccountEquity == null ? '—' : `${todayAccountEquity.toFixed(2)} USDT`,
+        rightColumn: true,
+        help: (
+          <>
+            <p>当前交易账户按最新余额、持仓和价格计算的总资产。</p>
+            <p>新战役的几何期望优先使用主力开仓时固化的账户资产；历史战役缺少该快照时，使用这个今日总资产作为估算分母。</p>
+          </>
+        ),
+      },
     ];
-  }, [accuracy, campaign, campaignMetricValues, campaignPerformance?.expectedWinRate, legs, tradeRecords]);
+  }, [
+    accuracy,
+    campaign,
+    campaignMetricValues,
+    campaignPerformance?.expectedWinRate,
+    currentAccountEquity,
+    isOwner,
+    legs,
+    tradeRecords,
+  ]);
   const campaignPnlOverviewNote = useMemo(() => {
     const expectationNote = campaignPerformanceLoading
       ? '正在按同一账户的有效战役口径计算期望…'
@@ -1358,7 +1401,10 @@ export default function JournalCampaignDetailPage() {
             <div className="font-medium">盈亏概览</div>
             <div className="mt-3 grid grid-cols-1 gap-x-8 gap-y-2 sm:grid-cols-2">
               {campaignPnlOverviewItems.map(item => (
-                <div key={item.key} className="flex items-baseline justify-between gap-3">
+                <div
+                  key={item.key}
+                  className={`flex items-baseline justify-between gap-3 ${item.rightColumn ? 'sm:col-start-2' : ''}`}
+                >
                   <PnlMetricLabel label={item.label}>{item.help}</PnlMetricLabel>
                   <span className={`font-mono ${item.valueClassName ?? ''}`}>{item.value}</span>
                 </div>

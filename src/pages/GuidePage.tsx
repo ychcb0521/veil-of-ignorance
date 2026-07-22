@@ -1215,7 +1215,7 @@ export default function GuidePage() {
                     </tr>
                   </thead>
                   <tbody>
-                    <tr><td className="px-3 py-2 border-t border-border">初始最大预期亏损 Lᵢ</td><td className="px-3 py-2 border-t border-border">主方向总名义仓位 × max（|开仓价 − 初始对冲 A 价|，|开仓价 − 初始对冲 B 价|）÷ 开仓价</td><td className="px-3 py-2 border-t border-border">主方向总名义仓位为所有同方向 Legs 去重求和：多战役包含 M、TP、加仓与重入，空战役对称处理；反向对冲不计入。至少存在一个有效初始对冲价格</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border">初始最大预期亏损 Lᵢ</td><td className="px-3 py-2 border-t border-border">主力开仓名义仓位 × max（|开仓价 − 初始对冲 A 价|，|开仓价 − 初始对冲 B 价|）÷ 开仓价</td><td className="px-3 py-2 border-t border-border">主力开仓名义仓位为入场时 M 加镜像的真实全暴露，采用镜像 TP 落袋前口径；后续加仓、重入与反向对冲不计入。历史战役从成交、Leg 与事件流去重还原</td></tr>
                     <tr><td className="px-3 py-2 border-t border-border">单场盈亏比 bᵢ</td><td className="px-3 py-2 border-t border-border">已实现盈亏ᵢ ÷ Lᵢ</td><td className="px-3 py-2 border-t border-border">盈利为正，亏损为负；页面同时显示百分数和括号内数字</td></tr>
                     <tr><td className="px-3 py-2 border-t border-border">胜率 P(赢)</td><td className="px-3 py-2 border-t border-border">有效盈利战役数 ÷（有效盈利战役数 + 有效亏损战役数）</td><td className="px-3 py-2 border-t border-border">只统计有效且非盈亏平衡的已结束战役</td></tr>
                     <tr><td className="px-3 py-2 border-t border-border">平均盈亏比 b̄</td><td className="px-3 py-2 border-t border-border">Σ 单场盈亏比 bᵢ ÷ 有效战役数 N</td><td className="px-3 py-2 border-t border-border">亏损的负盈亏比原样参与求和</td></tr>
@@ -1304,7 +1304,7 @@ export default function GuidePage() {
               </Highlight>
 
               <SubTitle>战役详情页：盈亏概览与高清 PNG</SubTitle>
-              <P>详情页的<strong>盈亏概览</strong>统一展示已实现盈亏、主力开仓杠杆倍数、峰值浮盈、最大预期亏损、预期回撤、盈亏比、机会质量、单场算术期望和单场几何期望。杠杆优先读取主力 Leg，历史记录缺失时再从关联成交、战役初始字段或主力开仓事件回填。每个指标名旁的低透明度 <strong>i</strong> 图标都可点击，会折叠展开该指标的含义、公式和数据口径，不会挤压页面布局。这些数据与战役列表使用同一套公式：预期回撤支持双向排序；机会质量先取 <strong>b* = max（实际盈亏比, 1）</strong>，再用 <strong>b* ÷ 预期回撤百分点</strong>计算，不取绝对值；期望指标使用同一账户当前的有效战役胜率，历史战役的几何期望在缺少开仓资产快照时才使用今日当前总资产估算。</P>
+              <P>详情页的<strong>盈亏概览</strong>统一展示已实现盈亏、主力开仓杠杆倍数、主力开仓名义仓位、峰值浮盈、最大预期亏损、预期回撤、盈亏比、机会质量、单场算术期望、单场几何期望与今日账户总资产。主力开仓名义仓位按入场时 M 加镜像的全暴露计算，不混入后续加仓；峰值浮盈按每个时点的<strong>未实现盈亏 + 累计已落袋盈亏</strong>取最高值，镜像止盈落袋也包含在内。杠杆优先读取主力 Leg，历史记录缺失时再从关联成交、战役初始字段或主力开仓事件回填。每个指标名旁的低透明度 <strong>i</strong> 图标都可点击，会折叠展开该指标的含义、公式和数据口径，不会挤压页面布局。这些数据与战役列表使用同一套公式：预期回撤支持双向排序；机会质量先取 <strong>b* = max（实际盈亏比, 1）</strong>，再用 <strong>b* ÷ 预期回撤百分点</strong>计算，不取绝对值；期望指标使用同一账户当前的有效战役胜率，历史战役的几何期望在缺少开仓资产快照时才使用今日当前总资产估算。</P>
               <ul className="list-disc pl-6 text-[14px] text-foreground/90 space-y-1">
                 <li>点击 Legs 列表右上角的 <strong>PNG</strong>，会把<strong>战役原数据、盈亏概览、当前 K 线周期、已经拖动 / 缩放好的 K 线视图，以及完整 Legs 列表</strong>导出到同一张高清图片。周期会以「1分钟线」「5分钟线」「15分钟线」或「1小时线」写入图片。</li>
                 <li>图片中的<strong>盈亏概览</strong>与详情页共用同一份指标清单；以后详情页新增盈亏指标时，导出图会自动同步收录，并随指标数量自动增加高度。</li>

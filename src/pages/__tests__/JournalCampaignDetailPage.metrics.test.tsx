@@ -374,6 +374,8 @@ describe('JournalCampaignDetailPage metrics', () => {
     await waitFor(() => expect(screen.getByText('机会质量')).toBeInTheDocument());
     expect(screen.getByText('200.0%（2.00）')).toBeInTheDocument();
     expect(screen.getByText('0.20')).toBeInTheDocument();
+    expect(screen.getByText('1000.00 USDT')).toBeInTheDocument();
+    expect(screen.getByText('10000.00 USDT')).toBeInTheDocument();
     // 算术/几何期望与实时胜率依赖异步加载的 campaignPerformance（同账户有效战役），需等它落定。
     await waitFor(() => expect(screen.getByText('+0.50R')).toBeInTheDocument());
     expect(screen.getByText('+0.5%/笔')).toBeInTheDocument();
@@ -382,6 +384,7 @@ describe('JournalCampaignDetailPage metrics', () => {
     for (const label of [
       '已实现 P&L',
       '杠杆倍数',
+      '主力开仓名义仓位',
       '峰值浮盈',
       '最大预期亏损',
       '预期回撤',
@@ -389,6 +392,7 @@ describe('JournalCampaignDetailPage metrics', () => {
       '机会质量',
       '算术期望',
       '几何期望',
+      '今日账户总资产',
     ]) {
       expect(screen.getByRole('button', { name: `${label}说明` })).toBeInTheDocument();
     }
@@ -404,6 +408,7 @@ describe('JournalCampaignDetailPage metrics', () => {
     expect(exportInput.pnlOverview.items.map(item => item.label)).toEqual([
       '已实现 P&L',
       '杠杆倍数',
+      '主力开仓名义仓位',
       '峰值浮盈',
       '最大预期亏损',
       '预期回撤',
@@ -411,6 +416,7 @@ describe('JournalCampaignDetailPage metrics', () => {
       '机会质量',
       '算术期望',
       '几何期望',
+      '今日账户总资产',
     ]);
     expect(exportInput.pnlOverview.note).toContain('2 场有效战役，实时胜率 50.00%');
   });

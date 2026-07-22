@@ -53,6 +53,7 @@ function input(): CampaignBoardExportInput {
     pnlOverview: {
       items: [
         { key: 'realizedPnl', label: '已实现 P&L', value: '3456.78 USDT', color: '#0ECB81' },
+        { key: 'initialMainExposureNotional', label: '主力开仓名义仓位', value: '12000.00 USDT' },
         { key: 'peakUnrealizedPnl', label: '峰值浮盈', value: '5200.00' },
         { key: 'maxDrawdown', label: '最大回撤', value: '-800.00' },
         { key: 'initialExpectedMaxLoss', label: '最大预期亏损', value: '1800.00 USDT' },
@@ -61,6 +62,7 @@ function input(): CampaignBoardExportInput {
         { key: 'opportunityQuality', label: '机会质量', value: '0.21', color: '#0ECB81' },
         { key: 'arithmeticExpectancy', label: '算术期望', value: '+0.18R', color: '#0ECB81' },
         { key: 'geometricExpectancy', label: '几何期望', value: '+0.4%/笔', color: '#0ECB81' },
+        { key: 'todayAccountEquity', label: '今日账户总资产', value: '50000.00 USDT' },
       ],
       note: '期望口径：37 场有效战役，实时胜率 48.65%。',
     },
@@ -78,10 +80,11 @@ describe('campaign PNG overview', () => {
     expect(metadata['方向 / 状态']).toBe('主多 / 盈利结束');
     expect(metadata['持续时间']).toBe('2 小时 30 分钟');
     expect(metadata['Legs 构成']).toBe('共 3 · 主仓 1 / 对冲 1 / TP 1 / 其他 0');
-    expect(metadata['初始主仓 / 杠杆']).toBe('12000.00 USDT / 6x');
+    expect(metadata['主力开仓名义仓位 / 杠杆']).toBe('12000.00 USDT / 6x');
     expect(metadata['最终 R']).toBe('2.40');
     expect(metadata['战役编号']).toBe('C-ABC123');
     expect(pnl['已实现 P&L']).toBe('3456.78 USDT');
+    expect(pnl['主力开仓名义仓位']).toBe('12000.00 USDT');
     expect(pnl['峰值浮盈']).toBe('5200.00');
     expect(pnl['最大回撤']).toBe('-800.00');
     expect(pnl['最大预期亏损']).toBe('1800.00 USDT');
@@ -90,6 +93,7 @@ describe('campaign PNG overview', () => {
     expect(pnl['机会质量']).toBe('0.21');
     expect(pnl['算术期望']).toBe('+0.18R');
     expect(pnl['几何期望']).toBe('+0.4%/笔');
+    expect(pnl['今日账户总资产']).toBe('50000.00 USDT');
     expect(overview.pnlNote).toContain('37 场有效战役');
   });
 

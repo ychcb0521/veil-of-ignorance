@@ -6,6 +6,8 @@ import {
 } from '@/lib/objectiveOperationTime';
 import { LEG_ROLE_LABELS } from '@/lib/strategyTemplates';
 import { resolveLegExecution, type LegExitPriceCorrections } from '@/lib/campaignLegExecution';
+import { computeInitialMainExposureNotional } from '@/lib/campaignAnalysis';
+import { formatCampaignLeverage, resolveCampaignMainLeverage } from '@/lib/campaignMetrics';
 import type { TradeCampaign, TradeJournal } from '@/types/journal';
 import type { CampaignReverseHedgeOrder, TradeRecord } from '@/types/trading';
 
@@ -553,6 +555,12 @@ export function buildCampaignBoardOverview(input: CampaignBoardExportInput): Cam
   const legCounts = campaignLegCounts(input.legs);
   const operationTime = campaignOperationTime(input.legs, input.tradeRecords);
   const chartIntervalLabel = formatCampaignChartInterval(input.chartInterval);
+  const initialMainExposureNotional = computeInitialMainExposureNotional(
+    input.campaign,
+    input.legs,
+    input.tradeRecords,
+  );
+  const mainLeverage = resolveCampaignMainLeverage(input.campaign, input.legs, input.tradeRecords);
   return {
     metadataItems: [
       { label: '操作时间', value: operationTime == null ? '—' : fmtClock(operationTime) },
@@ -563,7 +571,10 @@ export function buildCampaignBoardOverview(input: CampaignBoardExportInput): Cam
       { label: '持续时间', value: fmtCampaignDuration(input.campaign.opened_at, input.campaign.closed_at) },
       { label: '策略', value: input.campaign.strategy_template },
       { label: 'Legs 构成', value: `共 ${input.legs.length} · 主仓 ${legCounts.main} / 对冲 ${legCounts.hedge} / TP ${legCounts.tp} / 其他 ${legCounts.other}` },
-      { label: '初始主仓 / 杠杆', value: `${fmtAmount(input.campaign.initial_main_size_usdt, ' USDT')} / ${input.campaign.initial_leverage == null ? '—' : `${input.campaign.initial_leverage.toFixed(0)}x`}` },
+      {
+        label: '主力开仓名义仓位 / 杠杆',
+        value: `${initialMainExposureNotional > 0 ? fmtAmount(initialMainExposureNotional, ' USDT') : '—'} / ${formatCampaignLeverage(mainLeverage)}`,
+      },
       { label: '最终 R', value: fmtAmount(input.campaign.final_r_multiple) },
       { label: '战役编号', value: input.campaign.campaign_code || '—' },
     ],

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   computeDecisionAccuracy,
   computeCampaignInitialRiskFraction,
+  computeInitialMainExposureNotional,
   computeInitialExpectedMaxDrawdownPct,
   computeInitialExpectedMaxLoss,
   computeProfitCaptureRatio,
@@ -116,7 +117,7 @@ describe('campaign profit capture ratio', () => {
     expect(accuracy.profit_capture_ratio).toBeCloseTo(50, 8);
   });
 
-  it('uses every long position including TP and additions for a long campaign', () => {
+  it('uses the initial M plus mirror exposure while excluding later additions', () => {
     const campaign = makeCampaign(600);
     const legs = [
       makeLeg('main', 'main_open', 100, 'main-record'),
@@ -156,13 +157,14 @@ describe('campaign profit capture ratio', () => {
       },
     ];
 
-    // M 10,200 + TP 5,000 + A1 3,000 = 18,200; reverse hedges are excluded.
-    const expectedLoss = 18_200 * (12 / 102);
+    // Opening exposure is M 10,200 + mirror 5,000 = 15,200. A1 and hedges are excluded.
+    const expectedLoss = 15_200 * (12 / 102);
+    expect(computeInitialMainExposureNotional(campaign, legs, [makeMainRecord()])).toBeCloseTo(15_200, 8);
     expect(computeInitialExpectedMaxLoss(campaign, legs, [makeMainRecord()])).toBeCloseTo(expectedLoss, 8);
     expect(computeProfitCaptureRatio(campaign, legs, [makeMainRecord()])).toBeCloseTo((600 / expectedLoss) * 100, 8);
   });
 
-  it('applies the same all-main-side rule to short campaigns', () => {
+  it('applies the same initial M plus mirror rule to short campaigns', () => {
     const campaign = makeCampaign(-300);
     campaign.direction = 'main_short';
     const legs = [
@@ -174,9 +176,11 @@ describe('campaign profit capture ratio', () => {
     expect(computeInitialExpectedMaxLoss(campaign, legs, [])).toBeCloseTo(1_500, 8);
   });
 
-  it('reconstructs every main-side position from event-only historical campaigns', () => {
+  it('reconstructs initial M plus mirror from event-only historical campaigns', () => {
     const campaign = makeCampaign(450);
-    campaign.initial_main_size_usdt = null;
+    // Legacy summary fields may still contain the old M-only value. Event
+    // snapshots are the more precise source for the historical recomputation.
+    campaign.initial_main_size_usdt = 999;
     campaign.actual_evolution = [
       {
         id: 'historical-main',
@@ -250,9 +254,43 @@ describe('campaign profit capture ratio', () => {
       },
     ];
 
-    // Historical M 5,000 + TP 2,500 + A1 1,500 = 9,000; 5% risk boundary.
-    expect(computeInitialExpectedMaxLoss(campaign, [], [])).toBeCloseTo(450, 8);
-    expect(computeProfitCaptureRatio(campaign, [], [])).toBeCloseTo(100, 8);
+    // Historical opening exposure is M 5,000 + mirror 2,500 = 7,500. A1 is later and excluded.
+    expect(computeInitialMainExposureNotional(campaign, [], [])).toBeCloseTo(7_500, 8);
+    expect(computeInitialExpectedMaxLoss(campaign, [], [])).toBeCloseTo(375, 8);
+    expect(computeProfitCaptureRatio(campaign, [], [])).toBeCloseTo(120, 8);
+  });
+
+  it('adds banked mirror profit to unrealized P&L when finding peak campaign profit', () => {
+    const campaign = makeCampaign(125);
+    const mainRecord = {
+      ...makeMainRecord(),
+      id: 'peak-main-record',
+      entryPrice: 100,
+      exitPrice: 110,
+      quantity: 10,
+      pnl: 100,
+    };
+    const mirrorRecord = {
+      ...makeMainRecord(),
+      id: 'peak-mirror-record',
+      entryPrice: 100,
+      exitPrice: 105,
+      quantity: 5,
+      pnl: 25,
+      closeTime: Date.parse('2026-07-15T00:30:00.000Z'),
+    };
+    const legs = [
+      { ...makeLeg('peak-main', 'main_open', 100, mainRecord.id), direction: 'long' as const },
+      { ...makeLeg('peak-mirror', 'mirror_tp', 105, mirrorRecord.id), direction: 'long' as const },
+    ];
+    const klines = [
+      { time: Date.parse('2026-07-15T00:10:00.000Z'), open: 104, high: 104, low: 104, close: 104, volume: 1 },
+      { time: Date.parse('2026-07-15T00:40:00.000Z'), open: 110, high: 110, low: 110, close: 110, volume: 1 },
+    ];
+
+    // At 00:40 the mirror has banked 25 and M has 100 unrealized: peak = 125.
+    expect(computeDecisionAccuracy(campaign, legs, [mainRecord, mirrorRecord], klines).campaign_max_profit_real)
+      .toBeCloseTo(125, 8);
   });
 
   it('uses the initial main-entry equity snapshot to compute the campaign risk fraction', () => {
