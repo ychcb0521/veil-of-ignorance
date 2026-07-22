@@ -17,7 +17,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useTradingContext } from '@/contexts/TradingContext';
 import { intervalToMs } from '@/hooks/useBinanceData';
 import {
-  CAMPAIGN_VIEW_MULTIPLIERS,
+  CAMPAIGN_ORIGINAL_VIEW_MULTIPLIERS,
   buildCampaignKlineTimeWindow,
   buildCampaignKlineVisibleRange,
   useCampaignKlines,
@@ -1390,7 +1390,7 @@ export default function JournalCampaignDetailPage() {
               </div>
               <div className="h-4 w-px bg-border/70" />
               <div className="flex items-center gap-0.5" aria-label="K 线显示范围">
-                {CAMPAIGN_VIEW_MULTIPLIERS.map(multiplier => (
+                {CAMPAIGN_ORIGINAL_VIEW_MULTIPLIERS.map(multiplier => (
                   <button
                     key={multiplier}
                     type="button"

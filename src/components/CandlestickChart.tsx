@@ -34,6 +34,7 @@ import {
   registerAnalysisBandLabelOverlay,
   type AnalysisBandLabelOverlayData,
 } from "@/lib/analysisBandLabelOverlay";
+import { primeKlineChartPointerInteraction } from "@/lib/klineChartInteraction";
 
 // Mapping from our indicator IDs to klinecharts indicator names (built-in + custom)
 const KLINE_INDICATOR_MAP: Record<string, string> = { ...CUSTOM_INDICATOR_MAP };
@@ -590,6 +591,15 @@ function CandlestickChartComponent({
 
     chartRef.current = chart;
 
+    // init() creates KlineCharts' internal event root synchronously. Activating
+    // it here covers charts mounted or resized under an already-stationary mouse.
+    primeKlineChartPointerInteraction(containerRef.current);
+    const interactionFrame = window.requestAnimationFrame(() => {
+      if (chartRef.current !== chart || !containerRef.current) return;
+      chart.resize();
+      primeKlineChartPointerInteraction(containerRef.current);
+    });
+
     // Expose imperative API for direct candle updates (bypasses React render)
     if (chartApiRef) {
       chartApiRef.current = {
@@ -644,6 +654,7 @@ function CandlestickChartComponent({
     chart.subscribeAction("onCrosshairChange" as any, crosshairCb);
 
     return () => {
+      window.cancelAnimationFrame(interactionFrame);
       ro.disconnect();
       if (chartApiRef) chartApiRef.current = null;
       try {
@@ -730,10 +741,12 @@ function CandlestickChartComponent({
       frame = window.requestAnimationFrame(() => {
         frame = null;
         if (chartRef.current !== chart) return;
+        chart.resize();
         if (!applyAnalysisViewport()) chart.scrollToRealTime();
         // A zero-distance scroll is KlineCharts v9's public, non-mutating way
         // to invalidate every native pane after a programmatic viewport change.
         chart.scrollByDistance(0, 0);
+        if (containerRef.current) primeKlineChartPointerInteraction(containerRef.current);
       });
     };
     chart.subscribeAction(ActionType.OnDataReady, handleDataReady);
@@ -829,8 +842,10 @@ function CandlestickChartComponent({
     const frame = requestAnimationFrame(() => {
       const chart = chartRef.current;
       if (!chart || chart.getDataList().length !== data.length) return;
+      chart.resize();
       if (!applyAnalysisViewport()) return;
       chart.scrollByDistance(0, 0);
+      if (containerRef.current) primeKlineChartPointerInteraction(containerRef.current);
     });
     return () => cancelAnimationFrame(frame);
   }, [applyAnalysisViewport, data.length]);

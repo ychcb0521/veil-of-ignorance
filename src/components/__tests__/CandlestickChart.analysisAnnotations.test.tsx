@@ -4,6 +4,7 @@ import { CandlestickChart } from '@/components/CandlestickChart';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import type { KlineData } from '@/hooks/useBinanceData';
 import { FLOATING_LABEL_HEIGHT, layoutAnalysisFloatingLabels } from '@/lib/analysisFloatingLabels';
+import { primeKlineChartPointerInteraction } from '@/lib/klineChartInteraction';
 import {
   ANALYSIS_BAND_LABEL_OVERLAY,
   createAnalysisBandLabelFigures,
@@ -140,6 +141,17 @@ describe('CandlestickChart analysis annotations', () => {
       };
     });
     vi.stubGlobal('ResizeObserver', ResizeObserverMock);
+  });
+
+  it('图表在静止鼠标下异步挂载时会预激活原生指针交互', () => {
+    const host = document.createElement('div');
+    const chartEventRoot = document.createElement('div');
+    const mouseEnter = vi.fn();
+    chartEventRoot.addEventListener('mouseenter', mouseEnter);
+    host.appendChild(chartEventRoot);
+
+    expect(primeKlineChartPointerInteraction(host)).toBe(true);
+    expect(mouseEnter).toHaveBeenCalledTimes(1);
   });
 
   it('为分析标注创建独立 overlay，避免竖线被标签或 marker 覆盖', async () => {

@@ -10,7 +10,8 @@ import { useReplayKlines } from '@/hooks/useReplayKlines';
 export const CAMPAIGN_EDGE_PAD_MS = 15 * 60_000;
 export const CAMPAIGN_AVAILABLE_CONTEXT_MULTIPLIER = 25;
 export const CAMPAIGN_VIEW_MULTIPLIERS = [2, 3, 5, 11, 21, 31, 41, 51] as const;
-export type CampaignViewMultiplier = 1 | (typeof CAMPAIGN_VIEW_MULTIPLIERS)[number];
+export const CAMPAIGN_ORIGINAL_VIEW_MULTIPLIERS = [1.1, ...CAMPAIGN_VIEW_MULTIPLIERS] as const;
+export type CampaignViewMultiplier = 1 | (typeof CAMPAIGN_ORIGINAL_VIEW_MULTIPLIERS)[number];
 
 export type CampaignKlineTimeWindow = {
   /** 实际请求并允许浏览的完整 51 倍时间范围。 */
@@ -35,6 +36,7 @@ export type CampaignKlineVisibleRange = {
 /**
  * 把指定倍数的窗口放在战役内容正中。
  * 1 倍 = 战役内容本身，不附加前后上下文；
+ * 1.1 倍 = 左 0.05 倍 + 战役 1 倍 + 右 0.05 倍；
  * 例如 3 倍 = 左 1 倍 + 战役 1 倍 + 右 1 倍；
  * 2 倍 = 左 0.5 倍 + 战役 1 倍 + 右 0.5 倍。
  */

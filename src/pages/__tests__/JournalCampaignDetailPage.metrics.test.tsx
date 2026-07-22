@@ -225,7 +225,7 @@ describe('JournalCampaignDetailPage metrics', () => {
 
     const button3x = await screen.findByRole('button', { name: '显示 3 倍战役时间范围' });
     expect(button3x).toHaveAttribute('aria-pressed', 'true');
-    for (const multiplier of [2, 3, 5, 11, 21, 31, 41, 51]) {
+    for (const multiplier of [1.1, 2, 3, 5, 11, 21, 31, 41, 51]) {
       expect(screen.getByRole('button', { name: `显示 ${multiplier} 倍战役时间范围` })).toBeInTheDocument();
     }
     await waitFor(() => expect(replayVisibleRanges.at(-1)).toEqual({

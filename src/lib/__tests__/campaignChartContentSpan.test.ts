@@ -250,6 +250,10 @@ describe('buildCampaignKlineTimeWindow', () => {
       fromTime: t('2026-01-02T00:30:00.000Z'),
       toTime: t('2026-01-02T02:30:00.000Z'),
     });
+    expect(buildCampaignKlineVisibleRange(window, 1.1)).toEqual({
+      fromTime: t('2026-01-02T00:24:00.000Z'),
+      toTime: t('2026-01-02T02:36:00.000Z'),
+    });
     expect(buildCampaignKlineVisibleRange(window, 2)).toEqual({
       fromTime: t('2026-01-01T23:30:00.000Z'),
       toTime: t('2026-01-02T03:30:00.000Z'),
