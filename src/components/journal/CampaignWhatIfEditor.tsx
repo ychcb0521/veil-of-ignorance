@@ -73,7 +73,7 @@ const ROLE_OPTIONS: LegRole[] = [
 ];
 
 const COUNTERFACTUAL_VIEW_MULTIPLIERS: readonly CampaignViewMultiplier[] = [
-  1,
+  1.1,
   ...CAMPAIGN_VIEW_MULTIPLIERS,
 ];
 
@@ -147,7 +147,7 @@ export function CampaignWhatIfEditor({
   const [manualLegs, setManualLegs] = useState<CampaignCounterfactualManualLeg[]>([]);
   const [label, setLabel] = useState('');
   const [selectedManualLegId, setSelectedManualLegId] = useState<string | null>(null);
-  const [chartRangeMultiplier, setChartRangeMultiplier] = useState<CampaignViewMultiplier>(1);
+  const [chartRangeMultiplier, setChartRangeMultiplier] = useState<CampaignViewMultiplier>(1.1);
 
   const chartVisibleRange = useMemo(
     () => buildCampaignKlineVisibleRange(klineTimeWindow, chartRangeMultiplier),
@@ -164,7 +164,7 @@ export function CampaignWhatIfEditor({
   }, [baseDefaults, legs, klines, tradeRecords, legExitPriceCorrections]);
 
   useEffect(() => {
-    setChartRangeMultiplier(1);
+    setChartRangeMultiplier(1.1);
   }, [campaign.id]);
 
   const canRun = !klinesLoading && klines.length > 0;

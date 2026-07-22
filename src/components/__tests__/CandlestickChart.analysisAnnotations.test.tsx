@@ -183,6 +183,91 @@ describe('CandlestickChart analysis annotations', () => {
     interaction.destroy();
   });
 
+  // Faithful mini-model of KlineCharts v9's lazy pointer subscription: the
+  // mousemove listener that paints the crosshair only lives between mouseenter
+  // and mouseleave, and is re-subscribed on every enter.
+  const buildLazyChartHost = (bounds = { left: 100, top: 50, width: 400, height: 300 }) => {
+    const host = document.createElement('div');
+    const chartEventRoot = document.createElement('div');
+    chartEventRoot.tabIndex = 1;
+    chartEventRoot.getBoundingClientRect = () => ({
+      left: bounds.left,
+      top: bounds.top,
+      right: bounds.left + bounds.width,
+      bottom: bounds.top + bounds.height,
+      width: bounds.width,
+      height: bounds.height,
+      x: bounds.left,
+      y: bounds.top,
+      toJSON: () => ({}),
+    }) as DOMRect;
+    const nativeMouseMove = vi.fn();
+    let boundMove: ((event: MouseEvent) => void) | null = null;
+    chartEventRoot.addEventListener('mouseenter', () => {
+      if (boundMove) chartEventRoot.removeEventListener('mousemove', boundMove);
+      boundMove = (event: MouseEvent) => nativeMouseMove(event.clientX, event.clientY);
+      chartEventRoot.addEventListener('mousemove', boundMove);
+    });
+    chartEventRoot.addEventListener('mouseleave', () => {
+      if (boundMove) chartEventRoot.removeEventListener('mousemove', boundMove);
+      boundMove = null;
+    });
+    host.appendChild(chartEventRoot);
+    return { host, chartEventRoot, nativeMouseMove };
+  };
+
+  it('鼠标静止悬停在盘面上时，数据提交后 prime 会在原地补画十字线', () => {
+    const { host, nativeMouseMove } = buildLazyChartHost();
+    const beforeActivate = vi.fn();
+    const interaction = installKlineChartPointerInteraction(host, beforeActivate);
+
+    // Pointer comes to rest inside the chart (recorded via the document tracker),
+    // then never moves — exactly the async-mount / data-commit case.
+    document.dispatchEvent(new MouseEvent('pointermove', { clientX: 200, clientY: 150 }));
+
+    expect(interaction.prime()).toBe(true);
+    expect(beforeActivate).toHaveBeenCalledTimes(1);
+    expect(nativeMouseMove).toHaveBeenCalledWith(200, 150);
+    interaction.destroy();
+  });
+
+  it('每次 prime 都会重新补画，而不是首次之后就永久失效', () => {
+    const { host, nativeMouseMove } = buildLazyChartHost();
+    const interaction = installKlineChartPointerInteraction(host);
+    document.dispatchEvent(new MouseEvent('pointermove', { clientX: 220, clientY: 160 }));
+
+    interaction.prime();
+    interaction.prime();
+    interaction.prime();
+
+    // Old bridge latched after the first prime; the crosshair must repaint every time.
+    expect(nativeMouseMove).toHaveBeenCalledTimes(3);
+    expect(nativeMouseMove).toHaveBeenLastCalledWith(220, 160);
+    interaction.destroy();
+  });
+
+  it('数据就绪路径调用的 primeKlineChartPointerInteraction 会复用已记录的指针位置补画', () => {
+    const { host, nativeMouseMove } = buildLazyChartHost();
+    const interaction = installKlineChartPointerInteraction(host);
+    document.dispatchEvent(new MouseEvent('pointermove', { clientX: 260, clientY: 140 }));
+
+    expect(primeKlineChartPointerInteraction(host)).toBe(true);
+    expect(nativeMouseMove).toHaveBeenCalledWith(260, 140);
+    interaction.destroy();
+  });
+
+  it('指针在盘面之外时 prime 不会在错误坐标画出十字线', () => {
+    const { host, nativeMouseMove } = buildLazyChartHost();
+    const interaction = installKlineChartPointerInteraction(host);
+    // Pointer resting well outside the chart bounds.
+    document.dispatchEvent(new MouseEvent('pointermove', { clientX: 9000, clientY: 9000 }));
+
+    expect(interaction.prime()).toBe(true);
+    // Re-subscribed for a later real move, but no crosshair painted at a fake point.
+    expect(nativeMouseMove).not.toHaveBeenCalled();
+    interaction.destroy();
+  });
+
   it('为分析标注创建独立 overlay，避免竖线被标签或 marker 覆盖', async () => {
     render(
       <CandlestickChart

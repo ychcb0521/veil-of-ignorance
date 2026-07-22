@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { buildCampaignKlineTimeWindow } from '@/hooks/useCampaignKlines';
+import { buildCampaignKlineTimeWindow, buildCampaignKlineVisibleRange } from '@/hooks/useCampaignKlines';
 import type { TradeCampaign } from '@/types/journal';
 import { CampaignWhatIfEditor } from '../CampaignWhatIfEditor';
 
@@ -81,7 +81,7 @@ describe('CampaignWhatIfEditor K-line range', () => {
     replayVisibleRanges.length = 0;
   });
 
-  it('defaults to 1x and shares the original campaign range presets through 51x', async () => {
+  it('defaults to 1.1x and shares the original campaign range presets through 51x', async () => {
     render(
       <CampaignWhatIfEditor
         campaign={campaign}
@@ -103,16 +103,17 @@ describe('CampaignWhatIfEditor K-line range', () => {
       />,
     );
 
-    const button1x = screen.getByRole('button', { name: '反事实盘面显示 1 倍战役时间范围' });
-    expect(button1x).toHaveAttribute('aria-pressed', 'true');
-    for (const multiplier of [1, 2, 3, 5, 11, 21, 31, 41, 51]) {
+    const defaultButton = screen.getByRole('button', { name: '反事实盘面显示 1.1 倍战役时间范围' });
+    expect(defaultButton).toHaveAttribute('aria-pressed', 'true');
+    for (const multiplier of [1.1, 2, 3, 5, 11, 21, 31, 41, 51]) {
       expect(screen.getByRole('button', {
         name: `反事实盘面显示 ${multiplier} 倍战役时间范围`,
       })).toBeInTheDocument();
     }
+    const defaultRange = buildCampaignKlineVisibleRange(timeWindow, 1.1);
     await waitFor(() => expect(replayVisibleRanges.at(-1)).toEqual({
-      start: timeWindow.contentStartMs,
-      end: timeWindow.contentEndMs,
+      start: defaultRange.fromTime,
+      end: defaultRange.toTime,
     }));
 
     fireEvent.click(screen.getByRole('button', { name: '反事实盘面显示 51 倍战役时间范围' }));
