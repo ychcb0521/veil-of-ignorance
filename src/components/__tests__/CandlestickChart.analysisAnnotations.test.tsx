@@ -829,6 +829,42 @@ describe('CandlestickChart analysis annotations', () => {
     expect(mocks.chart.scrollByDistance).not.toHaveBeenCalled();
   });
 
+  it('同一份历史 K 线切换范围预设时会立即重新缩放并居中', async () => {
+    const data = Array.from({ length: 100 }, (_, index) => candle(index * 1000, 1 + index / 100));
+    const { rerender } = render(
+      <CandlestickChart
+        data={data}
+        symbol="HIFIUSDT"
+        rawSymbol="HIFIUSDT"
+        analysisMode
+        analysisFitAll
+        analysisVisibleStartTime={10_000}
+        analysisVisibleEndTime={49_000}
+      />,
+    );
+
+    await waitFor(() => expect(mocks.chart.setBarSpace).toHaveBeenCalled());
+    mocks.chart.setBarSpace.mockClear();
+    mocks.chart.scrollToTimestamp.mockClear();
+
+    rerender(
+      <CandlestickChart
+        data={data}
+        symbol="HIFIUSDT"
+        rawSymbol="HIFIUSDT"
+        analysisMode
+        analysisFitAll
+        analysisVisibleStartTime={20_000}
+        analysisVisibleEndTime={79_000}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(mocks.chart.setBarSpace).toHaveBeenCalledWith(1000 / 60);
+      expect(mocks.chart.scrollToTimestamp).toHaveBeenCalledWith(49_500, 0);
+    });
+  });
+
   it('委托空撤单结束点显示 ×，并带对应撤单竖线', async () => {
     render(
       <CandlestickChart

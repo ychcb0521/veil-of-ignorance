@@ -959,6 +959,27 @@ function CandlestickChartComponent({
     if (analysisMode) analysisCommitFinalizerRef.current();
   }, [analysisMode, data, propTimeAxisSignature]);
 
+  // Range presets (1.1x / 2x / ... / 51x) deliberately reuse the same complete
+  // K-line snapshot. A range-only change therefore never enters the data-feed
+  // branch above. Request a viewport pass explicitly so the preset changes bar
+  // space and centering without replacing data or rebuilding annotations.
+  useEffect(() => {
+    if (!analysisMode || !analysisFitAll || !hasAnalysisVisibleRange) return;
+    const lifecycle = analysisLifecycleRef.current;
+    if (!chartRef.current || !lifecycle.requestedSnapshotKey) return;
+
+    lifecycle.needsViewport = true;
+    lifecycle.scheduledSnapshotKey = "";
+    pointerInteractionRef.current?.invalidate();
+    analysisCommitFinalizerRef.current();
+  }, [
+    analysisFitAll,
+    analysisMode,
+    analysisVisibleEndTime,
+    analysisVisibleStartTime,
+    hasAnalysisVisibleRange,
+  ]);
+
   // ============================================================
   // TRADE MARKERS — data-driven: clear all then redraw from tradeHistory
   // ============================================================
