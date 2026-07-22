@@ -4,7 +4,10 @@ import { CandlestickChart } from '@/components/CandlestickChart';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import type { KlineData } from '@/hooks/useBinanceData';
 import { FLOATING_LABEL_HEIGHT, layoutAnalysisFloatingLabels } from '@/lib/analysisFloatingLabels';
-import { primeKlineChartPointerInteraction } from '@/lib/klineChartInteraction';
+import {
+  installKlineChartPointerInteraction,
+  primeKlineChartPointerInteraction,
+} from '@/lib/klineChartInteraction';
 import {
   ANALYSIS_BAND_LABEL_OVERLAY,
   createAnalysisBandLabelFigures,
@@ -152,6 +155,32 @@ describe('CandlestickChart analysis annotations', () => {
 
     expect(primeKlineChartPointerInteraction(host)).toBe(true);
     expect(mouseEnter).toHaveBeenCalledTimes(1);
+  });
+
+  it('图表在鼠标已位于盘面时会同步窗格并补发首次移动', () => {
+    const host = document.createElement('div');
+    const chartEventRoot = document.createElement('div');
+    chartEventRoot.tabIndex = 1;
+    const nativeMouseMove = vi.fn();
+    const beforeActivate = vi.fn();
+    chartEventRoot.addEventListener('mouseenter', () => {
+      chartEventRoot.addEventListener('mousemove', nativeMouseMove);
+    });
+    host.appendChild(chartEventRoot);
+
+    const interaction = installKlineChartPointerInteraction(host, beforeActivate);
+    chartEventRoot.dispatchEvent(new MouseEvent('mousemove', {
+      bubbles: true,
+      clientX: 120,
+      clientY: 80,
+    }));
+
+    expect(beforeActivate).toHaveBeenCalledTimes(1);
+    expect(nativeMouseMove).toHaveBeenCalled();
+
+    chartEventRoot.dispatchEvent(new MouseEvent('mousemove', { bubbles: true }));
+    expect(beforeActivate).toHaveBeenCalledTimes(1);
+    interaction.destroy();
   });
 
   it('为分析标注创建独立 overlay，避免竖线被标签或 marker 覆盖', async () => {

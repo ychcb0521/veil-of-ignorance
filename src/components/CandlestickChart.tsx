@@ -34,7 +34,10 @@ import {
   registerAnalysisBandLabelOverlay,
   type AnalysisBandLabelOverlayData,
 } from "@/lib/analysisBandLabelOverlay";
-import { primeKlineChartPointerInteraction } from "@/lib/klineChartInteraction";
+import {
+  installKlineChartPointerInteraction,
+  primeKlineChartPointerInteraction,
+} from "@/lib/klineChartInteraction";
 
 // Mapping from our indicator IDs to klinecharts indicator names (built-in + custom)
 const KLINE_INDICATOR_MAP: Record<string, string> = { ...CUSTOM_INDICATOR_MAP };
@@ -591,13 +594,21 @@ function CandlestickChartComponent({
 
     chartRef.current = chart;
 
-    // init() creates KlineCharts' internal event root synchronously. Activating
-    // it here covers charts mounted or resized under an already-stationary mouse.
-    primeKlineChartPointerInteraction(containerRef.current);
+    // KlineCharts v9 attaches pointer listeners lazily. Synchronize its pane
+    // bounds before the first real hit and repair the stationary-pointer case.
+    const pointerInteraction = installKlineChartPointerInteraction(
+      containerRef.current,
+      () => {
+        if (chartRef.current !== chart) return;
+        chart.resize();
+        chart.scrollByDistance(0, 0);
+      },
+    );
+    pointerInteraction.prime();
     const interactionFrame = window.requestAnimationFrame(() => {
       if (chartRef.current !== chart || !containerRef.current) return;
       chart.resize();
-      primeKlineChartPointerInteraction(containerRef.current);
+      pointerInteraction.prime();
     });
 
     // Expose imperative API for direct candle updates (bypasses React render)
@@ -655,6 +666,7 @@ function CandlestickChartComponent({
 
     return () => {
       window.cancelAnimationFrame(interactionFrame);
+      pointerInteraction.destroy();
       ro.disconnect();
       if (chartApiRef) chartApiRef.current = null;
       try {
