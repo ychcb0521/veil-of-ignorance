@@ -501,6 +501,12 @@ function CandlestickChartComponent({
   const { theme } = useTheme();
   const [analysisDataReadyRevision, setAnalysisDataReadyRevision] = useState(0);
   const crosshairPriceRef = useRef<number | null>(null);
+  const onCrosshairPriceChangeRef = useRef(onCrosshairPriceChange);
+  onCrosshairPriceChangeRef.current = onCrosshairPriceChange;
+  const pickModeRef = useRef(pickMode);
+  pickModeRef.current = pickMode;
+  const pricePrecisionRef = useRef(pricePrecision);
+  pricePrecisionRef.current = pricePrecision;
 
   const activeIndicatorPanes = useRef<Map<string, string | null>>(new Map());
 
@@ -751,13 +757,18 @@ function CandlestickChartComponent({
 
     // Subscribe to crosshair for price sync — use pixel-to-value conversion, NOT kline data
     const crosshairCb = (data: any) => {
+      const priceChangeHandler = onCrosshairPriceChangeRef.current;
+      // Read-only replay/campaign charts do not consume the crosshair price.
+      // Avoid a convertFromPixel pass on every mousemove; this is especially
+      // costly while KlineCharts holds a large historical index.
+      if (!priceChangeHandler && !pickModeRef.current) return;
       try {
         // Only process when mouse is over the main candle pane
         const paneId = data?.paneId;
         if (paneId && paneId !== "candle_pane") {
           // Mouse is over a sub-pane (Volume, MACD etc.) — ignore
           crosshairPriceRef.current = null;
-          if (onCrosshairPriceChange) onCrosshairPriceChange(null);
+          priceChangeHandler?.(null);
           return;
         }
 
@@ -768,9 +779,9 @@ function CandlestickChartComponent({
           if (result && typeof result.value === "number" && isFinite(result.value)) {
             const rawPrice = result.value;
             // Format to symbol's tick size precision
-            const formatted = parseFloat(rawPrice.toFixed(pricePrecision));
+            const formatted = parseFloat(rawPrice.toFixed(pricePrecisionRef.current));
             crosshairPriceRef.current = formatted;
-            if (onCrosshairPriceChange) onCrosshairPriceChange(formatted);
+            priceChangeHandler?.(formatted);
             return;
           }
         }
@@ -778,7 +789,7 @@ function CandlestickChartComponent({
         // convertFromPixel may not be available in all versions — fallback silently
       }
       crosshairPriceRef.current = null;
-      if (onCrosshairPriceChange) onCrosshairPriceChange(null);
+      priceChangeHandler?.(null);
     };
     chart.subscribeAction("onCrosshairChange" as any, crosshairCb);
     const dataReadyCb = () => analysisCommitFinalizerRef.current();
@@ -1155,12 +1166,12 @@ function CandlestickChartComponent({
       // campaigns contend with pointer and canvas work for up to two seconds.
       return;
     }
-    const axisData = nativeData.map(item => ({ time: item.timestamp, close: item.close }));
-    const newest = axisData[axisData.length - 1];
-    const inferredInterval = axisData.length > 1
-      ? Math.max(0, newest.time - axisData[axisData.length - 2].time)
+    const newestNative = nativeData[nativeData.length - 1];
+    const newest = { time: newestNative.timestamp, close: newestNative.close };
+    const inferredInterval = nativeData.length > 1
+      ? Math.max(0, newest.time - nativeData[nativeData.length - 2].timestamp)
       : 0;
-    const minTime = axisData[0].time;
+    const minTime = nativeData[0].timestamp;
     const maxTime = newest.time + inferredInterval;
     const lastValue = newest.close;
     const formatPrice = (value: number) => value.toFixed(pricePrecision);
@@ -1168,18 +1179,18 @@ function CandlestickChartComponent({
     const bindTimeToCandle = (time: number) => {
       const target = clampTime(time);
       let low = 0;
-      let high = axisData.length - 1;
+      let high = nativeData.length - 1;
       while (low < high) {
         const middle = Math.floor((low + high) / 2);
-        if (axisData[middle].time < target) low = middle + 1;
+        if (nativeData[middle].timestamp < target) low = middle + 1;
         else high = middle;
       }
       const rightIndex = low;
       const leftIndex = Math.max(0, rightIndex - 1);
-      const dataIndex = Math.abs(axisData[leftIndex].time - target) <= Math.abs(axisData[rightIndex].time - target)
+      const dataIndex = Math.abs(nativeData[leftIndex].timestamp - target) <= Math.abs(nativeData[rightIndex].timestamp - target)
         ? leftIndex
         : rightIndex;
-      return axisData[dataIndex].time;
+      return nativeData[dataIndex].timestamp;
     };
     const visibleMarkerCandidates = (analysisAnnotations.markers ?? []).filter(
       (m) => Number.isFinite(m.price) && m.time >= minTime && m.time <= maxTime,

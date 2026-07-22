@@ -6,6 +6,32 @@ import type { KlineData } from '@/hooks/useBinanceData';
  * arrive in overlapping pages or include stale duplicate rows from legacy data.
  */
 export function normalizeReplayKlines(klines: KlineData[]): KlineData[] {
+  // Binance range pages are normally already valid, strictly ordered and
+  // de-duplicated. Reusing that array avoids cloning tens of thousands of
+  // candles twice (once in useReplayKlines and again in ReplayKlineChart) for
+  // long historical campaigns. Legacy or corrected snapshots still fall
+  // through to the authoritative Map + sort normalization below.
+  let alreadyNormalized = true;
+  let previousTime = -Infinity;
+  for (const item of klines) {
+    const time = Math.trunc(item.time);
+    if (
+      !Number.isFinite(time)
+      || time !== item.time
+      || time <= previousTime
+      || !Number.isFinite(item.open)
+      || !Number.isFinite(item.high)
+      || !Number.isFinite(item.low)
+      || !Number.isFinite(item.close)
+      || !Number.isFinite(item.volume)
+    ) {
+      alreadyNormalized = false;
+      break;
+    }
+    previousTime = time;
+  }
+  if (alreadyNormalized) return klines;
+
   const byTime = new Map<number, KlineData>();
 
   for (const item of klines) {

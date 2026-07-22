@@ -37,10 +37,31 @@ interface Props {
   onSelectVerticalLine?: (id: string) => void;
 }
 
-function inferPricePrecision(values: number[]) {
-  const valid = values.filter(value => Number.isFinite(value) && value > 0);
-  if (valid.length === 0) return 2;
-  const reference = valid.reduce((sum, value) => sum + value, 0) / valid.length;
+function inferReplayPricePrecision(
+  data: KlineData[],
+  markers: ChartMarker[],
+  priceLines: PriceLine[],
+  timeBoundPriceLines: TimeBoundPriceLine[],
+) {
+  let sum = 0;
+  let count = 0;
+  const append = (value: number) => {
+    if (!Number.isFinite(value) || value <= 0) return;
+    sum += value;
+    count += 1;
+  };
+  for (const item of data) {
+    append(item.open);
+    append(item.high);
+    append(item.low);
+    append(item.close);
+  }
+  for (const marker of markers) append(marker.price);
+  for (const line of priceLines) append(line.price);
+  for (const line of timeBoundPriceLines) append(line.price);
+
+  if (count === 0) return 2;
+  const reference = sum / count;
   if (reference >= 1000) return 2;
   if (reference >= 100) return 3;
   if (reference >= 1) return 4;
@@ -80,12 +101,10 @@ export function ReplayKlineChart({
     return sliceReplayKlines(normalizedKlines, currentTime, historyCandles, viewportCenterTime);
   }, [fitAll, normalizedKlines, currentTime, historyCandles, viewportCenterTime]);
 
-  const pricePrecision = useMemo(() => inferPricePrecision([
-    ...replayData.flatMap(item => [item.open, item.high, item.low, item.close]),
-    ...markers.map(item => item.price),
-    ...priceLines.map(item => item.price),
-    ...timeBoundPriceLines.map(item => item.price),
-  ]), [replayData, markers, priceLines, timeBoundPriceLines]);
+  const pricePrecision = useMemo(
+    () => inferReplayPricePrecision(replayData, markers, priceLines, timeBoundPriceLines),
+    [replayData, markers, priceLines, timeBoundPriceLines],
+  );
 
   const annotations = useMemo<AnalysisChartAnnotations>(() => {
     if (replayData.length === 0) return {};

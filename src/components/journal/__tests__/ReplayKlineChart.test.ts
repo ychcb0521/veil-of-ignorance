@@ -50,4 +50,10 @@ describe('ReplayKlineChart windowing', () => {
     expect(normalized.map(item => item.time)).toEqual([1000, 2000, 3000]);
     expect(normalized[1].close).toBe(9);
   });
+
+  it('已经严格规范化的长历史 K 线复用原数组，避免重复全量复制', () => {
+    const normalized = Array.from({ length: 15_000 }, (_, index) => candle(index * 60_000));
+
+    expect(normalizeReplayKlines(normalized)).toBe(normalized);
+  });
 });

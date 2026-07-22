@@ -502,12 +502,18 @@ describe('CandlestickChart analysis annotations', () => {
       coordinates: [{ x: 120, y: 0 }],
       bounding: { width: 1000, height: 520 },
     } as any);
+    const unchangedFrame = createAnalysisBandLabelFigures({
+      overlay,
+      coordinates: [{ x: 120, y: 0 }],
+      bounding: { width: 1000, height: 520 },
+    } as any);
     const after = createAnalysisBandLabelFigures({
       overlay,
       coordinates: [{ x: 410, y: 0 }],
       bounding: { width: 1000, height: 520 },
     } as any);
 
+    expect(unchangedFrame).toBe(before);
     expect(before[0].attrs.x).toBe(120);
     expect(after[0].attrs.x).toBe(410);
     expect(document.querySelector('[data-analysis-label]')).toBeNull();
@@ -535,6 +541,27 @@ describe('CandlestickChart analysis annotations', () => {
     expect(getBandOverlay()?.points).toEqual([{ timestamp: 1000, value: 1.2 }]);
     expect(mocks.chart.subscribeAction).not.toHaveBeenCalledWith('onZoom', expect.any(Function));
     expect(mocks.chart.subscribeAction).not.toHaveBeenCalledWith('onScroll', expect.any(Function));
+  });
+
+  it('只读历史盘面移动十字线时不执行无人消费的价格坐标反算', async () => {
+    render(
+      <CandlestickChart
+        data={Array.from({ length: 2400 }, (_, index) => candle(index * 60_000, 1))}
+        symbol="HIFIUSDT"
+        rawSymbol="HIFIUSDT"
+        analysisMode
+        analysisAnnotations={{}}
+      />,
+    );
+
+    await waitFor(() => expect(mocks.chart.applyNewData).toHaveBeenCalled());
+    const crosshairCallback = mocks.chart.subscribeAction.mock.calls
+      .find(([type]) => type === 'onCrosshairChange')?.[1];
+    expect(crosshairCallback).toBeTypeOf('function');
+
+    mocks.chart.convertFromPixel.mockClear();
+    act(() => crosshairCallback?.({ paneId: 'candle_pane', y: 120 }));
+    expect(mocks.chart.convertFromPixel).not.toHaveBeenCalled();
   });
 
   it('旧战役的非整周期事件会绑定到最近的真实 K 线时间戳', async () => {

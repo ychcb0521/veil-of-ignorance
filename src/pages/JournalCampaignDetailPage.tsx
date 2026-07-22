@@ -650,10 +650,13 @@ export default function JournalCampaignDetailPage() {
   ]);
   const overviewInterval = useMemo(
     () => pickCampaignOverviewInterval({
-      startMs: campaignKlineTimeWindow.defaultFromTime,
-      endMs: campaignKlineTimeWindow.defaultToTime,
-    }),
-    [campaignKlineTimeWindow.defaultFromTime, campaignKlineTimeWindow.defaultToTime],
+      // The chart engine retains the complete 51x context, not only the initial
+      // 3x viewport. Budget against the data actually committed to KlineCharts
+      // so long historical campaigns do not silently load a 15k+ 1m snapshot.
+      startMs: campaignKlineTimeWindow.fromTime,
+      endMs: campaignKlineTimeWindow.toTime,
+    }, 6_000),
+    [campaignKlineTimeWindow.fromTime, campaignKlineTimeWindow.toTime],
   );
   const campaignKlineVisibleRange = useMemo(
     () => buildCampaignKlineVisibleRange(campaignKlineTimeWindow, chartRangeMultiplier),
@@ -838,7 +841,8 @@ export default function JournalCampaignDetailPage() {
             <p>战役期间某一时点的未实现盈亏，加上截至该时点已经落袋的盈亏之后，所得累计战役权益的最高值。</p>
             <div className="rounded bg-muted/60 px-2 py-1 font-mono text-foreground">峰值浮盈 = maxₜ（未实现盈亏ₜ + 累计已实现盈亏ₜ）</div>
             <p>已落袋部分包含镜像 TP 的已实现盈亏，因此可以与战役最终盈利直接比较。</p>
-            <p>按当前 K 线粒度的收盘价采样，不等同于逐笔成交的瞬时最高值。</p>
+            <p>每根 K 线同时使用最高价和最低价重估当时仍持有的完整多空组合；分批平仓、镜像落袋和对冲拆除均按各自发生时点切换仓位状态。</p>
+            <p>历史战役会从关联成交、Leg 快照和事件快照还原；精度以可用 K 线粒度为限，不将不同腿分别放在不可能同时出现的最优价格上。</p>
           </>
         ),
       },

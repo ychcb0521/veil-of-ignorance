@@ -3,7 +3,7 @@ import { MAIN_ADD_ROLES, usesDualHedgeSop } from '@/lib/strategyTemplates';
 import { getPositionNotionalUsd } from '@/lib/tradingSettlement';
 import { buildTradeRecordLookup } from '@/lib/objectiveOperationTime';
 import { isHistoricalCampaign, type CampaignEvent, type LegRole, type TradeCampaign, type TradeJournal } from '@/types/journal';
-import type { CampaignReverseHedgeOrder, PendingOrder, TradeRecord } from '@/types/trading';
+import type { CampaignReverseHedgeOrder, PendingOrder, SettlementMode, TradeRecord } from '@/types/trading';
 
 export interface StateSegment {
   state: 'state_0_setup' | 'state_1_lockin' | 'state_2_rolling' | 'state_3_exit';
@@ -709,11 +709,7 @@ function getKlinesInRange(klines: KlineData[], fromMs: number, toMs: number) {
   return klines.filter(kline => kline.time >= fromMs && kline.time <= toMs);
 }
 
-function buildActiveLegs(
-  campaign: TradeCampaign,
-  legs: TradeJournal[],
-  tradeRecords: TradeRecord[],
-): Array<{
+interface CampaignActiveLeg {
   id: string;
   journalId: string;
   role: LegRole | null;
@@ -723,7 +719,108 @@ function buildActiveLegs(
   startMs: number;
   endMs: number;
   realizedPnl: number | null;
-}> {
+  settlementMode: SettlementMode;
+  contractSizeUsd: number | null;
+  contracts: number | null;
+}
+
+function activeLegUnrealizedPnl(leg: CampaignActiveLeg, price: number): number {
+  if (!(price > 0) || !(leg.entryPrice > 0)) return 0;
+  if (leg.settlementMode === 'coin') {
+    const contracts = Math.max(0, Math.round(leg.contracts ?? leg.quantity));
+    const contractSizeUsd = leg.contractSizeUsd ?? 10;
+    if (contracts === 0) return 0;
+    const coinPnl = leg.side === 'LONG'
+      ? contracts * contractSizeUsd * (1 / leg.entryPrice - 1 / price)
+      : contracts * contractSizeUsd * (1 / price - 1 / leg.entryPrice);
+    return coinPnl * price;
+  }
+  return leg.side === 'LONG'
+    ? (price - leg.entryPrice) * leg.quantity
+    : (leg.entryPrice - price) * leg.quantity;
+}
+
+function campaignPnlAt(
+  activeLegs: CampaignActiveLeg[],
+  timestamp: number,
+  price: number,
+): number {
+  return activeLegs.reduce((total, leg) => {
+    if (timestamp >= leg.endMs) {
+      return total + (leg.realizedPnl ?? 0);
+    }
+    if (timestamp < leg.startMs) return total;
+    return total + activeLegUnrealizedPnl(leg, price);
+  }, 0);
+}
+
+function inferredKlineIntervalMs(klines: KlineData[]): number {
+  const sortedTimes = Array.from(new Set(klines.map(kline => kline.time))).sort((a, b) => a - b);
+  const intervals = sortedTimes
+    .slice(1)
+    .map((time, index) => time - sortedTimes[index])
+    .filter(interval => interval > 0)
+    .sort((a, b) => a - b);
+  return intervals[Math.floor(intervals.length / 2)] ?? 60_000;
+}
+
+function computeCampaignPnlExtremes(
+  activeLegs: CampaignActiveLeg[],
+  klines: KlineData[],
+  startMs: number,
+  endMs: number,
+): { maxProfit: number; maxDrawdown: number } {
+  const sortedKlines = [...klines]
+    .filter(kline => Number.isFinite(kline.time))
+    .sort((a, b) => a.time - b.time);
+  const defaultIntervalMs = inferredKlineIntervalMs(sortedKlines);
+  let maxProfit = 0;
+  let maxDrawdown = 0;
+
+  sortedKlines.forEach((kline, index) => {
+    const nextTime = sortedKlines[index + 1]?.time;
+    const barEndMs = nextTime && nextTime > kline.time
+      ? nextTime
+      : kline.time + defaultIntervalMs;
+    if (barEndMs <= startMs || kline.time > endMs) return;
+
+    // Rebuild every position state that existed during this candle. This keeps
+    // partial closes and banked mirror profit on the same campaign timeline.
+    const stateTimes = new Set<number>([
+      Math.max(startMs, kline.time),
+      Math.min(endMs, barEndMs - 1),
+    ]);
+    for (const leg of activeLegs) {
+      if (leg.startMs >= kline.time && leg.startMs < barEndMs) {
+        stateTimes.add(Math.max(startMs, leg.startMs));
+      }
+      if (leg.endMs > kline.time && leg.endMs <= barEndMs) {
+        stateTimes.add(Math.max(startMs, leg.endMs - 1));
+        stateTimes.add(Math.min(endMs, leg.endMs));
+      }
+    }
+
+    const prices = [kline.low, kline.high]
+      .map(Number)
+      .filter(price => Number.isFinite(price) && price > 0);
+    for (const timestamp of stateTimes) {
+      if (timestamp < startMs || timestamp > endMs) continue;
+      for (const price of prices) {
+        const total = campaignPnlAt(activeLegs, timestamp, price);
+        maxProfit = Math.max(maxProfit, total);
+        maxDrawdown = Math.min(maxDrawdown, total);
+      }
+    }
+  });
+
+  return { maxProfit, maxDrawdown };
+}
+
+function buildActiveLegs(
+  campaign: TradeCampaign,
+  legs: TradeJournal[],
+  tradeRecords: TradeRecord[],
+): CampaignActiveLeg[] {
   const endMs = campaignEndMs(campaign, tradeRecords);
   const syntheticEvents = buildCampaignEventStream(campaign, legs, tradeRecords);
 
@@ -741,6 +838,9 @@ function buildActiveLegs(
         startMs: record.openTime,
         endMs: record.closeTime || endMs,
         realizedPnl: Number.isFinite(record.pnl) ? Number(record.pnl) : null,
+        settlementMode: record.settlementMode ?? 'usdt',
+        contractSizeUsd: Number.isFinite(record.contractSizeUsd) ? Number(record.contractSizeUsd) : null,
+        contracts: Number.isFinite(record.contracts) ? Number(record.contracts) : null,
       }];
     }
 
@@ -751,16 +851,23 @@ function buildActiveLegs(
       && leg.pre_position_size != null
     ) {
       const closeMs = leg.post_simulated_close_time ? toMs(leg.post_simulated_close_time) : endMs;
+      const settlementMode = leg.pre_settlement_mode ?? 'usdt';
+      const contracts = Number.isFinite(leg.pre_contracts) ? Number(leg.pre_contracts) : null;
       return [{
         id: `open-${leg.id}`,
         journalId: leg.id,
         role: leg.leg_role,
         side: leg.direction === 'short' ? 'SHORT' : 'LONG',
-        quantity: leg.pre_position_size / leg.pre_entry_price,
+        quantity: settlementMode === 'coin' && contracts != null
+          ? contracts
+          : leg.pre_position_size / leg.pre_entry_price,
         entryPrice: leg.pre_entry_price,
         startMs: toMs(leg.pre_simulated_time),
         endMs: Number.isFinite(closeMs) ? closeMs : endMs,
         realizedPnl: Number.isFinite(leg.post_realized_pnl) ? Number(leg.post_realized_pnl) : null,
+        settlementMode,
+        contractSizeUsd: Number.isFinite(leg.pre_contract_size_usd) ? Number(leg.pre_contract_size_usd) : null,
+        contracts,
       }];
     }
 
@@ -770,23 +877,80 @@ function buildActiveLegs(
       );
       if (!triggerEvent) return [];
       const side = campaign.direction === 'main_long' ? 'SHORT' : 'LONG';
+      const cancelEvent = syntheticEvents.find(event =>
+        event.journal_id === leg.id
+        && event.event_type === 'hedge_cancelled'
+        && toMs(event.timestamp) >= toMs(triggerEvent.timestamp),
+      );
+      const closeMs = leg.post_simulated_close_time
+        ? toMs(leg.post_simulated_close_time)
+        : cancelEvent
+          ? toMs(cancelEvent.timestamp)
+          : endMs;
+      const settlementMode = leg.pre_settlement_mode ?? 'usdt';
+      const contracts = Number.isFinite(leg.pre_contracts) ? Number(leg.pre_contracts) : null;
       return [{
         id: `synthetic-hedge-${leg.id}`,
         journalId: leg.id,
         role: leg.leg_role,
         side,
-        quantity: leg.pre_position_size / leg.pre_entry_price,
+        quantity: settlementMode === 'coin' && contracts != null
+          ? contracts
+          : leg.pre_position_size / leg.pre_entry_price,
         entryPrice: leg.pre_entry_price,
         startMs: toMs(triggerEvent.timestamp),
-        endMs,
+        endMs: Number.isFinite(closeMs) ? closeMs : endMs,
         realizedPnl: Number.isFinite(leg.post_realized_pnl) ? Number(leg.post_realized_pnl) : null,
+        settlementMode,
+        contractSizeUsd: Number.isFinite(leg.pre_contract_size_usd) ? Number(leg.pre_contract_size_usd) : null,
+        contracts,
       }];
     }
 
     return [];
   });
 
-  return Array.from(new Map(candidates.map(leg => [leg.id, leg])).values());
+  const byIdentity = new Map(candidates.map(leg => [leg.id, leg]));
+  const representedJournalIds = new Set(candidates.map(leg => leg.journalId));
+  const representedRecordIds = new Set(candidates.map(leg => leg.id));
+
+  // Some historical campaigns retain complete leg snapshots only inside
+  // actual_evolution. Reconstruct those positions so old campaigns use the
+  // same peak-profit formula as newly recorded campaigns.
+  for (const event of syntheticEvents) {
+    if (event.event_type !== 'historical_leg_attached' || event.leg_role == null) continue;
+    if (event.journal_id && representedJournalIds.has(event.journal_id)) continue;
+    if (event.trade_record_id && representedRecordIds.has(event.trade_record_id)) continue;
+    const entryPrice = firstPositiveNumber(event.entry_price, event.price);
+    const notional = firstPositiveNumber(event.size_usdt);
+    const start = event.open_time ? toMs(event.open_time) : toMs(event.timestamp);
+    const close = event.close_time ? toMs(event.close_time) : endMs;
+    if (entryPrice == null || notional == null || !Number.isFinite(start)) continue;
+    const identity = event.trade_record_id ?? event.journal_id ?? event.id;
+    const fallbackSide = HEDGE_ROLES.includes(event.leg_role) || event.leg_role === 'reentry_hedge'
+      ? (campaign.direction === 'main_long' ? 'SHORT' : 'LONG')
+      : (campaign.direction === 'main_long' ? 'LONG' : 'SHORT');
+    byIdentity.set(identity, {
+      id: identity,
+      journalId: event.journal_id ?? event.id,
+      role: event.leg_role,
+      side: event.direction === 'short'
+        ? 'SHORT'
+        : event.direction === 'long'
+          ? 'LONG'
+          : fallbackSide,
+      quantity: notional / entryPrice,
+      entryPrice,
+      startMs: start,
+      endMs: Number.isFinite(close) ? close : endMs,
+      realizedPnl: Number.isFinite(event.realized_pnl) ? Number(event.realized_pnl) : null,
+      settlementMode: 'usdt',
+      contractSizeUsd: null,
+      contracts: null,
+    });
+  }
+
+  return Array.from(byIdentity.values());
 }
 
 function verdictByThresholds(value: number, thresholds: number[], labels: string[]) {
@@ -908,25 +1072,8 @@ export function computeDecisionAccuracy(
 
   const activeLegs = buildActiveLegs(campaign, legs, tradeRecords);
   const startMs = toMs(campaign.opened_at);
-  let maxProfit = 0;
-  let maxDrawdown = 0;
-  for (const kline of klines) {
-    if (kline.time < startMs || kline.time > endMs) continue;
-    let total = 0;
-    for (const leg of activeLegs) {
-      if (kline.time >= leg.endMs && leg.realizedPnl != null) {
-        total += leg.realizedPnl;
-        continue;
-      }
-      if (kline.time < leg.startMs || kline.time >= leg.endMs) continue;
-      const pnl = leg.side === 'LONG'
-        ? (kline.close - leg.entryPrice) * leg.quantity
-        : (leg.entryPrice - kline.close) * leg.quantity;
-      total += pnl;
-    }
-    maxProfit = Math.max(maxProfit, total);
-    maxDrawdown = Math.min(maxDrawdown, total);
-  }
+  const extremes = computeCampaignPnlExtremes(activeLegs, klines, startMs, endMs);
+  let { maxProfit, maxDrawdown } = extremes;
   const finalRealizedPnl = computeRealizedPnl(campaign, legs, tradeRecords);
   maxProfit = Math.max(maxProfit, finalRealizedPnl);
   maxDrawdown = Math.min(maxDrawdown, finalRealizedPnl);

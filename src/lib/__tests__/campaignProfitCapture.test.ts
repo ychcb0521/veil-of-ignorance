@@ -293,6 +293,214 @@ describe('campaign profit capture ratio', () => {
       .toBeCloseTo(125, 8);
   });
 
+  it('uses intrabar highs and lows instead of omitting wick P&L', () => {
+    const campaign = makeCampaign(20);
+    const mainRecord = {
+      ...makeMainRecord(),
+      id: 'wick-main-record',
+      entryPrice: 100,
+      exitPrice: 102,
+      quantity: 10,
+      pnl: 20,
+    };
+    const legs = [
+      { ...makeLeg('wick-main', 'main_open', 100, mainRecord.id), direction: 'long' as const },
+    ];
+    const klines = [{
+      time: Date.parse('2026-07-15T00:10:00.000Z'),
+      open: 100,
+      high: 115,
+      low: 95,
+      close: 102,
+      volume: 1,
+    }];
+
+    const accuracy = computeDecisionAccuracy(campaign, legs, [mainRecord], klines);
+    expect(accuracy.campaign_max_profit_real).toBeCloseTo(150, 8);
+    expect(accuracy.campaign_max_drawdown_real).toBeCloseTo(50, 8);
+  });
+
+  it('values simultaneous long and short legs as one portfolio at the same price', () => {
+    const campaign = makeCampaign(50);
+    const mainRecord = {
+      ...makeMainRecord(),
+      id: 'net-main-record',
+      entryPrice: 100,
+      exitPrice: 110,
+      quantity: 10,
+      pnl: 100,
+    };
+    const hedgeRecord = {
+      ...makeMainRecord(),
+      id: 'net-hedge-record',
+      side: 'SHORT' as const,
+      entryPrice: 100,
+      exitPrice: 110,
+      quantity: 5,
+      pnl: -50,
+    };
+    const legs = [
+      { ...makeLeg('net-main', 'main_open', 100, mainRecord.id), direction: 'long' as const },
+      { ...makeLeg('net-hedge', 'hedge_initial_a', 100, hedgeRecord.id), direction: 'short' as const },
+    ];
+    const klines = [{
+      time: Date.parse('2026-07-15T00:10:00.000Z'),
+      open: 100,
+      high: 110,
+      low: 90,
+      close: 100,
+      volume: 1,
+    }];
+
+    const accuracy = computeDecisionAccuracy(campaign, legs, [mainRecord, hedgeRecord], klines);
+    expect(accuracy.campaign_max_profit_real).toBeCloseTo(50, 8);
+    expect(accuracy.campaign_max_drawdown_real).toBeCloseTo(50, 8);
+  });
+
+  it('adds banked mirror profit to the remaining position at its intrabar high', () => {
+    const campaign = makeCampaign(175);
+    const mainRecord = {
+      ...makeMainRecord(),
+      id: 'wick-banked-main-record',
+      entryPrice: 100,
+      exitPrice: 115,
+      quantity: 10,
+      pnl: 150,
+    };
+    const mirrorRecord = {
+      ...makeMainRecord(),
+      id: 'wick-banked-mirror-record',
+      entryPrice: 100,
+      exitPrice: 105,
+      quantity: 5,
+      pnl: 25,
+      closeTime: Date.parse('2026-07-15T00:30:00.000Z'),
+    };
+    const legs = [
+      { ...makeLeg('wick-banked-main', 'main_open', 100, mainRecord.id), direction: 'long' as const },
+      { ...makeLeg('wick-banked-mirror', 'mirror_tp', 105, mirrorRecord.id), direction: 'long' as const },
+    ];
+    const klines = [
+      { time: Date.parse('2026-07-15T00:10:00.000Z'), open: 104, high: 106, low: 103, close: 104, volume: 1 },
+      { time: Date.parse('2026-07-15T00:40:00.000Z'), open: 110, high: 115, low: 109, close: 110, volume: 1 },
+    ];
+
+    expect(computeDecisionAccuracy(campaign, legs, [mainRecord, mirrorRecord], klines).campaign_max_profit_real)
+      .toBeCloseTo(175, 8);
+  });
+
+  it('reconstructs peak profit from event-only historical position snapshots', () => {
+    const campaign = makeCampaign(100);
+    campaign.actual_evolution = [{
+      id: 'event-only-main',
+      timestamp: openedAt,
+      event_type: 'historical_leg_attached',
+      leg_role: 'main_open',
+      journal_id: 'event-only-main-journal',
+      trade_record_id: 'event-only-main-record',
+      pending_order_id: null,
+      price: 100,
+      size_usdt: 1_000,
+      notes: null,
+      recorded_at: openedAt,
+      direction: 'long',
+      open_time: openedAt,
+      close_time: closedAt,
+      entry_price: 100,
+      exit_price: 110,
+      realized_pnl: 100,
+    }];
+    const klines = [{
+      time: Date.parse('2026-07-15T00:10:00.000Z'),
+      open: 100,
+      high: 120,
+      low: 98,
+      close: 105,
+      volume: 1,
+    }];
+
+    const accuracy = computeDecisionAccuracy(campaign, [], [], klines);
+    expect(accuracy.campaign_max_profit_real).toBeCloseTo(200, 8);
+    expect(accuracy.campaign_max_drawdown_real).toBeCloseTo(20, 8);
+  });
+
+  it('uses inverse-contract P&L for coin-margined campaign peaks', () => {
+    const campaign = makeCampaign(100);
+    const coinRecord = {
+      ...makeMainRecord(),
+      id: 'coin-peak-record',
+      symbol: 'BTCUSD_PERP',
+      entryPrice: 50_000,
+      exitPrice: 55_000,
+      quantity: 100,
+      contracts: 100,
+      contractSizeUsd: 100,
+      settlementMode: 'coin' as const,
+      pnl: 1_000,
+    };
+    const legs = [
+      { ...makeLeg('coin-main', 'main_open', 50_000, coinRecord.id), direction: 'long' as const },
+    ];
+    const klines = [{
+      time: Date.parse('2026-07-15T00:10:00.000Z'),
+      open: 50_000,
+      high: 55_000,
+      low: 45_000,
+      close: 52_000,
+      volume: 1,
+    }];
+
+    const accuracy = computeDecisionAccuracy(campaign, legs, [coinRecord], klines);
+    expect(accuracy.campaign_max_profit_real).toBeCloseTo(1_000, 8);
+    expect(accuracy.campaign_max_drawdown_real).toBeCloseTo(1_000, 8);
+  });
+
+  it('stops valuing a triggered hedge when that hedge is manually removed', () => {
+    const campaign = makeCampaign(0);
+    const triggerTime = '2026-07-15T00:10:00.000Z';
+    const cancelTime = '2026-07-15T00:20:00.000Z';
+    campaign.actual_evolution = [
+      {
+        id: 'manual-hedge-trigger',
+        timestamp: triggerTime,
+        event_type: 'hedge_triggered',
+        leg_role: 'hedge_initial_a',
+        journal_id: 'manual-hedge',
+        trade_record_id: null,
+        pending_order_id: 'manual-hedge-order',
+        price: 100,
+        size_usdt: 1_000,
+        notes: null,
+        recorded_at: triggerTime,
+      },
+      {
+        id: 'manual-hedge-cancel',
+        timestamp: cancelTime,
+        event_type: 'hedge_cancelled',
+        leg_role: 'hedge_initial_a',
+        journal_id: 'manual-hedge',
+        trade_record_id: null,
+        pending_order_id: 'manual-hedge-order',
+        price: 100,
+        size_usdt: 1_000,
+        notes: null,
+        recorded_at: cancelTime,
+      },
+    ];
+    const hedgeLeg = {
+      ...makeLeg('manual-hedge', 'hedge_initial_a', 100),
+      pre_position_size: 1_000,
+      direction: 'short' as const,
+    };
+    const klines = [
+      { time: Date.parse('2026-07-15T00:15:00.000Z'), open: 95, high: 95, low: 90, close: 90, volume: 1 },
+      { time: Date.parse('2026-07-15T00:25:00.000Z'), open: 80, high: 80, low: 80, close: 80, volume: 1 },
+    ];
+
+    expect(computeDecisionAccuracy(campaign, [hedgeLeg], [], klines).campaign_max_profit_real)
+      .toBeCloseTo(100, 8);
+  });
+
   it('uses the initial main-entry equity snapshot to compute the campaign risk fraction', () => {
     const legs = [
       { ...makeLeg('main', 'main_open', 100), pre_account_equity_usdt: 80_000 },

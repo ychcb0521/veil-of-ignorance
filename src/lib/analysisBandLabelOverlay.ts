@@ -19,6 +19,33 @@ export interface AnalysisBandLabelOverlayData {
   theme: "light" | "dark";
 }
 
+type FigureCacheEntry = {
+  signature: string;
+  figures: OverlayFigure[];
+};
+
+// KlineCharts calls createPointFigures again for every crosshair repaint, even
+// when neither the viewport nor any annotation moved. Historical campaigns can
+// contain dozens of same-time labels; rebuilding their groups, sort order and
+// collision lanes on every mousemove is visible as pointer lag. Cache by the
+// native X coordinates so pan/zoom still invalidates immediately while plain
+// crosshair movement reuses the already laid-out figures.
+const figureCache = new WeakMap<object, FigureCacheEntry>();
+
+const coordinateSignature = (
+  coordinates: OverlayCreateFiguresCallbackParams["coordinates"],
+  width: number,
+  height: number,
+) => {
+  let hash = 2166136261 >>> 0;
+  for (const coordinate of coordinates) {
+    const quantizedX = Math.round((coordinate?.x ?? Number.NaN) * 1000);
+    hash = (hash ^ (quantizedX & 0xffffffff)) >>> 0;
+    hash = Math.imul(hash, 16777619) >>> 0;
+  }
+  return `${coordinates.length}:${Math.round(width * 1000)}:${Math.round(height * 1000)}:${hash}`;
+};
+
 const withOpacity = (color: string, opacity: number) => {
   const hex = color.trim().match(/^#([\da-f]{2})([\da-f]{2})([\da-f]{2})$/i);
   if (hex) {
@@ -47,6 +74,11 @@ export function createAnalysisBandLabelFigures({
 }: Pick<OverlayCreateFiguresCallbackParams, "overlay" | "coordinates" | "bounding">): OverlayFigure[] {
   if (!isOverlayData(overlay.extendData) || bounding.width <= 0) return [];
 
+  const signature = coordinateSignature(coordinates, bounding.width, bounding.height);
+  const cacheKey = overlay as object;
+  const cached = figureCache.get(cacheKey);
+  if (cached?.signature === signature) return cached.figures;
+
   const labelsById = new Map(overlay.extendData.labels.map(label => [label.id, label]));
   const laidOut = layoutAnalysisFloatingLabels(
     overlay.extendData.labels.flatMap((label, index) => {
@@ -56,7 +88,7 @@ export function createAnalysisBandLabelFigures({
     { minTime: 0, maxTime: 1, width: bounding.width },
   );
 
-  return laidOut.map((label) => {
+  const figures = laidOut.map((label) => {
     const source = labelsById.get(label.id) ?? label;
     const emphasized = source.emphasis === "main-add";
     const opacity = emphasized ? 0.96 : 0.76;
@@ -93,6 +125,8 @@ export function createAnalysisBandLabelFigures({
       ignoreEvent: true,
     };
   });
+  figureCache.set(cacheKey, { signature, figures });
+  return figures;
 }
 
 export function registerAnalysisBandLabelOverlay() {
