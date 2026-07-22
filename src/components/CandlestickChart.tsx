@@ -36,7 +36,7 @@ import {
 } from "@/lib/analysisBandLabelOverlay";
 import {
   installKlineChartPointerInteraction,
-  primeKlineChartPointerInteraction,
+  type InteractionController,
 } from "@/lib/klineChartInteraction";
 
 // Mapping from our indicator IDs to klinecharts indicator names (built-in + custom)
@@ -480,8 +480,17 @@ function CandlestickChartComponent({
   const onSelectVerticalLineRef = useRef(onSelectVerticalLine);
   onSelectVerticalLineRef.current = onSelectVerticalLine;
   const analysisOverlayRunRef = useRef(0);
-  const analysisAxisRetryRef = useRef({ signature: "", attempts: 0 });
-  const pendingAnalysisViewportRef = useRef(false);
+  const pointerInteractionRef = useRef<InteractionController | null>(null);
+  const analysisCommitFinalizerRef = useRef<() => boolean>(() => false);
+  const analysisLifecycleRef = useRef({
+    requestedAxisSignature: "",
+    requestedSnapshotKey: "",
+    scheduledSnapshotKey: "",
+    settledSnapshotKey: "",
+    needsViewport: false,
+    finalizeFrame: null as number | null,
+    primeFrame: null as number | null,
+  });
 
   const [indicators, setIndicators] = usePersistedState<IndicatorConfig[]>("indicators", []);
   const [showIndicatorPanel, setShowIndicatorPanel] = useState(false);
@@ -587,6 +596,68 @@ function CandlestickChartComponent({
     [analysisFitAll, fitAnalysisWindow, centerAnalysisWindow],
   );
 
+  /**
+   * Complete an analysis snapshot only after KlineCharts exposes the exact
+   * native time axis requested by React. This is the single lifecycle owner for
+   * viewport fitting, annotation revision and pointer re-activation.
+   */
+  const finalizeAnalysisSnapshot = useCallback(() => {
+    const chart = chartRef.current;
+    const host = containerRef.current;
+    const lifecycle = analysisLifecycleRef.current;
+    if (!analysisMode || !chart || !host || !lifecycle.requestedSnapshotKey) return false;
+
+    const nativeData = chart.getDataList();
+    const nativeAxisSignature = hashTimeAxis(
+      nativeData.length,
+      index => nativeData[index].timestamp as number,
+    );
+    if (nativeAxisSignature !== lifecycle.requestedAxisSignature) return false;
+
+    const snapshotKey = lifecycle.requestedSnapshotKey;
+    if (lifecycle.scheduledSnapshotKey === snapshotKey) return true;
+    if (lifecycle.settledSnapshotKey === snapshotKey && !lifecycle.needsViewport) return true;
+
+    if (lifecycle.finalizeFrame != null) window.cancelAnimationFrame(lifecycle.finalizeFrame);
+    if (lifecycle.primeFrame != null) window.cancelAnimationFrame(lifecycle.primeFrame);
+    lifecycle.scheduledSnapshotKey = snapshotKey;
+    pointerInteractionRef.current?.invalidate();
+
+    lifecycle.finalizeFrame = window.requestAnimationFrame(() => {
+      lifecycle.finalizeFrame = null;
+      if (
+        chartRef.current !== chart
+        || analysisLifecycleRef.current.requestedSnapshotKey !== snapshotKey
+      ) return;
+
+      chart.resize();
+      if (lifecycle.needsViewport) {
+        if (!applyAnalysisViewport()) chart.scrollToRealTime();
+        lifecycle.needsViewport = false;
+      }
+      chart.scrollByDistance(0, 0);
+      lifecycle.settledSnapshotKey = snapshotKey;
+      lifecycle.scheduledSnapshotKey = "";
+
+      // React rebuilds the timestamp-bound native overlays from this revision.
+      setAnalysisDataReadyRevision(revision => revision + 1);
+
+      // Wait one more paint so overlays, pane bounds and hit-test canvases all
+      // share the final geometry before restoring first-hover interaction.
+      lifecycle.primeFrame = window.requestAnimationFrame(() => {
+        lifecycle.primeFrame = null;
+        if (
+          chartRef.current !== chart
+          || analysisLifecycleRef.current.requestedSnapshotKey !== snapshotKey
+        ) return;
+        pointerInteractionRef.current?.invalidate();
+        pointerInteractionRef.current?.prime();
+      });
+    });
+    return true;
+  }, [analysisMode, applyAnalysisViewport]);
+  analysisCommitFinalizerRef.current = finalizeAnalysisSnapshot;
+
   // ============================================================
   // Clear overlays on symbol change to prevent cross-symbol pollution
   // ============================================================
@@ -604,6 +675,13 @@ function CandlestickChartComponent({
       prevLastSigRef.current = "";
       prevTimeAxisSigRef.current = "";
       prevSymbolRef.current = symbol;
+      const lifecycle = analysisLifecycleRef.current;
+      lifecycle.requestedAxisSignature = "";
+      lifecycle.requestedSnapshotKey = "";
+      lifecycle.scheduledSnapshotKey = "";
+      lifecycle.settledSnapshotKey = "";
+      lifecycle.needsViewport = false;
+      pointerInteractionRef.current?.invalidate();
     }
   }, [symbol]);
 
@@ -636,6 +714,7 @@ function CandlestickChartComponent({
         chart.scrollByDistance(0, 0);
       },
     );
+    pointerInteractionRef.current = pointerInteraction;
     pointerInteraction.prime();
     const interactionFrame = window.requestAnimationFrame(() => {
       if (chartRef.current !== chart || !containerRef.current) return;
@@ -653,11 +732,18 @@ function CandlestickChartComponent({
     }
 
     // ResizeObserver for responsive container sizing
+    let resizePrimeFrame: number | null = null;
     const ro = new ResizeObserver((entries) => {
       for (const entry of entries) {
         const { width, height } = entry.contentRect;
         if (width > 0 && height > 0) {
           chart.resize();
+          pointerInteraction.invalidate();
+          if (resizePrimeFrame != null) window.cancelAnimationFrame(resizePrimeFrame);
+          resizePrimeFrame = window.requestAnimationFrame(() => {
+            resizePrimeFrame = null;
+            if (chartRef.current === chart) pointerInteraction.prime();
+          });
         }
       }
     });
@@ -695,15 +781,31 @@ function CandlestickChartComponent({
       if (onCrosshairPriceChange) onCrosshairPriceChange(null);
     };
     chart.subscribeAction("onCrosshairChange" as any, crosshairCb);
+    const dataReadyCb = () => analysisCommitFinalizerRef.current();
+    chart.subscribeAction(ActionType.OnDataReady, dataReadyCb);
+    const analysisLifecycle = analysisLifecycleRef.current;
 
     return () => {
       window.cancelAnimationFrame(interactionFrame);
+      if (resizePrimeFrame != null) window.cancelAnimationFrame(resizePrimeFrame);
+      if (analysisLifecycle.finalizeFrame != null) {
+        window.cancelAnimationFrame(analysisLifecycle.finalizeFrame);
+      }
+      if (analysisLifecycle.primeFrame != null) {
+        window.cancelAnimationFrame(analysisLifecycle.primeFrame);
+      }
       pointerInteraction.destroy();
+      pointerInteractionRef.current = null;
       ro.disconnect();
       if (chartApiRef) chartApiRef.current = null;
       try {
         chart.unsubscribeAction("onCrosshairChange" as any, crosshairCb);
       } catch {}
+      try {
+        chart.unsubscribeAction(ActionType.OnDataReady, dataReadyCb);
+      } catch {
+        // The chart may already have disposed its action store.
+      }
       dispose(containerRef.current!);
       chartRef.current = null;
     };
@@ -768,38 +870,6 @@ function CandlestickChartComponent({
     chart.setPriceVolumePrecision(pricePrecision, quantityPrecision);
   }, [pricePrecision, quantityPrecision]);
 
-  // KlineCharts applies large historical snapshots asynchronously. Fit the
-  // campaign viewport only after the native data index is ready; otherwise the
-  // later data commit can reset the scale while the HTML labels keep the old one.
-  useEffect(() => {
-    const chart = chartRef.current;
-    if (!chart) return;
-    let frame: number | null = null;
-    const handleDataReady = () => {
-      // KlineCharts commits long historical snapshots asynchronously. Rebuild the
-      // timestamp-bound annotation layer after that native commit completes.
-      setAnalysisDataReadyRevision((revision) => revision + 1);
-      if (!pendingAnalysisViewportRef.current) return;
-      pendingAnalysisViewportRef.current = false;
-      if (frame != null) window.cancelAnimationFrame(frame);
-      frame = window.requestAnimationFrame(() => {
-        frame = null;
-        if (chartRef.current !== chart) return;
-        chart.resize();
-        if (!applyAnalysisViewport()) chart.scrollToRealTime();
-        // A zero-distance scroll is KlineCharts v9's public, non-mutating way
-        // to invalidate every native pane after a programmatic viewport change.
-        chart.scrollByDistance(0, 0);
-        if (containerRef.current) primeKlineChartPointerInteraction(containerRef.current);
-      });
-    };
-    chart.subscribeAction(ActionType.OnDataReady, handleDataReady);
-    return () => {
-      chart.unsubscribeAction(ActionType.OnDataReady, handleDataReady);
-      if (frame != null) window.cancelAnimationFrame(frame);
-    };
-  }, [applyAnalysisViewport]);
-
   // ============================================================
   // Feed data to chart when props change (v9 API)
   // ============================================================
@@ -842,37 +912,32 @@ function CandlestickChartComponent({
     if (unchangedSnapshot) return;
 
     const needsFit = prevDataLenRef.current === 0 || (!wasPrepend && !isSmallAppend && !isSameBarUpdate);
-    // Set before feeding data so even a fast OnDataReady emission observes it.
-    if (needsFit) pendingAnalysisViewportRef.current = true;
-
-    const notifyAnalysisDataCommitted = analysisMode
-      ? () => {
-          // On the first synchronous commit the annotation effect has not run yet,
-          // so its normal pass already sees the final native axis. A later callback
-          // means an async historical commit finished after that pass and must rebuild.
-          if (analysisOverlayRunRef.current > 0) {
-            setAnalysisDataReadyRevision((revision) => revision + 1);
-          }
-        }
-      : undefined;
+    if (analysisMode) {
+      const lifecycle = analysisLifecycleRef.current;
+      lifecycle.requestedAxisSignature = timeAxisSig;
+      lifecycle.requestedSnapshotKey = `${timeAxisSig}|${lastSig}`;
+      lifecycle.needsViewport = lifecycle.needsViewport || needsFit;
+      lifecycle.scheduledSnapshotKey = "";
+      pointerInteractionRef.current?.invalidate();
+    }
 
     if (wasPrepend) {
       // Older data prepended — feed older portion via applyMoreData
       const newCount = data.length - prevDataLenRef.current;
       const olderData = klineData.slice(0, newCount);
-      chart.applyMoreData(olderData, true, notifyAnalysisDataCommitted);
+      chart.applyMoreData(olderData, true);
     } else if (prevDataLenRef.current === 0) {
       // Initial load
-      chart.applyNewData(klineData, true, notifyAnalysisDataCommitted);
+      chart.applyNewData(klineData, true);
     } else if (isSmallAppend) {
       // New candle appended (sim tick)
-      chart.updateData(lastCandle, notifyAnalysisDataCommitted);
+      chart.updateData(lastCandle);
     } else if (isSameBarUpdate) {
       // Same bar evolving: only update last candle to keep crosshair/interaction state stable
-      chart.updateData(lastCandle, notifyAnalysisDataCommitted);
+      chart.updateData(lastCandle);
     } else {
       // Data replaced (symbol/interval/window replacement)
-      chart.applyNewData(klineData, true, notifyAnalysisDataCommitted);
+      chart.applyNewData(klineData, true);
     }
 
     prevDataLenRef.current = data.length;
@@ -880,20 +945,8 @@ function CandlestickChartComponent({
     prevNewestRef.current = lastCandle.timestamp as number;
     prevLastSigRef.current = lastSig;
     prevTimeAxisSigRef.current = timeAxisSig;
-  }, [analysisMode, applyAnalysisViewport, data, propTimeAxisSignature]);
-
-  useEffect(() => {
-    if (data.length === 0) return;
-    const frame = requestAnimationFrame(() => {
-      const chart = chartRef.current;
-      if (!chart || chart.getDataList().length !== data.length) return;
-      chart.resize();
-      if (!applyAnalysisViewport()) return;
-      chart.scrollByDistance(0, 0);
-      if (containerRef.current) primeKlineChartPointerInteraction(containerRef.current);
-    });
-    return () => cancelAnimationFrame(frame);
-  }, [applyAnalysisViewport, data.length]);
+    if (analysisMode) analysisCommitFinalizerRef.current();
+  }, [analysisMode, data, propTimeAxisSignature]);
 
   // ============================================================
   // TRADE MARKERS — data-driven: clear all then redraw from tradeHistory
@@ -1097,21 +1150,11 @@ function CandlestickChartComponent({
       // create timestamp overlays against an empty or stale native index: doing so
       // makes the engine cache a screen position and is the reason some historical
       // campaigns could move their labels independently from their candles.
-      const retrySignature = propTimeAxisSig;
-      if (analysisAxisRetryRef.current.signature !== retrySignature) {
-        analysisAxisRetryRef.current = { signature: retrySignature, attempts: 0 };
-      }
-      if (analysisAxisRetryRef.current.attempts < 120 && typeof window !== "undefined") {
-        analysisAxisRetryRef.current.attempts += 1;
-        const retryFrame = window.requestAnimationFrame(() => {
-          if (analysisOverlayRunRef.current !== runId || chartRef.current !== chart) return;
-          setAnalysisDataReadyRevision((revision) => revision + 1);
-        });
-        return () => window.cancelAnimationFrame(retryFrame);
-      }
+      // The authoritative OnDataReady lifecycle will rerun this effect after
+      // the native axis matches. Frame-by-frame polling made large legacy
+      // campaigns contend with pointer and canvas work for up to two seconds.
       return;
     }
-    analysisAxisRetryRef.current = { signature: propTimeAxisSig, attempts: 0 };
     const axisData = nativeData.map(item => ({ time: item.timestamp, close: item.close }));
     const newest = axisData[axisData.length - 1];
     const inferredInterval = axisData.length > 1

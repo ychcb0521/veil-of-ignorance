@@ -246,6 +246,32 @@ describe('CandlestickChart analysis annotations', () => {
     interaction.destroy();
   });
 
+  it('异步数据或布局提交后可显式失效旧监听，并由下一次真实移动立即修复', () => {
+    const { host, chartEventRoot, nativeMouseMove } = buildLazyChartHost();
+    const beforeActivate = vi.fn();
+    const interaction = installKlineChartPointerInteraction(host, beforeActivate);
+
+    chartEventRoot.dispatchEvent(new MouseEvent('mousemove', {
+      bubbles: true,
+      clientX: 180,
+      clientY: 120,
+    }));
+    const firstActivationCount = beforeActivate.mock.calls.length;
+
+    // No browser mouseleave occurs when KlineCharts internally resets panes
+    // after a large history commit, so the controller must not trust old hover.
+    interaction.invalidate();
+    chartEventRoot.dispatchEvent(new MouseEvent('mousemove', {
+      bubbles: true,
+      clientX: 181,
+      clientY: 121,
+    }));
+
+    expect(beforeActivate).toHaveBeenCalledTimes(firstActivationCount + 1);
+    expect(nativeMouseMove).toHaveBeenLastCalledWith(181, 121);
+    interaction.destroy();
+  });
+
   it('数据就绪路径调用的 primeKlineChartPointerInteraction 会复用已记录的指针位置补画', () => {
     const { host, nativeMouseMove } = buildLazyChartHost();
     const interaction = installKlineChartPointerInteraction(host);

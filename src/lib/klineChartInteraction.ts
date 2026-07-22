@@ -1,4 +1,4 @@
-type InteractionController = {
+export type InteractionController = {
   /**
    * Re-arm the chart's lazy pointer listeners. When the pointer is currently
    * resting inside the chart, also repaint the crosshair at that resting point
@@ -6,6 +6,11 @@ type InteractionController = {
    * event root was reachable.
    */
   prime: () => boolean;
+  /**
+   * Mark the chart's native pointer subscription as stale. The next prime or
+   * real pointer event will rebuild KlineCharts' lazy listeners.
+   */
+  invalidate: () => void;
   destroy: () => void;
 };
 
@@ -18,7 +23,7 @@ type PointerSample = { clientX: number; clientY: number; seen: boolean };
  * primeKlineChartPointerInteraction() can reuse the tracked pointer instead of
  * blindly re-centering. Charts unregister on destroy.
  */
-const primeRegistry = new WeakMap<HTMLElement, () => boolean>();
+const interactionRegistry = new WeakMap<HTMLElement, InteractionController>();
 
 const getChartEventRoot = (host: HTMLElement): HTMLElement | null => {
   // KlineCharts v9 mounts its event target (_chartContainer) with tabIndex === 1.
@@ -78,7 +83,11 @@ export const installKlineChartPointerInteraction = (
   const chartEventRoot = getChartEventRoot(host);
   const view = host.ownerDocument.defaultView as (Window & typeof globalThis) | null;
   if (!chartEventRoot || !view) {
-    return { prime: () => false, destroy: () => undefined };
+    return {
+      prime: () => false,
+      invalidate: () => undefined,
+      destroy: () => undefined,
+    };
   }
   const doc = host.ownerDocument;
 
@@ -133,9 +142,17 @@ export const installKlineChartPointerInteraction = (
     // Pointer is outside or its position is not yet known: re-subscribe so the
     // next real move paints even without a fresh native enter, but do NOT paint
     // a crosshair at a fabricated (centered) coordinate.
+    armed = false;
     const bounds = root.getBoundingClientRect();
     activate(bounds.left + bounds.width / 2, bounds.top + bounds.height / 2, false, false);
     return true;
+  };
+
+  const invalidate = () => {
+    // Browser hover state and KlineCharts' internal listener state can diverge
+    // after a large async data commit or pane resize. Never infer native health
+    // from the previous mouseenter once the chart lifecycle has advanced.
+    armed = false;
   };
 
   const handleRealEnter = () => {
@@ -168,12 +185,11 @@ export const installKlineChartPointerInteraction = (
   chartEventRoot.addEventListener("mousemove", handleRealMove, true);
   chartEventRoot.addEventListener("mousedown", handleRealDown, true);
 
-  primeRegistry.set(host, prime);
-
-  return {
+  const controller: InteractionController = {
     prime,
+    invalidate,
     destroy: () => {
-      primeRegistry.delete(host);
+      interactionRegistry.delete(host);
       doc.removeEventListener("pointermove", trackPointer as EventListener, true);
       doc.removeEventListener("pointerdown", trackPointer as EventListener, true);
       doc.removeEventListener("mousemove", trackPointer, true);
@@ -183,6 +199,10 @@ export const installKlineChartPointerInteraction = (
       chartEventRoot.removeEventListener("mousedown", handleRealDown, true);
     },
   };
+
+  interactionRegistry.set(host, controller);
+
+  return controller;
 };
 
 /**
@@ -192,8 +212,8 @@ export const installKlineChartPointerInteraction = (
  * centered enter that just re-subscribes the listeners.
  */
 export const primeKlineChartPointerInteraction = (host: HTMLElement): boolean => {
-  const registered = primeRegistry.get(host);
-  if (registered) return registered();
+  const registered = interactionRegistry.get(host);
+  if (registered) return registered.prime();
 
   const root = getChartEventRoot(host);
   const view = host.ownerDocument.defaultView as (Window & typeof globalThis) | null;
@@ -207,4 +227,8 @@ export const primeKlineChartPointerInteraction = (host: HTMLElement): boolean =>
     false,
   ));
   return true;
+};
+
+export const invalidateKlineChartPointerInteraction = (host: HTMLElement): void => {
+  interactionRegistry.get(host)?.invalidate();
 };
