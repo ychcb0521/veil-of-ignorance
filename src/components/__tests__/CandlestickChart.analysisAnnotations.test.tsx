@@ -294,6 +294,24 @@ describe('CandlestickChart analysis annotations', () => {
     interaction.destroy();
   });
 
+  it('右侧价格轴使用完整十进制，不折叠连续的小数零', () => {
+    render(
+      <TooltipProvider>
+        <CandlestickChart
+          data={[candle(1000, 0.05283), candle(2000, 0.057987)]}
+          symbol="BTCUSDT"
+          rawSymbol="BTCUSDT"
+          pricePrecision={6}
+        />
+      </TooltipProvider>,
+    );
+
+    expect(mocks.init).toHaveBeenCalledWith(
+      expect.any(HTMLElement),
+      expect.objectContaining({ decimalFoldThreshold: 12 }),
+    );
+  });
+
   it('为分析标注创建独立 overlay，避免竖线被标签或 marker 覆盖', async () => {
     render(
       <CandlestickChart

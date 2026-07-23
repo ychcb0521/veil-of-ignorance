@@ -42,6 +42,10 @@ import {
 // Mapping from our indicator IDs to klinecharts indicator names (built-in + custom)
 const KLINE_INDICATOR_MAP: Record<string, string> = { ...CUSTOM_INDICATOR_MAP };
 
+// Keep right-axis prices readable. KlineCharts otherwise folds consecutive
+// decimal zeros into notation such as `0.0{3}8`, which resembles corrupted text.
+const DECIMAL_FOLD_THRESHOLD = 12;
+
 // IDs that render on the main (candle) pane as overlays
 const OVERLAY_INDICATOR_IDS = new Set([
   "MA",
@@ -704,6 +708,7 @@ function CandlestickChartComponent({
     const chart = init(containerRef.current, {
       styles: chartStylesForMode(theme, showLastPriceLine),
       timezone,
+      decimalFoldThreshold: DECIMAL_FOLD_THRESHOLD,
     });
 
     if (!chart) return;
