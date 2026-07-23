@@ -22,8 +22,9 @@ vi.mock("@/components/TimeframeSelector", () => ({
 }));
 
 describe("MultiChartLayout fullscreen timeframe selector", () => {
-  it("shows the main timeframe selector in fullscreen and keeps the existing change callback", () => {
+  it("shows synchronized timeframe and speed controls in fullscreen", () => {
     const onMainIntervalChange = vi.fn();
+    const onSetSpeed = vi.fn();
 
     render(
       <MultiChartLayout
@@ -37,14 +38,25 @@ describe("MultiChartLayout fullscreen timeframe selector", () => {
         currentSimulatedTime={Date.now()}
         mainInterval="1m"
         onMainIntervalChange={onMainIntervalChange}
+        speed={30}
+        onSetSpeed={onSetSpeed}
       />,
     );
 
     expect(screen.queryByText("当前周期 1m")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("加速器，当前 30 倍")).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByTitle("全屏"));
     fireEvent.click(screen.getByText("当前周期 1m"));
 
     expect(onMainIntervalChange).toHaveBeenCalledWith("5m");
+
+    fireEvent.click(screen.getByLabelText("加速器，当前 30 倍"));
+    const speedOption = screen.getByText("180x");
+    fireEvent.pointerDown(speedOption, { button: 0 });
+    fireEvent.click(speedOption);
+
+    expect(onSetSpeed).toHaveBeenCalledWith(180);
+    expect(onSetSpeed).toHaveBeenCalledTimes(1);
   });
 });

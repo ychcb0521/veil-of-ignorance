@@ -1,14 +1,15 @@
-import { useState, useCallback, useEffect, type MutableRefObject } from "react";
+import { useState, useCallback, useEffect, useRef, type MutableRefObject } from "react";
 import type { ChartImperativeApi } from "./CandlestickChart";
 import { CandlestickChart } from "./CandlestickChart";
 import { TimeframeSelector } from "./TimeframeSelector";
-import { LayoutGrid, Columns, Square, Maximize2, Minimize2, Clock3 } from "lucide-react";
+import { LayoutGrid, Columns, Square, Maximize2, Minimize2, Clock3, Gauge, ChevronDown } from "lucide-react";
 import type { KlineData } from "@/hooks/useBinanceData";
 import type { TradeRecord, PendingOrder } from "@/types/trading";
 
 type LayoutMode = "1x1" | "1x2" | "2x2";
 
 const INTERVALS = ["1m", "3m", "5m", "15m", "30m", "1h", "2h", "4h", "1d"];
+const SPEED_OPTIONS = [1, 2, 5, 10, 30, 60, 180, 300, 900];
 
 interface Props {
   mainData: KlineData[];
@@ -21,6 +22,8 @@ interface Props {
   currentSimulatedTime: number;
   mainInterval: string;
   onMainIntervalChange?: (interval: string) => void;
+  speed?: number;
+  onSetSpeed?: (speed: number) => void;
   pricePrecision?: number;
   quantityPrecision?: number;
   pendingOrders?: PendingOrder[];
@@ -48,6 +51,8 @@ export function MultiChartLayout({
   currentSimulatedTime,
   mainInterval,
   onMainIntervalChange,
+  speed = 1,
+  onSetSpeed,
   pricePrecision,
   quantityPrecision,
   pendingOrders,
@@ -185,6 +190,9 @@ export function MultiChartLayout({
             <TimeframeSelector interval={mainInterval} onIntervalChange={onMainIntervalChange} />
           </div>
         )}
+        {isFullscreen && onSetSpeed && (
+          <FullscreenSpeedSelector speed={speed} onSetSpeed={onSetSpeed} />
+        )}
         {[
           { mode: "1x1" as LayoutMode, icon: <Square className="w-3 h-3" />, label: "单图" },
           { mode: "1x2" as LayoutMode, icon: <Columns className="w-3 h-3" />, label: "双图" },
@@ -308,6 +316,87 @@ export function MultiChartLayout({
                 />
               )}
             </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function FullscreenSpeedSelector({ speed, onSetSpeed }: { speed: number; onSetSpeed: (speed: number) => void }) {
+  const [open, setOpen] = useState(false);
+  const [visualSpeed, setVisualSpeed] = useState(speed);
+  const panelRef = useRef<HTMLDivElement>(null);
+  const speedPointerDownRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    setVisualSpeed(speed);
+  }, [speed]);
+
+  useEffect(() => {
+    if (!open) return;
+    const handleOutsidePointer = (event: PointerEvent) => {
+      if (panelRef.current && !panelRef.current.contains(event.target as Node)) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener("pointerdown", handleOutsidePointer);
+    return () => document.removeEventListener("pointerdown", handleOutsidePointer);
+  }, [open]);
+
+  const selectSpeed = (nextSpeed: number) => {
+    setVisualSpeed(nextSpeed);
+    onSetSpeed(nextSpeed);
+    setOpen(false);
+  };
+
+  return (
+    <div ref={panelRef} className="relative mr-1 border-r border-border/60 pr-1">
+      <button
+        type="button"
+        onClick={() => setOpen((value) => !value)}
+        aria-label={`加速器，当前 ${visualSpeed} 倍`}
+        aria-expanded={open}
+        title="调整时间机器倍速"
+        className={`flex h-6 items-center gap-1 rounded px-1.5 font-mono text-[10px] transition-colors ${
+          open
+            ? "bg-primary text-primary-foreground"
+            : "text-muted-foreground hover:bg-accent/60 hover:text-foreground"
+        }`}
+      >
+        <Gauge className="h-3 w-3" />
+        <span>{visualSpeed}x</span>
+        <ChevronDown className={`h-2.5 w-2.5 transition-transform ${open ? "rotate-180" : ""}`} />
+      </button>
+
+      {open && (
+        <div className="absolute right-1 top-full z-50 mt-1 grid grid-cols-3 gap-1 rounded border border-border bg-card p-1.5 shadow-xl">
+          {SPEED_OPTIONS.map((option) => (
+            <button
+              type="button"
+              key={option}
+              onPointerDown={(event) => {
+                if (event.button !== 0) return;
+                speedPointerDownRef.current = option;
+                setVisualSpeed(option);
+                onSetSpeed(option);
+              }}
+              onClick={() => {
+                if (speedPointerDownRef.current === option) {
+                  speedPointerDownRef.current = null;
+                  setOpen(false);
+                  return;
+                }
+                selectSpeed(option);
+              }}
+              className={`min-w-12 rounded px-2 py-1 font-mono text-[10px] transition-all duration-100 ease-out active:scale-[0.96] ${
+                visualSpeed === option
+                  ? "bg-primary text-primary-foreground"
+                  : "bg-secondary text-secondary-foreground hover:bg-accent"
+              }`}
+            >
+              {option}x
+            </button>
           ))}
         </div>
       )}

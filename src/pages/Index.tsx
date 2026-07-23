@@ -1792,6 +1792,8 @@ const Index = () => {
                               currentSimulatedTime={activeCoinState.time}
                               mainInterval={interval}
                               onMainIntervalChange={handleIntervalChange}
+                              speed={activeCoinState.speed}
+                              onSetSpeed={handleSetSpeed}
                               pricePrecision={pricePrecision}
                               quantityPrecision={quantityPrecision}
                               pendingOrders={activeSymbolOrders}
