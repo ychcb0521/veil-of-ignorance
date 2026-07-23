@@ -162,6 +162,7 @@ export function MultiChartLayout({
   };
 
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const chartViewportRevision = `${isFullscreen ? "fullscreen" : "embedded"}:${layout}`;
 
   useEffect(() => {
     if (!isFullscreen) return;
@@ -241,6 +242,7 @@ export function MultiChartLayout({
           <CandlestickChart
             data={mainData}
             symbol={mainSymbol}
+            viewportRevision={chartViewportRevision}
             onLoadOlder={onLoadOlder}
             loadingOlder={loadingOlder}
             tradeHistory={tradeHistory}
@@ -261,6 +263,7 @@ export function MultiChartLayout({
             <CandlestickChart
               data={mainData}
               symbol={`${mainSymbol} ${mainInterval}`}
+              viewportRevision={chartViewportRevision}
               onLoadOlder={onLoadOlder}
               loadingOlder={loadingOlder}
               tradeHistory={tradeHistory}
@@ -288,6 +291,7 @@ export function MultiChartLayout({
               <CandlestickChart
                 data={getVisibleSubData(subCharts[0].data)}
                 symbol={`${mainSymbol} ${subCharts[0].interval}`}
+                viewportRevision={chartViewportRevision}
                 tradeHistory={tradeHistory}
                 rawSymbol={rawSymbol}
                 pricePrecision={pricePrecision}
@@ -305,6 +309,7 @@ export function MultiChartLayout({
             <CandlestickChart
               data={mainData}
               symbol={`${mainSymbol} ${mainInterval}`}
+              viewportRevision={chartViewportRevision}
               onLoadOlder={onLoadOlder}
               loadingOlder={loadingOlder}
               tradeHistory={tradeHistory}
@@ -329,6 +334,7 @@ export function MultiChartLayout({
                 <CandlestickChart
                   data={getVisibleSubData(subCharts[i].data)}
                   symbol={`${mainSymbol} ${subCharts[i].interval}`}
+                  viewportRevision={chartViewportRevision}
                   tradeHistory={tradeHistory}
                   rawSymbol={rawSymbol}
                   pricePrecision={pricePrecision}

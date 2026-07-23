@@ -200,6 +200,8 @@ export interface AnalysisDraggableVerticalLine {
 interface Props {
   data: KlineData[];
   symbol: string;
+  /** Changes when the host switches viewport/layout so native panes can reflow after CSS settles. */
+  viewportRevision?: string | number;
   onLoadOlder?: () => void;
   loadingOlder?: boolean;
   tradeHistory?: TradeRecord[];
@@ -441,6 +443,7 @@ export function hashTimeAxis(count: number, timeAt: (index: number) => number): 
 function CandlestickChartComponent({
   data,
   symbol,
+  viewportRevision,
   onLoadOlder,
   loadingOlder,
   tradeHistory,
@@ -475,6 +478,9 @@ function CandlestickChartComponent({
   const prevLastSigRef = useRef("");
   const prevTimeAxisSigRef = useRef("");
   const prevSymbolRef = useRef<string>(symbol);
+  const liveUpdateQueueRef = useRef<KLineData[]>([]);
+  const liveUpdateInFlightRef = useRef(false);
+  const liveUpdateGenerationRef = useRef(0);
   const analysisOverlayIdsRef = useRef<string[]>([]);
   const dragOverlayIdsRef = useRef<string[]>([]);
   const onDragPriceLineRef = useRef(onDragPriceLine);
@@ -485,6 +491,9 @@ function CandlestickChartComponent({
   onSelectVerticalLineRef.current = onSelectVerticalLine;
   const analysisOverlayRunRef = useRef(0);
   const pointerInteractionRef = useRef<InteractionController | null>(null);
+  const viewportReflowFrameRef = useRef<number | null>(null);
+  const viewportPrimeFrameRef = useRef<number | null>(null);
+  const lastViewportSizeRef = useRef({ width: 0, height: 0 });
   const analysisCommitFinalizerRef = useRef<() => boolean>(() => false);
   const analysisLifecycleRef = useRef({
     requestedAxisSignature: "",
@@ -513,6 +522,41 @@ function CandlestickChartComponent({
   pricePrecisionRef.current = pricePrecision;
 
   const activeIndicatorPanes = useRef<Map<string, string | null>>(new Map());
+
+  const scheduleViewportReflow = useCallback((force = false) => {
+    if (viewportReflowFrameRef.current != null) {
+      window.cancelAnimationFrame(viewportReflowFrameRef.current);
+    }
+
+    viewportReflowFrameRef.current = window.requestAnimationFrame(() => {
+      viewportReflowFrameRef.current = null;
+      const chart = chartRef.current;
+      const host = containerRef.current;
+      if (!chart || !host) return;
+
+      const bounds = host.getBoundingClientRect();
+      const nativeSize = chart.getSize();
+      const width = Math.round(bounds.width || nativeSize?.width || 0);
+      const height = Math.round(bounds.height || nativeSize?.height || 0);
+      if (width <= 0 || height <= 0) return;
+
+      const previous = lastViewportSizeRef.current;
+      if (!force && previous.width === width && previous.height === height) return;
+      lastViewportSizeRef.current = { width, height };
+
+      chart.resize();
+      pointerInteractionRef.current?.invalidate();
+
+      if (viewportPrimeFrameRef.current != null) {
+        window.cancelAnimationFrame(viewportPrimeFrameRef.current);
+      }
+      viewportPrimeFrameRef.current = window.requestAnimationFrame(() => {
+        viewportPrimeFrameRef.current = null;
+        if (chartRef.current !== chart) return;
+        pointerInteractionRef.current?.prime();
+      });
+    });
+  }, []);
 
   const hasAnalysisVisibleRange = typeof analysisVisibleStartTime === "number"
     && Number.isFinite(analysisVisibleStartTime)
@@ -676,6 +720,9 @@ function CandlestickChartComponent({
     if (!chart) return;
 
     if (prevSymbolRef.current !== symbol) {
+      liveUpdateGenerationRef.current += 1;
+      liveUpdateQueueRef.current = [];
+      liveUpdateInFlightRef.current = false;
       // Wipe all user-drawn overlays from the canvas
       chart.removeOverlay();
       // Reset data tracking refs so applyNewData fires cleanly for the new symbol
@@ -733,28 +780,48 @@ function CandlestickChartComponent({
       pointerInteraction.prime();
     });
 
-    // Expose imperative API for direct candle updates (bypasses React render)
+    // KLineCharts recalculates indicators asynchronously after updateData. At
+    // high replay speeds, concurrent calls can therefore finish out of order
+    // and leave the right-axis last-price mark on an older candle. Serialize
+    // different timestamps and coalesce repeated updates of the active candle.
     if (chartApiRef) {
+      const drainLiveUpdates = () => {
+        if (chartRef.current !== chart || liveUpdateInFlightRef.current) return;
+        const nextCandle = liveUpdateQueueRef.current.shift();
+        if (!nextCandle) return;
+
+        liveUpdateInFlightRef.current = true;
+        const generation = liveUpdateGenerationRef.current;
+        chart.updateData(nextCandle, () => {
+          if (
+            chartRef.current !== chart
+            || generation !== liveUpdateGenerationRef.current
+          ) return;
+          liveUpdateInFlightRef.current = false;
+          drainLiveUpdates();
+        });
+      };
+
       chartApiRef.current = {
         updateData: (candle: KLineData) => {
-          chart.updateData(candle);
+          const queue = liveUpdateQueueRef.current;
+          const lastPending = queue[queue.length - 1];
+          if (lastPending?.timestamp === candle.timestamp) {
+            queue[queue.length - 1] = candle;
+          } else {
+            queue.push(candle);
+          }
+          drainLiveUpdates();
         },
       };
     }
 
     // ResizeObserver for responsive container sizing
-    let resizePrimeFrame: number | null = null;
     const ro = new ResizeObserver((entries) => {
       for (const entry of entries) {
         const { width, height } = entry.contentRect;
         if (width > 0 && height > 0) {
-          chart.resize();
-          pointerInteraction.invalidate();
-          if (resizePrimeFrame != null) window.cancelAnimationFrame(resizePrimeFrame);
-          resizePrimeFrame = window.requestAnimationFrame(() => {
-            resizePrimeFrame = null;
-            if (chartRef.current === chart) pointerInteraction.prime();
-          });
+          scheduleViewportReflow();
         }
       }
     });
@@ -803,7 +870,14 @@ function CandlestickChartComponent({
 
     return () => {
       window.cancelAnimationFrame(interactionFrame);
-      if (resizePrimeFrame != null) window.cancelAnimationFrame(resizePrimeFrame);
+      if (viewportReflowFrameRef.current != null) {
+        window.cancelAnimationFrame(viewportReflowFrameRef.current);
+        viewportReflowFrameRef.current = null;
+      }
+      if (viewportPrimeFrameRef.current != null) {
+        window.cancelAnimationFrame(viewportPrimeFrameRef.current);
+        viewportPrimeFrameRef.current = null;
+      }
       if (analysisLifecycle.finalizeFrame != null) {
         window.cancelAnimationFrame(analysisLifecycle.finalizeFrame);
       }
@@ -813,6 +887,9 @@ function CandlestickChartComponent({
       pointerInteraction.destroy();
       pointerInteractionRef.current = null;
       ro.disconnect();
+      liveUpdateGenerationRef.current += 1;
+      liveUpdateQueueRef.current = [];
+      liveUpdateInFlightRef.current = false;
       if (chartApiRef) chartApiRef.current = null;
       try {
         chart.unsubscribeAction("onCrosshairChange" as any, crosshairCb);
@@ -825,7 +902,15 @@ function CandlestickChartComponent({
       dispose(containerRef.current!);
       chartRef.current = null;
     };
-  }, []);
+  }, [scheduleViewportReflow]);
+
+  // Fullscreen and multi-pane switches can emit several resize signals in one
+  // paint. Route them through the same coalesced scheduler so the native chart
+  // applies exactly one settled geometry and never nudges the time axis.
+  useEffect(() => {
+    if (viewportRevision == null) return;
+    scheduleViewportReflow(true);
+  }, [scheduleViewportReflow, viewportRevision]);
 
   // ============================================================
   // Theme reactivity & Tooltip customization
@@ -946,11 +1031,13 @@ function CandlestickChartComponent({
       // Initial load
       chart.applyNewData(klineData, true);
     } else if (isSmallAppend) {
-      // New candle appended (sim tick)
-      chart.updateData(lastCandle);
+      // The main replay chart is already updated by its imperative loop. A
+      // second prop-driven update would race the async indicator calculation
+      // and can restore a stale right-axis price.
+      if (!chartApiRef) chart.updateData(lastCandle);
     } else if (isSameBarUpdate) {
       // Same bar evolving: only update last candle to keep crosshair/interaction state stable
-      chart.updateData(lastCandle);
+      if (!chartApiRef) chart.updateData(lastCandle);
     } else {
       // Data replaced (symbol/interval/window replacement)
       chart.applyNewData(klineData, true);
@@ -1883,6 +1970,7 @@ function areChartPropsEqual(prev: Props, next: Props) {
   return (
     sameDataShape &&
     prev.symbol === next.symbol &&
+    prev.viewportRevision === next.viewportRevision &&
     prev.loadingOlder === next.loadingOlder &&
     prev.rawSymbol === next.rawSymbol &&
     prev.pricePrecision === next.pricePrecision &&

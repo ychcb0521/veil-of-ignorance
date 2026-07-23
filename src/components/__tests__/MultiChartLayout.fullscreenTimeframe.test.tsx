@@ -4,7 +4,12 @@ import { describe, expect, it, vi } from "vitest";
 import { MultiChartLayout } from "@/components/MultiChartLayout";
 
 vi.mock("@/components/CandlestickChart", () => ({
-  CandlestickChart: () => <div data-testid="candlestick-chart" />,
+  CandlestickChart: ({ viewportRevision }: { viewportRevision?: string | number }) => (
+    <div
+      data-testid="candlestick-chart"
+      data-viewport-revision={String(viewportRevision)}
+    />
+  ),
 }));
 
 vi.mock("@/components/TimeframeSelector", () => ({
@@ -45,12 +50,20 @@ describe("MultiChartLayout fullscreen timeframe selector", () => {
 
     expect(screen.queryByText("当前周期 1m")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("加速器，当前 30 倍")).not.toBeInTheDocument();
+    expect(screen.getByTestId("candlestick-chart")).toHaveAttribute(
+      "data-viewport-revision",
+      "embedded:1x1",
+    );
 
     fireEvent.click(screen.getByTitle("全屏"));
 
     expect(screen.getByRole("group", { name: "周期选择" })).toBeInTheDocument();
     expect(screen.getByRole("group", { name: "倍速选择" })).toBeInTheDocument();
     expect(screen.getByRole("group", { name: "视图布局" })).toBeInTheDocument();
+    expect(screen.getByTestId("candlestick-chart")).toHaveAttribute(
+      "data-viewport-revision",
+      "fullscreen:1x1",
+    );
 
     fireEvent.click(screen.getByText("当前周期 1m"));
 

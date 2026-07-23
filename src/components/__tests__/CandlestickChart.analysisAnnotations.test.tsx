@@ -1,6 +1,10 @@
 import { act, render, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { CandlestickChart, hashTimeAxis } from '@/components/CandlestickChart';
+import {
+  CandlestickChart,
+  hashTimeAxis,
+  type ChartImperativeApi,
+} from '@/components/CandlestickChart';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import type { KlineData } from '@/hooks/useBinanceData';
 import { FLOATING_LABEL_HEIGHT, layoutAnalysisFloatingLabels } from '@/lib/analysisFloatingLabels';
@@ -133,6 +137,15 @@ describe('CandlestickChart analysis annotations', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.dataList.length = 0;
+    mocks.chart.updateData.mockImplementation((nextCandle: any, callback?: () => void) => {
+      const last = mocks.dataList[mocks.dataList.length - 1];
+      if (last?.timestamp === nextCandle.timestamp) {
+        mocks.dataList[mocks.dataList.length - 1] = nextCandle;
+      } else {
+        mocks.dataList.push(nextCandle);
+      }
+      callback?.();
+    });
     mocks.chart.getDataList.mockImplementation(() => mocks.dataList);
     mocks.chart.convertToPixel.mockImplementation((point: any) => {
       const value = Array.isArray(point) ? point[0] : point;
@@ -155,6 +168,51 @@ describe('CandlestickChart analysis annotations', () => {
 
     expect(primeKlineChartPointerInteraction(host)).toBe(true);
     expect(mouseEnter).toHaveBeenCalledTimes(1);
+  });
+
+  it('宿主进入全屏后只执行一次稳定重排且不推动时间轴', async () => {
+    const { rerender } = render(
+      <TooltipProvider>
+        <CandlestickChart
+          data={[candle(1000, 1), candle(2000, 1.2)]}
+          symbol="BTCUSDT"
+          rawSymbol="BTCUSDT"
+          viewportRevision="embedded:1x1"
+        />
+      </TooltipProvider>,
+    );
+
+    await waitFor(() => {
+      expect(mocks.chart.resize).toHaveBeenCalled();
+    });
+    mocks.chart.resize.mockClear();
+    mocks.chart.scrollByDistance.mockClear();
+
+    rerender(
+      <TooltipProvider>
+        <CandlestickChart
+          data={[candle(1000, 1), candle(2000, 1.2)]}
+          symbol="BTCUSDT"
+          rawSymbol="BTCUSDT"
+          viewportRevision="fullscreen:1x1"
+        />
+      </TooltipProvider>,
+    );
+    rerender(
+      <TooltipProvider>
+        <CandlestickChart
+          data={[candle(1000, 1), candle(2000, 1.2)]}
+          symbol="BTCUSDT"
+          rawSymbol="BTCUSDT"
+          viewportRevision="fullscreen:2x2"
+        />
+      </TooltipProvider>,
+    );
+
+    await waitFor(() => {
+      expect(mocks.chart.resize).toHaveBeenCalledTimes(1);
+    });
+    expect(mocks.chart.scrollByDistance).not.toHaveBeenCalled();
   });
 
   it('图表在鼠标已位于盘面时会同步窗格并补发首次移动', () => {
@@ -181,6 +239,88 @@ describe('CandlestickChart analysis annotations', () => {
     chartEventRoot.dispatchEvent(new MouseEvent('mousemove', { bubbles: true }));
     expect(beforeActivate).toHaveBeenCalledTimes(1);
     interaction.destroy();
+  });
+
+  it('高倍速实时更新会串行执行并只保留同一根 K 线的最新价格', async () => {
+    const callbacks: Array<() => void> = [];
+    mocks.chart.updateData.mockImplementation((_nextCandle: any, callback?: () => void) => {
+      if (callback) callbacks.push(callback);
+    });
+    const chartApiRef = {
+      current: null,
+    } as React.MutableRefObject<ChartImperativeApi | null>;
+    const { rerender } = render(
+      <TooltipProvider>
+        <CandlestickChart
+          data={[candle(1000, 1)]}
+          symbol="BTCUSDT"
+          rawSymbol="BTCUSDT"
+          chartApiRef={chartApiRef}
+        />
+      </TooltipProvider>,
+    );
+
+    await waitFor(() => expect(chartApiRef.current).not.toBeNull());
+    mocks.chart.updateData.mockClear();
+
+    act(() => {
+      chartApiRef.current?.updateData({
+        timestamp: 1000,
+        open: 1,
+        high: 1.1,
+        low: 0.9,
+        close: 1.1,
+        volume: 1,
+      });
+      chartApiRef.current?.updateData({
+        timestamp: 1000,
+        open: 1,
+        high: 1.2,
+        low: 0.9,
+        close: 1.2,
+        volume: 1,
+      });
+      chartApiRef.current?.updateData({
+        timestamp: 1000,
+        open: 1,
+        high: 1.3,
+        low: 0.9,
+        close: 1.3,
+        volume: 1,
+      });
+      chartApiRef.current?.updateData({
+        timestamp: 2000,
+        open: 1.3,
+        high: 1.4,
+        low: 1.2,
+        close: 1.4,
+        volume: 1,
+      });
+    });
+
+    expect(mocks.chart.updateData).toHaveBeenCalledTimes(1);
+    expect(mocks.chart.updateData.mock.calls[0][0].close).toBe(1.1);
+
+    rerender(
+      <TooltipProvider>
+        <CandlestickChart
+          data={[candle(1000, 1.05)]}
+          symbol="BTCUSDT"
+          rawSymbol="BTCUSDT"
+          chartApiRef={chartApiRef}
+        />
+      </TooltipProvider>,
+    );
+    expect(mocks.chart.updateData).toHaveBeenCalledTimes(1);
+
+    act(() => callbacks.shift()?.());
+    expect(mocks.chart.updateData).toHaveBeenCalledTimes(2);
+    expect(mocks.chart.updateData.mock.calls[1][0].close).toBe(1.3);
+
+    act(() => callbacks.shift()?.());
+    expect(mocks.chart.updateData).toHaveBeenCalledTimes(3);
+    expect(mocks.chart.updateData.mock.calls[2][0].timestamp).toBe(2000);
+    expect(mocks.chart.updateData.mock.calls[2][0].close).toBe(1.4);
   });
 
   // Faithful mini-model of KlineCharts v9's lazy pointer subscription: the
