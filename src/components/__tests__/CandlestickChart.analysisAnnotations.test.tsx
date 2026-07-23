@@ -342,18 +342,25 @@ describe('CandlestickChart analysis annotations', () => {
       toJSON: () => ({}),
     }) as DOMRect;
     const nativeMouseMove = vi.fn();
+    const nativeWheel = vi.fn();
     let boundMove: ((event: MouseEvent) => void) | null = null;
+    let boundWheel: ((event: WheelEvent) => void) | null = null;
     chartEventRoot.addEventListener('mouseenter', () => {
       if (boundMove) chartEventRoot.removeEventListener('mousemove', boundMove);
+      if (boundWheel) chartEventRoot.removeEventListener('wheel', boundWheel);
       boundMove = (event: MouseEvent) => nativeMouseMove(event.clientX, event.clientY);
+      boundWheel = (event: WheelEvent) => nativeWheel(event.deltaY);
       chartEventRoot.addEventListener('mousemove', boundMove);
+      chartEventRoot.addEventListener('wheel', boundWheel);
     });
     chartEventRoot.addEventListener('mouseleave', () => {
       if (boundMove) chartEventRoot.removeEventListener('mousemove', boundMove);
+      if (boundWheel) chartEventRoot.removeEventListener('wheel', boundWheel);
       boundMove = null;
+      boundWheel = null;
     });
     host.appendChild(chartEventRoot);
-    return { host, chartEventRoot, nativeMouseMove };
+    return { host, chartEventRoot, nativeMouseMove, nativeWheel };
   };
 
   it('鼠标静止悬停在盘面上时，数据提交后 prime 会在原地补画十字线', () => {
@@ -409,6 +416,50 @@ describe('CandlestickChart analysis annotations', () => {
 
     expect(beforeActivate).toHaveBeenCalledTimes(firstActivationCount + 1);
     expect(nativeMouseMove).toHaveBeenLastCalledWith(181, 121);
+    interaction.destroy();
+  });
+
+  it('静止指针的首次滚轮会先恢复原生缩放监听并处理当前手势', () => {
+    const { host, chartEventRoot, nativeWheel } = buildLazyChartHost();
+    const beforeActivate = vi.fn();
+    const interaction = installKlineChartPointerInteraction(host, beforeActivate);
+
+    interaction.invalidate();
+    chartEventRoot.dispatchEvent(new WheelEvent('wheel', {
+      bubbles: true,
+      cancelable: true,
+      clientX: 240,
+      clientY: 180,
+      deltaY: -120,
+    }));
+
+    expect(beforeActivate).not.toHaveBeenCalled();
+    expect(nativeWheel).toHaveBeenCalledTimes(1);
+    expect(nativeWheel).toHaveBeenCalledWith(-120);
+    interaction.destroy();
+  });
+
+  it('连续滚轮缩放不会重复激活或重复消费手势', () => {
+    const { host, chartEventRoot, nativeWheel } = buildLazyChartHost();
+    const beforeActivate = vi.fn();
+    const interaction = installKlineChartPointerInteraction(host, beforeActivate);
+
+    interaction.invalidate();
+    chartEventRoot.dispatchEvent(new WheelEvent('wheel', {
+      bubbles: true,
+      clientX: 240,
+      clientY: 180,
+      deltaY: -60,
+    }));
+    chartEventRoot.dispatchEvent(new WheelEvent('wheel', {
+      bubbles: true,
+      clientX: 240,
+      clientY: 180,
+      deltaY: -60,
+    }));
+
+    expect(beforeActivate).not.toHaveBeenCalled();
+    expect(nativeWheel).toHaveBeenCalledTimes(2);
     interaction.destroy();
   });
 

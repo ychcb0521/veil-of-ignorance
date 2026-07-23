@@ -180,10 +180,27 @@ export const installKlineChartPointerInteraction = (
     activate(event.clientX, event.clientY, true, true);
   };
 
+  const handleRealWheel = (event: WheelEvent) => {
+    if (synthesizing || armed) return;
+    // A wheel gesture can arrive without a preceding pointer move when the
+    // chart mounts beneath a resting cursor. Re-arm during capture so
+    // KlineCharts' lazily installed target listener consumes this same event.
+    // Never prevent or replay it: either would make trackpad zoom feel stepped.
+    pointer.clientX = event.clientX;
+    pointer.clientY = event.clientY;
+    pointer.seen = true;
+    armed = true;
+    // The event is already in flight. A resize here could replace its target
+    // before KlineCharts receives it, so only restore the lazy subscription.
+    activate(event.clientX, event.clientY, false, false);
+  };
+
   chartEventRoot.addEventListener("mouseenter", handleRealEnter, true);
   chartEventRoot.addEventListener("mouseleave", handleRealLeave, true);
   chartEventRoot.addEventListener("mousemove", handleRealMove, true);
   chartEventRoot.addEventListener("mousedown", handleRealDown, true);
+  // The host survives pane rebuilds that may replace KlineCharts' event root.
+  host.addEventListener("wheel", handleRealWheel, { capture: true, passive: true });
 
   const controller: InteractionController = {
     prime,
@@ -197,6 +214,7 @@ export const installKlineChartPointerInteraction = (
       chartEventRoot.removeEventListener("mouseleave", handleRealLeave, true);
       chartEventRoot.removeEventListener("mousemove", handleRealMove, true);
       chartEventRoot.removeEventListener("mousedown", handleRealDown, true);
+      host.removeEventListener("wheel", handleRealWheel, true);
     },
   };
 
