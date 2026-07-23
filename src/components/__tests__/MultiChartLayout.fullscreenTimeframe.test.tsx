@@ -47,6 +47,11 @@ describe("MultiChartLayout fullscreen timeframe selector", () => {
     expect(screen.queryByLabelText("加速器，当前 30 倍")).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByTitle("全屏"));
+
+    expect(screen.getByRole("group", { name: "周期选择" })).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "倍速选择" })).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "视图布局" })).toBeInTheDocument();
+
     fireEvent.click(screen.getByText("当前周期 1m"));
 
     expect(onMainIntervalChange).toHaveBeenCalledWith("5m");

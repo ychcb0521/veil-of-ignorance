@@ -180,10 +180,20 @@ export function MultiChartLayout({
           : "h-full flex flex-col relative"
       }
     >
-      <div className="absolute right-2 top-1 z-30 flex items-center gap-0.5 bg-card/90 rounded px-1 py-0.5 border border-border/50">
+      <div
+        className={`absolute right-2 top-1 z-30 flex items-center ${
+          isFullscreen
+            ? "gap-2"
+            : "gap-0.5 rounded border border-border/50 bg-card/90 px-1 py-0.5"
+        }`}
+      >
         {isFullscreen && onMainIntervalChange && (
-          <div className="mr-1 flex items-center gap-1 border-r border-border/60 pr-1">
-            <span className="flex items-center gap-1 px-1 text-[10px] text-muted-foreground">
+          <div
+            role="group"
+            aria-label="周期选择"
+            className="flex items-center gap-1 rounded-md border border-border/70 bg-card/95 p-1 shadow-sm"
+          >
+            <span className="flex h-6 items-center gap-1 border-r border-border/60 px-1.5 text-[10px] font-medium text-muted-foreground">
               <Clock3 className="h-3 w-3" />
               周期
             </span>
@@ -193,27 +203,37 @@ export function MultiChartLayout({
         {isFullscreen && onSetSpeed && (
           <FullscreenSpeedSelector speed={speed} onSetSpeed={onSetSpeed} />
         )}
-        {[
-          { mode: "1x1" as LayoutMode, icon: <Square className="w-3 h-3" />, label: "单图" },
-          { mode: "1x2" as LayoutMode, icon: <Columns className="w-3 h-3" />, label: "双图" },
-          { mode: "2x2" as LayoutMode, icon: <LayoutGrid className="w-3 h-3" />, label: "四图" },
-        ].map((opt) => (
-          <button
-            key={opt.mode}
-            onClick={() => setLayout(opt.mode)}
-            title={opt.label}
-            className={`p-1 rounded transition-colors ${layout === opt.mode ? "bg-primary/20 text-primary" : "text-muted-foreground hover:text-foreground"}`}
-          >
-            {opt.icon}
-          </button>
-        ))}
-        <button
-          onClick={() => setIsFullscreen((v) => !v)}
-          title={isFullscreen ? "退出全屏 (Esc)" : "全屏"}
-          className="p-1 rounded transition-colors text-muted-foreground hover:text-foreground hover:bg-accent/50"
+        <div
+          role="group"
+          aria-label="视图布局"
+          className={`flex items-center ${
+            isFullscreen
+              ? "rounded-md border border-border/70 bg-card/95 p-1 shadow-sm"
+              : ""
+          }`}
         >
-          {isFullscreen ? <Minimize2 className="w-3 h-3" /> : <Maximize2 className="w-3 h-3" />}
-        </button>
+          {[
+            { mode: "1x1" as LayoutMode, icon: <Square className="w-3 h-3" />, label: "单图" },
+            { mode: "1x2" as LayoutMode, icon: <Columns className="w-3 h-3" />, label: "双图" },
+            { mode: "2x2" as LayoutMode, icon: <LayoutGrid className="w-3 h-3" />, label: "四图" },
+          ].map((opt) => (
+            <button
+              key={opt.mode}
+              onClick={() => setLayout(opt.mode)}
+              title={opt.label}
+              className={`p-1 rounded transition-colors ${layout === opt.mode ? "bg-primary/20 text-primary" : "text-muted-foreground hover:text-foreground"}`}
+            >
+              {opt.icon}
+            </button>
+          ))}
+          <button
+            onClick={() => setIsFullscreen((v) => !v)}
+            title={isFullscreen ? "退出全屏 (Esc)" : "全屏"}
+            className="p-1 rounded transition-colors text-muted-foreground hover:text-foreground hover:bg-accent/50"
+          >
+            {isFullscreen ? <Minimize2 className="w-3 h-3" /> : <Maximize2 className="w-3 h-3" />}
+          </button>
+        </div>
       </div>
 
       {layout === "1x1" ? (
@@ -351,26 +371,32 @@ function FullscreenSpeedSelector({ speed, onSetSpeed }: { speed: number; onSetSp
   };
 
   return (
-    <div ref={panelRef} className="relative mr-1 border-r border-border/60 pr-1">
+    <div
+      ref={panelRef}
+      role="group"
+      aria-label="倍速选择"
+      className="relative rounded-md border border-primary/25 bg-card/95 p-1 shadow-sm"
+    >
       <button
         type="button"
         onClick={() => setOpen((value) => !value)}
         aria-label={`加速器，当前 ${visualSpeed} 倍`}
         aria-expanded={open}
         title="调整时间机器倍速"
-        className={`flex h-6 items-center gap-1 rounded px-1.5 font-mono text-[10px] transition-colors ${
+        className={`flex h-6 items-center gap-1 rounded px-2 text-[10px] transition-colors ${
           open
             ? "bg-primary text-primary-foreground"
-            : "text-muted-foreground hover:bg-accent/60 hover:text-foreground"
+            : "bg-primary/10 text-primary hover:bg-primary/15"
         }`}
       >
         <Gauge className="h-3 w-3" />
-        <span>{visualSpeed}x</span>
+        <span className="font-medium">倍速</span>
+        <span className="font-mono">{visualSpeed}x</span>
         <ChevronDown className={`h-2.5 w-2.5 transition-transform ${open ? "rotate-180" : ""}`} />
       </button>
 
       {open && (
-        <div className="absolute right-1 top-full z-50 mt-1 grid grid-cols-3 gap-1 rounded border border-border bg-card p-1.5 shadow-xl">
+        <div className="absolute right-0 top-full z-50 mt-1.5 grid w-44 grid-cols-3 gap-1.5 rounded-md border border-border bg-card p-2 shadow-xl">
           {SPEED_OPTIONS.map((option) => (
             <button
               type="button"
@@ -389,7 +415,7 @@ function FullscreenSpeedSelector({ speed, onSetSpeed }: { speed: number; onSetSp
                 }
                 selectSpeed(option);
               }}
-              className={`min-w-12 rounded px-2 py-1 font-mono text-[10px] transition-all duration-100 ease-out active:scale-[0.96] ${
+              className={`h-7 whitespace-nowrap rounded px-1 font-mono text-[10px] transition-all duration-100 ease-out active:scale-[0.96] ${
                 visualSpeed === option
                   ? "bg-primary text-primary-foreground"
                   : "bg-secondary text-secondary-foreground hover:bg-accent"
