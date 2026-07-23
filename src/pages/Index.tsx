@@ -1791,6 +1791,7 @@ const Index = () => {
                               isRunning={activeCoinState.status !== "stopped"}
                               currentSimulatedTime={activeCoinState.time}
                               mainInterval={interval}
+                              onMainIntervalChange={handleIntervalChange}
                               pricePrecision={pricePrecision}
                               quantityPrecision={quantityPrecision}
                               pendingOrders={activeSymbolOrders}

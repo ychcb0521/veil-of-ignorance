@@ -1,7 +1,8 @@
 import { useState, useCallback, useEffect, type MutableRefObject } from "react";
 import type { ChartImperativeApi } from "./CandlestickChart";
 import { CandlestickChart } from "./CandlestickChart";
-import { LayoutGrid, Columns, Square, Maximize2, Minimize2 } from "lucide-react";
+import { TimeframeSelector } from "./TimeframeSelector";
+import { LayoutGrid, Columns, Square, Maximize2, Minimize2, Clock3 } from "lucide-react";
 import type { KlineData } from "@/hooks/useBinanceData";
 import type { TradeRecord, PendingOrder } from "@/types/trading";
 
@@ -19,6 +20,7 @@ interface Props {
   isRunning: boolean;
   currentSimulatedTime: number;
   mainInterval: string;
+  onMainIntervalChange?: (interval: string) => void;
   pricePrecision?: number;
   quantityPrecision?: number;
   pendingOrders?: PendingOrder[];
@@ -45,6 +47,7 @@ export function MultiChartLayout({
   isRunning,
   currentSimulatedTime,
   mainInterval,
+  onMainIntervalChange,
   pricePrecision,
   quantityPrecision,
   pendingOrders,
@@ -173,6 +176,15 @@ export function MultiChartLayout({
       }
     >
       <div className="absolute right-2 top-1 z-30 flex items-center gap-0.5 bg-card/90 rounded px-1 py-0.5 border border-border/50">
+        {isFullscreen && onMainIntervalChange && (
+          <div className="mr-1 flex items-center gap-1 border-r border-border/60 pr-1">
+            <span className="flex items-center gap-1 px-1 text-[10px] text-muted-foreground">
+              <Clock3 className="h-3 w-3" />
+              周期
+            </span>
+            <TimeframeSelector interval={mainInterval} onIntervalChange={onMainIntervalChange} />
+          </div>
+        )}
         {[
           { mode: "1x1" as LayoutMode, icon: <Square className="w-3 h-3" />, label: "单图" },
           { mode: "1x2" as LayoutMode, icon: <Columns className="w-3 h-3" />, label: "双图" },
