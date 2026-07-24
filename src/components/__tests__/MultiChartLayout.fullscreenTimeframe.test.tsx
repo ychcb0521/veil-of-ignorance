@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { MultiChartLayout } from "@/components/MultiChartLayout";
 
 vi.mock("@/components/CandlestickChart", () => ({
@@ -27,6 +27,10 @@ vi.mock("@/components/TimeframeSelector", () => ({
 }));
 
 describe("MultiChartLayout fullscreen timeframe selector", () => {
+  beforeEach(() => {
+    window.sessionStorage.clear();
+  });
+
   it("shows synchronized timeframe and speed controls in fullscreen", () => {
     const onMainIntervalChange = vi.fn();
     const onSetSpeed = vi.fn();
@@ -76,5 +80,74 @@ describe("MultiChartLayout fullscreen timeframe selector", () => {
 
     expect(onSetSpeed).toHaveBeenCalledWith(180);
     expect(onSetSpeed).toHaveBeenCalledTimes(1);
+  });
+
+  it("restores the adaptive fullscreen layout after a page refresh", () => {
+    const props = {
+      mainData: [],
+      mainSymbol: "BTC/USDT",
+      rawSymbol: "BTCUSDT",
+      onLoadOlder: vi.fn(),
+      loadingOlder: false,
+      tradeHistory: [],
+      isRunning: true,
+      currentSimulatedTime: Date.now(),
+      mainInterval: "1m",
+      onMainIntervalChange: vi.fn(),
+    };
+    const firstRender = render(<MultiChartLayout {...props} />);
+
+    fireEvent.click(screen.getByTitle("全屏"));
+    expect(window.sessionStorage.getItem("veil.mainChart.fullscreen")).toBe("1");
+    expect(screen.getByTestId("candlestick-chart")).toHaveAttribute(
+      "data-viewport-revision",
+      "fullscreen:1x1",
+    );
+
+    firstRender.unmount();
+    render(<MultiChartLayout {...props} />);
+
+    expect(screen.getByTitle("退出全屏 (Esc)")).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("group", { name: "周期选择" })).toBeInTheDocument();
+    expect(screen.getByTestId("candlestick-chart")).toHaveAttribute(
+      "data-viewport-revision",
+      "fullscreen:1x1",
+    );
+  });
+
+  it("only leaves the restored fullscreen layout through minimize or Escape", () => {
+    window.sessionStorage.setItem("veil.mainChart.fullscreen", "1");
+    const props = {
+      mainData: [],
+      mainSymbol: "BTC/USDT",
+      rawSymbol: "BTCUSDT",
+      onLoadOlder: vi.fn(),
+      loadingOlder: false,
+      tradeHistory: [],
+      isRunning: true,
+      currentSimulatedTime: Date.now(),
+      mainInterval: "1m",
+      onMainIntervalChange: vi.fn(),
+    };
+    const minimized = render(<MultiChartLayout {...props} />);
+
+    fireEvent.click(screen.getByTitle("退出全屏 (Esc)"));
+    expect(window.sessionStorage.getItem("veil.mainChart.fullscreen")).toBeNull();
+    expect(screen.getByTitle("全屏")).toHaveAttribute("aria-pressed", "false");
+
+    minimized.unmount();
+    window.sessionStorage.setItem("veil.mainChart.fullscreen", "1");
+    const escaped = render(<MultiChartLayout {...props} />);
+
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(window.sessionStorage.getItem("veil.mainChart.fullscreen")).toBeNull();
+    expect(screen.getByTitle("全屏")).toHaveAttribute("aria-pressed", "false");
+
+    escaped.unmount();
+    render(<MultiChartLayout {...props} />);
+    expect(screen.getByTestId("candlestick-chart")).toHaveAttribute(
+      "data-viewport-revision",
+      "embedded:1x1",
+    );
   });
 });

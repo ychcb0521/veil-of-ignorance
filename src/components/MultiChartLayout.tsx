@@ -10,6 +10,29 @@ type LayoutMode = "1x1" | "1x2" | "2x2";
 
 const INTERVALS = ["1m", "3m", "5m", "15m", "30m", "1h", "2h", "4h", "1d"];
 const SPEED_OPTIONS = [1, 2, 5, 10, 30, 60, 180, 300, 900];
+const FULLSCREEN_SESSION_KEY = "veil.mainChart.fullscreen";
+
+const readFullscreenSession = () => {
+  if (typeof window === "undefined") return false;
+  try {
+    return window.sessionStorage.getItem(FULLSCREEN_SESSION_KEY) === "1";
+  } catch {
+    return false;
+  }
+};
+
+const writeFullscreenSession = (active: boolean) => {
+  if (typeof window === "undefined") return;
+  try {
+    if (active) {
+      window.sessionStorage.setItem(FULLSCREEN_SESSION_KEY, "1");
+    } else {
+      window.sessionStorage.removeItem(FULLSCREEN_SESSION_KEY);
+    }
+  } catch {
+    // Fullscreen still works when browser storage is unavailable.
+  }
+};
 
 interface Props {
   mainData: KlineData[];
@@ -161,17 +184,21 @@ export function MultiChartLayout({
     loadSubChart(index, newInterval);
   };
 
-  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(readFullscreenSession);
   const chartViewportRevision = `${isFullscreen ? "fullscreen" : "embedded"}:${layout}`;
+  const updateFullscreen = useCallback((active: boolean) => {
+    writeFullscreenSession(active);
+    setIsFullscreen(active);
+  }, []);
 
   useEffect(() => {
     if (!isFullscreen) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setIsFullscreen(false);
+      if (e.key === "Escape") updateFullscreen(false);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [isFullscreen]);
+  }, [isFullscreen, updateFullscreen]);
 
   return (
     <div
@@ -228,8 +255,10 @@ export function MultiChartLayout({
             </button>
           ))}
           <button
-            onClick={() => setIsFullscreen((v) => !v)}
+            type="button"
+            onClick={() => updateFullscreen(!isFullscreen)}
             title={isFullscreen ? "退出全屏 (Esc)" : "全屏"}
+            aria-pressed={isFullscreen}
             className="p-1 rounded transition-colors text-muted-foreground hover:text-foreground hover:bg-accent/50"
           >
             {isFullscreen ? <Minimize2 className="w-3 h-3" /> : <Maximize2 className="w-3 h-3" />}
