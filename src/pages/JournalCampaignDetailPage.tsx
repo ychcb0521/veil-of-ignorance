@@ -5,6 +5,7 @@ import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
+import { ImeSafeInput } from '@/components/ui/ime-safe-text-field';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
@@ -1895,9 +1896,9 @@ export default function JournalCampaignDetailPage() {
                           <tr key={rowKey} className="border-t border-border">
                             <td className="px-3 py-2 align-top">
                               {isOwner ? (
-                                <Input
+                                <ImeSafeInput
                                   value={categoryVal}
-                                  onChange={e => setField('category', e.target.value)}
+                                  onValueChange={value => setField('category', value)}
                                   placeholder="违规阶段（选填）"
                                   className="h-8 text-[11px] capitalize"
                                 />
@@ -1907,9 +1908,9 @@ export default function JournalCampaignDetailPage() {
                             </td>
                             <td className="px-3 py-2 align-top text-foreground">
                               {isOwner ? (
-                                <Input
+                                <ImeSafeInput
                                   value={reasonVal}
-                                  onChange={e => setField('reason', e.target.value)}
+                                  onValueChange={value => setField('reason', value)}
                                   placeholder="违规描述（选填）"
                                   className="h-8 text-[11px]"
                                 />
@@ -1919,9 +1920,9 @@ export default function JournalCampaignDetailPage() {
                             </td>
                             <td className="px-3 py-2 align-top text-muted-foreground">
                               {isOwner ? (
-                                <Input
+                                <ImeSafeInput
                                   value={fixVal}
-                                  onChange={e => setField('fix', e.target.value)}
+                                  onValueChange={value => setField('fix', value)}
                                   placeholder="修正后（选填）"
                                   className="h-8 text-[11px]"
                                 />

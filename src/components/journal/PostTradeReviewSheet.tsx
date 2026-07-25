@@ -7,7 +7,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Dialog, DialogContent } from '@/components/ui/dialog';
 import { Sheet, SheetContent } from '@/components/ui/sheet';
 import { Button } from '@/components/ui/button';
-import { Textarea } from '@/components/ui/textarea';
+import { ImeSafeTextarea } from '@/components/ui/ime-safe-text-field';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
@@ -249,6 +249,11 @@ export function PostTradeReviewSheet({
   // Unreviewed journals and explicit required-review links cannot be dismissed.
   // Editing an already-reviewed journal from a normal link remains freely dismissible.
   const dismissBlocked = requireSaveBeforeClose || (!!journal && !journal.post_reviewed_at);
+  const handleEscapeKeyDown = (event: KeyboardEvent) => {
+    if (dismissBlocked || event.isComposing || event.keyCode === 229) {
+      event.preventDefault();
+    }
+  };
   const guardedOpenChange = (next: boolean) => {
     if (!next && dismissBlocked) {
       toast.error('请先完成本笔平仓评价，再离开');
@@ -274,7 +279,7 @@ export function PostTradeReviewSheet({
             side="bottom"
             className="h-[60vh] rounded-t-2xl p-0 bg-card border-t border-border text-foreground"
             onPointerDownOutside={dismissBlocked ? e => e.preventDefault() : undefined}
-            onEscapeKeyDown={dismissBlocked ? e => e.preventDefault() : undefined}
+            onEscapeKeyDown={handleEscapeKeyDown}
             onInteractOutside={dismissBlocked ? e => e.preventDefault() : undefined}
           >
             {placeholder}
@@ -285,7 +290,7 @@ export function PostTradeReviewSheet({
           <DialogContent
             className="w-[calc(100vw-32px)] max-w-[860px] h-[60vh] p-0 bg-card border border-border text-foreground overflow-hidden rounded-2xl shadow-2xl [&>button]:right-5 [&>button]:top-5"
             onPointerDownOutside={dismissBlocked ? e => e.preventDefault() : undefined}
-            onEscapeKeyDown={dismissBlocked ? e => e.preventDefault() : undefined}
+            onEscapeKeyDown={handleEscapeKeyDown}
             onInteractOutside={dismissBlocked ? e => e.preventDefault() : undefined}
           >
             {placeholder}
@@ -845,10 +850,10 @@ export function PostTradeReviewSheet({
             <p className="text-[10px] leading-relaxed text-muted-foreground">
               {CLOSE_REVIEW_SCHELLING_FLOOR_QUESTION.question}
             </p>
-            <Textarea
+            <ImeSafeTextarea
               rows={2}
               value={closeReviewAuditAnswers.schelling_floor_weight}
-              onChange={event => handleCloseAuditChange('schelling_floor_weight', event.target.value)}
+              onValueChange={value => handleCloseAuditChange('schelling_floor_weight', value)}
               placeholder={CLOSE_REVIEW_SCHELLING_FLOOR_QUESTION.placeholder}
               className={reviewAnswerTextareaClass}
             />
@@ -865,10 +870,10 @@ export function PostTradeReviewSheet({
                 <span className="text-muted-foreground">开仓前写下的反：</span>{snapshotPremortem}
               </div>
             )}
-            <Textarea
+            <ImeSafeTextarea
               rows={2}
               value={premortemReview}
-              onChange={e => setPremortemReview(e.target.value)}
+              onValueChange={setPremortemReview}
               placeholder="只写这个 pre-mortem 是否被碰到：命中 / 部分命中 / 没命中。先别解释为什么。"
               className={reviewAnswerTextareaClass}
             />
@@ -904,20 +909,20 @@ export function PostTradeReviewSheet({
                     </button>
                   ))}
                 </div>
-                <Textarea
+                <ImeSafeTextarea
                   rows={2}
                   value={falsificationNote}
-                  onChange={event => setFalsificationNote(event.target.value)}
+                  onValueChange={setFalsificationNote}
                   placeholder="证伪状态备注（可选）：例如触发时间、迟疑点、是否按计划拆仓。"
                   className={reviewAnswerTextareaClass}
                 />
                 {!falsificationFactValid && <div className="text-right font-mono text-[10px] text-[#F6465D]">必选</div>}
               </>
             ) : null}
-            <Textarea
+            <ImeSafeTextarea
               rows={2}
               value={invalidationReview}
-              onChange={e => setInvalidationReview(e.target.value)}
+              onValueChange={setInvalidationReview}
               placeholder={invalidationReviewPlaceholder}
               className={reviewAnswerTextareaClass}
             />
@@ -955,10 +960,10 @@ export function PostTradeReviewSheet({
                 </div>
               )}
               {!oddsStructureFactValid && <div className="text-right font-mono text-[10px] text-[#F6465D]">必选</div>}
-              <Textarea
+              <ImeSafeTextarea
                 rows={2}
                 value={expectancyReview}
-                onChange={e => setExpectancyReview(e.target.value)}
+                onValueChange={setExpectancyReview}
                 placeholder="只写目标空间/结构破坏是否被市场验证；不要用最后盈亏倒推。"
                 className={reviewAnswerTextareaClass}
               />
@@ -968,10 +973,10 @@ export function PostTradeReviewSheet({
           {isHedge && (
             <div className="space-y-1.5">
               <Label className="text-[12px] font-medium">正期望/保险价值事实备注 *</Label>
-              <Textarea
+              <ImeSafeTextarea
                 rows={2}
                 value={expectancyReview}
-                onChange={e => setExpectancyReview(e.target.value)}
+                onValueChange={setExpectancyReview}
                 placeholder="只写这份对冲保险有没有值回摩擦成本，先不写解释。"
                 className={reviewAnswerTextareaClass}
               />
@@ -1109,10 +1114,10 @@ export function PostTradeReviewSheet({
                     );
                   })}
                 </div>
-                <Textarea
+                <ImeSafeTextarea
                   rows={2}
                   value={payoffBasisReview}
-                  onChange={event => setPayoffBasisReview(event.target.value)}
+                  onValueChange={setPayoffBasisReview}
                   placeholder="填空：当时为什么判断这一档盈亏比？后来验证哪里对、哪里偏？"
                   className={reviewAnswerTextareaClass}
                 />
@@ -1144,10 +1149,10 @@ export function PostTradeReviewSheet({
                     );
                   })}
                 </div>
-                <Textarea
+                <ImeSafeTextarea
                   rows={2}
                   value={winRateBasisReview}
-                  onChange={event => setWinRateBasisReview(event.target.value)}
+                  onValueChange={setWinRateBasisReview}
                   placeholder="填空：当时为什么判断这一档胜率？后来验证哪里对、哪里偏？"
                   className={reviewAnswerTextareaClass}
                 />
@@ -1474,10 +1479,10 @@ export function PostTradeReviewSheet({
                 <div key={question.key} className="space-y-1.5">
                   <Label className="text-[12px] font-medium">{question.title} *</Label>
                   <p className="text-[10px] leading-relaxed text-muted-foreground">{question.question}</p>
-                  <Textarea
+                  <ImeSafeTextarea
                     rows={2}
                     value={closeReviewAuditAnswers[question.key]}
-                    onChange={event => handleCloseAuditChange(question.key, event.target.value)}
+                    onValueChange={value => handleCloseAuditChange(question.key, value)}
                     placeholder={question.placeholder}
                     className={reviewAnswerTextareaClass}
                   />
@@ -1502,10 +1507,10 @@ export function PostTradeReviewSheet({
 
           <div className="space-y-1.5">
             <Label className="text-[12px] font-medium">① 这单最起波澜的事情是什么？*</Label>
-            <Textarea
+            <ImeSafeTextarea
               rows={2}
               value={emoDisturbance}
-              onChange={e => setEmoDisturbance(e.target.value)}
+              onValueChange={setEmoDisturbance}
               placeholder="只写让你心里一震/一紧/一急的那个具体时刻：价格跳了、突然爆仓、有人喊单、止损被扫……"
               className={reviewAnswerTextareaClass}
             />
@@ -1513,10 +1518,10 @@ export function PostTradeReviewSheet({
 
           <div className="space-y-1.5">
             <Label className="text-[12px] font-medium">② 我的第一反应是什么？*</Label>
-            <Textarea
+            <ImeSafeTextarea
               rows={2}
               value={emoFirstReaction}
-              onChange={e => setEmoFirstReaction(e.target.value)}
+              onValueChange={setEmoFirstReaction}
               placeholder="没经过大脑那一下：想加仓、想砍掉、想躲开屏幕、想骂人、想截图发出去……写最原始的那个冲动。"
               className={reviewAnswerTextareaClass}
             />
@@ -1525,20 +1530,20 @@ export function PostTradeReviewSheet({
           <div className="space-y-3">
             <div className="space-y-1.5">
               <Label className="text-[12px] font-medium">③ 我其实想得到什么？*</Label>
-              <Textarea
+              <ImeSafeTextarea
                 rows={3}
                 value={emoWanted}
-                onChange={e => setEmoWanted(e.target.value)}
+                onValueChange={setEmoWanted}
                 placeholder="不是「赚钱」这种正确答案。是更底层的东西：被认可、扳回上一笔、证明自己看对了、一次到位……"
                 className={reviewAnswerTextareaClass}
               />
             </div>
             <div className="space-y-1.5">
               <Label className="text-[12px] font-medium">④ 我其实在害怕什么？*</Label>
-              <Textarea
+              <ImeSafeTextarea
                 rows={3}
                 value={emoFeared}
-                onChange={e => setEmoFeared(e.target.value)}
+                onValueChange={setEmoFeared}
                 placeholder="也不是「亏钱」这种表层答案。是更底层的东西：被打脸、错过、回吐、被嘲笑、不能再翻身……"
                 className={reviewAnswerTextareaClass}
               />
@@ -1547,10 +1552,10 @@ export function PostTradeReviewSheet({
 
           <div className="space-y-1.5">
             <Label className="text-[12px] font-medium">⑤ 我自己给自己找了一个什么样的理由？*</Label>
-            <Textarea
+            <ImeSafeTextarea
               rows={2}
               value={emoExcuse}
-              onChange={e => setEmoExcuse(e.target.value)}
+              onValueChange={setEmoExcuse}
               placeholder="当时是怎么把这个动作「说圆」的？「这次不一样」/「再等等就回来了」/「信号不算明显」/「破位需要确认」……"
               className={reviewAnswerTextareaClass}
             />
@@ -1618,10 +1623,10 @@ export function PostTradeReviewSheet({
               </div>
             )}
 
-            <Textarea
+            <ImeSafeTextarea
               rows={2}
               value={emoMainStone}
-              onChange={e => setEmoMainStone(e.target.value)}
+              onValueChange={setEmoMainStone}
               placeholder="用一句话补充：选中的标签具体长什么样？例如「就是怕上一笔亏了不甘心，这单本质是找回场子」。"
               className={reviewAnswerTextareaClass}
             />
@@ -1633,10 +1638,10 @@ export function PostTradeReviewSheet({
           {/* ⑦ 下次预案 */}
           <div className="rounded-xl border border-[#0ECB81]/30 bg-[#0ECB81]/[0.04] px-3 py-3 space-y-2">
             <Label className="text-[12px] font-medium text-[#0ECB81]">⑦ 如果明天同样遇到一样的事情，我准备怎么选？*</Label>
-            <Textarea
+            <ImeSafeTextarea
               rows={3}
               value={emoNextTimePlan}
-              onChange={e => setEmoNextTimePlan(e.target.value)}
+              onValueChange={setEmoNextTimePlan}
               placeholder="不要写「我下次会冷静」。写一个动作级的预案：触发什么信号、做什么动作、不做什么动作。例如：再遇到这种快速跳价，先离开屏幕 5 分钟再决定加减仓。"
               className={reviewAnswerTextareaClass}
             />
@@ -1679,7 +1684,7 @@ export function PostTradeReviewSheet({
           side="bottom"
           className="h-[92vh] rounded-t-2xl p-0 bg-background border-t border-border flex flex-col"
           onPointerDownOutside={dismissBlocked ? e => e.preventDefault() : undefined}
-          onEscapeKeyDown={dismissBlocked ? e => e.preventDefault() : undefined}
+          onEscapeKeyDown={handleEscapeKeyDown}
           onInteractOutside={dismissBlocked ? e => e.preventDefault() : undefined}
         >
           {body}
@@ -1693,7 +1698,7 @@ export function PostTradeReviewSheet({
       <DialogContent
         className="w-[calc(100vw-32px)] max-w-[860px] h-[92vh] overflow-hidden bg-background border border-border p-0 flex flex-col gap-0 rounded-2xl shadow-2xl [&>button]:right-5 [&>button]:top-5"
         onPointerDownOutside={dismissBlocked ? e => e.preventDefault() : undefined}
-        onEscapeKeyDown={dismissBlocked ? e => e.preventDefault() : undefined}
+        onEscapeKeyDown={handleEscapeKeyDown}
         onInteractOutside={dismissBlocked ? e => e.preventDefault() : undefined}
       >
         {body}

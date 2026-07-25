@@ -2047,7 +2047,10 @@ export async function getCampaignWithLegs(
     : (dbLegs.length > 0 ? dbLegs : syntheticLegs);
   return {
     campaign: resolvedCampaign,
-    legs: resolvedLegs,
+    // 平仓评价的扩展答案在远程 schema 尚未补齐时会落入本地镜像。
+    // 战役详情、TXT/PNG 导出必须与日记列表使用同一份“远端 + 镜像”有效数据，
+    // 否则只能读到 post_reviewed_at，却会把用户已经填写的答案导成“未填写”。
+    legs: applyLocalMirror(resolvedUserId, resolvedLegs),
   };
 }
 

@@ -3,7 +3,7 @@
  * 表单 + 已保存分支列表 + 真实 vs 反事实对比表
  */
 import { useMemo, useState } from 'react';
-import { Input } from '@/components/ui/input';
+import { ImeSafeInput } from '@/components/ui/ime-safe-text-field';
 import { Button } from '@/components/ui/button';
 import { Slider } from '@/components/ui/slider';
 import { Switch } from '@/components/ui/switch';
@@ -121,9 +121,13 @@ export function CounterfactualPanel({ journal, klines, selectedBranchId, onSelec
 
         <div>
           <div className="text-[10px] text-muted-foreground mb-1">分支标签 *（≤20 字符）</div>
-          <input value={label} onChange={e => setLabel(e.target.value.slice(0, 20))}
+          <ImeSafeInput
+            value={label}
+            onValueChange={setLabel}
+            maxLength={20}
             placeholder="例如：止损更宽 / 仓位减半 / 不开仓"
-            className={inputCls} />
+            className={inputCls}
+          />
         </div>
 
         <div className="flex items-center justify-between gap-2 bg-background rounded px-2 py-1.5">
