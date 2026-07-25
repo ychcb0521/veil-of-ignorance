@@ -1398,7 +1398,7 @@ describe('layoutAnalysisFloatingLabels', () => {
       [
         { id: 'a', time: 1000, text: '▲ A1', color: '#22C55E' },
         { id: 'b', time: 1001, text: '■ TP', color: '#EAB308' },
-        { id: 'c', time: 1002, text: '● M 减仓 50%', color: '#22C55E' },
+        { id: 'c', time: 1002, text: '● M 减仓 60%', color: '#22C55E' },
         { id: 'd', time: 1020, text: '▼ Hr1', color: '#60A5FA' },
       ],
       { minTime: 1000, maxTime: 1020, width: 360 },

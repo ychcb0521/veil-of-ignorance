@@ -9,6 +9,9 @@ export const MAIN_ADD_ROLES = [
   'main_add_6',
 ] as const satisfies LegRole[];
 
+export const INITIAL_HEDGE_SIZE_PCT = 50;
+export const MIRROR_TP_REDUCTION_PCT = 60;
+
 type ExpectedLeg = {
   role: LegRole;
   label: string;
@@ -25,23 +28,23 @@ type StrategyTemplateMeta = {
 export const STRATEGY_TEMPLATES: Record<StrategyTemplate, StrategyTemplateMeta> = {
   main_dual_hedge_mirror_tp: {
     name: '主仓 + 双对冲 + 镜像止盈',
-    description: '开主力单时同时挂 2 个 50% 对冲委托 + 1 个 50% 镜像止盈委托。镜像止盈触发后取消 1 对冲，进入"已锁定不亏"状态。',
+    description: `开主力单时同时挂 2 个 ${INITIAL_HEDGE_SIZE_PCT}% 对冲委托 + 1 个 ${MIRROR_TP_REDUCTION_PCT}% 镜像止盈委托。镜像止盈触发后取消 1 对冲，进入"已锁定不亏"状态。`,
     expected_legs: [
       { role: 'main_open', label: '主力开仓', required: true },
-      { role: 'hedge_initial_a', label: '初始对冲 A（50% 仓位）', required: true },
-      { role: 'hedge_initial_b', label: '初始对冲 B（50% 仓位）', required: true },
-      { role: 'mirror_tp', label: '镜像止盈委托（50% 仓位）', required: true },
+      { role: 'hedge_initial_a', label: `初始对冲 A（${INITIAL_HEDGE_SIZE_PCT}% 仓位）`, required: true },
+      { role: 'hedge_initial_b', label: `初始对冲 B（${INITIAL_HEDGE_SIZE_PCT}% 仓位）`, required: true },
+      { role: 'mirror_tp', label: `镜像止盈委托（${MIRROR_TP_REDUCTION_PCT}% 仓位）`, required: true },
     ],
     rolling_roles: ['main_add_1', 'main_add_2', 'main_add_3', 'hedge_rolling', 'reentry_main', 'reentry_hedge'],
   },
   rolling: {
     name: '滚仓',
-    description: '与「主仓 + 双对冲 + 镜像止盈」同一套 SOP：开主力单时挂 2 个 50% 对冲 + 1 个 50% 镜像止盈，按滚动规则推进。',
+    description: `与「主仓 + 双对冲 + 镜像止盈」同一套 SOP：开主力单时挂 2 个 ${INITIAL_HEDGE_SIZE_PCT}% 对冲 + 1 个 ${MIRROR_TP_REDUCTION_PCT}% 镜像止盈，按滚动规则推进。`,
     expected_legs: [
       { role: 'main_open', label: '主力开仓', required: true },
-      { role: 'hedge_initial_a', label: '初始对冲 A（50% 仓位）', required: true },
-      { role: 'hedge_initial_b', label: '初始对冲 B（50% 仓位）', required: true },
-      { role: 'mirror_tp', label: '镜像止盈委托（50% 仓位）', required: true },
+      { role: 'hedge_initial_a', label: `初始对冲 A（${INITIAL_HEDGE_SIZE_PCT}% 仓位）`, required: true },
+      { role: 'hedge_initial_b', label: `初始对冲 B（${INITIAL_HEDGE_SIZE_PCT}% 仓位）`, required: true },
+      { role: 'mirror_tp', label: `镜像止盈委托（${MIRROR_TP_REDUCTION_PCT}% 仓位）`, required: true },
     ],
     rolling_roles: ['main_add_1', 'main_add_2', 'main_add_3', 'hedge_rolling', 'reentry_main', 'reentry_hedge'],
   },

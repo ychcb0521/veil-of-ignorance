@@ -1,6 +1,6 @@
 import { type ReactNode, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, Download, Eye, EyeOff, Info, Layers, Sparkles, Trash2 } from 'lucide-react';
+import { ArrowLeft, Download, Eye, EyeOff, FileText, Info, Layers, Sparkles, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -53,6 +53,7 @@ import {
 } from '@/lib/campaignLegExecution';
 import { buildSelectedLegVerticalLines, legRoleMarkerLabel } from '@/lib/campaignLegMarkers';
 import { exportCampaignBoardPng, type CampaignBoardPnlItem } from '@/lib/campaignLegsPngExport';
+import { exportCampaignPostReviewsTxt, reviewedCampaignLegs } from '@/lib/campaignReviewTxtExport';
 import { campaignOperationTime, buildTradeRecordLookup, journalSimulatedCloseTime } from '@/lib/objectiveOperationTime';
 import {
   deleteCounterfactual,
@@ -69,7 +70,7 @@ import {
 } from '@/lib/journalApi';
 import { summarizeCampaignPerformance, type CampaignPerformanceSummary } from '@/lib/kellySizing';
 import { formatOpportunityQuality } from '@/lib/opportunityQuality';
-import { STRATEGY_TEMPLATES } from '@/lib/strategyTemplates';
+import { MIRROR_TP_REDUCTION_PCT, STRATEGY_TEMPLATES } from '@/lib/strategyTemplates';
 import {
   buildActualSimulationParams,
   buildManualLegs,
@@ -351,7 +352,7 @@ function buildChartArtifacts(
           price: exitPrice,
           shape: 'circle',
           color: '#0ECB81',
-          label: 'M 减仓 50%',
+          label: `M 减仓 ${MIRROR_TP_REDUCTION_PCT}%`,
         });
       }
       if (leg.leg_role === 'main_open' || leg.leg_role === 'reentry_main' || leg.leg_role?.startsWith('main_add_')) {
@@ -516,6 +517,7 @@ export default function JournalCampaignDetailPage() {
   const [campaignPerformance, setCampaignPerformance] = useState<CampaignPerformanceSummary | null>(null);
   const [campaignPerformanceLoading, setCampaignPerformanceLoading] = useState(false);
   const [campaignPerformanceError, setCampaignPerformanceError] = useState<string | null>(null);
+  const reviewedLegs = useMemo(() => reviewedCampaignLegs(legs), [legs]);
 
   useLayoutEffect(() => {
     window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
@@ -1317,6 +1319,16 @@ export default function JournalCampaignDetailPage() {
     }
   };
 
+  const handleExportCampaignReviewsTxt = () => {
+    if (!campaign || reviewedLegs.length === 0) return;
+    try {
+      const fileName = exportCampaignPostReviewsTxt(campaign, reviewedLegs);
+      toast.success('平仓评价已保存为 TXT', { description: fileName });
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : String(error));
+    }
+  };
+
   const handleBackToCampaigns = () => {
     const navigationState = location.state as CampaignDetailNavigationState | null;
     if (navigationState?.fromCampaignList) {
@@ -1606,18 +1618,33 @@ export default function JournalCampaignDetailPage() {
               <Layers className="w-4 h-4 text-muted-foreground" />
               Legs 列表
             </div>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              disabled={legsExporting || legs.length === 0}
-              onClick={handleExportCampaignBoardPng}
-              className="h-7 gap-1.5 px-2 text-[11px] text-muted-foreground hover:text-foreground"
-              title="保存战役原数据、盈亏概览、当前 K 线盘面与完整 Legs 列表为高清 PNG"
-            >
-              <Download className="h-3.5 w-3.5" />
-              {legsExporting ? '生成中' : 'PNG'}
-            </Button>
+            <div className="flex items-center gap-1.5">
+              {reviewedLegs.length > 0 && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={handleExportCampaignReviewsTxt}
+                  className="h-7 gap-1.5 px-2 text-[11px] text-muted-foreground hover:text-foreground"
+                  title={`导出本战役 ${reviewedLegs.length} 条平仓评价为 TXT`}
+                >
+                  <FileText className="h-3.5 w-3.5" />
+                  评价 TXT
+                </Button>
+              )}
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={legsExporting || legs.length === 0}
+                onClick={handleExportCampaignBoardPng}
+                className="h-7 gap-1.5 px-2 text-[11px] text-muted-foreground hover:text-foreground"
+                title="保存战役原数据、盈亏概览、当前 K 线盘面与完整 Legs 列表为高清 PNG"
+              >
+                <Download className="h-3.5 w-3.5" />
+                {legsExporting ? '生成中' : 'PNG'}
+              </Button>
+            </div>
           </div>
           <CampaignLegsList
             legs={legs}

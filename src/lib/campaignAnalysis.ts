@@ -1,5 +1,10 @@
 import type { KlineData } from '@/hooks/useBinanceData';
-import { MAIN_ADD_ROLES, usesDualHedgeSop } from '@/lib/strategyTemplates';
+import {
+  INITIAL_HEDGE_SIZE_PCT,
+  MAIN_ADD_ROLES,
+  MIRROR_TP_REDUCTION_PCT,
+  usesDualHedgeSop,
+} from '@/lib/strategyTemplates';
 import { getPositionNotionalUsd } from '@/lib/tradingSettlement';
 import { buildTradeRecordLookup } from '@/lib/objectiveOperationTime';
 import { isHistoricalCampaign, type CampaignEvent, type LegRole, type TradeCampaign, type TradeJournal } from '@/types/journal';
@@ -1171,13 +1176,13 @@ export function computeSopDeviation(
   if (usesDualHedgeSop(campaign.strategy_template) && mainSize != null) {
     for (const role of ['hedge_initial_a', 'hedge_initial_b'] as const) {
       const leg = liveLegs.find(item => item.leg_role === role) ?? null;
-      if (leg && !toleranceEqual(legSize(leg), mainSize * 0.5, 0.05)) {
-        addDeduction('setup', 3, `${LEGEND[role]}仓位大小未对齐主仓 50%`, [leg.id]);
+      if (leg && !toleranceEqual(legSize(leg), mainSize * (INITIAL_HEDGE_SIZE_PCT / 100), 0.05)) {
+        addDeduction('setup', 3, `${LEGEND[role]}仓位大小未对齐主仓 ${INITIAL_HEDGE_SIZE_PCT}%`, [leg.id]);
       }
     }
     const mirrorLeg = liveLegs.find(item => item.leg_role === 'mirror_tp') ?? null;
-    if (mirrorLeg && !toleranceEqual(legSize(mirrorLeg), mainSize * 0.5, 0.05)) {
-      addDeduction('setup', 3, 'mirror_tp 仓位大小未对齐主仓 50%', [mirrorLeg.id]);
+    if (mirrorLeg && !toleranceEqual(legSize(mirrorLeg), mainSize * (MIRROR_TP_REDUCTION_PCT / 100), 0.05)) {
+      addDeduction('setup', 3, `mirror_tp 仓位大小未对齐主仓 ${MIRROR_TP_REDUCTION_PCT}%`, [mirrorLeg.id]);
     }
   }
 
@@ -1209,8 +1214,12 @@ export function computeSopDeviation(
       addDeduction('lockin', 15, 'mirror_tp 触发后取消了 2 个 hedge', cancelWithinFive.map(event => event.id));
     }
     const mirrorLeg = liveLegs.find(leg => leg.leg_role === 'mirror_tp') ?? null;
-    if (mirrorLeg && mainSize != null && !toleranceEqual(legSize(mirrorLeg), mainSize * 0.5, 0.05)) {
-      addDeduction('lockin', 5, '主力部分平仓比例不等于 50%', [mirrorLeg.id]);
+    if (
+      mirrorLeg &&
+      mainSize != null &&
+      !toleranceEqual(legSize(mirrorLeg), mainSize * (MIRROR_TP_REDUCTION_PCT / 100), 0.05)
+    ) {
+      addDeduction('lockin', 5, `主力部分平仓比例不等于 ${MIRROR_TP_REDUCTION_PCT}%`, [mirrorLeg.id]);
     }
   }
 

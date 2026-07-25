@@ -5,6 +5,10 @@ import {
   type LegExitPriceCorrections,
 } from '@/lib/campaignLegExecution';
 import { buildTradeRecordLookup } from '@/lib/objectiveOperationTime';
+import {
+  INITIAL_HEDGE_SIZE_PCT,
+  MIRROR_TP_REDUCTION_PCT,
+} from '@/lib/strategyTemplates';
 import type {
   CampaignCounterfactualEvent,
   CampaignCounterfactualLegSummary,
@@ -1089,7 +1093,7 @@ function inferActualParams(
     },
     mirror_tp: {
       offset_pct: offsetPct(mirror?.pre_entry_price ?? null, entryDirection === 'long' ? 2 : -2),
-      size_pct: mirror ? sizePct(mirror.pre_position_size, 50) : 0,
+      size_pct: mirror ? sizePct(mirror.pre_position_size, MIRROR_TP_REDUCTION_PCT) : 0,
     },
     rolling: {
       enabled: rollingLegs.length > 0,
@@ -1137,9 +1141,9 @@ export function buildPureSopParams(campaign: TradeCampaign, legs: TradeJournal[]
   }
   return {
     ...actual,
-    hedge_a: { offset_pct: isLong ? -2 : 2, size_pct: 50 },
-    hedge_b: { offset_pct: isLong ? -4 : 4, size_pct: 50 },
-    mirror_tp: { offset_pct: isLong ? 2 : -2, size_pct: 50 },
+    hedge_a: { offset_pct: isLong ? -2 : 2, size_pct: INITIAL_HEDGE_SIZE_PCT },
+    hedge_b: { offset_pct: isLong ? -4 : 4, size_pct: INITIAL_HEDGE_SIZE_PCT },
+    mirror_tp: { offset_pct: isLong ? 2 : -2, size_pct: MIRROR_TP_REDUCTION_PCT },
     rolling: {
       enabled: true,
       trigger_rise_pct: 10,
@@ -1162,35 +1166,40 @@ function applyDeductionFix(
   const reason = deduction.reason;
 
   if (reason.includes('缺少 初始对冲 A')) {
-    params.hedge_a = { offset_pct: isLong ? -2 : 2, size_pct: 50 };
+    params.hedge_a = { offset_pct: isLong ? -2 : 2, size_pct: INITIAL_HEDGE_SIZE_PCT };
     return { params, fix_description: '补齐 hedge_a' };
   }
   if (reason.includes('缺少 初始对冲 B')) {
-    params.hedge_b = { offset_pct: isLong ? -4 : 4, size_pct: 50 };
+    params.hedge_b = { offset_pct: isLong ? -4 : 4, size_pct: INITIAL_HEDGE_SIZE_PCT };
     return { params, fix_description: '补齐 hedge_b' };
   }
   if (reason.includes('缺少 mirror_tp')) {
-    params.mirror_tp = { offset_pct: isLong ? 2 : -2, size_pct: 50 };
+    params.mirror_tp = { offset_pct: isLong ? 2 : -2, size_pct: MIRROR_TP_REDUCTION_PCT };
     return { params, fix_description: '补齐 mirror_tp' };
   }
   if (reason.includes('hedge_initial_a仓位大小未对齐主仓 50%') || reason.includes('初始对冲 A仓位大小未对齐主仓 50%')) {
-    params.hedge_a.size_pct = 50;
-    return { params, fix_description: '将 hedge_a 调整为主仓 50%' };
+    params.hedge_a.size_pct = INITIAL_HEDGE_SIZE_PCT;
+    return { params, fix_description: `将 hedge_a 调整为主仓 ${INITIAL_HEDGE_SIZE_PCT}%` };
   }
   if (reason.includes('hedge_initial_b仓位大小未对齐主仓 50%') || reason.includes('初始对冲 B仓位大小未对齐主仓 50%')) {
-    params.hedge_b.size_pct = 50;
-    return { params, fix_description: '将 hedge_b 调整为主仓 50%' };
+    params.hedge_b.size_pct = INITIAL_HEDGE_SIZE_PCT;
+    return { params, fix_description: `将 hedge_b 调整为主仓 ${INITIAL_HEDGE_SIZE_PCT}%` };
   }
-  if (reason.includes('mirror_tp 仓位大小未对齐主仓 50%') || reason.includes('主力部分平仓比例不等于 50%')) {
-    params.mirror_tp.size_pct = 50;
-    return { params, fix_description: '将 mirror_tp 调整为主仓 50%' };
+  if (
+    reason.includes('mirror_tp 仓位大小未对齐主仓 50%') ||
+    reason.includes(`mirror_tp 仓位大小未对齐主仓 ${MIRROR_TP_REDUCTION_PCT}%`) ||
+    reason.includes('主力部分平仓比例不等于 50%') ||
+    reason.includes(`主力部分平仓比例不等于 ${MIRROR_TP_REDUCTION_PCT}%`)
+  ) {
+    params.mirror_tp.size_pct = MIRROR_TP_REDUCTION_PCT;
+    return { params, fix_description: `将 mirror_tp 调整为主仓 ${MIRROR_TP_REDUCTION_PCT}%` };
   }
   if (reason.includes('mirror_tp 触发后 5 分钟内未取消任一 hedge')) {
     return { params, fix_description: '按时取消 hedge_b' };
   }
   if (reason.includes('mirror_tp 触发后取消了 2 个 hedge')) {
-    params.hedge_a.size_pct = 50;
-    params.hedge_b.size_pct = 50;
+    params.hedge_a.size_pct = INITIAL_HEDGE_SIZE_PCT;
+    params.hedge_b.size_pct = INITIAL_HEDGE_SIZE_PCT;
     return { params, fix_description: '仅取消 hedge_b，保留 1 个防守 hedge' };
   }
   if (reason.includes('新 hedge 价格相对旧 hedge 发生反向滚动')) {

@@ -8,11 +8,13 @@ import JournalCampaignDetailPage from '../JournalCampaignDetailPage';
 const scrollToMock = vi.fn();
 const {
   exportCampaignBoardPngMock,
+  exportCampaignPostReviewsTxtMock,
   listCounterfactualsMock,
   replayVisibleRanges,
   replayAnnotationSnapshots,
 } = vi.hoisted(() => ({
   exportCampaignBoardPngMock: vi.fn(async (_input: CampaignBoardExportInput) => 'BTCUSDT campaign.png'),
+  exportCampaignPostReviewsTxtMock: vi.fn(() => 'BTCUSDT review.txt'),
   listCounterfactualsMock: vi.fn(async () => [] as CampaignCounterfactual[]),
   replayVisibleRanges: [] as Array<{ start: number; end: number }>,
   replayAnnotationSnapshots: [] as Array<{
@@ -26,6 +28,7 @@ beforeEach(() => {
   window.localStorage.clear();
   scrollToMock.mockClear();
   exportCampaignBoardPngMock.mockClear();
+  exportCampaignPostReviewsTxtMock.mockClear();
   listCounterfactualsMock.mockReset();
   listCounterfactualsMock.mockResolvedValue([]);
   replayVisibleRanges.length = 0;
@@ -86,6 +89,7 @@ const { campaigns, detailsById } = vi.hoisted(() => {
       post_simulated_close_time: '2026-01-01T01:00:00.000Z',
       post_real_close_time: '2026-07-19T11:00:00.000Z',
       post_realized_pnl: null,
+      post_reviewed_at: '2026-07-19T11:05:00.000Z',
     } as TradeJournal,
     {
       id: `${campaignId}-hedge-a`,
@@ -205,6 +209,13 @@ vi.mock('@/lib/campaignLegsPngExport', async importOriginal => {
   return {
     ...actual,
     exportCampaignBoardPng: exportCampaignBoardPngMock,
+  };
+});
+vi.mock('@/lib/campaignReviewTxtExport', async importOriginal => {
+  const actual = await importOriginal<typeof import('@/lib/campaignReviewTxtExport')>();
+  return {
+    ...actual,
+    exportCampaignPostReviewsTxt: exportCampaignPostReviewsTxtMock,
   };
 });
 
@@ -419,5 +430,12 @@ describe('JournalCampaignDetailPage metrics', () => {
       '今日账户总资产',
     ]);
     expect(exportInput.pnlOverview.note).toContain('2 场有效战役，实时胜率 50.00%');
+
+    fireEvent.click(screen.getByRole('button', { name: '评价 TXT' }));
+    expect(exportCampaignPostReviewsTxtMock).toHaveBeenCalledTimes(1);
+    expect(exportCampaignPostReviewsTxtMock).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'winner' }),
+      [expect.objectContaining({ id: 'winner-main' })],
+    );
   });
 });

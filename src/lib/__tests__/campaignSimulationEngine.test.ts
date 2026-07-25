@@ -4,12 +4,14 @@ import type { KlineData } from '@/hooks/useBinanceData';
 import type {
   CampaignCounterfactualManualLeg,
   CampaignCounterfactualParams,
+  TradeCampaign,
   TradeJournal,
 } from '@/types/journal';
 import type { TradeRecord } from '@/types/trading';
 
 import {
   buildManualLegs,
+  buildPureSopParams,
   computeManualLegDeviationCosts,
   manualLegPnl,
   simulateCampaign,
@@ -275,6 +277,30 @@ describe('simulateCampaign', () => {
     expect(result.legs_summary).toHaveLength(2);
     expect(result.legs_summary.some(leg => leg.leg_role === 'mirror_tp')).toBe(false);
     expect(result.state_segments[0]?.state).toBe('manual_legs');
+  });
+});
+
+describe('buildPureSopParams', () => {
+  it('keeps initial hedges at 50% and changes mirror main reduction to 60%', () => {
+    const campaign = {
+      direction: 'main_long',
+      strategy_template: 'main_dual_hedge_mirror_tp',
+    } as TradeCampaign;
+    const mainLeg = {
+      id: 'main',
+      leg_role: 'main_open',
+      direction: 'long',
+      pre_simulated_time: new Date(t0).toISOString(),
+      pre_entry_price: 100,
+      pre_position_size: 1_000,
+      leverage: 1,
+    } as TradeJournal;
+
+    const params = buildPureSopParams(campaign, [mainLeg]);
+
+    expect(params?.hedge_a.size_pct).toBe(50);
+    expect(params?.hedge_b.size_pct).toBe(50);
+    expect(params?.mirror_tp.size_pct).toBe(60);
   });
 });
 
