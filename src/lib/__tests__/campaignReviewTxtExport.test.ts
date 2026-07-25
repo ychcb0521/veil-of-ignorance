@@ -125,6 +125,52 @@ describe('campaignReviewTxtExport', () => {
     expect(output).not.toContain('问题：这个对冲值回成本了吗？');
   });
 
+  it('不因当前适用条件变化而遗漏已经保存的历史答案', () => {
+    const audit = emptyCloseReviewAuditAnswers();
+    audit.decision_basis = '虽然是未入场记录，但这条自审答案已经保存。';
+
+    const output = buildCampaignPostReviewsTxt(campaign, [
+      makeLeg({
+        direction: 'no_entry',
+        order_kind: 'main',
+        post_outcome: 'breakeven',
+        post_result_summary: '旧记录仍保存了结果总结。',
+        post_decision_quality: 'mixed',
+        hedge_worth_it: 'partial',
+        post_missed_high_odds_state: 'under_sized',
+        post_opponent_was_right: false,
+        post_entry_payoff_estimate_grade: 'rr_gt_5',
+        post_entry_payoff_basis_review: '旧版评估认为目标空间超过五倍。',
+        post_reflection: buildCloseReviewReflectionText('', audit),
+      }),
+    ]);
+
+    expect(output).toContain('问题：结果复盘总结是什么？\n答案：旧记录仍保存了结果总结。');
+    expect(output).toContain('问题：这笔交易的决策质量如何？\n答案：混合 / 未明确');
+    expect(output).toContain('问题：这个对冲值回成本了吗？\n答案：部分');
+    expect(output).toContain('问题：是否踏空高盈亏比结构，或者该重没重？\n答案：该重没重');
+    expect(output).toContain('问题：反对者的判断后来被证明是对的吗？\n答案：否');
+    expect(output).toContain('问题：建仓时盈亏比估计属于哪一档？\n答案：>5:1');
+    expect(output).toContain('问题：建仓时盈亏比估计的复盘说明是什么？\n答案：旧版评估认为目标空间超过五倍。');
+    expect(output).toContain('答案：虽然是未入场记录，但这条自审答案已经保存。');
+  });
+
+  it('完整导出旧版路径复盘中已经保存的全部题目与答案', () => {
+    const output = buildCampaignPostReviewsTxt(campaign, [
+      makeLeg({
+        post_path_first_move: 'immediate_drawdown',
+        post_path_drawdown: 'over_stop',
+        post_path_win_quality: 'dragged_win',
+        post_path_agency_note: '被动等待后才重新拿回主动权。',
+      }),
+    ]);
+
+    expect(output).toContain('问题：旧版路径复盘：开仓后的第一段走势如何？\n答案：上来先水下');
+    expect(output).toContain('问题：旧版路径复盘：持仓途中经历了怎样的浮亏？\n答案：浮亏打到 / 越过止损');
+    expect(output).toContain('问题：旧版路径复盘：这笔赢单的质量如何？\n答案：扛出来的赢单');
+    expect(output).toContain('问题：旧版路径复盘：主动权补充说明是什么？\n答案：被动等待后才重新拿回主动权。');
+  });
+
   it('每个问题答案块之间保留一个空行，并区分同一战役的多个评价仓位', () => {
     const output = buildCampaignPostReviewsTxt(campaign, [
       makeLeg({

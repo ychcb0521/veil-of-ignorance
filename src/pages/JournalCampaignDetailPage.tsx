@@ -1774,7 +1774,7 @@ export default function JournalCampaignDetailPage() {
                   size="sm"
                   onClick={handleExportCampaignEmotionDiaryTxt}
                   className="h-7 gap-1.5 px-2 text-[11px] text-muted-foreground hover:text-foreground"
-                  title={`导出 ${campaignOperationDate ?? '操作日'} 的决策者情绪日记为 TXT`}
+                  title={`导出 ${campaignOperationDate ?? '操作日'} 的情绪日记为 TXT`}
                 >
                   <FileText className="h-3.5 w-3.5" />
                   情绪 TXT

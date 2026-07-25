@@ -57,6 +57,26 @@ const PATH_MODE_LABELS: Record<string, string> = {
   mirror_take_profit_1r: '1:1 镜像止盈',
 };
 
+const PATH_FIRST_MOVE_LABELS: Record<string, string> = {
+  immediate_profit: '第一段即盈利',
+  immediate_drawdown: '上来先水下',
+  unclear: '第一段看不清',
+};
+
+const PATH_DRAWDOWN_LABELS: Record<string, string> = {
+  none_or_shallow: '无有效浮亏',
+  meaningful: '经历有效浮亏',
+  over_stop: '浮亏打到 / 越过止损',
+  unclear: '浮亏路径看不清',
+};
+
+const PATH_WIN_QUALITY_LABELS: Record<string, string> = {
+  clean_win: '干净赢单',
+  dragged_win: '扛出来的赢单',
+  not_win: '非赢单',
+  unclear: '赢单质量看不清',
+};
+
 const TRADE_AGENCY_LABELS: Record<string, string> = {
   '1': '1 · 完全被动',
   '2': '2 · 勉强可控',
@@ -141,6 +161,19 @@ function buildLegQuestionAnswers(leg: TradeJournal): QuestionAnswer[] {
       || leg.pre_odds_structure === 'against_crowd_unreleased'
       || (leg.pre_opportunity_cost_worth === true && leg.pre_cheap_opportunity === 'cheap')
     );
+  const hasEntryEstimateAnswer = [
+    leg.post_entry_payoff_estimate_grade,
+    leg.post_entry_payoff_basis_review,
+    leg.post_entry_win_rate_estimate_grade,
+    leg.post_entry_win_rate_basis_review,
+    leg.post_opportunity_quality_payoff_ratio,
+    leg.post_opportunity_quality_drawdown_pct,
+    leg.post_path_mode,
+    leg.post_trade_agency_score,
+    leg.post_struggle_level,
+  ].some(isAnswered);
+  const hasCloseAuditAnswer = CLOSE_REVIEW_AUDIT_QUESTIONS
+    .some(question => isAnswered(reflection.answers[question.key]));
   const opportunityQuality = computeOpportunityQuality({
     payoffRatio: leg.post_opportunity_quality_payoff_ratio,
     drawdownPct: leg.post_opportunity_quality_drawdown_pct,
@@ -149,11 +182,15 @@ function buildLegQuestionAnswers(leg: TradeJournal): QuestionAnswer[] {
   addCurrent(answers, '这笔交易的结果是什么？', leg.post_outcome, OUTCOME_LABEL);
   addCurrent(answers, '这笔交易的已实现盈亏是多少？', leg.post_realized_pnl);
   addCurrent(answers, '这笔交易最终实现了多少 R？', leg.post_r_multiple);
-  if (quadrantApplicable) {
+  if (
+    quadrantApplicable
+    || isAnswered(leg.post_result_summary)
+    || isAnswered(leg.post_decision_quality)
+  ) {
     addCurrent(answers, '结果复盘总结是什么？', leg.post_result_summary);
     addCurrent(answers, '这笔交易的决策质量如何？', leg.post_decision_quality, DECISION_QUALITY_LABELS);
   }
-  if (isHedge) {
+  if (isHedge || isAnswered(leg.hedge_worth_it)) {
     addCurrent(answers, '这个对冲值回成本了吗？', leg.hedge_worth_it, HEDGE_WORTH_IT_LABELS);
   }
 
@@ -187,7 +224,7 @@ function buildLegQuestionAnswers(leg: TradeJournal): QuestionAnswer[] {
     addCurrent(answers, '这份对冲保险有没有值回摩擦成本？', oddsReview.body || leg.post_positive_expectancy_review);
   }
 
-  if (!isHedge && !isNoEntry) {
+  if ((!isHedge && !isNoEntry) || hasEntryEstimateAnswer) {
     addCurrent(
       answers,
       '建仓时盈亏比估计属于哪一档？',
@@ -225,7 +262,7 @@ function buildLegQuestionAnswers(leg: TradeJournal): QuestionAnswer[] {
     leg.post_small_position_drag,
     SITUATION_HANDLING_ALL_LABELS,
   );
-  if (showMissedHighOddsState) {
+  if (showMissedHighOddsState || isAnswered(leg.post_missed_high_odds_state)) {
     addCurrent(
       answers,
       '是否踏空高盈亏比结构，或者该重没重？',
@@ -233,11 +270,11 @@ function buildLegQuestionAnswers(leg: TradeJournal): QuestionAnswer[] {
       MISSED_HIGH_ODDS_LABELS,
     );
   }
-  if (isAnswered(leg.pre_opponent_statement)) {
+  if (isAnswered(leg.pre_opponent_statement) || isAnswered(leg.post_opponent_was_right)) {
     addCurrent(answers, '反对者的判断后来被证明是对的吗？', leg.post_opponent_was_right);
   }
 
-  if (!isNoEntry) {
+  if (!isNoEntry || hasCloseAuditAnswer) {
     for (const question of CLOSE_REVIEW_AUDIT_QUESTIONS) {
       addCurrent(answers, question.question, reflection.answers[question.key]);
     }
@@ -259,6 +296,25 @@ function buildLegQuestionAnswers(leg: TradeJournal): QuestionAnswer[] {
   // 只在旧记录确实有答案时追加，既保留历史信息，也避免给新评价凭空增加空题。
   addHistorical(answers, '平仓复盘还有哪些补充？', reflection.legacyText);
   addHistorical(answers, '下一次最应该坚持或修正的动作是什么？', leg.post_correct_action);
+  addHistorical(
+    answers,
+    '旧版路径复盘：开仓后的第一段走势如何？',
+    leg.post_path_first_move,
+    PATH_FIRST_MOVE_LABELS,
+  );
+  addHistorical(
+    answers,
+    '旧版路径复盘：持仓途中经历了怎样的浮亏？',
+    leg.post_path_drawdown,
+    PATH_DRAWDOWN_LABELS,
+  );
+  addHistorical(
+    answers,
+    '旧版路径复盘：这笔赢单的质量如何？',
+    leg.post_path_win_quality,
+    PATH_WIN_QUALITY_LABELS,
+  );
+  addHistorical(answers, '旧版路径复盘：主动权补充说明是什么？', leg.post_path_agency_note);
   addHistorical(answers, '五步诊断：我的目标是什么？', leg.post_five_step_goal);
   addHistorical(answers, '五步诊断：阻碍目标实现的问题是什么？', leg.post_five_step_problem);
   addHistorical(answers, '五步诊断：近因是什么？', leg.post_proximate_cause);

@@ -10,12 +10,16 @@ import {
   diaryToDraft,
   emotionDiaryCompletion,
   emptyEmotionDiaryDraft,
+  HADS_ANXIETY_QUESTIONS,
+  HADS_DEPRESSION_QUESTIONS,
   hadsBand,
   isCompleteHadsScores,
   isEmotionDiaryDraftComplete,
+  SAM_SCALE_QUESTIONS,
   samDescriptor,
   scoreHadsSubscale,
 } from '@/lib/emotionDiary';
+import type { HadsQuestion } from '@/lib/emotionDiary';
 import {
   listDecisionEmotionDiaries,
   saveDecisionEmotionDiary,
@@ -60,61 +64,59 @@ function bandClass(key: ReturnType<typeof hadsBand>['key']): string {
 function SamScale({
   dimension,
   label,
-  lowLabel,
-  highLabel,
   value,
   onChange,
 }: {
   dimension: SamDimension;
   label: string;
-  lowLabel: string;
-  highLabel: string;
   value: number | null;
   onChange: (score: number) => void;
 }) {
+  const question = SAM_SCALE_QUESTIONS[dimension];
   return (
-    <div className="space-y-2">
+    <div className="space-y-3">
       <div className="flex items-baseline justify-between gap-3">
         <div className="text-[12px] font-medium">{label}</div>
         <div className="font-mono text-[11px] text-muted-foreground">
           {value == null ? '未选择' : `${value}/9 · ${samDescriptor(dimension, value)}`}
         </div>
       </div>
-      <div className="grid grid-cols-9 gap-1" role="radiogroup" aria-label={label}>
-        {Array.from({ length: 9 }, (_, index) => index + 1).map(score => (
+      <p className="min-h-10 text-[11px] leading-5 text-foreground">{question.prompt}</p>
+      <div className="grid grid-cols-3 gap-1.5" role="radiogroup" aria-label={`${label}：${question.prompt}`}>
+        {question.options.map(option => (
           <button
-            key={score}
+            key={option.score}
             type="button"
             role="radio"
-            aria-checked={value === score}
-            onClick={() => onChange(score)}
-            className={`h-8 rounded border text-[11px] font-mono transition-colors ${
-              value === score
-                ? 'border-[#F0B90B] bg-[#F0B90B] text-black'
+            aria-checked={value === option.score}
+            onClick={() => onChange(option.score)}
+            className={`flex min-h-10 items-center gap-1.5 rounded border px-2 py-1.5 text-left transition-colors ${
+              value === option.score
+                ? 'border-[#F0B90B] bg-[#F0B90B]/12 text-foreground'
                 : 'border-border bg-background text-muted-foreground hover:border-foreground/25 hover:text-foreground'
             }`}
           >
-            {score}
+            <span className={`font-mono text-[10px] ${
+              value === option.score ? 'text-[#D89B00]' : 'text-muted-foreground/70'
+            }`}>
+              {option.score}
+            </span>
+            <span className="text-[10px] leading-4">{option.label}</span>
           </button>
         ))}
-      </div>
-      <div className="flex justify-between text-[10px] text-muted-foreground">
-        <span>1 · {lowLabel}</span>
-        <span>5 · 中间位置</span>
-        <span>9 · {highLabel}</span>
       </div>
     </div>
   );
 }
 
 function HadsSubscale({
-  code,
   label,
+  questions,
   values,
   onChange,
 }: {
-  code: 'A' | 'D';
   label: string;
+  questions: ReadonlyArray<HadsQuestion>;
   values: Array<HadsItemScore | null>;
   onChange: (next: Array<HadsItemScore | null>) => void;
 }) {
@@ -127,7 +129,7 @@ function HadsSubscale({
       <div className="h-11 px-3 border-b border-border flex items-center justify-between gap-3">
         <div>
           <div className="text-[12px] font-medium">{label}</div>
-          <div className="text-[10px] text-muted-foreground">授权题本计分位 {code}1–{code}7</div>
+          <div className="text-[10px] text-muted-foreground">过去一周 · 7 道题 · 每题选择一项</div>
         </div>
         {band ? (
           <div className={`rounded border px-2 py-1 text-[10px] font-mono ${bandClass(band.key)}`}>
@@ -140,33 +142,50 @@ function HadsSubscale({
         )}
       </div>
       <div className="divide-y divide-border/70">
-        {values.map((value, index) => (
-          <div key={`${code}${index + 1}`} className="h-10 px-3 flex items-center gap-3">
-            <div className="w-8 font-mono text-[11px] text-muted-foreground">{code}{index + 1}</div>
-            <div className="ml-auto grid w-[176px] grid-cols-4 gap-1" role="radiogroup" aria-label={`${label} ${code}${index + 1}`}>
-              {([0, 1, 2, 3] as HadsItemScore[]).map(itemScore => (
-                <button
-                  key={itemScore}
-                  type="button"
-                  role="radio"
-                  aria-checked={value === itemScore}
-                  onClick={() => {
-                    const next = [...values];
-                    next[index] = itemScore;
-                    onChange(next);
-                  }}
-                  className={`h-7 rounded border text-[10px] font-mono transition-colors ${
-                    value === itemScore
-                      ? 'border-[#F0B90B] bg-[#F0B90B]/15 text-[#D89B00]'
-                      : 'border-border bg-background text-muted-foreground hover:text-foreground'
-                  }`}
-                >
-                  {itemScore}
-                </button>
-              ))}
+        {questions.map((question, index) => {
+          const value = values[index];
+          return (
+            <div key={question.code} className="space-y-2.5 px-3 py-3">
+              <div className="flex items-start gap-2">
+                <span className="mt-0.5 shrink-0 font-mono text-[10px] text-muted-foreground">
+                  {question.code}
+                </span>
+                <p className="text-[11px] leading-5 text-foreground">{question.prompt}</p>
+              </div>
+              <div
+                className="grid gap-1.5 sm:grid-cols-2"
+                role="radiogroup"
+                aria-label={`${label} ${question.code}：${question.prompt}`}
+              >
+                {question.options.map(option => (
+                  <button
+                    key={option.score}
+                    type="button"
+                    role="radio"
+                    aria-checked={value === option.score}
+                    onClick={() => {
+                      const next = [...values];
+                      next[index] = option.score;
+                      onChange(next);
+                    }}
+                    className={`flex min-h-8 items-center gap-2 rounded border px-2 py-1.5 text-left text-[10px] leading-4 transition-colors ${
+                      value === option.score
+                        ? 'border-[#F0B90B] bg-[#F0B90B]/12 text-foreground'
+                        : 'border-border bg-background text-muted-foreground hover:border-foreground/25 hover:text-foreground'
+                    }`}
+                  >
+                    <span className={`font-mono ${
+                      value === option.score ? 'text-[#D89B00]' : 'text-muted-foreground/70'
+                    }`}>
+                      {option.score}
+                    </span>
+                    <span>{option.label}</span>
+                  </button>
+                ))}
+              </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );
@@ -270,7 +289,7 @@ export default function JournalEmotionDiaryPage() {
           .sort((a, b) => b.diary_date.localeCompare(a.diary_date))
       ));
       setDraft(diaryToDraft(saved));
-      toast.success('决策者情绪日记已保存', {
+      toast.success('情绪日记已保存', {
         description: `HADS-A ${saved.hads_anxiety_score} · HADS-D ${saved.hads_depression_score}`,
       });
     } catch (error) {
@@ -286,7 +305,7 @@ export default function JournalEmotionDiaryPage() {
         <div className="mx-auto flex max-w-[1440px] items-center gap-3 px-6 py-3">
           <BackButton />
           <div>
-            <h1 className="text-[14px] font-medium">决策者情绪日记</h1>
+            <h1 className="text-[14px] font-medium">情绪日记</h1>
             <p className="text-[10px] text-muted-foreground">把交易日的情绪背景留在决策记录旁边</p>
           </div>
           <div className="ml-auto hidden items-center gap-2 text-[10px] text-muted-foreground sm:flex">
@@ -360,25 +379,21 @@ export default function JournalEmotionDiaryPage() {
 
             <section className="border border-border bg-card">
               <div className="border-b border-border px-4 py-3">
-                <h2 className="text-[13px] font-medium">当日情绪状态</h2>
+                <h2 className="text-[13px] font-medium">当日情绪状态量表（SAM）</h2>
                 <p className="mt-0.5 text-[10px] text-muted-foreground">
-                  Self-Assessment Manikin（SAM）双维 1–9 评分；两个维度彼此独立。
+                  分别回答情绪效价与唤醒度两道题；两个维度彼此独立，均采用 1–9 评分。
                 </p>
               </div>
               <div className="grid gap-5 p-4 md:grid-cols-2">
                 <SamScale
                   dimension="valence"
                   label="情绪效价"
-                  lowLabel="非常不愉悦"
-                  highLabel="非常愉悦"
                   value={draft.sam_valence}
                   onChange={samValence => setDraft(current => ({ ...current, sam_valence: samValence }))}
                 />
                 <SamScale
                   dimension="arousal"
                   label="情绪唤醒度"
-                  lowLabel="非常平静"
-                  highLabel="非常激活"
                   value={draft.sam_arousal}
                   onChange={samArousal => setDraft(current => ({ ...current, sam_arousal: samArousal }))}
                 />
@@ -391,7 +406,9 @@ export default function JournalEmotionDiaryPage() {
                   <div>
                     <h2 className="text-[13px] font-medium">医院焦虑抑郁量表（HADS-14）</h2>
                     <p className="mt-0.5 max-w-[820px] text-[10px] leading-5 text-muted-foreground">
-                      HADS 题目与译文受版权保护。请对照获授权的 14 题题本，把每题经评分键换算后的 0–3 分录入对应位置；系统按焦虑 7 题、抑郁 7 题分别计分。
+                      请根据过去一周的真实状态直接完成以下 14 题。题目是按 HADS
+                      症状维度撰写的中文作答提示，并非授权标准译本；系统按焦虑 7 题、抑郁 7
+                      题分别计分。
                     </p>
                   </div>
                   <div className="rounded border border-border bg-background px-2.5 py-1.5 text-[10px] text-muted-foreground">
@@ -401,20 +418,20 @@ export default function JournalEmotionDiaryPage() {
               </div>
               <div className="grid gap-4 p-4 md:grid-cols-2">
                 <HadsSubscale
-                  code="A"
                   label="焦虑分量表"
+                  questions={HADS_ANXIETY_QUESTIONS}
                   values={draft.hads_anxiety_scores}
                   onChange={scores => setDraft(current => ({ ...current, hads_anxiety_scores: scores }))}
                 />
                 <HadsSubscale
-                  code="D"
                   label="抑郁分量表"
+                  questions={HADS_DEPRESSION_QUESTIONS}
                   values={draft.hads_depression_scores}
                   onChange={scores => setDraft(current => ({ ...current, hads_depression_scores: scores }))}
                 />
               </div>
               <div className="border-t border-border px-4 py-2 text-[10px] leading-5 text-muted-foreground">
-                HADS 是筛查工具，不构成临床诊断；两个分量表应分别解释，不合并成一个总分。
+                HADS 是筛查工具，不构成临床诊断；两个分量表应分别解释，不合并成一个总分。正式临床或研究使用应采用获授权的标准版本。
               </div>
             </section>
 

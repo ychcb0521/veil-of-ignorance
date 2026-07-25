@@ -139,7 +139,7 @@ export async function saveDecisionEmotionDiary(
   }
   if (!isCompleteHadsScores(draft.hads_anxiety_scores)
     || !isCompleteHadsScores(draft.hads_depression_scores)) {
-    throw new Error('请完成 HADS 的 14 个授权题本计分位');
+    throw new Error('请完成焦虑与抑郁自评的全部 14 道题目');
   }
 
   const now = new Date().toISOString();

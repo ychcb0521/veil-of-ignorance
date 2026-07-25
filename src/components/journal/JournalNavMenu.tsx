@@ -60,7 +60,7 @@ function useNavItems(
     {
       key: 'emotion-diary',
       icon: NotebookPen,
-      label: '决策者情绪日记',
+      label: '情绪日记',
       action: () => nav('/journal/emotion-diary'),
       isActive: () => loc.pathname === '/journal/emotion-diary',
     },

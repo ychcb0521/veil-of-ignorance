@@ -3,8 +3,11 @@ import {
   buildEmotionDiaryExportSummary,
   emptyEmotionDiaryDraft,
   emotionDiaryCompletion,
+  HADS_ANXIETY_QUESTIONS,
+  HADS_DEPRESSION_QUESTIONS,
   hadsBand,
   isEmotionDiaryDraftComplete,
+  SAM_SCALE_QUESTIONS,
   samDescriptor,
   scoreHadsSubscale,
 } from '@/lib/emotionDiary';
@@ -33,6 +36,19 @@ describe('decision emotion diary scoring', () => {
     expect(() => scoreHadsSubscale([0, 1, 2])).toThrow();
   });
 
+  it('为焦虑和抑郁分量表提供 14 道可直接作答的具体题目', () => {
+    expect(HADS_ANXIETY_QUESTIONS).toHaveLength(7);
+    expect(HADS_DEPRESSION_QUESTIONS).toHaveLength(7);
+
+    const questions = [...HADS_ANXIETY_QUESTIONS, ...HADS_DEPRESSION_QUESTIONS];
+    expect(new Set(questions.map(question => question.code)).size).toBe(14);
+    questions.forEach(question => {
+      expect(question.prompt.length).toBeGreaterThan(10);
+      expect(question.options.map(option => option.score)).toEqual([0, 1, 2, 3]);
+      expect(question.options.every(option => option.label.length > 0)).toBe(true);
+    });
+  });
+
   it('使用 HADS 正式分量表区间边界', () => {
     expect(hadsBand(0).key).toBe('normal');
     expect(hadsBand(7).key).toBe('normal');
@@ -47,6 +63,17 @@ describe('decision emotion diary scoring', () => {
     expect(samDescriptor('valence', 7)).toBe('偏正性');
     expect(samDescriptor('arousal', 2)).toBe('低唤醒');
     expect(samDescriptor('arousal', 9)).toBe('高唤醒');
+  });
+
+  it('为情绪效价和唤醒度提供具体题目及完整的 1–9 档含义', () => {
+    Object.values(SAM_SCALE_QUESTIONS).forEach(question => {
+      expect(question.prompt.length).toBeGreaterThan(10);
+      expect(question.options).toHaveLength(9);
+      expect(question.options.map(option => option.score)).toEqual([
+        1, 2, 3, 4, 5, 6, 7, 8, 9,
+      ]);
+      expect(question.options.every(option => option.label.length > 0)).toBe(true);
+    });
   });
 
   it('只有事件、SAM 和两个 HADS 分量表全部完成后才允许保存', () => {
