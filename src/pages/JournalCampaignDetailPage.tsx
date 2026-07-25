@@ -54,6 +54,10 @@ import {
 import { buildSelectedLegVerticalLines, legRoleMarkerLabel } from '@/lib/campaignLegMarkers';
 import { exportCampaignBoardPng, type CampaignBoardPnlItem } from '@/lib/campaignLegsPngExport';
 import { exportCampaignPostReviewsTxt, reviewedCampaignLegs } from '@/lib/campaignReviewTxtExport';
+import {
+  exportCampaignOpeningSnapshotsTxt,
+  openingSnapshotCampaignLegs,
+} from '@/lib/campaignSnapshotTxtExport';
 import { campaignOperationTime, buildTradeRecordLookup, journalSimulatedCloseTime } from '@/lib/objectiveOperationTime';
 import {
   deleteCounterfactual,
@@ -518,6 +522,7 @@ export default function JournalCampaignDetailPage() {
   const [campaignPerformanceLoading, setCampaignPerformanceLoading] = useState(false);
   const [campaignPerformanceError, setCampaignPerformanceError] = useState<string | null>(null);
   const reviewedLegs = useMemo(() => reviewedCampaignLegs(legs), [legs]);
+  const openingSnapshotLegs = useMemo(() => openingSnapshotCampaignLegs(legs), [legs]);
 
   useLayoutEffect(() => {
     window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
@@ -1329,6 +1334,16 @@ export default function JournalCampaignDetailPage() {
     }
   };
 
+  const handleExportCampaignSnapshotsTxt = () => {
+    if (!campaign || openingSnapshotLegs.length === 0) return;
+    try {
+      const fileName = exportCampaignOpeningSnapshotsTxt(campaign, openingSnapshotLegs);
+      toast.success('开仓快照已保存为 TXT', { description: fileName });
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : String(error));
+    }
+  };
+
   const handleBackToCampaigns = () => {
     const navigationState = location.state as CampaignDetailNavigationState | null;
     if (navigationState?.fromCampaignList) {
@@ -1619,6 +1634,19 @@ export default function JournalCampaignDetailPage() {
               Legs 列表
             </div>
             <div className="flex items-center gap-1.5">
+              {openingSnapshotLegs.length > 0 && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={handleExportCampaignSnapshotsTxt}
+                  className="h-7 gap-1.5 px-2 text-[11px] text-muted-foreground hover:text-foreground"
+                  title={`导出本战役 ${openingSnapshotLegs.length} 条开仓快照为 TXT`}
+                >
+                  <FileText className="h-3.5 w-3.5" />
+                  快照 TXT
+                </Button>
+              )}
               {reviewedLegs.length > 0 && (
                 <Button
                   type="button"

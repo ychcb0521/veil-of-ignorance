@@ -81,6 +81,21 @@ describe('campaignReviewTxtExport', () => {
     expect(output).not.toContain('[盈亏比目标复盘]');
   });
 
+  it('输出当前表单全部适用题目，未作答也明确标记未填写', () => {
+    const output = buildCampaignPostReviewsTxt(campaign, [
+      makeLeg({
+        post_outcome: 'breakeven',
+        pre_falsification_signal: null,
+        exit_falsification_status: 'triggered_late',
+      }),
+    ]);
+
+    expect(output).toContain('问题：全程有无给谢林兜底区该有的权重？\n答案：未填写');
+    expect(output).toContain('问题：建仓时胜率估计的复盘说明是什么？\n答案：未填写');
+    expect(output).toContain('问题：事前设定的证伪信号是否触发，我是否及时反应？\n答案：触发了，但我反应晚了');
+    expect(output).not.toContain('问题：这个对冲值回成本了吗？');
+  });
+
   it('每个问题答案块之间保留一个空行，并区分同一战役的多个评价仓位', () => {
     const output = buildCampaignPostReviewsTxt(campaign, [
       makeLeg({
