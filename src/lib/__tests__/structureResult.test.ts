@@ -120,6 +120,8 @@ describe('情境 × 处理 记账（含旧值向后兼容）', () => {
     expect(normalizeSituationHandling('attention_only')).toBe('small_dragged');
     expect(normalizeSituationHandling('missed_bigger')).toBe('small_dragged');
     expect(normalizeSituationHandling('chain_reaction')).toBe('small_dragged');
+    expect(normalizeSituationHandling('attention_drain')).toBe('small_dragged');
+    expect(normalizeSituationHandling('missed_big')).toBe('small_dragged');
     expect(normalizeSituationHandling('crisis_hit')).toBe('crisis_hit');
     expect(normalizeSituationHandling(null)).toBeNull();
   });

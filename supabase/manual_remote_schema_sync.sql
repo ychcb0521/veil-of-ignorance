@@ -151,6 +151,31 @@ ALTER TABLE public.trade_journals
   ADD COLUMN IF NOT EXISTS post_struggle_level        integer,
   ADD COLUMN IF NOT EXISTS post_small_position_drag   text;
 
+-- The UI now uses six situation-handling states. Keep both historical four-state
+-- vocabularies valid so this manual sync can be applied to every deployed schema.
+ALTER TABLE public.trade_journals
+  DROP CONSTRAINT IF EXISTS trade_journals_post_small_position_drag_check;
+
+ALTER TABLE public.trade_journals
+  ADD CONSTRAINT trade_journals_post_small_position_drag_check
+  CHECK (
+    post_small_position_drag IS NULL
+    OR post_small_position_drag IN (
+      'none',
+      'attention_only',
+      'missed_bigger',
+      'chain_reaction',
+      'attention_drain',
+      'missed_big',
+      'small_clean',
+      'small_dragged',
+      'big_opp_seized',
+      'big_opp_missed',
+      'crisis_avoided',
+      'crisis_hit'
+    )
+  );
+
 -- ---- market-structure layer (20260605090000) --------------------------------
 ALTER TABLE public.trade_journals
   ADD COLUMN IF NOT EXISTS pre_market_regime    text,

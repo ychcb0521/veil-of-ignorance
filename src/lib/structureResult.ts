@@ -213,18 +213,23 @@ export const SITUATION_HANDLING_LABELS: Record<SituationHandling, string> = {
 export const SITUATION_HANDLING_ALL_LABELS: Record<string, string> = {
   ...SITUATION_HANDLING_LABELS,
   ...SMALL_POSITION_DRAG_LABELS,
+  attention_drain: '小机会·被它拖累',
+  missed_big: '小机会·被它拖累',
 };
 
 /** 旧值 → 新六格的映射，供打开历史 journal 时把它落到对应格。 */
-const LEGACY_SITUATION_MAP: Record<SmallPositionDrag, SituationHandling> = {
+const LEGACY_SITUATION_MAP: Record<string, SituationHandling> = {
   none: 'small_clean',
   attention_only: 'small_dragged',
   missed_bigger: 'small_dragged',
   chain_reaction: 'small_dragged',
+  // 早期合并迁移曾短暂使用这两个别名，线上历史数据仍可能带有它们。
+  attention_drain: 'small_dragged',
+  missed_big: 'small_dragged',
 };
 
 export function normalizeSituationHandling(
-  value: SituationHandling | SmallPositionDrag | null | undefined,
+  value: SituationHandling | SmallPositionDrag | 'attention_drain' | 'missed_big' | null | undefined,
 ): SituationHandling | null {
   if (!value) return null;
   if (value in SITUATION_HANDLING_LABELS) return value as SituationHandling;
@@ -233,7 +238,7 @@ export function normalizeSituationHandling(
 
 /** 是否「处理不得当」= 该记为错误。新值看 handledWell；旧值 none 为好、其余为错。 */
 export function situationHandledPoorly(
-  value: SituationHandling | SmallPositionDrag | null | undefined,
+  value: SituationHandling | SmallPositionDrag | 'attention_drain' | 'missed_big' | null | undefined,
 ): boolean {
   const normalized = normalizeSituationHandling(value);
   if (!normalized) return false;

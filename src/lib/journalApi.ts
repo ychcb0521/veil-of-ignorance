@@ -554,6 +554,20 @@ export function isSchemaColumnMissingError(
 }
 
 /**
+ * 旧版远程库只允许四档「小机会拖累」值；新版前端保存六档「情境 × 处理」值时，
+ * Postgres 会以 23514 拒绝整次 update。这里只识别这一条具名约束，不能把其他
+ * CHECK 错误误当成 schema drift。
+ */
+function isLegacySituationHandlingConstraintError(
+  error: { code?: string; message?: string } | null,
+): boolean {
+  if (!error) return false;
+  const message = error.message ?? '';
+  return /trade_journals_post_small_position_drag_check/i.test(message)
+    && (error.code === '23514' || /violates check constraint/i.test(message));
+}
+
+/**
  * 逐列剥离若干次仍缺列，即判定远程库「严重漂移」，转为一次性批量剥离，避免几十次往返。
  *
  * 阈值放宽到 40：远程库可能缺 8 个 post_emo_* + 2 个 pre_stop_doing_* + 4 个 post_path_* + …
@@ -644,6 +658,18 @@ async function updateTradeJournalWithSchemaFallback(
     lastData = data;
     lastError = error;
     if (!error) return { data, error: null, droppedColumns };
+    if (
+      isLegacySituationHandlingConstraintError(error)
+      && 'post_small_position_drag' in nextPayload
+    ) {
+      const rest = { ...nextPayload };
+      delete rest.post_small_position_drag;
+      nextPayload = rest;
+      if (!droppedColumns.includes('post_small_position_drag')) {
+        droppedColumns.push('post_small_position_drag');
+      }
+      continue;
+    }
     if (!isMissingDalioMetaLayerError(error) && !isSchemaColumnMissingError(error)) {
       return { data, error, droppedColumns };
     }

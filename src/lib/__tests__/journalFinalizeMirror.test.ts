@@ -15,6 +15,7 @@ import { describe, expect, it, beforeEach, vi } from 'vitest';
 
 // 「远程库」已建的列：基础平仓字段 + 核心列；故意缺 post_emo_* / post_decision_quality 等扩展列。
 let dbColumns: Set<string>;
+let rejectNewSituationHandling: boolean;
 // auth.getUser() 返回的 user（设为 null 模拟网络抖动——修复后不应再依赖它）。
 let getUserResult: { id: string } | null;
 // auth.getSession() 返回的 session.user（本地兜底；行自带 user_id 时根本不会用到）。
@@ -38,6 +39,21 @@ vi.mock('@/integrations/supabase/client', () => {
             error: {
               code: 'PGRST204',
               message: `Could not find the '${missing}' column of 'trade_journals' in the schema cache`,
+            },
+          });
+        }
+        if (
+          rejectNewSituationHandling
+          && typeof payload.post_small_position_drag === 'string'
+          && !['none', 'attention_only', 'missed_bigger', 'chain_reaction'].includes(
+            payload.post_small_position_drag,
+          )
+        ) {
+          return Promise.resolve({
+            data: null,
+            error: {
+              code: '23514',
+              message: 'new row for relation "trade_journals" violates check constraint "trade_journals_post_small_position_drag_check"',
             },
           });
         }
@@ -86,6 +102,7 @@ const FINALIZE_INPUT: FinalizeJournalInput = {
   post_entry_win_rate_estimate_grade: 'wr_50_80',
   post_entry_payoff_basis_review: '当时把目标空间估得太满，没扣掉上方密集抛压',
   post_entry_win_rate_basis_review: '当时胜率依据只看了最近两根 K，样本太窄',
+  post_small_position_drag: 'big_opp_missed',
 };
 
 /** 错题集汇总加载时，server 拉回的那一行（缺扩展列，只有基础字段）。 */
@@ -116,6 +133,7 @@ describe('平仓评价 → 本地镜像 → 错题集汇总（闭环）', () => 
     ]);
     getUserResult = { id: OWNER };
     sessionUser = { id: OWNER };
+    rejectNewSituationHandling = false;
   });
 
   it('远程缺列时，提交仍成功落基础字段（成功语义，不整笔失败）', async () => {
@@ -183,5 +201,17 @@ describe('平仓评价 → 本地镜像 → 错题集汇总（闭环）', () => 
     const merged = applyLocalMirror(OWNER, [serverRow()]);
     const after = summarizeField(merged as TradeJournal[], emoSpec);
     expect(after.filled).toBe(1);
+  });
+
+  it('旧库仍是四档 CHECK 时，六档情境答案不阻断整份评价并由镜像保留原值', async () => {
+    dbColumns.add('post_small_position_drag');
+    rejectNewSituationHandling = true;
+
+    const updated = await finalizeJournalReview('journal-1', FINALIZE_INPUT);
+
+    expect(updated.post_outcome).toBe('loss');
+    expect(updated.post_small_position_drag).toBe('big_opp_missed');
+    const merged = applyLocalMirror(OWNER, [serverRow()]);
+    expect(merged[0].post_small_position_drag).toBe('big_opp_missed');
   });
 });
