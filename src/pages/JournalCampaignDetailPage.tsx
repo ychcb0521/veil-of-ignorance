@@ -25,6 +25,8 @@ import {
   type CampaignViewMultiplier,
 } from '@/hooks/useCampaignKlines';
 import { computeCurrentAccountEquity } from '@/lib/accountEquity';
+import { operationDateKey } from '@/lib/assetReport';
+import { formatCampaignDisplayCode, resolveCampaignAccountName } from '@/lib/campaignCode';
 import {
   buildCampaignEventStream,
   computeInitialMainExposureNotional,
@@ -54,6 +56,9 @@ import {
 } from '@/lib/campaignLegExecution';
 import { buildSelectedLegVerticalLines, legRoleMarkerLabel } from '@/lib/campaignLegMarkers';
 import { exportCampaignBoardPng, type CampaignBoardPnlItem } from '@/lib/campaignLegsPngExport';
+import { buildEmotionDiaryExportSummary } from '@/lib/emotionDiary';
+import { getDecisionEmotionDiaryByDate } from '@/lib/emotionDiaryApi';
+import { exportCampaignEmotionDiaryTxt } from '@/lib/emotionDiaryTxtExport';
 import { exportCampaignPostReviewsTxt, reviewedCampaignLegs } from '@/lib/campaignReviewTxtExport';
 import {
   exportCampaignOpeningSnapshotsTxt,
@@ -89,6 +94,7 @@ import type {
   TradeCampaign,
   TradeJournal,
 } from '@/types/journal';
+import type { DecisionEmotionDiary } from '@/types/emotionDiary';
 import type { CampaignReverseHedgeOrder, PendingOrder, TradeRecord } from '@/types/trading';
 
 const INTERVALS = ['1m', '5m', '15m', '1h'] as const;
@@ -491,11 +497,25 @@ export default function JournalCampaignDetailPage() {
   const { id } = useParams<{ id: string }>();
   const nav = useNavigate();
   const location = useLocation();
-  const { user } = useAuth();
+  const { user, profile } = useAuth();
   const viewerUserId = user?.id ?? null;
+  const campaignAccountName = useMemo(
+    () => resolveCampaignAccountName({
+      displayName: profile?.display_name,
+      email: user?.email,
+      userId: user?.id,
+    }),
+    [profile?.display_name, user?.email, user?.id],
+  );
   const { getEffectiveTime, balance, positionsMap, priceMap } = useTradingContext();
   const [loading, setLoading] = useState(true);
   const [campaign, setCampaign] = useState<TradeCampaign | null>(null);
+  const campaignDisplayCode = useMemo(
+    () => campaign
+      ? formatCampaignDisplayCode(campaign.campaign_code, campaignAccountName, campaign.id)
+      : '',
+    [campaign, campaignAccountName],
+  );
   const [legs, setLegs] = useState<TradeJournal[]>([]);
   const [tradeRecords, setTradeRecords] = useState<TradeRecord[]>([]);
   const [legExitPriceCorrections, setLegExitPriceCorrections] = useState<LegExitPriceCorrections>({});
@@ -522,6 +542,8 @@ export default function JournalCampaignDetailPage() {
   const [campaignPerformance, setCampaignPerformance] = useState<CampaignPerformanceSummary | null>(null);
   const [campaignPerformanceLoading, setCampaignPerformanceLoading] = useState(false);
   const [campaignPerformanceError, setCampaignPerformanceError] = useState<string | null>(null);
+  const [campaignEmotionDiary, setCampaignEmotionDiary] = useState<DecisionEmotionDiary | null>(null);
+  const [campaignEmotionDiaryLoading, setCampaignEmotionDiaryLoading] = useState(false);
   const reviewedLegs = useMemo(() => reviewedCampaignLegs(legs), [legs]);
   const openingSnapshotLegs = useMemo(() => openingSnapshotCampaignLegs(legs), [legs]);
 
@@ -604,6 +626,40 @@ export default function JournalCampaignDetailPage() {
     () => campaignOperationTime(legs, tradeRecords),
     [legs, tradeRecords],
   );
+  const campaignOperationDate = useMemo(
+    () => objectiveOperationTime == null ? null : operationDateKey(objectiveOperationTime),
+    [objectiveOperationTime],
+  );
+  const campaignEmotionDiarySummary = useMemo(
+    () => campaignEmotionDiary ? buildEmotionDiaryExportSummary(campaignEmotionDiary) : null,
+    [campaignEmotionDiary],
+  );
+
+  useEffect(() => {
+    if (!viewerUserId || !isOwner || !campaignOperationDate) {
+      setCampaignEmotionDiary(null);
+      setCampaignEmotionDiaryLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setCampaignEmotionDiaryLoading(true);
+    getDecisionEmotionDiaryByDate(viewerUserId, campaignOperationDate)
+      .then(diary => {
+        if (!cancelled) setCampaignEmotionDiary(diary);
+      })
+      .catch(error => {
+        if (!cancelled) {
+          setCampaignEmotionDiary(null);
+          console.warn('[JournalCampaignDetailPage] 读取操作日情绪日记失败', error);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setCampaignEmotionDiaryLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [campaignOperationDate, isOwner, viewerUserId]);
   const tradeRecordLookup = useMemo(
     () => buildTradeRecordLookup(tradeRecords),
     [tradeRecords],
@@ -1301,6 +1357,7 @@ export default function JournalCampaignDetailPage() {
       setLegsExporting(true);
       const fileName = await exportCampaignBoardPng({
         campaign,
+        accountName: campaignAccountName,
         legs,
         tradeRecords,
         reverseHedgeOrders: visibleReverseHedgeOrders,
@@ -1316,6 +1373,7 @@ export default function JournalCampaignDetailPage() {
           })),
           note: campaignPnlOverviewNote,
         },
+        emotionDiary: campaignEmotionDiarySummary,
       });
       toast.success('交易战役完整图片已保存为 PNG', { description: fileName });
     } catch (error) {
@@ -1328,7 +1386,7 @@ export default function JournalCampaignDetailPage() {
   const handleExportCampaignReviewsTxt = () => {
     if (!campaign || reviewedLegs.length === 0) return;
     try {
-      const fileName = exportCampaignPostReviewsTxt(campaign, reviewedLegs);
+      const fileName = exportCampaignPostReviewsTxt(campaign, reviewedLegs, campaignAccountName);
       toast.success('平仓评价已保存为 TXT', { description: fileName });
     } catch (error) {
       toast.error(error instanceof Error ? error.message : String(error));
@@ -1338,8 +1396,26 @@ export default function JournalCampaignDetailPage() {
   const handleExportCampaignSnapshotsTxt = () => {
     if (!campaign || openingSnapshotLegs.length === 0) return;
     try {
-      const fileName = exportCampaignOpeningSnapshotsTxt(campaign, openingSnapshotLegs);
+      const fileName = exportCampaignOpeningSnapshotsTxt(
+        campaign,
+        openingSnapshotLegs,
+        campaignAccountName,
+      );
       toast.success('开仓快照已保存为 TXT', { description: fileName });
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : String(error));
+    }
+  };
+
+  const handleExportCampaignEmotionDiaryTxt = () => {
+    if (!campaign || !campaignEmotionDiary) return;
+    try {
+      const fileName = exportCampaignEmotionDiaryTxt(
+        campaign,
+        campaignEmotionDiary,
+        campaignAccountName,
+      );
+      toast.success('操作日情绪日记已保存为 TXT', { description: fileName });
     } catch (error) {
       toast.error(error instanceof Error ? error.message : String(error));
     }
@@ -1373,9 +1449,9 @@ export default function JournalCampaignDetailPage() {
               <div className="font-mono text-[11px] text-muted-foreground flex flex-wrap items-center gap-2">
                 <span
                   className="rounded border border-border bg-card px-1.5 py-0.5 text-[10px]"
-                  title={`战役编号 ${campaign.campaign_code}`}
+                  title={`战役编号 ${campaignDisplayCode}`}
                 >
-                  {campaign.campaign_code}
+                  {campaignDisplayCode}
                 </span>
                 <span>{campaign.symbol}</span>
                 <span className={`px-2 py-0.5 rounded ${campaign.direction === 'main_long' ? 'bg-[#0ECB81]/10 text-[#0ECB81]' : 'bg-[#F6465D]/10 text-[#F6465D]'}`}>
@@ -1448,6 +1524,62 @@ export default function JournalCampaignDetailPage() {
           </div>
 
         </section>
+
+        {isOwner && campaignOperationDate && (
+          <section className="border border-border bg-card">
+            <div className="flex flex-wrap items-center gap-3 border-b border-border px-4 py-3">
+              <div>
+                <div className="text-[12px] font-medium">
+                  操作日情绪日记
+                  <span className="ml-2 font-mono text-[10px] text-muted-foreground">
+                    {campaignOperationDate}
+                  </span>
+                </div>
+                <div className="mt-0.5 text-[10px] text-muted-foreground">
+                  按客观操作时间关联，不使用 K 线模拟时间
+                </div>
+              </div>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => nav(`/journal/emotion-diary?date=${campaignOperationDate}`)}
+                className="ml-auto h-7 px-2 text-[11px] text-muted-foreground hover:text-foreground"
+              >
+                {campaignEmotionDiary ? '查看 / 编辑' : '去记录'}
+              </Button>
+            </div>
+            {campaignEmotionDiaryLoading ? (
+              <div className="px-4 py-5 text-[11px] text-muted-foreground">正在读取操作日日记…</div>
+            ) : campaignEmotionDiarySummary ? (
+              <div className="grid gap-4 px-4 py-4 lg:grid-cols-[minmax(0,1fr)_420px]">
+                <div>
+                  <div className="text-[10px] text-muted-foreground">最近起波澜的事情</div>
+                  <div className="mt-1 whitespace-pre-wrap text-[12px] leading-6">
+                    {campaignEmotionDiarySummary.eventText}
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-x-5 gap-y-3 border-l-0 border-border lg:border-l lg:pl-4">
+                  {[
+                    ['情绪效价', campaignEmotionDiarySummary.valence],
+                    ['情绪唤醒度', campaignEmotionDiarySummary.arousal],
+                    ['焦虑 HADS-A', campaignEmotionDiarySummary.anxiety],
+                    ['抑郁 HADS-D', campaignEmotionDiarySummary.depression],
+                  ].map(([label, value]) => (
+                    <div key={label}>
+                      <div className="text-[10px] text-muted-foreground">{label}</div>
+                      <div className="mt-1 font-mono text-[11px]">{value}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              <div className="px-4 py-5 text-[11px] text-muted-foreground">
+                该操作日尚未记录情绪日记。记录后会自动出现在这里及战役导出文件中。
+              </div>
+            )}
+          </section>
+        )}
 
         <section className="space-y-3">
           <div className="bg-card border border-border rounded p-2">
@@ -1635,6 +1767,19 @@ export default function JournalCampaignDetailPage() {
               Legs 列表
             </div>
             <div className="flex items-center gap-1.5">
+              {campaignEmotionDiary && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={handleExportCampaignEmotionDiaryTxt}
+                  className="h-7 gap-1.5 px-2 text-[11px] text-muted-foreground hover:text-foreground"
+                  title={`导出 ${campaignOperationDate ?? '操作日'} 的决策者情绪日记为 TXT`}
+                >
+                  <FileText className="h-3.5 w-3.5" />
+                  情绪 TXT
+                </Button>
+              )}
               {openingSnapshotLegs.length > 0 && (
                 <Button
                   type="button"

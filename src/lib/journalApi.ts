@@ -20,6 +20,7 @@ import {
 } from '@/lib/campaignDeviationRules';
 import { INITIAL_COGNITIVE_ASSETS } from '@/lib/cognitiveAssetsInitialContent';
 import { applyLocalMirror, mirrorDroppedColumns, reconcileLocalMirror } from '@/lib/journalLocalMirror';
+import { hydrateJournalReviews } from '@/lib/journalReviewIdentity';
 import {
   buildTradeRecordLookup,
   journalOperationTime,
@@ -2033,24 +2034,53 @@ export async function getCampaignWithLegs(
     .select('*')
     .eq('campaign_id', campaignId)
     .order('leg_sequence', { ascending: true });
+  let dbLegs: TradeJournal[] = [];
   if (lErr) {
     const syntheticLegs = resolvedCampaign ? synthesizeCampaignLegsFromEvents(resolvedCampaign) : [];
-    if (syntheticLegs.length > 0 || isMissingTradeJournalsFeatureError(lErr)) {
-      return { campaign: resolvedCampaign, legs: syntheticLegs };
+    if (syntheticLegs.length === 0 && !isMissingTradeJournalsFeatureError(lErr)) {
+      throw new Error(`加载战役 legs 失败：${lErr.message}`);
     }
-    throw new Error(`加载战役 legs 失败：${lErr.message}`);
+  } else {
+    dbLegs = (legs ?? []) as unknown as TradeJournal[];
   }
-  const dbLegs = (legs ?? []) as unknown as TradeJournal[];
   const syntheticLegs = synthesizeCampaignLegsFromEvents(resolvedCampaign);
   const resolvedLegs = isHistoricalCampaign(resolvedCampaign)
     ? mergeHistoricalCampaignLegs(dbLegs, syntheticLegs)
     : (dbLegs.length > 0 ? dbLegs : syntheticLegs);
+  const mirroredLegs = applyLocalMirror(resolvedUserId, resolvedLegs);
+  const tradeRecordIds = Array.from(new Set(
+    mirroredLegs
+      .map(leg => leg.trade_record_id)
+      .filter((id): id is string => Boolean(id)),
+  ));
+  let reviewSiblings: TradeJournal[] = [];
+  if (tradeRecordIds.length > 0) {
+    try {
+      const { data: siblingRows, error: siblingError } = await supabase
+        .from('trade_journals' as never)
+        .select('*')
+        .eq('user_id', resolvedUserId)
+        .in('trade_record_id', tradeRecordIds);
+      if (!siblingError) {
+        reviewSiblings = applyLocalMirror(
+          resolvedUserId,
+          (siblingRows ?? []) as unknown as TradeJournal[],
+        );
+      } else {
+        console.warn('[journalApi] 读取战役评价兄弟记录失败:', siblingError);
+      }
+    } catch (error) {
+      // 旧测试适配器或极旧客户端可能没有 .in；不阻断战役主体读取。
+      console.warn('[journalApi] 读取战役评价兄弟记录失败:', error);
+    }
+  }
+  const hydrated = hydrateJournalReviews([...mirroredLegs, ...reviewSiblings]);
   return {
     campaign: resolvedCampaign,
     // 平仓评价的扩展答案在远程 schema 尚未补齐时会落入本地镜像。
     // 战役详情、TXT/PNG 导出必须与日记列表使用同一份“远端 + 镜像”有效数据，
     // 否则只能读到 post_reviewed_at，却会把用户已经填写的答案导成“未填写”。
-    legs: applyLocalMirror(resolvedUserId, resolvedLegs),
+    legs: hydrated.slice(0, mirroredLegs.length),
   };
 }
 
@@ -4067,7 +4097,27 @@ export async function getJournalById(id: string): Promise<TradeJournal | null> {
   }
   const journal = (data as unknown as TradeJournal) ?? null;
   if (!journal) return null;
-  return applyLocalMirror(journal.user_id, [journal])[0] ?? journal;
+  const mirroredJournal = applyLocalMirror(journal.user_id, [journal])[0] ?? journal;
+  if (!mirroredJournal.trade_record_id) return mirroredJournal;
+  try {
+    const { data: siblings, error: siblingError } = await supabase
+      .from("trade_journals" as never)
+      .select("*")
+      .eq("user_id", mirroredJournal.user_id)
+      .eq("trade_record_id", mirroredJournal.trade_record_id);
+    if (siblingError) {
+      console.warn('[journalApi] 读取历史评价兄弟记录失败:', siblingError);
+      return mirroredJournal;
+    }
+    const mirroredSiblings = applyLocalMirror(
+      mirroredJournal.user_id,
+      (siblings ?? []) as unknown as TradeJournal[],
+    );
+    return hydrateJournalReviews([mirroredJournal, ...mirroredSiblings])[0] ?? mirroredJournal;
+  } catch (error) {
+    console.warn('[journalApi] 读取历史评价兄弟记录失败:', error);
+    return mirroredJournal;
+  }
 }
 
 // ============ Dalio L1 / L5 meta layer ============
@@ -4295,10 +4345,20 @@ export async function finalizeJournalReview(
   const { base, extra } = splitPostReviewPayload(payload);
   const baseResult = await updateTradeJournalWithSchemaFallback(journalId, base);
   const baseJournal = wrap("提交平仓评价", baseResult.error, baseResult.data as TradeJournal | null);
-  if (Object.keys(extra).length === 0) return baseJournal;
-
-  const extraResult = await updateTradeJournalWithSchemaFallback(journalId, extra);
-  const allDropped = [...baseResult.droppedColumns, ...extraResult.droppedColumns];
+  const extraResult = Object.keys(extra).length > 0
+    ? await updateTradeJournalWithSchemaFallback(journalId, extra)
+    : { data: null, error: null, droppedColumns: [] as string[] };
+  if (extraResult.error && !isMissingDalioMetaLayerError(extraResult.error)) {
+    throw new Error(`提交平仓评价失败：${extraResult.error.message}`);
+  }
+  // 极旧 schema 返回了无法精确解析的“评价扩展层不存在”错误时，把整组扩展字段
+  // 视为远程 dropped，并完整镜像，不能只保存基础六列却对用户报成功。
+  const implicitDropped = extraResult.error ? Object.keys(extra) : [];
+  const allDropped = Array.from(new Set([
+    ...baseResult.droppedColumns,
+    ...extraResult.droppedColumns,
+    ...implicitDropped,
+  ]));
   let mirrorUserId = (baseJournal as { user_id?: string | null } | null)?.user_id ?? null;
   try {
     if (!mirrorUserId) {
@@ -4330,13 +4390,12 @@ export async function finalizeJournalReview(
       }));
     }
   }
-  if (extraResult.error) {
-    if (!isMissingDalioMetaLayerError(extraResult.error)) {
-      console.warn('[journalApi] 保存扩展平仓评价字段失败:', extraResult.error);
-    }
-    return baseJournal;
-  }
-  return (extraResult.data as TradeJournal | null) ?? baseJournal;
+  const effectiveJournal = {
+    ...baseJournal,
+    ...((extraResult.data as Partial<TradeJournal> | null) ?? {}),
+    ...payload,
+  } as TradeJournal;
+  return applyLocalMirror(mirrorUserId, [effectiveJournal])[0] ?? effectiveJournal;
 }
 
 export async function listJournalsByTradeRecordId(
@@ -4349,7 +4408,7 @@ export async function listJournalsByTradeRecordId(
     .eq("user_id", userId)
     .eq("trade_record_id", tradeRecordId);
   const rows = wrap("按交易记录查询日记", error, data as unknown as TradeJournal[]);
-  return applyLocalMirror(userId, rows);
+  return hydrateJournalReviews(applyLocalMirror(userId, rows));
 }
 
 export async function syncTradeRecordCorrectionToJournals(record: TradeRecord): Promise<TradeJournal[]> {

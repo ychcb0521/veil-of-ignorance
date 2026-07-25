@@ -4,6 +4,8 @@ import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { LegRoleChip } from '@/components/journal/LegRoleChip';
+import { useAuth } from '@/contexts/AuthContext';
+import { formatCampaignDisplayCode, resolveCampaignAccountName } from '@/lib/campaignCode';
 import { classifiableOperationTime } from '@/lib/classifiableOperationTime';
 import { journalSimulatedCloseTime } from '@/lib/objectiveOperationTime';
 import { getAssignableLegRoles, LEG_ROLE_LABELS, MAIN_ADD_ROLES } from '@/lib/strategyTemplates';
@@ -175,6 +177,15 @@ export function AddToExistingCampaignDialog({
   symbol,
   onAttached,
 }: Props) {
+  const { user, profile } = useAuth();
+  const campaignAccountName = useMemo(
+    () => resolveCampaignAccountName({
+      displayName: profile?.display_name,
+      email: user?.email,
+      userId: user?.id,
+    }),
+    [profile?.display_name, user?.email, user?.id],
+  );
   const orderedItems = useMemo(
     () => [...items].sort((a, b) => itemTimeMs(a) - itemTimeMs(b)),
     [items],
@@ -294,7 +305,13 @@ export function AddToExistingCampaignDialog({
                 >
                   {sortedCampaigns.map(item => (
                     <option key={item.campaign.id} value={item.campaign.id}>
-                      {item.campaign.symbol === symbol ? '★ ' : ''}{item.campaign.campaign_code} · {item.campaign.title} · {fmtLabel(item.campaign.opened_at)} · {item.legs.length} legs · {item.campaign.status}
+                      {item.campaign.symbol === symbol ? '★ ' : ''}
+                      {formatCampaignDisplayCode(
+                        item.campaign.campaign_code,
+                        campaignAccountName,
+                        item.campaign.id,
+                      )}
+                      {' · '}{item.campaign.title} · {fmtLabel(item.campaign.opened_at)} · {item.legs.length} legs · {item.campaign.status}
                     </option>
                   ))}
                 </select>
@@ -304,7 +321,11 @@ export function AddToExistingCampaignDialog({
                 <div className="rounded border border-border bg-muted/20 p-3 text-[11px] space-y-2">
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="rounded border border-border bg-background px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
-                      {target.campaign.campaign_code}
+                      {formatCampaignDisplayCode(
+                        target.campaign.campaign_code,
+                        campaignAccountName,
+                        target.campaign.id,
+                      )}
                     </span>
                     <span>{target.campaign.title}</span>
                   </div>

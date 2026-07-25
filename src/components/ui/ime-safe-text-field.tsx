@@ -33,11 +33,11 @@ function useImeSafeValue(value: string, onValueChange: (value: string) => void) 
 
   const handleChange = React.useCallback((event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     const next = event.currentTarget.value;
-    const nativeEvent = event.nativeEvent as InputEvent;
     setDraft(next);
-    if (!composingRef.current && !nativeEvent.isComposing) {
-      commit(next);
-    }
+    // draft 负责保护输入法候选态不被父级重渲染覆盖；父级状态仍应逐次同步。
+    // 否则用户在中文候选刚落字时立刻点击“保存”，click 可能先于
+    // compositionend/blur 的 React 状态刷新，最终把屏幕上已填写的答案保存成旧值。
+    commit(next);
   }, [commit]);
 
   const handleCompositionStart = React.useCallback(

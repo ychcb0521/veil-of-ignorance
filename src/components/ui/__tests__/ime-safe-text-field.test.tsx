@@ -32,7 +32,7 @@ describe('IME-safe text fields', () => {
     fireEvent.change(field, { target: { value: 'pingcang' } });
 
     expect(field).toHaveValue('pingcang');
-    expect(screen.getByTestId('saved-review')).toHaveTextContent('原评价');
+    expect(screen.getByTestId('saved-review')).toHaveTextContent('pingcang');
 
     fireEvent.click(screen.getByRole('button', { name: '父级重渲染' }));
     expect(field).toHaveValue('pingcang');
@@ -44,7 +44,7 @@ describe('IME-safe text fields', () => {
     expect(screen.getByTestId('saved-review')).toHaveTextContent('平仓评价');
   });
 
-  it('does not publish a counterfactual input value until Chinese composition ends', () => {
+  it('keeps parent state current during Chinese composition so an immediate save cannot lose the answer', () => {
     const onValueChange = vi.fn();
 
     render(
@@ -59,12 +59,12 @@ describe('IME-safe text fields', () => {
     fireEvent.compositionStart(field);
     fireEvent.change(field, { target: { value: 'xiuzheng' } });
     expect(field).toHaveValue('xiuzheng');
-    expect(onValueChange).not.toHaveBeenCalled();
+    expect(onValueChange).toHaveBeenLastCalledWith('xiuzheng');
 
     fireEvent.change(field, { target: { value: '修正后的规则' } });
     fireEvent.compositionEnd(field);
 
-    expect(onValueChange).toHaveBeenCalledTimes(1);
+    expect(onValueChange).toHaveBeenCalledTimes(2);
     expect(onValueChange).toHaveBeenLastCalledWith('修正后的规则');
   });
 });

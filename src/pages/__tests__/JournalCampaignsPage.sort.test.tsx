@@ -6,7 +6,7 @@ import type { TradeRecord } from '@/types/trading';
 import JournalCampaignsPage from '../JournalCampaignsPage';
 
 const { mockUser, mockListDeletedCampaigns, mockRestoreCampaign, mockPermanentlyDeleteCampaign } = vi.hoisted(() => ({
-  mockUser: { id: 'user-1' },
+  mockUser: { id: 'user-1', email: 'desk@example.com' },
   mockListDeletedCampaigns: vi.fn(async () => []),
   mockRestoreCampaign: vi.fn(async () => undefined),
   mockPermanentlyDeleteCampaign: vi.fn(async () => undefined),
@@ -131,6 +131,7 @@ const tradeHistory: TradeRecord[] = [
 vi.mock('@/contexts/AuthContext', () => ({
   useAuth: () => ({
     user: mockUser,
+    profile: { display_name: '主账户' },
   }),
 }));
 
@@ -183,6 +184,7 @@ function makeCampaign(overrides: Partial<TradeCampaign>): TradeCampaign {
   return {
     id: overrides.id ?? 'campaign',
     user_id: 'user-1',
+    campaign_code: overrides.campaign_code ?? `C-${overrides.id ?? 'campaign'}`,
     symbol: 'BTCUSDT',
     direction: 'main_long',
     status: overrides.status ?? 'closed_profit',
@@ -281,6 +283,8 @@ describe('JournalCampaignsPage sorting', () => {
     );
 
     await waitFor(() => expect(screen.getAllByTestId('campaign-card')).toHaveLength(4));
+    expect(screen.getAllByTestId('campaign-card')[0])
+      .toHaveTextContent('C-主账户-BEST-PNL');
     expect(screen.queryByRole('button', { name: '我的战役' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '互关可见' })).not.toBeInTheDocument();
     expect(screen.getByTestId('campaign-sort-importance')).toHaveAttribute('data-sort-direction', 'asc');

@@ -43,6 +43,10 @@ import {
   getJournalById, listJournalsByTradeRecordId, backfillJournalFromRecord, syncTradeRecordCorrectionToJournals,
 } from '@/lib/journalApi';
 import type { TradeJournal } from '@/types/journal';
+import {
+  coalesceJournalRecords,
+  hasCompletedJournalReview,
+} from '@/lib/journalReviewIdentity';
 
 interface Props {
   positionsMap: PositionsMap;
@@ -280,19 +284,23 @@ export function PositionPanel({
   const reloadJournals = async () => {
     if (!user) return;
     try {
-      const all = await listJournals(user.id);
+      const all = coalesceJournalRecords(await listJournals(user.id));
       const map: Record<string, TradeJournal> = {};
       const ckey: Record<string, TradeJournal> = {};
       all.forEach(j => {
         if (j.trade_record_id) {
           const current = map[j.trade_record_id];
-          if (!current || (j.post_reviewed_at && !current.post_reviewed_at)) map[j.trade_record_id] = j;
+          if (!current || (hasCompletedJournalReview(j) && !hasCompletedJournalReview(current))) {
+            map[j.trade_record_id] = j;
+          }
         }
         if (j.pre_entry_price != null && j.direction !== 'no_entry') {
           const side = j.direction === 'long' ? 'LONG' : 'SHORT';
           const k = `${j.symbol}_${side}_${j.pre_entry_price.toFixed(4)}`;
-          // keep latest unreviewed first
-          if (!ckey[k] || (!j.post_reviewed_at && ckey[k].post_reviewed_at)) ckey[k] = j;
+          // 同一历史成交存在重复 journal 时，评价完成记录必须优先。
+          if (!ckey[k] || (hasCompletedJournalReview(j) && !hasCompletedJournalReview(ckey[k]))) {
+            ckey[k] = j;
+          }
         }
       });
       setJournalsByTradeId(map);
@@ -303,7 +311,7 @@ export function PositionPanel({
   useEffect(() => { reloadJournals(); }, [user]);
 
   const unreviewedCount = useMemo(
-    () => Object.values(journalsByCompositeKey).filter(j => !j.post_reviewed_at).length,
+    () => Object.values(journalsByCompositeKey).filter(j => !hasCompletedJournalReview(j)).length,
     [journalsByCompositeKey],
   );
 
@@ -332,7 +340,7 @@ export function PositionPanel({
         for (const ref of refs) {
           const existing = await listJournalsByTradeRecordId(user.id, ref);
           if (existing.length > 0) {
-            journal = existing.find(item => Boolean(item.post_reviewed_at)) ?? existing[0];
+            journal = existing.find(hasCompletedJournalReview) ?? existing[0];
             break;
           }
         }
@@ -1320,7 +1328,7 @@ export function PositionPanel({
                                 评价
                               </Button>
                             ) : <span className="text-muted-foreground">—</span>
-                          ) : matchedJ.post_reviewed_at ? (
+                          ) : hasCompletedJournalReview(matchedJ) ? (
                             <button
                               type="button"
                               onClick={() => { void openHistoryReview(t, matchedJ); }}

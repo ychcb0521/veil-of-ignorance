@@ -1,5 +1,6 @@
 import { COGNITIVE_BIAS_LABELS } from '@/lib/cognitiveBiasTags';
 import { campaignKlineTitleName } from '@/lib/campaignLegsPngExport';
+import { formatCampaignDisplayCode } from '@/lib/campaignCode';
 import { EDGE_SOURCE_LABELS } from '@/lib/edgeSource';
 import { parseHedgeBoundaryBasis } from '@/lib/hedgeBoundaryBasis';
 import {
@@ -359,6 +360,7 @@ function renderQuestionAnswer({ question, answer }: QuestionAnswer): string {
 export function buildCampaignOpeningSnapshotsTxt(
   campaign: TradeCampaign,
   legs: TradeJournal[],
+  accountName?: string | null,
 ): string {
   const snapshots = openingSnapshotCampaignLegs(legs);
   if (snapshots.length === 0) {
@@ -367,7 +369,7 @@ export function buildCampaignOpeningSnapshotsTxt(
 
   const header = [
     `交易战役：${campaign.title || campaignKlineTitleName(campaign)}`,
-    `战役编号：${campaign.campaign_code || campaign.id}`,
+    `战役编号：${formatCampaignDisplayCode(campaign.campaign_code, accountName, campaign.id)}`,
     `标的：${campaign.symbol}`,
     `开仓快照数量：${snapshots.length}`,
   ].join('\n');
@@ -393,8 +395,11 @@ function safeFileName(value: string): string {
     .trim();
 }
 
-export function campaignOpeningSnapshotsTxtFileName(campaign: TradeCampaign): string {
-  const code = campaign.campaign_code?.trim();
+export function campaignOpeningSnapshotsTxtFileName(
+  campaign: TradeCampaign,
+  accountName?: string | null,
+): string {
+  const code = formatCampaignDisplayCode(campaign.campaign_code, accountName, campaign.id);
   const base = code
     ? `${campaignKlineTitleName(campaign)} 编号 ${code}`
     : campaignKlineTitleName(campaign);
@@ -404,9 +409,10 @@ export function campaignOpeningSnapshotsTxtFileName(campaign: TradeCampaign): st
 export function exportCampaignOpeningSnapshotsTxt(
   campaign: TradeCampaign,
   legs: TradeJournal[],
+  accountName?: string | null,
 ): string {
-  const content = buildCampaignOpeningSnapshotsTxt(campaign, legs);
-  const fileName = campaignOpeningSnapshotsTxtFileName(campaign);
+  const content = buildCampaignOpeningSnapshotsTxt(campaign, legs, accountName);
+  const fileName = campaignOpeningSnapshotsTxtFileName(campaign, accountName);
   const blob = new Blob(['\uFEFF', content], { type: 'text/plain;charset=utf-8' });
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement('a');

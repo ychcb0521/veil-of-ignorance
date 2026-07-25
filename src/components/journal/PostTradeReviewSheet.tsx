@@ -1,6 +1,6 @@
 /**
  * 平仓评价弹窗 — 桌面 centered Dialog / 移动 bottom Sheet
- * 注意：本弹窗一旦被打开（journal.post_reviewed_at == null）就不允许 dismiss。
+ * 注意：本弹窗一旦被打开且尚未完成评价，就不允许 dismiss。
  *      用户必须填完字段并保存才能离开。这是为了堵住"静默关闭"漏洞。
  */
 import { useEffect, useMemo, useState } from 'react';
@@ -53,6 +53,7 @@ import {
   finalizeJournalReview,
   stampJournalCloseRealTime,
 } from '@/lib/journalApi';
+import { hasCompletedJournalReview } from '@/lib/journalReviewIdentity';
 import {
   journalCloseOperationTime,
   journalOpenOperationTime,
@@ -248,7 +249,8 @@ export function PostTradeReviewSheet({
 
   // Unreviewed journals and explicit required-review links cannot be dismissed.
   // Editing an already-reviewed journal from a normal link remains freely dismissible.
-  const dismissBlocked = requireSaveBeforeClose || (!!journal && !journal.post_reviewed_at);
+  const hasSavedReview = !!journal && hasCompletedJournalReview(journal);
+  const dismissBlocked = requireSaveBeforeClose || (!!journal && !hasSavedReview);
   const handleEscapeKeyDown = (event: KeyboardEvent) => {
     if (dismissBlocked || event.isComposing || event.keyCode === 229) {
       event.preventDefault();
@@ -569,9 +571,9 @@ export function PostTradeReviewSheet({
           <div className="min-w-0">
             <div className="flex items-center gap-2">
               <div className="text-[15px] font-semibold tracking-[0.01em] text-foreground">
-                {journal.post_reviewed_at ? '编辑平仓评价' : '平仓评价'}
+                {hasSavedReview ? '编辑平仓评价' : '平仓评价'}
               </div>
-              {journal.post_reviewed_at && (
+              {hasSavedReview && (
                 <span className="rounded-full border border-[#0ECB81]/30 bg-[#0ECB81]/10 px-2 py-0.5 text-[10px] font-medium text-[#0ECB81]">
                   已载入原评价
                 </span>

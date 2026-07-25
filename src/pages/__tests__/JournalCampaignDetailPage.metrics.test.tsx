@@ -128,7 +128,10 @@ const { campaigns, detailsById } = vi.hoisted(() => {
 });
 
 vi.mock('@/contexts/AuthContext', () => ({
-  useAuth: () => ({ user: { id: 'user-1' } }),
+  useAuth: () => ({
+    user: { id: 'user-1', email: 'desk@example.com' },
+    profile: { display_name: '主账户' },
+  }),
 }));
 
 vi.mock('@/contexts/TradingContext', () => ({
@@ -179,6 +182,10 @@ vi.mock('@/lib/journalApi', () => ({
   listCounterfactuals: listCounterfactualsMock,
   listCampaignComments: vi.fn(async () => []),
   hasMutualFollow: vi.fn(async () => true),
+}));
+
+vi.mock('@/lib/emotionDiaryApi', () => ({
+  getDecisionEmotionDiaryByDate: vi.fn(async () => null),
 }));
 
 vi.mock('@/components/journal/ReplayKlineChart', () => ({
@@ -415,6 +422,7 @@ describe('JournalCampaignDetailPage metrics', () => {
     fireEvent.click(screen.getByRole('button', { name: 'PNG' }));
     await waitFor(() => expect(exportCampaignBoardPngMock).toHaveBeenCalledTimes(1));
     const exportInput = exportCampaignBoardPngMock.mock.calls[0][0];
+    expect(exportInput.accountName).toBe('主账户');
     expect(exportInput.chartInterval).toBe('1m');
     expect(exportInput.pnlOverview.items.map(item => item.label)).toEqual([
       '已实现 P&L',
@@ -436,6 +444,51 @@ describe('JournalCampaignDetailPage metrics', () => {
     expect(exportCampaignPostReviewsTxtMock).toHaveBeenCalledWith(
       expect.objectContaining({ id: 'winner' }),
       [expect.objectContaining({ id: 'winner-main' })],
+      '主账户',
     );
+  });
+
+  it('shows the review export for a historical answer-only review without a timestamp', async () => {
+    const winner = detailsById.winner;
+    detailsById['legacy-review'] = {
+      ...winner,
+      campaign: {
+        ...winner.campaign,
+        id: 'legacy-review',
+        campaign_code: 'C-legacy-review',
+        title: 'legacy review campaign',
+      },
+      legs: [{
+        ...winner.legs[0],
+        id: 'legacy-review-main',
+        campaign_id: 'legacy-review',
+        post_reviewed_at: null,
+        post_reflection: '历史评价答案',
+      }],
+    };
+
+    try {
+      render(
+        <MemoryRouter initialEntries={['/journal/campaigns/legacy-review']}>
+          <Routes>
+            <Route path="/journal/campaigns/:id" element={<JournalCampaignDetailPage />} />
+          </Routes>
+        </MemoryRouter>,
+      );
+
+      const button = await screen.findByRole('button', { name: '评价 TXT' });
+      expect(button).toHaveAttribute('title', '导出本战役 1 条平仓评价为 TXT');
+      fireEvent.click(button);
+      expect(exportCampaignPostReviewsTxtMock).toHaveBeenCalledWith(
+        expect.objectContaining({ id: 'legacy-review' }),
+        [expect.objectContaining({
+          id: 'legacy-review-main',
+          post_reflection: '历史评价答案',
+        })],
+        '主账户',
+      );
+    } finally {
+      delete detailsById['legacy-review'];
+    }
   });
 });

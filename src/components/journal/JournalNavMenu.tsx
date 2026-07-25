@@ -14,7 +14,7 @@ import {
 } from '@/components/ui/sheet';
 import {
   LayoutGrid, ChevronDown, CheckCheck,
-  Wallet, BookMarked, BookOpen, Layers, ShieldCheck, Zap,
+  Wallet, BookMarked, BookOpen, Layers, NotebookPen, ShieldCheck, Zap,
 } from 'lucide-react';
 
 interface NavItem {
@@ -55,7 +55,14 @@ function useNavItems(
       key: 'journal', icon: BookOpen, label: '错题集',
       action: () => nav('/journal'),
       isActive: () => loc.pathname === '/journal' || (loc.pathname.startsWith('/journal/') &&
-        !['/journal/campaigns', '/journal/insights', '/journal/rules'].includes(loc.pathname)),
+        !['/journal/campaigns', '/journal/emotion-diary', '/journal/insights', '/journal/rules'].includes(loc.pathname)),
+    },
+    {
+      key: 'emotion-diary',
+      icon: NotebookPen,
+      label: '决策者情绪日记',
+      action: () => nav('/journal/emotion-diary'),
+      isActive: () => loc.pathname === '/journal/emotion-diary',
     },
     {
       key: 'campaigns', icon: Layers, label: '交易战役',

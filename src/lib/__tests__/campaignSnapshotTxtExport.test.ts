@@ -133,6 +133,13 @@ describe('campaignSnapshotTxtExport', () => {
       .toBe('BTCUSDT 2026-07-20 profit 编号 C-SNAPSHOT001 开仓快照.txt');
   });
 
+  it('账户名会同时写入快照正文中的战役编号与下载文件名', () => {
+    const output = buildCampaignOpeningSnapshotsTxt(campaign, [makeLeg()], '主账户');
+    expect(output).toContain('战役编号：C-主账户-SNAPSHOT001');
+    expect(campaignOpeningSnapshotsTxtFileName(campaign, '主账户'))
+      .toBe('BTCUSDT 2026-07-20 profit 编号 C-主账户-SNAPSHOT001 开仓快照.txt');
+  });
+
   it('没有开仓快照时拒绝生成空文件', () => {
     expect(() => buildCampaignOpeningSnapshotsTxt(campaign, [
       makeRetroactiveLeg(),

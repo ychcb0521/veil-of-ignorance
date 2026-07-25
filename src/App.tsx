@@ -17,6 +17,7 @@ import JournalRulesPage from "./pages/JournalRulesPage.tsx";
 import JournalCampaignsPage from "./pages/JournalCampaignsPage.tsx";
 import JournalCampaignDetailPage from "./pages/JournalCampaignDetailPage.tsx";
 import JournalCampaignClassifyPage from "./pages/JournalCampaignClassifyPage.tsx";
+import JournalEmotionDiaryPage from "./pages/JournalEmotionDiaryPage.tsx";
 import CognitiveAssetsPage from "./pages/CognitiveAssetsPage.tsx";
 import ExecutionAssetsPage from "./pages/ExecutionAssetsPage.tsx";
 import GuidePage from "./pages/GuidePage.tsx";
@@ -82,6 +83,7 @@ function AppRoutes() {
         <Route path="/journal/tags" element={<JournalTagsPage />} />
         <Route path="/journal/rules" element={<JournalRulesPage />} />
         <Route path="/journal/insights" element={<JournalInsightsPage />} />
+        <Route path="/journal/emotion-diary" element={<JournalEmotionDiaryPage />} />
         <Route path="/journal/campaigns" element={<JournalCampaignsPage />} />
         <Route path="/journal/campaigns/classify" element={<JournalCampaignClassifyPage />} />
         <Route path="/journal/campaigns/:id" element={<JournalCampaignDetailPage />} />

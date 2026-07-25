@@ -123,6 +123,17 @@ describe('平仓评价 → 本地镜像 → 错题集汇总（闭环）', () => 
     expect((updated as { post_outcome?: string }).post_outcome).toBe('loss');
   });
 
+  it('提交返回值立即包含完整评价，保存后的战役与编辑页无需等待再次加载', async () => {
+    const updated = await finalizeJournalReview('journal-1', FINALIZE_INPUT);
+
+    expect(updated.post_reviewed_at).toBeTruthy();
+    expect(updated.post_emo_disturbance).toBe('价格一回撤我就慌');
+    expect(updated.post_decision_quality).toBe('bad');
+    expect(updated.post_entry_payoff_estimate_grade).toBe('rr_2_5');
+    expect(updated.post_entry_payoff_basis_review)
+      .toBe('当时把目标空间估得太满，没扣掉上方密集抛压');
+  });
+
   it('被剥离的 post_emo_* 写入本地镜像，applyLocalMirror 合并后在汇总里计为「已填」', async () => {
     // 合并前：server 行没有 post_emo_disturbance → 汇总 0/1。
     const before = summarizeField([serverRow()], emoSpec);

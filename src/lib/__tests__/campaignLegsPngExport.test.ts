@@ -45,6 +45,7 @@ const legs = [
 function input(): CampaignBoardExportInput {
   return {
     campaign,
+    accountName: '主账户',
     legs,
     tradeRecords: [],
     reverseHedgeOrders: [],
@@ -66,6 +67,14 @@ function input(): CampaignBoardExportInput {
       ],
       note: '期望口径：37 场有效战役，实时胜率 48.65%。',
     },
+    emotionDiary: {
+      date: '2026-07-14',
+      eventText: '盘前出现意外消息，但完整记录事实后再执行。',
+      valence: '4/9（中性附近）',
+      arousal: '7/9（高唤醒）',
+      anxiety: '8/21（临界范围，8–10）',
+      depression: '4/21（正常范围，0–7）',
+    },
   };
 }
 
@@ -82,7 +91,7 @@ describe('campaign PNG overview', () => {
     expect(metadata['Legs 构成']).toBe('共 3 · 主仓 1 / 对冲 1 / TP 1 / 其他 0');
     expect(metadata['主力开仓名义仓位 / 杠杆']).toBe('12000.00 USDT / 6x');
     expect(metadata['最终 R']).toBe('2.40');
-    expect(metadata['战役编号']).toBe('C-ABC123');
+    expect(metadata['战役编号']).toBe('C-主账户-ABC123');
     expect(pnl['已实现 P&L']).toBe('3456.78 USDT');
     expect(pnl['主力开仓名义仓位']).toBe('12000.00 USDT');
     expect(pnl['峰值浮盈']).toBe('5200.00');
@@ -95,6 +104,11 @@ describe('campaign PNG overview', () => {
     expect(pnl['几何期望']).toBe('+0.4%/笔');
     expect(pnl['今日账户总资产']).toBe('50000.00 USDT');
     expect(overview.pnlNote).toContain('37 场有效战役');
+    expect(overview.emotionDiary).toEqual(expect.objectContaining({
+      date: '2026-07-14',
+      eventText: '盘前出现意外消息，但完整记录事实后再执行。',
+      anxiety: '8/21（临界范围，8–10）',
+    }));
   });
 
   it('将常用 K 线周期转换为完整的中文线型名称', () => {

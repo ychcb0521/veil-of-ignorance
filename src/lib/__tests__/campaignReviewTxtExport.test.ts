@@ -81,6 +81,35 @@ describe('campaignReviewTxtExport', () => {
     expect(output).not.toContain('[盈亏比目标复盘]');
   });
 
+  it('导出有答案但缺少评价时间戳的历史仓位', () => {
+    const legacyReview = makeLeg({
+      post_reviewed_at: null,
+      post_reflection: '这是一条旧版平仓评价答案。',
+    });
+
+    expect(reviewedCampaignLegs([legacyReview])).toEqual([legacyReview]);
+
+    const output = buildCampaignPostReviewsTxt(campaign, [legacyReview]);
+    expect(output).toContain('平仓评价数量：1');
+    expect(output).toContain('评价时间：历史评价（原记录未保存评价时间）');
+    expect(output).toContain('问题：平仓复盘还有哪些补充？\n答案：这是一条旧版平仓评价答案。');
+  });
+
+  it('只有自动回填的平仓事实时不显示为可导出的评价', () => {
+    const closeFactsOnly = makeLeg({
+      post_reviewed_at: null,
+      post_outcome: 'win',
+      post_realized_pnl: 123.45,
+      post_r_multiple: 1.2,
+      post_real_close_time: '2026-07-21T03:04:05.000Z',
+      post_simulated_close_time: '2026-07-20T03:04:05.000Z',
+    });
+
+    expect(reviewedCampaignLegs([closeFactsOnly])).toEqual([]);
+    expect(() => buildCampaignPostReviewsTxt(campaign, [closeFactsOnly]))
+      .toThrow('当前战役没有可导出的平仓评价');
+  });
+
   it('输出当前表单全部适用题目，未作答也明确标记未填写', () => {
     const output = buildCampaignPostReviewsTxt(campaign, [
       makeLeg({
@@ -128,6 +157,17 @@ describe('campaignReviewTxtExport', () => {
   it('文件名沿用战役名称和唯一编号', () => {
     expect(campaignPostReviewsTxtFileName(campaign))
       .toBe('BTCUSDT 2026-07-20 profit 编号 C-REVIEW001 平仓评价.txt');
+  });
+
+  it('账户名会同时写入评价正文中的战役编号与下载文件名', () => {
+    const output = buildCampaignPostReviewsTxt(
+      campaign,
+      [makeLeg({ post_outcome: 'win' })],
+      '主账户',
+    );
+    expect(output).toContain('战役编号：C-主账户-REVIEW001');
+    expect(campaignPostReviewsTxtFileName(campaign, '主账户'))
+      .toBe('BTCUSDT 2026-07-20 profit 编号 C-主账户-REVIEW001 平仓评价.txt');
   });
 
   it('没有已评价仓位时拒绝生成空文件', () => {

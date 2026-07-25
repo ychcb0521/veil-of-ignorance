@@ -8,11 +8,14 @@ import { LEG_ROLE_LABELS } from '@/lib/strategyTemplates';
 import { resolveLegExecution, type LegExitPriceCorrections } from '@/lib/campaignLegExecution';
 import { computeInitialMainExposureNotional } from '@/lib/campaignAnalysis';
 import { formatCampaignLeverage, resolveCampaignMainLeverage } from '@/lib/campaignMetrics';
+import { formatCampaignDisplayCode } from '@/lib/campaignCode';
 import type { TradeCampaign, TradeJournal } from '@/types/journal';
+import type { EmotionDiaryExportSummary } from '@/types/emotionDiary';
 import type { CampaignReverseHedgeOrder, TradeRecord } from '@/types/trading';
 
 type ExportInput = {
   campaign: TradeCampaign;
+  accountName?: string | null;
   legs: TradeJournal[];
   tradeRecords: TradeRecord[];
   reverseHedgeOrders: CampaignReverseHedgeOrder[];
@@ -26,6 +29,7 @@ export type CampaignBoardExportInput = ExportInput & {
     items: CampaignBoardPnlItem[];
     note?: string;
   };
+  emotionDiary?: EmotionDiaryExportSummary | null;
 };
 
 export type CampaignBoardPnlItem = {
@@ -106,8 +110,8 @@ export function campaignKlineTitleName(campaign: TradeCampaign): string {
   return `${campaign.symbol} ${dateSlug(campaign.opened_at)} ${campaignOutcomeSlug(campaign.status)}`;
 }
 
-function campaignExportFileBaseName(campaign: TradeCampaign): string {
-  const code = campaign.campaign_code?.trim();
+function campaignExportFileBaseName(campaign: TradeCampaign, accountName?: string | null): string {
+  const code = formatCampaignDisplayCode(campaign.campaign_code, accountName, campaign.id);
   return code ? `${campaignKlineTitleName(campaign)} 编号 ${code}` : campaignKlineTitleName(campaign);
 }
 
@@ -432,7 +436,12 @@ function buildCampaignLegsListCanvas(input: ExportInput, options: LegsCanvasOpti
     ctx.fillText(`${title} · Legs 列表`, MARGIN_X, 54, TABLE_WIDTH - 260);
     ctx.font = '600 12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace';
     ctx.fillStyle = '#64748B';
-    ctx.fillText(`编号 ${input.campaign.campaign_code} · 共 ${input.legs.length} legs`, MARGIN_X, 76, TABLE_WIDTH - 260);
+    const displayCode = formatCampaignDisplayCode(
+      input.campaign.campaign_code,
+      input.accountName,
+      input.campaign.id,
+    );
+    ctx.fillText(`编号 ${displayCode} · 共 ${input.legs.length} legs`, MARGIN_X, 76, TABLE_WIDTH - 260);
   }
 
   drawLegsTable(ctx, rows, headerHeight);
@@ -548,6 +557,7 @@ export type CampaignBoardOverview = {
   metadataItems: OverviewItem[];
   pnlItems: CampaignBoardPnlItem[];
   pnlNote?: string;
+  emotionDiary?: EmotionDiaryExportSummary | null;
 };
 
 /** 导出图顶部两块摘要的唯一数据源，避免页面字段演进时漏掉战役原数据或盈亏信息。 */
@@ -576,10 +586,18 @@ export function buildCampaignBoardOverview(input: CampaignBoardExportInput): Cam
         value: `${initialMainExposureNotional > 0 ? fmtAmount(initialMainExposureNotional, ' USDT') : '—'} / ${formatCampaignLeverage(mainLeverage)}`,
       },
       { label: '最终 R', value: fmtAmount(input.campaign.final_r_multiple) },
-      { label: '战役编号', value: input.campaign.campaign_code || '—' },
+      {
+        label: '战役编号',
+        value: formatCampaignDisplayCode(
+          input.campaign.campaign_code,
+          input.accountName,
+          input.campaign.id,
+        ),
+      },
     ],
     pnlItems: input.pnlOverview.items,
     pnlNote: input.pnlOverview.note,
+    emotionDiary: input.emotionDiary,
   };
 }
 
@@ -667,10 +685,79 @@ function overviewPanelHeight(items: OverviewItem[], note: string | undefined, wi
   return Math.max(BOARD_OVERVIEW_MIN_H, itemsBottom + 22 + noteLineCount * 14 + 12);
 }
 
+function emotionDiaryPanelHeight(
+  diary: EmotionDiaryExportSummary,
+  width: number,
+): number {
+  const measureCanvas = document.createElement('canvas');
+  const measureContext = measureCanvas.getContext('2d');
+  let eventLineCount = 1;
+  if (measureContext) {
+    measureContext.font = '500 12px ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+    eventLineCount = wrapCanvasText(measureContext, diary.eventText, width - 32).length;
+  } else {
+    eventLineCount = Math.max(1, Math.ceil(diary.eventText.length / Math.max(1, Math.floor((width - 32) / 12))));
+  }
+  return 60 + eventLineCount * 18 + 58;
+}
+
+function drawEmotionDiaryPanel(
+  ctx: CanvasRenderingContext2D,
+  diary: EmotionDiaryExportSummary,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+) {
+  fillRoundedRect(ctx, x, y, width, height, 10, '#FFFFFF');
+  strokeRoundedRect(ctx, x, y, width, height, 10, '#E5E7EB', 1);
+
+  ctx.font = '700 14px ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+  ctx.fillStyle = '#334155';
+  ctx.fillText(`操作日情绪日记 · ${diary.date}`, x + 16, y + 25, width - 32);
+
+  ctx.font = '500 10px ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+  ctx.fillStyle = '#64748B';
+  ctx.fillText('最近起波澜的事情', x + 16, y + 45, width - 32);
+
+  ctx.font = '500 12px ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+  ctx.fillStyle = '#1F2937';
+  const eventLines = wrapCanvasText(ctx, diary.eventText, width - 32);
+  eventLines.forEach((line, index) => {
+    ctx.fillText(line, x + 16, y + 63 + index * 18, width - 32);
+  });
+
+  const metricsTop = y + 73 + eventLines.length * 18;
+  ctx.strokeStyle = '#E5E7EB';
+  ctx.beginPath();
+  ctx.moveTo(x + 16, metricsTop - 13);
+  ctx.lineTo(x + width - 16, metricsTop - 13);
+  ctx.stroke();
+
+  const metrics = [
+    ['情绪效价', diary.valence],
+    ['情绪唤醒度', diary.arousal],
+    ['焦虑 HADS-A', diary.anxiety],
+    ['抑郁 HADS-D', diary.depression],
+  ] as const;
+  const metricWidth = (width - 32) / metrics.length;
+  metrics.forEach(([label, value], index) => {
+    const itemX = x + 16 + index * metricWidth;
+    ctx.font = '500 10px ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+    ctx.fillStyle = '#64748B';
+    ctx.fillText(label, itemX, metricsTop, metricWidth - 12);
+    ctx.font = '600 11px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace';
+    ctx.fillStyle = '#1F2937';
+    ctx.fillText(value, itemX, metricsTop + 17, metricWidth - 12);
+  });
+}
+
 export async function exportCampaignLegsListPng(input: ExportInput): Promise<string> {
-  const title = campaignKlineTitleName(input.campaign);
   const legsCanvas = buildCampaignLegsListCanvas(input, { includeHeader: true });
-  return downloadCanvas(legsCanvas.canvas, `${safeFileName(campaignExportFileBaseName(input.campaign))}.png`);
+  return downloadCanvas(
+    legsCanvas.canvas,
+    `${safeFileName(campaignExportFileBaseName(input.campaign, input.accountName))}.png`,
+  );
 }
 
 export async function exportCampaignBoardPng(input: CampaignBoardExportInput): Promise<string> {
@@ -689,8 +776,12 @@ export async function exportCampaignBoardPng(input: CampaignBoardExportInput): P
     overviewPanelHeight(overview.metadataItems, undefined, overviewWidth),
     overviewPanelHeight(overview.pnlItems, overview.pnlNote, overviewWidth),
   );
+  const emotionDiaryHeight = overview.emotionDiary
+    ? emotionDiaryPanelHeight(overview.emotionDiary, contentWidth)
+    : 0;
   const height = BOARD_HEADER_H
     + overviewHeight
+    + (overview.emotionDiary ? BOARD_SECTION_GAP + emotionDiaryHeight : 0)
     + BOARD_SECTION_GAP
     + BOARD_SECTION_LABEL_H
     + chartDisplayHeight
@@ -708,8 +799,13 @@ export async function exportCampaignBoardPng(input: CampaignBoardExportInput): P
   ctx.fillText(title, MARGIN_X, 42, width - MARGIN_X * 2);
   ctx.font = '600 12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace';
   ctx.fillStyle = '#64748B';
+  const displayCode = formatCampaignDisplayCode(
+    input.campaign.campaign_code,
+    input.accountName,
+    input.campaign.id,
+  );
   ctx.fillText(
-    `编号 ${input.campaign.campaign_code} · 周期 ${chartIntervalLabel} · 战役原数据 + 盈亏概览 + K 线盘面（当前视图）+ Legs 列表`,
+    `编号 ${displayCode} · 周期 ${chartIntervalLabel} · 战役原数据 + 盈亏概览${overview.emotionDiary ? ' + 操作日情绪日记' : ''} + K 线盘面（当前视图）+ Legs 列表`,
     MARGIN_X,
     68,
     width - MARGIN_X * 2,
@@ -719,6 +815,18 @@ export async function exportCampaignBoardPng(input: CampaignBoardExportInput): P
   drawOverviewPanel(ctx, '战役原数据', overview.metadataItems, undefined, MARGIN_X, y, overviewWidth, overviewHeight);
   drawOverviewPanel(ctx, '盈亏概览', overview.pnlItems, overview.pnlNote, MARGIN_X + overviewWidth + overviewGap, y, overviewWidth, overviewHeight);
   y += overviewHeight + BOARD_SECTION_GAP;
+
+  if (overview.emotionDiary) {
+    drawEmotionDiaryPanel(
+      ctx,
+      overview.emotionDiary,
+      MARGIN_X,
+      y,
+      contentWidth,
+      emotionDiaryHeight,
+    );
+    y += emotionDiaryHeight + BOARD_SECTION_GAP;
+  }
 
   drawSectionLabel(ctx, `K 线盘面（${chartIntervalLabel} · 当前视图）`, MARGIN_X, y);
   y += BOARD_SECTION_LABEL_H;
@@ -737,5 +845,8 @@ export async function exportCampaignBoardPng(input: CampaignBoardExportInput): P
   ctx.fillStyle = '#94A3B8';
   ctx.fillText(`导出时间 ${fmtClock(new Date().toISOString())}`, MARGIN_X, height - 16, width - MARGIN_X * 2);
 
-  return downloadCanvas(rendered.canvas, `${safeFileName(campaignExportFileBaseName(input.campaign))}.png`);
+  return downloadCanvas(
+    rendered.canvas,
+    `${safeFileName(campaignExportFileBaseName(input.campaign, input.accountName))}.png`,
+  );
 }

@@ -14,6 +14,7 @@ import { useTradingContext } from '@/contexts/TradingContext';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { listAllCampaigns, listAllJournalDataForUser, type BulkJournalData } from '@/lib/journalApi';
 import { applyLocalMirror } from '@/lib/journalLocalMirror';
+import { coalesceJournalRecords } from '@/lib/journalReviewIdentity';
 import { buildJournalCampaignIdIndex } from '@/lib/journalCampaignNavigation';
 import { useBlindSpots } from '@/lib/blindSpots';
 import { JournalSummaryView } from '@/components/journal/JournalSummaryView';
@@ -51,7 +52,10 @@ export default function JournalListPage() {
       // 本地镜像兜底：远程库 schema 漂移时本地存了一份完整字段，合并回去——
       // 用户单设备上始终能看到自己填的所有内容，不受远程缺列影响。
       const applyMirror = (d: BulkJournalData): BulkJournalData =>
-        ({ ...d, journals: applyLocalMirror(user.id, d.journals) });
+        ({
+          ...d,
+          journals: coalesceJournalRecords(applyLocalMirror(user.id, d.journals)),
+        });
       // API 已分页拉全历史；不再在记录多时退化为最近 90 天，否则待复盘与汇总会漏币种。
       setCampaigns(await campaignsPromise);
       setData(applyMirror(all));

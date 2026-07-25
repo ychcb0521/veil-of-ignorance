@@ -1,5 +1,7 @@
 import { campaignKlineTitleName } from '@/lib/campaignLegsPngExport';
+import { formatCampaignDisplayCode } from '@/lib/campaignCode';
 import { HEDGE_WORTH_IT_LABELS } from '@/lib/hedgeTypes';
+import { hasCompletedJournalReview } from '@/lib/journalReviewIdentity';
 import { OUTCOME_LABEL } from '@/lib/journalSummary';
 import { MAIN_STONE_META } from '@/lib/mainStoneTags';
 import {
@@ -276,7 +278,7 @@ function buildLegQuestionAnswers(leg: TradeJournal): QuestionAnswer[] {
 }
 
 export function reviewedCampaignLegs(legs: TradeJournal[]): TradeJournal[] {
-  return legs.filter(leg => Boolean(leg.post_reviewed_at?.trim()));
+  return legs.filter(hasCompletedJournalReview);
 }
 
 function directionLabel(direction: TradeJournal['direction']): string {
@@ -292,6 +294,7 @@ function renderQuestionAnswer({ question, answer }: QuestionAnswer): string {
 export function buildCampaignPostReviewsTxt(
   campaign: TradeCampaign,
   legs: TradeJournal[],
+  accountName?: string | null,
 ): string {
   const reviewed = reviewedCampaignLegs(legs);
   if (reviewed.length === 0) {
@@ -300,7 +303,7 @@ export function buildCampaignPostReviewsTxt(
 
   const header = [
     `交易战役：${campaign.title || campaignKlineTitleName(campaign)}`,
-    `战役编号：${campaign.campaign_code || campaign.id}`,
+    `战役编号：${formatCampaignDisplayCode(campaign.campaign_code, accountName, campaign.id)}`,
     `标的：${campaign.symbol}`,
     `平仓评价数量：${reviewed.length}`,
   ].join('\n');
@@ -310,7 +313,9 @@ export function buildCampaignPostReviewsTxt(
     const metadata = [
       `===== 平仓评价 ${index + 1} / ${reviewed.length} =====`,
       `仓位：${role} · ${leg.symbol} · ${directionLabel(leg.direction)}`,
-      `评价时间：${formatBeijingTime(leg.post_reviewed_at)}`,
+      `评价时间：${leg.post_reviewed_at
+        ? formatBeijingTime(leg.post_reviewed_at)
+        : '历史评价（原记录未保存评价时间）'}`,
     ].join('\n');
     const questionAnswers = buildLegQuestionAnswers(leg);
     const body = questionAnswers.map(renderQuestionAnswer).join('\n\n');
@@ -327,8 +332,11 @@ function safeFileName(value: string): string {
     .trim();
 }
 
-export function campaignPostReviewsTxtFileName(campaign: TradeCampaign): string {
-  const code = campaign.campaign_code?.trim();
+export function campaignPostReviewsTxtFileName(
+  campaign: TradeCampaign,
+  accountName?: string | null,
+): string {
+  const code = formatCampaignDisplayCode(campaign.campaign_code, accountName, campaign.id);
   const base = code
     ? `${campaignKlineTitleName(campaign)} 编号 ${code}`
     : campaignKlineTitleName(campaign);
@@ -338,9 +346,10 @@ export function campaignPostReviewsTxtFileName(campaign: TradeCampaign): string 
 export function exportCampaignPostReviewsTxt(
   campaign: TradeCampaign,
   legs: TradeJournal[],
+  accountName?: string | null,
 ): string {
-  const content = buildCampaignPostReviewsTxt(campaign, legs);
-  const fileName = campaignPostReviewsTxtFileName(campaign);
+  const content = buildCampaignPostReviewsTxt(campaign, legs, accountName);
+  const fileName = campaignPostReviewsTxtFileName(campaign, accountName);
   const blob = new Blob(['\uFEFF', content], { type: 'text/plain;charset=utf-8' });
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement('a');

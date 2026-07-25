@@ -21,6 +21,7 @@ import { Popover, PopoverAnchor, PopoverContent, PopoverTrigger } from '@/compon
 import { useAuth } from '@/contexts/AuthContext';
 import { useTradingContext } from '@/contexts/TradingContext';
 import { computeCurrentAccountEquity } from '@/lib/accountEquity';
+import { formatCampaignDisplayCode, resolveCampaignAccountName } from '@/lib/campaignCode';
 import {
   deleteCampaign,
   getCampaignFullData,
@@ -404,7 +405,15 @@ export default function JournalCampaignsPage() {
   const nav = useNavigate();
   const location = useLocation();
   const initialSortState = useMemo(() => parseCampaignListParams(location.search), [location.search]);
-  const { user } = useAuth();
+  const { user, profile } = useAuth();
+  const campaignAccountName = useMemo(
+    () => resolveCampaignAccountName({
+      displayName: profile?.display_name,
+      email: user?.email,
+      userId: user?.id,
+    }),
+    [profile?.display_name, user?.email, user?.id],
+  );
   const { balance, positionsMap, priceMap } = useTradingContext();
   const currentAccountEquity = useMemo(
     () => computeCurrentAccountEquity(balance, positionsMap, priceMap),
@@ -1300,6 +1309,11 @@ export default function JournalCampaignsPage() {
             const importance = importanceValue(campaign);
             const isOwnCampaign = campaign.user_id === user?.id;
             const operationTime = campaignOperationTime(legs, tradeRecords);
+            const campaignDisplayCode = formatCampaignDisplayCode(
+              campaign.campaign_code,
+              campaignAccountName,
+              campaign.id,
+            );
             const mirrorTpStatus = !campaignAchievedMirrorTp(legs, tradeRecords)
               ? '未实现'
               : !Number.isFinite(Number(campaign.final_realized_pnl))
@@ -1355,9 +1369,9 @@ export default function JournalCampaignsPage() {
                       <span className="text-[9px] text-muted-foreground/75">{STRATEGY_TEMPLATES[campaign.strategy_template].name}</span>
                       <span
                         className="inline-flex rounded border border-border/70 bg-background/45 px-1.5 py-0.5 font-mono text-[8px] text-muted-foreground/65"
-                        title={`战役编号 ${campaign.campaign_code}`}
+                        title={`战役编号 ${campaignDisplayCode}`}
                       >
-                        {campaign.campaign_code}
+                        {campaignDisplayCode}
                       </span>
                       <span
                         data-testid="campaign-operation-time"
@@ -1556,7 +1570,11 @@ export default function JournalCampaignsPage() {
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="truncate text-[12px] font-medium">{campaign.title}</span>
                       <span className="rounded bg-muted px-1.5 py-0.5 font-mono text-[9px] text-muted-foreground">
-                        {campaign.campaign_code}
+                        {formatCampaignDisplayCode(
+                          campaign.campaign_code,
+                          campaignAccountName,
+                          campaign.id,
+                        )}
                       </span>
                     </div>
                     <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-muted-foreground">

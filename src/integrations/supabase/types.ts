@@ -109,6 +109,54 @@ export type Database = {
         }
         Relationships: []
       }
+      decision_emotion_diaries: {
+        Row: {
+          created_at: string
+          diary_date: string
+          event_text: string
+          hads_anxiety_score: number
+          hads_anxiety_scores: number[]
+          hads_depression_score: number
+          hads_depression_scores: number[]
+          id: string
+          measurement_version: string
+          sam_arousal: number
+          sam_valence: number
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          diary_date: string
+          event_text: string
+          hads_anxiety_score: number
+          hads_anxiety_scores: number[]
+          hads_depression_score: number
+          hads_depression_scores: number[]
+          id?: string
+          measurement_version?: string
+          sam_arousal: number
+          sam_valence: number
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          diary_date?: string
+          event_text?: string
+          hads_anxiety_score?: number
+          hads_anxiety_scores?: number[]
+          hads_depression_score?: number
+          hads_depression_scores?: number[]
+          id?: string
+          measurement_version?: string
+          sam_arousal?: number
+          sam_valence?: number
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       error_tag_categories: {
         Row: {
           code: string
