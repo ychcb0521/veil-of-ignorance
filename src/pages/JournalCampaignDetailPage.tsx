@@ -1386,7 +1386,7 @@ export default function JournalCampaignDetailPage() {
   const handleExportCampaignReviewsTxt = () => {
     if (!campaign || reviewedLegs.length === 0) return;
     try {
-      const fileName = exportCampaignPostReviewsTxt(campaign, reviewedLegs, campaignAccountName);
+      const fileName = exportCampaignPostReviewsTxt(campaign, legs, campaignAccountName);
       toast.success('平仓评价已保存为 TXT', { description: fileName });
     } catch (error) {
       toast.error(error instanceof Error ? error.message : String(error));

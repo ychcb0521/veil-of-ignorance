@@ -142,7 +142,33 @@ function addHistorical(
   if (answer) target.push({ question, answer });
 }
 
-function buildLegQuestionAnswers(leg: TradeJournal): QuestionAnswer[] {
+function resolveCampaignTotalRealizedPnl(
+  campaign: TradeCampaign,
+  legs: TradeJournal[],
+): number | null {
+  if (
+    typeof campaign.final_realized_pnl === 'number'
+    && Number.isFinite(campaign.final_realized_pnl)
+  ) {
+    return campaign.final_realized_pnl;
+  }
+
+  let hasRealizedPnl = false;
+  const total = legs.reduce((sum, leg) => {
+    if (typeof leg.post_realized_pnl !== 'number' || !Number.isFinite(leg.post_realized_pnl)) {
+      return sum;
+    }
+    hasRealizedPnl = true;
+    return sum + leg.post_realized_pnl;
+  }, 0);
+
+  return hasRealizedPnl ? total : null;
+}
+
+function buildLegQuestionAnswers(
+  leg: TradeJournal,
+  campaignTotalRealizedPnl: number | null,
+): QuestionAnswer[] {
   const answers: QuestionAnswer[] = [];
   const reflection = parseCloseReviewReflectionText(leg.post_reflection);
   const oddsReview = parseOddsStructureReviewText(leg.post_positive_expectancy_review);
@@ -180,7 +206,7 @@ function buildLegQuestionAnswers(leg: TradeJournal): QuestionAnswer[] {
   });
 
   addCurrent(answers, '这笔交易的结果是什么？', leg.post_outcome, OUTCOME_LABEL);
-  addCurrent(answers, '这笔交易的已实现盈亏是多少？', leg.post_realized_pnl);
+  addCurrent(answers, '整个战役的总利润是多少？', campaignTotalRealizedPnl);
   addCurrent(answers, '这笔交易最终实现了多少 R？', leg.post_r_multiple);
   if (
     quadrantApplicable
@@ -356,6 +382,7 @@ export function buildCampaignPostReviewsTxt(
   if (reviewed.length === 0) {
     throw new Error('当前战役没有可导出的平仓评价');
   }
+  const campaignTotalRealizedPnl = resolveCampaignTotalRealizedPnl(campaign, legs);
 
   const header = [
     `交易战役：${campaign.title || campaignKlineTitleName(campaign)}`,
@@ -373,7 +400,7 @@ export function buildCampaignPostReviewsTxt(
         ? formatBeijingTime(leg.post_reviewed_at)
         : '历史评价（原记录未保存评价时间）'}`,
     ].join('\n');
-    const questionAnswers = buildLegQuestionAnswers(leg);
+    const questionAnswers = buildLegQuestionAnswers(leg, campaignTotalRealizedPnl);
     const body = questionAnswers.map(renderQuestionAnswer).join('\n\n');
     return body ? `${metadata}\n\n${body}` : metadata;
   });

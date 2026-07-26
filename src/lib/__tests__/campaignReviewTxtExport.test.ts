@@ -17,6 +17,7 @@ const campaign = {
   title: 'BTCUSDT 复盘战役',
   opened_at: '2026-07-20T02:00:00.000Z',
   status: 'closed_profit',
+  final_realized_pnl: 456.78,
 } as TradeCampaign;
 
 function makeLeg(overrides: Partial<TradeJournal>): TradeJournal {
@@ -51,10 +52,32 @@ describe('campaignReviewTxtExport', () => {
     const output = buildCampaignPostReviewsTxt(campaign, [reviewed, skipped]);
     expect(output).toContain('平仓评价数量：1');
     expect(output).toContain('问题：这笔交易的结果是什么？\n答案：赢');
-    expect(output).toContain('问题：这笔交易的已实现盈亏是多少？\n答案：123.45');
+    expect(output).toContain('问题：整个战役的总利润是多少？\n答案：456.78');
+    expect(output).not.toContain('问题：这笔交易的已实现盈亏是多少？');
     expect(output).toContain('问题：这笔交易的决策质量如何？\n答案：正当过程（结构对）');
     expect(output).toContain('问题：建仓时盈亏比估计属于哪一档？\n答案：2:1-5:1');
     expect(output).not.toContain('-999');
+  });
+
+  it('历史战役缺少汇总盈亏时，使用全部 Legs 的已实现盈亏合计作为战役总利润', () => {
+    const historicalCampaign = {
+      ...campaign,
+      final_realized_pnl: null,
+    } as TradeCampaign;
+    const output = buildCampaignPostReviewsTxt(historicalCampaign, [
+      makeLeg({
+        id: 'leg-main',
+        post_outcome: 'win',
+        post_realized_pnl: 120,
+      }),
+      makeLeg({
+        id: 'leg-hedge',
+        post_reviewed_at: null,
+        post_realized_pnl: -35,
+      }),
+    ]);
+
+    expect(output).toContain('问题：整个战役的总利润是多少？\n答案：85');
   });
 
   it('兼容历史 post_reflection 中保存的谢林兜底区与自审问题', () => {
