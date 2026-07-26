@@ -186,6 +186,11 @@ export function MultiChartLayout({
 
   const [isFullscreen, setIsFullscreen] = useState(readFullscreenSession);
   const chartViewportRevision = `${isFullscreen ? "fullscreen" : "embedded"}:${layout}`;
+  // KLineCharts keeps manual price-axis zoom state inside the native chart
+  // instance. A timeframe is a different data coordinate system, so remount
+  // only when symbol/timeframe changes. Ordinary candle updates keep the same
+  // instance and therefore preserve the user's current pan/zoom.
+  const mainChartIdentity = `${rawSymbol}:${mainInterval}`;
   const updateFullscreen = useCallback((active: boolean) => {
     writeFullscreenSession(active);
     setIsFullscreen(active);
@@ -269,8 +274,9 @@ export function MultiChartLayout({
       {layout === "1x1" ? (
         <div className="flex-1 min-h-0">
           <CandlestickChart
+            key={mainChartIdentity}
             data={mainData}
-            symbol={mainSymbol}
+            symbol={`${mainSymbol} ${mainInterval}`}
             viewportRevision={chartViewportRevision}
             onLoadOlder={onLoadOlder}
             loadingOlder={loadingOlder}
@@ -290,6 +296,7 @@ export function MultiChartLayout({
         <div className="flex-1 min-h-0 grid grid-cols-2 gap-px" style={{ background: "hsl(var(--border))" }}>
           <div className="bg-background min-h-0 overflow-hidden">
             <CandlestickChart
+              key={mainChartIdentity}
               data={mainData}
               symbol={`${mainSymbol} ${mainInterval}`}
               viewportRevision={chartViewportRevision}
@@ -318,6 +325,7 @@ export function MultiChartLayout({
               </div>
             ) : (
               <CandlestickChart
+                key={`${rawSymbol}:${subCharts[0].interval}`}
                 data={getVisibleSubData(subCharts[0].data)}
                 symbol={`${mainSymbol} ${subCharts[0].interval}`}
                 viewportRevision={chartViewportRevision}
@@ -336,6 +344,7 @@ export function MultiChartLayout({
         >
           <div className="bg-background min-h-0 overflow-hidden">
             <CandlestickChart
+              key={mainChartIdentity}
               data={mainData}
               symbol={`${mainSymbol} ${mainInterval}`}
               viewportRevision={chartViewportRevision}
@@ -361,6 +370,7 @@ export function MultiChartLayout({
                 </div>
               ) : (
                 <CandlestickChart
+                  key={`${rawSymbol}:${subCharts[i].interval}`}
                   data={getVisibleSubData(subCharts[i].data)}
                   symbol={`${mainSymbol} ${subCharts[i].interval}`}
                   viewportRevision={chartViewportRevision}

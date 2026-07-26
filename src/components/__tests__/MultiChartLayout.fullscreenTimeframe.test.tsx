@@ -115,6 +115,26 @@ describe("MultiChartLayout fullscreen timeframe selector", () => {
     );
   });
 
+  it("recreates the native chart coordinate system when the main timeframe changes", () => {
+    const props = {
+      mainData: [],
+      mainSymbol: "BTC/USDT",
+      rawSymbol: "BTCUSDT",
+      onLoadOlder: vi.fn(),
+      loadingOlder: false,
+      tradeHistory: [],
+      isRunning: true,
+      currentSimulatedTime: Date.now(),
+      onMainIntervalChange: vi.fn(),
+    };
+    const view = render(<MultiChartLayout {...props} mainInterval="1m" />);
+    const oneMinuteChart = screen.getByTestId("candlestick-chart");
+
+    view.rerender(<MultiChartLayout {...props} mainInterval="5m" />);
+
+    expect(screen.getByTestId("candlestick-chart")).not.toBe(oneMinuteChart);
+  });
+
   it("only leaves the restored fullscreen layout through minimize or Escape", () => {
     window.sessionStorage.setItem("veil.mainChart.fullscreen", "1");
     const props = {
