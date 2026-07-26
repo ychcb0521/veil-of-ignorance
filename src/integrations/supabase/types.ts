@@ -120,8 +120,20 @@ export type Database = {
           hads_depression_scores: number[]
           id: string
           measurement_version: string
-          sam_arousal: number
-          sam_valence: number
+          panas_item_scores: number[] | null
+          panas_negative_score: number | null
+          panas_positive_score: number | null
+          poms_anger_score: number | null
+          poms_confusion_score: number | null
+          poms_depression_score: number | null
+          poms_esteem_score: number | null
+          poms_fatigue_score: number | null
+          poms_item_scores: number[] | null
+          poms_tension_score: number | null
+          poms_total_mood_disturbance: number | null
+          poms_vigor_score: number | null
+          sam_arousal: number | null
+          sam_valence: number | null
           updated_at: string
           user_id: string
         }
@@ -135,8 +147,20 @@ export type Database = {
           hads_depression_scores: number[]
           id?: string
           measurement_version?: string
-          sam_arousal: number
-          sam_valence: number
+          panas_item_scores?: number[] | null
+          panas_negative_score?: number | null
+          panas_positive_score?: number | null
+          poms_anger_score?: number | null
+          poms_confusion_score?: number | null
+          poms_depression_score?: number | null
+          poms_esteem_score?: number | null
+          poms_fatigue_score?: number | null
+          poms_item_scores?: number[] | null
+          poms_tension_score?: number | null
+          poms_total_mood_disturbance?: number | null
+          poms_vigor_score?: number | null
+          sam_arousal?: number | null
+          sam_valence?: number | null
           updated_at?: string
           user_id: string
         }
@@ -150,8 +174,20 @@ export type Database = {
           hads_depression_scores?: number[]
           id?: string
           measurement_version?: string
-          sam_arousal?: number
-          sam_valence?: number
+          panas_item_scores?: number[] | null
+          panas_negative_score?: number | null
+          panas_positive_score?: number | null
+          poms_anger_score?: number | null
+          poms_confusion_score?: number | null
+          poms_depression_score?: number | null
+          poms_esteem_score?: number | null
+          poms_fatigue_score?: number | null
+          poms_item_scores?: number[] | null
+          poms_tension_score?: number | null
+          poms_total_mood_disturbance?: number | null
+          poms_vigor_score?: number | null
+          sam_arousal?: number | null
+          sam_valence?: number | null
           updated_at?: string
           user_id?: string
         }

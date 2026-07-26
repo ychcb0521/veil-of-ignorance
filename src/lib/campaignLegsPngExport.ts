@@ -698,7 +698,19 @@ function emotionDiaryPanelHeight(
   } else {
     eventLineCount = Math.max(1, Math.ceil(diary.eventText.length / Math.max(1, Math.floor((width - 32) / 12))));
   }
-  return 60 + eventLineCount * 18 + 58;
+  let dimensionLineCount = 0;
+  if (diary.pomsDimensions) {
+    if (measureContext) {
+      measureContext.font = '500 10px ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+      dimensionLineCount = wrapCanvasText(measureContext, diary.pomsDimensions, width - 32).length;
+    } else {
+      dimensionLineCount = Math.max(
+        1,
+        Math.ceil(diary.pomsDimensions.length / Math.max(1, Math.floor((width - 32) / 10))),
+      );
+    }
+  }
+  return 60 + eventLineCount * 18 + 58 + (dimensionLineCount > 0 ? 25 + dimensionLineCount * 14 : 0);
 }
 
 function drawEmotionDiaryPanel(
@@ -734,12 +746,20 @@ function drawEmotionDiaryPanel(
   ctx.lineTo(x + width - 16, metricsTop - 13);
   ctx.stroke();
 
-  const metrics = [
-    ['情绪效价', diary.valence],
-    ['情绪唤醒度', diary.arousal],
-    ['焦虑 HADS-A', diary.anxiety],
-    ['抑郁 HADS-D', diary.depression],
-  ] as const;
+  const metrics: ReadonlyArray<readonly [string, string]> = diary.pomsTotal
+    ? [
+      ['POMS TMD', diary.pomsTotal],
+      ['PANAS 正性', diary.panasPositive ?? '—'],
+      ['PANAS 负性', diary.panasNegative ?? '—'],
+      ['焦虑 HADS-A', diary.anxiety],
+      ['抑郁 HADS-D', diary.depression],
+    ]
+    : [
+      ['历史 SAM 效价', diary.legacyValence ?? '—'],
+      ['历史 SAM 唤醒度', diary.legacyArousal ?? '—'],
+      ['焦虑 HADS-A', diary.anxiety],
+      ['抑郁 HADS-D', diary.depression],
+    ];
   const metricWidth = (width - 32) / metrics.length;
   metrics.forEach(([label, value], index) => {
     const itemX = x + 16 + index * metricWidth;
@@ -750,6 +770,18 @@ function drawEmotionDiaryPanel(
     ctx.fillStyle = '#1F2937';
     ctx.fillText(value, itemX, metricsTop + 17, metricWidth - 12);
   });
+
+  if (diary.pomsDimensions) {
+    const dimensionsTop = metricsTop + 42;
+    ctx.font = '500 10px ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+    ctx.fillStyle = '#64748B';
+    ctx.fillText('POMS 七个分量表', x + 16, dimensionsTop, width - 32);
+    ctx.font = '500 10px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace';
+    ctx.fillStyle = '#1F2937';
+    wrapCanvasText(ctx, diary.pomsDimensions, width - 32).forEach((line, index) => {
+      ctx.fillText(line, x + 16, dimensionsTop + 16 + index * 14, width - 32);
+    });
+  }
 }
 
 export async function exportCampaignLegsListPng(input: ExportInput): Promise<string> {

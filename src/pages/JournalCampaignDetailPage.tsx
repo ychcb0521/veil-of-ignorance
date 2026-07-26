@@ -1560,17 +1560,34 @@ export default function JournalCampaignDetailPage() {
                   </div>
                 </div>
                 <div className="grid grid-cols-2 gap-x-5 gap-y-3 border-l-0 border-border lg:border-l lg:pl-4">
-                  {[
-                    ['情绪效价', campaignEmotionDiarySummary.valence],
-                    ['情绪唤醒度', campaignEmotionDiarySummary.arousal],
-                    ['焦虑 HADS-A', campaignEmotionDiarySummary.anxiety],
-                    ['抑郁 HADS-D', campaignEmotionDiarySummary.depression],
-                  ].map(([label, value]) => (
+                  {(campaignEmotionDiarySummary.pomsTotal
+                    ? [
+                      ['POMS 总心境扰乱', campaignEmotionDiarySummary.pomsTotal],
+                      ['PANAS 正性情感', campaignEmotionDiarySummary.panasPositive ?? '—'],
+                      ['PANAS 负性情感', campaignEmotionDiarySummary.panasNegative ?? '—'],
+                      ['焦虑 HADS-A', campaignEmotionDiarySummary.anxiety],
+                      ['抑郁 HADS-D', campaignEmotionDiarySummary.depression],
+                    ]
+                    : [
+                      ['历史 SAM 情绪效价', campaignEmotionDiarySummary.legacyValence ?? '—'],
+                      ['历史 SAM 情绪唤醒度', campaignEmotionDiarySummary.legacyArousal ?? '—'],
+                      ['焦虑 HADS-A', campaignEmotionDiarySummary.anxiety],
+                      ['抑郁 HADS-D', campaignEmotionDiarySummary.depression],
+                    ]
+                  ).map(([label, value]) => (
                     <div key={label}>
                       <div className="text-[10px] text-muted-foreground">{label}</div>
                       <div className="mt-1 font-mono text-[11px]">{value}</div>
                     </div>
                   ))}
+                  {campaignEmotionDiarySummary.pomsDimensions && (
+                    <div className="col-span-2 border-t border-border/70 pt-2">
+                      <div className="text-[10px] text-muted-foreground">POMS 七个分量表</div>
+                      <div className="mt-1 text-[10px] leading-5">
+                        {campaignEmotionDiarySummary.pomsDimensions}
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
             ) : (

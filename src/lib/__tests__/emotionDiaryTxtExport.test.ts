@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { buildCampaignEmotionDiaryTxt } from '@/lib/emotionDiaryTxtExport';
-import type { DecisionEmotionDiary } from '@/types/emotionDiary';
+import type { DecisionEmotionDiary, PanasItemScore, PomsItemScore } from '@/types/emotionDiary';
 import type { TradeCampaign } from '@/types/journal';
 
 const campaign = {
@@ -19,23 +19,38 @@ const diary: DecisionEmotionDiary = {
   user_id: 'user-1',
   diary_date: '2026-07-25',
   event_text: '事件第一行。\n事件第二行仍须完整保留。',
-  sam_valence: 6,
-  sam_arousal: 7,
+  sam_valence: null,
+  sam_arousal: null,
+  poms_item_scores: Array.from({ length: 40 }, () => 2 as PomsItemScore),
+  poms_tension_score: 12,
+  poms_anger_score: 14,
+  poms_fatigue_score: 10,
+  poms_depression_score: 12,
+  poms_vigor_score: 12,
+  poms_confusion_score: 10,
+  poms_esteem_score: 10,
+  poms_total_mood_disturbance: 126,
+  panas_item_scores: Array.from({ length: 20 }, () => 3 as PanasItemScore),
+  panas_positive_score: 30,
+  panas_negative_score: 30,
   hads_anxiety_scores: [1, 1, 1, 1, 1, 1, 1],
   hads_depression_scores: [0, 0, 0, 0, 0, 0, 0],
   hads_anxiety_score: 7,
   hads_depression_score: 0,
-  measurement_version: 'SAM-VA-9+HADS-14-score-entry-v1',
+  measurement_version: 'POMS-CN-40+PANAS-20+HADS-14-research-v1',
   created_at: '2026-07-25T04:00:00.000Z',
   updated_at: '2026-07-25T04:00:00.000Z',
 };
 
 describe('campaign emotion diary TXT export', () => {
-  it('问题与答案成对输出且题目之间空一行', () => {
+  it('完整事件与各量表计分成对输出，题目之间空一行', () => {
     const output = buildCampaignEmotionDiaryTxt(campaign, diary, '主账户');
 
     expect(output).toContain('最近让内心起波澜的事情\n事件第一行。\n事件第二行仍须完整保留。');
-    expect(output).toContain('情绪效价（SAM 1–9）\n6/9（中性附近）');
+    expect(output).toContain('心境状态量表（POMS）总心境扰乱\n126（TMD）');
+    expect(output).toContain('心境状态量表（POMS）七个分量表\n紧张 12');
+    expect(output).toContain('正性情感（PANAS-PA）\n30/50');
+    expect(output).toContain('负性情感（PANAS-NA）\n30/50');
     expect(output).toContain('焦虑分量表（HADS-A）\n7/21（正常范围，0–7）');
     expect(output).toContain('抑郁分量表（HADS-D）\n0/21（正常范围，0–7）');
     expect(output).toMatch(/关联战役\n.+\n\n战役编号/);

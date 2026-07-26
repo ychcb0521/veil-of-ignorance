@@ -3,11 +3,168 @@ import type {
   DecisionEmotionDiaryDraft,
   EmotionDiaryExportSummary,
   HadsItemScore,
+  PanasItemScore,
+  PomsItemScore,
   SamDimension,
 } from '@/types/emotionDiary';
 
-export const EMOTION_DIARY_MEASUREMENT_VERSION = 'SAM-VA-9+HADS-14-guided-v2';
+export const EMOTION_DIARY_MEASUREMENT_VERSION = 'POMS-CN-40+PANAS-20+HADS-14-research-v1';
 export const HADS_ITEM_COUNT = 7;
+export const POMS_ITEM_COUNT = 40;
+export const PANAS_ITEM_COUNT = 20;
+
+export type PomsSubscaleKey =
+  | 'tension'
+  | 'anger'
+  | 'fatigue'
+  | 'depression'
+  | 'vigor'
+  | 'confusion'
+  | 'esteem';
+
+export type PomsSubscaleScores = Record<PomsSubscaleKey, number>;
+
+export type PomsQuestion = {
+  code: string;
+  term: string;
+  subscale: PomsSubscaleKey;
+};
+
+export type PanasDimension = 'positive' | 'negative';
+
+export type PanasQuestion = {
+  code: string;
+  term: string;
+  dimension: PanasDimension;
+};
+
+export const POMS_RESPONSE_OPTIONS: ReadonlyArray<{
+  score: PomsItemScore;
+  label: string;
+}> = [
+  { score: 0, label: '几乎没有' },
+  { score: 1, label: '有一点' },
+  { score: 2, label: '中等' },
+  { score: 3, label: '相当多' },
+  { score: 4, label: '非常强烈' },
+];
+
+const POMS_TERMS = [
+  '紧张的',
+  '生气的',
+  '无精打采的',
+  '不快活的',
+  '轻松愉快的',
+  '慌乱的',
+  '为难的',
+  '心烦意乱的',
+  '气坏的',
+  '劳累的',
+  '悲伤的',
+  '精神饱满的',
+  '集中不了注意力的',
+  '自信的',
+  '内心不安的',
+  '气恼的',
+  '精疲力尽的',
+  '沮丧的',
+  '主动积极的',
+  '慌张的',
+  '坐卧不宁的',
+  '烦恼的',
+  '倦怠的',
+  '忧郁的',
+  '兴致勃勃的',
+  '健忘的',
+  '有能力感的',
+  '易激动的',
+  '愤怒的',
+  '疲惫不堪的',
+  '毫无价值的',
+  '富有活力的',
+  '有不确定感的',
+  '满意的',
+  '担忧的',
+  '狂怒的',
+  '抱怨的',
+  '孤弱无助的',
+  '劲头十足的',
+  '自豪的',
+] as const;
+
+const POMS_SUBSCALE_ITEM_NUMBERS: Record<PomsSubscaleKey, ReadonlyArray<number>> = {
+  tension: [1, 8, 15, 21, 28, 35],
+  anger: [2, 9, 16, 22, 29, 36, 37],
+  fatigue: [3, 10, 17, 23, 30],
+  depression: [4, 11, 18, 24, 31, 38],
+  vigor: [5, 12, 19, 25, 32, 39],
+  confusion: [6, 13, 20, 26, 33],
+  esteem: [7, 14, 27, 34, 40],
+};
+
+const POMS_SUBSCALE_BY_ITEM = Object.fromEntries(
+  Object.entries(POMS_SUBSCALE_ITEM_NUMBERS).flatMap(([subscale, itemNumbers]) => (
+    itemNumbers.map(itemNumber => [itemNumber, subscale])
+  )),
+) as Record<number, PomsSubscaleKey>;
+
+export const POMS_QUESTIONS: ReadonlyArray<PomsQuestion> = POMS_TERMS.map((term, index) => ({
+  code: `P${index + 1}`,
+  term,
+  subscale: POMS_SUBSCALE_BY_ITEM[index + 1],
+}));
+
+export const PANAS_RESPONSE_OPTIONS: ReadonlyArray<{
+  score: PanasItemScore;
+  label: string;
+}> = [
+  { score: 1, label: '几乎没有' },
+  { score: 2, label: '比较少' },
+  { score: 3, label: '中等' },
+  { score: 4, label: '比较多' },
+  { score: 5, label: '非常强烈' },
+];
+
+const PANAS_ITEMS: ReadonlyArray<{
+  term: string;
+  dimension: PanasDimension;
+}> = [
+  { term: '感兴趣', dimension: 'positive' },
+  { term: '苦恼', dimension: 'negative' },
+  { term: '兴奋', dimension: 'positive' },
+  { term: '心烦', dimension: 'negative' },
+  { term: '劲头足', dimension: 'positive' },
+  { term: '内疚', dimension: 'negative' },
+  { term: '恐惧', dimension: 'negative' },
+  { term: '敌意', dimension: 'negative' },
+  { term: '热情', dimension: 'positive' },
+  { term: '自豪', dimension: 'positive' },
+  { term: '易怒', dimension: 'negative' },
+  { term: '警觉', dimension: 'positive' },
+  { term: '羞愧', dimension: 'negative' },
+  { term: '备受鼓舞', dimension: 'positive' },
+  { term: '紧张', dimension: 'negative' },
+  { term: '意志坚定', dimension: 'positive' },
+  { term: '专注', dimension: 'positive' },
+  { term: '坐立不安', dimension: 'negative' },
+  { term: '活跃', dimension: 'positive' },
+  { term: '害怕', dimension: 'negative' },
+];
+
+export const PANAS_QUESTIONS: ReadonlyArray<PanasQuestion> = PANAS_ITEMS.map((item, index) => ({
+  code: `N${index + 1}`,
+  ...item,
+}));
+
+export const POMS_SUBSCALE_LABELS: Record<PomsSubscaleKey, string> = {
+  tension: '紧张',
+  anger: '愤怒',
+  fatigue: '疲劳',
+  depression: '抑郁',
+  vigor: '精力',
+  confusion: '慌乱',
+  esteem: '自尊',
+};
 
 export type HadsBand = {
   key: 'normal' | 'borderline' | 'abnormal';
@@ -209,6 +366,14 @@ export const HADS_DEPRESSION_QUESTIONS: ReadonlyArray<HadsQuestion> = [
   },
 ];
 
+export function emptyPomsScores(): Array<PomsItemScore | null> {
+  return Array.from({ length: POMS_ITEM_COUNT }, () => null);
+}
+
+export function emptyPanasScores(): Array<PanasItemScore | null> {
+  return Array.from({ length: PANAS_ITEM_COUNT }, () => null);
+}
+
 export function emptyHadsScores(): Array<HadsItemScore | null> {
   return Array.from({ length: HADS_ITEM_COUNT }, () => null);
 }
@@ -219,6 +384,8 @@ export function emptyEmotionDiaryDraft(diaryDate: string): DecisionEmotionDiaryD
     event_text: '',
     sam_valence: null,
     sam_arousal: null,
+    poms_item_scores: emptyPomsScores(),
+    panas_item_scores: emptyPanasScores(),
     hads_anxiety_scores: emptyHadsScores(),
     hads_depression_scores: emptyHadsScores(),
   };
@@ -230,9 +397,73 @@ export function diaryToDraft(diary: DecisionEmotionDiary): DecisionEmotionDiaryD
     event_text: diary.event_text,
     sam_valence: diary.sam_valence,
     sam_arousal: diary.sam_arousal,
+    poms_item_scores: diary.poms_item_scores.length === POMS_ITEM_COUNT
+      ? [...diary.poms_item_scores]
+      : emptyPomsScores(),
+    panas_item_scores: diary.panas_item_scores.length === PANAS_ITEM_COUNT
+      ? [...diary.panas_item_scores]
+      : emptyPanasScores(),
     hads_anxiety_scores: [...diary.hads_anxiety_scores],
     hads_depression_scores: [...diary.hads_depression_scores],
   };
+}
+
+export function isPomsItemScore(value: unknown): value is PomsItemScore {
+  return Number.isInteger(value) && Number(value) >= 0 && Number(value) <= 4;
+}
+
+export function isCompletePomsScores(
+  values: Array<PomsItemScore | null>,
+): values is PomsItemScore[] {
+  return values.length === POMS_ITEM_COUNT && values.every(isPomsItemScore);
+}
+
+export function scorePomsSubscales(values: PomsItemScore[]): PomsSubscaleScores {
+  if (!isCompletePomsScores(values)) {
+    throw new Error('POMS 必须包含 40 个 0–4 分项目');
+  }
+  return Object.fromEntries(
+    Object.entries(POMS_SUBSCALE_ITEM_NUMBERS).map(([key, itemNumbers]) => [
+      key,
+      itemNumbers.reduce((sum, itemNumber) => sum + values[itemNumber - 1], 0),
+    ]),
+  ) as PomsSubscaleScores;
+}
+
+export function scorePomsTotalMoodDisturbance(scores: PomsSubscaleScores): number {
+  return scores.tension
+    + scores.anger
+    + scores.fatigue
+    + scores.depression
+    + scores.confusion
+    - scores.vigor
+    - scores.esteem
+    + 100;
+}
+
+export function isPanasItemScore(value: unknown): value is PanasItemScore {
+  return Number.isInteger(value) && Number(value) >= 1 && Number(value) <= 5;
+}
+
+export function isCompletePanasScores(
+  values: Array<PanasItemScore | null>,
+): values is PanasItemScore[] {
+  return values.length === PANAS_ITEM_COUNT && values.every(isPanasItemScore);
+}
+
+export function scorePanas(
+  values: PanasItemScore[],
+): Record<PanasDimension, number> {
+  if (!isCompletePanasScores(values)) {
+    throw new Error('PANAS 必须包含 20 个 1–5 分项目');
+  }
+  return PANAS_QUESTIONS.reduce<Record<PanasDimension, number>>(
+    (scores, question, index) => {
+      scores[question.dimension] += values[index];
+      return scores;
+    },
+    { positive: 0, negative: 0 },
+  );
 }
 
 export function isHadsItemScore(value: unknown): value is HadsItemScore {
@@ -278,7 +509,8 @@ export function samDescriptor(dimension: SamDimension, score: number): string {
 export function emotionDiaryCompletion(draft: DecisionEmotionDiaryDraft) {
   return {
     event: draft.event_text.trim().length > 0,
-    sam: draft.sam_valence != null && draft.sam_arousal != null,
+    poms: isCompletePomsScores(draft.poms_item_scores),
+    panas: isCompletePanasScores(draft.panas_item_scores),
     anxiety: isCompleteHadsScores(draft.hads_anxiety_scores),
     depression: isCompleteHadsScores(draft.hads_depression_scores),
   };
@@ -293,11 +525,38 @@ export function buildEmotionDiaryExportSummary(
 ): EmotionDiaryExportSummary {
   const anxietyBand = hadsBand(diary.hads_anxiety_score);
   const depressionBand = hadsBand(diary.hads_depression_score);
+  const hasPoms = diary.poms_total_mood_disturbance != null
+    && diary.poms_tension_score != null
+    && diary.poms_anger_score != null
+    && diary.poms_fatigue_score != null
+    && diary.poms_depression_score != null
+    && diary.poms_vigor_score != null
+    && diary.poms_confusion_score != null
+    && diary.poms_esteem_score != null;
+  const hasPanas = diary.panas_positive_score != null && diary.panas_negative_score != null;
   return {
     date: diary.diary_date,
     eventText: diary.event_text.trim(),
-    valence: `${diary.sam_valence}/9（${samDescriptor('valence', diary.sam_valence)}）`,
-    arousal: `${diary.sam_arousal}/9（${samDescriptor('arousal', diary.sam_arousal)}）`,
+    pomsTotal: hasPoms ? `${diary.poms_total_mood_disturbance}（TMD）` : null,
+    pomsDimensions: hasPoms
+      ? [
+        `紧张 ${diary.poms_tension_score}`,
+        `愤怒 ${diary.poms_anger_score}`,
+        `疲劳 ${diary.poms_fatigue_score}`,
+        `抑郁 ${diary.poms_depression_score}`,
+        `精力 ${diary.poms_vigor_score}`,
+        `慌乱 ${diary.poms_confusion_score}`,
+        `自尊 ${diary.poms_esteem_score}`,
+      ].join(' · ')
+      : null,
+    panasPositive: hasPanas ? `${diary.panas_positive_score}/50` : null,
+    panasNegative: hasPanas ? `${diary.panas_negative_score}/50` : null,
+    legacyValence: diary.sam_valence == null
+      ? null
+      : `${diary.sam_valence}/9（${samDescriptor('valence', diary.sam_valence)}）`,
+    legacyArousal: diary.sam_arousal == null
+      ? null
+      : `${diary.sam_arousal}/9（${samDescriptor('arousal', diary.sam_arousal)}）`,
     anxiety: `${diary.hads_anxiety_score}/21（${anxietyBand.label}，${anxietyBand.range}）`,
     depression: `${diary.hads_depression_score}/21（${depressionBand.label}，${depressionBand.range}）`,
   };

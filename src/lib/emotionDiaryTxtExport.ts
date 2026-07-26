@@ -26,16 +26,26 @@ export function buildCampaignEmotionDiaryTxt(
     accountName,
     campaign.id,
   );
+  const measurementBlocks = summary.pomsTotal && summary.pomsDimensions
+    ? [
+      answerBlock('心境状态量表（POMS）总心境扰乱', summary.pomsTotal),
+      answerBlock('心境状态量表（POMS）七个分量表', summary.pomsDimensions),
+      answerBlock('正性情感（PANAS-PA）', summary.panasPositive ?? '—'),
+      answerBlock('负性情感（PANAS-NA）', summary.panasNegative ?? '—'),
+    ]
+    : [
+      answerBlock('历史情绪效价（SAM 1–9）', summary.legacyValence ?? '—'),
+      answerBlock('历史情绪唤醒度（SAM 1–9）', summary.legacyArousal ?? '—'),
+    ];
   return [
     answerBlock('关联战役', campaignKlineTitleName(campaign)),
     answerBlock('战役编号', campaignCode),
     answerBlock('操作日', summary.date),
     answerBlock('最近让内心起波澜的事情', summary.eventText),
-    answerBlock('情绪效价（SAM 1–9）', summary.valence),
-    answerBlock('情绪唤醒度（SAM 1–9）', summary.arousal),
+    ...measurementBlocks,
     answerBlock('焦虑分量表（HADS-A）', summary.anxiety),
     answerBlock('抑郁分量表（HADS-D）', summary.depression),
-    '说明\nHADS 为筛查工具，分数不等同于临床诊断。',
+    '说明\nPOMS 与 PANAS 用于纵向情绪研究记录，不设统一临床诊断区间；HADS 为筛查工具，分数不等同于临床诊断。',
   ].join('\n\n');
 }
 

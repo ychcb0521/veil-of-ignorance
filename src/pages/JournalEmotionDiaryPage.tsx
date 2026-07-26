@@ -14,12 +14,20 @@ import {
   HADS_DEPRESSION_QUESTIONS,
   hadsBand,
   isCompleteHadsScores,
+  isCompletePanasScores,
+  isCompletePomsScores,
   isEmotionDiaryDraftComplete,
-  SAM_SCALE_QUESTIONS,
-  samDescriptor,
+  PANAS_QUESTIONS,
+  PANAS_RESPONSE_OPTIONS,
+  POMS_QUESTIONS,
+  POMS_RESPONSE_OPTIONS,
+  POMS_SUBSCALE_LABELS,
   scoreHadsSubscale,
+  scorePanas,
+  scorePomsSubscales,
+  scorePomsTotalMoodDisturbance,
 } from '@/lib/emotionDiary';
-import type { HadsQuestion } from '@/lib/emotionDiary';
+import type { HadsQuestion, PomsSubscaleKey } from '@/lib/emotionDiary';
 import {
   listDecisionEmotionDiaries,
   saveDecisionEmotionDiary,
@@ -29,7 +37,8 @@ import type {
   DecisionEmotionDiary,
   DecisionEmotionDiaryDraft,
   HadsItemScore,
-  SamDimension,
+  PanasItemScore,
+  PomsItemScore,
 } from '@/types/emotionDiary';
 
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
@@ -61,49 +70,193 @@ function bandClass(key: ReturnType<typeof hadsBand>['key']): string {
   return 'text-[#F6465D] bg-[#F6465D]/8 border-[#F6465D]/20';
 }
 
-function SamScale({
-  dimension,
-  label,
-  value,
+function PomsScale({
+  values,
   onChange,
 }: {
-  dimension: SamDimension;
-  label: string;
-  value: number | null;
-  onChange: (score: number) => void;
+  values: Array<PomsItemScore | null>;
+  onChange: (next: Array<PomsItemScore | null>) => void;
 }) {
-  const question = SAM_SCALE_QUESTIONS[dimension];
+  const complete = isCompletePomsScores(values);
+  const scores = complete ? scorePomsSubscales(values) : null;
+  const tmd = scores ? scorePomsTotalMoodDisturbance(scores) : null;
+  const subscaleOrder: PomsSubscaleKey[] = [
+    'tension',
+    'anger',
+    'fatigue',
+    'depression',
+    'vigor',
+    'confusion',
+    'esteem',
+  ];
+
   return (
-    <div className="space-y-3">
-      <div className="flex items-baseline justify-between gap-3">
-        <div className="text-[12px] font-medium">{label}</div>
-        <div className="font-mono text-[11px] text-muted-foreground">
-          {value == null ? '未选择' : `${value}/9 · ${samDescriptor(dimension, value)}`}
+    <div className="border border-border rounded">
+      <div className="flex min-h-12 flex-wrap items-center justify-between gap-3 border-b border-border px-3 py-2">
+        <div>
+          <div className="text-[12px] font-medium">POMS-40 逐题记录</div>
+          <div className="text-[10px] text-muted-foreground">
+            今天截至填写此刻 · 40 项 · 0–4 分
+          </div>
+        </div>
+        <div className="font-mono text-[10px] text-muted-foreground">
+          {complete ? `40/40 · TMD ${tmd}` : `${values.filter(value => value != null).length}/40`}
         </div>
       </div>
-      <p className="min-h-10 text-[11px] leading-5 text-foreground">{question.prompt}</p>
-      <div className="grid grid-cols-3 gap-1.5" role="radiogroup" aria-label={`${label}：${question.prompt}`}>
-        {question.options.map(option => (
-          <button
-            key={option.score}
-            type="button"
-            role="radio"
-            aria-checked={value === option.score}
-            onClick={() => onChange(option.score)}
-            className={`flex min-h-10 items-center gap-1.5 rounded border px-2 py-1.5 text-left transition-colors ${
-              value === option.score
-                ? 'border-[#F0B90B] bg-[#F0B90B]/12 text-foreground'
-                : 'border-border bg-background text-muted-foreground hover:border-foreground/25 hover:text-foreground'
-            }`}
-          >
-            <span className={`font-mono text-[10px] ${
-              value === option.score ? 'text-[#D89B00]' : 'text-muted-foreground/70'
-            }`}>
-              {option.score}
-            </span>
-            <span className="text-[10px] leading-4">{option.label}</span>
-          </button>
-        ))}
+      {scores && (
+        <div className="grid grid-cols-2 border-b border-border bg-muted/25 sm:grid-cols-4 lg:grid-cols-8">
+          {subscaleOrder.map(key => (
+            <div key={key} className="border-b border-r border-border/70 px-2.5 py-2 last:border-r-0 sm:border-b-0">
+              <div className="text-[9px] text-muted-foreground">{POMS_SUBSCALE_LABELS[key]}</div>
+              <div className="mt-0.5 font-mono text-[12px] font-medium">{scores[key]}</div>
+            </div>
+          ))}
+          <div className="px-2.5 py-2">
+            <div className="text-[9px] text-muted-foreground">总心境扰乱 TMD</div>
+            <div className="mt-0.5 font-mono text-[12px] font-medium text-[#D89B00]">{tmd}</div>
+          </div>
+        </div>
+      )}
+      <div className="divide-y divide-border/70">
+        {POMS_QUESTIONS.map((question, index) => {
+          const value = values[index];
+          return (
+            <div
+              key={question.code}
+              className="grid gap-2 px-3 py-2.5 md:grid-cols-[minmax(160px,0.8fr)_minmax(460px,2fr)] md:items-center"
+            >
+              <div className="flex min-w-0 items-center gap-2">
+                <span className="shrink-0 font-mono text-[10px] text-muted-foreground">
+                  {question.code}
+                </span>
+                <span className="text-[11px] text-foreground">{question.term}</span>
+                <span className="ml-auto hidden text-[9px] text-muted-foreground lg:inline">
+                  {POMS_SUBSCALE_LABELS[question.subscale]}
+                </span>
+              </div>
+              <div
+                className="grid grid-cols-5 gap-1.5"
+                role="radiogroup"
+                aria-label={`POMS ${question.code} ${question.term}`}
+              >
+                {POMS_RESPONSE_OPTIONS.map(option => (
+                  <button
+                    key={option.score}
+                    type="button"
+                    role="radio"
+                    aria-checked={value === option.score}
+                    onClick={() => {
+                      const next = [...values];
+                      next[index] = option.score;
+                      onChange(next);
+                    }}
+                    className={`min-h-8 rounded border px-1.5 py-1 text-center transition-colors ${
+                      value === option.score
+                        ? 'border-[#F0B90B] bg-[#F0B90B]/12 text-foreground'
+                        : 'border-border bg-background text-muted-foreground hover:border-foreground/25 hover:text-foreground'
+                    }`}
+                  >
+                    <span className="block font-mono text-[10px]">{option.score}</span>
+                    <span className="hidden text-[9px] leading-3 sm:block">{option.label}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function PanasScale({
+  values,
+  onChange,
+}: {
+  values: Array<PanasItemScore | null>;
+  onChange: (next: Array<PanasItemScore | null>) => void;
+}) {
+  const complete = isCompletePanasScores(values);
+  const scores = complete ? scorePanas(values) : null;
+
+  return (
+    <div className="border border-border rounded">
+      <div className="flex min-h-12 flex-wrap items-center justify-between gap-3 border-b border-border px-3 py-2">
+        <div>
+          <div className="text-[12px] font-medium">PANAS-20 逐题记录</div>
+          <div className="text-[10px] text-muted-foreground">
+            今天截至填写此刻 · 20 项 · 1–5 分
+          </div>
+        </div>
+        <div className="font-mono text-[10px] text-muted-foreground">
+          {complete
+            ? `20/20 · PA ${scores?.positive}/50 · NA ${scores?.negative}/50`
+            : `${values.filter(value => value != null).length}/20`}
+        </div>
+      </div>
+      {scores && (
+        <div className="grid grid-cols-2 border-b border-border bg-muted/25">
+          <div className="border-r border-border/70 px-3 py-2">
+            <div className="text-[9px] text-muted-foreground">正性情感 PA</div>
+            <div className="mt-0.5 font-mono text-[12px] font-medium text-[#0ECB81]">
+              {scores.positive}/50
+            </div>
+          </div>
+          <div className="px-3 py-2">
+            <div className="text-[9px] text-muted-foreground">负性情感 NA</div>
+            <div className="mt-0.5 font-mono text-[12px] font-medium text-[#F6465D]">
+              {scores.negative}/50
+            </div>
+          </div>
+        </div>
+      )}
+      <div className="divide-y divide-border/70">
+        {PANAS_QUESTIONS.map((question, index) => {
+          const value = values[index];
+          return (
+            <div
+              key={question.code}
+              className="grid gap-2 px-3 py-2.5 md:grid-cols-[minmax(160px,0.8fr)_minmax(460px,2fr)] md:items-center"
+            >
+              <div className="flex min-w-0 items-center gap-2">
+                <span className="shrink-0 font-mono text-[10px] text-muted-foreground">
+                  {question.code}
+                </span>
+                <span className="text-[11px] text-foreground">{question.term}</span>
+                <span className="ml-auto hidden text-[9px] text-muted-foreground lg:inline">
+                  {question.dimension === 'positive' ? '正性' : '负性'}
+                </span>
+              </div>
+              <div
+                className="grid grid-cols-5 gap-1.5"
+                role="radiogroup"
+                aria-label={`PANAS ${question.code} ${question.term}`}
+              >
+                {PANAS_RESPONSE_OPTIONS.map(option => (
+                  <button
+                    key={option.score}
+                    type="button"
+                    role="radio"
+                    aria-checked={value === option.score}
+                    onClick={() => {
+                      const next = [...values];
+                      next[index] = option.score;
+                      onChange(next);
+                    }}
+                    className={`min-h-8 rounded border px-1.5 py-1 text-center transition-colors ${
+                      value === option.score
+                        ? 'border-[#F0B90B] bg-[#F0B90B]/12 text-foreground'
+                        : 'border-border bg-background text-muted-foreground hover:border-foreground/25 hover:text-foreground'
+                    }`}
+                  >
+                    <span className="block font-mono text-[10px]">{option.score}</span>
+                    <span className="hidden text-[9px] leading-3 sm:block">{option.label}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          );
+        })}
       </div>
     </div>
   );
@@ -202,6 +355,9 @@ function DiaryHistoryItem({
 }) {
   const anxietyBand = hadsBand(diary.hads_anxiety_score);
   const depressionBand = hadsBand(diary.hads_depression_score);
+  const hasCurrentMeasures = diary.poms_total_mood_disturbance != null
+    && diary.panas_positive_score != null
+    && diary.panas_negative_score != null;
   return (
     <button
       type="button"
@@ -213,7 +369,9 @@ function DiaryHistoryItem({
       <div className="flex items-center justify-between gap-3">
         <span className="text-[12px] font-medium">{dateLabel(diary.diary_date)}</span>
         <span className="font-mono text-[10px] text-muted-foreground">
-          V{diary.sam_valence} · A{diary.sam_arousal}
+          {hasCurrentMeasures
+            ? `TMD ${diary.poms_total_mood_disturbance} · PA ${diary.panas_positive_score} · NA ${diary.panas_negative_score}`
+            : `历史 SAM · V${diary.sam_valence ?? '—'} · A${diary.sam_arousal ?? '—'}`}
         </span>
       </div>
       <div className="mt-1 line-clamp-2 text-[11px] leading-5 text-muted-foreground">
@@ -248,6 +406,13 @@ export default function JournalEmotionDiaryPage() {
     : null;
   const depressionScore = isCompleteHadsScores(draft.hads_depression_scores)
     ? scoreHadsSubscale(draft.hads_depression_scores)
+    : null;
+  const pomsScores = isCompletePomsScores(draft.poms_item_scores)
+    ? scorePomsSubscales(draft.poms_item_scores)
+    : null;
+  const pomsTmd = pomsScores ? scorePomsTotalMoodDisturbance(pomsScores) : null;
+  const panasScores = isCompletePanasScores(draft.panas_item_scores)
+    ? scorePanas(draft.panas_item_scores)
     : null;
 
   useEffect(() => {
@@ -290,7 +455,13 @@ export default function JournalEmotionDiaryPage() {
       ));
       setDraft(diaryToDraft(saved));
       toast.success('情绪日记已保存', {
-        description: `HADS-A ${saved.hads_anxiety_score} · HADS-D ${saved.hads_depression_score}`,
+        description: [
+          `POMS TMD ${saved.poms_total_mood_disturbance}`,
+          `PANAS PA ${saved.panas_positive_score}`,
+          `NA ${saved.panas_negative_score}`,
+          `HADS-A ${saved.hads_anxiety_score}`,
+          `HADS-D ${saved.hads_depression_score}`,
+        ].join(' · '),
       });
     } catch (error) {
       toast.error(error instanceof Error ? error.message : String(error));
@@ -310,7 +481,7 @@ export default function JournalEmotionDiaryPage() {
           </div>
           <div className="ml-auto hidden items-center gap-2 text-[10px] text-muted-foreground sm:flex">
             <Activity className="h-3.5 w-3.5" />
-            <span>SAM 效价 / 唤醒度 · HADS-A / HADS-D</span>
+            <span>POMS-40 · PANAS-20 · HADS-14</span>
           </div>
         </div>
       </header>
@@ -379,24 +550,53 @@ export default function JournalEmotionDiaryPage() {
 
             <section className="border border-border bg-card">
               <div className="border-b border-border px-4 py-3">
-                <h2 className="text-[13px] font-medium">当日情绪状态量表（SAM）</h2>
-                <p className="mt-0.5 text-[10px] text-muted-foreground">
-                  分别回答情绪效价与唤醒度两道题；两个维度彼此独立，均采用 1–9 评分。
-                </p>
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <h2 className="text-[13px] font-medium">心境状态量表（POMS-40）</h2>
+                    <p className="mt-0.5 max-w-[900px] text-[10px] leading-5 text-muted-foreground">
+                      按原题序记录今天截至填写此刻的主观感受。七个分量表分别求和；
+                      总心境扰乱 TMD = 紧张 + 愤怒 + 疲劳 + 抑郁 + 慌乱 − 精力 − 自尊 + 100。
+                    </p>
+                  </div>
+                  <div className="rounded border border-border bg-background px-2.5 py-1.5 text-[10px] text-muted-foreground">
+                    0 几乎没有 · 4 非常强烈
+                  </div>
+                </div>
               </div>
-              <div className="grid gap-5 p-4 md:grid-cols-2">
-                <SamScale
-                  dimension="valence"
-                  label="情绪效价"
-                  value={draft.sam_valence}
-                  onChange={samValence => setDraft(current => ({ ...current, sam_valence: samValence }))}
+              <div className="p-4">
+                <PomsScale
+                  values={draft.poms_item_scores}
+                  onChange={scores => setDraft(current => ({ ...current, poms_item_scores: scores }))}
                 />
-                <SamScale
-                  dimension="arousal"
-                  label="情绪唤醒度"
-                  value={draft.sam_arousal}
-                  onChange={samArousal => setDraft(current => ({ ...current, sam_arousal: samArousal }))}
+              </div>
+              <div className="border-t border-border px-4 py-2 text-[10px] leading-5 text-muted-foreground">
+                POMS 原始分用于同一时间框架下的纵向比较；没有统一临床诊断界值。正式研究或临床使用应采用获授权版本及其常模。
+              </div>
+            </section>
+
+            <section className="border border-border bg-card">
+              <div className="border-b border-border px-4 py-3">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <h2 className="text-[13px] font-medium">正负情感量表（PANAS-20）</h2>
+                    <p className="mt-0.5 max-w-[900px] text-[10px] leading-5 text-muted-foreground">
+                      正性情感 10 项与负性情感 10 项分别求和，均为 10–50 分；
+                      两个维度独立解释，不反向计分，也不合并为一个总分。
+                    </p>
+                  </div>
+                  <div className="rounded border border-border bg-background px-2.5 py-1.5 text-[10px] text-muted-foreground">
+                    1 几乎没有 · 5 非常强烈
+                  </div>
+                </div>
+              </div>
+              <div className="p-4">
+                <PanasScale
+                  values={draft.panas_item_scores}
+                  onChange={scores => setDraft(current => ({ ...current, panas_item_scores: scores }))}
                 />
+              </div>
+              <div className="border-t border-border px-4 py-2 text-[10px] leading-5 text-muted-foreground">
+                PANAS 分数用于观察正性与负性情感的相对强度及长期变化，不设统一临床诊断区间。
               </div>
             </section>
 
@@ -441,7 +641,9 @@ export default function JournalEmotionDiaryPage() {
                   {complete ? '记录完整，可以保存' : '还有内容未完成'}
                 </div>
                 <div className="mt-0.5 truncate text-[10px] text-muted-foreground">
-                  事件 {completion.event ? '完成' : '未完成'} · SAM {completion.sam ? '完成' : '未完成'} ·
+                  事件 {completion.event ? '完成' : '未完成'} ·
+                  POMS {pomsTmd == null ? '未完成' : `TMD ${pomsTmd}`} ·
+                  PANAS {panasScores == null ? '未完成' : `PA ${panasScores.positive} / NA ${panasScores.negative}`} ·
                   HADS-A {anxietyScore == null ? '未完成' : `${anxietyScore}/21`} ·
                   HADS-D {depressionScore == null ? '未完成' : `${depressionScore}/21`}
                 </div>

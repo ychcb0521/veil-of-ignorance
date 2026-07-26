@@ -2,12 +2,19 @@ import { supabase } from '@/integrations/supabase/client';
 import {
   EMOTION_DIARY_MEASUREMENT_VERSION,
   isCompleteHadsScores,
+  isCompletePanasScores,
+  isCompletePomsScores,
   scoreHadsSubscale,
+  scorePanas,
+  scorePomsSubscales,
+  scorePomsTotalMoodDisturbance,
 } from '@/lib/emotionDiary';
 import type {
   DecisionEmotionDiary,
   DecisionEmotionDiaryDraft,
   HadsItemScore,
+  PanasItemScore,
+  PomsItemScore,
 } from '@/types/emotionDiary';
 
 const STORAGE_VERSION = 'decision_emotion_diaries_v1';
@@ -17,8 +24,20 @@ type EmotionDiaryRow = {
   user_id: string;
   diary_date: string;
   event_text: string;
-  sam_valence: number;
-  sam_arousal: number;
+  sam_valence: number | null;
+  sam_arousal: number | null;
+  poms_item_scores?: number[] | null;
+  poms_tension_score?: number | null;
+  poms_anger_score?: number | null;
+  poms_fatigue_score?: number | null;
+  poms_depression_score?: number | null;
+  poms_vigor_score?: number | null;
+  poms_confusion_score?: number | null;
+  poms_esteem_score?: number | null;
+  poms_total_mood_disturbance?: number | null;
+  panas_item_scores?: number[] | null;
+  panas_positive_score?: number | null;
+  panas_negative_score?: number | null;
   hads_anxiety_scores: number[];
   hads_depression_scores: number[];
   hads_anxiety_score: number;
@@ -44,6 +63,24 @@ function isMissingTableError(error: { code?: string; message?: string } | null):
 function toDiary(row: EmotionDiaryRow): DecisionEmotionDiary {
   return {
     ...row,
+    sam_valence: row.sam_valence ?? null,
+    sam_arousal: row.sam_arousal ?? null,
+    poms_item_scores: Array.isArray(row.poms_item_scores)
+      ? row.poms_item_scores as PomsItemScore[]
+      : [],
+    poms_tension_score: row.poms_tension_score ?? null,
+    poms_anger_score: row.poms_anger_score ?? null,
+    poms_fatigue_score: row.poms_fatigue_score ?? null,
+    poms_depression_score: row.poms_depression_score ?? null,
+    poms_vigor_score: row.poms_vigor_score ?? null,
+    poms_confusion_score: row.poms_confusion_score ?? null,
+    poms_esteem_score: row.poms_esteem_score ?? null,
+    poms_total_mood_disturbance: row.poms_total_mood_disturbance ?? null,
+    panas_item_scores: Array.isArray(row.panas_item_scores)
+      ? row.panas_item_scores as PanasItemScore[]
+      : [],
+    panas_positive_score: row.panas_positive_score ?? null,
+    panas_negative_score: row.panas_negative_score ?? null,
     hads_anxiety_scores: row.hads_anxiety_scores as HadsItemScore[],
     hads_depression_scores: row.hads_depression_scores as HadsItemScore[],
   };
@@ -134,14 +171,19 @@ export async function saveDecisionEmotionDiary(
 ): Promise<DecisionEmotionDiary> {
   const eventText = draft.event_text.trim();
   if (!eventText) throw new Error('请先记录最近让内心起波澜的事情');
-  if (draft.sam_valence == null || draft.sam_arousal == null) {
-    throw new Error('请完成情绪效价与唤醒度评分');
+  if (!isCompletePomsScores(draft.poms_item_scores)) {
+    throw new Error('请完成心境状态量表 POMS 的全部 40 道题目');
+  }
+  if (!isCompletePanasScores(draft.panas_item_scores)) {
+    throw new Error('请完成正负情感量表 PANAS 的全部 20 道题目');
   }
   if (!isCompleteHadsScores(draft.hads_anxiety_scores)
     || !isCompleteHadsScores(draft.hads_depression_scores)) {
     throw new Error('请完成焦虑与抑郁自评的全部 14 道题目');
   }
 
+  const poms = scorePomsSubscales(draft.poms_item_scores);
+  const panas = scorePanas(draft.panas_item_scores);
   const now = new Date().toISOString();
   const existing = readLocal(userId).find(item => item.diary_date === draft.diary_date);
   const row: EmotionDiaryRow = {
@@ -151,6 +193,18 @@ export async function saveDecisionEmotionDiary(
     event_text: eventText,
     sam_valence: draft.sam_valence,
     sam_arousal: draft.sam_arousal,
+    poms_item_scores: [...draft.poms_item_scores],
+    poms_tension_score: poms.tension,
+    poms_anger_score: poms.anger,
+    poms_fatigue_score: poms.fatigue,
+    poms_depression_score: poms.depression,
+    poms_vigor_score: poms.vigor,
+    poms_confusion_score: poms.confusion,
+    poms_esteem_score: poms.esteem,
+    poms_total_mood_disturbance: scorePomsTotalMoodDisturbance(poms),
+    panas_item_scores: [...draft.panas_item_scores],
+    panas_positive_score: panas.positive,
+    panas_negative_score: panas.negative,
     hads_anxiety_scores: [...draft.hads_anxiety_scores],
     hads_depression_scores: [...draft.hads_depression_scores],
     hads_anxiety_score: scoreHadsSubscale(draft.hads_anxiety_scores),
