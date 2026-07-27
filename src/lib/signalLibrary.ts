@@ -15,6 +15,7 @@
  */
 
 import { DEFAULT_SIGNAL_LIBRARY_TEXT } from './defaultSignalLibrary';
+import type { SignalJumpIssue } from './signalJumpDiagnostics';
 
 export interface TradeSignal {
   /** 稳定 id，用于列表 key 与删除 */
@@ -27,6 +28,8 @@ export interface TradeSignal {
   timeLabel: string;
   /** 兜底区：价格位 / 区间 / 备注，纯文本 */
   fallbackZone: string;
+  /** 已确认的致命跳转问题；瞬时网络 / 限流错误不会写入。 */
+  jumpIssue?: SignalJumpIssue;
 }
 
 export const SIGNAL_LIBRARY_STORAGE_KEY = 'veil.signalLibrary.v1';

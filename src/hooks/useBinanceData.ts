@@ -26,6 +26,8 @@ export function intervalToMs(interval: string): number {
     "1d": 86_400_000,
     "3d": 259_200_000,
     "1w": 604_800_000,
+    // 月线按最大自然月长度估算覆盖范围；Binance 的下一根月线会在实际月初接管。
+    "1M": 2_678_400_000,
   };
   return map[interval] || 60_000;
 }

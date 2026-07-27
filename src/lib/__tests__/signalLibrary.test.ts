@@ -305,6 +305,27 @@ describe('default signal library', () => {
     expect(loadSignals()).toEqual(custom);
   });
 
+  it('persists a confirmed fatal jump issue without adding it to text exports', () => {
+    const withIssue: TradeSignal[] = [{
+      id: 'fatal-1',
+      symbol: 'SOXLUSDT',
+      timeMs: 100,
+      timeLabel: '2026-01-01 00:00:00',
+      fallbackZone: '1',
+      jumpIssue: {
+        code: 'invalid_symbol',
+        reason: '该标的不存在',
+        checkedAt: 200,
+      },
+    }];
+
+    saveSignals(withIssue);
+
+    expect(loadSignals()).toEqual(withIssue);
+    expect(serializeSignals(withIssue)).not.toContain('该标的不存在');
+    expect(serializeSignals(withIssue)).not.toContain('invalid_symbol');
+  });
+
   it('migrates an old saved bundled library by merging in the updated defaults', () => {
     const oldBundled: TradeSignal[] = [
       {

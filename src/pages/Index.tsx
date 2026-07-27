@@ -27,6 +27,11 @@ import { CoolingOffModal, useCoolingOff } from "@/components/CoolingOffModal";
 import { getConditionalTriggerDecisionFromRange } from "@/lib/conditionalOrders";
 import { fetchCanonicalTimePriceAt } from "@/lib/canonicalTimePrice";
 import { applyCurrentPriceToVisibleData } from "@/lib/visibleDataPrice";
+import {
+  diagnoseSignalJump,
+  hasKlineCoveringSignalTime,
+  type SignalJumpResult,
+} from "@/lib/signalJumpDiagnostics";
 import { buildOperationAssetHistory, buildOperationDailyPnl, buildOperationDailyPnlDetails, pnlForOperationDate } from "@/lib/assetReport";
 import { toast } from "sonner";
 import { Wallet, Crosshair, BookOpen, Tag } from "lucide-react";
@@ -1332,21 +1337,39 @@ const Index = () => {
   // ===== Signal-library jump: switch symbol + start time machine atomically =====
   // 从「信号库」下拉点开某标的时调用，越过手动输入标的/时间，直接定位盘面。
   const handleJumpToSignal = useCallback(
-    async (symbol: string, timeMs: number) => {
-      const normalized = symbol.toUpperCase();
+    async (symbol: string, timeMs: number): Promise<SignalJumpResult> => {
+      const normalized = symbol.toUpperCase().replace(/[\s/]+/g, "");
 
       // 关键：先取数，确认拿到数据后，才改任何共享状态。
       // 「信号库」（按信号自动启动）与「手动启动」必须相互独立——一次失败的跳转
       // 绝不能污染手动模式。因此在 initLoad 成功前，不切换 activeSymbol、不清空行情、
       // 不重置数据层；失败时直接返回，手动模式所见状态原封不动。
-      prevVisibleLenRef.current = 0;
-      cursorRef.current = 0;
-      gameLoopInitRef.current = false;
+      let data = await initLoad(normalized, interval, timeMs);
+      let coversSignalTime = hasKlineCoveringSignalTime(data, timeMs, iMs);
 
-      const data = await initLoad(normalized, interval, timeMs);
-      if (data.length === 0) {
-        toast.error("数据获取失败", { description: `无法加载 ${normalized} @ 该时间，请检查信号` });
-        return;
+      if (!coversSignalTime) {
+        const diagnostic = await diagnoseSignalJump(normalized, timeMs, interval, iMs);
+
+        // 首次取数可能刚好碰上短暂请求抖动；诊断确认行情存在时只重试一次，
+        // 不把可恢复问题错误写成信号库的永久标记。
+        if (diagnostic.status === "available") {
+          data = await initLoad(normalized, interval, timeMs);
+          coversSignalTime = hasKlineCoveringSignalTime(data, timeMs, iMs);
+        }
+
+        if (!coversSignalTime) {
+          if (diagnostic.status === "fatal") {
+            toast.error("该信号无法跳转", { description: diagnostic.issue.reason });
+            return { ok: false, fatalIssue: diagnostic.issue, reason: diagnostic.issue.reason };
+          }
+          const reason = diagnostic.status === "retryable"
+            ? diagnostic.reason
+            : `无法加载 ${normalized} 在该信号时刻的 K 线`;
+          toast.error("行情暂时不可用", {
+            description: `${reason}。本次不会把信号标记为永久失效。`,
+          });
+          return { ok: false, reason };
+        }
       }
 
       // 取数成功——此时才原子地切换标的并清理该标的的旧缓存。
@@ -1361,6 +1384,7 @@ const Index = () => {
         });
       }
       prevVisibleLenRef.current = 0;
+      cursorRef.current = 0;
       gameLoopInitRef.current = false;
 
       if (timeMode === "isolated") {
@@ -1384,9 +1408,10 @@ const Index = () => {
       toast.success(`已跳转到 ${normalized}`, {
         description: `时间机器已定位到信号时间 · 加载 ${data.length} 根K线`,
       });
+      return { ok: true };
     },
     [
-      activeSymbol, interval, initLoad, sim, timeMode,
+      activeSymbol, interval, iMs, initLoad, sim, timeMode,
       setActiveSymbol, setPriceMap, setCoinTimelines, setSyncedOriginTime,
     ],
   );

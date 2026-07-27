@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo, useRef } from 'react';
 import {
   Play, Pause, Square, Clock, BookmarkX,
   Database, ChevronDown, Upload, Download, Plus, Trash2, X, ArrowRightCircle, CheckCircle2,
+  AlertTriangle, Loader2,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { formatUTC8 } from '@/lib/timeFormat';
@@ -9,6 +10,10 @@ import {
   type TradeSignal,
   loadSignals, saveSignals, parseSignalText, serializeSignals, mergeSignals, sortSignalsAlpha, sortSignalsByTime, signalMonthKey,
 } from '@/lib/signalLibrary';
+import {
+  signalJumpIssueLabel,
+  type SignalJumpResult,
+} from '@/lib/signalJumpDiagnostics';
 import type { TimeMachineStatus } from '@/hooks/useTimeSimulator';
 import type { TimeMode } from '@/contexts/TradingContext';
 import { useTradingContext } from '@/contexts/TradingContext';
@@ -28,7 +33,7 @@ interface Props {
   originTime?: number | null;
   onSymbolChange?: (symbol: string) => void;
   activeSymbol?: string;
-  onJumpToSignal?: (symbol: string, timeMs: number) => void;
+  onJumpToSignal?: (symbol: string, timeMs: number) => Promise<SignalJumpResult>;
 }
 
 const SPEED_OPTIONS = [1, 2, 5, 10, 30, 60, 180, 300, 900];
@@ -64,6 +69,7 @@ export function TimeControl({
   const [query, setQuery] = useState('');
   const [monthFilter, setMonthFilter] = useState(''); // '' = 全部月份
   const [sortMode, setSortMode] = useState<'alpha' | 'time-desc' | 'time-asc'>('alpha');
+  const [jumpingSignalId, setJumpingSignalId] = useState<string | null>(null);
 
   useEffect(() => { saveSignals(signals); }, [signals]);
   useEffect(() => { setVisualSpeed(speed); }, [speed]);
@@ -152,13 +158,30 @@ export function TimeControl({
     toast.success(`已导出 ${signals.length} 条信号`);
   };
 
-  const handleJumpSignal = (sig: TradeSignal) => {
+  const handleJumpSignal = async (sig: TradeSignal) => {
     if (!onJumpToSignal) {
       onSymbolChange?.(sig.symbol);
       return;
     }
-    onJumpToSignal(sig.symbol, sig.timeMs);
-    setSignalLibOpen(false);
+    if (jumpingSignalId) return;
+    setJumpingSignalId(sig.id);
+    try {
+      const result = await onJumpToSignal(sig.symbol, sig.timeMs);
+      if (result.ok) {
+        if (sig.jumpIssue) {
+          setSignals(prev => prev.map(item =>
+            item.id === sig.id ? { ...item, jumpIssue: undefined } : item));
+        }
+        setSignalLibOpen(false);
+        return;
+      }
+      if (result.fatalIssue) {
+        setSignals(prev => prev.map(item =>
+          item.id === sig.id ? { ...item, jumpIssue: result.fatalIssue } : item));
+      }
+    } finally {
+      setJumpingSignalId(null);
+    }
   };
 
   const handleStart = () => {
@@ -417,8 +440,9 @@ export function TimeControl({
                   <div key={sig.id} className="group flex items-center gap-2 px-2.5 py-1.5 hover:bg-accent/60">
                     <button
                       onClick={() => handleJumpSignal(sig)}
-                      className="flex flex-1 items-center gap-2 overflow-hidden text-left"
-                      title={`跳转到 ${sig.symbol} @ ${sig.timeLabel}`}
+                      disabled={jumpingSignalId != null}
+                      className="flex flex-1 items-center gap-2 overflow-hidden text-left disabled:cursor-wait disabled:opacity-70"
+                      title={sig.jumpIssue?.reason ?? `跳转到 ${sig.symbol} @ ${sig.timeLabel}`}
                     >
                       <span
                         className="flex w-24 shrink-0 items-center gap-1 font-mono text-[11px] font-medium text-foreground"
@@ -433,13 +457,25 @@ export function TimeControl({
                       {sig.fallbackZone && (
                         <span className="truncate text-[10px] text-[#F0B90B]/90">兜底 {sig.fallbackZone}</span>
                       )}
+                      {sig.jumpIssue && (
+                        <span
+                          className="ml-auto flex shrink-0 items-center gap-1 text-[9px] font-medium text-destructive"
+                          title={sig.jumpIssue.reason}
+                        >
+                          <AlertTriangle className="h-3 w-3" />
+                          不可跳转 · {signalJumpIssueLabel(sig.jumpIssue.code)}
+                        </span>
+                      )}
                     </button>
                     <button
                       onClick={() => handleJumpSignal(sig)}
-                      className="shrink-0 text-primary transition-colors hover:text-primary/70"
-                      title="跳转盘面"
+                      disabled={jumpingSignalId != null}
+                      className="shrink-0 text-primary transition-colors hover:text-primary/70 disabled:cursor-wait disabled:opacity-60"
+                      title={sig.jumpIssue?.reason ?? '跳转盘面'}
                     >
-                      <ArrowRightCircle className="w-4 h-4" />
+                      {jumpingSignalId === sig.id
+                        ? <Loader2 className="h-4 w-4 animate-spin" />
+                        : <ArrowRightCircle className="h-4 w-4" />}
                     </button>
                     <button
                       onClick={() => handleDeleteSignal(sig.id)}
