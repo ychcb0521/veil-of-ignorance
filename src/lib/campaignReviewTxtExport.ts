@@ -205,6 +205,11 @@ function buildLegQuestionAnswers(
     drawdownPct: leg.post_opportunity_quality_drawdown_pct,
   });
 
+  addCurrent(
+    answers,
+    '是否做到了珍惜“每一个球”？',
+    leg.post_every_ball_pct == null ? null : `${leg.post_every_ball_pct}%`,
+  );
   addCurrent(answers, '这笔交易的结果是什么？', leg.post_outcome, OUTCOME_LABEL);
   addCurrent(answers, '整个战役的总利润是多少？', campaignTotalRealizedPnl);
   addCurrent(answers, '这笔交易最终实现了多少 R？', leg.post_r_multiple);

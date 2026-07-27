@@ -4312,6 +4312,7 @@ export interface SyncCampaignDeviationRulesResult {
 // ============ Batch 3 additions ============
 
 export interface FinalizeJournalInput {
+  post_every_ball_pct?: TradeJournal['post_every_ball_pct'];
   post_outcome: TradeOutcome;
   post_realized_pnl: number | null;
   post_r_multiple: number | null;

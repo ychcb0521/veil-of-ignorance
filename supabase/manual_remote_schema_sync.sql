@@ -32,6 +32,7 @@
 ALTER TABLE public.trade_journals
   ADD COLUMN IF NOT EXISTS post_result_summary             text,
   ADD COLUMN IF NOT EXISTS post_decision_quality           text,
+  ADD COLUMN IF NOT EXISTS post_every_ball_pct              numeric,
   ADD COLUMN IF NOT EXISTS post_positive_expectancy_review text,
   ADD COLUMN IF NOT EXISTS post_premortem_review           text,
   ADD COLUMN IF NOT EXISTS post_invalidation_review        text,

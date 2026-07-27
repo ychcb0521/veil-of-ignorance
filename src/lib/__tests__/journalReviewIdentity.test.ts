@@ -42,6 +42,13 @@ describe('historical journal review identity', () => {
     }))).toBe(true);
   });
 
+  it('recognizes a saved first-question percentage, including an explicit 0%', () => {
+    expect(hasCompletedJournalReview(journal('percentage-only-review', {
+      post_reviewed_at: null,
+      post_every_ball_pct: 0,
+    }))).toBe(true);
+  });
+
   it('does not treat automatically backfilled close facts as a completed review', () => {
     expect(hasCompletedJournalReview(journal('close-facts-only', {
       post_outcome: 'win',

@@ -349,6 +349,15 @@ const ENTRY_WIN_RATE_ESTIMATE_ACCENTS: Record<string, string> = {
 };
 
 export const POST_FIELD_SPECS: SummaryFieldSpec[] = [
+  {
+    key: 'post_every_ball_pct',
+    label: '是否做到了珍惜“每一个球”？',
+    type: 'numeric',
+    numericMin: 0,
+    numericMax: 100,
+    numericUnit: '%',
+    hint: '平仓后以百分比复盘：这笔交易是否像珍惜每一个球一样珍惜每一次决策与执行。',
+  },
   { key: 'post_decision_quality', label: '选择本笔归类（结构 × 结果四象限的"结构轴"）', type: 'enum', optionLabels: DECISION_QUALITY_LABELS, optionAccents: DECISION_QUALITY_ACCENTS, hint: '过程是否正当——与盈亏无关。' },
   { key: 'post_struggle_level', label: '过程纠结度（1 极煎熬 → 5 行云流水）', type: 'numeric', numericMin: 1, numericMax: 5, numericLabels: STRUGGLE_LEVEL_LABELS as unknown as Record<string, string>, hint: '亏损的先行指标。' },
   { key: 'exit_falsification_status', label: '证伪信号触发状态（止）', type: 'enum', optionLabels: FALSIFICATION_STATUS_LABELS, optionAccents: FALSIFICATION_STATUS_ACCENTS, hint: '事前的止 vs 事后真实退出动作。' },

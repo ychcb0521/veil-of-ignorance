@@ -587,6 +587,7 @@ export type Database = {
           post_emo_main_stone_tags: string[] | null
           post_emo_next_time_plan: string | null
           post_emo_wanted: string | null
+          post_every_ball_pct: number | null
           post_error_scenario: string | null
           post_error_type_summary: string | null
           post_execution_monitor: string | null
@@ -730,6 +731,7 @@ export type Database = {
           post_emo_main_stone_tags?: string[] | null
           post_emo_next_time_plan?: string | null
           post_emo_wanted?: string | null
+          post_every_ball_pct?: number | null
           post_error_scenario?: string | null
           post_error_type_summary?: string | null
           post_execution_monitor?: string | null
@@ -873,6 +875,7 @@ export type Database = {
           post_emo_main_stone_tags?: string[] | null
           post_emo_next_time_plan?: string | null
           post_emo_wanted?: string | null
+          post_every_ball_pct?: number | null
           post_error_scenario?: string | null
           post_error_type_summary?: string | null
           post_execution_monitor?: string | null

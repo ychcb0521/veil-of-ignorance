@@ -34,6 +34,7 @@ function makeLeg(overrides: Partial<TradeJournal>): TradeJournal {
 describe('campaignReviewTxtExport', () => {
   it('只导出已完成平仓评价的仓位，并逐题输出问题和答案', () => {
     const reviewed = makeLeg({
+      post_every_ball_pct: 86,
       post_outcome: 'win',
       post_realized_pnl: 123.45,
       post_decision_quality: 'good',
@@ -51,12 +52,18 @@ describe('campaignReviewTxtExport', () => {
 
     const output = buildCampaignPostReviewsTxt(campaign, [reviewed, skipped]);
     expect(output).toContain('平仓评价数量：1');
+    expect(output).toContain('问题：是否做到了珍惜“每一个球”？\n答案：86%');
     expect(output).toContain('问题：这笔交易的结果是什么？\n答案：赢');
     expect(output).toContain('问题：整个战役的总利润是多少？\n答案：456.78');
     expect(output).not.toContain('问题：这笔交易的已实现盈亏是多少？');
     expect(output).toContain('问题：这笔交易的决策质量如何？\n答案：正当过程（结构对）');
     expect(output).toContain('问题：建仓时盈亏比估计属于哪一档？\n答案：2:1-5:1');
     expect(output).not.toContain('-999');
+
+    const everyBallQuestion = output.indexOf('问题：是否做到了珍惜“每一个球”？');
+    const outcomeQuestion = output.indexOf('问题：这笔交易的结果是什么？');
+    expect(everyBallQuestion).toBeGreaterThan(-1);
+    expect(everyBallQuestion).toBeLessThan(outcomeQuestion);
   });
 
   it('历史战役缺少汇总盈亏时，使用全部 Legs 的已实现盈亏合计作为战役总利润', () => {

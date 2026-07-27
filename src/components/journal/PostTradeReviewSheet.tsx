@@ -10,6 +10,7 @@ import { Button } from '@/components/ui/button';
 import { ImeSafeTextarea } from '@/components/ui/ime-safe-text-field';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Slider } from '@/components/ui/slider';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { toast } from 'sonner';
@@ -137,6 +138,7 @@ export function PostTradeReviewSheet({
 }: Props) {
   const isMobile = useIsMobile();
   const { recordPostTradeReviewCompleted } = useTradingContext();
+  const [everyBallPct, setEveryBallPct] = useState<number | null>(null);
   const [decisionQuality, setDecisionQuality] = useState<TradeJournal['post_decision_quality']>('mixed');
   const [expectancyReview, setExpectancyReview] = useState('');
   const [oddsStructureReviewValue, setOddsStructureReviewValue] = useState<OddsStructureReview | null>(null);
@@ -180,6 +182,7 @@ export function PostTradeReviewSheet({
     setStampedCloseTime(null);
     (async () => {
       try {
+        setEveryBallPct(journal.post_every_ball_pct ?? null);
         setDecisionQuality(journal.post_decision_quality ?? 'mixed');
         const parsedOddsStructureReview = parseOddsStructureReviewText(journal.post_positive_expectancy_review);
         setOddsStructureReviewValue(parsedOddsStructureReview.review);
@@ -403,7 +406,8 @@ export function PostTradeReviewSheet({
   ].every(value => value.trim().length > 0);
   const emoMainStoneValid = emoMainStone.trim().length > 0 || emoMainStoneTags.length > 0;
   const emoValid = emoTextValid && emoMainStoneValid;
-  const canSave = resultValid
+  const canSave = everyBallPct != null
+    && resultValid
     && decisionValid
     && quadrantValid
     && reviewLoopValid
@@ -440,6 +444,7 @@ export function PostTradeReviewSheet({
     window.addEventListener('journal:schemaDrift', onDrift);
     try {
       const updated = await finalizeJournalReview(journal.id, {
+        post_every_ball_pct: everyBallPct,
         post_outcome: outcome,
         post_realized_pnl: pnl,
         post_r_multiple: finalR,
@@ -602,6 +607,36 @@ export function PostTradeReviewSheet({
             这是历史回填，事后复盘有效，但避免编造当时未存在的决策。
           </div>
         )}
+        <section className={`border-[#F0B90B]/35 bg-[#F0B90B]/[0.04] px-4 py-4 ${sectionCardClass}`}>
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <div className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[#D89B00]">第一问</div>
+              <Label className="mt-1 block text-[13px] font-semibold text-foreground">
+                是否做到了珍惜“每一个球”？<span className="text-[#F6465D]"> *</span>
+              </Label>
+              <p className="mt-1 text-[10.5px] text-muted-foreground">
+                用百分比回看这笔交易中每一次判断与执行。
+              </p>
+            </div>
+            <div className="shrink-0 font-mono text-[18px] font-semibold text-[#D89B00]">
+              {everyBallPct == null ? '尚未评分' : `${everyBallPct}%`}
+            </div>
+          </div>
+          <Slider
+            className="mt-4 [&_[role=slider]]:border-[#F0B90B] [&_[role=slider]]:focus-visible:ring-[#F0B90B]/40 [&>span>span]:bg-[#F0B90B]"
+            min={0}
+            max={100}
+            step={1}
+            value={[everyBallPct ?? 0]}
+            onValueChange={([value]) => setEveryBallPct(value ?? 0)}
+            aria-label="是否做到了珍惜每一个球的百分比"
+          />
+          <div className="mt-2 flex justify-between font-mono text-[9px] text-muted-foreground">
+            <span>0%</span>
+            <span>50%</span>
+            <span>100%</span>
+          </div>
+        </section>
         {/* (A) Snapshot */}
         {showOpeningSnapshot && (
         <Collapsible>

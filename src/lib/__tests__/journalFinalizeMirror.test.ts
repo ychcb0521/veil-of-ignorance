@@ -91,6 +91,7 @@ const FINALIZE_INPUT: FinalizeJournalInput = {
   post_reflection: '',
   post_correct_action: '',
   // 以下扩展字段远程库尚未建列，会被 schema fallback 剥离 → 必须靠本地镜像兜底。
+  post_every_ball_pct: 87,
   post_emo_disturbance: '价格一回撤我就慌',
   post_emo_first_reaction: '想立刻平掉',
   post_emo_wanted: '想快点解脱',
@@ -120,6 +121,7 @@ function serverRow(): TradeJournal {
 }
 
 const emoSpec = POST_FIELD_SPECS.find(s => s.key === 'post_emo_disturbance')!;
+const everyBallSpec = POST_FIELD_SPECS.find(s => s.key === 'post_every_ball_pct')!;
 const payoffGradeSpec = POST_FIELD_SPECS.find(s => s.key === 'post_entry_payoff_estimate_grade')!;
 const payoffBasisSpec = POST_FIELD_SPECS.find(s => s.key === 'post_entry_payoff_basis_review')!;
 
@@ -145,6 +147,7 @@ describe('平仓评价 → 本地镜像 → 错题集汇总（闭环）', () => 
     const updated = await finalizeJournalReview('journal-1', FINALIZE_INPUT);
 
     expect(updated.post_reviewed_at).toBeTruthy();
+    expect(updated.post_every_ball_pct).toBe(87);
     expect(updated.post_emo_disturbance).toBe('价格一回撤我就慌');
     expect(updated.post_decision_quality).toBe('bad');
     expect(updated.post_entry_payoff_estimate_grade).toBe('rr_2_5');
@@ -178,6 +181,16 @@ describe('平仓评价 → 本地镜像 → 错题集汇总（闭环）', () => 
       .toBe('当时把目标空间估得太满，没扣掉上方密集抛压');
     expect(summarizeField(merged as TradeJournal[], payoffGradeSpec).filled).toBe(1);
     expect(summarizeField(merged as TradeJournal[], payoffBasisSpec).filled).toBe(1);
+  });
+
+  it('新百分比题在远程缺列时仍由本地镜像保留并进入汇总', async () => {
+    expect(summarizeField([serverRow()], everyBallSpec).filled).toBe(0);
+
+    await finalizeJournalReview('journal-1', FINALIZE_INPUT);
+
+    const merged = applyLocalMirror(OWNER, [serverRow()]);
+    expect((merged[0] as Record<string, unknown>).post_every_ball_pct).toBe(87);
+    expect(summarizeField(merged as TradeJournal[], everyBallSpec).filled).toBe(1);
   });
 
   it('远程列补齐后再次编辑，会清除旧镜像并显示刚保存的新答案', async () => {

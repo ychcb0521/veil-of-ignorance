@@ -799,6 +799,8 @@ export interface TradeJournal {
   pre_stop_doing_ad_hoc?: string | null;
 
   // post-review
+  /** 平仓评价第一问：是否做到了珍惜“每一个球”（0-100%）。 */
+  post_every_ball_pct?: number | null;
   post_outcome: TradeOutcome | null;
   post_realized_pnl: number | null;
   post_r_multiple: number | null;
