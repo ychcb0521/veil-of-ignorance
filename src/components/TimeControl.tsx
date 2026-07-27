@@ -11,6 +11,7 @@ import {
   loadSignals, saveSignals, parseSignalText, serializeSignals, mergeSignals, sortSignalsAlpha, sortSignalsByTime, signalMonthKey,
 } from '@/lib/signalLibrary';
 import {
+  preflightSignalJumpIssues,
   signalJumpIssueLabel,
   type SignalJumpResult,
 } from '@/lib/signalJumpDiagnostics';
@@ -34,6 +35,8 @@ interface Props {
   onSymbolChange?: (symbol: string) => void;
   activeSymbol?: string;
   onJumpToSignal?: (symbol: string, timeMs: number) => Promise<SignalJumpResult>;
+  signalJumpInterval?: string;
+  signalJumpIntervalMs?: number;
 }
 
 const SPEED_OPTIONS = [1, 2, 5, 10, 30, 60, 180, 300, 900];
@@ -43,6 +46,7 @@ export function TimeControl({
   onStart, onPause, onResume, onStop, onSetSpeed, clockRef,
   timeMode = 'synced',
   originTime, onSymbolChange, activeSymbol, onJumpToSignal,
+  signalJumpInterval = '1m', signalJumpIntervalMs = 60_000,
 }: Props) {
   const ctx = useTradingContext();
   const [noEntryOpen, setNoEntryOpen] = useState(false);
@@ -70,9 +74,89 @@ export function TimeControl({
   const [monthFilter, setMonthFilter] = useState(''); // '' = 全部月份
   const [sortMode, setSortMode] = useState<'alpha' | 'time-desc' | 'time-asc'>('alpha');
   const [jumpingSignalId, setJumpingSignalId] = useState<string | null>(null);
+  const [signalAuditProgress, setSignalAuditProgress] = useState<{
+    checked: number;
+    total: number;
+  } | null>(null);
+  const completedSignalAuditKeyRef = useRef<string | null>(null);
+  const signalsForAuditRef = useRef(signals);
+  signalsForAuditRef.current = signals;
 
   useEffect(() => { saveSignals(signals); }, [signals]);
   useEffect(() => { setVisualSpeed(speed); }, [speed]);
+
+  const signalAuditKey = useMemo(() => {
+    let hash = 2166136261;
+    for (const signal of signals) {
+      const value = `${signal.id}|${signal.symbol}|${signal.timeMs}`;
+      for (let index = 0; index < value.length; index += 1) {
+        hash ^= value.charCodeAt(index);
+        hash = Math.imul(hash, 16777619);
+      }
+    }
+    return `${signalJumpInterval}:${signalJumpIntervalMs}:${signals.length}:${hash >>> 0}`;
+  }, [signalJumpInterval, signalJumpIntervalMs, signals]);
+
+  useEffect(() => {
+    const auditSignals = signalsForAuditRef.current;
+    if (!signalLibOpen || !onJumpToSignal || auditSignals.length === 0) {
+      setSignalAuditProgress(null);
+      return;
+    }
+    if (completedSignalAuditKeyRef.current === signalAuditKey) return;
+
+    const controller = new AbortController();
+    const candidates = auditSignals.map(({ id, symbol, timeMs }) => ({ id, symbol, timeMs }));
+    const totalSymbols = new Set(candidates.map(item => item.symbol)).size;
+    setSignalAuditProgress({ checked: 0, total: totalSymbols });
+
+    void preflightSignalJumpIssues(
+      candidates,
+      signalJumpInterval,
+      signalJumpIntervalMs,
+      {
+        signal: controller.signal,
+        onProgress: ({ checkedSymbols, totalSymbols: total, fatalIssues }) => {
+          if (controller.signal.aborted) return;
+          if (fatalIssues.length > 0) {
+            const issuesById = new Map(fatalIssues.map(item => [item.id, item.issue]));
+            setSignals(prev => prev.map(item => {
+              const nextIssue = issuesById.get(item.id);
+              if (!nextIssue) return item;
+              if (
+                item.jumpIssue?.code === nextIssue.code
+                && item.jumpIssue.reason === nextIssue.reason
+              ) {
+                return item;
+              }
+              return { ...item, jumpIssue: nextIssue };
+            }));
+          }
+          setSignalAuditProgress({ checked: checkedSymbols, total });
+        },
+      },
+    ).then((summary) => {
+      if (controller.signal.aborted) return;
+      if (
+        !summary.retryableReason
+        && summary.retryableSymbols === 0
+        && summary.checkedSymbols === summary.totalSymbols
+      ) {
+        completedSignalAuditKeyRef.current = signalAuditKey;
+      }
+      setSignalAuditProgress(null);
+    }).catch(() => {
+      if (!controller.signal.aborted) setSignalAuditProgress(null);
+    });
+
+    return () => controller.abort();
+  }, [
+    onJumpToSignal,
+    signalAuditKey,
+    signalJumpInterval,
+    signalJumpIntervalMs,
+    signalLibOpen,
+  ]);
 
   // 信号里出现过的月份（按 UTC+8 墙钟），倒序 + 每月条数，喂给「按月份定位」下拉。
   const monthOptions = useMemo(() => {
@@ -348,6 +432,16 @@ export function TimeControl({
               >
                 <Download className="h-3 w-3" />
               </button>
+            )}
+            {signalAuditProgress && (
+              <span
+                className="ml-auto flex items-center gap-1 font-mono text-[9px] text-muted-foreground/60"
+                title="正在后台预检无法跳转的信号；不影响正常点击"
+                aria-live="polite"
+              >
+                <Loader2 className="h-2.5 w-2.5 animate-spin" />
+                预检 {signalAuditProgress.checked}/{signalAuditProgress.total}
+              </span>
             )}
           </div>
 

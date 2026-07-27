@@ -1730,6 +1730,8 @@ const Index = () => {
           timeMode={timeMode}
           onSymbolChange={handleSymbolChange}
           onJumpToSignal={handleJumpToSignal}
+          signalJumpInterval={interval}
+          signalJumpIntervalMs={iMs}
           originTime={activeCoinState.originTime}
           activeSymbol={activeSymbol}
         />
