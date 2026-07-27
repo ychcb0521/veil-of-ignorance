@@ -218,7 +218,7 @@ function afterDelistingIssue(symbol: string, lastOpen: number, now: number): Sig
 }
 
 /**
- * 打开信号库时的低请求量预检。
+ * 信号库载入后的低请求量预检。
  *
  * 先用一次 exchangeInfo 覆盖仍在交易所目录中的标的；只有不在目录中的历史/错误标的
  * 才按标的分组补查首尾 K 线。这样上千条信号不会变成上千次请求，同时仍能在用户点击前

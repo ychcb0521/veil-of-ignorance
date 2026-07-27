@@ -99,7 +99,7 @@ export function TimeControl({
 
   useEffect(() => {
     const auditSignals = signalsForAuditRef.current;
-    if (!signalLibOpen || !onJumpToSignal || auditSignals.length === 0) {
+    if (auditSignals.length === 0) {
       setSignalAuditProgress(null);
       return;
     }
@@ -151,11 +151,9 @@ export function TimeControl({
 
     return () => controller.abort();
   }, [
-    onJumpToSignal,
     signalAuditKey,
     signalJumpInterval,
     signalJumpIntervalMs,
-    signalLibOpen,
   ]);
 
   // 信号里出现过的月份（按 UTC+8 墙钟），倒序 + 每月条数，喂给「按月份定位」下拉。
@@ -183,6 +181,10 @@ export function TimeControl({
     if (monthFilter) base = base.filter(s => signalMonthKey(s.timeMs) === monthFilter);
     return q ? base.filter(s => s.symbol.includes(q)) : base;
   }, [signals, query, monthFilter, sortMode]);
+  const unjumpableSignalCount = useMemo(
+    () => signals.reduce((count, signal) => count + (signal.jumpIssue ? 1 : 0), 0),
+    [signals],
+  );
 
   // 「被做过交易」的标的集合：已平仓记录(tradeHistory) ∪ 当前持仓(positionsMap)，
   // 大写归一以匹配 sig.symbol。开仓即标记、平仓后仍保留——用于在信号库里识别已交易标的。
@@ -345,6 +347,14 @@ export function TimeControl({
           信号库
           {signals.length > 0 && (
             <span className="ml-0.5 rounded-full bg-primary/20 px-1.5 font-mono text-[9px] text-primary">{signals.length}</span>
+          )}
+          {unjumpableSignalCount > 0 && (
+            <span
+              className="rounded-full bg-destructive/10 px-1.5 font-mono text-[9px] text-destructive"
+              title={`${unjumpableSignalCount} 条信号已提前确认不可跳转`}
+            >
+              {unjumpableSignalCount} 不可跳转
+            </span>
           )}
           <ChevronDown className={`w-3 h-3 transition-transform ${signalLibOpen ? 'rotate-180' : ''}`} />
         </button>
