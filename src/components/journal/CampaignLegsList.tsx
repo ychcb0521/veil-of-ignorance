@@ -5,6 +5,7 @@ import { LegRoleChip } from '@/components/journal/LegRoleChip';
 import { resolveLegExecution, type LegExitPriceCorrections } from '@/lib/campaignLegExecution';
 import { HEDGE_TYPE_LABELS } from '@/lib/hedgeTypes';
 import { buildTradeRecordLookup, journalOperationTime } from '@/lib/objectiveOperationTime';
+import { buildCampaignReverseOrderLegMap } from '@/lib/campaignReverseOrderAttribution';
 import type { TradeJournal } from '@/types/journal';
 import type { CampaignReverseHedgeOrder, TradeRecord } from '@/types/trading';
 
@@ -34,12 +35,6 @@ function fmtClock(value: number | string | null | undefined): string {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
-function timeMs(value: number | string | null | undefined): number | null {
-  if (!value) return null;
-  const ms = typeof value === 'number' ? value : new Date(value).getTime();
-  return Number.isFinite(ms) ? ms : null;
-}
-
 function fmtPrice(value: number | null | undefined): string {
   if (value == null || !Number.isFinite(value)) return '—';
   if (Math.abs(value) >= 1) return value.toFixed(4);
@@ -59,40 +54,10 @@ export function CampaignLegsList({
   const nav = useNavigate();
   const recordMap = useMemo(() => buildTradeRecordLookup(tradeRecords), [tradeRecords]);
   const highlightedSet = useMemo(() => new Set(highlightedLegIds), [highlightedLegIds]);
-  // 反向挂单归属：已触发的委托优先按成交记录精确归到自己的 leg；
-  // 未触发/已撤的挂单再归到「委托时刻最近一次开仓」的那条腿，避免在重叠时间窗里重复出现。
-  const reverseOrderLegMap = useMemo(() => {
-    const legIdByTradeRecordId = new Map(
-      legs
-        .filter(leg => Boolean(leg.trade_record_id))
-        .map(leg => [leg.trade_record_id as string, leg.id]),
-    );
-    const legOpens = legs
-      .map(leg => {
-        const rec = leg.trade_record_id ? recordMap.get(leg.trade_record_id) ?? null : null;
-        return { id: leg.id, openMs: timeMs(rec?.openTime ?? leg.pre_simulated_time) };
-      })
-      .filter((item): item is { id: string; openMs: number } => item.openMs != null)
-      .sort((a, b) => a.openMs - b.openMs);
-    const map = new Map<string, string>();
-    for (const order of reverseHedgeOrders) {
-      const directLegId = order.tradeRecordId
-        ? legIdByTradeRecordId.get(order.tradeRecordId)
-        : legIdByTradeRecordId.get(order.id);
-      if (directLegId) {
-        map.set(order.id, directLegId);
-        continue;
-      }
-
-      let assignedId: string | null = legOpens[0]?.id ?? null;
-      for (const { id, openMs } of legOpens) {
-        if (openMs <= order.createdAt) assignedId = id;
-        else break;
-      }
-      if (assignedId) map.set(order.id, assignedId);
-    }
-    return map;
-  }, [legs, reverseHedgeOrders, recordMap]);
+  const reverseOrderLegMap = useMemo(
+    () => buildCampaignReverseOrderLegMap(legs, reverseHedgeOrders),
+    [legs, reverseHedgeOrders],
+  );
 
   return (
     <div className="bg-card border border-border rounded overflow-hidden">

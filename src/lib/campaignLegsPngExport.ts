@@ -9,6 +9,7 @@ import { resolveLegExecution, type LegExitPriceCorrections } from '@/lib/campaig
 import { computeInitialMainExposureNotional } from '@/lib/campaignAnalysis';
 import { formatCampaignLeverage, resolveCampaignMainLeverage } from '@/lib/campaignMetrics';
 import { formatCampaignDisplayCode } from '@/lib/campaignCode';
+import { buildCampaignReverseOrderLegMap } from '@/lib/campaignReverseOrderAttribution';
 import type { TradeCampaign, TradeJournal } from '@/types/journal';
 import type { EmotionDiaryExportSummary } from '@/types/emotionDiary';
 import type { CampaignReverseHedgeOrder, TradeRecord } from '@/types/trading';
@@ -130,12 +131,6 @@ function fmtClock(value: number | string | null | undefined): string {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
-function timeMs(value: number | string | null | undefined): number | null {
-  if (!value) return null;
-  const ms = typeof value === 'number' ? value : new Date(value).getTime();
-  return Number.isFinite(ms) ? ms : null;
-}
-
 function fmtPrice(value: number | null | undefined): string {
   if (value == null || !Number.isFinite(value)) return '—';
   if (Math.abs(value) >= 1) return value.toFixed(4);
@@ -199,49 +194,12 @@ function statusForReverseOrder(order: CampaignReverseHedgeOrder): string {
   return '已撤';
 }
 
-function buildReverseOrderLegMap(
-  legs: TradeJournal[],
-  tradeRecords: TradeRecord[],
-  reverseHedgeOrders: CampaignReverseHedgeOrder[],
-): Map<string, string> {
-  const recordMap = buildTradeRecordLookup(tradeRecords);
-  const legIdByTradeRecordId = new Map(
-    legs
-      .filter(leg => Boolean(leg.trade_record_id))
-      .map(leg => [leg.trade_record_id as string, leg.id]),
-  );
-  const legOpens = legs
-    .map(leg => {
-      const rec = leg.trade_record_id ? recordMap.get(leg.trade_record_id) ?? null : null;
-      return { id: leg.id, openMs: timeMs(rec?.openTime ?? leg.pre_simulated_time) };
-    })
-    .filter((item): item is { id: string; openMs: number } => item.openMs != null)
-    .sort((a, b) => a.openMs - b.openMs);
-  const map = new Map<string, string>();
-
-  for (const order of reverseHedgeOrders) {
-    const directLegId = order.tradeRecordId
-      ? legIdByTradeRecordId.get(order.tradeRecordId)
-      : legIdByTradeRecordId.get(order.id);
-    if (directLegId) {
-      map.set(order.id, directLegId);
-      continue;
-    }
-
-    let assignedId: string | null = legOpens[0]?.id ?? null;
-    for (const { id, openMs } of legOpens) {
-      if (openMs <= order.createdAt) assignedId = id;
-      else break;
-    }
-    if (assignedId) map.set(order.id, assignedId);
-  }
-
-  return map;
-}
-
 export function buildCampaignLegsExportRows(input: ExportInput): CampaignLegsExportRow[] {
   const recordMap = buildTradeRecordLookup(input.tradeRecords);
-  const reverseOrderLegMap = buildReverseOrderLegMap(input.legs, input.tradeRecords, input.reverseHedgeOrders);
+  const reverseOrderLegMap = buildCampaignReverseOrderLegMap(
+    input.legs,
+    input.reverseHedgeOrders,
+  );
 
   return input.legs.map(leg => {
     const record = leg.trade_record_id ? recordMap.get(leg.trade_record_id) ?? null : null;

@@ -219,4 +219,41 @@ describe('campaign PNG overview', () => {
       '空 0.120000 · 已触发',
     ]));
   });
+
+  it('PNG 的所有委托只显示在主力腿，不显示在共享成交标识的镜像腿', () => {
+    const rows = buildCampaignLegsExportRows({
+      ...input(),
+      legs: [
+        {
+          id: 'main-shared',
+          leg_sequence: 1,
+          leg_role: 'main_open',
+          order_kind: 'main',
+          trade_record_id: 'shared-record',
+          pre_simulated_time: '2026-07-14T01:00:00.000Z',
+        },
+        {
+          id: 'mirror-shared',
+          leg_sequence: 2,
+          leg_role: 'mirror_tp',
+          order_kind: 'tp',
+          trade_record_id: 'shared-record',
+          pre_simulated_time: '2026-07-14T01:00:00.000Z',
+        },
+      ] as TradeJournal[],
+      reverseHedgeOrders: [{
+        id: 'reverse-shared',
+        tradeRecordId: 'shared-record',
+        side: 'SHORT',
+        price: 0.12,
+        status: 'cancelled',
+        createdAt: Date.parse('2026-07-14T01:01:00.000Z'),
+        triggeredAt: null,
+        cancelledAt: Date.parse('2026-07-14T01:02:00.000Z'),
+      }],
+    });
+
+    expect(rows[0].cells[8].map(line => line.text)).toContain('空 0.120000 · 已撤');
+    expect(rows[1].cells[8].map(line => line.text)).toEqual(['—']);
+  });
 });
