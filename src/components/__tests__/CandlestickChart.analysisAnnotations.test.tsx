@@ -1,5 +1,5 @@
 import { act, render, waitFor } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   CandlestickChart,
   hashTimeAxis,
@@ -116,6 +116,9 @@ const labelsOverlap = (
   return !(a.left + a.width <= b.left || b.left + b.width <= a.left || a.top + height <= b.top || b.top + height <= a.top);
 };
 
+let viewportBounds = { width: 1000, height: 520 };
+const originalGetBoundingClientRect = HTMLElement.prototype.getBoundingClientRect;
+
 function candle(time: number, close = 1): KlineData {
   return {
     time,
@@ -136,6 +139,19 @@ const getBandLabelTexts = () => getBandOverlay()?.extendData?.labels?.map((label
 describe('CandlestickChart analysis annotations', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    viewportBounds = { width: 1000, height: 520 };
+    HTMLElement.prototype.getBoundingClientRect = vi.fn(() => ({
+      x: 0,
+      y: 0,
+      top: 0,
+      left: 0,
+      right: viewportBounds.width,
+      bottom: viewportBounds.height,
+      width: viewportBounds.width,
+      height: viewportBounds.height,
+      toJSON: () => ({}),
+    }));
+    mocks.chart.resize.mockImplementation(() => undefined);
     mocks.dataList.length = 0;
     mocks.chart.updateData.mockImplementation((nextCandle: any, callback?: () => void) => {
       const last = mocks.dataList[mocks.dataList.length - 1];
@@ -159,6 +175,10 @@ describe('CandlestickChart analysis annotations', () => {
     vi.stubGlobal('ResizeObserver', ResizeObserverMock);
   });
 
+  afterAll(() => {
+    HTMLElement.prototype.getBoundingClientRect = originalGetBoundingClientRect;
+  });
+
   it('图表在静止鼠标下异步挂载时会预激活原生指针交互', () => {
     const host = document.createElement('div');
     const chartEventRoot = document.createElement('div');
@@ -170,7 +190,7 @@ describe('CandlestickChart analysis annotations', () => {
     expect(mouseEnter).toHaveBeenCalledTimes(1);
   });
 
-  it('宿主进入全屏后只执行一次稳定重排且不推动时间轴', async () => {
+  it('宿主进入全屏后等待布局稳定并复核价格轴且不推动时间轴', async () => {
     const { rerender } = render(
       <TooltipProvider>
         <CandlestickChart
@@ -182,12 +202,15 @@ describe('CandlestickChart analysis annotations', () => {
       </TooltipProvider>,
     );
 
-    await waitFor(() => {
-      expect(mocks.chart.resize).toHaveBeenCalled();
-    });
+    await waitFor(() => expect(mocks.chart.resize.mock.calls.length).toBeGreaterThanOrEqual(3));
     mocks.chart.resize.mockClear();
     mocks.chart.scrollByDistance.mockClear();
+    const resizedAt: Array<{ width: number; height: number }> = [];
+    mocks.chart.resize.mockImplementation(() => {
+      resizedAt.push({ ...viewportBounds });
+    });
 
+    viewportBounds = { width: 1440, height: 860 };
     rerender(
       <TooltipProvider>
         <CandlestickChart
@@ -210,8 +233,12 @@ describe('CandlestickChart analysis annotations', () => {
     );
 
     await waitFor(() => {
-      expect(mocks.chart.resize).toHaveBeenCalledTimes(1);
+      expect(mocks.chart.resize).toHaveBeenCalledTimes(2);
     });
+    expect(resizedAt).toEqual([
+      { width: 1440, height: 860 },
+      { width: 1440, height: 860 },
+    ]);
     expect(mocks.chart.scrollByDistance).not.toHaveBeenCalled();
   });
 

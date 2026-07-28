@@ -3,7 +3,7 @@
  * Uses applyNewData / updateData / applyMoreData for data feeding.
  */
 
-import React, { useEffect, useRef, useCallback, useMemo, useState, memo } from "react";
+import React, { useEffect, useLayoutEffect, useRef, useCallback, useMemo, useState, memo } from "react";
 import {
   init,
   dispose,
@@ -492,7 +492,9 @@ function CandlestickChartComponent({
   const analysisOverlayRunRef = useRef(0);
   const pointerInteractionRef = useRef<InteractionController | null>(null);
   const viewportReflowFrameRef = useRef<number | null>(null);
+  const viewportPostResizeFrameRef = useRef<number | null>(null);
   const viewportPrimeFrameRef = useRef<number | null>(null);
+  const viewportReflowForceRef = useRef(false);
   const lastViewportSizeRef = useRef({ width: 0, height: 0 });
   const analysisCommitFinalizerRef = useRef<() => boolean>(() => false);
   const analysisLifecycleRef = useRef({
@@ -524,38 +526,109 @@ function CandlestickChartComponent({
   const activeIndicatorPanes = useRef<Map<string, string | null>>(new Map());
 
   const scheduleViewportReflow = useCallback((force = false) => {
-    if (viewportReflowFrameRef.current != null) {
-      window.cancelAnimationFrame(viewportReflowFrameRef.current);
-    }
+    viewportReflowForceRef.current = viewportReflowForceRef.current || force;
+    if (
+      viewportReflowFrameRef.current != null
+      || viewportPostResizeFrameRef.current != null
+    ) return;
 
-    viewportReflowFrameRef.current = window.requestAnimationFrame(() => {
+    let measuredWidth = 0;
+    let measuredHeight = 0;
+    let stableFrameCount = 0;
+    let emptyFrameCount = 0;
+    const maxEmptyFrameCount = 8;
+
+    const readViewportSize = (host: HTMLDivElement) => {
+      const bounds = host.getBoundingClientRect();
+      return {
+        width: Math.round(bounds.width || host.clientWidth || 0),
+        height: Math.round(bounds.height || host.clientHeight || 0),
+      };
+    };
+
+    const settleViewport = () => {
       viewportReflowFrameRef.current = null;
       const chart = chartRef.current;
       const host = containerRef.current;
       if (!chart || !host) return;
 
-      const bounds = host.getBoundingClientRect();
-      const nativeSize = chart.getSize();
-      const width = Math.round(bounds.width || nativeSize?.width || 0);
-      const height = Math.round(bounds.height || nativeSize?.height || 0);
-      if (width <= 0 || height <= 0) return;
+      const { width, height } = readViewportSize(host);
+      if (width <= 0 || height <= 0) {
+        emptyFrameCount += 1;
+        if (emptyFrameCount <= maxEmptyFrameCount) {
+          viewportReflowFrameRef.current = window.requestAnimationFrame(settleViewport);
+        }
+        return;
+      }
+      emptyFrameCount = 0;
+
+      if (measuredWidth === width && measuredHeight === height) {
+        stableFrameCount += 1;
+      } else {
+        measuredWidth = width;
+        measuredHeight = height;
+        stableFrameCount = 0;
+      }
+
+      // Fullscreen CSS, browser fullscreen and split-pane transitions may
+      // publish an intermediate width first. Wait until the host reports the
+      // same geometry in two consecutive paints before resizing native panes.
+      if (stableFrameCount < 1) {
+        viewportReflowFrameRef.current = window.requestAnimationFrame(settleViewport);
+        return;
+      }
 
       const previous = lastViewportSizeRef.current;
-      if (!force && previous.width === width && previous.height === height) return;
+      const shouldResize = viewportReflowForceRef.current
+        || previous.width !== width
+        || previous.height !== height;
+      viewportReflowForceRef.current = false;
+      if (!shouldResize) return;
       lastViewportSizeRef.current = { width, height };
 
       chart.resize();
       pointerInteractionRef.current?.invalidate();
 
-      if (viewportPrimeFrameRef.current != null) {
-        window.cancelAnimationFrame(viewportPrimeFrameRef.current);
-      }
-      viewportPrimeFrameRef.current = window.requestAnimationFrame(() => {
-        viewportPrimeFrameRef.current = null;
+      // KLineCharts computes the candle pane and the right price axis in
+      // separate native layout passes. Recheck after the first paint and
+      // resize once more so both canvases use the same final host geometry.
+      viewportPostResizeFrameRef.current = window.requestAnimationFrame(() => {
+        viewportPostResizeFrameRef.current = null;
         if (chartRef.current !== chart) return;
-        pointerInteractionRef.current?.prime();
+        const currentHost = containerRef.current;
+        if (!currentHost) return;
+
+        const finalSize = readViewportSize(currentHost);
+        if (
+          viewportReflowForceRef.current
+          || finalSize.width <= 0
+          || finalSize.height <= 0
+          || finalSize.width !== width
+          || finalSize.height !== height
+        ) {
+          measuredWidth = finalSize.width;
+          measuredHeight = finalSize.height;
+          stableFrameCount = 0;
+          viewportReflowForceRef.current = true;
+          viewportReflowFrameRef.current = window.requestAnimationFrame(settleViewport);
+          return;
+        }
+
+        chart.resize();
+        pointerInteractionRef.current?.invalidate();
+
+        if (viewportPrimeFrameRef.current != null) {
+          window.cancelAnimationFrame(viewportPrimeFrameRef.current);
+        }
+        viewportPrimeFrameRef.current = window.requestAnimationFrame(() => {
+          viewportPrimeFrameRef.current = null;
+          if (chartRef.current !== chart) return;
+          pointerInteractionRef.current?.prime();
+        });
       });
-    });
+    };
+
+    viewportReflowFrameRef.current = window.requestAnimationFrame(settleViewport);
   }, []);
 
   const hasAnalysisVisibleRange = typeof analysisVisibleStartTime === "number"
@@ -874,10 +947,15 @@ function CandlestickChartComponent({
         window.cancelAnimationFrame(viewportReflowFrameRef.current);
         viewportReflowFrameRef.current = null;
       }
+      if (viewportPostResizeFrameRef.current != null) {
+        window.cancelAnimationFrame(viewportPostResizeFrameRef.current);
+        viewportPostResizeFrameRef.current = null;
+      }
       if (viewportPrimeFrameRef.current != null) {
         window.cancelAnimationFrame(viewportPrimeFrameRef.current);
         viewportPrimeFrameRef.current = null;
       }
+      viewportReflowForceRef.current = false;
       if (analysisLifecycle.finalizeFrame != null) {
         window.cancelAnimationFrame(analysisLifecycle.finalizeFrame);
       }
@@ -904,10 +982,9 @@ function CandlestickChartComponent({
     };
   }, [scheduleViewportReflow]);
 
-  // Fullscreen and multi-pane switches can emit several resize signals in one
-  // paint. Route them through the same coalesced scheduler so the native chart
-  // applies exactly one settled geometry and never nudges the time axis.
-  useEffect(() => {
+  // Start observing the new host geometry before paint. The scheduler then
+  // waits for it to settle and synchronizes both the candle canvas and axis.
+  useLayoutEffect(() => {
     if (viewportRevision == null) return;
     scheduleViewportReflow(true);
   }, [scheduleViewportReflow, viewportRevision]);
