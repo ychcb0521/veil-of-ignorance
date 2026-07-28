@@ -14,10 +14,43 @@ function isMainLeg(leg: TradeJournal): boolean {
   );
 }
 
+function isHedgeLeg(leg: TradeJournal): boolean {
+  return (
+    leg.leg_role === 'hedge_initial_a'
+    || leg.leg_role === 'hedge_initial_b'
+    || leg.leg_role === 'hedge_rolling'
+    || leg.leg_role === 'reentry_hedge'
+    || (leg.order_kind === 'hedge' && leg.leg_role !== 'mirror_tp')
+  );
+}
+
+function timeMs(value: number | string | null | undefined): number | null {
+  if (value == null) return null;
+  const result = typeof value === 'number' ? value : new Date(value).getTime();
+  return Number.isFinite(result) ? result : null;
+}
+
+function triggeredHedgeMatchScore(
+  leg: TradeJournal,
+  order: CampaignReverseHedgeOrder,
+): number {
+  const legTime = timeMs(leg.pre_simulated_time);
+  const orderTime = timeMs(order.triggeredAt);
+  const timeScore = legTime != null && orderTime != null
+    ? Math.abs(legTime - orderTime)
+    : Number.MAX_SAFE_INTEGER / 2;
+  const legPrice = leg.pre_entry_price;
+  const orderPrice = order.fillPrice ?? order.price;
+  const priceScore = legPrice != null && Number.isFinite(legPrice) && Number.isFinite(orderPrice)
+    ? Math.abs(legPrice - orderPrice) / Math.max(Math.abs(orderPrice), 1e-12)
+    : 1;
+  return timeScore + priceScore * 60_000;
+}
+
 /**
- * Reverse orders protect the main exposure. They must never be presented as
- * orders belonging to a mirror-TP or hedge leg, even when legacy records share
- * a trade-record/position id with those legs.
+ * Pending/cancelled reverse orders protect the main exposure. Once an order
+ * triggers, the resulting reverse position belongs to its corresponding hedge
+ * leg. Mirror-TP legs never own reverse orders.
  */
 export function buildCampaignReverseOrderLegMap(
   legs: TradeJournal[],
@@ -25,6 +58,27 @@ export function buildCampaignReverseOrderLegMap(
 ): Map<string, string> {
   const orderedMainLegs = legs.filter(isMainLeg).sort((a, b) => sequence(a) - sequence(b));
   const ownerLeg = orderedMainLegs.find(leg => leg.leg_role === 'main_open') ?? orderedMainLegs[0] ?? null;
-  if (!ownerLeg) return new Map();
-  return new Map(reverseHedgeOrders.map(order => [order.id, ownerLeg.id]));
+  const hedgeLegs = legs.filter(isHedgeLeg).sort((a, b) => sequence(a) - sequence(b));
+  const result = new Map<string, string>();
+
+  for (const order of reverseHedgeOrders) {
+    if (order.status === 'triggered' && hedgeLegs.length > 0) {
+      const exactHedge = order.tradeRecordId
+        ? hedgeLegs.find(leg =>
+          leg.trade_record_id === order.tradeRecordId
+          || leg.trade_record_id === order.id
+        )
+        : null;
+      const matchedHedge = exactHedge ?? [...hedgeLegs].sort(
+        (a, b) => triggeredHedgeMatchScore(a, order) - triggeredHedgeMatchScore(b, order),
+      )[0];
+      if (matchedHedge) {
+        result.set(order.id, matchedHedge.id);
+        continue;
+      }
+    }
+    if (ownerLeg) result.set(order.id, ownerLeg.id);
+  }
+
+  return result;
 }

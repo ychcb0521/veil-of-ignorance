@@ -220,7 +220,7 @@ describe('campaign PNG overview', () => {
     ]));
   });
 
-  it('PNG 的所有委托只显示在主力腿，不显示在共享成交标识的镜像腿', () => {
+  it('PNG 的反向委托只显示在主力腿，镜像腿独立显示止盈委托时间', () => {
     const rows = buildCampaignLegsExportRows({
       ...input(),
       legs: [
@@ -254,6 +254,103 @@ describe('campaign PNG overview', () => {
     });
 
     expect(rows[0].cells[8].map(line => line.text)).toContain('空 0.120000 · 已撤');
-    expect(rows[1].cells[8].map(line => line.text)).toEqual(['—']);
+    expect(rows[1].cells[8].map(line => line.text)).toEqual([
+      '镜像止盈',
+      '委 2026-07-14 09:00',
+      '触 —',
+    ]);
+  });
+
+  it('PNG 在镜像止盈行显示事件中的止盈挂单时间和触发时间', () => {
+    const rows = buildCampaignLegsExportRows({
+      ...input(),
+      campaign: {
+        ...campaign,
+        actual_evolution: [
+          {
+            id: 'mirror-placed',
+            timestamp: '2026-07-14T01:05:00.000Z',
+            event_type: 'mirror_tp_placed',
+            leg_role: 'mirror_tp',
+            journal_id: 'mirror-timing',
+            trade_record_id: 'mirror-timing-record',
+            pending_order_id: null,
+            price: 0.12,
+            size_usdt: 500,
+            notes: null,
+            recorded_at: '2026-07-14T01:05:00.000Z',
+          },
+          {
+            id: 'mirror-triggered',
+            timestamp: '2026-07-14T01:45:00.000Z',
+            event_type: 'mirror_tp_triggered',
+            leg_role: 'mirror_tp',
+            journal_id: 'mirror-timing',
+            trade_record_id: 'mirror-timing-record',
+            pending_order_id: null,
+            price: 0.13,
+            size_usdt: 500,
+            notes: null,
+            recorded_at: '2026-07-14T01:45:00.000Z',
+          },
+        ],
+      },
+      legs: [{
+        id: 'mirror-timing',
+        leg_sequence: 1,
+        leg_role: 'mirror_tp',
+        trade_record_id: 'mirror-timing-record',
+        pre_simulated_time: '2026-07-14T01:00:00.000Z',
+      } as TradeJournal],
+      tradeRecords: [{
+        id: 'mirror-timing-record',
+        openTime: Date.parse('2026-07-14T01:00:00.000Z'),
+        closeTime: Date.parse('2026-07-14T02:00:00.000Z'),
+      } as CampaignBoardExportInput['tradeRecords'][number]],
+      reverseHedgeOrders: [],
+    });
+
+    expect(rows[0].cells[8].map(line => line.text)).toEqual([
+      '镜像止盈',
+      '委 2026-07-14 09:05',
+      '触 2026-07-14 09:45',
+    ]);
+  });
+
+  it('PNG 把已触发反向委托显示在对应对冲腿', () => {
+    const rows = buildCampaignLegsExportRows({
+      ...input(),
+      legs: [
+        {
+          id: 'main',
+          leg_sequence: 1,
+          leg_role: 'main_open',
+          order_kind: 'main',
+          pre_simulated_time: '2026-07-14T01:00:00.000Z',
+        },
+        {
+          id: 'hedge-a',
+          leg_sequence: 2,
+          leg_role: 'hedge_initial_a',
+          order_kind: 'hedge',
+          trade_record_id: 'hedge-record',
+          pre_simulated_time: '2026-07-14T01:05:00.000Z',
+        },
+      ] as TradeJournal[],
+      reverseHedgeOrders: [{
+        id: 'triggered-hedge',
+        tradeRecordId: 'hedge-record',
+        side: 'SHORT',
+        price: 0.12,
+        fillPrice: 0.119,
+        status: 'triggered',
+        createdAt: Date.parse('2026-07-14T01:01:00.000Z'),
+        triggeredAt: Date.parse('2026-07-14T01:05:00.000Z'),
+        cancelledAt: Date.parse('2026-07-14T01:10:00.000Z'),
+      }],
+    });
+
+    expect(rows[0].cells[8].map(line => line.text)).toEqual(['—']);
+    expect(rows[1].cells[8].map(line => line.text)).toContain('空 0.120000 · 已触发');
   });
 });

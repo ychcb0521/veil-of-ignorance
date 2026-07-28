@@ -1840,6 +1840,7 @@ export default function JournalCampaignDetailPage() {
           <CampaignLegsList
             legs={legs}
             tradeRecords={tradeRecords}
+            campaignEvents={campaign.actual_evolution}
             legExitPriceCorrections={legExitPriceCorrections}
             reverseHedgeOrders={visibleReverseHedgeOrders}
             highlightedLegIds={selectedLegMarkerIds}

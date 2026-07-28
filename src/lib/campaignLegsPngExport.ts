@@ -10,6 +10,7 @@ import { computeInitialMainExposureNotional } from '@/lib/campaignAnalysis';
 import { formatCampaignLeverage, resolveCampaignMainLeverage } from '@/lib/campaignMetrics';
 import { formatCampaignDisplayCode } from '@/lib/campaignCode';
 import { buildCampaignReverseOrderLegMap } from '@/lib/campaignReverseOrderAttribution';
+import { resolveMirrorTpOrderTiming } from '@/lib/campaignMirrorTpOrderTiming';
 import type { TradeCampaign, TradeJournal } from '@/types/journal';
 import type { EmotionDiaryExportSummary } from '@/types/emotionDiary';
 import type { CampaignReverseHedgeOrder, TradeRecord } from '@/types/trading';
@@ -73,7 +74,7 @@ const COLUMNS = [
   { title: '仓位', width: 122 },
   { title: '状态', width: 108 },
   { title: 'R̄', width: 82 },
-  { title: '反向挂单', width: 470 },
+  { title: '委托', width: 470 },
 ] as const;
 
 const TABLE_WIDTH = COLUMNS.reduce((sum, column) => sum + column.width, 0);
@@ -215,18 +216,27 @@ export function buildCampaignLegsExportRows(input: ExportInput): CampaignLegsExp
       ? `${HEDGE_TYPE_LABELS[leg.hedge_type]}${leg.hedge_necessity_pct != null ? ` · ${leg.hedge_necessity_pct.toFixed(0)}%` : ''}`
       : null;
     const reverseOrdersForLeg = input.reverseHedgeOrders.filter(order => reverseOrderLegMap.get(order.id) === leg.id);
-    const reverseLines: CampaignLegsExportCellLine[] = reverseOrdersForLeg.length === 0
+    const mirrorTpTiming = resolveMirrorTpOrderTiming(leg, record, input.campaign.actual_evolution);
+    const mirrorTpLines: CampaignLegsExportCellLine[] = mirrorTpTiming
+      ? [
+          { text: '镜像止盈', color: '#D89B00', bold: true },
+          { text: `委 ${fmtClock(mirrorTpTiming.placedAt)}`, color: '#5F6B7A' },
+          { text: `触 ${fmtClock(mirrorTpTiming.triggeredAt)}`, color: '#5F6B7A' },
+        ]
+      : [];
+    const reverseOrderLines: CampaignLegsExportCellLine[] = reverseOrdersForLeg.flatMap((order, index): CampaignLegsExportCellLine[] => {
+      const sideColor = order.side === 'SHORT' ? '#6D28D9' : '#002FA7';
+      return [
+        ...(index > 0 || mirrorTpLines.length > 0 ? [{ text: '', color: '#848E9C' }] : []),
+        { text: `${order.side === 'SHORT' ? '空' : '多'} ${fmtPrice(order.price)} · ${statusForReverseOrder(order)}`, color: sideColor, bold: true },
+        { text: `委 ${fmtClock(order.createdAt)}`, color: '#5F6B7A' },
+        ...(order.status === 'triggered' ? [{ text: `触 ${fmtClock(order.triggeredAt)}`, color: '#5F6B7A' }] : []),
+        { text: `${order.status === 'triggered' ? '平' : '撤'} ${order.cancelledAt ? fmtClock(order.cancelledAt) : '—'}`, color: '#5F6B7A' },
+      ];
+    });
+    const reverseLines: CampaignLegsExportCellLine[] = mirrorTpLines.length === 0 && reverseOrderLines.length === 0
       ? [{ text: '—', color: '#848E9C' }]
-      : reverseOrdersForLeg.flatMap((order, index): CampaignLegsExportCellLine[] => {
-          const sideColor = order.side === 'SHORT' ? '#6D28D9' : '#002FA7';
-          return [
-            ...(index > 0 ? [{ text: '', color: '#848E9C' }] : []),
-            { text: `${order.side === 'SHORT' ? '空' : '多'} ${fmtPrice(order.price)} · ${statusForReverseOrder(order)}`, color: sideColor, bold: true },
-            { text: `委 ${fmtClock(order.createdAt)}`, color: '#5F6B7A' },
-            ...(order.status === 'triggered' ? [{ text: `触 ${fmtClock(order.triggeredAt)}`, color: '#5F6B7A' }] : []),
-            { text: `${order.status === 'triggered' ? '平' : '撤'} ${order.cancelledAt ? fmtClock(order.cancelledAt) : '—'}`, color: '#5F6B7A' },
-          ];
-        });
+      : [...mirrorTpLines, ...reverseOrderLines];
 
     const exitPriceLines: CampaignLegsExportCellLine[] = [
       { text: fmtPrice(exitPriceValue), bold: Boolean(execution.exitCorrection) },

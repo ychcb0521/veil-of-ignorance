@@ -22,6 +22,7 @@ function order(
   id: string,
   createdAt: string,
   tradeRecordId: string | null = null,
+  overrides: Partial<CampaignReverseHedgeOrder> = {},
 ): CampaignReverseHedgeOrder {
   return {
     id,
@@ -32,6 +33,7 @@ function order(
     triggeredAt: null,
     cancelledAt: null,
     status: 'pending',
+    ...overrides,
   };
 }
 
@@ -65,5 +67,61 @@ describe('campaign reverse-order attribution', () => {
     expect(attribution.get(afterAdd.id)).toBe('main');
     expect([...attribution.values()]).not.toContain('mirror');
     expect([...attribution.values()]).not.toContain('hedge');
+  });
+
+  it('已触发反向委托归到对应的对冲腿', () => {
+    const legs = [
+      leg('main', 'main_open', '2026-07-14T01:00:00.000Z'),
+      leg('mirror', 'mirror_tp', '2026-07-14T01:00:00.000Z', 'shared-record'),
+      leg('hedge-a', 'hedge_initial_a', '2026-07-14T01:05:00.000Z', 'hedge-record'),
+    ];
+    const triggered = order(
+      'triggered-hedge',
+      '2026-07-14T01:01:00.000Z',
+      'hedge-record',
+      {
+        status: 'triggered',
+        triggeredAt: Date.parse('2026-07-14T01:05:00.000Z'),
+        fillPrice: 0.95,
+      },
+    );
+
+    const attribution = buildCampaignReverseOrderLegMap(legs, [triggered]);
+
+    expect(attribution.get(triggered.id)).toBe('hedge-a');
+  });
+
+  it('历史触发委托缺少关联 ID 时按触发时间和价格匹配对应对冲腿', () => {
+    const legs = [
+      { ...leg('main', 'main_open', '2026-07-14T01:00:00.000Z'), pre_entry_price: 1 },
+      { ...leg('hedge-a', 'hedge_initial_a', '2026-07-14T01:05:00.000Z'), pre_entry_price: 0.95 },
+      { ...leg('hedge-b', 'hedge_initial_b', '2026-07-14T01:15:00.000Z'), pre_entry_price: 0.9 },
+    ];
+    const triggered = order(
+      'legacy-triggered',
+      '2026-07-14T01:01:00.000Z',
+      null,
+      {
+        status: 'triggered',
+        triggeredAt: Date.parse('2026-07-14T01:15:00.000Z'),
+        fillPrice: 0.9,
+      },
+    );
+
+    const attribution = buildCampaignReverseOrderLegMap(legs, [triggered]);
+
+    expect(attribution.get(triggered.id)).toBe('hedge-b');
+  });
+
+  it('尚未触发的委托即使关联对冲记录也仍归主力', () => {
+    const legs = [
+      leg('main', 'main_open', '2026-07-14T01:00:00.000Z'),
+      leg('hedge-a', 'hedge_initial_a', '2026-07-14T01:05:00.000Z', 'hedge-record'),
+    ];
+    const pending = order('pending-hedge', '2026-07-14T01:01:00.000Z', 'hedge-record');
+
+    const attribution = buildCampaignReverseOrderLegMap(legs, [pending]);
+
+    expect(attribution.get(pending.id)).toBe('main');
   });
 });

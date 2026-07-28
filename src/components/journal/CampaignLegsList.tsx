@@ -6,12 +6,14 @@ import { resolveLegExecution, type LegExitPriceCorrections } from '@/lib/campaig
 import { HEDGE_TYPE_LABELS } from '@/lib/hedgeTypes';
 import { buildTradeRecordLookup, journalOperationTime } from '@/lib/objectiveOperationTime';
 import { buildCampaignReverseOrderLegMap } from '@/lib/campaignReverseOrderAttribution';
-import type { TradeJournal } from '@/types/journal';
+import { resolveMirrorTpOrderTiming } from '@/lib/campaignMirrorTpOrderTiming';
+import type { CampaignEvent, TradeJournal } from '@/types/journal';
 import type { CampaignReverseHedgeOrder, TradeRecord } from '@/types/trading';
 
 interface Props {
   legs: TradeJournal[];
   tradeRecords: TradeRecord[];
+  campaignEvents?: CampaignEvent[];
   legExitPriceCorrections?: LegExitPriceCorrections;
   reverseHedgeOrders?: CampaignReverseHedgeOrder[];
   highlightedLegIds?: string[];
@@ -44,6 +46,7 @@ function fmtPrice(value: number | null | undefined): string {
 export function CampaignLegsList({
   legs,
   tradeRecords,
+  campaignEvents = [],
   legExitPriceCorrections = {},
   reverseHedgeOrders = [],
   highlightedLegIds = [],
@@ -72,7 +75,7 @@ export function CampaignLegsList({
             <div>仓位</div>
             <div>状态</div>
             <div>R̄</div>
-            <div>反向挂单</div>
+            <div>委托</div>
             <div>操作</div>
           </div>
           <div className="max-h-[380px] overflow-y-auto">
@@ -90,6 +93,7 @@ export function CampaignLegsList({
                 ? `原 TradeRecord 平仓价 ${fmtPrice(execution.exitCorrection.originalExitPrice)} 超出该平仓时刻 1m K 线范围 ${fmtPrice(execution.exitCorrection.candleLow)}-${fmtPrice(execution.exitCorrection.candleHigh)}，本页按 K 线时价显示。`
                 : undefined;
               const reverseOrdersForLeg = reverseHedgeOrders.filter(order => reverseOrderLegMap.get(order.id) === leg.id);
+              const mirrorTpTiming = resolveMirrorTpOrderTiming(leg, record, campaignEvents);
               const hedgeSummary = leg.order_kind === 'hedge' && leg.hedge_type
                 ? `${HEDGE_TYPE_LABELS[leg.hedge_type]}${leg.hedge_necessity_pct != null ? ` · ${leg.hedge_necessity_pct.toFixed(0)}%` : ''}`
                 : null;
@@ -121,7 +125,14 @@ export function CampaignLegsList({
                   <div className={status.className}>{status.label}</div>
                   <div>{leg.post_r_multiple != null ? leg.post_r_multiple.toFixed(2) : '—'}</div>
                   <div className="space-y-1 pr-2 font-sans">
-                    {reverseOrdersForLeg.length === 0 ? (
+                    {mirrorTpTiming && (
+                      <div className="rounded border border-[#F0B90B]/25 bg-[#F0B90B]/5 px-2 py-1 leading-tight">
+                        <div className="text-[10px] font-medium text-[#D89B00]">镜像止盈</div>
+                        <div className="text-[10px] text-muted-foreground">委 {fmtClock(mirrorTpTiming.placedAt)}</div>
+                        <div className="text-[10px] text-muted-foreground">触 {fmtClock(mirrorTpTiming.triggeredAt)}</div>
+                      </div>
+                    )}
+                    {reverseOrdersForLeg.length === 0 && !mirrorTpTiming ? (
                       <span className="font-mono text-muted-foreground">—</span>
                     ) : (
                       reverseOrdersForLeg.map(order => (
