@@ -5,6 +5,11 @@ import {
   MIRROR_TP_REDUCTION_PCT,
   usesDualHedgeSop,
 } from '@/lib/strategyTemplates';
+import {
+  buildTradeRecordPnlCorrection,
+  type LegExitPriceCorrections,
+  type TradeRecordPnlCorrection,
+} from '@/lib/campaignLegExecution';
 import { getPositionNotionalUsd } from '@/lib/tradingSettlement';
 import { buildTradeRecordLookup } from '@/lib/objectiveOperationTime';
 import { isHistoricalCampaign, type CampaignEvent, type LegRole, type TradeCampaign, type TradeJournal } from '@/types/journal';
@@ -45,6 +50,17 @@ export interface DecisionAccuracyResult {
   profit_capture_ratio: number;
   campaign_max_drawdown_real: number;
   campaign_max_profit_real: number;
+}
+
+export interface CampaignPnlReconciliation {
+  officialCampaignPnl: number | null;
+  officialLegPnl: number | null;
+  correctedLegPnl: number | null;
+  baselinePnl: number;
+  correctedPnl: number;
+  priceCorrectionDelta: number;
+  officialVsLegDelta: number | null;
+  correctedRecords: TradeRecordPnlCorrection[];
 }
 
 export interface Deduction {
@@ -478,17 +494,11 @@ export function resolveCampaignInitialRiskFraction(
   };
 }
 
-function computeRealizedPnl(
+function buildRealizedPnlByIdentity(
   campaign: TradeCampaign,
   legs: TradeJournal[],
   tradeRecords: TradeRecord[],
-): number {
-  const campaignPnl = Number.isFinite(campaign.final_realized_pnl)
-    ? Number(campaign.final_realized_pnl)
-    : null;
-  const historical = isHistoricalCampaign(campaign);
-  if (campaignPnl != null && !historical) return campaignPnl;
-
+): Map<string, number> {
   const recordMap = buildTradeRecordLookup(tradeRecords);
   const pnlByIdentity = new Map<string, number>();
 
@@ -518,11 +528,69 @@ function computeRealizedPnl(
     if (!Number.isFinite(record.pnl)) continue;
     pnlByIdentity.set(`record:${record.id}`, Number(record.pnl));
   }
+  return pnlByIdentity;
+}
 
+function computeRealizedPnl(
+  campaign: TradeCampaign,
+  legs: TradeJournal[],
+  tradeRecords: TradeRecord[],
+): number {
+  const campaignPnl = Number.isFinite(campaign.final_realized_pnl)
+    ? Number(campaign.final_realized_pnl)
+    : null;
+  const historical = isHistoricalCampaign(campaign);
+  if (campaignPnl != null && !historical) return campaignPnl;
+
+  const pnlByIdentity = buildRealizedPnlByIdentity(campaign, legs, tradeRecords);
   if (pnlByIdentity.size > 0) {
     return Array.from(pnlByIdentity.values()).reduce((sum, pnl) => sum + pnl, 0);
   }
   return campaignPnl ?? 0;
+}
+
+export function computeCampaignPnlReconciliation(
+  campaign: TradeCampaign,
+  legs: TradeJournal[],
+  tradeRecords: TradeRecord[],
+  exitPriceCorrections: LegExitPriceCorrections = {},
+): CampaignPnlReconciliation {
+  const baselinePnl = computeRealizedPnl(campaign, legs, tradeRecords);
+  const officialCampaignPnl = Number.isFinite(campaign.final_realized_pnl)
+    ? Number(campaign.final_realized_pnl)
+    : null;
+  const pnlByIdentity = buildRealizedPnlByIdentity(campaign, legs, tradeRecords);
+  const officialLegPnl = pnlByIdentity.size > 0
+    ? Array.from(pnlByIdentity.values()).reduce((sum, pnl) => sum + pnl, 0)
+    : null;
+  const recordLookup = buildTradeRecordLookup(tradeRecords);
+  const correctedByRecordId = new Map<string, TradeRecordPnlCorrection>();
+
+  for (const leg of legs) {
+    const exitCorrection = exitPriceCorrections[leg.id];
+    if (!exitCorrection || !leg.trade_record_id) continue;
+    const record = recordLookup.get(leg.trade_record_id) ?? null;
+    if (!record || correctedByRecordId.has(record.id)) continue;
+    const pnlCorrection = buildTradeRecordPnlCorrection(record, exitCorrection);
+    if (pnlCorrection) correctedByRecordId.set(record.id, pnlCorrection);
+  }
+
+  const correctedRecords = Array.from(correctedByRecordId.values());
+  const priceCorrectionDelta = correctedRecords.reduce((sum, item) => sum + item.pnlDelta, 0);
+  const correctedLegPnl = officialLegPnl == null ? null : officialLegPnl + priceCorrectionDelta;
+
+  return {
+    officialCampaignPnl,
+    officialLegPnl,
+    correctedLegPnl,
+    baselinePnl,
+    correctedPnl: baselinePnl + priceCorrectionDelta,
+    priceCorrectionDelta,
+    officialVsLegDelta: officialCampaignPnl == null || officialLegPnl == null
+      ? null
+      : officialCampaignPnl - officialLegPnl,
+    correctedRecords,
+  };
 }
 
 export function computeProfitCaptureRatio(
@@ -530,6 +598,7 @@ export function computeProfitCaptureRatio(
   legs: TradeJournal[],
   tradeRecords: TradeRecord[],
   reverseHedgeOrders: CampaignReverseHedgeOrder[] = [],
+  exitPriceCorrections: LegExitPriceCorrections = {},
 ): number {
   const initialExpectedMaxLoss = computeInitialExpectedMaxLoss(
     campaign,
@@ -538,7 +607,13 @@ export function computeProfitCaptureRatio(
     reverseHedgeOrders,
   );
   if (initialExpectedMaxLoss <= EPSILON) return 0;
-  return (computeRealizedPnl(campaign, legs, tradeRecords) / initialExpectedMaxLoss) * 100;
+  const reconciliation = computeCampaignPnlReconciliation(
+    campaign,
+    legs,
+    tradeRecords,
+    exitPriceCorrections,
+  );
+  return (reconciliation.correctedPnl / initialExpectedMaxLoss) * 100;
 }
 
 export function formatCampaignPayoffRatio(value: number, percentDigits = 1): string {
@@ -1022,6 +1097,7 @@ export function computeDecisionAccuracy(
   tradeRecords: TradeRecord[],
   klines: KlineData[],
   reverseHedgeOrders: CampaignReverseHedgeOrder[] = [],
+  exitPriceCorrections: LegExitPriceCorrections = {},
 ): DecisionAccuracyResult {
   const isLongCampaign = campaign.direction === 'main_long';
   const endMs = campaignEndMs(campaign, tradeRecords);
@@ -1130,7 +1206,12 @@ export function computeDecisionAccuracy(
   const startMs = toMs(campaign.opened_at);
   const extremes = computeCampaignPnlExtremes(activeLegs, klines, startMs, endMs);
   let { maxProfit, maxDrawdown } = extremes;
-  const finalRealizedPnl = computeRealizedPnl(campaign, legs, tradeRecords);
+  const finalRealizedPnl = computeCampaignPnlReconciliation(
+    campaign,
+    legs,
+    tradeRecords,
+    exitPriceCorrections,
+  ).correctedPnl;
   maxProfit = Math.max(maxProfit, finalRealizedPnl);
   maxDrawdown = Math.min(maxDrawdown, finalRealizedPnl);
 
@@ -1145,6 +1226,7 @@ export function computeDecisionAccuracy(
     legs,
     tradeRecords,
     reverseHedgeOrders,
+    exitPriceCorrections,
   );
 
   return {

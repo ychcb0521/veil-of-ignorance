@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  computeCampaignPnlReconciliation,
   computeDecisionAccuracy,
   computeCampaignInitialRiskFraction,
   computeInitialMainExposureNotional,
@@ -115,6 +116,41 @@ describe('campaign profit capture ratio', () => {
     const accuracy = computeDecisionAccuracy(campaign, legs, records, []);
     expect(accuracy.initial_expected_max_loss).toBeCloseTo(1_200, 8);
     expect(accuracy.profit_capture_ratio).toBeCloseTo(50, 8);
+  });
+
+  it('propagates an exit-price reconciliation into realized P&L, b, and decision accuracy', () => {
+    const campaign = makeCampaign(650);
+    markAsHistorical(campaign);
+    const legs = [
+      makeLeg('main', 'main_open', 100, 'main-record'),
+      makeLeg('hedge-a', 'hedge_initial_a', 96),
+      makeLeg('hedge-b', 'hedge_initial_b', 90),
+    ];
+    const records = [makeMainRecord()];
+    const corrections = {
+      main: {
+        exitPrice: 105,
+        originalExitPrice: 108,
+        candleLow: 104,
+        candleHigh: 106,
+      },
+    };
+
+    const reconciliation = computeCampaignPnlReconciliation(
+      campaign,
+      legs,
+      records,
+      corrections,
+    );
+    expect(reconciliation.officialCampaignPnl).toBeCloseTo(650, 8);
+    expect(reconciliation.officialLegPnl).toBeCloseTo(600, 8);
+    expect(reconciliation.officialVsLegDelta).toBeCloseTo(50, 8);
+    expect(reconciliation.priceCorrectionDelta).toBeCloseTo(-300, 8);
+    expect(reconciliation.correctedPnl).toBeCloseTo(300, 8);
+    expect(computeProfitCaptureRatio(campaign, legs, records, [], corrections))
+      .toBeCloseTo(25, 8);
+    expect(computeDecisionAccuracy(campaign, legs, records, [], [], corrections).profit_capture_ratio)
+      .toBeCloseTo(25, 8);
   });
 
   it('uses the initial M plus mirror exposure while excluding later additions', () => {

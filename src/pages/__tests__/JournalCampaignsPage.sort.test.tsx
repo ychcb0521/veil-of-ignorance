@@ -5,6 +5,14 @@ import type { TradeCampaign, TradeJournal } from '@/types/journal';
 import type { TradeRecord } from '@/types/trading';
 import JournalCampaignsPage from '../JournalCampaignsPage';
 
+vi.mock('@/lib/campaignLegExecution', async importOriginal => {
+  const actual = await importOriginal<typeof import('@/lib/campaignLegExecution')>();
+  return {
+    ...actual,
+    fetchLegExitPriceCorrections: vi.fn(async () => ({})),
+  };
+});
+
 const { mockUser, mockListDeletedCampaigns, mockRestoreCampaign, mockPermanentlyDeleteCampaign } = vi.hoisted(() => ({
   mockUser: { id: 'user-1', email: 'desk@example.com' },
   mockListDeletedCampaigns: vi.fn(async () => []),

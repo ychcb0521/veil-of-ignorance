@@ -29,6 +29,7 @@ import { operationDateKey } from '@/lib/assetReport';
 import { formatCampaignDisplayCode, resolveCampaignAccountName } from '@/lib/campaignCode';
 import {
   buildCampaignEventStream,
+  computeCampaignPnlReconciliation,
   computeInitialMainExposureNotional,
   computeDecisionAccuracy,
   computeInitialExpectedMaxDrawdownPct,
@@ -48,11 +49,9 @@ import {
   resolveCampaignOpportunityQuality,
 } from '@/lib/campaignMetrics';
 import { buildCampaignChartContentTimeSpan, pickCampaignOverviewInterval, type CampaignChartInterval } from '@/lib/campaignChartContentSpan';
-import { fetchCanonicalTimePriceAt } from '@/lib/canonicalTimePrice';
 import {
-  buildLegExitPriceCorrection,
+  fetchLegExitPriceCorrections,
   resolveLegExecution,
-  type LegExitPriceCorrection,
   type LegExitPriceCorrections,
 } from '@/lib/campaignLegExecution';
 import { buildSelectedLegVerticalLines, legRoleMarkerLabel } from '@/lib/campaignLegMarkers';
@@ -484,6 +483,20 @@ async function loadAccountCampaignPerformance(
     : (await listVisibleCampaigns(viewerUserId)).filter(item => item.user_id === ownerUserId);
   const samples = await Promise.all(campaigns.map(async item => {
     const details = await getCampaignFullData(item.id);
+    const exitPriceCorrections = await fetchLegExitPriceCorrections(
+      details.campaign.symbol,
+      details.legs,
+      details.tradeRecords,
+    );
+    const reconciliation = computeCampaignPnlReconciliation(
+      details.campaign,
+      details.legs,
+      details.tradeRecords,
+      exitPriceCorrections,
+    );
+    const reconciledCampaign = reconciliation.correctedRecords.length > 0
+      ? { ...details.campaign, final_realized_pnl: reconciliation.correctedPnl }
+      : details.campaign;
     const initialExpectedMaxLoss = computeInitialExpectedMaxLoss(
       details.campaign,
       details.legs,
@@ -496,9 +509,10 @@ async function loadAccountCampaignPerformance(
         details.legs,
         details.tradeRecords,
         details.reverseHedgeOrders,
+        exitPriceCorrections,
       ) / 100
       : null;
-    return { campaign: details.campaign, payoffRatio };
+    return { campaign: reconciledCampaign, payoffRatio };
   }));
 
   return summarizeCampaignPerformance(samples);
@@ -767,33 +781,13 @@ export default function JournalCampaignDetailPage() {
     }
 
     let cancelled = false;
-    const recordMap = buildTradeRecordLookup(tradeRecords);
-    const candidates = legs
-      .map(leg => {
-        const record = leg.trade_record_id ? recordMap.get(leg.trade_record_id) ?? null : null;
-        return record && record.closeTime > 0 ? { leg, record } : null;
+    fetchLegExitPriceCorrections(campaign.symbol, legs, tradeRecords)
+      .then(corrections => {
+        if (!cancelled) setLegExitPriceCorrections(corrections);
       })
-      .filter((item): item is { leg: TradeJournal; record: TradeRecord } => item != null);
-
-    if (candidates.length === 0) {
-      setLegExitPriceCorrections({});
-      return;
-    }
-
-    (async () => {
-      const entries = await Promise.all(
-        candidates.map(async ({ leg, record }) => {
-          const canonical = await fetchCanonicalTimePriceAt(campaign.symbol, record.closeTime).catch(() => null);
-          const correction = buildLegExitPriceCorrection(record.exitPrice, canonical);
-          return correction ? [leg.id, correction] as const : null;
-        }),
-      );
-      if (cancelled) return;
-      const correctionEntries = entries.filter((entry): entry is readonly [string, LegExitPriceCorrection] => entry != null);
-      setLegExitPriceCorrections(
-        Object.fromEntries(correctionEntries),
-      );
-    })();
+      .catch(() => {
+        if (!cancelled) setLegExitPriceCorrections({});
+      });
 
     return () => {
       cancelled = true;
@@ -801,8 +795,28 @@ export default function JournalCampaignDetailPage() {
   }, [campaign, legs, tradeRecords]);
 
   const accuracy = useMemo(
-    () => (campaign ? computeDecisionAccuracy(campaign, legs, tradeRecords, klines, reverseHedgeOrders) : null),
-    [campaign, legs, tradeRecords, klines, reverseHedgeOrders],
+    () => (campaign
+      ? computeDecisionAccuracy(
+        campaign,
+        legs,
+        tradeRecords,
+        klines,
+        reverseHedgeOrders,
+        legExitPriceCorrections,
+      )
+      : null),
+    [campaign, legs, tradeRecords, klines, reverseHedgeOrders, legExitPriceCorrections],
+  );
+  const pnlReconciliation = useMemo(
+    () => (campaign
+      ? computeCampaignPnlReconciliation(
+        campaign,
+        legs,
+        tradeRecords,
+        legExitPriceCorrections,
+      )
+      : null),
+    [campaign, legs, tradeRecords, legExitPriceCorrections],
   );
   const currentAccountEquity = useMemo(
     () => computeCurrentAccountEquity(balance, positionsMap, priceMap),
@@ -854,7 +868,7 @@ export default function JournalCampaignDetailPage() {
   ]);
   const campaignPnlOverviewItems = useMemo<CampaignPnlOverviewItem[]>(() => {
     if (!campaign || !accuracy) return [];
-    const realizedPnl = campaign.final_realized_pnl;
+    const realizedPnl = pnlReconciliation?.correctedPnl ?? campaign.final_realized_pnl;
     const payoffRatio = campaignMetricValues?.profitCaptureRatio ?? null;
     const opportunityQuality = campaignMetricValues?.opportunityQuality ?? null;
     const arithmeticExpectancy = campaignMetricValues?.arithmeticExpectancy ?? null;
@@ -878,6 +892,48 @@ export default function JournalCampaignDetailPage() {
           <>
             <p>本场战役所有已平仓 Legs 的实际盈亏合计，包括主仓、加仓、对冲与止盈的已实现结果。</p>
             <div className="rounded bg-muted/60 px-2 py-1 font-mono text-foreground">已实现 P&amp;L = Σ 各已平仓 Leg 盈亏</div>
+          </>
+        ),
+      },
+      {
+        key: 'pnlReconciliation',
+        label: '逐腿 P&L 对账',
+        value: pnlReconciliation == null
+          ? '—'
+          : pnlReconciliation.correctedRecords.length > 0
+            ? `已校正 ${pnlReconciliation.correctedRecords.length} 条`
+            : '校验通过',
+        color: pnlReconciliation?.correctedRecords.length ? '#D99A00' : '#64748B',
+        valueClassName: pnlReconciliation?.correctedRecords.length ? 'text-amber-600' : 'text-muted-foreground',
+        help: (
+          <>
+            <p>逐腿使用开仓价、平仓价、方向和数量重算毛盈亏，并与官方净盈亏对账。手续费、滑点等官方净额调整原样保留。</p>
+            <div className="rounded bg-muted/60 px-2 py-1 font-mono text-foreground">
+              校正后净盈亏 = 官方净盈亏 +（修正价毛盈亏 − 原价毛盈亏）
+            </div>
+            {pnlReconciliation ? (
+              <>
+                <p className="font-mono text-foreground">
+                  官方战役：{pnlReconciliation.officialCampaignPnl == null
+                    ? '—'
+                    : pnlReconciliation.officialCampaignPnl.toFixed(2)}
+                  {' · '}逐腿官方：{pnlReconciliation.officialLegPnl == null
+                    ? '—'
+                    : pnlReconciliation.officialLegPnl.toFixed(2)}
+                </p>
+                <p className="font-mono text-foreground">
+                  异常价修正：{pnlReconciliation.priceCorrectionDelta >= 0 ? '+' : ''}
+                  {pnlReconciliation.priceCorrectionDelta.toFixed(2)}
+                  {' · '}校正后：{pnlReconciliation.correctedPnl.toFixed(2)}
+                </p>
+                {pnlReconciliation.correctedRecords.map(item => (
+                  <p key={item.recordId} className="font-mono text-foreground">
+                    {item.recordId.slice(0, 8)}：{item.originalExitPrice} → {item.correctedExitPrice}
+                    {' · '}P&amp;L {item.pnlDelta >= 0 ? '+' : ''}{item.pnlDelta.toFixed(2)}
+                  </p>
+                ))}
+              </>
+            ) : null}
           </>
         ),
       },
@@ -1032,6 +1088,7 @@ export default function JournalCampaignDetailPage() {
     currentAccountEquity,
     isOwner,
     legs,
+    pnlReconciliation,
     tradeRecords,
   ]);
   const campaignPnlOverviewNote = useMemo(() => {
@@ -1047,12 +1104,18 @@ export default function JournalCampaignDetailPage() {
       : campaignMetricValues?.initialRisk?.source === 'main_open_snapshot'
         ? ' 本场几何期望的资产分母使用主力开仓实时总资产快照。'
         : '';
-    return `${expectationNote}${riskNote}`;
+    const reconciliationNote = !pnlReconciliation
+      ? ''
+      : pnlReconciliation.correctedRecords.length > 0
+        ? ` 逐腿 P&L 对账已校正 ${pnlReconciliation.correctedRecords.length} 条异常成交价：官方战役 ${pnlReconciliation.officialCampaignPnl?.toFixed(2) ?? '—'} USDT，逐腿基线 ${pnlReconciliation.baselinePnl.toFixed(2)} USDT，价格修正 ${pnlReconciliation.priceCorrectionDelta >= 0 ? '+' : ''}${pnlReconciliation.priceCorrectionDelta.toFixed(2)} USDT，校正后 ${pnlReconciliation.correctedPnl.toFixed(2)} USDT。`
+        : ` 逐腿 P&L 对账校验通过：逐腿基线 ${pnlReconciliation.baselinePnl.toFixed(2)} USDT，未发现越出成交时点 1 分钟 K 线区间的成交价。`;
+    return `${expectationNote}${riskNote}${reconciliationNote}`;
   }, [
     campaignMetricValues?.initialRisk?.source,
     campaignPerformance,
     campaignPerformanceError,
     campaignPerformanceLoading,
+    pnlReconciliation,
   ]);
   const chart = useMemo(
     () => (campaign ? buildChartArtifacts(campaign, legs, tradeRecords, legExitPriceCorrections) : { markers: [], timeBoundPriceLines: [], verticalLines: [], events: [] }),

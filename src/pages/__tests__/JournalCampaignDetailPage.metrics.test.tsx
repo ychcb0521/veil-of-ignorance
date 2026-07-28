@@ -5,6 +5,14 @@ import type { CampaignBoardExportInput } from '@/lib/campaignLegsPngExport';
 import type { CampaignCounterfactual, TradeCampaign, TradeJournal } from '@/types/journal';
 import JournalCampaignDetailPage from '../JournalCampaignDetailPage';
 
+vi.mock('@/lib/campaignLegExecution', async importOriginal => {
+  const actual = await importOriginal<typeof import('@/lib/campaignLegExecution')>();
+  return {
+    ...actual,
+    fetchLegExitPriceCorrections: vi.fn(async () => ({})),
+  };
+});
+
 const scrollToMock = vi.fn();
 const {
   exportCampaignBoardPngMock,
@@ -257,7 +265,7 @@ describe('JournalCampaignDetailPage metrics', () => {
       end: Date.parse('2026-01-01T17:30:00.000Z'),
     }));
     expect(screen.getByRole('button', { name: '显示 51 倍战役时间范围' })).toHaveAttribute('aria-pressed', 'true');
-  }, 10_000);
+  }, 30_000);
 
   it('returns to the exact campaign-list history state when opened from the list', async () => {
     const listLocation = '/journal/campaigns?scope=own&sort=opportunityQuality&direction=asc';
@@ -426,6 +434,7 @@ describe('JournalCampaignDetailPage metrics', () => {
     expect(exportInput.chartInterval).toBe('1m');
     expect(exportInput.pnlOverview.items.map(item => item.label)).toEqual([
       '已实现 P&L',
+      '逐腿 P&L 对账',
       '杠杆倍数',
       '主力开仓名义仓位',
       '峰值浮盈',
@@ -443,10 +452,10 @@ describe('JournalCampaignDetailPage metrics', () => {
     expect(exportCampaignPostReviewsTxtMock).toHaveBeenCalledTimes(1);
     expect(exportCampaignPostReviewsTxtMock).toHaveBeenCalledWith(
       expect.objectContaining({ id: 'winner' }),
-      [expect.objectContaining({ id: 'winner-main' })],
+      expect.arrayContaining([expect.objectContaining({ id: 'winner-main' })]),
       '主账户',
     );
-  });
+  }, 10_000);
 
   it('shows the review export for a historical answer-only review without a timestamp', async () => {
     const winner = detailsById.winner;

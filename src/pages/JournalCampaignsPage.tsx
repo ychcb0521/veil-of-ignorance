@@ -32,12 +32,14 @@ import {
   updateCampaignImportance,
 } from '@/lib/journalApi';
 import {
+  computeCampaignPnlReconciliation,
   computeInitialExpectedMaxDrawdownPct,
   computeInitialExpectedMaxLoss,
   computeProfitCaptureRatio,
   formatCampaignPayoffRatio,
   resolveCampaignInitialRiskFraction,
 } from '@/lib/campaignAnalysis';
+import { fetchLegExitPriceCorrections } from '@/lib/campaignLegExecution';
 import type { CampaignInitialRiskSource } from '@/lib/campaignAnalysis';
 import {
   computeCampaignExpectancies,
@@ -454,6 +456,20 @@ export default function JournalCampaignsPage() {
         const full = await Promise.all(
           campaigns.map(async campaign => {
             const details = await getCampaignFullData(campaign.id);
+            const exitPriceCorrections = await fetchLegExitPriceCorrections(
+              details.campaign.symbol,
+              details.legs,
+              details.tradeRecords,
+            );
+            const reconciliation = computeCampaignPnlReconciliation(
+              details.campaign,
+              details.legs,
+              details.tradeRecords,
+              exitPriceCorrections,
+            );
+            const reconciledCampaign = reconciliation.correctedRecords.length > 0
+              ? { ...details.campaign, final_realized_pnl: reconciliation.correctedPnl }
+              : details.campaign;
             const initialExpectedMaxLoss = computeInitialExpectedMaxLoss(
               details.campaign,
               details.legs,
@@ -472,15 +488,16 @@ export default function JournalCampaignsPage() {
                 details.legs,
                 details.tradeRecords,
                 details.reverseHedgeOrders,
+                exitPriceCorrections,
               )
               : null;
             const opportunityQuality = resolveCampaignOpportunityQuality(
-              details.campaign,
+              reconciledCampaign,
               profitCaptureRatio,
               initialExpectedMaxDrawdownPct,
             );
             return {
-              campaign: details.campaign,
+              campaign: reconciledCampaign,
               legs: details.legs,
               tradeRecords: details.tradeRecords,
               profitCaptureRatio,
@@ -746,6 +763,20 @@ export default function JournalCampaignsPage() {
       await restoreCampaign(campaign.id);
       setDeletedCampaigns(current => current.filter(item => item.id !== campaign.id));
       const details = await getCampaignFullData(campaign.id);
+      const exitPriceCorrections = await fetchLegExitPriceCorrections(
+        details.campaign.symbol,
+        details.legs,
+        details.tradeRecords,
+      );
+      const reconciliation = computeCampaignPnlReconciliation(
+        details.campaign,
+        details.legs,
+        details.tradeRecords,
+        exitPriceCorrections,
+      );
+      const reconciledCampaign = reconciliation.correctedRecords.length > 0
+        ? { ...details.campaign, final_realized_pnl: reconciliation.correctedPnl }
+        : details.campaign;
       const initialExpectedMaxLoss = computeInitialExpectedMaxLoss(
         details.campaign,
         details.legs,
@@ -764,15 +795,16 @@ export default function JournalCampaignsPage() {
           details.legs,
           details.tradeRecords,
           details.reverseHedgeOrders,
+          exitPriceCorrections,
         )
         : null;
       const opportunityQuality = resolveCampaignOpportunityQuality(
-        details.campaign,
+        reconciledCampaign,
         profitCaptureRatio,
         initialExpectedMaxDrawdownPct,
       );
       const restoredRow: CampaignCardData = {
-        campaign: { ...details.campaign, deleted_at: null },
+        campaign: { ...reconciledCampaign, deleted_at: null },
         legs: details.legs,
         tradeRecords: details.tradeRecords,
         profitCaptureRatio,
