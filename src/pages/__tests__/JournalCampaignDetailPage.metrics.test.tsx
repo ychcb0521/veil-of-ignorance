@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CampaignBoardExportInput } from '@/lib/campaignLegsPngExport';
+import { getCampaignFullData } from '@/lib/journalApi';
 import type { CampaignCounterfactual, TradeCampaign, TradeJournal } from '@/types/journal';
 import JournalCampaignDetailPage from '../JournalCampaignDetailPage';
 
@@ -39,6 +40,7 @@ beforeEach(() => {
   exportCampaignPostReviewsTxtMock.mockClear();
   listCounterfactualsMock.mockReset();
   listCounterfactualsMock.mockResolvedValue([]);
+  vi.mocked(getCampaignFullData).mockImplementation(async (id: string) => detailsById[id]);
   replayVisibleRanges.length = 0;
   replayAnnotationSnapshots.length = 0;
   Object.defineProperty(window, 'scrollTo', {
@@ -406,6 +408,8 @@ describe('JournalCampaignDetailPage metrics', () => {
     await waitFor(() => expect(screen.getByText('+0.50R')).toBeInTheDocument());
     expect(screen.getByText('+0.5%/笔')).toBeInTheDocument();
     expect(screen.getByText(/2 场有效战役，实时胜率 50.00%/)).toBeInTheDocument();
+    expect(screen.queryByText('逐腿 P&L 对账')).not.toBeInTheDocument();
+    expect(screen.queryByText(/逐腿 P&L 对账已校正/)).not.toBeInTheDocument();
 
     for (const label of [
       '已实现 P&L',
@@ -434,7 +438,6 @@ describe('JournalCampaignDetailPage metrics', () => {
     expect(exportInput.chartInterval).toBe('1m');
     expect(exportInput.pnlOverview.items.map(item => item.label)).toEqual([
       '已实现 P&L',
-      '逐腿 P&L 对账',
       '杠杆倍数',
       '主力开仓名义仓位',
       '峰值浮盈',
@@ -447,6 +450,7 @@ describe('JournalCampaignDetailPage metrics', () => {
       '今日账户总资产',
     ]);
     expect(exportInput.pnlOverview.note).toContain('2 场有效战役，实时胜率 50.00%');
+    expect(exportInput.pnlOverview.note).not.toContain('逐腿 P&L 对账');
 
     fireEvent.click(screen.getByRole('button', { name: '评价 TXT' }));
     expect(exportCampaignPostReviewsTxtMock).toHaveBeenCalledTimes(1);
@@ -456,6 +460,25 @@ describe('JournalCampaignDetailPage metrics', () => {
       '主账户',
     );
   }, 10_000);
+
+  it('keeps verified expectancy values when another campaign fails to load', async () => {
+    vi.mocked(getCampaignFullData).mockImplementation(async (id: string) => {
+      if (id === 'loser') throw new Error('transient campaign load failure');
+      return detailsById[id];
+    });
+
+    render(
+      <MemoryRouter initialEntries={['/journal/campaigns/winner']}>
+        <Routes>
+          <Route path="/journal/campaigns/:id" element={<JournalCampaignDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => expect(screen.getByText('+2.00R')).toBeInTheDocument());
+    expect(screen.getByText(/1 场有效战役，实时胜率 100.00%/)).toBeInTheDocument();
+    expect(screen.queryByText(/期望口径加载失败/)).not.toBeInTheDocument();
+  });
 
   it('shows the review export for a historical answer-only review without a timestamp', async () => {
     const winner = detailsById.winner;

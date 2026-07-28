@@ -10,6 +10,7 @@ import {
   formatCampaignPayoffRatio,
   resolveCampaignInitialRiskFraction,
 } from '@/lib/campaignAnalysis';
+import { computeCampaignExpectancies } from '@/lib/campaignMetrics';
 import type { TradeCampaign, TradeJournal } from '@/types/journal';
 import type { TradeRecord } from '@/types/trading';
 
@@ -147,10 +148,18 @@ describe('campaign profit capture ratio', () => {
     expect(reconciliation.officialVsLegDelta).toBeCloseTo(50, 8);
     expect(reconciliation.priceCorrectionDelta).toBeCloseTo(-300, 8);
     expect(reconciliation.correctedPnl).toBeCloseTo(300, 8);
-    expect(computeProfitCaptureRatio(campaign, legs, records, [], corrections))
-      .toBeCloseTo(25, 8);
+    const correctedProfitCaptureRatio = computeProfitCaptureRatio(
+      campaign,
+      legs,
+      records,
+      [],
+      corrections,
+    );
+    expect(correctedProfitCaptureRatio).toBeCloseTo(25, 8);
     expect(computeDecisionAccuracy(campaign, legs, records, [], [], corrections).profit_capture_ratio)
       .toBeCloseTo(25, 8);
+    expect(computeCampaignExpectancies(correctedProfitCaptureRatio, 0.5, null).arithmeticExpectancy)
+      .toBeCloseTo(-0.375, 8);
   });
 
   it('uses the initial M plus mirror exposure while excluding later additions', () => {

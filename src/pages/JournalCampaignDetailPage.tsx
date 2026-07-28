@@ -481,7 +481,7 @@ async function loadAccountCampaignPerformance(
   const campaigns = ownerUserId === viewerUserId
     ? await listAllCampaigns(ownerUserId)
     : (await listVisibleCampaigns(viewerUserId)).filter(item => item.user_id === ownerUserId);
-  const samples = await Promise.all(campaigns.map(async item => {
+  const settledSamples = await Promise.allSettled(campaigns.map(async item => {
     const details = await getCampaignFullData(item.id);
     const exitPriceCorrections = await fetchLegExitPriceCorrections(
       details.campaign.symbol,
@@ -514,6 +514,9 @@ async function loadAccountCampaignPerformance(
       : null;
     return { campaign: reconciledCampaign, payoffRatio };
   }));
+  const samples = settledSamples.flatMap(result => (
+    result.status === 'fulfilled' ? [result.value] : []
+  ));
 
   return summarizeCampaignPerformance(samples);
 }
@@ -896,48 +899,6 @@ export default function JournalCampaignDetailPage() {
         ),
       },
       {
-        key: 'pnlReconciliation',
-        label: '逐腿 P&L 对账',
-        value: pnlReconciliation == null
-          ? '—'
-          : pnlReconciliation.correctedRecords.length > 0
-            ? `已校正 ${pnlReconciliation.correctedRecords.length} 条`
-            : '校验通过',
-        color: pnlReconciliation?.correctedRecords.length ? '#D99A00' : '#64748B',
-        valueClassName: pnlReconciliation?.correctedRecords.length ? 'text-amber-600' : 'text-muted-foreground',
-        help: (
-          <>
-            <p>逐腿使用开仓价、平仓价、方向和数量重算毛盈亏，并与官方净盈亏对账。手续费、滑点等官方净额调整原样保留。</p>
-            <div className="rounded bg-muted/60 px-2 py-1 font-mono text-foreground">
-              校正后净盈亏 = 官方净盈亏 +（修正价毛盈亏 − 原价毛盈亏）
-            </div>
-            {pnlReconciliation ? (
-              <>
-                <p className="font-mono text-foreground">
-                  官方战役：{pnlReconciliation.officialCampaignPnl == null
-                    ? '—'
-                    : pnlReconciliation.officialCampaignPnl.toFixed(2)}
-                  {' · '}逐腿官方：{pnlReconciliation.officialLegPnl == null
-                    ? '—'
-                    : pnlReconciliation.officialLegPnl.toFixed(2)}
-                </p>
-                <p className="font-mono text-foreground">
-                  异常价修正：{pnlReconciliation.priceCorrectionDelta >= 0 ? '+' : ''}
-                  {pnlReconciliation.priceCorrectionDelta.toFixed(2)}
-                  {' · '}校正后：{pnlReconciliation.correctedPnl.toFixed(2)}
-                </p>
-                {pnlReconciliation.correctedRecords.map(item => (
-                  <p key={item.recordId} className="font-mono text-foreground">
-                    {item.recordId.slice(0, 8)}：{item.originalExitPrice} → {item.correctedExitPrice}
-                    {' · '}P&amp;L {item.pnlDelta >= 0 ? '+' : ''}{item.pnlDelta.toFixed(2)}
-                  </p>
-                ))}
-              </>
-            ) : null}
-          </>
-        ),
-      },
-      {
         key: 'mainLeverage',
         label: '杠杆倍数',
         value: formatCampaignLeverage(mainLeverage),
@@ -1095,7 +1056,7 @@ export default function JournalCampaignDetailPage() {
     const expectationNote = campaignPerformanceLoading
       ? '正在按同一账户的有效战役口径计算期望…'
       : campaignPerformanceError
-        ? `期望口径加载失败：${campaignPerformanceError}`
+        ? '暂无可计算期望的有效战役样本。'
         : campaignPerformance?.expectedWinRate == null
           ? '暂无可计算胜率的有效战役样本。'
           : `期望口径：${campaignPerformance.payoffRatioSampleCount} 场有效战役，实时胜率 ${(campaignPerformance.expectedWinRate * 100).toFixed(2)}%。`;
@@ -1104,18 +1065,12 @@ export default function JournalCampaignDetailPage() {
       : campaignMetricValues?.initialRisk?.source === 'main_open_snapshot'
         ? ' 本场几何期望的资产分母使用主力开仓实时总资产快照。'
         : '';
-    const reconciliationNote = !pnlReconciliation
-      ? ''
-      : pnlReconciliation.correctedRecords.length > 0
-        ? ` 逐腿 P&L 对账已校正 ${pnlReconciliation.correctedRecords.length} 条异常成交价：官方战役 ${pnlReconciliation.officialCampaignPnl?.toFixed(2) ?? '—'} USDT，逐腿基线 ${pnlReconciliation.baselinePnl.toFixed(2)} USDT，价格修正 ${pnlReconciliation.priceCorrectionDelta >= 0 ? '+' : ''}${pnlReconciliation.priceCorrectionDelta.toFixed(2)} USDT，校正后 ${pnlReconciliation.correctedPnl.toFixed(2)} USDT。`
-        : ` 逐腿 P&L 对账校验通过：逐腿基线 ${pnlReconciliation.baselinePnl.toFixed(2)} USDT，未发现越出成交时点 1 分钟 K 线区间的成交价。`;
-    return `${expectationNote}${riskNote}${reconciliationNote}`;
+    return `${expectationNote}${riskNote}`;
   }, [
     campaignMetricValues?.initialRisk?.source,
     campaignPerformance,
     campaignPerformanceError,
     campaignPerformanceLoading,
-    pnlReconciliation,
   ]);
   const chart = useMemo(
     () => (campaign ? buildChartArtifacts(campaign, legs, tradeRecords, legExitPriceCorrections) : { markers: [], timeBoundPriceLines: [], verticalLines: [], events: [] }),
