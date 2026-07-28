@@ -578,6 +578,9 @@ export type Database = {
           position_mode: string | null
           post_correct_action: string | null
           post_decision_quality: string | null
+          post_entry_decision_quality: string | null
+          post_holding_decision_quality: string | null
+          post_exit_decision_quality: string | null
           post_design_intervention: string | null
           post_emo_disturbance: string | null
           post_emo_excuse: string | null
@@ -722,6 +725,9 @@ export type Database = {
           position_mode?: string | null
           post_correct_action?: string | null
           post_decision_quality?: string | null
+          post_entry_decision_quality?: string | null
+          post_holding_decision_quality?: string | null
+          post_exit_decision_quality?: string | null
           post_design_intervention?: string | null
           post_emo_disturbance?: string | null
           post_emo_excuse?: string | null
@@ -866,6 +872,9 @@ export type Database = {
           position_mode?: string | null
           post_correct_action?: string | null
           post_decision_quality?: string | null
+          post_entry_decision_quality?: string | null
+          post_holding_decision_quality?: string | null
+          post_exit_decision_quality?: string | null
           post_design_intervention?: string | null
           post_emo_disturbance?: string | null
           post_emo_excuse?: string | null

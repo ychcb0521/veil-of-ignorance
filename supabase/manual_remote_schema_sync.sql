@@ -32,6 +32,9 @@
 ALTER TABLE public.trade_journals
   ADD COLUMN IF NOT EXISTS post_result_summary             text,
   ADD COLUMN IF NOT EXISTS post_decision_quality           text,
+  ADD COLUMN IF NOT EXISTS post_entry_decision_quality     text,
+  ADD COLUMN IF NOT EXISTS post_holding_decision_quality   text,
+  ADD COLUMN IF NOT EXISTS post_exit_decision_quality      text,
   ADD COLUMN IF NOT EXISTS post_every_ball_pct              numeric,
   ADD COLUMN IF NOT EXISTS post_positive_expectancy_review text,
   ADD COLUMN IF NOT EXISTS post_premortem_review           text,
@@ -53,6 +56,13 @@ ALTER TABLE public.trade_journals
   ADD COLUMN IF NOT EXISTS pre_invalidation_condition      text,
   ADD COLUMN IF NOT EXISTS post_real_close_time            timestamptz,
   ADD COLUMN IF NOT EXISTS post_simulated_close_time       timestamptz;
+
+UPDATE public.trade_journals
+SET
+  post_entry_decision_quality = COALESCE(post_entry_decision_quality, post_decision_quality),
+  post_holding_decision_quality = COALESCE(post_holding_decision_quality, post_decision_quality),
+  post_exit_decision_quality = COALESCE(post_exit_decision_quality, post_decision_quality)
+WHERE post_decision_quality IS NOT NULL;
 
 UPDATE public.trade_journals
 SET

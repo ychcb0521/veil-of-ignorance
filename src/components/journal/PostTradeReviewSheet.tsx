@@ -60,7 +60,7 @@ import {
   journalOpenOperationTime,
   tradeRecordOperationTime,
 } from '@/lib/objectiveOperationTime';
-import type { TradeJournal, TradeOutcome } from '@/types/journal';
+import type { DecisionQuality, TradeJournal, TradeOutcome } from '@/types/journal';
 import { MENTAL_STATE_LABELS, PAIN_TAG_LABELS } from '@/types/journal';
 import type { PainTag } from '@/types/journal';
 import { formatBeijingTime } from '@/lib/timeFormat';
@@ -112,6 +112,16 @@ const ENTRY_WIN_RATE_ESTIMATE_OPTIONS: Array<{
   { value: 'wr_gt_80', label: '>80%', desc: '高确定性，重点看代价', accent: '#0ECB81' },
 ];
 
+const DECISION_QUALITY_OPTIONS: Array<{
+  value: Extract<DecisionQuality, 'good' | 'bad'>;
+  label: string;
+  desc: string;
+  accent: string;
+}> = [
+  { value: 'good', label: '正当', desc: '按当时信息与规则，这一步成立', accent: '#0ECB81' },
+  { value: 'bad', label: '错误', desc: '这一步偏离了当时应有的判断', accent: '#F6465D' },
+];
+
 interface Props {
   isOpen: boolean;
   onOpenChange: (open: boolean) => void;
@@ -139,7 +149,9 @@ export function PostTradeReviewSheet({
   const isMobile = useIsMobile();
   const { recordPostTradeReviewCompleted } = useTradingContext();
   const [everyBallPct, setEveryBallPct] = useState<number | null>(null);
-  const [decisionQuality, setDecisionQuality] = useState<TradeJournal['post_decision_quality']>('mixed');
+  const [entryDecisionQuality, setEntryDecisionQuality] = useState<DecisionQuality | null>(null);
+  const [holdingDecisionQuality, setHoldingDecisionQuality] = useState<DecisionQuality | null>(null);
+  const [exitDecisionQuality, setExitDecisionQuality] = useState<DecisionQuality | null>(null);
   const [expectancyReview, setExpectancyReview] = useState('');
   const [oddsStructureReviewValue, setOddsStructureReviewValue] = useState<OddsStructureReview | null>(null);
   const [payoffEstimateGrade, setPayoffEstimateGrade] = useState<TradeJournal['post_entry_payoff_estimate_grade']>(null);
@@ -183,7 +195,9 @@ export function PostTradeReviewSheet({
     (async () => {
       try {
         setEveryBallPct(journal.post_every_ball_pct ?? null);
-        setDecisionQuality(journal.post_decision_quality ?? 'mixed');
+        setEntryDecisionQuality(journal.post_entry_decision_quality ?? journal.post_decision_quality ?? null);
+        setHoldingDecisionQuality(journal.post_holding_decision_quality ?? journal.post_decision_quality ?? null);
+        setExitDecisionQuality(journal.post_exit_decision_quality ?? journal.post_decision_quality ?? null);
         const parsedOddsStructureReview = parseOddsStructureReviewText(journal.post_positive_expectancy_review);
         setOddsStructureReviewValue(parsedOddsStructureReview.review);
         setExpectancyReview(parsedOddsStructureReview.body);
@@ -342,7 +356,20 @@ export function PostTradeReviewSheet({
     ? (journal.pre_max_loss_usdt / journal.pre_account_equity_usdt) * 100
     : null;
 
-  // 结构 × 结果 四象限：结构轴 = 当时决策质量，结果轴 = 这单赢/亏。
+  const decisionQualityApplicable = journal.direction !== 'no_entry';
+  const phaseDecisionQualities = [
+    entryDecisionQuality,
+    holdingDecisionQuality,
+    exitDecisionQuality,
+  ];
+  const allPhaseDecisionQualitiesAnswered = phaseDecisionQualities.every(
+    value => value === 'good' || value === 'bad',
+  );
+  // 保留单字段作为下游统计兼容值：三阶段均正当才算正当，任一阶段错误即算错误。
+  const decisionQuality: DecisionQuality | null = allPhaseDecisionQualitiesAnswered
+    ? (phaseDecisionQualities.some(value => value === 'bad') ? 'bad' : 'good')
+    : (decisionQualityApplicable ? null : journal.post_decision_quality ?? null);
+  // 结构 × 结果 四象限：结构轴 = 三阶段归纳后的决策质量，结果轴 = 这单赢/亏。
   const quadrantApplicable = journal.direction !== 'no_entry' && (outcome === 'win' || outcome === 'loss');
   const quadrant = classifyStructureResult(decisionQuality, outcome);
   // 情境 × 处理 记账：给每一手定性——小机会 / 大机会 / 大危机，各有处理得当 / 不得当。
@@ -367,12 +394,9 @@ export function PostTradeReviewSheet({
     payoffRatio: opportunityQualityPayoff,
     drawdownPct: opportunityQualityDrawdown,
   });
-  // 结构对／错的 2×2 排布（上排结构对、下排结构错；左列赢、右列亏）。
-  const QUADRANT_GRID: StructureResultQuadrant[] = ['deserved_win', 'correct_loss', 'dangerous_win', 'deserved_loss'];
-
   const resultValid = !quadrantApplicable || !!quadrant;
   const quadrantValid = !quadrantApplicable || !!quadrant;
-  const decisionValid = !quadrantApplicable || decisionQuality === 'good' || decisionQuality === 'bad';
+  const decisionValid = !decisionQualityApplicable || allPhaseDecisionQualitiesAnswered;
   const falsificationFactValid = !snapshotFalsification || falsificationStatus != null;
   const oddsStructureFactValid = isHedge || !journal.pre_odds_structure || oddsStructureReviewValue != null;
   const pathValid = !showPathReview || (!!pathMode && !!tradeAgencyScore);
@@ -454,6 +478,9 @@ export function PostTradeReviewSheet({
         post_correct_action: journal.post_correct_action ?? '',
         post_result_summary: quadrant ? RESULT_REVIEW_LABELS[quadrant] : (journal.post_result_summary ?? outcomeLabel),
         post_decision_quality: decisionQuality,
+        post_entry_decision_quality: decisionQualityApplicable ? entryDecisionQuality : null,
+        post_holding_decision_quality: decisionQualityApplicable ? holdingDecisionQuality : null,
+        post_exit_decision_quality: decisionQualityApplicable ? exitDecisionQuality : null,
         post_struggle_level: struggleLevel,
         post_small_position_drag: showSmallPositionDrag ? smallPositionDrag : null,
         post_missed_high_odds_state: showMissedHighOddsState ? missedHighOddsState : null,
@@ -1203,71 +1230,108 @@ export function PostTradeReviewSheet({
 
         <div className={`space-y-3 px-4 py-4 ${sectionCardClass}`}>
           <div className="text-[12px] font-medium">结果复盘</div>
-          {quadrantApplicable && (
-            <div className="space-y-2">
+          {decisionQualityApplicable && (
+            <div className="space-y-3">
               <div className="flex items-center justify-between">
-                <Label className="text-[12px] font-medium">选择本笔归类 *</Label>
-                <span className="text-[10px] text-muted-foreground">好结果不等于好过程，坏结果不等于坏过程</span>
+                <Label className="text-[12px] font-medium">决策质量 *</Label>
+                <span className="text-[10px] text-muted-foreground">分别按当时信息评价，不用最终盈亏倒推</span>
               </div>
-              <div className="grid grid-cols-2 gap-1.5">
-                {QUADRANT_GRID.map(cell => {
-                  const meta = STRUCTURE_RESULT_QUADRANTS[cell];
-                  const active = quadrant === cell;
-                  const selectable = meta.isWin === (outcome === 'win');
-                  return (
-                    <button
-                      key={cell}
-                      type="button"
-                      disabled={!selectable}
-                      onClick={() => {
-                        if (!selectable) return;
-                        setDecisionQuality(meta.structureSound ? 'good' : 'bad');
-                      }}
-                      className={`rounded-lg border px-2.5 py-2 leading-tight transition-colors ${
-                        active
-                          ? ''
-                          : selectable
-                            ? 'border-border/60 bg-background/40 hover:bg-accent/60'
-                            : 'border-border/40 bg-background/20 opacity-35 cursor-not-allowed'
-                      }`}
-                      style={active ? { borderColor: meta.accent, backgroundColor: `${meta.accent}1A` } : undefined}
-                    >
-                      <div
-                        className={`text-[11px] font-semibold ${active ? '' : 'text-muted-foreground'}`}
-                        style={active ? { color: meta.accent } : undefined}
-                      >
-                        {RESULT_REVIEW_LABELS[cell]}
-                      </div>
-                      <div className="text-[9px] text-muted-foreground">
-                        {meta.structureSound ? '正当过程' : '错误过程'} · {meta.isWin ? '好结果' : '坏结果'}
-                      </div>
-                    </button>
-                  );
-                })}
+              <div className="grid gap-2 md:grid-cols-3">
+                {[
+                  {
+                    key: 'entry',
+                    label: '入场',
+                    hint: '建仓依据与风险边界',
+                    value: entryDecisionQuality,
+                    onChange: setEntryDecisionQuality,
+                  },
+                  {
+                    key: 'holding',
+                    label: '持仓',
+                    hint: '持仓判断与过程动作',
+                    value: holdingDecisionQuality,
+                    onChange: setHoldingDecisionQuality,
+                  },
+                  {
+                    key: 'exit',
+                    label: '离场',
+                    hint: '止盈、止损与退出判断',
+                    value: exitDecisionQuality,
+                    onChange: setExitDecisionQuality,
+                  },
+                ].map(phase => (
+                  <div key={phase.key} className="rounded-lg border border-border/60 bg-background/45 p-2.5">
+                    <div className="mb-2 flex items-center justify-between gap-2">
+                      <div className="text-[11px] font-semibold text-foreground">{phase.label}</div>
+                      <div className="text-[9px] text-muted-foreground">{phase.hint}</div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-1.5">
+                      {DECISION_QUALITY_OPTIONS.map(option => {
+                        const active = phase.value === option.value;
+                        return (
+                          <button
+                            key={option.value}
+                            type="button"
+                            onClick={() => phase.onChange(option.value)}
+                            className={`rounded-md border px-2 py-1.5 text-left transition-colors ${
+                              active
+                                ? ''
+                                : 'border-border/60 bg-background/50 hover:bg-accent/60'
+                            }`}
+                            style={active ? {
+                              borderColor: option.accent,
+                              backgroundColor: `${option.accent}14`,
+                            } : undefined}
+                          >
+                            <div
+                              className={`text-[10px] font-semibold ${active ? '' : 'text-muted-foreground'}`}
+                              style={active ? { color: option.accent } : undefined}
+                            >
+                              {option.label}
+                            </div>
+                            <div className="mt-0.5 text-[9px] leading-tight text-muted-foreground">
+                              {option.desc}
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                    {phase.value !== 'good' && phase.value !== 'bad' && (
+                      <div className="mt-1.5 text-right font-mono text-[9px] text-[#F6465D]">请选择</div>
+                    )}
+                  </div>
+                ))}
               </div>
-              {quadrant ? (
-                <div
-                  className="flex gap-2 rounded-lg border px-3 py-2 text-[11px] leading-relaxed"
-                  style={{
-                    borderColor: `${STRUCTURE_RESULT_QUADRANTS[quadrant].accent}66`,
-                    backgroundColor: `${STRUCTURE_RESULT_QUADRANTS[quadrant].accent}14`,
-                    color: STRUCTURE_RESULT_QUADRANTS[quadrant].accent,
-                  }}
-                >
-                  {STRUCTURE_RESULT_QUADRANTS[quadrant].isDanger && (
-                    <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-                  )}
-                  <span>
-                    <span className="font-semibold">{RESULT_REVIEW_LABELS[quadrant]}</span>
-                    ：{STRUCTURE_RESULT_QUADRANTS[quadrant].insight}
-                  </span>
-                </div>
-              ) : (
-                <p className="rounded border border-border/60 bg-background/40 px-2 py-1.5 text-[10px] leading-relaxed text-muted-foreground">
-                  请选择本笔落在哪一格。
-                </p>
+              {quadrantApplicable && (
+                quadrant ? (
+                  <div
+                    className="flex gap-2 rounded-lg border px-3 py-2 text-[11px] leading-relaxed"
+                    style={{
+                      borderColor: `${STRUCTURE_RESULT_QUADRANTS[quadrant].accent}66`,
+                      backgroundColor: `${STRUCTURE_RESULT_QUADRANTS[quadrant].accent}14`,
+                      color: STRUCTURE_RESULT_QUADRANTS[quadrant].accent,
+                    }}
+                  >
+                    {STRUCTURE_RESULT_QUADRANTS[quadrant].isDanger && (
+                      <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                    )}
+                    <span>
+                      <span className="font-semibold">{RESULT_REVIEW_LABELS[quadrant]}</span>
+                      ：{STRUCTURE_RESULT_QUADRANTS[quadrant].insight}
+                    </span>
+                  </div>
+                ) : (
+                  <p className="rounded border border-border/60 bg-background/40 px-2 py-1.5 text-[10px] leading-relaxed text-muted-foreground">
+                    完成入场、持仓、离场三栏后，系统会自动归纳“过程 × 结果”。
+                  </p>
+                )
               )}
             </div>
+          )}
+          {!decisionQualityApplicable && (
+            <p className="rounded border border-border/60 bg-background/40 px-2 py-1.5 text-[10px] leading-relaxed text-muted-foreground">
+              本记录为未入场决策，不需要填写入场、持仓、离场质量。
+            </p>
           )}
         </div>
 

@@ -216,10 +216,30 @@ function buildLegQuestionAnswers(
   if (
     quadrantApplicable
     || isAnswered(leg.post_result_summary)
+    || isAnswered(leg.post_entry_decision_quality)
+    || isAnswered(leg.post_holding_decision_quality)
+    || isAnswered(leg.post_exit_decision_quality)
     || isAnswered(leg.post_decision_quality)
   ) {
     addCurrent(answers, '结果复盘总结是什么？', leg.post_result_summary);
-    addCurrent(answers, '这笔交易的决策质量如何？', leg.post_decision_quality, DECISION_QUALITY_LABELS);
+    addCurrent(
+      answers,
+      '入场阶段的决策质量如何？',
+      leg.post_entry_decision_quality ?? leg.post_decision_quality,
+      DECISION_QUALITY_LABELS,
+    );
+    addCurrent(
+      answers,
+      '持仓阶段的决策质量如何？',
+      leg.post_holding_decision_quality ?? leg.post_decision_quality,
+      DECISION_QUALITY_LABELS,
+    );
+    addCurrent(
+      answers,
+      '离场阶段的决策质量如何？',
+      leg.post_exit_decision_quality ?? leg.post_decision_quality,
+      DECISION_QUALITY_LABELS,
+    );
   }
   if (isHedge || isAnswered(leg.hedge_worth_it)) {
     addCurrent(answers, '这个对冲值回成本了吗？', leg.hedge_worth_it, HEDGE_WORTH_IT_LABELS);

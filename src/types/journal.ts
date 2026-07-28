@@ -811,8 +811,14 @@ export interface TradeJournal {
   post_reviewed_at: string | null;
   /** Outcome summary separated from decision quality. */
   post_result_summary?: string | null;
-  /** Good/bad decision under information available at entry, independent of outcome. */
+  /** Compatibility aggregate derived from the three phase-level decision reviews. */
   post_decision_quality?: DecisionQuality | null;
+  /** Entry decision quality under the information available at entry. */
+  post_entry_decision_quality?: DecisionQuality | null;
+  /** Holding decision quality under the information available while the trade was open. */
+  post_holding_decision_quality?: DecisionQuality | null;
+  /** Exit decision quality under the information available at exit. */
+  post_exit_decision_quality?: DecisionQuality | null;
   /** 纠结度 / 轻松度（1 煎熬 … 5 行云流水）。过程质量的先行指标 —— 交易最重要的是轻松，不是赚钱。 */
   post_struggle_level?: 1 | 2 | 3 | 4 | 5 | null;
   /** 小机会仓位的隐性成本记账。仅对快照里被标记为小机会仓位的单子追问。 */

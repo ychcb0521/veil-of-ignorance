@@ -411,17 +411,25 @@ function CounterfactualChannel({ journal, klines, selectedBranchId, onSelectBran
       </span>
     }>
       <div className="space-y-3 text-[12px]">
-        {(journal.post_result_summary || journal.post_decision_quality) && (
+        {(journal.post_result_summary
+          || journal.post_entry_decision_quality
+          || journal.post_holding_decision_quality
+          || journal.post_exit_decision_quality
+          || journal.post_decision_quality) && (
           <div className="rounded border border-border bg-background/60 p-2 space-y-1.5 text-[11px]">
             {journal.post_result_summary && (
               <div><span className="text-muted-foreground">结果：</span>{journal.post_result_summary}</div>
             )}
-            {journal.post_decision_quality && (
-              <div>
-                <span className="text-muted-foreground">按当时信息的决策质量：</span>
-                {journal.post_decision_quality === 'good' ? '好决策' : journal.post_decision_quality === 'bad' ? '坏决策' : '混合'}
+            {[
+              ['入场', journal.post_entry_decision_quality ?? journal.post_decision_quality],
+              ['持仓', journal.post_holding_decision_quality ?? journal.post_decision_quality],
+              ['离场', journal.post_exit_decision_quality ?? journal.post_decision_quality],
+            ].map(([label, quality]) => quality && (
+              <div key={label}>
+                <span className="text-muted-foreground">决策质量 · {label}：</span>
+                {quality === 'good' ? '正当' : quality === 'bad' ? '错误' : '混合 / 未明确'}
               </div>
-            )}
+            ))}
           </div>
         )}
         {journal.post_correct_action && (
