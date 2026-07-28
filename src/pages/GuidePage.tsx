@@ -409,7 +409,7 @@ export default function GuidePage() {
                 <FlowArrow />
                 <FlowNode>下单、持仓、平仓；若左尾风险扩大，对冲单走独立的边界、必要性、把握性与双向预案快照</FlowNode>
                 <FlowArrow />
-                <FlowNode accent>平仓后评价：在居中评价弹窗里先完成「结构 × 结果」，再核对快照里写下的证伪信号、结构破坏信号与置信度是否被市场验证；事实模块负责对账，叙事模块只负责解释原因</FlowNode>
+                <FlowNode accent>平仓后评价：在居中评价弹窗里分别判断入场、持仓、离场三阶段的决策质量，再核对快照里写下的证伪信号、结构破坏信号与置信度是否被市场验证；系统自动归纳「结构 × 结果」，事实模块负责对账，叙事模块只负责解释原因</FlowNode>
                 <FlowArrow />
                 <FlowNode>归类到交易战役；错题集按“预测和结果之间的误差”自动汇总错误类型，重复出现的误差再写成规则，并到元监控里验证规则是否真的降低频次</FlowNode>
               </div>
@@ -869,15 +869,35 @@ export default function GuidePage() {
             <section id="s3-3" className="scroll-mt-20">
               <SubTitle>3.4 平仓评价复盘</SubTitle>
               <P>决策记录模式下，平仓会打开一个与开仓快照同规格的<strong>居中评价弹窗</strong>，不完成评价不能离开。评价的重心不是重新讲一遍故事，而是把快照时的预测和最终实际结果对上：预设的证伪信号兑现没有，结构破坏信号出现没有，进场时钉下的置信度有没有被验证。</P>
-              <P>弹窗按这条主线展开：<strong>事实模块</strong>逐条核验快照里押的<strong>反 / 止 / 结构 / 置信</strong>四条腿 → <strong>结果归类</strong>（结构 × 结果四象限）→ <strong>路径</strong>（滚仓 / 镜像止盈 + 交易主动权）→ <strong>体检模块</strong>（过程纠结度 / 小机会仓位记账 / 踏空高盈亏比结构）→ <strong>反对者陈述追踪</strong>（条件触发）→ <strong>情绪侧七问</strong>。先对账，再判读，最后翻动机，避免复盘变成事后重新叙述。</P>
+              <P>弹窗按这条主线展开：<strong>事实模块</strong>逐条核验快照里押的<strong>反 / 止 / 结构 / 置信</strong>四条腿 → <strong>决策质量</strong>（入场 / 持仓 / 离场三栏）→ 系统自动归纳<strong>结构 × 结果四象限</strong> → <strong>路径</strong>（滚仓 / 镜像止盈 + 交易主动权）→ <strong>体检模块</strong>（过程纠结度 / 小机会仓位记账 / 踏空高盈亏比结构）→ <strong>反对者陈述追踪</strong>（条件触发）→ <strong>情绪侧七问</strong>。先对账，再判读，最后翻动机，避免复盘变成事后重新叙述。</P>
               <P><strong>机会质量评估</strong>会在平仓时再输入当时可见的 b 与 d，并自动计算 Q。它默认带入开仓判断，但允许你根据复盘修正并保存；评估要回到当时的信息集，不能用最终盈亏倒推一个完美预测。</P>
 
               <SubTitle>事实模块 · 逐条核验闭环的四条腿（反 / 止 / 结构 / 置信）</SubTitle>
               <P>弹窗会把开仓快照里写下的<strong>反（亏损剧本）</strong>、<strong>止（失效信号）</strong>、<strong>结构（目标空间）</strong>、<strong>置信（开仓预测胜率）</strong>逐条原样回显，问你这四个假设在持仓过程中分别被市场怎么对待。这里<strong>只核验差值、不写事后故事</strong>，避免把"发生了什么"和"为什么"压成一个自洽的完美闭环。</P>
               <P><strong>"止"这条腿</strong>是其中最关键的子项：如果开仓时写过失效信号，这里会把它原样回显，再让你选三种状态之一：<strong>触发了，我及时反应了 / 触发了，但我反应晚了 / 没触发，我是主观平仓</strong>。这一步专治"写了止损条件却没执行"。</P>
 
-              <SubTitle>选择本笔归类（结构 × 结果四象限）</SubTitle>
-              <P>"结构 × 结果"是平仓评价的核心判断，不再把同一个判断拆成额外问题。你只需要把这笔交易放进一张 2×2：<strong>结构轴 = 这一笔的过程是不是正当的（与盈亏无关）</strong>，<strong>结果轴 = 这单赢 / 亏</strong>。一句话锚点：<strong>好结果不等于好过程，坏结果不等于坏过程</strong>。</P>
+              <SubTitle>决策质量：入场 / 持仓 / 离场三栏</SubTitle>
+              <P>决策质量不再用一个总判断覆盖整笔交易，而是把过程拆成三个可定位、可修改、可导出的阶段。每一栏都只按<strong>当时可见的信息与规则</strong>评价，分别选择<strong>正当</strong>或<strong>错误</strong>；最终盈亏不能反过来替过程洗白或定罪。</P>
+              <div className="overflow-x-auto">
+                <table className="w-full text-[11px] my-3 border border-border rounded overflow-hidden">
+                  <thead className="bg-muted/50">
+                    <tr>
+                      <th className="text-left px-3 py-2 font-medium text-foreground text-[10px]">阶段</th>
+                      <th className="text-left px-3 py-2 font-medium text-foreground text-[10px]">判断焦点</th>
+                      <th className="text-left px-3 py-2 font-medium text-foreground text-[10px]">可选答案</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr><td className="px-3 py-2 border-t border-border">入场</td><td className="px-3 py-2 border-t border-border">建仓依据、机会判断与风险边界是否成立</td><td className="px-3 py-2 border-t border-border">正当 / 错误</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border">持仓</td><td className="px-3 py-2 border-t border-border">持仓判断、加减仓与过程动作是否成立</td><td className="px-3 py-2 border-t border-border">正当 / 错误</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border">离场</td><td className="px-3 py-2 border-t border-border">止盈、止损与退出判断是否成立</td><td className="px-3 py-2 border-t border-border">正当 / 错误</td></tr>
+                  </tbody>
+                </table>
+              </div>
+              <P><strong>归纳规则：</strong>三栏全部正当，整笔过程才归为正当；任意一栏为错误，整笔过程即归为错误。系统再把这个过程结论与本笔赢 / 亏结果组合，自动生成四象限，不需要你重复手动选择象限。</P>
+
+              <SubTitle>系统自动归纳：结构 × 结果四象限</SubTitle>
+              <P>"结构 × 结果"仍是平仓评价的核心结论，但它现在由三阶段决策质量自动推导：<strong>结构轴 = 入场、持仓、离场合并后的过程质量（与盈亏无关）</strong>，<strong>结果轴 = 这单赢 / 亏</strong>。一句话锚点：<strong>好结果不等于好过程，坏结果不等于坏过程</strong>。</P>
               <div className="overflow-x-auto">
                 <table className="w-full text-[11px] my-3 border border-border rounded overflow-hidden">
                   <thead className="bg-muted/50">
@@ -898,7 +918,10 @@ export default function GuidePage() {
               <RedHighlight>
                 命中<strong>"错误过程的好结果"</strong>时，评价弹窗会给出强警示。这是系统唯一要对你"喊"的一格：盈利会强化你刚刚犯的错，下次仓位更大、错得更狠。
               </RedHighlight>
-              <P className="mt-2">如果结果是保本或未入场，不强行归入四象限；如果是赢或亏，就先选一格——按 UI 里"选择本笔归类"那 2×2 的可点格子，系统会自动只让你选与本笔结果一致的两格（赢的一行 / 亏的一行）。</P>
+              <P className="mt-2">如果结果是保本，不强行归入四象限；如果是赢或亏，完成三栏后系统立即显示对应象限。未入场记录不要求填写这三栏，也不会制造一个虚假的过程归类。</P>
+              <Highlight>
+                历史记录仍然兼容：旧评价只有一个总决策质量时，系统会把该值作为入场、持仓、离场三栏的回填依据；打开、编辑和导出旧战役时不会出现三栏空白。以后重新保存，会按三栏结构持续记录。
+              </Highlight>
 
               <SubTitle>路径 · 滚仓 vs 镜像止盈 + 交易主动权</SubTitle>
               <P>归类之后追问一句：<strong>这一笔最终走的是哪条路径</strong>，以及<strong>你在这条路径里有多大主动权</strong>。它只记录这单实际的路径，不评对错。</P>
@@ -1098,7 +1121,7 @@ export default function GuidePage() {
               <Highlight>
                 统计口径只看<strong>主力单</strong>（非对冲、非"太难"）——对冲单字段路径完全不同，混进来会让答案分布失真。
               </Highlight>
-              <P>汇总当前覆盖 <strong>17 个开仓字段</strong>（心态自评、市场结构、入场阶段、edge 源头、机会成本、便宜机会、盈亏比目标、止损质量、预测胜率、最大亏损、情绪标签、认知偏差、这笔为什么会对、亏完最可能原因、提前止损信号、反对者陈述、Stop Doing 临时一条）和 <strong>15 个平仓字段</strong>（结构归类、纠结度、证伪触发状态、小机会拖累、主石头标签 + 情绪七问的 7 个文字题 + 反 / 止 / 结构三个事实题）。新增字段只需要往字段 spec 里加一行就会自动出现。</P>
+              <P>汇总由字段 spec 自动覆盖完整的开仓快照与平仓评价，不再依赖容易过时的固定题目数量。平仓侧会把<strong>决策质量 · 入场 / 持仓 / 离场</strong>作为三个独立字段统计，同时保留事实核验、证伪触发、过程体检、路径与情绪题；历史记录只有单一决策质量时会自动回填三栏。以后新增题目，只需加入字段 spec 就会进入汇总。</P>
               <SubTitle>提交永不丢：本机镜像兜底</SubTitle>
               <P>
                 平仓评价提交后，<strong>一定会成功落库、并立即出现在「汇总」里</strong>，不存在"提交了却看不到"的情况。即使远程数据库还没建某些扩展列（你没跑最新迁移），提交也<strong>不会整笔失败</strong>——基础字段照常写远程，缺列的字段写入<strong>本机镜像</strong>，汇总同样读得到。所以右上角若提示"其中 N 项暂未同步到远程库（缺列）"，那不是报错：你填的内容已经在本机、汇总看得见，只是这几项还没同步到云端。
@@ -1275,8 +1298,8 @@ export default function GuidePage() {
                 打开一次战役，上方是贯穿整段的 K 线回放，下方是 <strong>Legs 列表</strong>。两者共用同一条时间轴，对照着看就能还原整条战役的进出场节奏：
               </P>
               <ul className="list-disc pl-6 text-[14px] text-foreground/90 space-y-1">
-                <li><strong>Legs 列表每条腿都标明开仓/平仓时间、开仓价/平仓价、仓位与状态</strong>；还没平仓的腿，平仓时间与平仓价显示「—」。每条腿还单独列出<strong>该腿期间挂的反向对冲空单</strong>（委托价 / 委托时间 / 取消时间）。</li>
-                <li><strong>K 线默认按三段式窗口自适应</strong>：首次打开时，战役内容占中间 1/3，开始前与结束后各显示一段同等长度的行情。底层同时预载战役左右各 25 倍的行情，完整可浏览范围为 51 倍；盘面顶部的小型倍率按钮可一键切换 2、3、5、11、21、31、41、51 倍，所有倍率都围绕战役持仓段居中，2 倍时左右各保留半段上下文。历史战役同样适用。</li>
+                <li><strong>Legs 列表每条腿都标明开仓/平仓时间、开仓价/平仓价、仓位与状态</strong>；还没平仓的腿，平仓时间与平仓价显示「—」。「委托」列按真实业务归属呈现：所有委托都以主力仓位为目标；对冲触发后的反向委托放在对应的对冲 leg；镜像止盈行则显示止盈挂单时间与触发时间，避免把主力委托误记到镜像腿。</li>
+                <li><strong>K 线默认按三段式窗口自适应</strong>：首次打开时，战役内容占中间 1/3，开始前与结束后各显示一段同等长度的行情。底层同时预载战役左右各 25 倍的行情，完整可浏览范围为 51 倍；盘面顶部的小型倍率按钮可一键切换 1.1、2、3、5、11、21、31、41、51 倍，所有倍率都围绕战役持仓段居中，2 倍时左右各保留半段上下文。历史战役同样适用。</li>
                 <li>内容区间会囊括 Legs、委托空单和当前反事实分支的最早 / 最晚事件，保证所有开平仓与挂单信息都落在默认可视范围内。</li>
                 <li>时间轴上用<strong>彩色竖线</strong>标注每条腿的开单 / 平单时刻——颜色区分方向、线型区分动作（见下表）。</li>
                 <li>主力开始只做一个简洁标记与较醒目的竖线，不额外绘制主力水平线；即使战役跨度很长，这条开始线也会保留。</li>
@@ -1308,9 +1331,20 @@ export default function GuidePage() {
               <ul className="list-disc pl-6 text-[14px] text-foreground/90 space-y-1">
                 <li>点击 Legs 列表右上角的 <strong>PNG</strong>，会把<strong>战役原数据、盈亏概览、当前 K 线周期、已经拖动 / 缩放好的 K 线视图，以及完整 Legs 列表</strong>导出到同一张高清图片。周期会以「1分钟线」「5分钟线」「15分钟线」或「1小时线」写入图片。</li>
                 <li>图片中的<strong>盈亏概览</strong>与详情页共用同一份指标清单；以后详情页新增盈亏指标时，导出图会自动同步收录，并随指标数量自动增加高度。</li>
-                <li>Legs 导出不受页面滚动区域限制；未滚动出来的腿、时间、价格、仓位、状态与反向挂单也会完整展开。图片高度随内容自动增长。</li>
+                <li>Legs 导出不受页面滚动区域限制；未滚动出来的腿、时间、价格、仓位、状态与委托信息也会完整展开。图片高度随内容自动增长。</li>
                 <li>文件名采用「标的 + 战役日期 + profit / loss + 战役编号」，例如 <strong>BTCDOMUSDT 2025-07-24 loss 编号 C-…</strong>，便于批量交给 AI 分析时保持唯一对应。</li>
               </ul>
+
+              <SubTitle>战役详情页：快照、评价与情绪 TXT</SubTitle>
+              <P>战役详情页会按实际数据决定是否显示三个低对比度导出按钮；按钮不要求每条 leg 都有记录，只要本战役至少一条符合条件就会出现：</P>
+              <ul className="list-disc pl-6 text-[14px] text-foreground/90 space-y-1">
+                <li><strong>快照 TXT：</strong>只要任一 leg 有开仓快照，就导出该战役全部已记录的开仓问题与答案；一题一答，不因页面折叠或字段较多而截断。</li>
+                <li><strong>评价 TXT：</strong>只要任一 leg 已完成平仓评价，就导出该战役所有已评价 leg 的完整题目与答案，包括决策质量的入场 / 持仓 / 离场三栏；每组题目与答案之间空一行，便于直接交给 AI 批量分析。</li>
+                <li><strong>情绪 TXT：</strong>战役操作日存在情绪日记时，导出当天事件记录及量表结果；量表保留总分与所在区间，和客观操作日期绑定。</li>
+              </ul>
+              <Highlight>
+                TXT 导出读取的是保存后的完整评价数据，而不是屏幕当前展开的几项。历史评价只有单一决策质量时，会按兼容规则回填三阶段后再导出，因此旧战役也不会漏掉决策质量答案。
+              </Highlight>
 
               <SubTitle>战役详情页：盘面叠加层（可显示/隐藏）</SubTitle>
               <P>盘面下方有几个<strong>很隐形的小图标</strong>，用来按需开关叠加层，默认显示、可一键隐藏，避免信息互相打架：</P>
@@ -1332,7 +1366,7 @@ export default function GuidePage() {
               </P>
               <ul className="list-disc pl-6 text-[14px] text-foreground/90 space-y-1">
                 <li>反事实的主力锚点<strong>以你的真实成交价 / 成交时间为准</strong>，紫色轨迹会精确贴合你实际开仓那根 K 线，对冲 / 止盈再从真实成交价按 SOP 偏移推算。</li>
-                <li>反事实盘面以原始战役的 K 线、真实事件标记、竖线、区间线和委托空单为只读背景，再叠加紫色虚拟轨迹；不会为了显示反事实而丢掉原始盘面信息。它与原始盘面共用完整的 51 倍数据范围和快捷档位，但默认从 <strong>1 倍</strong>开始，只铺满战役内容本身。</li>
+                <li>反事实盘面以原始战役的 K 线、真实事件标记、竖线、区间线和委托空单为只读背景，再叠加紫色虚拟轨迹；不会为了显示反事实而丢掉原始盘面信息。它与原始盘面共用完整的 51 倍数据范围和快捷档位，但默认从 <strong>1.1 倍</strong>开始，在完整战役内容外保留少量上下文。</li>
                 <li>下方「Legs 副本 · 手动反事实」保留可视化编辑（盘面竖线 + 可编辑表格），用于查看与对照。</li>
               </ul>
               <P><strong>SOP 偏离代价明细</strong>把「标准 SOP 要求、但你这场缺的每条建仓腿」逐条折算成钱：</P>
@@ -1440,7 +1474,7 @@ export default function GuidePage() {
               <P><strong>主力单与对冲单必须分开理解。</strong> 主力单评估方向与机会质量；对冲单评估风险管理。把两者混在一起，会污染 R 倍数、胜率和错误类型统计。</P>
               <P><strong>最大亏损是 R 倍数的分母。</strong> 它表达的是本次愿意承受的最大错误成本，不应被事后修改成更好看的数字。</P>
               <P><strong>全仓是硬阻断。</strong> 系统训练阶段只允许逐仓。全仓会把单笔错误扩散到账户整体，违背“损失有界”的底层原则。</P>
-              <P><strong>平仓评价是硬阻断。</strong> 已平仓交易未完成结构 × 结果、证伪核对与必要叙事前，不能开下一笔新仓。</P>
+              <P><strong>平仓评价是硬阻断。</strong> 已平仓交易未完成入场 / 持仓 / 离场三阶段决策质量、证伪核对与必要叙事前，不能开下一笔新仓；结构 × 结果四象限由三阶段结论与最终结果自动归纳。</P>
               <P><strong>低心态是硬阻断。</strong> 心态 ≤2 分时不能开仓，不提供“我知道但继续”的后门。</P>
               <P><strong>后见偏差必须隔离。</strong> 复现页在归因完成前隐藏后续走势，归因完成后才揭示行情路径。</P>
               <P><strong>历史回填不等于真实快照。</strong> 回填可以恢复交易结构，但无法恢复当时的理由、心态和风险认识。系统不会假装知道这些缺失信息。</P>
