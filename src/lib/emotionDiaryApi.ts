@@ -61,21 +61,27 @@ function isMissingTableError(error: { code?: string; message?: string } | null):
 }
 
 function toDiary(row: EmotionDiaryRow): DecisionEmotionDiary {
+  const pomsItemScores = Array.isArray(row.poms_item_scores)
+    ? row.poms_item_scores as PomsItemScore[]
+    : [];
+  const canonicalPoms = isCompletePomsScores(pomsItemScores)
+    ? scorePomsSubscales(pomsItemScores)
+    : null;
   return {
     ...row,
     sam_valence: row.sam_valence ?? null,
     sam_arousal: row.sam_arousal ?? null,
-    poms_item_scores: Array.isArray(row.poms_item_scores)
-      ? row.poms_item_scores as PomsItemScore[]
-      : [],
-    poms_tension_score: row.poms_tension_score ?? null,
-    poms_anger_score: row.poms_anger_score ?? null,
-    poms_fatigue_score: row.poms_fatigue_score ?? null,
-    poms_depression_score: row.poms_depression_score ?? null,
-    poms_vigor_score: row.poms_vigor_score ?? null,
-    poms_confusion_score: row.poms_confusion_score ?? null,
-    poms_esteem_score: row.poms_esteem_score ?? null,
-    poms_total_mood_disturbance: row.poms_total_mood_disturbance ?? null,
+    poms_item_scores: pomsItemScores,
+    poms_tension_score: canonicalPoms?.tension ?? row.poms_tension_score ?? null,
+    poms_anger_score: canonicalPoms?.anger ?? row.poms_anger_score ?? null,
+    poms_fatigue_score: canonicalPoms?.fatigue ?? row.poms_fatigue_score ?? null,
+    poms_depression_score: canonicalPoms?.depression ?? row.poms_depression_score ?? null,
+    poms_vigor_score: canonicalPoms?.vigor ?? row.poms_vigor_score ?? null,
+    poms_confusion_score: canonicalPoms?.confusion ?? row.poms_confusion_score ?? null,
+    poms_esteem_score: canonicalPoms?.esteem ?? row.poms_esteem_score ?? null,
+    poms_total_mood_disturbance: canonicalPoms
+      ? scorePomsTotalMoodDisturbance(canonicalPoms)
+      : row.poms_total_mood_disturbance ?? null,
     panas_item_scores: Array.isArray(row.panas_item_scores)
       ? row.panas_item_scores as PanasItemScore[]
       : [],

@@ -47,7 +47,7 @@ describe('campaign emotion diary TXT export', () => {
     const output = buildCampaignEmotionDiaryTxt(campaign, diary, '主账户');
 
     expect(output).toContain('最近让内心起波澜的事情\n事件第一行。\n事件第二行仍须完整保留。');
-    expect(output).toContain('心境状态量表（POMS）总心境扰乱\n126（TMD）');
+    expect(output).toContain('心境状态量表（POMS）总心境扰乱\n136（TMD）');
     expect(output).toContain('心境状态量表（POMS）七个分量表\n紧张 12');
     expect(output).toContain('正性情感（PANAS-PA）\n30/50');
     expect(output).toContain('负性情感（PANAS-NA）\n30/50');

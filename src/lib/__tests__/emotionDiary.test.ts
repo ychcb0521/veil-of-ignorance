@@ -10,6 +10,7 @@ import {
   PANAS_QUESTIONS,
   PANAS_RESPONSE_OPTIONS,
   POMS_QUESTIONS,
+  POMS_REVERSE_SCORED_ITEM_NUMBERS,
   POMS_RESPONSE_OPTIONS,
   scoreHadsSubscale,
   scorePanas,
@@ -55,9 +56,20 @@ describe('decision emotion diary scoring', () => {
     expect(new Set(POMS_QUESTIONS.map(question => question.code)).size).toBe(40);
     expect(POMS_RESPONSE_OPTIONS.map(option => option.score)).toEqual([0, 1, 2, 3, 4]);
     expect(POMS_QUESTIONS.every(question => question.term.length > 0 && question.subscale)).toBe(true);
+    expect(POMS_QUESTIONS.map(question => question.subscale)).toEqual([
+      'tension', 'anger', 'fatigue', 'depression', 'vigor', 'confusion', 'esteem',
+      'tension', 'anger', 'fatigue', 'depression', 'vigor', 'confusion', 'esteem',
+      'tension', 'anger', 'fatigue', 'depression', 'vigor', 'confusion', 'tension',
+      'anger', 'fatigue', 'depression', 'vigor', 'confusion', 'esteem', 'tension',
+      'anger', 'fatigue', 'depression', 'vigor', 'confusion', 'esteem', 'tension',
+      'anger', 'anger', 'depression', 'vigor', 'esteem',
+    ]);
+    expect(POMS_REVERSE_SCORED_ITEM_NUMBERS).toEqual([7]);
+    expect(POMS_QUESTIONS.filter(question => question.reverseScored).map(question => question.code))
+      .toEqual(['P7']);
   });
 
-  it('按中国简式 POMS-40 的七个分量表映射计分并计算 TMD', () => {
+  it('按中国简式 POMS-40 的七个分量表映射、反向题与 TMD 公式计分', () => {
     const allZero = Array.from({ length: 40 }, () => 0 as PomsItemScore);
     const zeroScores = scorePomsSubscales(allZero);
     expect(zeroScores).toEqual({
@@ -67,9 +79,9 @@ describe('decision emotion diary scoring', () => {
       depression: 0,
       vigor: 0,
       confusion: 0,
-      esteem: 0,
+      esteem: 4,
     });
-    expect(scorePomsTotalMoodDisturbance(zeroScores)).toBe(100);
+    expect(scorePomsTotalMoodDisturbance(zeroScores)).toBe(96);
 
     const allFour = Array.from({ length: 40 }, () => 4 as PomsItemScore);
     const maxItemScores = scorePomsSubscales(allFour);
@@ -80,9 +92,38 @@ describe('decision emotion diary scoring', () => {
       depression: 24,
       vigor: 24,
       confusion: 20,
-      esteem: 20,
+      esteem: 16,
     });
-    expect(scorePomsTotalMoodDisturbance(maxItemScores)).toBe(172);
+    expect(scorePomsTotalMoodDisturbance(maxItemScores)).toBe(176);
+  });
+
+  it('仅将 P7“为难的”反向计分，其他自尊题保持正向', () => {
+    const baseline = Array.from({ length: 40 }, () => 0 as PomsItemScore);
+    expect(scorePomsSubscales(baseline).esteem).toBe(4);
+
+    const embarrassed = [...baseline];
+    embarrassed[6] = 4;
+    expect(scorePomsSubscales(embarrassed).esteem).toBe(0);
+
+    const confident = [...baseline];
+    confident[13] = 4;
+    expect(scorePomsSubscales(confident).esteem).toBe(8);
+  });
+
+  it('POMS TMD 的理论边界为 56–216', () => {
+    const bestMood = Array.from({ length: 40 }, (_, index) => (
+      [4, 11, 18, 24, 31, 38].includes(index) || [13, 26, 33, 39].includes(index)
+        ? 4
+        : 0
+    )) as PomsItemScore[];
+    const worstMood = Array.from({ length: 40 }, (_, index) => (
+      [0, 1, 2, 3, 5, 6, 7, 8, 9, 10, 12, 14, 15, 16, 17, 19, 20, 21, 22, 23, 25, 27, 28, 29, 30, 32, 34, 35, 36, 37].includes(index)
+        ? 4
+        : 0
+    )) as PomsItemScore[];
+
+    expect(scorePomsTotalMoodDisturbance(scorePomsSubscales(bestMood))).toBe(56);
+    expect(scorePomsTotalMoodDisturbance(scorePomsSubscales(worstMood))).toBe(216);
   });
 
   it('完整提供 PANAS 20 项，并分别计算 10 项正性与 10 项负性情感', () => {
@@ -151,13 +192,26 @@ describe('decision emotion diary scoring', () => {
   it('导出呈现 POMS、PANAS、HADS 的研究计分结果', () => {
     const summary = buildEmotionDiaryExportSummary(diary);
     expect(summary.eventText).toBe(diary.event_text);
-    expect(summary.pomsTotal).toBe('126（TMD）');
+    expect(summary.pomsTotal).toBe('136（TMD）');
     expect(summary.pomsDimensions).toContain('紧张 12');
     expect(summary.pomsDimensions).toContain('自尊 10');
     expect(summary.panasPositive).toBe('30/50');
     expect(summary.panasNegative).toBe('30/50');
     expect(summary.anxiety).toBe('8/21（临界范围，8–10）');
     expect(summary.depression).toBe('4/21（正常范围，0–7）');
+  });
+
+  it('导出时依据逐题答案重算 POMS，避免沿用历史错误汇总分', () => {
+    const staleDiary = {
+      ...diary,
+      poms_item_scores: Array.from({ length: 40 }, () => 0 as PomsItemScore),
+      poms_esteem_score: 0,
+      poms_total_mood_disturbance: 100,
+    };
+    const summary = buildEmotionDiaryExportSummary(staleDiary);
+
+    expect(summary.pomsTotal).toBe('96（TMD）');
+    expect(summary.pomsDimensions).toContain('自尊 4');
   });
 
   it('旧 SAM 日记仍可读取并明确标为历史量表', () => {

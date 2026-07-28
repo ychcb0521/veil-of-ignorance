@@ -132,6 +132,7 @@ function PomsScale({
                 <span className="text-[11px] text-foreground">{question.term}</span>
                 <span className="ml-auto hidden text-[9px] text-muted-foreground lg:inline">
                   {POMS_SUBSCALE_LABELS[question.subscale]}
+                  {question.reverseScored ? ' · 反向计分' : ''}
                 </span>
               </div>
               <div
@@ -556,6 +557,7 @@ export default function JournalEmotionDiaryPage() {
                     <p className="mt-0.5 max-w-[900px] text-[10px] leading-5 text-muted-foreground">
                       按原题序记录今天截至填写此刻的主观感受。七个分量表分别求和；
                       总心境扰乱 TMD = 紧张 + 愤怒 + 疲劳 + 抑郁 + 慌乱 − 精力 − 自尊 + 100。
+                      自尊维度的 P7“为难的”按 4 − 原分反向计分。
                     </p>
                   </div>
                   <div className="rounded border border-border bg-background px-2.5 py-1.5 text-[10px] text-muted-foreground">

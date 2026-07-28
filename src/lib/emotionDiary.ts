@@ -8,7 +8,7 @@ import type {
   SamDimension,
 } from '@/types/emotionDiary';
 
-export const EMOTION_DIARY_MEASUREMENT_VERSION = 'POMS-CN-40+PANAS-20+HADS-14-research-v1';
+export const EMOTION_DIARY_MEASUREMENT_VERSION = 'POMS-CN-40+PANAS-20+HADS-14-research-v2';
 export const HADS_ITEM_COUNT = 7;
 export const POMS_ITEM_COUNT = 40;
 export const PANAS_ITEM_COUNT = 20;
@@ -28,6 +28,7 @@ export type PomsQuestion = {
   code: string;
   term: string;
   subscale: PomsSubscaleKey;
+  reverseScored: boolean;
 };
 
 export type PanasDimension = 'positive' | 'negative';
@@ -102,6 +103,9 @@ const POMS_SUBSCALE_ITEM_NUMBERS: Record<PomsSubscaleKey, ReadonlyArray<number>>
   esteem: [7, 14, 27, 34, 40],
 };
 
+export const POMS_REVERSE_SCORED_ITEM_NUMBERS: ReadonlyArray<number> = [7];
+const POMS_REVERSE_SCORED_ITEMS = new Set(POMS_REVERSE_SCORED_ITEM_NUMBERS);
+
 const POMS_SUBSCALE_BY_ITEM = Object.fromEntries(
   Object.entries(POMS_SUBSCALE_ITEM_NUMBERS).flatMap(([subscale, itemNumbers]) => (
     itemNumbers.map(itemNumber => [itemNumber, subscale])
@@ -112,6 +116,7 @@ export const POMS_QUESTIONS: ReadonlyArray<PomsQuestion> = POMS_TERMS.map((term,
   code: `P${index + 1}`,
   term,
   subscale: POMS_SUBSCALE_BY_ITEM[index + 1],
+  reverseScored: POMS_REVERSE_SCORED_ITEMS.has(index + 1),
 }));
 
 export const PANAS_RESPONSE_OPTIONS: ReadonlyArray<{
@@ -425,7 +430,10 @@ export function scorePomsSubscales(values: PomsItemScore[]): PomsSubscaleScores 
   return Object.fromEntries(
     Object.entries(POMS_SUBSCALE_ITEM_NUMBERS).map(([key, itemNumbers]) => [
       key,
-      itemNumbers.reduce((sum, itemNumber) => sum + values[itemNumber - 1], 0),
+      itemNumbers.reduce((sum, itemNumber) => {
+        const rawScore = values[itemNumber - 1];
+        return sum + (POMS_REVERSE_SCORED_ITEMS.has(itemNumber) ? 4 - rawScore : rawScore);
+      }, 0),
     ]),
   ) as PomsSubscaleScores;
 }
@@ -525,7 +533,7 @@ export function buildEmotionDiaryExportSummary(
 ): EmotionDiaryExportSummary {
   const anxietyBand = hadsBand(diary.hads_anxiety_score);
   const depressionBand = hadsBand(diary.hads_depression_score);
-  const hasPoms = diary.poms_total_mood_disturbance != null
+  const persistedPomsComplete = diary.poms_total_mood_disturbance != null
     && diary.poms_tension_score != null
     && diary.poms_anger_score != null
     && diary.poms_fatigue_score != null
@@ -533,20 +541,37 @@ export function buildEmotionDiaryExportSummary(
     && diary.poms_vigor_score != null
     && diary.poms_confusion_score != null
     && diary.poms_esteem_score != null;
+  const canonicalPoms = isCompletePomsScores(diary.poms_item_scores)
+    ? scorePomsSubscales(diary.poms_item_scores)
+    : null;
+  const pomsScores = canonicalPoms ?? (persistedPomsComplete
+    ? {
+      tension: diary.poms_tension_score!,
+      anger: diary.poms_anger_score!,
+      fatigue: diary.poms_fatigue_score!,
+      depression: diary.poms_depression_score!,
+      vigor: diary.poms_vigor_score!,
+      confusion: diary.poms_confusion_score!,
+      esteem: diary.poms_esteem_score!,
+    }
+    : null);
+  const pomsTotal = canonicalPoms
+    ? scorePomsTotalMoodDisturbance(canonicalPoms)
+    : diary.poms_total_mood_disturbance;
   const hasPanas = diary.panas_positive_score != null && diary.panas_negative_score != null;
   return {
     date: diary.diary_date,
     eventText: diary.event_text.trim(),
-    pomsTotal: hasPoms ? `${diary.poms_total_mood_disturbance}（TMD）` : null,
-    pomsDimensions: hasPoms
+    pomsTotal: pomsScores && pomsTotal != null ? `${pomsTotal}（TMD）` : null,
+    pomsDimensions: pomsScores
       ? [
-        `紧张 ${diary.poms_tension_score}`,
-        `愤怒 ${diary.poms_anger_score}`,
-        `疲劳 ${diary.poms_fatigue_score}`,
-        `抑郁 ${diary.poms_depression_score}`,
-        `精力 ${diary.poms_vigor_score}`,
-        `慌乱 ${diary.poms_confusion_score}`,
-        `自尊 ${diary.poms_esteem_score}`,
+        `紧张 ${pomsScores.tension}`,
+        `愤怒 ${pomsScores.anger}`,
+        `疲劳 ${pomsScores.fatigue}`,
+        `抑郁 ${pomsScores.depression}`,
+        `精力 ${pomsScores.vigor}`,
+        `慌乱 ${pomsScores.confusion}`,
+        `自尊 ${pomsScores.esteem}`,
       ].join(' · ')
       : null,
     panasPositive: hasPanas ? `${diary.panas_positive_score}/50` : null,
