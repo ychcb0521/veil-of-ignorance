@@ -236,6 +236,57 @@ export function computeInitialMainExposureNotional(
 }
 
 /**
+ * Percentage of the full initial main-side exposure closed by one mirror TP.
+ *
+ * The denominator follows the campaign overview's full-exposure definition:
+ * initial M + the initial mirror position(s), before any mirror TP is taken.
+ * This keeps historical 50/50 splits at 50% and newer 40/60 splits at 60%.
+ */
+export function computeMirrorTpReductionPct(
+  campaign: TradeCampaign,
+  mirrorLeg: TradeJournal,
+  legs: TradeJournal[],
+  tradeRecords: TradeRecord[],
+): number | null {
+  if (mirrorLeg.leg_role !== 'mirror_tp') return null;
+
+  const fullInitialExposure = computeInitialMainExposureNotional(campaign, legs, tradeRecords);
+  if (fullInitialExposure <= EPSILON) return null;
+
+  const mirrorRecord = findTradeRecord(mirrorLeg, tradeRecords);
+  const mirrorEvents = (campaign.actual_evolution ?? [])
+    .filter(event =>
+      event.leg_role === 'mirror_tp'
+      && (
+        event.journal_id === mirrorLeg.id
+        || Boolean(mirrorLeg.trade_record_id && event.trade_record_id === mirrorLeg.trade_record_id)
+      ),
+    )
+    .sort((a, b) => {
+      const priority = (event: CampaignEvent) => {
+        if (event.event_type === 'mirror_tp_placed') return 0;
+        if (event.event_type === 'historical_leg_attached') return 1;
+        if (event.event_type === 'mirror_tp_triggered') return 2;
+        return 3;
+      };
+      return priority(a) - priority(b) || toMs(a.timestamp) - toMs(b.timestamp);
+    });
+  const roleFallbackEvent = (campaign.actual_evolution ?? [])
+    .filter(event => event.leg_role === 'mirror_tp' && firstPositiveNumber(event.size_usdt) != null)
+    .sort((a, b) => toMs(a.timestamp) - toMs(b.timestamp))[0] ?? null;
+  const mirrorNotional = firstPositiveNumber(
+    mirrorRecord ? tradeRecordNotionalUsd(mirrorRecord, mirrorRecord.entryPrice) : null,
+    mirrorLeg.pre_position_size,
+    mirrorEvents[0]?.size_usdt,
+    roleFallbackEvent?.size_usdt,
+  );
+  if (mirrorNotional == null) return null;
+
+  const percentage = mirrorNotional / fullInitialExposure * 100;
+  return Number.isFinite(percentage) && percentage > EPSILON ? percentage : null;
+}
+
+/**
  * Resolve the shared initial risk anchor used by maximum drawdown percentage
  * and maximum expected loss. Historical role legs are reconstructed from
  * fills, so preserved order snapshots take precedence; actual fill prices are

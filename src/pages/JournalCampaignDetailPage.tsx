@@ -33,6 +33,7 @@ import {
   computeDecisionAccuracy,
   computeInitialExpectedMaxDrawdownPct,
   computeInitialExpectedMaxLoss,
+  computeMirrorTpReductionPct,
   computeProfitCaptureRatio,
   formatCampaignPayoffRatio,
   resolveCampaignInitialRiskFraction,
@@ -80,7 +81,7 @@ import {
 } from '@/lib/journalApi';
 import { summarizeCampaignPerformance, type CampaignPerformanceSummary } from '@/lib/kellySizing';
 import { formatOpportunityQuality } from '@/lib/opportunityQuality';
-import { MIRROR_TP_REDUCTION_PCT, STRATEGY_TEMPLATES } from '@/lib/strategyTemplates';
+import { STRATEGY_TEMPLATES } from '@/lib/strategyTemplates';
 import {
   buildActualSimulationParams,
   buildManualLegs,
@@ -262,6 +263,13 @@ function buildChartArtifacts(
   const markers: ChartMarker[] = [];
   const timeBoundPriceLines: TimeBoundPriceLine[] = [];
   const verticalLines: VerticalLine[] = [];
+  const formatReductionPct = (value: number | null) => {
+    if (value == null) return null;
+    const roundedInteger = Math.round(value);
+    return Math.abs(value - roundedInteger) < 0.05
+      ? String(roundedInteger)
+      : value.toFixed(1).replace(/\.0$/, '');
+  };
 
   verticalLines.push({
     time: new Date(campaign.opened_at).getTime(),
@@ -358,12 +366,15 @@ function buildChartArtifacts(
 
     if (closeTime != null) {
       if (leg.leg_role === 'mirror_tp') {
+        const reductionPct = formatReductionPct(
+          computeMirrorTpReductionPct(campaign, leg, legs, tradeRecords),
+        );
         markers.push({
           time: closeTime,
           price: exitPrice,
           shape: 'circle',
           color: '#0ECB81',
-          label: `M 减仓 ${MIRROR_TP_REDUCTION_PCT}%`,
+          label: reductionPct == null ? 'M 减仓' : `M 减仓 ${reductionPct}%`,
         });
       }
       if (leg.leg_role === 'main_open' || leg.leg_role === 'reentry_main' || leg.leg_role?.startsWith('main_add_')) {
