@@ -4,14 +4,16 @@ import type {
   EmotionDiaryExportSummary,
   HadsItemScore,
   PanasItemScore,
+  PiItemScore,
   PomsItemScore,
   SamDimension,
 } from '@/types/emotionDiary';
 
-export const EMOTION_DIARY_MEASUREMENT_VERSION = 'POMS-CN-40+PANAS-20+HADS-14-research-v2';
+export const EMOTION_DIARY_MEASUREMENT_VERSION = 'POMS-CN-40+PANAS-20+PI-7+HADS-14-research-v3';
 export const HADS_ITEM_COUNT = 7;
 export const POMS_ITEM_COUNT = 40;
 export const PANAS_ITEM_COUNT = 20;
+export const PI_ITEM_COUNT = 7;
 
 export type PomsSubscaleKey =
   | 'tension'
@@ -37,6 +39,11 @@ export type PanasQuestion = {
   code: string;
   term: string;
   dimension: PanasDimension;
+};
+
+export type PiQuestion = {
+  code: string;
+  prompt: string;
 };
 
 export const POMS_RESPONSE_OPTIONS: ReadonlyArray<{
@@ -160,6 +167,29 @@ export const PANAS_QUESTIONS: ReadonlyArray<PanasQuestion> = PANAS_ITEMS.map((it
   code: `N${index + 1}`,
   ...item,
 }));
+
+export const PI_RESPONSE_OPTIONS: ReadonlyArray<{
+  score: PiItemScore;
+  label: string;
+}> = [
+  { score: 1, label: '完全不同意' },
+  { score: 2, label: '不同意' },
+  { score: 3, label: '比较不同意' },
+  { score: 4, label: '不确定' },
+  { score: 5, label: '比较同意' },
+  { score: 6, label: '同意' },
+  { score: 7, label: '完全同意' },
+];
+
+export const PI_QUESTIONS: ReadonlyArray<PiQuestion> = [
+  { code: 'PI1', prompt: '我会主动着手处理问题。' },
+  { code: 'PI2', prompt: '每当事情出错时，我会立即寻找解决办法。' },
+  { code: 'PI3', prompt: '每当有机会主动参与时，我都会抓住它。' },
+  { code: 'PI4', prompt: '即使其他人没有行动，我也会立即采取主动。' },
+  { code: 'PI5', prompt: '我会迅速利用机会来实现自己的目标。' },
+  { code: 'PI6', prompt: '通常，我做的会超过别人对我的要求。' },
+  { code: 'PI7', prompt: '我尤其擅长把想法付诸实现。' },
+];
 
 export const POMS_SUBSCALE_LABELS: Record<PomsSubscaleKey, string> = {
   tension: '紧张',
@@ -379,6 +409,10 @@ export function emptyPanasScores(): Array<PanasItemScore | null> {
   return Array.from({ length: PANAS_ITEM_COUNT }, () => null);
 }
 
+export function emptyPiScores(): Array<PiItemScore | null> {
+  return Array.from({ length: PI_ITEM_COUNT }, () => null);
+}
+
 export function emptyHadsScores(): Array<HadsItemScore | null> {
   return Array.from({ length: HADS_ITEM_COUNT }, () => null);
 }
@@ -391,6 +425,7 @@ export function emptyEmotionDiaryDraft(diaryDate: string): DecisionEmotionDiaryD
     sam_arousal: null,
     poms_item_scores: emptyPomsScores(),
     panas_item_scores: emptyPanasScores(),
+    pi_item_scores: emptyPiScores(),
     hads_anxiety_scores: emptyHadsScores(),
     hads_depression_scores: emptyHadsScores(),
   };
@@ -408,6 +443,9 @@ export function diaryToDraft(diary: DecisionEmotionDiary): DecisionEmotionDiaryD
     panas_item_scores: diary.panas_item_scores.length === PANAS_ITEM_COUNT
       ? [...diary.panas_item_scores]
       : emptyPanasScores(),
+    pi_item_scores: diary.pi_item_scores.length === PI_ITEM_COUNT
+      ? [...diary.pi_item_scores]
+      : emptyPiScores(),
     hads_anxiety_scores: [...diary.hads_anxiety_scores],
     hads_depression_scores: [...diary.hads_depression_scores],
   };
@@ -474,6 +512,29 @@ export function scorePanas(
   );
 }
 
+export function isPiItemScore(value: unknown): value is PiItemScore {
+  return Number.isInteger(value) && Number(value) >= 1 && Number(value) <= 7;
+}
+
+export function isCompletePiScores(
+  values: Array<PiItemScore | null>,
+): values is PiItemScore[] {
+  return values.length === PI_ITEM_COUNT && values.every(isPiItemScore);
+}
+
+export function scorePersonalInitiative(
+  values: PiItemScore[],
+): { total: number; mean: number } {
+  if (!isCompletePiScores(values)) {
+    throw new Error('PI-7 必须包含 7 个 1–7 分项目');
+  }
+  const total = values.reduce<number>((sum, value) => sum + value, 0);
+  return {
+    total,
+    mean: Math.round((total / PI_ITEM_COUNT) * 100) / 100,
+  };
+}
+
 export function isHadsItemScore(value: unknown): value is HadsItemScore {
   return Number.isInteger(value) && Number(value) >= 0 && Number(value) <= 3;
 }
@@ -519,6 +580,7 @@ export function emotionDiaryCompletion(draft: DecisionEmotionDiaryDraft) {
     event: draft.event_text.trim().length > 0,
     poms: isCompletePomsScores(draft.poms_item_scores),
     panas: isCompletePanasScores(draft.panas_item_scores),
+    initiative: isCompletePiScores(draft.pi_item_scores),
     anxiety: isCompleteHadsScores(draft.hads_anxiety_scores),
     depression: isCompleteHadsScores(draft.hads_depression_scores),
   };
@@ -559,6 +621,17 @@ export function buildEmotionDiaryExportSummary(
     ? scorePomsTotalMoodDisturbance(canonicalPoms)
     : diary.poms_total_mood_disturbance;
   const hasPanas = diary.panas_positive_score != null && diary.panas_negative_score != null;
+  const canonicalPi = isCompletePiScores(diary.pi_item_scores)
+    ? scorePersonalInitiative(diary.pi_item_scores)
+    : null;
+  const persistedPiValid = diary.pi_total_score != null
+    && diary.pi_total_score >= 7
+    && diary.pi_total_score <= 49
+    && diary.pi_mean_score != null
+    && diary.pi_mean_score >= 1
+    && diary.pi_mean_score <= 7;
+  const piTotal = canonicalPi?.total ?? (persistedPiValid ? diary.pi_total_score : null);
+  const piMean = canonicalPi?.mean ?? (persistedPiValid ? diary.pi_mean_score : null);
   return {
     date: diary.diary_date,
     eventText: diary.event_text.trim(),
@@ -576,6 +649,8 @@ export function buildEmotionDiaryExportSummary(
       : null,
     panasPositive: hasPanas ? `${diary.panas_positive_score}/50` : null,
     panasNegative: hasPanas ? `${diary.panas_negative_score}/50` : null,
+    personalInitiativeTotal: piTotal == null ? null : `${piTotal}/49`,
+    personalInitiativeMean: piMean == null ? null : `${piMean.toFixed(2)}/7`,
     legacyValence: diary.sam_valence == null
       ? null
       : `${diary.sam_valence}/9（${samDescriptor('valence', diary.sam_valence)}）`,

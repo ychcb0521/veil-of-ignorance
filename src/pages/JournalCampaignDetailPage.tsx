@@ -1594,6 +1594,13 @@ export default function JournalCampaignDetailPage() {
                       ['POMS 总心境扰乱', campaignEmotionDiarySummary.pomsTotal],
                       ['PANAS 正性情感', campaignEmotionDiarySummary.panasPositive ?? '—'],
                       ['PANAS 负性情感', campaignEmotionDiarySummary.panasNegative ?? '—'],
+                      [
+                        '个人主动性 PI-7',
+                        campaignEmotionDiarySummary.personalInitiativeTotal
+                          && campaignEmotionDiarySummary.personalInitiativeMean
+                          ? `${campaignEmotionDiarySummary.personalInitiativeTotal} · 均分 ${campaignEmotionDiarySummary.personalInitiativeMean}`
+                          : '未填写',
+                      ],
                       ['焦虑 HADS-A', campaignEmotionDiarySummary.anxiety],
                       ['抑郁 HADS-D', campaignEmotionDiarySummary.depression],
                     ]

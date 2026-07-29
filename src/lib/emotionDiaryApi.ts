@@ -3,9 +3,11 @@ import {
   EMOTION_DIARY_MEASUREMENT_VERSION,
   isCompleteHadsScores,
   isCompletePanasScores,
+  isCompletePiScores,
   isCompletePomsScores,
   scoreHadsSubscale,
   scorePanas,
+  scorePersonalInitiative,
   scorePomsSubscales,
   scorePomsTotalMoodDisturbance,
 } from '@/lib/emotionDiary';
@@ -14,6 +16,7 @@ import type {
   DecisionEmotionDiaryDraft,
   HadsItemScore,
   PanasItemScore,
+  PiItemScore,
   PomsItemScore,
 } from '@/types/emotionDiary';
 
@@ -38,6 +41,9 @@ type EmotionDiaryRow = {
   panas_item_scores?: number[] | null;
   panas_positive_score?: number | null;
   panas_negative_score?: number | null;
+  pi_item_scores?: number[] | null;
+  pi_total_score?: number | null;
+  pi_mean_score?: number | null;
   hads_anxiety_scores: number[];
   hads_depression_scores: number[];
   hads_anxiety_score: number;
@@ -67,6 +73,12 @@ function toDiary(row: EmotionDiaryRow): DecisionEmotionDiary {
   const canonicalPoms = isCompletePomsScores(pomsItemScores)
     ? scorePomsSubscales(pomsItemScores)
     : null;
+  const piItemScores = Array.isArray(row.pi_item_scores)
+    ? row.pi_item_scores as PiItemScore[]
+    : [];
+  const canonicalPi = isCompletePiScores(piItemScores)
+    ? scorePersonalInitiative(piItemScores)
+    : null;
   return {
     ...row,
     sam_valence: row.sam_valence ?? null,
@@ -87,6 +99,9 @@ function toDiary(row: EmotionDiaryRow): DecisionEmotionDiary {
       : [],
     panas_positive_score: row.panas_positive_score ?? null,
     panas_negative_score: row.panas_negative_score ?? null,
+    pi_item_scores: piItemScores,
+    pi_total_score: canonicalPi?.total ?? row.pi_total_score ?? null,
+    pi_mean_score: canonicalPi?.mean ?? row.pi_mean_score ?? null,
     hads_anxiety_scores: row.hads_anxiety_scores as HadsItemScore[],
     hads_depression_scores: row.hads_depression_scores as HadsItemScore[],
   };
@@ -183,6 +198,9 @@ export async function saveDecisionEmotionDiary(
   if (!isCompletePanasScores(draft.panas_item_scores)) {
     throw new Error('请完成正负情感量表 PANAS 的全部 20 道题目');
   }
+  if (!isCompletePiScores(draft.pi_item_scores)) {
+    throw new Error('请完成个人主动性量表 PI-7 的全部 7 道题目');
+  }
   if (!isCompleteHadsScores(draft.hads_anxiety_scores)
     || !isCompleteHadsScores(draft.hads_depression_scores)) {
     throw new Error('请完成焦虑与抑郁自评的全部 14 道题目');
@@ -190,6 +208,7 @@ export async function saveDecisionEmotionDiary(
 
   const poms = scorePomsSubscales(draft.poms_item_scores);
   const panas = scorePanas(draft.panas_item_scores);
+  const initiative = scorePersonalInitiative(draft.pi_item_scores);
   const now = new Date().toISOString();
   const existing = readLocal(userId).find(item => item.diary_date === draft.diary_date);
   const row: EmotionDiaryRow = {
@@ -211,6 +230,9 @@ export async function saveDecisionEmotionDiary(
     panas_item_scores: [...draft.panas_item_scores],
     panas_positive_score: panas.positive,
     panas_negative_score: panas.negative,
+    pi_item_scores: [...draft.pi_item_scores],
+    pi_total_score: initiative.total,
+    pi_mean_score: initiative.mean,
     hads_anxiety_scores: [...draft.hads_anxiety_scores],
     hads_depression_scores: [...draft.hads_depression_scores],
     hads_anxiety_score: scoreHadsSubscale(draft.hads_anxiety_scores),

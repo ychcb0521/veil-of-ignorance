@@ -123,6 +123,9 @@ export type Database = {
           panas_item_scores: number[] | null
           panas_negative_score: number | null
           panas_positive_score: number | null
+          pi_item_scores: number[] | null
+          pi_mean_score: number | null
+          pi_total_score: number | null
           poms_anger_score: number | null
           poms_confusion_score: number | null
           poms_depression_score: number | null
@@ -150,6 +153,9 @@ export type Database = {
           panas_item_scores?: number[] | null
           panas_negative_score?: number | null
           panas_positive_score?: number | null
+          pi_item_scores?: number[] | null
+          pi_mean_score?: number | null
+          pi_total_score?: number | null
           poms_anger_score?: number | null
           poms_confusion_score?: number | null
           poms_depression_score?: number | null
@@ -177,6 +183,9 @@ export type Database = {
           panas_item_scores?: number[] | null
           panas_negative_score?: number | null
           panas_positive_score?: number | null
+          pi_item_scores?: number[] | null
+          pi_mean_score?: number | null
+          pi_total_score?: number | null
           poms_anger_score?: number | null
           poms_confusion_score?: number | null
           poms_depression_score?: number | null

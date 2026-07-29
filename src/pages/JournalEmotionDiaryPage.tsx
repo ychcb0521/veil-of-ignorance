@@ -15,15 +15,19 @@ import {
   hadsBand,
   isCompleteHadsScores,
   isCompletePanasScores,
+  isCompletePiScores,
   isCompletePomsScores,
   isEmotionDiaryDraftComplete,
   PANAS_QUESTIONS,
   PANAS_RESPONSE_OPTIONS,
+  PI_QUESTIONS,
+  PI_RESPONSE_OPTIONS,
   POMS_QUESTIONS,
   POMS_RESPONSE_OPTIONS,
   POMS_SUBSCALE_LABELS,
   scoreHadsSubscale,
   scorePanas,
+  scorePersonalInitiative,
   scorePomsSubscales,
   scorePomsTotalMoodDisturbance,
 } from '@/lib/emotionDiary';
@@ -38,6 +42,7 @@ import type {
   DecisionEmotionDiaryDraft,
   HadsItemScore,
   PanasItemScore,
+  PiItemScore,
   PomsItemScore,
 } from '@/types/emotionDiary';
 
@@ -263,6 +268,97 @@ function PanasScale({
   );
 }
 
+function PersonalInitiativeScale({
+  values,
+  onChange,
+}: {
+  values: Array<PiItemScore | null>;
+  onChange: (next: Array<PiItemScore | null>) => void;
+}) {
+  const complete = isCompletePiScores(values);
+  const score = complete ? scorePersonalInitiative(values) : null;
+
+  return (
+    <div className="rounded border border-border">
+      <div className="flex min-h-12 flex-wrap items-center justify-between gap-3 border-b border-border px-3 py-2">
+        <div>
+          <div className="text-[12px] font-medium">PI-7 逐题记录</div>
+          <div className="text-[10px] text-muted-foreground">
+            今天截至填写此刻 · 7 项 · 1–7 分
+          </div>
+        </div>
+        <div className="font-mono text-[10px] text-muted-foreground">
+          {score
+            ? `7/7 · 总分 ${score.total}/49 · 均分 ${score.mean.toFixed(2)}/7`
+            : `${values.filter(value => value != null).length}/7`}
+        </div>
+      </div>
+      {score && (
+        <div className="grid grid-cols-2 border-b border-border bg-muted/25">
+          <div className="border-r border-border/70 px-3 py-2">
+            <div className="text-[9px] text-muted-foreground">个人主动性总分</div>
+            <div className="mt-0.5 font-mono text-[12px] font-medium text-[#D89B00]">
+              {score.total}/49
+            </div>
+          </div>
+          <div className="px-3 py-2">
+            <div className="text-[9px] text-muted-foreground">题目均分</div>
+            <div className="mt-0.5 font-mono text-[12px] font-medium text-[#D89B00]">
+              {score.mean.toFixed(2)}/7
+            </div>
+          </div>
+        </div>
+      )}
+      <div className="divide-y divide-border/70">
+        {PI_QUESTIONS.map((question, index) => {
+          const value = values[index];
+          return (
+            <div
+              key={question.code}
+              className="grid gap-2 px-3 py-2.5 md:grid-cols-[minmax(250px,1fr)_minmax(560px,1.7fr)] md:items-center"
+            >
+              <div className="flex min-w-0 items-start gap-2">
+                <span className="mt-0.5 shrink-0 font-mono text-[10px] text-muted-foreground">
+                  {question.code}
+                </span>
+                <span className="text-[11px] leading-5 text-foreground">{question.prompt}</span>
+              </div>
+              <div
+                className="grid grid-cols-7 gap-1.5"
+                role="radiogroup"
+                aria-label={`PI-7 ${question.code}：${question.prompt}`}
+              >
+                {PI_RESPONSE_OPTIONS.map(option => (
+                  <button
+                    key={option.score}
+                    type="button"
+                    role="radio"
+                    aria-checked={value === option.score}
+                    title={`${option.score} · ${option.label}`}
+                    onClick={() => {
+                      const next = [...values];
+                      next[index] = option.score;
+                      onChange(next);
+                    }}
+                    className={`min-h-8 rounded border px-1 py-1 text-center transition-colors ${
+                      value === option.score
+                        ? 'border-[#F0B90B] bg-[#F0B90B]/12 text-foreground'
+                        : 'border-border bg-background text-muted-foreground hover:border-foreground/25 hover:text-foreground'
+                    }`}
+                  >
+                    <span className="block font-mono text-[10px]">{option.score}</span>
+                    <span className="hidden text-[8px] leading-3 xl:block">{option.label}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function HadsSubscale({
   label,
   questions,
@@ -379,6 +475,11 @@ function DiaryHistoryItem({
         {diary.event_text}
       </div>
       <div className="mt-2 flex gap-1.5 text-[9px] font-mono">
+        {diary.pi_total_score != null && diary.pi_mean_score != null && (
+          <span className="rounded border border-[#F0B90B]/25 bg-[#F0B90B]/8 px-1.5 py-0.5 text-[#D89B00]">
+            PI {diary.pi_total_score}/49 · {diary.pi_mean_score.toFixed(2)}/7
+          </span>
+        )}
         <span className={`rounded border px-1.5 py-0.5 ${bandClass(anxietyBand.key)}`}>
           焦虑 {diary.hads_anxiety_score}
         </span>
@@ -414,6 +515,9 @@ export default function JournalEmotionDiaryPage() {
   const pomsTmd = pomsScores ? scorePomsTotalMoodDisturbance(pomsScores) : null;
   const panasScores = isCompletePanasScores(draft.panas_item_scores)
     ? scorePanas(draft.panas_item_scores)
+    : null;
+  const initiativeScore = isCompletePiScores(draft.pi_item_scores)
+    ? scorePersonalInitiative(draft.pi_item_scores)
     : null;
 
   useEffect(() => {
@@ -460,6 +564,7 @@ export default function JournalEmotionDiaryPage() {
           `POMS TMD ${saved.poms_total_mood_disturbance}`,
           `PANAS PA ${saved.panas_positive_score}`,
           `NA ${saved.panas_negative_score}`,
+          `PI ${saved.pi_total_score}/49`,
           `HADS-A ${saved.hads_anxiety_score}`,
           `HADS-D ${saved.hads_depression_score}`,
         ].join(' · '),
@@ -482,7 +587,7 @@ export default function JournalEmotionDiaryPage() {
           </div>
           <div className="ml-auto hidden items-center gap-2 text-[10px] text-muted-foreground sm:flex">
             <Activity className="h-3.5 w-3.5" />
-            <span>POMS-40 · PANAS-20 · HADS-14</span>
+            <span>POMS-40 · PANAS-20 · PI-7 · HADS-14</span>
           </div>
         </div>
       </header>
@@ -606,6 +711,35 @@ export default function JournalEmotionDiaryPage() {
               <div className="border-b border-border px-4 py-3">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
+                    <h2 className="text-[13px] font-medium">
+                      个人主动性量表（Personal Initiative Scale，PI-7）
+                    </h2>
+                    <p className="mt-0.5 max-w-[900px] text-[10px] leading-5 text-muted-foreground">
+                      请根据今天截至填写此刻的真实表现，判断你对每项陈述的同意程度。
+                      七题均为正向计分，总分 7–49，题目均分 1.00–7.00；分数越高，表示自评的个人主动性越强。
+                    </p>
+                  </div>
+                  <div className="rounded border border-border bg-background px-2.5 py-1.5 text-[10px] text-muted-foreground">
+                    1 完全不同意 · 7 完全同意
+                  </div>
+                </div>
+              </div>
+              <div className="p-4">
+                <PersonalInitiativeScale
+                  values={draft.pi_item_scores}
+                  onChange={scores => setDraft(current => ({ ...current, pi_item_scores: scores }))}
+                />
+              </div>
+              <div className="border-t border-border px-4 py-2 text-[10px] leading-5 text-muted-foreground">
+                PI-7 原量表衡量一般性的个人主动性；这里保留原题项并用于每日纵向观察。
+                量表没有公认的临床分界，也不用于诊断；正式研究应使用经授权、验证的本地化版本。
+              </div>
+            </section>
+
+            <section className="border border-border bg-card">
+              <div className="border-b border-border px-4 py-3">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
                     <h2 className="text-[13px] font-medium">医院焦虑抑郁量表（HADS-14）</h2>
                     <p className="mt-0.5 max-w-[820px] text-[10px] leading-5 text-muted-foreground">
                       请根据过去一周的真实状态直接完成以下 14 题。题目是按 HADS
@@ -646,6 +780,9 @@ export default function JournalEmotionDiaryPage() {
                   事件 {completion.event ? '完成' : '未完成'} ·
                   POMS {pomsTmd == null ? '未完成' : `TMD ${pomsTmd}`} ·
                   PANAS {panasScores == null ? '未完成' : `PA ${panasScores.positive} / NA ${panasScores.negative}`} ·
+                  PI-7 {initiativeScore == null
+                    ? '未完成'
+                    : `${initiativeScore.total}/49 / ${initiativeScore.mean.toFixed(2)}/7`} ·
                   HADS-A {anxietyScore == null ? '未完成' : `${anxietyScore}/21`} ·
                   HADS-D {depressionScore == null ? '未完成' : `${depressionScore}/21`}
                 </div>

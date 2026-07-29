@@ -1340,7 +1340,7 @@ export default function GuidePage() {
               <ul className="list-disc pl-6 text-[14px] text-foreground/90 space-y-1">
                 <li><strong>快照 TXT：</strong>只要任一 leg 有开仓快照，就导出该战役全部已记录的开仓问题与答案；一题一答，不因页面折叠或字段较多而截断。</li>
                 <li><strong>评价 TXT：</strong>只要任一 leg 已完成平仓评价，就导出该战役所有已评价 leg 的完整题目与答案，包括决策质量的入场 / 持仓 / 离场三栏；每组题目与答案之间空一行，便于直接交给 AI 批量分析。</li>
-                <li><strong>情绪 TXT：</strong>战役操作日存在情绪日记时，导出当天事件记录及量表结果；量表保留总分与所在区间，和客观操作日期绑定。</li>
+                  <li><strong>情绪 TXT：</strong>战役操作日存在情绪日记时，导出当天事件记录及 POMS、PANAS、PI-7、HADS 量表结果，并和客观操作日期绑定。PI-7 报告 7–49 总分及 1.00–7.00 题目均分，全部正向计分，不设临床分界。</li>
               </ul>
               <Highlight>
                 TXT 导出读取的是保存后的完整评价数据，而不是屏幕当前展开的几项。历史评价只有单一决策质量时，会按兼容规则回填三阶段后再导出，因此旧战役也不会漏掉决策质量答案。

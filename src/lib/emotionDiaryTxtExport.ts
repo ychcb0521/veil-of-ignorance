@@ -32,6 +32,8 @@ export function buildCampaignEmotionDiaryTxt(
       answerBlock('心境状态量表（POMS）七个分量表', summary.pomsDimensions),
       answerBlock('正性情感（PANAS-PA）', summary.panasPositive ?? '—'),
       answerBlock('负性情感（PANAS-NA）', summary.panasNegative ?? '—'),
+      answerBlock('个人主动性量表（PI-7）总分', summary.personalInitiativeTotal ?? '未填写'),
+      answerBlock('个人主动性量表（PI-7）题目均分', summary.personalInitiativeMean ?? '未填写'),
     ]
     : [
       answerBlock('历史情绪效价（SAM 1–9）', summary.legacyValence ?? '—'),
@@ -45,7 +47,7 @@ export function buildCampaignEmotionDiaryTxt(
     ...measurementBlocks,
     answerBlock('焦虑分量表（HADS-A）', summary.anxiety),
     answerBlock('抑郁分量表（HADS-D）', summary.depression),
-    '说明\nPOMS 与 PANAS 用于纵向情绪研究记录，不设统一临床诊断区间；HADS 为筛查工具，分数不等同于临床诊断。',
+    '说明\nPOMS、PANAS 与 PI-7 用于纵向记录。PI-7 全部正向计分，不设统一临床诊断区间；HADS 为筛查工具，分数不等同于临床诊断。',
   ].join('\n\n');
 }
 

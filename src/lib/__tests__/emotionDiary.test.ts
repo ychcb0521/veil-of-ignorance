@@ -9,18 +9,27 @@ import {
   isEmotionDiaryDraftComplete,
   PANAS_QUESTIONS,
   PANAS_RESPONSE_OPTIONS,
+  PI_QUESTIONS,
+  PI_RESPONSE_OPTIONS,
   POMS_QUESTIONS,
   POMS_REVERSE_SCORED_ITEM_NUMBERS,
   POMS_RESPONSE_OPTIONS,
   scoreHadsSubscale,
   scorePanas,
+  scorePersonalInitiative,
   scorePomsSubscales,
   scorePomsTotalMoodDisturbance,
 } from '@/lib/emotionDiary';
-import type { DecisionEmotionDiary, PanasItemScore, PomsItemScore } from '@/types/emotionDiary';
+import type {
+  DecisionEmotionDiary,
+  PanasItemScore,
+  PiItemScore,
+  PomsItemScore,
+} from '@/types/emotionDiary';
 
 const pomsScores = Array.from({ length: 40 }, () => 2 as PomsItemScore);
 const panasScores = Array.from({ length: 20 }, () => 3 as PanasItemScore);
+const piScores = Array.from({ length: 7 }, () => 5 as PiItemScore);
 
 const diary: DecisionEmotionDiary = {
   id: 'diary-1',
@@ -41,11 +50,14 @@ const diary: DecisionEmotionDiary = {
   panas_item_scores: panasScores,
   panas_positive_score: 30,
   panas_negative_score: 30,
+  pi_item_scores: piScores,
+  pi_total_score: 35,
+  pi_mean_score: 5,
   hads_anxiety_scores: [1, 2, 1, 0, 2, 1, 1],
   hads_depression_scores: [0, 1, 0, 1, 1, 0, 1],
   hads_anxiety_score: 8,
   hads_depression_score: 4,
-  measurement_version: 'POMS-CN-40+PANAS-20+HADS-14-research-v1',
+  measurement_version: 'POMS-CN-40+PANAS-20+PI-7+HADS-14-research-v3',
   created_at: '2026-07-25T01:00:00.000Z',
   updated_at: '2026-07-25T01:00:00.000Z',
 };
@@ -142,6 +154,18 @@ describe('decision emotion diary scoring', () => {
     });
   });
 
+  it('完整提供 PI-7 七个正向题，并按 1–7 分计算总分与均分', () => {
+    expect(PI_QUESTIONS).toHaveLength(7);
+    expect(new Set(PI_QUESTIONS.map(question => question.code)).size).toBe(7);
+    expect(PI_QUESTIONS.every(question => question.prompt.length > 8)).toBe(true);
+    expect(PI_RESPONSE_OPTIONS.map(option => option.score)).toEqual([1, 2, 3, 4, 5, 6, 7]);
+    expect(scorePersonalInitiative(Array.from({ length: 7 }, () => 1 as PiItemScore)))
+      .toEqual({ total: 7, mean: 1 });
+    expect(scorePersonalInitiative(Array.from({ length: 7 }, () => 7 as PiItemScore)))
+      .toEqual({ total: 49, mean: 7 });
+    expect(scorePersonalInitiative([1, 2, 3, 4, 5, 6, 7])).toEqual({ total: 28, mean: 4 });
+  });
+
   it('按 7 个 0–3 分项目分别计算 HADS-A / HADS-D', () => {
     expect(scoreHadsSubscale(diary.hads_anxiety_scores)).toBe(8);
     expect(scoreHadsSubscale(diary.hads_depression_scores)).toBe(4);
@@ -170,13 +194,14 @@ describe('decision emotion diary scoring', () => {
     expect(hadsBand(21).key).toBe('abnormal');
   });
 
-  it('只有事件、POMS、PANAS 和两个 HADS 分量表全部完成后才允许保存', () => {
+  it('只有事件、POMS、PANAS、PI-7 和两个 HADS 分量表全部完成后才允许保存', () => {
     const draft = emptyEmotionDiaryDraft('2026-07-25');
     expect(isEmotionDiaryDraftComplete(draft)).toBe(false);
     expect(emotionDiaryCompletion(draft)).toEqual({
       event: false,
       poms: false,
       panas: false,
+      initiative: false,
       anxiety: false,
       depression: false,
     });
@@ -184,12 +209,13 @@ describe('decision emotion diary scoring', () => {
     draft.event_text = diary.event_text;
     draft.poms_item_scores = [...pomsScores];
     draft.panas_item_scores = [...panasScores];
+    draft.pi_item_scores = [...piScores];
     draft.hads_anxiety_scores = [...diary.hads_anxiety_scores];
     draft.hads_depression_scores = [...diary.hads_depression_scores];
     expect(isEmotionDiaryDraftComplete(draft)).toBe(true);
   });
 
-  it('导出呈现 POMS、PANAS、HADS 的研究计分结果', () => {
+  it('导出呈现 POMS、PANAS、PI-7、HADS 的研究计分结果', () => {
     const summary = buildEmotionDiaryExportSummary(diary);
     expect(summary.eventText).toBe(diary.event_text);
     expect(summary.pomsTotal).toBe('136（TMD）');
@@ -197,6 +223,8 @@ describe('decision emotion diary scoring', () => {
     expect(summary.pomsDimensions).toContain('自尊 10');
     expect(summary.panasPositive).toBe('30/50');
     expect(summary.panasNegative).toBe('30/50');
+    expect(summary.personalInitiativeTotal).toBe('35/49');
+    expect(summary.personalInitiativeMean).toBe('5.00/7');
     expect(summary.anxiety).toBe('8/21（临界范围，8–10）');
     expect(summary.depression).toBe('4/21（正常范围，0–7）');
   });
@@ -231,9 +259,13 @@ describe('decision emotion diary scoring', () => {
       panas_item_scores: [],
       panas_positive_score: null,
       panas_negative_score: null,
+      pi_item_scores: [],
+      pi_total_score: null,
+      pi_mean_score: null,
     };
     const summary = buildEmotionDiaryExportSummary(legacy);
     expect(summary.pomsTotal).toBeNull();
+    expect(summary.personalInitiativeTotal).toBeNull();
     expect(summary.legacyValence).toBe('3/9（偏负性）');
     expect(summary.legacyArousal).toBe('8/9（高唤醒）');
   });

@@ -719,6 +719,12 @@ function drawEmotionDiaryPanel(
       ['POMS TMD', diary.pomsTotal],
       ['PANAS 正性', diary.panasPositive ?? '—'],
       ['PANAS 负性', diary.panasNegative ?? '—'],
+      [
+        '个人主动性 PI-7',
+        diary.personalInitiativeTotal && diary.personalInitiativeMean
+          ? `${diary.personalInitiativeTotal} · ${diary.personalInitiativeMean}`
+          : '未填写',
+      ],
       ['焦虑 HADS-A', diary.anxiety],
       ['抑郁 HADS-D', diary.depression],
     ]
