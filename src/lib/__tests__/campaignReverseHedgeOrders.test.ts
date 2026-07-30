@@ -860,4 +860,133 @@ describe('getCampaignFullData reverse hedge order layer', () => {
     const { pendingOrders } = await getCampaignFullData(campaign.id);
     expect(pendingOrders.map(order => order.id)).toEqual(['in-window-pending']);
   });
+
+  it('浏览器成交快照已被旧上限淘汰时，从预设委托对冲 leg 精确恢复已触发委托', async () => {
+    const triggeredAt = t('2025-09-20T10:05:00.000Z');
+    const closeTime = t('2025-09-20T10:20:00.000Z');
+    journals = [
+      makeLeg({
+        id: 'legacy-limit-hedge-leg',
+        trade_record_id: 'legacy-limit-hedge-record',
+        order_kind: 'hedge',
+        hedge_order_method: 'limit_preset',
+        hedge_boundary_price: 1.2,
+        pre_simulated_time: new Date(triggeredAt).toISOString(),
+        pre_entry_price: 1.201,
+        pre_position_size: 120,
+      }),
+    ];
+    const tradeHistory: TradeRecord[] = [{
+      id: 'legacy-limit-hedge-record',
+      symbol: 'ASTERUSDT',
+      side: 'SHORT',
+      type: 'MARKET',
+      action: 'CLOSE',
+      entryPrice: 1.201,
+      exitPrice: 1.1,
+      quantity: 100,
+      leverage: 5,
+      pnl: 10,
+      fee: 0,
+      slippage: 0,
+      openTime: triggeredAt,
+      closeTime,
+    }];
+    localStorage.setItem('sim_user-1_trade_history', JSON.stringify(tradeHistory));
+
+    const { reverseHedgeOrders } = await getCampaignFullData(campaign.id);
+
+    expect(reverseHedgeOrders).toEqual([expect.objectContaining({
+      id: 'legacy-limit-preset:legacy-limit-hedge-leg',
+      tradeRecordId: 'legacy-limit-hedge-record',
+      side: 'SHORT',
+      price: 1.2,
+      fillPrice: 1.201,
+      createdAt: triggeredAt,
+      triggeredAt,
+      cancelledAt: closeTime,
+      status: 'triggered',
+    })]);
+  });
+
+  it('不会用市价追单 hedge leg 恢复黄色委托层', async () => {
+    const triggeredAt = t('2025-09-20T10:05:00.000Z');
+    journals = [
+      makeLeg({
+        id: 'market-chase-hedge-leg',
+        trade_record_id: 'market-chase-hedge-record',
+        order_kind: 'hedge',
+        hedge_order_method: 'market_chase',
+        pre_simulated_time: new Date(triggeredAt).toISOString(),
+        pre_entry_price: 1.201,
+      }),
+    ];
+    const tradeHistory: TradeRecord[] = [{
+      id: 'market-chase-hedge-record',
+      symbol: 'ASTERUSDT',
+      side: 'SHORT',
+      type: 'MARKET',
+      action: 'CLOSE',
+      entryPrice: 1.201,
+      exitPrice: 1.1,
+      quantity: 100,
+      leverage: 5,
+      pnl: 10,
+      fee: 0,
+      slippage: 0,
+      openTime: triggeredAt,
+      closeTime: t('2025-09-20T10:20:00.000Z'),
+    }];
+    localStorage.setItem('sim_user-1_trade_history', JSON.stringify(tradeHistory));
+
+    const { reverseHedgeOrders } = await getCampaignFullData(campaign.id);
+
+    expect(reverseHedgeOrders).toEqual([]);
+  });
+
+  it('从带明确委托 ID 的战役事件恢复已撤销委托', async () => {
+    const createdAt = '2025-09-20T10:02:00.000Z';
+    const cancelledAt = '2025-09-20T10:08:00.000Z';
+    campaign.actual_evolution = [
+      {
+        id: 'placed-event',
+        timestamp: createdAt,
+        event_type: 'hedge_placed',
+        leg_role: 'hedge_initial_a',
+        journal_id: null,
+        trade_record_id: null,
+        pending_order_id: 'historical-cancelled-order',
+        price: 1.19,
+        size_usdt: 100,
+        notes: null,
+        recorded_at: createdAt,
+        direction: 'short',
+      },
+      {
+        id: 'cancelled-event',
+        timestamp: cancelledAt,
+        event_type: 'hedge_cancelled',
+        leg_role: 'hedge_initial_a',
+        journal_id: null,
+        trade_record_id: null,
+        pending_order_id: 'historical-cancelled-order',
+        price: 1.19,
+        size_usdt: 100,
+        notes: null,
+        recorded_at: cancelledAt,
+        direction: 'short',
+      },
+    ];
+
+    const { reverseHedgeOrders } = await getCampaignFullData(campaign.id);
+
+    expect(reverseHedgeOrders).toEqual([expect.objectContaining({
+      id: 'historical-cancelled-order',
+      side: 'SHORT',
+      price: 1.19,
+      createdAt: t(createdAt),
+      cancelledAt: t(cancelledAt),
+      status: 'cancelled',
+    })]);
+  });
 });

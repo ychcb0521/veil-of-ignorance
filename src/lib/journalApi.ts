@@ -2365,6 +2365,121 @@ export async function getCampaignFullData(
       };
     })
     .filter((order): order is CampaignReverseHedgeOrder => Boolean(order));
+  const eventTimestamp = (event: CampaignEvent | undefined) => {
+    if (!event) return null;
+    const timestamp = new Date(event.timestamp).getTime();
+    return Number.isFinite(timestamp) ? timestamp : null;
+  };
+  const eventOrderIds = new Set(
+    campaign.actual_evolution
+      .map(event => event.pending_order_id)
+      .filter((id): id is string => Boolean(id)),
+  );
+  const eventRecoveredReverseOrders = Array.from(eventOrderIds)
+    .map((orderId): CampaignReverseHedgeOrder | null => {
+      const events = campaign.actual_evolution
+        .filter(event => event.pending_order_id === orderId)
+        .sort((a, b) => (eventTimestamp(a) ?? 0) - (eventTimestamp(b) ?? 0));
+      const placed = events.find(event => event.event_type === 'hedge_placed');
+      const triggered = events.find(event => event.event_type === 'hedge_triggered');
+      const cancelled = [...events].reverse().find(event => event.event_type === 'hedge_cancelled');
+      const ownerEvent = triggered ?? placed ?? cancelled;
+      const ownerLeg = legs.find(leg =>
+        (ownerEvent?.journal_id && leg.id === ownerEvent.journal_id) ||
+        (ownerEvent?.trade_record_id && leg.trade_record_id === ownerEvent.trade_record_id)
+      );
+      if (ownerEvent?.direction !== 'short' && ownerLeg?.direction !== 'short') return null;
+
+      const createdAt = eventTimestamp(placed) ?? eventTimestamp(triggered) ?? eventTimestamp(cancelled);
+      const triggeredAt = eventTimestamp(triggered);
+      const cancelledAt = eventTimestamp(cancelled);
+      const price = placed?.price ?? triggered?.price ?? cancelled?.price ?? ownerLeg?.hedge_boundary_price
+        ?? ownerLeg?.pre_entry_price;
+      if (createdAt == null || !inWindow(createdAt) || price == null || !Number.isFinite(price) || price <= 0) {
+        return null;
+      }
+
+      const record = ownerLeg?.trade_record_id
+        ? tradeRecords.find(item =>
+          item.id === ownerLeg.trade_record_id || item.positionId === ownerLeg.trade_record_id
+        ) ?? null
+        : null;
+      if (triggeredAt != null) {
+        return {
+          id: orderId,
+          tradeRecordId: record?.id ?? ownerEvent?.trade_record_id ?? null,
+          side: 'SHORT',
+          price,
+          fillPrice: ownerLeg?.pre_entry_price ?? triggered?.price ?? null,
+          createdAt,
+          triggeredAt,
+          cancelledAt: cancelledAt ?? (
+            record?.closeTime && record.closeTime > triggeredAt ? record.closeTime : null
+          ),
+          status: 'triggered',
+        };
+      }
+      if (cancelledAt != null) {
+        return {
+          id: orderId,
+          tradeRecordId: null,
+          side: 'SHORT',
+          price,
+          createdAt,
+          triggeredAt: null,
+          cancelledAt,
+          status: 'cancelled',
+        };
+      }
+      return null;
+    })
+    .filter((order): order is CampaignReverseHedgeOrder => order != null);
+  const recoveredLimitPresetOrders = legs
+    .filter(leg =>
+      leg.order_kind === 'hedge' &&
+      leg.direction === 'short' &&
+      leg.hedge_order_method === 'limit_preset' &&
+      Boolean(leg.trade_record_id)
+    )
+    .map((leg): CampaignReverseHedgeOrder | null => {
+      const record = tradeRecords.find(item =>
+        item.id === leg.trade_record_id || item.positionId === leg.trade_record_id
+      );
+      if (!record) return null;
+
+      const placed = campaign.actual_evolution
+        .filter(event =>
+          event.event_type === 'hedge_placed' &&
+          (event.journal_id === leg.id || event.trade_record_id === leg.trade_record_id)
+        )
+        .sort((a, b) => (eventTimestamp(a) ?? 0) - (eventTimestamp(b) ?? 0))[0];
+      const triggeredAt = record.openTime || new Date(leg.pre_simulated_time).getTime();
+      const createdAt = eventTimestamp(placed) ?? triggeredAt;
+      const price = placed?.price ?? leg.hedge_boundary_price ?? leg.pre_entry_price;
+      if (
+        !Number.isFinite(createdAt) ||
+        !inWindow(createdAt) ||
+        !Number.isFinite(triggeredAt) ||
+        price == null ||
+        !Number.isFinite(price) ||
+        price <= 0
+      ) {
+        return null;
+      }
+
+      return {
+        id: placed?.pending_order_id ?? `legacy-limit-preset:${leg.id}`,
+        tradeRecordId: record.id,
+        side: 'SHORT',
+        price,
+        fillPrice: leg.pre_entry_price,
+        createdAt,
+        triggeredAt,
+        cancelledAt: record.closeTime > triggeredAt ? record.closeTime : null,
+        status: 'triggered',
+      };
+    })
+    .filter((order): order is CampaignReverseHedgeOrder => order != null);
   const rawReverseHedgeOrders: CampaignReverseHedgeOrder[] = [
     ...cancelledOrders
       .filter(order =>
@@ -2402,6 +2517,10 @@ export async function getCampaignFullData(
     // 已触发(成交)的反向委托：只来自真实委托触发快照（委托时间 → 触发时间 → 平仓时间）。
     // 不再用普通 SHORT 成交记录兜底，避免把手动/市价空单误显示成「委托空单」。
     ...triggeredReverseOrders,
+    // 历史浏览器快照曾被最近 500 条上限淘汰。只用明确委托事件或
+    // limit_preset 对冲腿恢复，绝不把普通手动/市价 SHORT 成交当作委托单。
+    ...eventRecoveredReverseOrders,
+    ...recoveredLimitPresetOrders,
   ];
   const reverseOrderScore = (order: CampaignReverseHedgeOrder) => {
     const statusScore = order.status === 'triggered' ? 30 : order.status === 'cancelled' ? 20 : 10;

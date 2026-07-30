@@ -27,6 +27,7 @@ import { CoolingOffModal, useCoolingOff } from "@/components/CoolingOffModal";
 import { getConditionalTriggerDecisionFromRange } from "@/lib/conditionalOrders";
 import { fetchCanonicalTimePriceAt } from "@/lib/canonicalTimePrice";
 import { applyCurrentPriceToVisibleData } from "@/lib/visibleDataPrice";
+import { upsertOrderSnapshot } from "@/lib/orderSnapshotHistory";
 import {
   diagnoseSignalJump,
   hasKlineCoveringSignalTime,
@@ -419,9 +420,7 @@ const Index = () => {
 
       const { fee, margin, position } = executeSettlementFill(symbol, entryPrice, order, false, openTime);
 
-      setFilledOrders((prev) => [
-        ...prev.filter((item) => item.id !== order.id),
-        {
+      setFilledOrders(prev => upsertOrderSnapshot(prev, {
           id: order.id,
           symbol,
           side: order.side,
@@ -440,8 +439,7 @@ const Index = () => {
           createdAt: order.createdAt,
           filledAt: openTime,
           positionId: position.id,
-        },
-      ].slice(-500));
+        }));
       setBalance((prev) => prev - margin - fee);
       setPositionsMap((prev) => {
         const existing = (prev[symbol] || []).filter(isPositionOpen);
@@ -1014,9 +1012,7 @@ const Index = () => {
               { high: kline.high, low: kline.low, close: kline.close },
             );
             const actualFillPrice = position.entryPrice;
-            setFilledOrders((prev) => [
-              ...prev.filter((item) => item.id !== matchedOrder.id),
-              {
+            setFilledOrders(prev => upsertOrderSnapshot(prev, {
                 id: matchedOrder.id,
                 symbol: activeSymbol,
                 side: matchedOrder.side,
@@ -1035,8 +1031,7 @@ const Index = () => {
                 createdAt: matchedOrder.createdAt,
                 filledAt: simulatedTime,
                 positionId: position.id,
-              },
-            ].slice(-500));
+              }));
             setBalance((prev) => prev - margin - fee);
             setPositionsMap((prev) => {
               const existing = (prev[activeSymbol] || []).filter(isPositionOpen);

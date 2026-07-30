@@ -56,6 +56,7 @@ import {
   planReduceOnlyTrigger,
   type ReduceOnlyTriggerExecution,
 } from '@/lib/reduceOnlyOrderExecution';
+import { upsertOrderSnapshot } from '@/lib/orderSnapshotHistory';
 import { getPriceDecimals } from '@/lib/formatters';
 import {
   createDefaultExecutionAssetState,
@@ -307,7 +308,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
     setOrdersMapState(next);
   }, [setOrdersMapState]);
   // 撤单快照：撤单本身会把订单从 ordersMap 删掉，这里另存一份（含委托价/委托时间/取消时间），
-  // 供战役页展示「反向对冲挂单」。只追加、截断到最近 500 条。
+  // 供战役页展示「反向对冲挂单」。这是审计记录，不能按数量截断，否则历史战役的委托层会消失。
   const [, setCancelledOrders] = usePersistedState<CancelledOrderSnapshot[]>('cancelled_orders', []);
   // 成交快照：委托触发后订单会从 ordersMap 删除，这里保留“委托时间 → 触发时间”的桥。
   const [filledOrders, setFilledOrders] = usePersistedState<FilledOrderSnapshot[]>('filled_orders', []);
@@ -1249,10 +1250,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
     setOrdersMap((prev) => ({ ...prev, [execution.targetSymbol]: execution.orders }));
     setBalance((prev) => prev + Math.max(0, execution.returnedMargin));
     setTradeHistory((prev) => [...prev, execution.record]);
-    setFilledOrders((prev) => [
-      ...prev.filter((item) => item.id !== execution.filledOrder.id),
-      execution.filledOrder,
-    ].slice(-500));
+    setFilledOrders(prev => upsertOrderSnapshot(prev, execution.filledOrder));
 
     const kindLabel = order.reduceKind === 'TP' ? '止盈' : order.reduceKind === 'SL' ? '止损' : '条件';
     toast.success(`${kindLabel}已触发：${execution.targetSymbol} @ ${execution.fillPrice.toFixed(2)}`, {
@@ -1272,9 +1270,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
         : (order.conditionalLimitPrice && order.conditionalLimitPrice > 0)
           ? order.conditionalLimitPrice
           : order.stopPrice;
-      setCancelledOrders(prev => [
-        ...prev,
-        {
+      setCancelledOrders(prev => upsertOrderSnapshot(prev, {
           id: order.id,
           symbol,
           side: order.side,
@@ -1291,8 +1287,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
           contractSizeUsd: order.contractSizeUsd,
           createdAt: order.createdAt,
           cancelledAt,
-        },
-      ].slice(-500));
+        }));
     }
     setOrdersMap(prev => ({
       ...prev,
