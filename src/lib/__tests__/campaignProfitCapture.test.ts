@@ -10,9 +10,12 @@ import {
   formatCampaignPayoffRatio,
   resolveCampaignInitialRiskFraction,
 } from '@/lib/campaignAnalysis';
-import { computeCampaignExpectancies } from '@/lib/campaignMetrics';
+import {
+  computeCampaignExpectancies,
+  resolveCampaignOpportunityQuality,
+} from '@/lib/campaignMetrics';
 import type { TradeCampaign, TradeJournal } from '@/types/journal';
-import type { TradeRecord } from '@/types/trading';
+import type { CampaignReverseHedgeOrder, TradeRecord } from '@/types/trading';
 
 const openedAt = '2026-07-15T00:00:00.000Z';
 const closedAt = '2026-07-15T01:00:00.000Z';
@@ -755,6 +758,103 @@ describe('campaign profit capture ratio', () => {
 
     expect(computeInitialExpectedMaxLoss(campaign, legs, [], reverseOrders)).toBeCloseTo(1_000, 8);
     expect(computeDecisionAccuracy(campaign, legs, [], [], reverseOrders).profit_capture_ratio).toBeCloseTo(50, 8);
+  });
+
+  it('excludes a later rolling hedge from the historical initial drawdown boundary', () => {
+    const campaign = makeCampaign(318_504.69);
+    markAsHistorical(campaign);
+    campaign.initial_main_size_usdt = 1_000_000;
+    const mainOpenedAt = Date.parse('2025-11-06T16:10:00.000Z');
+    const legs = [{
+      ...makeLeg('main', 'main_open', 0.236728),
+      pre_simulated_time: new Date(mainOpenedAt).toISOString(),
+      pre_position_size: 1_000_000,
+      pre_account_equity_usdt: 28_408_874.4,
+    }];
+    const reverseOrders: CampaignReverseHedgeOrder[] = [
+      {
+        id: 'initial-a-snapshot',
+        side: 'SHORT',
+        price: 0.187,
+        createdAt: mainOpenedAt,
+        cancelledAt: Date.parse('2025-11-06T18:06:00.000Z'),
+        status: 'cancelled',
+      },
+      {
+        id: 'initial-a-legacy-copy',
+        side: 'SHORT',
+        price: 0.187,
+        createdAt: mainOpenedAt,
+        cancelledAt: Date.parse('2025-11-06T18:11:00.000Z'),
+        status: 'cancelled',
+      },
+      {
+        id: 'rolling-hedge',
+        side: 'SHORT',
+        price: 0.36,
+        fillPrice: 0.359939,
+        createdAt: Date.parse('2025-11-06T18:11:00.000Z'),
+        triggeredAt: Date.parse('2025-11-06T18:17:00.000Z'),
+        cancelledAt: Date.parse('2025-11-06T18:21:00.000Z'),
+        status: 'triggered',
+      },
+    ];
+
+    const expectedDrawdownPct = ((0.236728 - 0.187) / 0.236728) * 100;
+    expect(expectedDrawdownPct).toBeCloseTo(21.0064, 3);
+    expect(computeInitialExpectedMaxDrawdownPct(campaign, legs, [], reverseOrders))
+      .toBeCloseTo(expectedDrawdownPct, 8);
+    const initialExpectedMaxLoss = computeInitialExpectedMaxLoss(
+      campaign,
+      legs,
+      [],
+      reverseOrders,
+    );
+    expect(initialExpectedMaxLoss).toBeCloseTo(210_063.87, 2);
+
+    const profitCaptureRatio = computeProfitCaptureRatio(
+      campaign,
+      legs,
+      [],
+      reverseOrders,
+    );
+    expect(profitCaptureRatio).toBeCloseTo(151.62, 2);
+    expect(resolveCampaignOpportunityQuality(campaign, profitCaptureRatio, expectedDrawdownPct))
+      .toBeCloseTo(0.07, 2);
+
+    const risk = computeCampaignInitialRiskFraction(initialExpectedMaxLoss, legs);
+    expect(risk?.drawdownFraction).toBeCloseTo(0.0074, 4);
+    const expectancies = computeCampaignExpectancies(
+      profitCaptureRatio,
+      0.5625,
+      risk?.drawdownFraction ?? null,
+    );
+    expect(expectancies.arithmeticExpectancy).toBeCloseTo(0.42, 2);
+    expect(expectancies.geometricExpectancy).toBeCloseTo(0.003, 3);
+
+    const accuracy = computeDecisionAccuracy(campaign, legs, [], [], reverseOrders);
+    expect(accuracy.initial_expected_max_loss).toBeCloseTo(initialExpectedMaxLoss, 8);
+    expect(accuracy.profit_capture_ratio).toBeCloseTo(profitCaptureRatio, 8);
+  });
+
+  it('falls back to the explicit initial hedge role when only a later rolling order survives', () => {
+    const campaign = makeCampaign(500);
+    markAsHistorical(campaign);
+    const legs = [
+      makeLeg('main', 'main_open', 100),
+      makeLeg('hedge-a', 'hedge_initial_a', 90),
+    ];
+    const reverseOrders: CampaignReverseHedgeOrder[] = [{
+      id: 'rolling-only',
+      side: 'SHORT',
+      price: 130,
+      createdAt: Date.parse(openedAt) + 2 * 60 * 60 * 1000,
+      triggeredAt: Date.parse(openedAt) + 2.1 * 60 * 60 * 1000,
+      status: 'triggered',
+    }];
+
+    expect(computeInitialExpectedMaxDrawdownPct(campaign, legs, [], reverseOrders))
+      .toBeCloseTo(10, 8);
   });
 
   it('returns zero when no initial hedge price is available', () => {

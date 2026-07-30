@@ -89,6 +89,7 @@ const POSITION_ENTRY_EVENT_TYPES = new Set<CampaignEvent['event_type']>([
   'mirror_tp_placed',
 ]);
 const EPSILON = 0.0001;
+const INITIAL_REVERSE_ORDER_COHORT_MS = 5 * 60 * 1000;
 
 const toMs = (value: string) => new Date(value).getTime();
 const toIso = (value: number) => new Date(value).toISOString();
@@ -111,6 +112,88 @@ function tradeRecordNotionalUsd(record: TradeRecord, price = record.entryPrice):
 function firstPositiveNumber(...values: Array<number | null | undefined>): number | null {
   const value = values.find(candidate => Number.isFinite(candidate) && Number(candidate) > EPSILON);
   return value == null ? null : Number(value);
+}
+
+function uniquePrices(prices: number[], limit = INITIAL_HEDGE_ROLES.length): number[] {
+  const result: number[] = [];
+  for (const price of prices) {
+    const duplicate = result.some(existing =>
+      Math.abs(existing - price) <= Math.max(EPSILON, Math.abs(existing) * 1e-6),
+    );
+    if (!duplicate) result.push(price);
+    if (result.length >= limit) break;
+  }
+  return result;
+}
+
+function resolveInitialReverseHedgePrices(
+  campaign: TradeCampaign,
+  reverseHedgeOrders: CampaignReverseHedgeOrder[],
+  mainOpenedAt: number | null,
+  roleHedgePrices: number[],
+): number[] {
+  const expectedSide = campaign.direction === 'main_long' ? 'SHORT' : 'LONG';
+  const eligibleOrders = [...reverseHedgeOrders]
+    .filter(order => order.side === expectedSide && firstPositiveNumber(order.price) != null)
+    .sort((a, b) => a.createdAt - b.createdAt);
+  if (eligibleOrders.length === 0) return [];
+
+  const initialOrderIds = new Set(
+    (campaign.actual_evolution ?? [])
+      .filter(event =>
+        event.pending_order_id != null
+        && event.leg_role != null
+        && INITIAL_HEDGE_ROLES.includes(event.leg_role),
+      )
+      .map(event => event.pending_order_id as string),
+  );
+  const roleMatchedPrices = eligibleOrders
+    .filter(order => initialOrderIds.has(order.id))
+    .map(order => order.price);
+  if (roleMatchedPrices.length > 0) return uniquePrices(roleMatchedPrices);
+
+  // Some historical snapshots predate explicit A/B role events. Initial
+  // protection orders are submitted as one opening cohort; a later rolling
+  // hedge is a new decision and must never expand the ex-ante risk boundary.
+  const cohortStart = mainOpenedAt == null
+    ? eligibleOrders[0].createdAt
+    : mainOpenedAt - INITIAL_REVERSE_ORDER_COHORT_MS;
+  const cohortEnd = mainOpenedAt == null
+    ? eligibleOrders[0].createdAt + INITIAL_REVERSE_ORDER_COHORT_MS
+    : mainOpenedAt + INITIAL_REVERSE_ORDER_COHORT_MS;
+  const openingCohortPrices = uniquePrices(
+    eligibleOrders
+      .filter(order => order.createdAt >= cohortStart && order.createdAt <= cohortEnd)
+      .map(order => order.price),
+  );
+  if (openingCohortPrices.length > 0) return openingCohortPrices;
+
+  // A number of early imports retained relative/order-sequence timestamps
+  // instead of wall-clock timestamps. Recover the original order price only
+  // when its fill can be paired with an explicit initial A/B leg.
+  const fillMatchedPrices = eligibleOrders
+    .filter(order => {
+      const fillPrice = firstPositiveNumber(order.fillPrice);
+      if (fillPrice == null) return false;
+      return roleHedgePrices.some(rolePrice =>
+        Math.abs(rolePrice - fillPrice) <= Math.max(EPSILON, Math.abs(rolePrice) * 1e-6),
+      );
+    })
+    .map(order => order.price);
+  if (fillMatchedPrices.length > 0) return uniquePrices(fillMatchedPrices);
+
+  // The oldest snapshots have neither A/B role legs nor absolute timestamps.
+  // In that format, order sequence is the only surviving opening-cohort signal.
+  if (roleHedgePrices.length === 0) {
+    const legacyCohortEnd = eligibleOrders[0].createdAt + INITIAL_REVERSE_ORDER_COHORT_MS;
+    return uniquePrices(
+      eligibleOrders
+        .filter(order => order.createdAt <= legacyCohortEnd)
+        .map(order => order.price),
+    );
+  }
+
+  return [];
 }
 
 function findInitialMainLeg(legs: TradeJournal[]): TradeJournal | null {
@@ -357,17 +440,18 @@ function resolveInitialRiskAnchor(
     const eventPrice = firstPositiveNumber(event?.entry_price, event?.price);
     return eventPrice == null ? [] : [eventPrice];
   });
-  const expectedSide = campaign.direction === 'main_long' ? 'SHORT' : 'LONG';
-  const initialReversePrices: number[] = [];
-  for (const order of [...reverseHedgeOrders]
-    .filter(item => item.side === expectedSide && firstPositiveNumber(item.price) != null)
-    .sort((a, b) => a.createdAt - b.createdAt)) {
-    const duplicate = initialReversePrices.some(existing =>
-      Math.abs(existing - order.price) <= Math.max(EPSILON, Math.abs(existing) * 1e-6),
-    );
-    if (!duplicate) initialReversePrices.push(order.price);
-    if (initialReversePrices.length >= INITIAL_HEDGE_ROLES.length) break;
-  }
+  const mainOpenedAt = firstPositiveNumber(
+    mainRecord?.openTime,
+    mainLeg ? toMs(mainLeg.pre_simulated_time) : null,
+    mainEvent ? toMs(mainEvent.timestamp) : null,
+    toMs(campaign.opened_at),
+  );
+  const initialReversePrices = resolveInitialReverseHedgePrices(
+    campaign,
+    reverseHedgeOrders,
+    mainOpenedAt,
+    roleHedgePrices,
+  );
 
   // Historical A/B legs are reconstructed from fills, so their entry prices can
   // include slippage. When original order snapshots exist, those snapshots are
@@ -378,8 +462,10 @@ function resolveInitialRiskAnchor(
     : [...roleHedgePrices];
   if (hedgePrices.length < INITIAL_HEDGE_ROLES.length && !historical) {
     for (const price of initialReversePrices) {
-      const duplicate = hedgePrices.some(existing =>
-        Math.abs(existing - price) <= Math.max(EPSILON, Math.abs(existing) * 1e-6),
+      const duplicate = hedgePrices.some(
+        (existing) =>
+          Math.abs(existing - price) <=
+          Math.max(EPSILON, Math.abs(existing) * 1e-6),
       );
       if (!duplicate) hedgePrices.push(price);
       if (hedgePrices.length >= INITIAL_HEDGE_ROLES.length) break;
