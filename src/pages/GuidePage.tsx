@@ -1196,6 +1196,49 @@ export default function GuidePage() {
             <section id="s4-3" className="scroll-mt-20">
               <SubTitle>4.3 交易战役</SubTitle>
               <P>战役是比单笔交易更高一层的复盘单位。一次战役由同一标的、同一主方向、明确开始结束、多个 leg 组成。每场战役都会生成一个全局唯一的<strong>战役编号</strong>；编号与生成过程绑定，不会因标题、备注或规则文字被修改而改变。</P>
+              <SubTitle>Legs 的认知与风险分工</SubTitle>
+              <P>交易战役里的每一个 leg 都不是对价格涨跌的情绪表达，而是在不同证据阶段购买优势、限制误差或回收成本。判断一个动作是否合理，应先问它承担了什么认知与风险职能，而不是只看动作之后价格是否上涨。</P>
+              <div className="overflow-x-auto">
+                <table className="w-full text-[11px] my-3 border border-border rounded overflow-hidden">
+                  <thead className="bg-muted/50">
+                    <tr>
+                      <th className="text-left px-3 py-2 font-medium text-foreground text-[10px]">动作</th>
+                      <th className="text-left px-3 py-2 font-medium text-foreground text-[10px]">核心职能</th>
+                      <th className="text-left px-3 py-2 font-medium text-foreground text-[10px]">不应被误解为</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <td className="px-3 py-2 border-t border-border font-medium">M 底仓</td>
+                      <td className="px-3 py-2 border-t border-border">以有限成本购买观察权和参与权，让初始认知差进入可验证状态。</td>
+                      <td className="px-3 py-2 border-t border-border">单纯表达「我看多」。</td>
+                    </tr>
+                    <tr>
+                      <td className="px-3 py-2 border-t border-border font-medium">A1–A3 加仓</td>
+                      <td className="px-3 py-2 border-t border-border">购买已经被新证据验证、但尚未被价格完全兑现的后验优势。</td>
+                      <td className="px-3 py-2 border-t border-border">因为价格上涨而奖励自己，或机械追涨。</td>
+                    </tr>
+                    <tr>
+                      <td className="px-3 py-2 border-t border-border font-medium">Ha / Hb / Hr 对冲</td>
+                      <td className="px-3 py-2 border-t border-border">给模型误差、跳跃风险和错误路径定价，限制判断出错时的代价。</td>
+                      <td className="px-3 py-2 border-t border-border">另起一套独立的看空观点。</td>
+                    </tr>
+                    <tr>
+                      <td className="px-3 py-2 border-t border-border font-medium">镜像止盈</td>
+                      <td className="px-3 py-2 border-t border-border">回收试验成本、改善生存率，同时保留仍可参与右尾行情的仓位。</td>
+                      <td className="px-3 py-2 border-t border-border">害怕浮盈回吐而提前结束判断。</td>
+                    </tr>
+                    <tr>
+                      <td className="px-3 py-2 border-t border-border font-medium">退出</td>
+                      <td className="px-3 py-2 border-t border-border">在优势归零或转负时终止风险暴露，把资本释放给下一次机会。</td>
+                      <td className="px-3 py-2 border-t border-border">承认自己失败，或对自我判断作身份评价。</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+              <Highlight>
+                <strong>总纲：</strong>底仓购买认知差；加仓购买经过验证且尚未兑现的认知差；对冲限制模型误差；镜像止盈回收试验成本；退出处理优势消失。
+              </Highlight>
               <div className="overflow-x-auto">
                 <table className="w-full text-[11px] my-3 border border-border rounded overflow-hidden">
                   <thead className="bg-muted/50">
