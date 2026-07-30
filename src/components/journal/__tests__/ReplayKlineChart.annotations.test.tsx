@@ -70,21 +70,24 @@ describe('ReplayKlineChart annotations', () => {
     expect(latest?.verticalLines?.some(line => line.time === 4000 && line.label === '未来普通线')).toBe(false);
   });
 
-  it('保留完整 K 线数据，同时把默认三倍时间范围透传给初始视口', async () => {
+  it('仅激活默认视口附近 K 线，同时把时间范围透传给初始视口', async () => {
     render(
       <ReplayKlineChart
-        klines={Array.from({ length: 51 }, (_, index) => candle(index * 1000))}
-        currentTime={20_000}
+        klines={Array.from({ length: 1000 }, (_, index) => candle(index * 1000))}
+        currentTime={999_000}
         intervalMs={1000}
         symbol="BTCUSDT"
         fitAll
-        initialVisibleStartTime={9000}
-        initialVisibleEndTime={12_000}
+        initialVisibleStartTime={400_000}
+        initialVisibleEndTime={500_000}
       />,
     );
 
     await waitFor(() => expect(mocks.visibleRanges.length).toBeGreaterThan(0));
-    expect(mocks.visibleRanges.at(-1)).toEqual({ start: 9000, end: 12_000 });
+    expect(mocks.visibleRanges.at(-1)).toEqual({ start: 400_000, end: 500_000 });
+    expect(mocks.datasets.at(-1)?.length).toBe(341);
+    expect(mocks.datasets.at(-1)?.[0].time).toBe(280_000);
+    expect(mocks.datasets.at(-1)?.at(-1)?.time).toBe(620_000);
   });
 
   it('传给主图的旧战役 K 线时间轴始终严格递增且不重复', async () => {

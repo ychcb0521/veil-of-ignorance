@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import type { KlineData } from '@/hooks/useBinanceData';
-import { findReplayCursorIndex, normalizeReplayKlines, sliceReplayKlines } from '@/lib/replayKlineWindow';
+import {
+  findReplayCursorIndex,
+  normalizeReplayKlines,
+  sliceReplayKlines,
+  sliceReplayKlinesForAnalysis,
+} from '@/lib/replayKlineWindow';
 
 function candle(time: number): KlineData {
   return {
@@ -55,5 +60,31 @@ describe('ReplayKlineChart windowing', () => {
     const normalized = Array.from({ length: 15_000 }, (_, index) => candle(index * 60_000));
 
     expect(normalizeReplayKlines(normalized)).toBe(normalized);
+  });
+
+  it('分析盘面只激活可见范围与两侧缓冲，避免 1 分钟全量数据阻塞交互', () => {
+    const minute = 60_000;
+    const full = Array.from({ length: 10_000 }, (_, index) => candle(index * minute));
+    const active = sliceReplayKlinesForAnalysis(
+      full,
+      4_000 * minute,
+      4_240 * minute,
+      minute,
+    );
+
+    expect(active).toHaveLength(481);
+    expect(active[0].time).toBe(3_880 * minute);
+    expect(active.at(-1)?.time).toBe(4_360 * minute);
+  });
+
+  it('51 倍视窗覆盖完整预取范围时复用原数组', () => {
+    const full = Array.from({ length: 1_000 }, (_, index) => candle(index * 60_000));
+
+    expect(sliceReplayKlinesForAnalysis(
+      full,
+      full[0].time,
+      full.at(-1)!.time,
+      60_000,
+    )).toBe(full);
   });
 });

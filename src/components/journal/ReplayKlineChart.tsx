@@ -1,7 +1,11 @@
 import { useMemo } from 'react';
 import { CandlestickChart, type AnalysisChartAnnotations, type AnalysisDraggablePriceLine, type AnalysisDraggableVerticalLine } from '@/components/CandlestickChart';
 import type { KlineData } from '@/hooks/useBinanceData';
-import { normalizeReplayKlines, sliceReplayKlines } from '@/lib/replayKlineWindow';
+import {
+  normalizeReplayKlines,
+  sliceReplayKlines,
+  sliceReplayKlinesForAnalysis,
+} from '@/lib/replayKlineWindow';
 import type { ChartMarker, PriceLine, TimeBoundPriceLine, VerticalLine } from './ReplayCandleChart';
 
 interface Props {
@@ -95,11 +99,33 @@ export function ReplayKlineChart({
   const normalizedKlines = useMemo(() => normalizeReplayKlines(klines), [klines]);
 
   const replayData = useMemo(() => {
-    // 战役详情用 fitAll：直接渲染全部已拉取的 K 线（最多 51 倍时间范围），
-    // 由主图缩放到铺满视口；竖线/标记仍由下方 annotations 按 currentTime 过滤。
+    // Campaign pages prefetch up to 51x context, but the chart only commits the
+    // active viewport plus overscan. This keeps 1m drag/zoom responsive while
+    // range presets can still expand instantly from the prefetched snapshot.
+    if (
+      fitAll
+      && typeof initialVisibleStartTime === 'number'
+      && typeof initialVisibleEndTime === 'number'
+    ) {
+      return sliceReplayKlinesForAnalysis(
+        normalizedKlines,
+        initialVisibleStartTime,
+        initialVisibleEndTime,
+        intervalMs,
+      );
+    }
     if (fitAll) return normalizedKlines;
     return sliceReplayKlines(normalizedKlines, currentTime, historyCandles, viewportCenterTime);
-  }, [fitAll, normalizedKlines, currentTime, historyCandles, viewportCenterTime]);
+  }, [
+    currentTime,
+    fitAll,
+    historyCandles,
+    initialVisibleEndTime,
+    initialVisibleStartTime,
+    intervalMs,
+    normalizedKlines,
+    viewportCenterTime,
+  ]);
 
   const pricePrecision = useMemo(
     () => inferReplayPricePrecision(replayData, markers, priceLines, timeBoundPriceLines),

@@ -636,13 +636,23 @@ function CandlestickChartComponent({
     && typeof analysisVisibleEndTime === "number"
     && Number.isFinite(analysisVisibleEndTime)
     && analysisVisibleEndTime > analysisVisibleStartTime;
-  const analysisVisibleCandleCount = hasAnalysisVisibleRange
-    ? data.reduce((count, item) => (
-        item.time >= analysisVisibleStartTime && item.time <= analysisVisibleEndTime
-          ? count + 1
-          : count
-      ), 0)
-    : data.length;
+  const analysisVisibleCandleCount = useMemo(
+    () => (
+      hasAnalysisVisibleRange
+        ? data.reduce((count, item) => (
+            item.time >= analysisVisibleStartTime && item.time <= analysisVisibleEndTime
+              ? count + 1
+              : count
+          ), 0)
+        : data.length
+    ),
+    [
+      analysisVisibleEndTime,
+      analysisVisibleStartTime,
+      data,
+      hasAnalysisVisibleRange,
+    ],
+  );
 
   // Prop-axis signature is stable across the async-commit retry loop (data is
   // unchanged while the native index catches up), so memoize it once instead of
@@ -668,8 +678,8 @@ function CandlestickChartComponent({
     return true;
   }, [analysisFocusTime, data.length]);
 
-  // Campaign review: keep the complete prefetched dataset, but initially fit only the requested
-  // three-part range. Users can then zoom out/pan into the wider prefetched context.
+  // Campaign review fits the requested range inside an overscanned active
+  // snapshot. Larger presets swap in wider slices from the prefetched context.
   const fitAnalysisWindow = useCallback(() => {
     const chart = chartRef.current;
     if (!chart) return false;
@@ -1128,10 +1138,9 @@ function CandlestickChartComponent({
     if (analysisMode) analysisCommitFinalizerRef.current();
   }, [analysisMode, data, propTimeAxisSignature]);
 
-  // Range presets (1.1x / 2x / ... / 51x) deliberately reuse the same complete
-  // K-line snapshot. A range-only change therefore never enters the data-feed
-  // branch above. Request a viewport pass explicitly so the preset changes bar
-  // space and centering without replacing data or rebuilding annotations.
+  // A range-only update can reuse the same active slice near dataset edges.
+  // Request a viewport pass explicitly in that case; when the active slice does
+  // change, the data-ready lifecycle safely coalesces this extra request.
   useEffect(() => {
     if (!analysisMode || !analysisFitAll || !hasAnalysisVisibleRange) return;
     const lifecycle = analysisLifecycleRef.current;

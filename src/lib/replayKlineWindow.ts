@@ -72,6 +72,57 @@ export function findReplayCursorIndex(klines: KlineData[], currentTime: number) 
   return ans;
 }
 
+function findReplayFirstIndexAtOrAfter(klines: KlineData[], targetTime: number) {
+  let lo = 0;
+  let hi = klines.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (klines[mid].time < targetTime) lo = mid + 1;
+    else hi = mid;
+  }
+  return lo;
+}
+
+/**
+ * Keep campaign review charts virtualized around the requested viewport.
+ *
+ * Campaign pages prefetch up to 51x context so every range preset remains
+ * immediately available. Committing that entire snapshot to KlineCharts is
+ * unnecessary for a 1.1x/3x viewport and makes 1m charts perform indicator,
+ * axis and annotation work over thousands of off-screen candles. This window
+ * retains half a viewport on either side plus an indicator warm-up floor.
+ */
+export function sliceReplayKlinesForAnalysis(
+  klines: KlineData[],
+  visibleStartTime: number,
+  visibleEndTime: number,
+  intervalMs: number,
+  minimumBufferCandles = 120,
+) {
+  if (
+    klines.length === 0
+    || !Number.isFinite(visibleStartTime)
+    || !Number.isFinite(visibleEndTime)
+    || visibleEndTime <= visibleStartTime
+  ) {
+    return klines;
+  }
+
+  const visibleSpan = visibleEndTime - visibleStartTime;
+  const candleBuffer = Number.isFinite(intervalMs) && intervalMs > 0
+    ? intervalMs * Math.max(0, minimumBufferCandles)
+    : 0;
+  const padding = Math.max(visibleSpan / 2, candleBuffer);
+  const activeStartTime = visibleStartTime - padding;
+  const activeEndTime = visibleEndTime + padding;
+  const startIndex = findReplayFirstIndexAtOrAfter(klines, activeStartTime);
+  const endIndex = findReplayCursorIndex(klines, activeEndTime) + 1;
+
+  if (startIndex <= 0 && endIndex >= klines.length) return klines;
+  if (endIndex <= startIndex) return klines;
+  return klines.slice(startIndex, endIndex);
+}
+
 export function sliceReplayKlines(
   klines: KlineData[],
   currentTime: number,
