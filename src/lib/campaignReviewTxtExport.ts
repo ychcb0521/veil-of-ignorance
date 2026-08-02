@@ -34,6 +34,13 @@ const DECISION_QUALITY_LABELS: Record<string, string> = {
   bad: '错误过程（结构错）',
 };
 
+const EXIT_NATURE_LABELS: Record<string, string> = {
+  take_profit_before_t: 'T 前止盈 · 主动退出',
+  deterioration_falsification_exit: '突发恶化时止盈/退出 · 证伪退出',
+  stop_above_k: 'K 上方止损 · 主动退出',
+  stop_at_k: 'K 处止损 · 被动退出',
+};
+
 const FALSIFICATION_STATUS_LABELS: Record<string, string> = {
   triggered_reacted: '触发了，我及时反应了',
   triggered_late: '触发了，但我反应晚了',
@@ -214,11 +221,13 @@ function buildLegQuestionAnswers(
   addCurrent(answers, '整个战役的总利润是多少？', campaignTotalRealizedPnl);
   addCurrent(answers, '这笔交易最终实现了多少 R？', leg.post_r_multiple);
   if (
-    quadrantApplicable
+    !isNoEntry
+    || quadrantApplicable
     || isAnswered(leg.post_result_summary)
     || isAnswered(leg.post_entry_decision_quality)
     || isAnswered(leg.post_holding_decision_quality)
     || isAnswered(leg.post_exit_decision_quality)
+    || isAnswered(leg.post_exit_nature)
     || isAnswered(leg.post_decision_quality)
   ) {
     addCurrent(answers, '结果复盘总结是什么？', leg.post_result_summary);
@@ -239,6 +248,12 @@ function buildLegQuestionAnswers(
       '离场阶段的决策质量如何？',
       leg.post_exit_decision_quality ?? leg.post_decision_quality,
       DECISION_QUALITY_LABELS,
+    );
+    addCurrent(
+      answers,
+      '这笔交易的离场性质是什么？',
+      leg.post_exit_nature,
+      EXIT_NATURE_LABELS,
     );
   }
   if (isHedge || isAnswered(leg.hedge_worth_it)) {

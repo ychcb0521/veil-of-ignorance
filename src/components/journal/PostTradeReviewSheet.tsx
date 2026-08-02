@@ -14,7 +14,7 @@ import { Slider } from '@/components/ui/slider';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { toast } from 'sonner';
-import { ChevronDown, AlertTriangle } from 'lucide-react';
+import { ChevronDown, AlertTriangle, Info } from 'lucide-react';
 import { COGNITIVE_BIAS_LABELS } from '@/lib/cognitiveBiasTags';
 import {
   classifyStructureResult,
@@ -122,6 +122,38 @@ const DECISION_QUALITY_OPTIONS: Array<{
   { value: 'bad', label: '错误', desc: '这一步偏离了当时应有的判断', accent: '#F6465D' },
 ];
 
+const EXIT_NATURE_OPTIONS: Array<{
+  value: NonNullable<TradeJournal['post_exit_nature']>;
+  position: string;
+  nature: string;
+  reason: string;
+}> = [
+  {
+    value: 'take_profit_before_t',
+    position: 'T 前止盈',
+    nature: '主动退出',
+    reason: '剩余收益不足以支付继续持有的代价',
+  },
+  {
+    value: 'deterioration_falsification_exit',
+    position: '突发恶化时止盈/退出',
+    nature: '证伪退出',
+    reason: '上行逻辑或基本面被破坏',
+  },
+  {
+    value: 'stop_above_k',
+    position: 'K 上方止损',
+    nature: '主动退出',
+    reason: '新信息降低后验概率，完整证伪成本不值得支付',
+  },
+  {
+    value: 'stop_at_k',
+    position: 'K 处止损',
+    nature: '被动退出',
+    reason: '核心假设彻底失效，触发硬底线',
+  },
+];
+
 interface Props {
   isOpen: boolean;
   onOpenChange: (open: boolean) => void;
@@ -152,6 +184,7 @@ export function PostTradeReviewSheet({
   const [entryDecisionQuality, setEntryDecisionQuality] = useState<DecisionQuality | null>(null);
   const [holdingDecisionQuality, setHoldingDecisionQuality] = useState<DecisionQuality | null>(null);
   const [exitDecisionQuality, setExitDecisionQuality] = useState<DecisionQuality | null>(null);
+  const [exitNature, setExitNature] = useState<TradeJournal['post_exit_nature']>(null);
   const [expectancyReview, setExpectancyReview] = useState('');
   const [oddsStructureReviewValue, setOddsStructureReviewValue] = useState<OddsStructureReview | null>(null);
   const [payoffEstimateGrade, setPayoffEstimateGrade] = useState<TradeJournal['post_entry_payoff_estimate_grade']>(null);
@@ -198,6 +231,7 @@ export function PostTradeReviewSheet({
         setEntryDecisionQuality(journal.post_entry_decision_quality ?? journal.post_decision_quality ?? null);
         setHoldingDecisionQuality(journal.post_holding_decision_quality ?? journal.post_decision_quality ?? null);
         setExitDecisionQuality(journal.post_exit_decision_quality ?? journal.post_decision_quality ?? null);
+        setExitNature(journal.post_exit_nature ?? null);
         const parsedOddsStructureReview = parseOddsStructureReviewText(journal.post_positive_expectancy_review);
         setOddsStructureReviewValue(parsedOddsStructureReview.review);
         setExpectancyReview(parsedOddsStructureReview.body);
@@ -397,6 +431,7 @@ export function PostTradeReviewSheet({
   const resultValid = !quadrantApplicable || !!quadrant;
   const quadrantValid = !quadrantApplicable || !!quadrant;
   const decisionValid = !decisionQualityApplicable || allPhaseDecisionQualitiesAnswered;
+  const exitNatureValid = !decisionQualityApplicable || exitNature != null;
   const falsificationFactValid = !snapshotFalsification || falsificationStatus != null;
   const oddsStructureFactValid = isHedge || !journal.pre_odds_structure || oddsStructureReviewValue != null;
   const pathValid = !showPathReview || (!!pathMode && !!tradeAgencyScore);
@@ -433,6 +468,7 @@ export function PostTradeReviewSheet({
   const canSave = everyBallPct != null
     && resultValid
     && decisionValid
+    && exitNatureValid
     && quadrantValid
     && reviewLoopValid
     && entryEstimateReviewValid
@@ -481,6 +517,7 @@ export function PostTradeReviewSheet({
         post_entry_decision_quality: decisionQualityApplicable ? entryDecisionQuality : null,
         post_holding_decision_quality: decisionQualityApplicable ? holdingDecisionQuality : null,
         post_exit_decision_quality: decisionQualityApplicable ? exitDecisionQuality : null,
+        post_exit_nature: decisionQualityApplicable ? exitNature : null,
         post_struggle_level: struggleLevel,
         post_small_position_drag: showSmallPositionDrag ? smallPositionDrag : null,
         post_missed_high_odds_state: showMissedHighOddsState ? missedHighOddsState : null,
@@ -1301,6 +1338,78 @@ export function PostTradeReviewSheet({
                     )}
                   </div>
                 ))}
+              </div>
+              <div className="space-y-2 rounded-lg border border-border/60 bg-background/45 p-3">
+                <div className="flex items-center gap-1.5">
+                  <Label className="text-[12px] font-medium">离场性质 *</Label>
+                  <Collapsible>
+                    <CollapsibleTrigger asChild>
+                      <button
+                        type="button"
+                        aria-label="查看四种离场性质说明"
+                        title="查看离场性质说明"
+                        className="inline-flex h-5 w-5 items-center justify-center text-muted-foreground/45 transition-colors hover:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                      >
+                        <Info className="h-3.5 w-3.5" />
+                      </button>
+                    </CollapsibleTrigger>
+                    <CollapsibleContent className="mt-2 overflow-hidden rounded-lg border border-border/60 bg-background/90">
+                      <div className="border-b border-border/60 px-3 py-2 text-[11px] font-semibold text-foreground">
+                        四种离场应当明确区分
+                      </div>
+                      <div className="overflow-x-auto">
+                        <table className="w-full min-w-[620px] table-fixed text-left text-[10px] leading-relaxed">
+                          <thead className="bg-muted/40 text-muted-foreground">
+                            <tr>
+                              <th className="w-[28%] px-3 py-2 font-medium">位置</th>
+                              <th className="w-[20%] px-3 py-2 font-medium">离场性质</th>
+                              <th className="px-3 py-2 font-medium">核心原因</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {EXIT_NATURE_OPTIONS.map(option => (
+                              <tr key={option.value} className="border-t border-border/50">
+                                <td className="px-3 py-2 font-medium text-foreground">{option.position}</td>
+                                <td className="px-3 py-2 text-foreground/80">{option.nature}</td>
+                                <td className="px-3 py-2 text-muted-foreground">{option.reason}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </CollapsibleContent>
+                  </Collapsible>
+                  <span className="ml-auto text-[9px] text-muted-foreground/65">按实际退出位置选择</span>
+                </div>
+                <div className="grid gap-1.5 sm:grid-cols-2">
+                  {EXIT_NATURE_OPTIONS.map(option => {
+                    const active = exitNature === option.value;
+                    return (
+                      <button
+                        key={option.value}
+                        type="button"
+                        onClick={() => setExitNature(option.value)}
+                        className={`rounded-md border px-2.5 py-2 text-left transition-colors ${
+                          active
+                            ? 'border-[#F0B90B]/65 bg-[#F0B90B]/[0.08]'
+                            : 'border-border/60 bg-background/50 hover:bg-accent/60'
+                        }`}
+                      >
+                        <div className={`text-[10px] font-semibold ${active ? 'text-[#D89B00]' : 'text-foreground'}`}>
+                          {option.position}
+                        </div>
+                        <div className="mt-0.5 flex items-center gap-1.5 text-[9px] leading-tight text-muted-foreground">
+                          <span>{option.nature}</span>
+                          <span aria-hidden="true">·</span>
+                          <span>{option.reason}</span>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+                {!exitNatureValid && (
+                  <div className="text-right font-mono text-[9px] text-[#F6465D]">请选择离场性质</div>
+                )}
               </div>
               {quadrantApplicable && (
                 quadrant ? (

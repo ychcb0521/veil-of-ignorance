@@ -590,6 +590,7 @@ export type Database = {
           post_entry_decision_quality: string | null
           post_holding_decision_quality: string | null
           post_exit_decision_quality: string | null
+          post_exit_nature: string | null
           post_design_intervention: string | null
           post_emo_disturbance: string | null
           post_emo_excuse: string | null
@@ -737,6 +738,7 @@ export type Database = {
           post_entry_decision_quality?: string | null
           post_holding_decision_quality?: string | null
           post_exit_decision_quality?: string | null
+          post_exit_nature?: string | null
           post_design_intervention?: string | null
           post_emo_disturbance?: string | null
           post_emo_excuse?: string | null
@@ -884,6 +886,7 @@ export type Database = {
           post_entry_decision_quality?: string | null
           post_holding_decision_quality?: string | null
           post_exit_decision_quality?: string | null
+          post_exit_nature?: string | null
           post_design_intervention?: string | null
           post_emo_disturbance?: string | null
           post_emo_excuse?: string | null

@@ -41,6 +41,7 @@ describe('campaignReviewTxtExport', () => {
       post_entry_decision_quality: 'good',
       post_holding_decision_quality: 'bad',
       post_exit_decision_quality: 'good',
+      post_exit_nature: 'take_profit_before_t',
       post_entry_payoff_estimate_grade: 'rr_2_5',
       post_entry_payoff_basis_review: '初始支撑位清晰，目标空间充足。',
     });
@@ -62,6 +63,7 @@ describe('campaignReviewTxtExport', () => {
     expect(output).toContain('问题：入场阶段的决策质量如何？\n答案：正当过程（结构对）');
     expect(output).toContain('问题：持仓阶段的决策质量如何？\n答案：错误过程（结构错）');
     expect(output).toContain('问题：离场阶段的决策质量如何？\n答案：正当过程（结构对）');
+    expect(output).toContain('问题：这笔交易的离场性质是什么？\n答案：T 前止盈 · 主动退出');
     expect(output).not.toContain('问题：这笔交易的决策质量如何？');
     expect(output).toContain('问题：建仓时盈亏比估计属于哪一档？\n答案：2:1-5:1');
     expect(output).not.toContain('-999');
@@ -157,6 +159,7 @@ describe('campaignReviewTxtExport', () => {
 
     expect(output).toContain('问题：全程有无给谢林兜底区该有的权重？\n答案：未填写');
     expect(output).toContain('问题：建仓时胜率估计的复盘说明是什么？\n答案：未填写');
+    expect(output).toContain('问题：这笔交易的离场性质是什么？\n答案：未填写');
     expect(output).toContain('问题：事前设定的证伪信号是否触发，我是否及时反应？\n答案：触发了，但我反应晚了');
     expect(output).not.toContain('问题：这个对冲值回成本了吗？');
   });

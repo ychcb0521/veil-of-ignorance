@@ -35,6 +35,7 @@ ALTER TABLE public.trade_journals
   ADD COLUMN IF NOT EXISTS post_entry_decision_quality     text,
   ADD COLUMN IF NOT EXISTS post_holding_decision_quality   text,
   ADD COLUMN IF NOT EXISTS post_exit_decision_quality      text,
+  ADD COLUMN IF NOT EXISTS post_exit_nature                text,
   ADD COLUMN IF NOT EXISTS post_every_ball_pct              numeric,
   ADD COLUMN IF NOT EXISTS post_positive_expectancy_review text,
   ADD COLUMN IF NOT EXISTS post_premortem_review           text,
@@ -198,6 +199,20 @@ ALTER TABLE public.trade_journals
 ALTER TABLE public.trade_journals
   ADD COLUMN IF NOT EXISTS pre_cheap_opportunity      text,
   ADD COLUMN IF NOT EXISTS post_missed_high_odds_state text;
+
+ALTER TABLE public.trade_journals
+  DROP CONSTRAINT IF EXISTS trade_journals_post_exit_nature_check;
+
+ALTER TABLE public.trade_journals
+  ADD CONSTRAINT trade_journals_post_exit_nature_check
+  CHECK (
+    post_exit_nature IS NULL OR post_exit_nature IN (
+      'take_profit_before_t',
+      'deterioration_falsification_exit',
+      'stop_above_k',
+      'stop_at_k'
+    )
+  );
 
 -- ---- relax pre_odds_structure CHECK to the current vocabulary ----------------
 -- (legacy three-state ids kept valid so any historical rows still pass)

@@ -317,6 +317,18 @@ const DECISION_QUALITY_ACCENTS: Record<string, string> = {
   bad: '#F6465D',
   mixed: '#9AA0A6',
 };
+const EXIT_NATURE_LABELS: Record<string, string> = {
+  take_profit_before_t: 'T 前止盈 · 主动退出',
+  deterioration_falsification_exit: '突发恶化时止盈/退出 · 证伪退出',
+  stop_above_k: 'K 上方止损 · 主动退出',
+  stop_at_k: 'K 处止损 · 被动退出',
+};
+const EXIT_NATURE_ACCENTS: Record<string, string> = {
+  take_profit_before_t: '#0ECB81',
+  deterioration_falsification_exit: '#F0B90B',
+  stop_above_k: '#D89B00',
+  stop_at_k: '#F6465D',
+};
 const FALSIFICATION_STATUS_LABELS: Record<string, string> = {
   triggered_reacted: '触发了，我及时反应了',
   triggered_late: '触发了，但我反应晚了',
@@ -384,6 +396,14 @@ export const POST_FIELD_SPECS: SummaryFieldSpec[] = [
     optionAccents: DECISION_QUALITY_ACCENTS,
     hint: '只按离场当时可得的信息，评价止盈、止损与退出判断。',
     getValue: journal => journal.post_exit_decision_quality ?? journal.post_decision_quality,
+  },
+  {
+    key: 'post_exit_nature',
+    label: '离场性质',
+    type: 'enum',
+    optionLabels: EXIT_NATURE_LABELS,
+    optionAccents: EXIT_NATURE_ACCENTS,
+    hint: '区分主动退出、证伪退出与被动退出，并保留具体离场位置。',
   },
   { key: 'post_struggle_level', label: '过程纠结度（1 极煎熬 → 5 行云流水）', type: 'numeric', numericMin: 1, numericMax: 5, numericLabels: STRUGGLE_LEVEL_LABELS as unknown as Record<string, string>, hint: '亏损的先行指标。' },
   { key: 'exit_falsification_status', label: '证伪信号触发状态（止）', type: 'enum', optionLabels: FALSIFICATION_STATUS_LABELS, optionAccents: FALSIFICATION_STATUS_ACCENTS, hint: '事前的止 vs 事后真实退出动作。' },

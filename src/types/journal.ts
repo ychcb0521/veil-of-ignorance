@@ -123,6 +123,12 @@ export type JournalSource = 'live' | 'retroactive_from_record';
 /** Training-set vs holdout-set discipline (anti-overfitting). */
 export type DatasetSplit = 'in_sample' | 'out_of_sample';
 export type DecisionQuality = 'good' | 'mixed' | 'bad';
+/** 平仓评价中的四种离场位置 / 性质。 */
+export type PostExitNature =
+  | 'take_profit_before_t'
+  | 'deterioration_falsification_exit'
+  | 'stop_above_k'
+  | 'stop_at_k';
 export type EntryPayoffEstimateGrade = 'rr_1_2' | 'rr_2_5' | 'rr_gt_5';
 export type EntryWinRateEstimateGrade = 'wr_lt_50' | 'wr_50_80' | 'wr_gt_80';
 export type RuleCategory = 'hard' | 'core' | 'watch' | 'retired';
@@ -819,6 +825,8 @@ export interface TradeJournal {
   post_holding_decision_quality?: DecisionQuality | null;
   /** Exit decision quality under the information available at exit. */
   post_exit_decision_quality?: DecisionQuality | null;
+  /** Exit position and its corresponding active / falsification / passive nature. */
+  post_exit_nature?: PostExitNature | null;
   /** 纠结度 / 轻松度（1 煎熬 … 5 行云流水）。过程质量的先行指标 —— 交易最重要的是轻松，不是赚钱。 */
   post_struggle_level?: 1 | 2 | 3 | 4 | 5 | null;
   /** 小机会仓位的隐性成本记账。仅对快照里被标记为小机会仓位的单子追问。 */
