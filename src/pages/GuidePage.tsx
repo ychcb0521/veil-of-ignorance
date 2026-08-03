@@ -1293,7 +1293,7 @@ export default function GuidePage() {
                     <tr><td className="px-3 py-2 border-t border-border">单场几何期望 Gᵢ</td><td className="px-3 py-2 border-t border-border">(1+bᵢ·xᵢ)^P(赢) × (1−xᵢ)^(1−P(赢)) − 1</td><td className="px-3 py-2 border-t border-border">bᵢ 可为负；缺少有效 Lᵢ 或可用 Aᵢ 时不估算</td></tr>
                     <tr><td className="px-3 py-2 border-t border-border">汇总 Kelly 仓位 x*</td><td className="px-3 py-2 border-t border-border">b̄ &gt; 0 时：max（0，（P(赢)·b̄ −（1−P(赢)））÷ b̄）；b̄ ≤ 0 时为 0</td><td className="px-3 py-2 border-t border-border">由当前有效样本推导的模型最优风险比例，不是各场实际 xᵢ 的平均值</td></tr>
                     <tr><td className="px-3 py-2 border-t border-border">汇总几何期望 G</td><td className="px-3 py-2 border-t border-border">(1+b̄·x*)^P(赢) × (1−x*)^(1−P(赢)) − 1</td><td className="px-3 py-2 border-t border-border">表示在历史总体参数和 Kelly 最优仓位下的理论每笔复利率</td></tr>
-                    <tr><td className="px-3 py-2 border-t border-border">复合战役增长率 CGRₙ</td><td className="px-3 py-2 border-t border-border">[Π（1 + 已实现盈亏ᵢ ÷ 入场账户资产 Aᵢ）]^(1/N) − 1</td><td className="px-3 py-2 border-t border-border">只使用有效战役；Aᵢ 优先采用主力开仓资产快照，历史缺失时用今日账户资产估算。每场先归一化再连乘，避免账户规模与入出金直接扭曲结果</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border">复合战役增长率 CGRₙ</td><td className="px-3 py-2 border-t border-border">[Π（1 + 已实现盈亏ᵢ ÷ 入场账户资产 Aᵢ）]^(1/N) − 1</td><td className="px-3 py-2 border-t border-border">从 2026-08-03 21:04（客观操作时间）起前瞻统计；此前历史战役不纳入。Aᵢ 优先采用主力开仓资产快照，历史缺失时用今日账户资产估算</td></tr>
                   </tbody>
                 </table>
               </div>
@@ -1301,7 +1301,7 @@ export default function GuidePage() {
                 没有初始最大预期亏损，就没有可用分母，因此该战役的盈亏比显示「—」。它不会进入盈亏比排序，也不会进入胜率、平均盈亏比和期望值。统计概览中的指标可单击查看公式；排序行中的公式指标需双击或右键查看，单击只负责排序。
               </RedHighlight>
               <P>单场几何期望优先使用主力开仓时固化的实时账户总资产快照，该值不会被后续资产变化改写。旧战役若因字段上线较晚而缺少快照，系统会用<strong>今日当前总账户资产</strong>作为替代分母，使历史战役仍可计算和排序；这个回退值是历史估算而非当时资产的还原，会随当前账户资产实时更新。</P>
-              <P><strong>复合战役增长率</strong>沿用 CAGR 的复利结构，但用有效战役数 N 替代年数。它衡量已经实现的历史资本因子平均每场增长多少，与根据胜率和盈亏比推演的理论几何期望不同。正值表示有效战役的资本因子几何平均大于 1，负值表示平均每场复合收缩；任一战役亏损达到或超过其入场账户资产时，增长因子不再为正，结果按 −100% 处理。</P>
+              <P><strong>复合战役增长率</strong>沿用 CAGR 的复利结构，但用有效战役数 N 替代年数。该指标从 <strong>2026-08-03 21:04（北京时间）</strong>固定起算，以每场战役未经时间机器移位的客观操作时间判断是否进入样本；起算前的历史战役以及缺少客观操作时间的战役不纳入，后来归类或编辑也不会改变这一边界。它衡量起算后已经实现的资本因子平均每场增长多少，与根据胜率和盈亏比推演的理论几何期望不同。正值表示资本因子几何平均大于 1，负值表示平均每场复合收缩；任一纳入战役亏损达到或超过其入场账户资产时，增长因子不再为正，结果按 −100% 处理。</P>
 
               <SubTitle>不对称风险指标</SubTitle>
               <P>本策略刻意让左尾受控、右尾开放，因此不直接用标准差或夏普把右尾也当作风险扣分。「不对称风险」与实时胜率、平均盈亏比和期望值使用完全相同的账户级有效战役池：每场以 <strong>b = 已实现 P&amp;L ÷ 最大预期亏损</strong>计量，b &gt; 0 为盈利战役，b ≤ 0 为亏损战役。系统不做截尾，b &lt; −1 的超额实亏会完整进入下行统计。</P>

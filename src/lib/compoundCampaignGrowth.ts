@@ -7,6 +7,13 @@ export interface CompoundCampaignGrowthSample {
   eligible?: boolean;
   /** True when legacy data uses current account equity instead of an entry snapshot. */
   estimated?: boolean;
+  /** Objective wallet-clock time of the campaign's latest operation. */
+  operationTime?: number | null;
+}
+
+export interface CompoundCampaignGrowthOptions {
+  /** Only campaigns operated at or after this objective time enter the sample. */
+  startAt?: number | null;
 }
 
 export interface CompoundCampaignGrowthSummary {
@@ -16,9 +23,18 @@ export interface CompoundCampaignGrowthSummary {
   totalGrowthFactor: number | null;
   sampleCount: number;
   estimatedSampleCount: number;
+  excludedBeforeStartCount: number;
+  excludedMissingOperationTimeCount: number;
   /** A campaign lost at least 100% of its entry account equity. */
   wipedOut: boolean;
 }
+
+/**
+ * Forward-only measurement boundary requested on 2026-08-03 21:04:33 CST.
+ * Keep this fixed: moving it with deployment time would make the metric unstable.
+ */
+export const COMPOUND_CAMPAIGN_GROWTH_START_AT = Date.parse('2026-08-03T13:04:33.000Z');
+export const COMPOUND_CAMPAIGN_GROWTH_START_LABEL = '2026-08-03 21:04（客观操作时间）';
 
 /**
  * CAGR with campaign count replacing elapsed years:
@@ -29,8 +45,9 @@ export interface CompoundCampaignGrowthSummary {
  */
 export function computeCompoundCampaignGrowth(
   samples: CompoundCampaignGrowthSample[],
+  options: CompoundCampaignGrowthOptions = {},
 ): CompoundCampaignGrowthSummary {
-  const included = samples.filter(sample => (
+  const valid = samples.filter(sample => (
     sample.eligible !== false
     && typeof sample.realizedPnl === 'number'
     && Number.isFinite(sample.realizedPnl)
@@ -38,6 +55,23 @@ export function computeCompoundCampaignGrowth(
     && Number.isFinite(sample.accountEquityAtEntry)
     && sample.accountEquityAtEntry > 0
   ));
+  const startAt = typeof options.startAt === 'number' && Number.isFinite(options.startAt)
+    ? options.startAt
+    : null;
+  let excludedBeforeStartCount = 0;
+  let excludedMissingOperationTimeCount = 0;
+  const included = valid.filter(sample => {
+    if (startAt == null) return true;
+    if (typeof sample.operationTime !== 'number' || !Number.isFinite(sample.operationTime)) {
+      excludedMissingOperationTimeCount += 1;
+      return false;
+    }
+    if (sample.operationTime < startAt) {
+      excludedBeforeStartCount += 1;
+      return false;
+    }
+    return true;
+  });
 
   if (included.length === 0) {
     return {
@@ -45,6 +79,8 @@ export function computeCompoundCampaignGrowth(
       totalGrowthFactor: null,
       sampleCount: 0,
       estimatedSampleCount: 0,
+      excludedBeforeStartCount,
+      excludedMissingOperationTimeCount,
       wipedOut: false,
     };
   }
@@ -69,6 +105,8 @@ export function computeCompoundCampaignGrowth(
       totalGrowthFactor: 0,
       sampleCount: included.length,
       estimatedSampleCount,
+      excludedBeforeStartCount,
+      excludedMissingOperationTimeCount,
       wipedOut: true,
     };
   }
@@ -78,6 +116,8 @@ export function computeCompoundCampaignGrowth(
     totalGrowthFactor: Math.exp(logGrowthFactor),
     sampleCount: included.length,
     estimatedSampleCount,
+    excludedBeforeStartCount,
+    excludedMissingOperationTimeCount,
     wipedOut: false,
   };
 }

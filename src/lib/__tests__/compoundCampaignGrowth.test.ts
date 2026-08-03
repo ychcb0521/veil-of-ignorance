@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  COMPOUND_CAMPAIGN_GROWTH_START_AT,
   computeCompoundCampaignGrowth,
   formatCompoundCampaignGrowthRate,
 } from '../compoundCampaignGrowth';
@@ -16,6 +17,8 @@ describe('computeCompoundCampaignGrowth', () => {
     expect(result.totalGrowthFactor).toBeCloseTo(1.2792, 10);
     expect(result.rate).toBeCloseTo(0.085540798, 8);
     expect(result.estimatedSampleCount).toBe(0);
+    expect(result.excludedBeforeStartCount).toBe(0);
+    expect(result.excludedMissingOperationTimeCount).toBe(0);
     expect(result.wipedOut).toBe(false);
   });
 
@@ -52,8 +55,36 @@ describe('computeCompoundCampaignGrowth', () => {
       totalGrowthFactor: null,
       sampleCount: 0,
       estimatedSampleCount: 0,
+      excludedBeforeStartCount: 0,
+      excludedMissingOperationTimeCount: 0,
       wipedOut: false,
     });
+  });
+
+  it('starts at the fixed objective-time boundary and excludes all earlier history', () => {
+    const result = computeCompoundCampaignGrowth([
+      {
+        realizedPnl: 30,
+        accountEquityAtEntry: 100,
+        operationTime: COMPOUND_CAMPAIGN_GROWTH_START_AT - 1,
+      },
+      {
+        realizedPnl: 20,
+        accountEquityAtEntry: 100,
+        operationTime: COMPOUND_CAMPAIGN_GROWTH_START_AT,
+      },
+      {
+        realizedPnl: 50,
+        accountEquityAtEntry: 100,
+        operationTime: null,
+      },
+    ], { startAt: COMPOUND_CAMPAIGN_GROWTH_START_AT });
+
+    expect(result.sampleCount).toBe(1);
+    expect(result.rate).toBeCloseTo(0.2, 10);
+    expect(result.totalGrowthFactor).toBeCloseTo(1.2, 10);
+    expect(result.excludedBeforeStartCount).toBe(1);
+    expect(result.excludedMissingOperationTimeCount).toBe(1);
   });
 });
 

@@ -48,6 +48,8 @@ import {
   resolveCampaignOpportunityQuality,
 } from '@/lib/campaignMetrics';
 import {
+  COMPOUND_CAMPAIGN_GROWTH_START_AT,
+  COMPOUND_CAMPAIGN_GROWTH_START_LABEL,
   computeCompoundCampaignGrowth,
   formatCompoundCampaignGrowthRate,
 } from '@/lib/compoundCampaignGrowth';
@@ -664,16 +666,20 @@ export default function JournalCampaignsPage() {
     [displayRows, sortState],
   );
   const compoundCampaignGrowth = useMemo(
-    () => computeCompoundCampaignGrowth(displayRows.map(row => ({
-      realizedPnl: row.campaign.final_realized_pnl,
-      accountEquityAtEntry: row.riskAccountEquity,
-      eligible: (
-        ['closed_profit', 'closed_loss', 'closed_breakeven'].includes(row.campaign.status)
-        && row.profitCaptureRatio != null
-        && Number.isFinite(row.profitCaptureRatio)
-      ),
-      estimated: row.initialRiskSource === 'current_account_fallback',
-    }))),
+    () => computeCompoundCampaignGrowth(
+      displayRows.map(row => ({
+        realizedPnl: row.campaign.final_realized_pnl,
+        accountEquityAtEntry: row.riskAccountEquity,
+        eligible: (
+          ['closed_profit', 'closed_loss', 'closed_breakeven'].includes(row.campaign.status)
+          && row.profitCaptureRatio != null
+          && Number.isFinite(row.profitCaptureRatio)
+        ),
+        estimated: row.initialRiskSource === 'current_account_fallback',
+        operationTime: campaignOperationTime(row.legs, row.tradeRecords),
+      })),
+      { startAt: COMPOUND_CAMPAIGN_GROWTH_START_AT },
+    ),
     [displayRows],
   );
   const winRateLabel = performance.winRate == null ? '—' : `${(performance.winRate * 100).toFixed(2)}%`;
@@ -1357,10 +1363,74 @@ export default function JournalCampaignsPage() {
                     <div className="font-medium text-foreground">不对称风险</div>
                     <div className="mt-0.5 text-[10px] text-muted-foreground">上行与下行分开计量，完整保留右尾贡献</div>
                   </div>
-                  <details className="group text-[10px] text-muted-foreground">
-                    <summary className="cursor-pointer select-none list-none rounded px-1.5 py-1 hover:bg-muted/70">说明</summary>
-                    <div className="absolute right-3 top-12 z-10 w-[min(86vw,25rem)] rounded border border-border bg-card p-3 shadow-md">
-                      标准差和夏普会把右尾也当作风险。本模块把盈利波动留在上行，把亏损波动留在下行；不截尾、不缩尾，b&lt;−1 的实亏会完整计入。
+                  <details
+                    data-testid="asymmetric-risk-help"
+                    className="group text-[10px] text-muted-foreground"
+                  >
+                    <summary
+                      data-testid="asymmetric-risk-help-toggle"
+                      className="cursor-pointer select-none list-none rounded px-1.5 py-1 hover:bg-muted/70"
+                    >
+                      说明
+                    </summary>
+                    <div className="absolute right-3 top-12 z-10 max-h-[70vh] w-[min(90vw,36rem)] overflow-y-auto rounded border border-border bg-card p-3 shadow-lg">
+                      <div className="font-medium text-foreground">计算口径与符号</div>
+                      <div className="mt-1.5 space-y-1 leading-relaxed">
+                        <div><span className="font-mono text-foreground">bᵢ = 已实现 P&amp;Lᵢ ÷ 最大预期亏损ᵢ</span>。只使用与实时胜率完全相同、且属于当前账户的有效战役。</div>
+                        <div><span className="font-mono text-foreground">N</span> = 全部有效战役数；<span className="font-mono text-foreground">n_win</span> = bᵢ &gt; 0 的盈利战役数；<span className="font-mono text-foreground">n_loss</span> = bᵢ ≤ 0 的亏损战役数。</div>
+                        <div>不做任何异常值剔除，bᵢ &lt; −1 的超额实亏完整保留。盈亏比为空的已结束战役整场排除，并在模块脚注明示数量。</div>
+                      </div>
+
+                      <div className="mt-3 space-y-2">
+                        <div className="rounded border border-border/70 p-2">
+                          <div className="font-medium text-foreground">1. DSI 下行纪律系数</div>
+                          <div className="mt-1 font-mono text-foreground">DSI = √[Σ(bᵢ² | bᵢ ≤ 0) ÷ n_loss]</div>
+                          <div className="mt-1 leading-relaxed">只在亏损组内计算每笔亏损 R 倍数的均方根。设计亏损都贴近 −1R 时，DSI 接近 1；超过 1 的部分反映止损或对冲委托被越过。越小越好：≤1.05 绿，1.05–1.15 黄，&gt;1.15 红。</div>
+                        </div>
+
+                        <div className="rounded border border-border/70 p-2">
+                          <div className="font-medium text-foreground">2. USI 上行保留系数</div>
+                          <div className="mt-1 font-mono text-foreground">USI = √[Σ(bᵢ² | bᵢ &gt; 0) ÷ n_win] ÷ [Σ(bᵢ | bᵢ &gt; 0) ÷ n_win]</div>
+                          <div className="mt-1 leading-relaxed">盈利组的均方根除以盈利组均值，用来观察盈利分布是否仍保留少数大额右尾。若所有盈利几乎一样，分子与分母接近，USI 趋近 1；右尾越长，USI 越大。≥1.80 绿，1.50–1.80 黄，&lt;1.50 红。</div>
+                        </div>
+
+                        <div className="rounded border border-border/70 p-2">
+                          <div className="font-medium text-foreground">3. 上行标准差 σ_u</div>
+                          <div className="mt-1 font-mono text-foreground">σ_u = √[Σ max(bᵢ, 0)² ÷ N]</div>
+                          <div className="mt-1 leading-relaxed">每场只保留正向 R 倍数，亏损场按 0 进入求和，最后除以全部有效战役数 N。它描述整个战役序列中的上行波动强度；对本策略而言右尾是产出，应关注它是否被保留，而不是机械压低。</div>
+                        </div>
+
+                        <div className="rounded border border-border/70 p-2">
+                          <div className="font-medium text-foreground">4. 下行标准差 σ_d</div>
+                          <div className="mt-1 font-mono text-foreground">σ_d = √[Σ min(bᵢ, 0)² ÷ N]</div>
+                          <div className="mt-1 leading-relaxed">每场只保留负向 R 倍数，盈利场按 0 进入求和，分母仍是全部有效战役数 N。这是 MAR=0 的教科书 Sortino 口径，越小越好；它与只除以 n_loss 的 DSI 是不同口径，不能互换。</div>
+                        </div>
+
+                        <div className="rounded border border-border/70 p-2">
+                          <div className="font-medium text-foreground">5. UPR 上行潜力比</div>
+                          <div className="mt-1 font-mono text-foreground">U1 = Σ max(bᵢ, 0) ÷ N；UPR = U1 ÷ σ_d</div>
+                          <div className="mt-1 leading-relaxed">U1 是每场战役贡献的平均正向 R，上行只进入分子；σ_d 只度量下行并进入分母。UPR 因此直接衡量每单位下行波动换来了多少上行潜力，越大越好，是本模块主指标。</div>
+                        </div>
+
+                        <div className="rounded border border-border/70 p-2">
+                          <div className="font-medium text-foreground">6. Omega 比率</div>
+                          <div className="mt-1 font-mono text-foreground">D1 = Σ max(−bᵢ, 0) ÷ N；Omega = U1 ÷ D1</div>
+                          <div className="mt-1 leading-relaxed">D1 是每场战役贡献的平均负向 R 绝对值。Omega 比较累计上行与累计下行：等于 1 为盈亏平衡，大于 1 表示上行总量超过下行总量，越大越好。</div>
+                        </div>
+                      </div>
+
+                      <div className="mt-3 rounded bg-muted/60 p-2 leading-relaxed">
+                        <div className="font-medium text-foreground">Sortino 对照与恒等式</div>
+                        <div className="mt-1 font-mono text-foreground">Sortino = (U1 − D1) ÷ σ_d</div>
+                        <div className="mt-1 font-mono text-foreground">Sortino ≡ UPR − D1 ÷ σ_d</div>
+                        <div className="mt-1">系统逐次校验两边是否一致，用来发现样本池、分母或符号口径漂移。</div>
+                      </div>
+
+                      <div className="mt-3 border-t border-border/70 pt-2 leading-relaxed">
+                        <div className="font-medium text-foreground">空值与样本提示</div>
+                        <div className="mt-1">无亏损样本时，DSI、σ_d、UPR、Omega、Sortino 显示「—」；无盈利样本时，USI、σ_u、U1、UPR、Omega 显示「—」。任何除数为 0 也返回「—」，不会显示 0 或 ∞。</div>
+                        <div className="mt-1">n_loss &lt; 5 或 n_win &lt; 5 时仍显示可计算结果，同时加灰色「样本不足 n=X」角标。</div>
+                      </div>
                     </div>
                   </details>
                 </div>
@@ -1446,6 +1516,10 @@ export default function JournalCampaignsPage() {
                 <div className="mt-2 rounded bg-muted/60 px-2 py-1.5 font-mono leading-relaxed text-foreground">
                   CGRₙ = [Π（1 + 已实现盈亏ᵢ ÷ 入场账户资产 Aᵢ）]^(1/N) − 1
                 </div>
+                <div className="mt-2 rounded border border-[#F0B90B]/20 bg-[#F0B90B]/5 px-2 py-1.5 text-muted-foreground">
+                  <div className="font-medium text-foreground">起算：{COMPOUND_CAMPAIGN_GROWTH_START_LABEL}</div>
+                  <div className="mt-0.5">只纳入客观操作时间达到起算点、且在此后完成的有效战役；此前历史战役永久排除，不因后来归类或编辑重新进入。</div>
+                </div>
                 {compoundCampaignGrowth.rate != null && compoundCampaignGrowth.totalGrowthFactor != null ? (
                   <div className="mt-2 space-y-1 text-muted-foreground">
                     <div className="font-mono">
@@ -1466,8 +1540,14 @@ export default function JournalCampaignsPage() {
                     <div>未结束、缺少有效最大预期亏损、缺少可用入场资产或已实现盈亏的战役不计入 N。</div>
                   </div>
                 ) : (
-                  <div className="mt-2 text-muted-foreground">当前列表没有同时具备有效风险分母、已实现盈亏和入场账户资产的战役。</div>
+                  <div className="mt-2 text-muted-foreground">起算后暂时没有同时具备有效风险分母、已实现盈亏、入场账户资产和客观操作时间的战役。</div>
                 )}
+                {compoundCampaignGrowth.excludedBeforeStartCount > 0 ? (
+                  <div className="mt-2 text-muted-foreground">已排除起算前历史战役 {compoundCampaignGrowth.excludedBeforeStartCount} 场。</div>
+                ) : null}
+                {compoundCampaignGrowth.excludedMissingOperationTimeCount > 0 ? (
+                  <div className="mt-1 text-muted-foreground">另有 {compoundCampaignGrowth.excludedMissingOperationTimeCount} 场缺少客观操作时间，未纳入。</div>
+                ) : null}
               </PopoverContent>
             </Popover>
           </div>
