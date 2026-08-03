@@ -79,6 +79,11 @@ import {
   runAndPersistCustomCounterfactual,
 } from '@/lib/journalApi';
 import { summarizeCampaignPerformance, type CampaignPerformanceSummary } from '@/lib/kellySizing';
+import {
+  computeAsymmetricRiskContribution,
+  summarizeAsymmetricRiskMetrics,
+  type AsymmetricRiskMetricsSummary,
+} from '@/lib/asymmetricRiskMetrics';
 import { formatOpportunityQuality } from '@/lib/opportunityQuality';
 import { STRATEGY_TEMPLATES } from '@/lib/strategyTemplates';
 import {
@@ -474,10 +479,15 @@ function buildCounterfactualChartArtifacts(
   return { markers, timeBoundPriceLines, verticalLines };
 }
 
+type AccountCampaignMetrics = {
+  performance: CampaignPerformanceSummary;
+  asymmetricRisk: AsymmetricRiskMetricsSummary;
+};
+
 async function loadAccountCampaignPerformance(
   ownerUserId: string,
   viewerUserId: string,
-): Promise<CampaignPerformanceSummary> {
+): Promise<AccountCampaignMetrics> {
   const campaigns = ownerUserId === viewerUserId
     ? await listAllCampaigns(ownerUserId)
     : (await listVisibleCampaigns(viewerUserId)).filter(item => item.user_id === ownerUserId);
@@ -518,7 +528,10 @@ async function loadAccountCampaignPerformance(
     result.status === 'fulfilled' ? [result.value] : []
   ));
 
-  return summarizeCampaignPerformance(samples);
+  return {
+    performance: summarizeCampaignPerformance(samples),
+    asymmetricRisk: summarizeAsymmetricRiskMetrics(samples),
+  };
 }
 
 export default function JournalCampaignDetailPage() {
@@ -568,6 +581,7 @@ export default function JournalCampaignDetailPage() {
   const campaignChartExportRef = useRef<HTMLDivElement | null>(null);
   const [isOwner, setIsOwner] = useState(true);
   const [campaignPerformance, setCampaignPerformance] = useState<CampaignPerformanceSummary | null>(null);
+  const [campaignAsymmetricRisk, setCampaignAsymmetricRisk] = useState<AsymmetricRiskMetricsSummary | null>(null);
   const [campaignPerformanceLoading, setCampaignPerformanceLoading] = useState(false);
   const [campaignPerformanceError, setCampaignPerformanceError] = useState<string | null>(null);
   const [campaignEmotionDiary, setCampaignEmotionDiary] = useState<DecisionEmotionDiary | null>(null);
@@ -626,11 +640,15 @@ export default function JournalCampaignDetailPage() {
     if (!campaignOwnerId || !viewerUserId) return;
     let cancelled = false;
     setCampaignPerformance(null);
+    setCampaignAsymmetricRisk(null);
     setCampaignPerformanceError(null);
     setCampaignPerformanceLoading(true);
     loadAccountCampaignPerformance(campaignOwnerId, viewerUserId)
-      .then(summary => {
-        if (!cancelled) setCampaignPerformance(summary);
+      .then(result => {
+        if (!cancelled) {
+          setCampaignPerformance(result.performance);
+          setCampaignAsymmetricRisk(result.asymmetricRisk);
+        }
       })
       .catch(error => {
         if (!cancelled) {
@@ -869,6 +887,12 @@ export default function JournalCampaignDetailPage() {
     reverseHedgeOrders,
     tradeRecords,
   ]);
+  const asymmetricRiskContribution = useMemo(() => computeAsymmetricRiskContribution(
+    campaignMetricValues?.profitCaptureRatio == null
+      ? null
+      : campaignMetricValues.profitCaptureRatio / 100,
+    campaignAsymmetricRisk,
+  ), [campaignAsymmetricRisk, campaignMetricValues?.profitCaptureRatio]);
   const campaignPnlOverviewItems = useMemo<CampaignPnlOverviewItem[]>(() => {
     if (!campaign || !accuracy) return [];
     const realizedPnl = pnlReconciliation?.correctedPnl ?? campaign.final_realized_pnl;
@@ -980,6 +1004,29 @@ export default function JournalCampaignDetailPage() {
         ),
       },
       {
+        key: 'asymmetricRiskContribution',
+        label: '本场 b 对 DSI/USI 的贡献',
+        value: asymmetricRiskContribution == null
+          ? '—'
+          : `${asymmetricRiskContribution.group === 'win' ? 'USI' : 'DSI'} · b²/n = ${asymmetricRiskContribution.meanSquareTerm.toFixed(4)}${
+            asymmetricRiskContribution.meanSquareShare == null
+              ? ''
+              : `（组内 ${(asymmetricRiskContribution.meanSquareShare * 100).toFixed(1)}%）`
+          }`,
+        help: (
+          <>
+            <p>盈利战役进入 USI 的上行组；亏损或持平战役进入 DSI 的下行组。</p>
+            <div className="rounded bg-muted/60 px-2 py-1 font-mono text-foreground">本场均方贡献 = b² ÷ 对应组样本数 n</div>
+            <p>括号内的组内占比 = 本场 b² ÷ 对应组 Σb²，用于定位哪些战役拉高了 DSI 或支撑了 USI。</p>
+            {asymmetricRiskContribution != null ? (
+              <p className="font-mono text-foreground">
+                本场 b = {((campaignMetricValues?.profitCaptureRatio ?? 0) / 100).toFixed(2)}，n = {asymmetricRiskContribution.sampleCount}
+              </p>
+            ) : <p>本场缺少有效最大预期亏损，或账户级样本尚未加载，因此不计算。</p>}
+          </>
+        ),
+      },
+      {
         key: 'opportunityQuality',
         label: '机会质量',
         value: formatOpportunityQuality(opportunityQuality),
@@ -1043,6 +1090,7 @@ export default function JournalCampaignDetailPage() {
     ];
   }, [
     accuracy,
+    asymmetricRiskContribution,
     campaign,
     campaignMetricValues,
     campaignPerformance?.expectedWinRate,

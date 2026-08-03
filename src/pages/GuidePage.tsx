@@ -1265,7 +1265,7 @@ export default function GuidePage() {
               <P>点击卡片右侧的小箭头，会在卡片内部展开战役时间、结构与时长、已实现盈亏和完整 Legs 标签；再次点击即收起。点击卡片其他区域会进入战役详情，详情始终从页面顶部打开；从详情左上角返回时，会恢复进入前的排序参数、方向和列表滚动位置。</P>
 
               <SubTitle>统计概览与排序</SubTitle>
-              <P>「统计概览」与「排序方式」分成上下两行：概览汇总有效战役、镜像止盈、胜率、平均盈亏比、期望值、几何期望与机会质量；排序行只负责改变战役顺序，避免统计与操作混在一起。</P>
+              <P>「统计概览」与「排序方式」分成上下两行：概览汇总有效战役、镜像止盈、胜率、平均盈亏比、期望值、几何期望、机会质量、复合战役增长率与不对称风险；排序行只负责改变战役顺序，避免统计与操作混在一起。</P>
               <P>统计指标<strong>单击一次</strong>展开公式、有效样本和当前代入值，再单击一次关闭。排序按钮<strong>单击</strong>只执行排序；再次单击同一按钮，在升序与降序之间切换。需要查看排序指标公式时，使用<strong>双击或右键</strong>，不会因为查看说明而误改排序方向。</P>
               <P>默认按<strong>真实操作时间</strong>从新到旧排序；还可以按重要性、预期回撤、机会质量、盈亏比、算术期望、几何期望、镜像止盈或字母顺序双向排序。这里的操作时间是客观发生时间，不是无知之幕时间机器里的模拟时间。</P>
 
@@ -1293,6 +1293,7 @@ export default function GuidePage() {
                     <tr><td className="px-3 py-2 border-t border-border">单场几何期望 Gᵢ</td><td className="px-3 py-2 border-t border-border">(1+bᵢ·xᵢ)^P(赢) × (1−xᵢ)^(1−P(赢)) − 1</td><td className="px-3 py-2 border-t border-border">bᵢ 可为负；缺少有效 Lᵢ 或可用 Aᵢ 时不估算</td></tr>
                     <tr><td className="px-3 py-2 border-t border-border">汇总 Kelly 仓位 x*</td><td className="px-3 py-2 border-t border-border">b̄ &gt; 0 时：max（0，（P(赢)·b̄ −（1−P(赢)））÷ b̄）；b̄ ≤ 0 时为 0</td><td className="px-3 py-2 border-t border-border">由当前有效样本推导的模型最优风险比例，不是各场实际 xᵢ 的平均值</td></tr>
                     <tr><td className="px-3 py-2 border-t border-border">汇总几何期望 G</td><td className="px-3 py-2 border-t border-border">(1+b̄·x*)^P(赢) × (1−x*)^(1−P(赢)) − 1</td><td className="px-3 py-2 border-t border-border">表示在历史总体参数和 Kelly 最优仓位下的理论每笔复利率</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border">复合战役增长率 CGRₙ</td><td className="px-3 py-2 border-t border-border">[Π（1 + 已实现盈亏ᵢ ÷ 入场账户资产 Aᵢ）]^(1/N) − 1</td><td className="px-3 py-2 border-t border-border">只使用有效战役；Aᵢ 优先采用主力开仓资产快照，历史缺失时用今日账户资产估算。每场先归一化再连乘，避免账户规模与入出金直接扭曲结果</td></tr>
                   </tbody>
                 </table>
               </div>
@@ -1300,6 +1301,25 @@ export default function GuidePage() {
                 没有初始最大预期亏损，就没有可用分母，因此该战役的盈亏比显示「—」。它不会进入盈亏比排序，也不会进入胜率、平均盈亏比和期望值。统计概览中的指标可单击查看公式；排序行中的公式指标需双击或右键查看，单击只负责排序。
               </RedHighlight>
               <P>单场几何期望优先使用主力开仓时固化的实时账户总资产快照，该值不会被后续资产变化改写。旧战役若因字段上线较晚而缺少快照，系统会用<strong>今日当前总账户资产</strong>作为替代分母，使历史战役仍可计算和排序；这个回退值是历史估算而非当时资产的还原，会随当前账户资产实时更新。</P>
+              <P><strong>复合战役增长率</strong>沿用 CAGR 的复利结构，但用有效战役数 N 替代年数。它衡量已经实现的历史资本因子平均每场增长多少，与根据胜率和盈亏比推演的理论几何期望不同。正值表示有效战役的资本因子几何平均大于 1，负值表示平均每场复合收缩；任一战役亏损达到或超过其入场账户资产时，增长因子不再为正，结果按 −100% 处理。</P>
+
+              <SubTitle>不对称风险指标</SubTitle>
+              <P>本策略刻意让左尾受控、右尾开放，因此不直接用标准差或夏普把右尾也当作风险扣分。「不对称风险」与实时胜率、平均盈亏比和期望值使用完全相同的账户级有效战役池：每场以 <strong>b = 已实现 P&amp;L ÷ 最大预期亏损</strong>计量，b &gt; 0 为盈利战役，b ≤ 0 为亏损战役。系统不做截尾，b &lt; −1 的超额实亏会完整进入下行统计。</P>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm border border-border rounded-lg overflow-hidden">
+                  <thead className="bg-muted"><tr><th className="text-left px-3 py-2">指标</th><th className="text-left px-3 py-2">计算</th><th className="text-left px-3 py-2">阅读方式</th></tr></thead>
+                  <tbody>
+                    <tr><td className="px-3 py-2 border-t border-border">DSI 下行纪律系数</td><td className="px-3 py-2 border-t border-border">√（Σ亏损 b² ÷ n_loss）</td><td className="px-3 py-2 border-t border-border">越小越好；≤1.05 绿，1.05–1.15 黄，&gt;1.15 红</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border">USI 上行保留系数</td><td className="px-3 py-2 border-t border-border">√（Σ盈利 b² ÷ n_win）÷（Σ盈利 b ÷ n_win）</td><td className="px-3 py-2 border-t border-border">越大越好；≥1.80 绿，1.50–1.80 黄，&lt;1.50 红</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border">上行标准差 σ_u</td><td className="px-3 py-2 border-t border-border">√（Σmax（b,0）² ÷ N）</td><td className="px-3 py-2 border-t border-border">以全部有效战役 N 为分母；观察右尾是否被保留</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border">下行标准差 σ_d</td><td className="px-3 py-2 border-t border-border">√（Σmin（b,0）² ÷ N）</td><td className="px-3 py-2 border-t border-border">越小越好；这是 Sortino 全样本口径，不可与 DSI 的条件口径混用</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border">UPR 上行潜力比</td><td className="px-3 py-2 border-t border-border">U1 ÷ σ_d；U1 = Σmax（b,0）÷ N</td><td className="px-3 py-2 border-t border-border">主指标；上行只进分子、下行只进分母，越大越好</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border">Omega 比率</td><td className="px-3 py-2 border-t border-border">U1 ÷ D1；D1 = Σmax（−b,0）÷ N</td><td className="px-3 py-2 border-t border-border">越大越好；Omega = 1 为盈亏平衡线</td></tr>
+                  </tbody>
+                </table>
+              </div>
+              <P>Sortino 作为对照项显示：<strong>Sortino =（U1 − D1）÷ σ_d</strong>。系统同时校验恒等式 <strong>Sortino ≡ UPR − D1 ÷ σ_d</strong>，用于发现口径漂移。没有亏损样本时 DSI、σ_d、UPR、Omega、Sortino 显示「—」；没有盈利样本时 USI、σ_u、U1、UPR、Omega 显示「—」。对应盈利或亏损样本少于 5 场时仍给出数值，但标注「样本不足」。</P>
+              <P>盈亏比未回填的已结束战役不会进入这些指标，模块脚注会注明排除数量。进入单场战役后，「盈亏概览」会显示本场 <strong>b² ÷ n</strong> 对 DSI 或 USI 组内均方的贡献，以及本场 b² 占对应组 Σb² 的比例，用来快速定位拉高左尾风险或支撑右尾保留的具体战役；该项也会自动进入一键导出图片。</P>
 
               <SubTitle>算术期望与几何期望怎么读</SubTitle>
               <div className="overflow-x-auto">

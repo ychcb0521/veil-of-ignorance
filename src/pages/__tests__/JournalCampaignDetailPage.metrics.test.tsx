@@ -407,6 +407,7 @@ describe('JournalCampaignDetailPage metrics', () => {
     // 算术/几何期望与实时胜率依赖异步加载的 campaignPerformance（同账户有效战役），需等它落定。
     await waitFor(() => expect(screen.getByText('+0.50R')).toBeInTheDocument());
     expect(screen.getByText('+0.5%/笔')).toBeInTheDocument();
+    expect(screen.getByText('USI · b²/n = 4.0000（组内 100.0%）')).toBeInTheDocument();
     expect(screen.getByText(/2 场有效战役，实时胜率 50.00%/)).toBeInTheDocument();
     expect(screen.queryByText('逐腿 P&L 对账')).not.toBeInTheDocument();
     expect(screen.queryByText(/逐腿 P&L 对账已校正/)).not.toBeInTheDocument();
@@ -419,6 +420,7 @@ describe('JournalCampaignDetailPage metrics', () => {
       '最大预期亏损',
       '预期回撤',
       '盈亏比',
+      '本场 b 对 DSI/USI 的贡献',
       '机会质量',
       '算术期望',
       '几何期望',
@@ -444,6 +446,7 @@ describe('JournalCampaignDetailPage metrics', () => {
       '最大预期亏损',
       '预期回撤',
       '盈亏比',
+      '本场 b 对 DSI/USI 的贡献',
       '机会质量',
       '算术期望',
       '几何期望',

@@ -47,6 +47,11 @@ import {
   formatGeometricExpectancy,
   resolveCampaignOpportunityQuality,
 } from '@/lib/campaignMetrics';
+import {
+  computeCompoundCampaignGrowth,
+  formatCompoundCampaignGrowthRate,
+} from '@/lib/compoundCampaignGrowth';
+import { summarizeAsymmetricRiskMetrics } from '@/lib/asymmetricRiskMetrics';
 import { summarizeCampaignPerformance } from '@/lib/kellySizing';
 import { computeGeometricExpectancy } from '@/lib/geometricExpectancy';
 import { campaignAchievedMirrorTp, mirrorTpRank, summarizeMirrorTp } from '@/lib/mirrorTpSummary';
@@ -107,6 +112,8 @@ type CampaignFormulaPopover =
   | 'averagePayoffRatio'
   | 'expectedValue'
   | 'geometricEdge'
+  | 'compoundCampaignGrowth'
+  | 'asymmetricRisk'
   | 'opportunityQualitySort'
   | 'opportunityQuality';
 
@@ -207,6 +214,24 @@ const fmtOperationTime = (time: number | null) => (
 const fmtDeletedTime = (iso: string | null | undefined) => (
   iso ? formatBeijingTime(new Date(iso).getTime()).slice(0, 16) : '—'
 );
+
+function formatAsymmetricMetric(value: number | null, digits = 2): string {
+  return value == null ? '—' : value.toFixed(digits);
+}
+
+function dsiTone(value: number | null): string {
+  if (value == null) return 'text-muted-foreground';
+  if (value <= 1.05) return 'text-[#0ECB81]';
+  if (value <= 1.15) return 'text-[#B8860B]';
+  return 'text-[#F6465D]';
+}
+
+function usiTone(value: number | null): string {
+  if (value == null) return 'text-muted-foreground';
+  if (value >= 1.8) return 'text-[#0ECB81]';
+  if (value >= 1.5) return 'text-[#B8860B]';
+  return 'text-[#F6465D]';
+}
 
 function importanceValue(campaign: Pick<TradeCampaign, 'importance_weight'>): number {
   const value = Number(campaign.importance_weight);
@@ -572,12 +597,20 @@ export default function JournalCampaignsPage() {
     }
   };
 
-  const performance = useMemo(
-    () => summarizeCampaignPerformance(rows.map(row => ({
+  const performanceSamples = useMemo(
+    () => rows.map(row => ({
       campaign: row.campaign,
       payoffRatio: row.profitCaptureRatio == null ? null : row.profitCaptureRatio / 100,
-    }))),
+    })),
     [rows],
+  );
+  const performance = useMemo(
+    () => summarizeCampaignPerformance(performanceSamples),
+    [performanceSamples],
+  );
+  const asymmetricRisk = useMemo(
+    () => summarizeAsymmetricRiskMetrics(performanceSamples),
+    [performanceSamples],
   );
   const geometric = useMemo(
     () => computeGeometricExpectancy(performance.expectedWinRate, performance.payoffRatio),
@@ -630,6 +663,19 @@ export default function JournalCampaignsPage() {
     () => sortCampaignRows(displayRows, sortState),
     [displayRows, sortState],
   );
+  const compoundCampaignGrowth = useMemo(
+    () => computeCompoundCampaignGrowth(displayRows.map(row => ({
+      realizedPnl: row.campaign.final_realized_pnl,
+      accountEquityAtEntry: row.riskAccountEquity,
+      eligible: (
+        ['closed_profit', 'closed_loss', 'closed_breakeven'].includes(row.campaign.status)
+        && row.profitCaptureRatio != null
+        && Number.isFinite(row.profitCaptureRatio)
+      ),
+      estimated: row.initialRiskSource === 'current_account_fallback',
+    }))),
+    [displayRows],
+  );
   const winRateLabel = performance.winRate == null ? '—' : `${(performance.winRate * 100).toFixed(2)}%`;
   const payoffRatioLabel = performance.payoffRatio == null ? '—' : performance.payoffRatio.toFixed(2);
   const validCampaignCount = performance.payoffRatioSampleCount;
@@ -650,6 +696,7 @@ export default function JournalCampaignsPage() {
     ? '—'
     : `${(geometric.optimalFraction * 100).toFixed(1)}%`;
   const opportunityQualityLabel = formatOpportunityQuality(opportunityQualityStats.average);
+  const compoundCampaignGrowthLabel = formatCompoundCampaignGrowthRate(compoundCampaignGrowth.rate);
 
   const updateListParams = (nextSort: CampaignSortState) => {
     const params = new URLSearchParams(location.search);
@@ -1286,6 +1333,141 @@ export default function JournalCampaignsPage() {
                     当前 N = {opportunityQualityStats.sampleCount} 场。
                   </div>
                 </div>
+              </PopoverContent>
+            </Popover>
+            <Popover
+              open={formulaPopover === 'asymmetricRisk'}
+              onOpenChange={open => handleFormulaPopoverChange('asymmetricRisk', open)}
+            >
+              <PopoverTrigger asChild>
+                <button
+                  type="button"
+                  data-testid="campaign-asymmetric-risk"
+                  className="inline-flex h-7 shrink-0 items-center justify-center gap-1 whitespace-nowrap rounded border border-transparent px-2 text-foreground/65 transition-colors hover:border-[#F0B90B]/15 hover:bg-background/70 hover:text-foreground"
+                  aria-label={`不对称风险，UPR ${formatAsymmetricMetric(asymmetricRisk.upr)}，Omega ${formatAsymmetricMetric(asymmetricRisk.omega)}，点击查看六项指标`}
+                  title="点击查看不对称风险指标"
+                  onClick={event => toggleFormulaPopover(event, 'asymmetricRisk')}
+                >
+                  不对称风险 · UPR {formatAsymmetricMetric(asymmetricRisk.upr)} · Ω {formatAsymmetricMetric(asymmetricRisk.omega)}
+                </button>
+              </PopoverTrigger>
+              <PopoverContent align="end" className="w-[min(92vw,38rem)] border-border bg-card p-0 text-[11px]">
+                <div className="relative flex items-center justify-between border-b border-border/70 px-4 py-3">
+                  <div>
+                    <div className="font-medium text-foreground">不对称风险</div>
+                    <div className="mt-0.5 text-[10px] text-muted-foreground">上行与下行分开计量，完整保留右尾贡献</div>
+                  </div>
+                  <details className="group text-[10px] text-muted-foreground">
+                    <summary className="cursor-pointer select-none list-none rounded px-1.5 py-1 hover:bg-muted/70">说明</summary>
+                    <div className="absolute right-3 top-12 z-10 w-[min(86vw,25rem)] rounded border border-border bg-card p-3 shadow-md">
+                      标准差和夏普会把右尾也当作风险。本模块把盈利波动留在上行，把亏损波动留在下行；不截尾、不缩尾，b&lt;−1 的实亏会完整计入。
+                    </div>
+                  </details>
+                </div>
+                <div className="grid grid-cols-2 gap-px bg-border/60 sm:grid-cols-4">
+                  <div className="col-span-1 bg-card px-4 py-3 sm:col-span-2">
+                    <div className="text-muted-foreground">UPR 上行潜力比</div>
+                    <div className="mt-1 text-xl font-semibold text-foreground">{formatAsymmetricMetric(asymmetricRisk.upr, 3)}</div>
+                    <div className="mt-1 text-[10px] text-muted-foreground">U1 ÷ σ_d，越大越好</div>
+                    <div className="mt-1 flex flex-wrap gap-1">
+                      {asymmetricRisk.winCount < 5 ? <span className="rounded bg-muted px-1.5 py-0.5 text-[9px] text-muted-foreground">盈利样本不足 n={asymmetricRisk.winCount}</span> : null}
+                      {asymmetricRisk.lossCount < 5 ? <span className="rounded bg-muted px-1.5 py-0.5 text-[9px] text-muted-foreground">亏损样本不足 n={asymmetricRisk.lossCount}</span> : null}
+                    </div>
+                  </div>
+                  <div className="col-span-1 bg-card px-4 py-3 sm:col-span-2">
+                    <div className="text-muted-foreground">Omega 比率</div>
+                    <div className="mt-1 text-xl font-semibold text-foreground">{formatAsymmetricMetric(asymmetricRisk.omega, 3)}</div>
+                    <div className="mt-1 text-[10px] text-muted-foreground">U1 ÷ D1，1 为盈亏平衡线</div>
+                    <div className="mt-1 flex flex-wrap gap-1">
+                      {asymmetricRisk.winCount < 5 ? <span className="rounded bg-muted px-1.5 py-0.5 text-[9px] text-muted-foreground">盈利样本不足 n={asymmetricRisk.winCount}</span> : null}
+                      {asymmetricRisk.lossCount < 5 ? <span className="rounded bg-muted px-1.5 py-0.5 text-[9px] text-muted-foreground">亏损样本不足 n={asymmetricRisk.lossCount}</span> : null}
+                    </div>
+                  </div>
+                  <div className="bg-card px-4 py-3">
+                    <div className="text-muted-foreground">DSI 下行纪律</div>
+                    <div className={`mt-1 text-base font-semibold ${dsiTone(asymmetricRisk.dsi)}`}>{formatAsymmetricMetric(asymmetricRisk.dsi, 3)}</div>
+                    <div className="mt-1 text-[10px] text-muted-foreground">≤1.05 稳定，&gt;1.15 警戒</div>
+                    {asymmetricRisk.lossCount < 5 ? <span className="mt-1 inline-block rounded bg-muted px-1.5 py-0.5 text-[9px] text-muted-foreground">样本不足 n={asymmetricRisk.lossCount}</span> : null}
+                  </div>
+                  <div className="bg-card px-4 py-3">
+                    <div className="text-muted-foreground">USI 上行保留</div>
+                    <div className={`mt-1 text-base font-semibold ${usiTone(asymmetricRisk.usi)}`}>{formatAsymmetricMetric(asymmetricRisk.usi, 3)}</div>
+                    <div className="mt-1 text-[10px] text-muted-foreground">≥1.80 健康，&lt;1.50 警戒</div>
+                    {asymmetricRisk.winCount < 5 ? <span className="mt-1 inline-block rounded bg-muted px-1.5 py-0.5 text-[9px] text-muted-foreground">样本不足 n={asymmetricRisk.winCount}</span> : null}
+                  </div>
+                  <div className="bg-card px-4 py-3">
+                    <div className="text-muted-foreground">上行标准差 σ_u</div>
+                    <div className="mt-1 text-base font-semibold text-foreground">{formatAsymmetricMetric(asymmetricRisk.upsideStandardDeviation, 3)}</div>
+                    <div className="mt-1 text-[10px] text-muted-foreground">全样本 N 为分母，守住右尾</div>
+                    {asymmetricRisk.winCount < 5 ? <span className="mt-1 inline-block rounded bg-muted px-1.5 py-0.5 text-[9px] text-muted-foreground">样本不足 n={asymmetricRisk.winCount}</span> : null}
+                  </div>
+                  <div className="bg-card px-4 py-3">
+                    <div className="text-muted-foreground">下行标准差 σ_d</div>
+                    <div className="mt-1 text-base font-semibold text-foreground">{formatAsymmetricMetric(asymmetricRisk.downsideStandardDeviation, 3)}</div>
+                    <div className="mt-1 text-[10px] text-muted-foreground">全样本 N 为分母，越小越好</div>
+                    {asymmetricRisk.lossCount < 5 ? <span className="mt-1 inline-block rounded bg-muted px-1.5 py-0.5 text-[9px] text-muted-foreground">样本不足 n={asymmetricRisk.lossCount}</span> : null}
+                  </div>
+                </div>
+                <div className="space-y-1 border-t border-border/70 px-4 py-3 text-[10px] text-muted-foreground">
+                  <div className="grid grid-cols-3 gap-2 font-mono">
+                    <span>U1 {formatAsymmetricMetric(asymmetricRisk.upsidePotential, 3)}</span>
+                    <span>D1 {formatAsymmetricMetric(asymmetricRisk.downsidePotential, 3)}</span>
+                    <span>Sortino {formatAsymmetricMetric(asymmetricRisk.sortino, 3)}</span>
+                  </div>
+                  <div className="font-mono">
+                    校验：Sortino = UPR − D1/σ_d
+                    {asymmetricRisk.sortino != null && asymmetricRisk.sortinoIdentityRhs != null
+                      ? `（${Math.abs(asymmetricRisk.sortino - asymmetricRisk.sortinoIdentityRhs) < 1e-12 ? '通过' : '异常'}）`
+                      : '（—）'}
+                  </div>
+                  <div>口径：{asymmetricRisk.sampleCount} 场有效战役，其中盈利 {asymmetricRisk.winCount} 场 / 亏损 {asymmetricRisk.lossCount} 场</div>
+                  {asymmetricRisk.excludedPayoffCount > 0 ? <div>另有 {asymmetricRisk.excludedPayoffCount} 场已结束战役因盈亏比未回填而排除。</div> : null}
+                </div>
+              </PopoverContent>
+            </Popover>
+            <Popover
+              open={formulaPopover === 'compoundCampaignGrowth'}
+              onOpenChange={open => handleFormulaPopoverChange('compoundCampaignGrowth', open)}
+            >
+              <PopoverTrigger asChild>
+                <button
+                  type="button"
+                  data-testid="campaign-compound-growth-rate"
+                  className="inline-flex h-7 shrink-0 items-center justify-center whitespace-nowrap rounded border border-transparent px-2 text-foreground/65 transition-colors hover:border-[#F0B90B]/15 hover:bg-background/70 hover:text-foreground"
+                  aria-label={`复合战役增长率 ${compoundCampaignGrowthLabel}，共 ${compoundCampaignGrowth.sampleCount} 场有效战役，点击查看计算公式`}
+                  title="点击查看复合战役增长率计算公式"
+                  onClick={event => toggleFormulaPopover(event, 'compoundCampaignGrowth')}
+                >
+                  复合战役增长率（{compoundCampaignGrowthLabel}）
+                </button>
+              </PopoverTrigger>
+              <PopoverContent align="end" className="w-96 border-border bg-card p-3 text-[11px]">
+                <div className="font-medium text-foreground">复合战役增长率计算公式</div>
+                <div className="mt-2 rounded bg-muted/60 px-2 py-1.5 font-mono leading-relaxed text-foreground">
+                  CGRₙ = [Π（1 + 已实现盈亏ᵢ ÷ 入场账户资产 Aᵢ）]^(1/N) − 1
+                </div>
+                {compoundCampaignGrowth.rate != null && compoundCampaignGrowth.totalGrowthFactor != null ? (
+                  <div className="mt-2 space-y-1 text-muted-foreground">
+                    <div className="font-mono">
+                      = {compoundCampaignGrowth.totalGrowthFactor.toFixed(4)}^(1/{compoundCampaignGrowth.sampleCount}) − 1
+                    </div>
+                    <div className="font-mono text-foreground">= {compoundCampaignGrowthLabel}</div>
+                    <div>N = {compoundCampaignGrowth.sampleCount} 场有效战役；每场先用入场账户资产把已实现盈亏归一化，再连乘资本增长因子。</div>
+                    <div>等价于 CAGR 的（等效期末资产 ÷ 等效期初资产）^(1/N) − 1，只是用战役数替代年数。</div>
+                    <div>它描述已经实现的历史每战役复合增长，不是基于胜率与盈亏比推导的理论几何期望。</div>
+                    {compoundCampaignGrowth.estimatedSampleCount > 0 ? (
+                      <div className="text-[#B8860B]">
+                        其中 {compoundCampaignGrowth.estimatedSampleCount} 场旧战役缺少主力开仓资产快照，使用今日当前总账户资产估算 Aᵢ。
+                      </div>
+                    ) : null}
+                    {compoundCampaignGrowth.wipedOut ? (
+                      <div className="text-[#F6465D]">样本中存在资本增长因子 ≤ 0 的战役，代表本金被击穿，因此复合战役增长率记为 −100%。</div>
+                    ) : null}
+                    <div>未结束、缺少有效最大预期亏损、缺少可用入场资产或已实现盈亏的战役不计入 N。</div>
+                  </div>
+                ) : (
+                  <div className="mt-2 text-muted-foreground">当前列表没有同时具备有效风险分母、已实现盈亏和入场账户资产的战役。</div>
+                )}
               </PopoverContent>
             </Popover>
           </div>

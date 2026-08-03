@@ -190,12 +190,28 @@ export function estimatePayoffRatio(journals: TradeJournal[]): number | null {
   return avgWin / avgLoss;
 }
 
-function isResolvedCampaign(campaign: TradeCampaign): boolean {
+export function isResolvedCampaign(campaign: TradeCampaign): boolean {
   return (
     ['closed_profit', 'closed_loss', 'closed_breakeven'].includes(campaign.status)
     && typeof campaign.final_realized_pnl === 'number'
     && Number.isFinite(campaign.final_realized_pnl)
   );
+}
+
+/**
+ * 账户级期望与风险统计共用的有效战役池。
+ *
+ * 只有已结束且具备有限盈亏比 b 的战役才进入；调用方可以在这个唯一口径上
+ * 继续划分盈利、亏损或盈亏平衡，避免胜率、期望与风险指标各自筛出不同样本。
+ */
+export function selectValidCampaignPerformanceSamples(
+  samples: CampaignPerformanceSample[],
+): CampaignPerformanceSample[] {
+  return samples.filter(sample => (
+    isResolvedCampaign(sample.campaign)
+    && typeof sample.payoffRatio === 'number'
+    && Number.isFinite(sample.payoffRatio)
+  ));
 }
 
 /**
@@ -210,11 +226,7 @@ function isResolvedCampaign(campaign: TradeCampaign): boolean {
  * 历史战役不会进入胜率、平均盈亏比或期望值。
  */
 export function summarizeCampaignPerformance(samples: CampaignPerformanceSample[]): CampaignPerformanceSummary {
-  const payoffSamples = samples.filter(sample => (
-    isResolvedCampaign(sample.campaign)
-    && typeof sample.payoffRatio === 'number'
-    && Number.isFinite(sample.payoffRatio)
-  ));
+  const payoffSamples = selectValidCampaignPerformanceSamples(samples);
   const outcomeSamples = payoffSamples.filter(sample => (sample.campaign.final_realized_pnl ?? 0) !== 0);
   const wins = outcomeSamples.filter(sample => (sample.campaign.final_realized_pnl ?? 0) > 0);
   const losses = outcomeSamples.filter(sample => (sample.campaign.final_realized_pnl ?? 0) < 0);

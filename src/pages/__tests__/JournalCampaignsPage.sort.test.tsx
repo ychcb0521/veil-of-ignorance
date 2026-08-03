@@ -400,6 +400,8 @@ describe('JournalCampaignsPage sorting', () => {
     expect(sortControls).not.toContainElement(screen.getByTestId('campaign-valid-count'));
     expect(metricsStrip).toContainElement(screen.getByTestId('campaign-valid-count'));
     expect(metricsStrip).toContainElement(screen.getByTestId('campaign-opportunity-quality'));
+    expect(metricsStrip).toContainElement(screen.getByTestId('campaign-asymmetric-risk'));
+    expect(metricsStrip).toContainElement(screen.getByTestId('campaign-compound-growth-rate'));
     expect(screen.getByTestId('campaign-valid-count')).toHaveTextContent('有效战役（3）');
     expect(screen.getByTestId('campaign-valid-count')).toHaveAttribute(
       'aria-label',
@@ -453,6 +455,37 @@ describe('JournalCampaignsPage sorting', () => {
     expect(screen.getByText(/dᵢ = max（\|主力开仓价 − 初始对冲 A 价\|/)).toBeInTheDocument();
     expect(screen.getByText('当前 N = 3 场。')).toBeInTheDocument();
     fireEvent.click(screen.getByTestId('campaign-opportunity-quality'));
+    expect(screen.getByTestId('campaign-compound-growth-rate')).toHaveTextContent('复合战役增长率（+8.55%/战役）');
+    expect(screen.getByTestId('campaign-compound-growth-rate')).toHaveAttribute(
+      'aria-label',
+      '复合战役增长率 +8.55%/战役，共 3 场有效战役，点击查看计算公式',
+    );
+    fireEvent.click(screen.getByTestId('campaign-compound-growth-rate'));
+    expect(screen.getByText('复合战役增长率计算公式')).toBeInTheDocument();
+    expect(screen.getByText('CGRₙ = [Π（1 + 已实现盈亏ᵢ ÷ 入场账户资产 Aᵢ）]^(1/N) − 1')).toBeInTheDocument();
+    expect(screen.getByText('= 1.2792^(1/3) − 1')).toBeInTheDocument();
+    expect(screen.getByText('= +8.55%/战役')).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('campaign-compound-growth-rate'));
+    expect(screen.queryByText('复合战役增长率计算公式')).not.toBeInTheDocument();
+    expect(screen.getByTestId('campaign-asymmetric-risk')).toHaveTextContent('不对称风险 · UPR 2.53 · Ω 4.38');
+    fireEvent.click(screen.getByTestId('campaign-asymmetric-risk'));
+    expect(screen.getByText('不对称风险')).toBeInTheDocument();
+    expect(screen.getByText('2.526')).toBeInTheDocument();
+    expect(screen.getByText('4.375')).toBeInTheDocument();
+    expect(screen.getByText('0.800')).toHaveClass('text-[#0ECB81]');
+    expect(screen.getByText('1.229')).toHaveClass('text-[#F6465D]');
+    expect(screen.getByText('1.756')).toBeInTheDocument();
+    expect(screen.getByText('0.462')).toBeInTheDocument();
+    expect(screen.getByText('口径：3 场有效战役，其中盈利 2 场 / 亏损 1 场')).toBeInTheDocument();
+    expect(screen.getByText('另有 1 场已结束战役因盈亏比未回填而排除。')).toBeInTheDocument();
+    expect(screen.getByText('校验：Sortino = UPR − D1/σ_d（通过）')).toBeInTheDocument();
+    expect(screen.getByText('U1 1.167')).toBeInTheDocument();
+    expect(screen.getByText('D1 0.267')).toBeInTheDocument();
+    expect(screen.getByText('Sortino 1.949')).toBeInTheDocument();
+    expect(screen.getAllByText('盈利样本不足 n=2').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('亏损样本不足 n=1').length).toBeGreaterThan(0);
+    fireEvent.click(screen.getByTestId('campaign-asymmetric-risk'));
+    expect(screen.queryByText('口径：3 场有效战役，其中盈利 2 场 / 亏损 1 场')).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByTestId('campaign-sort-time'));
     expect(screen.getByTestId('campaign-sort-time')).toHaveAttribute('aria-pressed', 'true');
