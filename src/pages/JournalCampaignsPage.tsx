@@ -5,6 +5,7 @@ import {
   ArchiveRestore,
   ArrowDown,
   ArrowUp,
+  ChartScatter,
   ChevronDown,
   FolderPlus,
   Layers,
@@ -16,6 +17,7 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { BackButton } from '@/components/journal/BackButton';
+import { CampaignOddsScatterPlot } from '@/components/journal/CampaignOddsScatterPlot';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Popover, PopoverAnchor, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { useAuth } from '@/contexts/AuthContext';
@@ -60,6 +62,7 @@ import { campaignAchievedMirrorTp, mirrorTpRank, summarizeMirrorTp } from '@/lib
 import { formatOpportunityQuality } from '@/lib/opportunityQuality';
 import { LEG_ROLE_LABELS, STRATEGY_TEMPLATES } from '@/lib/strategyTemplates';
 import { campaignOperationTime } from '@/lib/objectiveOperationTime';
+import { buildCampaignOddsSeries } from '@/lib/campaignOddsSeries';
 import { formatBeijingTime } from '@/lib/timeFormat';
 import type { CampaignStatus, LegRole, TradeCampaign, TradeJournal } from '@/types/journal';
 import type { TradeRecord } from '@/types/trading';
@@ -453,6 +456,7 @@ export default function JournalCampaignsPage() {
   const [busyCampaignId, setBusyCampaignId] = useState<string | null>(null);
   const [sortState, setSortState] = useState<CampaignSortState>(initialSortState);
   const [formulaPopover, setFormulaPopover] = useState<CampaignFormulaPopover | null>(null);
+  const [oddsChartOpen, setOddsChartOpen] = useState(false);
   const [deletedOpen, setDeletedOpen] = useState(false);
   const [deletedLoading, setDeletedLoading] = useState(false);
   const [deletedCampaigns, setDeletedCampaigns] = useState<TradeCampaign[]>([]);
@@ -664,6 +668,16 @@ export default function JournalCampaignsPage() {
   const sortedRows = useMemo(
     () => sortCampaignRows(displayRows, sortState),
     [displayRows, sortState],
+  );
+  const oddsSeries = useMemo(
+    () => buildCampaignOddsSeries(displayRows.map(row => ({
+      campaignId: row.campaign.id,
+      title: row.campaign.title,
+      symbol: row.campaign.symbol,
+      odds: row.profitCaptureRatio == null ? null : row.profitCaptureRatio / 100,
+      operationTime: campaignOperationTime(row.legs, row.tradeRecords),
+    }))),
+    [displayRows],
   );
   const compoundCampaignGrowth = useMemo(
     () => computeCompoundCampaignGrowth(
@@ -1232,6 +1246,24 @@ export default function JournalCampaignsPage() {
                 )}
               </PopoverContent>
             </Popover>
+            <button
+              type="button"
+              data-testid="campaign-odds-chart-toggle"
+              aria-expanded={oddsChartOpen}
+              aria-controls="campaign-odds-scatter-panel"
+              aria-label={`${oddsChartOpen ? '收起' : '展开'}赔率时序散点图，共 ${oddsSeries.points.length} 场`}
+              title={`${oddsChartOpen ? '收起' : '展开'}赔率时序散点图`}
+              disabled={oddsSeries.points.length === 0}
+              onClick={() => setOddsChartOpen(current => !current)}
+              className="inline-flex h-7 shrink-0 select-none items-center justify-center gap-1 whitespace-nowrap rounded border border-transparent px-1.5 text-foreground/40 transition-colors hover:border-[#F0B90B]/15 hover:bg-background/70 hover:text-foreground/75 disabled:cursor-not-allowed disabled:opacity-25"
+            >
+              <ChartScatter aria-hidden="true" className="h-3.5 w-3.5" />
+              <span className="text-[9px]">赔率图</span>
+              <ChevronDown
+                aria-hidden="true"
+                className={`h-2.5 w-2.5 transition-transform ${oddsChartOpen ? 'rotate-180' : ''}`}
+              />
+            </button>
             <Popover
               open={formulaPopover === 'expectedValue'}
               onOpenChange={open => handleFormulaPopoverChange('expectedValue', open)}
@@ -1551,6 +1583,20 @@ export default function JournalCampaignsPage() {
               </PopoverContent>
             </Popover>
           </div>
+          {oddsChartOpen ? (
+            <div
+              id="campaign-odds-scatter-panel"
+              data-testid="campaign-odds-scatter-panel"
+              className="order-3 border-t border-border/70 bg-background/35"
+            >
+              <CampaignOddsScatterPlot
+                points={oddsSeries.points}
+                excludedMissingOddsCount={oddsSeries.excludedMissingOddsCount}
+                excludedMissingOperationTimeCount={oddsSeries.excludedMissingOperationTimeCount}
+                onSelectCampaign={handleCampaignOpen}
+              />
+            </div>
+          ) : null}
           </div>
         </section>
 

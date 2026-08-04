@@ -298,7 +298,25 @@ describe('JournalCampaignsPage sorting', () => {
     expect(screen.getByTestId('campaign-sort-importance')).toHaveAttribute('data-sort-direction', 'asc');
     expect(cardOrder()).toEqual(['Best PnL', 'Newest Operation', 'Late Close', 'High Importance']);
 
-    fireEvent.click(screen.getAllByTestId('campaign-card')[0]);
+    expect(screen.queryByTestId('campaign-odds-scatter-panel')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('campaign-odds-chart-toggle'));
+    expect(screen.getByTestId('campaign-odds-chart-toggle')).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByTestId('campaign-odds-scatter-panel')).toBeInTheDocument();
+    expect(
+      [...screen.getByTestId('campaign-odds-scatter-plot').querySelectorAll('[data-campaign-id]')]
+        .map(node => node.getAttribute('data-campaign-id')),
+    ).toEqual(['late-close', 'best-pnl', 'high-importance']);
+    expect(screen.getByTestId('campaign-odds-point-late-close')).toHaveAttribute('data-odds-sign', 'negative');
+    expect(screen.getByTestId('campaign-odds-point-best-pnl')).toHaveAttribute('data-odds-sign', 'positive');
+    expect(screen.getByTestId('campaign-odds-point-high-importance')).toHaveAttribute('data-odds-sign', 'positive');
+    expect(screen.getByTestId('campaign-odds-point-late-close').querySelector('span')).toHaveStyle({
+      backgroundColor: '#F6465D',
+    });
+    expect(screen.getByTestId('campaign-odds-point-best-pnl').querySelector('span')).toHaveStyle({
+      backgroundColor: '#0ECB81',
+    });
+
+    fireEvent.click(screen.getByTestId('campaign-odds-point-best-pnl'));
     expect(screen.getByTestId('location-probe')).toHaveTextContent(
       '/journal/campaigns/best-pnl?sort=importance&direction=asc|from-list',
     );
