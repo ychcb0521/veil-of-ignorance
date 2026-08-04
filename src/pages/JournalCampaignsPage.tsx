@@ -1380,22 +1380,26 @@ export default function JournalCampaignsPage() {
               data-testid="campaign-odds-chart-toggle"
               aria-expanded={oddsChartOpen}
               aria-controls="campaign-odds-scatter-panel"
-              aria-label={`${oddsChartOpen ? '收起' : '展开'}战役指标时序散点图，当前为${selectedMetricConfig.label}，共 ${selectedMetricSeries.points.length} 场`}
-              title={`${oddsChartOpen ? '收起' : '展开'}战役指标时序散点图`}
+              aria-label={`${oddsChartOpen ? '收起' : '展开'}赔率时序散点图，共 ${metricSeriesByKey.odds.points.length} 场`}
+              title={`${oddsChartOpen ? '收起' : '展开'}赔率时序散点图`}
               disabled={!hasAnyMetricPoints}
               onClick={() => {
-                if (!oddsChartOpen && selectedMetricSeries.points.length === 0) {
-                  const firstAvailable = CAMPAIGN_METRIC_CHART_CONFIGS.find(
-                    config => metricSeriesByKey[config.key].points.length > 0,
-                  );
-                  if (firstAvailable) setMetricChartKey(firstAvailable.key);
+                if (!oddsChartOpen) {
+                  if (metricSeriesByKey.odds.points.length > 0) {
+                    setMetricChartKey('odds');
+                  } else {
+                    const firstAvailable = CAMPAIGN_METRIC_CHART_CONFIGS.find(
+                      config => metricSeriesByKey[config.key].points.length > 0,
+                    );
+                    if (firstAvailable) setMetricChartKey(firstAvailable.key);
+                  }
                 }
                 setOddsChartOpen(current => !current);
               }}
               className="inline-flex h-7 shrink-0 select-none items-center justify-center gap-1 whitespace-nowrap rounded border border-transparent px-1.5 text-foreground/40 transition-colors hover:border-[#F0B90B]/15 hover:bg-background/70 hover:text-foreground/75 disabled:cursor-not-allowed disabled:opacity-25"
             >
               <ChartScatter aria-hidden="true" className="h-3.5 w-3.5" />
-              <span className="text-[9px]">指标图</span>
+              <span className="text-[9px]">赔率图</span>
               <ChevronDown
                 aria-hidden="true"
                 className={`h-2.5 w-2.5 transition-transform ${oddsChartOpen ? 'rotate-180' : ''}`}
@@ -1727,40 +1731,31 @@ export default function JournalCampaignsPage() {
               className="order-3 border-t border-border/70 bg-background/35"
             >
               <div
-                data-testid="campaign-metric-tabs"
-                role="tablist"
-                aria-label="选择战役指标图"
-                className="flex items-center gap-1 overflow-x-auto border-b border-border/60 px-3 py-2 sm:px-4"
+                data-testid="campaign-metric-picker"
+                className="mx-auto flex w-full max-w-[36rem] items-center justify-end gap-1.5 px-3 pt-2 sm:px-4"
               >
-                <span className="mr-1 shrink-0 text-[9px] font-medium text-muted-foreground/55">
+                <label htmlFor="campaign-metric-select" className="text-[9px] text-muted-foreground/45">
                   指标
-                </span>
-                {CAMPAIGN_METRIC_CHART_CONFIGS.map(config => {
-                  const pointCount = metricSeriesByKey[config.key].points.length;
-                  const selected = config.key === metricChartKey;
-                  return (
-                    <button
-                      key={config.key}
-                      type="button"
-                      role="tab"
-                      data-testid={`campaign-metric-tab-${config.key}`}
-                      aria-selected={selected}
-                      aria-controls="campaign-metric-scatter-view"
-                      disabled={pointCount === 0}
-                      onClick={() => setMetricChartKey(config.key)}
-                      className={`inline-flex h-6 shrink-0 items-center gap-1 rounded px-2 text-[10px] transition-colors ${
-                        selected
-                          ? 'bg-[#F0B90B]/10 font-medium text-[#B8860B]'
-                          : 'text-muted-foreground hover:bg-muted/65 hover:text-foreground'
-                      } disabled:cursor-not-allowed disabled:opacity-30`}
-                    >
-                      {config.label}
-                      <span className="font-mono text-[8px] opacity-55">{pointCount}</span>
-                    </button>
-                  );
-                })}
+                </label>
+                <select
+                  id="campaign-metric-select"
+                  data-testid="campaign-metric-select"
+                  aria-label="选择散点图指标"
+                  value={metricChartKey}
+                  onChange={event => setMetricChartKey(event.target.value as CampaignMetricChartKey)}
+                  className="h-6 rounded border border-border/55 bg-background/65 px-1.5 text-[10px] text-foreground/65 outline-none transition-colors hover:border-[#F0B90B]/25 focus:border-[#F0B90B]/45"
+                >
+                  {CAMPAIGN_METRIC_CHART_CONFIGS.map(config => {
+                    const pointCount = metricSeriesByKey[config.key].points.length;
+                    return (
+                      <option key={config.key} value={config.key} disabled={pointCount === 0}>
+                        {config.label} · {pointCount}
+                      </option>
+                    );
+                  })}
+                </select>
               </div>
-              <div id="campaign-metric-scatter-view" role="tabpanel">
+              <div id="campaign-metric-scatter-view">
                 <CampaignMetricScatterPlot
                   points={selectedMetricSeries.points}
                   metricKey={selectedMetricConfig.key}

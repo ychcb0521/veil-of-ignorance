@@ -301,7 +301,9 @@ describe('JournalCampaignsPage sorting', () => {
     expect(screen.queryByTestId('campaign-odds-scatter-panel')).not.toBeInTheDocument();
     fireEvent.click(screen.getByTestId('campaign-odds-chart-toggle'));
     expect(screen.getByTestId('campaign-odds-chart-toggle')).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByTestId('campaign-odds-chart-toggle')).toHaveTextContent('赔率图');
     expect(screen.getByTestId('campaign-odds-scatter-panel')).toBeInTheDocument();
+    expect(screen.getByTestId('campaign-odds-scroll-area')).toHaveClass('aspect-square');
     expect(
       [...screen.getByTestId('campaign-odds-scatter-plot').querySelectorAll('[data-campaign-id]')]
         .map(node => node.getAttribute('data-campaign-id')),
@@ -316,12 +318,11 @@ describe('JournalCampaignsPage sorting', () => {
       backgroundColor: '#0ECB81',
     });
 
-    expect(screen.getByTestId('campaign-metric-tabs')).toBeInTheDocument();
-    fireEvent.click(screen.getByTestId('campaign-metric-tab-expectedDrawdownPct'));
-    expect(screen.getByTestId('campaign-metric-tab-expectedDrawdownPct')).toHaveAttribute(
-      'aria-selected',
-      'true',
-    );
+    expect(screen.getByTestId('campaign-metric-picker')).toBeInTheDocument();
+    fireEvent.change(screen.getByTestId('campaign-metric-select'), {
+      target: { value: 'expectedDrawdownPct' },
+    });
+    expect(screen.getByTestId('campaign-metric-select')).toHaveValue('expectedDrawdownPct');
     expect(screen.getByTestId('campaign-metric-scatter-plot')).toHaveAttribute(
       'data-metric-key',
       'expectedDrawdownPct',
@@ -331,7 +332,9 @@ describe('JournalCampaignsPage sorting', () => {
         .map(node => node.getAttribute('data-campaign-id')),
     ).toEqual(['late-close', 'best-pnl', 'high-importance']);
 
-    fireEvent.click(screen.getByTestId('campaign-metric-tab-odds'));
+    fireEvent.change(screen.getByTestId('campaign-metric-select'), {
+      target: { value: 'odds' },
+    });
 
     fireEvent.click(screen.getByTestId('campaign-odds-point-best-pnl'));
     expect(screen.getByTestId('location-probe')).toHaveTextContent(

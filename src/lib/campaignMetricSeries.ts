@@ -21,6 +21,30 @@ export type CampaignMetricSeries = {
   excludedMissingOperationTimeCount: number;
 };
 
+export type CampaignMetricDomain = {
+  min: number;
+  max: number;
+};
+
+/**
+ * Fit the vertical scale to the values that are actually visible. Keeping zero
+ * outside an all-positive or all-negative series avoids flattening small moves.
+ */
+export function createCampaignMetricDomain(values: number[]): CampaignMetricDomain {
+  const finiteValues = values.filter(Number.isFinite);
+  if (finiteValues.length === 0) return { min: -1, max: 1 };
+
+  const rawMin = Math.min(...finiteValues);
+  const rawMax = Math.max(...finiteValues);
+  if (rawMin === rawMax) {
+    const padding = rawMin === 0 ? 1 : Math.max(Math.abs(rawMin) * 0.12, 0.01);
+    return { min: rawMin - padding, max: rawMax + padding };
+  }
+
+  const padding = (rawMax - rawMin) * 0.12;
+  return { min: rawMin - padding, max: rawMax + padding };
+}
+
 /**
  * Build a stable, objective-time series for a single campaign metric. Card sort
  * order is deliberately ignored so changing the list sort never moves points.

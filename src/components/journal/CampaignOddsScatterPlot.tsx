@@ -1,5 +1,8 @@
 import { useMemo, useState } from 'react';
-import type { CampaignMetricPoint } from '@/lib/campaignMetricSeries';
+import {
+  createCampaignMetricDomain,
+  type CampaignMetricPoint,
+} from '@/lib/campaignMetricSeries';
 import type { CampaignOddsPoint } from '@/lib/campaignOddsSeries';
 import { formatBeijingTime } from '@/lib/timeFormat';
 
@@ -26,24 +29,9 @@ type CampaignOddsScatterPlotProps = {
   onSelectCampaign: (campaignId: string) => void;
 };
 
-const PLOT_TOP_PX = 12;
-const PLOT_BOTTOM_PX = 28;
-const CHART_HEIGHT_PX = 190;
-
 function formatOdds(value: number) {
   const normalized = Math.abs(value) < 0.005 ? 0 : value;
   return `${normalized > 0 ? '+' : ''}${normalized.toFixed(2)}R`;
-}
-
-function createDomain(points: CampaignMetricPoint[]) {
-  const values = points.map(point => point.value);
-  const rawMin = Math.min(0, ...values);
-  const rawMax = Math.max(0, ...values);
-  const rawSpan = rawMax - rawMin;
-  const padding = Math.max(rawSpan * 0.12, rawSpan === 0 ? 1 : 0.05);
-  const min = rawMin < 0 ? rawMin - padding : 0;
-  const max = rawMax > 0 ? rawMax + padding : 0;
-  return min === max ? { min: -1, max: 1 } : { min, max };
 }
 
 function valuePosition(value: number, min: number, max: number) {
@@ -79,7 +67,10 @@ export function CampaignMetricScatterPlot({
   onSelectCampaign,
 }: CampaignMetricScatterPlotProps) {
   const [activeCampaignId, setActiveCampaignId] = useState<string | null>(null);
-  const domain = useMemo(() => createDomain(points), [points]);
+  const domain = useMemo(
+    () => createCampaignMetricDomain(points.map(point => point.value)),
+    [points],
+  );
   const ticks = useMemo(
     () => Array.from({ length: 5 }, (_, index) => {
       const value = domain.max - ((domain.max - domain.min) * index) / 4;
@@ -88,8 +79,7 @@ export function CampaignMetricScatterPlot({
     [domain],
   );
   const activePoint = points.find(point => point.campaignId === activeCampaignId) ?? null;
-  const xLabelStep = Math.max(1, Math.ceil(points.length / 8));
-  const chartMinWidth = Math.max(680, points.length * 30);
+  const xLabelStep = Math.max(1, Math.ceil(points.length / 5));
   const plotTestId = legacyOddsTestIds
     ? 'campaign-odds-scatter-plot'
     : 'campaign-metric-scatter-plot';
@@ -113,55 +103,44 @@ export function CampaignMetricScatterPlot({
     <div
       data-testid={plotTestId}
       data-metric-key={metricKey}
-      className="px-3 pb-3 pt-2 sm:px-4"
+      className="px-3 pb-3 pt-1 sm:px-4"
     >
-      <div className="mb-2 flex min-h-5 items-center gap-3 text-[10px] text-muted-foreground">
-        <span className="font-medium text-foreground/70">{seriesLabel}</span>
-        <span className="min-w-0 flex-1 truncate font-mono text-foreground/55" aria-live="polite">
-          {activePoint
-            ? `#${activePoint.sequence} ${activePoint.title} · ${formatValue(activePoint.value)} · ${formatBeijingTime(activePoint.operationTime)}`
-            : '按客观操作时间从早到晚排列；点击任一点进入对应战役'}
-        </span>
-        <span className="shrink-0">{points.length} 场</span>
-      </div>
-
-      <div className="grid grid-cols-[52px_minmax(0,1fr)] gap-1">
-        <div
-          className="relative text-[9px] font-mono text-muted-foreground/65"
-          style={{ height: CHART_HEIGHT_PX }}
-          aria-hidden="true"
-        >
-          <div
-            className="absolute inset-x-0"
-            style={{ top: PLOT_TOP_PX, bottom: PLOT_BOTTOM_PX }}
-          >
-            {ticks.map(tick => (
-              <span
-                key={tick.value}
-                className="absolute right-1 -translate-y-1/2 whitespace-nowrap"
-                style={{ top: `${tick.top}%` }}
-              >
-                {formatValue(tick.value)}
-              </span>
-            ))}
-          </div>
+      <div className="mx-auto w-full max-w-[36rem]">
+        <div className="mb-2 flex min-h-5 items-center gap-3 text-[10px] text-muted-foreground">
+          <span className="font-medium text-foreground/70">{seriesLabel}</span>
+          <span className="min-w-0 flex-1 truncate font-mono text-foreground/55" aria-live="polite">
+            {activePoint
+              ? `#${activePoint.sequence} ${activePoint.title} · ${formatValue(activePoint.value)} · ${formatBeijingTime(activePoint.operationTime)}`
+              : '按客观操作时间从早到晚排列；点击任一点进入对应战役'}
+          </span>
+          <span className="shrink-0">{points.length} 场</span>
         </div>
 
-        <div className="overflow-x-auto overscroll-x-contain pb-1" data-testid={scrollTestId}>
-          <div className="relative" style={{ height: CHART_HEIGHT_PX, minWidth: chartMinWidth }}>
-            <div
-              className="absolute inset-x-0"
-              style={{ top: PLOT_TOP_PX, bottom: PLOT_BOTTOM_PX }}
-            >
+        <div className="grid grid-cols-[58px_minmax(0,1fr)] gap-2">
+          <div className="relative h-full text-[9px] font-mono text-muted-foreground/65" aria-hidden="true">
+            <div className="absolute inset-x-0 bottom-7 top-3">
+              {ticks.map(tick => (
+                <span
+                  key={tick.value}
+                  className="absolute right-0 -translate-y-1/2 whitespace-nowrap"
+                  style={{ top: `${tick.top}%` }}
+                >
+                  {formatValue(tick.value)}
+                </span>
+              ))}
+            </div>
+          </div>
+
+          <div
+            className="relative aspect-square min-w-0 overflow-hidden rounded border border-border/55 bg-background/55"
+            data-testid={scrollTestId}
+          >
+            <div className="absolute inset-x-3 bottom-7 top-3">
               {ticks.map(tick => (
                 <div
                   key={tick.value}
                   aria-hidden="true"
-                  className={`absolute inset-x-0 border-t ${
-                    Math.abs(tick.value) < 0.000001
-                      ? 'border-dashed border-foreground/25'
-                      : 'border-border/55'
-                  }`}
+                  className="absolute inset-x-0 border-t border-border/55"
                   style={{ top: `${tick.top}%` }}
                 />
               ))}
@@ -207,7 +186,7 @@ export function CampaignMetricScatterPlot({
                           current === point.campaignId ? null : current
                         ))}
                         onClick={() => onSelectCampaign(point.campaignId)}
-                        className="group absolute left-1/2 z-10 flex h-6 w-6 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full outline-none focus-visible:ring-2 focus-visible:ring-[#F0B90B]/60"
+                        className="group absolute left-1/2 z-10 flex h-5 w-full min-w-[6px] max-w-5 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full outline-none focus-visible:ring-2 focus-visible:ring-[#F0B90B]/60"
                         style={{ top: `${valuePosition(point.value, domain.min, domain.max)}%` }}
                       >
                         <span
@@ -223,7 +202,7 @@ export function CampaignMetricScatterPlot({
             </div>
 
             <div
-              className="absolute inset-x-0 bottom-0 grid h-6 items-end text-center text-[9px] font-mono text-muted-foreground/55"
+              className="absolute inset-x-3 bottom-0 grid h-6 items-end pb-1 text-center text-[9px] font-mono text-muted-foreground/55"
               style={{ gridTemplateColumns: `repeat(${points.length}, minmax(0, 1fr))` }}
               aria-hidden="true"
             >
@@ -234,22 +213,22 @@ export function CampaignMetricScatterPlot({
             </div>
           </div>
         </div>
-      </div>
 
-      <div className="mt-1 flex items-center justify-between gap-3 text-[9px] text-muted-foreground/55">
-        <span>早 → 晚 · 横轴每格一场战役</span>
-        {excludedMissingValueCount > 0 || excludedMissingOperationTimeCount > 0 ? (
-          <span>
-            未绘制：
-            {excludedMissingValueCount > 0
-              ? `无${missingValueLabel} ${excludedMissingValueCount} 场`
-              : ''}
-            {excludedMissingValueCount > 0 && excludedMissingOperationTimeCount > 0 ? ' · ' : ''}
-            {excludedMissingOperationTimeCount > 0
-              ? `无客观操作时间 ${excludedMissingOperationTimeCount} 场`
-              : ''}
-          </span>
-        ) : null}
+        <div className="mt-1 flex items-center justify-between gap-3 text-[9px] text-muted-foreground/55">
+          <span>早 → 晚 · 横轴每格一场战役</span>
+          {excludedMissingValueCount > 0 || excludedMissingOperationTimeCount > 0 ? (
+            <span>
+              未绘制：
+              {excludedMissingValueCount > 0
+                ? `无${missingValueLabel} ${excludedMissingValueCount} 场`
+                : ''}
+              {excludedMissingValueCount > 0 && excludedMissingOperationTimeCount > 0 ? ' · ' : ''}
+              {excludedMissingOperationTimeCount > 0
+                ? `无客观操作时间 ${excludedMissingOperationTimeCount} 场`
+                : ''}
+            </span>
+          ) : null}
+        </div>
       </div>
     </div>
   );

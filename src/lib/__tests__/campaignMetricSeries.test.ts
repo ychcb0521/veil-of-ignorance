@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { buildCampaignMetricSeries } from '@/lib/campaignMetricSeries';
+import {
+  buildCampaignMetricSeries,
+  createCampaignMetricDomain,
+} from '@/lib/campaignMetricSeries';
 
 describe('buildCampaignMetricSeries', () => {
   it('sorts finite metric values by objective operation time with stable tie ordering', () => {
@@ -23,5 +26,27 @@ describe('buildCampaignMetricSeries', () => {
     ]);
     expect(result.excludedMissingValueCount).toBe(2);
     expect(result.excludedMissingOperationTimeCount).toBe(1);
+  });
+});
+
+describe('createCampaignMetricDomain', () => {
+  it('fits all-positive values without forcing zero into the vertical range', () => {
+    const domain = createCampaignMetricDomain([100, 110]);
+
+    expect(domain.min).toBeGreaterThan(0);
+    expect(domain.min).toBeLessThan(100);
+    expect(domain.max).toBeGreaterThan(110);
+  });
+
+  it('fits all-negative values without forcing zero into the vertical range', () => {
+    const domain = createCampaignMetricDomain([-10, -5]);
+
+    expect(domain.min).toBeLessThan(-10);
+    expect(domain.max).toBeGreaterThan(-5);
+    expect(domain.max).toBeLessThan(0);
+  });
+
+  it('adds a stable visible range when every value is identical', () => {
+    expect(createCampaignMetricDomain([2, 2])).toEqual({ min: 1.76, max: 2.24 });
   });
 });
