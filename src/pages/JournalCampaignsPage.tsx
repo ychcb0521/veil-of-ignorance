@@ -17,7 +17,10 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { BackButton } from '@/components/journal/BackButton';
-import { CampaignOddsScatterPlot } from '@/components/journal/CampaignOddsScatterPlot';
+import {
+  CampaignMetricScatterPlot,
+  type CampaignMetricColorMode,
+} from '@/components/journal/CampaignOddsScatterPlot';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Popover, PopoverAnchor, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { useAuth } from '@/contexts/AuthContext';
@@ -62,7 +65,10 @@ import { campaignAchievedMirrorTp, mirrorTpRank, summarizeMirrorTp } from '@/lib
 import { formatOpportunityQuality } from '@/lib/opportunityQuality';
 import { LEG_ROLE_LABELS, STRATEGY_TEMPLATES } from '@/lib/strategyTemplates';
 import { campaignOperationTime } from '@/lib/objectiveOperationTime';
-import { buildCampaignOddsSeries } from '@/lib/campaignOddsSeries';
+import {
+  buildCampaignMetricSeries,
+  type CampaignMetricSeries,
+} from '@/lib/campaignMetricSeries';
 import { formatBeijingTime } from '@/lib/timeFormat';
 import type { CampaignStatus, LegRole, TradeCampaign, TradeJournal } from '@/types/journal';
 import type { TradeRecord } from '@/types/trading';
@@ -102,6 +108,24 @@ type CampaignSortState = {
   direction: CampaignSortDirection;
 };
 
+type CampaignMetricChartKey =
+  | 'odds'
+  | 'expectedDrawdownPct'
+  | 'opportunityQuality'
+  | 'arithmeticExpectancy'
+  | 'geometricExpectancy'
+  | 'importance'
+  | 'mirrorTp';
+
+type CampaignMetricChartConfig = {
+  key: CampaignMetricChartKey;
+  label: string;
+  seriesLabel: string;
+  missingValueLabel: string;
+  colorMode: CampaignMetricColorMode;
+  formatValue: (value: number) => string;
+};
+
 type CampaignListNavigationState = {
   fromCampaignList: true;
 };
@@ -136,6 +160,79 @@ const SORT_OPTIONS: { value: CampaignSortMode; label: string }[] = [
 
 const DEFAULT_CAMPAIGN_SORT: CampaignSortState = { mode: 'time', direction: 'desc' };
 const CAMPAIGN_LIST_SCROLL_KEY_PREFIX = 'journal-campaign-list-scroll:';
+
+function formatSignedMetric(value: number, suffix: string, digits = 2): string {
+  const normalized = Math.abs(value) < 10 ** -(digits + 1) ? 0 : value;
+  return `${normalized > 0 ? '+' : ''}${normalized.toFixed(digits)}${suffix}`;
+}
+
+function formatMirrorTpMetric(value: number): string {
+  const rounded = Math.round(value);
+  if (Math.abs(value - rounded) > 0.001) return value.toFixed(1);
+  if (rounded >= 3) return '盈利';
+  if (rounded === 2) return '持平';
+  if (rounded === 1) return '亏损';
+  return '未实现';
+}
+
+const CAMPAIGN_METRIC_CHART_CONFIGS: readonly CampaignMetricChartConfig[] = [
+  {
+    key: 'odds',
+    label: '盈亏比',
+    seriesLabel: '盈亏比时序',
+    missingValueLabel: '有效盈亏比',
+    colorMode: 'signed',
+    formatValue: value => formatSignedMetric(value, 'R'),
+  },
+  {
+    key: 'expectedDrawdownPct',
+    label: '预期回撤',
+    seriesLabel: '预期回撤时序',
+    missingValueLabel: '预期回撤',
+    colorMode: 'risk',
+    formatValue: value => `${value.toFixed(2)}%`,
+  },
+  {
+    key: 'opportunityQuality',
+    label: '机会质量',
+    seriesLabel: '机会质量时序',
+    missingValueLabel: '机会质量',
+    colorMode: 'quality',
+    formatValue: value => value.toFixed(2),
+  },
+  {
+    key: 'arithmeticExpectancy',
+    label: '算术期望',
+    seriesLabel: '算术期望时序',
+    missingValueLabel: '算术期望',
+    colorMode: 'signed',
+    formatValue: formatArithmeticExpectancy,
+  },
+  {
+    key: 'geometricExpectancy',
+    label: '几何期望',
+    seriesLabel: '几何期望时序',
+    missingValueLabel: '几何期望',
+    colorMode: 'signed',
+    formatValue: formatGeometricExpectancy,
+  },
+  {
+    key: 'importance',
+    label: '重要性',
+    seriesLabel: '重要性时序',
+    missingValueLabel: '重要性评分',
+    colorMode: 'importance',
+    formatValue: value => `${Math.round(value)}/5`,
+  },
+  {
+    key: 'mirrorTp',
+    label: '镜像止盈',
+    seriesLabel: '镜像止盈结果时序',
+    missingValueLabel: '镜像止盈结果',
+    colorMode: 'mirrorTp',
+    formatValue: formatMirrorTpMetric,
+  },
+] as const;
 
 function parseCampaignListParams(search: string): CampaignSortState {
   const params = new URLSearchParams(search);
@@ -457,6 +554,7 @@ export default function JournalCampaignsPage() {
   const [sortState, setSortState] = useState<CampaignSortState>(initialSortState);
   const [formulaPopover, setFormulaPopover] = useState<CampaignFormulaPopover | null>(null);
   const [oddsChartOpen, setOddsChartOpen] = useState(false);
+  const [metricChartKey, setMetricChartKey] = useState<CampaignMetricChartKey>('odds');
   const [deletedOpen, setDeletedOpen] = useState(false);
   const [deletedLoading, setDeletedLoading] = useState(false);
   const [deletedCampaigns, setDeletedCampaigns] = useState<TradeCampaign[]>([]);
@@ -669,15 +767,46 @@ export default function JournalCampaignsPage() {
     () => sortCampaignRows(displayRows, sortState),
     [displayRows, sortState],
   );
-  const oddsSeries = useMemo(
-    () => buildCampaignOddsSeries(displayRows.map(row => ({
+  const metricSeriesByKey = useMemo<Record<CampaignMetricChartKey, CampaignMetricSeries>>(() => {
+    const samples = displayRows.map(row => ({
+      row,
       campaignId: row.campaign.id,
       title: row.campaign.title,
       symbol: row.campaign.symbol,
-      odds: row.profitCaptureRatio == null ? null : row.profitCaptureRatio / 100,
       operationTime: campaignOperationTime(row.legs, row.tradeRecords),
-    }))),
-    [displayRows],
+    }));
+    const buildSeries = (valueForRow: (row: CampaignDisplayData) => number | null) => (
+      buildCampaignMetricSeries(samples.map(({ row, ...sample }) => ({
+        ...sample,
+        value: valueForRow(row),
+      })))
+    );
+
+    return {
+      odds: buildSeries(row => (
+        row.profitCaptureRatio == null ? null : row.profitCaptureRatio / 100
+      )),
+      expectedDrawdownPct: buildSeries(row => (
+        Number.isFinite(row.initialExpectedMaxDrawdownPct) && row.initialExpectedMaxDrawdownPct > 0
+          ? row.initialExpectedMaxDrawdownPct
+          : null
+      )),
+      opportunityQuality: buildSeries(row => row.opportunityQuality),
+      arithmeticExpectancy: buildSeries(row => row.arithmeticExpectancy),
+      geometricExpectancy: buildSeries(row => row.geometricExpectancy),
+      importance: buildSeries(row => importanceValue(row.campaign)),
+      mirrorTp: buildSeries(row => rowMirrorTpRank(row)),
+    };
+  }, [displayRows]);
+  const selectedMetricConfig = CAMPAIGN_METRIC_CHART_CONFIGS.find(
+    config => config.key === metricChartKey,
+  ) ?? CAMPAIGN_METRIC_CHART_CONFIGS[0];
+  const selectedMetricSeries = metricSeriesByKey[metricChartKey];
+  const hasAnyMetricPoints = useMemo(
+    () => CAMPAIGN_METRIC_CHART_CONFIGS.some(
+      config => metricSeriesByKey[config.key].points.length > 0,
+    ),
+    [metricSeriesByKey],
   );
   const compoundCampaignGrowth = useMemo(
     () => computeCompoundCampaignGrowth(
@@ -1251,14 +1380,22 @@ export default function JournalCampaignsPage() {
               data-testid="campaign-odds-chart-toggle"
               aria-expanded={oddsChartOpen}
               aria-controls="campaign-odds-scatter-panel"
-              aria-label={`${oddsChartOpen ? '收起' : '展开'}赔率时序散点图，共 ${oddsSeries.points.length} 场`}
-              title={`${oddsChartOpen ? '收起' : '展开'}赔率时序散点图`}
-              disabled={oddsSeries.points.length === 0}
-              onClick={() => setOddsChartOpen(current => !current)}
+              aria-label={`${oddsChartOpen ? '收起' : '展开'}战役指标时序散点图，当前为${selectedMetricConfig.label}，共 ${selectedMetricSeries.points.length} 场`}
+              title={`${oddsChartOpen ? '收起' : '展开'}战役指标时序散点图`}
+              disabled={!hasAnyMetricPoints}
+              onClick={() => {
+                if (!oddsChartOpen && selectedMetricSeries.points.length === 0) {
+                  const firstAvailable = CAMPAIGN_METRIC_CHART_CONFIGS.find(
+                    config => metricSeriesByKey[config.key].points.length > 0,
+                  );
+                  if (firstAvailable) setMetricChartKey(firstAvailable.key);
+                }
+                setOddsChartOpen(current => !current);
+              }}
               className="inline-flex h-7 shrink-0 select-none items-center justify-center gap-1 whitespace-nowrap rounded border border-transparent px-1.5 text-foreground/40 transition-colors hover:border-[#F0B90B]/15 hover:bg-background/70 hover:text-foreground/75 disabled:cursor-not-allowed disabled:opacity-25"
             >
               <ChartScatter aria-hidden="true" className="h-3.5 w-3.5" />
-              <span className="text-[9px]">赔率图</span>
+              <span className="text-[9px]">指标图</span>
               <ChevronDown
                 aria-hidden="true"
                 className={`h-2.5 w-2.5 transition-transform ${oddsChartOpen ? 'rotate-180' : ''}`}
@@ -1589,12 +1726,55 @@ export default function JournalCampaignsPage() {
               data-testid="campaign-odds-scatter-panel"
               className="order-3 border-t border-border/70 bg-background/35"
             >
-              <CampaignOddsScatterPlot
-                points={oddsSeries.points}
-                excludedMissingOddsCount={oddsSeries.excludedMissingOddsCount}
-                excludedMissingOperationTimeCount={oddsSeries.excludedMissingOperationTimeCount}
-                onSelectCampaign={handleCampaignOpen}
-              />
+              <div
+                data-testid="campaign-metric-tabs"
+                role="tablist"
+                aria-label="选择战役指标图"
+                className="flex items-center gap-1 overflow-x-auto border-b border-border/60 px-3 py-2 sm:px-4"
+              >
+                <span className="mr-1 shrink-0 text-[9px] font-medium text-muted-foreground/55">
+                  指标
+                </span>
+                {CAMPAIGN_METRIC_CHART_CONFIGS.map(config => {
+                  const pointCount = metricSeriesByKey[config.key].points.length;
+                  const selected = config.key === metricChartKey;
+                  return (
+                    <button
+                      key={config.key}
+                      type="button"
+                      role="tab"
+                      data-testid={`campaign-metric-tab-${config.key}`}
+                      aria-selected={selected}
+                      aria-controls="campaign-metric-scatter-view"
+                      disabled={pointCount === 0}
+                      onClick={() => setMetricChartKey(config.key)}
+                      className={`inline-flex h-6 shrink-0 items-center gap-1 rounded px-2 text-[10px] transition-colors ${
+                        selected
+                          ? 'bg-[#F0B90B]/10 font-medium text-[#B8860B]'
+                          : 'text-muted-foreground hover:bg-muted/65 hover:text-foreground'
+                      } disabled:cursor-not-allowed disabled:opacity-30`}
+                    >
+                      {config.label}
+                      <span className="font-mono text-[8px] opacity-55">{pointCount}</span>
+                    </button>
+                  );
+                })}
+              </div>
+              <div id="campaign-metric-scatter-view" role="tabpanel">
+                <CampaignMetricScatterPlot
+                  points={selectedMetricSeries.points}
+                  metricKey={selectedMetricConfig.key}
+                  metricLabel={selectedMetricConfig.label}
+                  seriesLabel={selectedMetricConfig.seriesLabel}
+                  formatValue={selectedMetricConfig.formatValue}
+                  missingValueLabel={selectedMetricConfig.missingValueLabel}
+                  excludedMissingValueCount={selectedMetricSeries.excludedMissingValueCount}
+                  excludedMissingOperationTimeCount={selectedMetricSeries.excludedMissingOperationTimeCount}
+                  colorMode={selectedMetricConfig.colorMode}
+                  legacyOddsTestIds={selectedMetricConfig.key === 'odds'}
+                  onSelectCampaign={handleCampaignOpen}
+                />
+              </div>
             </div>
           ) : null}
           </div>

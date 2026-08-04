@@ -1,3 +1,5 @@
+import { buildCampaignMetricSeries } from '@/lib/campaignMetricSeries';
+
 export type CampaignOddsSeriesInput = {
   campaignId: string;
   title: string;
@@ -26,29 +28,24 @@ export type CampaignOddsSeries = {
  * ignored so changing the campaign-card sort never moves the scatter points.
  */
 export function buildCampaignOddsSeries(samples: CampaignOddsSeriesInput[]): CampaignOddsSeries {
-  let excludedMissingOddsCount = 0;
-  let excludedMissingOperationTimeCount = 0;
-
-  const eligible = samples.flatMap(sample => {
-    if (sample.odds == null || !Number.isFinite(sample.odds)) {
-      excludedMissingOddsCount += 1;
-      return [];
-    }
-    if (sample.operationTime == null || !Number.isFinite(sample.operationTime)) {
-      excludedMissingOperationTimeCount += 1;
-      return [];
-    }
-    return [{ ...sample, odds: sample.odds, operationTime: sample.operationTime }];
-  });
-
-  eligible.sort((left, right) => (
-    left.operationTime - right.operationTime
-    || left.campaignId.localeCompare(right.campaignId)
-  ));
+  const series = buildCampaignMetricSeries(samples.map(sample => ({
+    campaignId: sample.campaignId,
+    title: sample.title,
+    symbol: sample.symbol,
+    value: sample.odds,
+    operationTime: sample.operationTime,
+  })));
 
   return {
-    points: eligible.map((sample, index) => ({ ...sample, sequence: index + 1 })),
-    excludedMissingOddsCount,
-    excludedMissingOperationTimeCount,
+    points: series.points.map(point => ({
+      campaignId: point.campaignId,
+      title: point.title,
+      symbol: point.symbol,
+      odds: point.value,
+      operationTime: point.operationTime,
+      sequence: point.sequence,
+    })),
+    excludedMissingOddsCount: series.excludedMissingValueCount,
+    excludedMissingOperationTimeCount: series.excludedMissingOperationTimeCount,
   };
 }

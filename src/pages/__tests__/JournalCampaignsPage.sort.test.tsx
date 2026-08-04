@@ -316,6 +316,23 @@ describe('JournalCampaignsPage sorting', () => {
       backgroundColor: '#0ECB81',
     });
 
+    expect(screen.getByTestId('campaign-metric-tabs')).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('campaign-metric-tab-expectedDrawdownPct'));
+    expect(screen.getByTestId('campaign-metric-tab-expectedDrawdownPct')).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
+    expect(screen.getByTestId('campaign-metric-scatter-plot')).toHaveAttribute(
+      'data-metric-key',
+      'expectedDrawdownPct',
+    );
+    expect(
+      [...screen.getByTestId('campaign-metric-scatter-plot').querySelectorAll('[data-campaign-id]')]
+        .map(node => node.getAttribute('data-campaign-id')),
+    ).toEqual(['late-close', 'best-pnl', 'high-importance']);
+
+    fireEvent.click(screen.getByTestId('campaign-metric-tab-odds'));
+
     fireEvent.click(screen.getByTestId('campaign-odds-point-best-pnl'));
     expect(screen.getByTestId('location-probe')).toHaveTextContent(
       '/journal/campaigns/best-pnl?sort=importance&direction=asc|from-list',
