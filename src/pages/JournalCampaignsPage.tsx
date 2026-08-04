@@ -120,6 +120,7 @@ type CampaignMetricChartKey =
 type CampaignMetricChartConfig = {
   key: CampaignMetricChartKey;
   label: string;
+  chartLabel: string;
   seriesLabel: string;
   missingValueLabel: string;
   colorMode: CampaignMetricColorMode;
@@ -179,6 +180,7 @@ const CAMPAIGN_METRIC_CHART_CONFIGS: readonly CampaignMetricChartConfig[] = [
   {
     key: 'odds',
     label: '盈亏比',
+    chartLabel: '赔率图',
     seriesLabel: '盈亏比时序',
     missingValueLabel: '有效盈亏比',
     colorMode: 'signed',
@@ -187,6 +189,7 @@ const CAMPAIGN_METRIC_CHART_CONFIGS: readonly CampaignMetricChartConfig[] = [
   {
     key: 'expectedDrawdownPct',
     label: '预期回撤',
+    chartLabel: '回撤图',
     seriesLabel: '预期回撤时序',
     missingValueLabel: '预期回撤',
     colorMode: 'risk',
@@ -195,6 +198,7 @@ const CAMPAIGN_METRIC_CHART_CONFIGS: readonly CampaignMetricChartConfig[] = [
   {
     key: 'opportunityQuality',
     label: '机会质量',
+    chartLabel: '质量图',
     seriesLabel: '机会质量时序',
     missingValueLabel: '机会质量',
     colorMode: 'quality',
@@ -203,6 +207,7 @@ const CAMPAIGN_METRIC_CHART_CONFIGS: readonly CampaignMetricChartConfig[] = [
   {
     key: 'arithmeticExpectancy',
     label: '算术期望',
+    chartLabel: '算术图',
     seriesLabel: '算术期望时序',
     missingValueLabel: '算术期望',
     colorMode: 'signed',
@@ -211,6 +216,7 @@ const CAMPAIGN_METRIC_CHART_CONFIGS: readonly CampaignMetricChartConfig[] = [
   {
     key: 'geometricExpectancy',
     label: '几何期望',
+    chartLabel: '几何图',
     seriesLabel: '几何期望时序',
     missingValueLabel: '几何期望',
     colorMode: 'signed',
@@ -219,6 +225,7 @@ const CAMPAIGN_METRIC_CHART_CONFIGS: readonly CampaignMetricChartConfig[] = [
   {
     key: 'importance',
     label: '重要性',
+    chartLabel: '重要性图',
     seriesLabel: '重要性时序',
     missingValueLabel: '重要性评分',
     colorMode: 'importance',
@@ -227,6 +234,7 @@ const CAMPAIGN_METRIC_CHART_CONFIGS: readonly CampaignMetricChartConfig[] = [
   {
     key: 'mirrorTp',
     label: '镜像止盈',
+    chartLabel: '镜像图',
     seriesLabel: '镜像止盈结果时序',
     missingValueLabel: '镜像止盈结果',
     colorMode: 'mirrorTp',
@@ -553,7 +561,7 @@ export default function JournalCampaignsPage() {
   const [busyCampaignId, setBusyCampaignId] = useState<string | null>(null);
   const [sortState, setSortState] = useState<CampaignSortState>(initialSortState);
   const [formulaPopover, setFormulaPopover] = useState<CampaignFormulaPopover | null>(null);
-  const [oddsChartOpen, setOddsChartOpen] = useState(false);
+  const [metricChartOpen, setMetricChartOpen] = useState(false);
   const [metricChartKey, setMetricChartKey] = useState<CampaignMetricChartKey>('odds');
   const [deletedOpen, setDeletedOpen] = useState(false);
   const [deletedLoading, setDeletedLoading] = useState(false);
@@ -802,12 +810,15 @@ export default function JournalCampaignsPage() {
     config => config.key === metricChartKey,
   ) ?? CAMPAIGN_METRIC_CHART_CONFIGS[0];
   const selectedMetricSeries = metricSeriesByKey[metricChartKey];
-  const hasAnyMetricPoints = useMemo(
-    () => CAMPAIGN_METRIC_CHART_CONFIGS.some(
-      config => metricSeriesByKey[config.key].points.length > 0,
-    ),
-    [metricSeriesByKey],
-  );
+  const handleMetricChartToggle = (key: CampaignMetricChartKey) => {
+    if (metricSeriesByKey[key].points.length === 0) return;
+    if (metricChartOpen && metricChartKey === key) {
+      setMetricChartOpen(false);
+      return;
+    }
+    setMetricChartKey(key);
+    setMetricChartOpen(true);
+  };
   const compoundCampaignGrowth = useMemo(
     () => computeCompoundCampaignGrowth(
       displayRows.map(row => ({
@@ -1375,36 +1386,44 @@ export default function JournalCampaignsPage() {
                 )}
               </PopoverContent>
             </Popover>
-            <button
-              type="button"
-              data-testid="campaign-odds-chart-toggle"
-              aria-expanded={oddsChartOpen}
-              aria-controls="campaign-odds-scatter-panel"
-              aria-label={`${oddsChartOpen ? '收起' : '展开'}赔率时序散点图，共 ${metricSeriesByKey.odds.points.length} 场`}
-              title={`${oddsChartOpen ? '收起' : '展开'}赔率时序散点图`}
-              disabled={!hasAnyMetricPoints}
-              onClick={() => {
-                if (!oddsChartOpen) {
-                  if (metricSeriesByKey.odds.points.length > 0) {
-                    setMetricChartKey('odds');
-                  } else {
-                    const firstAvailable = CAMPAIGN_METRIC_CHART_CONFIGS.find(
-                      config => metricSeriesByKey[config.key].points.length > 0,
-                    );
-                    if (firstAvailable) setMetricChartKey(firstAvailable.key);
-                  }
-                }
-                setOddsChartOpen(current => !current);
-              }}
-              className="inline-flex h-7 shrink-0 select-none items-center justify-center gap-1 whitespace-nowrap rounded border border-transparent px-1.5 text-foreground/40 transition-colors hover:border-[#F0B90B]/15 hover:bg-background/70 hover:text-foreground/75 disabled:cursor-not-allowed disabled:opacity-25"
+            <div
+              data-testid="campaign-metric-chart-toggles"
+              className="inline-flex flex-wrap items-center gap-0.5 border-l border-[#F0B90B]/15 pl-1"
+              aria-label="指标时序散点图"
             >
-              <ChartScatter aria-hidden="true" className="h-3.5 w-3.5" />
-              <span className="text-[9px]">赔率图</span>
-              <ChevronDown
-                aria-hidden="true"
-                className={`h-2.5 w-2.5 transition-transform ${oddsChartOpen ? 'rotate-180' : ''}`}
-              />
-            </button>
+              {CAMPAIGN_METRIC_CHART_CONFIGS.map(config => {
+                const pointCount = metricSeriesByKey[config.key].points.length;
+                const active = metricChartOpen && metricChartKey === config.key;
+                const testId = config.key === 'odds'
+                  ? 'campaign-odds-chart-toggle'
+                  : `campaign-${config.key}-chart-toggle`;
+                return (
+                  <button
+                    key={config.key}
+                    type="button"
+                    data-testid={testId}
+                    aria-expanded={active}
+                    aria-controls="campaign-odds-scatter-panel"
+                    aria-label={`${active ? '收起' : '展开'}${config.label}时序散点图，共 ${pointCount} 场`}
+                    title={`${active ? '收起' : '展开'}${config.label}时序散点图`}
+                    disabled={pointCount === 0}
+                    onClick={() => handleMetricChartToggle(config.key)}
+                    className={`inline-flex h-7 shrink-0 select-none items-center justify-center gap-1 whitespace-nowrap rounded border px-1.5 transition-colors disabled:cursor-not-allowed disabled:opacity-20 ${
+                      active
+                        ? 'border-[#F0B90B]/25 bg-background/80 text-foreground/75'
+                        : 'border-transparent text-foreground/40 hover:border-[#F0B90B]/15 hover:bg-background/70 hover:text-foreground/75'
+                    }`}
+                  >
+                    <ChartScatter aria-hidden="true" className="h-3.5 w-3.5" />
+                    <span className="text-[9px]">{config.chartLabel}</span>
+                    <ChevronDown
+                      aria-hidden="true"
+                      className={`h-2.5 w-2.5 transition-transform ${active ? 'rotate-180' : ''}`}
+                    />
+                  </button>
+                );
+              })}
+            </div>
             <Popover
               open={formulaPopover === 'expectedValue'}
               onOpenChange={open => handleFormulaPopoverChange('expectedValue', open)}
@@ -1724,37 +1743,12 @@ export default function JournalCampaignsPage() {
               </PopoverContent>
             </Popover>
           </div>
-          {oddsChartOpen ? (
+          {metricChartOpen ? (
             <div
               id="campaign-odds-scatter-panel"
               data-testid="campaign-odds-scatter-panel"
               className="order-3 border-t border-border/70 bg-background/35"
             >
-              <div
-                data-testid="campaign-metric-picker"
-                className="mx-auto flex w-full max-w-[36rem] items-center justify-end gap-1.5 px-3 pt-2 sm:px-4"
-              >
-                <label htmlFor="campaign-metric-select" className="text-[9px] text-muted-foreground/45">
-                  指标
-                </label>
-                <select
-                  id="campaign-metric-select"
-                  data-testid="campaign-metric-select"
-                  aria-label="选择散点图指标"
-                  value={metricChartKey}
-                  onChange={event => setMetricChartKey(event.target.value as CampaignMetricChartKey)}
-                  className="h-6 rounded border border-border/55 bg-background/65 px-1.5 text-[10px] text-foreground/65 outline-none transition-colors hover:border-[#F0B90B]/25 focus:border-[#F0B90B]/45"
-                >
-                  {CAMPAIGN_METRIC_CHART_CONFIGS.map(config => {
-                    const pointCount = metricSeriesByKey[config.key].points.length;
-                    return (
-                      <option key={config.key} value={config.key} disabled={pointCount === 0}>
-                        {config.label} · {pointCount}
-                      </option>
-                    );
-                  })}
-                </select>
-              </div>
               <div id="campaign-metric-scatter-view">
                 <CampaignMetricScatterPlot
                   points={selectedMetricSeries.points}

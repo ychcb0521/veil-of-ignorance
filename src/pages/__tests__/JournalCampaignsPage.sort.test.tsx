@@ -318,23 +318,26 @@ describe('JournalCampaignsPage sorting', () => {
       backgroundColor: '#0ECB81',
     });
 
-    expect(screen.getByTestId('campaign-metric-picker')).toBeInTheDocument();
-    fireEvent.change(screen.getByTestId('campaign-metric-select'), {
-      target: { value: 'expectedDrawdownPct' },
-    });
-    expect(screen.getByTestId('campaign-metric-select')).toHaveValue('expectedDrawdownPct');
+    expect(screen.getByTestId('campaign-metric-chart-toggles')).toBeInTheDocument();
+    expect(screen.queryByTestId('campaign-metric-picker')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('campaign-expectedDrawdownPct-chart-toggle'));
+    expect(screen.getByTestId('campaign-odds-chart-toggle')).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.getByTestId('campaign-expectedDrawdownPct-chart-toggle')).toHaveAttribute(
+      'aria-expanded',
+      'true',
+    );
     expect(screen.getByTestId('campaign-metric-scatter-plot')).toHaveAttribute(
       'data-metric-key',
       'expectedDrawdownPct',
     );
+    expect(screen.getByTestId('campaign-metric-scroll-area')).toHaveClass('aspect-square');
     expect(
       [...screen.getByTestId('campaign-metric-scatter-plot').querySelectorAll('[data-campaign-id]')]
         .map(node => node.getAttribute('data-campaign-id')),
     ).toEqual(['late-close', 'best-pnl', 'high-importance']);
 
-    fireEvent.change(screen.getByTestId('campaign-metric-select'), {
-      target: { value: 'odds' },
-    });
+    fireEvent.click(screen.getByTestId('campaign-odds-chart-toggle'));
+    expect(screen.getByTestId('campaign-odds-chart-toggle')).toHaveAttribute('aria-expanded', 'true');
 
     fireEvent.click(screen.getByTestId('campaign-odds-point-best-pnl'));
     expect(screen.getByTestId('location-probe')).toHaveTextContent(
