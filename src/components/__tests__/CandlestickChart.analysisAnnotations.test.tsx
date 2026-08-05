@@ -16,6 +16,7 @@ import {
   ANALYSIS_BAND_LABEL_OVERLAY,
   createAnalysisBandLabelFigures,
 } from '@/lib/analysisBandLabelOverlay';
+import { ANALYSIS_AUTO_FIT_BOUNDS_INDICATOR } from '@/lib/analysisAutoFitBoundsIndicator';
 
 const mocks = vi.hoisted(() => {
   type ChartCandle = {
@@ -51,6 +52,9 @@ const mocks = vi.hoisted(() => {
     createOverlay: vi.fn(),
     overrideOverlay: vi.fn(),
     removeOverlay: vi.fn(),
+    createIndicator: vi.fn(() => 'candle_pane'),
+    overrideIndicator: vi.fn(),
+    removeIndicator: vi.fn(),
     getSize: vi.fn(() => ({ width: 1000, height: 520 })),
     getDataList: vi.fn(() => dataList),
     getBarSpace: vi.fn(() => 8),
@@ -99,7 +103,8 @@ vi.mock('klinecharts', () => ({
     OnZoom: 'onZoom',
     OnVisibleRangeChange: 'onVisibleRangeChange',
   },
-  TooltipShowRule: { FollowCross: 'follow_cross' },
+  IndicatorSeries: { Price: 'price' },
+  TooltipShowRule: { FollowCross: 'follow_cross', None: 'none' },
   TooltipShowType: { Standard: 'standard' },
 }));
 
@@ -902,6 +907,41 @@ describe('CandlestickChart analysis annotations', () => {
       expect(mocks.chart.setBarSpace).toHaveBeenCalled();
       expect(mocks.chart.scrollByDistance).toHaveBeenCalledWith(0, 0);
     });
+  });
+
+  it('自适应会让当前窗口内的委托线共同参与纵轴范围', async () => {
+    render(
+      <CandlestickChart
+        data={[candle(1000, 1), candle(2000, 1.1), candle(3000, 1.2)]}
+        symbol="BTCUSDT"
+        rawSymbol="BTCUSDT"
+        analysisMode
+        analysisFitAll
+        analysisVisibleStartTime={1000}
+        analysisVisibleEndTime={3000}
+        analysisAnnotations={{
+          timeBoundPriceLines: [{
+            id: 'pending-order',
+            price: 0.4,
+            startTime: 1500,
+            endTime: 2500,
+            color: '#F0B90B',
+            dashed: true,
+          }],
+        }}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(mocks.chart.createIndicator).toHaveBeenCalled();
+    });
+
+    const [indicator, _stack, paneOptions] = mocks.chart.createIndicator.mock.calls
+      .find(([value]) => value.name === ANALYSIS_AUTO_FIT_BOUNDS_INDICATOR)!;
+    expect(indicator.name).toBe(ANALYSIS_AUTO_FIT_BOUNDS_INDICATOR);
+    expect(indicator.calcParams[0]).toBeLessThan(0.4);
+    expect(indicator.calcParams[1]).toBeGreaterThan(1.3);
+    expect(paneOptions).toEqual({ id: 'candle_pane' });
   });
 
   it('长历史数据原生提交完成后会按同一时间戳重建标注层', async () => {

@@ -38,6 +38,11 @@ import {
   installKlineChartPointerInteraction,
   type InteractionController,
 } from "@/lib/klineChartInteraction";
+import { buildAnalysisAutoFitPriceRange } from "@/lib/analysisAutoFitPriceRange";
+import {
+  ANALYSIS_AUTO_FIT_BOUNDS_INDICATOR,
+  registerAnalysisAutoFitBoundsIndicator,
+} from "@/lib/analysisAutoFitBoundsIndicator";
 
 // Mapping from our indicator IDs to klinecharts indicator names (built-in + custom)
 const KLINE_INDICATOR_MAP: Record<string, string> = { ...CUSTOM_INDICATOR_MAP };
@@ -483,6 +488,7 @@ function CandlestickChartComponent({
   const liveUpdateGenerationRef = useRef(0);
   const analysisOverlayIdsRef = useRef<string[]>([]);
   const dragOverlayIdsRef = useRef<string[]>([]);
+  const analysisAutoFitIndicatorPaneRef = useRef<string | null>(null);
   const onDragPriceLineRef = useRef(onDragPriceLine);
   onDragPriceLineRef.current = onDragPriceLine;
   const onDragVerticalLineRef = useRef(onDragVerticalLine);
@@ -651,6 +657,28 @@ function CandlestickChartComponent({
       analysisVisibleStartTime,
       data,
       hasAnalysisVisibleRange,
+    ],
+  );
+  const analysisAutoFitPriceRange = useMemo(
+    () => (
+      analysisMode && analysisFitAll
+        ? buildAnalysisAutoFitPriceRange({
+            data,
+            visibleStartTime: analysisVisibleStartTime,
+            visibleEndTime: analysisVisibleEndTime,
+            annotations: analysisAnnotations,
+            draggablePriceLines,
+          })
+        : null
+    ),
+    [
+      analysisAnnotations,
+      analysisFitAll,
+      analysisMode,
+      analysisVisibleEndTime,
+      analysisVisibleStartTime,
+      data,
+      draggablePriceLines,
     ],
   );
 
@@ -834,6 +862,7 @@ function CandlestickChartComponent({
     // Register custom indicators before chart init to ensure klinecharts knows them
     registerCustomIndicators();
     registerAnalysisBandLabelOverlay();
+    registerAnalysisAutoFitBoundsIndicator();
 
     const chart = init(containerRef.current, {
       styles: chartStylesForMode(theme, showLastPriceLine),
@@ -989,6 +1018,7 @@ function CandlestickChartComponent({
       }
       dispose(containerRef.current!);
       chartRef.current = null;
+      analysisAutoFitIndicatorPaneRef.current = null;
     };
   }, [scheduleViewportReflow]);
 
@@ -1156,6 +1186,64 @@ function CandlestickChartComponent({
     analysisVisibleEndTime,
     analysisVisibleStartTime,
     hasAnalysisVisibleRange,
+  ]);
+
+  // KLineCharts only auto-scales native series. A transparent price-series
+  // indicator makes visible annotations and pending-order lines participate in
+  // the same Y-axis fit without drawing over the chart.
+  useEffect(() => {
+    const chart = chartRef.current;
+    if (!chart) return;
+
+    const removeBoundsIndicator = () => {
+      const paneId = analysisAutoFitIndicatorPaneRef.current;
+      if (!paneId) return;
+      try {
+        chart.removeIndicator(paneId, ANALYSIS_AUTO_FIT_BOUNDS_INDICATOR);
+      } catch {
+        // The chart may already have removed it during a data reset.
+      }
+      analysisAutoFitIndicatorPaneRef.current = null;
+    };
+
+    if (
+      !analysisMode
+      || !analysisFitAll
+      || !analysisAutoFitPriceRange
+      || data.length === 0
+    ) {
+      removeBoundsIndicator();
+      return;
+    }
+
+    const indicator = {
+      name: ANALYSIS_AUTO_FIT_BOUNDS_INDICATOR,
+      calcParams: [analysisAutoFitPriceRange.min, analysisAutoFitPriceRange.max],
+      minValue: analysisAutoFitPriceRange.min,
+      maxValue: analysisAutoFitPriceRange.max,
+    };
+    const paneId = analysisAutoFitIndicatorPaneRef.current;
+
+    try {
+      if (paneId) {
+        chart.overrideIndicator(indicator, paneId);
+      } else {
+        analysisAutoFitIndicatorPaneRef.current = chart.createIndicator(
+          indicator,
+          true,
+          { id: "candle_pane" },
+        );
+      }
+      chart.resize();
+    } catch {
+      // A subsequent data-ready pass retries with the fully committed dataset.
+    }
+  }, [
+    analysisAutoFitPriceRange,
+    analysisDataReadyRevision,
+    analysisFitAll,
+    analysisMode,
+    data.length,
   ]);
 
   // ============================================================
