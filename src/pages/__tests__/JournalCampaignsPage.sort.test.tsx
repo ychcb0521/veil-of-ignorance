@@ -323,6 +323,12 @@ describe('JournalCampaignsPage sorting', () => {
     expect(screen.getByTestId('campaign-odds-point-best-pnl').querySelector('span')).toHaveStyle({
       backgroundColor: '#0ECB81',
     });
+    expect(screen.getByTestId('campaign-metric-chart-back')).toHaveAccessibleName(
+      '收起盈亏比散点图并返回战役列表',
+    );
+    fireEvent.click(screen.getByTestId('campaign-metric-chart-back'));
+    expect(screen.queryByTestId('campaign-odds-scatter-panel')).not.toBeInTheDocument();
+    expect(screen.getAllByTestId('campaign-card')).toHaveLength(4);
 
     expect(screen.queryByTestId('campaign-metric-picker')).not.toBeInTheDocument();
     expect(screen.queryByTestId('campaign-expectedDrawdownPct-chart-toggle')).not.toBeInTheDocument();

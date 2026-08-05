@@ -1802,6 +1802,7 @@ export default function JournalCampaignsPage() {
                   excludedMissingOperationTimeCount={selectedMetricSeries.excludedMissingOperationTimeCount}
                   colorMode={selectedMetricConfig.colorMode}
                   legacyOddsTestIds={selectedMetricConfig.key === 'odds'}
+                  onBack={() => setMetricChartOpen(false)}
                   onSelectCampaign={handleCampaignOpen}
                 />
               </div>

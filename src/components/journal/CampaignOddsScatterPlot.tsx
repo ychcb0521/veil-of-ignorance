@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { ArrowLeft } from 'lucide-react';
 import {
   createCampaignMetricDomain,
   type CampaignMetricPoint,
@@ -19,6 +20,7 @@ type CampaignMetricScatterPlotProps = {
   excludedMissingOperationTimeCount?: number;
   colorMode?: CampaignMetricColorMode;
   legacyOddsTestIds?: boolean;
+  onBack?: () => void;
   onSelectCampaign: (campaignId: string) => void;
 };
 
@@ -64,6 +66,7 @@ export function CampaignMetricScatterPlot({
   excludedMissingOperationTimeCount = 0,
   colorMode = 'signed',
   legacyOddsTestIds = false,
+  onBack,
   onSelectCampaign,
 }: CampaignMetricScatterPlotProps) {
   const [activeCampaignId, setActiveCampaignId] = useState<string | null>(null);
@@ -114,6 +117,19 @@ export function CampaignMetricScatterPlot({
               : '按客观操作时间从早到晚排列；点击任一点进入对应战役'}
           </span>
           <span className="shrink-0">{points.length} 场</span>
+          {onBack ? (
+            <button
+              type="button"
+              data-testid="campaign-metric-chart-back"
+              aria-label={`收起${metricLabel}散点图并返回战役列表`}
+              title="返回战役列表"
+              onClick={onBack}
+              className="inline-flex h-6 shrink-0 items-center gap-1 rounded border border-transparent px-1.5 text-[9px] text-muted-foreground/55 transition-colors hover:border-border/70 hover:bg-muted/55 hover:text-foreground/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#F0B90B]/45"
+            >
+              <ArrowLeft aria-hidden="true" className="h-3 w-3" />
+              <span>返回列表</span>
+            </button>
+          ) : null}
         </div>
 
         <div className="grid grid-cols-[58px_minmax(0,1fr)] gap-2">
