@@ -20,6 +20,7 @@ import { BackButton } from '@/components/journal/BackButton';
 import {
   CampaignMetricScatterPlot,
   type CampaignMetricColorMode,
+  type CampaignMetricScatterGuide,
 } from '@/components/journal/CampaignOddsScatterPlot';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Popover, PopoverAnchor, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
@@ -122,6 +123,7 @@ type CampaignMetricChartConfig = {
   label: string;
   chartLabel: string;
   seriesLabel: string;
+  guide: CampaignMetricScatterGuide;
   missingValueLabel: string;
   colorMode: CampaignMetricColorMode;
   formatValue: (value: number) => string;
@@ -184,6 +186,19 @@ const CAMPAIGN_METRIC_CHART_CONFIGS: readonly CampaignMetricChartConfig[] = [
     label: '盈亏比',
     chartLabel: '赔率图',
     seriesLabel: '盈亏比时序',
+    guide: {
+      yAxis: '每场战役的实际盈亏比 b，单位为 R。b = 已实现盈亏 ÷ 初始最大预期亏损；正数表示盈利，负数表示亏损。',
+      point: '点越高，实际盈亏比越大；点越低，亏损相对初始风险越深。每个点代表一场具备有效风险分母的战役。',
+      colors: [
+        { color: '#0ECB81', label: '绿色：b > 0，战役盈利。' },
+        { color: '#F6465D', label: '红色：b < 0，战役亏损。' },
+        { color: '#98A2B3', label: '灰色：b = 0，盈亏持平。' },
+      ],
+      referenceLines: [
+        '灰色零线：盈亏平衡线。',
+        '黄色 -1R 虚线：实际亏损等于初始最大预期亏损；低于该线表示亏损超过原定风险边界。',
+      ],
+    },
     missingValueLabel: '有效盈亏比',
     colorMode: 'signed',
     formatValue: value => formatSignedMetric(value, 'R'),
@@ -193,6 +208,13 @@ const CAMPAIGN_METRIC_CHART_CONFIGS: readonly CampaignMetricChartConfig[] = [
     label: '预期回撤',
     chartLabel: '回撤图',
     seriesLabel: '预期回撤时序',
+    guide: {
+      yAxis: '主力开仓价到初始对冲 A/B 中有效风险边界的价格距离，占主力开仓价的百分比。数值越高，预设价格回撤空间越大。',
+      point: '点越高，代表该战役允许的预期回撤百分比越大；点越低，代表初始风险边界距离开仓价越近。',
+      colors: [
+        { color: '#F0B90B', label: '黄色：统一表示风险距离；颜色不区分盈利或亏损。' },
+      ],
+    },
     missingValueLabel: '预期回撤',
     colorMode: 'risk',
     formatValue: value => `${value.toFixed(2)}%`,
@@ -202,6 +224,13 @@ const CAMPAIGN_METRIC_CHART_CONFIGS: readonly CampaignMetricChartConfig[] = [
     label: '机会质量',
     chartLabel: '质量图',
     seriesLabel: '机会质量时序',
+    guide: {
+      yAxis: '机会质量 Q。Q = max(实际盈亏比 b, 1) ÷ 预期回撤百分点；预期回撤 2% 在公式中按 2 计算。',
+      point: '点越高，表示在实际盈亏表现与初始回撤空间共同衡量下，机会质量越高；点越低则相反。',
+      colors: [
+        { color: '#2B7FFF', label: '蓝色：统一表示机会质量；颜色不表达盈亏方向。' },
+      ],
+    },
     missingValueLabel: '机会质量',
     colorMode: 'quality',
     formatValue: value => value.toFixed(2),
@@ -211,6 +240,16 @@ const CAMPAIGN_METRIC_CHART_CONFIGS: readonly CampaignMetricChartConfig[] = [
     label: '算术期望',
     chartLabel: '算术图',
     seriesLabel: '算术期望时序',
+    guide: {
+      yAxis: '该场战役在当前有效样本胜率下的算术期望，单位为 R。E = P(赢) × b − (1 − P(赢))。',
+      point: '点越高，代表按当前胜率与本场实际盈亏比计算的期望越高；低于零表示算术期望为负。',
+      colors: [
+        { color: '#0ECB81', label: '绿色：算术期望 > 0。' },
+        { color: '#F6465D', label: '红色：算术期望 < 0。' },
+        { color: '#98A2B3', label: '灰色：算术期望 = 0。' },
+      ],
+      referenceLines: ['灰色零线：正、负算术期望的分界。'],
+    },
     missingValueLabel: '算术期望',
     colorMode: 'signed',
     formatValue: formatArithmeticExpectancy,
@@ -220,6 +259,16 @@ const CAMPAIGN_METRIC_CHART_CONFIGS: readonly CampaignMetricChartConfig[] = [
     label: '几何期望',
     chartLabel: '几何图',
     seriesLabel: '几何期望时序',
+    guide: {
+      yAxis: '该场战役按风险占比复合后的预期账户增长率，单位为每笔百分比。G = (1+b×x)^P(赢) × (1−x)^(1−P(赢)) − 1。',
+      point: '点越高，表示按本场风险占比与当前胜率估算的复合增长贡献越高；低于零表示长期复合效应为负。',
+      colors: [
+        { color: '#0ECB81', label: '绿色：几何期望 > 0。' },
+        { color: '#F6465D', label: '红色：几何期望 < 0。' },
+        { color: '#98A2B3', label: '灰色：几何期望 = 0。' },
+      ],
+      referenceLines: ['灰色零线：账户复合增长与复合损耗的分界。'],
+    },
     missingValueLabel: '几何期望',
     colorMode: 'signed',
     formatValue: formatGeometricExpectancy,
@@ -229,6 +278,13 @@ const CAMPAIGN_METRIC_CHART_CONFIGS: readonly CampaignMetricChartConfig[] = [
     label: '重要性',
     chartLabel: '重要性图',
     seriesLabel: '重要性时序',
+    guide: {
+      yAxis: '人工设置的战役重要性评分，范围为 0–5 星。纵坐标数值就是对应星级。',
+      point: '点越高，代表该战役被标记得越重要；点位只反映人工重要性，不代表盈亏或风险大小。',
+      colors: [
+        { color: '#D99A00', label: '金色：统一表示重要性评分；颜色不区分盈亏。' },
+      ],
+    },
     missingValueLabel: '重要性评分',
     colorMode: 'importance',
     formatValue: value => `${Math.round(value)}/5`,
@@ -238,6 +294,16 @@ const CAMPAIGN_METRIC_CHART_CONFIGS: readonly CampaignMetricChartConfig[] = [
     label: '镜像止盈',
     chartLabel: '镜像图',
     seriesLabel: '镜像止盈结果时序',
+    guide: {
+      yAxis: '镜像止盈结果采用离散等级：0 = 未实现，1 = 亏损，2 = 持平，3 = 盈利。纵向高度表示结果等级，不是连续金额差。',
+      point: '点越高，镜像止盈结果等级越好；同一水平线上的点属于同一种结果，点与点的垂直距离不代表实际盈亏差额。',
+      colors: [
+        { color: '#0ECB81', label: '绿色（3）：镜像止盈实现盈利。' },
+        { color: '#F0B90B', label: '黄色（2）：镜像止盈实现持平。' },
+        { color: '#F6465D', label: '红色（1）：镜像止盈实现亏损。' },
+        { color: '#98A2B3', label: '灰色（0）：镜像止盈未实现。' },
+      ],
+    },
     missingValueLabel: '镜像止盈结果',
     colorMode: 'mirrorTp',
     formatValue: formatMirrorTpMetric,
@@ -1792,10 +1858,12 @@ export default function JournalCampaignsPage() {
             >
               <div id="campaign-metric-scatter-view">
                 <CampaignMetricScatterPlot
+                  key={selectedMetricConfig.key}
                   points={selectedMetricSeries.points}
                   metricKey={selectedMetricConfig.key}
                   metricLabel={selectedMetricConfig.label}
                   seriesLabel={selectedMetricConfig.seriesLabel}
+                  guide={selectedMetricConfig.guide}
                   formatValue={selectedMetricConfig.formatValue}
                   missingValueLabel={selectedMetricConfig.missingValueLabel}
                   excludedMissingValueCount={selectedMetricSeries.excludedMissingValueCount}

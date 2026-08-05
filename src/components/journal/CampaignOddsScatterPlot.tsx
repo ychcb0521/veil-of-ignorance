@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { ArrowLeft } from 'lucide-react';
+import { ArrowLeft, CircleHelp } from 'lucide-react';
 import {
   createCampaignMetricDomain,
   type CampaignMetricPoint,
@@ -9,11 +9,22 @@ import { formatBeijingTime } from '@/lib/timeFormat';
 
 export type CampaignMetricColorMode = 'signed' | 'risk' | 'quality' | 'importance' | 'mirrorTp';
 
+export type CampaignMetricScatterGuide = {
+  yAxis: string;
+  point: string;
+  colors: readonly {
+    color: string;
+    label: string;
+  }[];
+  referenceLines?: readonly string[];
+};
+
 type CampaignMetricScatterPlotProps = {
   points: CampaignMetricPoint[];
   metricKey: string;
   metricLabel: string;
   seriesLabel: string;
+  guide: CampaignMetricScatterGuide;
   formatValue: (value: number) => string;
   missingValueLabel: string;
   excludedMissingValueCount?: number;
@@ -55,11 +66,26 @@ function metricPointColor(value: number, mode: CampaignMetricColorMode) {
   return '#98A2B3';
 }
 
+const ODDS_SCATTER_GUIDE: CampaignMetricScatterGuide = {
+  yAxis: '每场战役的实际盈亏比 b，单位为 R。b = 已实现盈亏 ÷ 初始最大预期亏损；正数表示盈利，负数表示亏损。',
+  point: '点越高，实际盈亏比越大；点越低，亏损相对初始风险越深。每个点代表一场具备有效风险分母的战役。',
+  colors: [
+    { color: '#0ECB81', label: '绿色：b > 0，战役盈利。' },
+    { color: '#F6465D', label: '红色：b < 0，战役亏损。' },
+    { color: '#98A2B3', label: '灰色：b = 0，盈亏持平。' },
+  ],
+  referenceLines: [
+    '灰色零线：盈亏平衡线。',
+    '黄色 -1R 虚线：实际亏损等于初始最大预期亏损；低于该线表示亏损超过原定风险边界。',
+  ],
+};
+
 export function CampaignMetricScatterPlot({
   points,
   metricKey,
   metricLabel,
   seriesLabel,
+  guide,
   formatValue,
   missingValueLabel,
   excludedMissingValueCount = 0,
@@ -70,6 +96,7 @@ export function CampaignMetricScatterPlot({
   onSelectCampaign,
 }: CampaignMetricScatterPlotProps) {
   const [activeCampaignId, setActiveCampaignId] = useState<string | null>(null);
+  const [guideOpen, setGuideOpen] = useState(false);
   const lossBoundaryValue = metricKey === 'odds' ? -1 : null;
   const domain = useMemo(
     () => createCampaignMetricDomain([
@@ -114,7 +141,21 @@ export function CampaignMetricScatterPlot({
     >
       <div className="mx-auto w-full max-w-[36rem]">
         <div className="mb-2 flex min-h-5 items-center gap-3 text-[10px] text-muted-foreground">
-          <span className="font-medium text-foreground/70">{seriesLabel}</span>
+          <span className="inline-flex shrink-0 items-center gap-0.5">
+            <span className="font-medium text-foreground/70">{seriesLabel}</span>
+            <button
+              type="button"
+              data-testid={`campaign-metric-guide-toggle-${metricKey}`}
+              aria-label={`${guideOpen ? '收起' : '查看'}${metricLabel}散点图说明`}
+              aria-expanded={guideOpen}
+              aria-controls={`campaign-metric-guide-${metricKey}`}
+              title="散点图说明"
+              onClick={() => setGuideOpen(open => !open)}
+              className="inline-flex h-5 w-5 items-center justify-center rounded text-muted-foreground/35 transition-colors hover:bg-muted/55 hover:text-foreground/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#F0B90B]/40"
+            >
+              <CircleHelp aria-hidden="true" className="h-3 w-3" />
+            </button>
+          </span>
           <span className="min-w-0 flex-1 truncate font-mono text-foreground/55" aria-live="polite">
             {activePoint
               ? `#${activePoint.sequence} ${activePoint.title} · ${formatValue(activePoint.value)} · ${formatBeijingTime(activePoint.operationTime)}`
@@ -135,6 +176,50 @@ export function CampaignMetricScatterPlot({
             </button>
           ) : null}
         </div>
+
+        {guideOpen ? (
+          <div
+            id={`campaign-metric-guide-${metricKey}`}
+            data-testid={`campaign-metric-guide-${metricKey}`}
+            className="mb-3 border-y border-border/45 bg-muted/15 px-2.5 py-2 text-[10px] leading-[1.55] text-muted-foreground"
+          >
+            <dl className="space-y-1.5">
+              <div className="grid grid-cols-[34px_minmax(0,1fr)] gap-2">
+                <dt className="font-medium text-foreground/60">横轴</dt>
+                <dd>按客观操作时间从早到晚等距排列，每一格代表一场战役；横向距离只表示先后顺序，不表示真实时间间隔。</dd>
+              </div>
+              <div className="grid grid-cols-[34px_minmax(0,1fr)] gap-2">
+                <dt className="font-medium text-foreground/60">纵轴</dt>
+                <dd>{guide.yAxis}</dd>
+              </div>
+              <div className="grid grid-cols-[34px_minmax(0,1fr)] gap-2">
+                <dt className="font-medium text-foreground/60">颜色</dt>
+                <dd className="flex flex-wrap gap-x-3 gap-y-1">
+                  {guide.colors.map(item => (
+                    <span key={`${item.color}-${item.label}`} className="inline-flex items-start gap-1">
+                      <span
+                        aria-hidden="true"
+                        className="mt-[4px] h-2 w-2 shrink-0 rounded-full border border-background"
+                        style={{ backgroundColor: item.color }}
+                      />
+                      <span>{item.label}</span>
+                    </span>
+                  ))}
+                </dd>
+              </div>
+              <div className="grid grid-cols-[34px_minmax(0,1fr)] gap-2">
+                <dt className="font-medium text-foreground/60">点位</dt>
+                <dd>{guide.point} 横向位置对应操作先后，纵向位置对应本指标数值；点击任一点进入对应战役。</dd>
+              </div>
+              {guide.referenceLines?.length ? (
+                <div className="grid grid-cols-[34px_minmax(0,1fr)] gap-2">
+                  <dt className="font-medium text-foreground/60">参考线</dt>
+                  <dd>{guide.referenceLines.join(' ')}</dd>
+                </div>
+              ) : null}
+            </dl>
+          </div>
+        ) : null}
 
         <div className="grid grid-cols-[58px_minmax(0,1fr)] gap-2">
           <div className="relative h-full text-[9px] font-mono text-muted-foreground/65" aria-hidden="true">
@@ -291,6 +376,7 @@ export function CampaignOddsScatterPlot({
       metricKey="odds"
       metricLabel="盈亏比"
       seriesLabel="赔率时序"
+      guide={ODDS_SCATTER_GUIDE}
       formatValue={formatOdds}
       missingValueLabel="有效赔率"
       excludedMissingValueCount={excludedMissingOddsCount}

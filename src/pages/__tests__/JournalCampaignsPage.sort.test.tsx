@@ -332,6 +332,21 @@ describe('JournalCampaignsPage sorting', () => {
       'border-dashed',
       'border-[#F0B90B]/80',
     );
+    const oddsGuideToggle = screen.getByTestId('campaign-metric-guide-toggle-odds');
+    expect(oddsGuideToggle).toHaveAccessibleName('查看盈亏比散点图说明');
+    expect(oddsGuideToggle).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByTestId('campaign-metric-guide-odds')).not.toBeInTheDocument();
+    fireEvent.click(oddsGuideToggle);
+    expect(oddsGuideToggle).toHaveAccessibleName('收起盈亏比散点图说明');
+    expect(oddsGuideToggle).toHaveAttribute('aria-expanded', 'true');
+    const oddsGuide = screen.getByTestId('campaign-metric-guide-odds');
+    expect(oddsGuide).toHaveTextContent('横轴');
+    expect(oddsGuide).toHaveTextContent('纵轴');
+    expect(oddsGuide).toHaveTextContent('颜色');
+    expect(oddsGuide).toHaveTextContent('点位');
+    expect(oddsGuide).toHaveTextContent('黄色 -1R 虚线');
+    fireEvent.click(oddsGuideToggle);
+    expect(screen.queryByTestId('campaign-metric-guide-odds')).not.toBeInTheDocument();
     expect(screen.getByTestId('campaign-metric-chart-back')).toHaveAccessibleName(
       '收起盈亏比散点图并返回战役列表',
     );
@@ -356,6 +371,13 @@ describe('JournalCampaignsPage sorting', () => {
       [...screen.getByTestId('campaign-metric-scatter-plot').querySelectorAll('[data-campaign-id]')]
         .map(node => node.getAttribute('data-campaign-id')),
     ).toEqual(['late-close', 'best-pnl', 'high-importance']);
+    const drawdownGuideToggle = screen.getByTestId(
+      'campaign-metric-guide-toggle-expectedDrawdownPct',
+    );
+    fireEvent.click(drawdownGuideToggle);
+    const drawdownGuide = screen.getByTestId('campaign-metric-guide-expectedDrawdownPct');
+    expect(drawdownGuide).toHaveTextContent('占主力开仓价的百分比');
+    expect(drawdownGuide).toHaveTextContent('黄色：统一表示风险距离');
 
     fireEvent.contextMenu(screen.getByTestId('campaign-sort-captureRate'));
     fireEvent.click(await screen.findByTestId('campaign-odds-chart-toggle'));
