@@ -70,9 +70,13 @@ export function CampaignMetricScatterPlot({
   onSelectCampaign,
 }: CampaignMetricScatterPlotProps) {
   const [activeCampaignId, setActiveCampaignId] = useState<string | null>(null);
+  const lossBoundaryValue = metricKey === 'odds' ? -1 : null;
   const domain = useMemo(
-    () => createCampaignMetricDomain(points.map(point => point.value)),
-    [points],
+    () => createCampaignMetricDomain([
+      ...points.map(point => point.value),
+      ...(lossBoundaryValue == null ? [] : [lossBoundaryValue]),
+    ]),
+    [lossBoundaryValue, points],
   );
   const ticks = useMemo(
     () => Array.from({ length: 5 }, (_, index) => {
@@ -144,6 +148,15 @@ export function CampaignMetricScatterPlot({
                   {formatValue(tick.value)}
                 </span>
               ))}
+              {lossBoundaryValue != null ? (
+                <span
+                  data-testid="campaign-odds-loss-boundary-label"
+                  className="absolute right-0 -translate-y-1/2 whitespace-nowrap font-medium text-[#D99A00]"
+                  style={{ top: `${valuePosition(lossBoundaryValue, domain.min, domain.max)}%` }}
+                >
+                  -1R
+                </span>
+              ) : null}
             </div>
           </div>
 
@@ -165,6 +178,15 @@ export function CampaignMetricScatterPlot({
                   aria-hidden="true"
                   className="absolute inset-x-0 border-t border-dashed border-foreground/30"
                   style={{ top: `${valuePosition(0, domain.min, domain.max)}%` }}
+                />
+              ) : null}
+              {lossBoundaryValue != null ? (
+                <div
+                  data-testid="campaign-odds-loss-boundary-line"
+                  data-reference-value={lossBoundaryValue}
+                  aria-hidden="true"
+                  className="absolute inset-x-0 z-[1] border-t border-dashed border-[#F0B90B]/80"
+                  style={{ top: `${valuePosition(lossBoundaryValue, domain.min, domain.max)}%` }}
                 />
               ) : null}
 

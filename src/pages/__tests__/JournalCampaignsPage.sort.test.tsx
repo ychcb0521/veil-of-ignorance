@@ -323,6 +323,15 @@ describe('JournalCampaignsPage sorting', () => {
     expect(screen.getByTestId('campaign-odds-point-best-pnl').querySelector('span')).toHaveStyle({
       backgroundColor: '#0ECB81',
     });
+    expect(screen.getByTestId('campaign-odds-loss-boundary-label')).toHaveTextContent('-1R');
+    expect(screen.getByTestId('campaign-odds-loss-boundary-line')).toHaveAttribute(
+      'data-reference-value',
+      '-1',
+    );
+    expect(screen.getByTestId('campaign-odds-loss-boundary-line')).toHaveClass(
+      'border-dashed',
+      'border-[#F0B90B]/80',
+    );
     expect(screen.getByTestId('campaign-metric-chart-back')).toHaveAccessibleName(
       '收起盈亏比散点图并返回战役列表',
     );
@@ -341,6 +350,7 @@ describe('JournalCampaignsPage sorting', () => {
       'data-metric-key',
       'expectedDrawdownPct',
     );
+    expect(screen.queryByTestId('campaign-odds-loss-boundary-line')).not.toBeInTheDocument();
     expect(screen.getByTestId('campaign-metric-scroll-area')).toHaveClass('aspect-square');
     expect(
       [...screen.getByTestId('campaign-metric-scatter-plot').querySelectorAll('[data-campaign-id]')]
