@@ -136,6 +136,8 @@ type CampaignFormulaPopover =
   | 'expectedDrawdownPct'
   | 'arithmeticExpectancy'
   | 'geometricExpectancy'
+  | 'importanceSort'
+  | 'mirrorTpSort'
   | 'validCampaigns'
   | 'mirrorTp'
   | 'winRate'
@@ -241,6 +243,26 @@ const CAMPAIGN_METRIC_CHART_CONFIGS: readonly CampaignMetricChartConfig[] = [
     formatValue: formatMirrorTpMetric,
   },
 ] as const;
+
+const SORT_FORMULA_BY_MODE: Partial<Record<CampaignSortMode, CampaignFormulaPopover>> = {
+  importance: 'importanceSort',
+  captureRate: 'captureRate',
+  expectedDrawdownPct: 'expectedDrawdownPct',
+  opportunityQuality: 'opportunityQualitySort',
+  arithmeticExpectancy: 'arithmeticExpectancy',
+  geometricExpectancy: 'geometricExpectancy',
+  mirrorTp: 'mirrorTpSort',
+};
+
+const SORT_CHART_BY_MODE: Partial<Record<CampaignSortMode, CampaignMetricChartKey>> = {
+  importance: 'importance',
+  captureRate: 'odds',
+  expectedDrawdownPct: 'expectedDrawdownPct',
+  opportunityQuality: 'opportunityQuality',
+  arithmeticExpectancy: 'arithmeticExpectancy',
+  geometricExpectancy: 'geometricExpectancy',
+  mirrorTp: 'mirrorTp',
+};
 
 function parseCampaignListParams(search: string): CampaignSortState {
   const params = new URLSearchParams(search);
@@ -1096,56 +1118,64 @@ export default function JournalCampaignsPage() {
                 排序方式
               </span>
               {SORT_OPTIONS.map(option => {
-              const active = sortState.mode === option.value;
-              const direction = active ? sortState.direction : 'desc';
-              const formula: CampaignFormulaPopover | null = option.value === 'opportunityQuality'
-                ? 'opportunityQualitySort'
-                : option.value === 'captureRate'
-                  || option.value === 'expectedDrawdownPct'
-                  || option.value === 'arithmeticExpectancy'
-                  || option.value === 'geometricExpectancy'
-                  ? option.value
-                  : null;
-              const sortButton = (
-                <button
-                  type="button"
-                  aria-pressed={active}
-                  aria-label={`${option.label}，${sortDirectionLabel(direction, option.value)}排序`}
-                  title={`按${option.label}${sortDirectionLabel(direction, option.value)}排序${active ? '；再次单击切换方向' : ''}`}
-                  data-sort-direction={active ? direction : undefined}
-                  data-testid={`campaign-sort-${option.value}`}
-                  onClick={(event) => {
-                    if (event.detail > 1) return;
-                    setFormulaPopover(null);
-                    handleSortChange(option.value);
-                  }}
-                  onDoubleClick={(event) => {
-                    if (formula) openFormulaPopover(event, formula);
-                  }}
-                  onContextMenu={(event) => {
-                    if (formula) openFormulaPopover(event, formula);
-                  }}
-                  className={`inline-flex h-7 items-center gap-1 rounded border px-2 transition-colors ${
-                    active
-                      ? 'border-border bg-card text-foreground shadow-sm'
-                      : 'border-transparent text-muted-foreground/60 hover:border-border/70 hover:bg-card/70 hover:text-foreground/80'
-                  }`}
-                >
-                  <span>{option.label}</span>
-                  {formula && (
-                    <Sigma aria-hidden="true" className="h-2.5 w-2.5 opacity-35" />
-                  )}
-                  {active && (
-                    direction === 'desc'
-                      ? <ArrowDown className="h-3 w-3 opacity-45" />
-                      : <ArrowUp className="h-3 w-3 opacity-45" />
-                  )}
-                </button>
-              );
-              if (!formula) {
-                return <span key={option.value}>{sortButton}</span>;
-              }
-              return (
+                const active = sortState.mode === option.value;
+                const direction = active ? sortState.direction : 'desc';
+                const formula = SORT_FORMULA_BY_MODE[option.value] ?? null;
+                const sortChartKey = SORT_CHART_BY_MODE[option.value] ?? null;
+                const sortChartConfig = sortChartKey == null
+                  ? null
+                  : CAMPAIGN_METRIC_CHART_CONFIGS.find(config => config.key === sortChartKey) ?? null;
+                const sortChartPointCount = sortChartKey == null
+                  ? 0
+                  : metricSeriesByKey[sortChartKey].points.length;
+                const sortChartActive = sortChartKey != null
+                  && metricChartOpen
+                  && metricChartKey === sortChartKey;
+                const sortChartTestId = sortChartKey === 'odds'
+                  ? 'campaign-odds-chart-toggle'
+                  : sortChartKey == null
+                    ? undefined
+                    : `campaign-${sortChartKey}-chart-toggle`;
+                const sortButton = (
+                  <button
+                    type="button"
+                    aria-pressed={active}
+                    aria-label={`${option.label}，${sortDirectionLabel(direction, option.value)}排序`}
+                    title={`按${option.label}${sortDirectionLabel(direction, option.value)}排序${active ? '；再次单击切换方向' : ''}${formula ? '；双击或右键查看说明与散点图' : ''}`}
+                    data-sort-direction={active ? direction : undefined}
+                    data-testid={`campaign-sort-${option.value}`}
+                    onClick={(event) => {
+                      if (event.detail > 1) return;
+                      setFormulaPopover(null);
+                      handleSortChange(option.value);
+                    }}
+                    onDoubleClick={(event) => {
+                      if (formula) openFormulaPopover(event, formula);
+                    }}
+                    onContextMenu={(event) => {
+                      if (formula) openFormulaPopover(event, formula);
+                    }}
+                    className={`inline-flex h-7 items-center gap-1 rounded border px-2 transition-colors ${
+                      active
+                        ? 'border-border bg-card text-foreground shadow-sm'
+                        : 'border-transparent text-muted-foreground/60 hover:border-border/70 hover:bg-card/70 hover:text-foreground/80'
+                    }`}
+                  >
+                    <span>{option.label}</span>
+                    {formula && (
+                      <Sigma aria-hidden="true" className="h-2.5 w-2.5 opacity-35" />
+                    )}
+                    {active && (
+                      direction === 'desc'
+                        ? <ArrowDown className="h-3 w-3 opacity-45" />
+                        : <ArrowUp className="h-3 w-3 opacity-45" />
+                    )}
+                  </button>
+                );
+                if (!formula) {
+                  return <span key={option.value}>{sortButton}</span>;
+                }
+                return (
                 <Popover
                   key={option.value}
                   open={formulaPopover === formula}
@@ -1211,7 +1241,7 @@ export default function JournalCampaignsPage() {
                           <div>缺少有效初始最大预期亏损的战役不参与排序。</div>
                         </div>
                       </>
-                    ) : (
+                    ) : formula === 'geometricExpectancy' ? (
                       <>
                         <div className="font-medium text-foreground">单场几何期望计算公式</div>
                         <div className="mt-2 rounded bg-muted/60 px-2 py-1.5 font-mono text-foreground">
@@ -1229,10 +1259,59 @@ export default function JournalCampaignsPage() {
                           <div>缺少有效初始最大预期亏损，或既无开仓快照也无可用当前资产的战役，不参与几何期望排序。</div>
                         </div>
                       </>
+                    ) : formula === 'importanceSort' ? (
+                      <>
+                        <div className="font-medium text-foreground">重要性排序口径</div>
+                        <div className="mt-2 rounded bg-muted/60 px-2 py-1.5 font-mono text-foreground">
+                          重要性 = 手动标记星级（0–5）
+                        </div>
+                        <div className="mt-2 space-y-1 text-muted-foreground">
+                          <div>排序直接使用每场战役当前保存的星级。</div>
+                          <div>未标记的战役按 0 星处理；相同星级再按客观操作时间排序。</div>
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <div className="font-medium text-foreground">镜像止盈排序口径</div>
+                        <div className="mt-2 rounded bg-muted/60 px-2 py-1.5 font-mono text-foreground">
+                          盈利实现 ＞ 持平实现 ＞ 亏损实现 ＞ 未实现
+                        </div>
+                        <div className="mt-2 space-y-1 text-muted-foreground">
+                          <div>先判断镜像止盈委托是否真正成交，再按战役最终已实现盈亏区分结果。</div>
+                          <div>相同结果再按客观操作时间排序。</div>
+                        </div>
+                      </>
                     )}
+                    {sortChartKey != null && sortChartConfig != null ? (
+                      <div className="mt-3 border-t border-border/55 pt-2">
+                        <button
+                          type="button"
+                          data-testid={sortChartTestId}
+                          aria-expanded={sortChartActive}
+                          aria-controls="campaign-odds-scatter-panel"
+                          aria-label={`${sortChartActive ? '收起' : '查看'}${sortChartConfig.label}时序散点图，共 ${sortChartPointCount} 场`}
+                          title={`${sortChartActive ? '收起' : '查看'}${sortChartConfig.label}时序散点图`}
+                          disabled={sortChartPointCount === 0}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            handleMetricChartToggle(sortChartKey);
+                            setFormulaPopover(null);
+                          }}
+                          className={`inline-flex h-6 items-center gap-1 rounded border px-1.5 text-[9px] transition-colors disabled:cursor-not-allowed disabled:opacity-30 ${
+                            sortChartActive
+                              ? 'border-[#F0B90B]/25 bg-[#F0B90B]/5 text-foreground/70'
+                              : 'border-transparent text-muted-foreground/45 hover:border-border/70 hover:bg-muted/45 hover:text-foreground/70'
+                          }`}
+                        >
+                          <ChartScatter aria-hidden="true" className="h-3 w-3" />
+                          <span>{sortChartActive ? '收起散点图' : '查看散点图'}</span>
+                          <span className="text-muted-foreground/45">{sortChartPointCount}</span>
+                        </button>
+                      </div>
+                    ) : null}
                   </PopoverContent>
                 </Popover>
-              );
+                );
               })}
             </div>
             <div
@@ -1386,44 +1465,6 @@ export default function JournalCampaignsPage() {
                 )}
               </PopoverContent>
             </Popover>
-            <div
-              data-testid="campaign-metric-chart-toggles"
-              className="inline-flex flex-wrap items-center gap-0.5 border-l border-[#F0B90B]/15 pl-1"
-              aria-label="指标时序散点图"
-            >
-              {CAMPAIGN_METRIC_CHART_CONFIGS.map(config => {
-                const pointCount = metricSeriesByKey[config.key].points.length;
-                const active = metricChartOpen && metricChartKey === config.key;
-                const testId = config.key === 'odds'
-                  ? 'campaign-odds-chart-toggle'
-                  : `campaign-${config.key}-chart-toggle`;
-                return (
-                  <button
-                    key={config.key}
-                    type="button"
-                    data-testid={testId}
-                    aria-expanded={active}
-                    aria-controls="campaign-odds-scatter-panel"
-                    aria-label={`${active ? '收起' : '展开'}${config.label}时序散点图，共 ${pointCount} 场`}
-                    title={`${active ? '收起' : '展开'}${config.label}时序散点图`}
-                    disabled={pointCount === 0}
-                    onClick={() => handleMetricChartToggle(config.key)}
-                    className={`inline-flex h-7 shrink-0 select-none items-center justify-center gap-1 whitespace-nowrap rounded border px-1.5 transition-colors disabled:cursor-not-allowed disabled:opacity-20 ${
-                      active
-                        ? 'border-[#F0B90B]/25 bg-background/80 text-foreground/75'
-                        : 'border-transparent text-foreground/40 hover:border-[#F0B90B]/15 hover:bg-background/70 hover:text-foreground/75'
-                    }`}
-                  >
-                    <ChartScatter aria-hidden="true" className="h-3.5 w-3.5" />
-                    <span className="text-[9px]">{config.chartLabel}</span>
-                    <ChevronDown
-                      aria-hidden="true"
-                      className={`h-2.5 w-2.5 transition-transform ${active ? 'rotate-180' : ''}`}
-                    />
-                  </button>
-                );
-              })}
-            </div>
             <Popover
               open={formulaPopover === 'expectedValue'}
               onOpenChange={open => handleFormulaPopoverChange('expectedValue', open)}

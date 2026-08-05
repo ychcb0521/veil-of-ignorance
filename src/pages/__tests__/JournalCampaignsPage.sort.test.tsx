@@ -299,9 +299,15 @@ describe('JournalCampaignsPage sorting', () => {
     expect(cardOrder()).toEqual(['Best PnL', 'Newest Operation', 'Late Close', 'High Importance']);
 
     expect(screen.queryByTestId('campaign-odds-scatter-panel')).not.toBeInTheDocument();
-    fireEvent.click(screen.getByTestId('campaign-odds-chart-toggle'));
-    expect(screen.getByTestId('campaign-odds-chart-toggle')).toHaveAttribute('aria-expanded', 'true');
-    expect(screen.getByTestId('campaign-odds-chart-toggle')).toHaveTextContent('赔率图');
+    expect(screen.queryByTestId('campaign-metric-chart-toggles')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('campaign-odds-chart-toggle')).not.toBeInTheDocument();
+
+    fireEvent.contextMenu(screen.getByTestId('campaign-sort-captureRate'));
+    const oddsChartToggle = await screen.findByTestId('campaign-odds-chart-toggle');
+    expect(oddsChartToggle).toHaveAttribute('aria-expanded', 'false');
+    expect(oddsChartToggle).toHaveTextContent('查看散点图');
+    fireEvent.click(oddsChartToggle);
+
     expect(screen.getByTestId('campaign-odds-scatter-panel')).toBeInTheDocument();
     expect(screen.getByTestId('campaign-odds-scroll-area')).toHaveClass('aspect-square');
     expect(
@@ -318,14 +324,13 @@ describe('JournalCampaignsPage sorting', () => {
       backgroundColor: '#0ECB81',
     });
 
-    expect(screen.getByTestId('campaign-metric-chart-toggles')).toBeInTheDocument();
     expect(screen.queryByTestId('campaign-metric-picker')).not.toBeInTheDocument();
-    fireEvent.click(screen.getByTestId('campaign-expectedDrawdownPct-chart-toggle'));
-    expect(screen.getByTestId('campaign-odds-chart-toggle')).toHaveAttribute('aria-expanded', 'false');
-    expect(screen.getByTestId('campaign-expectedDrawdownPct-chart-toggle')).toHaveAttribute(
-      'aria-expanded',
-      'true',
-    );
+    expect(screen.queryByTestId('campaign-expectedDrawdownPct-chart-toggle')).not.toBeInTheDocument();
+    fireEvent.contextMenu(screen.getByTestId('campaign-sort-expectedDrawdownPct'));
+    const drawdownChartToggle = await screen.findByTestId('campaign-expectedDrawdownPct-chart-toggle');
+    expect(drawdownChartToggle).toHaveAttribute('aria-expanded', 'false');
+    fireEvent.click(drawdownChartToggle);
+
     expect(screen.getByTestId('campaign-metric-scatter-plot')).toHaveAttribute(
       'data-metric-key',
       'expectedDrawdownPct',
@@ -336,8 +341,9 @@ describe('JournalCampaignsPage sorting', () => {
         .map(node => node.getAttribute('data-campaign-id')),
     ).toEqual(['late-close', 'best-pnl', 'high-importance']);
 
-    fireEvent.click(screen.getByTestId('campaign-odds-chart-toggle'));
-    expect(screen.getByTestId('campaign-odds-chart-toggle')).toHaveAttribute('aria-expanded', 'true');
+    fireEvent.contextMenu(screen.getByTestId('campaign-sort-captureRate'));
+    fireEvent.click(await screen.findByTestId('campaign-odds-chart-toggle'));
+    expect(screen.getByTestId('campaign-odds-scatter-plot')).toBeInTheDocument();
 
     fireEvent.click(screen.getByTestId('campaign-odds-point-best-pnl'));
     expect(screen.getByTestId('location-probe')).toHaveTextContent(
