@@ -47,8 +47,41 @@ function formatOdds(value: number) {
   return `${normalized > 0 ? '+' : ''}${normalized.toFixed(2)}R`;
 }
 
+function formatIntegerOddsTick(value: number) {
+  const normalized = Object.is(value, -0) ? 0 : value;
+  return `${normalized > 0 ? '+' : ''}${normalized}R`;
+}
+
 function valuePosition(value: number, min: number, max: number) {
   return 100 - ((value - min) / (max - min)) * 100;
+}
+
+function niceIntegerTickStep(rawStep: number) {
+  if (!Number.isFinite(rawStep) || rawStep <= 1) return 1;
+
+  const magnitude = 10 ** Math.floor(Math.log10(rawStep));
+  const normalized = rawStep / magnitude;
+  const multiplier = normalized <= 1 ? 1 : normalized <= 2 ? 2 : normalized <= 5 ? 5 : 10;
+  return Math.max(1, multiplier * magnitude);
+}
+
+function createIntegerOddsTicks(min: number, max: number) {
+  const lower = Math.ceil(min);
+  const upper = Math.floor(max);
+  if (lower > upper) return [];
+
+  const step = niceIntegerTickStep((upper - lower) / 5);
+  const first = Math.ceil(lower / step) * step;
+  const values: number[] = [];
+
+  for (let value = first; value <= upper; value += step) {
+    values.push(value);
+  }
+
+  return values.reverse().map(value => ({
+    value,
+    top: valuePosition(value, min, max),
+  }));
 }
 
 function metricPointColor(value: number, mode: CampaignMetricColorMode) {
@@ -105,13 +138,16 @@ export function CampaignMetricScatterPlot({
     ]),
     [lossBoundaryValue, points],
   );
-  const ticks = useMemo(
-    () => Array.from({ length: 5 }, (_, index) => {
+  const ticks = useMemo(() => {
+    if (metricKey === 'odds') {
+      return createIntegerOddsTicks(domain.min, domain.max);
+    }
+
+    return Array.from({ length: 5 }, (_, index) => {
       const value = domain.max - ((domain.max - domain.min) * index) / 4;
       return { value, top: valuePosition(value, domain.min, domain.max) };
-    }),
-    [domain],
-  );
+    });
+  }, [domain, metricKey]);
   const activePoint = points.find(point => point.campaignId === activeCampaignId) ?? null;
   const xLabelStep = Math.max(1, Math.ceil(points.length / 5));
   const plotTestId = legacyOddsTestIds
@@ -224,15 +260,21 @@ export function CampaignMetricScatterPlot({
         <div className="grid grid-cols-[58px_minmax(0,1fr)] gap-2">
           <div className="relative h-full text-[9px] font-mono text-muted-foreground/65" aria-hidden="true">
             <div className="absolute inset-x-0 bottom-7 top-3">
-              {ticks.map(tick => (
-                <span
-                  key={tick.value}
-                  className="absolute right-0 -translate-y-1/2 whitespace-nowrap"
-                  style={{ top: `${tick.top}%` }}
-                >
-                  {formatValue(tick.value)}
-                </span>
-              ))}
+              {ticks.map(tick => {
+                if (lossBoundaryValue === tick.value) return null;
+
+                return (
+                  <span
+                    key={tick.value}
+                    data-testid={metricKey === 'odds' ? 'campaign-odds-y-tick' : undefined}
+                    data-tick-value={metricKey === 'odds' ? tick.value : undefined}
+                    className="absolute right-0 -translate-y-1/2 whitespace-nowrap"
+                    style={{ top: `${tick.top}%` }}
+                  >
+                    {metricKey === 'odds' ? formatIntegerOddsTick(tick.value) : formatValue(tick.value)}
+                  </span>
+                );
+              })}
               {lossBoundaryValue != null ? (
                 <span
                   data-testid="campaign-odds-loss-boundary-label"
@@ -253,15 +295,21 @@ export function CampaignMetricScatterPlot({
               {ticks.map(tick => (
                 <div
                   key={tick.value}
+                  data-testid={metricKey === 'odds' ? 'campaign-odds-integer-grid-line' : undefined}
+                  data-grid-value={metricKey === 'odds' ? tick.value : undefined}
                   aria-hidden="true"
-                  className="absolute inset-x-0 border-t border-border/55"
+                  className={metricKey === 'odds'
+                    ? 'absolute inset-x-0 border-t-[0.5px] border-border/25'
+                    : 'absolute inset-x-0 border-t border-border/55'}
                   style={{ top: `${tick.top}%` }}
                 />
               ))}
               {domain.min < 0 && domain.max > 0 ? (
                 <div
                   aria-hidden="true"
-                  className="absolute inset-x-0 border-t border-dashed border-foreground/30"
+                  className={metricKey === 'odds'
+                    ? 'absolute inset-x-0 border-t-[0.5px] border-dashed border-foreground/20'
+                    : 'absolute inset-x-0 border-t border-dashed border-foreground/30'}
                   style={{ top: `${valuePosition(0, domain.min, domain.max)}%` }}
                 />
               ) : null}

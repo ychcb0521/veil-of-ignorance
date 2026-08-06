@@ -323,6 +323,23 @@ describe('JournalCampaignsPage sorting', () => {
     expect(screen.getByTestId('campaign-odds-point-best-pnl').querySelector('span')).toHaveStyle({
       backgroundColor: '#0ECB81',
     });
+    const oddsTickLabels = screen.getAllByTestId('campaign-odds-y-tick');
+    expect(oddsTickLabels.length).toBeGreaterThan(0);
+    expect(
+      oddsTickLabels.every(label => (
+        Number.isInteger(Number(label.getAttribute('data-tick-value')))
+        && !label.textContent?.includes('.')
+      )),
+    ).toBe(true);
+    const oddsGridLines = screen.getAllByTestId('campaign-odds-integer-grid-line');
+    expect(oddsGridLines.length).toBeGreaterThan(0);
+    expect(
+      oddsGridLines.every(line => (
+        Number.isInteger(Number(line.getAttribute('data-grid-value')))
+        && line.classList.contains('border-t-[0.5px]')
+        && line.classList.contains('border-border/25')
+      )),
+    ).toBe(true);
     expect(screen.getByTestId('campaign-odds-loss-boundary-label')).toHaveTextContent('-1R');
     expect(screen.getByTestId('campaign-odds-loss-boundary-line')).toHaveAttribute(
       'data-reference-value',
