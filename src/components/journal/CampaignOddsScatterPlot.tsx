@@ -55,6 +55,15 @@ type CampaignMetricScale = {
   ticks: CampaignMetricTick[];
 };
 
+type CampaignMetricBand = {
+  key: string;
+  lower: number;
+  upper: number;
+  top: number;
+  count: number;
+  label: string;
+};
+
 function formatOdds(value: number) {
   const normalized = Math.abs(value) < 0.005 ? 0 : value;
   return `${normalized > 0 ? '+' : ''}${normalized.toFixed(2)}R`;
@@ -174,6 +183,65 @@ function createDiscreteMetricScale(metricKey: string): CampaignMetricScale | nul
   }
 
   return null;
+}
+
+function uniqueSortedValues(values: number[]) {
+  return [...new Set(values.map(normalizeTickValue))].sort((left, right) => left - right);
+}
+
+function createContinuousMetricBands(
+  points: CampaignMetricPoint[],
+  scale: CampaignMetricScale,
+  formatValue: (value: number) => string,
+): CampaignMetricBand[] {
+  const boundaries = uniqueSortedValues([
+    scale.min,
+    ...scale.ticks.map(tick => tick.value),
+    scale.max,
+  ]);
+
+  return boundaries.slice(0, -1).map((lower, index) => {
+    const upper = boundaries[index + 1];
+    const isLast = index === boundaries.length - 2;
+    const count = points.filter(point => (
+      point.value >= lower && (isLast ? point.value <= upper : point.value < upper)
+    )).length;
+
+    return {
+      key: `${lower}-${upper}`,
+      lower,
+      upper,
+      top: valuePosition((lower + upper) / 2, scale.min, scale.max),
+      count,
+      label: `${formatValue(lower)} 至 ${formatValue(upper)}`,
+    };
+  });
+}
+
+function createDiscreteMetricBands(
+  points: CampaignMetricPoint[],
+  scale: CampaignMetricScale,
+  formatValue: (value: number) => string,
+): CampaignMetricBand[] {
+  return scale.ticks.map(tick => ({
+    key: String(tick.value),
+    lower: tick.value,
+    upper: tick.value,
+    top: tick.top,
+    count: points.filter(point => Math.abs(point.value - tick.value) < 1e-9).length,
+    label: `${formatValue(tick.value)} 档`,
+  }));
+}
+
+function createCampaignMetricBands(
+  points: CampaignMetricPoint[],
+  scale: CampaignMetricScale,
+  metricKey: string,
+  formatValue: (value: number) => string,
+) {
+  return createDiscreteMetricScale(metricKey)
+    ? createDiscreteMetricBands(points, scale, formatValue)
+    : createContinuousMetricBands(points, scale, formatValue);
 }
 
 function metricPointColor(value: number, mode: CampaignMetricColorMode) {
@@ -302,13 +370,23 @@ export function CampaignMetricScatterPlot({
       max: Math.max(...values),
     };
   }, [points]);
-  const xLabelStep = Math.max(1, Math.ceil(points.length / 5));
+  const bands = useMemo(
+    () => createCampaignMetricBands(points, scale, metricKey, formatValue),
+    [formatValue, metricKey, points, scale],
+  );
+  const markerMaxSize = Number(
+    Math.max(4, Math.min(10, 10 - Math.max(0, points.length - 24) * 0.045)).toFixed(1),
+  );
+  const xLabelStep = Math.max(1, Math.ceil(points.length / 6));
   const plotTestId = legacyOddsTestIds
     ? 'campaign-odds-scatter-plot'
     : 'campaign-metric-scatter-plot';
   const scrollTestId = legacyOddsTestIds
     ? 'campaign-odds-scroll-area'
     : 'campaign-metric-scroll-area';
+  const bandCountTestId = legacyOddsTestIds
+    ? 'campaign-odds-band-count'
+    : 'campaign-metric-band-count';
 
   if (points.length === 0) {
     return (
@@ -328,7 +406,7 @@ export function CampaignMetricScatterPlot({
       data-metric-key={metricKey}
       className="px-3 pb-4 pt-2 sm:px-4"
     >
-      <figure className="mx-auto w-full max-w-[43rem] text-[#172033]">
+      <figure className="mx-auto w-full max-w-[58rem] text-[#172033]">
         <div className="mb-2.5 flex min-h-6 items-center gap-3 text-[10px] text-[#667085]">
           <span className="inline-flex shrink-0 items-center gap-0.5">
             <span className="font-semibold text-[#344054]">{seriesLabel}</span>
@@ -470,10 +548,12 @@ export function CampaignMetricScatterPlot({
           </div>
 
           <div
-            className="relative aspect-square min-w-0 overflow-hidden rounded-[6px] border border-[#D9DEE7] bg-[#FCFDFE] shadow-[0_1px_2px_rgba(15,23,42,0.04)]"
+            className="relative aspect-[8/5] min-h-[18rem] min-w-0 overflow-hidden rounded-[6px] border border-[#D9DEE7] bg-[#FCFDFE] shadow-[0_1px_2px_rgba(15,23,42,0.04)] sm:min-h-0"
             data-testid={scrollTestId}
+            data-layout="campaign-scatter-landscape"
+            data-marker-max-size={markerMaxSize}
           >
-            <div className="absolute inset-x-3 bottom-7 top-3">
+            <div className="absolute bottom-7 left-3 right-10 top-3">
               {ticks.map(tick => (
                 <div
                   key={tick.value}
@@ -546,13 +626,15 @@ export function CampaignMetricScatterPlot({
                         onMouseEnter={() => setActiveCampaignId(point.campaignId)}
                         onFocus={() => setActiveCampaignId(point.campaignId)}
                         onClick={() => onSelectCampaign(point.campaignId)}
-                        className="group absolute left-1/2 z-10 flex h-6 w-full min-w-[7px] max-w-6 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full outline-none focus-visible:ring-2 focus-visible:ring-[#F0B90B]/60 focus-visible:ring-offset-1"
+                        className="group absolute left-1/2 z-10 flex h-6 w-full min-w-0 max-w-6 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full outline-none focus-visible:ring-2 focus-visible:ring-[#F0B90B]/60 focus-visible:ring-offset-1"
                         style={{ top: `${valuePosition(point.value, domain.min, domain.max)}%` }}
                       >
                         <span
                           aria-hidden="true"
-                          className={`h-2.5 w-2.5 border border-white shadow-[0_0_0_1px_rgba(15,23,42,0.12)] transition-[transform,box-shadow] duration-150 group-hover:scale-125 group-focus-visible:scale-125 ${markerShapeClass(pointShape)} ${active ? 'scale-125 shadow-[0_0_0_2px_rgba(15,23,42,0.14)]' : ''}`}
+                          className={`shrink-0 border border-white shadow-[0_0_0_1px_rgba(15,23,42,0.12)] transition-[transform,box-shadow] duration-150 group-hover:scale-125 group-focus-visible:scale-125 ${markerShapeClass(pointShape)} ${active ? 'scale-125 shadow-[0_0_0_2px_rgba(15,23,42,0.14)]' : ''}`}
                           style={{
+                            width: `clamp(3px, 72%, ${markerMaxSize}px)`,
+                            aspectRatio: '1 / 1',
                             backgroundColor: pointShape === 'ring' ? 'transparent' : pointColor,
                             borderColor: pointShape === 'ring' ? pointColor : undefined,
                           }}
@@ -565,7 +647,29 @@ export function CampaignMetricScatterPlot({
             </div>
 
             <div
-              className="absolute inset-x-3 bottom-0 grid h-6 items-end pb-1 text-center text-[9px] font-mono text-[#98A2B3]"
+              className="pointer-events-none absolute bottom-7 right-1 top-3 w-8 border-l border-[#E4E7EC]/70"
+              aria-label="纵轴区间散点数量"
+            >
+              {bands.map(band => (
+                <span
+                  key={band.key}
+                  data-testid={bandCountTestId}
+                  data-count={band.count}
+                  data-band-lower={band.lower}
+                  data-band-upper={band.upper}
+                  aria-label={`${band.label}，${band.count} 场`}
+                  className={`absolute right-0 -translate-y-1/2 font-mono text-[8px] leading-none tabular-nums ${
+                    band.count > 0 ? 'text-[#98A2B3]' : 'text-[#D0D5DD]'
+                  }`}
+                  style={{ top: `${band.top}%` }}
+                >
+                  n={band.count}
+                </span>
+              ))}
+            </div>
+
+            <div
+              className="absolute bottom-0 left-3 right-10 grid h-6 items-end pb-1 text-center text-[9px] font-mono text-[#98A2B3]"
               style={{ gridTemplateColumns: `repeat(${points.length}, minmax(0, 1fr))` }}
               aria-hidden="true"
             >

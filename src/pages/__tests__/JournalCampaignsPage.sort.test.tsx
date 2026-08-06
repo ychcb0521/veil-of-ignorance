@@ -309,7 +309,15 @@ describe('JournalCampaignsPage sorting', () => {
     fireEvent.click(oddsChartToggle);
 
     expect(screen.getByTestId('campaign-odds-scatter-panel')).toBeInTheDocument();
-    expect(screen.getByTestId('campaign-odds-scroll-area')).toHaveClass('aspect-square');
+    const oddsScrollArea = screen.getByTestId('campaign-odds-scroll-area');
+    expect(oddsScrollArea).toHaveClass('aspect-[8/5]');
+    expect(oddsScrollArea).toHaveAttribute('data-layout', 'campaign-scatter-landscape');
+    expect(Number(oddsScrollArea.getAttribute('data-marker-max-size'))).toBeLessThanOrEqual(10);
+    const oddsBandCounts = screen.getAllByTestId('campaign-odds-band-count');
+    expect(
+      oddsBandCounts.reduce((sum, node) => sum + Number(node.getAttribute('data-count')), 0),
+    ).toBe(3);
+    expect(oddsBandCounts.every(node => node.classList.contains('text-[8px]'))).toBe(true);
     expect(
       [...screen.getByTestId('campaign-odds-scatter-plot').querySelectorAll('[data-campaign-id]')]
         .map(node => node.getAttribute('data-campaign-id')),
@@ -394,7 +402,13 @@ describe('JournalCampaignsPage sorting', () => {
       'expectedDrawdownPct',
     );
     expect(screen.queryByTestId('campaign-odds-loss-boundary-line')).not.toBeInTheDocument();
-    expect(screen.getByTestId('campaign-metric-scroll-area')).toHaveClass('aspect-square');
+    const metricScrollArea = screen.getByTestId('campaign-metric-scroll-area');
+    expect(metricScrollArea).toHaveClass('aspect-[8/5]');
+    expect(metricScrollArea).toHaveAttribute('data-layout', 'campaign-scatter-landscape');
+    const metricBandCounts = screen.getAllByTestId('campaign-metric-band-count');
+    expect(
+      metricBandCounts.reduce((sum, node) => sum + Number(node.getAttribute('data-count')), 0),
+    ).toBe(3);
     expect(
       [...screen.getByTestId('campaign-metric-scatter-plot').querySelectorAll('[data-campaign-id]')]
         .map(node => node.getAttribute('data-campaign-id')),
