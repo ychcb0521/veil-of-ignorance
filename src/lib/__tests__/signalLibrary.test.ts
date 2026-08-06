@@ -280,12 +280,39 @@ describe('default signal library', () => {
     expect(defaults.length).toBe(parsedDefault.signals.length);
     expect(defaults.length).toBeGreaterThan(850);
     expect(defaults[0]).toMatchObject({
-      id: expect.stringMatching(/^default-RAVEUSDT-/),
-      symbol: 'RAVEUSDT',
-      fallbackZone: '0.477',
+      id: expect.stringMatching(/^default-TAKEUSDT-/),
+      symbol: 'TAKEUSDT',
+      fallbackZone: '0.043',
     });
-    expect(defaults.some(s => s.symbol === 'KGENUSDT' && s.timeLabel === '2026-06-28 02:36:00' && s.fallbackZone === '0.221')).toBe(true);
-    expect(defaults.some(s => s.symbol === 'BLUAIUSDT' && s.timeLabel === '2026-06-06 17:09:00' && s.fallbackZone === '0.017')).toBe(true);
+
+    const requestedSignals = [
+      ['BLUAIUSDT', '2026-06-06 17:09:00', '0.017'],
+      ['VELVETUSDT', '2026-06-08 23:16:00', '0.0353'],
+      ['HMSTRUSDT', '2026-06-10 21:51:00', '0.00023'],
+      ['MAGMAUSDT', '2026-06-10 21:51:00', '0.0541'],
+      ['COAIUSDT', '2026-06-13 22:51:00', '0.47'],
+      ['JTOUSDT', '2026-06-15 23:14:00', '0.708'],
+      ['AGTUSDT', '2026-06-18 00:26:00', '0.0263'],
+      ['HOODUSDT', '2026-06-18 00:26:00', '105.2'],
+      ['XPLUSDT', '2026-06-18 00:26:00', '0.1154'],
+      ['BELUSDT', '2026-06-22 21:45:00', '0.186'],
+      ['BASUSDT', '2026-06-24 21:52:00', '0.0414'],
+      ['HEIUSDT', '2026-06-25 21:38:00', '0.146'],
+      ['KGENUSDT', '2026-06-28 02:36:00', '0.221'],
+      ['RAVEUSDT', '2026-06-29 16:19:00', '0.477'],
+      ['AKEUSDT', '2026-07-03 20:47:00', '0.00048'],
+      ['EVAAUSDT', '2026-07-07 22:47:00', '1.81'],
+      ['ACEUSDT', '2026-07-20 17:58:00', '0.1355'],
+      ['TAKEUSDT', '2026-08-05 03:34:00', '0.043'],
+    ] as const;
+
+    requestedSignals.forEach(([symbol, timeLabel, fallbackZone]) => {
+      expect(defaults.some(signal => (
+        signal.symbol === symbol
+        && signal.timeLabel === timeLabel
+        && signal.fallbackZone === fallbackZone
+      ))).toBe(true);
+    });
     expect(defaults.some(s => s.symbol === 'PUMPBTCUSDT' && s.timeLabel === '2025-09-22 18:33:00')).toBe(true);
     expect(defaults.some(s => s.symbol === 'PROMPTUSDT' && s.fallbackZone === '0.475')).toBe(true);
   });
@@ -342,7 +369,7 @@ describe('default signal library', () => {
     const migrated = loadSignals();
 
     expect(migrated.some(s => s.symbol === 'JTOUSDT' && s.timeLabel === '2026-06-15 23:14:00')).toBe(true);
-    expect(migrated.some(s => s.symbol === 'RAVEUSDT' && s.timeLabel === '2026-06-29 16:19:00')).toBe(true);
+    expect(migrated.some(s => s.symbol === 'TAKEUSDT' && s.timeLabel === '2026-08-05 03:34:00')).toBe(true);
     expect(window.localStorage.getItem(SIGNAL_LIBRARY_DEFAULT_VERSION_KEY)).toBe(SIGNAL_LIBRARY_DEFAULT_VERSION);
   });
 
