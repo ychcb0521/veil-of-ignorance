@@ -38,7 +38,7 @@ import {
   installKlineChartPointerInteraction,
   type InteractionController,
 } from "@/lib/klineChartInteraction";
-import { buildAnalysisAutoFitPriceRange } from "@/lib/analysisAutoFitPriceRange";
+import { buildAnalysisOrderPriceBounds } from "@/lib/analysisAutoFitPriceRange";
 import {
   ANALYSIS_AUTO_FIT_BOUNDS_INDICATOR,
   registerAnalysisAutoFitBoundsIndicator,
@@ -489,6 +489,7 @@ function CandlestickChartComponent({
   const analysisOverlayIdsRef = useRef<string[]>([]);
   const dragOverlayIdsRef = useRef<string[]>([]);
   const analysisAutoFitIndicatorPaneRef = useRef<string | null>(null);
+  const analysisAutoFitIndicatorSignatureRef = useRef<string | null>(null);
   const onDragPriceLineRef = useRef(onDragPriceLine);
   onDragPriceLineRef.current = onDragPriceLine;
   const onDragVerticalLineRef = useRef(onDragVerticalLine);
@@ -659,26 +660,22 @@ function CandlestickChartComponent({
       hasAnalysisVisibleRange,
     ],
   );
-  const analysisAutoFitPriceRange = useMemo(
+  const analysisAutoFitOrderBounds = useMemo(
     () => (
       analysisMode && analysisFitAll
-        ? buildAnalysisAutoFitPriceRange({
-            data,
+        ? buildAnalysisOrderPriceBounds({
+            lines: analysisAnnotations?.timeBoundPriceLines,
             visibleStartTime: analysisVisibleStartTime,
             visibleEndTime: analysisVisibleEndTime,
-            annotations: analysisAnnotations,
-            draggablePriceLines,
           })
         : null
     ),
     [
-      analysisAnnotations,
+      analysisAnnotations?.timeBoundPriceLines,
       analysisFitAll,
       analysisMode,
       analysisVisibleEndTime,
       analysisVisibleStartTime,
-      data,
-      draggablePriceLines,
     ],
   );
 
@@ -1019,6 +1016,7 @@ function CandlestickChartComponent({
       dispose(containerRef.current!);
       chartRef.current = null;
       analysisAutoFitIndicatorPaneRef.current = null;
+      analysisAutoFitIndicatorSignatureRef.current = null;
     };
   }, [scheduleViewportReflow]);
 
@@ -1188,9 +1186,9 @@ function CandlestickChartComponent({
     hasAnalysisVisibleRange,
   ]);
 
-  // KLineCharts only auto-scales native series. A transparent price-series
-  // indicator makes visible annotations and pending-order lines participate in
-  // the same Y-axis fit without drawing over the chart.
+  // Pending-order prices expand only the native candle-pane Y range. This
+  // indicator has no per-candle values or figures, so candles and annotations
+  // continue to share the same native time axis during pan and zoom.
   useEffect(() => {
     const chart = chartRef.current;
     if (!chart) return;
@@ -1201,46 +1199,50 @@ function CandlestickChartComponent({
       try {
         chart.removeIndicator(paneId, ANALYSIS_AUTO_FIT_BOUNDS_INDICATOR);
       } catch {
-        // The chart may already have removed it during a data reset.
+        // It may already be gone after a native data reset.
       }
       analysisAutoFitIndicatorPaneRef.current = null;
+      analysisAutoFitIndicatorSignatureRef.current = null;
     };
 
     if (
       !analysisMode
       || !analysisFitAll
-      || !analysisAutoFitPriceRange
+      || !analysisAutoFitOrderBounds
       || data.length === 0
     ) {
       removeBoundsIndicator();
       return;
     }
 
-    const indicator = {
-      name: ANALYSIS_AUTO_FIT_BOUNDS_INDICATOR,
-      calcParams: [analysisAutoFitPriceRange.min, analysisAutoFitPriceRange.max],
-      minValue: analysisAutoFitPriceRange.min,
-      maxValue: analysisAutoFitPriceRange.max,
-    };
-    const paneId = analysisAutoFitIndicatorPaneRef.current;
+    const signature = `${analysisAutoFitOrderBounds.min}:${analysisAutoFitOrderBounds.max}`;
+    if (
+      analysisAutoFitIndicatorPaneRef.current
+      && analysisAutoFitIndicatorSignatureRef.current === signature
+    ) return;
+
+    removeBoundsIndicator();
 
     try {
-      if (paneId) {
-        chart.overrideIndicator(indicator, paneId);
-      } else {
-        analysisAutoFitIndicatorPaneRef.current = chart.createIndicator(
-          indicator,
-          true,
-          { id: "candle_pane" },
-        );
+      const paneId = chart.createIndicator(
+        {
+          name: ANALYSIS_AUTO_FIT_BOUNDS_INDICATOR,
+          minValue: analysisAutoFitOrderBounds.min,
+          maxValue: analysisAutoFitOrderBounds.max,
+          visible: false,
+        },
+        true,
+        { id: "candle_pane" },
+      );
+      if (typeof paneId === "string") {
+        analysisAutoFitIndicatorPaneRef.current = paneId;
+        analysisAutoFitIndicatorSignatureRef.current = signature;
       }
-      chart.resize();
     } catch {
-      // A subsequent data-ready pass retries with the fully committed dataset.
+      // A later prop pass retries after native data is ready.
     }
   }, [
-    analysisAutoFitPriceRange,
-    analysisDataReadyRevision,
+    analysisAutoFitOrderBounds,
     analysisFitAll,
     analysisMode,
     data.length,

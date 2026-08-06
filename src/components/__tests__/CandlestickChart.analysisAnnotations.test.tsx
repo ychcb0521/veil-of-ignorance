@@ -53,7 +53,6 @@ const mocks = vi.hoisted(() => {
     overrideOverlay: vi.fn(),
     removeOverlay: vi.fn(),
     createIndicator: vi.fn(() => 'candle_pane'),
-    overrideIndicator: vi.fn(),
     removeIndicator: vi.fn(),
     getSize: vi.fn(() => ({ width: 1000, height: 520 })),
     getDataList: vi.fn(() => dataList),
@@ -103,8 +102,7 @@ vi.mock('klinecharts', () => ({
     OnZoom: 'onZoom',
     OnVisibleRangeChange: 'onVisibleRangeChange',
   },
-  IndicatorSeries: { Price: 'price' },
-  TooltipShowRule: { FollowCross: 'follow_cross', None: 'none' },
+  TooltipShowRule: { FollowCross: 'follow_cross' },
   TooltipShowType: { Standard: 'standard' },
 }));
 
@@ -909,39 +907,58 @@ describe('CandlestickChart analysis annotations', () => {
     });
   });
 
-  it('自适应会让当前窗口内的委托线共同参与纵轴范围', async () => {
-    render(
+  it('自适应只用纵轴边界纳入当前窗口内的委托线，不重建逐根数据', async () => {
+    const data = [candle(1000, 1), candle(2000, 1.1), candle(3000, 1.2)];
+    const makeAnnotations = () => ({
+      timeBoundPriceLines: [{
+        id: 'pending-order',
+        price: 0.4,
+        startTime: 1500,
+        endTime: 2500,
+        color: '#F0B90B',
+        dashed: true,
+      }],
+    });
+    const { rerender } = render(
       <CandlestickChart
-        data={[candle(1000, 1), candle(2000, 1.1), candle(3000, 1.2)]}
+        data={data}
         symbol="BTCUSDT"
         rawSymbol="BTCUSDT"
         analysisMode
         analysisFitAll
         analysisVisibleStartTime={1000}
         analysisVisibleEndTime={3000}
-        analysisAnnotations={{
-          timeBoundPriceLines: [{
-            id: 'pending-order',
-            price: 0.4,
-            startTime: 1500,
-            endTime: 2500,
-            color: '#F0B90B',
-            dashed: true,
-          }],
-        }}
+        analysisAnnotations={makeAnnotations()}
       />,
     );
+    const matchingCalls = () => mocks.chart.createIndicator.mock.calls
+      .filter(([value]) => value.name === ANALYSIS_AUTO_FIT_BOUNDS_INDICATOR);
 
-    await waitFor(() => {
-      expect(mocks.chart.createIndicator).toHaveBeenCalled();
+    await waitFor(() => expect(matchingCalls()).toHaveLength(1));
+    const [indicator, stack, paneOptions] = matchingCalls()[0];
+    expect(indicator).toMatchObject({
+      name: ANALYSIS_AUTO_FIT_BOUNDS_INDICATOR,
+      minValue: 0.4,
+      maxValue: 0.4,
+      visible: false,
     });
-
-    const [indicator, _stack, paneOptions] = mocks.chart.createIndicator.mock.calls
-      .find(([value]) => value.name === ANALYSIS_AUTO_FIT_BOUNDS_INDICATOR)!;
-    expect(indicator.name).toBe(ANALYSIS_AUTO_FIT_BOUNDS_INDICATOR);
-    expect(indicator.calcParams[0]).toBeLessThan(0.4);
-    expect(indicator.calcParams[1]).toBeGreaterThan(1.3);
+    expect(indicator).not.toHaveProperty('calcParams');
+    expect(stack).toBe(true);
     expect(paneOptions).toEqual({ id: 'candle_pane' });
+
+    rerender(
+      <CandlestickChart
+        data={data}
+        symbol="BTCUSDT"
+        rawSymbol="BTCUSDT"
+        analysisMode
+        analysisFitAll
+        analysisVisibleStartTime={1000}
+        analysisVisibleEndTime={3000}
+        analysisAnnotations={makeAnnotations()}
+      />,
+    );
+    await waitFor(() => expect(matchingCalls()).toHaveLength(1));
   });
 
   it('长历史数据原生提交完成后会按同一时间戳重建标注层', async () => {
