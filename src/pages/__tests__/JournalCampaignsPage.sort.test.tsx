@@ -317,12 +317,23 @@ describe('JournalCampaignsPage sorting', () => {
     expect(screen.getByTestId('campaign-odds-point-late-close')).toHaveAttribute('data-odds-sign', 'negative');
     expect(screen.getByTestId('campaign-odds-point-best-pnl')).toHaveAttribute('data-odds-sign', 'positive');
     expect(screen.getByTestId('campaign-odds-point-high-importance')).toHaveAttribute('data-odds-sign', 'positive');
+    expect(screen.getByTestId('campaign-odds-point-late-close')).toHaveAttribute(
+      'data-marker-shape',
+      'diamond',
+    );
+    expect(screen.getByTestId('campaign-odds-point-best-pnl')).toHaveAttribute(
+      'data-marker-shape',
+      'circle',
+    );
     expect(screen.getByTestId('campaign-odds-point-late-close').querySelector('span')).toHaveStyle({
       backgroundColor: '#F6465D',
     });
     expect(screen.getByTestId('campaign-odds-point-best-pnl').querySelector('span')).toHaveStyle({
       backgroundColor: '#0ECB81',
     });
+    fireEvent.mouseEnter(screen.getByTestId('campaign-odds-point-best-pnl'));
+    expect(screen.getByTestId('campaign-odds-scatter-plot')).toHaveTextContent('Best PnL');
+    expect(screen.getByTestId('campaign-odds-point-best-pnl')).toHaveAttribute('aria-pressed', 'true');
     const oddsTickLabels = screen.getAllByTestId('campaign-odds-y-tick');
     expect(oddsTickLabels.length).toBeGreaterThan(0);
     expect(
@@ -337,7 +348,7 @@ describe('JournalCampaignsPage sorting', () => {
       oddsGridLines.every(line => (
         Number.isInteger(Number(line.getAttribute('data-grid-value')))
         && line.classList.contains('border-t-[0.5px]')
-        && line.classList.contains('border-border/25')
+        && line.classList.contains('border-[#CBD3DE]/45')
       )),
     ).toBe(true);
     expect(screen.getByTestId('campaign-odds-loss-boundary-label')).toHaveTextContent('-1R');

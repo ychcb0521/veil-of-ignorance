@@ -42,6 +42,19 @@ type CampaignOddsScatterPlotProps = {
   onSelectCampaign: (campaignId: string) => void;
 };
 
+type CampaignMetricMarkerShape = 'circle' | 'diamond' | 'square' | 'ring';
+
+type CampaignMetricTick = {
+  value: number;
+  top: number;
+};
+
+type CampaignMetricScale = {
+  min: number;
+  max: number;
+  ticks: CampaignMetricTick[];
+};
+
 function formatOdds(value: number) {
   const normalized = Math.abs(value) < 0.005 ? 0 : value;
   return `${normalized > 0 ? '+' : ''}${normalized.toFixed(2)}R`;
@@ -65,6 +78,27 @@ function niceIntegerTickStep(rawStep: number) {
   return Math.max(1, multiplier * magnitude);
 }
 
+function niceContinuousTickStep(rawStep: number) {
+  if (!Number.isFinite(rawStep) || rawStep <= 0) return 1;
+
+  const magnitude = 10 ** Math.floor(Math.log10(rawStep));
+  const normalized = rawStep / magnitude;
+  const multiplier = normalized <= 1
+    ? 1
+    : normalized <= 2
+      ? 2
+      : normalized <= 2.5
+        ? 2.5
+        : normalized <= 5
+          ? 5
+          : 10;
+  return multiplier * magnitude;
+}
+
+function normalizeTickValue(value: number) {
+  return Number(value.toPrecision(12));
+}
+
 function createIntegerOddsTicks(min: number, max: number) {
   const lower = Math.ceil(min);
   const upper = Math.floor(max);
@@ -84,6 +118,64 @@ function createIntegerOddsTicks(min: number, max: number) {
   }));
 }
 
+function createContinuousMetricScale(values: number[]): CampaignMetricScale {
+  const baseDomain = createCampaignMetricDomain(values);
+  let step = niceContinuousTickStep((baseDomain.max - baseDomain.min) / 5);
+  let min = Math.floor(baseDomain.min / step) * step;
+  let max = Math.ceil(baseDomain.max / step) * step;
+
+  if (min === max) {
+    min -= step;
+    max += step;
+  }
+
+  while (Math.round((max - min) / step) + 1 > 7) {
+    step = niceContinuousTickStep(step * 1.5);
+    min = Math.floor(baseDomain.min / step) * step;
+    max = Math.ceil(baseDomain.max / step) * step;
+  }
+
+  min = normalizeTickValue(min);
+  max = normalizeTickValue(max);
+  const tickCount = Math.round((max - min) / step);
+  const ticks = Array.from({ length: tickCount + 1 }, (_, index) => {
+    const value = normalizeTickValue(max - index * step);
+    return { value, top: valuePosition(value, min, max) };
+  });
+
+  return { min, max, ticks };
+}
+
+function createDiscreteMetricScale(metricKey: string): CampaignMetricScale | null {
+  if (metricKey === 'importance') {
+    const min = -0.5;
+    const max = 5.5;
+    return {
+      min,
+      max,
+      ticks: [5, 4, 3, 2, 1, 0].map(value => ({
+        value,
+        top: valuePosition(value, min, max),
+      })),
+    };
+  }
+
+  if (metricKey === 'mirrorTp') {
+    const min = -0.35;
+    const max = 3.35;
+    return {
+      min,
+      max,
+      ticks: [3, 2, 1, 0].map(value => ({
+        value,
+        top: valuePosition(value, min, max),
+      })),
+    };
+  }
+
+  return null;
+}
+
 function metricPointColor(value: number, mode: CampaignMetricColorMode) {
   if (mode === 'risk') return '#F0B90B';
   if (mode === 'quality') return '#2B7FFF';
@@ -97,6 +189,54 @@ function metricPointColor(value: number, mode: CampaignMetricColorMode) {
   if (value > 0) return '#0ECB81';
   if (value < 0) return '#F6465D';
   return '#98A2B3';
+}
+
+function metricPointShape(value: number, mode: CampaignMetricColorMode): CampaignMetricMarkerShape {
+  if (mode === 'mirrorTp') {
+    if (value >= 3) return 'circle';
+    if (value >= 2) return 'square';
+    if (value >= 1) return 'diamond';
+    return 'ring';
+  }
+
+  if (mode === 'signed') {
+    if (value > 0) return 'circle';
+    if (value < 0) return 'diamond';
+    return 'ring';
+  }
+
+  return 'circle';
+}
+
+function legendMarkerShape(index: number, mode: CampaignMetricColorMode): CampaignMetricMarkerShape {
+  if (mode === 'mirrorTp') {
+    return (['circle', 'square', 'diamond', 'ring'] as const)[index] ?? 'circle';
+  }
+
+  if (mode === 'signed') {
+    return (['circle', 'diamond', 'ring'] as const)[index] ?? 'circle';
+  }
+
+  return 'circle';
+}
+
+function markerShapeClass(shape: CampaignMetricMarkerShape) {
+  if (shape === 'diamond') return 'rotate-45 rounded-[2px]';
+  if (shape === 'square') return 'rounded-[2px]';
+  return 'rounded-full';
+}
+
+function visibleLegendLabel(label: string) {
+  const withoutColor = label.includes('：') ? label.split('：').slice(1).join('：') : label;
+  return withoutColor.split(/[，。]/)[0]?.trim() || label;
+}
+
+function median(values: number[]) {
+  const sorted = [...values].sort((left, right) => left - right);
+  const midpoint = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 0
+    ? (sorted[midpoint - 1] + sorted[midpoint]) / 2
+    : sorted[midpoint];
 }
 
 const ODDS_SCATTER_GUIDE: CampaignMetricScatterGuide = {
@@ -131,24 +271,37 @@ export function CampaignMetricScatterPlot({
   const [activeCampaignId, setActiveCampaignId] = useState<string | null>(null);
   const [guideOpen, setGuideOpen] = useState(false);
   const lossBoundaryValue = metricKey === 'odds' ? -1 : null;
-  const domain = useMemo(
-    () => createCampaignMetricDomain([
+  const scale = useMemo(() => {
+    const values = [
       ...points.map(point => point.value),
       ...(lossBoundaryValue == null ? [] : [lossBoundaryValue]),
-    ]),
-    [lossBoundaryValue, points],
-  );
-  const ticks = useMemo(() => {
+    ];
+
     if (metricKey === 'odds') {
-      return createIntegerOddsTicks(domain.min, domain.max);
+      const oddsDomain = createCampaignMetricDomain(values);
+      return {
+        ...oddsDomain,
+        ticks: createIntegerOddsTicks(oddsDomain.min, oddsDomain.max),
+      };
     }
 
-    return Array.from({ length: 5 }, (_, index) => {
-      const value = domain.max - ((domain.max - domain.min) * index) / 4;
-      return { value, top: valuePosition(value, domain.min, domain.max) };
-    });
-  }, [domain, metricKey]);
+    return createDiscreteMetricScale(metricKey) ?? createContinuousMetricScale(values);
+  }, [lossBoundaryValue, metricKey, points]);
+  const domain = scale;
+  const ticks = scale.ticks;
   const activePoint = points.find(point => point.campaignId === activeCampaignId) ?? null;
+  const summary = useMemo(() => {
+    const values = points.map(point => point.value);
+    if (values.length === 0) {
+      return { min: 0, median: 0, max: 0 };
+    }
+
+    return {
+      min: Math.min(...values),
+      median: median(values),
+      max: Math.max(...values),
+    };
+  }, [points]);
   const xLabelStep = Math.max(1, Math.ceil(points.length / 5));
   const plotTestId = legacyOddsTestIds
     ? 'campaign-odds-scatter-plot'
@@ -173,12 +326,12 @@ export function CampaignMetricScatterPlot({
     <div
       data-testid={plotTestId}
       data-metric-key={metricKey}
-      className="px-3 pb-3 pt-1 sm:px-4"
+      className="px-3 pb-4 pt-2 sm:px-4"
     >
-      <div className="mx-auto w-full max-w-[36rem]">
-        <div className="mb-2 flex min-h-5 items-center gap-3 text-[10px] text-muted-foreground">
+      <figure className="mx-auto w-full max-w-[43rem] text-[#172033]">
+        <div className="mb-2.5 flex min-h-6 items-center gap-3 text-[10px] text-[#667085]">
           <span className="inline-flex shrink-0 items-center gap-0.5">
-            <span className="font-medium text-foreground/70">{seriesLabel}</span>
+            <span className="font-semibold text-[#344054]">{seriesLabel}</span>
             <button
               type="button"
               data-testid={`campaign-metric-guide-toggle-${metricKey}`}
@@ -187,17 +340,20 @@ export function CampaignMetricScatterPlot({
               aria-controls={`campaign-metric-guide-${metricKey}`}
               title="散点图说明"
               onClick={() => setGuideOpen(open => !open)}
-              className="inline-flex h-5 w-5 items-center justify-center rounded text-muted-foreground/35 transition-colors hover:bg-muted/55 hover:text-foreground/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#F0B90B]/40"
+              className="inline-flex h-5 w-5 items-center justify-center rounded text-[#98A2B3] transition-colors hover:bg-[#F2F4F7] hover:text-[#475467] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#F0B90B]/40"
             >
               <CircleHelp aria-hidden="true" className="h-3 w-3" />
             </button>
           </span>
-          <span className="min-w-0 flex-1 truncate font-mono text-foreground/55" aria-live="polite">
+          <span
+            className="min-w-0 flex-1 truncate border-l border-[#E4E7EC] pl-3 font-mono text-[#667085]"
+            aria-live="polite"
+          >
             {activePoint
               ? `#${activePoint.sequence} ${activePoint.title} · ${formatValue(activePoint.value)} · ${formatBeijingTime(activePoint.operationTime)}`
-              : '按客观操作时间从早到晚排列；点击任一点进入对应战役'}
+              : '悬停或聚焦点位读取数值；点击进入对应战役'}
           </span>
-          <span className="shrink-0">{points.length} 场</span>
+          <span className="shrink-0 font-mono tabular-nums text-[#667085]">n={points.length}</span>
           {onBack ? (
             <button
               type="button"
@@ -205,7 +361,7 @@ export function CampaignMetricScatterPlot({
               aria-label={`收起${metricLabel}散点图并返回战役列表`}
               title="返回战役列表"
               onClick={onBack}
-              className="inline-flex h-6 shrink-0 items-center gap-1 rounded border border-transparent px-1.5 text-[9px] text-muted-foreground/55 transition-colors hover:border-border/70 hover:bg-muted/55 hover:text-foreground/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#F0B90B]/45"
+              className="inline-flex h-6 shrink-0 items-center gap-1 rounded border border-transparent px-1.5 text-[9px] text-[#667085] transition-colors hover:border-[#D0D5DD] hover:bg-[#F7F9FB] hover:text-[#344054] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#F0B90B]/45"
             >
               <ArrowLeft aria-hidden="true" className="h-3 w-3" />
               <span>返回列表</span>
@@ -217,25 +373,25 @@ export function CampaignMetricScatterPlot({
           <div
             id={`campaign-metric-guide-${metricKey}`}
             data-testid={`campaign-metric-guide-${metricKey}`}
-            className="mb-3 border-y border-border/45 bg-muted/15 px-2.5 py-2 text-[10px] leading-[1.55] text-muted-foreground"
+            className="mb-3 rounded-sm border border-[#E4E7EC] bg-[#F8FAFC] px-3 py-2.5 text-[10px] leading-[1.6] text-[#667085] shadow-[0_1px_2px_rgba(15,23,42,0.025)]"
           >
             <dl className="space-y-1.5">
               <div className="grid grid-cols-[34px_minmax(0,1fr)] gap-2">
-                <dt className="font-medium text-foreground/60">横轴</dt>
+                <dt className="font-medium text-[#475467]">横轴</dt>
                 <dd>按客观操作时间从早到晚等距排列，每一格代表一场战役；横向距离只表示先后顺序，不表示真实时间间隔。</dd>
               </div>
               <div className="grid grid-cols-[34px_minmax(0,1fr)] gap-2">
-                <dt className="font-medium text-foreground/60">纵轴</dt>
+                <dt className="font-medium text-[#475467]">纵轴</dt>
                 <dd>{guide.yAxis}</dd>
               </div>
               <div className="grid grid-cols-[34px_minmax(0,1fr)] gap-2">
-                <dt className="font-medium text-foreground/60">颜色</dt>
+                <dt className="font-medium text-[#475467]">颜色</dt>
                 <dd className="flex flex-wrap gap-x-3 gap-y-1">
                   {guide.colors.map(item => (
                     <span key={`${item.color}-${item.label}`} className="inline-flex items-start gap-1">
                       <span
                         aria-hidden="true"
-                        className="mt-[4px] h-2 w-2 shrink-0 rounded-full border border-background"
+                        className="mt-[4px] h-2 w-2 shrink-0 rounded-full border border-white"
                         style={{ backgroundColor: item.color }}
                       />
                       <span>{item.label}</span>
@@ -244,12 +400,12 @@ export function CampaignMetricScatterPlot({
                 </dd>
               </div>
               <div className="grid grid-cols-[34px_minmax(0,1fr)] gap-2">
-                <dt className="font-medium text-foreground/60">点位</dt>
+                <dt className="font-medium text-[#475467]">点位</dt>
                 <dd>{guide.point} 横向位置对应操作先后，纵向位置对应本指标数值；点击任一点进入对应战役。</dd>
               </div>
               {guide.referenceLines?.length ? (
                 <div className="grid grid-cols-[34px_minmax(0,1fr)] gap-2">
-                  <dt className="font-medium text-foreground/60">参考线</dt>
+                  <dt className="font-medium text-[#475467]">参考线</dt>
                   <dd>{guide.referenceLines.join(' ')}</dd>
                 </div>
               ) : null}
@@ -257,8 +413,34 @@ export function CampaignMetricScatterPlot({
           </div>
         ) : null}
 
-        <div className="grid grid-cols-[58px_minmax(0,1fr)] gap-2">
-          <div className="relative h-full text-[9px] font-mono text-muted-foreground/65" aria-hidden="true">
+        <div className="mb-2.5 flex flex-wrap items-center justify-between gap-x-4 gap-y-1.5 border-y border-[#E4E7EC] bg-[#FAFBFC] px-1 py-2 text-[9px] text-[#667085]">
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 font-mono tabular-nums text-[#475467]">
+            <span>范围 {formatValue(summary.min)} – {formatValue(summary.max)}</span>
+            <span className="text-[#D0D5DD]">|</span>
+            <span>中位数 {formatValue(summary.median)}</span>
+          </div>
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1" aria-label="图例">
+            {guide.colors.map((item, index) => {
+              const shape = legendMarkerShape(index, colorMode);
+              return (
+                <span key={`${item.color}-${item.label}`} className="inline-flex items-center gap-1.5">
+                  <span
+                    aria-hidden="true"
+                    className={`h-2 w-2 shrink-0 border border-white shadow-[0_0_0_1px_rgba(15,23,42,0.10)] ${markerShapeClass(shape)}`}
+                    style={{
+                      backgroundColor: shape === 'ring' ? 'transparent' : item.color,
+                      borderColor: shape === 'ring' ? item.color : undefined,
+                    }}
+                  />
+                  <span>{visibleLegendLabel(item.label)}</span>
+                </span>
+              );
+            })}
+          </div>
+        </div>
+
+        <div className="grid grid-cols-[56px_minmax(0,1fr)] gap-2 sm:grid-cols-[64px_minmax(0,1fr)] sm:gap-2.5">
+          <div className="relative h-full text-[9px] font-mono text-[#667085]" aria-hidden="true">
             <div className="absolute inset-x-0 bottom-7 top-3">
               {ticks.map(tick => {
                 if (lossBoundaryValue === tick.value) return null;
@@ -288,7 +470,7 @@ export function CampaignMetricScatterPlot({
           </div>
 
           <div
-            className="relative aspect-square min-w-0 overflow-hidden rounded border border-border/55 bg-background/55"
+            className="relative aspect-square min-w-0 overflow-hidden rounded-[6px] border border-[#D9DEE7] bg-[#FCFDFE] shadow-[0_1px_2px_rgba(15,23,42,0.04)]"
             data-testid={scrollTestId}
           >
             <div className="absolute inset-x-3 bottom-7 top-3">
@@ -298,18 +480,14 @@ export function CampaignMetricScatterPlot({
                   data-testid={metricKey === 'odds' ? 'campaign-odds-integer-grid-line' : undefined}
                   data-grid-value={metricKey === 'odds' ? tick.value : undefined}
                   aria-hidden="true"
-                  className={metricKey === 'odds'
-                    ? 'absolute inset-x-0 border-t-[0.5px] border-border/25'
-                    : 'absolute inset-x-0 border-t border-border/55'}
+                  className="absolute inset-x-0 border-t-[0.5px] border-[#CBD3DE]/45"
                   style={{ top: `${tick.top}%` }}
                 />
               ))}
               {domain.min < 0 && domain.max > 0 ? (
                 <div
                   aria-hidden="true"
-                  className={metricKey === 'odds'
-                    ? 'absolute inset-x-0 border-t-[0.5px] border-dashed border-foreground/20'
-                    : 'absolute inset-x-0 border-t border-dashed border-foreground/30'}
+                  className="absolute inset-x-0 border-t-[0.5px] border-dashed border-[#667085]/45"
                   style={{ top: `${valuePosition(0, domain.min, domain.max)}%` }}
                 />
               ) : null}
@@ -322,6 +500,13 @@ export function CampaignMetricScatterPlot({
                   style={{ top: `${valuePosition(lossBoundaryValue, domain.min, domain.max)}%` }}
                 />
               ) : null}
+              {activePoint ? (
+                <div
+                  aria-hidden="true"
+                  className="pointer-events-none absolute inset-x-0 z-[2] border-t border-dashed border-[#667085]/30"
+                  style={{ top: `${valuePosition(activePoint.value, domain.min, domain.max)}%` }}
+                />
+              ) : null}
 
               <div
                 className="absolute inset-0 grid"
@@ -332,12 +517,20 @@ export function CampaignMetricScatterPlot({
                   const negative = point.value < 0;
                   const valueSign = positive ? 'positive' : negative ? 'negative' : 'zero';
                   const pointColor = metricPointColor(point.value, colorMode);
+                  const pointShape = metricPointShape(point.value, colorMode);
+                  const active = activeCampaignId === point.campaignId;
                   const operationTime = formatBeijingTime(point.operationTime);
                   const pointTestId = legacyOddsTestIds
                     ? `campaign-odds-point-${point.campaignId}`
                     : `campaign-metric-point-${metricKey}-${point.campaignId}`;
                   return (
                     <div key={point.campaignId} className="relative h-full min-w-0">
+                      {active ? (
+                        <span
+                          aria-hidden="true"
+                          className="pointer-events-none absolute inset-y-0 left-1/2 z-[2] border-l border-dashed border-[#667085]/30"
+                        />
+                      ) : null}
                       <button
                         type="button"
                         data-testid={pointTestId}
@@ -346,24 +539,23 @@ export function CampaignMetricScatterPlot({
                         data-metric-value={point.value}
                         data-value-sign={valueSign}
                         data-odds-sign={legacyOddsTestIds ? valueSign : undefined}
+                        data-marker-shape={pointShape}
+                        aria-pressed={active}
                         aria-label={`第 ${point.sequence} 场，${point.title}，${metricLabel} ${formatValue(point.value)}，操作时间 ${operationTime}，进入战役`}
                         title={`${point.title}\n${metricLabel} ${formatValue(point.value)}\n操作时间 ${operationTime}`}
                         onMouseEnter={() => setActiveCampaignId(point.campaignId)}
-                        onMouseLeave={() => setActiveCampaignId(current => (
-                          current === point.campaignId ? null : current
-                        ))}
                         onFocus={() => setActiveCampaignId(point.campaignId)}
-                        onBlur={() => setActiveCampaignId(current => (
-                          current === point.campaignId ? null : current
-                        ))}
                         onClick={() => onSelectCampaign(point.campaignId)}
-                        className="group absolute left-1/2 z-10 flex h-5 w-full min-w-[6px] max-w-5 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full outline-none focus-visible:ring-2 focus-visible:ring-[#F0B90B]/60"
+                        className="group absolute left-1/2 z-10 flex h-6 w-full min-w-[7px] max-w-6 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full outline-none focus-visible:ring-2 focus-visible:ring-[#F0B90B]/60 focus-visible:ring-offset-1"
                         style={{ top: `${valuePosition(point.value, domain.min, domain.max)}%` }}
                       >
                         <span
                           aria-hidden="true"
-                          className="h-2.5 w-2.5 rounded-full border border-background shadow-[0_0_0_1px_rgba(15,23,42,0.08)] transition-transform group-hover:scale-125 group-focus-visible:scale-125"
-                          style={{ backgroundColor: pointColor }}
+                          className={`h-2.5 w-2.5 border border-white shadow-[0_0_0_1px_rgba(15,23,42,0.12)] transition-[transform,box-shadow] duration-150 group-hover:scale-125 group-focus-visible:scale-125 ${markerShapeClass(pointShape)} ${active ? 'scale-125 shadow-[0_0_0_2px_rgba(15,23,42,0.14)]' : ''}`}
+                          style={{
+                            backgroundColor: pointShape === 'ring' ? 'transparent' : pointColor,
+                            borderColor: pointShape === 'ring' ? pointColor : undefined,
+                          }}
                         />
                       </button>
                     </div>
@@ -373,7 +565,7 @@ export function CampaignMetricScatterPlot({
             </div>
 
             <div
-              className="absolute inset-x-3 bottom-0 grid h-6 items-end pb-1 text-center text-[9px] font-mono text-muted-foreground/55"
+              className="absolute inset-x-3 bottom-0 grid h-6 items-end pb-1 text-center text-[9px] font-mono text-[#98A2B3]"
               style={{ gridTemplateColumns: `repeat(${points.length}, minmax(0, 1fr))` }}
               aria-hidden="true"
             >
@@ -385,7 +577,7 @@ export function CampaignMetricScatterPlot({
           </div>
         </div>
 
-        <div className="mt-1 flex items-center justify-between gap-3 text-[9px] text-muted-foreground/55">
+        <figcaption className="mt-1.5 flex items-center justify-between gap-3 text-[9px] text-[#98A2B3]">
           <span>早 → 晚 · 横轴每格一场战役</span>
           {excludedMissingValueCount > 0 || excludedMissingOperationTimeCount > 0 ? (
             <span>
@@ -399,8 +591,8 @@ export function CampaignMetricScatterPlot({
                 : ''}
             </span>
           ) : null}
-        </div>
-      </div>
+        </figcaption>
+      </figure>
     </div>
   );
 }
