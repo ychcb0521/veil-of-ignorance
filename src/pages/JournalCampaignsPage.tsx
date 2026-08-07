@@ -209,15 +209,16 @@ const CAMPAIGN_METRIC_CHART_CONFIGS: readonly CampaignMetricChartConfig[] = [
     chartLabel: '回撤图',
     seriesLabel: '预期回撤时序',
     guide: {
-      yAxis: '主力开仓价到初始对冲 A/B 中有效风险边界的价格距离，占主力开仓价的百分比。数值越高，预设价格回撤空间越大。',
-      point: '点越高，代表该战役允许的预期回撤百分比越大；点越低，代表初始风险边界距离开仓价越近。',
+      yAxis: '以主力开仓价为 0%，向下显示到初始对冲 A/B 中有效风险边界的负回撤，占主力开仓价的百分比。数值越负，预设价格回撤空间越大。',
+      point: '点越靠近顶部 0%，初始风险边界离开仓价越近；点越低，负回撤绝对值越大。',
       colors: [
         { color: '#F0B90B', label: '黄色：统一表示风险距离；颜色不区分盈利或亏损。' },
       ],
+      referenceLines: ['0% 顶线：无预期回撤；纵轴向下表示回撤加深。'],
     },
     missingValueLabel: '预期回撤',
     colorMode: 'risk',
-    formatValue: value => `${value.toFixed(2)}%`,
+    formatValue: value => `${(Math.abs(value) < 0.005 ? 0 : value).toFixed(2)}%`,
   },
   {
     key: 'opportunityQuality',

@@ -413,6 +413,32 @@ describe('JournalCampaignsPage sorting', () => {
       [...screen.getByTestId('campaign-metric-scatter-plot').querySelectorAll('[data-campaign-id]')]
         .map(node => node.getAttribute('data-campaign-id')),
     ).toEqual(['late-close', 'best-pnl', 'high-importance']);
+    const drawdownTicks = screen.getAllByTestId(
+      'campaign-metric-y-tick-expectedDrawdownPct',
+    );
+    const drawdownTickValues = drawdownTicks.map(node =>
+      Number(node.getAttribute('data-tick-value')),
+    );
+    expect(drawdownTickValues[0]).toBe(0);
+    expect(drawdownTickValues.every(value => value <= 0)).toBe(true);
+
+    const drawdownPlot = screen.getByTestId('campaign-metric-scatter-plot');
+    const drawdownPointNodes = Array.from(
+      drawdownPlot.querySelectorAll<HTMLElement>('button[data-campaign-id]'),
+    );
+    expect(drawdownPointNodes.length).toBeGreaterThan(0);
+    expect(
+      drawdownPointNodes.every(node => Number(node.dataset.metricValue) < 0),
+    ).toBe(true);
+    const shallowDrawdownPoint = drawdownPointNodes.reduce((best, node) =>
+      Number(node.dataset.metricValue) > Number(best.dataset.metricValue) ? node : best,
+    );
+    const deepDrawdownPoint = drawdownPointNodes.reduce((best, node) =>
+      Number(node.dataset.metricValue) < Number(best.dataset.metricValue) ? node : best,
+    );
+    expect(Number.parseFloat(deepDrawdownPoint.style.top)).toBeGreaterThan(
+      Number.parseFloat(shallowDrawdownPoint.style.top),
+    );
     const drawdownGuideToggle = screen.getByTestId(
       'campaign-metric-guide-toggle-expectedDrawdownPct',
     );
@@ -420,6 +446,8 @@ describe('JournalCampaignsPage sorting', () => {
     const drawdownGuide = screen.getByTestId('campaign-metric-guide-expectedDrawdownPct');
     expect(drawdownGuide).toHaveTextContent('占主力开仓价的百分比');
     expect(drawdownGuide).toHaveTextContent('黄色：统一表示风险距离');
+    expect(drawdownGuide).toHaveTextContent('0%');
+    expect(drawdownGuide).toHaveTextContent('纵轴向下');
 
     fireEvent.contextMenu(screen.getByTestId('campaign-sort-captureRate'));
     fireEvent.click(await screen.findByTestId('campaign-odds-chart-toggle'));

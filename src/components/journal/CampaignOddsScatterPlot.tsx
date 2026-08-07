@@ -78,6 +78,10 @@ function valuePosition(value: number, min: number, max: number) {
   return 100 - ((value - min) / (max - min)) * 100;
 }
 
+function metricPlotValue(metricKey: string, value: number) {
+  return metricKey === 'expectedDrawdownPct' ? -Math.abs(value) : value;
+}
+
 function niceIntegerTickStep(rawStep: number) {
   if (!Number.isFinite(rawStep) || rawStep <= 1) return 1;
 
@@ -146,6 +150,30 @@ function createContinuousMetricScale(values: number[]): CampaignMetricScale {
 
   min = normalizeTickValue(min);
   max = normalizeTickValue(max);
+  const tickCount = Math.round((max - min) / step);
+  const ticks = Array.from({ length: tickCount + 1 }, (_, index) => {
+    const value = normalizeTickValue(max - index * step);
+    return { value, top: valuePosition(value, min, max) };
+  });
+
+  return { min, max, ticks };
+}
+
+function createExpectedDrawdownScale(values: number[]): CampaignMetricScale {
+  const finiteValues = values.filter(value => Number.isFinite(value));
+  const minValue = finiteValues.length > 0 ? Math.min(...finiteValues, 0) : -1;
+  const span = Math.max(Math.abs(minValue), Number.EPSILON);
+  let step = niceContinuousTickStep(span / 5);
+  let min = Math.floor(minValue / step) * step;
+
+  while (Math.round((0 - min) / step) + 1 > 7) {
+    step = niceContinuousTickStep(step * 1.5);
+    min = Math.floor(minValue / step) * step;
+  }
+
+  if (min === 0) min = -step;
+  min = normalizeTickValue(min);
+  const max = 0;
   const tickCount = Math.round((max - min) / step);
   const ticks = Array.from({ length: tickCount + 1 }, (_, index) => {
     const value = normalizeTickValue(max - index * step);
@@ -339,9 +367,16 @@ export function CampaignMetricScatterPlot({
   const [activeCampaignId, setActiveCampaignId] = useState<string | null>(null);
   const [guideOpen, setGuideOpen] = useState(false);
   const lossBoundaryValue = metricKey === 'odds' ? -1 : null;
+  const chartPoints = useMemo(
+    () => points.map(point => ({
+      ...point,
+      value: metricPlotValue(metricKey, point.value),
+    })),
+    [metricKey, points],
+  );
   const scale = useMemo(() => {
     const values = [
-      ...points.map(point => point.value),
+      ...chartPoints.map(point => point.value),
       ...(lossBoundaryValue == null ? [] : [lossBoundaryValue]),
     ];
 
@@ -353,13 +388,17 @@ export function CampaignMetricScatterPlot({
       };
     }
 
+    if (metricKey === 'expectedDrawdownPct') {
+      return createExpectedDrawdownScale(values);
+    }
+
     return createDiscreteMetricScale(metricKey) ?? createContinuousMetricScale(values);
-  }, [lossBoundaryValue, metricKey, points]);
+  }, [chartPoints, lossBoundaryValue, metricKey]);
   const domain = scale;
   const ticks = scale.ticks;
-  const activePoint = points.find(point => point.campaignId === activeCampaignId) ?? null;
+  const activePoint = chartPoints.find(point => point.campaignId === activeCampaignId) ?? null;
   const summary = useMemo(() => {
-    const values = points.map(point => point.value);
+    const values = chartPoints.map(point => point.value);
     if (values.length === 0) {
       return { min: 0, median: 0, max: 0 };
     }
@@ -369,15 +408,15 @@ export function CampaignMetricScatterPlot({
       median: median(values),
       max: Math.max(...values),
     };
-  }, [points]);
+  }, [chartPoints]);
   const bands = useMemo(
-    () => createCampaignMetricBands(points, scale, metricKey, formatValue),
-    [formatValue, metricKey, points, scale],
+    () => createCampaignMetricBands(chartPoints, scale, metricKey, formatValue),
+    [chartPoints, formatValue, metricKey, scale],
   );
   const markerMaxSize = Number(
-    Math.max(4, Math.min(10, 10 - Math.max(0, points.length - 24) * 0.045)).toFixed(1),
+    Math.max(4, Math.min(10, 10 - Math.max(0, chartPoints.length - 24) * 0.045)).toFixed(1),
   );
-  const xLabelStep = Math.max(1, Math.ceil(points.length / 6));
+  const xLabelStep = Math.max(1, Math.ceil(chartPoints.length / 6));
   const plotTestId = legacyOddsTestIds
     ? 'campaign-odds-scatter-plot'
     : 'campaign-metric-scatter-plot';
@@ -388,7 +427,7 @@ export function CampaignMetricScatterPlot({
     ? 'campaign-odds-band-count'
     : 'campaign-metric-band-count';
 
-  if (points.length === 0) {
+  if (chartPoints.length === 0) {
     return (
       <div
         data-testid={plotTestId}
@@ -431,7 +470,7 @@ export function CampaignMetricScatterPlot({
               ? `#${activePoint.sequence} ${activePoint.title} · ${formatValue(activePoint.value)} · ${formatBeijingTime(activePoint.operationTime)}`
               : '悬停或聚焦点位读取数值；点击进入对应战役'}
           </span>
-          <span className="shrink-0 font-mono tabular-nums text-[#667085]">n={points.length}</span>
+          <span className="shrink-0 font-mono tabular-nums text-[#667085]">n={chartPoints.length}</span>
           {onBack ? (
             <button
               type="button"
@@ -526,8 +565,12 @@ export function CampaignMetricScatterPlot({
                 return (
                   <span
                     key={tick.value}
-                    data-testid={metricKey === 'odds' ? 'campaign-odds-y-tick' : undefined}
-                    data-tick-value={metricKey === 'odds' ? tick.value : undefined}
+                    data-testid={
+                      metricKey === 'odds'
+                        ? 'campaign-odds-y-tick'
+                        : `campaign-metric-y-tick-${metricKey}`
+                    }
+                    data-tick-value={tick.value}
                     className="absolute right-0 -translate-y-1/2 whitespace-nowrap"
                     style={{ top: `${tick.top}%` }}
                   >
@@ -590,9 +633,9 @@ export function CampaignMetricScatterPlot({
 
               <div
                 className="absolute inset-0 grid"
-                style={{ gridTemplateColumns: `repeat(${points.length}, minmax(0, 1fr))` }}
+                style={{ gridTemplateColumns: `repeat(${chartPoints.length}, minmax(0, 1fr))` }}
               >
-                {points.map(point => {
+                {chartPoints.map(point => {
                   const positive = point.value > 0;
                   const negative = point.value < 0;
                   const valueSign = positive ? 'positive' : negative ? 'negative' : 'zero';
@@ -670,11 +713,11 @@ export function CampaignMetricScatterPlot({
 
             <div
               className="absolute bottom-0 left-3 right-10 grid h-6 items-end pb-1 text-center text-[9px] font-mono text-[#98A2B3]"
-              style={{ gridTemplateColumns: `repeat(${points.length}, minmax(0, 1fr))` }}
+              style={{ gridTemplateColumns: `repeat(${chartPoints.length}, minmax(0, 1fr))` }}
               aria-hidden="true"
             >
-              {points.map((point, index) => {
-                const showLabel = index === 0 || index === points.length - 1 || index % xLabelStep === 0;
+              {chartPoints.map((point, index) => {
+                const showLabel = index === 0 || index === chartPoints.length - 1 || index % xLabelStep === 0;
                 return <span key={point.campaignId}>{showLabel ? `#${point.sequence}` : ''}</span>;
               })}
             </div>
