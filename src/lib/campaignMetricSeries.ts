@@ -4,6 +4,12 @@ export type CampaignMetricSeriesInput = {
   symbol: string;
   value: number | null;
   operationTime: number | null;
+  /**
+   * 战役已实现盈亏。与 value 相互独立：像「预期回撤」这类纯风险指标，
+   * 数值本身不含盈亏方向，需要靠它把点染成盈利绿 / 亏损红。
+   * null = 未结束或无数据。
+   */
+  pnl?: number | null;
 };
 
 export type CampaignMetricPoint = {
@@ -13,6 +19,8 @@ export type CampaignMetricPoint = {
   value: number;
   operationTime: number;
   sequence: number;
+  /** 战役已实现盈亏；null / undefined = 未结束或无数据。 */
+  pnl?: number | null;
 };
 
 export type CampaignMetricSeries = {

@@ -422,6 +422,14 @@ describe('JournalCampaignsPage sorting', () => {
     expect(drawdownTickValues[0]).toBe(0);
     expect(drawdownTickValues.every(value => value <= 0)).toBe(true);
 
+    // 预期回撤只表达风险距离，颜色改由战役盈亏决定：盈利绿、亏损红。
+    expect(screen.getByTestId('campaign-metric-point-expectedDrawdownPct-late-close'))
+      .toHaveAttribute('data-pnl-sign', 'negative');
+    expect(screen.getByTestId('campaign-metric-point-expectedDrawdownPct-best-pnl'))
+      .toHaveAttribute('data-pnl-sign', 'positive');
+    expect(screen.getByTestId('campaign-metric-point-expectedDrawdownPct-high-importance'))
+      .toHaveAttribute('data-pnl-sign', 'positive');
+
     const drawdownPlot = screen.getByTestId('campaign-metric-scatter-plot');
     const drawdownPointNodes = Array.from(
       drawdownPlot.querySelectorAll<HTMLElement>('button[data-campaign-id]'),
@@ -445,7 +453,8 @@ describe('JournalCampaignsPage sorting', () => {
     fireEvent.click(drawdownGuideToggle);
     const drawdownGuide = screen.getByTestId('campaign-metric-guide-expectedDrawdownPct');
     expect(drawdownGuide).toHaveTextContent('占主力开仓价的百分比');
-    expect(drawdownGuide).toHaveTextContent('黄色：统一表示风险距离');
+    expect(drawdownGuide).toHaveTextContent('绿色：该战役最终盈利');
+    expect(drawdownGuide).toHaveTextContent('红色：该战役最终亏损');
     expect(drawdownGuide).toHaveTextContent('0%');
     expect(drawdownGuide).toHaveTextContent('纵轴向下');
 
@@ -453,10 +462,43 @@ describe('JournalCampaignsPage sorting', () => {
     fireEvent.click(await screen.findByTestId('campaign-odds-chart-toggle'));
     expect(screen.getByTestId('campaign-odds-scatter-plot')).toBeInTheDocument();
 
+    // 散点图的选中指标随 URL 带入详情页，返回时才能落回同一张图。
     fireEvent.click(screen.getByTestId('campaign-odds-point-best-pnl'));
     expect(screen.getByTestId('location-probe')).toHaveTextContent(
-      '/journal/campaigns/best-pnl?sort=importance&direction=asc|from-list',
+      '/journal/campaigns/best-pnl?sort=importance&direction=asc&chart=odds|from-list',
     );
+  }, 15_000);
+
+  it('从 URL 的 chart 参数恢复散点图，使详情页返回后仍停在图上', async () => {
+    render(
+      <MemoryRouter initialEntries={['/journal/campaigns?sort=importance&direction=asc&chart=expectedDrawdownPct']}>
+        <Routes>
+          <Route path="/journal/campaigns" element={<JournalCampaignsPage />} />
+          <Route path="/journal/campaigns/:id" element={<LocationProbe />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    // 首帧即恢复散点图面板，而不是掉回只有卡片列表的状态。
+    const plot = await screen.findByTestId('campaign-metric-scatter-plot');
+    expect(plot).toHaveAttribute('data-metric-key', 'expectedDrawdownPct');
+    expect(screen.getByTestId('campaign-odds-scatter-panel')).toBeInTheDocument();
+  }, 15_000);
+
+  it('关闭散点图会移除 chart 参数', async () => {
+    render(
+      <MemoryRouter initialEntries={['/journal/campaigns?chart=expectedDrawdownPct']}>
+        <Routes>
+          <Route path="/journal/campaigns" element={<JournalCampaignsPage />} />
+          <Route path="/journal/campaigns/:id" element={<LocationProbe />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    await screen.findByTestId('campaign-metric-scatter-plot');
+    fireEvent.click(screen.getByTestId('campaign-metric-chart-back'));
+    await waitFor(() => expect(screen.getAllByTestId('campaign-card').length).toBeGreaterThan(0));
+    expect(screen.queryByTestId('campaign-metric-scatter-plot')).not.toBeInTheDocument();
   }, 15_000);
 
   it('defaults to operation time and toggles sort direction for each field', async () => {

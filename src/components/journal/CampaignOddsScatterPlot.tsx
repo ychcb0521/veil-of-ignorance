@@ -272,8 +272,23 @@ function createCampaignMetricBands(
     : createContinuousMetricBands(points, scale, formatValue);
 }
 
-function metricPointColor(value: number, mode: CampaignMetricColorMode) {
-  if (mode === 'risk') return '#F0B90B';
+/** 盈利绿 / 亏损红 / 打平未结束灰——全站统一的盈亏配色。 */
+function pnlColor(pnl: number | null | undefined) {
+  if (pnl != null && Number.isFinite(pnl)) {
+    if (pnl > 0) return '#0ECB81';
+    if (pnl < 0) return '#F6465D';
+  }
+  return '#98A2B3';
+}
+
+function metricPointColor(
+  value: number,
+  mode: CampaignMetricColorMode,
+  pnl?: number | null,
+) {
+  // risk 模式（预期回撤）的纵轴只表达风险距离，不含盈亏方向，
+  // 因此颜色改由战役已实现盈亏决定：盈利绿、亏损红、打平/未结束灰。
+  if (mode === 'risk') return pnlColor(pnl);
   if (mode === 'quality') return '#2B7FFF';
   if (mode === 'importance') return '#D99A00';
   if (mode === 'mirrorTp') {
@@ -639,7 +654,10 @@ export function CampaignMetricScatterPlot({
                   const positive = point.value > 0;
                   const negative = point.value < 0;
                   const valueSign = positive ? 'positive' : negative ? 'negative' : 'zero';
-                  const pointColor = metricPointColor(point.value, colorMode);
+                  const pnlSign = point.pnl == null || !Number.isFinite(point.pnl)
+                    ? 'unknown'
+                    : point.pnl > 0 ? 'positive' : point.pnl < 0 ? 'negative' : 'zero';
+                  const pointColor = metricPointColor(point.value, colorMode, point.pnl);
                   const pointShape = metricPointShape(point.value, colorMode);
                   const active = activeCampaignId === point.campaignId;
                   const operationTime = formatBeijingTime(point.operationTime);
@@ -661,6 +679,7 @@ export function CampaignMetricScatterPlot({
                         data-metric-key={metricKey}
                         data-metric-value={point.value}
                         data-value-sign={valueSign}
+                        data-pnl-sign={pnlSign}
                         data-odds-sign={legacyOddsTestIds ? valueSign : undefined}
                         data-marker-shape={pointShape}
                         aria-pressed={active}

@@ -212,7 +212,9 @@ const CAMPAIGN_METRIC_CHART_CONFIGS: readonly CampaignMetricChartConfig[] = [
       yAxis: '以主力开仓价为 0%，向下显示到初始对冲 A/B 中有效风险边界的负回撤，占主力开仓价的百分比。数值越负，预设价格回撤空间越大。',
       point: '点越靠近顶部 0%，初始风险边界离开仓价越近；点越低，负回撤绝对值越大。',
       colors: [
-        { color: '#F0B90B', label: '黄色：统一表示风险距离；颜色不区分盈利或亏损。' },
+        { color: '#0ECB81', label: '绿色：该战役最终盈利。' },
+        { color: '#F6465D', label: '红色：该战役最终亏损。' },
+        { color: '#98A2B3', label: '灰色：盈亏持平或尚未结束。' },
       ],
       referenceLines: ['0% 顶线：无预期回撤；纵轴向下表示回撤加深。'],
     },
@@ -330,6 +332,22 @@ const SORT_CHART_BY_MODE: Partial<Record<CampaignSortMode, CampaignMetricChartKe
   geometricExpectancy: 'geometricExpectancy',
   mirrorTp: 'mirrorTp',
 };
+
+export type CampaignMetricChartViewState = {
+  open: boolean;
+  key: CampaignMetricChartKey;
+};
+
+/**
+ * 散点图的开关与选中指标存进 URL，而不是只放组件 state：
+ * 从散点图点进战役详情时 URL 会被一并带上，详情页返回（nav(-1)）落回同一条
+ * history 记录，列表页据此重新打开同一张散点图，而不是掉回卡片列表。
+ */
+function parseCampaignChartParams(search: string): CampaignMetricChartViewState {
+  const requested = new URLSearchParams(search).get('chart');
+  const matched = CAMPAIGN_METRIC_CHART_CONFIGS.find(config => config.key === requested);
+  return matched ? { open: true, key: matched.key } : { open: false, key: 'odds' };
+}
 
 function parseCampaignListParams(search: string): CampaignSortState {
   const params = new URLSearchParams(search);
@@ -650,8 +668,14 @@ export default function JournalCampaignsPage() {
   const [busyCampaignId, setBusyCampaignId] = useState<string | null>(null);
   const [sortState, setSortState] = useState<CampaignSortState>(initialSortState);
   const [formulaPopover, setFormulaPopover] = useState<CampaignFormulaPopover | null>(null);
-  const [metricChartOpen, setMetricChartOpen] = useState(false);
-  const [metricChartKey, setMetricChartKey] = useState<CampaignMetricChartKey>('odds');
+  const initialChartState = useMemo(
+    () => parseCampaignChartParams(location.search),
+    // 只取首帧快照：后续 URL 变化由下方 effect 同步，避免每次 search 变动都重建。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
+  );
+  const [metricChartOpen, setMetricChartOpen] = useState(initialChartState.open);
+  const [metricChartKey, setMetricChartKey] = useState<CampaignMetricChartKey>(initialChartState.key);
   const [deletedOpen, setDeletedOpen] = useState(false);
   const [deletedLoading, setDeletedLoading] = useState(false);
   const [deletedCampaigns, setDeletedCampaigns] = useState<TradeCampaign[]>([]);
@@ -665,6 +689,10 @@ export default function JournalCampaignsPage() {
         ? current
         : next
     ));
+    // 浏览器前进 / 后退（含详情页返回）时，让散点图跟随 URL 恢复。
+    const nextChart = parseCampaignChartParams(location.search);
+    setMetricChartOpen(nextChart.open);
+    if (nextChart.open) setMetricChartKey(nextChart.key);
     const params = new URLSearchParams(location.search);
     if (!params.has('scope')) return;
     params.delete('scope');
@@ -871,6 +899,7 @@ export default function JournalCampaignsPage() {
       title: row.campaign.title,
       symbol: row.campaign.symbol,
       operationTime: campaignOperationTime(row.legs, row.tradeRecords),
+      pnl: row.campaign.final_realized_pnl ?? null,
     }));
     const buildSeries = (valueForRow: (row: CampaignDisplayData) => number | null) => (
       buildCampaignMetricSeries(samples.map(({ row, ...sample }) => ({
@@ -899,14 +928,25 @@ export default function JournalCampaignsPage() {
     config => config.key === metricChartKey,
   ) ?? CAMPAIGN_METRIC_CHART_CONFIGS[0];
   const selectedMetricSeries = metricSeriesByKey[metricChartKey];
+  const updateChartParam = (nextKey: CampaignMetricChartKey | null) => {
+    const params = new URLSearchParams(location.search);
+    params.delete('scope');
+    if (nextKey) params.set('chart', nextKey);
+    else params.delete('chart');
+    const search = params.toString();
+    nav({ pathname: location.pathname, search: search ? `?${search}` : '' }, { replace: true });
+  };
+
   const handleMetricChartToggle = (key: CampaignMetricChartKey) => {
     if (metricSeriesByKey[key].points.length === 0) return;
     if (metricChartOpen && metricChartKey === key) {
       setMetricChartOpen(false);
+      updateChartParam(null);
       return;
     }
     setMetricChartKey(key);
     setMetricChartOpen(true);
+    updateChartParam(key);
   };
   const compoundCampaignGrowth = useMemo(
     () => computeCompoundCampaignGrowth(
@@ -1871,7 +1911,7 @@ export default function JournalCampaignsPage() {
                   excludedMissingOperationTimeCount={selectedMetricSeries.excludedMissingOperationTimeCount}
                   colorMode={selectedMetricConfig.colorMode}
                   legacyOddsTestIds={selectedMetricConfig.key === 'odds'}
-                  onBack={() => setMetricChartOpen(false)}
+                  onBack={() => { setMetricChartOpen(false); updateChartParam(null); }}
                   onSelectCampaign={handleCampaignOpen}
                 />
               </div>
