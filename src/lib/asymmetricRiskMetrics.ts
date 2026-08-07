@@ -128,6 +128,42 @@ export function summarizeAsymmetricRiskMetrics(
   };
 }
 
+export interface AsymmetricRiskContributionRates {
+  /** 该场 b² 占亏损组平方和的百分比；只有亏损（b ≤ 0）战役有值。 */
+  dsiContributionPct: number | null;
+  /** 该场 b² 占盈利组平方和的百分比；只有盈利（b > 0）战役有值。 */
+  usiContributionPct: number | null;
+}
+
+const EMPTY_CONTRIBUTION_RATES: AsymmetricRiskContributionRates = {
+  dsiContributionPct: null,
+  usiContributionPct: null,
+};
+
+/**
+ * 单场战役对 DSI / USI 的贡献率。
+ *
+ * DSI 与 USI 都建立在组内均方（b² 的平均）之上，因此一场战役的边际影响就是它的
+ * b² 占本组平方和的比例——平方意味着大亏 / 大赚被显著放大，正是要看见的那件事。
+ * 盈亏两组互斥：亏损战役只对 DSI 有贡献，盈利战役只对 USI 有贡献，另一侧为 null。
+ *
+ * 只对已了结且 b 有效的战役计算：未了结的战役本就不在 DSI/USI 的分母里，
+ * 给它算占比会与口径不一致。
+ */
+export function computeAsymmetricRiskContributionRates(
+  sample: CampaignPerformanceSample,
+  summary: AsymmetricRiskMetricsSummary | null,
+): AsymmetricRiskContributionRates {
+  if (summary == null || !isResolvedCampaign(sample.campaign)) return EMPTY_CONTRIBUTION_RATES;
+  const contribution = computeAsymmetricRiskContribution(sample.payoffRatio, summary);
+  if (contribution == null || contribution.meanSquareShare == null) return EMPTY_CONTRIBUTION_RATES;
+  const percentage = contribution.meanSquareShare * 100;
+  if (!Number.isFinite(percentage)) return EMPTY_CONTRIBUTION_RATES;
+  return contribution.group === 'loss'
+    ? { dsiContributionPct: percentage, usiContributionPct: null }
+    : { dsiContributionPct: null, usiContributionPct: percentage };
+}
+
 export function computeAsymmetricRiskContribution(
   payoffRatio: number | null,
   summary: AsymmetricRiskMetricsSummary | null,

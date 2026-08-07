@@ -59,7 +59,10 @@ import {
   computeCompoundCampaignGrowth,
   formatCompoundCampaignGrowthRate,
 } from '@/lib/compoundCampaignGrowth';
-import { summarizeAsymmetricRiskMetrics } from '@/lib/asymmetricRiskMetrics';
+import {
+  computeAsymmetricRiskContributionRates,
+  summarizeAsymmetricRiskMetrics,
+} from '@/lib/asymmetricRiskMetrics';
 import { summarizeCampaignPerformance } from '@/lib/kellySizing';
 import { computeGeometricExpectancy } from '@/lib/geometricExpectancy';
 import { campaignAchievedMirrorTp, mirrorTpRank, summarizeMirrorTp } from '@/lib/mirrorTpSummary';
@@ -90,6 +93,8 @@ type CampaignDisplayData = CampaignCardData & {
   riskAccountEquity: number | null;
   arithmeticExpectancy: number | null;
   geometricExpectancy: number | null;
+  dsiContributionPct: number | null;
+  usiContributionPct: number | null;
 };
 
 type CampaignSortMode =
@@ -101,6 +106,8 @@ type CampaignSortMode =
   | 'arithmeticExpectancy'
   | 'geometricExpectancy'
   | 'mirrorTp'
+  | 'dsiContribution'
+  | 'usiContribution'
   | 'alpha';
 type CampaignSortDirection = 'asc' | 'desc';
 
@@ -116,7 +123,9 @@ type CampaignMetricChartKey =
   | 'arithmeticExpectancy'
   | 'geometricExpectancy'
   | 'importance'
-  | 'mirrorTp';
+  | 'mirrorTp'
+  | 'dsiContribution'
+  | 'usiContribution';
 
 type CampaignMetricChartConfig = {
   key: CampaignMetricChartKey;
@@ -149,6 +158,8 @@ type CampaignFormulaPopover =
   | 'compoundCampaignGrowth'
   | 'asymmetricRisk'
   | 'opportunityQualitySort'
+  | 'dsiContributionSort'
+  | 'usiContributionSort'
   | 'opportunityQuality';
 
 const SORT_OPTIONS: { value: CampaignSortMode; label: string }[] = [
@@ -160,6 +171,8 @@ const SORT_OPTIONS: { value: CampaignSortMode; label: string }[] = [
   { value: 'arithmeticExpectancy', label: '算术期望' },
   { value: 'geometricExpectancy', label: '几何期望' },
   { value: 'mirrorTp', label: '镜像止盈' },
+  { value: 'dsiContribution', label: 'DSI 贡献' },
+  { value: 'usiContribution', label: 'USI 贡献' },
   { value: 'alpha', label: '字母' },
 ];
 
@@ -311,6 +324,40 @@ const CAMPAIGN_METRIC_CHART_CONFIGS: readonly CampaignMetricChartConfig[] = [
     colorMode: 'mirrorTp',
     formatValue: formatMirrorTpMetric,
   },
+  {
+    key: 'dsiContribution',
+    label: 'DSI 贡献',
+    chartLabel: 'DSI 贡献图',
+    seriesLabel: 'DSI 贡献率时序',
+    guide: {
+      yAxis: '该场亏损战役对下行风险 DSI 的贡献率 = bᵢ² ÷ 所有亏损战役 b² 之和 × 100%。',
+      point: '点越高，这一场对下行风险的拉动越大。平方放大了大亏，少数几场就可能占掉大半 DSI。',
+      colors: [
+        { color: '#F6465D', label: '红色：亏损战役；只有亏损（b ≤ 0）才对 DSI 有贡献。' },
+      ],
+      referenceLines: ['所有点的贡献率合计为 100%。'],
+    },
+    missingValueLabel: 'DSI 贡献率',
+    colorMode: 'downside',
+    formatValue: value => `${value.toFixed(1)}%`,
+  },
+  {
+    key: 'usiContribution',
+    label: 'USI 贡献',
+    chartLabel: 'USI 贡献图',
+    seriesLabel: 'USI 贡献率时序',
+    guide: {
+      yAxis: '该场盈利战役对上行离散 USI 的贡献率 = bᵢ² ÷ 所有盈利战役 b² 之和 × 100%。',
+      point: '点越高，这一场对盈利离散度的拉动越大。若极少数战役占掉大半，说明盈利高度依赖偶发大赚。',
+      colors: [
+        { color: '#0ECB81', label: '绿色：盈利战役；只有盈利（b > 0）才对 USI 有贡献。' },
+      ],
+      referenceLines: ['所有点的贡献率合计为 100%。'],
+    },
+    missingValueLabel: 'USI 贡献率',
+    colorMode: 'upside',
+    formatValue: value => `${value.toFixed(1)}%`,
+  },
 ] as const;
 
 const SORT_FORMULA_BY_MODE: Partial<Record<CampaignSortMode, CampaignFormulaPopover>> = {
@@ -321,6 +368,8 @@ const SORT_FORMULA_BY_MODE: Partial<Record<CampaignSortMode, CampaignFormulaPopo
   arithmeticExpectancy: 'arithmeticExpectancy',
   geometricExpectancy: 'geometricExpectancy',
   mirrorTp: 'mirrorTpSort',
+  dsiContribution: 'dsiContributionSort',
+  usiContribution: 'usiContributionSort',
 };
 
 const SORT_CHART_BY_MODE: Partial<Record<CampaignSortMode, CampaignMetricChartKey>> = {
@@ -331,6 +380,8 @@ const SORT_CHART_BY_MODE: Partial<Record<CampaignSortMode, CampaignMetricChartKe
   arithmeticExpectancy: 'arithmeticExpectancy',
   geometricExpectancy: 'geometricExpectancy',
   mirrorTp: 'mirrorTp',
+  dsiContribution: 'dsiContribution',
+  usiContribution: 'usiContribution',
 };
 
 export type CampaignMetricChartViewState = {
@@ -533,6 +584,13 @@ function sortCampaignRows(rows: CampaignDisplayData[], sort: CampaignSortState):
     if (sort.mode === 'geometricExpectancy') {
       return row.geometricExpectancy != null && Number.isFinite(row.geometricExpectancy);
     }
+    // 贡献率两档天然只含一侧样本：DSI 只有亏损战役、USI 只有盈利战役。
+    if (sort.mode === 'dsiContribution') {
+      return row.dsiContributionPct != null && Number.isFinite(row.dsiContributionPct);
+    }
+    if (sort.mode === 'usiContribution') {
+      return row.usiContributionPct != null && Number.isFinite(row.usiContributionPct);
+    }
     return true;
   });
   return [...visibleRows].sort((a, b) => {
@@ -616,6 +674,26 @@ function sortCampaignRows(rows: CampaignDisplayData[], sort: CampaignSortState):
     if (sort.mode === 'mirrorTp') {
       return compareNumber(rowMirrorTpRank(a), rowMirrorTpRank(b), sort.direction)
         || pnlDesc
+        || importanceDesc
+        || timeDesc
+        || alphaAsc;
+    }
+    if (sort.mode === 'dsiContribution') {
+      return compareFiniteMetric(
+        a.dsiContributionPct ?? Number.NaN,
+        b.dsiContributionPct ?? Number.NaN,
+        sort.direction,
+      )
+        || importanceDesc
+        || timeDesc
+        || alphaAsc;
+    }
+    if (sort.mode === 'usiContribution') {
+      return compareFiniteMetric(
+        a.usiContributionPct ?? Number.NaN,
+        b.usiContributionPct ?? Number.NaN,
+        sort.direction,
+      )
         || importanceDesc
         || timeDesc
         || alphaAsc;
@@ -884,9 +962,16 @@ export default function JournalCampaignsPage() {
           performance.expectedWinRate,
           initialRiskFraction,
         ),
+        ...computeAsymmetricRiskContributionRates(
+          {
+            campaign: row.campaign,
+            payoffRatio: row.profitCaptureRatio == null ? null : row.profitCaptureRatio / 100,
+          },
+          asymmetricRisk,
+        ),
       };
     }),
-    [rows, performance.expectedWinRate, currentAccountEquity, user?.id],
+    [rows, performance.expectedWinRate, currentAccountEquity, user?.id, asymmetricRisk],
   );
   const sortedRows = useMemo(
     () => sortCampaignRows(displayRows, sortState),
@@ -922,6 +1007,8 @@ export default function JournalCampaignsPage() {
       geometricExpectancy: buildSeries(row => row.geometricExpectancy),
       importance: buildSeries(row => importanceValue(row.campaign)),
       mirrorTp: buildSeries(row => rowMirrorTpRank(row)),
+      dsiContribution: buildSeries(row => row.dsiContributionPct),
+      usiContribution: buildSeries(row => row.usiContributionPct),
     };
   }, [displayRows]);
   const selectedMetricConfig = CAMPAIGN_METRIC_CHART_CONFIGS.find(
@@ -1364,6 +1451,34 @@ export default function JournalCampaignsPage() {
                           <div>bᵢ &lt; 0 时仍按该场真实 xᵢ 进入公式，不会归零。</div>
                           <div>若 xᵢ ≥ 100% 或 1+bᵢ·xᵢ ≤ 0，代表该风险比例下资本被击穿，几何期望记为 −100%。</div>
                           <div>缺少有效初始最大预期亏损，或既无开仓快照也无可用当前资产的战役，不参与几何期望排序。</div>
+                        </div>
+                      </>
+                    ) : formula === 'dsiContributionSort' ? (
+                      <>
+                        <div className="font-medium text-foreground">单场 DSI 贡献率计算公式</div>
+                        <div className="mt-2 rounded bg-muted/60 px-2 py-1.5 font-mono text-foreground">
+                          DSI 贡献率ᵢ = bᵢ² ÷ Σ(亏损战役 b²) × 100%
+                        </div>
+                        <div className="mt-2 space-y-1 text-muted-foreground">
+                          <div>DSI = √(Σ 亏损战役 b² ÷ 亏损场数)，衡量下行风险的量级。</div>
+                          <div>因此单场的边际影响就是它的 b² 占亏损组平方和的比例；平方会放大大亏，少数几场往往占掉大半。</div>
+                          <div>只有亏损战役（b ≤ 0，含盈亏持平）对 DSI 有贡献；盈利战役不参与该排序。</div>
+                          <div>全部参与战役的贡献率合计为 100%。未了结或缺少有效 bᵢ 的战役不参与。</div>
+                          <div>当前亏损样本 n={asymmetricRisk.lossCount}，DSI={formatAsymmetricMetric(asymmetricRisk.dsi, 3)}。</div>
+                        </div>
+                      </>
+                    ) : formula === 'usiContributionSort' ? (
+                      <>
+                        <div className="font-medium text-foreground">单场 USI 贡献率计算公式</div>
+                        <div className="mt-2 rounded bg-muted/60 px-2 py-1.5 font-mono text-foreground">
+                          USI 贡献率ᵢ = bᵢ² ÷ Σ(盈利战役 b²) × 100%
+                        </div>
+                        <div className="mt-2 space-y-1 text-muted-foreground">
+                          <div>USI = √(Σ 盈利战役 b² ÷ 盈利场数) ÷ 盈利均值，衡量盈利的离散程度。</div>
+                          <div>分子的组内均方决定量级，单场的边际影响即它的 b² 占盈利组平方和的比例。</div>
+                          <div>只有盈利战役（b &gt; 0）对 USI 有贡献；亏损战役不参与该排序。</div>
+                          <div>若极少数战役就占掉大半，说明整体盈利高度依赖偶发大赚，需与 U1 联合判读。</div>
+                          <div>当前盈利样本 n={asymmetricRisk.winCount}，USI={formatAsymmetricMetric(asymmetricRisk.usi, 3)}。</div>
                         </div>
                       </>
                     ) : formula === 'importanceSort' ? (

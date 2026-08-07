@@ -485,6 +485,39 @@ describe('JournalCampaignsPage sorting', () => {
     expect(screen.getByTestId('campaign-odds-scatter-panel')).toBeInTheDocument();
   }, 15_000);
 
+  it('DSI / USI 贡献率各自只收一侧样本，且组内合计 100%', async () => {
+    render(
+      <MemoryRouter initialEntries={['/journal/campaigns']}>
+        <Routes>
+          <Route path="/journal/campaigns" element={<JournalCampaignsPage />} />
+          <Route path="/journal/campaigns/:id" element={<LocationProbe />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    await waitFor(() => expect(screen.getAllByTestId('campaign-card')).toHaveLength(4));
+
+    // DSI 贡献：只有亏损战役 late-close 参与，独占 100%。
+    fireEvent.contextMenu(screen.getByTestId('campaign-sort-dsiContribution'));
+    fireEvent.click(await screen.findByTestId('campaign-dsiContribution-chart-toggle'));
+    const dsiPlot = screen.getByTestId('campaign-metric-scatter-plot');
+    expect(dsiPlot).toHaveAttribute('data-metric-key', 'dsiContribution');
+    const dsiPoints = Array.from(dsiPlot.querySelectorAll<HTMLElement>('button[data-campaign-id]'));
+    expect(dsiPoints.map(node => node.dataset.campaignId)).toEqual(['late-close']);
+    expect(Number(dsiPoints[0].dataset.metricValue)).toBeCloseTo(100, 6);
+
+    // USI 贡献：只有盈利战役参与，彼此合计 100%。
+    fireEvent.contextMenu(screen.getByTestId('campaign-sort-usiContribution'));
+    fireEvent.click(await screen.findByTestId('campaign-usiContribution-chart-toggle'));
+    const usiPlot = screen.getByTestId('campaign-metric-scatter-plot');
+    expect(usiPlot).toHaveAttribute('data-metric-key', 'usiContribution');
+    const usiPoints = Array.from(usiPlot.querySelectorAll<HTMLElement>('button[data-campaign-id]'));
+    expect(usiPoints.length).toBeGreaterThan(1);
+    expect(usiPoints.map(node => node.dataset.campaignId)).not.toContain('late-close');
+    expect(
+      usiPoints.reduce((sum, node) => sum + Number(node.dataset.metricValue), 0),
+    ).toBeCloseTo(100, 6);
+  }, 15_000);
+
   it('关闭散点图会移除 chart 参数', async () => {
     render(
       <MemoryRouter initialEntries={['/journal/campaigns?chart=expectedDrawdownPct']}>
@@ -523,6 +556,8 @@ describe('JournalCampaignsPage sorting', () => {
       'campaign-sort-arithmeticExpectancy',
       'campaign-sort-geometricExpectancy',
       'campaign-sort-mirrorTp',
+      'campaign-sort-dsiContribution',
+      'campaign-sort-usiContribution',
       'campaign-sort-alpha',
     ]);
     expect(screen.getAllByTestId('campaign-operation-time').map(node => node.textContent)).toEqual([

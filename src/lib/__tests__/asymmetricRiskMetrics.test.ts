@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { TradeCampaign } from '@/types/journal';
 import {
   computeAsymmetricRiskContribution,
+  computeAsymmetricRiskContributionRates,
   summarizeAsymmetricRiskMetrics,
 } from '../asymmetricRiskMetrics';
 
@@ -111,6 +112,57 @@ describe('summarizeAsymmetricRiskMetrics', () => {
       sampleCount: 2,
       meanSquareTerm: 0.125,
       meanSquareShare: 0.1,
+    });
+  });
+});
+
+describe('computeAsymmetricRiskContributionRates', () => {
+  const summary = summarizeAsymmetricRiskMetrics([
+    sample('w1', 3),
+    sample('w2', 1),
+    sample('l1', -0.5),
+    sample('l2', -1.5),
+  ]);
+
+  it('盈利战役只贡献 USI，亏损战役只贡献 DSI', () => {
+    // 盈利组平方和 = 9 + 1 = 10 → 3² / 10 = 90%
+    expect(computeAsymmetricRiskContributionRates(sample('w1', 3), summary)).toEqual({
+      dsiContributionPct: null,
+      usiContributionPct: 90,
+    });
+    // 亏损组平方和 = 0.25 + 2.25 = 2.5 → 1.5² / 2.5 = 90%
+    expect(computeAsymmetricRiskContributionRates(sample('l2', -1.5), summary)).toEqual({
+      dsiContributionPct: 90,
+      usiContributionPct: null,
+    });
+  });
+
+  it('各组贡献率各自合计 100%', () => {
+    const winTotal = [3, 1].reduce(
+      (sum, b) => sum + (computeAsymmetricRiskContributionRates(sample('w', b), summary).usiContributionPct ?? 0),
+      0,
+    );
+    const lossTotal = [-0.5, -1.5].reduce(
+      (sum, b) => sum + (computeAsymmetricRiskContributionRates(sample('l', b), summary).dsiContributionPct ?? 0),
+      0,
+    );
+    expect(winTotal).toBeCloseTo(100, 10);
+    expect(lossTotal).toBeCloseTo(100, 10);
+  });
+
+  it('未了结 / 无有效 b / 无 summary 一律不给贡献率', () => {
+    const running = { campaign: { ...campaign('run', 0), status: 'active' } as TradeCampaign, payoffRatio: 2 };
+    expect(computeAsymmetricRiskContributionRates(running, summary)).toEqual({
+      dsiContributionPct: null,
+      usiContributionPct: null,
+    });
+    expect(computeAsymmetricRiskContributionRates(sample('none', null), summary)).toEqual({
+      dsiContributionPct: null,
+      usiContributionPct: null,
+    });
+    expect(computeAsymmetricRiskContributionRates(sample('w1', 3), null)).toEqual({
+      dsiContributionPct: null,
+      usiContributionPct: null,
     });
   });
 });

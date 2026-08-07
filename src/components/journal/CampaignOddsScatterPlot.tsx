@@ -7,7 +7,16 @@ import {
 import type { CampaignOddsPoint } from '@/lib/campaignOddsSeries';
 import { formatBeijingTime } from '@/lib/timeFormat';
 
-export type CampaignMetricColorMode = 'signed' | 'risk' | 'quality' | 'importance' | 'mirrorTp';
+export type CampaignMetricColorMode =
+  | 'signed'
+  | 'risk'
+  | 'quality'
+  | 'importance'
+  | 'mirrorTp'
+  /** DSI 贡献：样本天然全是亏损战役，统一红色。 */
+  | 'downside'
+  /** USI 贡献：样本天然全是盈利战役，统一绿色。 */
+  | 'upside';
 
 export type CampaignMetricScatterGuide = {
   yAxis: string;
@@ -289,6 +298,8 @@ function metricPointColor(
   // risk 模式（预期回撤）的纵轴只表达风险距离，不含盈亏方向，
   // 因此颜色改由战役已实现盈亏决定：盈利绿、亏损红、打平/未结束灰。
   if (mode === 'risk') return pnlColor(pnl);
+  if (mode === 'downside') return '#F6465D';
+  if (mode === 'upside') return '#0ECB81';
   if (mode === 'quality') return '#2B7FFF';
   if (mode === 'importance') return '#D99A00';
   if (mode === 'mirrorTp') {
