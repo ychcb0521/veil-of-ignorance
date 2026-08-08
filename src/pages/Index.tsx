@@ -11,8 +11,8 @@ import { TimeControl } from "@/components/TimeControl";
 import { SessionModeControls } from "@/components/SessionModeControls";
 import { CandlestickChart, type ChartImperativeApi } from "@/components/CandlestickChart";
 import { MultiChartLayout } from "@/components/MultiChartLayout";
-import { OrderBook } from "@/components/OrderBook";
-import { RecentTrades } from "@/components/RecentTrades";
+import { MarketDataPanel, type MarketDataTab } from "@/components/MarketDataPanel";
+import { PGapPanel } from "@/components/PGapPanel";
 import { TickerBar } from "@/components/TickerBar";
 import { OrderPanel } from "@/components/OrderPanel";
 import { PositionPanel } from "@/components/PositionPanel";
@@ -189,7 +189,10 @@ const Index = () => {
   const [coolingOffModalOpen, setCoolingOffModalOpen] = useState(false);
   const [priceProtection, setPriceProtection] = usePersistedState("price_protection", true);
   const [isOrderBookOpen, setIsOrderBookOpen] = useState(true);
-  const [isRecentTradesOpen, setIsRecentTradesOpen] = useState(true);
+  // 盘口（订单簿/最新成交/市场异动）默认折叠、位于下方；P_gap 在上且默认完整显示。
+  const [isMarketDataCollapsed, setIsMarketDataCollapsed] = useState(true);
+  const [isPGapCollapsed, setIsPGapCollapsed] = useState(false);
+  const [marketDataTab, setMarketDataTab] = useState<MarketDataTab>("orderBook");
 
   const coolingOff = useCoolingOff();
   const hasRestoredRef = useRef(false);
@@ -1834,62 +1837,62 @@ const Index = () => {
                           <ResizableHandle withHandle />
                           <ResizablePanel defaultSize={25} minSize={15} maxSize={35}>
                             <div className="h-full w-full min-w-[280px] flex flex-col bg-white dark:bg-[#1e2329] min-h-0 overflow-hidden">
-                              <ResizablePanelGroup
-                                key={`${isRecentTradesOpen ? "rt-open" : "rt-closed"}`}
-                                direction="vertical"
-                                className="h-full w-full"
-                              >
-                                <ResizablePanel defaultSize={isRecentTradesOpen ? 60 : 100} minSize={20}>
-                                  <div className="h-full w-full flex flex-col min-h-0 overflow-hidden border-b border-gray-200 dark:border-[#2b3139]">
-                                    <OrderBook
+                              {/* P_gap 在上、盘口在下。两者都展开时才需要可拖拽分隔；
+                                  其余情形下折叠的一方缩成表头，空间全给展开的一方。 */}
+                              {!isPGapCollapsed && !isMarketDataCollapsed ? (
+                                <ResizablePanelGroup direction="vertical" className="h-full w-full">
+                                  <ResizablePanel defaultSize={50} minSize={25}>
+                                    <PGapPanel
+                                      currentPrice={displayCurrentPrice}
+                                      pricePrecision={pricePrecision}
+                                      collapsed={false}
+                                      onToggleCollapsed={() => setIsPGapCollapsed(true)}
+                                    />
+                                  </ResizablePanel>
+                                  <ResizableHandle
+                                    withHandle
+                                    className="!h-[2px] bg-gray-200 dark:bg-[#2b3139] hover:bg-gray-300 dark:hover:bg-[#474d57] transition-colors cursor-row-resize"
+                                  />
+                                  <ResizablePanel defaultSize={50} minSize={22}>
+                                    <MarketDataPanel
                                       symbol={activeSymbol}
                                       currentPrice={displayCurrentPrice}
                                       pricePrecision={pricePrecision}
-                                      onMinimize={() => setIsRecentTradesOpen((v) => !v)}
+                                      tab={marketDataTab}
+                                      onTabChange={setMarketDataTab}
+                                      collapsed={false}
+                                      onToggleCollapsed={() => setIsMarketDataCollapsed(true)}
+                                      onClose={() => setIsOrderBookOpen(false)}
+                                    />
+                                  </ResizablePanel>
+                                </ResizablePanelGroup>
+                              ) : (
+                                <>
+                                  <div className={isPGapCollapsed ? "flex-none" : "flex-1 min-h-0"}>
+                                    <PGapPanel
+                                      currentPrice={displayCurrentPrice}
+                                      pricePrecision={pricePrecision}
+                                      collapsed={isPGapCollapsed}
+                                      onToggleCollapsed={() => setIsPGapCollapsed((v) => !v)}
+                                    />
+                                  </div>
+                                  <div
+                                    className={`border-t border-gray-200 dark:border-[#2b3139] ${
+                                      isMarketDataCollapsed ? "flex-none" : "flex-1 min-h-0"
+                                    }`}
+                                  >
+                                    <MarketDataPanel
+                                      symbol={activeSymbol}
+                                      currentPrice={displayCurrentPrice}
+                                      pricePrecision={pricePrecision}
+                                      tab={marketDataTab}
+                                      onTabChange={setMarketDataTab}
+                                      collapsed={isMarketDataCollapsed}
+                                      onToggleCollapsed={() => setIsMarketDataCollapsed((v) => !v)}
                                       onClose={() => setIsOrderBookOpen(false)}
                                     />
                                   </div>
-                                </ResizablePanel>
-
-                                {isRecentTradesOpen && (
-                                  <>
-                                    <ResizableHandle
-                                      withHandle
-                                      className="!h-[2px] bg-gray-200 dark:bg-[#2b3139] hover:bg-gray-300 dark:hover:bg-[#474d57] transition-colors cursor-row-resize"
-                                    />
-                                    <ResizablePanel defaultSize={40} minSize={20}>
-                                      <div className="h-full w-full flex flex-col min-h-0 overflow-hidden">
-                                        <RecentTrades
-                                          currentPrice={displayCurrentPrice}
-                                          pricePrecision={pricePrecision}
-                                          onMinimize={() => setIsRecentTradesOpen(false)}
-                                          onClose={() => setIsRecentTradesOpen(false)}
-                                        />
-                                      </div>
-                                    </ResizablePanel>
-                                  </>
-                                )}
-                              </ResizablePanelGroup>
-
-                              {!isRecentTradesOpen && (
-                                <button
-                                  type="button"
-                                  onClick={() => setIsRecentTradesOpen(true)}
-                                  title="显示最新成交"
-                                  className="flex-none flex items-center justify-center gap-1 h-7 text-[11px] border-t border-gray-200 dark:border-[#2b3139] text-gray-500 dark:text-[#848e9c] hover:text-gray-900 dark:hover:text-white transition-colors"
-                                >
-                                  <svg
-                                    className="w-3 h-3"
-                                    viewBox="0 0 12 12"
-                                    fill="none"
-                                    stroke="currentColor"
-                                    strokeWidth="1.5"
-                                    strokeLinecap="round"
-                                  >
-                                    <path d="M2 4l4 4 4-4" />
-                                  </svg>
-                                  最新成交
-                                </button>
+                                </>
                               )}
                             </div>
                           </ResizablePanel>

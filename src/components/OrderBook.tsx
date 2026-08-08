@@ -21,6 +21,8 @@ interface Props {
   pricePrecision?: number;
   onMinimize?: () => void;
   onClose?: () => void;
+  /** 嵌入带页签的模块时隐藏自带表头，由外层提供统一表头（币安式：一个模块一个头）。 */
+  hideHeader?: boolean;
 }
 
 const DEPTH_LEVELS = 12;
@@ -39,7 +41,7 @@ function generateDepth(basePrice: number, step: number, levels: number, isBid: b
   return entries;
 }
 
-export function OrderBook({ currentPrice, symbol, previousPrice, pricePrecision: propPrecision, onMinimize, onClose }: Props) {
+export function OrderBook({ currentPrice, symbol, previousPrice, pricePrecision: propPrecision, onMinimize, onClose, hideHeader = false }: Props) {
   const { getSymbolSettlementMode } = useTradingContext();
   const quoteUnitLabel = getSymbolSettlementMode(symbol) === 'coin' ? 'USD' : 'USDT';
   const [seed, setSeed] = useState(0);
@@ -118,6 +120,7 @@ export function OrderBook({ currentPrice, symbol, previousPrice, pricePrecision:
   return (
     <div className="flex flex-col h-full min-h-0 overflow-hidden text-[10px] font-mono tabular-nums select-none bg-white dark:bg-[#1e2329]">
       {/* Header (frozen) — group enables hover-reveal of close icon */}
+      {!hideHeader && (
       <div className="group flex-none flex items-center justify-between px-3 h-10 border-b border-gray-200 dark:border-[#2b3139]">
         <div className="flex items-center gap-3">
           <span className="text-sm font-medium text-gray-900 dark:text-[#EAECEF]">订单簿</span>
@@ -178,6 +181,7 @@ export function OrderBook({ currentPrice, symbol, previousPrice, pricePrecision:
           )}
         </div>
       </div>
+      )}
 
       {/* Column headers (frozen) — 3 equal columns */}
       <div className="flex-none grid grid-cols-3 px-3 h-6 items-center text-[9px] text-gray-500 dark:text-[#848e9c] border-b border-gray-200 dark:border-[#2b3139]/60">

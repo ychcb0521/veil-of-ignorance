@@ -1,7 +1,6 @@
 import { fireEvent, render, screen } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { PGapPanel } from '@/components/PGapPanel';
-import { RecentTrades } from '@/components/RecentTrades';
 
 function setPrices(k: number, t: number) {
   fireEvent.change(screen.getByTestId('p-gap-stop-number'), { target: { value: String(k) } });
@@ -20,9 +19,11 @@ describe('PGapPanel', () => {
 
     expect(screen.getByTestId('p-gap-baseline')).toHaveTextContent('50.0%');
     const gap = screen.getByTestId('p-gap-value');
-    expect(gap).toHaveTextContent('优势边际 +10.0%');
+    expect(gap).toHaveTextContent('+10.0%');
     expect(gap).toHaveAttribute('data-gap-sign', 'positive');
-    expect(gap.className).toContain('text-trading-green');
+    expect(gap).toHaveStyle({ color: '#0ECB81' });
+    // 「优势边际」与数值同处一行，合起来读作「优势边际 +10.0%」
+    expect(gap.closest('div')).toHaveTextContent('优势边际');
     expect(screen.getByText('市场免费给你的胜率，P 必须高于它')).toBeInTheDocument();
   });
 
@@ -34,7 +35,7 @@ describe('PGapPanel', () => {
     const gap = screen.getByTestId('p-gap-value');
     expect(gap).toHaveTextContent('优势已耗尽');
     expect(gap).toHaveAttribute('data-gap-sign', 'non-positive');
-    expect(gap.className).toContain('text-trading-red');
+    expect(gap).toHaveStyle({ color: '#F6465D' });
   });
 
   it('S 随行情跳动即时重算：基线抬高、优势条向零收缩', () => {
@@ -78,23 +79,46 @@ describe('PGapPanel', () => {
     setWinRate(60);
 
     expect(screen.getByTestId('p-gap-baseline')).toHaveTextContent('50.0%');
-    expect(screen.getByTestId('p-gap-value')).toHaveTextContent('优势边际 +10.0%');
+    expect(screen.getByTestId('p-gap-value')).toHaveTextContent('+10.0%');
   });
 
-  it('作为第三个页签挂在最新成交/市场异动之后，且默认选中', () => {
-    render(<RecentTrades currentPrice={100} pricePrecision={2} />);
+  it('默认完整显示，不折叠', () => {
+    render(<PGapPanel currentPrice={100} pricePrecision={2} onToggleCollapsed={() => {}} />);
+    expect(screen.getByTestId('p-gap-panel')).toHaveAttribute('data-collapsed', 'false');
+    expect(screen.getByTestId('p-gap-collapse-toggle')).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByTestId('p-gap-stop-number')).toBeInTheDocument();
+  });
 
-    const tabLabels = Array.from(
-      screen.getByTestId('p-gap-tab').parentElement?.querySelectorAll('button') ?? [],
-    ).map(node => node.textContent);
-    expect(tabLabels).toEqual(['最新成交', '市场异动', 'P_gap']);
+  it('折叠后只留表头，并把 gap 读数收进表头', () => {
+    const { rerender } = render(
+      <PGapPanel currentPrice={100} pricePrecision={2} onToggleCollapsed={() => {}} />,
+    );
+    setPrices(90, 110);
+    setWinRate(60);
 
-    // 默认就停在 P_gap 上，无需点击
-    expect(screen.getByTestId('p-gap-panel')).toBeInTheDocument();
+    rerender(<PGapPanel currentPrice={100} pricePrecision={2} collapsed onToggleCollapsed={() => {}} />);
+    expect(screen.getByTestId('p-gap-panel')).toHaveAttribute('data-collapsed', 'true');
+    // 输入区与大读数都收起
+    expect(screen.queryByTestId('p-gap-stop-number')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('p-gap-baseline')).not.toBeInTheDocument();
+    // 但仪表仍在说话
+    expect(screen.getByTestId('p-gap-collapsed-value')).toHaveTextContent('+10.0%');
+  });
+
+  it('折叠按钮低调但可点', () => {
+    const onToggleCollapsed = vi.fn();
+    render(<PGapPanel currentPrice={100} pricePrecision={2} onToggleCollapsed={onToggleCollapsed} />);
+    const toggle = screen.getByTestId('p-gap-collapse-toggle');
+    expect(toggle.className).toContain('opacity-30');
+    fireEvent.click(toggle);
+    expect(onToggleCollapsed).toHaveBeenCalledTimes(1);
+  });
+
+  it('是独立模块：自带 P_gap 表头，不再寄居在成交页签里', () => {
+    render(<PGapPanel currentPrice={100} pricePrecision={2} />);
+    expect(screen.getByText('P_gap')).toBeInTheDocument();
+    expect(screen.getByText('优势边际')).toBeInTheDocument();
+    // 成交流水的表头不属于这个模块
     expect(screen.queryByText('价格(USDT)')).not.toBeInTheDocument();
-
-    fireEvent.click(screen.getByText('最新成交'));
-    expect(screen.queryByTestId('p-gap-panel')).not.toBeInTheDocument();
-    expect(screen.getByText('价格(USDT)')).toBeInTheDocument();
   });
 });
