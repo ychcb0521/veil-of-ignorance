@@ -28,9 +28,10 @@ const TOC: TocItem[] = [
     children: [
       { id: 's3-0', label: '3.1 交易模式选择' },
       { id: 's3-1', label: '3.2 时光机与行情' },
-      { id: 's3-2', label: '3.3 下单前快照' },
-      { id: 's3-3', label: '3.4 平仓评价复盘' },
-      { id: 's3-4', label: '3.5 持仓与历史' },
+      { id: 's3-1b', label: '3.3 P_gap 优势边际' },
+      { id: 's3-2', label: '3.4 下单前快照' },
+      { id: 's3-3', label: '3.5 平仓评价复盘' },
+      { id: 's3-4', label: '3.6 持仓与历史' },
     ],
   },
   {
@@ -526,7 +527,7 @@ export default function GuidePage() {
                   用来建立交易假设：趋势延续、结构反转、区间波动或放弃交易。不要在持仓后用图表临时补理由。
                 </KeyCard>
                 <KeyCard title="盘口与成交">
-                  用来观察微观结构。若盘口不是策略的一部分，就不要用它作为冲动加仓的借口。
+                  订单簿、最新成交、市场异动合并成右栏下方的一个模块，<strong>默认折叠</strong>成一条表头，把纵向空间让给 P_gap。折叠时点任一页签即展开到该页签。用来观察微观结构；若盘口不是策略的一部分，就不要用它作为冲动加仓的借口。
                 </KeyCard>
                 <KeyCard title="推荐节奏">
                   新手先用 1x-5x 练完整决策，熟悉后用 10x-60x 提高样本量；180x 和 300x 适合穿越无交易价值的等待区。
@@ -561,8 +562,79 @@ export default function GuidePage() {
               </RedHighlight>
             </section>
 
+            <section id="s3-1b" className="scroll-mt-20">
+              <SubTitle>3.3 P_gap 优势边际</SubTitle>
+              <P>
+                P_gap 是交易页右栏最上方的常驻仪表，<strong>默认完整显示</strong>。它只回答一个问题：<strong>你自认的胜率，比市场白送的那一份高出多少。</strong>它只读不写——不落库、不记历史、不做校准统计、不给仓位建议，读数即全部功能。
+              </P>
+              <div className="overflow-x-auto">
+                <table className="w-full text-[11px] my-3 border border-border rounded overflow-hidden">
+                  <thead className="bg-muted/50">
+                    <tr>
+                      <th className="text-left px-3 py-2 font-medium text-foreground text-[10px]">变量</th>
+                      <th className="text-left px-3 py-2 font-medium text-foreground text-[10px]">含义</th>
+                      <th className="text-left px-3 py-2 font-medium text-foreground text-[10px]">来源与交互</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr><td className="px-3 py-2 border-t border-border font-medium">S 现价</td><td className="px-3 py-2 border-t border-border">当前盘面价格</td><td className="px-3 py-2 border-t border-border">盘面实时数据，只读，随行情跳动</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border font-medium">K 止损</td><td className="px-3 py-2 border-t border-border">你打算认错的位置</td><td className="px-3 py-2 border-t border-border">滑块 + 数字输入；滑块量程为现价 ±12%</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border font-medium">T 目标</td><td className="px-3 py-2 border-t border-border">你打算兑现的位置</td><td className="px-3 py-2 border-t border-border">滑块 + 数字输入</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border font-medium">P 主观胜率</td><td className="px-3 py-2 border-t border-border">你主观认定这笔会赢的概率</td><td className="px-3 py-2 border-t border-border">滑块 + 数字输入，0–100%；<strong>默认填入本账号交易战役的整体胜率</strong>，可自行覆盖</td></tr>
+                  </tbody>
+                </table>
+              </div>
+              <SubTitle>两个读数</SubTitle>
+              <div className="overflow-x-auto">
+                <table className="w-full text-[11px] my-3 border border-border rounded overflow-hidden">
+                  <thead className="bg-muted/50">
+                    <tr>
+                      <th className="text-left px-3 py-2 font-medium text-foreground text-[10px]">指标</th>
+                      <th className="text-left px-3 py-2 font-medium text-foreground text-[10px]">公式</th>
+                      <th className="text-left px-3 py-2 font-medium text-foreground text-[10px]">怎么读</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <td className="px-3 py-2 border-t border-border">基线概率 P₀</td>
+                      <td className="px-3 py-2 border-t border-border">|S − K| ÷ |T − K|</td>
+                      <td className="px-3 py-2 border-t border-border">在<strong>没有任何优势</strong>的市场里，价格先摸到 T 而不是先摸到 K 的概率。止损放得越远、目标定得越近，它越高——这是市场免费给你的胜率，<strong>P 必须高于它</strong></td>
+                    </tr>
+                    <tr>
+                      <td className="px-3 py-2 border-t border-border">优势边际 gap</td>
+                      <td className="px-3 py-2 border-t border-border">P − P₀</td>
+                      <td className="px-3 py-2 border-t border-border">P 高出基线的部分，才真正属于你。gap &gt; 0 显示绿色「优势边际 +x.x%」；<strong>gap ≤ 0 转红并显示「优势已耗尽」</strong>，意味着这笔已不值得下手</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+              <P>
+                下方的<strong>优势条</strong>把优势被价格吃掉的过程直接画出来：满格为你锚定 P 那一刻的 gap；价格越往 T 走，P₀ 越高，条就越短。改动 K、T 或 P 会重新锚定。
+              </P>
+              <SubTitle>方向与守卫</SubTitle>
+              <P>
+                多空方向<strong>由 S、K、T 的相对位置自动判定</strong>，不需要也不能手选：多头要求 <strong>K &lt; S &lt; T</strong>，空头要求 <strong>T &lt; S &lt; K</strong>。任一输入变动（包括 S 的行情跳动）立即重算。
+              </P>
+              <RedHighlight>
+                当 <strong>T = K</strong>（分母为 0，基线概率无意义）或<strong>方向不成立</strong>（S 落在 K、T 同侧，或恰好压在 K 或 T 上）时，面板<strong>不出任何数字</strong>，只给提示——包括 P₀ 也不显示。宁可不给数，也不给一个无意义的数。
+              </RedHighlight>
+              <SubTitle>默认胜率的口径</SubTitle>
+              <P>
+                P 的默认值取<strong>本账号交易战役的整体胜率</strong>：已了结战役中盈利战役所占的比例，与「下注规模」处使用的是同一套口径。<strong>已了结战役不足 5 场时不给默认值</strong>，P 保持空白——不臆造。战役数据是异步加载的，系统只在你尚未动过 P 时落一次默认值，之后不会覆盖你的输入。
+              </P>
+              <P>
+                P 行下方会标出这个默认值的出处（如「默认取自本账号战役整体胜率 62%（n=23）」），<strong>点它即可把 P 退回该值</strong>，方便随时把当下的主观判断和自己的历史实绩作对照。
+              </P>
+              <Highlight>
+                这块表的用处不是替你决策，而是逼你把「我觉得这笔能赢」量化成一个数，再和市场免费给的那份摆在一起比。当 gap 逼近或跌破 0，说明你所谓的优势其实来自把止损放得太远、或目标定得太近，而不是来自判断本身。
+              </Highlight>
+              <P>
+                模块表头 <strong>P_gap</strong> 右侧有一个低调的问号，点开即是这套算法的完整说明；再右侧是折叠键（同样低调）。<strong>折叠后表头会顶替显示 gap 读数</strong>，仪表不会因为收起就失声。
+              </P>
+            </section>
+
             <section id="s3-2" className="scroll-mt-20">
-              <SubTitle>3.3 下单前快照</SubTitle>
+              <SubTitle>3.4 下单前快照</SubTitle>
               <P>开仓快照是系统的核心记录点。它固定“下单前的你”看到什么、相信什么、愿意亏多少、处在什么心态。但这里有一个必须先讲清的底层原则：<strong>主力单与对冲单不是同一类决策，不能用同一套问题去问。</strong> 主力单是在分布右尾下注，核心是“这次机会为什么值得押”；对冲单是在分布左尾买保险，核心是“什么时候裸拿已经变成负期望，应该让保险接管”。</P>
 
               <SubTitle>零号关 · Stop Doing List：开仓前先过这张「我决心不做」</SubTitle>
@@ -867,7 +939,7 @@ export default function GuidePage() {
             </section>
 
             <section id="s3-3" className="scroll-mt-20">
-              <SubTitle>3.4 平仓评价复盘</SubTitle>
+              <SubTitle>3.5 平仓评价复盘</SubTitle>
               <P>决策记录模式下，平仓会打开一个与开仓快照同规格的<strong>居中评价弹窗</strong>，不完成评价不能离开。评价的重心不是重新讲一遍故事，而是把快照时的预测和最终实际结果对上：预设的证伪信号兑现没有，结构破坏信号出现没有，进场时钉下的置信度有没有被验证。</P>
               <P>弹窗按这条主线展开：<strong>事实模块</strong>逐条核验快照里押的<strong>反 / 止 / 结构 / 置信</strong>四条腿 → <strong>决策质量</strong>（入场 / 持仓 / 离场三栏）→ 系统自动归纳<strong>结构 × 结果四象限</strong> → <strong>路径</strong>（滚仓 / 镜像止盈 + 交易主动权）→ <strong>体检模块</strong>（过程纠结度 / 小机会仓位记账 / 踏空高盈亏比结构）→ <strong>反对者陈述追踪</strong>（条件触发）→ <strong>情绪侧七问</strong>。先对账，再判读，最后翻动机，避免复盘变成事后重新叙述。</P>
               <P><strong>机会质量评估</strong>会在平仓时再输入当时可见的 b 与 d，并自动计算 Q。它默认带入开仓判断，但允许你根据复盘修正并保存；评估要回到当时的信息集，不能用最终盈亏倒推一个完美预测。</P>
@@ -1068,7 +1140,7 @@ export default function GuidePage() {
             </section>
 
             <section id="s3-4" className="scroll-mt-20">
-              <SubTitle>3.5 持仓与历史</SubTitle>
+              <SubTitle>3.6 持仓与历史</SubTitle>
               <P>底部历史区用于检查执行结果。重点关注三类记录：未评价交易、仓位历史记录、平仓方式。</P>
               <ul className="list-disc pl-6 text-[14px] text-foreground/90 space-y-1">
                 <li><strong>未评价交易</strong>：优先补齐。已平仓未评价会硬阻塞下一次开仓。</li>
@@ -1262,12 +1334,31 @@ export default function GuidePage() {
 
               <SubTitle>战役列表与折叠卡片</SubTitle>
               <P>战役卡片默认只保留两层核心信息：第一层是标题、方向、标的、策略、唯一编号、<strong>真实操作时间</strong>、重要性与结束状态；第二层是预期回撤、机会质量、盈亏比、单场算术期望、单场几何期望与镜像止盈状态。指标为正时使用绿色、为负时使用红色，无法计算时显示「—」。</P>
-              <P>点击卡片右侧的小箭头，会在卡片内部展开战役时间、结构与时长、已实现盈亏和完整 Legs 标签；再次点击即收起。点击卡片其他区域会进入战役详情，详情始终从页面顶部打开；从详情左上角返回时，会恢复进入前的排序参数、方向和列表滚动位置。</P>
+              <P>点击卡片右侧的小箭头，会在卡片内部展开战役时间、结构与时长、已实现盈亏和完整 Legs 标签；再次点击即收起。点击卡片其他区域会进入战役详情，详情始终从页面顶部打开；从详情左上角返回时，会恢复进入前的排序参数、方向和列表滚动位置——若你是从散点图点进去的，则回到那张散点图。</P>
 
               <SubTitle>统计概览与排序</SubTitle>
               <P>「统计概览」与「排序方式」分成上下两行：概览汇总有效战役、镜像止盈、胜率、平均盈亏比、期望值、几何期望、机会质量、复合战役增长率与不对称风险；排序行只负责改变战役顺序，避免统计与操作混在一起。</P>
               <P>统计指标<strong>单击一次</strong>展开公式、有效样本和当前代入值，再单击一次关闭。排序按钮<strong>单击</strong>只执行排序；再次单击同一按钮，在升序与降序之间切换。需要查看排序指标公式时，使用<strong>双击或右键</strong>，不会因为查看说明而误改排序方向。</P>
-              <P>默认按<strong>真实操作时间</strong>从新到旧排序；还可以按重要性、预期回撤、机会质量、盈亏比、算术期望、几何期望、镜像止盈或字母顺序双向排序。这里的操作时间是客观发生时间，不是无知之幕时间机器里的模拟时间。</P>
+              <P>默认按<strong>真实操作时间</strong>从新到旧排序；还可以按重要性、预期回撤、机会质量、盈亏比、算术期望、几何期望、镜像止盈、DSI 贡献、USI 贡献或字母顺序双向排序。这里的操作时间是客观发生时间，不是无知之幕时间机器里的模拟时间。</P>
+
+              <SubTitle>镜像止盈汇总</SubTitle>
+              <P>概览行「有效战役」旁的<strong>镜像止盈</strong>统计整表的镜像止盈达成情况。判定口径是「该战役里有一条 <strong>mirror_tp</strong> 腿真正成交」，与单场决策准确度里的 <code>mirror_tp_capture</code> 同源，但不依赖 K 线、可对整表批量统计。</P>
+              <div className="overflow-x-auto">
+                <table className="w-full text-[11px] my-3 border border-border rounded overflow-hidden">
+                  <thead className="bg-muted/50">
+                    <tr>
+                      <th className="text-left px-3 py-2 font-medium text-foreground text-[10px]">读数</th>
+                      <th className="text-left px-3 py-2 font-medium text-foreground text-[10px]">含义</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr><td className="px-3 py-2 border-t border-border">实现 / 未实现</td><td className="px-3 py-2 border-t border-border">两侧各给场数与占全表的百分比，合计 100%</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border">实现·盈利 / 实现·亏损</td><td className="px-3 py-2 border-t border-border">在已达成镜像止盈的战役里，按 final_realized_pnl 分成盈利与亏损；为 0 或未结束计入「打平 / 进行中」</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border">达成盈利率</td><td className="px-3 py-2 border-t border-border">实现·盈利 ÷ 全部已实现镜像止盈的战役</td></tr>
+                  </tbody>
+                </table>
+              </div>
+              <P>按镜像止盈排序时使用的权重为：<strong>实现·盈利 &gt; 实现·打平 / 进行中 &gt; 实现·亏损 &gt; 未实现</strong>。降序把「镜像止盈生效且赚钱」的战役排在最前，升序则把未实现的排在最前。每张战役卡片也有一列「镜像止盈」状态，盈利绿、亏损红。</P>
 
               <SubTitle>交易战役列表：期望值系列</SubTitle>
               <P><strong>战役级统计统一使用同一个有效样本口径：</strong>战役已经结束，并且存在大于 0 的初始最大预期亏损。计算如下：</P>
@@ -1320,6 +1411,45 @@ export default function GuidePage() {
               </div>
               <P>Sortino 作为对照项显示：<strong>Sortino =（U1 − D1）÷ σ_d</strong>。系统同时校验恒等式 <strong>Sortino ≡ UPR − D1 ÷ σ_d</strong>，用于发现口径漂移。没有亏损样本时 DSI、σ_d、UPR、Omega、Sortino 显示「—」；没有盈利样本时 USI、σ_u、U1、UPR、Omega 显示「—」。对应盈利或亏损样本少于 5 场时仍给出数值，但标注「样本不足」。</P>
               <P>盈亏比未回填的已结束战役不会进入这些指标，模块脚注会注明排除数量。进入单场战役后，「盈亏概览」会显示本场 <strong>b² ÷ n</strong> 对 DSI 或 USI 组内均方的贡献，以及本场 b² 占对应组 Σb² 的比例，用来快速定位拉高左尾风险或支撑右尾保留的具体战役；该项也会自动进入一键导出图片。</P>
+
+              <SubTitle>DSI 贡献率与 USI 贡献率</SubTitle>
+              <P>排序行里另有两档指标，把上面那个「单场贡献」提到整表维度，用来看<strong>风险与盈利的集中度</strong>。DSI 与 USI 都建立在组内均方（b² 的平均）之上，因此一场战役的边际影响，就是它的 <strong>b² 占本组平方和的比例</strong>：</P>
+              <div className="overflow-x-auto">
+                <table className="w-full text-[11px] my-3 border border-border rounded overflow-hidden">
+                  <thead className="bg-muted/50">
+                    <tr>
+                      <th className="text-left px-3 py-2 font-medium text-foreground text-[10px]">指标</th>
+                      <th className="text-left px-3 py-2 font-medium text-foreground text-[10px]">公式</th>
+                      <th className="text-left px-3 py-2 font-medium text-foreground text-[10px]">样本与读法</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <td className="px-3 py-2 border-t border-border">DSI 贡献率</td>
+                      <td className="px-3 py-2 border-t border-border">bᵢ² ÷ Σ（亏损战役 b²）× 100%</td>
+                      <td className="px-3 py-2 border-t border-border">只有<strong>亏损战役</strong>（b ≤ 0，含盈亏持平）参与。点越高，这一场对下行风险的拉动越大</td>
+                    </tr>
+                    <tr>
+                      <td className="px-3 py-2 border-t border-border">USI 贡献率</td>
+                      <td className="px-3 py-2 border-t border-border">bᵢ² ÷ Σ（盈利战役 b²）× 100%</td>
+                      <td className="px-3 py-2 border-t border-border">只有<strong>盈利战役</strong>（b &gt; 0）参与。若极少数战役占掉大半，说明盈利高度依赖偶发大赚</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+              <P>盈亏两组互斥，因此两张图天然各自只收一侧样本，<strong>组内贡献率合计恰为 100%</strong>。平方会放大大额盈亏——这正是要看见的东西：少数几场往往就占掉大半。只对已了结且 b 有效的战役计算；未了结的战役本就不在 DSI / USI 的分母里，给它算占比会与口径不一致。</P>
+              <Highlight>
+                USI 贡献率必须与 <strong>U1</strong> 联合判读：贡献率只描述「盈利来自谁」，不描述「盈利有多少」。集中度高本身不是错——右尾开放的策略天然如此；真正要警惕的是集中度高<em>且</em> U1 偏低，那意味着仅有的几次大赚还不足以撑起整体上行。
+              </Highlight>
+
+              <SubTitle>指标散点图</SubTitle>
+              <P>盈亏比、预期回撤、机会质量、算术期望、几何期望、重要性、镜像止盈、DSI 贡献、USI 贡献都各自配有一张散点图。在排序行上<strong>双击或右键</strong>对应指标打开公式浮层，浮层底部的「查看散点图」即可展开；再点一次「收起散点图」关闭。横轴是按<strong>客观操作时间</strong>排列的战役序号，与列表当前排序无关——改排序不会让点位移动。</P>
+              <ul className="list-disc pl-6 text-[14px] text-foreground/90 space-y-1">
+                <li><strong>颜色分两类。</strong>本身带盈亏方向的指标（盈亏比、算术期望、几何期望）按数值正负着色：正绿、负红、零灰。不带方向的纯量级指标用单色，避免暗示盈亏：机会质量蓝、重要性琥珀、DSI 贡献红、USI 贡献绿。</li>
+                <li><strong>预期回撤是个例外。</strong>它的纵轴只表达风险距离、本身不含盈亏方向，所以颜色改由<strong>该战役最终盈亏</strong>决定：盈利绿、亏损红、打平或未结束灰。这样同一张图上既能看到风险空间，又能看到它最后换来了什么结果。</li>
+                <li><strong>点进去还能回得来。</strong>点任一散点即进入该战役详情；从详情左上角返回时，会<strong>落回同一张散点图</strong>，而不是掉回卡片列表。选中的图表记在地址栏里，刷新与浏览器前进 / 后退都能复原。</li>
+                <li>浮层里的说明会列出该图纵轴含义、点位读法、颜色图例与参考线；缺少有效值的战役不进图，脚注会注明排除数量。</li>
+              </ul>
 
               <SubTitle>算术期望与几何期望怎么读</SubTitle>
               <div className="overflow-x-auto">
