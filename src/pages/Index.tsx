@@ -13,6 +13,7 @@ import { CandlestickChart, type ChartImperativeApi } from "@/components/Candlest
 import { MultiChartLayout } from "@/components/MultiChartLayout";
 import { MarketDataPanel, type MarketDataTab } from "@/components/MarketDataPanel";
 import { PGapPanel } from "@/components/PGapPanel";
+import { useCampaignWinRate } from "@/hooks/useCampaignWinRate";
 import { TickerBar } from "@/components/TickerBar";
 import { OrderPanel } from "@/components/OrderPanel";
 import { PositionPanel } from "@/components/PositionPanel";
@@ -192,6 +193,7 @@ const Index = () => {
   // 盘口（订单簿/最新成交/市场异动）默认折叠、位于下方；P_gap 在上且默认完整显示。
   const [isMarketDataCollapsed, setIsMarketDataCollapsed] = useState(true);
   const [isPGapCollapsed, setIsPGapCollapsed] = useState(false);
+  const campaignWinRate = useCampaignWinRate();
   const [marketDataTab, setMarketDataTab] = useState<MarketDataTab>("orderBook");
 
   const coolingOff = useCoolingOff();
@@ -1847,6 +1849,8 @@ const Index = () => {
                                       pricePrecision={pricePrecision}
                                       collapsed={false}
                                       onToggleCollapsed={() => setIsPGapCollapsed(true)}
+                                      defaultWinRatePct={campaignWinRate.winRate == null ? null : campaignWinRate.winRate * 100}
+                                      winRateSampleCount={campaignWinRate.resolvedCount}
                                     />
                                   </ResizablePanel>
                                   <ResizableHandle
@@ -1874,6 +1878,8 @@ const Index = () => {
                                       pricePrecision={pricePrecision}
                                       collapsed={isPGapCollapsed}
                                       onToggleCollapsed={() => setIsPGapCollapsed((v) => !v)}
+                                      defaultWinRatePct={campaignWinRate.winRate == null ? null : campaignWinRate.winRate * 100}
+                                      winRateSampleCount={campaignWinRate.resolvedCount}
                                     />
                                   </div>
                                   <div

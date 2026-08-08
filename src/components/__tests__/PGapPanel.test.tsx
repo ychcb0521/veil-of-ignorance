@@ -114,6 +114,52 @@ describe('PGapPanel', () => {
     expect(onToggleCollapsed).toHaveBeenCalledTimes(1);
   });
 
+  it('P 默认取本账号战役整体胜率', () => {
+    render(<PGapPanel currentPrice={100} pricePrecision={2} defaultWinRatePct={62} winRateSampleCount={23} />);
+    expect(screen.getByTestId('p-gap-winrate-number')).toHaveValue(62);
+    setPrices(90, 110);
+    // P₀=50%，P=62% → gap=+12%
+    expect(screen.getByTestId('p-gap-value')).toHaveTextContent('+12.0%');
+    expect(screen.getByTestId('p-gap-winrate-source')).toHaveTextContent('战役整体胜率 62%（n=23）');
+  });
+
+  it('战役胜率异步到达时不覆盖用户已输入的 P', () => {
+    const { rerender } = render(<PGapPanel currentPrice={100} pricePrecision={2} defaultWinRatePct={null} />);
+    setWinRate(80);
+    rerender(<PGapPanel currentPrice={100} pricePrecision={2} defaultWinRatePct={62} />);
+    expect(screen.getByTestId('p-gap-winrate-number')).toHaveValue(80);
+  });
+
+  it('样本不足（无战役胜率）时 P 保持空白，不臆造默认值', () => {
+    render(<PGapPanel currentPrice={100} pricePrecision={2} defaultWinRatePct={null} />);
+    expect(screen.getByTestId('p-gap-winrate-number')).toHaveValue(null);
+    expect(screen.queryByTestId('p-gap-winrate-source')).not.toBeInTheDocument();
+  });
+
+  it('点出处标签可把 P 退回战役胜率', () => {
+    render(<PGapPanel currentPrice={100} pricePrecision={2} defaultWinRatePct={62} />);
+    setWinRate(90);
+    expect(screen.getByTestId('p-gap-winrate-number')).toHaveValue(90);
+    fireEvent.click(screen.getByTestId('p-gap-winrate-source'));
+    expect(screen.getByTestId('p-gap-winrate-number')).toHaveValue(62);
+  });
+
+  it('说明浮层默认隐藏，点开后给出每个指标的算法与作用', async () => {
+    render(<PGapPanel currentPrice={100} pricePrecision={2} />);
+    expect(screen.queryByTestId('p-gap-help-content')).not.toBeInTheDocument();
+
+    const help = screen.getByTestId('p-gap-help');
+    expect(help.className).toContain('opacity-25');
+    fireEvent.click(help);
+
+    const content = await screen.findByTestId('p-gap-help-content');
+    expect(content).toHaveTextContent('P₀ = |S − K| ÷ |T − K|');
+    expect(content).toHaveTextContent('gap = P − P₀');
+    expect(content).toHaveTextContent('市场免费给你的胜率');
+    expect(content).toHaveTextContent('优势已耗尽');
+    expect(content).toHaveTextContent('多头 K < S < T');
+  });
+
   it('是独立模块：自带 P_gap 表头，不再寄居在成交页签里', () => {
     render(<PGapPanel currentPrice={100} pricePrecision={2} />);
     expect(screen.getByText('P_gap')).toBeInTheDocument();

@@ -6,6 +6,7 @@
  * 不落库、不记历史、不做校准统计、不给仓位建议。
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { computeAdvantageGap } from '@/lib/advantageGap';
 
 interface Props {
@@ -16,6 +17,10 @@ interface Props {
   collapsed?: boolean;
   onToggleCollapsed?: () => void;
   onClose?: () => void;
+  /** 该账号交易战役的整体胜率（0–100），作为 P 的默认值；样本不足时为 null。 */
+  defaultWinRatePct?: number | null;
+  /** 已了结战役数，用于标注默认值的样本量。 */
+  winRateSampleCount?: number;
 }
 
 /** 滑块围绕现价展开的半幅：±12% 足够覆盖常规止损/目标，又不至于精度过粗。 */
@@ -51,40 +56,20 @@ type FieldProps = {
   onCommit?: () => void;
 };
 
-/** 一行输入：左侧符号 + 名称，右侧数字框，下方滑块。三行等距，读数与手柄对齐。 */
+/**
+ * 单行输入：符号+名称 / 滑块 / 数字框 挤在同一行。
+ * 相比「标签行 + 滑块行」两行式省掉近一半高度，整块面板才能不滚动就看全。
+ */
 function GapField({
   id, symbol, label, accent, value, min, max, step,
   disabled = false, suffix, placeholder = '—', onChange, onCommit,
 }: FieldProps) {
   return (
-    <div className="px-3 py-2">
-      <div className="flex items-center justify-between gap-2">
-        <label htmlFor={`p-gap-${id}-number`} className="flex items-baseline gap-1.5 select-none">
-          <span className="font-mono text-[12px] font-semibold leading-none" style={{ color: accent }}>{symbol}</span>
-          <span className="text-[10px] text-gray-500 dark:text-[#848e9c]">{label}</span>
-        </label>
-        <div className="flex items-center gap-1">
-          <input
-            id={`p-gap-${id}-number`}
-            data-testid={`p-gap-${id}-number`}
-            type="number"
-            inputMode="decimal"
-            step={step}
-            min={min}
-            max={max}
-            disabled={disabled}
-            placeholder={placeholder}
-            value={value == null ? '' : value}
-            onChange={event => {
-              const next = Number.parseFloat(event.target.value);
-              onChange(Number.isFinite(next) ? next : null);
-            }}
-            onBlur={onCommit}
-            className="h-[26px] w-[92px] rounded border border-gray-200 bg-gray-50 px-2 text-right font-mono text-[11px] tabular-nums text-gray-900 outline-none transition-colors placeholder:text-gray-400 focus:border-[#fcd535] focus:bg-white disabled:opacity-40 dark:border-[#2b3139] dark:bg-[#161a1e] dark:text-[#EAECEF] dark:placeholder:text-[#5e6673] dark:focus:bg-[#12161a]"
-          />
-          {suffix && <span className="w-3 text-[10px] text-gray-500 dark:text-[#848e9c]">{suffix}</span>}
-        </div>
-      </div>
+    <div className="flex h-[30px] items-center gap-2 px-3">
+      <label htmlFor={`p-gap-${id}-number`} className="flex w-[52px] flex-none items-baseline gap-1 select-none">
+        <span className="font-mono text-[11px] font-semibold leading-none" style={{ color: accent }}>{symbol}</span>
+        <span className="text-[9px] text-gray-500 dark:text-[#848e9c]">{label}</span>
+      </label>
       <input
         data-testid={`p-gap-${id}-slider`}
         type="range"
@@ -98,8 +83,29 @@ function GapField({
         onPointerUp={onCommit}
         onKeyUp={onCommit}
         style={{ accentColor: accent }}
-        className="mt-2 h-[3px] w-full cursor-pointer appearance-none rounded-full bg-gray-200 disabled:cursor-not-allowed disabled:opacity-40 dark:bg-[#2b3139]"
+        className="h-[3px] min-w-0 flex-1 cursor-pointer appearance-none rounded-full bg-gray-200 disabled:cursor-not-allowed disabled:opacity-40 dark:bg-[#2b3139]"
       />
+      <div className="flex flex-none items-center gap-0.5">
+        <input
+          id={`p-gap-${id}-number`}
+          data-testid={`p-gap-${id}-number`}
+          type="number"
+          inputMode="decimal"
+          step={step}
+          min={min}
+          max={max}
+          disabled={disabled}
+          placeholder={placeholder}
+          value={value == null ? '' : value}
+          onChange={event => {
+            const next = Number.parseFloat(event.target.value);
+            onChange(Number.isFinite(next) ? next : null);
+          }}
+          onBlur={onCommit}
+          className="h-[22px] w-[74px] rounded border border-gray-200 bg-gray-50 px-1.5 text-right font-mono text-[10px] tabular-nums text-gray-900 outline-none transition-colors placeholder:text-gray-400 focus:border-[#fcd535] focus:bg-white disabled:opacity-40 dark:border-[#2b3139] dark:bg-[#161a1e] dark:text-[#EAECEF] dark:placeholder:text-[#5e6673] dark:focus:bg-[#12161a]"
+        />
+        <span className="w-2 text-[9px] text-gray-500 dark:text-[#848e9c]">{suffix ?? ''}</span>
+      </div>
     </div>
   );
 }
@@ -110,6 +116,8 @@ export function PGapPanel({
   collapsed = false,
   onToggleCollapsed,
   onClose,
+  defaultWinRatePct = null,
+  winRateSampleCount = 0,
 }: Props) {
   const hasPrice = Number.isFinite(currentPrice) && currentPrice > 0;
   // K / T 用现价两侧的对称括号作起手，滑块才有落点；P 严格无默认值。
@@ -124,6 +132,16 @@ export function PGapPanel({
     setStopLoss(Number((currentPrice * 0.98).toFixed(pricePrecision)));
     setTarget(Number((currentPrice * 1.02).toFixed(pricePrecision)));
   }, [currentPrice, hasPrice, pricePrecision]);
+
+  // P 默认取该账号交易战役的整体胜率。战役数据是异步到达的，只在用户尚未
+  // 自己动过 P 时落一次种，之后到达的默认值不得覆盖用户输入。
+  const winRateSeededRef = useRef(false);
+  useEffect(() => {
+    if (winRateSeededRef.current || defaultWinRatePct == null) return;
+    if (!Number.isFinite(defaultWinRatePct)) return;
+    winRateSeededRef.current = true;
+    setWinRatePct(current => (current == null ? clamp(defaultWinRatePct, 0, 100) : current));
+  }, [defaultWinRatePct]);
 
   const result = useMemo(
     () => computeAdvantageGap(
@@ -171,10 +189,79 @@ export function PGapPanel({
     >
       {/* 模块表头 */}
       <div className="group flex-none flex items-center justify-between gap-2 pl-3 pr-2 h-9 border-b border-gray-200 dark:border-[#2b3139]">
-        <div className="flex items-center gap-2 min-w-0">
+        <div className="flex items-center gap-1.5 min-w-0">
           <span className="relative flex h-full items-center whitespace-nowrap font-mono text-[12px] font-semibold text-gray-900 dark:text-[#EAECEF]">
             P_gap
           </span>
+          <Popover>
+            <PopoverTrigger asChild>
+              <button
+                type="button"
+                data-testid="p-gap-help"
+                aria-label="P_gap 使用说明"
+                title="使用说明"
+                className="flex h-4 w-4 flex-none items-center justify-center rounded-full text-gray-500 opacity-25 transition-opacity hover:opacity-100 group-hover:opacity-60 dark:text-[#848e9c]"
+              >
+                <svg className="h-3 w-3" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4">
+                  <circle cx="8" cy="8" r="6.4" />
+                  <path d="M6.3 6.1a1.8 1.8 0 1 1 2.4 1.7c-.5.2-.8.6-.8 1.1v.4" strokeLinecap="round" />
+                  <circle cx="8" cy="11.6" r="0.7" fill="currentColor" stroke="none" />
+                </svg>
+              </button>
+            </PopoverTrigger>
+            <PopoverContent
+              align="start"
+              side="bottom"
+              data-testid="p-gap-help-content"
+              className="w-[300px] border-gray-200 bg-white p-3 text-[11px] leading-relaxed dark:border-[#2b3139] dark:bg-[#1e2329]"
+            >
+              <div className="font-medium text-gray-900 dark:text-[#EAECEF]">P_gap · 优势边际</div>
+              <p className="mt-1 text-gray-500 dark:text-[#848e9c]">
+                这是一块仪表，只回答一个问题：你自认的胜率，比市场白送的那份高出多少。
+              </p>
+
+              <div className="mt-2.5 rounded bg-gray-50 px-2 py-1.5 font-mono text-[10px] text-gray-900 dark:bg-[#161a1e] dark:text-[#EAECEF]">
+                P₀ = |S − K| ÷ |T − K|<br />
+                gap = P − P₀
+              </div>
+
+              <dl className="mt-2.5 space-y-1.5 text-gray-500 dark:text-[#848e9c]">
+                <div>
+                  <dt className="inline font-mono font-semibold" style={{ color: YELLOW }}>S</dt>
+                  <dd className="inline"> · 现价，随行情实时跳动，只读。</dd>
+                </div>
+                <div>
+                  <dt className="inline font-mono font-semibold" style={{ color: RED }}>K</dt>
+                  <dd className="inline"> · 止损价，你打算认错的位置。</dd>
+                </div>
+                <div>
+                  <dt className="inline font-mono font-semibold" style={{ color: GREEN }}>T</dt>
+                  <dd className="inline"> · 目标价，你打算兑现的位置。</dd>
+                </div>
+                <div>
+                  <dt className="inline font-mono font-semibold" style={{ color: YELLOW }}>P</dt>
+                  <dd className="inline"> · 你主观认定的胜率，默认填入本账号交易战役的整体胜率（已了结战役中盈利的比例），可自行覆盖。</dd>
+                </div>
+                <div>
+                  <dt className="inline font-semibold text-gray-700 dark:text-[#B7BDC6]">P₀ 基线概率</dt>
+                  <dd className="inline"> · 在没有任何优势的市场里，价格先摸到 T 而不是先摸到 K 的概率。止损放得越远、目标定得越近，它越高——这是市场免费给你的胜率。</dd>
+                </div>
+                <div>
+                  <dt className="inline font-semibold text-gray-700 dark:text-[#B7BDC6]">gap 优势边际</dt>
+                  <dd className="inline"> · P 高出基线的部分，才真正属于你。<span style={{ color: GREEN }}>正数为绿</span>；<span style={{ color: RED }}>≤ 0 转红并显示「优势已耗尽」</span>，意味着这笔已不值得下手。</dd>
+                </div>
+                <div>
+                  <dt className="inline font-semibold text-gray-700 dark:text-[#B7BDC6]">优势条</dt>
+                  <dd className="inline"> · 满格为你锚定 P 那一刻的 gap。价格越往 T 走，P₀ 越高，条就越短——把优势被价格吃掉的过程直接画出来。</dd>
+                </div>
+              </dl>
+
+              <p className="mt-2.5 border-t border-gray-100 pt-2 text-gray-400 dark:border-[#2b3139] dark:text-[#5e6673]">
+                方向由 S、K、T 的相对位置自动判定：多头 K &lt; S &lt; T，空头 T &lt; S &lt; K。两者都不成立或 T = K 时不出数字，只出提示。
+                本面板只读不写：不落库、不记历史、不做校准统计、不给仓位建议。
+              </p>
+            </PopoverContent>
+          </Popover>
           {collapsed && gap != null ? (
             // 折叠后表头即读数：仪表不该因为收起就什么都不说。
             <span
@@ -228,30 +315,28 @@ export function PGapPanel({
 
       {!collapsed && (
       <div className="flex-1 min-h-0 overflow-y-auto scrollbar-thin scrollbar-thumb-[#2b3139] scrollbar-track-transparent">
-        {/* 读数区 —— 模块的主角，给足留白与字号层级 */}
-        <div className="px-3 pt-3 pb-3 border-b border-gray-200 dark:border-[#2b3139]">
+        {/* 读数区 —— 模块的主角 */}
+        <div className="px-3 pt-2 pb-2.5 border-b border-gray-200 dark:border-[#2b3139]">
           {result.valid ? (
             <>
-              <div className="flex items-end justify-between gap-2">
-                <div className="min-w-0">
-                  <div className="text-[10px] leading-none text-gray-500 dark:text-[#848e9c]">
-                    基线概率 P<sub className="text-[8px]">0</sub>
-                  </div>
-                  <div className="mt-1.5 text-[9px] leading-relaxed text-gray-400 dark:text-[#5e6673]">
-                    市场免费给你的胜率，P 必须高于它
-                  </div>
-                </div>
-                <div
+              <div className="flex items-baseline justify-between gap-2">
+                <span className="text-[10px] leading-none text-gray-500 dark:text-[#848e9c]">
+                  基线概率 P<sub className="text-[8px]">0</sub>
+                </span>
+                <span
                   data-testid="p-gap-baseline"
-                  className="flex-none font-mono text-[22px] font-semibold leading-none tabular-nums text-gray-900 dark:text-[#EAECEF]"
+                  className="flex-none font-mono text-[19px] font-semibold leading-none tabular-nums text-gray-900 dark:text-[#EAECEF]"
                 >
                   {(result.baseline * 100).toFixed(1)}%
-                </div>
+                </span>
+              </div>
+              <div className="mt-1 text-[9px] leading-none text-gray-400 dark:text-[#5e6673]">
+                市场免费给你的胜率，P 必须高于它
               </div>
 
-              <div className="mt-3 rounded-md border border-gray-200 bg-gray-50 px-2.5 py-2 dark:border-[#2b3139] dark:bg-[#161a1e]">
-                <div className="flex items-center justify-between gap-2">
-                  <span className="text-[10px] text-gray-500 dark:text-[#848e9c]">优势边际 gap</span>
+              <div className="mt-2 rounded-md border border-gray-200 bg-gray-50 px-2.5 py-1.5 dark:border-[#2b3139] dark:bg-[#161a1e]">
+                <div className="flex items-baseline justify-between gap-2">
+                  <span className="text-[10px] leading-none text-gray-500 dark:text-[#848e9c]">优势边际 gap</span>
                   {gap == null ? (
                     <span data-testid="p-gap-value" className="font-mono text-[11px] text-gray-400 dark:text-[#5e6673]">
                       请给出主观胜率 P
@@ -260,7 +345,7 @@ export function PGapPanel({
                     <span
                       data-testid="p-gap-value"
                       data-gap-sign={positive ? 'positive' : 'non-positive'}
-                      className="font-mono text-[17px] font-semibold leading-none tabular-nums"
+                      className="font-mono text-[16px] font-semibold leading-none tabular-nums"
                       style={{ color: positive ? GREEN : RED }}
                     >
                       {positive ? formatSignedPercent(gap) : '优势已耗尽'}
@@ -272,7 +357,7 @@ export function PGapPanel({
                 <div
                   data-testid="p-gap-bar"
                   data-remaining={remainingFraction.toFixed(4)}
-                  className="mt-2 h-[5px] w-full overflow-hidden rounded-full bg-gray-200 dark:bg-[#2b3139]"
+                  className="mt-1.5 h-[4px] w-full overflow-hidden rounded-full bg-gray-200 dark:bg-[#2b3139]"
                 >
                   <div
                     className="h-full rounded-full transition-[width] duration-300 ease-out"
@@ -282,17 +367,12 @@ export function PGapPanel({
                     }}
                   />
                 </div>
-                {positive && (
-                  <div className="mt-1.5 text-[9px] leading-none text-gray-400 dark:text-[#5e6673]">
-                    满格为锚定时的优势，随价格推进向零收缩
-                  </div>
-                )}
               </div>
             </>
           ) : (
             <div
               data-testid="p-gap-invalid"
-              className="flex min-h-[92px] items-center justify-center rounded-md border border-dashed border-gray-200 px-3 text-center text-[11px] leading-relaxed text-gray-500 dark:border-[#2b3139] dark:text-[#848e9c]"
+              className="flex min-h-[64px] items-center justify-center rounded-md border border-dashed border-gray-200 px-3 text-center text-[11px] leading-relaxed text-gray-500 dark:border-[#2b3139] dark:text-[#848e9c]"
             >
               {invalidMessage}
             </div>
@@ -301,7 +381,7 @@ export function PGapPanel({
 
         {/* 输入区 */}
         <div className="divide-y divide-gray-100 dark:divide-[#2b3139]/60">
-          <div className="flex items-center justify-between px-3 h-[38px]">
+          <div className="flex items-center justify-between px-3 h-[30px]">
             <span className="flex items-baseline gap-1.5 select-none">
               <span className="font-mono text-[12px] font-semibold leading-none" style={{ color: YELLOW }}>S</span>
               <span className="text-[10px] text-gray-500 dark:text-[#848e9c]">现价</span>
@@ -360,6 +440,20 @@ export function PGapPanel({
             onChange={next => setWinRatePct(next == null ? null : clamp(next, 0, 100))}
             onCommit={reanchor}
           />
+
+          {/* P 默认值出处：点一下可退回战役胜率，方便把主观判断和历史实绩对照 */}
+          {defaultWinRatePct != null && (
+            <button
+              type="button"
+              data-testid="p-gap-winrate-source"
+              title="点击把 P 恢复为战役整体胜率"
+              onClick={() => { setWinRatePct(clamp(defaultWinRatePct, 0, 100)); reanchor(); }}
+              className="flex w-full items-center gap-1 px-3 py-1 text-left text-[9px] leading-none text-gray-400 transition-colors hover:text-gray-600 dark:text-[#5e6673] dark:hover:text-[#B7BDC6]"
+            >
+              默认取自本账号战役整体胜率 {defaultWinRatePct.toFixed(0)}%
+              {winRateSampleCount > 0 && `（n=${winRateSampleCount}）`}
+            </button>
+          )}
         </div>
       </div>
       )}
