@@ -3,6 +3,7 @@
  * Static UI scaffold with deterministic mock data that gently jitters around currentPrice.
  */
 import { useEffect, useMemo, useState } from 'react';
+import { PGapPanel } from '@/components/PGapPanel';
 
 interface Trade {
   id: number;
@@ -41,7 +42,8 @@ function formatTime(ts: number) {
 }
 
 export function RecentTrades({ currentPrice, pricePrecision, onMinimize, onClose }: Props) {
-  const [tab, setTab] = useState<'trades' | 'movers'>('trades');
+  // P_gap 默认显示，优先于最新成交与市场异动。
+  const [tab, setTab] = useState<'p_gap' | 'trades' | 'movers'>('p_gap');
   const [tick, setTick] = useState(0);
 
   useEffect(() => {
@@ -77,6 +79,16 @@ export function RecentTrades({ currentPrice, pricePrecision, onMinimize, onClose
             市场异动
             {tab === 'movers' && <span className="absolute left-0 right-0 -bottom-px h-[2px] bg-[#fcd535]" />}
           </button>
+          <button
+            data-testid="p-gap-tab"
+            onClick={() => setTab('p_gap')}
+            className={`relative h-full text-sm font-medium transition-colors flex items-center ${
+              tab === 'p_gap' ? 'text-gray-900 dark:text-[#EAECEF]' : 'text-gray-500 dark:text-[#848e9c] hover:text-gray-900 dark:hover:text-white'
+            }`}
+          >
+            P_gap
+            {tab === 'p_gap' && <span className="absolute left-0 right-0 -bottom-px h-[2px] bg-[#fcd535]" />}
+          </button>
         </div>
         <div className="flex items-center space-x-2 text-gray-500 dark:text-[#848e9c]">
           <button type="button" title="弹出窗口" className="hover:text-gray-900 dark:hover:text-white cursor-pointer transition-colors">
@@ -106,14 +118,18 @@ export function RecentTrades({ currentPrice, pricePrecision, onMinimize, onClose
         </div>
       </div>
 
-      {/* Column headers (frozen) */}
-      <div className="flex-none flex items-center px-3 h-6 text-[9px] text-gray-500 dark:text-[#848e9c] border-b border-gray-200 dark:border-[#2b3139]/60">
-        <span className="flex-1">价格(USDT)</span>
-        <span className="w-16 text-right">数量</span>
-        <span className="w-14 text-right">时间</span>
-      </div>
+      {/* Column headers (frozen) — 价格/数量/时间 只属于成交列表，P_gap 不适用 */}
+      {tab !== 'p_gap' && (
+        <div className="flex-none flex items-center px-3 h-6 text-[9px] text-gray-500 dark:text-[#848e9c] border-b border-gray-200 dark:border-[#2b3139]/60">
+          <span className="flex-1">价格(USDT)</span>
+          <span className="w-16 text-right">数量</span>
+          <span className="w-14 text-right">时间</span>
+        </div>
+      )}
 
-      {tab === 'trades' ? (
+      {tab === 'p_gap' ? (
+        <PGapPanel currentPrice={currentPrice} pricePrecision={pricePrecision} />
+      ) : tab === 'trades' ? (
         <div className="flex-1 min-h-0 overflow-y-auto scrollbar-thin scrollbar-thumb-[#2b3139] scrollbar-track-transparent">
           {trades.length === 0 ? (
             <div className="flex items-center justify-center h-full text-gray-500 dark:text-[#848e9c]">等待数据...</div>
