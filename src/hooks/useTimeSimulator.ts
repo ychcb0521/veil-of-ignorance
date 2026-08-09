@@ -2,12 +2,16 @@ import { useState, useCallback, useRef, useEffect } from 'react';
 
 export type TimeMachineStatus = 'playing' | 'paused' | 'stopped';
 
+/** 播放方向：1 = 正序（默认），-1 = 倒叙播放（时钟随真实时间倒退）。 */
+export type TimeDirection = 1 | -1;
+
 export interface TimeSimulatorState {
   status: TimeMachineStatus;
   historicalAnchorTime: number | null;
   realStartTime: number | null;
   currentSimulatedTime: number;
   speed: number;
+  direction: TimeDirection;
   // Legacy compat
   isRunning: boolean;
 }
@@ -18,6 +22,7 @@ export interface PersistedTimeSim {
   realStartTime: number | null;
   currentSimulatedTime: number;
   speed: number;
+  direction?: TimeDirection;
 }
 
 const PERSIST_KEY = '__tm_live_time';
@@ -41,12 +46,14 @@ export function useTimeSimulator(initialState?: Partial<PersistedTimeSim>) {
       realStartTime: null,
       currentSimulatedTime: 0,
       speed: 1,
+      direction: 1,
       isRunning: false,
     };
     if (initialState) {
       const status = initialState.status || 'stopped';
       const isRunning = status === 'playing';
-      return { ...base, ...initialState, status, isRunning };
+      const direction: TimeDirection = initialState.direction === -1 ? -1 : 1;
+      return { ...base, ...initialState, status, isRunning, direction };
     }
     return base;
   });
@@ -66,6 +73,7 @@ export function useTimeSimulator(initialState?: Partial<PersistedTimeSim>) {
     historicalAnchorTime: state.historicalAnchorTime,
     realStartTime: state.realStartTime,
     speed: state.speed,
+    direction: state.direction,
   });
 
   const syncCore = (s: Partial<typeof coreRef.current>) => {
@@ -78,7 +86,7 @@ export function useTimeSimulator(initialState?: Partial<PersistedTimeSim>) {
     if (c.status !== 'playing' || !c.realStartTime || !c.historicalAnchorTime) {
       return currentTimeRef.current;
     }
-    return c.historicalAnchorTime + (Date.now() - c.realStartTime) * c.speed;
+    return c.historicalAnchorTime + (Date.now() - c.realStartTime) * c.speed * c.direction;
   }, []);
 
   // ---- Flush to React state (call at low freq from game loop) ----
@@ -100,18 +108,19 @@ export function useTimeSimulator(initialState?: Partial<PersistedTimeSim>) {
     const now = Date.now();
     currentTimeRef.current = historicalTime;
     syncCore({ status: 'playing', historicalAnchorTime: historicalTime, realStartTime: now, speed: 1 });
-    setState({
+    setState(prev => ({
       status: 'playing', isRunning: true,
       historicalAnchorTime: historicalTime, realStartTime: now,
       currentSimulatedTime: historicalTime, speed: 1,
-    });
+      direction: prev.direction,
+    }));
   }, []);
 
   const pauseSimulation = useCallback(() => {
     const c = coreRef.current;
     if (c.status !== 'playing') return;
     const now = Date.now();
-    const frozenTime = c.historicalAnchorTime! + (now - c.realStartTime!) * c.speed;
+    const frozenTime = c.historicalAnchorTime! + (now - c.realStartTime!) * c.speed * c.direction;
     currentTimeRef.current = frozenTime;
     syncCore({ status: 'paused' });
     setState(prev => ({
@@ -131,11 +140,12 @@ export function useTimeSimulator(initialState?: Partial<PersistedTimeSim>) {
   const stopSimulation = useCallback(() => {
     currentTimeRef.current = 0;
     syncCore({ status: 'stopped', historicalAnchorTime: null, realStartTime: null, speed: 1 });
-    setState({
+    setState(prev => ({
       status: 'stopped', isRunning: false,
       historicalAnchorTime: null, realStartTime: null,
       currentSimulatedTime: 0, speed: 1,
-    });
+      direction: prev.direction,
+    }));
     try { localStorage.removeItem(PERSIST_KEY); } catch {}
   }, []);
 
@@ -147,10 +157,29 @@ export function useTimeSimulator(initialState?: Partial<PersistedTimeSim>) {
       }
       if (prev.status !== 'playing' || !prev.realStartTime || prev.historicalAnchorTime == null) return prev;
       const now = Date.now();
-      const currentSim = prev.historicalAnchorTime + (now - prev.realStartTime) * prev.speed;
+      const currentSim = prev.historicalAnchorTime + (now - prev.realStartTime) * prev.speed * prev.direction;
       currentTimeRef.current = currentSim;
       syncCore({ speed, historicalAnchorTime: currentSim, realStartTime: now });
       return { ...prev, speed, historicalAnchorTime: currentSim, realStartTime: now, currentSimulatedTime: currentSim };
+    });
+  }, []);
+
+  /**
+   * 切换播放方向（倒叙播放）。播放中先把当前时刻冻结为新锚点再翻转，
+   * 保证切换瞬间时钟连续、不跳变；暂停/停止状态下只改方向。
+   */
+  const setDirection = useCallback((direction: TimeDirection) => {
+    setState(prev => {
+      if (prev.direction === direction) return prev;
+      if (prev.status !== 'playing' || !prev.realStartTime || prev.historicalAnchorTime == null) {
+        syncCore({ direction });
+        return { ...prev, direction };
+      }
+      const now = Date.now();
+      const currentSim = prev.historicalAnchorTime + (now - prev.realStartTime) * prev.speed * prev.direction;
+      currentTimeRef.current = currentSim;
+      syncCore({ direction, historicalAnchorTime: currentSim, realStartTime: now });
+      return { ...prev, direction, historicalAnchorTime: currentSim, realStartTime: now, currentSimulatedTime: currentSim };
     });
   }, []);
 
@@ -159,7 +188,7 @@ export function useTimeSimulator(initialState?: Partial<PersistedTimeSim>) {
     const handler = () => {
       const c = coreRef.current;
       if (c.status === 'playing' && c.realStartTime && c.historicalAnchorTime) {
-        const simTime = c.historicalAnchorTime + (Date.now() - c.realStartTime) * c.speed;
+        const simTime = c.historicalAnchorTime + (Date.now() - c.realStartTime) * c.speed * c.direction;
         try { localStorage.setItem(PERSIST_KEY, String(simTime)); } catch {}
       } else if (c.status === 'paused') {
         try { localStorage.setItem(PERSIST_KEY, String(currentTimeRef.current)); } catch {}
@@ -180,5 +209,6 @@ export function useTimeSimulator(initialState?: Partial<PersistedTimeSim>) {
     resumeSimulation,
     stopSimulation,
     setSpeed,
+    setDirection,
   };
 }

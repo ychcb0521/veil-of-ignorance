@@ -53,6 +53,8 @@ export interface PersistedSimState {
   realStartTime: number | null;
   currentSimulatedTime: number;
   speed: number;
+  /** 播放方向：-1 = 倒叙播放；缺省视为 1（正序），兼容旧数据。 */
+  direction?: 1 | -1;
   symbol: string;
   interval: string;
 }

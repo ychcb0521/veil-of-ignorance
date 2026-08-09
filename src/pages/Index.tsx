@@ -164,6 +164,7 @@ const Index = () => {
     closeLiquidationModal,
     timeMode,
     setTimeMode,
+    timeDirection,
     tradingMode,
     recordExecutionTrade,
     coinTimelines,
@@ -275,8 +276,13 @@ const Index = () => {
   const lastDisplayPriceFlushRef = useRef(0);
   const lastPersistRef = useRef(0);
   const timeModeRef = useRef(timeMode);
+  const timeDirectionRef = useRef(timeDirection);
   const activeSymbolRef = useRef(activeSymbol);
   const coinTimelinesRef = useRef(coinTimelines);
+  // 倒放触底自动补更早的 K 线：节流 + 由 loadOlder 自身的 noMore/inflight 守卫兜底。
+  const reverseLoadOlderAtRef = useRef(0);
+  const loadOlderRef = useRef(loadOlder);
+  const handlePauseRef = useRef<() => void>(() => {});
   const latestChartPriceRef = useRef(currentPrice || 0);
   const activeDisplayPriceRef = useRef(activeDisplayPrice || currentPrice || 0);
   const renderedDisplayPriceRef = useRef(activeDisplayPrice || currentPrice || 0);
@@ -304,6 +310,12 @@ const Index = () => {
   useEffect(() => {
     timeModeRef.current = timeMode;
   }, [timeMode]);
+  useEffect(() => {
+    timeDirectionRef.current = timeDirection;
+  }, [timeDirection]);
+  useEffect(() => {
+    loadOlderRef.current = loadOlder;
+  }, [loadOlder]);
   useEffect(() => {
     activeSymbolRef.current = activeSymbol;
   }, [activeSymbol]);
@@ -378,6 +390,8 @@ const Index = () => {
   const DISPLAY_PRICE_SMOOTHING_MS = 42;
   const DISPLAY_PRICE_SNAP_RATIO = 0.08;
   const REACT_FLUSH_MS = 250;
+  // 倒放时距最早已加载 K 线还剩多少根就开始预取更早数据
+  const REVERSE_PRELOAD_BARS = 120;
   const PERSIST_MS = 500;
   const CANONICAL_PRICE_MAX_SIM_AGE_MS = 90_000;
 
@@ -528,7 +542,7 @@ const Index = () => {
 
         for (const [sym, ct] of Object.entries(cts)) {
           if (ct.status !== "playing" || !ct.realStartTime || ct.historicalAnchorTime == null) continue;
-          const simTime = ct.historicalAnchorTime + (now - ct.realStartTime) * ct.speed;
+          const simTime = ct.historicalAnchorTime + (now - ct.realStartTime) * ct.speed * timeDirectionRef.current;
           updates[sym] = { ...ct, time: simTime };
           if (sym === activeSym) {
             activeSimTime = simTime;
@@ -555,6 +569,31 @@ const Index = () => {
               }
               cursorRef.current = idx;
               gameLoopInitRef.current = true;
+            }
+            if (timeDirectionRef.current === -1) {
+              // 倒叙播放：时钟越过某根蜡烛的右沿后，把它退回未落定状态。
+              // 撮合按倒序逐根重扫（价格路径反向穿过其区间）；图表侧把节流
+              // 计时清零，让本帧的 React flush 立即收缩 visibleData 丢弃它们。
+              const prevCursor = cursorRef.current;
+              while (cursorRef.current > 0 && data[cursorRef.current - 1].time + iMs > activeSimTime) {
+                cursorRef.current--;
+              }
+              if (prevCursor !== cursorRef.current) {
+                for (let i = prevCursor - 1; i >= cursorRef.current; i--) {
+                  const c = data[i];
+                  runConditionalMatchingForSymbol(activeSym, c, Math.max(activeSimTime, c.time));
+                }
+                lastReactFlushRef.current = 0;
+              }
+              // 倒放触底：先按余量预取更早的 K 线；真正到达最早一根时自动暂停。
+              if (activeSimTime <= data[0].time + REVERSE_PRELOAD_BARS * iMs && now - reverseLoadOlderAtRef.current > 2000) {
+                reverseLoadOlderAtRef.current = now;
+                void loadOlderRef.current();
+              }
+              if (activeSimTime <= data[0].time) {
+                handlePauseRef.current();
+                toast.warning('倒放已到达当前已加载的最早 K 线，已自动暂停');
+              }
             }
             let newCandles = 0;
             while (cursorRef.current < data.length) {
@@ -671,6 +710,28 @@ const Index = () => {
             }
             cursorRef.current = idx;
             gameLoopInitRef.current = true;
+          }
+          if (timeDirectionRef.current === -1) {
+            // 倒叙播放：同隔离模式——退回越界蜡烛、倒序重扫撮合、立即 flush 收缩图表。
+            const prevCursor = cursorRef.current;
+            while (cursorRef.current > 0 && data[cursorRef.current - 1].time + iMs > simTime) {
+              cursorRef.current--;
+            }
+            if (prevCursor !== cursorRef.current) {
+              for (let i = prevCursor - 1; i >= cursorRef.current; i--) {
+                const c = data[i];
+                runConditionalMatchingForSymbol(activeSymbolRef.current, c, Math.max(simTime, c.time));
+              }
+              lastReactFlushRef.current = 0;
+            }
+            if (simTime <= data[0].time + REVERSE_PRELOAD_BARS * iMs && now - reverseLoadOlderAtRef.current > 2000) {
+              reverseLoadOlderAtRef.current = now;
+              void loadOlderRef.current();
+            }
+            if (simTime <= data[0].time) {
+              handlePauseRef.current();
+              toast.warning('倒放已到达当前已加载的最早 K 线，已自动暂停');
+            }
           }
           let newCandles = 0;
           while (cursorRef.current < data.length) {
@@ -1167,7 +1228,7 @@ const Index = () => {
         if (!ct || ct.status !== "playing") return prev;
         const frozenTime =
           ct.historicalAnchorTime != null && ct.realStartTime
-            ? ct.historicalAnchorTime + (now - ct.realStartTime) * ct.speed
+            ? ct.historicalAnchorTime + (now - ct.realStartTime) * ct.speed * timeDirection
             : ct.time;
         return {
           ...prev,
@@ -1177,7 +1238,7 @@ const Index = () => {
     } else {
       sim.pauseSimulation();
     }
-  }, [timeMode, activeSymbol, sim]);
+  }, [timeMode, activeSymbol, sim, timeDirection]);
 
   const handleResume = useCallback(() => {
     if (timeMode === "isolated") {
@@ -1220,7 +1281,7 @@ const Index = () => {
           }
           const currentTime =
             ct.historicalAnchorTime != null && ct.realStartTime
-              ? ct.historicalAnchorTime + (now - ct.realStartTime) * ct.speed
+              ? ct.historicalAnchorTime + (now - ct.realStartTime) * ct.speed * timeDirection
               : ct.time;
           const next = {
             ...prev,
@@ -1233,8 +1294,13 @@ const Index = () => {
         sim.setSpeed(speed);
       }
     },
-    [timeMode, activeSymbol, sim],
+    [timeMode, activeSymbol, sim, timeDirection],
   );
+
+  // 倒放触底自动暂停要在 RAF 里调用；handlePause 依赖会变，走 ref 保持最新。
+  useEffect(() => {
+    handlePauseRef.current = handlePause;
+  }, [handlePause]);
 
   // ===== Symbol switch: reload chart data =====
   const handleSymbolChange = useCallback(

@@ -163,6 +163,9 @@ interface TradingState {
   // Multi-Timeline
   timeMode: TimeMode;
   setTimeMode: (v: TimeMode) => void;
+  /** 播放方向：1 正序（默认）/ -1 倒叙播放。全局生效，含隔离模式的所有币种时钟。 */
+  timeDirection: 1 | -1;
+  setTimeDirection: (v: 1 | -1) => void;
   /**
    * Trading mode:
    *   'direct'   — DEFAULT. skip snapshot + skip review; trade still hits trade_history
@@ -284,6 +287,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
       realStartTime: restoredStatus === 'playing' ? Date.now() : persistedSim.realStartTime,
       currentSimulatedTime: bestRestoredTime,
       speed: persistedSim.speed,
+      direction: persistedSim.direction === -1 ? -1 : 1,
     } : undefined
   );
 
@@ -440,6 +444,27 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
     return coinTimelines[symbol] ?? null;
   }, [coinTimelines]);
 
+  // 倒叙播放：翻转全局播放方向。隔离模式下所有播放中的币种时钟先按旧方向
+  // 冻结到当前时刻并重新锚定，保证切换瞬间任何时钟都不跳变；同步时钟的
+  // 冻结与重锚由 sim.setDirection 内部完成。
+  const setTimeDirection = useCallback((direction: 1 | -1) => {
+    const prevDirection = sim.direction;
+    if (direction === prevDirection) return;
+    const now = Date.now();
+    setCoinTimelines(prev => {
+      let changed = false;
+      const next: CoinTimelinesMap = { ...prev };
+      for (const [sym, ct] of Object.entries(prev)) {
+        if (ct.status !== 'playing' || !ct.realStartTime || ct.historicalAnchorTime == null) continue;
+        const frozen = ct.historicalAnchorTime + (now - ct.realStartTime) * ct.speed * prevDirection;
+        next[sym] = { ...ct, time: frozen, historicalAnchorTime: frozen, realStartTime: now };
+        changed = true;
+      }
+      return changed ? next : prev;
+    });
+    sim.setDirection(direction);
+  }, [sim, setCoinTimelines]);
+
   // Get effective simulation time for a given symbol
   const getEffectiveTime = useCallback((symbol?: string): number => {
     const sym = symbol || activeSymbol;
@@ -472,13 +497,14 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
         realStartTime: sim.realStartTime,
         currentSimulatedTime: sim.currentSimulatedTime,
         speed: sim.speed,
+        direction: sim.direction,
         symbol: activeSymbol,
         interval,
       });
     } else {
       clearSimState();
     }
-  }, [sim.status, sim.historicalAnchorTime, sim.realStartTime, sim.currentSimulatedTime, sim.speed, activeSymbol, interval]);
+  }, [sim.status, sim.historicalAnchorTime, sim.realStartTime, sim.currentSimulatedTime, sim.speed, sim.direction, activeSymbol, interval]);
 
   // Force-save on page unload
   const simRef = useRef(sim);
@@ -499,6 +525,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
         realStartTime: Date.now(),
         currentSimulatedTime: liveTime,
         speed: s.speed,
+        direction: s.direction,
         symbol: activeSymbolRef.current,
         interval: intervalRef.current,
       });
@@ -1432,6 +1459,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
     fundingRate: FUNDING_RATE,
     liquidationOpen, liquidationDetails, closeLiquidationModal,
     timeMode, setTimeMode,
+    timeDirection: sim.direction, setTimeDirection,
     tradingMode, setTradingMode,
     executionAsset, setExecutionAsset, recordExecutionTrade, recordCampaignCreated, reconcileCampaignRewards,
     recordPostTradeReviewCompleted, reconcilePostTradeReviewRewards,

@@ -7,7 +7,7 @@
  */
 
 import { useState } from 'react';
-import { Globe, Split, Lock, Brain, Zap } from 'lucide-react';
+import { Globe, Split, Lock, Brain, Zap, Rewind } from 'lucide-react';
 import { toast } from 'sonner';
 import {
   Dialog,
@@ -116,6 +116,18 @@ export function SessionModeControls({
     }
   };
 
+  // ===== 倒叙播放：翻转时间机器方向（默认正序） =====
+  const reverseActive = ctx.timeDirection === -1;
+  const handleDirectionToggle = () => {
+    const next = reverseActive ? 1 : -1;
+    ctx.setTimeDirection(next);
+    toast.message(next === -1 ? '已开启倒叙播放' : '已恢复正序播放', {
+      description: next === -1
+        ? '时间倒序推进：K 线逐根回退，模拟时间与其绑定的一切随之倒走（客观操作时间除外）。'
+        : '时间恢复正常方向推进。',
+    });
+  };
+
   // ===== 交易模式：决策记录 / 直接交易 =====
   const handleTradingModeClick = (next: 'decision' | 'direct') => {
     if (next === ctx.tradingMode) return;
@@ -141,6 +153,23 @@ export function SessionModeControls({
 
   return (
     <div className="flex items-center gap-1">
+      {/* 倒叙播放：默认正序，选中后时间倒序推进 */}
+      <button
+        onClick={handleDirectionToggle}
+        data-testid="time-direction-toggle"
+        aria-pressed={reverseActive}
+        title={reverseActive
+          ? '倒叙播放中：时间倒序推进，K 线逐根回退（客观操作时间不受影响）· 点击恢复正序'
+          : '倒叙播放：让时间机器倒着走，K 线逐根回退；默认正序 · 点击开启'}
+        className={`flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium transition-all duration-100 ease-out active:scale-[0.97] ${
+          reverseActive
+            ? 'bg-[#B080FF]/20 text-[#B080FF]'
+            : 'text-muted-foreground hover:text-foreground hover:bg-accent'
+        }`}
+      >
+        <Rewind className="w-3 h-3" /> 倒叙播放
+      </button>
+
       {/* 交易模式：直接显示 */}
       <button
         onClick={() => handleTradingModeClick('decision')}
