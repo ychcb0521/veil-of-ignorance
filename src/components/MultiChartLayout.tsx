@@ -41,6 +41,8 @@ interface Props {
   onLoadOlder: () => void;
   loadingOlder: boolean;
   tradeHistory: TradeRecord[];
+  /** 倒叙播放：把图表内部（镜像）时间换算回真实时间用于坐标轴/十字线/悬浮提示。 */
+  displayTimestampTransform?: ((ts: number) => number) | null;
   isRunning: boolean;
   currentSimulatedTime: number;
   mainInterval: string;
@@ -70,6 +72,7 @@ export function MultiChartLayout({
   onLoadOlder,
   loadingOlder,
   tradeHistory,
+  displayTimestampTransform = null,
   isRunning,
   currentSimulatedTime,
   mainInterval,
@@ -281,6 +284,7 @@ export function MultiChartLayout({
             onLoadOlder={onLoadOlder}
             loadingOlder={loadingOlder}
             tradeHistory={tradeHistory}
+            displayTimestampTransform={displayTimestampTransform}
             rawSymbol={rawSymbol}
             pricePrecision={pricePrecision}
             quantityPrecision={quantityPrecision}
@@ -303,6 +307,7 @@ export function MultiChartLayout({
               onLoadOlder={onLoadOlder}
               loadingOlder={loadingOlder}
               tradeHistory={tradeHistory}
+              displayTimestampTransform={displayTimestampTransform}
               rawSymbol={rawSymbol}
               pricePrecision={pricePrecision}
               quantityPrecision={quantityPrecision}
@@ -330,6 +335,7 @@ export function MultiChartLayout({
                 symbol={`${mainSymbol} ${subCharts[0].interval}`}
                 viewportRevision={chartViewportRevision}
                 tradeHistory={tradeHistory}
+              displayTimestampTransform={displayTimestampTransform}
                 rawSymbol={rawSymbol}
                 pricePrecision={pricePrecision}
                 quantityPrecision={quantityPrecision}
@@ -351,6 +357,7 @@ export function MultiChartLayout({
               onLoadOlder={onLoadOlder}
               loadingOlder={loadingOlder}
               tradeHistory={tradeHistory}
+              displayTimestampTransform={displayTimestampTransform}
               rawSymbol={rawSymbol}
               pricePrecision={pricePrecision}
               quantityPrecision={quantityPrecision}
@@ -375,6 +382,7 @@ export function MultiChartLayout({
                   symbol={`${mainSymbol} ${subCharts[i].interval}`}
                   viewportRevision={chartViewportRevision}
                   tradeHistory={tradeHistory}
+              displayTimestampTransform={displayTimestampTransform}
                   rawSymbol={rawSymbol}
                   pricePrecision={pricePrecision}
                   quantityPrecision={quantityPrecision}

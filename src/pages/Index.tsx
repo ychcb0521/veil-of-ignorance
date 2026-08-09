@@ -28,6 +28,13 @@ import { CoolingOffModal, useCoolingOff } from "@/components/CoolingOffModal";
 import { getConditionalTriggerDecisionFromRange } from "@/lib/conditionalOrders";
 import { fetchCanonicalTimePriceAt } from "@/lib/canonicalTimePrice";
 import { applyCurrentPriceToVisibleData } from "@/lib/visibleDataPrice";
+import {
+  getReverseVisibleData,
+  mirrorSettledBar,
+  mirrorTime,
+  reverseFormingBar,
+  snapToBarStart,
+} from "@/lib/reversePlayback";
 import { upsertOrderSnapshot } from "@/lib/orderSnapshotHistory";
 import {
   diagnoseSignalJump,
@@ -39,7 +46,7 @@ import { toast } from "sonner";
 import { Wallet, Crosshair, BookOpen, Tag } from "lucide-react";
 import { Link } from "react-router-dom";
 import { JournalNavMenu } from "@/components/journal/JournalNavMenu";
-import type { PendingOrder } from "@/types/trading";
+import type { PendingOrder, TradeRecord } from "@/types/trading";
 import { calcUnrealizedPnl } from "@/types/trading";
 import type { ExecutionTradeSnapshot } from "@/lib/executionAssets";
 import type { AssetState } from "@/types/assets";
@@ -63,6 +70,8 @@ import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@/componen
 
 // Price protection threshold: reject conditional triggers if |last - mark| / mark > 2%
 const PRICE_PROTECTION_THRESHOLD = 0.02;
+// 倒放（镜像视图）下传给图表的空成交列表——标记按真实时间戳定位会在镜像轴上错位。
+const EMPTY_TRADE_HISTORY: TradeRecord[] = [];
 
 // ===== Offline matching for restore =====
 function matchOrdersOffline(pendingOrders: PendingOrder[], klines: KlineData[], balance: number) {
@@ -165,6 +174,8 @@ const Index = () => {
     timeMode,
     setTimeMode,
     timeDirection,
+    reverseCapTime,
+    setReverseCapTime,
     tradingMode,
     recordExecutionTrade,
     coinTimelines,
@@ -239,7 +250,21 @@ const Index = () => {
     return ct?.time ?? 0;
   }, [timeMode, sim.currentSimulatedTime, coinTimelines, activeSymbol]);
 
-  const visibleData = useMemo(() => getVisibleData(effectiveSimTime, iMs), [getVisibleData, effectiveSimTime, iMs]);
+  // 倒放镜面：本次倒放的起点（对齐 K 线开盘）。同步模式用全局值，隔离模式各币种自带。
+  const activeReverseCap = useMemo(() => {
+    if (timeDirection !== -1) return null;
+    if (timeMode === 'isolated') return coinTimelines[activeSymbol]?.reverseCapTime ?? null;
+    return reverseCapTime;
+  }, [timeDirection, timeMode, coinTimelines, activeSymbol, reverseCapTime]);
+
+  const visibleData = useMemo(() => {
+    if (timeDirection === -1) {
+      // 镜像视图：真实时间更晚的作为主观历史铺在图上，更早的逐帧从右侧出现。
+      if (activeReverseCap == null) return [];
+      return getReverseVisibleData(allData, effectiveSimTime, activeReverseCap, iMs);
+    }
+    return getVisibleData(effectiveSimTime, iMs);
+  }, [timeDirection, activeReverseCap, allData, getVisibleData, effectiveSimTime, iMs]);
 
   const [activeDisplayPrice, setActiveDisplayPrice] = useState(() => currentPrice || 0);
   const displayCurrentPrice = activeDisplayPrice > 0 ? activeDisplayPrice : currentPrice;
@@ -252,6 +277,15 @@ const Index = () => {
   const displayData = useMemo(
     () => applyCurrentPriceToVisibleData(visibleData, displayCurrentPrice),
     [visibleData, displayCurrentPrice],
+  );
+
+  // 倒放坐标轴换算：镜像时间 → 真实时间（对合函数，正反同式）。
+  // 图表内部时间轴用镜像时间（严格递增），标签与十字线显示真实时间——从左到右递减。
+  const reverseAxisTransform = useMemo(
+    () => (timeDirection === -1 && activeReverseCap != null
+      ? (ts: number) => mirrorTime(activeReverseCap, ts)
+      : null),
+    [timeDirection, activeReverseCap],
   );
 
   const latestVisiblePrice = useMemo(() => {
@@ -277,6 +311,9 @@ const Index = () => {
   const lastPersistRef = useRef(0);
   const timeModeRef = useRef(timeMode);
   const timeDirectionRef = useRef(timeDirection);
+  const activeReverseCapRef = useRef(activeReverseCap);
+  // 倒放追踪上一帧的模拟时刻（按时间而非下标——loadOlder 前插会移动下标）。
+  const lastReverseSimTimeRef = useRef<number | null>(null);
   const activeSymbolRef = useRef(activeSymbol);
   const coinTimelinesRef = useRef(coinTimelines);
   // 倒放触底自动补更早的 K 线：节流 + 由 loadOlder 自身的 noMore/inflight 守卫兜底。
@@ -312,7 +349,13 @@ const Index = () => {
   }, [timeMode]);
   useEffect(() => {
     timeDirectionRef.current = timeDirection;
+    // 方向切换 = 图表视图整体重建（正常↔镜像），游标与倒放追踪都重新初始化。
+    gameLoopInitRef.current = false;
+    lastReverseSimTimeRef.current = null;
   }, [timeDirection]);
+  useEffect(() => {
+    activeReverseCapRef.current = activeReverseCap;
+  }, [activeReverseCap]);
   useEffect(() => {
     loadOlderRef.current = loadOlder;
   }, [loadOlder]);
@@ -392,6 +435,9 @@ const Index = () => {
   const REACT_FLUSH_MS = 250;
   // 倒放时距最早已加载 K 线还剩多少根就开始预取更早数据
   const REVERSE_PRELOAD_BARS = 120;
+  // 倒放（镜像视图）下成交标记与向左补历史都不适用：标记按真实时间戳定位会错位；
+  // 图表左沿是本次倒放的镜面起点，无历史可补。
+  const noopLoadOlder = useCallback(() => {}, []);
   const PERSIST_MS = 500;
   const CANONICAL_PRICE_MAX_SIM_AGE_MS = 90_000;
 
@@ -529,6 +575,98 @@ const Index = () => {
 
     let raf: number;
 
+    // 数据里 time <= t 的最大下标（二分；找不到返回 -1）。
+    const findBarIndexAtOrBefore = (data: KlineData[], t: number): number => {
+      let lo = 0;
+      let hi = data.length - 1;
+      let ans = -1;
+      while (lo <= hi) {
+        const mid = (lo + hi) >> 1;
+        if (data[mid].time <= t) {
+          ans = mid;
+          lo = mid + 1;
+        } else hi = mid - 1;
+      }
+      return ans;
+    };
+
+    // ===== 倒叙播放（镜像视图）的每帧图表推进 =====
+    // 时钟向真实过去走；每越过一根蜡烛的开盘，它便以「开收互换」的镜像整根
+    // 落定；正在穿越的那根按主观进度从真实收盘价向开盘价回走。追踪按时间而非
+    // 下标（loadOlder 前插会移动下标）；一帧越过多根时补画最近 3 根并让 React
+    // flush 立即补齐其余（与正放的批量策略镜像对称）。
+    const runReverseChartTick = (
+      api: { updateData: (candle: unknown) => void },
+      data: KlineData[],
+      sym: string,
+      simTime: number,
+      now: number,
+    ) => {
+      const cap = activeReverseCapRef.current;
+      if (cap == null) return;
+      const prevSim = lastReverseSimTimeRef.current;
+      lastReverseSimTimeRef.current = simTime;
+
+      // ① 本帧被完整揭示的蜡烛（时钟越过其开盘）：撮合全区间，补画主观最近的 3 根
+      if (prevSim != null && prevSim > simTime) {
+        const hiIdx = findBarIndexAtOrBefore(data, prevSim - 1);
+        const loIdx = findBarIndexAtOrBefore(data, simTime) + 1;
+        let crossed = 0;
+        for (let i = hiIdx; i >= loIdx && i >= 0; i--) {
+          const c = data[i];
+          if (c.time < simTime) break;
+          if (c.time + iMs > cap) continue; // 镜面之外（本次倒放开始时未完整揭示），永不显示
+          crossed++;
+          runConditionalMatchingForSymbol(sym, c, Math.max(simTime, c.time));
+          if (i <= loIdx + 2) {
+            const m = mirrorSettledBar(c, cap);
+            api.updateData({ timestamp: m.time, open: m.open, high: m.high, low: m.low, close: m.close, volume: m.volume });
+          }
+        }
+        if (crossed > 3) lastReactFlushRef.current = 0;
+      }
+
+      // ② 正在成形的镜像蜡烛：从真实收盘价向开盘价回走；显示价沿用正放的 canonical 合并
+      const k = findBarIndexAtOrBefore(data, simTime);
+      if (k >= 0) {
+        const bar = data[k];
+        if (simTime < bar.time + iMs && bar.time + iMs <= cap) {
+          const partial = reverseFormingBar(bar, simTime, iMs, cap);
+          const interpClose = partial.close;
+          const livePx = priceMapRef.current[sym];
+          const canonicalSample = canonicalPriceSampleRef.current;
+          const canonicalFresh =
+            canonicalSample?.symbol === sym &&
+            Math.abs(simTime - canonicalSample.simTime) <= CANONICAL_PRICE_MAX_SIM_AGE_MS;
+          const r = canonicalFresh && livePx > 0 && interpClose > 0 ? livePx / interpClose : 0;
+          const close = r >= 0.2 && r <= 5 ? livePx : interpClose;
+          const displayClose = flushDisplayPrice(close, now);
+          api.updateData({
+            timestamp: partial.time,
+            open: partial.open,
+            high: Math.max(partial.high, displayClose),
+            low: Math.min(partial.low, displayClose),
+            close: displayClose,
+            volume: partial.volume,
+          });
+          runConditionalMatchingForSymbol(sym, { high: partial.high, low: partial.low }, simTime);
+          latestChartPriceRef.current = close;
+        }
+      }
+
+      // ③ 触底：按余量预取更早的 K 线；到达已加载最早一根时自动暂停
+      if (data.length > 0) {
+        if (simTime <= data[0].time + REVERSE_PRELOAD_BARS * iMs && now - reverseLoadOlderAtRef.current > 2000) {
+          reverseLoadOlderAtRef.current = now;
+          void loadOlderRef.current();
+        }
+        if (simTime <= data[0].time) {
+          handlePauseRef.current();
+          toast.warning("倒放已到达当前已加载的最早 K 线，已自动暂停");
+        }
+      }
+    };
+
     const tick = () => {
       const now = Date.now();
 
@@ -571,30 +709,8 @@ const Index = () => {
               gameLoopInitRef.current = true;
             }
             if (timeDirectionRef.current === -1) {
-              // 倒叙播放：时钟越过某根蜡烛的右沿后，把它退回未落定状态。
-              // 撮合按倒序逐根重扫（价格路径反向穿过其区间）；图表侧把节流
-              // 计时清零，让本帧的 React flush 立即收缩 visibleData 丢弃它们。
-              const prevCursor = cursorRef.current;
-              while (cursorRef.current > 0 && data[cursorRef.current - 1].time + iMs > activeSimTime) {
-                cursorRef.current--;
-              }
-              if (prevCursor !== cursorRef.current) {
-                for (let i = prevCursor - 1; i >= cursorRef.current; i--) {
-                  const c = data[i];
-                  runConditionalMatchingForSymbol(activeSym, c, Math.max(activeSimTime, c.time));
-                }
-                lastReactFlushRef.current = 0;
-              }
-              // 倒放触底：先按余量预取更早的 K 线；真正到达最早一根时自动暂停。
-              if (activeSimTime <= data[0].time + REVERSE_PRELOAD_BARS * iMs && now - reverseLoadOlderAtRef.current > 2000) {
-                reverseLoadOlderAtRef.current = now;
-                void loadOlderRef.current();
-              }
-              if (activeSimTime <= data[0].time) {
-                handlePauseRef.current();
-                toast.warning('倒放已到达当前已加载的最早 K 线，已自动暂停');
-              }
-            }
+              runReverseChartTick(api, data, activeSym, activeSimTime, now);
+            } else {
             let newCandles = 0;
             while (cursorRef.current < data.length) {
               const candleEnd = data[cursorRef.current].time + iMs;
@@ -661,6 +777,7 @@ const Index = () => {
                 latestChartPriceRef.current = close;
               }
             }
+            }
           }
         }
 
@@ -712,27 +829,8 @@ const Index = () => {
             gameLoopInitRef.current = true;
           }
           if (timeDirectionRef.current === -1) {
-            // 倒叙播放：同隔离模式——退回越界蜡烛、倒序重扫撮合、立即 flush 收缩图表。
-            const prevCursor = cursorRef.current;
-            while (cursorRef.current > 0 && data[cursorRef.current - 1].time + iMs > simTime) {
-              cursorRef.current--;
-            }
-            if (prevCursor !== cursorRef.current) {
-              for (let i = prevCursor - 1; i >= cursorRef.current; i--) {
-                const c = data[i];
-                runConditionalMatchingForSymbol(activeSymbolRef.current, c, Math.max(simTime, c.time));
-              }
-              lastReactFlushRef.current = 0;
-            }
-            if (simTime <= data[0].time + REVERSE_PRELOAD_BARS * iMs && now - reverseLoadOlderAtRef.current > 2000) {
-              reverseLoadOlderAtRef.current = now;
-              void loadOlderRef.current();
-            }
-            if (simTime <= data[0].time) {
-              handlePauseRef.current();
-              toast.warning('倒放已到达当前已加载的最早 K 线，已自动暂停');
-            }
-          }
+            runReverseChartTick(api, data, activeSymbolRef.current, simTime, now);
+          } else {
           let newCandles = 0;
           while (cursorRef.current < data.length) {
             const candleEnd = data[cursorRef.current].time + iMs;
@@ -798,6 +896,7 @@ const Index = () => {
               runConditionalMatchingForSymbol(activeSymbolRef.current, { high: matchHigh, low: matchLow }, simTime);
               latestChartPriceRef.current = close;
             }
+          }
           }
         }
 
@@ -1369,6 +1468,11 @@ const Index = () => {
       if (data.length > 0) {
         prevVisibleLenRef.current = 0;
         gameLoopInitRef.current = false;
+        lastReverseSimTimeRef.current = null;
+
+        // 倒叙播放下启动：起点吸附到 K 线开盘并记为本次倒放的镜面 cap。
+        const startTs = timeDirection === -1 ? snapToBarStart(timestamp, iMs) : timestamp;
+        if (timeDirection === -1) setReverseCapTime(startTs);
 
         if (timeMode === "isolated") {
           const now = Date.now();
@@ -1376,28 +1480,31 @@ const Index = () => {
             ...prev,
             [activeSymbol]: {
               status: "playing",
-              time: timestamp,
+              time: startTs,
               speed: 1,
-              historicalAnchorTime: timestamp,
+              historicalAnchorTime: startTs,
               realStartTime: now,
-              originTime: timestamp,
+              originTime: startTs,
+              reverseCapTime: timeDirection === -1 ? startTs : null,
             },
           }));
           if (sim.status === "stopped") {
-            sim.startSimulation(timestamp);
+            sim.startSimulation(startTs);
           }
         } else {
-          setSyncedOriginTime(timestamp);
-          sim.startSimulation(timestamp);
+          setSyncedOriginTime(startTs);
+          sim.startSimulation(startTs);
         }
         toast.success("时间机器已启动", {
-          description: `已加载 ${data.length} 根K线 · 向左拖动可加载更多历史数据`,
+          description: timeDirection === -1
+            ? `已加载 ${data.length} 根K线 · 倒叙播放：更早的 K 线将逐帧出现`
+            : `已加载 ${data.length} 根K线 · 向左拖动可加载更多历史数据`,
         });
       } else {
         toast.error("数据获取失败", { description: "请检查时间范围和交易对" });
       }
     },
-    [activeSymbol, interval, initLoad, sim, timeMode, profile],
+    [activeSymbol, interval, iMs, initLoad, sim, timeMode, timeDirection, setReverseCapTime, profile],
   );
 
   // ===== Signal-library jump: switch symbol + start time machine atomically =====
@@ -1452,6 +1559,11 @@ const Index = () => {
       prevVisibleLenRef.current = 0;
       cursorRef.current = 0;
       gameLoopInitRef.current = false;
+      lastReverseSimTimeRef.current = null;
+
+      // 倒叙播放下跳转：同 handleStart，起点吸附并记镜面 cap。
+      const startTs = timeDirection === -1 ? snapToBarStart(timeMs, iMs) : timeMs;
+      if (timeDirection === -1) setReverseCapTime(startTs);
 
       if (timeMode === "isolated") {
         const now = Date.now();
@@ -1459,17 +1571,18 @@ const Index = () => {
           ...prev,
           [normalized]: {
             status: "playing",
-            time: timeMs,
+            time: startTs,
             speed: 1,
-            historicalAnchorTime: timeMs,
+            historicalAnchorTime: startTs,
             realStartTime: now,
-            originTime: timeMs,
+            originTime: startTs,
+            reverseCapTime: timeDirection === -1 ? startTs : null,
           },
         }));
-        if (sim.status === "stopped") sim.startSimulation(timeMs);
+        if (sim.status === "stopped") sim.startSimulation(startTs);
       } else {
-        setSyncedOriginTime(timeMs);
-        sim.startSimulation(timeMs);
+        setSyncedOriginTime(startTs);
+        sim.startSimulation(startTs);
       }
       toast.success(`已跳转到 ${normalized}`, {
         description: `时间机器已定位到信号时间 · 加载 ${data.length} 根K线`,
@@ -1477,7 +1590,7 @@ const Index = () => {
       return { ok: true };
     },
     [
-      activeSymbol, interval, iMs, initLoad, sim, timeMode,
+      activeSymbol, interval, iMs, initLoad, sim, timeMode, timeDirection, setReverseCapTime,
       setActiveSymbol, setPriceMap, setCoinTimelines, setSyncedOriginTime,
     ],
   );
@@ -1878,9 +1991,10 @@ const Index = () => {
                               mainData={displayData}
                               mainSymbol={activeSymbol.replace("USDT", "/USDT")}
                               rawSymbol={activeSymbol}
-                              onLoadOlder={loadOlder}
+                              onLoadOlder={timeDirection === -1 ? noopLoadOlder : loadOlder}
                               loadingOlder={loadingOlder}
-                              tradeHistory={tradeHistory}
+                              tradeHistory={timeDirection === -1 ? EMPTY_TRADE_HISTORY : tradeHistory}
+                              displayTimestampTransform={reverseAxisTransform}
                               isRunning={activeCoinState.status !== "stopped"}
                               currentSimulatedTime={activeCoinState.time}
                               mainInterval={interval}

@@ -7,6 +7,7 @@ import React, { useEffect, useLayoutEffect, useRef, useCallback, useMemo, useSta
 import {
   init,
   dispose,
+  utils as klinechartsUtils,
   CandleType,
   LineType,
   ActionType,
@@ -210,6 +211,11 @@ interface Props {
   onLoadOlder?: () => void;
   loadingOlder?: boolean;
   tradeHistory?: TradeRecord[];
+  /**
+   * 倒叙播放（镜像视图）：内部时间轴用镜像时间（严格递增，图表引擎照常工作），
+   * 该函数把镜像时间换算回真实时间，用于坐标轴刻度、十字线与悬浮提示的显示。
+   */
+  displayTimestampTransform?: ((ts: number) => number) | null;
   rawSymbol?: string;
   pricePrecision?: number;
   quantityPrecision?: number;
@@ -452,6 +458,7 @@ function CandlestickChartComponent({
   onLoadOlder,
   loadingOlder,
   tradeHistory,
+  displayTimestampTransform = null,
   rawSymbol,
   pricePrecision = 2,
   quantityPrecision = 3,
@@ -523,6 +530,9 @@ function CandlestickChartComponent({
   const { theme } = useTheme();
   const [analysisDataReadyRevision, setAnalysisDataReadyRevision] = useState(0);
   const crosshairPriceRef = useRef<number | null>(null);
+  // init 只执行一次；坐标轴/悬浮提示的时间换算函数经 ref 保持最新。
+  const displayTimestampTransformRef = useRef(displayTimestampTransform);
+  displayTimestampTransformRef.current = displayTimestampTransform;
   const onCrosshairPriceChangeRef = useRef(onCrosshairPriceChange);
   onCrosshairPriceChangeRef.current = onCrosshairPriceChange;
   const pickModeRef = useRef(pickMode);
@@ -865,6 +875,14 @@ function CandlestickChartComponent({
       styles: chartStylesForMode(theme, showLastPriceLine),
       timezone,
       decimalFoldThreshold: DECIMAL_FOLD_THRESHOLD,
+      customApi: {
+        // 倒叙播放（镜像视图）：坐标轴/十字线显示前把镜像时间换回真实时间。
+        // init 只执行一次，经 ref 读取当前换算函数；正序时为 null，原样直通。
+        formatDate: (dateTimeFormat, timestamp, format) => {
+          const transform = displayTimestampTransformRef.current;
+          return klinechartsUtils.formatDate(dateTimeFormat, transform ? transform(timestamp) : timestamp, format);
+        },
+      },
     });
 
     if (!chart) return;
@@ -1057,7 +1075,8 @@ function CandlestickChartComponent({
             const sign = isUp ? "+" : "";
 
             // Format time: YYYY-MM-DD HH:mm
-            const d = new Date(current.timestamp);
+            const tooltipTransform = displayTimestampTransformRef.current;
+            const d = new Date(tooltipTransform ? tooltipTransform(current.timestamp) : current.timestamp);
             const timeStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
 
             return [
@@ -2152,6 +2171,7 @@ function areChartPropsEqual(prev: Props, next: Props) {
     prev.pricePrecision === next.pricePrecision &&
     prev.quantityPrecision === next.quantityPrecision &&
     prev.tradeHistory === next.tradeHistory &&
+    prev.displayTimestampTransform === next.displayTimestampTransform &&
     prev.onLoadOlder === next.onLoadOlder &&
     prev.pendingOrders === next.pendingOrders &&
     prev.onCancelOrder === next.onCancelOrder &&

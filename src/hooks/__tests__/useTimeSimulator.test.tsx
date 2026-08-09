@@ -116,6 +116,29 @@ describe("useTimeSimulator 倒叙播放", () => {
     expect(result.current.getSimTime()).toBe(98_000 - 1_000 * 5);
   });
 
+  it("snapToMs：进入倒放时把冻结时刻向下对齐到 K 线开盘", () => {
+    const { result } = renderHook(() => useTimeSimulator());
+
+    act(() => result.current.startSimulation(90_000));
+    vi.setSystemTime(new Date("2026-01-01T00:00:07.000Z"));
+    // 正走 7 秒 → 97_000；以 60s 为栅格翻转 → 吸附到 60_000
+    act(() => result.current.setDirection(-1, { snapToMs: 60_000 }));
+    expect(result.current.currentSimulatedTime).toBe(60_000);
+
+    vi.setSystemTime(new Date("2026-01-01T00:00:09.000Z"));
+    expect(result.current.getSimTime()).toBe(58_000);
+  });
+
+  it("暂停状态下翻转同样吸附冻结时刻", () => {
+    const { result } = renderHook(() => useTimeSimulator());
+
+    act(() => result.current.startSimulation(90_000));
+    vi.setSystemTime(new Date("2026-01-01T00:00:07.000Z"));
+    act(() => result.current.pauseSimulation());
+    act(() => result.current.setDirection(-1, { snapToMs: 60_000 }));
+    expect(result.current.currentSimulatedTime).toBe(60_000);
+  });
+
   it("方向在 stop / start 之间保持，作为一种模式而非单次会话状态", () => {
     const { result } = renderHook(() => useTimeSimulator());
 

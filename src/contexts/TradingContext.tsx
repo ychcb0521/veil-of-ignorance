@@ -19,6 +19,7 @@
 import React, { createContext, useContext, useCallback, useEffect, useRef, useMemo, useState } from 'react';
 import { useTimeSimulator } from '@/hooks/useTimeSimulator';
 import { usePersistedState, loadPersistedSimState, saveSimState, clearSimState } from '@/hooks/usePersistedState';
+import { intervalToMs } from '@/hooks/useBinanceData';
 import { useAuth } from '@/contexts/AuthContext';
 import { toast } from 'sonner';
 import type {
@@ -90,6 +91,8 @@ export interface CoinTimelineState {
   realStartTime: number | null;
   /** The original start time the user entered — never changes after start */
   originTime: number | null;
+  /** 倒叙播放的镜面时刻（该币种本次倒放的起点，对齐 K 线开盘）；正序时无意义。 */
+  reverseCapTime?: number | null;
 }
 
 export type PositionsMap = Record<string, Position[]>;
@@ -166,6 +169,9 @@ interface TradingState {
   /** 播放方向：1 正序（默认）/ -1 倒叙播放。全局生效，含隔离模式的所有币种时钟。 */
   timeDirection: 1 | -1;
   setTimeDirection: (v: 1 | -1) => void;
+  /** 同步模式下本次倒放的镜面时刻（对齐 K 线开盘）；隔离模式看各币种的 reverseCapTime。 */
+  reverseCapTime: number | null;
+  setReverseCapTime: (v: number | null) => void;
   /**
    * Trading mode:
    *   'direct'   — DEFAULT. skip snapshot + skip review; trade still hits trade_history
@@ -444,26 +450,50 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
     return coinTimelines[symbol] ?? null;
   }, [coinTimelines]);
 
-  // 倒叙播放：翻转全局播放方向。隔离模式下所有播放中的币种时钟先按旧方向
-  // 冻结到当前时刻并重新锚定，保证切换瞬间任何时钟都不跳变；同步时钟的
-  // 冻结与重锚由 sim.setDirection 内部完成。
+  // 同步模式下本次倒放的镜面时刻（持久化，刷新后镜像视图不越界泄露未来）。
+  const [reverseCapTime, setReverseCapTime] = usePersistedState<number | null>('reverse_cap_time_v1', null);
+
+  // 倒叙播放：翻转全局播放方向。隔离模式下所有非停止币种的时钟先按旧方向
+  // 冻结到当前时刻并重新锚定，保证切换瞬间任何时钟都不跳变；进入倒放时把
+  // 冻结时刻向下对齐到 K 线开盘并记为镜面 cap——正放里只揭示了一半的蜡烛
+  // 不进入镜像历史，杜绝亚 K 线级的未来泄露。同步时钟的对齐由
+  // sim.setDirection(snapToMs) 内部完成。
   const setTimeDirection = useCallback((direction: 1 | -1) => {
     const prevDirection = sim.direction;
     if (direction === prevDirection) return;
     const now = Date.now();
+    const iMs = intervalToMs(interval);
+    const snap = (t: number) => (iMs > 0 ? Math.floor(t / iMs) * iMs : t);
+
     setCoinTimelines(prev => {
       let changed = false;
       const next: CoinTimelinesMap = { ...prev };
       for (const [sym, ct] of Object.entries(prev)) {
-        if (ct.status !== 'playing' || !ct.realStartTime || ct.historicalAnchorTime == null) continue;
-        const frozen = ct.historicalAnchorTime + (now - ct.realStartTime) * ct.speed * prevDirection;
-        next[sym] = { ...ct, time: frozen, historicalAnchorTime: frozen, realStartTime: now };
+        if (ct.status === 'stopped') continue;
+        const live = ct.status === 'playing' && ct.realStartTime && ct.historicalAnchorTime != null
+          ? ct.historicalAnchorTime + (now - ct.realStartTime) * ct.speed * prevDirection
+          : ct.time;
+        const frozen = direction === -1 ? snap(live) : live;
+        next[sym] = {
+          ...ct,
+          time: frozen,
+          historicalAnchorTime: ct.status === 'playing' ? frozen : ct.historicalAnchorTime,
+          realStartTime: ct.status === 'playing' ? now : ct.realStartTime,
+          reverseCapTime: direction === -1 ? frozen : ct.reverseCapTime ?? null,
+        };
         changed = true;
       }
       return changed ? next : prev;
     });
-    sim.setDirection(direction);
-  }, [sim, setCoinTimelines]);
+
+    if (direction === -1) {
+      const live = sim.status === 'playing' ? sim.getSimTime() : sim.currentTimeRef.current;
+      setReverseCapTime(snap(live));
+      sim.setDirection(direction, { snapToMs: iMs });
+    } else {
+      sim.setDirection(direction);
+    }
+  }, [sim, interval, setCoinTimelines, setReverseCapTime]);
 
   // Get effective simulation time for a given symbol
   const getEffectiveTime = useCallback((symbol?: string): number => {
@@ -1460,6 +1490,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
     liquidationOpen, liquidationDetails, closeLiquidationModal,
     timeMode, setTimeMode,
     timeDirection: sim.direction, setTimeDirection,
+    reverseCapTime, setReverseCapTime,
     tradingMode, setTradingMode,
     executionAsset, setExecutionAsset, recordExecutionTrade, recordCampaignCreated, reconcileCampaignRewards,
     recordPostTradeReviewCompleted, reconcilePostTradeReviewRewards,

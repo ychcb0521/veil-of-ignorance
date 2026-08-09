@@ -166,17 +166,26 @@ export function useTimeSimulator(initialState?: Partial<PersistedTimeSim>) {
 
   /**
    * 切换播放方向（倒叙播放）。播放中先把当前时刻冻结为新锚点再翻转，
-   * 保证切换瞬间时钟连续、不跳变；暂停/停止状态下只改方向。
+   * 保证切换瞬间时钟连续；暂停状态下冻结时刻同样生效；停止状态只改方向。
+   * snapToMs：翻转瞬间把冻结时刻向下对齐到该粒度（K 线开盘），
+   * 使倒放从整根蜡烛的边界开始——正放中只揭示了一半的蜡烛不进入镜像历史。
    */
-  const setDirection = useCallback((direction: TimeDirection) => {
+  const setDirection = useCallback((direction: TimeDirection, opts?: { snapToMs?: number }) => {
+    const snap = (t: number) => (
+      opts?.snapToMs && opts.snapToMs > 0 ? Math.floor(t / opts.snapToMs) * opts.snapToMs : t
+    );
     setState(prev => {
       if (prev.direction === direction) return prev;
       if (prev.status !== 'playing' || !prev.realStartTime || prev.historicalAnchorTime == null) {
-        syncCore({ direction });
-        return { ...prev, direction };
+        const frozen = snap(prev.currentSimulatedTime);
+        currentTimeRef.current = frozen;
+        syncCore({ direction, historicalAnchorTime: prev.status === 'paused' ? frozen : prev.historicalAnchorTime });
+        return prev.status === 'paused'
+          ? { ...prev, direction, historicalAnchorTime: frozen, currentSimulatedTime: frozen }
+          : { ...prev, direction };
       }
       const now = Date.now();
-      const currentSim = prev.historicalAnchorTime + (now - prev.realStartTime) * prev.speed * prev.direction;
+      const currentSim = snap(prev.historicalAnchorTime + (now - prev.realStartTime) * prev.speed * prev.direction);
       currentTimeRef.current = currentSim;
       syncCore({ direction, historicalAnchorTime: currentSim, realStartTime: now });
       return { ...prev, direction, historicalAnchorTime: currentSim, realStartTime: now, currentSimulatedTime: currentSim };

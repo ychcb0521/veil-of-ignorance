@@ -1,7 +1,7 @@
 /**
- * getVisibleData 的方向无关性 —— 倒叙播放的数据层根基。
- * 可见规则（time <= simTime）与部分蜡烛按 bar 内进度插值，天然不关心时钟朝哪走：
- * 时钟倒退时可见集合收缩、当前蜡烛从收盘价缩回开盘价。这里把这两条钉死。
+ * getVisibleData（正放视图）的幕规则：可见 = time <= simTime，部分蜡烛按 bar 内进度插值。
+ * 时钟被移到更早时刻时可见集合收缩、当前蜡烛缩回开盘——这是正放幕的自洽性。
+ * （倒叙播放使用独立的镜像视图，见 lib/reversePlayback 及其测试。）
  */
 import { act, renderHook } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
