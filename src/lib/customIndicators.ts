@@ -80,12 +80,98 @@ function calcWMA(values: number[], period: number): number[] {
   return result;
 }
 
+/**
+ * 历史波动率（HV）的纯计算：对数收益的滚动样本方差 → 标准差 → 按周期年化（%）。
+ *
+ * - 收益 rᵢ = ln(closeᵢ / closeᵢ₋₁)；窗口 N 内取样本方差（n−1）。
+ * - 年化：加密市场 7×24，全年毫秒数 ÷ 单根周期毫秒数 = 每年根数，σ_年 = σ_根 × √每年根数。
+ * - 前 N 根与无效价格处返回 NaN（图上留空，不画假值）。
+ * 导出以便单测：方差与年化两步都必须钉死。
+ */
+export function computeAnnualizedVolatility(
+  closesArr: number[],
+  period: number,
+  intervalMs: number,
+): number[] {
+  const n = closesArr.length;
+  const out = new Array<number>(n).fill(NaN);
+  if (n < 2 || period < 2 || !Number.isFinite(intervalMs) || intervalMs <= 0) return out;
+
+  const MS_PER_YEAR = 365 * 24 * 3_600_000;
+  const annualize = Math.sqrt(MS_PER_YEAR / intervalMs);
+
+  const rets = new Array<number>(n).fill(NaN);
+  for (let i = 1; i < n; i++) {
+    const prev = closesArr[i - 1];
+    const cur = closesArr[i];
+    if (prev > 0 && cur > 0) rets[i] = Math.log(cur / prev);
+  }
+
+  // 滚动 sum / sumsq：窗口内含 NaN 则该点不出数
+  let sum = 0;
+  let sumSq = 0;
+  let nanCount = 0;
+  for (let i = 1; i < n; i++) {
+    const r = rets[i];
+    if (Number.isFinite(r)) { sum += r; sumSq += r * r; } else nanCount++;
+    const drop = i - period; // 移出窗口的下标（收益从 1 开始）
+    if (drop >= 1) {
+      const d = rets[drop];
+      if (Number.isFinite(d)) { sum -= d; sumSq -= d * d; } else nanCount--;
+    }
+    const windowFull = i >= period;
+    if (windowFull && nanCount === 0) {
+      const mean = sum / period;
+      const variance = Math.max(0, (sumSq - period * mean * mean) / (period - 1));
+      out[i] = Math.sqrt(variance) * annualize * 100;
+    }
+  }
+  return out;
+}
+
 let registered = false;
 
 export function registerCustomIndicators() {
   if (registered) return;
 
   try {
+
+  // ─── HV 历史波动率（对数收益的滚动方差 → 年化 σ%） ───
+  registerIndicator({
+    name: 'HV_CUSTOM',
+    shortName: 'HV',
+    calcParams: [20],
+    figures: [
+      { key: 'hv', title: '年化σ%: ', type: 'line' },
+      { key: 'ma', title: '平滑: ', type: 'line' },
+    ],
+    calc: (dataList, indicator) => {
+      const period = Math.max(2, indicator.calcParams[0] ?? 20);
+      const smooth = Math.max(2, Math.round(period / 2));
+      try {
+        if (dataList.length < 2) return dataList.map(() => ({}));
+        // 年化系数按相邻时间戳推断单根周期，随图表周期自动适配
+        const intervalMs = (dataList[1].timestamp as number) - (dataList[0].timestamp as number);
+        const hv = computeAnnualizedVolatility(closes(dataList), period, intervalMs);
+        // NaN 安全的滚动均值（既有 sma 会被 NaN 前缀永久污染累加和）
+        const ma = new Array<number>(hv.length).fill(NaN);
+        let s = 0;
+        let cnt = 0;
+        for (let i = 0; i < hv.length; i++) {
+          if (Number.isFinite(hv[i])) { s += hv[i]; cnt++; }
+          const d = i - smooth;
+          if (d >= 0 && Number.isFinite(hv[d])) { s -= hv[d]; cnt--; }
+          if (cnt === smooth) ma[i] = s / smooth;
+        }
+        return dataList.map((_, i) => {
+          const point: Record<string, number> = {};
+          if (Number.isFinite(hv[i])) point.hv = hv[i];
+          if (Number.isFinite(ma[i])) point.ma = ma[i];
+          return point;
+        });
+      } catch { return dataList.map(() => ({})); }
+    },
+  });
 
   // ─── ADX ───
   registerIndicator({
@@ -675,6 +761,7 @@ export const CUSTOM_INDICATOR_MAP: Record<string, string> = {
   MOM: 'MOM_CUSTOM',
   AROON: 'AROON_CUSTOM',
   STDEV: 'STDEV_CUSTOM',
+  HV: 'HV_CUSTOM',
   CHOP: 'CHOP_CUSTOM',
   CMF: 'CMF_CUSTOM',
   BOP: 'BOP_CUSTOM',

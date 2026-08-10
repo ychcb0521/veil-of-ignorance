@@ -127,7 +127,7 @@ export const INDICATOR_CATALOG: IndicatorCatalogItem[] = [
   // --- Volatility ---
   { id: 'CHOP',   nameZh: '波动指数',                nameEn: 'Choppiness Index',            isOverlay: false, defaultPeriod: 14, color: '#F97316', category: 'volatility' },
   { id: 'CHOPZ',  nameZh: '波动区间',                nameEn: 'Chop Zone',                   isOverlay: false, defaultPeriod: 14, color: '#FB923C', category: 'volatility' },
-  { id: 'HV',     nameZh: '历史波动率',              nameEn: 'Historical Volatility',       isOverlay: false, defaultPeriod: 20, color: '#EF4444', category: 'volatility' },
+  { id: 'HV',     nameZh: '历史波动率(方差)',        nameEn: 'Historical Volatility',       isOverlay: false, defaultPeriod: 20, color: '#EF4444', category: 'volatility' },
   { id: 'STDEV',  nameZh: '标准偏差',                nameEn: 'Standard Deviation',          isOverlay: false, defaultPeriod: 20, color: '#F87171', category: 'volatility' },
   { id: 'SE',     nameZh: '标准误差',                nameEn: 'Standard Error',              isOverlay: false, defaultPeriod: 20, color: '#FCA5A5', category: 'volatility' },
   { id: 'MASI',   nameZh: '梅斯波动率指数',          nameEn: 'Mass Index',                  isOverlay: false, defaultPeriod: 25, color: '#FECDD3', category: 'volatility' },
