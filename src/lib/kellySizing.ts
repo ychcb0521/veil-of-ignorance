@@ -38,6 +38,16 @@ export interface CampaignPerformanceSummary {
   lossCount: number;
   payoffRatio: number | null;
   payoffRatioSampleCount: number;
+  /**
+   * 只取盈利战役（final_realized_pnl > 0）的平均盈亏比——「赢的时候平均赢多少 R」。
+   * 无盈利样本时为 null。
+   */
+  winPayoffRatio: number | null;
+  /**
+   * 只取亏损战役（final_realized_pnl < 0）的平均盈亏比——「亏的时候平均亏多少 R」，
+   * 恒为负值。无亏损样本时为 null。
+   */
+  lossPayoffRatio: number | null;
   expectedWinRate: number | null;
   expectedR: number | null;
 }
@@ -235,6 +245,15 @@ export function summarizeCampaignPerformance(samples: CampaignPerformanceSample[
   const payoffRatio = payoffRatios.length > 0
     ? payoffRatios.reduce((sum, value) => sum + value, 0) / payoffRatios.length
     : null;
+  // 分组均值与胜率同口径：按 final_realized_pnl 的符号切分，盈亏平衡两侧都不进。
+  // 由于 bᵢ = 已实现盈亏ᵢ ÷ Lᵢ 且 Lᵢ > 0，按盈亏符号切分等同于按 bᵢ 符号切分。
+  const meanOf = (list: CampaignPerformanceSample[]): number | null => (
+    list.length > 0
+      ? list.reduce((sum, sample) => sum + (sample.payoffRatio as number), 0) / list.length
+      : null
+  );
+  const winPayoffRatio = meanOf(wins);
+  const lossPayoffRatio = meanOf(losses);
   const expectedWinRate = winRate;
   const expectedR = expectedWinRate != null && payoffRatio != null
     ? expectedWinRate * payoffRatio - (1 - expectedWinRate)
@@ -246,6 +265,8 @@ export function summarizeCampaignPerformance(samples: CampaignPerformanceSample[
     lossCount: losses.length,
     payoffRatio,
     payoffRatioSampleCount: payoffRatios.length,
+    winPayoffRatio,
+    lossPayoffRatio,
     expectedWinRate,
     expectedR,
   };

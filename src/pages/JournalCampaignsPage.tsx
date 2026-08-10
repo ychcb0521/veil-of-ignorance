@@ -184,6 +184,12 @@ function formatSignedMetric(value: number, suffix: string, digits = 2): string {
   return `${normalized > 0 ? '+' : ''}${normalized.toFixed(digits)}${suffix}`;
 }
 
+/** 分组盈亏比均值：带符号显示，无样本时给「—」而不是 0，避免把「没有」读成「打平」。 */
+function formatGroupPayoffRatio(value: number | null): string {
+  if (value == null || !Number.isFinite(value)) return '—';
+  return `${value > 0 ? '+' : ''}${value.toFixed(2)}R`;
+}
+
 function formatMirrorTpMetric(value: number): string {
   const rounded = Math.round(value);
   if (Math.abs(value - rounded) > 0.001) return value.toFixed(1);
@@ -1681,6 +1687,35 @@ export default function JournalCampaignsPage() {
                     <div className="font-mono text-foreground">= {payoffRatioLabel}</div>
                     <div>亏损战役的负盈亏比原样参与求和。</div>
                     <div>没有有效初始最大预期亏损的战役不计入 N。</div>
+
+                    {/* 分组均值：把「赢多少」与「亏多少」拆开看，混合均值会把两者互相抵消 */}
+                    <div className="mt-2 border-t border-border/60 pt-2">
+                      <div className="text-foreground">分组均值</div>
+                      <div className="mt-1 space-y-1">
+                        <div className="flex items-baseline justify-between gap-2">
+                          <span>盈利战役（{performance.winCount} 场）</span>
+                          <span
+                            data-testid="campaign-win-payoff-ratio"
+                            className="font-mono tabular-nums text-[#0ECB81]"
+                          >
+                            {formatGroupPayoffRatio(performance.winPayoffRatio)}
+                          </span>
+                        </div>
+                        <div className="flex items-baseline justify-between gap-2">
+                          <span>亏损战役（{performance.lossCount} 场）</span>
+                          <span
+                            data-testid="campaign-loss-payoff-ratio"
+                            className="font-mono tabular-nums text-[#F6465D]"
+                          >
+                            {formatGroupPayoffRatio(performance.lossPayoffRatio)}
+                          </span>
+                        </div>
+                      </div>
+                      <div className="mt-1.5 leading-relaxed">
+                        分别是「赢的时候平均赢多少 R」与「亏的时候平均亏多少 R」，按已实现盈亏的正负切分，盈亏持平的战役两侧都不计入。
+                        混合均值 b̄ 会让两者互相抵消，拆开才看得出赔率结构。
+                      </div>
+                    </div>
                   </div>
                 ) : (
                   <div className="mt-2 text-muted-foreground">当前列表没有带有效盈亏比的战役。</div>

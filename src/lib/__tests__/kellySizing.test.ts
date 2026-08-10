@@ -154,6 +154,53 @@ describe('summarizeCampaignPerformance', () => {
     expect(result.expectedR).toBeCloseTo(-0.25, 8);
   });
 
+  it('分组均值：盈利组与亏损组各自求均值，盈亏持平两侧都不计入', () => {
+    const result = summarizeCampaignPerformance([
+      { campaign: campaign({ final_realized_pnl: 30, status: 'closed_profit' }), payoffRatio: 3 },
+      { campaign: campaign({ final_realized_pnl: 10, status: 'closed_profit' }), payoffRatio: 1 },
+      { campaign: campaign({ final_realized_pnl: -20, status: 'closed_loss' }), payoffRatio: -0.8 },
+      { campaign: campaign({ final_realized_pnl: -40, status: 'closed_loss' }), payoffRatio: -1.2 },
+      { campaign: campaign({ final_realized_pnl: 0, status: 'closed_breakeven' }), payoffRatio: 0 },
+    ]);
+
+    expect(result.winPayoffRatio).toBeCloseTo(2, 8);    // (3 + 1) / 2
+    expect(result.lossPayoffRatio).toBeCloseTo(-1, 8);  // (−0.8 − 1.2) / 2
+    expect(result.winCount).toBe(2);
+    expect(result.lossCount).toBe(2);
+    // 打平那场计入 N（分母 5）但对两组均值毫无贡献
+    expect(result.payoffRatioSampleCount).toBe(5);
+    expect(result.payoffRatio).toBeCloseTo(0.4, 8);
+  });
+
+  it('分组均值与混合均值满足恒等式 b̄ = (n_win·b̄_win + n_loss·b̄_loss) ÷ N', () => {
+    const result = summarizeCampaignPerformance([
+      { campaign: campaign({ final_realized_pnl: 30, status: 'closed_profit' }), payoffRatio: 2.5 },
+      { campaign: campaign({ final_realized_pnl: 10, status: 'closed_profit' }), payoffRatio: 0.7 },
+      { campaign: campaign({ final_realized_pnl: -20, status: 'closed_loss' }), payoffRatio: -1.1 },
+      { campaign: campaign({ final_realized_pnl: 0, status: 'closed_breakeven' }), payoffRatio: 0 },
+    ]);
+
+    const recombined =
+      (result.winCount * (result.winPayoffRatio ?? 0)
+        + result.lossCount * (result.lossPayoffRatio ?? 0))
+      / result.payoffRatioSampleCount;
+    expect(recombined).toBeCloseTo(result.payoffRatio as number, 10);
+  });
+
+  it('缺少某一侧样本时该组均值为 null，不退化成 0', () => {
+    const winsOnly = summarizeCampaignPerformance([
+      { campaign: campaign({ final_realized_pnl: 30, status: 'closed_profit' }), payoffRatio: 2 },
+    ]);
+    expect(winsOnly.winPayoffRatio).toBeCloseTo(2, 8);
+    expect(winsOnly.lossPayoffRatio).toBeNull();
+
+    const lossesOnly = summarizeCampaignPerformance([
+      { campaign: campaign({ final_realized_pnl: -30, status: 'closed_loss' }), payoffRatio: -1.5 },
+    ]);
+    expect(lossesOnly.winPayoffRatio).toBeNull();
+    expect(lossesOnly.lossPayoffRatio).toBeCloseTo(-1.5, 8);
+  });
+
   it('excludes unresolved campaigns even when they carry a provisional ratio', () => {
     const result = summarizeCampaignPerformance([
       { campaign: campaign({ final_realized_pnl: null, status: 'active' }), payoffRatio: 2 },

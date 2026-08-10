@@ -669,6 +669,16 @@ describe('JournalCampaignsPage sorting', () => {
     expect(screen.getByText('平均盈亏比计算公式')).toBeInTheDocument();
     expect(screen.getByText('b̄ = Σ 单场盈亏比 bᵢ ÷ 有效战役数 N')).toBeInTheDocument();
     expect(screen.getByText('= 2.70 ÷ 3')).toBeInTheDocument();
+    // 注解里分组给出「赢时平均赢多少 / 亏时平均亏多少」，混合均值会把两者抵消
+    expect(screen.getByText('分组均值')).toBeInTheDocument();
+    expect(screen.getByText('盈利战役（2 场）')).toBeInTheDocument();
+    expect(screen.getByText('亏损战役（1 场）')).toBeInTheDocument();
+    const winMean = Number(screen.getByTestId('campaign-win-payoff-ratio').textContent!.replace(/[+R]/g, ''));
+    const lossMean = Number(screen.getByTestId('campaign-loss-payoff-ratio').textContent!.replace(/[R]/g, ''));
+    expect(winMean).toBeGreaterThan(0);
+    expect(lossMean).toBeLessThan(0);
+    // 恒等式：(n_win·b̄_win + n_loss·b̄_loss) ÷ N == 混合均值 0.90
+    expect((2 * winMean + 1 * lossMean) / 3).toBeCloseTo(0.9, 2);
     fireEvent.click(screen.getByTestId('campaign-average-payoff-ratio'));
     expect(screen.getByTestId('campaign-expected-value')).toHaveTextContent('期望值（+0.27R）');
     fireEvent.click(screen.getByTestId('campaign-expected-value'));
