@@ -28,9 +28,24 @@ export type AdvantageGapResult =
       direction: AdvantageGapDirection;
       /** 基线概率，0–1 之间的小数。 */
       baseline: number;
+      /**
+       * 动态赔率 b = (T − S) ÷ (S − K)：这一刻的盈亏比——赚一份要走的距离
+       * 相对亏一份要走的距离。多空两个方向下分子分母同号，b 恒为正。
+       *
+       * 恒等式：1 ÷ (1 + b) ≡ P₀。把 b 代入即得
+       *   1/(1+b) = (S−K) / ((S−K)+(T−S)) = (S−K)/(T−K) = P₀
+       * 也就是说，「市场免费给的胜率」正是这一刻赔率下的盈亏平衡胜率。
+       */
+      payoffRatio: number;
       /** 优势边际 = P − P₀；P 未填写时为 null。 */
       gap: number | null;
     };
+
+/** 盈亏平衡胜率 P = 1 ÷ (1 + b)：赔率 b 下不亏不赚所需的最低胜率。 */
+export function breakEvenWinRate(payoffRatio: number): number | null {
+  if (!Number.isFinite(payoffRatio) || payoffRatio <= -1) return null;
+  return 1 / (1 + payoffRatio);
+}
 
 function isFinitePrice(value: number | null | undefined): value is number {
   return typeof value === 'number' && Number.isFinite(value);
@@ -60,6 +75,9 @@ export function computeAdvantageGap(
   const baseline = Math.abs(s - k) / Math.abs(t - k);
   if (!Number.isFinite(baseline)) return { valid: false, reason: 'degenerate' };
 
+  const payoffRatio = (t - s) / (s - k);
+  if (!Number.isFinite(payoffRatio)) return { valid: false, reason: 'degenerate' };
+
   const gap = isFinitePrice(p) ? p - baseline : null;
-  return { valid: true, direction, baseline, gap };
+  return { valid: true, direction, baseline, payoffRatio, gap };
 }

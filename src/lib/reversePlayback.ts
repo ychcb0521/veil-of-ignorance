@@ -15,8 +15,9 @@
  * 阳线阴线随之翻转，这正是反市场的本来面目。
  *
  * 无知之幕在倒放下同样成立，方向相反：主观未来 = 真实更早的数据，绝不显示。
- * cap 之后（真实更晚）的数据也不显示——那是这次倒放会话开始前尚未揭示的部分，
- * 展示它会向正放会话泄露未来。
+ * cap 之后（真实更晚）的数据则是倒放会话的「主观历史」，作为已落定的镜像蜡烛
+ * 铺在图表左侧——深度与正放的历史窗口一致。这是有意为之：倒放者被给予反向
+ * 市场的完整历史，正如正放者被给予正向历史。
  */
 import type { KlineData } from '@/hooks/useBinanceData';
 
@@ -73,10 +74,11 @@ export function reverseFormingBar(
 /**
  * 倒放视图的可见数据：镜像时间递增的 KlineData 数组。
  *
- * 可见性（真实域）：只收「真实收盘时刻 ≤ cap 且 > simTime」的蜡烛——
- *   - 收盘晚于 cap 的：本次倒放开始时尚未完整揭示，永不显示（防泄露）；
- *   - 收盘早于等于 simTime 的：主观未来，被幕遮蔽；
- *   - 时钟正在穿越的那根（开 < simTime < 收）按主观进度部分成形。
+ * 可见性（真实域）：收「真实收盘时刻 > simTime」的全部蜡烛——
+ *   - 收盘晚于 cap 的：主观历史，作为已落定的镜像蜡烛铺在左侧（深度与正放一致）；
+ *   - 时钟正在穿越的那根（开 ≤ simTime < 收）按主观进度部分成形；
+ *   - 收盘早于等于 simTime 的：主观未来，被幕遮蔽。
+ * cap 只充当时间反射的镜面锚点，保证一次倒放会话内镜像轴稳定。
  */
 export function getReverseVisibleData(
   allData: KlineData[],
@@ -91,7 +93,6 @@ export function getReverseVisibleData(
   for (let i = allData.length - 1; i >= 0; i--) {
     const bar = allData[i];
     const barEnd = bar.time + intervalMs;
-    if (barEnd > capTime) continue;
     if (barEnd <= simTime) break;
     out.push(
       simTime > bar.time

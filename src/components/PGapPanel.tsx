@@ -8,6 +8,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { computeAdvantageGap } from '@/lib/advantageGap';
+import { BreakEvenCurve } from '@/components/BreakEvenCurve';
 
 interface Props {
   /** 现价 S，来自盘面实时数据，只读。 */
@@ -243,6 +244,10 @@ export function PGapPanel({
                   <dd className="inline"> · 你主观认定的胜率，默认填入本账号交易战役的整体胜率（已了结战役中盈利的比例），可自行覆盖。</dd>
                 </div>
                 <div>
+                  <dt className="inline font-mono font-semibold text-gray-700 dark:text-[#B7BDC6]">b</dt>
+                  <dd className="inline"> · 动态赔率 =（T − S）÷（S − K），此刻的盈亏比。P₀ 恒等于 1 ÷ (1 + b)；点 b 可打开盈亏平衡胜率曲线。</dd>
+                </div>
+                <div>
                   <dt className="inline font-semibold text-gray-700 dark:text-[#B7BDC6]">P₀ 基线概率</dt>
                   <dd className="inline"> · 在没有任何优势的市场里，价格先摸到 T 而不是先摸到 K 的概率。止损放得越远、目标定得越近，它越高——这是市场免费给你的胜率。</dd>
                 </div>
@@ -330,8 +335,44 @@ export function PGapPanel({
                   {(result.baseline * 100).toFixed(1)}%
                 </span>
               </div>
-              <div className="mt-1 text-[9px] leading-none text-gray-400 dark:text-[#5e6673]">
-                市场免费给你的胜率，P 必须高于它
+              <div className="mt-1 flex items-baseline justify-between gap-2">
+                <span className="text-[9px] leading-none text-gray-400 dark:text-[#5e6673]">
+                  市场免费给你的胜率，P 必须高于它
+                </span>
+                {/* 动态赔率 b：低调入口，点开是盈亏平衡胜率曲线 */}
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <button
+                      type="button"
+                      data-testid="p-gap-payoff-ratio"
+                      title="动态赔率 b =（T − S）÷（S − K）· 点击查看盈亏平衡胜率曲线"
+                      className="flex-none border-b border-dashed border-gray-300 font-mono text-[9px] leading-none text-gray-400 opacity-60 transition-opacity hover:opacity-100 dark:border-[#2b3139] dark:text-[#5e6673]"
+                    >
+                      b {result.payoffRatio.toFixed(2)}
+                    </button>
+                  </PopoverTrigger>
+                  <PopoverContent
+                    align="end"
+                    side="bottom"
+                    data-testid="p-gap-payoff-chart"
+                    className="w-[320px] border-gray-200 bg-white p-3 dark:border-[#2b3139] dark:bg-[#1e2329]"
+                  >
+                    <div className="text-[11px] font-medium text-gray-900 dark:text-[#EAECEF]">盈亏平衡胜率</div>
+                    <div className="mt-0.5 font-mono text-[9px] text-gray-500 dark:text-[#848e9c]">
+                      P = 1 ÷ (1 + b)　·　b = (T − S) ÷ (S − K)
+                    </div>
+                    <div className="mt-2">
+                      <BreakEvenCurve
+                        currentPayoffRatio={result.payoffRatio}
+                        winRate={winRatePct == null ? null : winRatePct / 100}
+                      />
+                    </div>
+                    <p className="mt-2 border-t border-gray-100 pt-2 text-[9px] leading-relaxed text-gray-500 dark:border-[#2b3139] dark:text-[#848e9c]">
+                      曲线随赔率增大急速下降：b 从 1 到 2，门槛就从 50% 掉到 33%——把目标放远、止损收紧，比硬提胜率省力得多。
+                      当前赔率对应的门槛恒等于上方的基线概率 P₀，两者本就是同一个数的两种算法。
+                    </p>
+                  </PopoverContent>
+                </Popover>
               </div>
 
               <div className="mt-2 rounded-md border border-gray-200 bg-gray-50 px-2.5 py-1.5 dark:border-[#2b3139] dark:bg-[#161a1e]">

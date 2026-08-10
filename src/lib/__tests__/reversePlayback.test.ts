@@ -79,29 +79,36 @@ describe('reverseFormingBar', () => {
 describe('getReverseVisibleData', () => {
   it('镜像时间严格递增，相邻蜡烛收开衔接（镜像连续性）', () => {
     const out = getReverseVisibleData(CANDLES, BASE + 1 * MIN, CAP, MIN);
-    // 可见：第 3 根（已落定）+ 第 2 根（恰好整根揭示）；第 4 根在镜面外
-    expect(out).toHaveLength(2);
-    expect(out[0].time).toBeLessThan(out[1].time);
-    // 主观顺序：先见第 3 根（真实更晚），它的镜像 close 应衔接第 2 根的镜像 open
-    expect(out[0].close).toBe(out[1].open);
+    // 可见：第 4 根（cap 后的主观历史）+ 第 3 根 + 第 2 根（恰好整根揭示）
+    expect(out).toHaveLength(3);
+    for (let i = 1; i < out.length; i++) {
+      expect(out[i].time - out[i - 1].time).toBe(MIN); // 镜像时间严格递增
+      expect(out[i - 1].close).toBe(out[i].open);      // 收开衔接
+    }
   });
 
-  it('镜面之外（收盘晚于 cap）的蜡烛永不显示——不泄露正放未揭示的数据', () => {
+  it('cap 之后（真实更晚）的蜡烛作为主观历史铺在左侧——镜像时间小于起点侧', () => {
     const out = getReverseVisibleData(CANDLES, BASE, CAP, MIN);
-    expect(out.every(bar => bar.time >= mirrorTime(CAP, CAP - MIN))).toBe(true);
-    expect(out).toHaveLength(3); // 第 4 根被镜面挡住
+    expect(out).toHaveLength(4); // 第 4 根（cap 之后）也在
+    // 第 4 根真实最晚 → 镜像最早 → 排在最左（数组最前）
+    expect(out[0].time).toBe(mirrorTime(CAP, CANDLES[3].time));
+    expect(out[0]).toMatchObject({ open: 140, close: 130 }); // 已落定的镜像（开收互换）
   });
 
   it('主观未来（真实更早）被幕遮蔽：时钟未到的蜡烛不显示', () => {
-    // 时钟刚进入第 3 根 → 只有第 3 根（成形中），第 1、2 根还在主观未来
+    // 时钟刚进入第 3 根 → 第 4 根为主观历史、第 3 根成形中；第 1、2 根还在主观未来
     const out = getReverseVisibleData(CANDLES, BASE + 2 * MIN + 30_000, CAP, MIN);
-    expect(out).toHaveLength(1);
-    expect(out[0].open).toBe(130); // 从真实收盘价开始回走
+    expect(out).toHaveLength(2);
+    expect(out[1].open).toBe(130); // 成形中的一根从真实收盘价开始回走
   });
 
-  it('倒放起点瞬间（simTime == cap）盘面为空，随时钟倒退逐帧出现', () => {
-    expect(getReverseVisibleData(CANDLES, CAP, CAP, MIN)).toHaveLength(0);
-    const oneTickLater = getReverseVisibleData(CANDLES, CAP - 1_000, CAP, MIN);
-    expect(oneTickLater).toHaveLength(1);
+  it('倒放起点瞬间（simTime == cap）即呈现真实未来一侧作为主观历史', () => {
+    const atStart = getReverseVisibleData(CANDLES, CAP, CAP, MIN);
+    expect(atStart).toHaveLength(1); // 夹具里 cap 之后只有第 4 根
+    expect(atStart[0]).toMatchObject({ open: 140, close: 130 });
+    // 时钟倒退后，cap 之前的蜡烛开始逐帧出现在右侧
+    const later = getReverseVisibleData(CANDLES, CAP - 1_000, CAP, MIN);
+    expect(later).toHaveLength(2);
+    expect(later[1].time).toBeGreaterThan(later[0].time);
   });
 });

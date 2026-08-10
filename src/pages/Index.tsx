@@ -187,7 +187,7 @@ const Index = () => {
     getEffectiveAvailable,
   } = ctx;
 
-  const { allData, allDataRef, loading, loadingOlder, error, initLoad, loadOlder, getVisibleData, reset } =
+  const { allData, allDataRef, loading, loadingOlder, error, initLoad, loadOlder, loadNewer, getVisibleData, reset } =
     useBinanceData();
 
   // Background price polling for non-active symbols
@@ -219,7 +219,7 @@ const Index = () => {
 
     (async () => {
       const targetTime = persistedSim.currentSimulatedTime || persistedSim.historicalAnchorTime!;
-      const data = await initLoad(persistedSim.symbol, persistedSim.interval, targetTime);
+      const data = await initLoad(persistedSim.symbol, persistedSim.interval, targetTime, { reverse: persistedSim.direction === -1 });
       if (data.length > 0) {
         toast.info("已恢复模拟会话");
       }
@@ -435,9 +435,8 @@ const Index = () => {
   const REACT_FLUSH_MS = 250;
   // 倒放时距最早已加载 K 线还剩多少根就开始预取更早数据
   const REVERSE_PRELOAD_BARS = 120;
-  // 倒放（镜像视图）下成交标记与向左补历史都不适用：标记按真实时间戳定位会错位；
-  // 图表左沿是本次倒放的镜面起点，无历史可补。
-  const noopLoadOlder = useCallback(() => {}, []);
+  // 倒放（镜像视图）：图表左沿 = 主观深处历史 = 真实更晚的数据，向左拖动补 loadNewer。
+  const loadNewerVoid = useCallback(() => { void loadNewer(); }, [loadNewer]);
   const PERSIST_MS = 500;
   const CANONICAL_PRICE_MAX_SIM_AGE_MS = 90_000;
 
@@ -615,7 +614,6 @@ const Index = () => {
         for (let i = hiIdx; i >= loIdx && i >= 0; i--) {
           const c = data[i];
           if (c.time < simTime) break;
-          if (c.time + iMs > cap) continue; // 镜面之外（本次倒放开始时未完整揭示），永不显示
           crossed++;
           runConditionalMatchingForSymbol(sym, c, Math.max(simTime, c.time));
           if (i <= loIdx + 2) {
@@ -630,7 +628,7 @@ const Index = () => {
       const k = findBarIndexAtOrBefore(data, simTime);
       if (k >= 0) {
         const bar = data[k];
-        if (simTime < bar.time + iMs && bar.time + iMs <= cap) {
+        if (simTime < bar.time + iMs) {
           const partial = reverseFormingBar(bar, simTime, iMs, cap);
           const interpClose = partial.close;
           const livePx = priceMapRef.current[sym];
@@ -1423,7 +1421,7 @@ const Index = () => {
       if (timeMode === "isolated") {
         const targetState = coinTimelines[newSymbol];
         if (targetState && targetState.status !== "stopped" && targetState.time > 0) {
-          const data = await initLoad(newSymbol, interval, targetState.time);
+          const data = await initLoad(newSymbol, interval, targetState.time, { reverse: timeDirection === -1 });
           if (data.length > 0) {
             toast.info(`已切换到 ${newSymbol}`, { description: `加载 ${data.length} 根K线` });
           }
@@ -1435,7 +1433,7 @@ const Index = () => {
         // Synced mode
         if (sim.status !== "stopped") {
           const targetTime = sim.currentSimulatedTime;
-          const data = await initLoad(newSymbol, interval, targetTime);
+          const data = await initLoad(newSymbol, interval, targetTime, { reverse: timeDirection === -1 });
           if (data.length > 0) {
             toast.info(`已切换到 ${newSymbol}`, { description: `加载 ${data.length} 根K线` });
           }
@@ -1456,7 +1454,7 @@ const Index = () => {
       latestChartPriceRef.current = 0;
 
       if (activeCoinState.status !== "stopped") {
-        await initLoad(activeSymbol, newInterval, effectiveSimTime);
+        await initLoad(activeSymbol, newInterval, effectiveSimTime, { reverse: timeDirection === -1 });
       }
     },
     [activeSymbol, interval, activeCoinState.status, effectiveSimTime, initLoad, reset],
@@ -1464,7 +1462,7 @@ const Index = () => {
 
   const handleStart = useCallback(
     async (timestamp: number) => {
-      const data = await initLoad(activeSymbol, interval, timestamp);
+      const data = await initLoad(activeSymbol, interval, timestamp, { reverse: timeDirection === -1 });
       if (data.length > 0) {
         prevVisibleLenRef.current = 0;
         gameLoopInitRef.current = false;
@@ -1517,7 +1515,7 @@ const Index = () => {
       // 「信号库」（按信号自动启动）与「手动启动」必须相互独立——一次失败的跳转
       // 绝不能污染手动模式。因此在 initLoad 成功前，不切换 activeSymbol、不清空行情、
       // 不重置数据层；失败时直接返回，手动模式所见状态原封不动。
-      let data = await initLoad(normalized, interval, timeMs);
+      let data = await initLoad(normalized, interval, timeMs, { reverse: timeDirection === -1 });
       let coversSignalTime = hasKlineCoveringSignalTime(data, timeMs, iMs);
 
       if (!coversSignalTime) {
@@ -1526,7 +1524,7 @@ const Index = () => {
         // 首次取数可能刚好碰上短暂请求抖动；诊断确认行情存在时只重试一次，
         // 不把可恢复问题错误写成信号库的永久标记。
         if (diagnostic.status === "available") {
-          data = await initLoad(normalized, interval, timeMs);
+          data = await initLoad(normalized, interval, timeMs, { reverse: timeDirection === -1 });
           coversSignalTime = hasKlineCoveringSignalTime(data, timeMs, iMs);
         }
 
@@ -1991,7 +1989,7 @@ const Index = () => {
                               mainData={displayData}
                               mainSymbol={activeSymbol.replace("USDT", "/USDT")}
                               rawSymbol={activeSymbol}
-                              onLoadOlder={timeDirection === -1 ? noopLoadOlder : loadOlder}
+                              onLoadOlder={timeDirection === -1 ? loadNewerVoid : loadOlder}
                               loadingOlder={loadingOlder}
                               tradeHistory={timeDirection === -1 ? EMPTY_TRADE_HISTORY : tradeHistory}
                               displayTimestampTransform={reverseAxisTransform}

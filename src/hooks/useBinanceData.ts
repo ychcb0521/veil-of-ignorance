@@ -95,6 +95,9 @@ export function useBinanceData() {
   const ctxRef = useRef<{ symbol: string; interval: string }>({ symbol: "", interval: "" });
   const oldestRef = useRef<number>(Infinity);
   const noMoreRef = useRef(false);
+  const newestRef = useRef<number>(0);
+  const noMoreNewerRef = useRef(false);
+  const [loadingNewer, setLoadingNewer] = useState(false);
   const initLoadRequestIdRef = useRef(0);
 
   /** Direct ref access to allData — avoids stale closures in RAF loops */
@@ -110,25 +113,33 @@ export function useBinanceData() {
   }, []);
 
   const initLoad = useCallback(
-    async (symbol: string, interval: string, anchorTime: number) => {
+    async (symbol: string, interval: string, anchorTime: number, opts?: { reverse?: boolean }) => {
       const requestId = ++initLoadRequestIdRef.current;
       setLoading(true);
       setError(null);
 
       try {
-        const [historyData, futureData] = await Promise.all([
-          fetchBatch(symbol, interval, { endTime: anchorTime, limit: 1000 }),
-          fetchBatch(symbol, interval, { startTime: anchorTime + 1, limit: 300 }).catch(() => []),
-        ]);
-        if (historyData.length === 0) throw new Error("No data returned");
-
-        const merged = [...historyData];
-        if (futureData.length > 0) {
-          const seen = new Set(historyData.map((k) => k.time));
-          for (const k of futureData) {
-            if (!seen.has(k.time)) merged.push(k);
-          }
+        // 正放：锚点前 1000 根作历史 + 300 根前瞻缓冲。
+        // 倒放（镜像）：完全对称——锚点后 1000 根作「主观历史」（真实未来，铺在
+        // 镜像图左侧）+ 锚点前 300 根作倒走的流式缓冲。
+        const [historyData, futureData] = opts?.reverse
+          ? await Promise.all([
+              fetchBatch(symbol, interval, { startTime: anchorTime, limit: 1000 }),
+              fetchBatch(symbol, interval, { endTime: anchorTime - 1, limit: 300 }).catch(() => []),
+            ])
+          : await Promise.all([
+              fetchBatch(symbol, interval, { endTime: anchorTime, limit: 1000 }),
+              fetchBatch(symbol, interval, { startTime: anchorTime + 1, limit: 300 }).catch(() => []),
+            ]);
+        // 正放要求锚点前有历史；倒放的「历史」在锚点后，任一侧有数据即可开局。
+        if (opts?.reverse ? historyData.length === 0 && futureData.length === 0 : historyData.length === 0) {
+          throw new Error("No data returned");
         }
+
+        const seen = new Set(historyData.map((k) => k.time));
+        const extra = futureData.filter((k) => !seen.has(k.time));
+        // 倒放的 futureData 在锚点之前（真实更早），必须排在前面才保持升序。
+        const merged = opts?.reverse ? [...extra, ...historyData] : [...historyData, ...extra];
 
         if (requestId !== initLoadRequestIdRef.current) {
           return merged;
@@ -140,6 +151,8 @@ export function useBinanceData() {
         ctxRef.current = { symbol, interval };
         oldestRef.current = merged[0].time;
         noMoreRef.current = false;
+        newestRef.current = merged[merged.length - 1].time;
+        noMoreNewerRef.current = false;
         setAllDataAndRef(merged);
         return merged;
       } catch (e: any) {
@@ -155,6 +168,43 @@ export function useBinanceData() {
     },
     [setAllDataAndRef],
   );
+
+  /**
+   * 向后补更晚的 K 线（loadOlder 的镜像）。倒放时镜像图左沿 = 真实更晚的数据，
+   * 向左拖动即需要它；追加在数组尾部，保持升序。
+   */
+  const loadNewer = useCallback(async (): Promise<number> => {
+    if (loadingNewer || noMoreNewerRef.current) return 0;
+    const { symbol, interval } = ctxRef.current;
+    if (!symbol || newestRef.current <= 0) return 0;
+
+    setLoadingNewer(true);
+    try {
+      const startTime = newestRef.current + 1;
+      const newer = await fetchBatch(symbol, interval, { startTime, limit: 1000 });
+
+      if (newer.length === 0) {
+        noMoreNewerRef.current = true;
+        return 0;
+      }
+      if (newer.length < 1000) noMoreNewerRef.current = true;
+
+      newestRef.current = newer[newer.length - 1].time;
+
+      setAllDataAndRef((prev) => {
+        const existingLast = prev.length > 0 ? prev[prev.length - 1].time : -Infinity;
+        const unique = newer.filter((k) => k.time > existingLast);
+        return [...prev, ...unique];
+      });
+
+      return newer.length;
+    } catch (e: any) {
+      console.error("Failed to load newer data:", e);
+      return 0;
+    } finally {
+      setLoadingNewer(false);
+    }
+  }, [loadingNewer, setAllDataAndRef]);
 
   const loadOlder = useCallback(async (): Promise<number> => {
     if (loadingOlder || noMoreRef.current) return 0;
@@ -242,6 +292,8 @@ export function useBinanceData() {
     setAllDataAndRef([]);
     oldestRef.current = Infinity;
     noMoreRef.current = false;
+    newestRef.current = 0;
+    noMoreNewerRef.current = false;
     setError(null);
     setLoading(false);
   }, [setAllDataAndRef]);
@@ -251,9 +303,11 @@ export function useBinanceData() {
     allDataRef,
     loading,
     loadingOlder,
+    loadingNewer,
     error,
     initLoad,
     loadOlder,
+    loadNewer,
     getVisibleData,
     reset,
   };

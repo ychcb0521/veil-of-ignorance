@@ -1045,6 +1045,7 @@ function CandlestickChartComponent({
     scheduleViewportReflow(true);
   }, [scheduleViewportReflow, viewportRevision]);
 
+
   // ============================================================
   // Theme reactivity & Tooltip customization
   // ============================================================

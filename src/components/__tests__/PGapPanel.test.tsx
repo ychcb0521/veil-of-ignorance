@@ -160,6 +160,32 @@ describe('PGapPanel', () => {
     expect(content).toHaveTextContent('多头 K < S < T');
   });
 
+  it('显示动态赔率 b =（T − S）÷（S − K）', () => {
+    render(<PGapPanel currentPrice={100} pricePrecision={2} />);
+    setPrices(90, 120); // 赚 20 / 亏 10 → b = 2
+    expect(screen.getByTestId('p-gap-payoff-ratio')).toHaveTextContent('b 2.00');
+  });
+
+  it('b 是低调入口：点开呈现盈亏平衡胜率曲线，且门槛与 P₀ 一致', async () => {
+    render(<PGapPanel currentPrice={100} pricePrecision={2} />);
+    setPrices(90, 120);
+    setWinRate(60);
+    expect(screen.queryByTestId('p-gap-payoff-chart')).not.toBeInTheDocument();
+
+    const entry = screen.getByTestId('p-gap-payoff-ratio');
+    expect(entry.className).toContain('opacity-60');
+    fireEvent.click(entry);
+
+    const chart = await screen.findByTestId('p-gap-payoff-chart');
+    expect(chart).toHaveTextContent('P = 1 ÷ (1 + b)');
+    expect(screen.getByTestId('break-even-curve')).toBeInTheDocument();
+    // 恒等式：b=2 的平衡胜率 33.3% 即面板的基线概率 P₀
+    expect(screen.getByTestId('break-even-rate')).toHaveTextContent('33.3%');
+    expect(screen.getByTestId('p-gap-baseline')).toHaveTextContent('33.3%');
+    // 你的优势 = P − 门槛 = 60% − 33.3%
+    expect(screen.getByTestId('break-even-edge')).toHaveTextContent('+26.7%');
+  });
+
   it('是独立模块：自带 P_gap 表头，不再寄居在成交页签里', () => {
     render(<PGapPanel currentPrice={100} pricePrecision={2} />);
     expect(screen.getByText('P_gap')).toBeInTheDocument();
