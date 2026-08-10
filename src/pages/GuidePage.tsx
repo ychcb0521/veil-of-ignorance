@@ -637,6 +637,26 @@ export default function GuidePage() {
               <P>
                 下方的<strong>优势条</strong>把优势被价格吃掉的过程直接画出来：满格为你锚定 P 那一刻的 gap；价格越往 T 走，P₀ 越高，条就越短。改动 K、T 或 P 会重新锚定。
               </P>
+
+              <SubTitle>b 可落袋：现在止盈能拿到几个 R</SubTitle>
+              <P>
+                P 行下方是 <strong>b 可落袋</strong>——只问一件事：<strong>此刻立即平掉手上的多单，能落袋几个 R。</strong>它与目标 T 无关，只看已经持有的仓位：
+              </P>
+              <div className="my-3 rounded bg-muted/60 px-3 py-2 font-mono text-[11px] leading-relaxed text-foreground">
+                b<sub>可落袋</sub> = 当前未实现盈亏 ÷ 该多单的预期最大亏损 =（S − 多单开仓价）÷（开仓价 − K）
+              </div>
+              <P>
+                两种写法给出<strong>同一个数</strong>：因为预期最大亏损 = 名义仓位 × 价距 ÷ 开仓价 = 数量 × 价距，而未实现盈亏 =（S − 开仓价）× 数量，<strong>数量会约掉</strong>。它与交易战役里的单场盈亏比 bᵢ 同量纲，可以直接对照——<strong>+1.00R 就是「赚到了一个你原本准备亏掉的额度」</strong>，跌到止损则恰为 −1.00R。
+              </P>
+              <ul className="list-disc pl-6 text-[14px] text-foreground/90 space-y-1">
+                <li>持有多笔多单时用<strong>按数量加权的平均开仓价</strong>（标注「N 笔均价」）——加权均价正是让上式对总仓位成立的那个值。</li>
+                <li>盈利为绿、亏损为红；<strong>没有多单时直接写「当前无多单」</strong>，不拿 0 冒充。</li>
+                <li>止损 K 不在开仓价下方时不出数——那种情形下「预期最大亏损」本身就没有意义。</li>
+                <li>目前只统计<strong>多单</strong>，与主仓只做多的纪律一致。</li>
+              </ul>
+              <Highlight>
+                它和 gap 是一对：<strong>gap 说「这笔还值不值得继续持有」，b 可落袋说「现在收手能带走多少」。</strong>当 gap 已经逼近 0、而 b 可落袋是个可观的正数，那正是镜像止盈该机械执行的时刻——优势已经耗尽，但战果还在桌上。
+              </Highlight>
               <P>
                 P₀ 旁有一个低调的<strong>动态赔率 b =（T − S）÷（S − K）</strong>——此刻的盈亏比，随三个价格实时变动。它与基线概率是同一个数的两种算法：<strong>P₀ ≡ 1 ÷ (1 + b)</strong>。点击 b 打开<strong>盈亏平衡胜率曲线</strong>：横轴赔率、纵轴不亏所需的最低胜率，拖动滑条即是在问「若把赔率做到某个值，胜率门槛降到多少」；给出 P 后图中同时画出你与门槛的差额。曲线随赔率增大急速下降——b 从 1 到 2，门槛从 50% 掉到 33%，这正是「找赔率」比「硬提胜率」省力的原因。
               </P>

@@ -47,6 +47,37 @@ export function breakEvenWinRate(payoffRatio: number): number | null {
   return 1 / (1 + payoffRatio);
 }
 
+/**
+ * 可落袋盈亏比 b_可落袋 —— 此刻立即止盈能拿到几个 R。
+ *
+ *   b_可落袋 = 当前未实现盈亏 ÷ 该多单的预期最大亏损
+ *
+ * 注意数量会约掉，所以它等价于纯价格形式：
+ *   未实现盈亏 = (S − 开仓价) × 数量
+ *   预期最大亏损 L = 名义仓位 × 价距 ÷ 开仓价 = 数量 × 价距
+ *   ⇒ b_可落袋 = (S − 开仓价) ÷ (开仓价 − K)
+ * 两种读法给出同一个数，与战役里的 bᵢ =（已实现盈亏 ÷ Lᵢ）同一量纲，可直接对照。
+ *
+ * 多笔多单时传入按数量加权的平均开仓价——加权均价正是让上式对总仓位成立的那个值。
+ *
+ * @param s 现价
+ * @param entryPrice 多单（加权平均）开仓价
+ * @param k 止损价，用于度量预期最大亏损的价距
+ * @returns 正数=此刻落袋为盈，负数=此刻落袋为亏；无多单或止损不在开仓价下方时为 null
+ */
+export function computeBankableRatio(
+  s: number | null | undefined,
+  entryPrice: number | null | undefined,
+  k: number | null | undefined,
+): number | null {
+  if (!isFinitePrice(s) || !isFinitePrice(entryPrice) || !isFinitePrice(k)) return null;
+  // 多单的止损必须低于开仓价，否则「预期最大亏损」无意义（价距 ≤ 0）
+  const riskDistance = entryPrice - k;
+  if (riskDistance <= 0) return null;
+  const ratio = (s - entryPrice) / riskDistance;
+  return Number.isFinite(ratio) ? ratio : null;
+}
+
 function isFinitePrice(value: number | null | undefined): value is number {
   return typeof value === 'number' && Number.isFinite(value);
 }

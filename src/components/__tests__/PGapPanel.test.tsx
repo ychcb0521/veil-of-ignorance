@@ -186,6 +186,46 @@ describe('PGapPanel', () => {
     expect(screen.getByTestId('break-even-edge')).toHaveTextContent('+26.7%');
   });
 
+  it('b 可落袋：此刻立即止盈能拿到几个 R', () => {
+    // 开仓 100、止损 90 → 每 R = 10；现价 115 → +1.5R
+    render(<PGapPanel currentPrice={115} pricePrecision={2} longEntryPrice={100} longPositionCount={1} />);
+    setPrices(90, 130);
+    const bankable = screen.getByTestId('p-gap-bankable');
+    expect(bankable).toHaveTextContent('+1.50R');
+    expect(bankable).toHaveAttribute('data-bankable-state', 'positive');
+    expect(bankable).toHaveStyle({ color: '#0ECB81' });
+    expect(screen.getByText(/开仓 100\.00/)).toBeInTheDocument();
+  });
+
+  it('现价跌回开仓价下方时落袋即亏，转红', () => {
+    render(<PGapPanel currentPrice={95} pricePrecision={2} longEntryPrice={100} longPositionCount={1} />);
+    setPrices(90, 130);
+    const bankable = screen.getByTestId('p-gap-bankable');
+    expect(bankable).toHaveTextContent('-0.50R');
+    expect(bankable).toHaveAttribute('data-bankable-state', 'negative');
+    expect(bankable).toHaveStyle({ color: '#F6465D' });
+  });
+
+  it('没有多单时明说「当前无多单」，不臆造 R', () => {
+    render(<PGapPanel currentPrice={115} pricePrecision={2} />);
+    setPrices(90, 130);
+    const bankable = screen.getByTestId('p-gap-bankable');
+    expect(bankable).toHaveTextContent('当前无多单');
+    expect(bankable).toHaveAttribute('data-bankable-state', 'none');
+  });
+
+  it('止损不在开仓价下方时不出数——预期最大亏损无意义', () => {
+    render(<PGapPanel currentPrice={115} pricePrecision={2} longEntryPrice={100} longPositionCount={1} />);
+    setPrices(105, 130); // K 高于开仓价
+    expect(screen.getByTestId('p-gap-bankable')).toHaveTextContent('止损需低于开仓价');
+  });
+
+  it('多笔多单标注为均价', () => {
+    render(<PGapPanel currentPrice={115} pricePrecision={2} longEntryPrice={100} longPositionCount={3} />);
+    setPrices(90, 130);
+    expect(screen.getByText(/3 笔均价/)).toBeInTheDocument();
+  });
+
   it('是独立模块：自带 P_gap 表头，不再寄居在成交页签里', () => {
     render(<PGapPanel currentPrice={100} pricePrecision={2} />);
     expect(screen.getByText('P_gap')).toBeInTheDocument();

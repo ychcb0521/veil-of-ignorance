@@ -7,7 +7,7 @@
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { computeAdvantageGap } from '@/lib/advantageGap';
+import { computeAdvantageGap, computeBankableRatio } from '@/lib/advantageGap';
 import { BreakEvenCurve } from '@/components/BreakEvenCurve';
 
 interface Props {
@@ -22,6 +22,10 @@ interface Props {
   defaultWinRatePct?: number | null;
   /** 已了结战役数，用于标注默认值的样本量。 */
   winRateSampleCount?: number;
+  /** 当前该标的多单的按数量加权平均开仓价；无多单时为 null。 */
+  longEntryPrice?: number | null;
+  /** 当前多单笔数，用于标注这个均价来自几笔。 */
+  longPositionCount?: number;
 }
 
 /** 滑块围绕现价展开的半幅：±12% 足够覆盖常规止损/目标，又不至于精度过粗。 */
@@ -119,6 +123,8 @@ export function PGapPanel({
   onClose,
   defaultWinRatePct = null,
   winRateSampleCount = 0,
+  longEntryPrice = null,
+  longPositionCount = 0,
 }: Props) {
   const hasPrice = Number.isFinite(currentPrice) && currentPrice > 0;
   // K / T 用现价两侧的对称括号作起手，滑块才有落点；P 严格无默认值。
@@ -167,6 +173,12 @@ export function PGapPanel({
     const max = currentPrice * (1 + SLIDER_SPAN);
     return { min, max, step: Math.max((max - min) / 400, 10 ** -pricePrecision) };
   }, [currentPrice, hasPrice, pricePrecision]);
+
+  // 可落袋 R：只看已持有的多单（现价 vs 开仓价，以 K 度量的每 R 为单位），与目标 T 无关
+  const bankable = useMemo(
+    () => computeBankableRatio(hasPrice ? currentPrice : null, longEntryPrice, stopLoss),
+    [currentPrice, hasPrice, longEntryPrice, stopLoss],
+  );
 
   const gap = result.valid ? result.gap : null;
   const positive = gap != null && gap > 0;
@@ -481,6 +493,39 @@ export function PGapPanel({
             onChange={next => setWinRatePct(next == null ? null : clamp(next, 0, 100))}
             onCommit={reanchor}
           />
+
+          {/* b_可落袋：此刻立即止盈能拿到几个 R —— 只与已持有的多单有关，与 T 无关 */}
+          <div className="flex h-[30px] items-center justify-between gap-2 px-3">
+            <span className="flex items-baseline gap-1 select-none">
+              <span className="font-mono text-[11px] font-semibold leading-none text-[#B080FF]">b</span>
+              <span className="text-[9px] text-gray-500 dark:text-[#848e9c]">可落袋</span>
+              {longEntryPrice != null && (
+                <span className="text-[9px] text-gray-400 dark:text-[#5e6673]">
+                  开仓 {longEntryPrice.toFixed(pricePrecision)}
+                  {longPositionCount > 1 && ` · ${longPositionCount} 笔均价`}
+                </span>
+              )}
+            </span>
+            {bankable == null ? (
+              <span
+                data-testid="p-gap-bankable"
+                data-bankable-state="none"
+                className="font-mono text-[10px] text-gray-400 dark:text-[#5e6673]"
+              >
+                {longEntryPrice == null ? '当前无多单' : '止损需低于开仓价'}
+              </span>
+            ) : (
+              <span
+                data-testid="p-gap-bankable"
+                data-bankable-state={bankable > 0 ? 'positive' : bankable < 0 ? 'negative' : 'flat'}
+                title="此刻立即止盈能落袋的 R 数 =（现价 − 多单开仓价）÷（开仓价 − 止损 K）"
+                className="font-mono text-[13px] font-semibold tabular-nums"
+                style={{ color: bankable > 0 ? GREEN : bankable < 0 ? RED : undefined }}
+              >
+                {`${bankable > 0 ? '+' : ''}${bankable.toFixed(2)}R`}
+              </span>
+            )}
+          </div>
 
           {/* P 默认值出处：点一下可退回战役胜率，方便把主观判断和历史实绩对照 */}
           {defaultWinRatePct != null && (

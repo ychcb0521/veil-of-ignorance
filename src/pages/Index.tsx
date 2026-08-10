@@ -206,6 +206,23 @@ const Index = () => {
   const [isMarketDataCollapsed, setIsMarketDataCollapsed] = useState(true);
   const [isPGapCollapsed, setIsPGapCollapsed] = useState(false);
   const campaignWinRate = useCampaignWinRate();
+  // 当前标的多单的加权平均开仓价，供 P_gap 的「可落袋 R」使用。
+  // 按数量加权正是让「总未实现盈亏 ÷ 总预期最大亏损」成立的那个均价。
+  const activeLongEntry = useMemo(() => {
+    let qty = 0;
+    let notional = 0;
+    for (const position of activeSymbolPositions) {
+      if (position.side !== "LONG") continue;
+      const q = Number(position.quantity);
+      const e = Number(position.entryPrice);
+      if (!Number.isFinite(q) || q <= 0 || !Number.isFinite(e) || e <= 0) continue;
+      qty += q;
+      notional += q * e;
+      }
+    return qty > 0
+      ? { price: notional / qty, count: activeSymbolPositions.filter(p => p.side === "LONG").length }
+      : { price: null as number | null, count: 0 };
+  }, [activeSymbolPositions]);
   const [marketDataTab, setMarketDataTab] = useState<MarketDataTab>("orderBook");
 
   const coolingOff = useCoolingOff();
@@ -2029,6 +2046,8 @@ const Index = () => {
                                       onToggleCollapsed={() => setIsPGapCollapsed(true)}
                                       defaultWinRatePct={campaignWinRate.winRate == null ? null : campaignWinRate.winRate * 100}
                                       winRateSampleCount={campaignWinRate.resolvedCount}
+                                      longEntryPrice={activeLongEntry.price}
+                                      longPositionCount={activeLongEntry.count}
                                     />
                                   </ResizablePanel>
                                   <ResizableHandle
@@ -2058,6 +2077,8 @@ const Index = () => {
                                       onToggleCollapsed={() => setIsPGapCollapsed((v) => !v)}
                                       defaultWinRatePct={campaignWinRate.winRate == null ? null : campaignWinRate.winRate * 100}
                                       winRateSampleCount={campaignWinRate.resolvedCount}
+                                      longEntryPrice={activeLongEntry.price}
+                                      longPositionCount={activeLongEntry.count}
                                     />
                                   </div>
                                   <div

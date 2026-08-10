@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { breakEvenWinRate, computeAdvantageGap } from '../advantageGap';
+import { breakEvenWinRate, computeAdvantageGap, computeBankableRatio } from '../advantageGap';
 
 describe('computeAdvantageGap', () => {
   it('多头 K < S < T：P₀ 为已走过的距离占全程的比例', () => {
@@ -85,6 +85,36 @@ describe('computeAdvantageGap', () => {
     expect(breakEvenWinRate(0)).toBe(1);
     expect(breakEvenWinRate(-1)).toBeNull();
     expect(breakEvenWinRate(Number.NaN)).toBeNull();
+  });
+
+  it('b_可落袋：此刻立即止盈能拿到几个 R', () => {
+    // 开仓 100、止损 90 → 每 R = 10；现价 115 → 已浮盈 1.5R
+    expect(computeBankableRatio(115, 100, 90)).toBeCloseTo(1.5, 12);
+    // 现价回落到开仓价下方 → 落袋即亏
+    expect(computeBankableRatio(95, 100, 90)).toBeCloseTo(-0.5, 12);
+    // 恰好在开仓价 → 0R
+    expect(computeBankableRatio(100, 100, 90)).toBe(0);
+    // 跌到止损 → −1R，正是「预期最大亏损」的定义
+    expect(computeBankableRatio(90, 100, 90)).toBeCloseTo(-1, 12);
+  });
+
+  it('b_可落袋 与「未实现盈亏 ÷ 预期最大亏损」等价——数量会约掉', () => {
+    const entry = 100;
+    const k = 92;
+    const s = 118;
+    for (const qty of [0.5, 3, 250]) {
+      const unrealized = (s - entry) * qty;
+      // L = 名义仓位 × 价距 ÷ 开仓价 = qty × 价距
+      const expectedMaxLoss = (qty * entry) * ((entry - k) / entry);
+      expect(computeBankableRatio(s, entry, k)).toBeCloseTo(unrealized / expectedMaxLoss, 12);
+    }
+  });
+
+  it('无多单或止损不在开仓价下方时不出数', () => {
+    expect(computeBankableRatio(115, null, 90)).toBeNull();   // 没有多单
+    expect(computeBankableRatio(115, 100, 100)).toBeNull();   // 价距为 0
+    expect(computeBankableRatio(115, 100, 110)).toBeNull();   // 止损高于开仓价
+    expect(computeBankableRatio(Number.NaN, 100, 90)).toBeNull();
   });
 
   it('缺少任一价格或拿到非有限数时判为未完成', () => {
