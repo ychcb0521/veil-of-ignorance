@@ -537,6 +537,27 @@ export default function GuidePage() {
                 时光机的价值不是“快进看答案”，而是在看不到未来的条件下，把同一类行情反复练到动作稳定。倍速只是提高训练密度，不能替代下单前的判断。
               </Highlight>
 
+              <SubTitle>盘面指标</SubTitle>
+              <P>
+                主图右上角的<strong>「指标」</strong>入口打开指标面板：可搜索、可按<strong>趋势 / 动量 / 波动率 / 量能</strong>分类筛选。目录共 106 项，其中 <strong>43 项已实现</strong>可直接加载，未实现的条目在列表中灰显、点不动——<strong>不会给你一条画不出数的空线</strong>。叠加类指标（均线、通道等）画在主图上，震荡类指标各占一个副图窗格。
+              </P>
+              <SubTitle>衡量波动率方差：HV 历史波动率</SubTitle>
+              <P>
+                波动率分类下的<strong>「历史波动率(方差)」</strong>就是直接衡量收益方差的那一个。它不是看 K 线振幅，而是先取<strong>对数收益</strong> rᵢ = ln(收盘ᵢ ÷ 收盘ᵢ₋₁)，在滚动窗口内算<strong>样本方差</strong>（除以 n−1），开平方得标准差，再按周期<strong>年化</strong>成百分数：
+              </P>
+              <div className="my-3 rounded bg-muted/60 px-3 py-2 font-mono text-[11px] leading-relaxed text-foreground">
+                σ<sub>年化</sub> = √( Σ(rᵢ − r̄)² ÷ (N−1) ) × √(全年毫秒数 ÷ 单根周期毫秒数) × 100%
+              </div>
+              <ul className="list-disc pl-6 text-[14px] text-foreground/90 space-y-1">
+                <li><strong>年化系数自动适配周期。</strong>系数由相邻 K 线的时间戳推断（加密市场按 7×24 全年计），所以你在 1m 和 1h 之间切换，读数口径不变、可直接横向比较——这正是「年化」的意义所在。</li>
+                <li><strong>两条线。</strong>主线是年化 σ%，另一条是半窗滚动均值的平滑线，用来看当前波动率是高于还是低于自己近期的常态。</li>
+                <li><strong>宁缺勿假。</strong>窗口未满的前 N 根、以及被无效价格污染到的窗口，一律留空不画，不会用残缺样本凑一个数出来。</li>
+                <li>默认窗口 20 根。窗口越短越跟手、噪声越大；越长越平滑、越滞后。</li>
+              </ul>
+              <Highlight>
+                这条线回答的是「<strong>现在这段行情比平时躁动多少</strong>」。它与 P_gap 是互补的两件事：P_gap 用 K 与 T 的距离度量你<strong>主动设定</strong>的风险几何，HV 度量市场<strong>客观呈现</strong>的波动幅度。同样的止损距离，在高 HV 环境里被扫的概率要高得多——把止损放在多远才不算「送」，本就该随 HV 调整。
+              </Highlight>
+
               <SubTitle>多币种时间模式：同步 / 隔离</SubTitle>
               <P>
                 在多个标的之间切换训练时，时光机有两种推进时间的方式。开关收在顶部 Header 那个极小、近乎隐形的符号里，<strong>点开才展开</strong>；系统默认 <strong>同步</strong>。
