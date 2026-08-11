@@ -18,6 +18,7 @@ import {
   createCampaignFromTradeRecords,
   permanentlyDeleteCampaign,
   suggestLegRoles,
+  suggestOrphanRecordRoles,
   validateClassification,
 } from '@/lib/journalApi';
 import type {
@@ -107,44 +108,6 @@ function priceLabel(value: number | null | undefined) {
   return typeof value === 'number' && Number.isFinite(value) ? value.toFixed(4) : '—';
 }
 
-function suggestOrphanRecordRole(item: Extract<ClassifiableItem, { kind: 'orphanRecord' }>, index: number, ordered: ClassifiableItem[]): ClassifiableSuggestion {
-  if (index === 0) {
-    return {
-      itemId: item.id,
-      suggestedRole: 'main_open',
-      confidence: 'low',
-      reason: '第一条仓位历史记录默认作为主力开仓',
-    };
-  }
-
-  const main = ordered.find(candidate => candidate.id !== item.id && roleCandidateDirection(candidate) === roleCandidateDirection(ordered[0])) ?? ordered[0];
-  const sameDirection = itemDirection(item) === itemDirection(main);
-  if (sameDirection) {
-    const priorSameDirectionCount = ordered
-      .slice(0, index)
-      .filter(candidate => itemDirection(candidate) === itemDirection(item))
-      .length;
-    const addRole = MAIN_ADD_ROLES[Math.min(Math.max(priorSameDirectionCount - 1, 0), MAIN_ADD_ROLES.length - 1)] ?? 'main_add_1';
-    return {
-      itemId: item.id,
-      suggestedRole: addRole,
-      confidence: 'medium',
-      reason: '同向后续仓位，建议作为主力加仓 leg',
-    };
-  }
-
-  return {
-    itemId: item.id,
-    suggestedRole: 'hedge_rolling',
-    confidence: 'low',
-    reason: '反向历史成交更像滚动对冲或独立单，请按实际意图确认',
-  };
-}
-
-function roleCandidateDirection(item: ClassifiableItem): 'long' | 'short' {
-  return itemDirection(item);
-}
-
 function buildMixedValidation(
   ordered: ClassifiableItem[],
   roleMap: Record<string, LegRole | ''>,
@@ -182,8 +145,29 @@ export function ClassifyAsNewCampaignDialog({ open, onOpenChange, items, onCreat
     () => new Map(suggestLegRoles(ordered.flatMap(item => item.kind === 'journal' ? [item.journal] : [])).map(item => [item.journalId, item])),
     [ordered],
   );
+  // 裸记录批量建议：止盈1 → 镜像止盈；同向里最后平掉的 → 主力。
+  const orphanSuggestions = useMemo(() => {
+    const orphans = ordered.filter(
+      (item): item is Extract<ClassifiableItem, { kind: 'orphanRecord' }> => item.kind === 'orphanRecord',
+    );
+    if (orphans.length === 0) return new Map<string, ReturnType<typeof suggestOrphanRecordRoles>[number]>();
+    const mainDirection = itemDirection(ordered[0]);
+    return new Map(
+      suggestOrphanRecordRoles(
+        orphans.map(item => ({
+          id: item.id,
+          direction: itemDirection(item),
+          openTimeMs: item.record.openTime || 0,
+          closeTimeMs: item.record.closeTime || null,
+          exitMethod: item.record.exit_method ?? null,
+        })),
+        mainDirection,
+      ).map(suggestion => [suggestion.id, suggestion]),
+    );
+  }, [ordered]);
+
   const suggestions = useMemo<ClassifiableSuggestion[]>(
-    () => ordered.map((item, index) => {
+    () => ordered.map(item => {
       if (item.kind === 'journal') {
         const suggestion = journalSuggestions.get(item.journal.id);
         return suggestion
@@ -200,9 +184,22 @@ export function ClassifyAsNewCampaignDialog({ open, onOpenChange, items, onCreat
               reason: '未能推断角色，默认建议 main_open',
             };
       }
-      return suggestOrphanRecordRole(item, index, ordered);
+      const suggestion = orphanSuggestions.get(item.id);
+      return suggestion
+        ? {
+            itemId: item.id,
+            suggestedRole: suggestion.suggestedRole,
+            confidence: suggestion.confidence,
+            reason: suggestion.reason,
+          }
+        : {
+            itemId: item.id,
+            suggestedRole: 'main_open',
+            confidence: 'low',
+            reason: '未能推断角色，默认建议 main_open',
+          };
     }),
-    [journalSuggestions, ordered],
+    [journalSuggestions, orphanSuggestions, ordered],
   );
   const suggestionMap = useMemo(() => new Map(suggestions.map(item => [item.itemId, item])), [suggestions]);
   const firstItem = ordered[0] ?? null;

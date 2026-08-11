@@ -97,6 +97,7 @@ vi.mock('@/lib/journalApi', () => ({
   listUnclassifiedItems: mockListUnclassifiedItems,
   listAllCampaigns: vi.fn(async () => []),
   suggestLegRoles: vi.fn(() => []),
+  suggestOrphanRecordRoles: vi.fn(() => []),
   detachJournalFromCampaign: vi.fn(),
 }));
 

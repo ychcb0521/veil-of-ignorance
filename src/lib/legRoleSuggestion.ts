@@ -82,3 +82,96 @@ export function suggestLegRoles(journals: TradeJournal[]): SuggestedLegRole[] {
 
   return suggestions;
 }
+
+// ===== 裸仓位历史记录的角色建议（归类历史交易用） =====
+
+export interface OrphanRecordRoleInput {
+  id: string;
+  direction: 'long' | 'short';
+  openTimeMs: number;
+  /** 平仓时间（毫秒）；0 / null 视为仍持有。 */
+  closeTimeMs: number | null;
+  exitMethod?: string | null;
+}
+
+export interface OrphanRecordRoleSuggestion {
+  id: string;
+  suggestedRole: LegRole;
+  confidence: SuggestedLegRole['confidence'];
+  reason: string;
+}
+
+/**
+ * 裸 record 归类的角色语义（与实盘策略对齐）：
+ *   ① 交易记录里「止盈1」平仓的那笔就是镜像止盈——镜像多单挂止盈先落袋；
+ *   ② 同向仓位里【留到最后平掉】的那笔才是主力 main_open——主力按定义
+ *      比镜像活得久，仍持有的记录视为最晚平掉；
+ *   ③ 其余同向记录按开仓先后排为主力加仓；反向记录仍建议滚动对冲。
+ * 若最后平掉的那笔恰好也是止盈1（例如全部记录都走了止盈1），主力判定优先——
+ * 战役必须有 main_open，镜像身份让位。
+ */
+export function suggestOrphanRecordRoles(
+  records: OrphanRecordRoleInput[],
+  mainDirection: 'long' | 'short',
+): OrphanRecordRoleSuggestion[] {
+  const effectiveClose = (record: OrphanRecordRoleInput): number =>
+    record.closeTimeMs != null && record.closeTimeMs > 0 ? record.closeTimeMs : Number.POSITIVE_INFINITY;
+
+  const sameDirection = records.filter(record => record.direction === mainDirection);
+  let mainId: string | null = null;
+  for (const record of sameDirection) {
+    if (mainId == null) {
+      mainId = record.id;
+      continue;
+    }
+    const current = sameDirection.find(candidate => candidate.id === mainId)!;
+    if (
+      effectiveClose(record) > effectiveClose(current)
+      || (effectiveClose(record) === effectiveClose(current) && record.openTimeMs < current.openTimeMs)
+    ) {
+      mainId = record.id;
+    }
+  }
+
+  const byOpenTime = [...records].sort((a, b) => a.openTimeMs - b.openTimeMs);
+  let addCount = 0;
+  const out: OrphanRecordRoleSuggestion[] = [];
+  for (const record of byOpenTime) {
+    if (record.direction !== mainDirection) {
+      out.push({
+        id: record.id,
+        suggestedRole: 'hedge_rolling',
+        confidence: 'low',
+        reason: '反向历史成交更像滚动对冲或独立单，请按实际意图确认',
+      });
+      continue;
+    }
+    if (record.id === mainId) {
+      out.push({
+        id: record.id,
+        suggestedRole: 'main_open',
+        confidence: 'high',
+        reason: '同向仓位中留到最后平掉的一笔，即主力',
+      });
+      continue;
+    }
+    if (record.exitMethod === 'tp1') {
+      out.push({
+        id: record.id,
+        suggestedRole: 'mirror_tp',
+        confidence: 'high',
+        reason: '以「止盈1」平仓 = 镜像止盈落袋',
+      });
+      continue;
+    }
+    const addRole = MAIN_ADD_ROLES[Math.min(addCount, MAIN_ADD_ROLES.length - 1)] ?? 'reentry_main';
+    addCount += 1;
+    out.push({
+      id: record.id,
+      suggestedRole: addRole,
+      confidence: 'medium',
+      reason: '同向后续仓位，建议作为主力加仓 leg',
+    });
+  }
+  return out;
+}

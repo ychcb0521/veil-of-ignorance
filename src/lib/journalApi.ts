@@ -3489,6 +3489,8 @@ export async function detachCampaignLegFromCampaign(
   }
 }
 
+export { suggestOrphanRecordRoles } from '@/lib/legRoleSuggestion';
+
 export function suggestLegRoles(journals: TradeJournal[]): SuggestedLegRole[] {
   return suggestLegRolesHeuristic(journals);
 }
