@@ -214,10 +214,47 @@ describe('PGapPanel', () => {
     expect(bankable).toHaveAttribute('data-bankable-state', 'none');
   });
 
-  it('止损不在开仓价下方时不出数——预期最大亏损无意义', () => {
+  it('K₀ 不在开仓价下方时不出数——预期最大亏损无意义', () => {
+    // 无锚可用 → 退回情景 K=105，高于开仓价 → 不出数并提示
     render(<PGapPanel currentPrice={115} pricePrecision={2} longEntryPrice={100} longPositionCount={1} />);
-    setPrices(105, 130); // K 高于开仓价
-    expect(screen.getByTestId('p-gap-bankable')).toHaveTextContent('止损需低于开仓价');
+    setPrices(105, 130);
+    expect(screen.getByTestId('p-gap-bankable')).toHaveTextContent('K₀ 需低于开仓价');
+  });
+
+  it('K₀ 默认取该多单最早设定的止损，不跟随面板情景 K', () => {
+    render(<PGapPanel currentPrice={115} pricePrecision={2} longEntryPrice={100} longPositionCount={1} longRiskAnchorPrice={90} />);
+    // 情景 K 拖到开仓价上方——以前这会杀掉读数；现在分母用锚 K₀=90，照常出数
+    setPrices(105, 130);
+    expect(screen.getByTestId('p-gap-riskk-number')).toHaveValue(90);
+    expect(screen.getByTestId('p-gap-bankable')).toHaveTextContent('+1.50R');
+  });
+
+  it('K₀ 可手动修改，修改立即生效', () => {
+    render(<PGapPanel currentPrice={115} pricePrecision={2} longEntryPrice={100} longPositionCount={1} longRiskAnchorPrice={90} />);
+    setPrices(90, 130);
+    fireEvent.change(screen.getByTestId('p-gap-riskk-number'), { target: { value: '95' } });
+    // 每 R 从 10 变 5 → +3.00R
+    expect(screen.getByTestId('p-gap-bankable')).toHaveTextContent('+3.00R');
+    // 清空 → 恢复默认锚 90 → +1.50R
+    fireEvent.change(screen.getByTestId('p-gap-riskk-number'), { target: { value: '' } });
+    expect(screen.getByTestId('p-gap-bankable')).toHaveTextContent('+1.50R');
+  });
+
+  it('无可追溯止损时退回面板情景 K；切换标的清掉手动锚', () => {
+    const { rerender } = render(
+      <PGapPanel currentPrice={115} pricePrecision={2} longEntryPrice={100} longPositionCount={1} symbol="AUSDT" />,
+    );
+    setPrices(90, 130); // 无锚 → 用情景 K=90
+    expect(screen.getByTestId('p-gap-bankable')).toHaveTextContent('+1.50R');
+
+    fireEvent.change(screen.getByTestId('p-gap-riskk-number'), { target: { value: '95' } });
+    expect(screen.getByTestId('p-gap-bankable')).toHaveTextContent('+3.00R');
+
+    // 换标的 → 手动锚失效，退回情景 K
+    rerender(
+      <PGapPanel currentPrice={115} pricePrecision={2} longEntryPrice={100} longPositionCount={1} symbol="BUSDT" />,
+    );
+    expect(screen.getByTestId('p-gap-bankable')).toHaveTextContent('+1.50R');
   });
 
   it('多笔多单标注为均价', () => {

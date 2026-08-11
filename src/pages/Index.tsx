@@ -28,6 +28,7 @@ import { CoolingOffModal, useCoolingOff } from "@/components/CoolingOffModal";
 import { getConditionalTriggerDecisionFromRange } from "@/lib/conditionalOrders";
 import { fetchCanonicalTimePriceAt } from "@/lib/canonicalTimePrice";
 import { applyCurrentPriceToVisibleData } from "@/lib/visibleDataPrice";
+import { earliestLongStopPrice } from "@/lib/longRiskAnchor";
 import {
   getReverseVisibleData,
   mirrorSettledBar,
@@ -143,6 +144,7 @@ const Index = () => {
     setPositionsMap,
     ordersMap,
     setOrdersMap,
+    filledOrders,
     setFilledOrders,
     priceMap,
     setPriceMap,
@@ -223,6 +225,11 @@ const Index = () => {
       ? { price: notional / qty, count: activeSymbolPositions.filter(p => p.side === "LONG").length }
       : { price: null as number | null, count: 0 };
   }, [activeSymbolPositions]);
+  // b_可落袋 的风险锚：该多单最早设定的止损（在挂 + 已触发里 createdAt 最早）。
+  const activeLongRiskAnchor = useMemo(
+    () => earliestLongStopPrice(activeSymbol, activeSymbolPositions, activeSymbolOrders, filledOrders),
+    [activeSymbol, activeSymbolPositions, activeSymbolOrders, filledOrders],
+  );
   const [marketDataTab, setMarketDataTab] = useState<MarketDataTab>("orderBook");
 
   const coolingOff = useCoolingOff();
@@ -2048,6 +2055,8 @@ const Index = () => {
                                       winRateSampleCount={campaignWinRate.resolvedCount}
                                       longEntryPrice={activeLongEntry.price}
                                       longPositionCount={activeLongEntry.count}
+                                      longRiskAnchorPrice={activeLongRiskAnchor}
+                                      symbol={activeSymbol}
                                     />
                                   </ResizablePanel>
                                   <ResizableHandle
@@ -2079,6 +2088,8 @@ const Index = () => {
                                       winRateSampleCount={campaignWinRate.resolvedCount}
                                       longEntryPrice={activeLongEntry.price}
                                       longPositionCount={activeLongEntry.count}
+                                      longRiskAnchorPrice={activeLongRiskAnchor}
+                                      symbol={activeSymbol}
                                     />
                                   </div>
                                   <div

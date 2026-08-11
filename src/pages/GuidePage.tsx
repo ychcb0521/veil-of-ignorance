@@ -643,15 +643,17 @@ export default function GuidePage() {
                 P 行下方是 <strong>b 可落袋</strong>——只问一件事：<strong>此刻立即平掉手上的多单，能落袋几个 R。</strong>它与目标 T 无关，只看已经持有的仓位：
               </P>
               <div className="my-3 rounded bg-muted/60 px-3 py-2 font-mono text-[11px] leading-relaxed text-foreground">
-                b<sub>可落袋</sub> = 当前未实现盈亏 ÷ 该多单的预期最大亏损 =（S − 多单开仓价）÷（开仓价 − K）
+                b<sub>可落袋</sub> = 当前未实现盈亏 ÷ 该多单的预期最大亏损 =（S − 多单开仓价）÷（开仓价 − K₀）
               </div>
               <P>
                 两种写法给出<strong>同一个数</strong>：因为预期最大亏损 = 名义仓位 × 价距 ÷ 开仓价 = 数量 × 价距，而未实现盈亏 =（S − 开仓价）× 数量，<strong>数量会约掉</strong>。它与交易战役里的单场盈亏比 bᵢ 同量纲，可以直接对照——<strong>+1.00R 就是「赚到了一个你原本准备亏掉的额度」</strong>，跌到止损则恰为 −1.00R。
               </P>
               <ul className="list-disc pl-6 text-[14px] text-foreground/90 space-y-1">
+                <li><strong>分母用风险锚 K₀，不用面板上的情景 K。</strong>K₀ 默认取该多单<strong>最早设定的止损</strong>（在挂与已触发的止损委托里委托时间最早那张）——它定义了入场时承担的预期最大亏损，后来把止损上移是管理动作，不改写这个锚；与战役指标「初始风险边界不随后续修改移动」同一口径。面板上的 K 滑条只做情景推演，随手一拖不影响可落袋读数。</li>
+                <li>K₀ 显示为一个小输入框，<strong>可手动修改</strong>（比如止损从未挂成委托、只在纸上）；清空即恢复默认；改过的值在切换标的时失效。找不到任何可追溯止损时才退回情景 K。</li>
                 <li>持有多笔多单时用<strong>按数量加权的平均开仓价</strong>（标注「N 笔均价」）——加权均价正是让上式对总仓位成立的那个值。</li>
                 <li>盈利为绿、亏损为红；<strong>没有多单时直接写「当前无多单」</strong>，不拿 0 冒充。</li>
-                <li>止损 K 不在开仓价下方时不出数——那种情形下「预期最大亏损」本身就没有意义。</li>
+                <li>K₀ 不在开仓价下方时不出数——那种情形下「预期最大亏损」本身就没有意义。</li>
                 <li>目前只统计<strong>多单</strong>，与主仓只做多的纪律一致。</li>
               </ul>
               <Highlight>

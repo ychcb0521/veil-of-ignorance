@@ -26,6 +26,10 @@ interface Props {
   longEntryPrice?: number | null;
   /** 当前多单笔数，用于标注这个均价来自几笔。 */
   longPositionCount?: number;
+  /** 该多单最早设定的止损价（风险锚 K₀），b_可落袋 的默认分母；无可追溯止损时为 null。 */
+  longRiskAnchorPrice?: number | null;
+  /** 当前标的；切换标的时清掉手动改过的 K₀。 */
+  symbol?: string;
 }
 
 /** 滑块围绕现价展开的半幅：±12% 足够覆盖常规止损/目标，又不至于精度过粗。 */
@@ -125,6 +129,8 @@ export function PGapPanel({
   winRateSampleCount = 0,
   longEntryPrice = null,
   longPositionCount = 0,
+  longRiskAnchorPrice = null,
+  symbol = '',
 }: Props) {
   const hasPrice = Number.isFinite(currentPrice) && currentPrice > 0;
   // K / T 用现价两侧的对称括号作起手，滑块才有落点；P 严格无默认值。
@@ -174,10 +180,19 @@ export function PGapPanel({
     return { min, max, step: Math.max((max - min) / 400, 10 ** -pricePrecision) };
   }, [currentPrice, hasPrice, pricePrecision]);
 
-  // 可落袋 R：只看已持有的多单（现价 vs 开仓价，以 K 度量的每 R 为单位），与目标 T 无关
+  // b_可落袋 的分母锚 K₀：手动值 > 该多单最早设定的止损（预期最大亏损所在位）> 面板情景 K。
+  // 面板上的 K 滑条是拿来做情景推演的，随手一拖不该改写「入场时承担的风险」，
+  // 所以可落袋的分母必须有自己的锚，只在无锚可用时才退回情景 K。
+  const [manualRiskK, setManualRiskK] = useState<number | null>(null);
+  useEffect(() => {
+    setManualRiskK(null); // 换标的后旧的手动锚无意义
+  }, [symbol]);
+  const effectiveRiskK = manualRiskK ?? longRiskAnchorPrice ?? stopLoss;
+
+  // 可落袋 R：只看已持有的多单（现价 vs 开仓价，以 K₀ 度量的每 R 为单位），与目标 T 无关
   const bankable = useMemo(
-    () => computeBankableRatio(hasPrice ? currentPrice : null, longEntryPrice, stopLoss),
-    [currentPrice, hasPrice, longEntryPrice, stopLoss],
+    () => computeBankableRatio(hasPrice ? currentPrice : null, longEntryPrice, effectiveRiskK),
+    [currentPrice, hasPrice, longEntryPrice, effectiveRiskK],
   );
 
   const gap = result.valid ? result.gap : null;
@@ -494,7 +509,8 @@ export function PGapPanel({
             onCommit={reanchor}
           />
 
-          {/* b_可落袋：此刻立即止盈能拿到几个 R —— 只与已持有的多单有关，与 T 无关 */}
+          {/* b_可落袋：此刻立即止盈能拿到几个 R —— 只与已持有的多单有关，与 T 无关。
+              分母锚 K₀ 默认取该多单最早设定的止损（预期最大亏损所在位），可手动改。 */}
           <div className="flex h-[30px] items-center justify-between gap-2 px-3">
             <span className="flex min-w-0 items-baseline gap-1 select-none">
               <span className="font-mono text-[11px] font-semibold leading-none text-[#B080FF]">b</span>
@@ -506,25 +522,49 @@ export function PGapPanel({
                 </span>
               )}
             </span>
-            {bankable == null ? (
-              <span
-                data-testid="p-gap-bankable"
-                data-bankable-state="none"
-                className="font-mono text-[10px] text-gray-400 dark:text-[#5e6673]"
-              >
-                {longEntryPrice == null ? '当前无多单' : '止损需低于开仓价'}
-              </span>
-            ) : (
-              <span
-                data-testid="p-gap-bankable"
-                data-bankable-state={bankable > 0 ? 'positive' : bankable < 0 ? 'negative' : 'flat'}
-                title="此刻立即止盈能落袋的 R 数 =（现价 − 多单开仓价）÷（开仓价 − 止损 K）"
-                className="font-mono text-[clamp(11px,4.8cqw,13px)] font-semibold tabular-nums"
-                style={{ color: bankable > 0 ? GREEN : bankable < 0 ? RED : undefined }}
-              >
-                {`${bankable > 0 ? '+' : ''}${bankable.toFixed(2)}R`}
-              </span>
-            )}
+            <span className="flex flex-none items-center gap-1.5">
+              {longEntryPrice != null && (
+                <label className="flex items-center gap-0.5" title="风险锚 K₀：默认取该多单最早设定的止损（它定义预期最大亏损）；可手动修改，清空即恢复默认。面板上的 K 滑条只做情景推演，不影响此锚。">
+                  <span
+                    className={`font-mono text-[9px] leading-none ${manualRiskK != null ? 'text-[#B080FF]' : 'text-gray-400 dark:text-[#5e6673]'}`}
+                  >
+                    K₀
+                  </span>
+                  <input
+                    data-testid="p-gap-riskk-number"
+                    type="number"
+                    inputMode="decimal"
+                    step={10 ** -pricePrecision}
+                    placeholder="—"
+                    value={effectiveRiskK == null ? '' : effectiveRiskK}
+                    onChange={event => {
+                      const next = Number.parseFloat(event.target.value);
+                      setManualRiskK(Number.isFinite(next) ? next : null);
+                    }}
+                    className="h-[20px] w-[clamp(48px,20cqw,66px)] rounded border border-gray-200 bg-gray-50 px-1 text-right font-mono text-[9px] tabular-nums text-gray-900 outline-none transition-colors placeholder:text-gray-400 focus:border-[#B080FF] focus:bg-white dark:border-[#2b3139] dark:bg-[#161a1e] dark:text-[#EAECEF] dark:placeholder:text-[#5e6673] dark:focus:bg-[#12161a]"
+                  />
+                </label>
+              )}
+              {bankable == null ? (
+                <span
+                  data-testid="p-gap-bankable"
+                  data-bankable-state="none"
+                  className="whitespace-nowrap font-mono text-[10px] text-gray-400 dark:text-[#5e6673]"
+                >
+                  {longEntryPrice == null ? '当前无多单' : 'K₀ 需低于开仓价'}
+                </span>
+              ) : (
+                <span
+                  data-testid="p-gap-bankable"
+                  data-bankable-state={bankable > 0 ? 'positive' : bankable < 0 ? 'negative' : 'flat'}
+                  title="此刻立即止盈能落袋的 R 数 =（现价 − 多单开仓价）÷（开仓价 − K₀）"
+                  className="whitespace-nowrap font-mono text-[clamp(11px,4.8cqw,13px)] font-semibold tabular-nums"
+                  style={{ color: bankable > 0 ? GREEN : bankable < 0 ? RED : undefined }}
+                >
+                  {`${bankable > 0 ? '+' : ''}${bankable.toFixed(2)}R`}
+                </span>
+              )}
+            </span>
           </div>
 
           {/* P 默认值出处：点一下可退回战役胜率，方便把主观判断和历史实绩对照 */}
