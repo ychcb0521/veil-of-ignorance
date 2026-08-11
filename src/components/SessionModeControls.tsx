@@ -143,7 +143,7 @@ export function SessionModeControls({
   };
 
   const timeModeBtnCls = (active: boolean, disabled: boolean) =>
-    `flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium transition-all duration-100 ease-out active:scale-[0.97] ${
+    `flex items-center gap-1 whitespace-nowrap px-2 py-1 rounded text-[10px] font-medium transition-all duration-100 ease-out active:scale-[0.97] ${
       active
         ? 'bg-primary/20 text-primary'
         : disabled
@@ -161,7 +161,7 @@ export function SessionModeControls({
         title={reverseActive
           ? '倒叙播放中：时间倒序推进，K 线逐根回退（客观操作时间不受影响）· 点击恢复正序'
           : '倒叙播放：让时间机器倒着走，K 线逐根回退；默认正序 · 点击开启'}
-        className={`flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium transition-all duration-100 ease-out active:scale-[0.97] ${
+        className={`flex items-center gap-1 whitespace-nowrap px-2 py-1 rounded text-[10px] font-medium transition-all duration-100 ease-out active:scale-[0.97] ${
           reverseActive
             ? 'bg-[#B080FF]/20 text-[#B080FF]'
             : 'text-muted-foreground hover:text-foreground hover:bg-accent'
@@ -174,7 +174,7 @@ export function SessionModeControls({
       <button
         onClick={() => handleTradingModeClick('decision')}
         title="决策记录：完整快照 / 评价 / 错题集 / 元监控"
-        className={`flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium transition-all duration-100 ease-out active:scale-[0.97] ${
+        className={`flex items-center gap-1 whitespace-nowrap px-2 py-1 rounded text-[10px] font-medium transition-all duration-100 ease-out active:scale-[0.97] ${
           ctx.tradingMode === 'decision'
             ? 'bg-primary/20 text-primary'
             : 'text-muted-foreground hover:text-foreground hover:bg-accent'
@@ -185,7 +185,7 @@ export function SessionModeControls({
       <button
         onClick={() => handleTradingModeClick('direct')}
         title="直接交易：跳过快照与评价，仍可在交易战役中归类，但不进错题集/元监控"
-        className={`flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium transition-all duration-100 ease-out active:scale-[0.97] ${
+        className={`flex items-center gap-1 whitespace-nowrap px-2 py-1 rounded text-[10px] font-medium transition-all duration-100 ease-out active:scale-[0.97] ${
           ctx.tradingMode === 'direct'
             ? 'bg-[#F0B90B]/20 text-[#F0B90B]'
             : 'text-muted-foreground hover:text-foreground hover:bg-accent'

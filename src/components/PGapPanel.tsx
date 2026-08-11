@@ -71,9 +71,9 @@ function GapField({
 }: FieldProps) {
   return (
     <div className="flex h-[30px] items-center gap-2 px-3">
-      <label htmlFor={`p-gap-${id}-number`} className="flex w-[52px] flex-none items-baseline gap-1 select-none">
+      <label htmlFor={`p-gap-${id}-number`} className="flex w-[clamp(40px,17cqw,52px)] flex-none items-baseline gap-1 select-none">
         <span className="font-mono text-[11px] font-semibold leading-none" style={{ color: accent }}>{symbol}</span>
-        <span className="text-[9px] text-gray-500 dark:text-[#848e9c]">{label}</span>
+        <span className="min-w-0 truncate whitespace-nowrap text-[9px] text-gray-500 dark:text-[#848e9c]">{label}</span>
       </label>
       <input
         data-testid={`p-gap-${id}-slider`}
@@ -107,7 +107,7 @@ function GapField({
             onChange(Number.isFinite(next) ? next : null);
           }}
           onBlur={onCommit}
-          className="h-[22px] w-[74px] rounded border border-gray-200 bg-gray-50 px-1.5 text-right font-mono text-[10px] tabular-nums text-gray-900 outline-none transition-colors placeholder:text-gray-400 focus:border-[#fcd535] focus:bg-white disabled:opacity-40 dark:border-[#2b3139] dark:bg-[#161a1e] dark:text-[#EAECEF] dark:placeholder:text-[#5e6673] dark:focus:bg-[#12161a]"
+          className="h-[22px] w-[clamp(54px,25cqw,74px)] rounded border border-gray-200 bg-gray-50 px-1.5 text-right font-mono text-[10px] tabular-nums text-gray-900 outline-none transition-colors placeholder:text-gray-400 focus:border-[#fcd535] focus:bg-white disabled:opacity-40 dark:border-[#2b3139] dark:bg-[#161a1e] dark:text-[#EAECEF] dark:placeholder:text-[#5e6673] dark:focus:bg-[#12161a]"
         />
         <span className="w-2 text-[9px] text-gray-500 dark:text-[#848e9c]">{suffix ?? ''}</span>
       </div>
@@ -198,7 +198,7 @@ export function PGapPanel({
     <div
       data-testid="p-gap-panel"
       data-collapsed={collapsed ? 'true' : 'false'}
-      className="flex h-full min-h-0 flex-col overflow-hidden bg-white dark:bg-[#1e2329] select-none"
+      className="flex h-full min-h-0 flex-col overflow-hidden bg-white dark:bg-[#1e2329] select-none [container-type:inline-size]"
     >
       {/* 模块表头 */}
       <div className="group flex-none flex items-center justify-between gap-2 pl-3 pr-2 h-9 border-b border-gray-200 dark:border-[#2b3139]">
@@ -337,12 +337,12 @@ export function PGapPanel({
           {result.valid ? (
             <>
               <div className="flex items-baseline justify-between gap-2">
-                <span className="text-[10px] leading-none text-gray-500 dark:text-[#848e9c]">
+                <span className="min-w-0 truncate text-[10px] leading-none text-gray-500 dark:text-[#848e9c]">
                   基线概率 P<sub className="text-[8px]">0</sub>
                 </span>
                 <span
                   data-testid="p-gap-baseline"
-                  className="flex-none font-mono text-[19px] font-semibold leading-none tabular-nums text-gray-900 dark:text-[#EAECEF]"
+                  className="flex-none font-mono text-[clamp(14px,6.5cqw,19px)] font-semibold leading-none tabular-nums text-gray-900 dark:text-[#EAECEF]"
                 >
                   {(result.baseline * 100).toFixed(1)}%
                 </span>
@@ -398,7 +398,7 @@ export function PGapPanel({
                     <span
                       data-testid="p-gap-value"
                       data-gap-sign={positive ? 'positive' : 'non-positive'}
-                      className="font-mono text-[16px] font-semibold leading-none tabular-nums"
+                      className="font-mono text-[clamp(12px,5.5cqw,16px)] font-semibold leading-none tabular-nums"
                       style={{ color: positive ? GREEN : RED }}
                     >
                       {positive ? formatSignedPercent(gap) : '优势已耗尽'}
@@ -446,7 +446,7 @@ export function PGapPanel({
               </span>
               <span
                 data-testid="p-gap-spot"
-                className="font-mono text-[13px] font-semibold tabular-nums"
+                className="font-mono text-[clamp(11px,4.8cqw,13px)] font-semibold tabular-nums"
                 style={{ color: YELLOW }}
               >
                 {hasPrice ? currentPrice.toFixed(pricePrecision) : '—'}
@@ -496,11 +496,11 @@ export function PGapPanel({
 
           {/* b_可落袋：此刻立即止盈能拿到几个 R —— 只与已持有的多单有关，与 T 无关 */}
           <div className="flex h-[30px] items-center justify-between gap-2 px-3">
-            <span className="flex items-baseline gap-1 select-none">
+            <span className="flex min-w-0 items-baseline gap-1 select-none">
               <span className="font-mono text-[11px] font-semibold leading-none text-[#B080FF]">b</span>
-              <span className="text-[9px] text-gray-500 dark:text-[#848e9c]">可落袋</span>
+              <span className="whitespace-nowrap text-[9px] text-gray-500 dark:text-[#848e9c]">可落袋</span>
               {longEntryPrice != null && (
-                <span className="text-[9px] text-gray-400 dark:text-[#5e6673]">
+                <span className="min-w-0 truncate text-[9px] text-gray-400 dark:text-[#5e6673]">
                   开仓 {longEntryPrice.toFixed(pricePrecision)}
                   {longPositionCount > 1 && ` · ${longPositionCount} 笔均价`}
                 </span>
@@ -519,7 +519,7 @@ export function PGapPanel({
                 data-testid="p-gap-bankable"
                 data-bankable-state={bankable > 0 ? 'positive' : bankable < 0 ? 'negative' : 'flat'}
                 title="此刻立即止盈能落袋的 R 数 =（现价 − 多单开仓价）÷（开仓价 − 止损 K）"
-                className="font-mono text-[13px] font-semibold tabular-nums"
+                className="font-mono text-[clamp(11px,4.8cqw,13px)] font-semibold tabular-nums"
                 style={{ color: bankable > 0 ? GREEN : bankable < 0 ? RED : undefined }}
               >
                 {`${bankable > 0 ? '+' : ''}${bankable.toFixed(2)}R`}

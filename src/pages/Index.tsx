@@ -2033,7 +2033,7 @@ const Index = () => {
                         <>
                           <ResizableHandle withHandle />
                           <ResizablePanel defaultSize={25} minSize={15} maxSize={35}>
-                            <div className="h-full w-full min-w-[280px] flex flex-col bg-white dark:bg-[#1e2329] min-h-0 overflow-hidden">
+                            <div className="h-full w-full min-w-0 flex flex-col bg-white dark:bg-[#1e2329] min-h-0 overflow-hidden">
                               {/* P_gap 在上、盘口在下。两者都展开时才需要可拖拽分隔；
                                   其余情形下折叠的一方缩成表头，空间全给展开的一方。 */}
                               {!isPGapCollapsed && !isMarketDataCollapsed ? (

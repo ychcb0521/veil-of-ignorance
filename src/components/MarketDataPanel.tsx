@@ -40,11 +40,11 @@ export function MarketDataPanel({
     <div
       data-testid="market-data-panel"
       data-collapsed={collapsed ? 'true' : 'false'}
-      className="flex h-full min-h-0 flex-col overflow-hidden bg-white dark:bg-[#1e2329] text-[10px] font-mono select-none"
+      className="flex h-full min-h-0 flex-col overflow-hidden bg-white dark:bg-[#1e2329] text-[10px] font-mono select-none [container-type:inline-size]"
     >
       {/* 统一表头：页签在左，控件在右 */}
       <div className="group flex-none flex items-center justify-between gap-2 pl-3 pr-2 h-9 border-b border-gray-200 dark:border-[#2b3139]">
-        <div className="flex items-center gap-3 h-full min-w-0">
+        <div className="flex items-center gap-[clamp(6px,2.5cqw,12px)] h-full min-w-0 overflow-x-auto [scrollbar-width:none]">
           {TABS.map(item => {
             const active = !collapsed && tab === item.key;
             return (
@@ -58,7 +58,7 @@ export function MarketDataPanel({
                   // 折叠状态下点页签＝展开到该页签，少一次点击。
                   if (collapsed) onToggleCollapsed();
                 }}
-                className={`relative flex h-full shrink-0 items-center whitespace-nowrap text-[12px] font-medium transition-colors ${
+                className={`relative flex h-full shrink-0 items-center whitespace-nowrap text-[clamp(10px,4.2cqw,12px)] font-medium transition-colors ${
                   active
                     ? 'text-gray-900 dark:text-[#EAECEF]'
                     : 'text-gray-500 dark:text-[#848e9c] hover:text-gray-900 dark:hover:text-white'
