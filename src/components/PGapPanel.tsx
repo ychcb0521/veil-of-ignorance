@@ -38,6 +38,8 @@ const SLIDER_SPAN = 0.12;
 const GREEN = '#0ECB81';
 const RED = '#F6465D';
 const YELLOW = '#FCD535';
+// 浮亏被动态：S 已跌破多单开仓价时 gap 的告警色（橘黄，醒目区别于红绿）
+const ORANGE = '#F97316';
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(Math.max(value, min), max);
@@ -197,6 +199,10 @@ export function PGapPanel({
 
   const gap = result.valid ? result.gap : null;
   const positive = gap != null && gap > 0;
+  // 浮亏假优势守卫：持多单且 S 已跌破开仓价时，P₀ 因 S 靠近 K 而走低、gap 看似
+  // 变大——但那是亏损换来的“优势”，主动权已不在交易者手中。此状态下 gap 前置
+  // “−”号并以橘黄显示，标记劣势与被动。
+  const underwater = longEntryPrice != null && hasPrice && currentPrice < longEntryPrice;
   const remainingFraction = anchorGap != null && anchorGap > 0 && gap != null
     ? clamp(gap / anchorGap, 0, 1)
     : positive ? 1 : 0;
@@ -280,7 +286,7 @@ export function PGapPanel({
                 </div>
                 <div>
                   <dt className="inline font-semibold text-gray-700 dark:text-[#B7BDC6]">gap 优势边际</dt>
-                  <dd className="inline"> · P 高出基线的部分，才真正属于你。<span style={{ color: GREEN }}>正数为绿</span>；<span style={{ color: RED }}>≤ 0 转红并显示「优势已耗尽」</span>，意味着这笔已不值得下手。</dd>
+                  <dd className="inline"> · P 高出基线的部分，才真正属于你。<span style={{ color: GREEN }}>正数为绿</span>；<span style={{ color: RED }}>≤ 0 转红并显示「优势已耗尽」</span>，意味着这笔已不值得下手。<span style={{ color: ORANGE }}>橘黄且前置「−」号</span> = 持多单而现价已跌破开仓价：P₀ 因价格靠近止损而走低，gap 的走高是亏损换来的<strong>假优势</strong>——主动权已不在你手中，此为劣势与被动状态。</dd>
                 </div>
                 <div>
                   <dt className="inline font-semibold text-gray-700 dark:text-[#B7BDC6]">优势条</dt>
@@ -299,9 +305,11 @@ export function PGapPanel({
             <span
               data-testid="p-gap-collapsed-value"
               className="truncate font-mono text-[11px] font-semibold tabular-nums"
-              style={{ color: positive ? GREEN : RED }}
+              style={{ color: underwater ? ORANGE : positive ? GREEN : RED }}
             >
-              {positive ? formatSignedPercent(gap) : '优势已耗尽'}
+              {underwater
+                ? `−${Math.abs(gap * 100).toFixed(1)}%`
+                : positive ? formatSignedPercent(gap) : '优势已耗尽'}
             </span>
           ) : (
             <span className="truncate text-[10px] text-gray-500 dark:text-[#848e9c]">优势边际</span>
@@ -412,11 +420,16 @@ export function PGapPanel({
                   ) : (
                     <span
                       data-testid="p-gap-value"
-                      data-gap-sign={positive ? 'positive' : 'non-positive'}
+                      data-gap-sign={underwater ? 'underwater' : positive ? 'positive' : 'non-positive'}
+                      title={underwater
+                        ? '现价已跌破多单开仓价（浮亏）：P₀ 因价格靠近止损而走低，gap 的走高是亏损换来的假优势——主动权已不在你手中'
+                        : undefined}
                       className="font-mono text-[clamp(12px,5.5cqw,16px)] font-semibold leading-none tabular-nums"
-                      style={{ color: positive ? GREEN : RED }}
+                      style={{ color: underwater ? ORANGE : positive ? GREEN : RED }}
                     >
-                      {positive ? formatSignedPercent(gap) : '优势已耗尽'}
+                      {underwater
+                        ? `−${Math.abs(gap * 100).toFixed(1)}%`
+                        : positive ? formatSignedPercent(gap) : '优势已耗尽'}
                     </span>
                   )}
                 </div>
@@ -431,7 +444,7 @@ export function PGapPanel({
                     className="h-full rounded-full transition-[width] duration-300 ease-out"
                     style={{
                       width: `${positive ? remainingFraction * 100 : 100}%`,
-                      backgroundColor: positive ? GREEN : RED,
+                      backgroundColor: underwater ? ORANGE : positive ? GREEN : RED,
                     }}
                   />
                 </div>

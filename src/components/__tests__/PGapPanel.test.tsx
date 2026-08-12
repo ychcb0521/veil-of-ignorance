@@ -263,6 +263,48 @@ describe('PGapPanel', () => {
     expect(screen.getByText(/3 笔均价/)).toBeInTheDocument();
   });
 
+  it('浮亏假优势守卫：S 跌破多单开仓价时 gap 前置 − 号、转橘黄', () => {
+    // 持多单开仓 100；S=95 已浮亏。K=90,T=130 → P₀=(5)/(40)=12.5%，P=60 → gap=+47.5%
+    // ——看似优势变大，实为亏损换来的假优势 → 显示 −47.5% 橘黄
+    render(<PGapPanel currentPrice={95} pricePrecision={2} longEntryPrice={100} longPositionCount={1} longRiskAnchorPrice={90} />);
+    setPrices(90, 130);
+    setWinRate(60);
+    const gap = screen.getByTestId('p-gap-value');
+    expect(gap).toHaveTextContent('−47.5%');
+    expect(gap).toHaveAttribute('data-gap-sign', 'underwater');
+    expect(gap).toHaveStyle({ color: '#F97316' });
+  });
+
+  it('S 回到开仓价上方即恢复常规绿色显示', () => {
+    render(<PGapPanel currentPrice={105} pricePrecision={2} longEntryPrice={100} longPositionCount={1} longRiskAnchorPrice={90} />);
+    setPrices(90, 130);
+    setWinRate(60);
+    const gap = screen.getByTestId('p-gap-value');
+    expect(gap).toHaveAttribute('data-gap-sign', 'positive');
+    expect(gap).toHaveStyle({ color: '#0ECB81' });
+  });
+
+  it('无多单时不触发浮亏标记——被动状态只属于持仓者', () => {
+    render(<PGapPanel currentPrice={95} pricePrecision={2} />);
+    setPrices(90, 130);
+    setWinRate(60);
+    expect(screen.getByTestId('p-gap-value')).toHaveAttribute('data-gap-sign', 'positive');
+  });
+
+  it('折叠表头读数同样按浮亏状态转橘黄带 − 号', () => {
+    const { rerender } = render(
+      <PGapPanel currentPrice={95} pricePrecision={2} longEntryPrice={100} longPositionCount={1} onToggleCollapsed={() => {}} />,
+    );
+    setPrices(90, 130);
+    setWinRate(60);
+    rerender(
+      <PGapPanel currentPrice={95} pricePrecision={2} longEntryPrice={100} longPositionCount={1} collapsed onToggleCollapsed={() => {}} />,
+    );
+    const collapsedValue = screen.getByTestId('p-gap-collapsed-value');
+    expect(collapsedValue).toHaveTextContent('−47.5%');
+    expect(collapsedValue).toHaveStyle({ color: '#F97316' });
+  });
+
   it('是独立模块：自带 P_gap 表头，不再寄居在成交页签里', () => {
     render(<PGapPanel currentPrice={100} pricePrecision={2} />);
     expect(screen.getByText('P_gap')).toBeInTheDocument();
