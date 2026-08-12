@@ -29,6 +29,7 @@ import { getConditionalTriggerDecisionFromRange } from "@/lib/conditionalOrders"
 import { fetchCanonicalTimePriceAt } from "@/lib/canonicalTimePrice";
 import { applyCurrentPriceToVisibleData } from "@/lib/visibleDataPrice";
 import { earliestLongStopPrice } from "@/lib/longRiskAnchor";
+import { getPriceDecimals } from "@/lib/formatters";
 import {
   getReverseVisibleData,
   mirrorSettledBar,
@@ -316,6 +317,16 @@ const Index = () => {
     const latest = visibleData[visibleData.length - 1];
     return Number(latest?.close ?? 0);
   }, [visibleData]);
+
+  // 价格精度的数据回退：换币时会清掉 priceMap 里的旧价防串价，此时 context 的
+  // pricePrecision 退回 2 位——klinecharts 的刻度步长受精度限制，0.0128 的币按
+  // 0.01 画刻度会把 Y 轴撑爆、蜡烛挤成一条。实时价缺位时改用最新可见 K 线的
+  // 收盘价推导精度，保证新币种一进来盘面就自适应。
+  const chartPricePrecision = useMemo(() => {
+    if (currentPrice > 0) return pricePrecision;
+    const vis = Number(latestVisiblePrice || 0);
+    return vis > 0 ? getPriceDecimals(vis) : pricePrecision;
+  }, [currentPrice, latestVisiblePrice, pricePrecision]);
 
   // Should the RAF engine be running?
   const shouldRunEngine = useMemo(() => {
@@ -1431,6 +1442,9 @@ const Index = () => {
       setActiveSymbol(newSymbol);
       // Clear stale price to prevent cross-symbol pollution on chart
       latestChartPriceRef.current = 0;
+      activeDisplayPriceRef.current = 0;
+      renderedDisplayPriceRef.current = 0;
+      setActiveDisplayPrice(0);
       setPriceMap((prev) => {
         if (!prev[newSymbol]) return prev;
         const next = { ...prev };
@@ -1571,6 +1585,9 @@ const Index = () => {
       if (normalized !== activeSymbol) {
         setActiveSymbol(normalized);
         latestChartPriceRef.current = 0;
+        activeDisplayPriceRef.current = 0;
+        renderedDisplayPriceRef.current = 0;
+        setActiveDisplayPrice(0);
         setPriceMap((prev) => {
           if (!prev[normalized]) return prev;
           const next = { ...prev };
@@ -1964,7 +1981,7 @@ const Index = () => {
                     symbol={activeSymbol}
                     currentPrice={displayCurrentPrice}
                     visibleData={displayData}
-                    pricePrecision={pricePrecision}
+                    pricePrecision={chartPricePrecision}
                     effectiveSimTime={effectiveSimTime}
                   />
 
@@ -2023,7 +2040,7 @@ const Index = () => {
                               onMainIntervalChange={handleIntervalChange}
                               speed={activeCoinState.speed}
                               onSetSpeed={handleSetSpeed}
-                              pricePrecision={pricePrecision}
+                              pricePrecision={chartPricePrecision}
                               quantityPrecision={quantityPrecision}
                               pendingOrders={activeSymbolOrders}
                               onCancelOrder={(orderId) => handleCancelOrder(activeSymbol, orderId)}
@@ -2048,7 +2065,7 @@ const Index = () => {
                                   <ResizablePanel defaultSize={50} minSize={25}>
                                     <PGapPanel
                                       currentPrice={displayCurrentPrice}
-                                      pricePrecision={pricePrecision}
+                                      pricePrecision={chartPricePrecision}
                                       collapsed={false}
                                       onToggleCollapsed={() => setIsPGapCollapsed(true)}
                                       defaultWinRatePct={campaignWinRate.winRate == null ? null : campaignWinRate.winRate * 100}
@@ -2067,7 +2084,7 @@ const Index = () => {
                                     <MarketDataPanel
                                       symbol={activeSymbol}
                                       currentPrice={displayCurrentPrice}
-                                      pricePrecision={pricePrecision}
+                                      pricePrecision={chartPricePrecision}
                                       tab={marketDataTab}
                                       onTabChange={setMarketDataTab}
                                       collapsed={false}
@@ -2081,7 +2098,7 @@ const Index = () => {
                                   <div className={isPGapCollapsed ? "flex-none" : "flex-1 min-h-0"}>
                                     <PGapPanel
                                       currentPrice={displayCurrentPrice}
-                                      pricePrecision={pricePrecision}
+                                      pricePrecision={chartPricePrecision}
                                       collapsed={isPGapCollapsed}
                                       onToggleCollapsed={() => setIsPGapCollapsed((v) => !v)}
                                       defaultWinRatePct={campaignWinRate.winRate == null ? null : campaignWinRate.winRate * 100}
@@ -2100,7 +2117,7 @@ const Index = () => {
                                     <MarketDataPanel
                                       symbol={activeSymbol}
                                       currentPrice={displayCurrentPrice}
-                                      pricePrecision={pricePrecision}
+                                      pricePrecision={chartPricePrecision}
                                       tab={marketDataTab}
                                       onTabChange={setMarketDataTab}
                                       collapsed={isMarketDataCollapsed}
@@ -2139,7 +2156,7 @@ const Index = () => {
                     initialCapital={profile?.initial_capital ?? 1_000_000}
                     onClearSymbolData={handleClearSymbolData}
                     onPlaceTpSl={handlePlaceTpSl}
-                    pricePrecision={pricePrecision}
+                    pricePrecision={chartPricePrecision}
                     activeTab={bottomTab}
                     onTabChange={setBottomTab}
                     onCloseAllPositions={handleCloseAllPositions}
@@ -2159,7 +2176,7 @@ const Index = () => {
                 currentPrice={displayCurrentPrice}
                 disabled={activeCoinState.status === "stopped" || displayCurrentPrice === 0}
                 onPlaceOrder={handlePlaceOrderForActiveSymbol}
-                pricePrecision={pricePrecision}
+                pricePrecision={chartPricePrecision}
                 quantityPrecision={quantityPrecision}
                 coolingOff={coolingOff.isActive}
                 coolingOffLabel={coolingOff.isActive ? coolingOff.formatRemaining() : undefined}
