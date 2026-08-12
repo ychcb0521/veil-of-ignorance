@@ -248,8 +248,9 @@ export function PGapPanel({
             <PopoverContent
               align="start"
               side="bottom"
+              collisionPadding={12}
               data-testid="p-gap-help-content"
-              className="w-[300px] border-gray-200 bg-white p-3 text-[11px] leading-relaxed dark:border-[#2b3139] dark:bg-[#1e2329]"
+              className="flex max-h-[var(--radix-popover-content-available-height)] w-[300px] flex-col overflow-y-auto overscroll-contain border-gray-200 bg-white p-3 text-[11px] leading-relaxed dark:border-[#2b3139] dark:bg-[#1e2329]"
             >
               <div className="font-medium text-gray-900 dark:text-[#EAECEF]">P_gap · 优势边际</div>
               <p className="mt-1 text-gray-500 dark:text-[#848e9c]">
@@ -391,8 +392,9 @@ export function PGapPanel({
                   <PopoverContent
                     align="end"
                     side="bottom"
+                    collisionPadding={12}
                     data-testid="p-gap-payoff-chart"
-                    className="w-[320px] border-gray-200 bg-white p-3 dark:border-[#2b3139] dark:bg-[#1e2329]"
+                    className="flex max-h-[var(--radix-popover-content-available-height)] w-[320px] flex-col overflow-y-auto overscroll-contain border-gray-200 bg-white p-3 dark:border-[#2b3139] dark:bg-[#1e2329]"
                   >
                     <div className="text-[11px] font-medium text-gray-900 dark:text-[#EAECEF]">盈亏平衡胜率</div>
                     <div className="mt-0.5 font-mono text-[9px] text-gray-500 dark:text-[#848e9c]">
