@@ -29,9 +29,10 @@ const TOC: TocItem[] = [
       { id: 's3-0', label: '3.1 交易模式选择' },
       { id: 's3-1', label: '3.2 时光机与行情' },
       { id: 's3-1b', label: '3.3 P_gap 优势边际' },
-      { id: 's3-2', label: '3.4 下单前快照' },
-      { id: 's3-3', label: '3.5 平仓评价复盘' },
-      { id: 's3-4', label: '3.6 持仓与历史' },
+      { id: 's3-1c', label: '3.4 宽框架与严框架' },
+      { id: 's3-2', label: '3.5 下单前快照' },
+      { id: 's3-3', label: '3.6 平仓评价复盘' },
+      { id: 's3-4', label: '3.7 持仓与历史' },
     ],
   },
   {
@@ -689,8 +690,55 @@ export default function GuidePage() {
               </P>
             </section>
 
+            <section id="s3-1c" className="scroll-mt-20">
+              <SubTitle>3.4 宽框架与严框架</SubTitle>
+              <P>标的入选走哪套框架，决定了这笔仓位后续的全部待遇——<strong>建仓之前就要定，不在持仓中途换</strong>。</P>
+              <div className="overflow-x-auto">
+                <table className="w-full text-[11px] my-3 border border-border rounded overflow-hidden">
+                  <thead className="bg-muted/50">
+                    <tr>
+                      <th className="text-left px-3 py-2 font-medium text-foreground text-[10px]"></th>
+                      <th className="text-left px-3 py-2 font-medium text-foreground text-[10px]">严框架 · 严进严出</th>
+                      <th className="text-left px-3 py-2 font-medium text-foreground text-[10px]">宽松框架 · 宽进宽出</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr><td className="px-3 py-2 border-t border-border font-medium">入选标准</td><td className="px-3 py-2 border-t border-border">高</td><td className="px-3 py-2 border-t border-border">低</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border font-medium">波动容忍</td><td className="px-3 py-2 border-t border-border">高——入选够硬，扛得住震</td><td className="px-3 py-2 border-t border-border">低——入选门槛低，波动即警报</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border font-medium">总仓位上限</td><td className="px-3 py-2 border-t border-border">高——允许养成重仓</td><td className="px-3 py-2 border-t border-border">低——封顶就低</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border font-medium"><strong>头仓</strong></td><td className="px-3 py-2 border-t border-border"><strong>可以大</strong>——它是分期建仓的第一期，后面还要加</td><td className="px-3 py-2 border-t border-border"><strong>必须更小</strong>——它基本就是终仓，没有后续</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border font-medium">后期加仓</td><td className="px-3 py-2 border-t border-border"><strong>需要加仓</strong>，让赢家变肥</td><td className="px-3 py-2 border-t border-border"><strong>谨慎加仓</strong>——除非该标的已被证明符合严框架（升级后按严框架对待）</td></tr>
+                  </tbody>
+                </table>
+              </div>
+
+              <SubTitle>不只是上限不同：头仓本身就该不同</SubTitle>
+              <P>
+                最常见的误读是：两套框架只差一个<strong>总仓位上限</strong>——严框架能养到更大、宽框架封顶更低——于是<strong>用同一个头仓起手</strong>，反正后面自然会被上限拦住。这个做法把两套框架的差别全部推给了「以后」，而建仓那一刻恰恰是唯一由你完全掌控的时点。
+              </P>
+              <P>
+                两者的头仓在<strong>身份上</strong>就不一样：严框架的头仓是<strong>第一期</strong>——入选够硬，本来就打算加仓，它的任务是先建立浮盈垫、为后续加仓提供弹药；宽框架的头仓是<strong>全部</strong>——入选门槛低、原则上谨慎加仓，所以你下的这一笔基本就是终仓，不会再有第二笔来摊薄或修正它。
+              </P>
+              <Highlight>
+                由此产生一个反直觉的后果：<strong>如果两套框架用同一个头仓，那么总上限更低的宽框架，反而在开局那一刻就顶格。</strong>本该更保守的一套，实际仓位利用率最高。「更低的总上限」在这种用法下形同虚设——因为你根本没打算用到上限，头仓已经把额度占满了。<strong>总仓位上限只约束「最多能到多大」，它约束不了「一开始就有多大」；能约束起手大小的，只有头仓本身。</strong>
+              </Highlight>
+              <P>
+                所以宽框架的头仓必须<strong>绝对地更小</strong>——不是「相对它自己的上限更小」，而是数字上就更小。还有一层理由来自记账：<strong>头仓 × 止损距离 = 预期最大亏损 L</strong>，而 L 是 R 倍数的分母、是整套复盘记账的支点。宽框架的波动容忍本来就低（波动即警报，更容易被震出），若头仓不缩，被震出的每一次都按严框架的量级计损——<strong>低质量入选 + 高频止损 + 大头仓</strong>，是耗损最快的组合。
+              </P>
+              <P>
+                <strong>升级不追认头仓。</strong> 宽框架标的一旦被证明符合严框架（见上表「后期加仓」一行），可升级后按严框架对待——但升级改变的是<strong>后续加仓的资格</strong>，不回头追认头仓。已经建好的小头仓就是小头仓，只能靠后续加仓把它养大，不能补一笔「本来就该更大」的仓。这条防的是把「升级」当成事后放大风险的借口。
+              </P>
+              <P>
+                系统不替你强制头仓大小——它是<strong>建仓前的纪律</strong>，落点在下单前快照里的「本次最大亏损 USDT」：那个数字乘不乘得动，取决于你这一笔走的是哪套框架。
+              </P>
+              <Highlight>
+                两条不可逆的线：<strong>镜像止盈位置不能轻易动</strong>——即使出现了新的支撑位，也不能以此调低镜像止盈；止损线可以上调，但前提是新位置<strong>被证明非常结实</strong>。<strong>严框架处于低预期回撤时，也不能轻易调大预期最大亏损</strong>——预期回撤小不是放大风险敞口的理由。
+              </Highlight>
+
+            </section>
+
             <section id="s3-2" className="scroll-mt-20">
-              <SubTitle>3.4 下单前快照</SubTitle>
+              <SubTitle>3.5 下单前快照</SubTitle>
               <P>开仓快照是系统的核心记录点。它固定“下单前的你”看到什么、相信什么、愿意亏多少、处在什么心态。但这里有一个必须先讲清的底层原则：<strong>主力单与对冲单不是同一类决策，不能用同一套问题去问。</strong> 主力单是在分布右尾下注，核心是“这次机会为什么值得押”；对冲单是在分布左尾买保险，核心是“什么时候裸拿已经变成负期望，应该让保险接管”。</P>
 
               <SubTitle>零号关 · Stop Doing List：开仓前先过这张「我决心不做」</SubTitle>
@@ -716,28 +764,6 @@ export default function GuidePage() {
                 这是<strong>零号关</strong>：它放在排除性清单（一票否决）之上，比心态分、仓位模式更早出现。它筛的不是“此刻能不能交易”，而是“你这一刀会不会重复犯你已经决心戒掉的那类错”。
               </Highlight>
               <P><strong>降级行为：</strong>如果你的全局清单还是空的（或服务端表还没建），这一块会显示「清单为空」，<strong>不阻挡开仓</strong>，等价于退回原有流程。建议第一次进入时点「维护清单」加几条，把你最常踩的坑先固定下来。</P>
-
-              <SubTitle>两套筛选框架：严进严出，宽进宽出</SubTitle>
-              <P>标的入选走哪套框架，决定了这笔仓位后续的全部待遇——<strong>建仓之前就要定，不在持仓中途换</strong>。</P>
-              <div className="overflow-x-auto">
-                <table className="w-full text-[11px] my-3 border border-border rounded overflow-hidden">
-                  <thead className="bg-muted/50">
-                    <tr>
-                      <th className="text-left px-3 py-2 font-medium text-foreground text-[10px]"></th>
-                      <th className="text-left px-3 py-2 font-medium text-foreground text-[10px]">严框架 · 严进严出</th>
-                      <th className="text-left px-3 py-2 font-medium text-foreground text-[10px]">宽松框架 · 宽进宽出</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <tr><td className="px-3 py-2 border-t border-border font-medium">入选标准</td><td className="px-3 py-2 border-t border-border">高</td><td className="px-3 py-2 border-t border-border">低</td></tr>
-                    <tr><td className="px-3 py-2 border-t border-border font-medium">波动容忍</td><td className="px-3 py-2 border-t border-border">高——入选够硬，扛得住震</td><td className="px-3 py-2 border-t border-border">低——入选门槛低，波动即警报</td></tr>
-                    <tr><td className="px-3 py-2 border-t border-border font-medium">后期加仓</td><td className="px-3 py-2 border-t border-border"><strong>需要加仓</strong>，让赢家变肥</td><td className="px-3 py-2 border-t border-border"><strong>谨慎加仓</strong>——除非该标的已被证明符合严框架（升级后按严框架对待）</td></tr>
-                  </tbody>
-                </table>
-              </div>
-              <Highlight>
-                两条不可逆的线：<strong>镜像止盈位置不能轻易动</strong>——即使出现了新的支撑位，也不能以此调低镜像止盈；止损线可以上调，但前提是新位置<strong>被证明非常结实</strong>。<strong>严框架处于低预期回撤时，也不能轻易调大预期最大亏损</strong>——预期回撤小不是放大风险敞口的理由。
-              </Highlight>
 
               <SubTitle>主力单快照：先判断结构（第 0 步），再走三步（源头 → 盈亏比目标 → 胜率）</SubTitle>
               <P><strong>主力单</strong>的第一性原理是：你是在押一段右尾收益，真正要回答的是<strong>这笔是否有正期望</strong>，而不是“我有多想下单”。但在押注之前，必须先回答一个更底层的问题——<strong>现在是什么市场</strong>。系统因此把主力单快照先收进<strong>第 0 步 · 市场结构</strong>（判断单边 / 震荡 / 转换、你在哪个阶段入场，计数 2/2），再把下注本身拆成三步，<strong>顺序本身就是纪律</strong>：第一步<strong>源头 · 机会成本</strong>（这一单靠什么机制赚钱、值不值得占用你的行动力，计数 2/2），第二步<strong>① 盈亏比目标</strong>（结构给的收益空间够不够厚，计数 6/6），第三步<strong>② 胜率轴</strong>（方向判断，只用于事后校准，计数 3/3）。</P>
@@ -1017,7 +1043,7 @@ export default function GuidePage() {
             </section>
 
             <section id="s3-3" className="scroll-mt-20">
-              <SubTitle>3.5 平仓评价复盘</SubTitle>
+              <SubTitle>3.6 平仓评价复盘</SubTitle>
               <P>决策记录模式下，平仓会打开一个与开仓快照同规格的<strong>居中评价弹窗</strong>，不完成评价不能离开。评价的重心不是重新讲一遍故事，而是把快照时的预测和最终实际结果对上：预设的证伪信号兑现没有，结构破坏信号出现没有，进场时钉下的置信度有没有被验证。</P>
               <P>弹窗按这条主线展开：<strong>事实模块</strong>逐条核验快照里押的<strong>反 / 止 / 结构 / 置信</strong>四条腿 → <strong>决策质量</strong>（入场 / 持仓 / 离场三栏）→ 系统自动归纳<strong>结构 × 结果四象限</strong> → <strong>路径</strong>（滚仓 / 镜像止盈 + 交易主动权）→ <strong>体检模块</strong>（过程纠结度 / 小机会仓位记账 / 踏空高盈亏比结构）→ <strong>反对者陈述追踪</strong>（条件触发）→ <strong>情绪侧七问</strong>。先对账，再判读，最后翻动机，避免复盘变成事后重新叙述。</P>
               <P><strong>机会质量评估</strong>会在平仓时再输入当时可见的 b 与 d，并自动计算 Q。它默认带入开仓判断，但允许你根据复盘修正并保存；评估要回到当时的信息集，不能用最终盈亏倒推一个完美预测。</P>
@@ -1218,7 +1244,7 @@ export default function GuidePage() {
             </section>
 
             <section id="s3-4" className="scroll-mt-20">
-              <SubTitle>3.6 持仓与历史</SubTitle>
+              <SubTitle>3.7 持仓与历史</SubTitle>
               <P>底部历史区用于检查执行结果。重点关注三类记录：未评价交易、仓位历史记录、平仓方式。</P>
               <ul className="list-disc pl-6 text-[14px] text-foreground/90 space-y-1">
                 <li><strong>未评价交易</strong>：优先补齐。已平仓未评价会硬阻塞下一次开仓。</li>
