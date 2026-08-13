@@ -422,7 +422,7 @@ export function PGapPanel({
                 </span>
                 <span
                   data-testid="p-gap-baseline"
-                  className="flex-none font-mono text-[clamp(14px,6.5cqw,19px)] font-semibold leading-none tabular-nums text-gray-900 dark:text-[#EAECEF]"
+                  className="flex-none font-mono text-[clamp(12px,5.2cqw,15px)] font-semibold leading-none tabular-nums text-gray-900 dark:text-[#EAECEF]"
                 >
                   {(result.baseline * 100).toFixed(1)}%
                 </span>
@@ -479,7 +479,7 @@ export function PGapPanel({
                     <span
                       data-testid="p-gap-value"
                       data-gap-sign={positive ? 'positive' : 'non-positive'}
-                      className="font-mono text-[clamp(12px,5.5cqw,16px)] font-semibold leading-none tabular-nums"
+                      className="font-mono text-[clamp(14px,6.2cqw,18px)] font-semibold leading-none tabular-nums"
                       style={{ color: positive ? GREEN : RED }}
                     >
                       {positive ? formatSignedPercent(gap) : '优势已耗尽'}
@@ -583,7 +583,7 @@ export function PGapPanel({
                 <span
                   data-testid="p-gap-computed-p"
                   title="自动计算、只读：P = 结构存活概率 × 存活后突破 T 的条件概率"
-                  className="flex-none font-mono text-[clamp(14px,6.5cqw,19px)] font-semibold leading-none tabular-nums text-gray-900 dark:text-[#EAECEF]"
+                  className="flex-none font-mono text-[clamp(12px,5.2cqw,15px)] font-semibold leading-none tabular-nums text-gray-900 dark:text-[#EAECEF]"
                 >
                   {winRatePct.toFixed(1)}%
                 </span>
