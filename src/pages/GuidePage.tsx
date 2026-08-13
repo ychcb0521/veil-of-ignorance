@@ -499,7 +499,7 @@ export default function GuidePage() {
                   输入日期和时间后，系统加载该时刻附近的真实历史行情。K 线、盘口、成交、持仓盈亏和订单触发都以模拟时间为准。
                 </KeyCard>
                 <KeyCard title="加速播放">
-                  支持 1x、2x、5x、10x、50x、60x、180x、300x 倍速。慢速用于练决策细节，高倍速用于快速穿越等待区和重复训练同类行情。
+                  支持 1x、2x、5x、10x、50x、60x、180x、300x 倍速。慢速用于练决策细节，高倍速用于快速穿越等待区和重复训练同类行情。高倍速对数据的消耗是线性的（3m 周期 180 倍速 = 1 根 K 线 / 秒），系统会在接近已加载边界时自动预取下一批，取到尽头则自动暂停。
                 </KeyCard>
                 <KeyCard title="暂停与恢复">
                   可随时暂停、继续或跳转。暂停时适合写交易计划、检查 checklist、复盘刚才为什么想出手。
@@ -582,7 +582,7 @@ export default function GuidePage() {
               <SubTitle>倒叙播放</SubTitle>
               <P>顶部 Header「决策记录」前方有一个<strong>倒叙播放</strong>开关，<strong>默认正序</strong>。选中后，盘面切换为<strong>镜像视图</strong>：真实时间上更晚的 K 线作为「历史」铺在图上，<strong>更早的 K 线逐帧从右侧出现</strong>，横轴时间从左到右<strong>递减</strong>——你是在把反向的市场当作一个正常盘面来看。每根蜡烛开收互换（主观上价格从真实收盘走向真实开盘），阳线阴线随之翻转，成形中的蜡烛按主观进度渐显。模拟时间与绑定其上的一切（下单时间、行情、撮合）随倒走的时钟推进；<strong>客观操作时间除外</strong>——真实世界的操作记录永远向前。</P>
               <P>盘面左侧铺的是<strong>主观历史</strong>——即倒放起点之后、真实时间上更晚的 K 线（实际上是未来数据，这是有意为之：倒放者被给予反向市场的完整历史，正如正放者被给予正向历史），<strong>深度与正放一致（约 1000 根）</strong>，向左拖动可继续加载更晚的数据。幕只遮一侧：<strong>主观未来 = 真实更早的数据，绝不提前显示</strong>。注意：既然左侧历史是真实未来，倒放过某段行情后再切回正放训练同一段，正放的无知之幕对你个人已经失效——两种方向请用不同的行情段。</P>
-              <P>切换瞬间时钟无跳变（起点自动对齐到 K 线开盘）；倒放触底会自动预取更早的 K 线，到达已加载最早一根时自动暂停。方向是一种模式：暂停、停止、重新启动之间保持，直到你手动切回正序。倒放中图表不显示成交标记（按真实时间戳定位的标记在镜像轴上会错位）。</P>
+              <P>切换瞬间时钟无跳变（起点自动对齐到 K 线开盘）；<strong>两个方向都会在接近数据边界时自动预取</strong>——正放触顶补更晚的 K 线、倒放触底补更早的，取到尽头则自动暂停并提示。方向是一种模式：暂停、停止、重新启动之间保持，直到你手动切回正序。倒放中图表不显示成交标记（按真实时间戳定位的标记在镜像轴上会错位）。</P>
               <RedHighlight>
                 <strong>切换守卫（下限优先）：</strong>手里还有持仓时<strong>禁止切换</strong>，必须先平仓；从隔离切回同步、但仍有币种在独立运行时，系统会弹窗列出运行中的币种，让你先跳转查看、或<strong>一键停止所有并切换</strong>。这是为了不让“切个模式”悄悄改变正在持仓 / 运行的标的的时间口径。
               </RedHighlight>
@@ -716,6 +716,28 @@ export default function GuidePage() {
                 这是<strong>零号关</strong>：它放在排除性清单（一票否决）之上，比心态分、仓位模式更早出现。它筛的不是“此刻能不能交易”，而是“你这一刀会不会重复犯你已经决心戒掉的那类错”。
               </Highlight>
               <P><strong>降级行为：</strong>如果你的全局清单还是空的（或服务端表还没建），这一块会显示「清单为空」，<strong>不阻挡开仓</strong>，等价于退回原有流程。建议第一次进入时点「维护清单」加几条，把你最常踩的坑先固定下来。</P>
+
+              <SubTitle>两套筛选框架：严进严出，宽进宽出</SubTitle>
+              <P>标的入选走哪套框架，决定了这笔仓位后续的全部待遇——<strong>建仓之前就要定，不在持仓中途换</strong>。</P>
+              <div className="overflow-x-auto">
+                <table className="w-full text-[11px] my-3 border border-border rounded overflow-hidden">
+                  <thead className="bg-muted/50">
+                    <tr>
+                      <th className="text-left px-3 py-2 font-medium text-foreground text-[10px]"></th>
+                      <th className="text-left px-3 py-2 font-medium text-foreground text-[10px]">严框架 · 严进严出</th>
+                      <th className="text-left px-3 py-2 font-medium text-foreground text-[10px]">宽松框架 · 宽进宽出</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr><td className="px-3 py-2 border-t border-border font-medium">入选标准</td><td className="px-3 py-2 border-t border-border">高</td><td className="px-3 py-2 border-t border-border">低</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border font-medium">波动容忍</td><td className="px-3 py-2 border-t border-border">高——入选够硬，扛得住震</td><td className="px-3 py-2 border-t border-border">低——入选门槛低，波动即警报</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border font-medium">后期加仓</td><td className="px-3 py-2 border-t border-border"><strong>需要加仓</strong>，让赢家变肥</td><td className="px-3 py-2 border-t border-border"><strong>谨慎加仓</strong>——除非该标的已被证明符合严框架（升级后按严框架对待）</td></tr>
+                  </tbody>
+                </table>
+              </div>
+              <Highlight>
+                两条不可逆的线：<strong>镜像止盈位置不能轻易动</strong>——即使出现了新的支撑位，也不能以此调低镜像止盈；止损线可以上调，但前提是新位置<strong>被证明非常结实</strong>。<strong>严框架处于低预期回撤时，也不能轻易调大预期最大亏损</strong>——预期回撤小不是放大风险敞口的理由。
+              </Highlight>
 
               <SubTitle>主力单快照：先判断结构（第 0 步），再走三步（源头 → 盈亏比目标 → 胜率）</SubTitle>
               <P><strong>主力单</strong>的第一性原理是：你是在押一段右尾收益，真正要回答的是<strong>这笔是否有正期望</strong>，而不是“我有多想下单”。但在押注之前，必须先回答一个更底层的问题——<strong>现在是什么市场</strong>。系统因此把主力单快照先收进<strong>第 0 步 · 市场结构</strong>（判断单边 / 震荡 / 转换、你在哪个阶段入场，计数 2/2），再把下注本身拆成三步，<strong>顺序本身就是纪律</strong>：第一步<strong>源头 · 机会成本</strong>（这一单靠什么机制赚钱、值不值得占用你的行动力，计数 2/2），第二步<strong>① 盈亏比目标</strong>（结构给的收益空间够不够厚，计数 6/6），第三步<strong>② 胜率轴</strong>（方向判断，只用于事后校准，计数 3/3）。</P>
@@ -1729,6 +1751,7 @@ export default function GuidePage() {
               <P><strong>低心态是硬阻断。</strong> 心态 ≤2 分时不能开仓，不提供“我知道但继续”的后门。</P>
               <P><strong>后见偏差必须隔离。</strong> 复现页在归因完成前隐藏后续走势，归因完成后才揭示行情路径。</P>
               <P><strong>历史回填不等于真实快照。</strong> 回填可以恢复交易结构，但无法恢复当时的理由、心态和风险认识。系统不会假装知道这些缺失信息。</P>
+              <P><strong>K 线是流式供给的，有边界就会停。</strong> 开局先取锚点前 1000 根历史 + 1000 根前瞻缓冲，播放接近边界时自动预取下一批（正放取更晚、倒放取更早）。取到尽头会<strong>自动暂停并提示</strong>，而不是让时钟继续空跑——盘面停住时看一眼提示，那是数据到头，不是卡顿。高倍速消耗很快：3m 周期 180 倍速恰为 <strong>1 根 / 秒</strong>，1m 周期 900 倍速达 15 根 / 秒。</P>
             </div>
           </section>
 

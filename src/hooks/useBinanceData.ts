@@ -98,6 +98,10 @@ export function useBinanceData() {
   const newestRef = useRef<number>(0);
   const noMoreNewerRef = useRef(false);
   const [loadingNewer, setLoadingNewer] = useState(false);
+  // setState 是异步的：RAF 每帧调用时，连续两帧可能都读到 loadingNewer === false
+  // 而重复发请求。用 ref 做真正的在途锁——进入函数体即置位，同步生效。
+  const inflightNewerRef = useRef(false);
+  const inflightOlderRef = useRef(false);
   const initLoadRequestIdRef = useRef(0);
 
   /** Direct ref access to allData — avoids stale closures in RAF loops */
@@ -119,7 +123,9 @@ export function useBinanceData() {
       setError(null);
 
       try {
-        // 正放：锚点前 1000 根作历史 + 300 根前瞻缓冲。
+        // 正放：锚点前 1000 根作历史 + 1000 根前瞻缓冲。缓冲从 300 提到 1000——
+        // 3m 周期 180 倍速恰为 1 根/秒，300 根只够 5 分钟，之后就得完全依赖
+        // 流式补给按时到达；1000 根把开局的余量拉到 16 分钟以上。
         // 倒放（镜像）：完全对称——锚点后 1000 根作「主观历史」（真实未来，铺在
         // 镜像图左侧）+ 锚点前 300 根作倒走的流式缓冲。
         const [historyData, futureData] = opts?.reverse
@@ -129,7 +135,7 @@ export function useBinanceData() {
             ])
           : await Promise.all([
               fetchBatch(symbol, interval, { endTime: anchorTime, limit: 1000 }),
-              fetchBatch(symbol, interval, { startTime: anchorTime + 1, limit: 300 }).catch(() => []),
+              fetchBatch(symbol, interval, { startTime: anchorTime + 1, limit: 1000 }).catch(() => []),
             ]);
         // 正放要求锚点前有历史；倒放的「历史」在锚点后，任一侧有数据即可开局。
         if (opts?.reverse ? historyData.length === 0 && futureData.length === 0 : historyData.length === 0) {
@@ -153,6 +159,8 @@ export function useBinanceData() {
         noMoreRef.current = false;
         newestRef.current = merged[merged.length - 1].time;
         noMoreNewerRef.current = false;
+        inflightNewerRef.current = false;
+        inflightOlderRef.current = false;
         setAllDataAndRef(merged);
         return merged;
       } catch (e: any) {
@@ -174,10 +182,11 @@ export function useBinanceData() {
    * 向左拖动即需要它；追加在数组尾部，保持升序。
    */
   const loadNewer = useCallback(async (): Promise<number> => {
-    if (loadingNewer || noMoreNewerRef.current) return 0;
+    if (inflightNewerRef.current || noMoreNewerRef.current) return 0;
     const { symbol, interval } = ctxRef.current;
     if (!symbol || newestRef.current <= 0) return 0;
 
+    inflightNewerRef.current = true;
     setLoadingNewer(true);
     try {
       const startTime = newestRef.current + 1;
@@ -202,15 +211,17 @@ export function useBinanceData() {
       console.error("Failed to load newer data:", e);
       return 0;
     } finally {
+      inflightNewerRef.current = false;
       setLoadingNewer(false);
     }
-  }, [loadingNewer, setAllDataAndRef]);
+  }, [setAllDataAndRef]);
 
   const loadOlder = useCallback(async (): Promise<number> => {
-    if (loadingOlder || noMoreRef.current) return 0;
+    if (inflightOlderRef.current || noMoreRef.current) return 0;
     const { symbol, interval } = ctxRef.current;
     if (!symbol) return 0;
 
+    inflightOlderRef.current = true;
     setLoadingOlder(true);
     try {
       const endTime = oldestRef.current - 1;
@@ -236,9 +247,10 @@ export function useBinanceData() {
       console.error("Failed to load older data:", e);
       return 0;
     } finally {
+      inflightOlderRef.current = false;
       setLoadingOlder(false);
     }
-  }, [loadingOlder, setAllDataAndRef]);
+  }, [setAllDataAndRef]);
 
   /**
    * Get visible data up to simulated time with sub-candle interpolation.

@@ -583,8 +583,7 @@ export function PGapPanel({
                 <span
                   data-testid="p-gap-computed-p"
                   title="自动计算、只读：P = 结构存活概率 × 存活后突破 T 的条件概率"
-                  className="flex-none font-mono text-[clamp(12px,5.2cqw,15px)] font-semibold leading-none tabular-nums"
-                  style={{ color: YELLOW }}
+                  className="flex-none font-mono text-[clamp(14px,6.5cqw,19px)] font-semibold leading-none tabular-nums text-gray-900 dark:text-[#EAECEF]"
                 >
                   {winRatePct.toFixed(1)}%
                 </span>

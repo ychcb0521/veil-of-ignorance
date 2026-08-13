@@ -37,6 +37,7 @@ import {
   reverseFormingBar,
   snapToBarStart,
 } from "@/lib/reversePlayback";
+import { isForwardExhausted, needsForwardPreload, needsReversePreload } from "@/lib/streamingWindow";
 import { upsertOrderSnapshot } from "@/lib/orderSnapshotHistory";
 import {
   diagnoseSignalJump,
@@ -351,6 +352,11 @@ const Index = () => {
   const lastReverseSimTimeRef = useRef<number | null>(null);
   const activeSymbolRef = useRef(activeSymbol);
   const coinTimelinesRef = useRef(coinTimelines);
+  // 正放触顶自动补更晚的 K 线：节流 + 由 loadNewer 自身的 noMore/inflight 守卫兜底。
+  const loadNewerRef = useRef(loadNewer);
+  const forwardLoadNewerAtRef = useRef(0);
+  // 只在「喂完最后一根」的那一刻提示一次，避免暂停后每帧重复弹 toast。
+  const forwardExhaustedRef = useRef(false);
   // 倒放触底自动补更早的 K 线：节流 + 由 loadOlder 自身的 noMore/inflight 守卫兜底。
   const reverseLoadOlderAtRef = useRef(0);
   const loadOlderRef = useRef(loadOlder);
@@ -394,6 +400,9 @@ const Index = () => {
   useEffect(() => {
     loadOlderRef.current = loadOlder;
   }, [loadOlder]);
+  useEffect(() => {
+    loadNewerRef.current = loadNewer;
+  }, [loadNewer]);
   useEffect(() => {
     activeSymbolRef.current = activeSymbol;
   }, [activeSymbol]);
@@ -468,6 +477,10 @@ const Index = () => {
   const DISPLAY_PRICE_SMOOTHING_MS = 42;
   const DISPLAY_PRICE_SNAP_RATIO = 0.08;
   const REACT_FLUSH_MS = 250;
+  // 正放时距最晚已加载 K 线还剩多少根就开始预取更晚数据。取得比倒放宽裕些：
+  // 高倍速下消耗极快（3m 周期 180x 恰为 1 根/秒，1m 周期 900x 达 15 根/秒），
+  // 240 根足以覆盖一次取数的往返，且取数本身有 2s 节流与在途锁兜底。
+  const FORWARD_PRELOAD_BARS = 240;
   // 倒放时距最早已加载 K 线还剩多少根就开始预取更早数据
   const REVERSE_PRELOAD_BARS = 120;
   // 倒放（镜像视图）：图表左沿 = 主观深处历史 = 真实更晚的数据，向左拖动补 loadNewer。
@@ -624,6 +637,109 @@ const Index = () => {
       return ans;
     };
 
+    // ===== 正放的每帧图表推进 =====
+    // 与 runReverseChartTick 对称。此前这段逻辑在 isolated / synced 两个分支里
+    // 各抄了一份且逐字节相同——正是「倒放补了流式加载、正放漏了」这个缺口能
+    // 长期存在的原因。现在只此一份，两个分支共用。
+    const runForwardChartTick = (
+      api: { updateData: (candle: unknown) => void },
+      data: KlineData[],
+      sym: string,
+      simTime: number,
+      now: number,
+    ) => {
+      let newCandles = 0;
+      while (cursorRef.current < data.length) {
+        const candleEnd = data[cursorRef.current].time + iMs;
+        if (candleEnd <= simTime) {
+          newCandles++;
+          cursorRef.current++;
+        } else break;
+      }
+      if (newCandles > 0) {
+        const settledStart = Math.max(0, cursorRef.current - newCandles);
+        for (let i = settledStart; i < cursorRef.current; i++) {
+          runConditionalMatchingForSymbol(sym, data[i], Math.min(simTime, data[i].time + iMs));
+        }
+
+        const batchStart = Math.max(0, cursorRef.current - Math.min(newCandles, 3));
+        for (let i = batchStart; i < cursorRef.current; i++) {
+          const c = data[i];
+          api.updateData({
+            timestamp: c.time,
+            open: c.open,
+            high: c.high,
+            low: c.low,
+            close: c.close,
+            volume: c.volume,
+          });
+        }
+        // 一帧越过多根（高倍速）时让 React 立即补齐其余，与倒放策略一致
+        if (newCandles > 3) lastReactFlushRef.current = 0;
+        const settledClose = Number(data[cursorRef.current - 1]?.close);
+        if (Number.isFinite(settledClose) && settledClose > 0) {
+          latestChartPriceRef.current = settledClose;
+          flushDisplayPrice(settledClose, now);
+        }
+      }
+      if (cursorRef.current < data.length) {
+        const candle = data[cursorRef.current];
+        if (candle.time <= simTime) {
+          const isLiveCandle = candle.time + iMs > Date.now() - 60000;
+          const progress = Math.max(0, Math.min(1, (simTime - candle.time) / iMs));
+          const interpClose = isLiveCandle ? candle.close : candle.open + (candle.close - candle.open) * progress;
+          const hlReveal = Math.min(1, progress * 1.5);
+          const rawHigh = isLiveCandle ? candle.high : candle.open + (candle.high - candle.open) * hlReveal;
+          const rawLow = isLiveCandle ? candle.low : candle.open + (candle.low - candle.open) * hlReveal;
+          // 撮合仍用「周期插值」的 high/low（行为完全不变）
+          const matchHigh = isLiveCandle ? candle.high : Math.max(candle.open, interpClose, rawHigh);
+          const matchLow = isLiveCandle ? candle.low : Math.min(candle.open, interpClose, rawLow);
+          // 显示价统一用「该时刻 1m 价」（priceMap，useBackgroundPrices 每秒更新），使各周期一致；
+          // 偏差过大（疑似切标的残留）或冷启动拉不到时，退回周期插值，不会更糟。
+          const livePx = priceMapRef.current[sym];
+          const canonicalSample = canonicalPriceSampleRef.current;
+          const canonicalFresh =
+            canonicalSample?.symbol === sym &&
+            Math.abs(simTime - canonicalSample.simTime) <= CANONICAL_PRICE_MAX_SIM_AGE_MS;
+          const r = canonicalFresh && livePx > 0 && interpClose > 0 ? livePx / interpClose : 0;
+          const close = r >= 0.2 && r <= 5 ? livePx : interpClose;
+          const displayClose = flushDisplayPrice(close, now);
+          api.updateData({
+            timestamp: candle.time,
+            open: candle.open,
+            high: Math.max(matchHigh, displayClose),
+            low: Math.min(matchLow, displayClose),
+            close: displayClose,
+            volume: candle.volume * progress,
+          });
+          runConditionalMatchingForSymbol(sym, { high: matchHigh, low: matchLow }, simTime);
+          latestChartPriceRef.current = close;
+        }
+      }
+
+      // ③ 触顶：按余量预取更晚的 K 线；喂完已加载最后一根时自动暂停。
+      //    这一段此前完全缺失——初始只有 300 根前瞻缓冲，3m 周期 180x 下
+      //    恰好 1 根/秒，5 分钟就把缓冲吃光，此后时钟照跑、蜡烛不动。
+      if (data.length > 0) {
+        const lastLoaded = data[data.length - 1].time;
+        if (needsForwardPreload(simTime, lastLoaded, iMs, FORWARD_PRELOAD_BARS) && now - forwardLoadNewerAtRef.current > 2000) {
+          forwardLoadNewerAtRef.current = now;
+          void loadNewerRef.current();
+        }
+        if (isForwardExhausted(simTime, lastLoaded, iMs)) {
+          // 只在跨过边界的那一刻暂停并提示一次
+          if (!forwardExhaustedRef.current) {
+            forwardExhaustedRef.current = true;
+            handlePauseRef.current();
+            toast.warning("已播放到当前可取的最新 K 线，已自动暂停");
+          }
+        } else {
+          // 补到了新数据 / 用户回退了时间 → 恢复常态，下次触顶仍会提示
+          forwardExhaustedRef.current = false;
+        }
+      }
+    };
+
     // ===== 倒叙播放（镜像视图）的每帧图表推进 =====
     // 时钟向真实过去走；每越过一根蜡烛的开盘，它便以「开收互换」的镜像整根
     // 落定；正在穿越的那根按主观进度从真实收盘价向开盘价回走。追踪按时间而非
@@ -689,7 +805,7 @@ const Index = () => {
 
       // ③ 触底：按余量预取更早的 K 线；到达已加载最早一根时自动暂停
       if (data.length > 0) {
-        if (simTime <= data[0].time + REVERSE_PRELOAD_BARS * iMs && now - reverseLoadOlderAtRef.current > 2000) {
+        if (needsReversePreload(simTime, data[0].time, iMs, REVERSE_PRELOAD_BARS) && now - reverseLoadOlderAtRef.current > 2000) {
           reverseLoadOlderAtRef.current = now;
           void loadOlderRef.current();
         }
@@ -744,72 +860,7 @@ const Index = () => {
             if (timeDirectionRef.current === -1) {
               runReverseChartTick(api, data, activeSym, activeSimTime, now);
             } else {
-            let newCandles = 0;
-            while (cursorRef.current < data.length) {
-              const candleEnd = data[cursorRef.current].time + iMs;
-              if (candleEnd <= activeSimTime) {
-                newCandles++;
-                cursorRef.current++;
-              } else break;
-            }
-            if (newCandles > 0) {
-              const settledStart = Math.max(0, cursorRef.current - newCandles);
-              for (let i = settledStart; i < cursorRef.current; i++) {
-                runConditionalMatchingForSymbol(activeSym, data[i], Math.min(activeSimTime, data[i].time + iMs));
-              }
-
-              const batchStart = Math.max(0, cursorRef.current - Math.min(newCandles, 3));
-              for (let i = batchStart; i < cursorRef.current; i++) {
-                const c = data[i];
-                api.updateData({
-                  timestamp: c.time,
-                  open: c.open,
-                  high: c.high,
-                  low: c.low,
-                  close: c.close,
-                  volume: c.volume,
-                });
-              }
-              const settledClose = Number(data[cursorRef.current - 1]?.close);
-              if (Number.isFinite(settledClose) && settledClose > 0) {
-                latestChartPriceRef.current = settledClose;
-                flushDisplayPrice(settledClose, now);
-              }
-            }
-            if (cursorRef.current < data.length) {
-              const candle = data[cursorRef.current];
-              if (candle.time <= activeSimTime) {
-                const isLiveCandle = candle.time + iMs > Date.now() - 60000;
-                const progress = Math.max(0, Math.min(1, (activeSimTime - candle.time) / iMs));
-                const interpClose = isLiveCandle ? candle.close : candle.open + (candle.close - candle.open) * progress;
-                const hlReveal = Math.min(1, progress * 1.5);
-                const rawHigh = isLiveCandle ? candle.high : candle.open + (candle.high - candle.open) * hlReveal;
-                const rawLow = isLiveCandle ? candle.low : candle.open + (candle.low - candle.open) * hlReveal;
-                // 撮合仍用「周期插值」的 high/low（行为完全不变）
-                const matchHigh = isLiveCandle ? candle.high : Math.max(candle.open, interpClose, rawHigh);
-                const matchLow = isLiveCandle ? candle.low : Math.min(candle.open, interpClose, rawLow);
-                // 显示价统一用「该时刻 1m 价」（priceMap，useBackgroundPrices 每秒更新），使各周期一致；
-                // 偏差过大（疑似切标的残留）或冷启动拉不到时，退回周期插值，不会更糟。
-                const livePx = priceMapRef.current[activeSym];
-                const canonicalSample = canonicalPriceSampleRef.current;
-                const canonicalFresh =
-                  canonicalSample?.symbol === activeSym &&
-                  Math.abs(activeSimTime - canonicalSample.simTime) <= CANONICAL_PRICE_MAX_SIM_AGE_MS;
-                const r = canonicalFresh && livePx > 0 && interpClose > 0 ? livePx / interpClose : 0;
-                const close = r >= 0.2 && r <= 5 ? livePx : interpClose;
-                const displayClose = flushDisplayPrice(close, now);
-                api.updateData({
-                  timestamp: candle.time,
-                  open: candle.open,
-                  high: Math.max(matchHigh, displayClose),
-                  low: Math.min(matchLow, displayClose),
-                  close: displayClose,
-                  volume: candle.volume * progress,
-                });
-                runConditionalMatchingForSymbol(activeSym, { high: matchHigh, low: matchLow }, activeSimTime);
-                latestChartPriceRef.current = close;
-              }
-            }
+              runForwardChartTick(api, data, activeSym, activeSimTime, now);
             }
           }
         }
@@ -864,72 +915,7 @@ const Index = () => {
           if (timeDirectionRef.current === -1) {
             runReverseChartTick(api, data, activeSymbolRef.current, simTime, now);
           } else {
-          let newCandles = 0;
-          while (cursorRef.current < data.length) {
-            const candleEnd = data[cursorRef.current].time + iMs;
-            if (candleEnd <= simTime) {
-              newCandles++;
-              cursorRef.current++;
-            } else break;
-          }
-          if (newCandles > 0) {
-            const settledStart = Math.max(0, cursorRef.current - newCandles);
-            for (let i = settledStart; i < cursorRef.current; i++) {
-              runConditionalMatchingForSymbol(activeSymbolRef.current, data[i], Math.min(simTime, data[i].time + iMs));
-            }
-
-            const batchStart = Math.max(0, cursorRef.current - Math.min(newCandles, 3));
-            for (let i = batchStart; i < cursorRef.current; i++) {
-              const c = data[i];
-              api.updateData({
-                timestamp: c.time,
-                open: c.open,
-                high: c.high,
-                low: c.low,
-                close: c.close,
-                volume: c.volume,
-              });
-            }
-            const settledClose = Number(data[cursorRef.current - 1]?.close);
-            if (Number.isFinite(settledClose) && settledClose > 0) {
-              latestChartPriceRef.current = settledClose;
-              flushDisplayPrice(settledClose, now);
-            }
-          }
-          if (cursorRef.current < data.length) {
-            const candle = data[cursorRef.current];
-            if (candle.time <= simTime) {
-              const isLiveCandle = candle.time + iMs > Date.now() - 60000;
-              const progress = Math.max(0, Math.min(1, (simTime - candle.time) / iMs));
-              const interpClose = isLiveCandle ? candle.close : candle.open + (candle.close - candle.open) * progress;
-              const hlReveal = Math.min(1, progress * 1.5);
-              const rawHigh = isLiveCandle ? candle.high : candle.open + (candle.high - candle.open) * hlReveal;
-              const rawLow = isLiveCandle ? candle.low : candle.open + (candle.low - candle.open) * hlReveal;
-              // 撮合仍用「周期插值」的 high/low（行为完全不变）
-              const matchHigh = isLiveCandle ? candle.high : Math.max(candle.open, interpClose, rawHigh);
-              const matchLow = isLiveCandle ? candle.low : Math.min(candle.open, interpClose, rawLow);
-              // 显示价统一用「该时刻 1m 价」（priceMap，useBackgroundPrices 每秒更新），使各周期一致；
-              // 偏差过大（疑似切标的残留）或冷启动拉不到时，退回周期插值，不会更糟。
-              const livePx = priceMapRef.current[activeSymbolRef.current];
-              const canonicalSample = canonicalPriceSampleRef.current;
-              const canonicalFresh =
-                canonicalSample?.symbol === activeSymbolRef.current &&
-                Math.abs(simTime - canonicalSample.simTime) <= CANONICAL_PRICE_MAX_SIM_AGE_MS;
-              const r = canonicalFresh && livePx > 0 && interpClose > 0 ? livePx / interpClose : 0;
-              const close = r >= 0.2 && r <= 5 ? livePx : interpClose;
-              const displayClose = flushDisplayPrice(close, now);
-              api.updateData({
-                timestamp: candle.time,
-                open: candle.open,
-                high: Math.max(matchHigh, displayClose),
-                low: Math.min(matchLow, displayClose),
-                close: displayClose,
-                volume: candle.volume * progress,
-              });
-              runConditionalMatchingForSymbol(activeSymbolRef.current, { high: matchHigh, low: matchLow }, simTime);
-              latestChartPriceRef.current = close;
-            }
-          }
+            runForwardChartTick(api, data, activeSymbolRef.current, simTime, now);
           }
         }
 
