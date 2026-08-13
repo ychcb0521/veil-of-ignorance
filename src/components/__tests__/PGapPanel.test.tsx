@@ -67,7 +67,7 @@ describe('PGapPanel', () => {
 
     expect(screen.getByTestId('p-gap-baseline')).toHaveTextContent('50.0%');
     expect(screen.getByTestId('p-gap-value')).toHaveTextContent('请填写 P₁ 与 P₂');
-    expect(screen.getByTestId('p-gap-computed-p')).toHaveTextContent('= P₁ × P₂');
+    expect(screen.getByTestId('p-gap-computed-p')).toHaveTextContent('待填');
   });
 
   it('T === K 与方向不成立时不出数字，只出提示', () => {
@@ -152,7 +152,7 @@ describe('PGapPanel', () => {
     render(<PGapPanel currentPrice={100} pricePrecision={2} />);
     setPrices(90, 110);
     setSurvival(90);
-    expect(screen.getByTestId('p-gap-computed-p')).toHaveTextContent('= P₁ × P₂');
+    expect(screen.getByTestId('p-gap-computed-p')).toHaveTextContent('待填');
     expect(screen.getByTestId('p-gap-value')).toHaveTextContent('请填写 P₁ 与 P₂');
   });
 
@@ -161,7 +161,7 @@ describe('PGapPanel', () => {
     // 不落种：两项输入为空、P 为占位
     expect(screen.getByTestId('p-gap-survival-number')).toHaveValue(null);
     expect(screen.getByTestId('p-gap-breakout-number')).toHaveValue(null);
-    expect(screen.getByTestId('p-gap-computed-p')).toHaveTextContent('= P₁ × P₂');
+    expect(screen.getByTestId('p-gap-computed-p')).toHaveTextContent('待填');
     const source = screen.getByTestId('p-gap-winrate-source');
     expect(source).toHaveTextContent('参考：本账号战役整体胜率 62%（n=23）');
     expect(source.tagName).not.toBe('BUTTON');
@@ -291,47 +291,58 @@ describe('PGapPanel', () => {
     expect(screen.getByText(/3 笔均价/)).toBeInTheDocument();
   });
 
-  it('浮亏假优势守卫：S 跌破多单开仓价时 gap 前置 − 号、转醒目蓝', () => {
-    // 持多单开仓 100；S=95 已浮亏。K=90,T=130 → P₀=(5)/(40)=12.5%，P=60 → gap=+47.5%
-    // ——看似优势变大，实为亏损换来的假优势 → 显示 −47.5% 醒目蓝
+  it('gap 只做 P 对 P₀ 的几何对比，不与持仓成本价比较', () => {
+    // 持多单开仓 100、S=95 已浮亏。K=90,T=130 → P₀=5/40=12.5%，P=60% → gap=+47.5%
+    // 浮亏与否不参与 gap：读数照常为正绿，不加负号、不换色。
     render(<PGapPanel currentPrice={95} pricePrecision={2} longEntryPrice={100} longPositionCount={1} longRiskAnchorPrice={90} />);
     setPrices(90, 130);
     setWinRate(60);
-    const gap = screen.getByTestId('p-gap-value');
-    expect(gap).toHaveTextContent('−47.5%');
-    expect(gap).toHaveAttribute('data-gap-sign', 'underwater');
-    expect(gap).toHaveStyle({ color: '#2B7FFF' });
-  });
 
-  it('S 回到开仓价上方即恢复常规绿色显示', () => {
-    render(<PGapPanel currentPrice={105} pricePrecision={2} longEntryPrice={100} longPositionCount={1} longRiskAnchorPrice={90} />);
-    setPrices(90, 130);
-    setWinRate(60);
     const gap = screen.getByTestId('p-gap-value');
+    expect(gap).toHaveTextContent('+47.5%');
+    expect(gap.textContent).not.toContain('−');
     expect(gap).toHaveAttribute('data-gap-sign', 'positive');
     expect(gap).toHaveStyle({ color: '#0ECB81' });
+    // P₀ 恒为正；优势条按原始正 gap 满格
+    expect(screen.getByTestId('p-gap-baseline')).toHaveTextContent('12.5%');
+    expect(screen.getByTestId('p-gap-bar')).toHaveAttribute('data-remaining', '1.0000');
+    // 持仓盈亏另有其表：b 可落袋照常显示浮亏
+    expect(screen.getByTestId('p-gap-bankable')).toHaveTextContent('-0.50R');
   });
 
-  it('无多单时不触发浮亏标记——被动状态只属于持仓者', () => {
-    render(<PGapPanel currentPrice={95} pricePrecision={2} />);
+  it('无论持仓浮盈浮亏，同样的 S/K/T/P 给出同样的 gap', () => {
+    const { rerender } = render(
+      <PGapPanel currentPrice={95} pricePrecision={2} longEntryPrice={100} longPositionCount={1} longRiskAnchorPrice={90} />,
+    );
     setPrices(90, 130);
     setWinRate(60);
-    expect(screen.getByTestId('p-gap-value')).toHaveAttribute('data-gap-sign', 'positive');
+    const underwaterGap = screen.getByTestId('p-gap-value').textContent;
+
+    // 换成浮盈持仓（开仓价降到 92），gap 不应有任何变化
+    rerender(<PGapPanel currentPrice={95} pricePrecision={2} longEntryPrice={92} longPositionCount={1} longRiskAnchorPrice={90} />);
+    expect(screen.getByTestId('p-gap-value').textContent).toBe(underwaterGap);
+
+    // 完全无持仓，同样不变
+    rerender(<PGapPanel currentPrice={95} pricePrecision={2} />);
+    expect(screen.getByTestId('p-gap-value').textContent).toBe(underwaterGap);
   });
 
-  it('折叠表头读数同样按浮亏状态转醒目蓝带 − 号', () => {
+  it('折叠表头读数同样只反映 gap 本身', () => {
     const { rerender } = render(
-      <PGapPanel currentPrice={95} pricePrecision={2} longEntryPrice={100} longPositionCount={1} onToggleCollapsed={() => {}} />,
+      <PGapPanel currentPrice={95} pricePrecision={2} longEntryPrice={100} longPositionCount={1}
+        longRiskAnchorPrice={90} onToggleCollapsed={() => {}} />,
     );
     setPrices(90, 130);
     setWinRate(60);
     rerender(
-      <PGapPanel currentPrice={95} pricePrecision={2} longEntryPrice={100} longPositionCount={1} collapsed onToggleCollapsed={() => {}} />,
+      <PGapPanel currentPrice={95} pricePrecision={2} longEntryPrice={100} longPositionCount={1}
+        longRiskAnchorPrice={90} collapsed onToggleCollapsed={() => {}} />,
     );
-    const collapsedValue = screen.getByTestId('p-gap-collapsed-value');
-    expect(collapsedValue).toHaveTextContent('−47.5%');
-    expect(collapsedValue).toHaveStyle({ color: '#2B7FFF' });
+    const collapsed = screen.getByTestId('p-gap-collapsed-value');
+    expect(collapsed).toHaveTextContent('+47.5%');
+    expect(collapsed).toHaveStyle({ color: '#0ECB81' });
   });
+
 
   it('是独立模块：自带 P_gap 表头，不再寄居在成交页签里', () => {
     render(<PGapPanel currentPrice={100} pricePrecision={2} />);

@@ -631,7 +631,7 @@ export default function GuidePage() {
                     <tr>
                       <td className="px-3 py-2 border-t border-border">优势边际 gap</td>
                       <td className="px-3 py-2 border-t border-border">P − P₀</td>
-                      <td className="px-3 py-2 border-t border-border">P 高出基线的部分，才真正属于你。gap &gt; 0 显示绿色「优势边际 +x.x%」；<strong>gap ≤ 0 转红并显示「优势已耗尽」</strong>，意味着这笔已不值得下手。<strong>蓝色且前置「−」号</strong> = 持多单而现价已跌破开仓价：P₀ 因价格靠近止损而走低，gap 的走高是亏损换来的<strong>假优势</strong>——浮亏时主动权已不在交易者手中，此为劣势与被动状态，优势条同步转蓝</td>
+                      <td className="px-3 py-2 border-t border-border">P 高出基线的部分，才真正属于你。gap &gt; 0 显示绿色「优势边际 +x.x%」；<strong>gap ≤ 0 转红并显示「优势已耗尽」</strong>，意味着这笔已不值得下手。gap 只做「P 对 P₀」的<strong>纯几何对比</strong>，不与持仓成本价比较——同样的 S/K/T/P，无论你此刻浮盈、浮亏还是空仓，gap 都是同一个数。持仓的盈亏状态另有其表：看 b 可落袋</td>
                     </tr>
                   </tbody>
                 </table>

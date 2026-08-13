@@ -38,10 +38,6 @@ const SLIDER_SPAN = 0.12;
 const GREEN = '#0ECB81';
 const RED = '#F6465D';
 const YELLOW = '#FCD535';
-// 浮亏被动态：S 已跌破多单开仓价时 gap 的告警色。
-// 用醒目蓝而非红/黄——它既不是「亏」也不是「警告」，而是第三种语义：
-// 数字在涨、身份是被动。蓝色与绿/红/黄三色互不混淆，一眼可辨。
-const BLUE = '#2B7FFF';
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(Math.max(value, min), max);
@@ -70,18 +66,32 @@ type FieldProps = {
 };
 
 /**
- * 单行输入：符号+名称 / 滑块 / 数字框 挤在同一行。
- * 相比「标签行 + 滑块行」两行式省掉近一半高度，整块面板才能不滚动就看全。
+ * 单行输入行。用固定三栏栅格而不是 flex 自由排布——K/T/P₁/P₂ 四行的
+ * 符号、滑块、数字框因此严格竖向对齐，这是整块面板秩序感的来源。
+ * 标签列宽度随容器伸缩但有下限，避免「结构存活」被截成「结构…」。
  */
 function GapField({
   id, symbol, label, accent, value, min, max, step,
   disabled = false, suffix, placeholder = '—', onChange, onCommit,
 }: FieldProps) {
   return (
-    <div className="flex h-[30px] items-center gap-2 px-3">
-      <label htmlFor={`p-gap-${id}-number`} className="flex w-[clamp(40px,17cqw,52px)] flex-none items-baseline gap-1 select-none">
-        <span className="font-mono text-[11px] font-semibold leading-none" style={{ color: accent }}>{symbol}</span>
-        <span className="min-w-0 truncate whitespace-nowrap text-[9px] text-gray-500 dark:text-[#848e9c]">{label}</span>
+    <div
+      className="grid h-[32px] items-center gap-2 px-3"
+      style={{ gridTemplateColumns: 'clamp(58px,24cqw,76px) minmax(0,1fr) clamp(56px,26cqw,74px)' }}
+    >
+      <label htmlFor={`p-gap-${id}-number`} className="flex min-w-0 items-center gap-1 select-none">
+        <span
+          className="w-[14px] flex-none font-mono text-[11px] font-semibold leading-none"
+          style={{ color: accent }}
+        >
+          {symbol}
+        </span>
+        <span
+          title={label}
+          className="min-w-0 truncate whitespace-nowrap text-[9px] leading-none text-gray-500 dark:text-[#848e9c]"
+        >
+          {label}
+        </span>
       </label>
       <input
         data-testid={`p-gap-${id}-slider`}
@@ -96,9 +106,10 @@ function GapField({
         onPointerUp={onCommit}
         onKeyUp={onCommit}
         style={{ accentColor: accent }}
-        className="h-[3px] min-w-0 flex-1 cursor-pointer appearance-none rounded-full bg-gray-200 disabled:cursor-not-allowed disabled:opacity-40 dark:bg-[#2b3139]"
+        className="h-[3px] w-full cursor-pointer appearance-none rounded-full bg-gray-200 disabled:cursor-not-allowed disabled:opacity-40 dark:bg-[#2b3139]"
       />
-      <div className="flex flex-none items-center gap-0.5">
+      {/* 单位内嵌进输入框，右缘因此与上下各行严格对齐 */}
+      <div className="relative">
         <input
           id={`p-gap-${id}-number`}
           data-testid={`p-gap-${id}-number`}
@@ -115,9 +126,13 @@ function GapField({
             onChange(Number.isFinite(next) ? next : null);
           }}
           onBlur={onCommit}
-          className="h-[22px] w-[clamp(54px,25cqw,74px)] rounded border border-gray-200 bg-gray-50 px-1.5 text-right font-mono text-[10px] tabular-nums text-gray-900 outline-none transition-colors placeholder:text-gray-400 focus:border-[#fcd535] focus:bg-white disabled:opacity-40 dark:border-[#2b3139] dark:bg-[#161a1e] dark:text-[#EAECEF] dark:placeholder:text-[#5e6673] dark:focus:bg-[#12161a]"
+          className={`h-[22px] w-full rounded border border-gray-200 bg-gray-50 py-0 text-right font-mono text-[10px] tabular-nums text-gray-900 outline-none transition-colors placeholder:text-gray-400 focus:border-[#fcd535] focus:bg-white disabled:opacity-40 dark:border-[#2b3139] dark:bg-[#161a1e] dark:text-[#EAECEF] dark:placeholder:text-[#5e6673] dark:focus:bg-[#12161a] ${suffix ? 'pl-1 pr-[14px]' : 'px-1.5'}`}
         />
-        <span className="w-2 text-[9px] text-gray-500 dark:text-[#848e9c]">{suffix ?? ''}</span>
+        {suffix && (
+          <span className="pointer-events-none absolute inset-y-0 right-1 flex items-center text-[9px] leading-none text-gray-400 dark:text-[#5e6673]">
+            {suffix}
+          </span>
+        )}
       </div>
     </div>
   );
@@ -200,10 +215,6 @@ export function PGapPanel({
 
   const gap = result.valid ? result.gap : null;
   const positive = gap != null && gap > 0;
-  // 浮亏假优势守卫：持多单且 S 已跌破开仓价时，P₀ 因 S 靠近 K 而走低、gap 看似
-  // 变大——但那是亏损换来的“优势”，主动权已不在交易者手中。此状态下 gap 前置
-  // “−”号并以醒目蓝显示，标记劣势与被动。
-  const underwater = longEntryPrice != null && hasPrice && currentPrice < longEntryPrice;
   const remainingFraction = anchorGap != null && anchorGap > 0 && gap != null
     ? clamp(gap / anchorGap, 0, 1)
     : positive ? 1 : 0;
@@ -258,6 +269,7 @@ export function PGapPanel({
 
               <div className="mt-2.5 rounded bg-gray-50 px-2 py-1.5 font-mono text-[10px] text-gray-900 dark:bg-[#161a1e] dark:text-[#EAECEF]">
                 P₀ = |S − K| ÷ |T − K|<br />
+                P&nbsp;&nbsp;= P₁ × P₂<br />
                 gap = P − P₀
               </div>
 
@@ -275,8 +287,16 @@ export function PGapPanel({
                   <dd className="inline"> · 目标价，你打算兑现的位置。</dd>
                 </div>
                 <div>
+                  <dt className="inline font-mono font-semibold" style={{ color: YELLOW }}>P₁</dt>
+                  <dd className="inline"> · 结构存活概率：当前交易结构继续存活、不被证伪的概率。由你自己填写。</dd>
+                </div>
+                <div>
+                  <dt className="inline font-mono font-semibold" style={{ color: YELLOW }}>P₂</dt>
+                  <dd className="inline"> · 存活后突破 T 的概率，是<strong>条件概率</strong>——先假定结构成立，再问价格走到 T 的把握；<strong>不是</strong>独立的「突破 T 概率」，否则结构风险会被重复计价。由你自己填写。</dd>
+                </div>
+                <div>
                   <dt className="inline font-mono font-semibold" style={{ color: YELLOW }}>P</dt>
-                  <dd className="inline"> · 最终主观胜率，不再手填：P = P₁(结构存活) × P₂(存活后突破 T)。P₁ 是当前交易结构不被证伪的概率；P₂ 是【在结构存活的条件下】价格最终突破 T 的条件概率——两者相乘即链式法则。面板下方的战役整体胜率仅作参考对照。</dd>
+                  <dd className="inline"> · 最终主观胜率 = P₁ × P₂（链式法则），<strong>自动计算、只读</strong>，任一项变化即实时重算；任一项缺失则不出数。面板底部的战役整体胜率仅作参考对照，不会自动填入。</dd>
                 </div>
                 <div>
                   <dt className="inline font-mono font-semibold text-gray-700 dark:text-[#B7BDC6]">b</dt>
@@ -288,7 +308,7 @@ export function PGapPanel({
                 </div>
                 <div>
                   <dt className="inline font-semibold text-gray-700 dark:text-[#B7BDC6]">gap 优势边际</dt>
-                  <dd className="inline"> · P 高出基线的部分，才真正属于你。<span style={{ color: GREEN }}>正数为绿</span>；<span style={{ color: RED }}>≤ 0 转红并显示「优势已耗尽」</span>，意味着这笔已不值得下手。<span style={{ color: BLUE }}>蓝色且前置「−」号</span> = 持多单而现价已跌破开仓价：P₀ 因价格靠近止损而走低，gap 的走高是亏损换来的<strong>假优势</strong>——主动权已不在你手中，此为劣势与被动状态。</dd>
+                  <dd className="inline"> · P 高出基线的部分，才真正属于你。<span style={{ color: GREEN }}>正数为绿</span>；<span style={{ color: RED }}>≤ 0 转红并显示「优势已耗尽」</span>，意味着这笔已不值得下手。gap 只做「P 对 P₀」的纯几何对比，不与持仓成本价比较——持仓的盈亏状态请看 b 可落袋。</dd>
                 </div>
                 <div>
                   <dt className="inline font-semibold text-gray-700 dark:text-[#B7BDC6]">优势条</dt>
@@ -307,11 +327,9 @@ export function PGapPanel({
             <span
               data-testid="p-gap-collapsed-value"
               className="truncate font-mono text-[11px] font-semibold tabular-nums"
-              style={{ color: underwater ? BLUE : positive ? GREEN : RED }}
+              style={{ color: positive ? GREEN : RED }}
             >
-              {underwater
-                ? `−${Math.abs(gap * 100).toFixed(1)}%`
-                : positive ? formatSignedPercent(gap) : '优势已耗尽'}
+              {positive ? formatSignedPercent(gap) : '优势已耗尽'}
             </span>
           ) : (
             <span className="truncate text-[10px] text-gray-500 dark:text-[#848e9c]">优势边际</span>
@@ -423,16 +441,11 @@ export function PGapPanel({
                   ) : (
                     <span
                       data-testid="p-gap-value"
-                      data-gap-sign={underwater ? 'underwater' : positive ? 'positive' : 'non-positive'}
-                      title={underwater
-                        ? '现价已跌破多单开仓价（浮亏）：P₀ 因价格靠近止损而走低，gap 的走高是亏损换来的假优势——主动权已不在你手中'
-                        : undefined}
+                      data-gap-sign={positive ? 'positive' : 'non-positive'}
                       className="font-mono text-[clamp(12px,5.5cqw,16px)] font-semibold leading-none tabular-nums"
-                      style={{ color: underwater ? BLUE : positive ? GREEN : RED }}
+                      style={{ color: positive ? GREEN : RED }}
                     >
-                      {underwater
-                        ? `−${Math.abs(gap * 100).toFixed(1)}%`
-                        : positive ? formatSignedPercent(gap) : '优势已耗尽'}
+                      {positive ? formatSignedPercent(gap) : '优势已耗尽'}
                     </span>
                   )}
                 </div>
@@ -447,7 +460,7 @@ export function PGapPanel({
                     className="h-full rounded-full transition-[width] duration-300 ease-out"
                     style={{
                       width: `${positive ? remainingFraction * 100 : 100}%`,
-                      backgroundColor: underwater ? BLUE : positive ? GREEN : RED,
+                      backgroundColor: positive ? GREEN : RED,
                     }}
                   />
                 </div>
@@ -456,16 +469,17 @@ export function PGapPanel({
           ) : (
             <div
               data-testid="p-gap-invalid"
-              className="flex min-h-[64px] items-center justify-center rounded-md border border-dashed border-gray-200 px-3 text-center text-[11px] leading-relaxed text-gray-500 dark:border-[#2b3139] dark:text-[#848e9c]"
+              className="flex items-start gap-1.5 rounded-md border border-dashed border-gray-200 px-2.5 py-2 text-[10px] leading-relaxed text-gray-500 dark:border-[#2b3139] dark:text-[#848e9c]"
             >
-              {invalidMessage}
+              <span className="mt-[1px] flex-none text-gray-400 dark:text-[#5e6673]">!</span>
+              <span className="min-w-0">{invalidMessage}</span>
             </div>
           )}
         </div>
 
         {/* 输入区 */}
         <div className="divide-y divide-gray-100 dark:divide-[#2b3139]/60">
-          <div className="flex items-center justify-between px-3 h-[30px]">
+          <div className="flex h-[32px] items-center justify-between px-3">
             <span className="flex items-baseline gap-1.5 select-none">
               <span className="font-mono text-[12px] font-semibold leading-none" style={{ color: YELLOW }}>S</span>
               <span className="text-[10px] text-gray-500 dark:text-[#848e9c]">现价</span>
@@ -511,61 +525,68 @@ export function PGapPanel({
             onChange={next => { setTarget(next); reanchor(); }}
           />
 
-          <GapField
-            id="survival"
-            symbol="P₁"
-            label="结构存活"
-            accent={YELLOW}
-            value={survivalPct}
-            min={0}
-            max={100}
-            step={0.5}
-            suffix="%"
-            onChange={next => setSurvivalPct(next == null ? null : clamp(next, 0, 100))}
-            onCommit={reanchor}
-          />
-
-          <GapField
-            id="breakout"
-            symbol="P₂"
-            label="破T|存活"
-            accent={YELLOW}
-            value={breakoutPct}
-            min={0}
-            max={100}
-            step={0.5}
-            suffix="%"
-            onChange={next => setBreakoutPct(next == null ? null : clamp(next, 0, 100))}
-            onCommit={reanchor}
-          />
-
-          {/* 最终主观概率 P：自动计算、只读。P₂ 是条件概率，所以直接相乘即链式法则。 */}
-          <div
-            className="flex h-[30px] items-center justify-between gap-2 px-3"
-            title="P = 结构存活概率 × 存活后突破 T 的条件概率（链式法则）。两项任一变化即实时重算；不可手改。"
-          >
-            <span className="flex min-w-0 items-baseline gap-1 select-none">
-              <span className="font-mono text-[11px] font-semibold leading-none" style={{ color: YELLOW }}>P</span>
-              <span className="min-w-0 truncate whitespace-nowrap text-[9px] text-gray-500 dark:text-[#848e9c]">主观胜率 · 自动</span>
-            </span>
-            {winRatePct == null ? (
-              <span data-testid="p-gap-computed-p" className="font-mono text-[10px] text-gray-400 dark:text-[#5e6673]">
-                = P₁ × P₂
+          {/* 概率组：P₁、P₂ 缩进并由左侧竖线归入 P 名下——一眼看出 P 是它们的乘积，
+              而不是三个并列的独立字段。 */}
+          <div className="px-3 pt-2">
+            <div className="flex items-baseline justify-between gap-2">
+              <span className="flex min-w-0 items-baseline gap-1 select-none">
+                <span className="font-mono text-[11px] font-semibold leading-none" style={{ color: YELLOW }}>P</span>
+                <span className="min-w-0 truncate whitespace-nowrap text-[9px] text-gray-500 dark:text-[#848e9c]">
+                  主观胜率
+                </span>
+                <span className="whitespace-nowrap font-mono text-[8px] text-gray-400 dark:text-[#5e6673]">
+                  = P₁×P₂
+                </span>
               </span>
-            ) : (
-              <span
-                data-testid="p-gap-computed-p"
-                className="font-mono text-[clamp(11px,4.8cqw,13px)] font-semibold tabular-nums"
-                style={{ color: YELLOW }}
-              >
-                {winRatePct.toFixed(1)}%
-              </span>
-            )}
+              {winRatePct == null ? (
+                <span data-testid="p-gap-computed-p" className="flex-none font-mono text-[10px] text-gray-400 dark:text-[#5e6673]">
+                  待填
+                </span>
+              ) : (
+                <span
+                  data-testid="p-gap-computed-p"
+                  title="自动计算、只读：P = 结构存活概率 × 存活后突破 T 的条件概率"
+                  className="flex-none font-mono text-[clamp(12px,5.2cqw,15px)] font-semibold leading-none tabular-nums"
+                  style={{ color: YELLOW }}
+                >
+                  {winRatePct.toFixed(1)}%
+                </span>
+              )}
+            </div>
+          </div>
+
+          <div className="ml-3 border-l border-gray-200 pb-1 dark:border-[#2b3139]">
+            <GapField
+              id="survival"
+              symbol="P₁"
+              label="结构存活"
+              accent={YELLOW}
+              value={survivalPct}
+              min={0}
+              max={100}
+              step={0.5}
+              suffix="%"
+              onChange={next => setSurvivalPct(next == null ? null : clamp(next, 0, 100))}
+              onCommit={reanchor}
+            />
+            <GapField
+              id="breakout"
+              symbol="P₂"
+              label="存活后破 T"
+              accent={YELLOW}
+              value={breakoutPct}
+              min={0}
+              max={100}
+              step={0.5}
+              suffix="%"
+              onChange={next => setBreakoutPct(next == null ? null : clamp(next, 0, 100))}
+              onCommit={reanchor}
+            />
           </div>
 
           {/* b_可落袋：此刻立即止盈能拿到几个 R —— 只与已持有的多单有关，与 T 无关。
               分母锚 K₀ 默认取该多单最早设定的止损（预期最大亏损所在位），可手动改。 */}
-          <div className="flex h-[30px] items-center justify-between gap-2 px-3">
+          <div className="flex h-[32px] items-center justify-between gap-2 px-3">
             <span className="flex min-w-0 items-baseline gap-1 select-none">
               <span className="font-mono text-[11px] font-semibold leading-none text-[#B080FF]">b</span>
               <span className="whitespace-nowrap text-[9px] text-gray-500 dark:text-[#848e9c]">可落袋</span>
@@ -625,7 +646,7 @@ export function PGapPanel({
           {defaultWinRatePct != null && (
             <div
               data-testid="p-gap-winrate-source"
-              className="flex w-full items-center gap-1 px-3 py-1 text-left text-[9px] leading-none text-gray-400 dark:text-[#5e6673]"
+              className="mt-1 flex w-full items-center gap-1 border-t border-gray-100 px-3 pb-1 pt-1.5 text-left text-[9px] leading-none text-gray-400 dark:border-[#2b3139]/60 dark:text-[#5e6673]"
             >
               参考：本账号战役整体胜率 {defaultWinRatePct.toFixed(0)}%
               {winRateSampleCount > 0 && `（n=${winRateSampleCount}）`}
