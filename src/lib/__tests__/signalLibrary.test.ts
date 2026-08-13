@@ -280,12 +280,16 @@ describe('default signal library', () => {
     expect(defaults.length).toBe(parsedDefault.signals.length);
     expect(defaults.length).toBeGreaterThan(850);
     expect(defaults[0]).toMatchObject({
-      id: expect.stringMatching(/^default-TAKEUSDT-/),
-      symbol: 'TAKEUSDT',
-      fallbackZone: '0.043',
+      id: expect.stringMatching(/^default-VELVETUSDT-/),
+      symbol: 'VELVETUSDT',
+      fallbackZone: '0.71',
     });
 
     const requestedSignals = [
+      // 2026-08-11 那批：VELVET 是二次入库（2026-06-08 已有一条 0.0353），
+      // 两条并存正是信号库该有的行为——同一标的不同时点各自成立。
+      ['VELVETUSDT', '2026-08-11 22:47:00', '0.71'],
+      ['LUNA2USDT', '2026-08-11 22:47:00', '0.0481'],
       ['BLUAIUSDT', '2026-06-06 17:09:00', '0.017'],
       ['VELVETUSDT', '2026-06-08 23:16:00', '0.0353'],
       ['HMSTRUSDT', '2026-06-10 21:51:00', '0.00023'],

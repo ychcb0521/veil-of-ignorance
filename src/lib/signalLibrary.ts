@@ -33,7 +33,7 @@ export interface TradeSignal {
 }
 
 export const SIGNAL_LIBRARY_STORAGE_KEY = 'veil.signalLibrary.v1';
-export const SIGNAL_LIBRARY_DEFAULT_VERSION = '202608060001';
+export const SIGNAL_LIBRARY_DEFAULT_VERSION = '202608130001';
 export const SIGNAL_LIBRARY_DEFAULT_VERSION_KEY = 'veil.signalLibrary.defaultVersion';
 
 const HEADER_TIME_RE = /^(time|时间|日期|date)$/i;
