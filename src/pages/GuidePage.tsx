@@ -606,7 +606,9 @@ export default function GuidePage() {
                     <tr><td className="px-3 py-2 border-t border-border font-medium">S 现价</td><td className="px-3 py-2 border-t border-border">当前盘面价格</td><td className="px-3 py-2 border-t border-border">盘面实时数据，只读，随行情跳动</td></tr>
                     <tr><td className="px-3 py-2 border-t border-border font-medium">K 止损</td><td className="px-3 py-2 border-t border-border">你打算认错的位置</td><td className="px-3 py-2 border-t border-border">滑块 + 数字输入；滑块量程为现价 ±12%</td></tr>
                     <tr><td className="px-3 py-2 border-t border-border font-medium">T 目标</td><td className="px-3 py-2 border-t border-border">你打算兑现的位置</td><td className="px-3 py-2 border-t border-border">滑块 + 数字输入</td></tr>
-                    <tr><td className="px-3 py-2 border-t border-border font-medium">P 主观胜率</td><td className="px-3 py-2 border-t border-border">你主观认定这笔会赢的概率</td><td className="px-3 py-2 border-t border-border">滑块 + 数字输入，0–100%；<strong>默认填入本账号交易战役的整体胜率</strong>，可自行覆盖</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border font-medium">P₁ 结构存活概率</td><td className="px-3 py-2 border-t border-border">当前交易结构继续存活、不被证伪的概率</td><td className="px-3 py-2 border-t border-border">滑块 + 数字输入，0–100%，由交易者自己填写</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border font-medium">P₂ 存活后突破 T 的概率</td><td className="px-3 py-2 border-t border-border"><strong>条件概率</strong>：在结构存活的前提下，价格最终突破 T 的概率——不是独立的「突破 T 概率」</td><td className="px-3 py-2 border-t border-border">滑块 + 数字输入，0–100%，由交易者自己填写</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border font-medium">P 最终主观胜率</td><td className="px-3 py-2 border-t border-border">P = P₁ × P₂（链式法则）</td><td className="px-3 py-2 border-t border-border"><strong>自动计算、只读</strong>；任一输入变化即实时重算，任一项缺失则不出数</td></tr>
                   </tbody>
                 </table>
               </div>
@@ -669,12 +671,12 @@ export default function GuidePage() {
               <RedHighlight>
                 当 <strong>T = K</strong>（分母为 0，基线概率无意义）或<strong>方向不成立</strong>（S 落在 K、T 同侧，或恰好压在 K 或 T 上）时，面板<strong>不出任何数字</strong>，只给提示——包括 P₀ 也不显示。宁可不给数，也不给一个无意义的数。
               </RedHighlight>
-              <SubTitle>默认胜率的口径</SubTitle>
+              <SubTitle>P 的两段式估法</SubTitle>
               <P>
-                P 的默认值取<strong>本账号交易战役的整体胜率</strong>：已了结战役中盈利战役所占的比例，与「下注规模」处使用的是同一套口径。<strong>已了结战役不足 5 场时不给默认值</strong>，P 保持空白——不臆造。战役数据是异步加载的，系统只在你尚未动过 P 时落一次默认值，之后不会覆盖你的输入。
+                P 不再一把手填，而是拆成两个更可回答的问题：<strong>「这个结构还活得下去吗（P₁）」</strong>与<strong>「假如它活着，价格能走到 T 吗（P₂）」</strong>。两者相乘即最终主观胜率——P₂ 必须按<strong>条件概率</strong>来估：先假定结构成立，再问突破的把握，否则会把结构风险重复计价。例如 P₁=90%、P₂=40%，则 P=36%。
               </P>
               <P>
-                P 行下方会标出这个默认值的出处（如「默认取自本账号战役整体胜率 62%（n=23）」），<strong>点它即可把 P 退回该值</strong>，方便随时把当下的主观判断和自己的历史实绩作对照。
+                两项都由交易者自己填写，系统不代为估算；<strong>任一项缺失时 P 不出数</strong>、gap 保持等待——不臆造。面板下方仍显示<strong>本账号战役整体胜率</strong>（已了结战役中盈利的比例，不足 5 场不显示），但它只是参考对照，不再自动填入。
               </P>
               <Highlight>
                 这块表的用处不是替你决策，而是逼你把「我觉得这笔能赢」量化成一个数，再和市场免费给的那份摆在一起比。当 gap 逼近或跌破 0，说明你所谓的优势其实来自把止损放得太远、或目标定得太近，而不是来自判断本身。

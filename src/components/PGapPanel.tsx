@@ -140,7 +140,9 @@ export function PGapPanel({
   // K / T 用现价两侧的对称括号作起手，滑块才有落点；P 严格无默认值。
   const [stopLoss, setStopLoss] = useState<number | null>(null);
   const [target, setTarget] = useState<number | null>(null);
-  const [winRatePct, setWinRatePct] = useState<number | null>(null);
+  // P 不再手填：P = P(结构存活) × P(突破T | 结构存活)，两项均由交易者填写。
+  const [survivalPct, setSurvivalPct] = useState<number | null>(null);
+  const [breakoutPct, setBreakoutPct] = useState<number | null>(null);
   const seededRef = useRef(false);
 
   useEffect(() => {
@@ -150,15 +152,12 @@ export function PGapPanel({
     setTarget(Number((currentPrice * 1.02).toFixed(pricePrecision)));
   }, [currentPrice, hasPrice, pricePrecision]);
 
-  // P 默认取该账号交易战役的整体胜率。战役数据是异步到达的，只在用户尚未
-  // 自己动过 P 时落一次种，之后到达的默认值不得覆盖用户输入。
-  const winRateSeededRef = useRef(false);
-  useEffect(() => {
-    if (winRateSeededRef.current || defaultWinRatePct == null) return;
-    if (!Number.isFinite(defaultWinRatePct)) return;
-    winRateSeededRef.current = true;
-    setWinRatePct(current => (current == null ? clamp(defaultWinRatePct, 0, 100) : current));
-  }, [defaultWinRatePct]);
+  // 最终主观概率 P（%）= 结构存活概率 × 存活后突破 T 的条件概率。
+  // 只读、实时；任一项缺失即为 null——不臆造。战役整体胜率只作参考展示，不再落种。
+  const winRatePct = useMemo(() => {
+    if (survivalPct == null || breakoutPct == null) return null;
+    return (survivalPct / 100) * (breakoutPct / 100) * 100;
+  }, [survivalPct, breakoutPct]);
 
   const result = useMemo(
     () => computeAdvantageGap(
@@ -277,7 +276,7 @@ export function PGapPanel({
                 </div>
                 <div>
                   <dt className="inline font-mono font-semibold" style={{ color: YELLOW }}>P</dt>
-                  <dd className="inline"> · 你主观认定的胜率，默认填入本账号交易战役的整体胜率（已了结战役中盈利的比例），可自行覆盖。</dd>
+                  <dd className="inline"> · 最终主观胜率，不再手填：P = P₁(结构存活) × P₂(存活后突破 T)。P₁ 是当前交易结构不被证伪的概率；P₂ 是【在结构存活的条件下】价格最终突破 T 的条件概率——两者相乘即链式法则。面板下方的战役整体胜率仅作参考对照。</dd>
                 </div>
                 <div>
                   <dt className="inline font-mono font-semibold text-gray-700 dark:text-[#B7BDC6]">b</dt>
@@ -419,7 +418,7 @@ export function PGapPanel({
                   <span className="text-[10px] leading-none text-gray-500 dark:text-[#848e9c]">优势边际 gap</span>
                   {gap == null ? (
                     <span data-testid="p-gap-value" className="font-mono text-[11px] text-gray-400 dark:text-[#5e6673]">
-                      请给出主观胜率 P
+                      请填写 P₁ 与 P₂
                     </span>
                   ) : (
                     <span
@@ -513,18 +512,56 @@ export function PGapPanel({
           />
 
           <GapField
-            id="winrate"
-            symbol="P"
-            label="主观胜率"
+            id="survival"
+            symbol="P₁"
+            label="结构存活"
             accent={YELLOW}
-            value={winRatePct}
+            value={survivalPct}
             min={0}
             max={100}
             step={0.5}
             suffix="%"
-            onChange={next => setWinRatePct(next == null ? null : clamp(next, 0, 100))}
+            onChange={next => setSurvivalPct(next == null ? null : clamp(next, 0, 100))}
             onCommit={reanchor}
           />
+
+          <GapField
+            id="breakout"
+            symbol="P₂"
+            label="破T|存活"
+            accent={YELLOW}
+            value={breakoutPct}
+            min={0}
+            max={100}
+            step={0.5}
+            suffix="%"
+            onChange={next => setBreakoutPct(next == null ? null : clamp(next, 0, 100))}
+            onCommit={reanchor}
+          />
+
+          {/* 最终主观概率 P：自动计算、只读。P₂ 是条件概率，所以直接相乘即链式法则。 */}
+          <div
+            className="flex h-[30px] items-center justify-between gap-2 px-3"
+            title="P = 结构存活概率 × 存活后突破 T 的条件概率（链式法则）。两项任一变化即实时重算；不可手改。"
+          >
+            <span className="flex min-w-0 items-baseline gap-1 select-none">
+              <span className="font-mono text-[11px] font-semibold leading-none" style={{ color: YELLOW }}>P</span>
+              <span className="min-w-0 truncate whitespace-nowrap text-[9px] text-gray-500 dark:text-[#848e9c]">主观胜率 · 自动</span>
+            </span>
+            {winRatePct == null ? (
+              <span data-testid="p-gap-computed-p" className="font-mono text-[10px] text-gray-400 dark:text-[#5e6673]">
+                = P₁ × P₂
+              </span>
+            ) : (
+              <span
+                data-testid="p-gap-computed-p"
+                className="font-mono text-[clamp(11px,4.8cqw,13px)] font-semibold tabular-nums"
+                style={{ color: YELLOW }}
+              >
+                {winRatePct.toFixed(1)}%
+              </span>
+            )}
+          </div>
 
           {/* b_可落袋：此刻立即止盈能拿到几个 R —— 只与已持有的多单有关，与 T 无关。
               分母锚 K₀ 默认取该多单最早设定的止损（预期最大亏损所在位），可手动改。 */}
@@ -584,18 +621,15 @@ export function PGapPanel({
             </span>
           </div>
 
-          {/* P 默认值出处：点一下可退回战役胜率，方便把主观判断和历史实绩对照 */}
+          {/* 战役整体胜率仅作参考对照——P 由上面两项相乘而来，不再从这里落种 */}
           {defaultWinRatePct != null && (
-            <button
-              type="button"
+            <div
               data-testid="p-gap-winrate-source"
-              title="点击把 P 恢复为战役整体胜率"
-              onClick={() => { setWinRatePct(clamp(defaultWinRatePct, 0, 100)); reanchor(); }}
-              className="flex w-full items-center gap-1 px-3 py-1 text-left text-[9px] leading-none text-gray-400 transition-colors hover:text-gray-600 dark:text-[#5e6673] dark:hover:text-[#B7BDC6]"
+              className="flex w-full items-center gap-1 px-3 py-1 text-left text-[9px] leading-none text-gray-400 dark:text-[#5e6673]"
             >
-              默认取自本账号战役整体胜率 {defaultWinRatePct.toFixed(0)}%
+              参考：本账号战役整体胜率 {defaultWinRatePct.toFixed(0)}%
               {winRateSampleCount > 0 && `（n=${winRateSampleCount}）`}
-            </button>
+            </div>
           )}
         </div>
       </div>

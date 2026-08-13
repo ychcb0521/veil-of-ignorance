@@ -7,8 +7,18 @@ function setPrices(k: number, t: number) {
   fireEvent.change(screen.getByTestId('p-gap-target-number'), { target: { value: String(t) } });
 }
 
+function setSurvival(pct: number) {
+  fireEvent.change(screen.getByTestId('p-gap-survival-number'), { target: { value: String(pct) } });
+}
+
+function setBreakout(pct: number) {
+  fireEvent.change(screen.getByTestId('p-gap-breakout-number'), { target: { value: String(pct) } });
+}
+
+/** 让乘积 P 恰为 pct：存活=pct、条件破T=100。旧用例的 gap 断言语义保持不变。 */
 function setWinRate(pct: number) {
-  fireEvent.change(screen.getByTestId('p-gap-winrate-number'), { target: { value: String(pct) } });
+  setSurvival(pct);
+  setBreakout(100);
 }
 
 describe('PGapPanel', () => {
@@ -56,8 +66,8 @@ describe('PGapPanel', () => {
     setPrices(90, 110);
 
     expect(screen.getByTestId('p-gap-baseline')).toHaveTextContent('50.0%');
-    expect(screen.getByTestId('p-gap-value')).toHaveTextContent('请给出主观胜率 P');
-    expect(screen.getByTestId('p-gap-winrate-number')).toHaveValue(null);
+    expect(screen.getByTestId('p-gap-value')).toHaveTextContent('请填写 P₁ 与 P₂');
+    expect(screen.getByTestId('p-gap-computed-p')).toHaveTextContent('= P₁ × P₂');
   });
 
   it('T === K 与方向不成立时不出数字，只出提示', () => {
@@ -114,34 +124,52 @@ describe('PGapPanel', () => {
     expect(onToggleCollapsed).toHaveBeenCalledTimes(1);
   });
 
-  it('P 默认取本账号战役整体胜率', () => {
-    render(<PGapPanel currentPrice={100} pricePrecision={2} defaultWinRatePct={62} winRateSampleCount={23} />);
-    expect(screen.getByTestId('p-gap-winrate-number')).toHaveValue(62);
+  it('P = 结构存活概率 × 存活后突破 T 的条件概率（规格示例 90%×40%=36%）', () => {
+    render(<PGapPanel currentPrice={100} pricePrecision={2} />);
     setPrices(90, 110);
-    // P₀=50%，P=62% → gap=+12%
-    expect(screen.getByTestId('p-gap-value')).toHaveTextContent('+12.0%');
-    expect(screen.getByTestId('p-gap-winrate-source')).toHaveTextContent('战役整体胜率 62%（n=23）');
+    setSurvival(90);
+    setBreakout(40);
+    expect(screen.getByTestId('p-gap-computed-p')).toHaveTextContent('36.0%');
+    // P₀=50%，P=36% → gap 为负 → 优势已耗尽
+    expect(screen.getByTestId('p-gap-value')).toHaveTextContent('优势已耗尽');
   });
 
-  it('战役胜率异步到达时不覆盖用户已输入的 P', () => {
-    const { rerender } = render(<PGapPanel currentPrice={100} pricePrecision={2} defaultWinRatePct={null} />);
-    setWinRate(80);
-    rerender(<PGapPanel currentPrice={100} pricePrecision={2} defaultWinRatePct={62} />);
-    expect(screen.getByTestId('p-gap-winrate-number')).toHaveValue(80);
+  it('任一项变化时 P 实时更新，且没有可手改 P 的输入框', () => {
+    render(<PGapPanel currentPrice={100} pricePrecision={2} />);
+    setPrices(90, 110);
+    setSurvival(90);
+    setBreakout(40);
+    expect(screen.getByTestId('p-gap-computed-p')).toHaveTextContent('36.0%');
+    setBreakout(80);
+    expect(screen.getByTestId('p-gap-computed-p')).toHaveTextContent('72.0%');
+    setSurvival(50);
+    expect(screen.getByTestId('p-gap-computed-p')).toHaveTextContent('40.0%');
+    // P 只读：不存在旧的 winrate 输入框
+    expect(screen.queryByTestId('p-gap-winrate-number')).not.toBeInTheDocument();
   });
 
-  it('样本不足（无战役胜率）时 P 保持空白，不臆造默认值', () => {
+  it('只填一项时 P 不出数，gap 同样等待', () => {
+    render(<PGapPanel currentPrice={100} pricePrecision={2} />);
+    setPrices(90, 110);
+    setSurvival(90);
+    expect(screen.getByTestId('p-gap-computed-p')).toHaveTextContent('= P₁ × P₂');
+    expect(screen.getByTestId('p-gap-value')).toHaveTextContent('请填写 P₁ 与 P₂');
+  });
+
+  it('战役整体胜率仅作参考展示，不再落种、不可点击回填', () => {
+    render(<PGapPanel currentPrice={100} pricePrecision={2} defaultWinRatePct={62} winRateSampleCount={23} />);
+    // 不落种：两项输入为空、P 为占位
+    expect(screen.getByTestId('p-gap-survival-number')).toHaveValue(null);
+    expect(screen.getByTestId('p-gap-breakout-number')).toHaveValue(null);
+    expect(screen.getByTestId('p-gap-computed-p')).toHaveTextContent('= P₁ × P₂');
+    const source = screen.getByTestId('p-gap-winrate-source');
+    expect(source).toHaveTextContent('参考：本账号战役整体胜率 62%（n=23）');
+    expect(source.tagName).not.toBe('BUTTON');
+  });
+
+  it('无战役胜率时参考行隐藏', () => {
     render(<PGapPanel currentPrice={100} pricePrecision={2} defaultWinRatePct={null} />);
-    expect(screen.getByTestId('p-gap-winrate-number')).toHaveValue(null);
     expect(screen.queryByTestId('p-gap-winrate-source')).not.toBeInTheDocument();
-  });
-
-  it('点出处标签可把 P 退回战役胜率', () => {
-    render(<PGapPanel currentPrice={100} pricePrecision={2} defaultWinRatePct={62} />);
-    setWinRate(90);
-    expect(screen.getByTestId('p-gap-winrate-number')).toHaveValue(90);
-    fireEvent.click(screen.getByTestId('p-gap-winrate-source'));
-    expect(screen.getByTestId('p-gap-winrate-number')).toHaveValue(62);
   });
 
   it('说明浮层默认隐藏，点开后给出每个指标的算法与作用', async () => {
