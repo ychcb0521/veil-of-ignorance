@@ -1,14 +1,15 @@
 /**
  * 优势边际 gap —— 一块纯读数的仪表。
  *
- * 基线概率 P₀ = |S − K| ÷ |T − K|
+ * 基线概率 P₀ =（S − K）÷（T − K）
  *   在没有任何优势的市场里，价格从 S 出发先摸到 T 而不是先摸到 K 的概率。
  *   它是市场免费给的胜率：把止损放得越远、目标放得越近，P₀ 越高。
+ *   S 越界时不截断：跌破止损为负、越过目标 >1。
  * 优势边际 gap = P − P₀
  *   主观胜率 P 高出基线的部分，才是真正属于你的边际。gap ≤ 0 即优势已耗尽。
  *
- * 方向由 S、K、T 的相对位置推断，不由用户选择：
- *   多头 K < S < T；空头 T < S < K。两者都不成立（含 T === K）时不出数字。
+ * 方向由 T 相对 K 的位置定义：T 在 K 之上为多头，反之为空头（T === K 时退化，不出数字）。
+ * S 不必落在 K 与 T 之间——冲破止损则 P₀ < 0、越过目标则 P₀ > 1，如实反映越界事实。
  */
 
 export type AdvantageGapDirection = 'long' | 'short';
@@ -18,7 +19,7 @@ export type AdvantageGapInvalidReason =
   | 'incomplete'
   /** T === K，|T − K| 为 0，基线概率无意义。 */
   | 'degenerate'
-  /** 既不满足 K < S < T，也不满足 T < S < K。 */
+  /** 保留以兼容既有调用；方向不再因 S 越界而判负。 */
   | 'direction';
 
 export type AdvantageGapResult =
@@ -26,11 +27,14 @@ export type AdvantageGapResult =
   | {
       valid: true;
       direction: AdvantageGapDirection;
-      /** 基线概率，0–1 之间的小数。 */
+      /**
+       * 基线概率 =（S − K）÷（T − K）。S 在 K 与 T 之间时落在 0–1；
+       * S 冲破止损时为负、越过目标时大于 1——越界值如实呈现，不做截断。
+       */
       baseline: number;
       /**
        * 动态赔率 b = (T − S) ÷ (S − K)：这一刻的盈亏比——赚一份要走的距离
-       * 相对亏一份要走的距离。多空两个方向下分子分母同号，b 恒为正。
+       * 相对亏一份要走的距离。S 落在 K 与 T 之间时为正；S 越界时随之转负。
        *
        * 恒等式：1 ÷ (1 + b) ≡ P₀。把 b 代入即得
        *   1/(1+b) = (S−K) / ((S−K)+(T−S)) = (S−K)/(T−K) = P₀
@@ -96,14 +100,12 @@ export function computeAdvantageGap(
   }
   if (t === k) return { valid: false, reason: 'degenerate' };
 
-  const direction: AdvantageGapDirection | null = k < s && s < t
-    ? 'long'
-    : t < s && s < k
-      ? 'short'
-      : null;
-  if (direction == null) return { valid: false, reason: 'direction' };
+  // 方向由 T 相对 K 的位置定义（T 在 K 之上即多头），不再要求 S 落在两者之间。
+  const direction: AdvantageGapDirection = t > k ? 'long' : 'short';
 
-  const baseline = Math.abs(s - k) / Math.abs(t - k);
+  // 教科书写法，不取绝对值：K<S<T 时落在 0–1；S 冲破止损则为负，S 越过目标则 >1。
+  // 越界值不是错误，而是「S 已跑出 K–T 区间」这一事实的如实读数。
+  const baseline = (s - k) / (t - k);
   if (!Number.isFinite(baseline)) return { valid: false, reason: 'degenerate' };
 
   const payoffRatio = (t - s) / (s - k);

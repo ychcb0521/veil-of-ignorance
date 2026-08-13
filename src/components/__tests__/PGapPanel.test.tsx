@@ -1,5 +1,5 @@
 import { fireEvent, render, screen } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { PGapPanel } from '@/components/PGapPanel';
 
 function setPrices(k: number, t: number) {
@@ -22,6 +22,9 @@ function setWinRate(pct: number) {
 }
 
 describe('PGapPanel', () => {
+  // P_gap 的手填量按标的存进 localStorage；用例之间必须互不继承。
+  beforeEach(() => localStorage.clear());
+
   it('S 居中时 P₀ 为 50%，P 高于基线给出绿色优势边际', () => {
     render(<PGapPanel currentPrice={100} pricePrecision={2} />);
     setPrices(90, 110);
@@ -70,17 +73,19 @@ describe('PGapPanel', () => {
     expect(screen.getByTestId('p-gap-computed-p')).toHaveTextContent('待填');
   });
 
-  it('T === K 与方向不成立时不出数字，只出提示', () => {
+  it('T === K 时退化，不出数字', () => {
     render(<PGapPanel currentPrice={100} pricePrecision={2} />);
-
     setPrices(100, 100);
     expect(screen.getByTestId('p-gap-invalid')).toHaveTextContent('基线概率无意义');
     expect(screen.queryByTestId('p-gap-baseline')).not.toBeInTheDocument();
+  });
 
-    // S 落在 K、T 同侧：多头 K<S<T 与空头 T<S<K 均不成立
+  it('S 冲破止损时 P₀ 转负、照常出数——不再判「方向不成立」', () => {
+    render(<PGapPanel currentPrice={100} pricePrecision={2} />);
+    // K=101 已在现价之上：S 冲破止损 → P₀ =（100−101）÷（110−101）≈ −11.1%
     setPrices(101, 110);
-    expect(screen.getByTestId('p-gap-invalid')).toHaveTextContent('方向不成立');
-    expect(screen.queryByTestId('p-gap-value')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('p-gap-invalid')).not.toBeInTheDocument();
+    expect(screen.getByTestId('p-gap-baseline')).toHaveTextContent('-11.1%');
   });
 
   it('空头 T < S < K 同样成立', () => {
@@ -268,7 +273,7 @@ describe('PGapPanel', () => {
     expect(screen.getByTestId('p-gap-bankable')).toHaveTextContent('+1.50R');
   });
 
-  it('无可追溯止损时退回面板情景 K；切换标的清掉手动锚', () => {
+  it('无可追溯止损时退回面板情景 K；换标的得到该标的自己的存档', () => {
     const { rerender } = render(
       <PGapPanel currentPrice={115} pricePrecision={2} longEntryPrice={100} longPositionCount={1} symbol="AUSDT" />,
     );
@@ -278,11 +283,39 @@ describe('PGapPanel', () => {
     fireEvent.change(screen.getByTestId('p-gap-riskk-number'), { target: { value: '95' } });
     expect(screen.getByTestId('p-gap-bankable')).toHaveTextContent('+3.00R');
 
-    // 换标的 → 手动锚失效，退回情景 K
+    // 换标的 → BUSDT 尚无存档，价格重新起手、手动锚不跟随
     rerender(
       <PGapPanel currentPrice={115} pricePrecision={2} longEntryPrice={100} longPositionCount={1} symbol="BUSDT" />,
     );
-    expect(screen.getByTestId('p-gap-bankable')).toHaveTextContent('+1.50R');
+    expect(screen.getByTestId('p-gap-stop-number')).toHaveValue(112.7);
+
+    // 切回 AUSDT → 原存档（含手动锚 95）原样恢复
+    rerender(
+      <PGapPanel currentPrice={115} pricePrecision={2} longEntryPrice={100} longPositionCount={1} symbol="AUSDT" />,
+    );
+    expect(screen.getByTestId('p-gap-riskk-number')).toHaveValue(95);
+    expect(screen.getByTestId('p-gap-bankable')).toHaveTextContent('+3.00R');
+  });
+
+  it('刷新页面后同一标的的填写原样恢复', () => {
+    const { unmount } = render(
+      <PGapPanel currentPrice={100} pricePrecision={2} symbol="AUSDT" longEntryPrice={95} longPositionCount={1} />,
+    );
+    setPrices(90, 130);
+    setSurvival(91.5);
+    setBreakout(78.5);
+    expect(screen.getByTestId('p-gap-computed-p')).toHaveTextContent('71.8%');
+
+    // 卸载再挂载 = 刷新页面（状态只存在 localStorage 里）
+    unmount();
+    render(
+      <PGapPanel currentPrice={100} pricePrecision={2} symbol="AUSDT" longEntryPrice={95} longPositionCount={1} />,
+    );
+    expect(screen.getByTestId('p-gap-stop-number')).toHaveValue(90);
+    expect(screen.getByTestId('p-gap-target-number')).toHaveValue(130);
+    expect(screen.getByTestId('p-gap-survival-number')).toHaveValue(91.5);
+    expect(screen.getByTestId('p-gap-breakout-number')).toHaveValue(78.5);
+    expect(screen.getByTestId('p-gap-computed-p')).toHaveTextContent('71.8%');
   });
 
   it('多笔多单标注为均价', () => {

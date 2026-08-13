@@ -41,13 +41,31 @@ describe('computeAdvantageGap', () => {
     expect(computeAdvantageGap(100, 100, 100, 0.6)).toEqual({ valid: false, reason: 'degenerate' });
   });
 
-  it('方向不成立时不出数字', () => {
-    // S 在 K 与 T 的同一侧：既非 K<S<T，也非 T<S<K
-    expect(computeAdvantageGap(80, 90, 110, 0.6)).toEqual({ valid: false, reason: 'direction' });
-    expect(computeAdvantageGap(120, 90, 110, 0.6)).toEqual({ valid: false, reason: 'direction' });
-    // 边界：S 落在 K 或 T 上，方向同样不成立
-    expect(computeAdvantageGap(90, 90, 110, 0.6)).toEqual({ valid: false, reason: 'direction' });
-    expect(computeAdvantageGap(110, 90, 110, 0.6)).toEqual({ valid: false, reason: 'direction' });
+  it('S 越界时 P₀ 如实越界，不再判「方向不成立」', () => {
+    // 多头 K=90,T=110。S 冲破止损 → P₀ 为负
+    const brokeStop = computeAdvantageGap(80, 90, 110, 0.6);
+    expect(brokeStop.valid).toBe(true);
+    if (brokeStop.valid) expect(brokeStop.baseline).toBeCloseTo(-0.5, 12);
+    // S 越过目标 → P₀ > 1
+    const pastTarget = computeAdvantageGap(120, 90, 110, 0.6);
+    expect(pastTarget.valid).toBe(true);
+    if (pastTarget.valid) expect(pastTarget.baseline).toBeCloseTo(1.5, 12);
+    // S 恰在目标上 → P₀ = 1（b = 0，仍可算）
+    const atTarget = computeAdvantageGap(110, 90, 110, 0.6);
+    expect(atTarget.valid && atTarget.baseline).toBe(1);
+    // S 恰在止损上 → 风险距离为 0、赔率 b 无定义，仍判退化
+    expect(computeAdvantageGap(90, 90, 110, 0.6)).toEqual({ valid: false, reason: 'degenerate' });
+  });
+
+  it('P₀ 为负时 gap 随之放大——越界读数不做截断', () => {
+    // P₀ = −0.5，P = 60% ⇒ gap = 0.6 −(−0.5) = 1.1
+    const r = computeAdvantageGap(80, 90, 110, 0.6);
+    expect(r.valid && r.gap).toBeCloseTo(1.1, 12);
+  });
+
+  it('方向由 T 相对 K 定义，与 S 的位置无关', () => {
+    expect(computeAdvantageGap(80, 90, 110, null).valid && computeAdvantageGap(80, 90, 110, null).direction).toBe('long');
+    expect(computeAdvantageGap(200, 110, 90, null).valid && computeAdvantageGap(200, 110, 90, null).direction).toBe('short');
   });
 
   it('动态赔率 b =（T − S）÷（S − K），多空两向均为正', () => {

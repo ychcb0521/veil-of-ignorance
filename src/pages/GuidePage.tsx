@@ -669,7 +669,7 @@ export default function GuidePage() {
                 多空方向<strong>由 S、K、T 的相对位置自动判定</strong>，不需要也不能手选：多头要求 <strong>K &lt; S &lt; T</strong>，空头要求 <strong>T &lt; S &lt; K</strong>。任一输入变动（包括 S 的行情跳动）立即重算。
               </P>
               <RedHighlight>
-                当 <strong>T = K</strong>（分母为 0，基线概率无意义）或<strong>方向不成立</strong>（S 落在 K、T 同侧，或恰好压在 K 或 T 上）时，面板<strong>不出任何数字</strong>，只给提示——包括 P₀ 也不显示。宁可不给数，也不给一个无意义的数。
+                当 <strong>T = K</strong>（分母为 0，基线概率无意义）或 <strong>S 恰好压在 K 上</strong>（风险距离为 0，赔率 b 无定义）时，面板<strong>不出任何数字</strong>，只给提示——包括 P₀ 也不显示。宁可不给数，也不给一个无意义的数。
               </RedHighlight>
               <SubTitle>P 的两段式估法</SubTitle>
               <P>
@@ -681,6 +681,9 @@ export default function GuidePage() {
               <Highlight>
                 这块表的用处不是替你决策，而是逼你把「我觉得这笔能赢」量化成一个数，再和市场免费给的那份摆在一起比。当 gap 逼近或跌破 0，说明你所谓的优势其实来自把止损放得太远、或目标定得太近，而不是来自判断本身。
               </Highlight>
+              <P>
+                面板上手填的 K、T、P₁、P₂ 与 K₀ <strong>按标的分别存档</strong>：刷新页面后同一标的原样恢复，换标的则各存各的、互不串味。
+              </P>
               <P>
                 模块表头 <strong>P_gap</strong> 右侧有一个低调的问号，点开即是这套算法的完整说明；再右侧是折叠键（同样低调）。<strong>折叠后表头会顶替显示 gap 读数</strong>，仪表不会因为收起就失声。
               </P>

@@ -5,7 +5,8 @@
  * S 随行情跳动，K / T / P 由用户拖动；任一输入变动立即重算。读数即全部功能：
  * 不落库、不记历史、不做校准统计、不给仓位建议。
  */
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
+import { usePersistedState } from '@/hooks/usePersistedState';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { computeAdvantageGap, computeBankableRatio } from '@/lib/advantageGap';
 import { BreakEvenCurve } from '@/components/BreakEvenCurve';
@@ -31,6 +32,24 @@ interface Props {
   /** 当前标的；切换标的时清掉手动改过的 K₀。 */
   symbol?: string;
 }
+
+/** P_gap 的手填量按标的存档，刷新页面不丢；键名带版本以便将来结构变更时平滑失效。 */
+const P_GAP_DRAFT_KEY = 'p_gap_draft_v1';
+
+interface PGapDraft {
+  stopLoss: number | null;
+  target: number | null;
+  survivalPct: number | null;
+  breakoutPct: number | null;
+  manualRiskK: number | null;
+  /** 优势条满格基准——锚定 P 那一刻的 gap。 */
+  anchorGap: number | null;
+}
+
+const EMPTY_DRAFT: PGapDraft = {
+  stopLoss: null, target: null, survivalPct: null, breakoutPct: null,
+  manualRiskK: null, anchorGap: null,
+};
 
 /** 滑块围绕现价展开的半幅：±12% 足够覆盖常规止损/目标，又不至于精度过粗。 */
 const SLIDER_SPAN = 0.12;
@@ -152,20 +171,40 @@ export function PGapPanel({
   symbol = '',
 }: Props) {
   const hasPrice = Number.isFinite(currentPrice) && currentPrice > 0;
-  // K / T 用现价两侧的对称括号作起手，滑块才有落点；P 严格无默认值。
-  const [stopLoss, setStopLoss] = useState<number | null>(null);
-  const [target, setTarget] = useState<number | null>(null);
-  // P 不再手填：P = P(结构存活) × P(突破T | 结构存活)，两项均由交易者填写。
-  const [survivalPct, setSurvivalPct] = useState<number | null>(null);
-  const [breakoutPct, setBreakoutPct] = useState<number | null>(null);
-  const seededRef = useRef(false);
 
+  // 五个手填量按标的存档，刷新页面后同一标的原样恢复；换标的各存各的、互不串味。
+  // K / T 用现价两侧的对称括号作起手，滑块才有落点；P₁ / P₂ / K₀ 严格无默认值。
+  const [draftBySymbol, setDraftBySymbol] = usePersistedState<Record<string, PGapDraft>>(
+    P_GAP_DRAFT_KEY,
+    {},
+  );
+  const draft = draftBySymbol[symbol] ?? EMPTY_DRAFT;
+  const patchDraft = (patch: Partial<PGapDraft>) => {
+    setDraftBySymbol(prev => ({
+      ...prev,
+      [symbol]: { ...(prev[symbol] ?? EMPTY_DRAFT), ...patch },
+    }));
+  };
+
+  const stopLoss = draft.stopLoss;
+  const target = draft.target;
+  const survivalPct = draft.survivalPct;
+  const breakoutPct = draft.breakoutPct;
+  const setStopLoss = (v: number | null) => patchDraft({ stopLoss: v });
+  const setTarget = (v: number | null) => patchDraft({ target: v });
+  const setSurvivalPct = (v: number | null) => patchDraft({ survivalPct: v });
+  const setBreakoutPct = (v: number | null) => patchDraft({ breakoutPct: v });
+
+  // 只在该标的尚无存档时落起手值——已有存档（含刷新后恢复的）绝不覆盖。
   useEffect(() => {
-    if (seededRef.current || !hasPrice) return;
-    seededRef.current = true;
-    setStopLoss(Number((currentPrice * 0.98).toFixed(pricePrecision)));
-    setTarget(Number((currentPrice * 1.02).toFixed(pricePrecision)));
-  }, [currentPrice, hasPrice, pricePrecision]);
+    if (!hasPrice) return;
+    if (draft.stopLoss != null || draft.target != null) return;
+    patchDraft({
+      stopLoss: Number((currentPrice * 0.98).toFixed(pricePrecision)),
+      target: Number((currentPrice * 1.02).toFixed(pricePrecision)),
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [symbol, hasPrice]);
 
   // 最终主观概率 P（%）= 结构存活概率 × 存活后突破 T 的条件概率。
   // 只读、实时；任一项缺失即为 null——不臆造。战役整体胜率只作参考展示，不再落种。
@@ -186,9 +225,9 @@ export function PGapPanel({
 
   // 满格 = 锚定 P 那一刻的 gap；随后 S 推高基线，条向零收缩，
   // 直观展示优势被价格吃掉的过程。P 或 K/T 改动即重新锚定。
-  const [anchorGap, setAnchorGap] = useState<number | null>(null);
+  const anchorGap = draft.anchorGap;
   const reanchor = () => {
-    setAnchorGap(result.valid && result.gap != null && result.gap > 0 ? result.gap : null);
+    patchDraft({ anchorGap: result.valid && result.gap != null && result.gap > 0 ? result.gap : null });
   };
 
   const sliderBounds = useMemo(() => {
@@ -201,10 +240,8 @@ export function PGapPanel({
   // b_可落袋 的分母锚 K₀：手动值 > 该多单最早设定的止损（预期最大亏损所在位）> 面板情景 K。
   // 面板上的 K 滑条是拿来做情景推演的，随手一拖不该改写「入场时承担的风险」，
   // 所以可落袋的分母必须有自己的锚，只在无锚可用时才退回情景 K。
-  const [manualRiskK, setManualRiskK] = useState<number | null>(null);
-  useEffect(() => {
-    setManualRiskK(null); // 换标的后旧的手动锚无意义
-  }, [symbol]);
+  const manualRiskK = draft.manualRiskK;
+  const setManualRiskK = (v: number | null) => patchDraft({ manualRiskK: v });
   const effectiveRiskK = manualRiskK ?? longRiskAnchorPrice ?? stopLoss;
 
   // 可落袋 R：只看已持有的多单（现价 vs 开仓价，以 K₀ 度量的每 R 为单位），与目标 T 无关
