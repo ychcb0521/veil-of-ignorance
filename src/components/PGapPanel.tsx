@@ -252,6 +252,8 @@ export function PGapPanel({
 
   const gap = result.valid ? result.gap : null;
   const positive = gap != null && gap > 0;
+  // 已触及止损：这笔的前提已被证伪，不出 gap，只出状态（否则负 P₀ 会把优势虚增）。
+  const stopBreached = result.valid && result.stopBreached;
   const remainingFraction = anchorGap != null && anchorGap > 0 && gap != null
     ? clamp(gap / anchorGap, 0, 1)
     : positive ? 1 : 0;
@@ -345,7 +347,7 @@ export function PGapPanel({
                 </div>
                 <div>
                   <dt className="inline font-semibold text-gray-700 dark:text-[#B7BDC6]">gap 优势边际</dt>
-                  <dd className="inline"> · P 高出基线的部分，才真正属于你。<span style={{ color: GREEN }}>正数为绿</span>；<span style={{ color: RED }}>≤ 0 转红并显示「优势已耗尽」</span>，意味着这笔已不值得下手。gap 只做「P 对 P₀」的纯几何对比，不与持仓成本价比较——持仓的盈亏状态请看 b 可落袋。</dd>
+                  <dd className="inline"> · P 高出基线的部分，才真正属于你。<span style={{ color: GREEN }}>正数为绿</span>；<span style={{ color: RED }}>≤ 0 转红并显示「优势已耗尽」</span>，意味着这笔已不值得下手。gap 只做「P 对 P₀」的纯几何对比，不与持仓成本价比较——持仓的盈亏状态请看 b 可落袋。<strong>现价一旦触及或越过止损 K，本行只显示「已触及止损 K」而不再出数</strong>：那时「先摸到 T」已经判负，P₀ 的线性式失效（真实概率为 0），若仍代入相减会把优势虚增。</dd>
                 </div>
                 <div>
                   <dt className="inline font-semibold text-gray-700 dark:text-[#B7BDC6]">优势条</dt>
@@ -359,7 +361,15 @@ export function PGapPanel({
               </p>
             </PopoverContent>
           </Popover>
-          {collapsed && gap != null ? (
+          {collapsed && stopBreached ? (
+            <span
+              data-testid="p-gap-collapsed-value"
+              className="truncate font-mono text-[11px] font-semibold"
+              style={{ color: RED }}
+            >
+              已触及止损 K
+            </span>
+          ) : collapsed && gap != null ? (
             // 折叠后表头即读数：仪表不该因为收起就什么都不说。
             <span
               data-testid="p-gap-collapsed-value"
@@ -472,8 +482,16 @@ export function PGapPanel({
                 <div className="flex items-baseline justify-between gap-2">
                   <span className="text-[10px] leading-none text-gray-500 dark:text-[#848e9c]">优势边际 gap</span>
                   {gap == null ? (
-                    <span data-testid="p-gap-value" className="font-mono text-[11px] text-gray-400 dark:text-[#5e6673]">
-                      请填写 P₁ 与 P₂
+                    <span
+                      data-testid="p-gap-value"
+                      data-gap-sign={stopBreached ? 'stop-breached' : 'pending'}
+                      title={stopBreached
+                        ? '现价已触及/越过止损 K：「先摸到 T」这个事件已经判负，优势边际不再有意义——P₀ 的越界值只说明价格跑出了 K–T 区间多远'
+                        : undefined}
+                      className={`font-mono text-[11px] ${stopBreached ? 'font-semibold' : ''}`}
+                      style={{ color: stopBreached ? RED : undefined }}
+                    >
+                      {stopBreached ? '已触及止损 K' : '请填写 P₁ 与 P₂'}
                     </span>
                   ) : (
                     <span
@@ -496,8 +514,8 @@ export function PGapPanel({
                   <div
                     className="h-full rounded-full transition-[width] duration-300 ease-out"
                     style={{
-                      width: `${positive ? remainingFraction * 100 : 100}%`,
-                      backgroundColor: positive ? GREEN : RED,
+                      width: `${!stopBreached && positive ? remainingFraction * 100 : 100}%`,
+                      backgroundColor: !stopBreached && positive ? GREEN : RED,
                     }}
                   />
                 </div>

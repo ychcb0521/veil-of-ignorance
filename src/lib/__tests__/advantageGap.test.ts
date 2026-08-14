@@ -6,7 +6,8 @@ describe('computeAdvantageGap', () => {
     // S 位于 K 与 T 的正中 → 市场免费给的胜率是 50%，赔率恰为 1
     const result = computeAdvantageGap(100, 90, 110, 0.6);
     expect(result).toEqual({
-      valid: true, direction: 'long', baseline: 0.5, payoffRatio: 1, gap: expect.closeTo(0.1, 12),
+      valid: true, direction: 'long', baseline: 0.5, payoffRatio: 1,
+      stopBreached: false, gap: expect.closeTo(0.1, 12),
     });
   });
 
@@ -42,7 +43,7 @@ describe('computeAdvantageGap', () => {
   });
 
   it('S 越界时 P₀ 如实越界，不再判「方向不成立」', () => {
-    // 多头 K=90,T=110。S 冲破止损 → P₀ 为负
+    // 多头 K=90,T=110。S 冲破止损 → P₀ 为负（读数保留，说明跑出区间多远）
     const brokeStop = computeAdvantageGap(80, 90, 110, 0.6);
     expect(brokeStop.valid).toBe(true);
     if (brokeStop.valid) expect(brokeStop.baseline).toBeCloseTo(-0.5, 12);
@@ -57,10 +58,36 @@ describe('computeAdvantageGap', () => {
     expect(computeAdvantageGap(90, 90, 110, 0.6)).toEqual({ valid: false, reason: 'degenerate' });
   });
 
-  it('P₀ 为负时 gap 随之放大——越界读数不做截断', () => {
-    // P₀ = −0.5，P = 60% ⇒ gap = 0.6 −(−0.5) = 1.1
-    const r = computeAdvantageGap(80, 90, 110, 0.6);
-    expect(r.valid && r.gap).toBeCloseTo(1.1, 12);
+  it('触及止损后不出 gap——负 P₀ 绝不能把优势虚增', () => {
+    // 用户给的反例：K=90、T=110、S 跌到 80，P=72%
+    // 若照 gap = P − P₀ 硬算 = 0.72 −(−0.5) = +122%，破了止损反而「优势最大」。
+    // 正解：S 已越过 K，「先摸到 T」这个事件已判负（真实概率 0），线性式失效，不出数。
+    const r = computeAdvantageGap(80, 90, 110, 0.72);
+    expect(r.valid).toBe(true);
+    if (!r.valid) return;
+    expect(r.stopBreached).toBe(true);
+    expect(r.gap).toBeNull();
+    expect(r.baseline).toBeCloseTo(-0.5, 12); // P₀ 越界值仍保留，用于说明跑出多远
+  });
+
+  it('区间内照常出 gap，止损标志为假', () => {
+    const r = computeAdvantageGap(100, 90, 110, 0.72);
+    expect(r.valid && r.stopBreached).toBe(false);
+    expect(r.valid && r.gap).toBeCloseTo(0.22, 12);
+  });
+
+  it('越过目标 T 那一侧无需特判：P₀ > 1 自然读作优势已耗尽', () => {
+    const r = computeAdvantageGap(120, 90, 110, 0.72);
+    expect(r.valid && r.stopBreached).toBe(false);
+    expect(r.valid && r.baseline).toBeCloseTo(1.5, 12);
+    expect(r.valid && r.gap).toBeCloseTo(-0.78, 12); // 负值 → 「优势已耗尽」
+  });
+
+  it('空头对称：S 涨过止损 K 同样不出 gap', () => {
+    // 空头 K=110、T=90；S 涨到 120 已越过止损
+    const r = computeAdvantageGap(120, 110, 90, 0.72);
+    expect(r.valid && r.stopBreached).toBe(true);
+    expect(r.valid && r.gap).toBeNull();
   });
 
   it('方向由 T 相对 K 定义，与 S 的位置无关', () => {

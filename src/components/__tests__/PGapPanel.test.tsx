@@ -80,12 +80,51 @@ describe('PGapPanel', () => {
     expect(screen.queryByTestId('p-gap-baseline')).not.toBeInTheDocument();
   });
 
-  it('S 冲破止损时 P₀ 转负、照常出数——不再判「方向不成立」', () => {
+  it('S 冲破止损时 P₀ 转负仍显示，但不再判「方向不成立」', () => {
     render(<PGapPanel currentPrice={100} pricePrecision={2} />);
     // K=101 已在现价之上：S 冲破止损 → P₀ =（100−101）÷（110−101）≈ −11.1%
     setPrices(101, 110);
     expect(screen.queryByTestId('p-gap-invalid')).not.toBeInTheDocument();
     expect(screen.getByTestId('p-gap-baseline')).toHaveTextContent('-11.1%');
+  });
+
+  it('触及止损后不显示优势——K=90/T=110/S=80 不得读作「+122%」', () => {
+    // 现价 80 已跌破止损 90：即便填了 P=72%，也不能拿负的 P₀ 去相减
+    render(<PGapPanel currentPrice={80} pricePrecision={2} />);
+    setPrices(90, 110);
+    setSurvival(90);
+    setBreakout(80); // P = 72%
+
+    const gap = screen.getByTestId('p-gap-value');
+    expect(gap).toHaveTextContent('已触及止损 K');
+    expect(gap).toHaveAttribute('data-gap-sign', 'stop-breached');
+    expect(gap.textContent).not.toContain('122');
+    expect(gap.textContent).not.toContain('%');
+    // P₀ 的越界值仍然显示，用于说明价格跑出区间多远
+    expect(screen.getByTestId('p-gap-baseline')).toHaveTextContent('-50.0%');
+    // P 本身照常算，只是不再参与 gap
+    expect(screen.getByTestId('p-gap-computed-p')).toHaveTextContent('72.0%');
+  });
+
+  it('价格回到止损之上，优势边际立即恢复出数', () => {
+    const { rerender } = render(<PGapPanel currentPrice={80} pricePrecision={2} />);
+    setPrices(90, 110);
+    setSurvival(90);
+    setBreakout(80);
+    expect(screen.getByTestId('p-gap-value')).toHaveTextContent('已触及止损 K');
+
+    rerender(<PGapPanel currentPrice={100} pricePrecision={2} />);
+    // P₀=50%、P=72% → gap=+22%
+    expect(screen.getByTestId('p-gap-value')).toHaveTextContent('+22.0%');
+  });
+
+  it('越过目标 T 不特判：P₀ 超 100% 自然读作优势已耗尽', () => {
+    render(<PGapPanel currentPrice={120} pricePrecision={2} />);
+    setPrices(90, 110);
+    setSurvival(90);
+    setBreakout(80);
+    expect(screen.getByTestId('p-gap-baseline')).toHaveTextContent('150.0%');
+    expect(screen.getByTestId('p-gap-value')).toHaveTextContent('优势已耗尽');
   });
 
   it('空头 T < S < K 同样成立', () => {

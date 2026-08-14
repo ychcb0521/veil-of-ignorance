@@ -667,11 +667,27 @@ export default function GuidePage() {
               </P>
               <SubTitle>方向与守卫</SubTitle>
               <P>
-                多空方向<strong>由 S、K、T 的相对位置自动判定</strong>，不需要也不能手选：多头要求 <strong>K &lt; S &lt; T</strong>，空头要求 <strong>T &lt; S &lt; K</strong>。任一输入变动（包括 S 的行情跳动）立即重算。
+                多空方向<strong>由 T 相对 K 的位置自动判定</strong>，不需要也不能手选：<strong>T 在 K 之上为多头</strong>，反之为空头。S <strong>不必</strong>落在两者之间——S 冲破止损时 P₀ 转负、越过目标时 P₀ 超过 100%，越界值<strong>如实呈现、不做截断</strong>，它告诉你价格已经跑出 K–T 区间多远。任一输入变动（包括 S 的行情跳动）立即重算。
               </P>
               <RedHighlight>
                 当 <strong>T = K</strong>（分母为 0，基线概率无意义）或 <strong>S 恰好压在 K 上</strong>（风险距离为 0，赔率 b 无定义）时，面板<strong>不出任何数字</strong>，只给提示——包括 P₀ 也不显示。宁可不给数，也不给一个无意义的数。
               </RedHighlight>
+              <SubTitle>触及止损后为什么不再出 gap</SubTitle>
+              <P>
+                <strong>现价一旦触及或越过止损 K，优势边际那一行只显示「已触及止损 K」，不再出数。</strong>
+                这不是保守，而是数学要求：P₀ 的线性式只有在 K 与 T <strong>之间</strong>才是「先摸到 T 而不是先摸到 K」的概率。
+                S 越过 K 意味着 <strong>K 已经被摸到、这个事件已经判负</strong>，真实概率是 <strong>0</strong>——可线性外推却给出一个负数。
+              </P>
+              <RedHighlight>
+                负的 P₀ 一旦代进 gap = P − P₀，就变成 <strong>P + |P₀|</strong>，优势凭空虚增。
+                以 <strong>K=90、T=110、S 跌到 80、P=72%</strong> 为例：硬算得到荒谬的 <strong>「+122%」</strong>——
+                等于说<strong>破了止损反而优势最大</strong>，把仪表整个读反了。所以此处只出状态、不出数。
+              </RedHighlight>
+              <P>
+                P₀ 的越界值仍然显示（−50%，它说明价格跑出区间多远），P₁/P₂/P 也照常计算，只是 P 不再参与相减。
+                价格回到 K 之上，优势边际<strong>立即恢复</strong>出数。
+                <strong>越过目标 T 那一侧不需要特判</strong>：P₀ 超过 100% 会让 gap 自然转负、读作「优势已耗尽」——那本就是正确的读数，因为价格已经走完你规划的空间。
+              </P>
               <SubTitle>P 的两段式估法</SubTitle>
               <P>
                 P 不再一把手填，而是拆成两个更可回答的问题：<strong>「这个结构还活得下去吗（P₁）」</strong>与<strong>「假如它活着，价格能走到 T 吗（P₂）」</strong>。两者相乘即最终主观胜率——P₂ 必须按<strong>条件概率</strong>来估：先假定结构成立，再问突破的把握，否则会把结构风险重复计价。例如 P₁=90%、P₂=40%，则 P=36%。

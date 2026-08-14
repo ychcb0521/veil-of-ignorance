@@ -10,6 +10,8 @@
  *
  * 方向由 T 相对 K 的位置定义：T 在 K 之上为多头，反之为空头（T === K 时退化，不出数字）。
  * S 不必落在 K 与 T 之间——冲破止损则 P₀ < 0、越过目标则 P₀ > 1，如实反映越界事实。
+ * 但线性式只在 K 与 T 之间才是首达概率：S 越过 K 后该事件已判负（真实概率为 0），
+ * 故此时只显示 P₀ 的越界值，不再输出 gap。
  */
 
 export type AdvantageGapDirection = 'long' | 'short';
@@ -41,7 +43,19 @@ export type AdvantageGapResult =
        * 也就是说，「市场免费给的胜率」正是这一刻赔率下的盈亏平衡胜率。
        */
       payoffRatio: number;
-      /** 优势边际 = P − P₀；P 未填写时为 null。 */
+      /**
+       * 价格是否已触及/越过止损 K（多头 S ≤ K，空头 S ≥ K）。
+       * 此时这笔的前提已被证伪，「优势边际」不再有意义——见 gap 的说明。
+       */
+      stopBreached: boolean;
+      /**
+       * 优势边际 = P − P₀；P 未填写时为 null。
+       * **止损已被触及时同样为 null**：P₀ 的线性式只在 K 与 T 之间是首达概率，
+       * S 越过 K 后「先摸到 T」这个事件早已判负、真实概率为 0，而线性外推却给出
+       * 负的 P₀，代入 gap = P − P₀ 会变成 P + |P₀|，凭空虚增出优势
+       * （K=90/T=110/S=80/P=72% ⇒ 虚假的「+122%」）。破了止损反而显示优势最大，
+       * 是把仪表读反了，因此此处不出数、只出状态。
+       */
       gap: number | null;
     };
 
@@ -111,6 +125,9 @@ export function computeAdvantageGap(
   const payoffRatio = (t - s) / (s - k);
   if (!Number.isFinite(payoffRatio)) return { valid: false, reason: 'degenerate' };
 
-  const gap = isFinitePrice(p) ? p - baseline : null;
-  return { valid: true, direction, baseline, payoffRatio, gap };
+  // 止损已被触及：不再计算优势边际（理由见 gap 的类型说明）。
+  // S 越过目标 T 那一侧不必特判——P₀ ≥ 1 会让 gap ≤ 0 自然读作「优势已耗尽」。
+  const stopBreached = direction === 'long' ? s <= k : s >= k;
+  const gap = !stopBreached && isFinitePrice(p) ? p - baseline : null;
+  return { valid: true, direction, baseline, payoffRatio, stopBreached, gap };
 }
