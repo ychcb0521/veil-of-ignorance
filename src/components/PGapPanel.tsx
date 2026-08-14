@@ -97,7 +97,7 @@ function GapField({
 }: FieldProps) {
   return (
     <div
-      className="grid h-[32px] items-center gap-2 px-3"
+      className="grid h-[26px] items-center gap-2 px-3"
       style={{ gridTemplateColumns: 'clamp(58px,24cqw,76px) minmax(0,1fr) clamp(56px,26cqw,74px)' }}
     >
       <label htmlFor={`p-gap-${id}-number`} className="flex min-w-0 items-center gap-1 select-none">
@@ -147,7 +147,7 @@ function GapField({
             onChange(Number.isFinite(next) ? next : null);
           }}
           onBlur={onCommit}
-          className={`h-[22px] w-full rounded border border-gray-200 bg-gray-50 py-0 text-right font-mono text-[10px] tabular-nums text-gray-900 outline-none transition-colors placeholder:text-gray-400 focus:border-[#fcd535] focus:bg-white disabled:opacity-40 dark:border-[#2b3139] dark:bg-[#161a1e] dark:text-[#EAECEF] dark:placeholder:text-[#5e6673] dark:focus:bg-[#12161a] ${suffix ? 'pl-1 pr-[14px]' : 'px-1.5'}`}
+          className={`h-[20px] w-full rounded border border-gray-200 bg-gray-50 py-0 text-right font-mono text-[10px] tabular-nums text-gray-900 outline-none transition-colors placeholder:text-gray-400 focus:border-[#fcd535] focus:bg-white disabled:opacity-40 dark:border-[#2b3139] dark:bg-[#161a1e] dark:text-[#EAECEF] dark:placeholder:text-[#5e6673] dark:focus:bg-[#12161a] ${suffix ? 'pl-1 pr-[14px]' : 'px-1.5'}`}
         />
         {suffix && (
           <span className="pointer-events-none absolute inset-y-0 right-1 flex items-center text-[9px] leading-none text-gray-400 dark:text-[#5e6673]">
@@ -435,7 +435,7 @@ export function PGapPanel({
       {!collapsed && (
       <div className="flex-1 min-h-0 overflow-y-auto scrollbar-thin scrollbar-thumb-[#2b3139] scrollbar-track-transparent">
         {/* 读数区 —— 模块的主角 */}
-        <div className="px-3 pt-2 pb-2.5 border-b border-gray-200 dark:border-[#2b3139]">
+        <div className="px-3 pt-1.5 pb-2 border-b border-gray-200 dark:border-[#2b3139]">
           {result.valid ? (
             <>
               <div className="flex items-baseline justify-between gap-2">
@@ -449,7 +449,7 @@ export function PGapPanel({
                   {(result.baseline * 100).toFixed(1)}%
                 </span>
               </div>
-              <div className="mt-1 flex items-baseline justify-between gap-2">
+              <div className="mt-0.5 flex items-baseline justify-between gap-2">
                 <span className="text-[9px] leading-none text-gray-400 dark:text-[#5e6673]">
                   市场免费给你的胜率，P 必须高于它
                 </span>
@@ -490,7 +490,7 @@ export function PGapPanel({
                 </Popover>
               </div>
 
-              <div className="mt-2 rounded-md border border-gray-200 bg-gray-50 px-2.5 py-1.5 dark:border-[#2b3139] dark:bg-[#161a1e]">
+              <div className="mt-1.5 border-t border-gray-100 pt-1.5 dark:border-[#2b3139]/60">
                 <div className="flex items-baseline justify-between gap-2">
                   <span className="text-[10px] leading-none text-gray-500 dark:text-[#848e9c]">优势边际 gap</span>
                   {gap == null ? (
@@ -521,7 +521,7 @@ export function PGapPanel({
                 <div
                   data-testid="p-gap-bar"
                   data-remaining={remainingFraction.toFixed(4)}
-                  className="mt-1.5 h-[4px] w-full overflow-hidden rounded-full bg-gray-200 dark:bg-[#2b3139]"
+                  className="mt-1 h-[3px] w-full overflow-hidden rounded-full bg-gray-200 dark:bg-[#2b3139]"
                 >
                   <div
                     className="h-full rounded-full transition-[width] duration-300 ease-out"
@@ -546,7 +546,7 @@ export function PGapPanel({
 
         {/* 输入区 */}
         <div className="divide-y divide-gray-100 dark:divide-[#2b3139]/60">
-          <div className="flex h-[32px] items-center justify-between px-3">
+          <div className="flex h-[26px] items-center justify-between px-3">
             <span className="flex items-baseline gap-1.5 select-none">
               <span className="font-mono text-[12px] font-semibold leading-none" style={{ color: YELLOW }}>S</span>
               <span className="text-[10px] text-gray-500 dark:text-[#848e9c]">现价</span>
@@ -594,7 +594,7 @@ export function PGapPanel({
 
           {/* 概率组：P₁、P₂ 缩进并由左侧竖线归入 P 名下——一眼看出 P 是它们的乘积，
               而不是三个并列的独立字段。 */}
-          <div className="px-3 pt-2">
+          <div className="px-3 pt-1.5 pb-0.5">
             <div className="flex items-baseline justify-between gap-2">
               <span className="flex min-w-0 items-baseline gap-1 select-none">
                 <span className="font-mono text-[11px] font-semibold leading-none" style={{ color: YELLOW }}>P</span>
@@ -621,7 +621,7 @@ export function PGapPanel({
             </div>
           </div>
 
-          <div className="ml-3 border-l border-gray-200 pb-1 dark:border-[#2b3139]">
+          <div className="ml-3 border-l border-gray-200 dark:border-[#2b3139]">
             <GapField
               id="survival"
               symbol="P₁"
@@ -665,7 +665,7 @@ export function PGapPanel({
 
           {/* b_可落袋：此刻立即止盈能拿到几个 R —— 只与已持有的多单有关，与 T 无关。
               分母锚 K₀ 默认取该多单最早设定的止损（预期最大亏损所在位），可手动改。 */}
-          <div className="flex h-[32px] items-center justify-between gap-2 px-3">
+          <div className="flex h-[26px] items-center justify-between gap-2 px-3">
             <span className="flex min-w-0 items-baseline gap-1 select-none">
               <span className="font-mono text-[11px] font-semibold leading-none text-[#B080FF]">b</span>
               <span className="whitespace-nowrap text-[9px] text-gray-500 dark:text-[#848e9c]">可落袋</span>
@@ -695,7 +695,7 @@ export function PGapPanel({
                       const next = Number.parseFloat(event.target.value);
                       setManualRiskK(Number.isFinite(next) ? next : null);
                     }}
-                    className="h-[20px] w-[clamp(48px,20cqw,66px)] rounded border border-gray-200 bg-gray-50 px-1 text-right font-mono text-[9px] tabular-nums text-gray-900 outline-none transition-colors placeholder:text-gray-400 focus:border-[#B080FF] focus:bg-white dark:border-[#2b3139] dark:bg-[#161a1e] dark:text-[#EAECEF] dark:placeholder:text-[#5e6673] dark:focus:bg-[#12161a]"
+                    className="h-[19px] w-[clamp(48px,20cqw,66px)] rounded border border-gray-200 bg-gray-50 px-1 text-right font-mono text-[9px] tabular-nums text-gray-900 outline-none transition-colors placeholder:text-gray-400 focus:border-[#B080FF] focus:bg-white dark:border-[#2b3139] dark:bg-[#161a1e] dark:text-[#EAECEF] dark:placeholder:text-[#5e6673] dark:focus:bg-[#12161a]"
                   />
                 </label>
               )}
@@ -725,7 +725,7 @@ export function PGapPanel({
           {defaultWinRatePct != null && (
             <div
               data-testid="p-gap-winrate-source"
-              className="mt-1 flex w-full items-center gap-1 border-t border-gray-100 px-3 pb-1 pt-1.5 text-left text-[9px] leading-none text-gray-400 dark:border-[#2b3139]/60 dark:text-[#5e6673]"
+              className="flex w-full items-center gap-1 px-3 pb-1.5 text-left text-[9px] leading-none text-gray-400 dark:text-[#5e6673]"
             >
               参考：本账号战役整体胜率 {defaultWinRatePct.toFixed(0)}%
               {winRateSampleCount > 0 && `（n=${winRateSampleCount}）`}
