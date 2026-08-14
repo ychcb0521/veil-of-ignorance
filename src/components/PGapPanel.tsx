@@ -41,13 +41,15 @@ interface PGapDraft {
   target: number | null;
   survivalPct: number | null;
   breakoutPct: number | null;
+  /** P₃：结构已被证伪，价格仍然突破 T 的条件概率。 */
+  deadBreakoutPct: number | null;
   manualRiskK: number | null;
   /** 优势条满格基准——锚定 P 那一刻的 gap。 */
   anchorGap: number | null;
 }
 
 const EMPTY_DRAFT: PGapDraft = {
-  stopLoss: null, target: null, survivalPct: null, breakoutPct: null,
+  stopLoss: null, target: null, survivalPct: null, breakoutPct: null, deadBreakoutPct: null,
   manualRiskK: null, anchorGap: null,
 };
 
@@ -194,6 +196,8 @@ export function PGapPanel({
   const setTarget = (v: number | null) => patchDraft({ target: v });
   const setSurvivalPct = (v: number | null) => patchDraft({ survivalPct: v });
   const setBreakoutPct = (v: number | null) => patchDraft({ breakoutPct: v });
+  const deadBreakoutPct = draft.deadBreakoutPct;
+  const setDeadBreakoutPct = (v: number | null) => patchDraft({ deadBreakoutPct: v });
 
   // 只在该标的尚无存档时落起手值——已有存档（含刷新后恢复的）绝不覆盖。
   useEffect(() => {
@@ -206,12 +210,16 @@ export function PGapPanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [symbol, hasPrice]);
 
-  // 最终主观概率 P（%）= 结构存活概率 × 存活后突破 T 的条件概率。
+  // 最终主观概率 P（%）= P₁·P₂ +（1−P₁)·P₃ —— 全概率公式。
   // 只读、实时；任一项缺失即为 null——不臆造。战役整体胜率只作参考展示，不再落种。
   const winRatePct = useMemo(() => {
-    if (survivalPct == null || breakoutPct == null) return null;
-    return (survivalPct / 100) * (breakoutPct / 100) * 100;
-  }, [survivalPct, breakoutPct]);
+    if (survivalPct == null || breakoutPct == null || deadBreakoutPct == null) return null;
+    const p1 = survivalPct / 100;
+    // 全概率公式：「摸到 T」= 结构活着摸到 ∪ 结构死了仍摸到，两条路径互斥且穷尽。
+    // 是相加不是相减——写成减法 P 会变负（P₁=50%,P₂=40%,P₃=80% ⇒ −20%），
+    // 而加法版恒落在 [0,1]，因为它是 P₂ 与 P₃ 以 P₁ 为权的凸组合。
+    return (p1 * (breakoutPct / 100) + (1 - p1) * (deadBreakoutPct / 100)) * 100;
+  }, [survivalPct, breakoutPct, deadBreakoutPct]);
 
   const result = useMemo(
     () => computeAdvantageGap(
@@ -307,8 +315,8 @@ export function PGapPanel({
               </p>
 
               <div className="mt-2.5 rounded bg-gray-50 px-2 py-1.5 font-mono text-[10px] text-gray-900 dark:bg-[#161a1e] dark:text-[#EAECEF]">
-                P₀ = |S − K| ÷ |T − K|<br />
-                P&nbsp;&nbsp;= P₁ × P₂<br />
+                P₀ = (S − K) ÷ (T − K)<br />
+                P&nbsp;&nbsp;= P₁·P₂ + (1−P₁)·P₃<br />
                 gap = P − P₀
               </div>
 
@@ -334,8 +342,12 @@ export function PGapPanel({
                   <dd className="inline"> · 存活后突破 T 的概率，是<strong>条件概率</strong>——先假定结构成立，再问价格走到 T 的把握；<strong>不是</strong>独立的「突破 T 概率」，否则结构风险会被重复计价。由你自己填写。</dd>
                 </div>
                 <div>
+                  <dt className="inline font-mono font-semibold" style={{ color: YELLOW }}>P₃</dt>
+                  <dd className="inline"> · <strong>结构已被证伪、价格仍然突破 T</strong> 的条件概率（结构死的概率就是 1 − P₁）。这条路径真实存在——形态废了不等于价格走不到目标；漏掉它会让 P 系统性低估。由你自己填写。</dd>
+                </div>
+                <div>
                   <dt className="inline font-mono font-semibold" style={{ color: YELLOW }}>P</dt>
-                  <dd className="inline"> · 最终主观胜率 = P₁ × P₂（链式法则），<strong>自动计算、只读</strong>，任一项变化即实时重算；任一项缺失则不出数。面板底部的战役整体胜率仅作参考对照，不会自动填入。</dd>
+                  <dd className="inline"> · 最终主观胜率 = <strong>P₁×P₂ +（1−P₁)×P₃</strong>（全概率公式）：「摸到 T」有两条互斥且穷尽的路径——结构活着摸到、结构死了仍摸到，两条都要计入。注意是<strong>相加</strong>：若写成相减，P 会变成负数（P₁=50%、P₂=40%、P₃=80% 得 −20%）；相加版恒落在 0–100%，因为它是 P₂ 与 P₃ 以 P₁ 为权的加权平均。<strong>自动计算、只读</strong>，任一项变化即实时重算；三项缺任一则不出数。面板底部的战役整体胜率仅作参考对照，不会自动填入。</dd>
                 </div>
                 <div>
                   <dt className="inline font-mono font-semibold text-gray-700 dark:text-[#B7BDC6]">b</dt>
@@ -356,7 +368,7 @@ export function PGapPanel({
               </dl>
 
               <p className="mt-2.5 border-t border-gray-100 pt-2 text-gray-400 dark:border-[#2b3139] dark:text-[#5e6673]">
-                方向由 S、K、T 的相对位置自动判定：多头 K &lt; S &lt; T，空头 T &lt; S &lt; K。两者都不成立或 T = K 时不出数字，只出提示。
+                方向由 T 相对 K 的位置自动判定：T 在 K 之上为多头，反之为空头。S 不必落在两者之间，越界的 P₀ 如实显示；但现价一旦触及或越过止损 K，优势边际只显示状态、不再出数。T = K 或 S 恰压在 K 上时不出任何数字，只出提示。
                 本面板只读不写：不落库、不记历史、不做校准统计、不给仓位建议。
               </p>
             </PopoverContent>
@@ -491,7 +503,7 @@ export function PGapPanel({
                       className={`font-mono text-[11px] ${stopBreached ? 'font-semibold' : ''}`}
                       style={{ color: stopBreached ? RED : undefined }}
                     >
-                      {stopBreached ? '已触及止损 K' : '请填写 P₁ 与 P₂'}
+                      {stopBreached ? '已触及止损 K' : '请填写 P₁ / P₂ / P₃'}
                     </span>
                   ) : (
                     <span
@@ -590,7 +602,7 @@ export function PGapPanel({
                   主观胜率
                 </span>
                 <span className="whitespace-nowrap font-mono text-[8px] text-gray-400 dark:text-[#5e6673]">
-                  = P₁×P₂
+                  = P₁P₂+(1−P₁)P₃
                 </span>
               </span>
               {winRatePct == null ? (
@@ -600,7 +612,7 @@ export function PGapPanel({
               ) : (
                 <span
                   data-testid="p-gap-computed-p"
-                  title="自动计算、只读：P = 结构存活概率 × 存活后突破 T 的条件概率"
+                  title="自动计算、只读：P = P₁×P₂ +（1−P₁)×P₃。「摸到 T」有两条互斥路径——结构活着摸到、结构死了仍摸到，全概率公式把两条都计入"
                   className="flex-none font-mono text-[clamp(12px,5.2cqw,15px)] font-semibold leading-none tabular-nums text-gray-900 dark:text-[#EAECEF]"
                 >
                   {winRatePct.toFixed(1)}%
@@ -634,6 +646,19 @@ export function PGapPanel({
               step={0.5}
               suffix="%"
               onChange={next => setBreakoutPct(next == null ? null : clamp(next, 0, 100))}
+              onCommit={reanchor}
+            />
+            <GapField
+              id="dead-breakout"
+              symbol="P₃"
+              label="证伪后破 T"
+              accent={YELLOW}
+              value={deadBreakoutPct}
+              min={0}
+              max={100}
+              step={0.5}
+              suffix="%"
+              onChange={next => setDeadBreakoutPct(next == null ? null : clamp(next, 0, 100))}
               onCommit={reanchor}
             />
           </div>

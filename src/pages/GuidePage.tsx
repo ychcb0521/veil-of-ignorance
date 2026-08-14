@@ -609,7 +609,8 @@ export default function GuidePage() {
                     <tr><td className="px-3 py-2 border-t border-border font-medium">T 目标</td><td className="px-3 py-2 border-t border-border">你打算兑现的位置</td><td className="px-3 py-2 border-t border-border">滑块 + 数字输入</td></tr>
                     <tr><td className="px-3 py-2 border-t border-border font-medium">P₁ 结构存活概率</td><td className="px-3 py-2 border-t border-border">当前交易结构继续存活、不被证伪的概率</td><td className="px-3 py-2 border-t border-border">滑块 + 数字输入，0–100%，由交易者自己填写</td></tr>
                     <tr><td className="px-3 py-2 border-t border-border font-medium">P₂ 存活后突破 T 的概率</td><td className="px-3 py-2 border-t border-border"><strong>条件概率</strong>：在结构存活的前提下，价格最终突破 T 的概率——不是独立的「突破 T 概率」</td><td className="px-3 py-2 border-t border-border">滑块 + 数字输入，0–100%，由交易者自己填写</td></tr>
-                    <tr><td className="px-3 py-2 border-t border-border font-medium">P 最终主观胜率</td><td className="px-3 py-2 border-t border-border">P = P₁ × P₂（链式法则）</td><td className="px-3 py-2 border-t border-border"><strong>自动计算、只读</strong>；任一输入变化即实时重算，任一项缺失则不出数</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border font-medium">P₃ 证伪后突破 T 的概率</td><td className="px-3 py-2 border-t border-border"><strong>条件概率</strong>：结构<strong>已被证伪</strong>，价格仍然突破 T 的概率（结构死的概率即 1 − P₁）</td><td className="px-3 py-2 border-t border-border">滑块 + 数字输入，0–100%，由交易者自己填写</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border font-medium">P 最终主观胜率</td><td className="px-3 py-2 border-t border-border">P = P₁·P₂ +（1 − P₁)·P₃（全概率公式）</td><td className="px-3 py-2 border-t border-border"><strong>自动计算、只读</strong>；任一输入变化即实时重算，任一项缺失则不出数</td></tr>
                   </tbody>
                 </table>
               </div>
@@ -688,12 +689,25 @@ export default function GuidePage() {
                 价格回到 K 之上，优势边际<strong>立即恢复</strong>出数。
                 <strong>越过目标 T 那一侧不需要特判</strong>：P₀ 超过 100% 会让 gap 自然转负、读作「优势已耗尽」——那本就是正确的读数，因为价格已经走完你规划的空间。
               </P>
-              <SubTitle>P 的两段式估法</SubTitle>
+              <SubTitle>P 的三段式估法</SubTitle>
               <P>
-                P 不再一把手填，而是拆成两个更可回答的问题：<strong>「这个结构还活得下去吗（P₁）」</strong>与<strong>「假如它活着，价格能走到 T 吗（P₂）」</strong>。两者相乘即最终主观胜率——P₂ 必须按<strong>条件概率</strong>来估：先假定结构成立，再问突破的把握，否则会把结构风险重复计价。例如 P₁=90%、P₂=40%，则 P=36%。
+P 不再一把手填，而是拆成三个更可回答的问题：<strong>「这个结构还活得下去吗（P₁）」</strong>、<strong>「假如它活着，价格能走到 T 吗（P₂）」</strong>、<strong>「假如它死了，价格还是走到了 T 吗（P₃）」</strong>。P₂ 与 P₃ 都必须按<strong>条件概率</strong>来估——先假定结构的死活，再问突破的把握，否则会把结构风险重复计价。
+              </P>
+              <RedHighlight>
+                「摸到 T」有两条<strong>互斥且穷尽</strong>的路径——结构活着摸到、结构死了仍摸到。全概率公式把两条都计入：
+                <strong>P = P₁·P₂ +（1 − P₁)·P₃</strong>。注意是<strong>相加</strong>：若误写成相减，P 会变成负数
+                （P₁=50%、P₂=40%、P₃=80% 得 −20%，而概率不可能为负）；相加版则恒落在 0–100%，因为它本质是
+                <strong>P₂ 与 P₃ 以 P₁ 为权的加权平均</strong>。
+              </RedHighlight>
+              <P>
+                为什么必须有 P₃：<strong>形态废了不等于价格走不到目标</strong>。只算 P₁·P₂ 会漏掉「结构证伪后价格仍然触及 T」的全部路径，
+                使 P 系统性低估，也让 P 与 P₀ 度量的<strong>不再是同一个事件</strong>——P₀ 问的是「价格先摸到 T 还是先摸到 K」，
+                它并不关心你的形态是否还成立。补上 P₃ 之后，两者才对齐，gap = P − P₀ 的相减才是有意义的。
+                举例：P₁=90%、P₂=80%、P₃=20% ⇒ P = 0.9×0.8 + 0.1×0.2 = <strong>74%</strong>（只算前一项会低估到 72%）。
+                若你认为结构一死价格就绝无可能到 T，把 P₃ 填 0 即退化回纯乘积。
               </P>
               <P>
-                两项都由交易者自己填写，系统不代为估算；<strong>任一项缺失时 P 不出数</strong>、gap 保持等待——不臆造。面板下方仍显示<strong>本账号战役整体胜率</strong>（已了结战役中盈利的比例，不足 5 场不显示），但它只是参考对照，不再自动填入。
+                三项都由交易者自己填写，系统不代为估算；<strong>任一项缺失时 P 不出数</strong>、gap 保持等待——不臆造。面板下方仍显示<strong>本账号战役整体胜率</strong>（已了结战役中盈利的比例，不足 5 场不显示），但它只是参考对照，不再自动填入。
               </P>
               <Highlight>
                 这块表的用处不是替你决策，而是逼你把「我觉得这笔能赢」量化成一个数，再和市场免费给的那份摆在一起比。当 gap 逼近或跌破 0，说明你所谓的优势其实来自把止损放得太远、或目标定得太近，而不是来自判断本身。

@@ -15,10 +15,18 @@ function setBreakout(pct: number) {
   fireEvent.change(screen.getByTestId('p-gap-breakout-number'), { target: { value: String(pct) } });
 }
 
-/** 让乘积 P 恰为 pct：存活=pct、条件破T=100。旧用例的 gap 断言语义保持不变。 */
+function setDeadBreakout(pct: number) {
+  fireEvent.change(screen.getByTestId('p-gap-dead-breakout-number'), { target: { value: String(pct) } });
+}
+
+/**
+ * 让 P 恰为 pct：P₁=pct、P₂=100%、P₃=0 ⇒ P = pct·1 + (1−pct)·0 = pct。
+ * 旧用例的 gap 断言语义因此完全不变。
+ */
 function setWinRate(pct: number) {
   setSurvival(pct);
   setBreakout(100);
+  setDeadBreakout(0);
 }
 
 describe('PGapPanel', () => {
@@ -69,7 +77,7 @@ describe('PGapPanel', () => {
     setPrices(90, 110);
 
     expect(screen.getByTestId('p-gap-baseline')).toHaveTextContent('50.0%');
-    expect(screen.getByTestId('p-gap-value')).toHaveTextContent('请填写 P₁ 与 P₂');
+    expect(screen.getByTestId('p-gap-value')).toHaveTextContent('请填写 P₁ / P₂ / P₃');
     expect(screen.getByTestId('p-gap-computed-p')).toHaveTextContent('待填');
   });
 
@@ -93,7 +101,8 @@ describe('PGapPanel', () => {
     render(<PGapPanel currentPrice={80} pricePrecision={2} />);
     setPrices(90, 110);
     setSurvival(90);
-    setBreakout(80); // P = 72%
+    setBreakout(80);
+    setDeadBreakout(0); // P = 0.9×0.8 + 0.1×0 = 72%
 
     const gap = screen.getByTestId('p-gap-value');
     expect(gap).toHaveTextContent('已触及止损 K');
@@ -111,6 +120,7 @@ describe('PGapPanel', () => {
     setPrices(90, 110);
     setSurvival(90);
     setBreakout(80);
+    setDeadBreakout(0);
     expect(screen.getByTestId('p-gap-value')).toHaveTextContent('已触及止损 K');
 
     rerender(<PGapPanel currentPrice={100} pricePrecision={2} />);
@@ -123,6 +133,7 @@ describe('PGapPanel', () => {
     setPrices(90, 110);
     setSurvival(90);
     setBreakout(80);
+    setDeadBreakout(0);
     expect(screen.getByTestId('p-gap-baseline')).toHaveTextContent('150.0%');
     expect(screen.getByTestId('p-gap-value')).toHaveTextContent('优势已耗尽');
   });
@@ -168,14 +179,36 @@ describe('PGapPanel', () => {
     expect(onToggleCollapsed).toHaveBeenCalledTimes(1);
   });
 
-  it('P = 结构存活概率 × 存活后突破 T 的条件概率（规格示例 90%×40%=36%）', () => {
+  it('P 按全概率公式：P₁P₂ +（1−P₁)P₃', () => {
     render(<PGapPanel currentPrice={100} pricePrecision={2} />);
     setPrices(90, 110);
     setSurvival(90);
+    setBreakout(80);
+    setDeadBreakout(20);
+    // 0.9×0.8 + 0.1×0.2 = 0.72 + 0.02 = 74%
+    expect(screen.getByTestId('p-gap-computed-p')).toHaveTextContent('74.0%');
+    // P₃=0 时退化回旧的纯乘积：0.9×0.4 = 36%
     setBreakout(40);
+    setDeadBreakout(0);
     expect(screen.getByTestId('p-gap-computed-p')).toHaveTextContent('36.0%');
     // P₀=50%，P=36% → gap 为负 → 优势已耗尽
     expect(screen.getByTestId('p-gap-value')).toHaveTextContent('优势已耗尽');
+  });
+
+  it('P₃ 只会把 P 抬高，绝不使其为负或越过 100%', () => {
+    render(<PGapPanel currentPrice={100} pricePrecision={2} />);
+    setPrices(90, 110);
+    // 若误写成减法，P₁=50%、P₂=40%、P₃=80% 会得到 −20%
+    setSurvival(50);
+    setBreakout(40);
+    setDeadBreakout(80);
+    // 正解：0.5×0.4 + 0.5×0.8 = 0.2 + 0.4 = 60%
+    expect(screen.getByTestId('p-gap-computed-p')).toHaveTextContent('60.0%');
+    expect(screen.getByTestId('p-gap-computed-p').textContent).not.toContain('-');
+
+    // 三项全为 100% 时恰好封顶在 100%，不越界
+    setSurvival(100); setBreakout(100); setDeadBreakout(100);
+    expect(screen.getByTestId('p-gap-computed-p')).toHaveTextContent('100.0%');
   });
 
   it('任一项变化时 P 实时更新，且没有可手改 P 的输入框', () => {
@@ -183,21 +216,26 @@ describe('PGapPanel', () => {
     setPrices(90, 110);
     setSurvival(90);
     setBreakout(40);
+    setDeadBreakout(0);
     expect(screen.getByTestId('p-gap-computed-p')).toHaveTextContent('36.0%');
     setBreakout(80);
     expect(screen.getByTestId('p-gap-computed-p')).toHaveTextContent('72.0%');
     setSurvival(50);
     expect(screen.getByTestId('p-gap-computed-p')).toHaveTextContent('40.0%');
+    // 改 P₃ 同样实时反映：0.5×0.8 + 0.5×0.6 = 70%
+    setDeadBreakout(60);
+    expect(screen.getByTestId('p-gap-computed-p')).toHaveTextContent('70.0%');
     // P 只读：不存在旧的 winrate 输入框
     expect(screen.queryByTestId('p-gap-winrate-number')).not.toBeInTheDocument();
   });
 
-  it('只填一项时 P 不出数，gap 同样等待', () => {
+  it('三项未填齐时 P 不出数，gap 同样等待', () => {
     render(<PGapPanel currentPrice={100} pricePrecision={2} />);
     setPrices(90, 110);
     setSurvival(90);
+    setBreakout(80); // 仍缺 P₃
     expect(screen.getByTestId('p-gap-computed-p')).toHaveTextContent('待填');
-    expect(screen.getByTestId('p-gap-value')).toHaveTextContent('请填写 P₁ 与 P₂');
+    expect(screen.getByTestId('p-gap-value')).toHaveTextContent('请填写 P₁ / P₂ / P₃');
   });
 
   it('战役整体胜率仅作参考展示，不再落种、不可点击回填', () => {
@@ -225,11 +263,12 @@ describe('PGapPanel', () => {
     fireEvent.click(help);
 
     const content = await screen.findByTestId('p-gap-help-content');
-    expect(content).toHaveTextContent('P₀ = |S − K| ÷ |T − K|');
+    expect(content).toHaveTextContent('P₀ = (S − K) ÷ (T − K)');
     expect(content).toHaveTextContent('gap = P − P₀');
     expect(content).toHaveTextContent('市场免费给你的胜率');
     expect(content).toHaveTextContent('优势已耗尽');
-    expect(content).toHaveTextContent('多头 K < S < T');
+    expect(content).toHaveTextContent('T 在 K 之上为多头');
+    expect(content).toHaveTextContent('P₁·P₂ + (1−P₁)·P₃');
   });
 
   it('显示动态赔率 b =（T − S）÷（S − K）', () => {
@@ -343,7 +382,9 @@ describe('PGapPanel', () => {
     setPrices(90, 130);
     setSurvival(91.5);
     setBreakout(78.5);
-    expect(screen.getByTestId('p-gap-computed-p')).toHaveTextContent('71.8%');
+    setDeadBreakout(12);
+    // 0.915×0.785 + 0.085×0.12 = 0.71828 + 0.0102 = 72.8%
+    expect(screen.getByTestId('p-gap-computed-p')).toHaveTextContent('72.8%');
 
     // 卸载再挂载 = 刷新页面（状态只存在 localStorage 里）
     unmount();
@@ -354,7 +395,8 @@ describe('PGapPanel', () => {
     expect(screen.getByTestId('p-gap-target-number')).toHaveValue(130);
     expect(screen.getByTestId('p-gap-survival-number')).toHaveValue(91.5);
     expect(screen.getByTestId('p-gap-breakout-number')).toHaveValue(78.5);
-    expect(screen.getByTestId('p-gap-computed-p')).toHaveTextContent('71.8%');
+    expect(screen.getByTestId('p-gap-dead-breakout-number')).toHaveValue(12);
+    expect(screen.getByTestId('p-gap-computed-p')).toHaveTextContent('72.8%');
   });
 
   it('多笔多单标注为均价', () => {
