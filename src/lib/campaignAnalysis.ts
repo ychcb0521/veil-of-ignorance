@@ -14,6 +14,7 @@ import { getPositionNotionalUsd } from '@/lib/tradingSettlement';
 import { buildTradeRecordLookup } from '@/lib/objectiveOperationTime';
 import { isHistoricalCampaign, type CampaignEvent, type LegRole, type TradeCampaign, type TradeJournal } from '@/types/journal';
 import type { CampaignReverseHedgeOrder, PendingOrder, SettlementMode, TradeRecord } from '@/types/trading';
+import { pickPrimaryMainLeg } from '@/lib/campaignPrimaryMainLeg';
 
 export interface StateSegment {
   state: 'state_0_setup' | 'state_1_lockin' | 'state_2_rolling' | 'state_3_exit';
@@ -197,9 +198,9 @@ function resolveInitialReverseHedgePrices(
 }
 
 function findInitialMainLeg(legs: TradeJournal[]): TradeJournal | null {
-  return legs
-    .filter(leg => leg.leg_role === 'main_open')
-    .sort((a, b) => toMs(a.pre_simulated_time) - toMs(b.pre_simulated_time))[0] ?? null;
+  // 多笔主仓时以名义金额最大的那笔为准（并列时退回最早开仓），
+  // 否则一笔残仓排在前面就会把开仓价、风险锚整体带偏。
+  return pickPrimaryMainLeg(legs.filter(leg => leg.leg_role === 'main_open'));
 }
 
 interface InitialRiskAnchor {

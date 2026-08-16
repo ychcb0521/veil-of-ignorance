@@ -1478,6 +1478,33 @@ function synthesizeCampaignLegsFromEvents(campaign: TradeCampaign): TradeJournal
     });
 }
 
+/**
+ * 挂出但未触发的镜像止盈，也要出现在 legs 里。
+ *
+ * 未触发意味着没有成交记录，因而永远不会有 trade_journals 行——它只以
+ * `mirror_tp_placed` 事件存在。而非历史战役只要有 DB legs 就整体丢弃合成 leg，
+ * 于是这笔挂单在明细与导出里彻底消失，Legs 构成显示「TP 0」，看不出这场战役
+ * 究竟挂没挂过镜像止盈。
+ *
+ * 这里只补「一个 mirror_tp leg 都没有」的情形，不动已有的任何 leg：
+ * 已触发的镜像止盈本就有 DB leg，不会被重复补一行。
+ */
+export function appendUntriggeredMirrorTpLeg(
+  campaign: TradeCampaign,
+  legs: TradeJournal[],
+): TradeJournal[] {
+  if (legs.some(leg => leg.leg_role === 'mirror_tp')) return legs;
+  const events = [...(campaign.actual_evolution ?? [])]
+    .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+  // 有触发事件说明它成交过，缺 DB leg 属于另一类问题，不在此处臆造
+  if (events.some(event => event.event_type === 'mirror_tp_triggered')) return legs;
+  const placed = events.find(event => (
+    event.event_type === 'mirror_tp_placed' && event.leg_role === 'mirror_tp'
+  ));
+  if (!placed) return legs;
+  return [...legs, synthesizeJournalFromEvent(campaign, placed, legs.length + 1, null)];
+}
+
 function mergeCampaignLegSnapshots(primary: TradeJournal, fallback: TradeJournal): TradeJournal {
   const merged = { ...fallback, ...primary } as TradeJournal;
   for (const key of Object.keys(fallback) as Array<keyof TradeJournal>) {
@@ -2070,9 +2097,12 @@ export async function getCampaignWithLegs(
     dbLegs = (legs ?? []) as unknown as TradeJournal[];
   }
   const syntheticLegs = synthesizeCampaignLegsFromEvents(resolvedCampaign);
-  const resolvedLegs = isHistoricalCampaign(resolvedCampaign)
-    ? mergeHistoricalCampaignLegs(dbLegs, syntheticLegs)
-    : (dbLegs.length > 0 ? dbLegs : syntheticLegs);
+  const resolvedLegs = appendUntriggeredMirrorTpLeg(
+    resolvedCampaign,
+    isHistoricalCampaign(resolvedCampaign)
+      ? mergeHistoricalCampaignLegs(dbLegs, syntheticLegs)
+      : (dbLegs.length > 0 ? dbLegs : syntheticLegs),
+  );
   const mirroredLegs = applyLocalMirror(resolvedUserId, resolvedLegs);
   const tradeRecordIds = Array.from(new Set(
     mirroredLegs

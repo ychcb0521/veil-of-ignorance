@@ -1,5 +1,6 @@
 import type { TradeJournal } from '@/types/journal';
 import type { CampaignReverseHedgeOrder } from '@/types/trading';
+import { pickPrimaryMainLeg } from '@/lib/campaignPrimaryMainLeg';
 
 function sequence(leg: TradeJournal): number {
   return leg.leg_sequence ?? Number.MAX_SAFE_INTEGER;
@@ -57,7 +58,9 @@ export function buildCampaignReverseOrderLegMap(
   reverseHedgeOrders: CampaignReverseHedgeOrder[],
 ): Map<string, string> {
   const orderedMainLegs = legs.filter(isMainLeg).sort((a, b) => sequence(a) - sequence(b));
-  const ownerLeg = orderedMainLegs.find(leg => leg.leg_role === 'main_open') ?? orderedMainLegs[0] ?? null;
+  // 反向委托保护的是主力敞口，因此挂在名义金额最大的那笔主仓名下，
+  // 而不是序号最小的那笔（残仓排在前面会让整列委托都归错 leg）。
+  const ownerLeg = pickPrimaryMainLeg(orderedMainLegs) ?? orderedMainLegs[0] ?? null;
   const hedgeLegs = legs.filter(isHedgeLeg).sort((a, b) => sequence(a) - sequence(b));
   const result = new Map<string, string>();
 

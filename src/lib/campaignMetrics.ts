@@ -2,6 +2,7 @@ import { computeGeometricExpectancy } from '@/lib/geometricExpectancy';
 import { computeRealizedOpportunityQuality } from '@/lib/opportunityQuality';
 import type { TradeCampaign, TradeJournal } from '@/types/journal';
 import type { TradeRecord } from '@/types/trading';
+import { pickPrimaryMainLeg } from '@/lib/campaignPrimaryMainLeg';
 
 export interface CampaignExpectancies {
   arithmeticExpectancy: number | null;
@@ -18,9 +19,8 @@ export function resolveCampaignMainLeverage(
   legs: TradeJournal[],
   tradeRecords: TradeRecord[],
 ): number | null {
-  const mainLeg = legs.find(leg => leg.leg_role === 'main_open')
-    ?? legs.find(leg => leg.leg_role === 'reentry_main')
-    ?? null;
+  // 多笔主仓时取名义金额最大的那笔——杠杆要跟着真正的主力走
+  const mainLeg = pickPrimaryMainLeg(legs);
   const mainEvent = (campaign.actual_evolution ?? []).find(event => (
     event.event_type === 'main_opened' || event.event_type === 'reentry_main_opened'
   )) ?? null;

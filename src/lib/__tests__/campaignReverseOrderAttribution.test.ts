@@ -124,4 +124,12 @@ describe('campaign reverse-order attribution', () => {
 
     expect(attribution.get(pending.id)).toBe('main');
   });
+
+  it('多笔主仓时，未触发的反向委托挂在名义金额最大的那笔名下', () => {
+    // 实盘反例：1769.83 的残仓 leg_sequence 在前，真正的主力是 17775439.86
+    const dust = { ...leg('dust', 'main_open', '2026-08-05T04:02:00Z'), pre_position_size: 1769.83 } as TradeJournal;
+    const real = { ...leg('real', 'main_open', '2026-08-05T04:02:30Z'), pre_position_size: 17775439.86 } as TradeJournal;
+    const map = buildCampaignReverseOrderLegMap([dust, real], [order('o1', '2026-08-05T04:03:00Z')]);
+    expect(map.get('o1')).toBe('real');
+  });
 });
