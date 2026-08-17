@@ -15,6 +15,7 @@
  */
 
 import { DEFAULT_SIGNAL_LIBRARY_TEXT } from './defaultSignalLibrary';
+import { queueSimStatePush } from './simStateSync';
 import type { SignalJumpIssue } from './signalJumpDiagnostics';
 
 export interface TradeSignal {
@@ -287,6 +288,22 @@ export function saveSignals(list: TradeSignal[]): void {
     window.localStorage.setItem(SIGNAL_LIBRARY_DEFAULT_VERSION_KEY, SIGNAL_LIBRARY_DEFAULT_VERSION);
   } catch {
     /* ignore quota / serialization errors */
+  }
+  // 用户粘贴的信号跟账号走：镜像到云端，换浏览器不丢
+  const userId = currentUserIdFromAuthToken();
+  if (userId) queueSimStatePush(userId, 'signal_library_v1', list);
+}
+
+/** 从 supabase auth token 里取当前用户 id（与 usePersistedState 同一来源）。 */
+function currentUserIdFromAuthToken(): string | null {
+  try {
+    const storageKey = Object.keys(window.localStorage).find(k =>
+      k.startsWith('sb-') && k.endsWith('-auth-token'));
+    if (!storageKey) return null;
+    const data = JSON.parse(window.localStorage.getItem(storageKey) || '{}');
+    return data?.user?.id ?? null;
+  } catch {
+    return null;
   }
 }
 

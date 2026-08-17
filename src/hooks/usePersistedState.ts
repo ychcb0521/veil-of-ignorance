@@ -1,10 +1,11 @@
 import { useState, useCallback, useRef } from 'react';
+import { queueSimStatePush } from '@/lib/simStateSync';
 import type { TimeMachineStatus } from './useTimeSimulator';
 
 /**
  * User-scoped persisted state.
  */
-function getUserPrefix(): string {
+function getUserId(): string | null {
   try {
     const storageKey = Object.keys(localStorage).find(k =>
       k.startsWith('sb-') && k.endsWith('-auth-token')
@@ -12,15 +13,21 @@ function getUserPrefix(): string {
     if (storageKey) {
       const data = JSON.parse(localStorage.getItem(storageKey) || '{}');
       const userId = data?.user?.id;
-      if (userId) return `sim_${userId}_`;
+      if (userId) return userId;
     }
   } catch {}
-  return 'sim_anon_';
+  return null;
+}
+
+function getUserPrefix(): string {
+  const userId = getUserId();
+  return userId ? `sim_${userId}_` : 'sim_anon_';
 }
 
 export function usePersistedState<T>(key: string, defaultValue: T): [T, (value: T | ((prev: T) => T)) => void] {
   const prefix = getUserPrefix();
   const fullKey = prefix + key;
+  const userId = getUserId();
 
   const [state, setStateRaw] = useState<T>(() => {
     try {
@@ -39,9 +46,11 @@ export function usePersistedState<T>(key: string, defaultValue: T): [T, (value: 
       try {
         localStorage.setItem(fullKey, JSON.stringify(next));
       } catch {}
+      // 云端镜像：换浏览器后数据跟账号走。防抖、降级都在同步层内处理。
+      if (userId) queueSimStatePush(userId, key, next);
       return next;
     });
-  }, [fullKey]);
+  }, [fullKey, key, userId]);
 
   return [state, setState];
 }
