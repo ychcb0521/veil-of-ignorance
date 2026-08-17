@@ -109,99 +109,6 @@ export type Database = {
         }
         Relationships: []
       }
-      decision_emotion_diaries: {
-        Row: {
-          created_at: string
-          diary_date: string
-          event_text: string
-          hads_anxiety_score: number
-          hads_anxiety_scores: number[]
-          hads_depression_score: number
-          hads_depression_scores: number[]
-          id: string
-          measurement_version: string
-          panas_item_scores: number[] | null
-          panas_negative_score: number | null
-          panas_positive_score: number | null
-          pi_item_scores: number[] | null
-          pi_mean_score: number | null
-          pi_total_score: number | null
-          poms_anger_score: number | null
-          poms_confusion_score: number | null
-          poms_depression_score: number | null
-          poms_esteem_score: number | null
-          poms_fatigue_score: number | null
-          poms_item_scores: number[] | null
-          poms_tension_score: number | null
-          poms_total_mood_disturbance: number | null
-          poms_vigor_score: number | null
-          sam_arousal: number | null
-          sam_valence: number | null
-          updated_at: string
-          user_id: string
-        }
-        Insert: {
-          created_at?: string
-          diary_date: string
-          event_text: string
-          hads_anxiety_score: number
-          hads_anxiety_scores: number[]
-          hads_depression_score: number
-          hads_depression_scores: number[]
-          id?: string
-          measurement_version?: string
-          panas_item_scores?: number[] | null
-          panas_negative_score?: number | null
-          panas_positive_score?: number | null
-          pi_item_scores?: number[] | null
-          pi_mean_score?: number | null
-          pi_total_score?: number | null
-          poms_anger_score?: number | null
-          poms_confusion_score?: number | null
-          poms_depression_score?: number | null
-          poms_esteem_score?: number | null
-          poms_fatigue_score?: number | null
-          poms_item_scores?: number[] | null
-          poms_tension_score?: number | null
-          poms_total_mood_disturbance?: number | null
-          poms_vigor_score?: number | null
-          sam_arousal?: number | null
-          sam_valence?: number | null
-          updated_at?: string
-          user_id: string
-        }
-        Update: {
-          created_at?: string
-          diary_date?: string
-          event_text?: string
-          hads_anxiety_score?: number
-          hads_anxiety_scores?: number[]
-          hads_depression_score?: number
-          hads_depression_scores?: number[]
-          id?: string
-          measurement_version?: string
-          panas_item_scores?: number[] | null
-          panas_negative_score?: number | null
-          panas_positive_score?: number | null
-          pi_item_scores?: number[] | null
-          pi_mean_score?: number | null
-          pi_total_score?: number | null
-          poms_anger_score?: number | null
-          poms_confusion_score?: number | null
-          poms_depression_score?: number | null
-          poms_esteem_score?: number | null
-          poms_fatigue_score?: number | null
-          poms_item_scores?: number[] | null
-          poms_tension_score?: number | null
-          poms_total_mood_disturbance?: number | null
-          poms_vigor_score?: number | null
-          sam_arousal?: number | null
-          sam_valence?: number | null
-          updated_at?: string
-          user_id?: string
-        }
-        Relationships: []
-      }
       error_tag_categories: {
         Row: {
           code: string
@@ -587,10 +494,6 @@ export type Database = {
           position_mode: string | null
           post_correct_action: string | null
           post_decision_quality: string | null
-          post_entry_decision_quality: string | null
-          post_holding_decision_quality: string | null
-          post_exit_decision_quality: string | null
-          post_exit_nature: string | null
           post_design_intervention: string | null
           post_emo_disturbance: string | null
           post_emo_excuse: string | null
@@ -600,7 +503,6 @@ export type Database = {
           post_emo_main_stone_tags: string[] | null
           post_emo_next_time_plan: string | null
           post_emo_wanted: string | null
-          post_every_ball_pct: number | null
           post_error_scenario: string | null
           post_error_type_summary: string | null
           post_execution_monitor: string | null
@@ -735,10 +637,6 @@ export type Database = {
           position_mode?: string | null
           post_correct_action?: string | null
           post_decision_quality?: string | null
-          post_entry_decision_quality?: string | null
-          post_holding_decision_quality?: string | null
-          post_exit_decision_quality?: string | null
-          post_exit_nature?: string | null
           post_design_intervention?: string | null
           post_emo_disturbance?: string | null
           post_emo_excuse?: string | null
@@ -748,7 +646,6 @@ export type Database = {
           post_emo_main_stone_tags?: string[] | null
           post_emo_next_time_plan?: string | null
           post_emo_wanted?: string | null
-          post_every_ball_pct?: number | null
           post_error_scenario?: string | null
           post_error_type_summary?: string | null
           post_execution_monitor?: string | null
@@ -883,10 +780,6 @@ export type Database = {
           position_mode?: string | null
           post_correct_action?: string | null
           post_decision_quality?: string | null
-          post_entry_decision_quality?: string | null
-          post_holding_decision_quality?: string | null
-          post_exit_decision_quality?: string | null
-          post_exit_nature?: string | null
           post_design_intervention?: string | null
           post_emo_disturbance?: string | null
           post_emo_excuse?: string | null
@@ -896,7 +789,6 @@ export type Database = {
           post_emo_main_stone_tags?: string[] | null
           post_emo_next_time_plan?: string | null
           post_emo_wanted?: string | null
-          post_every_ball_pct?: number | null
           post_error_scenario?: string | null
           post_error_type_summary?: string | null
           post_execution_monitor?: string | null
