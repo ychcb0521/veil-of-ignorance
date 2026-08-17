@@ -292,6 +292,9 @@ CREATE TABLE IF NOT EXISTS public.user_sim_state (
   PRIMARY KEY (user_id, key)
 );
 
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.user_sim_state TO authenticated;
+GRANT ALL ON public.user_sim_state TO service_role;
+
 ALTER TABLE public.user_sim_state ENABLE ROW LEVEL SECURITY;
 
 DROP POLICY IF EXISTS "Users read own sim state"   ON public.user_sim_state;
