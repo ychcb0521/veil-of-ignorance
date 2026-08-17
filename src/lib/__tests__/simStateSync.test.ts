@@ -115,6 +115,22 @@ describe('hydrateSimState', () => {
     expect(JSON.parse(localStorage.getItem(`sim_${UID}_balance`)!)).toBe(999);
   });
 
+  it('三处非 sim_ 前缀的存储也按各自的键写回', async () => {
+    mocks.eq.mockImplementation(async () => ({
+      data: [
+        { key: 'blind_spots_v1', value: [{ id: 'b1' }], updated_at: '2026-08-17T00:00:00Z' },
+        { key: 'journal_mirror_v1', value: { [UID]: { j1: { note: 'x' } } }, updated_at: '2026-08-17T00:00:00Z' },
+        { key: 'emotion_diary_v1', value: [{ diary_date: '2026-08-16' }], updated_at: '2026-08-17T00:00:00Z' },
+      ],
+      error: null,
+    }));
+    await hydrateSimState(UID);
+    expect(JSON.parse(localStorage.getItem(`veil:blindspots:${UID}`)!)).toEqual([{ id: 'b1' }]);
+    expect(JSON.parse(localStorage.getItem('journal_local_mirror_v1')!)).toEqual({ [UID]: { j1: { note: 'x' } } });
+    expect(JSON.parse(localStorage.getItem(`decision_emotion_diaries_v1:${UID}`)!))
+      .toEqual([{ diary_date: '2026-08-16' }]);
+  });
+
   it('信号库经全局键映射写回 veil.signalLibrary.v1', async () => {
     mocks.eq.mockImplementation(async () => ({
       data: [{ key: 'signal_library_v1', value: [{ id: 's1' }], updated_at: '2026-08-17T00:00:00Z' }],

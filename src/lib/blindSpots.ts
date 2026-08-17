@@ -1,3 +1,4 @@
+import { queueSimStatePush } from '@/lib/simStateSync';
 /**
  * 盲区（Blind Spots）—— 错题集里唯一的附加模块。
  *
@@ -39,6 +40,7 @@ export function saveBlindSpots(userId: string | null | undefined, items: BlindSp
   } catch {
     /* localStorage 不可用时静默降级 */
   }
+  if (userId) queueSimStatePush(userId, 'blind_spots_v1', items);
 }
 
 function makeId(): string {

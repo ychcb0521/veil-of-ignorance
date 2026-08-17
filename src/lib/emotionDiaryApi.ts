@@ -11,6 +11,7 @@ import {
   scorePomsSubscales,
   scorePomsTotalMoodDisturbance,
 } from '@/lib/emotionDiary';
+import { queueSimStatePush } from '@/lib/simStateSync';
 import type {
   DecisionEmotionDiary,
   DecisionEmotionDiaryDraft,
@@ -134,6 +135,7 @@ function writeLocal(userId: string, diaries: DecisionEmotionDiary[]): void {
   } catch (error) {
     console.warn('[emotionDiaryApi] 本地镜像写入失败', error);
   }
+  queueSimStatePush(userId, 'emotion_diary_v1', diaries);
 }
 
 function upsertLocal(userId: string, diary: DecisionEmotionDiary): void {

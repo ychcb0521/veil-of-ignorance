@@ -1,3 +1,5 @@
+import { queueSimStatePush } from '@/lib/simStateSync';
+
 /**
  * 本地镜像：远程库 schema 漂移时的兜底持久层。
  *
@@ -9,8 +11,8 @@
  *      错题集 reload 时把本地镜像 merge 回 server 拉回来的 journals，
  *      用户单设备上始终能看到自己填的所有内容。
  *
- * 妥协：跨设备/浏览器不同步；只要用户跑了 supabase 迁移，新数据自然走正常通道，
- *      本地镜像就只是历史 backup。
+ * 同步：这份镜像同样会推送到账号的云端存档（user_sim_state），换浏览器不丢；
+ *      只要用户跑了 supabase 迁移，新数据自然走正常通道，本地镜像退为历史 backup。
  */
 
 const STORAGE_KEY = 'journal_local_mirror_v1';
@@ -33,6 +35,22 @@ function writeStore(store: Store): void {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(store));
   } catch (e) {
     console.warn('[journalLocalMirror] write failed:', e);
+  }
+  // 这份镜像存的是「远程缺列时被剥掉的字段原值」——正是最容易随浏览器丢失的
+  // 一类数据，必须一并上云（原注释里「跨设备不同步」的妥协至此解除）。
+  const userId = currentUserIdFromAuthToken();
+  if (userId) queueSimStatePush(userId, 'journal_mirror_v1', store);
+}
+
+/** 与 usePersistedState 同源地取当前用户 id。 */
+function currentUserIdFromAuthToken(): string | null {
+  try {
+    if (typeof localStorage === 'undefined') return null;
+    const key = Object.keys(localStorage).find(k => k.startsWith('sb-') && k.endsWith('-auth-token'));
+    if (!key) return null;
+    return JSON.parse(localStorage.getItem(key) || '{}')?.user?.id ?? null;
+  } catch {
+    return null;
   }
 }
 

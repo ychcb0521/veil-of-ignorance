@@ -21,13 +21,25 @@ import { supabase } from '@/integrations/supabase/client';
 const EXCLUDED_KEYS = new Set(['price_map']);
 
 /**
- * 不带用户前缀的全局键 → 实际 localStorage 键的映射。
- * 信号库存在 veil.signalLibrary.v1（无 sim_ 前缀），但用户粘贴的信号是
- * 跟账号走的资产，同样要跨浏览器保留。
+ * 不走 `sim_<uid>_` 前缀的存储 → 实际 localStorage 键的映射。
+ * 这些同样是跟账号走的资产，不能因为键名格式不同就漏掉：
+ *   signal_library_v1  用户粘贴的信号库（全局键）
+ *   blind_spots_v1     认知盲区清单（veil:blindspots:<uid>）
+ *   journal_mirror_v1  远程 schema 缺列时的字段兜底镜像（全局键，内部按 uid 分区）
+ *   emotion_diary_v1   情绪日记本地镜像（<version>:<uid>）
+ * 值为函数时按当前 userId 拼装实际键。
  */
-const GLOBAL_KEY_STORAGE: Record<string, string> = {
-  signal_library_v1: 'veil.signalLibrary.v1',
+const ALT_KEY_STORAGE: Record<string, (userId: string) => string> = {
+  signal_library_v1: () => 'veil.signalLibrary.v1',
+  blind_spots_v1: (uid) => `veil:blindspots:${uid}`,
+  journal_mirror_v1: () => 'journal_local_mirror_v1',
+  emotion_diary_v1: (uid) => `decision_emotion_diaries_v1:${uid}`,
 };
+
+function storageKeyFor(logicalKey: string, userId: string): string {
+  const alt = ALT_KEY_STORAGE[logicalKey];
+  return alt ? alt(userId) : `sim_${userId}_${logicalKey}`;
+}
 
 /** 时间线心跳类键每 500ms 就变一次，用长节流窗口，其余键短防抖即可。 */
 const SLOW_SYNC_KEYS = new Set(['synced_origin_time', 'coin_timelines_v2', 'reverse_cap_time_v1']);
@@ -131,7 +143,7 @@ function installFlushHooks(userId: string): void {
 export function queueSimStatePush(userId: string, key: string, value: unknown): void {
   if (!userId || EXCLUDED_KEYS.has(key) || tableMissing) return;
   installFlushHooks(userId);
-  writeShadowTs(GLOBAL_KEY_STORAGE[key] ?? `sim_${userId}_${key}`, Date.now());
+  writeShadowTs(storageKeyFor(key, userId), Date.now());
 
   const existing = pending.get(key);
   if (existing) clearTimeout(existing.timer);
@@ -174,7 +186,7 @@ export async function hydrateSimState(userId: string): Promise<HydrateResult> {
     let applied = 0;
     for (const row of rows) {
       if (EXCLUDED_KEYS.has(row.key)) continue;
-      const fullKey = GLOBAL_KEY_STORAGE[row.key] ?? `sim_${userId}_${row.key}`;
+      const fullKey = storageKeyFor(row.key, userId);
       const remoteTs = new Date(row.updated_at).getTime();
       const localTs = readShadowTs(fullKey);
       const hasLocal = localStorage.getItem(fullKey) != null;
@@ -208,8 +220,8 @@ function backfillLocalOnlyKeys(userId: string, remoteKeys: Set<string>): void {
       const logical = logicalKeyOf(fullKey, userId);
       if (logical) candidates.push([logical, fullKey]);
     }
-    for (const [logical, storageKeyName] of Object.entries(GLOBAL_KEY_STORAGE)) {
-      candidates.push([logical, storageKeyName]);
+    for (const logical of Object.keys(ALT_KEY_STORAGE)) {
+      candidates.push([logical, storageKeyFor(logical, userId)]);
     }
     for (const [logical, storageKeyName] of candidates) {
       if (remoteKeys.has(logical) || EXCLUDED_KEYS.has(logical)) continue;

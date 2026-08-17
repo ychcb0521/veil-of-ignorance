@@ -67,6 +67,7 @@ import type {
   CounterfactualBranchResult,
 } from "@/types/journal";
 import { isHistoricalCampaign, ruleCooldownRemainingMs } from "@/types/journal";
+import { queueSimStatePush } from '@/lib/simStateSync';
 import type {
   PendingOrder,
   TradeRecord,
@@ -144,6 +145,9 @@ function writeUserScopedStorage<T>(userId: string, key: string, value: T): void 
   } catch (error) {
     console.warn(`[journalApi] 写入本地缓存失败: ${key}`, error);
   }
+  // 这条路径与 usePersistedState 写同一套 sim_<uid>_ 键，但不经过那个 hook，
+  // 因此必须自己推送——否则本次会话内的改动要等下次启动回填才上云。
+  queueSimStatePush(userId, key, value);
 }
 
 export type { CampaignDeviationNote } from "@/types/journal";
