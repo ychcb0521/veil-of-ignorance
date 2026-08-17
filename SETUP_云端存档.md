@@ -1,14 +1,43 @@
 # 启用账号云端存档（一次性操作）
 
 交易数据换浏览器/换电脑就丢失，是因为整个模拟交易引擎的状态只存在浏览器本地。
-代码侧的同步已经就绪，但**云端还缺一张表**——建好之前，程序会自动降级为纯本地
-模式（不会报错，但也不会同步）。
+代码侧的同步已经就绪，但**云端还缺一张表** `user_sim_state`——建好之前程序会
+自动降级为纯本地模式（不报错，但也不同步）。
 
-## 怎么做
+## 重要前提：后端由 Lovable Cloud 托管
 
-1. 打开 <https://supabase.com/dashboard/project/pyvndfzpbsgzinqxairn/sql/new>
-2. 把下面整段粘进去，点 **Run**
-3. 看到 `Success` 即可
+本项目的 Supabase 项目是 `pyvndfzpbsgzinqxairn`，由 **Lovable Cloud 管理**
+（见 `.lovable/plan.md`：「通过 Lovable Cloud migration 工具一次性提交」）。
+
+因此：
+
+- 它**不会**出现在你自己的 Supabase 组织里——那个组织显示「Create a project」
+  是正常的，**不要在那里新建项目**，新项目是另一个空数据库，连上去等于把
+  现有数据全部弃掉。
+- 建表要走 Lovable，而不是自己的 Supabase 控制台。
+
+## 怎么做（任选其一）
+
+### 方式 A · 让 Lovable 应用迁移（推荐）
+
+迁移文件已经在仓库里，且已推送到 GitHub：
+
+```
+supabase/migrations/20260817090000_add_user_sim_state.sql
+```
+
+在 Lovable 的对话框里说：
+
+> 请应用 supabase/migrations/20260817090000_add_user_sim_state.sql 这个数据库迁移
+
+如果它说找不到文件，就把下面整段 SQL 直接贴给它，让它执行。
+
+### 方式 B · 从 Lovable 进入后端控制台
+
+Lovable 项目页里有 Cloud / Backend 入口，从那里打开 Supabase 后台（会带上
+正确的项目与权限），进 SQL Editor 粘贴执行同一段 SQL。
+
+### 要执行的 SQL
 
 ```sql
 CREATE TABLE IF NOT EXISTS public.user_sim_state (
@@ -38,8 +67,8 @@ CREATE POLICY "Users delete own sim state"
 NOTIFY pgrst, 'reload schema';
 ```
 
-这段可以重复执行，不会删任何数据，也不碰其他表。
-（它同时已并入 `supabase/manual_remote_schema_sync.sql` 末尾，跑那个文件同样生效。）
+可重复执行，不删任何数据，不碰其他表。
+（同一段也已并入 `supabase/manual_remote_schema_sync.sql` 末尾。）
 
 ## 执行之后
 
@@ -51,13 +80,11 @@ NOTIFY pgrst, 'reload schema';
 
 ## 怎么确认生效了
 
-浏览器控制台执行：
+浏览器控制台如果出现下面这行，说明表还没建成功：
 
-```js
-localStorage.getItem(Object.keys(localStorage).find(k => k.endsWith('_balance')))
+```
+[simStateSync] user_sim_state 表不存在，云端同步停用（退回纯本地存储）
 ```
 
-或在 Supabase 后台 Table Editor 里打开 `user_sim_state`，应能看到若干行
-（key 为 balance / trade_history / positions_map 等）。
-
-若控制台出现 `[simStateSync] user_sim_state 表不存在`，说明 SQL 还没执行成功。
+没有这行、且 Supabase 的 `user_sim_state` 表里能看到若干行
+（key 为 balance / trade_history / positions_map 等），即为成功。
