@@ -62,6 +62,29 @@ describe('queueSimStatePush', () => {
     expect(mocks.upsert).not.toHaveBeenCalled();
   });
 
+  it('推送失败会自动重试一次——瞬时抖动不该让这笔永远上不了云', async () => {
+    let calls = 0;
+    mocks.upsert.mockImplementation(async () => {
+      calls += 1;
+      return calls === 1 ? { error: { code: '500', message: 'temporary' } } : { error: null };
+    });
+    queueSimStatePush(UID, 'balance', 42);
+    await vi.advanceTimersByTimeAsync(1_600);
+    expect(calls).toBe(1);
+    await vi.advanceTimersByTimeAsync(3_200);
+    expect(calls).toBe(2); // 重试成功
+  });
+
+  it('重试仍失败则放弃，不无限重试', async () => {
+    mocks.upsert.mockImplementation(async () => ({ error: { code: '500', message: 'down' } }));
+    queueSimStatePush(UID, 'balance', 42);
+    await vi.advanceTimersByTimeAsync(1_600);
+    await vi.advanceTimersByTimeAsync(3_200);
+    const after = mocks.upsert.mock.calls.length;
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(mocks.upsert.mock.calls.length).toBe(after);
+  });
+
   it('表不存在时静默停用，之后不再尝试推送', async () => {
     mocks.upsert.mockImplementation(async () => ({
       error: { code: 'PGRST205', message: "Could not find the table 'public.user_sim_state'" },

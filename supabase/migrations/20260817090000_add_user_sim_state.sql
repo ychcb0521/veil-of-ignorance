@@ -1,31 +1,39 @@
--- 模拟交易引擎状态的云端镜像。
+
+-- =============================================================================
+-- user_sim_state —— 模拟交易引擎状态的账号云端存档
+-- =============================================================================
+-- WHY
+--   持仓、成交历史、挂单、余额、各币时间线、杠杆设置、信号库等引擎状态此前
+--   只存在浏览器 localStorage，换浏览器 / 换电脑即全部丢失（账户资产由余额、
+--   持仓、成交历史推导，因此一并丢失）。这张表按 (user_id, key) 存一份 jsonb
+--   镜像：客户端写入后防抖推送，新环境登录时水化回本地。
 --
--- 此前持仓、成交历史、挂单、余额、各币时间线、杠杆设置等全部只存在浏览器
--- localStorage（sim_<userId>_* 前缀），同一账号换浏览器即回到初始状态。
--- 这张 KV 表按 (user_id, key) 存一份 jsonb 镜像：写路径防抖推送，
--- 新环境启动时水化回 localStorage，账号数据从此跟人走、不跟浏览器走。
-create table if not exists public.user_sim_state (
-  user_id uuid not null references auth.users (id) on delete cascade,
-  key text not null,
-  value jsonb not null,
-  updated_at timestamptz not null default now(),
-  primary key (user_id, key)
+-- SAFETY
+--   幂等：表用 IF NOT EXISTS，策略先 DROP 再 CREATE，可安全重复执行；
+--   不触碰任何既有表，不删除任何数据。
+-- -----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS public.user_sim_state (
+  user_id    uuid        NOT NULL REFERENCES auth.users (id) ON DELETE CASCADE,
+  key        text        NOT NULL,
+  value      jsonb       NOT NULL,
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (user_id, key)
 );
 
-alter table public.user_sim_state enable row level security;
+ALTER TABLE public.user_sim_state ENABLE ROW LEVEL SECURITY;
 
-create policy "Users read own sim state"
-  on public.user_sim_state for select
-  using (auth.uid() = user_id);
+DROP POLICY IF EXISTS "Users read own sim state"   ON public.user_sim_state;
+DROP POLICY IF EXISTS "Users insert own sim state" ON public.user_sim_state;
+DROP POLICY IF EXISTS "Users update own sim state" ON public.user_sim_state;
+DROP POLICY IF EXISTS "Users delete own sim state" ON public.user_sim_state;
 
-create policy "Users insert own sim state"
-  on public.user_sim_state for insert
-  with check (auth.uid() = user_id);
+CREATE POLICY "Users read own sim state"
+  ON public.user_sim_state FOR SELECT USING (auth.uid() = user_id);
+CREATE POLICY "Users insert own sim state"
+  ON public.user_sim_state FOR INSERT WITH CHECK (auth.uid() = user_id);
+CREATE POLICY "Users update own sim state"
+  ON public.user_sim_state FOR UPDATE USING (auth.uid() = user_id);
+CREATE POLICY "Users delete own sim state"
+  ON public.user_sim_state FOR DELETE USING (auth.uid() = user_id);
 
-create policy "Users update own sim state"
-  on public.user_sim_state for update
-  using (auth.uid() = user_id);
-
-create policy "Users delete own sim state"
-  on public.user_sim_state for delete
-  using (auth.uid() = user_id);
+NOTIFY pgrst, 'reload schema';

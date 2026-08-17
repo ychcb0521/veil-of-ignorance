@@ -2,6 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { BrowserRouter, Route, Routes } from "react-router-dom";
 import { hydrateSimState } from "@/lib/simStateSync";
+import { toast } from "sonner";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -42,7 +43,16 @@ function useSimStateHydration(userId: string | null | undefined): boolean {
     if (!userId) return;
     let cancelled = false;
     const timeout = setTimeout(() => { if (!cancelled) setReady(true); }, 4000);
-    hydrateSimState(userId).finally(() => {
+    hydrateSimState(userId).then((result) => {
+      // 云端存档没建起来时必须让人看见——静默降级正是「换浏览器数据全没了」
+      // 的成因，绝不能再悄悄发生。每个会话只提示一次。
+      if (result.status === 'table-missing' && !cancelled) {
+        toast.warning('云端存档未启用：交易数据目前只存在本浏览器', {
+          description: '换浏览器或换电脑将看不到这些记录。需要在 Supabase 执行一次建表 SQL（见仓库 SETUP_云端存档.md）。',
+          duration: 12_000,
+        });
+      }
+    }).finally(() => {
       clearTimeout(timeout);
       if (!cancelled) setReady(true);
     });

@@ -91,9 +91,19 @@ export function logicalKeyOf(fullKey: string, userId: string): string | null {
   return key.endsWith('__syncts') ? null : key;
 }
 
-async function pushNow(userId: string, key: string, value: unknown): Promise<void> {
+/** 单键负载超过这个大小就告警：成交历史累积到一定量后可能触到请求体上限。 */
+const LARGE_PAYLOAD_WARN_BYTES = 4 * 1024 * 1024;
+
+async function pushNow(userId: string, key: string, value: unknown, retry = true): Promise<void> {
   if (tableMissing) return;
   try {
+    const approxBytes = JSON.stringify(value)?.length ?? 0;
+    if (approxBytes > LARGE_PAYLOAD_WARN_BYTES) {
+      console.warn(
+        `[simStateSync] ${key} 体积已达 ${(approxBytes / 1024 / 1024).toFixed(1)}MB，`
+        + '接近单次请求上限，若推送开始失败需要改为分片存储',
+      );
+    }
     const { error } = await supabase
       .from('user_sim_state' as never)
       .upsert(
@@ -109,12 +119,20 @@ async function pushNow(userId: string, key: string, value: unknown): Promise<voi
       if (isMissingSimStateTableError(error)) {
         tableMissing = true;
         console.warn('[simStateSync] user_sim_state 表不存在，云端同步停用（退回纯本地存储）');
+      } else if (retry) {
+        // 瞬时网络抖动不该让这一笔永远上不了云：隔 3 秒重试一次
+        console.warn('[simStateSync] 推送失败，3 秒后重试：', error.message);
+        setTimeout(() => { void pushNow(userId, key, value, false); }, 3_000);
       } else {
-        console.warn('[simStateSync] 推送失败：', error.message);
+        console.warn('[simStateSync] 推送重试仍失败：', error.message);
       }
     }
   } catch (e) {
-    console.warn('[simStateSync] 推送异常：', e);
+    if (retry) {
+      setTimeout(() => { void pushNow(userId, key, value, false); }, 3_000);
+    } else {
+      console.warn('[simStateSync] 推送异常：', e);
+    }
   }
 }
 
