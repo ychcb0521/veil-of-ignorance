@@ -18,6 +18,13 @@
 
 import React, { createContext, useContext, useCallback, useEffect, useRef, useMemo, useState } from 'react';
 import { useTimeSimulator } from '@/hooks/useTimeSimulator';
+import {
+  applyTransfer,
+  validateTransfer,
+  type TransferRecord,
+  type WalletBalances,
+  type WalletId,
+} from '@/lib/walletTransfer';
 import { usePersistedState, loadPersistedSimState, saveSimState, clearSimState } from '@/hooks/usePersistedState';
 import { intervalToMs } from '@/hooks/useBinanceData';
 import { useAuth } from '@/contexts/AuthContext';
@@ -121,6 +128,14 @@ interface TradingState {
   setPriceMap: (v: PriceMap | ((prev: PriceMap) => PriceMap)) => void;
   balance: number;
   setBalance: (v: number | ((prev: number) => number)) => void;
+  /** 现货钱包余额（USDT）。合约钱包的余额就是 balance。 */
+  spotBalance: number;
+  /** 资金钱包余额（USDT）。 */
+  fundingBalance: number;
+  /** 账内划转记录，最新在前。 */
+  transferHistory: TransferRecord[];
+  /** 在三个钱包之间划转；返回是否成功，失败原因已以 toast 呈现。 */
+  transferFunds: (from: WalletId, to: WalletId, amount: number) => boolean;
   /** @deprecated always empty — single global balance is used */
   isolatedBalances: IsolatedBalancesMap;
   /** @deprecated no-op */
@@ -324,6 +339,11 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
   const [filledOrders, setFilledOrders] = usePersistedState<FilledOrderSnapshot[]>('filled_orders', []);
   const [priceMap, setPriceMap] = usePersistedState<PriceMap>('price_map', {});
   const [balance, setBalance] = usePersistedState('balance', initialCapital);
+  // 现货 / 资金钱包。合约钱包用既有的 balance——它已是「可用现金」口径
+  // （开仓扣、平仓退），正是币安「合约可划转」的那个数。
+  const [spotBalance, setSpotBalance] = usePersistedState('spot_balance', 0);
+  const [fundingBalance, setFundingBalance] = usePersistedState('funding_balance', 0);
+  const [transferHistory, setTransferHistory] = usePersistedState<TransferRecord[]>('transfer_history', []);
 
   useEffect(() => {
     setPositionsMap(prev => {
@@ -1464,6 +1484,35 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
     toast.success(`已彻底清除 ${symbol.replace('USDT', '/USDT')} 的所有数据，资产已复原。`);
   }, [tradeHistory]);
 
+  /**
+   * 账内划转。校验与结算都走 walletTransfer 里的纯逻辑，UI 只负责收集输入——
+   * 这样「最大可划转」「是否超额」在按钮与提交两处永远是同一套规则。
+   */
+  const transferFunds = useCallback((from: WalletId, to: WalletId, amount: number): boolean => {
+    const balances: WalletBalances = { futures: balance, spot: spotBalance, funding: fundingBalance };
+    const check = validateTransfer(balances, { from, to, amount });
+    if (!check.ok) {
+      toast.error(check.message);
+      return false;
+    }
+    const next = applyTransfer(balances, { from, to, amount: check.amount });
+    setBalance(next.futures);
+    setSpotBalance(next.spot);
+    setFundingBalance(next.funding);
+    setTransferHistory(prev => [
+      {
+        id: `tr_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
+        from, to, amount: check.amount,
+        // 与成交记录同一条时间轴，复盘时对得上
+        timestamp: getEffectiveTime(),
+        asset: 'USDT' as const,
+      },
+      ...prev,
+    ].slice(0, 500));
+    return true;
+  }, [balance, spotBalance, fundingBalance, getEffectiveTime,
+      setBalance, setSpotBalance, setFundingBalance, setTransferHistory]);
+
   const value: TradingState = {
     sim,
     activeSymbol, setActiveSymbol,
@@ -1473,6 +1522,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
     filledOrders, setFilledOrders,
     priceMap, setPriceMap,
     balance, setBalance,
+    spotBalance, fundingBalance, transferHistory, transferFunds,
     isolatedBalances: emptyIsolatedBalances,
     setIsolatedBalances: setIsolatedBalancesNoop,
     tradeHistory, setTradeHistory,

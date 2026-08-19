@@ -1,7 +1,10 @@
 import { useState } from 'react';
 import { Wallet, ArrowUpRight, ArrowDownLeft, ArrowLeftRight, ChevronRight, Eye, EyeOff, TrendingUp, TrendingDown } from 'lucide-react';
 import type { AssetState } from '@/types/assets';
+import { useTradingContext } from '@/contexts/TradingContext';
+import type { WalletBalances } from '@/lib/walletTransfer';
 import { AssetReportModal } from './AssetReportModal';
+import { TransferDialog } from './TransferDialog';
 
 interface Props {
   assets: AssetState;
@@ -9,7 +12,15 @@ interface Props {
 
 export function AssetOverview({ assets }: Props) {
   const [reportOpen, setReportOpen] = useState(false);
+  const [transferOpen, setTransferOpen] = useState(false);
   const [hidden, setHidden] = useState(false);
+  const { balance, spotBalance, fundingBalance, transferFunds } = useTradingContext();
+  // 合约钱包取「可用余额」而非权益：占用中的保证金与未实现盈亏都划不走
+  const walletBalances: WalletBalances = {
+    futures: balance,
+    spot: spotBalance,
+    funding: fundingBalance,
+  };
 
   const { totalBalance, todayPnl, todayPnlPct, accounts } = assets;
   const isProfit = todayPnl >= 0;
@@ -62,13 +73,18 @@ export function AssetOverview({ assets }: Props) {
         {/* Action Buttons */}
         <div className="flex border-t border-border">
           {[
-            { icon: ArrowDownLeft, label: '添加资金', labelEn: 'Deposit' },
-            { icon: ArrowUpRight, label: '转出', labelEn: 'Withdraw' },
-            { icon: ArrowLeftRight, label: '划转', labelEn: 'Transfer' },
-          ].map(({ icon: Icon, label }) => (
+            { icon: ArrowDownLeft, label: '添加资金', labelEn: 'Deposit', onClick: undefined },
+            { icon: ArrowUpRight, label: '转出', labelEn: 'Withdraw', onClick: undefined },
+            { icon: ArrowLeftRight, label: '划转', labelEn: 'Transfer', onClick: () => setTransferOpen(true) },
+          ].map(({ icon: Icon, label, onClick }) => (
             <button
               key={label}
-              className="flex-1 flex flex-col items-center gap-1 py-3 text-muted-foreground hover:text-foreground hover:bg-accent/30 transition-colors border-r border-border last:border-r-0"
+              type="button"
+              data-testid={`asset-action-${label}`}
+              onClick={onClick}
+              disabled={!onClick}
+              title={onClick ? undefined : '模拟盘不涉及真实出入金'}
+              className="flex-1 flex flex-col items-center gap-1 py-3 text-muted-foreground hover:text-foreground hover:bg-accent/30 transition-colors border-r border-border last:border-r-0 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:text-muted-foreground disabled:hover:bg-transparent"
             >
               <Icon className="w-4 h-4" />
               <span className="text-[10px] font-medium">{label}</span>
@@ -110,6 +126,13 @@ export function AssetOverview({ assets }: Props) {
         open={reportOpen}
         onClose={() => setReportOpen(false)}
         assets={assets}
+      />
+
+      <TransferDialog
+        open={transferOpen}
+        onClose={() => setTransferOpen(false)}
+        balances={walletBalances}
+        onTransfer={transferFunds}
       />
     </>
   );

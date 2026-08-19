@@ -151,6 +151,8 @@ const Index = () => {
     priceMap,
     setPriceMap,
     balance,
+    spotBalance,
+    fundingBalance,
     setBalance,
     isolatedBalances,
     tradeHistory,
@@ -947,7 +949,10 @@ const Index = () => {
         unrealizedPnl += calcUnrealizedPnl(pos, price || pos.entryPrice);
       }
     }
-    const totalBalance = balance + unrealizedPnl;
+    // 合约钱包权益 = 可用现金 + 未实现盈亏；账户总资产还要加上现货与资金钱包。
+    // 划转只在钱包之间搬钱，因此 totalBalance 在划转前后严格不变。
+    const futuresEquity = balance + unrealizedPnl;
+    const totalBalance = futuresEquity + spotBalance + fundingBalance;
     const dailyPnl = buildOperationDailyPnl(tradeHistory);
     const todayRealizedPnl = pnlForOperationDate(dailyPnl);
     const todayPnl = todayRealizedPnl + unrealizedPnl;
@@ -962,7 +967,6 @@ const Index = () => {
 
     const dailyPnlDetails = buildOperationDailyPnlDetails(tradeHistory);
 
-    const futuresBalance = totalBalance;
     return {
       totalBalance,
       todayPnl,
@@ -971,18 +975,19 @@ const Index = () => {
         {
           label: "合约",
           labelEn: "Futures",
-          balance: futuresBalance,
+          balance: futuresEquity,
           available: balance,
-          frozen: futuresBalance - balance,
+          // 冻结 = 被持仓占用的保证金 + 未实现盈亏，这部分划不走
+          frozen: futuresEquity - balance,
         },
-        { label: "资金", labelEn: "Funding", balance: 0, available: 0, frozen: 0 },
-        { label: "现货", labelEn: "Spot", balance: 0, available: 0, frozen: 0 },
+        { label: "资金", labelEn: "Funding", balance: fundingBalance, available: fundingBalance, frozen: 0 },
+        { label: "现货", labelEn: "Spot", balance: spotBalance, available: spotBalance, frozen: 0 },
       ],
       history,
       dailyPnl,
       dailyPnlDetails,
     };
-  }, [balance, positionsMap, displayPriceMap, tradeHistory, profile]);
+  }, [balance, spotBalance, fundingBalance, positionsMap, displayPriceMap, tradeHistory, profile]);
 
   useEffect(() => {
     const canonicalPrice = Number(currentPrice || 0);
