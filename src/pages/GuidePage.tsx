@@ -1829,6 +1829,11 @@ P 不再一把手填，而是拆成三个更可回答的问题：<strong>「这�
                 </thead>
                 <tbody>
                   <tr>
+                    <td className="px-3 py-2 border-t border-border font-medium">默认结算方式</td>
+                    <td className="px-3 py-2 border-t border-border">新标的下单<strong>默认币本位</strong>；下单面板顶部那颗「U本位 / 币本位」标签可随时切换，一旦为某个标的选过，此后就记住你的选择。</td>
+                    <td className="px-3 py-2 border-t border-border">本系统的主仓打法以币本位为主。<strong>已有的历史记录不受影响</strong>——缺少该字段的旧单子一律仍按 U 本位解读，否则等于事后改写过去交易的含义，连带污染战役的保证金、R 倍数与统计。</td>
+                  </tr>
+                  <tr>
                     <td className="px-3 py-2 border-t border-border font-medium">ROE 分母</td>
                     <td className="px-3 py-2 border-t border-border">U本位与币本位合约的 ROE 分母统一固定为开仓时的初始保证金；后续追加保证金不计入 ROE 分母，只影响保证金余额、强平风险和保证金比率。</td>
                     <td className="px-3 py-2 border-t border-border">追加保证金是延长生存时间的动作，不是降低这笔交易原始收益率的动作。看 ROE 时，读的是这笔交易相对初始风险资本的效率；看爆仓风险时，再看保证金余额和保证金比率。</td>

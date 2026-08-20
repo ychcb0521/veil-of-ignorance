@@ -43,6 +43,7 @@ import type {
 } from '@/types/trading';
 import {
   calcUnrealizedPnl,
+  DEFAULT_SETTLEMENT_MODE,
   MAINTENANCE_MARGIN_RATE, LIQUIDATION_FEE_RATE, FUNDING_RATE, FUNDING_HOURS, getTriggerOperator,
 } from '@/types/trading';
 import { resolveConditionalTriggerPrice, shouldRejectImmediateConditionalPlacement } from '@/lib/conditionalOrders';
@@ -640,7 +641,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
   }, [setMarginModeMap]);
 
   const getSymbolSettlementMode = useCallback((symbol: string): SettlementMode => {
-    return settlementModeMap[symbol] ?? 'usdt';
+    return settlementModeMap[symbol] ?? DEFAULT_SETTLEMENT_MODE;
   }, [settlementModeMap]);
 
   const setSymbolSettlementMode = useCallback((symbol: string, mode: SettlementMode) => {

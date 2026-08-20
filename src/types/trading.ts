@@ -14,6 +14,15 @@ export type OrderType =
 
 export type MarginMode = "cross" | "isolated";
 export type SettlementMode = "usdt" | "coin";
+
+/**
+ * 新标的下单时的默认结算方式。
+ *
+ * 只作用于「尚未为该标的显式选过结算方式」的实时下单路径。
+ * 历史记录里缺失该字段的回填一律保持 "usdt"——那些单子是在旧默认下开的，
+ * 事后按币本位重新解读会悄悄改写过去交易的含义，连带污染战役统计。
+ */
+export const DEFAULT_SETTLEMENT_MODE: SettlementMode = "coin";
 export type OrderStatus = "NEW" | "PENDING" | "FILLED" | "CANCELED" | "TRIGGERED" | "ACTIVE";
 export type TriggerOperator = ">=" | "<=";
 
