@@ -90,6 +90,21 @@ export function coinAmountToUsd(amount: number, price: number): number {
   return Number.isFinite(amount) && Number.isFinite(price) ? amount * price : 0;
 }
 
+/**
+ * 名义仓位的「币本位计数」：把 USD 名义按给定价格折成以币计的数量。
+ *
+ * 币本位合约的面值以 USD 计（1 张 = N USD），所以名义天然是 USD。
+ * 但持仓者关心的是「这笔仓位相当于多少枚币」——那才是币本位的自然读数，
+ * 也与下单面板「以币计的订单金额」同一口径，两处对得上。
+ *
+ * 价格非正时返回 null（不臆造 0，否则会被误读成空仓）。
+ */
+export function coinNotionalAmount(notionalUsd: number, price: number): number | null {
+  if (!(price > 0) || !Number.isFinite(notionalUsd)) return null;
+  const amount = notionalUsd / price;
+  return Number.isFinite(amount) ? amount : null;
+}
+
 export function formatCoinAmount(amount: number, asset: string, decimals = 6): string {
   const safe = Number.isFinite(amount) ? amount : 0;
   return `${safe.toFixed(decimals)} ${asset}`;

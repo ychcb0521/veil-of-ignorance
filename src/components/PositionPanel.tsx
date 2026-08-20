@@ -28,7 +28,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useTradingContext } from '@/contexts/TradingContext';
 import { PostTradeReviewSheet } from '@/components/journal/PostTradeReviewSheet';
 import { ExitMethodBadge } from '@/components/journal/ExitMethodBadge';
-import { getSettlementAsset } from '@/lib/coinMargined';
+import { coinNotionalAmount, formatCoinAmount, getSettlementAsset } from '@/lib/coinMargined';
 import {
   formatSettlementQuantity,
   getPositionNotionalUsd,
@@ -1051,6 +1051,11 @@ export function PositionPanel({
                     const orderMark = order.price > 0 ? order.price : (priceMap[symbol] || 0);
                     const orderQuoteLabel = isCoinSettled(order) ? 'USD' : 'USDT';
                     const orderNotional = getPositionNotionalUsd(symbol, order, orderMark);
+                    // 币本位委托以「币计名义」为主读数：USD 面值是合约的记账口径，
+                    // 但交易者关心的是这笔相当于多少枚币，与下单面板的币计订单金额同口径。
+                    const orderNotionalCoin = isCoinSettled(order)
+                      ? coinNotionalAmount(orderNotional, orderMark)
+                      : null;
                     return (
                       <tr key={order.id} className="border-b border-gray-100 dark:border-[#2b3139]/50 hover:bg-gray-50 dark:hover:bg-white/5">
                         <td className="px-3 py-2">
@@ -1091,7 +1096,18 @@ export function PositionPanel({
                           ) : '-'}
                         </td>
                         <td className="px-3 py-2 text-gray-900 dark:text-white">
-                          {formatUSDT(orderNotional)} {orderQuoteLabel}
+                          {orderNotionalCoin != null ? (
+                            <>
+                              <div data-testid="order-qty-coin">
+                                {formatCoinAmount(orderNotionalCoin, getSettlementAsset(symbol))}
+                              </div>
+                              <div className="text-[10px] text-gray-500 dark:text-[#848e9c]">
+                                ≈ {formatUSDT(orderNotional)} USD
+                              </div>
+                            </>
+                          ) : (
+                            <>{formatUSDT(orderNotional)} {orderQuoteLabel}</>
+                          )}
                         </td>
                         <td className="px-3 py-2 text-gray-900 dark:text-white">{order.leverage}x</td>
                         <td className="px-3 py-2">
