@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, useMemo } from 'react';
 import type { OrderSide, OrderType } from '@/types/trading';
 import { ORDER_TYPE_INFO, getMaxLeverageForNotional, getLeverageTierInfo, MAINTENANCE_MARGIN_RATE, calcUnrealizedPnl } from '@/types/trading';
 import { ChevronDown, Check, AlertTriangle, Crosshair, ArrowLeftRight, Calculator, Gauge, Info } from 'lucide-react';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import type { PlaceOrderParams } from '@/contexts/TradingContext';
 import { useTradingContext } from '@/contexts/TradingContext';
 import { formatUSDT } from '@/lib/formatters';
@@ -27,7 +28,7 @@ export type PriceSelection = 'MARKET' | 'LIMIT' | 'BEST';
 export type TriggerType = 'MARK' | 'LAST';
 export type CurrencyUnit = 'BASE' | 'USDT';
 export type UsdtInputMode = 'ORDER_VALUE' | 'INITIAL_MARGIN';
-type CoinInputUnit = 'USD_NOTIONAL' | 'CONTRACTS' | 'COIN_MARGIN';
+type CoinInputUnit = 'CONTRACTS' | 'COIN_NOTIONAL' | 'COIN_MARGIN';
 export type ActionMode = 'OPEN' | 'CLOSE';
 export type TimeInForce = 'GTC' | 'IOC' | 'FOK';
 
@@ -188,7 +189,8 @@ export function OrderPanel({
       marginCoin = coinMarginAmount(effectiveQty, effectivePrice, leverage, contractSizeUsd);
       margin = marginCoin * effectivePrice;
     } else if (usdtInputMode === 'ORDER_VALUE') {
-      effectiveQty = coinContractsFromUsdNotional(inputAmount, symbol, contractSizeUsd);
+      // 「以币计的订单金额」：与币安 COIN-M 一致——先按现价折成 USD 名义，再取整到张
+      effectiveQty = coinContractsFromUsdNotional(inputAmount * effectivePrice, symbol, contractSizeUsd);
       notionalValue = coinNotionalUsd(effectiveQty, contractSizeUsd);
       marginCoin = coinMarginAmount(effectiveQty, effectivePrice, leverage, contractSizeUsd);
       margin = marginCoin * effectivePrice;
@@ -228,12 +230,12 @@ export function OrderPanel({
     ? 'CONTRACTS'
     : usdtInputMode === 'INITIAL_MARGIN'
       ? 'COIN_MARGIN'
-      : 'USD_NOTIONAL';
+      : 'COIN_NOTIONAL';
   // 「保证金」模式下必须带上「保证金」三字：只写币名会与「数量」字段完全混淆，
   //  用户会把「5,000,000 RUNE 保证金」误读成「买 5,000,000 个 RUNE」。
   const unitLabel = currencyUnit === 'BASE'
     ? (isCoinMargined ? '张' : baseCoin)
-    : (isCoinMargined ? (usdtInputMode === 'ORDER_VALUE' ? 'USD' : `${baseCoin} 保证金`) : 'USDT');
+    : (isCoinMargined ? (usdtInputMode === 'ORDER_VALUE' ? baseCoin : `${baseCoin} 保证金`) : 'USDT');
   const maxNotionalUnit = isCoinMargined ? 'USD' : 'USDT';
   const marginDisplay = isCoinMargined
     ? `${formatCoinAmount(marginCoin, baseCoin)} ≈ ${formatUSDT(margin)} USD`
@@ -255,7 +257,9 @@ export function OrderPanel({
     if (currencyUnit === 'USDT') {
       if (isCoinMargined) {
         if (usdtInputMode === 'ORDER_VALUE') {
-          setQuantity((maxNotional * (p / 100)).toFixed(2));
+          // 币本位此档以币计价：把可开名义(USD)折成币数
+          const maxNotionalCoin = effectivePrice > 0 ? maxNotional / effectivePrice : 0;
+          setQuantity((maxNotionalCoin * (p / 100)).toFixed(6));
         } else {
           const maxMarginCoin = effectivePrice > 0 ? Math.max(0, available) / effectivePrice : 0;
           setQuantity((maxMarginCoin * (p / 100)).toFixed(6));
@@ -281,10 +285,13 @@ export function OrderPanel({
       setCurrencyUnit('BASE');
       setUsdtInputMode('ORDER_VALUE');
       setQuantity(hasExistingOrder ? String(roundCoinContracts(effectiveQty)) : '');
-    } else if (unit === 'USD_NOTIONAL') {
+    } else if (unit === 'COIN_NOTIONAL') {
       setCurrencyUnit('USDT');
       setUsdtInputMode('ORDER_VALUE');
-      setQuantity(hasExistingOrder ? coinNotionalUsd(effectiveQty, contractSizeUsd).toFixed(2) : '');
+      const coinNotional = effectivePrice > 0
+        ? coinNotionalUsd(effectiveQty, contractSizeUsd) / effectivePrice
+        : 0;
+      setQuantity(hasExistingOrder ? coinNotional.toFixed(6) : '');
     } else {
       setCurrencyUnit('USDT');
       setUsdtInputMode('INITIAL_MARGIN');
@@ -296,6 +303,61 @@ export function OrderPanel({
     setPercent(0);
     setShowCurrencySelector(false);
   };
+
+  /**
+   * 单位偏好卡片 —— 与币安同构：
+   *   卡片一 = 标的自身的计量单位（U 本位为币、币本位为张）；
+   *   卡片二 = 保证金资产，内含「订单金额 / 初始保证金」两个常驻子选项。
+   * 两种结算方式共用同一套结构，位置也一致（锚在数量框下方）。
+   */
+  const unitOptions = isCoinMargined
+    ? [
+        {
+          key: 'CONTRACTS',
+          label: '张',
+          desc: `输入并显示合约张数；1 张 = ${contractSizeUsd} USD 面值。`,
+          select: () => selectCoinInputUnit('CONTRACTS'),
+        },
+        {
+          key: 'COIN',
+          label: baseCoin,
+          desc: `输入并显示 ${baseCoin} 的订单金额。如需使用初始保证金下单，请选择「初始保证金」选项，并输入相应金额。`,
+          select: () => selectCoinInputUnit('COIN_NOTIONAL'),
+          subModes: [
+            { value: 'ORDER_VALUE' as UsdtInputMode, label: '订单金额', select: () => selectCoinInputUnit('COIN_NOTIONAL') },
+            { value: 'INITIAL_MARGIN' as UsdtInputMode, label: '初始保证金', select: () => selectCoinInputUnit('COIN_MARGIN') },
+          ],
+        },
+      ]
+    : [
+        {
+          key: 'BASE',
+          label: baseCoin,
+          desc: `输入并显示 ${baseCoin} 的订单金额。`,
+          select: () => { setCurrencyUnit('BASE'); setUsdtInputMode('ORDER_VALUE'); setQuantity(''); setPercent(0); setShowCurrencySelector(false); },
+        },
+        {
+          key: 'USDT',
+          label: 'USDT',
+          desc: '输入并显示 USDT 的订单金额。如需使用初始保证金下单，请选择「初始保证金」选项，并输入相应金额。',
+          select: () => { setCurrencyUnit('USDT'); setUsdtInputMode('ORDER_VALUE'); setQuantity(''); setPercent(0); setShowCurrencySelector(false); },
+          subModes: [
+            {
+              value: 'ORDER_VALUE' as UsdtInputMode,
+              label: '订单金额',
+              select: () => { setCurrencyUnit('USDT'); setUsdtInputMode('ORDER_VALUE'); setQuantity(''); setPercent(0); setShowCurrencySelector(false); },
+            },
+            {
+              value: 'INITIAL_MARGIN' as UsdtInputMode,
+              label: '初始保证金',
+              select: () => { setCurrencyUnit('USDT'); setUsdtInputMode('INITIAL_MARGIN'); setQuantity(''); setPercent(0); setShowCurrencySelector(false); },
+            },
+          ],
+        },
+      ];
+  const activeUnitKey = isCoinMargined
+    ? (coinInputUnit === 'CONTRACTS' ? 'CONTRACTS' : 'COIN')
+    : (currencyUnit === 'BASE' ? 'BASE' : 'USDT');
 
   // ===== Snapshot dialog state (intercepts every order placement) =====
   const [snapshotOpen, setSnapshotOpen] = useState(false);
@@ -575,12 +637,73 @@ export function OrderPanel({
             placeholder="0"
             className="flex-1 w-full min-w-0 bg-transparent text-right text-[13px] text-foreground font-mono tabular-nums outline-none placeholder:text-muted-foreground/60"
           />
-          <button
-            onClick={() => setShowCurrencySelector(true)}
-            className="ml-2 flex items-center gap-0.5 text-[11px] text-foreground/90 hover:text-foreground shrink-0"
-          >
-            {unitLabel} <ChevronDown className="w-3 h-3" />
-          </button>
+          <Popover open={showCurrencySelector} onOpenChange={setShowCurrencySelector}>
+            <PopoverTrigger asChild>
+              <button
+                data-testid="unit-preference-trigger"
+                className="ml-2 flex items-center gap-0.5 text-[11px] text-foreground/90 hover:text-foreground shrink-0"
+              >
+                {unitLabel} <ChevronDown className="w-3 h-3" />
+              </button>
+            </PopoverTrigger>
+            <PopoverContent
+              align="end"
+              side="bottom"
+              collisionPadding={12}
+              data-testid="unit-preference"
+              className="w-[320px] max-h-[var(--radix-popover-content-available-height)] overflow-y-auto overscroll-contain border-border bg-card p-3"
+            >
+              <div className="mb-2 text-[11px] font-medium text-muted-foreground">单位偏好</div>
+              <div className="space-y-2">
+                {unitOptions.map(option => {
+                  const active = option.key === activeUnitKey;
+                  return (
+                    <button
+                      key={option.key}
+                      type="button"
+                      data-testid={`unit-card-${option.key}`}
+                      aria-pressed={active}
+                      onClick={() => option.select()}
+                      className={`w-full rounded-md border px-3 py-2.5 text-left transition-colors ${
+                        active
+                          ? 'border-foreground/70 bg-secondary/40'
+                          : 'border-border hover:bg-secondary/30'
+                      }`}
+                    >
+                      <div className="text-sm font-medium text-foreground">{option.label}</div>
+                      <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground/80">{option.desc}</p>
+                      {option.subModes && (
+                        <div className="mt-2 flex gap-4">
+                          {option.subModes.map(sub => {
+                            const subActive = active && sub.value === usdtInputMode;
+                            return (
+                              <span
+                                key={sub.value}
+                                role="radio"
+                                aria-checked={subActive}
+                                data-testid={`unit-sub-${sub.value}`}
+                                onClick={event => { event.stopPropagation(); sub.select(); }}
+                                className="flex cursor-pointer items-center gap-1.5"
+                              >
+                                <span className={`flex h-3.5 w-3.5 items-center justify-center rounded-full border-2 ${
+                                  subActive ? 'border-primary' : 'border-muted-foreground/50'
+                                }`}>
+                                  {subActive && <span className="h-1.5 w-1.5 rounded-full bg-primary" />}
+                                </span>
+                                <span className={`text-xs ${subActive ? 'text-foreground' : 'text-muted-foreground'}`}>
+                                  {sub.label}
+                                </span>
+                              </span>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            </PopoverContent>
+          </Popover>
         </div>
 
         {/* Slider with 5 diamond anchors */}
@@ -765,94 +888,6 @@ export function OrderPanel({
         </div>
       </div>
 
-      {/* ===== Currency unit bottom sheet (kept) ===== */}
-      {showCurrencySelector && (
-        <BottomSheet title="货币单位" onClose={() => setShowCurrencySelector(false)}>
-          {isCoinMargined ? (
-            <div className="py-1">
-              {([
-                {
-                  value: 'USD_NOTIONAL' as CoinInputUnit,
-                  label: 'USD',
-                  desc: '按订单名义价值输入，系统自动换算为币本位合约张数。',
-                },
-                {
-                  value: 'CONTRACTS' as CoinInputUnit,
-                  label: '张',
-                  desc: `按合约张数输入；1 张 = ${contractSizeUsd} USD 面值。`,
-                },
-                {
-                  value: 'COIN_MARGIN' as CoinInputUnit,
-                  label: `${baseCoin} 保证金`,
-                  desc: `按 ${baseCoin} 初始保证金输入，系统按价格和杠杆换算张数。`,
-                },
-              ]).map((option, index) => (
-                <div key={option.value}>
-                  <button
-                    onClick={() => selectCoinInputUnit(option.value)}
-                    className="w-full text-left px-4 py-3 hover:bg-secondary transition-colors"
-                  >
-                    <div className="flex items-center justify-between">
-                      <span className="text-sm text-foreground font-medium">{option.label}</span>
-                      {coinInputUnit === option.value && <Check className="w-4 h-4 text-primary" />}
-                    </div>
-                    <p className="text-[11px] text-muted-foreground/80 mt-1">{option.desc}</p>
-                  </button>
-                  {index < 2 && <div className="border-t border-border" />}
-                </div>
-              ))}
-            </div>
-          ) : (
-            <>
-              <button
-                onClick={() => { setCurrencyUnit('BASE'); setShowCurrencySelector(false); }}
-                className="w-full text-left px-4 py-3 hover:bg-secondary transition-colors"
-              >
-                <div className="flex items-center justify-between">
-                  <span className="text-sm text-foreground font-medium">{baseCoin}</span>
-                  {currencyUnit === 'BASE' && <Check className="w-4 h-4 text-primary" />}
-                </div>
-                <p className="text-[11px] text-muted-foreground/80 mt-1">
-                  输入并显示以 {baseCoin} 表示的订单金额。
-                </p>
-              </button>
-              <div className="border-t border-border" />
-              <button
-                onClick={() => { setCurrencyUnit('USDT'); setShowCurrencySelector(false); }}
-                className="w-full text-left px-4 py-3 hover:bg-secondary transition-colors"
-              >
-                <div className="flex items-center justify-between">
-                  <span className="text-sm text-foreground font-medium">USDT</span>
-                  {currencyUnit === 'USDT' && <Check className="w-4 h-4 text-primary" />}
-                </div>
-                <p className="text-[11px] text-muted-foreground/80 mt-1">
-                  输入并显示以 USDT 表示的订单金额。
-                </p>
-                {currencyUnit === 'USDT' && (
-                  <div className="flex gap-3 mt-2 ml-1">
-                    {([
-                      { value: 'ORDER_VALUE' as UsdtInputMode, label: '订单金额' },
-                      { value: 'INITIAL_MARGIN' as UsdtInputMode, label: '初始保证金' },
-                    ]).map(m => (
-                      <label key={m.value} className="flex items-center gap-1.5 cursor-pointer">
-                        <span className={`w-3.5 h-3.5 rounded-full border-2 flex items-center justify-center ${
-                          usdtInputMode === m.value ? 'border-primary' : 'border-gray-500'
-                        }`}>
-                          {usdtInputMode === m.value && <span className="w-1.5 h-1.5 rounded-full bg-primary" />}
-                        </span>
-                        <span className={`text-xs ${usdtInputMode === m.value ? 'text-foreground' : 'text-muted-foreground'}`}>
-                          {m.label}
-                        </span>
-                      </label>
-                    ))}
-                  </div>
-                )}
-              </button>
-            </>
-          )}
-        </BottomSheet>
-      )}
-
       {/* ===== Pre-trade snapshot dialog (hard-gates every order placement) ===== */}
       <PreTradeSnapshotDialog
         isOpen={snapshotOpen}
@@ -894,20 +929,3 @@ export function OrderPanel({
 }
 
 // ===== Reusable: Bottom Sheet Overlay =====
-function BottomSheet({ title, children, onClose }: { title: string; children: React.ReactNode; onClose: () => void }) {
-  return (
-    <div className="fixed inset-0 z-[100] flex items-end justify-center" onClick={onClose}>
-      <div className="absolute inset-0 bg-black/60" />
-      <div
-        className="relative w-full max-w-sm rounded-t-xl border-t border-border overflow-hidden animate-in slide-in-from-bottom duration-200 bg-popover"
-        onClick={e => e.stopPropagation()}
-      >
-        <div className="flex items-center justify-between px-4 py-3 border-b border-border">
-          <h3 className="text-sm font-medium text-foreground">{title}</h3>
-          <button onClick={onClose} className="text-muted-foreground hover:text-foreground text-xs">✕</button>
-        </div>
-        <div className="max-h-[60vh] overflow-y-auto">{children}</div>
-      </div>
-    </div>
-  );
-}

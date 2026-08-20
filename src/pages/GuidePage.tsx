@@ -1830,7 +1830,7 @@ P 不再一把手填，而是拆成三个更可回答的问题：<strong>「这�
                 <tbody>
                   <tr>
                     <td className="px-3 py-2 border-t border-border font-medium">数量单位</td>
-                    <td className="px-3 py-2 border-t border-border">数量单位默认取<strong>该结算方式的原生单位</strong>：币本位 → <strong>张</strong>（1 张 = 固定 USD 面值，与币安 COIN-M 的 Cont 一致）；U 本位 → USDT 订单价值。换标的或切结算方式时会自动回到原生单位并清空输入。</td>
+                    <td className="px-3 py-2 border-t border-border">点数量框右侧的单位即弹出<strong>单位偏好</strong>浮层（贴着数量框，与币安同位置），两张卡片：<strong>卡片一</strong>是标的自身的计量单位（U 本位 → 币，币本位 → <strong>张</strong>，1 张 = 固定 USD 面值）；<strong>卡片二</strong>是保证金资产（U 本位 → USDT，币本位 → 该币），内含常驻的<strong>「订单金额 / 初始保证金」</strong>两个子选项。默认取该结算方式的原生单位——币本位默认「张」、U 本位默认 USDT 订单金额；换标的或切结算方式时自动回到原生单位并清空输入。</td>
                     <td className="px-3 py-2 border-t border-border">币本位下把数量默认成 USD 会让单位与标的脱节。另需留意：单位下拉里还有「<strong>◯◯ 保证金</strong>」一项，那是<strong>按保证金输入</strong>而非按数量——标签特意带上「保证金」三字，避免与数量混淆（在该模式下输入 500 万，意思是投入 500 万枚币作保证金，按杠杆放大后名义可达数千万）。</td>
                   </tr>
                   <tr>
