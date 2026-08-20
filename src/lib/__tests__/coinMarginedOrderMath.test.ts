@@ -74,8 +74,12 @@ describe('下单面板的单位口径', () => {
   const panel = () =>
     readFileSyncSafe('src/components/OrderPanel.tsx');
 
-  it('币本位默认用「张」，不再默认 USD/USDT', () => {
-    expect(panel()).toContain("useState<CurrencyUnit>(isCoinMargined ? 'BASE' : 'USDT')");
+  it('默认落在「保证金资产 · 订单金额」——币本位即该币的订单金额', () => {
+    const src = panel();
+    expect(src).toContain("useState<CurrencyUnit>('USDT')");
+    expect(src).toContain("useState<UsdtInputMode>('ORDER_VALUE')");
+    // 币本位下 currencyUnit='USDT' + ORDER_VALUE 派生为 COIN_NOTIONAL
+    expect(src).toContain(": 'COIN_NOTIONAL'");
   });
 
   it('以币计的保证金输入必须带「保证金」字样，不能只写币名', () => {

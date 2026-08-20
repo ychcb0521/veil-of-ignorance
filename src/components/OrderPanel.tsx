@@ -103,11 +103,12 @@ export function OrderPanel({
   // ===== Existing selectors / payload state =====
   const [priceSelection, setPriceSelection] = useState<PriceSelection>('LIMIT');
   const [triggerType, setTriggerType] = useState<TriggerType>('LAST');
-  // 数量单位默认取「该结算方式的原生单位」：
-  //   币本位 → 张（1 张 = contractSizeUsd USD 面值，与币安 COIN-M 的 Cont 一致）
-  //   U 本位 → USDT 订单价值
-  // 不再一律默认成 USD/USDT——那会让币本位下单时的数量单位与标的本身脱节。
-  const [currencyUnit, setCurrencyUnit] = useState<CurrencyUnit>(isCoinMargined ? 'BASE' : 'USDT');
+  // 数量单位默认落在「保证金资产 · 订单金额」这张卡：
+  //   币本位 → 该币的订单金额（如 BANANAS31）
+  //   U 本位 → USDT 订单金额
+  // 两种结算方式都以「订单金额」起手，量纲与该模式的保证金资产一致；
+  // 「张」与「初始保证金」留给需要时手动切换。
+  const [currencyUnit, setCurrencyUnit] = useState<CurrencyUnit>('USDT');
   const [usdtInputMode, setUsdtInputMode] = useState<UsdtInputMode>('ORDER_VALUE');
   const [tif, setTif] = useState<TimeInForce>('GTC');
 
@@ -143,7 +144,7 @@ export function OrderPanel({
   // 换标的或切结算方式时，数量单位回到该模式的原生单位并清空输入——
   // 否则「5,000,000」这种数字会带着上一个模式的语义留在框里，极易误读。
   useEffect(() => {
-    setCurrencyUnit(isCoinMargined ? 'BASE' : 'USDT');
+    setCurrencyUnit('USDT');
     setUsdtInputMode('ORDER_VALUE');
     setQuantity('');
     setPercent(0);
