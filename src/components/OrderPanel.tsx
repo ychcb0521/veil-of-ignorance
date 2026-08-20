@@ -102,7 +102,11 @@ export function OrderPanel({
   // ===== Existing selectors / payload state =====
   const [priceSelection, setPriceSelection] = useState<PriceSelection>('LIMIT');
   const [triggerType, setTriggerType] = useState<TriggerType>('LAST');
-  const [currencyUnit, setCurrencyUnit] = useState<CurrencyUnit>('USDT');
+  // 数量单位默认取「该结算方式的原生单位」：
+  //   币本位 → 张（1 张 = contractSizeUsd USD 面值，与币安 COIN-M 的 Cont 一致）
+  //   U 本位 → USDT 订单价值
+  // 不再一律默认成 USD/USDT——那会让币本位下单时的数量单位与标的本身脱节。
+  const [currencyUnit, setCurrencyUnit] = useState<CurrencyUnit>(isCoinMargined ? 'BASE' : 'USDT');
   const [usdtInputMode, setUsdtInputMode] = useState<UsdtInputMode>('ORDER_VALUE');
   const [tif, setTif] = useState<TimeInForce>('GTC');
 
@@ -134,6 +138,15 @@ export function OrderPanel({
   const [scaledCount] = useState('5');
   const [scaledStartPrice] = useState('');
   const [scaledEndPrice] = useState('');
+
+  // 换标的或切结算方式时，数量单位回到该模式的原生单位并清空输入——
+  // 否则「5,000,000」这种数字会带着上一个模式的语义留在框里，极易误读。
+  useEffect(() => {
+    setCurrencyUnit(isCoinMargined ? 'BASE' : 'USDT');
+    setUsdtInputMode('ORDER_VALUE');
+    setQuantity('');
+    setPercent(0);
+  }, [isCoinMargined, symbol]);
 
   // Sync priceSelection ↔ orderType
   useEffect(() => {
@@ -216,7 +229,11 @@ export function OrderPanel({
     : usdtInputMode === 'INITIAL_MARGIN'
       ? 'COIN_MARGIN'
       : 'USD_NOTIONAL';
-  const unitLabel = currencyUnit === 'BASE' ? (isCoinMargined ? '张' : baseCoin) : (isCoinMargined ? (usdtInputMode === 'ORDER_VALUE' ? 'USD' : baseCoin) : 'USDT');
+  // 「保证金」模式下必须带上「保证金」三字：只写币名会与「数量」字段完全混淆，
+  //  用户会把「5,000,000 RUNE 保证金」误读成「买 5,000,000 个 RUNE」。
+  const unitLabel = currencyUnit === 'BASE'
+    ? (isCoinMargined ? '张' : baseCoin)
+    : (isCoinMargined ? (usdtInputMode === 'ORDER_VALUE' ? 'USD' : `${baseCoin} 保证金`) : 'USDT');
   const maxNotionalUnit = isCoinMargined ? 'USD' : 'USDT';
   const marginDisplay = isCoinMargined
     ? `${formatCoinAmount(marginCoin, baseCoin)} ≈ ${formatUSDT(margin)} USD`
@@ -766,7 +783,7 @@ export function OrderPanel({
                 },
                 {
                   value: 'COIN_MARGIN' as CoinInputUnit,
-                  label: baseCoin,
+                  label: `${baseCoin} 保证金`,
                   desc: `按 ${baseCoin} 初始保证金输入，系统按价格和杠杆换算张数。`,
                 },
               ]).map((option, index) => (

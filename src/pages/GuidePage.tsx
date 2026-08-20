@@ -1829,6 +1829,11 @@ P 不再一把手填，而是拆成三个更可回答的问题：<strong>「这�
                 </thead>
                 <tbody>
                   <tr>
+                    <td className="px-3 py-2 border-t border-border font-medium">数量单位</td>
+                    <td className="px-3 py-2 border-t border-border">数量单位默认取<strong>该结算方式的原生单位</strong>：币本位 → <strong>张</strong>（1 张 = 固定 USD 面值，与币安 COIN-M 的 Cont 一致）；U 本位 → USDT 订单价值。换标的或切结算方式时会自动回到原生单位并清空输入。</td>
+                    <td className="px-3 py-2 border-t border-border">币本位下把数量默认成 USD 会让单位与标的脱节。另需留意：单位下拉里还有「<strong>◯◯ 保证金</strong>」一项，那是<strong>按保证金输入</strong>而非按数量——标签特意带上「保证金」三字，避免与数量混淆（在该模式下输入 500 万，意思是投入 500 万枚币作保证金，按杠杆放大后名义可达数千万）。</td>
+                  </tr>
+                  <tr>
                     <td className="px-3 py-2 border-t border-border font-medium">默认结算方式</td>
                     <td className="px-3 py-2 border-t border-border">新标的下单<strong>默认币本位</strong>；下单面板顶部那颗「U本位 / 币本位」标签可随时切换，一旦为某个标的选过，此后就记住你的选择。</td>
                     <td className="px-3 py-2 border-t border-border">本系统的主仓打法以币本位为主。<strong>已有的历史记录不受影响</strong>——缺少该字段的旧单子一律仍按 U 本位解读，否则等于事后改写过去交易的含义，连带污染战役的保证金、R 倍数与统计。</td>
