@@ -9,6 +9,7 @@ import { buildCampaignReverseOrderLegMap } from '@/lib/campaignReverseOrderAttri
 import { resolveMirrorTpOrderTiming } from '@/lib/campaignMirrorTpOrderTiming';
 import type { CampaignEvent, TradeJournal } from '@/types/journal';
 import { computeLegPnlContributions } from '@/lib/campaignLegPnl';
+import { legDeltaB, splitMainLegPhases, type MainLegPhase } from '@/lib/campaignLegPhases';
 import type { CampaignReverseHedgeOrder, TradeRecord } from '@/types/trading';
 
 interface Props {
@@ -21,6 +22,8 @@ interface Props {
   onToggleHighlight?: (leg: TradeJournal) => void;
   onHideReverseHedgeOrder?: (order: CampaignReverseHedgeOrder) => void;
   onDetach?: (leg: TradeJournal) => void;
+  /** 战役的初始最大预期亏损 L（USDT）；Δb 列 = 各腿盈亏 ÷ L。缺失时 Δb 显示「—」。 */
+  initialExpectedMaxLoss?: number | null;
 }
 
 function statusForLeg(leg: TradeJournal, record: TradeRecord | null) {
@@ -53,10 +56,10 @@ function fmtPrice(value: number | null | undefined): string {
  * 时间列用 minmax(200px, 1fr) 而不是裸 1fr：裸 1fr 在容器被压窄时会缩到
  * 放不下「操作 2026-08-21 11:03」，导致文字逐字竖排。
  */
-const LEGS_GRID = 'grid-cols-[44px_112px_minmax(200px,1fr)_100px_100px_104px_84px_60px_128px_226px_136px]';
+const LEGS_GRID = 'grid-cols-[44px_112px_minmax(200px,1fr)_100px_100px_104px_84px_60px_128px_84px_226px_136px]';
 
 /** 各列合计的下限，与 LEGS_GRID 对应；不足时容器横向滚动而不是压扁列。 */
-const LEGS_MIN_WIDTH = 'min-w-[1440px]';
+const LEGS_MIN_WIDTH = 'min-w-[1524px]';
 
 export function CampaignLegsList({
   legs,
@@ -68,6 +71,7 @@ export function CampaignLegsList({
   onToggleHighlight,
   onHideReverseHedgeOrder,
   onDetach,
+  initialExpectedMaxLoss = null,
 }: Props) {
   const nav = useNavigate();
   const recordMap = useMemo(() => buildTradeRecordLookup(tradeRecords), [tradeRecords]);
@@ -80,6 +84,50 @@ export function CampaignLegsList({
     ),
     [legs, recordMap],
   );
+  // 主力腿的阶段拆解：每一次滚动对冲的结束把主力切成一段。
+  // 边界价取对冲的平仓价（resolveLegExecution 同源，含平仓价校正）。
+  const mainPhasesMap = useMemo(() => {
+    const hedgeBoundaries = legs
+      .filter(l => l.order_kind === 'hedge' || (l.leg_role ?? '').startsWith('hedge_') || l.leg_role === 'reentry_hedge')
+      .map(l => {
+        const rec = l.trade_record_id ? recordMap.get(l.trade_record_id) ?? null : null;
+        const exec = resolveLegExecution(l, rec, legExitPriceCorrections);
+        return { legId: l.id, closeTime: exec.closeTime ?? null, closePrice: exec.exitPrice ?? null };
+      });
+    const map = new Map<string, MainLegPhase[]>();
+    for (const leg of legs) {
+      if (leg.leg_role !== 'main_open' && leg.leg_role !== 'reentry_main') continue;
+      const rec = leg.trade_record_id ? recordMap.get(leg.trade_record_id) ?? null : null;
+      const exec = resolveLegExecution(leg, rec, legExitPriceCorrections);
+      const pnl = (typeof rec?.pnl === 'number' && Number.isFinite(rec.pnl))
+        ? rec.pnl
+        : (typeof leg.post_realized_pnl === 'number' && Number.isFinite(leg.post_realized_pnl) ? leg.post_realized_pnl : null);
+      if (pnl == null || exec.entryPrice == null || exec.exitPrice == null) continue;
+      const phases = splitMainLegPhases({
+        pnl,
+        entryPrice: exec.entryPrice,
+        exitPrice: exec.exitPrice,
+        openTime: exec.openTime ?? null,
+        closeTime: exec.closeTime ?? null,
+        side: leg.direction === 'short' ? 'short' : 'long',
+        hedges: hedgeBoundaries,
+      });
+      // 只有真被切开（≥2 段）才展示子行；单段就是整腿自身，无需重复
+      if (phases.length >= 2) map.set(leg.id, phases);
+    }
+    return map;
+  }, [legs, recordMap, legExitPriceCorrections]);
+
+  // 贡献率分母（与 legPnlMap 同口径），供阶段子行使用：
+  // 阶段是主力贡献的细分，用同一分母，Σ阶段贡献 = 主力贡献，不双计。
+  const contributionDenominator = useMemo(() => {
+    let sum = 0;
+    for (const entry of legPnlMap.values()) {
+      if (entry.pnl != null) sum += Math.abs(entry.pnl);
+    }
+    return sum;
+  }, [legPnlMap]);
+
   const reverseOrderLegMap = useMemo(
     () => buildCampaignReverseOrderLegMap(legs, reverseHedgeOrders),
     [legs, reverseHedgeOrders],
@@ -99,6 +147,7 @@ export function CampaignLegsList({
             <div>状态</div>
             <div className="text-right">R̄</div>
             <div className="text-right">盈亏 / 贡献</div>
+            <div className="text-right" title="该腿盈亏 ÷ 初始最大预期亏损 L：这条腿把整场 b 推高 / 拉低了多少">Δb</div>
             <div>委托</div>
             <div className="text-right">操作</div>
           </div>
@@ -121,9 +170,10 @@ export function CampaignLegsList({
               const hedgeSummary = leg.order_kind === 'hedge' && leg.hedge_type
                 ? `${HEDGE_TYPE_LABELS[leg.hedge_type]}${leg.hedge_necessity_pct != null ? ` · ${leg.hedge_necessity_pct.toFixed(0)}%` : ''}`
                 : null;
+              const phases = mainPhasesMap.get(leg.id) ?? null;
               return (
+                <div key={leg.id}>
                 <div
-                  key={leg.id}
                   className={`grid ${LEGS_GRID} gap-x-3 items-start text-[11px] font-mono py-2.5 px-3 border-b border-border/40 hover:bg-accent transition-colors ${
                     highlighted ? 'bg-[#002FA7]/5 ring-1 ring-inset ring-[#002FA7]/12' : ''
                   }`}
@@ -175,6 +225,22 @@ export function CampaignLegsList({
                             ? '—'
                             : `${contribution > 0 ? '+' : ''}${(contribution * 100).toFixed(1)}%`}
                         </div>
+                      </div>
+                    );
+                  })()}
+                  {(() => {
+                    const pnl = legPnlMap.get(leg.id)?.pnl ?? null;
+                    const delta = legDeltaB(pnl, initialExpectedMaxLoss);
+                    if (delta == null) return <div className="text-right text-muted-foreground">—</div>;
+                    return (
+                      <div
+                        data-testid={`leg-delta-b-${leg.id}`}
+                        title="该腿盈亏 ÷ 初始最大预期亏损 L —— 这条腿把整场 b 推高 / 拉低了多少个单位"
+                        className={`text-right tabular-nums ${
+                          delta === 0 ? 'text-muted-foreground' : delta > 0 ? 'text-[#0ECB81]' : 'text-[#F6465D]'
+                        }`}
+                      >
+                        {delta > 0 ? '+' : ''}{delta.toFixed(2)}
                       </div>
                     );
                   })()}
@@ -276,6 +342,55 @@ export function CampaignLegsList({
                       </button>
                     )}
                   </div>
+                </div>
+
+                {/* 主力阶段拆解：每一次滚动对冲的结束 = 主力一个阶段的完成。
+                    子行缩进浅色呈现，Σ阶段盈亏 === 主力整腿盈亏（分摊守恒）。 */}
+                {phases && (
+                  <div data-testid={`leg-phases-${leg.id}`} className="border-b border-border/40 bg-muted/20">
+                    {phases.map(phase => {
+                      const phaseDelta = legDeltaB(phase.pnl, initialExpectedMaxLoss);
+                      const phaseContribution = contributionDenominator > 0 ? phase.pnl / contributionDenominator : null;
+                      const positive = phase.pnl > 0;
+                      return (
+                        <div
+                          key={phase.index}
+                          className={`grid ${LEGS_GRID} gap-x-3 items-center py-1 px-3 text-[10px] font-mono text-muted-foreground`}
+                        >
+                          <div />
+                          <div className="pl-3 font-sans text-[9px]">
+                            阶段 {phase.index}
+                            {phase.boundaryLegId == null && <span className="text-muted-foreground/60"> · 收尾</span>}
+                          </div>
+                          <div className="tabular-nums">
+                            {fmtClock(phase.startTime)} → {fmtClock(phase.endTime)}
+                            {phase.boundaryLegId != null && (
+                              <span className="ml-1 font-sans text-[9px] text-[#6D28D9]/80">对冲结束切段</span>
+                            )}
+                          </div>
+                          <div className="text-right tabular-nums">{fmtPrice(phase.startPrice)}</div>
+                          <div className="text-right tabular-nums">{fmtPrice(phase.endPrice)}</div>
+                          <div />
+                          <div />
+                          <div />
+                          <div className="text-right leading-tight">
+                            <div className={`tabular-nums ${phase.pnl === 0 ? '' : positive ? 'text-[#0ECB81]/90' : 'text-[#F6465D]/90'}`}>
+                              {positive ? '+' : ''}{phase.pnl.toFixed(2)}
+                            </div>
+                            <div className="text-[9px] tabular-nums text-muted-foreground/70">
+                              {phaseContribution == null ? '—' : `${phaseContribution > 0 ? '+' : ''}${(phaseContribution * 100).toFixed(1)}%`}
+                            </div>
+                          </div>
+                          <div className={`text-right tabular-nums ${phaseDelta == null ? '' : phaseDelta > 0 ? 'text-[#0ECB81]/90' : phaseDelta < 0 ? 'text-[#F6465D]/90' : ''}`}>
+                            {phaseDelta == null ? '—' : `${phaseDelta > 0 ? '+' : ''}${phaseDelta.toFixed(2)}`}
+                          </div>
+                          <div />
+                          <div />
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
                 </div>
               );
             })}

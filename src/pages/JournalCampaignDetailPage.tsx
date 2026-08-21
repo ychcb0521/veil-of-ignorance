@@ -1242,6 +1242,11 @@ export default function JournalCampaignDetailPage() {
     () => displayableReverseHedgeOrders.filter(order => !hiddenReverseOrderSet.has(order.id)),
     [displayableReverseHedgeOrders, hiddenReverseOrderSet],
   );
+  // Legs 表 Δb 列的分母：战役初始最大预期亏损 L
+  const legsInitialExpectedMaxLoss = useMemo(
+    () => (campaign ? computeInitialExpectedMaxLoss(campaign, legs, tradeRecords, reverseHedgeOrders) : null),
+    [campaign, legs, tradeRecords, reverseHedgeOrders],
+  );
   const hiddenReverseOrderCount = useMemo(
     () => displayableReverseHedgeOrders.filter(order => hiddenReverseOrderSet.has(order.id)).length,
     [displayableReverseHedgeOrders, hiddenReverseOrderSet],
@@ -1434,6 +1439,7 @@ export default function JournalCampaignDetailPage() {
       setLegsExporting(true);
       const fileName = await exportCampaignBoardPng({
         campaign,
+        initialExpectedMaxLoss: legsInitialExpectedMaxLoss,
         accountName: campaignAccountName,
         legs,
         tradeRecords,
@@ -1922,6 +1928,7 @@ export default function JournalCampaignDetailPage() {
             </div>
           </div>
           <CampaignLegsList
+            initialExpectedMaxLoss={legsInitialExpectedMaxLoss}
             legs={legs}
             tradeRecords={tradeRecords}
             campaignEvents={campaign.actual_evolution}

@@ -79,7 +79,7 @@ function input(): CampaignBoardExportInput {
 }
 
 /** 「委托」列在 COLUMNS 里的下标。插新列时只需改这里，不必逐处改数字。 */
-const ORDER_COL = 9;
+const ORDER_COL = 10;
 
 describe('campaign PNG overview', () => {
   it('完整包含战役原数据和盈亏概览字段', () => {

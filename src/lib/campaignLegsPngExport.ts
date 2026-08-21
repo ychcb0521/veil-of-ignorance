@@ -12,12 +12,15 @@ import { formatCampaignDisplayCode } from '@/lib/campaignCode';
 import { buildCampaignReverseOrderLegMap } from '@/lib/campaignReverseOrderAttribution';
 import { resolveMirrorTpOrderTiming } from '@/lib/campaignMirrorTpOrderTiming';
 import { computeLegPnlContributions } from '@/lib/campaignLegPnl';
+import { legDeltaB, splitMainLegPhases } from '@/lib/campaignLegPhases';
 import type { TradeCampaign, TradeJournal } from '@/types/journal';
 import type { EmotionDiaryExportSummary } from '@/types/emotionDiary';
 import type { CampaignReverseHedgeOrder, TradeRecord } from '@/types/trading';
 
 type ExportInput = {
   campaign: TradeCampaign;
+  /** Δb 列的分母：战役初始最大预期亏损 L。 */
+  initialExpectedMaxLoss?: number | null;
   accountName?: string | null;
   legs: TradeJournal[];
   tradeRecords: TradeRecord[];
@@ -76,6 +79,7 @@ const COLUMNS = [
   { title: '状态', width: 108 },
   { title: 'R̄', width: 82 },
   { title: '盈亏 / 贡献', width: 150 },
+  { title: 'Δb', width: 90 },
   { title: '委托', width: 470 },
 ] as const;
 
@@ -209,7 +213,18 @@ export function buildCampaignLegsExportRows(input: ExportInput): CampaignLegsExp
     leg => (leg.trade_record_id ? recordMap.get(leg.trade_record_id) ?? null : null),
   );
 
-  return input.legs.map(leg => {
+  // 主力阶段拆解（与页面同源）：滚动对冲的结束把主力切成阶段
+  const hedgeBoundaries = input.legs
+    .filter(l => l.order_kind === 'hedge' || (l.leg_role ?? '').startsWith('hedge_') || l.leg_role === 'reentry_hedge')
+    .map(l => {
+      const rec = l.trade_record_id ? recordMap.get(l.trade_record_id) ?? null : null;
+      const exec = resolveLegExecution(l, rec, input.legExitPriceCorrections);
+      return { legId: l.id, closeTime: exec.closeTime ?? null, closePrice: exec.exitPrice ?? null };
+    });
+  const contributionDenominator = [...legPnlMap.values()]
+    .reduce((sum, entry) => sum + (entry.pnl == null ? 0 : Math.abs(entry.pnl)), 0);
+
+  return input.legs.flatMap(leg => {
     const record = leg.trade_record_id ? recordMap.get(leg.trade_record_id) ?? null : null;
     const execution = resolveLegExecution(leg, record, input.legExitPriceCorrections);
     const status = statusForLeg(leg, record);
@@ -289,14 +304,73 @@ export function buildCampaignLegsExportRows(input: ExportInput): CampaignLegsExp
           },
         ];
       })(),
+      (() => {
+        const pnl = legPnlMap.get(leg.id)?.pnl ?? null;
+        const delta = legDeltaB(pnl, input.initialExpectedMaxLoss ?? null);
+        if (delta == null) return [{ text: '—', color: '#848E9C' }];
+        return [{
+          text: `${delta > 0 ? '+' : ''}${delta.toFixed(2)}`,
+          color: delta === 0 ? '#5F6B7A' : delta > 0 ? '#0ECB81' : '#F6465D',
+          bold: true,
+        }];
+      })(),
       reverseLines,
     ];
     const maxLines = Math.max(...cells.map(cell => cell.length));
-    return {
+    const mainRow = {
       legId: leg.id,
       cells,
       height: Math.max(58, ROW_PAD_Y * 2 + maxLines * LINE_H),
     };
+
+    // 主力行后追加阶段子行（≥2 段才有意义）
+    if (leg.leg_role !== 'main_open' && leg.leg_role !== 'reentry_main') return [mainRow];
+    const pnlForPhases = legPnlMap.get(leg.id)?.pnl ?? null;
+    if (pnlForPhases == null || entryPriceValue == null || exitPriceValue == null) return [mainRow];
+    const phases = splitMainLegPhases({
+      pnl: pnlForPhases,
+      entryPrice: entryPriceValue,
+      exitPrice: exitPriceValue,
+      openTime: execution.openTime ?? null,
+      closeTime: execution.closeTime ?? null,
+      side: leg.direction === 'short' ? 'short' : 'long',
+      hedges: hedgeBoundaries,
+    });
+    if (phases.length < 2) return [mainRow];
+    const phaseRows = phases.map(phase => {
+      const delta = legDeltaB(phase.pnl, input.initialExpectedMaxLoss ?? null);
+      const contribution = contributionDenominator > 0 ? phase.pnl / contributionDenominator : null;
+      return {
+        legId: `${leg.id}-phase-${phase.index}`,
+        cells: [
+          [{ text: '' }],
+          [{ text: `阶段 ${phase.index}${phase.boundaryLegId == null ? ' · 收尾' : ''}`, color: '#848E9C' }],
+          [{ text: `${fmtClock(phase.startTime)} → ${fmtClock(phase.endTime)}`, color: '#848E9C' }],
+          [{ text: fmtPrice(phase.startPrice), color: '#848E9C' }],
+          [{ text: fmtPrice(phase.endPrice), color: '#848E9C' }],
+          [{ text: '' }],
+          [{ text: '' }],
+          [{ text: '' }],
+          [
+            {
+              text: `${phase.pnl > 0 ? '+' : ''}${phase.pnl.toFixed(2)}`,
+              color: phase.pnl === 0 ? '#5F6B7A' : phase.pnl > 0 ? '#0ECB81' : '#F6465D',
+            },
+            {
+              text: contribution == null ? '—' : `${contribution > 0 ? '+' : ''}${(contribution * 100).toFixed(1)}%`,
+              color: '#848E9C',
+            },
+          ],
+          [{
+            text: delta == null ? '—' : `${delta > 0 ? '+' : ''}${delta.toFixed(2)}`,
+            color: delta == null || delta === 0 ? '#5F6B7A' : delta > 0 ? '#0ECB81' : '#F6465D',
+          }],
+          [{ text: '' }],
+        ],
+        height: Math.max(44, ROW_PAD_Y * 2 + 2 * LINE_H),
+      };
+    });
+    return [mainRow, ...phaseRows];
   });
 }
 
