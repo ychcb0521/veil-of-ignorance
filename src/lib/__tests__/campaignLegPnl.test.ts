@@ -7,8 +7,15 @@ const leg = (id: string, over: Partial<TradeJournal> = {}): TradeJournal =>
   ({ id, post_realized_pnl: null, ...over } as TradeJournal);
 const rec = (pnl: number): TradeRecord => ({ pnl } as TradeRecord);
 
+// 取值优先级（成交记录压过复盘快照）现在归 campaignRealizedPnl 管，
+// 这里只复刻同一条规则，好让本文件专注于「贡献率」这一层。
 const run = (legs: TradeJournal[], records: Record<string, TradeRecord | null> = {}) =>
-  computeLegPnlContributions(legs, l => records[l.id] ?? null);
+  computeLegPnlContributions(legs, l => {
+    const fromRecord = records[l.id]?.pnl;
+    if (typeof fromRecord === 'number' && Number.isFinite(fromRecord)) return fromRecord;
+    const fromLeg = l.post_realized_pnl;
+    return typeof fromLeg === 'number' && Number.isFinite(fromLeg) ? fromLeg : null;
+  });
 
 describe('computeLegPnlContributions', () => {
   it('成交记录优先于人工快照——事实压过回填', () => {

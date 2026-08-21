@@ -12,6 +12,7 @@ import { formatCampaignDisplayCode } from '@/lib/campaignCode';
 import { buildCampaignReverseOrderLegMap } from '@/lib/campaignReverseOrderAttribution';
 import { resolveMirrorTpOrderTiming } from '@/lib/campaignMirrorTpOrderTiming';
 import { computeLegPnlContributions } from '@/lib/campaignLegPnl';
+import { computeCampaignRealizedPnl } from '@/lib/campaignRealizedPnl';
 import { legDeltaB, splitMainLegPhases } from '@/lib/campaignLegPhases';
 import type { TradeCampaign, TradeJournal } from '@/types/journal';
 import type { EmotionDiaryExportSummary } from '@/types/emotionDiary';
@@ -207,9 +208,17 @@ export function buildCampaignLegsExportRows(input: ExportInput): CampaignLegsExp
     input.reverseHedgeOrders,
   );
 
+  // 与页面完全同源：导出图里的腿盈亏必须和界面上是同一个数，
+  // 否则导出的 PNG 会成为第五套口径。
+  const settlement = computeCampaignRealizedPnl(
+    input.campaign,
+    input.legs,
+    input.tradeRecords,
+    input.legExitPriceCorrections,
+  );
   const legPnlMap = computeLegPnlContributions(
     input.legs,
-    leg => (leg.trade_record_id ? recordMap.get(leg.trade_record_id) ?? null : null),
+    leg => settlement.byLeg.get(leg.id) ?? null,
   );
 
   // 主力阶段拆解（与页面同源）：滚动对冲的结束把主力切成阶段

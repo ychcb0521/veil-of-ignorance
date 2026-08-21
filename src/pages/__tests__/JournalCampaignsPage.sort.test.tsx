@@ -130,10 +130,10 @@ const reverseOrdersByCampaign = {
 };
 
 const tradeHistory: TradeRecord[] = [
-  makeRecord('high-importance-record', '2026-04-03T00:00:00.000Z', 1),
-  makeRecord('newest-record', '2026-01-10T00:00:00.000Z', 10),
-  makeRecord('best-pnl-record', '2026-03-02T00:00:00.000Z', 1_000),
-  makeRecord('late-close-record', '2026-02-01T00:00:00.000Z', 0.5),
+  makeRecord('high-importance-record', '2026-04-03T00:00:00.000Z', 1, 30),
+  makeRecord('newest-record', '2026-01-10T00:00:00.000Z', 10, 50),
+  makeRecord('best-pnl-record', '2026-03-02T00:00:00.000Z', 1_000, 1_000),
+  makeRecord('late-close-record', '2026-02-01T00:00:00.000Z', 0.5, -20),
 ];
 
 vi.mock('@/contexts/AuthContext', () => ({
@@ -167,7 +167,13 @@ vi.mock('@/lib/journalApi', () => ({
   updateCampaignImportance: vi.fn(async (_id: string, weight: number) => weight),
 }));
 
-function makeRecord(id: string, objectiveTime: string, quantity: number): TradeRecord {
+/**
+ * pnl 必须与所属战役的 final_realized_pnl 对得上。
+ * 这些 fixture 曾经把每条记录的 pnl 都写死成 10、而战役声称 30/50/1000/−20——
+ * 落库值本就是由 legs + records 推导出来的缓存，二者不一致在真实数据里不成立，
+ * 也让「缓存与重算谁优先」这个问题被 fixture 悄悄预设了答案。
+ */
+function makeRecord(id: string, objectiveTime: string, quantity: number, pnl = 10): TradeRecord {
   return {
     id,
     symbol: 'BTCUSDT',
@@ -178,7 +184,7 @@ function makeRecord(id: string, objectiveTime: string, quantity: number): TradeR
     exitPrice: 110,
     quantity,
     leverage: 1,
-    pnl: 10,
+    pnl,
     fee: 0,
     slippage: 0,
     openTime: Date.parse('2025-01-01T00:00:00.000Z'),

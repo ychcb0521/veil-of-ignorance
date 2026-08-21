@@ -13,6 +13,7 @@ import {
 import { getPositionNotionalUsd } from '@/lib/tradingSettlement';
 import { buildTradeRecordLookup } from '@/lib/objectiveOperationTime';
 import { isHistoricalCampaign, type CampaignEvent, type LegRole, type TradeCampaign, type TradeJournal } from '@/types/journal';
+import { computeCampaignRealizedPnl } from '@/lib/campaignRealizedPnl';
 import type { CampaignReverseHedgeOrder, PendingOrder, SettlementMode, TradeRecord } from '@/types/trading';
 import { pickPrimaryMainLeg } from '@/lib/campaignPrimaryMainLeg';
 
@@ -581,75 +582,21 @@ export function resolveCampaignInitialRiskFraction(
   };
 }
 
-function buildRealizedPnlByIdentity(
-  campaign: TradeCampaign,
-  legs: TradeJournal[],
-  tradeRecords: TradeRecord[],
-): Map<string, number> {
-  const recordMap = buildTradeRecordLookup(tradeRecords);
-  const pnlByIdentity = new Map<string, number>();
-
-  // Lowest-priority historical source first; later sources overwrite the same
-  // trade identity without adding it twice.
-  const legById = new Map(legs.map(leg => [leg.id, leg]));
-  for (const event of [...(campaign.actual_evolution ?? [])]
-    .sort((a, b) => toMs(a.timestamp) - toMs(b.timestamp))) {
-    if (!Number.isFinite(event.realized_pnl)) continue;
-    if (!event.leg_role && !event.trade_record_id && !event.journal_id) continue;
-    const linkedLeg = event.journal_id ? legById.get(event.journal_id) ?? null : null;
-    const recordReference = event.trade_record_id ?? linkedLeg?.trade_record_id;
-    const identity = recordReference
-      ? recordMap.get(recordReference)?.id ?? recordReference
-      : null;
-    pnlByIdentity.set(identity ? `record:${identity}` : `journal:${event.journal_id ?? event.id}`, Number(event.realized_pnl));
-  }
-
-  for (const leg of legs) {
-    const record = leg.trade_record_id ? recordMap.get(leg.trade_record_id) ?? null : null;
-    const pnl = leg.post_realized_pnl;
-    if (!Number.isFinite(pnl)) continue;
-    const identity = record?.id ?? leg.trade_record_id;
-    pnlByIdentity.set(identity ? `record:${identity}` : `journal:${leg.id}`, Number(pnl));
-  }
-  for (const record of tradeRecords) {
-    if (!Number.isFinite(record.pnl)) continue;
-    pnlByIdentity.set(`record:${record.id}`, Number(record.pnl));
-  }
-  return pnlByIdentity;
-}
-
-function computeRealizedPnl(
-  campaign: TradeCampaign,
-  legs: TradeJournal[],
-  tradeRecords: TradeRecord[],
-): number {
-  const campaignPnl = Number.isFinite(campaign.final_realized_pnl)
-    ? Number(campaign.final_realized_pnl)
-    : null;
-  const historical = isHistoricalCampaign(campaign);
-  if (campaignPnl != null && !historical) return campaignPnl;
-
-  const pnlByIdentity = buildRealizedPnlByIdentity(campaign, legs, tradeRecords);
-  if (pnlByIdentity.size > 0) {
-    return Array.from(pnlByIdentity.values()).reduce((sum, pnl) => sum + pnl, 0);
-  }
-  return campaignPnl ?? 0;
-}
-
 export function computeCampaignPnlReconciliation(
   campaign: TradeCampaign,
   legs: TradeJournal[],
   tradeRecords: TradeRecord[],
   exitPriceCorrections: LegExitPriceCorrections = {},
 ): CampaignPnlReconciliation {
-  const baselinePnl = computeRealizedPnl(campaign, legs, tradeRecords);
+  // 唯一真源：口径写死在 campaignRealizedPnl 里。baseline 与 corrected 都出自它，
+  // 差别只在要不要把平仓价校正叠进去，因此 correctedPnl ≡ Σ(该函数的 byLeg)。
+  const baseline = computeCampaignRealizedPnl(campaign, legs, tradeRecords);
+  const corrected = computeCampaignRealizedPnl(campaign, legs, tradeRecords, exitPriceCorrections);
+  const baselinePnl = baseline.total ?? 0;
   const officialCampaignPnl = Number.isFinite(campaign.final_realized_pnl)
     ? Number(campaign.final_realized_pnl)
     : null;
-  const pnlByIdentity = buildRealizedPnlByIdentity(campaign, legs, tradeRecords);
-  const officialLegPnl = pnlByIdentity.size > 0
-    ? Array.from(pnlByIdentity.values()).reduce((sum, pnl) => sum + pnl, 0)
-    : null;
+  const officialLegPnl = baseline.total;
   const recordLookup = buildTradeRecordLookup(tradeRecords);
   const correctedByRecordId = new Map<string, TradeRecordPnlCorrection>();
 
@@ -663,15 +610,17 @@ export function computeCampaignPnlReconciliation(
   }
 
   const correctedRecords = Array.from(correctedByRecordId.values());
-  const priceCorrectionDelta = correctedRecords.reduce((sum, item) => sum + item.pnlDelta, 0);
-  const correctedLegPnl = officialLegPnl == null ? null : officialLegPnl + priceCorrectionDelta;
+  // 校正总额由两次求和相减得出，而不是把 correctedRecords 的 delta 再加一遍——
+  // 后者会与模块内部「一条腿只叠一次校正」的规则脱钩，重新制造两套账。
+  const priceCorrectionDelta = (corrected.total ?? 0) - (baseline.total ?? 0);
+  const correctedLegPnl = corrected.total;
 
   return {
     officialCampaignPnl,
     officialLegPnl,
     correctedLegPnl,
     baselinePnl,
-    correctedPnl: baselinePnl + priceCorrectionDelta,
+    correctedPnl: corrected.total ?? 0,
     priceCorrectionDelta,
     officialVsLegDelta: officialCampaignPnl == null || officialLegPnl == null
       ? null

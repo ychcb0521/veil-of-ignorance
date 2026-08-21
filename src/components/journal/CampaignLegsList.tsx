@@ -8,7 +8,8 @@ import { buildTradeRecordLookup, journalOperationTime } from '@/lib/objectiveOpe
 import { buildCampaignReverseOrderLegMap } from '@/lib/campaignReverseOrderAttribution';
 import { resolveMirrorTpOrderTiming } from '@/lib/campaignMirrorTpOrderTiming';
 import type { CampaignEvent, TradeJournal } from '@/types/journal';
-import { computeLegPnlContributions } from '@/lib/campaignLegPnl';
+import { computeLegPnlContributions, sumLegPnl } from '@/lib/campaignLegPnl';
+import { computeCampaignRealizedPnl } from '@/lib/campaignRealizedPnl';
 import { legDeltaB, splitMainLegPhases, type MainLegPhase } from '@/lib/campaignLegPhases';
 import type { CampaignReverseHedgeOrder, TradeRecord } from '@/types/trading';
 
@@ -24,6 +25,16 @@ interface Props {
   onDetach?: (leg: TradeJournal) => void;
   /** 战役的初始最大预期亏损 L（USDT）；Δb 列 = 各腿盈亏 ÷ L。缺失时 Δb 显示「—」。 */
   initialExpectedMaxLoss?: number | null;
+}
+
+/** 盈亏取自哪一层数据。写在合计行旁边，让用户知道这个数有多硬。 */
+function settlementBasisLabel(basis: string): string {
+  if (basis === 'records') return '取自成交记录';
+  if (basis === 'mixed') return '成交记录 + 复盘快照';
+  if (basis === 'leg_snapshots') return '取自复盘快照';
+  if (basis === 'events') return '取自战役事件';
+  if (basis === 'campaign_summary') return '取自落库缓存';
+  return '未结算';
 }
 
 function statusForLeg(leg: TradeJournal, record: TradeRecord | null) {
@@ -77,12 +88,20 @@ export function CampaignLegsList({
   const recordMap = useMemo(() => buildTradeRecordLookup(tradeRecords), [tradeRecords]);
   const highlightedSet = useMemo(() => new Set(highlightedLegIds), [highlightedLegIds]);
   // 每条腿的已实现盈亏与对全场的贡献率。必须整体算——贡献率的分母依赖全部腿。
-  const legPnlMap = useMemo(
-    () => computeLegPnlContributions(
+  // 盈亏取值走全局唯一真源，Legs 表不再自己算一套——
+  // 曾经这里用「一条腿一条成交」而战役总额用「一个仓位的每一刀」，同一场战役于是两个数。
+  const settlement = useMemo(
+    () => computeCampaignRealizedPnl(
+      { final_realized_pnl: null, actual_evolution: campaignEvents },
       legs,
-      leg => (leg.trade_record_id ? recordMap.get(leg.trade_record_id) ?? null : null),
+      tradeRecords,
+      legExitPriceCorrections,
     ),
-    [legs, recordMap],
+    [campaignEvents, legs, tradeRecords, legExitPriceCorrections],
+  );
+  const legPnlMap = useMemo(
+    () => computeLegPnlContributions(legs, leg => settlement.byLeg.get(leg.id) ?? null),
+    [legs, settlement],
   );
   // 主力腿的阶段拆解：每一次滚动对冲的结束把主力切成一段。
   // 边界价取对冲的平仓价（resolveLegExecution 同源，含平仓价校正）。
@@ -99,9 +118,7 @@ export function CampaignLegsList({
       if (leg.leg_role !== 'main_open' && leg.leg_role !== 'reentry_main') continue;
       const rec = leg.trade_record_id ? recordMap.get(leg.trade_record_id) ?? null : null;
       const exec = resolveLegExecution(leg, rec, legExitPriceCorrections);
-      const pnl = (typeof rec?.pnl === 'number' && Number.isFinite(rec.pnl))
-        ? rec.pnl
-        : (typeof leg.post_realized_pnl === 'number' && Number.isFinite(leg.post_realized_pnl) ? leg.post_realized_pnl : null);
+      const pnl = settlement.byLeg.get(leg.id) ?? null;
       if (pnl == null || exec.entryPrice == null || exec.exitPrice == null) continue;
       const phases = splitMainLegPhases({
         pnl,
@@ -118,6 +135,11 @@ export function CampaignLegsList({
     return map;
   }, [legs, recordMap, legExitPriceCorrections]);
 
+  const totalPnl = useMemo(() => (settlement.total ?? null), [settlement]);
+  const totalDeltaB = useMemo(
+    () => (totalPnl == null ? null : legDeltaB(totalPnl, initialExpectedMaxLoss)),
+    [totalPnl, initialExpectedMaxLoss],
+  );
   // 贡献率分母（与 legPnlMap 同口径），供阶段子行使用：
   // 阶段是主力贡献的细分，用同一分母，Σ阶段贡献 = 主力贡献，不双计。
   const contributionDenominator = useMemo(() => {
@@ -391,6 +413,25 @@ export function CampaignLegsList({
                 </div>
               );
             })}
+            {/* 合计行：按构造恒等于盈亏概览的「已实现 P&L」。
+                历史上两处各算各的、谁也不显示合计，用户只能手加三个数才发现对不上；
+                把这一行画出来，界面本身就是一道持续生效的断言。 */}
+            <div
+              data-testid="legs-total-row"
+              className={`grid ${LEGS_GRID} items-center gap-x-3 border-t-2 border-border px-3 py-2 text-[11px] font-medium`}
+            >
+              <div />
+              <div className="text-muted-foreground">合计</div>
+              <div className="text-[10px] text-muted-foreground">{settlementBasisLabel(settlement.basis)}</div>
+              <div /><div /><div /><div />
+              <div className={`text-right tabular-nums ${totalPnl == null ? 'text-muted-foreground' : totalPnl > 0 ? 'text-[#0ECB81]' : totalPnl < 0 ? 'text-[#F6465D]' : ''}`}>
+                {totalPnl == null ? '—' : `${totalPnl > 0 ? '+' : ''}${totalPnl.toFixed(2)}`}
+              </div>
+              <div className={`text-right tabular-nums ${totalDeltaB == null ? 'text-muted-foreground' : totalDeltaB > 0 ? 'text-[#0ECB81]' : totalDeltaB < 0 ? 'text-[#F6465D]' : ''}`}>
+                {totalDeltaB == null ? '—' : `${totalDeltaB > 0 ? '+' : ''}${totalDeltaB.toFixed(2)}`}
+              </div>
+              <div /><div />
+            </div>
           </div>
         </div>
       </div>

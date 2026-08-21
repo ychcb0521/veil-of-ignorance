@@ -19,8 +19,8 @@ describe('Legs 表栅格', () => {
     // 除常量声明外，不得再出现写死的 grid-cols-[...]
     const inlineGrids = s.match(/grid-cols-\[/g) ?? [];
     expect(inlineGrids.length).toBe(1);
-    // 表头、数据行、主力阶段子行各引用一次
-    expect((s.match(/\$\{LEGS_GRID\}/g) ?? []).length).toBe(3);
+    // 表头、数据行、主力阶段子行、合计行各引用一次
+    expect((s.match(/\$\{LEGS_GRID\}/g) ?? []).length).toBe(4);
   });
 
   it('列定义的列数与表头单元格数一致', () => {
@@ -32,6 +32,14 @@ describe('Legs 表栅格', () => {
     for (const title of ['#', '角色', '时间', '开仓价', '平仓价', '仓位', '状态', '盈亏 / 贡献', 'Δb', '委托', '操作']) {
       expect(s).toContain(`>${title}</div>`);
     }
+  });
+
+  it('画出合计行——它按构造恒等于盈亏概览，是防止两套账再次分家的可视断言', () => {
+    const s = src();
+    expect(s).toContain('data-testid="legs-total-row"');
+    // 合计必须取自战役唯一真源，不能在组件里另起一套求和
+    expect(s).toContain('computeCampaignRealizedPnl');
+    expect(s).toContain('settlement.total');
   });
 
   it('时间列用 minmax 而非裸 1fr——裸 1fr 被压窄时会让文字逐字竖排', () => {

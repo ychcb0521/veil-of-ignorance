@@ -67,6 +67,7 @@ import type {
   CounterfactualBranchResult,
 } from "@/types/journal";
 import { isHistoricalCampaign, ruleCooldownRemainingMs } from "@/types/journal";
+import { campaignStatusFromRealizedPnl, computeCampaignRealizedPnl } from "@/lib/campaignRealizedPnl";
 import { queueSimStatePush } from '@/lib/simStateSync';
 import type {
   PendingOrder,
@@ -1582,16 +1583,22 @@ async function getJournalsByIds(journalIds: string[]): Promise<TradeJournal[]> {
   return wrap('读取交易日记', error, (data ?? []) as unknown as TradeJournal[]);
 }
 
+function getTradeRecordsForUser(userId: string): TradeRecord[] {
+  return readUserScopedStorage<TradeRecord[]>(userId, 'trade_history', []);
+}
+
 function getTradeRecordMapForUser(userId: string) {
-  const tradeHistory = readUserScopedStorage<TradeRecord[]>(userId, 'trade_history', []);
-  return buildTradeRecordLookup(tradeHistory);
+  return buildTradeRecordLookup(getTradeRecordsForUser(userId));
 }
 
 function deriveCampaignPatchFromLegs(
   currentCampaign: TradeCampaign,
   legs: TradeJournal[],
-  tradeRecordMap: Map<string, TradeRecord>,
+  tradeRecords: TradeRecord[],
 ): MutableCampaignPatch {
+  // 收数组而不是收折叠后的 map：一个仓位分几刀平掉时，map 只留最后一刀，
+  // 落库的 final_realized_pnl 会因此少计前面几刀，与界面对不上。
+  const tradeRecordMap = buildTradeRecordLookup(tradeRecords);
   if (legs.length === 0) {
     return {
       opened_at: currentCampaign.opened_at,
@@ -1608,10 +1615,10 @@ function deriveCampaignPatchFromLegs(
   const mainOpen = ordered.find(leg => leg.leg_role === 'main_open') ?? ordered.find(leg => leg.order_kind === 'main') ?? null;
   const openedAt = ordered[0]?.pre_simulated_time ?? currentCampaign.opened_at;
   const allHaveTradeRecord = ordered.every(leg => leg.trade_record_id != null);
-  const totalPnl = ordered.reduce((sum, leg) => {
-    const record = leg.trade_record_id ? tradeRecordMap.get(leg.trade_record_id) ?? null : null;
-    return sum + (leg.post_realized_pnl ?? record?.pnl ?? 0);
-  }, 0);
+  // 与盈亏概览、Legs 表同源。此前这里是 post_realized_pnl 优先、record 兜底，
+  // 而 Legs 表恰好相反，两处对同一条腿可能取到不同的数。
+  const settlement = computeCampaignRealizedPnl(currentCampaign, ordered, tradeRecords);
+  const totalPnl = settlement.total ?? 0;
   const totalPlannedMaxLoss = ordered.reduce((sum, leg) => sum + (leg.pre_max_loss_usdt ?? 0), 0);
   const closeTimes = ordered
     .map(leg => leg.trade_record_id ? tradeRecordMap.get(leg.trade_record_id)?.closeTime ?? null : null)
@@ -1620,11 +1627,10 @@ function deriveCampaignPatchFromLegs(
     ? toIso(Math.max(...closeTimes))
     : null;
 
+  // 状态与金额同源：「亏损结束」配一个绿色正数在构造上不再可能。
   let status: CampaignStatus = 'active';
-  if (ordered.some(leg => leg.trade_record_id == null)) {
-    status = 'active';
-  } else if (closedAt) {
-    status = totalPnl > 0 ? 'closed_profit' : totalPnl < 0 ? 'closed_loss' : 'closed_breakeven';
+  if (!ordered.some(leg => leg.trade_record_id == null)) {
+    status = campaignStatusFromRealizedPnl({ total: settlement.total, settled: Boolean(closedAt) }, closedAt);
   }
 
   return {
@@ -1658,8 +1664,7 @@ async function normalizeCampaignLegSequences(campaignId: string): Promise<void> 
 
 async function recomputeCampaignDerivedFields(campaignId: string): Promise<TradeCampaign> {
   const { campaign, legs } = await getCampaignWithLegs(campaignId);
-  const tradeRecordMap = getTradeRecordMapForUser(campaign.user_id);
-  const patch = deriveCampaignPatchFromLegs(campaign, legs, tradeRecordMap);
+  const patch = deriveCampaignPatchFromLegs(campaign, legs, getTradeRecordsForUser(campaign.user_id));
   const { data, error } = await supabase
     .from('trade_campaigns' as never)
     .update(patch as never)
@@ -1719,9 +1724,11 @@ async function syncTradeRecordCorrectionToCampaigns(record: TradeRecord, journal
 
   for (const campaignId of campaignIds) {
     const { campaign, legs } = await getCampaignWithLegs(campaignId);
-    const tradeRecordMap = getTradeRecordMapForUser(campaign.user_id);
-    tradeRecordMap.set(record.id, record);
-    const derived = deriveCampaignPatchFromLegs(campaign, legs, tradeRecordMap);
+    // 被修正的那条记录以修正后的版本参与重算（其余保持磁盘上的版本）
+    const userRecords = getTradeRecordsForUser(campaign.user_id)
+      .map(item => (item.id === record.id ? record : item));
+    if (!userRecords.some(item => item.id === record.id)) userRecords.push(record);
+    const derived = deriveCampaignPatchFromLegs(campaign, legs, userRecords);
     const actual_evolution = (campaign.actual_evolution ?? []).map(event => (
       campaignEventMatchesTradeRecord(event, record, journalIds)
         ? normalizeCampaignEventForTradeRecord(event, record)
@@ -1749,10 +1756,6 @@ async function syncTradeRecordCorrectionToCampaigns(record: TradeRecord, journal
   }
 }
 
-function hasCompleteTradeRecordsForCampaign(legs: TradeJournal[], tradeRecordMap: Map<string, TradeRecord>): boolean {
-  return legs.length > 0 && legs.every(leg => Boolean(leg.trade_record_id) && tradeRecordMap.has(leg.trade_record_id as string));
-}
-
 function campaignPatchChanged(campaign: TradeCampaign, patch: MutableCampaignPatch): boolean {
   const fields: Array<keyof MutableCampaignPatch> = [
     'opened_at',
@@ -1772,9 +1775,12 @@ async function healCampaignSummarySnapshots(
   legs: TradeJournal[],
   tradeRecords: TradeRecord[],
 ): Promise<TradeCampaign> {
-  const tradeRecordMap = buildTradeRecordLookup(tradeRecords);
-  if (!hasCompleteTradeRecordsForCampaign(legs, tradeRecordMap)) return campaign;
-  const patch = deriveCampaignPatchFromLegs(campaign, legs, tradeRecordMap);
+  // 门槛改用「每条腿都结算完毕」而不是「每条腿都能在 lookup 里查到成交记录」：
+  // 后者把「只有复盘快照、本地没有成交记录」的历史战役永久挡在自愈之外，
+  // 于是存量数据永远收敛不到新口径。落库值是缓存，能重算出来就该让它收敛。
+  const settlement = computeCampaignRealizedPnl(campaign, legs, tradeRecords);
+  if (!settlement.settled) return campaign;
+  const patch = deriveCampaignPatchFromLegs(campaign, legs, tradeRecords);
   if (!campaignPatchChanged(campaign, patch)) return campaign;
 
   const { data, error } = await supabase
@@ -3076,7 +3082,8 @@ export async function batchAttachToCampaign(
   const nextEvents: CampaignEvent[] = [...campaign.actual_evolution];
   const newLegs: TradeJournal[] = [];
   let journalCampaignColumnsUnavailable = false;
-  const tradeRecordMap = getTradeRecordMapForUser(campaign.user_id);
+  const tradeRecordsForUser = getTradeRecordsForUser(campaign.user_id);
+  const tradeRecordMap = buildTradeRecordLookup(tradeRecordsForUser);
 
   try {
     for (const assignment of assignments) {
@@ -3114,7 +3121,7 @@ export async function batchAttachToCampaign(
     }
 
     const patch = {
-      ...deriveCampaignPatchFromLegs(campaign, [...existingLegs, ...newLegs], tradeRecordMap),
+      ...deriveCampaignPatchFromLegs(campaign, [...existingLegs, ...newLegs], tradeRecordsForUser),
       actual_evolution: nextEvents,
     };
     const { error: campaignErr } = await supabase
@@ -3187,7 +3194,8 @@ export async function createCampaignFromJournals(input: {
   if (!userId) throw new Error('创建战役失败：用户未登录');
 
   const now = new Date().toISOString();
-  const tradeRecordMap = getTradeRecordMapForUser(userId);
+  const tradeRecordsForUser = getTradeRecordsForUser(userId);
+  const tradeRecordMap = buildTradeRecordLookup(tradeRecordsForUser);
   const draftLegs = orderedLegs.map(item => ({
     ...item.journal,
     leg_role: item.legRole,
@@ -3219,7 +3227,7 @@ export async function createCampaignFromJournals(input: {
     created_at: now,
     updated_at: now,
   } satisfies TradeCampaign;
-  const derivedPatch = deriveCampaignPatchFromLegs(draftCampaign, draftLegs, tradeRecordMap);
+  const derivedPatch = deriveCampaignPatchFromLegs(draftCampaign, draftLegs, tradeRecordsForUser);
   const payload = {
     user_id: userId,
     symbol: mainOpen.symbol,
@@ -3310,8 +3318,13 @@ export async function createCampaignFromTradeRecords(input: {
   const openedMs = Math.min(...ordered.map(item => tradeRecordTimeMs(item.record)));
   const closeTimes = ordered.map(item => item.record.closeTime || tradeRecordTimeMs(item.record)).filter(time => time > 0);
   const closedMs = closeTimes.length === ordered.length ? Math.max(...closeTimes) : null;
+  // 与重算战役走同一段代码：数值上等价（回填腿是精确 id 匹配），
+  // 但保证「建战役」和「事后重算」永远不会得出两个不同的数。
   const totalPnl = ordered.reduce((sum, item) => sum + (item.record.pnl || 0), 0);
-  const closedStatus: CampaignStatus = totalPnl > 0 ? 'closed_profit' : totalPnl < 0 ? 'closed_loss' : 'closed_breakeven';
+  const closedStatus = campaignStatusFromRealizedPnl(
+    { total: totalPnl, settled: closedMs != null },
+    toIso(closedMs),
+  );
   const openedAt = toIso(openedMs) ?? now;
   const closedAt = toIso(closedMs);
   const notes = input.notes?.trim() || null;

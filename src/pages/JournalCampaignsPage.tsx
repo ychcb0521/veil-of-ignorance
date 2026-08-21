@@ -47,6 +47,7 @@ import {
 } from '@/lib/campaignAnalysis';
 import { fetchLegExitPriceCorrections, type LegExitPriceCorrections } from '@/lib/campaignLegExecution';
 import type { CampaignInitialRiskSource } from '@/lib/campaignAnalysis';
+import { campaignStatusFromRealizedPnl, computeCampaignRealizedPnl } from '@/lib/campaignRealizedPnl';
 import {
   computeCampaignExpectancies,
   formatArithmeticExpectancy,
@@ -806,9 +807,18 @@ export default function JournalCampaignsPage() {
             details.tradeRecords,
             exitPriceCorrections,
           );
-          const reconciledCampaign = reconciliation.correctedRecords.length > 0
-            ? { ...details.campaign, final_realized_pnl: reconciliation.correctedPnl }
-            : details.campaign;
+          // 无条件同源。此前只有「存在平仓价校正」时才切换到重算口径，
+          // 于是同一场战役在列表页显示落库值、在详情页显示重算值——两个页面两个数。
+          const settlement = computeCampaignRealizedPnl(
+            details.campaign, details.legs, details.tradeRecords, exitPriceCorrections,
+          );
+          const reconciledCampaign = {
+            ...details.campaign,
+            final_realized_pnl: settlement.total ?? details.campaign.final_realized_pnl,
+            status: settlement.settled
+              ? campaignStatusFromRealizedPnl(settlement, details.campaign.closed_at)
+              : details.campaign.status,
+          };
           const initialExpectedMaxLoss = computeInitialExpectedMaxLoss(
             details.campaign,
             details.legs,
@@ -1232,9 +1242,18 @@ export default function JournalCampaignsPage() {
         details.tradeRecords,
         exitPriceCorrections,
       );
-      const reconciledCampaign = reconciliation.correctedRecords.length > 0
-        ? { ...details.campaign, final_realized_pnl: reconciliation.correctedPnl }
-        : details.campaign;
+      // 无条件同源。此前只有「存在平仓价校正」时才切换到重算口径，
+      // 于是同一场战役在列表页显示落库值、在详情页显示重算值——两个页面两个数。
+      const settlement = computeCampaignRealizedPnl(
+        details.campaign, details.legs, details.tradeRecords, exitPriceCorrections,
+      );
+      const reconciledCampaign = {
+        ...details.campaign,
+        final_realized_pnl: settlement.total ?? details.campaign.final_realized_pnl,
+        status: settlement.settled
+          ? campaignStatusFromRealizedPnl(settlement, details.campaign.closed_at)
+          : details.campaign.status,
+      };
       const initialExpectedMaxLoss = computeInitialExpectedMaxLoss(
         details.campaign,
         details.legs,
