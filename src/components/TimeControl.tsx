@@ -428,91 +428,18 @@ export function TimeControl({
 
       {/* 信号库折叠面板 */}
       {signalLibOpen && (
-        <div className="mt-3 border-t border-border/60 pt-3">
-          {/* 极简「上传 / 粘贴信号」+「导出」入口：默认近乎隐形，与列表融为一体 */}
-          <div className="flex items-center gap-3">
-            <button
-              onClick={() => setImportOpen(o => !o)}
-              title={importOpen ? '收起上传 / 粘贴信号' : '上传 / 粘贴信号'}
-              className={`flex items-center gap-1 text-[10px] transition-colors ${
-                importOpen ? 'text-primary' : 'text-muted-foreground/30 hover:text-muted-foreground'
-              }`}
-            >
-              <Upload className="h-3 w-3" />
-              <ChevronDown className={`h-2.5 w-2.5 transition-transform ${importOpen ? 'rotate-180' : ''}`} />
-            </button>
-            {signals.length > 0 && (
-              <button
-                onClick={handleExportSignals}
-                title="导出信号库为 txt（与导入互逆，可原样再导入）"
-                className="flex items-center text-[10px] text-muted-foreground/30 transition-colors hover:text-muted-foreground"
-              >
-                <Download className="h-3 w-3" />
-              </button>
-            )}
-            {signalAuditProgress && (
-              <span
-                className="ml-auto flex items-center gap-1 font-mono text-[9px] text-muted-foreground/60"
-                title="正在后台预检无法跳转的信号；不影响正常点击"
-                aria-live="polite"
-              >
-                <Loader2 className="h-2.5 w-2.5 animate-spin" />
-                预检 {signalAuditProgress.checked}/{signalAuditProgress.total}
-              </span>
-            )}
-          </div>
-
-          {importOpen && (
-          <div className="mt-2">
-          <div className="mb-1.5 text-[10px] text-muted-foreground">
-            上传 / 粘贴信号 · 支持「<span className="font-mono text-foreground">日期时间表头 + 多行标的</span>」或「<span className="font-mono text-foreground">标的, 时间, 兜底区</span>」· 时间按 UTC+8 · 标的自动补 USDT
-          </div>
-          <textarea
-            value={importText}
-            onChange={e => setImportText(e.target.value)}
-            rows={3}
-            spellCheck={false}
-            placeholder={'2026-04-29 18:27\nnaoris 0.107\nMoodeng 0.0608\n\n2026-04-28 21:00\ntac 谢林兜底区 0.0127'}
-            className="input-dark w-full resize-y font-mono text-[11px]"
-          />
-          <div className="mt-1.5 flex flex-wrap items-center gap-2">
-            <button onClick={handleImport} className="btn-long flex items-center gap-1 px-2 py-1 text-[10px] active:scale-[0.97]">
-              <Plus className="w-3 h-3" /> 导入
-            </button>
-            <button
-              onClick={() => fileRef.current?.click()}
-              className="flex items-center gap-1 rounded border border-border/60 px-2 py-1 text-[10px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-            >
-              <Upload className="w-3 h-3" /> 上传文件
-            </button>
-            <input ref={fileRef} type="file" accept=".csv,.txt,.tsv" className="hidden" onChange={handleFile} />
-            {signals.length > 0 && (
-              <button
-                onClick={handleClearSignals}
-                className="ml-auto flex items-center gap-1 rounded px-2 py-1 text-[10px] text-destructive transition-colors hover:bg-destructive/10"
-              >
-                <Trash2 className="w-3 h-3" /> 清空
-              </button>
-            )}
-          </div>
-
-          {importErrors.length > 0 && (
-            <div className="mt-1.5 space-y-0.5 text-[10px] text-destructive">
-              {importErrors.slice(0, 5).map((er, i) => <div key={i}>{er}</div>)}
-              {importErrors.length > 5 && <div>…等 {importErrors.length} 行未识别</div>}
-            </div>
-          )}
-          </div>
-          )}
-
-          <div className="mt-3">
-            <div className="mb-2 flex flex-wrap items-center gap-2">
+        <div data-testid="signal-library-panel" className="mt-2 border-t border-border/60 pt-2">
+          {/* 统一工具条：筛选 + 导入 / 导出 / 预检。
+              原先「只放两个 12px 图标」的独立一行已并入这里——横向本来就过剩，
+              纵向才是稀缺的，这是把过剩的横向兑换成纵向的一次交易。 */}
+          <div>
+            <div className="mb-1.5 flex flex-wrap items-center gap-1.5">
               {signals.length > 0 && (
                 <select
                   value={sortMode}
                   onChange={e => setSortMode(e.target.value as 'alpha' | 'time-desc' | 'time-asc')}
                   title="排序方式"
-                  className="input-dark shrink-0 text-[11px]"
+                  className="input-dark h-[22px] shrink-0 px-1.5 py-0.5 text-[11px]"
                 >
                   <option value="alpha">标的 A→Z</option>
                   <option value="time-desc">时间 新→旧</option>
@@ -524,7 +451,7 @@ export function TimeControl({
                   value={monthFilter}
                   onChange={e => setMonthFilter(e.target.value)}
                   title="按月份定位信号"
-                  className="input-dark shrink-0 font-mono text-[11px]"
+                  className="input-dark h-[22px] shrink-0 px-1.5 py-0.5 font-mono text-[11px]"
                 >
                   <option value="">全部月份（{signals.length}）</option>
                   {monthOptions.map(({ month, count }) => (
@@ -536,11 +463,83 @@ export function TimeControl({
                 value={query}
                 onChange={e => setQuery(e.target.value)}
                 placeholder="筛选标的…"
-                className="input-dark min-w-[7rem] flex-1 text-[11px]"
+                className="input-dark min-w-[7rem] flex-1 px-1.5 py-0.5 text-[11px] leading-4"
               />
+              <button
+                onClick={() => setImportOpen(o => !o)}
+                title={importOpen ? '收起上传 / 粘贴信号' : '上传 / 粘贴信号'}
+                className={`flex h-[22px] shrink-0 items-center gap-0.5 rounded px-1.5 transition-colors ${
+                  importOpen ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:bg-accent hover:text-foreground'
+                }`}
+              >
+                <Upload className="h-3 w-3" />
+                <ChevronDown className={`h-2.5 w-2.5 transition-transform ${importOpen ? 'rotate-180' : ''}`} />
+              </button>
+              {signals.length > 0 && (
+                <button
+                  onClick={handleExportSignals}
+                  title="导出信号库为 txt（与导入互逆，可原样再导入）"
+                  className="flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                >
+                  <Download className="h-3 w-3" />
+                </button>
+              )}
+              {signalAuditProgress && (
+                <span
+                  className="flex shrink-0 items-center gap-1 font-mono text-[10px] leading-4 text-muted-foreground/70"
+                  title="正在后台预检无法跳转的信号；不影响正常点击"
+                  aria-live="polite"
+                >
+                  <Loader2 className="h-2.5 w-2.5 animate-spin" />
+                  预检 {signalAuditProgress.checked}/{signalAuditProgress.total}
+                </span>
+              )}
             </div>
+          {importOpen && (
+            <div className="mb-1.5">
+            <div className="mb-1.5 text-[10px] text-muted-foreground">
+              上传 / 粘贴信号 · 支持「<span className="font-mono text-foreground">日期时间表头 + 多行标的</span>」或「<span className="font-mono text-foreground">标的, 时间, 兜底区</span>」· 时间按 UTC+8 · 标的自动补 USDT
+            </div>
+            <textarea
+              value={importText}
+              onChange={e => setImportText(e.target.value)}
+              rows={3}
+              spellCheck={false}
+              placeholder={'2026-04-29 18:27\nnaoris 0.107\nMoodeng 0.0608\n\n2026-04-28 21:00\ntac 谢林兜底区 0.0127'}
+              className="input-dark w-full resize-y font-mono text-[11px]"
+            />
+            <div className="mt-1.5 flex flex-wrap items-center gap-2">
+              <button onClick={handleImport} className="btn-long flex items-center gap-1 px-2 py-1 text-[10px] active:scale-[0.97]">
+                <Plus className="w-3 h-3" /> 导入
+              </button>
+              <button
+                onClick={() => fileRef.current?.click()}
+                className="flex items-center gap-1 rounded border border-border/60 px-2 py-1 text-[10px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+              >
+                <Upload className="w-3 h-3" /> 上传文件
+              </button>
+              <input ref={fileRef} type="file" accept=".csv,.txt,.tsv" className="hidden" onChange={handleFile} />
+              {signals.length > 0 && (
+                <button
+                  onClick={handleClearSignals}
+                  className="ml-auto flex items-center gap-1 rounded px-2 py-1 text-[10px] text-destructive transition-colors hover:bg-destructive/10"
+                >
+                  <Trash2 className="w-3 h-3" /> 清空
+                </button>
+              )}
+            </div>
+
+            {importErrors.length > 0 && (
+              <div className="mt-1.5 space-y-0.5 text-[10px] text-destructive">
+                {importErrors.slice(0, 5).map((er, i) => <div key={i}>{er}</div>)}
+                {importErrors.length > 5 && <div>…等 {importErrors.length} 行未识别</div>}
+              </div>
+            )}
+            </div>
+            )}
+
             {sortedFiltered.length === 0 ? (
-              <div className="rounded border border-dashed border-border/60 px-3 py-6 text-center text-[10px] text-muted-foreground">
+              <div className="rounded border border-dashed border-border/60 px-3 py-4 text-center text-[10px] text-muted-foreground">
                 {signals.length === 0
                   ? '还没有信号。上传或粘贴「标的 + 时间 + 兜底区」后，这里会列出（可按标的或时间排序），点开即可越过手动输入、直接跳转盘面。'
                   : '没有匹配的标的。'}
@@ -548,26 +547,26 @@ export function TimeControl({
             ) : (
               <div className="overflow-hidden rounded border border-border/60">
                 {/* 表头：与行共用同一套列宽，四列各有名分，不再靠位置猜 */}
-                <div className="grid grid-cols-[minmax(120px,168px)_128px_minmax(0,1fr)_auto] items-center gap-3 border-b border-border/60 bg-muted/40 px-2.5 py-1.5 pr-[68px] text-[9px] font-medium text-muted-foreground">
+                <div className="grid grid-cols-[minmax(108px,148px)_128px_minmax(0,1fr)_auto] items-center gap-2 border-b border-border/60 bg-muted/40 px-2 py-1 pr-[58px] text-[9px] leading-3 font-medium text-muted-foreground">
                   <span>标的</span>
                   <span>信号时间</span>
                   <span>兜底区</span>
                   <span className="w-5" aria-hidden />
                 </div>
-                <div className="max-h-56 divide-y divide-border/30 overflow-y-auto">
+                <div className="max-h-56 divide-y divide-border/30 overflow-y-auto overscroll-contain">
                 {sortedFiltered.map(sig => {
                   const hasDayCampaign = hasCampaignOnSignalDay(campaignDayIndex, sig);
                   return (
-                  <div key={sig.id} className="group flex items-center gap-2 px-2.5 py-[7px] transition-colors hover:bg-accent/60">
+                  <div key={sig.id} className="group flex items-stretch gap-1.5 px-2 py-0.5 transition-colors hover:bg-accent/60">
                     <button
                       onClick={() => handleJumpSignal(sig)}
                       disabled={jumpingSignalId != null}
-                      className="grid flex-1 grid-cols-[minmax(120px,168px)_128px_minmax(0,1fr)_auto] items-center gap-3 overflow-hidden text-left disabled:cursor-wait disabled:opacity-70"
+                      className="grid flex-1 grid-cols-[minmax(108px,148px)_128px_minmax(0,1fr)_auto] items-center gap-2 overflow-hidden text-left disabled:cursor-wait disabled:opacity-70"
                       title={sig.jumpIssue?.reason ?? `跳转到 ${sig.symbol} @ ${sig.timeLabel}`}
                     >
                       {/* 标的：勾号在前，名称可截断但列宽足够放下常见长度 */}
                       <span
-                        className="flex min-w-0 items-center gap-1 font-mono text-[11px] font-medium text-foreground"
+                        className="flex min-w-0 items-center gap-1 font-mono text-[11px] font-medium leading-4 text-foreground"
                         title={tradedSymbols.has(sig.symbol) ? '已交易过该标的' : undefined}
                       >
                         {tradedSymbols.has(sig.symbol) && (
@@ -577,7 +576,7 @@ export function TimeControl({
                       </span>
                       {/* 时间：定宽等宽字体，纵向严格成列 */}
                       <span className="flex items-center gap-1">
-                        <span className="font-mono text-[10px] tabular-nums text-muted-foreground">{sig.timeLabel}</span>
+                        <span className="font-mono text-[10px] leading-4 tabular-nums text-muted-foreground">{sig.timeLabel}</span>
                         {hasDayCampaign && (
                           // 低调标注：当日该标的已有战役。小圆点而非文字/勾号，
                           // 扫视时不抢注意力，需要时 hover 才给出说明。
@@ -590,27 +589,27 @@ export function TimeControl({
                         )}
                       </span>
                       {/* 兜底区：占据剩余宽度，长文本截断而不挤压他列 */}
-                      <span className="truncate text-[10px] text-[#F0B90B]/90">
+                      <span className="truncate text-[10px] leading-4 text-[#F0B90B]/90">
                         {sig.fallbackZone ? `兜底 ${sig.fallbackZone}` : ''}
                       </span>
                       {/* 不可跳转：收成一枚图标徽标，原因进 tooltip——
                           整行文字会把兜底区挤没，且它只在少数行出现 */}
                       {sig.jumpIssue ? (
                         <span
-                          className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-destructive/10 text-destructive"
+                          className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-destructive/10 text-destructive"
                           title={`不可跳转 · ${signalJumpIssueLabel(sig.jumpIssue.code)}｜${sig.jumpIssue.reason}`}
                           aria-label={`不可跳转：${signalJumpIssueLabel(sig.jumpIssue.code)}`}
                         >
                           <AlertTriangle className="h-3 w-3" />
                         </span>
                       ) : (
-                        <span className="h-5 w-5 shrink-0" aria-hidden />
+                        <span className="h-4 w-4 shrink-0" aria-hidden />
                       )}
                     </button>
                     <button
                       onClick={() => handleJumpSignal(sig)}
                       disabled={jumpingSignalId != null}
-                      className="shrink-0 text-primary transition-colors hover:text-primary/70 disabled:cursor-wait disabled:opacity-60"
+                      className="flex h-5 w-5 shrink-0 items-center justify-center text-primary transition-colors hover:text-primary/70 disabled:cursor-wait disabled:opacity-60"
                       title={sig.jumpIssue?.reason ?? '跳转盘面'}
                     >
                       {jumpingSignalId === sig.id
@@ -619,7 +618,7 @@ export function TimeControl({
                     </button>
                     <button
                       onClick={() => handleDeleteSignal(sig.id)}
-                      className="shrink-0 text-muted-foreground opacity-0 transition-opacity hover:text-destructive group-hover:opacity-100"
+                      className="flex h-5 w-5 shrink-0 items-center justify-center text-muted-foreground opacity-0 transition-opacity hover:text-destructive focus-visible:opacity-100 group-hover:opacity-100"
                       title="删除该信号"
                     >
                       <X className="w-3.5 h-3.5" />
