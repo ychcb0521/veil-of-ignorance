@@ -185,11 +185,6 @@ export function TimeControl({
     if (monthFilter) base = base.filter(s => signalMonthKey(s.timeMs) === monthFilter);
     return q ? base.filter(s => s.symbol.includes(q)) : base;
   }, [signals, query, monthFilter, sortMode]);
-  const unjumpableSignalCount = useMemo(
-    () => signals.reduce((count, signal) => count + (signal.jumpIssue ? 1 : 0), 0),
-    [signals],
-  );
-
   // 「被做过交易」的标的集合：已平仓记录(tradeHistory) ∪ 当前持仓(positionsMap)，
   // 大写归一以匹配 sig.symbol。开仓即标记、平仓后仍保留——用于在信号库里识别已交易标的。
   const tradedSymbols = useMemo(() => {
@@ -265,6 +260,8 @@ export function TimeControl({
   const handleJumpSignal = async (sig: TradeSignal) => {
     if (!onJumpToSignal) {
       onSymbolChange?.(sig.symbol);
+      // 选定标的即进入下一阶段，信号库没有继续停留的必要——与跳转成功后一致收起
+      setSignalLibOpen(false);
       return;
     }
     if (jumpingSignalId) return;
@@ -365,14 +362,6 @@ export function TimeControl({
           信号库
           {signals.length > 0 && (
             <span className="ml-0.5 rounded-full bg-primary/20 px-1.5 font-mono text-[9px] text-primary">{signals.length}</span>
-          )}
-          {unjumpableSignalCount > 0 && (
-            <span
-              className="rounded-full bg-destructive/10 px-1.5 font-mono text-[9px] text-destructive"
-              title={`${unjumpableSignalCount} 条信号已提前确认不可跳转`}
-            >
-              {unjumpableSignalCount} 不可跳转
-            </span>
           )}
           <ChevronDown className={`w-3 h-3 transition-transform ${signalLibOpen ? 'rotate-180' : ''}`} />
         </button>
@@ -557,19 +546,28 @@ export function TimeControl({
                   : '没有匹配的标的。'}
               </div>
             ) : (
-              <div className="max-h-56 divide-y divide-border/40 overflow-y-auto rounded border border-border/60">
+              <div className="overflow-hidden rounded border border-border/60">
+                {/* 表头：与行共用同一套列宽，四列各有名分，不再靠位置猜 */}
+                <div className="grid grid-cols-[minmax(120px,168px)_128px_minmax(0,1fr)_auto] items-center gap-3 border-b border-border/60 bg-muted/40 px-2.5 py-1.5 pr-[68px] text-[9px] font-medium text-muted-foreground">
+                  <span>标的</span>
+                  <span>信号时间</span>
+                  <span>兜底区</span>
+                  <span className="w-5" aria-hidden />
+                </div>
+                <div className="max-h-56 divide-y divide-border/30 overflow-y-auto">
                 {sortedFiltered.map(sig => {
                   const hasDayCampaign = hasCampaignOnSignalDay(campaignDayIndex, sig);
                   return (
-                  <div key={sig.id} className="group flex items-center gap-2 px-2.5 py-1.5 hover:bg-accent/60">
+                  <div key={sig.id} className="group flex items-center gap-2 px-2.5 py-[7px] transition-colors hover:bg-accent/60">
                     <button
                       onClick={() => handleJumpSignal(sig)}
                       disabled={jumpingSignalId != null}
-                      className="flex flex-1 items-center gap-2 overflow-hidden text-left disabled:cursor-wait disabled:opacity-70"
+                      className="grid flex-1 grid-cols-[minmax(120px,168px)_128px_minmax(0,1fr)_auto] items-center gap-3 overflow-hidden text-left disabled:cursor-wait disabled:opacity-70"
                       title={sig.jumpIssue?.reason ?? `跳转到 ${sig.symbol} @ ${sig.timeLabel}`}
                     >
+                      {/* 标的：勾号在前，名称可截断但列宽足够放下常见长度 */}
                       <span
-                        className="flex w-24 shrink-0 items-center gap-1 font-mono text-[11px] font-medium text-foreground"
+                        className="flex min-w-0 items-center gap-1 font-mono text-[11px] font-medium text-foreground"
                         title={tradedSymbols.has(sig.symbol) ? '已交易过该标的' : undefined}
                       >
                         {tradedSymbols.has(sig.symbol) && (
@@ -577,10 +575,11 @@ export function TimeControl({
                         )}
                         <span className="truncate">{sig.symbol}</span>
                       </span>
-                      <span className="flex shrink-0 items-center gap-1">
-                        <span className="font-mono text-[10px] text-muted-foreground">{sig.timeLabel}</span>
+                      {/* 时间：定宽等宽字体，纵向严格成列 */}
+                      <span className="flex items-center gap-1">
+                        <span className="font-mono text-[10px] tabular-nums text-muted-foreground">{sig.timeLabel}</span>
                         {hasDayCampaign && (
-                          // 低调标注：当日该标的已有战役。用一个小圆点而非文字/勾号，
+                          // 低调标注：当日该标的已有战役。小圆点而非文字/勾号，
                           // 扫视时不抢注意力，需要时 hover 才给出说明。
                           <span
                             data-testid="signal-day-campaign"
@@ -590,17 +589,22 @@ export function TimeControl({
                           />
                         )}
                       </span>
-                      {sig.fallbackZone && (
-                        <span className="truncate text-[10px] text-[#F0B90B]/90">兜底 {sig.fallbackZone}</span>
-                      )}
-                      {sig.jumpIssue && (
+                      {/* 兜底区：占据剩余宽度，长文本截断而不挤压他列 */}
+                      <span className="truncate text-[10px] text-[#F0B90B]/90">
+                        {sig.fallbackZone ? `兜底 ${sig.fallbackZone}` : ''}
+                      </span>
+                      {/* 不可跳转：收成一枚图标徽标，原因进 tooltip——
+                          整行文字会把兜底区挤没，且它只在少数行出现 */}
+                      {sig.jumpIssue ? (
                         <span
-                          className="ml-auto flex shrink-0 items-center gap-1 text-[9px] font-medium text-destructive"
-                          title={sig.jumpIssue.reason}
+                          className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-destructive/10 text-destructive"
+                          title={`不可跳转 · ${signalJumpIssueLabel(sig.jumpIssue.code)}｜${sig.jumpIssue.reason}`}
+                          aria-label={`不可跳转：${signalJumpIssueLabel(sig.jumpIssue.code)}`}
                         >
                           <AlertTriangle className="h-3 w-3" />
-                          不可跳转 · {signalJumpIssueLabel(sig.jumpIssue.code)}
                         </span>
+                      ) : (
+                        <span className="h-5 w-5 shrink-0" aria-hidden />
                       )}
                     </button>
                     <button
@@ -623,6 +627,7 @@ export function TimeControl({
                   </div>
                   );
                 })}
+                </div>
               </div>
             )}
           </div>
