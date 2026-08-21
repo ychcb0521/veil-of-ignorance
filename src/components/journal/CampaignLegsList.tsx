@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Crosshair, ExternalLink, EyeOff } from 'lucide-react';
+import { Crosshair, ExternalLink, EyeOff, Unlink } from 'lucide-react';
 import { LegRoleChip } from '@/components/journal/LegRoleChip';
 import { resolveLegExecution, type LegExitPriceCorrections } from '@/lib/campaignLegExecution';
 import { HEDGE_TYPE_LABELS } from '@/lib/hedgeTypes';
@@ -44,6 +44,20 @@ function fmtPrice(value: number | null | undefined): string {
   return value.toPrecision(6);
 }
 
+/**
+ * Legs 表的列宽 —— 表头与数据行共用同一个常量。
+ *
+ * 这里曾经把表头和行各写一份，加列时只改了表头，行少一列，
+ * 最后一列「操作」被挤进隐式新行、整张表错位。共用一份后物理上不可能再失配。
+ *
+ * 时间列用 minmax(200px, 1fr) 而不是裸 1fr：裸 1fr 在容器被压窄时会缩到
+ * 放不下「操作 2026-08-21 11:03」，导致文字逐字竖排。
+ */
+const LEGS_GRID = 'grid-cols-[44px_112px_minmax(200px,1fr)_100px_100px_104px_84px_60px_128px_226px_136px]';
+
+/** 各列合计的下限，与 LEGS_GRID 对应；不足时容器横向滚动而不是压扁列。 */
+const LEGS_MIN_WIDTH = 'min-w-[1440px]';
+
 export function CampaignLegsList({
   legs,
   tradeRecords,
@@ -74,19 +88,19 @@ export function CampaignLegsList({
   return (
     <div className="bg-card border border-border rounded overflow-hidden">
       <div className="overflow-x-auto">
-        <div className="min-w-[1320px]">
-          <div className="grid grid-cols-[48px_120px_1fr_96px_96px_92px_88px_72px_132px_210px_230px] text-[10px] text-muted-foreground bg-muted/40 py-2 px-3">
+        <div className={LEGS_MIN_WIDTH}>
+          <div className={`grid ${LEGS_GRID} gap-x-3 text-[10px] font-medium text-muted-foreground bg-muted/40 py-2 px-3`}>
             <div>#</div>
             <div>角色</div>
             <div>时间</div>
-            <div>开仓价</div>
-            <div>平仓价</div>
-            <div>仓位</div>
+            <div className="text-right">开仓价</div>
+            <div className="text-right">平仓价</div>
+            <div className="text-right">仓位</div>
             <div>状态</div>
-            <div>R̄</div>
-            <div>盈亏 / 贡献</div>
+            <div className="text-right">R̄</div>
+            <div className="text-right">盈亏 / 贡献</div>
             <div>委托</div>
-            <div>操作</div>
+            <div className="text-right">操作</div>
           </div>
           <div className="max-h-[380px] overflow-y-auto">
             {legs.map(leg => {
@@ -110,7 +124,7 @@ export function CampaignLegsList({
               return (
                 <div
                   key={leg.id}
-                  className={`grid grid-cols-[48px_120px_1fr_96px_96px_92px_88px_72px_210px_230px] items-center text-[11px] font-mono py-2 px-3 border-b border-border/40 hover:bg-accent ${
+                  className={`grid ${LEGS_GRID} gap-x-3 items-start text-[11px] font-mono py-2.5 px-3 border-b border-border/40 hover:bg-accent transition-colors ${
                     highlighted ? 'bg-[#002FA7]/5 ring-1 ring-inset ring-[#002FA7]/12' : ''
                   }`}
                 >
@@ -129,17 +143,17 @@ export function CampaignLegsList({
                     <div><span className="text-muted-foreground">操作 </span>{operationLabel}</div>
                     {hedgeSummary && <div className="text-[10px] text-[#F0B90B]">{hedgeSummary}</div>}
                   </div>
-                  <div>{fmtPrice(entryPriceValue)}</div>
-                  <div title={exitCorrectionTitle}>{fmtPrice(exitPriceValue)}</div>
-                  <div>{leg.pre_position_size != null ? leg.pre_position_size.toFixed(2) : '—'}</div>
+                  <div className="text-right tabular-nums">{fmtPrice(entryPriceValue)}</div>
+                  <div className="text-right tabular-nums" title={exitCorrectionTitle}>{fmtPrice(exitPriceValue)}</div>
+                  <div className="text-right tabular-nums">{leg.pre_position_size != null ? leg.pre_position_size.toFixed(2) : '—'}</div>
                   <div className={status.className}>{status.label}</div>
-                  <div>{leg.post_r_multiple != null ? leg.post_r_multiple.toFixed(2) : '—'}</div>
+                  <div className="text-right tabular-nums">{leg.post_r_multiple != null ? leg.post_r_multiple.toFixed(2) : '—'}</div>
                   {(() => {
                     const entry = legPnlMap.get(leg.id);
                     const pnl = entry?.pnl ?? null;
                     if (pnl == null) {
                       // 未平仓 / 无数据：显示「—」而不是 0——0 会被读成「打平」
-                      return <div className="text-muted-foreground">—</div>;
+                      return <div className="text-right text-muted-foreground">—</div>;
                     }
                     const positive = pnl > 0;
                     const contribution = entry?.contribution ?? null;
@@ -147,7 +161,7 @@ export function CampaignLegsList({
                       <div
                         data-testid={`leg-pnl-${leg.id}`}
                         title="该腿的已实现盈亏，以及它在本场各腿盈亏绝对值之和里所占的份额"
-                        className="leading-tight"
+                        className="text-right leading-tight"
                       >
                         <div
                           className={`font-mono tabular-nums ${
@@ -156,7 +170,7 @@ export function CampaignLegsList({
                         >
                           {positive ? '+' : ''}{pnl.toFixed(2)}
                         </div>
-                        <div className="text-[9px] text-muted-foreground">
+                        <div className="text-[9px] tabular-nums text-muted-foreground">
                           {contribution == null
                             ? '—'
                             : `${contribution > 0 ? '+' : ''}${(contribution * 100).toFixed(1)}%`}
@@ -164,7 +178,9 @@ export function CampaignLegsList({
                       </div>
                     );
                   })()}
-                  <div className="space-y-1 pr-2 font-sans">
+                  {/* 委托列：多条卡片会把行撑得很高。限高 + 内部滚动，
+                      让各行高度趋于一致，同时一条委托都不丢。 */}
+                  <div className="max-h-[132px] space-y-1 overflow-y-auto pr-1 font-sans">
                     {mirrorTpTiming && (
                       <div className="rounded border border-[#F0B90B]/25 bg-[#F0B90B]/5 px-2 py-1 leading-tight">
                         <div className="text-[10px] font-medium text-[#D89B00]">镜像止盈</div>
@@ -219,37 +235,44 @@ export function CampaignLegsList({
                       ))
                     )}
                   </div>
-                  <div className="flex items-center gap-3">
+                  {/* 操作列：等宽图标按钮，文字进 tooltip。
+                      三个中文按钮横排放不进窄列，会逐字竖排并把整行撑歪。 */}
+                  <div className="flex items-center justify-end gap-0.5 font-sans">
                     {onToggleHighlight && (
                       <button
                         type="button"
                         onClick={() => onToggleHighlight(leg)}
-                        className={`inline-flex items-center gap-1 rounded px-2 py-1 text-[10px] transition-colors ${
+                        title={highlighted ? '已标注到盘面，点击取消' : '标到盘面'}
+                        aria-label={highlighted ? '取消盘面标注' : '标到盘面'}
+                        aria-pressed={highlighted}
+                        className={`inline-flex h-6 w-6 shrink-0 items-center justify-center rounded transition-colors ${
                           highlighted
                             ? 'bg-[#002FA7]/10 text-[#002FA7] hover:bg-[#002FA7]/15'
                             : 'text-muted-foreground hover:bg-muted hover:text-foreground'
                         }`}
                       >
-                        <Crosshair className="w-3 h-3" />
-                        {highlighted ? '已标注' : '标到盘面'}
+                        <Crosshair className="w-3.5 h-3.5" />
                       </button>
                     )}
                     <button
                       type="button"
                       disabled={!leg.id}
                       onClick={() => nav(`/journal/${leg.id}`)}
-                      className="inline-flex items-center gap-1 text-[10px] text-muted-foreground hover:text-foreground disabled:opacity-40"
+                      title="查看复盘"
+                      aria-label="查看复盘"
+                      className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-40"
                     >
-                      <ExternalLink className="w-3 h-3" />
-                      查看复盘
+                      <ExternalLink className="w-3.5 h-3.5" />
                     </button>
                     {onDetach && (
                       <button
                         type="button"
                         onClick={() => onDetach(leg)}
-                        className="text-[10px] text-muted-foreground hover:text-[#F6465D]"
+                        title="从本战役解除该腿"
+                        aria-label="解除"
+                        className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-muted hover:text-[#F6465D]"
                       >
-                        解除
+                        <Unlink className="w-3.5 h-3.5" />
                       </button>
                     )}
                   </div>
