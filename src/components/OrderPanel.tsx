@@ -1,7 +1,14 @@
 import { useState, useRef, useEffect, useMemo } from 'react';
 import type { OrderSide, OrderType } from '@/types/trading';
 import { ORDER_TYPE_INFO, getMaxLeverageForNotional, getLeverageTierInfo, MAINTENANCE_MARGIN_RATE, calcUnrealizedPnl } from '@/types/trading';
-import { ChevronDown, Check, AlertTriangle, Crosshair, ArrowLeftRight, Calculator, Gauge, Info } from 'lucide-react';
+import { ChevronDown, Check, AlertTriangle, Crosshair, ArrowLeftRight, Calculator, Gauge, Info, MoreHorizontal } from 'lucide-react';
+import { TradingPreferencesDrawer } from '@/components/TradingPreferencesDrawer';
+import { usePersistedState } from '@/hooks/usePersistedState';
+import {
+  DEFAULT_TRADING_PREFERENCES,
+  clampPrefLeverage,
+  type TradingPreferences,
+} from '@/lib/tradingPreferences';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import type { PlaceOrderParams } from '@/contexts/TradingContext';
 import { useTradingContext } from '@/contexts/TradingContext';
@@ -142,6 +149,12 @@ export function OrderPanel({
   const [tpTrigger, setTpTrigger] = useState('');
   const [slTrigger, setSlTrigger] = useState('');
 
+  // 交易偏好（币安右上角 ⋯ 抽屉）。走 usePersistedState，自动纳入账号云端存档。
+  const [tradingPrefs, setTradingPrefs] = usePersistedState<TradingPreferences>(
+    'trading_preferences_v1', DEFAULT_TRADING_PREFERENCES,
+  );
+  const [prefsOpen, setPrefsOpen] = useState(false);
+
   // 高级类型槽：第三常驻位显示当前选中的高级类型（币安式），默认条件委托
   const [advancedType, setAdvancedType] = useState<OrderType>('CONDITIONAL');
   // 各高级类型的参数（可编辑）
@@ -156,6 +169,17 @@ export function OrderPanel({
   const [scaledEndPrice, setScaledEndPrice] = useState('');
   // TWAP 切片间隔自动推导：总时长均分约 20 片、每片不短于 1 分钟（不再暴露给用户）
   const twapInterval = String(Math.max(1, Math.round((parseFloat(twapDuration) || 60) / 20)));
+
+  // 应用默认杠杆：仅当开关开启、该标的从未显式设置过杠杆、且当前既无持仓也无挂单时。
+  // 与币安一致——已有仓位/挂单的币对不得在背后改动风险参数。
+  useEffect(() => {
+    if (!tradingPrefs.useDefaultLeverage) return;
+    if (ctx.leverageMap[symbol] != null) return;
+    if ((ctx.positionsMap[symbol]?.length ?? 0) > 0) return;
+    if ((ctx.ordersMap[symbol]?.length ?? 0) > 0) return;
+    ctx.setSymbolLeverage(symbol, clampPrefLeverage(tradingPrefs.defaultLeverage));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [symbol, tradingPrefs.useDefaultLeverage, tradingPrefs.defaultLeverage]);
 
   // 换标的或切结算方式时，数量单位回到该模式的原生单位并清空输入——
   // 否则「5,000,000」这种数字会带着上一个模式的语义留在框里，极易误读。
@@ -487,10 +511,21 @@ export function OrderPanel({
           {isCoinMargined ? '币本位' : 'U本位'}
         </button>
 
+        <button
+          type="button"
+          data-testid="open-trading-prefs"
+          onClick={() => setPrefsOpen(true)}
+          title="交易偏好"
+          aria-label="交易偏好"
+          className="ml-auto flex h-[22px] w-[22px] items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+        >
+          <MoreHorizontal className="h-4 w-4" />
+        </button>
+
         {onOpenCoolingOff && (
           <button
             onClick={onOpenCoolingOff}
-            className="ml-auto text-[11px] text-blue-400 hover:text-blue-300 transition-colors"
+            className="text-[11px] text-blue-400 hover:text-blue-300 transition-colors"
           >
             🧊 冷静期
           </button>
@@ -506,7 +541,7 @@ export function OrderPanel({
               onClick={() => setActionMode(m)}
               className={`flex-1 py-1 rounded text-[12px] font-medium transition-all ${
                 actionMode === m
-                  ? 'bg-accent text-white shadow-sm'
+                  ? 'bg-accent text-card-foreground shadow-sm'
                   : 'text-muted-foreground hover:text-foreground'
               }`}
             >
@@ -525,7 +560,7 @@ export function OrderPanel({
               key={t.value}
               onClick={() => setOrderType(t.value)}
               className={`relative pb-1.5 transition-colors ${
-                active ? 'text-white' : 'text-muted-foreground hover:text-foreground'
+                active ? 'text-card-foreground font-medium' : 'text-muted-foreground hover:text-foreground'
               }`}
             >
               {t.label}
@@ -538,7 +573,7 @@ export function OrderPanel({
             data-testid="advanced-type-slot"
             onClick={() => setShowOrderTypeMenu(v => !v)}
             className={`relative pb-1.5 flex items-center gap-0.5 transition-colors ${
-              advancedActive ? 'text-white' : 'text-muted-foreground hover:text-foreground'
+              advancedActive ? 'text-card-foreground font-medium' : 'text-muted-foreground hover:text-foreground'
             }`}
           >
             {advancedLabel}
@@ -832,44 +867,47 @@ export function OrderPanel({
           </Popover>
         </div>
 
-        {/* Slider with 5 diamond anchors */}
-        <div className="px-1 pt-1 pb-2">
+        {/* 仓位比例滑条 —— 币安式：菱形锚点常驻、不占一行百分比文字，
+            当前比例只在非 0 时以小字浮在右上，避免固定标签占掉纵向空间。 */}
+        <div className="px-1 pt-2 pb-1.5">
           <div className="relative h-5 flex items-center">
             <input
               type="range" min={0} max={100} step={1}
               value={percent}
               onChange={e => applyPercent(parseInt(e.target.value))}
+              aria-label="仓位比例"
               className="absolute inset-0 w-full h-5 opacity-0 cursor-pointer z-10"
             />
-            {/* Track */}
-            <div className="relative h-[3px] w-full rounded-full bg-secondary">
+            <div className="relative h-[2px] w-full rounded-full bg-secondary">
               <div
                 className="absolute left-0 top-0 h-full rounded-full bg-primary"
                 style={{ width: `${percent}%` }}
               />
-              {/* Diamond anchors */}
               {[0, 25, 50, 75, 100].map(p => (
-                <div
+                <button
                   key={p}
-                  className={`absolute top-1/2 w-2 h-2 rotate-45 -translate-x-1/2 -translate-y-1/2 ${
-                    percent >= p ? 'bg-primary' : 'bg-muted'
+                  type="button"
+                  tabIndex={-1}
+                  onClick={() => applyPercent(p)}
+                  aria-label={`${p}%`}
+                  className={`absolute top-1/2 z-20 h-[7px] w-[7px] rotate-45 -translate-x-1/2 -translate-y-1/2 border transition-colors ${
+                    percent >= p
+                      ? 'border-primary bg-primary'
+                      : 'border-muted-foreground/40 bg-card'
                   }`}
                   style={{ left: `${p}%` }}
                 />
               ))}
+              {/* 拖动手柄 */}
+              <span
+                className="pointer-events-none absolute top-1/2 z-30 h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-primary bg-card shadow-sm"
+                style={{ left: `${percent}%` }}
+              />
             </div>
           </div>
-          <div className="flex justify-between text-[10px] text-muted-foreground/80 mt-1">
-            {[0, 25, 50, 75, 100].map(p => (
-              <button
-                key={p}
-                onClick={() => applyPercent(p)}
-                className={`tabular-nums ${percent === p ? 'text-primary' : 'hover:text-foreground/90'}`}
-              >
-                {p}%
-              </button>
-            ))}
-          </div>
+          {percent > 0 && (
+            <div className="mt-0.5 text-right text-[10px] tabular-nums text-primary">{percent}%</div>
+          )}
         </div>
 
         {/* TP/SL + TIF row */}
@@ -1025,6 +1063,13 @@ export function OrderPanel({
           </button>
         </div>
       </div>
+
+      <TradingPreferencesDrawer
+        open={prefsOpen}
+        onClose={() => setPrefsOpen(false)}
+        prefs={tradingPrefs}
+        onChange={setTradingPrefs}
+      />
 
       {/* ===== Pre-trade snapshot dialog (hard-gates every order placement) ===== */}
       <PreTradeSnapshotDialog

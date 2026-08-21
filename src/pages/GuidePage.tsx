@@ -1839,6 +1839,11 @@ P 不再一把手填，而是拆成三个更可回答的问题：<strong>「这�
                 </thead>
                 <tbody>
                   <tr>
+                    <td className="px-3 py-2 border-t border-border font-medium">交易偏好（右上角 ⋯）</td>
+                    <td className="px-3 py-2 border-t border-border">下单面板右上角的 <strong>⋯</strong> 打开抽屉，结构与币安一致：<strong>交易配置 → 默认交易设置 → 默认杠杆和保证金模式</strong>。可开启「应用默认杠杆」并设定 1–50x 与默认保证金模式，点「确认」才生效（草稿式，与币安相同）。<strong>只对尚未访问过、且当前无持仓无挂单的币对生效</strong>——已建仓的标的不会在背后被改动风险参数。「下单确认」可切换。其余币安项（账户模式 / 资产模式 / 价差保护 等）本系统无对应功能，保留位置但置灰。</td>
+                    <td className="px-3 py-2 border-t border-border">与币安同构，便于迁移习惯。注意本系统训练阶段<strong>强制逐仓</strong>：即便把默认保证金模式设为全仓，下单仍会被硬阻断。</td>
+                  </tr>
+                  <tr>
                     <td className="px-3 py-2 border-t border-border font-medium">订单类型（币安式三槽）</td>
                     <td className="px-3 py-2 border-t border-border">常驻 <strong>限价 | 市价 | 高级槽</strong> 三个标签；高级槽显示当前选中的高级类型，下拉五项（条件委托 / 跟踪委托 / 只做Maker / TWAP / 分段订单）对当前项打勾。止盈止损不占标签位，用限价 / 市价表单里的勾选组合。<strong>五种高级类型都是真实执行</strong>：条件委托触发价成交；<strong>跟踪委托</strong>按币安语义——卖出方向追踪最高价、从峰值回撤「回调率」即市价成交，买入方向对称追踪最低价，可设激活价（触及后才开始追踪）；<strong>TWAP</strong> 在总时长内按模拟时间均匀分批市价成交（切片间隔自动 ≈ 总时长 ÷ 20，最短 1 分钟）；<strong>分段订单</strong>在起始价与终止价之间均匀铺出指定张数的限价单。</td>
                     <td className="px-3 py-2 border-t border-border">与币安的下单区同构，训练动作可以直接迁移。跟踪委托同一根 K 线内先按有利端点推进极值、再用不利端点判触发——宁可早触发，不做乐观回测。</td>
