@@ -208,10 +208,12 @@ const Index = () => {
   const [perfSymbol, setPerfSymbol] = useState<string | null>(null);
   const [coolingOffModalOpen, setCoolingOffModalOpen] = useState(false);
   const [priceProtection, setPriceProtection] = usePersistedState("price_protection", true);
-  const [isOrderBookOpen, setIsOrderBookOpen] = useState(true);
+  // 盘口开合走持久化：这是「界面设置 → 模块显隐」的真值来源，
+  // 页内的关闭按钮和抽屉里的开关改的是同一个状态，刷新后也保留。
+  const [isOrderBookOpen, setIsOrderBookOpen] = usePersistedState<boolean>('panel_orderbook_open_v1', true);
   // 盘口（订单簿/最新成交/市场异动）默认折叠、位于下方；P_gap 在上且默认完整显示。
   const [isMarketDataCollapsed, setIsMarketDataCollapsed] = useState(true);
-  const [isPGapCollapsed, setIsPGapCollapsed] = useState(false);
+  const [isPGapCollapsed, setIsPGapCollapsed] = usePersistedState<boolean>('panel_pgap_collapsed_v1', false);
   const campaignWinRate = useCampaignWinRate();
   // 当前标的多单的加权平均开仓价，供 P_gap 的「可落袋 R」使用。
   // 按数量加权正是让「总未实现盈亏 ÷ 总预期最大亏损」成立的那个均价。
@@ -2217,6 +2219,12 @@ const Index = () => {
                 coolingOff={coolingOff.isActive}
                 coolingOffLabel={coolingOff.isActive ? coolingOff.formatRemaining() : undefined}
                 onOpenCoolingOff={() => setCoolingOffModalOpen(true)}
+                panels={{ orderBook: isOrderBookOpen, pGap: !isPGapCollapsed }}
+                onPanelChange={(key, visible) => {
+                  if (key === 'orderBook') setIsOrderBookOpen(visible);
+                  // P_gap 是「收起为标题栏」而非彻底隐藏，故取反
+                  else setIsPGapCollapsed(!visible);
+                }}
                 priceProtection={priceProtection}
                 onTogglePriceProtection={() => setPriceProtection((prev) => !prev)}
                 crosshairPrice={crosshairPrice}

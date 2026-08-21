@@ -20,15 +20,54 @@ export interface TradingPreferences {
   defaultLeverage: number;
   /** 默认保证金模式。 */
   defaultMarginMode: MarginMode;
-  /** 下单确认弹窗：关闭后市价单不再二次确认（币安「下单确认」）。 */
-  orderConfirm: boolean;
+  /** 下单确认：按订单类型分别控制是否二次确认（币安「下单确认」页）。 */
+  orderConfirm: Record<OrderConfirmKey, boolean>;
+  /** 默认触发类型：止损/条件单以哪个价格判定触发（币安「默认触发类型」页）。 */
+  defaultTriggerType: 'LAST' | 'MARK';
+  /** 仓位模式：单向 = 同一合约只允许一个方向；双向 = 可同时持多空（币安「仓位模式」页）。 */
+  positionMode: 'oneway' | 'hedge';
 }
+
+/** 下单确认可分别开关的订单类型——与币安该页逐项对应。 */
+export type OrderConfirmKey =
+  | 'limit' | 'market' | 'tpsl' | 'marketTpsl' | 'conditional' | 'trailing' | 'twap' | 'reverse';
+
+export const ORDER_CONFIRM_ITEMS: { key: OrderConfirmKey; label: string }[] = [
+  { key: 'limit', label: '限价 订单' },
+  { key: 'market', label: '市价 订单' },
+  { key: 'tpsl', label: '止盈止损 订单' },
+  { key: 'marketTpsl', label: '市价止盈止损 订单' },
+  { key: 'conditional', label: '条件委托 订单' },
+  { key: 'trailing', label: '跟踪委托 订单' },
+  { key: 'twap', label: 'TWAP 订单' },
+  { key: 'reverse', label: '反手交易' },
+];
+
+/**
+ * 可显隐的面板。币安列了七个模块，本系统只有这两个**真的能藏**：
+ * 图表 / 下单 / 仓位是交易页的骨架，藏了页面就没法用；
+ * 「最新成交」「保证金比率」本系统压根没有这两个模块。
+ * 与其摆五个拨不动的开关，不如只留能兑现的。
+ */
+export type PanelKey = 'orderBook' | 'pGap';
+
+export const PANEL_ITEMS: { key: PanelKey; label: string; desc: string }[] = [
+  { key: 'orderBook', label: '订单簿', desc: '关闭后隐藏右侧盘口，图表占满整个上半区。' },
+  { key: 'pGap', label: 'P_gap 优势边际', desc: '关闭后收起为标题栏，空间让给盘口。' },
+];
 
 export const DEFAULT_TRADING_PREFERENCES: TradingPreferences = {
   useDefaultLeverage: false,
   defaultLeverage: 10,
   defaultMarginMode: DEFAULT_MARGIN_MODE,
-  orderConfirm: true,
+  // 币安默认全部关闭（不弹二次确认）；本系统的决策记录模式另有强制快照，不受此影响
+  orderConfirm: {
+    limit: false, market: false, tpsl: false, marketTpsl: false,
+    conditional: false, trailing: false, twap: false, reverse: false,
+  },
+  defaultTriggerType: 'LAST',
+  // 本系统主仓做多 + 对冲做空并存，天然是双向持仓
+  positionMode: 'hedge',
 };
 
 /** 币安该面板的杠杆刻度。 */

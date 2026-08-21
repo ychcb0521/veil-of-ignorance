@@ -8,6 +8,7 @@ import {
   DEFAULT_TRADING_PREFERENCES,
   clampPrefLeverage,
   type TradingPreferences,
+  type PanelKey,
 } from '@/lib/tradingPreferences';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import type { PlaceOrderParams } from '@/contexts/TradingContext';
@@ -57,6 +58,9 @@ interface Props {
   pickedPrice?: number | null;
   /** Optional: pause the time machine when the snapshot dialog opens */
   onAutoPauseTimeMachine?: () => void;
+  /** 面板显隐：真值在交易页，抽屉只是它的一个入口 */
+  panels?: Record<PanelKey, boolean>;
+  onPanelChange?: (key: PanelKey, visible: boolean) => void;
 }
 
 // Order types shown in the horizontal tab strip (top 3 + dropdown for the rest)
@@ -86,6 +90,7 @@ export function OrderPanel({
   pricePrecision = 2, quantityPrecision = 3,
   crosshairPrice, pickMode, onPickModeChange, pickedPrice,
   onAutoPauseTimeMachine,
+  panels, onPanelChange,
 }: Props) {
   // ===== Live account info pulled from context (for available balance + risk panel) =====
   const ctx = useTradingContext();
@@ -169,6 +174,11 @@ export function OrderPanel({
   const [scaledEndPrice, setScaledEndPrice] = useState('');
   // TWAP 切片间隔自动推导：总时长均分约 20 片、每片不短于 1 分钟（不再暴露给用户）
   const twapInterval = String(Math.max(1, Math.round((parseFloat(twapDuration) || 60) / 20)));
+
+  // 默认触发类型：偏好一改即同步到下单用的触发类型（币安「默认触发类型」页）
+  useEffect(() => {
+    setTriggerType(tradingPrefs.defaultTriggerType);
+  }, [tradingPrefs.defaultTriggerType]);
 
   // 应用默认杠杆：仅当开关开启、该标的从未显式设置过杠杆、且当前既无持仓也无挂单时。
   // 与币安一致——已有仓位/挂单的币对不得在背后改动风险参数。
@@ -522,14 +532,6 @@ export function OrderPanel({
           <MoreHorizontal className="h-4 w-4" />
         </button>
 
-        {onOpenCoolingOff && (
-          <button
-            onClick={onOpenCoolingOff}
-            className="text-[11px] text-blue-400 hover:text-blue-300 transition-colors"
-          >
-            🧊 冷静期
-          </button>
-        )}
       </div>
 
       {/* ============ OPEN / CLOSE PILL ============ */}
@@ -1069,6 +1071,9 @@ export function OrderPanel({
         onClose={() => setPrefsOpen(false)}
         prefs={tradingPrefs}
         onChange={setTradingPrefs}
+        onOpenCoolingOff={onOpenCoolingOff}
+        panels={panels}
+        onPanelChange={onPanelChange}
       />
 
       {/* ===== Pre-trade snapshot dialog (hard-gates every order placement) ===== */}

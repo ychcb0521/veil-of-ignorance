@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   DEFAULT_TRADING_PREFERENCES,
+  ORDER_CONFIRM_ITEMS,
+  PANEL_ITEMS,
   clampPrefLeverage,
   resolveInitialSymbolSetup,
 } from '@/lib/tradingPreferences';
@@ -43,5 +45,35 @@ describe('resolveInitialSymbolSetup', () => {
   it('默认杠杆越界时也被夹住，不会把 999x 传给引擎', () => {
     const wild = { ...prefs, defaultLeverage: 999 };
     expect(resolveInitialSymbolSetup(wild, null, null).leverage).toBe(50);
+  });
+});
+
+describe('偏好模型只承诺能兑现的开关', () => {
+  it('下单确认逐订单类型可控，出厂全关（与币安一致）', () => {
+    const keys = ORDER_CONFIRM_ITEMS.map(i => i.key).sort();
+    expect(Object.keys(DEFAULT_TRADING_PREFERENCES.orderConfirm).sort()).toEqual(keys);
+    expect(Object.values(DEFAULT_TRADING_PREFERENCES.orderConfirm).every(v => v === false)).toBe(true);
+  });
+
+  it('默认触发类型出厂为最新价格', () => {
+    expect(DEFAULT_TRADING_PREFERENCES.defaultTriggerType).toBe('LAST');
+  });
+
+  it('出厂为双向持仓——主仓与对冲腿必须能并存', () => {
+    expect(DEFAULT_TRADING_PREFERENCES.positionMode).toBe('hedge');
+  });
+
+  it('模块显隐只列真能藏的两个，不摆拨不动的假开关', () => {
+    expect(PANEL_ITEMS.map(i => i.key)).toEqual(['orderBook', 'pGap']);
+    // 图表/下单/仓位是骨架，最新成交/保证金比率本系统没有——都不该出现在开关里
+    const labels = PANEL_ITEMS.map(i => i.label).join();
+    for (const absent of ['图表', '下单', '仓位', '最新成交', '保证金比率']) {
+      expect(labels).not.toContain(absent);
+    }
+  });
+
+  it('面板显隐与配色不进偏好模型：前者真值在交易页，后者本系统全局锁定', () => {
+    expect(DEFAULT_TRADING_PREFERENCES).not.toHaveProperty('panels');
+    expect(DEFAULT_TRADING_PREFERENCES).not.toHaveProperty('colorPreference');
   });
 });
