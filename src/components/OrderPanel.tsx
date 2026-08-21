@@ -56,7 +56,20 @@ interface Props {
 const PRIMARY_ORDER_TABS: { value: OrderType; label: string }[] = [
   { value: 'LIMIT', label: '限价' },
   { value: 'MARKET', label: '市价' },
-  { value: 'LIMIT_TP_SL', label: '限价止盈止损' },
+];
+
+/**
+ * 高级类型槽（第三常驻位）的候选——与币安的下拉一致：
+ * 条件委托 / 跟踪委托 / 只做Maker (Post Only) / TWAP / 分段订单。
+ * 止盈止损不占标签位：币安把 TP/SL 做成限价/市价表单里的勾选项（本面板已有），
+ * LIMIT_TP_SL / MARKET_TP_SL 由勾选组合出，不再单列。
+ */
+const ADVANCED_ORDER_TYPES: { value: OrderType; label: string; hint: string }[] = [
+  { value: 'CONDITIONAL', label: '条件委托', hint: '价格触及触发价后，按市价成交。' },
+  { value: 'TRAILING_STOP', label: '跟踪委托', hint: '价格从极值回调指定比例后，按市价成交；可设激活价。' },
+  { value: 'POST_ONLY', label: '只做Maker (Post Only)', hint: '只挂单不吃单：若会立即成交则撤单。' },
+  { value: 'TWAP', label: 'TWAP', hint: '在总时长内按时间均匀分批市价买入 / 卖出，摊薄冲击成本。' },
+  { value: 'SCALED', label: '分段订单', hint: '在价格区间内均匀铺多张限价单。' },
 ];
 
 export function OrderPanel({
@@ -129,17 +142,20 @@ export function OrderPanel({
   const [tpTrigger, setTpTrigger] = useState('');
   const [slTrigger, setSlTrigger] = useState('');
 
-  // Trailing / TWAP / Conditional / Scaled defaults (kept for payload compatibility)
-  const [callbackRate] = useState('1');
+  // 高级类型槽：第三常驻位显示当前选中的高级类型（币安式），默认条件委托
+  const [advancedType, setAdvancedType] = useState<OrderType>('CONDITIONAL');
+  // 各高级类型的参数（可编辑）
+  const [callbackRate, setCallbackRate] = useState('1');
   const [trailingExecType] = useState<'MARKET' | 'LIMIT'>('MARKET');
   const [trailingLimitPrice] = useState('');
-  const [twapDuration] = useState('60');
-  const [twapInterval] = useState('5');
+  const [twapDuration, setTwapDuration] = useState('60');
   const [condExecType] = useState<'MARKET' | 'LIMIT'>('MARKET');
   const [condLimitPrice] = useState('');
-  const [scaledCount] = useState('5');
-  const [scaledStartPrice] = useState('');
-  const [scaledEndPrice] = useState('');
+  const [scaledCount, setScaledCount] = useState('5');
+  const [scaledStartPrice, setScaledStartPrice] = useState('');
+  const [scaledEndPrice, setScaledEndPrice] = useState('');
+  // TWAP 切片间隔自动推导：总时长均分约 20 片、每片不短于 1 分钟（不再暴露给用户）
+  const twapInterval = String(Math.max(1, Math.round((parseFloat(twapDuration) || 60) / 20)));
 
   // 换标的或切结算方式时，数量单位回到该模式的原生单位并清空输入——
   // 否则「5,000,000」这种数字会带着上一个模式的语义留在框里，极易误读。
@@ -424,9 +440,15 @@ export function OrderPanel({
   };
 
   const isPrimaryTab = PRIMARY_ORDER_TABS.some(t => t.value === orderType);
-  const dropdownLabel = isPrimaryTab ? '更多' : (ORDER_TYPE_INFO.find(t => t.value === orderType)?.label ?? '更多');
+  // 第三槽显示当前选中的高级类型名；正在使用高级类型时该槽为激活态
+  const advancedActive = !isPrimaryTab;
+  const advancedLabel = ADVANCED_ORDER_TYPES.find(t => t.value === advancedType)?.label ?? '条件委托';
+  const activeTypeHint = ADVANCED_ORDER_TYPES.find(t => t.value === orderType)?.hint
+    ?? (orderType === 'MARKET' ? '以当前市场最优价格立即成交。' : '以指定价格或更优价格成交。');
 
-  const showLimitPriceField = orderType !== 'MARKET' && orderType !== 'MARKET_TP_SL';
+  // 限价输入只属于限价系（限价 / 只做Maker / 限价止盈止损）；
+  // 市价系与「触发后按市价执行」的高级类型（条件 / 跟踪 / TWAP / 分段用区间价）都不显示
+  const showLimitPriceField = orderType === 'LIMIT' || orderType === 'POST_ONLY' || orderType === 'LIMIT_TP_SL';
 
   return (
     <div className="flex flex-col h-full min-h-0 w-full min-w-[300px] bg-card text-foreground font-sans">
@@ -494,7 +516,7 @@ export function OrderPanel({
         </div>
       </div>
 
-      {/* ============ ORDER TYPE TABS (with active yellow underline) ============ */}
+      {/* ============ 订单类型：限价 | 市价 | <高级槽>（币安式三槽） ============ */}
       <div className="flex-none px-3 pb-1 flex items-center gap-3 text-[12px] border-b border-border">
         {PRIMARY_ORDER_TABS.map(t => {
           const active = orderType === t.value;
@@ -513,31 +535,39 @@ export function OrderPanel({
         })}
         <div className="relative" ref={orderTypeMenuRef}>
           <button
-            onClick={() => setShowOrderTypeMenu(s => !s)}
+            data-testid="advanced-type-slot"
+            onClick={() => setShowOrderTypeMenu(v => !v)}
             className={`relative pb-1.5 flex items-center gap-0.5 transition-colors ${
-              !isPrimaryTab ? 'text-white' : 'text-muted-foreground hover:text-foreground'
+              advancedActive ? 'text-white' : 'text-muted-foreground hover:text-foreground'
             }`}
           >
-            {dropdownLabel}
-            <ChevronDown className="w-3 h-3" />
-            {!isPrimaryTab && <span className="absolute left-0 right-3 -bottom-px h-[2px] bg-primary rounded-full" />}
+            {advancedLabel}
+            <ChevronDown className={`w-3 h-3 transition-transform ${showOrderTypeMenu ? 'rotate-180' : ''}`} />
+            {advancedActive && <span className="absolute left-0 right-3 -bottom-px h-[2px] bg-primary rounded-full" />}
           </button>
           {showOrderTypeMenu && (
-            <div className="absolute z-40 top-full mt-1 left-0 min-w-[160px] rounded-md border border-border bg-popover shadow-xl">
-              {ORDER_TYPE_INFO.filter(t => !PRIMARY_ORDER_TABS.some(p => p.value === t.value)).map(t => (
+            <div data-testid="advanced-type-menu" className="absolute z-40 top-full mt-1 left-0 min-w-[188px] rounded-md border border-border bg-popover py-1 shadow-xl">
+              {ADVANCED_ORDER_TYPES.map(t => (
                 <button
                   key={t.value}
-                  onClick={() => { setOrderType(t.value); setShowOrderTypeMenu(false); }}
-                  className={`w-full text-left px-3 py-1.5 text-[12px] hover:bg-secondary transition-colors ${
-                    orderType === t.value ? 'text-primary' : 'text-foreground/90'
-                  }`}
+                  onClick={() => { setAdvancedType(t.value); setOrderType(t.value); setShowOrderTypeMenu(false); }}
+                  className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-[13px] text-foreground/90 transition-colors hover:bg-secondary"
+                  title={t.hint}
                 >
                   {t.label}
+                  {advancedType === t.value && advancedActive && <Check className="h-3.5 w-3.5 text-primary" />}
                 </button>
               ))}
             </div>
           )}
         </div>
+        <span
+          className="ml-auto pb-1.5 text-muted-foreground/70"
+          title={activeTypeHint}
+          aria-label="订单类型说明"
+        >
+          <Info className="h-3.5 w-3.5" />
+        </span>
       </div>
 
       {/* ============ MAIN BODY (independent scroll area) ============ */}
@@ -594,7 +624,8 @@ export function OrderPanel({
         )}
 
         {/* Market price hint */}
-        {!showLimitPriceField && (
+        {/* 「市价」静态行只属于市价系；高级类型（条件/跟踪/TWAP/分段）不显示价格行——与币安一致 */}
+        {(orderType === 'MARKET' || orderType === 'MARKET_TP_SL') && (
           <div className="flex items-center bg-secondary rounded-md h-9 px-3 w-full min-w-0">
             <span className="text-[11px] text-muted-foreground/80 mr-2 shrink-0">价格</span>
             <span className="flex-1 min-w-0 text-right text-[13px] text-muted-foreground truncate">市价</span>
@@ -602,10 +633,12 @@ export function OrderPanel({
           </div>
         )}
 
-        {/* Trigger price (TP/SL or conditional types) */}
+        {/* Trigger price (TP/SL or conditional types)；跟踪委托此行是「激活价（可选）」 */}
         {(orderType === 'LIMIT_TP_SL' || orderType === 'MARKET_TP_SL' || orderType === 'CONDITIONAL' || orderType === 'TRAILING_STOP') && (
           <div className="flex items-center bg-secondary rounded-md h-9 px-3 w-full min-w-0">
-            <span className="text-[11px] text-muted-foreground/80 mr-2 shrink-0">触发价</span>
+            <span className="text-[11px] text-muted-foreground/80 mr-2 shrink-0">
+              {orderType === 'TRAILING_STOP' ? '激活价' : '触发价'}
+            </span>
             <input
               type="text"
               value={stopPrice}
@@ -626,6 +659,98 @@ export function OrderPanel({
             </button>
             <span className="text-[11px] text-muted-foreground/80 ml-2 shrink-0">{quoteUnitLabel}</span>
           </div>
+        )}
+
+        {/* ===== 跟踪委托：回调率 ===== */}
+        {orderType === 'TRAILING_STOP' && (
+          <div className="flex items-center bg-secondary rounded-md h-9 px-3 w-full min-w-0">
+            <span className="text-[11px] text-muted-foreground/80 mr-2 shrink-0">回调率</span>
+            <input
+              data-testid="trailing-callback"
+              type="number" inputMode="decimal" min={0.1} max={99} step={0.1}
+              value={callbackRate}
+              onChange={e => setCallbackRate(e.target.value)}
+              placeholder="1"
+              className="flex-1 w-full min-w-0 bg-transparent text-right text-[13px] text-foreground font-mono tabular-nums outline-none placeholder:text-muted-foreground/60"
+            />
+            <span className="text-[11px] text-muted-foreground/80 ml-2 shrink-0">%</span>
+          </div>
+        )}
+
+        {/* ===== TWAP：总时长 + 快选（币安式 30分/1时/6时/12时） ===== */}
+        {orderType === 'TWAP' && (
+          <>
+            <div className="flex items-center bg-secondary rounded-md h-9 px-3 w-full min-w-0">
+              <span className="text-[11px] text-muted-foreground/80 mr-2 shrink-0">总时长</span>
+              <input
+                data-testid="twap-duration"
+                type="number" inputMode="numeric" min={5} step={5}
+                value={twapDuration}
+                onChange={e => setTwapDuration(e.target.value)}
+                placeholder="60"
+                className="flex-1 w-full min-w-0 bg-transparent text-right text-[13px] text-foreground font-mono tabular-nums outline-none placeholder:text-muted-foreground/60"
+              />
+              <span className="text-[11px] text-muted-foreground/80 ml-2 shrink-0">分</span>
+            </div>
+            <div className="grid grid-cols-4 gap-1.5">
+              {([['30分', 30], ['1时', 60], ['6时', 360], ['12时', 720]] as const).map(([label, mins]) => (
+                <button
+                  key={label}
+                  type="button"
+                  onClick={() => setTwapDuration(String(mins))}
+                  className={`h-7 rounded text-[11px] transition-colors ${
+                    parseFloat(twapDuration) === mins
+                      ? 'bg-accent text-foreground'
+                      : 'bg-secondary text-muted-foreground hover:text-foreground'
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </>
+        )}
+
+        {/* ===== 分段订单：区间两端价 + 单数 ===== */}
+        {orderType === 'SCALED' && (
+          <>
+            <div className="flex items-center bg-secondary rounded-md h-9 px-3 w-full min-w-0">
+              <span className="text-[11px] text-muted-foreground/80 mr-2 shrink-0">起始价</span>
+              <input
+                data-testid="scaled-start"
+                type="number" inputMode="decimal" step="any"
+                value={scaledStartPrice}
+                onChange={e => setScaledStartPrice(e.target.value)}
+                placeholder="0.00"
+                className="flex-1 w-full min-w-0 bg-transparent text-right text-[13px] text-foreground font-mono tabular-nums outline-none placeholder:text-muted-foreground/60"
+              />
+              <span className="text-[11px] text-muted-foreground/80 ml-2 shrink-0">{quoteUnitLabel}</span>
+            </div>
+            <div className="flex items-center bg-secondary rounded-md h-9 px-3 w-full min-w-0">
+              <span className="text-[11px] text-muted-foreground/80 mr-2 shrink-0">终止价</span>
+              <input
+                data-testid="scaled-end"
+                type="number" inputMode="decimal" step="any"
+                value={scaledEndPrice}
+                onChange={e => setScaledEndPrice(e.target.value)}
+                placeholder="0.00"
+                className="flex-1 w-full min-w-0 bg-transparent text-right text-[13px] text-foreground font-mono tabular-nums outline-none placeholder:text-muted-foreground/60"
+              />
+              <span className="text-[11px] text-muted-foreground/80 ml-2 shrink-0">{quoteUnitLabel}</span>
+            </div>
+            <div className="flex items-center bg-secondary rounded-md h-9 px-3 w-full min-w-0">
+              <span className="text-[11px] text-muted-foreground/80 mr-2 shrink-0">单数</span>
+              <input
+                data-testid="scaled-count"
+                type="number" inputMode="numeric" min={2} max={50} step={1}
+                value={scaledCount}
+                onChange={e => setScaledCount(e.target.value)}
+                placeholder="5"
+                className="flex-1 w-full min-w-0 bg-transparent text-right text-[13px] text-foreground font-mono tabular-nums outline-none placeholder:text-muted-foreground/60"
+              />
+              <span className="text-[11px] text-muted-foreground/80 ml-2 shrink-0">张</span>
+            </div>
+          </>
         )}
 
         {/* Quantity input with currency unit selector */}
@@ -823,14 +948,14 @@ export function OrderPanel({
             disabled={orderDisabled}
             className="w-full min-w-0 h-10 px-1 rounded-md bg-trading-green hover:bg-trading-green/90 active:scale-[0.98] disabled:opacity-40 disabled:cursor-not-allowed text-white text-[13px] font-semibold transition-all truncate"
           >
-            {coolingOff ? '🧊 冷静中' : (actionMode === 'OPEN' ? '开多 / Buy' : '平空 / Buy')}
+            {coolingOff ? '🧊 冷静中' : (actionMode === 'OPEN' ? '开多' : '平空')}
           </button>
           <button
             onClick={() => handleOrder('SHORT')}
             disabled={orderDisabled}
             className="w-full min-w-0 h-10 px-1 rounded-md bg-trading-red hover:bg-trading-red/90 active:scale-[0.98] disabled:opacity-40 disabled:cursor-not-allowed text-white text-[13px] font-semibold transition-all truncate"
           >
-            {coolingOff ? '🧊 冷静中' : (actionMode === 'OPEN' ? '开空 / Sell' : '平多 / Sell')}
+            {coolingOff ? '🧊 冷静中' : (actionMode === 'OPEN' ? '开空' : '平多')}
           </button>
         </div>
 
@@ -846,6 +971,18 @@ export function OrderPanel({
           </div>
         </div>
 
+        {/* TWAP 新手引导（仅 TWAP 类型显示，币安同位） */}
+        {orderType === 'TWAP' && (
+          <button
+            type="button"
+            data-testid="twap-guide"
+            className="flex items-center gap-1 text-[11px] text-muted-foreground transition-colors hover:text-foreground"
+            title="TWAP（时间加权平均价格）会把订单在总时长内按时间均匀拆成小片、逐片以市价成交，用于摊薄大单的冲击成本。切片间隔由系统按总时长自动决定。"
+          >
+            <Info className="w-3 h-3" />
+            TWAP 新手引导
+          </button>
+        )}
         {/* Fee tier link */}
         <button className="flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground transition-colors">
           <Info className="w-3 h-3" />

@@ -38,6 +38,7 @@ import {
   snapToBarStart,
 } from "@/lib/reversePlayback";
 import { isForwardExhausted, needsForwardPreload, needsReversePreload } from "@/lib/streamingWindow";
+import { stepTrailingStop } from "@/lib/trailingStop";
 import { upsertOrderSnapshot } from "@/lib/orderSnapshotHistory";
 import {
   diagnoseSignalJump,
@@ -577,6 +578,50 @@ const Index = () => {
   const runConditionalMatchingForSymbol = useCallback(
     (symbol: string, candle: Pick<KlineData, "high" | "low">, openTime: number) => {
       const symbolOrders = ordersMapRef.current[symbol] || [];
+
+      // ===== 跟踪委托：逐根 K 线推进极值，回调触及即按市价成交 =====
+      // 状态映射：SHORT 追最高价存 peakPrice，LONG 追最低价存 troughPrice。
+      if (symbolOrders.some(o => o.type === 'TRAILING_STOP' && o.status === 'PENDING')) {
+        for (const order of symbolOrders) {
+          if (order.type !== 'TRAILING_STOP' || order.status !== 'PENDING') continue;
+          if (conditionalTriggerLocksRef.current.has(order.id)) continue;
+          const extreme = order.side === 'SHORT' ? (order.peakPrice ?? null) : (order.troughPrice ?? null);
+          const result = stepTrailingStop({
+            side: order.side,
+            callbackRate: order.callbackRate ?? 0,
+            activationPrice: order.stopPrice > 0 ? order.stopPrice : null,
+            state: { activated: order.trailingActivated ?? false, extreme },
+            high: candle.high,
+            low: candle.low,
+          });
+          const nextPeak = order.side === 'SHORT' ? result.state.extreme ?? undefined : order.peakPrice;
+          const nextTrough = order.side === 'LONG' ? result.state.extreme ?? undefined : order.troughPrice;
+          const stateChanged = result.state.activated !== (order.trailingActivated ?? false)
+            || nextPeak !== order.peakPrice
+            || nextTrough !== order.troughPrice;
+
+          if (result.triggered && result.triggerPrice != null) {
+            conditionalTriggerLocksRef.current.add(order.id);
+            const executed = createTriggeredConditionalPosition(symbol, order, result.triggerPrice, openTime);
+            if (!executed) {
+              conditionalTriggerLocksRef.current.delete(order.id);
+            }
+            continue;
+          }
+          if (stateChanged) {
+            setOrdersMap(prev => {
+              const list = prev[symbol] || [];
+              return {
+                ...prev,
+                [symbol]: list.map(item => item.id === order.id
+                  ? { ...item, trailingActivated: result.state.activated, peakPrice: nextPeak, troughPrice: nextTrough }
+                  : item),
+              };
+            });
+          }
+        }
+      }
+
       if (
         !symbolOrders.some(
           (order) =>

@@ -1839,6 +1839,11 @@ P 不再一把手填，而是拆成三个更可回答的问题：<strong>「这�
                 </thead>
                 <tbody>
                   <tr>
+                    <td className="px-3 py-2 border-t border-border font-medium">订单类型（币安式三槽）</td>
+                    <td className="px-3 py-2 border-t border-border">常驻 <strong>限价 | 市价 | 高级槽</strong> 三个标签；高级槽显示当前选中的高级类型，下拉五项（条件委托 / 跟踪委托 / 只做Maker / TWAP / 分段订单）对当前项打勾。止盈止损不占标签位，用限价 / 市价表单里的勾选组合。<strong>五种高级类型都是真实执行</strong>：条件委托触发价成交；<strong>跟踪委托</strong>按币安语义——卖出方向追踪最高价、从峰值回撤「回调率」即市价成交，买入方向对称追踪最低价，可设激活价（触及后才开始追踪）；<strong>TWAP</strong> 在总时长内按模拟时间均匀分批市价成交（切片间隔自动 ≈ 总时长 ÷ 20，最短 1 分钟）；<strong>分段订单</strong>在起始价与终止价之间均匀铺出指定张数的限价单。</td>
+                    <td className="px-3 py-2 border-t border-border">与币安的下单区同构，训练动作可以直接迁移。跟踪委托同一根 K 线内先按有利端点推进极值、再用不利端点判触发——宁可早触发，不做乐观回测。</td>
+                  </tr>
+                  <tr>
                     <td className="px-3 py-2 border-t border-border font-medium">数量单位</td>
                     <td className="px-3 py-2 border-t border-border">点数量框右侧的单位即弹出<strong>单位偏好</strong>浮层（贴着数量框，与币安同位置），两张卡片：<strong>卡片一</strong>是标的自身的计量单位（U 本位 → 币，币本位 → <strong>张</strong>，1 张 = 固定 USD 面值）；<strong>卡片二</strong>是保证金资产（U 本位 → USDT，币本位 → 该币），内含常驻的<strong>「订单金额 / 初始保证金」</strong>两个子选项。默认落在<strong>卡片二的「订单金额」</strong>——币本位即该币的订单金额、U 本位即 USDT 订单金额，量纲与该模式的保证金资产一致；「张」与「初始保证金」留给需要时手动切换。换标的或切结算方式时自动回到这个默认并清空输入。</td>
                     <td className="px-3 py-2 border-t border-border">币本位下把数量默认成 USD 会让单位与标的脱节。另需留意：单位下拉里还有「<strong>◯◯ 保证金</strong>」一项，那是<strong>按保证金输入</strong>而非按数量——标签特意带上「保证金」三字，避免与数量混淆（在该模式下输入 500 万，意思是投入 500 万枚币作保证金，按杠杆放大后名义可达数千万）。</td>

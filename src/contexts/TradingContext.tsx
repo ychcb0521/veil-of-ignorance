@@ -1033,6 +1033,48 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
     }
 
     // TWAP
+    if (normalizedOrder.type === 'TRAILING_STOP') {
+      const cb = Number(normalizedOrder.callbackRate);
+      if (!(cb > 0) || cb >= 1) {
+        toast.error('回调率无效', { description: '请输入 0–100% 之间的回调率' });
+        return null;
+      }
+      // 与条件委托同样做挂单时的保证金预检——触发时才发现钱不够体验最差
+      {
+        const estPrice = Number(normalizedOrder.stopPrice) > 0 ? Number(normalizedOrder.stopPrice) : effectiveCurrentPrice;
+        const { marginUsd } = getSettlementMarginParts(symbol, normalizedOrder, estPrice);
+        const { feeUsd } = getSettlementFeeParts(symbol, normalizedOrder, estPrice, true);
+        if (marginUsd + feeUsd > available) {
+          toast.error('可用余额不足', {
+            description: `需要 ${(marginUsd + feeUsd).toFixed(2)} USDT，当前可用 ${available.toFixed(2)} USDT`,
+          });
+          return null;
+        }
+      }
+      const activation = Number(normalizedOrder.stopPrice) > 0 ? Number(normalizedOrder.stopPrice) : 0;
+      const trailingOrder: PendingOrder = {
+        id: crypto.randomUUID(), side: normalizedOrder.side, type: 'TRAILING_STOP',
+        price: 0, stopPrice: activation, quantity: normalizedOrder.quantity,
+        leverage: normalizedOrder.leverage, marginMode: normalizedOrder.marginMode,
+        settlementMode: normalizedOrder.settlementMode,
+        settlementAsset: normalizedOrder.settlementAsset,
+        contractSizeUsd: normalizedOrder.contractSizeUsd,
+        contracts: normalizedOrder.contracts,
+        callbackRate: cb,
+        trailingExecType: 'MARKET',
+        // 无激活价 = 挂出即激活；极值从首根 K 线开始积累
+        trailingActivated: activation <= 0,
+        peakPrice: undefined, troughPrice: undefined,
+        status: 'PENDING', createdAt: now,
+        tradingMode: tradingModeRef.current,
+      };
+      setOrdersMap(prev => ({ ...prev, [symbol]: [...(prev[symbol] || []), trailingOrder] }));
+      toast.info(activation > 0
+        ? `跟踪委托已挂出 · 激活价 ${activation} · 回调 ${(cb * 100).toFixed(1)}%`
+        : `跟踪委托已挂出 · 回调 ${(cb * 100).toFixed(1)}%`);
+      return null;
+    }
+
     if (normalizedOrder.type === 'TWAP') {
       const durationMs = (normalizedOrder.twapDuration || 60) * 60 * 1000;
       const intervalMs = (normalizedOrder.twapInterval || 5) * 60 * 1000;
