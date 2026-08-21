@@ -56,10 +56,10 @@ function fmtPrice(value: number | null | undefined): string {
  * 时间列用 minmax(200px, 1fr) 而不是裸 1fr：裸 1fr 在容器被压窄时会缩到
  * 放不下「操作 2026-08-21 11:03」，导致文字逐字竖排。
  */
-const LEGS_GRID = 'grid-cols-[44px_112px_minmax(200px,1fr)_100px_100px_104px_84px_60px_128px_84px_226px_136px]';
+const LEGS_GRID = 'grid-cols-[44px_112px_minmax(200px,1fr)_100px_100px_104px_84px_132px_88px_236px_136px]';
 
 /** 各列合计的下限，与 LEGS_GRID 对应；不足时容器横向滚动而不是压扁列。 */
-const LEGS_MIN_WIDTH = 'min-w-[1524px]';
+const LEGS_MIN_WIDTH = 'min-w-[1476px]';
 
 export function CampaignLegsList({
   legs,
@@ -145,7 +145,6 @@ export function CampaignLegsList({
             <div className="text-right">平仓价</div>
             <div className="text-right">仓位</div>
             <div>状态</div>
-            <div className="text-right">R̄</div>
             <div className="text-right">盈亏 / 贡献</div>
             <div className="text-right" title="该腿盈亏 ÷ 初始最大预期亏损 L：这条腿把整场 b 推高 / 拉低了多少">Δb</div>
             <div>委托</div>
@@ -197,7 +196,6 @@ export function CampaignLegsList({
                   <div className="text-right tabular-nums" title={exitCorrectionTitle}>{fmtPrice(exitPriceValue)}</div>
                   <div className="text-right tabular-nums">{leg.pre_position_size != null ? leg.pre_position_size.toFixed(2) : '—'}</div>
                   <div className={status.className}>{status.label}</div>
-                  <div className="text-right tabular-nums">{leg.post_r_multiple != null ? leg.post_r_multiple.toFixed(2) : '—'}</div>
                   {(() => {
                     const entry = legPnlMap.get(leg.id);
                     const pnl = entry?.pnl ?? null;
@@ -370,7 +368,6 @@ export function CampaignLegsList({
                           </div>
                           <div className="text-right tabular-nums">{fmtPrice(phase.startPrice)}</div>
                           <div className="text-right tabular-nums">{fmtPrice(phase.endPrice)}</div>
-                          <div />
                           <div />
                           <div />
                           <div className="text-right leading-tight">

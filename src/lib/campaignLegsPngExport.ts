@@ -77,7 +77,6 @@ const COLUMNS = [
   { title: '平仓价', width: 122 },
   { title: '仓位', width: 122 },
   { title: '状态', width: 108 },
-  { title: 'R̄', width: 82 },
   { title: '盈亏 / 贡献', width: 150 },
   { title: 'Δb', width: 90 },
   { title: '委托', width: 470 },
@@ -283,7 +282,6 @@ export function buildCampaignLegsExportRows(input: ExportInput): CampaignLegsExp
       exitPriceLines,
       [{ text: leg.pre_position_size != null ? leg.pre_position_size.toFixed(2) : '—' }],
       [{ text: status.label, color: status.color, bold: true }],
-      [{ text: leg.post_r_multiple != null ? leg.post_r_multiple.toFixed(2) : '—' }],
       (() => {
         // 与页面上的 Legs 列表同源，避免导出图与界面读数打架
         const entry = legPnlMap.get(leg.id);
@@ -348,7 +346,6 @@ export function buildCampaignLegsExportRows(input: ExportInput): CampaignLegsExp
           [{ text: `${fmtClock(phase.startTime)} → ${fmtClock(phase.endTime)}`, color: '#848E9C' }],
           [{ text: fmtPrice(phase.startPrice), color: '#848E9C' }],
           [{ text: fmtPrice(phase.endPrice), color: '#848E9C' }],
-          [{ text: '' }],
           [{ text: '' }],
           [{ text: '' }],
           [

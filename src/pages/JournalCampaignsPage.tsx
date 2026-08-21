@@ -45,7 +45,7 @@ import {
   formatCampaignPayoffRatio,
   resolveCampaignInitialRiskFraction,
 } from '@/lib/campaignAnalysis';
-import { fetchLegExitPriceCorrections } from '@/lib/campaignLegExecution';
+import { fetchLegExitPriceCorrections, type LegExitPriceCorrections } from '@/lib/campaignLegExecution';
 import type { CampaignInitialRiskSource } from '@/lib/campaignAnalysis';
 import {
   computeCampaignExpectancies,
@@ -791,61 +791,90 @@ export default function JournalCampaignsPage() {
       setLoading(true);
       try {
         const campaigns = await listAllCampaigns(user.id);
-        const full = await Promise.all(
-          campaigns.map(async campaign => {
-            const details = await getCampaignFullData(campaign.id);
-            const exitPriceCorrections = await fetchLegExitPriceCorrections(
-              details.campaign.symbol,
-              details.legs,
-              details.tradeRecords,
-            );
-            const reconciliation = computeCampaignPnlReconciliation(
+
+        /**
+         * 单场战役的行数据。exitPriceCorrections 可选：
+         * 首屏用空校正（纯本地计算、零网络），后台补齐后再用真校正重算一次。
+         */
+        const buildRow = (
+          details: Awaited<ReturnType<typeof getCampaignFullData>>,
+          exitPriceCorrections: LegExitPriceCorrections,
+        ) => {
+          const reconciliation = computeCampaignPnlReconciliation(
+            details.campaign,
+            details.legs,
+            details.tradeRecords,
+            exitPriceCorrections,
+          );
+          const reconciledCampaign = reconciliation.correctedRecords.length > 0
+            ? { ...details.campaign, final_realized_pnl: reconciliation.correctedPnl }
+            : details.campaign;
+          const initialExpectedMaxLoss = computeInitialExpectedMaxLoss(
+            details.campaign,
+            details.legs,
+            details.tradeRecords,
+            details.reverseHedgeOrders,
+          );
+          const initialExpectedMaxDrawdownPct = computeInitialExpectedMaxDrawdownPct(
+            details.campaign,
+            details.legs,
+            details.tradeRecords,
+            details.reverseHedgeOrders,
+          );
+          const profitCaptureRatio = Number.isFinite(initialExpectedMaxLoss) && initialExpectedMaxLoss > 0
+            ? computeProfitCaptureRatio(
               details.campaign,
               details.legs,
               details.tradeRecords,
+              details.reverseHedgeOrders,
               exitPriceCorrections,
-            );
-            const reconciledCampaign = reconciliation.correctedRecords.length > 0
-              ? { ...details.campaign, final_realized_pnl: reconciliation.correctedPnl }
-              : details.campaign;
-            const initialExpectedMaxLoss = computeInitialExpectedMaxLoss(
-              details.campaign,
-              details.legs,
-              details.tradeRecords,
-              details.reverseHedgeOrders,
-            );
-            const initialExpectedMaxDrawdownPct = computeInitialExpectedMaxDrawdownPct(
-              details.campaign,
-              details.legs,
-              details.tradeRecords,
-              details.reverseHedgeOrders,
-            );
-            const profitCaptureRatio = Number.isFinite(initialExpectedMaxLoss) && initialExpectedMaxLoss > 0
-              ? computeProfitCaptureRatio(
-                details.campaign,
-                details.legs,
-                details.tradeRecords,
-                details.reverseHedgeOrders,
-                exitPriceCorrections,
-              )
-              : null;
-            const opportunityQuality = resolveCampaignOpportunityQuality(
-              reconciledCampaign,
-              profitCaptureRatio,
-              initialExpectedMaxDrawdownPct,
-            );
-            return {
-              campaign: reconciledCampaign,
-              legs: details.legs,
-              tradeRecords: details.tradeRecords,
-              profitCaptureRatio,
-              initialExpectedMaxLoss,
-              initialExpectedMaxDrawdownPct,
-              opportunityQuality,
-            };
-          }),
+            )
+            : null;
+          const opportunityQuality = resolveCampaignOpportunityQuality(
+            reconciledCampaign,
+            profitCaptureRatio,
+            initialExpectedMaxDrawdownPct,
+          );
+          return {
+            campaign: reconciledCampaign,
+            legs: details.legs,
+            tradeRecords: details.tradeRecords,
+            profitCaptureRatio,
+            initialExpectedMaxLoss,
+            initialExpectedMaxDrawdownPct,
+            opportunityQuality,
+          };
+        };
+
+        // ① 首屏：只取战役明细（数据库），平仓价校正一律用空值。
+        //    校正原本对每场每条腿各发一次行情请求（N×M 次，全局仅 6 并发），
+        //    是这一页「加载中」长时间不散的唯一原因；它只影响个别异常平仓价的
+        //    修正，不该挡住整页首屏。
+        const detailList = await Promise.all(
+          campaigns.map(campaign => getCampaignFullData(campaign.id)),
         );
-        if (!cancelled) setRows(full);
+        if (cancelled) return;
+        const full = detailList.map(details => buildRow(details, {}));
+        setRows(full);
+        setLoading(false);
+
+        // ② 后台补齐平仓价校正，逐场到达即静默替换该行——首屏已可用，
+        //    数字随后自行收敛到与详情页完全一致的口径，功能一点不少。
+        void Promise.all(detailList.map(async (details, index) => {
+          const corrections = await fetchLegExitPriceCorrections(
+            details.campaign.symbol,
+            details.legs,
+            details.tradeRecords,
+          ).catch(() => ({} as LegExitPriceCorrections));
+          if (cancelled || Object.keys(corrections).length === 0) return;
+          const corrected = buildRow(details, corrections);
+          setRows(prev => {
+            if (prev.length !== detailList.length) return prev;
+            const next = [...prev];
+            next[index] = corrected;
+            return next;
+          });
+        }));
       } finally {
         if (!cancelled) setLoading(false);
       }

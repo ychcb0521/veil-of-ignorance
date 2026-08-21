@@ -28,8 +28,8 @@ describe('Legs 表栅格', () => {
     const grid = /grid-cols-\[([^\]]+)\]/.exec(s)?.[1] ?? '';
     // 用下划线分隔，但 minmax(200px,1fr) 内部没有下划线，可安全按 _ 切
     const columnCount = grid.split('_').length;
-    expect(columnCount).toBe(12);
-    for (const title of ['#', '角色', '时间', '开仓价', '平仓价', '仓位', '状态', 'R̄', '盈亏 / 贡献', 'Δb', '委托', '操作']) {
+    expect(columnCount).toBe(11);
+    for (const title of ['#', '角色', '时间', '开仓价', '平仓价', '仓位', '状态', '盈亏 / 贡献', 'Δb', '委托', '操作']) {
       expect(s).toContain(`>${title}</div>`);
     }
   });
