@@ -1056,7 +1056,7 @@ P 不再一把手填，而是拆成三个更可回答的问题：<strong>「这�
                   </thead>
                   <tbody>
                     <tr><td className="px-3 py-2 border-t border-border">订单类型</td><td className="px-3 py-2 border-t border-border">区分主力单与对冲单</td><td className="px-3 py-2 border-t border-border">主力单评估方向判断；对冲单改成对冲类型、边界、必要性、把握性与双向预案</td></tr>
-                    <tr><td className="px-3 py-2 border-t border-border">仓位模式</td><td className="px-3 py-2 border-t border-border">强制使用逐仓</td><td className="px-3 py-2 border-t border-border">全仓是硬阻断，必须切换到逐仓才能提交</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border">仓位模式</td><td className="px-3 py-2 border-t border-border">强制使用逐仓，<strong>新标的即默认逐仓</strong></td><td className="px-3 py-2 border-t border-border">全仓是硬阻断，必须切换到逐仓才能提交；默认值因此就设为逐仓，免得每开一个新标的都要先手动切一次</td></tr>
                     <tr><td className="px-3 py-2 border-t border-border">edge / 源头（主力单）</td><td className="px-3 py-2 border-t border-border">第一步：认领靠什么机制赚钱，作为“盈亏同源”标签</td><td className="px-3 py-2 border-t border-border">主力单必填；五选一：顺势延续 / 突破扩张 / 均值回归 / 挤压释放 / 无明确 edge（标红）</td></tr>
                     <tr><td className="px-3 py-2 border-t border-border">机会成本问句（主力单）</td><td className="px-3 py-2 border-t border-border">第一步：认完源头再问“不做更亏吗”</td><td className="px-3 py-2 border-t border-border">主力单必答；三选一：是·不做更亏（放行）/ 否·不做也不亏 / 说不清·凭感觉（后两者＝小机会仓位，触发二次确认）</td></tr>
                     <tr><td className="px-3 py-2 border-t border-border">盈亏比目标（主力单）</td><td className="px-3 py-2 border-t border-border">第二步：判断结构给的收益空间够不够厚</td><td className="px-3 py-2 border-t border-border">五选一：1R / 2R / 3R 为可做；盈亏比不足、目标不清楚标红，触发空仓建议与二次确认</td></tr>

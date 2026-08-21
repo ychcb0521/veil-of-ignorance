@@ -13,6 +13,18 @@ export type OrderType =
   | "SCALED"; // 分段订单
 
 export type MarginMode = "cross" | "isolated";
+
+/**
+ * 新标的下单时的默认仓位模式。
+ *
+ * 取逐仓：本系统把「全仓」定为硬阻断（全仓会把单笔错误扩散到账户整体，
+ * 违背损失有界的底层原则），默认却是全仓的话，每开一个新标的都要先手动切换
+ * 才能提交，默认值与硬约束自相矛盾。
+ *
+ * 只作用于「尚未为该标的显式选过仓位模式」的实时下单路径；
+ * 历史记录里缺失该字段的回填保持原样，不追溯改写过去交易的含义。
+ */
+export const DEFAULT_MARGIN_MODE: MarginMode = "isolated";
 export type SettlementMode = "usdt" | "coin";
 
 /**

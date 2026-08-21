@@ -431,7 +431,7 @@ export function PreTradeSnapshotForm({
 
   const isHedge = isTrade && orderKind === 'hedge';
   const currentLeverage = getSymbolLeverage(symbol) ?? leverage;
-  const currentMarginMode = getSymbolMarginMode(symbol) ?? 'cross';
+  const currentMarginMode = getSymbolMarginMode(symbol);
   const settlementMode: SettlementMode = orderParams?.settlementMode ?? 'usdt';
   const settlementAsset = orderParams?.settlementAsset ?? (settlementMode === 'coin' ? getSettlementAsset(symbol) : 'USDT');
   const contractSizeUsd = settlementMode === 'coin' && orderParams?.contractSizeUsd != null

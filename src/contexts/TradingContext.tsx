@@ -43,6 +43,7 @@ import type {
 } from '@/types/trading';
 import {
   calcUnrealizedPnl,
+  DEFAULT_MARGIN_MODE,
   DEFAULT_SETTLEMENT_MODE,
   MAINTENANCE_MARGIN_RATE, LIQUIDATION_FEE_RATE, FUNDING_RATE, FUNDING_HOURS, getTriggerOperator,
 } from '@/types/trading';
@@ -633,7 +634,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
   }, [setLeverageMap]);
 
   const getSymbolMarginMode = useCallback((symbol: string): MarginMode => {
-    return marginModeMap[symbol] ?? 'cross';
+    return marginModeMap[symbol] ?? DEFAULT_MARGIN_MODE;
   }, [marginModeMap]);
 
   const setSymbolMarginMode = useCallback((symbol: string, mode: MarginMode) => {
