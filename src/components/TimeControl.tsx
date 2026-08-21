@@ -18,6 +18,9 @@ import {
 import type { TimeMachineStatus } from '@/hooks/useTimeSimulator';
 import type { TimeMode } from '@/contexts/TradingContext';
 import { useTradingContext } from '@/contexts/TradingContext';
+import { useAuth } from '@/contexts/AuthContext';
+import { listAllCampaigns } from '@/lib/journalApi';
+import { buildCampaignDayIndex, hasCampaignOnSignalDay } from '@/lib/signalCampaignIndex';
 import { PreTradeSnapshotDialog } from '@/components/journal/PreTradeSnapshotDialog';
 
 interface Props {
@@ -49,6 +52,7 @@ export function TimeControl({
   signalJumpInterval = '1m', signalJumpIntervalMs = 60_000,
 }: Props) {
   const ctx = useTradingContext();
+  const { user } = useAuth();
   const [noEntryOpen, setNoEntryOpen] = useState(false);
   const [noEntrySimTime, setNoEntrySimTime] = useState<number>(Date.now());
   const [visualSpeed, setVisualSpeed] = useState(speed);
@@ -198,6 +202,20 @@ export function TimeControl({
     }
     return set;
   }, [ctx.tradeHistory, ctx.positionsMap]);
+
+  // 「该标的在信号当日有没有开过战役」的索引。与上面的 tradedSymbols 是两件事：
+  // 那个只问「这个标的做过没有」（不分日期），这个问的是「信号那天做没做」。
+  // 战役数据在服务端，只在信号库展开时拉一次，避免每次渲染都打库。
+  const [campaignDayIndex, setCampaignDayIndex] = useState<Set<string>>(() => new Set());
+  useEffect(() => {
+    if (!signalLibOpen || !user?.id) return;
+    let cancelled = false;
+    void listAllCampaigns(user.id)
+      .then(list => { if (!cancelled) setCampaignDayIndex(buildCampaignDayIndex(list)); })
+      // 拉取失败就不标注——这只是辅助信息，绝不能挡住信号库本身的使用
+      .catch(() => { if (!cancelled) setCampaignDayIndex(new Set()); });
+    return () => { cancelled = true; };
+  }, [signalLibOpen, user?.id]);
 
   const doImport = (text: string) => {
     const { signals: parsed, errors } = parseSignalText(text);
@@ -540,7 +558,9 @@ export function TimeControl({
               </div>
             ) : (
               <div className="max-h-56 divide-y divide-border/40 overflow-y-auto rounded border border-border/60">
-                {sortedFiltered.map(sig => (
+                {sortedFiltered.map(sig => {
+                  const hasDayCampaign = hasCampaignOnSignalDay(campaignDayIndex, sig);
+                  return (
                   <div key={sig.id} className="group flex items-center gap-2 px-2.5 py-1.5 hover:bg-accent/60">
                     <button
                       onClick={() => handleJumpSignal(sig)}
@@ -557,7 +577,19 @@ export function TimeControl({
                         )}
                         <span className="truncate">{sig.symbol}</span>
                       </span>
-                      <span className="shrink-0 font-mono text-[10px] text-muted-foreground">{sig.timeLabel}</span>
+                      <span className="flex shrink-0 items-center gap-1">
+                        <span className="font-mono text-[10px] text-muted-foreground">{sig.timeLabel}</span>
+                        {hasDayCampaign && (
+                          // 低调标注：当日该标的已有战役。用一个小圆点而非文字/勾号，
+                          // 扫视时不抢注意力，需要时 hover 才给出说明。
+                          <span
+                            data-testid="signal-day-campaign"
+                            title="当日该标的已有交易战役"
+                            aria-label="当日已有战役"
+                            className="h-1.5 w-1.5 shrink-0 rounded-full bg-[#0ecb81]/50"
+                          />
+                        )}
+                      </span>
                       {sig.fallbackZone && (
                         <span className="truncate text-[10px] text-[#F0B90B]/90">兜底 {sig.fallbackZone}</span>
                       )}
@@ -589,7 +621,8 @@ export function TimeControl({
                       <X className="w-3.5 h-3.5" />
                     </button>
                   </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>
