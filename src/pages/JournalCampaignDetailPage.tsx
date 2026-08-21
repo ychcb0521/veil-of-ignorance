@@ -40,7 +40,7 @@ import {
   resolveCampaignInitialRiskFraction,
   shouldSuggestCampaignEnd,
 } from '@/lib/campaignAnalysis';
-import { campaignStatusFromRealizedPnl, computeCampaignRealizedPnl } from '@/lib/campaignRealizedPnl';
+import { campaignStatusFromRealizedPnl, computeCampaignRealizedPnl, hasMaterialDrift } from '@/lib/campaignRealizedPnl';
 import {
   computeCampaignExpectancies,
   formatArithmeticExpectancy,
@@ -906,6 +906,9 @@ export default function JournalCampaignDetailPage() {
   const campaignPnlOverviewItems = useMemo<CampaignPnlOverviewItem[]>(() => {
     if (!campaign || !accuracy) return [];
     const realizedPnl = pnlReconciliation?.correctedPnl ?? campaign.final_realized_pnl;
+    const pnlSettlement = campaign ? computeCampaignRealizedPnl(campaign, legs, tradeRecords, legExitPriceCorrections) : null;
+    // 系统一直算得出这个差额，却从来不显示——分歧被静默吞掉正是「两页两个数」能长期存在的原因。
+    const pnlDrift = pnlSettlement && hasMaterialDrift(pnlSettlement) ? pnlSettlement.drift : null;
     const payoffRatio = campaignMetricValues?.profitCaptureRatio ?? null;
     const opportunityQuality = campaignMetricValues?.opportunityQuality ?? null;
     const arithmeticExpectancy = campaignMetricValues?.arithmeticExpectancy ?? null;
@@ -929,6 +932,25 @@ export default function JournalCampaignDetailPage() {
           <>
             <p>本场战役所有已平仓 Legs 的实际盈亏合计，包括主仓、加仓、对冲与止盈的已实现结果。</p>
             <div className="rounded bg-muted/60 px-2 py-1 font-mono text-foreground">已实现 P&amp;L = Σ 各已平仓 Leg 盈亏</div>
+            <p>
+              这个数与下方 Legs 表的「合计」行、卡片上的状态标签同源，按构造必然相等；
+              取自{' '}
+              <span className="text-foreground">
+                {pnlSettlement?.basis === 'records' ? '成交记录'
+                  : pnlSettlement?.basis === 'mixed' ? '成交记录 + 复盘快照'
+                  : pnlSettlement?.basis === 'leg_snapshots' ? '复盘快照'
+                  : pnlSettlement?.basis === 'events' ? '战役事件'
+                  : pnlSettlement?.basis === 'campaign_summary' ? '落库缓存'
+                  : '尚未结算'}
+              </span>
+              。一个仓位分几刀平掉时，每一刀都计入；资金费不并入任何腿。
+            </p>
+            {pnlDrift != null && (
+              <p className="text-[#F0B90B]">
+                落库缓存为 {pnlSettlement?.stored?.toFixed(2)} USDT，与现算值相差 {pnlDrift.toFixed(2)} USDT。
+                下次读取本战役时会自动回写收敛；若长期不归零说明写库失败。
+              </p>
+            )}
           </>
         ),
       },
@@ -1479,7 +1501,7 @@ export default function JournalCampaignDetailPage() {
   const handleExportCampaignReviewsTxt = () => {
     if (!campaign || reviewedLegs.length === 0) return;
     try {
-      const fileName = exportCampaignPostReviewsTxt(campaign, legs, campaignAccountName);
+      const fileName = exportCampaignPostReviewsTxt(campaign, legs, campaignAccountName, tradeRecords);
       toast.success('平仓评价已保存为 TXT', { description: fileName });
     } catch (error) {
       toast.error(error instanceof Error ? error.message : String(error));

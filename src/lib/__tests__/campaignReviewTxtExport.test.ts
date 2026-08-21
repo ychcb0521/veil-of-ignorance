@@ -17,7 +17,9 @@ const campaign = {
   title: 'BTCUSDT 复盘战役',
   opened_at: '2026-07-20T02:00:00.000Z',
   status: 'closed_profit',
-  final_realized_pnl: 456.78,
+  // 与两条腿的 post_realized_pnl 之和一致（123.45 + −999）。
+  // 落库值是由各腿推导出来的缓存，写一个对不上的数在真实数据里不成立。
+  final_realized_pnl: -875.55,
 } as TradeCampaign;
 
 function makeLeg(overrides: Partial<TradeJournal>): TradeJournal {
@@ -58,7 +60,7 @@ describe('campaignReviewTxtExport', () => {
     expect(output).toContain('平仓评价数量：1');
     expect(output).toContain('问题：是否做到了珍惜“每一个球”？\n答案：86%');
     expect(output).toContain('问题：这笔交易的结果是什么？\n答案：赢');
-    expect(output).toContain('问题：整个战役的总利润是多少？\n答案：456.78');
+    expect(output).toContain('问题：整个战役的总利润是多少？\n答案：-875.55');
     expect(output).not.toContain('问题：这笔交易的已实现盈亏是多少？');
     expect(output).toContain('问题：入场阶段的决策质量如何？\n答案：正当过程（结构对）');
     expect(output).toContain('问题：持仓阶段的决策质量如何？\n答案：错误过程（结构错）');

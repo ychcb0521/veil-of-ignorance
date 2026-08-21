@@ -2200,6 +2200,9 @@ export default function JournalCampaignsPage() {
             const arithmeticTone = arithmeticExpectancy == null || arithmeticExpectancy === 0
               ? 'text-foreground/80'
               : arithmeticExpectancy > 0 ? 'text-[#0ECB81]' : 'text-[#F6465D]';
+            // 下注比例吃掉全部账户权益：几何期望必然是 −100%/笔（G = 0）。
+            // 这是仓位大小的结论，不是本场盈亏，所以会和正的算术期望同时出现。
+            const ruinousSizing = initialRiskFraction != null && initialRiskFraction >= 1;
             const geometricTone = geometricExpectancy == null || geometricExpectancy === 0
               ? 'text-foreground/80'
               : geometricExpectancy > 0 ? 'text-[#0ECB81]' : 'text-[#F6465D]';
@@ -2331,15 +2334,28 @@ export default function JournalCampaignsPage() {
                   </div>
                   <div
                     data-testid="campaign-geometric-expectancy"
+                    data-ruinous-sizing={ruinousSizing ? 'true' : undefined}
                     title={initialRiskFraction == null
                       ? '缺少有效初始最大预期亏损，或没有可用的账户总资产，无法计算单场几何期望'
-                      : initialRiskSource === 'current_account_fallback'
-                        ? `历史估算：xᵢ = 最大预期亏损 ÷ 今日当前总账户资产 ${riskAccountEquity?.toFixed(2) ?? '—'} = ${(initialRiskFraction * 100).toFixed(2)}%`
-                        : `xᵢ = 最大预期亏损 ÷ 主力开仓实时总资产快照 ${riskAccountEquity?.toFixed(2) ?? '—'} = ${(initialRiskFraction * 100).toFixed(2)}%`}
+                      : ruinousSizing
+                        ? `本场下注比例 xᵢ = 最大预期亏损 ÷ 账户总资产 ${riskAccountEquity?.toFixed(2) ?? '—'} = ${(initialRiskFraction * 100).toFixed(2)}% ≥ 100%：`
+                          + '这一注押上了全部本金，重复下去必然归零，故几何期望记为 −100%/笔。'
+                          + '它评判的是仓位大小，与本场实际盈亏无关——所以可以和正的算术期望并存。'
+                          + `注意卡片左侧的「预期回撤 ${initialExpectedMaxDrawdownPct.toFixed(2)}%」是价格层面的口径（主力入场到对冲边界的距离），与这里的账户层面 xᵢ 不是同一个量。`
+                        : initialRiskSource === 'current_account_fallback'
+                          ? `历史估算：xᵢ = 最大预期亏损 ÷ 今日当前总账户资产 ${riskAccountEquity?.toFixed(2) ?? '—'} = ${(initialRiskFraction * 100).toFixed(2)}%`
+                          : `xᵢ = 最大预期亏损 ÷ 主力开仓实时总资产快照 ${riskAccountEquity?.toFixed(2) ?? '—'} = ${(initialRiskFraction * 100).toFixed(2)}%`}
                     className="inline-flex h-7 shrink-0 items-center gap-1.5 border-r border-border/60 px-3"
                   >
                     <span className="text-[10px] text-muted-foreground/70">几何期望：</span>
                     <span className={`whitespace-nowrap font-mono text-[10px] font-medium tabular-nums ${geometricTone}`}>{formatGeometricExpectancy(geometricExpectancy)}</span>
+                    {/* −100%/笔 与一个正的算术期望并排出现时，不加标注只会被读成 bug。
+                        这个徽标点明它是「仓位大小的判决」而不是「本场盈亏」，不用悬停就看得懂。 */}
+                    {ruinousSizing && (
+                      <span className="rounded-sm bg-[#F6465D]/15 px-1 text-[9px] leading-4 text-[#F6465D]">
+                        仓位击穿
+                      </span>
+                    )}
                   </div>
                   <div className="inline-flex h-7 shrink-0 items-center gap-1.5 px-3" data-testid="campaign-mirror-tp-status">
                     <span className="text-[10px] text-muted-foreground/70">镜像止盈：</span>

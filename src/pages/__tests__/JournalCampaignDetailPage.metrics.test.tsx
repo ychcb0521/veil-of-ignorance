@@ -461,6 +461,8 @@ describe('JournalCampaignDetailPage metrics', () => {
       expect.objectContaining({ id: 'winner' }),
       expect.arrayContaining([expect.objectContaining({ id: 'winner-main' })]),
       '主账户',
+      // 第四个参数是成交记录：导出的 TXT 必须与界面显示的战役盈亏同源
+      expect.any(Array),
     );
   }, 10_000);
 
@@ -521,6 +523,7 @@ describe('JournalCampaignDetailPage metrics', () => {
           post_reflection: '历史评价答案',
         })],
         '主账户',
+        expect.any(Array),
       );
     } finally {
       delete detailsById['legacy-review'];

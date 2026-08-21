@@ -22,6 +22,8 @@ import {
 } from '@/lib/structureResult';
 import { formatBeijingTime } from '@/lib/timeFormat';
 import type { TradeCampaign, TradeJournal } from '@/types/journal';
+import type { TradeRecord } from '@/types/trading';
+import { computeCampaignRealizedPnl } from '@/lib/campaignRealizedPnl';
 
 type QuestionAnswer = {
   question: string;
@@ -149,28 +151,8 @@ function addHistorical(
   if (answer) target.push({ question, answer });
 }
 
-function resolveCampaignTotalRealizedPnl(
-  campaign: TradeCampaign,
-  legs: TradeJournal[],
-): number | null {
-  if (
-    typeof campaign.final_realized_pnl === 'number'
-    && Number.isFinite(campaign.final_realized_pnl)
-  ) {
-    return campaign.final_realized_pnl;
-  }
-
-  let hasRealizedPnl = false;
-  const total = legs.reduce((sum, leg) => {
-    if (typeof leg.post_realized_pnl !== 'number' || !Number.isFinite(leg.post_realized_pnl)) {
-      return sum;
-    }
-    hasRealizedPnl = true;
-    return sum + leg.post_realized_pnl;
-  }, 0);
-
-  return hasRealizedPnl ? total : null;
-}
+// 曾经这里是第四套口径（落库缓存优先、否则 Σ post_realized_pnl，完全不看成交记录），
+// 导出的 TXT 因此可能与界面显示的战役盈亏不是一个数。改走全局唯一真源。
 
 function buildLegQuestionAnswers(
   leg: TradeJournal,
@@ -417,12 +399,13 @@ export function buildCampaignPostReviewsTxt(
   campaign: TradeCampaign,
   legs: TradeJournal[],
   accountName?: string | null,
+  tradeRecords: TradeRecord[] = [],
 ): string {
   const reviewed = reviewedCampaignLegs(legs);
   if (reviewed.length === 0) {
     throw new Error('当前战役没有可导出的平仓评价');
   }
-  const campaignTotalRealizedPnl = resolveCampaignTotalRealizedPnl(campaign, legs);
+  const campaignTotalRealizedPnl = computeCampaignRealizedPnl(campaign, legs, tradeRecords).total;
 
   const header = [
     `交易战役：${campaign.title || campaignKlineTitleName(campaign)}`,
@@ -470,8 +453,9 @@ export function exportCampaignPostReviewsTxt(
   campaign: TradeCampaign,
   legs: TradeJournal[],
   accountName?: string | null,
+  tradeRecords: TradeRecord[] = [],
 ): string {
-  const content = buildCampaignPostReviewsTxt(campaign, legs, accountName);
+  const content = buildCampaignPostReviewsTxt(campaign, legs, accountName, tradeRecords);
   const fileName = campaignPostReviewsTxtFileName(campaign, accountName);
   const blob = new Blob(['\uFEFF', content], { type: 'text/plain;charset=utf-8' });
   const url = URL.createObjectURL(blob);
