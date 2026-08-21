@@ -78,6 +78,9 @@ function input(): CampaignBoardExportInput {
   };
 }
 
+/** 「委托」列在 COLUMNS 里的下标。插新列时只需改这里，不必逐处改数字。 */
+const ORDER_COL = 9;
+
 describe('campaign PNG overview', () => {
   it('完整包含战役原数据和盈亏概览字段', () => {
     const overview = buildCampaignBoardOverview(input());
@@ -215,7 +218,7 @@ describe('campaign PNG overview', () => {
       '原 0.500000',
       'K线 0.180000-0.220000',
     ]);
-    expect(rows[0].cells[8].map(line => line.text)).toEqual(expect.arrayContaining([
+    expect(rows[0].cells[ORDER_COL].map(line => line.text)).toEqual(expect.arrayContaining([
       '空 0.120000 · 已触发',
     ]));
   });
@@ -253,8 +256,8 @@ describe('campaign PNG overview', () => {
       }],
     });
 
-    expect(rows[0].cells[8].map(line => line.text)).toContain('空 0.120000 · 已撤');
-    expect(rows[1].cells[8].map(line => line.text)).toEqual([
+    expect(rows[0].cells[ORDER_COL].map(line => line.text)).toContain('空 0.120000 · 已撤');
+    expect(rows[1].cells[ORDER_COL].map(line => line.text)).toEqual([
       '镜像止盈',
       '委 2026-07-14 09:00',
       '触 —',
@@ -310,7 +313,7 @@ describe('campaign PNG overview', () => {
       reverseHedgeOrders: [],
     });
 
-    expect(rows[0].cells[8].map(line => line.text)).toEqual([
+    expect(rows[0].cells[ORDER_COL].map(line => line.text)).toEqual([
       '镜像止盈',
       '委 2026-07-14 09:05',
       '触 2026-07-14 09:45',
@@ -350,7 +353,7 @@ describe('campaign PNG overview', () => {
       }],
     });
 
-    expect(rows[0].cells[8].map(line => line.text)).toEqual(['—']);
-    expect(rows[1].cells[8].map(line => line.text)).toContain('空 0.120000 · 已触发');
+    expect(rows[0].cells[ORDER_COL].map(line => line.text)).toEqual(['—']);
+    expect(rows[1].cells[ORDER_COL].map(line => line.text)).toContain('空 0.120000 · 已触发');
   });
 });

@@ -8,6 +8,7 @@ import { buildTradeRecordLookup, journalOperationTime } from '@/lib/objectiveOpe
 import { buildCampaignReverseOrderLegMap } from '@/lib/campaignReverseOrderAttribution';
 import { resolveMirrorTpOrderTiming } from '@/lib/campaignMirrorTpOrderTiming';
 import type { CampaignEvent, TradeJournal } from '@/types/journal';
+import { computeLegPnlContributions } from '@/lib/campaignLegPnl';
 import type { CampaignReverseHedgeOrder, TradeRecord } from '@/types/trading';
 
 interface Props {
@@ -57,6 +58,14 @@ export function CampaignLegsList({
   const nav = useNavigate();
   const recordMap = useMemo(() => buildTradeRecordLookup(tradeRecords), [tradeRecords]);
   const highlightedSet = useMemo(() => new Set(highlightedLegIds), [highlightedLegIds]);
+  // 每条腿的已实现盈亏与对全场的贡献率。必须整体算——贡献率的分母依赖全部腿。
+  const legPnlMap = useMemo(
+    () => computeLegPnlContributions(
+      legs,
+      leg => (leg.trade_record_id ? recordMap.get(leg.trade_record_id) ?? null : null),
+    ),
+    [legs, recordMap],
+  );
   const reverseOrderLegMap = useMemo(
     () => buildCampaignReverseOrderLegMap(legs, reverseHedgeOrders),
     [legs, reverseHedgeOrders],
@@ -66,7 +75,7 @@ export function CampaignLegsList({
     <div className="bg-card border border-border rounded overflow-hidden">
       <div className="overflow-x-auto">
         <div className="min-w-[1320px]">
-          <div className="grid grid-cols-[48px_120px_1fr_96px_96px_92px_88px_72px_210px_230px] text-[10px] text-muted-foreground bg-muted/40 py-2 px-3">
+          <div className="grid grid-cols-[48px_120px_1fr_96px_96px_92px_88px_72px_132px_210px_230px] text-[10px] text-muted-foreground bg-muted/40 py-2 px-3">
             <div>#</div>
             <div>角色</div>
             <div>时间</div>
@@ -75,6 +84,7 @@ export function CampaignLegsList({
             <div>仓位</div>
             <div>状态</div>
             <div>R̄</div>
+            <div>盈亏 / 贡献</div>
             <div>委托</div>
             <div>操作</div>
           </div>
@@ -124,6 +134,36 @@ export function CampaignLegsList({
                   <div>{leg.pre_position_size != null ? leg.pre_position_size.toFixed(2) : '—'}</div>
                   <div className={status.className}>{status.label}</div>
                   <div>{leg.post_r_multiple != null ? leg.post_r_multiple.toFixed(2) : '—'}</div>
+                  {(() => {
+                    const entry = legPnlMap.get(leg.id);
+                    const pnl = entry?.pnl ?? null;
+                    if (pnl == null) {
+                      // 未平仓 / 无数据：显示「—」而不是 0——0 会被读成「打平」
+                      return <div className="text-muted-foreground">—</div>;
+                    }
+                    const positive = pnl > 0;
+                    const contribution = entry?.contribution ?? null;
+                    return (
+                      <div
+                        data-testid={`leg-pnl-${leg.id}`}
+                        title="该腿的已实现盈亏，以及它在本场各腿盈亏绝对值之和里所占的份额"
+                        className="leading-tight"
+                      >
+                        <div
+                          className={`font-mono tabular-nums ${
+                            pnl === 0 ? 'text-muted-foreground' : positive ? 'text-[#0ECB81]' : 'text-[#F6465D]'
+                          }`}
+                        >
+                          {positive ? '+' : ''}{pnl.toFixed(2)}
+                        </div>
+                        <div className="text-[9px] text-muted-foreground">
+                          {contribution == null
+                            ? '—'
+                            : `${contribution > 0 ? '+' : ''}${(contribution * 100).toFixed(1)}%`}
+                        </div>
+                      </div>
+                    );
+                  })()}
                   <div className="space-y-1 pr-2 font-sans">
                     {mirrorTpTiming && (
                       <div className="rounded border border-[#F0B90B]/25 bg-[#F0B90B]/5 px-2 py-1 leading-tight">

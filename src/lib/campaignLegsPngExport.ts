@@ -11,6 +11,7 @@ import { formatCampaignLeverage, resolveCampaignMainLeverage } from '@/lib/campa
 import { formatCampaignDisplayCode } from '@/lib/campaignCode';
 import { buildCampaignReverseOrderLegMap } from '@/lib/campaignReverseOrderAttribution';
 import { resolveMirrorTpOrderTiming } from '@/lib/campaignMirrorTpOrderTiming';
+import { computeLegPnlContributions } from '@/lib/campaignLegPnl';
 import type { TradeCampaign, TradeJournal } from '@/types/journal';
 import type { EmotionDiaryExportSummary } from '@/types/emotionDiary';
 import type { CampaignReverseHedgeOrder, TradeRecord } from '@/types/trading';
@@ -74,6 +75,7 @@ const COLUMNS = [
   { title: '仓位', width: 122 },
   { title: '状态', width: 108 },
   { title: 'R̄', width: 82 },
+  { title: '盈亏 / 贡献', width: 150 },
   { title: '委托', width: 470 },
 ] as const;
 
@@ -202,6 +204,11 @@ export function buildCampaignLegsExportRows(input: ExportInput): CampaignLegsExp
     input.reverseHedgeOrders,
   );
 
+  const legPnlMap = computeLegPnlContributions(
+    input.legs,
+    leg => (leg.trade_record_id ? recordMap.get(leg.trade_record_id) ?? null : null),
+  );
+
   return input.legs.map(leg => {
     const record = leg.trade_record_id ? recordMap.get(leg.trade_record_id) ?? null : null;
     const execution = resolveLegExecution(leg, record, input.legExitPriceCorrections);
@@ -262,6 +269,26 @@ export function buildCampaignLegsExportRows(input: ExportInput): CampaignLegsExp
       [{ text: leg.pre_position_size != null ? leg.pre_position_size.toFixed(2) : '—' }],
       [{ text: status.label, color: status.color, bold: true }],
       [{ text: leg.post_r_multiple != null ? leg.post_r_multiple.toFixed(2) : '—' }],
+      (() => {
+        // 与页面上的 Legs 列表同源，避免导出图与界面读数打架
+        const entry = legPnlMap.get(leg.id);
+        const pnl = entry?.pnl ?? null;
+        if (pnl == null) return [{ text: '—', color: '#848E9C' }];
+        const contribution = entry?.contribution ?? null;
+        return [
+          {
+            text: `${pnl > 0 ? '+' : ''}${pnl.toFixed(2)}`,
+            color: pnl === 0 ? '#5F6B7A' : pnl > 0 ? '#0ECB81' : '#F6465D',
+            bold: true,
+          },
+          {
+            text: contribution == null
+              ? '—'
+              : `${contribution > 0 ? '+' : ''}${(contribution * 100).toFixed(1)}%`,
+            color: '#848E9C',
+          },
+        ];
+      })(),
       reverseLines,
     ];
     const maxLines = Math.max(...cells.map(cell => cell.length));
