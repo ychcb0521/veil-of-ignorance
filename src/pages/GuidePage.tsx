@@ -794,6 +794,18 @@ P 不再一把手填，而是拆成三个更可回答的问题：<strong>「这�
                 <li><strong>这是上限，不是目标。</strong>取等号时综合成本线恰好落在止损线上（Σ X<sub>j</sub>(S<sub>stop</sub> − P<sub>j</sub>) = 0 ⟺ S<sub>stop</sub> = 综合成本）；要让止损线严格高于成本线，实际加仓量取<strong>小于</strong> X<sub>i</sub>。</li>
                 <li>币本位照用。反向合约的币盈亏分母是当前价而非开仓价，但锁定点的定义是盈亏归零，零乘任何价格仍是零——线性与反向在锁定点给出同一个币量。下单时折成名义 N = X<sub>i</sub> × P<sub>i</sub> USD 再除以面值得张数。</li>
               </ul>
+              <P>
+                <strong>X₁ 从盘面怎么读。</strong>头仓通常是多轮加仓堆出来的，但<strong>不必逐腿算</strong>：把 S₀ 取<strong>开仓均价</strong>、X₁ 取<strong>名义总仓位 ÷ 开仓均价</strong>，单腿公式与多腿公式结果<strong>完全相同</strong>（多腿分子 Σ X<sub>j</sub>(S<sub>stop</sub> − P<sub>j</sub>) 恒等于 (N ÷ S̄)(S<sub>stop</sub> − S̄)，S̄ 即开仓均价）。持仓卡上三个数就够：
+              </P>
+              <div className="my-3 rounded bg-muted/60 px-3 py-2 font-mono text-[11px] leading-relaxed text-foreground">
+                X₁ = 张数 × 面值 ÷ 开仓均价 　（U 本位：X₁ 就是「数量」，无需换算）<br />
+                或直接算垫子： 垫子(USD) = 名义 × (S<sub>stop</sub> − 开仓均价) ÷ 开仓均价
+              </div>
+              <ul className="list-disc pl-6 text-[14px] text-foreground/90 space-y-1">
+                <li><strong>名义与均价必须同批。</strong>用全部腿的总名义，S₀ 就得用全部腿的开仓均价——拿总名义去配头仓那一笔的成交价，垫子会被算大近一倍，锁不住。</li>
+                <li><strong>别用卡片上的「≈ ×× 币」。</strong>那一栏是按<strong>标记价</strong>折算的当前币当量（名义 ÷ 现价），价格一涨就缩水；X₁ 要的是按<strong>开仓均价</strong>折算的值，开仓即固定、不随价格变。两者在 S₂ 处相差 S₀ ÷ S₂ 倍，直接代入会欠锁。</li>
+                <li><strong>币本位多腿的均价按名义加权。</strong>正确的合并均价是 Σ张<sub>j</sub> ÷ Σ(张<sub>j</sub> ÷ P<sub>j</sub>)（调和平均，与币安 COIN-M 一致）。持仓卡当前显示的是按张数算术加权的值，多腿且各腿价差较大时会略偏高，据此算出的 X₂ 偏小——方向保守（欠锁不会爆），但要精确时请用上式自行折算。</li>
+              </ul>
 
             </section>
 
