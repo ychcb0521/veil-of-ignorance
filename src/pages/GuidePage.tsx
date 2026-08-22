@@ -782,29 +782,19 @@ P 不再一把手填，而是拆成三个更可回答的问题：<strong>「这�
                 两条不可逆的线：<strong>镜像止盈位置不能轻易动</strong>——即使出现了新的支撑位，也不能以此调低镜像止盈；止损线可以上调，但前提是新位置<strong>被证明非常结实</strong>。<strong>严框架处于低预期回撤时，也不能轻易调大预期最大亏损</strong>——预期回撤小不是放大风险敞口的理由。
               </Highlight>
               <P>
-                <strong>加仓量：浮盈垫锁死。</strong>止损线上调之后，能加多少由<strong>既有腿在新止损线上的浮盈</strong>决定：新腿从加仓价跌回止损线的亏损，恰好被这笔浮盈垫兜住，整场战役在止损线上盈亏归零——这就是「锁死」。
+                <strong>加仓量：浮盈垫锁死。</strong>止损线上调之后，能加多少由<strong>既有腿在新止损线上的浮盈</strong>决定：新腿从加仓价跌回止损线的亏损，恰好被这笔浮盈垫兜住，整场战役在止损线上盈亏归零。三个价格定义一个区间：<strong>S̄ 开仓均价 · S₁ 新止损线 · S₂ 加仓价</strong>。
               </P>
               <div className="my-3 rounded bg-muted/60 px-3 py-2 font-mono text-[11px] leading-relaxed text-foreground">
-                单腿：X₂ = X₁ (S₁ − S₀) ÷ (S₂ − S₁)<br />
-                多腿：X<sub>i</sub> = Σ<sub>j</sub> X<sub>j</sub> (S<sub>stop</sub> − P<sub>j</sub>) ÷ (P<sub>i</sub> − S<sub>stop</sub>)
+                平衡式：X₁ (S₁ − S̄) = X₂ (S₂ − S₁)　　　　旧腿在止损线上的垫子 = 新腿跌回止损线的亏损<br />
+                赔率式：X₂ = X₁ ÷ b ，　b = (S₂ − S₁) ÷ (S₁ − S̄)　　　1 ÷ (1 + b) = P₀ = (S₁ − S̄) ÷ (S₂ − S̄)<br />
+                读　数：X₁ = 名义总仓位 ÷ 开仓均价　　　　（U 本位即「数量」；币本位 = 张数 × 面值 ÷ 开仓均价）
               </div>
               <ul className="list-disc pl-6 text-[14px] text-foreground/90 space-y-1">
-                <li>X₁ 头仓币量、S₀ 开仓价、S₁ 新止损线、S₂ 加仓价。例：10 币 @100，止损上移到 110，价格到 120 加仓 → X₂ = 10 × 10 ÷ 10 = <strong>10 币</strong>；跌回 110 时头仓 +100、新腿 −100，合计 0。</li>
-                <li>多腿版把<strong>每一条既有腿</strong>在新止损线上的盈亏求和作分子。止损线每上移一次都要<strong>重算全部腿</strong>——离止损线越远的腿贡献的垫子越厚，不是只看上一腿。</li>
-                <li><strong>这是上限，不是目标。</strong>取等号时综合成本线恰好落在止损线上（Σ X<sub>j</sub>(S<sub>stop</sub> − P<sub>j</sub>) = 0 ⟺ S<sub>stop</sub> = 综合成本）；要让止损线严格高于成本线，实际加仓量取<strong>小于</strong> X<sub>i</sub>。</li>
-                <li>币本位照用。反向合约的币盈亏分母是当前价而非开仓价，但锁定点的定义是盈亏归零，零乘任何价格仍是零——线性与反向在锁定点给出同一个币量。下单时折成名义 N = X<sub>i</sub> × P<sub>i</sub> USD 再除以面值得张数。</li>
-              </ul>
-              <P>
-                <strong>X₁ 从盘面怎么读。</strong>头仓通常是多轮加仓堆出来的，但<strong>不必逐腿算</strong>：把 S₀ 取<strong>开仓均价</strong>、X₁ 取<strong>名义总仓位 ÷ 开仓均价</strong>，单腿公式与多腿公式结果<strong>完全相同</strong>（多腿分子 Σ X<sub>j</sub>(S<sub>stop</sub> − P<sub>j</sub>) 恒等于 (N ÷ S̄)(S<sub>stop</sub> − S̄)，S̄ 即开仓均价）。持仓卡上三个数就够：
-              </P>
-              <div className="my-3 rounded bg-muted/60 px-3 py-2 font-mono text-[11px] leading-relaxed text-foreground">
-                X₁ = 张数 × 面值 ÷ 开仓均价 　（U 本位：X₁ 就是「数量」，无需换算）<br />
-                或直接算垫子： 垫子(USD) = 名义 × (S<sub>stop</sub> − 开仓均价) ÷ 开仓均价
-              </div>
-              <ul className="list-disc pl-6 text-[14px] text-foreground/90 space-y-1">
-                <li><strong>名义与均价必须同批。</strong>用全部腿的总名义，S₀ 就得用全部腿的开仓均价——拿总名义去配头仓那一笔的成交价，垫子会被算大近一倍，锁不住。</li>
-                <li><strong>别用卡片上的「≈ ×× 币」。</strong>那一栏是按<strong>标记价</strong>折算的当前币当量（名义 ÷ 现价），价格一涨就缩水；X₁ 要的是按<strong>开仓均价</strong>折算的值，开仓即固定、不随价格变。两者在 S₂ 处相差 S₀ ÷ S₂ 倍，直接代入会欠锁。</li>
-                <li><strong>币本位多腿的均价按名义加权。</strong>正确的合并均价是 Σ张<sub>j</sub> ÷ Σ(张<sub>j</sub> ÷ P<sub>j</sub>)（调和平均，与币安 COIN-M 一致）。持仓卡当前显示的是按张数算术加权的值，多腿且各腿价差较大时会略偏高，据此算出的 X₂ 偏小——方向保守（欠锁不会爆），但要精确时请用上式自行折算。</li>
+                <li>例：10 币 @100，止损上移到 110，价格到 120 加仓 → b = 10 ÷ 10 = 1，X₂ = <strong>10 币</strong>；跌回 110 时头仓 +100、新腿 −100，合计 0。止损线落在 [S̄, S₂] <strong>正中</strong>时 b = 1、加仓量 = 头仓；越贴近现价 b 越小、能加越多，离成本线越近则几乎加不动。</li>
+                <li><strong>多轮加仓不必逐腿算。</strong>S̄ 取开仓均价、X₁ 取名义 ÷ 开仓均价，与逐腿求和 Σ X<sub>j</sub>(S₁ − P<sub>j</sub>) <strong>恒等</strong>。名义与均价必须来自同一批腿——拿总名义配头仓那一笔的价格，垫子会被算大近一倍。别用持仓卡的「≈ ×× 币」：那是按<strong>标记价</strong>折算、随价格缩水的当前币当量；X₁ 按<strong>开仓均价</strong>折算，开仓即定。</li>
+                <li><strong>这是上限，不是目标。</strong>取等号时综合成本线恰好落在止损线上；要让止损线严格高于成本线，实际加仓量取<strong>小于</strong> X₂。止损线每上移一次都要重算——b 由这三个价格定义，换一组就变。</li>
+                <li><strong>这个 b 不是盘面 P_gap 的 b。</strong>同一时刻两者取值无关：加仓的 b 往<strong>回</strong>看（成本线 → 止损线，已经赚到的），P_gap 的 b 往<strong>前</strong>看（现价 → 目标，还没赚的）。记笔记时带上锚点，或直接用 X₂ = X₁ · P₀ ÷ (1 − P₀)。</li>
+                <li><strong>币本位照用。</strong>锁定点的定义是盈亏归零，零乘任何价格仍是零——线性与反向合约在锁定点给出同一个币量；下单时折成名义 N₂ = X₂ × S₂ USD 再除以面值得张数。多腿的正确合并均价是 Σ张<sub>j</sub> ÷ Σ(张<sub>j</sub> ÷ P<sub>j</sub>)（调和平均，与币安 COIN-M 一致）；持仓卡当前按张数算术加权，多腿且价差大时略偏高、据此算出的 X₂ 偏小（欠锁，方向保守），要精确时请按上式自行折算。</li>
               </ul>
 
             </section>
