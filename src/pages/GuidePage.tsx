@@ -781,6 +781,19 @@ P 不再一把手填，而是拆成三个更可回答的问题：<strong>「这�
               <Highlight>
                 两条不可逆的线：<strong>镜像止盈位置不能轻易动</strong>——即使出现了新的支撑位，也不能以此调低镜像止盈；止损线可以上调，但前提是新位置<strong>被证明非常结实</strong>。<strong>严框架处于低预期回撤时，也不能轻易调大预期最大亏损</strong>——预期回撤小不是放大风险敞口的理由。
               </Highlight>
+              <P>
+                <strong>加仓量：浮盈垫锁死。</strong>止损线上调之后，能加多少由<strong>既有腿在新止损线上的浮盈</strong>决定：新腿从加仓价跌回止损线的亏损，恰好被这笔浮盈垫兜住，整场战役在止损线上盈亏归零——这就是「锁死」。
+              </P>
+              <div className="my-3 rounded bg-muted/60 px-3 py-2 font-mono text-[11px] leading-relaxed text-foreground">
+                单腿：X₂ = X₁ (S₁ − S₀) ÷ (S₂ − S₁)<br />
+                多腿：X<sub>i</sub> = Σ<sub>j</sub> X<sub>j</sub> (S<sub>stop</sub> − P<sub>j</sub>) ÷ (P<sub>i</sub> − S<sub>stop</sub>)
+              </div>
+              <ul className="list-disc pl-6 text-[14px] text-foreground/90 space-y-1">
+                <li>X₁ 头仓币量、S₀ 开仓价、S₁ 新止损线、S₂ 加仓价。例：10 币 @100，止损上移到 110，价格到 120 加仓 → X₂ = 10 × 10 ÷ 10 = <strong>10 币</strong>；跌回 110 时头仓 +100、新腿 −100，合计 0。</li>
+                <li>多腿版把<strong>每一条既有腿</strong>在新止损线上的盈亏求和作分子。止损线每上移一次都要<strong>重算全部腿</strong>——离止损线越远的腿贡献的垫子越厚，不是只看上一腿。</li>
+                <li><strong>这是上限，不是目标。</strong>取等号时综合成本线恰好落在止损线上（Σ X<sub>j</sub>(S<sub>stop</sub> − P<sub>j</sub>) = 0 ⟺ S<sub>stop</sub> = 综合成本）；要让止损线严格高于成本线，实际加仓量取<strong>小于</strong> X<sub>i</sub>。</li>
+                <li>币本位照用。反向合约的币盈亏分母是当前价而非开仓价，但锁定点的定义是盈亏归零，零乘任何价格仍是零——线性与反向在锁定点给出同一个币量。下单时折成名义 N = X<sub>i</sub> × P<sub>i</sub> USD 再除以面值得张数。</li>
+              </ul>
 
             </section>
 
