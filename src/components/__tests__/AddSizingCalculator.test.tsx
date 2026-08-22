@@ -112,6 +112,31 @@ describe('AddSizingCalculator', () => {
     expect(screen.getByTestId('add-sizing-kb-out')).toHaveTextContent('120.0000');
   });
 
+  it('落袋垫与浮盈垫同式：X = 垫 ÷ 险，K_B 默认取 S₁ 即零风险档', () => {
+    // 浮盈垫 Y₁ = 18.3333×(130−109.0909) = 383.33；险 = 10 → X₂ = 38.33
+    // 落袋垫 G = 1.2 RAVE，币本位按 K_B=S₁ 估值 → X_G = 1.2×130/10 = 15.6
+    renderCalc();
+    type('add-sizing-s1', '130');
+    expect(screen.getByTestId('add-sizing-cushion')).toHaveTextContent('383.33 USD ÷ 险 10.0000');
+    type('add-sizing-g', '1.2');
+    // K_B 留空 = 取 S₁ = 零风险档，标题应这么说
+    expect(screen.getByTestId('add-sizing-x2b-out')).toHaveTextContent('零风险');
+    expect(screen.getByTestId('add-sizing-x2b-out')).toHaveTextContent('15.6');
+    // 两本账相加，且此时对冲要一并扛起 B 腿
+    expect(screen.getByTestId('add-sizing-total-add')).toHaveTextContent('53.93');
+    expect(screen.getByTestId('add-sizing-total-hedge')).toHaveTextContent('72.27');
+  });
+
+  it('K_B 拖到 S₁ 之下则 B 腿自带敞口，合计对冲不再并入它', () => {
+    renderCalc();
+    type('add-sizing-s1', '130');
+    type('add-sizing-g', '1.2');
+    type('add-sizing-kb', '120');
+    expect(screen.getByTestId('add-sizing-x2b-out')).toHaveTextContent('带敞口');
+    // B 腿单独在 K_B 处对冲，A 线只管 X₁ + X₂
+    expect(screen.queryByTestId('add-sizing-total-hedge')).not.toBeInTheDocument();
+  });
+
   it('使用说明入口近乎隐形，但点开有公式与链接', () => {
     renderCalc();
     const help = screen.getByTestId('add-sizing-help');
@@ -119,7 +144,9 @@ describe('AddSizingCalculator', () => {
     expect(screen.queryByTestId('add-sizing-help-panel')).not.toBeInTheDocument();
     fireEvent.click(help);
     const panel = screen.getByTestId('add-sizing-help-panel');
-    expect(panel).toHaveTextContent('X₂ = X₁ ÷ b');
+    expect(panel).toHaveTextContent('加仓量 = 垫 ÷ 险');
+    expect(panel).toHaveTextContent('X₂ = Y₁ ÷ 险');
+    expect(panel).toHaveTextContent('X_G = Y_G ÷ 险');
     expect(within(panel).getByRole('link')).toHaveAttribute('href', '/guide#s3-1c');
   });
 });
