@@ -38,7 +38,10 @@ export function suggestLegRoles(journals: TradeJournal[]): SuggestedLegRole[] {
         reason = '时间最早的主力订单';
         mainAssigned = true;
       } else {
-        suggestedRole = MAIN_ADD_ROLES[Math.min(mainAddCount, MAIN_ADD_ROLES.length - 1)] ?? 'reentry_main';
+        // 不夹逼索引：越过最后一个加仓槽时让下标越界，?? 的溢出兜底才有机会触发。
+        // 夹逼会把第 7、8、9…笔全部标成同一个「加仓6」——一个对八行都相同的「建议」
+        // 不含任何信息，还把「我不知道」伪装成了一个具体且笃定的答案。
+        suggestedRole = MAIN_ADD_ROLES[mainAddCount] ?? 'reentry_main';
         mainAddCount += 1;
         if (previous && isTriggeredHedge(previous)) {
           confidence = 'medium';
@@ -164,7 +167,8 @@ export function suggestOrphanRecordRoles(
       });
       continue;
     }
-    const addRole = MAIN_ADD_ROLES[Math.min(addCount, MAIN_ADD_ROLES.length - 1)] ?? 'reentry_main';
+    // 同上：加仓槽用尽后退到 reentry_main，而不是把所有溢出的都叫「加仓6」。
+    const addRole = MAIN_ADD_ROLES[addCount] ?? 'reentry_main';
     addCount += 1;
     out.push({
       id: record.id,

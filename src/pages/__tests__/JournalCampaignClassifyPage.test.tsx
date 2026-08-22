@@ -93,13 +93,16 @@ vi.mock('@/contexts/TradingContext', () => ({
   }),
 }));
 
-vi.mock('@/lib/journalApi', () => ({
-  listUnclassifiedItems: mockListUnclassifiedItems,
-  listAllCampaigns: vi.fn(async () => []),
-  suggestLegRoles: vi.fn(() => []),
-  suggestOrphanRecordRoles: vi.fn(() => []),
-  detachJournalFromCampaign: vi.fn(),
-}));
+vi.mock('@/lib/journalApi', async () => {
+  const real = await vi.importActual<typeof import('@/lib/legRoleSuggestion')>('@/lib/legRoleSuggestion');
+  return {
+    listUnclassifiedItems: mockListUnclassifiedItems,
+    listAllCampaigns: vi.fn(async () => []),
+    suggestLegRoles: real.suggestLegRoles,
+    suggestOrphanRecordRoles: real.suggestOrphanRecordRoles,
+    detachJournalFromCampaign: vi.fn(),
+  };
+});
 
 describe('JournalCampaignClassifyPage', () => {
   beforeEach(() => {
@@ -204,5 +207,73 @@ describe('JournalCampaignClassifyPage', () => {
     expect(await screen.findByRole('option', { name: 'BTCUSDT' })).toBeInTheDocument();
     fireEvent.pointerDown(document.body);
     expect(screen.queryByRole('option', { name: 'BTCUSDT' })).not.toBeInTheDocument();
+  });
+});
+
+/** 造一条 journal：默认未归类、无成交、post_realized_pnl 落库为 0（老数据常见形态）。 */
+function journalFixture(id: string, over: Record<string, unknown>) {
+  return {
+    id, user_id: 'user-1', campaign_id: null, leg_role: null, trade_record_id: null,
+    leverage: 5, post_realized_pnl: 0, post_outcome: null,
+    post_simulated_close_time: null, post_real_close_time: null, ...over,
+  };
+}
+
+describe('归类历史交易表格', () => {
+  beforeEach(() => {
+    mockListUnclassifiedItems.mockResolvedValueOnce({
+      journals: [
+        // RAVE：主力（有成交引用但本地没载入）+ 两张未触发的对冲 + 一张挂单中的主力
+        journalFixture('r-main', { symbol: 'RAVEUSDT', order_kind: 'main', direction: 'long', pre_simulated_time: '2026-04-10T03:48:07+08:00', pre_entry_price: 0.6354, trade_record_id: 'rave-close-missing' }),
+        journalFixture('r-h1', { symbol: 'RAVEUSDT', order_kind: 'hedge', direction: 'short', pre_simulated_time: '2026-04-10T04:35:14+08:00', pre_entry_price: 0.6698 }),
+        journalFixture('r-add', { symbol: 'RAVEUSDT', order_kind: 'main', direction: 'long', pre_simulated_time: '2026-04-10T07:47:55+08:00', pre_entry_price: 1.0098 }),
+        // BLUR 在时间上更晚：主力 + 一笔加仓。若建议跨标的累加，这笔会被标成「加仓2」
+        journalFixture('b-main', { symbol: 'BLURUSDT', order_kind: 'main', direction: 'long', pre_simulated_time: '2026-05-02T10:00:00+08:00', pre_entry_price: 0.016 }),
+        journalFixture('b-add', { symbol: 'BLURUSDT', order_kind: 'main', direction: 'long', pre_simulated_time: '2026-05-02T11:00:00+08:00', pre_entry_price: 0.0165 }),
+      ],
+      orphanRecords: [],
+    });
+  });
+
+  it('未平仓的行不显示 +0.00——0 是「没有数据」不是「打平」', async () => {
+    render(<MemoryRouter initialEntries={['/journal/campaigns/classify?symbol=raveusdt']}><JournalCampaignClassifyPage /></MemoryRouter>);
+    await screen.findByRole('table');
+    expect(screen.queryByText(/\+0\.00/)).not.toBeInTheDocument();
+  });
+
+  it('无成交的行把平仓侧折成一句话，措辞复用下一屏的三态', async () => {
+    render(<MemoryRouter initialEntries={['/journal/campaigns/classify?symbol=raveusdt']}><JournalCampaignClassifyPage /></MemoryRouter>);
+    await screen.findByRole('table');
+    expect(screen.getByText('未触发取消 · 无成交')).toBeInTheDocument();   // 对冲挂单，从未触发
+    expect(screen.getByText('挂单中 · 尚未平仓')).toBeInTheDocument();     // 主力挂单
+    expect(screen.getByText('已成交 · 成交记录未载入')).toBeInTheDocument(); // 有引用但本地没有这条成交
+    const folded = screen.getByText('未触发取消 · 无成交').closest('td')!;
+    expect(folded).toHaveAttribute('colspan', '5');
+  });
+
+  it('时间单行 MM-DD HH:mm:ss，秒留在列内——加仓腿常同一分钟连开两刀，先后只能靠秒', async () => {
+    render(<MemoryRouter initialEntries={['/journal/campaigns/classify?symbol=raveusdt']}><JournalCampaignClassifyPage /></MemoryRouter>);
+    await screen.findByRole('table');
+    const cell = screen.getByText('04-10 03:48:07');
+    expect(cell.textContent).not.toContain('\n');
+    expect(cell).toHaveAttribute('title', '2026-04-10 03:48:07'); // 年份进 title
+  });
+
+  it('合约格里标出主力 / 对冲——决定角色的字段不该是表里唯一看不见的', async () => {
+    render(<MemoryRouter initialEntries={['/journal/campaigns/classify?symbol=raveusdt']}><JournalCampaignClassifyPage /></MemoryRouter>);
+    await screen.findByRole('table');
+    expect(screen.getAllByText('主力').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('对冲').length).toBeGreaterThan(0);
+  });
+
+  it('建议按标的分组：别的币的加仓不会把这个币的计数推高', async () => {
+    // 先渲染 BLUR：它在时间上晚于 RAVE 的主力与加仓。若 mainAddCount 跨标的累加，
+    // BLUR 的那笔加仓会被标成「加仓2」（RAVE 已用掉加仓1）。
+    render(<MemoryRouter initialEntries={['/journal/campaigns/classify?symbol=blurusdt']}><JournalCampaignClassifyPage /></MemoryRouter>);
+    await screen.findByRole('table');
+    expect(screen.getByText('加仓1')).toBeInTheDocument();
+    expect(screen.queryByText('加仓2')).not.toBeInTheDocument();
+    // 建议全称与理由在 title 里可达
+    expect(screen.getByText('加仓1').closest('[title]')).toHaveAttribute('title', expect.stringContaining('加仓1'));
   });
 });

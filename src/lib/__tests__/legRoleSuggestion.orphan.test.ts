@@ -61,3 +61,36 @@ describe('suggestOrphanRecordRoles', () => {
     expect(roleOf(out, 'tp2')).toBe('main_add_1');
   });
 });
+
+describe('加仓槽用尽后的溢出兜底', () => {
+  it('第 7 笔起退到 reentry_main，而不是把所有溢出的都叫「加仓6」', () => {
+    // 原实现用 MAIN_ADD_ROLES[Math.min(n, len-1)] 夹逼索引，
+    // ?? 'reentry_main' 这条溢出兜底因此永远不触发：第 7、8、9… 笔全被标成加仓6。
+    // 一个对多行都相同的「建议」不含信息，还把「我不知道」伪装成了具体答案。
+    const records: OrphanRecordRoleInput[] = [
+      // 留到最后平掉的那笔是主力
+      rec({ id: 'main', openTimeMs: 100, closeTimeMs: 99_000 }),
+      ...Array.from({ length: 8 }, (_, i) =>
+        rec({ id: `add-${i + 1}`, openTimeMs: 1_000 + i, closeTimeMs: 2_000 })),
+    ];
+    const out = suggestOrphanRecordRoles(records, 'long');
+    expect(roleOf(out, 'main')).toBe('main_open');
+    expect(roleOf(out, 'add-1')).toBe('main_add_1');
+    expect(roleOf(out, 'add-6')).toBe('main_add_6');
+    // 越过第 6 个槽后不再重复 main_add_6
+    expect(roleOf(out, 'add-7')).toBe('reentry_main');
+    expect(roleOf(out, 'add-8')).toBe('reentry_main');
+  });
+
+  it('六个加仓槽各不相同——建议要能区分出第几笔', () => {
+    const records: OrphanRecordRoleInput[] = [
+      rec({ id: 'main', openTimeMs: 100, closeTimeMs: 99_000 }),
+      ...Array.from({ length: 6 }, (_, i) =>
+        rec({ id: `add-${i + 1}`, openTimeMs: 1_000 + i, closeTimeMs: 2_000 })),
+    ];
+    const roles = suggestOrphanRecordRoles(records, 'long')
+      .filter(s => s.id.startsWith('add-'))
+      .map(s => s.suggestedRole);
+    expect(new Set(roles).size).toBe(6);
+  });
+});

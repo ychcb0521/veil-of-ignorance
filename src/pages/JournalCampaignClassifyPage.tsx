@@ -16,7 +16,7 @@ import { getSettlementAsset } from '@/lib/coinMargined';
 import { detachJournalFromCampaign, listAllCampaigns, listUnclassifiedItems, suggestLegRoles } from '@/lib/journalApi';
 import { LEG_ROLE_LABELS } from '@/lib/strategyTemplates';
 import { getPositionNotionalUsd } from '@/lib/tradingSettlement';
-import type { TradeCampaign, TradeJournal } from '@/types/journal';
+import type { TradeCampaign, TradeJournal, SuggestedLegRole } from '@/types/journal';
 import type { ClassifiableItem } from '@/types/journalClassification';
 import type { TradeRecord } from '@/types/trading';
 
@@ -50,13 +50,44 @@ function fmtContractForItem(item: ClassifiableItem, record: TradeRecord | null) 
   return `${getSettlementAsset(symbol)}/${quote}`;
 }
 
-function fmtStackedTime(value: string | number | null | undefined) {
-  if (!value) return '—';
-  const date = typeof value === 'number' ? new Date(value) : new Date(value);
-  if (Number.isNaN(date.getTime())) return '—';
-  const pad = (n: number) => String(n).padStart(2, '0');
-  return `${date.getFullYear()}/${pad(date.getMonth() + 1)}/${pad(date.getDate())}\n${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+const pad2 = (n: number) => String(n).padStart(2, '0');
+
+function toDate(value: string | number | null | undefined): Date | null {
+  if (value === null || value === undefined || value === '') return null;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
 }
+
+/**
+ * 列内单行：MM-DD HH:mm:ss。年份进 title。
+ * 曾经用 \n 堆成两行（日期一行、时分秒一行），每一行都两行高，14 条记录撑满整屏。
+ * 秒必须留在列内：加仓腿常常同一分钟内连开两刀，先后顺序只能靠秒判定，
+ * 藏进悬停等于删掉。
+ */
+function fmtClock(value: string | number | null | undefined): string {
+  const d = toDate(value);
+  if (!d) return '—';
+  return `${pad2(d.getMonth() + 1)}-${pad2(d.getDate())} ${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`;
+}
+
+function fmtClockFull(value: string | number | null | undefined): string | undefined {
+  const d = toDate(value);
+  if (!d) return undefined;
+  return `${d.getFullYear()}-${fmtClock(value)}`;
+}
+
+/** 建议置信度圆点。用主题 token，亮色下不会像硬编码绿那样对比度崩掉。 */
+const CONFIDENCE_DOT: Record<SuggestedLegRole['confidence'], string> = {
+  high: 'bg-trading-green',
+  medium: 'bg-primary',
+  low: 'bg-muted-foreground',
+};
+
+/**
+ * 订单类型。决定这一行在战役里是什么角色的字段恰恰是 order_kind
+ * （整套 legRoleSuggestion 建立在它之上），而此前表里唯一看不到的就是它。
+ */
+const ORDER_KIND_LABEL: Record<string, string> = { main: '主力', hedge: '对冲' };
 
 function roeFromRecord(record: TradeRecord | null) {
   if (!record || record.leverage <= 0) return null;
@@ -180,10 +211,25 @@ export default function JournalCampaignClassifyPage() {
       ? availableSymbols.filter(item => item.startsWith(normalized))
       : availableSymbols;
   }, [availableSymbols, symbol]);
-  const suggestionMap = useMemo(
-    () => new Map(suggestLegRoles(filteredForSuggestions(allCandidateJournals)).map(item => [item.journalId, item])),
-    [allCandidateJournals],
-  );
+  // 建议必须按标的分组、且只算尚未归类的 journal。
+  // 此前整张账号的 journal 一股脑喂给 suggestLegRoles，而它内部的 mainAddCount 是
+  // 全局累加的——于是 RAVE 这张表上的「加仓6」可能在数别的币的加仓次数，
+  // 已归类的腿还会把计数器推高。建议于是失去信息：所有行都是同一个「加仓6」。
+  const suggestionMap = useMemo(() => {
+    const bySymbol = new Map<string, TradeJournal[]>();
+    for (const journal of allCandidateJournals) {
+      if (journal.campaign_id) continue;
+      const key = (journal.symbol ?? '').toUpperCase();
+      const bucket = bySymbol.get(key) ?? [];
+      bucket.push(journal);
+      bySymbol.set(key, bucket);
+    }
+    const map = new Map<string, SuggestedLegRole>();
+    for (const bucket of bySymbol.values()) {
+      for (const item of suggestLegRoles(filteredForSuggestions(bucket))) map.set(item.journalId, item);
+    }
+    return map;
+  }, [allCandidateJournals]);
 
   const symbolScoped = useMemo(
     () => {
@@ -470,10 +516,26 @@ export default function JournalCampaignClassifyPage() {
                   <div>{emptyReason}</div>
                 </div>
               ) : (
-                <table className="w-full min-w-[1420px] text-[12px] font-mono tabular-nums">
+                <table className="w-full min-w-[1200px] table-fixed text-[11px] font-mono tabular-nums">
+                  {/* 列宽契约写死在 colgroup 里（table-fixed 下才真正生效）。
+                      固定列合计 1064px，余量全给最右的「归属 / 建议」，
+                      1280 笔电（内容区 ≈1232px）不出横向滚动条。 */}
+                  <colgroup>
+                    <col style={{ width: 40 }} />
+                    <col style={{ width: 184 }} />
+                    <col style={{ width: 92 }} />
+                    <col style={{ width: 124 }} />
+                    <col style={{ width: 88 }} />
+                    <col style={{ width: 92 }} />
+                    <col style={{ width: 124 }} />
+                    <col style={{ width: 56 }} />
+                    <col style={{ width: 140 }} />
+                    <col style={{ width: 124 }} />
+                    <col />
+                  </colgroup>
                   <thead className="sticky top-0 z-10 bg-card">
                     <tr className="border-b border-border bg-muted/35 text-[11px] text-muted-foreground">
-                      <th className="w-[48px] px-3 py-2 text-left font-medium">
+                      <th className="px-3 py-2 text-left font-medium">
                         <Checkbox
                           checked={allCurrentSelected ? true : someCurrentSelected ? 'indeterminate' : false}
                           onCheckedChange={(checked) => {
@@ -485,9 +547,16 @@ export default function JournalCampaignClassifyPage() {
                           }}
                         />
                       </th>
-                      {['合约', '方向', '开仓均价', '平仓均价', '数量', '开仓时间', '平仓时间', '操作时间', '平仓方式', '平仓盈亏', '收益率(ROE)', '当前归属'].map(header => (
-                        <th key={header} className="px-3 py-2 text-left font-medium whitespace-nowrap">{header}</th>
-                      ))}
+                      <th className="px-3 py-2 text-left font-medium whitespace-nowrap">合约 · 方向</th>
+                      <th className="px-3 py-2 text-right font-medium whitespace-nowrap">开仓均价</th>
+                      <th className="px-3 py-2 text-left font-medium whitespace-nowrap">开仓时间</th>
+                      <th className="px-3 py-2 text-right font-medium whitespace-nowrap">数量</th>
+                      <th className="px-3 py-2 text-right font-medium whitespace-nowrap">平仓均价</th>
+                      <th className="px-3 py-2 text-left font-medium whitespace-nowrap">平仓时间</th>
+                      <th className="px-3 py-2 text-left font-medium whitespace-nowrap">方式</th>
+                      <th className="px-3 py-2 text-right font-medium whitespace-nowrap">盈亏 / ROE</th>
+                      <th className="px-3 py-2 text-left font-medium whitespace-nowrap" title="真实钱包时钟下的操作时刻；老记录没有，不用模拟时间冒充">操作时间</th>
+                      <th className="px-3 py-2 text-left font-medium whitespace-nowrap">归属 / 建议</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -506,9 +575,31 @@ export default function JournalCampaignClassifyPage() {
                       const entryPrice = record?.entryPrice ?? journal?.pre_entry_price ?? null;
                       const exitPrice = record?.exitPrice && record.exitPrice > 0 ? record.exitPrice : null;
                       const quantity = record?.quantity ?? null;
-                      const pnl = record?.pnl ?? journal?.post_realized_pnl ?? null;
+                      // 一行只有真的平过仓才有已实现盈亏。未平仓的 journal 其 post_realized_pnl
+                      // 可能落库为 0——那是「没有数据」不是「打平」。
+                      const journalClosed = Boolean(
+                        journal?.post_simulated_close_time
+                        || journal?.post_real_close_time
+                        || journal?.post_outcome,
+                      );
+                      const pnl = record
+                        ? record.pnl
+                        : (journalClosed ? journal?.post_realized_pnl ?? null : null);
                       const roe = roeFromRecord(record);
                       const operationTime = operationTimeForItem(item, record);
+                      const openTime = record?.openTime ?? journal?.pre_simulated_time;
+                      const orderKindLabel = journal?.order_kind ? (ORDER_KIND_LABEL[journal.order_kind] ?? journal.order_kind) : null;
+                      // 没有成交记录的行，平仓侧五格折成一句话——措辞复用下一屏
+                      // （ClassifyAsNewCampaignDialog）已有的三态，不另造词：
+                      // 一张从未触发、已被取消的对冲挂单，和一笔还持着的仓位，要不要收进同一场战役是完全不同的判断。
+                      const closeSideNote = record
+                        ? null
+                        : journal?.trade_record_id
+                          ? '已成交 · 成交记录未载入'
+                          : journal?.order_kind === 'hedge'
+                            ? '未触发取消 · 无成交'
+                            : '挂单中 · 尚未平仓';
+                      const pnlTone = typeof pnl !== 'number' ? 'text-muted-foreground' : pnl >= 0 ? 'text-trading-green' : 'text-trading-red';
                       return (
                         <tr
                           key={item.id}
@@ -520,9 +611,9 @@ export default function JournalCampaignClassifyPage() {
                           onKeyDown={(event) => {
                             if (journal?.id && event.key === 'Enter') window.open(`/journal/${journal.id}`, '_blank', 'noopener,noreferrer');
                           }}
-                          className={`border-b border-border/40 ${rowClickable ? 'hover:bg-accent' : ''}`}
+                          className={`h-8 border-b border-border/40 ${rowClickable ? 'cursor-pointer hover:bg-accent focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring' : ''}`}
                         >
-                          <td className="px-3 py-2" onClick={event => event.stopPropagation()}>
+                          <td className="px-3 py-1.5" onClick={event => event.stopPropagation()}>
                             <Checkbox
                               checked={selectedIds.has(item.id)}
                               onCheckedChange={(checked) => {
@@ -535,25 +626,40 @@ export default function JournalCampaignClassifyPage() {
                               }}
                             />
                           </td>
-                          <td className="px-3 py-2 text-foreground font-medium whitespace-nowrap">{fmtContractForItem(item, record)}</td>
-                          <td className={`px-3 py-2 font-bold whitespace-pre-line ${direction === 'short' ? 'text-[#F6465D]' : 'text-[#0ECB81]'}`}>
-                            {direction === 'short' ? '空' : '多'}{leverage ? `\n${leverage}x` : ''}
+                          {/* 合约字符串保持单一文本节点（测试按整串 getByText）；
+                              方向徽标 ml-auto 贴右——一场战役只有一个方向，它是勾选时的第一判别式，必须成一条竖线。 */}
+                          <td className="px-3 py-1.5 whitespace-nowrap">
+                            <span className="flex items-center gap-1.5">
+                              <span className="min-w-0 truncate font-medium text-foreground">{fmtContractForItem(item, record)}</span>
+                              {orderKindLabel && (
+                                <span className="shrink-0 rounded-sm bg-muted px-1 text-[10px] leading-4 text-muted-foreground">{orderKindLabel}</span>
+                              )}
+                              <span className={`ml-auto shrink-0 rounded-sm px-1.5 text-[10px] font-bold leading-4 ${direction === 'short' ? 'bg-trading-red/15 text-trading-red' : 'bg-trading-green/15 text-trading-green'}`}>
+                                {direction === 'short' ? '空' : '多'}{leverage ? ` ${leverage}x` : ''}
+                              </span>
+                            </span>
                           </td>
-                          <td className="px-3 py-2 text-foreground whitespace-nowrap">{fmtPrice(entryPrice)}</td>
-                          <td className="px-3 py-2 text-foreground whitespace-nowrap">{fmtPrice(exitPrice)}</td>
-                          <td className="px-3 py-2 text-foreground whitespace-nowrap">{fmtAmount(quantity)}</td>
-                          <td className="px-3 py-2 text-muted-foreground whitespace-pre-line">{fmtStackedTime(record?.openTime ?? journal?.pre_simulated_time)}</td>
-                          <td className="px-3 py-2 text-muted-foreground whitespace-pre-line">{fmtStackedTime(record?.closeTime)}</td>
-                          <td className="px-3 py-2 text-muted-foreground whitespace-pre-line">{fmtStackedTime(operationTime)}</td>
-                          <td className="px-3 py-2 whitespace-nowrap">{record ? exitMethodLabel(record) : '—'}</td>
-                          <td className={`px-3 py-2 font-bold whitespace-nowrap ${typeof pnl !== 'number' ? 'text-muted-foreground' : pnl >= 0 ? 'text-[#0ECB81]' : 'text-[#F6465D]'}`}>
-                            {fmtSignedUsdt(pnl)}
-                          </td>
-                          <td className={`px-3 py-2 font-bold whitespace-nowrap ${typeof roe !== 'number' ? 'text-muted-foreground' : roe >= 0 ? 'text-[#0ECB81]' : 'text-[#F6465D]'}`}>
-                            {fmtRoe(roe)}
-                          </td>
-                          <td className="px-3 py-2 min-w-[220px]" onClick={event => event.stopPropagation()}>
-                            <div className="flex items-center gap-2 min-w-0 text-[11px]">
+                          <td className="px-3 py-1.5 text-right text-foreground whitespace-nowrap">{fmtPrice(entryPrice)}</td>
+                          <td className="px-3 py-1.5 text-muted-foreground whitespace-nowrap" title={fmtClockFull(openTime)}>{fmtClock(openTime)}</td>
+                          {closeSideNote ? (
+                            <td colSpan={5} className="px-3 py-1.5 text-muted-foreground/70 whitespace-nowrap">{closeSideNote}</td>
+                          ) : (
+                            <>
+                              <td className="px-3 py-1.5 text-right text-foreground whitespace-nowrap">{fmtAmount(quantity)}</td>
+                              <td className="px-3 py-1.5 text-right text-foreground whitespace-nowrap">{fmtPrice(exitPrice)}</td>
+                              <td className="px-3 py-1.5 text-muted-foreground whitespace-nowrap" title={fmtClockFull(record?.closeTime)}>{fmtClock(record?.closeTime)}</td>
+                              <td className="px-3 py-1.5 whitespace-nowrap">{exitMethodLabel(record)}</td>
+                              <td className={`px-3 py-1.5 text-right whitespace-nowrap font-bold ${pnlTone}`}>
+                                {fmtSignedUsdt(pnl)}
+                                {typeof roe === 'number' && (
+                                  <span className="ml-1.5 font-medium opacity-80">{fmtRoe(roe)}</span>
+                                )}
+                              </td>
+                            </>
+                          )}
+                          <td className="px-3 py-1.5 text-muted-foreground whitespace-nowrap" title={fmtClockFull(operationTime)}>{fmtClock(operationTime)}</td>
+                          <td className="px-3 py-1.5 whitespace-nowrap" onClick={event => event.stopPropagation()}>
+                            <div className="flex min-w-0 items-center gap-2 overflow-hidden text-[11px]">
                               {item.kind === 'orphanRecord' ? (
                                 recordCampaignMap.has(item.record.id) ? (
                                   <Link to={`/journal/campaigns/${recordCampaignMap.get(item.record.id)?.id}`} className="truncate text-[#5BA3FF] hover:underline">
@@ -573,8 +679,12 @@ export default function JournalCampaignClassifyPage() {
                                 </>
                               )}
                               {suggestion && item.kind === 'journal' && !journal.campaign_id && (
-                                <span className="truncate text-[10px] text-muted-foreground">
-                                  建议：{LEG_ROLE_LABELS[suggestion.suggestedRole]}
+                                <span
+                                  className="inline-flex shrink-0 items-center gap-1 rounded-sm bg-muted px-1.5 text-[10px] leading-4 text-muted-foreground"
+                                  title={`建议 ${LEG_ROLE_LABELS[suggestion.suggestedRole]} · ${suggestion.reason}`}
+                                >
+                                  <span className={`h-1.5 w-1.5 rounded-full ${CONFIDENCE_DOT[suggestion.confidence]}`} aria-hidden />
+                                  {LEG_ROLE_LABELS[suggestion.suggestedRole]}
                                 </span>
                               )}
                             </div>
