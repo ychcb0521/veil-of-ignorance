@@ -76,7 +76,7 @@ const COLUMNS = [
   { title: '时间', width: 300 },
   { title: '开仓价', width: 122 },
   { title: '平仓价', width: 122 },
-  { title: '仓位', width: 122 },
+  { title: '仓位 / 币量', width: 122 },
   { title: '状态', width: 108 },
   { title: '盈亏 / 贡献', width: 150 },
   { title: 'Δb', width: 90 },
@@ -289,7 +289,19 @@ export function buildCampaignLegsExportRows(input: ExportInput): CampaignLegsExp
       ],
       [{ text: fmtPrice(entryPriceValue) }],
       exitPriceLines,
-      [{ text: leg.pre_position_size != null ? leg.pre_position_size.toFixed(2) : '—' }],
+      // 与页面同源：名义在上、按开仓价折算的币量在下，导出图不另起一套读数
+      (() => {
+        const notionalText = leg.pre_position_size != null ? leg.pre_position_size.toFixed(2) : '—';
+        const coinQty = leg.pre_position_size != null && entryPriceValue != null && entryPriceValue > 0
+          ? leg.pre_position_size / entryPriceValue
+          : null;
+        return coinQty == null
+          ? [{ text: notionalText }]
+          : [
+            { text: notionalText },
+            { text: coinQty.toLocaleString('en-US', { maximumFractionDigits: 2 }), color: '#848E9C' },
+          ];
+      })(),
       [{ text: status.label, color: status.color, bold: true }],
       (() => {
         // 与页面上的 Legs 列表同源，避免导出图与界面读数打架

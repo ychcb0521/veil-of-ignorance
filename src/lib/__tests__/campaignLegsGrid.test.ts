@@ -29,7 +29,7 @@ describe('Legs 表栅格', () => {
     // 用下划线分隔，但 minmax(200px,1fr) 内部没有下划线，可安全按 _ 切
     const columnCount = grid.split('_').length;
     expect(columnCount).toBe(11);
-    for (const title of ['#', '角色', '时间', '开仓价', '平仓价', '仓位', '状态', '盈亏 / 贡献', 'Δb', '委托', '操作']) {
+    for (const title of ['#', '角色', '时间', '开仓价', '平仓价', '仓位 / 币量', '状态', '盈亏 / 贡献', 'Δb', '委托', '操作']) {
       expect(s).toContain(`>${title}</div>`);
     }
   });
@@ -40,6 +40,15 @@ describe('Legs 表栅格', () => {
     // 合计必须取自战役唯一真源，不能在组件里另起一套求和
     expect(s).toContain('computeCampaignRealizedPnl');
     expect(s).toContain('settlement.total');
+  });
+
+  it('仓位列同时给出名义与币量——币量 = 名义 ÷ 开仓价，就是加仓公式里的 X', () => {
+    const src_ = src();
+    // 反向合约面值锁在 USD 上，光看名义看不出这条腿拿着多少币
+    expect(src_).toContain('leg.pre_position_size / entryPriceValue');
+    // 价格缺失或为 0 时不猜一个币量出来
+    expect(src_).toContain('entryPriceValue > 0');
+    expect(src_).toContain('legCoinQty');
   });
 
   it('时间列用 minmax 而非裸 1fr——裸 1fr 被压窄时会让文字逐字竖排', () => {

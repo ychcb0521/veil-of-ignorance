@@ -165,7 +165,7 @@ export function CampaignLegsList({
             <div>时间</div>
             <div className="text-right">开仓价</div>
             <div className="text-right">平仓价</div>
-            <div className="text-right">仓位</div>
+            <div className="text-right" title="上行：名义仓位（USD）；下行：按开仓价折算的币量，即加仓公式里的 X">仓位 / 币量</div>
             <div>状态</div>
             <div className="text-right">盈亏 / 贡献</div>
             <div className="text-right" title="该腿盈亏 ÷ 初始最大预期亏损 L：这条腿把整场 b 推高 / 拉低了多少">Δb</div>
@@ -182,6 +182,10 @@ export function CampaignLegsList({
               const closeLabel = fmtClock(execution.closeTime);
               const operationLabel = fmtClock(journalOperationTime(leg, record));
               const entryPriceValue = execution.entryPrice;
+              // 币量 = 名义 ÷ 开仓价。名义为 0 或价格缺失时不猜，显示空。
+              const legCoinQty = leg.pre_position_size != null && entryPriceValue != null && entryPriceValue > 0
+                ? leg.pre_position_size / entryPriceValue
+                : null;
               const exitPriceValue = execution.exitPrice;
               const exitCorrectionTitle = execution.exitCorrection
                 ? `原 TradeRecord 平仓价 ${fmtPrice(execution.exitCorrection.originalExitPrice)} 超出该平仓时刻 1m K 线范围 ${fmtPrice(execution.exitCorrection.candleLow)}-${fmtPrice(execution.exitCorrection.candleHigh)}，本页按 K 线时价显示。`
@@ -216,7 +220,19 @@ export function CampaignLegsList({
                   </div>
                   <div className="text-right tabular-nums">{fmtPrice(entryPriceValue)}</div>
                   <div className="text-right tabular-nums" title={exitCorrectionTitle}>{fmtPrice(exitPriceValue)}</div>
-                  <div className="text-right tabular-nums">{leg.pre_position_size != null ? leg.pre_position_size.toFixed(2) : '—'}</div>
+                  {/* 仓位是名义 USD；下面补按开仓价折算的币量——它就是加仓公式里的 X。
+                      反向合约的面值锁在 USD 上，光看名义看不出这条腿拿着多少币。 */}
+                  <div className="text-right tabular-nums leading-tight">
+                    <div>{leg.pre_position_size != null ? leg.pre_position_size.toFixed(2) : '—'}</div>
+                    {legCoinQty != null && (
+                      <div
+                        className="text-[10px] text-muted-foreground"
+                        title={`按开仓价折算的币量：${leg.pre_position_size?.toFixed(2)} ÷ ${fmtPrice(entryPriceValue)} = ${legCoinQty.toLocaleString('en-US', { maximumFractionDigits: 2 })}`}
+                      >
+                        {legCoinQty.toLocaleString('en-US', { maximumFractionDigits: 2 })}
+                      </div>
+                    )}
+                  </div>
                   <div className={status.className}>{status.label}</div>
                   {(() => {
                     const entry = legPnlMap.get(leg.id);
