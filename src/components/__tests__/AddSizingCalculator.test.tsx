@@ -137,6 +137,9 @@ describe('顶栏「加仓」按钮', () => {
     expect(open.compareDocumentPosition(reverse) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     fireEvent.click(open);
     expect(screen.getByTestId('add-sizing-dialog')).toBeInTheDocument();
-    expect(screen.getByText('加仓计算器 · RAVEUSDT')).toBeInTheDocument();
+    // 标题与标的现在是两个元素（标题黑、标的灰等宽），分别断言
+    const dialog = screen.getByTestId('add-sizing-dialog');
+    expect(within(dialog).getByText('加仓计算器')).toBeInTheDocument();
+    expect(within(dialog).getByText('RAVEUSDT')).toBeInTheDocument();
   });
 });

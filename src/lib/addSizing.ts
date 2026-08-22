@@ -50,6 +50,13 @@ export type CushionAddProblem = 'invalid_input' | 's1_not_past_cost' | 's2_not_p
 export interface CushionAddResult {
   ok: boolean;
   problem: CushionAddProblem | null;
+  /**
+   * 无解时给出「要成立还差什么」的具体门槛，而不是只说一句「不行」：
+   *   s1_not_past_cost → S₁ 至少要越过 S̄（主多 > S̄、主空 < S̄）
+   *   s2_not_past_s1   → S₂ 至少要越过 S₁
+   * 有解时为 null。
+   */
+  needed: { field: 'S₁' | 'S₂'; mustBe: 'above' | 'below'; threshold: number; gap: number } | null;
   /** 浮盈垫距离 |S₁ − S̄| */
   cushionDistance: number;
   /** 新腿风险距离 |S₂ − S₁| */
@@ -70,9 +77,9 @@ export interface CushionAddResult {
   hedgeNotionalAtS1: number;
 }
 
-function cushionFail(problem: CushionAddProblem): CushionAddResult {
+function cushionFail(problem: CushionAddProblem, needed: CushionAddResult['needed'] = null): CushionAddResult {
   return {
-    ok: false, problem,
+    ok: false, problem, needed,
     cushionDistance: Number.NaN, riskDistance: Number.NaN, cushion: Number.NaN,
     b: Number.NaN, p0: Number.NaN,
     x2Max: 0, x2MaxNotional: 0,
@@ -88,8 +95,16 @@ export function computeCushionAdd(input: CushionAddInput): CushionAddResult {
   const d = input.side === 'SHORT' ? -1 : 1;
   const cushionDistance = (s1 - sBar) * d;
   const riskDistance = (s2 - s1) * d;
-  if (!(cushionDistance > 0)) return cushionFail('s1_not_past_cost');
-  if (!(riskDistance > 0)) return cushionFail('s2_not_past_s1');
+  if (!(cushionDistance > 0)) {
+    return cushionFail('s1_not_past_cost', {
+      field: 'S₁', mustBe: d > 0 ? 'above' : 'below', threshold: sBar, gap: Math.abs(sBar - s1),
+    });
+  }
+  if (!(riskDistance > 0)) {
+    return cushionFail('s2_not_past_s1', {
+      field: 'S₂', mustBe: d > 0 ? 'above' : 'below', threshold: s1, gap: Math.abs(s1 - s2),
+    });
+  }
 
   const cushion = x1 * cushionDistance;
   const b = riskDistance / cushionDistance;
@@ -97,7 +112,7 @@ export function computeCushionAdd(input: CushionAddInput): CushionAddResult {
   const x2Max = x1 / b;
   const hedgeCoinsAtS1 = x1 + x2Max;
   return {
-    ok: true, problem: null,
+    ok: true, problem: null, needed: null,
     cushionDistance, riskDistance, cushion, b, p0,
     x2Max, x2MaxNotional: x2Max * s2,
     blendedCostAfter: (x1 * sBar + x2Max * s2) / hedgeCoinsAtS1,
@@ -218,7 +233,10 @@ export function legOpeningCoins(leg: OpeningCoinsSource, defaultFaceUsd: number)
   if (!fin(leg.entryPrice) || leg.entryPrice <= 0) return 0;
   if (leg.settlementMode === 'coin') {
     const face = fin(leg.contractSizeUsd) && (leg.contractSizeUsd as number) > 0 ? (leg.contractSizeUsd as number) : defaultFaceUsd;
-    const contracts = fin(leg.contracts) ? (leg.contracts as number) : 0;
+    // 与引擎 getCoinContracts 同规则：contracts 缺失时张数存在 quantity 里。
+    // 只认 contracts 会把这类持仓的币量算成 0，X₁ 直接消失。
+    const contracts = fin(leg.contracts) ? (leg.contracts as number)
+      : fin(leg.quantity) ? (leg.quantity as number) : 0;
     return (contracts * face) / leg.entryPrice;
   }
   return fin(leg.quantity) ? (leg.quantity as number) : 0;
