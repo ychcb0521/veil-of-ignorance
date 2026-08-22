@@ -1744,7 +1744,7 @@ const Index = () => {
     // isolatedBalances removed — single global pool
     setTimeMode("synced");
 
-    toast.success("已清除所有平行宇宙数据并切换到同步模式");
+    toast.success("已合并所有币种时间轴并切换到同步模式");
   }, [
     positionsMap,
     priceMap,
@@ -2268,16 +2268,24 @@ const Index = () => {
       <Dialog open={modeSwitchDialogOpen} onOpenChange={setModeSwitchDialogOpen}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>⚠️ 清除所有平行宇宙数据</DialogTitle>
+            <DialogTitle>⚠️ 合并所有平行时间轴</DialogTitle>
             <DialogDescription>
-              此操作将清除所有隔离模式下的独立账户数据（各币种的独立资金、持仓、挂单和历史记录），并合并为单一全局时间线。此操作不可撤销。
+              隔离模式下每个币种各有一条独立时钟，此刻停在各自不同的时刻。切回同步模式要把它们并成一条时间线，
+              跨在不同时刻上的持仓与挂单无法一并搬过去，因此会先结清。此操作不可撤销。
             </DialogDescription>
           </DialogHeader>
+          {/* 这段文案曾经写「各币种的独立资金 / 独立沙盒账户将被销毁」——
+              而 isolatedBalances 早已改成空对象 + 空操作 setter，资金一直是单一全局池。
+              在一个不可撤销的确认框上夸大后果，会让人误以为切换要没收钱。逐条对着
+              confirmStopAllAndSwitch 的实际行为重写，并补上「不受影响」那一半。 */}
           <div className="rounded-lg border border-border bg-card/60 p-3 text-xs text-muted-foreground space-y-1">
-            <div>• 所有独立沙盒账户将被销毁</div>
-            <div>• 所有未平仓位将被强制结算</div>
+            <div>• 各币种的独立时钟清空，全部并到一条时间线</div>
+            <div>• 所有未平仓位按当前价强制结算——是真平仓，会产生成交记录、盈亏计入余额</div>
             <div>• 所有挂单将被撤销</div>
-            <div>• 切换后使用全局共享账户</div>
+            <div>• 时间机器停止，回放进度归零</div>
+            <div className="pt-1 text-foreground/70">
+              不受影响：账户余额、成交与仓位历史、交易战役、复盘记录、信号库
+            </div>
           </div>
           <DialogFooter>
             <button
