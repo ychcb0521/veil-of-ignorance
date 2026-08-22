@@ -1864,6 +1864,11 @@ P 不再一把手填，而是拆成三个更可回答的问题：<strong>「这�
                     <td className="px-3 py-2 border-t border-border">币本位下把数量默认成 USD 会让单位与标的脱节。另需留意：单位下拉里还有「<strong>◯◯ 保证金</strong>」一项，那是<strong>按保证金输入</strong>而非按数量——标签特意带上「保证金」三字，避免与数量混淆（在该模式下输入 500 万，意思是投入 500 万枚币作保证金，按杠杆放大后名义可达数千万）。</td>
                   </tr>
                   <tr>
+                    <td className="px-3 py-2 border-t border-border font-medium">持仓卡的「持仓数量」</td>
+                    <td className="px-3 py-2 border-t border-border">币本位持仓在张数后面补一个<strong>按标记价折算的持币数量</strong>，形如 <strong>13291 张 ≈ 284,702.0065 RAVE</strong>；U 本位不变（它的数量本来就是币量）。悬停给出折算式：名义 USD ÷ 标记价。价格暂时取不到时只显示张数，不编一个币量出来。</td>
+                    <td className="px-3 py-2 border-t border-border">反向合约的面值锁死在 USD 上，<strong>持币数量随价格浮动</strong>——只显示张数的话，「我现在到底拿着多少币」每次都得自己心算。折算口径与同一张卡上的标记价、保证金比率一致，也与当前委托列表的币计名义同源。</td>
+                  </tr>
+                  <tr>
                     <td className="px-3 py-2 border-t border-border font-medium">默认结算方式</td>
                     <td className="px-3 py-2 border-t border-border">新标的下单<strong>默认币本位</strong>；下单面板顶部那颗「U本位 / 币本位」标签可随时切换，一旦为某个标的选过，此后就记住你的选择。</td>
                     <td className="px-3 py-2 border-t border-border">本系统的主仓打法以币本位为主。<strong>已有的历史记录不受影响</strong>——缺少该字段的旧单子一律仍按 U 本位解读，否则等于事后改写过去交易的含义，连带污染战役的保证金、R 倍数与统计。</td>

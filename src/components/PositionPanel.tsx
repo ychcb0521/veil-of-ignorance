@@ -870,9 +870,21 @@ export function PositionPanel({
                     // 保证金比率（与币安一致）：维持保证金 / 保证金余额；余额含追加保证金，币本位按现价估值。
                     const markValuedMargin = isCoinGroup && totalMarginCoin > 0 && price > 0 ? totalMarginCoin * price : effectiveMargin;
                     const marginRatio = settlementMarginRatioPct(notional, markValuedMargin, totalPnl);
+                    // 币本位（反向合约）的合约面值固定在 USD 上，持币数量随价格浮动：
+                    // 币量 = 名义 USD ÷ 价格。只显示张数的话，「我到底拿着多少币」得自己心算。
+                    // 按标记价折算，与同一张卡上显示的标记价、保证金比率同口径。
+                    const positionCoinAmount = isCoinGroup && price > 0
+                      ? coinNotionalAmount(notional, price)
+                      : null;
                     const positionQtyLabel = isCoinGroup
-                      ? `${totalUnits} 张`
+                      ? (positionCoinAmount != null
+                        ? `${totalUnits} 张 ≈ ${formatAmount(positionCoinAmount)} ${baseCoin}`
+                        : `${totalUnits} 张`)
                       : formatAmount(mg.totalQuantity);
+                    const positionQtyTitle = isCoinGroup && positionCoinAmount != null
+                      ? `反向合约面值固定为 USD，持币数量随价格变动：`
+                        + `名义 ${formatUSDT(notional)} USD ÷ 标记价 ${formatPrice(price)} = ${formatAmount(positionCoinAmount)} ${baseCoin}`
+                      : undefined;
 
                 // Compute aggregate liquidation price from the first child (approximation for merged)
                 // For merged positions use weighted entry to compute approximate liq
@@ -946,7 +958,7 @@ export function PositionPanel({
 
                     {/* Details Grid */}
                     <div className="grid grid-cols-3 gap-x-4 gap-y-2 px-3 pb-2.5">
-                      <DetailCell label="持仓数量" value={positionQtyLabel} />
+                      <DetailCell label="持仓数量" value={positionQtyLabel} title={positionQtyTitle} />
                       <div className="min-w-0">
                         <div className="text-[10px] text-muted-foreground truncate">保证金</div>
                         <div className="flex items-center gap-1">
@@ -1813,9 +1825,11 @@ export function PositionPanel({
 
 /* ===== Sub-components ===== */
 
-function DetailCell({ label, value, valueClassName }: { label: string; value: string; valueClassName?: string }) {
+function DetailCell({ label, value, valueClassName, title }: {
+  label: string; value: string; valueClassName?: string; title?: string;
+}) {
   return (
-    <div className="min-w-0">
+    <div className="min-w-0" title={title}>
       <div className="text-[10px] text-muted-foreground truncate">{label}</div>
       <div className={`text-xs font-mono tabular-nums text-foreground ${valueClassName || ''}`}>{value}</div>
     </div>
