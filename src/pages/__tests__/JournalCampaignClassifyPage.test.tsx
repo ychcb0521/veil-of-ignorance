@@ -104,6 +104,14 @@ vi.mock('@/lib/journalApi', async () => {
   };
 });
 
+/**
+ * 默认只列「有成交的」；三态措辞与角色建议讲的都是没有成交记录的行，
+ * 所以这些用例先按下「显示无成交记录」的开关。功能没变，只是折进了开关后面。
+ */
+async function revealUnfilled() {
+  fireEvent.click(await screen.findByTestId('toggle-unfilled'));
+}
+
 describe('JournalCampaignClassifyPage', () => {
   beforeEach(() => {
     mockListUnclassifiedItems.mockClear();
@@ -243,6 +251,7 @@ describe('归类历史交易表格', () => {
 
   it('无成交的行把平仓侧折成一句话，措辞复用下一屏的三态', async () => {
     render(<MemoryRouter initialEntries={['/journal/campaigns/classify?symbol=raveusdt']}><JournalCampaignClassifyPage /></MemoryRouter>);
+    await revealUnfilled();
     await screen.findByRole('table');
     expect(screen.getByText('未触发取消 · 无成交')).toBeInTheDocument();   // 对冲挂单，从未触发
     expect(screen.getByText('挂单中 · 尚未平仓')).toBeInTheDocument();     // 主力挂单
@@ -261,15 +270,56 @@ describe('归类历史交易表格', () => {
 
   it('合约格里标出主力 / 对冲——决定角色的字段不该是表里唯一看不见的', async () => {
     render(<MemoryRouter initialEntries={['/journal/campaigns/classify?symbol=raveusdt']}><JournalCampaignClassifyPage /></MemoryRouter>);
+    await revealUnfilled();
     await screen.findByRole('table');
     expect(screen.getAllByText('主力').length).toBeGreaterThan(0);
     expect(screen.getAllByText('对冲').length).toBeGreaterThan(0);
+  });
+
+  it('默认只列成交过的——没有 trade_record_id 的挂单不是一笔交易', async () => {
+    render(<MemoryRouter initialEntries={['/journal/campaigns/classify?symbol=raveusdt']}><JournalCampaignClassifyPage /></MemoryRouter>);
+    await screen.findByTestId('toggle-unfilled');
+    // 折起时看不到「从未成交」那两态
+    expect(screen.queryByText('未触发取消 · 无成交')).not.toBeInTheDocument();
+    expect(screen.queryByText('挂单中 · 尚未平仓')).not.toBeInTheDocument();
+  });
+
+  it('「已成交 · 成交记录未载入」不算无成交——本地查不到记录不等于这笔没发生', async () => {
+    // 判据与三态措辞同源：有 trade_record_id 就是成交过，只是记录没载入。
+    // 若按「能否解析到记录」判，这类真实交易会被静默藏起来。
+    render(<MemoryRouter initialEntries={['/journal/campaigns/classify?symbol=raveusdt']}><JournalCampaignClassifyPage /></MemoryRouter>);
+    await screen.findByRole('table');
+    expect(screen.getByText('已成交 · 成交记录未载入')).toBeInTheDocument();
+  });
+
+  it('隐藏的条数写在汇总行上，并且一键可放出来——过滤不能静默吞数据', async () => {
+    render(<MemoryRouter initialEntries={['/journal/campaigns/classify?symbol=raveusdt']}><JournalCampaignClassifyPage /></MemoryRouter>);
+    const toggle = await screen.findByTestId('toggle-unfilled');
+    expect(toggle).toHaveTextContent(/另有 \d+ 条无成交记录/);
+    fireEvent.click(toggle);
+    expect(await screen.findByText('未触发取消 · 无成交')).toBeInTheDocument();
+    expect(screen.getByTestId('toggle-unfilled')).toHaveTextContent(/隐藏 \d+ 条无成交记录/);
+  });
+
+  it('操作时间可作排序依据，点表头切换升降序', async () => {
+    render(<MemoryRouter initialEntries={['/journal/campaigns/classify?symbol=raveusdt']}><JournalCampaignClassifyPage /></MemoryRouter>);
+    await screen.findByRole('table');
+    const th = screen.getByTestId('sort-operationTime');
+    // 默认就按操作时间倒序
+    expect(th).toHaveAttribute('aria-sort', 'descending');
+    fireEvent.click(th);
+    expect(screen.getByTestId('sort-operationTime')).toHaveAttribute('aria-sort', 'ascending');
+    // 换一列则回到倒序
+    fireEvent.click(screen.getByTestId('sort-openTime'));
+    expect(screen.getByTestId('sort-openTime')).toHaveAttribute('aria-sort', 'descending');
+    expect(screen.getByTestId('sort-operationTime')).toHaveAttribute('aria-sort', 'none');
   });
 
   it('建议按标的分组：别的币的加仓不会把这个币的计数推高', async () => {
     // 先渲染 BLUR：它在时间上晚于 RAVE 的主力与加仓。若 mainAddCount 跨标的累加，
     // BLUR 的那笔加仓会被标成「加仓2」（RAVE 已用掉加仓1）。
     render(<MemoryRouter initialEntries={['/journal/campaigns/classify?symbol=blurusdt']}><JournalCampaignClassifyPage /></MemoryRouter>);
+    await revealUnfilled();
     await screen.findByRole('table');
     expect(screen.getByText('加仓1')).toBeInTheDocument();
     expect(screen.queryByText('加仓2')).not.toBeInTheDocument();

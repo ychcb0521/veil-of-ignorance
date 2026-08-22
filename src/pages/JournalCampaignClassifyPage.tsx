@@ -15,6 +15,7 @@ import { classifiableOperationTime } from '@/lib/classifiableOperationTime';
 import { getSettlementAsset } from '@/lib/coinMargined';
 import { detachJournalFromCampaign, listAllCampaigns, listUnclassifiedItems, suggestLegRoles } from '@/lib/journalApi';
 import { LEG_ROLE_LABELS } from '@/lib/strategyTemplates';
+import { buildTradeRecordLookup } from '@/lib/objectiveOperationTime';
 import { getPositionNotionalUsd } from '@/lib/tradingSettlement';
 import type { TradeCampaign, TradeJournal, SuggestedLegRole } from '@/types/journal';
 import type { ClassifiableItem } from '@/types/journalClassification';
@@ -104,6 +105,29 @@ function exitMethodLabel(record: TradeRecord | null) {
   return record.exit_method;
 }
 
+/** 可点排序的表头。当前列显示方向箭头，其余列悬停才提示可点。 */
+function SortableTh({ sortKey, label, align, hint, active, asc, onSort }: {
+  sortKey: SortKey; label: string; align: 'left' | 'right'; hint: string;
+  active: SortKey; asc: boolean; onSort: (key: SortKey) => void;
+}) {
+  const isActive = active === sortKey;
+  return (
+    <th className={`px-3 py-2 font-medium whitespace-nowrap ${align === 'right' ? 'text-right' : 'text-left'}`}>
+      <button
+        type="button"
+        data-testid={`sort-${sortKey}`}
+        aria-sort={isActive ? (asc ? 'ascending' : 'descending') : 'none'}
+        title={`${hint}点击按${SORT_LABELS[sortKey]}排序`}
+        onClick={() => onSort(sortKey)}
+        className={`inline-flex items-center gap-1 transition-colors hover:text-foreground ${isActive ? 'text-foreground' : ''}`}
+      >
+        {label}
+        <span aria-hidden className={isActive ? '' : 'opacity-0'}>{asc ? '↑' : '↓'}</span>
+      </button>
+    </th>
+  );
+}
+
 export default function JournalCampaignClassifyPage() {
   const nav = useNavigate();
   const [searchParams] = useSearchParams();
@@ -113,6 +137,19 @@ export default function JournalCampaignClassifyPage() {
   const [symbol, setSymbol] = useState(() => searchParams.get('symbol')?.trim().toUpperCase() ?? '');
   const dateFrom = searchParams.get('dateFrom') ?? '';
   const dateTo = searchParams.get('dateTo') ?? '';
+  // 排序：默认按「操作时间」倒序——这一页是事后归类，真实动手的先后比模拟开仓时间更贴近回忆。
+  const [sortKey, setSortKey] = useState<SortKey>('operationTime');
+  const [sortAsc, setSortAsc] = useState(false);
+  // 没有成交记录的 journal（挂单被撤、从未触发）不是一笔交易，默认不列；
+  // 但绝不静默吞掉——汇总行会写明隐藏了几条，一键可以放出来。
+  const [showUnfilled, setShowUnfilled] = useState(false);
+  const applySort = useCallback((key: SortKey) => {
+    setSortKey(current => {
+      if (current === key) { setSortAsc(prev => !prev); return current; }
+      setSortAsc(false);
+      return key;
+    });
+  }, []);
   const [optionsOpen, setOptionsOpen] = useState(false);
   const [activeOptionIndex, setActiveOptionIndex] = useState(-1);
   const optionsContainerRef = useRef<HTMLDivElement>(null);
@@ -158,7 +195,11 @@ export default function JournalCampaignClassifyPage() {
   }, [loadData]);
 
   const campaignMap = useMemo(() => new Map(campaignBundles.map(bundle => [bundle.campaign.id, bundle.campaign])), [campaignBundles]);
-  const tradeRecordMap = useMemo(() => new Map(tradeHistory.map(record => [record.id, record])), [tradeHistory]);
+  // 用 buildTradeRecordLookup 而不是裸 Map(record.id → record)：
+  // 实盘「记录决策」的腿把 onPlaceOrder 返回的**仓位 id** 写进了 trade_record_id，
+  // 回填的腿写的才是成交 id。只按成交 id 查，前一类真实成交的腿会整行显示「—」，
+  // 看起来像「没成交」，既误导人，也会被下面的有效性过滤误伤。
+  const tradeRecordMap = useMemo(() => buildTradeRecordLookup(tradeHistory), [tradeHistory]);
   const recordCampaignMap = useMemo(() => {
     const next = new Map<string, TradeCampaign>();
     campaignBundles.forEach(({ campaign }) => {
@@ -238,7 +279,20 @@ export default function JournalCampaignClassifyPage() {
     },
     [allItems, symbol],
   );
-  const filtered = useMemo(() => {
+  /**
+   * 该项是否成交过——判据与本页三态措辞保持一致，否则会自相矛盾：
+   *   有 trade_record_id、但本地查不到记录 → 界面写「已成交 · 成交记录未载入」，
+   *   那是一笔真交易，只是记录没载入，不能因为查不到就当它不存在。
+   * 没有 trade_record_id 的才是「挂单中」「未触发取消」——从未成为一笔交易。
+   * 裸记录进来时已经只剩 CLOSE / LIQUIDATION，恒为真。
+   */
+  const isFilled = useCallback(
+    (item: ClassifiableItem) => item.kind === 'orphanRecord' || Boolean(item.journal.trade_record_id),
+    [],
+  );
+
+  // 未归类 + 落在日期范围内。有效性单独一层，好数出「隐藏了几条」。
+  const unclassified = useMemo(() => {
     return symbolScoped.filter(item => {
       const timeMs = itemTimeMs(item);
       if (dateFrom && timeMs < new Date(`${dateFrom}T00:00:00`).getTime()) return false;
@@ -248,6 +302,22 @@ export default function JournalCampaignClassifyPage() {
       return true;
     });
   }, [symbolScoped, dateFrom, dateTo, recordCampaignMap]);
+
+  const unfilledCount = useMemo(
+    () => unclassified.filter(item => !isFilled(item)).length,
+    [unclassified, isFilled],
+  );
+
+  const filtered = useMemo(() => {
+    const rows = showUnfilled ? unclassified : unclassified.filter(isFilled);
+    const dir = sortAsc ? 1 : -1;
+    return [...rows].sort((a, b) => {
+      const diff = sortValue(sortKey, a, tradeRecordMap.get(itemRecordRef(a) ?? '') ?? null, a)
+        - sortValue(sortKey, b, tradeRecordMap.get(itemRecordRef(b) ?? '') ?? null, b);
+      // 同值时退回开仓时间倒序，避免每次渲染顺序抖动
+      return (diff !== 0 ? diff * dir : itemTimeMs(b) - itemTimeMs(a));
+    });
+  }, [unclassified, showUnfilled, isFilled, sortKey, sortAsc, tradeRecordMap]);
 
   const selectedItems = useMemo(
     () => filtered.filter(item => selectedIds.has(item.id)),
@@ -496,10 +566,28 @@ export default function JournalCampaignClassifyPage() {
 
         {symbol.trim() ? (
           <div className="pt-4">
-            <div className="pb-2 text-[11px] text-muted-foreground">
-              {filteredJournalCount === 0 && filteredOrphanCount === 0
-                ? '该标的暂无可归类项'
-                : `共 ${filteredJournalCount} 个 journal · ${filteredOrphanCount} 条仓位历史记录`}
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 pb-2 text-[11px] text-muted-foreground">
+              <span>
+                {filteredJournalCount === 0 && filteredOrphanCount === 0
+                  ? '该标的暂无可归类项'
+                  : `共 ${filteredJournalCount} 个 journal · ${filteredOrphanCount} 条仓位历史记录`}
+              </span>
+              {/* 过滤掉的东西必须能看见：只说「隐藏了几条」还不够，得给一键放出来的入口，
+                  否则一条本该归类的腿被判成「没成交」时，用户永远不会知道它去哪了。 */}
+              {unfilledCount > 0 && (
+                <button
+                  type="button"
+                  data-testid="toggle-unfilled"
+                  onClick={() => setShowUnfilled(v => !v)}
+                  className="underline decoration-dotted underline-offset-2 transition-colors hover:text-foreground"
+                  title="没有成交记录的 journal：挂单被撤、或从未触发。它们不是一笔交易，默认不列。"
+                >
+                  {showUnfilled ? `隐藏 ${unfilledCount} 条无成交记录` : `另有 ${unfilledCount} 条无成交记录 · 显示`}
+                </button>
+              )}
+              <span className="ml-auto">
+                按{SORT_LABELS[sortKey]}{sortAsc ? '升序' : '倒序'}
+              </span>
             </div>
             <section className="overflow-hidden rounded border border-border bg-card">
               {loading ? (
@@ -549,13 +637,13 @@ export default function JournalCampaignClassifyPage() {
                       </th>
                       <th className="px-3 py-2 text-left font-medium whitespace-nowrap">合约 · 方向</th>
                       <th className="px-3 py-2 text-right font-medium whitespace-nowrap">开仓均价</th>
-                      <th className="px-3 py-2 text-left font-medium whitespace-nowrap">开仓时间</th>
+                      <SortableTh sortKey="openTime" label="开仓时间" align="left" hint="" active={sortKey} asc={sortAsc} onSort={applySort} />
                       <th className="px-3 py-2 text-right font-medium whitespace-nowrap">数量</th>
                       <th className="px-3 py-2 text-right font-medium whitespace-nowrap">平仓均价</th>
-                      <th className="px-3 py-2 text-left font-medium whitespace-nowrap">平仓时间</th>
+                      <SortableTh sortKey="closeTime" label="平仓时间" align="left" hint="" active={sortKey} asc={sortAsc} onSort={applySort} />
                       <th className="px-3 py-2 text-left font-medium whitespace-nowrap">方式</th>
-                      <th className="px-3 py-2 text-right font-medium whitespace-nowrap">盈亏 / ROE</th>
-                      <th className="px-3 py-2 text-left font-medium whitespace-nowrap" title="真实钱包时钟下的操作时刻；老记录没有，不用模拟时间冒充">操作时间</th>
+                      <SortableTh sortKey="pnl" label="盈亏 / ROE" align="right" hint="" active={sortKey} asc={sortAsc} onSort={applySort} />
+                      <SortableTh sortKey="operationTime" label="操作时间" align="left" hint="真实钱包时钟下的操作时刻；老记录没有，不用模拟时间冒充。" active={sortKey} asc={sortAsc} onSort={applySort} />
                       <th className="px-3 py-2 text-left font-medium whitespace-nowrap">归属 / 建议</th>
                     </tr>
                   </thead>
@@ -801,6 +889,39 @@ function filteredForSuggestions(journals: TradeJournal[]) {
 
 function itemSymbol(item: ClassifiableItem) {
   return item.kind === 'journal' ? item.journal.symbol : item.record.symbol;
+}
+
+/** 可点表头排序的列。只列真正能比出先后的，文本列不掺进来。 */
+type SortKey = 'operationTime' | 'openTime' | 'closeTime' | 'pnl';
+
+const SORT_LABELS: Record<SortKey, string> = {
+  operationTime: '操作时间',
+  openTime: '开仓时间',
+  closeTime: '平仓时间',
+  pnl: '平仓盈亏',
+};
+
+function itemRecordRef(item: ClassifiableItem): string | null {
+  return item.kind === 'journal' ? item.journal.trade_record_id ?? null : item.record.id;
+}
+
+/**
+ * 排序取值。缺值一律排到最后（升序取 +∞、降序由调用方乘 −1 后自然落底），
+ * 而不是当成 0 —— 未平仓的行混进盈亏最差的一档会误导判断。
+ */
+function sortValue(
+  key: SortKey,
+  item: ClassifiableItem,
+  record: TradeRecord | null,
+  original: ClassifiableItem,
+): number {
+  if (key === 'openTime') return itemTimeMs(original);
+  if (key === 'closeTime') return record?.closeTime || Number.NEGATIVE_INFINITY;
+  if (key === 'pnl') {
+    const pnl = record?.pnl;
+    return typeof pnl === 'number' && Number.isFinite(pnl) ? pnl : Number.NEGATIVE_INFINITY;
+  }
+  return operationTimeForItem(item, record) ?? Number.NEGATIVE_INFINITY;
 }
 
 function itemTimeMs(item: ClassifiableItem) {
