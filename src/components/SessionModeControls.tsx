@@ -7,7 +7,8 @@
  */
 
 import { useState } from 'react';
-import { Globe, Split, Lock, Brain, Zap, Rewind } from 'lucide-react';
+import { Globe, Split, Lock, Brain, Zap, Rewind, Calculator } from 'lucide-react';
+import { AddSizingCalculator } from '@/components/AddSizingCalculator';
 import { toast } from 'sonner';
 import {
   Dialog,
@@ -27,6 +28,8 @@ interface Props {
   totalPositionCount?: number;
   coinTimelines?: CoinTimelinesMap;
   onSymbolChange?: (symbol: string) => void;
+  /** 当前盘面标的——加仓计算器据此读持仓、现价、结算方式 */
+  activeSymbol?: string;
 }
 
 type GuardedCoin = {
@@ -41,8 +44,10 @@ export function SessionModeControls({
   totalPositionCount = 0,
   coinTimelines = {},
   onSymbolChange,
+  activeSymbol,
 }: Props) {
   const ctx = useTradingContext();
+  const [addSizingOpen, setAddSizingOpen] = useState(false);
   const [timeModeOpen, setTimeModeOpen] = useState(false);
   const [guardDialogOpen, setGuardDialogOpen] = useState(false);
   const [guardedCoins, setGuardedCoins] = useState<GuardedCoin[]>([]);
@@ -153,6 +158,24 @@ export function SessionModeControls({
 
   return (
     <div className="flex items-center gap-1">
+      {/* 加仓计算器：浮盈垫锁死的加仓量与对冲量（使用说明 3.4）。
+          只在打开时挂载弹窗，按钮本身不读持仓，不给顶栏增加任何渲染负担。 */}
+      <button
+        type="button"
+        onClick={() => setAddSizingOpen(true)}
+        data-testid="add-sizing-open"
+        disabled={!activeSymbol}
+        title={activeSymbol
+          ? `加仓计算器：按浮盈垫锁死算 ${activeSymbol} 的加仓上限与对冲量`
+          : '加仓计算器：先选一个标的'}
+        className="flex items-center gap-1 whitespace-nowrap rounded px-2 py-1 text-[10px] font-medium text-muted-foreground transition-all duration-100 ease-out hover:bg-accent hover:text-foreground active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-40"
+      >
+        <Calculator className="w-3 h-3" /> 加仓
+      </button>
+      {addSizingOpen && activeSymbol && (
+        <AddSizingCalculator open symbol={activeSymbol} onClose={() => setAddSizingOpen(false)} />
+      )}
+
       {/* 倒叙播放：默认正序，选中后时间倒序推进 */}
       <button
         onClick={handleDirectionToggle}
