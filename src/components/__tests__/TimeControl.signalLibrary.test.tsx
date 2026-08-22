@@ -31,6 +31,9 @@ const SIGNALS = [
   { id: 's1', symbol: '0GUSDT', timeMs: Date.parse('2025-11-08T06:31:00.000Z'), timeLabel: '2025-11-08 14:31', fallbackZone: '1.38' },
   { id: 's2', symbol: 'ACEUSDT', timeMs: Date.parse('2025-07-11T06:42:00.000Z'), timeLabel: '2025-07-11 14:42', fallbackZone: '0.56' },
   { id: 's3', symbol: 'A50USDT', timeMs: Date.parse('2024-10-25T17:33:00.000Z'), timeLabel: '2024-10-26 01:33', fallbackZone: '' },
+  // 与 s2 同月，且字母序在它之前而时间在它之后——字母序与时间序相反，
+  // 才能验出「选中月份后排序真的换成了时间」而不是碰巧顺序一样。
+  { id: 's4', symbol: 'AAVEUSDT', timeMs: Date.parse('2025-07-20T02:00:00.000Z'), timeLabel: '2025-07-20 10:00', fallbackZone: '3' },
 ];
 
 function renderControl() {
@@ -85,7 +88,9 @@ describe('信号库展开面板', () => {
     expect(within(lib).getByTitle(/导出信号库/)).toBeInTheDocument();
     expect(within(lib).getByPlaceholderText(/筛选标的/)).toBeInTheDocument();
     expect(within(lib).getByTitle('排序方式')).toBeInTheDocument();
-    expect(within(lib).getByTitle('按月份定位信号')).toBeInTheDocument();
+    // 用正则而非精确串：title 里补了「选中某个月会自动按时间旧→新排列」这句提示，
+    // 这条守卫要保的是「控件还在」，不是文案一字不变。
+    expect(within(lib).getByTitle(/按月份定位信号/)).toBeInTheDocument();
   });
 
   it('筛选框按标的过滤', () => {
@@ -111,6 +116,41 @@ describe('信号库展开面板', () => {
       expect(cell.children).toHaveLength(2);
       expect(cell.className).toContain('grid-cols-[12px_minmax(0,1fr)]');
     }
+  });
+
+  it('选中具体月份后自动按时间旧→新排列——字母序会把那个月的时间线打散', () => {
+    renderControl();
+    openLibrary();
+    const lib = libraryRoot();
+    const sortSelect = within(lib).getByTitle('排序方式') as HTMLSelectElement;
+    expect(sortSelect.value).toBe('alpha'); // 全部月份下仍是字母序
+
+    fireEvent.change(within(lib).getByTitle(/按月份定位信号/), { target: { value: '2025-07' } });
+    expect(sortSelect.value).toBe('time-asc');
+    // 2025-07 里 AAVEUSDT 字母序在前、时间在后，改成时间序后应排在 ACEUSDT 之后
+    const symbols = within(lib).getAllByText(/USDT$/).map(n => n.textContent);
+    expect(symbols).toEqual(['ACEUSDT', 'AAVEUSDT']);
+  });
+
+  it('选月之后手动改排序不会被抢回去', () => {
+    renderControl();
+    openLibrary();
+    const lib = libraryRoot();
+    fireEvent.change(within(lib).getByTitle(/按月份定位信号/), { target: { value: '2025-07' } });
+    const sortSelect = within(lib).getByTitle('排序方式') as HTMLSelectElement;
+    fireEvent.change(sortSelect, { target: { value: 'alpha' } });
+    expect(sortSelect.value).toBe('alpha');
+    expect(within(lib).getAllByText(/USDT$/).map(n => n.textContent)).toEqual(['AAVEUSDT', 'ACEUSDT']);
+  });
+
+  it('切回「全部月份」不改排序——用户没要求那个方向', () => {
+    renderControl();
+    openLibrary();
+    const lib = libraryRoot();
+    const monthSelect = within(lib).getByTitle(/按月份定位信号/);
+    fireEvent.change(monthSelect, { target: { value: '2025-07' } });
+    fireEvent.change(monthSelect, { target: { value: '' } });
+    expect((within(lib).getByTitle('排序方式') as HTMLSelectElement).value).toBe('time-asc');
   });
 
   it('每行都有跳转入口和删除入口', () => {

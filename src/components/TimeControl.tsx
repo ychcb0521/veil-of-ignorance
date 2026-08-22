@@ -80,6 +80,21 @@ export function TimeControl({
   const [query, setQuery] = useState('');
   const [monthFilter, setMonthFilter] = useState(''); // '' = 全部月份
   const [sortMode, setSortMode] = useState<'alpha' | 'time-desc' | 'time-asc'>('alpha');
+
+  /**
+   * 选中某个具体月份时把排序切成「时间 旧→新」。
+   *
+   * 两种浏览方式要的顺序不同：看全部月份是在上千条里找某个标的，字母序才查得动；
+   * 缩到一个月是在读那段时间里信号出现的先后，字母序会把时间线打散。
+   *
+   * 只在「切换月份」这个动作上生效，之后手动改排序不会被抢回去——
+   * 每次重新选月份才重新应用这个默认值。切回「全部月份」不动排序：
+   * 用户没要求那个方向，替他改回去只会显得系统在跟他抢方向盘。
+   */
+  const selectMonth = (month: string) => {
+    setMonthFilter(month);
+    if (month) setSortMode('time-asc');
+  };
   const [jumpingSignalId, setJumpingSignalId] = useState<string | null>(null);
   const [signalAuditProgress, setSignalAuditProgress] = useState<{
     checked: number;
@@ -449,8 +464,8 @@ export function TimeControl({
               {monthOptions.length > 0 && (
                 <select
                   value={monthFilter}
-                  onChange={e => setMonthFilter(e.target.value)}
-                  title="按月份定位信号"
+                  onChange={e => selectMonth(e.target.value)}
+                  title="按月份定位信号（选中某个月会自动按时间旧→新排列）"
                   className="input-dark h-[22px] shrink-0 px-1.5 py-0.5 font-mono text-[11px]"
                 >
                   <option value="">全部月份（{signals.length}）</option>
