@@ -8,7 +8,13 @@ import { SIGNAL_LIBRARY_STORAGE_KEY } from '@/lib/signalLibrary';
 vi.mock('@/contexts/AuthContext', () => ({ useAuth: () => ({ user: { id: 'u-1' } }) }));
 vi.mock('@/contexts/TradingContext', () => ({
   useTradingContext: () => ({
-    tradeHistory: [{ symbol: 'ACEUSDT' }],
+    // ACEUSDT 在 2025-07-11（UTC+8）开过仓 —— 与下面 s2 那条信号同一天。
+    // 另有一笔 0GUSDT 在 2025-11-07 开仓，比 s1 那条信号早一天：
+    // 按标的判会把 s1 也标成已交易，按日判则不会。
+    tradeHistory: [
+      { symbol: 'ACEUSDT', action: 'CLOSE', openTime: Date.parse('2025-07-11T06:42:00.000Z') },
+      { symbol: '0GUSDT', action: 'CLOSE', openTime: Date.parse('2025-11-06T06:31:00.000Z') },
+    ],
     positionsMap: {},
     priceMap: {},
     getEffectiveTime: () => Date.parse('2025-11-08T06:31:00.000Z'),
@@ -59,11 +65,16 @@ describe('信号库展开面板', () => {
     expect(within(lib).getByText(/0\.56/)).toBeInTheDocument();
   });
 
-  it('已交易过的标的带勾号，未交易的不带', () => {
+  it('勾号按「信号当日」判定，不是「这个标的做过没有」', () => {
+    // 同一个币种会在很多个日期出现在信号库里。按标的判定的话，
+    // 别的日期交易过就会把这一天也标成已交易，标记因此失去意义。
     renderControl();
     openLibrary();
-    const marks = within(libraryRoot()).getAllByLabelText('已交易');
-    expect(marks).toHaveLength(1); // 只有 ACEUSDT 在 tradeHistory 里
+    const marks = within(libraryRoot()).getAllByLabelText('信号当日已交易');
+    // 只有 ACEUSDT（信号 2025-07-11，当天确实开过仓）该带勾号。
+    // 0GUSDT 虽然交易过，但那笔是 11-06 开的，而信号在 11-08 —— 不算。
+    expect(marks).toHaveLength(1);
+    expect(marks[0].closest('span')).toHaveTextContent('ACEUSDT');
   });
 
   it('导入、导出、清空、筛选、排序、月份定位入口都还在', () => {

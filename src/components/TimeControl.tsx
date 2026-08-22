@@ -20,7 +20,10 @@ import type { TimeMode } from '@/contexts/TradingContext';
 import { useTradingContext } from '@/contexts/TradingContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { listAllCampaigns } from '@/lib/journalApi';
-import { buildCampaignDayIndex, hasCampaignOnSignalDay } from '@/lib/signalCampaignIndex';
+import {
+  buildCampaignDayIndex, buildTradedDayIndex,
+  hasCampaignOnSignalDay, hasTradeOnSignalDay,
+} from '@/lib/signalCampaignIndex';
 import { PreTradeSnapshotDialog } from '@/components/journal/PreTradeSnapshotDialog';
 
 interface Props {
@@ -185,21 +188,18 @@ export function TimeControl({
     if (monthFilter) base = base.filter(s => signalMonthKey(s.timeMs) === monthFilter);
     return q ? base.filter(s => s.symbol.includes(q)) : base;
   }, [signals, query, monthFilter, sortMode]);
-  // 「被做过交易」的标的集合：已平仓记录(tradeHistory) ∪ 当前持仓(positionsMap)，
-  // 大写归一以匹配 sig.symbol。开仓即标记、平仓后仍保留——用于在信号库里识别已交易标的。
-  const tradedSymbols = useMemo(() => {
-    const set = new Set<string>();
-    for (const t of ctx.tradeHistory) {
-      if (t.symbol) set.add(t.symbol.toUpperCase());
-    }
-    for (const [sym, list] of Object.entries(ctx.positionsMap)) {
-      if (Array.isArray(list) && list.length > 0) set.add(sym.toUpperCase());
-    }
-    return set;
-  }, [ctx.tradeHistory, ctx.positionsMap]);
+  // 「标的@日期」索引：信号那天，这个标的动过手没有。
+  // 这里曾经只按标的判定（做过一次 TRB，所有 TRB 信号全被标成已交易），
+  // 而同一个币种会在很多个日期出现——按标的判等于把标记稀释成「这币我碰过」，
+  // 恰恰丢掉了「这一条信号我执行了没有」这个唯一有用的信息。
+  const tradedDayIndex = useMemo(
+    () => buildTradedDayIndex(ctx.tradeHistory, ctx.positionsMap),
+    [ctx.tradeHistory, ctx.positionsMap],
+  );
 
-  // 「该标的在信号当日有没有开过战役」的索引。与上面的 tradedSymbols 是两件事：
-  // 那个只问「这个标的做过没有」（不分日期），这个问的是「信号那天做没做」。
+  // 「该标的在信号当日有没有开过战役」的索引。与上面的 tradedDayIndex 同为按日口径，
+  // 但问的不是同一件事：那个是「当天动过手没有」（引擎里的成交/持仓），
+  // 这个是「当天那笔交易被归类成战役了没有」——下了单但还没归类的日子只有勾号、没有圆点。
   // 战役数据在服务端，只在信号库展开时拉一次，避免每次渲染都打库。
   const [campaignDayIndex, setCampaignDayIndex] = useState<Set<string>>(() => new Set());
   useEffect(() => {
@@ -556,6 +556,7 @@ export function TimeControl({
                 <div className="max-h-56 divide-y divide-border/30 overflow-y-auto overscroll-contain">
                 {sortedFiltered.map(sig => {
                   const hasDayCampaign = hasCampaignOnSignalDay(campaignDayIndex, sig);
+                  const tradedOnSignalDay = hasTradeOnSignalDay(tradedDayIndex, sig);
                   return (
                   <div key={sig.id} className="group flex items-stretch gap-1.5 px-2 py-0.5 transition-colors hover:bg-accent/60">
                     <button
@@ -567,10 +568,10 @@ export function TimeControl({
                       {/* 标的：勾号在前，名称可截断但列宽足够放下常见长度 */}
                       <span
                         className="flex min-w-0 items-center gap-1 font-mono text-[11px] font-medium leading-4 text-foreground"
-                        title={tradedSymbols.has(sig.symbol) ? '已交易过该标的' : undefined}
+                        title={tradedOnSignalDay ? `${sig.timeLabel.slice(0, 10)} 当日交易过 ${sig.symbol}` : undefined}
                       >
-                        {tradedSymbols.has(sig.symbol) && (
-                          <CheckCircle2 className="h-3 w-3 shrink-0 text-[#0ecb81]" aria-label="已交易" />
+                        {tradedOnSignalDay && (
+                          <CheckCircle2 className="h-3 w-3 shrink-0 text-[#0ecb81]" aria-label="信号当日已交易" />
                         )}
                         <span className="truncate">{sig.symbol}</span>
                       </span>

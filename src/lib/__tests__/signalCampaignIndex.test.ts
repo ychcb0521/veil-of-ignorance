@@ -1,11 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildCampaignDayIndex,
+  buildTradedDayIndex,
   hasCampaignOnSignalDay,
+  hasTradeOnSignalDay,
   normalizeSymbolKey,
   utc8DateKey,
 } from '@/lib/signalCampaignIndex';
 import type { TradeCampaign } from '@/types/journal';
+import type { TradeRecord } from '@/types/trading';
 
 const campaign = (symbol: string, openedAt: string): TradeCampaign =>
   ({ symbol, opened_at: openedAt } as TradeCampaign);
@@ -83,5 +86,75 @@ describe('hasCampaignOnSignalDay', () => {
       campaign('VELVETUSDT', '2026-08-11T09:00:00Z'),
     ]);
     expect(index.size).toBe(1);
+  });
+});
+
+describe('buildTradedDayIndex / hasTradeOnSignalDay', () => {
+  const rec = (over: Partial<TradeRecord>): TradeRecord =>
+    ({ id: 'r', symbol: 'TRBUSDT', action: 'CLOSE', pnl: 0, openTime: 0, closeTime: 0, ...over } as TradeRecord);
+  const at = (iso: string) => Date.parse(iso);
+
+  it('只标注信号当日动过手的那一条——同一个币的其它日期不受牵连', () => {
+    // 这正是用户报的问题：8 月做过一次 TRB，1 月那条 TRB 信号也被标成「已交易」。
+    const index = buildTradedDayIndex(
+      [rec({ openTime: at('2026-08-22T02:31:00.000Z') })], // UTC+8 = 08-22 10:31
+      {},
+    );
+    expect(hasTradeOnSignalDay(index, { symbol: 'TRBUSDT', timeMs: at('2026-08-22T02:31:00.000Z') })).toBe(true);
+    expect(hasTradeOnSignalDay(index, { symbol: 'TRBUSDT', timeMs: at('2026-01-15T02:31:00.000Z') })).toBe(false);
+  });
+
+  it('别的标的当天交易过，不算这个标的交易过', () => {
+    const index = buildTradedDayIndex([rec({ symbol: 'ARUSDT', openTime: at('2026-08-22T02:31:00.000Z') })], {});
+    expect(hasTradeOnSignalDay(index, { symbol: 'BLURUSDT', timeMs: at('2026-08-22T02:31:00.000Z') })).toBe(false);
+  });
+
+  it('按开仓日归属，不按平仓日——前一天开的仓今天平掉，不算今天进过场', () => {
+    const index = buildTradedDayIndex(
+      [rec({ openTime: at('2026-08-21T02:00:00.000Z'), closeTime: at('2026-08-22T02:00:00.000Z') })],
+      {},
+    );
+    expect(hasTradeOnSignalDay(index, { symbol: 'TRBUSDT', timeMs: at('2026-08-21T05:00:00.000Z') })).toBe(true);
+    expect(hasTradeOnSignalDay(index, { symbol: 'TRBUSDT', timeMs: at('2026-08-22T05:00:00.000Z') })).toBe(false);
+  });
+
+  it('资金费不算一次进场——否则仅仅持仓过夜就会把第二天误标成交易日', () => {
+    const index = buildTradedDayIndex(
+      [rec({ action: 'FUNDING', openTime: at('2026-08-23T00:00:00.000Z') })],
+      {},
+    );
+    expect(hasTradeOnSignalDay(index, { symbol: 'TRBUSDT', timeMs: at('2026-08-23T02:00:00.000Z') })).toBe(false);
+  });
+
+  it('爆仓也是一次交易，要算', () => {
+    const index = buildTradedDayIndex(
+      [rec({ action: 'LIQUIDATION', openTime: at('2026-08-22T02:00:00.000Z') })],
+      {},
+    );
+    expect(hasTradeOnSignalDay(index, { symbol: 'TRBUSDT', timeMs: at('2026-08-22T05:00:00.000Z') })).toBe(true);
+  });
+
+  it('当前未平仓位按其开仓日计入', () => {
+    const index = buildTradedDayIndex([], {
+      ARUSDT: [{ openTime: at('2026-08-22T02:00:00.000Z') } as never],
+    });
+    expect(hasTradeOnSignalDay(index, { symbol: 'ARUSDT', timeMs: at('2026-08-22T05:00:00.000Z') })).toBe(true);
+  });
+
+  it('缺开仓时间的持仓宁可不标，也不标到错误的日期上', () => {
+    const index = buildTradedDayIndex([], { ARUSDT: [{} as never] });
+    expect(index.size).toBe(0);
+  });
+
+  it('跨 UTC 零点的信号按 UTC+8 归日，与战役索引口径一致', () => {
+    // UTC 2026-08-21T18:00 = UTC+8 2026-08-22 02:00
+    const index = buildTradedDayIndex([rec({ openTime: at('2026-08-21T18:00:00.000Z') })], {});
+    expect(hasTradeOnSignalDay(index, { symbol: 'TRBUSDT', timeMs: at('2026-08-21T20:00:00.000Z') })).toBe(true);
+    expect(hasTradeOnSignalDay(index, { symbol: 'TRBUSDT', timeMs: at('2026-08-21T10:00:00.000Z') })).toBe(false);
+  });
+
+  it('标的写法不同也能对上（trb/usdt 与 TRBUSDT）', () => {
+    const index = buildTradedDayIndex([rec({ symbol: 'trb/usdt', openTime: at('2026-08-22T02:00:00.000Z') })], {});
+    expect(hasTradeOnSignalDay(index, { symbol: 'TRBUSDT', timeMs: at('2026-08-22T05:00:00.000Z') })).toBe(true);
   });
 });
