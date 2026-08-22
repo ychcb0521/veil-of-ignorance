@@ -548,7 +548,7 @@ export function TimeControl({
               <div className="overflow-hidden rounded border border-border/60">
                 {/* 表头：与行共用同一套列宽，四列各有名分，不再靠位置猜 */}
                 <div className="grid grid-cols-[minmax(108px,148px)_128px_minmax(0,1fr)_auto] items-center gap-2 border-b border-border/60 bg-muted/40 px-2 py-1 pr-[58px] text-[9px] leading-3 font-medium text-muted-foreground">
-                  <span>标的</span>
+                  <span className="grid grid-cols-[12px_minmax(0,1fr)] items-center gap-1"><span aria-hidden /><span>标的</span></span>
                   <span>信号时间</span>
                   <span>兜底区</span>
                   <span className="w-5" aria-hidden />
@@ -566,13 +566,15 @@ export function TimeControl({
                       title={sig.jumpIssue?.reason ?? `跳转到 ${sig.symbol} @ ${sig.timeLabel}`}
                     >
                       {/* 标的：勾号在前，名称可截断但列宽足够放下常见长度 */}
+                      {/* 勾号占一条固定的 12px 列，没勾时留空位而不是让标的左移——
+                          条件渲染会让带勾与不带勾的行首字母错开，勾号本身也没有固定的一列可扫。 */}
                       <span
-                        className="flex min-w-0 items-center gap-1 font-mono text-[11px] font-medium leading-4 text-foreground"
+                        className="grid min-w-0 grid-cols-[12px_minmax(0,1fr)] items-center gap-1 font-mono text-[11px] font-medium leading-4 text-foreground"
                         title={tradedOnSignalDay ? `${sig.timeLabel.slice(0, 10)} 当日交易过 ${sig.symbol}` : undefined}
                       >
-                        {tradedOnSignalDay && (
-                          <CheckCircle2 className="h-3 w-3 shrink-0 text-[#0ecb81]" aria-label="信号当日已交易" />
-                        )}
+                        {tradedOnSignalDay
+                          ? <CheckCircle2 className="h-3 w-3 text-[#0ecb81]" aria-label="信号当日已交易" />
+                          : <span aria-hidden />}
                         <span className="truncate">{sig.symbol}</span>
                       </span>
                       {/* 时间：定宽等宽字体，纵向严格成列 */}

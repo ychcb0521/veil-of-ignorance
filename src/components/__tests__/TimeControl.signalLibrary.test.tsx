@@ -97,6 +97,22 @@ describe('信号库展开面板', () => {
     expect(within(lib).queryByText('0GUSDT')).not.toBeInTheDocument();
   });
 
+  it('勾号占固定一列，带勾与不带勾的行首字母对齐', () => {
+    // 条件渲染勾号会让没勾的行整体左移，首字母和勾号两列都对不齐。
+    // 这里断言每一行都渲染了「勾号槽」——有勾放图标，没勾放等宽空位。
+    renderControl();
+    openLibrary();
+    const lib = libraryRoot();
+    const names = within(lib).getAllByText(/USDT$/);
+    const cells = names.map(n => n.parentElement!);
+    expect(cells).toHaveLength(SIGNALS.length);
+    for (const cell of cells) {
+      // 每个标的单元格恒有两个子节点：勾号槽 + 名称
+      expect(cell.children).toHaveLength(2);
+      expect(cell.className).toContain('grid-cols-[12px_minmax(0,1fr)]');
+    }
+  });
+
   it('每行都有跳转入口和删除入口', () => {
     renderControl();
     openLibrary();
