@@ -1,12 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { RotateCcw } from 'lucide-react';
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { useTradingContext } from '@/contexts/TradingContext';
 import { getCoinMarginedContractSizeUsd, getSettlementAsset } from '@/lib/coinMargined';
 import {
@@ -23,9 +18,9 @@ import {
 /**
  * 加仓计算器 —— 使用说明 3.4 的公式做成可以按的东西。
  *
- * 界面只放数字：X₂ 与对冲量是主角，中间量降一级，价格阶梯把 S̄ / S₁ / S₂ 的几何画出来
- * （「S₁ 还在成本线下方所以没有垫子」这种情况一眼可见，不必读文字）。
- * 解释性文字一律留在使用说明 3.4，右上角那个近乎隐形的「?」给公式速览与跳转。
+ * 界面只放数字：X₂ 与对冲量是主角，中间量降成一行芯片，价格阶梯把 S̄ / S₁ / S₂ 的几何画出来。
+ * 阶梯**不看有没有解**：三个价格齐了就画，方向反了的那一段标红——「S₁ 还在成本线亏损侧」
+ * 因此一眼可见，不必读文字。解释性文字一律留在使用说明 3.4，右上角近乎隐形的「?」给公式速览。
  */
 
 interface Props {
@@ -42,13 +37,20 @@ const toNum = (s: string) => { const n = parseFloat(s); return Number.isFinite(n
 const tidyPx = (v: number) => (Number.isFinite(v) ? String(Number(v.toPrecision(8))) : '');
 const tidyCoins = (v: number) => (Number.isFinite(v) ? String(Number(v.toFixed(4))) : '');
 
-/** 无解时给一句带数字的诊断——说清缺什么、差多少，不写成一段话。 */
-function cushionDiagnosis(r: CushionAddResult, side: AddSide): string {
-  if (r.problem === 'invalid_input') return '填入 S̄ · S₁ · S₂ · X₁ 后计算';
-  if (!r.needed) return '无法计算';
+/**
+ * 无解分两档，不能混为一谈：
+ *   还没填全 → 中性，这不是错误；
+ *   条件违反 → 告警，并给出「差多少」这个能行动的数。
+ */
+function cushionNote(r: CushionAddResult, side: AddSide): { text: string; violation: boolean } {
+  if (r.problem === 'invalid_input') return { text: '填入 S̄ · S₁ · S₂ · X₁ 后计算', violation: false };
+  if (!r.needed) return { text: '无法计算', violation: true };
   const dir = r.needed.mustBe === 'above' ? '高于' : '低于';
   const what = r.problem === 's1_not_past_cost' ? '没有浮盈垫' : '新腿没有风险距离';
-  return `${what}：${side === 'LONG' ? '主多' : '主空'}需 ${r.needed.field} ${dir} ${fmtPx(r.needed.threshold)}，还差 ${fmtPx(r.needed.gap)}`;
+  return {
+    text: `${what} · ${side === 'LONG' ? '主多' : '主空'}需 ${r.needed.field} ${dir} ${fmtPx(r.needed.threshold)}，还差 ${fmtPx(r.needed.gap)}`,
+    violation: true,
+  };
 }
 
 const BANKED_PROBLEM: Record<string, string> = {
@@ -97,6 +99,7 @@ export function AddSizingCalculator({ open, onClose, symbol }: Props) {
     () => computeCushionAdd({ side, sBar: toNum(sBar), s1: toNum(s1), s2: toNum(s2), x1: toNum(x1) }),
     [side, sBar, s1, s2, x1],
   );
+  const note = cushionNote(cushion, side);
 
   const banked = useMemo(
     () => detectBankedMirrorProfit(symbol, side, ctx.tradeHistory, held?.earliestOpenTime ?? null),
@@ -112,22 +115,23 @@ export function AddSizingCalculator({ open, onClose, symbol }: Props) {
   const bankedOn = toNum(g) > 0;
 
   const contracts = (coins: number, price: number) =>
-    isCoin && Number.isFinite(coins) && price > 0 ? `${coinsToContracts(coins, price, face).toLocaleString('en-US')} 张` : '';
+    isCoin && Number.isFinite(coins) && price > 0 ? ` · ${coinsToContracts(coins, price, face).toLocaleString('en-US')} 张` : '';
 
   return (
     <Dialog open={open} onOpenChange={v => { if (!v) onClose(); }}>
-      <DialogContent className="max-h-[92vh] gap-0 overflow-y-auto p-0 sm:max-w-[660px]" data-testid="add-sizing-dialog">
-        <DialogHeader className="space-y-0 border-b border-border px-5 py-3.5">
+      <DialogContent className="max-h-[92vh] gap-0 overflow-y-auto p-0 sm:max-w-[600px]" data-testid="add-sizing-dialog">
+        {/* pr-14 给右上角的关闭 × 让位——ml-auto 的「?」会和它叠在一起 */}
+        <DialogHeader className="space-y-0 border-b border-border py-2.5 pl-4 pr-14">
           <div className="flex items-center gap-2">
-            <DialogTitle className="text-[14px] font-medium">加仓计算器</DialogTitle>
-            <span className="font-mono text-[12px] text-muted-foreground">{symbol}</span>
+            <DialogTitle className="text-[13px] font-medium">加仓计算器</DialogTitle>
+            <span className="font-mono text-[11px] text-muted-foreground">{symbol}</span>
             <button
               type="button"
               data-testid="add-sizing-help"
               aria-label="使用说明"
               aria-expanded={helpOpen}
               onClick={() => setHelpOpen(v => !v)}
-              className="ml-auto h-5 w-5 shrink-0 rounded-full text-[11px] leading-5 text-muted-foreground/25 transition-colors hover:bg-accent hover:text-foreground"
+              className="ml-auto h-4 w-4 shrink-0 rounded-full text-[10px] leading-4 text-muted-foreground/25 transition-colors hover:bg-accent hover:text-foreground"
             >
               ?
             </button>
@@ -135,24 +139,24 @@ export function AddSizingCalculator({ open, onClose, symbol }: Props) {
         </DialogHeader>
 
         {helpOpen && (
-          <div data-testid="add-sizing-help-panel" className="border-b border-border bg-muted/30 px-5 py-3 text-[11px] leading-relaxed text-muted-foreground">
-            <div className="font-mono text-foreground">X₁ (S₁ − S̄) = X₂ (S₂ − S₁)</div>
-            <div className="mt-0.5 font-mono">X₂ = X₁ ÷ b　·　b = (S₂ − S₁)/(S₁ − S̄)　·　1/(1+b) = P₀　·　对冲 = X₁ + X₂ @ S₁</div>
-            <div className="mt-0.5 font-mono">B 腿：X₂ᴮ 从 S₂ 跌到 K_B 恰好亏掉已落袋的 G</div>
-            <Link to="/guide#s3-1c" className="mt-1.5 inline-block text-[#5BA3FF] hover:underline">完整说明 · 使用说明 3.4 →</Link>
+          <div data-testid="add-sizing-help-panel" className="border-b border-border bg-muted/30 px-4 py-2.5 font-mono text-[10px] leading-[1.7] text-muted-foreground">
+            <div className="text-foreground">X₁ (S₁ − S̄) = X₂ (S₂ − S₁)</div>
+            <div>X₂ = X₁ ÷ b　b = (S₂−S₁)/(S₁−S̄)　1/(1+b) = P₀　对冲 = X₁ + X₂ @ S₁</div>
+            <div>B 腿：X₂ᴮ 从 S₂ 跌到 K_B 恰好亏掉已落袋的 G</div>
+            <Link to="/guide#s3-1c" className="mt-1 inline-block font-sans text-primary hover:underline">完整说明 · 使用说明 3.4 →</Link>
           </div>
         )}
 
-        <div className="space-y-5 px-5 py-4">
+        <div className="space-y-3 px-4 py-3">
           {/* 方向 + 盘面 */}
-          <div className="flex items-center gap-1 text-[11px]">
+          <div className="flex items-center gap-1">
             {(['LONG', 'SHORT'] as AddSide[]).map(v => (
               <button
                 key={v}
                 type="button"
                 data-testid={`add-sizing-side-${v}`}
                 onClick={() => setSide(v)}
-                className={`rounded px-2.5 py-1 font-medium transition-colors ${
+                className={`rounded px-2 py-0.5 text-[11px] font-medium transition-colors ${
                   side === v
                     ? (v === 'LONG' ? 'bg-trading-green/15 text-trading-green' : 'bg-trading-red/15 text-trading-red')
                     : 'text-muted-foreground hover:bg-accent hover:text-foreground'
@@ -169,45 +173,46 @@ export function AddSizingCalculator({ open, onClose, symbol }: Props) {
           </div>
 
           {/* 输入：按价格阶梯顺序 S̄ → S₁ → S₂，X₁ 殿后 */}
-          <div className="grid grid-cols-2 gap-x-4 gap-y-3 sm:grid-cols-4">
-            <Field label="S̄ 开仓均价" value={sBar} onChange={setSBar} testId="add-sizing-sbar"
+          <div className="grid grid-cols-4 gap-x-2">
+            <Field label="S̄ 均价" value={sBar} onChange={setSBar} testId="add-sizing-sbar"
               onReset={held ? () => setSBar(tidyPx(held.avgEntry)) : undefined} />
             <Field label="S₁ 止损线" value={s1} onChange={setS1} testId="add-sizing-s1" accent />
             <Field label="S₂ 加仓价" value={s2} onChange={setS2} testId="add-sizing-s2"
               onReset={currentPrice > 0 ? () => setS2(tidyPx(currentPrice)) : undefined} />
-            <Field label={`X₁ 既有 ${coinName}`} value={x1} onChange={setX1} testId="add-sizing-x1"
+            <Field label={`X₁ ${coinName}`} value={x1} onChange={setX1} testId="add-sizing-x1"
               onReset={held ? () => setX1(tidyCoins(held.coins)) : undefined} />
           </div>
 
-          <PriceLadder side={side} sBar={toNum(sBar)} s1={toNum(s1)} s2={toNum(s2)} result={cushion} />
+          <PriceLadder side={side} sBar={toNum(sBar)} s1={toNum(s1)} s2={toNum(s2)} />
 
           {/* A 本账 */}
-          <section data-testid="add-sizing-cushion" className="space-y-3">
-            <SectionLabel title="A 浮盈垫" note="锁死" />
-            {!cushion.ok ? (
-              <p data-testid="add-sizing-cushion-problem" className="rounded bg-muted/40 px-3 py-2.5 text-[11px] text-muted-foreground">
-                {cushionDiagnosis(cushion, side)}
-              </p>
-            ) : (
+          <section data-testid="add-sizing-cushion" className="space-y-2">
+            <div className="flex items-baseline gap-2">
+              <h3 className="text-[11px] font-medium text-foreground">A 浮盈垫</h3>
+              <span className="text-[10px] text-muted-foreground">锁死</span>
+              {!cushion.ok && (
+                <span
+                  data-testid="add-sizing-cushion-problem"
+                  className={`ml-auto truncate rounded border px-1.5 py-0.5 text-[10px] ${
+                    note.violation
+                      ? 'border-trading-red/40 bg-trading-red/10 text-trading-red'
+                      : 'border-dashed border-border text-muted-foreground'
+                  }`}
+                >
+                  {note.text}
+                </span>
+              )}
+            </div>
+            {cushion.ok && (
               <>
-                <div className="grid grid-cols-2 gap-3">
-                  <Hero
-                    testId="add-sizing-x2"
-                    label="加仓上限 X₂"
-                    value={fmtCoins(cushion.x2Max)}
-                    unit={coinName}
-                    sub={`${fmtUsd(cushion.x2MaxNotional)} USD${isCoin ? ` · ${contracts(cushion.x2Max, toNum(s2))}` : ''}`}
-                    tone="primary"
-                  />
-                  <Hero
-                    testId="add-sizing-hedge"
-                    label={`对冲 @ S₁　${side === 'LONG' ? '空' : '多'}`}
-                    value={fmtCoins(cushion.hedgeCoinsAtS1)}
-                    unit={coinName}
-                    sub={`${fmtUsd(cushion.hedgeNotionalAtS1)} USD${isCoin ? ` · ${contracts(cushion.hedgeCoinsAtS1, toNum(s1))}` : ''}`}
-                  />
+                <div className="grid grid-cols-2 gap-2">
+                  <Hero testId="add-sizing-x2" label="加仓上限 X₂" value={fmtCoins(cushion.x2Max)} unit={coinName}
+                    sub={`${fmtUsd(cushion.x2MaxNotional)} USD${contracts(cushion.x2Max, toNum(s2))}`} tone="primary" />
+                  <Hero testId="add-sizing-hedge" label={`对冲 @ S₁ · ${side === 'LONG' ? '空' : '多'}`}
+                    value={fmtCoins(cushion.hedgeCoinsAtS1)} unit={coinName}
+                    sub={`${fmtUsd(cushion.hedgeNotionalAtS1)} USD${contracts(cushion.hedgeCoinsAtS1, toNum(s1))}`} />
                 </div>
-                <MetaRow items={[
+                <Chips items={[
                   ['浮盈垫', `${fmtUsd(cushion.cushion)} USD`],
                   ['b', cushion.b.toFixed(4)],
                   ['P₀', fmtPct(cushion.p0)],
@@ -218,77 +223,67 @@ export function AddSizingCalculator({ open, onClose, symbol }: Props) {
           </section>
 
           {/* B 本账 */}
-          <section data-testid="add-sizing-banked" className="space-y-3 border-t border-border pt-4">
-            <SectionLabel title="B 落袋镜像" note="可选 · 允许敞口" />
-            <div className="flex flex-wrap items-end gap-x-4 gap-y-2">
-              <div className="w-[150px]">
-                <Field label={`G 已落袋 ${isCoin ? coinName : 'USD'}`} value={g} onChange={setG} testId="add-sizing-g" />
-              </div>
+          <section data-testid="add-sizing-banked" className="space-y-2 border-t border-border pt-3">
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5">
+              <h3 className="text-[11px] font-medium text-foreground">B 落袋镜像</h3>
+              <span className="text-[10px] text-muted-foreground">可选 · 允许敞口</span>
+              {!bankedOn && (
+                <span data-testid="add-sizing-banked-off" className="ml-auto text-[10px] text-muted-foreground">未填 G，本账关闭</span>
+              )}
+            </div>
+            <div className="flex flex-wrap items-end gap-x-2 gap-y-1.5">
+              <div className="w-[116px]"><Field label={`G 已落袋 ${isCoin ? coinName : 'USD'}`} value={g} onChange={setG} testId="add-sizing-g" /></div>
               {bankedSuggest > 0 && (
                 <button
                   type="button"
                   data-testid="add-sizing-fill-banked"
                   onClick={() => setG(isCoin ? tidyCoins(bankedSuggest) : String(Number(bankedSuggest.toFixed(2))))}
-                  className="mb-0.5 rounded border border-border px-2 py-1 font-mono text-[10px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                  className="h-7 rounded border border-border px-2 font-mono text-[10px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
                 >
                   本场止盈 +{isCoin ? fmtCoins(bankedSuggest, 4) : fmtUsd(bankedSuggest)}（{banked.count} 笔）
                 </button>
               )}
               {bankedOn && (
-                <div className="mb-0.5 flex items-center gap-1 text-[11px]">
-                  {(['line', 'size'] as BankedKnob['kind'][]).map(k => (
-                    <button
-                      key={k}
-                      type="button"
-                      data-testid={`add-sizing-knob-${k}`}
-                      onClick={() => setKnobKind(k)}
-                      className={`rounded px-2 py-1 transition-colors ${knobKind === k ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:bg-accent hover:text-foreground'}`}
-                    >
-                      {k === 'line' ? '定线' : '定仓'}
-                    </button>
-                  ))}
-                </div>
+                <>
+                  <div className="flex h-7 items-center gap-0.5 rounded bg-secondary p-0.5">
+                    {(['line', 'size'] as BankedKnob['kind'][]).map(k => (
+                      <button
+                        key={k}
+                        type="button"
+                        data-testid={`add-sizing-knob-${k}`}
+                        onClick={() => setKnobKind(k)}
+                        className={`rounded px-2 py-0.5 text-[10px] transition-colors ${knobKind === k ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
+                      >
+                        {k === 'line' ? '定线' : '定仓'}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="w-[116px]">
+                    {knobKind === 'line'
+                      ? <Field label="K_B 零风险线" value={kB} onChange={setKB} testId="add-sizing-kb" placeholder={s1 || 'S₁'} onReset={() => setKB('')} accent />
+                      : <Field label={`X₂ᴮ ${coinName}`} value={x2B} onChange={setX2B} testId="add-sizing-x2b" accent />}
+                  </div>
+                </>
               )}
-              {bankedOn && (
-                <div className="w-[150px]">
-                  {knobKind === 'line'
-                    ? <Field label="K_B 零风险线" value={kB} onChange={setKB} testId="add-sizing-kb" placeholder={s1 || 'S₁'} onReset={() => setKB('')} accent />
-                    : <Field label={`X₂ᴮ ${coinName}`} value={x2B} onChange={setX2B} testId="add-sizing-x2b" accent />}
-                </div>
+              {bankedOn && !bankedRes.ok && (
+                <span data-testid="add-sizing-banked-problem" className="mb-1 text-[10px] text-muted-foreground">
+                  {BANKED_PROBLEM[bankedRes.problem ?? 'disabled']}
+                </span>
               )}
             </div>
-
-            {!bankedOn ? (
-              <p data-testid="add-sizing-banked-off" className="text-[11px] text-muted-foreground">
-                未填 G，本账关闭
-              </p>
-            ) : !bankedRes.ok ? (
-              <p data-testid="add-sizing-banked-problem" className="rounded bg-muted/40 px-3 py-2.5 text-[11px] text-muted-foreground">
-                {BANKED_PROBLEM[bankedRes.problem ?? 'disabled']}
-              </p>
-            ) : (
+            {bankedOn && bankedRes.ok && (
               <>
-                <div className="grid grid-cols-2 gap-3">
-                  <Hero
-                    testId="add-sizing-x2b-out"
-                    label="B 腿 X₂ᴮ"
-                    value={fmtCoins(bankedRes.x2)}
-                    unit={coinName}
-                    sub={`${fmtUsd(bankedRes.x2Notional)} USD${isCoin ? ` · ${contracts(bankedRes.x2, toNum(s2))}` : ''}`}
-                    tone="primary"
-                  />
-                  <Hero
-                    testId="add-sizing-kb-out"
-                    label="K_B 零风险线"
-                    value={fmtPx(bankedRes.kB)}
-                    sub={bankedRes.kBBeyondS1 ? '已越过 S₁' : '不低于 S₁'}
-                  />
+                <div className="grid grid-cols-2 gap-2">
+                  <Hero testId="add-sizing-x2b-out" label="B 腿 X₂ᴮ" value={fmtCoins(bankedRes.x2)} unit={coinName}
+                    sub={`${fmtUsd(bankedRes.x2Notional)} USD${contracts(bankedRes.x2, toNum(s2))}`} tone="primary" />
+                  <Hero testId="add-sizing-kb-out" label="K_B 零风险线" value={fmtPx(bankedRes.kB)}
+                    sub={bankedRes.kBBeyondS1 ? '已越过 S₁' : '不低于 S₁'} />
                 </div>
-                <MetaRow items={[
-                  ['S₁ 处吃掉落袋', `${isCoin ? fmtCoins(bankedRes.consumedAtS1, 4) : fmtUsd(bankedRes.consumedAtS1)} · 敞口 ${fmtPct(bankedRes.exposureAtS1)}`, bankedRes.exposureAtS1 > 1],
+                <Chips items={[
+                  ['S₁ 处吃掉', `${isCoin ? fmtCoins(bankedRes.consumedAtS1, 4) : fmtUsd(bankedRes.consumedAtS1)} · 敞口 ${fmtPct(bankedRes.exposureAtS1)}`, bankedRes.exposureAtS1 > 1],
                   ['剩余', isCoin ? fmtCoins(bankedRes.residualAtS1, 4) : fmtUsd(bankedRes.residualAtS1)],
                   ...(cushion.ok
-                    ? [['合计加仓', `${fmtCoins(cushion.x2Max + bankedRes.x2)} ${coinName}　A ${fmtCoins(cushion.x2Max)} + B ${fmtCoins(bankedRes.x2)}`, false, 'add-sizing-total-add'] as const]
+                    ? [['合计', `${fmtCoins(cushion.x2Max + bankedRes.x2)} ${coinName} · A ${fmtCoins(cushion.x2Max)} + B ${fmtCoins(bankedRes.x2)}`, false, 'add-sizing-total-add'] as const]
                     : []),
                 ] as Array<readonly [string, string, boolean?, string?]>} />
               </>
@@ -300,57 +295,55 @@ export function AddSizingCalculator({ open, onClose, symbol }: Props) {
   );
 }
 
-/** 价格阶梯：把 S̄ / S₁ / S₂ 三点按比例画在一条轴上，垫子段与风险段分色。 */
-function PriceLadder({ side, sBar, s1, s2, result }: {
-  side: AddSide; sBar: number; s1: number; s2: number; result: CushionAddResult;
-}) {
-  const all = [sBar, s1, s2].filter(v => Number.isFinite(v) && v > 0);
-  if (all.length < 3) return <div className="h-[46px]" aria-hidden />;
-  const lo = Math.min(...all);
-  const hi = Math.max(...all);
+/**
+ * 价格阶梯：三个价格齐了就画，**不看有没有解**。
+ * 方向反了的那一段标红——「S₁ 还在成本线亏损侧」于是一眼可见，而不是只剩一句灰字。
+ */
+function PriceLadder({ side, sBar, s1, s2 }: { side: AddSide; sBar: number; s1: number; s2: number }) {
+  const ok = [sBar, s1, s2].every(v => Number.isFinite(v) && v > 0);
+  const lo = ok ? Math.min(sBar, s1, s2) : 0;
+  const hi = ok ? Math.max(sBar, s1, s2) : 0;
   const span = hi - lo;
-  if (!(span > 0)) return <div className="h-[46px]" aria-hidden />;
-  // 主多向右为盈利方向；主空翻转，让「垫子在左、风险在右」的读法保持一致
-  const pos = (p: number) => ((side === 'LONG' ? p - lo : hi - p) / span) * 100;
+  // 三个价格没齐、或三点重合时不占位——留一块空白比什么都不放更糟
+  if (!ok || !(span > 0)) return null;
+
+  const d = side === 'SHORT' ? -1 : 1;
+  const pos = (p: number) => ((d > 0 ? p - lo : hi - p) / span) * 100;
   const pB = pos(sBar);
   const p1 = pos(s1);
   const p2 = pos(s2);
-  const seg = (a: number, b: number) => ({ left: `${Math.min(a, b)}%`, width: `${Math.abs(b - a)}%` });
-
   const mid = (a: number, b: number) => (a + b) / 2;
+  const seg = (a: number, b: number) => ({ left: `${Math.min(a, b)}%`, width: `${Math.abs(b - a)}%` });
+  const cushionOk = (s1 - sBar) * d > 0;
+  const riskOk = (s2 - s1) * d > 0;
 
   return (
-    // 左右留出 14px：两端的刻度用 -translate-x-1/2 居中，贴边会被裁掉一半
-    <div className="relative h-[44px] px-3.5" data-testid="add-sizing-ladder">
-      <div className="relative h-full">
-        <div className="absolute inset-x-0 top-[11px] h-[3px] rounded-full bg-muted" />
-        {result.ok && <div className="absolute top-[11px] h-[3px] rounded-full bg-trading-green/50" style={seg(pB, p1)} />}
-        {result.ok && <div className="absolute top-[11px] h-[3px] rounded-full bg-primary/50" style={seg(p1, p2)} />}
+    // 左右留 14px：两端刻度用 -translate-x-1/2 居中，贴边会被裁掉一半
+    <div className="px-3.5" data-testid="add-sizing-ladder">
+      <div className="relative h-[40px]">
+        <div className="absolute inset-x-0 top-[10px] h-[3px] rounded-full bg-muted" />
+        <div className={`absolute top-[10px] h-[3px] rounded-full ${cushionOk ? 'bg-trading-green/55' : 'bg-trading-red/55'}`} style={seg(pB, p1)} />
+        <div className={`absolute top-[10px] h-[3px] rounded-full ${riskOk ? 'bg-primary/55' : 'bg-trading-red/55'}`} style={seg(p1, p2)} />
         {([['S̄', pB, false], ['S₁', p1, true], ['S₂', p2, false]] as const).map(([label, p, accent]) => (
           <div key={label} className="absolute top-0 -translate-x-1/2 text-center" style={{ left: `${p}%` }}>
-            <div className={`mx-auto h-[8px] w-[2px] rounded-full ${accent ? 'bg-foreground' : 'bg-muted-foreground/50'}`} />
-            <div className={`mt-[8px] text-[10px] leading-none ${accent ? 'text-foreground' : 'text-muted-foreground'}`}>{label}</div>
+            <div className={`mx-auto h-[7px] w-[2px] rounded-full ${accent ? 'bg-foreground' : 'bg-muted-foreground/50'}`} />
+            <div className={`mt-[7px] text-[9px] leading-none ${accent ? 'text-foreground' : 'text-muted-foreground'}`}>{label}</div>
           </div>
         ))}
         {/* 距离标注落在各自线段的中点下方，而不是挤在两端 */}
-        {result.ok && ([
-          ['垫', result.cushionDistance, mid(pB, p1)],
-          ['险', result.riskDistance, mid(p1, p2)],
-        ] as const).map(([tag, dist, at]) => (
-          <div key={tag} className="absolute top-[30px] -translate-x-1/2 whitespace-nowrap font-mono text-[9px] text-muted-foreground" style={{ left: `${at}%` }}>
-            {tag} {fmtPx(dist)}
+        {([
+          ['垫', Math.abs(s1 - sBar), mid(pB, p1), cushionOk],
+          ['险', Math.abs(s2 - s1), mid(p1, p2), riskOk],
+        ] as const).map(([tag, dist, at, good]) => (
+          <div
+            key={tag}
+            className={`absolute top-[27px] -translate-x-1/2 whitespace-nowrap font-mono text-[9px] ${good ? 'text-muted-foreground' : 'text-trading-red'}`}
+            style={{ left: `${at}%` }}
+          >
+            {good ? '' : '反向 '}{tag} {fmtPx(dist)}
           </div>
         ))}
       </div>
-    </div>
-  );
-}
-
-function SectionLabel({ title, note }: { title: string; note: string }) {
-  return (
-    <div className="flex items-baseline gap-2">
-      <h3 className="text-[11px] font-medium tracking-wide text-foreground">{title}</h3>
-      <span className="text-[10px] text-muted-foreground">{note}</span>
     </div>
   );
 }
@@ -359,22 +352,22 @@ function Hero({ label, value, unit, sub, tone, testId }: {
   label: string; value: string; unit?: string; sub?: string; tone?: 'primary'; testId: string;
 }) {
   return (
-    <div data-testid={testId} className="rounded-md bg-muted/40 px-3.5 py-3">
+    <div data-testid={testId} className="rounded-md bg-muted/40 px-3 py-2">
       <div className="text-[10px] text-muted-foreground">{label}</div>
-      <div className={`mt-1 font-mono text-[20px] font-semibold leading-none tabular-nums ${tone === 'primary' ? 'text-primary' : 'text-foreground'}`}>
+      <div className={`mt-0.5 font-mono text-[18px] font-semibold leading-tight tabular-nums ${tone === 'primary' ? 'text-primary' : 'text-foreground'}`}>
         {value}
-        {unit && <span className="ml-1 text-[11px] font-normal text-muted-foreground">{unit}</span>}
+        {unit && <span className="ml-1 text-[10px] font-normal text-muted-foreground">{unit}</span>}
       </div>
-      {sub && <div className="mt-1.5 font-mono text-[10px] text-muted-foreground">{sub}</div>}
+      {sub && <div className="font-mono text-[10px] text-muted-foreground">{sub}</div>}
     </div>
   );
 }
 
-function MetaRow({ items }: { items: Array<readonly [string, string, boolean?, string?]> }) {
+function Chips({ items }: { items: Array<readonly [string, string, boolean?, string?]> }) {
   return (
-    <div className="flex flex-wrap gap-x-6 gap-y-1.5">
+    <div className="flex flex-wrap gap-x-4 gap-y-1">
       {items.map(([label, value, warn, testId]) => (
-        <div key={label} data-testid={testId} className="text-[10px]">
+        <div key={label} data-testid={testId} className="text-[10px] leading-tight">
           <span className="text-muted-foreground">{label} </span>
           <span className={`font-mono tabular-nums ${warn ? 'text-trading-red' : 'text-foreground'}`}>{value}</span>
         </div>
@@ -388,12 +381,12 @@ function Field({ label, value, onChange, testId, onReset, accent, placeholder }:
   onReset?: () => void; accent?: boolean; placeholder?: string;
 }) {
   return (
-    <label className="block">
-      <span className="flex items-center gap-1 text-[10px] text-muted-foreground">
+    <label className="block min-w-0">
+      <span className="flex items-center gap-1 text-[10px] leading-tight text-muted-foreground">
         <span className="truncate">{label}</span>
         {onReset && (
           <button type="button" aria-label={`${label} 复位`} onClick={onReset}
-            className="ml-auto shrink-0 rounded p-0.5 opacity-50 transition-opacity hover:opacity-100">
+            className="ml-auto shrink-0 rounded opacity-40 transition-opacity hover:opacity-100">
             <RotateCcw className="h-2.5 w-2.5" />
           </button>
         )}
@@ -406,7 +399,7 @@ function Field({ label, value, onChange, testId, onReset, accent, placeholder }:
         value={value}
         placeholder={placeholder}
         onChange={e => onChange(e.target.value)}
-        className={`mt-1 h-8 w-full rounded border bg-secondary px-2 font-mono text-[12px] tabular-nums text-foreground transition-colors focus:outline-none focus:ring-1 focus:ring-primary/40 ${
+        className={`mt-0.5 h-7 w-full rounded border bg-secondary px-1.5 font-mono text-[11px] tabular-nums text-foreground transition-colors focus:outline-none focus:ring-1 focus:ring-primary/40 ${
           accent ? 'border-primary/40' : 'border-border'
         }`}
       />
