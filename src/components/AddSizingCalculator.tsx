@@ -27,6 +27,13 @@ interface Props {
   open: boolean;
   onClose: () => void;
   symbol: string;
+  /**
+   * 实时现价（Index 的 displayCurrentPrice）。不能读 ctx.priceMap ——
+   * 那是 usePersistedState('price_map') 的持久化行情缓存，会留着上一段回放的陈旧价，
+   * 于是 S₂ 被预填成完全不相干的数（实测 0.6273 vs 真实 0.012804）。
+   * 全 app 的面板拿的都是这个实时值，计算器也必须同源。
+   */
+  currentPrice?: number;
 }
 
 const fmtCoins = (v: number, dp = 2) => (Number.isFinite(v) ? v.toLocaleString('en-US', { maximumFractionDigits: dp }) : '—');
@@ -61,10 +68,9 @@ const BANKED_PROBLEM: Record<string, string> = {
   x2_not_above_g: 'X₂ᴮ 需大于 G',
 };
 
-export function AddSizingCalculator({ open, onClose, symbol }: Props) {
+export function AddSizingCalculator({ open, onClose, symbol, currentPrice = 0 }: Props) {
   const ctx = useTradingContext();
   const positions = ctx.positionsMap[symbol];
-  const currentPrice = ctx.priceMap[symbol] ?? 0;
   const settlement = ctx.getSymbolSettlementMode(symbol);
   const isCoin = settlement === 'coin';
   const face = getCoinMarginedContractSizeUsd(symbol);
@@ -82,6 +88,7 @@ export function AddSizingCalculator({ open, onClose, symbol }: Props) {
   const [kB, setKB] = useState('');
   const [x2B, setX2B] = useState('');
   const [helpOpen, setHelpOpen] = useState(false);
+  const [sideOpen, setSideOpen] = useState(false);
 
   const seedRef = useRef({ held, currentPrice });
   seedRef.current = { held, currentPrice };
@@ -92,7 +99,7 @@ export function AddSizingCalculator({ open, onClose, symbol }: Props) {
     setSBar(h ? tidyPx(h.avgEntry) : '');
     setX1(h ? tidyCoins(h.coins) : '');
     setS2(px > 0 ? tidyPx(px) : '');
-    setS1(''); setG(''); setKnobKind('line'); setKB(''); setX2B(''); setHelpOpen(false);
+    setS1(''); setG(''); setKnobKind('line'); setKB(''); setX2B(''); setHelpOpen(false); setSideOpen(false);
   }, [open]);
 
   const cushion = useMemo(
@@ -150,23 +157,38 @@ export function AddSizingCalculator({ open, onClose, symbol }: Props) {
         )}
 
         <div className="space-y-3 px-4 py-3">
-          {/* 方向 + 盘面 */}
+          {/* 方向 + 盘面。方向默认由持仓推定，几乎不用改——
+              所以收成一个小字，点开才露出另一个选项，不占常驻视觉分量。 */}
           <div className="flex items-center gap-1">
-            {(['LONG', 'SHORT'] as AddSide[]).map(v => (
+            {sideOpen ? (
+              (['LONG', 'SHORT'] as AddSide[]).map(v => (
+                <button
+                  key={v}
+                  type="button"
+                  data-testid={`add-sizing-side-${v}`}
+                  onClick={() => { setSide(v); setSideOpen(false); }}
+                  className={`rounded px-2 py-0.5 text-[11px] font-medium transition-colors ${
+                    side === v
+                      ? (v === 'LONG' ? 'bg-trading-green/15 text-trading-green' : 'bg-trading-red/15 text-trading-red')
+                      : 'text-muted-foreground hover:bg-accent hover:text-foreground'
+                  }`}
+                >
+                  {v === 'LONG' ? '主多' : '主空'}
+                </button>
+              ))
+            ) : (
               <button
-                key={v}
                 type="button"
-                data-testid={`add-sizing-side-${v}`}
-                onClick={() => setSide(v)}
-                className={`rounded px-2 py-0.5 text-[11px] font-medium transition-colors ${
-                  side === v
-                    ? (v === 'LONG' ? 'bg-trading-green/15 text-trading-green' : 'bg-trading-red/15 text-trading-red')
-                    : 'text-muted-foreground hover:bg-accent hover:text-foreground'
+                data-testid="add-sizing-side-toggle"
+                onClick={() => setSideOpen(true)}
+                title="切换方向"
+                className={`rounded px-1.5 py-0.5 text-[10px] transition-colors hover:bg-accent ${
+                  side === 'LONG' ? 'text-trading-green/60 hover:text-trading-green' : 'text-trading-red/60 hover:text-trading-red'
                 }`}
               >
-                {v === 'LONG' ? '主多' : '主空'}
+                {side === 'LONG' ? '主多' : '主空'}
               </button>
-            ))}
+            )}
             {held && (
               <span className="ml-auto font-mono text-[10px] text-muted-foreground">
                 盘面 {held.legCount} 笔 · {fmtUsd(held.notionalUsd)} USD

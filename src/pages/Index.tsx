@@ -1955,6 +1955,7 @@ const Index = () => {
           coinTimelines={coinTimelines}
           onSymbolChange={handleSymbolChange}
           activeSymbol={activeSymbol}
+          activePrice={displayCurrentPrice}
         />
         <div className="flex items-center gap-3 shrink-0">
           {loading && <span className="text-[10px] text-primary animate-pulse font-mono">加载历史数据...</span>}

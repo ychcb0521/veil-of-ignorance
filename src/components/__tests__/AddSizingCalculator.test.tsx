@@ -28,7 +28,8 @@ vi.mock('@/contexts/TradingContext', async () => {
       tradingMode: 'direct',
       setTradingMode: vi.fn(),
       positionsMap: { RAVEUSDT: positions },
-      priceMap: { RAVEUSDT: 140 },
+      // 刻意放一个陈旧价：priceMap 是持久化的行情缓存，计算器不该再读它
+      priceMap: { RAVEUSDT: 0.6273595 },
       tradeHistory,
       getSymbolSettlementMode: () => 'coin',
     }),
@@ -38,10 +39,10 @@ vi.mock('@/contexts/TradingContext', async () => {
 const num = (testId: string) => Number((screen.getByTestId(testId) as HTMLInputElement).value);
 const type = (testId: string, v: string) => fireEvent.change(screen.getByTestId(testId), { target: { value: v } });
 
-function renderCalc() {
+function renderCalc(currentPrice = 140) {
   return render(
     <MemoryRouter>
-      <AddSizingCalculator open onClose={() => {}} symbol="RAVEUSDT" />
+      <AddSizingCalculator open onClose={() => {}} symbol="RAVEUSDT" currentPrice={currentPrice} />
     </MemoryRouter>,
   );
 }
@@ -51,7 +52,9 @@ describe('AddSizingCalculator', () => {
     renderCalc();
     expect(num('add-sizing-x1')).toBeCloseTo(18.3333, 3);
     expect(num('add-sizing-sbar')).toBeCloseTo(109.0909, 3);
-    expect(num('add-sizing-s2')).toBe(140);            // 现价
+    // S₂ 取传入的实时价，而不是 mock 里那个陈旧的 priceMap 值
+    expect(num('add-sizing-s2')).toBe(140);
+    expect(num('add-sizing-s2')).not.toBe(0.6273595);
     expect((screen.getByTestId('add-sizing-s1') as HTMLInputElement).value).toBe(''); // S₁ 留给人
   });
 
@@ -135,6 +138,19 @@ describe('AddSizingCalculator', () => {
     expect(screen.getByTestId('add-sizing-x2b-out')).toHaveTextContent('带敞口');
     // B 腿单独在 K_B 处对冲，A 线只管 X₁ + X₂
     expect(screen.queryByTestId('add-sizing-total-hedge')).not.toBeInTheDocument();
+  });
+
+  it('方向默认收成一个小字，点开才露出两个选项', () => {
+    // 方向由持仓推定，几乎不用改——常驻两个按钮是多余的视觉分量
+    renderCalc();
+    expect(screen.queryByTestId('add-sizing-side-LONG')).not.toBeInTheDocument();
+    const toggle = screen.getByTestId('add-sizing-side-toggle');
+    expect(toggle).toHaveTextContent('主多');   // 盘面是多头
+    fireEvent.click(toggle);
+    fireEvent.click(screen.getByTestId('add-sizing-side-SHORT'));
+    // 选完立刻收回去
+    expect(screen.queryByTestId('add-sizing-side-LONG')).not.toBeInTheDocument();
+    expect(screen.getByTestId('add-sizing-side-toggle')).toHaveTextContent('主空');
   });
 
   it('使用说明入口近乎隐形，但点开有公式与链接', () => {

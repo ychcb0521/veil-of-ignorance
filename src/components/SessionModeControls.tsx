@@ -28,8 +28,10 @@ interface Props {
   totalPositionCount?: number;
   coinTimelines?: CoinTimelinesMap;
   onSymbolChange?: (symbol: string) => void;
-  /** 当前盘面标的——加仓计算器据此读持仓、现价、结算方式 */
+  /** 当前盘面标的——加仓计算器据此读持仓与结算方式 */
   activeSymbol?: string;
+  /** 实时现价（Index 的 displayCurrentPrice），供加仓计算器预填 S₂ */
+  activePrice?: number;
 }
 
 type GuardedCoin = {
@@ -45,6 +47,7 @@ export function SessionModeControls({
   coinTimelines = {},
   onSymbolChange,
   activeSymbol,
+  activePrice,
 }: Props) {
   const ctx = useTradingContext();
   const [addSizingOpen, setAddSizingOpen] = useState(false);
@@ -173,7 +176,7 @@ export function SessionModeControls({
         <Calculator className="w-3 h-3" /> 加仓
       </button>
       {addSizingOpen && activeSymbol && (
-        <AddSizingCalculator open symbol={activeSymbol} onClose={() => setAddSizingOpen(false)} />
+        <AddSizingCalculator open symbol={activeSymbol} currentPrice={activePrice} onClose={() => setAddSizingOpen(false)} />
       )}
 
       {/* 倒叙播放：默认正序，选中后时间倒序推进 */}
