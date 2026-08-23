@@ -333,14 +333,19 @@
    两端对齐时余量趋近于零，右缘不需要靠拉伸就能齐。字距不为零就破坏了这个
    整除关系——原来那 0.012em ≈ 0.18px 肉眼本来也看不见。 */
 /* 开关挂在**栏宽**上，不是视口宽度。用视口会错一整档：主栏宽度
-   = 视口 − 48(px-6) − 240(aside) − 32(gap)，所以要到视口 1008px 主栏才够 43rem；
+   = 视口 − 48(px-6) − 240(aside) − 32(gap)，所以要到视口 1008px 主栏才够 --measure；
    写 max-width:767px 的话，768–1007px 这一整段（iPad 竖屏、半屏窗口）主栏只有
    448–687px，justify 却全速开着，每行扩展点腰斩、字距波动翻倍。
    容器查询让断点永远跟 --measure 对齐，以后改栅格也不会再错位。 */
 .guide-doc { container-type: inline-size; }
 
+/* **默认就是两端对齐**，窄栏才关掉——方向不能反过来写。
+   反过来写（默认 start、够宽才 justify）时，只要 @container 因为任何原因没生效
+   （老浏览器、构建链把它丢了、容器上下文没建起来），落到的就是**齐左**，
+   也就是用户抱怨的那个样子。按现在这个方向写，同样的故障落到的是**两端对齐**——
+   失败时给出的是用户想要的结果，而不是他抱怨的结果。 */
 .guide-doc :is(.guide-copy, .guide-callout, li) {
-  text-align: start;         /* 默认不对齐；够宽了才由下面的容器查询打开 */
+  text-align: justify;
   text-align-last: start;    /* 显式钉死：中文段落末行本来就该左对齐收笔。
                                 绝不要 justify——「三个字铺满一行」是灾难。 */
   hyphens: manual;           /* 中文没有连字典，auto 是空转；显式关掉可防止将来
@@ -357,10 +362,10 @@
    却让缩进后的右缘多出一条与正文不同的边。 */
 /* 675px = --measure 的字面量（15px × 45）。容器查询的条件里不能用自定义属性，
    只能写死；改 --fs-body 或字数时**这个数要跟着改**。
-   低于这个宽度不开对齐：栏宽不足时每行的可扩展点从 45 掉到 20 出头，
-   同样的余量摊下来是两倍的字距波动。 */
-@container (min-width: 675px) {
-  .guide-doc :is(.guide-copy, .guide-callout) { text-align: justify; }
+   栏宽不足 --measure 时退回齐左：每行的可扩展点从 44 掉到 20 出头，
+   同样的余量摊下来是两倍的字距波动，那时 justify 是负收益。 */
+@container (max-width: 674.98px) {
+  .guide-doc :is(.guide-copy, .guide-callout, li) { text-align: start; }
 }
 
 /* 含行内公式的块退回左对齐。这是 justify 在本页唯一会真正翻车的地方：
