@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet';
 import { toast } from 'sonner';
+import './GuidePage.css';
 
 interface TocItem {
   id: string;
@@ -56,7 +57,7 @@ const FLAT_TOC = TOC.flatMap(t => [t, ...(t.children ?? [])]);
 
 function Highlight({ children }: { children: ReactNode }) {
   return (
-    <div className="rounded-xl border border-[#F0B90B]/25 bg-[#F0B90B]/6 px-4 py-3 text-[14px] leading-7 text-foreground shadow-sm">
+    <div className="guide-callout guide-callout--amber">
       {children}
     </div>
   );
@@ -64,7 +65,7 @@ function Highlight({ children }: { children: ReactNode }) {
 
 function RedHighlight({ children }: { children: ReactNode }) {
   return (
-    <div className="rounded-xl border border-[#F6465D]/25 bg-[#F6465D]/7 px-4 py-3 text-[14px] leading-7 text-foreground shadow-sm">
+    <div className="guide-callout guide-callout--red">
       {children}
     </div>
   );
@@ -72,35 +73,35 @@ function RedHighlight({ children }: { children: ReactNode }) {
 
 function SectionTitle({ children, accent }: { children: ReactNode; accent?: string }) {
   return (
-    <div className="flex items-center gap-3 mb-4">
+    <div className="guide-section-title">
       <span
-        className="inline-block w-1 h-6 rounded"
+        className="guide-section-marker"
         style={{ background: accent ?? 'hsl(var(--primary))' }}
       />
-      <h2 className="text-[20px] font-medium text-foreground">{children}</h2>
+      <h2 className="guide-section-heading">{children}</h2>
     </div>
   );
 }
 
 function SubTitle({ children }: { children: ReactNode }) {
-  return <h3 className="mt-7 mb-3 text-[16px] font-semibold tracking-[0.01em] text-foreground">{children}</h3>;
+  return <h3 className="guide-subtitle">{children}</h3>;
 }
 
 function P({ children, className = '' }: { children: ReactNode; className?: string }) {
-  return <p className={`text-[14px] leading-relaxed text-foreground/90 ${className}`}>{children}</p>;
+  return <p className={`guide-copy ${className}`}>{children}</p>;
 }
 
 function TocList({ activeId, onJump }: { activeId: string; onJump?: () => void }) {
   return (
-    <nav className="space-y-0.5">
-      <div className="text-[11px] text-muted-foreground uppercase tracking-wider mb-2">目录</div>
+    <nav className="guide-toc">
+      <div className="guide-toc-label">目录</div>
       {TOC.map(item => (
         <div key={item.id}>
           <a
             href={`#${item.id}`}
             onClick={onJump}
-            className={`block h-8 px-2 leading-8 text-[12px] rounded hover:bg-accent cursor-pointer ${
-              activeId === item.id ? 'bg-accent text-foreground border-l-2 border-[#F0B90B]' : 'text-muted-foreground'
+            className={`guide-toc-link ${
+              activeId === item.id ? 'is-active' : ''
             }`}
           >
             {item.label}
@@ -110,8 +111,8 @@ function TocList({ activeId, onJump }: { activeId: string; onJump?: () => void }
               key={c.id}
               href={`#${c.id}`}
               onClick={onJump}
-              className={`block h-7 pl-6 pr-2 leading-7 text-[11px] rounded hover:bg-accent cursor-pointer ${
-                activeId === c.id ? 'bg-accent text-foreground border-l-2 border-[#F0B90B]' : 'text-muted-foreground'
+              className={`guide-toc-link guide-toc-link--child ${
+                activeId === c.id ? 'is-active' : ''
               }`}
             >
               {c.label}
@@ -124,24 +125,24 @@ function TocList({ activeId, onJump }: { activeId: string; onJump?: () => void }
 }
 
 function KeyGrid({ children }: { children: ReactNode }) {
-  return <div className="grid gap-4 md:grid-cols-3">{children}</div>;
+  return <div className="guide-key-grid">{children}</div>;
 }
 
 function KeyCard({ title, children }: { title: string; children: ReactNode }) {
   return (
-    <div className="flex h-full flex-col rounded-xl border border-border/70 bg-card/95 p-5 shadow-sm">
-      <div className="border-b border-border/50 pb-3">
-        <div className="text-[13px] font-semibold tracking-[0.01em] text-foreground">{title}</div>
+    <div className="guide-key-card">
+      <div className="guide-key-card__header">
+        <div className="guide-key-card__title">{title}</div>
       </div>
-      <div className="pt-3 text-[13px] leading-7 text-muted-foreground">{children}</div>
+      <div className="guide-key-card__body">{children}</div>
     </div>
   );
 }
 
 function FlowNode({ children, accent }: { children: ReactNode; accent?: boolean }) {
   return (
-    <div className={`relative mx-auto max-w-[520px] rounded-xl border bg-card/95 px-4 py-3 text-center text-[12px] leading-6 shadow-sm ${
-      accent ? 'border-[#F0B90B]/55' : 'border-border/70'
+    <div className={`guide-flow-node ${
+      accent ? 'guide-flow-node--accent' : ''
     }`}>
       {children}
     </div>
@@ -190,7 +191,23 @@ export default function GuidePage() {
   const nav = useNavigate();
   const [activeId, setActiveId] = useState<string>('s1');
   const [exportOpen, setExportOpen] = useState(false);
+  const [charCount, setCharCount] = useState<number | null>(null);
   const observerRef = useRef<IntersectionObserver | null>(null);
+  const mainRef = useRef<HTMLElement | null>(null);
+
+  /**
+   * 全文字数。按「非空白字符」计：中文没有词边界，按词数算不成立；
+   * 空格与换行只是排版，不该被读成内容。
+   * 用克隆体来数，并把 data-guide-meta 摘掉——字数那一行自己也在 main 里，
+   * 不摘就会把自己数进去（而且数完一变，下一次又不一样）。
+   */
+  useEffect(() => {
+    const root = mainRef.current;
+    if (!root) return;
+    const clone = root.cloneNode(true) as HTMLElement;
+    clone.querySelectorAll('[data-guide-meta]').forEach(node => node.remove());
+    setCharCount((clone.textContent ?? '').replace(/\s+/g, '').length);
+  }, []);
 
   useEffect(() => {
     const obs = new IntersectionObserver(
@@ -303,7 +320,7 @@ export default function GuidePage() {
           </div>
         </aside>
 
-        <main className="space-y-12 min-w-0">
+        <main ref={mainRef} className="space-y-12 min-w-0">
           <section id="s1" className="scroll-mt-20">
             <SectionTitle accent="#F0B90B">1. 系统定位</SectionTitle>
             <div className="space-y-3">
@@ -1927,6 +1944,12 @@ P 不再一把手填，而是拆成三个更可回答的问题：<strong>「这�
               </div>
             </div>
           </section>
+
+          {charCount != null && (
+            <div data-guide-meta className="guide-wordcount" title={`全文 ${charCount.toLocaleString('en-US')} 字（不含空白）`}>
+              （{charCount.toLocaleString('en-US')} 字）
+            </div>
+          )}
         </main>
       </div>
     </div>

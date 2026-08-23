@@ -1,0 +1,317 @@
+/**
+ * 使用说明的排版层。
+ *
+ * 这一页是全系统唯一一份长篇中文正文，读的时候一坐就是十几分钟——
+ * 它的问题不是「好不好看」，而是**读久了累不累**。所以这里的每一条都冲着
+ * 阅读节奏去，而不是冲着装饰：
+ *
+ *   · 行距 1.9、字距 0.012em —— 中文没有词间空格，靠行距与字距造出呼吸；
+ *   · 正文限宽 78ch（约 49 个汉字一行）—— 栏宽本来接近 65 字，眼睛回到行首
+ *     会找错行。表格与卡片不受限，它们本来就靠横向对齐传递信息；
+ *   · 标题、副标题、正文三级用「字号 + 字重 + 字距」拉开，不靠颜色——
+ *     颜色留给语义（金色=强调，红色=警告），层级不该跟它抢；
+ *   · 所有颜色走主题 token，亮暗两套都成立。硬编码的十六进制只留给
+ *     金/红这两个有语义的强调色，且只用作描边与淡背景，不用作正文颜色
+ *     （#F0B90B 当正文色在亮色主题下对比度只有 1.7:1）。
+ */
+
+/* ============ 正文 ============ */
+
+.guide-copy {
+  max-width: 78ch;
+  font-size: 14.5px;
+  line-height: 1.9;
+  letter-spacing: 0.012em;
+  color: hsl(var(--foreground) / 0.88);
+  text-wrap: pretty;
+}
+
+.guide-copy strong {
+  font-weight: 600;
+  color: hsl(var(--foreground));
+}
+
+/* ============ 章节标题 ============ */
+
+.guide-section-title {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 1.25rem;
+}
+
+/**
+ * 竖条的 background 由 TSX 的 inline style 给（每章一个强调色），
+ * 这里只管形状——写 background 会被 inline 覆盖，等于白写。
+ */
+.guide-section-marker {
+  display: inline-block;
+  width: 3px;
+  height: 1.45rem;
+  flex: none;
+  border-radius: 999px;
+}
+
+.guide-section-heading {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 600;
+  line-height: 1.35;
+  letter-spacing: -0.005em;
+  color: hsl(var(--foreground));
+  text-wrap: balance;
+}
+
+/* ============ 小节标题 ============ */
+
+/**
+ * 副标题靠一条细横线与上文分开，而不是靠更大的字号——
+ * 长文里再加一级字号会把层级压得太挤，一条线就够了。
+ *
+ * 分隔距离用 padding 撑而不是 margin：外面那层 `space-y-3` 的选择器是
+ * `.space-y-3 > :not([hidden]) ~ :not([hidden])`（0,3,0），单类名的
+ * margin-top 抢不过它，写了也不生效。细线因此落在 padding 区里偏上的位置，
+ * 上方留白（12 + 13.6px）略多于下方（18.4px）——分隔线该更靠近它引出的标题。
+ */
+.guide-subtitle {
+  position: relative;
+  margin: 0 0 0.85rem;
+  padding-top: 2rem;
+  font-size: 15.5px;
+  font-weight: 600;
+  line-height: 1.5;
+  letter-spacing: 0.005em;
+  color: hsl(var(--foreground));
+  text-wrap: balance;
+}
+
+.guide-subtitle::before {
+  content: '';
+  position: absolute;
+  top: 0.85rem;
+  left: 0;
+  width: 2rem;
+  height: 1px;
+  background: hsl(var(--border));
+}
+
+/* ============ 强调块 ============ */
+
+.guide-callout {
+  position: relative;
+  padding: 0.9rem 1.1rem 0.9rem 1.25rem;
+  border-radius: 0.75rem;
+  border: 1px solid;
+  font-size: 14px;
+  line-height: 1.85;
+  letter-spacing: 0.01em;
+  /* 正文一律吃前景色。金/红只上描边、淡背景与竖条——
+     #F0B90B 当正文色在亮色主题下对比度只有 1.7:1，读不清。 */
+  color: hsl(var(--foreground));
+}
+
+/* 左侧那道实心竖条：描边本身太淡，强调块需要一个能被余光看到的锚点。 */
+.guide-callout::before {
+  content: '';
+  position: absolute;
+  top: 0.9rem;
+  bottom: 0.9rem;
+  left: 0;
+  width: 2px;
+  border-radius: 999px;
+  opacity: 0.6;
+}
+
+.guide-callout--amber {
+  border-color: rgb(240 185 11 / 0.28);
+  background: rgb(240 185 11 / 0.07);
+}
+
+.guide-callout--amber::before {
+  background: #F0B90B;
+}
+
+.guide-callout--red {
+  border-color: rgb(246 70 93 / 0.28);
+  background: rgb(246 70 93 / 0.07);
+}
+
+.guide-callout--red::before {
+  background: #F6465D;
+}
+
+/* ============ 要点卡片 ============ */
+
+.guide-key-grid {
+  display: grid;
+  gap: 1rem;
+}
+
+@media (min-width: 768px) {
+  .guide-key-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+.guide-key-card {
+  display: flex;
+  height: 100%;
+  flex-direction: column;
+  padding: 1.15rem 1.25rem;
+  border: 1px solid hsl(var(--border) / 0.7);
+  border-radius: 0.75rem;
+  background: hsl(var(--card) / 0.95);
+  box-shadow: 0 1px 2px hsl(var(--foreground) / 0.04);
+  transition: border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease;
+}
+
+.guide-key-card:hover {
+  border-color: hsl(var(--foreground) / 0.18);
+  box-shadow: 0 6px 18px hsl(var(--foreground) / 0.07);
+  transform: translateY(-1px);
+}
+
+.guide-key-card__header {
+  padding-bottom: 0.7rem;
+  border-bottom: 1px solid hsl(var(--border) / 0.5);
+}
+
+.guide-key-card__title {
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  color: hsl(var(--foreground));
+}
+
+.guide-key-card__body {
+  padding-top: 0.7rem;
+  font-size: 13px;
+  line-height: 1.85;
+  letter-spacing: 0.01em;
+  color: hsl(var(--muted-foreground));
+}
+
+/* ============ 流程节点 ============ */
+
+.guide-flow-node {
+  position: relative;
+  margin-inline: auto;
+  max-width: 520px;
+  padding: 0.75rem 1rem;
+  border: 1px solid hsl(var(--border) / 0.7);
+  border-radius: 0.75rem;
+  background: hsl(var(--card) / 0.95);
+  box-shadow: 0 1px 2px hsl(var(--foreground) / 0.04);
+  text-align: center;
+  font-size: 12.5px;
+  line-height: 1.7;
+  letter-spacing: 0.01em;
+}
+
+.guide-flow-node--accent {
+  border-color: rgb(240 185 11 / 0.55);
+  background: rgb(240 185 11 / 0.05);
+}
+
+/* ============ 目录 ============ */
+
+.guide-toc {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.guide-toc-label {
+  margin-bottom: 0.6rem;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: hsl(var(--muted-foreground) / 0.75);
+}
+
+/**
+ * 高亮态用左侧一根竖条，而不是整块底色——目录一直停在视野边缘，
+ * 整块底色会跟正文抢注意力。竖条常驻但透明，切换时不产生位移。
+ */
+.guide-toc-link {
+  position: relative;
+  display: block;
+  height: 2rem;
+  padding: 0 0.5rem 0 0.7rem;
+  border-radius: 0.375rem;
+  font-size: 12px;
+  line-height: 2rem;
+  color: hsl(var(--muted-foreground));
+  cursor: pointer;
+  transition: color 140ms ease, background-color 140ms ease;
+}
+
+.guide-toc-link::before {
+  content: '';
+  position: absolute;
+  top: 0.35rem;
+  bottom: 0.35rem;
+  left: 0;
+  width: 2px;
+  border-radius: 999px;
+  background: #F0B90B;
+  opacity: 0;
+  transition: opacity 140ms ease;
+}
+
+.guide-toc-link:hover {
+  background: hsl(var(--accent));
+  color: hsl(var(--foreground) / 0.9);
+}
+
+.guide-toc-link.is-active {
+  background: hsl(var(--accent));
+  color: hsl(var(--foreground));
+  font-weight: 500;
+}
+
+.guide-toc-link.is-active::before {
+  opacity: 1;
+}
+
+.guide-toc-link--child {
+  height: 1.75rem;
+  padding-left: 1.5rem;
+  font-size: 11px;
+  line-height: 1.75rem;
+}
+
+/* ============ 文末字数 ============ */
+
+/**
+ * 全文字数：给「这份说明有多重」一个量感，但它不是内容的一部分，
+ * 所以压到几乎看不见——只有视线扫到右下角、并且停下来时才认得出。
+ */
+.guide-wordcount {
+  margin-top: 2.5rem;
+  text-align: right;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.04em;
+  color: hsl(var(--muted-foreground) / 0.28);
+  user-select: none;
+  transition: color 200ms ease;
+}
+
+.guide-wordcount:hover {
+  color: hsl(var(--muted-foreground) / 0.7);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .guide-key-card,
+  .guide-toc-link,
+  .guide-toc-link::before,
+  .guide-wordcount {
+    transition: none;
+  }
+
+  .guide-key-card:hover {
+    transform: none;
+  }
+}
