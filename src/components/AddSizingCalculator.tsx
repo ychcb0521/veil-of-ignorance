@@ -142,9 +142,9 @@ export function AddSizingCalculator({ open, onClose, symbol }: Props) {
           <div data-testid="add-sizing-help-panel" className="border-b border-border bg-muted/30 px-4 py-2.5 font-mono text-[10px] leading-[1.7] text-muted-foreground">
             <div className="text-foreground">加仓量 = 垫 ÷ 险　险 = S₂ − S₁</div>
             <div>A 浮盈垫 Y₁ = X₁(S₁−S̄)　→　X₂ = Y₁ ÷ 险 = X₁ ÷ b　b = 险 / (S₁−S̄)</div>
-            <div className="font-sans">此处的 b 往回看（成本线 → 止损线），与盘面 P_gap 的 b（现价 → 目标）无关</div>
-            <div>B 落袋垫 Y_G = G　　　　 →　X_G = Y_G ÷ 险（K_B = S₁ 时；把 K_B 拖低才产生敞口）</div>
-            <div>对冲 @ S₁ = X₁ + X₂ (+ X_G，当 K_B = S₁)</div>
+            <div className="font-sans">此处的 b 往回看（成本线 → 止损线 → 现价），与盘面 P_gap 的 b（现价 → 目标）无关</div>
+            <div>B 落袋垫 Y_G = G　　　　 →　X_G = Y_G ÷ 险</div>
+            <div>对冲 @ S₁ = X₁ + X₂ (+ X_G)</div>
             <Link to="/guide#s3-1c" className="mt-1 inline-block font-sans text-primary hover:underline">完整说明 · 使用说明 3.4 →</Link>
           </div>
         )}
@@ -228,7 +228,7 @@ export function AddSizingCalculator({ open, onClose, symbol }: Props) {
           <section data-testid="add-sizing-banked" className="space-y-2 border-t border-border pt-3">
             <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5">
               <h3 className="text-[11px] font-medium text-foreground">B 落袋镜像</h3>
-              <span className="text-[10px] text-muted-foreground">落袋也是垫 · 默认零风险</span>
+              <span className="text-[10px] text-muted-foreground">同一 S₁ / S₂ · 只是垫子不同</span>
               {!bankedOn && (
                 <span data-testid="add-sizing-banked-off" className="ml-auto text-[10px] text-muted-foreground">未填 G，本账关闭</span>
               )}
