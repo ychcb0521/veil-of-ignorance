@@ -27,7 +27,9 @@ const { mockUser, mockCloseCampaign, mockAppendCampaignEvent } = vi.hoisted(() =
    * 实则永不停歇地重渲染，测试进程会一直挂着。真实的 AuthContext 给的是稳定引用。
    */
   mockUser: { id: 'user-1', email: 'desk@example.com' },
-  mockCloseCampaign: vi.fn(async (_id: string, _patch: ClosePatch) => undefined),
+  // closeCampaign 的返回值现在参与判定：handler 拿它回读 closed_at，
+  // 确认这次结束真的落库了。mock 必须像真的一样把写回的那一行还回来。
+  mockCloseCampaign: vi.fn(async (_id: string, patch: ClosePatch) => ({ closed_at: patch.closed_at } as unknown)),
   mockAppendCampaignEvent: vi.fn(async (_id: string, _event: { event_type: string }) => undefined),
 }));
 
@@ -217,6 +219,55 @@ describe('战役列表 · 一键结束进行中的战役', () => {
     expect(banner).toHaveTextContent('你有 1 个进行中的战役');
     const winCard = screen.getAllByTestId('campaign-card').find(card => card.textContent?.includes('赢的那场'));
     expect(winCard).toHaveTextContent('盈利结束');
+  });
+
+  it('事件流写失败不推翻已经落库的结束——那是审计副产物，不是这场的成败', async () => {
+    // 曾经两次写入被绑在同一个 try 里：closeCampaign 成功、appendCampaignEvent 抛错时，
+    // 数据库其实已经结束了，界面却一行不改、还报「失败」。刷新才发现其实成了——
+    // 症状与「完全没写进去」一模一样，结论却相反。
+    mockCloseCampaign.mockClear();
+    mockAppendCampaignEvent.mockClear();
+    mockAppendCampaignEvent.mockRejectedValueOnce(new Error('事件流写失败'));
+    await openBulkCloseDialog();
+    fireEvent.click(screen.getByTestId('bulk-close-confirm'));
+
+    await waitFor(() => expect(screen.queryByTestId('bulk-close-dialog')).not.toBeInTheDocument());
+    // 两场都算结束了，一场只是事件流没写上
+    expect(mockCloseCampaign).toHaveBeenCalledTimes(2);
+    expect(screen.queryByTestId('bulk-close-failures')).not.toBeInTheDocument();
+    const winCard = screen.getAllByTestId('campaign-card').find(c => c.textContent?.includes('赢的那场'));
+    expect(winCard).toHaveTextContent('盈利结束');
+  });
+
+  it('结束失败时对话框不关，逐场把原因摆在原地——不是一条停两秒半的 toast', async () => {
+    mockCloseCampaign.mockClear();
+    mockCloseCampaign.mockRejectedValueOnce(new Error('云端 0 行被更新'));
+    await openBulkCloseDialog();
+    fireEvent.click(screen.getByTestId('bulk-close-confirm'));
+
+    const panel = await screen.findByTestId('bulk-close-failures');
+    expect(panel).toHaveTextContent('1 场没能结束');
+    expect(panel).toHaveTextContent('云端 0 行被更新');
+    // mockRejectedValueOnce 打的是第一次调用，也就是「赢的那场」
+    expect(panel).toHaveTextContent('赢的那场');
+    // 对话框必须还开着，按钮改口成「重试」
+    expect(screen.getByTestId('bulk-close-dialog')).toBeInTheDocument();
+    expect(screen.getByTestId('bulk-close-confirm')).toHaveTextContent('重试');
+    // 失败的那一场不动，成功的那一场照样当场翻面——一场失败不该拖累另一场
+    const cards = screen.getAllByTestId('campaign-card');
+    expect(cards.find(c => c.textContent?.includes('赢的那场'))).toHaveTextContent('进行中');
+    expect(cards.find(c => c.textContent?.includes('亏的那场'))).toHaveTextContent('亏损结束');
+  });
+
+  it('写完回读不到 closed_at 就算失败——不许把没落库的写入报告成成功', async () => {
+    // 这是「点了没反应」最难判的那一种：写请求没报错，但一行都没更新。
+    mockCloseCampaign.mockClear();
+    mockCloseCampaign.mockResolvedValueOnce({} as never);   // 回来的行没有 closed_at
+    await openBulkCloseDialog();
+    fireEvent.click(screen.getByTestId('bulk-close-confirm'));
+
+    const panel = await screen.findByTestId('bulk-close-failures');
+    expect(panel).toHaveTextContent('回读不到结束时间');
   });
 
   it('勾选之后未结算的那场才被标成放弃', async () => {

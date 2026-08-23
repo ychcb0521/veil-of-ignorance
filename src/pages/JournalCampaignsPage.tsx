@@ -787,6 +787,11 @@ export default function JournalCampaignsPage() {
   const [bulkCloseOpen, setBulkCloseOpen] = useState(false);
   const [bulkClosing, setBulkClosing] = useState(false);
   const [includeUnsettled, setIncludeUnsettled] = useState(false);
+  // 失败常驻在对话框里，不是右上角停两秒半的 toast。
+  // 一次批量操作失败时用户的视线正落在对话框上——把原因摆在他正在看的地方，
+  // 而且是**每一场**的原因，不是只报第一条。
+  const [bulkFailures, setBulkFailures] = useState<string[]>([]);
+  const [bulkWarnings, setBulkWarnings] = useState<string[]>([]);
 
   useEffect(() => {
     const next = parseCampaignListParams(location.search);
@@ -1227,12 +1232,18 @@ export default function JournalCampaignsPage() {
   const handleBulkClose = async () => {
     if (bulkClosing || bulkCloseTargets.length === 0) return;
     setBulkClosing(true);
+    setBulkFailures([]);
+    setBulkWarnings([]);
     const closed = new Map<string, BulkClosePlanItem>();
     const failures: string[] = [];
+    const warnings: string[] = [];
+    const reason = (error: unknown) => (error instanceof Error ? error.message : String(error));
     try {
       for (const item of bulkCloseTargets) {
+        // 主操作：结束战役。只有它失败，这一场才算失败。
+        let saved: TradeCampaign;
         try {
-          await closeCampaign(item.campaign.id, {
+          saved = await closeCampaign(item.campaign.id, {
             status: item.verdict.status,
             final_realized_pnl: item.realizedPnl,
             final_r_multiple: item.finalRMultiple,
@@ -1240,6 +1251,24 @@ export default function JournalCampaignsPage() {
             // peak_unrealized_pnl / peak_drawdown 有意不写：批量路径手上没有逐笔权益曲线，
             // 补 null 会把单场对话框此前算出的峰值抹掉。缺字段就让它保持原样。
           });
+        } catch (error) {
+          failures.push(`${item.campaign.title} · ${reason(error)}`);
+          continue;
+        }
+
+        // 回读确认：拿写回来的那一行核对 closed_at 真的落下去了。
+        // 「点了没反应」之所以难判，就是因为整条链路上没有任何一步会说
+        // 「我写了但没写进去」——这一句把模糊的症状变成确定的结论。
+        if (!saved?.closed_at) {
+          failures.push(`${item.campaign.title} · 写入后回读不到结束时间，状态可能没有真正保存`);
+          continue;
+        }
+
+        closed.set(item.campaign.id, item);
+
+        // 副操作：写事件流。它是审计副产物——写不上不改变「这场已经结束」这个事实，
+        // 所以只降级成提示，绝不把一次已经落库的结束报告成失败。
+        try {
           await appendCampaignEvent(item.campaign.id, {
             timestamp: item.closedAt,
             event_type: 'campaign_closed',
@@ -1253,9 +1282,8 @@ export default function JournalCampaignsPage() {
               ? '在战役列表一键结束；结束时仍有未结算的腿，按放弃处理'
               : '在战役列表一键结束；状态由已实现盈亏推出',
           });
-          closed.set(item.campaign.id, item);
         } catch (error) {
-          failures.push(`${item.campaign.title}：${error instanceof Error ? error.message : String(error)}`);
+          warnings.push(`${item.campaign.title} · 状态已保存，但事件流没写上：${reason(error)}`);
         }
       }
     } finally {
@@ -1279,13 +1307,20 @@ export default function JournalCampaignsPage() {
       }));
     }
 
+    setBulkWarnings(warnings);
     if (failures.length === 0) {
       setBulkCloseOpen(false);
       setIncludeUnsettled(false);
-      toast.success(`已结束 ${closed.size} 场战役`);
+      setBulkFailures([]);
+      toast.success(
+        warnings.length > 0
+          ? `已结束 ${closed.size} 场战役（${warnings.length} 场的事件流未写入）`
+          : `已结束 ${closed.size} 场战役`,
+      );
       return;
     }
-    toast.error(`${closed.size} 场已结束，${failures.length} 场失败 · ${failures[0]}`);
+    // 有失败就**不关对话框**，把每一场的原因留在原地让用户看清楚。
+    setBulkFailures(failures);
   };
 
   const handleDeleteCampaign = async (
@@ -1491,7 +1526,7 @@ export default function JournalCampaignsPage() {
           onOpenChange={(open) => {
             if (bulkClosing) return; // 写库过程中不许关掉，避免只结了一半却看不见进度
             setBulkCloseOpen(open);
-            if (!open) setIncludeUnsettled(false);
+            if (!open) { setIncludeUnsettled(false); setBulkFailures([]); setBulkWarnings([]); }
           }}
         >
           <DialogContent className="max-w-[560px]" data-testid="bulk-close-dialog">
@@ -1576,11 +1611,35 @@ export default function JournalCampaignsPage() {
               </label>
             )}
 
+            {bulkFailures.length > 0 && (
+              <div
+                data-testid="bulk-close-failures"
+                className="space-y-1 rounded border border-[#F6465D]/40 bg-[#F6465D]/10 px-2.5 py-2 text-[11px] text-[#F6465D]"
+              >
+                <div className="font-medium">{bulkFailures.length} 场没能结束</div>
+                {bulkFailures.map(msg => (
+                  <div key={msg} className="leading-[1.6] opacity-90">{msg}</div>
+                ))}
+              </div>
+            )}
+
+            {bulkWarnings.length > 0 && (
+              <div
+                data-testid="bulk-close-warnings"
+                className="space-y-1 rounded border border-[#F0B90B]/40 bg-[#F0B90B]/10 px-2.5 py-2 text-[11px] text-[#F0B90B]"
+              >
+                <div className="font-medium">{bulkWarnings.length} 场的状态已保存，但事件流没写上</div>
+                {bulkWarnings.map(msg => (
+                  <div key={msg} className="leading-[1.6] opacity-90">{msg}</div>
+                ))}
+              </div>
+            )}
+
             <DialogFooter>
               <button
                 type="button"
                 disabled={bulkClosing}
-                onClick={() => { setBulkCloseOpen(false); setIncludeUnsettled(false); }}
+                onClick={() => { setBulkCloseOpen(false); setIncludeUnsettled(false); setBulkFailures([]); setBulkWarnings([]); }}
                 className="inline-flex h-8 items-center rounded border border-border bg-card px-3 text-[12px] hover:bg-accent disabled:opacity-50"
               >
                 取消
@@ -1592,7 +1651,11 @@ export default function JournalCampaignsPage() {
                 onClick={() => void handleBulkClose()}
                 className="inline-flex h-8 items-center rounded bg-[#F0B90B] px-3 text-[12px] font-medium text-black transition-opacity hover:opacity-90 disabled:opacity-40"
               >
-                {bulkClosing ? '结束中…' : `结束这 ${bulkCloseTargets.length} 场`}
+                {bulkClosing
+                  ? '结束中…'
+                  : bulkFailures.length > 0
+                    ? `重试这 ${bulkCloseTargets.length} 场`
+                    : `结束这 ${bulkCloseTargets.length} 场`}
               </button>
             </DialogFooter>
           </DialogContent>

@@ -1864,25 +1864,69 @@ export async function createCampaign(input: CreateCampaignInput): Promise<TradeC
   return wrap('创建战役', error, toCampaign(data));
 }
 
+/**
+ * 更新战役。
+ *
+ * 这里此前把两件完全不同的事压成了同一个分支：
+ *   ① 这行在云端**不存在**（本地建的战役，只在 localStorage 里）
+ *   ② 这行存在，但这次 UPDATE **一行都没匹配上**（不是本人的战役、
+ *      RLS 的 UPDATE 策略缺失、或者登录会话已过期导致 auth.uid() 为 NULL）
+ *
+ * 因为用的是 `.single()`，②在 PostgREST 那边返回的是 406 + PGRST116
+ * 「JSON object requested, multiple (or no) rows returned」——与①的报错**一模一样**。
+ * 于是 ② 被 isCampaignNotFoundError 认成 ①，退去写 localStorage：
+ * 本地恰好有镜像就**假装成功**（云端其实没写进去），本地没有镜像就抛出那句
+ * 谁也看不懂的 PostgREST 原文。「一键结束点了没反应」正是后一种。
+ *
+ * 现在把两件事拆开：
+ *   · 显式带上 user_id 条件——0 行不再由 RLS 静默过滤，而是由我们自己的条件决定；
+ *   · 用 maybeSingle()——0 行返回 data === null 且 error 为空，不再伪装成「找不到」；
+ *   · 0 行且本地也没有镜像时，报出**能照着排查的那句话**，而不是 PostgREST 原文。
+ */
 export async function updateCampaign(
   id: string,
   patch: Partial<Pick<TradeCampaign, 'title' | 'status' | 'notes' | 'closed_at' | 'final_realized_pnl' | 'final_r_multiple' | 'peak_unrealized_pnl' | 'peak_drawdown'>>,
 ): Promise<TradeCampaign> {
+  const userId = await getAuthenticatedUserId('更新战役');
+
+  const writeLocalMirror = (): TradeCampaign | null => {
+    const local = findLocalCampaign(userId, id);
+    if (!local) return null;
+    const updated = { ...local, ...patch, updated_at: new Date().toISOString() };
+    upsertLocalCampaign(updated);
+    return updated;
+  };
+
   const { data, error } = await supabase
     .from('trade_campaigns' as never)
     .update(patch as never)
     .eq('id', id)
+    .eq('user_id', userId)
     .select()
-    .single();
-  if (error && (isMissingTradeCampaignsTableError(error) || isCampaignNotFoundError(error))) {
-    const userId = await getAuthenticatedUserId('更新战役');
-    const local = findLocalCampaign(userId, id);
-    if (!local) return wrap('更新战役', error, toCampaign(data));
-    const updated = { ...local, ...patch, updated_at: new Date().toISOString() };
-    upsertLocalCampaign(updated);
-    return updated;
+    .maybeSingle();
+
+  if (error) {
+    if (isMissingTradeCampaignsTableError(error) || isCampaignNotFoundError(error)) {
+      const local = writeLocalMirror();
+      if (local) return local;
+    }
+    return wrap('更新战役', error, null);
   }
-  return wrap('更新战役', error, toCampaign(data));
+
+  if (!data) {
+    // 没有 error 却 0 行：条件没匹配上。本地有镜像就是一场纯本地战役，正常落本地；
+    // 本地也没有，就说明这行只存在于云端而我们写不动它——必须说出来，不能假装成功。
+    const local = writeLocalMirror();
+    if (local) return local;
+    throw new Error(
+      `更新战役失败：云端 0 行被更新（id=${id}）。`
+      + `可能是登录会话已过期（请重新登录再试），`
+      + `或这场战役不属于当前账号，`
+      + `或 trade_campaigns 的 UPDATE 策略缺失。`,
+    );
+  }
+
+  return toCampaign(data);
 }
 
 export async function updateCampaignImportance(id: string, importanceWeight: number): Promise<number> {
