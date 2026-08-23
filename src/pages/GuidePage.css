@@ -1,83 +1,508 @@
 /**
  * 使用说明的排版层。
  *
- * 这一页是全系统唯一一份长篇中文正文，读的时候一坐就是十几分钟——
- * 它的问题不是「好不好看」，而是**读久了累不累**。所以这里的每一条都冲着
- * 阅读节奏去，而不是冲着装饰：
+ * 这一页是全系统唯一一份长篇中文正文（约 4.4 万字、171 段、9 章），读的时候
+ * 一坐就是十几分钟——它的问题不是「好不好看」，而是**读久了累不累**、
+ * **一眼能不能看出结构**。这一版围绕四件被实测出来的事重做：
  *
- *   · 行距 1.9、字距 0.012em —— 中文没有词间空格，靠行距与字距造出呼吸；
- *   · 正文限宽 78ch（约 49 个汉字一行）—— 栏宽本来接近 65 字，眼睛回到行首
- *     会找错行。表格与卡片不受限，它们本来就靠横向对齐传递信息；
- *   · 标题、副标题、正文三级用「字号 + 字重 + 字距」拉开，不靠颜色——
- *     颜色留给语义（金色=强调，红色=警告），层级不该跟它抢；
- *   · 所有颜色走主题 token，亮暗两套都成立。硬编码的十六进制只留给
- *     金/红这两个有语义的强调色，且只用作描边与淡背景，不用作正文颜色
- *     （#F0B90B 当正文色在亮色主题下对比度只有 1.7:1）。
+ *   1. 段落之间真的是 0px。Tailwind preflight 把 p{margin:0} 清了，而 .guide-copy
+ *      从来没写过 margin——171 段里只有 4 个 space-y-3 容器内的段落有 12px，
+ *      其余 167 段完全贴死，整节糊成一堵墙。这比「右边不齐」严重一个量级。
+ *      解法见「垂直节奏」：全页只留一条竖直动线，一道缝只有一个主人。
+ *
+ *   2. text-align 是 start，右缘参差。中文的断行机会在几乎每两个汉字之间，
+ *      一行 46 字有 45 个可扩展点，justify 摊下来每点不到 0.5px——西文那种
+ *      「白河」在中文里不成立，不开反而是浪费。见「两端对齐」。
+ *
+ *   3. 同一根竖轴上并存五条右边缘：正文 713px、强调块/列表/表格 960px、
+ *      流程节点居中 740px。眼睛往下扫时文本块的右轮廓在 246px 之间反复跳——
+ *      用户说的「两端不对齐」，这一层比行末参差刺眼得多。收敛成两条：
+ *      **文本轴**（散文，43rem）与**对象轴**（表格/卡片网格，占满栏宽），
+ *      且共用同一条左边缘。对象轴之所以允许更宽，是因为它们自带边框底色，
+ *      眼睛会读成「插图」而不是「另一栏正文」。
+ *
+ *   4. font-family 计算值是 Inter, sans-serif——Inter 没有 CJK 字形，每个汉字
+ *      逐字回退到 generic sans-serif：mac 上是 PingFang、Windows 上可能是雅黑
+ *      也可能被抓成宋体、Linux 上全看装了什么。同一份 CSS 在三个平台是三种
+ *      字面率、三种字重，本地调好的行距字距在别人机器上根本不成立。见「字体」。
+ *
+ * ─────────── 特异度速查（这一条决定本文件里每一条选择器怎么写） ───────────
+ *
+ * 实测：GuidePage.css 在打包产物里排在 **最前面**（byte 133），Tailwind 的
+ * preflight 在 4215、单类工具在 16988+、space-y-* 在 35041+。原因是 main.tsx
+ * 里 `import App` 在 `import './index.css'` 之前，Rollup 按后序遍历发射 CSS。
+ * 结论：**任何与 Tailwind 特异度打平的规则，我们都输**。dev 模式下 HMR 会把
+ * 本文件的 <style> 重新 append 到末尾，于是「改的时候是对的、刷新就没了」。
+ *
+ *   Tailwind 单类间距工具  .mt-2 / .mb-3 / .my-3 / .my-8 / .mt-4 / .mt-8   (0,1,0)
+ *   Tailwind 任意值字号色  .text-[11px] / .text-foreground/90              (0,1,0)
+ *   Tailwind space-y-*     .space-y-1 > :not([hidden]) ~ :not([hidden])    (0,3,0)
+ *
+ * 所以本文件的规则一律凑到 (0,2,0) 以上；要压 space-y-1 就必须 ≥ (0,4,0) 或
+ * 用同构写法把 :not([hidden]) 补回来（见「列表」那一节的算式）。
+ * **禁止在本文件写原生 @layer**：这里没有 @tailwind 指令，PostCSS 不处理它，
+ * 写出来是真正的 CSS 级联层；而 Tailwind v3 的 utilities 是无层的，无层永远
+ * 赢过有层——写了等于自废整个文件。也不要靠调 import 顺序去翻盘，那会改变
+ * 全站所有页面级 CSS 的层叠语义，是比问题本身更大的风险。
  */
 
-/* ============ 正文 ============ */
+/* ============================================================
+   0 · 中文标点：从 Inter 手里抢回来
+   ============================================================
+   全文 172 处「——」、157 处「“」「”」。因为 'Inter' 排在字体栈最前，而 Inter
+   覆盖 U+2014 / U+2018–201D / U+2026 / U+00B7 这些码位，它们现在渲染成**西文形**：
+   破折号是两条中间带缝的 em dash，接不成中文要求的一条连续长线；弯引号只有
+   汉字三分之一宽、且没有全角标点该有的内侧留白，紧贴汉字「贴脸」。三样加起来
+   出现近 400 次，是「看起来不专业」最直接的来源；开了两端对齐之后更明显——
+   justify 把行拉平，标点的宽度错误就变成右缘节奏的错误。
 
-.guide-copy {
-  max-width: 78ch;
-  font-size: 14.5px;
-  line-height: 1.9;
-  letter-spacing: 0.012em;
-  color: hsl(var(--foreground) / 0.88);
-  text-wrap: pretty;
+   这个 face 只声明 unicode-range + local()，**没有任何网络请求**，本机没有对应
+   字体就静默跳过、原样回退。区间刻意避开 U+2013（en dash）与纯西文撇号场景，
+   只圈住中文标点本体。 */
+@font-face {
+  font-family: 'CJK Punct';
+  font-weight: 400;
+  font-style: normal;
+  src: local('PingFang SC'), local('PingFangSC-Regular'),
+       local('Microsoft YaHei'), local('Source Han Sans SC'),
+       local('Noto Sans CJK SC'), local('Noto Sans SC'), local('Hiragino Sans GB');
+  unicode-range: U+00B7, U+2014-2015, U+2018-201D, U+2026,
+                 U+3001-3011, U+3014-301F, U+FE10-FE19, U+FE30-FE4F,
+                 U+FF01-FF20, U+FF3B-FF3E, U+FF5B-FF60, U+FFE0-FFE5;
+}
+@font-face {
+  font-family: 'CJK Punct';
+  font-weight: 500 700;
+  font-style: normal;
+  src: local('PingFang SC Semibold'), local('PingFangSC-Semibold'),
+       local('Microsoft YaHei Bold'), local('Source Han Sans SC Bold'),
+       local('Noto Sans CJK SC Bold'), local('Noto Sans SC Bold');
+  unicode-range: U+00B7, U+2014-2015, U+2018-201D, U+2026,
+                 U+3001-3011, U+3014-301F, U+FE10-FE19, U+FE30-FE4F,
+                 U+FF01-FF20, U+FF3B-FF3E, U+FF5B-FF60, U+FFE0-FFE5;
 }
 
-.guide-copy strong {
+/* ============================================================
+   1 · 令牌：全部从行高推出来，不许出现孤立的拍脑袋数
+   ============================================================ */
+
+.guide-page {
+  /* 正文 15px。14.5px 是**西文**的舒适区：同样 px 下汉字的墨量约是拉丁小写的
+     两倍、笔画数三到五倍（比较「囊」与「a」），屏幕中文长正文的实用下限就是
+     15px。只加 0.5px 是有意的——这是交易系统的一页，字号要跟全站密度对得上，
+     不能为了这一页把整站的视觉重量改掉。 */
+  --fs-body: 15px;
+  --fs-sm: 13px;        /* 卡片正文 / 表格 / 流程节点 */
+  --fs-xs: 11.5px;      /* 目录子项 / 字数 / 小标签 */
+
+  /* 15 × 1.8 = 27px 整。整数行高让下面七级步长全是干净的乘积，
+     也让 justify 时行盒高度不会出现半像素抖动。 */
+  --lh: 1.8;
+  --rhythm: 27px;
+
+  /* 行长。ch 量的是当前字体里「0」的推进宽度——这里的「0」由 Inter 提供，
+     而正文**一个汉字都不会用 Inter 渲染**，所以 78ch 是把中文栏宽绑在了一个
+     永远不渲染中文的字体上；Google Fonts 一慢，栏宽就从 626px 跳到 713px。
+     改用 rem（不用 em：.guide-copy 15px 与 .guide-callout 若字号不同，同一个
+     43em 会解析出两个宽度，右缘又差开）。
+     再进一步：直接把行长定义成**字宽的整数倍**。43rem = 688px = 45.87 个汉字，
+     那 0.87 个字宽（13px）是每一行都消不掉的永久余量，两端对齐时要摊到 45 个
+     间隙上——letter-spacing: 0 那条「纯汉字行余量趋近于零」的论证在 688px 下
+     其实不成立。写成 15 × 45 = 675px 之后它才真的成立，且 45 字仍落在
+     40–46 的甜点区内（中文一行超过 50 字，眼睛从行尾回到行首会串行）。 */
+  --measure: calc(var(--fs-body) * 45);
+
+  /* 七级步长。每一级都是 --rhythm 的倍数，所以任意两道缝可以互相比较，
+     读者能从「白多白少」直接读出层级高低。 */
+  --gap-hair:    calc(var(--rhythm) * 0.33);  /*  9px  li ↔ li */
+  --gap-tight:   calc(var(--rhythm) * 0.50);  /* 13.5px 标题 ↓ 它引出的内容 */
+  --gap-flow:    calc(var(--rhythm) * 0.67);  /* 18px  段 ↔ 段 */
+  --gap-block:   calc(var(--rhythm) * 1.00);  /* 27px  段 ↔ 表格/列表/强调块 */
+  --gap-topic:   calc(var(--rhythm) * 1.55);  /* 42px  段 ↔ H4 */
+  --gap-sub:     calc(var(--rhythm) * 2.10);  /* 57px  段 ↔ H3（编号小节） */
+  --gap-chapter: calc(var(--rhythm) * 3.00);  /* 81px  章 ↔ 章 */
+
+  /* 段间距为什么取 0.67 行（18px）而不是一整行：行内白 = 27 − 15 = 12px，
+     段间白必须**明显大于**它才读得出断开；但这份文档段落极短（多数两三行），
+     给满 27px 会让段落彼此脱钩，一节散成一堆碎片。18px 让段落基线距达到
+     1.67 行——够断，不至于断裂。
+     标题的上下留白比恒定在 3:1 附近：H4 是 42 ÷ 13.5 = 3.1；H3 是「细线上方
+     36.8」÷「标题下方 13.5」= 2.7（线本身已经承担了一部分分隔功能，所以比值
+     可以低一档）。层级差异交给「上方留白的绝对值」表达——这比字号差更能让人
+     读出「这是标题」，因为它把标题在视觉上焊在下文上，而不是漂在两段之间。 */
+
+  /* ── 颜色 ──
+     正文原来吃 hsl(var(--foreground) / 0.88)。对比度没问题（暗 10.7:1 / 亮 10.3:1），
+     问题在 alpha 的语义：alpha 是「跟身后任何东西混合」，而正文并不只坐在页底上，
+     它也出现在 bg-card 盒子里、bg-muted 表头旁——同一段正文因此有两个颜色。
+     固化成实色，观感不变，但「正文色」不再是背景的函数。 */
+  --guide-ink: 220 6% 75%;          /* 暗底 10.6:1，与原 0.88 合成值肉眼无差 */
+  --guide-line: 216 14% 26%;        /* 卡片/表格描边：暗色靠面分层，线只收边 */
+  --guide-shadow-a: 0.35;           /* 阴影必须是黑的，见「卡片」 */
+
+  --guide-gold: 46 91% 49%;         /* #F0B90B 暗底 11.0:1 */
+  --guide-red: 352 91% 62%;         /* #F6465D 暗底  5.6:1 */
+  --guide-green: 156 87% 43%;
+  --guide-purple: 263 100% 75%;
+  --guide-blue: 214 100% 68%;
+  --guide-orange: 43 100% 42%;
+
+  /* 强调块的着色强度分主题：sRGB 在高亮端伽马压缩严重，同样的 alpha 在亮色下
+     产生的可感差异只有暗端的一半——暗色 7% 给出 1.10:1，亮色要 12% 才追平。
+     不是「统一调大」，是两套值。 */
+  --callout-tint: 0.07;
+  --callout-edge: 0.30;
+  --callout-bar: 0.85;
+
+  --toc-hit: 216 14% 22%;           /* 对暗色卡 1.36:1：能看出状态又不抢正文 */
+}
+
+.light .guide-page,
+.guide-page.light {
+  --guide-ink: 222 8% 25%;          /* 亮底 10.4:1 */
+  --guide-line: 220 13% 82%;        /* 亮色下 card 是纯白、无法比页底更亮，
+                                       边界职责全部由线承担：对页底 1.50:1 是下限 */
+  --guide-shadow-a: 0.06;
+
+  /* 亮色把每个色相压到 4.5:1 以上。为什么不是「统一降 20% 亮度」：金色在 sRGB
+     里亮度极高，要跨过 4.5:1 必须压到 L≈30%，而红色 L=45% 就够——每个色相要跨
+     的距离不一样，只能逐个算。原值在亮底上的实测：#F0B90B 1.73:1、#0ECB81 2.04、
+     #F6465D 3.38、#B080FF 2.73，无一及格。 */
+  --guide-gold: 41 100% 30%;        /* #9A6A00 亮底 4.54:1 */
+  --guide-red: 352 70% 45%;         /* #C42239 亮底 5.53:1 */
+  --guide-green: 156 91% 25%;       /* #067A4C 亮底 5.16:1 */
+  --guide-purple: 258 73% 55%;      /* #6D3BE0 亮底 6.00:1 */
+  --guide-blue: 216 80% 47%;        /* #1863D6 亮底 5.30:1 */
+  --guide-orange: 41 100% 27%;      /* #8A5D00 亮底 5.52:1 */
+
+  --callout-tint: 0.12;             /* → 1.16:1，落在「余光能察觉又不抢正文」的窗口 */
+  --callout-edge: 0.55;             /* → 2.00:1；原来的 0.28 在亮色下是 1.17:1，物理不可见 */
+  --callout-bar: 1;
+
+  --toc-hit: 220 14% 91%;
+}
+
+/* ============================================================
+   2 · 字体：Inter 只管拉丁与数字，汉字必须有确定落点
+   ============================================================
+   font-family 是**逐字符**回退而不是整块选字体，所以顺序即分工：
+   'CJK Punct' 抢中文标点 → 'Inter' 吃拉丁与数字 → CJK 链兜住汉字。
+
+   两条不能弄反的细节：
+   · 苹果系必须排在 Windows 系之前。Office for Mac 会安装 Microsoft YaHei，
+     写反了以后所有装 Office 的 Mac 会突然用雅黑渲染。
+   · system-ui / -apple-system 绝不能排在 CJK 名字之前——macOS 的 system-ui 自带
+     内部 CJK 回退链，会把汉字整块吞走，让后面写的一切失效。这里干脆不列。
+
+   作用域刻意限死在 .guide-page 而不是改 index.css 的 body：改 body 会同时改变
+   交易页所有中文的落点，收益大风险也大，应该单独验收。 */
+.guide-page {
+  font-family:
+    'CJK Punct',
+    'Inter',
+    'PingFang SC', 'Hiragino Sans GB',
+    'HarmonyOS Sans SC',
+    'Microsoft YaHei UI', 'Microsoft YaHei',
+    'Source Han Sans SC', 'Noto Sans SC', 'Noto Sans CJK SC',
+    'WenQuanYi Micro Hei', 'Droid Sans Fallback',
+    sans-serif;
+  font-kerning: normal;
+}
+
+/* 公式片段：index.css 的 .font-mono 被 Tailwind 生成的同名工具类覆盖了
+   （两条都是 (0,1,0)，Tailwind 在后），所以第 566/683/804 行那三个公式块实际
+   用的是系统等宽字体，而它们**都没有 CJK**——「加仓量 = 垫 ÷ 险」里的中文
+   会再回退一次，一行里出现三种字体、基线错位肉眼可见。
+   (0,2,0) 稳赢工具类，影响面限死在这一页。 */
+.guide-page .font-mono {
+  font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas,
+    'PingFang SC', 'Microsoft YaHei', monospace;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0;                /* 中文的字距调校对等宽西文只会添乱 */
+  font-feature-settings: 'zero' 1;  /* 带斜杠的 0，与字母 O 区分 */
+}
+
+/* ============================================================
+   3 · 垂直节奏：全文只有一条竖直动线
+   ============================================================
+   规则只有两条：
+     ① 流容器的直接子元素之间，由「后者的 margin-top」独占那道缝；
+     ② 谁都不许带 margin-bottom。
+   一道缝只有一个主人 —— 于是**不存在外边距折叠**，也不存在「上一个的 mb 和
+   下一个的 mt 谁大」这种不可预测的算术。这一点在这份 DOM 上是硬需求：
+   40 个表格被包在 div.overflow-x-auto 里，overflow 非 visible 会建立 BFC，
+   表格的 my-3 被关在滚动盒内部出不来（这就是「代码里明明有 my-3、实测缝是 0」
+   的原因）；而两个引言块的 my-8 又会折叠成 max(32, 步长)，把块级间距吞掉。
+
+   差异全部由 --flow-step 承担：它和 margin-top 是两个**不同的属性**，设变量的
+   规则再低特异度也不会被那条 margin 声明压住。这就是本文件里再也不需要写
+   第二条 margin 的原因。 */
+
+/* 流容器的直接子元素：切断继承 + 交出 margin-bottom + 默认落在文本轴上。
+   :is() 取参数中最高特异度 = `.guide-doc .guide-stack` = (0,2,0)。
+   压得住 .my-8 / .mb-3 / .mt-2 / .mt-4 / .mt-8 (0,1,0)——那几处一次性微调
+   自动失效，不必手动去 TSX 里清。 */
+:is(.guide-doc, .guide-doc section, .guide-doc .guide-stack) > * {
+  --flow-step: initial;   /* 父容器自己的步长不许漏给孩子 */
+  margin-bottom: 0;
+  max-width: var(--measure);
+}
+
+/* 唯一一条 margin 声明。(0,2,0) */
+:is(.guide-doc, .guide-doc section, .guide-doc .guide-stack) > * + * {
+  margin-top: var(--flow-step, var(--gap-flow));
+}
+
+/* ── 对象轴 ──
+   有边框/底色包裹的数据对象走满栏宽。它们的右边缘允许与正文不同，因为封闭的
+   边框会让眼睛把它读成「插图」而不是「另一栏正文」；而无边框的散文（强调块、
+   列表、流程节点）必须回到文本轴，否则就是第二栏。
+   容器（section / .guide-stack）本身不限宽——限宽只落在叶子上，否则会把宽表格挤扁。 */
+:is(.guide-doc, .guide-doc section, .guide-doc .guide-stack)
+  > :is(section, .guide-stack, .overflow-x-auto, .guide-key-grid, .grid,
+        [class~='bg-card']:not(:has(.guide-flow-node))) {
+  max-width: none;
+}
+
+/* 流程图的外框排除在对象轴之外：它装的是 8 段散文（其中两个 accent 节点各约
+   230 个汉字），跟着表格跑到 960px 会让它成为全页最宽的一块正文，
+   而且是唯一一块不参与两端对齐的正文——右轮廓上凭空多出第三条边。
+   框回到文本轴，节点填满框，整张图于是和段落共用同一条左右边缘。 */
+
+/* ── A 组 · 步长由「我是谁」决定。(0,3,0) ── */
+:is(.guide-doc, .guide-doc section, .guide-doc .guide-stack)
+  > :is(.overflow-x-auto, .guide-callout, .guide-key-grid, .grid, ul, ol,
+        [class~='bg-card'])            { --flow-step: var(--gap-block); }
+
+:is(.guide-doc, .guide-doc section, .guide-doc .guide-stack)
+  > .guide-subtitle                    { --flow-step: var(--gap-topic); }
+
+/* 顶级章节之间。
+   **必须重复 .guide-doc 把特异度顶到 (0,2,2)**：上面那条复位
+   `:is(.guide-doc, .guide-doc section, .guide-doc .guide-stack) > *` 是 (0,2,0)
+   （:is() 取参数里最高的那个 = `.guide-doc .guide-stack`），而单写
+   `.guide-doc > section + section` 只有 (0,1,2)——类数 1 < 2，直接输给复位，
+   --flow-step 会被打回 initial，章与章之间只剩默认的 18px。
+   这是本文件自伤，与 Tailwind 无关，dev / prod 一致。
+   (0,2,2) 稳过复位，又仍低于 A/B 组的 (0,3,0)，不会反过来抢走它们。 */
+.guide-doc.guide-doc > section + section { --flow-step: var(--gap-chapter); }
+.guide-doc.guide-doc > [data-guide-meta]  { --flow-step: var(--gap-chapter); }
+
+/* ── B 组 · 步长由「谁在我前面」决定。同为 (0,3,0)，写在 A 组之后所以胜出 ──
+   刻意如此：**标题必须黏住下文**，这条优先级高于「下文是什么」。
+   于是「表格紧跟在小标题后面」时走 13.5px 而不是 27px。 */
+:is(.guide-doc, .guide-doc section, .guide-doc .guide-stack)
+  > .guide-section-title + *           { --flow-step: calc(var(--rhythm) * 0.78); }
+
+:is(.guide-doc, .guide-doc section, .guide-doc .guide-stack)
+  > .guide-subtitle + *                { --flow-step: var(--gap-tight); }
+
+/* ── 编号小节（13 个，即 TOC 里有锚点的 2.1 / 3.6 / 4.3 …） ──
+   它们在 DOM 里 100% 可判别：全是嵌套 <section> 的第一个子元素。
+   给它们一条**贯穿栏宽的 1px 细线**——横跨整个版面的线读作「结构分界」，
+   而原来那条 2rem 短横线读作「装饰」。全文只有 13 条线，一条线 = 一个 TOC 锚点，
+   和左侧目录一一对应；线这个资源被稀缺化之后才重新携带信息。
+   padding 与步长互补，保证「线上方的白」恒等于 --gap-sub 的比例分配。 */
+/* 同样重复类名：单写 (0,1,2) 会被复位的 (0,2,0) 打回 initial，
+   13 个编号小节的 57px 上留白会退化成 18px。padding-top 与 border-top 没有竞争者，
+   本来就生效——只有 --flow-step 这一条会静默失效，最难发现。 */
+.guide-doc.guide-doc section > section {
+  --flow-step: calc(var(--gap-sub) - var(--rhythm) * 0.75);  /* 36.8px 在线上方 */
+  padding-top: calc(var(--rhythm) * 0.75);                   /* 20.3px 线到标题 */
+  border-top: 1px solid hsl(var(--border));
+}
+
+/* 表格的 my-3 出不了 .overflow-x-auto 建立的 BFC，那 12px 只是滚动盒内部的死白。
+   缝归外层容器管。(0,2,1) 压过 Tailwind 的 .my-3 (0,1,0)，40 处一次清掉。 */
+.guide-doc .overflow-x-auto > table { margin: 0; }
+
+/* 结尾的 CTA 需要一段明确的收束白，不要跟正文用同一个块级步长。 */
+.guide-doc .guide-outro { --flow-step: var(--gap-sub); }
+
+/* ============================================================
+   4 · 两端对齐
+   ============================================================
+   西文排版界怕 justify，是因为西文的断行机会只在词间空格——一行 8~10 个空格
+   要吞掉几十像素的余量，就会撑出「白河」。中文完全不是这个结构：断行机会存在
+   于几乎每两个汉字之间，一行 46 字有约 45 个可扩展点。真实余量有多大？行尾放
+   不下的那个单位有多宽，余量就有多宽：如果是一个汉字（15px），每个间隙分到
+   0.33px；哪怕是本文最长的拉丁词，分到每个间隙也不足 1.5px——低于知觉阈值。
+   所以这份文档的散文块是 justify 的最佳适用场景。
+
+   letter-spacing 归零还有一个额外好处：纯汉字行的宽度恰好是字宽的整数倍，
+   两端对齐时余量趋近于零，右缘不需要靠拉伸就能齐。字距不为零就破坏了这个
+   整除关系——原来那 0.012em ≈ 0.18px 肉眼本来也看不见。 */
+/* 开关挂在**栏宽**上，不是视口宽度。用视口会错一整档：主栏宽度
+   = 视口 − 48(px-6) − 240(aside) − 32(gap)，所以要到视口 1008px 主栏才够 43rem；
+   写 max-width:767px 的话，768–1007px 这一整段（iPad 竖屏、半屏窗口）主栏只有
+   448–687px，justify 却全速开着，每行扩展点腰斩、字距波动翻倍。
+   容器查询让断点永远跟 --measure 对齐，以后改栅格也不会再错位。 */
+.guide-doc { container-type: inline-size; }
+
+.guide-doc :is(.guide-copy, .guide-callout, li) {
+  text-align: start;         /* 默认不对齐；够宽了才由下面的容器查询打开 */
+  text-align-last: start;    /* 显式钉死：中文段落末行本来就该左对齐收笔。
+                                绝不要 justify——「三个字铺满一行」是灾难。 */
+  hyphens: manual;           /* 中文没有连字典，auto 是空转；显式关掉可防止将来
+                                局部标 lang="en" 后英文被连字符切开 */
+  text-wrap: pretty;         /* 避免末行掉单字；不支持的浏览器忽略 */
+}
+
+/* overflow-wrap 只发给段落。它是这一组里**唯一真能把 P_gap 劈开**的属性
+   （word-break: normal 是初始值，写不写都一样，是噪音，已删）；列表项在窄栏里
+   更容易触发它，所以不给 li。真正的标识符保护在 .guide-formula 的 nowrap 上。 */
+.guide-doc .guide-copy { overflow-wrap: break-word; }
+
+/* li 不参与两端对齐：列表项平均只有一两行，justify 对它是 no-op，
+   却让缩进后的右缘多出一条与正文不同的边。 */
+/* 675px = --measure 的字面量（15px × 45）。容器查询的条件里不能用自定义属性，
+   只能写死；改 --fs-body 或字数时**这个数要跟着改**。
+   低于这个宽度不开对齐：栏宽不足时每行的可扩展点从 45 掉到 20 出头，
+   同样的余量摊下来是两倍的字距波动。 */
+@container (min-width: 675px) {
+  .guide-doc :is(.guide-copy, .guide-callout) { text-align: justify; }
+}
+
+/* 含行内公式的块退回左对齐。这是 justify 在本页唯一会真正翻车的地方：
+   一段 45 字符、只含 8 个空格的公式串（U 本位 X₂ᴮ = G ÷ |S₂ − K_B|；币本位 …）
+   里拉丁串不可断，整行的拉伸会全部集中到那 8 个空格上，每个能被吹到 20–30px
+   —— **这才是真正的河流**。
+   护栏必须同时认 <code> 和 font-mono：全页 font-mono 只有 11 处、<code> 有 4 处，
+   只认 font-mono 会漏掉一大批带行内公式的段落。属性选择器用 *= 而不是 ~=，
+   因为 Tailwind 的 font-mono 常与别的修饰符拼在同一个 class 值里。
+   (0,3,0) 高于上面那条 (0,2,0)。 */
+.guide-doc :is(.guide-copy, .guide-callout, li):has(code, .font-mono, [class*="font-mono"], .guide-formula) {
+  text-align: start;
+}
+
+/* 行内公式整体不断行。× ÷ − 这些符号（U+00D7 / U+00F7 / U+2212）在 UAX #14 里是
+   AI 类，在东亚上下文中被解析成 ID（表意字），两侧都可断——于是 `0.9×0.8` 会被
+   从中间劈开。这是 word-break / overflow-wrap 都管不到的一层。 */
+.guide-doc .guide-formula {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 窄栏与居中块明确不参与：扩展点少、余量占比大，justify 是负收益。
+   表格单元格尤其——格子窄、内容短，会把三个字拉到整格宽。
+   text-align 是继承属性，这一条同时把漏进去的部分收回来。 */
+.guide-doc :is(th, td),
+.guide-key-card__body,
+.guide-flow-node,
+.guide-section-heading,
+.guide-subtitle {
+  text-align: start;
+}
+
+/* 渐进增强 · Chromium 独占（Chrome/Edge 123+）。
+   初始值 normal 会让行首的开括号/开引号保持全角，于是像「“无知之幕”（veil of
+   ignorance）来自…」这种以引号开头的段落，左缘会比邻段缩进半个字，在齐左的
+   段落流里非常显眼。trim-start 正是修这个的。
+   刻意不挂在 .guide-doc 上：它会继承进表格，改变文本实际宽度 → 列宽在 Chrome
+   与 Safari 之间差 1–2%。只发给散文块。 */
+@supports (text-spacing-trim: trim-start) {
+  .guide-doc :is(.guide-copy, .guide-callout, li) { text-spacing-trim: trim-start; }
+}
+
+/* 渐进增强 · Safari 独占。行尾的 。，、 悬挂到版心之外，本来差半个字才够的行
+   能收进来——中文两端对齐最优雅的一块补丁。Chrome/Firefox 无此属性，那两家
+   右缘会因行末标点留半字白，属预期。
+   不加 first（行首悬挂）：它与 text-spacing-trim 的行首处理重复，叠加会让
+   Safari 和 Chrome 得到不同的左缘。 */
+@supports (hanging-punctuation: allow-end) {
+  .guide-doc :is(.guide-copy, .guide-callout, li) { hanging-punctuation: allow-end; }
+}
+
+/* 明确不写：
+   · text-justify —— Safari 至今未实现，Chrome 直到 145+；合法值里根本没有
+     老文章里的 inter-ideograph / distribute（IE 遗产），写了整条声明被丢弃。
+     中文要的行为就是默认的 auto。
+   · text-autospace —— 初始值就是 normal（汉字与拉丁/数字之间的 1/8 em 间隙
+     默认已开），什么都不写就已经拿到了。唯一要记住的是别写 no-autospace。
+   · line-break: strict —— 它收紧的是**日文**的小书假名与长音符禁则；中文的
+     避头尾浏览器按 UAX #14 默认就做了，写了是噪音还会让行数抖动。
+   · word-break: auto-phrase —— 做的是日文文节分词，对中文无效。 */
+
+/* ============================================================
+   5 · 正文
+   ============================================================ */
+
+.guide-copy {
+  max-width: var(--measure);
+  font-size: var(--fs-body);
+  line-height: var(--lh);
+  letter-spacing: 0;
+  color: hsl(var(--guide-ink));
+}
+
+/* 正文里大量段落以 <strong> 开头当行内小标题（「**L2，操作层。** 它把…」），
+   与正文拉开约 30% 亮度差就够——再大就变成第二种标题了。 */
+.guide-copy strong,
+.guide-callout strong,
+.guide-doc li strong {
   font-weight: 600;
   color: hsl(var(--foreground));
 }
 
-/* ============ 章节标题 ============ */
+/* ============================================================
+   6 · 四级标题
+   ============================================================
+   实测 <SubTitle> 出现 70 次，其中带编号、TOC 里有锚点的只有 13 个，其余 57 个
+   是章节内部的话题标题。结构上后者是前者的子级，却共用同一个 class、同一个
+   字号、同一条横线——在 3.6 那一节里读者会看到 8 个视觉上完全同级的标题。
+   拆成四级：21 / 18 / 16 / 15，比值 1.17 / 1.13 / 1.07。
+   最后一跳只有 1.07 是刻意的：CJK 里靠字号拉四级会让 H2 大到失控，H4 与正文的
+   差别交给**字重 600 + 3:1 的留白不对称**去表达——长文里「留白多少」比
+   「大多少」更可靠地传达层级。 */
 
 .guide-section-title {
   display: flex;
   align-items: center;
   gap: 0.75rem;
-  margin-bottom: 1.25rem;
+  margin-bottom: 0;   /* 缝已经交给流轴，这里再写就是第二个来源 */
 }
 
 /**
- * 竖条的 background 由 TSX 的 inline style 给（每章一个强调色），
- * 这里只管形状——写 background 会被 inline 覆盖，等于白写。
+ * 竖条的 background 由 TSX 的 inline style 给（每章一个身份色），CSS 写 background
+ * 会被 inline 覆盖。但**滤镜不在 inline 里**——所以亮色主题下用一次 brightness
+ * 把九章的身份色整体压暗，既跨过 1.4.11 的 3:1（细线的有效对比低于同色块面，
+ * 这里按 4.5:1 选值），又保住每章不同的色相。实测压后：金 5.1:1、绿 5.8:1、
+ * 红 8.4:1、紫 7.2:1，原值分别只有 1.73 / 2.04 / 3.38 / 2.73。
  */
 .guide-section-marker {
   display: inline-block;
   width: 3px;
-  height: 1.45rem;
+  height: 1.5rem;
   flex: none;
   border-radius: 999px;
 }
 
+.light .guide-section-marker {
+  filter: brightness(0.55) saturate(1.12);
+}
+
+/* H2 · 章（9 个） */
 .guide-section-heading {
   margin: 0;
-  font-size: 20px;
+  font-size: 21px;
   font-weight: 600;
   line-height: 1.35;
-  letter-spacing: -0.005em;
+  letter-spacing: -0.008em;   /* 大字号下汉字会显松，负字距把标题收成一个块 */
   color: hsl(var(--foreground));
   text-wrap: balance;
 }
 
-/* ============ 小节标题 ============ */
-
-/**
- * 副标题靠一条细横线与上文分开，而不是靠更大的字号——
- * 长文里再加一级字号会把层级压得太挤，一条线就够了。
- *
- * 分隔距离用 padding 撑而不是 margin：外面那层 `space-y-3` 的选择器是
- * `.space-y-3 > :not([hidden]) ~ :not([hidden])`（0,3,0），单类名的
- * margin-top 抢不过它，写了也不生效。细线因此落在 padding 区里偏上的位置，
- * 上方留白（12 + 13.6px）略多于下方（18.4px）——分隔线该更靠近它引出的标题。
- */
+/* H4 · 章内话题标题（57 个）—— 基础态。
+   原来那条 2rem 短横线删掉了：它出现 70 次、长度是一个和任何东西都不成比例的
+   任意值，而且和 SectionTitle 的 3px 竖条抢同一种视觉信号——余光扫过去，一根
+   短横和一根短竖分不出高低。现在三种信号对应三个层级：竖条=章、满栏细线=小节、
+   无装饰=话题，互不重复。
+   原来的 padding-top: 2rem 也一并撤销——那是为了绕开 space-y-3 (0,3,0) 的妥协，
+   space-y-3 换成 .guide-stack 之后这个理由不存在了；留着会和流轴的 42px 叠成 74px。 */
 .guide-subtitle {
-  position: relative;
-  margin: 0 0 0.85rem;
-  padding-top: 2rem;
-  font-size: 15.5px;
+  margin: 0;
+  padding: 0;
+  font-size: 16px;
   font-weight: 600;
   line-height: 1.5;
   letter-spacing: 0.005em;
@@ -85,154 +510,301 @@
   text-wrap: balance;
 }
 
-.guide-subtitle::before {
-  content: '';
-  position: absolute;
-  top: 0.85rem;
-  left: 0;
-  width: 2rem;
-  height: 1px;
-  background: hsl(var(--border));
+/* H3 · 编号小节（13 个）。判据：嵌套 section 的首个子元素。
+   顶级 s1…s9 的 id 不含连字符，天然排除，但这里用结构判据而不是 id 判据——
+   将来新增一个 id 带连字符的顶级章节也不会误判。(0,1,3) */
+.guide-doc section > section > .guide-subtitle:first-child {
+  font-size: 18px;
+  line-height: 1.45;
+  letter-spacing: 0;
 }
 
-/* ============ 强调块 ============ */
+/* ============================================================
+   7 · 强调块
+   ============================================================
+   49 个（32 金 + 17 红）散在 171 段正文里，平均每 3.5 段就有一个。它装的是
+   **散文**，和正文是同一种质地，所以必须回到文本轴——原来它铺满 960px、
+   比正文宽 35%，眼睛会把它读成「另一栏」。字号也必须与正文相同：它是被框起来
+   的正文，不是注释，降字号等于告诉读者「这段没那么重要」，与它的语义相反。
 
+   分级靠**减色**而不是加色（全页已经跑着 7 个色相，再多一档只会更糊）：
+   红（硬约束，17 个）是全页色彩强度的天花板，金（补充说明，32 个）把描边与
+   底色各压一档，让金块的着色重量明显低于红块。 */
+/* 这里刻意**不**为内边距做宽度补偿。
+   补偿的动机是「让框里的字和段落的字右缘对齐」，但那样做会把盒右缘推到
+   675+24.3+20.25+2 = 721.6px 处——实测右边缘于是从一条（971）裂成两条
+   （971×189 段落 / 1018×49 强调块），而**边框才是眼睛真正读到的那条边**，
+   它比框内文字的位置强势得多。
+   保持 max-width: var(--measure)：盒的左右边框正好落在段落文字的左右边缘上，
+   框内文字对称内缩——那是「这是一个框」的正常读法，不是错位。 */
 .guide-callout {
+  --cal-px-l: calc(var(--rhythm) * 0.9);
+  --cal-px-r: calc(var(--rhythm) * 0.75);
   position: relative;
-  padding: 0.9rem 1.1rem 0.9rem 1.25rem;
+  padding: var(--gap-flow) var(--cal-px-r) var(--gap-flow) var(--cal-px-l);
   border-radius: 0.75rem;
   border: 1px solid;
-  font-size: 14px;
-  line-height: 1.85;
-  letter-spacing: 0.01em;
-  /* 正文一律吃前景色。金/红只上描边、淡背景与竖条——
-     #F0B90B 当正文色在亮色主题下对比度只有 1.7:1，读不清。 */
+  font-size: var(--fs-body);
+  line-height: var(--lh);
+  letter-spacing: 0;
+  /* 正文一律吃前景色。金/红只上描边、淡背景与竖条——#F0B90B 当正文色在亮色
+     主题下对比度只有 1.73:1，读不清。 */
   color: hsl(var(--foreground));
 }
 
-/* 左侧那道实心竖条：描边本身太淡，强调块需要一个能被余光看到的锚点。 */
+/* 左侧那道实心竖条：描边本身太淡，强调块需要一个能被余光看到的锚点。
+   竖向内边距 ≥ 段间距，否则文字会显得被上下夹紧。 */
 .guide-callout::before {
   content: '';
   position: absolute;
-  top: 0.9rem;
-  bottom: 0.9rem;
+  top: var(--gap-flow);
+  bottom: var(--gap-flow);
   left: 0;
   width: 2px;
   border-radius: 999px;
-  opacity: 0.6;
+  opacity: var(--callout-bar);
 }
 
 .guide-callout--amber {
-  border-color: rgb(240 185 11 / 0.28);
-  background: rgb(240 185 11 / 0.07);
+  border-color: hsl(var(--guide-gold) / calc(var(--callout-edge) * 0.75));
+  background: hsl(var(--guide-gold) / calc(var(--callout-tint) * 0.8));
 }
 
-.guide-callout--amber::before {
-  background: #F0B90B;
-}
+.guide-callout--amber::before { background: hsl(var(--guide-gold)); }
 
 .guide-callout--red {
-  border-color: rgb(246 70 93 / 0.28);
-  background: rgb(246 70 93 / 0.07);
+  border-color: hsl(var(--guide-red) / var(--callout-edge));
+  background: hsl(var(--guide-red) / var(--callout-tint));
 }
 
 .guide-callout--red::before {
-  background: #F6465D;
+  background: hsl(var(--guide-red));
+  width: 3px;                /* 一级强调：唯一一处比别人粗的竖条 */
+  opacity: 1;
 }
 
-/* ============ 要点卡片 ============ */
+/* ============================================================
+   8 · 列表
+   ============================================================
+   17 个 list-disc + 1 个 list-decimal，一字不差地重复 `text-[14px]
+   text-foreground/90 space-y-1`。14px vs 正文 14.5px 差 0.5px——这个量级正好落在
+   「看得出不一样、但说不出哪里不一样」的区间，读起来像从两个地方复制来的。
+   列表项就是正文（s4-3 那 12 条每条都是整段论证），字号/行高/颜色与正文完全
+   一致，层级只由缩进与圆点承担。
+
+   特异度算式（这一节全部靠它，不改 TSX）：
+     .guide-doc :is(ul, ol)                    = (0,1,0)+(0,0,1) = (0,1,1)
+        > .text-[14px] / .pl-6 / .list-disc 的 (0,1,0) ✓
+     .guide-doc :is(ul,ol) > li:not([hidden]) ~ li:not([hidden])
+       = (0,1,0)+(0,0,1)+(0,0,1)+(0,1,0)+(0,0,1)+(0,1,0) = (0,3,3)
+        > .space-y-1 > :not([hidden]) ~ :not([hidden]) 的 (0,3,0) ✓
+   —— 这是唯一能从 CSS 侧压过 space-y-* 的写法：把它自己的 :not([hidden])
+   补回来再加一个作用域类，而不是堆无意义的选择器打特异度战争。 */
+.guide-doc :is(ul, ol) {
+  max-width: var(--measure);
+  padding-left: 1.45em;            /* 跟随字号，不是固定 24px */
+  font-size: var(--fs-body);
+  line-height: var(--lh);
+  letter-spacing: 0;
+  color: hsl(var(--guide-ink));
+  list-style-position: outside;
+}
+
+.guide-doc ol { font-variant-numeric: tabular-nums; }  /* 序号列才对得齐 */
+
+.guide-doc :is(ul, ol) > li:not([hidden]) ~ li:not([hidden]) {
+  /* 9px：明显大于行内白的一半（12px 的行内白里，4px 的项间距根本断不开多行 li），
+     又明显小于段间距 18px —— 列表内部比段落之间更紧密。 */
+  margin-top: var(--gap-hair);
+}
+
+.guide-doc :is(ul, ol) > li::marker {
+  color: hsl(var(--muted-foreground) / 0.75);
+  font-size: 0.85em;               /* 圆点是导航记号，不该和正文同分量 */
+}
+
+/* ============================================================
+   9 · 表格
+   ============================================================
+   两个问题：td 是 text-[11px] 而 th 是 text-[10px]——**表头比数据还小**，
+   表头是这张表的导航，永远不该比它导航的内容更弱；11px ÷ 14.5px = 0.76 这个
+   比值只适用于「短标签型」表格，而 s8「注意事项」表的单个 <td> 装着六七行、
+   带 <br /> 和多个 <strong> 的完整段落——这些不是表格，是分栏排版的正文。
+
+   td/th 同为 13px（= --fs-sm，0.87 × 正文）：既保住「表格是另一种质地」的区分，
+   又让长段落格子可读；层级用**字重与色阶**表达，不用字号倒挂表达。
+   (0,2,1) 压过 .text-[11px] / .px-3 / .py-2 (0,1,0)，40 张表一条规则解决，不改 TSX。 */
+.guide-doc .overflow-x-auto {
+  position: relative;
+  overscroll-behavior-x: contain;  /* 横滚到头别把手势传给页面（触控板误触发返回） */
+}
+
+.guide-doc .overflow-x-auto > table {
+  /* w-full 意味着表格宽度永远等于滚动容器宽度，内容盒永远不会溢出——
+     overflow-x: auto 因此**永远不激活**，窄屏下表格不滚动，它会被压扁：
+     iPhone 375px 时 3 列表每列内容宽只剩 76px，11px 字号 → 每行 6–7 个汉字。
+     给一个 min-width 才能让滚动真正生效。34rem = 3 列 × 约 15 个汉字 + 内边距。 */
+  min-width: 34rem;
+  font-size: var(--fs-sm);
+  line-height: 1.7;
+  letter-spacing: 0.006em;
+  font-variant-numeric: tabular-nums;  /* 数字不等宽会让列「呼吸」 */
+}
+
+.guide-doc .overflow-x-auto :is(th, td) {
+  /* 竖向 ≥ 行内白（22.1 − 13 ≈ 9px），否则多行格子的文字会贴着上下边框 */
+  padding: calc(var(--rhythm) * 0.38) calc(var(--rhythm) * 0.52);
+  vertical-align: top;               /* 长短不一的格子按顶对齐，横向基线才成立 */
+}
+
+.guide-doc .overflow-x-auto th {
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  /* muted-foreground 实测只有 4.21:1（暗色），13px 是正文级字号、要求 4.5:1。
+     表头是「这一列在说什么」的入口，比单元格更该读得清。0.78 实测约 6.9:1，
+     仍比 td 淡一档——「表头 / 数据」的区分靠字重与这一档色阶保留。 */
+  color: hsl(var(--foreground) / 0.78);
+}
+
+/* ============================================================
+   10 · 要点卡片
+   ============================================================ */
 
 .guide-key-grid {
   display: grid;
-  gap: 1rem;
+  gap: var(--gap-flow);
 }
 
+/* 768px 处主栏其实只有 448px（侧栏此时刚出现），3 列各 138px、减内边距只剩
+   98px，13px 中文 → 每行 7 个字。所以 3 列必须推到 1024px 以上。 */
 @media (min-width: 768px) {
-  .guide-key-grid {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-  }
+  .guide-key-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (min-width: 1024px) {
+  .guide-key-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 }
 
 .guide-key-card {
   display: flex;
   height: 100%;
   flex-direction: column;
-  padding: 1.15rem 1.25rem;
-  border: 1px solid hsl(var(--border) / 0.7);
+  padding: var(--gap-flow) calc(var(--rhythm) * 0.75);
+  border: 1px solid hsl(var(--guide-line));
   border-radius: 0.75rem;
-  background: hsl(var(--card) / 0.95);
-  box-shadow: 0 1px 2px hsl(var(--foreground) / 0.04);
+  /* 去掉原来的 /0.95：亮色下 card 是纯白、叠在 #FAFAFA 上还是白（1.03:1，
+     等于没有色差），alpha 完全无效；暗色下它反而把卡面往页底方向拉，削弱了
+     唯一有效的那条分层线索。分工是明确的——暗色靠面，亮色靠线。 */
+  background: hsl(var(--card));
+  box-shadow: 0 1px 2px hsl(0 0% 0% / var(--guide-shadow-a));
   transition: border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease;
 }
 
+/* 阴影必须与主题解绑。原来用 hsl(var(--foreground) / 0.04)，而 --foreground 在
+   暗色主题是近白——那不是阴影，是一圈 4%~7% 的白色外发光，比卡片底和页底都亮，
+   方向与暗色主题的深度语言（近处更亮、远处更暗）正好相反。 */
 .guide-key-card:hover {
-  border-color: hsl(var(--foreground) / 0.18);
-  box-shadow: 0 6px 18px hsl(var(--foreground) / 0.07);
+  border-color: hsl(var(--guide-line) / 1);
+  box-shadow: 0 6px 18px hsl(0 0% 0% / calc(var(--guide-shadow-a) * 1.6));
   transform: translateY(-1px);
 }
 
 .guide-key-card__header {
-  padding-bottom: 0.7rem;
-  border-bottom: 1px solid hsl(var(--border) / 0.5);
+  padding-bottom: var(--gap-tight);
+  border-bottom: 1px solid hsl(var(--guide-line) / 0.6);
 }
 
 .guide-key-card__title {
-  font-size: 13px;
+  font-size: var(--fs-sm);
   font-weight: 600;
   letter-spacing: 0.01em;
   color: hsl(var(--foreground));
 }
 
+/* muted-foreground 在暗色是 hsl(220 8% 50%)：对**页底**是 4.73:1（勉强过线），
+   但卡片正文并不坐在页底上——它坐在 --card 上，实测只有 3.92:1，13px 中文不达
+   AA。不去动全局 token（交易页到处在用），改用 foreground + alpha，亮暗两套
+   自动成立：暗色下 0.72 给 6.6:1。 */
 .guide-key-card__body {
-  padding-top: 0.7rem;
-  font-size: 13px;
-  line-height: 1.85;
-  letter-spacing: 0.01em;
-  color: hsl(var(--muted-foreground));
+  padding-top: var(--gap-tight);
+  font-size: var(--fs-sm);
+  line-height: var(--lh);
+  letter-spacing: 0;
+  color: hsl(var(--foreground) / 0.72);
 }
 
-/* ============ 流程节点 ============ */
-
+/* ============================================================
+   11 · 流程节点
+   ============================================================
+   原来是 text-align: center + max-width 520px + margin-inline auto。这个设定假设
+   节点内容是短标签（「选择历史时间与标的」9 个字，确实合适），但第 427 / 431 行
+   两个 accent 节点各约 **230 个汉字**——桌面上是 6 行居中文本，iPhone 上是
+   10 行。10 行居中意味着左右两条边缘都在锯齿状抖动，中文读者每行都要重新找行首，
+   这是这一页在手机上最难读的地方。text-wrap: balance 救不了：Chrome 有 6 行硬上限。
+   改左对齐、跟随容器宽度；箭头仍居中，流程感不丢。 */
 .guide-flow-node {
   position: relative;
-  margin-inline: auto;
-  max-width: 520px;
-  padding: 0.75rem 1rem;
-  border: 1px solid hsl(var(--border) / 0.7);
+  margin-inline: 0;
+  max-width: none;
+  padding: calc(var(--rhythm) * 0.42) calc(var(--rhythm) * 0.6);
+  border: 1px solid hsl(var(--guide-line));
   border-radius: 0.75rem;
-  background: hsl(var(--card) / 0.95);
-  box-shadow: 0 1px 2px hsl(var(--foreground) / 0.04);
-  text-align: center;
-  font-size: 12.5px;
-  line-height: 1.7;
-  letter-spacing: 0.01em;
+  background: hsl(var(--card));
+  box-shadow: 0 1px 2px hsl(0 0% 0% / var(--guide-shadow-a));
+  font-size: var(--fs-sm);
+  line-height: 1.75;
+  letter-spacing: 0;
 }
 
 .guide-flow-node--accent {
-  border-color: rgb(240 185 11 / 0.55);
-  background: rgb(240 185 11 / 0.05);
+  border-color: hsl(var(--guide-gold) / 0.55);
+  background: hsl(var(--guide-gold) / calc(var(--callout-tint) * 0.7));
 }
 
-/* ============ 目录 ============ */
+/* ============================================================
+   12 · 目录
+   ============================================================ */
 
+/* 目录有两个渲染位置：桌面侧栏在 .guide-page 里，移动端抽屉由 Radix 的
+   SheetPortal 渲染到 document.body —— **不在 .guide-page 子树内**。
+   只把 token 定义在 .guide-page 上时，抽屉里的 --fs-xs / --toc-hit / --guide-gold
+   全是未定义，触发 invalid-at-computed-value-time：字号回落到继承值、
+   高亮底色与金色竖条整个消失。所以目录自带一份 token，不依赖祖先。 */
 .guide-toc {
+  --fs-xs: 11.5px;
+  --toc-hit: 216 14% 22%;
+  --guide-gold: 46 91% 49%;
+
   display: flex;
   flex-direction: column;
   gap: 1px;
 }
 
+.light .guide-toc {
+  --toc-hit: 220 14% 91%;
+  --guide-gold: 41 100% 30%;
+}
+
+/* 10px + uppercase + 0.14em 字距已经是全页最难认的排版组合，再叠 0.75 的透明度
+   就是双重削弱（暗色下实测 2.79:1）。去掉 alpha，视觉重量反而更像「标签」
+   而不是「脏字」。 */
 .guide-toc-label {
-  margin-bottom: 0.6rem;
+  margin-bottom: 0.65rem;
   font-size: 10px;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.14em;
-  color: hsl(var(--muted-foreground) / 0.75);
+  /* 0.5 实测只有 3.13:1（亮）/ 3.88:1（暗）——10px + 大写 + 0.14em 字距已经是
+     全页最难认的排版组合，对比度还不到 4.5:1 就是双重削弱。0.7 拉到 5.3 / 6.1。 */
+  color: hsl(var(--foreground) / 0.7);
 }
 
 /**
- * 高亮态用左侧一根竖条，而不是整块底色——目录一直停在视野边缘，
- * 整块底色会跟正文抢注意力。竖条常驻但透明，切换时不产生位移。
+ * 高亮态用左侧一根竖条 + 一层极淡底色，而不是整块重底——目录一直停在视野边缘，
+ * 重底会跟正文抢注意力。竖条常驻但透明，切换时不产生位移。
+ * 文字色从 0.65 起跳：暗色下 muted-foreground 落在 bg-card 上只有 3.89:1，
+ * 12px 中文不达 AA；0.65 给 5.6:1，既过线又保留「次要」的层级。
  */
 .guide-toc-link {
   position: relative;
@@ -242,7 +814,7 @@
   border-radius: 0.375rem;
   font-size: 12px;
   line-height: 2rem;
-  color: hsl(var(--muted-foreground));
+  color: hsl(var(--foreground) / 0.65);
   cursor: pointer;
   transition: color 140ms ease, background-color 140ms ease;
 }
@@ -255,52 +827,228 @@
   left: 0;
   width: 2px;
   border-radius: 999px;
-  background: #F0B90B;
+  /* 走 token：亮色下原来的 #F0B90B 对白卡只有 1.80:1，而它是亮色主题下
+     active 态的主要承载——压暗后 4.54:1。 */
+  background: hsl(var(--guide-gold));
   opacity: 0;
   transition: opacity 140ms ease;
 }
 
 .guide-toc-link:hover {
-  background: hsl(var(--accent));
-  color: hsl(var(--foreground) / 0.9);
+  background: hsl(var(--toc-hit));
+  color: hsl(var(--foreground) / 0.92);
 }
 
 .guide-toc-link.is-active {
-  background: hsl(var(--accent));
+  background: hsl(var(--toc-hit));
   color: hsl(var(--foreground));
   font-weight: 500;
 }
 
-.guide-toc-link.is-active::before {
-  opacity: 1;
-}
+.guide-toc-link.is-active::before { opacity: 1; }
 
 .guide-toc-link--child {
   height: 1.75rem;
   padding-left: 1.5rem;
-  font-size: 11px;
+  font-size: var(--fs-xs);
   line-height: 1.75rem;
+  color: hsl(var(--foreground) / 0.55);
 }
 
-/* ============ 文末字数 ============ */
+/* 键盘焦点。原来完全没有——只剩 UA 默认焦点环，而侧栏是 bg-card + p-3，
+   链接紧贴容器内壁，默认环在暗色卡上几乎看不出。用 --ring 并推离内壁；
+   焦点在框外、阅读位置在框内，两者不打架。 */
+.guide-toc-link:focus-visible,
+.guide-page a:focus-visible,
+.guide-page button:focus-visible {
+  outline: 2px solid hsl(var(--ring));
+  outline-offset: 2px;
+}
 
-/**
- * 全文字数：给「这份说明有多重」一个量感，但它不是内容的一部分，
- * 所以压到几乎看不见——只有视线扫到右下角、并且停下来时才认得出。
- */
+/* ============================================================
+   13 · 文末字数
+   ============================================================
+   全文字数：给「这份说明有多重」一个量感，但它不是内容的一部分，所以压到几乎
+   看不见。原来的 0.28 合成后是 1.37:1（暗）/ 1.44:1（亮）——那不是「隐形」，
+   是**物理不可见**：在非校准屏、低亮度或有环境光时根本读不出数字。
+   0.5 给出约 1.99:1，落在「扫过去不打扰、停下来能认出」的窗口。 */
 .guide-wordcount {
-  margin-top: 2.5rem;
   text-align: right;
   font-size: 10px;
   font-variant-numeric: tabular-nums;
   letter-spacing: 0.04em;
-  color: hsl(var(--muted-foreground) / 0.28);
+  color: hsl(var(--muted-foreground) / 0.5);
   user-select: none;
   transition: color 200ms ease;
 }
 
-.guide-wordcount:hover {
-  color: hsl(var(--muted-foreground) / 0.7);
+.guide-wordcount:hover,
+.guide-wordcount:focus-visible {
+  color: hsl(var(--muted-foreground));   /* 既然是「停下来想看」，一次给到能读 */
+}
+
+/* ============================================================
+   14 · 亮色主题下的内联强调色兜底
+   ============================================================
+   TSX 里有 41 处硬编码文字色（style={{color:'#…'}} + text-[#…]），它们是表格
+   单元格里的语义标签，属于正文级文字，AA 要求 4.5:1。实测在亮色页底上：
+   #F0B90B 1.73:1、#0ECB81 2.04、#F7931A 2.20、#D89B00 2.34、#5BA3FF 2.48、
+   #B080FF 2.73、#F6465D 3.38、#2B80FF 3.57——**无一及格**，六个连 3:1 都不到。
+   同一批色在暗底上是 5.3~11.0:1，全部及格。这不是「个别色偏淡」，是整套配色
+   按暗色单主题选的十六进制被原样搬进了双主题。
+
+   内联样式只有 !important 能盖，且必须写两种序列化形式：React 通过 CSSOM 赋值，
+   Chrome/Firefox/Safari 回读 style 属性时都会序列化成 rgb() 形式，只写 hex
+   匹配不到。这是一层**兜底**——真正干净的修法是把这 41 处换成 className，
+   属于独立的一次改动。 */
+.light .guide-page [style*='#F0B90B'],
+.light .guide-page [style*='rgb(240, 185, 11)'],
+.light .guide-page .text-\[\#F0B90B\] { color: hsl(var(--guide-gold)) !important; }
+
+.light .guide-page [style*='#F6465D'],
+.light .guide-page [style*='rgb(246, 70, 93)'],
+.light .guide-page .text-\[\#F6465D\] { color: hsl(var(--guide-red)) !important; }
+
+.light .guide-page [style*='#0ECB81'],
+.light .guide-page [style*='rgb(14, 203, 129)'],
+.light .guide-page .text-\[\#0ECB81\] { color: hsl(var(--guide-green)) !important; }
+
+.light .guide-page [style*='#B080FF'],
+.light .guide-page [style*='rgb(176, 128, 255)'],
+.light .guide-page .text-\[\#B080FF\] { color: hsl(var(--guide-purple)) !important; }
+
+.light .guide-page [style*='#2B80FF'],
+.light .guide-page [style*='rgb(43, 128, 255)'],
+.light .guide-page .text-\[\#5BA3FF\] { color: hsl(var(--guide-blue)) !important; }
+
+.light .guide-page [style*='#D89B00'],
+.light .guide-page [style*='rgb(216, 155, 0)'],
+.light .guide-page [style*='#F7931A'],
+.light .guide-page [style*='rgb(247, 147, 26)'],
+.light .guide-page .text-\[\#D89B00\] { color: hsl(var(--guide-orange)) !important; }
+
+/* 上面那批属性选择器按 rgb() 形式也会命中 SectionTitle 的竖条（它的 inline 是
+   background 不是 color）。竖条没有文字，命中无害，但显式还原以免将来误伤。 */
+.light .guide-page .guide-section-marker { color: inherit !important; }
+
+/* ============================================================
+   15 · 窄屏
+   ============================================================ */
+
+@media (max-width: 767px) {
+  .guide-page {
+    /* 手机主栏只有约 327px = 22 个汉字/行。1.8 的行距在这么窄的栏里会让段落
+       显得散（行内白相对行长的占比翻倍），收到 1.72；段间距同比收。 */
+    --lh: 1.72;
+    --rhythm: 26px;
+  }
+
+  /* 这里**不再**重复关 justify：容器查询已经按真实栏宽全权负责这件事。
+     再写一条按视口宽度的规则就是第二个真相来源，两者迟早会错位
+     （视口 768–1007px 时主栏只有 448–687px，正是原来那条 max-width:767px
+     漏掉的一整档）。 */
+
+  .guide-callout {
+    padding: var(--gap-flow) calc(var(--rhythm) * 0.6) var(--gap-flow) calc(var(--rhythm) * 0.7);
+  }
+}
+
+/* ============================================================
+   16 · 打印
+   ============================================================
+   :root 默认是**暗色**，浏览器打印默认不打背景——不做任何处理时 Cmd+P 出来是
+   白纸上的 #D6D8DC 文字，对比度约 1.15:1，等于空白页。这是一份 3 万多字的操作
+   手册，Cmd+P 是最自然的动作。
+   翻变量时 :root 和 .light 都要覆盖：用户可能停在任一主题上打印。 */
+@media print {
+  /* 不去翻 :root —— 翻不动，而且是全站副作用。index.css 把同名 token 写在
+     `@layer base { :root {…} .light {…} }` 里，Tailwind v3 的 @layer 是 PostCSS
+     伪层、会被展平成普通规则发射在 @tailwind base 的位置；本文件排在 bundle
+     最前（byte 133），同为 (0,1,0) 打平就输。
+     改成在 .guide-page 上重定义：靠**后代覆盖**而不是靠特异度赢——
+     .guide-page 是 :root 的后代，token 在这棵子树里天然是新值。 */
+  .guide-page {
+    --background: 0 0% 100%;
+    --foreground: 220 15% 12%;
+    --card: 0 0% 100%;
+    --border: 220 13% 78%;
+    --muted: 0 0% 96%;
+    --muted-foreground: 220 10% 32%;
+    --accent: 0 0% 96%;
+
+    --guide-ink: 220 15% 12%;
+    --guide-line: 220 13% 72%;
+    --measure: none;
+    background: #fff;
+    color: hsl(var(--foreground));
+  }
+
+  /* 收进作用域：裸写 header/aside 是全站打印规则，会波及别的页面。 */
+  .guide-page > header,
+  .guide-page aside { display: none !important; }
+
+  /* overflow: auto 在打印时会**裁掉**溢出且不产生滚动条——超出可视宽度的表格列
+     会静默丢失，读者不会知道少了东西。(0,2,0) 赢过 Tailwind 的 .overflow-x-auto。 */
+  .guide-doc .overflow-x-auto { overflow-x: visible; }
+  .guide-doc .overflow-x-auto > table { width: auto; min-width: 0; font-size: 9pt; }
+
+  :is(.guide-doc, .guide-doc section, .guide-doc .guide-stack) > * { max-width: none; }
+
+  .guide-doc :is(.guide-copy, .guide-callout, li) { orphans: 3; widows: 3; }
+
+  .guide-callout,
+  .guide-key-card,
+  .guide-flow-node,
+  table, tr                       { break-inside: avoid; }
+  .guide-section-title,
+  .guide-subtitle                 { break-after: avoid; }
+  .guide-doc > section            { break-before: page; }
+  .guide-doc > section:first-child { break-before: auto; }
+
+  /* 底色打不出来，语义靠描边与竖条保留；竖条加宽以补偿墨色缺失。 */
+  .guide-callout { border-width: 1.5pt; background: none; }
+  .guide-callout::before { width: 3pt; opacity: 1; }
+  .guide-key-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .guide-wordcount { color: hsl(var(--muted-foreground)); }
+}
+
+/* ============================================================
+   17 · 强制颜色 / 高对比 / 减少动效
+   ============================================================ */
+
+/* Windows 高对比度模式会强制覆盖 background / border-color / color / box-shadow。
+   此时 --amber 与 --red 的区别（描边色、底色、竖条色三个属性）**全部被覆盖**，
+   49 个强调块变成 49 个一模一样的框，「金=强调 / 红=警告」彻底失效；目录的
+   active 态也只剩 font-weight: 500。
+   forced-color-adjust: none 是在主动关闭用户的可访问性设置——**只豁免 2~3px 的
+   纯装饰竖条，绝不给文字或大面积背景**。 */
+@media (forced-colors: active) {
+  .guide-callout { border: 2px solid CanvasText; background: Canvas; }
+  .guide-callout::before { forced-color-adjust: none; width: 3px; opacity: 1; }
+  .guide-callout--amber::before { background: #F0B90B; }
+  .guide-callout--red::before   { background: #F6465D; }
+
+  .guide-section-marker { forced-color-adjust: none; }
+
+  .guide-toc-link.is-active {
+    background: Highlight;
+    color: HighlightText;
+    forced-color-adjust: none;
+  }
+  .guide-toc-link:hover { background: Canvas; text-decoration: underline; }
+
+  .guide-key-card { border: 1px solid CanvasText; }
+  .guide-flow-node--accent { border: 2px solid Highlight; }
+}
+
+@media (prefers-contrast: more) {
+  .guide-page { --guide-ink: var(--foreground); }
+  .guide-key-card__body,
+  .guide-toc-link,
+  .guide-toc-link--child   { color: hsl(var(--foreground)); }
+  .guide-wordcount         { color: hsl(var(--muted-foreground)); }
+  .guide-callout           { border-width: 2px; }
+  .guide-callout::before   { opacity: 1; width: 3px; }
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -246,7 +246,7 @@ export default function GuidePage() {
   };
 
   return (
-    <div className="min-h-screen bg-background text-foreground">
+    <div className="guide-page min-h-screen bg-background text-foreground">
       <header className="sticky top-0 z-20 bg-background/95 backdrop-blur-sm border-b border-border">
         <div className="px-6 py-3 max-w-[1280px] mx-auto flex items-center gap-3">
           <Button variant="ghost" size="sm" className="h-8 px-2" onClick={() => nav(-1)}>
@@ -320,10 +320,10 @@ export default function GuidePage() {
           </div>
         </aside>
 
-        <main ref={mainRef} className="space-y-12 min-w-0">
+        <main ref={mainRef} className="guide-doc min-w-0">
           <section id="s1" className="scroll-mt-20">
             <SectionTitle accent="#F0B90B">1. 系统定位</SectionTitle>
-            <div className="space-y-3">
+            <div className="guide-stack">
               <P>
                 无知之幕不是普通模拟盘，也不是单纯的交易日志。它是一套把<strong>训练、决策记录、复盘、规则演化、元监控</strong>接成闭环的交易系统。
               </P>
@@ -383,7 +383,7 @@ export default function GuidePage() {
               <P>
                 这套系统不是用来记录盈亏的，而是用来训练你的判断。它按五层闭环运转：底层信念生成规则，规则被带进每一笔交易现场，交易结束后被复盘诊断，最后由长期数据反过来检查——这整套方法，到底有没有让你变好。从上到下，越来越快、越来越具体；从下到上，真实数据一点点改写你最底层的信念。
               </P>
-              <div className="space-y-3">
+              <div className="guide-stack">
                 <P><strong>L1，原则层。</strong> 它保存系统最底层的信念：市场不可完全预测，但你可以靠小步试错、控制风险、持续校准慢慢往前走。它变化最慢，几年才动一次，是所有规则和动作的源头。</P>
                 <P><strong>L2，操作层。</strong> 它把 L1 的原则翻译成具体的规则和自查问题，回答的始终是同一件事：下次再遇到类似情况，我该问自己什么、该做什么、又绝对不能做什么。</P>
                 <P><strong>L3，现场决策层——也是整套系统的核心。</strong> 它不是单纯的记录，而是两种过程的结合：交易前，它带着 L2 的规则帮你做出这一笔的判断；与此同时，它又提前把未来复盘要用的数据钉下来——原始假设、置信度、情绪状态、认知偏差、风险暴露、执行依据。换句话说，它把本该盘后才做的诊断（L4），搬到了结果还没揭晓的这一刻。这正是它对抗事后美化的关键：当时写下的，才是当时的你，而不是那个已经知道结果、忍不住重新解释的你。</P>
@@ -1342,7 +1342,7 @@ P 不再一把手填，而是拆成三个更可回答的问题：<strong>「这�
             </section>
           </section>
 
-          <section id="s4" className="scroll-mt-20 bg-accent/30 border border-border rounded-lg p-6">
+          <section id="s4" className="scroll-mt-20">
             <SectionTitle accent="#B080FF">4. 复盘中心</SectionTitle>
             <P>复盘中心负责把交易样本加工成能力。它的正确使用顺序是：先补评价，再看预测误差与错误类型（并在结构成熟度里看哪些结构已经建好），再归类战役，再写规则，最后用元监控验证。</P>
 
@@ -1861,7 +1861,7 @@ P 不再一把手填，而是拆成三个更可回答的问题：<strong>「这�
           <section id="s7" className="scroll-mt-20">
             <SectionTitle accent="#F6465D">7. 数据边界与硬约束</SectionTitle>
             <P className="mb-3">这一节的每一条硬约束，本质上都在做同一件事：把<strong>下限</strong>钉死。它们不决定你能赚多少，只确保最坏情况发生时，你依然亏得起、活得下来——上限可以敞开，正是因为下限不会被击穿。<strong>别把它们读成“风控”或“防守”：恰恰相反，下限被焊死，才是你敢多下、敢让每个赢家跑得更肥的前提——纪律的终极目的是进攻，不是防守。</strong></P>
-            <div className="space-y-3">
+            <div className="guide-stack">
               <P><strong>主力单与对冲单必须分开理解。</strong> 主力单评估方向与机会质量；对冲单评估风险管理。把两者混在一起，会污染 R 倍数、胜率和错误类型统计。</P>
               <P><strong>最大亏损是 R 倍数的分母。</strong> 它表达的是本次愿意承受的最大错误成本，不应被事后修改成更好看的数字。</P>
               <P><strong>全仓是硬阻断。</strong> 系统训练阶段只允许逐仓。全仓会把单笔错误扩散到账户整体，违背“损失有界”的底层原则。</P>
@@ -1930,9 +1930,9 @@ P 不再一把手填，而是拆成三个更可回答的问题：<strong>「这�
                 “系统是否有效，不看你复盘写得多长，而看同一类错误是否越来越少。”
               </p>
             </div>
-            <div className="space-y-3">
+            <div className="guide-stack">
               <P>一周后看未评价是否清零；一个月后看高频错误是否收敛；两个月后看新规则是否真的降低对应错误频次。能做到这三点，系统就在工作。</P>
-              <div className="mt-8 flex flex-col items-center gap-2">
+              <div className="guide-outro flex flex-col items-center gap-2">
                 <Link to="/">
                   <button className="bg-[#F0B90B] hover:bg-[#F0B90B]/90 text-black h-10 px-6 rounded font-medium">
                     进入交易页 →
