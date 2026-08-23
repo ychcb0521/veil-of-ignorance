@@ -786,7 +786,7 @@ P 不再一把手填，而是拆成三个更可回答的问题：<strong>「这�
               </P>
               <div className="my-3 rounded bg-muted/60 px-3 py-2 font-mono text-[11px] leading-relaxed text-foreground">
                 平衡式：X₁ (S₁ − S̄) = X₂ (S₂ − S₁)　　　　旧腿在止损线上的垫子 = 新腿跌回止损线的亏损<br />
-                赔率式：X₂ = X₁ ÷ b ，　b = (S₂ − S₁) ÷ (S₁ − S̄)　　　1 ÷ (1 + b) = P₀ = (S₁ − S̄) ÷ (S₂ − S̄)<br />
+                赔率式：X₂ = X₁ ÷ b ，　b = (S₂ − S₁) ÷ (S₁ − S̄)　　　1 ÷ (1 + b) = 新腿占比 X₂ ÷ (X₁ + X₂)<br />
                 读　数：X₁ = 名义总仓位 ÷ 开仓均价　　　　（U 本位即「数量」；币本位 = 张数 × 面值 ÷ 开仓均价）
               </div>
               <ul className="list-disc pl-6 text-[14px] text-foreground/90 space-y-1">

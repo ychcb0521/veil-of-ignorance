@@ -141,7 +141,8 @@ export function AddSizingCalculator({ open, onClose, symbol }: Props) {
         {helpOpen && (
           <div data-testid="add-sizing-help-panel" className="border-b border-border bg-muted/30 px-4 py-2.5 font-mono text-[10px] leading-[1.7] text-muted-foreground">
             <div className="text-foreground">加仓量 = 垫 ÷ 险　险 = S₂ − S₁</div>
-            <div>A 浮盈垫 Y₁ = X₁(S₁−S̄)　→　X₂ = Y₁ ÷ 险 = X₁ ÷ b　b = 险/(S₁−S̄)　1/(1+b) = P₀</div>
+            <div>A 浮盈垫 Y₁ = X₁(S₁−S̄)　→　X₂ = Y₁ ÷ 险 = X₁ ÷ b　b = 险 / (S₁−S̄)</div>
+            <div className="font-sans">此处的 b 往回看（成本线 → 止损线），与盘面 P_gap 的 b（现价 → 目标）无关</div>
             <div>B 落袋垫 Y_G = G　　　　 →　X_G = Y_G ÷ 险（K_B = S₁ 时；把 K_B 拖低才产生敞口）</div>
             <div>对冲 @ S₁ = X₁ + X₂ (+ X_G，当 K_B = S₁)</div>
             <Link to="/guide#s3-1c" className="mt-1 inline-block font-sans text-primary hover:underline">完整说明 · 使用说明 3.4 →</Link>
@@ -216,7 +217,7 @@ export function AddSizingCalculator({ open, onClose, symbol }: Props) {
                 <Chips items={[
                   ['浮盈垫 Y₁', `${fmtUsd(cushion.cushion)} USD ÷ 险 ${fmtPx(cushion.riskDistance)}`],
                   ['b', cushion.b.toFixed(4)],
-                  ['P₀', fmtPct(cushion.p0)],
+                  ['新腿占比', fmtPct(cushion.p0)],
                   ['加仓后均价', fmtPx(cushion.blendedCostAfter)],
                 ]} />
               </>
