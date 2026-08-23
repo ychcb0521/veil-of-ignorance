@@ -266,11 +266,18 @@ export default function JournalCampaignClassifyPage() {
       bySymbol.set(key, bucket);
     }
     const map = new Map<string, SuggestedLegRole>();
+    // 初始对冲 A / B 认的是「委托价与触发价都压在主力开仓价上」。主力的计划价
+    // 和实际成交价常差一个滑点，而对冲是照实际成本线挂的——两个价都交给判据。
+    const filledEntryPrice = (journal: TradeJournal) => (
+      journal.trade_record_id ? tradeRecordMap.get(journal.trade_record_id)?.entryPrice ?? null : null
+    );
     for (const bucket of bySymbol.values()) {
-      for (const item of suggestLegRoles(filteredForSuggestions(bucket))) map.set(item.journalId, item);
+      for (const item of suggestLegRoles(filteredForSuggestions(bucket), { filledEntryPrice })) {
+        map.set(item.journalId, item);
+      }
     }
     return map;
-  }, [allCandidateJournals]);
+  }, [allCandidateJournals, tradeRecordMap]);
 
   const symbolScoped = useMemo(
     () => {

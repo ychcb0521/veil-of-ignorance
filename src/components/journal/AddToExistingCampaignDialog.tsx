@@ -19,6 +19,7 @@ import type {
   TradeCampaign,
   TradeJournal,
 } from '@/types/journal';
+import { filledEntryPriceFromItems } from '@/types/journalClassification';
 import type { ClassifiableItem, ClassifiableSuggestion } from '@/types/journalClassification';
 
 interface Props {
@@ -206,7 +207,10 @@ export function AddToExistingCampaignDialog({
   const target = sortedCampaigns.find(item => item.campaign.id === targetCampaignId) ?? null;
   const orphanCount = useMemo(() => orderedItems.filter(item => item.kind === 'orphanRecord').length, [orderedItems]);
   const suggestions = useMemo(() => {
-    const base: SuggestedLegRole[] = suggestLegRoles(orderedItems.flatMap(item => item.kind === 'journal' ? [item.journal] : []));
+    const base: SuggestedLegRole[] = suggestLegRoles(
+      orderedItems.flatMap(item => item.kind === 'journal' ? [item.journal] : []),
+      { filledEntryPrice: filledEntryPriceFromItems(orderedItems) },
+    );
     const baseMap = new Map<string, SuggestedLegRole>(base.map(item => [item.journalId, item] as const));
     const normalized: ClassifiableSuggestion[] = orderedItems.map((item, index) => {
       if (item.kind === 'orphanRecord') {

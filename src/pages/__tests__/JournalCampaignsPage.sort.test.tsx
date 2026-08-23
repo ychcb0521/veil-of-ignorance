@@ -148,10 +148,14 @@ vi.mock('@/contexts/TradingContext', () => ({
     balance: 100_000,
     positionsMap: {},
     priceMap: {},
+    // 一键结束用它当「没有成交也没有事件」时的兜底时间戳。
+    getEffectiveTime: () => Date.parse('2026-08-23T12:00:00.000Z'),
   }),
 }));
 
 vi.mock('@/lib/journalApi', () => ({
+  appendCampaignEvent: vi.fn(async () => undefined),
+  closeCampaign: vi.fn(async () => undefined),
   deleteCampaign: vi.fn(),
   getCampaignFullData: vi.fn(async (id: string) => ({
     campaign: [...campaigns, deletedCampaign].find(campaign => campaign.id === id),

@@ -27,7 +27,10 @@ import {
   tradeRecordOperationTime,
 } from '@/lib/objectiveOperationTime';
 import { getPositionNotionalUsd } from '@/lib/tradingSettlement';
-import { suggestLegRoles as suggestLegRolesHeuristic } from '@/lib/legRoleSuggestion';
+import {
+  suggestLegRoles as suggestLegRolesHeuristic,
+  type SuggestLegRolesOptions,
+} from '@/lib/legRoleSuggestion';
 import type { CognitiveAssetsDoc, CognitiveAssetCategory, CognitiveAssetSection } from '@/types/cognitiveAssets';
 import { MAIN_ADD_ROLES, usesDualHedgeSop } from '@/lib/strategyTemplates';
 import type {
@@ -3538,8 +3541,11 @@ export async function detachCampaignLegFromCampaign(
 
 export { suggestOrphanRecordRoles } from '@/lib/legRoleSuggestion';
 
-export function suggestLegRoles(journals: TradeJournal[]): SuggestedLegRole[] {
-  return suggestLegRolesHeuristic(journals);
+export function suggestLegRoles(
+  journals: TradeJournal[],
+  options?: SuggestLegRolesOptions,
+): SuggestedLegRole[] {
+  return suggestLegRolesHeuristic(journals, options);
 }
 
 // ============ Batch 18: Campaign Counterfactuals ============

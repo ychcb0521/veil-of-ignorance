@@ -27,6 +27,7 @@ import type {
   StrategyTemplate,
   SuggestedLegRole,
 } from '@/types/journal';
+import { filledEntryPriceFromItems } from '@/types/journalClassification';
 import type { ClassifiableItem, ClassifiableSuggestion } from '@/types/journalClassification';
 
 interface Props {
@@ -142,7 +143,12 @@ export function ClassifyAsNewCampaignDialog({ open, onOpenChange, items, onCreat
     [items],
   );
   const journalSuggestions = useMemo(
-    () => new Map(suggestLegRoles(ordered.flatMap(item => item.kind === 'journal' ? [item.journal] : [])).map(item => [item.journalId, item])),
+    () => new Map(suggestLegRoles(
+      ordered.flatMap(item => item.kind === 'journal' ? [item.journal] : []),
+      // 初始对冲 A / B 认的是「委托价与触发价都压在主力开仓价上」，
+      // 而对冲是照实际成本线挂的——把成交价一并交给判据。
+      { filledEntryPrice: filledEntryPriceFromItems(ordered) },
+    ).map(item => [item.journalId, item])),
     [ordered],
   );
   // 裸记录批量建议：止盈1 → 镜像止盈；同向里最后平掉的 → 主力。

@@ -22,13 +22,15 @@ import {
   type CampaignMetricColorMode,
   type CampaignMetricScatterGuide,
 } from '@/components/journal/CampaignOddsScatterPlot';
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Popover, PopoverAnchor, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { useAuth } from '@/contexts/AuthContext';
 import { useTradingContext } from '@/contexts/TradingContext';
 import { computeCurrentAccountEquity } from '@/lib/accountEquity';
 import { formatCampaignDisplayCode, resolveCampaignAccountName } from '@/lib/campaignCode';
 import {
+  appendCampaignEvent,
+  closeCampaign,
   deleteCampaign,
   getCampaignFullData,
   listAllCampaigns,
@@ -47,7 +49,17 @@ import {
 } from '@/lib/campaignAnalysis';
 import { fetchLegExitPriceCorrections, type LegExitPriceCorrections } from '@/lib/campaignLegExecution';
 import type { CampaignInitialRiskSource } from '@/lib/campaignAnalysis';
-import { campaignStatusFromRealizedPnl, computeCampaignRealizedPnl } from '@/lib/campaignRealizedPnl';
+import {
+  campaignStatusFromRealizedPnl,
+  computeCampaignRealizedPnl,
+  type CampaignRealizedPnl,
+} from '@/lib/campaignRealizedPnl';
+import {
+  BULK_CLOSE_STATUS_LABELS,
+  CLOSE_TIME_SOURCE_LABELS,
+  planBulkCampaignClose,
+  type BulkClosePlanItem,
+} from '@/lib/campaignBulkClose';
 import {
   computeCampaignExpectancies,
   formatArithmeticExpectancy,
@@ -82,6 +94,12 @@ type CampaignCardData = {
   campaign: TradeCampaign;
   legs: TradeJournal[];
   tradeRecords: TradeRecord[];
+  /**
+   * 本行显示的已实现盈亏口径，连同它的 settled / byLeg 一起留着。
+   * 一键结束直接用这一份，不重算——重算会丢掉后台补齐的平仓价校正，
+   * 于是确认框里读到的数和写进数据库的数会不一样。
+   */
+  settlement: CampaignRealizedPnl;
   profitCaptureRatio: number | null;
   initialExpectedMaxLoss: number;
   initialExpectedMaxDrawdownPct: number;
@@ -743,7 +761,7 @@ export default function JournalCampaignsPage() {
     }),
     [profile?.display_name, user?.email, user?.id],
   );
-  const { balance, positionsMap, priceMap } = useTradingContext();
+  const { balance, positionsMap, priceMap, getEffectiveTime } = useTradingContext();
   const currentAccountEquity = useMemo(
     () => computeCurrentAccountEquity(balance, positionsMap, priceMap),
     [balance, positionsMap, priceMap],
@@ -766,6 +784,9 @@ export default function JournalCampaignsPage() {
   const [deletedCampaigns, setDeletedCampaigns] = useState<TradeCampaign[]>([]);
   const [deletedBusyId, setDeletedBusyId] = useState<string | null>(null);
   const [expandedCampaignIds, setExpandedCampaignIds] = useState<Set<string>>(() => new Set());
+  const [bulkCloseOpen, setBulkCloseOpen] = useState(false);
+  const [bulkClosing, setBulkClosing] = useState(false);
+  const [includeUnsettled, setIncludeUnsettled] = useState(false);
 
   useEffect(() => {
     const next = parseCampaignListParams(location.search);
@@ -849,6 +870,7 @@ export default function JournalCampaignsPage() {
             campaign: reconciledCampaign,
             legs: details.legs,
             tradeRecords: details.tradeRecords,
+            settlement,
             profitCaptureRatio,
             initialExpectedMaxLoss,
             initialExpectedMaxDrawdownPct,
@@ -920,6 +942,29 @@ export default function JournalCampaignsPage() {
     () => rows.filter((row: CampaignCardData) => row.campaign.status === 'active').length,
     [rows],
   );
+
+  /**
+   * 「如果现在把进行中的战役全部结束，会发生什么」——确认框读它，写库也读它。
+   * 只收自己的战役：别人分享过来的行同样会显示在列表里，但不该被这里写掉。
+   */
+  const bulkClosePlan = useMemo(() => {
+    const candidates = rows
+      .filter(row => row.campaign.status === 'active' && row.campaign.user_id === user?.id)
+      .map(row => ({ campaign: row.campaign, legs: row.legs, settlement: row.settlement }));
+    // 兜底时钟：模拟时间尚未启动过时是 0，直接拿去当时间戳会盖出 1970 年。
+    const clock = getEffectiveTime();
+    return planBulkCampaignClose(candidates, clock > 0 ? clock : Date.now());
+  }, [rows, user?.id, getEffectiveTime]);
+
+  const settledPlan = useMemo(
+    () => bulkClosePlan.filter(item => item.verdict.kind === 'settled'),
+    [bulkClosePlan],
+  );
+  const unsettledPlan = useMemo(
+    () => bulkClosePlan.filter(item => item.verdict.kind === 'unsettled'),
+    [bulkClosePlan],
+  );
+  const bulkCloseTargets = includeUnsettled ? bulkClosePlan : settledPlan;
 
   const handleImportanceChange = async (
     event: MouseEvent<HTMLButtonElement>,
@@ -1171,6 +1216,78 @@ export default function JournalCampaignsPage() {
     });
   };
 
+  /**
+   * 一键结束。写的字段与单场「结束战役」对话框完全一致——两条路径必须产出同一种
+   * 数据形状，否则复盘导出、事件流、指标页能分辨出「这场是批量结的」。
+   *
+   * 串行而不是 Promise.all：appendCampaignEvent 是「读 actual_evolution → 整段写回」，
+   * 并发写同一行会互相覆盖；场数是个位数，串行的代价可以忽略。
+   * 单场失败不终止整批：已成功的照样落地，失败的原样留在列表里等下一次。
+   */
+  const handleBulkClose = async () => {
+    if (bulkClosing || bulkCloseTargets.length === 0) return;
+    setBulkClosing(true);
+    const closed = new Map<string, BulkClosePlanItem>();
+    const failures: string[] = [];
+    try {
+      for (const item of bulkCloseTargets) {
+        try {
+          await closeCampaign(item.campaign.id, {
+            status: item.verdict.status,
+            final_realized_pnl: item.realizedPnl,
+            final_r_multiple: item.finalRMultiple,
+            closed_at: item.closedAt,
+            // peak_unrealized_pnl / peak_drawdown 有意不写：批量路径手上没有逐笔权益曲线，
+            // 补 null 会把单场对话框此前算出的峰值抹掉。缺字段就让它保持原样。
+          });
+          await appendCampaignEvent(item.campaign.id, {
+            timestamp: item.closedAt,
+            event_type: 'campaign_closed',
+            leg_role: null,
+            journal_id: null,
+            trade_record_id: null,
+            pending_order_id: null,
+            price: null,
+            size_usdt: null,
+            notes: item.verdict.kind === 'unsettled'
+              ? '在战役列表一键结束；结束时仍有未结算的腿，按放弃处理'
+              : '在战役列表一键结束；状态由已实现盈亏推出',
+          });
+          closed.set(item.campaign.id, item);
+        } catch (error) {
+          failures.push(`${item.campaign.title}：${error instanceof Error ? error.message : String(error)}`);
+        }
+      }
+    } finally {
+      setBulkClosing(false);
+    }
+
+    if (closed.size > 0) {
+      setRows(prev => prev.map(row => {
+        const item = closed.get(row.campaign.id);
+        if (!item) return row;
+        return {
+          ...row,
+          campaign: {
+            ...row.campaign,
+            status: item.verdict.status,
+            closed_at: item.closedAt,
+            final_realized_pnl: item.realizedPnl ?? row.campaign.final_realized_pnl,
+            final_r_multiple: item.finalRMultiple,
+          },
+        };
+      }));
+    }
+
+    if (failures.length === 0) {
+      setBulkCloseOpen(false);
+      setIncludeUnsettled(false);
+      toast.success(`已结束 ${closed.size} 场战役`);
+      return;
+    }
+    toast.error(`${closed.size} 场已结束，${failures.length} 场失败 · ${failures[0]}`);
+  };
+
   const handleDeleteCampaign = async (
     event: MouseEvent<HTMLButtonElement>,
     campaign: TradeCampaign,
@@ -1284,6 +1401,7 @@ export default function JournalCampaignsPage() {
         campaign: { ...reconciledCampaign, deleted_at: null },
         legs: details.legs,
         tradeRecords: details.tradeRecords,
+        settlement,
         profitCaptureRatio,
         initialExpectedMaxLoss,
         initialExpectedMaxDrawdownPct,
@@ -1350,10 +1468,135 @@ export default function JournalCampaignsPage() {
 
       <main className="mx-auto max-w-[1600px] px-4 py-5 sm:px-6">
         {activeCount > 0 && (
-          <div className="mb-4 bg-[#F0B90B]/10 border border-[#F0B90B]/30 rounded px-3 py-2 text-[11px] text-[#F0B90B]">
-            你有 {activeCount} 个进行中的战役。每个战役都应该有明确的退出条件——不要让它无限期 active。
-          </div>
+          <button
+            type="button"
+            data-testid="active-campaigns-banner"
+            onClick={() => setBulkCloseOpen(true)}
+            title="一键结束进行中的战役"
+            className="mb-4 flex w-full items-center gap-2 rounded border border-[#F0B90B]/30 bg-[#F0B90B]/10 px-3 py-2 text-left text-[11px] text-[#F0B90B] transition-colors hover:border-[#F0B90B]/60 hover:bg-[#F0B90B]/20"
+          >
+            <span className="min-w-0 flex-1">
+              你有 {activeCount} 个进行中的战役。每个战役都应该有明确的退出条件——不要让它无限期 active。
+            </span>
+            <span className="shrink-0 rounded border border-[#F0B90B]/45 px-1.5 py-0.5 text-[10px] font-medium">
+              一键结束
+            </span>
+          </button>
         )}
+
+        {/* 一键结束的确认框：先把「每一场会变成什么」摊开，再动手写库。
+            这是一批不可撤销的写入，界面上读到的那一份就是随后落库的那一份。 */}
+        <Dialog
+          open={bulkCloseOpen}
+          onOpenChange={(open) => {
+            if (bulkClosing) return; // 写库过程中不许关掉，避免只结了一半却看不见进度
+            setBulkCloseOpen(open);
+            if (!open) setIncludeUnsettled(false);
+          }}
+        >
+          <DialogContent className="max-w-[560px]" data-testid="bulk-close-dialog">
+            <DialogHeader>
+              <DialogTitle className="text-[14px]">结束进行中的战役</DialogTitle>
+              <DialogDescription className="text-[11px] leading-[1.7]">
+                状态由本场已实现盈亏推出，不用手选；结束时间取该场最后一笔成交，不是此刻。
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="max-h-[46vh] space-y-1 overflow-y-auto pr-0.5">
+              {bulkClosePlan.length === 0 && (
+                <div className="rounded border border-border bg-muted/25 px-3 py-6 text-center text-[12px] text-muted-foreground">
+                  没有属于你的进行中战役
+                </div>
+              )}
+              {bulkClosePlan.map((item) => {
+                // 取成局部常量再判别：TS 只对 const 引用做别名收窄，
+                // 直接写 item.verdict.kind 会让下面读 unsettledLegCount 时丢掉类型。
+                const verdict = item.verdict;
+                const unsettled = verdict.kind === 'unsettled';
+                const included = !unsettled || includeUnsettled;
+                const pnl = item.realizedPnl;
+                const pnlTone = pnl == null || pnl === 0
+                  ? 'text-foreground/70'
+                  : pnl > 0 ? 'text-[#0ECB81]' : 'text-[#F6465D]';
+                return (
+                  <div
+                    key={item.campaign.id}
+                    data-testid="bulk-close-row"
+                    data-campaign-id={item.campaign.id}
+                    data-included={included}
+                    className={`rounded border px-2.5 py-1.5 ${included ? 'border-border bg-card' : 'border-dashed border-border/70 bg-muted/20 opacity-60'}`}
+                  >
+                    <div className="flex items-center gap-2 text-[11px]">
+                      <span className="min-w-0 flex-1 truncate text-foreground/90">{item.campaign.title}</span>
+                      <span className={`shrink-0 font-mono tabular-nums ${pnlTone}`}>
+                        {pnl == null ? '—' : `${pnl > 0 ? '+' : ''}${pnl.toFixed(2)}`}
+                      </span>
+                      <span className="shrink-0 text-muted-foreground/50">→</span>
+                      <span className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium ${STATUS_STYLES[verdict.status] || 'bg-muted text-muted-foreground'}`}>
+                        {BULK_CLOSE_STATUS_LABELS[verdict.status]}
+                      </span>
+                    </div>
+                    <div className="mt-0.5 flex items-center gap-1.5 text-[9px] text-muted-foreground/65">
+                      <span className="font-mono tabular-nums">
+                        {formatBeijingTime(Date.parse(item.closedAt)).slice(0, 16)}
+                      </span>
+                      <span className="text-muted-foreground/45">·</span>
+                      <span>{CLOSE_TIME_SOURCE_LABELS[item.closedAtSource]}</span>
+                      {verdict.kind === 'unsettled' && (
+                        <>
+                          <span className="text-muted-foreground/45">·</span>
+                          <span className="text-[#F0B90B]/85">
+                            {verdict.unsettledLegCount > 0
+                              ? `还有 ${verdict.unsettledLegCount} 条腿未结算`
+                              : '没有已结算的腿'}
+                          </span>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {unsettledPlan.length > 0 && (
+              <label
+                data-testid="bulk-close-include-unsettled"
+                className="flex cursor-pointer items-start gap-2 rounded border border-border/70 bg-muted/20 px-2.5 py-2 text-[11px] text-muted-foreground"
+              >
+                <input
+                  type="checkbox"
+                  className="mt-0.5 h-3 w-3 shrink-0 accent-[#F0B90B]"
+                  checked={includeUnsettled}
+                  onChange={(event) => setIncludeUnsettled(event.target.checked)}
+                />
+                <span>
+                  连同 {unsettledPlan.length} 场未结算的一并标记为「放弃」。
+                  <span className="text-muted-foreground/70">它们还有没结算完的腿，给不出盈利或亏损的定性。</span>
+                </span>
+              </label>
+            )}
+
+            <DialogFooter>
+              <button
+                type="button"
+                disabled={bulkClosing}
+                onClick={() => { setBulkCloseOpen(false); setIncludeUnsettled(false); }}
+                className="inline-flex h-8 items-center rounded border border-border bg-card px-3 text-[12px] hover:bg-accent disabled:opacity-50"
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                data-testid="bulk-close-confirm"
+                disabled={bulkClosing || bulkCloseTargets.length === 0}
+                onClick={() => void handleBulkClose()}
+                className="inline-flex h-8 items-center rounded bg-[#F0B90B] px-3 text-[12px] font-medium text-black transition-opacity hover:opacity-90 disabled:opacity-40"
+              >
+                {bulkClosing ? '结束中…' : `结束这 ${bulkCloseTargets.length} 场`}
+              </button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
 
         <section className="mb-5 overflow-hidden border-y border-border/80 bg-card/40">
           <div className="flex w-full flex-col">
