@@ -83,8 +83,8 @@ function SectionTitle({ children, accent }: { children: ReactNode; accent?: stri
   );
 }
 
-function SubTitle({ children }: { children: ReactNode }) {
-  return <h3 className="guide-subtitle">{children}</h3>;
+function SubTitle({ children, anchor }: { children: ReactNode; anchor?: boolean }) {
+  return <h3 className={`guide-subtitle${anchor ? ' guide-subtitle--anchor' : ''}`}>{children}</h3>;
 }
 
 function P({ children, className = '' }: { children: ReactNode; className?: string }) {
@@ -418,7 +418,7 @@ export default function GuidePage() {
             <P>如果只记一条路径，就按“筛掉坏结构 → 记录一笔决策 → 评价一笔结果 → 看见预测误差与错误类型 → 归类战役 → 写入规则 → 用元监控验证”执行。</P>
 
             <section id="s2-1" className="scroll-mt-20">
-              <SubTitle>2.1 交易训练闭环</SubTitle>
+              <SubTitle anchor>2.1 交易训练闭环</SubTitle>
               <div className="bg-card border border-border rounded p-6">
                 <FlowNode>选择历史时间与标的</FlowNode>
                 <FlowArrow />
@@ -438,7 +438,7 @@ export default function GuidePage() {
             </section>
 
             <section id="s2-2" className="scroll-mt-20">
-              <SubTitle>2.2 每周复盘闭环</SubTitle>
+              <SubTitle anchor>2.2 每周复盘闭环</SubTitle>
               <ol className="list-decimal pl-6 text-[14px] text-foreground/90 space-y-1">
                 <li>打开错题集，优先处理“未评价”交易；评价完成后，重点看快照预测与最终结果之间的误差。</li>
                 <li>查看错误类型目录，也查看空仓观望、小机会仓位、踏空高盈亏比结构、edge 源头的盈亏同源、过程纠结度与胜率校准是否出现系统偏差。</li>
@@ -457,7 +457,7 @@ export default function GuidePage() {
             <P>交易页负责训练和记录，所有后续复盘都依赖这里产生的数据。关键不是多点几笔单，而是每次出手前把判断写清楚。</P>
 
             <section id="s3-0" className="scroll-mt-20">
-              <SubTitle>3.1 交易模式选择</SubTitle>
+              <SubTitle anchor>3.1 交易模式选择</SubTitle>
               <P>
                 交易页<strong>顶部 Header</strong>（标的选择器与右侧「复盘中心」之间）有一对开关：<strong>决策记录</strong> 与 <strong>直接交易</strong>。这是进入交易页后你做的第一个决定，也是整套系统里最大的一个分叉——它决定本次会话产生的数据是否进入复盘体系。系统默认 <strong>直接交易</strong>，需要训练时手动切换到决策记录。紧挨着它右侧那个极小、近乎隐形的符号，是另一组「<strong>同步 / 隔离</strong>」<strong>时间模式</strong>开关（点开才展开，详见 3.2）——那是切换币种时的时间推进方式，别和这里的交易模式混为一谈。
               </P>
@@ -508,7 +508,7 @@ export default function GuidePage() {
             </section>
 
             <section id="s3-1" className="scroll-mt-20">
-              <SubTitle>3.2 时光机与行情</SubTitle>
+              <SubTitle anchor>3.2 时光机与行情</SubTitle>
               <P>
                 时光机是交易页的核心训练能力。它把真实历史行情切回到你指定的某一刻，并用“模拟时钟”继续向前播放。你只能看到当时已经发生的数据，看不到未来。
               </P>
@@ -624,7 +624,7 @@ export default function GuidePage() {
             </section>
 
             <section id="s3-1b" className="scroll-mt-20">
-              <SubTitle>3.3 P_gap 优势边际</SubTitle>
+              <SubTitle anchor>3.3 P_gap 优势边际</SubTitle>
               <P>
                 P_gap 是交易页右栏最上方的常驻仪表，<strong>默认完整显示</strong>。它只回答一个问题：<strong>你自认的胜率，比市场白送的那一份高出多少。</strong>它只读不写——不落库、不记历史、不做校准统计、不给仓位建议，读数即全部功能。
               </P>
@@ -755,7 +755,7 @@ P 不再一把手填，而是拆成三个更可回答的问题：<strong>「这�
             </section>
 
             <section id="s3-1c" className="scroll-mt-20">
-              <SubTitle>3.4 宽框架与严框架</SubTitle>
+              <SubTitle anchor>3.4 宽框架与严框架</SubTitle>
               <P>标的入选走哪套框架，决定了这笔仓位后续的全部待遇——<strong>建仓之前就要定，不在持仓中途换</strong>。</P>
               <div className="overflow-x-auto">
                 <table className="w-full text-[11px] my-3 border border-border rounded overflow-hidden">
@@ -825,7 +825,7 @@ P 不再一把手填，而是拆成三个更可回答的问题：<strong>「这�
             </section>
 
             <section id="s3-2" className="scroll-mt-20">
-              <SubTitle>3.5 下单前快照</SubTitle>
+              <SubTitle anchor>3.5 下单前快照</SubTitle>
               <P>开仓快照是系统的核心记录点。它固定“下单前的你”看到什么、相信什么、愿意亏多少、处在什么心态。但这里有一个必须先讲清的底层原则：<strong>主力单与对冲单不是同一类决策，不能用同一套问题去问。</strong> 主力单是在分布右尾下注，核心是“这次机会为什么值得押”；对冲单是在分布左尾买保险，核心是“什么时候裸拿已经变成负期望，应该让保险接管”。</P>
 
               <SubTitle>零号关 · Stop Doing List：开仓前先过这张「我决心不做」</SubTitle>
@@ -1130,7 +1130,7 @@ P 不再一把手填，而是拆成三个更可回答的问题：<strong>「这�
             </section>
 
             <section id="s3-3" className="scroll-mt-20">
-              <SubTitle>3.6 平仓评价复盘</SubTitle>
+              <SubTitle anchor>3.6 平仓评价复盘</SubTitle>
               <P>决策记录模式下，平仓会打开一个与开仓快照同规格的<strong>居中评价弹窗</strong>，不完成评价不能离开。评价的重心不是重新讲一遍故事，而是把快照时的预测和最终实际结果对上：预设的证伪信号兑现没有，结构破坏信号出现没有，进场时钉下的置信度有没有被验证。</P>
               <P>弹窗按这条主线展开：<strong>事实模块</strong>逐条核验快照里押的<strong>反 / 止 / 结构 / 置信</strong>四条腿 → <strong>决策质量</strong>（入场 / 持仓 / 离场三栏）→ 系统自动归纳<strong>结构 × 结果四象限</strong> → <strong>路径</strong>（滚仓 / 镜像止盈 + 交易主动权）→ <strong>体检模块</strong>（过程纠结度 / 小机会仓位记账 / 踏空高盈亏比结构）→ <strong>反对者陈述追踪</strong>（条件触发）→ <strong>情绪侧七问</strong>。先对账，再判读，最后翻动机，避免复盘变成事后重新叙述。</P>
               <P><strong>机会质量评估</strong>会在平仓时再输入当时可见的 b 与 d，并自动计算 Q。它默认带入开仓判断，但允许你根据复盘修正并保存；评估要回到当时的信息集，不能用最终盈亏倒推一个完美预测。</P>
@@ -1331,7 +1331,7 @@ P 不再一把手填，而是拆成三个更可回答的问题：<strong>「这�
             </section>
 
             <section id="s3-4" className="scroll-mt-20">
-              <SubTitle>3.7 持仓与历史</SubTitle>
+              <SubTitle anchor>3.7 持仓与历史</SubTitle>
               <P>底部历史区用于检查执行结果。重点关注三类记录：未评价交易、仓位历史记录、平仓方式。</P>
               <ul className="list-disc pl-6 text-[14px] text-foreground/90 space-y-1">
                 <li><strong>未评价交易</strong>：优先补齐。已平仓未评价会硬阻塞下一次开仓。</li>
@@ -1347,7 +1347,7 @@ P 不再一把手填，而是拆成三个更可回答的问题：<strong>「这�
             <P>复盘中心负责把交易样本加工成能力。它的正确使用顺序是：先补评价，再看预测误差与错误类型（并在结构成熟度里看哪些结构已经建好），再归类战役，再写规则，最后用元监控验证。</P>
 
             <section id="s4-1" className="scroll-mt-20">
-              <SubTitle>4.1 错题集</SubTitle>
+              <SubTitle anchor>4.1 错题集</SubTitle>
               <P>错题集的单位不是<strong>一笔笔交易</strong>，也不是抽象的"错误类型代码"，而是<strong>开仓快照与平仓评价里每一个具体问题的历史答案分布</strong>。它要回答的是：所有历史主力单加起来，<strong>这道题我都填过些什么</strong>，分布在哪几格，命中过几次坑。</P>
               <P>它一共有 <strong>4 个 tab</strong>：</P>
               <KeyGrid>
@@ -1395,7 +1395,7 @@ P 不再一把手填，而是拆成三个更可回答的问题：<strong>「这�
             </section>
 
             <section id="s4-2" className="scroll-mt-20">
-              <SubTitle>4.2 结构成熟度</SubTitle>
+              <SubTitle anchor>4.2 结构成熟度</SubTitle>
               <P>结构成熟度和错题集用的是<strong>同一份预测误差</strong>，只是换一个切面：错题集按“错误<strong>种类</strong>”切，这里按“<strong>结构</strong>（edge 源头）”切。它回答的是另一个问题——<strong>哪一个结构我已经建好</strong>：误差低、而且稳，稳到可以拿它当过滤器去捕捉匹配的标的。</P>
               <P><strong>你押的从来不是一个数，是一个结构闭环。</strong>期望值 <strong>E = P×b −(1−P)</strong> 只是这个闭环在“胜率×赔率”这一个切面上的标量投影——它必要，但只占一部分。结构本身是一套自洽的交易闭环：<strong>正</strong>（最大概率的正向走势预期）、<strong>反</strong>（与正向预期不符的判断准则）、<strong>止</strong>（什么具体信号一出就意味着正向预期开始失效）。这三件事，正是开仓快照里 <strong>正 / 反 / 止</strong> 三问在当时写下的。所以<strong>成熟 = 闭环成熟</strong>：不只胜率要校准，止损也要走“前门”。</P>
               <P>这正是你给自己定的纪律的正面：<strong>纪律就是“建模”，从混沌中抽象出结构</strong>。它是错题集那条“错误 → 拦截规则”负向回路的<strong>正向镜像</strong>——负向回路把反复出现的错误升级成规则去<strong>封杀</strong>；这里把误差收敛的结构毕业成模型去<strong>复用</strong>。一个收口，一个放大。</P>
@@ -1457,7 +1457,7 @@ P 不再一把手填，而是拆成三个更可回答的问题：<strong>「这�
             </section>
 
             <section id="s4-3" className="scroll-mt-20">
-              <SubTitle>4.3 交易战役</SubTitle>
+              <SubTitle anchor>4.3 交易战役</SubTitle>
               <P>战役是比单笔交易更高一层的复盘单位。一次战役由同一标的、同一主方向、明确开始结束、多个 leg 组成。每场战役都会生成一个全局唯一的<strong>战役编号</strong>；编号与生成过程绑定，不会因标题、备注或规则文字被修改而改变。</P>
               <SubTitle>Legs 的认知与风险分工</SubTitle>
               <P>交易战役里的每一个 leg 都不是对价格涨跌的情绪表达，而是在不同证据阶段购买优势、限制误差或回收成本。判断一个动作是否合理，应先问它承担了什么认知与风险职能，而不是只看动作之后价格是否上涨。</P>
@@ -1773,7 +1773,7 @@ P 不再一把手填，而是拆成三个更可回答的问题：<strong>「这�
             </section>
 
             <section id="s4-5" className="scroll-mt-20">
-              <SubTitle>4.5 规则</SubTitle>
+              <SubTitle anchor>4.5 规则</SubTitle>
               <P>规则不是独立写出来的口号，而是复盘系统的输出。它来自已发生的交易错误，并被写回下一次开仓前的 checklist。</P>
               <P>规则生成有四条来源：</P>
               <div className="overflow-x-auto">
