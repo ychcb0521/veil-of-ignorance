@@ -61,8 +61,16 @@ function readShadowTs(fullKey: string): number {
   }
 }
 
+/**
+ * 影子戳只许前进，不许后退。
+ * 它表达的是「本地这份内容至少和某个时刻的远端一样新」，而推送完成的顺序
+ * 与入队顺序未必一致（防抖 + 重试 + flush 三条路都能乱序），取 max 才不会
+ * 因为一次迟到的回调把已经更新的判断打回去。
+ */
 function writeShadowTs(fullKey: string, ts: number): void {
   try {
+    const current = readShadowTs(fullKey);
+    if (ts <= current) return;
     localStorage.setItem(shadowKey(fullKey), String(ts));
   } catch {
     /* quota 满时影子丢失只影响下次比较，不影响数据本身 */
@@ -77,9 +85,17 @@ function isMissingSimStateTableError(error: { code?: string; message?: string } 
     || (/user_sim_state/i.test(message) && /schema cache|could not find|does not exist/i.test(message));
 }
 
-type PendingPush = { value: unknown; timer: ReturnType<typeof setTimeout> };
+type PendingPush = { value: unknown; gen: number; timer: ReturnType<typeof setTimeout> };
 
 const pending = new Map<string, PendingPush>();
+/**
+ * 每个键的版本号。入队即 +1，推送带着自己的版本出发。
+ * 出发前若发现已经不是最新版本，就整笔作废——**尤其是失败后的那次重试**：
+ * 它手里攥的是 3 秒前的旧值，却会盖上一个新的 updated_at，
+ * 于是云端内容倒退回旧版本，下一次 hydrate 再用这个「更新的」旧值把本地
+ * 那笔新成交抹掉。用户看到的就是「删过历史成交、又交易了一笔，那笔没了」。
+ */
+const generation = new Map<string, number>();
 let tableMissing = false;
 let flushHooksInstalled = false;
 
@@ -94,8 +110,10 @@ export function logicalKeyOf(fullKey: string, userId: string): string | null {
 /** 单键负载超过这个大小就告警：成交历史累积到一定量后可能触到请求体上限。 */
 const LARGE_PAYLOAD_WARN_BYTES = 4 * 1024 * 1024;
 
-async function pushNow(userId: string, key: string, value: unknown, retry = true): Promise<void> {
+async function pushNow(userId: string, key: string, value: unknown, gen: number, retry = true): Promise<void> {
   if (tableMissing) return;
+  // 已经被更新的版本取代 → 这一笔（含它的重试）整个作废，绝不把旧值写上云。
+  if ((generation.get(key) ?? 0) !== gen) return;
   try {
     const approxBytes = JSON.stringify(value)?.length ?? 0;
     if (approxBytes > LARGE_PAYLOAD_WARN_BYTES) {
@@ -104,6 +122,10 @@ async function pushNow(userId: string, key: string, value: unknown, retry = true
         + '接近单次请求上限，若推送开始失败需要改为分片存储',
       );
     }
+    // 与影子戳同源：这一行的 updated_at 必须是我们**自己**记下来的那个时刻，
+    // 否则本地永远比远端「旧」1.5 秒（入队时刻 vs 推送时刻），
+    // 「本地更新的操作不会被回滚」那道护栏就从来不会生效。
+    const updatedAt = new Date().toISOString();
     const { error } = await supabase
       .from('user_sim_state' as never)
       .upsert(
@@ -111,10 +133,15 @@ async function pushNow(userId: string, key: string, value: unknown, retry = true
           user_id: userId,
           key,
           value: value as never,
-          updated_at: new Date().toISOString(),
+          updated_at: updatedAt,
         } as never,
         { onConflict: 'user_id,key' },
       );
+    if (!error) {
+      // 推送成功：本地内容至少和这一行一样新。注意即使期间又有更新的本地写入
+      // （gen 已经变了）也要写——那时本地只会更新，不会更旧。
+      writeShadowTs(storageKeyFor(key, userId), Date.parse(updatedAt));
+    }
     if (error) {
       if (isMissingSimStateTableError(error)) {
         tableMissing = true;
@@ -122,14 +149,14 @@ async function pushNow(userId: string, key: string, value: unknown, retry = true
       } else if (retry) {
         // 瞬时网络抖动不该让这一笔永远上不了云：隔 3 秒重试一次
         console.warn('[simStateSync] 推送失败，3 秒后重试：', error.message);
-        setTimeout(() => { void pushNow(userId, key, value, false); }, 3_000);
+        setTimeout(() => { void pushNow(userId, key, value, gen, false); }, 3_000);
       } else {
         console.warn('[simStateSync] 推送重试仍失败：', error.message);
       }
     }
   } catch (e) {
     if (retry) {
-      setTimeout(() => { void pushNow(userId, key, value, false); }, 3_000);
+      setTimeout(() => { void pushNow(userId, key, value, gen, false); }, 3_000);
     } else {
       console.warn('[simStateSync] 推送异常：', e);
     }
@@ -139,7 +166,7 @@ async function pushNow(userId: string, key: string, value: unknown, retry = true
 function flushAllPending(userId: string): void {
   for (const [key, entry] of pending) {
     clearTimeout(entry.timer);
-    void pushNow(userId, key, entry.value);
+    void pushNow(userId, key, entry.value, entry.gen);
   }
   pending.clear();
 }
@@ -161,6 +188,11 @@ function installFlushHooks(userId: string): void {
 export function queueSimStatePush(userId: string, key: string, value: unknown): void {
   if (!userId || EXCLUDED_KEYS.has(key) || tableMissing) return;
   installFlushHooks(userId);
+  // 入队即占一个新版本号：在此之前出发的推送与重试全部作废。
+  const gen = (generation.get(key) ?? 0) + 1;
+  generation.set(key, gen);
+  // 先按入队时刻记一次，保证「写了但还没推上去」的本地值也受护栏保护；
+  // 推送成功后会再对齐到那一行真正的 updated_at（writeShadowTs 只进不退）。
   writeShadowTs(storageKeyFor(key, userId), Date.now());
 
   const existing = pending.get(key);
@@ -168,9 +200,10 @@ export function queueSimStatePush(userId: string, key: string, value: unknown): 
   const delay = SLOW_SYNC_KEYS.has(key) ? SLOW_DEBOUNCE_MS : FAST_DEBOUNCE_MS;
   pending.set(key, {
     value,
+    gen,
     timer: setTimeout(() => {
       pending.delete(key);
-      void pushNow(userId, key, value);
+      void pushNow(userId, key, value, gen);
     }, delay),
   });
 }
@@ -261,6 +294,7 @@ function backfillLocalOnlyKeys(userId: string, remoteKeys: Set<string>): void {
 export function __resetSimStateSyncForTests(): void {
   for (const entry of pending.values()) clearTimeout(entry.timer);
   pending.clear();
+  generation.clear();
   tableMissing = false;
   flushHooksInstalled = false;
 }
