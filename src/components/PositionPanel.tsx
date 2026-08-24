@@ -491,6 +491,39 @@ export function PositionPanel({
 
   const fundingRecords = tradeHistory.filter(t => t.action === 'FUNDING');
   const tradeRecords = tradeHistory.filter(t => t.action === 'CLOSE' || t.action === 'LIQUIDATION');
+  /**
+   * 历史类表格原本一律 `.slice(0, 100)` 硬截断，而 tab 上的 showCount 是 false——
+   * 超过 100 笔之后更早的记录在界面上**永久不可见，且没有任何提示**。
+   * 「仓位历史记录部分有遗漏」最廉价、也最该先排除的一种解释就是它：
+   * 记录都在，只是看不到。截断保留（几千行一次性渲染会卡），但必须说出来并给出口。
+   * 说明做成 <tfoot> 而不是表格的兄弟节点：三个表都在 `cond ? (...) : (...)` 里，
+   * 兄弟节点会让分支变成两个根元素，得再包一层 fragment，改动面反而更大。
+   */
+  const HISTORY_PAGE = 100;
+  const [historyExpanded, setHistoryExpanded] = useState(false);
+  const capRows = <T,>(rows: T[]): T[] => (historyExpanded ? rows : rows.slice(0, HISTORY_PAGE));
+  const TruncationFoot = ({ total, cols }: { total: number; cols: number }) => (
+    historyExpanded || total <= HISTORY_PAGE ? null : (
+      <tfoot>
+        <tr>
+          <td
+            colSpan={cols}
+            data-testid="history-truncation-note"
+            className="px-3 py-2 text-center text-[11px] text-gray-500 dark:text-[#848e9c] border-t border-gray-100 dark:border-[#2b3139]/50"
+          >
+            仅显示最近 {HISTORY_PAGE} 条，共 {total} 条 ——
+            <button
+              type="button"
+              onClick={() => setHistoryExpanded(true)}
+              className="ml-1 text-[#F0B90B] hover:underline"
+            >
+              显示全部
+            </button>
+          </td>
+        </tr>
+      </tfoot>
+    )
+  );
 
   const historySymbols = useMemo(() => {
     const syms = new Set<string>();
@@ -544,9 +577,9 @@ export function PositionPanel({
     { key: 'positions', label: '仓位', count: mergedPositions.length, showCount: true },
     { key: 'pending', label: '当前委托', count: allOrders.length, showCount: true },
     { key: 'history', label: '历史委托', count: 0, showCount: false },
-    { key: 'trades', label: '历史成交', count: tradeRecords.length, showCount: false },
-    { key: 'funding', label: '资金流水', count: fundingRecords.length, showCount: false },
-    { key: 'positionHistory', label: '仓位历史记录', count: 0, showCount: false },
+    { key: 'trades', label: '历史成交', count: tradeRecords.length, showCount: true },
+    { key: 'funding', label: '资金流水', count: fundingRecords.length, showCount: true },
+    { key: 'positionHistory', label: '仓位历史记录', count: tradeRecords.length, showCount: true },
     { key: 'bots', label: '机器人', count: 0, showCount: false },
     { key: 'assets', label: '资产', count: 0, showCount: false },
   ];
@@ -1254,7 +1287,7 @@ export function PositionPanel({
                   </tr>
                 </thead>
                 <tbody>
-                  {tradeRecords.slice().reverse().slice(0, 100).map(t => {
+                  {capRows(tradeRecords.slice().reverse()).map(t => {
                     const ts = t.closeTime || t.openTime;
                     const isLong = t.side === 'LONG';
                     // Closing a LONG = sell; closing a SHORT = buy
@@ -1279,6 +1312,7 @@ export function PositionPanel({
                     );
                   })}
                 </tbody>
+                <TruncationFoot total={tradeRecords.length} cols={6} />
               </table>
             )}
           </div>
@@ -1308,7 +1342,7 @@ export function PositionPanel({
                   </tr>
                 </thead>
                 <tbody>
-                  {tradeRecords.slice().reverse().slice(0, 100).map(t => {
+                  {capRows(tradeRecords.slice().reverse()).map(t => {
                     const tradeQuoteLabel = isCoinSettled(t) ? 'USD' : 'USDT';
                     const notionalUsd = t.notionalUsd ?? getPositionNotionalUsd(t.symbol, t, t.entryPrice);
                     // ROE 分母 = 初始保证金 = 名义@开仓/杠杆（固定、不含追加），与开仓中持仓同口径。
@@ -1396,6 +1430,7 @@ export function PositionPanel({
                     );
                   })}
                 </tbody>
+                <TruncationFoot total={tradeRecords.length} cols={12} />
               </table>
             )}
           </div>
@@ -1418,7 +1453,7 @@ export function PositionPanel({
                   </tr>
                 </thead>
                 <tbody>
-                  {fundingRecords.slice().reverse().slice(0, 100).map(t => (
+                  {capRows(fundingRecords.slice().reverse()).map(t => (
                     <tr key={t.id} className="border-b border-gray-100 dark:border-[#2b3139]/50">
                       <td className="px-3 py-2 text-gray-500 dark:text-[#848e9c]">
                         {new Date(t.openTime).toLocaleString()}
@@ -1437,6 +1472,7 @@ export function PositionPanel({
                     </tr>
                   ))}
                 </tbody>
+                <TruncationFoot total={fundingRecords.length} cols={6} />
               </table>
             )}
           </div>
