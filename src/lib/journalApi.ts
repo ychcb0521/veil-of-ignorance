@@ -1594,7 +1594,7 @@ function getTradeRecordMapForUser(userId: string) {
   return buildTradeRecordLookup(getTradeRecordsForUser(userId));
 }
 
-function deriveCampaignPatchFromLegs(
+export function deriveCampaignPatchFromLegs(
   currentCampaign: TradeCampaign,
   legs: TradeJournal[],
   tradeRecords: TradeRecord[],
@@ -1626,14 +1626,37 @@ function deriveCampaignPatchFromLegs(
   const closeTimes = ordered
     .map(leg => leg.trade_record_id ? tradeRecordMap.get(leg.trade_record_id)?.closeTime ?? null : null)
     .filter((time): time is number => typeof time === 'number');
-  const closedAt = allHaveTradeRecord && closeTimes.length === ordered.length
-    ? toIso(Math.max(...closeTimes))
-    : null;
+
+  /**
+   * 能不能**正面**算出这场的收盘时刻：每条腿都挂了成交 id，且每一条都能在
+   * 本地成交历史里查到 closeTime。
+   *
+   * 关键在于这个函数的结果会被 healCampaignSummarySnapshots 直接 UPDATE 回库，
+   * 而 tradeRecords 来自 localStorage 的 trade_history —— 那是**缓存，不是真相**。
+   * 用户在「历史成交」里删过数据、换了浏览器、云端水化还没跑完、或者腿上存的是
+   * 仓位 id 而对应记录已被清理，这里都会查不到。
+   *
+   * 以前查不到就直接写 closed_at = null / status = 'active'，于是每打开一次战役列表，
+   * getCampaignFullData → heal → UPDATE 就把一场早已打完的战役**永久改回「进行中」**。
+   * 这既是「已结束战役时不时冒出来」的成因，也是「一键结束点了没作用」的成因：
+   * 结束确实写进去了，下一次读列表又被 heal 改了回来。
+   *
+   * 查不到只意味着「算不出」，绝不等于「没结束」。算不出时一律保留库里已有的值。
+   * 代价：若用户事后拆走一条腿让战役真的不再完整，旧的 closed_at 会残留，
+   * 需要显式重新结束——比起静默抹掉用户已确认的结束状态，这个方向是对的。
+   */
+  const canResolveCloseTimes = allHaveTradeRecord && closeTimes.length === ordered.length;
+  const computedClosedAt = canResolveCloseTimes ? toIso(Math.max(...closeTimes)) : null;
+  const closedAt = computedClosedAt ?? currentCampaign.closed_at ?? null;
 
   // 状态与金额同源：「亏损结束」配一个绿色正数在构造上不再可能。
-  let status: CampaignStatus = 'active';
-  if (!ordered.some(leg => leg.trade_record_id == null)) {
-    status = campaignStatusFromRealizedPnl({ total: settlement.total, settled: Boolean(closedAt) }, closedAt);
+  let status: CampaignStatus;
+  if (canResolveCloseTimes) {
+    status = campaignStatusFromRealizedPnl({ total: settlement.total, settled: true }, computedClosedAt);
+  } else if (currentCampaign.closed_at) {
+    status = currentCampaign.status;   // 已结束的一律保留，不因本地查不到记录而降级
+  } else {
+    status = 'active';                 // 本来就没结束
   }
 
   return {
@@ -1643,8 +1666,11 @@ function deriveCampaignPatchFromLegs(
     status,
     initial_main_size_usdt: mainOpen?.pre_position_size ?? currentCampaign.initial_main_size_usdt,
     initial_leverage: mainOpen?.leverage ?? currentCampaign.initial_leverage,
-    final_realized_pnl: allHaveTradeRecord ? totalPnl : null,
-    final_r_multiple: allHaveTradeRecord && totalPlannedMaxLoss > 0 ? totalPnl / totalPlannedMaxLoss : null,
+    // 同上：算不出时保留落库值，不要用 null 把已经对过账的金额抹掉。
+    final_realized_pnl: allHaveTradeRecord ? totalPnl : (currentCampaign.final_realized_pnl ?? null),
+    final_r_multiple: allHaveTradeRecord && totalPlannedMaxLoss > 0
+      ? totalPnl / totalPlannedMaxLoss
+      : (currentCampaign.final_r_multiple ?? null),
   };
 }
 
@@ -1784,6 +1810,15 @@ async function healCampaignSummarySnapshots(
   const settlement = computeCampaignRealizedPnl(campaign, legs, tradeRecords);
   if (!settlement.settled) return campaign;
   const patch = deriveCampaignPatchFromLegs(campaign, legs, tradeRecords);
+
+  /**
+   * 纵深防御。这是一次**写在读路径上**的自愈：每打开一次战役列表，每一场都会走到这里。
+   * 自愈的职责是把缺的补上、把陈的刷新，**不包括把用户已确认的结束状态抹掉**。
+   * derive 已经不再降级，这里再钉一道——将来谁改 derive 也不会静默地把库改坏。
+   */
+  if (campaign.closed_at && (patch.closed_at == null || patch.status === 'active')) {
+    return campaign;
+  }
   if (!campaignPatchChanged(campaign, patch)) return campaign;
 
   const { data, error } = await supabase
