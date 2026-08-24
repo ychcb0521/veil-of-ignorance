@@ -130,6 +130,31 @@ describe('AddSizingCalculator', () => {
     expect(screen.getByTestId('add-sizing-total-hedge')).toHaveTextContent('72.27');
   });
 
+  it('B 账本一开，头条是要下的那一单的总量 X₂ + X_G，不是单独的 X_G', () => {
+    // X_G 单独看没有下单意义：真正提交的是 A + B 的合计。
+    renderCalc();
+    type('add-sizing-s1', '130');
+    type('add-sizing-g', '1.2');
+
+    const total = screen.getByTestId('add-sizing-total-add');
+    expect(total).toHaveTextContent('合计加仓 X₂ + X_G');
+    expect(total).toHaveTextContent('53.93');            // 38.33 + 15.6
+    expect(total).toHaveTextContent('38.33');            // 拆解仍在，A
+    expect(total).toHaveTextContent('15.6');             // 拆解仍在，B
+
+    // 头条排在 X_G 之前——总量先入眼
+    const xg = screen.getByTestId('add-sizing-x2b-out');
+    expect(total.compareDocumentPosition(xg) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('A 账本无解时退回以 X_G 为头条，不显示一个算不出来的合计', () => {
+    renderCalc();
+    type('add-sizing-s1', '100');   // 没越过均价 → A 无解
+    type('add-sizing-g', '1.2');
+    expect(screen.queryByTestId('add-sizing-total-add')).not.toBeInTheDocument();
+    expect(screen.getByTestId('add-sizing-x2b-out')).toBeInTheDocument();
+  });
+
   it('K_B 拖到 S₁ 之下则 B 腿自带敞口，合计对冲不再并入它', () => {
     renderCalc();
     type('add-sizing-s1', '130');

@@ -297,9 +297,22 @@ export function AddSizingCalculator({ open, onClose, symbol, currentPrice = 0 }:
             </div>
             {bankedOn && bankedRes.ok && (
               <>
+                {/* B 账本一开，真正要下的那一单就是 A + B 的总量——X_G 单独看没有下单意义。
+                    所以合计升为头条，X_G 与 K_B 退到下一行做拆解。 */}
+                {cushion.ok && (
+                  <Hero
+                    testId="add-sizing-total-add"
+                    label="合计加仓 X₂ + X_G"
+                    value={fmtCoins(cushion.x2Max + bankedRes.x2)}
+                    unit={coinName}
+                    sub={`A ${fmtCoins(cushion.x2Max)} + B ${fmtCoins(bankedRes.x2)}${contracts(cushion.x2Max + bankedRes.x2, toNum(s2))}`}
+                    tone="primary"
+                  />
+                )}
                 <div className="grid grid-cols-2 gap-2">
                   <Hero testId="add-sizing-x2b-out" label={bankedRes.kBBeyondS1 ? 'B 腿 X_G · 带敞口' : 'B 腿 X_G · 零风险'} value={fmtCoins(bankedRes.x2)} unit={coinName}
-                    sub={`${fmtUsd(bankedRes.x2Notional)} USD${contracts(bankedRes.x2, toNum(s2))}`} tone="primary" />
+                    sub={`${fmtUsd(bankedRes.x2Notional)} USD${contracts(bankedRes.x2, toNum(s2))}`}
+                    tone={cushion.ok ? undefined : 'primary'} />
                   <Hero testId="add-sizing-kb-out" label="K_B 零风险线" value={fmtPx(bankedRes.kB)}
                     sub={bankedRes.kBBeyondS1 ? '已越过 S₁' : '不低于 S₁'} />
                 </div>
@@ -308,7 +321,7 @@ export function AddSizingCalculator({ open, onClose, symbol, currentPrice = 0 }:
                   ['剩余', isCoin ? fmtCoins(bankedRes.residualAtS1, 4) : fmtUsd(bankedRes.residualAtS1)],
                   ...(cushion.ok
                     ? [
-                      ['合计加仓', `${fmtCoins(cushion.x2Max + bankedRes.x2)} ${coinName} · A ${fmtCoins(cushion.x2Max)} + B ${fmtCoins(bankedRes.x2)}`, false, 'add-sizing-total-add'] as const,
+                      // 合计加仓已升为本段头条，这里不再重复同一个数。
                       // K_B = S₁ 时 B 腿也挂在同一条线上，对冲要一并扛起来；
                       // K_B 拖低则 B 腿单独在 K_B 处对冲，A 线只管 X₁ + X₂。
                       ...(bankedRes.kBBeyondS1
