@@ -22,6 +22,7 @@ export function useBackgroundPrices() {
     activeSymbol,
     activeSymbols,
     setPriceMap,
+    markPriceAsOf,
     ordersMap,
     setOrdersMap,
     setPositionsMap,
@@ -180,7 +181,13 @@ export function useBackgroundPrices() {
           }),
         );
         for (const { sym, r } of results) {
-          if (r) newPrices[sym] = r;
+          if (!r) continue;
+          newPrices[sym] = r;
+          // 登记这个价属于哪一刻：用发起请求时的 effectiveTime，不是落地时刻。
+          // 只给**真正取到价**的标的盖戳——取失败的（catch → r=null）保持旧戳，
+          // 于是它继续被强平判据视为陈价。这是整条闸门的关键：
+          // 盖戳绝不能按「结果 map 里的所有键」来，那会把陈价一起认证成新鲜的。
+          markPriceAsOf(sym, getEffectiveTime(sym));
         }
       }
 
@@ -211,6 +218,7 @@ export function useBackgroundPrices() {
     activeSymbols,
     ordersMap,
     setPriceMap,
+    markPriceAsOf,
     matchBackgroundOrders,
   ]);
 

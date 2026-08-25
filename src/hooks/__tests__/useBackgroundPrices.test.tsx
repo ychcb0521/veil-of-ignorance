@@ -47,6 +47,7 @@ describe('useBackgroundPrices', () => {
       activeSymbol: 'EVAAUSDT',
       activeSymbols: ['ALPACAUSDT'],
       setPriceMap,
+      markPriceAsOf: vi.fn(),
       ordersMap: {},
       positionsMap: {},
       setOrdersMap: vi.fn(),
@@ -99,6 +100,7 @@ describe('useBackgroundPrices', () => {
       activeSymbol: 'ACTIVEUSDT',
       activeSymbols: ['ACTIVEUSDT', 'BACKGROUNDUSDT'],
       setPriceMap: vi.fn(),
+      markPriceAsOf: vi.fn(),
       ordersMap: {
         ACTIVEUSDT: [activeOrder],
         BACKGROUNDUSDT: [backgroundOrder],

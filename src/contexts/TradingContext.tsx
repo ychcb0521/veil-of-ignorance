@@ -28,6 +28,7 @@ import {
 import { usePersistedState, loadPersistedSimState, saveSimState, clearSimState } from '@/hooks/usePersistedState';
 import { intervalToMs } from '@/hooks/useBinanceData';
 import { useAuth } from '@/contexts/AuthContext';
+import { evaluateIsolatedLiquidation, staleToleranceMs } from '@/lib/liquidationGuards';
 import { toast } from 'sonner';
 import type {
   Position,
@@ -128,6 +129,12 @@ interface TradingState {
   setFilledOrders: (v: FilledOrderSnapshot[] | ((prev: FilledOrderSnapshot[]) => FilledOrderSnapshot[])) => void;
   priceMap: PriceMap;
   setPriceMap: (v: PriceMap | ((prev: PriceMap) => PriceMap)) => void;
+  /**
+   * 登记「这个标的的价属于哪一刻」。只有真正发起过行情请求的地方才该调用它，
+   * 且必须传**请求时用的那个模拟时刻**，而不是 setState 落地的时刻。
+   * 没登记过的标的一律不参与强平——见 lib/liquidationGuards。
+   */
+  markPriceAsOf: (symbol: string, asOfSimTime: number) => void;
   balance: number;
   setBalance: (v: number | ((prev: number) => number)) => void;
   /** 现货钱包余额（USDT）。合约钱包的余额就是 balance。 */
@@ -340,6 +347,23 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
   // 成交快照：委托触发后订单会从 ordersMap 删除，这里保留“委托时间 → 触发时间”的桥。
   const [filledOrders, setFilledOrders] = usePersistedState<FilledOrderSnapshot[]>('filled_orders', []);
   const [priceMap, setPriceMap] = usePersistedState<PriceMap>('price_map', {});
+  /**
+   * 每个标的的价格「属于哪一刻」（模拟时间）。
+   *
+   * priceMap 本身只是 Record<string, number>，没有时间戳，却被持久化进 localStorage、
+   * 又是 simStateSync 里唯一不上云的键 —— 持仓/余额/时间机器状态都上云，价格不上云。
+   * 于是「持仓」和「价格」从设计上就允许来自不同时刻：上一段回放、上一个日期的价
+   * 会活过刷新、活过时间跳转，而强平此前唯一的护栏只有 `price > 0`。
+   *
+   * 这张表只在**真正发起过一次行情请求**的地方按请求所用的模拟时刻登记（markPriceAsOf），
+   * 所以「没登记过」= 说不清这个价属于哪一刻。用 ref 而不是 state：
+   * 它不参与渲染，而且**不该被持久化** —— 刷新后一律视为未知，宁可晚一秒强平。
+   */
+  const priceAsOfRef = useRef<Record<string, number>>({});
+  const markPriceAsOf = useCallback((symbol: string, asOfSimTime: number) => {
+    if (!symbol || !Number.isFinite(asOfSimTime) || asOfSimTime <= 0) return;
+    priceAsOfRef.current[symbol] = asOfSimTime;
+  }, []);
   const [balance, setBalance] = usePersistedState('balance', initialCapital);
   // 现货 / 资金钱包。合约钱包用既有的 balance——它已是「可用现金」口径
   // （开仓扣、平仓退），正是币安「合约可划转」的那个数。
@@ -766,15 +790,21 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
 
       for (let i = positions.length - 1; i >= 0; i--) {
         const pos = positions[i];
-        if (pos.marginMode !== 'isolated' || pos.isolatedMargin == null) continue;
 
-        const pnl = calcUnrealizedPnl(pos, price);
-        const posEquity = pos.isolatedMargin + pnl;
-        const notional = getPositionNotionalUsd(sym, pos, price);
-        const maintMargin = notional * MAINTENANCE_MARGIN_RATE;
+        // 判据整个搬进 liquidationGuards.evaluateIsolatedLiquidation：
+        // 陈价、零张幽灵仓位、NaN 三种情况全部落到「不强平」。
+        // 旧代码写的是 `if (posEquity > maintMargin) continue`——NaN 让 `>` 为假，
+        // 于是任何畸形数据的默认归宿是「爆仓」，方向是反的。
+        const decision = evaluateIsolatedLiquidation({
+          symbol: sym, position: pos, price,
+          priceAsOf: priceAsOfRef.current[sym],
+          nowSim: getEffectiveTime(sym),
+          toleranceMs: staleToleranceMs(sim.speed),
+        });
+        if (!decision.liquidate) continue;
 
-        if (posEquity > maintMargin) continue;
-
+        const pnl = decision.pnlUsd;
+        const notional = decision.notionalUsd;
         const { feeUsd: closeFee, feeCoin } = getSettlementFeeParts(sym, pos, price, false);
         const liqFee = notional * LIQUIDATION_FEE_RATE;
 
@@ -794,9 +824,16 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
           closedRealAt: Date.now(),
         }]);
 
+        // 按 id 删，不按下标。下标取自 effect 闭包里那份已提交的 positionsMap，
+        // 而 filter 作用在 setPositionsMap 同步推进的 positionsMapRef 上——两个数组
+        // 不同源：同一帧里只要 rAF 的止盈止损或后台轮询改过这个数组，下标就会错位，
+        // 结果不是**删空**（同一 positionId 下一帧再写一条重复爆仓单），
+        // 就是**误删一笔健康仓位**（无声消失、没有任何平仓记录）。
+        // 同文件的 handleClosePosition 早就写着 defensive: not just by index，只有这里漏了。
+        const liquidatedId = pos.id;
         setPositionsMap(prev => ({
           ...prev,
-          [sym]: (prev[sym] || []).filter((_, idx) => idx !== i),
+          [sym]: (prev[sym] || []).filter(p => p.id !== liquidatedId),
         }));
 
         // Isolated margin is lost — no change to global balance (it was already deducted at open)
@@ -882,7 +919,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
         setTimeout(() => { liquidationCheckRef.current = false; }, 2000);
       }
     }
-  }, [priceMap, positionsMap, balance, sim.isRunning, sim.currentSimulatedTime]);
+  }, [priceMap, positionsMap, balance, sim.isRunning, sim.currentSimulatedTime, sim.speed, getEffectiveTime]);
 
   // ===== Place Order (with strict accounting enforcement — single global pool) =====
   const handlePlaceOrder = useCallback((symbol: string, order: PlaceOrderParams): { id: string } | null => {
@@ -1564,7 +1601,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
     positionsMap, setPositionsMap,
     ordersMap, setOrdersMap,
     filledOrders, setFilledOrders,
-    priceMap, setPriceMap,
+    priceMap, setPriceMap, markPriceAsOf,
     balance, setBalance,
     spotBalance, fundingBalance, transferHistory, transferFunds,
     isolatedBalances: emptyIsolatedBalances,

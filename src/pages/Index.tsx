@@ -151,6 +151,7 @@ const Index = () => {
     setFilledOrders,
     priceMap,
     setPriceMap,
+    markPriceAsOf,
     balance,
     spotBalance,
     fundingBalance,
@@ -446,8 +447,13 @@ const Index = () => {
         if (prev[symbol] === price.close) return prev;
         return { ...prev, [symbol]: price.close };
       });
+      // 登记这个价属于哪一刻。用 time（发起请求时用的模拟时刻），不是此刻 ——
+      // 高倍速下一次异步往返本身就跨掉不少模拟时间，用落地时刻会把滞后算成 0。
+      // 注意要写在 setPriceMap 的**外面**：上面那个 early-return 在价格没变时
+      // 不更新 map，但「这一刻我确实拿到了这个标的的价」仍然成立。
+      markPriceAsOf(symbol, time);
     },
-    [setPriceMap],
+    [setPriceMap, markPriceAsOf],
   );
 
   const canonicalPriceRefreshTime = useMemo(() => {
