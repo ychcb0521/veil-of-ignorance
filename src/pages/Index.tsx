@@ -77,63 +77,6 @@ const PRICE_PROTECTION_THRESHOLD = 0.02;
 // 倒放（镜像视图）下传给图表的空成交列表——标记按真实时间戳定位会在镜像轴上错位。
 const EMPTY_TRADE_HISTORY: TradeRecord[] = [];
 
-// ===== Offline matching for restore =====
-function matchOrdersOffline(pendingOrders: PendingOrder[], klines: KlineData[], balance: number) {
-  const newPositions: any[] = [];
-  let remaining = [...pendingOrders];
-  let bal = balance;
-
-  for (const kline of klines) {
-    const stillPending: PendingOrder[] = [];
-    for (const order of remaining) {
-      let triggered = false;
-      let fillPrice = 0;
-
-      if (order.type === "LIMIT" || order.type === "POST_ONLY") {
-        if (order.side === "LONG" && kline.low <= order.price) {
-          triggered = true;
-          fillPrice = order.price;
-        } else if (order.side === "SHORT" && kline.high >= order.price) {
-          triggered = true;
-          fillPrice = order.price;
-        }
-      } else if (order.type === "MARKET_TP_SL") {
-        const dir = order.triggerDirection || (order.side === "LONG" ? "UP" : "DOWN");
-        if (dir === "UP" && kline.high >= order.stopPrice) {
-          triggered = true;
-          fillPrice = order.stopPrice;
-        } else if (dir === "DOWN" && kline.low <= order.stopPrice) {
-          triggered = true;
-          fillPrice = order.stopPrice;
-        }
-      } else if (order.type === "CONDITIONAL") {
-        const decision = getConditionalTriggerDecisionFromRange(order as any, kline);
-        if (!decision) {
-          stillPending.push(order);
-          continue;
-        }
-
-        if (decision.triggered) {
-          triggered = true;
-          fillPrice = decision.triggerPriceNum;
-        }
-      }
-
-      if (triggered) {
-        const symbol = (order as PendingOrder & { symbol?: string }).symbol || "BTCUSDT";
-        const { fee, margin, position } = executeSettlementFill(symbol, fillPrice, order, false, kline.time);
-        bal -= margin + fee;
-        newPositions.push(position);
-      } else {
-        stillPending.push(order);
-      }
-    }
-    remaining = stillPending;
-  }
-
-  return { positions: newPositions, remainingOrders: remaining, newBalance: bal };
-}
-
 const Index = () => {
   const { user, profile, signOut } = useAuth();
   const ctx = useTradingContext();
@@ -174,6 +117,7 @@ const Index = () => {
     handleCancelOrder,
     handlePlaceTpSl,
     applyAttachedTpSl,
+    settleFillDebit,
     executeReduceOnlyTrigger,
     handleAddIsolatedMargin,
     handleAdjustMargin,
@@ -545,6 +489,18 @@ const Index = () => {
 
       const { fee, margin, position } = executeSettlementFill(symbol, entryPrice, order, false, openTime);
 
+      // 付不起就当场撤单。**返回 true**:调用方把 false 读成「没执行」，
+      // 会解掉触发锁并挂上 500ms 重试——那会变成每半秒一次的无限重试加提示。
+      if (!settleFillDebit(symbol, order, margin, fee, openTime)) {
+        const pruned = {
+          ...ordersMapRef.current,
+          [symbol]: (ordersMapRef.current[symbol] || []).filter((candidate) => candidate.id !== order.id),
+        };
+        ordersMapRef.current = pruned;
+        setOrdersMap(pruned);
+        return true;
+      }
+
       setFilledOrders(prev => upsertOrderSnapshot(prev, {
           id: order.id,
           symbol,
@@ -565,7 +521,6 @@ const Index = () => {
           filledAt: openTime,
           positionId: position.id,
         }));
-      setBalance((prev) => prev - margin - fee);
       setPositionsMap((prev) => {
         const existing = (prev[symbol] || []).filter(isPositionOpen);
         return {
@@ -584,7 +539,7 @@ const Index = () => {
       toast.success(`条件单已触发：${symbol} ${order.side} ${formatSettlementQuantity(position, symbol)} @ ${formatPrice(entryPrice, symbol)}`);
       return true;
     },
-    [applyAttachedTpSl, executeReduceOnlyTrigger, setBalance, setFilledOrders, setOrdersMap, setPositionsMap],
+    [applyAttachedTpSl, executeReduceOnlyTrigger, settleFillDebit, setFilledOrders, setOrdersMap, setPositionsMap],
   );
 
   const runConditionalMatchingForSymbol = useCallback(
@@ -1260,6 +1215,11 @@ const Index = () => {
               { high: kline.high, low: kline.low, close: kline.close },
             );
             const actualFillPrice = position.entryPrice;
+            // 付不起 → 不 push 回 remaining（等于撤单）。id 在上面已经进了 filledIds，
+            // 所以 updater 被 React 重跑时不会重复扣款或重复撤单。
+            if (!settleFillDebit(activeSymbol, matchedOrder, margin, fee, simulatedTime)) {
+              continue;
+            }
             setFilledOrders(prev => upsertOrderSnapshot(prev, {
                 id: matchedOrder.id,
                 symbol: activeSymbol,
@@ -1280,7 +1240,6 @@ const Index = () => {
                 filledAt: simulatedTime,
                 positionId: position.id,
               }));
-            setBalance((prev) => prev - margin - fee);
             setPositionsMap((prev) => {
               const existing = (prev[activeSymbol] || []).filter(isPositionOpen);
               return {
@@ -1374,7 +1333,12 @@ const Index = () => {
                   false,
                   getEffectiveTime(symbol),
                 );
-                setBalance((b) => b - margin - fee);
+                // 付不起就**停掉整张 TWAP**,而不是跳过一片继续跑:
+                // 后面每一片只会更贵(仓位在涨、可用在降)。
+                if (!settleFillDebit(symbol, order, margin, fee, getEffectiveTime(symbol))) {
+                  changed = true;
+                  return null;
+                }
                 setPositionsMap((p) => {
                   const existing = (p[symbol] || []).filter(isPositionOpen);
                   return {
@@ -1400,7 +1364,7 @@ const Index = () => {
         return changed ? { ...prev, [symbol]: updated } : prev;
       });
     }
-  }, [effectiveSimTime, activeCoinState.status, ordersMap, priceMap, getEffectiveTime]);
+  }, [effectiveSimTime, activeCoinState.status, ordersMap, priceMap, getEffectiveTime, settleFillDebit]);
 
   // ===== ISOLATED-MODE HANDLERS =====
   const handlePause = useCallback(() => {

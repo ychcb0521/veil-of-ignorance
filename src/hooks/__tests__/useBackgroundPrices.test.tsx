@@ -171,11 +171,16 @@ describe('useBackgroundPrices', () => {
       triggerDirection: 'DOWN',
     } as PendingOrder);
 
-    async function runFill() {
+    async function runFill(affordable = true) {
       const setBalance = vi.fn();
       const setPositionsMap = vi.fn();
       const setFilledOrders = vi.fn();
       const recordExecutionTrade = vi.fn();
+      // 显式给出真实签名：vi.fn(() => bool) 会把入参推成空元组，
+      // 于是 mock.calls[0] 取不到 margin/fee，断言反而变成空转。
+      const settleFillDebit = vi.fn(
+        (_symbol: string, _order: PendingOrder, _marginUsd: number, _feeUsd: number, _cancelledAt: number) => affordable,
+      );
       vi.mocked(fetchCanonicalTimePriceAt).mockResolvedValue({ high: 0.011, low: 0.0102, close: 0.0105 });
       vi.mocked(useTradingContext).mockReturnValue({
         sim: { isRunning: true },
@@ -188,26 +193,35 @@ describe('useBackgroundPrices', () => {
         setPositionsMap,
         setBalance,
         setFilledOrders,
+        settleFillDebit,
         tradingMode: 'direct',
         getEffectiveTime: vi.fn(() => 1_000),
         recordExecutionTrade,
         executeReduceOnlyTrigger: vi.fn(),
-      applyAttachedTpSl: vi.fn(),
+        applyAttachedTpSl: vi.fn(),
       } as unknown as ReturnType<typeof useTradingContext>);
 
       render(<Harness />);
       await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
-      return { setBalance, setPositionsMap, setFilledOrders, recordExecutionTrade };
+      return { setBalance, setPositionsMap, setFilledOrders, recordExecutionTrade, settleFillDebit };
     }
 
     it('【回归】按 张 × 面值 收保证金,不是按 张 × 价', async () => {
-      const { setBalance } = await runFill();
-      expect(setBalance).toHaveBeenCalledTimes(1);
-      const charged = 1_000_000 - setBalance.mock.calls[0][0](1_000_000);
+      const { settleFillDebit } = await runFill();
+      expect(settleFillDebit).toHaveBeenCalledTimes(1);
+      const [, , marginUsd, feeUsd] = settleFillDebit.mock.calls[0];
       // 名义 1000 USD ÷ 3 = 333.333 保证金,+ 1000 × 0.0004 = 0.4 手续费
-      expect(charged).toBeCloseTo(1000 / LEV + 1000 * 0.0004, 6);
+      expect(marginUsd).toBeCloseTo(1000 / LEV, 6);
+      expect(feeUsd).toBeCloseTo(1000 * 0.0004, 6);
       // 旧式给出的是 0.3448 + 0.0005 —— 少收将近三个数量级
-      expect(charged).toBeGreaterThan(300);
+      expect(marginUsd).toBeGreaterThan(300);
+    });
+
+    it('【回归】付不起就不建仓、不落成交、不计执行力资产', async () => {
+      const { setPositionsMap, setFilledOrders, recordExecutionTrade } = await runFill(false);
+      expect(setPositionsMap).not.toHaveBeenCalled();
+      expect(setFilledOrders).not.toHaveBeenCalled();
+      expect(recordExecutionTrade).not.toHaveBeenCalled();
     });
 
     it('【回归】建出来的仓位带齐结算字段,否则此后全按 U 本位读', async () => {

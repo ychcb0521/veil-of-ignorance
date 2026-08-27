@@ -70,6 +70,8 @@ import {
 import { upsertOrderSnapshot } from '@/lib/orderSnapshotHistory';
 import { formatPrice, getPriceDecimals } from '@/lib/formatters';
 import { buildTpSlOrders, replaceTpSlOrders, validateTpSlLevels } from '@/lib/tpSlOrders';
+import { evaluateFillAffordability, fillCostUsd } from '@/lib/fillAffordability';
+import { orderReferencePrice } from '@/lib/orderReferencePrice';
 import {
   createDefaultExecutionAssetState,
   recordExecutionTrade as applyExecutionTradeReward,
@@ -177,6 +179,11 @@ interface TradingState {
   handleClosePosition: (symbol: string, index: number, percentage?: number, method?: 'manual' | 'sl' | 'tp1' | 'tp2' | 'tp3' | 'liquidation') => void;
   handleCancelOrder: (symbol: string, orderId: string) => void;
   handlePlaceTpSl: (symbol: string, pos: Position, tp: number | null, sl: number | null, pct: number) => void;
+  /**
+   * 成交时扣款；付不起就撤单留痕并返回 false。
+   * 必须严格排在减仓分支**之后**——止盈止损是**退还**保证金的，绝不能被这道闸门拦住。
+   */
+  settleFillDebit: (symbol: string, order: PendingOrder, marginUsd: number, feeUsd: number, cancelledAt: number) => boolean;
   /** 挂单成交时兑现它随身带着的止盈止损（勾选框下达的那一对）。 */
   applyAttachedTpSl: (symbol: string, position: Position, order: PendingOrder) => void;
   executeReduceOnlyTrigger: (
@@ -386,7 +393,22 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
     if (!symbol || !Number.isFinite(asOfSimTime) || asOfSimTime <= 0) return;
     priceAsOfRef.current[symbol] = asOfSimTime;
   }, []);
-  const [balance, setBalance] = usePersistedState('balance', initialCapital);
+  const [balance, setBalanceState] = usePersistedState('balance', initialCapital);
+  const balanceRef = useRef(balance);
+  balanceRef.current = balance;
+  /**
+   * 余额一律**写时同步推进 ref**——与 positionsMap / ordersMap 同一个套路。
+   *
+   * 此前 balanceRef 靠一个 useEffect 追平（`useEffect(() => { ref = balance })`），
+   * 于是同一批 setState 里的每一次读都拿到**同一个提交前的旧值**：
+   * 一根 K 线里同时触发的 N 条腿会各自看到全额余额、各自放行，
+   * 任何「够不够钱」的判断在那一刻都等于没写。
+   */
+  const setBalance = useCallback((value: number | ((prev: number) => number)) => {
+    const next = typeof value === 'function' ? (value as (p: number) => number)(balanceRef.current) : value;
+    balanceRef.current = next;
+    setBalanceState(next);
+  }, [setBalanceState]);
   // 现货 / 资金钱包。合约钱包用既有的 balance——它已是「可用现金」口径
   // （开仓扣、平仓退），正是币安「合约可划转」的那个数。
   const [spotBalance, setSpotBalance] = usePersistedState('spot_balance', 0);
@@ -456,9 +478,6 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
 
   const priceMapRef = useRef(priceMap);
   useEffect(() => { priceMapRef.current = priceMap; }, [priceMap]);
-
-  const balanceRef = useRef(balance);
-  useEffect(() => { balanceRef.current = balance; }, [balance]);
 
   useEffect(() => {
     // 先按当前权重把历史事件重算一次(幂等)，再结算未练习欠账。
@@ -944,6 +963,71 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
   }, [priceMap, positionsMap, balance, sim.isRunning, sim.currentSimulatedTime, sim.speed, getEffectiveTime]);
 
   /**
+   * 成交时的扣款闸门。返回 true = 已扣款；false = 这一单付不起，必须当作撤单丢掉。
+   *
+   * 挂单在这个模拟器里**不预留保证金**（calcAvailable 只遍历 positionsMap，
+   * ordersMap 从来没有任何记账函数读过），所以下单时的检查是一次**检查**、
+   * 不是一次**冻结**：两条各自过得了检查的腿可以一起触发、一起扣款。
+   * 余额 100,000 配两条各需 60,120 的条件单 → 触发后余额 −20,480。
+   *
+   * 负余额之后没有任何东西把它捞回来。**有全仓仓位**时它会把 crossEquity
+   * 自己拖到 0 以下，下一跳强平所有标的的全仓仓位、并清空所有挂单；
+   * **只有逐仓仓位**时那一支根本不跑，负余额永久留在账上、同步进云端，
+   * 此后每一笔下单都被「可用余额不足」永久拒掉——一个退不出去的死局。
+   *
+   * 三条刻意的取舍：
+   *
+   * · **不夹 Math.max(0, …)**。钳到 0 会静默销毁钱：仓位照建，保证金却没真付，
+   *   于是保证金率、强平距离、战役的 R 全都对着一个虚数算。
+   * · **失败即撤单，并且留痕**。触发是一次**穿越**不是一个状态——被拒的
+   *   100 元买单不会在价格回到 105 时重新武装，留着它等于给用户一张
+   *   永远不会成交、却一直显示「在挂」的单子。撤单快照要写进 cancelled_orders，
+   *   否则战役页的反向对冲挂单层会整条腿凭空消失。
+   * · **绝不缩量成交**。币本位的量是整数张，填进去的数是**授权上限**；
+   *   缩量还会把绑在这笔仓位上的减仓单和战役的初始风险锚一起弄脏。
+   */
+  const settleFillDebit = useCallback((
+    symbol: string,
+    order: PendingOrder,
+    marginUsd: number,
+    feeUsd: number,
+    cancelledAt: number,
+  ): boolean => {
+    const verdict = evaluateFillAffordability({
+      availableUsd: calcAvailable(balanceRef.current, positionsMapRef.current),
+      marginUsd,
+      feeUsd,
+    });
+    if (verdict.ok) {
+      setBalance(prev => prev - marginUsd - feeUsd);
+      return true;
+    }
+
+    setCancelledOrders(prev => upsertOrderSnapshot(prev, {
+      id: order.id,
+      symbol,
+      side: order.side,
+      type: order.type,
+      reduceOnly: order.reduceOnly ?? false,
+      reduceKind: order.reduceKind ?? null,
+      linkedPositionId: order.linkedPositionId ?? null,
+      price: orderReferencePrice(order, priceMapRef.current[symbol] || 0).price,
+      quantity: order.quantity,
+      contracts: order.contracts,
+      leverage: order.leverage,
+      settlementMode: order.settlementMode,
+      settlementAsset: order.settlementAsset,
+      contractSizeUsd: order.contractSizeUsd,
+      createdAt: order.createdAt,
+      cancelledAt,
+    }));
+    toast.error('保证金不足，委托已撤销', {
+      description: `${symbol} 需要 ${verdict.requiredUsd.toFixed(2)} USDT，可用 ${verdict.availableUsd.toFixed(2)} USDT`,
+    });
+    return false;
+  }, [setBalance, setCancelledOrders]);
+
+  /**
    * 随单下达的止盈止损：**成交那一刻**才变成减仓单。
    *
    * 参照价是这笔仓位的**开仓价**，不是此刻的盘口——一张挂在 0.0100 的限价买单
@@ -1111,6 +1195,25 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
       const qtyPerStep = isCoinSettled(normalizedOrder)
         ? Math.max(1, Math.round(normalizedOrder.quantity / count))
         : normalizedOrder.quantity / count;
+      /**
+       * 分段订单此前在这里直接 return,**完全跳过**下方的预检——
+       * 一次点击就能铺出 N 条谁也没查过的腿。按每条子单自己的委托价逐条估,
+       * 求和后一次性检查:这 N 条是一起挂出去的,就该一起验。
+       */
+      {
+        let scaledTotal = 0;
+        for (let i = 0; i < count; i++) {
+          const childPrice = startP + step * i;
+          const child = { ...normalizedOrder, quantity: qtyPerStep, contracts: isCoinSettled(normalizedOrder) ? qtyPerStep : undefined };
+          scaledTotal += fillCostUsd(symbol, child as unknown as PendingOrder, childPrice).totalUsd;
+        }
+        if (scaledTotal > available) {
+          toast.error('可用余额不足', {
+            description: `${count} 笔子单合计需要 ${scaledTotal.toFixed(2)} USDT，当前可用 ${available.toFixed(2)} USDT`,
+          });
+          return null;
+        }
+      }
       const parentId = crypto.randomUUID();
       const newOrders: PendingOrder[] = Array.from({ length: count }, (_, i) => ({
         id: crypto.randomUUID(), side: normalizedOrder.side, type: 'LIMIT' as OrderType,
@@ -1137,12 +1240,13 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
       }
       // 与条件委托同样做挂单时的保证金预检——触发时才发现钱不够体验最差
       {
+        // 跟踪委托的成交价是「极值 ×(1∓回调率)」,挂单时不可知;
+        // 激活价至少是价格必须先够到的一档,拿它当估价比拿盘口保守。
         const estPrice = Number(normalizedOrder.stopPrice) > 0 ? Number(normalizedOrder.stopPrice) : effectiveCurrentPrice;
-        const { marginUsd } = getSettlementMarginParts(symbol, normalizedOrder, estPrice);
-        const { feeUsd } = getSettlementFeeParts(symbol, normalizedOrder, estPrice, true);
-        if (marginUsd + feeUsd > available) {
+        const { totalUsd } = fillCostUsd(symbol, normalizedOrder as unknown as PendingOrder, estPrice);
+        if (totalUsd > available) {
           toast.error('可用余额不足', {
-            description: `需要 ${(marginUsd + feeUsd).toFixed(2)} USDT，当前可用 ${available.toFixed(2)} USDT`,
+            description: `需要 ${totalUsd.toFixed(2)} USDT，当前可用 ${available.toFixed(2)} USDT`,
           });
           return null;
         }
@@ -1174,6 +1278,20 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
     if (normalizedOrder.type === 'TWAP') {
       const durationMs = (normalizedOrder.twapDuration || 60) * 60 * 1000;
       const intervalMs = (normalizedOrder.twapInterval || 5) * 60 * 1000;
+      /**
+       * TWAP 此前在这里直接 return,于是它**一生中从未被检查过**:
+       * 挂出时跳过预检,每一片成交又各自开一个新仓位、各自扣钱。
+       * 按全量估——切片是累加的,不是轮换的。
+       */
+      {
+        const { totalUsd } = fillCostUsd(symbol, normalizedOrder as unknown as PendingOrder, effectiveCurrentPrice);
+        if (totalUsd > available) {
+          toast.error('可用余额不足', {
+            description: `TWAP 全量需要 ${totalUsd.toFixed(2)} USDT，当前可用 ${available.toFixed(2)} USDT`,
+          });
+          return null;
+        }
+      }
       const twapOrder: PendingOrder = {
         id: crypto.randomUUID(), side: normalizedOrder.side, type: 'TWAP',
         price: 0, stopPrice: 0, quantity: normalizedOrder.quantity,
@@ -1194,10 +1312,23 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
     }
 
     // All other pending types — strict margin pre-check
-    const estPrice = normalizedOrder.price > 0 ? normalizedOrder.price : effectiveCurrentPrice;
-    const { marginUsd } = getSettlementMarginParts(symbol, normalizedOrder, estPrice);
-    const { feeUsd } = getSettlementFeeParts(symbol, normalizedOrder, estPrice, true);
-    const estMargin = marginUsd + feeUsd;
+    /**
+     * 预检要用**这一单会成交的价**,不是「按下按钮那一刻的盘口」。
+     *
+     * 条件单的价在 stopPrice 上,而 price 恒为 0（面板给非限价档发 price: 0）,
+     * 于是旧写法一路兜到市价:一张触发价在市价 1.5 倍上的**线性**买入止损,
+     * 按 1/1.5 的钱放行、按全额扣款。币本位不受影响——那一支的
+     * marginUsd = 名义 ÷ 杠杆、feeUsd = 名义 × 费率,price 在
+     * coinMarginAmount 与 coinAmountToUsd 之间**精确约掉**,喂什么价都一样。
+     *
+     * isMaker 从 true 改成 false:这些单子成交时全都走 taker
+     * （所有成交点都传 false）。按 maker 估、按 taker 收,差的那一半是白放行的,
+     * 而这一项与价无关,币本位同样中招。
+     */
+    const estPrice = orderReferencePrice(normalizedOrder as unknown as PendingOrder, effectiveCurrentPrice).price;
+    const { marginUsd, feeUsd, totalUsd: estMargin } = fillCostUsd(
+      symbol, normalizedOrder as unknown as PendingOrder, estPrice,
+    );
     if (estMargin > available) {
       toast.error('可用余额不足', {
         description: `需要 ${estMargin.toFixed(2)} USDT，当前可用 ${available.toFixed(2)} USDT`,
@@ -1616,7 +1747,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
     getSymbolMarginMode, setSymbolMarginMode,
     getSymbolSettlementMode, setSymbolSettlementMode,
     activeSymbols,
-    handlePlaceOrder, handleClosePosition, handleCancelOrder, handlePlaceTpSl, applyAttachedTpSl, executeReduceOnlyTrigger,
+    handlePlaceOrder, handleClosePosition, handleCancelOrder, handlePlaceTpSl, applyAttachedTpSl, settleFillDebit, executeReduceOnlyTrigger,
     handleAddIsolatedMargin, handleAdjustMargin, handleClearSymbolData,
     fundingRate: FUNDING_RATE,
     liquidationOpen, liquidationDetails, closeLiquidationModal,

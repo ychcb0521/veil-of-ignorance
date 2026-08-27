@@ -34,8 +34,8 @@ export function useBackgroundPrices() {
     ordersMap,
     setOrdersMap,
     setPositionsMap,
-    setBalance,
     setFilledOrders,
+    settleFillDebit,
     tradingMode,
     getEffectiveTime,
     recordExecutionTrade,
@@ -122,6 +122,12 @@ export function useBackgroundPrices() {
           const { fee, margin, position } = executeSettlementFill(symbol, fillPrice, order, false, simulatedTime);
           const actualFillPrice = position.entryPrice;
 
+          // 付不起就当场撤单留痕。id 已经进了 filledIds（上一行 push），
+          // 所以这一单无论如何都会离开 ordersMap，不会变成一张永远挂着却成不了的单。
+          if (!settleFillDebit(symbol, order, margin, fee, simulatedTime)) {
+            continue;
+          }
+
           // 成交快照。此前这里一处都不写,于是「非当前标的」上触发的单子
           // 在 filled_orders 里没有任何痕迹——战役页的「反向对冲挂单」
           // (journalApi.ts:2466 triggeredReverseOrders)永远看不到这些腿。
@@ -145,7 +151,6 @@ export function useBackgroundPrices() {
             filledAt: simulatedTime,
             positionId: position.id,
           }));
-          setBalance((prev) => prev - margin - fee);
           setPositionsMap((prev) => {
             // isPositionOpen 而不是 quantity > 1e-8:币本位的存量记在 contracts 上。
             const existing = (prev[symbol] || []).filter(isPositionOpen);
@@ -188,7 +193,7 @@ export function useBackgroundPrices() {
         }));
       }
     },
-    [setBalance, setPositionsMap, setOrdersMap, setFilledOrders, executeReduceOnlyTrigger, applyAttachedTpSl, recordExecutionTrade, tradingMode, getEffectiveTime],
+    [setPositionsMap, setOrdersMap, setFilledOrders, settleFillDebit, executeReduceOnlyTrigger, applyAttachedTpSl, recordExecutionTrade, tradingMode, getEffectiveTime],
   );
 
   const pollBackgroundSymbols = useCallback(async () => {
