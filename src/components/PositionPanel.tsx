@@ -28,7 +28,8 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useTradingContext } from '@/contexts/TradingContext';
 import { PostTradeReviewSheet } from '@/components/journal/PostTradeReviewSheet';
 import { ExitMethodBadge } from '@/components/journal/ExitMethodBadge';
-import { coinNotionalAmount, formatCoinAmount, getSettlementAsset } from '@/lib/coinMargined';
+import {
+  getCoinContracts, coinNotionalAmount, formatCoinAmount, getSettlementAsset } from '@/lib/coinMargined';
 import {
   formatSettlementQuantity,
   getPositionNotionalUsd,
@@ -1146,8 +1147,10 @@ export function PositionPanel({
                               <div data-testid="order-qty-coin">
                                 {formatCoinAmount(orderNotionalCoin, getSettlementAsset(symbol))}
                               </div>
+                              {/* 张数写出来：币本位的量只能是整数张，而折成币是随价浮动的小数。
+                                  不写张，用户就无从理解为什么自己填的数和这里的数对不上。 */}
                               <div className="text-[10px] text-gray-500 dark:text-[#848e9c]">
-                                ≈ {formatUSDT(orderNotional)} USD
+                                {getCoinContracts(order)} 张 · ≈ {formatUSDT(orderNotional)} USD
                               </div>
                             </>
                           ) : (

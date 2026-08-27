@@ -321,6 +321,20 @@ export function OrderPanel({
     : coinInputUnit === 'COIN_MARGIN'
       ? (effectivePrice > 0 && leverage > 0 ? contractSizeUsd / (effectivePrice * leverage) : 0)
       : minCoinPerContract;
+  /**
+   * 按当前档折算出「这一单实际会下出去的量」，单位与输入框一致。
+   * 币本位的张是整数,所以用户填的数几乎总要被取整——以前取整是隐形的:
+   * 框里写 88、委托里是 72.956016,两个数都对,但不该同时出现在屏幕上。
+   * 失焦时把框里的数换成这个值,输入框 / 提示 / 当前委托从此显示同一个数。
+   */
+  const snappedInput = !isCoinMargined || effectiveQty < 1
+    ? null
+    : coinInputUnit === 'CONTRACTS'
+      ? String(effectiveQty)
+      : coinInputUnit === 'COIN_MARGIN'
+        ? marginCoin.toFixed(6)
+        : effectiveCoinAmount.toFixed(6);
+
   const minInputUnitLabel = coinInputUnit === 'CONTRACTS'
     ? '张'
     : coinInputUnit === 'COIN_MARGIN'
@@ -846,6 +860,12 @@ export function OrderPanel({
             type="text"
             value={quantity}
             onChange={e => { setQuantity(e.target.value); setPercent(0); }}
+            onBlur={() => {
+              // 不足一张时不吸附：那会把用户刚填的数抹成空白，
+              // 而他需要看着自己填的数去对照红字里的最小量。
+              if (snappedInput != null && snappedInput !== quantity) setQuantity(snappedInput);
+            }}
+            data-testid="order-qty-input"
             placeholder="0"
             className="flex-1 w-full min-w-0 bg-transparent text-right text-[13px] text-foreground font-mono tabular-nums outline-none placeholder:text-muted-foreground/60"
           />

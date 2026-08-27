@@ -67,6 +67,37 @@ describe('币本位下单量不得被静默放大', () => {
     expect(coinContractsExactFromUsdNotional(4.092, 'API3USD')).toBe(0);
   });
 
+  it('【回归】填 88 拿到 72.956016——框里的数与委托里的数必须能对上', () => {
+    // 用户第二次报的那一单：API3 @0.411207，「API3 金额」档填 88。
+    const PRICE2 = 0.411207;
+    const notionalUsd = 88 * PRICE2;                       // 36.186216 USD
+    const contracts = coinContractsExactFromUsdNotional(notionalUsd, 'API3USD', SIZE);
+    expect(contracts).toBe(3);                             // 3.6186 → 向下取整
+    const actualCoin = coinNotionalUsd(contracts, SIZE) / PRICE2;
+    // 截图里是 72.956016，用的是未四舍五入的标记价；这里拿显示价 0.411207 复算，
+    // 只对得到小数点后 3 位。要害是「3 张」这个整数，不是末位。
+    expect(actualCoin).toBeCloseTo(72.956, 3);
+
+    // 88 在这个粒度上根本落不到：相邻两档只有 72.96 与 97.28，
+    // 所以输入框必须吸附到 72.956016，而不是留着 88 让两处显示不一致。
+    const nextUp = coinNotionalUsd(contracts + 1, SIZE) / PRICE2;
+    expect(nextUp).toBeCloseTo(97.275, 3);
+    expect(88).toBeGreaterThan(actualCoin);
+    expect(88).toBeLessThan(nextUp);
+
+    // 一张的币量 = 粒度；88 不是它的整数倍，这就是对不上的全部原因
+    const stepCoin = SIZE / PRICE2;
+    expect(stepCoin).toBeCloseTo(24.319, 3);
+    expect(actualCoin / stepCoin).toBeCloseTo(3, 9);
+  });
+
+  it('吸附后的值再走一遍换算必须不动——否则失焦会反复跳数', () => {
+    const PRICE2 = 0.411207;
+    const snapped = coinNotionalUsd(3, SIZE) / PRICE2;     // 72.956016
+    const again = coinContractsExactFromUsdNotional(snapped * PRICE2, 'API3USD', SIZE);
+    expect(again).toBe(3);
+  });
+
   it('非法输入一律 0，不制造 1 张', () => {
     for (const v of [0, -5, Number.NaN, Number.POSITIVE_INFINITY]) {
       expect(coinContractsExact(v)).toBe(0);
