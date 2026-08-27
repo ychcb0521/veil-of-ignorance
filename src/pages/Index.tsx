@@ -173,6 +173,7 @@ const Index = () => {
     handleClosePosition,
     handleCancelOrder,
     handlePlaceTpSl,
+    applyAttachedTpSl,
     executeReduceOnlyTrigger,
     handleAddIsolatedMargin,
     handleAdjustMargin,
@@ -578,10 +579,12 @@ const Index = () => {
       };
       ordersMapRef.current = nextOrdersMap;
       setOrdersMap(nextOrdersMap);
+      // 这张单随身带着的止盈止损,成交这一刻才兑现
+      applyAttachedTpSl(symbol, position, order);
       toast.success(`条件单已触发：${symbol} ${order.side} ${formatSettlementQuantity(position, symbol)} @ ${formatPrice(entryPrice, symbol)}`);
       return true;
     },
-    [executeReduceOnlyTrigger, setBalance, setFilledOrders, setOrdersMap, setPositionsMap],
+    [applyAttachedTpSl, executeReduceOnlyTrigger, setBalance, setFilledOrders, setOrdersMap, setPositionsMap],
   );
 
   const runConditionalMatchingForSymbol = useCallback(
@@ -1308,6 +1311,7 @@ const Index = () => {
               };
               recordExecutionTrade(matchedOrder.tradingMode ?? tradingMode, trade);
             }
+            applyAttachedTpSl(activeSymbol, position, matchedOrder);
             toast.success(
               `委托成交: ${matchedOrder.side === "LONG" ? "开多" : "开空"} ${formatSettlementQuantity(position, activeSymbol)} @ ${formatPrice(actualFillPrice, activeSymbol)}`,
             );

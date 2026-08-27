@@ -76,6 +76,19 @@ export interface PendingOrder {
   conditionalExecType?: "MARKET" | "LIMIT";
   conditionalLimitPrice?: number;
 
+  /**
+   * 随这张单一起下的止盈 / 止损——**成交时**才变成减仓单。
+   *
+   * 此前面板把止盈价塞进 stopPrice、把类型改写成 LIMIT_TP_SL / MARKET_TP_SL，
+   * 于是引擎把**止盈价当成开仓触发价**：市价单不再立刻成交，而是挂在止盈价上开仓
+   * （Index.tsx:1136-1144）；限价单则要等价格先摸到止盈价才肯激活
+   * （Index.tsx:1149-1159）。两种都不是用户勾那个框时想要的东西。
+   * 分开存,开仓价与保护价从此不再共用一个字段。
+   */
+  attachedTpPrice?: number;
+  attachedSlPrice?: number;
+  attachedTpSlPercentage?: number;
+
   /** Trigger direction locked at placement: UP = triggerPrice > currentPrice, DOWN = triggerPrice < currentPrice */
   triggerDirection?: "UP" | "DOWN";
   /** Locked comparison operator for conditional orders, derived from triggerPrice vs currentPrice at placement */

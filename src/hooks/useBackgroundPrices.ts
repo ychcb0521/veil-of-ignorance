@@ -40,6 +40,7 @@ export function useBackgroundPrices() {
     getEffectiveTime,
     recordExecutionTrade,
     executeReduceOnlyTrigger,
+    applyAttachedTpSl,
   } = useTradingContext();
 
   const lastPollRef = useRef<number>(0);
@@ -173,6 +174,7 @@ export function useBackgroundPrices() {
             };
             recordExecutionTrade(order.tradingMode ?? tradingMode, trade);
           }
+          applyAttachedTpSl(symbol, position, order);
           toast.success(
             `条件单已触发：${symbol} ${order.side === 'LONG' ? '开多' : '开空'} ${formatSettlementQuantity(position, symbol)} @ ${formatPrice(actualFillPrice, symbol)}`,
           );
@@ -186,7 +188,7 @@ export function useBackgroundPrices() {
         }));
       }
     },
-    [setBalance, setPositionsMap, setOrdersMap, setFilledOrders, executeReduceOnlyTrigger, recordExecutionTrade, tradingMode, getEffectiveTime],
+    [setBalance, setPositionsMap, setOrdersMap, setFilledOrders, executeReduceOnlyTrigger, applyAttachedTpSl, recordExecutionTrade, tradingMode, getEffectiveTime],
   );
 
   const pollBackgroundSymbols = useCallback(async () => {

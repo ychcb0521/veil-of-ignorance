@@ -58,6 +58,7 @@ describe('useBackgroundPrices', () => {
       getEffectiveTime,
       recordExecutionTrade: vi.fn(),
       executeReduceOnlyTrigger: vi.fn(),
+      applyAttachedTpSl: vi.fn(),
     } as unknown as ReturnType<typeof useTradingContext>);
 
     render(<Harness />);
@@ -112,6 +113,7 @@ describe('useBackgroundPrices', () => {
       getEffectiveTime: vi.fn(() => 1_000),
       recordExecutionTrade: vi.fn(),
       executeReduceOnlyTrigger,
+      applyAttachedTpSl: vi.fn(),
     } as unknown as ReturnType<typeof useTradingContext>);
 
     render(<Harness />);
@@ -190,6 +192,7 @@ describe('useBackgroundPrices', () => {
         getEffectiveTime: vi.fn(() => 1_000),
         recordExecutionTrade,
         executeReduceOnlyTrigger: vi.fn(),
+      applyAttachedTpSl: vi.fn(),
       } as unknown as ReturnType<typeof useTradingContext>);
 
       render(<Harness />);

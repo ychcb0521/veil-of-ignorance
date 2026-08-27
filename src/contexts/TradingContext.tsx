@@ -69,6 +69,7 @@ import {
 } from '@/lib/reduceOnlyOrderExecution';
 import { upsertOrderSnapshot } from '@/lib/orderSnapshotHistory';
 import { formatPrice, getPriceDecimals } from '@/lib/formatters';
+import { buildTpSlOrders, replaceTpSlOrders, validateTpSlLevels } from '@/lib/tpSlOrders';
 import {
   createDefaultExecutionAssetState,
   recordExecutionTrade as applyExecutionTradeReward,
@@ -176,6 +177,8 @@ interface TradingState {
   handleClosePosition: (symbol: string, index: number, percentage?: number, method?: 'manual' | 'sl' | 'tp1' | 'tp2' | 'tp3' | 'liquidation') => void;
   handleCancelOrder: (symbol: string, orderId: string) => void;
   handlePlaceTpSl: (symbol: string, pos: Position, tp: number | null, sl: number | null, pct: number) => void;
+  /** 挂单成交时兑现它随身带着的止盈止损（勾选框下达的那一对）。 */
+  applyAttachedTpSl: (symbol: string, position: Position, order: PendingOrder) => void;
   executeReduceOnlyTrigger: (
     symbol: string,
     order: PendingOrder,
@@ -259,6 +262,10 @@ export interface PlaceOrderParams {
   twapInterval?: number;
   conditionalExecType?: 'MARKET' | 'LIMIT';
   conditionalLimitPrice?: number;
+  /** 勾选「止盈止损」时随单带下来的保护价——绝不再与 stopPrice 合流。 */
+  tpTriggerPrice?: number;
+  slTriggerPrice?: number;
+  tpSlPercentage?: number;
   scaledCount?: number;
   scaledStartPrice?: number;
   scaledEndPrice?: number;
@@ -936,10 +943,45 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
     }
   }, [priceMap, positionsMap, balance, sim.isRunning, sim.currentSimulatedTime, sim.speed, getEffectiveTime]);
 
+  /**
+   * 随单下达的止盈止损：**成交那一刻**才变成减仓单。
+   *
+   * 参照价是这笔仓位的**开仓价**，不是此刻的盘口——一张挂在 0.0100 的限价买单
+   * 配 0.0105 的止盈完全合理，拿 0.0112 的盘口去校验会把它判成方向错误，
+   * 而它当时根本还没成交。
+   */
+  const applyAttachedTpSl = useCallback((symbol: string, position: Position, order: PendingOrder) => {
+    const tp = Number(order.attachedTpPrice) > 0 ? Number(order.attachedTpPrice) : null;
+    const sl = Number(order.attachedSlPrice) > 0 ? Number(order.attachedSlPrice) : null;
+    if (tp === null && sl === null) return;
+
+    const levels = { tp, sl, percentage: Number(order.attachedTpSlPercentage) || 100 };
+    if (validateTpSlLevels(position.side, levels, position.entryPrice)) return;
+
+    const now = getEffectiveTime(symbol);
+    const newOrders = buildTpSlOrders({ symbol, position, levels, now, newId: () => crypto.randomUUID() });
+    if (newOrders.length === 0) return;
+    setOrdersMap(prev => ({
+      ...prev,
+      [symbol]: replaceTpSlOrders(prev[symbol] || [], position.id, newOrders),
+    }));
+  }, [getEffectiveTime, setOrdersMap]);
+
   // ===== Place Order (with strict accounting enforcement — single global pool) =====
   const handlePlaceOrder = useCallback((symbol: string, order: PlaceOrderParams): { id: string } | null => {
     // Use refs to bypass stale closures in high-frequency time machine ticks
     const available = calcAvailable(balanceRef.current, positionsMapRef.current);
+    /**
+     * 勾选「止盈止损」带下来的保护价。**与 stopPrice 彻底分开**:
+     * 此前它们合流在一个字段里,于是引擎把止盈价当成开仓触发价——
+     * 市价单不再立刻成交、挂到止盈价上开仓;限价单要等价格摸到止盈价才肯激活。
+     * 立即成交的路径当场挂保护单;挂单则把它随身带着,成交那一刻才兑现。
+     */
+    const attachedTpSl = {
+      attachedTpPrice: Number(order.tpTriggerPrice) > 0 ? Number(order.tpTriggerPrice) : undefined,
+      attachedSlPrice: Number(order.slTriggerPrice) > 0 ? Number(order.slTriggerPrice) : undefined,
+      attachedTpSlPercentage: Number(order.tpSlPercentage) > 0 ? Number(order.tpSlPercentage) : undefined,
+    };
     // Use ref to avoid stale closure — always get the freshest price
     const symbolPrice = priceMapRef.current[symbol] || 0;
     const effectiveCurrentPrice = Number(order.latestPrice || symbolPrice);
@@ -1025,6 +1067,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
         recordExecutionTrade(tradingModeRef.current, buildExecutionTradeSnapshot(position, 'BEST'));
       }
       toast.success(`最优价成交: ${normalizedOrder.side === 'LONG' ? '开多' : '开空'} ${formatSettlementQuantity(position, symbol)} @ ${formatPrice(position.entryPrice, symbol)}`);
+      applyAttachedTpSl(symbol, position, { ...normalizedOrder, ...attachedTpSl } as unknown as PendingOrder);
       return { id: position.id };
     }
 
@@ -1048,6 +1091,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
         recordExecutionTrade(tradingModeRef.current, buildExecutionTradeSnapshot(position, normalizedOrder.type));
       }
       toast.success(`${normalizedOrder.side === 'LONG' ? '开多' : '开空'} ${formatSettlementQuantity(position, symbol)} @ ${formatPrice(position.entryPrice, symbol)}`);
+      applyAttachedTpSl(symbol, position, { ...normalizedOrder, ...attachedTpSl } as unknown as PendingOrder);
       return { id: position.id };
     }
 
@@ -1191,6 +1235,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
       callbackRate: normalizedOrder.callbackRate, trailingExecType: normalizedOrder.trailingExecType,
       trailingLimitPrice: normalizedOrder.trailingLimitPrice, trailingActivated: false,
       conditionalExecType: normalizedOrder.conditionalExecType, conditionalLimitPrice: normalizedOrder.conditionalLimitPrice,
+      ...attachedTpSl,
       triggerDirection, operator,
     };
     setOrdersMap(prev => ({ ...prev, [symbol]: [...(prev[symbol] || []), newOrder] }));
@@ -1308,85 +1353,26 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
 
   // ===== Place TP/SL conditional orders (reduce-only, linked to a specific position) =====
   const handlePlaceTpSl = useCallback((symbol: string, pos: Position, tp: number | null, sl: number | null, pct: number) => {
-    if ((tp === null || !(tp > 0)) && (sl === null || !(sl > 0))) {
-      toast.error('请至少输入一个有效的触发价格');
-      return;
-    }
-
-    const safePct = Math.min(100, Math.max(1, pct));
-    const totalUnits = getPositionUnits(pos);
-    const closeQty = isCoinSettled(pos)
-      ? Math.max(1, Math.round(totalUnits * (safePct / 100)))
-      : totalUnits * (safePct / 100);
-    if (closeQty <= 0) {
-      toast.error('平仓数量无效');
-      return;
-    }
-
-    const markPrice = priceMapRef.current[symbol] || 0;
-
-    // Sanity check TP/SL direction relative to current mark price
-    if (markPrice > 0) {
-      if (tp !== null && tp > 0) {
-        if (pos.side === 'LONG' && tp <= markPrice) { toast.error('多单止盈价必须高于当前价'); return; }
-        if (pos.side === 'SHORT' && tp >= markPrice) { toast.error('空单止盈价必须低于当前价'); return; }
-      }
-      if (sl !== null && sl > 0) {
-        if (pos.side === 'LONG' && sl >= markPrice) { toast.error('多单止损价必须低于当前价'); return; }
-        if (pos.side === 'SHORT' && sl <= markPrice) { toast.error('空单止损价必须高于当前价'); return; }
-      }
-    }
+    const levels = { tp, sl, percentage: pct };
+    // 持仓卡上改止盈止损，参照价是**此刻的标记价**：仓位已经在市场里了。
+    // （随单下达那条路参照的是开仓价——见 applyAttachedTpSl。）
+    const invalid = validateTpSlLevels(pos.side, levels, priceMapRef.current[symbol] || 0);
+    if (invalid) { toast.error(invalid.message); return; }
 
     const now = getEffectiveTime(symbol);
-    const closeSide: OrderSide = pos.side === 'LONG' ? 'SHORT' : 'LONG';
+    const newOrders = buildTpSlOrders({ symbol, position: pos, levels, now, newId: () => crypto.randomUUID() });
+    if (newOrders.length === 0) { toast.error('平仓数量无效'); return; }
 
-    setOrdersMap(prev => {
-      const orders = prev[symbol] || [];
-      // Replace any existing TP/SL on this exact position
-      const filtered = orders.filter(o => !(o.reduceOnly && o.linkedPositionId === pos.id));
-      const newOrders: PendingOrder[] = [];
-
-      if (tp !== null && tp > 0) {
-        const tpOperator: TriggerOperator = pos.side === 'LONG' ? '>=' : '<=';
-        newOrders.push({
-          id: crypto.randomUUID(), side: closeSide, type: 'CONDITIONAL' as OrderType,
-          price: 0, stopPrice: tp, quantity: closeQty,
-          leverage: pos.leverage, marginMode: pos.marginMode,
-          settlementMode: pos.settlementMode, settlementAsset: pos.settlementAsset,
-          contractSizeUsd: pos.contractSizeUsd,
-          contracts: isCoinSettled(pos) ? closeQty : undefined,
-          status: 'PENDING', createdAt: now,
-          conditionalExecType: 'MARKET',
-          operator: tpOperator, triggerDirection: tpOperator === '>=' ? 'UP' : 'DOWN',
-          reduceOnly: true, reduceSymbol: symbol, reducePositionSide: pos.side,
-          linkedPositionId: pos.id, reduceKind: 'TP', reducePercentage: safePct,
-        });
-      }
-
-      if (sl !== null && sl > 0) {
-        const slOperator: TriggerOperator = pos.side === 'LONG' ? '<=' : '>=';
-        newOrders.push({
-          id: crypto.randomUUID(), side: closeSide, type: 'CONDITIONAL' as OrderType,
-          price: 0, stopPrice: sl, quantity: closeQty,
-          leverage: pos.leverage, marginMode: pos.marginMode,
-          settlementMode: pos.settlementMode, settlementAsset: pos.settlementAsset,
-          contractSizeUsd: pos.contractSizeUsd,
-          contracts: isCoinSettled(pos) ? closeQty : undefined,
-          status: 'PENDING', createdAt: now,
-          conditionalExecType: 'MARKET',
-          operator: slOperator, triggerDirection: slOperator === '>=' ? 'UP' : 'DOWN',
-          reduceOnly: true, reduceSymbol: symbol, reducePositionSide: pos.side,
-          linkedPositionId: pos.id, reduceKind: 'SL', reducePercentage: safePct,
-        });
-      }
-
-      return { ...prev, [symbol]: [...filtered, ...newOrders] };
-    });
+    setOrdersMap(prev => ({
+      ...prev,
+      [symbol]: replaceTpSlOrders(prev[symbol] || [], pos.id, newOrders),
+    }));
 
     toast.success('止盈/止损委托已下达', {
-      description: `TP: ${tp || '-'} / SL: ${sl || '-'} · ${safePct}% 仓位`,
+      description: `TP: ${tp || '-'} / SL: ${sl || '-'} · ${Math.min(100, Math.max(1, pct))}% 仓位`,
     });
   }, [getEffectiveTime]);
+
 
   const executeReduceOnlyTrigger = useCallback((
     symbol: string,
@@ -1630,7 +1616,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
     getSymbolMarginMode, setSymbolMarginMode,
     getSymbolSettlementMode, setSymbolSettlementMode,
     activeSymbols,
-    handlePlaceOrder, handleClosePosition, handleCancelOrder, handlePlaceTpSl, executeReduceOnlyTrigger,
+    handlePlaceOrder, handleClosePosition, handleCancelOrder, handlePlaceTpSl, applyAttachedTpSl, executeReduceOnlyTrigger,
     handleAddIsolatedMargin, handleAdjustMargin, handleClearSymbolData,
     fundingRate: FUNDING_RATE,
     liquidationOpen, liquidationDetails, closeLiquidationModal,

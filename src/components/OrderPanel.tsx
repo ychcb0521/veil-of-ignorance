@@ -621,14 +621,25 @@ export function OrderPanel({
     // 不足一张时 belowMinContract 已经让 orderDisabled 为真，走不到这里。
     const finalQty = isCoinMargined ? coinContractsExact(effectiveQty) : effectiveQty;
     if (orderDisabled || finalQty <= 0) return null;
-    const finalType: OrderType = enableTpSl
-      ? (orderType === 'MARKET' ? 'MARKET_TP_SL' : orderType === 'LIMIT' ? 'LIMIT_TP_SL' : orderType)
-      : orderType;
+    /**
+     * 勾选止盈止损**不再改写订单类型**。
+     *
+     * 此前 MARKET → MARKET_TP_SL、LIMIT → LIMIT_TP_SL，止盈价还顺着
+     * `stopPrice || tpTrigger || slTrigger` 兜底链塞进 stopPrice——
+     * 而触发价那行输入在市价/限价标签下根本不渲染（类型是提交这一刻才合成的），
+     * 所以兜底一定会抓到止盈价。引擎于是把**止盈价当成开仓触发价**：
+     * 市价单不再立刻成交、挂到止盈价上开仓；限价单要等价格先摸到止盈价才肯激活。
+     * 现在保护价单独传，开仓价与保护价不再共用一个字段。
+     */
+    const finalType: OrderType = orderType;
     return {
       side: rawSide,
       type: finalType,
       price: priceSelection === 'LIMIT' ? (parseFloat(price) || 0) : 0,
-      stopPrice: parseFloat(stopPrice) || parseFloat(tpTrigger) || parseFloat(slTrigger) || 0,
+      stopPrice: parseFloat(stopPrice) || 0,
+      tpTriggerPrice: enableTpSl ? (parseFloat(tpTrigger) || 0) : 0,
+      slTriggerPrice: enableTpSl ? (parseFloat(slTrigger) || 0) : 0,
+      tpSlPercentage: 100,
       quantity: finalQty,
       leverage,
       marginMode,
