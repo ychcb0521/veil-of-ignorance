@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AddSizingCalculator } from '@/components/AddSizingCalculator';
 import { SessionModeControls } from '@/components/SessionModeControls';
 import type { Position, TradeRecord } from '@/types/trading';
@@ -20,6 +20,10 @@ const tradeHistory: TradeRecord[] = [
   { id: 'old', symbol: 'RAVEUSDT', side: 'LONG', type: 'MARKET', action: 'CLOSE', entryPrice: 90, exitPrice: 95, quantity: 1, leverage: 5, pnl: 999, pnlCoin: 9, fee: 0, slippage: 0, openTime: 100, closeTime: 500, exit_method: 'tp1', settlementMode: 'coin' } as TradeRecord,
 ];
 
+/** 盘口挂单：模块级可变量，默认空——这样现有 13 条测试里 bookLine 恒为 null，
+ *  「S₁ 留给人」那条契约原样成立；只有显式塞单子的测试才看得到盘口线。 */
+const book = vi.hoisted(() => ({ orders: {} as Record<string, unknown[]> }));
+
 vi.mock('@/contexts/TradingContext', async () => {
   const actual = await vi.importActual<typeof import('@/contexts/TradingContext')>('@/contexts/TradingContext');
   return {
@@ -28,6 +32,7 @@ vi.mock('@/contexts/TradingContext', async () => {
       tradingMode: 'direct',
       setTradingMode: vi.fn(),
       positionsMap: { RAVEUSDT: positions },
+      ordersMap: book.orders,
       // 刻意放一个陈旧价：priceMap 是持久化的行情缓存，计算器不该再读它
       priceMap: { RAVEUSDT: 0.6273595 },
       tradeHistory,
@@ -78,7 +83,10 @@ describe('AddSizingCalculator', () => {
     renderCalc();
     type('add-sizing-s1', '130');
     expect(screen.getByTestId('add-sizing-banked-off')).toBeInTheDocument();
-    const x2Before = screen.getByTestId('add-sizing-x2').textContent;
+    // 只锁**数值**：B 一开，A 段的标签会加上「· 仅 A」限定词（那是刻意的——
+    // B 开着时 A 段这两个数都只是一半，不是该照着下的量），但数字必须一字不变。
+    const numsOf = (id: string) => (screen.getByTestId(id).textContent ?? '').match(/[\d,.]+/g);
+    const x2Before = numsOf('add-sizing-x2');
 
     // 检测到本场落袋 1.2 RAVE（旧的 999 那笔在本场之前，不计）
     const fill = screen.getByTestId('add-sizing-fill-banked');
@@ -91,7 +99,7 @@ describe('AddSizingCalculator', () => {
     expect(screen.getByTestId('add-sizing-x2b-out')).toHaveTextContent('15.6');
     expect(screen.getByTestId('add-sizing-banked')).toHaveTextContent('敞口 100.0%');
     // A 本账一字不变
-    expect(screen.getByTestId('add-sizing-x2').textContent).toBe(x2Before);
+    expect(numsOf('add-sizing-x2')).toEqual(x2Before);
   });
 
   it('把 K_B 拖到 S₁ 之下：B 腿变小、只吃掉一部分落袋，界面标出「已越过 S₁」', () => {
@@ -209,5 +217,67 @@ describe('顶栏「加仓」按钮', () => {
     const dialog = screen.getByTestId('add-sizing-dialog');
     expect(within(dialog).getByText('加仓计算器')).toBeInTheDocument();
     expect(within(dialog).getByText('RAVEUSDT')).toBeInTheDocument();
+  });
+});
+
+
+describe('盘口对冲线与 S₁ 偏差', () => {
+  afterEach(() => { book.orders = {}; });
+
+  const hedgeOrder = (over: Record<string, unknown> = {}) => ({
+    id: 'h1', side: 'SHORT', type: 'CONDITIONAL', price: 0, stopPrice: 130,
+    quantity: 500, contracts: 500, contractSizeUsd: 10, settlementMode: 'coin',
+    leverage: 5, marginMode: 'isolated', status: 'PENDING', createdAt: 1_500,
+    ...over,
+  });
+
+  it('盘口没有对冲单时，S₁ 仍然留给人——不预填、不出现盘口区块', () => {
+    renderCalc();
+    expect((screen.getByTestId('add-sizing-s1') as HTMLInputElement).value).toBe('');
+    expect(screen.queryByTestId('add-sizing-book-lines')).not.toBeInTheDocument();
+  });
+
+  it('盘口有对冲单时只摆候选芯片，绝不自动填进 S₁', () => {
+    book.orders = { RAVEUSDT: [hedgeOrder()] };
+    renderCalc();
+    expect(screen.getByTestId('add-sizing-book-line')).toHaveTextContent('130');
+    // 关键：仍然留空。系统分不出「对冲单」与「试单」，不许替用户做决定。
+    expect((screen.getByTestId('add-sizing-s1') as HTMLInputElement).value).toBe('');
+  });
+
+  it('点候选芯片才把线填进 S₁', () => {
+    book.orders = { RAVEUSDT: [hedgeOrder()] };
+    renderCalc();
+    fireEvent.click(screen.getByTestId('add-sizing-book-line'));
+    expect(num('add-sizing-s1')).toBe(130);
+    expect(screen.queryByTestId('add-sizing-s1-deviation')).not.toBeInTheDocument();
+  });
+
+  it('【回归】S₁ 与盘口线不一致 → 按 USDT 明码标出代价，并给一键改正', () => {
+    // 这正是 SCRTUSDT 那场的形状：填的线与盘口挂着的线不是同一条。
+    book.orders = { RAVEUSDT: [hedgeOrder({ stopPrice: 128 })] };
+    renderCalc();
+    type('add-sizing-s1', '130');            // 填 130，盘口挂的是 128
+    const warn = screen.getByTestId('add-sizing-s1-deviation');
+    expect(warn).toHaveTextContent('不是同一条线');
+    expect(warn).toHaveTextContent('128');
+    expect(warn).toHaveTextContent('锁死本应是 0');
+
+    fireEvent.click(screen.getByTestId('add-sizing-use-book-line'));
+    expect(num('add-sizing-s1')).toBe(128);
+    expect(screen.queryByTestId('add-sizing-s1-deviation')).not.toBeInTheDocument();
+  });
+
+  it('B 开着时「合计对冲」升为 Hero，A 段那两个数标明「仅 A」', () => {
+    renderCalc();
+    type('add-sizing-s1', '130');
+    expect(screen.queryByTestId('add-sizing-total-hedge-hero')).not.toBeInTheDocument();
+    expect(screen.getByTestId('add-sizing-x2')).toHaveTextContent('加仓上限 X₂');
+
+    type('add-sizing-g', '1.2');
+    // 真正该挂的量必须和合计加仓一样醒目，而不是躺在底部小字里
+    expect(screen.getByTestId('add-sizing-total-hedge-hero')).toHaveTextContent('72.27');
+    expect(screen.getByTestId('add-sizing-x2')).toHaveTextContent('仅 A');
+    expect(screen.getByTestId('add-sizing-hedge')).toHaveTextContent('仅 A');
   });
 });

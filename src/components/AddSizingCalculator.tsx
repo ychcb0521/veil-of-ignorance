@@ -5,6 +5,12 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { useTradingContext } from '@/contexts/TradingContext';
 import { getCoinMarginedContractSizeUsd, getSettlementAsset } from '@/lib/coinMargined';
 import {
+  PRE_MAIN_LOOKBACK_MS,
+  evaluateS1Deviation,
+  readHedgeLines,
+  sameLine,
+} from '@/lib/hedgeLines';
+import {
   coinsToContracts,
   computeBankedAdd,
   computeCushionAdd,
@@ -114,6 +120,30 @@ export function AddSizingCalculator({ open, onClose, symbol, currentPrice = 0 }:
   );
   const bankedSuggest = isCoin ? banked.coin : banked.usd;
 
+  /**
+   * 盘口上真实挂着的对冲线。整套「锁死」的前提是 S₁ 就是这条线——
+   * 此前计算器读不到 ordersMap，两者可以静默地不是同一个数：
+   * 实测填 0.114572 而盘口挂 0.114401，差 0.149%，加仓量因此超 9.1%，
+   * 到线那一刻净值 −3,247 而不是设计的 0。
+   * 只产出候选、不预填也不锁定：系统分不出「对冲单」和「试单/遗留单」的意图，
+   * 用一个可能错的值去占住用户唯一需要判断的输入，是让确定性最低的一方拿走决定权。
+   */
+  const hedgeRead = useMemo(() => readHedgeLines(
+    symbol, ctx.ordersMap, positions, side,
+    (held?.earliestOpenTime ?? 0) - PRE_MAIN_LOOKBACK_MS,
+    isCoin ? 'coin' : 'usdt', face,
+  ), [symbol, ctx.ordersMap, positions, side, held?.earliestOpenTime, isCoin, face]);
+
+  const bookLine = hedgeRead.candidates[0] ?? null;
+  const s1Deviation = useMemo(() => {
+    if (!bookLine || !cushion.ok) return null;
+    if (sameLine(bookLine.price, toNum(s1))) return null;
+    return evaluateS1Deviation({
+      side, sBar: toNum(sBar), s1: toNum(s1), s2: toNum(s2),
+      x1: toNum(x1), g: Math.max(0, toNum(g)), bookPrice: bookLine.price,
+    });
+  }, [bookLine, cushion.ok, side, sBar, s1, s2, x1, g]);
+
   const effectiveKB = kB !== '' ? toNum(kB) : toNum(s1);
   const bankedRes = useMemo(() => {
     const knob: BankedKnob = knobKind === 'line' ? { kind: 'line', kB: effectiveKB } : { kind: 'size', x2: toNum(x2B) };
@@ -207,6 +237,55 @@ export function AddSizingCalculator({ open, onClose, symbol, currentPrice = 0 }:
               onReset={held ? () => setX1(tidyCoins(held.coins)) : undefined} />
           </div>
 
+          {/* 盘口上真实挂着的对冲线。只摆候选、不预填也不锁定 S₁——
+              系统分不出「对冲单」与「试单 / 上一场遗留单」的意图。 */}
+          {(bookLine || hedgeRead.unlineable.length > 0) && (
+            <div data-testid="add-sizing-book-lines" className="flex flex-wrap items-center gap-1 text-[10px]">
+              <span className="text-muted-foreground/70">盘口对冲线</span>
+              {hedgeRead.candidates.map(c => (
+                <button
+                  key={c.id}
+                  type="button"
+                  data-testid="add-sizing-book-line"
+                  onClick={() => setS1(tidyPx(c.price))}
+                  title="填入 S₁"
+                  className={`rounded border px-1.5 py-0.5 font-mono transition-colors ${
+                    sameLine(c.price, toNum(s1))
+                      ? 'border-trading-green/50 bg-trading-green/10 text-trading-green'
+                      : 'border-border text-foreground/80 hover:bg-accent'
+                  }`}
+                >
+                  {fmtPx(c.price)} · {fmtCoins(c.coins)} {coinName}
+                </button>
+              ))}
+              {hedgeRead.candidates.length > 1 && (
+                <span className="text-muted-foreground/60">{hedgeRead.candidates.length} 条线 · 系统不替你选</span>
+              )}
+              {hedgeRead.unlineable.length > 0 && (
+                <span className="text-muted-foreground/60">
+                  {hedgeRead.unlineable.length} 张无固定线（跟踪 / TWAP），未计入
+                </span>
+              )}
+              {hedgeRead.staleCount > 0 && (
+                <span className="text-muted-foreground/60">{hedgeRead.staleCount} 张早于本场，已排除</span>
+              )}
+            </div>
+          )}
+
+          {/* S₁ 与盘口线不一致：不报价差（0.15% 看着就该被忽略），报**钱**。 */}
+          {s1Deviation && (
+            <div data-testid="add-sizing-s1-deviation"
+              className="rounded border border-trading-red/40 bg-trading-red/5 px-2 py-1.5 text-[10px] leading-[1.6] text-trading-red">
+              S₁ {fmtPx(s1Deviation.typedS1)} 与盘口对冲线 {fmtPx(s1Deviation.bookPrice)} 不是同一条线 ——
+              加仓{s1Deviation.excessCoins > 0 ? '多' : '少'}下 {fmtCoins(Math.abs(s1Deviation.excessCoins))} {coinName}
+              （应 {fmtCoins(s1Deviation.shouldAdd)}）；价格走到 {fmtPx(s1Deviation.bookPrice)} 时账面
+              <span className="font-medium"> {fmtUsd(s1Deviation.netAtBookLine)} USD</span>，锁死本应是 0。
+              <button type="button" data-testid="add-sizing-use-book-line"
+                onClick={() => setS1(tidyPx(s1Deviation.bookPrice))}
+                className="ml-1 underline hover:no-underline">按盘口重算</button>
+            </div>
+          )}
+
           <PriceLadder side={side} sBar={toNum(sBar)} s1={toNum(s1)} s2={toNum(s2)} />
 
           {/* A 本账 */}
@@ -230,9 +309,15 @@ export function AddSizingCalculator({ open, onClose, symbol, currentPrice = 0 }:
             {cushion.ok && (
               <>
                 <div className="grid grid-cols-2 gap-2">
-                  <Hero testId="add-sizing-x2" label="加仓上限 X₂" value={fmtCoins(cushion.x2Max)} unit={coinName}
-                    sub={`${fmtUsd(cushion.x2MaxNotional)} USD${contracts(cushion.x2Max, toNum(s2))}`} tone="primary" />
-                  <Hero testId="add-sizing-hedge" label={`对冲 @ S₁ · ${side === 'LONG' ? '空' : '多'}`}
+                  {/* B 账本一开，这两个数就都**只是 A 那一半**，不是该照着下的量。
+                      合计加仓 / 合计对冲在 B 段以 Hero 呈现；这里相应降级，
+                      免得屏幕上最醒目的两个数恰恰是不该用的那两个（本次事故的形状之一）。 */}
+                  <Hero testId="add-sizing-x2" label={bankedOn ? '加仓 X₂ · 仅 A' : '加仓上限 X₂'}
+                    value={fmtCoins(cushion.x2Max)} unit={coinName}
+                    sub={`${fmtUsd(cushion.x2MaxNotional)} USD${contracts(cushion.x2Max, toNum(s2))}`}
+                    tone={bankedOn ? undefined : 'primary'} />
+                  <Hero testId="add-sizing-hedge"
+                    label={`对冲 @ S₁ · ${side === 'LONG' ? '空' : '多'}${bankedOn ? ' · 仅 A' : ''}`}
                     value={fmtCoins(cushion.hedgeCoinsAtS1)} unit={coinName}
                     sub={`${fmtUsd(cushion.hedgeNotionalAtS1)} USD${contracts(cushion.hedgeCoinsAtS1, toNum(s1))}`} />
                 </div>
@@ -300,14 +385,30 @@ export function AddSizingCalculator({ open, onClose, symbol, currentPrice = 0 }:
                 {/* B 账本一开，真正要下的那一单就是 A + B 的总量——X_G 单独看没有下单意义。
                     所以合计升为头条，X_G 与 K_B 退到下一行做拆解。 */}
                 {cushion.ok && (
-                  <Hero
-                    testId="add-sizing-total-add"
-                    label="合计加仓 X₂ + X_G"
-                    value={fmtCoins(cushion.x2Max + bankedRes.x2)}
-                    unit={coinName}
-                    sub={`A ${fmtCoins(cushion.x2Max)} + B ${fmtCoins(bankedRes.x2)}${contracts(cushion.x2Max + bankedRes.x2, toNum(s2))}`}
-                    tone="primary"
-                  />
+                  <div className="grid grid-cols-2 gap-2">
+                    <Hero
+                      testId="add-sizing-total-add"
+                      label="合计加仓 X₂ + X_G"
+                      value={fmtCoins(cushion.x2Max + bankedRes.x2)}
+                      unit={coinName}
+                      sub={`A ${fmtCoins(cushion.x2Max)} + B ${fmtCoins(bankedRes.x2)}${contracts(cushion.x2Max + bankedRes.x2, toNum(s2))}`}
+                      tone="primary"
+                    />
+                    {/* 对冲量此前只是底部一行小字，而 A 段那个「对冲 @ S₁」Hero 只算了 A。
+                        真正要挂的是 X₁ + X₂ + X_G —— 它必须和合计加仓一样醒目。 */}
+                    {!bankedRes.kBBeyondS1 && (
+                      <Hero
+                        testId="add-sizing-total-hedge-hero"
+                        label={`合计对冲 @ S₁ · ${side === 'LONG' ? '空' : '多'}`}
+                        value={fmtCoins(cushion.hedgeCoinsAtS1 + bankedRes.x2)}
+                        unit={coinName}
+                        sub={`X₁ + X₂ + X_G${hedgeRead.filledHedgeCoins > 0 || bookLine
+                          ? ` · 已挂 ${fmtCoins((bookLine?.coins ?? 0) + hedgeRead.filledHedgeCoins)}`
+                          : ''}`}
+                        tone="primary"
+                      />
+                    )}
+                  </div>
                 )}
                 <div className="grid grid-cols-2 gap-2">
                   <Hero testId="add-sizing-x2b-out" label={bankedRes.kBBeyondS1 ? 'B 腿 X_G · 带敞口' : 'B 腿 X_G · 零风险'} value={fmtCoins(bankedRes.x2)} unit={coinName}
