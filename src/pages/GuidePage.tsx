@@ -1933,7 +1933,7 @@ P 不再一把手填，而是拆成三个更可回答的问题：<strong>「这�
                   </tr>
                   <tr>
                     <td className="px-3 py-2 border-t border-border font-medium">当前委托的「数量」</td>
-                    <td className="px-3 py-2 border-t border-border">币本位挂单的币数，按<strong>这一单真正会成交的那个价</strong>折算，并在张数那一行写明口径（按<strong>委托价</strong> / <strong>触发价</strong> / <strong>现价</strong>折算）。逐型：限价 / 限价止盈止损 / 只做Maker / 分段子单 → 委托价；<strong>条件委托（含止盈止损单）→ 触发价</strong>；<strong>跟踪委托 / TWAP / 市价止盈止损 → 现价</strong>。减仓单还会写出<strong>成数</strong>（如「100% 仓位」）：它按触发价折，主读数会比按标记价折的持仓卡小一截，不写成数容易被误读成部分平仓。下单面板的「实际下单 N 张 ≈ …」用的是同一个价，所以输入框、提示、委托列表三处永远是同一个数。</td>
+                    <td className="px-3 py-2 border-t border-border">币本位挂单的币数，按<strong>这一单真正会成交的那个价</strong>折算，并在张数那一行写明口径（按<strong>委托价</strong> / <strong>触发价</strong> / <strong>现价</strong>折算）。逐型：限价 / 限价止盈止损 / 只做Maker / 分段子单 → 委托价；<strong>条件委托（含止盈止损单）→ 触发价</strong>；<strong>跟踪委托 / TWAP / 市价止盈止损 → 现价</strong>。减仓单还会写出<strong>成数</strong>（如「100% 仓位」）：它按触发价折，主读数会比按标记价折的持仓卡小一截，不写成数容易被误读成部分平仓。<strong>TWAP 按剩余量显示</strong>，并单列「剩余 X / 总 Y」——切片引擎只累加已成交量、从不递减挂单量，此前一张走完九成的 TWAP 与一张还没开始的长得一模一样。下单面板的「实际下单 N 张 ≈ …」用的是同一个价，所以输入框、提示、委托列表三处永远是同一个数。</td>
                     <td className="px-3 py-2 border-t border-border">此前一律按<strong>下单那一刻的市价</strong>折算：触发价 0.010344、市价 0.011199 的那张条件单，屏幕上写 892.96 NOM，而它成交时给你的是 966.744006 NOM——差 8.27%，且永不收敛，因为它是拿一个<strong>永不发生的价</strong>算出来的。张数也一样被它定：填 3600 个币会下出 4 张，那 4 张到触发价上是 3866.98 个币，多出的 267 个你从没批准过。<strong>跟踪委托那行输入是「激活价」不是触发价</strong>（成交价 = 极值 ×(1∓回调率)，挂单时不可知），TWAP 的两个价都是 0，所以这两类如实退回<strong>现价并标注</strong>——标签只声称「按此刻的市价，这一单相当于多少币」，不假装那是成交价；拿激活价去折出来的数才会被读成成交价，而它永远不是。</td>
                   </tr>
                   <tr>

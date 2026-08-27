@@ -134,4 +134,23 @@ describe('当前委托的币数按挂单自己的价折算', () => {
     expect(screen.getByTestId('order-qty-coin')).toHaveTextContent('892.936869 NOM');
     expect(screen.getByText(/按现价折算/)).toBeInTheDocument();
   });
+
+  it('【回归】走完九成的 TWAP 要显示剩余量，不是最初的总量', () => {
+    renderOrders(coinOrder({
+      type: 'TWAP', price: 0, stopPrice: 0, status: 'ACTIVE',
+      quantity: 100, contracts: 100, twapTotalQty: 100, twapFilledQty: 90,
+    }));
+    expect(screen.getByTestId('order-remaining-units')).toHaveTextContent('剩余 10.0000 / 总 100.0000 张');
+    expect(screen.getByText(/10 张/)).toBeInTheDocument();      // 张数跟着剩余走
+    expect(screen.queryByText(/100 张/)).not.toBeInTheDocument();
+  });
+
+  it('没走过片的 TWAP 不显示「剩余」那一行', () => {
+    renderOrders(coinOrder({
+      type: 'TWAP', price: 0, stopPrice: 0, status: 'ACTIVE',
+      quantity: 100, contracts: 100, twapTotalQty: 100, twapFilledQty: 0,
+    }));
+    expect(screen.queryByTestId('order-remaining-units')).not.toBeInTheDocument();
+    expect(screen.getByText(/100 张/)).toBeInTheDocument();
+  });
 });
