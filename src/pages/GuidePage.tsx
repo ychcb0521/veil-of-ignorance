@@ -1938,7 +1938,7 @@ P 不再一把手填，而是拆成三个更可回答的问题：<strong>「这�
                   </tr>
                   <tr>
                     <td className="px-3 py-2 border-t border-border font-medium">「止盈/止损」勾选框</td>
-                    <td className="px-3 py-2 border-t border-border">勾上它<strong>不改变订单类型</strong>：市价单仍然当场成交、限价单仍然挂在你写的委托价上、条件单的触发价仍然是你填的那个。两个保护价随单带着，<strong>成交那一刻</strong>才变成挂在这笔仓位上的减仓单（与持仓卡上的「止盈/止损」按钮造出的是同一种东西）。方向校验参照的是<strong>这笔仓位的开仓价</strong>，不是此刻的盘口。</td>
+                    <td className="px-3 py-2 border-t border-border">勾上它<strong>不改变订单类型</strong>：市价单仍然当场成交、限价单仍然挂在你写的委托价上、条件单的触发价仍然是你填的那个。两个保护价随单带着，<strong>成交那一刻</strong>才变成挂在这笔仓位上的减仓单（与持仓卡上的「止盈/止损」按钮造出的是同一种东西）。方向校验参照的是<strong>这笔仓位的开仓价</strong>，不是此刻的盘口，并且<strong>在下单时就拦</strong>——那是你还能改的最后一刻；成交时再查一遍作兜底，若某一腿方向不对，<strong>只丢那一腿</strong>并弹出提示，另一腿照挂。<strong>分段订单 / TWAP / 跟踪委托不支持</strong>随单保护单，勾选框在这三类下直接置灰。</td>
                     <td className="px-3 py-2 border-t border-border">此前勾上它会把类型改写成「限价TP/SL」「市价TP/SL」，并把<strong>止盈价塞进开仓触发价</strong>——触发价那行输入在市价/限价标签下根本不渲染（类型是提交那一刻才合成的），所以一定会兜到止盈价上。后果是：<strong>市价单不再立刻成交，而是挂在止盈价上开仓</strong>；限价单则要等价格先摸到止盈价才肯激活。开仓价与保护价从此分开存，不再共用一个字段。</td>
                   </tr>
                   <tr>

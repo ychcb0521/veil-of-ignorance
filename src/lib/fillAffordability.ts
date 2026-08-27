@@ -27,26 +27,17 @@ export interface FillAffordability {
 }
 
 /**
- * 可用余额 = 余额 − **全仓**仓位占用的保证金。
+ * 一笔成交要动的钱，能不能从**钱包自由现金**里出。
  *
- * 逐仓的保证金在开仓那一刻就已经从 balance 里扣走了，平仓时再还回来，
- * 所以这里再减一次就是重复计算。（AccountInfo.tsx 与 OrderPanel 的
- * 「可用」用的是另一条式子，把逐仓也减了一遍——那是另一个真实的缺陷，不在此处。）
+ * 这个模拟器的记账约定：保证金在开仓那一刻就已经从 balance 里扣走了，
+ * **两种模式都一样**（开仓的 setBalance(prev - requiredMargin) 不分 marginMode，
+ * 平仓也不分模式退还）。所以「还能再花多少」就是 balance 本身——
+ * 再去减仓位占用的保证金，那是把同一笔钱扣两遍。
+ *
+ * （TradingContext 的 calcAvailable 与 AccountInfo / OrderPanel 的「可用」
+ * 各自又减了一遍：前者减全仓、后者减全部。两处都是真实缺陷，但它们是
+ * **下单侧**的偏严，可重试；这里是成交侧，失败即撤单，不可逆，所以不能跟着错。）
  */
-export function crossMarginUsed(positionsMap: PositionsBySymbol): number {
-  let total = 0;
-  for (const positions of Object.values(positionsMap)) {
-    for (const p of positions as Position[]) {
-      if (p.marginMode === 'cross') total += p.margin;
-    }
-  }
-  return total;
-}
-
-export function availableUsd(balance: number, positionsMap: PositionsBySymbol): number {
-  return balance - crossMarginUsed(positionsMap);
-}
-
 export function evaluateFillAffordability(args: {
   availableUsd: number;
   marginUsd: number;
@@ -55,8 +46,19 @@ export function evaluateFillAffordability(args: {
   epsilon?: number;
 }): FillAffordability {
   const { availableUsd: avail, marginUsd, feeUsd, epsilon = 1e-8 } = args;
-  const required = (Number.isFinite(marginUsd) ? marginUsd : 0) + (Number.isFinite(feeUsd) ? feeUsd : 0);
   const safeAvail = Number.isFinite(avail) ? avail : 0;
+  /**
+   * 数字坏掉时**一律判付不起**,绝不当成 0。
+   *
+   * 把 NaN 折成 0 会让 required 变成 0、判定为「付得起」,
+   * 于是 setBalance(prev - NaN) 把余额本身变成 NaN——正是这道闸门要挡的
+   * 那种不可恢复的死状态,而且是它自己造出来的。
+   * 线性分支的 marginUsd 在 leverage <= 0 时就会给出非有限值。
+   */
+  if (!Number.isFinite(marginUsd) || !Number.isFinite(feeUsd)) {
+    return { ok: false, requiredUsd: Number.NaN, availableUsd: safeAvail, shortfallUsd: Number.NaN };
+  }
+  const required = marginUsd + feeUsd;
   const ok = required <= safeAvail + epsilon;
   return {
     ok,

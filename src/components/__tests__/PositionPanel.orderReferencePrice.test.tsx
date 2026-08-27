@@ -127,12 +127,11 @@ describe('当前委托的币数按挂单自己的价折算', () => {
     expect(screen.getByTestId('order-reduce-percentage')).toHaveTextContent('100% 仓位');
   });
 
-  it('市价单勾选止盈止损：列表与面板一样按现价，不拿止盈价折', () => {
-    // 引擎确实成交在那个止盈价上（那是另一个更重的缺陷，已单独立项），
-    // 但面板此刻还认为自己在下市价单。跟着引擎走会让两屏差 25%。
+  it('历史遗留的市价TP/SL 按它真正的成交价折——面板已不再产生这个类型', () => {
+    // 面值 10 ÷ 0.015 = 666.666667
     renderOrders(coinOrder({ type: 'MARKET_TP_SL', price: 0, stopPrice: 0.015, status: 'NEW' }));
-    expect(screen.getByTestId('order-qty-coin')).toHaveTextContent('892.936869 NOM');
-    expect(screen.getByText(/按现价折算/)).toBeInTheDocument();
+    expect(screen.getByTestId('order-qty-coin')).toHaveTextContent('666.666667 NOM');
+    expect(screen.getByText(/按触发价折算/)).toBeInTheDocument();
   });
 
   it('【回归】走完九成的 TWAP 要显示剩余量，不是最初的总量', () => {

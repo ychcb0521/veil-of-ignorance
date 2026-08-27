@@ -69,7 +69,7 @@ import {
 } from '@/lib/reduceOnlyOrderExecution';
 import { upsertOrderSnapshot } from '@/lib/orderSnapshotHistory';
 import { formatPrice, getPriceDecimals } from '@/lib/formatters';
-import { buildTpSlOrders, replaceTpSlOrders, validateTpSlLevels } from '@/lib/tpSlOrders';
+import { buildTpSlOrders, keepValidTpSlLegs, replaceTpSlOrders, validateTpSlLevels } from '@/lib/tpSlOrders';
 import { evaluateFillAffordability, fillCostUsd } from '@/lib/fillAffordability';
 import { orderReferencePrice } from '@/lib/orderReferencePrice';
 import {
@@ -993,8 +993,21 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
     feeUsd: number,
     cancelledAt: number,
   ): boolean => {
+    /**
+     * 用**钱包里的自由现金**判定,不是 calcAvailable。
+     *
+     * calcAvailable = 余额 − Σ全仓保证金,而余额**已经**把两种模式的保证金都扣掉了
+     * （开仓 setBalance(prev - requiredMargin) 不分模式,平仓也不分模式退还）。
+     * 再减一次就是重复计算:开出 50 万全仓仓位后,余额 499,800、
+     * calcAvailable 却是 −200 —— 一个毫无亏损的健康账户被判成负可用。
+     *
+     * 这个重复计算是旧的,但后果是新的:此前它只让**下单**偏严(弹个提示,可以重试),
+     * 现在它跑在**成交**那一刻,而这里失败是不可逆的撤单。
+     * 一个仓位铺得比较开的全仓用户,会看着自己付得起的挂单在触发时被撤掉。
+     * (下单侧那道偏严的检查照旧——它可重试,而且宁严勿松。)
+     */
     const verdict = evaluateFillAffordability({
-      availableUsd: calcAvailable(balanceRef.current, positionsMapRef.current),
+      availableUsd: balanceRef.current,
       marginUsd,
       feeUsd,
     });
@@ -1039,11 +1052,23 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
     const sl = Number(order.attachedSlPrice) > 0 ? Number(order.attachedSlPrice) : null;
     if (tp === null && sl === null) return;
 
-    const levels = { tp, sl, percentage: Number(order.attachedTpSlPercentage) || 100 };
-    if (validateTpSlLevels(position.side, levels, position.entryPrice)) return;
-
+    const requested = { tp, sl, percentage: Number(order.attachedTpSlPercentage) || 100 };
+    /**
+     * **逐腿**取舍,而且失败要出声。
+     *
+     * 早先这里是「一发现坏腿就整体 return，且一声不吭」:
+     * 止盈框里一个笔误会把那张完全合法的止损单一起吞掉——而止损是唯一负责
+     * 封住亏损的那一支;用户拿到的是一个已经开着的杠杆仓位、零保护、零提示,
+     * 唯一的信号是委托列表里少了两行。现在坏哪腿丢哪腿,并且说出来。
+     */
+    const { levels, dropped } = keepValidTpSlLegs(position.side, requested, position.entryPrice);
     const now = getEffectiveTime(symbol);
     const newOrders = buildTpSlOrders({ symbol, position, levels, now, newId: () => crypto.randomUUID() });
+    if (dropped.length > 0) {
+      toast.error('随单止盈/止损未能挂出', {
+        description: `${dropped.map(d => d.message).join('；')}（成交价 ${formatPrice(position.entryPrice, symbol)}）`,
+      });
+    }
     if (newOrders.length === 0) return;
     setOrdersMap(prev => ({
       ...prev,
@@ -1084,6 +1109,32 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
       ...order,
       settlementMode: order.settlementMode ?? getSymbolSettlementMode(symbol),
     });
+
+    /**
+     * 保护价的方向在**下单这一刻**就能判：将来的成交价对每种类型都是已知的
+     * （市价/最优价 = 现价，限价 = 委托价，条件单 = 触发价）。
+     * 在这里拦下来，用户还站在面板前、还能改;拖到成交时再说,那已经是几小时后、
+     * 而且他多半正看着别的标的。成交时那一道留作兜底。
+     */
+    if (attachedTpSl.attachedTpPrice != null || attachedTpSl.attachedSlPrice != null) {
+      const entryGuess = orderReferencePrice(
+        { ...normalizedOrder, type: normalizedOrder.type } as unknown as PendingOrder,
+        effectiveCurrentPrice,
+      ).price;
+      const invalid = validateTpSlLevels(
+        normalizedOrder.side,
+        {
+          tp: attachedTpSl.attachedTpPrice ?? null,
+          sl: attachedTpSl.attachedSlPrice ?? null,
+          percentage: attachedTpSl.attachedTpSlPercentage ?? 100,
+        },
+        entryGuess,
+      );
+      if (invalid) {
+        toast.error(invalid.message, { description: `参照开仓价 ${formatPrice(entryGuess, symbol)}` });
+        return null;
+      }
+    }
 
     const now = getEffectiveTime(symbol);
     const buildExecutionTradeSnapshot = (

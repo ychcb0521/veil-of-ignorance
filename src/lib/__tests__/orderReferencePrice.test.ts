@@ -44,13 +44,17 @@ describe('挂单折算价：逐型对照撮合引擎', () => {
       .toEqual({ price: 0.010344, kind: 'trigger' });
   });
 
-  it('MARKET_TP_SL 故意不读 stopPrice——那是止盈价，而面板此刻还看不见它', () => {
-    // 引擎确实成交在 stopPrice（Index.tsx:1138,1142），但那个值来自
-    // OrderPanel.tsx:616 的 `stopPrice || tpTrigger || slTrigger` 兜底链，抓到的是止盈价。
-    // 跟着它折，面板（还以为在下市价单）与委托列表会差 25%——
-    // 而「面板 / 提示 / 委托列表同一个数」是四次报错换来的不变量，它更重。
+  it('MARKET_TP_SL 读 stopPrice——引擎就成交在那儿，且面板已不再产生这个类型', () => {
+    // 我一度让它退回现价，理由是「面板还以为自己在下市价单，两屏会差 25%」。
+    // 那条理由随勾选框的改造一起作废了：勾选不再改写类型，面板永远不会同屏
+    // 显示一张 MARKET_TP_SL，只剩已经持久化的旧单。对旧单就该按引擎的成交价折。
     expect(orderReferencePrice(order({ type: 'MARKET_TP_SL', price: 0, stopPrice: 0.015 }), MARKET))
-      .toEqual({ price: MARKET, kind: 'market' });
+      .toEqual({ price: 0.015, kind: 'trigger' });
+  });
+
+  it('LIMIT_TP_SL 仍然走价优先——它成交在 price，stopPrice 只是武装线', () => {
+    expect(orderReferencePrice(order({ type: 'LIMIT_TP_SL', price: 0.0100, stopPrice: 0.0150 }), MARKET))
+      .toEqual({ price: 0.0100, kind: 'limit' });
   });
 
   it('LIMIT_TP_SL 成交在 price，stopPrice 只是武装线（Index.tsx:1149-1159）', () => {
@@ -130,11 +134,11 @@ describe('面板折算价：必须与挂单侧给出同一个数', () => {
     }
   });
 
-  it('市价 + 勾选止盈止损：绝不能把止盈价当折算价', () => {
-    // *_TP_SL 是提交那一刻才合成的，渲染时 orderType 还是 MARKET；
-    // 若面板去读那行输入，stopPrice||tpTrigger||slTrigger 会兜到止盈价上，
-    // 用止盈价给开仓单定量 —— 0.015 会把 1 张读成 666.67 个币。
+  it('市价 + 勾选止盈止损：面板按现价，因为它下出去的就是一张市价单', () => {
+    // 勾选不再改写类型，保护价也不再进 stopPrice，所以面板与挂单两侧都读现价。
     expect(panel({ orderType: 'MARKET', triggerPrice: 0.015 })).toEqual({ price: MARKET, kind: 'market' });
+    expect(orderReferencePrice(order({ type: 'MARKET', price: 0, stopPrice: 0 }), MARKET))
+      .toEqual({ price: MARKET, kind: 'market' });
   });
 
   /**
@@ -143,8 +147,10 @@ describe('面板折算价：必须与挂单侧给出同一个数', () => {
    * 两条断言各自为真，整套测试全绿，而屏幕上差着 25%。
    */
   it.each([
+    // MARKET_TP_SL 不在配对表里：面板已经不会产生它，只剩历史遗留单，
+    // 不存在「同一张单同屏两个数」的场景。
     ['市价 + 止盈止损', { orderType: 'MARKET' as const, priceSelection: 'MARKET' as const, limitPrice: 0, triggerPrice: 0.015 },
-      order({ type: 'MARKET_TP_SL', price: 0, stopPrice: 0.015 })],
+      order({ type: 'MARKET', price: 0, stopPrice: 0 })],
     ['条件委托', { orderType: 'CONDITIONAL' as const, priceSelection: 'MARKET' as const, limitPrice: 0, triggerPrice: 0.010344 },
       order({ type: 'CONDITIONAL', price: 0, stopPrice: 0.010344 })],
     ['限价', { orderType: 'LIMIT' as const, priceSelection: 'LIMIT' as const, limitPrice: 0.0100, triggerPrice: 0 },

@@ -23,8 +23,8 @@ import { resolveConditionalTriggerPrice } from '@/lib/conditionalOrders';
  *                            —— 含减仓止盈/止损单，它们就是 CONDITIONAL
  *   TRAILING_STOP            fillPrice = 极值 × (1 ∓ 回调率)      (Index.tsx:1191,1204)
  *   TWAP                     每片按当时市价成交                   (Index.tsx:1367)
- *   MARKET_TP_SL             引擎确实成交在 stopPrice            (Index.tsx:1138,1142)
- *                            —— 但**故意不用它**，理由见下方 MARKET_TP_SL 一节
+ *   MARKET_TP_SL             fillPrice = order.stopPrice        (Index.tsx:1090-1103)
+ *                            —— 只剩历史遗留单会是这个类型，见下方一节
  *
  * 后三类取不到自有价，退回实时市价并标 'market'。这不是在预测成交价——
  * 标签写着「按现价折算」，它声称的就只是「按此刻的市价，这一单相当于多少币」。
@@ -34,15 +34,13 @@ import { resolveConditionalTriggerPrice } from '@/lib/conditionalOrders';
  * 返回 kind 是为了让调用方**把折算口径写在屏幕上**。同一张单在不同价下是不同的币数，
  * 这本身没有错；错的是不说按哪个价算的——用户已经为此报过四次错。
  *
- * ── 关于 MARKET_TP_SL ──
- * 引擎确实把它成交在 stopPrice 上，但那个 stopPrice 是**止盈价**：
- * OrderPanel.tsx:616 的 `stopPrice || tpTrigger || slTrigger` 兜底链会抓到止盈价，
- * 而触发价那行输入在 MARKET 标签下根本不渲染（类型是提交那一刻才合成的）。
- * 于是「市价单勾选止盈止损」会挂成一张停在止盈价上开仓的单子——那是另一个更重的
- * 缺陷，已单独立项。在它修好之前，按 stopPrice 折出来的数不是信息、是伪影：
- * 面板此刻还认为自己在下市价单（它看不到那个 stopPrice），两屏会差 25%。
- * 而「面板 / 提示 / 委托列表三处同一个数」是用户四次报错换来的不变量，它更重。
- * 所以这里**只跟随面板能看见的东西**：不认 MARKET_TP_SL 的 stopPrice。
+ * ── 关于 *_TP_SL 两个历史类型 ──
+ * 它们**不再由面板产生**：勾选「止盈止损」曾经把类型改写成
+ * LIMIT_TP_SL / MARKET_TP_SL、并把止盈价塞进 stopPrice，引擎于是拿止盈价当开仓
+ * 触发价；那条已经改掉了（保护价单独随单带，成交时才兑现）。
+ * 所以现在只剩**已经持久化的旧单**会是这两个类型，面板永远不会同屏显示一张，
+ * 也就不存在「两屏对不上」的问题——按引擎真正的成交价折算即可：
+ * LIMIT_TP_SL 成交在 price（走「价优先」那一支），MARKET_TP_SL 成交在 stopPrice。
  *
  * ── 未统一的既有实现（刻意不动）──
  * TradingContext.tsx:1442 与 journalApi.ts:2370 用的是
@@ -99,7 +97,15 @@ export function orderReferencePrice(
   // 价优先。既有实现里 hedgeLines.ts:106 反着排（stopPrice 优先），
   // 那对 LIMIT_TP_SL 是错的：它成交在 price，stopPrice 只是武装线。
   const limit = positive(order.price);
-  return limit > 0 ? { price: limit, kind: 'limit' } : market();
+  if (limit > 0) return { price: limit, kind: 'limit' };
+
+  // 历史遗留的 MARKET_TP_SL：引擎确实成交在 stopPrice 上（Index.tsx:1090-1103）。
+  // 面板已经不会再产生这个类型，所以不存在「面板与列表对不上」的顾虑了。
+  if (order.type === 'MARKET_TP_SL') {
+    const trigger = positive(order.stopPrice);
+    if (trigger > 0) return { price: trigger, kind: 'trigger' };
+  }
+  return market();
 }
 
 /**

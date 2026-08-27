@@ -50,7 +50,7 @@ import { toast } from "sonner";
 import { Wallet, Crosshair, BookOpen, Tag } from "lucide-react";
 import { Link } from "react-router-dom";
 import { JournalNavMenu } from "@/components/journal/JournalNavMenu";
-import type { PendingOrder, TradeRecord } from "@/types/trading";
+import type { PendingOrder, Position, TradeRecord } from "@/types/trading";
 import { calcUnrealizedPnl } from "@/types/trading";
 import type { ExecutionTradeSnapshot } from "@/lib/executionAssets";
 import type { AssetState } from "@/types/assets";
@@ -99,7 +99,6 @@ const Index = () => {
     balance,
     spotBalance,
     fundingBalance,
-    setBalance,
     isolatedBalances,
     tradeHistory,
     activeSymbolPositions,
@@ -1056,6 +1055,18 @@ const Index = () => {
     if (!symbolOrders || symbolOrders.length === 0) return;
 
     const filledIds: string[] = [];
+    /**
+     * 成交后要挂的止盈止损**不能在 updater 里挂**。
+     *
+     * setOrdersMap 不是 React 的 updater,而是一个**即时**的推进 ref 的包装
+     * （TradingContext.tsx:355-359）:它当场跑一遍回调、把结果写进 ordersMapRef、
+     * 再交给 React。于是嵌套写入的顺序是:
+     *   外层 updater 开始（捕获 prev） → 内层 applyAttachedTpSl 把 TP/SL 写进 ref
+     *   → 外层返回由 prev 算出的 next → ref 被 next **覆盖**。
+     * 保护单当场就被抹掉了,而且抹掉的版本还会被持久化。
+     * 攒起来,等外层写完再挂——非当前标的那条轮询本来就是这个顺序,所以它没事。
+     */
+    const attachAfterFill: { position: Position; order: PendingOrder }[] = [];
 
     for (const kline of newKlines) {
       setOrdersMap((prev) => {
@@ -1270,7 +1281,7 @@ const Index = () => {
               };
               recordExecutionTrade(matchedOrder.tradingMode ?? tradingMode, trade);
             }
-            applyAttachedTpSl(activeSymbol, position, matchedOrder);
+            attachAfterFill.push({ position, order: matchedOrder });
             toast.success(
               `委托成交: ${matchedOrder.side === "LONG" ? "开多" : "开空"} ${formatSettlementQuantity(position, activeSymbol)} @ ${formatPrice(actualFillPrice, activeSymbol)}`,
             );
@@ -1284,7 +1295,12 @@ const Index = () => {
         return { ...prev, [activeSymbol]: remaining };
       });
     }
-  }, [visibleData.length, activeSymbol, recordExecutionTrade, tradingMode, getEffectiveTime, setFilledOrders]);
+
+    // 外层写完之后再挂保护单：此刻 ordersMapRef 已经是成交后的样子。
+    for (const { position, order } of attachAfterFill) {
+      applyAttachedTpSl(activeSymbol, position, order);
+    }
+  }, [visibleData.length, activeSymbol, recordExecutionTrade, tradingMode, getEffectiveTime, setFilledOrders, applyAttachedTpSl]);
 
   // ===== TWAP ENGINE =====
   useEffect(() => {

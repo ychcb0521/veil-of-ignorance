@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import type { Position } from '@/types/trading';
 import {
-  buildTpSlOrders, replaceTpSlOrders, tpSlCloseUnits, validateTpSlLevels,
+  buildTpSlOrders, keepValidTpSlLegs, replaceTpSlOrders, tpSlCloseUnits,
+  validateTpSlLegs, validateTpSlLevels,
 } from '@/lib/tpSlOrders';
 
 let seq = 0;
@@ -113,5 +114,35 @@ describe('止盈止损方向校验', () => {
   it('两边都空是错的；参照价拿不到时不瞎拦', () => {
     expect(validateTpSlLevels('LONG', { tp: null, sl: null, percentage: 100 }, 0.011)?.field).toBe('levels');
     expect(validateTpSlLevels('LONG', { tp: 0.001, sl: 0.99, percentage: 100 }, 0)).toBeNull();
+  });
+
+  it('【回归】止盈填反不得连累止损——那一支才是封住亏损的', () => {
+    // 早先一发现坏腿就整体 return:止盈框里一个笔误会把完全合法的止损单一起吞掉,
+    // 用户拿到一个已经开着的杠杆仓位、零保护、零提示。
+    const levels = { tp: 0.009, sl: 0.0095, percentage: 100 };   // 多单:tp 填反了,sl 合法
+    const legs = validateTpSlLegs('LONG', levels, 0.011199);
+    expect(legs.tp?.field).toBe('tp');
+    expect(legs.sl).toBeNull();
+
+    const kept = keepValidTpSlLegs('LONG', levels, 0.011199);
+    expect(kept.levels.tp).toBeNull();
+    expect(kept.levels.sl).toBe(0.0095);
+    expect(kept.dropped).toHaveLength(1);
+
+    const orders = buildTpSlOrders({ symbol: 'NOMUSD', position: coinPos(), levels: kept.levels, now: 0, newId });
+    expect(orders).toHaveLength(1);
+    expect(orders[0].reduceKind).toBe('SL');
+  });
+
+  it('两腿都合法时一腿都不丢', () => {
+    const kept = keepValidTpSlLegs('LONG', { tp: 0.015, sl: 0.009, percentage: 100 }, 0.011199);
+    expect(kept.dropped).toHaveLength(0);
+    expect(kept.levels).toEqual({ tp: 0.015, sl: 0.009, percentage: 100 });
+  });
+
+  it('两腿都填反时两腿都丢，并且报得出两条原因', () => {
+    const kept = keepValidTpSlLegs('LONG', { tp: 0.009, sl: 0.015, percentage: 100 }, 0.011199);
+    expect(kept.dropped.map(d => d.field)).toEqual(['tp', 'sl']);
+    expect(buildTpSlOrders({ symbol: 'NOMUSD', position: coinPos(), levels: kept.levels, now: 0, newId })).toHaveLength(0);
   });
 });

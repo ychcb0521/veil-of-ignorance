@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import { useState } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import { OrderPanel } from '@/components/OrderPanel';
@@ -129,5 +129,36 @@ describe('随单下达的止盈止损', () => {
     expect(p.type).toBe('MARKET');
     expect(p.tpTriggerPrice).toBe(0);
     expect(p.slTriggerPrice).toBe(SL);
+  });
+
+  /**
+   * 【回归】分段 / TWAP / 跟踪委托不挂随单保护单——它们的挂单是显式字面量造的、
+   * 不带附挂字段，TWAP 的切片成交点更没有兑现入口。此前勾选框对这三类照常渲染、
+   * 照常可勾、然后**静默丢弃**。没做到就别摆在那里。
+   */
+  it.each(['分段订单', 'TWAP', '跟踪委托'])('%s 不给勾选止盈止损', (label) => {
+    renderPanel();
+    fireEvent.click(screen.getByTestId('advanced-type-slot'));
+    fireEvent.click(within(screen.getByTestId('advanced-type-menu')).getByText(label));
+    const box = screen.getByTestId('enable-tpsl') as HTMLInputElement;
+    expect(box.disabled).toBe(true);
+    expect(screen.getByText(/该类型不支持/)).toBeInTheDocument();
+  });
+
+  it('从支持的类型切到不支持的类型，已填的保护价不得随单发出去', () => {
+    const onPlaceOrder = renderPanel();
+    fireEvent.click(screen.getByText('市价'));
+    fireEvent.change(qtyInput(), { target: { value: '3600' } });
+    tickTpSl();
+    fillTpSl(String(TP), String(SL));
+
+    fireEvent.click(screen.getByTestId('advanced-type-slot'));
+    fireEvent.click(within(screen.getByTestId('advanced-type-menu')).getByText('TWAP'));
+    fireEvent.click(screen.getByText('开多'));
+
+    const p = onPlaceOrder.mock.calls[0][0];
+    expect(p.type).toBe('TWAP');
+    expect(p.tpTriggerPrice).toBe(0);
+    expect(p.slTriggerPrice).toBe(0);
   });
 });

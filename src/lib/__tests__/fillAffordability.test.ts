@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { PendingOrder, Position } from '@/types/trading';
-import { availableUsd, crossMarginUsed, evaluateFillAffordability, fillCostUsd } from '@/lib/fillAffordability';
+import { evaluateFillAffordability, fillCostUsd } from '@/lib/fillAffordability';
 import { orderReferencePrice } from '@/lib/orderReferencePrice';
 
 const coinOrder = (over: Partial<PendingOrder> = {}): PendingOrder => ({
@@ -60,12 +60,6 @@ describe('U 本位按成交价估，不是按下单那刻的盘口', () => {
 });
 
 describe('可用余额与逐笔判定', () => {
-  it('只减全仓——逐仓的保证金开仓时就已经从余额里扣走了', () => {
-    const map = { A: [pos({ marginMode: 'cross', margin: 100 })], B: [pos({ marginMode: 'isolated', margin: 500 })] };
-    expect(crossMarginUsed(map)).toBe(100);
-    expect(availableUsd(1000, map)).toBe(900);
-  });
-
   it('【回归】连续扣款：第三笔必须被拦下', () => {
     // 挂单不预留保证金，所以三条各自过得了下单检查的腿会一起扣款。
     // 余额 100,000，每笔 60,240：前两笔加起来已经 120,480。
@@ -93,8 +87,23 @@ describe('可用余额与逐笔判定', () => {
     expect(evaluateFillAffordability({ availableUsd: 100, marginUsd: 100, feeUsd: 0.01 }).ok).toBe(false);
   });
 
-  it('数字坏掉时按 0 算，绝不因为 NaN 就放行', () => {
+  it('【回归】数字坏掉时一律判付不起——把 NaN 折成 0 会让余额自己变成 NaN', () => {
+    // 之前这里把 NaN 折成 0 → required=0 → 判「付得起」→ setBalance(prev - NaN)
+    // → 余额变 NaN,正是这道闸门要挡的那种不可恢复状态,而且是它自己造的。
+    // 线性分支的 marginUsd 在 leverage <= 0 时就会给出非有限值。
     expect(evaluateFillAffordability({ availableUsd: NaN, marginUsd: 10, feeUsd: 0 }).ok).toBe(false);
-    expect(evaluateFillAffordability({ availableUsd: 100, marginUsd: NaN, feeUsd: NaN }).ok).toBe(true);
+    expect(evaluateFillAffordability({ availableUsd: 100, marginUsd: NaN, feeUsd: NaN }).ok).toBe(false);
+    expect(evaluateFillAffordability({ availableUsd: 100, marginUsd: Infinity, feeUsd: 0 }).ok).toBe(false);
+    expect(evaluateFillAffordability({ availableUsd: 100, marginUsd: 10, feeUsd: NaN }).ok).toBe(false);
+  });
+
+  it('【回归】判定基准是钱包自由现金,不是「余额 − 全仓保证金」', () => {
+    // 保证金开仓那一刻就已经从余额里扣走了(两种模式都是),所以再减一次是扣两遍:
+    // 开出 50 万全仓仓位后余额 499,800、「余额 − 全仓保证金」却是 −200 ——
+    // 一个毫无亏损的健康账户被判成负可用,而成交侧失败是不可逆的撤单。
+    const walletAfterOpen = 499_800;
+    const doubleCounted = walletAfterOpen - 500_000;
+    expect(evaluateFillAffordability({ availableUsd: walletAfterOpen, marginUsd: 1000, feeUsd: 0.4 }).ok).toBe(true);
+    expect(evaluateFillAffordability({ availableUsd: doubleCounted, marginUsd: 1000, feeUsd: 0.4 }).ok).toBe(false);
   });
 });

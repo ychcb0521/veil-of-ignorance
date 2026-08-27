@@ -24,29 +24,67 @@ export interface TpSlValidationError {
   field: 'tp' | 'sl' | 'levels' | 'quantity';
 }
 
+/**
+ * 逐腿校验。**必须逐腿**——早先一发现坏腿就整体返回,于是止盈框里一个笔误
+ * 会把那张完全合法的止损单一起吞掉,而止损正是唯一负责封住亏损的那一支。
+ */
+export interface TpSlLegVerdict {
+  tp: TpSlValidationError | null;
+  sl: TpSlValidationError | null;
+  /** 两边都没填。 */
+  empty: boolean;
+}
+
+export function validateTpSlLegs(
+  side: OrderSide,
+  levels: TpSlLevels,
+  referencePrice: number,
+): TpSlLegVerdict {
+  const { tp, sl } = levels;
+  const hasTp = tp !== null && tp > 0;
+  const hasSl = sl !== null && sl > 0;
+  if (!hasTp && !hasSl) return { tp: null, sl: null, empty: true };
+
+  // 参照价对市价单是成交价、对限价单是委托价——都不是「此刻的盘口」。
+  // 拿盘口去校验一张挂在别处的限价单，会把完全合理的止盈判成方向错误。
+  if (!(referencePrice > 0)) return { tp: null, sl: null, empty: false };
+
+  let tpErr: TpSlValidationError | null = null;
+  let slErr: TpSlValidationError | null = null;
+  if (hasTp) {
+    if (side === 'LONG' && tp! <= referencePrice) tpErr = { message: '多单止盈价必须高于开仓价', field: 'tp' };
+    if (side === 'SHORT' && tp! >= referencePrice) tpErr = { message: '空单止盈价必须低于开仓价', field: 'tp' };
+  }
+  if (hasSl) {
+    if (side === 'LONG' && sl! >= referencePrice) slErr = { message: '多单止损价必须低于开仓价', field: 'sl' };
+    if (side === 'SHORT' && sl! <= referencePrice) slErr = { message: '空单止损价必须高于开仓价', field: 'sl' };
+  }
+  return { tp: tpErr, sl: slErr, empty: false };
+}
+
+/** 整体判定，供「下单前就该拦住」的调用方使用。 */
 export function validateTpSlLevels(
   side: OrderSide,
   levels: TpSlLevels,
   referencePrice: number,
 ): TpSlValidationError | null {
-  const { tp, sl } = levels;
-  const hasTp = tp !== null && tp > 0;
-  const hasSl = sl !== null && sl > 0;
-  if (!hasTp && !hasSl) return { message: '请至少输入一个有效的触发价格', field: 'levels' };
+  const v = validateTpSlLegs(side, levels, referencePrice);
+  if (v.empty) return { message: '请至少输入一个有效的触发价格', field: 'levels' };
+  return v.tp ?? v.sl;
+}
 
-  // 参照价对市价单是成交价、对限价单是委托价——都不是「此刻的盘口」。
-  // 拿盘口去校验一张挂在别处的限价单，会把完全合理的止盈判成方向错误。
-  if (!(referencePrice > 0)) return null;
-
-  if (hasTp) {
-    if (side === 'LONG' && tp! <= referencePrice) return { message: '多单止盈价必须高于开仓价', field: 'tp' };
-    if (side === 'SHORT' && tp! >= referencePrice) return { message: '空单止盈价必须低于开仓价', field: 'tp' };
-  }
-  if (hasSl) {
-    if (side === 'LONG' && sl! >= referencePrice) return { message: '多单止损价必须低于开仓价', field: 'sl' };
-    if (side === 'SHORT' && sl! <= referencePrice) return { message: '空单止损价必须高于开仓价', field: 'sl' };
-  }
-  return null;
+/** 丢掉方向不合法的那一腿，另一腿照挂。 */
+export function keepValidTpSlLegs(
+  side: OrderSide,
+  levels: TpSlLevels,
+  referencePrice: number,
+): { levels: TpSlLevels; dropped: TpSlValidationError[] } {
+  const v = validateTpSlLegs(side, levels, referencePrice);
+  const dropped = [v.tp, v.sl].filter(Boolean) as TpSlValidationError[];
+  return {
+    levels: { ...levels, tp: v.tp ? null : levels.tp, sl: v.sl ? null : levels.sl },
+    dropped,
+  };
 }
 
 /** 按成数算出要平掉的量；币本位只能是整数张，且不足一张时至少一张。 */

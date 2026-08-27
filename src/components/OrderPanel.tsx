@@ -73,8 +73,9 @@ const PRIMARY_ORDER_TABS: { value: OrderType; label: string }[] = [
 /**
  * 高级类型槽（第三常驻位）的候选——与币安的下拉一致：
  * 条件委托 / 跟踪委托 / 只做Maker (Post Only) / TWAP / 分段订单。
- * 止盈止损不占标签位：币安把 TP/SL 做成限价/市价表单里的勾选项（本面板已有），
- * LIMIT_TP_SL / MARKET_TP_SL 由勾选组合出，不再单列。
+ * 止盈止损不占标签位：币安把 TP/SL 做成限价/市价表单里的勾选项（本面板已有）。
+ * 勾选**不改变订单类型**——保护价随单带着、成交时才兑现成减仓单；
+ * LIMIT_TP_SL / MARKET_TP_SL 只剩历史遗留单还是这两个类型，面板不再产生它们。
  */
 const ADVANCED_ORDER_TYPES: { value: OrderType; label: string; hint: string }[] = [
   { value: 'CONDITIONAL', label: '条件委托', hint: '价格触及触发价后，按市价成交。' },
@@ -637,8 +638,8 @@ export function OrderPanel({
       type: finalType,
       price: priceSelection === 'LIMIT' ? (parseFloat(price) || 0) : 0,
       stopPrice: parseFloat(stopPrice) || 0,
-      tpTriggerPrice: enableTpSl ? (parseFloat(tpTrigger) || 0) : 0,
-      slTriggerPrice: enableTpSl ? (parseFloat(slTrigger) || 0) : 0,
+      tpTriggerPrice: enableTpSl && tpSlSupported ? (parseFloat(tpTrigger) || 0) : 0,
+      slTriggerPrice: enableTpSl && tpSlSupported ? (parseFloat(slTrigger) || 0) : 0,
       tpSlPercentage: 100,
       quantity: finalQty,
       leverage,
@@ -684,6 +685,15 @@ export function OrderPanel({
     setSnapshotEntryPrice(ctx.priceMap[symbol] ?? currentPrice ?? null);
     setSnapshotOpen(true);
   };
+
+  /**
+   * 随单止盈止损目前只对「成交即建仓、且建的是一个仓位」的类型成立。
+   * 分段订单会拆成 N 张子单（每张各自建仓，需要 N 对保护单）、
+   * TWAP 的每一片都建一个新仓位且切片成交点没有兑现入口、
+   * 跟踪委托的挂单是显式字面量造的，不带附挂字段。
+   * 三者此前都能勾上然后被静默丢弃。
+   */
+  const tpSlSupported = orderType !== 'SCALED' && orderType !== 'TWAP' && orderType !== 'TRAILING_STOP';
 
   const isPrimaryTab = PRIMARY_ORDER_TABS.some(t => t.value === orderType);
   // 第三槽显示当前选中的高级类型名；正在使用高级类型时该槽为激活态
@@ -1163,14 +1173,22 @@ export function OrderPanel({
 
         {/* TP/SL + TIF row */}
         <div className="flex items-center justify-between text-[11px]">
-          <label className="flex items-center gap-1.5 cursor-pointer text-foreground/90">
+          {/* 分段 / TWAP / 跟踪三类不挂随单保护单——它们各自的挂单是显式字面量造的,
+              不带 attachedTpSl,而 TWAP 的切片成交点也没有兑现入口。
+              勾选框此前对这三类照常渲染、照常可勾、然后**静默丢弃**。
+              没做到就别摆在那里:直接不给勾,并把原因写在旁边。 */}
+          <label className={`flex items-center gap-1.5 text-foreground/90 ${
+            tpSlSupported ? 'cursor-pointer' : 'cursor-not-allowed opacity-50'
+          }`}>
             <input
               type="checkbox"
-              checked={enableTpSl}
+              data-testid="enable-tpsl"
+              checked={enableTpSl && tpSlSupported}
+              disabled={!tpSlSupported}
               onChange={e => setEnableTpSl(e.target.checked)}
               className="w-3 h-3 accent-primary"
             />
-            <span>止盈/止损</span>
+            <span>止盈/止损{!tpSlSupported && <span className="ml-1 text-muted-foreground/70">（该类型不支持）</span>}</span>
           </label>
 
           <div className="relative" ref={tifMenuRef}>
@@ -1199,7 +1217,7 @@ export function OrderPanel({
         </div>
 
         {/* Inline TP/SL trigger fields */}
-        {enableTpSl && (
+        {enableTpSl && tpSlSupported && (
           <div className="space-y-1.5">
             <div className="flex items-center bg-secondary rounded-md h-8 px-3">
               <span className="text-[11px] text-trading-green mr-2">止盈</span>
