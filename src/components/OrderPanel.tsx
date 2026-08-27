@@ -16,13 +16,13 @@ import { useTradingContext } from '@/contexts/TradingContext';
 import { formatUSDT } from '@/lib/formatters';
 import { PreTradeSnapshotDialog } from '@/components/journal/PreTradeSnapshotDialog';
 import {
-  coinContractsFromUsdNotional,
+  coinContractsExact,
+  coinContractsExactFromUsdNotional,
   coinMarginAmount,
   coinNotionalUsd,
   formatCoinAmount,
   getCoinMarginedContractSizeUsd,
   getSettlementAsset,
-  roundCoinContracts,
 } from '@/lib/coinMargined';
 import {
   getPositionNotionalUsd,
@@ -235,20 +235,20 @@ export function OrderPanel({
   let notionalValue = 0;
   if (isCoinMargined) {
     if (currencyUnit === 'BASE') {
-      effectiveQty = roundCoinContracts(inputAmount);
+      effectiveQty = coinContractsExact(inputAmount);
       notionalValue = coinNotionalUsd(effectiveQty, contractSizeUsd);
       marginCoin = coinMarginAmount(effectiveQty, effectivePrice, leverage, contractSizeUsd);
       margin = marginCoin * effectivePrice;
     } else if (usdtInputMode === 'ORDER_VALUE') {
       // 「以币计的订单金额」：与币安 COIN-M 一致——先按现价折成 USD 名义，再取整到张
-      effectiveQty = coinContractsFromUsdNotional(inputAmount * effectivePrice, symbol, contractSizeUsd);
+      effectiveQty = coinContractsExactFromUsdNotional(inputAmount * effectivePrice, symbol, contractSizeUsd);
       notionalValue = coinNotionalUsd(effectiveQty, contractSizeUsd);
       marginCoin = coinMarginAmount(effectiveQty, effectivePrice, leverage, contractSizeUsd);
       margin = marginCoin * effectivePrice;
     } else {
       marginCoin = inputAmount;
       const targetNotional = marginCoin * effectivePrice * leverage;
-      effectiveQty = coinContractsFromUsdNotional(targetNotional, symbol, contractSizeUsd);
+      effectiveQty = coinContractsExactFromUsdNotional(targetNotional, symbol, contractSizeUsd);
       notionalValue = coinNotionalUsd(effectiveQty, contractSizeUsd);
       marginCoin = coinMarginAmount(effectiveQty, effectivePrice, leverage, contractSizeUsd);
       margin = marginCoin * effectivePrice;
@@ -267,10 +267,34 @@ export function OrderPanel({
     notionalValue = effectiveQty * effectivePrice;
   }
 
+  /**
+   * 币本位一张的面值固定在 USD（10；BTC 100），所以「最小下单量」换成币是随价浮动的。
+   * 之前不足一张会被静默放大成一张下出去，用户看到的是自己填的数、成交的是别的数。
+   * 现在把这一张究竟是多少币算出来，直接说给用户听。
+   */
+  const minCoinPerContract = effectivePrice > 0 ? contractSizeUsd / effectivePrice : 0;
+  /**
+   * 开仓/平仓两档一视同仁。
+   * 我一度以为平仓档需要豁免（怕拦住尾仓平不掉），那是**基于一个错误前提**：
+   * 面板的「平仓」档根本不平仓——PlaceOrderParams 里没有 reduceOnly，
+   * actionMode 只改按钮文案，handlePlaceOrder 一律 [...existing, position] 追加**新仓位**。
+   * 真正的平仓走 PositionPanel → handleClosePosition，不经过这里。
+   * 豁免的实际后果是造出一个死按钮：effectiveQty=0 时守卫不响、按钮可点，
+   * buildOrderParams 撞上 finalQty <= 0 返回 null，点下去什么都不发生、也没有任何提示。
+   */
+  const belowMinContract = isCoinMargined && quantity.trim() !== '' && effectiveQty < 1;
+  /** 取整后真正会下出去的币量——与输入不一致时必须显式告诉用户。 */
+  const effectiveCoinAmount = effectivePrice > 0
+    ? coinNotionalUsd(effectiveQty, contractSizeUsd) / effectivePrice
+    : 0;
+
   const maxAllowedLeverage = getMaxLeverageForNotional(notionalValue);
   const leverageExceeded = leverage > maxAllowedLeverage && notionalValue > 0;
   const tierInfo = getLeverageTierInfo(notionalValue);
-  const orderDisabled = disabled || leverageExceeded || !!coolingOff || (isCoinMargined && inputAmount > 0 && effectiveQty < 1);
+  // belowMinContract 此前是死代码：roundCoinContracts 只会返回 0 或 ≥1，
+  // 永远落不进 (0,1)，所以「不足一张」从来没被拦住过，而是被放大成一张下出去。
+  // 换成 coinContractsExact 之后这条守卫才真正活了。
+  const orderDisabled = disabled || leverageExceeded || !!coolingOff || belowMinContract;
 
   // Max buy/sell capacity in USDT (notional)
   const maxNotional = Math.max(0, available) * leverage;
@@ -284,9 +308,32 @@ export function OrderPanel({
       : 'COIN_NOTIONAL';
   // 「保证金」模式下必须带上「保证金」三字：只写币名会与「数量」字段完全混淆，
   //  用户会把「5,000,000 RUNE 保证金」误读成「买 5,000,000 个 RUNE」。
+  /**
+   * 「至少要填多少」必须用**当前输入框那一档的单位**报，否则等于换个单位继续骗人。
+   *   张       → 1
+   *   币金额   → 一张的名义折币          = 面值 / 价
+   *   币保证金 → 一张所需的保证金折币    = 面值 / (价 × 杠杆)
+   * 之前三档共用「面值 / 价」，在保证金档下报出来的数是真实所需的 leverage 倍；
+   * 用户照着填会开出 6 倍于本意的仓位。
+   */
+  const minInputInCurrentUnit = coinInputUnit === 'CONTRACTS'
+    ? 1
+    : coinInputUnit === 'COIN_MARGIN'
+      ? (effectivePrice > 0 && leverage > 0 ? contractSizeUsd / (effectivePrice * leverage) : 0)
+      : minCoinPerContract;
+  const minInputUnitLabel = coinInputUnit === 'CONTRACTS'
+    ? '张'
+    : coinInputUnit === 'COIN_MARGIN'
+      ? `${baseCoin} 保证金`
+      : baseCoin;
+
   const unitLabel = currencyUnit === 'BASE'
     ? (isCoinMargined ? '张' : baseCoin)
-    : (isCoinMargined ? (usdtInputMode === 'ORDER_VALUE' ? baseCoin : `${baseCoin} 保证金`) : 'USDT');
+    // 币本位三档必须都自带量纲。此前「币金额」档只写币名，与 U 本位 BASE 档
+    // （那里币名确实等于持币数量）长得一模一样，用户把「10 API3」读成
+    // 「买 10 个 API3」完全合理——而币本位永远拿不到「10 个币的仓位」，
+    // 那个数字自始至终只是个折算金额。这次事故的入口就在这个标签上。
+    : (isCoinMargined ? (usdtInputMode === 'ORDER_VALUE' ? `${baseCoin} 金额` : `${baseCoin} 保证金`) : 'USDT');
   const maxNotionalUnit = isCoinMargined ? 'USD' : 'USDT';
   const marginDisplay = isCoinMargined
     ? `${formatCoinAmount(marginCoin, baseCoin)} ≈ ${formatUSDT(margin)} USD`
@@ -335,7 +382,7 @@ export function OrderPanel({
     if (unit === 'CONTRACTS') {
       setCurrencyUnit('BASE');
       setUsdtInputMode('ORDER_VALUE');
-      setQuantity(hasExistingOrder ? String(roundCoinContracts(effectiveQty)) : '');
+      setQuantity(hasExistingOrder ? String(coinContractsExact(effectiveQty)) : '');
     } else if (unit === 'COIN_NOTIONAL') {
       setCurrencyUnit('USDT');
       setUsdtInputMode('ORDER_VALUE');
@@ -418,7 +465,9 @@ export function OrderPanel({
   const [snapshotEntryPrice, setSnapshotEntryPrice] = useState<number | null>(null);
 
   const buildOrderParams = (rawSide: OrderSide): PlaceOrderParams | null => {
-    const finalQty = isCoinMargined ? roundCoinContracts(effectiveQty) : effectiveQty;
+    // 绝不向上兜底：把「不足一张」放大成一张正是本次要修的东西。
+    // 不足一张时 belowMinContract 已经让 orderDisabled 为真，走不到这里。
+    const finalQty = isCoinMargined ? coinContractsExact(effectiveQty) : effectiveQty;
     if (orderDisabled || finalQty <= 0) return null;
     const finalType: OrderType = enableTpSl
       ? (orderType === 'MARKET' ? 'MARKET_TP_SL' : orderType === 'LIMIT' ? 'LIMIT_TP_SL' : orderType)
@@ -868,6 +917,34 @@ export function OrderPanel({
             </PopoverContent>
           </Popover>
         </div>
+
+        {/* 币本位的下单量只能是整数张（面值锁在 USD），所以输入几乎总要被取整。
+            以前取整是静默的，还会把「不足一张」放大成一张——用户看到的数和
+            成交的数不是一个。这里把两种情况都说出来。 */}
+        {belowMinContract && (
+          <div
+            data-testid="coin-min-order-hint"
+            className="mt-1 text-[10px] leading-4 text-trading-red"
+          >
+            低于最小下单量：1 张 = {formatUSDT(contractSizeUsd)} USD
+            ≈ {formatCoinAmount(minCoinPerContract, baseCoin)}
+            {'，请至少填 '}
+            {coinInputUnit === 'CONTRACTS' ? '1' : minInputInCurrentUnit.toFixed(6)}
+            {' '}{minInputUnitLabel}
+          </div>
+        )}
+        {!belowMinContract && isCoinMargined && inputAmount > 0 && effectiveQty > 0 && (
+          <div
+            data-testid="coin-effective-qty-hint"
+            className="mt-1 text-[10px] leading-4 text-muted-foreground/80"
+          >
+            实际下单 {effectiveQty} 张 ≈ 名义 {formatCoinAmount(effectiveCoinAmount, baseCoin)}
+            {' '}≈ {formatUSDT(notionalValue)} USD
+            {coinInputUnit === 'COIN_MARGIN' && (
+              <>{'，占用保证金 '}{formatCoinAmount(marginCoin, baseCoin)}</>
+            )}
+          </div>
+        )}
 
         {/* 仓位比例滑条 —— 币安式：菱形锚点常驻、不占一行百分比文字，
             当前比例只在非 0 时以小字浮在右上，避免固定标签占掉纵向空间。 */}

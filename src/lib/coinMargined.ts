@@ -32,6 +32,42 @@ export function getCoinContractSizeUsd(symbol: string, item?: CoinLikeInstrument
   return Number.isFinite(value) && value > 0 ? value : getCoinMarginedContractSizeUsd(symbol);
 }
 
+/**
+ * 把张数取整到合约粒度，**不设下限**。可能返回 0——那正是「这一单小于一张」的信号。
+ *
+ * 与 roundCoinContracts 有两处区别，都是要害：
+ *
+ * 1. **不设下限**。后者写着 Math.max(1, …)，于是「不足一张」被静默放大成一张。
+ *    币本位一张面值 10 USD（BTC 100 USD），在 0.4092 的币价上一张 ≈ 24.44 个币——
+ *    用户在「币金额」档填 10，期望 ≈4.09 USD 的仓位，拿到的是 10 USD、24.44 个币，
+ *    **2.4 倍**，而输入框自始至终显示「10」。
+ *
+ * 2. **向下取整，不是四舍五入**。输入框里的数字是用户的**授权上限**：
+ *    保证金、手续费、强平距离全都随它等比放大，多开的那一截是他从没批准过的钱。
+ *    少开可以再补一单，多开要付一个 taker 来回加滑点才能削回去；真实交易所对
+ *    LOT_SIZE 也一律截断。四舍五入下 1.514 张 → 2 张，用户填 37 个币拿到 48.88 个，
+ *    多 32%，而这正是「填的数和拿到的数不一样」这件事本身。
+ *    ε 是为了 2.9999999 这种浮点噪声，别让它掉成 2。
+ */
+export function coinContractsExact(value: number): number {
+  if (!Number.isFinite(value) || value <= 0) return 0;
+  return Math.floor(value + 1e-9);
+}
+
+export function coinContractsExactFromUsdNotional(
+  notionalUsd: number,
+  symbol: string,
+  contractSizeUsd = getCoinMarginedContractSizeUsd(symbol),
+): number {
+  if (!(contractSizeUsd > 0)) return 0;
+  return coinContractsExact(Number(notionalUsd) / contractSizeUsd);
+}
+
+/**
+ * 规范化**已经存在的**订单/仓位的张数。这里保留 Math.max(1, …)：
+ * 一张已经成交的单子不该被读成 0 张（那会变成幽灵仓位）。
+ * ⚠ 但它绝不能用在「把用户输入换算成下单量」的路径上——见 coinContractsExact。
+ */
 export function roundCoinContracts(value: number): number {
   return Number.isFinite(value) && value > 0 ? Math.max(1, Math.round(value)) : 0;
 }
