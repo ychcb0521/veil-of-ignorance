@@ -162,6 +162,8 @@ export function OrderPanel({
    * '0.003173' × 94537 ÷ 100 = 2.9997,一次反推就把 3 张掉成 2。
    */
   const lockFoldRef = useRef({ raw: 0, price: 0 });
+  /** 输入框是否正被编辑。编辑期间绝不回写，否则用户打一半的数会被改掉。 */
+  const [qtyFocused, setQtyFocused] = useState(false);
   const [percent, setPercent] = useState(0);
 
   // TP/SL inline checkbox state
@@ -419,6 +421,29 @@ export function OrderPanel({
     setLockedContracts(foldContracts(raw, nextPrice));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [leverage, price, priceSelection]);
+
+  /**
+   * 未聚焦时，把输入框持续同步成「锁定张数在当前价下的等值」。
+   *
+   * 币本位的「币数」随价浮动是物理事实：4 张 = 40 USD 面值，折成币 = 40 ÷ 现价。
+   * 此前只在失焦那一刻吸附一次，于是框里冻着吸附时刻的数（95.417571 @0.419209），
+   * 而提示与当前委托跟着现价走（95.330021 @0.419595）——同一屏上两个数，
+   * 正是用户反复报的「下单币数与当前委托显示的不一样」。
+   *
+   * 只改显示，不碰锁：张数仍然只在输入变动时折算一次。折算源同步成与锁
+   * **精确一致**的未取整数值，让后续重折不必从六位小数的显示串反推。
+   */
+  useEffect(() => {
+    if (qtyFocused || snappedInput == null || snappedInput === quantity) return;
+    setQuantity(snappedInput);
+    lockFoldRef.current = {
+      raw: coinInputUnit === 'CONTRACTS' ? effectiveQty
+        : coinInputUnit === 'COIN_MARGIN' ? marginCoin
+        : effectiveCoinAmount,
+      price: effectivePrice,
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [qtyFocused, snappedInput]);
 
   const applyPercent = (p: number) => {
     setPercent(p);
@@ -924,20 +949,8 @@ export function OrderPanel({
             type="text"
             value={quantity}
             onChange={e => { updateQuantity(e.target.value); setPercent(0); }}
-            onBlur={() => {
-              // 不足一张时不吸附：那会把用户刚填的数抹成空白，
-              // 而他需要看着自己填的数去对照红字里的最小量。
-              if (snappedInput == null || snappedInput === quantity) return;
-              setQuantity(snappedInput);
-              // 吸附只改显示;折算源同步为与锁**精确一致**的未取整数值,
-              // 锁本身不动。之后的重折从这里出发,不从六位小数的显示串反推。
-              lockFoldRef.current = {
-                raw: coinInputUnit === 'CONTRACTS' ? effectiveQty
-                  : coinInputUnit === 'COIN_MARGIN' ? marginCoin
-                  : effectiveCoinAmount,
-                price: effectivePrice,
-              };
-            }}
+            onFocus={() => setQtyFocused(true)}
+            onBlur={() => setQtyFocused(false)}
             data-testid="order-qty-input"
             placeholder="0"
             className="flex-1 w-full min-w-0 bg-transparent text-right text-[13px] text-foreground font-mono tabular-nums outline-none placeholder:text-muted-foreground/60"

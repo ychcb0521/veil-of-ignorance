@@ -75,11 +75,34 @@ describe('币本位张数锁', () => {
     fireEvent.change(qtyInput(), { target: { value: '99' } });
     expect(hint()).toHaveTextContent('实际下单 4 张');
 
-    fireEvent.blur(qtyInput());               // 吸附到 4 张的边界值
-    expect(parseFloat(qtyInput().value)).toBeCloseTo(95.4176, 3);
+    fireEvent.blur(qtyInput());               // 失焦 → 同步成当前价下的等值
+    expect(parseFloat(qtyInput().value)).toBeCloseTo(40 / P1, 3);
 
     rerenderAt(P2);                           // 行情下跳
     expect(hint()).toHaveTextContent('实际下单 4 张');   // 旧代码这里是 3 张
+  });
+
+  it('【回归】未聚焦时框里的数跟着现价走——三处必须是同一个数', () => {
+    // 事故的另一半：框冻在吸附时刻(95.417571 @0.419209)，提示随现价(95.330021 @0.419595)，
+    // 同一屏两个数。币本位的币数本来就随价浮动，框也必须跟着。
+    const { rerenderAt } = renderPanel(P1);
+    fireEvent.change(qtyInput(), { target: { value: '99' } });
+    fireEvent.blur(qtyInput());
+    expect(parseFloat(qtyInput().value)).toBeCloseTo(40 / P1, 4);
+
+    rerenderAt(P2);
+    // 框、提示、以及将要提交的量，全部落在 4 张 @P2 上
+    expect(parseFloat(qtyInput().value)).toBeCloseTo(40 / P2, 4);
+    expect(hint()).toHaveTextContent(String((40 / P2).toFixed(4).slice(0, 6)));
+    expect(hint()).toHaveTextContent('实际下单 4 张');
+  });
+
+  it('正在输入时绝不回写——打一半的数不能被改掉', () => {
+    const { rerenderAt } = renderPanel(P1);
+    fireEvent.focus(qtyInput());
+    fireEvent.change(qtyInput(), { target: { value: '99' } });
+    rerenderAt(P2);                           // 编辑期间行情跳动
+    expect(qtyInput().value).toBe('99');      // 原样保留
   });
 
   it('【回归】点击提交的张数 = 提示里的张数,与点击那一刻的价格无关', () => {
