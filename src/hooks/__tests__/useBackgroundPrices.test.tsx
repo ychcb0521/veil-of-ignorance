@@ -133,4 +133,112 @@ describe('useBackgroundPrices', () => {
       expect.any(Number),
     );
   });
+
+  /**
+   * 非当前标的的撮合此前**自己手算**成交:
+   *   fee    = calcFee(fillPrice, order.quantity)
+   *   margin = order.quantity × fillPrice ÷ leverage
+   * 那是线性合约的式子。币本位的 quantity 是**张**,名义 = 张 × 面值(USD),与价无关。
+   * 100 张 × 10 USD = 1000 USD 名义,3x 杠杆应收 333.33 USD 保证金;
+   * 手算式给出 0.3448 USD —— 少收 966.74 倍,而这个倍数恰好就是「一张等于多少币」。
+   * 更糟的是建出来的仓位不带 settlementMode / contracts / contractSizeUsd,
+   * 此后每一处 getPositionNotionalUsd 都走 U 本位分支。
+   */
+  describe('币本位挂单在非当前标的上成交', () => {
+    const FACE = 10;
+    const CONTRACTS = 100;
+    const LEV = 3;
+    const TRIGGER = 0.010344;
+
+    const coinOrder = (): PendingOrder => ({
+      id: 'bg-coin',
+      side: 'LONG',
+      type: 'CONDITIONAL',
+      price: 0,
+      stopPrice: TRIGGER,
+      quantity: CONTRACTS,
+      contracts: CONTRACTS,
+      contractSizeUsd: FACE,
+      settlementMode: 'coin',
+      settlementAsset: 'NOM',
+      leverage: LEV,
+      marginMode: 'isolated',
+      status: 'PENDING',
+      createdAt: 100,
+      operator: '<=',
+      triggerDirection: 'DOWN',
+    } as PendingOrder);
+
+    async function runFill() {
+      const setBalance = vi.fn();
+      const setPositionsMap = vi.fn();
+      const setFilledOrders = vi.fn();
+      const recordExecutionTrade = vi.fn();
+      vi.mocked(fetchCanonicalTimePriceAt).mockResolvedValue({ high: 0.011, low: 0.0102, close: 0.0105 });
+      vi.mocked(useTradingContext).mockReturnValue({
+        sim: { isRunning: true },
+        activeSymbol: 'ACTIVEUSDT',
+        activeSymbols: ['ACTIVEUSDT', 'NOMUSD'],
+        setPriceMap: vi.fn(),
+        markPriceAsOf: vi.fn(),
+        ordersMap: { NOMUSD: [coinOrder()] },
+        setOrdersMap: vi.fn(),
+        setPositionsMap,
+        setBalance,
+        setFilledOrders,
+        tradingMode: 'direct',
+        getEffectiveTime: vi.fn(() => 1_000),
+        recordExecutionTrade,
+        executeReduceOnlyTrigger: vi.fn(),
+      } as unknown as ReturnType<typeof useTradingContext>);
+
+      render(<Harness />);
+      await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+      return { setBalance, setPositionsMap, setFilledOrders, recordExecutionTrade };
+    }
+
+    it('【回归】按 张 × 面值 收保证金,不是按 张 × 价', async () => {
+      const { setBalance } = await runFill();
+      expect(setBalance).toHaveBeenCalledTimes(1);
+      const charged = 1_000_000 - setBalance.mock.calls[0][0](1_000_000);
+      // 名义 1000 USD ÷ 3 = 333.333 保证金,+ 1000 × 0.0004 = 0.4 手续费
+      expect(charged).toBeCloseTo(1000 / LEV + 1000 * 0.0004, 6);
+      // 旧式给出的是 0.3448 + 0.0005 —— 少收将近三个数量级
+      expect(charged).toBeGreaterThan(300);
+    });
+
+    it('【回归】建出来的仓位带齐结算字段,否则此后全按 U 本位读', async () => {
+      const { setPositionsMap } = await runFill();
+      const next = setPositionsMap.mock.calls[0][0]({ NOMUSD: [] });
+      const pos = next.NOMUSD[0];
+      expect(pos.settlementMode).toBe('coin');
+      expect(pos.settlementAsset).toBe('NOM');
+      expect(pos.contracts).toBe(CONTRACTS);
+      expect(pos.contractSizeUsd).toBe(FACE);
+      expect(pos.marginCoin).toBeGreaterThan(0);
+      // 逐仓保证金也要按 USD 名义,而不是 张 × 价
+      expect(pos.isolatedMargin).toBeCloseTo(1000 / LEV, 6);
+    });
+
+    it('【回归】成交要落 filled_orders,否则战役页永远看不到这条腿', async () => {
+      const { setFilledOrders } = await runFill();
+      expect(setFilledOrders).toHaveBeenCalledTimes(1);
+      const snap = setFilledOrders.mock.calls[0][0]([])[0];
+      expect(snap.id).toBe('bg-coin');
+      expect(snap.contracts).toBe(CONTRACTS);
+      expect(snap.settlementMode).toBe('coin');
+      expect(snap.triggerPrice).toBeCloseTo(TRIGGER, 9);
+    });
+
+    it('【回归】执行力资产收到的名义是 USD 名义,不是 张 × 价', async () => {
+      const { recordExecutionTrade } = await runFill();
+      expect(recordExecutionTrade).toHaveBeenCalledTimes(1);
+      const trade = recordExecutionTrade.mock.calls[0][1];
+      expect(trade.notionalUsd).toBeCloseTo(1000, 6);
+      expect(trade.settlementMode).toBe('coin');
+      expect(trade.contracts).toBe(CONTRACTS);
+      // 旧式写的是 order.quantity × fillPrice ≈ 1.03
+      expect(trade.notional).toBeGreaterThan(900);
+    });
+  });
 });

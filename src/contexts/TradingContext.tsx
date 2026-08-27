@@ -68,7 +68,7 @@ import {
   type ReduceOnlyTriggerExecution,
 } from '@/lib/reduceOnlyOrderExecution';
 import { upsertOrderSnapshot } from '@/lib/orderSnapshotHistory';
-import { getPriceDecimals } from '@/lib/formatters';
+import { formatPrice, getPriceDecimals } from '@/lib/formatters';
 import {
   createDefaultExecutionAssetState,
   recordExecutionTrade as applyExecutionTradeReward,
@@ -1024,7 +1024,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
       if (normalizedOrder.side === 'LONG') {
         recordExecutionTrade(tradingModeRef.current, buildExecutionTradeSnapshot(position, 'BEST'));
       }
-      toast.success(`最优价成交: ${normalizedOrder.side === 'LONG' ? '开多' : '开空'} ${formatSettlementQuantity(position, symbol)} @ ${position.entryPrice.toFixed(2)}`);
+      toast.success(`最优价成交: ${normalizedOrder.side === 'LONG' ? '开多' : '开空'} ${formatSettlementQuantity(position, symbol)} @ ${formatPrice(position.entryPrice, symbol)}`);
       return { id: position.id };
     }
 
@@ -1047,7 +1047,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
       if (normalizedOrder.side === 'LONG') {
         recordExecutionTrade(tradingModeRef.current, buildExecutionTradeSnapshot(position, normalizedOrder.type));
       }
-      toast.success(`${normalizedOrder.side === 'LONG' ? '开多' : '开空'} ${formatSettlementQuantity(position, symbol)} @ ${position.entryPrice.toFixed(2)}`);
+      toast.success(`${normalizedOrder.side === 'LONG' ? '开多' : '开空'} ${formatSettlementQuantity(position, symbol)} @ ${formatPrice(position.entryPrice, symbol)}`);
       return { id: position.id };
     }
 
@@ -1302,7 +1302,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
     const pctLabel = pct < 1 ? ` (${Math.round(pct * 100)}%)` : '';
     const netPnl = pnlUsd - feeUsd;
     toast.success(`市价平仓成功，已结算盈亏：${netPnl >= 0 ? '+' : ''}${netPnl.toFixed(2)} USDT`, {
-      description: `${symbol} ${formatSettlementQuantity({ ...pos, quantity: closeQty, contracts: isCoinSettled(pos) ? closeQty : undefined }, symbol)}${pctLabel} @ ${fillPrice.toFixed(2)}`,
+      description: `${symbol} ${formatSettlementQuantity({ ...pos, quantity: closeQty, contracts: isCoinSettled(pos) ? closeQty : undefined }, symbol)}${pctLabel} @ ${formatPrice(fillPrice, symbol)}`,
     });
   }, [getEffectiveTime]);
 
@@ -1426,7 +1426,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
     setFilledOrders(prev => upsertOrderSnapshot(prev, execution.filledOrder));
 
     const kindLabel = order.reduceKind === 'TP' ? '止盈' : order.reduceKind === 'SL' ? '止损' : '条件';
-    toast.success(`${kindLabel}已触发：${execution.targetSymbol} @ ${execution.fillPrice.toFixed(2)}`, {
+    toast.success(`${kindLabel}已触发：${execution.targetSymbol} @ ${formatPrice(execution.fillPrice, execution.targetSymbol)}`, {
       description: `${execution.netPnl >= 0 ? '+' : ''}${execution.netPnl.toFixed(2)} USDT`,
     });
     return execution;

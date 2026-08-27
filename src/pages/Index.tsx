@@ -29,7 +29,7 @@ import { getConditionalTriggerDecisionFromRange } from "@/lib/conditionalOrders"
 import { fetchCanonicalTimePriceAt } from "@/lib/canonicalTimePrice";
 import { applyCurrentPriceToVisibleData } from "@/lib/visibleDataPrice";
 import { earliestLongStopPrice } from "@/lib/longRiskAnchor";
-import { getPriceDecimals } from "@/lib/formatters";
+import { formatPrice, getPriceDecimals } from "@/lib/formatters";
 import {
   getReverseVisibleData,
   mirrorSettledBar,
@@ -578,7 +578,7 @@ const Index = () => {
       };
       ordersMapRef.current = nextOrdersMap;
       setOrdersMap(nextOrdersMap);
-      toast.success(`条件单已触发：${symbol} ${order.side} ${formatSettlementQuantity(position, symbol)} @ ${entryPrice.toFixed(2)}`);
+      toast.success(`条件单已触发：${symbol} ${order.side} ${formatSettlementQuantity(position, symbol)} @ ${formatPrice(entryPrice, symbol)}`);
       return true;
     },
     [executeReduceOnlyTrigger, setBalance, setFilledOrders, setOrdersMap, setPositionsMap],
@@ -1309,7 +1309,7 @@ const Index = () => {
               recordExecutionTrade(matchedOrder.tradingMode ?? tradingMode, trade);
             }
             toast.success(
-              `委托成交: ${matchedOrder.side === "LONG" ? "开多" : "开空"} ${formatSettlementQuantity(position, activeSymbol)} @ ${actualFillPrice.toFixed(2)}`,
+              `委托成交: ${matchedOrder.side === "LONG" ? "开多" : "开空"} ${formatSettlementQuantity(position, activeSymbol)} @ ${formatPrice(actualFillPrice, activeSymbol)}`,
             );
           } else if (convertToLimit) {
             remaining.push(updatedOrder);

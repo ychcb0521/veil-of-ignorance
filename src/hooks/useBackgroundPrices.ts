@@ -8,9 +8,17 @@
 import { useEffect, useRef, useCallback } from "react";
 import { useTradingContext } from "@/contexts/TradingContext";
 import type { PendingOrder } from "@/types/trading";
-import { calcFee } from "@/types/trading";
 import type { ExecutionTradeSnapshot } from "@/lib/executionAssets";
 import { getConditionalTriggerDecisionFromRange } from "@/lib/conditionalOrders";
+import {
+  executeSettlementFill,
+  formatSettlementQuantity,
+  getPositionNotionalUsd,
+  getPositionUnits,
+  isPositionOpen,
+} from "@/lib/tradingSettlement";
+import { upsertOrderSnapshot } from "@/lib/orderSnapshotHistory";
+import { formatPrice } from "@/lib/formatters";
 import { toast } from "sonner";
 import { fetchCanonicalTimePriceAt, type CanonicalTimePrice } from "@/lib/canonicalTimePrice";
 
@@ -27,6 +35,7 @@ export function useBackgroundPrices() {
     setOrdersMap,
     setPositionsMap,
     setBalance,
+    setFilledOrders,
     tradingMode,
     getEffectiveTime,
     recordExecutionTrade,
@@ -94,32 +103,52 @@ export function useBackgroundPrices() {
           }
 
           // === REGULAR OPEN PATH ===
+          //
+          // 走与盘面同一个结算入口。这里**曾经自己手算**:
+          //   fee    = calcFee(fillPrice, order.quantity)
+          //   margin = order.quantity × fillPrice ÷ leverage
+          // 那是线性合约的式子。币本位的 quantity 是**张**,名义是 张 × 面值(USD),
+          // 与价无关——13291 张 RAVE 的名义是 132,910 USD,手算式给出 5,994 USD,
+          // 保证金因此只收了应收的 1/22。而且建出来的仓位不带 settlementMode /
+          // contracts / contractSizeUsd / marginCoin,于是此后每一处
+          // getPositionNotionalUsd 都会走 U 本位分支,未实现盈亏、维持保证金、
+          // 强平距离全部按错误的名义计算。
+          //
+          // executeSettlementFill 是纯函数,盘面撮合(Index.tsx:545,1251)用的就是它:
+          // 归一化 → 滑点 → 手续费 → 保证金 → 造出带齐结算字段的 Position。
           filledIds.push(order.id);
-          const fee = calcFee(fillPrice, order.quantity, false);
-          const margin = (order.quantity * fillPrice) / order.leverage;
-          const positionId = crypto.randomUUID();
           const simulatedTime = getEffectiveTime(symbol);
+          const { fee, margin, position } = executeSettlementFill(symbol, fillPrice, order, false, simulatedTime);
+          const actualFillPrice = position.entryPrice;
 
+          // 成交快照。此前这里一处都不写,于是「非当前标的」上触发的单子
+          // 在 filled_orders 里没有任何痕迹——战役页的「反向对冲挂单」
+          // (journalApi.ts:2466 triggeredReverseOrders)永远看不到这些腿。
+          setFilledOrders((prev) => upsertOrderSnapshot(prev, {
+            id: order.id,
+            symbol,
+            side: order.side,
+            type: order.type,
+            reduceOnly: order.reduceOnly ?? false,
+            reduceKind: order.reduceKind ?? null,
+            linkedPositionId: order.linkedPositionId ?? null,
+            price: actualFillPrice,
+            triggerPrice: fillPrice,
+            quantity: order.quantity,
+            contracts: order.contracts,
+            leverage: order.leverage,
+            settlementMode: order.settlementMode,
+            settlementAsset: order.settlementAsset,
+            contractSizeUsd: order.contractSizeUsd,
+            createdAt: order.createdAt,
+            filledAt: simulatedTime,
+            positionId: position.id,
+          }));
           setBalance((prev) => prev - margin - fee);
           setPositionsMap((prev) => {
-            const existing = (prev[symbol] || []).filter((position) => position.quantity > 1e-8);
-            return {
-              ...prev,
-              [symbol]: [
-                ...existing,
-                {
-                  id: positionId,
-                  side: order.side,
-                  entryPrice: fillPrice,
-                  quantity: order.quantity,
-                  leverage: order.leverage,
-                  marginMode: order.marginMode,
-                  margin,
-                  isolatedMargin: order.marginMode === "isolated" ? margin : undefined,
-                  openTime: simulatedTime,
-                },
-              ],
-            };
+            // isPositionOpen 而不是 quantity > 1e-8:币本位的存量记在 contracts 上。
+            const existing = (prev[symbol] || []).filter(isPositionOpen);
+            return { ...prev, [symbol]: [...existing, position] };
           });
           // 执行力资产只奖励做多开仓；做空都是辅助对冲单，不计分。
           if (order.side === 'LONG') {
@@ -127,18 +156,26 @@ export function useBackgroundPrices() {
               symbol,
               side: order.side,
               orderType: order.type,
-              entryPrice: fillPrice,
-              quantity: order.quantity,
+              entryPrice: actualFillPrice,
+              quantity: getPositionUnits(position),
               leverage: order.leverage,
               marginMode: order.marginMode,
+              settlementMode: position.settlementMode,
+              settlementAsset: position.settlementAsset,
+              contractSizeUsd: position.contractSizeUsd,
+              contracts: position.contracts,
+              marginCoin: position.marginCoin,
               margin,
-              notional: order.quantity * fillPrice,
+              notional: getPositionNotionalUsd(symbol, position, actualFillPrice),
+              notionalUsd: getPositionNotionalUsd(symbol, position, actualFillPrice),
               simulatedTime,
-              positionId,
+              positionId: position.id,
             };
             recordExecutionTrade(order.tradingMode ?? tradingMode, trade);
           }
-          toast.success(`条件单已触发：${symbol} ${order.side} @ ${fillPrice.toFixed(2)}`);
+          toast.success(
+            `条件单已触发：${symbol} ${order.side === 'LONG' ? '开多' : '开空'} ${formatSettlementQuantity(position, symbol)} @ ${formatPrice(actualFillPrice, symbol)}`,
+          );
         }
       }
 
@@ -149,7 +186,7 @@ export function useBackgroundPrices() {
         }));
       }
     },
-    [setBalance, setPositionsMap, setOrdersMap, executeReduceOnlyTrigger, recordExecutionTrade, tradingMode, getEffectiveTime],
+    [setBalance, setPositionsMap, setOrdersMap, setFilledOrders, executeReduceOnlyTrigger, recordExecutionTrade, tradingMode, getEffectiveTime],
   );
 
   const pollBackgroundSymbols = useCallback(async () => {
