@@ -152,6 +152,7 @@ const Index = () => {
     priceMap,
     setPriceMap,
     markPriceAsOf,
+    publishMatchRange,
     balance,
     spotBalance,
     fundingBalance,
@@ -767,6 +768,8 @@ const Index = () => {
             close: displayClose,
             volume: candle.volume * progress,
           });
+          // 闸门与撮合必须同源：喂给撮合的这个区间，同时发布给下单闸门。
+          publishMatchRange(sym, { high: matchHigh, low: matchLow });
           runConditionalMatchingForSymbol(sym, { high: matchHigh, low: matchLow }, simTime);
           latestChartPriceRef.current = close;
         }

@@ -135,6 +135,8 @@ interface TradingState {
    * 没登记过的标的一律不参与强平——见 lib/liquidationGuards。
    */
   markPriceAsOf: (symbol: string, asOfSimTime: number) => void;
+  /** 发布当刻撮合区间，供条件单下单闸门与撮合共用同一基准。 */
+  publishMatchRange: (symbol: string, range: { high: number; low: number }) => void;
   balance: number;
   setBalance: (v: number | ((prev: number) => number)) => void;
   /** 现货钱包余额（USDT）。合约钱包的余额就是 balance。 */
@@ -359,6 +361,19 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
    * 所以「没登记过」= 说不清这个价属于哪一刻。用 ref 而不是 state：
    * 它不参与渲染，而且**不该被持久化** —— 刷新后一律视为未知，宁可晚一秒强平。
    */
+  /**
+   * 当刻撮合用的价格区间（当前这根未收 K 线的 high/low）。
+   * 条件单的下单闸门必须和撮合看**同一个区间**：撮合基准不是标量现价，
+   * 而是这根 K 线已经打印出来的全部行程。Index 在喂撮合的同一处发布到这里。
+   */
+  const matchRangeRef = useRef<Record<string, { high: number; low: number }>>({});
+  const publishMatchRange = useCallback((symbol: string, range: { high: number; low: number }) => {
+    if (!symbol) return;
+    const { high, low } = range;
+    if (!Number.isFinite(high) || !Number.isFinite(low)) return;
+    matchRangeRef.current[symbol] = { high, low };
+  }, []);
+
   const priceAsOfRef = useRef<Record<string, number>>({});
   const markPriceAsOf = useCallback((symbol: string, asOfSimTime: number) => {
     if (!symbol || !Number.isFinite(asOfSimTime) || asOfSimTime <= 0) return;
@@ -980,7 +995,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
         return null;
       }
 
-      if (shouldRejectImmediateConditionalPlacement(normalizedOrder.side, currentP, triggerP)) {
+      if (shouldRejectImmediateConditionalPlacement(currentP, triggerP, matchRangeRef.current[symbol])) {
         toast.error('触发价设置不合理，订单将立即成交，请修改或使用市价单');
         return null;
       }
@@ -1601,7 +1616,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
     positionsMap, setPositionsMap,
     ordersMap, setOrdersMap,
     filledOrders, setFilledOrders,
-    priceMap, setPriceMap, markPriceAsOf,
+    priceMap, setPriceMap, markPriceAsOf, publishMatchRange,
     balance, setBalance,
     spotBalance, fundingBalance, transferHistory, transferFunds,
     isolatedBalances: emptyIsolatedBalances,
