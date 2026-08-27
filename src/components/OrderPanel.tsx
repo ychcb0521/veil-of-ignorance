@@ -24,6 +24,7 @@ import {
   getCoinMarginedContractSizeUsd,
   getSettlementAsset,
 } from '@/lib/coinMargined';
+import { orderPriceKindLabel, panelReferencePrice } from '@/lib/orderReferencePrice';
 import {
   getPositionNotionalUsd,
 } from '@/lib/tradingSettlement';
@@ -218,10 +219,19 @@ export function OrderPanel({
     setPercent(0);
   }, [isCoinMargined, symbol]);
 
-  // Sync priceSelection ↔ orderType
+  /**
+   * Sync priceSelection ↔ orderType
+   *
+   * 高级类型此前**一个都没映射**，于是 priceSelection 留在上一个标签的值上：
+   * 在「限价」里填过 0.0113 再切到「条件委托」，限价框已经不渲染了
+   * （showLimitPriceField 不含 CONDITIONAL），可 price 这个 state 还在，
+   * 于是 buildOrderParams 会给一张条件单带上 price: 0.0113 —— 一个**没有任何
+   * 引擎会认**的价（条件单成交在触发价上），却会被折算价与委托列表当成委托价优先读到。
+   * 幽灵委托价必须在源头掐掉。
+   */
   useEffect(() => {
-    if (orderType === 'MARKET' || orderType === 'MARKET_TP_SL') setPriceSelection('MARKET');
-    else if (orderType === 'LIMIT' || orderType === 'POST_ONLY' || orderType === 'LIMIT_TP_SL') setPriceSelection('LIMIT');
+    if (orderType === 'LIMIT' || orderType === 'POST_ONLY' || orderType === 'LIMIT_TP_SL') setPriceSelection('LIMIT');
+    else setPriceSelection('MARKET');
   }, [orderType]);
 
   // Picked-from-chart price → fill stopPrice
@@ -245,7 +255,26 @@ export function OrderPanel({
 
   // ===== Derived values =====
   const inputAmount = parseFloat(quantity) || 0;
-  const effectivePrice = priceSelection === 'LIMIT' ? (parseFloat(price) || currentPrice) : currentPrice;
+  /**
+   * 折算价：这一单**真正会成交**的价，币数 ↔ 张数全部按它换算。
+   * 条件委托成交在触发价上，此前却一路按实时市价折——触发价 0.010344、市价 0.011199 时，
+   * 填 3600 个币会下出 4 张，而这 4 张到触发价上是 3866.98 个币，比填的多 267 个。
+   * 用户从没批准过那 267 个。
+   */
+  const priceRef = panelReferencePrice({
+    orderType,
+    priceSelection,
+    limitPrice: parseFloat(price) || 0,
+    triggerPrice: parseFloat(stopPrice) || 0,
+    marketPrice: currentPrice,
+  });
+  const effectivePrice = priceRef.price;
+  /**
+   * 用户**亲手写下**的那个折算价（字符串原样）。重折只认它的变化。
+   * 不能拿 effectivePrice 当依赖：兜底到市价时它每根 K 线都在跳，
+   * 那等于每一跳都用新价重掷一次张数——正是「看着 4 张、挂出 3 张」的原始事故。
+   */
+  const authoredPrice = priceSelection === 'LIMIT' ? price : orderType === 'CONDITIONAL' ? stopPrice : '';
 
   let effectiveQty = 0;
   let margin = 0;
@@ -257,8 +286,11 @@ export function OrderPanel({
     // 保证金 / 名义随实时价浮动是币本位的物理事实,照实显示。
     effectiveQty = currencyUnit === 'BASE' ? coinContractsExact(inputAmount) : lockedContracts;
     notionalValue = coinNotionalUsd(effectiveQty, contractSizeUsd);
-    marginCoin = coinMarginAmount(effectiveQty, effectivePrice, leverage, contractSizeUsd);
-    margin = marginCoin * effectivePrice;
+    // USD 保证金与价无关（名义 ÷ 杠杆),折成币才需要一个价——而这一格是拿来跟
+    // 正上方那行「可用 … 币」比的,两者必须同分母。按折算价折会让「保证金 1.979 亿 NOM」
+    // 压在「可用 1.828 亿 NOM」上面(差 8.27%),看着像超额,实则 USD 口径分毫不差。
+    margin = leverage > 0 ? notionalValue / leverage : 0;
+    marginCoin = currentPrice > 0 ? margin / currentPrice : 0;
   } else if (currencyUnit === 'BASE') {
     effectiveQty = inputAmount;
     margin = (effectiveQty * effectivePrice) / leverage;
@@ -304,9 +336,14 @@ export function OrderPanel({
 
   // Max buy/sell capacity in USDT (notional)
   const maxNotional = Math.max(0, available) * leverage;
-  const availableCoin = effectivePrice > 0 ? Math.max(0, available) / effectivePrice : 0;
-  const accountEquityCoin = effectivePrice > 0 ? Math.max(0, equity) / effectivePrice : 0;
-  const maintenanceCoin = effectivePrice > 0 ? Math.max(0, totalMaintenance) / effectivePrice : 0;
+  /**
+   * 这三行描述的是**账户**，不是这一单，所以只能按实时价折——
+   * totalMaintenance 甚至聚合了别的标的的仓位（见上方循环）。
+   * 跟着折算价走的话，在触发价框里敲一个字，账户余额的币计读数就会整体跳一下。
+   */
+  const availableCoin = currentPrice > 0 ? Math.max(0, available) / currentPrice : 0;
+  const accountEquityCoin = currentPrice > 0 ? Math.max(0, equity) / currentPrice : 0;
+  const maintenanceCoin = currentPrice > 0 ? Math.max(0, totalMaintenance) / currentPrice : 0;
   const coinInputUnit: CoinInputUnit = currencyUnit === 'BASE'
     ? 'CONTRACTS'
     : usdtInputMode === 'INITIAL_MARGIN'
@@ -400,18 +437,30 @@ export function OrderPanel({
    *     框里有数时价格基准真的换了,按当前基准重折。
    * 重折一律从 lockFoldRef 的未取整数值出发。依赖里刻意没有 currentPrice。
    */
-  const prevFoldDeps = useRef({ leverage, price, priceSelection });
+  const prevFoldDeps = useRef({ leverage, authoredPrice, priceSelection, orderType });
+  /**
+   * 本帧是否**正欠一次重折**。重折在 effect 里落地，而 snappedInput 是渲染期算的：
+   * 折算基准刚变的那一帧，effectivePrice 已经是新价、lockedContracts 还是旧值，
+   * 两者相乘出来的 snappedInput 属于一个不存在的状态。让同步 effect 写下去就会
+   * 出现「框里躺着 892.936869、锁却是 0 张、提示写着『请至少填 892.936869』、按钮还是灰的」。
+   * prevFoldDeps 在重折 effect 的**开头**更新，所以这一帧读到的仍是旧值——正好当闸门。
+   */
+  const foldBasisChanged =
+    prevFoldDeps.current.leverage !== leverage
+    || prevFoldDeps.current.authoredPrice !== authoredPrice
+    || prevFoldDeps.current.priceSelection !== priceSelection
+    || prevFoldDeps.current.orderType !== orderType;
   useEffect(() => {
     const prev = prevFoldDeps.current;
-    prevFoldDeps.current = { leverage, price, priceSelection };
+    prevFoldDeps.current = { leverage, authoredPrice, priceSelection, orderType };
     if (!isCoinMargined || currencyUnit === 'BASE') return;
     const leverageChanged = prev.leverage !== leverage;
-    const priceStrChanged = prev.price !== price;
-    const selChanged = prev.priceSelection !== priceSelection;
+    const priceStrChanged = prev.authoredPrice !== authoredPrice;
+    const selChanged = prev.priceSelection !== priceSelection || prev.orderType !== orderType;
     if (!leverageChanged && !priceStrChanged && !selChanged) return;
     if (leverageChanged && !priceStrChanged && !selChanged && usdtInputMode === 'ORDER_VALUE') return;
-    const limitEmpty = !(parseFloat(price) > 0);
-    if (selChanged && !priceStrChanged && !leverageChanged && limitEmpty) return;
+    const authoredEmpty = !(parseFloat(authoredPrice) > 0);
+    if (selChanged && !priceStrChanged && !leverageChanged && authoredEmpty) return;
 
     const { raw, price: foldPrice } = lockFoldRef.current;
     const nextPrice = (priceStrChanged || selChanged)
@@ -420,7 +469,7 @@ export function OrderPanel({
     lockFoldRef.current = { raw, price: nextPrice };
     setLockedContracts(foldContracts(raw, nextPrice));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [leverage, price, priceSelection]);
+  }, [leverage, authoredPrice, priceSelection, orderType]);
 
   /**
    * 未聚焦时，把输入框持续同步成「锁定张数在当前价下的等值」。
@@ -430,20 +479,20 @@ export function OrderPanel({
    * 而提示与当前委托跟着现价走（95.330021 @0.419595）——同一屏上两个数，
    * 正是用户反复报的「下单币数与当前委托显示的不一样」。
    *
-   * 只改显示，不碰锁：张数仍然只在输入变动时折算一次。折算源同步成与锁
-   * **精确一致**的未取整数值，让后续重折不必从六位小数的显示串反推。
+   * 只改显示，**绝不碰折算源**。lockFoldRef.raw 始终是用户亲手写下的那个授权量。
+   *
+   * 早先这里把吸附值写回了折算源，于是折算源永远停在「整张数的边界」上：
+   * 40 USD ÷ 0.0113 = 3539.823009。此后任何一次往低价的重折都必掉一张
+   * （3539.823009 × 0.011199 ÷ 10 = 3.964 → 3），而且是单向棘轮——
+   * 点开「条件委托」瞄一眼再点回「限价」，40 USD 的单子变 30 USD，
+   * 再切两次只剩 10 USD，屏幕上没有任何一处说过数量变了。
+   * 保留原始授权量 3600 则每次都折回 4 张，切多少次都一样。
    */
   useEffect(() => {
-    if (qtyFocused || snappedInput == null || snappedInput === quantity) return;
+    if (qtyFocused || foldBasisChanged || snappedInput == null || snappedInput === quantity) return;
     setQuantity(snappedInput);
-    lockFoldRef.current = {
-      raw: coinInputUnit === 'CONTRACTS' ? effectiveQty
-        : coinInputUnit === 'COIN_MARGIN' ? marginCoin
-        : effectiveCoinAmount,
-      price: effectivePrice,
-    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [qtyFocused, snappedInput]);
+  }, [qtyFocused, foldBasisChanged, snappedInput]);
 
   const applyPercent = (p: number) => {
     setPercent(p);
@@ -794,6 +843,7 @@ export function OrderPanel({
             <div className="flex flex-1 min-w-0 items-center bg-secondary rounded-md h-9 px-3">
               <span className="text-[11px] text-muted-foreground/80 mr-2 shrink-0">价格</span>
               <input
+                data-testid="order-limit-price"
                 type="text"
                 value={price}
                 onChange={e => setPrice(e.target.value)}
@@ -829,6 +879,7 @@ export function OrderPanel({
               {orderType === 'TRAILING_STOP' ? '激活价' : '触发价'}
             </span>
             <input
+              data-testid="order-trigger-price"
               type="text"
               value={stopPrice}
               onChange={e => setStopPrice(e.target.value)}
@@ -1034,6 +1085,7 @@ export function OrderPanel({
           >
             低于最小下单量：1 张 = {formatUSDT(contractSizeUsd)} USD
             ≈ {formatCoinAmount(minCoinPerContract, baseCoin)}
+            {'（按'}{orderPriceKindLabel(priceRef.kind)}{'）'}
             {'，请至少填 '}
             {coinInputUnit === 'CONTRACTS' ? '1' : minInputInCurrentUnit.toFixed(6)}
             {' '}{minInputUnitLabel}
@@ -1046,6 +1098,9 @@ export function OrderPanel({
           >
             实际下单 {effectiveQty} 张 ≈ 名义 {formatCoinAmount(effectiveCoinAmount, baseCoin)}
             {' '}≈ {formatUSDT(notionalValue)} USD
+            {/* 折算口径必须写在数旁边：同一张单在不同价下是不同的币数，这没错；
+                错的是不说按哪个价算的。委托列表那一行用的是同一个标签。 */}
+            {'（按'}{orderPriceKindLabel(priceRef.kind)}{'折算）'}
             {coinInputUnit === 'COIN_MARGIN' && (
               <>{'，占用保证金 '}{formatCoinAmount(marginCoin, baseCoin)}</>
             )}

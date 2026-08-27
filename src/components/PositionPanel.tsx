@@ -30,6 +30,7 @@ import { PostTradeReviewSheet } from '@/components/journal/PostTradeReviewSheet'
 import { ExitMethodBadge } from '@/components/journal/ExitMethodBadge';
 import {
   getCoinContracts, coinNotionalAmount, formatCoinAmount, getSettlementAsset } from '@/lib/coinMargined';
+import { orderPriceKindLabel, orderReferencePrice } from '@/lib/orderReferencePrice';
 import {
   formatSettlementQuantity,
   getPositionNotionalUsd,
@@ -1080,7 +1081,7 @@ export function PositionPanel({
 
         {/* ===== PENDING ORDERS ===== */}
         {activeTab === 'pending' && (
-          <div className="flex-1 overflow-y-auto scrollbar-pro min-h-0">
+          <div className="flex-1 overflow-y-auto overflow-x-auto scrollbar-pro min-h-0">
             {allOrders.length === 0 ? (
               <div className="px-4 py-20 text-center text-xs text-gray-500 dark:text-[#848e9c]">暂无委托</div>
             ) : (
@@ -1094,7 +1095,11 @@ export function PositionPanel({
                 </thead>
                 <tbody>
                   {allOrders.map(({ symbol, order }) => {
-                    const orderMark = order.price > 0 ? order.price : (priceMap[symbol] || 0);
+                    // 折算价 = 引擎真正会成交的那个价，不是「渲染这一帧的市价」。
+                    // 条件单成交在触发价上：0.010344 的触发价配 0.011199 的市价，
+                    // 按市价折出来的 892.960966 NOM 是一个永不发生的数。
+                    const orderRef = orderReferencePrice(order, priceMap[symbol] || 0);
+                    const orderMark = orderRef.price;
                     const orderQuoteLabel = isCoinSettled(order) ? 'USD' : 'USDT';
                     const orderNotional = getPositionNotionalUsd(symbol, order, orderMark);
                     // 币本位委托以「币计名义」为主读数：USD 面值是合约的记账口径，
@@ -1124,6 +1129,17 @@ export function PositionPanel({
                                 只减仓
                               </span>
                             )}
+                            {/* 减仓单按触发价折币，主读数会比按标记价折的持仓卡小一截
+                                （0.015 的止盈对 0.011199 的标记价，小 25%），看着像部分平仓。
+                                成数就在 order 上，此前从没渲染过；写出来才是一眼能定性的那个数。 */}
+                            {order.reduceOnly && order.reducePercentage != null && (
+                              <span
+                                data-testid="order-reduce-percentage"
+                                className="text-[9px] px-1 py-0 rounded bg-gray-100 dark:bg-white/5 text-gray-500 dark:text-[#848e9c] border border-gray-200 dark:border-[#2b3139] whitespace-nowrap"
+                              >
+                                {order.reducePercentage}% 仓位
+                              </span>
+                            )}
                           </div>
                         </td>
                         <td className={`px-3 py-2 font-bold ${order.side === 'LONG' ? 'text-[#0ecb81]' : 'text-[#f6465d]'}`}>
@@ -1151,10 +1167,19 @@ export function PositionPanel({
                                   不写张，用户就无从理解为什么自己填的数和这里的数对不上。 */}
                               <div className="text-[10px] text-gray-500 dark:text-[#848e9c]">
                                 {getCoinContracts(order)} 张 · ≈ {formatUSDT(orderNotional)} USD
+                                {' · 按'}{orderPriceKindLabel(orderRef.kind)}{'折算'}
                               </div>
                             </>
                           ) : (
-                            <>{formatUSDT(orderNotional)} {orderQuoteLabel}</>
+                            <>
+                              <div>{formatUSDT(orderNotional)} {orderQuoteLabel}</div>
+                              {/* U 本位的名义 = 数量 × 折算价,基准同样跟着这次改动移动了
+                                  （条件单从现价挪到触发价，60000 → 50000 差 17%）。
+                                  只给币本位挂标签，等于对另一半用户重犯「不说按哪个价算」。 */}
+                              <div className="text-[10px] text-gray-500 dark:text-[#848e9c]">
+                                {'按'}{orderPriceKindLabel(orderRef.kind)}{'折算'}
+                              </div>
+                            </>
                           )}
                         </td>
                         <td className="px-3 py-2 text-gray-900 dark:text-white">{order.leverage}x</td>
