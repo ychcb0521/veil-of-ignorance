@@ -51,7 +51,10 @@ export function getCoinContractSizeUsd(symbol: string, item?: CoinLikeInstrument
  */
 export function coinContractsExact(value: number): number {
   if (!Number.isFinite(value) || value <= 0) return 0;
-  return Math.floor(value + 1e-9);
+  // ε=1e-7：显示值走 toFixed(6) 的字符串来回后,张数会带 ~1e-8 量级的噪声
+  // （95.417571 × 价 ÷ 面值 = 3.99999996…),1e-9 吸不住它,会把 4 张掉成 3。
+  // 1e-7 仍远小于半张,不会把真实的 3.9 抬成 4。
+  return Math.floor(value + 1e-7);
 }
 
 export function coinContractsExactFromUsdNotional(

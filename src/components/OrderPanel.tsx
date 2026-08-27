@@ -147,6 +147,21 @@ export function OrderPanel({
   const [price, setPrice] = useState('');
   const [stopPrice, setStopPrice] = useState('');
   const [quantity, setQuantity] = useState('');
+  /**
+   * 币本位的**张数锁**。张数只在「输入变动的时刻」由当时的价格折算一次，
+   * 此后价格跳动不得重算——两张相隔 7 秒的截图钉死过反例：
+   * 吸附把框停在恰好 4 张的边界（95.417571 @0.419209），价格跌到 0.419155,
+   * 点击时重算 floor(95.417571×0.419155/10)=3——用户看着「4 张」下单，
+   * 挂出去的是 3 张。用整数张当唯一真源，显示值都从它折出来。
+   */
+  const [lockedContracts, setLockedContracts] = useState(0);
+  /**
+   * 锁的**折算源**：输入时刻的未取整数值 + 当时用的折算价。
+   * 任何需要重折的场合(杠杆/限价真的变了)都从这里出发,**绝不从显示串反推**——
+   * 显示走 toFixed(6),六位小数在 BTC(面值 100、价 ~1e5)下装不下整张边界:
+   * '0.003173' × 94537 ÷ 100 = 2.9997,一次反推就把 3 张掉成 2。
+   */
+  const lockFoldRef = useRef({ raw: 0, price: 0 });
   const [percent, setPercent] = useState(0);
 
   // TP/SL inline checkbox state
@@ -197,6 +212,7 @@ export function OrderPanel({
     setCurrencyUnit('USDT');
     setUsdtInputMode('ORDER_VALUE');
     setQuantity('');
+    setLockedContracts(0);
     setPercent(0);
   }, [isCoinMargined, symbol]);
 
@@ -234,25 +250,13 @@ export function OrderPanel({
   let marginCoin = 0;
   let notionalValue = 0;
   if (isCoinMargined) {
-    if (currencyUnit === 'BASE') {
-      effectiveQty = coinContractsExact(inputAmount);
-      notionalValue = coinNotionalUsd(effectiveQty, contractSizeUsd);
-      marginCoin = coinMarginAmount(effectiveQty, effectivePrice, leverage, contractSizeUsd);
-      margin = marginCoin * effectivePrice;
-    } else if (usdtInputMode === 'ORDER_VALUE') {
-      // 「以币计的订单金额」：与币安 COIN-M 一致——先按现价折成 USD 名义，再取整到张
-      effectiveQty = coinContractsExactFromUsdNotional(inputAmount * effectivePrice, symbol, contractSizeUsd);
-      notionalValue = coinNotionalUsd(effectiveQty, contractSizeUsd);
-      marginCoin = coinMarginAmount(effectiveQty, effectivePrice, leverage, contractSizeUsd);
-      margin = marginCoin * effectivePrice;
-    } else {
-      marginCoin = inputAmount;
-      const targetNotional = marginCoin * effectivePrice * leverage;
-      effectiveQty = coinContractsExactFromUsdNotional(targetNotional, symbol, contractSizeUsd);
-      notionalValue = coinNotionalUsd(effectiveQty, contractSizeUsd);
-      marginCoin = coinMarginAmount(effectiveQty, effectivePrice, leverage, contractSizeUsd);
-      margin = marginCoin * effectivePrice;
-    }
+    // 张数是唯一真源：BASE 档直接取整输入；USD 两档读**输入时刻锁定**的张数,
+    // 绝不在渲染里用实时价重算——那正是「看着 4 张下单、挂出 3 张」的来源。
+    // 保证金 / 名义随实时价浮动是币本位的物理事实,照实显示。
+    effectiveQty = currencyUnit === 'BASE' ? coinContractsExact(inputAmount) : lockedContracts;
+    notionalValue = coinNotionalUsd(effectiveQty, contractSizeUsd);
+    marginCoin = coinMarginAmount(effectiveQty, effectivePrice, leverage, contractSizeUsd);
+    margin = marginCoin * effectivePrice;
   } else if (currencyUnit === 'BASE') {
     effectiveQty = inputAmount;
     margin = (effectiveQty * effectivePrice) / leverage;
@@ -364,18 +368,72 @@ export function OrderPanel({
     if (currentPrice > 0) setPrice(currentPrice.toFixed(pricePrecision));
   };
 
+  /**
+   * 把「未取整的输入数值」按给定折算价折成张。只许在输入变动 / 换算语义
+   * 真正改变的时刻调用——张数由此锁定,行情跳动不得触碰。
+   */
+  const foldContracts = (amt: number, px: number): number => {
+    if (!isCoinMargined || !(amt > 0) || !(px > 0)) return 0;
+    if (currencyUnit === 'BASE') return coinContractsExact(amt);
+    const notionalUsd = usdtInputMode === 'ORDER_VALUE'
+      ? amt * px             // 币金额：币 × 价 = 名义
+      : amt * px * leverage; // 币保证金：保证金 × 价 × 杠杆 = 名义
+    return coinContractsExactFromUsdNotional(notionalUsd, symbol, contractSizeUsd);
+  };
+  const updateQuantity = (raw: string) => {
+    setQuantity(raw);
+    if (!isCoinMargined) return;
+    const amt = parseFloat(raw) || 0;
+    lockFoldRef.current = { raw: amt, price: effectivePrice };
+    setLockedContracts(foldContracts(amt, effectivePrice));
+  };
+
+  /**
+   * 只有换算语义**真正改变**时才重折,并且按「变了的是谁」分流:
+   *   · 杠杆变 · 币金额档  → 杠杆不进该档映射,跳过——否则动一下杠杆就等于
+   *     用实时价重掷一次骰子,原事故换个扳机重演;
+   *   · 杠杆变 · 保证金档  → 语义真变,但折算价沿用锁定价:只让杠杆增量进来;
+   *   · 限价框的数变       → 用户给了新的折算价,按它重折并更新锁定价;
+   *   · 限价⇄市价切换      → 限价框为空时两边同为实时价 fallback,语义未变,跳过;
+   *     框里有数时价格基准真的换了,按当前基准重折。
+   * 重折一律从 lockFoldRef 的未取整数值出发。依赖里刻意没有 currentPrice。
+   */
+  const prevFoldDeps = useRef({ leverage, price, priceSelection });
+  useEffect(() => {
+    const prev = prevFoldDeps.current;
+    prevFoldDeps.current = { leverage, price, priceSelection };
+    if (!isCoinMargined || currencyUnit === 'BASE') return;
+    const leverageChanged = prev.leverage !== leverage;
+    const priceStrChanged = prev.price !== price;
+    const selChanged = prev.priceSelection !== priceSelection;
+    if (!leverageChanged && !priceStrChanged && !selChanged) return;
+    if (leverageChanged && !priceStrChanged && !selChanged && usdtInputMode === 'ORDER_VALUE') return;
+    const limitEmpty = !(parseFloat(price) > 0);
+    if (selChanged && !priceStrChanged && !leverageChanged && limitEmpty) return;
+
+    const { raw, price: foldPrice } = lockFoldRef.current;
+    const nextPrice = (priceStrChanged || selChanged)
+      ? effectivePrice                    // 价格基准被用户改了:用新基准
+      : (foldPrice > 0 ? foldPrice : effectivePrice); // 只动了杠杆:沿用锁定价
+    lockFoldRef.current = { raw, price: nextPrice };
+    setLockedContracts(foldContracts(raw, nextPrice));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [leverage, price, priceSelection]);
+
   const applyPercent = (p: number) => {
     setPercent(p);
     if (currencyUnit === 'USDT') {
       if (isCoinMargined) {
-        if (usdtInputMode === 'ORDER_VALUE') {
-          // 币本位此档以币计价：把可开名义(USD)折成币数
-          const maxNotionalCoin = effectivePrice > 0 ? maxNotional / effectivePrice : 0;
-          setQuantity((maxNotionalCoin * (p / 100)).toFixed(6));
-        } else {
-          const maxMarginCoin = effectivePrice > 0 ? Math.max(0, available) / effectivePrice : 0;
-          setQuantity((maxMarginCoin * (p / 100)).toFixed(6));
-        }
+        // 先定张数、再折显示值。顺序反过来（先折币串再转回张）会在 toFixed
+        // 的最后一位上掉一张——0.532 张的世界里六位小数不是免费的。
+        const c = Math.max(0, Math.floor((maxNotional * (p / 100)) / contractSizeUsd));
+        setLockedContracts(c);
+        const exact = c > 0 && effectivePrice > 0
+          ? coinNotionalUsd(c, contractSizeUsd)
+            / (usdtInputMode === 'ORDER_VALUE' ? effectivePrice : effectivePrice * leverage)
+          : 0;
+        lockFoldRef.current = { raw: exact, price: effectivePrice };
+        setQuantity(exact > 0 ? exact.toFixed(6) : '0');
       } else {
         const target = usdtInputMode === 'ORDER_VALUE' ? maxNotional : Math.max(0, available);
         setQuantity((target * (p / 100)).toFixed(2));
@@ -400,16 +458,22 @@ export function OrderPanel({
     } else if (unit === 'COIN_NOTIONAL') {
       setCurrencyUnit('USDT');
       setUsdtInputMode('ORDER_VALUE');
+      // 切档不改张数：锁直接沿用当前张数,显示值从它折出——
+      // 走「折成币串再转回张」的字符串来回会在 toFixed 上丢一张。
+      setLockedContracts(hasExistingOrder ? effectiveQty : 0);
       const coinNotional = effectivePrice > 0
         ? coinNotionalUsd(effectiveQty, contractSizeUsd) / effectivePrice
         : 0;
+      lockFoldRef.current = { raw: hasExistingOrder ? coinNotional : 0, price: effectivePrice };
       setQuantity(hasExistingOrder ? coinNotional.toFixed(6) : '');
     } else {
       setCurrencyUnit('USDT');
       setUsdtInputMode('INITIAL_MARGIN');
+      setLockedContracts(hasExistingOrder ? effectiveQty : 0);
       const nextMarginCoin = hasExistingOrder
         ? coinMarginAmount(effectiveQty, effectivePrice, leverage, contractSizeUsd)
         : 0;
+      lockFoldRef.current = { raw: nextMarginCoin, price: effectivePrice };
       setQuantity(hasExistingOrder ? nextMarginCoin.toFixed(6) : '');
     }
     setPercent(0);
@@ -859,11 +923,20 @@ export function OrderPanel({
           <input
             type="text"
             value={quantity}
-            onChange={e => { setQuantity(e.target.value); setPercent(0); }}
+            onChange={e => { updateQuantity(e.target.value); setPercent(0); }}
             onBlur={() => {
               // 不足一张时不吸附：那会把用户刚填的数抹成空白，
               // 而他需要看着自己填的数去对照红字里的最小量。
-              if (snappedInput != null && snappedInput !== quantity) setQuantity(snappedInput);
+              if (snappedInput == null || snappedInput === quantity) return;
+              setQuantity(snappedInput);
+              // 吸附只改显示;折算源同步为与锁**精确一致**的未取整数值,
+              // 锁本身不动。之后的重折从这里出发,不从六位小数的显示串反推。
+              lockFoldRef.current = {
+                raw: coinInputUnit === 'CONTRACTS' ? effectiveQty
+                  : coinInputUnit === 'COIN_MARGIN' ? marginCoin
+                  : effectiveCoinAmount,
+                price: effectivePrice,
+              };
             }}
             data-testid="order-qty-input"
             placeholder="0"
