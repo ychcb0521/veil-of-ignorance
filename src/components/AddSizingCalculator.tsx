@@ -141,8 +141,9 @@ export function AddSizingCalculator({ open, onClose, symbol, currentPrice = 0 }:
     return evaluateS1Deviation({
       side, sBar: toNum(sBar), s1: toNum(s1), s2: toNum(s2),
       x1: toNum(x1), g: Math.max(0, toNum(g)), bookPrice: bookLine.price,
+      settlement: isCoin ? 'coin' : 'usdt',
     });
-  }, [bookLine, cushion.ok, side, sBar, s1, s2, x1, g]);
+  }, [bookLine, cushion.ok, side, sBar, s1, s2, x1, g, isCoin]);
 
   const effectiveKB = kB !== '' ? toNum(kB) : toNum(s1);
   const bankedRes = useMemo(() => {

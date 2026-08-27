@@ -80,7 +80,7 @@ describe('盘口对冲线', () => {
 
 describe('S₁ 偏差定价 —— 把 0.149% 翻译成 USDT', () => {
   it('【回归】复现事故的那三个数：应下 13,799,517 / 实下 15,052,198 / 净值 −3,247', () => {
-    const d = evaluateS1Deviation({ side: 'LONG', sBar: SBAR, s1: TYPED, s2: S2, x1: X1, g: G, bookPrice: BOOK })!;
+    const d = evaluateS1Deviation({ side: 'LONG', sBar: SBAR, s1: TYPED, s2: S2, x1: X1, g: G, bookPrice: BOOK, settlement: 'usdt' })!;
     expect(d.shouldAdd).toBeCloseTo(13_799_517, 0);
     // TYPED 是反解值取到 6 位小数的结果，回代会有 0.03% 的残差；
     // 要害是量级（超一百多万币），不是末位。
@@ -92,28 +92,66 @@ describe('S₁ 偏差定价 —— 把 0.149% 翻译成 USDT', () => {
   });
 
   it('S₁ 与盘口线一致时，到线净值就是设计意图的 0', () => {
-    const d = evaluateS1Deviation({ side: 'LONG', sBar: SBAR, s1: BOOK, s2: S2, x1: X1, g: G, bookPrice: BOOK })!;
+    const d = evaluateS1Deviation({ side: 'LONG', sBar: SBAR, s1: BOOK, s2: S2, x1: X1, g: G, bookPrice: BOOK, settlement: 'usdt' })!;
     expect(d.netAtBookLine).toBeCloseTo(0, 6);
     expect(d.excessCoins).toBeCloseTo(0, 6);
   });
 
   it('S₁ 填低于盘口线则是少下——净值为正，不是错误但要让用户看见', () => {
-    const d = evaluateS1Deviation({ side: 'LONG', sBar: SBAR, s1: 0.114300, s2: S2, x1: X1, g: G, bookPrice: BOOK })!;
+    const d = evaluateS1Deviation({ side: 'LONG', sBar: SBAR, s1: 0.114300, s2: S2, x1: X1, g: G, bookPrice: BOOK, settlement: 'usdt' })!;
     expect(d.excessCoins).toBeLessThan(0);
     expect(d.netAtBookLine).toBeGreaterThan(0);
   });
 
   it('主空方向整套反过来', () => {
     const d = evaluateS1Deviation({
-      side: 'SHORT', sBar: 0.116993, s1: 0.115000, s2: 0.113532, x1: X1, g: G, bookPrice: 0.115200,
+      side: 'SHORT', sBar: 0.116993, s1: 0.115000, s2: 0.113532, x1: X1, g: G, bookPrice: 0.115200, settlement: 'usdt',
     })!;
     expect(d).not.toBeNull();
     expect(Number.isFinite(d.netAtBookLine)).toBe(true);
   });
 
   it('输入不成立时返回 null，不硬算出一个假数', () => {
-    expect(evaluateS1Deviation({ side: 'LONG', sBar: SBAR, s1: TYPED, s2: S2, x1: X1, g: G, bookPrice: 0 })).toBeNull();
+    expect(evaluateS1Deviation({ side: 'LONG', sBar: SBAR, s1: TYPED, s2: S2, x1: X1, g: G, bookPrice: 0, settlement: 'usdt' })).toBeNull();
     // S₁ 已经越过 S₂：险为负，锁死无从谈起
-    expect(evaluateS1Deviation({ side: 'LONG', sBar: SBAR, s1: 0.12, s2: S2, x1: X1, g: G, bookPrice: BOOK })).toBeNull();
+    expect(evaluateS1Deviation({ side: 'LONG', sBar: SBAR, s1: 0.12, s2: S2, x1: X1, g: G, bookPrice: BOOK, settlement: 'usdt' })).toBeNull();
+  });
+});
+
+
+/**
+ * 币本位:G 以**币**计,B 那一支的公式是 X_G = G·K_B ÷ 险,不是 G ÷ 险。
+ * 用户全程用币本位,漏掉这一支等于这个警示对他恒错。
+ */
+describe('币本位的 B 账本口径', () => {
+  const G_COIN = 273_779;   // 镜像止盈落袋的币量（USD 口径是 32,299.75）
+
+  it('币本位与 U 本位给出不同的 X_G —— 差在 G 要按线价折回 USD', () => {
+    const coin = evaluateS1Deviation({
+      side: 'LONG', sBar: SBAR, s1: TYPED, s2: S2, x1: X1, g: G_COIN, bookPrice: BOOK, settlement: 'coin',
+    })!;
+    const usdt = evaluateS1Deviation({
+      side: 'LONG', sBar: SBAR, s1: TYPED, s2: S2, x1: X1, g: G_COIN, bookPrice: BOOK, settlement: 'usdt',
+    })!;
+    // 同一个 g 喂进两种口径必须给出不同的答案，否则就是漏了分支
+    expect(coin.shouldAdd).not.toBeCloseTo(usdt.shouldAdd, 0);
+    // 币本位：G·线价 ÷ 险；线价 0.1144 < 1，所以币本位的 X_G 小得多
+    expect(coin.shouldAdd).toBeLessThan(usdt.shouldAdd);
+  });
+
+  it('币本位下 S₁ 与盘口线一致时，到线净值同样恰为 0', () => {
+    const d = evaluateS1Deviation({
+      side: 'LONG', sBar: SBAR, s1: BOOK, s2: S2, x1: X1, g: G_COIN, bookPrice: BOOK, settlement: 'coin',
+    })!;
+    expect(d.netAtBookLine).toBeCloseTo(0, 6);
+    expect(d.excessCoins).toBeCloseTo(0, 6);
+  });
+
+  it('币本位下填错 S₁ 同样被定价成 USDT 的净值缺口', () => {
+    const d = evaluateS1Deviation({
+      side: 'LONG', sBar: SBAR, s1: TYPED, s2: S2, x1: X1, g: G_COIN, bookPrice: BOOK, settlement: 'coin',
+    })!;
+    expect(d.excessCoins).toBeGreaterThan(0);   // 多下了
+    expect(d.netAtBookLine).toBeLessThan(0);    // 到线时已经亏
   });
 });

@@ -136,6 +136,18 @@ export function sameLine(a: number, b: number): boolean {
   return Math.abs(a - b) <= Math.max(1e-12, Math.max(Math.abs(a), Math.abs(b)) * 1e-6);
 }
 
+/**
+ * B 账本那一块垫子换算成「加仓多少币」。**必须与 computeBankedAdd 同源分支**：
+ *   U 本位：G 以 USDT 计 → X_G = G ÷ 险
+ *   币本位：G 以**币**计 → X_G = G·K_B ÷ 险（亏损也以币计，要先按线价折回 USD）
+ * 漏掉币本位这一支的后果不是差一点：本例 G=273,779 币 vs 32,299.75 USDT，
+ * 两条公式给出的 X_G 差 3%，而在「险」很小的时候这点差再被 1/险 放大一次。
+ */
+function bankedCoins(g: number, line: number, risk: number, coin: boolean): number {
+  if (!(g > 0) || !(risk > 0)) return 0;
+  return coin ? (g * line) / risk : g / risk;
+}
+
 export interface S1Deviation {
   bookPrice: number;
   typedS1: number;
@@ -158,8 +170,11 @@ export interface S1Deviation {
  */
 export function evaluateS1Deviation(args: {
   side: AddSide; sBar: number; s1: number; s2: number; x1: number; g: number; bookPrice: number;
+  /** 结算口径。币本位下 g 以**币**计，B 那一支的公式不同——见 bankedCoins。 */
+  settlement: 'coin' | 'usdt';
 }): S1Deviation | null {
-  const { side, sBar, s1, s2, x1, g, bookPrice } = args;
+  const { side, sBar, s1, s2, x1, g, bookPrice, settlement } = args;
+  const coin = settlement === 'coin';
   const d = side === 'SHORT' ? -1 : 1;
   const fin = (v: number) => typeof v === 'number' && Number.isFinite(v) && v > 0;
   if (!fin(sBar) || !fin(s1) || !fin(s2) || !fin(x1) || !fin(bookPrice)) return null;
@@ -167,9 +182,13 @@ export function evaluateS1Deviation(args: {
   const riskBook = (s2 - bookPrice) * d;
   if (!(riskTyped > 0) || !(riskBook > 0)) return null;
 
-  const typedAdd = (x1 * (s1 - sBar) * d + Math.max(0, g)) / riskTyped;
-  const shouldAdd = (x1 * (bookPrice - sBar) * d + Math.max(0, g)) / riskBook;
-  const netAtBookLine = x1 * (bookPrice - sBar) * d + Math.max(0, g) - typedAdd * riskBook;
+  // A 段两种口径同式：用「按开仓价折出的币量」表述时，USD 盈亏都是 X(P − 入场价)。
+  const typedAdd = (x1 * (s1 - sBar) * d) / riskTyped + bankedCoins(g, s1, riskTyped, coin);
+  const shouldAdd = (x1 * (bookPrice - sBar) * d) / riskBook + bankedCoins(g, bookPrice, riskBook, coin);
+
+  // 走到盘口线那一刻的账面（USD）。币本位的 G 以币计，比较前要按线价折成 USD。
+  const gUsdAtLine = coin ? Math.max(0, g) * bookPrice : Math.max(0, g);
+  const netAtBookLine = x1 * (bookPrice - sBar) * d + gUsdAtLine - typedAdd * riskBook;
 
   return {
     bookPrice, typedS1: s1, shouldAdd, typedAdd,
