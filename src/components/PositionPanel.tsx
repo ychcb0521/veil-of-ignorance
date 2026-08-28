@@ -32,6 +32,8 @@ import {
   getCoinContracts, coinNotionalAmount, formatCoinAmount, getSettlementAsset } from '@/lib/coinMargined';
 import { orderPriceKindLabel, orderReferencePrice } from '@/lib/orderReferencePrice';
 import { restingOrderSize, withRemainingUnits } from '@/lib/restingOrderSize';
+import { firstLiquidationPrice, initialMarginUsd } from '@/lib/positionGroupRisk';
+import { allocateMarginUsd } from '@/lib/marginAllocation';
 import {
   formatSettlementQuantity,
   getPositionNotionalUsd,
@@ -59,8 +61,7 @@ interface Props {
   activeSymbol: string;
   onClosePosition: (symbol: string, index: number, percentage?: number) => void;
   onCancelOrder: (symbol: string, orderId: string) => void;
-  onAddIsolatedMargin?: (symbol: string, posIndex: number, amount: number) => void;
-  onAdjustMargin?: (symbol: string, posIndex: number, signedDelta: number) => void;
+  onAdjustMargin?: (symbol: string, allocations: { positionId: string; deltaUsd: number }[]) => void;
   availableBalance?: number;
   balance?: number;
   initialCapital?: number;
@@ -181,7 +182,7 @@ function buildCorrectedTradeRecord(record: TradeRecord, form: TradeRecordRepairF
 
 export function PositionPanel({
   positionsMap, ordersMap, tradeHistory, priceMap, activeSymbol,
-  onClosePosition, onCancelOrder, onAddIsolatedMargin, onAdjustMargin, availableBalance = 0, balance = 0, initialCapital = 1_000_000,
+  onClosePosition, onCancelOrder, onAdjustMargin, availableBalance = 0, balance = 0, initialCapital = 1_000_000,
   onClearSymbolData,
   activeTab, onTabChange, onCloseAllPositions, pricePrecision, onPlaceTpSl,
 }: Props) {
@@ -189,7 +190,11 @@ export function PositionPanel({
   const [leverageModal, setLeverageModal] = useState<{ symbol: string; index: number; pos: Position } | null>(null);
   const [tpslModal, setTpslModal] = useState<{ symbol: string; index: number; pos: Position } | null>(null);
   const [closeModal, setCloseModal] = useState<{ symbol: string; index: number; pos: Position } | null>(null);
-  const [adjustMarginModal, setAdjustMarginModal] = useState<{ symbol: string; index: number; pos: Position } | null>(null);
+  /**
+   * 按**仓位 id**记，不按数组下标。下标是活靶子:仓位被移除时一律用 id 过滤,
+   * 而强平与平仓由行情时钟触发——模态框开着的这段时间里,下标随时可能整体前移。
+   */
+  const [adjustMarginModal, setAdjustMarginModal] = useState<{ symbol: string; positionIds: string[] } | null>(null);
   const [closingKey, setClosingKey] = useState<string | null>(null);
   const [hideOtherContracts, setHideOtherContracts] = useState(false);
   const [closeAllConfirmOpen, setCloseAllConfirmOpen] = useState(false);
@@ -939,7 +944,23 @@ export function PositionPanel({
                   contracts: isCoinGroup ? totalUnits : undefined,
                   marginCoin: isCoinGroup ? totalMarginCoin : undefined,
                 };
-                const liq = calcLiquidationPrice(syntheticPos);
+                /**
+                 * 逐仓爆仓是**逐仓位**判的，所以合并卡上该写的是"先死的那一笔"在哪个价，
+                 * 而不是把总量/总保证金/加权均价拼成的虚构单仓位算出来的那个数。
+                 * 用户那张卡合成价 0.134361、真正先爆的一腿在 0.142494——
+                 * 卡说还有 13.1% 空间，实际只有 7.9%，低估的余量是现价的 5.26%。
+                 * 全仓不同：那本来就是一个共用的保证金池，合成才是对的。
+                 */
+                const isolatedChildren = mg.children
+                  .filter(c => c.position.marginMode === 'isolated')
+                  .map(c => c.position);
+                const allIsolated = mg.children.length > 0 && isolatedChildren.length === mg.children.length;
+                const groupFirstLiq = isolatedChildren.length > 0
+                  ? firstLiquidationPrice(isolatedChildren, mg.side)
+                  : null;
+                const liq = mg.marginMode === 'isolated' && groupFirstLiq != null
+                  ? groupFirstLiq
+                  : calcLiquidationPrice(syntheticPos);
 
                 const handleCloseGroup = (e: React.MouseEvent) => {
                   e.stopPropagation();
@@ -1001,13 +1022,20 @@ export function PositionPanel({
                           <span className="text-xs font-mono tabular-nums text-foreground">
                             {effectiveMarginLabel}
                           </span>
-                          {mg.marginMode === 'isolated' && mg.children.length === 1 && onAdjustMargin && (
+                          {/* 合并卡也要能追加保证金。此前 children.length === 1 把「2 笔合并」的卡
+                              整个挡掉了。分组键**不含保证金模式**（只按 symbol_side），
+                              所以一个全仓腿混进来也会并成同一张卡——那种情况下这颗按钮不能出现,
+                              否则会在写到一半时被全仓那一腿顶回来。 */}
+                          {allIsolated && onAdjustMargin && (
                             <button
                               type="button"
+                              data-testid="adjust-margin"
                               onClick={(e) => {
                                 e.stopPropagation();
-                                const first = mg.children[0];
-                                setAdjustMarginModal({ symbol: mg.symbol, index: first.index, pos: first.position });
+                                setAdjustMarginModal({
+                                  symbol: mg.symbol,
+                                  positionIds: mg.children.map(c => c.position.id),
+                                });
                               }}
                               title="调整保证金"
                               className="inline-flex items-center justify-center w-4 h-4 rounded border border-border bg-muted/40 hover:bg-primary/20 hover:border-primary/60 text-muted-foreground hover:text-primary transition-colors active:scale-95"
@@ -1022,8 +1050,11 @@ export function PositionPanel({
                       <DetailCell label="标记价格" value={price > 0 ? formatPrice(price, mg.symbol) : '-'} />
                       <DetailCell
                         key={`liq-${mg.totalIsolatedMargin ?? mg.totalMargin}-${mg.totalQuantity}-${mg.weightedEntryPrice}`}
-                        label="强平价格"
+                        label={mg.children.length > 1 && mg.marginMode === 'isolated' ? '强平价格（最先）' : '强平价格'}
                         value={isFinite(liq) ? formatPrice(liq, mg.symbol) : '--'}
+                        title={mg.children.length > 1 && mg.marginMode === 'isolated'
+                          ? '逐仓爆仓是逐仓位判的：这里写的是这组里最先被强平的那一笔的价格，不是各笔的平均。'
+                          : undefined}
                         valueClassName="text-trading-red"
                       />
                     </div>
@@ -1641,18 +1672,50 @@ export function PositionPanel({
           onConfirm={handleCloseConfirm}
         />
       )}
-      {adjustMarginModal && onAdjustMargin && (
-        <AdjustMarginModal
-          open={!!adjustMarginModal}
-          onClose={() => setAdjustMarginModal(null)}
-          symbol={adjustMarginModal.symbol}
-          position={positionsMap[adjustMarginModal.symbol]?.[adjustMarginModal.index] ?? adjustMarginModal.pos}
-          availableBalance={availableBalance}
-          onConfirm={(signedDelta) => {
-            onAdjustMargin(adjustMarginModal.symbol, adjustMarginModal.index, signedDelta);
-          }}
-        />
-      )}
+      {(() => {
+        if (!adjustMarginModal || !onAdjustMargin) return null;
+        const { symbol, positionIds } = adjustMarginModal;
+        // 每次渲染按 id 重新解析：期间被平掉 / 被强平的腿自动消失，不会误伤别人。
+        const live = (positionsMap[symbol] ?? []).filter(p => positionIds.includes(p.id));
+        if (live.length === 0) return null;
+        const mark = priceMap[symbol] || 0;
+        const floor = live.reduce((sum, p) => sum + initialMarginUsd(symbol, p), 0);
+        // 显示用的合成仓位：把整组当一笔看，模态框里的每个数都是这一组的。
+        const totalUnits = live.reduce((sum, p) => sum + getPositionUnits(p), 0);
+        const isCoinGroup = isCoinSettled(live[0]);
+        const head = live[0];
+        const groupPos: Position = {
+          ...head,
+          id: `adjust_${symbol}`,
+          quantity: totalUnits,
+          contracts: isCoinGroup ? totalUnits : undefined,
+          entryPrice: totalUnits > 0
+            ? live.reduce((sum, p) => sum + p.entryPrice * getPositionUnits(p), 0) / totalUnits
+            : head.entryPrice,
+          margin: live.reduce((sum, p) => sum + p.margin, 0),
+          isolatedMargin: live.reduce((sum, p) => sum + (p.isolatedMargin ?? p.margin), 0),
+          marginCoin: isCoinGroup
+            ? live.reduce((sum, p) => sum + (p.marginCoin ?? 0), 0)
+            : undefined,
+        };
+        return (
+          <AdjustMarginModal
+            open
+            onClose={() => setAdjustMarginModal(null)}
+            symbol={symbol}
+            position={groupPos}
+            legs={live}
+            markPrice={mark}
+            initialMarginUsd={floor}
+            availableBalance={availableBalance}
+            onConfirm={(signedDelta) => {
+              onAdjustMargin(symbol, allocateMarginUsd({
+                symbol, positions: live, deltaUsd: signedDelta, markPrice: mark,
+              }));
+            }}
+          />
+        );
+      })()}
 
       <Dialog open={closeAllConfirmOpen} onOpenChange={setCloseAllConfirmOpen}>
         <DialogContent className="sm:max-w-sm">

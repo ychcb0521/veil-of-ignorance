@@ -70,6 +70,7 @@ import {
 import { upsertOrderSnapshot } from '@/lib/orderSnapshotHistory';
 import { formatPrice, getPriceDecimals } from '@/lib/formatters';
 import { buildTpSlOrders, keepValidTpSlLegs, replaceTpSlOrders, validateTpSlLevels } from '@/lib/tpSlOrders';
+import { removableMarginUsd } from '@/lib/positionGroupRisk';
 import { evaluateFillAffordability, fillCostUsd } from '@/lib/fillAffordability';
 import { orderReferencePrice } from '@/lib/orderReferencePrice';
 import {
@@ -192,8 +193,8 @@ interface TradingState {
     triggerPrice: number,
     closeTime?: number,
   ) => ReduceOnlyTriggerExecution;
-  handleAddIsolatedMargin: (symbol: string, posIndex: number, amount: number) => void;
-  handleAdjustMargin: (symbol: string, posIndex: number, signedDelta: number) => void;
+  /** 按仓位 id 调整逐仓保证金；一次可写多笔（合并卡下的各腿）。 */
+  handleAdjustMargin: (symbol: string, allocations: { positionId: string; deltaUsd: number }[]) => void;
   handleClearSymbolData: (symbol: string) => void;
   fundingRate: number;
   liquidationOpen: boolean;
@@ -1640,72 +1641,89 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
   // ===== Adjust Isolated Margin (add OR remove) =====
   // signedDelta > 0 = add (debit available, credit position margin)
   // signedDelta < 0 = remove (credit available, debit position margin, guarded by initial margin floor)
-  const handleAdjustMargin = useCallback((symbol: string, posIndex: number, signedDelta: number) => {
-    if (!signedDelta || isNaN(signedDelta)) return;
+  /**
+   * 调整逐仓保证金。**按仓位 id 定位，不按数组下标**。
+   *
+   * 下标是活靶子：仓位被移除时一律用 id 过滤（强平 :875、平仓 :1468、清标的数据），
+   * 而这些都由行情时钟和后台轮询触发,不只是用户点击。模态框打开到点确认之间
+   * 只要有一笔更靠前的仓位平掉,下标就整体前移——旧写法会把钱**追进另一笔仓位**;
+   * 若目标恰好是最后一笔并被平掉,`arr[index]` 变 undefined,静默什么都不做,
+   * 而模态框那边还照样弹"调整成功"。
+   *
+   * 一次写完整组:多笔各自 setPositionsMap 会产生 N 次持久化与云同步。
+   */
+  const handleAdjustMargin = useCallback((
+    symbol: string,
+    allocations: { positionId: string; deltaUsd: number }[],
+  ) => {
+    const items = allocations.filter(a => Number.isFinite(a.deltaUsd) && a.deltaUsd !== 0);
+    if (items.length === 0) return;
+
     const positions = positionsMapRef.current[symbol] || [];
-    const pos = positions[posIndex];
-    if (!pos) return;
-    if (pos.marginMode !== 'isolated') {
-      toast.error('全仓模式不支持单仓位调整保证金');
+    const byId = new Map(positions.map(p => [p.id, p]));
+    for (const { positionId } of items) {
+      const p = byId.get(positionId);
+      if (!p) { toast.error('仓位已不存在，保证金未调整'); return; }
+      if (p.marginMode !== 'isolated') { toast.error('全仓模式不支持单仓位调整保证金'); return; }
+    }
+
+    const adding = items.reduce((sum, a) => sum + a.deltaUsd, 0) > 0;
+    // 逐笔夹到各自的上限，再按夹完的总额动账——绝不让某一笔被减到初始保证金以下。
+    const applied = new Map<string, number>();
+    let net = 0;
+    for (const { positionId, deltaUsd } of items) {
+      const p = byId.get(positionId)!;
+      let actual = deltaUsd;
+      if (deltaUsd < 0) {
+        const room = removableMarginUsd(symbol, p);
+        actual = -Math.min(-deltaUsd, room);
+      }
+      if (Math.abs(actual) <= 1e-8) continue;
+      applied.set(positionId, (applied.get(positionId) ?? 0) + actual);
+      net += actual;
+    }
+
+    if (Math.abs(net) <= 1e-8) {
+      toast.error(adding ? '可用余额不足' : '已达初始保证金下限，无法继续减少');
       return;
     }
 
-    const currentMargin = pos.isolatedMargin ?? pos.margin;
-    const initialMargin = isCoinSettled(pos)
-      ? pos.margin
-      : (pos.quantity * pos.entryPrice) / pos.leverage;
-
-    if (signedDelta > 0) {
-      // ADD
-      const avail = calcAvailable(balanceRef.current, positionsMapRef.current);
-      const actual = Math.min(signedDelta, avail);
-      if (actual <= 1e-8) { toast.error('可用余额不足'); return; }
-      setBalance(prev => prev - actual);
-      setPositionsMap(prev => {
-        const arr = [...(prev[symbol] || [])];
-        const p = arr[posIndex];
-        if (!p) return prev;
-        const price = priceMapRef.current[symbol] || p.entryPrice;
-        const coinDelta = isCoinSettled(p) && price > 0 ? actual / price : 0;
-        arr[posIndex] = {
-          ...p,
-          isolatedMargin: (p.isolatedMargin ?? p.margin) + actual,
-          margin: p.margin + actual,
-          marginCoin: p.marginCoin == null ? undefined : p.marginCoin + coinDelta,
-        };
-        return { ...prev, [symbol]: arr };
-      });
-    } else {
-      // REMOVE — guard by initial margin floor
-      const requested = -signedDelta;
-      const maxRemovable = Math.max(0, currentMargin - initialMargin);
-      const actual = Math.min(requested, maxRemovable);
-      if (actual <= 1e-8) {
-        toast.error('已达初始保证金下限，无法继续减少');
+    if (net > 0) {
+      // 判定基准是钱包自由现金：余额已经把两种模式的保证金都扣掉了，
+      // 再减一次全仓保证金就是同一笔钱扣两遍（见 fillAffordability 的说明）。
+      const free = balanceRef.current;
+      if (net > free + 1e-8) {
+        toast.error('可用余额不足', {
+          description: `需要 ${net.toFixed(2)} USDT，可用 ${free.toFixed(2)} USDT`,
+        });
         return;
       }
-      setBalance(prev => prev + actual);
-      setPositionsMap(prev => {
-        const arr = [...(prev[symbol] || [])];
-        const p = arr[posIndex];
-        if (!p) return prev;
-        const price = priceMapRef.current[symbol] || p.entryPrice;
-        const coinDelta = isCoinSettled(p) && price > 0 ? actual / price : 0;
-        arr[posIndex] = {
-          ...p,
-          isolatedMargin: (p.isolatedMargin ?? p.margin) - actual,
-          margin: Math.max(0, p.margin - actual),
-          marginCoin: p.marginCoin == null ? undefined : Math.max(0, p.marginCoin - coinDelta),
-        };
-        return { ...prev, [symbol]: arr };
-      });
     }
-  }, []);
 
-  // Backwards-compat alias: legacy "+只追加" callsites
-  const handleAddIsolatedMargin = useCallback((symbol: string, posIndex: number, amount: number) => {
-    handleAdjustMargin(symbol, posIndex, Math.abs(amount));
-  }, [handleAdjustMargin]);
+    setBalance(prev => prev - net);
+    setPositionsMap(prev => {
+      const arr = [...(prev[symbol] || [])];
+      const price = priceMapRef.current[symbol] || 0;
+      for (let i = 0; i < arr.length; i++) {
+        const delta = applied.get(arr[i].id);
+        if (delta == null) continue;
+        const p = arr[i];
+        const px = price > 0 ? price : p.entryPrice;
+        const coinDelta = isCoinSettled(p) && px > 0 ? delta / px : 0;
+        arr[i] = {
+          ...p,
+          isolatedMargin: Math.max(0, (p.isolatedMargin ?? p.margin) + delta),
+          margin: Math.max(0, p.margin + delta),
+          marginCoin: p.marginCoin == null ? undefined : Math.max(0, p.marginCoin + coinDelta),
+        };
+      }
+      return { ...prev, [symbol]: arr };
+    });
+    toast.success('保证金调整成功', {
+      description: `${net > 0 ? '追加' : '减少'} ${Math.abs(net).toFixed(2)} USDT`,
+      position: 'top-center',
+    });
+  }, [setBalance, setPositionsMap]);
 
   // ===== Clear Symbol Data & Financial Reversal =====
   const handleClearSymbolData = useCallback((symbol: string) => {
@@ -1799,7 +1817,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
     getSymbolSettlementMode, setSymbolSettlementMode,
     activeSymbols,
     handlePlaceOrder, handleClosePosition, handleCancelOrder, handlePlaceTpSl, applyAttachedTpSl, settleFillDebit, executeReduceOnlyTrigger,
-    handleAddIsolatedMargin, handleAdjustMargin, handleClearSymbolData,
+    handleAdjustMargin, handleClearSymbolData,
     fundingRate: FUNDING_RATE,
     liquidationOpen, liquidationDetails, closeLiquidationModal,
     timeMode, setTimeMode,

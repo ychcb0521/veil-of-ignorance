@@ -118,7 +118,6 @@ const Index = () => {
     applyAttachedTpSl,
     settleFillDebit,
     executeReduceOnlyTrigger,
-    handleAddIsolatedMargin,
     handleAdjustMargin,
     handleClearSymbolData,
     liquidationOpen,
@@ -2182,7 +2181,6 @@ const Index = () => {
                     activeSymbol={activeSymbol}
                     onClosePosition={handleClosePositionForSymbol}
                     onCancelOrder={handleCancelOrderForSymbol}
-                    onAddIsolatedMargin={handleAddIsolatedMargin}
                     onAdjustMargin={handleAdjustMargin}
                     availableBalance={getEffectiveAvailable(activeSymbol)}
                     balance={balance}

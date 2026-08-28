@@ -7,7 +7,8 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
 import type { Position } from '@/types/trading';
-import { calcLiquidationPrice } from '@/types/trading';
+import { firstLiquidationPrice } from '@/lib/positionGroupRisk';
+import { allocateMarginUsd } from '@/lib/marginAllocation';
 import { formatPrice, formatUSDT } from '@/lib/formatters';
 import { formatCoinAmount, getSettlementAsset } from '@/lib/coinMargined';
 import { isCoinSettled } from '@/lib/tradingSettlement';
@@ -19,6 +20,20 @@ interface Props {
   position: Position;
   /** Global available balance (for Add max) */
   availableBalance: number;
+  /**
+   * 实时标记价。USD ↔ 币的换算**必须**用它，不能用开仓价：
+   * 真正记账的那一步就是按标记价折的（handleAdjustMargin 里 actual / priceMap），
+   * 用开仓价算给用户看，等于展示一个不会发生的币量。
+   * 合并组更明显——合成仓位的"开仓价"是加权均价，等于谁的开仓价都不是。
+   */
+  markPrice: number;
+  /** 可减到的地板（USD）。由调用方按逐笔算好——币本位的地板与价无关，U 本位按各自开仓价。 */
+  initialMarginUsd: number;
+  /**
+   * 这组下面的**每一笔**逐仓仓位。强平价必须逐笔算再取最先撞线的那个：
+   * 逐仓爆仓是逐仓位判的，把整组拼成一笔虚构仓位算出来的价既不是最先也不是最后。
+   */
+  legs: Position[];
   /** signedDelta > 0 = add, < 0 = remove */
   onConfirm: (signedDelta: number) => void;
 }
@@ -26,7 +41,7 @@ interface Props {
 type Mode = 'add' | 'remove';
 
 export function AdjustMarginModal({
-  open, onClose, symbol, position, availableBalance, onConfirm,
+  open, onClose, symbol, position, availableBalance, markPrice, initialMarginUsd, legs, onConfirm,
 }: Props) {
   const [mode, setMode] = useState<Mode>('add');
   const [amountStr, setAmountStr] = useState<string>('');
@@ -35,11 +50,18 @@ export function AdjustMarginModal({
   const baseCoin = getSettlementAsset(symbol);
   const quoteUnitLabel = isCoinMargined ? 'USD' : 'USDT';
   const currentMargin = position.isolatedMargin ?? position.margin;
-  const initialMargin = isCoinMargined ? position.margin : (position.quantity * position.entryPrice) / position.leverage;
+  /**
+   * 地板由调用方给。币本位此前取的是 position.margin —— 而它开仓时就等于初始保证金、
+   * 追加时又跟着一起涨，于是"可减 = 当前 − 地板"**恒为 0**：
+   * 币本位仓位从开出来的那一刻起就一分钱都减不掉，不是"加过之后才不能减"。
+   */
+  const initialMargin = initialMarginUsd;
   const maxRemovable = Math.max(0, currentMargin - initialMargin);
   const maxAddable = Math.max(0, availableBalance);
   const max = mode === 'add' ? maxAddable : maxRemovable;
-  const maxCoin = isCoinMargined && position.entryPrice > 0 ? max / position.entryPrice : 0;
+  /** 换算价：标记价优先，取不到才退回开仓价（与记账那一步同源）。 */
+  const conversionPrice = markPrice > 0 ? markPrice : position.entryPrice;
+  const maxCoin = isCoinMargined && conversionPrice > 0 ? max / conversionPrice : 0;
 
   const amount = useMemo(() => {
     const n = parseFloat(amountStr);
@@ -47,23 +69,42 @@ export function AdjustMarginModal({
     return Math.min(n, max);
   }, [amountStr, max]);
 
-  // Compute current & projected liq prices
-  const currentLiq = useMemo(() => calcLiquidationPrice({
-    ...position,
-    marginMode: 'isolated',
-    isolatedMargin: currentMargin,
-  }), [position, currentMargin]);
+  // 强平价：整组里**最先**撞线的那一笔。单笔时就是它自己。
+  const currentLiq = useMemo(
+    () => firstLiquidationPrice(legs, position.side) ?? NaN,
+    [legs, position.side],
+  );
 
+  /**
+   * 【回归】预估强平价此前对币本位**恒等于当前强平价**。
+   *
+   * 它只覆写了 isolatedMargin，而 calcLiquidationPrice 的币本位分支读的是
+   * `marginCoin ?? margin / entryPrice` —— 两个都没动。于是无论填多少，
+   * 箭头右边的数永远和左边一样。而用户全程币本位，这个模态框里唯一有决策价值的
+   * 那个数，一直是个常数；点确认之后卡上的强平价却真的跳了。
+   * 三个保证金字段一起更新，币量按**标记价**折（与真正记账的那一步同源）。
+   */
   const projectedLiq = useMemo(() => {
     const signed = mode === 'add' ? amount : -amount;
-    const newMargin = currentMargin + signed;
-    if (newMargin <= 0) return NaN;
-    return calcLiquidationPrice({
-      ...position,
-      marginMode: 'isolated',
-      isolatedMargin: newMargin,
+    if (signed === 0) return currentLiq;
+    if (currentMargin + signed <= 0) return NaN;
+    // 按真正会执行的那套分摊算，再逐笔重算强平价——否则模态框承诺的是一个不会发生的数。
+    const allocations = allocateMarginUsd({ symbol, positions: legs, deltaUsd: signed, markPrice: conversionPrice });
+    const byId = new Map(allocations.map(a => [a.positionId, a.deltaUsd]));
+    const projected = legs.map(p => {
+      const d = byId.get(p.id) ?? 0;
+      if (d === 0) return p;
+      const coin = isCoinSettled(p) && conversionPrice > 0 ? d / conversionPrice : 0;
+      const baseCoin = p.marginCoin ?? (p.entryPrice > 0 ? p.margin / p.entryPrice : 0);
+      return {
+        ...p,
+        isolatedMargin: Math.max(0, (p.isolatedMargin ?? p.margin) + d),
+        margin: Math.max(0, p.margin + d),
+        marginCoin: isCoinSettled(p) ? Math.max(0, baseCoin + coin) : p.marginCoin,
+      };
     });
-  }, [position, currentMargin, amount, mode]);
+    return firstLiquidationPrice(projected, position.side) ?? NaN;
+  }, [legs, symbol, currentLiq, currentMargin, amount, mode, conversionPrice, position.side]);
 
   const handleMax = () => setAmountStr(max > 0 ? String(max.toFixed(2)) : '0');
 
@@ -77,14 +118,12 @@ export function AdjustMarginModal({
   const handleConfirm = () => {
     if (!canSubmit) return;
     const signed = mode === 'add' ? amount : -amount;
-    const coinSuffix = isCoinMargined && position.entryPrice > 0
-      ? ` ≈ ${formatCoinAmount(amount / position.entryPrice, baseCoin)}`
-      : '';
+    /**
+     * 不在这里报成功。调用方可能因为"可用余额不足"/"已达初始保证金下限"
+     * 直接返回并弹错误提示——此前这两条提示会和这里的"调整成功"**同时**出现在
+     * 同一次点击上。成功与否由真正动账的那一方说。
+     */
     onConfirm(signed);
-    toast.success('保证金调整成功', {
-      description: `${mode === 'add' ? '追加' : '减少'} ${amount.toFixed(2)} USDT${coinSuffix}`,
-      position: 'top-center',
-    });
     setAmountStr('');
     onClose();
   };
@@ -100,6 +139,7 @@ export function AdjustMarginModal({
               {position.side === 'LONG' ? '多' : '空'} {position.leverage}x
             </span>{' '}
             · 逐仓
+            {legs.length > 1 && <> · <span className="text-foreground/80">{legs.length} 笔合并</span></>}
           </DialogDescription>
         </DialogHeader>
 
@@ -164,8 +204,14 @@ export function AdjustMarginModal({
                 highlight
               />
               <div className="h-px bg-border my-1" />
+              {legs.length > 1 && (
+                <div className="text-[10px] leading-4 text-muted-foreground/80 pt-0.5">
+                  这组有 {legs.length} 笔逐仓仓位，按名义等比摊到每一笔；
+                  强平价取<strong className="text-foreground/80">最先撞线</strong>的那一笔——逐仓爆仓是逐仓位判的。
+                </div>
+              )}
               <Row
-                label="预估强平价"
+                label={legs.length > 1 ? '预估强平价（最先）' : '预估强平价'}
                 value={
                   <span className="flex items-center gap-1.5">
                     <span className={isFinite(currentLiq) ? 'text-trading-red/80' : 'text-muted-foreground'}>

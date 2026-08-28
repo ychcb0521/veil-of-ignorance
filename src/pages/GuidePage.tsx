@@ -1947,6 +1947,11 @@ P 不再一把手填，而是拆成三个更可回答的问题：<strong>「这�
                     <td className="px-3 py-2 border-t border-border">此前成交点<strong>一次都不查</strong>：余额 100,000 配两条各需 60,120 的条件单，下单时各自都过，同时触发就扣成 <strong>−20,480</strong>。负余额之后没有任何东西把它捞回来——<strong>有全仓仓位</strong>时它会把全仓权益自己拖到 0 以下，下一跳强平所有标的的全仓仓位并清空全部挂单；<strong>只有逐仓仓位</strong>时那一支根本不跑，负余额永久留在账上、还同步进云端，此后每一笔下单都被「可用余额不足」永久拒掉。分段订单与 TWAP 更是连下单时那道检查都绕过了，现在一并补上。</td>
                   </tr>
                   <tr>
+                    <td className="px-3 py-2 border-t border-border font-medium">合并持仓卡的强平价与追加保证金</td>
+                    <td className="px-3 py-2 border-t border-border">同标的同方向的多笔仓位会并成一张卡。卡上的<strong>强平价格（最先）</strong>写的是这组里<strong>最先被强平</strong>的那一笔的价格——多单取各笔中最高的，空单取最低的。<strong>「+」调整保证金对合并卡同样可用</strong>：追加按各笔名义等比摊分，减少按各笔<strong>还能减多少</strong>等比摊分，减到各自的开仓保证金为止。整组一次写完，按仓位 id 定位。若组里混进了全仓腿（分组只按标的+方向，不含保证金模式），按钮不出现。</td>
+                    <td className="px-3 py-2 border-t border-border">逐仓爆仓是<strong>逐仓位</strong>判的，先死的是最弱的那一笔。此前卡上显示的是把总量、总保证金、加权均价拼成一笔<strong>虚构仓位</strong>算出来的价，既不是最先也不是最后：一张 104,933 张、均价 0.147257、现价 0.154646 的卡显示 0.134361，而真正先爆的一腿在 <strong>0.142494</strong>——卡说还有 13.1% 空间，<strong>实际只有 7.9%</strong>，低估的余量是现价的 5.26%。另外两件一并修掉：币本位的「减少保证金」<strong>从开仓那一刻起就是死的</strong>（可减额恒为 0，地板取错了字段），以及模态框里的「预估强平价」<strong>对币本位恒等于当前值</strong>（它只改了一个强平公式根本不读的字段）。</td>
+                  </tr>
+                  <tr>
                     <td className="px-3 py-2 border-t border-border font-medium">默认结算方式</td>
                     <td className="px-3 py-2 border-t border-border">新标的下单<strong>默认币本位</strong>；下单面板顶部那颗「U本位 / 币本位」标签可随时切换，一旦为某个标的选过，此后就记住你的选择。</td>
                     <td className="px-3 py-2 border-t border-border">本系统的主仓打法以币本位为主。<strong>已有的历史记录不受影响</strong>——缺少该字段的旧单子一律仍按 U 本位解读，否则等于事后改写过去交易的含义，连带污染战役的保证金、R 倍数与统计。</td>
