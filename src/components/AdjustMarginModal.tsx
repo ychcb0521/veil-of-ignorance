@@ -34,6 +34,8 @@ interface Props {
    * 逐仓爆仓是逐仓位判的，把整组拼成一笔虚构仓位算出来的价既不是最先也不是最后。
    */
   legs: Position[];
+  /** 同一张卡上被排除在外的全仓腿数量——为 0 时不提示。 */
+  excludedCrossLegs?: number;
   /** signedDelta > 0 = add, < 0 = remove */
   onConfirm: (signedDelta: number) => void;
 }
@@ -41,7 +43,7 @@ interface Props {
 type Mode = 'add' | 'remove';
 
 export function AdjustMarginModal({
-  open, onClose, symbol, position, availableBalance, markPrice, initialMarginUsd, legs, onConfirm,
+  open, onClose, symbol, position, availableBalance, markPrice, initialMarginUsd, legs, excludedCrossLegs = 0, onConfirm,
 }: Props) {
   const [mode, setMode] = useState<Mode>('add');
   const [amountStr, setAmountStr] = useState<string>('');
@@ -208,6 +210,11 @@ export function AdjustMarginModal({
                 <div className="text-[10px] leading-4 text-muted-foreground/80 pt-0.5">
                   这组有 {legs.length} 笔逐仓仓位，按名义等比摊到每一笔；
                   强平价取<strong className="text-foreground/80">最先撞线</strong>的那一笔——逐仓爆仓是逐仓位判的。
+                </div>
+              )}
+              {excludedCrossLegs > 0 && (
+                <div className="text-[10px] leading-4 text-amber-500 dark:text-amber-400 pt-0.5">
+                  本组另有 {excludedCrossLegs} 笔<strong>全仓</strong>仓位未计入：全仓共用一个保证金池，不支持单仓位追加。
                 </div>
               )}
               <Row

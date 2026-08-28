@@ -87,10 +87,40 @@ describe('合并持仓卡的保证金', () => {
     expect(first).toBeGreaterThan(0.134361);
   });
 
-  it('混进一条全仓腿时不给按钮——分组键不含保证金模式，会并成同一张卡', () => {
-    // 写到一半会被全仓那一腿顶回来，不如根本不出现。
-    renderPanel([A, leg('c', 100, 0.15, 'cross')]);
-    expect(screen.queryByTestId('adjust-margin')).not.toBeInTheDocument();
+  it('【回归】混进全仓腿时按钮**照样在**，只是只对逐仓腿生效', () => {
+    // 分组键只有 symbol_side、不含保证金模式，全仓腿会并进同一张卡。
+    // 因为一条腿不支持就把另一条腿明明支持的能力一起收走，是错的。
+    const onAdjustMargin = renderPanel([A, B, leg('c', 100, 0.15, 'cross')], vi.fn());
+    const btn = screen.getByTestId('adjust-margin') as HTMLButtonElement;
+    expect(btn.disabled).toBe(false);
+
+    fireEvent.click(btn);
+    fireEvent.change(screen.getByRole('spinbutton'), { target: { value: '100000' } });
+    fireEvent.click(screen.getByRole('button', { name: /确认|确定/ }));
+
+    const [, allocations] = onAdjustMargin.mock.calls[0];
+    // 全仓那条不在里面——它会被下游拒掉，而拒掉发生在已经写了一半的时候
+    expect(allocations.map((a: { positionId: string }) => a.positionId).sort()).toEqual(['a', 'b']);
+  });
+
+  it('整张卡都是全仓时按钮置灰但保留，并说明原因', () => {
+    // 全仓共用一个保证金池，单仓位追加在机制上就不存在。
+    // 但要把原因说出来，而不是让按钮凭空消失。
+    renderPanel([leg('c', 100, 0.15, 'cross'), leg('d', 200, 0.16, 'cross')]);
+    const btn = screen.getByTestId('adjust-margin') as HTMLButtonElement;
+    expect(btn.disabled).toBe(true);
+    expect(btn.title).toMatch(/全仓.*共用一个保证金池/);
+  });
+
+  it('三笔、四笔合并同样都有——「无论有几笔」不是只到两笔为止', () => {
+    for (const n of [3, 4, 6]) {
+      const legs = Array.from({ length: n }, (_, i) => leg(`p${i}`, 10_000 + i * 137, 0.13 + i * 0.004));
+      const { unmount } = { unmount: () => {} };
+      renderPanel(legs);
+      expect((screen.getAllByTestId('adjust-margin')[0] as HTMLButtonElement).disabled).toBe(false);
+      unmount();
+      document.body.innerHTML = '';
+    }
   });
 
   it('点开后按 id 下发分摊，两腿都拿到钱且总额等于填的数', () => {

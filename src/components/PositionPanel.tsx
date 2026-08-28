@@ -954,7 +954,18 @@ export function PositionPanel({
                 const isolatedChildren = mg.children
                   .filter(c => c.position.marginMode === 'isolated')
                   .map(c => c.position);
-                const allIsolated = mg.children.length > 0 && isolatedChildren.length === mg.children.length;
+                /**
+                 * 有**任何一条**逐仓腿就给按钮，并且只对逐仓腿动手。
+                 *
+                 * 分组键只有 symbol_side、**不含保证金模式**，所以一条全仓腿会并进同一张卡。
+                 * 我一度因此把整张卡的按钮挡掉——那等于因为一条腿不支持，把另一条腿
+                 * 明明支持的能力也一起收走了。
+                 * 整张卡都是全仓时按钮**置灰但保留**：全仓共用一个保证金池，
+                 * 单仓位追加在机制上就不存在（币安同样不给），但要把原因说出来，
+                 * 而不是让按钮凭空消失。
+                 */
+                const hasIsolated = isolatedChildren.length > 0;
+                const mixedWithCross = hasIsolated && isolatedChildren.length < mg.children.length;
                 const groupFirstLiq = isolatedChildren.length > 0
                   ? firstLiquidationPrice(isolatedChildren, mg.side)
                   : null;
@@ -1026,19 +1037,31 @@ export function PositionPanel({
                               整个挡掉了。分组键**不含保证金模式**（只按 symbol_side），
                               所以一个全仓腿混进来也会并成同一张卡——那种情况下这颗按钮不能出现,
                               否则会在写到一半时被全仓那一腿顶回来。 */}
-                          {allIsolated && onAdjustMargin && (
+                          {onAdjustMargin && (
                             <button
                               type="button"
                               data-testid="adjust-margin"
+                              disabled={!hasIsolated}
                               onClick={(e) => {
                                 e.stopPropagation();
+                                if (!hasIsolated) return;
                                 setAdjustMarginModal({
                                   symbol: mg.symbol,
-                                  positionIds: mg.children.map(c => c.position.id),
+                                  // 只把逐仓腿交出去——全仓那条会被下游拒掉，
+                                  // 而拒掉发生在已经写了一半的时候。
+                                  positionIds: isolatedChildren.map(p => p.id),
                                 });
                               }}
-                              title="调整保证金"
-                              className="inline-flex items-center justify-center w-4 h-4 rounded border border-border bg-muted/40 hover:bg-primary/20 hover:border-primary/60 text-muted-foreground hover:text-primary transition-colors active:scale-95"
+                              title={hasIsolated
+                                ? (mixedWithCross
+                                  ? `调整保证金（本组 ${mg.children.length} 笔中 ${isolatedChildren.length} 笔为逐仓，仅对逐仓生效）`
+                                  : '调整保证金')
+                                : '全仓仓位共用一个保证金池，不支持单仓位追加；切换到逐仓后可用'}
+                              className={`inline-flex items-center justify-center w-4 h-4 rounded border transition-colors ${
+                                hasIsolated
+                                  ? 'border-border bg-muted/40 hover:bg-primary/20 hover:border-primary/60 text-muted-foreground hover:text-primary active:scale-95'
+                                  : 'border-border/40 bg-muted/20 text-muted-foreground/40 cursor-not-allowed'
+                              }`}
                             >
                               <Plus className="w-2.5 h-2.5" strokeWidth={3} />
                             </button>
@@ -1676,8 +1699,12 @@ export function PositionPanel({
         if (!adjustMarginModal || !onAdjustMargin) return null;
         const { symbol, positionIds } = adjustMarginModal;
         // 每次渲染按 id 重新解析：期间被平掉 / 被强平的腿自动消失，不会误伤别人。
-        const live = (positionsMap[symbol] ?? []).filter(p => positionIds.includes(p.id));
+        // 只认逐仓腿；期间被平掉 / 被强平的自动消失，不会误伤别人。
+        const live = (positionsMap[symbol] ?? [])
+          .filter(p => positionIds.includes(p.id) && p.marginMode === 'isolated');
         if (live.length === 0) return null;
+        const crossOnCard = (positionsMap[symbol] ?? [])
+          .filter(p => p.side === live[0].side && p.marginMode !== 'isolated').length;
         const mark = priceMap[symbol] || 0;
         const floor = live.reduce((sum, p) => sum + initialMarginUsd(symbol, p), 0);
         // 显示用的合成仓位：把整组当一笔看，模态框里的每个数都是这一组的。
@@ -1707,6 +1734,7 @@ export function PositionPanel({
             legs={live}
             markPrice={mark}
             initialMarginUsd={floor}
+            excludedCrossLegs={crossOnCard}
             availableBalance={availableBalance}
             onConfirm={(signedDelta) => {
               onAdjustMargin(symbol, allocateMarginUsd({
