@@ -10,6 +10,7 @@ import { computeInitialMainExposureNotional } from '@/lib/campaignAnalysis';
 import { formatCampaignLeverage, resolveCampaignMainLeverage } from '@/lib/campaignMetrics';
 import { formatCampaignDisplayCode } from '@/lib/campaignCode';
 import { buildCampaignReverseOrderLegMap } from '@/lib/campaignReverseOrderAttribution';
+import { buildMainLegOrdinals } from '@/lib/campaignMainLegOrdinals';
 import { resolveMirrorTpOrderTiming } from '@/lib/campaignMirrorTpOrderTiming';
 import { computeLegPnlContributions } from '@/lib/campaignLegPnl';
 import { computeCampaignRealizedPnl } from '@/lib/campaignRealizedPnl';
@@ -203,9 +204,18 @@ function statusForReverseOrder(order: CampaignReverseHedgeOrder): string {
 
 export function buildCampaignLegsExportRows(input: ExportInput): CampaignLegsExportRow[] {
   const recordMap = buildTradeRecordLookup(input.tradeRecords);
+  const mainLegOrdinals = buildMainLegOrdinals(input.legs);
   const reverseOrderLegMap = buildCampaignReverseOrderLegMap(
     input.legs,
     input.reverseHedgeOrders,
+    {
+      // 与页面完全同源：导出图的归类必须和界面一致，否则 PNG 会成为第五套口径。
+      legWindow: (leg) => {
+        const rec = leg.trade_record_id ? recordMap.get(leg.trade_record_id) ?? null : null;
+        const exec = resolveLegExecution(leg, rec, input.legExitPriceCorrections);
+        return { openMs: exec.openTime ?? null, closeMs: exec.closeTime ?? null };
+      },
+    },
   );
 
   // 与页面完全同源：导出图里的腿盈亏必须和界面上是同一个数，
@@ -236,7 +246,11 @@ export function buildCampaignLegsExportRows(input: ExportInput): CampaignLegsExp
     const record = leg.trade_record_id ? recordMap.get(leg.trade_record_id) ?? null : null;
     const execution = resolveLegExecution(leg, record, input.legExitPriceCorrections);
     const status = statusForLeg(leg, record);
-    const roleLabel = leg.leg_role ? LEG_ROLE_LABELS[leg.leg_role] ?? leg.leg_role : '—';
+    // 与页面同源：两笔及以上主力时带上序号，导出图里也能核对归类。
+    const roleOrdinal = mainLegOrdinals.get(leg.id) ?? null;
+    const roleLabel = leg.leg_role
+      ? `${LEG_ROLE_LABELS[leg.leg_role] ?? leg.leg_role}${roleOrdinal ? ` ${roleOrdinal}` : ''}`
+      : '—';
     const openLabel = fmtClock(execution.openTime ?? leg.pre_simulated_time);
     const closeLabel = fmtClock(execution.closeTime);
     const operationLabel = fmtClock(journalOperationTime(leg, record));

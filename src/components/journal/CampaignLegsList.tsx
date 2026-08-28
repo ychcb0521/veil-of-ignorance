@@ -6,6 +6,7 @@ import { resolveLegExecution, type LegExitPriceCorrections } from '@/lib/campaig
 import { HEDGE_TYPE_LABELS } from '@/lib/hedgeTypes';
 import { buildTradeRecordLookup, journalOperationTime } from '@/lib/objectiveOperationTime';
 import { buildCampaignReverseOrderLegMap } from '@/lib/campaignReverseOrderAttribution';
+import { buildMainLegOrdinals } from '@/lib/campaignMainLegOrdinals';
 import { resolveMirrorTpOrderTiming } from '@/lib/campaignMirrorTpOrderTiming';
 import type { CampaignEvent, TradeJournal } from '@/types/journal';
 import { computeLegPnlContributions, sumLegPnl } from '@/lib/campaignLegPnl';
@@ -150,9 +151,20 @@ export function CampaignLegsList({
     return sum;
   }, [legPnlMap]);
 
+  // 两笔及以上主力时给它们编号——归类按时间走，界面上得能一眼核对归对没有。
+  const mainLegOrdinals = useMemo(() => buildMainLegOrdinals(legs), [legs]);
+
   const reverseOrderLegMap = useMemo(
-    () => buildCampaignReverseOrderLegMap(legs, reverseHedgeOrders),
-    [legs, reverseHedgeOrders],
+    () => buildCampaignReverseOrderLegMap(legs, reverseHedgeOrders, {
+      // 与这一行渲染的「开 / 平」严格同源。若归类用一套时间、显示用另一套，
+      // 就会出现「委 01:00 挂在一行标着 平 23:53 的腿上」——同一类错配换个位置再来一次。
+      legWindow: (leg) => {
+        const rec = leg.trade_record_id ? recordMap.get(leg.trade_record_id) ?? null : null;
+        const exec = resolveLegExecution(leg, rec, legExitPriceCorrections);
+        return { openMs: exec.openTime ?? null, closeMs: exec.closeTime ?? null };
+      },
+    }),
+    [legs, reverseHedgeOrders, recordMap, legExitPriceCorrections],
   );
 
   return (
@@ -205,7 +217,9 @@ export function CampaignLegsList({
                 >
                   <div>{leg.leg_sequence ?? '—'}</div>
                   <div className="flex items-center gap-1.5">
-                    {leg.leg_role ? <LegRoleChip role={leg.leg_role} /> : '—'}
+                    {leg.leg_role
+                      ? <LegRoleChip role={leg.leg_role} ordinal={mainLegOrdinals.get(leg.id) ?? null} />
+                      : '—'}
                     {leg.source === 'retroactive_from_record' && (
                       <span className="inline-flex items-center rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
                         回填

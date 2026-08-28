@@ -56,12 +56,18 @@ interface Props {
   role: LegRole;
   short?: boolean;
   className?: string;
+  /**
+   * 同一档主力有多笔时的序号（按开仓先后）。只在 ≥2 笔时传，
+   * 单笔写「主力1」会暗示还有个主力2。
+   */
+  ordinal?: number | null;
 }
 
-export function LegRoleChip({ role, short = false, className }: Props) {
+export function LegRoleChip({ role, short = false, className, ordinal }: Props) {
+  const suffix = ordinal != null && ordinal > 0 ? String(ordinal) : '';
   return (
     <span className={cn('inline-flex items-center rounded px-2 py-0.5 text-[10px]', STYLES[role], className)}>
-      {short ? SHORT_LABELS[role] : LABELS[role]}
+      {short ? `${SHORT_LABELS[role]}${suffix}` : `${LABELS[role]}${suffix ? ` ${suffix}` : ''}`}
     </span>
   );
 }
