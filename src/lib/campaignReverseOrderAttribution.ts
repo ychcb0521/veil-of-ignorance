@@ -25,7 +25,16 @@ export interface MainLegWindow {
   closeMs: number | null;
 }
 
+/**
+ * 同一时刻有多笔主力开着时怎么裁决。
+ *   size          —— 按名义金额（委托归属沿用此口径：残仓 vs 真主力靠金额分辨）
+ *   nearest-open  —— 取开仓时刻最接近的那笔（镜像止盈与它的主力**同秒**开出，
+ *                    这时「谁更近」是强信号，而金额不是）
+ */
+export type MainLegTieBreak = 'size' | 'nearest-open';
+
 export interface ReverseOrderAttributionOptions {
+  tieBreak?: MainLegTieBreak;
   /**
    * 取一条腿的持仓窗口。**必须与界面上那两行「开 / 平」同源**
    * （resolveLegExecution），否则会出现「委 01:00 挂在一行标着 平 23:53 的腿上」
@@ -133,27 +142,33 @@ function feasibleHedgeLegs(
   return feasible;
 }
 
-export function buildCampaignReverseOrderLegMap(
+/** 主力腿的时间归属器。风险口径与委托列表共用它——两处若各写一遍，迟早分叉。 */
+export function createMainLegOwnerResolver(
   legs: TradeJournal[],
-  reverseHedgeOrders: CampaignReverseHedgeOrder[],
   options: ReverseOrderAttributionOptions = {},
-): Map<string, string> {
+): (createdAtMs: number | null | undefined) => TradeJournal | null {
   const windowFor = options.legWindow ?? defaultWindow;
+  const tieBreak = options.tieBreak ?? 'size';
   const orderedMainLegs = legs.filter(isMainLeg).sort((a, b) => sequence(a) - sequence(b));
   const windows = new Map(orderedMainLegs.map(leg => [leg.id, windowFor(leg)] as const));
   // 兜底所有者：一条时间线索都用不上时才轮到它（沿用旧行为）。
   const fallbackOwner = pickPrimaryMainLeg(orderedMainLegs) ?? orderedMainLegs[0] ?? null;
-  const hedgeLegs = legs.filter(isHedgeLeg).sort((a, b) => sequence(a) - sequence(b));
-  const result = new Map<string, string>();
-  const claimedHedgeLegs = new Set<string>();
 
-  const ownerByTime = (order: CampaignReverseHedgeOrder): TradeJournal | null => {
-    const t = timeMs(order.createdAt);
+  return (createdAtMs) => {
+    const t = timeMs(createdAtMs);
     if (t == null) return fallbackOwner;
 
-    // A：委托挂出那一刻**正开着**的主力。同一刻有多笔时按金额定（残仓 vs 真主力）。
+    // A：委托挂出那一刻**正开着**的主力。同一刻有多笔时按 tieBreak 裁决。
     const containing = orderedMainLegs.filter(leg => windowContains(windows.get(leg.id)!, t));
     if (containing.length > 0) {
+      if (tieBreak === 'nearest-open') {
+        return [...containing].sort((a, b) => {
+          const da = Math.abs((windows.get(a.id)!.openMs ?? Number.MAX_SAFE_INTEGER) - t);
+          const db = Math.abs((windows.get(b.id)!.openMs ?? Number.MAX_SAFE_INTEGER) - t);
+          if (da !== db) return da - db;
+          return sequence(a) - sequence(b);
+        })[0];
+      }
       return pickPrimaryMainLeg(containing) ?? containing[0];
     }
 
@@ -175,6 +190,17 @@ export function buildCampaignReverseOrderLegMap(
     // D：连开仓时刻都取不到的病态情形。
     return fallbackOwner;
   };
+}
+
+export function buildCampaignReverseOrderLegMap(
+  legs: TradeJournal[],
+  reverseHedgeOrders: CampaignReverseHedgeOrder[],
+  options: ReverseOrderAttributionOptions = {},
+): Map<string, string> {
+  const ownerFor = createMainLegOwnerResolver(legs, options);
+  const hedgeLegs = legs.filter(isHedgeLeg).sort((a, b) => sequence(a) - sequence(b));
+  const result = new Map<string, string>();
+  const claimedHedgeLegs = new Set<string>();
 
   for (const order of reverseHedgeOrders) {
     if (order.status === 'triggered' && hedgeLegs.length > 0) {
@@ -196,7 +222,7 @@ export function buildCampaignReverseOrderLegMap(
       // 没有可行的对冲腿时，按它**挂出**时保护的那笔主力归类——
       // 而不是无条件塞给金额最大的那笔。
     }
-    const owner = ownerByTime(order);
+    const owner = ownerFor(order.createdAt);
     if (owner) result.set(order.id, owner.id);
   }
 

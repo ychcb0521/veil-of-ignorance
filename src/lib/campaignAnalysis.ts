@@ -12,10 +12,15 @@ import {
 } from '@/lib/campaignLegExecution';
 import { getPositionNotionalUsd } from '@/lib/tradingSettlement';
 import { buildTradeRecordLookup } from '@/lib/objectiveOperationTime';
+import { resolveLegExecution } from '@/lib/campaignLegExecution';
 import { isHistoricalCampaign, type CampaignEvent, type LegRole, type TradeCampaign, type TradeJournal } from '@/types/journal';
 import { computeCampaignRealizedPnl } from '@/lib/campaignRealizedPnl';
 import type { CampaignReverseHedgeOrder, PendingOrder, SettlementMode, TradeRecord } from '@/types/trading';
 import { pickPrimaryMainLeg } from '@/lib/campaignPrimaryMainLeg';
+import {
+  buildCampaignReverseOrderLegMap,
+  createMainLegOwnerResolver,
+} from '@/lib/campaignReverseOrderAttribution';
 
 export interface StateSegment {
   state: 'state_0_setup' | 'state_1_lockin' | 'state_2_rolling' | 'state_3_exit';
@@ -198,6 +203,38 @@ function resolveInitialReverseHedgePrices(
   return [];
 }
 
+/** 最早开仓的那笔主力（权益快照口径）。 */
+function findEarliestMainLeg(legs: TradeJournal[]): TradeJournal | null {
+  return legs
+    .filter(leg => leg.leg_role === 'main_open')
+    .sort((a, b) => toMs(a.pre_simulated_time) - toMs(b.pre_simulated_time))[0] ?? null;
+}
+
+/** 这笔镜像所属主力那一组的开仓敞口；单笔主力时返回 null 走原路径。 */
+function resolveMirrorGroupExposure(
+  campaign: TradeCampaign,
+  legs: TradeJournal[],
+  tradeRecords: TradeRecord[],
+  mirrorLeg: TradeJournal,
+): number | null {
+  const mainLegs = legs
+    .filter(leg => leg.leg_role === 'main_open')
+    .sort((a, b) => toMs(a.pre_simulated_time) - toMs(b.pre_simulated_time));
+  if (mainLegs.length <= 1) return null;
+  const legWindow = (leg: TradeJournal) => {
+    const exec = resolveLegExecution(leg, findTradeRecord(leg, tradeRecords));
+    return { openMs: exec.openTime ?? null, closeMs: exec.closeTime ?? null };
+  };
+  const ownerForLeg = createMainLegOwnerResolver(legs, { legWindow, tieBreak: 'nearest-open' });
+  const groups = groupInitialMainExposure(campaign, legs, tradeRecords, mainLegs, ownerForLeg);
+  const owner = ownerForLeg(firstPositiveNumber(
+    findTradeRecord(mirrorLeg, tradeRecords)?.openTime,
+    toMs(mirrorLeg.pre_simulated_time),
+  ));
+  const grouped = owner ? groups.get(owner.id) : null;
+  return grouped != null && grouped > EPSILON ? grouped : null;
+}
+
 function findInitialMainLeg(legs: TradeJournal[]): TradeJournal | null {
   // 多笔主仓时以名义金额最大的那笔为准（并列时退回最早开仓），
   // 否则一笔残仓排在前面就会把开仓价、风险锚整体带偏。
@@ -313,6 +350,70 @@ function resolveInitialMainExposureNotional(
 }
 
 /**
+ * 把开仓敞口**按主力分组**：每笔主力 + 归属于它的镜像止盈。
+ *
+ * 分组前先按 positionIdentity 去重（与上面同一套身份），否则一笔镜像会被两组各记一次。
+ * 镜像归属用「开仓时刻落在哪笔主力的持仓窗口里」——本场两笔镜像与各自主力**同秒**开出，
+ * 分完之后 61430/(40960+61430) 与 133880/(89260+133880) 都恰好是 60.0%，
+ * 正是策略写死的 40/60 分割；这证明分组是真的，不是凑出来的。
+ */
+function groupInitialMainExposure(
+  campaign: TradeCampaign,
+  legs: TradeJournal[],
+  tradeRecords: TradeRecord[],
+  mainLegs: TradeJournal[],
+  ownerAt: (t: number | null | undefined) => TradeJournal | null,
+): Map<string, number> {
+  const recordLookup = buildTradeRecordLookup(tradeRecords);
+  const seen = new Set<string>();
+  const groups = new Map<string, number>();
+  const earliestKey = mainLegs[0]?.id ?? null;
+
+  const add = (ownerId: string | null, notional: number) => {
+    const key = ownerId ?? earliestKey;
+    if (key == null) return;
+    groups.set(key, (groups.get(key) ?? 0) + notional);
+  };
+
+  for (const leg of legs) {
+    if (!isInitialMainExposurePosition(campaign, leg.leg_role, leg.direction)) continue;
+    const record = leg.trade_record_id ? recordLookup.get(leg.trade_record_id) ?? null : null;
+    const notional = firstPositiveNumber(
+      record ? tradeRecordNotionalUsd(record, record.entryPrice) : null,
+      leg.pre_position_size,
+    );
+    if (notional == null) continue;
+    const identity = positionIdentity(record, leg.trade_record_id, leg.id, `journal:${leg.id}`);
+    if (seen.has(identity)) continue;
+    seen.add(identity);
+    // 主力自己就是自己的组;镜像按开仓时刻归属。
+    const owner = leg.leg_role === 'main_open'
+      ? leg
+      : ownerAt(firstPositiveNumber(record?.openTime, toMs(leg.pre_simulated_time)));
+    add(owner?.id ?? null, notional);
+  }
+
+  for (const event of [...(campaign.actual_evolution ?? [])]
+    .sort((a, b) => toMs(a.timestamp) - toMs(b.timestamp))) {
+    if (!POSITION_ENTRY_EVENT_TYPES.has(event.event_type)) continue;
+    if (!isInitialMainExposurePosition(campaign, event.leg_role, event.direction)) continue;
+    const record = event.trade_record_id ? recordLookup.get(event.trade_record_id) ?? null : null;
+    const notional = firstPositiveNumber(
+      record ? tradeRecordNotionalUsd(record, record.entryPrice) : null,
+      event.size_usdt,
+    );
+    if (notional == null) continue;
+    const identity = positionIdentity(record, event.trade_record_id, event.journal_id, `event:${event.id}`);
+    if (seen.has(identity)) continue;
+    seen.add(identity);
+    const owner = ownerAt(firstPositiveNumber(record?.openTime, toMs(event.timestamp)));
+    add(owner?.id ?? null, notional);
+  }
+
+  return groups;
+}
+
+/**
  * Initial main opening notional in USDT. A long campaign sums every opening M
  * and mirror-long slice; a short campaign applies the same rule symmetrically.
  */
@@ -351,7 +452,14 @@ export function computeMirrorTpReductionPct(
 ): number | null {
   if (mirrorLeg.leg_role !== 'mirror_tp') return null;
 
-  const fullInitialExposure = computeInitialMainExposureNotional(campaign, legs, tradeRecords);
+  /**
+   * 分母是**这笔镜像所属的那一组**主力敞口，不是全场之和。
+   * 多笔主力时用全场当分母会把 60/40 的分割算成 18.87% / 41.13%——
+   * 而上面那段注释明明白白承诺「newer 40/60 splits at 60%」，
+   * 那在任何两笔主力的战役上都是一句做不到的话。按组分完正好是 60.0% / 60.0%。
+   */
+  const fullInitialExposure = resolveMirrorGroupExposure(campaign, legs, tradeRecords, mirrorLeg)
+    ?? computeInitialMainExposureNotional(campaign, legs, tradeRecords);
   if (fullInitialExposure <= EPSILON) return null;
 
   const mirrorRecord = findTradeRecord(mirrorLeg, tradeRecords);
@@ -491,8 +599,14 @@ export function computeInitialExpectedMaxDrawdownPct(
   tradeRecords: TradeRecord[],
   reverseHedgeOrders: CampaignReverseHedgeOrder[] = [],
 ): number {
-  const anchor = resolveInitialRiskAnchor(campaign, legs, tradeRecords, reverseHedgeOrders);
-  return anchor == null ? 0 : anchor.drawdownFraction * 100;
+  const risk = resolveMainRiskAnchors(campaign, legs, tradeRecords, reverseHedgeOrders);
+  // 多笔主力时取**敞口加权**的等效回撤率：它是唯一能让
+  // 「最大预期亏损 = 名义仓位 × 预期回撤比例」这条帮助文案继续字面成立的定义，
+  // 也是唯一在单笔主力时退化回原值的定义。
+  // 分母只算**锚得出跌幅**的那部分敞口：锚不出来的腿已经在分子记 0，
+  // 再放进分母就是罚两次。
+  if (risk.anchoredExposureNotional <= EPSILON) return 0;
+  return (risk.expectedMaxLoss / risk.anchoredExposureNotional) * 100;
 }
 
 /**
@@ -502,14 +616,168 @@ export function computeInitialExpectedMaxDrawdownPct(
  * TP; later additions/re-entries and reverse hedges are excluded. A short
  * campaign applies the same rule symmetrically.
  */
+/** 一笔主力自己的风险锚。 */
+export interface MainRiskAnchor {
+  mainLegId: string;
+  exposureNotional: number;
+  /** 到它**自己**的初始保护线的跌幅；取不到时为 null。 */
+  drawdownFraction: number | null;
+  /** fraction × exposure；锚不出来时为 0（绝不借用别人的跌幅）。 */
+  expectedMaxLoss: number;
+}
+
+export interface CampaignRiskAnchors {
+  anchors: MainRiskAnchor[];
+  /** Σ 各主力自身的预期最大亏损。 */
+  expectedMaxLoss: number;
+  /** 能锚出跌幅的那部分敞口之和——作为等效回撤率的分母。 */
+  anchoredExposureNotional: number;
+  /** 锚不出来的敞口：它在分子里记 0，所以 L 是**下限**，不是准确值。 */
+  unanchoredExposureNotional: number;
+}
+
+/**
+ * 逐笔主力各算各的风险锚，然后求和。
+ *
+ * 事故：一场战役有两笔主力时，`findInitialMainLeg` 按名义金额只挑一笔，
+ * 于是**跌幅取自那一笔、敞口却是全部主力之和**——同一个数里混了两套口径。
+ * 实盘那张卡：主力1 到它自己保护线的跌幅是 13.38%，主力2 是 6.81%；
+ * 系统拿 6.81% 去给两笔加起来的 325,530 敞口计价，主力1 的 102,390 敞口
+ * 被按别人的止损宽度算了。
+ *
+ * 关键分寸：**归属决定「哪一笔」，±5 分钟开仓 cohort 决定「哪些委托算 ex-ante」**——
+ * 两者是相乘的关系，不能互相替代。若把「该主力持仓期内的所有委托」都算进保护线，
+ * 主力2 后面那几张 0.117–0.130 的追踪单（在多单开仓价**上方**）会被 |·| 当成风险，
+ * 预期最大亏损反而随着行情走对而变大、盈亏比塌到 0.67——那等于惩罚正确的移动止盈。
+ */
+export function resolveMainRiskAnchors(
+  campaign: TradeCampaign,
+  legs: TradeJournal[],
+  tradeRecords: TradeRecord[],
+  reverseHedgeOrders: CampaignReverseHedgeOrder[] = [],
+): CampaignRiskAnchors {
+  const mainLegs = legs
+    .filter(leg => leg.leg_role === 'main_open')
+    .sort((a, b) => toMs(a.pre_simulated_time) - toMs(b.pre_simulated_time));
+
+  // 单笔主力（含 0 笔的纯事件战役）走原路径，逐字节不变。
+  if (mainLegs.length <= 1) {
+    const anchor = resolveInitialRiskAnchor(campaign, legs, tradeRecords, reverseHedgeOrders);
+    if (anchor == null) {
+      return { anchors: [], expectedMaxLoss: 0, anchoredExposureNotional: 0, unanchoredExposureNotional: 0 };
+    }
+    return {
+      anchors: [{
+        mainLegId: mainLegs[0]?.id ?? '',
+        exposureNotional: anchor.initialMainExposureNotional,
+        drawdownFraction: anchor.drawdownFraction,
+        expectedMaxLoss: anchor.drawdownFraction * anchor.initialMainExposureNotional,
+      }],
+      expectedMaxLoss: anchor.drawdownFraction * anchor.initialMainExposureNotional,
+      anchoredExposureNotional: anchor.initialMainExposureNotional,
+      unanchoredExposureNotional: 0,
+    };
+  }
+
+  const legWindow = (leg: TradeJournal) => {
+    const rec = findTradeRecord(leg, tradeRecords);
+    const exec = resolveLegExecution(leg, rec);
+    return { openMs: exec.openTime ?? null, closeMs: exec.closeTime ?? null };
+  };
+  // 委托归属沿用金额裁决（残仓 vs 真主力）；镜像/角色腿用「开仓最接近」——它们与主力同秒开出。
+  const ownerForOrder = createMainLegOwnerResolver(legs, { legWindow });
+  const ownerForLeg = createMainLegOwnerResolver(legs, { legWindow, tieBreak: 'nearest-open' });
+  const exposureByMain = groupInitialMainExposure(campaign, legs, tradeRecords, mainLegs, ownerForLeg);
+  const orderLegMap = buildCampaignReverseOrderLegMap(legs, reverseHedgeOrders, { legWindow });
+  const historical = isHistoricalCampaign(campaign);
+  const expectedSide = campaign.direction === 'main_long' ? 'SHORT' : 'LONG';
+
+  const anchors: MainRiskAnchor[] = [];
+  for (const [index, mainLeg] of mainLegs.entries()) {
+    const mainRecord = findTradeRecord(mainLeg, tradeRecords);
+    const entryPrice = firstPositiveNumber(mainRecord?.entryPrice, mainLeg.pre_entry_price);
+    const exposureNotional = exposureByMain.get(mainLeg.id) ?? 0;
+    const openedAtMs = firstPositiveNumber(
+      mainRecord?.openTime,
+      toMs(mainLeg.pre_simulated_time),
+      // campaign.opened_at 只对**最早**那笔主力有意义
+      index === 0 ? toMs(campaign.opened_at) : null,
+    );
+
+    // 只看归属于这一笔主力的反向委托——否则主力1 会拿到主力2 的保护价。
+    const ownOrders = reverseHedgeOrders.filter(order =>
+      order.side === expectedSide && orderLegMap.get(order.id) === mainLeg.id,
+    );
+    // 角色腿（初始对冲 A/B）同样按时间归属到各自主力。
+    const roleHedgePrices = INITIAL_HEDGE_ROLES.flatMap(role => {
+      const roleLegs = legs
+        .filter(leg => leg.leg_role === role)
+        .filter(leg => ownerForLeg(firstPositiveNumber(
+          findTradeRecord(leg, tradeRecords)?.openTime,
+          toMs(leg.pre_simulated_time),
+        ))?.id === mainLeg.id)
+        .sort((a, b) => toMs(a.pre_simulated_time) - toMs(b.pre_simulated_time));
+      const plannedPrice = firstPositiveNumber(
+        roleLegs.find(leg => firstPositiveNumber(leg.pre_entry_price) != null)?.pre_entry_price,
+      );
+      if (plannedPrice != null) return [plannedPrice];
+      const recordLeg = roleLegs.find(leg => findTradeRecord(leg, tradeRecords) != null) ?? null;
+      const recordPrice = recordLeg
+        ? firstPositiveNumber(findTradeRecord(recordLeg, tradeRecords)?.entryPrice)
+        : null;
+      return recordPrice == null ? [] : [recordPrice];
+    });
+
+    const initialReversePrices = resolveInitialReverseHedgePrices(
+      campaign, ownOrders, openedAtMs, roleHedgePrices,
+    );
+    const hedgePrices = historical && initialReversePrices.length > 0
+      ? [...initialReversePrices]
+      : [...roleHedgePrices];
+    if (hedgePrices.length < INITIAL_HEDGE_ROLES.length && !historical) {
+      for (const price of initialReversePrices) {
+        const duplicate = hedgePrices.some(existing =>
+          Math.abs(existing - price) <= Math.max(EPSILON, Math.abs(existing) * 1e-6));
+        if (!duplicate) hedgePrices.push(price);
+        if (hedgePrices.length >= INITIAL_HEDGE_ROLES.length) break;
+      }
+    }
+
+    const resolvable = entryPrice != null && exposureNotional > EPSILON && hedgePrices.length > 0;
+    const drawdownFraction = resolvable
+      ? Math.max(...hedgePrices.map(price => Math.abs(price - entryPrice) / entryPrice))
+      : null;
+    anchors.push({
+      mainLegId: mainLeg.id,
+      exposureNotional,
+      drawdownFraction,
+      // 锚不出来就记 0,绝不借用别的腿的跌幅——那等于凭空发明一条从未挂过的止损。
+      expectedMaxLoss: drawdownFraction == null ? 0 : drawdownFraction * exposureNotional,
+    });
+  }
+
+  const anchoredExposureNotional = anchors
+    .filter(a => a.drawdownFraction != null)
+    .reduce((sum, a) => sum + a.exposureNotional, 0);
+  const unanchoredExposureNotional = anchors
+    .filter(a => a.drawdownFraction == null)
+    .reduce((sum, a) => sum + a.exposureNotional, 0);
+
+  return {
+    anchors,
+    expectedMaxLoss: anchors.reduce((sum, a) => sum + a.expectedMaxLoss, 0),
+    anchoredExposureNotional,
+    unanchoredExposureNotional,
+  };
+}
+
 export function computeInitialExpectedMaxLoss(
   campaign: TradeCampaign,
   legs: TradeJournal[],
   tradeRecords: TradeRecord[],
   reverseHedgeOrders: CampaignReverseHedgeOrder[] = [],
 ): number {
-  const anchor = resolveInitialRiskAnchor(campaign, legs, tradeRecords, reverseHedgeOrders);
-  return anchor == null ? 0 : anchor.drawdownFraction * anchor.initialMainExposureNotional;
+  return resolveMainRiskAnchors(campaign, legs, tradeRecords, reverseHedgeOrders).expectedMaxLoss;
 }
 
 export interface CampaignInitialRiskFraction {
@@ -539,7 +807,13 @@ export function computeCampaignInitialRiskFraction(
   legs: TradeJournal[],
 ): CampaignInitialRiskFraction | null {
   if (!Number.isFinite(initialExpectedMaxLoss) || initialExpectedMaxLoss <= EPSILON) return null;
-  const mainLeg = findInitialMainLeg(legs);
+  /**
+   * 取**最早**那笔主力的权益快照，不是金额最大那笔。
+   * 「这场战役押上了本金的百分之几」问的是入场那一刻的本金；
+   * 旧写法取金额最大那笔，在实盘这场里等于用了 8 小时后、
+   * 已经把主力1 的 +3268 记进去之后的权益——那是事后视角。
+   */
+  const mainLeg = findEarliestMainLeg(legs) ?? findInitialMainLeg(legs);
   const accountEquityAtMainOpen = Number(mainLeg?.pre_account_equity_usdt);
   if (!Number.isFinite(accountEquityAtMainOpen) || accountEquityAtMainOpen <= EPSILON) return null;
   return {

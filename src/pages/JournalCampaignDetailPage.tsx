@@ -1004,7 +1004,11 @@ export default function JournalCampaignDetailPage() {
           <>
             <p>入场时 M 加镜像的真实全暴露，在初始对冲 A/B 风险边界下承担的最大亏损额，是盈亏比的风险分母。</p>
             <div className="rounded bg-muted/60 px-2 py-1 font-mono text-foreground">最大预期亏损 = 主力开仓名义仓位 × 预期回撤比例</div>
-            <p>后续加仓、重入仓位和反向对冲不计入主力开仓名义仓位。</p>
+            <p><strong>一场有多笔主力时，按笔各算各的、再求和</strong>：每笔主力用它<strong>自己</strong>的开仓价、
+              自己那笔镜像的敞口、以及开仓 ±5 分钟内挂出的<strong>自己</strong>那批保护单。
+              上面那条等式仍然成立——「预期回撤比例」是按敞口加权的等效值。</p>
+            <p>后续加仓、重入仓位和反向对冲不计入主力开仓名义仓位；开仓 5 分钟之后才挂出的追踪单
+              属于新决策，不会抬高这个数。</p>
           </>
         ),
       },
