@@ -182,4 +182,70 @@ describe('单笔主力必须逐字节不变', () => {
   it('单笔主力的镜像减仓% 不走分组路径', () => {
     expect(computeMirrorTpReductionPct(campaign, TP1, soloLegs, soloRecords)).toBeCloseTo(60, 2);
   });
+
+  it('【回归】成交过的保护单不得被丢掉——保护单成交正是真亏损发生的那种战役', () => {
+    // 委托列表那张归类表对 triggered 委托返回的是**对冲腿 id**，
+    // 拿它跟主力 id 比永远不等 → 成交过的保护单对每一笔主力都不算数，
+    // 于是边界退回到成交价（含滑点），违反「委托快照是唯一有效 ex-ante 边界」。
+    const triggered: CampaignReverseHedgeOrder[] = ORDERS.map(o =>
+      o.id === 'a1' || o.id === 'a2'
+        ? { ...o, status: 'triggered' as const, triggeredAt: o.createdAt + 60_000, fillPrice: 0.0900 }
+        : o);
+    const risk = resolveMainRiskAnchors(campaign, LEGS, RECORDS, triggered);
+    expect(risk.anchors[0].drawdownFraction).toBeCloseTo(F1, 9);   // 仍是 0.0887240 的委托价
+  });
+
+  it('【回归】多单挂在开仓价上方的空单不算风险——那是封顶利润', () => {
+    // 一张 0.1200 的开仓空单：在主力2 的 ±5 分钟 cohort 内、价格与 0.104000 不同，
+    // 能占到第二个名额。Math.abs 会把这段利润距离当成风险，凭空多算 10.7%。
+    const withProfitSide: CampaignReverseHedgeOrder[] = [
+      ...ORDERS,
+      ord('b0', 0.1200, '2026-04-30T04:26:00.000Z'),
+    ];
+    const risk = resolveMainRiskAnchors(campaign, LEGS, RECORDS, withProfitSide);
+    expect(risk.anchors[1].drawdownFraction).toBeCloseTo(F2, 9);
+    expect(Math.abs(0.1200 - 0.111594) / 0.111594).toBeGreaterThan(F2);   // 它确实"更远"
+  });
+
+  it('【回归】全部保护线都在利润侧时判为未锚定，不是记 0 风险', () => {
+    // 记 0 会让「预期最大亏损」缩水、盈亏比被抬高，是往危险方向错。
+    const allProfitSide = ORDERS.map(o => ({ ...o, price: 0.2 }));
+    const risk = resolveMainRiskAnchors(campaign, LEGS, RECORDS, allProfitSide);
+    expect(risk.anchors.every(a => a.drawdownFraction == null)).toBe(true);
+    expect(risk.expectedMaxLoss).toBe(0);
+    // 但敞口必须以「未计价」的身份留在账上，不能无声消失
+    expect(risk.unanchoredExposureNotional).toBeCloseTo(N1 + N2, 2);
+  });
+
+  it('【回归】有腿锚不出来时，界面上并排那两个数相乘仍等于最大预期亏损', () => {
+    // 分母若取「已锚敞口」，13,704 会和相乘得到的 43,570 差 3.18 倍——
+    // 而帮助文案就写着 L = 名义仓位 × 预期回撤比例。
+    const onlyM1Protected = ORDERS.filter(o => o.id.startsWith('a'));
+    const L = computeInitialExpectedMaxLoss(campaign, LEGS, RECORDS, onlyM1Protected);
+    const d = computeInitialExpectedMaxDrawdownPct(campaign, LEGS, RECORDS, onlyM1Protected);
+    const N = computeInitialMainExposureNotional(campaign, LEGS, RECORDS);
+    expect(L).toBeCloseTo(F1 * N1, 6);              // 只有主力1 被定价
+    expect((d / 100) * N).toBeCloseTo(L, 6);        // 等式仍然成立
+  });
+
+  it('【回归】只剩事件流的老战役仍能锚出边界，不退化成 0', () => {
+    // legs 上没有开仓价、也没有成交记录，全靠 actual_evolution。
+    // 单主力路径一直有这级兜底，多主力路径漏掉就会整条锚变 null。
+    const bare = LEGS.map(l => l.id === 'm1'
+      ? { ...l, pre_entry_price: null, trade_record_id: null } as TradeJournal
+      : l);
+    const withEvent = {
+      ...campaign,
+      actual_evolution: [
+        ...(campaign.actual_evolution ?? []),
+        {
+          id: 'ev-m1', event_type: 'main_opened', leg_role: 'main_open',
+          timestamp: '2026-04-29T19:48:00.000Z', journal_id: 'm1',
+          entry_price: 0.102434, size_usdt: 40_960,
+        },
+      ],
+    } as unknown as TradeCampaign;
+    const risk = resolveMainRiskAnchors(withEvent, bare, RECORDS, ORDERS);
+    expect(risk.anchors[0].drawdownFraction).toBeCloseTo(F1, 9);
+  });
 });

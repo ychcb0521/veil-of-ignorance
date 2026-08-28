@@ -410,6 +410,20 @@ function groupInitialMainExposure(
     add(owner?.id ?? null, notional);
   }
 
+  /**
+   * 战役级兜底只能落到**最早**那笔主力头上。
+   * 单主力那条路径一直有这一级（firstPositiveNumber 链的最后一环），
+   * 分组版漏掉它的后果是：一笔既没有 pre_position_size、也没有成交记录的主力
+   * 敞口变 0 → 预期最大亏损记 0 → **盈亏比被抬高**，是往危险方向错。
+   * `initial_main_size_usdt` 是按「最早那笔主力」写进库的（journalApi 的口径），
+   * 所以只能给它，不能当成整组的总额。
+   */
+  const earliest = mainLegs[0];
+  if (earliest && !(groups.get(earliest.id) ?? 0)) {
+    const fallback = firstPositiveNumber(campaign.initial_main_size_usdt);
+    if (fallback != null) groups.set(earliest.id, fallback);
+  }
+
   return groups;
 }
 
@@ -605,8 +619,12 @@ export function computeInitialExpectedMaxDrawdownPct(
   // 也是唯一在单笔主力时退化回原值的定义。
   // 分母只算**锚得出跌幅**的那部分敞口：锚不出来的腿已经在分子记 0，
   // 再放进分母就是罚两次。
-  if (risk.anchoredExposureNotional <= EPSILON) return 0;
-  return (risk.expectedMaxLoss / risk.anchoredExposureNotional) * 100;
+  // 分母取**全额**敞口——界面把「主力开仓名义仓位」和「预期回撤比例」并排印出来，
+  // 中间还写着 L = 名义 × 回撤率。除以「已锚敞口」会让这条等式在有腿锚不出来时变成假话
+  // （实测 13,704 vs 相乘得到的 43,570，差 3.18 倍）。宁可让 d 反映
+  // 「这部分敞口没被定价」，也不要让两张卡片相乘对不上。
+  if (risk.fullExposureNotional <= EPSILON) return 0;
+  return (risk.expectedMaxLoss / risk.fullExposureNotional) * 100;
 }
 
 /**
@@ -634,6 +652,8 @@ export interface CampaignRiskAnchors {
   anchoredExposureNotional: number;
   /** 锚不出来的敞口：它在分子里记 0，所以 L 是**下限**，不是准确值。 */
   unanchoredExposureNotional: number;
+  /** 界面「主力开仓名义仓位」印的那个全额，用来保住 L = 回撤率 × 名义 这条等式。 */
+  fullExposureNotional: number;
 }
 
 /**
@@ -664,7 +684,10 @@ export function resolveMainRiskAnchors(
   if (mainLegs.length <= 1) {
     const anchor = resolveInitialRiskAnchor(campaign, legs, tradeRecords, reverseHedgeOrders);
     if (anchor == null) {
-      return { anchors: [], expectedMaxLoss: 0, anchoredExposureNotional: 0, unanchoredExposureNotional: 0 };
+      return {
+        anchors: [], expectedMaxLoss: 0, anchoredExposureNotional: 0,
+        unanchoredExposureNotional: 0, fullExposureNotional: 0,
+      };
     }
     return {
       anchors: [{
@@ -676,6 +699,7 @@ export function resolveMainRiskAnchors(
       expectedMaxLoss: anchor.drawdownFraction * anchor.initialMainExposureNotional,
       anchoredExposureNotional: anchor.initialMainExposureNotional,
       unanchoredExposureNotional: 0,
+      fullExposureNotional: anchor.initialMainExposureNotional,
     };
   }
 
@@ -688,25 +712,48 @@ export function resolveMainRiskAnchors(
   const ownerForOrder = createMainLegOwnerResolver(legs, { legWindow });
   const ownerForLeg = createMainLegOwnerResolver(legs, { legWindow, tieBreak: 'nearest-open' });
   const exposureByMain = groupInitialMainExposure(campaign, legs, tradeRecords, mainLegs, ownerForLeg);
-  const orderLegMap = buildCampaignReverseOrderLegMap(legs, reverseHedgeOrders, { legWindow });
   const historical = isHistoricalCampaign(campaign);
   const expectedSide = campaign.direction === 'main_long' ? 'SHORT' : 'LONG';
 
   const anchors: MainRiskAnchor[] = [];
   for (const [index, mainLeg] of mainLegs.entries()) {
     const mainRecord = findTradeRecord(mainLeg, tradeRecords);
-    const entryPrice = firstPositiveNumber(mainRecord?.entryPrice, mainLeg.pre_entry_price);
+    // 事件兜底:legs 已不在、只剩事件流的老战役靠它取开仓价与开仓时刻。
+    // 单主力路径一直有这两级,多主力路径漏掉的后果是整条锚变 null → 记 0 → 抬高盈亏比。
+    const mainEvent = (campaign.actual_evolution ?? [])
+      .filter(event => event.leg_role === 'main_open')
+      .filter(event => event.journal_id === mainLeg.id
+        || ownerForLeg(toMs(event.timestamp))?.id === mainLeg.id)
+      .sort((a, b) => toMs(a.timestamp) - toMs(b.timestamp))
+      .find(event => firstPositiveNumber(event.entry_price, event.price) != null) ?? null;
+    const entryPrice = firstPositiveNumber(
+      mainRecord?.entryPrice,
+      mainLeg.pre_entry_price,
+      mainEvent?.entry_price,
+      mainEvent?.price,
+    );
     const exposureNotional = exposureByMain.get(mainLeg.id) ?? 0;
     const openedAtMs = firstPositiveNumber(
       mainRecord?.openTime,
       toMs(mainLeg.pre_simulated_time),
+      mainEvent ? toMs(mainEvent.timestamp) : null,
       // campaign.opened_at 只对**最早**那笔主力有意义
       index === 0 ? toMs(campaign.opened_at) : null,
     );
 
-    // 只看归属于这一笔主力的反向委托——否则主力1 会拿到主力2 的保护价。
+    /**
+     * 只看归属于这一笔主力的反向委托——否则主力1 会拿到主力2 的保护价。
+     *
+     * 这里必须**直接按挂出时刻算主力归属**，不能用委托列表那张归类表：
+     * 那张表对 status === 'triggered' 的委托返回的是**对冲腿 id**，
+     * 拿它跟主力 id 比永远不等 → **成交过的保护单会被整批丢掉**。
+     * 而保护单成交，正是亏损真正发生的那种战役；单主力路径从不按 status 筛，
+     * 于是同一批数据在删掉一笔主力前后会给出两个不同的风险边界
+     * （13.3842% 的委托快照 vs 12.1385% 的成交价——后者已经把滑点算了进去，
+     * 违反「历史战役的委托快照是唯一有效 ex-ante 边界」那条规则）。
+     */
     const ownOrders = reverseHedgeOrders.filter(order =>
-      order.side === expectedSide && orderLegMap.get(order.id) === mainLeg.id,
+      order.side === expectedSide && ownerForOrder(order.createdAt)?.id === mainLeg.id,
     );
     // 角色腿（初始对冲 A/B）同样按时间归属到各自主力。
     const roleHedgePrices = INITIAL_HEDGE_ROLES.flatMap(role => {
@@ -725,7 +772,18 @@ export function resolveMainRiskAnchors(
       const recordPrice = recordLeg
         ? firstPositiveNumber(findTradeRecord(recordLeg, tradeRecords)?.entryPrice)
         : null;
-      return recordPrice == null ? [] : [recordPrice];
+      if (recordPrice != null) return [recordPrice];
+
+      // 第三级兜底：legs 已经不在、只剩事件流的老战役。单主力那条路径一直有这一级，
+      // 多主力路径上一版把它漏掉了——漏掉的后果是这类战役直接锚不出风险边界、
+      // 预期最大亏损记 0，而 0 会**抬高**盈亏比，是往危险方向错。
+      const event = (campaign.actual_evolution ?? [])
+        .filter(item => item.leg_role === role)
+        .filter(item => ownerForLeg(toMs(item.timestamp))?.id === mainLeg.id)
+        .sort((a, b) => toMs(a.timestamp) - toMs(b.timestamp))
+        .find(item => firstPositiveNumber(item.entry_price, item.price) != null);
+      const eventPrice = firstPositiveNumber(event?.entry_price, event?.price);
+      return eventPrice == null ? [] : [eventPrice];
     });
 
     const initialReversePrices = resolveInitialReverseHedgePrices(
@@ -743,10 +801,29 @@ export function resolveMainRiskAnchors(
       }
     }
 
-    const resolvable = entryPrice != null && exposureNotional > EPSILON && hedgePrices.length > 0;
-    const drawdownFraction = resolvable
-      ? Math.max(...hedgePrices.map(price => Math.abs(price - entryPrice) / entryPrice))
-      : null;
+    /**
+     * **方向性**距离，不是绝对值。
+     *
+     * 多单的亏损边界只可能在开仓价**下方**；挂在上方的空单是在封顶利润，
+     * 它一分钱亏损都产生不了。Math.abs 会把那一段利润距离当成风险：
+     * 实测一张挂在 0.1200 的开仓空单（开仓价 0.111594、在 ±5 分钟 cohort 之内、
+     * 价格又与 0.104000 不同，所以能占到第二个名额）会让这一笔的预期最大亏损
+     * 凭空涨 10.7%——用户因为挂了一张利润侧的单子而被记了更多风险。
+     * 角色腿那一支更是完全绕开 cohort，一个写错方向的价会直接进 max。
+     *
+     * 落在利润侧的线**丢掉**，而不是钳成 0：钳成 0 会让 max 取到 0，
+     * 等于宣称「这笔仓位没有风险」。全部线都在利润侧时整条锚判为 null
+     * （记 0 会抬高盈亏比，是往危险方向错）。
+     */
+    const lossSideFractions = entryPrice != null
+      ? hedgePrices
+        .map(price => (campaign.direction === 'main_long'
+          ? (entryPrice - price)
+          : (price - entryPrice)) / entryPrice)
+        .filter(fraction => fraction > 0)
+      : [];
+    const resolvable = entryPrice != null && exposureNotional > EPSILON && lossSideFractions.length > 0;
+    const drawdownFraction = resolvable ? Math.max(...lossSideFractions) : null;
     anchors.push({
       mainLegId: mainLeg.id,
       exposureNotional,
@@ -759,15 +836,21 @@ export function resolveMainRiskAnchors(
   const anchoredExposureNotional = anchors
     .filter(a => a.drawdownFraction != null)
     .reduce((sum, a) => sum + a.exposureNotional, 0);
-  const unanchoredExposureNotional = anchors
-    .filter(a => a.drawdownFraction == null)
-    .reduce((sum, a) => sum + a.exposureNotional, 0);
+  const expectedMaxLoss = anchors.reduce((sum, a) => sum + a.expectedMaxLoss, 0);
+  /**
+   * 锚不出来的敞口。**用全额减去已锚的**，而不是把各腿的 exposureNotional 相加——
+   * 一笔连敞口都取不到的主力，它的 exposureNotional 本身就是 0，
+   * 按腿相加会让它连「未计价」这个身份都没有，界面上无声消失。
+   */
+  const fullExposure = computeInitialMainExposureNotional(campaign, legs, tradeRecords);
+  const unanchoredExposureNotional = Math.max(0, fullExposure - anchoredExposureNotional);
 
   return {
     anchors,
-    expectedMaxLoss: anchors.reduce((sum, a) => sum + a.expectedMaxLoss, 0),
+    expectedMaxLoss,
     anchoredExposureNotional,
     unanchoredExposureNotional,
+    fullExposureNotional: fullExposure,
   };
 }
 
