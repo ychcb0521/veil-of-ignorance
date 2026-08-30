@@ -216,6 +216,25 @@ export interface Position {
   isolatedMargin?: number;
   /** Simulated clock time when this position was opened */
   openTime?: number;
+  /**
+   * 构成这个仓位的每一笔成交。**fills[0].id 恒等于 position.id**。
+   *
+   * 同标的同方向的成交会合并成一个仓位（币安单向持仓模式就是这样），
+   * 但「这一笔加仓自己是什么时候、以什么价开的」不能因此丢掉——
+   * 战役页的腿、开仓时刻、快照都要靠它。合并只改风控口径，不抹掉历史。
+   *
+   * 旧数据没有这个字段，读的时候一律按 [{ id, openTime, entryPrice, units }] 推导，
+   * 不做持久化迁移（positions_map 是云同步的，没有版本号，坏迁移不可回滚）。
+   */
+  fills?: PositionFill[];
+}
+
+export interface PositionFill {
+  id: string;
+  openTime: number;
+  entryPrice: number;
+  /** 该笔成交的计量单位数：币本位为张数，U 本位为币数。 */
+  units: number;
 }
 
 export interface TradeRecord {

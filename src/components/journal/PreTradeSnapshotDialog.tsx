@@ -78,10 +78,22 @@ export function PreTradeSnapshotDialog({
 
   // Pending-review gate: closed trades without post-review must be evaluated before new orders
   const [pendingReviews, setPendingReviews] = useState<TradeJournal[] | null>(null);
+  /**
+   * 还开着的仓位 id。**必须把每一笔成交的 id 也算进来。**
+   *
+   * 同标的同方向的成交会并成一个仓位，被吞并那一笔的 id 不再是任何 position.id——
+   * 而日志的 trade_record_id 存的就是下单时返回的那个 id。只按 position.id 建集合的话，
+   * 那笔加仓的日志会被判成「已平仓未评价」，于是**此后每一次下单都被拦住**，
+   * 提示「还有 N 笔已平仓未评价交易，必须先评价」——而那笔仓位其实好端端开着。
+   * 这是同一个推断第二次出事（上一次是幽灵强平），所以这里连**缺席也不当作已平仓**。
+   */
   const openPositionIds = useMemo(() => {
     const ids = new Set<string>();
     for (const positions of Object.values(trading.positionsMap)) {
-      for (const p of positions) ids.add(p.id);
+      for (const p of positions) {
+        ids.add(p.id);
+        for (const f of p.fills ?? []) ids.add(f.id);
+      }
     }
     return ids;
   }, [trading.positionsMap]);

@@ -62,6 +62,7 @@ import {
   isPositionOpen,
   normalizeSettlementOrder,
   scaleSettlementPosition,
+  mergeFilledPosition,
 } from '@/lib/tradingSettlement';
 import {
   planReduceOnlyTrigger,
@@ -72,6 +73,7 @@ import { formatPrice, getPriceDecimals } from '@/lib/formatters';
 import { buildTpSlOrders, keepValidTpSlLegs, replaceTpSlOrders, validateTpSlLevels } from '@/lib/tpSlOrders';
 import { removableMarginUsd } from '@/lib/positionGroupRisk';
 import { evaluateFillAffordability, fillCostUsd } from '@/lib/fillAffordability';
+import type { PositionMergeResult } from '@/lib/tradingSettlement';
 import { orderReferencePrice } from '@/lib/orderReferencePrice';
 import {
   createDefaultExecutionAssetState,
@@ -1077,6 +1079,45 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
     }));
   }, [getEffectiveTime, setOrdersMap]);
 
+  /**
+   * 合并成交之后的收尾。**不做这一步，就是拿一个安静的 bug 换掉一个吵闹的 bug。**
+   *
+   * 1. 挂在被吞并那笔仓位上的减仓单（止盈/止损）会变成孤儿：
+   *    planReduceOnlyTrigger 按 `candidate.id === linkedPositionId` 找仓位，找不到就
+   *    返回 linked_position_missing 并**原样保留**这张单——不撤、不改指、不报错。
+   *    用户在委托列表里看得见一张永远不会触发的止损。改指到存活仓位，绝不撤销。
+   * 2. 随单带下来的止盈止损**不挂**：applyAttachedTpSl 会按 linkedPositionId 先删后建，
+   *    传存活仓位进去等于让这笔加仓**悄悄抹掉主力现有的止损**；而且它按成数算量，
+   *    「100%」会变成平掉合并后的全部。说出来，让用户自己在仓位上重设。
+   */
+  const applyMergeSideEffects = useCallback((symbol: string, merged: PositionMergeResult) => {
+    if (merged.blockedBy) {
+      toast.warning('未与现有仓位合并', {
+        description: merged.blockedBy === 'leverage'
+          ? '杠杆与现有同向仓位不同，两笔各自独立计算强平价。'
+          : merged.blockedBy === 'marginMode'
+            ? '保证金模式与现有同向仓位不同，两笔各自独立计算强平价。'
+            : '结算方式与现有同向仓位不同，两笔各自独立计算强平价。',
+      });
+      return;
+    }
+    if (!merged.absorbedFillId) return;
+
+    const absorbed = merged.absorbedFillId;
+    const survivorId = merged.survivor.id;
+    setOrdersMap(prev => {
+      const list = prev[symbol] || [];
+      let touched = 0;
+      const next = list.map(o => {
+        if (!(o.reduceOnly && o.linkedPositionId === absorbed)) return o;
+        touched += 1;
+        return { ...o, linkedPositionId: survivorId };
+      });
+      if (touched === 0) return prev;
+      return { ...prev, [symbol]: next };
+    });
+  }, [setOrdersMap]);
+
   // ===== Place Order (with strict accounting enforcement — single global pool) =====
   const handlePlaceOrder = useCallback((symbol: string, order: PlaceOrderParams): { id: string } | null => {
     // Use refs to bypass stale closures in high-frequency time machine ticks
@@ -1193,17 +1234,35 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
         return null;
       }
       setBalance(prev => prev - requiredMargin);
-      setPositionsMap(prev => {
-        // Filter out any ghost (near-zero) positions for this symbol before adding
-        const existing = (prev[symbol] || []).filter(isPositionOpen);
-        return { ...prev, [symbol]: [...existing, position] };
-      });
+      /**
+       * 同标的同方向并成一个仓位（币安单向持仓）：分开算会让加仓被自己的强平价
+       * 单独打掉，而健康的主力明明还有盈余可以扛住它。
+       * 先算好再写——setPositionsMap 是即时包装、positionsMapRef 与它同步推进，
+       * 在调用前读 ref 与在 updater 里读 prev 等价，而且能把合并结果带出来。
+       */
+      const merged = mergeFilledPosition(
+        symbol, (positionsMapRef.current[symbol] || []).filter(isPositionOpen), position,
+      );
+      setPositionsMap(prev => ({ ...prev, [symbol]: merged.positions }));
+      applyMergeSideEffects(symbol, merged);
       // 执行力资产只奖励做多开仓：做空一律视为辅助对冲单，不计分。
       if (normalizedOrder.side === 'LONG') {
         recordExecutionTrade(tradingModeRef.current, buildExecutionTradeSnapshot(position, 'BEST'));
       }
       toast.success(`最优价成交: ${normalizedOrder.side === 'LONG' ? '开多' : '开空'} ${formatSettlementQuantity(position, symbol)} @ ${formatPrice(position.entryPrice, symbol)}`);
-      applyAttachedTpSl(symbol, position, { ...normalizedOrder, ...attachedTpSl } as unknown as PendingOrder);
+      /**
+       * 并入现有仓位时**不挂**随单止盈止损。
+       * applyAttachedTpSl 按 linkedPositionId 先删后建，传存活仓位进去等于让这笔加仓
+       * 悄悄抹掉主力现有的止损；而且它按成数算量，「100%」会变成平掉合并后的全部。
+       * 说出来，让用户在仓位上自己重设——不替他决定要不要换掉那道保护。
+       */
+      if (merged.absorbedFillId && (attachedTpSl.attachedTpPrice != null || attachedTpSl.attachedSlPrice != null)) {
+        toast.warning('随单止盈/止损未挂出', {
+          description: '本单已并入现有同向仓位；为避免覆盖仓位上已有的止损，请在仓位卡上重新设置。',
+        });
+      } else {
+        applyAttachedTpSl(symbol, merged.survivor, { ...normalizedOrder, ...attachedTpSl } as unknown as PendingOrder);
+      }
       return { id: position.id };
     }
 
@@ -1218,16 +1277,35 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
         return null;
       }
       setBalance(prev => prev - requiredMargin);
-      setPositionsMap(prev => {
-        const existing = (prev[symbol] || []).filter(isPositionOpen);
-        return { ...prev, [symbol]: [...existing, position] };
-      });
+      /**
+       * 同标的同方向并成一个仓位（币安单向持仓）：分开算会让加仓被自己的强平价
+       * 单独打掉，而健康的主力明明还有盈余可以扛住它。
+       * 先算好再写——setPositionsMap 是即时包装、positionsMapRef 与它同步推进，
+       * 在调用前读 ref 与在 updater 里读 prev 等价，而且能把合并结果带出来。
+       */
+      const merged = mergeFilledPosition(
+        symbol, (positionsMapRef.current[symbol] || []).filter(isPositionOpen), position,
+      );
+      setPositionsMap(prev => ({ ...prev, [symbol]: merged.positions }));
+      applyMergeSideEffects(symbol, merged);
       // 执行力资产只奖励做多开仓：做空一律视为辅助对冲单，不计分。
       if (normalizedOrder.side === 'LONG') {
         recordExecutionTrade(tradingModeRef.current, buildExecutionTradeSnapshot(position, normalizedOrder.type));
       }
       toast.success(`${normalizedOrder.side === 'LONG' ? '开多' : '开空'} ${formatSettlementQuantity(position, symbol)} @ ${formatPrice(position.entryPrice, symbol)}`);
-      applyAttachedTpSl(symbol, position, { ...normalizedOrder, ...attachedTpSl } as unknown as PendingOrder);
+      /**
+       * 并入现有仓位时**不挂**随单止盈止损。
+       * applyAttachedTpSl 按 linkedPositionId 先删后建，传存活仓位进去等于让这笔加仓
+       * 悄悄抹掉主力现有的止损；而且它按成数算量，「100%」会变成平掉合并后的全部。
+       * 说出来，让用户在仓位上自己重设——不替他决定要不要换掉那道保护。
+       */
+      if (merged.absorbedFillId && (attachedTpSl.attachedTpPrice != null || attachedTpSl.attachedSlPrice != null)) {
+        toast.warning('随单止盈/止损未挂出', {
+          description: '本单已并入现有同向仓位；为避免覆盖仓位上已有的止损，请在仓位卡上重新设置。',
+        });
+      } else {
+        applyAttachedTpSl(symbol, merged.survivor, { ...normalizedOrder, ...attachedTpSl } as unknown as PendingOrder);
+      }
       return { id: position.id };
     }
 

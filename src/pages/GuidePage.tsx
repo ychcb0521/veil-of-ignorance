@@ -1952,6 +1952,11 @@ P 不再一把手填，而是拆成三个更可回答的问题：<strong>「这�
                     <td className="px-3 py-2 border-t border-border">逐仓爆仓是<strong>逐仓位</strong>判的，先死的是最弱的那一笔。此前卡上显示的是把总量、总保证金、加权均价拼成一笔<strong>虚构仓位</strong>算出来的价，既不是最先也不是最后：一张 104,933 张、均价 0.147257、现价 0.154646 的卡显示 0.134361，而真正先爆的一腿在 <strong>0.142494</strong>——卡说还有 13.1% 空间，<strong>实际只有 7.9%</strong>，低估的余量是现价的 5.26%。另外两件一并修掉：币本位的「减少保证金」<strong>从开仓那一刻起就是死的</strong>（可减额恒为 0，地板取错了字段），以及模态框里的「预估强平价」<strong>对币本位恒等于当前值</strong>（它只改了一个强平公式根本不读的字段）。</td>
                   </tr>
                   <tr>
+                    <td className="px-3 py-2 border-t border-border font-medium">同向仓位合并</td>
+                    <td className="px-3 py-2 border-t border-border">同标的、同方向、<strong>同杠杆同保证金模式同结算方式</strong>的成交会并成<strong>一个</strong>仓位（与币安单向持仓一致）：加权开仓价按<strong>币量</strong>加权，张数与保证金相加，保留最早那一笔的 id 与开仓时刻，每笔成交仍留在仓位的 fills 里。强平因此按合并后的整体判。四项有任一不同则<strong>不合并</strong>，并弹出提示说明原因。多单与空单<strong>永远不合并</strong>——那是主力与对冲。并入现有仓位时，随单勾选的止盈止损<strong>不挂出</strong>并提示，避免悄悄覆盖仓位上已有的止损；挂在被并入那一笔上的减仓单会自动改指到存活仓位，不撤销。</td>
+                    <td className="px-3 py-2 border-t border-border">此前每一笔成交各建一个仓位，逐仓强平按「<strong>任一腿</strong>净值 ≤ 维持保证金」判——于是加仓会被<strong>自己的</strong>强平价单独打掉，而健康的主力明明还有盈余可以扛住它。实盘 COAIUSDT 2026-06-13：主力开仓 0.538058（强平 0.491100）、加仓 0.604447（强平 <strong>0.551695</strong>），价格触及 0.542220 把<strong>加仓整条打掉</strong>，主力毫发无损；合并后加权开仓价 0.581748、强平价 <strong>0.530977</strong>，0.542220 根本不该触发任何强平。单向持仓的正确判据是「<strong>各腿净值之和</strong> ≤ 维持保证金之和」，健康腿的盈余本来就该拿来扛住加仓。另注：反向合约的强平价是 E·L(1+mmr)/(L+1)，与线性的 E(1−1/L+mmr) 在 10x 上差 0.9%。</td>
+                  </tr>
+                  <tr>
                     <td className="px-3 py-2 border-t border-border font-medium">默认结算方式</td>
                     <td className="px-3 py-2 border-t border-border">新标的下单<strong>默认币本位</strong>；下单面板顶部那颗「U本位 / 币本位」标签可随时切换，一旦为某个标的选过，此后就记住你的选择。</td>
                     <td className="px-3 py-2 border-t border-border">本系统的主仓打法以币本位为主。<strong>已有的历史记录不受影响</strong>——缺少该字段的旧单子一律仍按 U 本位解读，否则等于事后改写过去交易的含义，连带污染战役的保证金、R 倍数与统计。</td>

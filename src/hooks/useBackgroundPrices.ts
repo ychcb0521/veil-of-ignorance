@@ -16,6 +16,7 @@ import {
   getPositionNotionalUsd,
   getPositionUnits,
   isPositionOpen,
+  mergeFilledPosition,
 } from "@/lib/tradingSettlement";
 import { upsertOrderSnapshot } from "@/lib/orderSnapshotHistory";
 import { formatPrice } from "@/lib/formatters";
@@ -154,7 +155,8 @@ export function useBackgroundPrices() {
           setPositionsMap((prev) => {
             // isPositionOpen 而不是 quantity > 1e-8:币本位的存量记在 contracts 上。
             const existing = (prev[symbol] || []).filter(isPositionOpen);
-            return { ...prev, [symbol]: [...existing, position] };
+            // 同标的同方向并成一个仓位（币安单向持仓）。
+            return { ...prev, [symbol]: mergeFilledPosition(symbol, existing, position).positions };
           });
           // 执行力资产只奖励做多开仓；做空都是辅助对冲单，不计分。
           if (order.side === 'LONG') {

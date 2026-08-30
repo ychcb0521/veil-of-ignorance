@@ -453,6 +453,8 @@ export function PositionPanel({
     side: Position['side'];
     totalQuantity: number;
     weightedEntryPrice: number;
+    /** 按开仓价折出的总币量——加权开仓价的正确权重。 */
+    totalCoinsAtEntry: number;
     totalMargin: number;
     totalIsolatedMargin: number | null;
     leverage: number;
@@ -469,6 +471,7 @@ export function PositionPanel({
           symbol,
           side: pos.side,
           totalQuantity: 0,
+          totalCoinsAtEntry: 0,
           weightedEntryPrice: 0,
           totalMargin: 0,
           totalIsolatedMargin: null,
@@ -479,7 +482,22 @@ export function PositionPanel({
       }
       const g = groups.get(key)!;
       const units = getPositionUnits(pos);
-      g.weightedEntryPrice = (g.weightedEntryPrice * g.totalQuantity + pos.entryPrice * units) / (g.totalQuantity + units);
+      /**
+       * 加权开仓价按**币量**加权，不是按张数。
+       *
+       * units 对币本位是**张数**，而反向合约的盈亏是 N(1/e − 1/x)——
+       * 按张数取算术平均得到的是错的那个均值。两腿 1000 张 @0.5 与 1000 张 @0.6：
+       * 正解 0.545455，按张数算给出 0.55，在**每一个**价位上都差一个固定的币计盈亏，
+       * 打平点本身就摆错了。而 DEFAULT_SETTLEMENT_MODE 是 coin，这是默认路径。
+       * 由 Jensen，算术均值 ≥ 调和均值，所以空单方向上这个错误会把强平价显示得**更远**
+       * ——低估风险。U 本位下币量就是数量，公式退化成原来的数量加权，行为不变。
+       */
+      const coinsAtEntry = pos.entryPrice > 0
+        ? Math.abs(getPositionNotionalUsd(symbol, pos, pos.entryPrice)) / pos.entryPrice
+        : 0;
+      g.weightedEntryPrice = (g.weightedEntryPrice * g.totalCoinsAtEntry + pos.entryPrice * coinsAtEntry)
+        / (g.totalCoinsAtEntry + coinsAtEntry || 1);
+      g.totalCoinsAtEntry += coinsAtEntry;
       g.totalQuantity += units;
       g.totalMargin += pos.margin;
       if (pos.marginMode === 'isolated' && pos.isolatedMargin != null) {

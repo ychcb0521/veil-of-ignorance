@@ -61,6 +61,7 @@ import {
   getPositionUnits,
   isCoinSettled,
   isPositionOpen,
+  mergeFilledPosition,
 } from "@/lib/tradingSettlement";
 import {
   Dialog,
@@ -521,10 +522,9 @@ const Index = () => {
         }));
       setPositionsMap((prev) => {
         const existing = (prev[symbol] || []).filter(isPositionOpen);
-        return {
-          ...prev,
-          [symbol]: [...existing, position],
-        };
+        // 同标的同方向并成一个仓位（币安单向持仓）：分开算会让加仓被自己的
+        // 强平价单独打掉，而健康的主力明明还有盈余可以扛住它。
+        return { ...prev, [symbol]: mergeFilledPosition(symbol, existing, position).positions };
       });
       const nextOrdersMap = {
         ...ordersMapRef.current,
@@ -1252,10 +1252,8 @@ const Index = () => {
               }));
             setPositionsMap((prev) => {
               const existing = (prev[activeSymbol] || []).filter(isPositionOpen);
-              return {
-                ...prev,
-                [activeSymbol]: [...existing, position],
-              };
+              // 同标的同方向并成一个仓位（币安单向持仓）。
+              return { ...prev, [activeSymbol]: mergeFilledPosition(activeSymbol, existing, position).positions };
             });
             // 执行力资产只奖励做多开仓；做空都是辅助对冲单，不计分。
             if (matchedOrder.side === 'LONG') {
@@ -1356,10 +1354,8 @@ const Index = () => {
                 }
                 setPositionsMap((p) => {
                   const existing = (p[symbol] || []).filter(isPositionOpen);
-                  return {
-                    ...p,
-                    [symbol]: [...existing, position],
-                  };
+                  // TWAP 的每一片也并入同一个仓位，否则一张 TWAP 会铺出十几个各自可爆的小仓。
+                  return { ...p, [symbol]: mergeFilledPosition(symbol, existing, position).positions };
                 });
                 changed = true;
                 return {
