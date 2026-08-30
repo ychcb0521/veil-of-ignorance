@@ -155,11 +155,34 @@ describe('AddSizingCalculator', () => {
     expect(total.compareDocumentPosition(xg) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
-  it('A 账本无解时退回以 X_G 为头条，不显示一个算不出来的合计', () => {
+  /**
+   * 【改写】这条原本钉的是「A 无解时退回以 X_G 为头条」——正是实盘事故的成因。
+   *
+   * SAGAUSDT 2026-05-12：第二次加仓时垫已经是 −21,955（第一次加仓把成本线推过了止损线），
+   * A 段只剩一行灰色小字「没有浮盈垫」，B 段照常给出 3,084 万币并附一键填入按钮，
+   * 用户照着下了 2,941 万。B 的立论是「在垫子上再叠一层」；
+   * 没有垫子时它不是加仓，是在亏损上加杠杆。所以 A 拒绝时 B 必须一起停。
+   */
+  it('【回归】A 账本无解时，B 段整段关闭，不给任何可下单的数', () => {
     renderCalc();
-    type('add-sizing-s1', '100');   // 没越过均价 → A 无解
+    // 先在 A 还成立时把 B 跑起来，再把 A 打掉——复刻实盘顺序：
+    // 第一次加仓时 B 是开着的，第二次加仓时垫已经没了。
+    type('add-sizing-s1', '130');   // A 成立
     type('add-sizing-g', '1.2');
+    expect(screen.getByTestId('add-sizing-x2b-out')).toBeInTheDocument();
+    type('add-sizing-s1', '100');   // 没越过均价 → A 拒绝
+    expect(screen.getByTestId('add-sizing-banked-blocked')).toBeInTheDocument();
+    expect(screen.queryByTestId('add-sizing-x2b-out')).not.toBeInTheDocument();
     expect(screen.queryByTestId('add-sizing-total-add')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('add-sizing-g')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('add-sizing-fill-banked')).not.toBeInTheDocument();
+  });
+
+  it('A 有解时 B 段照常工作——这次改动不该动到正常路径', () => {
+    renderCalc();
+    type('add-sizing-s1', '130');
+    type('add-sizing-g', '1.2');
+    expect(screen.queryByTestId('add-sizing-banked-blocked')).not.toBeInTheDocument();
     expect(screen.getByTestId('add-sizing-x2b-out')).toBeInTheDocument();
   });
 
@@ -279,5 +302,13 @@ describe('盘口对冲线与 S₁ 偏差', () => {
     expect(screen.getByTestId('add-sizing-total-hedge-hero')).toHaveTextContent('72.27');
     expect(screen.getByTestId('add-sizing-x2')).toHaveTextContent('仅 A');
     expect(screen.getByTestId('add-sizing-hedge')).toHaveTextContent('仅 A');
+  });
+
+  it('S₁ 还没填时不算「A 拒绝」——B 段照常在，别把「没填」和「填了但不成立」混为一谈', () => {
+    // S₁ 默认留空（那一格刻意留给人判断）。若把 invalid_input 也当成拒绝，
+    // 一进对话框 B 段就整个消失，用户连 G 都没处填。
+    renderCalc();
+    expect(screen.queryByTestId('add-sizing-banked-blocked')).not.toBeInTheDocument();
+    expect(screen.getByTestId('add-sizing-g')).toBeInTheDocument();
   });
 });

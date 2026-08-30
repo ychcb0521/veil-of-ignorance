@@ -115,9 +115,25 @@ export function AddSizingCalculator({ open, onClose, symbol, currentPrice = 0 }:
   const note = cushionNote(cushion, side);
 
   const banked = useMemo(
-    () => detectBankedMirrorProfit(symbol, side, ctx.tradeHistory, held?.earliestOpenTime ?? null),
-    [symbol, side, ctx.tradeHistory, held?.earliestOpenTime],
+    () => detectBankedMirrorProfit(symbol, side, ctx.tradeHistory, held?.earliestOpenTime ?? null, positions),
+    [symbol, side, ctx.tradeHistory, held?.earliestOpenTime, positions],
   );
+  /**
+   * 这笔 G 是不是已经花过了。
+   * 「第几次加仓」的可靠信号是**落袋之后又开了几笔仓**——G 从落袋那一刻才存在,
+   * 只有之后开的仓位才可能花掉它。数持仓条数不行:主仓与镜像是同一刻开出的两条腿。
+   */
+  const bankedMaybeSpent = banked.addsSinceBanked > 0;
+  /**
+   * A **拒绝**，而不是 A 还没填完。
+   *
+   * S₁ 默认是空的（那一格刻意留给人判断），此时 A 报的是 invalid_input——
+   * 「还没填」和「填了但不成立」是两回事：把两者混为一谈会让一进对话框
+   * B 段就整个消失，用户连 G 都没处填。只有 A 给出了明确的否定
+   * （没有浮盈垫 / 新腿没有风险距离）才连坐关掉 B。
+   */
+  const cushionRefused = !cushion.ok && cushion.problem !== 'invalid_input';
+  const bankedOpen = !cushionRefused;
   const bankedSuggest = isCoin ? banked.coin : banked.usd;
 
   /**
@@ -337,10 +353,32 @@ export function AddSizingCalculator({ open, onClose, symbol, currentPrice = 0 }:
             <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5">
               <h3 className="text-[11px] font-medium text-foreground">B 落袋镜像</h3>
               <span className="text-[10px] text-muted-foreground">同一 S₁ / S₂ · 只是垫子不同</span>
-              {!bankedOn && (
+              {bankedOpen && !bankedOn && (
                 <span data-testid="add-sizing-banked-off" className="ml-auto text-[10px] text-muted-foreground">未填 G，本账关闭</span>
               )}
             </div>
+
+            {/**
+              * A 拒绝时 B 一起停。
+              *
+              * 两本账此前完全独立:A 段缩成一行灰色小字「没有浮盈垫」,B 段照常显示一个大数字,
+              * 旁边还有一键填入「本场止盈 +84,742（1 笔）」。实盘那一场的第二次加仓就是这么来的——
+              * 垫已经是 −21,955（加仓1 把成本线推到了止损线上方）,A 在拒绝,
+              * 而 B 给出 3,084 万币,用户照着下了 2,941 万。
+              *
+              * B 的立论是「拿已落袋的 G 去买一个新期权」。垫都没有的时候,
+              * 那不是在垫子上再叠一层,是在亏损上加杠杆——立论本身就不成立。
+              */}
+            {cushionRefused && (
+              <div
+                data-testid="add-sizing-banked-blocked"
+                className="rounded border border-trading-red/40 bg-trading-red/5 px-2 py-1.5 text-[10px] leading-4 text-trading-red"
+              >
+                A 浮盈垫不成立（{note.text}），<strong>本账一并关闭</strong>。
+                B 的前提是「在垫子上再叠一层」；没有垫子时它不是加仓，是在亏损上加杠杆。
+              </div>
+            )}
+            {bankedOpen && (
             <div className="flex flex-wrap items-end gap-x-2 gap-y-1.5">
               <div className="w-[116px]"><Field label={`G 已落袋 ${isCoin ? coinName : 'USD'}`} value={g} onChange={setG} testId="add-sizing-g" /></div>
               {bankedSuggest > 0 && (
@@ -348,7 +386,14 @@ export function AddSizingCalculator({ open, onClose, symbol, currentPrice = 0 }:
                   type="button"
                   data-testid="add-sizing-fill-banked"
                   onClick={() => setG(isCoin ? tidyCoins(bankedSuggest) : String(Number(bankedSuggest.toFixed(2))))}
-                  className="h-7 rounded border border-border px-2 font-mono text-[10px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                  title={bankedMaybeSpent
+                    ? `这笔落袋之后你已经开过 ${banked.addsSinceBanked} 笔仓，G 很可能已经花掉了。同一笔钱只能花一次。`
+                    : undefined}
+                  className={`h-7 rounded border px-2 font-mono text-[10px] transition-colors ${
+                    bankedMaybeSpent
+                      ? 'border-amber-500/50 bg-amber-500/5 text-amber-600 hover:bg-amber-500/10 dark:text-amber-400'
+                      : 'border-border text-muted-foreground hover:bg-accent hover:text-foreground'
+                  }`}
                 >
                   本场止盈 +{isCoin ? fmtCoins(bankedSuggest, 4) : fmtUsd(bankedSuggest)}（{banked.count} 笔）
                 </button>
@@ -381,7 +426,24 @@ export function AddSizingCalculator({ open, onClose, symbol, currentPrice = 0 }:
                 </span>
               )}
             </div>
-            {bankedOn && bankedRes.ok && (
+            )}
+            {/**
+              * G 是**一次性**的一笔钱。落袋之后再开的每一笔仓都可能已经花掉它，
+              * 而 detectBankedMirrorProfit 每次都把同一笔止盈原样再报一次。
+              * 实盘那一场：同一笔 84,742 被两次加仓各用了一遍
+              * （加仓1 ≈ B 给的 3,038 万币，加仓2 ≈ B 又给的 3,084 万币）。
+              */}
+            {bankedOpen && bankedMaybeSpent && (
+              <div
+                data-testid="add-sizing-banked-spent"
+                className="rounded border border-amber-500/40 bg-amber-500/5 px-2 py-1.5 text-[10px] leading-4 text-amber-600 dark:text-amber-400"
+              >
+                这笔落袋之后你已经开过 <strong>{banked.addsSinceBanked}</strong> 笔仓——
+                <strong>G 很可能已经花掉了</strong>。同一笔已实现利润只能买一次期权；
+                要再用 B，先扣掉前几次加仓已经动用的部分。
+              </div>
+            )}
+            {bankedOpen && bankedOn && bankedRes.ok && (
               <>
                 {/* B 账本一开，真正要下的那一单就是 A + B 的总量——X_G 单独看没有下单意义。
                     所以合计升为头条，X_G 与 K_B 退到下一行做拆解。 */}

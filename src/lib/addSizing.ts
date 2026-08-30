@@ -318,6 +318,19 @@ export interface BankedMirrorProfit {
   /** 以币计的落袋合计（币本位 B 本账用它）：优先取成交记录的 pnlCoin，缺失时按平仓价折算 */
   coin: number;
   count: number;
+  /** 最后一笔落袋的时刻。G 是从这一刻起才存在的。 */
+  lastBankedAt: number | null;
+  /**
+   * 该笔落袋**之后**新开的同向仓位数。
+   *
+   * 「这是第几次加仓」的可靠识别信号,而且是**因果相关**的那一个:
+   * G 从落袋那一刻才存在,所以只有落袋之后开的仓位才可能花掉它。
+   * 用「持仓条数」或「leg_sequence」都不行——主仓与镜像是同一刻开出的两条腿,
+   * 数条数会把它们误判成加过仓;而 leg 要等日志写完才有,加仓当下还没有。
+   *
+   * > 0 就意味着这笔 G **可能已经被花掉了**,不能再原样填进 B 账本。
+   */
+  addsSinceBanked: number;
 }
 
 /**
@@ -330,11 +343,15 @@ export function detectBankedMirrorProfit(
   side: AddSide,
   tradeHistory: TradeRecord[] | undefined,
   earliestOpenTime: number | null,
+  /** 当前持仓——用来数「落袋之后又开了几笔」。不传则不做这项判断。 */
+  positions?: { side?: AddSide | string | null; openTime?: number | null }[] | null,
 ): BankedMirrorProfit {
-  if (earliestOpenTime == null) return { usd: 0, coin: 0, count: 0 };
+  const empty = { usd: 0, coin: 0, count: 0, lastBankedAt: null, addsSinceBanked: 0 };
+  if (earliestOpenTime == null) return empty;
   let usd = 0;
   let coin = 0;
   let count = 0;
+  let lastBankedAt: number | null = null;
   for (const r of tradeHistory ?? []) {
     if (!r || r.symbol !== symbol || r.side !== side) continue;
     if (r.action !== 'CLOSE' || r.exit_method !== 'tp1') continue;
@@ -345,6 +362,64 @@ export function detectBankedMirrorProfit(
       ? (r.pnlCoin as number)
       : (fin(r.exitPrice) && (r.exitPrice as number) > 0 ? r.pnl / (r.exitPrice as number) : 0);
     count += 1;
+    const t = fin(r.closeTime) ? (r.closeTime as number) : null;
+    if (t != null && (lastBankedAt == null || t > lastBankedAt)) lastBankedAt = t;
   }
-  return { usd, coin, count };
+
+  let addsSinceBanked = 0;
+  if (lastBankedAt != null && positions) {
+    for (const p of positions) {
+      if (!p || p.side !== side) continue;
+      const t = fin(p.openTime) ? (p.openTime as number) : null;
+      // 严格晚于落袋时刻才算——同刻开出的是同一批腿,不是加仓。
+      if (t != null && t > (lastBankedAt as number)) addsSinceBanked += 1;
+    }
+  }
+
+  return { usd, coin, count, lastBankedAt, addsSinceBanked };
+}
+
+/**
+ * 加仓**之后**的综合成本线，以及它落在止损线的哪一侧。
+ *
+ * 这是 A3-R 的 R0 门槛：加仓后必须重算，成本线越过止损线即当场非法。
+ * 实盘那一场就死在这里——加仓 3,076 万币之后成本线从 0.044722 升到 0.047158，
+ * 而止损线在 0.045323，**超出 4.05%**，从那一刻起整个仓位已经不合法，
+ * 后面的第二次加仓只是在一个已经违规的仓位上继续。
+ *
+ * 注意 A 账本的定义本身就是「加到成本线**恰好落在** S₁」（实测 0.0453230，分毫不差）。
+ * 所以任何超出 A 的加量——包括整个 B 账本——**必然**把成本线推过 S₁。
+ * 那不是 bug，是 B 的定义：它拿已落袋的 G 去买一个新期权，代价就是放弃「在 S₁ 打平」。
+ * 因此这里只**如实显示**落点，不做硬拦截；真正该硬拦的是「A 连垫都没有」那种情形。
+ */
+export interface PostAddCostLine {
+  /** 加仓后的综合成本线 */
+  blendedCost: number;
+  /** 成本线仍在止损线的安全侧（多单：成本线低于止损线） */
+  pastStop: boolean;
+  /** 成本线越过止损线的相对幅度；未越过时为 0 */
+  overshootPct: number;
+}
+
+export function evaluatePostAddCostLine(args: {
+  side: AddSide;
+  sBar: number;
+  s1: number;
+  s2: number;
+  x1: number;
+  addCoins: number;
+}): PostAddCostLine | null {
+  const { side, sBar, s1, s2, x1, addCoins } = args;
+  if (![sBar, s1, s2, x1, addCoins].every(v => fin(v) && v > 0)) return null;
+  const total = x1 + addCoins;
+  if (!(total > 0)) return null;
+  const blendedCost = (x1 * sBar + addCoins * s2) / total;
+  const d = side === 'SHORT' ? -1 : 1;
+  // 多单：成本线高于止损线即越过；空单相反。
+  const overshoot = (blendedCost - s1) * d;
+  return {
+    blendedCost,
+    pastStop: overshoot > 0,
+    overshootPct: overshoot > 0 ? (overshoot / s1) * 100 : 0,
+  };
 }
