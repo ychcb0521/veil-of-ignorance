@@ -87,8 +87,6 @@ import {
   recordPracticeLogged as applyPracticeLogged,
   migrateExecutionAssetScoringV2 as applyScoringMigration,
   settleNoTradePenalties,
-  settleCampaignMissingPenalties as applySettleCampaignMissing,
-  reconcileReviewMissingPenalties as applyReconcileReviewMissing,
   type CampaignCreationRef,
   type CampaignRewardRef,
   type ClosedMainTradeReviewState,
@@ -237,10 +235,6 @@ interface TradingState {
   reconcilePostTradeReviewRewards: (reviews: CompletedExecutionReview[]) => void;
   /** 弃单 / 空仓观察记录后调用，标记当天已练习，清「未交易 −1000」（Option A）。 */
   recordObservationLogged: () => void;
-  /** 用权威战役列表结算「当天交易过某标的却没为它建战役」的 −300（按标的、永久）。 */
-  settleCampaignMissingPenalties: (campaigns: CampaignCreationRef[]) => void;
-  /** 用已平仓主力单的复盘状态对账「未做平仓评价 −1000」（可翻转，补做即翻回）。 */
-  reconcileReviewMissingPenalties: (closedMainTrades: ClosedMainTradeReviewState[]) => void;
   coinTimelines: CoinTimelinesMap;
   setCoinTimelines: (v: CoinTimelinesMap | ((prev: CoinTimelinesMap) => CoinTimelinesMap)) => void;
   totalPositionCount: number;
@@ -498,7 +492,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
     setExecutionAsset(prev => applyExecutionTradeReward(prev, mode, new Date(), trade));
   }, [setExecutionAsset]);
 
-  // 建战役按「自然日 × 标的」+300；同日同标的只计一次，并与未建战役 −300 互斥。
+  // 建战役按「自然日 × 标的」+300；同日同标的只计一次。
   const recordCampaignCreated = useCallback((campaign?: string | CampaignRewardRef | null) => {
     setExecutionAsset(prev => applyCampaignReward(prev, campaign ?? null, new Date()));
   }, [setExecutionAsset]);
@@ -522,16 +516,6 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
   // 弃单 / 空仓观察 = 当天有练习：标记当天已练习，清「未交易 −1000」（Option A）。
   const recordObservationLogged = useCallback(() => {
     setExecutionAsset(prev => applyPracticeLogged(prev, new Date()));
-  }, [setExecutionAsset]);
-
-  // 用权威战役列表结算「交易过却当天没建战役」的 −300；与同日同标的建战役奖励互斥。
-  const settleCampaignMissingPenalties = useCallback((campaigns: CampaignCreationRef[]) => {
-    setExecutionAsset(prev => applySettleCampaignMissing(prev, campaigns, new Date()));
-  }, [setExecutionAsset]);
-
-  // 未做平仓评价 −1000（可翻转）：按已平仓主力单的复盘状态增删罚，补做复盘即翻回。
-  const reconcileReviewMissingPenalties = useCallback((closedMainTrades: ClosedMainTradeReviewState[]) => {
-    setExecutionAsset(prev => applyReconcileReviewMissing(prev, closedMainTrades, new Date()));
   }, [setExecutionAsset]);
 
   // Total position count across all symbols
@@ -1964,7 +1948,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
     tradingMode, setTradingMode,
     executionAsset, setExecutionAsset, recordExecutionTrade, recordCampaignCreated, reconcileCampaignRewards,
     recordPostTradeReviewCompleted, reconcilePostTradeReviewRewards,
-    recordObservationLogged, settleCampaignMissingPenalties, reconcileReviewMissingPenalties,
+    recordObservationLogged,
     coinTimelines, setCoinTimelines,
     totalPositionCount,
     getEffectiveTime,

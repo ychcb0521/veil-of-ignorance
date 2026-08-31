@@ -172,41 +172,29 @@ describe('ExecutionAssetsPage review reward', () => {
       symbol: 'BTCUSDT',
       createdAt: '2026-07-10T00:00:00.000Z',
     }]);
-    expect(mockReconcileReviewMissingPenalties).toHaveBeenCalledWith([{
-      journalId: 'journal-1',
-      reviewed: true,
-      symbol: 'BTCUSDT',
-      operationTime: Date.parse('2026-06-22T04:05:06.000Z'),
-    }]);
+    // v5 删掉了「未做平仓评价 −1000」，进页面不再做这项对账。
+    expect(mockReconcileReviewMissingPenalties).not.toHaveBeenCalled();
 
     expect(Array.from(screen.getByTestId('execution-rule-grid').children).map(card => (
       card.textContent?.replace(/\s+/g, '')
     ))).toEqual([
-      // 三对镜像（做 vs 不做，同额反号）+ 独立一档的「未练习 −2000」
+      // v5：三项奖励 + 唯一一项扣分「未练习 −2000」。
+      // 原先与三项奖励成对的扣分（未做评价 / 直接交易 / 未建战役）已取消。
       '完成平仓评价+1000',
       '决策记录交易+600',
       '创建交易战役+300',
-      '未做平仓评价-1000',
-      '直接交易（每标的）-600',
-      '标的未建战役（每标的）-300',
       '自然日未练习-2000',
     ]);
 
     const summaryCards = Array.from(screen.getByTestId('execution-summary-grid').children);
     expect(summaryCards.map(card => card.getAttribute('data-summary-key'))).toEqual([
       'penalty',
-      'review_missing',
-      'direct',
-      'campaign_missing',
       'review',
       'decision',
       'campaign',
     ]);
     expect(summaryCards.map(card => card.textContent?.replace(/\s+/g, ''))).toEqual([
       '1未练习扣分日每天-2000点击查看明细',
-      '1未做评价每笔-1000点击查看明细',
-      '1直接交易每标的−600点击查看明细',
-      '1未建战役每标的-300点击查看明细',
       '1平仓评价每次+1000点击查看明细',
       '1决策记录交易每次+600点击查看明细',
       '1建战役每次+300点击查看明细',
@@ -256,43 +244,7 @@ describe('ExecutionAssetsPage review reward', () => {
     expect(await screen.findByText('已进入对应交易战役')).toBeInTheDocument();
   });
 
-  it('opens a missing-campaign deduction with the exact symbol and operation date prefilled', async () => {
-    render(
-      <MemoryRouter initialEntries={['/execution-assets']}>
-        <Routes>
-          <Route path="/execution-assets" element={<ExecutionAssetsPage />} />
-          <Route path="/journal/campaigns/classify" element={<LocationProbe />} />
-        </Routes>
-      </MemoryRouter>,
-    );
 
-    fireEvent.click(screen.getByText('未建战役'));
-    expect(await screen.findByText('未建交易战役明细')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: /补建战役/ }));
-
-    expect(await screen.findByTestId('review-destination')).toHaveTextContent(
-      '/journal/campaigns/classify?symbol=SOLUSDT&dateFrom=2026-07-07&dateTo=2026-07-07',
-    );
-  });
-
-  it('lets a direct-trade deduction open a required post-trade review as remediation', async () => {
-    render(
-      <MemoryRouter initialEntries={['/execution-assets']}>
-        <Routes>
-          <Route path="/execution-assets" element={<ExecutionAssetsPage />} />
-          <Route path="/journal/:journalId" element={<LocationProbe />} />
-        </Routes>
-      </MemoryRouter>,
-    );
-
-    fireEvent.click(screen.getByText('直接交易'));
-    expect(await screen.findByText('直接交易明细')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: '查看 / 补做平仓评价' }));
-
-    expect(await screen.findByTestId('review-destination')).toHaveTextContent(
-      '/journal/journal-direct?review=required&from=execution-assets',
-    );
-  });
 
   it.each([
     {
@@ -300,12 +252,6 @@ describe('ExecutionAssetsPage review reward', () => {
       score: '+666',
       expected: '/journal/journal-1?review=edit&from=execution-assets',
       title: '点击查看、编辑并保存这笔平仓评价',
-    },
-    {
-      eventId: 'review-missing-event-1',
-      score: '-1,000',
-      expected: '/journal/journal-missing?review=required&from=execution-assets',
-      title: '点击开始并完成这笔平仓评价',
     },
   ])('opens the correct review mode for $eventId', async ({ eventId, score, expected, title }) => {
     render(

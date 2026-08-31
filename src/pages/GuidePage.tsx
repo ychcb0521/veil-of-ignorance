@@ -1857,27 +1857,26 @@ P 不再一把手填，而是拆成三个更可回答的问题：<strong>「这�
                   <tr><td className="px-3 py-2 border-t border-border">完成平仓评价</td><td className="px-3 py-2 border-t border-border font-mono text-[#B080FF]">+1000</td><td className="px-3 py-2 border-t border-border">把一次交易闭合成可复盘的评价样本——错题集 / 结构成熟度的数据全从这里来；同一笔后续编辑不重复计分</td></tr>
                   <tr><td className="px-3 py-2 border-t border-border">决策记录模块交易</td><td className="px-3 py-2 border-t border-border font-mono text-[#0ECB81]">+600</td><td className="px-3 py-2 border-t border-border">走决策模块下单，留下完整样本：开仓快照 → 平仓评价 → 错题集 / 结构成熟度 / 规则 / 元监控</td></tr>
                   <tr><td className="px-3 py-2 border-t border-border">创建交易战役</td><td className="px-3 py-2 border-t border-border font-mono text-[#5BA3FF]">+300</td><td className="px-3 py-2 border-t border-border">按“自然日 × 标的”计分；同日同标的建一场或多场都只奖励一次</td></tr>
-                  <tr><td className="px-3 py-2 border-t border-border">未做平仓评价</td><td className="px-3 py-2 border-t border-border font-mono text-[#F6465D]">-1000</td><td className="px-3 py-2 border-t border-border">已平仓、有成交记录的主力单没做复盘就扣；<strong>可翻转</strong>——事后补做复盘，这 −1000 撤销并翻成 +1000（2000 分摆动，催你清空待复盘）</td></tr>
-                  <tr><td className="px-3 py-2 border-t border-border">直接交易（每标的）</td><td className="px-3 py-2 border-t border-border font-mono text-[#F6465D]">-600</td><td className="px-3 py-2 border-t border-border">未走决策模块、无结构地下单；按当日标的去重（同标的多笔只扣一次）</td></tr>
-                  <tr><td className="px-3 py-2 border-t border-border">标的未建战役（每标的）</td><td className="px-3 py-2 border-t border-border font-mono text-[#D89B00]">-300</td><td className="px-3 py-2 border-t border-border">当天交易过但没建战役；与同日同标的“建战役 +300”互斥，后补战役会自动撤罚翻转</td></tr>
                   <tr><td className="px-3 py-2 border-t border-border">自然日未练习</td><td className="px-3 py-2 border-t border-border font-mono text-[#F6465D]">-2000</td><td className="px-3 py-2 border-t border-border"><strong>头号大罪</strong>：一整天没有任何练习动作；无正向镜像、<strong>永久不可逆</strong>——后续再练也不退这笔，按模拟时间的自然日结算</td></tr>
                 </tbody>
               </table>
             </div>
-            <P>七个类目里，前六个是<strong>三对镜像（做 vs 不做，同额反号）</strong>：完成评价 +1000 ↔ 未做评价 −1000、决策 +600 ↔ 直接 −600、建战役 +300 ↔ 未建战役 −300。每一对都在问同一件事——<strong>这一步你做了没有、做得有没有结构</strong>。第七个「自然日未练习 −2000」没有正向镜像、独占一档且最重：练习是一切样本的源头，<strong>断更是头号大罪</strong>。所以这页想拉高的不是总分，而是让每次「做」都落到加分那侧、且<strong>每天至少留一次练习</strong>。</P>
+            <P>四个类目里，前三个都是<strong>奖励</strong>：完成评价 +1000、决策记录 +600、建战役 +300。做了给分，<strong>没做不倒扣</strong>——原先与它们成对的三项扣分（未做评价 −1000、直接交易 −600、未建战役 −300）已经取消，历史记录也一并撤销退分。唯一的扣分是第四项「自然日未练习 −2000」：它没有正向镜像、独占一档且最重，因为练习是一切样本的源头，<strong>断更是头号大罪</strong>。</P>
+            <P>为什么只留这一条扣分：其余三项罚的都是「这一次做得不够好」，而那种事后再补就能补回来的缺口，用<strong>拿不到奖励</strong>来表达就够了，再倒扣一次是重复计价。断更不一样——它罚的是「这一天根本没发生」，那是补不回来的。所以这页想拉高的不是总分，而是让每次「做」都落到加分那侧、且<strong>每天至少留一次练习</strong>。</P>
 
             <SubTitle>什么算、什么不算</SubTitle>
             <ul className="list-disc pl-6 text-[14px] text-foreground/90 space-y-1">
               <li><strong>只记做多开仓。</strong>做空都是辅助对冲单，属于风险管理动作，不计执行力分。</li>
               <li><strong>挂单成交才计分。</strong>挂出限价单只是意图，真正成交才算“做”——意图不计分，执行才计分。</li>
               <li><strong>“当天已练习” = 下单 / 弃单（太难不做）/ 完成复盘，任一即可。</strong>只要当天留下其中任一动作，就清掉当天的“未练习 −2000”——练的是决策周期，不是必须下注。</li>
-              <li><strong>平仓评价：做 +1000、不做 −1000，可翻转。</strong>已平仓的主力单没复盘挂 −1000；<strong>事后补做复盘，这 −1000 撤销并翻成 +1000</strong>（2000 分摆动，催你清空待复盘）。系统按 journal ID 识别，反复编辑不重复计分。之所以可翻转而非永久：复盘价值随时可回收，不像断更不可逆。</li>
+              <li><strong>平仓评价：做 +1000，不做不扣。</strong>系统按 journal ID 识别，反复编辑不重复计分。没做的那些不再挂 −1000——待复盘清单本身就是提醒，扣一次分只是把同一件事再说一遍。</li>
               <li><strong>“未练习”扣分永久不可逆、且最重（−2000）。</strong>某个自然日没有任何练习，就永久记一笔 −2000，后面再怎么练、再盈利都不退这笔——单笔亏损能被后续盈利覆盖，断更不能。按模拟时间的自然日结算。</li>
-              <li><strong>六项各自独立计分、互不联动。</strong>直接交易 −600 只看「这笔有没有走决策模块」，与是否建战役无关——战役是「计划层」结构、决策记录是「每单层」结构，两者分别度量，不互相抵扣。</li>
-              <li><strong>历史按同一把尺重算。</strong>旧数据首次加载会按当前权重重算一次（直接交易按当日标的去重），让新旧记录可比。</li>
+              <li><strong>直接交易不再扣分。</strong>它只是<strong>拿不到</strong>决策记录那 +600，而不是倒扣 600。直接交易的笔数仍然统计，用来算「决策记录占比」——那是给你看的诊断，不是罚单。</li>
+              <li><strong>四项各自独立计分、互不联动。</strong>战役是「计划层」结构、决策记录是「每单层」结构，两者分别度量，不互相抵扣。</li>
+              <li><strong>历史按同一把尺重算。</strong>旧数据首次加载会按当前权重重算一次；<strong>已取消的三项扣分会从流水里整条删除、总分同步退回</strong>——不是记成 0 分留在明细里，否则你会以为系统还在算那笔账。</li>
             </ul>
             <RedHighlight>
-              执行力资产不判<strong>单笔对错</strong>——一笔亏损的决策单照样 +600；但它判你做得<strong>有没有结构</strong>：带着快照 / 战役 / 评价去做加分，无结构地乱下、或干脆不练，扣分。对错（质量）交给复盘中心（错题集 / 结构成熟度 / 规则）去判，这里管的是<strong>做得够多 × 做得有结构</strong>。它专治的是那种更隐蔽的失败——<strong>因为怕错而不做</strong>：在一个下限已被焊死的系统里，不做，往往才是最贵的那个错误。
+              执行力资产不判<strong>单笔对错</strong>——一笔亏损的决策单照样 +600；但它判你做得<strong>有没有结构</strong>：带着快照 / 战役 / 评价去做加分，无结构地乱下则拿不到分，干脆不练才扣分。对错（质量）交给复盘中心（错题集 / 结构成熟度 / 规则）去判，这里管的是<strong>做得够多 × 做得有结构</strong>。它专治的是那种更隐蔽的失败——<strong>因为怕错而不做</strong>：在一个下限已被焊死的系统里，不做，往往才是最贵的那个错误。
             </RedHighlight>
           </section>
 

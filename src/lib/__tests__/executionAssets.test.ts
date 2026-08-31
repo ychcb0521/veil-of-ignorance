@@ -2,13 +2,10 @@ import { describe, expect, it } from 'vitest';
 
 import {
   createDefaultExecutionAssetState,
-  EXECUTION_CAMPAIGN_MISSING_PENALTY,
   EXECUTION_CAMPAIGN_REWARD,
   EXECUTION_DECISION_REWARD,
-  EXECUTION_DIRECT_PENALTY,
   EXECUTION_NO_TRADE_PENALTY,
   EXECUTION_REVIEW_REWARD,
-  EXECUTION_REVIEW_MISSING_PENALTY,
   EXECUTION_SCORING_VERSION,
   localDateKey,
   migrateExecutionAssetScoringV2,
@@ -17,9 +14,7 @@ import {
   recordPracticeLogged,
   reconcileCampaignRewards,
   reconcilePostTradeReviewRewards,
-  reconcileReviewMissingPenalties,
   recordExecutionTrade,
-  settleCampaignMissingPenalties,
   settleNoTradePenalties,
   summarizeExecutionAssetEvents,
   type ExecutionAssetEvent,
@@ -51,25 +46,19 @@ describe('execution assets', () => {
     const summary = summarizeExecutionAssetEvents([
       event('decision_reward', 'd1'),
       event('decision_reward', 'd2'),
-      event('direct_reward', 'x1'),
       event('no_trade_penalty', 'n1'),
       event('campaign_reward', 'c1'),
-      event('campaign_missing_penalty', 'cm1'),
       event('review_reward', 'r1'),
-      event('review_missing_penalty', 'rm1'),
-      event('review_missing_penalty', 'rm2'),
     ]);
 
     expect(summary).toEqual({
       decisionCount: 2,
-      directCount: 1,
+      directCount: 0,
       noTradePenaltyCount: 1,
       campaignCount: 1,
-      campaignMissingCount: 1,
       reviewCount: 1,
-      reviewMissingCount: 2,
-      totalTradeCount: 3,
-      decisionShare: (2 / 3) * 100,
+      totalTradeCount: 2,
+      decisionShare: 100,
     });
   });
 
@@ -84,32 +73,7 @@ describe('execution assets', () => {
     expect(s1.events[0]).toMatchObject({ type: 'decision_reward', points: EXECUTION_DECISION_REWARD });
   });
 
-  it('直接交易按标的扣分（负权重，同额反号于决策）', () => {
-    const s0 = createDefaultExecutionAssetState(d('2026-06-03'));
-    const s1 = recordExecutionTrade(s0, 'direct', d('2026-06-03'), trade('BTCUSDT'));
 
-    expect(s1.points).toBe(-EXECUTION_DIRECT_PENALTY);
-    expect(s1.decisionTradeCount).toBe(0);
-    expect(s1.directTradeCount).toBe(1);
-    expect(s1.tradedDates['2026-06-03']).toBe(true);
-    expect(s1.tradedSymbolsByDate['2026-06-03']).toEqual(['BTCUSDT']);
-    expect(s1.events[0]).toMatchObject({ type: 'direct_reward', points: -EXECUTION_DIRECT_PENALTY, label: '直接交易扣分' });
-  });
-
-  it('直接交易同一标的当天只扣一次；不同标的各扣一次', () => {
-    const s0 = createDefaultExecutionAssetState(d('2026-06-03'));
-    const s1 = recordExecutionTrade(s0, 'direct', d('2026-06-03'), trade('BTCUSDT'));
-    const s2 = recordExecutionTrade(s1, 'direct', d('2026-06-03'), trade('BTCUSDT'));
-    // 同标的第二笔：只算练习，不重复扣分、不新增事件、不增计数。
-    expect(s2.points).toBe(-EXECUTION_DIRECT_PENALTY);
-    expect(s2.directTradeCount).toBe(1);
-    expect(s2.events.filter(e => e.type === 'direct_reward')).toHaveLength(1);
-
-    const s3 = recordExecutionTrade(s2, 'direct', d('2026-06-03'), trade('ETHUSDT'));
-    expect(s3.points).toBe(-EXECUTION_DIRECT_PENALTY * 2);
-    expect(s3.directTradeCount).toBe(2);
-    expect(s3.tradedSymbolsByDate['2026-06-03']).toEqual(['BTCUSDT', 'ETHUSDT']);
-  });
 
   it('决策交易不按标的去重：同标的多笔各得满分', () => {
     const s0 = createDefaultExecutionAssetState(d('2026-06-03'));
@@ -400,69 +364,6 @@ describe('建战役 +1500（按 ID 幂等 + 对账自愈）', () => {
   });
 });
 
-describe('缺战役结算 −300（当天必须新建，按标的累计，永久）', () => {
-  // 06-03 直接交易 BTC + ETH（当天不建战役），今天 06-04 结算。
-  const twoSymbolsTraded = () => {
-    let s = recordExecutionTrade(createDefaultExecutionAssetState(d('2026-06-03')), 'direct', d('2026-06-03'), trade('BTCUSDT'));
-    s = recordExecutionTrade(s, 'direct', d('2026-06-03'), trade('ETHUSDT'));
-    return s;
-  };
-
-  it('两个交易过的标的都没当天建战役 → 各扣 300（按标的累计）', () => {
-    const s = twoSymbolsTraded();
-    const settled = settleCampaignMissingPenalties(s, [], d('2026-06-04'));
-    expect(settled.campaignMissingCount).toBe(2);
-    expect(settled.points).toBe(s.points - EXECUTION_CAMPAIGN_MISSING_PENALTY * 2);
-    expect(settled.events.filter(e => e.type === 'campaign_missing_penalty')).toHaveLength(2);
-  });
-
-  it('当天为某标的建了战役则该标的免罚', () => {
-    const s = twoSymbolsTraded();
-    const settled = settleCampaignMissingPenalties(s, [{ symbol: 'BTCUSDT', createdAt: d('2026-06-03') }], d('2026-06-04'));
-    expect(settled.campaignMissingCount).toBe(1); // 只有 ETH 缺
-  });
-
-  it('先结算未建罚分、后补齐同日同标的战役时，撤罚并翻转为建战役奖励', () => {
-    let s = recordExecutionTrade(createDefaultExecutionAssetState(d('2026-06-03')), 'decision', d('2026-06-03'), trade('BTCUSDT'));
-    s = settleCampaignMissingPenalties(s, [], d('2026-06-04'));
-    const beforeFlip = s.points;
-    expect(s.events.filter(event => event.type === 'campaign_missing_penalty')).toHaveLength(1);
-
-    const flipped = reconcileCampaignRewards(s, [{
-      id: 'btc-campaign',
-      symbol: 'BTCUSDT',
-      createdAt: d('2026-06-03T18:00:00+08:00'),
-    }], d('2026-06-04'));
-
-    expect(flipped.points).toBe(beforeFlip + EXECUTION_CAMPAIGN_MISSING_PENALTY + EXECUTION_CAMPAIGN_REWARD);
-    expect(flipped.campaignMissingCount).toBe(0);
-    expect(flipped.campaignCount).toBe(1);
-    expect(flipped.events.filter(event => event.type === 'campaign_missing_penalty')).toHaveLength(0);
-    expect(flipped.events.filter(event => event.type === 'campaign_reward')).toHaveLength(1);
-  });
-
-  it('战役建在别的日子不算「当天新建」→ 仍罚', () => {
-    const s = twoSymbolsTraded();
-    const settled = settleCampaignMissingPenalties(s, [{ symbol: 'BTCUSDT', createdAt: d('2026-06-04') }], d('2026-06-05'));
-    expect(settled.campaignMissingCount).toBe(2); // BTC 的战役建在 06-04，非交易日 06-03
-  });
-
-  it('永久幂等：再次结算不重复扣、已过去的日子不回访', () => {
-    const s = twoSymbolsTraded();
-    const once = settleCampaignMissingPenalties(s, [], d('2026-06-04'));
-    const twice = settleCampaignMissingPenalties(once, [], d('2026-06-05'));
-    expect(twice.campaignMissingCount).toBe(2);
-    expect(twice.points).toBe(once.points);
-  });
-
-  it('没有交易标的的日子（含历史迁移日）不误罚', () => {
-    const s0 = createDefaultExecutionAssetState(d('2026-06-03')); // tradedSymbolsByDate 为空
-    const settled = settleCampaignMissingPenalties(s0, [], d('2026-06-06'));
-    expect(settled.campaignMissingCount).toBe(0);
-    expect(settled.points).toBe(0);
-  });
-});
-
 describe('Option A：弃单 / 复盘算当天练习，清「未交易 −1000」', () => {
   it('recordPracticeLogged 标记当天已练习 → 次日结算不扣未交易', () => {
     const s0 = createDefaultExecutionAssetState(d('2026-06-03'));
@@ -491,8 +392,8 @@ describe('Option A：弃单 / 复盘算当天练习，清「未交易 −1000」
   });
 });
 
-describe('历史重算迁移（按当前权重重算已有事件；含未练习 −2000）', () => {
-  // 旧权重下记录的历史事件（新在前）：决策999 / 直接99×2(同标的同日) / 未交易-500 / 建战役1500 / 复盘666
+describe('历史重算迁移（v5：重算保留项 + 丢弃已删除的三项）', () => {
+  // 旧权重下记录的历史事件（新在前）：决策999 / 直接99×2(同标的同日) / 未交易-500 / 建战役1500 / 复盘666 / 未建战役-300 / 未做评价-1000
   const legacyState = () => ({
     ...createDefaultExecutionAssetState(d('2026-06-10')),
     scoringVersion: undefined,
@@ -505,24 +406,36 @@ describe('历史重算迁移（按当前权重重算已有事件；含未练习 
       { id: 'e3', type: 'direct_reward', points: 99, date: '2026-06-02', createdAt: 3, label: '直接交易奖励', trade: trade('BTCUSDT') },
       { id: 'e2', type: 'direct_reward', points: 99, date: '2026-06-02', createdAt: 2, label: '直接交易奖励', trade: trade('BTCUSDT') },
       { id: 'e1', type: 'decision_reward', points: 999, date: '2026-06-01', createdAt: 1, label: '决策记录交易奖励', trade: trade('ETHUSDT') },
+      { id: 'e0a', type: 'campaign_missing_penalty', points: -300, date: '2026-06-01', createdAt: 0.5, label: '2026-06-01 ETHUSDT 未建战役' },
+      { id: 'e0b', type: 'review_missing_penalty', points: -1000, date: '2026-06-01', createdAt: 0.2, label: '未做平仓评价', journalId: 'j9' },
     ],
   }) as unknown as ReturnType<typeof createDefaultExecutionAssetState>;
 
-  it('按新权重重算并重求和；直接交易按当日标的去重', () => {
+  it('保留项按当前权重重算', () => {
     const m = migrateExecutionAssetScoringV2(legacyState());
-    // 决策+600, 直接BTC(两笔→一笔)-600, 未练习-2000, 建战役+300, 复盘+1000
-    expect(m.points).toBe(600 - 600 - 2000 + 300 + 1000);
-    expect(m.directTradeCount).toBe(1);
-    expect(m.scoringVersion).toBe(EXECUTION_SCORING_VERSION);
     const byId = Object.fromEntries(m.events.map(e => [e.id, e.points]));
-    expect(byId.e1).toBe(600);   // decision
-    expect(byId.e4).toBe(-2000); // no_trade（−1000→−2000 重算）
-    expect(byId.e5).toBe(300);   // campaign
-    expect(byId.e6).toBe(1000);  // review
-    // 两笔同标的同日直接交易：最早一笔留 -600，重复的被并笔丢弃（流水每条=一次计分动作）
-    expect(byId.e2).toBe(-600);
-    expect(byId.e3).toBeUndefined();
-    expect(m.events).toHaveLength(5);
+    expect(byId.e1).toBe(600);   // 决策
+    expect(byId.e4).toBe(-2000); // 未练习（−500 旧权重 → −2000）
+    expect(byId.e5).toBe(300);   // 建战役
+    expect(byId.e6).toBe(1000);  // 复盘
+    expect(m.scoringVersion).toBe(EXECUTION_SCORING_VERSION);
+  });
+
+  it('【v5】已删除的三项从流水里整条消失，总分同步退回', () => {
+    // 丢弃而不是记 0 分：事件流是流水，一条 0 分的「未做平仓评价」留在明细里
+    // 只会让人以为系统还在算这笔账。总分从流水重建，丢掉即等于退分。
+    const m = migrateExecutionAssetScoringV2(legacyState());
+    expect(m.points).toBe(600 - 2000 + 300 + 1000);          // 不含 −600 / −300 / −1000
+    expect(m.events.map(e => e.id).sort()).toEqual(['e1', 'e4', 'e5', 'e6']);
+    expect(m.events.some(e => (e.type as string) === 'direct_reward')).toBe(false);
+    expect(m.events.some(e => (e.type as string) === 'campaign_missing_penalty')).toBe(false);
+    expect(m.events.some(e => (e.type as string) === 'review_missing_penalty')).toBe(false);
+    expect(m.campaignMissingCount).toBe(0);
+  });
+
+  it('【v5】直接交易的**笔数**保留——决策占比要靠它，它是统计不是惩罚', () => {
+    const m = migrateExecutionAssetScoringV2(legacyState());
+    expect(m.directTradeCount).toBe(1);   // 同标的同日两笔并作一笔
   });
 
   it('幂等：已迁移到当前版本再迁移不变', () => {
@@ -537,84 +450,5 @@ describe('历史重算迁移（按当前权重重算已有事件；含未练习 
     const m = migrateExecutionAssetScoringV2(fresh);
     expect(m.points).toBe(0);
     expect(m.scoringVersion).toBe(EXECUTION_SCORING_VERSION);
-  });
-});
-
-describe('未做平仓评价 −1000（可翻转镜像，与复盘奖励互斥）', () => {
-  const missingOf = (s: ReturnType<typeof createDefaultExecutionAssetState>) =>
-    s.events.filter(e => e.type === 'review_missing_penalty').map(e => e.journalId);
-
-  it('未复盘的主力单挂 −1000；已复盘的不挂', () => {
-    const s0 = createDefaultExecutionAssetState(d('2026-06-03'));
-    const s1 = reconcileReviewMissingPenalties(s0, [
-      { journalId: 'a', reviewed: false },
-      { journalId: 'b', reviewed: true },
-      { journalId: 'c', reviewed: false },
-    ], d('2026-06-03'));
-    expect(s1.points).toBe(-EXECUTION_REVIEW_MISSING_PENALTY * 2);
-    expect(missingOf(s1).sort()).toEqual(['a', 'c']);
-  });
-
-  it('补做复盘 → −1000 撤销并退分（翻转，为 +1000 让路）', () => {
-    const s0 = createDefaultExecutionAssetState(d('2026-06-03'));
-    const s1 = reconcileReviewMissingPenalties(s0, [{ journalId: 'a', reviewed: false }], d('2026-06-03'));
-    expect(s1.points).toBe(-EXECUTION_REVIEW_MISSING_PENALTY);
-    // a 现在复盘了 → 撤罚、退分、事件移除
-    const s2 = reconcileReviewMissingPenalties(s1, [{ journalId: 'a', reviewed: true }], d('2026-06-04'));
-    expect(s2.points).toBe(0);
-    expect(missingOf(s2)).toEqual([]);
-  });
-
-  it('幂等：同一未复盘集合再跑不变、不重复扣', () => {
-    const s0 = createDefaultExecutionAssetState(d('2026-06-03'));
-    const once = reconcileReviewMissingPenalties(s0, [{ journalId: 'a', reviewed: false }], d('2026-06-03'));
-    const twice = reconcileReviewMissingPenalties(once, [{ journalId: 'a', reviewed: false }], d('2026-06-04'));
-    expect(twice.points).toBe(once.points);
-    expect(missingOf(twice)).toEqual(['a']);
-  });
-
-  it('不再在集合里的（如已删）也撤罚退分', () => {
-    const s0 = createDefaultExecutionAssetState(d('2026-06-03'));
-    const s1 = reconcileReviewMissingPenalties(s0, [{ journalId: 'a', reviewed: false }], d('2026-06-03'));
-    const s2 = reconcileReviewMissingPenalties(s1, [], d('2026-06-04')); // a 不在集合了
-    expect(s2.points).toBe(0);
-    expect(missingOf(s2)).toEqual([]);
-  });
-
-  it('历史未评价流水会补齐标的和客观操作时间，不重复扣分', () => {
-    const operationTime = d('2026-06-22T09:30:00+08:00');
-    const s0 = createDefaultExecutionAssetState(d('2026-07-14'));
-    const penalized = reconcileReviewMissingPenalties(s0, [
-      { journalId: 'legacy', reviewed: false },
-    ], d('2026-07-14'));
-    const reconciled = reconcileReviewMissingPenalties(penalized, [
-      { journalId: 'legacy', reviewed: false, symbol: 'btcusdt', operationTime },
-    ], d('2026-07-14'));
-    const event = reconciled.events.find(item => item.type === 'review_missing_penalty');
-
-    expect(reconciled.points).toBe(-EXECUTION_REVIEW_MISSING_PENALTY);
-    expect(event).toMatchObject({
-      journalId: 'legacy',
-      reviewSymbol: 'BTCUSDT',
-      operationTime: operationTime.getTime(),
-      date: '2026-06-22',
-    });
-  });
-
-  it('组合语义：未复盘 −1000 → 补做复盘 +1000 & 撤罚，全程净 +1000、不双算不丢分', () => {
-    const s0 = createDefaultExecutionAssetState(d('2026-06-03'));
-    // 页面对账：a 未复盘 → 挂 −1000
-    const s1 = reconcileReviewMissingPenalties(s0, [{ journalId: 'a', reviewed: false }], d('2026-06-03'));
-    expect(s1.points).toBe(-EXECUTION_REVIEW_MISSING_PENALTY);
-    // 实时补做复盘：+1000（罚事件仍在，暂时净 0）
-    const s2 = recordPostTradeReviewCompleted(s1, 'a', d('2026-06-04'));
-    expect(s2.points).toBe(EXECUTION_REVIEW_REWARD - EXECUTION_REVIEW_MISSING_PENALTY);
-    // 再次进页面对账：a 已复盘 → 撤罚退分，净 +1000
-    const s3 = reconcileReviewMissingPenalties(s2, [{ journalId: 'a', reviewed: true }], d('2026-06-05'));
-    expect(s3.points).toBe(EXECUTION_REVIEW_REWARD);
-    expect(missingOf(s3)).toEqual([]);
-    // 复盘奖励对账幂等：a 已在 rewardedReviewJournalIds，不重复 +1000
-    const s4 = reconcilePostTradeReviewRewards(s3, [{ journalId: 'a', reviewedAt: d('2026-06-04') }], d('2026-06-06'));
-    expect(s4.points).toBe(EXECUTION_REVIEW_REWARD);
   });
 });
