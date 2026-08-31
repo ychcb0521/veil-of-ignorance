@@ -95,6 +95,8 @@ const POSITION_ENTRY_EVENT_TYPES = new Set<CampaignEvent['event_type']>([
   'main_opened',
   'mirror_tp_placed',
 ]);
+import { resolveUnblendedMainEntry } from '@/lib/campaignMainEntryUnblend';
+
 const EPSILON = 0.0001;
 const INITIAL_REVERSE_ORDER_COHORT_MS = 5 * 60 * 1000;
 
@@ -114,6 +116,58 @@ function findTradeRecord(leg: TradeJournal, tradeRecords: TradeRecord[]): TradeR
 
 function tradeRecordNotionalUsd(record: TradeRecord, price = record.entryPrice): number {
   return getPositionNotionalUsd(record.symbol, record, price || record.entryPrice);
+}
+
+/**
+ * 老数据的自动补救：主力那条平仓记录若是**合并出来的**，把主力自己的开仓价解回来。
+ *
+ * 只在能拿到正面证据时才动手（记录名义 = 主力 + 各兄弟腿），拿不到就原样返回。
+ * 本次改动之后成交的仓位不走这里——分片各带自己的价，`fillId` 就是标记。
+ */
+function unblendedMainEntryPrice(
+  campaign: TradeCampaign,
+  mainLeg: TradeJournal | null,
+  mainRecord: TradeRecord | null,
+  legs: TradeJournal[],
+  tradeRecords: TradeRecord[],
+): number | null {
+  if (mainRecord == null || !positiveOrNull(mainRecord.entryPrice)) return null;
+  const mainDirection = campaignMainDirection(campaign);
+  const siblings = legs
+    .filter(leg => leg.id !== mainLeg?.id)
+    .filter(leg => leg.leg_role === 'mirror_tp'
+      || (leg.leg_role != null && String(leg.leg_role).startsWith('main_add')))
+    .filter(leg => leg.direction == null || leg.direction === mainDirection)
+    .filter(leg => {
+      // 自己另有仓位的说明当初没并进来，减了反而把主力算错。
+      const rec = findTradeRecord(leg, tradeRecords);
+      return rec == null || rec.positionId == null || rec.positionId === mainRecord.positionId;
+    })
+    .map(leg => {
+      const rec = findTradeRecord(leg, tradeRecords);
+      // 记录若就是主力那一条（老数据两条腿指向同一条），它带的是**合计**，不能当成这条腿的。
+      const own = rec != null && rec.id !== mainRecord.id ? rec : null;
+      const entryPrice = firstPositiveNumber(leg.pre_entry_price, own?.entryPrice);
+      const notionalUsd = firstPositiveNumber(
+        leg.pre_position_size,
+        own ? tradeRecordNotionalUsd(own, own.entryPrice) : null,
+      );
+      return entryPrice != null && notionalUsd != null ? { entryPrice, notionalUsd } : null;
+    })
+    .filter((x): x is { entryPrice: number; notionalUsd: number } => x != null);
+
+  const solved = resolveUnblendedMainEntry({
+    blendedEntryPrice: mainRecord.entryPrice,
+    totalNotionalUsd: tradeRecordNotionalUsd(mainRecord, mainRecord.entryPrice),
+    recordFillId: mainRecord.fillId ?? null,
+    mainNotionalUsd: firstPositiveNumber(mainLeg?.pre_position_size, campaign.initial_main_size_usdt),
+    mergedSiblings: siblings,
+  });
+  return solved.ok ? solved.entryPrice : null;
+}
+
+function positiveOrNull(v: unknown): boolean {
+  return typeof v === 'number' && Number.isFinite(v) && v > 0;
 }
 
 function firstPositiveNumber(...values: Array<number | null | undefined>): number | null {
@@ -526,7 +580,10 @@ function resolveInitialRiskAnchor(
   const mainEvent = (campaign.actual_evolution ?? []).find(event =>
     event.leg_role === 'main_open' && firstPositiveNumber(event.entry_price, event.price) != null,
   ) ?? null;
+  // 老数据的主力记录可能是合并出来的:先试着把主力自己的开仓价解回来,
+  // 解不出(新数据、没有兄弟腿、或名义对不上)就原样走今天这条链。
   const entryPrice = firstPositiveNumber(
+    unblendedMainEntryPrice(campaign, mainLeg, mainRecord, legs, tradeRecords),
     mainRecord?.entryPrice,
     mainLeg?.pre_entry_price,
     mainEvent?.entry_price,
@@ -726,7 +783,9 @@ export function resolveMainRiskAnchors(
         || ownerForLeg(toMs(event.timestamp))?.id === mainLeg.id)
       .sort((a, b) => toMs(a.timestamp) - toMs(b.timestamp))
       .find(event => firstPositiveNumber(event.entry_price, event.price) != null) ?? null;
+    // 与单主力路径同一条补救,详见 unblendedMainEntryPrice。
     const entryPrice = firstPositiveNumber(
+      unblendedMainEntryPrice(campaign, mainLeg, mainRecord, legs, tradeRecords),
       mainRecord?.entryPrice,
       mainLeg.pre_entry_price,
       mainEvent?.entry_price,
