@@ -170,6 +170,68 @@ function positiveOrNull(v: unknown): boolean {
   return typeof v === 'number' && Number.isFinite(v) && v > 0;
 }
 
+
+/**
+ * 该引用名下**全部**平仓分片。ref 可能是记录 id、成交 id 或仓位 id，三级顺序与
+ * claimRecordsByLeg / buildTradeRecordLookup 一致。
+ */
+function settlementSlicesFor(ref: string, settlement: TradeRecord[]): TradeRecord[] {
+  const exact = settlement.filter(r => r.id === ref);
+  if (exact.length > 0) {
+    // 精确命中一条之后要把**同一笔成交的其余分刀**一并带上：
+    // 一笔成交经 S 次部分平仓有 S 条分片，只认 1 条会把敞口按刀数除下去。
+    const fills = new Set(exact.map(r => r.fillId).filter((x): x is string => Boolean(x)));
+    return fills.size > 0
+      ? settlement.filter(r => r.id === ref || (r.fillId != null && fills.has(r.fillId)))
+      : exact;
+  }
+  // 成交 id 优先于仓位 id：仓位 id 指向的是合并后的聚合仓位。
+  const byFill = settlement.filter(r => r.fillId === ref);
+  if (byFill.length > 0) return byFill;
+  return settlement.filter(r => r.positionId === ref);
+}
+
+/**
+ * 这条腿**开仓时**的名义，从它全部平仓分片累加得出。
+ *
+ * 事故：原来直接取 `tradeRecordNotionalUsd(单条记录)`，而那条记录是一次 CLOSE，
+ * 它的量是「这一刀关掉了多少」，不是「这一笔开了多少」。币本位下更直接——
+ * getPositionNotionalUsd 对币本位完全由 record.contracts 决定，price 参数是死的。
+ *
+ * 镜像止盈平掉 60% 是按占比从**每笔成交**里各取 60%（scaleSettlementPosition 按 pct
+ * 缩 fills），主力那一笔只剩 40%；收尾平仓时读到的就是那 40%。于是：
+ *
+ *   预期最大亏损 = 133.85（仓位全开着）→ 镜像止盈落袋那一秒 → 53.54
+ *
+ * 一个 **ex-ante** 的量会随着行情走对而缩水，而它是盈亏比与 R 倍数的**分母**——
+ * 分母缩 60%，盈亏比虚抬 2.5 倍，方向是「这笔仓位没那么危险」。
+ * 这个 bug 只在止盈之后发作，而那时用户正在高兴，所以能活很久。
+ *
+ * 各分片之和恰好等于开仓量：按比例缩之后每一刀都会碰到每一笔成交，Σ 回到原值
+ * （币本位整数张有 ±1 张的取整漂移，量级可忽略）。
+ */
+function openingNotionalUsd(
+  ref: string | null | undefined,
+  settlement: TradeRecord[],
+): number | null {
+  if (!ref) return null;
+  const slices = settlementSlicesFor(ref, settlement);
+  if (slices.length === 0) return null;
+  const total = slices.reduce((sum, r) => sum + tradeRecordNotionalUsd(r, r.entryPrice), 0);
+  return total > EPSILON ? total : null;
+}
+
+/**
+ * 承载敞口的记录。只把资金费排除掉——它与开仓量无关，混进来会虚增敞口。
+ *
+ * 不能反过来写成「只要 CLOSE / LIQUIDATION」：老记录与部分测试夹具**没有 action 字段**，
+ * 白名单会把它们整批滤掉，敞口退回快照、快照为空时整条腿消失。
+ * 这个应用不写 OPEN 记录，所以「非资金费」等价于「结算」。
+ */
+function settlementRecordsOf(tradeRecords: TradeRecord[]): TradeRecord[] {
+  return tradeRecords.filter(r => r.action !== 'FUNDING');
+}
+
 function firstPositiveNumber(...values: Array<number | null | undefined>): number | null {
   const value = values.find(candidate => Number.isFinite(candidate) && Number(candidate) > EPSILON);
   return value == null ? null : Number(value);
@@ -347,10 +409,11 @@ function resolveInitialMainExposureNotional(
   mainEvent: CampaignEvent | null,
 ): number | null {
   const recordLookup = buildTradeRecordLookup(tradeRecords);
+  const settlement = settlementRecordsOf(tradeRecords);
   const notionals = new Map<string, number>();
 
   const mainNotional = firstPositiveNumber(
-    mainRecord ? tradeRecordNotionalUsd(mainRecord, mainRecord.entryPrice) : null,
+    openingNotionalUsd(mainLeg?.trade_record_id, settlementRecordsOf(tradeRecords)),
     mainLeg?.pre_position_size,
     mainEvent?.size_usdt,
     campaign.initial_main_size_usdt,
@@ -371,7 +434,7 @@ function resolveInitialMainExposureNotional(
     if (!isInitialMainExposurePosition(campaign, leg.leg_role, leg.direction)) continue;
     const record = leg.trade_record_id ? recordLookup.get(leg.trade_record_id) ?? null : null;
     const notional = firstPositiveNumber(
-      record ? tradeRecordNotionalUsd(record, record.entryPrice) : null,
+      openingNotionalUsd(leg.trade_record_id, settlement),
       leg.pre_position_size,
     );
     if (notional == null) continue;
@@ -419,6 +482,7 @@ function groupInitialMainExposure(
   ownerAt: (t: number | null | undefined) => TradeJournal | null,
 ): Map<string, number> {
   const recordLookup = buildTradeRecordLookup(tradeRecords);
+  const settlement = settlementRecordsOf(tradeRecords);
   const seen = new Set<string>();
   const groups = new Map<string, number>();
   const earliestKey = mainLegs[0]?.id ?? null;
@@ -433,7 +497,7 @@ function groupInitialMainExposure(
     if (!isInitialMainExposurePosition(campaign, leg.leg_role, leg.direction)) continue;
     const record = leg.trade_record_id ? recordLookup.get(leg.trade_record_id) ?? null : null;
     const notional = firstPositiveNumber(
-      record ? tradeRecordNotionalUsd(record, record.entryPrice) : null,
+      openingNotionalUsd(leg.trade_record_id, settlement),
       leg.pre_position_size,
     );
     if (notional == null) continue;
@@ -552,7 +616,7 @@ export function computeMirrorTpReductionPct(
     .filter(event => event.leg_role === 'mirror_tp' && firstPositiveNumber(event.size_usdt) != null)
     .sort((a, b) => toMs(a.timestamp) - toMs(b.timestamp))[0] ?? null;
   const mirrorNotional = firstPositiveNumber(
-    mirrorRecord ? tradeRecordNotionalUsd(mirrorRecord, mirrorRecord.entryPrice) : null,
+    openingNotionalUsd(mirrorLeg.trade_record_id, settlementRecordsOf(tradeRecords)),
     mirrorLeg.pre_position_size,
     mirrorEvents[0]?.size_usdt,
     roleFallbackEvent?.size_usdt,
@@ -1014,6 +1078,7 @@ export function computeCampaignPnlReconciliation(
     : null;
   const officialLegPnl = baseline.total;
   const recordLookup = buildTradeRecordLookup(tradeRecords);
+  const settlement = settlementRecordsOf(tradeRecords);
   const correctedByRecordId = new Map<string, TradeRecordPnlCorrection>();
 
   for (const leg of legs) {
