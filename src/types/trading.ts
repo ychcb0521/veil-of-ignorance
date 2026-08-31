@@ -243,11 +243,26 @@ export interface PositionFill {
   entryPrice: number;
   /** 该笔成交的计量单位数：币本位为张数，U 本位为币数。 */
   units: number;
+  /**
+   * 该笔成交**开仓时**的杠杆。持仓期内提过杠杆之后，合并仓位的 openLeverage
+   * 一路继承最早那笔的值，加仓那一片就会顶着主力的杠杆写进历史，R 倍数随之失真。
+   * 旧数据没有这个字段时退回仓位级的 openLeverage ?? leverage。
+   */
+  openLeverage?: number;
 }
 
 export interface TradeRecord {
   id: string;
   /** Position that produced this close/funding/liquidation record when known. */
+  /**
+   * 这一片属于**哪一笔成交**。
+   *
+   * 同向成交会合并成一个仓位（币安单向持仓），但平仓时按每笔成交各写一条记录——
+   * 否则加仓在战役里会整条消失,主力还会顶着一个混合开仓价。
+   * positionId 仍然是**存活的那个合并仓位**;fillId 才是这一片自己的身份。
+   * 旧记录没有这个字段,一律退回按 positionId 归属。
+   */
+  fillId?: string;
   positionId?: string | null;
   symbol: string;
   side: OrderSide;

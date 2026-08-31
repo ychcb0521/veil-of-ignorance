@@ -70,7 +70,7 @@ describe('reduce-only take-profit execution', () => {
     if (!execution.ok) return;
     expect(execution.positions).toEqual([]);
     expect(execution.orders).toEqual([]);
-    expect(execution.record).toMatchObject({
+    expect(execution.records[0]).toMatchObject({
       positionId: position.id,
       symbol: 'TESTUSDT',
       side: 'LONG',
@@ -80,7 +80,7 @@ describe('reduce-only take-profit execution', () => {
       closedRealAt: 3_000,
       exit_method: 'tp1',
     });
-    expect(execution.record.pnl).toBeGreaterThan(0);
+    expect(execution.records[0].pnl).toBeGreaterThan(0);
     expect(execution.filledOrder).toMatchObject({
       id: order.id,
       side: 'SHORT',
@@ -112,8 +112,8 @@ describe('reduce-only take-profit execution', () => {
 
     expect(execution.ok).toBe(true);
     if (!execution.ok) return;
-    expect(execution.record).toMatchObject({ side: 'SHORT', action: 'CLOSE', exit_method: 'tp1' });
-    expect(execution.record.pnl).toBeGreaterThan(0);
+    expect(execution.records[0]).toMatchObject({ side: 'SHORT', action: 'CLOSE', exit_method: 'tp1' });
+    expect(execution.records[0].pnl).toBeGreaterThan(0);
     expect(execution.filledOrder.side).toBe('LONG');
   });
 

@@ -162,6 +162,9 @@ export function ClassifyAsNewCampaignDialog({ open, onOpenChange, items, onCreat
       suggestOrphanRecordRoles(
         orphans.map(item => ({
           id: item.id,
+          // fillId 不传的话 legRoleSuggestion 里 `r.fillId ?? r.id` 恒等于 r.id,
+          // `groups.size !== records.length` 恒为假,整段按成交分组是死代码。
+          fillId: item.record.fillId ?? null,
           direction: itemDirection(item),
           openTimeMs: item.record.openTime || 0,
           closeTimeMs: item.record.closeTime || null,

@@ -173,6 +173,8 @@ export interface OrphanRecordRoleInput {
   /** 平仓时间（毫秒）；0 / null 视为仍持有。 */
   closeTimeMs: number | null;
   exitMethod?: string | null;
+  /** 这一片属于哪一笔成交；合并仓位的一次平仓会拆成多片。缺省时按 id 自成一组。 */
+  fillId?: string | null;
 }
 
 export interface OrphanRecordRoleSuggestion {
@@ -191,10 +193,54 @@ export interface OrphanRecordRoleSuggestion {
  * 若最后平掉的那笔恰好也是止盈1（例如全部记录都走了止盈1），主力判定优先——
  * 战役必须有 main_open，镜像身份让位。
  */
+/**
+ * 按**成交**定角色,而不是按记录。
+ *
+ * 合并仓位的一次平仓会拆成多片记录,同一笔成交可能出现在很多次平仓里。
+ * 若按记录逐条定角色:
+ *   · 一次止盈平掉 3 笔成交,会冒出**两条**「镜像止盈」——
+ *     而 mirror_tp 是计入开仓敞口的,加仓的名义会从这扇错门重新混进风险口径;
+ *   · N 笔成交 × S 次平仓会在分类界面里炸出 N·S 行。
+ * 每笔成交只出一个角色,代表片取它最早的那次平仓。
+ */
 export function suggestOrphanRecordRoles(
   records: OrphanRecordRoleInput[],
   mainDirection: 'long' | 'short',
 ): OrphanRecordRoleSuggestion[] {
+  const groups = new Map<string, OrphanRecordRoleInput[]>();
+  for (const r of records) {
+    const key = r.fillId ?? r.id;
+    const list = groups.get(key);
+    if (list) list.push(r); else groups.set(key, [r]);
+  }
+  if (groups.size !== records.length) {
+    /**
+     * 每组选一个代表片:该笔成交**最晚**平掉的那一次,不是最早那次。
+     *
+     * 部分平仓是按比例缩每一笔成交的,所以每一刀都会给**所有**成交各写一条记录——
+     * 各组的平仓时刻集合完全相同,取最早等于没取。真正的差别在 exit_method:
+     * 最早那一片带的是第一刀的退出方式(镜像止盈分批减仓时就是 'tp1'),
+     * 于是加仓会继承主力第一刀的止盈方式、被判成 mirror_tp 而不是加仓。
+     * 最晚那一片才是这笔成交**自己**真正的结束方式。
+     */
+    const repIdByGroup = new Map<string, string>();
+    const reps: OrphanRecordRoleInput[] = [];
+    for (const [key, list] of groups) {
+      const rep = [...list].sort(
+        (a, b) => (b.closeTimeMs ?? Infinity) - (a.closeTimeMs ?? Infinity),
+      )[0];
+      repIdByGroup.set(key, rep.id);
+      reps.push(rep);
+    }
+    // 只对代表片跑一遍原算法,再把结论发回组内每一片(调用方按记录 id 查)。
+    const byRepId = new Map(suggestOrphanRecordRoles(reps, mainDirection).map(x => [x.id, x]));
+    return records.flatMap(r => {
+      const repId = repIdByGroup.get(r.fillId ?? r.id);
+      const suggestion = repId != null ? byRepId.get(repId) : undefined;
+      return suggestion ? [{ ...suggestion, id: r.id }] : [];
+    });
+  }
+
   const effectiveClose = (record: OrphanRecordRoleInput): number =>
     record.closeTimeMs != null && record.closeTimeMs > 0 ? record.closeTimeMs : Number.POSITIVE_INFINITY;
 

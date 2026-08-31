@@ -2882,7 +2882,9 @@ export async function listOrphanTradeRecords(
   );
   const linkedIds = new Set(linked.map(row => row.trade_record_id).filter((value): value is string => Boolean(value)));
   return tradeHistory
-    .filter(record => !linkedIds.has(record.id))
+    // 分片记录的 fillId 才是日志存的那个 id;只看 record.id 会把加仓那一片
+    // 当成孤儿再列一遍,用户一分类就多出第二条腿,两条腿认领同一笔钱。
+    .filter(record => !linkedIds.has(record.id) && !(record.fillId && linkedIds.has(record.fillId)))
     .filter(record => matchesTradeRecordFilters(record, filters))
     .sort((a, b) => tradeRecordTimeMs(b) - tradeRecordTimeMs(a));
 }

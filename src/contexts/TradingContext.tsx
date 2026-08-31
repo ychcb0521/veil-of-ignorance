@@ -51,6 +51,7 @@ import {
 import { resolveConditionalTriggerPrice, shouldRejectImmediateConditionalPlacement } from '@/lib/conditionalOrders';
 import {
   POSITION_DUST_EPSILON,
+  buildCloseRecords,
   closeSettlementPosition,
   executeSettlementFill,
   formatSettlementQuantity,
@@ -857,21 +858,26 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
         const { feeUsd: closeFee, feeCoin } = getSettlementFeeParts(sym, pos, price, false);
         const liqFee = notional * LIQUIDATION_FEE_RATE;
 
-        setTradeHistory(prev => [...prev, {
-          id: crypto.randomUUID(), symbol: sym, side: pos.side,
-          positionId: pos.id,
-          type: 'MARKET' as OrderType, action: 'LIQUIDATION' as const,
-          entryPrice: pos.entryPrice, exitPrice: price,
-          quantity: getPositionUnits(pos), contracts: isCoinSettled(pos) ? getPositionUnits(pos) : undefined,
-          leverage: pos.openLeverage ?? pos.leverage,
-          pnl: pnl - closeFee - liqFee, fee: closeFee + liqFee, slippage: 0,
-          feeCoin, notionalUsd: notional,
-          settlementMode: pos.settlementMode, settlementAsset: pos.settlementAsset,
-          contractSizeUsd: pos.contractSizeUsd,
-          openTime: pos.openTime || 0, closeTime: getEffectiveTime(sym),
-          exit_method: 'liquidation',
+        /**
+         * 强平也按每笔成交各写一条。合并本来就是为了「加仓不该被自己的强平价单独打掉」——
+         * 若强平这一支只写一条,就等于在**它当初要保护的那件事真的发生时**,
+         * 把加仓从事后复盘里抹掉。
+         */
+        setTradeHistory(prev => [...prev, ...buildCloseRecords({
+          symbol: sym, pos,
+          closeQty: getPositionUnits(pos),
+          fillPrice: price,
+          closeTime: getEffectiveTime(sym),
+          exitMethod: 'liquidation',
           closedRealAt: Date.now(),
-        }]);
+          totals: {
+            netPnl: pnl - closeFee - liqFee,
+            feeUsd: closeFee + liqFee,
+            feeCoin,
+            slippageUsd: 0,
+            notionalUsd: notional,
+          },
+        }).map(r => ({ ...r, action: 'LIQUIDATION' as const }))]);
 
         // 按 id 删，不按下标。下标取自 effect 闭包里那份已提交的 positionsMap，
         // 而 filter 作用在 setPositionsMap 同步推进的 positionsMapRef 上——两个数组
@@ -931,21 +937,22 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
             const liqFee = notional * LIQUIDATION_FEE_RATE;
             totalLoss += Math.abs(Math.min(0, pnl - closeFee - liqFee)) + liqFee;
 
-            liqRecords.push({
-              id: crypto.randomUUID(), symbol: sym, side: pos.side,
-              positionId: pos.id,
-              type: 'MARKET' as OrderType, action: 'LIQUIDATION' as const,
-              entryPrice: pos.entryPrice, exitPrice: price,
-              quantity: getPositionUnits(pos), contracts: isCoinSettled(pos) ? getPositionUnits(pos) : undefined,
-              leverage: pos.openLeverage ?? pos.leverage,
-              pnl: pnl - closeFee - liqFee, fee: closeFee + liqFee, slippage: 0,
-              feeCoin, notionalUsd: notional,
-              settlementMode: pos.settlementMode, settlementAsset: pos.settlementAsset,
-              contractSizeUsd: pos.contractSizeUsd,
-              openTime: pos.openTime || 0, closeTime: getEffectiveTime(sym),
-              exit_method: 'liquidation',
+            // 全仓强平同样按每笔成交拆条,理由与逐仓那一支相同。
+            liqRecords.push(...buildCloseRecords({
+              symbol: sym, pos,
+              closeQty: getPositionUnits(pos),
+              fillPrice: price,
+              closeTime: getEffectiveTime(sym),
+              exitMethod: 'liquidation',
               closedRealAt: Date.now(),
-            });
+              totals: {
+                netPnl: pnl - closeFee - liqFee,
+                feeUsd: closeFee + liqFee,
+                feeCoin,
+                slippageUsd: 0,
+                notionalUsd: notional,
+              },
+            }).map(r => ({ ...r, action: 'LIQUIDATION' as const })));
           }
         }
 
@@ -1644,20 +1651,19 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
       return changed ? { ...prev, [symbol]: next } : prev;
     });
 
-    setTradeHistory(prev => [...prev, {
-      id: crypto.randomUUID(), symbol, side: pos.side, type: 'MARKET' as OrderType,
-      positionId: pos.id,
-      action: 'CLOSE' as const, entryPrice: pos.entryPrice, exitPrice: fillPrice,
-      quantity: closeQty, contracts: isCoinSettled(pos) ? closeQty : undefined,
-      leverage: pos.openLeverage ?? pos.leverage,
-      pnl: pnlUsd - feeUsd, pnlCoin, feeCoin,
-      fee: feeUsd, slippage: slippageUsd, notionalUsd,
-      settlementMode: pos.settlementMode, settlementAsset: pos.settlementAsset,
-      contractSizeUsd: pos.contractSizeUsd,
-      openTime: pos.openTime || 0, closeTime: getEffectiveTime(symbol),
-      exit_method: method,
+    // 手动平仓也按每笔成交拆条。这里是与 settlePositionClose 并行的**第二份**实现,
+    // 只把记录这一段接过去,不做整体归并——那是另一件事(见下方 TODO 立项)。
+    setTradeHistory(prev => [...prev, ...buildCloseRecords({
+      symbol, pos, closeQty, fillPrice,
+      closeTime: getEffectiveTime(symbol),
+      exitMethod: method,
       closedRealAt: Date.now(),
-    }]);
+      totals: {
+        netPnl: pnlUsd - feeUsd,
+        pnlCoin, feeUsd, feeCoin,
+        slippageUsd, notionalUsd,
+      },
+    })]);
 
     const pctLabel = pct < 1 ? ` (${Math.round(pct * 100)}%)` : '';
     const netPnl = pnlUsd - feeUsd;
@@ -1723,7 +1729,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
     setPositionsMap((prev) => ({ ...prev, [execution.targetSymbol]: execution.positions }));
     setOrdersMap((prev) => ({ ...prev, [execution.targetSymbol]: execution.orders }));
     setBalance((prev) => prev + Math.max(0, execution.returnedMargin));
-    setTradeHistory((prev) => [...prev, execution.record]);
+    setTradeHistory((prev) => [...prev, ...execution.records]);
     setFilledOrders(prev => upsertOrderSnapshot(prev, execution.filledOrder));
 
     const kindLabel = order.reduceKind === 'TP' ? '止盈' : order.reduceKind === 'SL' ? '止损' : '条件';

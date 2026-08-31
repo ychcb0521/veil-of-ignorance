@@ -23,7 +23,7 @@ describe('settlePositionClose trade history record', () => {
     expect(settled).not.toBeNull();
     expect(settled?.willFullyClose).toBe(false);
     expect(settled?.remainingUnits).toBeCloseTo(5);
-    expect(settled?.record).toMatchObject({
+    expect(settled?.records[0]).toMatchObject({
       symbol: 'TESTUSDT',
       side: 'LONG',
       type: 'MARKET',
@@ -38,9 +38,9 @@ describe('settlePositionClose trade history record', () => {
       closedRealAt: 3_000,
       exit_method: 'tp1',
     });
-    expect(settled?.record.exitPrice).toBeGreaterThan(0);
-    expect(settled?.record.notionalUsd).toBeGreaterThan(0);
-    expect(settled?.record.fee).toBeGreaterThan(0);
-    expect(settled?.record.pnl).toBeGreaterThan(0);
+    expect(settled?.records[0].exitPrice).toBeGreaterThan(0);
+    expect(settled?.records[0].notionalUsd).toBeGreaterThan(0);
+    expect(settled?.records[0].fee).toBeGreaterThan(0);
+    expect(settled?.records[0].pnl).toBeGreaterThan(0);
   });
 });

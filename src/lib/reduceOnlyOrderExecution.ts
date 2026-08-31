@@ -27,7 +27,8 @@ export interface ReduceOnlyTriggerSuccess {
   linkedPositionId: string;
   positions: Position[];
   orders: PendingOrder[];
-  record: TradeRecord;
+  /** 每笔成交各一条：合并仓位平仓时，加仓那一片必须自己成一条记录。 */
+  records: TradeRecord[];
   filledOrder: FilledOrderSnapshot;
   returnedMargin: number;
   fillPrice: number;
@@ -142,7 +143,7 @@ export function planReduceOnlyTrigger({
     linkedPositionId,
     positions: nextPositions,
     orders: nextOrders,
-    record: settled.record,
+    records: settled.records,
     filledOrder: {
       id: liveOrder.id,
       symbol: targetSymbol,

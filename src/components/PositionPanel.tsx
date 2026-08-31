@@ -330,7 +330,12 @@ export function PositionPanel({
 
   const lookupJournalForRecord = (t: TradeRecord): TradeJournal | null => {
     const k = `${t.symbol}_${t.side}_${t.entryPrice.toFixed(4)}`;
+    // fillId 必须排在 positionId **前面**,与 claimRecordsByLeg 的三级顺序一致。
+    // 合并仓位所有分片的 positionId 都是存活仓位(= 最早那笔成交)的 id,
+    // 而加仓腿的 journal.trade_record_id 存的是这笔成交自己的 id;
+    // 少了这一级,加仓那一片会绑到主力的 journal 上,评价写进别人的本子里。
     return journalsByTradeId[t.id]
+      ?? (t.fillId ? journalsByTradeId[t.fillId] : null)
       ?? (t.positionId ? journalsByTradeId[t.positionId] : null)
       ?? journalsByCompositeKey[k]
       ?? null;
@@ -349,7 +354,10 @@ export function PositionPanel({
     try {
       let journal = knownJournal ?? lookupJournalForRecord(record);
       if (!journal) {
-        const refs = Array.from(new Set([record.id, record.positionId].filter((id): id is string => Boolean(id))));
+        // 顺序与 lookupJournalForRecord 一致:id → fillId → positionId。
+        const refs = Array.from(new Set(
+          [record.id, record.fillId, record.positionId].filter((id): id is string => Boolean(id)),
+        ));
         for (const ref of refs) {
           const existing = await listJournalsByTradeRecordId(user.id, ref);
           if (existing.length > 0) {
