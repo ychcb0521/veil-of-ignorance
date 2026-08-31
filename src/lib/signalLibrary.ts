@@ -31,6 +31,50 @@ export interface TradeSignal {
   fallbackZone: string;
   /** 已确认的致命跳转问题；瞬时网络 / 限流错误不会写入。 */
   jumpIssue?: SignalJumpIssue;
+  /**
+   * 交易者手动打的信号质量分，1–5 星；undefined = 未评分。
+   *
+   * 存在信号对象上而不是另开一张表：信号库本来就是**跟账号走**的
+   * （saveSignals 会按 uid 推到云端），所以评分天然是每个账户各自一份；
+   * 而 mergeSignals 按「标的@时间」去重且**保留已存在的那条**，
+   * 于是重新粘贴同一批信号不会把评分冲掉。
+   */
+  quality?: number;
+}
+
+/** 五星制的合法取值；0 或越界一律视为未评分。 */
+export const SIGNAL_QUALITY_MAX = 5;
+
+export function normalizeSignalQuality(value: unknown): number | undefined {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return undefined;
+  const rounded = Math.round(n);
+  if (rounded < 1 || rounded > SIGNAL_QUALITY_MAX) return undefined;
+  return rounded;
+}
+
+/**
+ * 给一条信号打分。**最新一次评分覆盖旧的**；点同一颗星表示撤销评分。
+ * 纯函数，返回新数组，不改原数组。
+ */
+export function setSignalQuality(
+  list: TradeSignal[],
+  id: string,
+  quality: number | undefined,
+): TradeSignal[] {
+  const next = normalizeSignalQuality(quality);
+  let changed = false;
+  const out = list.map(sig => {
+    if (sig.id !== id) return sig;
+    const current = normalizeSignalQuality(sig.quality);
+    // 点当前星数 = 取消评分,给一条撤销误点的路
+    const applied = next != null && next === current ? undefined : next;
+    if (applied === current) return sig;
+    changed = true;
+    const { quality: _drop, ...rest } = sig;
+    return applied == null ? (rest as TradeSignal) : { ...rest, quality: applied } as TradeSignal;
+  });
+  return changed ? out : list;
 }
 
 export const SIGNAL_LIBRARY_STORAGE_KEY = 'veil.signalLibrary.v1';
@@ -206,6 +250,39 @@ export function mergeSignals(existing: TradeSignal[], incoming: TradeSignal[]): 
     merged.push(sig);
   }
   return merged;
+}
+
+export type SignalSortKey = 'symbol' | 'time' | 'quality';
+
+/**
+ * 按列排序。三列各有各的次序语义：
+ *   symbol   字母序；同标的再按时间升序（同一个币会出现在很多天）
+ *   time     时间序
+ *   quality  评分；**未评分永远排在最后**，不论升降——
+ *            未评分不是「0 星」，把它当 0 会让升序时一堆没看过的信号占满前排。
+ * 同分再按时间新→旧，保证结果稳定可复现。
+ */
+export function sortSignalsBy(
+  list: TradeSignal[],
+  key: SignalSortKey,
+  dir: 'asc' | 'desc' = 'asc',
+): TradeSignal[] {
+  if (key === 'symbol') {
+    const alpha = sortSignalsAlpha(list);
+    return dir === 'asc' ? alpha : [...alpha].reverse();
+  }
+  if (key === 'time') return sortSignalsByTime(list, dir);
+
+  const sign = dir === 'asc' ? 1 : -1;
+  return [...list].sort((a, b) => {
+    const qa = normalizeSignalQuality(a.quality);
+    const qb = normalizeSignalQuality(b.quality);
+    if (qa == null && qb == null) return b.timeMs - a.timeMs;
+    if (qa == null) return 1;      // 未评分沉底
+    if (qb == null) return -1;
+    if (qa !== qb) return (qa - qb) * sign;
+    return b.timeMs - a.timeMs;
+  });
 }
 
 /** 按标的字母序排序；同一标的按时间升序。 */

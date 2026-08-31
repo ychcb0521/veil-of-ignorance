@@ -9,7 +9,11 @@ import { formatUTC8 } from '@/lib/timeFormat';
 import {
   type TradeSignal,
   loadSignals, saveSignals, parseSignalText, serializeSignals, mergeSignals, sortSignalsAlpha, sortSignalsByTime, signalMonthKey,
+  normalizeSignalQuality,
+  setSignalQuality,
+  sortSignalsBy,
 } from '@/lib/signalLibrary';
+import { SignalQualityStars } from '@/components/SignalQualityStars';
 import {
   preflightSignalJumpIssues,
   signalJumpIssueLabel,
@@ -79,7 +83,18 @@ export function TimeControl({
   const [importErrors, setImportErrors] = useState<string[]>([]);
   const [query, setQuery] = useState('');
   const [monthFilter, setMonthFilter] = useState(''); // '' = 全部月份
-  const [sortMode, setSortMode] = useState<'alpha' | 'time-desc' | 'time-asc'>('alpha');
+  /**
+   * 排序改成**点表头**,不再用独立的下拉框:列名本来就在那儿,
+   * 再放一个「标的 A→Z」的选择器等于把同一件事说两遍,而且它排不了新增的评分列。
+   */
+  const [sortKey, setSortKey] = useState<'symbol' | 'time' | 'quality'>('symbol');
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
+  const toggleSort = (key: 'symbol' | 'time' | 'quality') => {
+    if (key === sortKey) { setSortDir(d => (d === 'asc' ? 'desc' : 'asc')); return; }
+    setSortKey(key);
+    // 各列的「顺手方向」不同:标的从 A 起,时间与评分从大的起。
+    setSortDir(key === 'symbol' ? 'asc' : 'desc');
+  };
 
   /**
    * 选中某个具体月份时把排序切成「时间 旧→新」。
@@ -93,7 +108,7 @@ export function TimeControl({
    */
   const selectMonth = (month: string) => {
     setMonthFilter(month);
-    if (month) setSortMode('time-asc');
+    if (month) { setSortKey('time'); setSortDir('asc'); }
   };
   const [jumpingSignalId, setJumpingSignalId] = useState<string | null>(null);
   const [signalAuditProgress, setSignalAuditProgress] = useState<{
@@ -197,12 +212,10 @@ export function TimeControl({
 
   const sortedFiltered = useMemo(() => {
     const q = query.trim().toUpperCase();
-    let base = sortMode === 'alpha'
-      ? sortSignalsAlpha(signals)
-      : sortSignalsByTime(signals, sortMode === 'time-asc' ? 'asc' : 'desc');
-    if (monthFilter) base = base.filter(s => signalMonthKey(s.timeMs) === monthFilter);
-    return q ? base.filter(s => s.symbol.includes(q)) : base;
-  }, [signals, query, monthFilter, sortMode]);
+    const base = sortSignalsBy(signals, sortKey, sortDir);
+    const byMonth = monthFilter ? base.filter(s => signalMonthKey(s.timeMs) === monthFilter) : base;
+    return q ? byMonth.filter(s => s.symbol.includes(q)) : byMonth;
+  }, [signals, query, monthFilter, sortKey, sortDir]);
   // 「标的@日期」索引：信号那天，这个标的动过手没有。
   // 这里曾经只按标的判定（做过一次 TRB，所有 TRB 信号全被标成已交易），
   // 而同一个币种会在很多个日期出现——按标的判等于把标记稀释成「这币我碰过」，
@@ -253,6 +266,13 @@ export function TimeControl({
   };
 
   const handleDeleteSignal = (id: string) => setSignals(prev => prev.filter(s => s.id !== id));
+  /**
+   * 打分。写回 signals 之后由既有的 `useEffect(() => saveSignals(signals))` 落盘，
+   * 并顺着 saveSignals 推到云端——所以「最新评分覆盖旧的」是自动成立的，
+   * 不需要另开一条保存路径。
+   */
+  const handleRateSignal = (id: string, next: number) =>
+    setSignals(prev => setSignalQuality(prev, id, next));
   const handleClearSignals = () => { setSignals([]); setImportErrors([]); toast.message('信号库已清空'); };
 
   // 导出：把整库序列化成「区块格式」txt（与导入互逆，可原样再导入），触发浏览器下载。
@@ -449,18 +469,6 @@ export function TimeControl({
               纵向才是稀缺的，这是把过剩的横向兑换成纵向的一次交易。 */}
           <div>
             <div className="mb-1.5 flex flex-wrap items-center gap-1.5">
-              {signals.length > 0 && (
-                <select
-                  value={sortMode}
-                  onChange={e => setSortMode(e.target.value as 'alpha' | 'time-desc' | 'time-asc')}
-                  title="排序方式"
-                  className="input-dark h-[22px] shrink-0 px-1.5 py-0.5 text-[11px]"
-                >
-                  <option value="alpha">标的 A→Z</option>
-                  <option value="time-desc">时间 新→旧</option>
-                  <option value="time-asc">时间 旧→新</option>
-                </select>
-              )}
               {monthOptions.length > 0 && (
                 <select
                   value={monthFilter}
@@ -562,11 +570,15 @@ export function TimeControl({
             ) : (
               <div className="overflow-hidden rounded border border-border/60">
                 {/* 表头：与行共用同一套列宽，四列各有名分，不再靠位置猜 */}
-                <div className="grid grid-cols-[minmax(108px,148px)_128px_minmax(0,1fr)_auto] items-center gap-2 border-b border-border/60 bg-muted/40 px-2 py-1 pr-[58px] text-[9px] leading-3 font-medium text-muted-foreground">
-                  <span className="grid grid-cols-[12px_minmax(0,1fr)] items-center gap-1"><span aria-hidden /><span>标的</span></span>
-                  <span>信号时间</span>
+                <div className="grid grid-cols-[minmax(108px,148px)_128px_minmax(0,1fr)_auto_74px] items-center gap-2 border-b border-border/60 bg-muted/40 px-2 py-1 pr-[56px] text-[9px] leading-3 font-medium text-muted-foreground">
+                  <span className="grid grid-cols-[12px_minmax(0,1fr)] items-center gap-1">
+                    <span aria-hidden />
+                    <SortHeader label="标的" active={sortKey === 'symbol'} dir={sortDir} onClick={() => toggleSort('symbol')} />
+                  </span>
+                  <SortHeader label="信号时间" active={sortKey === 'time'} dir={sortDir} onClick={() => toggleSort('time')} />
                   <span>兜底区</span>
                   <span className="w-5" aria-hidden />
+                  <SortHeader label="评分" active={sortKey === 'quality'} dir={sortDir} onClick={() => toggleSort('quality')} />
                 </div>
                 <div className="max-h-56 divide-y divide-border/30 overflow-y-auto overscroll-contain">
                 {sortedFiltered.map(sig => {
@@ -624,6 +636,15 @@ export function TimeControl({
                         <span className="h-4 w-4 shrink-0" aria-hidden />
                       )}
                     </button>
+                    {/* 评分列：与表头的 74px 对齐。必须在跳转按钮之外——
+                        整行本身是 <button>，嵌套按钮既是非法 HTML，点星星也会把盘面跳走。 */}
+                    <span className="flex w-[74px] shrink-0 items-center justify-start">
+                      <SignalQualityStars
+                        signalId={sig.id}
+                        value={normalizeSignalQuality(sig.quality)}
+                        onChange={(next) => handleRateSignal(sig.id, next)}
+                      />
+                    </span>
                     <button
                       onClick={() => handleJumpSignal(sig)}
                       disabled={jumpingSignalId != null}
@@ -665,5 +686,29 @@ export function TimeControl({
         pricePrecision={2}
       />
     </div>
+  );
+}
+
+/**
+ * 可点排序的表头。箭头只在当前排序列上出现——每列都挂一个箭头会让人以为
+ * 三列各自独立排序，而这里同一时刻只有一个排序键。
+ */
+function SortHeader({
+  label, active, dir, onClick,
+}: { label: string; active: boolean; dir: 'asc' | 'desc'; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      data-testid={`signal-sort-${label}`}
+      aria-sort={active ? (dir === 'asc' ? 'ascending' : 'descending') : 'none'}
+      title={`按${label}排序${active ? '（再点一次反向）' : ''}`}
+      className={`flex items-center gap-0.5 text-left transition-colors hover:text-foreground ${
+        active ? 'text-foreground' : ''
+      }`}
+    >
+      <span>{label}</span>
+      <span className="w-2 shrink-0 leading-none" aria-hidden>{active ? (dir === 'asc' ? '↑' : '↓') : ''}</span>
+    </button>
   );
 }
