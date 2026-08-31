@@ -252,4 +252,34 @@ describe('信号库展开面板', () => {
       expect(within(lib).getByTestId('signal-sort-评分')).toHaveAttribute('aria-sort', 'none');
     });
   });
+
+  describe('不可跳转徽标', () => {
+    const withIssue = [
+      { ...SIGNALS[0], jumpIssue: { code: 'symbol_not_listed', reason: '该标的未上市' } },
+      SIGNALS[1],
+    ];
+
+    it('只在有问题的那条上出现，且用深灰而非红色', () => {
+      localStorage.setItem(SIGNAL_LIBRARY_STORAGE_KEY, JSON.stringify(withIssue));
+      renderControl();
+      openLibrary();
+      const badges = screen.getAllByTestId('signal-jump-issue');
+      expect(badges).toHaveLength(1);
+      // 它只在少数行出现，红色会在扫视时抢走注意力
+      expect(badges[0].className).toContain('text-muted-foreground');
+      expect(badges[0].className).not.toContain('destructive');
+    });
+
+    it('【回归】徽标在评分右侧，不再夹在兜底区与评分之间', () => {
+      localStorage.setItem(SIGNAL_LIBRARY_STORAGE_KEY, JSON.stringify(withIssue));
+      renderControl();
+      openLibrary();
+      const badge = screen.getByTestId('signal-jump-issue');
+      const stars = screen.getByTestId(`signal-quality-${withIssue[0].id}`);
+      // DOM 顺序即视觉顺序：星星在前，徽标在后
+      expect(stars.compareDocumentPosition(badge) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      // 且不再嵌在跳转按钮里
+      expect(badge.closest('button')).toBeNull();
+    });
+  });
 });

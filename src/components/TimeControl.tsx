@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo, useRef } from 'react';
 import {
   Play, Pause, Square, Clock, BookmarkX,
   Database, ChevronDown, Upload, Download, Plus, Trash2, X, ArrowRightCircle, CheckCircle2,
-  AlertTriangle, Loader2,
+  AlertCircle, Loader2,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { formatUTC8 } from '@/lib/timeFormat';
@@ -570,14 +570,13 @@ export function TimeControl({
             ) : (
               <div className="overflow-hidden rounded border border-border/60">
                 {/* 表头：与行共用同一套列宽，四列各有名分，不再靠位置猜 */}
-                <div className="grid grid-cols-[minmax(108px,148px)_128px_minmax(0,160px)_auto_74px_minmax(0,1fr)] items-center gap-2 border-b border-border/60 bg-muted/40 px-2 py-1 pr-[56px] text-[9px] leading-3 font-medium text-muted-foreground">
+                <div className="grid grid-cols-[minmax(108px,148px)_128px_minmax(0,160px)_74px_minmax(0,1fr)] items-center gap-2 border-b border-border/60 bg-muted/40 px-2 py-1 pr-[56px] text-[9px] leading-3 font-medium text-muted-foreground">
                   <span className="grid grid-cols-[12px_minmax(0,1fr)] items-center gap-1">
                     <span aria-hidden />
                     <SortHeader label="标的" active={sortKey === 'symbol'} dir={sortDir} onClick={() => toggleSort('symbol')} />
                   </span>
                   <SortHeader label="信号时间" active={sortKey === 'time'} dir={sortDir} onClick={() => toggleSort('time')} />
                   <span>兜底区</span>
-                  <span className="w-5" aria-hidden />
                   <SortHeader label="评分" active={sortKey === 'quality'} dir={sortDir} onClick={() => toggleSort('quality')} />
                   {/* 吸收剩余宽度的空列。放在评分**之后**——之前它在兜底区那一列，
                       于是兜底区把所有余量吃掉、评分被顶到最右边去了。 */}
@@ -592,7 +591,7 @@ export function TimeControl({
                     <button
                       onClick={() => handleJumpSignal(sig)}
                       disabled={jumpingSignalId != null}
-                      className="grid shrink-0 grid-cols-[minmax(108px,148px)_128px_minmax(0,160px)_auto] items-center gap-2 overflow-hidden text-left disabled:cursor-wait disabled:opacity-70"
+                      className="grid shrink-0 grid-cols-[minmax(108px,148px)_128px_minmax(0,160px)] items-center gap-2 overflow-hidden text-left disabled:cursor-wait disabled:opacity-70"
                       title={sig.jumpIssue?.reason ?? `跳转到 ${sig.symbol} @ ${sig.timeLabel}`}
                     >
                       {/* 标的：勾号在前，名称可截断但列宽足够放下常见长度 */}
@@ -625,19 +624,6 @@ export function TimeControl({
                       <span className="truncate text-[10px] leading-4 text-[#F0B90B]/90">
                         {sig.fallbackZone ? `兜底 ${sig.fallbackZone}` : ''}
                       </span>
-                      {/* 不可跳转：收成一枚图标徽标，原因进 tooltip——
-                          整行文字会把兜底区挤没，且它只在少数行出现 */}
-                      {sig.jumpIssue ? (
-                        <span
-                          className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-destructive/10 text-destructive"
-                          title={`不可跳转 · ${signalJumpIssueLabel(sig.jumpIssue.code)}｜${sig.jumpIssue.reason}`}
-                          aria-label={`不可跳转：${signalJumpIssueLabel(sig.jumpIssue.code)}`}
-                        >
-                          <AlertTriangle className="h-3 w-3" />
-                        </span>
-                      ) : (
-                        <span className="h-4 w-4 shrink-0" aria-hidden />
-                      )}
                     </button>
                     {/* 评分列：与表头的 74px 对齐。必须在跳转按钮之外——
                         整行本身是 <button>，嵌套按钮既是非法 HTML，点星星也会把盘面跳走。 */}
@@ -650,6 +636,21 @@ export function TimeControl({
                     </span>
                     {/* 余量放在评分之后，评分才会紧贴兜底区 */}
                     <span className="min-w-0 flex-1" aria-hidden />
+                    {/* 不可跳转：一枚图标，原因进 tooltip。放在最右、紧贴跳转箭头——
+                        它说的就是「这个箭头点不动」，挨着它才读得出因果；
+                        夹在兜底区与评分之间只会把两列的对齐撑开。
+                        用深灰而非红色：它只在少数行出现，红色会在扫视时抢走注意力，
+                        而这不是一个需要立刻处置的错误，只是「这条跳不过去」。 */}
+                    {sig.jumpIssue && (
+                      <span
+                        data-testid="signal-jump-issue"
+                        className="flex h-4 w-4 shrink-0 items-center justify-center text-muted-foreground"
+                        title={`不可跳转 · ${signalJumpIssueLabel(sig.jumpIssue.code)}｜${sig.jumpIssue.reason}`}
+                        aria-label={`不可跳转：${signalJumpIssueLabel(sig.jumpIssue.code)}`}
+                      >
+                        <AlertCircle className="h-3.5 w-3.5" />
+                      </span>
+                    )}
                     <button
                       onClick={() => handleJumpSignal(sig)}
                       disabled={jumpingSignalId != null}
