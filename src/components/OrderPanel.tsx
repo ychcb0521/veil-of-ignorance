@@ -14,6 +14,9 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import type { PlaceOrderParams } from '@/contexts/TradingContext';
 import { useTradingContext } from '@/contexts/TradingContext';
 import { formatUSDT } from '@/lib/formatters';
+import { LeverageModal } from '@/components/LeverageModal';
+import { symbolExposureNotionalUsd } from '@/lib/leverageRestatement';
+import { toast } from 'sonner';
 import { PreTradeSnapshotDialog } from '@/components/journal/PreTradeSnapshotDialog';
 import {
   coinContractsExact,
@@ -166,6 +169,7 @@ export function OrderPanel({
   const lockFoldRef = useRef({ raw: 0, price: 0 });
   /** 输入框是否正被编辑。编辑期间绝不回写，否则用户打一半的数会被改掉。 */
   const [qtyFocused, setQtyFocused] = useState(false);
+  const [leverageModalOpen, setLeverageModalOpen] = useState(false);
   const [percent, setPercent] = useState(0);
 
   // TP/SL inline checkbox state
@@ -716,14 +720,15 @@ export function OrderPanel({
         >
           {marginMode === 'isolated' ? '逐仓' : '全仓'}
         </button>
+        {/**
+          * 与持仓卡上的「杠杆」按钮是**同一个**对话框、同一个 applySymbolLeverage。
+          * 于是「改了下单模块的杠杆，持仓也跟着改」是结构上成立的，
+          * 不存在只改一边的路径。原来那个 prompt() 只写 leverageMap，
+          * 持仓纹丝不动，而且它连强平价前后对比都渲染不出来。
+          */}
         <button
-          onClick={() => {
-            const next = prompt('设置杠杆 (1-125)', String(leverage));
-            if (next) {
-              const v = parseInt(next);
-              if (!isNaN(v)) setLeverage(v);
-            }
-          }}
+          data-testid="order-leverage"
+          onClick={() => setLeverageModalOpen(true)}
           className="px-2 py-0.5 rounded bg-secondary hover:bg-accent text-[11px] text-foreground transition-colors"
         >
           {leverage}x
@@ -1344,6 +1349,29 @@ export function OrderPanel({
       />
 
       {/* ===== Pre-trade snapshot dialog (hard-gates every order placement) ===== */}
+      {leverageModalOpen && (
+        <LeverageModal
+          symbol={symbol}
+          currentLeverage={leverage}
+          settlementMode={settlementMode}
+          notional={symbolExposureNotionalUsd(symbol, positions, ctx.ordersMap[symbol] ?? [], currentPrice)}
+          positions={positions}
+          orders={ctx.ordersMap[symbol] ?? []}
+          markPrice={currentPrice}
+          availableBalance={Math.max(0, available)}
+          onClose={() => setLeverageModalOpen(false)}
+          onConfirm={(next) => {
+            const plan = ctx.applySymbolLeverage(symbol, next);
+            if (!plan.ok) { toast.error(plan.refusal?.message ?? '杠杆未调整'); return; }
+            toast.success(`杠杆已调整为 ${plan.to}x`, {
+              description: plan.totalReleaseUsd > 1e-9
+                ? `释放保证金 ${formatUSDT(plan.totalReleaseUsd)} USDT`
+                : undefined,
+            });
+            setLeverageModalOpen(false);
+          }}
+        />
+      )}
       <PreTradeSnapshotDialog
         isOpen={snapshotOpen}
         onOpenChange={(o) => {

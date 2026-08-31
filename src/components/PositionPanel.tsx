@@ -34,6 +34,7 @@ import { orderPriceKindLabel, orderReferencePrice } from '@/lib/orderReferencePr
 import { restingOrderSize, withRemainingUnits } from '@/lib/restingOrderSize';
 import { firstLiquidationPrice, initialMarginUsd } from '@/lib/positionGroupRisk';
 import { allocateMarginUsd } from '@/lib/marginAllocation';
+import { symbolExposureNotionalUsd, type LeverageChangePlan } from '@/lib/leverageRestatement';
 import {
   formatSettlementQuantity,
   getPositionNotionalUsd,
@@ -62,6 +63,8 @@ interface Props {
   onClosePosition: (symbol: string, index: number, percentage?: number) => void;
   onCancelOrder: (symbol: string, orderId: string) => void;
   onAdjustMargin?: (symbol: string, allocations: { positionId: string; deltaUsd: number }[]) => void;
+  /** 调整标的杠杆：持仓、挂单、余额一起重述，返回执行计划或拒绝原因。 */
+  onApplySymbolLeverage?: (symbol: string, nextLeverage: number) => LeverageChangePlan;
   availableBalance?: number;
   balance?: number;
   initialCapital?: number;
@@ -182,12 +185,14 @@ function buildCorrectedTradeRecord(record: TradeRecord, form: TradeRecordRepairF
 
 export function PositionPanel({
   positionsMap, ordersMap, tradeHistory, priceMap, activeSymbol,
-  onClosePosition, onCancelOrder, onAdjustMargin, availableBalance = 0, balance = 0, initialCapital = 1_000_000,
+  onClosePosition, onCancelOrder, onAdjustMargin, onApplySymbolLeverage, availableBalance = 0, balance = 0, initialCapital = 1_000_000,
   onClearSymbolData,
   activeTab, onTabChange, onCloseAllPositions, pricePrecision, onPlaceTpSl,
 }: Props) {
   const { setSymbolLeverage: setSharedSymbolLeverage, tradingMode, setTradeHistory, setBalance } = useTradingContext();
-  const [leverageModal, setLeverageModal] = useState<{ symbol: string; index: number; pos: Position } | null>(null);
+  // 调杠杆是**按标的**的操作（持仓、挂单一起重述）。刻意不带 pos——
+  // 带着单笔仓位会诱导出逐腿写入，而逐腿写入正是混杠杆状态的制造方式。
+  const [leverageModal, setLeverageModal] = useState<{ symbol: string } | null>(null);
   const [tpslModal, setTpslModal] = useState<{ symbol: string; index: number; pos: Position } | null>(null);
   const [closeModal, setCloseModal] = useState<{ symbol: string; index: number; pos: Position } | null>(null);
   /**
@@ -1131,6 +1136,10 @@ export function PositionPanel({
 
                     {/* Action Buttons */}
                     <div className="flex border-t border-border/50">
+                      <ActionBtn label="杠杆" onClick={(e) => {
+                        e.stopPropagation();
+                        setLeverageModal({ symbol: mg.symbol });
+                      }} />
                       <ActionBtn label="止盈/止损" onClick={(e) => {
                         e.stopPropagation();
                         // Apply TP/SL to the first child position
@@ -1667,24 +1676,45 @@ export function PositionPanel({
       </div>
 
       {/* Modals */}
-      {leverageModal && (
-        <LeverageModal
-          symbol={leverageModal.symbol}
-          currentLeverage={leverageModal.pos.leverage}
-          settlementMode={leverageModal.pos.settlementMode}
-          notional={getPositionNotionalUsd(
-            leverageModal.symbol,
-            leverageModal.pos,
-            priceMap[leverageModal.symbol] || leverageModal.pos.entryPrice,
-          )}
-          onClose={() => setLeverageModal(null)}
-          onConfirm={(newLev) => {
-            setSharedSymbolLeverage(leverageModal.symbol, newLev);
-            toast.success(`杠杆已调整为 ${newLev}x`);
-            setLeverageModal(null);
-          }}
-        />
-      )}
+      {leverageModal && onApplySymbolLeverage && (() => {
+        const sym = leverageModal.symbol;
+        const legs = (positionsMap[sym] ?? []).filter(isPositionOpen);
+        const orders = ordersMap[sym] ?? [];
+        const mark = priceMap[sym] || 0;
+        return (
+          <LeverageModal
+            symbol={sym}
+            currentLeverage={legs.length > 0
+              ? Math.max(...legs.map(p => Math.max(1, p.leverage || 1)))
+              : (legs[0]?.leverage ?? 1)}
+            settlementMode={legs[0]?.settlementMode}
+            notional={symbolExposureNotionalUsd(sym, legs, orders, mark)}
+            positions={legs}
+            orders={orders}
+            markPrice={mark}
+            availableBalance={availableBalance}
+            onClose={() => setLeverageModal(null)}
+            /**
+             * 此前这里只写 leverageMap，然后无条件弹「杠杆已调整为 Nx」——
+             * 仓位没动、挂单没动、一分钱没动，纯粹是一句谎话。
+             * 现在走 applySymbolLeverage 原子重述，并按返回的计划如实报告。
+             */
+            onConfirm={(newLev) => {
+              const plan = onApplySymbolLeverage(sym, newLev);
+              if (!plan.ok) {
+                toast.error(plan.refusal?.message ?? '杠杆未调整');
+                return;
+              }
+              toast.success(`杠杆已调整为 ${plan.to}x`, {
+                description: plan.totalReleaseUsd > 1e-9
+                  ? `释放保证金 ${formatUSDT(plan.totalReleaseUsd)} USDT`
+                  : undefined,
+              });
+              setLeverageModal(null);
+            }}
+          />
+        );
+      })()}
       {tpslModal && (
         <TpSlModal
           pos={tpslModal.pos}

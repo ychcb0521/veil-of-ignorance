@@ -184,6 +184,8 @@ export function executeSettlementFill(
     entryPrice: fillPrice,
     quantity: normalized.quantity,
     leverage: normalized.leverage,
+    // 开仓杠杆快照：leverage 会被「调整杠杆」改写，这个不会。
+    openLeverage: normalized.leverage,
     marginMode: normalized.marginMode,
     settlementMode: normalized.settlementMode ?? "usdt",
     settlementAsset: normalized.settlementAsset ?? "USDT",
@@ -314,7 +316,7 @@ export function settlePositionClose(
       exitPrice: fillPrice,
       quantity: closeQty,
       contracts: isCoinSettled(pos) ? closeQty : undefined,
-      leverage: pos.leverage,
+      leverage: pos.openLeverage ?? pos.leverage,
       pnl: netPnl,
       pnlCoin,
       feeCoin,

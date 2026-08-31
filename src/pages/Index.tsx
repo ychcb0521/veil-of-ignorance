@@ -117,6 +117,7 @@ const Index = () => {
     handleCancelOrder,
     handlePlaceTpSl,
     applyAttachedTpSl,
+    applySymbolLeverage,
     settleFillDebit,
     executeReduceOnlyTrigger,
     handleAdjustMargin,
@@ -2178,6 +2179,7 @@ const Index = () => {
                     onClosePosition={handleClosePositionForSymbol}
                     onCancelOrder={handleCancelOrderForSymbol}
                     onAdjustMargin={handleAdjustMargin}
+                    onApplySymbolLeverage={applySymbolLeverage}
                     availableBalance={getEffectiveAvailable(activeSymbol)}
                     balance={balance}
                     initialCapital={profile?.initial_capital ?? 1_000_000}

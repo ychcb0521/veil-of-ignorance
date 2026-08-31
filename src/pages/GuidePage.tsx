@@ -1957,6 +1957,11 @@ P 不再一把手填，而是拆成三个更可回答的问题：<strong>「这�
                     <td className="px-3 py-2 border-t border-border">此前每一笔成交各建一个仓位，逐仓强平按「<strong>任一腿</strong>净值 ≤ 维持保证金」判——于是加仓会被<strong>自己的</strong>强平价单独打掉，而健康的主力明明还有盈余可以扛住它。实盘 COAIUSDT 2026-06-13：主力开仓 0.538058（强平 0.491100）、加仓 0.604447（强平 <strong>0.551695</strong>），价格触及 0.542220 把<strong>加仓整条打掉</strong>，主力毫发无损；合并后加权开仓价 0.581748、强平价 <strong>0.530977</strong>，0.542220 根本不该触发任何强平。单向持仓的正确判据是「<strong>各腿净值之和</strong> ≤ 维持保证金之和」，健康腿的盈余本来就该拿来扛住加仓。另注：反向合约的强平价是 E·L(1+mmr)/(L+1)，与线性的 E(1−1/L+mmr) 在 10x 上差 0.9%。</td>
                   </tr>
                   <tr>
+                    <td className="px-3 py-2 border-t border-border font-medium">调整杠杆</td>
+                    <td className="px-3 py-2 border-t border-border">持仓卡上的<strong>「杠杆」</strong>按钮与下单面板的杠杆按钮是<strong>同一个对话框</strong>，改动会<strong>同时重述该标的的持仓、挂单与余额</strong>——所以「下单模块改了杠杆，持仓也跟着改」是结构上成立的，不存在只改一边的路径。提杠杆 = 降低保证金地板 = <strong>释放保证金回余额</strong>（释放额 = 名义 ×(1/L₁ − 1/L₂)，按<strong>开仓价</strong>折算）。名义、张数、开仓价一概不动。确认前会显示保证金与<strong>强平价的前后对比</strong>、释放额、档位上限。四道守卫：立即触发强平则拒绝、逐仓有持仓时<strong>只能升不能降</strong>（滑块下限直接卡死）、按该标的<strong>总</strong>敞口查档位上限、取不到标记价则拒绝。</td>
+                    <td className="px-3 py-2 border-t border-border">这正是上文「用提杠杆换加仓弹药」的机制：释放出来的保证金就是新增的可用资金。三件事必须在同一次写入里完成，否则任一交错都是缺陷——<strong>只改杠杆不退钱</strong>会让保证金地板下降而钱还在仓位里，凭空多出一笔「可减保证金」，用户能从调整保证金弹窗里提走、每提一档再来一次；<strong>只退钱不改杠杆</strong>则让用户自己追加的保证金变得取不出来；<strong>不改挂单</strong>则下一笔成交按旧杠杆建仓，而合并键把杠杆算在内，拖一下滑块就多出一张卡。另：平仓记录写的是<strong>开仓时</strong>的杠杆快照，否则中途提一次杠杆再平仓，战役的「初始杠杆」会被追溯改写、R 倍数虚高。</td>
+                  </tr>
+                  <tr>
                     <td className="px-3 py-2 border-t border-border font-medium">默认结算方式</td>
                     <td className="px-3 py-2 border-t border-border">新标的下单<strong>默认币本位</strong>；下单面板顶部那颗「U本位 / 币本位」标签可随时切换，一旦为某个标的选过，此后就记住你的选择。</td>
                     <td className="px-3 py-2 border-t border-border">本系统的主仓打法以币本位为主。<strong>已有的历史记录不受影响</strong>——缺少该字段的旧单子一律仍按 U 本位解读，否则等于事后改写过去交易的含义，连带污染战役的保证金、R 倍数与统计。</td>

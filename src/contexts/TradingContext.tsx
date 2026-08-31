@@ -73,6 +73,7 @@ import { formatPrice, getPriceDecimals } from '@/lib/formatters';
 import { buildTpSlOrders, keepValidTpSlLegs, replaceTpSlOrders, validateTpSlLevels } from '@/lib/tpSlOrders';
 import { removableMarginUsd } from '@/lib/positionGroupRisk';
 import { evaluateFillAffordability, fillCostUsd } from '@/lib/fillAffordability';
+import { planLeverageChange, type LeverageChangePlan } from '@/lib/leverageRestatement';
 import type { PositionMergeResult } from '@/lib/tradingSettlement';
 import { orderReferencePrice } from '@/lib/orderReferencePrice';
 import {
@@ -182,6 +183,8 @@ interface TradingState {
   handleClosePosition: (symbol: string, index: number, percentage?: number, method?: 'manual' | 'sl' | 'tp1' | 'tp2' | 'tp3' | 'liquidation') => void;
   handleCancelOrder: (symbol: string, orderId: string) => void;
   handlePlaceTpSl: (symbol: string, pos: Position, tp: number | null, sl: number | null, pct: number) => void;
+  /** 调整标的杠杆：持仓、挂单、余额一起重述；被拒绝时返回原因，不做任何写入。 */
+  applySymbolLeverage: (symbol: string, nextLeverage: number) => LeverageChangePlan;
   /**
    * 成交时扣款；付不起就撤单留痕并返回 false。
    * 必须严格排在减仓分支**之后**——止盈止损是**退还**保证金的，绝不能被这道闸门拦住。
@@ -456,6 +459,8 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
   }, []);
   const [quantityPrecision, setQuantityPrecision] = useState(3);
   const [leverageMap, setLeverageMap] = usePersistedState<Record<string, number>>('symbol_leverage', {});
+  const leverageMapRef = useRef(leverageMap);
+  leverageMapRef.current = leverageMap;
   const [marginModeMap, setMarginModeMap] = usePersistedState<Record<string, MarginMode>>('symbol_margin_mode', {});
   const [settlementModeMap, setSettlementModeMap] = usePersistedState<Record<string, SettlementMode>>('symbol_settlement_mode', {});
 
@@ -800,7 +805,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
           type: 'FUNDING' as any, action: 'FUNDING',
           entryPrice: price, exitPrice: 0,
           quantity: getPositionUnits(pos), contracts: isCoinSettled(pos) ? getPositionUnits(pos) : undefined,
-          leverage: pos.leverage,
+          leverage: pos.openLeverage ?? pos.leverage,
           pnl: amount, fee: Math.abs(fee), slippage: 0,
           feeCoin, notionalUsd: notional,
           settlementMode: pos.settlementMode, settlementAsset: pos.settlementAsset,
@@ -858,7 +863,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
           type: 'MARKET' as OrderType, action: 'LIQUIDATION' as const,
           entryPrice: pos.entryPrice, exitPrice: price,
           quantity: getPositionUnits(pos), contracts: isCoinSettled(pos) ? getPositionUnits(pos) : undefined,
-          leverage: pos.leverage,
+          leverage: pos.openLeverage ?? pos.leverage,
           pnl: pnl - closeFee - liqFee, fee: closeFee + liqFee, slippage: 0,
           feeCoin, notionalUsd: notional,
           settlementMode: pos.settlementMode, settlementAsset: pos.settlementAsset,
@@ -932,7 +937,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
               type: 'MARKET' as OrderType, action: 'LIQUIDATION' as const,
               entryPrice: pos.entryPrice, exitPrice: price,
               quantity: getPositionUnits(pos), contracts: isCoinSettled(pos) ? getPositionUnits(pos) : undefined,
-              leverage: pos.leverage,
+              leverage: pos.openLeverage ?? pos.leverage,
               pnl: pnl - closeFee - liqFee, fee: closeFee + liqFee, slippage: 0,
               feeCoin, notionalUsd: notional,
               settlementMode: pos.settlementMode, settlementAsset: pos.settlementAsset,
@@ -1117,6 +1122,55 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
       return { ...prev, [symbol]: next };
     });
   }, [setOrdersMap]);
+
+  /**
+   * 调整一个标的的杠杆——**持仓、挂单、余额在同一次写入里一起动**。
+   *
+   * 三件事必须原子完成，任何一种交错都是缺陷：
+   *   · 只写 leverage 不动保证金 → 地板下降而钱没退，凭空多出「可减保证金」，
+   *     用户能从调整保证金弹窗里把它提走，而且每提一档再来一次；
+   *   · 只动保证金不写 leverage → 地板没变而钱退了，用户自己追加的保证金变得取不出来；
+   *   · 不改挂单 → 下一笔成交按旧杠杆建仓，而合并键把杠杆算在内，
+   *     于是拖一下滑块就多出一张卡。
+   *
+   * 方向是单向的：leverageMap → 持仓 + 挂单。持仓永不反向写回 leverageMap。
+   */
+  const applySymbolLeverage = useCallback((symbol: string, nextLeverage: number): LeverageChangePlan => {
+    const positions = (positionsMapRef.current[symbol] || []).filter(isPositionOpen);
+    const orders = ordersMapRef.current[symbol] || [];
+    const plan = planLeverageChange({
+      symbol,
+      positions,
+      orders,
+      markPrice: priceMapRef.current[symbol] || 0,
+      currentLeverage: leverageMapRef.current[symbol] ?? 35,
+      nextLeverage,
+    });
+    if (!plan.ok) return plan;
+
+    setSymbolLeverage(symbol, plan.to);
+
+    if (plan.legs.length > 0) {
+      const byId = new Map(plan.legs.map(l => [l.positionId, l.next] as const));
+      setPositionsMap(prev => ({
+        ...prev,
+        [symbol]: (prev[symbol] || []).map(p => byId.get(p.id) ?? p),
+      }));
+      // 释放出来的保证金回到余额。提杠杆之所以能换来加仓弹药，就是这一步。
+      if (Math.abs(plan.totalReleaseUsd) > 1e-9) {
+        setBalance(prev => prev + plan.totalReleaseUsd);
+      }
+    }
+
+    if (plan.restatedOrderIds.length > 0) {
+      const ids = new Set(plan.restatedOrderIds);
+      setOrdersMap(prev => ({
+        ...prev,
+        [symbol]: (prev[symbol] || []).map(o => (ids.has(o.id) ? { ...o, leverage: plan.to } : o)),
+      }));
+    }
+    return plan;
+  }, [setSymbolLeverage, setPositionsMap, setBalance, setOrdersMap]);
 
   // ===== Place Order (with strict accounting enforcement — single global pool) =====
   const handlePlaceOrder = useCallback((symbol: string, order: PlaceOrderParams): { id: string } | null => {
@@ -1595,7 +1649,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
       positionId: pos.id,
       action: 'CLOSE' as const, entryPrice: pos.entryPrice, exitPrice: fillPrice,
       quantity: closeQty, contracts: isCoinSettled(pos) ? closeQty : undefined,
-      leverage: pos.leverage,
+      leverage: pos.openLeverage ?? pos.leverage,
       pnl: pnlUsd - feeUsd, pnlCoin, feeCoin,
       fee: feeUsd, slippage: slippageUsd, notionalUsd,
       settlementMode: pos.settlementMode, settlementAsset: pos.settlementAsset,
@@ -1894,7 +1948,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
     getSymbolMarginMode, setSymbolMarginMode,
     getSymbolSettlementMode, setSymbolSettlementMode,
     activeSymbols,
-    handlePlaceOrder, handleClosePosition, handleCancelOrder, handlePlaceTpSl, applyAttachedTpSl, settleFillDebit, executeReduceOnlyTrigger,
+    handlePlaceOrder, handleClosePosition, handleCancelOrder, handlePlaceTpSl, applyAttachedTpSl, settleFillDebit, applySymbolLeverage, executeReduceOnlyTrigger,
     handleAdjustMargin, handleClearSymbolData,
     fundingRate: FUNDING_RATE,
     liquidationOpen, liquidationDetails, closeLiquidationModal,

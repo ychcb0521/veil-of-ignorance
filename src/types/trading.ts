@@ -217,6 +217,14 @@ export interface Position {
   /** Simulated clock time when this position was opened */
   openTime?: number;
   /**
+   * 开仓那一刻的杠杆，**永不重述**。
+   *
+   * leverage 会被「调整杠杆」改写，而平仓记录写的是 pos.leverage——
+   * 于是持仓中途提一次杠杆再平仓，战役的「初始杠杆」会被**追溯改写**成提高后的值，
+   * 连带 R 倍数与预期最大亏损全部虚高。旧数据没有这个字段时退回 leverage。
+   */
+  openLeverage?: number;
+  /**
    * 构成这个仓位的每一笔成交。**fills[0].id 恒等于 position.id**。
    *
    * 同标的同方向的成交会合并成一个仓位（币安单向持仓模式就是这样），
