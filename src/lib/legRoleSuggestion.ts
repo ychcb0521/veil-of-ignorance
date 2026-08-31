@@ -175,6 +175,10 @@ export interface OrphanRecordRoleInput {
   exitMethod?: string | null;
   /** 这一片属于哪一笔成交；合并仓位的一次平仓会拆成多片。缺省时按 id 自成一组。 */
   fillId?: string | null;
+  /** 开仓价。镜像与主力**同价**开出，加仓必然不同价——这是两者的分水岭。 */
+  entryPrice?: number | null;
+  /** 名义或数量（同一战役内单位一致即可）。只用来看 60/40 分割，不参与金额计算。 */
+  size?: number | null;
 }
 
 export interface OrphanRecordRoleSuggestion {
@@ -244,6 +248,49 @@ export function suggestOrphanRecordRoles(
   const effectiveClose = (record: OrphanRecordRoleInput): number =>
     record.closeTimeMs != null && record.closeTimeMs > 0 ? record.closeTimeMs : Number.POSITIVE_INFINITY;
 
+  /**
+   * 结构性地认出镜像止盈——**不依赖 exit_method**。
+   *
+   * 从币安导入的裸 record 没有 exit_method，原来只认 `exitMethod === 'tp1'`，
+   * 于是镜像整批掉进兜底分支被当成加仓。而加仓一旦被当成 mirror_tp（或反过来），
+   * mirror_tp 是计入 ex-ante 开仓敞口的，加仓的名义会从这扇错门混进风险口径。
+   *
+   * 真正的分水岭是**什么时候开的**，不是怎么平的：
+   *   · 镜像：与主力**同一刻、同一价**开出（策略模板写的就是「开主力单时同时挂」），然后**先平**
+   *   · 加仓：**后来**才开，价格**必然不同**（同价就没有加仓的理由）
+   *
+   * 实盘 TURBOUSDT 2025-04-23：两笔同为 11:31:07 开、同为 0.0034，
+   * 一笔 12:19 平（822,920）、一笔 15:08 平（548,620）——822920/1371540 = 60.0%，
+   * 正是策略写死的 60% 镜像 / 40% 主力。加仓不会长成这个形状。
+   */
+  const OPEN_TOLERANCE_MS = 120_000;   // 同一批委托挂出的时间窗
+  const PRICE_TOLERANCE = 0.01;        // 同价（留出滑点）
+  const MIRROR_SHARE = 0.6;            // 策略写死的镜像占比
+
+  const samePrice = (a: number | null | undefined, b: number | null | undefined): boolean => {
+    if (!(typeof a === 'number' && Number.isFinite(a) && a > 0)) return false;
+    if (!(typeof b === 'number' && Number.isFinite(b) && b > 0)) return false;
+    return Math.abs(a - b) <= Math.max(a, b) * PRICE_TOLERANCE;
+  };
+
+  /**
+   * 找出「这一笔是谁的镜像」：同向、同刻、同价，而对方**活得更久**。
+   * 用「存在这样的兄弟」而不是「等于那个 mainId」，多笔主力各带镜像时也成立。
+   */
+  const mirrorHostOf = (record: OrphanRecordRoleInput): OrphanRecordRoleInput | null =>
+    records.find(other => other.id !== record.id
+      && other.direction === record.direction
+      && effectiveClose(other) > effectiveClose(record)
+      && Math.abs(other.openTimeMs - record.openTimeMs) <= OPEN_TOLERANCE_MS
+      && samePrice(other.entryPrice, record.entryPrice)) ?? null;
+
+  /** 60/40 分割对上了就给高置信度，对不上仍然判镜像但降一档。 */
+  const splitMatches = (record: OrphanRecordRoleInput, host: OrphanRecordRoleInput): boolean => {
+    const a = Number(record.size), b = Number(host.size);
+    if (!(Number.isFinite(a) && a > 0 && Number.isFinite(b) && b > 0)) return false;
+    return Math.abs(a / (a + b) - MIRROR_SHARE) <= 0.05;
+  };
+
   const sameDirection = records.filter(record => record.direction === mainDirection);
   let mainId: string | null = null;
   for (const record of sameDirection) {
@@ -288,6 +335,20 @@ export function suggestOrphanRecordRoles(
         suggestedRole: 'mirror_tp',
         confidence: 'high',
         reason: '以「止盈1」平仓 = 镜像止盈落袋',
+      });
+      continue;
+    }
+    // 裸 record 没有 exit_method，改用结构判据：与主力同刻同价开出、且先平。
+    const host = mirrorHostOf(record);
+    if (host != null) {
+      const split = splitMatches(record, host);
+      out.push({
+        id: record.id,
+        suggestedRole: 'mirror_tp',
+        confidence: split ? 'high' : 'medium',
+        reason: split
+          ? '与主力同刻同价开出、先行平仓，且占比 ≈ 60% = 镜像止盈'
+          : '与主力同刻同价开出并先行平仓 = 镜像止盈（占比未落在 60% 附近，请确认）',
       });
       continue;
     }

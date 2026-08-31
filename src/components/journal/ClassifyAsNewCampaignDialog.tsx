@@ -165,6 +165,11 @@ export function ClassifyAsNewCampaignDialog({ open, onOpenChange, items, onCreat
           // fillId 不传的话 legRoleSuggestion 里 `r.fillId ?? r.id` 恒等于 r.id,
           // `groups.size !== records.length` 恒为假,整段按成交分组是死代码。
           fillId: item.record.fillId ?? null,
+          // 开仓价与仓位是认出镜像止盈的判据：镜像与主力同刻同价开出、占 60%，
+          // 加仓则后开、异价。不传的话镜像会被当成加仓，而 mirror_tp 计入开仓敞口，
+          // 判错会让加仓的名义从错门混进风险口径。
+          entryPrice: itemEntryPrice(item),
+          size: itemPositionSize(item),
           direction: itemDirection(item),
           openTimeMs: item.record.openTime || 0,
           closeTimeMs: item.record.closeTime || null,
