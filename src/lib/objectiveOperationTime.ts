@@ -23,17 +23,46 @@ function recordRecency(record: TradeRecord): number {
  */
 export function buildTradeRecordLookup(records: TradeRecord[]): Map<string, TradeRecord> {
   const lookup = new Map<string, TradeRecord>();
+  const latestByFill = new Map<string, TradeRecord>();
   const latestByPosition = new Map<string, TradeRecord>();
+
+  const newer = (candidate: TradeRecord, current: TradeRecord | undefined) =>
+    !current || recordRecency(candidate) > recordRecency(current);
 
   for (const record of records) {
     lookup.set(record.id, record);
+    if (record.fillId && newer(record, latestByFill.get(record.fillId))) {
+      latestByFill.set(record.fillId, record);
+    }
     if (!record.positionId) continue;
+    /**
+     * 仓位 id 必须解析到**主力那一片**,不是「最近的那一片」。
+     *
+     * 同向成交在持仓期合并成一个仓位(爆仓要按整仓算),平仓时按每笔成交各写一条记录,
+     * 它们的 positionId 全都是存活仓位的 id、closeTime 又完全相等——
+     * 于是 `recordRecency(record) > recordRecency(current)` 永远不成立,
+     * 留下的是**数组里先出现的那条**。主力腿读到谁的开仓价取决于记录顺序,
+     * 而预期最大亏损 L = 跌幅 × 敞口 的两个因子都从这条记录取:
+     * 读到加仓那片就等于拿加仓的开仓价和数量去给主力的风险定价。
+     *
+     * 不变量 fills[0].id === position.id 给了确定的判据:
+     * fillId 等于仓位 id 的那一片就是**合并之前的主力单**。
+     */
     const current = latestByPosition.get(record.positionId);
-    if (!current || recordRecency(record) > recordRecency(current)) {
+    const isMainFill = record.fillId === record.positionId;
+    const currentIsMainFill = current != null && current.fillId === current.positionId;
+    if (current == null
+      || (isMainFill && !currentIsMainFill)
+      || (isMainFill === currentIsMainFill && newer(record, current))) {
       latestByPosition.set(record.positionId, record);
     }
   }
 
+  // 成交 id 优先于仓位 id:加仓腿存的是这笔成交自己的 id,
+  // 顺序与 claimRecordsByLeg / lookupJournalForRecord 的三级完全一致。
+  for (const [fillId, record] of latestByFill) {
+    if (!lookup.has(fillId)) lookup.set(fillId, record);
+  }
   for (const [positionId, record] of latestByPosition) {
     if (!lookup.has(positionId)) lookup.set(positionId, record);
   }
