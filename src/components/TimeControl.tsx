@@ -570,7 +570,7 @@ export function TimeControl({
             ) : (
               <div className="overflow-hidden rounded border border-border/60">
                 {/* 表头：与行共用同一套列宽，四列各有名分，不再靠位置猜 */}
-                <div className="grid grid-cols-[minmax(108px,148px)_128px_minmax(0,1fr)_auto_74px] items-center gap-2 border-b border-border/60 bg-muted/40 px-2 py-1 pr-[56px] text-[9px] leading-3 font-medium text-muted-foreground">
+                <div className="grid grid-cols-[minmax(108px,148px)_128px_minmax(0,160px)_auto_74px_minmax(0,1fr)] items-center gap-2 border-b border-border/60 bg-muted/40 px-2 py-1 pr-[56px] text-[9px] leading-3 font-medium text-muted-foreground">
                   <span className="grid grid-cols-[12px_minmax(0,1fr)] items-center gap-1">
                     <span aria-hidden />
                     <SortHeader label="标的" active={sortKey === 'symbol'} dir={sortDir} onClick={() => toggleSort('symbol')} />
@@ -579,6 +579,9 @@ export function TimeControl({
                   <span>兜底区</span>
                   <span className="w-5" aria-hidden />
                   <SortHeader label="评分" active={sortKey === 'quality'} dir={sortDir} onClick={() => toggleSort('quality')} />
+                  {/* 吸收剩余宽度的空列。放在评分**之后**——之前它在兜底区那一列，
+                      于是兜底区把所有余量吃掉、评分被顶到最右边去了。 */}
+                  <span aria-hidden />
                 </div>
                 <div className="max-h-56 divide-y divide-border/30 overflow-y-auto overscroll-contain">
                 {sortedFiltered.map(sig => {
@@ -589,7 +592,7 @@ export function TimeControl({
                     <button
                       onClick={() => handleJumpSignal(sig)}
                       disabled={jumpingSignalId != null}
-                      className="grid flex-1 grid-cols-[minmax(108px,148px)_128px_minmax(0,1fr)_auto] items-center gap-2 overflow-hidden text-left disabled:cursor-wait disabled:opacity-70"
+                      className="grid shrink-0 grid-cols-[minmax(108px,148px)_128px_minmax(0,160px)_auto] items-center gap-2 overflow-hidden text-left disabled:cursor-wait disabled:opacity-70"
                       title={sig.jumpIssue?.reason ?? `跳转到 ${sig.symbol} @ ${sig.timeLabel}`}
                     >
                       {/* 标的：勾号在前，名称可截断但列宽足够放下常见长度 */}
@@ -645,6 +648,8 @@ export function TimeControl({
                         onChange={(next) => handleRateSignal(sig.id, next)}
                       />
                     </span>
+                    {/* 余量放在评分之后，评分才会紧贴兜底区 */}
+                    <span className="min-w-0 flex-1" aria-hidden />
                     <button
                       onClick={() => handleJumpSignal(sig)}
                       disabled={jumpingSignalId != null}
