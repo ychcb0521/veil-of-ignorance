@@ -394,6 +394,68 @@ function positionIdentity(
 }
 
 /**
+ * 同一笔仓位的**全部别名**，而不是只有「胜出的那一个」。
+ *
+ * 事故 BMTUSDT 2025-04-28：开仓敞口显示 13,543,000，恰好是真值 6,771,500 的 **2.000 倍**，
+ * 预期最大亏损 564,753 而不是 282,372，盈亏比因此从 29.6% 塌成 14.8%。
+ *
+ * 敞口有两条来源——`legs` 与 `actual_evolution` 事件流——靠 positionIdentity 去重。
+ * 但同一笔仓位从两条路走出来的字符串可以不一样：
+ *   · 腿这边关联得到记录  → `record:rm`
+ *   · 事件那边只有 journal_id、`trade_record_id` 还是 null → `journal:m`
+ * 回填流程正是「先建 journal、发事件、**再**关联记录」，发事件那一刻 ref 还是空的，
+ * 于是留下一个对不上的别名，同一笔仓位进账两次。
+ *
+ * 「恰好 2.000 倍」这个整数比本身就是判据：价格、滑点、精度的误差不会给出整洁的 2。
+ *
+ * 登记全部别名之后，任一别名撞上就算见过——两条路径从此不可能各记一次。
+ */
+function positionIdentityAliases(
+  record: TradeRecord | null,
+  recordReference: string | null | undefined,
+  journalId: string | null | undefined,
+  fallback: string,
+): string[] {
+  const keys = [
+    resolvedRecordIdentity(record),
+    recordReference ? `record-ref:${recordReference}` : null,
+    // 记录自带的 id 也要登记：腿按 ref 找到它、事件按 record.id 找到它，两边要能对上。
+    record?.id ? `record-ref:${record.id}` : null,
+    journalId ? `journal:${journalId}` : null,
+  ].filter((k): k is string => Boolean(k));
+  return keys.length > 0 ? keys : [fallback];
+}
+
+/**
+ * 内容别名：当两条路径**一个 id 都不共享**时的最后一道链接。
+ *
+ * 形状 (c)：腿没有 trade_record_id（用户手工建的腿），而记录派生的事件
+ * `journal_id` 恒为 null（见 campaignEventFromTradeRecord）——两边的 id 别名集合
+ * 交集为空，纯靠 id 永远对不上，同一笔仓位仍会记两次。
+ *
+ * 用「角色 + 名义 + 开仓分钟」作内容指纹。之所以够安全：本函数只服务
+ * INITIAL_MAIN_EXPOSURE_ROLES（main_open / mirror_tp），而这套策略里
+ * 同一分钟内不可能开出两笔角色相同、名义又分毫不差的仓位——那本来就是同一笔。
+ * 价格**不进**指纹：腿存的是 pre_entry_price、事件存的是成交价，两者可以差一个滑点。
+ */
+function positionShapeKey(
+  role: string | null | undefined,
+  notional: number,
+  timeMs: number | null,
+): string | null {
+  if (!role || !Number.isFinite(notional) || !(notional > 0)) return null;
+  if (timeMs == null || !Number.isFinite(timeMs) || timeMs <= 0) return null;
+  return `shape:${role}|${Math.round(notional)}|${Math.floor(timeMs / 60_000)}`;
+}
+
+/** 见过任一别名就算见过；否则把全部别名登记进去。 */
+function claimPositionOnce(seen: Set<string>, aliases: string[]): boolean {
+  if (aliases.some(key => seen.has(key))) return false;
+  for (const key of aliases) seen.add(key);
+  return true;
+}
+
+/**
  * Resolve the full opening exposure before the mirror TP closes. This is the
  * initial M position plus every initial mirror position on the same side. Later
  * additions/re-entries and reverse hedges are deliberately excluded. Event
@@ -411,6 +473,8 @@ function resolveInitialMainExposureNotional(
   const recordLookup = buildTradeRecordLookup(tradeRecords);
   const settlement = settlementRecordsOf(tradeRecords);
   const notionals = new Map<string, number>();
+  // 别名集合与 notionals 分开：一笔仓位可能有多个别名，但只该记一次账。
+  const seenPositions = new Set<string>();
 
   const mainNotional = firstPositiveNumber(
     openingNotionalUsd(mainLeg?.trade_record_id, settlementRecordsOf(tradeRecords)),
@@ -419,15 +483,13 @@ function resolveInitialMainExposureNotional(
     campaign.initial_main_size_usdt,
   );
   if (mainNotional != null) {
-    notionals.set(
-      positionIdentity(
-        mainRecord,
-        mainLeg?.trade_record_id ?? mainEvent?.trade_record_id,
-        mainLeg?.id ?? mainEvent?.journal_id,
-        mainEvent ? `event:${mainEvent.id}` : 'campaign:initial-main',
-      ),
-      mainNotional,
+    const mainAliases = positionIdentityAliases(
+      mainRecord,
+      mainLeg?.trade_record_id ?? mainEvent?.trade_record_id,
+      mainLeg?.id ?? mainEvent?.journal_id,
+      mainEvent ? `event:${mainEvent.id}` : 'campaign:initial-main',
     );
+    if (claimPositionOnce(seenPositions, mainAliases)) notionals.set(mainAliases[0], mainNotional);
   }
 
   for (const leg of legs) {
@@ -438,8 +500,12 @@ function resolveInitialMainExposureNotional(
       leg.pre_position_size,
     );
     if (notional == null) continue;
-    const identity = positionIdentity(record, leg.trade_record_id, leg.id, `journal:${leg.id}`);
-    if (!notionals.has(identity)) notionals.set(identity, notional);
+    const aliases = [
+      ...positionIdentityAliases(record, leg.trade_record_id, leg.id, `journal:${leg.id}`),
+      positionShapeKey(leg.leg_role, notional,
+        firstPositiveNumber(record?.openTime, toMs(leg.pre_simulated_time))),
+    ].filter((k): k is string => Boolean(k));
+    if (claimPositionOnce(seenPositions, aliases)) notionals.set(aliases[0], notional);
   }
 
   for (const event of [...(campaign.actual_evolution ?? [])]
@@ -453,13 +519,12 @@ function resolveInitialMainExposureNotional(
       event.size_usdt,
     );
     if (notional == null) continue;
-    const identity = positionIdentity(
-      record,
-      event.trade_record_id,
-      event.journal_id,
-      `event:${event.id}`,
-    );
-    if (!notionals.has(identity)) notionals.set(identity, notional);
+    const aliases = [
+      ...positionIdentityAliases(record, event.trade_record_id, event.journal_id, `event:${event.id}`),
+      positionShapeKey(event.leg_role, notional,
+        firstPositiveNumber(record?.openTime, toMs(event.timestamp))),
+    ].filter((k): k is string => Boolean(k));
+    if (claimPositionOnce(seenPositions, aliases)) notionals.set(aliases[0], notional);
   }
 
   const total = Array.from(notionals.values()).reduce((sum, notional) => sum + notional, 0);
@@ -501,9 +566,11 @@ function groupInitialMainExposure(
       leg.pre_position_size,
     );
     if (notional == null) continue;
-    const identity = positionIdentity(record, leg.trade_record_id, leg.id, `journal:${leg.id}`);
-    if (seen.has(identity)) continue;
-    seen.add(identity);
+    if (!claimPositionOnce(seen, [
+      ...positionIdentityAliases(record, leg.trade_record_id, leg.id, `journal:${leg.id}`),
+      positionShapeKey(leg.leg_role, notional,
+        firstPositiveNumber(record?.openTime, toMs(leg.pre_simulated_time))),
+    ].filter((k): k is string => Boolean(k)))) continue;
     // 主力自己就是自己的组;镜像按开仓时刻归属。
     const owner = leg.leg_role === 'main_open'
       ? leg
@@ -521,9 +588,11 @@ function groupInitialMainExposure(
       event.size_usdt,
     );
     if (notional == null) continue;
-    const identity = positionIdentity(record, event.trade_record_id, event.journal_id, `event:${event.id}`);
-    if (seen.has(identity)) continue;
-    seen.add(identity);
+    if (!claimPositionOnce(seen, [
+      ...positionIdentityAliases(record, event.trade_record_id, event.journal_id, `event:${event.id}`),
+      positionShapeKey(event.leg_role, notional,
+        firstPositiveNumber(record?.openTime, toMs(event.timestamp))),
+    ].filter((k): k is string => Boolean(k)))) continue;
     const owner = ownerAt(firstPositiveNumber(record?.openTime, toMs(event.timestamp)));
     add(owner?.id ?? null, notional);
   }
