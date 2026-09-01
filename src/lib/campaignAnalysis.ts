@@ -433,25 +433,59 @@ function positionIdentityAliases(
  * `journal_id` 恒为 null（见 campaignEventFromTradeRecord）——两边的 id 别名集合
  * 交集为空，纯靠 id 永远对不上，同一笔仓位仍会记两次。
  *
- * 用「角色 + 名义 + 开仓分钟」作内容指纹。之所以够安全：本函数只服务
- * INITIAL_MAIN_EXPOSURE_ROLES（main_open / mirror_tp），而这套策略里
- * 同一分钟内不可能开出两笔角色相同、名义又分毫不差的仓位——那本来就是同一笔。
- * 价格**不进**指纹：腿存的是 pre_entry_price、事件存的是成交价，两者可以差一个滑点。
+ * 上一版用「角色 + 名义取整 + 开仓分钟」拼成字符串做指纹，**方向错了**：
+ * 那是拿**精确哈希**去做**近似匹配**。哈希只能回答「完全相同吗」，而这里要问的是
+ * 「是不是同一笔仓位」。两条来源对时间的理解本就不同——回填事件带的往往是
+ * **归类那一刻**的时间戳（2026-09-01），不是开仓时刻（2025-04-29）；名义也可能差几毛钱。
+ * 实测三种形状仍然整整翻倍：事件时间戳取归类时刻、时间戳跨分钟桶边界差 2 秒、
+ * 名义差 1 USDT。等于只是把失效的门槛从「id 不同」挪到了「分钟不同」。
+ *
+ * 现在的判据分两层，且**腿是权威来源**：
+ *   · 腿：只按 id 别名去重，**绝不做内容合并**。腿有几条就是几笔——
+ *     两笔名义恰好相同的主力是合法的（多主力战役），内容合并会把它们吃掉一条。
+ *   · 事件：先按 id 别名认领；认不上再按「同角色 + 名义相对误差 ≤ 0.1%」认领已有的那一笔。
+ *     两者都认不上才算一笔新仓位——那对应「腿已不在、只剩事件流」的老战役。
+ * 时间彻底不进判据：它在两条来源之间系统性地不一致，只会制造假阴性。
  */
-function positionShapeKey(
-  role: string | null | undefined,
-  notional: number,
-  timeMs: number | null,
-): string | null {
-  if (!role || !Number.isFinite(notional) || !(notional > 0)) return null;
-  if (timeMs == null || !Number.isFinite(timeMs) || timeMs <= 0) return null;
-  return `shape:${role}|${Math.round(notional)}|${Math.floor(timeMs / 60_000)}`;
+interface ClaimedPosition {
+  aliases: Set<string>;
+  role: string;
+  notional: number;
 }
 
-/** 见过任一别名就算见过；否则把全部别名登记进去。 */
-function claimPositionOnce(seen: Set<string>, aliases: string[]): boolean {
-  if (aliases.some(key => seen.has(key))) return false;
-  for (const key of aliases) seen.add(key);
+/** 名义相对误差 0.1%：够吸收滑点与取整，又远小于两笔真实仓位之间的差距。 */
+const NOTIONAL_MATCH_TOLERANCE = 1e-3;
+
+function sameNotional(a: number, b: number): boolean {
+  return Math.abs(a - b) <= Math.max(1, Math.abs(a) * NOTIONAL_MATCH_TOLERANCE);
+}
+
+/**
+ * 认领一笔仓位。返回 true 表示这是**新的一笔**、该计入敞口。
+ * `allowContentMatch` 为 false 时只按 id 认领——腿那一侧用它。
+ */
+function claimPosition(
+  claimed: ClaimedPosition[],
+  aliases: string[],
+  role: string | null | undefined,
+  notional: number,
+  allowContentMatch: boolean,
+): boolean {
+  const existingById = claimed.find(item => aliases.some(key => item.aliases.has(key)));
+  if (existingById) {
+    for (const key of aliases) existingById.aliases.add(key);
+    return false;
+  }
+  if (allowContentMatch && role) {
+    const existingByShape = claimed.find(item =>
+      item.role === role && sameNotional(item.notional, notional));
+    if (existingByShape) {
+      // 把事件的 id 并进去，后续同一笔的其它事件可以直接按 id 命中。
+      for (const key of aliases) existingByShape.aliases.add(key);
+      return false;
+    }
+  }
+  claimed.push({ aliases: new Set(aliases), role: role ?? '', notional });
   return true;
 }
 
@@ -474,7 +508,7 @@ function resolveInitialMainExposureNotional(
   const settlement = settlementRecordsOf(tradeRecords);
   const notionals = new Map<string, number>();
   // 别名集合与 notionals 分开：一笔仓位可能有多个别名，但只该记一次账。
-  const seenPositions = new Set<string>();
+  const claimed: ClaimedPosition[] = [];
 
   const mainNotional = firstPositiveNumber(
     openingNotionalUsd(mainLeg?.trade_record_id, settlementRecordsOf(tradeRecords)),
@@ -483,28 +517,17 @@ function resolveInitialMainExposureNotional(
     campaign.initial_main_size_usdt,
   );
   if (mainNotional != null) {
-    // 这一支跑在两个循环**之前**，同样要登记内容指纹：只登记 id 别名的话，
-    // 主力的指纹从未进过集合，后面一条没有任何 id 的 main_opened 事件就会把它再记一次
-    // （实测 1.400×——多记的正好是一整笔主力）。
-    const mainAliases = [
-      ...positionIdentityAliases(
-        mainRecord,
-        mainLeg?.trade_record_id ?? mainEvent?.trade_record_id,
-        mainLeg?.id ?? mainEvent?.journal_id,
-        mainEvent ? `event:${mainEvent.id}` : 'campaign:initial-main',
-      ),
-      positionShapeKey(
-        mainLeg?.leg_role ?? 'main_open',
-        mainNotional,
-        firstPositiveNumber(
-          mainRecord?.openTime,
-          mainLeg ? toMs(mainLeg.pre_simulated_time) : null,
-          mainEvent ? toMs(mainEvent.timestamp) : null,
-          toMs(campaign.opened_at),
-        ),
-      ),
-    ].filter((k): k is string => Boolean(k));
-    if (claimPositionOnce(seenPositions, mainAliases)) notionals.set(mainAliases[0], mainNotional);
+    // 这一支跑在两个循环**之前**。它代表一条真实的主力腿，所以按「腿」处理：
+    // 只按 id 认领，不做内容合并；后面的事件才去认领它。
+    const mainAliases = positionIdentityAliases(
+      mainRecord,
+      mainLeg?.trade_record_id ?? mainEvent?.trade_record_id,
+      mainLeg?.id ?? mainEvent?.journal_id,
+      mainEvent ? `event:${mainEvent.id}` : 'campaign:initial-main',
+    );
+    if (claimPosition(claimed, mainAliases, mainLeg?.leg_role ?? 'main_open', mainNotional, false)) {
+      notionals.set(mainAliases[0], mainNotional);
+    }
   }
 
   for (const leg of legs) {
@@ -515,12 +538,12 @@ function resolveInitialMainExposureNotional(
       leg.pre_position_size,
     );
     if (notional == null) continue;
-    const aliases = [
-      ...positionIdentityAliases(record, leg.trade_record_id, leg.id, `journal:${leg.id}`),
-      positionShapeKey(leg.leg_role, notional,
-        firstPositiveNumber(record?.openTime, toMs(leg.pre_simulated_time))),
-    ].filter((k): k is string => Boolean(k));
-    if (claimPositionOnce(seenPositions, aliases)) notionals.set(aliases[0], notional);
+    // 腿是权威来源：只按 id 去重，绝不内容合并——
+    // 两笔名义恰好相同的主力是合法的（多主力战役），合并会吃掉一条。
+    const aliases = positionIdentityAliases(record, leg.trade_record_id, leg.id, `journal:${leg.id}`);
+    if (claimPosition(claimed, aliases, leg.leg_role, notional, false)) {
+      notionals.set(aliases[0], notional);
+    }
   }
 
   for (const event of [...(campaign.actual_evolution ?? [])]
@@ -534,12 +557,12 @@ function resolveInitialMainExposureNotional(
       event.size_usdt,
     );
     if (notional == null) continue;
-    const aliases = [
-      ...positionIdentityAliases(record, event.trade_record_id, event.journal_id, `event:${event.id}`),
-      positionShapeKey(event.leg_role, notional,
-        firstPositiveNumber(record?.openTime, toMs(event.timestamp))),
-    ].filter((k): k is string => Boolean(k));
-    if (claimPositionOnce(seenPositions, aliases)) notionals.set(aliases[0], notional);
+    // 事件可以按 id 或按内容（同角色 + 名义相近）认领已有的那一笔；
+    // 都认不上才算新的一笔——那是「腿已不在、只剩事件流」的老战役。
+    const aliases = positionIdentityAliases(record, event.trade_record_id, event.journal_id, `event:${event.id}`);
+    if (claimPosition(claimed, aliases, event.leg_role, notional, true)) {
+      notionals.set(aliases[0], notional);
+    }
   }
 
   const total = Array.from(notionals.values()).reduce((sum, notional) => sum + notional, 0);
@@ -563,7 +586,7 @@ function groupInitialMainExposure(
 ): Map<string, number> {
   const recordLookup = buildTradeRecordLookup(tradeRecords);
   const settlement = settlementRecordsOf(tradeRecords);
-  const seen = new Set<string>();
+  const claimed: ClaimedPosition[] = [];
   const groups = new Map<string, number>();
   const earliestKey = mainLegs[0]?.id ?? null;
 
@@ -581,11 +604,12 @@ function groupInitialMainExposure(
       leg.pre_position_size,
     );
     if (notional == null) continue;
-    if (!claimPositionOnce(seen, [
-      ...positionIdentityAliases(record, leg.trade_record_id, leg.id, `journal:${leg.id}`),
-      positionShapeKey(leg.leg_role, notional,
-        firstPositiveNumber(record?.openTime, toMs(leg.pre_simulated_time))),
-    ].filter((k): k is string => Boolean(k)))) continue;
+    // 腿是权威来源：只按 id 去重，绝不内容合并（见 claimPosition 上方那段）。
+    if (!claimPosition(
+      claimed,
+      positionIdentityAliases(record, leg.trade_record_id, leg.id, `journal:${leg.id}`),
+      leg.leg_role, notional, false,
+    )) continue;
     // 主力自己就是自己的组;镜像按开仓时刻归属。
     const owner = leg.leg_role === 'main_open'
       ? leg
@@ -603,11 +627,12 @@ function groupInitialMainExposure(
       event.size_usdt,
     );
     if (notional == null) continue;
-    if (!claimPositionOnce(seen, [
-      ...positionIdentityAliases(record, event.trade_record_id, event.journal_id, `event:${event.id}`),
-      positionShapeKey(event.leg_role, notional,
-        firstPositiveNumber(record?.openTime, toMs(event.timestamp))),
-    ].filter((k): k is string => Boolean(k)))) continue;
+    // 事件可按 id 或按内容认领已有的那一笔；都认不上才算新的一笔。
+    if (!claimPosition(
+      claimed,
+      positionIdentityAliases(record, event.trade_record_id, event.journal_id, `event:${event.id}`),
+      event.leg_role, notional, true,
+    )) continue;
     const owner = ownerAt(firstPositiveNumber(record?.openTime, toMs(event.timestamp)));
     add(owner?.id ?? null, notional);
   }

@@ -104,6 +104,47 @@ describe('ex-ante 敞口：不含加仓，也不重复计数', () => {
     }
   });
 
+  /**
+   * 【回归】这四种形状在「角色+名义取整+开仓分钟」那版指纹下**仍然整整翻倍**。
+   * 病根是拿**精确哈希**去做**近似匹配**：两条来源对时间的理解本就系统性不同——
+   * 回填事件带的往往是归类那一刻（2026-09-01），不是开仓时刻（2025-04-29）。
+   */
+  const stillDoubledShapes: Array<[string, CampaignEvent[]]> = [
+    ['事件时间戳取归类时刻，而非开仓时刻', [
+      ev('main_open', N_MAIN, E, '2026-09-01T17:47:00.000Z', null, null),
+      ev('mirror_tp', N_MIRROR, E, '2026-09-01T17:47:00.000Z', null, null)]],
+    ['事件时间戳跨分钟桶边界，只差 2 秒', [
+      ev('main_open', N_MAIN, E, '2025-04-29T07:21:01.000Z', null, null),
+      ev('mirror_tp', N_MIRROR, E, '2025-04-29T07:21:01.000Z', null, null)]],
+    ['事件名义差 1 USDT（滑点/取整）', [
+      ev('main_open', N_MAIN + 1, E, OPEN, null, null),
+      ev('mirror_tp', N_MIRROR + 1, E, OPEN, null, null)]],
+    ['事件名义差几毛钱', [
+      ev('main_open', N_MAIN + 0.4, E, OPEN, null, null),
+      ev('mirror_tp', N_MIRROR + 0.4, E, OPEN, null, null)]],
+  ];
+
+  it.each(stillDoubledShapes)('【回归】%s —— 仍须按同一笔认领', (_name, events) => {
+    const n = exposureOf(events)!;
+    expect(n).toBeCloseTo(TRUE_EXPOSURE, 0);
+    expect(n).not.toBeCloseTo(TRUE_EXPOSURE * 2, 0);
+  });
+
+  it('【判据】两笔名义恰好相同的主力**不得**被合并——多主力战役是合法的', () => {
+    // 内容认领只开给事件那一侧；腿是权威来源，有几条就是几笔。
+    // 合并会把敞口做小、L 做小、盈亏比做大，是往「风险更小」的方向错。
+    const twinLegs = [
+      leg('m1', 'main_open', N_MAIN, E, OPEN, 'r1'),
+      leg('m2', 'main_open', N_MAIN, E, '2025-04-29T08:40:00.000Z', 'r2'),
+    ];
+    const twinRecords = [
+      rec('r1', N_MAIN, E, OPEN, '2025-04-29T09:13:00.000Z'),
+      rec('r2', N_MAIN, E, '2025-04-29T08:40:00.000Z', '2025-04-29T09:13:00.000Z'),
+    ];
+    expect(computeInitialMainExposureNotional(campaign([]), twinLegs, twinRecords))
+      .toBeCloseTo(N_MAIN * 2, 0);
+  });
+
   it('滚动对冲同样不计入', () => {
     expect(exposureOf([])!).toBeLessThan(TRUE_EXPOSURE + N_HEDGE);
   });
