@@ -58,3 +58,48 @@ export function legendReservedRight({
    */
   return Math.max(0, Math.min(wanted, mainWidth - minLegendWidth));
 }
+
+/**
+ * 指标工具栏（指标/挂单/标记/指标标签）要距图表右边缘多远，才不被布局按钮组压住。
+ *
+ * 同一个病的第二次发作：布局按钮组在 MultiChartLayout 里 `absolute right-2`（距右 8px），
+ * 实测宽约 94px，于是占据右侧 8~102px；而指标工具栏在 CandlestickChart 里写死
+ * `right-12`（距右 48px）。48 < 102，必然重叠。
+ *
+ * 两个数字分处**父子两个组件**，谁也看不见谁，所以这个魔法数字从写下那天起就没对过。
+ * 改成实测之后，布局按钮组增删按钮（全屏时会多出「周期」「速度」两组）也自动跟随。
+ *
+ * 只在**竖直方向真的重叠**时才避让：2x2 布局下只有右上角那张图会被压到，
+ * 下面两张若也无脑内缩，会白白浪费半张图的横向空间。
+ */
+export interface ToolbarInsetInput {
+  /** 该图表相对定位容器的矩形。 */
+  wrapper: { top: number; right: number; bottom: number };
+  /** 布局按钮组的矩形；取不到（未挂载 / 不在这张图上方）时传 null。 */
+  controls: { top: number; left: number; bottom: number } | null;
+  /** 工具栏与按钮组之间留的空隙。 */
+  gap?: number;
+  /** 不重叠时的默认内缩。 */
+  fallback?: number;
+}
+
+export const TOOLBAR_CONTROLS_GAP = 8;
+export const TOOLBAR_DEFAULT_INSET = 8;
+
+export function toolbarInsetRight({
+  wrapper,
+  controls,
+  gap = TOOLBAR_CONTROLS_GAP,
+  fallback = TOOLBAR_DEFAULT_INSET,
+}: ToolbarInsetInput): number {
+  if (controls == null) return fallback;
+  const finite = [wrapper.top, wrapper.right, wrapper.bottom, controls.top, controls.left, controls.bottom];
+  if (finite.some(v => !Number.isFinite(v))) return fallback;
+
+  // 竖直不相交 → 不在这张图上方（2x2 的下面两张），不必内缩。
+  if (controls.bottom <= wrapper.top || controls.top >= wrapper.bottom) return fallback;
+  // 按钮组整个在这张图右侧之外 → 也不会压到。
+  if (controls.left >= wrapper.right) return fallback;
+
+  return Math.max(fallback, wrapper.right - controls.left + gap);
+}

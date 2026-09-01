@@ -42,3 +42,44 @@ describe('图例给工具栏预留的宽度', () => {
     }
   });
 });
+
+import { toolbarInsetRight, TOOLBAR_DEFAULT_INSET } from '@/lib/chartLegendReservation';
+
+/** 实测：布局按钮组 `right-2`、宽约 94px；图表容器右边缘 900。 */
+const WRAPPER = { top: 0, right: 900, bottom: 400 };
+const CONTROLS = { top: 4, left: 798, bottom: 28 };   // 900−8−94 = 798
+
+describe('指标工具栏躲开布局按钮组', () => {
+  it('【回归】写死的 right-12（48px）不够——按钮组占到 102px', () => {
+    const inset = toolbarInsetRight({ wrapper: WRAPPER, controls: CONTROLS });
+    expect(inset).toBe(900 - 798 + 8);      // 110
+    expect(inset).toBeGreaterThan(48);      // 原来的 right-12 会被压住
+  });
+
+  it('按钮组变宽（全屏时多出周期/速度两组）时自动跟随', () => {
+    const wide = toolbarInsetRight({ wrapper: WRAPPER, controls: { ...CONTROLS, left: 600 } });
+    expect(wide).toBe(308);
+  });
+
+  it('【判据】2x2 下面两张图不内缩——按钮组不在它们上方', () => {
+    // 无脑内缩会白白浪费半张图的横向空间。
+    const lower = { top: 410, right: 900, bottom: 800 };
+    expect(toolbarInsetRight({ wrapper: lower, controls: CONTROLS })).toBe(TOOLBAR_DEFAULT_INSET);
+  });
+
+  it('按钮组整个在这张图右侧之外时不内缩', () => {
+    expect(toolbarInsetRight({ wrapper: { top: 0, right: 440, bottom: 400 }, controls: CONTROLS }))
+      .toBe(TOOLBAR_DEFAULT_INSET);
+  });
+
+  it('取不到按钮组 / 尺寸未就绪时退回默认内缩', () => {
+    expect(toolbarInsetRight({ wrapper: WRAPPER, controls: null })).toBe(TOOLBAR_DEFAULT_INSET);
+    expect(toolbarInsetRight({ wrapper: { ...WRAPPER, right: NaN }, controls: CONTROLS }))
+      .toBe(TOOLBAR_DEFAULT_INSET);
+  });
+
+  it('永远不小于默认内缩', () => {
+    expect(toolbarInsetRight({ wrapper: WRAPPER, controls: { ...CONTROLS, left: 899 } }))
+      .toBeGreaterThanOrEqual(TOOLBAR_DEFAULT_INSET);
+  });
+});

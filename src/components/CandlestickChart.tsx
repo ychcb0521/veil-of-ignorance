@@ -40,7 +40,10 @@ import {
   type InteractionController,
 } from "@/lib/klineChartInteraction";
 import { buildAnalysisOrderPriceBounds } from "@/lib/analysisAutoFitPriceRange";
-import { legendReservedRight } from "@/lib/chartLegendReservation";
+import { legendReservedRight, toolbarInsetRight, TOOLBAR_DEFAULT_INSET as TOOLBAR_FALLBACK_INSET } from "@/lib/chartLegendReservation";
+
+/** 画布图例字号：与右上角按钮的 text-[10px] 对齐（klinecharts 默认 12）。 */
+const LEGEND_FONT_SIZE = 10;
 import {
   ANALYSIS_AUTO_FIT_BOUNDS_INDICATOR,
   registerAnalysisAutoFitBoundsIndicator,
@@ -1057,7 +1060,9 @@ function CandlestickChartComponent({
    * 绘图区宽度（不含右侧 Y 轴）与工具栏左边缘（换算到图表容器坐标）。
    */
   const legendToolbarRef = useRef<HTMLDivElement>(null);
+  const chartWrapperRef = useRef<HTMLDivElement>(null);
   const [legendOffsetRight, setLegendOffsetRight] = useState(0);
+  const [toolbarRight, setToolbarRight] = useState(TOOLBAR_FALLBACK_INSET);
 
   useEffect(() => {
     const toolbar = legendToolbarRef.current;
@@ -1067,6 +1072,22 @@ function CandlestickChartComponent({
     const measure = () => {
       const chart = chartRef.current;
       if (!chart) return;
+
+      // ① 工具栏先躲开右上角的布局按钮组（父组件里的，子组件看不见，只能实测）
+      const wrapperEl = chartWrapperRef.current;
+      const controlsEl = wrapperEl?.closest("[data-chart-layout-root]")
+        ?.querySelector("[data-chart-layout-controls]") as HTMLElement | null;
+      if (wrapperEl) {
+        const w = wrapperEl.getBoundingClientRect();
+        const c = controlsEl?.getBoundingClientRect() ?? null;
+        const inset = toolbarInsetRight({
+          wrapper: { top: w.top, right: w.right, bottom: w.bottom },
+          controls: c ? { top: c.top, left: c.left, bottom: c.bottom } : null,
+        });
+        setToolbarRight(prev => (Math.abs(prev - inset) < 1 ? prev : inset));
+      }
+
+      // ② 图例再躲开工具栏**移动之后**的实际左边缘
       const main = chart.getSize("candle_pane", DomPosition.Main) ?? chart.getSize();
       const mainWidth = main?.width ?? 0;
       if (!(mainWidth > 0)) return;
@@ -1082,7 +1103,7 @@ function CandlestickChartComponent({
     observer.observe(toolbar);
     observer.observe(container);
     return () => observer.disconnect();
-  }, [analysisMode]);
+  }, [analysisMode, indicators.length]);
 
   // ============================================================
   // Theme reactivity & Tooltip customization
@@ -1102,6 +1123,8 @@ function CandlestickChartComponent({
           ...baseStyle.candle.tooltip,
           // 给右上角工具栏让路：图例撞上按钮之前先换行（见上方 legendOffsetRight）
           offsetRight: legendOffsetRight,
+          // 与右上角按钮的 text-[10px] 对齐；klinecharts 默认 12，画布上比按钮明显更大。
+          text: { ...(baseStyle.candle.tooltip as { text?: object }).text, size: LEGEND_FONT_SIZE },
           custom: (data: any) => {
             const current = data.current;
             if (!current) return [];
@@ -1131,6 +1154,16 @@ function CandlestickChartComponent({
             ];
           },
         },
+      },
+    };
+
+    // 副图的指标图例(VOL(1) MA1:… / HV(20) 年化σ%:…)同样对齐，
+    // 只改主图会让两种字号并存，看起来像没改干净。
+    (styles as { indicator?: unknown }).indicator = {
+      ...(baseStyle as { indicator?: object }).indicator,
+      tooltip: {
+        ...((baseStyle as { indicator?: { tooltip?: object } }).indicator?.tooltip ?? {}),
+        text: { size: LEGEND_FONT_SIZE },
       },
     };
 
@@ -2078,7 +2111,7 @@ function CandlestickChartComponent({
       )}
 
       {/* Chart area with toolbar */}
-      <div className="flex-1 min-h-0 relative overflow-hidden">
+      <div ref={chartWrapperRef} className="flex-1 min-h-0 relative overflow-hidden">
         <div
           ref={containerRef}
           className="absolute inset-0"
@@ -2102,7 +2135,8 @@ function CandlestickChartComponent({
         {/* Right side: indicator buttons */}
         <div
           ref={legendToolbarRef}
-          className="absolute right-12 top-0 z-10 flex items-center gap-2 py-1.5 px-2 max-w-[60%] overflow-visible"
+          style={{ right: toolbarRight }}
+          className="absolute top-0 z-10 flex items-center gap-2 py-1.5 px-2 max-w-[60%] overflow-visible"
         >
           <button
             type="button"

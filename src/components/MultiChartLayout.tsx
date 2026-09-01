@@ -210,13 +210,17 @@ export function MultiChartLayout({
 
   return (
     <div
+      data-chart-layout-root
       className={
         isFullscreen
           ? "fixed inset-0 z-[9999] bg-white dark:bg-[#0b0e11] flex flex-col w-full h-full"
           : "h-full flex flex-col relative"
       }
     >
+      {/* 打标记供 CandlestickChart 实测避让——它的工具栏原来写死 right-12(48px)，
+          而这一组实测宽约 94px、占到 102px，必然被压住。见 chartLegendReservation。 */}
       <div
+        data-chart-layout-controls
         className={`absolute right-2 top-1 z-30 flex items-center ${
           isFullscreen
             ? "gap-2"
