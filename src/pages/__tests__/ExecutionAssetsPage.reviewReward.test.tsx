@@ -6,8 +6,6 @@ import ExecutionAssetsPage from '../ExecutionAssetsPage';
 const {
   mockReconcileCampaignRewards,
   mockReconcilePostTradeReviewRewards,
-  mockSettleCampaignMissingPenalties,
-  mockReconcileReviewMissingPenalties,
   mockListAllCampaigns,
   mockListJournals,
   mockListJournalsByTradeRecordId,
@@ -15,8 +13,6 @@ const {
 } = vi.hoisted(() => ({
   mockReconcileCampaignRewards: vi.fn(),
   mockReconcilePostTradeReviewRewards: vi.fn(),
-  mockSettleCampaignMissingPenalties: vi.fn(),
-  mockReconcileReviewMissingPenalties: vi.fn(),
   mockListAllCampaigns: vi.fn(async () => [{
     id: 'campaign-1',
     symbol: 'BTCUSDT',
@@ -139,8 +135,6 @@ vi.mock('@/contexts/TradingContext', () => ({
     tradeHistory: mockTradeHistory,
     reconcileCampaignRewards: mockReconcileCampaignRewards,
     reconcilePostTradeReviewRewards: mockReconcilePostTradeReviewRewards,
-    settleCampaignMissingPenalties: mockSettleCampaignMissingPenalties,
-    reconcileReviewMissingPenalties: mockReconcileReviewMissingPenalties,
   }),
 }));
 
@@ -173,7 +167,9 @@ describe('ExecutionAssetsPage review reward', () => {
       createdAt: '2026-07-10T00:00:00.000Z',
     }]);
     // v5 删掉了「未做平仓评价 −1000」，进页面不再做这项对账。
-    expect(mockReconcileReviewMissingPenalties).not.toHaveBeenCalled();
+    // 这里不再断言「没调用某个 mock」——那个方法已经从 context 类型上消失了，
+    // 真调用连编译都过不去；断一个永远不可能被调用的 vi.fn() 是恒真的空断言，
+    // 它假装有覆盖，比没有测试更糟。
 
     expect(Array.from(screen.getByTestId('execution-rule-grid').children).map(card => (
       card.textContent?.replace(/\s+/g, '')

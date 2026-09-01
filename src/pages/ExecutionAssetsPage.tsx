@@ -56,8 +56,8 @@ function formatSigned(points: number) {
 }
 
 function eventTone(type: string) {
+  // v5 删掉的三种事件不再有配色分支：迁移会把它们整条丢弃，渲染时不可能再出现。
   if (type === 'decision_reward') return 'text-[#0ECB81] border-[#0ECB81]/25 bg-[#0ECB81]/5';
-  if (type === 'direct_reward') return 'text-[#F6465D] border-[#F6465D]/25 bg-[#F6465D]/5';
   if (type === 'campaign_reward') return 'text-[#5BA3FF] border-[#5BA3FF]/25 bg-[#5BA3FF]/5';
   if (type === 'review_reward') return 'text-[#B080FF] border-[#B080FF]/25 bg-[#B080FF]/5';
   return 'text-[#F6465D] border-[#F6465D]/25 bg-[#F6465D]/5';
