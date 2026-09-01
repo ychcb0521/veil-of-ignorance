@@ -40,6 +40,7 @@ import {
   type InteractionController,
 } from "@/lib/klineChartInteraction";
 import { buildAnalysisOrderPriceBounds } from "@/lib/analysisAutoFitPriceRange";
+import { legendReservedRight } from "@/lib/chartLegendReservation";
 import {
   ANALYSIS_AUTO_FIT_BOUNDS_INDICATOR,
   registerAnalysisAutoFitBoundsIndicator,
@@ -1047,6 +1048,43 @@ function CandlestickChartComponent({
 
 
   // ============================================================
+  // 顶部 OHLC 图例与右上角工具栏的避让
+  // ============================================================
+  /**
+   * 事故：点到 K 线时顶部文字互相重叠（「收 0.124450」压着「指标」、「幅」压着「标记」）。
+   * 画布上的 OHLC 图例与 HTML 工具栏在抢同一条水平带，而图例宽度是数据决定的。
+   * 病根与解法见 `@/lib/chartLegendReservation`；这里只负责**实测**那两个几何量：
+   * 绘图区宽度（不含右侧 Y 轴）与工具栏左边缘（换算到图表容器坐标）。
+   */
+  const legendToolbarRef = useRef<HTMLDivElement>(null);
+  const [legendOffsetRight, setLegendOffsetRight] = useState(0);
+
+  useEffect(() => {
+    const toolbar = legendToolbarRef.current;
+    const container = containerRef.current;
+    if (!toolbar || !container) return;
+
+    const measure = () => {
+      const chart = chartRef.current;
+      if (!chart) return;
+      const main = chart.getSize("candle_pane", DomPosition.Main) ?? chart.getSize();
+      const mainWidth = main?.width ?? 0;
+      if (!(mainWidth > 0)) return;
+
+      const toolbarLeft = toolbar.getBoundingClientRect().left - container.getBoundingClientRect().left;
+      const reserved = legendReservedRight({ mainWidth, toolbarLeft });
+      // 亚像素抖动不触发 setStyles——那会整张重绘。
+      setLegendOffsetRight(prev => (Math.abs(prev - reserved) < 1 ? prev : reserved));
+    };
+
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(toolbar);
+    observer.observe(container);
+    return () => observer.disconnect();
+  }, [analysisMode]);
+
+  // ============================================================
   // Theme reactivity & Tooltip customization
   // ============================================================
   useEffect(() => {
@@ -1062,6 +1100,8 @@ function CandlestickChartComponent({
         ...baseStyle.candle,
         tooltip: {
           ...baseStyle.candle.tooltip,
+          // 给右上角工具栏让路：图例撞上按钮之前先换行（见上方 legendOffsetRight）
+          offsetRight: legendOffsetRight,
           custom: (data: any) => {
             const current = data.current;
             if (!current) return [];
@@ -1095,7 +1135,7 @@ function CandlestickChartComponent({
     };
 
     chart.setStyles(styles);
-  }, [theme, pricePrecision, showLastPriceLine]);
+  }, [theme, pricePrecision, showLastPriceLine, legendOffsetRight]);
 
   // ============================================================
   // Price/Volume precision
@@ -2060,7 +2100,10 @@ function CandlestickChartComponent({
         )}
 
         {/* Right side: indicator buttons */}
-        <div className="absolute right-12 top-0 z-10 flex items-center gap-2 py-1.5 px-2 max-w-[60%] overflow-visible">
+        <div
+          ref={legendToolbarRef}
+          className="absolute right-12 top-0 z-10 flex items-center gap-2 py-1.5 px-2 max-w-[60%] overflow-visible"
+        >
           <button
             type="button"
             onClick={(e) => {
