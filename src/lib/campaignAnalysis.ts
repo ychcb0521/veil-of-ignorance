@@ -483,12 +483,27 @@ function resolveInitialMainExposureNotional(
     campaign.initial_main_size_usdt,
   );
   if (mainNotional != null) {
-    const mainAliases = positionIdentityAliases(
-      mainRecord,
-      mainLeg?.trade_record_id ?? mainEvent?.trade_record_id,
-      mainLeg?.id ?? mainEvent?.journal_id,
-      mainEvent ? `event:${mainEvent.id}` : 'campaign:initial-main',
-    );
+    // 这一支跑在两个循环**之前**，同样要登记内容指纹：只登记 id 别名的话，
+    // 主力的指纹从未进过集合，后面一条没有任何 id 的 main_opened 事件就会把它再记一次
+    // （实测 1.400×——多记的正好是一整笔主力）。
+    const mainAliases = [
+      ...positionIdentityAliases(
+        mainRecord,
+        mainLeg?.trade_record_id ?? mainEvent?.trade_record_id,
+        mainLeg?.id ?? mainEvent?.journal_id,
+        mainEvent ? `event:${mainEvent.id}` : 'campaign:initial-main',
+      ),
+      positionShapeKey(
+        mainLeg?.leg_role ?? 'main_open',
+        mainNotional,
+        firstPositiveNumber(
+          mainRecord?.openTime,
+          mainLeg ? toMs(mainLeg.pre_simulated_time) : null,
+          mainEvent ? toMs(mainEvent.timestamp) : null,
+          toMs(campaign.opened_at),
+        ),
+      ),
+    ].filter((k): k is string => Boolean(k));
     if (claimPositionOnce(seenPositions, mainAliases)) notionals.set(mainAliases[0], mainNotional);
   }
 

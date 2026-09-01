@@ -100,6 +100,28 @@ describe('同一笔敞口不得被数两次', () => {
     expect(exposureOf([a, b], [R_MAIN], [])).toBeCloseTo(N_MAIN + 999_999, 2);
   });
 
+  it('【回归】开仓类事件与回填事件并存时，主力不得被再记一次', () => {
+    // resolveInitialMainExposureNotional 有一支「主力」跑在两个循环**之前**。
+    // 它当初只登记 id 别名、没登记内容指纹，于是主力的指纹从未进过集合，
+    // 后面一条没有任何 id 的 main_opened 事件就把它又记了一遍——实测 1.400×，
+    // 多记的正好是一整笔主力。PENGUUSDT 的复核里发现的。
+    const events = [
+      ev('main_open', N_MAIN, null, 'm'),
+      ev('mirror_tp', N_MIRROR, null, 'r'),
+      { ...ev('main_open', N_MAIN, null, null), id: 'e-live-main', event_type: 'main_opened' } as CampaignEvent,
+      { ...ev('mirror_tp', N_MIRROR, null, null), id: 'e-live-tp', event_type: 'mirror_tp_placed' } as CampaignEvent,
+    ];
+    expect(exposureOf(LEGS_LINKED, RECORDS, events)).toBeCloseTo(TRUE_EXPOSURE, 2);
+  });
+
+  it('事件时间戳与腿差几十秒仍算同一笔——指纹按分钟取整', () => {
+    const shifted = [
+      { ...ev('main_open', N_MAIN, null, 'm'), timestamp: '2025-04-28T08:35:40.000Z' } as CampaignEvent,
+      { ...ev('mirror_tp', N_MIRROR, null, 'r'), timestamp: '2025-04-28T08:35:40.000Z' } as CampaignEvent,
+    ];
+    expect(exposureOf(LEGS_LINKED, RECORDS, shifted)).toBeCloseTo(TRUE_EXPOSURE, 2);
+  });
+
   it('对冲腿不计入 ex-ante 敞口', () => {
     const hedge = leg('h', 'hedge_rolling', 2_640_000, null);
     expect(exposureOf([...LEGS_LINKED, hedge], RECORDS, [])).toBeCloseTo(TRUE_EXPOSURE, 2);
