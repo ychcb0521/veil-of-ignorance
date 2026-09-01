@@ -506,66 +506,78 @@ function resolveInitialMainExposureNotional(
 ): number | null {
   const recordLookup = buildTradeRecordLookup(tradeRecords);
   const settlement = settlementRecordsOf(tradeRecords);
-  const notionals = new Map<string, number>();
-  // 别名集合与 notionals 分开：一笔仓位可能有多个别名，但只该记一次账。
-  const claimed: ClaimedPosition[] = [];
 
-  const mainNotional = firstPositiveNumber(
-    openingNotionalUsd(mainLeg?.trade_record_id, settlementRecordsOf(tradeRecords)),
-    mainLeg?.pre_position_size,
-    mainEvent?.size_usdt,
-    campaign.initial_main_size_usdt,
-  );
-  if (mainNotional != null) {
-    // 这一支跑在两个循环**之前**。它代表一条真实的主力腿，所以按「腿」处理：
-    // 只按 id 认领，不做内容合并；后面的事件才去认领它。
-    const mainAliases = positionIdentityAliases(
-      mainRecord,
-      mainLeg?.trade_record_id ?? mainEvent?.trade_record_id,
-      mainLeg?.id ?? mainEvent?.journal_id,
-      mainEvent ? `event:${mainEvent.id}` : 'campaign:initial-main',
-    );
-    if (claimPosition(claimed, mainAliases, mainLeg?.leg_role ?? 'main_open', mainNotional, false)) {
-      notionals.set(mainAliases[0], mainNotional);
-    }
-  }
+  /**
+   * 敞口有两条来源：腿（trade_journals）与事件流（campaign.actual_evolution）。
+   * 同一笔仓位两边都描述一遍，于是要么去重、要么翻倍。
+   *
+   * 前两版都在做**跨来源匹配**：先按 id 别名，再加「角色+名义+开仓分钟」的内容指纹。
+   * 两版都失败了，因为两条来源在系统层面就不一致——回填事件带的是**归类那一刻**的
+   * 时间戳（2026-09-01），不是开仓时刻（2025-04-29）；名义还可能差几毛钱。
+   * 每修一次，只是把失效门槛从「id 不同」挪到「分钟不同」，再挪到「名义差一块钱」。
+   *
+   * 所以改成**结构上不可能翻倍**的做法：**按角色分，腿存在就只用腿**。
+   * 事件流只在某个角色**一条腿都没有**时兜底——那对应「腿已不在、只剩事件流」的老战役。
+   * 两条来源不再相加，也就不存在「有没有对上」这个问题。
+   *
+   * 按角色而不是整体切换，是为了兼容「主力有腿、镜像只在事件里」这种半残数据。
+   */
+  const collect = (entries: Array<{ role: string; notional: number }>, role: string) =>
+    entries.filter(item => item.role === role).reduce((sum, item) => sum + item.notional, 0);
 
+  // ① 腿：权威来源。腿之间天然按 id 互不相同，无需去重。
+  const legEntries: Array<{ role: string; notional: number }> = [];
   for (const leg of legs) {
     if (!isInitialMainExposurePosition(campaign, leg.leg_role, leg.direction)) continue;
-    const record = leg.trade_record_id ? recordLookup.get(leg.trade_record_id) ?? null : null;
     const notional = firstPositiveNumber(
       openingNotionalUsd(leg.trade_record_id, settlement),
       leg.pre_position_size,
     );
-    if (notional == null) continue;
-    // 腿是权威来源：只按 id 去重，绝不内容合并——
-    // 两笔名义恰好相同的主力是合法的（多主力战役），合并会吃掉一条。
-    const aliases = positionIdentityAliases(record, leg.trade_record_id, leg.id, `journal:${leg.id}`);
-    if (claimPosition(claimed, aliases, leg.leg_role, notional, false)) {
-      notionals.set(aliases[0], notional);
-    }
+    if (notional == null || !leg.leg_role) continue;
+    legEntries.push({ role: leg.leg_role, notional });
   }
 
+  // ② 事件：只在同角色没有腿时才会被用到；事件**之间**仍要去重
+  //    （main_opened 与 historical_leg_attached 可能描述同一笔）。
+  const eventClaimed: ClaimedPosition[] = [];
+  const eventEntries: Array<{ role: string; notional: number }> = [];
   for (const event of [...(campaign.actual_evolution ?? [])]
     .sort((a, b) => toMs(a.timestamp) - toMs(b.timestamp))) {
     if (!POSITION_ENTRY_EVENT_TYPES.has(event.event_type)) continue;
     if (!isInitialMainExposurePosition(campaign, event.leg_role, event.direction)) continue;
-
     const record = event.trade_record_id ? recordLookup.get(event.trade_record_id) ?? null : null;
     const notional = firstPositiveNumber(
       record ? tradeRecordNotionalUsd(record, record.entryPrice) : null,
       event.size_usdt,
     );
-    if (notional == null) continue;
-    // 事件可以按 id 或按内容（同角色 + 名义相近）认领已有的那一笔；
-    // 都认不上才算新的一笔——那是「腿已不在、只剩事件流」的老战役。
-    const aliases = positionIdentityAliases(record, event.trade_record_id, event.journal_id, `event:${event.id}`);
-    if (claimPosition(claimed, aliases, event.leg_role, notional, true)) {
-      notionals.set(aliases[0], notional);
-    }
+    if (notional == null || !event.leg_role) continue;
+    const aliases = positionIdentityAliases(
+      record, event.trade_record_id, event.journal_id, `event:${event.id}`);
+    if (!claimPosition(eventClaimed, aliases, event.leg_role, notional, true)) continue;
+    eventEntries.push({ role: event.leg_role, notional });
   }
 
-  const total = Array.from(notionals.values()).reduce((sum, notional) => sum + notional, 0);
+  // ③ 逐角色取用：有腿用腿，没腿才用事件。两者永不相加。
+  let total = 0;
+  for (const role of INITIAL_MAIN_EXPOSURE_ROLES) {
+    const fromLegs = collect(legEntries, role);
+    total += fromLegs > EPSILON ? fromLegs : collect(eventEntries, role);
+  }
+
+  // ④ 主力那一档两条来源都空时，退回战役级快照（老战役连腿带事件都没有）。
+  const mainRole = mainLeg?.leg_role ?? 'main_open';
+  const hasMain = collect(legEntries, mainRole) > EPSILON || collect(eventEntries, mainRole) > EPSILON;
+  if (!hasMain) {
+    const fallback = firstPositiveNumber(
+      openingNotionalUsd(mainLeg?.trade_record_id, settlement),
+      mainLeg?.pre_position_size,
+      mainEvent?.size_usdt,
+      mainRecord ? tradeRecordNotionalUsd(mainRecord, mainRecord.entryPrice) : null,
+      campaign.initial_main_size_usdt,
+    );
+    if (fallback != null) total += fallback;
+  }
+
   return total > EPSILON ? total : null;
 }
 
@@ -596,6 +608,11 @@ function groupInitialMainExposure(
     groups.set(key, (groups.get(key) ?? 0) + notional);
   };
 
+  /**
+   * 与 resolveInitialMainExposureNotional 同一条结构性原则：**按角色分，腿存在就只用腿**。
+   * 两条来源永不相加，翻倍在结构上不可能发生（跨来源匹配为什么不管用，见那边的长注释）。
+   */
+  const rolesWithLegs = new Set<string>();
   for (const leg of legs) {
     if (!isInitialMainExposurePosition(campaign, leg.leg_role, leg.direction)) continue;
     const record = leg.trade_record_id ? recordLookup.get(leg.trade_record_id) ?? null : null;
@@ -603,13 +620,8 @@ function groupInitialMainExposure(
       openingNotionalUsd(leg.trade_record_id, settlement),
       leg.pre_position_size,
     );
-    if (notional == null) continue;
-    // 腿是权威来源：只按 id 去重，绝不内容合并（见 claimPosition 上方那段）。
-    if (!claimPosition(
-      claimed,
-      positionIdentityAliases(record, leg.trade_record_id, leg.id, `journal:${leg.id}`),
-      leg.leg_role, notional, false,
-    )) continue;
+    if (notional == null || !leg.leg_role) continue;
+    rolesWithLegs.add(leg.leg_role);
     // 主力自己就是自己的组;镜像按开仓时刻归属。
     const owner = leg.leg_role === 'main_open'
       ? leg
@@ -621,13 +633,15 @@ function groupInitialMainExposure(
     .sort((a, b) => toMs(a.timestamp) - toMs(b.timestamp))) {
     if (!POSITION_ENTRY_EVENT_TYPES.has(event.event_type)) continue;
     if (!isInitialMainExposurePosition(campaign, event.leg_role, event.direction)) continue;
+    // 该角色已有腿 → 事件只是同一批仓位的另一种描述，整批跳过。
+    if (!event.leg_role || rolesWithLegs.has(event.leg_role)) continue;
     const record = event.trade_record_id ? recordLookup.get(event.trade_record_id) ?? null : null;
     const notional = firstPositiveNumber(
       record ? tradeRecordNotionalUsd(record, record.entryPrice) : null,
       event.size_usdt,
     );
     if (notional == null) continue;
-    // 事件可按 id 或按内容认领已有的那一笔；都认不上才算新的一笔。
+    // 事件**之间**仍要去重：main_opened 与 historical_leg_attached 可能描述同一笔。
     if (!claimPosition(
       claimed,
       positionIdentityAliases(record, event.trade_record_id, event.journal_id, `event:${event.id}`),

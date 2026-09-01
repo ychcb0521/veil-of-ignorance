@@ -145,6 +145,44 @@ describe('ex-ante 敞口：不含加仓，也不重复计数', () => {
       .toBeCloseTo(N_MAIN * 2, 0);
   });
 
+  /**
+   * 【结构性质】腿在场时，事件流**无论长成什么样**都不能抬高敞口。
+   *
+   * 前两版都在做跨来源匹配（先 id 别名、再「角色+名义+分钟」指纹），两版都被真实数据打穿：
+   * 回填事件带的是归类那一刻的时间戳，名义还可能差几毛钱。每修一次只是把失效门槛
+   * 从「id 不同」挪到「分钟不同」再挪到「名义差一块钱」。
+   * 现在改成按角色切换来源——腿存在就只用腿，两条来源永不相加，
+   * 于是这条性质不再依赖任何匹配是否成功。
+   */
+  it('【判据】事件流怎么变形都抬不高敞口——腿在场时它整批不参与', () => {
+    const hostile: CampaignEvent[] = [
+      ev('main_open', N_MAIN, E, '2026-09-01T17:47:00.000Z', null, null),
+      ev('mirror_tp', N_MIRROR, E, '2026-09-01T17:47:00.000Z', null, null),
+      ev('main_open', N_MAIN + 1, E, '1999-01-01T00:00:00.000Z', null, null),
+      ev('mirror_tp', N_MIRROR * 3, E, '2030-01-01T00:00:00.000Z', null, null),
+      ev('main_open', N_MAIN, E, OPEN, 'm', null),
+      ev('main_open', N_MAIN, E, OPEN, null, 'rm', 'main_opened'),
+      ev('mirror_tp', N_MIRROR, E, OPEN, null, null, 'mirror_tp_placed'),
+    ];
+    expect(exposureOf(hostile)).toBeCloseTo(TRUE_EXPOSURE, 2);
+  });
+
+  it('腿一条都没有时，事件流才兜底——老战役不能因此变成 0', () => {
+    const eventsOnly = [
+      ev('main_open', N_MAIN, E, OPEN, null, null),
+      ev('mirror_tp', N_MIRROR, E, OPEN, null, null),
+    ];
+    const n = computeInitialMainExposureNotional(campaign(eventsOnly), [], []);
+    expect(n).toBeCloseTo(TRUE_EXPOSURE, 2);
+  });
+
+  it('半残数据：主力有腿、镜像只在事件里——两档各取各的来源', () => {
+    const mainOnlyLegs = [LEGS[0], LEGS[2], LEGS[3]];   // 去掉镜像腿
+    const mirrorEvent = [ev('mirror_tp', N_MIRROR, E, OPEN, null, null)];
+    expect(computeInitialMainExposureNotional(campaign(mirrorEvent), mainOnlyLegs, RECORDS))
+      .toBeCloseTo(TRUE_EXPOSURE, 2);
+  });
+
   it('滚动对冲同样不计入', () => {
     expect(exposureOf([])!).toBeLessThan(TRUE_EXPOSURE + N_HEDGE);
   });
