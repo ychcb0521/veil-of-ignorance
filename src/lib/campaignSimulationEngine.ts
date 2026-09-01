@@ -1,5 +1,10 @@
 import type { KlineData } from '@/hooks/useBinanceData';
-import { computeSopDeviation, type Deduction, type SopDeviationResult } from '@/lib/campaignAnalysis';
+import {
+  computeInitialExpectedMaxLoss,
+  computeSopDeviation,
+  type Deduction,
+  type SopDeviationResult,
+} from '@/lib/campaignAnalysis';
 import {
   resolveLegExecution,
   type LegExitPriceCorrections,
@@ -635,27 +640,12 @@ function buildSyntheticCampaignAndLegs(
 }
 
 function buildResultFromState(state: SimulationState): CampaignCounterfactualResult {
-  const plannedMaxLoss = (() => {
-    if (!state.activeMain && state.params.entry.size_usdt <= 0) return 0;
-    const triggerCandidates = [state.params.hedge_a, state.params.hedge_b]
-      .filter(item => item.size_pct > 0)
-      .map(item => priceFromOffset(state.params.entry.price, item.offset_pct));
-    const firstAdverse = state.params.entry.direction === 'long'
-      ? Math.max(...triggerCandidates, -Infinity)
-      : Math.min(...triggerCandidates, Infinity);
-    if (!Number.isFinite(firstAdverse)) return 0;
-    return Math.abs(pnlForClose(
-      state.params.entry.direction,
-      state.params.entry.price,
-      firstAdverse,
-      state.params.entry.size_usdt,
-      state.params.entry.leverage,
-    ));
-  })();
-
   const baseResult = {
     final_realized_pnl: round(state.realizedPnl),
-    final_r_multiple: plannedMaxLoss > EPSILON ? round(state.realizedPnl / plannedMaxLoss) : 0,
+    // 先占位；合成战役建好之后才拿得到 L（见下方 plannedMaxLoss）。
+    // buildSyntheticCampaignAndLegs 只是把这个值抄进合成战役的同名字段，
+    // 而 computeInitialExpectedMaxLoss 不读它，所以这层循环依赖是良性的。
+    final_r_multiple: 0,
     peak_unrealized_pnl: round(Math.max(0, state.peakEquity)),
     peak_drawdown: round(Math.abs(Math.min(0, state.troughEquity))),
     profit_capture_ratio: state.peakEquity > EPSILON
@@ -675,8 +665,27 @@ function buildResultFromState(state: SimulationState): CampaignCounterfactualRes
 
   const synthetic = buildSyntheticCampaignAndLegs(state.params, state.template, baseResult, state.events, state.legs);
   const sop = computeSopDeviation(synthetic.campaign, synthetic.legs, []);
+
+  /**
+   * 反事实的 R 必须与战役页的 b **同一个口径**，否则两个数并排放在一起没有可比性。
+   *
+   * 原来这里自己写了一份 plannedMaxLoss，和 resolveMainRiskAnchors 差两处，
+   * 而且两处**同向**地把 L 做小、把 R 做大：
+   *   ① 敞口只取 entry.size_usdt，**不含归属它的镜像止盈**。
+   *      SOP 镜像 = 主仓 60%，所以差 1.60 倍。
+   *   ② 保护线取 Math.max(A, B)，多单时那是**离开仓价最近**的一条；
+   *      resolveMainRiskAnchors 取的是**最远**那条（承担的风险以最宽的止损计）。
+   *      SOP 的 −2% / −4% 就是 2.00 倍。
+   * 合计 3.20 倍——同一笔盈亏，战役页 b = 0.73R，反事实分支能给出 2.3R。
+   *
+   * 合成战役与合成腿这里本来就要造（computeSopDeviation 要用），腿上带着
+   * leg_role、pre_position_size、pre_entry_price，正好够锚出「M + 镜像」的敞口
+   * 与最远那条保护线。直接复用它，口径就不可能再分叉。
+   */
+  const plannedMaxLoss = computeInitialExpectedMaxLoss(synthetic.campaign, synthetic.legs, []);
   return {
     ...baseResult,
+    final_r_multiple: plannedMaxLoss > EPSILON ? round(state.realizedPnl / plannedMaxLoss) : 0,
     sop_score: sop.score ?? 0,
   };
 }
@@ -985,15 +994,46 @@ export function simulateManualLegScenario(
   const lastTime = manualLegs.reduce((latest, leg) => (
     new Date(leg.close_time).getTime() > new Date(latest).getTime() ? leg.close_time : latest
   ), manualLegs[0].close_time);
-  const mainLeg = manualLegs.find(leg => leg.leg_role === 'main_open') ?? manualLegs[0];
-  const plannedMaxLoss = mainLeg
-    ? Math.abs(manualLegPnl({
-      ...mainLeg,
-      exit_price: params.entry.direction === 'long'
-        ? params.entry.price * 0.98
-        : params.entry.price * 1.02,
-    }))
-    : 0;
+  /**
+   * 手动 Legs 分支原来把保护线**写死成 2%**，既不看这场战役实际挂在哪，
+   * 敞口也只有主力一条腿。止损越宽被高估得越离谱：实盘那笔 13.38% 的主力，
+   * L 真值 37,781 而这里给 3,530——R 高估 10.7 倍，而它恰恰是最该被警告的一类。
+   *
+   * 手动腿上带着角色、开仓时刻、开仓价、名义，信息本来就够。映射成合成腿之后
+   * 复用同一个 buildSyntheticCampaignAndLegs + computeInitialExpectedMaxLoss，
+   * 与战役页、与上面那支反事实**共用一套口径**，不可能再分叉。
+   * 锚不出保护线时返回 0（下方 > EPSILON 判断会让 R 显示 0），
+   * 绝不拿一个凭空的 2% 顶上——那是在给一个不存在的止损定价。
+   */
+  const syntheticSimLegs: SimulationLeg[] = manualLegs.map((leg, index) => ({
+    id: leg.id || `manual-leg-${index + 1}`,
+    role: leg.leg_role as LegRole,
+    kind: leg.leg_role === 'main_open' ? 'main' : leg.leg_role === 'mirror_tp' ? 'mirror_tp' : 'hedge',
+    placedAt: leg.open_time,
+    triggerPrice: leg.entry_price,
+    sizeUsdt: leg.size_usdt,
+    status: 'filled',
+    triggeredAt: leg.close_time,
+    fillPrice: leg.entry_price,
+    realizedPnlUsdt: manualLegPnl(leg),
+    cycle: 1,
+  }));
+  const manualBase = {
+    final_realized_pnl: round(finalPnl),
+    final_r_multiple: 0,
+    peak_unrealized_pnl: round(Math.max(0, peakEquity)),
+    peak_drawdown: round(Math.abs(Math.min(0, troughEquity))),
+    profit_capture_ratio: 0,
+    events,
+    legs_summary: [],
+    state_segments: [],
+  } as Omit<CampaignCounterfactualResult, 'sop_score'>;
+  const manualSynthetic = buildSyntheticCampaignAndLegs(
+    params, 'main_dual_hedge_mirror_tp', manualBase, events, syntheticSimLegs,
+  );
+  const plannedMaxLoss = computeInitialExpectedMaxLoss(
+    manualSynthetic.campaign, manualSynthetic.legs, [],
+  );
 
   return {
     final_realized_pnl: round(finalPnl),

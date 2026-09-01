@@ -85,7 +85,20 @@ describe('simulateCampaign', () => {
     );
 
     expect(result.final_realized_pnl).toBeCloseTo(-20, 4);
-    expect(result.final_r_multiple).toBeCloseTo(-1, 4);
+    /**
+     * R 从 −1 变成 −0.3333，是**口径统一**，不是这个场景的结果变了。
+     *
+     * 反事实的 R 现在与战役页的 b 走同一条 computeInitialExpectedMaxLoss：
+     *   敞口 1000（主力）+ 500（镜像 50%）= 1500，不再只算主力；
+     *   保护线取**最远**那条 hedge_b −4%（96），不再取最近的 hedge_a −2%（98）。
+     *   L = 4% × 1500 = 60，R = −20 / 60 = −0.3333。
+     *
+     * 取舍要说清楚：本场 exit_rule 是 close_all_on_hedge_trigger，对冲A 在 −2% 就全平，
+     * −4% 那条线**永远到不了**，所以旧的 −1R 更贴近「这个计划真正能亏多少」。
+     * 但战役页取最远线是因为实盘事先不知道哪条先被打到。两个数要能并排比较，
+     * 就必须同口径——这正是统一的理由，代价是仿真的 R 偏保守（分母偏大）。
+     */
+    expect(result.final_r_multiple).toBeCloseTo(-0.3333, 4);
     expect(result.legs_summary.find(leg => leg.leg_role === 'hedge_initial_a')?.status).toBe('filled');
   });
 
