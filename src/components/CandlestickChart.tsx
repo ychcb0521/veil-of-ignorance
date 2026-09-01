@@ -1077,22 +1077,33 @@ function CandlestickChartComponent({
       const wrapperEl = chartWrapperRef.current;
       const controlsEl = wrapperEl?.closest("[data-chart-layout-root]")
         ?.querySelector("[data-chart-layout-controls]") as HTMLElement | null;
-      if (wrapperEl) {
-        const w = wrapperEl.getBoundingClientRect();
+      const wrapperRect = wrapperEl?.getBoundingClientRect() ?? null;
+      let inset = toolbarRight;
+      if (wrapperRect) {
         const c = controlsEl?.getBoundingClientRect() ?? null;
-        const inset = toolbarInsetRight({
-          wrapper: { top: w.top, right: w.right, bottom: w.bottom },
+        inset = toolbarInsetRight({
+          wrapper: { top: wrapperRect.top, right: wrapperRect.right, bottom: wrapperRect.bottom },
           controls: c ? { top: c.top, left: c.left, bottom: c.bottom } : null,
         });
         setToolbarRight(prev => (Math.abs(prev - inset) < 1 ? prev : inset));
       }
 
-      // ② 图例再躲开工具栏**移动之后**的实际左边缘
+      // ② 图例躲开工具栏**移动之后**的左边缘——这里必须**算**，不能读 DOM。
+      //
+      // ResizeObserver 只在尺寸变化时触发，不管位置；而 ① 让工具栏左移时宽度并没变。
+      // 此刻 React 还没把新的 right 写进 DOM，读 getBoundingClientRect() 拿到的是
+      // **移动前**那个更靠右的位置，图例据此少留一截，正好差出几像素的残余重叠。
+      // 工具栏的宽度不受移动影响，所以移动后的左边缘可以直接算出来：确定性的算术，
+      // 优于对渲染时序的假设（用 requestAnimationFrame 等一帧会引入闪烁与时序依赖）。
       const main = chart.getSize("candle_pane", DomPosition.Main) ?? chart.getSize();
       const mainWidth = main?.width ?? 0;
       if (!(mainWidth > 0)) return;
 
-      const toolbarLeft = toolbar.getBoundingClientRect().left - container.getBoundingClientRect().left;
+      const containerRect = container.getBoundingClientRect();
+      const toolbarWidth = toolbar.getBoundingClientRect().width;
+      const toolbarLeft = wrapperRect
+        ? wrapperRect.right - inset - toolbarWidth - containerRect.left
+        : toolbar.getBoundingClientRect().left - containerRect.left;
       const reserved = legendReservedRight({ mainWidth, toolbarLeft });
       // 亚像素抖动不触发 setStyles——那会整张重绘。
       setLegendOffsetRight(prev => (Math.abs(prev - reserved) < 1 ? prev : reserved));
@@ -1103,7 +1114,7 @@ function CandlestickChartComponent({
     observer.observe(toolbar);
     observer.observe(container);
     return () => observer.disconnect();
-  }, [analysisMode, indicators.length]);
+  }, [analysisMode, indicators.length, toolbarRight]);
 
   // ============================================================
   // Theme reactivity & Tooltip customization
@@ -1143,14 +1154,25 @@ function CandlestickChartComponent({
             const d = new Date(tooltipTransform ? tooltipTransform(current.timestamp) : current.timestamp);
             const timeStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
 
+            /**
+             * 字段顺序按**语义分组**，不按 OHLC 惯例。
+             *
+             * 图例是按整个字段自动换行的，所以顺序决定了断点落在哪里。
+             * 分成「这根K线发生了什么」与「区间与成交量」两组：
+             *   开 → 收 → 幅   一笔行情的起点、终点、结果，三个数要连读才有意义
+             *   高 / 低 / 量    区间与成交量，是背景信息
+             * 窄图上断点正好落在两组之间，读起来是两句话而不是被截断的一句；
+             * 宽图上仍是一行。把 幅 排在 收 后面尤其要紧——涨跌幅是收盘价的注解，
+             * 原来它被挤到第二行末尾，与它解释的那个数隔了一整行。
+             */
             return [
               { title: "时间 ", value: timeStr },
               { title: "开 ", value: current.open.toFixed(pricePrecision) },
+              { title: "收 ", value: current.close.toFixed(pricePrecision) },
+              { title: "幅 ", value: { text: `${sign}${changePct.toFixed(2)}%`, color } },
               { title: "高 ", value: current.high.toFixed(pricePrecision) },
               { title: "低 ", value: current.low.toFixed(pricePrecision) },
-              { title: "收 ", value: current.close.toFixed(pricePrecision) },
               { title: "量 ", value: current.volume.toLocaleString(undefined, { maximumFractionDigits: 0 }) },
-              { title: "幅 ", value: { text: `${sign}${changePct.toFixed(2)}%`, color } },
             ];
           },
         },
