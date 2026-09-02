@@ -2152,6 +2152,49 @@ export async function listDeletedCampaigns(userId: string): Promise<TradeCampaig
   ));
 }
 
+/**
+ * 战役腿的后处理：合成腿、本地镜像、评价兄弟记录、水合。
+ *
+ * 单场（getCampaignWithLegs）与批量（getCampaignsWithLegs）共用这一份。
+ * 抽出来是因为列表页要批量取数：147 场各发 3 个查询 = 441 次往返，
+ * 而这段逻辑一旦复制成两份，两个页面迟早给出不同的腿。
+ */
+function assembleCampaignLegs(
+  campaign: TradeCampaign,
+  dbLegs: TradeJournal[],
+  siblings: TradeJournal[],
+): TradeJournal[] {
+  const userId = campaign.user_id;
+  const syntheticLegs = synthesizeCampaignLegsFromEvents(campaign);
+  const resolvedLegs = appendUntriggeredMirrorTpLeg(
+    campaign,
+    isHistoricalCampaign(campaign)
+      ? mergeHistoricalCampaignLegs(dbLegs, syntheticLegs)
+      : (dbLegs.length > 0 ? dbLegs : syntheticLegs),
+  );
+  const mirroredLegs = applyLocalMirror(userId, resolvedLegs);
+  const hydrated = hydrateJournalReviews([...mirroredLegs, ...applyLocalMirror(userId, siblings)]);
+  const legIds = new Set(mirroredLegs.map(leg => leg.id));
+  return hydrated.filter(leg => legIds.has(leg.id));
+}
+
+/** 本地存储的一次性快照。147 场各读一遍会把同一份 JSON 解析 588 次（实测 2~6 秒纯阻塞）。 */
+export interface UserLocalSnapshot {
+  tradeHistory: TradeRecord[];
+  ordersMap: Record<string, PendingOrder[]>;
+  cancelledOrders: CancelledOrderSnapshot[];
+  filledOrders: FilledOrderSnapshot[];
+}
+
+export function readUserLocalSnapshot(userId: string): UserLocalSnapshot {
+  return {
+    tradeHistory: readUserScopedStorage<TradeRecord[]>(userId, 'trade_history', []),
+    ordersMap: readUserScopedStorage<Record<string, PendingOrder[]>>(userId, 'orders_map', {}),
+    cancelledOrders: readUserScopedStorage<CancelledOrderSnapshot[]>(userId, 'cancelled_orders', []),
+    filledOrders: readUserScopedStorage<FilledOrderSnapshot[]>(userId, 'filled_orders', []),
+  };
+}
+
 export async function getCampaignWithLegs(
   campaignId: string,
 ): Promise<{ campaign: TradeCampaign; legs: TradeJournal[] }> {
@@ -2308,8 +2351,30 @@ async function healCampaignLegSnapshots(legs: TradeJournal[], tradeRecords: Trad
   }
 }
 
+/**
+ * 单场战役的完整数据。
+ *
+ * `options` 是给**列表页**用的：它一次要开 147 场，而默认路径每场都会
+ *   · 把 trade_history / orders_map / cancelled_orders / filled_orders 各解析一遍
+ *     （实测 147 场 × trade_history 一项就是 0.5~1.6 秒**纯主线程阻塞**，四项合计 2~6 秒，
+ *      期间滚动、点击、动画全部停摆）；
+ *   · 回写腿快照与战役汇总（**写数据库**）——刚改过口径之后几乎每条腿都判定为需要回写，
+ *     于是渲染一个列表变成一场写风暴。
+ * 两件事对单场详情是对的，对列表是纯浪费。
+ */
+export interface CampaignFullDataOptions {
+  /** 共用的本地存储快照；不传则自行读取（单场路径的原行为）。 */
+  local?: UserLocalSnapshot;
+  /**
+   * 是否回写腿快照 / 战役汇总。默认 true（详情页需要）。
+   * 列表页传 false：那是渲染，不该产生写副作用。
+   */
+  heal?: boolean;
+}
+
 export async function getCampaignFullData(
   campaignId: string,
+  options: CampaignFullDataOptions = {},
 ): Promise<{
   campaign: TradeCampaign;
   legs: TradeJournal[];
@@ -2319,10 +2384,8 @@ export async function getCampaignFullData(
 }> {
   const { campaign, legs } = await getCampaignWithLegs(campaignId);
   const userId = campaign.user_id;
-  const tradeHistory = readUserScopedStorage<TradeRecord[]>(userId, 'trade_history', []);
-  const ordersMap = readUserScopedStorage<Record<string, PendingOrder[]>>(userId, 'orders_map', {});
-  const cancelledOrders = readUserScopedStorage<CancelledOrderSnapshot[]>(userId, 'cancelled_orders', []);
-  const filledOrders = readUserScopedStorage<FilledOrderSnapshot[]>(userId, 'filled_orders', []);
+  const local = options.local ?? readUserLocalSnapshot(userId);
+  const { tradeHistory, ordersMap, cancelledOrders, filledOrders } = local;
   const legRecordIds = new Set(
     legs
       .map(leg => leg.trade_record_id)
@@ -2667,8 +2730,12 @@ export async function getCampaignFullData(
   }, new Map<string, CampaignReverseHedgeOrder>()).values()).sort((a, b) => a.createdAt - b.createdAt);
 
   // 本人视角（有成交记录）时，把平仓快照回写到腿上，使互关者也能读到一致的平仓信息。
-  await healCampaignLegSnapshots(legs, tradeRecords);
-  const healedCampaign = await healCampaignSummarySnapshots(campaign, legs, tradeRecords);
+  // 列表页显式关掉：渲染一个列表不该写库，147 场同时回写会把首屏拖到打不开。
+  let healedCampaign = campaign;
+  if (options.heal !== false) {
+    await healCampaignLegSnapshots(legs, tradeRecords);
+    healedCampaign = await healCampaignSummarySnapshots(campaign, legs, tradeRecords);
+  }
 
   return {
     campaign: healedCampaign,

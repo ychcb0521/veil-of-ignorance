@@ -120,6 +120,8 @@ vi.mock('@/lib/journalApi', () => ({
   appendCampaignEvent: mockAppendCampaignEvent,
   closeCampaign: mockCloseCampaign,
   deleteCampaign: vi.fn(),
+  // 列表页共用一份本地快照，避免 147 场各解析一遍（实测 2~6 秒主线程阻塞）。
+  readUserLocalSnapshot: () => ({ tradeHistory: [], ordersMap: {}, cancelledOrders: [], filledOrders: [] }),
   getCampaignFullData: vi.fn(async (id: string) => ({
     campaign: campaigns.find(campaign => campaign.id === id),
     legs: legsByCampaign[id] ?? [],

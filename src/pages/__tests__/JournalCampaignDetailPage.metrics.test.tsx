@@ -186,6 +186,8 @@ vi.mock('@/hooks/useCampaignKlines', async importOriginal => {
 });
 
 vi.mock('@/lib/journalApi', () => ({
+  // 列表页共用一份本地快照，避免 147 场各解析一遍（实测 2~6 秒主线程阻塞）。
+  readUserLocalSnapshot: () => ({ tradeHistory: [], ordersMap: {}, cancelledOrders: [], filledOrders: [] }),
   getCampaignFullData: vi.fn(async (id: string) => detailsById[id]),
   listAllCampaigns: vi.fn(async () => campaigns),
   listVisibleCampaigns: vi.fn(async () => campaigns),

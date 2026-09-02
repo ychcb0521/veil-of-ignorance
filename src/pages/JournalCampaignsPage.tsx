@@ -33,6 +33,7 @@ import {
   closeCampaign,
   deleteCampaign,
   getCampaignFullData,
+  readUserLocalSnapshot,
   listAllCampaigns,
   listDeletedCampaigns,
   permanentlyDeleteCampaign,
@@ -883,16 +884,43 @@ export default function JournalCampaignsPage() {
           };
         };
 
-        // ① 首屏：只取战役明细（数据库），平仓价校正一律用空值。
-        //    校正原本对每场每条腿各发一次行情请求（N×M 次，全局仅 6 并发），
-        //    是这一页「加载中」长时间不散的唯一原因；它只影响个别异常平仓价的
-        //    修正，不该挡住整页首屏。
-        const detailList = await Promise.all(
-          campaigns.map(campaign => getCampaignFullData(campaign.id)),
-        );
+        /**
+         * ① 首屏：取战役明细，平仓价校正一律用空值。
+         *
+         * 三件事此前把这一页拖到「加载中」散不掉，逐条去掉：
+         *
+         *   a. **本地存储被重复解析**。每场 getCampaignFullData 都会把
+         *      trade_history / orders_map / cancelled_orders / filled_orders 各解析一遍。
+         *      147 场 × 仅 trade_history 一项实测就是 0.5~1.6 秒**纯主线程阻塞**，
+         *      四项合计 2~6 秒——期间滚动、点击、动画全部停摆，不只是这一页慢。
+         *      改成读一次、全场共用。
+         *
+         *   b. **渲染触发写库**。默认路径末尾会回写腿快照与战役汇总；
+         *      刚改过口径之后几乎每条腿都判定为需要回写，于是打开列表变成写风暴。
+         *      列表是只读视图，heal: false。
+         *
+         *   c. **首屏等全部**。原来 Promise.all 等 147 场全部返回才画第一行。
+         *      改成分批：每批到达就画，用户看到的第一批在几百毫秒内出现。
+         *      批与批之间让出一帧，主线程不被独占，滚动始终跟手。
+         */
+        const local = readUserLocalSnapshot(user.id);
+        const BATCH = 12;
+        const detailList: Awaited<ReturnType<typeof getCampaignFullData>>[] = [];
+        for (let i = 0; i < campaigns.length; i += BATCH) {
+          if (cancelled) return;
+          const batch = await Promise.all(
+            campaigns.slice(i, i + BATCH).map(campaign =>
+              getCampaignFullData(campaign.id, { local, heal: false })),
+          );
+          if (cancelled) return;
+          detailList.push(...batch);
+          const painted = detailList.map(details => buildRow(details, {}));
+          setRows(painted);
+          setLoading(false);          // 第一批到达即撤掉「加载中」
+          // 让出一帧：不让连续的批次把主线程连成一段长任务。
+          await new Promise(resolve => setTimeout(resolve, 0));
+        }
         if (cancelled) return;
-        const full = detailList.map(details => buildRow(details, {}));
-        setRows(full);
         setLoading(false);
 
         // ② 后台补齐平仓价校正，逐场到达即静默替换该行——首屏已可用，
