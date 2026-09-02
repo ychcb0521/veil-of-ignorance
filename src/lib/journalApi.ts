@@ -2882,9 +2882,20 @@ export async function listOrphanTradeRecords(
   );
   const linkedIds = new Set(linked.map(row => row.trade_record_id).filter((value): value is string => Boolean(value)));
   return tradeHistory
-    // 分片记录的 fillId 才是日志存的那个 id;只看 record.id 会把加仓那一片
-    // 当成孤儿再列一遍,用户一分类就多出第二条腿,两条腿认领同一笔钱。
-    .filter(record => !linkedIds.has(record.id) && !(record.fillId && linkedIds.has(record.fillId)))
+    /**
+     * 只按 record.id 过滤。**不要**在这里顺带按 fillId 过滤——那是我改坏过一次的地方。
+     *
+     * handlePlaceOrder 成交后返回的是这一笔新成交自己的 id，也就是 fills[n].id，
+     * 所以每为一条腿「记录决策」，那条日志的 trade_record_id 就等于该成交的 fillId。
+     * 一旦这里按 fillId 排除，凡是记过决策的腿，它的平仓分片全被隐藏——
+     * 实盘表现是归类页只剩一多一空，镜像止盈、加仓、各对冲空单整批消失。
+     *
+     * 根子在层次：这一层只知道「有没有日志引用过这个 fill」，不知道**那条日志
+     * 是否会出现在用户眼前**（归类页还有日期/标的/已归类三道过滤）。日志被筛掉、
+     * 分片也被隐藏，这笔成交就一个入口都没有了。
+     * 去重要放在两份名单同时可见的那一层，即 JournalCampaignClassifyPage。
+     */
+    .filter(record => !linkedIds.has(record.id))
     .filter(record => matchesTradeRecordFilters(record, filters))
     .sort((a, b) => tradeRecordTimeMs(b) - tradeRecordTimeMs(a));
 }

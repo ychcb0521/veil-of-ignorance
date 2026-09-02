@@ -229,8 +229,21 @@ export default function JournalCampaignClassifyPage() {
           journal,
           record: journal.trade_record_id ? tradeRecordMap.get(journal.trade_record_id) ?? null : null,
         })),
+        /**
+         * 去重放在这一层，因为这里两份名单同时在手：日志行与裸记录行。
+         *
+         * 一笔成交经合并仓位平仓会拆成多条分片记录，而它若记过决策，日志的
+         * trade_record_id 就等于该成交的 fillId（handlePlaceOrder 返回的正是成交自己的 id）。
+         * 所以同一笔成交可能既有日志行、又有分片行——按 fillId 一并排除，
+         * 让它只以日志行出现一次。
+         *
+         * 关键是这个排除**只对本页真正列出的日志生效**：日志若被日期/标的/已归类
+         * 筛掉，journalRecordIds 里就没有它，分片行照常显示。
+         * 这条不变量保证「每笔成交至少有一个入口」，而在数据层做同样的过滤会破坏它。
+         */
         ...classifiableTradeHistory
-          .filter(record => !journalRecordIds.has(record.id))
+          .filter(record => !journalRecordIds.has(record.id)
+            && !(record.fillId && journalRecordIds.has(record.fillId)))
           .map(record => ({ id: `r_${record.id}`, kind: 'orphanRecord' as const, record })),
       ].sort((a, b) => itemTimeMs(b) - itemTimeMs(a));
     },
