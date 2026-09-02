@@ -15,7 +15,7 @@
  * 顺带：它还让 Lovable 的「有改动待发布」标记得以置位——从 GitHub 同步进来的提交
  * 不会自动把站点标记成待发布，而带上这个标记的提交会。
  */
-export const BUILD_STAMP = 'veil-build:2026-09-01-4';
+export const BUILD_STAMP = 'veil-build:2026-09-02-1';
 
 /**
  * 启动时打一行。console 调用不会被摇树掉，字面量因此必定留在产物里；

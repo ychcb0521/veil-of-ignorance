@@ -19,6 +19,7 @@ import {
   type AddSide,
   type BankedKnob,
   type CushionAddResult,
+  evaluatePostAddCostLine,
 } from '@/lib/addSizing';
 
 /**
@@ -167,6 +168,33 @@ export function AddSizingCalculator({ open, onClose, symbol, currentPrice = 0 }:
     return computeBankedAdd({ side, settlement, g: toNum(g), s2: toNum(s2), s1: toNum(s1), knob });
   }, [knobKind, effectiveKB, x2B, side, settlement, g, s2, s1]);
   const bankedOn = toNum(g) > 0;
+
+  /**
+   * R0 复核 —— A3-R 的门槛：加仓后重算综合成本线，越过止损线即当场非法。
+   *
+   * 这函数在 addSizing.ts 里躺了一直没接进界面。AIOTUSDT 2025-05-03 的学费：
+   * 合法上限 A+B = 4,264,691 币(1.79M USDT)，实际加了 20,066,005 币(8.41M)——
+   * **4.71 倍**。加仓后成本线 0.417749、扣除落袋后 0.415646，越过 S₁(0.406286) 2.30%，
+   * 折成钱是 20.6 万 USD 的本金缺口——那一场最终亏 25.4 万，几乎全部来自这里。
+   * 而当时界面上没有任何一处会把「这单越界了」喊出来。
+   *
+   * 判定用**扣除落袋后的**成本线：B 本账拿 G 买期权、成本线越过 S₁ 是它的定义，
+   * 不该报红；报红的判据是「跌到 S₁ 时的亏损连 G 都盖不住」——缺口由本金支付。
+   */
+  const contemplatedAddCoins =
+    (cushion.ok ? cushion.x2Max : 0)
+    + (bankedOn && bankedRes.ok ? bankedRes.x2 : 0);
+  const r0 = useMemo(() => {
+    if (!cushion.ok || !(contemplatedAddCoins > 0)) return null;
+    const post = evaluatePostAddCostLine({
+      side, sBar: toNum(sBar), s1: toNum(s1), s2: toNum(s2),
+      x1: toNum(x1), addCoins: contemplatedAddCoins,
+    });
+    if (!post) return null;
+    // 缺口（与 G 同单位）：B 在 S₁ 吃掉的超出 G 的部分。B 关着时恒为 0——A 的定义就是在 S₁ 打平。
+    const uncovered = bankedOn && bankedRes.ok ? Math.max(0, -bankedRes.residualAtS1) : 0;
+    return { ...post, uncovered };
+  }, [cushion.ok, contemplatedAddCoins, side, sBar, s1, s2, x1, bankedOn, bankedRes]);
 
   const contracts = (coins: number, price: number) =>
     isCoin && Number.isFinite(coins) && price > 0 ? ` · ${coinsToContracts(coins, price, face).toLocaleString('en-US')} 张` : '';
@@ -497,6 +525,45 @@ export function AddSizingCalculator({ open, onClose, symbol, currentPrice = 0 }:
               </>
             )}
           </section>
+
+          {/* R0 复核 —— 不做硬拦截（B 的定义允许成本线越过 S₁），但缺口必须扎眼 */}
+          {r0 && (
+            <section
+              data-testid="add-sizing-r0"
+              className={`space-y-1 rounded border px-3 py-2 ${
+                r0.uncovered > 0
+                  ? 'border-trading-red/50 bg-trading-red/10'
+                  : 'border-border bg-muted/30'
+              }`}
+            >
+              <div className="flex items-baseline gap-2">
+                <h3 className={`text-[11px] font-medium ${r0.uncovered > 0 ? 'text-trading-red' : 'text-foreground'}`}>
+                  R0 复核 · 加仓后成本线
+                </h3>
+                <span className="font-mono text-[11px] text-foreground">{fmtPx(r0.blendedCost)}</span>
+                <span className="text-[10px] text-muted-foreground">
+                  {r0.pastStop && r0.overshootPct >= 0.01
+                    ? `越过 S₁ ${r0.overshootPct.toFixed(2)}%${bankedOn ? '（B 段以落袋垫付）' : ''}`
+                    : '落在 S₁ 安全侧'}
+                </span>
+              </div>
+              {r0.uncovered > 0 ? (
+                <div data-testid="add-sizing-r0-violation" className="text-[10px] leading-[1.7] text-trading-red">
+                  <strong>R0 非法：跌到 S₁ 的亏损超出落袋 {isCoin ? `${fmtCoins(r0.uncovered, 4)} ${coinName}` : `${fmtUsd(r0.uncovered)} USD`}，
+                  这个缺口由本金支付</strong>——超出 B 上限 {Number.isFinite(bankedRes.exposureAtS1) ? `${(bankedRes.exposureAtS1 * 100).toFixed(0)}%` : '—'}。
+                  同一笔已实现利润只能买一次期权；要么把量压回上限，要么接受这不再是「锁死」而是加风险。
+                </div>
+              ) : (
+                <div data-testid="add-sizing-r0-pass" className="text-[10px] leading-[1.7] text-muted-foreground">
+                  跌到 S₁：A 段打平{bankedOn && bankedRes.ok
+                    ? `，B 段由落袋垫付${bankedRes.residualAtS1 > 0
+                      ? `，仍剩 ${isCoin ? `${fmtCoins(bankedRes.residualAtS1, 4)} ${coinName}` : `${fmtUsd(bankedRes.residualAtS1)} USD`}`
+                      : '，恰好花光'}`
+                    : ''}——通过。
+                </div>
+              )}
+            </section>
+          )}
         </div>
       </DialogContent>
     </Dialog>

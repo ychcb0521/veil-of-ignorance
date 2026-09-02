@@ -223,6 +223,49 @@ describe('AddSizingCalculator', () => {
   });
 });
 
+describe('R0 复核 —— AIOTUSDT 学费单要求的那一块', () => {
+  /**
+   * AIOTUSDT 2025-05-03:合法上限 4.26M 币,实际加 20.07M(4.71×),亏 25.4 万。
+   * 数学层没错;错在 evaluatePostAddCostLine 一直是死代码,界面从不喊「越界」。
+   * 这里钉住:合规时给通过语,超量时给红色横幅 + 缺口金额。
+   */
+  it('A+B 按上限走 → R0 通过,B 段由落袋垫付', () => {
+    renderCalc();
+    type('add-sizing-s1', '130');
+    type('add-sizing-g', '1.2');
+    // K_B 默认 = S₁,B 在 S₁ 恰好花光 → 无缺口
+    expect(screen.getByTestId('add-sizing-r0-pass')).toBeInTheDocument();
+    expect(screen.queryByTestId('add-sizing-r0-violation')).toBeNull();
+    expect(screen.getByTestId('add-sizing-r0')).toHaveTextContent('R0 复核');
+  });
+
+  it('【回归】定仓旋钮输入超量 → 红色横幅 + 缺口 + 超出倍数', () => {
+    renderCalc();
+    type('add-sizing-s1', '130');
+    type('add-sizing-g', '1.2');
+    // 切到定仓,输入 3 倍于上限(上限 15.6):46.8 币
+    fireEvent.click(screen.getByTestId('add-sizing-knob-size'));
+    type('add-sizing-x2b', '46.8');
+    const banner = screen.getByTestId('add-sizing-r0-violation');
+    expect(banner).toHaveTextContent('R0 非法');
+    expect(banner).toHaveTextContent('由本金支付');
+    expect(banner).toHaveTextContent('300%');           // exposureAtS1 = 3×
+    expect(screen.queryByTestId('add-sizing-r0-pass')).toBeNull();
+  });
+
+  it('B 关闭时(纯 A)恒为通过——A 的定义就是在 S₁ 打平', () => {
+    renderCalc();
+    type('add-sizing-s1', '130');
+    expect(screen.getByTestId('add-sizing-r0-pass')).toBeInTheDocument();
+    expect(screen.getByTestId('add-sizing-r0-pass')).toHaveTextContent('A 段打平');
+  });
+
+  it('S₁ 未填时不出 R0 块——没有可复核的对象', () => {
+    renderCalc();
+    expect(screen.queryByTestId('add-sizing-r0')).toBeNull();
+  });
+});
+
 describe('顶栏「加仓」按钮', () => {
   it('在倒叙播放左边；没有标的时禁用，有标的时点开计算器', () => {
     const { unmount } = render(<MemoryRouter><SessionModeControls /></MemoryRouter>);
