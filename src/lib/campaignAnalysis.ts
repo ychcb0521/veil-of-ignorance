@@ -221,6 +221,78 @@ function openingNotionalUsd(
   return total > EPSILON ? total : null;
 }
 
+/** 这条腿**自己**那一刀平掉了多少名义（只认精确 id 命中的分片，不沿 fillId 外扩）。 */
+function ownClosedNotionalUsd(
+  ref: string | null | undefined,
+  settlement: TradeRecord[],
+): number | null {
+  if (!ref) return null;
+  const total = settlement
+    .filter(record => record.id === ref)
+    .reduce((sum, record) => sum + tradeRecordNotionalUsd(record, record.entryPrice), 0);
+  return total > EPSILON ? total : null;
+}
+
+/** 一笔开仓成交，以及认领了它某几刀平仓的那些初始腿。 */
+interface InitialExposureGroup {
+  legs: TradeJournal[];
+  /** 组内全部平仓分片**并集**之和；组里没有任何成交记录时为 null。 */
+  notional: number | null;
+  /** 这一组已经算进去的平仓记录 id。事件兜底据此避免把同一刀再加一遍。 */
+  sliceIds: Set<string>;
+}
+
+/**
+ * 把初始敞口腿按「同一笔开仓成交」并组。
+ *
+ * 事故（XLMUSDT 2026-05-30）：历史归类把一笔仓位的两刀平仓分别标成了
+ * main_open（收尾 40%）与 mirror_tp（镜像止盈 60%）。两条腿指着**同一笔开仓**，
+ * 而 openingNotionalUsd 会沿 fillId 把兄弟分片补回整笔——于是两条腿各自算出
+ * 673,580，相加成 1,347,160：敞口精确翻倍，最大预期亏损跟着翻倍（85,916 而非 42,958），
+ * 镜像减仓比例被压成 673,580 / 1,347,160 = 50%（真实是 60%）。
+ *
+ * 判据是**能否触达同一批平仓分片**：能，就是同一笔开仓，敞口只能计一次。
+ *
+ * 计一次的口径是组内分片的**并集**，不是「各腿自己那一刀之和」。
+ * 一笔开仓的分片不一定都被腿认领——剩下的 40% 若又切成两刀、腿只关联其中一刀，
+ * 按认领求和会少算 20%。那正是「镜像止盈落袋后 L 缩水」这个老 bug 的另一副面孔：
+ * L 是 ex-ante 的量，它是盈亏比的分母，少算就等于虚报「这笔仓位没那么危险」。
+ */
+function groupLegsByOpeningFill(
+  initialLegs: TradeJournal[],
+  settlement: TradeRecord[],
+): InitialExposureGroup[] {
+  const groups: Array<{ legs: TradeJournal[]; slices: Map<string, TradeRecord> }> = [];
+  for (const leg of initialLegs) {
+    const slices = leg.trade_record_id ? settlementSlicesFor(leg.trade_record_id, settlement) : [];
+    // 与多个组都有交集时要把它们一并并掉，否则 {A} {B} {A,B} 会留下两个组。
+    const hits = groups.filter(group => slices.some(slice => group.slices.has(slice.id)));
+    const target = hits[0] ?? { legs: [], slices: new Map<string, TradeRecord>() };
+    if (hits.length === 0) groups.push(target);
+    for (const extra of hits.slice(1)) {
+      target.legs.push(...extra.legs);
+      for (const [id, slice] of extra.slices) target.slices.set(id, slice);
+      groups.splice(groups.indexOf(extra), 1);
+    }
+    target.legs.push(leg);
+    for (const slice of slices) target.slices.set(slice.id, slice);
+  }
+  return groups.map(group => {
+    const total = Array.from(group.slices.values())
+      .reduce((sum, record) => sum + tradeRecordNotionalUsd(record, record.entryPrice), 0);
+    return {
+      legs: group.legs,
+      notional: total > EPSILON ? total : null,
+      sliceIds: new Set(group.slices.keys()),
+    };
+  });
+}
+
+/** 组的记账角色：有主力就挂主力名下，否则挂第一条腿（镜像独立成仓的老数据）。 */
+function groupOwnerLeg(group: InitialExposureGroup): TradeJournal {
+  return group.legs.find(leg => leg.leg_role === 'main_open') ?? group.legs[0];
+}
+
 /**
  * 承载敞口的记录。只把资金费排除掉——它与开仓量无关，混进来会虚增敞口。
  *
@@ -525,16 +597,32 @@ function resolveInitialMainExposureNotional(
   const collect = (entries: Array<{ role: string; notional: number }>, role: string) =>
     entries.filter(item => item.role === role).reduce((sum, item) => sum + item.notional, 0);
 
-  // ① 腿：权威来源。腿之间天然按 id 互不相同，无需去重。
+  // ① 腿：权威来源。同一笔开仓被拆成多条腿（主力收尾 + 镜像止盈）时按组计一次全额。
+  const initialExposureLegs = legs.filter(leg =>
+    isInitialMainExposurePosition(campaign, leg.leg_role, leg.direction));
   const legEntries: Array<{ role: string; notional: number }> = [];
-  for (const leg of legs) {
-    if (!isInitialMainExposurePosition(campaign, leg.leg_role, leg.direction)) continue;
-    const notional = firstPositiveNumber(
-      openingNotionalUsd(leg.trade_record_id, settlement),
-      leg.pre_position_size,
-    );
-    if (notional == null || !leg.leg_role) continue;
-    legEntries.push({ role: leg.leg_role, notional });
+  /**
+   * 「这个角色有没有腿」要独立于「这个角色摊到多少金额」来记。
+   * 一笔开仓的全额记在主力名下之后，镜像那一档的金额是 0——若拿金额当判据，
+   * 第 ③ 步会认为镜像没有腿而去补事件流，翻倍从另一条路回来。
+   */
+  const rolesCoveredByLegs = new Set<string>();
+  /**
+   * 腿已经算进去的平仓分片。
+   *
+   * 一条主力腿沿 fillId 展开时会把镜像那一刀也算进整笔开仓里。若此时镜像**没有腿、
+   * 只剩事件**，第 ③ 步会认为镜像那一档缺来源而去补事件——那一刀就被加了第二遍。
+   * 「按角色分」挡不住这一种：两个角色确实一个有腿一个没有，翻倍发生在角色内部。
+   */
+  const sliceIdsCountedByLegs = new Set<string>();
+  for (const group of groupLegsByOpeningFill(initialExposureLegs, settlement)) {
+    const owner = groupOwnerLeg(group);
+    const notional = group.notional
+      ?? firstPositiveNumber(...group.legs.map(leg => leg.pre_position_size));
+    if (notional == null || !owner.leg_role) continue;
+    for (const leg of group.legs) if (leg.leg_role) rolesCoveredByLegs.add(leg.leg_role);
+    for (const sliceId of group.sliceIds) sliceIdsCountedByLegs.add(sliceId);
+    legEntries.push({ role: owner.leg_role, notional });
   }
 
   // ② 事件：只在同角色没有腿时才会被用到；事件**之间**仍要去重
@@ -545,6 +633,8 @@ function resolveInitialMainExposureNotional(
     .sort((a, b) => toMs(a.timestamp) - toMs(b.timestamp))) {
     if (!POSITION_ENTRY_EVENT_TYPES.has(event.event_type)) continue;
     if (!isInitialMainExposurePosition(campaign, event.leg_role, event.direction)) continue;
+    // 这一刀已经含在某条腿的整笔开仓里了。
+    if (event.trade_record_id && sliceIdsCountedByLegs.has(event.trade_record_id)) continue;
     const record = event.trade_record_id ? recordLookup.get(event.trade_record_id) ?? null : null;
     const notional = firstPositiveNumber(
       record ? tradeRecordNotionalUsd(record, record.entryPrice) : null,
@@ -560,8 +650,7 @@ function resolveInitialMainExposureNotional(
   // ③ 逐角色取用：有腿用腿，没腿才用事件。两者永不相加。
   let total = 0;
   for (const role of INITIAL_MAIN_EXPOSURE_ROLES) {
-    const fromLegs = collect(legEntries, role);
-    total += fromLegs > EPSILON ? fromLegs : collect(eventEntries, role);
+    total += rolesCoveredByLegs.has(role) ? collect(legEntries, role) : collect(eventEntries, role);
   }
 
   // ④ 主力那一档两条来源都空时，退回战役级快照（老战役连腿带事件都没有）。
@@ -612,20 +701,22 @@ function groupInitialMainExposure(
    * 与 resolveInitialMainExposureNotional 同一条结构性原则：**按角色分，腿存在就只用腿**。
    * 两条来源永不相加，翻倍在结构上不可能发生（跨来源匹配为什么不管用，见那边的长注释）。
    */
+  const initialExposureLegs = legs.filter(leg =>
+    isInitialMainExposurePosition(campaign, leg.leg_role, leg.direction));
   const rolesWithLegs = new Set<string>();
-  for (const leg of legs) {
-    if (!isInitialMainExposurePosition(campaign, leg.leg_role, leg.direction)) continue;
-    const record = leg.trade_record_id ? recordLookup.get(leg.trade_record_id) ?? null : null;
-    const notional = firstPositiveNumber(
-      openingNotionalUsd(leg.trade_record_id, settlement),
-      leg.pre_position_size,
-    );
-    if (notional == null || !leg.leg_role) continue;
-    rolesWithLegs.add(leg.leg_role);
-    // 主力自己就是自己的组;镜像按开仓时刻归属。
-    const owner = leg.leg_role === 'main_open'
-      ? leg
-      : ownerAt(firstPositiveNumber(record?.openTime, toMs(leg.pre_simulated_time)));
+  const sliceIdsCountedByLegs = new Set<string>();
+  for (const group of groupLegsByOpeningFill(initialExposureLegs, settlement)) {
+    const ownerLeg = groupOwnerLeg(group);
+    const notional = group.notional
+      ?? firstPositiveNumber(...group.legs.map(leg => leg.pre_position_size));
+    if (notional == null || !ownerLeg.leg_role) continue;
+    for (const leg of group.legs) if (leg.leg_role) rolesWithLegs.add(leg.leg_role);
+    for (const sliceId of group.sliceIds) sliceIdsCountedByLegs.add(sliceId);
+    // 主力自己就是自己的组;镜像独立成仓时按开仓时刻归属。
+    const record = ownerLeg.trade_record_id ? recordLookup.get(ownerLeg.trade_record_id) ?? null : null;
+    const owner = ownerLeg.leg_role === 'main_open'
+      ? ownerLeg
+      : ownerAt(firstPositiveNumber(record?.openTime, toMs(ownerLeg.pre_simulated_time)));
     add(owner?.id ?? null, notional);
   }
 
@@ -635,6 +726,8 @@ function groupInitialMainExposure(
     if (!isInitialMainExposurePosition(campaign, event.leg_role, event.direction)) continue;
     // 该角色已有腿 → 事件只是同一批仓位的另一种描述，整批跳过。
     if (!event.leg_role || rolesWithLegs.has(event.leg_role)) continue;
+    // 这一刀已经含在某条腿的整笔开仓里了（见 resolveInitialMainExposureNotional 的长注释）。
+    if (event.trade_record_id && sliceIdsCountedByLegs.has(event.trade_record_id)) continue;
     const record = event.trade_record_id ? recordLookup.get(event.trade_record_id) ?? null : null;
     const notional = firstPositiveNumber(
       record ? tradeRecordNotionalUsd(record, record.entryPrice) : null,
@@ -738,8 +831,21 @@ export function computeMirrorTpReductionPct(
   const roleFallbackEvent = (campaign.actual_evolution ?? [])
     .filter(event => event.leg_role === 'mirror_tp' && firstPositiveNumber(event.size_usdt) != null)
     .sort((a, b) => toMs(a.timestamp) - toMs(b.timestamp))[0] ?? null;
+  const settlement = settlementRecordsOf(tradeRecords);
+  /**
+   * 分子是这笔镜像**实际平掉**的量。
+   * 它与主力共用一笔开仓时（同一组、组里不止一条腿），只能认它自己那一刀——
+   * 沿 fillId 外扩会拿到整笔开仓，比例算出来恒等于 50%，与实际减仓多少无关。
+   * 镜像自己独立成仓时反过来：外扩才拿得到它被分刀平掉的完整仓位。
+   */
+  const initialExposureLegs = legs.filter(leg =>
+    isInitialMainExposurePosition(campaign, leg.leg_role, leg.direction));
+  const sharesOpeningFill = groupLegsByOpeningFill(initialExposureLegs, settlement)
+    .some(group => group.legs.length > 1 && group.legs.some(leg => leg.id === mirrorLeg.id));
   const mirrorNotional = firstPositiveNumber(
-    openingNotionalUsd(mirrorLeg.trade_record_id, settlementRecordsOf(tradeRecords)),
+    sharesOpeningFill
+      ? ownClosedNotionalUsd(mirrorLeg.trade_record_id, settlement)
+      : openingNotionalUsd(mirrorLeg.trade_record_id, settlement),
     mirrorLeg.pre_position_size,
     mirrorEvents[0]?.size_usdt,
     roleFallbackEvent?.size_usdt,
