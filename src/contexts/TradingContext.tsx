@@ -1031,7 +1031,9 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
       settlementAsset: order.settlementAsset,
       contractSizeUsd: order.contractSizeUsd,
       createdAt: order.createdAt,
+      createdRealAt: order.createdRealAt,
       cancelledAt,
+      cancelledRealAt: Date.now(),
     }));
     toast.error('保证金不足，委托已撤销', {
       description: `${symbol} 需要 ${verdict.requiredUsd.toFixed(2)} USDT，可用 ${verdict.availableUsd.toFixed(2)} USDT`,
@@ -1270,7 +1272,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
 
     // BEST PRICE (taker)
     if (normalizedOrder.priceSelection === 'BEST') {
-      const { fee, margin, slippage, position } = executeSettlementFill(symbol, effectiveCurrentPrice, normalizedOrder, false, now);
+      const { fee, margin, slippage, position } = executeSettlementFill(symbol, effectiveCurrentPrice, normalizedOrder, false, now, Date.now());
       const requiredMargin = margin + fee;
       if (requiredMargin > available) {
         toast.error('可用余额不足', {
@@ -1313,7 +1315,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
 
     // MARKET (taker with slippage)
     if (normalizedOrder.type === 'MARKET') {
-      const { fee, margin, slippage, position } = executeSettlementFill(symbol, effectiveCurrentPrice, normalizedOrder, false, now);
+      const { fee, margin, slippage, position } = executeSettlementFill(symbol, effectiveCurrentPrice, normalizedOrder, false, now, Date.now());
       const requiredMargin = margin + fee;
       if (requiredMargin > available) {
         toast.error('可用余额不足', {
@@ -1398,7 +1400,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
         settlementAsset: normalizedOrder.settlementAsset,
         contractSizeUsd: normalizedOrder.contractSizeUsd,
         contracts: isCoinSettled(normalizedOrder) ? qtyPerStep : undefined,
-        status: 'NEW' as const, createdAt: now, parentScaledId: parentId,
+        status: 'NEW' as const, createdAt: now, createdRealAt: Date.now(), parentScaledId: parentId,
         tradingMode: tradingModeRef.current,
       }));
       setOrdersMap(prev => ({ ...prev, [symbol]: [...(prev[symbol] || []), ...newOrders] }));
@@ -1440,7 +1442,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
         // 无激活价 = 挂出即激活；极值从首根 K 线开始积累
         trailingActivated: activation <= 0,
         peakPrice: undefined, troughPrice: undefined,
-        status: 'PENDING', createdAt: now,
+        status: 'PENDING', createdAt: now, createdRealAt: Date.now(),
         tradingMode: tradingModeRef.current,
       };
       setOrdersMap(prev => ({ ...prev, [symbol]: [...(prev[symbol] || []), trailingOrder] }));
@@ -1475,7 +1477,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
         settlementAsset: normalizedOrder.settlementAsset,
         contractSizeUsd: normalizedOrder.contractSizeUsd,
         contracts: normalizedOrder.contracts,
-        status: 'ACTIVE', createdAt: now,
+        status: 'ACTIVE', createdAt: now, createdRealAt: Date.now(),
         tradingMode: tradingModeRef.current,
         twapTotalQty: normalizedOrder.quantity, twapFilledQty: 0,
         twapInterval: intervalMs, twapNextExecTime: now,
@@ -1536,7 +1538,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
       settlementAsset: normalizedOrder.settlementAsset,
       contractSizeUsd: normalizedOrder.contractSizeUsd,
       contracts: normalizedOrder.contracts,
-      status: normalizedOrder.type === 'CONDITIONAL' ? 'PENDING' : 'NEW', createdAt: now,
+      status: normalizedOrder.type === 'CONDITIONAL' ? 'PENDING' : 'NEW', createdAt: now, createdRealAt: Date.now(),
       tradingMode: tradingModeRef.current,
       callbackRate: normalizedOrder.callbackRate, trailingExecType: normalizedOrder.trailingExecType,
       trailingLimitPrice: normalizedOrder.trailingLimitPrice, trailingActivated: false,
@@ -1750,7 +1752,9 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
           settlementAsset: order.settlementAsset,
           contractSizeUsd: order.contractSizeUsd,
           createdAt: order.createdAt,
+          createdRealAt: order.createdRealAt,
           cancelledAt,
+          cancelledRealAt: Date.now(),
         }));
     }
     setOrdersMap(prev => ({

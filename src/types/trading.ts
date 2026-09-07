@@ -57,6 +57,12 @@ export interface PendingOrder {
   contracts?: number;
   status: OrderStatus;
   createdAt: number;
+  /**
+   * 真实钱包时钟下的挂单时刻（Date.now()），与 createdAt 的模拟 K 线时间严格区分。
+   * 归属战役靠它：同一段历史行情可以回放两次，两次的委托在模拟时间轴上完全重合，
+   * 在真实时间轴上必然分开。老委托没有这个字段（undefined），归属时退回模拟窗口。
+   */
+  createdRealAt?: number;
   /** Trading mode captured at placement, so later fills keep the original incentive weight. */
   tradingMode?: "decision" | "direct";
 
@@ -136,6 +142,9 @@ export interface CancelledOrderSnapshot {
   createdAt: number;
   /** 取消时间 (sim/K-line clock) */
   cancelledAt: number;
+  /** 真实钱包时钟下的挂单 / 撤单时刻；老快照没有。 */
+  createdRealAt?: number;
+  cancelledRealAt?: number;
 }
 
 /**
@@ -167,6 +176,9 @@ export interface FilledOrderSnapshot {
   createdAt: number;
   /** 触发/成交时间 (sim/K-line clock) */
   filledAt: number;
+  /** 真实钱包时钟下的挂单 / 成交时刻；老快照没有。 */
+  createdRealAt?: number;
+  filledRealAt?: number;
   positionId?: string;
 }
 
@@ -216,6 +228,8 @@ export interface Position {
   isolatedMargin?: number;
   /** Simulated clock time when this position was opened */
   openTime?: number;
+  /** 真实钱包时钟下的开仓时刻（Date.now()）；老仓位没有。战役按真实时间归属委托单时的下界依据。 */
+  openedRealAt?: number;
   /**
    * 开仓那一刻的杠杆，**永不重述**。
    *
@@ -240,6 +254,8 @@ export interface Position {
 export interface PositionFill {
   id: string;
   openTime: number;
+  /** 这笔成交自己的真实开仓时刻；合并进仓位后各笔各留各的。 */
+  openedRealAt?: number;
   entryPrice: number;
   /** 该笔成交的计量单位数：币本位为张数，U 本位为币数。 */
   units: number;
@@ -290,6 +306,8 @@ export interface TradeRecord {
    * 老记录为 undefined（界面显示「—」，绝不退回模拟时间冒充真实操作时间）。
    */
   closedRealAt?: number;
+  /** 真实钱包时钟下的开仓时刻；与 closedRealAt 一起框出这笔交易在现实里的持有区间。老记录没有。 */
+  openedRealAt?: number;
   /** How the position was closed. Manual for user-initiated; sl/tp1-3 for triggered TP/SL; liquidation for forced close. */
   exit_method?: "manual" | "sl" | "tp1" | "tp2" | "tp3" | "liquidation";
   /** User-written reason recorded after the close, used for post-trade review and playback. */

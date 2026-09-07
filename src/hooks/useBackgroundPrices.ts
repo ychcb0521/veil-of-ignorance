@@ -120,7 +120,7 @@ export function useBackgroundPrices() {
           // 归一化 → 滑点 → 手续费 → 保证金 → 造出带齐结算字段的 Position。
           filledIds.push(order.id);
           const simulatedTime = getEffectiveTime(symbol);
-          const { fee, margin, position } = executeSettlementFill(symbol, fillPrice, order, false, simulatedTime);
+          const { fee, margin, position } = executeSettlementFill(symbol, fillPrice, order, false, simulatedTime, Date.now());
           const actualFillPrice = position.entryPrice;
 
           // 付不起就当场撤单留痕。id 已经进了 filledIds（上一行 push），
@@ -149,7 +149,9 @@ export function useBackgroundPrices() {
             settlementAsset: order.settlementAsset,
             contractSizeUsd: order.contractSizeUsd,
             createdAt: order.createdAt,
+            createdRealAt: order.createdRealAt,
             filledAt: simulatedTime,
+            filledRealAt: Date.now(),
             positionId: position.id,
           }));
           setPositionsMap((prev) => {

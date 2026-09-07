@@ -172,6 +172,8 @@ export function executeSettlementFill(
   order: SettlementOrderLike,
   isMaker: boolean,
   openTime = 0,
+  /** 真实钱包时钟下的开仓时刻。可选：纯函数保持可复现，调用方在成交那一刻传 Date.now()。 */
+  openedRealAt?: number,
 ) {
   const normalized = normalizeSettlementOrder(symbol, order);
   const { fillPrice, slippageUsd } = applySettlementSlippage(symbol, rawPrice, normalized, isMaker);
@@ -195,6 +197,7 @@ export function executeSettlementFill(
     marginCoin,
     isolatedMargin: normalized.marginMode === "isolated" ? marginUsd : undefined,
     openTime,
+    ...(Number.isFinite(openedRealAt) && (openedRealAt as number) > 0 ? { openedRealAt } : {}),
   };
 
   return { fee: feeUsd, feeCoin, margin: marginUsd, marginCoin, slippage: slippageUsd, position };
@@ -381,6 +384,7 @@ export function buildCloseRecords(input: {
     settlementAsset: pos.settlementAsset,
     contractSizeUsd: pos.contractSizeUsd,
     openTime: pos.openTime || 0,
+    openedRealAt: pos.openedRealAt,
     closeTime,
     exit_method: exitMethod,
     closedRealAt,
@@ -468,6 +472,7 @@ export function buildCloseRecords(input: {
       fillId: f.id,
       entryPrice: f.entryPrice,
       openTime: f.openTime || pos.openTime || 0,
+      openedRealAt: f.openedRealAt ?? pos.openedRealAt,
       // 每笔成交各带自己的开仓杠杆:持仓期内提过杠杆之后,合并仓位的 openLeverage
       // 一路继承最早那笔的值,加仓那一片会顶着主力的杠杆写进历史,R 倍数随之失真。
       leverage: f.openLeverage ?? pos.openLeverage ?? pos.leverage,
@@ -584,6 +589,7 @@ function fillsOf(p: Position, symbol: string): PositionFill[] {
     entryPrice: p.entryPrice,
     units: getPositionUnits(p),
     openLeverage: p.openLeverage ?? p.leverage,
+    openedRealAt: p.openedRealAt,
   }];
 }
 

@@ -487,7 +487,7 @@ const Index = () => {
       const liveOrder = (ordersMapRef.current[symbol] || []).find((candidate) => candidate.id === order.id);
       if (!liveOrder) return false;
 
-      const { fee, margin, position } = executeSettlementFill(symbol, entryPrice, order, false, openTime);
+      const { fee, margin, position } = executeSettlementFill(symbol, entryPrice, order, false, openTime, Date.now());
 
       // 付不起就当场撤单。**返回 true**:调用方把 false 读成「没执行」，
       // 会解掉触发锁并挂上 500ms 重试——那会变成每半秒一次的无限重试加提示。
@@ -518,7 +518,9 @@ const Index = () => {
           settlementAsset: order.settlementAsset,
           contractSizeUsd: order.contractSizeUsd,
           createdAt: order.createdAt,
+          createdRealAt: order.createdRealAt,
           filledAt: openTime,
+          filledRealAt: Date.now(),
           positionId: position.id,
         }));
       setPositionsMap((prev) => {
@@ -1223,7 +1225,9 @@ const Index = () => {
               matchedOrder,
               isMaker,
               simulatedTime,
-              { high: kline.high, low: kline.low, close: kline.close },
+              // 第 6 位曾误传 K 线区间对象（函数从未消费它，只是个基线类型错误）；
+              // 现在这一位是真实开仓时刻，供战役按真实时间归属委托单。
+              Date.now(),
             );
             const actualFillPrice = position.entryPrice;
             // 付不起 → 不 push 回 remaining（等于撤单）。id 在上面已经进了 filledIds，
@@ -1248,7 +1252,9 @@ const Index = () => {
                 settlementAsset: matchedOrder.settlementAsset,
                 contractSizeUsd: matchedOrder.contractSizeUsd,
                 createdAt: matchedOrder.createdAt,
+                createdRealAt: matchedOrder.createdRealAt,
                 filledAt: simulatedTime,
+                filledRealAt: Date.now(),
                 positionId: position.id,
               }));
             setPositionsMap((prev) => {
@@ -1346,6 +1352,7 @@ const Index = () => {
                   sliceOrder,
                   false,
                   getEffectiveTime(symbol),
+                  Date.now(),
                 );
                 // 付不起就**停掉整张 TWAP**,而不是跳过一片继续跑:
                 // 后面每一片只会更贵(仓位在涨、可用在降)。

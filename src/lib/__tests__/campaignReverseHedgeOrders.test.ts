@@ -989,4 +989,169 @@ describe('getCampaignFullData reverse hedge order layer', () => {
       status: 'cancelled',
     })]);
   });
+
+  it('【回归】同一段行情回放两次：委托按真实操作时间归属，上一次回放的单子不混进来', async () => {
+    // 模拟时间轴：两次回放完全一样（都是 2025-09-20 10:00–10:30 那段行情）
+    const createdAt = t('2025-09-20T10:01:00.000Z');
+    const filledAt = t('2025-09-20T10:05:00.000Z');
+    const closeTime = t('2025-09-20T10:20:00.000Z');
+    // 真实时间轴：第一次回放在 9 月 5 日，本场（第二次）在 9 月 7 日
+    const REPLAY_1 = Date.parse('2026-09-05T10:00:00.000Z');
+    const REPLAY_2 = Date.parse('2026-09-07T09:00:00.000Z');
+    const MIN = 60_000;
+
+    const shortOpen = (
+      id: string,
+      createdRealAt: number | undefined,
+      positionId: string,
+      price = 1.201,
+      createdAtSim = createdAt,
+    ): FilledOrderSnapshot => ({
+      id,
+      symbol: 'ASTERUSDT',
+      side: 'SHORT',
+      type: 'CONDITIONAL',
+      reduceOnly: false,
+      reduceKind: null,
+      price,
+      triggerPrice: price,
+      quantity: 100,
+      leverage: 5,
+      createdAt: createdAtSim,
+      filledAt,
+      positionId,
+      ...(createdRealAt != null ? { createdRealAt, filledRealAt: createdRealAt + 4 * MIN } : {}),
+    });
+    // 上一次回放的那张单，模拟时间、价格、数量与本场主单**一模一样**——只差真实时刻
+    const filledOrders: FilledOrderSnapshot[] = [
+      shortOpen('short-open-replay-1', REPLAY_1 + 1 * MIN, 'short-position-old'),
+      shortOpen('short-open-order', REPLAY_2 + 1 * MIN, 'short-position'),
+      // 升级前的老委托：没有真实时刻 → 放行
+      shortOpen('short-open-legacy', undefined, 'short-position-legacy', 1.21, t('2025-09-20T10:02:00.000Z')),
+      // 开主力前 2 分钟挂出的前置对冲：落在回看窗内 → 保留
+      shortOpen('short-prehedge-open', REPLAY_2 - 2 * MIN, 'short-position-pre', 1.22, t('2025-09-20T10:03:00.000Z')),
+    ];
+    const cancelledOrders: CancelledOrderSnapshot[] = [
+      {
+        id: 'short-cancelled-replay-1',
+        symbol: 'ASTERUSDT',
+        side: 'SHORT',
+        type: 'CONDITIONAL',
+        reduceOnly: false,
+        reduceKind: null,
+        price: 1.19,
+        quantity: 100,
+        leverage: 5,
+        createdAt: t('2025-09-20T10:04:00.000Z'),
+        cancelledAt: t('2025-09-20T10:09:00.000Z'),
+        createdRealAt: REPLAY_1 + 4 * MIN,
+        cancelledRealAt: REPLAY_1 + 9 * MIN,
+      },
+      {
+        id: 'short-cancelled-open',
+        symbol: 'ASTERUSDT',
+        side: 'SHORT',
+        type: 'CONDITIONAL',
+        reduceOnly: false,
+        reduceKind: null,
+        price: 1.19,
+        quantity: 100,
+        leverage: 5,
+        createdAt: t('2025-09-20T10:04:00.000Z'),
+        cancelledAt: t('2025-09-20T10:09:00.000Z'),
+        createdRealAt: REPLAY_2 + 4 * MIN,
+        cancelledRealAt: REPLAY_2 + 9 * MIN,
+      },
+    ];
+    const pendingBase: PendingOrder = {
+      id: 'short-pending-open',
+      side: 'SHORT',
+      type: 'CONDITIONAL',
+      price: 1.18,
+      stopPrice: 1.18,
+      quantity: 100,
+      leverage: 5,
+      marginMode: 'isolated',
+      status: 'PENDING',
+      createdAt: t('2025-09-20T10:08:00.000Z'),
+      createdRealAt: REPLAY_2 + 8 * MIN,
+    };
+    const pendingReplay1: PendingOrder = { ...pendingBase, id: 'short-pending-replay-1', createdRealAt: REPLAY_1 + 8 * MIN };
+
+    // 一张已成交的开仓委托对应一个仓位、一条平仓记录（既有去重规则：record 相同即视为同一张单），
+    // 所以三张本场成交单各自带一条记录。老记录没有真实时刻。
+    const closedRecord = (id: string, positionId: string, entryPrice: number, real?: { opened: number; closed: number }): TradeRecord => ({
+      id,
+      symbol: 'ASTERUSDT',
+      side: 'SHORT',
+      type: 'MARKET',
+      action: 'CLOSE',
+      entryPrice,
+      exitPrice: 1.1,
+      quantity: 100,
+      leverage: 5,
+      pnl: 10,
+      fee: 0,
+      slippage: 0,
+      openTime: filledAt,
+      closeTime,
+      positionId,
+      ...(real ? { openedRealAt: real.opened, closedRealAt: real.closed } : {}),
+    } as TradeRecord);
+    const tradeHistory: TradeRecord[] = [
+      closedRecord('record-short-position', 'short-position', 1.201, { opened: REPLAY_2 + 5 * MIN, closed: REPLAY_2 + 20 * MIN }),
+      closedRecord('record-short-legacy', 'short-position-legacy', 1.21),
+      closedRecord('record-short-pre', 'short-position-pre', 1.22, { opened: REPLAY_2 + 2 * MIN, closed: REPLAY_2 + 18 * MIN }),
+    ];
+    journals = [
+      makeLeg({
+        id: 'leg-triggered-short',
+        trade_record_id: 'record-short-position',
+        leg_sequence: 1,
+        pre_simulated_time: new Date(filledAt).toISOString(),
+        pre_real_time: new Date(REPLAY_2 + 1 * MIN).toISOString(),
+        pre_entry_price: 1.201,
+        pre_position_size: 120,
+      }),
+      makeLeg({
+        id: 'leg-legacy-short',
+        trade_record_id: 'record-short-legacy',
+        leg_sequence: 2,
+        pre_simulated_time: new Date(filledAt).toISOString(),
+        pre_real_time: new Date(REPLAY_2 + 2 * MIN).toISOString(),
+        pre_entry_price: 1.21,
+        pre_position_size: 121,
+      }),
+      makeLeg({
+        id: 'leg-pre-short',
+        trade_record_id: 'record-short-pre',
+        leg_sequence: 3,
+        pre_simulated_time: new Date(filledAt).toISOString(),
+        pre_real_time: new Date(REPLAY_2 - 2 * MIN).toISOString(),
+        pre_entry_price: 1.22,
+        pre_position_size: 122,
+      }),
+    ];
+
+    localStorage.setItem('sim_user-1_filled_orders', JSON.stringify(filledOrders));
+    localStorage.setItem('sim_user-1_cancelled_orders', JSON.stringify(cancelledOrders));
+    localStorage.setItem('sim_user-1_orders_map', JSON.stringify({ ASTERUSDT: [pendingBase, pendingReplay1] }));
+    localStorage.setItem('sim_user-1_trade_history', JSON.stringify(tradeHistory));
+
+    const { reverseHedgeOrders } = await getCampaignFullData(campaign.id);
+    const ids = reverseHedgeOrders.map(order => order.id);
+
+    // 本场 + 老委托 + 前置对冲：保留
+    expect([...ids].sort()).toEqual([
+      'short-cancelled-open',
+      'short-open-legacy',
+      'short-open-order',
+      'short-pending-open',
+      'short-prehedge-open',
+    ]);
+    // 上一次回放：三种状态的委托全部排除
+    expect(ids).not.toContain('short-open-replay-1');
+    expect(ids).not.toContain('short-cancelled-replay-1');
+    expect(ids).not.toContain('short-pending-replay-1');
+  });
 });

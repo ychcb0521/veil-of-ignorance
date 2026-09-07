@@ -72,6 +72,7 @@ import type {
 import { isHistoricalCampaign, ruleCooldownRemainingMs } from "@/types/journal";
 import { campaignStatusFromRealizedPnl, computeCampaignRealizedPnl } from "@/lib/campaignRealizedPnl";
 import { queueSimStatePush } from '@/lib/simStateSync';
+import { campaignRealTimeWindow, orderWithinRealWindow } from '@/lib/campaignOrderRealTime';
 import type {
   PendingOrder,
   TradeRecord,
@@ -2406,11 +2407,25 @@ export async function getCampaignFullData(
     legRecordIds.has(record.id)
     || Boolean(record.positionId && legRecordIds.has(record.positionId))
   ));
+  /**
+   * 第二道归属：**真实时间**一致性。
+   * 这是时间机器——同一段历史行情能回放两次，两次的委托在模拟时间轴上完全重合，
+   * 上面的 inWindow 会把两场的单子全部收进来（WLDUSDT 2026-05-26 的事故）。
+   * 人一次只能做一件事，两次回放的现实时刻必然分开：委托的真实创建时刻
+   * 必须落在本场已选中成交的真实区间内。老数据没有真实时刻 → 放行，退回模拟窗口。
+   */
+  const realWindow = campaignRealTimeWindow({
+    tradeRecords,
+    legs,
+    campaignClosed: Boolean(campaign.closed_at),
+  });
+  const inRealWindow = (t: number | null | undefined) => orderWithinRealWindow(t, realWindow);
   // 持仓面板 / 结束建议用的挂单也按挂单时间归属，避免同标的另一场战役的实时挂单混进本战役。
   const pendingOrders = Object.entries(ordersMap)
     .flatMap(([symbol, orders]) => symbol === campaign.symbol ? orders : [])
     .filter(order => (order.status === 'NEW' || order.status === 'PENDING' || order.status === 'ACTIVE')
-      && inWindow(order.createdAt));
+      && inWindow(order.createdAt)
+      && inRealWindow(order.createdRealAt));
 
   // 黄色委托层只记录「开仓性质的委托空单」；止盈/止损等平仓委托不进入这里。
   const isPositionClosingOrder = (order: Pick<PendingOrder | CancelledOrderSnapshot | FilledOrderSnapshot, 'side'> & {
@@ -2530,7 +2545,8 @@ export async function getCampaignFullData(
     .filter(order =>
       order.symbol === campaign.symbol &&
       isOpeningShortOrder(order) &&
-      inWindow(order.createdAt)
+      inWindow(order.createdAt) &&
+      inRealWindow(order.createdRealAt)
     )
     .map(order => {
       const record = findRecordForFilledOrder(order);
@@ -2670,7 +2686,8 @@ export async function getCampaignFullData(
       .filter(order =>
         order.symbol === campaign.symbol &&
         isOpeningShortOrder(order) &&
-        inWindow(order.createdAt)
+        inWindow(order.createdAt) &&
+        inRealWindow(order.createdRealAt)
       )
       .map(order => ({
         id: order.id,

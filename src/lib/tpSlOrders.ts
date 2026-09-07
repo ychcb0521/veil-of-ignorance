@@ -124,7 +124,7 @@ export function buildTpSlOrders(args: {
       settlementMode: position.settlementMode, settlementAsset: position.settlementAsset,
       contractSizeUsd: position.contractSizeUsd,
       contracts: coin ? closeQty : undefined,
-      status: 'PENDING', createdAt: now,
+      status: 'PENDING', createdAt: now, createdRealAt: Date.now(),
       conditionalExecType: 'MARKET',
       operator, triggerDirection: operator === '>=' ? 'UP' : 'DOWN',
       reduceOnly: true, reduceSymbol: symbol, reducePositionSide: position.side,
