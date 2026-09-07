@@ -18,10 +18,15 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useTradingContext } from '@/contexts/TradingContext';
 import { intervalToMs } from '@/hooks/useBinanceData';
 import {
+  CAMPAIGN_ABSOLUTE_RANGE_PRESETS,
+  CAMPAIGN_MIN_CONTEXT_MS,
   CAMPAIGN_ORIGINAL_VIEW_MULTIPLIERS,
+  buildCampaignChartVisibleRange,
   buildCampaignKlineTimeWindow,
   buildCampaignKlineVisibleRange,
   useCampaignKlines,
+  type CampaignChartRangeSelection,
+  type CampaignKlineTimeWindow,
   type CampaignViewMultiplier,
 } from '@/hooks/useCampaignKlines';
 import { computeCurrentAccountEquity } from '@/lib/accountEquity';
@@ -49,7 +54,12 @@ import {
   resolveCampaignMainLeverage,
   resolveCampaignOpportunityQuality,
 } from '@/lib/campaignMetrics';
-import { buildCampaignChartContentTimeSpan, pickCampaignOverviewInterval, type CampaignChartInterval } from '@/lib/campaignChartContentSpan';
+import {
+  buildCampaignChartContentTimeSpan,
+  pickCampaignOverviewInterval,
+  pickCoarserCampaignInterval,
+  type CampaignChartInterval,
+} from '@/lib/campaignChartContentSpan';
 import {
   fetchLegExitPriceCorrections,
   resolveLegExecution,
@@ -102,6 +112,19 @@ import type {
 } from '@/types/journal';
 import type { DecisionEmotionDiary } from '@/types/emotionDiary';
 import type { CampaignReverseHedgeOrder, PendingOrder, TradeRecord } from '@/types/trading';
+
+/** 把毫秒跨度写成中文提示文案：aria-label 里的「N 倍」在短战役上会撒谎，真实时长放 title 里。 */
+function formatCampaignSpanLabel(spanMs: number): string {
+  if (!Number.isFinite(spanMs) || spanMs <= 0) return '0 分钟';
+  if (spanMs >= 24 * 60 * 60_000) return `${(spanMs / (24 * 60 * 60_000)).toFixed(1)} 天`;
+  if (spanMs >= 60 * 60_000) return `${(spanMs / (60 * 60_000)).toFixed(1)} 小时`;
+  return `${(spanMs / 60_000).toFixed(1)} 分钟`;
+}
+
+function campaignMultiplierSpanMs(window: CampaignKlineTimeWindow, multiplier: CampaignViewMultiplier): number {
+  const range = buildCampaignKlineVisibleRange(window, multiplier);
+  return range.toTime - range.fromTime;
+}
 
 const INTERVALS = ['1m', '5m', '15m', '1h'] as const;
 type Interval = CampaignChartInterval;
@@ -574,7 +597,9 @@ export default function JournalCampaignDetailPage() {
   const [reverseHedgeOrders, setReverseHedgeOrders] = useState<CampaignReverseHedgeOrder[]>([]);
   const [interval, setInterval] = useState<Interval>('1m');
   const [intervalTouched, setIntervalTouched] = useState(false);
-  const [chartRangeMultiplier, setChartRangeMultiplier] = useState<CampaignViewMultiplier>(3);
+  const [chartRangeSelection, setChartRangeSelection] = useState<CampaignChartRangeSelection>(
+    { kind: 'multiplier', multiplier: 3 },
+  );
   const [endOpen, setEndOpen] = useState(false);
   const [focusTime, setFocusTime] = useState<number | null>(null);
   const [counterfactuals, setCounterfactuals] = useState<CampaignCounterfactual[]>([]);
@@ -604,7 +629,9 @@ export default function JournalCampaignDetailPage() {
   }, [id]);
 
   useEffect(() => {
-    setChartRangeMultiplier(3);
+    // 换战役必须连绝对预设一起重置：否则从某战役的「1月」视图进另一个 symbol，
+    // 开场就带着一个月的拉取窗口。
+    setChartRangeSelection({ kind: 'multiplier', multiplier: 3 });
   }, [id]);
 
   useEffect(() => {
@@ -751,43 +778,68 @@ export default function JournalCampaignDetailPage() {
     () => buildCampaignChartContentTimeSpan(campaign, legs, tradeRecords, reverseHedgeOrders, selectedCounterfactual),
     [campaign, legs, tradeRecords, reverseHedgeOrders, selectedCounterfactual],
   );
+  const campaignKlineSpanStartMs = chartContentTimeSpan.startMs ?? legTimeSpan.startMs;
+  const campaignKlineSpanEndMs = chartContentTimeSpan.endMs ?? legTimeSpan.endMs;
+  // 基准窗口 = 完全不含绝对预设的今日行为。反事实面板拿的是它：
+  // 把一个「被 1 个月撑开过」的窗口交给 What-if，它的 51 倍会指向与主图不同的数据边界。
+  const campaignKlineBaseWindow = useMemo(() => {
+    const openedAtMs = campaign ? new Date(campaign.opened_at).getTime() : Date.now();
+    const closedAtMs = new Date(effectiveClosedAt).getTime();
+    return buildCampaignKlineTimeWindow(
+      openedAtMs,
+      closedAtMs,
+      campaignKlineSpanStartMs,
+      campaignKlineSpanEndMs,
+    );
+  }, [campaign, campaignKlineSpanEndMs, campaignKlineSpanStartMs, effectiveClosedAt]);
   const campaignKlineTimeWindow = useMemo(() => {
     const openedAtMs = campaign ? new Date(campaign.opened_at).getTime() : Date.now();
     const closedAtMs = new Date(effectiveClosedAt).getTime();
     return buildCampaignKlineTimeWindow(
       openedAtMs,
       closedAtMs,
-      chartContentTimeSpan.startMs ?? legTimeSpan.startMs,
-      chartContentTimeSpan.endMs ?? legTimeSpan.endMs,
+      campaignKlineSpanStartMs,
+      campaignKlineSpanEndMs,
+      chartRangeSelection,
     );
-  }, [
-    campaign,
-    chartContentTimeSpan.endMs,
-    chartContentTimeSpan.startMs,
-    effectiveClosedAt,
-    legTimeSpan.endMs,
-    legTimeSpan.startMs,
-  ]);
-  const overviewInterval = useMemo(
-    () => pickCampaignOverviewInterval({
-      // The chart engine retains the complete 51x context, not only the initial
-      // 3x viewport. Budget against the data actually committed to KlineCharts
-      // so long historical campaigns do not silently load a 15k+ 1m snapshot.
+  }, [campaign, campaignKlineSpanEndMs, campaignKlineSpanStartMs, chartRangeSelection, effectiveClosedAt]);
+  const campaignKlineVisibleRange = useMemo(
+    () => buildCampaignChartVisibleRange(campaignKlineTimeWindow, chartRangeSelection),
+    [campaignKlineTimeWindow, chartRangeSelection],
+  );
+  const overviewInterval = useMemo(() => {
+    // 拉取项 = 今天的行为，一个字不动：倍率按钮只是取景，绝不允许连带改周期。
+    // 一旦改了，klines 的粒度会跟着变，而 klines 同时喂给 computeDecisionAccuracy /
+    // buildManualLegs / runAndPersistCustomCounterfactual —— 点一下缩放就能写脏已保存的反事实。
+    const fetchedInterval = pickCampaignOverviewInterval({
       startMs: campaignKlineTimeWindow.fromTime,
       endMs: campaignKlineTimeWindow.toTime,
-    }, 6_000),
-    [campaignKlineTimeWindow.fromTime, campaignKlineTimeWindow.toTime],
-  );
-  const campaignKlineVisibleRange = useMemo(
-    () => buildCampaignKlineVisibleRange(campaignKlineTimeWindow, chartRangeMultiplier),
-    [campaignKlineTimeWindow, chartRangeMultiplier],
-  );
-
-  useEffect(() => {
-    if (!intervalTouched && interval !== overviewInterval) {
-      setInterval(overviewInterval);
-    }
-  }, [interval, intervalTouched, overviewInterval]);
+    }, 6_000);
+    if (chartRangeSelection.kind !== 'absolute') return fetchedInterval;
+    // 只有绝对预设需要按「可见根数」再收紧一次：klinecharts 的 barSpace 下限是 1px，
+    // 可见根数超过画布宽度（约 1700）就会被静默裁掉中心以外的部分，
+    // 用户点了「1月」只会拿到不可读的 1px 柱子和被裁掉一大半的区间。
+    const visibleInterval = pickCampaignOverviewInterval({
+      startMs: campaignKlineVisibleRange.fromTime,
+      endMs: campaignKlineVisibleRange.toTime,
+    }, 1_200);
+    return pickCoarserCampaignInterval(visibleInterval, fetchedInterval);
+  }, [
+    campaignKlineTimeWindow.fromTime,
+    campaignKlineTimeWindow.toTime,
+    campaignKlineVisibleRange.fromTime,
+    campaignKlineVisibleRange.toTime,
+    chartRangeSelection,
+  ]);
+  // 自动挡直接派生，不再走 state 往返。旧写法是在 effect 里 setInterval，
+  // 于是「点预设」的那一帧窗口已经是 30 天、interval 还停在 1m，
+  // useReplayKlines 的 effect 先跑起来就是 43200 根 / 29 个串行请求。
+  // 手动挡（intervalTouched）在倍率视图下原样保留；绝对预设下只保证不比可读下限更细。
+  const effectiveInterval = useMemo<Interval>(() => {
+    if (!intervalTouched) return overviewInterval;
+    if (chartRangeSelection.kind !== 'absolute') return interval;
+    return pickCoarserCampaignInterval(interval, overviewInterval);
+  }, [chartRangeSelection, interval, intervalTouched, overviewInterval]);
 
   const {
     klines,
@@ -800,9 +852,10 @@ export default function JournalCampaignDetailPage() {
     campaign?.symbol ?? '',
     campaign?.opened_at ?? new Date().toISOString(),
     effectiveClosedAt,
-    interval,
-    chartContentTimeSpan.startMs ?? legTimeSpan.startMs,
-    chartContentTimeSpan.endMs ?? legTimeSpan.endMs,
+    effectiveInterval,
+    campaignKlineSpanStartMs,
+    campaignKlineSpanEndMs,
+    chartRangeSelection,
   );
 
   useEffect(() => {
@@ -1358,7 +1411,13 @@ export default function JournalCampaignDetailPage() {
   // 数据层实际预载 51 倍范围；首次打开仍只铺满「前 1 倍 + 战役 1 倍 + 后 1 倍」。
   // 必须放在上面的 loading guard 之后——此时 campaign 一定非空；放在 guard 之前会在
   // 首帧（campaign 仍为 null）就解引用 campaign.opened_at 直接崩溃、整页白屏。
-  const chartDefaultCurrentTime = campaignKlineVisibleRange.toTime;
+  // ReplayKlineChart 用 currentTime 当「标注截止时刻」（marker/竖线/委托线都按 time <= currentTime 过滤）。
+  // 倍率档位天生 toTime >= contentEnd，这个 max 是恒等的；但绝对预设的右沿会被夹到「现在」，
+  // 一旦落在战役内容右端之前，整段后半程的 marker 与竖线会无声消失。
+  const chartDefaultCurrentTime = Math.max(
+    campaignKlineVisibleRange.toTime,
+    campaignKlineTimeWindow.contentEndMs ?? Number.NEGATIVE_INFINITY,
+  );
   const chartDefaultViewportCenterTime = Math.round(
     (campaignKlineVisibleRange.fromTime + campaignKlineVisibleRange.toTime) / 2,
   );
@@ -1393,6 +1452,13 @@ export default function JournalCampaignDetailPage() {
   const handleRunWhatIf = async (label: string, params: CampaignCounterfactualParams) => {
     if (klinesLoading || klines.length === 0) {
       toast.error('K 线尚未加载完成，暂时无法运行 What-if');
+      return;
+    }
+    // 模拟引擎会走完整个 klines 数组，并用最后一根收盘结算未平仓位。
+    // 绝对预设下这个数组是「1 天 / 1 周 / 1 月」的窗口，同一组参数会因为
+    // 当时恰好选了哪个预设而写出不同的 final_realized_pnl —— 这是会污染库里数据的静默错误。
+    if (chartRangeSelection.kind === 'absolute') {
+      toast.error('当前是绝对时间范围预设，请先切回倍率视图再运行 What-if');
       return;
     }
     try {
@@ -1482,7 +1548,7 @@ export default function JournalCampaignDetailPage() {
         reverseHedgeOrders: visibleReverseHedgeOrders,
         legExitPriceCorrections,
         chartElement: campaignChartExportRef.current,
-        chartInterval: interval,
+        chartInterval: effectiveInterval,
         pnlOverview: {
           items: campaignPnlOverviewItems.map(({ key, label, value, color }) => ({
             key,
@@ -1736,7 +1802,10 @@ export default function JournalCampaignDetailPage() {
                       setIntervalTouched(true);
                       setInterval(item);
                     }}
-                    className={`h-6 px-2 rounded text-[10px] font-mono ${interval === item ? 'bg-[#F0B90B] text-black' : 'bg-muted text-foreground'}`}
+                    title={effectiveInterval !== item && intervalTouched && interval === item
+                      ? `当前绝对时间预设下已自动放粗到 ${effectiveInterval}，避免 K 线被压成 1 像素`
+                      : undefined}
+                    className={`h-6 px-2 rounded text-[10px] font-mono ${effectiveInterval === item ? 'bg-[#F0B90B] text-black' : 'bg-muted text-foreground'}`}
                   >
                     {item}
                   </button>
@@ -1748,15 +1817,17 @@ export default function JournalCampaignDetailPage() {
                   <button
                     key={multiplier}
                     type="button"
-                    title={`显示 ${multiplier} 倍战役时间范围`}
+                    title={`显示 ${multiplier} 倍战役时间范围（约 ${formatCampaignSpanLabel(
+                      campaignMultiplierSpanMs(campaignKlineBaseWindow, multiplier),
+                    )}）`}
                     aria-label={`显示 ${multiplier} 倍战役时间范围`}
-                    aria-pressed={chartRangeMultiplier === multiplier}
+                    aria-pressed={chartRangeSelection.kind === 'multiplier' && chartRangeSelection.multiplier === multiplier}
                     onClick={() => {
                       setFocusTime(null);
-                      setChartRangeMultiplier(multiplier);
+                      setChartRangeSelection({ kind: 'multiplier', multiplier });
                     }}
                     className={`h-5 min-w-6 rounded px-1 text-[9px] font-mono transition-colors ${
-                      chartRangeMultiplier === multiplier
+                      chartRangeSelection.kind === 'multiplier' && chartRangeSelection.multiplier === multiplier
                         ? 'bg-foreground/85 text-background'
                         : 'text-muted-foreground/70 hover:bg-muted hover:text-foreground'
                     }`}
@@ -1764,7 +1835,52 @@ export default function JournalCampaignDetailPage() {
                     {multiplier}x
                   </button>
                 ))}
+                <div className="h-4 w-px bg-border/70 mx-1" />
+                {CAMPAIGN_ABSOLUTE_RANGE_PRESETS.map(preset => {
+                  /*
+                   * 绝对档一律可点。
+                   *
+                   * 曾按「比 51 倍还窄就置灰」处理，结果恰好在最该有它们的两头全锁死：
+                   * 67 秒的战役 51 倍已是 25.5 小时，「1天」一进来就是灰的；
+                   * 而超过 14 小时的战役三个档全灰，一排点不动的按钮读起来就是坏了。
+                   * 「正好一天」本身就是一种有意义的取景，不该因为另一个档更宽而禁用；
+                   * 比战役本身还窄的情形另有兜底（effectiveSpan 取 max，战役永远在画面内）。
+                   */
+                  const pressed = chartRangeSelection.kind === 'absolute' && chartRangeSelection.key === preset.key;
+                  return (
+                    <button
+                      key={preset.key}
+                      type="button"
+                      title={`以战役为中心显示 ${preset.label} K 线（不短于战役本身，右沿不超过现在）`}
+                      aria-label={`显示 ${preset.label} K 线范围`}
+                      aria-pressed={pressed}
+                      onClick={() => {
+                        setFocusTime(null);
+                        // nowMs 在点击这一刻取样并随选择冻结：放进 memo 里裸调 Date.now()
+                        // 会让 fromTime/toTime 每帧都变，等于无限重取 + 图表反复重挂。
+                        setChartRangeSelection({ kind: 'absolute', key: preset.key, nowMs: Date.now() });
+                      }}
+                      className={`h-5 min-w-7 rounded px-1 text-[9px] font-mono transition-colors ${
+                        pressed
+                          ? 'bg-foreground/85 text-background'
+                          : 'text-muted-foreground/70 hover:bg-muted hover:text-foreground'
+                      }`}
+                    >
+                      {preset.label}
+                    </button>
+                  );
+                })}
               </div>
+              {campaignKlineBaseWindow.contentStartMs != null
+                && campaignKlineBaseWindow.contentEndMs != null
+                && campaignKlineBaseWindow.contentEndMs - campaignKlineBaseWindow.contentStartMs < CAMPAIGN_MIN_CONTEXT_MS && (
+                <div className="text-[9px] text-muted-foreground/70">
+                  本战役仅 {formatCampaignSpanLabel(
+                    campaignKlineBaseWindow.contentEndMs - campaignKlineBaseWindow.contentStartMs,
+                  )}，已按 {formatCampaignSpanLabel(CAMPAIGN_MIN_CONTEXT_MS)}最小上下文取景；
+                  倍数拉大后 K 线会挤成发丝，换更大的周期即可
+                </div>
+              )}
               <div className="flex-1" />
             </div>
             <div ref={campaignChartExportRef} className="h-[480px] border border-border rounded overflow-hidden">
@@ -1780,10 +1896,10 @@ export default function JournalCampaignDetailPage() {
                 <div className="h-full flex items-center justify-center text-[12px] text-muted-foreground">该时间段暂无 K 线数据</div>
               ) : (
                 <ReplayKlineChart
-                  key={`${campaign.id}:${interval}:${campaignKlineFromTime}:${campaignKlineToTime}`}
+                  key={`${campaign.id}:${effectiveInterval}:${campaignKlineFromTime}:${campaignKlineToTime}`}
                   klines={klines}
                   currentTime={chartCurrentTime}
-                  intervalMs={intervalToMs(interval)}
+                  intervalMs={intervalToMs(effectiveInterval)}
                   symbol={campaign.symbol}
                   markers={displayMarkers}
                   timeBoundPriceLines={displayPriceLines}
@@ -2002,10 +2118,13 @@ export default function JournalCampaignDetailPage() {
             legExitPriceCorrections={legExitPriceCorrections}
             klines={klines}
             klinesLoading={klinesLoading}
-            interval={interval}
+            interval={effectiveInterval}
             intervalOptions={INTERVALS}
-            onIntervalChange={(nextInterval) => setInterval(nextInterval as Interval)}
-            klineTimeWindow={campaignKlineTimeWindow}
+            onIntervalChange={(nextInterval) => {
+              setIntervalTouched(true);
+              setInterval(nextInterval as Interval);
+            }}
+            klineTimeWindow={campaignKlineBaseWindow}
             timezone={LOCAL_TIME_ZONE}
             whatIfRunning={whatIfRunning}
             onRunWhatIf={handleRunWhatIf}

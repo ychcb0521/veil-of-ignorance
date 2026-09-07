@@ -88,3 +88,17 @@ export function pickCampaignOverviewInterval(
   }
   return '1h';
 }
+
+/**
+ * 取两个候选周期里较粗的那个（按 OVERVIEW_INTERVALS 的顺序）。
+ * 用途：绝对预设要同时满足两条约束——可见根数不能撞上 klinecharts barSpace 1px 的硬墙
+ * （超过画布宽度约 1700 根就会被静默裁掉中心以外的部分），拉取根数又不能超过今天。
+ */
+export function pickCoarserCampaignInterval(
+  a: CampaignChartInterval,
+  b: CampaignChartInterval,
+): CampaignChartInterval {
+  const indexA = OVERVIEW_INTERVALS.findIndex(item => item.interval === a);
+  const indexB = OVERVIEW_INTERVALS.findIndex(item => item.interval === b);
+  return indexA >= indexB ? a : b;
+}

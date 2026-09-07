@@ -1,4 +1,4 @@
-import { type ChangeEvent, useEffect, useMemo, useState } from 'react';
+import { type ChangeEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { Plus, RotateCcw, Trash2, TrendingUp } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -157,11 +157,23 @@ export function CampaignWhatIfEditor({
     (chartVisibleRange.fromTime + chartVisibleRange.toTime) / 2,
   );
 
+  /**
+   * 重置只跟「换了战役 / 换了底稿」走，不跟 klines 数组的身份走。
+   *
+   * K 线范围加了绝对档（1天/1周/1月）之后，点一下就会重新拉取，klines 换成新数组——
+   * 而这个 effect 原本把 klines 列在依赖里，于是用户填到一半的反事实参数和手工腿
+   * 会被静默清空。倍数按钮不重取，所以两组相邻的按钮行为还不一样。
+   * klines 只是算手工腿入场价的材料，用 ref 读当前值即可；真正该触发重建的是
+   * 「K 线从无到有」那一次。
+   */
+  const klinesRef = useRef(klines);
+  klinesRef.current = klines;
+  const klinesReady = klines.length > 0;
   useEffect(() => {
     setParams(baseDefaults);
-    if (baseDefaults) setManualLegs(buildManualLegs(baseDefaults, legs, klines, tradeRecords, legExitPriceCorrections));
+    if (baseDefaults) setManualLegs(buildManualLegs(baseDefaults, legs, klinesRef.current, tradeRecords, legExitPriceCorrections));
     setSelectedManualLegId(null);
-  }, [baseDefaults, legs, klines, tradeRecords, legExitPriceCorrections]);
+  }, [baseDefaults, legs, klinesReady, tradeRecords, legExitPriceCorrections]);
 
   useEffect(() => {
     setChartRangeMultiplier(1.1);

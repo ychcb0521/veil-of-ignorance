@@ -10,12 +10,14 @@ async function fetchRange(
   interval: string,
   fromTime: number,
   toTime: number,
+  signal?: AbortSignal,
 ): Promise<KlineData[]> {
   const out: KlineData[] = [];
   let cursor = fromTime;
   // Binance fapi limit 1500 per request
   const limit = 1500;
   while (cursor < toTime) {
+    if (signal?.aborted) break;
     const qs = new URLSearchParams({
       symbol,
       interval,
@@ -23,7 +25,7 @@ async function fetchRange(
       endTime: String(toTime),
       limit: String(limit),
     });
-    const res = await fetch(`https://fapi.binance.com/fapi/v1/klines?${qs}`);
+    const res = await fetch(`https://fapi.binance.com/fapi/v1/klines?${qs}`, { signal });
     if (!res.ok) throw new Error(`API ${res.status}`);
     const raw: unknown[][] = await res.json();
     if (raw.length === 0) break;
@@ -68,13 +70,22 @@ export function useReplayKlines(
   useEffect(() => {
     if (!symbol) return;
     let cancelled = false;
+    // 旧写法只翻一个 cancelled 标志，分页循环仍会跑完并继续吃带宽。
+    // 加了绝对时间预设后「连点几个预设」会叠出几个各自数 MB 的串行分页循环，必须真的中断。
+    const controller = new AbortController();
     setLoading(true);
     setError(null);
-    fetchRange(symbol, interval, fromTime, toTime)
+    fetchRange(symbol, interval, fromTime, toTime, controller.signal)
       .then(data => { if (!cancelled) setKlines(data); })
-      .catch(e => { if (!cancelled) setError(e instanceof Error ? e.message : String(e)); })
+      .catch(e => {
+        if (cancelled || controller.signal.aborted) return;
+        setError(e instanceof Error ? e.message : String(e));
+      })
       .finally(() => { if (!cancelled) setLoading(false); });
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
   }, [symbol, interval, fromTime, toTime, reloadKey]);
 
   return { klines, loading, error, reload: () => setReloadKey(k => k + 1) };

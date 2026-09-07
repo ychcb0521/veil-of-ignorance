@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { buildCampaignChartContentTimeSpan, pickCampaignOverviewInterval } from '@/lib/campaignChartContentSpan';
 import {
   CAMPAIGN_AVAILABLE_CONTEXT_MULTIPLIER,
-  CAMPAIGN_EDGE_PAD_MS,
+  CAMPAIGN_MIN_CONTEXT_MS,
   buildCampaignKlineTimeWindow,
   buildCampaignKlineVisibleRange,
 } from '@/hooks/useCampaignKlines';
@@ -286,20 +286,22 @@ describe('buildCampaignKlineTimeWindow', () => {
     })).toBe('5m');
   });
 
-  it('单点内容区间用最小缓冲兜底，空区间保留旧宽松窗口', () => {
+  it('单点内容区间用最小上下文兜底（与短战役共用 30 分钟下限），空区间保留旧宽松窗口', () => {
     const openedAtMs = t('2026-01-02T00:00:00.000Z');
     const closedAtMs = t('2026-01-02T02:00:00.000Z');
     const singlePoint = t('2026-01-02T00:30:00.000Z');
 
+    // 单点区间与短战役共用同一条法则：可见跨度 = 倍数 × 上下文单位。
+    // 所以 3 倍窗口 = 3 × 30 分钟（点两侧各 1.5 个单位），51 倍窗口 = 51 × 30 分钟。
     expect(buildCampaignKlineTimeWindow(openedAtMs, closedAtMs, singlePoint, singlePoint)).toEqual({
-      fromTime: singlePoint - CAMPAIGN_EDGE_PAD_MS * CAMPAIGN_AVAILABLE_CONTEXT_MULTIPLIER,
-      toTime: singlePoint + CAMPAIGN_EDGE_PAD_MS * CAMPAIGN_AVAILABLE_CONTEXT_MULTIPLIER,
-      defaultFromTime: singlePoint - CAMPAIGN_EDGE_PAD_MS,
-      defaultToTime: singlePoint + CAMPAIGN_EDGE_PAD_MS,
+      fromTime: singlePoint - CAMPAIGN_MIN_CONTEXT_MS * (CAMPAIGN_AVAILABLE_CONTEXT_MULTIPLIER + 0.5),
+      toTime: singlePoint + CAMPAIGN_MIN_CONTEXT_MS * (CAMPAIGN_AVAILABLE_CONTEXT_MULTIPLIER + 0.5),
+      defaultFromTime: singlePoint - CAMPAIGN_MIN_CONTEXT_MS * 1.5,
+      defaultToTime: singlePoint + CAMPAIGN_MIN_CONTEXT_MS * 1.5,
       contentStartMs: singlePoint,
       contentEndMs: singlePoint,
-      contextMs: CAMPAIGN_EDGE_PAD_MS,
-      availableContextMs: CAMPAIGN_EDGE_PAD_MS * CAMPAIGN_AVAILABLE_CONTEXT_MULTIPLIER,
+      contextMs: CAMPAIGN_MIN_CONTEXT_MS,
+      availableContextMs: CAMPAIGN_MIN_CONTEXT_MS * CAMPAIGN_AVAILABLE_CONTEXT_MULTIPLIER,
     });
 
     expect(buildCampaignKlineTimeWindow(openedAtMs, closedAtMs, null, null)).toEqual({
