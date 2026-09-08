@@ -62,8 +62,11 @@ describe('图表令牌契约', () => {
 describe('图表代码里不再出现裸十六进制', () => {
   const files = [
     'src/components/charts/ScatterPlot.tsx',
+    'src/components/charts/stackLayout.ts',
     'src/components/journal/CampaignOddsScatterPlot.tsx',
     'src/components/journal/JournalStatsSidebar.tsx',
+    'src/lib/kernelDensity.ts',
+    'src/lib/oddsDistribution.ts',
   ];
 
   for (const file of files) {

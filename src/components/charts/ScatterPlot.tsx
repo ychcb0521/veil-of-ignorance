@@ -15,9 +15,13 @@ import {
   markShapePath,
   seriesTokenVar,
   type ChartSeriesToken,
+  type ClampDirection,
   type ScatterMarkShape,
 } from '@/lib/chartTokens';
+import { stackLayout, type ScatterStackScale } from './stackLayout';
 import { useChartSize } from './useChartSize';
+
+export type { ScatterStackScale } from './stackLayout';
 
 export type ScatterSeries = {
   id: string;
@@ -58,10 +62,23 @@ export type ScatterGutterLabel = {
 };
 
 export type ScatterYAxis = {
+  mode?: 'value';
   min: number;
   max: number;
   ticks: ScatterTick[];
   gutterLabels?: ScatterGutterLabel[];
+};
+
+/**
+ * 场数轴：纵轴不再是数值，而是「落在这一档的第几个」。刻度由元件按像素步距自己派生，
+ * 因为只有元件知道图有多高、一行占几个像素。只能与 xAxis.mode === 'linear' 搭配。
+ */
+export type ScatterCountAxis = {
+  mode: 'count';
+  tickTestId?: string;
+  gridTestId?: string;
+  /** 只缀在最顶一格刻度后（如「30 场」），轴自己报一次单位。 */
+  unit?: string;
 };
 
 export type ScatterXAxis =
@@ -72,6 +89,12 @@ export type ScatterXAxis =
 export type ScatterReferenceLine = {
   value: number;
   kind: 'zero' | 'threshold';
+  /** 默认 'y'（横向参考线）；'x' 是竖向参考线，只在 linear 横轴下有意义。 */
+  axis?: 'x' | 'y';
+  /** 只有竖向参考线会画文字标签，贴在绘图区顶端，用墨色而不是线色。 */
+  label?: string;
+  /** 标签落在线的哪一侧；缺省时 value ≤ 0 靠左、否则靠右，贴边时自动翻转。 */
+  labelSide?: 'left' | 'right';
   testId?: string;
   dataAttrs?: Record<string, string | number>;
 };
@@ -85,9 +108,12 @@ export type ScatterBandCounts = {
 export type ScatterPlotProps = {
   points: ScatterPoint[];
   series: ScatterSeries[];
-  yAxis: ScatterYAxis;
+  /** 数值轴（默认）或场数轴（堆叠布局，仅 linear 横轴）。 */
+  yAxis: ScatterYAxis | ScatterCountAxis;
   xAxis: ScatterXAxis;
   referenceLines?: ScatterReferenceLine[];
+  /** 只在场数轴下调用：画在参考线之后、点位之前，并被裁进绘图区。 */
+  overlay?: (scale: ScatterStackScale) => ReactNode;
   bandCounts?: ScatterBandCounts;
   onSelect?: (id: string) => void;
   onActiveChange?: (id: string | null) => void;
@@ -107,9 +133,92 @@ type PlacedPoint = ScatterPoint & {
   cx: number;
   cy: number;
   yPct: number;
-  clamped: 'up' | 'down' | null;
+  clamped: ClampDirection | null;
   series: ScatterSeries;
 };
+
+type StackOverflowGlyph = { bin: number; cx: number; cy: number; yPct: number; count: number };
+
+type StackInfo = {
+  pitchY: number;
+  rowsFit: number;
+  binWidth: number;
+  binPx: number;
+  tallest: number;
+  requiredPlotHeight: number;
+  overflow: StackOverflowGlyph[];
+};
+
+/** 场数轴的盒子最高撑到这里（44rem）：再高就让最高一档合成一个三角并在脚注报数。 */
+const STACK_BOX_CAP = 704;
+/** 与绘图盒 class 里的 min-h-[18rem] 同值，行内 minHeight 不能把手机上的下限压掉。 */
+const STACK_BOX_FLOOR = 288;
+/** 绘图盒上下各 1px 边框不在测量区内，撑高时要把它们算进去，否则最高一档差 2px 装不下。 */
+const STACK_BOX_BORDER = 2;
+/** 堆叠布局里提示框挂在点位侧面、垂直居中；四行文字约 68px 高，锚点离盒子上下缘至少留这么多。 */
+const STACK_TOOLTIP_HALF = 40;
+
+/** 场数轴刻度步距：只用 1/2/5 × 10ⁿ，让 4~6 条网格线落在整数计数上。 */
+function countTickStep(rows: number) {
+  const candidates = [1, 2, 5, 10, 20, 50, 100, 200, 500];
+  return candidates.find(step => rows / step <= 5) ?? candidates[candidates.length - 1];
+}
+
+/** 9px 等宽字的估算宽度：拉丁 0.6em、CJK 1em，用来判断标签会不会撞到绘图区边缘。 */
+function estimateLabelWidth(text: string) {
+  let width = 0;
+  for (const char of text) width += /[\u3000-\u9fff\uff00-\uffef]/.test(char) ? 9 : 5.4;
+  return width;
+}
+
+type XReferenceLabelPlacement = {
+  line: ScatterReferenceLine;
+  x: number;
+  side: 'left' | 'right';
+  row: number;
+};
+
+/**
+ * 竖向参考线的标签排位：先试本线偏好的一侧，再试另一侧，两侧都撞（绘图区边缘或已放好的标签）
+ * 才下移一行。窄屏上「−1R 止损」被挤到墙右侧时，「0 盈亏平衡」应当贴到 0 线右侧，
+ * 而不是换行后横跨止损墙、和自己的线脱开。
+ */
+function placeXReferenceLabels(
+  lines: ScatterReferenceLine[],
+  xOf: (value: number) => number,
+  lineLeft: number,
+  lineRight: number,
+): XReferenceLabelPlacement[] {
+  const placed: (XReferenceLabelPlacement & { box: [number, number] })[] = [];
+  for (const line of lines) {
+    const x = xOf(line.value);
+    const width = estimateLabelWidth(line.label ?? '');
+    const preferred: 'left' | 'right' = line.labelSide ?? (line.value <= 0 ? 'left' : 'right');
+    const sides: ('left' | 'right')[] = preferred === 'left' ? ['left', 'right'] : ['right', 'left'];
+    const boxFor = (side: 'left' | 'right'): [number, number] => (
+      side === 'left' ? [x - 4 - width, x - 4] : [x + 4, x + 4 + width]
+    );
+    const fits = (side: 'left' | 'right', row: number) => {
+      const box = boxFor(side);
+      if (box[0] < lineLeft || box[1] > lineRight) return false;
+      return !placed.some(other => other.row === row && box[0] < other.box[1] + 4 && other.box[0] < box[1] + 4);
+    };
+    let choice: { side: 'left' | 'right'; row: number } | null = null;
+    for (let row = 0; row < 4 && !choice; row += 1) {
+      const side = sides.find(candidate => fits(candidate, row));
+      if (side) choice = { side, row };
+    }
+    // 两侧都出界（绘图区窄过标签本身）：按偏好侧放，宁可裁掉也不省略。
+    const { side, row } = choice ?? { side: preferred, row: placed.length };
+    placed.push({ line, x, side, row, box: boxFor(side) });
+  }
+  return placed.map(({ line, x, side, row }) => ({ line, x, side, row }));
+}
+
+function fractionOf(axis: { min: number; max: number }, value: number) {
+  const span = axis.max - axis.min || 1;
+  return 1 - (value - axis.min) / span;
+}
 
 /**
  * 稳健纵轴窗口：极端 R 会把 -1R~+1R 的主群压成一条线，取 p2–p98 分位，
@@ -174,6 +283,7 @@ export function ScatterPlot({
   yAxis,
   xAxis,
   referenceLines = [],
+  overlay,
   bandCounts,
   onSelect,
   onActiveChange,
@@ -198,24 +308,75 @@ export function ScatterPlot({
   const trackWidth = Math.max(1, size.width);
   const innerWidth = Math.max(1, trackWidth - PLOT_INSET.left - PLOT_INSET.right);
 
-  const yFraction = useCallback(
+  // 场数轴的 min/max 要等布局算出行距才知道，所以数值轴在这里单独收窄；
+  // 现有调用方 valueYAxis === yAxis，一切照旧。
+  const stackMode = yAxis.mode === 'count';
+  const valueYAxis: ScatterYAxis | null = yAxis.mode === 'count' ? null : yAxis;
+  const valueMin = valueYAxis?.min ?? 0;
+  const valueMax = valueYAxis?.max ?? 1;
+  const valueFraction = useCallback(
     (value: number) => {
-      const span = yAxis.max - yAxis.min || 1;
-      return 1 - (value - yAxis.min) / span;
+      const span = valueMax - valueMin || 1;
+      return 1 - (value - valueMin) / span;
     },
-    [yAxis.max, yAxis.min],
+    [valueMax, valueMin],
   );
 
   const layout = useMemo(() => {
     const count = points.length;
     if (count === 0) {
-      return { contentWidth: trackWidth, pitch: MIN_PITCH, fitMode: 'fit' as const, placed: [] as PlacedPoint[] };
+      return { contentWidth: trackWidth, pitch: MIN_PITCH, fitMode: 'fit' as const, placed: [] as PlacedPoint[], stack: null as StackInfo | null };
+    }
+
+    if (stackMode && xAxis.mode === 'linear') {
+      // 场数轴：横轴铺满、永不滚动；点位按档吸附、从底线往上堆，纵轴就是计数。
+      const contentWidth = trackWidth;
+      const result = stackLayout(points.map(point => ({ id: point.id, x: point.x })), {
+        xMin: xAxis.min,
+        xMax: xAxis.max,
+        left: PLOT_INSET.left,
+        right: contentWidth - PLOT_INSET.right,
+        top: PLOT_INSET.top,
+        plotHeight,
+      });
+      const byId = new Map(points.map(point => [point.id, point]));
+      const placed = result.placed.flatMap(item => {
+        const point = byId.get(item.id);
+        if (!point) return [];
+        return [{
+          ...point,
+          cx: item.cx,
+          cy: item.cy,
+          yPct: item.yPct,
+          clamped: item.clamped,
+          series: seriesById.get(point.seriesId) ?? series[0],
+        }];
+      });
+      return {
+        contentWidth,
+        pitch: result.binPx,
+        fitMode: 'fit' as const,
+        placed,
+        stack: {
+          pitchY: result.pitchY,
+          rowsFit: result.rowsFit,
+          binWidth: result.binWidth,
+          binPx: result.binPx,
+          tallest: result.tallest,
+          requiredPlotHeight: result.requiredPlotHeight,
+          overflow: result.overflow.map(({ bin, cx, cy, yPct, count: n }) => ({ bin, cx, cy, yPct, count: n })),
+        } as StackInfo,
+      };
+    }
+    if (stackMode) {
+      // 场数轴只对 linear 横轴有定义；其它模式不能悄悄改读成别的意思。
+      console.error('ScatterPlot: yAxis.mode === "count" 只能与 xAxis.mode === "linear" 搭配，已退回数值布局。');
     }
 
     const clampY = (value: number) => {
-      if (value > yAxis.max) return { fraction: 0, clamped: 'up' as const };
-      if (value < yAxis.min) return { fraction: 1, clamped: 'down' as const };
-      return { fraction: yFraction(value), clamped: null };
+      if (value > valueMax) return { fraction: 0, clamped: 'up' as const };
+      if (value < valueMin) return { fraction: 1, clamped: 'down' as const };
+      return { fraction: valueFraction(value), clamped: null };
     };
 
     if (xAxis.mode === 'ordinal') {
@@ -235,7 +396,7 @@ export function ScatterPlot({
           series: seriesById.get(point.seriesId) ?? series[0],
         };
       });
-      return { contentWidth, pitch, fitMode: required > trackWidth ? ('scroll' as const) : ('fit' as const), placed };
+      return { contentWidth, pitch, fitMode: required > trackWidth ? ('scroll' as const) : ('fit' as const), placed, stack: null as StackInfo | null };
     }
 
     // category / linear：先按占用数算出需要多宽，再做蜂群排布。
@@ -297,12 +458,47 @@ export function ScatterPlot({
       pitch: MIN_PITCH,
       fitMode: 'fit' as const,
       placed,
+      stack: null as StackInfo | null,
     };
-  }, [innerWidth, plotHeight, points, series, seriesById, trackWidth, xAxis, yAxis.max, yAxis.min, yFraction]);
+  }, [innerWidth, plotHeight, points, series, seriesById, stackMode, trackWidth, xAxis, valueMax, valueMin, valueFraction]);
 
-  const { contentWidth, pitch, fitMode, placed } = layout;
+  const { contentWidth, pitch, fitMode, placed, stack } = layout;
   const activePoint = placed.find(point => point.id === activeId) ?? null;
   const clampedCount = placed.filter(point => point.clamped != null).length;
+
+  // 场数轴由布局派生：max = 图高 ÷ 行距（非整数），这样 count c 的网格线恰好落在
+  // 第 c 个点位的上沿——「这条线下面有 c 个点」。
+  const renderAxis = useMemo<ScatterYAxis>(() => {
+    if (!stack || yAxis.mode !== 'count') return valueYAxis ?? { min: 0, max: 1, ticks: [] };
+    const max = plotHeight / stack.pitchY;
+    const step = countTickStep(stack.rowsFit);
+    const ticks: ScatterTick[] = [];
+    for (let value = Math.floor(stack.rowsFit / step) * step; value >= 0; value -= step) {
+      const topmost = value + step > stack.rowsFit;
+      ticks.push({
+        value,
+        label: topmost && yAxis.unit ? `${value} ${yAxis.unit}` : String(value),
+        testId: yAxis.tickTestId,
+        dataAttrs: { 'data-tick-value': value },
+        gridTestId: yAxis.gridTestId,
+        gridDataAttrs: { 'data-grid-value': value },
+      });
+    }
+    return { min: 0, max, ticks };
+  }, [plotHeight, stack, valueYAxis, yAxis]);
+  const yFraction = (value: number) => fractionOf(renderAxis, value);
+  const xFraction = (value: number) => {
+    if (xAxis.mode !== 'linear') return 0;
+    const span = xAxis.max - xAxis.min || 1;
+    return (value - xAxis.min) / span;
+  };
+  // 堆得比图高还高时先把盒子撑高（有上限），而不是把点丢掉；盒子高度只由宽度决定，
+  // 不会和测量结果互相追着改。
+  const stackBoxMinHeight = stack
+    ? Math.max(STACK_BOX_FLOOR, Math.min(STACK_BOX_CAP, stack.requiredPlotHeight + PLOT_INSET.top + PLOT_INSET.bottom + STACK_BOX_BORDER))
+    : null;
+  const stackOverflowCount = stack ? stack.overflow.reduce((sum, glyph) => sum + glyph.count, 0) : 0;
+  const clipPathId = `${testId}-plot-clip`;
 
   // 时序图挂载时滚到最右端，先看到最新的战役；左侧渐隐提示还有更早的点位。
   useEffect(() => {
@@ -354,7 +550,7 @@ export function ScatterPlot({
   const gutterStyle: CSSProperties = { top: PLOT_INSET.top, bottom: PLOT_INSET.bottom };
   // 命中区宽度不超过列距，否则相邻按钮会盖住彼此圆心，点错战役。
   const hitWidth = Math.max(8, Math.min(HIT_MIN, pitch));
-  const hitHeight = xAxis.mode === 'ordinal' ? HIT_MIN : MIN_PITCH;
+  const hitHeight = stack ? stack.pitchY : xAxis.mode === 'ordinal' ? HIT_MIN : MIN_PITCH;
   const tabbableId = activeId ?? placed[0]?.id ?? null;
 
   return (
@@ -381,7 +577,7 @@ export function ScatterPlot({
         <div className="grid grid-cols-[56px_minmax(0,1fr)] gap-2 sm:grid-cols-[64px_minmax(0,1fr)] sm:gap-2.5">
           <div className="relative h-full font-mono text-[9px] text-[color:var(--chart-ink-muted)]" aria-hidden="true">
             <div className="absolute inset-x-0" style={gutterStyle}>
-              {yAxis.ticks.map(tick => ((tick.hideLabel || (yAxis.gutterLabels ?? []).some(
+              {renderAxis.ticks.map(tick => ((tick.hideLabel || (renderAxis.gutterLabels ?? []).some(
                 label => Math.abs(yFraction(label.value) - yFraction(tick.value)) * plotHeight < 11,
               )) ? null : (
                 <span
@@ -394,7 +590,7 @@ export function ScatterPlot({
                   {tick.label}
                 </span>
               )))}
-              {yAxis.gutterLabels?.map(label => (
+              {renderAxis.gutterLabels?.map(label => (
                 <span
                   key={`gutter-${label.value}`}
                   data-testid={label.testId}
@@ -417,6 +613,9 @@ export function ScatterPlot({
             data-layout="campaign-scatter-landscape"
             onMouseLeave={clearHover}
             className="relative aspect-[8/5] min-h-[18rem] min-w-0 overflow-hidden rounded-[6px] border border-[color:var(--chart-border)] bg-[color:var(--chart-surface)] sm:min-h-0"
+            // 带 aspect-ratio 的网格项一旦被 min-height 撑高，浏览器会反过来按比例推宽度而不是
+            // 拉伸到列宽（justify-self: normal 对有比例的盒子按 start 处理）；写死 100% 宽度切断这条回路。
+            style={stackBoxMinHeight == null ? undefined : { minHeight: stackBoxMinHeight, width: '100%' }}
           >
             <div
               ref={trackRef}
@@ -432,7 +631,14 @@ export function ScatterPlot({
                   height={boxHeight}
                   viewBox={`0 0 ${contentWidth} ${boxHeight}`}
                 >
-                  {yAxis.ticks.map(tick => {
+                  {stack ? (
+                    <defs>
+                      <clipPath id={clipPathId}>
+                        <rect x={lineLeft} y={PLOT_INSET.top} width={Math.max(0, lineRight - lineLeft)} height={plotHeight} />
+                      </clipPath>
+                    </defs>
+                  ) : null}
+                  {renderAxis.ticks.map(tick => {
                     const y = Math.round(PLOT_INSET.top + yFraction(tick.value) * plotHeight) + 0.5;
                     return (
                       <line
@@ -449,6 +655,28 @@ export function ScatterPlot({
                     );
                   })}
                   {referenceLines.map(line => {
+                    if (line.axis === 'x') {
+                      const x = Math.round(lineLeft + xFraction(line.value) * (lineRight - lineLeft)) + 0.5;
+                      return (
+                        <line
+                          key={`ref-x-${line.kind}-${line.value}`}
+                          data-testid={line.testId}
+                          data-reference-kind={line.kind}
+                          data-reference-axis="x"
+                          {...applyDataAttrs(line.dataAttrs)}
+                          x1={x}
+                          x2={x}
+                          y1={PLOT_INSET.top}
+                          y2={PLOT_INSET.top + plotHeight}
+                          shapeRendering="crispEdges"
+                          strokeDasharray={line.kind === 'threshold' ? '4 3' : undefined}
+                          style={{
+                            stroke: line.kind === 'threshold' ? CHART_THRESHOLD_VAR : CHART_AXIS_VAR,
+                            strokeWidth: 1,
+                          }}
+                        />
+                      );
+                    }
                     const y = Math.round(PLOT_INSET.top + yFraction(line.value) * plotHeight) + 0.5;
                     return (
                       <line
@@ -469,15 +697,33 @@ export function ScatterPlot({
                       />
                     );
                   })}
+                  {stack && overlay ? (
+                    <g aria-hidden="true" clipPath={`url(#${clipPathId})`}>
+                      {overlay({
+                        x: value => lineLeft + xFraction(value) * (lineRight - lineLeft),
+                        countY: count => PLOT_INSET.top + plotHeight - count * stack.pitchY,
+                        binWidth: stack.binWidth,
+                        binPx: stack.binPx,
+                        pitchY: stack.pitchY,
+                        rowsFit: stack.rowsFit,
+                        n: points.length,
+                        plot: { left: lineLeft, right: lineRight, top: PLOT_INSET.top, bottom: PLOT_INSET.top + plotHeight },
+                        clipPathId,
+                      })}
+                    </g>
+                  ) : null}
                   {activePoint ? (
                     <g style={{ stroke: CHART_AXIS_VAR, strokeWidth: 1 }} shapeRendering="crispEdges">
-                      <line
-                        data-testid="chart-crosshair-value"
-                        x1={lineLeft}
-                        x2={lineRight}
-                        y1={Math.round(activePoint.cy) + 0.5}
-                        y2={Math.round(activePoint.cy) + 0.5}
-                      />
+                      {/* 堆叠布局里横向十字线会被读成「数值」，只留竖线指向所在档。 */}
+                      {stack ? null : (
+                        <line
+                          data-testid="chart-crosshair-value"
+                          x1={lineLeft}
+                          x2={lineRight}
+                          y1={Math.round(activePoint.cy) + 0.5}
+                          y2={Math.round(activePoint.cy) + 0.5}
+                        />
+                      )}
                       <line
                         data-testid="chart-crosshair-column"
                         x1={Math.round(activePoint.cx) + 0.5}
@@ -491,7 +737,7 @@ export function ScatterPlot({
                     <g key={`mark-${point.id}`} data-mark-for={point.id}>
                       {point.clamped ? (
                         <path
-                          d={clampedChevronPath(point.cx, point.cy, point.clamped === 'up' ? 'up' : 'down')}
+                          d={clampedChevronPath(point.cx, point.cy, point.clamped)}
                           paintOrder="stroke"
                           style={{
                             fill: seriesTokenVar(point.series.token),
@@ -511,9 +757,57 @@ export function ScatterPlot({
                       )}
                     </g>
                   ))}
+                  {stack?.overflow.map(glyph => (
+                    // 图高放不下的那一截：一档一个朝上的三角，不把 N 个点叠在同一像素上。
+                    <path
+                      key={`overflow-${glyph.bin}`}
+                      data-testid="chart-stack-overflow"
+                      data-overflow-count={glyph.count}
+                      d={clampedChevronPath(glyph.cx, glyph.cy, 'up')}
+                      paintOrder="stroke"
+                      style={{ fill: 'var(--chart-ink-muted)', stroke: CHART_SURFACE_VAR, strokeWidth: MARK_RING_W }}
+                    />
+                  ))}
+                  {stack ? placeXReferenceLabels(
+                    referenceLines.filter(line => line.axis === 'x' && line.label),
+                    value => Math.round(lineLeft + xFraction(value) * (lineRight - lineLeft)) + 0.5,
+                    // 标签可以借用 12px 内边距，硬边是 SVG 两端：窄屏上「−1R 止损」才留得在墙左边。
+                    0,
+                    contentWidth,
+                  ).map(({ line, x, side, row }) => {
+                    // 标签贴在绘图区顶端、用墨色，位置由 placeXReferenceLabels 决定；
+                    // 文字带表面色描边，堆到顶也能读。
+                    return (
+                      <text
+                        key={`ref-label-${line.value}`}
+                        data-testid={line.testId ? `${line.testId}-label` : undefined}
+                        x={side === 'left' ? x - 4 : x + 4}
+                        y={PLOT_INSET.top + 9 + row * 12}
+                        textAnchor={side === 'left' ? 'end' : 'start'}
+                        paintOrder="stroke"
+                        className="font-mono"
+                        style={{ fontSize: 9, fontWeight: 500, fill: 'var(--chart-ink-muted)', stroke: CHART_SURFACE_VAR, strokeWidth: 3 }}
+                      >
+                        {line.label}
+                      </text>
+                    );
+                  }) : null}
                 </svg>
 
                 <div className="absolute left-0" style={{ top: PLOT_INSET.top, bottom: PLOT_INSET.bottom, width: contentWidth }}>
+                  {stack?.overflow.map(glyph => (
+                    <button
+                      key={`overflow-${glyph.bin}`}
+                      type="button"
+                      data-testid="chart-stack-overflow-hit"
+                      data-overflow-count={glyph.count}
+                      aria-label={`该档另有 ${glyph.count} 场超出图高，未逐点绘制`}
+                      tabIndex={-1}
+                      title={`另有 ${glyph.count} 场超出图高`}
+                      className="absolute z-10 -translate-x-1/2 -translate-y-1/2 cursor-help rounded-full bg-transparent outline-none"
+                      style={{ left: `${glyph.cx}px`, top: `${glyph.yPct}%`, width: `${hitWidth}px`, height: `${hitHeight}px` }}
+                    />
+                  ))}
                   {placed.map((point, index) => (
                     <button
                       key={point.id}
@@ -562,8 +856,19 @@ export function ScatterPlot({
                     // 内容与按钮的 aria-label 完全重复，再挂 role="status" 会让读屏
                     // 每移动一个点位就念两遍（表头那条 aria-live 是第三遍）。视觉浮层，读屏静音。
                     aria-hidden="true"
-                    className="pointer-events-none absolute z-20 max-w-[15rem] -translate-x-1/2 -translate-y-full rounded-[4px] border border-[color:var(--chart-border)] bg-[color:var(--chart-surface-raised)] px-2 py-1.5 text-left shadow-[0_2px_8px_rgba(0,0,0,0.18)]"
-                    style={{
+                    className={`pointer-events-none absolute z-20 max-w-[15rem] rounded-[4px] border border-[color:var(--chart-border)] bg-[color:var(--chart-surface-raised)] px-2 py-1.5 text-left shadow-[0_2px_8px_rgba(0,0,0,0.18)] ${
+                      // 堆叠布局里提示框挂在点位旁边而不是上方，否则会盖住正在读的这一柱。
+                      stack ? '-translate-y-1/2' : '-translate-x-1/2 -translate-y-full'
+                    }`}
+                    style={stack ? {
+                      // 右侧放不下 15rem 时改用 right 锚到点位左侧：用 left + translate 翻转会让
+                      // 绝对定位盒子只剩锚点右侧那点可用宽度，文字被挤成两行。
+                      ...(activePoint.cx + 12 + 240 > contentWidth
+                        ? { right: `${contentWidth - (activePoint.cx - 12)}px` }
+                        : { left: `${activePoint.cx + 12}px` }),
+                      // 上下各留半个提示框：底行点位（分布图里最多的那些）的提示框不能被盒子裁掉下缘。
+                      top: `${Math.min(boxHeight - STACK_TOOLTIP_HALF, Math.max(PLOT_INSET.top + STACK_TOOLTIP_HALF, activePoint.cy))}px`,
+                    } : {
                       left: `${Math.min(contentWidth - 90, Math.max(90, activePoint.cx))}px`,
                       top: `${Math.max(38, activePoint.cy - 10)}px`,
                     }}
@@ -694,6 +999,9 @@ export function ScatterPlot({
             {directionHint}
             {fitMode === 'scroll' ? ' · 可左右滚动查看全部点位' : ''}
             {clampedCount > 0 ? ` · ${clampedCount} 个点位超出显示区间，已贴边标记` : ''}
+            {stack && stackOverflowCount > 0
+              ? ` · 最高一档 ${stack.tallest} 场，图高只放下 ${stack.rowsFit - 1} 场，另 ${stackOverflowCount} 场以顶端三角合并标记`
+              : ''}
           </span>
           {footnote}
         </figcaption>

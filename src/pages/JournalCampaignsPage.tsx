@@ -19,6 +19,7 @@ import { toast } from 'sonner';
 import { BackButton } from '@/components/journal/BackButton';
 import {
   CampaignMetricScatterPlot,
+  type CampaignMetricChartView,
   type CampaignMetricColorMode,
   type CampaignMetricScatterGuide,
 } from '@/components/journal/CampaignOddsScatterPlot';
@@ -138,6 +139,7 @@ type CampaignSortState = {
 
 type CampaignMetricChartKey =
   | 'odds'
+  | 'oddsDistribution'
   | 'expectedDrawdownPct'
   | 'opportunityQuality'
   | 'arithmeticExpectancy'
@@ -149,6 +151,10 @@ type CampaignMetricChartKey =
 
 type CampaignMetricChartConfig = {
   key: CampaignMetricChartKey;
+  /** 喂图的数据序列来自哪个键；缺省就是自己。分布图与时序图共用同一份盈亏比序列。 */
+  sourceKey?: CampaignMetricChartKey;
+  /** 缺省 'time'。 */
+  view?: CampaignMetricChartView;
   label: string;
   chartLabel: string;
   seriesLabel: string;
@@ -236,6 +242,32 @@ const CAMPAIGN_METRIC_CHART_CONFIGS: readonly CampaignMetricChartConfig[] = [
       referenceLines: [
         '灰色零线：盈亏平衡线。',
         '黄色 -1R 虚线：实际亏损等于初始最大预期亏损；低于该线表示亏损超过原定风险边界。',
+      ],
+    },
+    missingValueLabel: '有效盈亏比',
+    colorMode: 'signed',
+    formatValue: value => formatSignedMetric(value, 'R'),
+  },
+  {
+    key: 'oddsDistribution',
+    sourceKey: 'odds',
+    view: 'distribution',
+    label: '盈亏比分布',
+    chartLabel: '分布图',
+    seriesLabel: '盈亏比分布',
+    guide: {
+      yAxis: '落在该盈亏比附近的战役数量：点从底线向上堆叠，堆得越高，这一档 b 出现得越多。刻度随图高变化，读柱高时对照左侧场数刻度。',
+      point: '每个点仍是一场战役，横向位置就是它的实际盈亏比 b，不考虑时间先后；同一档内的点按 b 从小到大自下而上排。',
+      colors: [
+        { token: 'profit', label: '绿色：b > 0，战役盈利。' },
+        { token: 'loss', label: '红色：b < 0，战役亏损。' },
+        { token: 'neutral', label: '灰色：b = 0，盈亏持平。' },
+      ],
+      referenceLines: [
+        '琥珀色 -1R 虚线：止损墙，实际亏损等于初始最大预期亏损；墙左侧的点是止损滑点或超出原定风险的亏损。',
+        '灰色 0 线：盈亏平衡。',
+        '灰色曲线：高斯核密度估计（Silverman 带宽）换算成每档期望场数，与柱共用同一条场数轴；带宽约两档宽，尖峰处会低于实际堆高，是趋势轮廓而不是包络。',
+        '超出右侧显示区间的极端盈利贴在右缘画成三角并在脚注计数。',
       ],
     },
     missingValueLabel: '有效盈亏比',
@@ -1116,10 +1148,13 @@ export default function JournalCampaignsPage() {
       })))
     );
 
+    // 分布图与时序图是同一份序列的两种读法，只建一次、共用同一个对象。
+    const odds = buildSeries(row => (
+      row.profitCaptureRatio == null ? null : row.profitCaptureRatio / 100
+    ));
     return {
-      odds: buildSeries(row => (
-        row.profitCaptureRatio == null ? null : row.profitCaptureRatio / 100
-      )),
+      odds,
+      oddsDistribution: odds,
       expectedDrawdownPct: buildSeries(row => (
         Number.isFinite(row.initialExpectedMaxDrawdownPct) && row.initialExpectedMaxDrawdownPct > 0
           ? row.initialExpectedMaxDrawdownPct
@@ -1138,6 +1173,8 @@ export default function JournalCampaignsPage() {
     config => config.key === metricChartKey,
   ) ?? CAMPAIGN_METRIC_CHART_CONFIGS[0];
   const selectedMetricSeries = metricSeriesByKey[metricChartKey];
+  // 「当前打开的是哪份数据」：分布图打开时，盈亏比的排序行按钮也要读成「收起」。
+  const openSourceKey: CampaignMetricChartKey = selectedMetricConfig.sourceKey ?? selectedMetricConfig.key;
   const updateChartParam = (nextKey: CampaignMetricChartKey | null) => {
     const params = new URLSearchParams(location.search);
     params.delete('scope');
@@ -1149,7 +1186,7 @@ export default function JournalCampaignsPage() {
 
   const handleMetricChartToggle = (key: CampaignMetricChartKey) => {
     if (metricSeriesByKey[key].points.length === 0) return;
-    if (metricChartOpen && metricChartKey === key) {
+    if (metricChartOpen && openSourceKey === key) {
       setMetricChartOpen(false);
       updateChartParam(null);
       return;
@@ -1712,7 +1749,7 @@ export default function JournalCampaignsPage() {
                   : metricSeriesByKey[sortChartKey].points.length;
                 const sortChartActive = sortChartKey != null
                   && metricChartOpen
-                  && metricChartKey === sortChartKey;
+                  && openSourceKey === sortChartKey;
                 const sortChartTestId = sortChartKey === 'odds'
                   ? 'campaign-odds-chart-toggle'
                   : sortChartKey == null
@@ -1899,8 +1936,8 @@ export default function JournalCampaignsPage() {
                           data-testid={sortChartTestId}
                           aria-expanded={sortChartActive}
                           aria-controls="campaign-odds-scatter-panel"
-                          aria-label={`${sortChartActive ? '收起' : '查看'}${sortChartConfig.label}时序散点图，共 ${sortChartPointCount} 场`}
-                          title={`${sortChartActive ? '收起' : '查看'}${sortChartConfig.label}时序散点图`}
+                          aria-label={`${sortChartActive ? '收起' : '查看'}${sortChartConfig.label}散点图，共 ${sortChartPointCount} 场`}
+                          title={`${sortChartActive ? '收起' : '查看'}${sortChartConfig.label}散点图`}
                           disabled={sortChartPointCount === 0}
                           onClick={(event) => {
                             event.stopPropagation();
@@ -2430,6 +2467,45 @@ export default function JournalCampaignsPage() {
               className="order-3 border-t border-border/70 bg-background/35"
             >
               <div id="campaign-metric-scatter-view">
+                {openSourceKey === 'odds' ? (
+                  // 「时序 | 分布」放在面板层而不是图表表头：空序列时元件只渲染空态、没有表头，
+                  // 切换键仍要在。切换直接改键与 URL，不走 toggle（同键会关图）。
+                  <div className="flex items-center justify-end px-3 pt-2 sm:px-4">
+                    <div
+                      role="group"
+                      aria-label="盈亏比视图"
+                      data-testid="campaign-odds-view-switch"
+                      className="inline-flex shrink-0 overflow-hidden rounded border border-[color:var(--chart-border)] text-[9px] text-[color:var(--chart-ink-muted)]"
+                    >
+                      {([
+                        { key: 'odds' as const, label: '时序', testId: 'campaign-odds-view-time' },
+                        { key: 'oddsDistribution' as const, label: '分布', testId: 'campaign-odds-view-distribution' },
+                      ]).map(option => {
+                        const pressed = selectedMetricConfig.key === option.key;
+                        return (
+                          <button
+                            key={option.key}
+                            type="button"
+                            data-testid={option.testId}
+                            aria-pressed={pressed}
+                            onClick={() => {
+                              if (pressed) return;
+                              setMetricChartKey(option.key);
+                              updateChartParam(option.key);
+                            }}
+                            className={`px-2 py-0.5 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--ring))] ${
+                              pressed
+                                ? 'bg-[color:var(--chart-surface-raised)] font-medium text-[color:var(--chart-ink)]'
+                                : 'hover:text-[color:var(--chart-ink)]'
+                            }`}
+                          >
+                            {option.label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ) : null}
                 <CampaignMetricScatterPlot
                   key={selectedMetricConfig.key}
                   points={selectedMetricSeries.points}
@@ -2443,6 +2519,7 @@ export default function JournalCampaignsPage() {
                   excludedMissingOperationTimeCount={selectedMetricSeries.excludedMissingOperationTimeCount}
                   colorMode={selectedMetricConfig.colorMode}
                   legacyOddsTestIds={selectedMetricConfig.key === 'odds'}
+                  view={selectedMetricConfig.view ?? 'time'}
                   onBack={() => { setMetricChartOpen(false); updateChartParam(null); }}
                   onSelectCampaign={handleCampaignOpen}
                 />

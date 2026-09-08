@@ -331,3 +331,169 @@ describe('ScatterPlot 在没有 ResizeObserver 的环境里', () => {
     }
   });
 });
+
+describe('ScatterPlot 堆叠（场数）布局', () => {
+  function makeStackPoints(values: number[]) {
+    return values.map((value, index) => ({
+      id: `s${index}`,
+      x: value,
+      // 场数轴下 y 不参与布局，统一给 0。
+      y: 0,
+      seriesId: value > 0 ? 'profit' : value < 0 ? 'loss' : 'flat',
+      valueText: `${value}R`,
+      label: `战役 ${index}`,
+      ariaLabel: `第 ${index} 场，${value}R`,
+      testId: `st-${index}`,
+      dataAttrs: { 'data-campaign-id': `c${index}`, 'data-metric-value': value },
+    }));
+  }
+
+  function renderStack(values: number[], extra: Partial<Parameters<typeof ScatterPlot>[0]> = {}) {
+    return render(
+      <ScatterPlot
+        points={makeStackPoints(values)}
+        series={SERIES}
+        yAxis={{ mode: 'count', tickTestId: 'ctick', gridTestId: 'cgrid', unit: '场' }}
+        xAxis={{ mode: 'linear', min: -2, max: 10, labels: [{ at: -2, text: '-2R' }, { at: 10, text: '+10R' }] }}
+        emptyMessage="暂无数据"
+        testId="plot"
+        scrollAreaTestId="scroll"
+        {...extra}
+      />,
+    );
+  }
+
+  it('同一 x 的 5 个点从底线向上堆：5 个 mark、5 个 button、top% 严格递减、不滚动', () => {
+    renderStack([0.5, 0.5, 0.5, 0.5, 0.5]);
+    const plot = screen.getByTestId('plot');
+    expect(plot.querySelectorAll('[data-mark-for]')).toHaveLength(5);
+    const buttons = [...plot.querySelectorAll<HTMLElement>('button[data-campaign-id]')];
+    expect(buttons).toHaveLength(5);
+    const tops = buttons.map(node => Number.parseFloat(node.style.top));
+    expect(buttons.every(node => node.style.top.endsWith('%'))).toBe(true);
+    for (let i = 1; i < tops.length; i += 1) expect(tops[i]).toBeLessThan(tops[i - 1]);
+    expect(new Set(buttons.map(node => node.style.left)).size).toBe(1);
+    expect([...plot.querySelectorAll('[data-mark-for]')].every(node => !node.hasAttribute('data-campaign-id'))).toBe(true);
+    const scroll = screen.getByTestId('scroll');
+    expect(scroll).toHaveAttribute('data-fit-mode', 'fit');
+    expect(scroll).toHaveAttribute('data-mark-size', '8');
+    expect(scroll).toHaveAttribute('data-layout', 'campaign-scatter-landscape');
+    expect(Number(scroll.getAttribute('data-mark-pitch'))).toBeGreaterThanOrEqual(MIN_PITCH);
+  });
+
+  it('竖向参考线：x1 === x2、data-reference-axis=x、threshold 虚线琥珀 / zero 实线轴色、标签用墨色', () => {
+    renderStack([-0.5, 0.5], {
+      referenceLines: [
+        { axis: 'x', value: -1, kind: 'threshold', label: '-1R 止损', testId: 'wall', dataAttrs: { 'data-reference-value': -1 } },
+        { axis: 'x', value: 0, kind: 'zero', label: '0 盈亏平衡', testId: 'be' },
+      ],
+    });
+    const wall = screen.getByTestId('wall') as unknown as SVGLineElement;
+    expect(wall.getAttribute('x1')).toBe(wall.getAttribute('x2'));
+    expect(wall.getAttribute('y1')).not.toBe(wall.getAttribute('y2'));
+    expect(wall).toHaveAttribute('data-reference-axis', 'x');
+    expect(wall).toHaveAttribute('data-reference-value', '-1');
+    expect(wall.getAttribute('stroke-dasharray')).toBeTruthy();
+    expect(wall.style.stroke).toBe('var(--chart-threshold)');
+    const breakEven = screen.getByTestId('be') as unknown as SVGLineElement;
+    expect(breakEven.getAttribute('stroke-dasharray')).toBeNull();
+    expect(breakEven.style.stroke).toBe('var(--chart-axis)');
+    expect(Number(breakEven.getAttribute('x1'))).toBeGreaterThan(Number(wall.getAttribute('x1')));
+    const label = screen.getByTestId('wall-label') as unknown as SVGTextElement;
+    expect(label.tagName.toLowerCase()).toBe('text');
+    expect(label.textContent).toBe('-1R 止损');
+    expect(label.style.fill).toBe('var(--chart-ink-muted)');
+    expect(screen.getByTestId('be-label').textContent).toBe('0 盈亏平衡');
+  });
+
+  it('overlay 画在参考线之后、第一个点位之前，且不带 data-mark-for', () => {
+    renderStack([0.2, 0.4, 0.6], {
+      overlay: scale => (
+        <path
+          data-testid="curve"
+          d={`M ${scale.x(-2)} ${scale.countY(0)} L ${scale.x(10)} ${scale.countY(1)}`}
+          fill="none"
+          style={{ stroke: 'var(--chart-ink-secondary)' }}
+        />
+      ),
+    });
+    const plot = screen.getByTestId('plot');
+    const curve = screen.getByTestId('curve');
+    expect(curve.hasAttribute('data-mark-for')).toBe(false);
+    expect(curve.closest('[data-mark-for]')).toBeNull();
+    const firstMark = plot.querySelector('[data-mark-for]')!;
+    // eslint-disable-next-line no-bitwise
+    expect(curve.compareDocumentPosition(firstMark) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(curve.parentElement?.getAttribute('clip-path')).toContain('plot-plot-clip');
+    expect(plot.querySelector('clipPath#plot-plot-clip')).not.toBeNull();
+    expect(plot.querySelectorAll('[data-mark-for]')).toHaveLength(3);
+  });
+
+  it('悬停只给竖向十字线与提示框，不画横向数值线', () => {
+    renderStack([0.2, 0.4]);
+    fireEvent.mouseEnter(screen.getByTestId('st-1'));
+    expect(screen.getByTestId('chart-tooltip')).toHaveTextContent('战役 1');
+    expect(screen.getByTestId('chart-crosshair-column')).toBeInTheDocument();
+    expect(screen.queryByTestId('chart-crosshair-value')).not.toBeInTheDocument();
+  });
+
+  it('x 越出窗口的点画成三角而不是圆，脚注计数', () => {
+    renderStack([0.5, 38]);
+    const mark = screen.getByTestId('plot').querySelector('[data-mark-for="s1"] > *')!;
+    expect(mark.tagName.toLowerCase()).toBe('path');
+    expect(mark.getAttribute('paint-order')).toBe('stroke');
+    expect((mark as unknown as SVGPathElement).style.stroke).toBe('var(--chart-surface)');
+    const inside = screen.getByTestId('plot').querySelector('[data-mark-for="s0"] > *')!;
+    expect(inside.tagName.toLowerCase()).toBe('circle');
+    expect(screen.getByTestId('plot').querySelector('figcaption')).toHaveTextContent('1 个点位超出显示区间');
+    const buttons = [...screen.getByTestId('plot').querySelectorAll<HTMLElement>('button[data-campaign-id]')];
+    expect(Number.parseFloat(buttons[1].style.left)).toBeGreaterThan(Number.parseFloat(buttons[0].style.left));
+  });
+
+  it('场数刻度是升序整数、最顶一格带单位、网格实线且落在行的边界上', () => {
+    renderStack([0.5, 0.5, 0.5]);
+    const ticks = screen.getAllByTestId('ctick');
+    const values = ticks.map(node => Number(node.getAttribute('data-tick-value')));
+    expect(values.every(Number.isInteger)).toBe(true);
+    const ascending = [...values].sort((a, b) => a - b);
+    expect(ascending[0]).toBe(0);
+    expect(new Set(values).size).toBe(values.length);
+    expect(ticks.find(node => Number(node.getAttribute('data-tick-value')) === Math.max(...values))).toHaveTextContent('场');
+    const grid = screen.getAllByTestId('cgrid') as unknown as SVGLineElement[];
+    expect(grid.length).toBe(ticks.length);
+    for (const line of grid) {
+      expect(line.style.stroke).toBe('var(--chart-grid)');
+      expect(line.getAttribute('stroke-dasharray')).toBeNull();
+    }
+    // 第 c 条网格线 = 底线 − c × 行距：与按钮的 top% 换算一致。
+    const baseline = Number(grid.find(line => line.getAttribute('data-grid-value') === '0')!.getAttribute('y1'));
+    const buttons = [...screen.getByTestId('plot').querySelectorAll<HTMLElement>('button[data-campaign-id]')];
+    const pitch = Number.parseFloat(buttons[0].style.height);
+    expect(pitch).toBeGreaterThanOrEqual(12);
+    const step = Number(grid[0].getAttribute('data-grid-value')) === 0
+      ? Number(grid[1].getAttribute('data-grid-value'))
+      : Number(grid[0].getAttribute('data-grid-value'));
+    const stepLine = grid.find(line => Number(line.getAttribute('data-grid-value')) === step)!;
+    expect(baseline - Number(stepLine.getAttribute('y1'))).toBeCloseTo(step * pitch, 6);
+  });
+
+  it('重复渲染得到完全相同的位置', () => {
+    const values = [-1.2, -1, -0.9, -0.5, 0, 0.3, 0.3, 1.1, 7];
+    const { rerender } = renderStack(values);
+    const read = () => [...screen.getByTestId('plot').querySelectorAll<HTMLElement>('button[data-campaign-id]')]
+      .map(node => `${node.style.left}|${node.style.top}`);
+    const first = read();
+    rerender(
+      <ScatterPlot
+        points={makeStackPoints(values)}
+        series={SERIES}
+        yAxis={{ mode: 'count' }}
+        xAxis={{ mode: 'linear', min: -2, max: 10 }}
+        emptyMessage="暂无数据"
+        testId="plot"
+        scrollAreaTestId="scroll"
+      />,
+    );
+    expect(read()).toEqual(first);
+  });
+});

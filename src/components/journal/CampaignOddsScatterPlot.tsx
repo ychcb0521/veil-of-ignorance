@@ -7,12 +7,19 @@ import {
 import { formatBeijingTime } from '@/lib/timeFormat';
 import {
   ScatterPlot,
+  type ScatterCountAxis,
   type ScatterPoint,
   type ScatterReferenceLine,
   type ScatterSeries,
+  type ScatterStackScale,
+  type ScatterXAxis,
   type ScatterYAxis,
 } from '@/components/charts/ScatterPlot';
 import { markShapePath, type ChartSeriesToken, type ScatterMarkShape } from '@/lib/chartTokens';
+import { buildOddsDistributionModel, kdeCountPath, TAIL_THRESHOLD } from '@/lib/oddsDistribution';
+
+/** 时序：横轴按操作时间排战役；分布：横轴是指标数值本身，纵轴是落在该档的场数。 */
+export type CampaignMetricChartView = 'time' | 'distribution';
 
 export type CampaignMetricColorMode =
   | 'signed'
@@ -48,6 +55,8 @@ type CampaignMetricScatterPlotProps = {
   excludedMissingOperationTimeCount?: number;
   colorMode?: CampaignMetricColorMode;
   legacyOddsTestIds?: boolean;
+  /** 缺省 'time'。'distribution' 只对盈亏比这类以 R 计的带符号指标有意义。 */
+  view?: CampaignMetricChartView;
   onBack?: () => void;
   onSelectCampaign: (campaignId: string) => void;
 };
@@ -344,11 +353,13 @@ export function CampaignMetricScatterPlot({
   excludedMissingOperationTimeCount = 0,
   colorMode = 'signed',
   legacyOddsTestIds = false,
+  view = 'time',
   onBack,
   onSelectCampaign,
 }: CampaignMetricScatterPlotProps) {
   const [activeCampaignId, setActiveCampaignId] = useState<string | null>(null);
   const [guideOpen, setGuideOpen] = useState(false);
+  const distribution = view === 'distribution';
   const lossBoundaryValue = metricKey === 'odds' ? -1 : null;
   const chartPoints = useMemo(
     () => points.map(point => ({
@@ -380,6 +391,11 @@ export function CampaignMetricScatterPlot({
   const domain = scale;
   const ticks = scale.ticks;
   const activePoint = chartPoints.find(point => point.campaignId === activeCampaignId) ?? null;
+  // 分布视图的窗口、摘要、带宽都由同一份纯函数派生，和时序视图互不影响。
+  const dist = useMemo(
+    () => (distribution ? buildOddsDistributionModel(chartPoints) : null),
+    [chartPoints, distribution],
+  );
   const summary = useMemo(() => {
     const values = chartPoints.map(point => point.value);
     if (values.length === 0) {
@@ -417,8 +433,10 @@ export function CampaignMetricScatterPlot({
     [colorMode, guide.colors],
   );
 
+  // 分布视图按 b 升序喂给元件：按钮顺序 = 键盘左右键的漫游顺序 = 沿横轴从左到右。
+  const orderedPoints = dist ? dist.sortedPoints : chartPoints;
   const scatterPoints = useMemo<ScatterPoint[]>(
-    () => chartPoints.map((point, index) => {
+    () => orderedPoints.map((point, index) => {
       const positive = point.value > 0;
       const negative = point.value < 0;
       const valueSign = positive ? 'positive' : negative ? 'negative' : 'zero';
@@ -429,8 +447,8 @@ export function CampaignMetricScatterPlot({
       const operationTime = formatBeijingTime(point.operationTime);
       return {
         id: point.campaignId,
-        x: index,
-        y: point.value,
+        x: dist ? point.value : index,
+        y: dist ? 0 : point.value,
         seriesId: `s${Math.min(seriesIndex, Math.max(0, series.length - 1))}`,
         valueText: formatValue(point.value),
         label: `#${point.sequence} ${point.title}`,
@@ -449,8 +467,50 @@ export function CampaignMetricScatterPlot({
         },
       };
     }),
-    [chartPoints, colorMode, formatValue, legacyOddsTestIds, metricKey, metricLabel, series.length],
+    [colorMode, dist, formatValue, legacyOddsTestIds, metricKey, metricLabel, orderedPoints, series.length],
   );
+
+  const countAxis = useMemo<ScatterCountAxis>(() => ({
+    mode: 'count',
+    tickTestId: `campaign-metric-y-tick-${metricKey}`,
+    gridTestId: `campaign-metric-grid-line-${metricKey}`,
+    unit: '场',
+  }), [metricKey]);
+
+  const distributionXAxis = useMemo<ScatterXAxis | null>(() => (dist ? {
+    mode: 'linear',
+    min: dist.domain.min,
+    max: dist.domain.max,
+    labels: dist.domain.ticks.map(value => ({ at: value, text: formatIntegerOddsTick(value) })),
+  } : null), [dist]);
+
+  const distributionReferenceLines = useMemo<ScatterReferenceLine[]>(() => (dist ? [
+    {
+      axis: 'x',
+      value: -1,
+      kind: 'threshold',
+      label: '-1R 止损',
+      testId: `campaign-metric-loss-wall-${metricKey}`,
+      dataAttrs: { 'data-reference-value': -1 },
+    },
+    {
+      axis: 'x',
+      value: 0,
+      kind: 'zero',
+      label: '0 盈亏平衡',
+      testId: `campaign-metric-break-even-${metricKey}`,
+      dataAttrs: { 'data-reference-value': 0 },
+    },
+  ] : []), [dist, metricKey]);
+
+  const densityOverlay = useMemo(() => (dist ? (scale: ScatterStackScale) => (
+    <path
+      data-testid={`campaign-metric-density-curve-${metricKey}`}
+      d={kdeCountPath(dist.values, dist.domain, scale, dist.bandwidth)}
+      fill="none"
+      style={{ stroke: 'var(--chart-ink-secondary)', strokeWidth: 2, strokeLinejoin: 'round', strokeLinecap: 'round' }}
+    />
+  ) : undefined), [dist, metricKey]);
 
   const yAxis = useMemo<ScatterYAxis>(() => ({
     min: domain.min,
@@ -537,7 +597,11 @@ export function CampaignMetricScatterPlot({
       <dl className="space-y-1.5">
         <div className="grid grid-cols-[34px_minmax(0,1fr)] gap-2">
           <dt className="font-medium text-[color:var(--chart-ink)]">横轴</dt>
-          <dd>按客观操作时间从早到晚等距排列，每一格代表一场战役；横向距离只表示先后顺序，不表示真实时间间隔。战役较多时图区可左右滚动，点位大小固定不缩小。</dd>
+          {dist ? (
+            <dd>横轴就是盈亏比 b 本身，单位 R，线性刻度，不考虑时间先后。显示区间取 p2–p98 的稳健窗口并封顶在 +10R；超出右缘的极端盈利贴边画成三角并在脚注计数，−1R 左侧的亏损照常落在墙外。</dd>
+          ) : (
+            <dd>按客观操作时间从早到晚等距排列，每一格代表一场战役；横向距离只表示先后顺序，不表示真实时间间隔。战役较多时图区可左右滚动，点位大小固定不缩小。</dd>
+          )}
         </div>
         <div className="grid grid-cols-[34px_minmax(0,1fr)] gap-2">
           <dt className="font-medium text-[color:var(--chart-ink)]">纵轴</dt>
@@ -558,7 +622,11 @@ export function CampaignMetricScatterPlot({
         </div>
         <div className="grid grid-cols-[34px_minmax(0,1fr)] gap-2">
           <dt className="font-medium text-[color:var(--chart-ink)]">点位</dt>
-          <dd>{guide.point} 横向位置对应操作先后，纵向位置对应本指标数值；点击任一点进入对应战役。右侧 n= 是各纵轴区间的全域点数，可用来读出被长尾压扁的中段密度。</dd>
+          {dist ? (
+            <dd>{guide.point} 横向位置吸附到所在档的中心：每 1R 等分成若干档、每档至少 14px 宽，−1R 与 0 恰好是档边界，越过止损墙的亏损永远画在墙左边；精确 b 看提示框。纵向位置是同一档里的堆叠序号，从底线往上数。图高放不下的档会撑高图盒，撑到上限仍放不下时顶端合成一个三角并在脚注报数。点击任一点进入对应战役。</dd>
+          ) : (
+            <dd>{guide.point} 横向位置对应操作先后，纵向位置对应本指标数值；点击任一点进入对应战役。右侧 n= 是各纵轴区间的全域点数，可用来读出被长尾压扁的中段密度。</dd>
+          )}
         </div>
         {guide.referenceLines?.length ? (
           <div className="grid grid-cols-[34px_minmax(0,1fr)] gap-2">
@@ -574,8 +642,8 @@ export function CampaignMetricScatterPlot({
     <ScatterPlot
       points={scatterPoints}
       series={series}
-      yAxis={yAxis}
-      xAxis={{
+      yAxis={dist ? countAxis : yAxis}
+      xAxis={distributionXAxis ?? {
         mode: 'ordinal',
         count: chartPoints.length,
         labelAt: index => {
@@ -585,8 +653,9 @@ export function CampaignMetricScatterPlot({
           return show ? `#${point.sequence}` : null;
         },
       }}
-      referenceLines={referenceLines}
-      bandCounts={{
+      referenceLines={dist ? distributionReferenceLines : referenceLines}
+      overlay={densityOverlay}
+      bandCounts={dist ? undefined : {
         testId: bandCountTestId,
         items: bands.map(band => ({
           key: band.key,
@@ -605,14 +674,40 @@ export function CampaignMetricScatterPlot({
       rootDataAttrs={{ 'data-metric-key': metricKey }}
       header={header}
       guidePanel={guidePanel}
-      legendExtra={(
+      legendExtra={dist ? (
+        <div
+          data-testid={`campaign-metric-summary-${metricKey}`}
+          className="flex flex-wrap items-center gap-x-3 gap-y-1 font-mono tabular-nums"
+        >
+          <span>范围 {formatValue(dist.summary.min)} – {formatValue(dist.summary.max)}</span>
+          <span className="text-[color:var(--chart-axis)]">|</span>
+          <span>中位数 {formatValue(dist.summary.median)}</span>
+          <span className="text-[color:var(--chart-axis)]">|</span>
+          <span>均值 {formatValue(dist.summary.mean)}</span>
+          <span className="text-[color:var(--chart-axis)]">|</span>
+          <span data-testid={`campaign-metric-win-rate-${metricKey}`}>
+            胜率 {Math.round(dist.summary.winRate * 100)}% ({dist.summary.winCount}/{dist.summary.n})
+          </span>
+          <span className="text-[color:var(--chart-axis)]">|</span>
+          <span data-testid={`campaign-metric-tail-count-${metricKey}`}>
+            右尾 &gt;+{TAIL_THRESHOLD}R {dist.summary.tailCount} 场
+          </span>
+          <span className="text-[color:var(--chart-axis)]">|</span>
+          <span className="inline-flex items-center gap-1.5">
+            <svg aria-hidden="true" width="12" height="12" viewBox="0 0 12 12" className="shrink-0">
+              <path d="M 1 9 C 3 9 4 3 6 3 C 8 3 9 9 11 9" fill="none" style={{ stroke: 'var(--chart-ink-secondary)', strokeWidth: 2, strokeLinecap: 'round' }} />
+            </svg>
+            <span>平滑密度（每档期望场数）</span>
+          </span>
+        </div>
+      ) : (
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 font-mono tabular-nums">
           <span>范围 {formatValue(summary.min)} – {formatValue(summary.max)}</span>
           <span className="text-[color:var(--chart-axis)]">|</span>
           <span>中位数 {formatValue(summary.median)}</span>
         </div>
       )}
-      directionHint="早 → 晚 · 横轴每格一场战役"
+      directionHint={dist ? '横轴 盈亏比 b（R）· 纵轴 场数 · 不按时间排列' : '早 → 晚 · 横轴每格一场战役'}
       footnote={excludedMissingValueCount > 0 || excludedMissingOperationTimeCount > 0 ? (
         <span>
           未绘制：

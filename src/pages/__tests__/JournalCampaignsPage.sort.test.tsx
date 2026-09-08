@@ -291,6 +291,12 @@ function LocationProbe() {
   );
 }
 
+/** 挂在列表路由旁边、只读 search 的探针：切换视图后不离开列表也能断言 URL。 */
+function SearchProbe() {
+  const location = useLocation();
+  return <div data-testid="location-probe-search">{location.search}</div>;
+}
+
 describe('JournalCampaignsPage sorting', () => {
   it('removes the legacy mutual scope while preserving sort parameters and detail navigation', async () => {
     render(
@@ -502,6 +508,89 @@ describe('JournalCampaignsPage sorting', () => {
     const plot = await screen.findByTestId('campaign-metric-scatter-plot');
     expect(plot).toHaveAttribute('data-metric-key', 'expectedDrawdownPct');
     expect(screen.getByTestId('campaign-odds-scatter-panel')).toBeInTheDocument();
+  }, 15_000);
+
+  it('?chart=oddsDistribution 恢复分布图，「时序 | 分布」互切并写回 URL，排序行按钮把它当作盈亏比图收起', async () => {
+    render(
+      <MemoryRouter initialEntries={['/journal/campaigns?sort=importance&direction=asc&chart=oddsDistribution']}>
+        <Routes>
+          <Route path="/journal/campaigns" element={<JournalCampaignsPage />} />
+          <Route path="/journal/campaigns/:id" element={<LocationProbe />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    const plot = await screen.findByTestId('campaign-metric-scatter-plot');
+    expect(plot).toHaveAttribute('data-metric-key', 'oddsDistribution');
+    expect(screen.queryByTestId('campaign-odds-scatter-plot')).not.toBeInTheDocument();
+    expect(screen.getByTestId('campaign-odds-view-distribution')).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByTestId('campaign-odds-view-time')).toHaveAttribute('aria-pressed', 'false');
+    // 竖向参考线：止损墙虚线琥珀、盈亏平衡实线；标签用墨色。
+    const wall = screen.getByTestId('campaign-metric-loss-wall-oddsDistribution') as unknown as SVGLineElement;
+    expect(wall).toHaveAttribute('data-reference-axis', 'x');
+    expect(wall).toHaveAttribute('data-reference-kind', 'threshold');
+    expect(wall.getAttribute('stroke-dasharray')).toBeTruthy();
+    expect(wall.style.stroke).toBe('var(--chart-threshold)');
+    expect(screen.getByTestId('campaign-metric-loss-wall-oddsDistribution-label')).toHaveTextContent('-1R 止损');
+    const breakEven = screen.getByTestId('campaign-metric-break-even-oddsDistribution') as unknown as SVGLineElement;
+    expect(breakEven).toHaveAttribute('data-reference-axis', 'x');
+    expect(breakEven.getAttribute('stroke-dasharray')).toBeNull();
+    // 点位按 b 升序排（late-close −0.8 → best-pnl +0.5 → high-importance +3），横向位置递增。
+    const distributionButtons = [...plot.querySelectorAll<HTMLElement>('button[data-campaign-id]')];
+    expect(distributionButtons.map(node => node.dataset.campaignId)).toEqual(['late-close', 'best-pnl', 'high-importance']);
+    const lefts = distributionButtons.map(node => Number.parseFloat(node.style.left));
+    expect(lefts[0]).toBeLessThan(lefts[1]);
+    expect(lefts[1]).toBeLessThan(lefts[2]);
+    expect(distributionButtons.every(node => node.style.top.endsWith('%'))).toBe(true);
+    expect(screen.getByTestId('campaign-metric-point-oddsDistribution-late-close')).toHaveAttribute('data-marker-shape', 'diamond');
+    expect(screen.getByTestId('campaign-metric-density-curve-oddsDistribution').tagName.toLowerCase()).toBe('path');
+    expect(screen.getByTestId('campaign-metric-win-rate-oddsDistribution')).toHaveTextContent('胜率 67% (2/3)');
+    expect(screen.getByTestId('campaign-metric-tail-count-oddsDistribution')).toHaveTextContent('右尾 >+5R 0 场');
+    expect(screen.queryByTestId('campaign-metric-band-count')).not.toBeInTheDocument();
+    expect(screen.getByTestId('campaign-metric-scroll-area')).toHaveAttribute('data-fit-mode', 'fit');
+    expect(screen.getByTestId('campaign-metric-scroll-area')).toHaveClass('aspect-[8/5]');
+    fireEvent.click(screen.getByTestId('campaign-metric-guide-toggle-oddsDistribution'));
+    const guide = screen.getByTestId('campaign-metric-guide-oddsDistribution');
+    expect(guide).toHaveTextContent('盈亏比 b 本身');
+    expect(guide).toHaveTextContent('止损墙');
+    expect(guide).toHaveTextContent('核密度');
+
+    // 切回时序：URL 改成 chart=odds，旧的 campaign-odds-* testid 原样回来。
+    fireEvent.click(screen.getByTestId('campaign-odds-view-time'));
+    expect(screen.getByTestId('campaign-odds-scatter-plot')).toBeInTheDocument();
+    expect(screen.getByTestId('campaign-odds-loss-boundary-line')).toBeInTheDocument();
+    expect(screen.getByTestId('campaign-odds-loss-boundary-label')).toHaveTextContent('-1R');
+    expect(screen.queryByTestId('campaign-metric-scatter-plot')).not.toBeInTheDocument();
+    expect(screen.getByTestId('campaign-odds-view-time')).toHaveAttribute('aria-pressed', 'true');
+    fireEvent.click(screen.getByTestId('campaign-odds-point-best-pnl'));
+    expect(screen.getByTestId('location-probe')).toHaveTextContent(
+      '/journal/campaigns/best-pnl?sort=importance&direction=asc&chart=odds|from-list',
+    );
+  }, 15_000);
+
+  it('分布图打开时排序行按钮读作「收起散点图」并能直接收起', async () => {
+    render(
+      <MemoryRouter initialEntries={['/journal/campaigns?sort=importance&direction=asc&chart=odds']}>
+        <Routes>
+          <Route path="/journal/campaigns" element={<><JournalCampaignsPage /><SearchProbe /></>} />
+          <Route path="/journal/campaigns/:id" element={<LocationProbe />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    await screen.findByTestId('campaign-odds-scatter-plot');
+    fireEvent.click(screen.getByTestId('campaign-odds-view-distribution'));
+    expect(await screen.findByTestId('campaign-metric-scatter-plot')).toHaveAttribute('data-metric-key', 'oddsDistribution');
+    expect(screen.getByTestId('location-probe-search')).toHaveTextContent('chart=oddsDistribution');
+
+    fireEvent.contextMenu(screen.getByTestId('campaign-sort-captureRate'));
+    const toggle = await screen.findByTestId('campaign-odds-chart-toggle');
+    expect(toggle).toHaveTextContent('收起散点图');
+    expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    expect(toggle.getAttribute('aria-label')).not.toContain('时序');
+    fireEvent.click(toggle);
+    expect(screen.queryByTestId('campaign-odds-scatter-panel')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('campaign-odds-view-switch')).not.toBeInTheDocument();
+    expect(screen.getByTestId('location-probe-search')).not.toHaveTextContent('chart=');
   }, 15_000);
 
   it('DSI / USI 贡献率各自只收一侧样本，且组内合计 100%', async () => {

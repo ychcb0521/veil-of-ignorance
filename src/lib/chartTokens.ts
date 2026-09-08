@@ -96,10 +96,14 @@ export function markShapePath(shape: ScatterMarkShape, cx: number, cy: number) {
   return '';
 }
 
+export type ClampDirection = 'up' | 'down' | 'left' | 'right';
+
 /** 越界点位夹在边缘并画成朝外的三角，保留数值可读性但不谎报位置。 */
-export function clampedChevronPath(cx: number, cy: number, direction: 'up' | 'down') {
+export function clampedChevronPath(cx: number, cy: number, direction: ClampDirection) {
   const d = 4.6;
-  return direction === 'up'
-    ? `M ${cx} ${cy - d} L ${cx + d} ${cy + d * 0.7} L ${cx - d} ${cy + d * 0.7} Z`
-    : `M ${cx} ${cy + d} L ${cx + d} ${cy - d * 0.7} L ${cx - d} ${cy - d * 0.7} Z`;
+  if (direction === 'up') return `M ${cx} ${cy - d} L ${cx + d} ${cy + d * 0.7} L ${cx - d} ${cy + d * 0.7} Z`;
+  if (direction === 'down') return `M ${cx} ${cy + d} L ${cx + d} ${cy - d * 0.7} L ${cx - d} ${cy - d * 0.7} Z`;
+  // 横轴越界：分布图把超出显示区间的极端盈亏贴在左右缘，三角尖朝外。
+  if (direction === 'right') return `M ${cx + d} ${cy} L ${cx - d * 0.7} ${cy + d} L ${cx - d * 0.7} ${cy - d} Z`;
+  return `M ${cx - d} ${cy} L ${cx + d * 0.7} ${cy + d} L ${cx + d * 0.7} ${cy - d} Z`;
 }
