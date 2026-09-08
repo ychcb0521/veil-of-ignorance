@@ -49,6 +49,25 @@
     --sidebar-accent-foreground: 220 10% 85%;
     --sidebar-border: 216 14% 19%;
     --sidebar-ring: 43 89% 50%;
+
+    /* ── 复盘图表令牌（深色 = 应用默认主题）────────────────────────────
+       颜色全部经 dataviz 的 validate_palette.js 验证，禁止凭眼睛微调。
+       --chart-importance 与 --chart-threshold 同为琥珀，但二者互斥：
+       阈值虚线只在盈亏比图出现，重要性配色只在重要性图出现，永不同框。 */
+    --chart-surface: #161A1E;
+    --chart-surface-raised: #1C2126;
+    --chart-border: #2A313A;
+    --chart-grid: #262D36;
+    --chart-axis: #39424D;
+    --chart-ink: #E6EAF2;
+    --chart-ink-secondary: #AEB8C7;
+    --chart-ink-muted: #98A2B3;
+    --chart-profit: #1FA97A;
+    --chart-loss: #EF5B3C;
+    --chart-neutral: #626C79;
+    --chart-info: #2B7FFF;
+    --chart-importance: #C98500;
+    --chart-threshold: #C98500;
   }
 
   .light {
@@ -93,6 +112,22 @@
     --sidebar-accent-foreground: 220 15% 15%;
     --sidebar-border: 220 13% 88%;
     --sidebar-ring: 43 89% 45%;
+
+    /* 复盘图表令牌（浅色覆盖）。见 :root 处的说明。 */
+    --chart-surface: #FCFDFE;
+    --chart-surface-raised: #FFFFFF;
+    --chart-border: #D9DEE7;
+    --chart-grid: #E3E7EE;
+    --chart-axis: #C7CEDA;
+    --chart-ink: #172033;
+    --chart-ink-secondary: #4A5568;
+    --chart-ink-muted: #5B6675;
+    --chart-profit: #00875A;
+    --chart-loss: #DE350B;
+    --chart-neutral: #87919F;
+    --chart-info: #2B7FFF;
+    --chart-importance: #D99A00;
+    --chart-threshold: #D99A00;
   }
 }
 

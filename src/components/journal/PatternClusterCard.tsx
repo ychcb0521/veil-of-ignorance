@@ -90,10 +90,10 @@ export function PatternClusterCard({ cluster, expandedSignal }: Props) {
                 <svg viewBox="0 0 240 64" className="w-full h-16">
                   {timeDist.map((t, i) => {
                     const h = (t.count / maxTime) * 50;
-                    return <rect key={i} x={i * 10} y={60 - h} width={8} height={h} className="fill-[#5b8def]" />;
+                    return <rect key={i} x={i * 10} y={60 - h} width={8} height={h} rx={1} style={{ fill: 'var(--chart-info)' }} />;
                   })}
                   {[0, 6, 12, 18, 23].map(h => (
-                    <text key={h} x={h * 10 + 4} y={64} fontSize="6" textAnchor="middle" className="fill-[#848E9C]">{h}</text>
+                    <text key={h} x={h * 10 + 4} y={64} fontSize="6" textAnchor="middle" style={{ fill: 'var(--chart-ink-muted)' }}>{h}</text>
                   ))}
                 </svg>
               </MiniChart>
@@ -101,11 +101,11 @@ export function PatternClusterCard({ cluster, expandedSignal }: Props) {
                 <svg viewBox="0 0 100 64" className="w-full h-16">
                   {mentalDist.map((m, i) => {
                     const h = (m.count / maxMental) * 50;
-                    const color = m.state <= 2 ? '#F6465D' : m.state === 3 ? '#848E9C' : '#0ECB81';
+                    const color = m.state <= 2 ? 'var(--chart-loss)' : m.state === 3 ? 'var(--chart-neutral)' : 'var(--chart-profit)';
                     return (
                       <g key={i}>
-                        <rect x={i * 20 + 4} y={60 - h} width={14} height={h} fill={color} />
-                        <text x={i * 20 + 11} y={64} fontSize="6" textAnchor="middle" className="fill-[#848E9C]">{m.state}</text>
+                        <rect x={i * 20 + 4} y={60 - h} width={14} height={h} rx={1} style={{ fill: color }} />
+                        <text x={i * 20 + 11} y={64} fontSize="6" textAnchor="middle" style={{ fill: 'var(--chart-ink-muted)' }}>{m.state}</text>
                       </g>
                     );
                   })}

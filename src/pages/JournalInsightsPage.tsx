@@ -4,6 +4,7 @@
  */
 import { useEffect, useMemo, useState } from 'react';
 import { BackButton } from '@/components/journal/BackButton';
+import { ScatterPlot, robustRDomain, type ScatterSeries } from '@/components/charts/ScatterPlot';
 import { Slider } from '@/components/ui/slider';
 import { toast } from 'sonner';
 import { useAuth } from '@/contexts/AuthContext';
@@ -914,14 +915,14 @@ export default function JournalInsightsPage() {
               </thead>
               <tbody className="font-mono">
                 {stats.trend.slice(0, 12).map(t => {
-                  const deltaColor = t.delta > 0 ? 'text-[#F6465D]' : t.delta < 0 ? 'text-[#0ECB81]' : 'text-muted-foreground';
+                  const deltaColor = t.delta > 0 ? 'text-[color:var(--chart-loss)]' : t.delta < 0 ? 'text-[color:var(--chart-profit)]' : 'text-muted-foreground';
                   return (
                     <tr key={t.pattern.id} className="border-t border-border">
                       <td className="px-3 py-1.5 text-foreground">{t.pattern.pattern_name}</td>
                       <td className="text-right px-3">{t.cur}</td>
                       <td className="text-right px-3 text-muted-foreground">{t.prev}</td>
                       <td className={`text-right px-3 ${deltaColor}`}>{t.delta > 0 ? '+' : ''}{t.delta}</td>
-                      <td className={`text-right px-3 pr-3 ${t.avg_pnl >= 0 ? 'text-[#0ECB81]' : 'text-[#F6465D]'}`}>
+                      <td className={`text-right px-3 pr-3 ${t.avg_pnl >= 0 ? 'text-[color:var(--chart-profit)]' : 'text-[color:var(--chart-loss)]'}`}>
                         {t.avg_pnl >= 0 ? '+' : ''}{t.avg_pnl.toFixed(2)}
                       </td>
                     </tr>
@@ -944,9 +945,9 @@ export default function JournalInsightsPage() {
                   <div key={h.hour} className="flex items-center gap-2 text-[11px] font-mono">
                     <span className="w-8 text-muted-foreground">{String(h.hour).padStart(2, '0')}时</span>
                     <div className="flex-1 bg-background h-2 rounded overflow-hidden">
-                      <div className="h-full bg-[#0ECB81]" style={{ width: `${Math.min(100, h.avg_pnl)}%` }} />
+                      <div className="h-full bg-[color:var(--chart-profit)]" style={{ width: `${Math.min(100, h.avg_pnl)}%` }} />
                     </div>
-                    <span className="w-12 text-right text-[#0ECB81]">+{h.avg_pnl.toFixed(2)}</span>
+                    <span className="w-12 text-right text-[color:var(--chart-profit)]">+{h.avg_pnl.toFixed(2)}</span>
                     <span className="w-8 text-right text-muted-foreground">{h.count}笔</span>
                   </div>
                 ))}
@@ -966,10 +967,10 @@ export default function JournalInsightsPage() {
                   <span className="w-6 text-muted-foreground">{m.state}分</span>
                   <span className="w-10 text-muted-foreground">{m.count}笔</span>
                   <div className="flex-1 bg-background h-2 rounded overflow-hidden relative">
-                    <div className={`h-full ${m.avg_pnl >= 0 ? 'bg-[#0ECB81]' : 'bg-[#F6465D]'}`}
+                    <div className={`h-full ${m.avg_pnl >= 0 ? 'bg-[color:var(--chart-profit)]' : 'bg-[color:var(--chart-loss)]'}`}
                       style={{ width: `${Math.min(100, Math.abs(m.avg_pnl))}%` }} />
                   </div>
-                  <span className={`w-16 text-right ${m.avg_pnl >= 0 ? 'text-[#0ECB81]' : 'text-[#F6465D]'}`}>
+                  <span className={`w-16 text-right ${m.avg_pnl >= 0 ? 'text-[color:var(--chart-profit)]' : 'text-[color:var(--chart-loss)]'}`}>
                     {m.avg_pnl >= 0 ? '+' : ''}{m.avg_pnl.toFixed(2)}
                   </span>
                 </div>
@@ -1005,7 +1006,7 @@ export default function JournalInsightsPage() {
                         className="h-full"
                         style={{
                           width: `${Math.max(8, item.loss_ratio * 100)}%`,
-                          background: item.loss_ratio >= 0.66 ? '#F6465D' : item.loss_ratio >= 0.4 ? '#F0B90B' : '#0ECB81',
+                          background: item.loss_ratio >= 0.66 ? 'var(--chart-loss)' : item.loss_ratio >= 0.4 ? 'var(--chart-importance)' : 'var(--chart-profit)',
                         }}
                       />
                     </div>
@@ -1041,7 +1042,7 @@ export default function JournalInsightsPage() {
                   <div className="rounded border border-border bg-background p-2">
                     <div className="text-[10px] text-muted-foreground">+7d 平均盈亏</div>
                     <div className={`text-[18px] font-mono ${
-                      (tooHardStats?.avgPnl7d ?? 0) < 0 ? 'text-[#0ECB81]' : (tooHardStats?.avgPnl7d ?? 0) > 0 ? 'text-[#F0B90B]' : 'text-muted-foreground'
+                      (tooHardStats?.avgPnl7d ?? 0) < 0 ? 'text-[color:var(--chart-profit)]' : (tooHardStats?.avgPnl7d ?? 0) > 0 ? 'text-[#F0B90B]' : 'text-muted-foreground'
                     }`}>
                       {tooHardStats?.avgPnl7d == null ? '—' : `${tooHardStats.avgPnl7d >= 0 ? '+' : ''}${tooHardStats.avgPnl7d.toFixed(2)}%`}
                     </div>
@@ -1051,7 +1052,7 @@ export default function JournalInsightsPage() {
                   tooHardStats?.avgPnl7d == null
                     ? 'text-muted-foreground'
                     : tooHardStats.avgPnl7d < 0
-                      ? 'text-[#0ECB81]'
+                      ? 'text-[color:var(--chart-profit)]'
                       : tooHardStats.avgPnl7d > 0
                         ? 'text-[#F0B90B]'
                         : 'text-muted-foreground'
@@ -1090,7 +1091,7 @@ export default function JournalInsightsPage() {
               </div>
               <div className="rounded border border-border bg-background p-2">
                 <div className="text-[10px] text-muted-foreground">Brier 分数</div>
-                <div className={`text-[18px] font-mono ${stats.calibration.brier <= 0.2 ? 'text-[#0ECB81]' : stats.calibration.brier <= 0.3 ? 'text-[#F0B90B]' : 'text-[#F6465D]'}`}>
+                <div className={`text-[18px] font-mono ${stats.calibration.brier <= 0.2 ? 'text-[color:var(--chart-profit)]' : stats.calibration.brier <= 0.3 ? 'text-[#F0B90B]' : 'text-[color:var(--chart-loss)]'}`}>
                   {stats.calibration.brier.toFixed(3)}
                 </div>
                 <div className="text-[10px] text-muted-foreground">越低越准</div>
@@ -1120,15 +1121,15 @@ export default function JournalInsightsPage() {
                     <div className="font-mono text-muted-foreground">{bin.label}</div>
                     <div className="space-y-1">
                       <div className="h-2 rounded bg-card overflow-hidden">
-                        <div className="h-full bg-[#F0B90B]" style={{ width: `${bin.avgPredicted * 100}%` }} />
+                        <div className="h-full bg-[color:var(--chart-importance)]" style={{ width: `${bin.avgPredicted * 100}%` }} />
                       </div>
                       <div className="h-2 rounded bg-card overflow-hidden">
-                        <div className="h-full bg-[#0ECB81]" style={{ width: `${bin.actualRate * 100}%` }} />
+                        <div className="h-full bg-[color:var(--chart-profit)]" style={{ width: `${bin.actualRate * 100}%` }} />
                       </div>
                     </div>
                     <div className="text-right font-mono text-muted-foreground">
                       n={bin.count}
-                      <div className={bin.diff > 0.08 ? 'text-[#F6465D]' : bin.diff < -0.08 ? 'text-[#F0B90B]' : 'text-[#0ECB81]'}>
+                      <div className={bin.diff > 0.08 ? 'text-[color:var(--chart-loss)]' : bin.diff < -0.08 ? 'text-[#F0B90B]' : 'text-[color:var(--chart-profit)]'}>
                         {bin.count === 0 ? '—' : `${bin.diff >= 0 ? '+' : ''}${(bin.diff * 100).toFixed(0)}pp`}
                       </div>
                     </div>
@@ -1136,8 +1137,8 @@ export default function JournalInsightsPage() {
                 ))}
               </div>
               <div className="mt-3 flex gap-4 text-[9px] text-muted-foreground">
-                <span><span className="inline-block h-2 w-4 rounded bg-[#F0B90B] mr-1" />预测均值</span>
-                <span><span className="inline-block h-2 w-4 rounded bg-[#0ECB81] mr-1" />实际胜率</span>
+                <span><span className="inline-block h-2 w-4 rounded bg-[color:var(--chart-importance)] mr-1" />预测均值</span>
+                <span><span className="inline-block h-2 w-4 rounded bg-[color:var(--chart-profit)] mr-1" />实际胜率</span>
               </div>
             </div>
             <CalibrationDrillCard candidates={stats.calibrationTraining.drillCandidates} />
@@ -1182,15 +1183,15 @@ export default function JournalInsightsPage() {
                         <div className="font-mono text-muted-foreground">{bin.label}</div>
                         <div className="space-y-1">
                           <div className="h-2 rounded bg-card overflow-hidden">
-                            <div className="h-full bg-[#F0B90B]" style={{ width: `${bin.avgPredicted * 100}%` }} />
+                            <div className="h-full bg-[color:var(--chart-importance)]" style={{ width: `${bin.avgPredicted * 100}%` }} />
                           </div>
                           <div className="h-2 rounded bg-card overflow-hidden">
-                            <div className="h-full bg-[#0ECB81]" style={{ width: `${bin.actualWorthRate * 100}%` }} />
+                            <div className="h-full bg-[color:var(--chart-profit)]" style={{ width: `${bin.actualWorthRate * 100}%` }} />
                           </div>
                         </div>
                         <div className="text-right font-mono text-muted-foreground">
                           n={bin.count}
-                          <div className={bin.diff > 0.08 ? 'text-[#F6465D]' : bin.diff < -0.08 ? 'text-[#F0B90B]' : 'text-[#0ECB81]'}>
+                          <div className={bin.diff > 0.08 ? 'text-[color:var(--chart-loss)]' : bin.diff < -0.08 ? 'text-[#F0B90B]' : 'text-[color:var(--chart-profit)]'}>
                             {bin.count === 0 ? '—' : `${bin.diff >= 0 ? '+' : ''}${(bin.diff * 100).toFixed(0)}pp`}
                           </div>
                         </div>
@@ -1198,8 +1199,8 @@ export default function JournalInsightsPage() {
                     ))}
                   </div>
                   <div className="mt-3 flex gap-4 text-[9px] text-muted-foreground">
-                    <span><span className="inline-block h-2 w-4 rounded bg-[#F0B90B] mr-1" />输入把握性</span>
-                    <span><span className="inline-block h-2 w-4 rounded bg-[#0ECB81] mr-1" />实际值回率</span>
+                    <span><span className="inline-block h-2 w-4 rounded bg-[color:var(--chart-importance)] mr-1" />输入把握性</span>
+                    <span><span className="inline-block h-2 w-4 rounded bg-[color:var(--chart-profit)] mr-1" />实际值回率</span>
                   </div>
                 </>
               )}
@@ -1221,7 +1222,7 @@ export default function JournalInsightsPage() {
                     </div>
                     <div className="rounded border border-border bg-card p-2">
                       <div className="text-[10px] text-muted-foreground">恐慌对冲计数</div>
-                      <div className={`text-[18px] font-mono ${stats.hedgeDiscipline.panicHedgeCount > 0 ? 'text-[#F0B90B]' : 'text-[#0ECB81]'}`}>
+                      <div className={`text-[18px] font-mono ${stats.hedgeDiscipline.panicHedgeCount > 0 ? 'text-[#F0B90B]' : 'text-[color:var(--chart-profit)]'}`}>
                         {stats.hedgeDiscipline.panicHedgeCount}
                       </div>
                     </div>
@@ -1237,7 +1238,7 @@ export default function JournalInsightsPage() {
                     </div>
                     <div className="mt-2 h-2 rounded bg-background overflow-hidden">
                       <div
-                        className="h-full bg-[#F0B90B]"
+                        className="h-full bg-[color:var(--chart-importance)]"
                         style={{ width: `${stats.hedgeDiscipline.methodSampleCount === 0 ? 0 : stats.hedgeDiscipline.marketChaseRate * 100}%` }}
                       />
                     </div>
@@ -1298,7 +1299,7 @@ export default function JournalInsightsPage() {
               <div key={item.label} className="rounded border border-border bg-background p-2">
                 <div className="text-[10px] text-muted-foreground">{item.label}</div>
                 <div className={`text-[18px] font-mono ${
-                  item.count === 0 ? 'text-muted-foreground' : item.score >= 0.6 ? 'text-[#0ECB81]' : item.score >= 0.45 ? 'text-[#F0B90B]' : 'text-[#F6465D]'
+                  item.count === 0 ? 'text-muted-foreground' : item.score >= 0.6 ? 'text-[color:var(--chart-profit)]' : item.score >= 0.45 ? 'text-[#F0B90B]' : 'text-[color:var(--chart-loss)]'
                 }`}>
                   {pct(item.score)}
                 </div>
@@ -1316,7 +1317,7 @@ export default function JournalInsightsPage() {
             <div className="text-[12px] font-medium mb-2">决策质量 vs 结果</div>
             <DecisionScatterPlot points={stats.decisionScatter} />
             <div className="mt-2 text-[10px] text-muted-foreground">
-              横轴 D-score，纵轴 R。坏结果不自动等于坏决策；真正要看的是长期相关性。
+              坏结果不自动等于坏决策；真正要看的是长期相关性。
             </div>
           </section>
           <section className="border border-border rounded bg-card p-3">
@@ -1331,11 +1332,11 @@ export default function JournalInsightsPage() {
                     <span className="w-10 text-right">{item.count}次</span>
                     <div className="flex-1 bg-background h-2 rounded overflow-hidden">
                       <div
-                        className={item.avgR >= 0 ? 'h-full bg-[#0ECB81]' : 'h-full bg-[#F6465D]'}
+                        className={item.avgR >= 0 ? 'h-full bg-[color:var(--chart-profit)]' : 'h-full bg-[color:var(--chart-loss)]'}
                         style={{ width: `${Math.min(100, Math.abs(item.avgR) * 40 + 8)}%` }}
                       />
                     </div>
-                    <span className={item.avgR >= 0 ? 'w-16 text-right text-[#0ECB81]' : 'w-16 text-right text-[#F6465D]'}>
+                    <span className={item.avgR >= 0 ? 'w-16 text-right text-[color:var(--chart-profit)]' : 'w-16 text-right text-[color:var(--chart-loss)]'}>
                       {item.avgR >= 0 ? '+' : ''}{item.avgR.toFixed(2)}R
                     </span>
                   </div>
@@ -1403,13 +1404,13 @@ export default function JournalInsightsPage() {
                       <span className="font-mono text-muted-foreground">{item.count} 笔 · {(item.share * 100).toFixed(0)}%</span>
                     </div>
                     <div className="mt-2 h-2 rounded bg-card overflow-hidden">
-                      <div className="h-full bg-[#F0B90B]" style={{ width: `${item.share * 100}%` }} />
+                      <div className="h-full bg-[color:var(--chart-importance)]" style={{ width: `${item.share * 100}%` }} />
                     </div>
                     <div className="mt-2 text-[10px] font-mono">
                       {item.medianR == null
                         ? <span className="text-muted-foreground">实现 R 中位数：样本不足</span>
                         : (
-                          <span className={item.medianR >= 0 ? 'text-[#0ECB81]' : 'text-[#F6465D]'}>
+                          <span className={item.medianR >= 0 ? 'text-[color:var(--chart-profit)]' : 'text-[color:var(--chart-loss)]'}>
                             实现 R 中位数：{item.medianR >= 0 ? '+' : ''}{item.medianR.toFixed(2)}R
                           </span>
                         )}
@@ -1438,7 +1439,7 @@ export default function JournalInsightsPage() {
               <div className="mt-4 grid gap-2">
                 <div className="rounded border border-[#F6465D]/30 bg-[#F6465D]/5 p-2">
                   <div className="flex items-center justify-between text-[11px]">
-                    <span className="text-[#F6465D]">小机会仓位</span>
+                    <span className="text-[color:var(--chart-loss)]">小机会仓位</span>
                     <span className="font-mono">{stats.smallOpportunityProfile.count} 笔</span>
                   </div>
                   <div className="mt-2 grid grid-cols-3 gap-2 text-[10px] text-muted-foreground">
@@ -1461,7 +1462,7 @@ export default function JournalInsightsPage() {
                 </div>
                 <div className="rounded border border-[#0ECB81]/30 bg-[#0ECB81]/5 p-2">
                   <div className="flex items-center justify-between text-[11px]">
-                    <span className="text-[#0ECB81]">正确空仓（no_trade）</span>
+                    <span className="text-[color:var(--chart-profit)]">正确空仓（no_trade）</span>
                     <span className="font-mono">{stats.smallOpportunityProfile.emptyCount} 次</span>
                   </div>
                   <div className="mt-2 text-[10px] text-muted-foreground">
@@ -1485,7 +1486,7 @@ export default function JournalInsightsPage() {
               <div className="mt-4 grid gap-2">
                 <div className="rounded border border-[#F6465D]/30 bg-[#F6465D]/5 p-2">
                   <div className="flex items-center justify-between text-[11px]">
-                    <span className="text-[#F6465D]">厚结构没吃够</span>
+                    <span className="text-[color:var(--chart-loss)]">厚结构没吃够</span>
                     <span className="font-mono">{stats.missedHighOddsProfile.count} 笔</span>
                   </div>
                   <div className="mt-2 grid grid-cols-3 gap-2 text-[10px] text-muted-foreground">
@@ -1505,7 +1506,7 @@ export default function JournalInsightsPage() {
                 </div>
                 <div className="rounded border border-[#0ECB81]/30 bg-[#0ECB81]/5 p-2">
                   <div className="flex items-center justify-between text-[11px]">
-                    <span className="text-[#0ECB81]">结构厚度与暴露匹配</span>
+                    <span className="text-[color:var(--chart-profit)]">结构厚度与暴露匹配</span>
                     <span className="font-mono">{stats.missedHighOddsProfile.cleanCount} 笔</span>
                   </div>
                   <div className="mt-2 text-[10px] text-muted-foreground">
@@ -1551,20 +1552,20 @@ export default function JournalInsightsPage() {
                         <div className="flex items-center gap-2">
                           <span className="w-7 shrink-0 text-[9px] text-muted-foreground">盈</span>
                           <div className="h-2 flex-1 rounded bg-card overflow-hidden">
-                            <div className="h-full bg-[#0ECB81]" style={{ width: `${(s.totalWinPnl / denom) * 100}%` }} />
+                            <div className="h-full bg-[color:var(--chart-profit)]" style={{ width: `${(s.totalWinPnl / denom) * 100}%` }} />
                           </div>
-                          <span className="w-16 shrink-0 text-right font-mono text-[9px] text-[#0ECB81]">+{s.totalWinPnl.toFixed(0)}</span>
+                          <span className="w-16 shrink-0 text-right font-mono text-[9px] text-[color:var(--chart-profit)]">+{s.totalWinPnl.toFixed(0)}</span>
                         </div>
                         <div className="flex items-center gap-2">
                           <span className="w-7 shrink-0 text-[9px] text-muted-foreground">亏</span>
                           <div className="h-2 flex-1 rounded bg-card overflow-hidden">
-                            <div className="h-full bg-[#F6465D]" style={{ width: `${(Math.abs(s.totalLossPnl) / denom) * 100}%` }} />
+                            <div className="h-full bg-[color:var(--chart-loss)]" style={{ width: `${(Math.abs(s.totalLossPnl) / denom) * 100}%` }} />
                           </div>
-                          <span className="w-16 shrink-0 text-right font-mono text-[9px] text-[#F6465D]">{s.totalLossPnl.toFixed(0)}</span>
+                          <span className="w-16 shrink-0 text-right font-mono text-[9px] text-[color:var(--chart-loss)]">{s.totalLossPnl.toFixed(0)}</span>
                         </div>
                       </div>
                       <div className="mt-1.5 text-right text-[10px] font-mono">
-                        净 <span className={s.netPnl >= 0 ? 'text-[#0ECB81]' : 'text-[#F6465D]'}>{s.netPnl >= 0 ? '+' : ''}{s.netPnl.toFixed(2)}</span>
+                        净 <span className={s.netPnl >= 0 ? 'text-[color:var(--chart-profit)]' : 'text-[color:var(--chart-loss)]'}>{s.netPnl >= 0 ? '+' : ''}{s.netPnl.toFixed(2)}</span>
                       </div>
                     </div>
                   );
@@ -1591,7 +1592,7 @@ export default function JournalInsightsPage() {
               <div className="mt-3 space-y-3">
                 <div className="grid grid-cols-2 gap-2">
                   <div className="rounded border border-[#F6465D]/30 bg-[#F6465D]/5 p-2">
-                    <div className="text-[10px] text-[#F6465D]">高纠结（1–2）</div>
+                    <div className="text-[10px] text-[color:var(--chart-loss)]">高纠结（1–2）</div>
                     <div className="mt-1 text-[10px] text-muted-foreground">
                       {stats.struggleProfile.high.count} 笔 · 胜率 <span className="font-mono text-foreground">{pct(stats.struggleProfile.high.winRate)}</span>
                     </div>
@@ -1600,7 +1601,7 @@ export default function JournalInsightsPage() {
                     </div>
                   </div>
                   <div className="rounded border border-[#0ECB81]/30 bg-[#0ECB81]/5 p-2">
-                    <div className="text-[10px] text-[#0ECB81]">轻松（4–5）</div>
+                    <div className="text-[10px] text-[color:var(--chart-profit)]">轻松（4–5）</div>
                     <div className="mt-1 text-[10px] text-muted-foreground">
                       {stats.struggleProfile.low.count} 笔 · 胜率 <span className="font-mono text-foreground">{pct(stats.struggleProfile.low.winRate)}</span>
                     </div>
@@ -1616,7 +1617,7 @@ export default function JournalInsightsPage() {
                       <div className="h-2 flex-1 rounded bg-background overflow-hidden">
                         <div
                           className="h-full"
-                          style={{ width: `${b.winRate * 100}%`, backgroundColor: b.winRate >= 0.5 ? '#0ECB81' : '#F6465D' }}
+                          style={{ width: `${b.winRate * 100}%`, backgroundColor: b.winRate >= 0.5 ? 'var(--chart-profit)' : 'var(--chart-loss)' }}
                         />
                       </div>
                       <span className="w-20 shrink-0 text-right font-mono text-muted-foreground">{b.count}笔 {pct(b.winRate)}</span>
@@ -1633,7 +1634,7 @@ export default function JournalInsightsPage() {
             <div className="text-[12px] font-medium mb-2">全仓笔数审计</div>
             <div className="text-[28px] font-mono leading-none">{stats.crossCount}</div>
             <div className={`mt-2 text-[11px] ${
-              stats.crossCount === 0 ? 'text-[#0ECB81]' : 'text-[#F6465D]'
+              stats.crossCount === 0 ? 'text-[color:var(--chart-profit)]' : 'text-[color:var(--chart-loss)]'
             }`}>
               {stats.crossCount === 0
                 ? '✓ 守卫上线后无任何全仓交易'
@@ -1671,11 +1672,11 @@ export default function JournalInsightsPage() {
                       <td className="px-3 text-muted-foreground">{e.pattern?.pattern_name ?? '—'}</td>
                       <td className="text-right px-3">{e.before}</td>
                       <td className="text-right px-3">{e.after}</td>
-                      <td className={`text-right px-3 ${e.delta < 0 ? 'text-[#0ECB81]' : e.delta > 0 ? 'text-[#F6465D]' : 'text-muted-foreground'}`}>
+                      <td className={`text-right px-3 ${e.delta < 0 ? 'text-[color:var(--chart-profit)]' : e.delta > 0 ? 'text-[color:var(--chart-loss)]' : 'text-muted-foreground'}`}>
                         <div>{e.delta > 0 ? '+' : ''}{e.delta}</div>
                         <div className="text-[9px] text-muted-foreground">{e.ci.note}</div>
                       </td>
-                      <td className={`px-3 pr-3 ${e.baseline.ruleAttributablePct < -0.1 ? 'text-[#0ECB81]' : e.baseline.ruleAttributablePct > 0.1 ? 'text-[#F6465D]' : 'text-muted-foreground'}`}>
+                      <td className={`px-3 pr-3 ${e.baseline.ruleAttributablePct < -0.1 ? 'text-[color:var(--chart-profit)]' : e.baseline.ruleAttributablePct > 0.1 ? 'text-[color:var(--chart-loss)]' : 'text-muted-foreground'}`}>
                         <div>{e.baseline.note}</div>
                         <div className="text-[9px] text-muted-foreground">
                           全局 {e.globalBefore}→{e.globalAfter}
@@ -1692,7 +1693,7 @@ export default function JournalInsightsPage() {
         <section className="border border-border rounded bg-card p-3">
           <div className="text-[12px] font-medium mb-2">战役 SOP 经济成本</div>
           <div className={`text-[34px] font-mono leading-none ${
-            (campaignEconomic?.totalDeviationCost ?? 0) > 0 ? 'text-[#F6465D]' : 'text-[#0ECB81]'
+            (campaignEconomic?.totalDeviationCost ?? 0) > 0 ? 'text-[color:var(--chart-loss)]' : 'text-[color:var(--chart-profit)]'
           }`}>
             {campaignEconomic?.unavailable ? '—' : `${(campaignEconomic?.totalDeviationCost ?? 0).toFixed(2)} USDT`}
           </div>
@@ -1700,7 +1701,7 @@ export default function JournalInsightsPage() {
             {campaignEconomic?.unavailable ? '战役成本数据暂不可用' : '过去 30 天实时战役因 SOP 偏离损失的金额'}
           </div>
           <div className={`mt-2 text-[11px] ${
-            (campaignEconomic?.totalDeviationCost ?? 0) > 0 ? 'text-[#F6465D]' : 'text-[#0ECB81]'
+            (campaignEconomic?.totalDeviationCost ?? 0) > 0 ? 'text-[color:var(--chart-loss)]' : 'text-[color:var(--chart-profit)]'
           }`}>
             {campaignEconomic?.unavailable
               ? '元监控其他数据已正常加载'
@@ -1718,7 +1719,7 @@ export default function JournalInsightsPage() {
                     <div className="text-[11px] text-foreground truncate">{item.reason}</div>
                     <div className="text-[10px] text-muted-foreground">出现 {item.count} 次</div>
                   </div>
-                  <div className="text-[11px] font-mono text-[#F6465D]">{item.totalCost.toFixed(2)} USDT</div>
+                  <div className="text-[11px] font-mono text-[color:var(--chart-loss)]">{item.totalCost.toFixed(2)} USDT</div>
                 </div>
               ))
             )}
@@ -1833,7 +1834,7 @@ function CalibrationDrillCard({ candidates }: { candidates: CalibrationDrillCand
         <div className="mt-3 grid grid-cols-3 gap-2 text-[10px]">
           <div className="rounded border border-border bg-card p-2">
             <div className="text-muted-foreground">实际结果</div>
-            <div className={`mt-1 font-mono text-[13px] ${current.outcomeWin ? 'text-[#0ECB81]' : 'text-[#F6465D]'}`}>
+            <div className={`mt-1 font-mono text-[13px] ${current.outcomeWin ? 'text-[color:var(--chart-profit)]' : 'text-[color:var(--chart-loss)]'}`}>
               {current.outcomeWin ? 'WIN' : 'LOSS'}
             </div>
           </div>
@@ -1843,7 +1844,7 @@ function CalibrationDrillCard({ candidates }: { candidates: CalibrationDrillCand
           </div>
           <div className="rounded border border-border bg-card p-2">
             <div className="text-muted-foreground">本次 Brier</div>
-            <div className={`mt-1 font-mono text-[13px] ${brier <= 0.2 ? 'text-[#0ECB81]' : brier <= 0.3 ? 'text-[#F0B90B]' : 'text-[#F6465D]'}`}>
+            <div className={`mt-1 font-mono text-[13px] ${brier <= 0.2 ? 'text-[color:var(--chart-profit)]' : brier <= 0.3 ? 'text-[#F0B90B]' : 'text-[color:var(--chart-loss)]'}`}>
               {brier.toFixed(3)}
             </div>
           </div>
@@ -1861,36 +1862,64 @@ function CalibrationDrillCard({ candidates }: { candidates: CalibrationDrillCand
   );
 }
 
+/** 超出这个数就只画最近的样本，并在脚注里说清楚被丢了多少条——不做静默截断。 */
+const DECISION_SCATTER_CAP = 240;
+
+
+const DECISION_SCATTER_SERIES: ScatterSeries[] = [
+  { id: 'good', label: '好决策', token: 'profit', shape: 'circle' },
+  { id: 'bad', label: '坏决策', token: 'loss', shape: 'diamond' },
+  // 第三类（mixed）用蓝不用琥珀：深色面上 琥珀↔红 deutan ΔE 只有 2.3、常视 12.1，
+  // 形状次编码救不了常视硬门槛；蓝色三色全对通过。
+  { id: 'mixed', label: '未定性', token: 'info', shape: 'ring' },
+];
+
 function DecisionScatterPlot({
   points,
 }: {
   points: Array<{ id: string; symbol: string; score: number; r: number; quality: string | null }>;
 }) {
-  if (points.length === 0) {
-    return <div className="h-[220px] flex items-center justify-center text-[11px] text-muted-foreground">暂无可绘制样本</div>;
-  }
-  const minR = Math.min(-2, ...points.map(point => point.r));
-  const maxR = Math.max(2, ...points.map(point => point.r));
-  const yFor = (r: number) => 190 - ((r - minR) / Math.max(0.01, maxR - minR)) * 160;
+  const drawn = points.slice(-DECISION_SCATTER_CAP);
+  const dropped = points.length - drawn.length;
+  const domain = robustRDomain(drawn.map(point => point.r));
+
   return (
-    <svg viewBox="0 0 360 220" className="w-full h-[220px] rounded border border-border bg-background">
-      <line x1="35" y1="190" x2="340" y2="190" stroke="currentColor" className="text-border" />
-      <line x1="35" y1="30" x2="35" y2="190" stroke="currentColor" className="text-border" />
-      <line x1="35" y1={yFor(0)} x2="340" y2={yFor(0)} stroke="currentColor" className="text-muted-foreground/40" strokeDasharray="4 4" />
-      <text x="35" y="208" className="fill-muted-foreground text-[9px]">0</text>
-      <text x="175" y="208" className="fill-muted-foreground text-[9px]">D-score</text>
-      <text x="320" y="208" className="fill-muted-foreground text-[9px]">100</text>
-      <text x="5" y="35" className="fill-muted-foreground text-[9px]">R</text>
-      {points.slice(0, 160).map(point => {
-        const x = 35 + (point.score / 100) * 305;
-        const y = yFor(point.r);
-        const fill = point.quality === 'good' ? '#0ECB81' : point.quality === 'bad' ? '#F6465D' : '#F0B90B';
-        return (
-          <circle key={point.id} cx={x} cy={y} r="4" fill={fill}>
-            <title>{point.symbol} · D {point.score} · {point.r.toFixed(2)}R</title>
-          </circle>
-        );
-      })}
-    </svg>
+    <ScatterPlot
+      points={drawn.map(point => ({
+        id: point.id,
+        x: point.score,
+        y: point.r,
+        seriesId: point.quality === 'good' ? 'good' : point.quality === 'bad' ? 'bad' : 'mixed',
+        valueText: `${point.r > 0 ? '+' : ''}${point.r.toFixed(2)}R`,
+        label: point.symbol,
+        metaText: `D-score ${point.score}`,
+        ariaLabel: `${point.symbol}，D-score ${point.score}，${point.r.toFixed(2)}R`,
+        dataAttrs: { 'data-decision-quality': point.quality ?? 'mixed', 'data-d-score': point.score },
+      }))}
+      series={DECISION_SCATTER_SERIES}
+      yAxis={{
+        min: domain.min,
+        max: domain.max,
+        ticks: domain.ticks.map(value => ({
+          value,
+          label: `${value > 0 ? '+' : ''}${value}R`,
+          dataAttrs: { 'data-tick-value': value },
+        })),
+      }}
+      xAxis={{ mode: 'linear', min: 0, max: 100, labels: [
+        { at: 0, text: '0' },
+        { at: 50, text: 'D-score' },
+        { at: 100, text: '100' },
+      ] }}
+      referenceLines={[{ value: 0, kind: 'zero' }]}
+      emptyMessage="暂无可绘制样本"
+      testId="decision-scatter-plot"
+      scrollAreaTestId="decision-scatter-scroll-area"
+      legendExtra={(
+        <div className="font-mono tabular-nums">n={drawn.length}</div>
+      )}
+      directionHint="横轴 D-score，纵轴 R"
+      footnote={dropped > 0 ? <span>未绘制：更早的 {dropped} 条</span> : null}
+    />
   );
 }

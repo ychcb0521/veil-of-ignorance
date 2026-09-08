@@ -4,6 +4,7 @@ import {
   computeOutcomeRate, computeTimeDistribution, computeSymbolDistribution,
 } from '@/lib/journalAggregations';
 import type { TradeJournal, JournalTagAssignment } from '@/types/journal';
+import { ScatterPlot, robustRDomain, type ScatterSeries } from '@/components/charts/ScatterPlot';
 
 interface Props {
   journals: TradeJournal[];
@@ -14,8 +15,17 @@ interface Props {
 
 function fmtPnl(v: number) { return `${v > 0 ? '+' : ''}${v.toFixed(2)}`; }
 function pnlColor(v: number) {
-  return v > 0 ? 'text-[#0ECB81]' : v < 0 ? 'text-[#F6465D]' : 'text-foreground';
+  return v > 0
+    ? 'text-[color:var(--chart-profit)]'
+    : v < 0 ? 'text-[color:var(--chart-loss)]' : 'text-foreground';
 }
+
+const MENTAL_SCATTER_SERIES: ScatterSeries[] = [
+  { id: 'win', label: '盈利', token: 'profit', shape: 'circle' },
+  { id: 'loss', label: '亏损', token: 'loss', shape: 'diamond' },
+  { id: 'other', label: '打平／未结束', token: 'neutral', shape: 'ring' },
+];
+
 
 export function JournalStatsSidebar({ journals, assignments, clusters, rangeDays }: Props) {
   const outcome = useMemo(() => computeOutcomeRate(journals), [journals]);
@@ -57,7 +67,7 @@ export function JournalStatsSidebar({ journals, assignments, clusters, rangeDays
       o: j.post_outcome,
     }));
   }, [journals]);
-  const maxR = Math.max(1, ...scatter.map(s => Math.abs(s.y)));
+  const mentalDomain = useMemo(() => robustRDomain(scatter.map(s => s.y)), [scatter]);
 
   return (
     <aside className="overflow-hidden rounded border border-border bg-card">
@@ -97,32 +107,47 @@ export function JournalStatsSidebar({ journals, assignments, clusters, rangeDays
       </div>
 
       <Section title="心态-收益">
-        <svg viewBox="0 0 240 100" className="w-full h-32">
-          <line x1="0" y1="50" x2="240" y2="50" stroke="#2B3139" />
-          {[1, 2, 3, 4, 5].map(s => (
-            <text key={s} x={(s - 1) * 56 + 16} y={98} fontSize="7" textAnchor="middle" className="fill-[#848E9C]">{s}</text>
-          ))}
-          {scatter.map((p, i) => {
-            const cx = (p.x - 1) * 56 + 16;
-            const cy = 50 - (p.y / maxR) * 40;
-            const color = p.o === 'win' ? '#0ECB81' : p.o === 'loss' ? '#F6465D' : '#848E9C';
-            return <circle key={i} cx={cx} cy={cy} r={2.5} fill={color} opacity={0.7} />;
-          })}
-        </svg>
+        <ScatterPlot
+          points={scatter.map((p, i) => ({
+            id: `mental-${i}`,
+            x: p.x,
+            y: p.y,
+            seriesId: p.o === 'win' ? 'win' : p.o === 'loss' ? 'loss' : 'other',
+            valueText: `${p.y > 0 ? '+' : ''}${p.y.toFixed(2)}R`,
+            label: `心态 ${p.x} 分`,
+            ariaLabel: `心态 ${p.x} 分，${p.y.toFixed(2)}R`,
+          }))}
+          series={MENTAL_SCATTER_SERIES}
+          yAxis={{
+            min: mentalDomain.min,
+            max: mentalDomain.max,
+            ticks: mentalDomain.ticks.map(value => ({
+              value,
+              label: `${value > 0 ? '+' : ''}${value}R`,
+            })),
+          }}
+          xAxis={{ mode: 'category', categories: [1, 2, 3, 4, 5].map(v => ({ value: v, label: String(v) })) }}
+          referenceLines={[{ value: 0, kind: 'zero' }]}
+          emptyMessage="暂无带 R 值的样本"
+          testId="mental-scatter-plot"
+          scrollAreaTestId="mental-scatter-scroll-area"
+          legendExtra={<div className="font-mono tabular-nums">n={scatter.length}</div>}
+          directionHint="横轴 心态评分 1–5，纵轴 R"
+        />
         <div className="text-[10px] text-muted-foreground">找到自己的 alpha 心态窗口</div>
       </Section>
 
       <Section title="时段-平均R">
         <svg viewBox="0 0 240 100" className="w-full h-32">
-          <line x1="0" y1="50" x2="240" y2="50" stroke="#2B3139" />
+          <line x1="0" y1="50" x2="240" y2="50" style={{ stroke: 'var(--chart-axis)' }} shapeRendering="crispEdges" />
           {timeDist.map((t, i) => {
             const h = (Math.abs(t.avg_pnl) / maxTime) * 40;
             const y = t.avg_pnl >= 0 ? 50 - h : 50;
-            const color = t.avg_pnl >= 0 ? '#0ECB81' : '#F6465D';
-            return <rect key={i} x={i * 10} y={y} width={8} height={h} fill={color} />;
+            const color = t.avg_pnl >= 0 ? 'var(--chart-profit)' : 'var(--chart-loss)';
+            return <rect key={i} x={i * 10} y={y} width={8} height={h} rx={1} style={{ fill: color }} />;
           })}
           {[0, 6, 12, 18, 23].map(h => (
-            <text key={h} x={h * 10 + 4} y={98} fontSize="7" textAnchor="middle" className="fill-[#848E9C]">{h}</text>
+            <text key={h} x={h * 10 + 4} y={98} fontSize="7" textAnchor="middle" style={{ fill: 'var(--chart-ink-muted)' }}>{h}</text>
           ))}
         </svg>
         <div className="text-[10px] text-muted-foreground">你的 alpha 时间窗口</div>
@@ -137,7 +162,7 @@ export function JournalStatsSidebar({ journals, assignments, clusters, rangeDays
               <div key={s.symbol} className="flex items-center gap-2 font-mono text-[11px]">
                 <span className="w-16 truncate">{s.symbol}</span>
                 <div className="flex-1 h-1.5 bg-muted rounded">
-                  <div className="h-full bg-[#5b8def] rounded" style={{ width: `${(s.count / maxSymCount) * 100}%` }} />
+                  <div className="h-full rounded bg-[color:var(--chart-info)]" style={{ width: `${(s.count / maxSymCount) * 100}%` }} />
                 </div>
                 <span className="text-muted-foreground w-6 text-right">×{s.count}</span>
                 <span className={`w-16 text-right ${pnlColor(s.total_pnl)}`}>{fmtPnl(s.total_pnl)}</span>

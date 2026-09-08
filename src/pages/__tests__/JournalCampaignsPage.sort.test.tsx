@@ -324,7 +324,10 @@ describe('JournalCampaignsPage sorting', () => {
     const oddsScrollArea = screen.getByTestId('campaign-odds-scroll-area');
     expect(oddsScrollArea).toHaveClass('aspect-[8/5]');
     expect(oddsScrollArea).toHaveAttribute('data-layout', 'campaign-scatter-landscape');
-    expect(Number(oddsScrollArea.getAttribute('data-marker-max-size'))).toBeLessThanOrEqual(10);
+    // 点位尺寸不再随点数缩小（旧 data-marker-max-size 在 N=192 时给出 4px，正是模糊病根），
+    // 改为固定 8px 实心 + 由布局决定 fit / scroll。
+    expect(oddsScrollArea).toHaveAttribute('data-mark-size', '8');
+    expect(['fit', 'scroll']).toContain(oddsScrollArea.getAttribute('data-fit-mode'));
     const oddsBandCounts = screen.getAllByTestId('campaign-odds-band-count');
     expect(
       oddsBandCounts.reduce((sum, node) => sum + Number(node.getAttribute('data-count')), 0),
@@ -345,12 +348,12 @@ describe('JournalCampaignsPage sorting', () => {
       'data-marker-shape',
       'circle',
     );
-    expect(screen.getByTestId('campaign-odds-point-late-close').querySelector('span')).toHaveStyle({
-      backgroundColor: '#F6465D',
-    });
-    expect(screen.getByTestId('campaign-odds-point-best-pnl').querySelector('span')).toHaveStyle({
-      backgroundColor: '#0ECB81',
-    });
+    // 点位改为真实 SVG 图形、颜色走 CSS 变量，身份改由 data-series-token 断言；
+    // 原来锁定的十六进制值移交 src/lib/__tests__/chartTokens.contract.test.ts 继续覆盖。
+    expect(screen.getByTestId('campaign-odds-point-late-close'))
+      .toHaveAttribute('data-series-token', 'loss');
+    expect(screen.getByTestId('campaign-odds-point-best-pnl'))
+      .toHaveAttribute('data-series-token', 'profit');
     fireEvent.mouseEnter(screen.getByTestId('campaign-odds-point-best-pnl'));
     expect(screen.getByTestId('campaign-odds-scatter-plot')).toHaveTextContent('Best PnL');
     expect(screen.getByTestId('campaign-odds-point-best-pnl')).toHaveAttribute('aria-pressed', 'true');
@@ -364,11 +367,14 @@ describe('JournalCampaignsPage sorting', () => {
     ).toBe(true);
     const oddsGridLines = screen.getAllByTestId('campaign-odds-integer-grid-line');
     expect(oddsGridLines.length).toBeGreaterThan(0);
+    // 网格线由 div 的 border-t-[0.5px]（浏览器只能反锯齿成灰雾）换成 1px 实线 SVG hairline。
     expect(
       oddsGridLines.every(line => (
         Number.isInteger(Number(line.getAttribute('data-grid-value')))
-        && line.classList.contains('border-t-[0.5px]')
-        && line.classList.contains('border-[#CBD3DE]/45')
+        && line.tagName.toLowerCase() === 'line'
+        && (line as unknown as SVGLineElement).style.stroke === 'var(--chart-grid)'
+        && (line as unknown as SVGLineElement).style.strokeWidth === '1'
+        && !line.getAttribute('stroke-dasharray')
       )),
     ).toBe(true);
     expect(screen.getByTestId('campaign-odds-loss-boundary-label')).toHaveTextContent('-1R');
@@ -376,10 +382,11 @@ describe('JournalCampaignsPage sorting', () => {
       'data-reference-value',
       '-1',
     );
-    expect(screen.getByTestId('campaign-odds-loss-boundary-line')).toHaveClass(
-      'border-dashed',
-      'border-[#F0B90B]/80',
-    );
+    // 只有阈值线配虚线：网格是实线，-1R 是 threshold。
+    const lossBoundaryLine = screen.getByTestId('campaign-odds-loss-boundary-line') as unknown as SVGLineElement;
+    expect(lossBoundaryLine).toHaveAttribute('data-reference-kind', 'threshold');
+    expect(lossBoundaryLine.getAttribute('stroke-dasharray')).toBeTruthy();
+    expect(lossBoundaryLine.style.stroke).toBe('var(--chart-threshold)');
     const oddsGuideToggle = screen.getByTestId('campaign-metric-guide-toggle-odds');
     expect(oddsGuideToggle).toHaveAccessibleName('查看盈亏比散点图说明');
     expect(oddsGuideToggle).toHaveAttribute('aria-expanded', 'false');

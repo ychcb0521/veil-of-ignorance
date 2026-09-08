@@ -332,7 +332,7 @@ export function TradePerformancePanel({ open, onClose, symbol, tradeHistory }: P
                     })()}
                     <polyline
                       fill="none"
-                      stroke={isPositive ? '#0ECB81' : '#F6465D'}
+                      stroke={isPositive ? 'var(--chart-profit)' : 'var(--chart-loss)'}
                       strokeWidth={1.5}
                       points={curve.map((c, i) => {
                         const x = (i / (curve.length - 1)) * W;
