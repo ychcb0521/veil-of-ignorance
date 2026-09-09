@@ -131,7 +131,8 @@ describe('summarizeCampaignPerformance', () => {
     expect(result.winRate).toBeCloseTo(0.75, 8);
     expect(result.payoffRatio).toBeCloseTo(0.2375, 8);
     expect(result.payoffRatioSampleCount).toBe(4);
-    expect(result.expectedR).toBeCloseTo(-0.071875, 8);
+    // E = b̄：亏损已以负值进入均值，不再减 (1 − p)（旧式 0.75×0.2375−0.25 = −0.071875 把亏损扣了两遍）
+    expect(result.expectedR).toBeCloseTo(0.2375, 8);
     expect(result.expectedWinRate).toBeCloseTo(0.75, 8);
     expect(result.winCount).toBe(3);
     expect(result.lossCount).toBe(1);
@@ -151,7 +152,21 @@ describe('summarizeCampaignPerformance', () => {
     expect(result.payoffRatio).toBeCloseTo(0.5, 8);
     expect(result.payoffRatioSampleCount).toBe(2);
     expect(result.expectedWinRate).toBeCloseTo(0.5, 8);
-    expect(result.expectedR).toBeCloseTo(-0.25, 8);
+    expect(result.expectedR).toBeCloseTo(0.5, 8);   // = b̄，而不是 0.5×0.5−0.5 = −0.25
+  });
+
+  it('期望值就是均值：+3R 与 −1R 两场 → +1.0R，不是 0，也不是 p·b̄ = 0.5', () => {
+    const result = summarizeCampaignPerformance([
+      { campaign: campaign({ final_realized_pnl: 300, status: 'closed_profit' }), payoffRatio: 3 },
+      { campaign: campaign({ final_realized_pnl: -100, status: 'closed_loss' }), payoffRatio: -1 },
+    ]);
+    expect(result.winRate).toBeCloseTo(0.5, 8);
+    expect(result.payoffRatio).toBeCloseTo(1, 8);
+    expect(result.expectedR).toBeCloseTo(1, 8);
+    // 课本式 p·b赢 − (1−p)·|b亏| 用分组均值写出来与均值恒等
+    expect(
+      result.expectedWinRate! * result.winPayoffRatio! + (1 - result.expectedWinRate!) * result.lossPayoffRatio!,
+    ).toBeCloseTo(result.expectedR!, 8);
   });
 
   it('分组均值：盈利组与亏损组各自求均值，盈亏持平两侧都不计入', () => {

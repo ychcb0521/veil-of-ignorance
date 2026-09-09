@@ -1232,6 +1232,8 @@ export default function JournalCampaignsPage() {
   );
   const winRateLabel = performance.winRate == null ? '—' : `${(performance.winRate * 100).toFixed(2)}%`;
   const payoffRatioLabel = performance.payoffRatio == null ? '—' : performance.payoffRatio.toFixed(2);
+  // 期望值浮层里的分组项：某一组没有样本时该项为 0（n = 0），不是「—」。
+  const groupTerm = (value: number | null) => (value == null ? '0' : value.toFixed(2));
   const validCampaignCount = performance.payoffRatioSampleCount;
   const breakevenCampaignCount = Math.max(
     0,
@@ -2177,16 +2179,25 @@ export default function JournalCampaignsPage() {
               <PopoverContent align="end" className="w-72 border-border bg-card p-3 text-[11px]">
                 <div className="font-medium text-foreground">期望值计算公式</div>
                 <div className="mt-2 rounded bg-muted/60 px-2 py-1.5 font-mono text-foreground">
-                  E = P(赢) × b − (1 − P(赢))
+                  E = Σ bᵢ ÷ N
                 </div>
                 {performance.expectedWinRate != null && performance.payoffRatio != null && performance.expectedR != null ? (
                   <div className="mt-2 space-y-1 text-muted-foreground">
+                    <div>全部有效战役盈亏比的平均值，等价于按盈亏分组：</div>
+                    <div className="font-mono">= (n赢 × b̄赢 + n亏 × b̄亏) ÷ N</div>
                     <div className="font-mono">
-                      = {(performance.expectedWinRate * 100).toFixed(2)}% × {performance.payoffRatio.toFixed(2)} − {((1 - performance.expectedWinRate) * 100).toFixed(2)}%
+                      = ({performance.winCount} × {groupTerm(performance.winPayoffRatio)} + {performance.lossCount} × {groupTerm(performance.lossPayoffRatio)}) ÷ {performance.payoffRatioSampleCount}
                     </div>
                     <div className="font-mono text-foreground">= {expectedRLabel}</div>
-                    <div>b = 所有战役盈亏比之和 ÷ 有效战役数</div>
+                    <div>b̄赢 / b̄亏 = 盈利 / 亏损战役各自的平均盈亏比；盈亏平衡战役计入 N，贡献为 0</div>
                     <div>P(赢) 仅统计设置了最大预期亏损的有效战役</div>
+                    <div className="mt-2 border-t border-border/60 pt-2 text-foreground">理论公式</div>
+                    <div className="font-mono">E = P(赢) × b − (1 − P(赢))</div>
+                    <div>
+                      其中 b 是「赢时的平均盈亏比」、每次亏损按恰好 −1R 计。这里的 b̄ 是全部战役的混合均值，
+                      亏损已以负值计入，再减 (1 − P(赢)) 会把亏损扣两遍；实盘亏损平均 {groupTerm(performance.lossPayoffRatio)}R 也不恰好是 −1R，
+                      所以统计值直接取平均。
+                    </div>
                   </div>
                 ) : (
                   <div className="mt-2 text-muted-foreground">

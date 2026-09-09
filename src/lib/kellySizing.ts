@@ -226,9 +226,16 @@ export function selectValidCampaignPerformanceSamples(
 
 /**
  * 当前战役列表的描述性统计，不设最小样本门槛：
- *   p = 盈利战役 /（盈利战役 + 亏损战役）
- *   b = Σ 单场战役盈亏比 / 有有效盈亏比的战役数
- *   E = p·b − (1 − p)
+ *   p  = 盈利战役 /（盈利战役 + 亏损战役）
+ *   b̄  = Σ 单场战役盈亏比 / 有有效盈亏比的战役数
+ *   E  = b̄
+ *
+ * E 曾写成 p·b̄ − (1 − p)，那是课本公式 E = p·b − (1 − p) 的误用：课本里的 b 是
+ * 「赢时的平均盈亏比」、每次亏损按恰好 −1R 计；而这里的 b̄ 是全部战役的混合均值，
+ * 亏损已经以负值躺在里面，再减一次 (1 − p) 等于把亏损扣两遍。
+ * 两场战役 +3R、−1R：真实期望 +1.0R，旧式给 0，p·b̄ 给 0.5。
+ * 按分组均值写成 (n赢·b̄赢 + n亏·b̄亏) ÷ N 恒等于 b̄（下面的测试钉着这条恒等式），
+ * 课本式只是「亏损恰好 −1R、没有持平场」时的特例。
  *
  * 所有指标先使用同一个有效战役集合：已结束，并且存在由初始最大预期
  * 亏损计算出的有限盈亏比。胜率再从其中排除盈亏平衡战役；平均盈亏比
@@ -255,9 +262,8 @@ export function summarizeCampaignPerformance(samples: CampaignPerformanceSample[
   const winPayoffRatio = meanOf(wins);
   const lossPayoffRatio = meanOf(losses);
   const expectedWinRate = winRate;
-  const expectedR = expectedWinRate != null && payoffRatio != null
-    ? expectedWinRate * payoffRatio - (1 - expectedWinRate)
-    : null;
+  // 统计期望就是有效战役 b 的平均值；分组拆解见 winPayoffRatio / lossPayoffRatio。
+  const expectedR = expectedWinRate != null && payoffRatio != null ? payoffRatio : null;
 
   return {
     winRate,

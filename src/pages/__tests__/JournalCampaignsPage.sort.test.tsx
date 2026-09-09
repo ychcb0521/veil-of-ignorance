@@ -806,10 +806,14 @@ describe('JournalCampaignsPage sorting', () => {
     // 恒等式：(n_win·b̄_win + n_loss·b̄_loss) ÷ N == 混合均值 0.90
     expect((2 * winMean + 1 * lossMean) / 3).toBeCloseTo(0.9, 2);
     fireEvent.click(screen.getByTestId('campaign-average-payoff-ratio'));
-    expect(screen.getByTestId('campaign-expected-value')).toHaveTextContent('期望值（+0.27R）');
+    // 期望值就是有效战役 b 的平均值（0.90），不再是 P×b̄ − (1−P) = 0.27——那会把亏损扣两遍。
+    expect(screen.getByTestId('campaign-expected-value')).toHaveTextContent('期望值（+0.90R）');
     fireEvent.click(screen.getByTestId('campaign-expected-value'));
+    expect(screen.getByText('E = Σ bᵢ ÷ N')).toBeInTheDocument();
+    expect(screen.getByText('= (n赢 × b̄赢 + n亏 × b̄亏) ÷ N')).toBeInTheDocument();
+    // 理论公式仍并列展示，注明它假设亏损恰为 −1R、b 取赢时均值
     expect(screen.getByText('E = P(赢) × b − (1 − P(赢))')).toBeInTheDocument();
-    expect(screen.getByText('= +0.27R')).toBeInTheDocument();
+    expect(screen.getByText('= +0.90R')).toBeInTheDocument();
     expect(screen.getByText('P(赢) 仅统计设置了最大预期亏损的有效战役')).toBeInTheDocument();
     expect(screen.getByTestId('campaign-opportunity-quality')).toHaveTextContent('机会质量（0.27）');
     expect(screen.getByTestId('campaign-opportunity-quality')).toHaveAttribute(
