@@ -327,6 +327,20 @@ describe('JournalCampaignsPage sorting', () => {
     fireEvent.click(oddsChartToggle);
 
     expect(screen.getByTestId('campaign-odds-scatter-panel')).toBeInTheDocument();
+    // 盈亏比默认打开的是**分布**：要判断的是形状（右尾多长、亏损有没有被止损墙挡住），
+    // 与战役先后无关。时序是第二个问题，用面板右上角的切换键取回。
+    expect(screen.getByTestId('campaign-odds-view-distribution')).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByTestId('campaign-odds-view-time')).toHaveAttribute('aria-pressed', 'false');
+    expect(screen.getByTestId('campaign-metric-scatter-plot')).toHaveAttribute(
+      'data-metric-key',
+      'oddsDistribution',
+    );
+    // 分布图不是时序图：时序专属的 legacy testid 此刻不该存在。
+    expect(screen.queryByTestId('campaign-odds-scroll-area')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId('campaign-odds-view-time'));
+    expect(screen.getByTestId('campaign-odds-view-time')).toHaveAttribute('aria-pressed', 'true');
+
     const oddsScrollArea = screen.getByTestId('campaign-odds-scroll-area');
     expect(oddsScrollArea).toHaveClass('aspect-[8/5]');
     expect(oddsScrollArea).toHaveAttribute('data-layout', 'campaign-scatter-landscape');
@@ -485,12 +499,16 @@ describe('JournalCampaignsPage sorting', () => {
 
     fireEvent.contextMenu(screen.getByTestId('campaign-sort-captureRate'));
     fireEvent.click(await screen.findByTestId('campaign-odds-chart-toggle'));
-    expect(screen.getByTestId('campaign-odds-scatter-plot')).toBeInTheDocument();
+    // 再次打开仍落在默认的分布视图，而不是记住上一次切过去的时序。
+    expect(screen.getByTestId('campaign-metric-scatter-plot')).toHaveAttribute(
+      'data-metric-key',
+      'oddsDistribution',
+    );
 
     // 散点图的选中指标随 URL 带入详情页，返回时才能落回同一张图。
-    fireEvent.click(screen.getByTestId('campaign-odds-point-best-pnl'));
+    fireEvent.click(screen.getByTestId('campaign-metric-point-oddsDistribution-best-pnl'));
     expect(screen.getByTestId('location-probe')).toHaveTextContent(
-      '/journal/campaigns/best-pnl?sort=importance&direction=asc&chart=odds|from-list',
+      '/journal/campaigns/best-pnl?sort=importance&direction=asc&chart=oddsDistribution|from-list',
     );
   }, 15_000);
 

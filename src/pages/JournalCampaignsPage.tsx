@@ -442,6 +442,20 @@ const SORT_CHART_BY_MODE: Partial<Record<CampaignSortMode, CampaignMetricChartKe
   usiContribution: 'usiContribution',
 };
 
+/**
+ * 某个指标族**默认打开哪一张视图**。
+ *
+ * 盈亏比默认看分布而不是时序：要判断的是「这套打法的形状对不对」——右尾够不够长、
+ * 亏损有没有被 -1R 止损墙挡住——而形状与战役先后无关。时序回答的是「b 怎么变化」，
+ * 是第二个问题。面板右上角的「时序 | 分布」随时切回，选择记进 URL。
+ *
+ * 这里映射的是**族键**（排序行按钮传进来的那个），族键本身仍用于判定「当前开的是不是这一族」
+ * 与按钮的 testid，所以不能反过来把 SORT_CHART_BY_MODE 直接改成分布键。
+ */
+const DEFAULT_CHART_VIEW_BY_SOURCE: Partial<Record<CampaignMetricChartKey, CampaignMetricChartKey>> = {
+  odds: 'oddsDistribution',
+};
+
 export type CampaignMetricChartViewState = {
   open: boolean;
   key: CampaignMetricChartKey;
@@ -455,7 +469,9 @@ export type CampaignMetricChartViewState = {
 function parseCampaignChartParams(search: string): CampaignMetricChartViewState {
   const requested = new URLSearchParams(search).get('chart');
   const matched = CAMPAIGN_METRIC_CHART_CONFIGS.find(config => config.key === requested);
-  return matched ? { open: true, key: matched.key } : { open: false, key: 'odds' };
+  return matched
+    ? { open: true, key: matched.key }
+    : { open: false, key: DEFAULT_CHART_VIEW_BY_SOURCE.odds ?? 'odds' };
 }
 
 function parseCampaignListParams(search: string): CampaignSortState {
@@ -1191,9 +1207,11 @@ export default function JournalCampaignsPage() {
       updateChartParam(null);
       return;
     }
-    setMetricChartKey(key);
+    // 排序行按钮传的是族键；真正打开的是这一族的默认视图（盈亏比 → 分布）。
+    const openKey = DEFAULT_CHART_VIEW_BY_SOURCE[key] ?? key;
+    setMetricChartKey(openKey);
     setMetricChartOpen(true);
-    updateChartParam(key);
+    updateChartParam(openKey);
   };
   const compoundCampaignGrowth = useMemo(
     () => computeCompoundCampaignGrowth(
