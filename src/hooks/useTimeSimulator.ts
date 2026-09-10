@@ -89,6 +89,13 @@ export function useTimeSimulator(initialState?: Partial<PersistedTimeSim>) {
     return c.historicalAnchorTime + (Date.now() - c.realStartTime) * c.speed * c.direction;
   }, []);
 
+  /**
+   * 读取「此刻真正生效的倍速」。RAF 循环所在 effect 的依赖里没有 speed，
+   * 闭包里捕获的 sim.speed 会过期；coreRef.speed 由 syncCore 实时维护，
+   * 而 useCallback 保持稳定引用，不会把 effect 拽着重建。
+   */
+  const getSpeed = useCallback((): number => coreRef.current.speed, []);
+
   // ---- Flush to React state (call at low freq from game loop) ----
   const syncReactState = useCallback((simTime: number) => {
     currentTimeRef.current = simTime;
@@ -211,6 +218,7 @@ export function useTimeSimulator(initialState?: Partial<PersistedTimeSim>) {
     ...state,
     currentTimeRef,
     getSimTime,
+    getSpeed,
     syncReactState,
     persistTime,
     startSimulation,

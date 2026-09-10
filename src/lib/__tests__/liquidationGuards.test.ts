@@ -42,6 +42,14 @@ describe('陈价闸门', () => {
     expect(staleToleranceMs(900)).toBe(900 * 5_000);
     expect(staleToleranceMs(0)).toBe(STALE_PRICE_MIN_TOLERANCE_MS);
   });
+
+  it('新的最高倍速 3600x 下容差是 5 模拟小时——这是经过审阅的结果，不是意外', () => {
+    // 公式按设计线性放大：容差换算成真实时间恒为 5 秒（任何 ≥12x 的倍速都一样），
+    // 所以「模拟小时数变大」不是判据变松。若哪天想给它封顶，请先想清楚：
+    // 封顶会让高倍速下的逐仓强平直接拒绝执行，那比现状更糟。
+    expect(staleToleranceMs(3600)).toBe(18_000_000);
+    expect(staleToleranceMs(3600) / 3600).toBe(5_000);
+  });
 });
 
 describe('逐仓强平判据', () => {

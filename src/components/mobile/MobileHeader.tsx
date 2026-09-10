@@ -3,6 +3,7 @@ import { ThemeToggle } from '@/components/ThemeToggle';
 import { Play, Pause, Clock } from 'lucide-react';
 import { formatUTC8 } from '@/lib/timeFormat';
 import { useEffect, useRef, useState } from 'react';
+import { SIMULATION_SPEED_OPTIONS } from '@/lib/simulationSpeeds';
 
 interface Props {
   symbol: string;
@@ -17,7 +18,6 @@ interface Props {
   onSetSpeed: (s: number) => void;
 }
 
-const SPEED_OPTIONS = [1, 2, 5, 10, 30, 60, 180, 300, 900];
 
 export function MobileHeader({
   symbol, interval, onSymbolChange, onIntervalChange,
@@ -43,7 +43,7 @@ export function MobileHeader({
       </div>
 
       {/* Time machine row */}
-      <div className="flex items-center gap-2 px-3 py-1.5 border-t border-border">
+      <div className="flex flex-wrap items-center gap-2 px-3 py-1.5 border-t border-border">
         <Clock className="w-3 h-3 text-primary shrink-0" />
         <span className="text-[10px] text-muted-foreground shrink-0">TIME MACHINE</span>
         {isRunning ? (
@@ -51,8 +51,8 @@ export function MobileHeader({
             <button onClick={onStop} className="btn-short flex items-center gap-1 text-[10px] px-2 py-0.5 shrink-0">
               <Pause className="w-3 h-3" /> 暂停
             </button>
-            <div className="flex items-center gap-0.5 shrink-0">
-              {SPEED_OPTIONS.map(s => (
+            <div className="flex flex-wrap items-center gap-0.5 min-w-0">
+              {SIMULATION_SPEED_OPTIONS.map(s => (
                 <button
                   key={s}
                   type="button"

@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { MultiChartLayout } from "@/components/MultiChartLayout";
 
@@ -79,6 +79,41 @@ describe("MultiChartLayout fullscreen timeframe selector", () => {
     fireEvent.click(speedOption);
 
     expect(onSetSpeed).toHaveBeenCalledWith(180);
+    expect(onSetSpeed).toHaveBeenCalledTimes(1);
+  });
+
+  it("全屏倍速面板列出全部 11 档，且能选到 3600x", () => {
+    const onSetSpeed = vi.fn();
+
+    render(
+      <MultiChartLayout
+        mainData={[]}
+        mainSymbol="BTC/USDT"
+        rawSymbol="BTCUSDT"
+        onLoadOlder={vi.fn()}
+        loadingOlder={false}
+        tradeHistory={[]}
+        isRunning
+        currentSimulatedTime={Date.now()}
+        mainInterval="1m"
+        onMainIntervalChange={vi.fn()}
+        speed={30}
+        onSetSpeed={onSetSpeed}
+      />,
+    );
+
+    fireEvent.click(screen.getByTitle("全屏"));
+    fireEvent.click(screen.getByLabelText("加速器，当前 30 倍"));
+
+    const group = screen.getByRole("group", { name: "倍速选择" });
+    // 11 个档位 + 1 个展开按钮
+    expect(within(group).getAllByRole("button")).toHaveLength(12);
+
+    const fastest = within(group).getByText("3600x");
+    fireEvent.pointerDown(fastest, { button: 0 });
+    fireEvent.click(fastest);
+
+    expect(onSetSpeed).toHaveBeenCalledWith(3600);
     expect(onSetSpeed).toHaveBeenCalledTimes(1);
   });
 

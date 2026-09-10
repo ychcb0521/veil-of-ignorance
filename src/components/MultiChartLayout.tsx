@@ -5,11 +5,11 @@ import { TimeframeSelector } from "./TimeframeSelector";
 import { LayoutGrid, Columns, Square, Maximize2, Minimize2, Clock3, Gauge, ChevronDown } from "lucide-react";
 import type { KlineData } from "@/hooks/useBinanceData";
 import type { TradeRecord, PendingOrder } from "@/types/trading";
+import { SIMULATION_SPEED_OPTIONS } from "@/lib/simulationSpeeds";
 
 type LayoutMode = "1x1" | "1x2" | "2x2";
 
 const INTERVALS = ["1m", "3m", "5m", "15m", "30m", "1h", "2h", "4h", "1d"];
-const SPEED_OPTIONS = [1, 2, 5, 10, 30, 60, 180, 300, 900];
 const FULLSCREEN_SESSION_KEY = "veil.mainChart.fullscreen";
 
 const readFullscreenSession = () => {
@@ -454,7 +454,7 @@ function FullscreenSpeedSelector({ speed, onSetSpeed }: { speed: number; onSetSp
 
       {open && (
         <div className="absolute right-0 top-full z-50 mt-1.5 grid w-44 grid-cols-3 gap-1.5 rounded-md border border-border bg-card p-2 shadow-xl">
-          {SPEED_OPTIONS.map((option) => (
+          {SIMULATION_SPEED_OPTIONS.map((option) => (
             <button
               type="button"
               key={option}

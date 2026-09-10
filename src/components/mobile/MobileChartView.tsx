@@ -7,6 +7,8 @@ import type { TimeMachineStatus } from '@/hooks/useTimeSimulator';
 import { useState } from 'react';
 import { WheelDateTimePicker } from './WheelPicker';
 import { MobileTimeframeSheet } from './MobileTimeframeSheet';
+import { MobileSpeedSheet } from './MobileSpeedSheet';
+import { QUICK_SIMULATION_SPEEDS } from '@/lib/simulationSpeeds';
 import { TIMEFRAME_LABELS } from '@/hooks/useTimeframePrefs';
 import { getSettlementAsset } from '@/lib/coinMargined';
 
@@ -37,10 +39,10 @@ interface Props {
 }
 
 export function MobileChartView(props: Props) {
-  const SPEED_OPTIONS = [1, 2, 5, 10, 30, 60, 180, 300, 900];
   const [selectedDate, setSelectedDate] = useState(() => new Date('2024-01-15T00:00:00Z')); // 00:00 UTC = 08:00 UTC+8
   const [showPicker, setShowPicker] = useState(false);
   const [showTimeframeSheet, setShowTimeframeSheet] = useState(false);
+  const [showSpeedSheet, setShowSpeedSheet] = useState(false);
   const { getSymbolSettlementMode } = useTradingContext();
   const settlementMode = getSymbolSettlementMode(props.symbol);
   const baseCoin = getSettlementAsset(props.symbol);
@@ -121,8 +123,10 @@ export function MobileChartView(props: Props) {
         {props.status === 'playing' && (
           <>
             <span className="font-mono text-[10px] text-primary flex-1 truncate">{formatSimTime(props.currentSimulatedTime)}</span>
+            {/* 快捷 4 档 + 「更多」：栏内塞不下 11 个按钮，但每一档都必须够得着，
+                当前倍速不在快捷档里时由「更多」按钮直接显示它，避免出现「全都没高亮」。 */}
             <div className="flex items-center gap-0.5 shrink-0">
-              {SPEED_OPTIONS.slice(0, 4).map(s => (
+              {QUICK_SIMULATION_SPEEDS.map(s => (
                 <button key={s} onClick={() => props.onSetSpeed(s)}
                   className={`px-1 py-0.5 rounded text-[9px] font-mono ${
                     props.speed === s ? 'bg-primary text-primary-foreground' : 'text-muted-foreground'
@@ -131,6 +135,17 @@ export function MobileChartView(props: Props) {
                   {s}x
                 </button>
               ))}
+              <button
+                onClick={() => setShowSpeedSheet(true)}
+                aria-label="更多倍速"
+                className={`px-1 py-0.5 rounded text-[9px] font-mono ${
+                  QUICK_SIMULATION_SPEEDS.some(s => s === props.speed)
+                    ? 'text-muted-foreground'
+                    : 'bg-primary text-primary-foreground'
+                }`}
+              >
+                {QUICK_SIMULATION_SPEEDS.some(s => s === props.speed) ? '更多' : `${props.speed}x`}
+              </button>
             </div>
             <button onClick={props.onPause} className="p-1 text-yellow-400">
               <Pause className="w-3.5 h-3.5" />
@@ -166,6 +181,13 @@ export function MobileChartView(props: Props) {
         onClose={() => setShowTimeframeSheet(false)}
         interval={props.interval}
         onIntervalChange={props.onIntervalChange}
+      />
+
+      <MobileSpeedSheet
+        open={showSpeedSheet}
+        onClose={() => setShowSpeedSheet(false)}
+        speed={props.speed}
+        onSetSpeed={props.onSetSpeed}
       />
 
       {/* Price summary bar */}

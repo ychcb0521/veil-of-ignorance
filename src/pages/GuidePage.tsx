@@ -517,7 +517,7 @@ export default function GuidePage() {
                   输入日期和时间后，系统加载该时刻附近的真实历史行情。K 线、盘口、成交、持仓盈亏和订单触发都以模拟时间为准。
                 </KeyCard>
                 <KeyCard title="加速播放">
-                  支持 1x、2x、5x、10x、50x、60x、180x、300x 倍速。慢速用于练决策细节，高倍速用于快速穿越等待区和重复训练同类行情。高倍速对数据的消耗是线性的（3m 周期 180 倍速 = 1 根 K 线 / 秒），系统会在接近已加载边界时自动预取下一批，取到尽头则自动暂停。
+                  支持 1x、2x、5x、10x、30x、60x、180x、300x、900x、1800x、3600x 共 11 档。慢速用于练决策细节，高倍速用于快速穿越等待区和重复训练同类行情。高倍速对数据的消耗是线性的（3m 周期 180 倍速 = 1 根 K 线 / 秒，1m 周期 3600 倍速达 60 根 / 秒），系统会在接近已加载边界时自动预取下一批——预取阈值按「还剩几秒真实时间」计算，倍速越高提前量越大，取到尽头才自动暂停。
                 </KeyCard>
                 <KeyCard title="暂停与恢复">
                   可随时暂停、继续或跳转。暂停时适合写交易计划、检查 checklist、复盘刚才为什么想出手。
@@ -535,7 +535,7 @@ export default function GuidePage() {
                   <tbody>
                     <tr><td className="px-3 py-2 border-t border-border">历史回放</td><td className="px-3 py-2 border-t border-border">从任意历史时刻重新进入市场</td><td className="px-3 py-2 border-t border-border">把过去行情变成可反复练习的样本</td></tr>
                     <tr><td className="px-3 py-2 border-t border-border">未来不可见</td><td className="px-3 py-2 border-t border-border">只显示模拟时间以前的数据</td><td className="px-3 py-2 border-t border-border">避免用已知结果污染判断</td></tr>
-                    <tr><td className="px-3 py-2 border-t border-border">倍速播放</td><td className="px-3 py-2 border-t border-border">按 1x 到 300x 推进行情</td><td className="px-3 py-2 border-t border-border">用高倍速提高训练密度，用低倍速校准执行质量</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border">倍速播放</td><td className="px-3 py-2 border-t border-border">按 1x 到 3600x 推进行情</td><td className="px-3 py-2 border-t border-border">用高倍速提高训练密度，用低倍速校准执行质量</td></tr>
                     <tr><td className="px-3 py-2 border-t border-border">统一模拟时钟</td><td className="px-3 py-2 border-t border-border">订单、持仓、盈亏、历史记录同步推进</td><td className="px-3 py-2 border-t border-border">让训练接近真实交易节奏</td></tr>
                   </tbody>
                 </table>
@@ -548,7 +548,7 @@ export default function GuidePage() {
                   订单簿、最新成交、市场异动合并成右栏下方的一个模块，<strong>默认折叠</strong>成一条表头，把纵向空间让给 P_gap。折叠时点任一页签即展开到该页签。用来观察微观结构；若盘口不是策略的一部分，就不要用它作为冲动加仓的借口。
                 </KeyCard>
                 <KeyCard title="推荐节奏">
-                  新手先用 1x-5x 练完整决策，熟悉后用 10x-60x 提高样本量；180x 和 300x 适合穿越无交易价值的等待区。
+                  新手先用 1x-5x 练完整决策，熟悉后用 10x-60x 提高样本量；180x 到 900x 适合穿越无交易价值的等待区，1800x / 3600x 用于跨越以「天」计的长等待区——但此时只适合空仓快进，不适合挂着条件单跑（原因见下条）。
                 </KeyCard>
               </KeyGrid>
               <Highlight>
@@ -1896,7 +1896,8 @@ P 不再一把手填，而是拆成三个更可回答的问题：<strong>「这�
               <P><strong>历史回填不等于真实快照。</strong> 回填可以恢复交易结构，但无法恢复当时的理由、心态和风险认识。系统不会假装知道这些缺失信息。</P>
               <P><strong>账户资产与钱包划转。</strong>顶部「预估总资产」是<strong>三个钱包的合计</strong>：合约（Futures）、现货（Spot）、资金（Funding）。合约钱包的<strong>可用</strong>是自由现金，被持仓占用的保证金与未实现盈亏计入「冻结」，<strong>划不走</strong>——这与币安一致。点「划转」按币安的逻辑在三个钱包之间搬钱：选来源与目标（选成同一个会自动交换）、可一键「最大」、即时到账、不收手续费。<strong>划转不改变账户总资产</strong>，它只改变钱分布在哪个钱包，因此不会影响资产曲线、今日盈亏与任何战役指标。「添加资金」「转出」对应真实出入金，模拟盘不提供，按钮置灰。</P>
               <P><strong>账号数据跟人走，不跟浏览器走。</strong><strong>持仓、成交历史（含资金流水）、挂单与已撤单、余额、各币时间线、杠杆 / 保证金模式 / 结算模式、图表画线与指标、信号库、认知盲区、情绪日记本地镜像</strong>等全部引擎状态，除本地存储外还会<strong>自动镜像到账号的云端存档</strong>：操作后约 1.5 秒内推送（时间线心跳类合并到 20 秒一批），切走页面或关闭标签时立即冲刷。换一个浏览器登录同一账号，进入交易页前会先看到「同步账号数据」——云端存档水化完成后，所有记录原样恢复。两边都用过的浏览器以<strong>更新的一方为准</strong>，不会用旧数据回滚新操作。离线或同步失败时照常可用，数据仍在本地，恢复联网后自动补推。<strong>账户资产</strong>不单独存储——它由初始资金（服务端）＋余额＋持仓＋成交历史实时推导，这四项都在同步范围内，因此资产总额、今日盈亏与资产曲线换浏览器后自动一致。</P>
-              <P><strong>K 线是流式供给的，有边界就会停。</strong> 开局先取锚点前 1000 根历史 + 1000 根前瞻缓冲，播放接近边界时自动预取下一批（正放取更晚、倒放取更早）。取到尽头会<strong>自动暂停并提示</strong>，而不是让时钟继续空跑——盘面停住时看一眼提示，那是数据到头，不是卡顿。高倍速消耗很快：3m 周期 180 倍速恰为 <strong>1 根 / 秒</strong>，1m 周期 900 倍速达 15 根 / 秒。</P>
+              <P><strong>K 线是流式供给的，有边界就会停。</strong> 开局先取锚点前 1000 根历史 + 1000 根前瞻缓冲，播放接近边界时自动预取下一批（正放取更晚、倒放取更早）。取到尽头会<strong>自动暂停并提示</strong>，而不是让时钟继续空跑——盘面停住时看一眼提示，那是数据到头，不是卡顿。高倍速消耗很快：3m 周期 180 倍速恰为 <strong>1 根 / 秒</strong>，1m 周期 3600 倍速达 <strong>60 根 / 秒</strong>。因此预取阈值不再是固定根数，而是按<strong>余量秒数</strong>算（正放留 16 秒、倒放留 8 秒），倍速越高提前量越大；在所有旧倍速下算出来的仍是原来的 240 / 120 根，一根不差。</P>
+              <P><strong>1800x / 3600x 有两个看不见的代价，先知道再用。</strong> 其一，<strong>强平判据是按真实时间采样的，不看 K 线高低点</strong>：每 250 毫秒真实时间取一次标量价，1800 倍速下相邻两次相隔 7.5 模拟分钟，3600 倍速下相隔 15 模拟分钟（1m 周期即 15 根 K 线）。止盈止损与条件单是逐根撮合的，强平不是，所以极高倍速下可能出现「止损按影线成交、强平没看到同一根影线」。其二，<strong>每次「启动」都会把倍速重置回 1x</strong>，需要重新选择——这是为了避免上次的 3600x 在你还没看清盘面时就跑起来。</P>
             </div>
           </section>
 

@@ -29,6 +29,7 @@ import {
   hasCampaignOnSignalDay, hasTradeOnSignalDay,
 } from '@/lib/signalCampaignIndex';
 import { PreTradeSnapshotDialog } from '@/components/journal/PreTradeSnapshotDialog';
+import { SIMULATION_SPEED_OPTIONS } from '@/lib/simulationSpeeds';
 
 interface Props {
   status: TimeMachineStatus;
@@ -49,8 +50,6 @@ interface Props {
   signalJumpIntervalMs?: number;
 }
 
-const SPEED_OPTIONS = [1, 2, 5, 10, 30, 60, 180, 300, 900];
-
 export function TimeControl({
   status, currentSimulatedTime, speed,
   onStart, onPause, onResume, onStop, onSetSpeed, clockRef,
@@ -62,7 +61,10 @@ export function TimeControl({
   const { user } = useAuth();
   const [noEntryOpen, setNoEntryOpen] = useState(false);
   const [noEntrySimTime, setNoEntrySimTime] = useState<number>(Date.now());
+  // 按下即高亮的乐观镜像；外部倍速变化（刷新后读回持久化速度、全屏选择器改速）
+  // 必须回灌，否则高亮停在旧档位，看起来像「我选的 3600x 被拒绝了」。
   const [visualSpeed, setVisualSpeed] = useState(speed);
+  useEffect(() => { setVisualSpeed(speed); }, [speed]);
   const speedPointerDownRef = useRef<number | null>(null);
   const noEntrySymbol = activeSymbol || 'BTCUSDT';
 
@@ -327,8 +329,8 @@ export function TimeControl({
   };
 
   const SpeedButtons = () => (
-    <div className="flex items-center gap-1">
-      {SPEED_OPTIONS.map(s => (
+    <div className="flex items-center gap-1 flex-wrap">
+      {SIMULATION_SPEED_OPTIONS.map(s => (
         <button
           type="button"
           key={s}

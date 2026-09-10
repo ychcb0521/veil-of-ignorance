@@ -1,4 +1,5 @@
 import { useState, useCallback, useRef } from "react";
+import { FETCH_HANG_TIMEOUT_MS, PREFETCH_BATCH_BARS } from "@/lib/streamingWindow";
 
 export interface KlineData {
   time: number; // ms timestamp (open time)
@@ -38,6 +39,11 @@ const RETRYABLE_STATUS = new Set([418, 429, 500, 502, 503, 504]);
 const MAX_FETCH_RETRIES = 2;
 /** 重试退避基数（毫秒），按指数增长：250 → 500。 */
 const RETRY_BASE_MS = 250;
+/**
+ * 单次取数的挂死断路器：只用来保证在途锁一定会释放，不是超时重试策略
+ * （取值与理由见 streamingWindow.ts 的 FETCH_HANG_TIMEOUT_MS）。
+ */
+const FETCH_TIMEOUT_MS = FETCH_HANG_TIMEOUT_MS;
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -64,7 +70,21 @@ async function fetchBatch(
   if (params.startTime != null) qs.set("startTime", String(params.startTime));
   if (params.endTime != null) qs.set("endTime", String(params.endTime));
 
-  const res = await fetch(`https://fapi.binance.com/fapi/v1/klines?${qs}`);
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+  let res: Response;
+  try {
+    res = await fetch(`https://fapi.binance.com/fapi/v1/klines?${qs}`, { signal: controller.signal });
+  } catch (e: any) {
+    // 挂死（AbortError）与网络抖动同样按「瞬时错误」重试
+    if (attempt < MAX_FETCH_RETRIES) {
+      await sleep(RETRY_BASE_MS * 2 ** attempt);
+      return fetchBatch(symbol, interval, params, attempt + 1);
+    }
+    throw e;
+  } finally {
+    clearTimeout(timeout);
+  }
   if (!res.ok) {
     if (RETRYABLE_STATUS.has(res.status) && attempt < MAX_FETCH_RETRIES) {
       await sleep(RETRY_BASE_MS * 2 ** attempt);
@@ -124,14 +144,16 @@ export function useBinanceData() {
 
       try {
         // 正放：锚点前 1000 根作历史 + 1000 根前瞻缓冲。缓冲从 300 提到 1000——
-        // 3m 周期 180 倍速恰为 1 根/秒，300 根只够 5 分钟，之后就得完全依赖
-        // 流式补给按时到达；1000 根把开局的余量拉到 16 分钟以上。
-        // 倒放（镜像）：完全对称——锚点后 1000 根作「主观历史」（真实未来，铺在
-        // 镜像图左侧）+ 锚点前 300 根作倒走的流式缓冲。
+        // 300 根在 3m 周期 180 倍速（恰为 1 根/秒）下只够 5 分钟，之后就得完全依赖
+        // 流式补给按时到达。注意这 1000 根值多少真实时间取决于倍速：180x/3m 是 16 分钟，
+        // 而最快的 3600x/1m 只有 16.7 秒——所以余量判定必须按秒算（见 streamingWindow）。
+        // 倒放（镜像）：完全对称——锚点后 1000 根作「主观历史」（真实未来，铺在镜像图
+        // 左侧）+ 锚点前 1000 根作倒走的流式缓冲。这一侧原来只有 300 根，比 3600x/1m
+        // 下算出的倒放预取阈值（480 根）还小，等于开局第一帧就发请求、成败系于单次取数。
         const [historyData, futureData] = opts?.reverse
           ? await Promise.all([
               fetchBatch(symbol, interval, { startTime: anchorTime, limit: 1000 }),
-              fetchBatch(symbol, interval, { endTime: anchorTime - 1, limit: 300 }).catch(() => []),
+              fetchBatch(symbol, interval, { endTime: anchorTime - 1, limit: PREFETCH_BATCH_BARS }).catch(() => []),
             ])
           : await Promise.all([
               fetchBatch(symbol, interval, { endTime: anchorTime, limit: 1000 }),
@@ -190,13 +212,13 @@ export function useBinanceData() {
     setLoadingNewer(true);
     try {
       const startTime = newestRef.current + 1;
-      const newer = await fetchBatch(symbol, interval, { startTime, limit: 1000 });
+      const newer = await fetchBatch(symbol, interval, { startTime, limit: PREFETCH_BATCH_BARS });
 
       if (newer.length === 0) {
         noMoreNewerRef.current = true;
         return 0;
       }
-      if (newer.length < 1000) noMoreNewerRef.current = true;
+      if (newer.length < PREFETCH_BATCH_BARS) noMoreNewerRef.current = true;
 
       newestRef.current = newer[newer.length - 1].time;
 
@@ -225,14 +247,14 @@ export function useBinanceData() {
     setLoadingOlder(true);
     try {
       const endTime = oldestRef.current - 1;
-      const older = await fetchBatch(symbol, interval, { endTime, limit: 1000 });
+      const older = await fetchBatch(symbol, interval, { endTime, limit: PREFETCH_BATCH_BARS });
 
       if (older.length === 0) {
         noMoreRef.current = true;
         return 0;
       }
 
-      if (older.length < 1000) noMoreRef.current = true;
+      if (older.length < PREFETCH_BATCH_BARS) noMoreRef.current = true;
 
       oldestRef.current = older[0].time;
 
@@ -299,6 +321,14 @@ export function useBinanceData() {
     [allData],
   );
 
+  /**
+   * 在途查询。给 RAF 侧的预取节流用：节流戳只应在「真正发起请求」时写，
+   * 否则在途期间条件一直为真，每 2 秒盲写一次会把失败后的重试推迟到下一个
+   * 2 秒边界——等于把余量预算凭空多花 2 秒。
+   */
+  const isFetchingNewer = useCallback(() => inflightNewerRef.current, []);
+  const isFetchingOlder = useCallback(() => inflightOlderRef.current, []);
+
   const reset = useCallback(() => {
     initLoadRequestIdRef.current += 1;
     setAllDataAndRef([]);
@@ -320,6 +350,8 @@ export function useBinanceData() {
     initLoad,
     loadOlder,
     loadNewer,
+    isFetchingNewer,
+    isFetchingOlder,
     getVisibleData,
     reset,
   };
