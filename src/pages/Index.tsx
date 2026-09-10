@@ -69,6 +69,7 @@ import {
   isCoinSettled,
   isPositionOpen,
   mergeFilledPosition,
+  type PositionMergeResult,
 } from "@/lib/tradingSettlement";
 import {
   Dialog,
@@ -124,6 +125,7 @@ const Index = () => {
     handleCancelOrder,
     handlePlaceTpSl,
     applyAttachedTpSl,
+    applyMergeSideEffects,
     applySymbolLeverage,
     settleFillDebit,
     executeReduceOnlyTrigger,
@@ -536,24 +538,47 @@ const Index = () => {
           filledRealAt: Date.now(),
           positionId: position.id,
         }));
+      /**
+       * 合并结果要**带出来**：后面两件事都依赖「到底并没并、并进了谁」。
+       * 原来这里把 mergeFilledPosition 写在 updater 里、结果就地丢掉，于是
+       * 既没做合并善后，随单止损又挂到了 position.id 上——而合并后活下来的是
+       * 被吞并方的 id，这张止损从诞生起就指向一个不存在的仓位，永不触发。
+       */
+      const mergeOut: { current: PositionMergeResult | null } = { current: null };
       setPositionsMap((prev) => {
         const existing = (prev[symbol] || []).filter(isPositionOpen);
-        // 同标的同方向并成一个仓位（币安单向持仓）：分开算会让加仓被自己的
-        // 强平价单独打掉，而健康的主力明明还有盈余可以扛住它。
-        return { ...prev, [symbol]: mergeFilledPosition(symbol, existing, position).positions };
+        const result = mergeFilledPosition(symbol, existing, position);
+        mergeOut.current = result;
+        return { ...prev, [symbol]: result.positions };
       });
+      // setPositionsMap 是即时包装（updater 同步跑在最新的 ref 上），所以这里拿得到结果。
+      const merged = mergeOut.current;
+      if (merged) applyMergeSideEffects(symbol, merged);
       const nextOrdersMap = {
         ...ordersMapRef.current,
         [symbol]: (ordersMapRef.current[symbol] || []).filter((candidate) => candidate.id !== order.id),
       };
       ordersMapRef.current = nextOrdersMap;
       setOrdersMap(nextOrdersMap);
-      // 这张单随身带着的止盈止损,成交这一刻才兑现
-      applyAttachedTpSl(symbol, position, order);
+      /**
+       * 这张单随身带着的止盈止损，成交这一刻才兑现——但**并入现有仓位时不挂**，
+       * 与 TradingContext 的市价/最优价路径同一口径：applyAttachedTpSl 按
+       * linkedPositionId 先删后建，对存活仓位调用等于让这笔加仓悄悄抹掉主力现有的
+       * 止损，而且它按成数算量，「100%」会变成平掉合并后的全部。说出来，让用户自己定。
+       */
+      if (merged?.absorbedFillId) {
+        if (Number(order.attachedTpPrice) > 0 || Number(order.attachedSlPrice) > 0) {
+          toast.warning('随单止盈/止损未挂出', {
+            description: '本次成交已并入现有同向仓位；请在仓位上重新设置止盈止损，避免覆盖已有保护。',
+          });
+        }
+      } else if (merged) {
+        applyAttachedTpSl(symbol, merged.survivor, order);
+      }
       toast.success(`条件单已触发：${symbol} ${order.side} ${formatSettlementQuantity(position, symbol)} @ ${formatPrice(entryPrice, symbol)}`);
       return true;
     },
-    [applyAttachedTpSl, executeReduceOnlyTrigger, settleFillDebit, setFilledOrders, setOrdersMap, setPositionsMap],
+    [applyAttachedTpSl, applyMergeSideEffects, executeReduceOnlyTrigger, settleFillDebit, setFilledOrders, setOrdersMap, setPositionsMap],
   );
 
   const runConditionalMatchingForSymbol = useCallback(
@@ -1118,7 +1143,7 @@ const Index = () => {
      * 保护单当场就被抹掉了,而且抹掉的版本还会被持久化。
      * 攒起来,等外层写完再挂——非当前标的那条轮询本来就是这个顺序,所以它没事。
      */
-    const attachAfterFill: { position: Position; order: PendingOrder }[] = [];
+    const attachAfterFill: { position: Position; order: PendingOrder; merged: PositionMergeResult | null }[] = [];
 
     for (const kline of newKlines) {
       setOrdersMap((prev) => {
@@ -1307,10 +1332,14 @@ const Index = () => {
                 filledRealAt: Date.now(),
                 positionId: position.id,
               }));
+            // 同标的同方向并成一个仓位（币安单向持仓）。合并后必须改指减仓单，
+            // 否则挂在被吞并那笔上的止损会变成永不触发的孤儿。
+            const mergeOut: { current: PositionMergeResult | null } = { current: null };
             setPositionsMap((prev) => {
               const existing = (prev[activeSymbol] || []).filter(isPositionOpen);
-              // 同标的同方向并成一个仓位（币安单向持仓）。
-              return { ...prev, [activeSymbol]: mergeFilledPosition(activeSymbol, existing, position).positions };
+              const result = mergeFilledPosition(activeSymbol, existing, position);
+              mergeOut.current = result;
+              return { ...prev, [activeSymbol]: result.positions };
             });
             // 执行力资产只奖励做多开仓；做空都是辅助对冲单，不计分。
             if (matchedOrder.side === 'LONG') {
@@ -1335,7 +1364,7 @@ const Index = () => {
               };
               recordExecutionTrade(matchedOrder.tradingMode ?? tradingMode, trade);
             }
-            attachAfterFill.push({ position, order: matchedOrder });
+            attachAfterFill.push({ position, order: matchedOrder, merged: mergeOut.current });
             toast.success(
               `委托成交: ${matchedOrder.side === "LONG" ? "开多" : "开空"} ${formatSettlementQuantity(position, activeSymbol)} @ ${formatPrice(actualFillPrice, activeSymbol)}`,
             );
@@ -1351,14 +1380,38 @@ const Index = () => {
     }
 
     // 外层写完之后再挂保护单：此刻 ordersMapRef 已经是成交后的样子。
-    for (const { position, order } of attachAfterFill) {
-      applyAttachedTpSl(activeSymbol, position, order);
+    // 合并善后同样要等到这里——applyMergeSideEffects 也写 ordersMap，
+    // 放在外层 updater 里会被外层用 prev 算出的 next 覆盖掉（同上面那段注释）。
+    for (const { position, order, merged } of attachAfterFill) {
+      if (merged) applyMergeSideEffects(activeSymbol, merged);
+      /**
+       * 随单止盈止损**并入现有仓位时不挂**，与条件单、后台成交、市价/最优价四条
+       * 路径同一口径。这里原来无条件传 `position`——也就是**被吞并的那一笔**：
+       * 合并后活下来的是主力的 id，这张止损从诞生起就指向一个不存在的仓位，
+       * planReduceOnlyTrigger 返回 linked_position_missing 后**原样保留**它，
+       * 不撤、不改指、不报错，用户看得见一张永不触发的止损。
+       * 传存活仓位同样不行：applyAttachedTpSl 按 linkedPositionId 先删后建，
+       * 会抹掉主力现有的保护，且按成数算量，「100%」等于平掉合并后的全部。
+       */
+      if (merged?.absorbedFillId) {
+        if (Number(order.attachedTpPrice) > 0 || Number(order.attachedSlPrice) > 0) {
+          toast.warning('随单止盈/止损未挂出', {
+            description: `${activeSymbol} 本次成交已并入现有同向仓位；请在仓位上重新设置止盈止损，避免覆盖已有保护。`,
+          });
+        }
+      } else {
+        applyAttachedTpSl(activeSymbol, merged?.survivor ?? position, order);
+      }
     }
-  }, [visibleData.length, activeSymbol, recordExecutionTrade, tradingMode, getEffectiveTime, setFilledOrders, applyAttachedTpSl]);
+  }, [visibleData.length, activeSymbol, recordExecutionTrade, tradingMode, getEffectiveTime, setFilledOrders, applyAttachedTpSl, applyMergeSideEffects]);
 
   // ===== TWAP ENGINE =====
   useEffect(() => {
     if (activeCoinState.status !== "playing" || currentPrice <= 0) return;
+
+    // 合并善后攒在这里，等下面所有 setOrdersMap 都写完再统一执行——与随单止盈止损
+    // 同一条规矩：在 updater 里改 ordersMap，会被外层用旧 prev 算出的结果覆盖掉。
+    const twapMerges: { symbol: string; merged: PositionMergeResult }[] = [];
 
     for (const [symbol, orders] of Object.entries(ordersMap)) {
       const price = priceMap[symbol] || 0;
@@ -1410,11 +1463,20 @@ const Index = () => {
                   changed = true;
                   return null;
                 }
-                setPositionsMap((p) => {
-                  const existing = (p[symbol] || []).filter(isPositionOpen);
+                {
                   // TWAP 的每一片也并入同一个仓位，否则一张 TWAP 会铺出十几个各自可爆的小仓。
-                  return { ...p, [symbol]: mergeFilledPosition(symbol, existing, position).positions };
-                });
+                  // 每一片合并后同样要改指减仓单——分片越多，孤儿止损的机会越多。
+                  const mergeOut: { current: PositionMergeResult | null } = { current: null };
+                  setPositionsMap((p) => {
+                    const existing = (p[symbol] || []).filter(isPositionOpen);
+                    const result = mergeFilledPosition(symbol, existing, position);
+                    mergeOut.current = result;
+                    return { ...p, [symbol]: result.positions };
+                  });
+                  // 攒起来，等外层 setOrdersMap 写完再执行：applyMergeSideEffects 也写
+                  // ordersMap，在 updater 里调会被外层用旧 prev 算出的结果覆盖掉。
+                  if (mergeOut.current) twapMerges.push({ symbol, merged: mergeOut.current });
+                }
                 changed = true;
                 return {
                   ...order,
@@ -1433,7 +1495,9 @@ const Index = () => {
         return changed ? { ...prev, [symbol]: updated } : prev;
       });
     }
-  }, [effectiveSimTime, activeCoinState.status, ordersMap, priceMap, getEffectiveTime, settleFillDebit]);
+
+    for (const { symbol, merged } of twapMerges) applyMergeSideEffects(symbol, merged);
+  }, [effectiveSimTime, activeCoinState.status, ordersMap, priceMap, getEffectiveTime, settleFillDebit, applyMergeSideEffects]);
 
   // ===== ISOLATED-MODE HANDLERS =====
   const handlePause = useCallback(() => {

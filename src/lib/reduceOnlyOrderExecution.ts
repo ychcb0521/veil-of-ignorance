@@ -31,6 +31,11 @@ export interface ReduceOnlyTriggerSuccess {
   records: TradeRecord[];
   filledOrder: FilledOrderSnapshot;
   returnedMargin: number;
+  /**
+   * 被减仓那笔仓位的保证金模式。调用方据此决定余额怎么回写：
+   * 全仓全额（returnedMargin 可为负，超额亏损必须扣账），逐仓封底到 0。
+   */
+  marginMode: Position['marginMode'];
   fillPrice: number;
   netPnl: number;
   fullyClosed: boolean;
@@ -141,6 +146,7 @@ export function planReduceOnlyTrigger({
     ok: true,
     targetSymbol,
     linkedPositionId,
+    marginMode: position.marginMode,
     positions: nextPositions,
     orders: nextOrders,
     records: settled.records,

@@ -113,3 +113,48 @@ export function evaluateIsolatedLiquidation(input: {
 
   return { liquidate: true, pnlUsd, notionalUsd, equityUsd, maintenanceUsd };
 }
+
+
+/** 全仓一档的输入：钱包余额、全部全仓仓位的保证金与浮盈、维持保证金。 */
+export interface CrossLiquidationInput {
+  /** 钱包余额。注意：开仓时已经从它里面扣掉了保证金。 */
+  balanceUsd: number;
+  /** 全部全仓仓位**已被扣走**的保证金之和。 */
+  crossMarginUsd: number;
+  /** 全部全仓仓位的浮动盈亏之和（亏为负）。 */
+  crossUnrealizedPnlUsd: number;
+  /** 全部全仓仓位的维持保证金之和。 */
+  crossMaintenanceUsd: number;
+}
+
+export type CrossLiquidationDecision =
+  | { liquidate: false; reason: 'no_position' | 'bad_numbers' | 'solvent'; equityUsd?: number }
+  | { liquidate: true; equityUsd: number; maintenanceUsd: number };
+
+/**
+ * 全仓强平判据。
+ *
+ * 事故：原来写的是 `crossEquity = balance + ΣPnL`，把**已经扣走的保证金**漏在了权益之外。
+ * 这个代码库里开仓就 `setBalance(prev − margin − fee)`，两种模式都扣；所以钱包里的
+ * 现金已经不含在用保证金，真实权益必须是 `余额 + Σ全仓保证金 + Σ浮盈`。
+ * 少算的正好是 Σ保证金，后果有两层：
+ *   · 强平在真实距离的**一半**处就触发；
+ *   · 仓位铺满时余额≈0，任何一点负浮盈（开仓滑点就够）都会在下一个 250ms 判定里
+ *     把整个账户清掉——用户看到的是「刚开仓就爆仓」。
+ * 逐仓保证金是隔离的，不进这个池子（它有自己的 evaluateIsolatedLiquidation）。
+ */
+export function evaluateCrossLiquidation(input: CrossLiquidationInput): CrossLiquidationDecision {
+  const { balanceUsd, crossMarginUsd, crossUnrealizedPnlUsd, crossMaintenanceUsd } = input;
+  if (!(crossMarginUsd > 0) && !(crossMaintenanceUsd > 0)) {
+    return { liquidate: false, reason: 'no_position' };
+  }
+  const equityUsd = balanceUsd + crossMarginUsd + crossUnrealizedPnlUsd;
+  if (!Number.isFinite(equityUsd) || !Number.isFinite(crossMaintenanceUsd)) {
+    // 与逐仓同一取向：算不清就**不**强平。反过来会让任何畸形数据都以爆仓收场。
+    return { liquidate: false, reason: 'bad_numbers' };
+  }
+  if (!(equityUsd <= crossMaintenanceUsd)) {
+    return { liquidate: false, reason: 'solvent', equityUsd };
+  }
+  return { liquidate: true, equityUsd, maintenanceUsd: crossMaintenanceUsd };
+}

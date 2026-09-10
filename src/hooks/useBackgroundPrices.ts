@@ -18,6 +18,7 @@ import {
   isPositionOpen,
   mergeFilledPosition,
 } from "@/lib/tradingSettlement";
+import type { PositionMergeResult } from "@/lib/tradingSettlement";
 import { upsertOrderSnapshot } from "@/lib/orderSnapshotHistory";
 import { formatPrice } from "@/lib/formatters";
 import { toast } from "sonner";
@@ -42,6 +43,7 @@ export function useBackgroundPrices() {
     recordExecutionTrade,
     executeReduceOnlyTrigger,
     applyAttachedTpSl,
+    applyMergeSideEffects,
   } = useTradingContext();
 
   const lastPollRef = useRef<number>(0);
@@ -154,12 +156,18 @@ export function useBackgroundPrices() {
             filledRealAt: Date.now(),
             positionId: position.id,
           }));
+          // 合并结果要带出来：合并后必须改指减仓单，否则挂在被吞并那笔上的止损
+          // 会指向一个不存在的仓位 id，永不触发且无声。后台成交这一路尤其要紧——
+          // 它本来就是「用户没在看的那个标的」。
+          const mergeOut: { current: PositionMergeResult | null } = { current: null };
           setPositionsMap((prev) => {
             // isPositionOpen 而不是 quantity > 1e-8:币本位的存量记在 contracts 上。
             const existing = (prev[symbol] || []).filter(isPositionOpen);
-            // 同标的同方向并成一个仓位（币安单向持仓）。
-            return { ...prev, [symbol]: mergeFilledPosition(symbol, existing, position).positions };
+            const result = mergeFilledPosition(symbol, existing, position);
+            mergeOut.current = result;
+            return { ...prev, [symbol]: result.positions };
           });
+          if (mergeOut.current) applyMergeSideEffects(symbol, mergeOut.current);
           // 执行力资产只奖励做多开仓；做空都是辅助对冲单，不计分。
           if (order.side === 'LONG') {
             const trade: ExecutionTradeSnapshot = {
@@ -183,7 +191,29 @@ export function useBackgroundPrices() {
             };
             recordExecutionTrade(order.tradingMode ?? tradingMode, trade);
           }
-          applyAttachedTpSl(symbol, position, order);
+          /**
+           * 随单止盈止损：**并入现有仓位时不挂**，与 TradingContext 的市价/最优价路径、
+           * Index 的条件单路径同一口径。
+           *
+           * 这里原来无条件传 `position`——也就是**被吞并的那一笔**。合并后活下来的是
+           * 主力的 id，于是这张止损从诞生起就指向一个已经不存在的仓位：
+           * planReduceOnlyTrigger 按 id 找不到仓位就返回 linked_position_missing 并
+           * **原样保留**这张单，不撤、不改指、不报错。用户在委托列表里看得见一张
+           * 永远不会触发的止损——而这条路径恰恰是「他没在看的那个标的」。
+           * （改指也救不了它：applyMergeSideEffects 在它被造出来之前就跑完了。）
+           * 传存活仓位同样不行：applyAttachedTpSl 按 linkedPositionId 先删后建，
+           * 会悄悄抹掉主力现有的止损，而且按成数算量，「100%」会变成平掉合并后的全部。
+           */
+          const mergedFill = mergeOut.current;
+          if (mergedFill?.absorbedFillId) {
+            if (Number(order.attachedTpPrice) > 0 || Number(order.attachedSlPrice) > 0) {
+              toast.warning('随单止盈/止损未挂出', {
+                description: `${symbol} 本次成交已并入现有同向仓位；请在仓位上重新设置止盈止损，避免覆盖已有保护。`,
+              });
+            }
+          } else {
+            applyAttachedTpSl(symbol, mergedFill?.survivor ?? position, order);
+          }
           toast.success(
             `条件单已触发：${symbol} ${order.side === 'LONG' ? '开多' : '开空'} ${formatSettlementQuantity(position, symbol)} @ ${formatPrice(actualFillPrice, symbol)}`,
           );
@@ -270,9 +300,27 @@ export function useBackgroundPrices() {
     matchBackgroundOrders,
   ]);
 
+  /**
+   * 定时器只跟「在不在播放」走，回调本身走 ref。
+   *
+   * 事故：这个 1 秒的 interval 从来没有触发过一次。
+   * pollBackgroundSymbols 的依赖里有 getEffectiveTime，而它依赖 sim.currentSimulatedTime
+   * ——播放时每 250ms 由 RAF 循环 flush 一次。于是 effect 每 250ms 重跑：
+   * 清掉旧定时器、装一个新的，永远等不到第 1000ms。
+   *
+   * 后果不只是「价格不刷新」：非当前图表标的的委托**只在这里撮合**
+   * （matchBackgroundOrders 全仓库仅此一个调用点），而强平判据又要求价格新鲜。
+   * 也就是说，你切走的那些标的：止损不触发、条件单不成交、爆仓也不发生，
+   * 而界面上它们的浮盈定格在最后一次看到的价上，看起来一切正常。
+   *
+   * 这个 bug 能活这么久，是因为它的测试把 currentSimulatedTime 写成了常量——
+   * 时间不动，effect 就不重装，定时器于是「正常」触发。下面的回归测试让时间动起来。
+   */
+  const pollRef = useRef(pollBackgroundSymbols);
+  pollRef.current = pollBackgroundSymbols;
   useEffect(() => {
     if (!sim.isRunning) return;
-    const handle = window.setInterval(pollBackgroundSymbols, 1000);
+    const handle = window.setInterval(() => { void pollRef.current(); }, 1000);
     return () => window.clearInterval(handle);
-  }, [sim.isRunning, pollBackgroundSymbols]);
+  }, [sim.isRunning]);
 }

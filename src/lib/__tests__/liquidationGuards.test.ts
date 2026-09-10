@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
+  STALE_PRICE_MIN_TOLERANCE_MS,
+  evaluateCrossLiquidation,
   evaluateIsolatedLiquidation,
   isPriceFreshForLiquidation,
   staleToleranceMs,
-  STALE_PRICE_MIN_TOLERANCE_MS,
 } from '@/lib/liquidationGuards';
 import type { Position } from '@/types/trading';
 
@@ -109,5 +110,54 @@ describe('逐仓强平判据', () => {
   it('全仓仓位不走这条判据；没有价也不清算', () => {
     expect(evalAt(ordiLong({ marginMode: 'cross' }), 4.2205)).toMatchObject({ reason: 'not_isolated' });
     expect(evalAt(ordiLong(), 0)).toMatchObject({ reason: 'no_price' });
+  });
+});
+
+
+describe('全仓强平判据', () => {
+  /**
+   * 这个代码库开仓就 setBalance(prev − margin − fee)，两种模式都扣。
+   * 所以钱包现金**不含**在用保证金，真实权益 = 余额 + Σ全仓保证金 + Σ浮盈。
+   */
+  const base = { balanceUsd: 500, crossMarginUsd: 9_500, crossUnrealizedPnlUsd: 0, crossMaintenanceUsd: 400 };
+
+  it('【回归】刚开仓、零浮亏的满仓账户绝不强平——旧判据漏掉保证金，这里会当场清零', () => {
+    const d = evaluateCrossLiquidation(base);
+    expect(d.liquidate).toBe(false);
+    expect(d.equityUsd).toBeCloseTo(10_000, 6);
+    // 旧口径：余额 500 + 浮盈 0 = 500 > 维持 400，勉强不爆；再来一点滑点就爆。
+    expect(base.balanceUsd + base.crossUnrealizedPnlUsd).toBeLessThan(base.crossMaintenanceUsd + 101);
+  });
+
+  it('【回归】开仓滑点造成的一点负浮盈也不该触发强平（旧判据会）', () => {
+    const d = evaluateCrossLiquidation({ ...base, crossUnrealizedPnlUsd: -120 });
+    expect(d.liquidate).toBe(false);          // 权益 9,880 ≫ 维持 400
+    const oldEquity = base.balanceUsd - 120;  // 380
+    expect(oldEquity <= base.crossMaintenanceUsd).toBe(true);   // 旧判据：爆
+  });
+
+  it('真正资不抵债时仍然强平：亏到权益跌破维持保证金', () => {
+    const d = evaluateCrossLiquidation({ ...base, crossUnrealizedPnlUsd: -9_700 });
+    expect(d.liquidate).toBe(true);
+    if (d.liquidate) {
+      expect(d.equityUsd).toBeCloseTo(300, 6);
+      expect(d.maintenanceUsd).toBeCloseTo(400, 6);
+    }
+  });
+
+  it('触发点是权益 = 维持保证金，与逐仓同一条边界（等号成立即强平）', () => {
+    const d = evaluateCrossLiquidation({ ...base, crossUnrealizedPnlUsd: -9_600 });
+    expect(d.liquidate).toBe(true);   // 权益恰好 400
+  });
+
+  it('没有全仓仓位时不判定', () => {
+    expect(evaluateCrossLiquidation({
+      balanceUsd: 1, crossMarginUsd: 0, crossUnrealizedPnlUsd: 0, crossMaintenanceUsd: 0,
+    })).toMatchObject({ liquidate: false, reason: 'no_position' });
+  });
+
+  it('NaN 落到「不强平」，与逐仓同一取向——反过来会让任何畸形数据都以爆仓收场', () => {
+    expect(evaluateCrossLiquidation({ ...base, crossUnrealizedPnlUsd: NaN }))
+      .toMatchObject({ liquidate: false, reason: 'bad_numbers' });
   });
 });

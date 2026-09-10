@@ -258,4 +258,62 @@ describe('useBackgroundPrices', () => {
       expect(trade.notional).toBeGreaterThan(900);
     });
   });
+
+  /**
+   * 这一组用「会变的模拟时间」驱动。
+   * 其余用例把 currentSimulatedTime 写成常量，effect 不会重装定时器——
+   * 正是这一点让「定时器每 250ms 被清掉重装、永远等不到第 1000ms」藏了下来。
+   */
+  describe('【回归】播放中模拟时间每 250ms 前进，1 秒轮询仍必须触发', () => {
+    function mountWithTickingClock() {
+      let simTime = 1_700_000_000_000;
+      const getEffectiveTime = vi.fn((_symbol?: string) => simTime);
+      const build = () => ({
+        sim: { isRunning: true, currentSimulatedTime: simTime },
+        activeSymbol: 'BTCUSDT',
+        activeSymbols: ['ETHUSDT'],
+        setPriceMap: vi.fn((u: (p: Record<string, number>) => Record<string, number>) => u({})),
+        markPriceAsOf: vi.fn(),
+        ordersMap: {},
+        positionsMap: {},
+        setOrdersMap: vi.fn(),
+        setPositionsMap: vi.fn(),
+        setBalance: vi.fn(),
+        setTradeHistory: vi.fn(),
+        tradingMode: 'direct',
+        // 每次重渲染都换一个新函数身份，复刻 getEffectiveTime 随 sim 时间重建的真实情形
+        getEffectiveTime: ((s: string) => getEffectiveTime(s)) as unknown as typeof getEffectiveTime,
+        recordExecutionTrade: vi.fn(),
+        executeReduceOnlyTrigger: vi.fn(),
+        applyAttachedTpSl: vi.fn(),
+      });
+      vi.mocked(useTradingContext).mockImplementation(() => build() as unknown as ReturnType<typeof useTradingContext>);
+      const view = render(<Harness />);
+      return {
+        /** 推进 ms 毫秒，其间每 250ms 让模拟时间前进并重渲染（= RAF 的 React flush）。 */
+        advance: async (ms: number) => {
+          for (let elapsed = 0; elapsed < ms; elapsed += 250) {
+            await act(async () => {
+              simTime += 250 * 60;   // 60 倍速
+              view.rerender(<Harness />);
+              await vi.advanceTimersByTimeAsync(250);
+            });
+          }
+        },
+      };
+    }
+
+    it('时间在走时，1 秒后后台标的仍被取价（旧实现一次都取不到）', async () => {
+      const { advance } = mountWithTickingClock();
+      await advance(1000);
+      expect(fetchCanonicalTimePriceAt).toHaveBeenCalledWith('ETHUSDT', expect.any(Number));
+    });
+
+    it('连跑 3 秒至少取到 3 轮，说明定时器没有被反复重装', async () => {
+      const { advance } = mountWithTickingClock();
+      await advance(3000);
+      const ethCalls = vi.mocked(fetchCanonicalTimePriceAt).mock.calls.filter(c => c[0] === 'ETHUSDT');
+      expect(ethCalls.length).toBeGreaterThanOrEqual(3);
+    });
+  });
 });

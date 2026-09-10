@@ -36,9 +36,24 @@ describe('成交点的写入顺序', () => {
 
     const body = blockAt(src, updaterStart);
     expect(body).not.toContain('applyAttachedTpSl(');
+    // applyMergeSideEffects 也写 ordersMap，同一条规矩：不许在 updater 里调。
+    expect(body).not.toContain('applyMergeSideEffects(');
     // 攒起来、等外层写完再挂
     expect(body).toContain('attachAfterFill.push(');
-    expect(src).toContain('for (const { position, order } of attachAfterFill)');
+    expect(src).toContain('of attachAfterFill)');
+  });
+
+  it('【回归】逐 K 线撮合的随单止盈止损不得挂在**被吞并**的那笔成交上', () => {
+    // 合并后活下来的是主力的 id，被吞并的正是这笔新成交。把它交给
+    // applyAttachedTpSl 等于造一张 linkedPositionId 指向不存在仓位的止损：
+    // planReduceOnlyTrigger 返回 linked_position_missing 后原样保留它——
+    // 不撤、不改指、不报错，用户看得见一张永不触发的止损。
+    const src = read('pages/Index.tsx');
+    const at = src.indexOf('of attachAfterFill)');
+    expect(at).toBeGreaterThan(-1);
+    const body = blockAt(src, at);
+    expect(body).not.toContain('applyAttachedTpSl(activeSymbol, position, order)');
+    expect(body).toContain('merged?.absorbedFillId');
   });
 
   it('setOrdersMap 确实是即时包装——这条前提如果变了，上面那条就该重写', () => {

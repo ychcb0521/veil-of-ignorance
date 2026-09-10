@@ -28,7 +28,7 @@ import {
 import { usePersistedState, loadPersistedSimState, saveSimState, clearSimState } from '@/hooks/usePersistedState';
 import { intervalToMs } from '@/hooks/useBinanceData';
 import { useAuth } from '@/contexts/AuthContext';
-import { evaluateIsolatedLiquidation, staleToleranceMs } from '@/lib/liquidationGuards';
+import { evaluateCrossLiquidation, evaluateIsolatedLiquidation, staleToleranceMs } from '@/lib/liquidationGuards';
 import { toast } from 'sonner';
 import type {
   Position,
@@ -191,6 +191,12 @@ interface TradingState {
   settleFillDebit: (symbol: string, order: PendingOrder, marginUsd: number, feeUsd: number, cancelledAt: number) => boolean;
   /** 挂单成交时兑现它随身带着的止盈止损（勾选框下达的那一对）。 */
   applyAttachedTpSl: (symbol: string, position: Position, order: PendingOrder) => void;
+  /**
+   * 合并成交之后的收尾，**每一个调用 mergeFilledPosition 的地方都必须紧接着调它**。
+   * 曾经 6 个合并点只有 2 个调了：另外 4 条路径（条件单触发、限价撮合、TWAP、后台成交）
+   * 合并后不改指减仓单，止损于是挂在一个已经不存在的仓位 id 上——永不触发，且无声。
+   */
+  applyMergeSideEffects: (symbol: string, merged: PositionMergeResult) => void;
   executeReduceOnlyTrigger: (
     symbol: string,
     order: PendingOrder,
@@ -888,6 +894,8 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
     let crossUnrealizedPnl = 0;
     let crossMaintenanceMargin = 0;
     let crossPositionCount = 0;
+    // 已被扣出钱包的全仓保证金——它是权益的一部分，判据里漏掉它就等于把风险算大一倍。
+    let crossMargin = 0;
     for (const [sym, positions] of Object.entries(positionsMap)) {
       const price = priceMap[sym] || 0;
       if (price <= 0) continue;
@@ -895,18 +903,42 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
         if (pos.marginMode !== 'cross') continue;
         crossUnrealizedPnl += calcUnrealizedPnl(pos, price);
         crossMaintenanceMargin += getPositionNotionalUsd(sym, pos, price) * MAINTENANCE_MARGIN_RATE;
+        crossMargin += pos.margin;
         crossPositionCount++;
       }
     }
 
     if (crossPositionCount > 0) {
-      const crossEquity = balance + crossUnrealizedPnl;
-      const crossMaintenance = crossMaintenanceMargin;
+      const crossDecision = evaluateCrossLiquidation({
+        balanceUsd: balance,
+        crossMarginUsd: crossMargin,
+        crossUnrealizedPnlUsd: crossUnrealizedPnl,
+        crossMaintenanceUsd: crossMaintenanceMargin,
+      });
+      const crossEquity = crossDecision.equityUsd ?? (balance + crossMargin + crossUnrealizedPnl);
 
-      if (crossEquity <= crossMaintenance || crossEquity <= 0) {
+      if (crossDecision.liquidate) {
         liquidationCheckRef.current = true;
 
         let totalLoss = 0;
+        /** 全仓仓位的净结算之和（盈亏 − 平仓费 − 强平费），用来把余额落到真实数上。 */
+        let crossSettlement = 0;
+        /**
+         * 撤单要按「这个仓位还在不在」算，**不是**按「它这一刻有没有价」算。
+         *
+         * 下面的 setPositionsMap 删掉的是**全部**全仓仓位，包括 priceMap 里
+         * 暂时没有价（刚恢复会话、取价失败）、因而没进结算那一轮的那些。
+         * 只把「有价的那些」放进这个集合，挂在无价仓位上的止损就会活下来，
+         * 指向一个已经不存在的 id：planReduceOnlyTrigger 返回 linked_position_missing
+         * 并**原样保留**这张单——不撤、不改指、不报错，永远挂在委托列表里。
+         * 旧代码 setOrdersMap({}) 连坐清空，反而没有这个洞。
+         */
+        const liquidatedPositionIds = new Set<string>();
+        for (const positions of Object.values(positionsMap)) {
+          for (const pos of positions) {
+            if (pos.marginMode === 'cross') liquidatedPositionIds.add(pos.id);
+          }
+        }
         const liqRecords: TradeRecord[] = [];
 
         for (const [sym, positions] of Object.entries(positionsMap)) {
@@ -920,6 +952,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
             const { feeUsd: closeFee, feeCoin } = getSettlementFeeParts(sym, pos, price, false);
             const liqFee = notional * LIQUIDATION_FEE_RATE;
             totalLoss += Math.abs(Math.min(0, pnl - closeFee - liqFee)) + liqFee;
+            crossSettlement += pnl - closeFee - liqFee;
 
             // 全仓强平同样按每笔成交拆条,理由与逐仓那一支相同。
             liqRecords.push(...buildCloseRecords({
@@ -940,16 +973,58 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
           }
         }
 
+        /**
+         * 只删**这一轮真正结算过**的仓位，不按 marginMode 一刀切。
+         *
+         * 上面两个循环都有 `if (price <= 0) continue`：拿不到报价的全仓仓位既不进
+         * crossMargin/crossSettlement，也不写强平记录。若这里仍按模式清空，它就会
+         * 凭空消失——没有任何平仓记录、开仓时扣走的保证金再也回不到余额、
+         * 它的止损因为不在 liquidatedPositionIds 里而留下来变成孤儿单。
+         * 触发条件很平常：刚恢复会话或刚切标的，后台轮询还没回价。
+         */
         setPositionsMap(prev => {
           const next: PositionsMap = {};
           for (const [sym, positions] of Object.entries(prev)) {
-            const isolated = positions.filter(p => p.marginMode === 'isolated');
-            if (isolated.length > 0) next[sym] = isolated;
+            const kept = positions.filter(p => !liquidatedPositionIds.has(p.id));
+            if (kept.length > 0) next[sym] = kept;
           }
           return next;
         });
-        setOrdersMap({});
-        setBalance(Math.max(0, crossEquity * 0.05));
+        /**
+         * 只清**全仓**仓位的委托。原来是 setOrdersMap({})，把逐仓仓位的止盈止损
+         * 一起抹了——逐仓仓位并没有被强平，却在这一刻失去了全部保护。
+         */
+        setOrdersMap(prev => {
+          const next: OrdersMap = {};
+          for (const [sym, orders] of Object.entries(prev)) {
+            const kept = orders.filter(o => !liquidatedPositionIds.has(o.linkedPositionId ?? ''));
+            if (kept.length > 0) next[sym] = kept;
+          }
+          return next;
+        });
+        /**
+         * 余额按**真实结算**落地：钱包现金 + 退回的全仓保证金 + 各仓位的净结果。
+         * 原来写的是 crossEquity × 0.05——一个没有出处的「留 5%」，
+         * 与上面刚写进 tradeHistory 的那批强平记录对不上账，
+         * 于是「Σ记录盈亏」与「余额变化」从此永久分叉。
+         */
+        /**
+         * 用 prev 而不是 effect 闭包里的 balance：useEffect 是异步冲刷的，提交与冲刷之间
+         * 后台轮询（现在真的每秒跑了）、资金费结算那个先声明因而先跑的 effect，
+         * 都可能已经改过余额；用旧闭包绝对赋值会把它们**整笔丢掉**。
+         *
+         * **不加 Math.max(0, …) 的钳位**：那个钳位在这里恒等于 0，等于让这行算什么都一样。
+         * 触发条件是权益 ≤ Σ维持保证金 = 0.004·N，而这一刀要付的费用是
+         * 平仓费 0.0004·N + 强平费 0.005·N = 0.0054·N > 0.004·N，
+         * 所以「权益 − 费用」恒为负（上界 −0.0014·N）。钳到 0 就意味着钱包少付了那一截，
+         * 而刚写进 tradeHistory 的强平记录里记的是完整数额——b、R 全都建立在这些记录上，
+         * 「Σ记录 == Δ余额」一旦破掉，风险统计就永远比真实少亏一截。
+         *
+         * 代价是余额可以为负，含义是「亏穿了」。这与同文件平仓那一支「全仓全额回写」
+         * 同一口径。更贴近币安的做法是按**破产价**结算、让记录与钱包同时落在
+         * 「恰好亏光保证金」上（保险基金吃掉超出部分）——那是另一件事，单独立项。
+         */
+        setBalance(prev => prev + crossMargin + crossSettlement);
         setTradeHistory(prev => [...prev, ...liqRecords]);
 
         setLiquidationDetails({ lostAmount: totalLoss, liquidatedPositions: crossPositionCount });
@@ -1581,8 +1656,17 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
       ? closedIsoMargin + pnlUsd - feeUsd
       : closedMargin + pnlUsd - feeUsd;
 
-    // Credit to single global balance
-    setBalance(prev => prev + Math.max(0, returnedMargin));
+    /**
+     * 全仓**全额**回写，逐仓才封底。
+     *
+     * 事故：这里原来一律 `Math.max(0, returnedMargin)`。开仓时余额已经扣掉了保证金，
+     * 平仓时 returnedMargin = 保证金 + 盈亏 − 手续费；亏损一旦超过这笔保证金它就为负，
+     * 被 max(0,…) 截成 0 —— 超出的那部分**永远没人付**，账户凭空多出钱，
+     * 于是「Σ成交记录盈亏」与「余额变化」对不上账，而 b、R 全部建立在这些记录上。
+     * 逐仓保留封底：币安逐仓的语义就是最多亏掉隔离保证金——**前提是强平按时发生**，
+     * 这条前提由 evaluateIsolatedLiquidation 那一路负责。
+     */
+    setBalance(prev => prev + (pos.marginMode === 'cross' ? returnedMargin : Math.max(0, returnedMargin)));
 
     // Determine if this position will be fully closed (for OCO cleanup)
     // Use Epsilon Threshold (1e-6) to defend against JS float precision dust
@@ -1714,7 +1798,12 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
     reduceOnlyDeferredReasonRef.current.delete(order.id);
     setPositionsMap((prev) => ({ ...prev, [execution.targetSymbol]: execution.positions }));
     setOrdersMap((prev) => ({ ...prev, [execution.targetSymbol]: execution.orders }));
-    setBalance((prev) => prev + Math.max(0, execution.returnedMargin));
+    // 与手动平仓同一口径：全仓全额回写（可为负），逐仓封底。
+    setBalance((prev) => prev + (
+      execution.marginMode === 'cross'
+        ? execution.returnedMargin
+        : Math.max(0, execution.returnedMargin)
+    ));
     setTradeHistory((prev) => [...prev, ...execution.records]);
     setFilledOrders(prev => upsertOrderSnapshot(prev, execution.filledOrder));
 
@@ -1942,7 +2031,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
     getSymbolMarginMode, setSymbolMarginMode,
     getSymbolSettlementMode, setSymbolSettlementMode,
     activeSymbols,
-    handlePlaceOrder, handleClosePosition, handleCancelOrder, handlePlaceTpSl, applyAttachedTpSl, settleFillDebit, applySymbolLeverage, executeReduceOnlyTrigger,
+    handlePlaceOrder, handleClosePosition, handleCancelOrder, handlePlaceTpSl, applyAttachedTpSl, applyMergeSideEffects, settleFillDebit, applySymbolLeverage, executeReduceOnlyTrigger,
     handleAdjustMargin, handleClearSymbolData,
     fundingRate: FUNDING_RATE,
     liquidationOpen, liquidationDetails, closeLiquidationModal,
