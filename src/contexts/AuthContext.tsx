@@ -6,6 +6,7 @@
 import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import type { User, Session } from '@supabase/supabase-js';
+import { setActiveSyncUser } from '@/lib/simStateSync';
 
 interface Profile {
   id: string;
@@ -101,6 +102,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const signOut = useCallback(async () => {
+    /**
+     * 先把这个账号名下积压的云端推送冲刷干净、再解除归属。
+     * 不解除的话，同一标签页换个账号登录时，页面隐藏 / 关闭那两个冲刷监听器
+     * 仍会按**上一个人的 id** 推送——新账号的持仓与成交历史会覆盖掉旧账号的云端存档。
+     */
+    setActiveSyncUser(null);
     await supabase.auth.signOut();
     setUser(null);
     setSession(null);

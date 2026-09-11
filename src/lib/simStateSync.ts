@@ -96,8 +96,33 @@ const pending = new Map<string, PendingPush>();
  * 那笔新成交抹掉。用户看到的就是「删过历史成交、又交易了一笔，那笔没了」。
  */
 const generation = new Map<string, number>();
+/**
+ * 版本号必须按 **(用户, 键)** 记，不能只按键。
+ * 只按键的话，切换用户时为了不让 A 的版本号压掉 B 的推送就得整张清空，
+ * 而一清空，A 那笔「失败后 3 秒重试」手里的旧 gen 又会重新对上号码
+ * ——同一个账号退出再登录，那笔 3 秒前的旧值就带着更新的 updated_at
+ * 盖在刚推上去的新值上面，云端内容倒退。带上 userId 之后两难消失：
+ * 跨用户天然不冲突，版本号也就永远只增不清。
+ */
+function genKey(userId: string, key: string): string {
+  return `${userId}\u0000${key}`;
+}
 let tableMissing = false;
 let flushHooksInstalled = false;
+/**
+ * 当前会话属于哪个用户。
+ *
+ * 事故：installFlushHooks 只装一次（flushHooksInstalled 是模块级布尔），而它注册的
+ * visibilitychange / pagehide 监听器**闭包捕获了第一次见到的 userId**。同一个标签页里
+ * 退出再换个账号登录（不刷新页面），这两个监听器仍按**前一个人的 id** 冲刷积压推送——
+ * B 的持仓、余额、成交历史被写进 A 的云端行。A 换台设备再登录，整份交易历史被 B 的覆盖。
+ * 跨账号覆盖是不可逆的：云端只存最后一版。
+ *
+ * 改法：监听器读这个可变量，而不是捕获参数。另外 pending 是模块级、只按 key 不按用户，
+ * 切换用户时先冲刷再清空；generation 则改成按 (用户, 键) 记，跨用户天然不冲突，
+ * 不需要（也绝不能）清空——见 genKey。
+ */
+let activeUserId: string | null = null;
 
 /** 从完整 localStorage 键（sim_<uid>_foo）还原出逻辑键 foo；不匹配则返回 null。 */
 export function logicalKeyOf(fullKey: string, userId: string): string | null {
@@ -113,7 +138,7 @@ const LARGE_PAYLOAD_WARN_BYTES = 4 * 1024 * 1024;
 async function pushNow(userId: string, key: string, value: unknown, gen: number, retry = true): Promise<void> {
   if (tableMissing) return;
   // 已经被更新的版本取代 → 这一笔（含它的重试）整个作废，绝不把旧值写上云。
-  if ((generation.get(key) ?? 0) !== gen) return;
+  if ((generation.get(genKey(userId, key)) ?? 0) !== gen) return;
   try {
     const approxBytes = JSON.stringify(value)?.length ?? 0;
     if (approxBytes > LARGE_PAYLOAD_WARN_BYTES) {
@@ -171,14 +196,28 @@ function flushAllPending(userId: string): void {
   pending.clear();
 }
 
-function installFlushHooks(userId: string): void {
+function installFlushHooks(): void {
   if (flushHooksInstalled || typeof window === 'undefined') return;
   flushHooksInstalled = true;
-  // 页面隐藏（切标签/最小化/关闭前）时冲刷积压的推送——不丢最后一笔操作
+  // 页面隐藏（切标签/最小化/关闭前）时冲刷积压的推送——不丢最后一笔操作。
+  // 读 activeUserId 而不是捕获参数：监听器只装一次，捕获等于把第一个账号焊死在这里。
   window.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'hidden') flushAllPending(userId);
+    if (document.visibilityState === 'hidden' && activeUserId) flushAllPending(activeUserId);
   });
-  window.addEventListener('pagehide', () => flushAllPending(userId));
+  window.addEventListener('pagehide', () => { if (activeUserId) flushAllPending(activeUserId); });
+}
+
+/**
+ * 切换当前用户。**先把上一个人的积压冲刷到他自己名下**，再交出归属。
+ * generation 按 (用户, 键) 记，跨用户不会互相压制，所以这里**不清**——
+ * 清了等于把版本号退回 0，上一段生命周期里还在路上的重试会重新对上号码，
+ * 把旧值盖到新值上（见 genKey 注释）。
+ */
+export function setActiveSyncUser(userId: string | null): void {
+  if (activeUserId === userId) return;
+  if (activeUserId) flushAllPending(activeUserId);
+  pending.clear();
+  activeUserId = userId;
 }
 
 /**
@@ -187,10 +226,13 @@ function installFlushHooks(userId: string): void {
  */
 export function queueSimStatePush(userId: string, key: string, value: unknown): void {
   if (!userId || EXCLUDED_KEYS.has(key) || tableMissing) return;
-  installFlushHooks(userId);
+  // 第一次见到某个用户的写入即认定会话归属，晚于它的监听器才有正确的 id 可读。
+  if (activeUserId !== userId) setActiveSyncUser(userId);
+  installFlushHooks();
   // 入队即占一个新版本号：在此之前出发的推送与重试全部作废。
-  const gen = (generation.get(key) ?? 0) + 1;
-  generation.set(key, gen);
+  const gk = genKey(userId, key);
+  const gen = (generation.get(gk) ?? 0) + 1;
+  generation.set(gk, gen);
   // 先按入队时刻记一次，保证「写了但还没推上去」的本地值也受护栏保护；
   // 推送成功后会再对齐到那一行真正的 updated_at（writeShadowTs 只进不退）。
   writeShadowTs(storageKeyFor(key, userId), Date.now());
@@ -220,6 +262,8 @@ export interface HydrateResult {
  */
 export async function hydrateSimState(userId: string): Promise<HydrateResult> {
   if (!userId) return { status: 'error', applied: 0 };
+  // 水化发生在交易组件树挂载之前，是认定会话归属最早、也最可靠的时机。
+  setActiveSyncUser(userId);
   try {
     const { data, error } = await supabase
       .from('user_sim_state' as never)
@@ -297,4 +341,5 @@ export function __resetSimStateSyncForTests(): void {
   generation.clear();
   tableMissing = false;
   flushHooksInstalled = false;
+  activeUserId = null;
 }

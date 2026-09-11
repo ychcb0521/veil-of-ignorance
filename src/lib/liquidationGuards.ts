@@ -79,6 +79,42 @@ export type IsolatedLiquidationDecision =
  *      任何 NaN 都会让 `>` 为假，于是一路掉进爆仓分支——NaN 的默认归宿是「爆仓」，
  *      这是反的。现在 NaN 落到 bad_numbers。
  */
+/** 币本位仓位（保证金记在币上）。 */
+function isCoinSettledPosition(position: Position): boolean {
+  return position.settlementMode === 'coin';
+}
+
+/**
+ * 一笔仓位**当下**的保证金美元价值。
+ * 币本位持有的是币，价值随价格走；U 本位就是那个固定美元数。
+ * 逐仓与全仓必须用同一个口径——否则同一笔币本位仓位在两种模式下按两套模型判生死。
+ */
+export function positionMarginUsdAtMark(position: Position, price: number): number {
+  if (isCoinSettledPosition(position)) return coinMarginUsdAtMark(position, price);
+  return position.isolatedMargin ?? position.margin ?? 0;
+}
+
+/**
+ * 币本位逐仓保证金按**现价**折算出的美元价值。
+ * marginCoin 缺失的老仓位退回 isolatedMargin / 开仓价 推出的币数，
+ * 与 calcLiquidationPrice 的兜底同一条。
+ */
+function coinMarginUsdAtMark(position: Position, price: number): number {
+  const marginCoin = position.marginCoin
+    ?? (position.entryPrice > 0 ? (position.isolatedMargin ?? 0) / position.entryPrice : 0);
+  /**
+   * 两种情况必须分开，混为一谈会各错一头：
+   *   · 保证金**确实被减到 0**（leverageRestatement 的 Math.max(0, marginCoin − releaseCoin)
+   *     能做到）→ 返回 0。权益 = 浮盈，照常进入判据；返回 NaN 会让一笔一分保证金都不剩的
+   *     仓位落到 bad_numbers 而永远打不掉，比不改还糟。
+   *   · 保证金**数据损坏**（NaN / 无穷）→ 返回 NaN，沿用既有取向：算不清就不强平。
+   *     把它当成 0 等于拿坏数据去判生死。
+   */
+  if (!Number.isFinite(marginCoin)) return Number.NaN;
+  if (marginCoin <= 0) return 0;
+  return marginCoin * price;
+}
+
 export function evaluateIsolatedLiquidation(input: {
   symbol: string;
   position: Position;
@@ -104,7 +140,27 @@ export function evaluateIsolatedLiquidation(input: {
   }
 
   const pnlUsd = calcUnrealizedPnl(position, price);
-  const equityUsd = position.isolatedMargin + pnlUsd;
+  /**
+   * 币本位的保证金持有的是**币**，它的美元价值随价格走，不是开仓那一刻的固定美元数。
+   *
+   * 事故：这里原来一律用 isolatedMargin（开仓时折算的固定美元）。与卡片上显示的
+   * 强平价（calcLiquidationPrice 按 marginCoin 估值）用的是两套模型，于是引擎和
+   * 显示价对不上：
+   *   equity_引擎 = N/L + pnlUsd
+   *   equity_正确 = x·marginCoin + pnlUsd       （x = 当前价）
+   *   差额 = (N/L)·(x/E − 1)
+   * x > E 时正确值更大 → 引擎低估权益 → **提前**强平；空头正是在 x > E 时亏损，
+   * 所以空头会在显示的强平价之前约 10% 就被打掉，而那时保证金还剩一成多。
+   * x < E 时反过来 → 多头**越过**显示的强平价仍活着，此时币本位权益其实已经为负。
+   *
+   * 换成按现价折算之后，判据 x·marginCoin + pnlUsd ≤ N·mmr 解出来的边界，
+   * 与 calcLiquidationPrice 的币本位公式逐字一致（下有测试逐条比对）。
+   * 维持保证金那一项不用动：币本位名义 N = 张数 × 面值，本来就与价格无关。
+   */
+  const marginUsd = isCoinSettledPosition(position)
+    ? coinMarginUsdAtMark(position, price)
+    : position.isolatedMargin;
+  const equityUsd = marginUsd + pnlUsd;
   const maintenanceUsd = notionalUsd * MAINTENANCE_MARGIN_RATE;
   if (!Number.isFinite(equityUsd) || !Number.isFinite(maintenanceUsd)) {
     return { liquidate: false, reason: 'bad_numbers' };

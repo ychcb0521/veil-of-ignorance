@@ -1,9 +1,11 @@
+import { calcLiquidationPrice, calcUnrealizedPnl } from '@/types/trading';
 import { describe, expect, it } from 'vitest';
 import {
   STALE_PRICE_MIN_TOLERANCE_MS,
   evaluateCrossLiquidation,
   evaluateIsolatedLiquidation,
   isPriceFreshForLiquidation,
+  positionMarginUsdAtMark,
   staleToleranceMs,
 } from '@/lib/liquidationGuards';
 import type { Position } from '@/types/trading';
@@ -77,9 +79,21 @@ describe('逐仓强平判据', () => {
     expect(d).toMatchObject({ reason: 'solvent' });
   });
 
-  it('真正该爆的仍然会爆：10x 多头跌破约 9.6% 触发', () => {
-    // 币本位 LONG: pnl/N = 现价/开仓价 − 1；爆仓需 ≤ −(1/lev − MMR) = −0.096
-    expect(evalAt(ordiLong(), 3.2279 * 0.905).liquidate).toBe(false);
+  it('真正该爆的仍然会爆：10x 币本位多头跌破 E·L(1+mmr)/(L+1) 触发', () => {
+    /**
+     * 这条原来写的是「跌破约 9.6% 触发」，注释里的依据是 −(1/lev − MMR)——
+     * 那是**U 本位**的线性公式，套在币本位仓位上是错的。币本位反向合约的强平价是
+     *   E·L(1+mmr)/(L+1) = 3.2279 × 10 × 1.004 / 11 = 2.9462   （−8.73%）
+     * 而卡片上显示的强平价（calcLiquidationPrice 的币本位分支）一直就是这么算的。
+     * 旧引擎按「开仓时固定美元」估值保证金，于是让仓位活过了自己卡片上写的强平价，
+     * 这条断言把那个行为钉住了。现在引擎与显示价同一模型，断言按真实边界重写。
+     */
+    const liq = calcLiquidationPrice(ordiLong());
+    expect(liq).toBeCloseTo(2.9462, 3);
+    expect(evalAt(ordiLong(), liq * 1.001).liquidate).toBe(false);
+    expect(evalAt(ordiLong(), liq * 0.999).liquidate).toBe(true);
+    // 旧断言的那两个价都已在强平价之下，现在都该爆
+    expect(evalAt(ordiLong(), 3.2279 * 0.905).liquidate).toBe(true);
     expect(evalAt(ordiLong(), 3.2279 * 0.900).liquidate).toBe(true);
   });
 
@@ -159,5 +173,141 @@ describe('全仓强平判据', () => {
   it('NaN 落到「不强平」，与逐仓同一取向——反过来会让任何畸形数据都以爆仓收场', () => {
     expect(evaluateCrossLiquidation({ ...base, crossUnrealizedPnlUsd: NaN }))
       .toMatchObject({ liquidate: false, reason: 'bad_numbers' });
+  });
+});
+
+
+describe('币本位逐仓：引擎的触发点必须等于卡片上显示的强平价', () => {
+  const FACE = 10;              // 非 BTC 合约面值 10 USD
+  const CONTRACTS = 100;        // 名义 1,000 USD
+  const NOTIONAL = CONTRACTS * FACE;
+  const ENTRY = 1;
+
+  function coinPos(side: 'LONG' | 'SHORT', leverage: number): Position {
+    const marginCoin = NOTIONAL / (ENTRY * leverage);
+    return {
+      id: `${side}-${leverage}`,
+      symbol: 'ORDIUSD',
+      side,
+      entryPrice: ENTRY,
+      quantity: CONTRACTS,
+      contracts: CONTRACTS,
+      contractSizeUsd: FACE,
+      leverage,
+      marginMode: 'isolated',
+      settlementMode: 'coin',
+      settlementAsset: 'ORDI',
+      margin: NOTIONAL / leverage,
+      marginCoin,
+      isolatedMargin: NOTIONAL / leverage,
+      openTime: 0,
+    } as unknown as Position;
+  }
+
+  /** 二分出引擎真正开始强平的价格。 */
+  function engineTriggerPrice(pos: Position, side: 'LONG' | 'SHORT'): number {
+    // 区间要以**这笔仓位自己的**开仓价为界，不能用外层的币本位常量
+    let lo = side === 'LONG' ? 1e-9 : pos.entryPrice;
+    let hi = side === 'LONG' ? pos.entryPrice : pos.entryPrice * 1e6;
+    for (let i = 0; i < 200; i += 1) {
+      const mid = (lo + hi) / 2;
+      const d = evaluateIsolatedLiquidation({
+        symbol: 'ORDIUSD', position: pos, price: mid,
+        priceAsOf: NOW, nowSim: NOW, toleranceMs: TOL,
+      });
+      // LONG：价越低越该爆；SHORT：价越高越该爆
+      if (d.liquidate) { if (side === 'LONG') lo = mid; else hi = mid; }
+      else { if (side === 'LONG') hi = mid; else lo = mid; }
+    }
+    return (lo + hi) / 2;
+  }
+
+  for (const leverage of [3, 5, 10, 20]) {
+    it(`${leverage}x 多头：引擎触发点 == calcLiquidationPrice`, () => {
+      const pos = coinPos('LONG', leverage);
+      expect(engineTriggerPrice(pos, 'LONG')).toBeCloseTo(calcLiquidationPrice(pos), 6);
+    });
+
+    it(`${leverage}x 空头：引擎触发点 == calcLiquidationPrice（旧实现提前约 10%）`, () => {
+      const pos = coinPos('SHORT', leverage);
+      expect(engineTriggerPrice(pos, 'SHORT')).toBeCloseTo(calcLiquidationPrice(pos), 6);
+    });
+  }
+
+  it('【回归】按开仓固定美元估值会让 3x 空头提前一大截——这正是被修掉的偏差', () => {
+    const pos = coinPos('SHORT', 3);
+    const shown = calcLiquidationPrice(pos);
+    // 旧口径：equity = isolatedMargin(固定) + pnlUsd
+    const oldTrigger = (() => {
+      let lo = ENTRY, hi = 1e6;
+      for (let i = 0; i < 200; i += 1) {
+        const mid = (lo + hi) / 2;
+        const equityOld = (pos.isolatedMargin ?? 0) + calcUnrealizedPnl(pos, mid);
+        if (equityOld <= NOTIONAL * 0.004) hi = mid; else lo = mid;
+      }
+      return (lo + hi) / 2;
+    })();
+    expect(oldTrigger).toBeLessThan(shown);
+    expect((shown - oldTrigger) / shown).toBeGreaterThan(0.05);   // 实测 >10%
+    // 修好之后不再有这个缺口
+    expect(engineTriggerPrice(pos, 'SHORT')).toBeCloseTo(shown, 6);
+  });
+
+  it('U 本位不受影响：仍按 isolatedMargin 估值', () => {
+    const usdt = {
+      id: 'u', symbol: 'BTCUSDT', side: 'LONG', entryPrice: 100, quantity: 1,
+      leverage: 10, marginMode: 'isolated', settlementMode: 'usdt',
+      margin: 10, isolatedMargin: 10, openTime: 0,
+    } as unknown as Position;
+    const d = evaluateIsolatedLiquidation({
+      symbol: 'BTCUSDT', position: usdt, price: 100,
+      priceAsOf: NOW, nowSim: NOW, toleranceMs: TOL,
+    });
+    expect(d.liquidate).toBe(false);
+    /**
+     * U 本位这一支**不追求**与显示价逐字相等，因为两者的维持保证金口径本就不同：
+     * 引擎按**现价**名义算（x × mmr，这是币安的口径），calcLiquidationPrice 按
+     * **开仓**名义算（E·qty × mmr）。10x 下差 0.04%（90.361 vs 90.4）。
+     * 这是既有差异，不是币本位这次改动带来的；这里只钉住「本次改动没碰 U 本位」。
+     */
+    const trigger = engineTriggerPrice(usdt, 'LONG');
+    expect(trigger).toBeCloseTo(90.3614, 3);
+    expect(Math.abs(trigger - calcLiquidationPrice(usdt)) / trigger).toBeLessThan(0.001);
+  });
+});
+
+
+describe('保证金估值：逐仓与全仓必须同一口径', () => {
+  it('币本位按现价折算；U 本位用固定美元', () => {
+    const coin = {
+      symbol: 'ORDIUSD', side: 'LONG', entryPrice: 2, quantity: 100, contracts: 100,
+      contractSizeUsd: 10, leverage: 10, marginMode: 'cross', settlementMode: 'coin',
+      margin: 100, marginCoin: 50, isolatedMargin: 100, openTime: 0,
+    } as unknown as Position;
+    // 50 币 × 现价 3 = 150 USD，而开仓冻结的是 100 USD
+    expect(positionMarginUsdAtMark(coin, 3)).toBeCloseTo(150, 9);
+    expect(positionMarginUsdAtMark(coin, 1)).toBeCloseTo(50, 9);
+
+    const linear = {
+      symbol: 'BTCUSDT', side: 'LONG', entryPrice: 100, quantity: 1, leverage: 10,
+      marginMode: 'cross', settlementMode: 'usdt', margin: 10, isolatedMargin: 10, openTime: 0,
+    } as unknown as Position;
+    expect(positionMarginUsdAtMark(linear, 250)).toBeCloseTo(10, 9);
+  });
+
+  it('【回归】保证金被减到 0 的币本位仓位仍可强平，不得落到「算不清所以不强平」', () => {
+    const drained = {
+      symbol: 'ORDIUSD', side: 'LONG', entryPrice: 2, quantity: 100, contracts: 100,
+      contractSizeUsd: 10, leverage: 10, marginMode: 'isolated', settlementMode: 'coin',
+      margin: 0, marginCoin: 0, isolatedMargin: 0, openTime: 0,
+    } as unknown as Position;
+    expect(positionMarginUsdAtMark(drained, 1.5)).toBe(0);
+    const d = evaluateIsolatedLiquidation({
+      symbol: 'ORDIUSD', position: drained, price: 1.5,
+      priceAsOf: NOW, nowSim: NOW, toleranceMs: TOL,
+    });
+    // 一分保证金不剩，必须打掉——而不是落到「算不清所以不强平」
+    expect(d.liquidate).toBe(true);
+    if (d.liquidate) expect(d.equityUsd).toBeLessThanOrEqual(d.maintenanceUsd);
   });
 });

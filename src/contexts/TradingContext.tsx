@@ -28,7 +28,7 @@ import {
 import { usePersistedState, loadPersistedSimState, saveSimState, clearSimState } from '@/hooks/usePersistedState';
 import { intervalToMs } from '@/hooks/useBinanceData';
 import { useAuth } from '@/contexts/AuthContext';
-import { evaluateCrossLiquidation, evaluateIsolatedLiquidation, staleToleranceMs } from '@/lib/liquidationGuards';
+import { evaluateCrossLiquidation, evaluateIsolatedLiquidation, positionMarginUsdAtMark, staleToleranceMs } from '@/lib/liquidationGuards';
 import { toast } from 'sonner';
 import type {
   Position,
@@ -903,7 +903,9 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
         if (pos.marginMode !== 'cross') continue;
         crossUnrealizedPnl += calcUnrealizedPnl(pos, price);
         crossMaintenanceMargin += getPositionNotionalUsd(sym, pos, price) * MAINTENANCE_MARGIN_RATE;
-        crossMargin += pos.margin;
+        // 币本位持有的是币，保证金的美元价值随价格走；用开仓时冻结的 pos.margin
+        // 会让同一笔仓位在逐仓与全仓下按两套模型判生死（逐仓那一支已按现价折算）。
+        crossMargin += positionMarginUsdAtMark(pos, price);
         crossPositionCount++;
       }
     }
@@ -1024,6 +1026,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
          * 同一口径。更贴近币安的做法是按**破产价**结算、让记录与钱包同时落在
          * 「恰好亏光保证金」上（保险基金吃掉超出部分）——那是另一件事，单独立项。
          */
+        // crossMargin 已按现价折算（见上），与 crossSettlement 同源，余额与记录对得上账。
         setBalance(prev => prev + crossMargin + crossSettlement);
         setTradeHistory(prev => [...prev, ...liqRecords]);
 

@@ -18,6 +18,7 @@ import {
   hydrateSimState,
   logicalKeyOf,
   queueSimStatePush,
+  setActiveSyncUser,
 } from '@/lib/simStateSync';
 
 const UID = 'u-1';
@@ -205,5 +206,57 @@ describe('logicalKeyOf', () => {
     expect(logicalKeyOf(`sim_${UID}_balance__syncts`, UID)).toBeNull();
     expect(logicalKeyOf('app-theme', UID)).toBeNull();
     expect(logicalKeyOf('sim_other_balance', UID)).toBeNull();
+  });
+});
+
+
+/**
+ * 同一标签页里换账号：冲刷监听器绝不能还认着上一个人。
+ *
+ * 事故：installFlushHooks 只装一次，两个监听器闭包捕获了**第一次**见到的 userId。
+ * 退出再登另一个号（不刷新），页面隐藏 / 关闭时积压的推送仍写进前一个人的云端行——
+ * B 的持仓、余额、成交历史覆盖掉 A 的存档，而云端只留最后一版，不可逆。
+ */
+describe('账号切换后的云端归属', () => {
+  const userIdsOf = (calls: unknown[][]) =>
+    calls.map(c => (c[0] as { user_id?: string })?.user_id);
+
+  it('【回归】切到 B 之后，页面隐藏冲刷必须写 B，不能写 A', async () => {
+    queueSimStatePush('user-A', 'balance', 1);
+    await vi.runAllTimersAsync();
+    mocks.upsert.mockClear();
+
+    setActiveSyncUser('user-B');
+    queueSimStatePush('user-B', 'balance', 2);
+    // 不等防抖，直接模拟「切标签页 / 关窗口」那一刻的冲刷
+    Object.defineProperty(document, 'visibilityState', { value: 'hidden', configurable: true });
+    document.dispatchEvent(new Event('visibilitychange', { bubbles: true }));
+    await vi.runAllTimersAsync();
+
+    const ids = userIdsOf(mocks.upsert.mock.calls);
+    expect(ids.length).toBeGreaterThan(0);
+    expect(ids).not.toContain('user-A');
+    expect(ids.every(id => id === 'user-B')).toBe(true);
+  });
+
+  it('切换时先把上一个人的积压推给他自己，不丢也不串', async () => {
+    queueSimStatePush('user-A', 'positions_map', { a: 1 });
+    setActiveSyncUser('user-B');            // 应当当场冲刷 A 的积压
+    await vi.runAllTimersAsync();
+    const ids = userIdsOf(mocks.upsert.mock.calls);
+    expect(ids).toContain('user-A');
+    expect(ids).not.toContain('user-B');
+  });
+
+  it('退出登录（归属置空）后，冲刷监听器不再推任何东西', async () => {
+    queueSimStatePush('user-A', 'balance', 1);
+    await vi.runAllTimersAsync();
+    setActiveSyncUser(null);
+    mocks.upsert.mockClear();
+
+    Object.defineProperty(document, 'visibilityState', { value: 'hidden', configurable: true });
+    document.dispatchEvent(new Event('visibilitychange', { bubbles: true }));
+    await vi.runAllTimersAsync();
+    expect(mocks.upsert).not.toHaveBeenCalled();
   });
 });

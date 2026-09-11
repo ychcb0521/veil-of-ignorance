@@ -28,6 +28,7 @@ import { CoolingOffModal, useCoolingOff } from "@/components/CoolingOffModal";
 import { getConditionalTriggerDecisionFromRange } from "@/lib/conditionalOrders";
 import { fetchCanonicalTimePriceAt } from "@/lib/canonicalTimePrice";
 import { applyCurrentPriceToVisibleData } from "@/lib/visibleDataPrice";
+import { matchDatasetKey, planMatchBatch, type MatchCursor } from "@/lib/matchingWindow";
 import { earliestLongStopPrice } from "@/lib/longRiskAnchor";
 import { formatPrice, getPriceDecimals } from "@/lib/formatters";
 import {
@@ -1116,17 +1117,31 @@ const Index = () => {
     }
   }, [activeSymbol, interval]);
 
-  const prevVisibleLenRef = useRef(0);
+  const matchCursorRef = useRef<MatchCursor | null>(null);
 
   // ===== MATCHING ENGINE for active symbol =====
   useEffect(() => {
-    if (visibleData.length <= prevVisibleLenRef.current) {
-      prevVisibleLenRef.current = visibleData.length;
-      return;
-    }
-
-    const newKlines = visibleData.slice(prevVisibleLenRef.current);
-    prevVisibleLenRef.current = visibleData.length;
+    /**
+     * 「哪几根算新」交给 planMatchBatch 判定，不再用数组长度差。
+     * 长度差在首批数据到位时会把整个已加载历史当成刚收盘的新 K 线，
+     * 于是刷新一次页面，躺在 localStorage 里的限价单就会被历史行情撮合成交——
+     * 一笔用户从未下过的成交，带着过去的时间戳写进 trade_history。
+     * 详见 lib/matchingWindow.ts 的长注释。
+     */
+    const plan = planMatchBatch({
+      cursor: matchCursorRef.current,
+      key: matchDatasetKey(activeSymbol, iMs, timeDirection === -1 ? -1 : 1),
+      candles: visibleData,
+      // 倒放的 visibleData 走**镜像时间**（getReverseVisibleData 返回 mirrorTime(cap, t)）：
+      // 真实时间越早 → 镜像时间越大，新露头的那根仍在数组末尾、时间仍是**变大**的。
+      // 所以这里恒为 1；传 -1 会让水位停在镜面另一端，倒放将永远撮合不到任何一根
+      // （挂单、止盈止损全部哑火），而 loadNewer 补来的主观历史反倒会被当成新 K 线撮合。
+      // 方向只作为数据集身份的一部分（换方向 = 整批镜像时间重算 = 必须重新播种）。
+      direction: 1,
+    });
+    matchCursorRef.current = plan.nextCursor;
+    const newKlines = plan.match;
+    if (newKlines.length === 0) return;
 
     const symbolOrders = ordersMap[activeSymbol];
     if (!symbolOrders || symbolOrders.length === 0) return;
@@ -1403,7 +1418,7 @@ const Index = () => {
         applyAttachedTpSl(activeSymbol, merged?.survivor ?? position, order);
       }
     }
-  }, [visibleData.length, activeSymbol, recordExecutionTrade, tradingMode, getEffectiveTime, setFilledOrders, applyAttachedTpSl, applyMergeSideEffects]);
+  }, [visibleData, iMs, timeDirection, activeSymbol, recordExecutionTrade, tradingMode, getEffectiveTime, setFilledOrders, applyAttachedTpSl, applyMergeSideEffects]);
 
   // ===== TWAP ENGINE =====
   useEffect(() => {
@@ -1600,7 +1615,7 @@ const Index = () => {
         return next;
       });
       reset();
-      prevVisibleLenRef.current = 0;
+      matchCursorRef.current = null;
       cursorRef.current = 0;
       gameLoopInitRef.current = false;
 
@@ -1634,7 +1649,7 @@ const Index = () => {
       if (newInterval === interval) return;
       setIntervalVal(newInterval);
       reset();
-      prevVisibleLenRef.current = 0;
+      matchCursorRef.current = null;
       cursorRef.current = 0;
       gameLoopInitRef.current = false;
       latestChartPriceRef.current = 0;
@@ -1650,7 +1665,7 @@ const Index = () => {
     async (timestamp: number) => {
       const data = await initLoad(activeSymbol, interval, timestamp, { reverse: timeDirection === -1 });
       if (data.length > 0) {
-        prevVisibleLenRef.current = 0;
+        matchCursorRef.current = null;
         gameLoopInitRef.current = false;
         lastReverseSimTimeRef.current = null;
 
@@ -1743,7 +1758,7 @@ const Index = () => {
           return next;
         });
       }
-      prevVisibleLenRef.current = 0;
+      matchCursorRef.current = null;
       cursorRef.current = 0;
       gameLoopInitRef.current = false;
       lastReverseSimTimeRef.current = null;
@@ -1844,7 +1859,7 @@ const Index = () => {
 
     // Full state cleanup — garbage collection
     reset();
-    prevVisibleLenRef.current = 0;
+    matchCursorRef.current = null;
     cursorRef.current = 0;
     gameLoopInitRef.current = false;
     clearSimState();
@@ -1890,7 +1905,7 @@ const Index = () => {
         },
       }));
       reset();
-      prevVisibleLenRef.current = 0;
+      matchCursorRef.current = null;
       // If no other coins are playing, also stop global sim
       const anyOtherPlaying = Object.entries(coinTimelines).some(
         ([sym, ct]) => sym !== activeSymbol && ct.status === "playing",
@@ -1915,7 +1930,7 @@ const Index = () => {
         }
       }
       reset();
-      prevVisibleLenRef.current = 0;
+      matchCursorRef.current = null;
       clearSimState();
       setSyncedOriginTime(null);
       sim.stopSimulation();
