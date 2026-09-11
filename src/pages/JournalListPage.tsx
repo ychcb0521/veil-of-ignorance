@@ -7,7 +7,7 @@
  */
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { toast } from 'sonner';
+import { toast } from '@/lib/notificationCenter';
 import { BackButton } from '@/components/journal/BackButton';
 import { useAuth } from '@/contexts/AuthContext';
 import { useTradingContext } from '@/contexts/TradingContext';

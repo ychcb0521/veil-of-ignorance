@@ -14,7 +14,7 @@ import { AlertOctagon } from 'lucide-react';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { useAuth } from '@/contexts/AuthContext';
 import { useTradingContext } from '@/contexts/TradingContext';
-import { toast } from 'sonner';
+import { toast } from '@/lib/notificationCenter';
 import {
   createJournalPreSnapshot, createNoTradeJournal, findUnreviewedJournals, updateJournalTradeRef,
 } from '@/lib/journalApi';

@@ -1,6 +1,6 @@
 import { ALL_TIMEFRAMES, TIMEFRAME_LABELS, UNSUPPORTED_TIMEFRAMES, type Timeframe } from '@/hooks/useTimeframePrefs';
 import { X } from 'lucide-react';
-import { toast } from 'sonner';
+import { toast } from '@/lib/notificationCenter';
 
 interface Props {
   open: boolean;

@@ -1,6 +1,6 @@
 import { useState, useCallback } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
-import { toast } from 'sonner';
+import { toast } from '@/lib/notificationCenter';
 
 export default function OnboardingPage() {
   const { initializeAccount } = useAuth();

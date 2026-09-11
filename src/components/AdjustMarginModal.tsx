@@ -5,7 +5,7 @@ import {
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
-import { toast } from 'sonner';
+import { toast } from '@/lib/notificationCenter';
 import type { Position } from '@/types/trading';
 import { firstLiquidationPrice } from '@/lib/positionGroupRisk';
 import { allocateMarginUsd } from '@/lib/marginAllocation';

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ChangeEvent } from 'react';
-import { toast } from 'sonner';
+import { toast } from '@/lib/notificationCenter';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { AlertCircle, Check, ChevronDown, Loader2, Search } from 'lucide-react';
 import { BackButton } from '@/components/journal/BackButton';

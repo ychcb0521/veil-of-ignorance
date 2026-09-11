@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { ChevronDown, ChevronRight, AlertTriangle } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-import { toast } from 'sonner';
+import { toast } from '@/lib/notificationCenter';
 import type { PatternCluster } from '@/lib/journalAggregations';
 import {
   computeTimeDistribution, computeMentalStateDistribution, computeSymbolDistribution,

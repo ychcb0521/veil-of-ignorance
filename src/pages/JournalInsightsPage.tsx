@@ -6,7 +6,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { BackButton } from '@/components/journal/BackButton';
 import { ScatterPlot, robustRDomain, type ScatterSeries } from '@/components/charts/ScatterPlot';
 import { Slider } from '@/components/ui/slider';
-import { toast } from 'sonner';
+import { toast } from '@/lib/notificationCenter';
 import { useAuth } from '@/contexts/AuthContext';
 import { useTradingContext } from '@/contexts/TradingContext';
 import { computeBiasSpectrum } from '@/lib/biasSpectrum';

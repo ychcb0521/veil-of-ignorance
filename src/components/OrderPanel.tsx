@@ -3,6 +3,7 @@ import type { OrderSide, OrderType } from '@/types/trading';
 import { ORDER_TYPE_INFO, getMaxLeverageForNotional, getLeverageTierInfo, MAINTENANCE_MARGIN_RATE, calcUnrealizedPnl } from '@/types/trading';
 import { ChevronDown, Check, AlertTriangle, Crosshair, ArrowLeftRight, Calculator, Gauge, Info, MoreHorizontal } from 'lucide-react';
 import { TradingPreferencesDrawer } from '@/components/TradingPreferencesDrawer';
+import { useNotificationCenter } from '@/lib/notificationCenter';
 import { usePersistedState } from '@/hooks/usePersistedState';
 import {
   DEFAULT_TRADING_PREFERENCES,
@@ -16,7 +17,7 @@ import { useTradingContext } from '@/contexts/TradingContext';
 import { formatUSDT } from '@/lib/formatters';
 import { LeverageModal } from '@/components/LeverageModal';
 import { symbolExposureNotionalUsd } from '@/lib/leverageRestatement';
-import { toast } from 'sonner';
+import { toast } from '@/lib/notificationCenter';
 import { PreTradeSnapshotDialog } from '@/components/journal/PreTradeSnapshotDialog';
 import {
   coinContractsExact,
@@ -182,6 +183,7 @@ export function OrderPanel({
     'trading_preferences_v1', DEFAULT_TRADING_PREFERENCES,
   );
   const [prefsOpen, setPrefsOpen] = useState(false);
+  const notifications = useNotificationCenter();
 
   // 高级类型槽：第三常驻位显示当前选中的高级类型（币安式），默认条件委托
   const [advancedType, setAdvancedType] = useState<OrderType>('CONDITIONAL');
@@ -753,10 +755,26 @@ export function OrderPanel({
           data-testid="open-trading-prefs"
           onClick={() => setPrefsOpen(true)}
           title="交易偏好"
-          aria-label="交易偏好"
-          className="ml-auto flex h-[22px] w-[22px] items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+          aria-label={notifications.unreadCount > 0
+            ? `交易偏好（${notifications.unreadCount} 条未读消息）`
+            : '交易偏好'}
+          className="relative ml-auto flex h-[22px] w-[22px] items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
         >
           <MoreHorizontal className="h-4 w-4" />
+          {/* 提示不再弹出，靠这个角标告诉你「有消息没看」；有未读报错时变红。 */}
+          {notifications.unreadCount > 0 && (
+            <span
+              data-testid="prefs-unread-badge"
+              data-has-error={notifications.unreadErrorCount > 0 ? 'true' : 'false'}
+              className={`pointer-events-none absolute -right-1.5 -top-1.5 flex h-[14px] min-w-[14px] items-center justify-center rounded-full px-[3px] font-mono text-[9px] leading-none ${
+                notifications.unreadErrorCount > 0
+                  ? 'bg-[#F6465D] text-white'
+                  : 'bg-muted-foreground/70 text-background'
+              }`}
+            >
+              {notifications.unreadCount > 99 ? '99+' : notifications.unreadCount}
+            </span>
+          )}
         </button>
 
       </div>

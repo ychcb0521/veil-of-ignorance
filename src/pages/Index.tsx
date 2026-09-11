@@ -54,7 +54,7 @@ import {
   type SignalJumpResult,
 } from "@/lib/signalJumpDiagnostics";
 import { buildOperationAssetHistory, buildOperationDailyPnl, buildOperationDailyPnlDetails, pnlForOperationDate } from "@/lib/assetReport";
-import { toast } from "sonner";
+import { toast } from '@/lib/notificationCenter';
 import { Wallet, Crosshair, BookOpen, Tag } from "lucide-react";
 import { Link } from "react-router-dom";
 import { JournalNavMenu } from "@/components/journal/JournalNavMenu";

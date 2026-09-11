@@ -21,7 +21,7 @@ import {
 import type { PositionMergeResult } from "@/lib/tradingSettlement";
 import { upsertOrderSnapshot } from "@/lib/orderSnapshotHistory";
 import { formatPrice } from "@/lib/formatters";
-import { toast } from "sonner";
+import { toast } from '@/lib/notificationCenter';
 import { fetchCanonicalTimePriceAt, type CanonicalTimePrice } from "@/lib/canonicalTimePrice";
 
 type KlinePrice = CanonicalTimePrice;

@@ -3,7 +3,7 @@ import { ArrowLeft, ChevronDown, ChevronRight, FileText, List, Loader2, Trash2, 
 import ReactMarkdown from 'react-markdown';
 import { useNavigate } from 'react-router-dom';
 import remarkGfm from 'remark-gfm';
-import { toast } from 'sonner';
+import { toast } from '@/lib/notificationCenter';
 import {
   AlertDialog,
   AlertDialogAction,

@@ -11,6 +11,8 @@ import {
   type PanelKey,
   type TradingPreferences,
 } from '@/lib/tradingPreferences';
+import { NotificationHistoryPanel } from '@/components/NotificationHistoryPanel';
+import { setNotificationPopupsEnabled, useNotificationCenter } from '@/lib/notificationCenter';
 
 /**
  * 交易偏好抽屉 —— 复刻币安合约页右上角 ⋯ 的设置面板。
@@ -23,7 +25,8 @@ import {
 type Page =
   | 'root' | 'ui'
   | 'orderConfirm' | 'positionMode' | 'defaults' | 'leverage' | 'triggerType'
-  | 'orderModify' | 'notify' | 'accountMode' | 'assetMode' | 'priceProtect' | 'timezone';
+  | 'orderModify' | 'notify' | 'accountMode' | 'assetMode' | 'priceProtect' | 'timezone'
+  | 'history';
 
 interface Props {
   open: boolean;
@@ -151,6 +154,7 @@ function CardChoice<T extends string>({ value, onChange, options }: {
 
 export function TradingPreferencesDrawer({ open, onClose, prefs, onChange, onOpenCoolingOff, panels, onPanelChange }: Props) {
   const [page, setPage] = useState<Page>('root');
+  const notifications = useNotificationCenter();
   const [draftLeverage, setDraftLeverage] = useState(prefs.defaultLeverage);
   const [draftMode, setDraftMode] = useState<MarginMode>(prefs.defaultMarginMode);
   const [draftUse, setDraftUse] = useState(prefs.useDefaultLeverage);
@@ -180,6 +184,7 @@ export function TradingPreferencesDrawer({ open, onClose, prefs, onChange, onOpe
     : page === 'triggerType' ? '默认触发类型'
     : page === 'orderModify' ? '订单修改'
     : page === 'notify' ? '通知设置'
+    : page === 'history' ? '历史消息'
     : unavailable?.title ?? '';
 
   const back = () => {
@@ -254,8 +259,24 @@ export function TradingPreferencesDrawer({ open, onClose, prefs, onChange, onOpe
               {onOpenCoolingOff && (
                 <Row label="冷静期" onClick={() => { onClose(); onOpenCoolingOff(); }} />
               )}
+
+              {/*
+                提示不再弹在屏幕右上角（那里是时间机器的倍速条与模拟时钟），
+                一律汇总到这里，点开才看。未读条数同时显示在打开抽屉的 ⋯ 按钮上。
+              */}
+              <div className="px-4 pb-1 pt-4 text-[11px] text-muted-foreground">消息</div>
+              <Row
+                label="历史消息"
+                value={notifications.unreadCount > 0
+                  ? `${notifications.unreadCount} 条未读`
+                  : `${notifications.entries.length} 条`}
+                onClick={() => setPage('history')}
+              />
             </>
           )}
+
+          {/* ===== 历史消息 ===== */}
+          {page === 'history' && <NotificationHistoryPanel />}
 
           {/* ===== 界面设置 ===== */}
           {page === 'ui' && (
@@ -466,11 +487,19 @@ export function TradingPreferencesDrawer({ open, onClose, prefs, onChange, onOpe
 
           {/* ===== 通知设置 ===== */}
           {page === 'notify' && (
-            <p className="p-4 text-[11px] leading-relaxed text-muted-foreground">
-              币安在此配置止盈止损触发、资金费用、追加保证金的邮件与推送通知。
-              本系统是单机训练环境，触发与成交以页面内的即时提示呈现，不发送外部通知，
-              因此该页无可配置项。
-            </p>
+            <>
+              <ToggleRow
+                label="在屏幕上弹出提示"
+                desc="关闭时（默认），成交、触发、资金费结算、报错等提示只记入「历史消息」，不在屏幕上弹出。"
+                checked={notifications.popupsEnabled}
+                onChange={setNotificationPopupsEnabled}
+              />
+              <p className="p-4 text-[11px] leading-relaxed text-muted-foreground">
+                不弹出不等于不提醒：未读条数显示在交易偏好 ⋯ 按钮上，有未读报错时为红色。
+                爆仓仍会以独立弹窗告知，不受此开关影响。
+                本系统是单机训练环境，不发送邮件与推送等外部通知。
+              </p>
+            </>
           )}
 
           {/* ===== 本系统无对应的页面：展示币安内容 + 说明原因 ===== */}

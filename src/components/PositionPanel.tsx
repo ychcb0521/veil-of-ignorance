@@ -5,7 +5,7 @@ import { calcUnrealizedPnl, calcLiquidationPrice } from '@/types/trading';
 import type { PositionsMap, OrdersMap, PriceMap } from '@/contexts/TradingContext';
 import { X, Trash2, ArrowUpDown, ArrowUp, ArrowDown, Plus, MoreVertical, ChevronDown, ChevronRight, GripVertical, Check, Loader2, Pencil } from 'lucide-react';
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover';
-import { toast } from 'sonner';
+import { toast } from '@/lib/notificationCenter';
 import { LeverageModal } from '@/components/LeverageModal';
 import { TpSlModal } from '@/components/TpSlModal';
 import { ClosePositionModal } from '@/components/ClosePositionModal';

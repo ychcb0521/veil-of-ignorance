@@ -6,7 +6,7 @@ import { useNavigate } from 'react-router-dom';
 import { BackButton } from '@/components/journal/BackButton';
 import { Button } from '@/components/ui/button';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
-import { toast } from 'sonner';
+import { toast } from '@/lib/notificationCenter';
 import { useAuth } from '@/contexts/AuthContext';
 import { listCategories, listPatterns, archivePattern } from '@/lib/journalApi';
 import type { ErrorTagCategory, ErrorTagPattern } from '@/types/journal';

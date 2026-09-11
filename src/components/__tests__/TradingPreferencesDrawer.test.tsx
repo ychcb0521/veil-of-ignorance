@@ -1,9 +1,10 @@
 // @vitest-environment jsdom
 import { useState } from 'react';
-import { fireEvent, render, screen } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { act, fireEvent, render, screen } from '@testing-library/react';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { TradingPreferencesDrawer } from '@/components/TradingPreferencesDrawer';
 import { DEFAULT_TRADING_PREFERENCES, type PanelKey, type TradingPreferences } from '@/lib/tradingPreferences';
+import { __resetNotificationCenterForTests, getNotificationSnapshot, toast } from '@/lib/notificationCenter';
 
 /** 受控壳：真实复现「抽屉改 prefs → 父组件回传新 prefs」这条回路。 */
 function Harness({ panels, onPanelChange }: {
@@ -109,5 +110,58 @@ describe('TradingPreferencesDrawer', () => {
       expect(screen.getAllByText(marker).length).toBeGreaterThan(0);
       fireEvent.click(screen.getByTestId('prefs-back'));
     }
+  });
+});
+
+
+describe('TradingPreferencesDrawer · 历史消息', () => {
+  beforeEach(() => {
+    localStorage.clear();
+    __resetNotificationCenterForTests();
+  });
+
+  it('【用户要求】「历史消息」在首页最下方——排在冷静期所在的「高级设置」之后', () => {
+    render(<Harness />);
+    const rows = screen.getAllByRole('button').map(b => b.textContent?.trim() ?? '');
+    const history = rows.findIndex(t => t.startsWith('历史消息'));
+    const timezone = rows.findIndex(t => t.startsWith('涨跌幅与图表时区'));
+    expect(history).toBeGreaterThan(timezone);
+    // 它之后不再有别的首页条目
+    expect(rows.slice(history + 1).some(t => /^(账户模式|下单确认|通知设置|冷静期)/.test(t))).toBe(false);
+  });
+
+  it('首页显示未读条数；点开列出消息，并把它们标记为已读', async () => {
+    toast.success('开多成交');
+    toast.error('下单失败', { description: '余额不足' });
+    render(<Harness />);
+    expect(screen.getByText('2 条未读')).toBeInTheDocument();
+
+    openPage('历史消息');
+    expect(screen.getByRole('heading', { level: 2 })).toHaveTextContent('历史消息');
+    const items = screen.getAllByTestId('notification-history-item');
+    expect(items.map(i => i.getAttribute('data-level'))).toEqual(['error', 'success']);
+    // 本次打开仍高亮刚才没看过的两条
+    expect(items.every(i => i.getAttribute('data-unread') === 'true')).toBe(true);
+    expect(screen.getByText('余额不足')).toBeInTheDocument();
+
+    await act(async () => { await Promise.resolve(); });
+    expect(getNotificationSnapshot().unreadCount).toBe(0);
+  });
+
+  it('空历史给出说明而不是一片空白', () => {
+    render(<Harness />);
+    openPage('历史消息');
+    expect(screen.getByTestId('notification-history-empty')).toBeInTheDocument();
+  });
+
+  it('「通知设置」里有真开关，默认关闭', async () => {
+    render(<Harness />);
+    openPage('通知设置');
+    const toggle = screen.getByRole('switch', { name: '在屏幕上弹出提示' });
+    expect(toggle).toHaveAttribute('aria-checked', 'false');
+    fireEvent.click(toggle);
+    await act(async () => { await Promise.resolve(); });
+    expect(getNotificationSnapshot().popupsEnabled).toBe(true);
+    expect(screen.getByRole('switch', { name: '在屏幕上弹出提示' })).toHaveAttribute('aria-checked', 'true');
   });
 });

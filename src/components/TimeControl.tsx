@@ -4,7 +4,7 @@ import {
   Database, ChevronDown, Upload, Download, Plus, Trash2, X, ArrowRightCircle, CheckCircle2,
   AlertCircle, Loader2,
 } from 'lucide-react';
-import { toast } from 'sonner';
+import { toast } from '@/lib/notificationCenter';
 import { formatUTC8 } from '@/lib/timeFormat';
 import {
   type TradeSignal,

@@ -9,7 +9,7 @@ import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useAuth } from '@/contexts/AuthContext';
-import { toast } from 'sonner';
+import { toast } from '@/lib/notificationCenter';
 import { createPattern, updatePattern, listCategories, listPatterns, patternHasAnyAssignment } from '@/lib/journalApi';
 import type { ErrorTagCategory, ErrorTagPattern } from '@/types/journal';
 

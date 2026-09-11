@@ -13,7 +13,7 @@ import { Label } from '@/components/ui/label';
 import { Slider } from '@/components/ui/slider';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { useIsMobile } from '@/hooks/use-mobile';
-import { toast } from 'sonner';
+import { toast } from '@/lib/notificationCenter';
 import { ChevronDown, AlertTriangle, Info } from 'lucide-react';
 import { COGNITIVE_BIAS_LABELS } from '@/lib/cognitiveBiasTags';
 import {

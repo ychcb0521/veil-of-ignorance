@@ -29,7 +29,7 @@ import { usePersistedState, loadPersistedSimState, saveSimState, clearSimState }
 import { intervalToMs } from '@/hooks/useBinanceData';
 import { useAuth } from '@/contexts/AuthContext';
 import { evaluateCrossLiquidation, evaluateIsolatedLiquidation, positionMarginUsdAtMark, staleToleranceMs } from '@/lib/liquidationGuards';
-import { toast } from 'sonner';
+import { toast } from '@/lib/notificationCenter';
 import type {
   Position,
   PendingOrder,

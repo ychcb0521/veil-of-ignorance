@@ -4,7 +4,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useBeforeUnload, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { AlertOctagon, Pencil, BrainCircuit } from 'lucide-react';
-import { toast } from 'sonner';
+import { toast } from '@/lib/notificationCenter';
 import { useAuth } from '@/contexts/AuthContext';
 import { useTradingContext } from '@/contexts/TradingContext';
 import { useIsMobile } from '@/hooks/use-mobile';

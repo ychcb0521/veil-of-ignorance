@@ -9,7 +9,7 @@ import {
   type SixStepValue,
 } from './SixStepAnalysisForm';
 import { updateJournalDeepAnalysis, promoteDraftToRule, getJournalById } from '@/lib/journalApi';
-import { toast } from 'sonner';
+import { toast } from '@/lib/notificationCenter';
 
 
 interface ChannelProps {

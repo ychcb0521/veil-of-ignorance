@@ -12,6 +12,7 @@ const SRC = join(process.cwd(), 'src');
 
 /** 已知不需要同步的写入点，附豁免理由。 */
 const EXEMPT: Record<string, string> = {
+  'lib/notificationCenter.ts': '历史消息与「弹出提示」开关：本机的界面日志与显示偏好，封顶 300 条，按用户前缀分区；不属于交易状态，账户资产不由它推导，不需要跨设备同步。',
   'contexts/ThemeContext.tsx': '主题偏好属设备级，跨浏览器不必统一',
   'hooks/useTheme.ts': '同上',
   'hooks/useTimeSimulator.ts': '__tm_live_time 是崩溃恢复用的心跳，重启即重建',

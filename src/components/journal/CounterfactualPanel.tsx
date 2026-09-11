@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Slider } from '@/components/ui/slider';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
-import { toast } from 'sonner';
+import { toast } from '@/lib/notificationCenter';
 import { Trash2 } from 'lucide-react';
 import { useReplay } from '@/contexts/ReplayContext';
 import { runCounterfactual } from '@/lib/counterfactualEngine';

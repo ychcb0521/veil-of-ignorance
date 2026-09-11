@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Activity, CalendarDays, ChevronLeft, ChevronRight, Save, Waves } from 'lucide-react';
 import { useSearchParams } from 'react-router-dom';
-import { toast } from 'sonner';
+import { toast } from '@/lib/notificationCenter';
 import { BackButton } from '@/components/journal/BackButton';
 import { Button } from '@/components/ui/button';
 import { ImeSafeTextarea } from '@/components/ui/ime-safe-text-field';

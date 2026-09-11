@@ -2,27 +2,12 @@ import { useState, useCallback, useRef } from 'react';
 import { queueSimStatePush } from '@/lib/simStateSync';
 import type { TimeMachineStatus } from './useTimeSimulator';
 
+import { getUserId, getUserPrefix } from '@/lib/userStoragePrefix';
+
 /**
  * User-scoped persisted state.
  */
-function getUserId(): string | null {
-  try {
-    const storageKey = Object.keys(localStorage).find(k =>
-      k.startsWith('sb-') && k.endsWith('-auth-token')
-    );
-    if (storageKey) {
-      const data = JSON.parse(localStorage.getItem(storageKey) || '{}');
-      const userId = data?.user?.id;
-      if (userId) return userId;
-    }
-  } catch {}
-  return null;
-}
-
-function getUserPrefix(): string {
-  const userId = getUserId();
-  return userId ? `sim_${userId}_` : 'sim_anon_';
-}
+export { getUserPrefix };
 
 export function usePersistedState<T>(key: string, defaultValue: T): [T, (value: T | ((prev: T) => T)) => void] {
   const prefix = getUserPrefix();

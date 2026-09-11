@@ -9,7 +9,7 @@
 import { useState } from 'react';
 import { Globe, Split, Lock, Brain, Zap, Rewind, Calculator } from 'lucide-react';
 import { AddSizingCalculator } from '@/components/AddSizingCalculator';
-import { toast } from 'sonner';
+import { toast } from '@/lib/notificationCenter';
 import {
   Dialog,
   DialogContent,
@@ -199,7 +199,7 @@ export function SessionModeControls({
       {/* 交易模式：直接显示 */}
       <button
         onClick={() => handleTradingModeClick('decision')}
-        title="决策记录：完整快照 / 评价 / 错题集 / 元监控"
+        aria-label="决策记录：完整快照 / 评价 / 错题集 / 元监控"
         className={`flex items-center gap-1 whitespace-nowrap px-2 py-1 rounded text-[10px] font-medium transition-all duration-100 ease-out active:scale-[0.97] ${
           ctx.tradingMode === 'decision'
             ? 'bg-primary/20 text-primary'
@@ -210,7 +210,9 @@ export function SessionModeControls({
       </button>
       <button
         onClick={() => handleTradingModeClick('direct')}
-        title="直接交易：跳过快照与评价，仍可在交易战役中归类，但不进错题集/元监控"
+        // 不用 title：浏览器的悬停提示会盖在右上角的模拟时钟上。
+        // 两种模式的说明在切换时记入「历史消息」（见 handleTradingModeClick）。
+        aria-label="直接交易：跳过快照与评价，仍可在交易战役中归类，但不进错题集/元监控"
         className={`flex items-center gap-1 whitespace-nowrap px-2 py-1 rounded text-[10px] font-medium transition-all duration-100 ease-out active:scale-[0.97] ${
           ctx.tradingMode === 'direct'
             ? 'bg-[#F0B90B]/20 text-[#F0B90B]'

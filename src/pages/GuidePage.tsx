@@ -4,7 +4,7 @@ import { ArrowDown, ArrowLeft, ChevronDown, Download, List } from 'lucide-react'
 import { Button } from '@/components/ui/button';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet';
-import { toast } from 'sonner';
+import { toast } from '@/lib/notificationCenter';
 import './GuidePage.css';
 
 interface TocItem {
@@ -1916,7 +1916,7 @@ P 不再一把手填，而是拆成三个更可回答的问题：<strong>「这�
                 <tbody>
                   <tr>
                     <td className="px-3 py-2 border-t border-border font-medium">交易偏好（右上角 ⋯）</td>
-                    <td className="px-3 py-2 border-t border-border">下单面板右上角的 <strong>⋯</strong> 打开抽屉，页面树与币安一致，分 <strong>交易偏好</strong> / <strong>界面设置</strong> 两个页签。<br />· <strong>默认交易设置 → 默认杠杆和保证金模式</strong>：可开启「应用默认杠杆」并设定 1–50x 与默认保证金模式，点「确认」才生效（草稿式，与币安相同）。<strong>只对尚未访问过、且当前无持仓无挂单的币对生效</strong>——已建仓的标的不会在背后被改动风险参数。注意即便这里选了全仓，下单时仍会被硬阻断：训练阶段强制逐仓。<br />· <strong>默认交易设置 → 默认触发类型</strong>：最新价格 / 标记价格，改完即同步到下单面板的触发价判定。<br />· <strong>下单确认</strong>：按八种订单类型分别开关二次确认弹窗。决策记录模式本就强制下单前快照，不受此开关影响。<br />· <strong>仓位模式</strong>：本系统默认双向持仓——主仓做多 + 对冲做空必须能并存，切成单向会让对冲腿无处安放。<br />· <strong>界面设置 → 模块显隐</strong>：只列真能藏的两个（订单簿、P_gap 优势边际），与页内的关闭按钮是同一个状态，刷新后保留。图表 / 下单 / 仓位是交易页骨架不可隐藏，「最新成交」「保证金比率」本系统没有对应模块，因此不列。配色全局锁定绿涨红跌，以免历史截图与复盘记录里的红绿含义前后不一致。<br />· <strong>冷静期</strong>在「高级设置」里（原先挂在面板顶部，已收进抽屉）。<br />· 账户模式 / 资产模式 / 价差保护 / 涨跌幅与图表时区等本系统无对应功能的页面照样能打开，里面写清了币安在此做什么、以及本系统为何不适用——不是漏做。</td>
+                    <td className="px-3 py-2 border-t border-border">下单面板右上角的 <strong>⋯</strong> 打开抽屉，页面树与币安一致，分 <strong>交易偏好</strong> / <strong>界面设置</strong> 两个页签。<br />· <strong>默认交易设置 → 默认杠杆和保证金模式</strong>：可开启「应用默认杠杆」并设定 1–50x 与默认保证金模式，点「确认」才生效（草稿式，与币安相同）。<strong>只对尚未访问过、且当前无持仓无挂单的币对生效</strong>——已建仓的标的不会在背后被改动风险参数。注意即便这里选了全仓，下单时仍会被硬阻断：训练阶段强制逐仓。<br />· <strong>默认交易设置 → 默认触发类型</strong>：最新价格 / 标记价格，改完即同步到下单面板的触发价判定。<br />· <strong>下单确认</strong>：按八种订单类型分别开关二次确认弹窗。决策记录模式本就强制下单前快照，不受此开关影响。<br />· <strong>仓位模式</strong>：本系统默认双向持仓——主仓做多 + 对冲做空必须能并存，切成单向会让对冲腿无处安放。<br />· <strong>界面设置 → 模块显隐</strong>：只列真能藏的两个（订单簿、P_gap 优势边际），与页内的关闭按钮是同一个状态，刷新后保留。图表 / 下单 / 仓位是交易页骨架不可隐藏，「最新成交」「保证金比率」本系统没有对应模块，因此不列。配色全局锁定绿涨红跌，以免历史截图与复盘记录里的红绿含义前后不一致。<br />· <strong>冷静期</strong>在「高级设置」里（原先挂在面板顶部，已收进抽屉）。<br />· <strong>历史消息</strong>在抽屉首页最下方：成交、触发、资金费结算、报错等提示<strong>默认不再弹出</strong>（原先弹在屏幕右上角，会盖住时间机器的倍速条与模拟时钟），一律记在这里，按真实时间倒序，最多保留最近 300 条，点开即视为已读。未读条数显示在 <strong>⋯</strong> 按钮的角标上，有未读报错时为红色。想恢复弹出，到「通知设置」打开「在屏幕上弹出提示」。爆仓仍以独立弹窗告知，不受此开关影响。<br />· 账户模式 / 资产模式 / 价差保护 / 涨跌幅与图表时区等本系统无对应功能的页面照样能打开，里面写清了币安在此做什么、以及本系统为何不适用——不是漏做。</td>
                     <td className="px-3 py-2 border-t border-border">与币安同构，便于迁移习惯。注意本系统训练阶段<strong>强制逐仓</strong>：即便把默认保证金模式设为全仓，下单仍会被硬阻断。</td>
                   </tr>
                   <tr>

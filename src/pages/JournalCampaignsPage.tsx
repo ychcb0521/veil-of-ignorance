@@ -15,7 +15,7 @@ import {
   Star,
   Trash2,
 } from 'lucide-react';
-import { toast } from 'sonner';
+import { toast } from '@/lib/notificationCenter';
 import { BackButton } from '@/components/journal/BackButton';
 import {
   CampaignMetricScatterPlot,

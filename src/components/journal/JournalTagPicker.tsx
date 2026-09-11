@@ -5,7 +5,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { ChevronDown, ChevronRight } from 'lucide-react';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Textarea } from '@/components/ui/textarea';
-import { toast } from 'sonner';
+import { toast } from '@/lib/notificationCenter';
 import { listCategories, listPatterns, countPatternOccurrencesLast30Days } from '@/lib/journalApi';
 import type { ErrorTagCategory, ErrorTagPattern } from '@/types/journal';
 import { NewPatternDialog } from './NewPatternDialog';

@@ -1,7 +1,7 @@
 import { type ReactNode, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { ArrowLeft, Download, Eye, EyeOff, FileText, Info, Layers, Sparkles, Trash2 } from 'lucide-react';
-import { toast } from 'sonner';
+import { toast } from '@/lib/notificationCenter';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';

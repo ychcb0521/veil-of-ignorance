@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { ChevronDown, Star, StarOff } from 'lucide-react';
 import { ALL_TIMEFRAMES, TIMEFRAME_LABELS, UNSUPPORTED_TIMEFRAMES, type Timeframe, useTimeframePrefs } from '@/hooks/useTimeframePrefs';
-import { toast } from 'sonner';
+import { toast } from '@/lib/notificationCenter';
 
 interface Props {
   interval: string;

@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/button';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Label } from '@/components/ui/label';
 import { AlertOctagon } from 'lucide-react';
-import { toast } from 'sonner';
+import { toast } from '@/lib/notificationCenter';
 import { Link } from 'react-router-dom';
 import { createRule, markRuleAddedToChecklist, snoozeRulePattern, updateRule } from '@/lib/journalApi';
 import type { CriticalPatternInfo } from '@/lib/criticalPatternDetector';
