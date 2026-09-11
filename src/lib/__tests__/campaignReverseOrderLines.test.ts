@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { buildCampaignReverseOrderPriceLines } from '../campaignReverseOrderLines';
+import {
+  buildCampaignReverseOrderPriceLines,
+  buildManualHedgeShortPriceLines,
+  isHedgeShortLeg,
+  type HedgeShortLegExecution,
+} from '../campaignReverseOrderLines';
 import type { CampaignReverseHedgeOrder, TradeRecord } from '@/types/trading';
 
 const t = (iso: string) => Date.parse(iso);
@@ -264,5 +269,85 @@ describe('buildCampaignReverseOrderPriceLines', () => {
     ], [], t('2026-01-01T10:30:00.000Z'));
 
     expect(lines).toEqual([]);
+  });
+});
+
+/**
+ * 手动开的对冲空单与被触发的委托空单同一个目的，图上照「触发空」画成黄色实线。
+ * 例子取自 IMXUSDT 2025-09-16：主多 0.715953，两组委托空单 0.648644 / 0.694724 都被撤，
+ * 16:17 手动开空 0.703118 对冲、17:17 平掉——原来图上只有一个蓝色 Hr1 三角，看不到这段对冲。
+ */
+describe('buildManualHedgeShortPriceLines', () => {
+  const imx = (hhmm: string) => Date.parse(`2025-09-16T${hhmm}:00+08:00`);
+  const fallbackEnd = imx('18:32');
+  const manualHedge = (o: Partial<HedgeShortLegExecution> = {}): HedgeShortLegExecution => ({
+    legId: 'hr1', recordId: 'manual-record', openTime: imx('16:17'), closeTime: imx('17:17'), entryPrice: 0.703118, ...o,
+  });
+  const cancelledOrders = [
+    makeShortOrder({ id: 'o1', price: 0.648644, status: 'cancelled', createdAt: imx('15:51'), cancelledAt: imx('16:18') }),
+    makeShortOrder({ id: 'o2', price: 0.694724, status: 'cancelled', createdAt: imx('17:17'), cancelledAt: imx('18:32') }),
+  ];
+
+  it('【用户要求】手动对冲空单画成黄色实线：开仓价，从开仓到平仓', () => {
+    expect(buildManualHedgeShortPriceLines([manualHedge()], cancelledOrders, [], fallbackEnd)).toEqual([{
+      price: 0.703118, color: '#F0B90B', startTime: imx('16:17'), endTime: imx('17:17'),
+      dashed: false, endMarker: null, title: '手动空',
+    }]);
+  });
+
+  it('与「触发空」同色同线型', () => {
+    const triggered = buildCampaignReverseOrderPriceLines([
+      makeShortOrder({ status: 'triggered', createdAt: imx('16:00'), triggeredAt: imx('16:10') }),
+    ], [], fallbackEnd).find(line => line.title === '触发空');
+    const manual = buildManualHedgeShortPriceLines([manualHedge()], [], [], fallbackEnd)[0];
+    expect(manual).toMatchObject({ color: triggered?.color, dashed: triggered?.dashed });
+  });
+
+  it('还没平的对冲空单画到战役结束', () => {
+    const [line] = buildManualHedgeShortPriceLines([manualHedge({ closeTime: null })], [], [], fallbackEnd);
+    expect(line).toMatchObject({ startTime: imx('16:17'), endTime: fallbackEnd });
+  });
+
+  it('由委托触发开出的对冲腿不画第二条：按 trade record id 认', () => {
+    const order = makeShortOrder({
+      id: 'trig', tradeRecordId: 'manual-record', price: 0.703, status: 'triggered',
+      createdAt: imx('16:00'), triggeredAt: imx('16:17'),
+    });
+    expect(buildManualHedgeShortPriceLines([manualHedge()], [order], [], fallbackEnd)).toEqual([]);
+  });
+
+  it('按成交时刻 ±60 秒与价位认出触发单开出的腿（逐笔拆条后记录 id 对不上时）', () => {
+    const order = makeShortOrder({
+      id: 'trig', price: 0.7031, fillPrice: 0.703118, status: 'triggered',
+      createdAt: imx('16:00'), triggeredAt: imx('16:17') + 20_000,
+    });
+    expect(buildManualHedgeShortPriceLines([manualHedge({ recordId: 'per-fill-sibling' })], [order], [], fallbackEnd))
+      .toEqual([]);
+  });
+
+  it('时刻或价位对不上的触发单不影响手动单', () => {
+    const farInTime = makeShortOrder({ id: 'a', price: 0.703118, status: 'triggered', createdAt: imx('15:00'), triggeredAt: imx('15:30') });
+    const otherPrice = makeShortOrder({ id: 'b', price: 0.72, status: 'triggered', createdAt: imx('16:00'), triggeredAt: imx('16:17') });
+    expect(buildManualHedgeShortPriceLines([manualHedge()], [farInTime, otherPrice], [], fallbackEnd)).toHaveLength(1);
+  });
+
+  it('缺开仓价/开仓时刻、或平仓早于开仓的畸形腿不画', () => {
+    expect(buildManualHedgeShortPriceLines([
+      manualHedge({ entryPrice: null }),
+      manualHedge({ openTime: null }),
+      manualHedge({ closeTime: imx('16:00') }),
+    ], [], [], fallbackEnd)).toEqual([]);
+  });
+});
+
+describe('isHedgeShortLeg', () => {
+  it('只认对冲类角色里方向为空的腿', () => {
+    expect(isHedgeShortLeg({ leg_role: 'hedge_rolling', direction: 'short' })).toBe(true);
+    expect(isHedgeShortLeg({ leg_role: 'hedge_initial_a', direction: 'short' })).toBe(true);
+    expect(isHedgeShortLeg({ leg_role: 'reentry_hedge', direction: 'short' })).toBe(true);
+    expect(isHedgeShortLeg({ leg_role: 'hedge_rolling', direction: 'long' })).toBe(false);
+    expect(isHedgeShortLeg({ leg_role: 'main_open', direction: 'short' })).toBe(false);
+    expect(isHedgeShortLeg({ leg_role: 'mirror_tp', direction: 'short' })).toBe(false);
+    expect(isHedgeShortLeg({ leg_role: null, direction: 'short' })).toBe(false);
   });
 });

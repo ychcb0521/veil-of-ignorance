@@ -103,7 +103,13 @@ import {
   computeManualLegDeviationCosts,
   type ManualLegDeviationCost,
 } from '@/lib/campaignSimulationEngine';
-import { buildCampaignReverseOrderPriceLines, isDisplayableReverseHedgeOrder } from '@/lib/campaignReverseOrderLines';
+import {
+  buildCampaignReverseOrderPriceLines,
+  buildManualHedgeShortPriceLines,
+  isDisplayableReverseHedgeOrder,
+  isHedgeShortLeg,
+  type HedgeShortLegExecution,
+} from '@/lib/campaignReverseOrderLines';
 import type {
   CampaignCounterfactual,
   CampaignCounterfactualParams,
@@ -1340,13 +1346,39 @@ export default function JournalCampaignDetailPage() {
     () => displayableReverseHedgeOrders.filter(order => hiddenReverseOrderSet.has(order.id)).length,
     [displayableReverseHedgeOrders, hiddenReverseOrderSet],
   );
+  // 手动开的对冲空单：与被触发的委托空单同一个目的，同在这一层、同样黄色（见 buildManualHedgeShortPriceLines）。
+  const manualHedgeShortLegs = useMemo<HedgeShortLegExecution[]>(() => {
+    const lookup = buildTradeRecordLookup(tradeRecords);
+    const result: HedgeShortLegExecution[] = [];
+    for (const leg of legs) {
+      if (!isHedgeShortLeg(leg)) continue;
+      const record = leg.trade_record_id ? lookup.get(leg.trade_record_id) ?? null : null;
+      const resolved = resolveLegExecution(leg, record, legExitPriceCorrections);
+      // 既没有成交记录、也没有平仓时刻的是计划中的对冲，还不是开出来的单。
+      if (!resolved.record && resolved.closeTime == null) continue;
+      result.push({
+        legId: leg.id,
+        recordId: resolved.record?.id ?? null,
+        openTime: resolved.openTime,
+        closeTime: resolved.closeTime,
+        entryPrice: resolved.entryPrice,
+      });
+    }
+    return result;
+  }, [legs, tradeRecords, legExitPriceCorrections]);
+  const hasReverseOrders = displayableReverseHedgeOrders.length > 0;
+  const hasManualHedgeShorts = manualHedgeShortLegs.length > 0;
   const orderInfoPriceLines = useMemo<TimeBoundPriceLine[]>(() => {
     if (!campaign) return [];
     const fallbackEnd = campaign.closed_at
       ? new Date(campaign.closed_at).getTime()
       : (klines.length > 0 ? klines[klines.length - 1].time : 0);
-    return buildCampaignReverseOrderPriceLines(visibleReverseHedgeOrders, tradeRecords, fallbackEnd);
-  }, [campaign, visibleReverseHedgeOrders, tradeRecords, klines]);
+    return [
+      ...buildCampaignReverseOrderPriceLines(visibleReverseHedgeOrders, tradeRecords, fallbackEnd),
+      // 「是不是触发单开出的腿」按全部可显示的委托判，隐藏某张委托不会让它的腿冒充手动单。
+      ...buildManualHedgeShortPriceLines(manualHedgeShortLegs, displayableReverseHedgeOrders, tradeRecords, fallbackEnd),
+    ];
+  }, [campaign, visibleReverseHedgeOrders, displayableReverseHedgeOrders, manualHedgeShortLegs, tradeRecords, klines]);
   const displayMarkers = useMemo(
     () => [...chart.markers, ...(showSelectedCounterfactual ? counterfactualChart.markers : [])],
     [chart.markers, counterfactualChart.markers, showSelectedCounterfactual],
@@ -1913,28 +1945,33 @@ export default function JournalCampaignDetailPage() {
                 />
               )}
             </div>
-            {displayableReverseHedgeOrders.length > 0 && (
+            {(hasReverseOrders || hasManualHedgeShorts) && (
               <div className="mt-2 px-1 space-y-1.5">
                 <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
                   <button
                     type="button"
                     onClick={() => setShowOrderInfo(v => !v)}
-                    title={showOrderInfo ? '隐藏委托空单（黄色）' : '显示委托空单（黄色）'}
-                    aria-label={showOrderInfo ? '隐藏委托空单' : '显示委托空单'}
+                    title={showOrderInfo ? '隐藏委托/手动对冲空单（黄色）' : '显示委托/手动对冲空单（黄色）'}
+                    aria-label={showOrderInfo ? '隐藏委托与手动对冲空单' : '显示委托与手动对冲空单'}
                     className="inline-flex items-center text-[#F0B90B]/60 hover:text-[#F0B90B] transition-colors"
                   >
                     {showOrderInfo ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
                   </button>
                   <span>
-                    委托空单挂单（<span className="text-[#F0B90B]">黄色水平线</span>，按委托价{showOrderInfo ? '' : '·已隐藏'}）
+                    {[hasReverseOrders && '委托空单挂单', hasManualHedgeShorts && '手动对冲空单'].filter(Boolean).join(' · ')}
+                    （<span className="text-[#F0B90B]">黄色水平线</span>，
+                    {[hasReverseOrders && '委托按委托价', hasManualHedgeShorts && '手动按开仓价'].filter(Boolean).join('、')}
+                    {showOrderInfo ? '' : '·已隐藏'}）
                   </span>
-                  <button
-                    type="button"
-                    onClick={() => setShowReverseOrderManager(v => !v)}
-                    className="ml-1 rounded px-1.5 py-0.5 text-[10px] text-muted-foreground/55 hover:bg-muted hover:text-foreground transition-colors"
-                  >
-                    {showReverseOrderManager ? '收起' : '管理'}
-                  </button>
+                  {hasReverseOrders && (
+                    <button
+                      type="button"
+                      onClick={() => setShowReverseOrderManager(v => !v)}
+                      className="ml-1 rounded px-1.5 py-0.5 text-[10px] text-muted-foreground/55 hover:bg-muted hover:text-foreground transition-colors"
+                    >
+                      {showReverseOrderManager ? '收起' : '管理'}
+                    </button>
+                  )}
                   {hiddenReverseOrderCount > 0 && (
                     <button
                       type="button"
