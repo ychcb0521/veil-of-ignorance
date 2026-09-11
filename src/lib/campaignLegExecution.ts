@@ -136,6 +136,12 @@ export async function fetchLegExitPriceCorrections(
     if (!leg.trade_record_id) continue;
     const record = recordLookup.get(leg.trade_record_id);
     if (!record || !Number.isFinite(record.closeTime) || record.closeTime <= 0) continue;
+    /**
+     * 破产价结算的逐仓强平不校正：它的平仓价是触发那根 K 线里的强平价，平仓时刻是那根的收线，
+     * 1 分钟校验看的是收线之后那一分钟（大周期下离影线可达一小时），会把正确的强平判成异常；
+     * 更糟的是按平仓价重算毛盈亏会拆掉「亏损＝保证金」的封顶。老的强平记录照常校正。
+     */
+    if (record.liquidationSettlement === 'bankruptcy') continue;
     const linkedLegs = legsByRecordId.get(record.id) ?? [];
     linkedLegs.push(leg);
     legsByRecordId.set(record.id, linkedLegs);
@@ -222,6 +228,8 @@ export function buildTradeRecordPnlCorrection(
   exitCorrection: LegExitPriceCorrection,
 ): TradeRecordPnlCorrection | null {
   if (!Number.isFinite(record.pnl)) return null;
+  // 破产价结算的净盈亏与平仓价无关（恒为 −保证金），按价差重算只会拆掉封顶。
+  if (record.liquidationSettlement === 'bankruptcy') return null;
   const originalGrossPnl = tradeRecordGrossPnlAtExit(record, exitCorrection.originalExitPrice);
   const correctedGrossPnl = tradeRecordGrossPnlAtExit(record, exitCorrection.exitPrice);
   const pnlDelta = correctedGrossPnl - originalGrossPnl;

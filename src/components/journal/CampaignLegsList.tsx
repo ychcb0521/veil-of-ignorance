@@ -199,8 +199,16 @@ export function CampaignLegsList({
                 ? leg.pre_position_size / entryPriceValue
                 : null;
               const exitPriceValue = execution.exitPrice;
+              /**
+               * 强平记录的价格不在平仓时刻那根 K 线里，说明引擎用了一个不属于那一刻的价去判强平
+               * （旧版会拿比仓位还早的价）。这不是普通的价格误差：按 K 线改价只会把一次误判的强平
+               * 改写成一笔看似合理的亏损，所以要明说。
+               */
+              const liquidationAnomaly = Boolean(execution.exitCorrection) && execution.record?.action === 'LIQUIDATION';
               const exitCorrectionTitle = execution.exitCorrection
-                ? `原 TradeRecord 平仓价 ${fmtPrice(execution.exitCorrection.originalExitPrice)} 超出该平仓时刻 1m K 线范围 ${fmtPrice(execution.exitCorrection.candleLow)}-${fmtPrice(execution.exitCorrection.candleHigh)}，本页按 K 线时价显示。`
+                ? liquidationAnomaly
+                  ? `强平异常：记录的强平价 ${fmtPrice(execution.exitCorrection.originalExitPrice)} 不在平仓时刻 1m K 线范围 ${fmtPrice(execution.exitCorrection.candleLow)}-${fmtPrice(execution.exitCorrection.candleHigh)} 内，属于引擎误判的强平。本页按 K 线时价显示，这条腿的盈亏不代表真实结果。`
+                  : `原 TradeRecord 平仓价 ${fmtPrice(execution.exitCorrection.originalExitPrice)} 超出该平仓时刻 1m K 线范围 ${fmtPrice(execution.exitCorrection.candleLow)}-${fmtPrice(execution.exitCorrection.candleHigh)}，本页按 K 线时价显示。`
                 : undefined;
               const reverseOrdersForLeg = reverseHedgeOrders.filter(order => reverseOrderLegMap.get(order.id) === leg.id);
               const mirrorTpTiming = resolveMirrorTpOrderTiming(leg, record, campaignEvents);
@@ -233,7 +241,12 @@ export function CampaignLegsList({
                     {hedgeSummary && <div className="text-[10px] text-[#F0B90B]">{hedgeSummary}</div>}
                   </div>
                   <div className="text-right tabular-nums">{fmtPrice(entryPriceValue)}</div>
-                  <div className="text-right tabular-nums" title={exitCorrectionTitle}>{fmtPrice(exitPriceValue)}</div>
+                  <div className="text-right tabular-nums" title={exitCorrectionTitle}>
+                    {fmtPrice(exitPriceValue)}
+                    {liquidationAnomaly && (
+                      <div data-testid="leg-liquidation-anomaly" className="text-[10px] text-[#F6465D]">强平异常</div>
+                    )}
+                  </div>
                   {/* 仓位是名义 USD；下面补按开仓价折算的币量——它就是加仓公式里的 X。
                       反向合约的面值锁在 USD 上，光看名义看不出这条腿拿着多少币。 */}
                   <div className="text-right tabular-nums leading-tight">

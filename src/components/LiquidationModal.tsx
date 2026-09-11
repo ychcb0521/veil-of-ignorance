@@ -1,13 +1,16 @@
 import { AlertTriangle, X } from 'lucide-react';
+import { liquidationNoticeCopy, type LiquidationDetails } from '@/lib/liquidationNotice';
 
 interface Props {
   open: boolean;
   onClose: () => void;
-  details?: { lostAmount: number; liquidatedPositions: number };
+  details?: LiquidationDetails;
 }
 
 export function LiquidationModal({ open, onClose, details }: Props) {
   if (!open) return null;
+  // 逐仓与全仓的强平是两回事：只接管一笔 vs 接管全部全仓，破产价结算 vs 市价 + 0.5% 强平费。
+  const copy = liquidationNoticeCopy(details?.scope, details?.liquidatedPositions);
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-sm">
@@ -22,8 +25,7 @@ export function LiquidationModal({ open, onClose, details }: Props) {
         {/* Body */}
         <div className="px-6 py-5 space-y-4">
           <p className="text-sm text-foreground text-center leading-relaxed">
-            保证金不足，您的仓位已被<span className="font-bold text-destructive">强制接管</span>。
-            所有挂单已撤销，所有持仓已按市价强制平仓。
+            {copy.lead}<span className="font-bold text-destructive">{copy.emphasis}</span>{copy.tail}
           </p>
 
           {details && (
@@ -42,7 +44,7 @@ export function LiquidationModal({ open, onClose, details }: Props) {
           )}
 
           <p className="text-[10px] text-muted-foreground text-center">
-            包含 0.5% 强平清算费 · 维持保证金率 0.4%
+            {copy.footnote}
           </p>
         </div>
 

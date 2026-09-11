@@ -127,6 +127,7 @@ const Index = () => {
     handlePlaceTpSl,
     applyAttachedTpSl,
     applyMergeSideEffects,
+    liquidateIsolatedOnCandle,
     applySymbolLeverage,
     settleFillDebit,
     executeReduceOnlyTrigger,
@@ -309,6 +310,9 @@ const Index = () => {
   const lastPersistRef = useRef(0);
   const timeModeRef = useRef(timeMode);
   const timeDirectionRef = useRef(timeDirection);
+  // 逐 K 强平走 ref：RAF 循环不因这个回调换身份而重建。
+  const liquidateOnCandleRef = useRef(liquidateIsolatedOnCandle);
+  liquidateOnCandleRef.current = liquidateIsolatedOnCandle;
   const activeReverseCapRef = useRef(activeReverseCap);
   // 倒放追踪上一帧的模拟时刻（按时间而非下标——loadOlder 前插会移动下标）。
   const lastReverseSimTimeRef = useRef<number | null>(null);
@@ -415,7 +419,7 @@ const Index = () => {
       // 高倍速下一次异步往返本身就跨掉不少模拟时间，用落地时刻会把滞后算成 0。
       // 注意要写在 setPriceMap 的**外面**：上面那个 early-return 在价格没变时
       // 不更新 map，但「这一刻我确实拿到了这个标的的价」仍然成立。
-      markPriceAsOf(symbol, time);
+      markPriceAsOf(symbol, time, price.close);
     },
     [setPriceMap, markPriceAsOf],
   );
@@ -714,7 +718,17 @@ const Index = () => {
       if (newCandles > 0) {
         const settledStart = Math.max(0, cursorRef.current - newCandles);
         for (let i = settledStart; i < cursorRef.current; i++) {
+          const settledCandle = {
+            high: data[i].high, low: data[i].low, close: data[i].close,
+            startTime: data[i].time, endTime: Math.min(simTime, data[i].time + iMs),
+            settled: true,
+          };
+          // 挂着止损、但止损都在强平价之外的仓位：价格到不了止损就先爆了，强平排在撮合之前。
+          liquidateOnCandleRef.current?.(sym, settledCandle, 'beforeMatching');
           runConditionalMatchingForSymbol(sym, data[i], Math.min(simTime, data[i].time + iMs));
+          // 其余仓位：止盈止损先撮合（止损在强平价之内，先被触及），再按同一根 K 线判强平——
+          // 同一个时钟、同一个区间，多单看最低、空单看最高，影线穿过强平价就算。
+          liquidateOnCandleRef.current?.(sym, settledCandle, 'afterMatching');
         }
 
         const batchStart = Math.max(0, cursorRef.current - Math.min(newCandles, 3));
@@ -780,7 +794,17 @@ const Index = () => {
           // 但每帧推进越过 1/3 根时（1m 周期 1200 倍速以上）就再也采不到那个饱和点，
           // 3600x/1m 下每根只采一个样本，三分之二的蜡烛会漏。
           publishMatchRange(sym, { high: candle.high, low: candle.low });
+          // 成形中的这根同样判强平，高低点与撮合同源（不用网络取回的显示价——
+          // 之前让强平用上过期价格的正是那条路）。插值收盘是合成价：成交就在这根里时
+          // 这根不判，等收线用真实收盘（见 evaluateIsolatedLiquidationOnCandle）。
+          const formingCandle = {
+            high: matchHigh, low: matchLow, close: interpClose,
+            startTime: candle.time, endTime: simTime,
+            settled: false,
+          };
+          liquidateOnCandleRef.current?.(sym, formingCandle, 'beforeMatching');
           runConditionalMatchingForSymbol(sym, { high: matchHigh, low: matchLow }, simTime);
+          liquidateOnCandleRef.current?.(sym, formingCandle, 'afterMatching');
           latestChartPriceRef.current = close;
         }
       }

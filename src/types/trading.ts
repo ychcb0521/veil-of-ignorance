@@ -310,6 +310,12 @@ export interface TradeRecord {
   openedRealAt?: number;
   /** How the position was closed. Manual for user-initiated; sl/tp1-3 for triggered TP/SL; liquidation for forced close. */
   exit_method?: "manual" | "sl" | "tp1" | "tp2" | "tp3" | "liquidation";
+  /**
+   * 逐仓强平按破产价结算的记录：净盈亏恰为 −隔离保证金，与平仓价上的毛盈亏无关。
+   * 按平仓价重算盈亏的地方（导出的出场价校正、手动修正）必须跳过它，否则会把保证金封顶拆掉。
+   * 老的强平记录没有这个字段。
+   */
+  liquidationSettlement?: "bankruptcy";
   /** User-written reason recorded after the close, used for post-trade review and playback. */
   exit_reason_text?: string;
 }

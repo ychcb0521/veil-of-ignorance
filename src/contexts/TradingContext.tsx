@@ -16,7 +16,7 @@
  * user physically clicks (Real-world Sequential Ledger).
  */
 
-import React, { createContext, useContext, useCallback, useEffect, useRef, useMemo, useState } from 'react';
+import React, { createContext, useContext, useCallback, useEffect, useLayoutEffect, useRef, useMemo, useState } from 'react';
 import { useTimeSimulator } from '@/hooks/useTimeSimulator';
 import {
   applyTransfer,
@@ -28,7 +28,24 @@ import {
 import { usePersistedState, loadPersistedSimState, saveSimState, clearSimState } from '@/hooks/usePersistedState';
 import { intervalToMs } from '@/hooks/useBinanceData';
 import { useAuth } from '@/contexts/AuthContext';
-import { evaluateCrossLiquidation, evaluateIsolatedLiquidation, positionMarginUsdAtMark, staleToleranceMs } from '@/lib/liquidationGuards';
+import {
+  evaluateCrossLiquidation,
+  evaluateIsolatedLiquidation,
+  evaluateIsolatedLiquidationOnCandle,
+  isPriceFreshForLiquidation,
+  isolatedLiquidationSettlement,
+  positionMarginUsdAtMark,
+  staleToleranceMs,
+  type LiquidationCandle,
+  type RiskFloorEntry,
+  updateRiskFloors,
+  nextExposure,
+  priceObservedAfter,
+  stopLossVersusLiquidation,
+  type ExposureEntry,
+} from '@/lib/liquidationGuards';
+import { mergeLiquidationDetails, type LiquidationDetails } from '@/lib/liquidationNotice';
+import { calcLiquidationPrice } from '@/types/trading';
 import { toast } from '@/lib/notificationCenter';
 import type {
   Position,
@@ -119,7 +136,6 @@ export type CoinTimelinesMap = Record<string, CoinTimelineState>;
 /** @deprecated kept for backward compat — always empty now */
 export type IsolatedBalancesMap = Record<string, number>;
 
-interface LiquidationDetails { lostAmount: number; liquidatedPositions: number; }
 
 interface TradingState {
   sim: ReturnType<typeof useTimeSimulator>;
@@ -140,7 +156,7 @@ interface TradingState {
    * 且必须传**请求时用的那个模拟时刻**，而不是 setState 落地的时刻。
    * 没登记过的标的一律不参与强平——见 lib/liquidationGuards。
    */
-  markPriceAsOf: (symbol: string, asOfSimTime: number) => void;
+  markPriceAsOf: (symbol: string, asOfSimTime: number, price?: number) => void;
   /** 发布当刻撮合区间，供条件单下单闸门与撮合共用同一基准。 */
   publishMatchRange: (symbol: string, range: { high: number; low: number }) => void;
   balance: number;
@@ -197,6 +213,11 @@ interface TradingState {
    * 合并后不改指减仓单，止损于是挂在一个已经不存在的仓位 id 上——永不触发，且无声。
    */
   applyMergeSideEffects: (symbol: string, merged: PositionMergeResult) => void;
+  /**
+   * 逐根 K 线判定逐仓强平（正放）。由 Index 的撮合循环在每根收线或成形中的 K 线上、
+   * 紧跟止盈止损撮合之后调用——与成交共用同一个时钟、同一根 K 线、同一个区间。
+   */
+  liquidateIsolatedOnCandle: (symbol: string, candle: LiquidationCandle, phase?: 'beforeMatching' | 'afterMatching') => void;
   executeReduceOnlyTrigger: (
     symbol: string,
     order: PendingOrder,
@@ -348,16 +369,23 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
   const [interval, setInterval] = usePersistedState('interval', persistedSim?.interval ?? '1m');
   const [positionsMap, setPositionsMapState] = usePersistedState<PositionsMap>('positions_map', {});
   const positionsMapRef = useRef(positionsMap);
-  positionsMapRef.current = positionsMap;
   const setPositionsMap = useCallback((value: PositionsMap | ((prev: PositionsMap) => PositionsMap)) => {
     const next = typeof value === 'function' ? value(positionsMapRef.current) : value;
     positionsMapRef.current = next;
     setPositionsMapState(next);
   }, [setPositionsMapState]);
+  /**
+   * ref 由上面的写入包装同步推进；这里只在 state **真的换了**时追平（云端/跨页水合等不走包装的写入）。
+   * 不能在渲染期直接赋值：React 18 会先渲染优先级更高的更新（比如一次点击），那一次渲染看到的
+   * positionsMap 还不含 RAF 循环里刚写入的强平删除——渲染期赋值会把 ref 退回旧值，
+   * 刚强平掉的仓位复活，下一帧再被强平一次、多写一条强平记录。
+   */
+  useLayoutEffect(() => { positionsMapRef.current = positionsMap; }, [positionsMap]);
 
   const [ordersMap, setOrdersMapState] = usePersistedState<OrdersMap>('orders_map', {});
   const ordersMapRef = useRef(ordersMap);
-  ordersMapRef.current = ordersMap;
+  // 同 positionsMapRef：写入包装同步推进，state 真换了才追平，不在渲染期赋值（否则撤掉的单会复活）。
+  useLayoutEffect(() => { ordersMapRef.current = ordersMap; }, [ordersMap]);
   const reduceOnlyDeferredReasonRef = useRef(new Map<string, string>());
   const setOrdersMap = useCallback((value: OrdersMap | ((prev: OrdersMap) => OrdersMap)) => {
     const next = typeof value === 'function' ? value(ordersMapRef.current) : value;
@@ -396,13 +424,18 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const priceAsOfRef = useRef<Record<string, number>>({});
-  const markPriceAsOf = useCallback((symbol: string, asOfSimTime: number) => {
+  /** 与时间戳同一次登记的那个价：戳与价必须属于同一次请求（见强平兜底判定）。 */
+  const pricePairedWithAsOfRef = useRef<Record<string, number>>({});
+  const markPriceAsOf = useCallback((symbol: string, asOfSimTime: number, price?: number) => {
     if (!symbol || !Number.isFinite(asOfSimTime) || asOfSimTime <= 0) return;
     priceAsOfRef.current[symbol] = asOfSimTime;
+    if (price != null && Number.isFinite(price) && price > 0) pricePairedWithAsOfRef.current[symbol] = price;
+    else delete pricePairedWithAsOfRef.current[symbol];
   }, []);
   const [balance, setBalanceState] = usePersistedState('balance', initialCapital);
   const balanceRef = useRef(balance);
-  balanceRef.current = balance;
+  // 同 positionsMapRef：写入包装同步推进，state 真换了才追平，不在渲染期赋值（否则一次记账会被旧值覆盖）。
+  useLayoutEffect(() => { balanceRef.current = balance; }, [balance]);
   /**
    * 余额一律**写时同步推进 ref**——与 positionsMap / ordersMap 同一个套路。
    *
@@ -589,6 +622,25 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
     return ct?.time ?? sim.currentSimulatedTime;
   }, [timeMode, coinTimelines, activeSymbol, sim.currentSimulatedTime]);
 
+  /**
+   * 此刻的模拟时间，按撮合时钟（与 Index 的 RAF 同一个公式）现算。
+   * getEffectiveTime 读的是 React state，每 250 毫秒真实时间才刷新一次，3600 倍下落后可达 15 个模拟分钟。
+   * 手动开仓若取它，记录里的开仓时刻会早于真实成交，强平护栏据此放行成交之前的价；
+   * 手动平仓若取它，平仓时刻会早于撮合时钟记下的开仓时刻。成交时刻一律取这个。
+   * 输入放在 ref 里，函数身份稳定，调用方不必把它加进依赖。
+   */
+  const liveClockInputsRef = useRef({ timeMode, coinTimelines, activeSymbol, direction: sim.direction, getSimTime: sim.getSimTime });
+  liveClockInputsRef.current = { timeMode, coinTimelines, activeSymbol, direction: sim.direction, getSimTime: sim.getSimTime };
+  const getLiveSimTime = useCallback((symbol?: string): number => {
+    const { timeMode: mode, coinTimelines: cts, activeSymbol: active, direction, getSimTime } = liveClockInputsRef.current;
+    if (mode === 'synced') return getSimTime();
+    const ct = cts[symbol || active];
+    if (ct && ct.status === 'playing' && ct.realStartTime && ct.historicalAnchorTime != null) {
+      return ct.historicalAnchorTime + (Date.now() - ct.realStartTime) * ct.speed * (direction === -1 ? -1 : 1);
+    }
+    return ct?.time ?? getSimTime();
+  }, []);
+
   // Always return the single global balance
   const getEffectiveBalance = useCallback((_symbol: string): number => {
     return balance;
@@ -602,7 +654,18 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
   // Liquidation modal state
   const [liquidationOpen, setLiquidationOpen] = useState(false);
   const [liquidationDetails, setLiquidationDetails] = useState<LiquidationDetails | undefined>();
-  const closeLiquidationModal = useCallback(() => setLiquidationOpen(false), []);
+  /** 弹窗是否还开着——同步可读。开着时新的强平并入同一个弹窗，而不是把前一笔覆盖掉。 */
+  const liquidationOpenRef = useRef(false);
+  const closeLiquidationModal = useCallback(() => {
+    liquidationOpenRef.current = false;
+    setLiquidationOpen(false);
+  }, []);
+  const openLiquidationModal = useCallback((details: LiquidationDetails) => {
+    const merge = liquidationOpenRef.current;
+    liquidationOpenRef.current = true;
+    setLiquidationDetails(prev => (merge && prev ? mergeLiquidationDetails(prev, details) : details));
+    setLiquidationOpen(true);
+  }, []);
 
   // Persist sim state
   useEffect(() => {
@@ -818,76 +881,156 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
     }
   }, [sim.currentSimulatedTime, sim.isRunning, positionsMap, priceMap]);
 
+  /**
+   * 逐仓强平的唯一落账出口：逐根 K 线与界面刷新两条判定路径都走这里。
+   *
+   * · 记账按破产价口径：亏掉的恰好是隔离保证金（isolatedLiquidationSettlement）。
+   *   钱包在逐仓强平时一分不动（保证金开仓时已扣），记录也必须落在同一个数上。
+   * · 时间取判定所用价格的时刻，绝不取落后的界面时钟——那会让平仓时间早于开仓。
+   * · 挂在这些仓位上的止盈止损一并撤掉：仓位已不存在，它们永远不会触发。
+   * · 逐仓爆仓同样弹独立窗口：普通提示默认只进「历史消息」，爆仓不能只剩一个角标。
+   */
+  const settleIsolatedLiquidations = useCallback((
+    items: { symbol: string; position: Position; exitPrice: number; closeTime: number }[],
+  ) => {
+    if (items.length === 0) return;
+    const records: TradeRecord[] = [];
+    const idsBySymbol = new Map<string, Set<string>>();
+    let lost = 0;
+    for (const { symbol: sym, position: pos, exitPrice, closeTime } of items) {
+      const totals = isolatedLiquidationSettlement({ symbol: sym, position: pos, exitPrice });
+      records.push(...buildCloseRecords({
+        symbol: sym, pos,
+        closeQty: getPositionUnits(pos),
+        fillPrice: exitPrice,
+        closeTime,
+        exitMethod: 'liquidation',
+        closedRealAt: Date.now(),
+        totals,
+      }).map(r => ({ ...r, action: 'LIQUIDATION' as const, liquidationSettlement: 'bankruptcy' as const })));
+      const marginLost = Math.max(0, Number(pos.isolatedMargin) || 0);
+      lost += marginLost;
+      const ids = idsBySymbol.get(sym) ?? new Set<string>();
+      ids.add(pos.id);
+      idsBySymbol.set(sym, ids);
+      toast.error(`🚨 逐仓爆仓: ${sym} ${pos.side === 'LONG' ? '多' : '空'} ${formatSettlementQuantity(pos, sym)}`, {
+        description: `保证金 ${marginLost.toFixed(2)} USDT 已清零`,
+        duration: 8000,
+      });
+    }
+    setTradeHistory(prev => [...prev, ...records]);
+    // 按 id 删，不按下标（下标与 ref 不同源，错位会误删健康仓位或重复强平）。
+    setPositionsMap(prev => {
+      const next = { ...prev };
+      for (const [sym, ids] of idsBySymbol) next[sym] = (prev[sym] || []).filter(p => !ids.has(p.id));
+      return next;
+    });
+    setOrdersMap(prev => {
+      let changed = false;
+      const next = { ...prev };
+      for (const [sym, ids] of idsBySymbol) {
+        const list = prev[sym] || [];
+        const kept = list.filter(o => !(o.reduceOnly && o.linkedPositionId && ids.has(o.linkedPositionId)));
+        if (kept.length !== list.length) { next[sym] = kept; changed = true; }
+      }
+      return changed ? next : prev;
+    });
+    openLiquidationModal({ lostAmount: lost, liquidatedPositions: items.length, scope: 'isolated' });
+  }, [setTradeHistory, setPositionsMap, setOrdersMap, openLiquidationModal]);
+
+  /** 逐根判定：每个标的上一次判定看到的最后时刻，与每副仓位构成的风险下限（见 updateRiskFloors）。 */
+  const candleLiqLastEndRef = useRef(new Map<string, number>());
+  const candleLiqFloorsRef = useRef(new Map<string, Map<string, RiskFloorEntry>>());
+  const liquidateIsolatedOnCandle = useCallback((
+    symbol: string,
+    candle: LiquidationCandle,
+    /**
+     * 撮合之前只处理「挂着止损、但止损都在强平价之外」的仓位——价格到不了止损就先爆了；
+     * 其余仓位在撮合之后判（止损在强平价之内，先被触及）。
+     */
+    phase: 'beforeMatching' | 'afterMatching' = 'afterMatching',
+  ) => {
+    const lastSeenEnd = candleLiqLastEndRef.current.get(symbol);
+    candleLiqLastEndRef.current.set(symbol, candle.endTime);
+    // 读 ref：同一帧里止盈止损刚平掉的仓位此刻已从 ref 移除，不会再被强平一次。
+    const positions = (positionsMapRef.current[symbol] || [])
+      .filter(p => p.marginMode === 'isolated' && isPositionOpen(p));
+    // 没有仓位也要走一遍：「上一次看到哪」必须每次都记，下限才可信。
+    const floors = updateRiskFloors(
+      candleLiqFloorsRef.current.get(symbol) ?? new Map(), positions, lastSeenEnd, candle.endTime,
+      staleToleranceMs(sim.speed),
+    );
+    candleLiqFloorsRef.current.set(symbol, floors);
+    if (positions.length === 0) return;
+    const items: { symbol: string; position: Position; exitPrice: number; closeTime: number }[] = [];
+    for (const pos of positions) {
+      if (phase === 'beforeMatching'
+        && stopLossVersusLiquidation(pos, ordersMapRef.current[symbol] || []) !== 'liquidation_first') continue;
+      const decision = evaluateIsolatedLiquidationOnCandle({
+        symbol, position: pos, candle, riskSince: floors.get(pos.id)?.floor,
+      });
+      if (!decision.liquidate) continue;
+      items.push({ symbol, position: pos, exitPrice: decision.exitPrice, closeTime: candle.endTime });
+    }
+    settleIsolatedLiquidations(items);
+  }, [settleIsolatedLiquidations, sim.speed]);
+
   // ===== LIQUIDATION ENGINE (Cross + Isolated) =====
   const liquidationCheckRef = useRef(false);
+  const exposureRef = useRef(new Map<string, ExposureEntry>());
   useEffect(() => {
     if (!sim.isRunning || liquidationCheckRef.current) return;
 
-    // --- ISOLATED margin-mode liquidation: check each isolated position independently ---
-    for (const [sym, positions] of Object.entries(positionsMap)) {
-      const price = priceMap[sym] || 0;
-      if (price <= 0) continue;
-
-      for (let i = positions.length - 1; i >= 0; i--) {
-        const pos = positions[i];
-
-        // 判据整个搬进 liquidationGuards.evaluateIsolatedLiquidation：
-        // 陈价、零张幽灵仓位、NaN 三种情况全部落到「不强平」。
-        // 旧代码写的是 `if (posEquity > maintMargin) continue`——NaN 让 `>` 为假，
-        // 于是任何畸形数据的默认归宿是「爆仓」，方向是反的。
-        const decision = evaluateIsolatedLiquidation({
-          symbol: sym, position: pos, price,
-          priceAsOf: priceAsOfRef.current[sym],
-          nowSim: getEffectiveTime(sym),
-          toleranceMs: staleToleranceMs(sim.speed),
-        });
-        if (!decision.liquidate) continue;
-
-        const pnl = decision.pnlUsd;
-        const notional = decision.notionalUsd;
-        const { feeUsd: closeFee, feeCoin } = getSettlementFeeParts(sym, pos, price, false);
-        const liqFee = notional * LIQUIDATION_FEE_RATE;
-
-        /**
-         * 强平也按每笔成交各写一条。合并本来就是为了「加仓不该被自己的强平价单独打掉」——
-         * 若强平这一支只写一条,就等于在**它当初要保护的那件事真的发生时**,
-         * 把加仓从事后复盘里抹掉。
-         */
-        setTradeHistory(prev => [...prev, ...buildCloseRecords({
-          symbol: sym, pos,
-          closeQty: getPositionUnits(pos),
-          fillPrice: price,
-          closeTime: getEffectiveTime(sym),
-          exitMethod: 'liquidation',
-          closedRealAt: Date.now(),
-          totals: {
-            netPnl: pnl - closeFee - liqFee,
-            feeUsd: closeFee + liqFee,
-            feeCoin,
-            slippageUsd: 0,
-            notionalUsd: notional,
-          },
-        }).map(r => ({ ...r, action: 'LIQUIDATION' as const }))]);
-
-        // 按 id 删，不按下标。下标取自 effect 闭包里那份已提交的 positionsMap，
-        // 而 filter 作用在 setPositionsMap 同步推进的 positionsMapRef 上——两个数组
-        // 不同源：同一帧里只要 rAF 的止盈止损或后台轮询改过这个数组，下标就会错位，
-        // 结果不是**删空**（同一 positionId 下一帧再写一条重复爆仓单），
-        // 就是**误删一笔健康仓位**（无声消失、没有任何平仓记录）。
-        // 同文件的 handleClosePosition 早就写着 defensive: not just by index，只有这里漏了。
-        const liquidatedId = pos.id;
-        setPositionsMap(prev => ({
-          ...prev,
-          [sym]: (prev[sym] || []).filter(p => p.id !== liquidatedId),
-        }));
-
-        // Isolated margin is lost — no change to global balance (it was already deducted at open)
-        toast.error(`🚨 逐仓爆仓: ${sym} ${pos.side === 'LONG' ? '多' : '空'} ${formatSettlementQuantity(pos, sym)}`, {
-          description: `保证金 ${pos.isolatedMargin.toFixed(2)} USDT 已清零`,
-          duration: 8000,
-        });
+    // --- ISOLATED margin-mode liquidation（兜底路径）---
+    // 正放时当前标的由 Index 的撮合循环逐根 K 线判定（liquidateIsolatedOnCandle）；
+    // 这里兜住其余情形：后台标的、倒放。读 positionsMapRef 而不是闭包里的 positionsMap——
+    // 逐根判定刚打掉的仓位此刻已从 ref 移除，闭包里那份还在，读它会再强平一次。
+    const direction: 1 | -1 = sim.direction === -1 ? -1 : 1;
+    const tolerance = staleToleranceMs(sim.speed);
+    // 每副仓位的风险起点：通常是它形成的那一刻；跳了时间或换了方向就改从此刻算（见 nextExposure）。
+    const exposures = new Map<string, ExposureEntry>();
+    for (const [sym, positions] of Object.entries(positionsMapRef.current)) {
+      const clock = getEffectiveTime(sym);
+      for (const pos of positions) {
+        exposures.set(pos.id, nextExposure(exposureRef.current.get(pos.id), pos, clock, direction, tolerance));
       }
     }
+    exposureRef.current = exposures;
+    const riskStartOf = (pos: Position) => exposures.get(pos.id)?.start ?? null;
+    /**
+     * 这个价属于哪一刻——只认与它同一次登记的时间戳。价格 state 要等下一次渲染才提交，
+     * 时间戳却在 ref 里、登记当下就换了；两者之间跑到这里，会把上一次的价配上新一次的戳，陈价被当成新鲜的。
+     */
+    const pairedAsOf = (sym: string, price: number): number | undefined => {
+      const paired = pricePairedWithAsOfRef.current[sym];
+      if (paired != null && paired !== price) return undefined;
+      return priceAsOfRef.current[sym];
+    };
+    const isolatedItems: { symbol: string; position: Position; exitPrice: number; closeTime: number }[] = [];
+    for (const [sym, positions] of Object.entries(positionsMapRef.current)) {
+      const price = priceMap[sym] || 0;
+      if (price <= 0) continue;
+      const priceAsOf = pairedAsOf(sym, price);
+      for (const pos of positions) {
+        // 判据在 liquidationGuards.evaluateIsolatedLiquidation：陈价、早于仓位形成的价、
+        // 零张幽灵仓位、NaN 全部落到「不强平」。
+        const decision = evaluateIsolatedLiquidation({
+          symbol: sym, position: pos, price, priceAsOf,
+          nowSim: getEffectiveTime(sym),
+          toleranceMs: tolerance,
+          direction,
+          riskSince: riskStartOf(pos),
+        });
+        if (!decision.liquidate) continue;
+        // 两次采样之间价格已越过强平价：按强平价记账（仓位本应在那里被接管），
+        // 不按采样到的那个更远的价；亏损由结算函数封顶在保证金。
+        const liq = calcLiquidationPrice(pos);
+        const exitPrice = Number.isFinite(liq) && liq > 0 ? liq : price;
+        // 时间取这个价的时刻：判据已保证它按播放方向不早于仓位形成。
+        isolatedItems.push({ symbol: sym, position: pos, exitPrice, closeTime: Number(priceAsOf) });
+      }
+    }
+    settleIsolatedLiquidations(isolatedItems);
 
     // --- CROSS liquidation: aggregate all cross positions globally ---
     // MMR = ∑(notional * MAINTENANCE_MARGIN_RATE) where notional = qty * currentPrice
@@ -896,11 +1039,22 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
     let crossPositionCount = 0;
     // 已被扣出钱包的全仓保证金——它是权益的一部分，判据里漏掉它就等于把风险算大一倍。
     let crossMargin = 0;
-    for (const [sym, positions] of Object.entries(positionsMap)) {
+    /**
+     * 全仓权益是整个账户的事：任一全仓标的的价格过期、缺价、或早于该仓位形成，
+     * 这一轮整轮不判——与逐仓同一取向，算不清就不强平。原来全仓这一支完全没有过期价格检查。
+     */
+    let crossPriceUsable = true;
+    for (const [sym, positions] of Object.entries(positionsMapRef.current)) {
+      if (!positions.some(p => p.marginMode === 'cross' && isPositionOpen(p))) continue;
       const price = priceMap[sym] || 0;
-      if (price <= 0) continue;
+      const priceAsOf = pairedAsOf(sym, price);
+      if (price <= 0 || !isPriceFreshForLiquidation(priceAsOf, getEffectiveTime(sym), tolerance)) {
+        crossPriceUsable = false;
+        continue;
+      }
       for (const pos of positions) {
         if (pos.marginMode !== 'cross') continue;
+        if (!priceObservedAfter(priceAsOf, riskStartOf(pos), direction)) crossPriceUsable = false;
         crossUnrealizedPnl += calcUnrealizedPnl(pos, price);
         crossMaintenanceMargin += getPositionNotionalUsd(sym, pos, price) * MAINTENANCE_MARGIN_RATE;
         // 币本位持有的是币，保证金的美元价值随价格走；用开仓时冻结的 pos.margin
@@ -910,7 +1064,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
       }
     }
 
-    if (crossPositionCount > 0) {
+    if (crossPositionCount > 0 && crossPriceUsable) {
       const crossDecision = evaluateCrossLiquidation({
         balanceUsd: balance,
         crossMarginUsd: crossMargin,
@@ -936,14 +1090,15 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
          * 旧代码 setOrdersMap({}) 连坐清空，反而没有这个洞。
          */
         const liquidatedPositionIds = new Set<string>();
-        for (const positions of Object.values(positionsMap)) {
+        // 与下面结算那一轮同读 ref：闭包里那份可能缺一笔刚开的全仓仓位——它会被结算、却不被删除。
+        for (const positions of Object.values(positionsMapRef.current)) {
           for (const pos of positions) {
             if (pos.marginMode === 'cross') liquidatedPositionIds.add(pos.id);
           }
         }
         const liqRecords: TradeRecord[] = [];
 
-        for (const [sym, positions] of Object.entries(positionsMap)) {
+        for (const [sym, positions] of Object.entries(positionsMapRef.current)) {
           const price = priceMap[sym] || 0;
           if (price <= 0) continue;
 
@@ -953,7 +1108,8 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
             const notional = getPositionNotionalUsd(sym, pos, price);
             const { feeUsd: closeFee, feeCoin } = getSettlementFeeParts(sym, pos, price, false);
             const liqFee = notional * LIQUIDATION_FEE_RATE;
-            totalLoss += Math.abs(Math.min(0, pnl - closeFee - liqFee)) + liqFee;
+            // 净结算里已经扣过强平费；原来在亏损之外再加一次 liqFee，弹窗里的损失被多算一截。
+            totalLoss += Math.max(0, -(pnl - closeFee - liqFee));
             crossSettlement += pnl - closeFee - liqFee;
 
             // 全仓强平同样按每笔成交拆条,理由与逐仓那一支相同。
@@ -961,7 +1117,8 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
               symbol: sym, pos,
               closeQty: getPositionUnits(pos),
               fillPrice: price,
-              closeTime: getEffectiveTime(sym),
+              // 取这个价的时刻，不取落后的界面时钟（那会让平仓时间早于开仓）。
+              closeTime: Number(pairedAsOf(sym, price)),
               exitMethod: 'liquidation',
               closedRealAt: Date.now(),
               totals: {
@@ -1030,14 +1187,13 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
         setBalance(prev => prev + crossMargin + crossSettlement);
         setTradeHistory(prev => [...prev, ...liqRecords]);
 
-        setLiquidationDetails({ lostAmount: totalLoss, liquidatedPositions: crossPositionCount });
-        setLiquidationOpen(true);
+        openLiquidationModal({ lostAmount: totalLoss, liquidatedPositions: crossPositionCount, scope: 'cross' });
         toast.error('🚨 全仓爆仓！所有全仓仓位已被强制平仓', { duration: 10000 });
 
         setTimeout(() => { liquidationCheckRef.current = false; }, 2000);
       }
     }
-  }, [priceMap, positionsMap, balance, sim.isRunning, sim.currentSimulatedTime, sim.speed, getEffectiveTime]);
+  }, [priceMap, positionsMap, balance, sim.isRunning, sim.currentSimulatedTime, sim.speed, sim.direction, getEffectiveTime, settleIsolatedLiquidations, openLiquidationModal]);
 
   /**
    * 成交时的扣款闸门。返回 true = 已扣款；false = 这一单付不起，必须当作撤单丢掉。
@@ -1303,7 +1459,8 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
       }
     }
 
-    const now = getEffectiveTime(symbol);
+    // 成交时刻取撮合时钟（见 getLiveSimTime），不取落后的界面时钟。
+    const now = getLiveSimTime(symbol);
     const buildExecutionTradeSnapshot = (
       position: Position,
       orderType: string,
@@ -1728,7 +1885,8 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
     // 只把记录这一段接过去,不做整体归并——那是另一件事(见下方 TODO 立项)。
     setTradeHistory(prev => [...prev, ...buildCloseRecords({
       symbol, pos, closeQty, fillPrice,
-      closeTime: getEffectiveTime(symbol),
+      // 平仓时刻与开仓同取撮合时钟：界面时钟落后，会让平仓早于开仓。
+      closeTime: getLiveSimTime(symbol),
       exitMethod: method,
       closedRealAt: Date.now(),
       totals: {
@@ -2034,7 +2192,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
     getSymbolMarginMode, setSymbolMarginMode,
     getSymbolSettlementMode, setSymbolSettlementMode,
     activeSymbols,
-    handlePlaceOrder, handleClosePosition, handleCancelOrder, handlePlaceTpSl, applyAttachedTpSl, applyMergeSideEffects, settleFillDebit, applySymbolLeverage, executeReduceOnlyTrigger,
+    handlePlaceOrder, handleClosePosition, handleCancelOrder, handlePlaceTpSl, applyAttachedTpSl, applyMergeSideEffects, liquidateIsolatedOnCandle, settleFillDebit, applySymbolLeverage, executeReduceOnlyTrigger,
     handleAdjustMargin, handleClearSymbolData,
     fundingRate: FUNDING_RATE,
     liquidationOpen, liquidationDetails, closeLiquidationModal,

@@ -288,6 +288,10 @@ export function buildCampaignLegsExportRows(input: ExportInput): CampaignLegsExp
         { text: `原 ${fmtPrice(execution.exitCorrection.originalExitPrice)}`, color: '#848E9C' },
         { text: `K线 ${fmtPrice(execution.exitCorrection.candleLow)}-${fmtPrice(execution.exitCorrection.candleHigh)}`, color: '#848E9C' },
       ] : []),
+      // 强平记录的价不在那一刻的 K 线里 = 引擎误判的强平，改价后的盈亏不代表真实结果。
+      ...(execution.exitCorrection && execution.record?.action === 'LIQUIDATION'
+        ? [{ text: '强平异常', color: '#F6465D' }]
+        : []),
     ];
     const cells: CampaignLegsExportCellLine[][] = [
       [{ text: String(leg.leg_sequence ?? '—') }],

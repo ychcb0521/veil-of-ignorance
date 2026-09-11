@@ -265,7 +265,7 @@ export function useBackgroundPrices() {
           // 只给**真正取到价**的标的盖戳——取失败的（catch → r=null）保持旧戳，
           // 于是它继续被强平判据视为陈价。这是整条闸门的关键：
           // 盖戳绝不能按「结果 map 里的所有键」来，那会把陈价一起认证成新鲜的。
-          markPriceAsOf(sym, getEffectiveTime(sym));
+          markPriceAsOf(sym, getEffectiveTime(sym), r.close);
         }
       }
 

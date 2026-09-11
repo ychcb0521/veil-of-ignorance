@@ -396,6 +396,11 @@ export function PositionPanel({
 
   const handleSaveTradeRecordRepair = async () => {
     if (!repairRecord) return;
+    // 破产价结算的逐仓强平：净盈亏＝−保证金，按平仓价重算会把封顶拆掉、还会改动余额。
+    if (repairRecord.liquidationSettlement === 'bankruptcy') {
+      toast.error('逐仓强平按破产价结算（亏损＝保证金），不能按平仓价重算');
+      return;
+    }
     let corrected: TradeRecord;
     try {
       corrected = buildCorrectedTradeRecord(repairRecord, repairForm);
@@ -1551,6 +1556,8 @@ export function PositionPanel({
                             variant="ghost"
                             size="sm"
                             onClick={() => openTradeRecordRepair(t)}
+                            disabled={t.liquidationSettlement === 'bankruptcy'}
+                            title={t.liquidationSettlement === 'bankruptcy' ? '逐仓强平按破产价结算（亏损＝保证金），不按平仓价重算' : undefined}
                             className="h-6 px-2 text-[10px] text-muted-foreground hover:text-foreground"
                           >
                             <Pencil className="w-3 h-3 mr-1" />
