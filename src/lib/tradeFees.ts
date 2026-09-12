@@ -18,6 +18,7 @@
  */
 import { LEGACY_TAKER_FEE, MAKER_FEE, TAKER_FEE, type TradeRecord } from '@/types/trading';
 import { getPositionNotionalUsd, isCoinSettled } from '@/lib/tradingSettlement';
+import { getSettlementAsset } from '@/lib/coinMargined';
 
 export interface FeeSide {
   usd: number;
@@ -31,6 +32,18 @@ export interface FeeSide {
   estimated: boolean;
 }
 
+/**
+ * 币本位手续费按币计。币价差几个数量级：ASTER 一笔是 86.54，BTC 一笔是 0.0000495，
+ * 所以大于 1 保留两位小数、小于 1 按四位有效数字，两种都读得出来。
+ */
+export function formatFeeCoin(coin: number | null | undefined, asset?: string): string {
+  if (!finite(coin)) return '—';
+  const text = Math.abs(coin) >= 1
+    ? coin.toLocaleString('en-US', { maximumFractionDigits: 2 })
+    : coin.toLocaleString('en-US', { maximumSignificantDigits: 4 });
+  return asset ? `${text} ${asset}` : text;
+}
+
 export interface TradeRecordFees {
   /** 开仓费；记录连开仓价 / 数量都没有时为 null。 */
   open: FeeSide | null;
@@ -38,8 +51,14 @@ export interface TradeRecordFees {
   close: FeeSide;
   /** 平仓费里包含的强平清算费；非强平记录为 null。 */
   liquidationFeeUsd: number | null;
+  /** 币本位：手续费按币结算，开平两笔的**币数**不同（价格越高付的币越少），美元数却相同。 */
+  coinSettled: boolean;
+  /** 结算币种，如 BTC / ASTER；U 本位为 'USDT'。 */
+  asset: string;
   /** 开仓费 + 平仓费；开仓费未知时为 null。 */
   totalUsd: number | null;
+  /** 币本位的币计合计；U 本位为 null。 */
+  totalCoin: number | null;
   /** 记录盈亏（已扣平仓费）再扣开仓费：这一笔对钱包的净影响。 */
   netAfterOpenFee: number | null;
   /** 任一侧是估算的。 */
@@ -81,10 +100,12 @@ function openSide(record: TradeRecord): FeeSide | null {
 function closeSide(record: TradeRecord): FeeSide {
   const usd = finite(record.fee) ? record.fee : 0;
   const liquidation = record.action === 'LIQUIDATION';
+  // 币本位的老记录若没存 feeCoin，按「美元 ÷ 平仓价」还原——与 coinFeeAmount 同一条式子。
+  const coinFallback = isCoinSettled(record) && record.exitPrice > 0 ? usd / record.exitPrice : null;
   if (finite(record.closeFeeRate)) {
     return {
       usd,
-      coin: finite(record.feeCoin) ? record.feeCoin : null,
+      coin: finite(record.feeCoin) ? record.feeCoin : coinFallback,
       rate: record.closeFeeRate,
       maker: typeof record.closeIsMaker === 'boolean' ? record.closeIsMaker : false,
       estimated: false,
@@ -96,7 +117,7 @@ function closeSide(record: TradeRecord): FeeSide {
   const impliedRate = notional != null && usd > 0 ? usd / notional : null;
   return {
     usd,
-    coin: finite(record.feeCoin) ? record.feeCoin : null,
+    coin: finite(record.feeCoin) ? record.feeCoin : coinFallback,
     rate: impliedRate != null && impliedRate > 0 && impliedRate < 0.01 ? impliedRate : null,
     maker: false,
     estimated: true,
@@ -110,12 +131,19 @@ export function tradeRecordFees(record: TradeRecord): TradeRecordFees {
     ? (finite(record.liquidationFeeUsd) ? record.liquidationFeeUsd : null)
     : null;
   const totalUsd = open ? open.usd + close.usd : null;
+  const coinSettled = isCoinSettled(record);
+  const totalCoin = coinSettled && open?.coin != null && close.coin != null
+    ? open.coin + close.coin
+    : null;
   const pnl = finite(record.pnl) ? record.pnl : null;
   return {
     open,
     close,
     liquidationFeeUsd,
+    coinSettled,
+    asset: coinSettled ? (record.settlementAsset || getSettlementAsset(record.symbol)) : 'USDT',
     totalUsd,
+    totalCoin,
     netAfterOpenFee: open && pnl != null ? pnl - open.usd : null,
     estimated: Boolean(open?.estimated) || close.estimated,
   };
@@ -147,9 +175,17 @@ export function describeTradeRecordFees(record: TradeRecord): string {
   const coin = isCoinSettled(record);
   const parts: string[] = [
     coin
-      ? '币安口径：手续费 = 名义 × 费率，币本位名义 = 张数 × 面值 ÷ 成交价（以币计，折美元即 张数 × 面值 × 费率）。'
-      : '币安口径：手续费 = 名义 × 费率，名义 = 数量 × 成交价。',
+      ? `币安口径（币本位）：手续费 = 名义 × 费率，名义 = 张数 × 面值 ÷ 成交价，以 ${fees.asset} 计。`
+        + '折成美元恰好是 张数 × 面值 × 费率，价格被约掉——所以开平两笔的**美元数必然相同**，'
+        + '而**币数不同**：成交价越高，同一笔名义付出的币越少。'
+      : '币安口径（U 本位）：手续费 = 数量 × 成交价 × 费率，以 USDT 计。平仓价高于开仓价时，平仓费也高于开仓费。',
   ];
+  if (coin && fees.open?.coin != null && fees.close.coin != null) {
+    parts.push(
+      `本笔：开仓 ${formatFeeCoin(fees.open.coin, fees.asset)}、平仓 ${formatFeeCoin(fees.close.coin, fees.asset)}，`
+      + `合计 ${formatFeeCoin(fees.totalCoin, fees.asset)}。`,
+    );
+  }
   const openNotional = tradeRecordNotionalUsdAt(record, record.entryPrice);
   if (fees.open && openNotional != null) {
     parts.push(
@@ -185,11 +221,20 @@ export function describeTradeRecordFees(record: TradeRecord): string {
 }
 
 /** 一批记录的手续费合计（按记录 id 去重：同一条记录挂在几条腿上只算一次）。 */
-export function sumTradeRecordFees(records: Iterable<TradeRecord>): { totalUsd: number; estimated: boolean } | null {
+export function sumTradeRecordFees(records: Iterable<TradeRecord>): {
+  totalUsd: number;
+  /** 全部是同一币种的币本位记录时给出币计合计，否则为 null（不同币种不能相加）。 */
+  totalCoin: number | null;
+  asset: string;
+  estimated: boolean;
+} | null {
   const seen = new Set<string>();
   let total = 0;
+  let coinTotal = 0;
   let any = false;
   let estimated = false;
+  let coinOk = true;
+  let asset = 'USDT';
   for (const record of records) {
     if (seen.has(record.id)) continue;
     seen.add(record.id);
@@ -198,8 +243,15 @@ export function sumTradeRecordFees(records: Iterable<TradeRecord>): { totalUsd: 
     total += fees.totalUsd;
     any = true;
     estimated ||= fees.estimated;
+    if (fees.coinSettled && fees.totalCoin != null && (asset === 'USDT' || asset === fees.asset)) {
+      asset = fees.asset;
+      coinTotal += fees.totalCoin;
+    } else {
+      coinOk = false;
+    }
   }
-  return any ? { totalUsd: total, estimated } : null;
+  if (!any) return null;
+  return { totalUsd: total, totalCoin: coinOk && asset !== 'USDT' ? coinTotal : null, asset, estimated };
 }
 
 /** 当前费率表（供界面展示）。 */

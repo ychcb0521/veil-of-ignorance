@@ -124,12 +124,79 @@ describe('tradeRecordFees', () => {
 
   it('说明文字把币安算式、两笔费用与「盈亏列为什么是这个数」讲清楚', () => {
     const text = describeTradeRecordFees(hpe());
-    expect(text).toContain('手续费 = 名义 × 费率');
+    expect(text).toContain('手续费 = 数量 × 成交价 × 费率');
     expect(text).toContain('744310.45 × 0.04% = 297.72');
     expect(text).toContain('744384.81 × 0.04% = 297.75');
     expect(text).toContain('毛盈亏 +74.36 − 平仓费 297.75 = -223.39');
     expect(text).toContain('净结果为 -521.11');
     expect(text).toContain('估算');
+  });
+
+  /**
+   * ASTERUSDT 2025-09-18（用户案例）：币本位主多，开 8.1380 → 平 8.2060，名义 1,760,560 USD。
+   * 界面上两笔手续费的**美元数完全相等**（各 704.22），一度像是把平仓费算成了开仓费；
+   * 其实这正是币安币本位的算式：fee = 张数 × 面值 ÷ 成交价 × 费率，收的是币，
+   * 折美元后价格被约掉。差别藏在币数里：开仓 86.54，平仓 85.82。
+   */
+  const coinLeg = (over: Partial<TradeRecord> = {}): TradeRecord => hpe({
+    settlementMode: 'coin', settlementAsset: 'ASTER',
+    contracts: 176_056, contractSizeUsd: 10, quantity: 176_056,
+    entryPrice: 8.1380, exitPrice: 8.2060,
+    fee: 1_760_560 * LEGACY_TAKER_FEE, feeCoin: (1_760_560 / 8.2060) * LEGACY_TAKER_FEE,
+    ...over,
+  });
+
+  it('【用户案例】币本位：两笔的美元数相同是对的，币数才不同——价越高付的币越少', () => {
+    const fees = tradeRecordFees(coinLeg());
+    expect(fees.coinSettled).toBe(true);
+    expect(fees.asset).toBe('ASTER');
+    // 美元：张数 × 面值 × 费率，与成交价无关 ⇒ 开平必然相等
+    expect(fees.open!.usd).toBeCloseTo(704.22, 2);
+    expect(fees.close.usd).toBeCloseTo(704.22, 2);
+    expect(fees.totalUsd).toBeCloseTo(1408.45, 2);
+    // 币：名义 ÷ 成交价 × 费率 ⇒ 平仓价更高，付的币更少
+    expect(fees.open!.coin).toBeCloseTo(1_760_560 / 8.1380 * 0.0004, 4);   // 86.54
+    expect(fees.close.coin).toBeCloseTo(1_760_560 / 8.2060 * 0.0004, 4);   // 85.82
+    expect(fees.close.coin!).toBeLessThan(fees.open!.coin!);
+    expect(fees.totalCoin).toBeCloseTo(fees.open!.coin! + fees.close.coin!, 9);
+  });
+
+  it('币本位平仓价更低时反过来：平仓费的币数更多', () => {
+    const fees = tradeRecordFees(coinLeg({ exitPrice: 7.5, feeCoin: (1_760_560 / 7.5) * LEGACY_TAKER_FEE }));
+    expect(fees.close.coin!).toBeGreaterThan(fees.open!.coin!);
+    expect(fees.close.usd).toBeCloseTo(fees.open!.usd, 6);       // 美元仍然相等
+  });
+
+  it('U 本位相反：美元数随成交价走，平仓价更高则平仓费更高', () => {
+    const fees = tradeRecordFees(hpe({ exitPrice: 70 }));
+    expect(fees.coinSettled).toBe(false);
+    expect(fees.asset).toBe('USDT');
+    expect(fees.open!.coin).toBeNull();
+    expect(fees.open!.usd).toBeCloseTo(62.0584 * 11_993.71 * 0.0004, 6);
+    // 旧记录的平仓费取自记录本身；新记录里它 = 数量 × 平仓价 × 费率
+    const fresh = tradeRecordFees(hpe({
+      exitPrice: 70, fee: 11_993.71 * 70 * TAKER_FEE, closeFeeRate: TAKER_FEE,
+      openFeeUsd: 11_993.71 * 62.0584 * TAKER_FEE, openFeeRate: TAKER_FEE, openIsMaker: false,
+    }));
+    expect(fresh.close.usd).toBeGreaterThan(fresh.open!.usd);
+  });
+
+  it('币本位的说明文字讲清「美元相同、币数不同」，并给出两笔的币数', () => {
+    const text = describeTradeRecordFees(coinLeg());
+    expect(text).toContain('币本位');
+    expect(text).toContain('张数 × 面值 ÷ 成交价');
+    expect(text).toContain('美元数必然相同');
+    expect(text).toContain('币数不同');
+    expect(text).toContain('86.54 ASTER');
+    expect(text).toContain('85.82 ASTER');
+  });
+
+  it('合计：同币种的币本位记录给出币计合计，混着 U 本位就只给美元', () => {
+    const coinSum = sumTradeRecordFees([coinLeg(), coinLeg({ id: 'c2' })]);
+    expect(coinSum!.asset).toBe('ASTER');
+    expect(coinSum!.totalCoin).toBeCloseTo(2 * (1_760_560 / 8.1380 + 1_760_560 / 8.2060) * 0.0004 / 2 * 2, 2);
+    const mixed = sumTradeRecordFees([coinLeg(), hpe({ id: 'u1' })]);
+    expect(mixed!.totalCoin).toBeNull();
   });
 
   it('合计按记录去重：同一条记录挂在主力与镜像止盈两条腿上只算一次', () => {

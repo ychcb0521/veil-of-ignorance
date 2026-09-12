@@ -77,10 +77,11 @@ describe('Legs 表栅格', () => {
     expect(tracks[2]).toBe('180px');                        // 时间：放得下「开 2025-09-19 22:42」
   });
 
-  it('操作列是图标按钮，中文标签进 title 而不是渲染成文字', () => {
+  it('操作列只留两个图标按钮（标到盘面 / 解除），中文标签进 title 而不是渲染成文字', () => {
     const s = src();
-    expect(s).toContain("title=\"查看复盘\"");
     expect(s).toContain("aria-label=\"解除\"");
+    expect(s).toContain("'标到盘面'");
+    expect(s).not.toContain('查看复盘');     // 这个入口已按要求去掉
     // 旧写法把中文直接渲染在按钮里，窄列下会折成竖排
     expect(s).not.toContain('>\n                      查看复盘\n');
   });

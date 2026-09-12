@@ -42,7 +42,7 @@ describe('Legs 列表的手续费列', () => {
     expect(cell.textContent).toContain('开 297.72 · 平 297.75');
     expect(cell.textContent).toContain('估');
     expect(cell.textContent).not.toContain('Taker');
-    expect(cell.getAttribute('title')).toContain('手续费 = 名义 × 费率');
+    expect(cell.getAttribute('title')).toContain('手续费 = 数量 × 成交价 × 费率');
     expect(cell.getAttribute('title')).toContain('Taker，记录未存开仓费，按当时费率估算');
     expect(cell.getAttribute('title')).toContain('毛盈亏 +74.36 − 平仓费 297.75 = -223.39');
     expect(screen.getByTestId('legs-total-fees').textContent).toContain('595.48');

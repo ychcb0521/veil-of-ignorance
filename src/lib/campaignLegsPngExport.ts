@@ -10,7 +10,7 @@ import { computeInitialMainExposureNotional } from '@/lib/campaignAnalysis';
 import { formatCampaignLeverage, resolveCampaignMainLeverage } from '@/lib/campaignMetrics';
 import { formatCampaignDisplayCode } from '@/lib/campaignCode';
 import { buildCampaignReverseOrderLegMap } from '@/lib/campaignReverseOrderAttribution';
-import { tradeRecordFees } from '@/lib/tradeFees';
+import { formatFeeCoin, tradeRecordFees } from '@/lib/tradeFees';
 import { buildMainLegOrdinals } from '@/lib/campaignMainLegOrdinals';
 import { resolveMirrorTpOrderTiming } from '@/lib/campaignMirrorTpOrderTiming';
 import { computeLegPnlContributions } from '@/lib/campaignLegPnl';
@@ -369,14 +369,20 @@ export function buildCampaignLegsExportRows(input: ExportInput): CampaignLegsExp
       (() => {
         const fees = execution.record ? tradeRecordFees(execution.record) : null;
         if (!fees) return [{ text: '—', color: '#A3ABB8' }];
+        // 币本位按币显示：折成美元后价格被约掉，开平两笔的美元数必然相同（见 tradeFees）
+        const coinMode = fees.coinSettled && fees.totalCoin != null;
         return [
           {
-            text: `${fees.totalUsd == null ? '—' : fees.totalUsd.toFixed(2)}${fees.estimated ? ' 估' : ''}`,
+            text: `${coinMode
+              ? formatFeeCoin(fees.totalCoin, fees.asset)
+              : fees.totalUsd == null ? '—' : fees.totalUsd.toFixed(2)}${fees.estimated ? ' 估' : ''}`,
             color: '#5F6B7A',
             size: 11,
           },
           {
-            text: `开 ${fees.open ? fees.open.usd.toFixed(2) : '—'} · 平 ${fees.close.usd.toFixed(2)}`,
+            text: coinMode
+              ? `开 ${formatFeeCoin(fees.open?.coin)} · 平 ${formatFeeCoin(fees.close.coin)}`
+              : `开 ${fees.open ? fees.open.usd.toFixed(2) : '—'} · 平 ${fees.close.usd.toFixed(2)}`,
             color: '#9AA4B2',
             size: 10,
           },
