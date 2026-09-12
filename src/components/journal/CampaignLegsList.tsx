@@ -12,7 +12,7 @@ import type { CampaignEvent, TradeJournal } from '@/types/journal';
 import { computeLegPnlContributions, sumLegPnl } from '@/lib/campaignLegPnl';
 import { computeCampaignRealizedPnl } from '@/lib/campaignRealizedPnl';
 import { legDeltaB, splitMainLegPhases, type MainLegPhase } from '@/lib/campaignLegPhases';
-import { describeTradeRecordFees, feeKindLabel, sumTradeRecordFees, tradeRecordFees } from '@/lib/tradeFees';
+import { describeTradeRecordFees, sumTradeRecordFees, tradeRecordFees } from '@/lib/tradeFees';
 import type { CampaignReverseHedgeOrder, TradeRecord } from '@/types/trading';
 
 interface Props {
@@ -72,10 +72,10 @@ function fmtPrice(value: number | null | undefined): string {
 /** 手续费列表头的说明：币安的算式、费率档与「盈亏列为什么已经扣了平仓费」。 */
 const FEE_COLUMN_HINT = '币安口径：手续费 = 名义 × 费率，开仓、平仓各收一次；市价单 / 触发单 Taker 0.05%，盘口限价单 Maker 0.02%（U 本位名义 = 数量 × 成交价；币本位 = 张数 × 面值 ÷ 成交价，以币计）。盈亏列已扣平仓费；开仓费在开仓当时从钱包扣除。旧记录未存开仓费，按当时 0.04% Taker 估算并标明。';
 
-const LEGS_GRID = 'grid-cols-[44px_112px_minmax(200px,1fr)_100px_100px_104px_84px_132px_124px_88px_236px_136px]';
+const LEGS_GRID = 'grid-cols-[44px_112px_minmax(200px,1fr)_100px_100px_104px_84px_112px_132px_88px_236px_136px]';
 
 /** 各列合计的下限，与 LEGS_GRID 对应；不足时容器横向滚动而不是压扁列。 */
-const LEGS_MIN_WIDTH = 'min-w-[1612px]';
+const LEGS_MIN_WIDTH = 'min-w-[1600px]';
 
 export function CampaignLegsList({
   legs,
@@ -193,8 +193,8 @@ export function CampaignLegsList({
             <div className="text-right">平仓价</div>
             <div className="text-right" title="上行：名义仓位（USD）；下行：按开仓价折算的币量，即加仓公式里的 X">仓位 / 币量</div>
             <div>状态</div>
+            <div className="text-right text-muted-foreground/70" title={FEE_COLUMN_HINT}>手续费</div>
             <div className="text-right" title="该腿的已实现盈亏（已扣平仓费；开仓费在开仓当时从钱包扣除，见手续费列）">盈亏 / 贡献</div>
-            <div className="text-right" title={FEE_COLUMN_HINT}>手续费</div>
             <div className="text-right" title="该腿盈亏 ÷ 初始最大预期亏损 L：这条腿把整场 b 推高 / 拉低了多少">Δb</div>
             <div>委托</div>
             <div className="text-right">操作</div>
@@ -277,6 +277,27 @@ export function CampaignLegsList({
                   </div>
                   <div className={status.className}>{status.label}</div>
                   {(() => {
+                    // 手续费：**刻意做淡**——它是成本注脚，不是这一行的主角。
+                    // 合计在上、开/平拆分在下；费率、Maker/Taker、估算依据全在 tooltip 里。
+                    const fees = execution.record ? tradeRecordFees(execution.record) : null;
+                    if (!fees) return <div className="text-right text-[10px] text-muted-foreground/50">—</div>;
+                    return (
+                      <div
+                        data-testid={`leg-fees-${leg.id}`}
+                        title={describeTradeRecordFees(execution.record!)}
+                        className="text-right leading-tight tabular-nums text-[10px] text-muted-foreground/70"
+                      >
+                        <div>
+                          {fees.totalUsd == null ? '—' : fees.totalUsd.toFixed(2)}
+                          {fees.estimated && <span className="ml-0.5 text-[9px] text-muted-foreground/50">估</span>}
+                        </div>
+                        <div className="text-[9px] text-muted-foreground/50">
+                          开 {fees.open ? fees.open.usd.toFixed(2) : '—'} · 平 {fees.close.usd.toFixed(2)}
+                        </div>
+                      </div>
+                    );
+                  })()}
+                  {(() => {
                     const entry = legPnlMap.get(leg.id);
                     const pnl = entry?.pnl ?? null;
                     if (pnl == null) {
@@ -303,28 +324,6 @@ export function CampaignLegsList({
                             ? '—'
                             : `${contribution > 0 ? '+' : ''}${(contribution * 100).toFixed(1)}%`}
                         </div>
-                      </div>
-                    );
-                  })()}
-                  {(() => {
-                    // 手续费列：开仓费 + 平仓费 = 合计，各带 Maker/Taker 与费率。
-                    // 只有成交记录才有可信的手续费；计划中的腿、只有复盘快照的腿显示「—」。
-                    const fees = execution.record ? tradeRecordFees(execution.record) : null;
-                    if (!fees) return <div className="text-right text-muted-foreground">—</div>;
-                    return (
-                      <div
-                        data-testid={`leg-fees-${leg.id}`}
-                        title={describeTradeRecordFees(execution.record!)}
-                        className="text-right leading-tight tabular-nums"
-                      >
-                        <div><span className="text-muted-foreground">开 </span>{fees.open ? fees.open.usd.toFixed(2) : '—'}</div>
-                        <div className="text-[9px] text-muted-foreground">{fees.open ? feeKindLabel(fees.open) : '无开仓信息'}</div>
-                        <div><span className="text-muted-foreground">平 </span>{fees.close.usd.toFixed(2)}</div>
-                        <div className="text-[9px] text-muted-foreground">
-                          {feeKindLabel(fees.close)}{fees.liquidationFeeUsd != null ? ' · 含强平费' : ''}
-                        </div>
-                        <div className="font-medium"><span className="font-normal text-muted-foreground">合计 </span>{fees.totalUsd == null ? '—' : fees.totalUsd.toFixed(2)}</div>
-                        {fees.open?.estimated && <div className="text-[9px] text-[#D89B00]">开仓费为估算</div>}
                       </div>
                     );
                   })()}
@@ -472,6 +471,7 @@ export function CampaignLegsList({
                           <div className="text-right tabular-nums">{fmtPrice(phase.endPrice)}</div>
                           <div />
                           <div />
+                          <div />
                           <div className="text-right leading-tight">
                             <div className={`tabular-nums ${phase.pnl === 0 ? '' : positive ? 'text-[#0ECB81]/90' : 'text-[#F6465D]/90'}`}>
                               {positive ? '+' : ''}{phase.pnl.toFixed(2)}
@@ -480,7 +480,6 @@ export function CampaignLegsList({
                               {phaseContribution == null ? '—' : `${phaseContribution > 0 ? '+' : ''}${(phaseContribution * 100).toFixed(1)}%`}
                             </div>
                           </div>
-                          <div />
                           <div className={`text-right tabular-nums ${phaseDelta == null ? '' : phaseDelta > 0 ? 'text-[#0ECB81]/90' : phaseDelta < 0 ? 'text-[#F6465D]/90' : ''}`}>
                             {phaseDelta == null ? '—' : `${phaseDelta > 0 ? '+' : ''}${phaseDelta.toFixed(2)}`}
                           </div>
@@ -505,16 +504,16 @@ export function CampaignLegsList({
               <div className="text-muted-foreground">合计</div>
               <div className="text-[10px] text-muted-foreground">{settlementBasisLabel(settlement.basis)}</div>
               <div /><div /><div /><div />
-              <div className={`text-right tabular-nums ${totalPnl == null ? 'text-muted-foreground' : totalPnl > 0 ? 'text-[#0ECB81]' : totalPnl < 0 ? 'text-[#F6465D]' : ''}`}>
-                {totalPnl == null ? '—' : `${totalPnl > 0 ? '+' : ''}${totalPnl.toFixed(2)}`}
-              </div>
               <div
                 data-testid="legs-total-fees"
                 title="本场全部成交记录的开仓费 + 平仓费（按记录去重：同一条记录挂在几条腿上只算一次）"
-                className="text-right tabular-nums text-muted-foreground leading-tight"
+                className="text-right text-[10px] font-normal tabular-nums leading-tight text-muted-foreground/70"
               >
                 {feeTotals == null ? '—' : feeTotals.totalUsd.toFixed(2)}
-                {feeTotals?.estimated && <div className="text-[9px] text-[#D89B00]">含估算</div>}
+                {feeTotals?.estimated && <span className="ml-0.5 text-[9px] text-muted-foreground/50">估</span>}
+              </div>
+              <div className={`text-right tabular-nums ${totalPnl == null ? 'text-muted-foreground' : totalPnl > 0 ? 'text-[#0ECB81]' : totalPnl < 0 ? 'text-[#F6465D]' : ''}`}>
+                {totalPnl == null ? '—' : `${totalPnl > 0 ? '+' : ''}${totalPnl.toFixed(2)}`}
               </div>
               <div className={`text-right tabular-nums ${totalDeltaB == null ? 'text-muted-foreground' : totalDeltaB > 0 ? 'text-[#0ECB81]' : totalDeltaB < 0 ? 'text-[#F6465D]' : ''}`}>
                 {totalDeltaB == null ? '—' : `${totalDeltaB > 0 ? '+' : ''}${totalDeltaB.toFixed(2)}`}

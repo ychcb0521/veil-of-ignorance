@@ -10,7 +10,7 @@ import { computeInitialMainExposureNotional } from '@/lib/campaignAnalysis';
 import { formatCampaignLeverage, resolveCampaignMainLeverage } from '@/lib/campaignMetrics';
 import { formatCampaignDisplayCode } from '@/lib/campaignCode';
 import { buildCampaignReverseOrderLegMap } from '@/lib/campaignReverseOrderAttribution';
-import { feeKindLabel, tradeRecordFees } from '@/lib/tradeFees';
+import { tradeRecordFees } from '@/lib/tradeFees';
 import { buildMainLegOrdinals } from '@/lib/campaignMainLegOrdinals';
 import { resolveMirrorTpOrderTiming } from '@/lib/campaignMirrorTpOrderTiming';
 import { computeLegPnlContributions } from '@/lib/campaignLegPnl';
@@ -80,8 +80,8 @@ const COLUMNS = [
   { title: '平仓价', width: 122 },
   { title: '仓位 / 币量', width: 122 },
   { title: '状态', width: 108 },
+  { title: '手续费', width: 140 },
   { title: '盈亏 / 贡献', width: 150 },
-  { title: '手续费', width: 128 },
   { title: 'Δb', width: 90 },
   { title: '委托', width: 470 },
 ] as const;
@@ -323,6 +323,21 @@ export function buildCampaignLegsExportRows(input: ExportInput): CampaignLegsExp
           ];
       })(),
       [{ text: status.label, color: status.color, bold: true }],
+      // 手续费：与页面同源，同样刻意做淡——合计在上、开/平拆分在下，明细在页面的 tooltip 里。
+      (() => {
+        const fees = execution.record ? tradeRecordFees(execution.record) : null;
+        if (!fees) return [{ text: '—', color: '#A3ABB8' }];
+        return [
+          {
+            text: `${fees.totalUsd == null ? '—' : fees.totalUsd.toFixed(2)}${fees.estimated ? ' 估' : ''}`,
+            color: '#848E9C',
+          },
+          {
+            text: `开 ${fees.open ? fees.open.usd.toFixed(2) : '—'} · 平 ${fees.close.usd.toFixed(2)}`,
+            color: '#A3ABB8',
+          },
+        ];
+      })(),
       (() => {
         // 与页面上的 Legs 列表同源，避免导出图与界面读数打架
         const entry = legPnlMap.get(leg.id);
@@ -341,19 +356,6 @@ export function buildCampaignLegsExportRows(input: ExportInput): CampaignLegsExp
               : `${contribution > 0 ? '+' : ''}${(contribution * 100).toFixed(1)}%`,
             color: '#848E9C',
           },
-        ];
-      })(),
-      // 与页面同源：开仓费 + 平仓费 = 合计，各带 Maker/Taker 与费率；旧记录的开仓费标「估算」。
-      (() => {
-        const fees = execution.record ? tradeRecordFees(execution.record) : null;
-        if (!fees) return [{ text: '—', color: '#848E9C' }];
-        return [
-          { text: `开 ${fees.open ? fees.open.usd.toFixed(2) : '—'}` },
-          { text: fees.open ? feeKindLabel(fees.open) : '无开仓信息', color: '#848E9C' },
-          { text: `平 ${fees.close.usd.toFixed(2)}` },
-          { text: `${feeKindLabel(fees.close)}${fees.liquidationFeeUsd != null ? ' · 含强平费' : ''}`, color: '#848E9C' },
-          { text: `合计 ${fees.totalUsd == null ? '—' : fees.totalUsd.toFixed(2)}`, bold: true },
-          ...(fees.open?.estimated ? [{ text: '开仓费为估算', color: '#D89B00' }] : []),
         ];
       })(),
       (() => {
@@ -402,6 +404,7 @@ export function buildCampaignLegsExportRows(input: ExportInput): CampaignLegsExp
           [{ text: fmtPrice(phase.endPrice), color: '#848E9C' }],
           [{ text: '' }],
           [{ text: '' }],
+          [{ text: '' }],
           [
             {
               text: `${phase.pnl > 0 ? '+' : ''}${phase.pnl.toFixed(2)}`,
@@ -412,7 +415,6 @@ export function buildCampaignLegsExportRows(input: ExportInput): CampaignLegsExp
               color: '#848E9C',
             },
           ],
-          [{ text: '' }],
           [{
             text: delta == null ? '—' : `${delta > 0 ? '+' : ''}${delta.toFixed(2)}`,
             color: delta == null || delta === 0 ? '#5F6B7A' : delta > 0 ? '#0ECB81' : '#F6465D',

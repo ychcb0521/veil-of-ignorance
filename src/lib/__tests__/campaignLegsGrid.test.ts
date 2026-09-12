@@ -29,9 +29,14 @@ describe('Legs 表栅格', () => {
     // 用下划线分隔，但 minmax(200px,1fr) 内部没有下划线，可安全按 _ 切
     const columnCount = grid.split('_').length;
     expect(columnCount).toBe(12);
-    for (const title of ['#', '角色', '时间', '开仓价', '平仓价', '仓位 / 币量', '状态', '盈亏 / 贡献', '手续费', 'Δb', '委托', '操作']) {
+    for (const title of ['#', '角色', '时间', '开仓价', '平仓价', '仓位 / 币量', '状态', '手续费', '盈亏 / 贡献', 'Δb', '委托', '操作']) {
       expect(s).toContain(`>${title}</div>`);
     }
+  });
+
+  it('手续费列排在盈亏列之前——它是成本注脚，不该抢主列的位置', () => {
+    const s = src();
+    expect(s.indexOf('>手续费</div>')).toBeLessThan(s.indexOf('>盈亏 / 贡献</div>'));
   });
 
   it('画出合计行——它按构造恒等于盈亏概览，是防止两套账再次分家的可视断言', () => {

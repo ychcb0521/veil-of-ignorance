@@ -35,16 +35,16 @@ describe('Legs 列表的手续费列', () => {
     const record = hpeRecord();
     renderList([record], [legFor(record)]);
     const cell = screen.getByTestId('leg-fees-leg-1');
-    expect(cell.textContent).toContain('开 297.72');
-    expect(cell.textContent).toContain('平 297.75');
-    expect(cell.textContent).toContain('合计 595.48');
-    expect(cell.textContent).toContain('Taker ≈0.04%');
-    expect(cell.textContent).toContain('开仓费为估算');
-    // tooltip 把币安算式与「盈亏为什么是这个数」讲清楚
+    // 只露两行：合计在上、开/平拆分在下；费率与估算依据都收进 tooltip
+    expect(cell.textContent).toContain('595.48');
+    expect(cell.textContent).toContain('开 297.72 · 平 297.75');
+    expect(cell.textContent).toContain('估');
+    expect(cell.textContent).not.toContain('Taker');
     expect(cell.getAttribute('title')).toContain('手续费 = 名义 × 费率');
+    expect(cell.getAttribute('title')).toContain('Taker，记录未存开仓费，按当时费率估算');
     expect(cell.getAttribute('title')).toContain('毛盈亏 +74.36 − 平仓费 297.75 = -223.39');
     expect(screen.getByTestId('legs-total-fees').textContent).toContain('595.48');
-    expect(screen.getByTestId('legs-total-fees').textContent).toContain('含估算');
+    expect(screen.getByTestId('legs-total-fees').textContent).toContain('估');
   });
 
   it('新记录：三个数都来自记录，标 Taker 0.05%，不带估算字样', () => {
@@ -54,22 +54,33 @@ describe('Legs 列表的手续费列', () => {
     });
     renderList([record], [legFor(record)]);
     const cell = screen.getByTestId('leg-fees-leg-1');
-    expect(cell.textContent).toContain('开 372.16');
-    expect(cell.textContent).toContain('平 372.19');
-    expect(cell.textContent).toContain('合计 744.35');
-    expect(cell.textContent).toContain('Taker 0.05%');
+    expect(cell.textContent).toContain('744.35');
+    expect(cell.textContent).toContain('开 372.16 · 平 372.19');
     expect(cell.textContent).not.toContain('估');
+    expect(cell.getAttribute('title')).toContain('0.05%');
     expect(screen.getByTestId('legs-total-fees').textContent).not.toContain('估');
   });
 
-  it('强平记录：平仓费标明含强平费', () => {
+  it('手续费列排在盈亏列之前，且比盈亏淡', () => {
+    const record = hpeRecord();
+    const { container } = renderList([record], [legFor(record)]);
+    const fees = screen.getByTestId('leg-fees-leg-1');
+    const pnl = screen.getByTestId(`leg-pnl-leg-1`);
+    // DOM 顺序 = 栅格列序
+    expect(fees.compareDocumentPosition(pnl) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(fees.className).toContain('text-muted-foreground/70');
+    expect(container.querySelector('[data-testid="legs-total-fees"]')?.className)
+      .toContain('text-muted-foreground/70');
+  });
+
+  it('强平记录：tooltip 里标明含强平清算费', () => {
     const record = hpeRecord({
       action: 'LIQUIDATION', exit_method: 'liquidation', liquidationSettlement: 'bankruptcy',
       pnl: -74_431, fee: 4_019.4, closeFeeRate: TAKER_FEE, closeIsMaker: false, liquidationFeeUsd: 3_721.6,
       openFeeUsd: 372.155, openIsMaker: false, openFeeRate: TAKER_FEE,
     });
     renderList([record], [legFor(record)]);
-    expect(screen.getByTestId('leg-fees-leg-1').textContent).toContain('含强平费');
+    expect(screen.getByTestId('leg-fees-leg-1').getAttribute('title')).toContain('强平清算费 3721.60');
   });
 
   it('没有成交记录的腿显示「—」；合计按记录去重', () => {
