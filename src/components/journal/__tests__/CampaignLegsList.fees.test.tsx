@@ -26,8 +26,10 @@ const legFor = (record: TradeRecord, id = 'leg-1'): TradeJournal => ({
   created_at: '2026-09-12T00:00:00.000Z', updated_at: '2026-09-12T00:00:00.000Z',
 } as TradeJournal);
 
-const renderList = (records: TradeRecord[], legs: TradeJournal[]) => render(
-  <MemoryRouter><CampaignLegsList legs={legs} tradeRecords={records} /></MemoryRouter>,
+const renderList = (records: TradeRecord[], legs: TradeJournal[], expectedMaxLoss: number | null = 30_487) => render(
+  <MemoryRouter>
+    <CampaignLegsList legs={legs} tradeRecords={records} initialExpectedMaxLoss={expectedMaxLoss} />
+  </MemoryRouter>,
 );
 
 describe('Legs 列表的手续费列', () => {
@@ -61,16 +63,36 @@ describe('Legs 列表的手续费列', () => {
     expect(screen.getByTestId('legs-total-fees').textContent).not.toContain('估');
   });
 
-  it('手续费列排在盈亏列之前，且比盈亏淡', () => {
+  it('主次：Δb 最重、盈亏次之、手续费最轻，且手续费排在盈亏之前', () => {
     const record = hpeRecord();
-    const { container } = renderList([record], [legFor(record)]);
+    renderList([record], [legFor(record)]);
     const fees = screen.getByTestId('leg-fees-leg-1');
-    const pnl = screen.getByTestId(`leg-pnl-leg-1`);
-    // DOM 顺序 = 栅格列序
+    const pnl = screen.getByTestId('leg-pnl-leg-1');
+    const delta = screen.getByTestId('leg-delta-b-leg-1');
+    // DOM 顺序 = 栅格列序：手续费在盈亏之前
     expect(fees.compareDocumentPosition(pnl) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(fees.className).toContain('text-muted-foreground/70');
-    expect(container.querySelector('[data-testid="legs-total-fees"]')?.className)
-      .toContain('text-muted-foreground/70');
+    // 主次由字号与字重定，不靠发灰
+    expect(delta.className).toContain('text-[14px]');
+    expect(delta.className).toContain('font-semibold');
+    expect(pnl.className).toContain('text-[12px]');
+    expect(fees.className).toContain('text-[11px]');
+    // 合计行同一套
+    expect(screen.getByTestId('legs-total-delta-b').className).toContain('text-[14px]');
+    expect(screen.getByTestId('legs-total-fees').className).toContain('text-[11px]');
+    /**
+     * 底色必须写成 /[0.12]。任意色配非标准透明度档（写成 /12）Tailwind 不生成规则，
+     * 底色会**静默**失效——改回那种写法时这条会响。
+     */
+    expect(delta.className).toContain('bg-[#F6465D]/[0.12]');
+  });
+
+  it('小到取不出两位小数的 Δb 显示 0.00，不是「−0.00」，且用中性底色', () => {
+    const record = hpeRecord({ pnl: -122.4 });
+    renderList([record], [legFor(record)], 30_487);          // −122.4 ÷ 30487 = −0.004
+    const delta = screen.getByTestId('leg-delta-b-leg-1');
+    expect(delta.textContent).toBe('0.00');
+    expect(delta.className).toContain('bg-muted');
+    expect(delta.className).not.toContain('#F6465D');
   });
 
   it('强平记录：tooltip 里标明含强平清算费', () => {

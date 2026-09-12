@@ -69,13 +69,38 @@ function fmtPrice(value: number | null | undefined): string {
  * 时间列用 minmax(200px, 1fr) 而不是裸 1fr：裸 1fr 在容器被压窄时会缩到
  * 放不下「操作 2026-08-21 11:03」，导致文字逐字竖排。
  */
+/**
+ * Δb 是这张表的主角（这条腿把整场的 b 推高/拉低了多少），用最大字号 + 淡色底的胶囊固定住视线。
+ * 底色只取 12% 透明度：密排表格里满色块会盖过数字本身。
+ */
+function deltaTone(delta: number | null): string {
+  if (delta == null || roundedDeltaB(delta) === 0) return 'bg-muted text-muted-foreground';
+  // 透明度必须写成 /[0.12]：任意色 + 非标准透明度档（/12）Tailwind 不会生成规则，底色会静默失效。
+  return delta > 0
+    ? 'bg-[#0ECB81]/[0.12] text-[#0ECB81]'
+    : 'bg-[#F6465D]/[0.12] text-[#F6465D]';
+}
+
+/** 两位小数下取不到半个刻度的值就是 0：否则会印出「−0.00」这种自相矛盾的读数。 */
+function roundedDeltaB(delta: number): number {
+  const rounded = Number(delta.toFixed(2));
+  return rounded === 0 ? 0 : rounded;
+}
+
+/** 「+0.43」「-0.06」「0.00」。 */
+function formatDeltaB(delta: number | null): string {
+  if (delta == null) return '—';
+  const value = roundedDeltaB(delta);
+  return `${value > 0 ? '+' : ''}${value.toFixed(2)}`;
+}
+
 /** 手续费列表头的说明：币安的算式、费率档与「盈亏列为什么已经扣了平仓费」。 */
 const FEE_COLUMN_HINT = '币安口径：手续费 = 名义 × 费率，开仓、平仓各收一次；市价单 / 触发单 Taker 0.05%，盘口限价单 Maker 0.02%（U 本位名义 = 数量 × 成交价；币本位 = 张数 × 面值 ÷ 成交价，以币计）。盈亏列已扣平仓费；开仓费在开仓当时从钱包扣除。旧记录未存开仓费，按当时 0.04% Taker 估算并标明。';
 
-const LEGS_GRID = 'grid-cols-[44px_112px_minmax(200px,1fr)_100px_100px_104px_84px_112px_132px_88px_236px_136px]';
+const LEGS_GRID = 'grid-cols-[44px_112px_minmax(200px,1fr)_100px_100px_104px_84px_124px_124px_96px_236px_136px]';
 
 /** 各列合计的下限，与 LEGS_GRID 对应；不足时容器横向滚动而不是压扁列。 */
-const LEGS_MIN_WIDTH = 'min-w-[1600px]';
+const LEGS_MIN_WIDTH = 'min-w-[1612px]';
 
 export function CampaignLegsList({
   legs,
@@ -193,9 +218,9 @@ export function CampaignLegsList({
             <div className="text-right">平仓价</div>
             <div className="text-right" title="上行：名义仓位（USD）；下行：按开仓价折算的币量，即加仓公式里的 X">仓位 / 币量</div>
             <div>状态</div>
-            <div className="text-right text-muted-foreground/70" title={FEE_COLUMN_HINT}>手续费</div>
-            <div className="text-right" title="该腿的已实现盈亏（已扣平仓费；开仓费在开仓当时从钱包扣除，见手续费列）">盈亏 / 贡献</div>
-            <div className="text-right" title="该腿盈亏 ÷ 初始最大预期亏损 L：这条腿把整场 b 推高 / 拉低了多少">Δb</div>
+            <div className="text-right text-muted-foreground/60" title={FEE_COLUMN_HINT}>手续费</div>
+            <div className="text-right text-foreground/70" title="该腿的已实现盈亏（已扣平仓费；开仓费在开仓当时从钱包扣除，见手续费列）">盈亏 / 贡献</div>
+            <div className="text-right font-semibold tracking-wide text-foreground/85" title="该腿盈亏 ÷ 初始最大预期亏损 L：这条腿把整场 b 推高 / 拉低了多少">Δb</div>
             <div>委托</div>
             <div className="text-right">操作</div>
           </div>
@@ -277,21 +302,25 @@ export function CampaignLegsList({
                   </div>
                   <div className={status.className}>{status.label}</div>
                   {(() => {
-                    // 手续费：**刻意做淡**——它是成本注脚，不是这一行的主角。
-                    // 合计在上、开/平拆分在下；费率、Maker/Taker、估算依据全在 tooltip 里。
+                    /**
+                     * 三列的主次由**字号与字重**定，不靠发灰：
+                     *   Δb 14px 半粗 + 淡色底（主角）→ 盈亏 12px 中粗（次角）→ 手续费 11px 常规（注脚）。
+                     * 手续费用中性前景色而不是灰调，密排小字下灰调会显脏。
+                     * 费率、Maker/Taker、估算依据都在 tooltip 里。
+                     */
                     const fees = execution.record ? tradeRecordFees(execution.record) : null;
-                    if (!fees) return <div className="text-right text-[10px] text-muted-foreground/50">—</div>;
+                    if (!fees) return <div className="text-right text-[11px] text-foreground/30">—</div>;
                     return (
                       <div
                         data-testid={`leg-fees-${leg.id}`}
                         title={describeTradeRecordFees(execution.record!)}
-                        className="text-right leading-tight tabular-nums text-[10px] text-muted-foreground/70"
+                        className="text-right text-[11px] leading-snug tabular-nums text-foreground/55"
                       >
                         <div>
                           {fees.totalUsd == null ? '—' : fees.totalUsd.toFixed(2)}
-                          {fees.estimated && <span className="ml-0.5 text-[9px] text-muted-foreground/50">估</span>}
+                          {fees.estimated && <span className="ml-1 text-[8px] tracking-wide text-foreground/30">估</span>}
                         </div>
-                        <div className="text-[9px] text-muted-foreground/50">
+                        <div className="overflow-hidden text-ellipsis whitespace-nowrap text-[9px] text-foreground/35">
                           开 {fees.open ? fees.open.usd.toFixed(2) : '—'} · 平 {fees.close.usd.toFixed(2)}
                         </div>
                       </div>
@@ -310,16 +339,16 @@ export function CampaignLegsList({
                       <div
                         data-testid={`leg-pnl-${leg.id}`}
                         title="该腿的已实现盈亏，以及它在本场各腿盈亏绝对值之和里所占的份额"
-                        className="text-right leading-tight"
+                        className="text-right text-[12px] leading-snug"
                       >
                         <div
-                          className={`font-mono tabular-nums ${
-                            pnl === 0 ? 'text-muted-foreground' : positive ? 'text-[#0ECB81]' : 'text-[#F6465D]'
+                          className={`font-mono font-medium tabular-nums ${
+                            pnl === 0 ? 'text-foreground/50' : positive ? 'text-[#0ECB81]/90' : 'text-[#F6465D]/90'
                           }`}
                         >
                           {positive ? '+' : ''}{pnl.toFixed(2)}
                         </div>
-                        <div className="text-[9px] tabular-nums text-muted-foreground">
+                        <div className="text-[9px] tabular-nums text-foreground/35">
                           {contribution == null
                             ? '—'
                             : `${contribution > 0 ? '+' : ''}${(contribution * 100).toFixed(1)}%`}
@@ -330,16 +359,16 @@ export function CampaignLegsList({
                   {(() => {
                     const pnl = legPnlMap.get(leg.id)?.pnl ?? null;
                     const delta = legDeltaB(pnl, initialExpectedMaxLoss);
-                    if (delta == null) return <div className="text-right text-muted-foreground">—</div>;
+                    if (delta == null) return <div className="text-right text-[11px] text-foreground/30">—</div>;
                     return (
-                      <div
-                        data-testid={`leg-delta-b-${leg.id}`}
-                        title="该腿盈亏 ÷ 初始最大预期亏损 L —— 这条腿把整场 b 推高 / 拉低了多少个单位"
-                        className={`text-right tabular-nums ${
-                          delta === 0 ? 'text-muted-foreground' : delta > 0 ? 'text-[#0ECB81]' : 'text-[#F6465D]'
-                        }`}
-                      >
-                        {delta > 0 ? '+' : ''}{delta.toFixed(2)}
+                      <div className="flex justify-end">
+                        <span
+                          data-testid={`leg-delta-b-${leg.id}`}
+                          title="该腿盈亏 ÷ 初始最大预期亏损 L —— 这条腿把整场 b 推高 / 拉低了多少个单位"
+                          className={`inline-flex items-center rounded-md px-1.5 py-0.5 text-[14px] font-semibold leading-tight tabular-nums ${deltaTone(delta)}`}
+                        >
+                          {formatDeltaB(delta)}
+                        </span>
                       </div>
                     );
                   })()}
@@ -507,16 +536,21 @@ export function CampaignLegsList({
               <div
                 data-testid="legs-total-fees"
                 title="本场全部成交记录的开仓费 + 平仓费（按记录去重：同一条记录挂在几条腿上只算一次）"
-                className="text-right text-[10px] font-normal tabular-nums leading-tight text-muted-foreground/70"
+                className="text-right text-[11px] font-normal tabular-nums leading-snug text-foreground/55"
               >
                 {feeTotals == null ? '—' : feeTotals.totalUsd.toFixed(2)}
-                {feeTotals?.estimated && <span className="ml-0.5 text-[9px] text-muted-foreground/50">估</span>}
+                {feeTotals?.estimated && <span className="ml-1 text-[8px] tracking-wide text-foreground/30">估</span>}
               </div>
-              <div className={`text-right tabular-nums ${totalPnl == null ? 'text-muted-foreground' : totalPnl > 0 ? 'text-[#0ECB81]' : totalPnl < 0 ? 'text-[#F6465D]' : ''}`}>
+              <div className={`text-right text-[12px] font-medium tabular-nums ${totalPnl == null ? 'text-foreground/50' : totalPnl > 0 ? 'text-[#0ECB81]/90' : totalPnl < 0 ? 'text-[#F6465D]/90' : ''}`}>
                 {totalPnl == null ? '—' : `${totalPnl > 0 ? '+' : ''}${totalPnl.toFixed(2)}`}
               </div>
-              <div className={`text-right tabular-nums ${totalDeltaB == null ? 'text-muted-foreground' : totalDeltaB > 0 ? 'text-[#0ECB81]' : totalDeltaB < 0 ? 'text-[#F6465D]' : ''}`}>
-                {totalDeltaB == null ? '—' : `${totalDeltaB > 0 ? '+' : ''}${totalDeltaB.toFixed(2)}`}
+              <div className="flex justify-end">
+                <span
+                  data-testid="legs-total-delta-b"
+                  className={`inline-flex items-center rounded-md px-1.5 py-0.5 text-[14px] font-semibold leading-tight tabular-nums ${deltaTone(totalDeltaB)}`}
+                >
+                  {formatDeltaB(totalDeltaB)}
+                </span>
               </div>
               <div /><div />
             </div>

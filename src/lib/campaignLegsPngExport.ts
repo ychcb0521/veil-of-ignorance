@@ -52,6 +52,8 @@ export type CampaignLegsExportCellLine = {
   text: string;
   color?: string;
   bold?: boolean;
+  /** 字号（px）。缺省 13——三个数值列靠它拉开主次：Δb 16 / 盈亏 13 / 手续费 11。 */
+  size?: number;
 };
 
 export type CampaignLegsExportRow = {
@@ -82,7 +84,7 @@ const COLUMNS = [
   { title: '状态', width: 108 },
   { title: '手续费', width: 140 },
   { title: '盈亏 / 贡献', width: 150 },
-  { title: 'Δb', width: 90 },
+  { title: 'Δb', width: 104 },
   { title: '委托', width: 470 },
 ] as const;
 
@@ -330,11 +332,13 @@ export function buildCampaignLegsExportRows(input: ExportInput): CampaignLegsExp
         return [
           {
             text: `${fees.totalUsd == null ? '—' : fees.totalUsd.toFixed(2)}${fees.estimated ? ' 估' : ''}`,
-            color: '#848E9C',
+            color: '#5F6B7A',
+            size: 11,
           },
           {
             text: `开 ${fees.open ? fees.open.usd.toFixed(2) : '—'} · 平 ${fees.close.usd.toFixed(2)}`,
-            color: '#A3ABB8',
+            color: '#9AA4B2',
+            size: 10,
           },
         ];
       })(),
@@ -349,12 +353,14 @@ export function buildCampaignLegsExportRows(input: ExportInput): CampaignLegsExp
             text: `${pnl > 0 ? '+' : ''}${pnl.toFixed(2)}`,
             color: pnl === 0 ? '#5F6B7A' : pnl > 0 ? '#0ECB81' : '#F6465D',
             bold: true,
+            size: 13,
           },
           {
             text: contribution == null
               ? '—'
               : `${contribution > 0 ? '+' : ''}${(contribution * 100).toFixed(1)}%`,
-            color: '#848E9C',
+            color: '#9AA4B2',
+            size: 10,
           },
         ];
       })(),
@@ -362,10 +368,12 @@ export function buildCampaignLegsExportRows(input: ExportInput): CampaignLegsExp
         const pnl = legPnlMap.get(leg.id)?.pnl ?? null;
         const delta = legDeltaB(pnl, input.initialExpectedMaxLoss ?? null);
         if (delta == null) return [{ text: '—', color: '#848E9C' }];
+        // Δb 是主角：导出图里也用最大字号把它顶出来
         return [{
           text: `${delta > 0 ? '+' : ''}${delta.toFixed(2)}`,
           color: delta === 0 ? '#5F6B7A' : delta > 0 ? '#0ECB81' : '#F6465D',
           bold: true,
+          size: 16,
         }];
       })(),
       reverseLines,
@@ -501,7 +509,7 @@ function drawLines(
   maxWidth: number,
 ) {
   lines.forEach((line, index) => {
-    ctx.font = `${line.bold ? 700 : 500} 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace`;
+    ctx.font = `${line.bold ? 700 : 500} ${line.size ?? 13}px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace`;
     ctx.fillStyle = line.color ?? '#202630';
     ctx.fillText(line.text, x, y + index * LINE_H, maxWidth);
   });
