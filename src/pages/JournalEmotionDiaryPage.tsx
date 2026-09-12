@@ -3,6 +3,7 @@ import { Activity, CalendarDays, ChevronLeft, ChevronRight, Save, Waves } from '
 import { useSearchParams } from 'react-router-dom';
 import { toast } from '@/lib/notificationCenter';
 import { BackButton } from '@/components/journal/BackButton';
+import { EmotionDiaryExportPanel } from '@/components/journal/EmotionDiaryExportPanel';
 import { Button } from '@/components/ui/button';
 import { ImeSafeTextarea } from '@/components/ui/ime-safe-text-field';
 import { useAuth } from '@/contexts/AuthContext';
@@ -801,9 +802,20 @@ export default function JournalEmotionDiaryPage() {
 
           <aside className="h-fit border border-border bg-card lg:sticky lg:top-[72px]">
             <div className="border-b border-border px-3 py-3">
-              <div className="text-[12px] font-medium">历史记录</div>
-              <div className="mt-0.5 text-[10px] text-muted-foreground">
-                共 {diaries.length} 天 · 每个自然日一份
+              <div className="flex items-start gap-2">
+                <div className="min-w-0">
+                  <div className="text-[12px] font-medium">历史记录</div>
+                  <div className="mt-0.5 text-[10px] text-muted-foreground">
+                    共 {diaries.length} 天 · 每个自然日一份
+                  </div>
+                </div>
+                <div className="ml-auto">
+                  <EmotionDiaryExportPanel
+                    diaries={diaries}
+                    selectedDate={selectedDate}
+                    today={todayKey()}
+                  />
+                </div>
               </div>
             </div>
             {loading ? (
