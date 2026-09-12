@@ -1385,9 +1385,6 @@ export default function JournalCampaignsPage() {
   const realizedGrowthLabel = realizedGrowth.count === 0
     ? '—'
     : formatGrowthFactor(realizedGrowth.factor);
-  const realizedPerCampaignLabel = realizedGrowth.perCampaign == null
-    ? '—'
-    : `${realizedGrowth.perCampaign >= 0 ? '+' : ''}${(realizedGrowth.perCampaign * 100).toFixed(1)}%`;
   const opportunityQualityLabel = formatOpportunityQuality(opportunityQualityStats.average);
 
   const updateListParams = (nextSort: CampaignSortState) => {
@@ -2373,42 +2370,65 @@ export default function JournalCampaignsPage() {
                 </button>
               </PopoverTrigger>
               <PopoverContent align="end" className="w-80 border-border bg-card p-3 text-[11px]">
-                <div className="font-medium text-foreground">几何期望（每笔复利率）计算公式</div>
-                <div className="mt-2 rounded bg-muted/60 px-2 py-1.5 font-mono text-foreground">
-                  W = (1+b·x)^(n·p) · (1−x)^(n·(1−p)) = G^n，G = (1+b·x)^p · (1−x)^(1−p)，几何期望 = G − 1
-                </div>
+                {/**
+                  * 这个浮层里其实是**两个概念**，过去挤在同一个标题下，读者很容易把
+                  * 「推演出来的复利速度」当成「账户真实走过的路径」。现在分成两块，
+                  * 各自带一句「它回答什么」，最后再点明两者之差的含义。
+                  */}
+                <div className="font-medium text-foreground">几何期望 · 两个口径</div>
                 {geometric != null && performance.expectedWinRate != null && performance.winPayoffRatio != null ? (
-                  <div className="mt-2 space-y-1 text-muted-foreground">
-                    <div className="font-mono">
-                      G = (1 + {performance.winPayoffRatio.toFixed(2)} × {fixedFractionLabel})^{(performance.expectedWinRate * 100).toFixed(1)}% · (1 − {fixedFractionLabel})^{((1 - performance.expectedWinRate) * 100).toFixed(1)}%
-                    </div>
-                    <div className="font-mono text-foreground">G − 1 = {geometricEdgeLabel}/笔</div>
-                    <div className="font-mono text-foreground">W = G^{validCampaignCount} = {compoundGrowthLabel}（{validCampaignCount} 场累计）</div>
+                  <div className="mt-2 space-y-2 text-muted-foreground">
+                    <section className="space-y-1">
+                      <div className="flex items-baseline gap-1.5">
+                        <span className="rounded-sm bg-muted px-1 text-[9px] text-foreground/70">理论</span>
+                        <span className="text-foreground">几何期望（每笔复利率）</span>
+                      </div>
+                      <div className="rounded bg-muted/60 px-2 py-1.5 font-mono text-foreground">
+                        G = (1+b·x)^p · (1−x)^(1−p)，几何期望 = G − 1；W = G^n
+                      </div>
+                      <div className="font-mono">
+                        G = (1 + {performance.winPayoffRatio.toFixed(2)} × {fixedFractionLabel})^{(performance.expectedWinRate * 100).toFixed(1)}% · (1 − {fixedFractionLabel})^{((1 - performance.expectedWinRate) * 100).toFixed(1)}%
+                      </div>
+                      <div className="font-mono text-foreground">G − 1 = {geometricEdgeLabel}/笔</div>
+                      <div className="font-mono text-foreground">W = G^{validCampaignCount} = {compoundGrowthLabel}</div>
+                      <div>
+                        它回答：<span className="text-foreground">若按这套参数重复下注 {validCampaignCount} 次，理论上本金按什么速度复利</span>。
+                        b = 盈利战役的平均实际盈亏比（{performance.winPayoffRatio.toFixed(2)}，{performance.winCount} 场）；
+                        p = 有效战役胜率（{(performance.expectedWinRate * 100).toFixed(1)}%）；
+                        n = 有效战役数（{validCampaignCount} 场）；
+                        x = 每笔按资金比例的最大预期回撤，统一取 {fixedFractionLabel}——固定仓位后，这个数的变化只反映 edge 本身，可以纵向比较。
+                      </div>
+                      <div>它与算术期望（{expectedRLabel}）的差 = <span className="text-foreground">波动拖累</span>：押太大时算术为正、几何却翻负、本金长期归零。</div>
+                      {geometric.bleeds ? (
+                        <div className="text-[#F6465D]">当前为长期缩水（G&lt;1）——这套 edge 不该按此仓位下注。</div>
+                      ) : null}
+                    </section>
 
-                    {/* 另一种统计口径：不按均值推演，直接把每场真实的 (1+bᵢ·x) 连乘起来。 */}
-                    <div className="mt-2 border-t border-border/60 pt-2">
+                    <section className="space-y-1 border-t border-border/60 pt-2">
+                      <div className="flex items-baseline gap-1.5">
+                        <span className="rounded-sm bg-muted px-1 text-[9px] text-foreground/70">实测</span>
+                        <span className="text-foreground">实际复利结果</span>
+                      </div>
+                      <div className="rounded bg-muted/60 px-2 py-1.5 font-mono text-foreground">
+                        ∏（1+bᵢ·x），bᵢ = 每场真实盈亏比
+                      </div>
                       <div className="font-mono text-foreground">
                         ∏（1+bᵢ·x）= {realizedGrowthLabel}
-                        <span className="ml-1 text-muted-foreground">（{realizedGrowth.count} 场实测连乘）</span>
+                        <span className="ml-1 text-muted-foreground">（{realizedGrowth.count} 场逐场连乘）</span>
                       </div>
-                      <div className="mt-1 font-mono">
-                        每场几何平均 = ∏^(1/{realizedGrowth.count || 1}) − 1 = {realizedPerCampaignLabel}/笔
-                      </div>
-                      <div className="mt-1 leading-relaxed">
-                        上面的 W 是<span className="text-foreground">推演</span>：按胜率与盈利侧均值重复下注 {validCampaignCount} 次会怎样。
-                        这一行是<span className="text-foreground">实测</span>：每场按同样 {fixedFractionLabel} 的比例下注，
-                        用真实发生的 bᵢ 逐场连乘，本金实际走成了几倍。两者的差就是「真实样本的顺序与分布」相对按均值推演的代价或红利。
+                      <div>
+                        它回答：<span className="text-foreground">每场按同样 {fixedFractionLabel} 的比例下注，真实发生的 bᵢ 一场一场走下来，本金实际成了几倍</span>。
+                        这里不用胜率、也不用平均值，样本是什么就走什么。
                       </div>
                       {realizedGrowth.wipedOut ? (
-                        <div className="mt-1 text-[#F6465D]">其中有一场 bᵢ ≤ −10，按 {fixedFractionLabel} 下注足以打穿本金，连乘因此归零。</div>
+                        <div className="text-[#F6465D]">其中有一场 bᵢ ≤ −10，按 {fixedFractionLabel} 下注足以打穿本金，连乘因此归零。</div>
                       ) : null}
+                    </section>
+
+                    <div className="border-t border-border/60 pt-2">
+                      两者之差 = <span className="text-foreground">真实样本的分布</span>相对「按均值推演」的代价或红利：
+                      理论那条把所有盈利战役压成一个平均数，实测这条保留了每一场的原样。
                     </div>
-                    <div>x = 每笔按资金比例的最大预期回撤，统一取 {fixedFractionLabel}；固定仓位后几何期望的变化只反映 edge 本身，可以纵向比较。</div>
-                    <div>b = 盈利战役的平均实际盈亏比（{performance.winPayoffRatio.toFixed(2)}，{performance.winCount} 场）；p = 有效战役胜率（{(performance.expectedWinRate * 100).toFixed(1)}%）；n = 有效战役数（{validCampaignCount} 场）。</div>
-                    <div>它与算术期望（{expectedRLabel}）的差 = <span className="text-foreground">波动拖累</span>：押太大时算术为正、几何却翻负、本金长期归零。</div>
-                    {geometric.bleeds ? (
-                      <div className="text-[#F6465D]">当前为长期缩水（G&lt;1）——这套 edge 不该按此仓位下注。</div>
-                    ) : null}
                   </div>
                 ) : (
                   <div className="mt-2 text-muted-foreground">需要可计算的胜率，以及至少一场盈利战役的平均盈亏比，才能得到几何期望。</div>

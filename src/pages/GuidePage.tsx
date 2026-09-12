@@ -1600,7 +1600,7 @@ P 不再一把手填，而是拆成三个更可回答的问题：<strong>「这�
                     <tr><td className="px-3 py-2 border-t border-border">单场几何期望 Gᵢ − 1</td><td className="px-3 py-2 border-t border-border">Gᵢ = 1 + bᵢ·x，x 每场统一取 10%，因此 Gᵢ − 1 = bᵢ × 0.1</td><td className="px-3 py-2 border-t border-border">bᵢ 可为负，Gᵢ − 1 随之为负（bᵢ = −1 → −10%）。不乘胜率：单场结果已经发生，bᵢ 就是它的全部。1+bᵢ·x ≤ 0（bᵢ ≤ −10）代表本金被打穿，按 −100% 记</td></tr>
                     <tr><td className="px-3 py-2 border-t border-border">汇总几何期望 G</td><td className="px-3 py-2 border-t border-border">(1+b·x)^p × (1−x)^(1−p) − 1；x 统一取 10%，b 取盈利战役的平均实际盈亏比，p 取有效战役胜率</td><td className="px-3 py-2 border-t border-border">表示在历史总体参数、每笔固定投入 10% 资金比例下的理论每笔复利率；固定仓位后它的变化只反映 edge 本身，可以纵向比较</td></tr>
                     <tr><td className="px-3 py-2 border-t border-border">n 场累计因子 W（推演）</td><td className="px-3 py-2 border-t border-border">W = (1+b·x)^(n·p) × (1−x)^(n·(1−p)) = G^n，n 取有效战役数</td><td className="px-3 py-2 border-t border-border">把每笔复利率按有效战役场数复利到底的理论总倍数；它是模型推演，不是账户真实收益</td></tr>
-                    <tr><td className="px-3 py-2 border-t border-border">实测连乘 ∏（1+bᵢ·x）</td><td className="px-3 py-2 border-t border-border">把每一场的单场增长因子 1 + bᵢ×0.1 依次相乘；同时给出每场几何平均 = ∏^(1/n) − 1</td><td className="px-3 py-2 border-t border-border">不按均值推演，直接照真实发生的 bᵢ 逐场走：同样按 10% 的比例下注，本金实际变成几倍。与 W 的差就是「真实样本的分布」相对按均值推演的代价或红利。任一场 bᵢ ≤ −10 会把整条路径归零</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border">实际复利结果 ∏（1+bᵢ·x）</td><td className="px-3 py-2 border-t border-border">把每一场的单场增长因子 1 + bᵢ×0.1 依次相乘</td><td className="px-3 py-2 border-t border-border">不用胜率、也不用平均值，照真实发生的 bᵢ 一场一场走：同样按 10% 的比例下注，本金实际变成几倍。任一场 bᵢ ≤ −10 会把整条路径归零</td></tr>
                   </tbody>
                 </table>
               </div>
@@ -1683,7 +1683,7 @@ P 不再一把手填，而是拆成三个更可回答的问题：<strong>「这�
                   <tbody>
                     <tr><td className="px-3 py-2 border-t border-border">汇总算术期望 E</td><td className="px-3 py-2 border-t border-border">按当前胜率与<strong>混合均值 b̄</strong>（不是概览显示的盈利侧均值），每承担 1R 风险的平均加法收益是多少</td><td className="px-3 py-2 border-t border-border">不反映仓位大小、波动拖累与复利路径</td></tr>
                     <tr><td className="px-3 py-2 border-t border-border">汇总几何期望 G</td><td className="px-3 py-2 border-t border-border">若每笔固定按 10% 的资金比例重复同类战役，理论资本每笔按什么速度复利</td><td className="px-3 py-2 border-t border-border">不是实际历史收益率，也不是对下一笔的保证</td></tr>
-                    <tr><td className="px-3 py-2 border-t border-border">实测连乘 ∏（1+bᵢ·x）</td><td className="px-3 py-2 border-t border-border">同样按 10% 下注，这批战役真实走下来把本金变成了几倍</td><td className="px-3 py-2 border-t border-border">它按的是固定 10% 的假设仓位，不等于账户的真实收益曲线</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border">实际复利结果 ∏（1+bᵢ·x）</td><td className="px-3 py-2 border-t border-border">同样按 10% 下注，这批战役真实走下来把本金变成了几倍</td><td className="px-3 py-2 border-t border-border">它按的是固定 10% 的假设仓位，不等于账户的真实收益曲线</td></tr>
                     <tr><td className="px-3 py-2 border-t border-border">单场算术期望 Eᵢ</td><td className="px-3 py-2 border-t border-border">把该场事后实际 bᵢ 放回当前总体胜率后，得到怎样的 R 值</td><td className="px-3 py-2 border-t border-border">不是该场建仓时已经知道的事前期望</td></tr>
                     <tr><td className="px-3 py-2 border-t border-border">单场几何期望 Gᵢ − 1</td><td className="px-3 py-2 border-t border-border">若按固定 10% 的资金比例下这一注，这一场把本金乘成了多少</td><td className="px-3 py-2 border-t border-border">不能仅凭一场结果判断策略未来必然盈利或亏损</td></tr>
                   </tbody>
@@ -1692,6 +1692,8 @@ P 不再一把手填，而是拆成三个更可回答的问题：<strong>「这�
               <Highlight>
                 单场 Eᵢ 与 Gᵢ 使用的是事后实际盈亏比 bᵢ，因此它们是复盘指标，不是纯粹的事前预测。真正的事前期望需要使用建仓当时估计的胜率、预期盈利倍数和预期最大亏损比例。
               </Highlight>
+
+              <P><strong>「几何期望」那一项里其实是两个口径，浮层已经分成两块</strong>：上半是<strong>理论几何期望</strong>——把盈利战役压成一个平均 b，配上胜率 p 推演「重复下注 n 次会怎样」；下半是<strong>实际复利结果</strong>——不用胜率也不用平均值，照真实发生的每一个 bᵢ 逐场连乘。两者之差就是真实样本的分布相对「按均值推演」的代价或红利：理论那条抹掉了顺序与离散度，实测这条保留了每一场的原样。</P>
 
               <SubTitle>几何期望为负意味着什么</SubTitle>
               <P>几何期望小于 0，表示相应的复利增长因子小于 1：如果在相同胜率、盈亏结构和风险比例下反复执行，理论账户资产会随次数按复利方式缩水。例如几何期望为 −5%/笔，对应的理论路径约为「初始资产 × 0.95ⁿ」。</P>

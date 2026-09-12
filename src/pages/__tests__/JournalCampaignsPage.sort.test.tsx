@@ -971,7 +971,12 @@ describe('JournalCampaignsPage sorting', () => {
 
     // 【用户要求】几何期望：x 固定 10%、b 取盈利战役均值、p 取胜率、n 取有效战役数，并报 W = G^n
     fireEvent.click(screen.getByTestId('campaign-geometric-edge'));
-    expect(screen.getByText(/W = \(1\+b·x\)\^\(n·p\).*= G\^n/)).toBeInTheDocument();
+    // 【用户要求】浮层分成两块：上半是理论推演，下半是实际复利结果
+    expect(screen.getByText('几何期望 · 两个口径')).toBeInTheDocument();
+    expect(screen.getByText('几何期望（每笔复利率）')).toBeInTheDocument();
+    expect(screen.getByText('实际复利结果')).toBeInTheDocument();
+    expect(screen.getByText(/G = \(1\+b·x\)\^p[\s\S]*W = G\^n/)).toBeInTheDocument();
+    expect(screen.getByText(/∏（1\+bᵢ·x），bᵢ = 每场真实盈亏比/)).toBeInTheDocument();
     // 公式行里代入的 b 就是概览那一项显示的盈利侧均值，x 是 10%
     const winMeanText = screen.getByTestId('campaign-average-payoff-ratio')
       .textContent!.match(/\+(\d+\.\d{2})R/)![1];
@@ -981,8 +986,9 @@ describe('JournalCampaignsPage sorting', () => {
     expect(screen.getByText(/n = 有效战役数（3 场）/)).toBeInTheDocument();
     // 【用户要求】另一种统计口径：把每场的 (1+bᵢ·x) 连乘起来，并给出每场几何平均
     expect(screen.getByText(/∏（1\+bᵢ·x）= ×/)).toBeInTheDocument();
-    expect(screen.getByText(/3 场实测连乘/)).toBeInTheDocument();
-    expect(screen.getByText(/每场几何平均 = ∏\^\(1\/3\) − 1 = [+-]\d+\.\d%\/笔/)).toBeInTheDocument();
+    expect(screen.getByText(/3 场逐场连乘/)).toBeInTheDocument();
+    // 「每场几何平均」那一行按要求撤掉了
+    expect(screen.queryByText(/每场几何平均/)).not.toBeInTheDocument();
     // 【用户要求】最优仓位 x* 那一行不再显示
     expect(screen.queryByText(/最优仓位 x\*/)).not.toBeInTheDocument();
     fireEvent.click(screen.getByTestId('campaign-geometric-edge'));
