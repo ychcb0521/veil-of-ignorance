@@ -31,6 +31,25 @@ export function geometricGrowthFactor(winRate: number, payoffRatio: number, draw
   return Math.pow(winLeg, p) * Math.pow(lossLeg, 1 - p);
 }
 
+/**
+ * 全表口径统一采用的下注比例 x = 10%。
+ *
+ * 为什么不用 Kelly 最优 x*：x* 是「这套 edge 在理论最优仓位下能有多少复利潜力」，
+ * 会随胜率、盈亏比一起漂——今天 35%、明天 20%，两天的几何期望不可比。固定 10% 之后
+ * 变化的只剩 edge 本身，几何期望才是一条能纵向比较的曲线。x* 仍单独列出作参照。
+ */
+export const FIXED_DRAWDOWN_FRACTION = 0.1;
+
+/**
+ * n 笔复利总因子 W = G^n。G ≤ 0（已被击穿）时恒为 0；n ≤ 0 → 1（没下过注）。
+ * 用 exp(n·ln G) 而不是 Math.pow：n 上百时前者不会先溢出成 Infinity 再没法判断。
+ */
+export function compoundGrowthFactor(growthFactor: number, trades: number): number {
+  if (!Number.isFinite(growthFactor) || !Number.isFinite(trades) || trades <= 0) return 1;
+  if (growthFactor <= 0) return 0;
+  return Math.exp(trades * Math.log(growthFactor));
+}
+
 /** Kelly 最优下注比例 x* = (p·b − (1−p)) / b，夹在 [0, 1)。负 edge → 0（不该下注）。 */
 export function optimalDrawdownFraction(winRate: number, payoffRatio: number): number {
   const p = clamp01(winRate);

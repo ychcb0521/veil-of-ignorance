@@ -156,3 +156,116 @@ export function stackLayout(points: StackLayoutPoint[], options: StackLayoutOpti
     binCounts,
   };
 }
+
+export type ColumnStackOptions = {
+  /** 类目取值，按横轴从左到右的顺序；点位按 x 精确匹配吸附到对应列。 */
+  columns: number[];
+  /** 绘图区左右边缘（px）。 */
+  left: number;
+  right: number;
+  /** 绘图区顶边（px）与高度（px）。 */
+  top: number;
+  plotHeight: number;
+  /**
+   * 排版用的参考高度（px）：每行放几个点只按它和列宽算，不看实测高度。
+   * 这样「撑高盒子」不会反过来改每行点数，两者互相追着长到上限。
+   */
+  referenceHeight: number;
+};
+
+export type ColumnStackResult = {
+  placed: StackPlacedPoint[];
+  overflow: StackOverflow[];
+  /** 一列的宽度（px）。 */
+  columnPx: number;
+  /** 同一行里相邻两点的间距（px）——命中区不能比它宽，否则会盖住旁边那一场。 */
+  pitchX: number;
+  /** 每行摆几个点——纵轴一格因此代表 perRow 场，刻度必须同步放大，否则轴在说谎。 */
+  perRow: number;
+  pitchY: number;
+  /** 图高能装下的行数。 */
+  rowsFit: number;
+  /** 最多的一列有多少场。 */
+  tallest: number;
+  /** 以 12px 行距把最高一柱完整画出来所需的绘图区高度；调用方据此撑高盒子而不是丢点。 */
+  requiredPlotHeight: number;
+  /** 每列场数，按列序号索引。 */
+  columnCounts: number[];
+};
+
+/**
+ * 类目柱状堆叠：每个类目一根柱，柱由该类目的点位自底向上码成方阵。
+ *
+ * 为什么一行要放多个点：离散指标（镜像止盈档位、重要度）的同一档往往有上百场，
+ * 一行一场的柱子要一千多像素高，只能溢出成三角——那等于把数据藏起来。改成方阵后
+ * 柱高 = 场数 ÷ 每行点数，最高的一柱正好占满图高，每个点仍是一场、仍可点击。
+ * 代价是纵轴一格等于 perRow 场，所以这个数要报给调用方去缩放刻度。
+ */
+export function columnStackLayout(points: StackLayoutPoint[], options: ColumnStackOptions): ColumnStackResult {
+  const { columns, left, right, top, plotHeight, referenceHeight } = options;
+  const slots = Math.max(1, columns.length);
+  const columnPx = Math.max(MIN_PITCH, (right - left) / slots);
+  const centerAt = (index: number) => left + columnPx * (index + 0.5);
+
+  const indexOf = (x: number) => {
+    const exact = columns.indexOf(x);
+    if (exact >= 0) return exact;
+    // 落在类目之外的点不丢弃，归到最近的一列；类目轴上「最近」就是唯一说得通的解释。
+    let nearest = 0;
+    for (let index = 1; index < columns.length; index += 1) {
+      if (Math.abs(columns[index] - x) < Math.abs(columns[nearest] - x)) nearest = index;
+    }
+    return nearest;
+  };
+
+  const buckets = Array.from({ length: slots }, () => [] as StackLayoutPoint[]);
+  for (const point of points) buckets[indexOf(point.x)].push(point);
+  // 列内按 id 排，重复渲染永远得到同一张图。
+  for (const bucket of buckets) bucket.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+
+  const columnCounts = buckets.map(bucket => bucket.length);
+  const tallest = columnCounts.reduce((max, count) => Math.max(max, count), 0);
+
+  // 每行点数只由「一列能并排放几个」和参考高度决定：最高一柱正好占满参考高度。
+  // 实测高度不参与，否则撑高盒子会让 perRow 变小、柱变高、又要撑高，一路顶到上限。
+  const widest = Math.max(1, Math.floor(columnPx / MIN_PITCH));
+  const targetRows = Math.max(1, Math.floor(referenceHeight / MARK_FOOTPRINT));
+  const perRow = Math.min(widest, Math.max(1, Math.ceil(tallest / targetRows)));
+  const rowsNeeded = Math.max(1, Math.ceil(tallest / perRow));
+  // 行距和 linear 一路一样：装得下就用 14px，装不下退到 12px（环贴环）。
+  const pitchY = rowsNeeded * MIN_PITCH <= plotHeight ? MIN_PITCH : MARK_FOOTPRINT;
+  const rowsFit = Math.max(1, Math.floor(plotHeight / pitchY));
+  const pitchX = Math.min(MIN_PITCH, columnPx / perRow);
+
+  const baseline = top + plotHeight;
+  const pctAt = (cy: number) => ((cy - top) / plotHeight) * 100;
+
+  const placed: StackPlacedPoint[] = [];
+  const overflow: StackOverflow[] = [];
+  buckets.forEach((bucket, index) => {
+    const center = centerAt(index);
+    const rows = Math.ceil(bucket.length / perRow);
+    bucket.forEach((point, rank) => {
+      const row = Math.floor(rank / perRow);
+      const slot = rank % perRow;
+      // 方阵左右边缘取齐（不逐行居中），柱子才有直边；最顶一行没填满是可以数出来的。
+      const cx = center + (slot - (perRow - 1) / 2) * pitchX;
+      // 图高仍然装不下时（列窄到 perRow 被夹住），最顶一行让给合成三角。
+      if (rows > rowsFit && row >= rowsFit - 1) {
+        const cy = baseline - (rowsFit - 0.5) * pitchY;
+        const existing = overflow.find(item => item.bin === index);
+        if (existing) {
+          existing.count += 1;
+          existing.ids.push(point.id);
+        } else {
+          overflow.push({ bin: index, cx: center, cy, yPct: pctAt(cy), count: 1, ids: [point.id] });
+        }
+        return;
+      }
+      const cy = baseline - (row + 0.5) * pitchY;
+      placed.push({ id: point.id, cx, cy, yPct: pctAt(cy), bin: index, rank, clamped: null });
+    });
+  });
+
+  return { placed, overflow, columnPx, pitchX, perRow, pitchY, rowsFit, tallest, requiredPlotHeight: rowsNeeded * MARK_FOOTPRINT, columnCounts };
+}

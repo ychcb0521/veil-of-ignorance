@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { Fragment, useMemo, useState } from 'react';
 import { ArrowLeft, CircleHelp } from 'lucide-react';
 import {
   createCampaignMetricDomain,
@@ -18,8 +18,12 @@ import {
 import { markShapePath, type ChartSeriesToken, type ScatterMarkShape } from '@/lib/chartTokens';
 import { buildOddsDistributionModel, kdeCountPath, TAIL_THRESHOLD } from '@/lib/oddsDistribution';
 
-/** 时序：横轴按操作时间排战役；分布：横轴是指标数值本身，纵轴是落在该档的场数。 */
-export type CampaignMetricChartView = 'time' | 'distribution';
+/**
+ * 时序：横轴按操作时间排战役；
+ * 分布：横轴是指标数值本身（连续），纵轴是落在该档的场数；
+ * 柱状：横轴是离散的结果档位，同一档的战役沿纵轴堆成一根柱——柱由点组成，点仍可悬停、点击进战役。
+ */
+export type CampaignMetricChartView = 'time' | 'distribution' | 'bars';
 
 export type CampaignMetricColorMode =
   | 'signed'
@@ -360,6 +364,9 @@ export function CampaignMetricScatterPlot({
   const [activeCampaignId, setActiveCampaignId] = useState<string | null>(null);
   const [guideOpen, setGuideOpen] = useState(false);
   const distribution = view === 'distribution';
+  // 柱状与分布都按横轴堆叠、纵轴读场数；区别只在横轴是离散档位还是连续数值。
+  const bars = view === 'bars';
+  const stacked = distribution || bars;
   const lossBoundaryValue = metricKey === 'odds' ? -1 : null;
   const chartPoints = useMemo(
     () => points.map(point => ({
@@ -396,6 +403,23 @@ export function CampaignMetricScatterPlot({
     () => (distribution ? buildOddsDistributionModel(chartPoints) : null),
     [chartPoints, distribution],
   );
+  /**
+   * 柱状视图的档位表。档位取自该指标的离散刻度（镜像止盈就是 未实现/亏损/持平/盈利 四档），
+   * 而不是数据里出现过的值——某一档一场没有时，那根空柱也要留在轴上，
+   * 「持平 0 场」本身就是结论。柱状键与它的时序键共用同一套刻度：mirrorTpBars → mirrorTp。
+   */
+  const barColumns = useMemo(() => {
+    if (!bars) return null;
+    const discrete = createDiscreteMetricScale(metricKey.replace(/Bars$/, ''));
+    const values = discrete
+      ? discrete.ticks.map(tick => tick.value).sort((a, b) => a - b)
+      : [...new Set(chartPoints.map(point => point.value))].sort((a, b) => a - b);
+    return values.map(value => ({
+      value,
+      label: formatValue(value),
+      count: chartPoints.filter(point => point.value === value).length,
+    }));
+  }, [bars, chartPoints, formatValue, metricKey]);
   const summary = useMemo(() => {
     const values = chartPoints.map(point => point.value);
     if (values.length === 0) {
@@ -434,7 +458,11 @@ export function CampaignMetricScatterPlot({
   );
 
   // 分布视图按 b 升序喂给元件：按钮顺序 = 键盘左右键的漫游顺序 = 沿横轴从左到右。
-  const orderedPoints = dist ? dist.sortedPoints : chartPoints;
+  const orderedPoints = dist
+    ? dist.sortedPoints
+    : bars
+      ? [...chartPoints].sort((a, b) => a.value - b.value || a.campaignId.localeCompare(b.campaignId))
+      : chartPoints;
   const scatterPoints = useMemo<ScatterPoint[]>(
     () => orderedPoints.map((point, index) => {
       const positive = point.value > 0;
@@ -447,8 +475,8 @@ export function CampaignMetricScatterPlot({
       const operationTime = formatBeijingTime(point.operationTime);
       return {
         id: point.campaignId,
-        x: dist ? point.value : index,
-        y: dist ? 0 : point.value,
+        x: stacked ? point.value : index,
+        y: stacked ? 0 : point.value,
         seriesId: `s${Math.min(seriesIndex, Math.max(0, series.length - 1))}`,
         valueText: formatValue(point.value),
         label: `#${point.sequence} ${point.title}`,
@@ -467,7 +495,7 @@ export function CampaignMetricScatterPlot({
         },
       };
     }),
-    [colorMode, dist, formatValue, legacyOddsTestIds, metricKey, metricLabel, orderedPoints, series.length],
+    [colorMode, formatValue, legacyOddsTestIds, metricKey, metricLabel, orderedPoints, series.length, stacked],
   );
 
   const countAxis = useMemo<ScatterCountAxis>(() => ({
@@ -483,6 +511,11 @@ export function CampaignMetricScatterPlot({
     max: dist.domain.max,
     labels: dist.domain.ticks.map(value => ({ at: value, text: formatIntegerOddsTick(value) })),
   } : null), [dist]);
+
+  const barsXAxis = useMemo<ScatterXAxis | null>(() => (barColumns ? {
+    mode: 'category',
+    categories: barColumns.map(column => ({ value: column.value, label: column.label })),
+  } : null), [barColumns]);
 
   const distributionReferenceLines = useMemo<ScatterReferenceLine[]>(() => (dist ? [
     {
@@ -622,7 +655,9 @@ export function CampaignMetricScatterPlot({
         </div>
         <div className="grid grid-cols-[34px_minmax(0,1fr)] gap-2">
           <dt className="font-medium text-[color:var(--chart-ink)]">点位</dt>
-          {dist ? (
+          {bars ? (
+            <dd>{guide.point} 横向位置只表示所属档位，档内的左右位置不携带含义：一行放不下时点会并排铺开，柱因此有宽度。纵向位置是这一档里的堆叠序号，从底线往上数；左侧刻度已按每行点数折算成场数。</dd>
+          ) : dist ? (
             <dd>{guide.point} 横向位置吸附到所在档的中心：每 1R 等分成若干档、每档至少 14px 宽，−1R 与 0 恰好是档边界，越过止损墙的亏损永远画在墙左边；精确 b 看提示框。纵向位置是同一档里的堆叠序号，从底线往上数。图高放不下的档会撑高图盒，撑到上限仍放不下时顶端合成一个三角并在脚注报数。点击任一点进入对应战役。</dd>
           ) : (
             <dd>{guide.point} 横向位置对应操作先后，纵向位置对应本指标数值；点击任一点进入对应战役。右侧 n= 是各纵轴区间的全域点数，可用来读出被长尾压扁的中段密度。</dd>
@@ -642,8 +677,8 @@ export function CampaignMetricScatterPlot({
     <ScatterPlot
       points={scatterPoints}
       series={series}
-      yAxis={dist ? countAxis : yAxis}
-      xAxis={distributionXAxis ?? {
+      yAxis={stacked ? countAxis : yAxis}
+      xAxis={distributionXAxis ?? barsXAxis ?? {
         mode: 'ordinal',
         count: chartPoints.length,
         labelAt: index => {
@@ -653,9 +688,9 @@ export function CampaignMetricScatterPlot({
           return show ? `#${point.sequence}` : null;
         },
       }}
-      referenceLines={dist ? distributionReferenceLines : referenceLines}
+      referenceLines={dist ? distributionReferenceLines : bars ? [] : referenceLines}
       overlay={densityOverlay}
-      bandCounts={dist ? undefined : {
+      bandCounts={stacked ? undefined : {
         testId: bandCountTestId,
         items: bands.map(band => ({
           key: band.key,
@@ -700,6 +735,22 @@ export function CampaignMetricScatterPlot({
             <span>平滑密度（每档期望场数）</span>
           </span>
         </div>
+      ) : barColumns ? (
+        <div
+          data-testid={`campaign-metric-summary-${metricKey}`}
+          className="flex flex-wrap items-center gap-x-3 gap-y-1 font-mono tabular-nums"
+        >
+          {barColumns.map((column, index) => (
+            <Fragment key={column.value}>
+              {index > 0 ? <span className="text-[color:var(--chart-axis)]">|</span> : null}
+              <span data-testid={`campaign-metric-bar-count-${metricKey}-${column.value}`}>
+                {column.label} {column.count} 场
+              </span>
+            </Fragment>
+          ))}
+          <span className="text-[color:var(--chart-axis)]">|</span>
+          <span>合计 {chartPoints.length} 场</span>
+        </div>
       ) : (
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 font-mono tabular-nums">
           <span>范围 {formatValue(summary.min)} – {formatValue(summary.max)}</span>
@@ -707,7 +758,11 @@ export function CampaignMetricScatterPlot({
           <span>中位数 {formatValue(summary.median)}</span>
         </div>
       )}
-      directionHint={dist ? '横轴 盈亏比 b（R）· 纵轴 场数 · 不按时间排列' : '早 → 晚 · 横轴每格一场战役'}
+      directionHint={dist
+        ? '横轴 盈亏比 b（R）· 纵轴 场数 · 不按时间排列'
+        : bars
+          ? `横轴 ${metricLabel}档位 · 纵轴 场数 · 不按时间排列`
+          : '早 → 晚 · 横轴每格一场战役'}
       footnote={excludedMissingValueCount > 0 || excludedMissingOperationTimeCount > 0 ? (
         <span>
           未绘制：

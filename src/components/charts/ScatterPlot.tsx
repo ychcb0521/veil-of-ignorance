@@ -18,7 +18,7 @@ import {
   type ClampDirection,
   type ScatterMarkShape,
 } from '@/lib/chartTokens';
-import { stackLayout, type ScatterStackScale } from './stackLayout';
+import { columnStackLayout, stackLayout, type ScatterStackScale } from './stackLayout';
 import { useChartSize } from './useChartSize';
 
 export type { ScatterStackScale } from './stackLayout';
@@ -142,6 +142,8 @@ type StackOverflowGlyph = { bin: number; cx: number; cy: number; yPct: number; c
 type StackInfo = {
   pitchY: number;
   rowsFit: number;
+  /** 纵轴一格代表几场：一行一场时是 1，类目柱状把一行码成 perRow 场。 */
+  perRow: number;
   binWidth: number;
   binPx: number;
   tallest: number;
@@ -153,6 +155,8 @@ type StackInfo = {
 const STACK_BOX_CAP = 704;
 /** 与绘图盒 class 里的 min-h-[18rem] 同值，行内 minHeight 不能把手机上的下限压掉。 */
 const STACK_BOX_FLOOR = 288;
+/** 与绘图盒 class 里的 aspect-[8/5] 同值：盒子高度由宽度定，排版要用它推高度才不会自我追逐。 */
+const STACK_BOX_ASPECT = 5 / 8;
 /** 绘图盒上下各 1px 边框不在测量区内，撑高时要把它们算进去，否则最高一档差 2px 装不下。 */
 const STACK_BOX_BORDER = 2;
 /** 堆叠布局里提示框挂在点位侧面、垂直居中；四行文字约 68px 高，锚点离盒子上下缘至少留这么多。 */
@@ -328,6 +332,50 @@ export function ScatterPlot({
       return { contentWidth: trackWidth, pitch: MIN_PITCH, fitMode: 'fit' as const, placed: [] as PlacedPoint[], stack: null as StackInfo | null };
     }
 
+    if (stackMode && xAxis.mode === 'category') {
+      // 类目柱状：每个类目一根柱，柱内把点码成方阵，纵轴仍然是场数。
+      const contentWidth = trackWidth;
+      const result = columnStackLayout(points.map(point => ({ id: point.id, x: point.x })), {
+        columns: xAxis.categories.map(category => category.value),
+        left: PLOT_INSET.left,
+        right: contentWidth - PLOT_INSET.right,
+        top: PLOT_INSET.top,
+        plotHeight,
+        // 盒子高度由宽度定（aspect-[8/5]，下限 18rem），所以排版的参考高度也只从宽度推。
+        referenceHeight: Math.max(STACK_BOX_FLOOR, trackWidth * STACK_BOX_ASPECT)
+          - PLOT_INSET.top - PLOT_INSET.bottom - STACK_BOX_BORDER,
+      });
+      const byId = new Map(points.map(point => [point.id, point]));
+      const placed = result.placed.flatMap(item => {
+        const point = byId.get(item.id);
+        if (!point) return [];
+        return [{
+          ...point,
+          cx: item.cx,
+          cy: item.cy,
+          yPct: item.yPct,
+          clamped: item.clamped,
+          series: seriesById.get(point.seriesId) ?? series[0],
+        }];
+      });
+      return {
+        contentWidth,
+        pitch: result.pitchX,
+        fitMode: 'fit' as const,
+        placed,
+        stack: {
+          pitchY: result.pitchY,
+          rowsFit: result.rowsFit,
+          perRow: result.perRow,
+          binWidth: 1,
+          binPx: result.columnPx,
+          tallest: result.tallest,
+          requiredPlotHeight: result.requiredPlotHeight,
+          overflow: result.overflow.map(({ bin, cx, cy, yPct, count: n }) => ({ bin, cx, cy, yPct, count: n })),
+        } as StackInfo,
+      };
+    }
+
     if (stackMode && xAxis.mode === 'linear') {
       // 场数轴：横轴铺满、永不滚动；点位按档吸附、从底线往上堆，纵轴就是计数。
       const contentWidth = trackWidth;
@@ -360,6 +408,7 @@ export function ScatterPlot({
         stack: {
           pitchY: result.pitchY,
           rowsFit: result.rowsFit,
+          perRow: 1,
           binWidth: result.binWidth,
           binPx: result.binPx,
           tallest: result.tallest,
@@ -369,8 +418,8 @@ export function ScatterPlot({
       };
     }
     if (stackMode) {
-      // 场数轴只对 linear 横轴有定义；其它模式不能悄悄改读成别的意思。
-      console.error('ScatterPlot: yAxis.mode === "count" 只能与 xAxis.mode === "linear" 搭配，已退回数值布局。');
+      // 场数轴只对 linear / category 横轴有定义；其它模式不能悄悄改读成别的意思。
+      console.error('ScatterPlot: yAxis.mode === "count" 只能与 xAxis.mode === "linear" 或 "category" 搭配，已退回数值布局。');
     }
 
     const clampY = (value: number) => {
@@ -470,11 +519,13 @@ export function ScatterPlot({
   // 第 c 个点位的上沿——「这条线下面有 c 个点」。
   const renderAxis = useMemo<ScatterYAxis>(() => {
     if (!stack || yAxis.mode !== 'count') return valueYAxis ?? { min: 0, max: 1, ticks: [] };
-    const max = plotHeight / stack.pitchY;
-    const step = countTickStep(stack.rowsFit);
+    // 一行码 perRow 场时，刻度必须同比放大：不然「20」这条线读出来会少算 perRow 倍。
+    const max = (plotHeight / stack.pitchY) * stack.perRow;
+    const capacity = stack.rowsFit * stack.perRow;
+    const step = countTickStep(capacity);
     const ticks: ScatterTick[] = [];
-    for (let value = Math.floor(stack.rowsFit / step) * step; value >= 0; value -= step) {
-      const topmost = value + step > stack.rowsFit;
+    for (let value = Math.floor(capacity / step) * step; value >= 0; value -= step) {
+      const topmost = value + step > capacity;
       ticks.push({
         value,
         label: topmost && yAxis.unit ? `${value} ${yAxis.unit}` : String(value),
@@ -701,7 +752,7 @@ export function ScatterPlot({
                     <g aria-hidden="true" clipPath={`url(#${clipPathId})`}>
                       {overlay({
                         x: value => lineLeft + xFraction(value) * (lineRight - lineLeft),
-                        countY: count => PLOT_INSET.top + plotHeight - count * stack.pitchY,
+                        countY: count => PLOT_INSET.top + plotHeight - (count / stack.perRow) * stack.pitchY,
                         binWidth: stack.binWidth,
                         binPx: stack.binPx,
                         pitchY: stack.pitchY,
@@ -1000,7 +1051,7 @@ export function ScatterPlot({
             {fitMode === 'scroll' ? ' · 可左右滚动查看全部点位' : ''}
             {clampedCount > 0 ? ` · ${clampedCount} 个点位超出显示区间，已贴边标记` : ''}
             {stack && stackOverflowCount > 0
-              ? ` · 最高一档 ${stack.tallest} 场，图高只放下 ${stack.rowsFit - 1} 场，另 ${stackOverflowCount} 场以顶端三角合并标记`
+              ? ` · 最高一档 ${stack.tallest} 场，图高只放下 ${(stack.rowsFit - 1) * stack.perRow} 场，另 ${stackOverflowCount} 场以顶端三角合并标记`
               : ''}
           </span>
           {footnote}

@@ -573,6 +573,61 @@ describe('JournalCampaignsPage sorting', () => {
     expect(screen.getByTestId('campaign-odds-scatter-panel')).toBeInTheDocument();
   }, 15_000);
 
+  it('【用户要求】镜像止盈多一种「柱状」看法：同一档的战役堆成一根柱，空档保留，切换写回 URL', async () => {
+    render(
+      <MemoryRouter initialEntries={['/journal/campaigns?chart=mirrorTp']}>
+        <Routes>
+          <Route path="/journal/campaigns" element={<JournalCampaignsPage />} />
+          <Route path="/journal/campaigns/:id" element={<LocationProbe />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    const timePlot = await screen.findByTestId('campaign-metric-scatter-plot');
+    expect(timePlot).toHaveAttribute('data-metric-key', 'mirrorTp');
+    // 时序视图下切换键已经在，且停在「时序」
+    expect(screen.getByTestId('campaign-mirrorTp-view-time')).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByTestId('campaign-mirrorTp-view-bars')).toHaveAttribute('aria-pressed', 'false');
+
+    fireEvent.click(screen.getByTestId('campaign-mirrorTp-view-bars'));
+
+    await waitFor(() => expect(screen.getByTestId('campaign-metric-scatter-plot'))
+      .toHaveAttribute('data-metric-key', 'mirrorTpBars'));
+    expect(screen.getByTestId('campaign-mirrorTp-view-bars')).toHaveAttribute('aria-pressed', 'true');
+
+    // 四个结果档位都在轴上——一场都没有的档位留空柱，「持平 0 场」本身就是结论
+    const summary = screen.getByTestId('campaign-metric-summary-mirrorTpBars');
+    for (const label of ['未实现', '亏损', '持平', '盈利']) {
+      expect(summary.textContent).toContain(label);
+    }
+    expect(screen.getByTestId('campaign-metric-bar-count-mirrorTpBars-2')).toHaveTextContent('持平 0 场');
+
+    // 同一档的点聚在自己那根柱里（档内允许蜂群展开，避免同一点位互相盖住），
+    // 档与档之间沿横轴按结果等级递增排开
+    const barsPlot = screen.getByTestId('campaign-metric-scatter-plot');
+    const buttons = [...barsPlot.querySelectorAll<HTMLElement>('button[data-campaign-id]')];
+    expect(buttons.length).toBeGreaterThan(0);
+    const byColumn = new Map<number, number[]>();
+    for (const node of buttons) {
+      const value = Number(node.dataset.metricValue);
+      byColumn.set(value, [...(byColumn.get(value) ?? []), Number.parseFloat(node.style.left)]);
+    }
+    const columns = [...byColumn.entries()]
+      .map(([value, lefts]) => ({
+        value,
+        center: lefts.reduce((sum, left) => sum + left, 0) / lefts.length,
+        spread: Math.max(...lefts) - Math.min(...lefts),
+      }))
+      .sort((a, b) => a.value - b.value);
+    // jsdom 没有布局，宽度都是 0，所以只断言相对次序（档与档的排布留给浏览器里的实测）
+    for (let index = 1; index < columns.length; index += 1) {
+      expect(columns[index].center).toBeGreaterThan(columns[index - 1].center);
+    }
+    // 柱状视图不画时序视图那套右侧档位计数，也没有密度曲线
+    expect(screen.queryByTestId('campaign-metric-band-count')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('campaign-metric-density-curve-mirrorTpBars')).not.toBeInTheDocument();
+  }, 15_000);
+
   it('?chart=oddsDistribution 恢复分布图，「时序 | 分布」互切并写回 URL，排序行按钮把它当作盈亏比图收起', async () => {
     render(
       <MemoryRouter initialEntries={['/journal/campaigns?sort=importance&direction=asc&chart=oddsDistribution']}>

@@ -79,8 +79,14 @@ import {
   summarizeAsymmetricRiskMetrics,
 } from '@/lib/asymmetricRiskMetrics';
 import { summarizeCampaignPerformance } from '@/lib/kellySizing';
-import { computeGeometricExpectancy } from '@/lib/geometricExpectancy';
-import { campaignAchievedMirrorTp, mirrorTpRank, summarizeMirrorTp } from '@/lib/mirrorTpSummary';
+import { FIXED_DRAWDOWN_FRACTION, compoundGrowthFactor, computeGeometricExpectancy } from '@/lib/geometricExpectancy';
+import {
+  campaignAchievedMirrorTp,
+  mirrorTpOutcome,
+  mirrorTpRank,
+  summarizeMirrorTp,
+  type MirrorTpOutcome,
+} from '@/lib/mirrorTpSummary';
 import { formatOpportunityQuality } from '@/lib/opportunityQuality';
 import { LEG_ROLE_LABELS, STRATEGY_TEMPLATES } from '@/lib/strategyTemplates';
 import { campaignOperationTime } from '@/lib/objectiveOperationTime';
@@ -147,6 +153,7 @@ type CampaignMetricChartKey =
   | 'geometricExpectancy'
   | 'importance'
   | 'mirrorTp'
+  | 'mirrorTpBars'
   | 'dsiContribution'
   | 'usiContribution';
 
@@ -156,6 +163,9 @@ type CampaignMetricChartConfig = {
   sourceKey?: CampaignMetricChartKey;
   /** 缺省 'time'。 */
   view?: CampaignMetricChartView;
+  /** 同一指标有多种看法时，面板右上角切换键上的短标签（时序 / 分布 / 柱状）。 */
+  viewLabel?: string;
+  viewTestId?: string;
   label: string;
   chartLabel: string;
   seriesLabel: string;
@@ -250,6 +260,8 @@ const CAMPAIGN_METRIC_CHART_CONFIGS: readonly CampaignMetricChartConfig[] = [
     key: 'odds',
     label: '盈亏比',
     chartLabel: '赔率图',
+    viewLabel: '时序',
+    viewTestId: 'campaign-odds-view-time',
     seriesLabel: '盈亏比时序',
     guide: {
       yAxis: '每场战役的实际盈亏比 b，单位为 R。b = 已实现盈亏 ÷ 初始最大预期亏损；正数表示盈利，负数表示亏损。',
@@ -274,6 +286,8 @@ const CAMPAIGN_METRIC_CHART_CONFIGS: readonly CampaignMetricChartConfig[] = [
     view: 'distribution',
     label: '盈亏比分布',
     chartLabel: '分布图',
+    viewLabel: '分布',
+    viewTestId: 'campaign-odds-view-distribution',
     seriesLabel: '盈亏比分布',
     guide: {
       yAxis: '落在该盈亏比附近的战役数量：点从底线向上堆叠，堆得越高，这一档 b 出现得越多。刻度随图高变化，读柱高时对照左侧场数刻度。',
@@ -387,10 +401,37 @@ const CAMPAIGN_METRIC_CHART_CONFIGS: readonly CampaignMetricChartConfig[] = [
     key: 'mirrorTp',
     label: '镜像止盈',
     chartLabel: '镜像图',
+    viewLabel: '时序',
+    viewTestId: 'campaign-mirrorTp-view-time',
     seriesLabel: '镜像止盈结果时序',
     guide: {
-      yAxis: '镜像止盈结果采用离散等级：0 = 未实现，1 = 亏损，2 = 持平，3 = 盈利。纵向高度表示结果等级，不是连续金额差。',
+      yAxis: '镜像止盈结果采用离散等级：0 = 未实现，1 = 亏损，2 = 持平，3 = 盈利；盈亏按实际盈亏比 b 判，|b| ≤ 0.1 记持平。纵向高度表示结果等级，不是连续金额差。',
       point: '点越高，镜像止盈结果等级越好；同一水平线上的点属于同一种结果，点与点的垂直距离不代表实际盈亏差额。',
+      colors: [
+        { token: 'profit', label: '绿色圆点（3）：镜像止盈实现盈利。' },
+        { token: 'neutral', label: '灰色方块（2）：镜像止盈实现持平。' },
+        { token: 'loss', label: '红色菱形（1）：镜像止盈实现亏损。' },
+        { token: 'neutral', label: '灰色空心圈（0）：镜像止盈未实现。' },
+      ],
+    },
+    missingValueLabel: '镜像止盈结果',
+    colorMode: 'mirrorTp',
+    formatValue: formatMirrorTpMetric,
+  },
+  {
+    key: 'mirrorTpBars',
+    sourceKey: 'mirrorTp',
+    view: 'bars',
+    viewLabel: '柱状',
+    viewTestId: 'campaign-mirrorTp-view-bars',
+    label: '镜像止盈分布',
+    chartLabel: '柱状图',
+    seriesLabel: '镜像止盈结果分布',
+    guide: {
+      yAxis: '纵轴是场数：同一档的战役码成一根柱，柱越高这种结果出现得越多。场数多时一行会并排放几个点，'
+        + '左侧刻度已按每行点数折算，照着刻度读柱高即可；每档的精确场数也写在图例右侧。',
+      point: '横轴是四个结果档位（未实现 / 亏损 / 持平 / 盈利；|b| ≤ 0.1 记持平），不按时间排列。柱由点组成，每个点仍是一场战役，'
+        + '悬停读数值、点击进入对应战役。一场都没有的档位保留空柱——某一档 0 场本身就是结论。',
       colors: [
         { token: 'profit', label: '绿色圆点（3）：镜像止盈实现盈利。' },
         { token: 'neutral', label: '灰色方块（2）：镜像止盈实现持平。' },
@@ -652,10 +693,24 @@ function comparePnl(
   return compareFiniteMetric(pnlSortValue(a), pnlSortValue(b), direction);
 }
 
-/** 每场战役的镜像止盈排序权重（成交判定 + 盈亏 → mirrorTpRank）。 */
+/** 每场战役的实际盈亏比 b = 已实现盈亏 ÷ 初始最大预期亏损（列表口径 = 利润捕获率 ÷ 100）。 */
+function rowPayoffRatio(row: { profitCaptureRatio: number | null }): number | null {
+  return row.profitCaptureRatio == null ? null : row.profitCaptureRatio / 100;
+}
+
+/** 卡片上的镜像止盈状态文案；与统计、排序共用 mirrorTpOutcome，三处不会各判各的。 */
+const MIRROR_TP_STATUS_LABEL: Record<MirrorTpOutcome, string> = {
+  win: '实现·盈利',
+  loss: '实现·亏损',
+  flat: '实现·持平',
+  open: '实现·进行中',
+};
+
+/** 每场战役的镜像止盈排序权重（成交判定 + 盈亏比 → mirrorTpRank）。 */
 function rowMirrorTpRank(row: CampaignDisplayData): number {
   return mirrorTpRank(
     campaignAchievedMirrorTp(row.legs, row.tradeRecords),
+    rowPayoffRatio(row),
     row.campaign.final_realized_pnl ?? null,
   );
 }
@@ -1143,14 +1198,20 @@ export default function JournalCampaignsPage() {
     () => summarizeAsymmetricRiskMetrics(performanceSamples),
     [performanceSamples],
   );
+  /**
+   * 全表几何期望：G = (1+b·x)^p·(1−x)^(1−p)，x 固定 10%、b 取盈利战役的平均 b、p 取有效战役胜率。
+   * b 只用盈利侧：公式里 (1+b·x) 是「赢的那一腿乘多少」，混进亏损战役的负 b 会同时压低赢腿，
+   * 而亏损已经由 (1−x)^(1−p) 这一腿表达了，等于罚两次。
+   */
   const geometric = useMemo(
-    () => computeGeometricExpectancy(performance.expectedWinRate, performance.payoffRatio),
-    [performance.expectedWinRate, performance.payoffRatio],
+    () => computeGeometricExpectancy(performance.expectedWinRate, performance.winPayoffRatio, FIXED_DRAWDOWN_FRACTION),
+    [performance.expectedWinRate, performance.winPayoffRatio],
   );
   // 镜像止盈达成统计（战役维度，全表口径）。
   const mirrorTp = useMemo(
     () => summarizeMirrorTp(rows.map(row => ({
       achieved: campaignAchievedMirrorTp(row.legs, row.tradeRecords),
+      payoffRatio: rowPayoffRatio(row),
       realizedPnl: row.campaign.final_realized_pnl ?? null,
     }))),
     [rows],
@@ -1221,6 +1282,7 @@ export default function JournalCampaignsPage() {
     const odds = buildSeries(row => (
       row.profitCaptureRatio == null ? null : row.profitCaptureRatio / 100
     ));
+    const mirrorTp = buildSeries(row => rowMirrorTpRank(row));
     return {
       odds,
       oddsDistribution: odds,
@@ -1233,7 +1295,9 @@ export default function JournalCampaignsPage() {
       arithmeticExpectancy: buildSeries(row => row.arithmeticExpectancy),
       geometricExpectancy: buildSeries(row => row.geometricExpectancy),
       importance: buildSeries(row => importanceValue(row.campaign)),
-      mirrorTp: buildSeries(row => rowMirrorTpRank(row)),
+      mirrorTp: mirrorTp,
+      // 柱状图与时序图读的是同一份镜像止盈序列，只是横轴换成了结果档位。
+      mirrorTpBars: mirrorTp,
       dsiContribution: buildSeries(row => row.dsiContributionPct),
       usiContribution: buildSeries(row => row.usiContributionPct),
     };
@@ -1244,6 +1308,15 @@ export default function JournalCampaignsPage() {
   const selectedMetricSeries = metricSeriesByKey[metricChartKey];
   // 「当前打开的是哪份数据」：分布图打开时，盈亏比的排序行按钮也要读成「收起」。
   const openSourceKey: CampaignMetricChartKey = selectedMetricConfig.sourceKey ?? selectedMetricConfig.key;
+  /** 同一指标的几种看法（时序 / 分布 / 柱状）；只有一种时不画切换键。 */
+  const familyViewOptions = useMemo(
+    () => CAMPAIGN_METRIC_CHART_CONFIGS.filter(
+      config => (config.sourceKey ?? config.key) === openSourceKey && config.viewLabel,
+    ),
+    [openSourceKey],
+  );
+  const familySourceLabel = CAMPAIGN_METRIC_CHART_CONFIGS
+    .find(config => config.key === openSourceKey)?.label ?? selectedMetricConfig.label;
   const updateChartParam = (nextKey: CampaignMetricChartKey | null) => {
     const params = new URLSearchParams(location.search);
     params.delete('scope');
@@ -1304,6 +1377,16 @@ export default function JournalCampaignsPage() {
   const optimalFractionLabel = geometric == null || geometric.optimalFraction <= 0
     ? '—'
     : `${(geometric.optimalFraction * 100).toFixed(1)}%`;
+  const fixedFractionLabel = `${(FIXED_DRAWDOWN_FRACTION * 100).toFixed(0)}%`;
+  // n 笔累计因子：几百场复利动辄上亿倍，超过 4 位数就换科学计数，别让一串零占满一行。
+  const compoundGrowthLabel = geometric == null
+    ? '—'
+    : (() => {
+      const factor = compoundGrowthFactor(geometric.growthFactor, validCampaignCount);
+      if (factor === 0) return '×0（本金归零）';
+      if (factor >= 10000 || (factor > 0 && factor < 0.0001)) return `×${factor.toExponential(2)}`;
+      return `×${factor.toFixed(2)}`;
+    })();
   const opportunityQualityLabel = formatOpportunityQuality(opportunityQualityStats.average);
   const compoundCampaignGrowthLabel = formatCompoundCampaignGrowthRate(compoundCampaignGrowth.rate);
 
@@ -1997,7 +2080,7 @@ export default function JournalCampaignsPage() {
                           盈利实现 ＞ 持平实现 ＞ 亏损实现 ＞ 未实现
                         </div>
                         <div className="mt-2 space-y-1 text-muted-foreground">
-                          <div>先判断镜像止盈委托是否真正成交，再按战役最终已实现盈亏区分结果。</div>
+                          <div>先判断镜像止盈委托是否真正成交，再按战役实际盈亏比 b 区分结果：|b| ≤ 0.1 记持平。</div>
                           <div>相同结果再按客观操作时间排序。</div>
                         </div>
                       </>
@@ -2097,7 +2180,8 @@ export default function JournalCampaignsPage() {
                 <div className="font-medium text-foreground">镜像止盈达成统计</div>
                 <div className="mt-2 space-y-1 text-muted-foreground">
                   <div>「实现镜像止盈」= 该战役的镜像止盈委托真正成交（触发后进入「已锁定不亏」）。口径为当前列表全部 {mirrorTp.total} 场战役。</div>
-                  <div>达成率 = 实现 ÷ 全部；达成盈利率 = 实现且盈利 ÷ 实现（盈亏按战役已实现盈亏判定）。</div>
+                  <div>达成率 = 实现 ÷ 全部；达成盈利率 = 实现且盈利 ÷ 实现。</div>
+                  <div>盈亏按战役实际盈亏比 b 判定：<span className="text-foreground">|b| ≤ 0.1 记持平</span>，不计入盈利或亏损——这个幅度是手续费与滑点级别的噪声，不是镜像止盈的功劳或过失。缺少有效初始最大预期亏损时退回按已实现盈亏的正负判。</div>
                 </div>
                 <div className="mt-2 grid grid-cols-2 gap-1 border-t border-border/60 pt-2 text-center">
                   <div><span className="text-muted-foreground">实现</span><strong className="ml-1 text-foreground">{mirrorTp.achieved}</strong><span className="ml-1 text-muted-foreground">（{mirrorTpRateLabel}）</span></div>
@@ -2109,7 +2193,7 @@ export default function JournalCampaignsPage() {
                   <div><span className="text-muted-foreground">达成盈利率</span><strong className="ml-1 text-foreground">{mirrorTpWinRateLabel}</strong></div>
                 </div>
                 {mirrorTp.achievedNeutral > 0 ? (
-                  <div className="mt-1 text-center text-muted-foreground">其中 {mirrorTp.achievedNeutral} 场进行中 / 打平（未计入盈亏）。</div>
+                  <div className="mt-1 text-center text-muted-foreground">其中 {mirrorTp.achievedNeutral} 场持平（|b| ≤ 0.1）/ 进行中，未计入盈亏。</div>
                 ) : null}
               </PopoverContent>
             </Popover>
@@ -2277,23 +2361,27 @@ export default function JournalCampaignsPage() {
               <PopoverContent align="end" className="w-80 border-border bg-card p-3 text-[11px]">
                 <div className="font-medium text-foreground">几何期望（每笔复利率）计算公式</div>
                 <div className="mt-2 rounded bg-muted/60 px-2 py-1.5 font-mono text-foreground">
-                  G = (1+b·x)^P(赢) · (1−x)^(1−P(赢))，几何期望 = G − 1
+                  W = (1+b·x)^(n·p) · (1−x)^(n·(1−p)) = G^n，G = (1+b·x)^p · (1−x)^(1−p)，几何期望 = G − 1
                 </div>
-                {geometric != null && performance.expectedWinRate != null && performance.payoffRatio != null ? (
+                {geometric != null && performance.expectedWinRate != null && performance.winPayoffRatio != null ? (
                   <div className="mt-2 space-y-1 text-muted-foreground">
                     <div className="font-mono">
-                      x* = ({(performance.expectedWinRate * 100).toFixed(1)}% × {performance.payoffRatio.toFixed(2)} − {((1 - performance.expectedWinRate) * 100).toFixed(1)}%) ÷ {performance.payoffRatio.toFixed(2)} = {optimalFractionLabel}
+                      G = (1 + {performance.winPayoffRatio.toFixed(2)} × {fixedFractionLabel})^{(performance.expectedWinRate * 100).toFixed(1)}% · (1 − {fixedFractionLabel})^{((1 - performance.expectedWinRate) * 100).toFixed(1)}%
                     </div>
-                    <div className="font-mono text-foreground">G − 1 = {geometricEdgeLabel}/笔（在最优仓位 x* 下）</div>
-                    <div>x = 每笔按资金比例的最大预期回撤；这里取令复利最大的 Kelly 最优 x*（= 下方「最优仓位」）。</div>
+                    <div className="font-mono text-foreground">G − 1 = {geometricEdgeLabel}/笔</div>
+                    <div className="font-mono text-foreground">W = G^{validCampaignCount} = {compoundGrowthLabel}（{validCampaignCount} 场累计）</div>
+                    <div>x = 每笔按资金比例的最大预期回撤，统一取 {fixedFractionLabel}；固定仓位后几何期望的变化只反映 edge 本身，可以纵向比较。</div>
+                    <div>b = 盈利战役的平均实际盈亏比（{performance.winPayoffRatio.toFixed(2)}，{performance.winCount} 场）；p = 有效战役胜率（{(performance.expectedWinRate * 100).toFixed(1)}%）；n = 有效战役数（{validCampaignCount} 场）。</div>
                     <div>它与算术期望（{expectedRLabel}）的差 = <span className="text-foreground">波动拖累</span>：押太大时算术为正、几何却翻负、本金长期归零。</div>
                     {geometric.bleeds ? (
                       <div className="text-[#F6465D]">当前为长期缩水（G&lt;1）——这套 edge 不该按此仓位下注。</div>
                     ) : null}
-                    <div className="border-t border-border/60 pt-1.5 font-mono text-foreground">最优仓位 x*：{optimalFractionLabel}</div>
+                    <div className="border-t border-border/60 pt-1.5 font-mono text-foreground">
+                      最优仓位 x*（仅作参照，不参与上式）：{optimalFractionLabel}
+                    </div>
                   </div>
                 ) : (
-                  <div className="mt-2 text-muted-foreground">需要可计算的胜率与盈亏比才能得到几何期望。</div>
+                  <div className="mt-2 text-muted-foreground">需要可计算的胜率，以及至少一场盈利战役的平均盈亏比，才能得到几何期望。</div>
                 )}
               </PopoverContent>
             </Popover>
@@ -2549,26 +2637,24 @@ export default function JournalCampaignsPage() {
               className="order-3 border-t border-border/70 bg-background/35"
             >
               <div id="campaign-metric-scatter-view">
-                {openSourceKey === 'odds' ? (
-                  // 「时序 | 分布」放在面板层而不是图表表头：空序列时元件只渲染空态、没有表头，
+                {familyViewOptions.length > 1 ? (
+                  // 视图切换键放在面板层而不是图表表头：空序列时元件只渲染空态、没有表头，
                   // 切换键仍要在。切换直接改键与 URL，不走 toggle（同键会关图）。
+                  // 选项由同族配置自动生成：新增一种看法只要多写一条配置，不必再动这里。
                   <div className="flex items-center justify-end px-3 pt-2 sm:px-4">
                     <div
                       role="group"
-                      aria-label="盈亏比视图"
-                      data-testid="campaign-odds-view-switch"
+                      aria-label={`${familySourceLabel}视图`}
+                      data-testid={`campaign-${openSourceKey}-view-switch`}
                       className="inline-flex shrink-0 overflow-hidden rounded border border-[color:var(--chart-border)] text-[9px] text-[color:var(--chart-ink-muted)]"
                     >
-                      {([
-                        { key: 'odds' as const, label: '时序', testId: 'campaign-odds-view-time' },
-                        { key: 'oddsDistribution' as const, label: '分布', testId: 'campaign-odds-view-distribution' },
-                      ]).map(option => {
+                      {familyViewOptions.map(option => {
                         const pressed = selectedMetricConfig.key === option.key;
                         return (
                           <button
                             key={option.key}
                             type="button"
-                            data-testid={option.testId}
+                            data-testid={option.viewTestId}
                             aria-pressed={pressed}
                             onClick={() => {
                               if (pressed) return;
@@ -2581,7 +2667,7 @@ export default function JournalCampaignsPage() {
                                 : 'hover:text-[color:var(--chart-ink)]'
                             }`}
                           >
-                            {option.label}
+                            {option.viewLabel}
                           </button>
                         );
                       })}
@@ -2654,13 +2740,10 @@ export default function JournalCampaignsPage() {
             );
             const mirrorTpStatus = !campaignAchievedMirrorTp(legs, tradeRecords)
               ? '未实现'
-              : !Number.isFinite(Number(campaign.final_realized_pnl))
-                ? '实现·进行中'
-                : Number(campaign.final_realized_pnl) > 0
-                  ? '实现·盈利'
-                  : Number(campaign.final_realized_pnl) < 0
-                    ? '实现·亏损'
-                    : '实现·打平';
+              : MIRROR_TP_STATUS_LABEL[mirrorTpOutcome(
+                profitCaptureRatio == null ? null : profitCaptureRatio / 100,
+                campaign.final_realized_pnl ?? null,
+              )];
             const statusLabel = campaign.status === 'active'
               ? '进行中'
               : campaign.status === 'closed_profit'

@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
+  FIXED_DRAWDOWN_FRACTION,
+  compoundGrowthFactor,
   geometricGrowthFactor,
   optimalDrawdownFraction,
   computeGeometricExpectancy,
@@ -105,5 +107,41 @@ describe('computeGeometricExpectancy', () => {
     expect(computeGeometricExpectancy(null, 10)).toBeNull();
     expect(computeGeometricExpectancy(0.6, null)).toBeNull();
     expect(computeGeometricExpectancy(0.6, Number.NaN)).toBeNull();
+  });
+});
+
+describe('【用户要求】全表口径：x 固定 0.1，b 取盈利战役平均 b，p 取有效战役胜率，n 取有效战役数', () => {
+  it('x 统一取 0.1，不再随 Kelly 最优仓位漂', () => {
+    expect(FIXED_DRAWDOWN_FRACTION).toBe(0.1);
+    const r = computeGeometricExpectancy(0.568, 2.01, FIXED_DRAWDOWN_FRACTION)!;
+    expect(r.drawdownFraction).toBe(0.1);
+    // 最优仓位仍算得出来，只是不参与 G
+    expect(r.optimalFraction).toBeCloseTo(0.353, 3);
+    expect(r.growthFactor).toBeCloseTo(
+      Math.pow(1 + 2.01 * 0.1, 0.568) * Math.pow(1 - 0.1, 1 - 0.568),
+      12,
+    );
+    expect(r.geometricEdge).toBeCloseTo(r.growthFactor - 1, 12);
+  });
+
+  it('W = G^n：n 笔复利总因子', () => {
+    const r = computeGeometricExpectancy(0.568, 2.01, FIXED_DRAWDOWN_FRACTION)!;
+    expect(compoundGrowthFactor(r.growthFactor, 1)).toBeCloseTo(r.growthFactor, 12);
+    expect(compoundGrowthFactor(r.growthFactor, 3)).toBeCloseTo(r.growthFactor ** 3, 10);
+    // 几百场也不能先溢出成 Infinity
+    expect(Number.isFinite(compoundGrowthFactor(1.02, 227))).toBe(true);
+    expect(compoundGrowthFactor(1.02, 227)).toBeCloseTo(1.02 ** 227, 6);
+  });
+
+  it('W 的边界：n≤0 不算下注，G≤0 视为本金归零', () => {
+    expect(compoundGrowthFactor(1.5, 0)).toBe(1);
+    expect(compoundGrowthFactor(1.5, -3)).toBe(1);
+    expect(compoundGrowthFactor(0, 100)).toBe(0);
+  });
+
+  it('同一个 p、同一个 x 下，b 越大几何期望越高（b 用盈利侧均值才不会被亏损腿罚两次）', () => {
+    const winSideOnly = computeGeometricExpectancy(0.568, 2.01, FIXED_DRAWDOWN_FRACTION)!;
+    const mixedAverage = computeGeometricExpectancy(0.568, 0.6, FIXED_DRAWDOWN_FRACTION)!;
+    expect(winSideOnly.geometricEdge).toBeGreaterThan(mixedAverage.geometricEdge);
   });
 });

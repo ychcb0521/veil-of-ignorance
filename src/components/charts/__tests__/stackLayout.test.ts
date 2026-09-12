@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { MARK_FOOTPRINT, MIN_PITCH } from '@/lib/chartTokens';
-import { stackLayout } from '../stackLayout';
+import { columnStackLayout, stackLayout } from '../stackLayout';
 
 const OPTS = { xMin: -2, xMax: 10, left: 12, right: 840, top: 12, plotHeight: 492 };
 
@@ -128,5 +128,97 @@ describe('stackLayout 频数堆叠', () => {
         }
       }
     }
+  });
+});
+
+const COLUMN_OPTS = {
+  columns: [0, 1, 2, 3],
+  left: 12,
+  right: 840,
+  top: 12,
+  plotHeight: 492,
+  referenceHeight: 492,
+};
+
+function colPts(counts: Record<number, number>) {
+  return Object.entries(counts).flatMap(([value, n]) =>
+    Array.from({ length: n }, (_, index) => ({ id: `c${value}-${index}`, x: Number(value) })));
+}
+
+describe('columnStackLayout 类目柱状堆叠', () => {
+  it('【用户要求】每个档位堆成一根柱：柱数 = 类目数，点位一个不丢', () => {
+    const result = columnStackLayout(colPts({ 0: 101, 1: 17, 2: 0, 3: 109 }), COLUMN_OPTS);
+    expect(result.placed).toHaveLength(227);
+    expect(result.overflow).toEqual([]);
+    expect(result.columnCounts).toEqual([101, 17, 0, 109]);
+    expect(result.tallest).toBe(109);
+    // 四个类目各自吸附到本列，列中心互不重叠
+    const centers = [0, 1, 2, 3].map(index => result.columnPx * (index + 0.5) + 12);
+    for (const [index, center] of centers.entries()) {
+      const inColumn = result.placed.filter(item => item.bin === index);
+      for (const item of inColumn) {
+        expect(Math.abs(item.cx - center)).toBeLessThanOrEqual(result.columnPx / 2);
+      }
+    }
+  });
+
+  it('场数多时一行并排放 perRow 个点，最高一柱正好占满参考高度', () => {
+    const result = columnStackLayout(colPts({ 0: 101, 1: 17, 2: 0, 3: 109 }), COLUMN_OPTS);
+    expect(result.perRow).toBeGreaterThan(1);
+    const rows = Math.ceil(result.tallest / result.perRow);
+    // 取的是「能装下的最小 perRow」：少放一个/行，最高一柱就超出参考高度了。
+    expect(rows * MARK_FOOTPRINT).toBeLessThanOrEqual(COLUMN_OPTS.referenceHeight);
+    expect(Math.ceil(result.tallest / (result.perRow - 1)) * MARK_FOOTPRINT)
+      .toBeGreaterThan(COLUMN_OPTS.referenceHeight);
+    // 同一行的点 cy 相同、cx 互不重叠；行与行之间恰差一个行距
+    const tallestColumn = result.placed.filter(item => item.bin === 3);
+    const byRow = new Map<number, number[]>();
+    for (const item of tallestColumn) {
+      byRow.set(item.cy, [...(byRow.get(item.cy) ?? []), item.cx]);
+    }
+    const rowKeys = [...byRow.keys()].sort((a, b) => b - a);
+    expect(rowKeys).toHaveLength(rows);
+    for (let i = 1; i < rowKeys.length; i += 1) {
+      expect(rowKeys[i - 1] - rowKeys[i]).toBeCloseTo(result.pitchY, 6);
+    }
+    for (const xs of byRow.values()) {
+      const sorted = [...xs].sort((a, b) => a - b);
+      for (let i = 1; i < sorted.length; i += 1) {
+        expect(sorted[i] - sorted[i - 1]).toBeGreaterThanOrEqual(result.pitchX - 1e-6);
+      }
+    }
+  });
+
+  it('每行点数只看列宽与参考高度：实测图高变化不改 perRow，盒子撑高才不会自我追逐', () => {
+    const points = colPts({ 0: 101, 1: 17, 2: 0, 3: 109 });
+    const short = columnStackLayout(points, { ...COLUMN_OPTS, plotHeight: 200 });
+    const tall = columnStackLayout(points, { ...COLUMN_OPTS, plotHeight: 900 });
+    expect(short.perRow).toBe(tall.perRow);
+    expect(short.requiredPlotHeight).toBe(tall.requiredPlotHeight);
+  });
+
+  it('列窄到放不下时才夹住 perRow，多出来的点合并成顶端三角而不是丢掉', () => {
+    const narrow = columnStackLayout(colPts({ 0: 300 }), {
+      ...COLUMN_OPTS, right: 92, plotHeight: 120, referenceHeight: 120,
+    });
+    const drawn = narrow.placed.length;
+    const folded = narrow.overflow.reduce((sum, glyph) => sum + glyph.count, 0);
+    expect(drawn + folded).toBe(300);
+    expect(folded).toBeGreaterThan(0);
+  });
+
+  it('一场都没有的档位保留空柱，不让后面的档位左移', () => {
+    const result = columnStackLayout(colPts({ 0: 3, 3: 2 }), COLUMN_OPTS);
+    expect(result.columnCounts).toEqual([3, 0, 0, 2]);
+    const lastColumn = result.placed.filter(item => item.bin === 3);
+    expect(lastColumn).toHaveLength(2);
+  });
+
+  it('同样的输入重复算出同一张图（点位可重复渲染）', () => {
+    const points = colPts({ 0: 9, 1: 4, 3: 7 });
+    const a = columnStackLayout(points, COLUMN_OPTS);
+    const b = columnStackLayout([...points].reverse(), COLUMN_OPTS);
+    const key = (list: typeof a.placed) => list.map(i => `${i.id}@${i.cx},${i.cy}`).sort().join('|');
+    expect(key(a.placed)).toBe(key(b.placed));
   });
 });

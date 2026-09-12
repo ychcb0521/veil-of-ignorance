@@ -1568,12 +1568,12 @@ P 不再一把手填，而是拆成三个更可回答的问题：<strong>「这�
                   </thead>
                   <tbody>
                     <tr><td className="px-3 py-2 border-t border-border">实现 / 未实现</td><td className="px-3 py-2 border-t border-border">两侧各给场数与占全表的百分比，合计 100%</td></tr>
-                    <tr><td className="px-3 py-2 border-t border-border">实现·盈利 / 实现·亏损</td><td className="px-3 py-2 border-t border-border">在已达成镜像止盈的战役里，按 final_realized_pnl 分成盈利与亏损；为 0 或未结束计入「打平 / 进行中」</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border">实现·盈利 / 实现·亏损</td><td className="px-3 py-2 border-t border-border">在已达成镜像止盈的战役里，按实际盈亏比 b 分成盈利与亏损；<strong>|b| ≤ 0.1 记持平</strong>，与未结束一起计入「持平 / 进行中」。缺少有效初始最大预期亏损时退回按 final_realized_pnl 的正负判</td></tr>
                     <tr><td className="px-3 py-2 border-t border-border">达成盈利率</td><td className="px-3 py-2 border-t border-border">实现·盈利 ÷ 全部已实现镜像止盈的战役</td></tr>
                   </tbody>
                 </table>
               </div>
-              <P>按镜像止盈排序时使用的权重为：<strong>实现·盈利 &gt; 实现·打平 / 进行中 &gt; 实现·亏损 &gt; 未实现</strong>。降序把「镜像止盈生效且赚钱」的战役排在最前，升序则把未实现的排在最前。每张战役卡片也有一列「镜像止盈」状态，盈利绿、亏损红。</P>
+              <P>按镜像止盈排序时使用的权重为：<strong>实现·盈利 &gt; 实现·持平 / 进行中 &gt; 实现·亏损 &gt; 未实现</strong>。盈亏三分统一走 ±0.1 的持平带：赚回 0.03R 与亏掉 0.03R 在决策上是同一件事，按金额符号切会把这类噪声战役硬塞进盈利或亏损。降序把「镜像止盈生效且赚钱」的战役排在最前，升序则把未实现的排在最前。每张战役卡片也有一列「镜像止盈」状态，盈利绿、亏损红。</P>
 
               <SubTitle>交易战役列表：期望值系列</SubTitle>
               <P><strong>战役级统计统一使用同一个有效样本口径：</strong>战役已经结束，并且存在大于 0 的初始最大预期亏损。计算如下：</P>
@@ -1598,8 +1598,9 @@ P 不再一把手填，而是拆成三个更可回答的问题：<strong>「这�
                     <tr><td className="px-3 py-2 border-t border-border">单场算术期望 Eᵢ</td><td className="px-3 py-2 border-t border-border">P(赢) × bᵢ −（1 − P(赢)）</td><td className="px-3 py-2 border-t border-border">使用实时有效战役胜率与该场带符号盈亏比</td></tr>
                     <tr><td className="px-3 py-2 border-t border-border">单场风险比例 xᵢ</td><td className="px-3 py-2 border-t border-border">Lᵢ ÷ 主力开仓时账户总资产 Aᵢ</td><td className="px-3 py-2 border-t border-border">优先使用主力开仓快照；旧战役缺失时用今日当前总资产估算</td></tr>
                     <tr><td className="px-3 py-2 border-t border-border">单场几何期望 Gᵢ</td><td className="px-3 py-2 border-t border-border">(1+bᵢ·xᵢ)^P(赢) × (1−xᵢ)^(1−P(赢)) − 1</td><td className="px-3 py-2 border-t border-border">bᵢ 可为负；缺少有效 Lᵢ 或可用 Aᵢ 时不估算</td></tr>
-                    <tr><td className="px-3 py-2 border-t border-border">汇总 Kelly 仓位 x*</td><td className="px-3 py-2 border-t border-border">b̄ &gt; 0 时：max（0，（P(赢)·b̄ −（1−P(赢)））÷ b̄）；b̄ ≤ 0 时为 0</td><td className="px-3 py-2 border-t border-border">由当前有效样本推导的模型最优风险比例，不是各场实际 xᵢ 的平均值</td></tr>
-                    <tr><td className="px-3 py-2 border-t border-border">汇总几何期望 G</td><td className="px-3 py-2 border-t border-border">(1+b̄·x*)^P(赢) × (1−x*)^(1−P(赢)) − 1</td><td className="px-3 py-2 border-t border-border">表示在历史总体参数和 Kelly 最优仓位下的理论每笔复利率</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border">汇总 Kelly 仓位 x*</td><td className="px-3 py-2 border-t border-border">b̄ &gt; 0 时：max（0，（P(赢)·b̄ −（1−P(赢)））÷ b̄）；b̄ ≤ 0 时为 0</td><td className="px-3 py-2 border-t border-border">由当前有效样本推导的模型最优风险比例，仅作参照；不参与汇总几何期望，也不是各场实际 xᵢ 的平均值</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border">汇总几何期望 G</td><td className="px-3 py-2 border-t border-border">(1+b·x)^p × (1−x)^(1−p) − 1；x 统一取 10%，b 取盈利战役的平均实际盈亏比，p 取有效战役胜率</td><td className="px-3 py-2 border-t border-border">表示在历史总体参数、每笔固定投入 10% 资金比例下的理论每笔复利率；固定仓位后它的变化只反映 edge 本身，可以纵向比较</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border">n 场累计因子 W</td><td className="px-3 py-2 border-t border-border">W = (1+b·x)^(n·p) × (1−x)^(n·(1−p)) = G^n，n 取有效战役数</td><td className="px-3 py-2 border-t border-border">把每笔复利率按有效战役场数复利到底的理论总倍数；它是模型推演，不是账户真实收益</td></tr>
                     <tr><td className="px-3 py-2 border-t border-border">复合战役增长率 CGRₙ</td><td className="px-3 py-2 border-t border-border">[Π（1 + 已实现盈亏ᵢ ÷ 入场账户资产 Aᵢ）]^(1/N) − 1</td><td className="px-3 py-2 border-t border-border">从 2026-08-03 21:04（客观操作时间）起前瞻统计；此前历史战役不纳入。Aᵢ 优先采用主力开仓资产快照，历史缺失时用今日账户资产估算</td></tr>
                   </tbody>
                 </table>
@@ -1682,7 +1683,7 @@ P 不再一把手填，而是拆成三个更可回答的问题：<strong>「这�
                   </thead>
                   <tbody>
                     <tr><td className="px-3 py-2 border-t border-border">汇总算术期望 E</td><td className="px-3 py-2 border-t border-border">按当前胜率与平均盈亏比，每承担 1R 风险的平均加法收益是多少</td><td className="px-3 py-2 border-t border-border">不反映仓位大小、波动拖累与复利路径</td></tr>
-                    <tr><td className="px-3 py-2 border-t border-border">汇总几何期望 G</td><td className="px-3 py-2 border-t border-border">若按模型 Kelly 仓位重复同类战役，理论资本每笔按什么速度复利</td><td className="px-3 py-2 border-t border-border">不是实际历史收益率，也不是对下一笔的保证</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border">汇总几何期望 G</td><td className="px-3 py-2 border-t border-border">若每笔固定按 10% 的资金比例重复同类战役，理论资本每笔按什么速度复利</td><td className="px-3 py-2 border-t border-border">不是实际历史收益率，也不是对下一笔的保证</td></tr>
                     <tr><td className="px-3 py-2 border-t border-border">单场算术期望 Eᵢ</td><td className="px-3 py-2 border-t border-border">把该场事后实际 bᵢ 放回当前总体胜率后，得到怎样的 R 值</td><td className="px-3 py-2 border-t border-border">不是该场建仓时已经知道的事前期望</td></tr>
                     <tr><td className="px-3 py-2 border-t border-border">单场几何期望 Gᵢ</td><td className="px-3 py-2 border-t border-border">该场实际盈亏结构与当时真实风险比例，对长期复利结构形成怎样的影响</td><td className="px-3 py-2 border-t border-border">不能仅凭一场结果判断策略未来必然盈利或亏损</td></tr>
                   </tbody>
