@@ -106,6 +106,26 @@ describe('Legs 列表的手续费列', () => {
     expect(delta.className).not.toContain('#F6465D');
   });
 
+  it('【用户要求】币本位：主行是金额（钱包扣的数），拆分写币数——两笔金额必然相同，币数才有差别', () => {
+    const record = hpeRecord({
+      settlementMode: 'coin', settlementAsset: 'ASTER',
+      contracts: 176_056, contractSizeUsd: 10, quantity: 176_056,
+      entryPrice: 8.1380, exitPrice: 8.2060,
+      fee: 1_760_560 * 0.0004, feeCoin: (1_760_560 / 8.2060) * 0.0004, pnl: 14_007.73,
+    });
+    renderList([record], [legFor(record)]);
+    const cell = screen.getByTestId('leg-fees-leg-1');
+    // 主行：金额，且是两笔之和
+    expect(cell.textContent).toContain('1408.45');
+    // 次行：币数，开平不同（价越高付的币越少），并标出币种
+    expect(cell.textContent).toContain('开 86.54 · 平 85.82');
+    expect(cell.textContent).toContain('ASTER');
+    // 不把两个一模一样的金额并排写出来
+    expect(cell.textContent).not.toContain('开 704.22 · 平 704.22');
+    expect(cell.getAttribute('title')).toContain('钱包按这个数扣');
+    expect(screen.getByTestId('legs-total-fees').textContent).toContain('1408.45');
+  });
+
   it('强平记录：tooltip 里标明含强平清算费', () => {
     const record = hpeRecord({
       action: 'LIQUIDATION', exit_method: 'liquidation', liquidationSettlement: 'bankruptcy',

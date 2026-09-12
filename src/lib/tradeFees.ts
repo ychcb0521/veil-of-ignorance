@@ -173,16 +173,22 @@ const signed = (v: number) => `${v > 0 ? '+' : ''}${v.toFixed(2)}`;
 export function describeTradeRecordFees(record: TradeRecord): string {
   const fees = tradeRecordFees(record);
   const coin = isCoinSettled(record);
-  const parts: string[] = [
+  const parts: string[] = [];
+  if (fees.totalUsd != null && fees.open != null) {
+    parts.push(
+      `这一笔手续费合计 ${money(fees.totalUsd)} USDT（开仓 ${money(fees.open.usd)} + 平仓 ${money(fees.close.usd)}），钱包按这个数扣。`,
+    );
+  }
+  parts.push(
     coin
-      ? `币安口径（币本位）：手续费 = 名义 × 费率，名义 = 张数 × 面值 ÷ 成交价，以 ${fees.asset} 计。`
-        + '折成美元恰好是 张数 × 面值 × 费率，价格被约掉——所以开平两笔的**美元数必然相同**，'
-        + '而**币数不同**：成交价越高，同一笔名义付出的币越少。'
-      : '币安口径（U 本位）：手续费 = 数量 × 成交价 × 费率，以 USDT 计。平仓价高于开仓价时，平仓费也高于开仓费。',
-  ];
+      ? `币安口径（币本位）：手续费 = 名义 × 费率，名义 = 张数 × 面值 ÷ 成交价，收的是 ${fees.asset}；`
+        + '钱包再按成交当时的价折成 USDT。折算之后价格被约掉（= 张数 × 面值 × 费率），'
+        + '所以开平两笔的**金额必然相同**，差别只在**币数**：成交价越高，同一笔名义付出的币越少。'
+      : '币安口径（U 本位）：手续费 = 数量 × 成交价 × 费率，直接以 USDT 计。平仓价高于开仓价时，平仓费也高于开仓费。',
+  );
   if (coin && fees.open?.coin != null && fees.close.coin != null) {
     parts.push(
-      `本笔：开仓 ${formatFeeCoin(fees.open.coin, fees.asset)}、平仓 ${formatFeeCoin(fees.close.coin, fees.asset)}，`
+      `币数：开仓 ${formatFeeCoin(fees.open.coin, fees.asset)}、平仓 ${formatFeeCoin(fees.close.coin, fees.asset)}，`
       + `合计 ${formatFeeCoin(fees.totalCoin, fees.asset)}。`,
     );
   }

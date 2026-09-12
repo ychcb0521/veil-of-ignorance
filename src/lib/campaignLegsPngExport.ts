@@ -369,19 +369,18 @@ export function buildCampaignLegsExportRows(input: ExportInput): CampaignLegsExp
       (() => {
         const fees = execution.record ? tradeRecordFees(execution.record) : null;
         if (!fees) return [{ text: '—', color: '#A3ABB8' }];
-        // 币本位按币显示：折成美元后价格被约掉，开平两笔的美元数必然相同（见 tradeFees）
-        const coinMode = fees.coinSettled && fees.totalCoin != null;
+        // 主行是金额（钱包扣的就是它），次行是拆分；币本位的拆分写币数——
+        // 折成美元后价格被约掉，两笔金额必然相同，只有币数看得出差别（见 tradeFees）
+        const coinMode = fees.coinSettled && fees.open?.coin != null && fees.close.coin != null;
         return [
           {
-            text: `${coinMode
-              ? formatFeeCoin(fees.totalCoin, fees.asset)
-              : fees.totalUsd == null ? '—' : fees.totalUsd.toFixed(2)}${fees.estimated ? ' 估' : ''}`,
+            text: `${fees.totalUsd == null ? '—' : fees.totalUsd.toFixed(2)}${fees.estimated ? ' 估' : ''}`,
             color: '#5F6B7A',
             size: 11,
           },
           {
             text: coinMode
-              ? `开 ${formatFeeCoin(fees.open?.coin)} · 平 ${formatFeeCoin(fees.close.coin)}`
+              ? `开 ${formatFeeCoin(fees.open?.coin)} · 平 ${formatFeeCoin(fees.close.coin)} ${fees.asset}`
               : `开 ${fees.open ? fees.open.usd.toFixed(2) : '—'} · 平 ${fees.close.usd.toFixed(2)}`,
             color: '#9AA4B2',
             size: 10,

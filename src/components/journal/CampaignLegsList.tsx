@@ -134,10 +134,10 @@ const FEE_COLUMN_HINT = '币安口径：手续费 = 名义 × 费率，开仓、
   + '币本位：名义 = 张数 × 面值 ÷ 成交价，收的是币——折成美元后价格被约掉，所以开平两笔的美元数必然相同，币数才不同（价越高付的币越少），本列因此按币显示。'
   + '盈亏列已扣平仓费；开仓费在开仓当时从钱包扣除。旧记录未存开仓费，按当时 0.04% Taker 估算并标明。';
 
-const LEGS_GRID = 'grid-cols-[36px_128px_180px_116px_84px_88px_88px_116px_104px_minmax(224px,1fr)_64px]';
+const LEGS_GRID = 'grid-cols-[36px_128px_180px_116px_84px_88px_88px_116px_120px_minmax(224px,1fr)_64px]';
 
 /** 各列合计的下限，与 LEGS_GRID 对应；不足时容器横向滚动而不是压扁列。 */
-const LEGS_MIN_WIDTH = 'min-w-[1352px]';
+const LEGS_MIN_WIDTH = 'min-w-[1368px]';
 
 export function CampaignLegsList({
   legs,
@@ -407,11 +407,14 @@ export function CampaignLegsList({
                     const fees = execution.record ? tradeRecordFees(execution.record) : null;
                     if (!fees) return <div className="text-right text-[11px] text-foreground/30">—</div>;
                     /**
-                     * 币本位按**币**显示。币安的币本位手续费 = 张数 × 面值 ÷ 成交价 × 费率，收的是币；
-                     * 折成美元后价格被约掉（= 张数 × 面值 × 费率），开平两笔的美元数必然相同——
-                     * 只写美元会让人以为引擎把平仓费算成了开仓费。币数才看得出两笔的差别。
+                     * **主行永远是金额**：手续费最终要用钱衡量，而钱包扣的正是这个数
+                     * （币本位按成交当时的价把币折成 USDT 扣，Σ手续费 = 钱包少掉的钱）。
+                     *
+                     * 次行给拆分。币本位的拆分写**币数**：手续费 = 张数 × 面值 ÷ 成交价 × 费率，收的是币；
+                     * 折成美元后价格被约掉（= 张数 × 面值 × 费率），开平两笔的金额必然相同——
+                     * 把两个一模一样的金额并排写出来只会让人以为引擎算错了，币数才看得出两笔的差别。
                      */
-                    const coinMode = fees.coinSettled && fees.totalCoin != null;
+                    const coinMode = fees.coinSettled && fees.open?.coin != null && fees.close.coin != null;
                     return (
                       <div
                         data-testid={`leg-fees-${leg.id}`}
@@ -419,9 +422,7 @@ export function CampaignLegsList({
                         className="text-right text-[11px] leading-snug tabular-nums text-foreground/55"
                       >
                         <div>
-                          {coinMode
-                            ? formatFeeCoin(fees.totalCoin, fees.asset)
-                            : fees.totalUsd == null ? '—' : fees.totalUsd.toFixed(2)}
+                          {fees.totalUsd == null ? '—' : fees.totalUsd.toFixed(2)}
                           {fees.estimated && <span className="ml-1 text-[8px] tracking-wide text-foreground/30">估</span>}
                         </div>
                         <div className="overflow-hidden text-ellipsis whitespace-nowrap text-[9px] text-foreground/35">
@@ -430,6 +431,7 @@ export function CampaignLegsList({
                             : fees.open ? fees.open.usd.toFixed(2) : '—'}
                           {' · 平 '}
                           {coinMode ? formatFeeCoin(fees.close.coin) : fees.close.usd.toFixed(2)}
+                          {coinMode && <span className="ml-1 text-[8px] text-foreground/30">{fees.asset}</span>}
                         </div>
                       </div>
                     );
@@ -600,14 +602,12 @@ export function CampaignLegsList({
               <div /><div /><div />
               <div
                 data-testid="legs-total-fees"
-                title="本场全部成交记录的开仓费 + 平仓费（按记录去重：同一条记录挂在几条腿上只算一次）"
+                title={feeTotals?.totalCoin != null
+                  ? `本场全部成交记录的开仓费 + 平仓费（按记录去重）：${feeTotals.totalUsd.toFixed(2)} USDT，币计 ${formatFeeCoin(feeTotals.totalCoin, feeTotals.asset)}。币本位按成交当时的价折成 USDT 从钱包扣除。`
+                  : '本场全部成交记录的开仓费 + 平仓费（按记录去重：同一条记录挂在几条腿上只算一次）'}
                 className="text-right text-[11px] font-normal tabular-nums leading-snug text-foreground/55"
               >
-                {feeTotals == null
-                  ? '—'
-                  : feeTotals.totalCoin != null
-                    ? formatFeeCoin(feeTotals.totalCoin, feeTotals.asset)
-                    : feeTotals.totalUsd.toFixed(2)}
+                {feeTotals == null ? '—' : feeTotals.totalUsd.toFixed(2)}
                 {feeTotals?.estimated && <span className="ml-1 text-[8px] tracking-wide text-foreground/30">估</span>}
               </div>
               <div /><div />

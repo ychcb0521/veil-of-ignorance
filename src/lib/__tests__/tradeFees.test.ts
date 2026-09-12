@@ -181,12 +181,15 @@ describe('tradeRecordFees', () => {
     expect(fresh.close.usd).toBeGreaterThan(fresh.open!.usd);
   });
 
-  it('币本位的说明文字讲清「美元相同、币数不同」，并给出两笔的币数', () => {
+  it('币本位的说明文字：先给金额，再讲「金额相同、币数不同」并列出两笔币数', () => {
     const text = describeTradeRecordFees(coinLeg());
-    expect(text).toContain('币本位');
+    // 第一句就是钱：手续费最终以金额衡量
+    expect(text.indexOf('USDT（开仓')).toBeLessThan(text.indexOf('币安口径'));
+    expect(text).toContain('1408.45 USDT');
+    expect(text).toContain('钱包按这个数扣');
     expect(text).toContain('张数 × 面值 ÷ 成交价');
-    expect(text).toContain('美元数必然相同');
-    expect(text).toContain('币数不同');
+    expect(text).toContain('金额必然相同');
+    expect(text).toContain('币数');
     expect(text).toContain('86.54 ASTER');
     expect(text).toContain('85.82 ASTER');
   });
