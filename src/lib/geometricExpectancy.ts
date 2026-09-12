@@ -41,6 +41,64 @@ export function geometricGrowthFactor(winRate: number, payoffRatio: number, draw
 export const FIXED_DRAWDOWN_FRACTION = 0.1;
 
 /**
+ * 单场资本增长因子：1 + b·x。按固定 x 的资金比例下这一注，赚 b 个 R 就把本金乘上这个数。
+ *
+ * 下限 0：1 + b·x ≤ 0 意味着这一注亏掉了全部本金（x = 10% 时 b ≤ −10），
+ * 再往下就是「负的本金」，那不是增长因子能表达的东西。
+ */
+export function fixedBetGrowthFactor(payoffRatio: number, drawdownFraction = FIXED_DRAWDOWN_FRACTION): number {
+  if (!Number.isFinite(payoffRatio)) return 1;
+  return Math.max(0, 1 + payoffRatio * drawdownFraction);
+}
+
+export interface RealizedCompoundGrowth {
+  /** ∏(1 + bᵢ·x)：把每场的增长因子按顺序连乘，就是这条真实路径的总倍数。 */
+  factor: number;
+  /** 每场几何平均 = factor^(1/n) − 1；n = 0 时为 null，本金归零时为 −1。 */
+  perCampaign: number | null;
+  count: number;
+  /** 是否有某一场把本金打穿（因子 0），导致整条路径归零。 */
+  wipedOut: boolean;
+}
+
+/**
+ * 实测连乘：把每一场的 (1 + bᵢ·x) 乘起来。
+ *
+ * 它与 W = G^n 回答的是两个问题。G^n 是**推演**：假设按当前胜率与盈利侧均值重复下注 n 次；
+ * 连乘是**实测**：这 n 场真实发生的 bᵢ，按同一个下注比例走下来，本金到底变成了几倍。
+ * 两者背离的地方，就是「样本的顺序与分布」相对「按均值推演」的代价或红利。
+ *
+ * 用 exp(Σ ln) 而不是逐个相乘：几百场连乘会在中途下溢成 0 或上溢成 Infinity，
+ * 取对数求和再还原，中间不会丢精度。
+ */
+export function realizedCompoundGrowth(
+  payoffRatios: readonly number[],
+  drawdownFraction = FIXED_DRAWDOWN_FRACTION,
+): RealizedCompoundGrowth {
+  const usable = payoffRatios.filter(value => Number.isFinite(value));
+  if (usable.length === 0) return { factor: 1, perCampaign: null, count: 0, wipedOut: false };
+
+  let logSum = 0;
+  let wipedOut = false;
+  for (const payoffRatio of usable) {
+    const factor = fixedBetGrowthFactor(payoffRatio, drawdownFraction);
+    if (factor <= 0) {
+      wipedOut = true;
+      break;
+    }
+    logSum += Math.log(factor);
+  }
+  if (wipedOut) return { factor: 0, perCampaign: -1, count: usable.length, wipedOut: true };
+
+  return {
+    factor: Math.exp(logSum),
+    perCampaign: Math.exp(logSum / usable.length) - 1,
+    count: usable.length,
+    wipedOut: false,
+  };
+}
+
+/**
  * n 笔复利总因子 W = G^n。G ≤ 0（已被击穿）时恒为 0；n ≤ 0 → 1（没下过注）。
  * 用 exp(n·ln G) 而不是 Math.pow：n 上百时前者不会先溢出成 Infinity 再没法判断。
  */

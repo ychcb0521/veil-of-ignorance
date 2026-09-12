@@ -72,8 +72,13 @@ import {
   computeAsymmetricRiskContributionRates,
   summarizeAsymmetricRiskMetrics,
 } from '@/lib/asymmetricRiskMetrics';
-import { summarizeCampaignPerformance } from '@/lib/kellySizing';
-import { FIXED_DRAWDOWN_FRACTION, compoundGrowthFactor, computeGeometricExpectancy } from '@/lib/geometricExpectancy';
+import { selectValidCampaignPerformanceSamples, summarizeCampaignPerformance } from '@/lib/kellySizing';
+import {
+  FIXED_DRAWDOWN_FRACTION,
+  compoundGrowthFactor,
+  computeGeometricExpectancy,
+  realizedCompoundGrowth,
+} from '@/lib/geometricExpectancy';
 import {
   campaignAchievedMirrorTp,
   mirrorTpOutcome,
@@ -361,8 +366,9 @@ const CAMPAIGN_METRIC_CHART_CONFIGS: readonly CampaignMetricChartConfig[] = [
     chartLabel: '几何图',
     seriesLabel: '几何期望时序',
     guide: {
-      yAxis: '该场战役按风险占比复合后的预期账户增长率，单位为每笔百分比。G = (1+b×x)^P(赢) × (1−x)^(1−P(赢)) − 1。',
-      point: '点越高，表示按本场风险占比与当前胜率估算的复合增长贡献越高；低于零表示长期复合效应为负。',
+      yAxis: '按固定 10% 的资金比例下这一注，本场把本金乘成了多少：Gᵢ = 1 + bᵢ×0.1，纵轴是 Gᵢ − 1，单位为每笔百分比。',
+      point: '点越高，本场按同一下注比例换算出的资本增长越大；低于零线的是亏损场，bᵢ 为负、Gᵢ − 1 随之为负。'
+        + '固定 x 之后这一列是 bᵢ 的等比缩放，所以它的形状与盈亏比图一致——差别只在单位。',
       colors: [
         { token: 'profit', label: '绿色：几何期望 > 0。' },
         { token: 'loss', label: '红色：几何期望 < 0。' },
@@ -1194,6 +1200,18 @@ export default function JournalCampaignsPage() {
     [performanceSamples],
   );
   /**
+   * 实测连乘 ∏(1+bᵢ·x)：每场按固定 10% 下注，这条真实路径把本金走成了几倍。
+   * 与 W = G^n 同一口径下的两个问题——那个是按均值推演，这个是照真实 bᵢ 逐场走。
+   * 取样population 与「有效战役 / 平均盈亏比」完全一致，n 才对得上。
+   */
+  const realizedGrowth = useMemo(
+    () => realizedCompoundGrowth(
+      selectValidCampaignPerformanceSamples(performanceSamples)
+        .map(sample => sample.payoffRatio as number),
+    ),
+    [performanceSamples],
+  );
+  /**
    * 全表几何期望：G = (1+b·x)^p·(1−x)^(1−p)，x 固定 10%、b 取盈利战役的平均 b、p 取有效战役胜率。
    * b 只用盈利侧：公式里 (1+b·x) 是「赢的那一腿乘多少」，混进亏损战役的负 b 会同时压低赢腿，
    * 而亏损已经由 (1−x)^(1−p) 这一腿表达了，等于罚两次。
@@ -1237,11 +1255,7 @@ export default function JournalCampaignsPage() {
         initialRiskFraction,
         initialRiskSource: initialRisk?.source ?? null,
         riskAccountEquity: initialRisk?.accountEquityAtMainOpen ?? null,
-        ...computeCampaignExpectancies(
-          row.profitCaptureRatio,
-          performance.expectedWinRate,
-          initialRiskFraction,
-        ),
+        ...computeCampaignExpectancies(row.profitCaptureRatio, performance.expectedWinRate),
         ...computeAsymmetricRiskContributionRates(
           {
             campaign: row.campaign,
@@ -1357,17 +1371,23 @@ export default function JournalCampaignsPage() {
     ? '—'
     : `${geometric.geometricEdge >= 0 ? '+' : ''}${(geometric.geometricEdge * 100).toFixed(1)}%`;
   const fixedFractionLabel = `${(FIXED_DRAWDOWN_FRACTION * 100).toFixed(0)}%`;
-  // n 笔累计因子：几百场复利动辄上亿倍，超过 4 位数就换科学计数，别让一串零占满一行。
+  // 累计倍数：几百场复利动辄上亿倍，超过 4 位数就换科学计数，别让一串零占满一行。
+  const formatGrowthFactor = (factor: number) => {
+    if (factor === 0) return '×0（本金归零）';
+    // G^n 在 n 上千时会溢出成 Infinity；「×Infinity」读起来像 bug，不如直说超出可表示范围。
+    if (!Number.isFinite(factor)) return '×超出可表示范围';
+    if (factor >= 10000 || factor < 0.0001) return `×${factor.toExponential(2)}`;
+    return `×${factor.toFixed(2)}`;
+  };
   const compoundGrowthLabel = geometric == null
     ? '—'
-    : (() => {
-      const factor = compoundGrowthFactor(geometric.growthFactor, validCampaignCount);
-      if (factor === 0) return '×0（本金归零）';
-      // G^n 在 n 上千时会溢出成 Infinity；「×Infinity」读起来像 bug，不如直说超出可表示范围。
-      if (!Number.isFinite(factor)) return '×超出可表示范围';
-      if (factor >= 10000 || factor < 0.0001) return `×${factor.toExponential(2)}`;
-      return `×${factor.toFixed(2)}`;
-    })();
+    : formatGrowthFactor(compoundGrowthFactor(geometric.growthFactor, validCampaignCount));
+  const realizedGrowthLabel = realizedGrowth.count === 0
+    ? '—'
+    : formatGrowthFactor(realizedGrowth.factor);
+  const realizedPerCampaignLabel = realizedGrowth.perCampaign == null
+    ? '—'
+    : `${realizedGrowth.perCampaign >= 0 ? '+' : ''}${(realizedGrowth.perCampaign * 100).toFixed(1)}%`;
   const opportunityQualityLabel = formatOpportunityQuality(opportunityQualityStats.average);
 
   const updateListParams = (nextSort: CampaignSortState) => {
@@ -2000,18 +2020,26 @@ export default function JournalCampaignsPage() {
                       <>
                         <div className="font-medium text-foreground">单场几何期望计算公式</div>
                         <div className="mt-2 rounded bg-muted/60 px-2 py-1.5 font-mono text-foreground">
-                          Gᵢ = (1+bᵢ·xᵢ)^P(赢) · (1−xᵢ)^(1−P(赢)) − 1
+                          Gᵢ = 1 + bᵢ·x，单场几何期望 = Gᵢ − 1 = bᵢ·x
                         </div>
                         <div className="mt-2 space-y-1 text-muted-foreground">
                           <div className="rounded border border-border/60 px-2 py-1.5 font-mono leading-relaxed text-foreground/85">
-                            xᵢ = 该战役初始最大预期亏损 Lᵢ ÷ 主力开仓时账户总资产 Aᵢ
+                            x = {fixedFractionLabel}（每场统一）；bᵢ = 该战役带正负号的实际盈亏比
                           </div>
-                          <div>Aᵢ 优先读取主力开仓时固化的实时总资产快照，后续资产变化不会改写该值。</div>
-                          <div>旧战役缺少快照时，使用今日当前总账户资产作为历史估算：{currentAccountEquity > 0 ? `${currentAccountEquity.toFixed(2)} USDT` : '当前不可用'}；该估算会随当前账户资产更新。</div>
-                          <div>P(赢) 使用当前有效战役实时胜率：{winRateLabel}；bᵢ 使用该战役带正负号的实际盈亏比。</div>
-                          <div>bᵢ &lt; 0 时仍按该场真实 xᵢ 进入公式，不会归零。</div>
-                          <div>若 xᵢ ≥ 100% 或 1+bᵢ·xᵢ ≤ 0，代表该风险比例下资本被击穿，几何期望记为 −100%。</div>
-                          <div>缺少有效初始最大预期亏损，或既无开仓快照也无可用当前资产的战役，不参与几何期望排序。</div>
+                          <div>
+                            读法：按固定 {fixedFractionLabel} 的资金比例下这一注，赚 bᵢ 个 R 就等于本金乘上 1 + bᵢ×0.1 倍。
+                            例：bᵢ = +2 → Gᵢ = 1.20，本场几何期望 +20%。
+                          </div>
+                          <div>
+                            这里不乘胜率：汇总那条 G 要按胜率把赢腿与亏腿加权，因为它推演的是重复下注的长期路径；
+                            单场的结果已经发生，bᵢ 就是它的全部。
+                          </div>
+                          <div>
+                            x 也不再按该场真实的「最大预期亏损 ÷ 开仓时账户资产」取值：那样会把「这场赔率结构好不好」
+                            和「当时账户有多大」搅在一起——同样一场 +2R，早期小账户算出来像重仓豪赌、后期大账户算出来几乎没下注。
+                          </div>
+                          <div>若 1+bᵢ·x ≤ 0（即 bᵢ ≤ −10），代表这一注把本金打穿，几何期望记为 −100%。</div>
+                          <div>缺少有效初始最大预期亏损（因而没有 bᵢ）的战役不参与几何期望排序。</div>
                         </div>
                       </>
                     ) : formula === 'dsiContributionSort' ? (
@@ -2356,6 +2384,25 @@ export default function JournalCampaignsPage() {
                     </div>
                     <div className="font-mono text-foreground">G − 1 = {geometricEdgeLabel}/笔</div>
                     <div className="font-mono text-foreground">W = G^{validCampaignCount} = {compoundGrowthLabel}（{validCampaignCount} 场累计）</div>
+
+                    {/* 另一种统计口径：不按均值推演，直接把每场真实的 (1+bᵢ·x) 连乘起来。 */}
+                    <div className="mt-2 border-t border-border/60 pt-2">
+                      <div className="font-mono text-foreground">
+                        ∏（1+bᵢ·x）= {realizedGrowthLabel}
+                        <span className="ml-1 text-muted-foreground">（{realizedGrowth.count} 场实测连乘）</span>
+                      </div>
+                      <div className="mt-1 font-mono">
+                        每场几何平均 = ∏^(1/{realizedGrowth.count || 1}) − 1 = {realizedPerCampaignLabel}/笔
+                      </div>
+                      <div className="mt-1 leading-relaxed">
+                        上面的 W 是<span className="text-foreground">推演</span>：按胜率与盈利侧均值重复下注 {validCampaignCount} 次会怎样。
+                        这一行是<span className="text-foreground">实测</span>：每场按同样 {fixedFractionLabel} 的比例下注，
+                        用真实发生的 bᵢ 逐场连乘，本金实际走成了几倍。两者的差就是「真实样本的顺序与分布」相对按均值推演的代价或红利。
+                      </div>
+                      {realizedGrowth.wipedOut ? (
+                        <div className="mt-1 text-[#F6465D]">其中有一场 bᵢ ≤ −10，按 {fixedFractionLabel} 下注足以打穿本金，连乘因此归零。</div>
+                      ) : null}
+                    </div>
                     <div>x = 每笔按资金比例的最大预期回撤，统一取 {fixedFractionLabel}；固定仓位后几何期望的变化只反映 edge 本身，可以纵向比较。</div>
                     <div>b = 盈利战役的平均实际盈亏比（{performance.winPayoffRatio.toFixed(2)}，{performance.winCount} 场）；p = 有效战役胜率（{(performance.expectedWinRate * 100).toFixed(1)}%）；n = 有效战役数（{validCampaignCount} 场）。</div>
                     <div>它与算术期望（{expectedRLabel}）的差 = <span className="text-foreground">波动拖累</span>：押太大时算术为正、几何却翻负、本金长期归零。</div>
@@ -2837,22 +2884,20 @@ export default function JournalCampaignsPage() {
                   <div
                     data-testid="campaign-geometric-expectancy"
                     data-ruinous-sizing={ruinousSizing ? 'true' : undefined}
-                    title={initialRiskFraction == null
-                      ? '缺少有效初始最大预期亏损，或没有可用的账户总资产，无法计算单场几何期望'
-                      : ruinousSizing
-                        ? `本场下注比例 xᵢ = 最大预期亏损 ÷ 账户总资产 ${riskAccountEquity?.toFixed(2) ?? '—'} = ${(initialRiskFraction * 100).toFixed(2)}% ≥ 100%：`
-                          + '这一注押上了全部本金，重复下去必然归零，故几何期望记为 −100%/笔。'
-                          + '它评判的是仓位大小，与本场实际盈亏无关——所以可以和正的算术期望并存。'
-                          + `注意卡片左侧的「预期回撤 ${initialExpectedMaxDrawdownPct.toFixed(2)}%」是价格层面的口径（主力入场到对冲边界的距离），与这里的账户层面 xᵢ 不是同一个量。`
-                        : initialRiskSource === 'current_account_fallback'
-                          ? `历史估算：xᵢ = 最大预期亏损 ÷ 今日当前总账户资产 ${riskAccountEquity?.toFixed(2) ?? '—'} = ${(initialRiskFraction * 100).toFixed(2)}%`
-                          : `xᵢ = 最大预期亏损 ÷ 主力开仓实时总资产快照 ${riskAccountEquity?.toFixed(2) ?? '—'} = ${(initialRiskFraction * 100).toFixed(2)}%`}
+                    title={`单场几何期望 = Gᵢ − 1，Gᵢ = 1 + bᵢ·x，x 每场统一取 ${fixedFractionLabel}`
+                      + (initialRiskFraction == null
+                        ? ''
+                        : ruinousSizing
+                          ? `。另：本场真实下注比例 = 最大预期亏损 ÷ 账户总资产 ${riskAccountEquity?.toFixed(2) ?? '—'} = ${(initialRiskFraction * 100).toFixed(2)}% ≥ 100%，`
+                            + '这一注押上了全部本金。它评判的是当时的仓位大小，不进上面这个公式，也与本场实际盈亏无关。'
+                            + `注意卡片左侧的「预期回撤 ${initialExpectedMaxDrawdownPct.toFixed(2)}%」是价格层面的口径（主力入场到对冲边界的距离），与账户层面的下注比例不是同一个量。`
+                          : '')}
                     className="inline-flex h-7 shrink-0 items-center gap-1.5 border-r border-border/60 px-3"
                   >
                     <span className="text-[10px] text-muted-foreground/70">几何期望：</span>
                     <span className={`whitespace-nowrap font-mono text-[10px] font-medium tabular-nums ${geometricTone}`}>{formatGeometricExpectancy(geometricExpectancy)}</span>
-                    {/* −100%/笔 与一个正的算术期望并排出现时，不加标注只会被读成 bug。
-                        这个徽标点明它是「仓位大小的判决」而不是「本场盈亏」，不用悬停就看得懂。 */}
+                    {/* 这一注押上了全部本金。几何期望改用固定 x 之后它不再影响那个数，
+                        但「当时仓位有多大」本身就是要盯的纪律信号，所以徽标留着。 */}
                     {ruinousSizing && (
                       <span className="rounded-sm bg-[#F6465D]/15 px-1 text-[9px] leading-4 text-[#F6465D]">
                         仓位击穿

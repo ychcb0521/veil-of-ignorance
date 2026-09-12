@@ -161,7 +161,7 @@ describe('campaign profit capture ratio', () => {
     expect(correctedProfitCaptureRatio).toBeCloseTo(25, 8);
     expect(computeDecisionAccuracy(campaign, legs, records, [], [], corrections).profit_capture_ratio)
       .toBeCloseTo(25, 8);
-    expect(computeCampaignExpectancies(correctedProfitCaptureRatio, 0.5, null).arithmeticExpectancy)
+    expect(computeCampaignExpectancies(correctedProfitCaptureRatio, 0.5).arithmeticExpectancy)
       .toBeCloseTo(-0.375, 8);
   });
 
@@ -823,14 +823,12 @@ describe('campaign profit capture ratio', () => {
       .toBeCloseTo(0.07, 2);
 
     const risk = computeCampaignInitialRiskFraction(initialExpectedMaxLoss, legs);
+    // 真实下注比例仍然算得出来（卡片上的「仓位」判断还在用），只是不再进几何期望
     expect(risk?.drawdownFraction).toBeCloseTo(0.0074, 4);
-    const expectancies = computeCampaignExpectancies(
-      profitCaptureRatio,
-      0.5625,
-      risk?.drawdownFraction ?? null,
-    );
+    const expectancies = computeCampaignExpectancies(profitCaptureRatio, 0.5625);
     expect(expectancies.arithmeticExpectancy).toBeCloseTo(0.42, 2);
-    expect(expectancies.geometricExpectancy).toBeCloseTo(0.003, 3);
+    // 【用户要求】Gᵢ = 1 + bᵢ·x，x 固定 0.1：b = 1.5162 → 几何期望 = 0.15162
+    expect(expectancies.geometricExpectancy).toBeCloseTo(1.5162 * 0.1, 3);
 
     const accuracy = computeDecisionAccuracy(campaign, legs, [], [], reverseOrders);
     expect(accuracy.initial_expected_max_loss).toBeCloseTo(initialExpectedMaxLoss, 8);

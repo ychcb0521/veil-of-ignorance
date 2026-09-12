@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import {
   FIXED_DRAWDOWN_FRACTION,
   compoundGrowthFactor,
+  fixedBetGrowthFactor,
+  realizedCompoundGrowth,
   geometricGrowthFactor,
   optimalDrawdownFraction,
   computeGeometricExpectancy,
@@ -143,5 +145,55 @@ describe('【用户要求】全表口径：x 固定 0.1，b 取盈利战役平�
     const winSideOnly = computeGeometricExpectancy(0.568, 2.01, FIXED_DRAWDOWN_FRACTION)!;
     const mixedAverage = computeGeometricExpectancy(0.568, 0.6, FIXED_DRAWDOWN_FRACTION)!;
     expect(winSideOnly.geometricEdge).toBeGreaterThan(mixedAverage.geometricEdge);
+  });
+});
+
+describe('【用户要求】实测连乘 ∏(1+bᵢ·x)', () => {
+  it('单场因子 = 1 + b·x，负 b 给出小于 1 的因子', () => {
+    expect(fixedBetGrowthFactor(2)).toBeCloseTo(1.2, 12);
+    expect(fixedBetGrowthFactor(0)).toBe(1);
+    expect(fixedBetGrowthFactor(-1)).toBeCloseTo(0.9, 12);
+    // 1 + b·x ≤ 0：这一注亏光本金，因子记 0 而不是负数
+    expect(fixedBetGrowthFactor(-10)).toBe(0);
+    expect(fixedBetGrowthFactor(-30)).toBe(0);
+  });
+
+  it('把每场的因子连乘起来，并给出每场几何平均', () => {
+    const result = realizedCompoundGrowth([2, -1, 0.5]);
+    expect(result.count).toBe(3);
+    expect(result.factor).toBeCloseTo(1.2 * 0.9 * 1.05, 12);
+    expect(result.perCampaign).toBeCloseTo((1.2 * 0.9 * 1.05) ** (1 / 3) - 1, 12);
+    expect(result.wipedOut).toBe(false);
+  });
+
+  it('顺序不影响连乘结果（乘法可交换），但与按均值推演的 G^n 不是一回事', () => {
+    const a = realizedCompoundGrowth([3, -1, -1, 2]);
+    const b = realizedCompoundGrowth([-1, 2, 3, -1]);
+    expect(a.factor).toBeCloseTo(b.factor, 12);
+    // 同样四场，按「胜率 0.5 + 盈利侧均值 2.5」推演出来的 G^4 与实测连乘不同
+    const model = computeGeometricExpectancy(0.5, 2.5, FIXED_DRAWDOWN_FRACTION)!;
+    expect(compoundGrowthFactor(model.growthFactor, 4)).not.toBeCloseTo(a.factor, 3);
+  });
+
+  it('任何一场打穿本金，整条路径归零', () => {
+    const result = realizedCompoundGrowth([5, -12, 3]);
+    expect(result.factor).toBe(0);
+    expect(result.perCampaign).toBe(-1);
+    expect(result.wipedOut).toBe(true);
+  });
+
+  it('几百场也不下溢成 0 / 上溢成 Infinity', () => {
+    const many = Array.from({ length: 400 }, (_, index) => (index % 2 === 0 ? 1.5 : -0.8));
+    const result = realizedCompoundGrowth(many);
+    expect(Number.isFinite(result.factor)).toBe(true);
+    expect(result.factor).toBeGreaterThan(0);
+    expect(result.perCampaign).toBeCloseTo((1.15 * 0.92) ** 0.5 - 1, 10);
+  });
+
+  it('空样本：不报错，倍数为 1、每场均值为 null', () => {
+    const result = realizedCompoundGrowth([]);
+    expect(result.factor).toBe(1);
+    expect(result.perCampaign).toBeNull();
+    expect(result.count).toBe(0);
   });
 });

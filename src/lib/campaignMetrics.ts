@@ -1,4 +1,4 @@
-import { computeGeometricExpectancy } from '@/lib/geometricExpectancy';
+import { fixedBetGrowthFactor } from '@/lib/geometricExpectancy';
 import { computeRealizedOpportunityQuality } from '@/lib/opportunityQuality';
 import type { TradeCampaign, TradeJournal } from '@/types/journal';
 import type { TradeRecord } from '@/types/trading';
@@ -70,29 +70,45 @@ export function resolveCampaignOpportunityQuality(
   });
 }
 
+/**
+ * 单场资本增长因子：Gᵢ = 1 + bᵢ·x，x 每场统一取 10%。
+ *
+ * 这是「这一场把本金乘成了多少」的直接口径：按固定 10% 的资金比例下这一注，
+ * 赚 bᵢ 个 R 就等于本金变成 1 + bᵢ×0.1 倍。它与汇总那条 G 不同——汇总那条要
+ * 按胜率把「赢的一腿」和「亏的一腿」加权，因为它推演的是重复下注的长期路径；
+ * 单场的结果已经发生，bᵢ 就是它的全部，不需要再乘概率。
+ *
+ * 1 + bᵢ·x ≤ 0（bᵢ ≤ −10）代表这一注亏光了本金，因子按 0 记、几何期望记 −100%。
+ */
+export function campaignGrowthFactor(payoffRatio: number): number {
+  return fixedBetGrowthFactor(payoffRatio);
+}
+
+/**
+ * 单场的两个期望。
+ *
+ * 几何那一项不再看该场真实的 Lᵢ ÷ Aᵢ：真实 xᵢ 把「这场赔率结构好不好」和
+ * 「当时账户有多大」搅在一起——同样一场 +2R，早期小账户算出来像重仓豪赌、
+ * 后期大账户算出来几乎没下注，两个数没法横向比。固定 x 之后只剩 bᵢ 在动。
+ * 附带好处：不再需要开仓时的账户资产快照，老战役也算得出来。
+ */
 export function computeCampaignExpectancies(
   profitCaptureRatio: number | null,
   winRate: number | null,
-  campaignDrawdownFraction: number | null,
 ): CampaignExpectancies {
-  if (
-    profitCaptureRatio == null
-    || winRate == null
-    || !Number.isFinite(profitCaptureRatio)
-    || !Number.isFinite(winRate)
-  ) {
+  if (profitCaptureRatio == null || !Number.isFinite(profitCaptureRatio)) {
     return { arithmeticExpectancy: null, geometricExpectancy: null };
   }
 
   const payoffRatio = profitCaptureRatio / 100;
-  const arithmeticExpectancy = winRate * payoffRatio - (1 - winRate);
-  const geometric = campaignDrawdownFraction != null && Number.isFinite(campaignDrawdownFraction)
-    ? computeGeometricExpectancy(winRate, payoffRatio, campaignDrawdownFraction)
+  // 算术期望要按账户胜率加权，没有胜率就给不出；几何那一项只由 bᵢ 决定，照常算。
+  const arithmeticExpectancy = winRate != null && Number.isFinite(winRate)
+    ? winRate * payoffRatio - (1 - winRate)
     : null;
 
   return {
     arithmeticExpectancy,
-    geometricExpectancy: geometric?.geometricEdge ?? null,
+    geometricExpectancy: campaignGrowthFactor(payoffRatio) - 1,
   };
 }
 

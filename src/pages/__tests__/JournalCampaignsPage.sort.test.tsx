@@ -876,11 +876,12 @@ describe('JournalCampaignsPage sorting', () => {
       '算术期望：-0.87R',
       '算术期望：—',
     ]);
+    // 【用户要求】单场几何期望 = Gᵢ − 1 = bᵢ × 0.1；bᵢ 为负时它也为负
     expect(screen.getAllByTestId('campaign-geometric-expectancy').map(node => node.textContent)).toEqual([
-      '几何期望：+15.0%/笔',
-      '几何期望：-0.1%/笔',
-      '几何期望：-4.3%/笔',
-      '几何期望：—',
+      '几何期望：+30.0%/笔',   // b = +3.00
+      '几何期望：+5.0%/笔',    // b = +0.50
+      '几何期望：-8.0%/笔',    // b = −0.80，负 b 给负值
+      '几何期望：—',           // 没有有效 bᵢ
     ]);
     expect(screen.queryByText(/峰值浮盈/)).not.toBeInTheDocument();
     expect(screen.getByTestId('campaign-sort-time')).toHaveAttribute('aria-pressed', 'true');
@@ -978,6 +979,10 @@ describe('JournalCampaignsPage sorting', () => {
     expect(screen.getByText(/W = G\^3 = ×/)).toBeInTheDocument();
     expect(screen.getByText(/b = 盈利战役的平均实际盈亏比（.*2 场）/)).toBeInTheDocument();
     expect(screen.getByText(/n = 有效战役数（3 场）/)).toBeInTheDocument();
+    // 【用户要求】另一种统计口径：把每场的 (1+bᵢ·x) 连乘起来，并给出每场几何平均
+    expect(screen.getByText(/∏（1\+bᵢ·x）= ×/)).toBeInTheDocument();
+    expect(screen.getByText(/3 场实测连乘/)).toBeInTheDocument();
+    expect(screen.getByText(/每场几何平均 = ∏\^\(1\/3\) − 1 = [+-]\d+\.\d%\/笔/)).toBeInTheDocument();
     // 【用户要求】最优仓位 x* 那一行不再显示
     expect(screen.queryByText(/最优仓位 x\*/)).not.toBeInTheDocument();
     fireEvent.click(screen.getByTestId('campaign-geometric-edge'));

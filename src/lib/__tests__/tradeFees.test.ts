@@ -6,6 +6,7 @@ const asOrder = (o: Record<string, unknown>) => o as unknown as SettlementOrderL
 import {
   describeTradeRecordFees,
   feeKindLabel,
+  formatFeeCoin,
   formatFeeRate,
   sumTradeRecordFees,
   tradeRecordFees,
@@ -208,5 +209,20 @@ describe('tradeRecordFees', () => {
     expect(sum!.totalUsd).toBeCloseTo(297.72418 + 297.75392 + 10 + 100 * LEGACY_TAKER_FEE, 4);
     expect(sum!.estimated).toBe(true);
     expect(sumTradeRecordFees([])).toBeNull();
+  });
+});
+
+describe('【用户要求】币数的显示精度：这一列很窄，小数要花在有用的地方', () => {
+  it('上千只报整数，千位以下保留两位，小于 1 走有效数字', () => {
+    expect(formatFeeCoin(4_002.71)).toBe('4,003');
+    expect(formatFeeCoin(104_090.61)).toBe('104,091');
+    expect(formatFeeCoin(999.994)).toBe('999.99');
+    expect(formatFeeCoin(86.5432)).toBe('86.54');
+    expect(formatFeeCoin(0.00123456)).toBe('0.001235');
+    expect(formatFeeCoin(null)).toBe('—');
+  });
+
+  it('带币种时后缀跟在数字后面', () => {
+    expect(formatFeeCoin(4_002.71, 'TUT')).toBe('4,003 TUT');
   });
 });

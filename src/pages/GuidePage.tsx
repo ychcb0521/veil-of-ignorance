@@ -1597,17 +1597,17 @@ P 不再一把手填，而是拆成三个更可回答的问题：<strong>「这�
                     <tr><td className="px-3 py-2 border-t border-border">预期回撤 dᵢ</td><td className="px-3 py-2 border-t border-border">max（|主力开仓价 − 初始对冲 A 价|，|主力开仓价 − 初始对冲 B 价|）÷ 主力开仓价 × 100%</td><td className="px-3 py-2 border-t border-border">至少存在一个有效初始对冲价格；支持列表双向排序，缺少价格的战役不参与排序</td></tr>
                     <tr><td className="px-3 py-2 border-t border-border">机会质量 Qᵢ / Q̄</td><td className="px-3 py-2 border-t border-border">bᵢ* = max（实际盈亏比 bᵢ, 1）；Qᵢ = bᵢ* ÷ 预期回撤百分点 dᵢ；Q̄ = ΣQᵢ ÷ N</td><td className="px-3 py-2 border-t border-border">实际盈亏比小于 1（包括等于 0 或为负数）时统一按 1 计算，不取绝对值。历史价格沿用初始最大预期亏损的同一解析口径</td></tr>
                     <tr><td className="px-3 py-2 border-t border-border">单场算术期望 Eᵢ</td><td className="px-3 py-2 border-t border-border">P(赢) × bᵢ −（1 − P(赢)）</td><td className="px-3 py-2 border-t border-border">使用实时有效战役胜率与该场带符号盈亏比</td></tr>
-                    <tr><td className="px-3 py-2 border-t border-border">单场风险比例 xᵢ</td><td className="px-3 py-2 border-t border-border">Lᵢ ÷ 主力开仓时账户总资产 Aᵢ</td><td className="px-3 py-2 border-t border-border">优先使用主力开仓快照；旧战役缺失时用今日当前总资产估算</td></tr>
-                    <tr><td className="px-3 py-2 border-t border-border">单场几何期望 Gᵢ</td><td className="px-3 py-2 border-t border-border">(1+bᵢ·xᵢ)^P(赢) × (1−xᵢ)^(1−P(赢)) − 1</td><td className="px-3 py-2 border-t border-border">bᵢ 可为负；缺少有效 Lᵢ 或可用 Aᵢ 时不估算</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border">单场几何期望 Gᵢ − 1</td><td className="px-3 py-2 border-t border-border">Gᵢ = 1 + bᵢ·x，x 每场统一取 10%，因此 Gᵢ − 1 = bᵢ × 0.1</td><td className="px-3 py-2 border-t border-border">bᵢ 可为负，Gᵢ − 1 随之为负（bᵢ = −1 → −10%）。不乘胜率：单场结果已经发生，bᵢ 就是它的全部。1+bᵢ·x ≤ 0（bᵢ ≤ −10）代表本金被打穿，按 −100% 记</td></tr>
                     <tr><td className="px-3 py-2 border-t border-border">汇总几何期望 G</td><td className="px-3 py-2 border-t border-border">(1+b·x)^p × (1−x)^(1−p) − 1；x 统一取 10%，b 取盈利战役的平均实际盈亏比，p 取有效战役胜率</td><td className="px-3 py-2 border-t border-border">表示在历史总体参数、每笔固定投入 10% 资金比例下的理论每笔复利率；固定仓位后它的变化只反映 edge 本身，可以纵向比较</td></tr>
-                    <tr><td className="px-3 py-2 border-t border-border">n 场累计因子 W</td><td className="px-3 py-2 border-t border-border">W = (1+b·x)^(n·p) × (1−x)^(n·(1−p)) = G^n，n 取有效战役数</td><td className="px-3 py-2 border-t border-border">把每笔复利率按有效战役场数复利到底的理论总倍数；它是模型推演，不是账户真实收益</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border">n 场累计因子 W（推演）</td><td className="px-3 py-2 border-t border-border">W = (1+b·x)^(n·p) × (1−x)^(n·(1−p)) = G^n，n 取有效战役数</td><td className="px-3 py-2 border-t border-border">把每笔复利率按有效战役场数复利到底的理论总倍数；它是模型推演，不是账户真实收益</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border">实测连乘 ∏（1+bᵢ·x）</td><td className="px-3 py-2 border-t border-border">把每一场的单场增长因子 1 + bᵢ×0.1 依次相乘；同时给出每场几何平均 = ∏^(1/n) − 1</td><td className="px-3 py-2 border-t border-border">不按均值推演，直接照真实发生的 bᵢ 逐场走：同样按 10% 的比例下注，本金实际变成几倍。与 W 的差就是「真实样本的分布」相对按均值推演的代价或红利。任一场 bᵢ ≤ −10 会把整条路径归零</td></tr>
                   </tbody>
                 </table>
               </div>
               <RedHighlight>
                 没有初始最大预期亏损，就没有可用分母，因此该战役的盈亏比显示「—」。它不会进入盈亏比排序，也不会进入胜率、平均盈亏比和期望值。统计概览中的指标可单击查看公式；排序行中的公式指标需双击或右键查看，单击只负责排序。
               </RedHighlight>
-              <P>单场几何期望优先使用主力开仓时固化的实时账户总资产快照，该值不会被后续资产变化改写。旧战役若因字段上线较晚而缺少快照，系统会用<strong>今日当前总账户资产</strong>作为替代分母，使历史战役仍可计算和排序；这个回退值是历史估算而非当时资产的还原，会随当前账户资产实时更新。</P>
+              <P>单场几何期望只由 bᵢ 决定：按固定 <strong>10%</strong> 的资金比例下这一注，赚 bᵢ 个 R 就等于本金乘上 1 + bᵢ×0.1 倍。它<strong>不再</strong>使用该场真实的「最大预期亏损 ÷ 开仓时账户总资产」——真实 xᵢ 会把「这场赔率结构好不好」和「当时账户有多大」搅在一起，同样一场 +2R，早期小账户算出来像重仓豪赌、后期大账户算出来几乎没下注，两个数没法横向比。改成固定 x 之后，场与场之间只剩 bᵢ 在动，也不再依赖开仓时的账户资产快照，老战役同样算得出来。</P>
 
               <SubTitle>不对称风险指标</SubTitle>
               <P>本策略刻意让左尾受控、右尾开放，因此不直接用标准差或夏普把右尾也当作风险扣分。「不对称风险」与实时胜率、平均盈亏比和期望值使用完全相同的账户级有效战役池：每场以 <strong>b = 已实现 P&amp;L ÷ 最大预期亏损</strong>计量，b &gt; 0 为盈利战役，b ≤ 0 为亏损战役。系统不做截尾，b &lt; −1 的超额实亏会完整进入下行统计。</P>
@@ -1683,8 +1683,9 @@ P 不再一把手填，而是拆成三个更可回答的问题：<strong>「这�
                   <tbody>
                     <tr><td className="px-3 py-2 border-t border-border">汇总算术期望 E</td><td className="px-3 py-2 border-t border-border">按当前胜率与<strong>混合均值 b̄</strong>（不是概览显示的盈利侧均值），每承担 1R 风险的平均加法收益是多少</td><td className="px-3 py-2 border-t border-border">不反映仓位大小、波动拖累与复利路径</td></tr>
                     <tr><td className="px-3 py-2 border-t border-border">汇总几何期望 G</td><td className="px-3 py-2 border-t border-border">若每笔固定按 10% 的资金比例重复同类战役，理论资本每笔按什么速度复利</td><td className="px-3 py-2 border-t border-border">不是实际历史收益率，也不是对下一笔的保证</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border">实测连乘 ∏（1+bᵢ·x）</td><td className="px-3 py-2 border-t border-border">同样按 10% 下注，这批战役真实走下来把本金变成了几倍</td><td className="px-3 py-2 border-t border-border">它按的是固定 10% 的假设仓位，不等于账户的真实收益曲线</td></tr>
                     <tr><td className="px-3 py-2 border-t border-border">单场算术期望 Eᵢ</td><td className="px-3 py-2 border-t border-border">把该场事后实际 bᵢ 放回当前总体胜率后，得到怎样的 R 值</td><td className="px-3 py-2 border-t border-border">不是该场建仓时已经知道的事前期望</td></tr>
-                    <tr><td className="px-3 py-2 border-t border-border">单场几何期望 Gᵢ</td><td className="px-3 py-2 border-t border-border">该场实际盈亏结构与当时真实风险比例，对长期复利结构形成怎样的影响</td><td className="px-3 py-2 border-t border-border">不能仅凭一场结果判断策略未来必然盈利或亏损</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border">单场几何期望 Gᵢ − 1</td><td className="px-3 py-2 border-t border-border">若按固定 10% 的资金比例下这一注，这一场把本金乘成了多少</td><td className="px-3 py-2 border-t border-border">不能仅凭一场结果判断策略未来必然盈利或亏损</td></tr>
                   </tbody>
                 </table>
               </div>
@@ -1695,10 +1696,10 @@ P 不再一把手填，而是拆成三个更可回答的问题：<strong>「这�
               <SubTitle>几何期望为负意味着什么</SubTitle>
               <P>几何期望小于 0，表示相应的复利增长因子小于 1：如果在相同胜率、盈亏结构和风险比例下反复执行，理论账户资产会随次数按复利方式缩水。例如几何期望为 −5%/笔，对应的理论路径约为「初始资产 × 0.95ⁿ」。</P>
               <ul className="list-disc pl-6 text-[14px] text-foreground/90 space-y-1">
-                <li><strong>bᵢ 为正但 Gᵢ 为负：</strong>通常说明胜率不足、盈亏空间不够，或该场风险比例 xᵢ 过大，波动拖累已经吞掉算术优势。</li>
+                <li><strong>单场 Gᵢ − 1 与 bᵢ 同号：</strong>固定 x 之后单场几何期望就是 bᵢ 的等比缩放（bᵢ × 0.1），赚的场为正、亏的场为负，不会出现「bᵢ 为正而 Gᵢ 为负」。会出现那种背离的是<strong>汇总</strong>几何期望——它要按胜率把赢腿与亏腿加权，波动拖累就体现在那里。</li>
                 <li><strong>bᵢ 为负导致 Gᵢ 为负：</strong>主要描述这场历史结果确实侵蚀了资本；它不等于同类策略未来必然是负期望。</li>
                 <li><strong>算术期望为正但几何期望为负：</strong>表示方向上可能仍有平均优势，但下注过重，长期路径仍可能缩水甚至归零。</li>
-                <li><strong>xᵢ ≥ 100%，或 1+bᵢ·xᵢ ≤ 0：</strong>代表最大预期亏损足以击穿账户权益，单场几何期望按 −100% 处理。</li>
+                <li><strong>1+bᵢ·x ≤ 0（即 bᵢ ≤ −10）：</strong>这一场亏掉了十倍于计划最大亏损的钱，按 10% 的下注比例足以打穿本金，增长因子记 0、单场几何期望按 −100% 处理。</li>
               </ul>
               <RedHighlight>
                 几何期望为正不是“这场交易正确”的证明，几何期望为负也不是对未来的判决。它首先是一把检查赔率、胜率与仓位是否共同支持长期复利的尺子。
@@ -1744,7 +1745,7 @@ P 不再一把手填，而是拆成三个更可回答的问题：<strong>「这�
               </Highlight>
 
               <SubTitle>战役详情页：盈亏概览与高清 PNG</SubTitle>
-              <P><strong>已实现盈亏的口径全系统只有一个</strong>：本场战役所归类仓位产生的每一条结算记录（平仓 / 爆仓）之和，按成交 id 去重、每条恰好计一次。一个仓位分几刀平掉时每一刀都算，镜像止盈落袋也算（它就是主力仓位上的一刀）；资金费不并入任何腿。战役状态、标题、列表卡片、Legs 表合计行、导出 PNG 与复盘 TXT 全部读同一个函数，因此<strong>「亏损结束」配一个绿色正数在构造上不可能再出现</strong>。Legs 表底部的<strong>合计行</strong>按构造恒等于盈亏概览的已实现 P&L，旁边标注这笔数取自成交记录、复盘快照还是落库缓存。落库缓存只是由各腿推导出来的快照，与现算值不一致时以现算值为准，并在盈亏概览里显示差额、下次读取战役时自动回写收敛。详情页的<strong>盈亏概览</strong>统一展示已实现盈亏、主力开仓杠杆倍数、主力开仓名义仓位、峰值浮盈、最大预期亏损、预期回撤、盈亏比、机会质量、单场算术期望、单场几何期望与今日账户总资产。主力开仓名义仓位按入场时 M 加镜像的全暴露计算，不混入后续加仓；峰值浮盈按每个时点的<strong>未实现盈亏 + 累计已落袋盈亏</strong>取最高值，镜像止盈落袋也包含在内。未实现部分会同时检查每根 K 线的最高价与最低价，并以同一价格重估当时仍持有的完整多空组合；分批平仓、镜像落袋和对冲拆除按各自时点切换状态，历史战役则从关联成交、Leg 快照与事件快照还原。杠杆优先读取主力 Leg，历史记录缺失时再从关联成交、战役初始字段或主力开仓事件回填。每个指标名旁的低透明度 <strong>i</strong> 图标都可点击，会折叠展开该指标的含义、公式和数据口径，不会挤压页面布局。这些数据与战役列表使用同一套公式：注意系统里有两个都叫「回撤」但含义不同的量：列表与详情显示的<strong>预期回撤</strong>是<strong>价格层面</strong>的（主力入场到对冲边界的距离 ÷ 入场价），而几何期望公式里的 <strong>xᵢ</strong> 是<strong>账户层面</strong>的下注比例（最大预期亏损 ÷ 账户总资产）。当 xᵢ ≥ 100% 时这一注押上了全部本金，几何期望按 −100%/笔 记，卡片上会显示「仓位击穿」徽标——它评判的是仓位大小，与本场实际盈亏无关，所以会和一个正的算术期望并排出现，这不是显示错误。预期回撤支持双向排序；机会质量先取 <strong>b* = max（实际盈亏比, 1）</strong>，再用 <strong>b* ÷ 预期回撤百分点</strong>计算，不取绝对值；期望指标使用同一账户当前的有效战役胜率，历史战役的几何期望在缺少开仓资产快照时才使用今日当前总资产估算。</P>
+              <P><strong>已实现盈亏的口径全系统只有一个</strong>：本场战役所归类仓位产生的每一条结算记录（平仓 / 爆仓）之和，按成交 id 去重、每条恰好计一次。一个仓位分几刀平掉时每一刀都算，镜像止盈落袋也算（它就是主力仓位上的一刀）；资金费不并入任何腿。战役状态、标题、列表卡片、Legs 表合计行、导出 PNG 与复盘 TXT 全部读同一个函数，因此<strong>「亏损结束」配一个绿色正数在构造上不可能再出现</strong>。Legs 表底部的<strong>合计行</strong>按构造恒等于盈亏概览的已实现 P&L，旁边标注这笔数取自成交记录、复盘快照还是落库缓存。落库缓存只是由各腿推导出来的快照，与现算值不一致时以现算值为准，并在盈亏概览里显示差额、下次读取战役时自动回写收敛。详情页的<strong>盈亏概览</strong>统一展示已实现盈亏、主力开仓杠杆倍数、主力开仓名义仓位、峰值浮盈、最大预期亏损、预期回撤、盈亏比、机会质量、单场算术期望、单场几何期望与今日账户总资产。主力开仓名义仓位按入场时 M 加镜像的全暴露计算，不混入后续加仓；峰值浮盈按每个时点的<strong>未实现盈亏 + 累计已落袋盈亏</strong>取最高值，镜像止盈落袋也包含在内。未实现部分会同时检查每根 K 线的最高价与最低价，并以同一价格重估当时仍持有的完整多空组合；分批平仓、镜像落袋和对冲拆除按各自时点切换状态，历史战役则从关联成交、Leg 快照与事件快照还原。杠杆优先读取主力 Leg，历史记录缺失时再从关联成交、战役初始字段或主力开仓事件回填。每个指标名旁的低透明度 <strong>i</strong> 图标都可点击，会折叠展开该指标的含义、公式和数据口径，不会挤压页面布局。这些数据与战役列表使用同一套公式：注意系统里有两个都叫「回撤」但含义不同的量：列表与详情显示的<strong>预期回撤</strong>是<strong>价格层面</strong>的（主力入场到对冲边界的距离 ÷ 入场价），而几何期望公式里的 <strong>x</strong> 是<strong>账户层面</strong>的下注比例，现已每场统一取 10%。卡片上的「仓位击穿」徽标仍按该场<strong>真实</strong>的下注比例（最大预期亏损 ÷ 账户总资产）判定：≥ 100% 代表这一注押上了全部本金。它评判的是当时的仓位大小，<strong>不进几何期望公式</strong>，也与本场实际盈亏无关，所以会和一个正的算术期望并排出现，这不是显示错误。预期回撤支持双向排序；机会质量先取 <strong>b* = max（实际盈亏比, 1）</strong>，再用 <strong>b* ÷ 预期回撤百分点</strong>计算，不取绝对值；算术期望使用同一账户当前的有效战役胜率；单场几何期望只看 bᵢ 与固定的 10%，不再需要开仓资产快照。</P>
               <ul className="list-disc pl-6 text-[14px] text-foreground/90 space-y-1">
                 <li>点击 Legs 列表右上角的 <strong>PNG</strong>，会把<strong>战役原数据、盈亏概览、当前 K 线周期、已经拖动 / 缩放好的 K 线视图，以及完整 Legs 列表</strong>导出到同一张高清图片。周期会以「1分钟线」「5分钟线」「15分钟线」或「1小时线」写入图片。</li>
                 <li>图片中的<strong>盈亏概览</strong>与详情页共用同一份指标清单；以后详情页新增盈亏指标时，导出图会自动同步收录，并随指标数量自动增加高度。</li>

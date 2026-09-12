@@ -38,9 +38,14 @@ export interface FeeSide {
  */
 export function formatFeeCoin(coin: number | null | undefined, asset?: string): string {
   if (!finite(coin)) return '—';
-  const text = Math.abs(coin) >= 1
-    ? coin.toLocaleString('en-US', { maximumFractionDigits: 2 })
-    : coin.toLocaleString('en-US', { maximumSignificantDigits: 4 });
+  // 上千的币数不报小数：4,003 个币的手续费里那 0.71 个是噪声，却要占掉三个字符宽，
+  // 而这一列本来就窄——小数点后那一点精度换不来任何判断。
+  const magnitude = Math.abs(coin);
+  const text = magnitude >= 1000
+    ? coin.toLocaleString('en-US', { maximumFractionDigits: 0 })
+    : magnitude >= 1
+      ? coin.toLocaleString('en-US', { maximumFractionDigits: 2 })
+      : coin.toLocaleString('en-US', { maximumSignificantDigits: 4 });
   return asset ? `${text} ${asset}` : text;
 }
 

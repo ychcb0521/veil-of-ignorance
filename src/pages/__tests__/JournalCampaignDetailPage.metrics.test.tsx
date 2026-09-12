@@ -408,7 +408,8 @@ describe('JournalCampaignDetailPage metrics', () => {
     expect(screen.getByText('10000.00 USDT')).toBeInTheDocument();
     // 算术/几何期望与实时胜率依赖异步加载的 campaignPerformance（同账户有效战役），需等它落定。
     await waitFor(() => expect(screen.getByText('+0.50R')).toBeInTheDocument());
-    expect(screen.getByText('+0.5%/笔')).toBeInTheDocument();
+    // 【用户要求】单场几何期望 = Gᵢ − 1 = bᵢ × 0.1；这场 b = 2.00 → +20.0%
+    expect(screen.getByText('+20.0%/笔')).toBeInTheDocument();
     expect(screen.getByText('USI · b²/n = 4.0000（组内 100.0%）')).toBeInTheDocument();
     expect(screen.getByText(/2 场有效战役，实时胜率 50.00%/)).toBeInTheDocument();
     expect(screen.queryByText('逐腿 P&L 对账')).not.toBeInTheDocument();

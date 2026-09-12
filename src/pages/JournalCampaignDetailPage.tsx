@@ -935,7 +935,6 @@ export default function JournalCampaignDetailPage() {
     const expectancies = computeCampaignExpectancies(
       profitCaptureRatio,
       campaignPerformance?.expectedWinRate ?? null,
-      initialRisk?.drawdownFraction ?? null,
     );
 
     return {

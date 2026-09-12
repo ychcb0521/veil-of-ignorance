@@ -134,10 +134,10 @@ const FEE_COLUMN_HINT = '币安口径：手续费 = 名义 × 费率，开仓、
   + '币本位：名义 = 张数 × 面值 ÷ 成交价，收的是币——折成美元后价格被约掉，所以开平两笔的美元数必然相同，币数才不同（价越高付的币越少），本列因此按币显示。'
   + '盈亏列已扣平仓费；开仓费在开仓当时从钱包扣除。旧记录未存开仓费，按当时 0.04% Taker 估算并标明。';
 
-const LEGS_GRID = 'grid-cols-[36px_128px_180px_116px_84px_88px_88px_116px_120px_minmax(224px,1fr)_64px]';
+const LEGS_GRID = 'grid-cols-[36px_128px_180px_116px_84px_88px_88px_116px_148px_minmax(216px,1fr)_64px]';
 
 /** 各列合计的下限，与 LEGS_GRID 对应；不足时容器横向滚动而不是压扁列。 */
-const LEGS_MIN_WIDTH = 'min-w-[1368px]';
+const LEGS_MIN_WIDTH = 'min-w-[1388px]';
 
 export function CampaignLegsList({
   legs,
@@ -418,7 +418,9 @@ export function CampaignLegsList({
                     return (
                       <div
                         data-testid={`leg-fees-${leg.id}`}
-                        className="text-right text-[11px] leading-snug tabular-nums text-foreground/55"
+                        // min-w-0 不能少：网格项的 min-width 默认是 auto，等于「不许比内容窄」，
+                        // 于是这条长子行会把 132px 的轨道顶破、压到左边「币量 / 仓位」那一列上。
+                        className="min-w-0 text-right text-[11px] leading-snug tabular-nums text-foreground/55"
                       >
                         <div>
                           {fees.totalUsd == null ? '—' : fees.totalUsd.toFixed(2)}

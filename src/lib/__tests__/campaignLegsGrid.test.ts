@@ -73,8 +73,17 @@ describe('Legs 表栅格', () => {
     const tracks = grid.split('_');
     expect(tracks).toHaveLength(11);
     expect(tracks.filter(track => track.includes('fr'))).toHaveLength(1);
-    expect(tracks[9]).toContain('minmax(224px,1fr)');      // 委托：唯一越宽越有用的列
+    expect(tracks[9]).toMatch(/^minmax\(2\d\dpx,1fr\)$/);   // 委托：唯一越宽越有用的列
     expect(tracks[2]).toBe('180px');                        // 时间：放得下「开 2025-09-19 22:42」
+  });
+
+  it('【用户要求】手续费列放得下「开 82,328 · 平 104,091 ASTER」这类最长的拆分行', () => {
+    const grid = /grid-cols-\[([^\]]+)\]/.exec(src())?.[1] ?? '';
+    const feeTrack = Number.parseInt(grid.split('_')[8], 10);
+    expect(feeTrack).toBeGreaterThanOrEqual(148);
+    // 单元格必须带 min-w-0：网格项默认 min-width:auto，长子行会顶破定宽轨道、压到左边一列上
+    const cell = /data-testid=\{`leg-fees-\$\{leg\.id\}`\}[\s\S]{0,400}?className="([^"]+)"/.exec(src())?.[1] ?? '';
+    expect(cell).toContain('min-w-0');
   });
 
   it('操作列只留两个图标按钮（标到盘面 / 解除），中文标签进 title 而不是渲染成文字', () => {
