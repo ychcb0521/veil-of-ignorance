@@ -10,6 +10,12 @@ export type CampaignMetricSeriesInput = {
    * null = 未结束或无数据。
    */
   pnl?: number | null;
+  /**
+   * 战役实际盈亏比 b = 已实现盈亏 ÷ 初始最大预期亏损。
+   * 与 value 无关：像镜像止盈这种只有四个档位的指标，点上读不出赚亏了多少个 R，
+   * 提示框里补一个 b 才能就地判断这一档到底值不值。null = 无有效 L。
+   */
+  payoffRatio?: number | null;
 };
 
 export type CampaignMetricPoint = {
@@ -21,6 +27,8 @@ export type CampaignMetricPoint = {
   sequence: number;
   /** 战役已实现盈亏；null / undefined = 未结束或无数据。 */
   pnl?: number | null;
+  /** 战役实际盈亏比 b；null / undefined = 无有效初始最大预期亏损。 */
+  payoffRatio?: number | null;
 };
 
 export type CampaignMetricSeries = {

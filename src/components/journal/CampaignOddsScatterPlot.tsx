@@ -367,6 +367,9 @@ export function CampaignMetricScatterPlot({
   // 柱状与分布都按横轴堆叠、纵轴读场数；区别只在横轴是离散档位还是连续数值。
   const bars = view === 'bars';
   const stacked = distribution || bars;
+  // 镜像止盈只有四个档位，点上读不出这一场赚亏了多少个 R，提示框里补一个 b 才判断得了。
+  // 盈亏比图不补：它的轴本身就是 b。其余指标暂不补，免得每张图的提示框都挂一串数。
+  const showPayoffRatio = metricKey.startsWith('mirrorTp');
   const lossBoundaryValue = metricKey === 'odds' ? -1 : null;
   const chartPoints = useMemo(
     () => points.map(point => ({
@@ -473,15 +476,23 @@ export function CampaignMetricScatterPlot({
         : point.pnl > 0 ? 'positive' : point.pnl < 0 ? 'negative' : 'zero';
       const seriesIndex = metricSeriesIndex(point.value, colorMode, point.pnl);
       const operationTime = formatBeijingTime(point.operationTime);
+      // 盈亏比图的纵轴本身就是 b，再报一次是废话；其余指标才补。
+      const payoffSuffix = showPayoffRatio && point.payoffRatio != null && Number.isFinite(point.payoffRatio)
+        // 先按显示精度定成符号：直接看原值会把 −0.001 印成「−0.00R」——一个不存在的负零。
+        ? (() => {
+          const rounded = Number(point.payoffRatio.toFixed(2)) + 0;
+          return ` · b ${rounded > 0 ? '+' : ''}${rounded.toFixed(2)}R`;
+        })()
+        : '';
       return {
         id: point.campaignId,
         x: stacked ? point.value : index,
         y: stacked ? 0 : point.value,
         seriesId: `s${Math.min(seriesIndex, Math.max(0, series.length - 1))}`,
-        valueText: formatValue(point.value),
+        valueText: `${formatValue(point.value)}${payoffSuffix}`,
         label: `#${point.sequence} ${point.title}`,
         metaText: `操作时间 ${operationTime}`,
-        ariaLabel: `第 ${point.sequence} 场，${point.title}，${metricLabel} ${formatValue(point.value)}，操作时间 ${operationTime}，进入战役`,
+        ariaLabel: `第 ${point.sequence} 场，${point.title}，${metricLabel} ${formatValue(point.value)}${payoffSuffix}，操作时间 ${operationTime}，进入战役`,
         testId: legacyOddsTestIds
           ? `campaign-odds-point-${point.campaignId}`
           : `campaign-metric-point-${metricKey}-${point.campaignId}`,
@@ -495,7 +506,7 @@ export function CampaignMetricScatterPlot({
         },
       };
     }),
-    [colorMode, formatValue, legacyOddsTestIds, metricKey, metricLabel, orderedPoints, series.length, stacked],
+    [colorMode, formatValue, legacyOddsTestIds, metricKey, metricLabel, orderedPoints, series.length, showPayoffRatio, stacked],
   );
 
   const countAxis = useMemo<ScatterCountAxis>(() => ({
@@ -514,7 +525,11 @@ export function CampaignMetricScatterPlot({
 
   const barsXAxis = useMemo<ScatterXAxis | null>(() => (barColumns ? {
     mode: 'category',
-    categories: barColumns.map(column => ({ value: column.value, label: column.label })),
+    categories: barColumns.map(column => ({
+      value: column.value,
+      label: column.label,
+      sublabel: `${column.count} 场`,
+    })),
   } : null), [barColumns]);
 
   const distributionReferenceLines = useMemo<ScatterReferenceLine[]>(() => (dist ? [

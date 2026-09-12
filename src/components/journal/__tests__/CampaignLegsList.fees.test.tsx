@@ -42,9 +42,8 @@ describe('Legs 列表的手续费列', () => {
     expect(cell.textContent).toContain('开 297.72 · 平 297.75');
     expect(cell.textContent).toContain('估');
     expect(cell.textContent).not.toContain('Taker');
-    expect(cell.getAttribute('title')).toContain('手续费 = 数量 × 成交价 × 费率');
-    expect(cell.getAttribute('title')).toContain('Taker，记录未存开仓费，按当时费率估算');
-    expect(cell.getAttribute('title')).toContain('毛盈亏 +74.36 − 平仓费 297.75 = -223.39');
+    // 【用户要求】不要那个黑框提示：单元格上不再挂 title
+    expect(cell.getAttribute('title')).toBeNull();
     expect(screen.getByTestId('legs-total-fees').textContent).toContain('595.48');
     expect(screen.getByTestId('legs-total-fees').textContent).toContain('估');
   });
@@ -59,7 +58,7 @@ describe('Legs 列表的手续费列', () => {
     expect(cell.textContent).toContain('744.35');
     expect(cell.textContent).toContain('开 372.16 · 平 372.19');
     expect(cell.textContent).not.toContain('估');
-    expect(cell.getAttribute('title')).toContain('0.05%');
+    expect(cell.getAttribute('title')).toBeNull();
     expect(screen.getByTestId('legs-total-fees').textContent).not.toContain('估');
   });
 
@@ -122,18 +121,23 @@ describe('Legs 列表的手续费列', () => {
     expect(cell.textContent).toContain('ASTER');
     // 不把两个一模一样的金额并排写出来
     expect(cell.textContent).not.toContain('开 704.22 · 平 704.22');
-    expect(cell.getAttribute('title')).toContain('钱包按这个数扣');
+    expect(cell.getAttribute('title')).toBeNull();
     expect(screen.getByTestId('legs-total-fees').textContent).toContain('1408.45');
   });
 
-  it('强平记录：tooltip 里标明含强平清算费', () => {
+  it('强平记录：手续费列仍按开 + 平两笔报数，且不挂 title', () => {
     const record = hpeRecord({
       action: 'LIQUIDATION', exit_method: 'liquidation', liquidationSettlement: 'bankruptcy',
       pnl: -74_431, fee: 4_019.4, closeFeeRate: TAKER_FEE, closeIsMaker: false, liquidationFeeUsd: 3_721.6,
       openFeeUsd: 372.155, openIsMaker: false, openFeeRate: TAKER_FEE,
     });
     renderList([record], [legFor(record)]);
-    expect(screen.getByTestId('leg-fees-leg-1').getAttribute('title')).toContain('强平清算费 3721.60');
+    const cell = screen.getByTestId('leg-fees-leg-1');
+    // 强平清算费已经含在记录的 fee 里，所以仍进合计（4391.56）；
+    // 它不再单独标注——原先只有那个 title 说得清，而 title 按要求撤了。
+    expect(cell.textContent).toContain('4391.56');
+    expect(cell.textContent).toContain('开 372.15 · 平 4019.40');
+    expect(cell.getAttribute('title')).toBeNull();
   });
 
   it('没有成交记录的腿显示「—」；合计按记录去重', () => {

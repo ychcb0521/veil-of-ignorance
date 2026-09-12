@@ -96,7 +96,6 @@ import {
   type AsymmetricRiskMetricsSummary,
 } from '@/lib/asymmetricRiskMetrics';
 import { formatOpportunityQuality } from '@/lib/opportunityQuality';
-import { STRATEGY_TEMPLATES } from '@/lib/strategyTemplates';
 import {
   buildActualSimulationParams,
   buildManualLegs,
@@ -1674,7 +1673,6 @@ export default function JournalCampaignDetailPage() {
                 <span className={`px-2 py-0.5 rounded ${campaign.direction === 'main_long' ? 'bg-[#0ECB81]/10 text-[#0ECB81]' : 'bg-[#F6465D]/10 text-[#F6465D]'}`}>
                   {campaign.direction === 'main_long' ? '主多' : '主空'}
                 </span>
-                <span>{STRATEGY_TEMPLATES[campaign.strategy_template].name}</span>
                 <span className={`px-2 py-0.5 rounded ${chipForStatus(campaign.status)}`}>{campaign.status}</span>
               </div>
             </div>

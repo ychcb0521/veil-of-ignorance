@@ -577,7 +577,7 @@ describe('JournalCampaignsPage sorting', () => {
     render(
       <MemoryRouter initialEntries={['/journal/campaigns?chart=mirrorTp']}>
         <Routes>
-          <Route path="/journal/campaigns" element={<JournalCampaignsPage />} />
+          <Route path="/journal/campaigns" element={<><JournalCampaignsPage /><SearchProbe /></>} />
           <Route path="/journal/campaigns/:id" element={<LocationProbe />} />
         </Routes>
       </MemoryRouter>,
@@ -594,6 +594,8 @@ describe('JournalCampaignsPage sorting', () => {
     await waitFor(() => expect(screen.getByTestId('campaign-metric-scatter-plot'))
       .toHaveAttribute('data-metric-key', 'mirrorTpBars'));
     expect(screen.getByTestId('campaign-mirrorTp-view-bars')).toHaveAttribute('aria-pressed', 'true');
+    // 切换写回地址栏：从散点图点进详情再返回时，落回的是同一张图
+    expect(screen.getByTestId('location-probe-search')).toHaveTextContent('chart=mirrorTpBars');
 
     // 四个结果档位都在轴上——一场都没有的档位留空柱，「持平 0 场」本身就是结论
     const summary = screen.getByTestId('campaign-metric-summary-mirrorTpBars');
@@ -626,6 +628,36 @@ describe('JournalCampaignsPage sorting', () => {
     // 柱状视图不画时序视图那套右侧档位计数，也没有密度曲线
     expect(screen.queryByTestId('campaign-metric-band-count')).not.toBeInTheDocument();
     expect(screen.queryByTestId('campaign-metric-density-curve-mirrorTpBars')).not.toBeInTheDocument();
+
+    // 【用户要求】四根柱的柱脚各写自己的场数——柱高只读得出大概，精确值要就地可读。
+    // 而且写的必须就是这一柱真正画出来的点数，不能是另算的一份。
+    for (const value of [0, 1, 2, 3]) {
+      const drawn = buttons.filter(node => Number(node.dataset.metricValue) === value).length;
+      expect(screen.getByTestId(`chart-category-count-${value}`).textContent).toBe(`${drawn} 场`);
+    }
+
+    // 【用户要求】点开一个点要读得到这一场的 b：档位只有四种，b 才说明赚亏了多少个 R
+    const labelled = buttons.map(node => node.getAttribute('aria-label') ?? '');
+    expect(labelled.some(label => /· b [+-]\d+\.\d{2}R/.test(label))).toBe(true);
+  }, 15_000);
+
+  it('【用户要求】镜像止盈默认就开柱状视图，不必再手动切', async () => {
+    render(
+      <MemoryRouter initialEntries={['/journal/campaigns?sort=mirrorTp&direction=desc']}>
+        <Routes>
+          <Route path="/journal/campaigns" element={<JournalCampaignsPage />} />
+          <Route path="/journal/campaigns/:id" element={<LocationProbe />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    fireEvent.contextMenu(await screen.findByTestId('campaign-sort-mirrorTp'));
+    fireEvent.click(await screen.findByTestId('campaign-mirrorTp-chart-toggle'));
+
+    await waitFor(() => expect(screen.getByTestId('campaign-metric-scatter-plot'))
+      .toHaveAttribute('data-metric-key', 'mirrorTpBars'));
+    expect(screen.getByTestId('campaign-mirrorTp-view-bars')).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByTestId('campaign-mirrorTp-view-time')).toHaveAttribute('aria-pressed', 'false');
   }, 15_000);
 
   it('?chart=oddsDistribution 恢复分布图，「时序 | 分布」互切并写回 URL，排序行按钮把它当作盈亏比图收起', async () => {
@@ -860,7 +892,7 @@ describe('JournalCampaignsPage sorting', () => {
     expect(metricsStrip).toContainElement(screen.getByTestId('campaign-valid-count'));
     expect(metricsStrip).toContainElement(screen.getByTestId('campaign-opportunity-quality'));
     expect(metricsStrip).toContainElement(screen.getByTestId('campaign-asymmetric-risk'));
-    expect(metricsStrip).toContainElement(screen.getByTestId('campaign-compound-growth-rate'));
+    expect(metricsStrip).toContainElement(screen.getByTestId('campaign-geometric-edge'));
     expect(screen.getByTestId('campaign-valid-count')).toHaveTextContent('有效战役（3）');
     expect(screen.getByTestId('campaign-valid-count')).toHaveAttribute(
       'aria-label',
@@ -887,24 +919,28 @@ describe('JournalCampaignsPage sorting', () => {
     expect(screen.getByText('= 2 ÷（2 + 1）')).toBeInTheDocument();
     fireEvent.click(screen.getByTestId('campaign-win-rate'));
     expect(screen.queryByText('胜率计算公式')).not.toBeInTheDocument();
-    expect(screen.getByTestId('campaign-average-payoff-ratio')).toHaveTextContent('平均盈亏比（0.90）');
-    expect(screen.getByTestId('campaign-average-payoff-ratio')).toHaveAttribute(
-      'aria-label',
-      '平均盈亏比 0.90，共 3 场战役',
-    );
-    fireEvent.click(screen.getByTestId('campaign-average-payoff-ratio'));
+    // 【用户要求】概览那一项只报盈利战役的平均 b（赢的时候平均赢多少 R），不报混合均值 0.90
+    const payoffChip = screen.getByTestId('campaign-average-payoff-ratio');
+    expect(payoffChip.textContent).toMatch(/平均盈亏比（\+\d+\.\d{2}R）/);
+    expect(payoffChip.textContent).not.toContain('0.90');
+    expect(payoffChip.getAttribute('aria-label')).toContain('盈利战役 2 场');
+    expect(payoffChip.getAttribute('aria-label')).toContain('亏损战役平均');
+    fireEvent.click(payoffChip);
+    // 浮层里盈利侧的数就是概览那一项显示的数
+    expect(payoffChip.textContent)
+      .toContain(screen.getByTestId('campaign-win-payoff-ratio').textContent!);
     expect(screen.getByText('平均盈亏比计算公式')).toBeInTheDocument();
-    expect(screen.getByText('b̄ = Σ 单场盈亏比 bᵢ ÷ 有效战役数 N')).toBeInTheDocument();
-    expect(screen.getByText('= 2.70 ÷ 3')).toBeInTheDocument();
-    // 注解里分组给出「赢时平均赢多少 / 亏时平均亏多少」，混合均值会把两者抵消
-    expect(screen.getByText('分组均值')).toBeInTheDocument();
+    expect(screen.getByText('b̄赢 = Σ 盈利战役 bᵢ ÷ 盈利战役数')).toBeInTheDocument();
+    // 【用户要求】亏损侧也要看得到
     expect(screen.getByText('盈利战役（2 场）')).toBeInTheDocument();
     expect(screen.getByText('亏损战役（1 场）')).toBeInTheDocument();
     const winMean = Number(screen.getByTestId('campaign-win-payoff-ratio').textContent!.replace(/[+R]/g, ''));
     const lossMean = Number(screen.getByTestId('campaign-loss-payoff-ratio').textContent!.replace(/[R]/g, ''));
     expect(winMean).toBeGreaterThan(0);
     expect(lossMean).toBeLessThan(0);
-    // 恒等式：(n_win·b̄_win + n_loss·b̄_loss) ÷ N == 混合均值 0.90
+    // 混合均值降级成脚注但不能消失：期望值读的就是它，恒等式仍然成立
+    expect(screen.getByTestId('campaign-mixed-payoff-ratio')).toHaveTextContent('0.90');
+    expect(screen.getByText('= 2.70 ÷ 3（亏损以负值原样参与求和）')).toBeInTheDocument();
     expect((2 * winMean + 1 * lossMean) / 3).toBeCloseTo(0.9, 2);
     fireEvent.click(screen.getByTestId('campaign-average-payoff-ratio'));
     // 期望值就是有效战役 b 的平均值（0.90），不再是 P×b̄ − (1−P) = 0.27——那会把亏损扣两遍。
@@ -928,20 +964,26 @@ describe('JournalCampaignsPage sorting', () => {
     expect(screen.getByText(/dᵢ = max（\|主力开仓价 − 初始对冲 A 价\|/)).toBeInTheDocument();
     expect(screen.getByText('当前 N = 3 场。')).toBeInTheDocument();
     fireEvent.click(screen.getByTestId('campaign-opportunity-quality'));
-    expect(screen.getByTestId('campaign-compound-growth-rate')).toHaveTextContent('复合战役增长率（—）');
-    expect(screen.getByTestId('campaign-compound-growth-rate')).toHaveAttribute(
-      'aria-label',
-      '复合战役增长率 —，共 0 场有效战役，点击查看计算公式',
-    );
-    fireEvent.click(screen.getByTestId('campaign-compound-growth-rate'));
-    expect(screen.getByText('复合战役增长率计算公式')).toBeInTheDocument();
-    expect(screen.getByText('CGRₙ = [Π（1 + 已实现盈亏ᵢ ÷ 入场账户资产 Aᵢ）]^(1/N) − 1')).toBeInTheDocument();
-    expect(screen.getByText('起算：2026-08-03 21:04（客观操作时间）')).toBeInTheDocument();
-    expect(screen.getByText(/此前历史战役永久排除/)).toBeInTheDocument();
-    expect(screen.getByText('已排除起算前历史战役 3 场。')).toBeInTheDocument();
-    expect(screen.getByText(/起算后暂时没有同时具备/)).toBeInTheDocument();
-    fireEvent.click(screen.getByTestId('campaign-compound-growth-rate'));
+    // 【用户要求】复合战役增长率撤掉：几何期望的 W = G^n 已经表达了同一件事
+    expect(screen.queryByTestId('campaign-compound-growth-rate')).not.toBeInTheDocument();
     expect(screen.queryByText('复合战役增长率计算公式')).not.toBeInTheDocument();
+
+    // 【用户要求】几何期望：x 固定 10%、b 取盈利战役均值、p 取胜率、n 取有效战役数，并报 W = G^n
+    fireEvent.click(screen.getByTestId('campaign-geometric-edge'));
+    expect(screen.getByText(/W = \(1\+b·x\)\^\(n·p\).*= G\^n/)).toBeInTheDocument();
+    // 公式行里代入的 b 就是概览那一项显示的盈利侧均值，x 是 10%
+    const winMeanText = screen.getByTestId('campaign-average-payoff-ratio')
+      .textContent!.match(/\+(\d+\.\d{2})R/)![1];
+    expect(screen.getByText(new RegExp(`G = \\(1 \\+ ${winMeanText} × 10%\\)`))).toBeInTheDocument();
+    expect(screen.getByText(/W = G\^3 = ×/)).toBeInTheDocument();
+    expect(screen.getByText(/b = 盈利战役的平均实际盈亏比（.*2 场）/)).toBeInTheDocument();
+    expect(screen.getByText(/n = 有效战役数（3 场）/)).toBeInTheDocument();
+    // 【用户要求】最优仓位 x* 那一行不再显示
+    expect(screen.queryByText(/最优仓位 x\*/)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('campaign-geometric-edge'));
+
+    // 【用户要求】卡片上不再显示策略模板名
+    expect(screen.queryByText('主仓 + 双对冲 + 镜像止盈')).not.toBeInTheDocument();
     expect(screen.getByTestId('campaign-asymmetric-risk')).toHaveTextContent('不对称风险 · UPR 2.53 · Ω 4.38');
     fireEvent.click(screen.getByTestId('campaign-asymmetric-risk'));
     expect(screen.getByText('不对称风险')).toBeInTheDocument();

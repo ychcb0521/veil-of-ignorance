@@ -71,7 +71,8 @@ export type ScatterYAxis = {
 
 /**
  * 场数轴：纵轴不再是数值，而是「落在这一档的第几个」。刻度由元件按像素步距自己派生，
- * 因为只有元件知道图有多高、一行占几个像素。只能与 xAxis.mode === 'linear' 搭配。
+ * 因为只有元件知道图有多高、一行占几个像素。只能与 xAxis.mode === 'linear'（按数值分档）
+ * 或 'category'（一个类目一根柱）搭配；类目柱状下一行会码多个点，刻度按每行点数同比放大。
  */
 export type ScatterCountAxis = {
   mode: 'count';
@@ -84,7 +85,7 @@ export type ScatterCountAxis = {
 export type ScatterXAxis =
   | { mode: 'ordinal'; count: number; labelAt: (index: number) => string | null }
   | { mode: 'linear'; min: number; max: number; labels?: { at: number; text: string }[] }
-  | { mode: 'category'; categories: { value: number; label: string }[] };
+  | { mode: 'category'; categories: { value: number; label: string; sublabel?: string }[] };
 
 export type ScatterReferenceLine = {
   value: number;
@@ -971,10 +972,19 @@ export function ScatterPlot({
                       return (
                         <span
                           key={`xc-${category.value}`}
-                          className="absolute -translate-x-1/2 whitespace-nowrap pt-1"
+                          className="absolute flex -translate-x-1/2 flex-col items-center whitespace-nowrap pt-1 leading-tight"
                           style={{ left: `${PLOT_INSET.left + step * (index + 0.5)}px`, top: 0 }}
                         >
-                          {category.label}
+                          <span>{category.label}</span>
+                          {/* 柱高只能读个大概，精确场数就写在柱脚下——不必回到图例上找。 */}
+                          {category.sublabel ? (
+                            <span
+                              data-testid={`chart-category-count-${category.value}`}
+                              className="text-[color:var(--chart-ink-secondary)]"
+                            >
+                              {category.sublabel}
+                            </span>
+                          ) : null}
                         </span>
                       );
                     })

@@ -1548,11 +1548,11 @@ P 不再一把手填，而是拆成三个更可回答的问题：<strong>「这�
               <P>实时战役与历史归类战役必须隔离。实时战役在开仓时归属；历史归类只加入历史战役，不把回填数据混进实时训练口径。</P>
 
               <SubTitle>战役列表与折叠卡片</SubTitle>
-              <P>战役卡片默认只保留两层核心信息：第一层是标题、方向、标的、策略、唯一编号、<strong>真实操作时间</strong>、重要性与结束状态；第二层是预期回撤、机会质量、盈亏比、单场算术期望、单场几何期望与镜像止盈状态。指标为正时使用绿色、为负时使用红色，无法计算时显示「—」。</P>
+              <P>战役卡片默认只保留两层核心信息：第一层是标题、方向、标的、杠杆倍数、唯一编号、<strong>真实操作时间</strong>、重要性与结束状态；第二层是预期回撤、机会质量、盈亏比、单场算术期望、单场几何期望与镜像止盈状态。指标为正时使用绿色、为负时使用红色，无法计算时显示「—」。</P>
               <P>点击卡片右侧的小箭头，会在卡片内部展开战役时间、结构与时长、已实现盈亏和完整 Legs 标签；再次点击即收起。点击卡片其他区域会进入战役详情，详情始终从页面顶部打开；从详情左上角返回时，会恢复进入前的排序参数、方向和列表滚动位置——若你是从散点图点进去的，则回到那张散点图。</P>
 
               <SubTitle>统计概览与排序</SubTitle>
-              <P>「统计概览」与「排序方式」分成上下两行：概览汇总有效战役、镜像止盈、胜率、平均盈亏比、期望值、几何期望、机会质量、复合战役增长率与不对称风险；排序行只负责改变战役顺序，避免统计与操作混在一起。</P>
+              <P>「统计概览」与「排序方式」分成上下两行：概览汇总有效战役、镜像止盈、胜率、平均盈亏比、期望值、几何期望、机会质量与不对称风险；排序行只负责改变战役顺序，避免统计与操作混在一起。</P>
               <P>统计指标<strong>单击一次</strong>展开公式、有效样本和当前代入值，再单击一次关闭。排序按钮<strong>单击</strong>只执行排序；再次单击同一按钮，在升序与降序之间切换。需要查看排序指标公式时，使用<strong>双击或右键</strong>，不会因为查看说明而误改排序方向。</P>
               <P>默认按<strong>真实操作时间</strong>从新到旧排序；还可以按重要性、预期回撤、机会质量、盈亏比、算术期望、几何期望、镜像止盈、DSI 贡献、USI 贡献或字母顺序双向排序。这里的操作时间是客观发生时间，不是无知之幕时间机器里的模拟时间。</P>
 
@@ -1590,18 +1590,17 @@ P 不再一把手填，而是拆成三个更可回答的问题：<strong>「这�
                     <tr><td className="px-3 py-2 border-t border-border">初始最大预期亏损 Lᵢ</td><td className="px-3 py-2 border-t border-border">主力开仓名义仓位 × max（|开仓价 − 初始对冲 A 价|，|开仓价 − 初始对冲 B 价|）÷ 开仓价</td><td className="px-3 py-2 border-t border-border">主力开仓名义仓位为入场时 M 加镜像的真实全暴露，采用镜像 TP 落袋前口径；后续加仓、重入与反向对冲不计入。历史战役从成交、Leg 与事件流去重还原</td></tr>
                     <tr><td className="px-3 py-2 border-t border-border">单场盈亏比 bᵢ</td><td className="px-3 py-2 border-t border-border">已实现盈亏ᵢ ÷ Lᵢ</td><td className="px-3 py-2 border-t border-border">盈利为正，亏损为负；页面同时显示百分数和括号内数字</td></tr>
                     <tr><td className="px-3 py-2 border-t border-border">胜率 P(赢)</td><td className="px-3 py-2 border-t border-border">有效盈利战役数 ÷（有效盈利战役数 + 有效亏损战役数）</td><td className="px-3 py-2 border-t border-border">只统计有效且非盈亏平衡的已结束战役</td></tr>
-                    <tr><td className="px-3 py-2 border-t border-border">平均盈亏比 b̄</td><td className="px-3 py-2 border-t border-border">Σ 单场盈亏比 bᵢ ÷ 有效战役数 N</td><td className="px-3 py-2 border-t border-border">亏损的负盈亏比原样参与求和</td></tr>
-                    <tr><td className="px-3 py-2 border-t border-border">分组均值 b̄<sub>盈</sub> / b̄<sub>亏</sub></td><td className="px-3 py-2 border-t border-border">各自组内 Σbᵢ ÷ 该组场数</td><td className="px-3 py-2 border-t border-border">「赢时平均赢多少 R」与「亏时平均亏多少 R」，在平均盈亏比的注解里展开；按已实现盈亏正负切分，打平两侧都不计入（但仍在 N 里）。恒等式 b̄ =（n<sub>盈</sub>·b̄<sub>盈</sub> + n<sub>亏</sub>·b̄<sub>亏</sub>）÷ N</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border">平均盈亏比（概览显示值）b̄<sub>盈</sub></td><td className="px-3 py-2 border-t border-border">Σ 盈利战役 bᵢ ÷ 盈利战役数</td><td className="px-3 py-2 border-t border-border">概览那一项只报盈利侧——「赢的时候平均赢多少 R」；亏损侧与混合均值在它的浮层里</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border">混合均值 b̄</td><td className="px-3 py-2 border-t border-border">Σ 单场盈亏比 bᵢ ÷ 有效战役数 N</td><td className="px-3 py-2 border-t border-border">亏损的负盈亏比原样参与求和。它不再作为概览标题数字，但期望值读的就是它</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border">分组均值 b̄<sub>盈</sub> / b̄<sub>亏</sub></td><td className="px-3 py-2 border-t border-border">各自组内 Σbᵢ ÷ 该组场数</td><td className="px-3 py-2 border-t border-border">「赢时平均赢多少 R」与「亏时平均亏多少 R」，按已实现盈亏正负切分，打平两侧都不计入（但仍在 N 里）。b̄<sub>盈</sub> 就是概览上「平均盈亏比」显示的那个数，b̄<sub>亏</sub> 与混合均值在同一个浮层里。恒等式 b̄ =（n<sub>盈</sub>·b̄<sub>盈</sub> + n<sub>亏</sub>·b̄<sub>亏</sub>）÷ N 仍然成立</td></tr>
                     <tr><td className="px-3 py-2 border-t border-border">期望值 E</td><td className="px-3 py-2 border-t border-border">Σ bᵢ ÷ N = b̄，等价于（n<sub>赢</sub>·b̄<sub>赢</sub> + n<sub>亏</sub>·b̄<sub>亏</sub>）÷ N</td><td className="px-3 py-2 border-t border-border">统计期望就是有效战役盈亏比的平均值。课本式 P(赢) × b −（1 − P(赢)）里的 b 是赢时均值、亏损按恰好 −1R 计；b̄ 已含亏损的负值，再减（1 − P）会把亏损扣两遍，故不采用</td></tr>
                     <tr><td className="px-3 py-2 border-t border-border">预期回撤 dᵢ</td><td className="px-3 py-2 border-t border-border">max（|主力开仓价 − 初始对冲 A 价|，|主力开仓价 − 初始对冲 B 价|）÷ 主力开仓价 × 100%</td><td className="px-3 py-2 border-t border-border">至少存在一个有效初始对冲价格；支持列表双向排序，缺少价格的战役不参与排序</td></tr>
                     <tr><td className="px-3 py-2 border-t border-border">机会质量 Qᵢ / Q̄</td><td className="px-3 py-2 border-t border-border">bᵢ* = max（实际盈亏比 bᵢ, 1）；Qᵢ = bᵢ* ÷ 预期回撤百分点 dᵢ；Q̄ = ΣQᵢ ÷ N</td><td className="px-3 py-2 border-t border-border">实际盈亏比小于 1（包括等于 0 或为负数）时统一按 1 计算，不取绝对值。历史价格沿用初始最大预期亏损的同一解析口径</td></tr>
                     <tr><td className="px-3 py-2 border-t border-border">单场算术期望 Eᵢ</td><td className="px-3 py-2 border-t border-border">P(赢) × bᵢ −（1 − P(赢)）</td><td className="px-3 py-2 border-t border-border">使用实时有效战役胜率与该场带符号盈亏比</td></tr>
                     <tr><td className="px-3 py-2 border-t border-border">单场风险比例 xᵢ</td><td className="px-3 py-2 border-t border-border">Lᵢ ÷ 主力开仓时账户总资产 Aᵢ</td><td className="px-3 py-2 border-t border-border">优先使用主力开仓快照；旧战役缺失时用今日当前总资产估算</td></tr>
                     <tr><td className="px-3 py-2 border-t border-border">单场几何期望 Gᵢ</td><td className="px-3 py-2 border-t border-border">(1+bᵢ·xᵢ)^P(赢) × (1−xᵢ)^(1−P(赢)) − 1</td><td className="px-3 py-2 border-t border-border">bᵢ 可为负；缺少有效 Lᵢ 或可用 Aᵢ 时不估算</td></tr>
-                    <tr><td className="px-3 py-2 border-t border-border">汇总 Kelly 仓位 x*</td><td className="px-3 py-2 border-t border-border">b̄ &gt; 0 时：max（0，（P(赢)·b̄ −（1−P(赢)））÷ b̄）；b̄ ≤ 0 时为 0</td><td className="px-3 py-2 border-t border-border">由当前有效样本推导的模型最优风险比例，仅作参照；不参与汇总几何期望，也不是各场实际 xᵢ 的平均值</td></tr>
                     <tr><td className="px-3 py-2 border-t border-border">汇总几何期望 G</td><td className="px-3 py-2 border-t border-border">(1+b·x)^p × (1−x)^(1−p) − 1；x 统一取 10%，b 取盈利战役的平均实际盈亏比，p 取有效战役胜率</td><td className="px-3 py-2 border-t border-border">表示在历史总体参数、每笔固定投入 10% 资金比例下的理论每笔复利率；固定仓位后它的变化只反映 edge 本身，可以纵向比较</td></tr>
                     <tr><td className="px-3 py-2 border-t border-border">n 场累计因子 W</td><td className="px-3 py-2 border-t border-border">W = (1+b·x)^(n·p) × (1−x)^(n·(1−p)) = G^n，n 取有效战役数</td><td className="px-3 py-2 border-t border-border">把每笔复利率按有效战役场数复利到底的理论总倍数；它是模型推演，不是账户真实收益</td></tr>
-                    <tr><td className="px-3 py-2 border-t border-border">复合战役增长率 CGRₙ</td><td className="px-3 py-2 border-t border-border">[Π（1 + 已实现盈亏ᵢ ÷ 入场账户资产 Aᵢ）]^(1/N) − 1</td><td className="px-3 py-2 border-t border-border">从 2026-08-03 21:04（客观操作时间）起前瞻统计；此前历史战役不纳入。Aᵢ 优先采用主力开仓资产快照，历史缺失时用今日账户资产估算</td></tr>
                   </tbody>
                 </table>
               </div>
@@ -1609,7 +1608,6 @@ P 不再一把手填，而是拆成三个更可回答的问题：<strong>「这�
                 没有初始最大预期亏损，就没有可用分母，因此该战役的盈亏比显示「—」。它不会进入盈亏比排序，也不会进入胜率、平均盈亏比和期望值。统计概览中的指标可单击查看公式；排序行中的公式指标需双击或右键查看，单击只负责排序。
               </RedHighlight>
               <P>单场几何期望优先使用主力开仓时固化的实时账户总资产快照，该值不会被后续资产变化改写。旧战役若因字段上线较晚而缺少快照，系统会用<strong>今日当前总账户资产</strong>作为替代分母，使历史战役仍可计算和排序；这个回退值是历史估算而非当时资产的还原，会随当前账户资产实时更新。</P>
-              <P><strong>复合战役增长率</strong>沿用 CAGR 的复利结构，但用有效战役数 N 替代年数。该指标从 <strong>2026-08-03 21:04（北京时间）</strong>固定起算，以每场战役未经时间机器移位的客观操作时间判断是否进入样本；起算前的历史战役以及缺少客观操作时间的战役不纳入，后来归类或编辑也不会改变这一边界。它衡量起算后已经实现的资本因子平均每场增长多少，与根据胜率和盈亏比推演的理论几何期望不同。正值表示资本因子几何平均大于 1，负值表示平均每场复合收缩；任一纳入战役亏损达到或超过其入场账户资产时，增长因子不再为正，结果按 −100% 处理。</P>
 
               <SubTitle>不对称风险指标</SubTitle>
               <P>本策略刻意让左尾受控、右尾开放，因此不直接用标准差或夏普把右尾也当作风险扣分。「不对称风险」与实时胜率、平均盈亏比和期望值使用完全相同的账户级有效战役池：每场以 <strong>b = 已实现 P&amp;L ÷ 最大预期亏损</strong>计量，b &gt; 0 为盈利战役，b ≤ 0 为亏损战役。系统不做截尾，b &lt; −1 的超额实亏会完整进入下行统计。</P>
@@ -1660,10 +1658,11 @@ P 不再一把手填，而是拆成三个更可回答的问题：<strong>「这�
               </Highlight>
 
               <SubTitle>指标散点图</SubTitle>
-              <P>盈亏比、预期回撤、机会质量、算术期望、几何期望、重要性、镜像止盈、DSI 贡献、USI 贡献都各自配有一张散点图。在排序行上<strong>双击或右键</strong>对应指标打开公式浮层，浮层底部的「查看散点图」即可展开；再点一次「收起散点图」关闭。<strong>盈亏比默认展开的是分布图</strong>，其余指标以及盈亏比切到「时序」后，横轴都是按<strong>客观操作时间</strong>排列的战役序号，与列表当前排序无关——改排序不会让点位移动。</P>
+              <P>盈亏比、预期回撤、机会质量、算术期望、几何期望、重要性、镜像止盈、DSI 贡献、USI 贡献都各自配有一张散点图。在排序行上<strong>双击或右键</strong>对应指标打开公式浮层，浮层底部的「查看散点图」即可展开；再点一次「收起散点图」关闭。<strong>盈亏比默认展开的是分布图、镜像止盈默认展开的是柱状图</strong>，其余指标以及这两者切回「时序」后，横轴都是按<strong>客观操作时间</strong>排列的战役序号，与列表当前排序无关——改排序不会让点位移动。</P>
               <ul className="list-disc pl-6 text-[14px] text-foreground/90 space-y-1">
                 <li><strong>颜色分两类。</strong>本身带盈亏方向的指标（盈亏比、算术期望、几何期望）按数值正负着色：正绿、负红、零灰。不带方向的纯量级指标用单色，避免暗示盈亏：机会质量蓝、重要性琥珀、DSI 贡献红、USI 贡献绿。</li>
                 <li><strong>预期回撤是个例外。</strong>它的纵轴只表达风险距离、本身不含盈亏方向，所以颜色改由<strong>该战役最终盈亏</strong>决定：盈利绿、亏损红、打平或未结束灰。这样同一张图上既能看到风险空间，又能看到它最后换来了什么结果。</li>
+                <li><strong>镜像止盈默认看柱状。</strong>四个结果档位（未实现 / 亏损 / 持平 / 盈利）各一根柱，柱由该档的战役自底向上码成方阵——场数多时一行并排放几个点，左侧场数刻度已按每行点数同比折算，精确场数另写在柱脚下。点位悬停或聚焦会报出该场的实际盈亏比 b：档位只有四种，b 才说明这一场赚亏了多少个 R。用面板右上角的「时序 | 柱状」切回时序，选择记进地址栏。</li>
                 <li><strong>盈亏比默认看分布。</strong>要判断的是这套打法的形状——右尾够不够长、亏损有没有被止损墙挡住——形状与战役先后无关，所以展开盈亏比时先给分布图；用面板右上角的「时序 | 分布」随时切回时序，选择记进地址栏。分布图横轴是盈亏比 b 本身（单位 R，线性刻度），纵轴是落在该 b 附近的战役数量——点按档从底线向上堆叠（每 1R 等分成若干档、每档至少 14px 宽，−1R 与 0 恰好是档边界），堆得越高出现得越多，不考虑时间先后。琥珀色 −1R 虚线是止损墙，灰色 0 线是盈亏平衡，灰色曲线是核密度估计换算成「每档期望场数」的平滑轮廓，与柱共用同一条场数轴；显示区间取 p2–p98 并封顶在 +10R，超出右缘的极端盈利贴边画成三角并在脚注计数，−1R 左侧的亏损照常落在墙外。</li>
                 <li><strong>点进去还能回得来。</strong>点任一散点即进入该战役详情；从详情左上角返回时，会<strong>落回同一张散点图</strong>，而不是掉回卡片列表。选中的图表与所选视图（时序 / 分布）都记在地址栏里，刷新与浏览器前进 / 后退都能复原。</li>
                 <li><strong>颜色之外还有形状。</strong>同一张图里，圆点、菱形、方块、空心圈各代表一档，色觉差异或黑白打印时靠形状也能分辨；图例里的形状与图上的点位完全一致。镜像止盈的「持平」用灰色方块而不是黄色——黄与红在红绿色觉模拟下几乎重合。</li>
@@ -1682,7 +1681,7 @@ P 不再一把手填，而是拆成三个更可回答的问题：<strong>「这�
                     </tr>
                   </thead>
                   <tbody>
-                    <tr><td className="px-3 py-2 border-t border-border">汇总算术期望 E</td><td className="px-3 py-2 border-t border-border">按当前胜率与平均盈亏比，每承担 1R 风险的平均加法收益是多少</td><td className="px-3 py-2 border-t border-border">不反映仓位大小、波动拖累与复利路径</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border">汇总算术期望 E</td><td className="px-3 py-2 border-t border-border">按当前胜率与<strong>混合均值 b̄</strong>（不是概览显示的盈利侧均值），每承担 1R 风险的平均加法收益是多少</td><td className="px-3 py-2 border-t border-border">不反映仓位大小、波动拖累与复利路径</td></tr>
                     <tr><td className="px-3 py-2 border-t border-border">汇总几何期望 G</td><td className="px-3 py-2 border-t border-border">若每笔固定按 10% 的资金比例重复同类战役，理论资本每笔按什么速度复利</td><td className="px-3 py-2 border-t border-border">不是实际历史收益率，也不是对下一笔的保证</td></tr>
                     <tr><td className="px-3 py-2 border-t border-border">单场算术期望 Eᵢ</td><td className="px-3 py-2 border-t border-border">把该场事后实际 bᵢ 放回当前总体胜率后，得到怎样的 R 值</td><td className="px-3 py-2 border-t border-border">不是该场建仓时已经知道的事前期望</td></tr>
                     <tr><td className="px-3 py-2 border-t border-border">单场几何期望 Gᵢ</td><td className="px-3 py-2 border-t border-border">该场实际盈亏结构与当时真实风险比例，对长期复利结构形成怎样的影响</td><td className="px-3 py-2 border-t border-border">不能仅凭一场结果判断策略未来必然盈利或亏损</td></tr>

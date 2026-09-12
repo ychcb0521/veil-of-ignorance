@@ -11,7 +11,7 @@ import type { CampaignEvent, TradeJournal } from '@/types/journal';
 import { computeLegPnlContributions, sumLegPnl } from '@/lib/campaignLegPnl';
 import { computeCampaignRealizedPnl } from '@/lib/campaignRealizedPnl';
 import { legDeltaB, splitMainLegPhases, type MainLegPhase } from '@/lib/campaignLegPhases';
-import { describeTradeRecordFees, formatFeeCoin, sumTradeRecordFees, tradeRecordFees } from '@/lib/tradeFees';
+import { formatFeeCoin, sumTradeRecordFees, tradeRecordFees } from '@/lib/tradeFees';
 import type { CampaignReverseHedgeOrder, TradeRecord } from '@/types/trading';
 
 interface Props {
@@ -418,7 +418,6 @@ export function CampaignLegsList({
                     return (
                       <div
                         data-testid={`leg-fees-${leg.id}`}
-                        title={describeTradeRecordFees(execution.record!)}
                         className="text-right text-[11px] leading-snug tabular-nums text-foreground/55"
                       >
                         <div>

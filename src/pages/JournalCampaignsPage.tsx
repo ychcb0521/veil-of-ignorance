@@ -69,12 +69,6 @@ import {
   resolveCampaignOpportunityQuality,
 } from '@/lib/campaignMetrics';
 import {
-  COMPOUND_CAMPAIGN_GROWTH_START_AT,
-  COMPOUND_CAMPAIGN_GROWTH_START_LABEL,
-  computeCompoundCampaignGrowth,
-  formatCompoundCampaignGrowthRate,
-} from '@/lib/compoundCampaignGrowth';
-import {
   computeAsymmetricRiskContributionRates,
   summarizeAsymmetricRiskMetrics,
 } from '@/lib/asymmetricRiskMetrics';
@@ -88,7 +82,7 @@ import {
   type MirrorTpOutcome,
 } from '@/lib/mirrorTpSummary';
 import { formatOpportunityQuality } from '@/lib/opportunityQuality';
-import { LEG_ROLE_LABELS, STRATEGY_TEMPLATES } from '@/lib/strategyTemplates';
+import { LEG_ROLE_LABELS } from '@/lib/strategyTemplates';
 import { campaignOperationTime } from '@/lib/objectiveOperationTime';
 import {
   buildCampaignMetricSeries,
@@ -192,7 +186,6 @@ type CampaignFormulaPopover =
   | 'averagePayoffRatio'
   | 'expectedValue'
   | 'geometricEdge'
-  | 'compoundCampaignGrowth'
   | 'asymmetricRisk'
   | 'opportunityQualitySort'
   | 'dsiContributionSort'
@@ -429,7 +422,7 @@ const CAMPAIGN_METRIC_CHART_CONFIGS: readonly CampaignMetricChartConfig[] = [
     seriesLabel: '镜像止盈结果分布',
     guide: {
       yAxis: '纵轴是场数：同一档的战役码成一根柱，柱越高这种结果出现得越多。场数多时一行会并排放几个点，'
-        + '左侧刻度已按每行点数折算，照着刻度读柱高即可；每档的精确场数也写在图例右侧。',
+        + '左侧刻度已按每行点数折算，照着刻度读柱高即可；每根柱的精确场数写在柱脚下，图例右侧另有一份含合计的汇总。',
       point: '横轴是四个结果档位（未实现 / 亏损 / 持平 / 盈利；|b| ≤ 0.1 记持平），不按时间排列。柱由点组成，每个点仍是一场战役，'
         + '悬停读数值、点击进入对应战役。一场都没有的档位保留空柱——某一档 0 场本身就是结论。',
       colors: [
@@ -515,6 +508,8 @@ const SORT_CHART_BY_MODE: Partial<Record<CampaignSortMode, CampaignMetricChartKe
  */
 const DEFAULT_CHART_VIEW_BY_SOURCE: Partial<Record<CampaignMetricChartKey, CampaignMetricChartKey>> = {
   odds: 'oddsDistribution',
+  // 镜像止盈同理：要问的是「四档各多少场」，时序把 200 个点摊成四条横线，什么也读不出来。
+  mirrorTp: 'mirrorTpBars',
 };
 
 export type CampaignMetricChartViewState = {
@@ -1270,6 +1265,7 @@ export default function JournalCampaignsPage() {
       symbol: row.campaign.symbol,
       operationTime: campaignOperationTime(row.legs, row.tradeRecords),
       pnl: row.campaign.final_realized_pnl ?? null,
+      payoffRatio: rowPayoffRatio(row),
     }));
     const buildSeries = (valueForRow: (row: CampaignDisplayData) => number | null) => (
       buildCampaignMetricSeries(samples.map(({ row, ...sample }) => ({
@@ -1333,31 +1329,17 @@ export default function JournalCampaignsPage() {
       updateChartParam(null);
       return;
     }
-    // 排序行按钮传的是族键；真正打开的是这一族的默认视图（盈亏比 → 分布）。
+    // 排序行按钮传的是族键；真正打开的是这一族的默认视图（盈亏比 → 分布，镜像止盈 → 柱状）。
     const openKey = DEFAULT_CHART_VIEW_BY_SOURCE[key] ?? key;
     setMetricChartKey(openKey);
     setMetricChartOpen(true);
     updateChartParam(openKey);
   };
-  const compoundCampaignGrowth = useMemo(
-    () => computeCompoundCampaignGrowth(
-      displayRows.map(row => ({
-        realizedPnl: row.campaign.final_realized_pnl,
-        accountEquityAtEntry: row.riskAccountEquity,
-        eligible: (
-          ['closed_profit', 'closed_loss', 'closed_breakeven'].includes(row.campaign.status)
-          && row.profitCaptureRatio != null
-          && Number.isFinite(row.profitCaptureRatio)
-        ),
-        estimated: row.initialRiskSource === 'current_account_fallback',
-        operationTime: campaignOperationTime(row.legs, row.tradeRecords),
-      })),
-      { startAt: COMPOUND_CAMPAIGN_GROWTH_START_AT },
-    ),
-    [displayRows],
-  );
   const winRateLabel = performance.winRate == null ? '—' : `${(performance.winRate * 100).toFixed(2)}%`;
   const payoffRatioLabel = performance.payoffRatio == null ? '—' : performance.payoffRatio.toFixed(2);
+  // 概览里那一项只报盈利侧：「赢的时候平均赢多少 R」。混合均值仍在浮层与期望值里。
+  const winPayoffRatioLabel = formatGroupPayoffRatio(performance.winPayoffRatio);
+  const lossPayoffRatioLabel = formatGroupPayoffRatio(performance.lossPayoffRatio);
   // 期望值浮层里的分组项：某一组没有样本时该项为 0（n = 0），不是「—」。
   const groupTerm = (value: number | null) => (value == null ? '0' : value.toFixed(2));
   const validCampaignCount = performance.payoffRatioSampleCount;
@@ -1374,9 +1356,6 @@ export default function JournalCampaignsPage() {
   const geometricEdgeLabel = geometric == null
     ? '—'
     : `${geometric.geometricEdge >= 0 ? '+' : ''}${(geometric.geometricEdge * 100).toFixed(1)}%`;
-  const optimalFractionLabel = geometric == null || geometric.optimalFraction <= 0
-    ? '—'
-    : `${(geometric.optimalFraction * 100).toFixed(1)}%`;
   const fixedFractionLabel = `${(FIXED_DRAWDOWN_FRACTION * 100).toFixed(0)}%`;
   // n 笔累计因子：几百场复利动辄上亿倍，超过 4 位数就换科学计数，别让一串零占满一行。
   const compoundGrowthLabel = geometric == null
@@ -1384,11 +1363,12 @@ export default function JournalCampaignsPage() {
     : (() => {
       const factor = compoundGrowthFactor(geometric.growthFactor, validCampaignCount);
       if (factor === 0) return '×0（本金归零）';
-      if (factor >= 10000 || (factor > 0 && factor < 0.0001)) return `×${factor.toExponential(2)}`;
+      // G^n 在 n 上千时会溢出成 Infinity；「×Infinity」读起来像 bug，不如直说超出可表示范围。
+      if (!Number.isFinite(factor)) return '×超出可表示范围';
+      if (factor >= 10000 || factor < 0.0001) return `×${factor.toExponential(2)}`;
       return `×${factor.toFixed(2)}`;
     })();
   const opportunityQualityLabel = formatOpportunityQuality(opportunityQualityStats.average);
-  const compoundCampaignGrowthLabel = formatCompoundCampaignGrowthRate(compoundCampaignGrowth.rate);
 
   const updateListParams = (nextSort: CampaignSortState) => {
     const params = new URLSearchParams(location.search);
@@ -2241,56 +2221,62 @@ export default function JournalCampaignsPage() {
                 <button
                   type="button"
                   data-testid="campaign-average-payoff-ratio"
-                  aria-label={`平均盈亏比 ${payoffRatioLabel}，共 ${performance.payoffRatioSampleCount} 场战役`}
+                  aria-label={`平均盈亏比 ${winPayoffRatioLabel}，盈利战役 ${performance.winCount} 场；亏损战役平均 ${lossPayoffRatioLabel}，${performance.lossCount} 场`}
                   title="点击查看平均盈亏比计算公式"
                   onClick={event => toggleFormulaPopover(event, 'averagePayoffRatio')}
                   className="inline-flex h-7 shrink-0 select-none items-center justify-center gap-1 whitespace-nowrap rounded border border-transparent px-2 text-foreground/65 transition-colors hover:border-[#F0B90B]/15 hover:bg-background/70 hover:text-foreground"
                 >
-                  平均盈亏比（{payoffRatioLabel}）
+                  平均盈亏比（{winPayoffRatioLabel}）
                   <Sigma aria-hidden="true" className="h-2.5 w-2.5 opacity-35" />
                 </button>
               </PopoverTrigger>
               <PopoverContent align="end" className="w-72 border-border bg-card p-3 text-[11px]">
                 <div className="font-medium text-foreground">平均盈亏比计算公式</div>
                 <div className="mt-2 rounded bg-muted/60 px-2 py-1.5 font-mono text-foreground">
-                  b̄ = Σ 单场盈亏比 bᵢ ÷ 有效战役数 N
+                  b̄赢 = Σ 盈利战役 bᵢ ÷ 盈利战役数
                 </div>
                 {performance.payoffRatio != null && payoffRatioSum != null ? (
                   <div className="mt-2 space-y-1 text-muted-foreground">
-                    <div className="font-mono">
-                      = {payoffRatioSum.toFixed(2)} ÷ {performance.payoffRatioSampleCount}
+                    {/* 头条是盈利侧：「赢的时候平均赢多少 R」才是赔率结构里要盯的那个数。
+                        亏损侧紧随其后——没有它就只剩一半故事。混合均值降成脚注，但不能删：期望值读的就是它。 */}
+                    <div className="flex items-baseline justify-between gap-2">
+                      <span className="text-foreground">盈利战役（{performance.winCount} 场）</span>
+                      <span
+                        data-testid="campaign-win-payoff-ratio"
+                        className="font-mono text-[12px] font-semibold tabular-nums text-[#0ECB81]"
+                      >
+                        {formatGroupPayoffRatio(performance.winPayoffRatio)}
+                      </span>
                     </div>
-                    <div className="font-mono text-foreground">= {payoffRatioLabel}</div>
-                    <div>亏损战役的负盈亏比原样参与求和。</div>
-                    <div>没有有效初始最大预期亏损的战役不计入 N。</div>
+                    <div className="flex items-baseline justify-between gap-2">
+                      <span>亏损战役（{performance.lossCount} 场）</span>
+                      <span
+                        data-testid="campaign-loss-payoff-ratio"
+                        className="font-mono tabular-nums text-[#F6465D]"
+                      >
+                        {formatGroupPayoffRatio(performance.lossPayoffRatio)}
+                      </span>
+                    </div>
+                    <div className="leading-relaxed">
+                      分别是「赢的时候平均赢多少 R」与「亏的时候平均亏多少 R」，按已实现盈亏的正负切分，盈亏持平的战役两侧都不计入。
+                      上方那一项只报盈利侧：混合均值会让赢和亏互相抵消，看不出赔率结构。
+                    </div>
+                    <div>没有有效初始最大预期亏损的战役不计入统计。</div>
 
-                    {/* 分组均值：把「赢多少」与「亏多少」拆开看，混合均值会把两者互相抵消 */}
                     <div className="mt-2 border-t border-border/60 pt-2">
-                      <div className="text-foreground">分组均值</div>
-                      <div className="mt-1 space-y-1">
-                        <div className="flex items-baseline justify-between gap-2">
-                          <span>盈利战役（{performance.winCount} 场）</span>
-                          <span
-                            data-testid="campaign-win-payoff-ratio"
-                            className="font-mono tabular-nums text-[#0ECB81]"
-                          >
-                            {formatGroupPayoffRatio(performance.winPayoffRatio)}
-                          </span>
-                        </div>
-                        <div className="flex items-baseline justify-between gap-2">
-                          <span>亏损战役（{performance.lossCount} 场）</span>
-                          <span
-                            data-testid="campaign-loss-payoff-ratio"
-                            className="font-mono tabular-nums text-[#F6465D]"
-                          >
-                            {formatGroupPayoffRatio(performance.lossPayoffRatio)}
-                          </span>
-                        </div>
+                      <div className="flex items-baseline justify-between gap-2">
+                        <span>混合均值 b̄（全部 {performance.payoffRatioSampleCount} 场）</span>
+                        <span
+                          data-testid="campaign-mixed-payoff-ratio"
+                          className="font-mono tabular-nums text-foreground"
+                        >
+                          {payoffRatioLabel}
+                        </span>
                       </div>
-                      <div className="mt-1.5 leading-relaxed">
-                        分别是「赢的时候平均赢多少 R」与「亏的时候平均亏多少 R」，按已实现盈亏的正负切分，盈亏持平的战役两侧都不计入。
-                        混合均值 b̄ 会让两者互相抵消，拆开才看得出赔率结构。
+                      <div className="mt-1 font-mono">
+                        = {payoffRatioSum.toFixed(2)} ÷ {performance.payoffRatioSampleCount}（亏损以负值原样参与求和）
                       </div>
+                      <div className="mt-1 leading-relaxed">期望值那一项读的就是这个混合均值。</div>
                     </div>
                   </div>
                 ) : (
@@ -2376,9 +2362,6 @@ export default function JournalCampaignsPage() {
                     {geometric.bleeds ? (
                       <div className="text-[#F6465D]">当前为长期缩水（G&lt;1）——这套 edge 不该按此仓位下注。</div>
                     ) : null}
-                    <div className="border-t border-border/60 pt-1.5 font-mono text-foreground">
-                      最优仓位 x*（仅作参照，不参与上式）：{optimalFractionLabel}
-                    </div>
                   </div>
                 ) : (
                   <div className="mt-2 text-muted-foreground">需要可计算的胜率，以及至少一场盈利战役的平均盈亏比，才能得到几何期望。</div>
@@ -2574,61 +2557,6 @@ export default function JournalCampaignsPage() {
                 </div>
               </PopoverContent>
             </Popover>
-            <Popover
-              open={formulaPopover === 'compoundCampaignGrowth'}
-              onOpenChange={open => handleFormulaPopoverChange('compoundCampaignGrowth', open)}
-            >
-              <PopoverTrigger asChild>
-                <button
-                  type="button"
-                  data-testid="campaign-compound-growth-rate"
-                  className="inline-flex h-7 shrink-0 items-center justify-center whitespace-nowrap rounded border border-transparent px-2 text-foreground/65 transition-colors hover:border-[#F0B90B]/15 hover:bg-background/70 hover:text-foreground"
-                  aria-label={`复合战役增长率 ${compoundCampaignGrowthLabel}，共 ${compoundCampaignGrowth.sampleCount} 场有效战役，点击查看计算公式`}
-                  title="点击查看复合战役增长率计算公式"
-                  onClick={event => toggleFormulaPopover(event, 'compoundCampaignGrowth')}
-                >
-                  复合战役增长率（{compoundCampaignGrowthLabel}）
-                </button>
-              </PopoverTrigger>
-              <PopoverContent align="end" className="w-96 border-border bg-card p-3 text-[11px]">
-                <div className="font-medium text-foreground">复合战役增长率计算公式</div>
-                <div className="mt-2 rounded bg-muted/60 px-2 py-1.5 font-mono leading-relaxed text-foreground">
-                  CGRₙ = [Π（1 + 已实现盈亏ᵢ ÷ 入场账户资产 Aᵢ）]^(1/N) − 1
-                </div>
-                <div className="mt-2 rounded border border-[#F0B90B]/20 bg-[#F0B90B]/5 px-2 py-1.5 text-muted-foreground">
-                  <div className="font-medium text-foreground">起算：{COMPOUND_CAMPAIGN_GROWTH_START_LABEL}</div>
-                  <div className="mt-0.5">只纳入客观操作时间达到起算点、且在此后完成的有效战役；此前历史战役永久排除，不因后来归类或编辑重新进入。</div>
-                </div>
-                {compoundCampaignGrowth.rate != null && compoundCampaignGrowth.totalGrowthFactor != null ? (
-                  <div className="mt-2 space-y-1 text-muted-foreground">
-                    <div className="font-mono">
-                      = {compoundCampaignGrowth.totalGrowthFactor.toFixed(4)}^(1/{compoundCampaignGrowth.sampleCount}) − 1
-                    </div>
-                    <div className="font-mono text-foreground">= {compoundCampaignGrowthLabel}</div>
-                    <div>N = {compoundCampaignGrowth.sampleCount} 场有效战役；每场先用入场账户资产把已实现盈亏归一化，再连乘资本增长因子。</div>
-                    <div>等价于 CAGR 的（等效期末资产 ÷ 等效期初资产）^(1/N) − 1，只是用战役数替代年数。</div>
-                    <div>它描述已经实现的历史每战役复合增长，不是基于胜率与盈亏比推导的理论几何期望。</div>
-                    {compoundCampaignGrowth.estimatedSampleCount > 0 ? (
-                      <div className="text-[#B8860B]">
-                        其中 {compoundCampaignGrowth.estimatedSampleCount} 场旧战役缺少主力开仓资产快照，使用今日当前总账户资产估算 Aᵢ。
-                      </div>
-                    ) : null}
-                    {compoundCampaignGrowth.wipedOut ? (
-                      <div className="text-[#F6465D]">样本中存在资本增长因子 ≤ 0 的战役，代表本金被击穿，因此复合战役增长率记为 −100%。</div>
-                    ) : null}
-                    <div>未结束、缺少有效最大预期亏损、缺少可用入场资产或已实现盈亏的战役不计入 N。</div>
-                  </div>
-                ) : (
-                  <div className="mt-2 text-muted-foreground">起算后暂时没有同时具备有效风险分母、已实现盈亏、入场账户资产和客观操作时间的战役。</div>
-                )}
-                {compoundCampaignGrowth.excludedBeforeStartCount > 0 ? (
-                  <div className="mt-2 text-muted-foreground">已排除起算前历史战役 {compoundCampaignGrowth.excludedBeforeStartCount} 场。</div>
-                ) : null}
-                {compoundCampaignGrowth.excludedMissingOperationTimeCount > 0 ? (
-                  <div className="mt-1 text-muted-foreground">另有 {compoundCampaignGrowth.excludedMissingOperationTimeCount} 场缺少客观操作时间，未纳入。</div>
-                ) : null}
-              </PopoverContent>
-            </Popover>
           </div>
           {metricChartOpen ? (
             <div
@@ -2802,7 +2730,6 @@ export default function JournalCampaignsPage() {
                           {formatLeverage(cardLeverage)}
                         </span>
                       )}
-                      <span className="text-[9px] text-muted-foreground/75">{STRATEGY_TEMPLATES[campaign.strategy_template].name}</span>
                       <span
                         className="inline-flex rounded border border-border/70 bg-background/45 px-1.5 py-0.5 font-mono text-[8px] text-muted-foreground/65"
                         title={`战役编号 ${campaignDisplayCode}`}

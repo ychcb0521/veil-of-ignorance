@@ -497,3 +497,78 @@ describe('ScatterPlot 堆叠（场数）布局', () => {
     expect(read()).toEqual(first);
   });
 });
+
+describe('类目柱状（场数轴 + 类目横轴）', () => {
+  function makeBarPoints(counts: Record<number, number>) {
+    return Object.entries(counts).flatMap(([value, n]) =>
+      Array.from({ length: n }, (_, index) => ({
+        id: `b${value}-${index}`,
+        x: Number(value),
+        y: 0,
+        seriesId: Number(value) > 0 ? 'profit' : Number(value) < 0 ? 'loss' : 'flat',
+        valueText: `档 ${value}`,
+        label: `战役 ${value}-${index}`,
+        ariaLabel: `战役 ${value}-${index}`,
+        dataAttrs: { 'data-campaign-id': `c${value}-${index}`, 'data-metric-value': Number(value) },
+      })));
+  }
+
+  function renderBars(counts: Record<number, number>, categories: { value: number; label: string; sublabel?: string }[]) {
+    return render(
+      <ScatterPlot
+        points={makeBarPoints(counts)}
+        series={SERIES}
+        yAxis={{ mode: 'count', tickTestId: 'btick', gridTestId: 'bgrid', unit: '场' }}
+        xAxis={{ mode: 'category', categories }}
+        emptyMessage="暂无数据"
+        testId="bars"
+        scrollAreaTestId="bars-scroll"
+      />,
+    );
+  }
+
+  const CATEGORIES = [
+    { value: 0, label: '未实现', sublabel: '101 场' },
+    { value: 1, label: '亏损', sublabel: '15 场' },
+    { value: 2, label: '持平', sublabel: '0 场' },
+    { value: 3, label: '盈利', sublabel: '105 场' },
+  ];
+
+  it('场数轴与类目横轴能搭配：所有点都画出来，不退回数值布局', () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    renderBars({ 0: 101, 1: 15, 2: 0, 3: 105 }, CATEGORIES);
+    const plot = screen.getByTestId('bars');
+    expect(plot.querySelectorAll('button[data-campaign-id]')).toHaveLength(221);
+    expect(error).not.toHaveBeenCalled();
+    error.mockRestore();
+  });
+
+  /**
+   * 这条是柱状图的诚信条款：一行码 perRow 场时，刻度必须同比放大。
+   * 若刻度还按「一行一场」派生，最高一档 105 场的柱子会顶穿一条只到四十几的轴，
+   * 读者照着轴读出来的数就会差好几倍。
+   */
+  it('刻度按每行点数折算：最高一柱读得出的场数覆盖得住它真正的场数', () => {
+    renderBars({ 0: 101, 1: 15, 2: 0, 3: 105 }, CATEGORIES);
+    const ticks = [...screen.getAllByTestId('btick')].map(node => Number(node.dataset.tickValue));
+    const top = Math.max(...ticks);
+    expect(top).toBeGreaterThanOrEqual(100);
+    expect(ticks).toContain(0);
+    // 最高一柱的柱顶落在顶刻度之下：柱顶 top% 不会跑到绘图区外
+    const tops = [...screen.getByTestId('bars').querySelectorAll<HTMLElement>('button[data-campaign-id]')]
+      .map(node => Number.parseFloat(node.style.top));
+    expect(Math.min(...tops)).toBeGreaterThanOrEqual(0);
+  });
+
+  // 柱脚那行字由调用方给（元件不自己数点），所以这里只验证「给什么画什么」
+  it('柱脚写场数：给了 sublabel 就原样渲染', () => {
+    renderBars({ 0: 3, 3: 2 }, CATEGORIES);
+    expect(screen.getByTestId('chart-category-count-0')).toHaveTextContent('101 场');
+    expect(screen.getByTestId('chart-category-count-2')).toHaveTextContent('0 场');
+  });
+
+  it('没有 sublabel 的类目轴不画柱脚数字', () => {
+    renderBars({ 0: 3 }, CATEGORIES.map(({ value, label }) => ({ value, label })));
+    expect(screen.queryByTestId('chart-category-count-0')).not.toBeInTheDocument();
+  });
+})
