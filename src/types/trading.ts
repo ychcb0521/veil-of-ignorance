@@ -249,6 +249,14 @@ export interface Position {
    * 不做持久化迁移（positions_map 是云同步的，没有版本号，坏迁移不可回滚）。
    */
   fills?: PositionFill[];
+  /**
+   * 开仓手续费随仓位走（合并仓位是各笔之和，部分平仓按比例带走），
+   * 平仓记录据此写出这一笔的完整成本。旧仓位没有这些字段。
+   */
+  openFeeUsd?: number;
+  openFeeCoin?: number;
+  openIsMaker?: boolean;
+  openFeeRate?: number;
 }
 
 export interface PositionFill {
@@ -265,6 +273,14 @@ export interface PositionFill {
    * 旧数据没有这个字段时退回仓位级的 openLeverage ?? leverage。
    */
   openLeverage?: number;
+  /** 这笔成交开仓时付的手续费（USD）。旧数据没有；战役页按当年费率估算并标明。 */
+  openFeeUsd?: number;
+  /** 币本位：开仓手续费的币数。 */
+  openFeeCoin?: number;
+  /** 开仓时按 Maker 还是 Taker 收的。 */
+  openIsMaker?: boolean;
+  /** 开仓时适用的费率（小数）。费率表日后再变，历史记录仍能解释。 */
+  openFeeRate?: number;
 }
 
 export interface TradeRecord {
@@ -316,6 +332,19 @@ export interface TradeRecord {
    * 老的强平记录没有这个字段。
    */
   liquidationSettlement?: "bankruptcy";
+  /**
+   * 手续费明细（2026-09-12 起写入）。`fee` 一直只是**平仓费**（强平记录里含强平清算费）；
+   * 开仓费在开仓当时从钱包扣除、此前不进任何记录——「平仓价高于开仓价却亏损」的来源。
+   * 旧记录没有这些字段，战役页按当年费率估算开仓费（见 lib/tradeFees.ts）。
+   */
+  openFeeUsd?: number;
+  openFeeCoin?: number;
+  openIsMaker?: boolean;
+  openFeeRate?: number;
+  closeIsMaker?: boolean;
+  closeFeeRate?: number;
+  /** 强平记录：`fee` 里包含的强平清算费。 */
+  liquidationFeeUsd?: number;
   /** User-written reason recorded after the close, used for post-trade review and playback. */
   exit_reason_text?: string;
 }
@@ -385,8 +414,25 @@ export function calcSlippage(
   return side === "LONG" ? price * (1 + slippageRate) : price * (1 - slippageRate);
 }
 
-export const TAKER_FEE = 0.0004; // 0.04%
+/**
+ * 币安合约手续费，普通用户（VIP 0）：Maker 0.02%，Taker 0.05%。U 本位与币本位同一档
+ * （币本位自 2023-09-26 起 Maker 0.010% → 0.020%，Taker 0.050% 不变）。
+ *
+ * 计算式（币安官方 FAQ「Binance Futures Fee Structure & Fee Calculations」）：
+ *   手续费 = 名义价值 × 费率，开仓、平仓各收一次
+ *   U 本位：名义 = 数量 × 成交价，以 USDT 计
+ *   币本位：名义 = 张数 × 面值 ÷ 成交价，以币计
+ *   市价单、触发后的止损/止盈市价单是 Taker；挂在盘口成交的限价单是 Maker
+ * 来源：binance.com/en/support/faq/binance-futures-fee-structure-fee-calculations-360033544231
+ *       binance.com/en/support/announcement/binance-futures-updates-trading-fees-for-coin-m-futures-contracts-2023-09-26-…
+ */
+export const TAKER_FEE = 0.0005; // 0.05%
 export const MAKER_FEE = 0.0002; // 0.02%
+/**
+ * 2026-09-12 之前本模拟器一直按 0.04% 收 Taker 费，而且不把开仓费写进任何记录。
+ * 那之前的成交记录估算开仓费时用这个费率——用今天的费率去估当年扣走的钱会对不上钱包。
+ */
+export const LEGACY_TAKER_FEE = 0.0004;
 
 export function calcUnrealizedPnl(pos: Position, currentPrice: number): number {
   if (pos.settlementMode === "coin") {

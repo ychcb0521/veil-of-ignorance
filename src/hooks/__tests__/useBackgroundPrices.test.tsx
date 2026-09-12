@@ -210,9 +210,10 @@ describe('useBackgroundPrices', () => {
       const { settleFillDebit } = await runFill();
       expect(settleFillDebit).toHaveBeenCalledTimes(1);
       const [, , marginUsd, feeUsd] = settleFillDebit.mock.calls[0];
-      // 名义 1000 USD ÷ 3 = 333.333 保证金,+ 1000 × 0.0004 = 0.4 手续费
+      // 名义 1000 USD ÷ 3 = 333.333 保证金；手续费 = 名义 × 费率（币安口径）。
+      // 这张是 CONDITIONAL：触发后按市价成交 → Taker 0.05% = 0.5。
       expect(marginUsd).toBeCloseTo(1000 / LEV, 6);
-      expect(feeUsd).toBeCloseTo(1000 * 0.0004, 6);
+      expect(feeUsd).toBeCloseTo(1000 * 0.0005, 6);
       // 旧式给出的是 0.3448 + 0.0005 —— 少收将近三个数量级
       expect(marginUsd).toBeGreaterThan(300);
     });

@@ -128,17 +128,18 @@ export function getSettlementFeeParts(
   price: number,
   isMaker: boolean,
 ) {
+  // 币安口径：手续费 = 名义 × 费率。U 本位名义 = 数量 × 成交价；币本位名义 = 张数 × 面值 ÷ 成交价（以币计）。
+  const feeRate = isMaker ? MAKER_FEE : TAKER_FEE;
   if (isCoinSettled(item)) {
-    const feeRate = isMaker ? MAKER_FEE : TAKER_FEE;
     const feeCoin = coinFeeAmount(
       getCoinContracts(item),
       price,
       feeRate,
       getCoinContractSizeUsd(symbol, item),
     );
-    return { feeUsd: coinAmountToUsd(feeCoin, price), feeCoin };
+    return { feeUsd: coinAmountToUsd(feeCoin, price), feeCoin, feeRate };
   }
-  return { feeUsd: calcFee(price, Number(item.quantity ?? 0), isMaker), feeCoin: undefined };
+  return { feeUsd: calcFee(price, Number(item.quantity ?? 0), isMaker), feeCoin: undefined, feeRate };
 }
 
 export function applySettlementSlippage(
@@ -177,7 +178,7 @@ export function executeSettlementFill(
 ) {
   const normalized = normalizeSettlementOrder(symbol, order);
   const { fillPrice, slippageUsd } = applySettlementSlippage(symbol, rawPrice, normalized, isMaker);
-  const { feeUsd, feeCoin } = getSettlementFeeParts(symbol, normalized, fillPrice, isMaker);
+  const { feeUsd, feeCoin, feeRate } = getSettlementFeeParts(symbol, normalized, fillPrice, isMaker);
   const { marginUsd, marginCoin } = getSettlementMarginParts(symbol, normalized, fillPrice);
 
   const position: Position = {
@@ -197,6 +198,11 @@ export function executeSettlementFill(
     marginCoin,
     isolatedMargin: normalized.marginMode === "isolated" ? marginUsd : undefined,
     openTime,
+    // 开仓费随仓位走：此前它只从钱包扣、不进任何记录，平仓记录因此看不到这一笔的完整成本。
+    openFeeUsd: feeUsd,
+    openFeeCoin: feeCoin,
+    openIsMaker: isMaker,
+    openFeeRate: feeRate,
     ...(Number.isFinite(openedRealAt) && (openedRealAt as number) > 0 ? { openedRealAt } : {}),
   };
 
@@ -218,7 +224,7 @@ export function closeSettlementPosition(
   const closeSide: OrderSide = pos.side === "LONG" ? "SHORT" : "LONG";
   const closeOrder = { ...orderLike, side: closeSide };
   const { fillPrice, slippageUsd } = applySettlementSlippage(symbol, rawPrice, closeOrder, isMaker);
-  const { feeUsd, feeCoin } = getSettlementFeeParts(symbol, closeOrder, fillPrice, isMaker);
+  const { feeUsd, feeCoin, feeRate } = getSettlementFeeParts(symbol, closeOrder, fillPrice, isMaker);
 
   if (isCoinSettled(pos)) {
     const pnlCoin = coinPnlAmount(
@@ -235,6 +241,8 @@ export function closeSettlementPosition(
       pnlCoin,
       feeUsd,
       feeCoin,
+      feeRate,
+      isMaker,
       notionalUsd: getPositionNotionalUsd(symbol, orderLike, fillPrice),
     };
   }
@@ -246,6 +254,8 @@ export function closeSettlementPosition(
     pnlCoin: undefined,
     feeUsd,
     feeCoin,
+    feeRate,
+    isMaker,
     notionalUsd: getPositionNotionalUsd(symbol, orderLike, fillPrice),
   };
 }
@@ -295,6 +305,7 @@ export function settlePositionClose(
     pnlCoin,
     feeUsd,
     feeCoin,
+    feeRate,
     notionalUsd,
   } = closeSettlementPosition(symbol, pos, rawPrice, closeQty, false);
 
@@ -315,7 +326,7 @@ export function settlePositionClose(
     netPnl,
     records: buildCloseRecords({
       symbol, pos, closeQty, fillPrice, closeTime, exitMethod, closedRealAt,
-      totals: { netPnl, pnlCoin, feeUsd, feeCoin, slippageUsd, notionalUsd },
+      totals: { netPnl, pnlCoin, feeUsd, feeCoin, slippageUsd, notionalUsd, closeFeeRate: feeRate, closeIsMaker: false },
     }),
   };
 }
@@ -323,10 +334,20 @@ export function settlePositionClose(
 export interface CloseRecordTotals {
   netPnl: number;
   pnlCoin?: number;
+  /** 平仓费（强平时含强平清算费）。 */
   feeUsd: number;
   feeCoin?: number;
   slippageUsd: number;
   notionalUsd: number;
+  closeFeeRate?: number;
+  closeIsMaker?: boolean;
+  /** 强平记录：feeUsd 里包含的强平清算费。 */
+  liquidationFeeUsd?: number;
+}
+
+/** 按比例带走一部分金额；未知（旧数据）就仍是未知。 */
+function feePart(value: number | undefined, share: number): number | undefined {
+  return value == null || !Number.isFinite(value) ? undefined : value * share;
 }
 
 /**
@@ -360,6 +381,9 @@ export function buildCloseRecords(input: {
 }): TradeRecord[] {
   const { symbol, pos, closeQty, fillPrice, closeTime, exitMethod, closedRealAt, totals } = input;
   const coin = isCoinSettled(pos);
+  // 这一刀平掉了仓位的多大比例：开仓费按同一比例带进记录（部分平仓只带走那一部分）。
+  const positionUnits = getPositionUnits(pos);
+  const closeShare = positionUnits > 0 ? Math.min(1, closeQty / positionUnits) : 1;
 
   const base = (over: Partial<TradeRecord>): TradeRecord => ({
     id: crypto.randomUUID(),
@@ -388,6 +412,14 @@ export function buildCloseRecords(input: {
     closeTime,
     exit_method: exitMethod,
     closedRealAt,
+    // 手续费明细。单笔（或旧数据）走这里的仓位级开仓费；多笔成交在下面按每笔各自的开仓费覆盖。
+    openFeeUsd: feePart(pos.openFeeUsd, closeShare),
+    openFeeCoin: feePart(pos.openFeeCoin, closeShare),
+    openIsMaker: pos.openIsMaker,
+    openFeeRate: pos.openFeeRate,
+    closeIsMaker: totals.closeIsMaker,
+    closeFeeRate: totals.closeFeeRate,
+    liquidationFeeUsd: totals.liquidationFeeUsd,
     ...over,
   } as TradeRecord);
 
@@ -486,6 +518,12 @@ export function buildCloseRecords(input: {
       feeCoin: totals.feeCoin == null ? undefined : totals.feeCoin * share,
       slippage: totals.slippageUsd * share,
       notionalUsd: totals.notionalUsd * share,
+      // 开仓费是每笔成交自己的（各笔价不同、Maker/Taker 也可能不同），按这一笔被平掉的比例带走。
+      openFeeUsd: feePart(f.openFeeUsd, f.units > 0 ? alloc[i] / f.units : 0),
+      openFeeCoin: feePart(f.openFeeCoin, f.units > 0 ? alloc[i] / f.units : 0),
+      openIsMaker: f.openIsMaker,
+      openFeeRate: f.openFeeRate,
+      liquidationFeeUsd: feePart(totals.liquidationFeeUsd, share),
     });
     if (i !== absorber) {
       acc.quantity += rec.quantity; acc.pnl += rec.pnl;
@@ -529,7 +567,14 @@ export function scaleSettlementPosition(pos: Position, remainingUnits: number): 
    * 按比例缩,不是先进先出地消耗:先进先出会改变存活仓位的加权开仓价、
    * 从而改变强平价,而币安单向持仓的减仓不动均价(这里 pos.entryPrice 也确实不动)。
    */
-  const fills = pos.fills?.map(f => ({ ...f, units: f.units * pct }));
+  // 开仓费同样按比例留在存活的仓位上：平掉的那部分已随平仓记录写出。
+  const fills = pos.fills?.map(f => ({
+    ...f,
+    units: f.units * pct,
+    openFeeUsd: feePart(f.openFeeUsd, pct),
+    openFeeCoin: feePart(f.openFeeCoin, pct),
+  }));
+  const openFees = { openFeeUsd: feePart(pos.openFeeUsd, pct), openFeeCoin: feePart(pos.openFeeCoin, pct) };
   if (isCoinSettled(pos)) {
     return {
       ...pos,
@@ -539,6 +584,7 @@ export function scaleSettlementPosition(pos: Position, remainingUnits: number): 
       marginCoin: pos.marginCoin == null ? undefined : pos.marginCoin * pct,
       isolatedMargin: pos.isolatedMargin == null ? undefined : pos.isolatedMargin * pct,
       fills,
+      ...openFees,
     };
   }
   return {
@@ -547,6 +593,7 @@ export function scaleSettlementPosition(pos: Position, remainingUnits: number): 
     fills,
     margin: pos.margin * pct,
     isolatedMargin: pos.isolatedMargin == null ? undefined : pos.isolatedMargin * pct,
+    ...openFees,
   };
 }
 
@@ -590,7 +637,16 @@ function fillsOf(p: Position, symbol: string): PositionFill[] {
     units: getPositionUnits(p),
     openLeverage: p.openLeverage ?? p.leverage,
     openedRealAt: p.openedRealAt,
+    openFeeUsd: p.openFeeUsd,
+    openFeeCoin: p.openFeeCoin,
+    openIsMaker: p.openIsMaker,
+    openFeeRate: p.openFeeRate,
   }];
+}
+
+/** 两笔已知金额之和；任一笔未知（旧数据）就整体未知，记录层按每笔各自处理。 */
+function sumKnown(a: number | undefined, b: number | undefined): number | undefined {
+  return a == null || b == null || !Number.isFinite(a) || !Number.isFinite(b) ? undefined : a + b;
 }
 
 /** 合并键。side 之外还必须比这三样，否则会把两种物理含义不同的仓位缝在一起。 */
@@ -672,6 +728,11 @@ export function mergeFilledPosition(
     // 而 0 会把战役的委托归属窗口变成 [1970, 平仓]。
     openTime: openTimes.length > 0 ? Math.min(...openTimes) : target.openTime,
     fills,
+    // 仓位级的开仓费只是各笔之和（部分平仓时按比例带走要用它）；Maker/Taker、费率不一致就不填。
+    openFeeUsd: sumKnown(target.openFeeUsd, fill.openFeeUsd),
+    openFeeCoin: sumKnown(target.openFeeCoin, fill.openFeeCoin),
+    openIsMaker: target.openIsMaker === fill.openIsMaker ? target.openIsMaker : undefined,
+    openFeeRate: target.openFeeRate === fill.openFeeRate ? target.openFeeRate : undefined,
   };
 
   return {

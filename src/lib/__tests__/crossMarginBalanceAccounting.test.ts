@@ -64,13 +64,13 @@ describe('全仓平仓的余额守恒', () => {
  *
  * 事故（复核期间发现）：修 bug 时给它加了 `Math.max(0, 余额 + Σ保证金 + Σ净结算)`，
  * 而那个钳位在这里**恒等于 0**——触发条件是权益 ≤ Σ维持保证金 = 0.004·N，
- * 这一刀要付的却是 平仓费 0.0004·N + 强平费 0.005·N = 0.0054·N。
- * 0.0054 > 0.004 ⇒ 括号内恒为负，钳位于是让这行算什么都一样。
+ * 这一刀要付的却是 平仓费 0.0005·N + 强平费 0.005·N = 0.0055·N。
+ * 0.0055 > 0.004 ⇒ 括号内恒为负，钳位于是让这行算什么都一样。
  * 结果是钱包少付了那一截，而记录里记的是完整数额，b 与 R 全都建立在记录上。
  */
 describe('全仓强平的余额与记录必须同源', () => {
   const MAINTENANCE = 0.004;
-  const TAKER = 0.0004;
+  const TAKER = 0.0005;
   const LIQ = 0.005;
 
   it('【回归】费用恒大于维持保证金，所以钳到 0 必然让钱包欠账', () => {
@@ -80,7 +80,7 @@ describe('全仓强平的余额与记录必须同源', () => {
       const settledUpperBound = notional * MAINTENANCE - notional * (TAKER + LIQ);
       expect(settledUpperBound).toBeLessThan(0);
       expect(Math.max(0, settledUpperBound)).toBe(0);          // 钳位吃掉的正是这一截
-      expect(settledUpperBound).toBeCloseTo(-notional * 0.0014, 6);
+      expect(settledUpperBound).toBeCloseTo(-notional * 0.0015, 6);
     }
   });
 

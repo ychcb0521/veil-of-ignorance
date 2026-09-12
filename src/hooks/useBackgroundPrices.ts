@@ -122,7 +122,10 @@ export function useBackgroundPrices() {
           // 归一化 → 滑点 → 手续费 → 保证金 → 造出带齐结算字段的 Position。
           filledIds.push(order.id);
           const simulatedTime = getEffectiveTime(symbol);
-          const { fee, margin, position } = executeSettlementFill(symbol, fillPrice, order, false, simulatedTime, Date.now());
+          // 与盘面撮合（Index.tsx）同一口径、也是币安的口径：挂在盘口成交的限价单是 Maker，
+          // 触发后按市价成交的是 Taker。这里原来一律按 Taker 收，后台标的的限价单多付了一倍半。
+          const isMaker = order.type === 'LIMIT' || order.type === 'POST_ONLY' || order.type === 'LIMIT_TP_SL';
+          const { fee, margin, position } = executeSettlementFill(symbol, fillPrice, order, isMaker, simulatedTime, Date.now());
           const actualFillPrice = position.entryPrice;
 
           // 付不起就当场撤单留痕。id 已经进了 filledIds（上一行 push），

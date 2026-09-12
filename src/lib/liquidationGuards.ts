@@ -529,7 +529,7 @@ export function isolatedLiquidationSettlement(input: {
   const { symbol, position, exitPrice } = input;
   const marginUsd = Math.max(0, Number(position.isolatedMargin) || 0);
   const grossPnl = calcUnrealizedPnl(position, exitPrice);
-  const { feeUsd: closeFee, feeCoin: closeFeeCoin } = getSettlementFeeParts(symbol, position, exitPrice, false);
+  const { feeUsd: closeFee, feeCoin: closeFeeCoin, feeRate: closeFeeRate } = getSettlementFeeParts(symbol, position, exitPrice, false);
   const netPnl = -marginUsd;
   const leftover = grossPnl - closeFee - netPnl;
   const liqFee = Number.isFinite(leftover) ? Math.max(0, leftover) : 0;
@@ -540,5 +540,8 @@ export function isolatedLiquidationSettlement(input: {
     feeCoin,
     slippageUsd: 0,
     notionalUsd: getPositionNotionalUsd(symbol, position, exitPrice),
+    closeFeeRate,
+    closeIsMaker: false,
+    liquidationFeeUsd: liqFee,
   };
 }

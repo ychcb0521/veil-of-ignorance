@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { MAKER_FEE, TAKER_FEE } from '@/types/trading';
 import type { PendingOrder, Position } from '@/types/trading';
 import { evaluateFillAffordability, fillCostUsd } from '@/lib/fillAffordability';
 import { orderReferencePrice } from '@/lib/orderReferencePrice';
@@ -33,12 +34,13 @@ describe('币本位的保证金与价无关——这条是承重的', () => {
     expect(a.marginUsd).toBeCloseTo(b.marginUsd, 12);
     expect(a.feeUsd).toBeCloseTo(b.feeUsd, 12);
     expect(a.marginUsd).toBeCloseTo(1000 / 10, 9);      // 100 张 × 10 USD ÷ 10x
-    expect(a.feeUsd).toBeCloseTo(1000 * 0.0004, 9);     // taker
+    expect(a.feeUsd).toBeCloseTo(1000 * 0.0005, 9);     // taker 0.05%（币安 VIP 0）
   });
 
   it('【回归】按 taker 估，不是 maker——成交点全都是 taker', () => {
+    // 币安普通用户：Taker 0.05% / Maker 0.02%
     expect(fillCostUsd('NOMUSD', coinOrder(), 0.012).feeUsd)
-      .toBeCloseTo(2 * fillCostUsd('NOMUSD', coinOrder(), 0.012, true).feeUsd, 9);
+      .toBeCloseTo((TAKER_FEE / MAKER_FEE) * fillCostUsd('NOMUSD', coinOrder(), 0.012, true).feeUsd, 9);
   });
 });
 

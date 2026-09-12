@@ -1106,7 +1106,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
             if (pos.marginMode !== 'cross') continue;
             const pnl = calcUnrealizedPnl(pos, price);
             const notional = getPositionNotionalUsd(sym, pos, price);
-            const { feeUsd: closeFee, feeCoin } = getSettlementFeeParts(sym, pos, price, false);
+            const { feeUsd: closeFee, feeCoin, feeRate: closeFeeRate } = getSettlementFeeParts(sym, pos, price, false);
             const liqFee = notional * LIQUIDATION_FEE_RATE;
             // 净结算里已经扣过强平费；原来在亏损之外再加一次 liqFee，弹窗里的损失被多算一截。
             totalLoss += Math.max(0, -(pnl - closeFee - liqFee));
@@ -1127,6 +1127,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
                 feeCoin,
                 slippageUsd: 0,
                 notionalUsd: notional,
+                closeFeeRate, closeIsMaker: false, liquidationFeeUsd: liqFee,
               },
             }).map(r => ({ ...r, action: 'LIQUIDATION' as const })));
           }
@@ -1806,6 +1807,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
       pnlCoin,
       feeUsd,
       feeCoin,
+      feeRate,
       notionalUsd,
     } = closeSettlementPosition(symbol, pos, rawPrice, closeQty, false);
 
@@ -1893,6 +1895,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
         netPnl: pnlUsd - feeUsd,
         pnlCoin, feeUsd, feeCoin,
         slippageUsd, notionalUsd,
+        closeFeeRate: feeRate, closeIsMaker: false,
       },
     })]);
 
