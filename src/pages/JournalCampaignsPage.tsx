@@ -129,6 +129,7 @@ type CampaignSortMode =
   | 'mirrorTp'
   | 'dsiContribution'
   | 'usiContribution'
+  | 'leverage'
   | 'alpha';
 type CampaignSortDirection = 'asc' | 'desc';
 
@@ -199,8 +200,27 @@ const SORT_OPTIONS: { value: CampaignSortMode; label: string }[] = [
   { value: 'mirrorTp', label: '镜像止盈' },
   { value: 'dsiContribution', label: 'DSI 贡献' },
   { value: 'usiContribution', label: 'USI 贡献' },
+  { value: 'leverage', label: '杠杆倍数' },
   { value: 'alpha', label: '字母' },
 ];
+
+/**
+ * 会**过滤掉**缺少该指标的战役的排序档：空列表时要说清是「没有战役」还是「有战役但都算不出这个指标」。
+ * 此前 DSI / USI / 杠杆三档同样在过滤，却只显示「尚无战役」，看上去像战役丢了。
+ */
+const SORT_EMPTY_HINTS: Partial<Record<CampaignSortMode, { noun: string; hint: string }>> = {
+  captureRate: { noun: '可计算盈亏比', hint: '未设置初始最大预期亏损的战役不会进入当前排序' },
+  expectedDrawdownPct: { noun: '可计算预期回撤', hint: '缺少主力开仓价或初始对冲 A/B 价格的战役不会进入当前排序' },
+  opportunityQuality: { noun: '可计算机会质量', hint: '缺少实际盈亏比、主力开仓价或初始对冲 A/B 价格的战役不会进入当前排序' },
+  arithmeticExpectancy: { noun: '可计算算术期望', hint: '未设置初始最大预期亏损的战役不会进入当前排序' },
+  geometricExpectancy: {
+    noun: '可计算几何期望',
+    hint: '旧战役缺少开仓资产快照时会按当前总资产估算；缺少初始最大预期亏损的战役仍不会进入当前排序',
+  },
+  dsiContribution: { noun: '可计算 DSI 贡献', hint: 'DSI 贡献只统计亏损战役，其余不会进入当前排序' },
+  usiContribution: { noun: '可计算 USI 贡献', hint: 'USI 贡献只统计盈利战役，其余不会进入当前排序' },
+  leverage: { noun: '记录了杠杆倍数', hint: '没有记录杠杆倍数、各腿也没有杠杆的战役不会进入当前排序' },
+};
 
 const DEFAULT_CAMPAIGN_SORT: CampaignSortState = { mode: 'time', direction: 'desc' };
 const CAMPAIGN_LIST_SCROLL_KEY_PREFIX = 'journal-campaign-list-scroll:';
@@ -640,6 +660,21 @@ function rowMirrorTpRank(row: CampaignDisplayData): number {
   );
 }
 
+/**
+ * 战役的杠杆倍数：以主力开仓那一刻记下的初始杠杆为准。
+ * 老战役没记这个字段时退回各腿里最大的那个——持仓期内提过杠杆的，按它真正承担过的风险排。
+ */
+function campaignLeverage(row: CampaignDisplayData): number {
+  const initial = Number(row.campaign.initial_leverage);
+  if (Number.isFinite(initial) && initial > 0) return initial;
+  let max = 0;
+  for (const leg of row.legs) {
+    const value = Number(leg.leverage);
+    if (Number.isFinite(value) && value > max) max = value;
+  }
+  return max;
+}
+
 function sortCampaignRows(rows: CampaignDisplayData[], sort: CampaignSortState): CampaignDisplayData[] {
   const visibleRows = rows.filter(row => {
     if (sort.mode === 'captureRate') {
@@ -664,6 +699,9 @@ function sortCampaignRows(rows: CampaignDisplayData[], sort: CampaignSortState):
     }
     if (sort.mode === 'usiContribution') {
       return row.usiContributionPct != null && Number.isFinite(row.usiContributionPct);
+    }
+    if (sort.mode === 'leverage') {
+      return campaignLeverage(row) > 0;
     }
     return true;
   });
@@ -768,6 +806,12 @@ function sortCampaignRows(rows: CampaignDisplayData[], sort: CampaignSortState):
         b.usiContributionPct ?? Number.NaN,
         sort.direction,
       )
+        || importanceDesc
+        || timeDesc
+        || alphaAsc;
+    }
+    if (sort.mode === 'leverage') {
+      return compareNumber(campaignLeverage(a), campaignLeverage(b), sort.direction)
         || importanceDesc
         || timeDesc
         || alphaAsc;
@@ -2566,27 +2610,13 @@ export default function JournalCampaignsPage() {
               <Layers className="w-5 h-5 text-muted-foreground" />
             </div>
             <div className="text-[13px] font-medium">
-              {(sortState.mode === 'captureRate'
-                || sortState.mode === 'expectedDrawdownPct'
-                || sortState.mode === 'opportunityQuality'
-                || sortState.mode === 'arithmeticExpectancy'
-                || sortState.mode === 'geometricExpectancy') && rows.length > 0
-                ? `暂无可计算${sortState.mode === 'captureRate' ? '盈亏比' : sortState.mode === 'expectedDrawdownPct' ? '预期回撤' : sortState.mode === 'opportunityQuality' ? '机会质量' : sortState.mode === 'arithmeticExpectancy' ? '算术期望' : '几何期望'}的战役`
+              {SORT_EMPTY_HINTS[sortState.mode] && rows.length > 0
+                ? `暂无${SORT_EMPTY_HINTS[sortState.mode]!.noun}的战役`
                 : '尚无战役'}
             </div>
             <div className="text-[12px] text-muted-foreground">
-              {(sortState.mode === 'captureRate'
-                || sortState.mode === 'expectedDrawdownPct'
-                || sortState.mode === 'opportunityQuality'
-                || sortState.mode === 'arithmeticExpectancy'
-                || sortState.mode === 'geometricExpectancy') && rows.length > 0
-                ? sortState.mode === 'geometricExpectancy'
-                  ? '旧战役缺少开仓资产快照时会按当前总资产估算；缺少初始最大预期亏损的战役仍不会进入当前排序'
-                  : sortState.mode === 'opportunityQuality'
-                    ? '缺少实际盈亏比、主力开仓价或初始对冲 A/B 价格的战役不会进入当前排序'
-                    : sortState.mode === 'expectedDrawdownPct'
-                      ? '缺少主力开仓价或初始对冲 A/B 价格的战役不会进入当前排序'
-                    : '未设置初始最大预期亏损的战役不会进入当前排序'
+              {SORT_EMPTY_HINTS[sortState.mode] && rows.length > 0
+                ? SORT_EMPTY_HINTS[sortState.mode]!.hint
                 : '你下次开主力单时会自动创建第一个战役'}
             </div>
           </div>

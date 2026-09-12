@@ -27,6 +27,7 @@ const campaigns: TradeCampaign[] = [
     opened_at: '2026-01-01T00:00:00.000Z',
     closed_at: '2026-01-02T00:00:00.000Z',
     initial_main_size_usdt: 100,
+    initial_leverage: 3,
     final_realized_pnl: 30,
     importance_weight: 5,
   }),
@@ -36,6 +37,7 @@ const campaigns: TradeCampaign[] = [
     opened_at: '2026-03-01T00:00:00.000Z',
     closed_at: '2026-03-02T00:00:00.000Z',
     initial_main_size_usdt: 1000,
+    initial_leverage: 20,
     final_realized_pnl: 50,
     importance_weight: 1,
   }),
@@ -45,6 +47,7 @@ const campaigns: TradeCampaign[] = [
     opened_at: '2026-02-01T00:00:00.000Z',
     closed_at: '2026-02-02T00:00:00.000Z',
     initial_main_size_usdt: 100000,
+    initial_leverage: 10,
     final_realized_pnl: 1000,
     importance_weight: 0,
   }),
@@ -213,7 +216,7 @@ function makeCampaign(overrides: Partial<TradeCampaign>): TradeCampaign {
     opened_at: overrides.opened_at ?? now,
     closed_at: overrides.closed_at ?? null,
     initial_main_size_usdt: overrides.initial_main_size_usdt ?? null,
-    initial_leverage: null,
+    initial_leverage: overrides.initial_leverage ?? null,
     final_realized_pnl: overrides.final_realized_pnl ?? null,
     final_r_multiple: null,
     peak_unrealized_pnl: null,
@@ -298,6 +301,28 @@ function SearchProbe() {
 }
 
 describe('JournalCampaignsPage sorting', () => {
+  it('【用户要求】按杠杆倍数排序：默认从大到小，再点一次切到从小到大，没记杠杆的战役不进入这一档', async () => {
+    render(
+      <MemoryRouter initialEntries={['/journal/campaigns']}>
+        <Routes>
+          <Route path="/journal/campaigns" element={<JournalCampaignsPage />} />
+          <Route path="/journal/campaigns/:id" element={<LocationProbe />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => expect(screen.getAllByTestId('campaign-card')).toHaveLength(4));
+    fireEvent.click(screen.getByTestId('campaign-sort-leverage'));
+
+    // 20x → 10x → 3x；Late Close 没记杠杆，各腿也没有，被排除在这一档之外
+    await waitFor(() => expect(cardOrder()).toEqual(['Newest Operation', 'Best PnL', 'High Importance']));
+    expect(screen.getByTestId('campaign-sort-leverage')).toHaveAttribute('data-sort-direction', 'desc');
+
+    fireEvent.click(screen.getByTestId('campaign-sort-leverage'));
+    await waitFor(() => expect(cardOrder()).toEqual(['High Importance', 'Best PnL', 'Newest Operation']));
+    expect(screen.getByTestId('campaign-sort-leverage')).toHaveAttribute('data-sort-direction', 'asc');
+  }, 15_000);
+
   it('removes the legacy mutual scope while preserving sort parameters and detail navigation', async () => {
     render(
       <MemoryRouter initialEntries={['/journal/campaigns?scope=mutual&sort=importance&direction=asc']}>
@@ -684,6 +709,7 @@ describe('JournalCampaignsPage sorting', () => {
       'campaign-sort-mirrorTp',
       'campaign-sort-dsiContribution',
       'campaign-sort-usiContribution',
+      'campaign-sort-leverage',
       'campaign-sort-alpha',
     ]);
     expect(screen.getAllByTestId('campaign-operation-time').map(node => node.textContent)).toEqual([
