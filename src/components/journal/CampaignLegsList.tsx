@@ -54,6 +54,24 @@ function fmtClock(value: number | string | null | undefined): string {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
+/**
+ * 委托卡片里的时刻：同一天只写 HH:mm，跨天才补 MM-DD。
+ * 卡片里原本三行各印一遍完整日期（年份也在），一张卡四行高，三张就把行撑破、
+ * 还要靠内部滚动切成半张。行头已经写着这条腿的开平日期，卡片只需要说"几点"。
+ */
+function fmtCardTime(value: number | null | undefined, sameDayAs?: number | null): string {
+  if (!value) return '—';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '—';
+  const pad = (n: number) => String(n).padStart(2, '0');
+  const hm = `${pad(date.getHours())}:${pad(date.getMinutes())}`;
+  if (sameDayAs) {
+    const ref = new Date(sameDayAs);
+    if (!Number.isNaN(ref.getTime()) && ref.toDateString() === date.toDateString()) return hm;
+  }
+  return `${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${hm}`;
+}
+
 function fmtPrice(value: number | null | undefined): string {
   if (value == null || !Number.isFinite(value)) return '—';
   if (Math.abs(value) >= 1) return value.toFixed(4);
@@ -62,6 +80,14 @@ function fmtPrice(value: number | null | undefined): string {
 
 /**
  * Legs 表的列宽 —— 表头与数据行共用同一个常量。
+ *
+ * 弹性那一格给**委托**，不给时间。时间列的内容是定宽的（「开 2025-09-19 22:42」），
+ * 让它吃掉所有富余宽度，富余就会变成表格中段一片空洞，而右侧的委托卡片反倒挤到发虚。
+ * 委托是唯一"越宽越有用"的列，多出来的宽度停在它和操作列之间，视觉上是留白而不是裂口。
+ *
+ * 列序：分类信息（# / 角色 / 状态）聚在左边，数值列（开仓价 → Δb）连成不被打断的一段，
+ * 右端是委托与操作。状态原本卡在仓位和手续费之间，把数值读数劈成两截。
+
  *
  * 这里曾经把表头和行各写一份，加列时只改了表头，行少一列，
  * 最后一列「操作」被挤进隐式新行、整张表错位。共用一份后物理上不可能再失配。
@@ -97,10 +123,10 @@ function formatDeltaB(delta: number | null): string {
 /** 手续费列表头的说明：币安的算式、费率档与「盈亏列为什么已经扣了平仓费」。 */
 const FEE_COLUMN_HINT = '币安口径：手续费 = 名义 × 费率，开仓、平仓各收一次；市价单 / 触发单 Taker 0.05%，盘口限价单 Maker 0.02%（U 本位名义 = 数量 × 成交价；币本位 = 张数 × 面值 ÷ 成交价，以币计）。盈亏列已扣平仓费；开仓费在开仓当时从钱包扣除。旧记录未存开仓费，按当时 0.04% Taker 估算并标明。';
 
-const LEGS_GRID = 'grid-cols-[44px_112px_minmax(200px,1fr)_100px_100px_104px_84px_124px_124px_96px_236px_136px]';
+const LEGS_GRID = 'grid-cols-[36px_112px_68px_196px_92px_92px_118px_112px_124px_84px_minmax(244px,1fr)_92px]';
 
 /** 各列合计的下限，与 LEGS_GRID 对应；不足时容器横向滚动而不是压扁列。 */
-const LEGS_MIN_WIDTH = 'min-w-[1612px]';
+const LEGS_MIN_WIDTH = 'min-w-[1504px]';
 
 export function CampaignLegsList({
   legs,
@@ -210,16 +236,16 @@ export function CampaignLegsList({
     <div className="bg-card border border-border rounded overflow-hidden">
       <div className="overflow-x-auto">
         <div className={LEGS_MIN_WIDTH}>
-          <div className={`grid ${LEGS_GRID} gap-x-3 text-[10px] font-medium text-muted-foreground bg-muted/40 py-2 px-3`}>
+          <div className={`grid ${LEGS_GRID} gap-x-2.5 text-[10px] font-medium text-muted-foreground bg-muted/40 py-2 px-3`}>
             <div>#</div>
             <div>角色</div>
+            <div>状态</div>
             <div>时间</div>
             <div className="text-right">开仓价</div>
             <div className="text-right">平仓价</div>
             <div className="text-right" title="上行：名义仓位（USD）；下行：按开仓价折算的币量，即加仓公式里的 X">仓位 / 币量</div>
-            <div>状态</div>
             <div className="text-right text-muted-foreground/60" title={FEE_COLUMN_HINT}>手续费</div>
-            <div className="text-right text-foreground/70" title="该腿的已实现盈亏（已扣平仓费；开仓费在开仓当时从钱包扣除，见手续费列）">盈亏 / 贡献</div>
+            <div className="text-right text-foreground/70" title="上行：该腿在本场各腿盈亏绝对值之和里所占的份额；下行：已实现盈亏金额（已扣平仓费，开仓费在开仓当时从钱包扣除，见手续费列）">贡献 / 盈亏</div>
             <div className="text-right font-semibold tracking-wide text-foreground/85" title="该腿盈亏 ÷ 初始最大预期亏损 L：这条腿把整场 b 推高 / 拉低了多少">Δb</div>
             <div>委托</div>
             <div className="text-right">操作</div>
@@ -259,7 +285,7 @@ export function CampaignLegsList({
               return (
                 <div key={leg.id}>
                 <div
-                  className={`grid ${LEGS_GRID} gap-x-3 items-start text-[11px] font-mono py-2.5 px-3 border-b border-border/40 hover:bg-accent transition-colors ${
+                  className={`grid ${LEGS_GRID} gap-x-2.5 items-start text-[11px] font-mono py-2.5 px-3 border-b border-border/40 hover:bg-accent transition-colors ${
                     highlighted ? 'bg-[#002FA7]/5 ring-1 ring-inset ring-[#002FA7]/12' : ''
                   }`}
                 >
@@ -274,6 +300,7 @@ export function CampaignLegsList({
                       </span>
                     )}
                   </div>
+                  <div className={status.className}>{status.label}</div>
                   <div className="leading-tight">
                     <div><span className="text-muted-foreground">开 </span>{openLabel}</div>
                     <div><span className="text-muted-foreground">平 </span>{closeLabel}</div>
@@ -300,7 +327,6 @@ export function CampaignLegsList({
                       </div>
                     )}
                   </div>
-                  <div className={status.className}>{status.label}</div>
                   {(() => {
                     /**
                      * 三列的主次由**字号与字重**定，不靠发灰：
@@ -338,20 +364,21 @@ export function CampaignLegsList({
                     return (
                       <div
                         data-testid={`leg-pnl-${leg.id}`}
-                        title="该腿的已实现盈亏，以及它在本场各腿盈亏绝对值之和里所占的份额"
+                        title="上行：该腿在本场各腿盈亏绝对值之和里所占的份额；下行：已实现盈亏金额"
                         className="text-right text-[12px] leading-snug"
                       >
+                        {/* 份额才是要读的那个数：同样一笔金额，在小场子里是主因、在大场子里是零头。 */}
                         <div
                           className={`font-mono font-medium tabular-nums ${
                             pnl === 0 ? 'text-foreground/50' : positive ? 'text-[#0ECB81]/90' : 'text-[#F6465D]/90'
                           }`}
                         >
-                          {positive ? '+' : ''}{pnl.toFixed(2)}
-                        </div>
-                        <div className="text-[9px] tabular-nums text-foreground/35">
                           {contribution == null
                             ? '—'
                             : `${contribution > 0 ? '+' : ''}${(contribution * 100).toFixed(1)}%`}
+                        </div>
+                        <div className="text-[10px] tabular-nums text-foreground/45">
+                          {positive ? '+' : ''}{pnl.toFixed(2)}
                         </div>
                       </div>
                     );
@@ -374,12 +401,16 @@ export function CampaignLegsList({
                   })()}
                   {/* 委托列：多条卡片会把行撑得很高。限高 + 内部滚动，
                       让各行高度趋于一致，同时一条委托都不丢。 */}
-                  <div className="max-h-[132px] space-y-1 overflow-y-auto pr-1 font-sans">
+                  <div className="max-h-[132px] max-w-[320px] space-y-1 overflow-y-auto pr-1 font-sans">
                     {mirrorTpTiming && (
-                      <div className="rounded border border-[#F0B90B]/25 bg-[#F0B90B]/5 px-2 py-1 leading-tight">
+                      <div
+                        className="rounded border border-[#F0B90B]/25 bg-[#F0B90B]/5 px-2 py-1 leading-tight"
+                        title={`委 ${fmtClock(mirrorTpTiming.placedAt)} · 触 ${fmtClock(mirrorTpTiming.triggeredAt)}`}
+                      >
                         <div className="text-[10px] font-medium text-[#D89B00]">镜像止盈</div>
-                        <div className="text-[10px] text-muted-foreground">委 {fmtClock(mirrorTpTiming.placedAt)}</div>
-                        <div className="text-[10px] text-muted-foreground">触 {fmtClock(mirrorTpTiming.triggeredAt)}</div>
+                        <div className="text-[10px] tabular-nums text-muted-foreground">
+                          委 {fmtCardTime(mirrorTpTiming.placedAt)} · 触 {fmtCardTime(mirrorTpTiming.triggeredAt, mirrorTpTiming.placedAt)}
+                        </div>
                       </div>
                     )}
                     {reverseOrdersForLeg.length === 0 && !mirrorTpTiming ? (
@@ -388,6 +419,7 @@ export function CampaignLegsList({
                       reverseOrdersForLeg.map(order => (
                         <div
                           key={order.id}
+                          title={`委 ${fmtClock(order.createdAt)}${order.status === 'triggered' ? ` · 触 ${fmtClock(order.triggeredAt)}` : ''} · ${order.status === 'triggered' ? '平' : '撤'} ${order.cancelledAt ? fmtClock(order.cancelledAt) : '—'}`}
                           className="group rounded border border-border/50 bg-muted/30 px-2 py-1 leading-tight"
                         >
                           <div className="flex items-center justify-between gap-2">
@@ -418,12 +450,10 @@ export function CampaignLegsList({
                               )}
                             </div>
                           </div>
-                          <div className="text-[10px] text-muted-foreground">委 {fmtClock(order.createdAt)}</div>
-                          {order.status === 'triggered' && (
-                            <div className="text-[10px] text-muted-foreground">触 {fmtClock(order.triggeredAt)}</div>
-                          )}
-                          <div className="text-[10px] text-muted-foreground">
-                            {order.cancelledAt ? `${order.status === 'triggered' ? '平' : '撤'} ${fmtClock(order.cancelledAt)}` : `${order.status === 'triggered' ? '平' : '撤'} —`}
+                          <div className="text-[10px] tabular-nums text-muted-foreground">
+                            委 {fmtCardTime(order.createdAt)}
+                            {order.status === 'triggered' && ` · 触 ${fmtCardTime(order.triggeredAt, order.createdAt)}`}
+                            {` · ${order.status === 'triggered' ? '平' : '撤'} ${order.cancelledAt ? fmtCardTime(order.cancelledAt, order.createdAt) : '—'}`}
                           </div>
                         </div>
                       ))
@@ -483,13 +513,14 @@ export function CampaignLegsList({
                       return (
                         <div
                           key={phase.index}
-                          className={`grid ${LEGS_GRID} gap-x-3 items-center py-1 px-3 text-[10px] font-mono text-muted-foreground`}
+                          className={`grid ${LEGS_GRID} gap-x-2.5 items-center py-1 px-3 text-[10px] font-mono text-muted-foreground`}
                         >
                           <div />
                           <div className="pl-3 font-sans text-[9px]">
                             阶段 {phase.index}
                             {phase.boundaryLegId == null && <span className="text-muted-foreground/60"> · 收尾</span>}
                           </div>
+                          <div />
                           <div className="tabular-nums">
                             {fmtClock(phase.startTime)} → {fmtClock(phase.endTime)}
                             {phase.boundaryLegId != null && (
@@ -500,13 +531,12 @@ export function CampaignLegsList({
                           <div className="text-right tabular-nums">{fmtPrice(phase.endPrice)}</div>
                           <div />
                           <div />
-                          <div />
                           <div className="text-right leading-tight">
                             <div className={`tabular-nums ${phase.pnl === 0 ? '' : positive ? 'text-[#0ECB81]/90' : 'text-[#F6465D]/90'}`}>
-                              {positive ? '+' : ''}{phase.pnl.toFixed(2)}
+                              {phaseContribution == null ? '—' : `${phaseContribution > 0 ? '+' : ''}${(phaseContribution * 100).toFixed(1)}%`}
                             </div>
                             <div className="text-[9px] tabular-nums text-muted-foreground/70">
-                              {phaseContribution == null ? '—' : `${phaseContribution > 0 ? '+' : ''}${(phaseContribution * 100).toFixed(1)}%`}
+                              {positive ? '+' : ''}{phase.pnl.toFixed(2)}
                             </div>
                           </div>
                           <div className={`text-right tabular-nums ${phaseDelta == null ? '' : phaseDelta > 0 ? 'text-[#0ECB81]/90' : phaseDelta < 0 ? 'text-[#F6465D]/90' : ''}`}>
@@ -527,12 +557,13 @@ export function CampaignLegsList({
                 把这一行画出来，界面本身就是一道持续生效的断言。 */}
             <div
               data-testid="legs-total-row"
-              className={`grid ${LEGS_GRID} items-center gap-x-3 border-t-2 border-border px-3 py-2 text-[11px] font-medium`}
+              className={`grid ${LEGS_GRID} items-center gap-x-2.5 border-t-2 border-border px-3 py-2 text-[11px] font-medium`}
             >
               <div />
               <div className="text-muted-foreground">合计</div>
+              <div />
               <div className="text-[10px] text-muted-foreground">{settlementBasisLabel(settlement.basis)}</div>
-              <div /><div /><div /><div />
+              <div /><div /><div />
               <div
                 data-testid="legs-total-fees"
                 title="本场全部成交记录的开仓费 + 平仓费（按记录去重：同一条记录挂在几条腿上只算一次）"

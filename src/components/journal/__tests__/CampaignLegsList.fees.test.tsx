@@ -86,6 +86,14 @@ describe('Legs 列表的手续费列', () => {
     expect(delta.className).toContain('bg-[#F6465D]/[0.12]');
   });
 
+  it('贡献率在上、金额在下——要读的是这条腿占整场的多少', () => {
+    const record = hpeRecord();
+    renderList([record], [legFor(record)]);
+    const lines = [...screen.getByTestId('leg-pnl-leg-1').children].map(el => el.textContent);
+    expect(lines[0]).toMatch(/%$/);                 // 主行是百分比
+    expect(lines[1]).toContain('-223.39');          // 次行才是金额
+  });
+
   it('小到取不出两位小数的 Δb 显示 0.00，不是「−0.00」，且用中性底色', () => {
     const record = hpeRecord({ pnl: -122.4 });
     renderList([record], [legFor(record)], 30_487);          // −122.4 ÷ 30487 = −0.004

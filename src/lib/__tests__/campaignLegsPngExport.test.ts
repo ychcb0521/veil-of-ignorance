@@ -172,8 +172,8 @@ describe('campaign PNG overview', () => {
     expect(rows).toHaveLength(14);
     expect(rows.at(-1)?.legId).toBe('leg-14');
     expect(rows.at(-1)?.cells[0][0].text).toBe('14');
-    expect(rows.at(-1)?.cells[3][0].text).toBe('113.0000');
-    expect(rows.at(-1)?.cells[5][0].text).toBe('1013.00');
+    expect(rows.at(-1)?.cells[4][0].text).toBe('113.0000');
+    expect(rows.at(-1)?.cells[6][0].text).toBe('1013.00');
     expect(campaignLegsExportCanvasHeight({
       ...input(),
       legs: manyLegs,
@@ -215,7 +215,7 @@ describe('campaign PNG overview', () => {
       },
     });
 
-    expect(rows[0].cells[4].map(line => line.text)).toEqual([
+    expect(rows[0].cells[5].map(line => line.text)).toEqual([
       '0.200000',
       '原 0.500000',
       'K线 0.180000-0.220000',

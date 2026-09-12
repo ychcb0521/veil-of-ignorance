@@ -75,15 +75,15 @@ type LegsCanvasOptions = {
 };
 
 const COLUMNS = [
-  { title: '#', width: 56 },
-  { title: '角色', width: 150 },
-  { title: '时间', width: 300 },
-  { title: '开仓价', width: 122 },
-  { title: '平仓价', width: 122 },
-  { title: '仓位 / 币量', width: 122 },
-  { title: '状态', width: 108 },
-  { title: '手续费', width: 140 },
-  { title: '盈亏 / 贡献', width: 150 },
+  { title: '#', width: 52 },
+  { title: '角色', width: 148 },
+  { title: '状态', width: 96 },
+  { title: '时间', width: 292 },
+  { title: '开仓价', width: 118 },
+  { title: '平仓价', width: 118 },
+  { title: '仓位 / 币量', width: 132 },
+  { title: '手续费', width: 132 },
+  { title: '贡献 / 盈亏', width: 150 },
   { title: 'Δb', width: 104 },
   { title: '委托', width: 470 },
 ] as const;
@@ -303,6 +303,7 @@ export function buildCampaignLegsExportRows(input: ExportInput): CampaignLegsExp
         { text: roleLabel, bold: true },
         ...(leg.source === 'retroactive_from_record' ? [{ text: '回填', color: '#848E9C' }] : []),
       ],
+      [{ text: status.label, color: status.color, bold: true }],
       [
         { text: `开 ${openLabel}` },
         { text: `平 ${closeLabel}` },
@@ -324,7 +325,6 @@ export function buildCampaignLegsExportRows(input: ExportInput): CampaignLegsExp
             { text: coinQty.toLocaleString('en-US', { maximumFractionDigits: 2 }), color: '#848E9C' },
           ];
       })(),
-      [{ text: status.label, color: status.color, bold: true }],
       // 手续费：与页面同源，同样刻意做淡——合计在上、开/平拆分在下，明细在页面的 tooltip 里。
       (() => {
         const fees = execution.record ? tradeRecordFees(execution.record) : null;
@@ -348,17 +348,18 @@ export function buildCampaignLegsExportRows(input: ExportInput): CampaignLegsExp
         const pnl = entry?.pnl ?? null;
         if (pnl == null) return [{ text: '—', color: '#848E9C' }];
         const contribution = entry?.contribution ?? null;
+        // 份额在上、金额在下：要读的是这条腿占了整场的多少，不是它的绝对数
         return [
           {
-            text: `${pnl > 0 ? '+' : ''}${pnl.toFixed(2)}`,
+            text: contribution == null
+              ? '—'
+              : `${contribution > 0 ? '+' : ''}${(contribution * 100).toFixed(1)}%`,
             color: pnl === 0 ? '#5F6B7A' : pnl > 0 ? '#0ECB81' : '#F6465D',
             bold: true,
             size: 13,
           },
           {
-            text: contribution == null
-              ? '—'
-              : `${contribution > 0 ? '+' : ''}${(contribution * 100).toFixed(1)}%`,
+            text: `${pnl > 0 ? '+' : ''}${pnl.toFixed(2)}`,
             color: '#9AA4B2',
             size: 10,
           },
@@ -407,19 +408,19 @@ export function buildCampaignLegsExportRows(input: ExportInput): CampaignLegsExp
         cells: [
           [{ text: '' }],
           [{ text: `阶段 ${phase.index}${phase.boundaryLegId == null ? ' · 收尾' : ''}`, color: '#848E9C' }],
+          [{ text: '' }],
           [{ text: `${fmtClock(phase.startTime)} → ${fmtClock(phase.endTime)}`, color: '#848E9C' }],
           [{ text: fmtPrice(phase.startPrice), color: '#848E9C' }],
           [{ text: fmtPrice(phase.endPrice), color: '#848E9C' }],
           [{ text: '' }],
           [{ text: '' }],
-          [{ text: '' }],
           [
             {
-              text: `${phase.pnl > 0 ? '+' : ''}${phase.pnl.toFixed(2)}`,
+              text: contribution == null ? '—' : `${contribution > 0 ? '+' : ''}${(contribution * 100).toFixed(1)}%`,
               color: phase.pnl === 0 ? '#5F6B7A' : phase.pnl > 0 ? '#0ECB81' : '#F6465D',
             },
             {
-              text: contribution == null ? '—' : `${contribution > 0 ? '+' : ''}${(contribution * 100).toFixed(1)}%`,
+              text: `${phase.pnl > 0 ? '+' : ''}${phase.pnl.toFixed(2)}`,
               color: '#848E9C',
             },
           ],

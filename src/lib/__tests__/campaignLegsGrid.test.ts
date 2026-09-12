@@ -29,14 +29,14 @@ describe('Legs 表栅格', () => {
     // 用下划线分隔，但 minmax(200px,1fr) 内部没有下划线，可安全按 _ 切
     const columnCount = grid.split('_').length;
     expect(columnCount).toBe(12);
-    for (const title of ['#', '角色', '时间', '开仓价', '平仓价', '仓位 / 币量', '状态', '手续费', '盈亏 / 贡献', 'Δb', '委托', '操作']) {
+    for (const title of ['#', '角色', '状态', '时间', '开仓价', '平仓价', '仓位 / 币量', '手续费', '贡献 / 盈亏', 'Δb', '委托', '操作']) {
       expect(s).toContain(`>${title}</div>`);
     }
   });
 
   it('手续费列排在盈亏列之前——它是成本注脚，不该抢主列的位置', () => {
     const s = src();
-    expect(s.indexOf('>手续费</div>')).toBeLessThan(s.indexOf('>盈亏 / 贡献</div>'));
+    expect(s.indexOf('>手续费</div>')).toBeLessThan(s.indexOf('>贡献 / 盈亏</div>'));
   });
 
   it('画出合计行——它按构造恒等于盈亏概览，是防止两套账再次分家的可视断言', () => {
@@ -56,8 +56,13 @@ describe('Legs 表栅格', () => {
     expect(src_).toContain('legCoinQty');
   });
 
-  it('时间列用 minmax 而非裸 1fr——裸 1fr 被压窄时会让文字逐字竖排', () => {
-    expect(/grid-cols-\[[^\]]*minmax\(200px,1fr\)/.test(src())).toBe(true);
+  it('弹性列是「委托」而不是「时间」——时间内容定宽，让它吃富余会在表格中段留下空洞', () => {
+    const grid = /grid-cols-\[([^\]]+)\]/.exec(src())?.[1] ?? '';
+    const tracks = grid.split('_');
+    expect(tracks.filter(track => track.includes('fr'))).toHaveLength(1);
+    expect(tracks[10]).toContain('minmax(244px,1fr)');     // 委托：唯一越宽越有用的列
+    expect(tracks[3]).toBe('196px');                        // 时间：放得下「开 2025-09-19 22:42」
+    expect(tracks[2]).toBe('68px');                         // 状态：与角色相邻，不再劈开数值列
   });
 
   it('操作列是图标按钮，中文标签进 title 而不是渲染成文字', () => {
