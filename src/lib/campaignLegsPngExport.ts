@@ -76,15 +76,14 @@ type LegsCanvasOptions = {
 
 const COLUMNS = [
   { title: '#', width: 52 },
-  { title: '角色', width: 148 },
-  { title: '状态', width: 96 },
-  { title: '时间', width: 292 },
-  { title: '开仓价', width: 118 },
-  { title: '平仓价', width: 118 },
-  { title: '仓位 / 币量', width: 132 },
-  { title: '手续费', width: 132 },
+  { title: '角色', width: 152 },
+  { title: '时间', width: 284 },
   { title: '贡献 / 盈亏', width: 150 },
   { title: 'Δb', width: 104 },
+  { title: '开仓价', width: 118 },
+  { title: '平仓价', width: 118 },
+  { title: '币量 / 仓位', width: 140 },
+  { title: '手续费', width: 132 },
   { title: '委托', width: 470 },
 ] as const;
 
@@ -194,10 +193,18 @@ function campaignLegCounts(legs: TradeJournal[]) {
   return { main, hedge, tp, other: Math.max(0, legs.length - main - hedge - tp) };
 }
 
-function statusForLeg(leg: TradeJournal, record: TradeRecord | null): { label: string; color: string } {
-  if (record || leg.post_simulated_close_time || leg.post_real_close_time || leg.post_outcome) return { label: '已平仓', color: '#0ECB81' };
-  if (leg.leg_role === 'mirror_tp' || leg.leg_role?.startsWith('hedge_')) return { label: '挂单中', color: '#D89B00' };
-  return { label: '进行中', color: '#848E9C' };
+/** closed 是常态：状态不占一列，导出图同样只在未平仓时才写它（与页面同源）。 */
+function statusForLeg(
+  leg: TradeJournal,
+  record: TradeRecord | null,
+): { label: string; color: string; closed: boolean } {
+  if (record || leg.post_simulated_close_time || leg.post_real_close_time || leg.post_outcome) {
+    return { label: '已平仓', color: '#0ECB81', closed: true };
+  }
+  if (leg.leg_role === 'mirror_tp' || leg.leg_role?.startsWith('hedge_')) {
+    return { label: '挂单中', color: '#D89B00', closed: false };
+  }
+  return { label: '进行中', color: '#848E9C', closed: false };
 }
 
 function statusForReverseOrder(order: CampaignReverseHedgeOrder): string {
@@ -302,46 +309,14 @@ export function buildCampaignLegsExportRows(input: ExportInput): CampaignLegsExp
       [
         { text: roleLabel, bold: true },
         ...(leg.source === 'retroactive_from_record' ? [{ text: '回填', color: '#848E9C' }] : []),
+        ...(status.closed ? [] : [{ text: status.label, color: status.color }]),
       ],
-      [{ text: status.label, color: status.color, bold: true }],
       [
         { text: `开 ${openLabel}` },
         { text: `平 ${closeLabel}` },
         { text: `操作 ${operationLabel}` },
         ...(hedgeSummary ? [{ text: hedgeSummary, color: '#D89B00' }] : []),
       ],
-      [{ text: fmtPrice(entryPriceValue) }],
-      exitPriceLines,
-      // 与页面同源：名义在上、按开仓价折算的币量在下，导出图不另起一套读数
-      (() => {
-        const notionalText = leg.pre_position_size != null ? leg.pre_position_size.toFixed(2) : '—';
-        const coinQty = leg.pre_position_size != null && entryPriceValue != null && entryPriceValue > 0
-          ? leg.pre_position_size / entryPriceValue
-          : null;
-        return coinQty == null
-          ? [{ text: notionalText }]
-          : [
-            { text: notionalText },
-            { text: coinQty.toLocaleString('en-US', { maximumFractionDigits: 2 }), color: '#848E9C' },
-          ];
-      })(),
-      // 手续费：与页面同源，同样刻意做淡——合计在上、开/平拆分在下，明细在页面的 tooltip 里。
-      (() => {
-        const fees = execution.record ? tradeRecordFees(execution.record) : null;
-        if (!fees) return [{ text: '—', color: '#A3ABB8' }];
-        return [
-          {
-            text: `${fees.totalUsd == null ? '—' : fees.totalUsd.toFixed(2)}${fees.estimated ? ' 估' : ''}`,
-            color: '#5F6B7A',
-            size: 11,
-          },
-          {
-            text: `开 ${fees.open ? fees.open.usd.toFixed(2) : '—'} · 平 ${fees.close.usd.toFixed(2)}`,
-            color: '#9AA4B2',
-            size: 10,
-          },
-        ];
-      })(),
       (() => {
         // 与页面上的 Legs 列表同源，避免导出图与界面读数打架
         const entry = legPnlMap.get(leg.id);
@@ -377,6 +352,36 @@ export function buildCampaignLegsExportRows(input: ExportInput): CampaignLegsExp
           size: 16,
         }];
       })(),
+      [{ text: fmtPrice(entryPriceValue) }],
+      exitPriceLines,
+      // 与页面同源：币量在上、名义在下——加仓公式里的 X 是币量，名义只是它乘开仓价的结果
+      (() => {
+        const notionalText = leg.pre_position_size != null ? leg.pre_position_size.toFixed(2) : '—';
+        const coinQty = leg.pre_position_size != null && entryPriceValue != null && entryPriceValue > 0
+          ? leg.pre_position_size / entryPriceValue
+          : null;
+        return [
+          { text: coinQty == null ? '—' : coinQty.toLocaleString('en-US', { maximumFractionDigits: 2 }) },
+          { text: notionalText, color: '#848E9C' },
+        ];
+      })(),
+      // 手续费：与页面同源，同样刻意做淡——合计在上、开/平拆分在下，明细在页面的 tooltip 里。
+      (() => {
+        const fees = execution.record ? tradeRecordFees(execution.record) : null;
+        if (!fees) return [{ text: '—', color: '#A3ABB8' }];
+        return [
+          {
+            text: `${fees.totalUsd == null ? '—' : fees.totalUsd.toFixed(2)}${fees.estimated ? ' 估' : ''}`,
+            color: '#5F6B7A',
+            size: 11,
+          },
+          {
+            text: `开 ${fees.open ? fees.open.usd.toFixed(2) : '—'} · 平 ${fees.close.usd.toFixed(2)}`,
+            color: '#9AA4B2',
+            size: 10,
+          },
+        ];
+      })(),
       reverseLines,
     ];
     const maxLines = Math.max(...cells.map(cell => cell.length));
@@ -408,12 +413,7 @@ export function buildCampaignLegsExportRows(input: ExportInput): CampaignLegsExp
         cells: [
           [{ text: '' }],
           [{ text: `阶段 ${phase.index}${phase.boundaryLegId == null ? ' · 收尾' : ''}`, color: '#848E9C' }],
-          [{ text: '' }],
           [{ text: `${fmtClock(phase.startTime)} → ${fmtClock(phase.endTime)}`, color: '#848E9C' }],
-          [{ text: fmtPrice(phase.startPrice), color: '#848E9C' }],
-          [{ text: fmtPrice(phase.endPrice), color: '#848E9C' }],
-          [{ text: '' }],
-          [{ text: '' }],
           [
             {
               text: contribution == null ? '—' : `${contribution > 0 ? '+' : ''}${(contribution * 100).toFixed(1)}%`,
@@ -428,6 +428,10 @@ export function buildCampaignLegsExportRows(input: ExportInput): CampaignLegsExp
             text: delta == null ? '—' : `${delta > 0 ? '+' : ''}${delta.toFixed(2)}`,
             color: delta == null || delta === 0 ? '#5F6B7A' : delta > 0 ? '#0ECB81' : '#F6465D',
           }],
+          [{ text: fmtPrice(phase.startPrice), color: '#848E9C' }],
+          [{ text: fmtPrice(phase.endPrice), color: '#848E9C' }],
+          [{ text: '' }],
+          [{ text: '' }],
           [{ text: '' }],
         ],
         height: Math.max(44, ROW_PAD_Y * 2 + 2 * LINE_H),

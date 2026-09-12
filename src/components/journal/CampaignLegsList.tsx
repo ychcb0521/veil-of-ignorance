@@ -39,11 +39,16 @@ function settlementBasisLabel(basis: string): string {
   return '未结算';
 }
 
+/** closed 是常态：状态不再占一列，只有**不是**已平仓时才在角色旁标一枚小标签。 */
 function statusForLeg(leg: TradeJournal, record: TradeRecord | null) {
-  if (record) return { label: '已平仓', className: 'text-[#0ECB81]' };
-  if (leg.post_simulated_close_time || leg.post_real_close_time || leg.post_outcome) return { label: '已平仓', className: 'text-[#0ECB81]' };
-  if (leg.leg_role === 'mirror_tp' || leg.leg_role?.startsWith('hedge_')) return { label: '挂单中', className: 'text-[#F0B90B]' };
-  return { label: '进行中', className: 'text-muted-foreground' };
+  if (record) return { label: '已平仓', className: 'text-[#0ECB81]', closed: true };
+  if (leg.post_simulated_close_time || leg.post_real_close_time || leg.post_outcome) {
+    return { label: '已平仓', className: 'text-[#0ECB81]', closed: true };
+  }
+  if (leg.leg_role === 'mirror_tp' || leg.leg_role?.startsWith('hedge_')) {
+    return { label: '挂单中', className: 'text-[#F0B90B]', closed: false };
+  }
+  return { label: '进行中', className: 'text-muted-foreground', closed: false };
 }
 
 function fmtClock(value: number | string | null | undefined): string {
@@ -85,8 +90,9 @@ function fmtPrice(value: number | null | undefined): string {
  * 让它吃掉所有富余宽度，富余就会变成表格中段一片空洞，而右侧的委托卡片反倒挤到发虚。
  * 委托是唯一"越宽越有用"的列，多出来的宽度停在它和操作列之间，视觉上是留白而不是裂口。
  *
- * 列序：分类信息（# / 角色 / 状态）聚在左边，数值列（开仓价 → Δb）连成不被打断的一段，
- * 右端是委托与操作。状态原本卡在仓位和手续费之间，把数值读数劈成两截。
+ * 列序按**阅读价值**排，不按录入顺序排：贡献 / 盈亏与 Δb 紧跟在时间之后，落在从左往右
+ * 扫视最先停留的那一段；开平价、币量、手续费这些"怎么来的"排在后面；委托与操作收在右端。
+ * 「状态」不单独占一列——已平仓是绝大多数，只在**没有**平仓时才在角色旁标一枚小标签。
 
  *
  * 这里曾经把表头和行各写一份，加列时只改了表头，行少一列，
@@ -120,13 +126,16 @@ function formatDeltaB(delta: number | null): string {
   return `${value > 0 ? '+' : ''}${value.toFixed(2)}`;
 }
 
+/** 时间列里「开 / 平 / 操作」三个标签的定宽，保证三行时间戳起点对齐。 */
+const TIME_LABEL = 'inline-block w-[30px] text-muted-foreground';
+
 /** 手续费列表头的说明：币安的算式、费率档与「盈亏列为什么已经扣了平仓费」。 */
 const FEE_COLUMN_HINT = '币安口径：手续费 = 名义 × 费率，开仓、平仓各收一次；市价单 / 触发单 Taker 0.05%，盘口限价单 Maker 0.02%（U 本位名义 = 数量 × 成交价；币本位 = 张数 × 面值 ÷ 成交价，以币计）。盈亏列已扣平仓费；开仓费在开仓当时从钱包扣除。旧记录未存开仓费，按当时 0.04% Taker 估算并标明。';
 
-const LEGS_GRID = 'grid-cols-[36px_112px_68px_196px_92px_92px_118px_112px_124px_84px_minmax(244px,1fr)_92px]';
+const LEGS_GRID = 'grid-cols-[36px_128px_180px_116px_84px_88px_88px_116px_104px_minmax(224px,1fr)_84px]';
 
 /** 各列合计的下限，与 LEGS_GRID 对应；不足时容器横向滚动而不是压扁列。 */
-const LEGS_MIN_WIDTH = 'min-w-[1504px]';
+const LEGS_MIN_WIDTH = 'min-w-[1372px]';
 
 export function CampaignLegsList({
   legs,
@@ -239,14 +248,13 @@ export function CampaignLegsList({
           <div className={`grid ${LEGS_GRID} gap-x-2.5 text-[10px] font-medium text-muted-foreground bg-muted/40 py-2 px-3`}>
             <div>#</div>
             <div>角色</div>
-            <div>状态</div>
             <div>时间</div>
-            <div className="text-right">开仓价</div>
-            <div className="text-right">平仓价</div>
-            <div className="text-right" title="上行：名义仓位（USD）；下行：按开仓价折算的币量，即加仓公式里的 X">仓位 / 币量</div>
-            <div className="text-right text-muted-foreground/60" title={FEE_COLUMN_HINT}>手续费</div>
             <div className="text-right text-foreground/70" title="上行：该腿在本场各腿盈亏绝对值之和里所占的份额；下行：已实现盈亏金额（已扣平仓费，开仓费在开仓当时从钱包扣除，见手续费列）">贡献 / 盈亏</div>
             <div className="text-right font-semibold tracking-wide text-foreground/85" title="该腿盈亏 ÷ 初始最大预期亏损 L：这条腿把整场 b 推高 / 拉低了多少">Δb</div>
+            <div className="text-right">开仓价</div>
+            <div className="text-right">平仓价</div>
+            <div className="text-right" title="上行：按开仓价折算的币量，即加仓公式里的 X；下行：名义仓位（USD）">币量 / 仓位</div>
+            <div className="text-right text-muted-foreground/60" title={FEE_COLUMN_HINT}>手续费</div>
             <div>委托</div>
             <div className="text-right">操作</div>
           </div>
@@ -290,68 +298,37 @@ export function CampaignLegsList({
                   }`}
                 >
                   <div>{leg.leg_sequence ?? '—'}</div>
-                  <div className="flex items-center gap-1.5">
+                  {/* 角色名长短不一（主力开仓 / 加仓1 / ReH），标签靠左排就会参差；
+                      推到列的右缘，各行的「回填」便落在同一条竖线上。 */}
+                  <div className="flex items-center justify-between gap-1.5">
                     {leg.leg_role
                       ? <LegRoleChip role={leg.leg_role} ordinal={mainLegOrdinals.get(leg.id) ?? null} />
                       : '—'}
-                    {leg.source === 'retroactive_from_record' && (
-                      <span className="inline-flex items-center rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
-                        回填
-                      </span>
-                    )}
+                    {/* 「回填」排在最右：它几乎每行都有，放在右缘各行才落在同一条竖线上；
+                        「挂单中 / 进行中」是少数行才出现的例外，插在它左边。 */}
+                    <div className="flex shrink-0 items-center gap-1">
+                      {!status.closed && (
+                        <span className={`inline-flex items-center rounded bg-muted px-1.5 py-0.5 text-[10px] ${status.className}`}>
+                          {status.label}
+                        </span>
+                      )}
+                      {leg.source === 'retroactive_from_record' && (
+                        <span className="inline-flex items-center rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
+                          回填
+                        </span>
+                      )}
+                    </div>
                   </div>
-                  <div className={status.className}>{status.label}</div>
+                  {/* 标签定宽（按最长的「操作」定），三行时间戳才会起于同一条竖线：
+                      一个字的「开」与两个字的「操作」若各自占位，日期就会落在两个位置上。
+                      定宽写在 span 上而不是拆成两栏，文本本身仍是「开 2025-09-19 21:49」，
+                      复制出去、读屏念出来都还是一句完整的话。 */}
                   <div className="leading-tight">
-                    <div><span className="text-muted-foreground">开 </span>{openLabel}</div>
-                    <div><span className="text-muted-foreground">平 </span>{closeLabel}</div>
-                    <div><span className="text-muted-foreground">操作 </span>{operationLabel}</div>
+                    <div><span className={TIME_LABEL}>开 </span>{openLabel}</div>
+                    <div><span className={TIME_LABEL}>平 </span>{closeLabel}</div>
+                    <div><span className={TIME_LABEL}>操作 </span>{operationLabel}</div>
                     {hedgeSummary && <div className="text-[10px] text-[#F0B90B]">{hedgeSummary}</div>}
                   </div>
-                  <div className="text-right tabular-nums">{fmtPrice(entryPriceValue)}</div>
-                  <div className="text-right tabular-nums" title={exitCorrectionTitle}>
-                    {fmtPrice(exitPriceValue)}
-                    {liquidationAnomaly && (
-                      <div data-testid="leg-liquidation-anomaly" className="text-[10px] text-[#F6465D]">强平异常</div>
-                    )}
-                  </div>
-                  {/* 仓位是名义 USD；下面补按开仓价折算的币量——它就是加仓公式里的 X。
-                      反向合约的面值锁在 USD 上，光看名义看不出这条腿拿着多少币。 */}
-                  <div className="text-right tabular-nums leading-tight">
-                    <div>{leg.pre_position_size != null ? leg.pre_position_size.toFixed(2) : '—'}</div>
-                    {legCoinQty != null && (
-                      <div
-                        className="text-[10px] text-muted-foreground"
-                        title={`按开仓价折算的币量：${leg.pre_position_size?.toFixed(2)} ÷ ${fmtPrice(entryPriceValue)} = ${legCoinQty.toLocaleString('en-US', { maximumFractionDigits: 2 })}`}
-                      >
-                        {legCoinQty.toLocaleString('en-US', { maximumFractionDigits: 2 })}
-                      </div>
-                    )}
-                  </div>
-                  {(() => {
-                    /**
-                     * 三列的主次由**字号与字重**定，不靠发灰：
-                     *   Δb 14px 半粗 + 淡色底（主角）→ 盈亏 12px 中粗（次角）→ 手续费 11px 常规（注脚）。
-                     * 手续费用中性前景色而不是灰调，密排小字下灰调会显脏。
-                     * 费率、Maker/Taker、估算依据都在 tooltip 里。
-                     */
-                    const fees = execution.record ? tradeRecordFees(execution.record) : null;
-                    if (!fees) return <div className="text-right text-[11px] text-foreground/30">—</div>;
-                    return (
-                      <div
-                        data-testid={`leg-fees-${leg.id}`}
-                        title={describeTradeRecordFees(execution.record!)}
-                        className="text-right text-[11px] leading-snug tabular-nums text-foreground/55"
-                      >
-                        <div>
-                          {fees.totalUsd == null ? '—' : fees.totalUsd.toFixed(2)}
-                          {fees.estimated && <span className="ml-1 text-[8px] tracking-wide text-foreground/30">估</span>}
-                        </div>
-                        <div className="overflow-hidden text-ellipsis whitespace-nowrap text-[9px] text-foreground/35">
-                          开 {fees.open ? fees.open.usd.toFixed(2) : '—'} · 平 {fees.close.usd.toFixed(2)}
-                        </div>
-                      </div>
-                    );
-                  })()}
                   {(() => {
                     const entry = legPnlMap.get(leg.id);
                     const pnl = entry?.pnl ?? null;
@@ -399,9 +376,54 @@ export function CampaignLegsList({
                       </div>
                     );
                   })()}
+                  <div className="text-right tabular-nums">{fmtPrice(entryPriceValue)}</div>
+                  <div className="text-right tabular-nums" title={exitCorrectionTitle}>
+                    {fmtPrice(exitPriceValue)}
+                    {liquidationAnomaly && (
+                      <div data-testid="leg-liquidation-anomaly" className="text-[10px] text-[#F6465D]">强平异常</div>
+                    )}
+                  </div>
+                  {/* 币量在上、名义在下：加仓公式里的 X 是币量，名义只是它乘开仓价的结果。
+                      反向合约的面值锁在 USD 上，光看名义看不出这条腿到底拿着多少币。 */}
+                  <div
+                    className="text-right tabular-nums leading-snug"
+                    title={legCoinQty != null
+                      ? `币量 = 名义 ÷ 开仓价 = ${leg.pre_position_size?.toFixed(2)} ÷ ${fmtPrice(entryPriceValue)}`
+                      : '缺开仓价时不猜币量'}
+                  >
+                    <div>{legCoinQty != null ? legCoinQty.toLocaleString('en-US', { maximumFractionDigits: 2 }) : '—'}</div>
+                    <div className="text-[10px] text-muted-foreground">
+                      {leg.pre_position_size != null ? leg.pre_position_size.toFixed(2) : '—'}
+                    </div>
+                  </div>
+                  {(() => {
+                    /**
+                     * 三列的主次由**字号与字重**定，不靠发灰：
+                     *   Δb 14px 半粗 + 淡色底（主角）→ 盈亏 12px 中粗（次角）→ 手续费 11px 常规（注脚）。
+                     * 手续费用中性前景色而不是灰调，密排小字下灰调会显脏。
+                     * 费率、Maker/Taker、估算依据都在 tooltip 里。
+                     */
+                    const fees = execution.record ? tradeRecordFees(execution.record) : null;
+                    if (!fees) return <div className="text-right text-[11px] text-foreground/30">—</div>;
+                    return (
+                      <div
+                        data-testid={`leg-fees-${leg.id}`}
+                        title={describeTradeRecordFees(execution.record!)}
+                        className="text-right text-[11px] leading-snug tabular-nums text-foreground/55"
+                      >
+                        <div>
+                          {fees.totalUsd == null ? '—' : fees.totalUsd.toFixed(2)}
+                          {fees.estimated && <span className="ml-1 text-[8px] tracking-wide text-foreground/30">估</span>}
+                        </div>
+                        <div className="overflow-hidden text-ellipsis whitespace-nowrap text-[9px] text-foreground/35">
+                          开 {fees.open ? fees.open.usd.toFixed(2) : '—'} · 平 {fees.close.usd.toFixed(2)}
+                        </div>
+                      </div>
+                    );
+                  })()}
                   {/* 委托列：多条卡片会把行撑得很高。限高 + 内部滚动，
                       让各行高度趋于一致，同时一条委托都不丢。 */}
-                  <div className="max-h-[132px] max-w-[320px] space-y-1 overflow-y-auto pr-1 font-sans">
+                  <div className="max-h-[152px] max-w-[300px] space-y-1 overflow-y-auto pr-1 font-sans">
                     {mirrorTpTiming && (
                       <div
                         className="rounded border border-[#F0B90B]/25 bg-[#F0B90B]/5 px-2 py-1 leading-tight"
@@ -520,17 +542,12 @@ export function CampaignLegsList({
                             阶段 {phase.index}
                             {phase.boundaryLegId == null && <span className="text-muted-foreground/60"> · 收尾</span>}
                           </div>
-                          <div />
-                          <div className="tabular-nums">
-                            {fmtClock(phase.startTime)} → {fmtClock(phase.endTime)}
+                          <div className="tabular-nums" title={`${fmtClock(phase.startTime)} → ${fmtClock(phase.endTime)}`}>
+                            {fmtCardTime(phase.startTime)} → {fmtCardTime(phase.endTime, phase.startTime)}
                             {phase.boundaryLegId != null && (
                               <span className="ml-1 font-sans text-[9px] text-[#6D28D9]/80">对冲结束切段</span>
                             )}
                           </div>
-                          <div className="text-right tabular-nums">{fmtPrice(phase.startPrice)}</div>
-                          <div className="text-right tabular-nums">{fmtPrice(phase.endPrice)}</div>
-                          <div />
-                          <div />
                           <div className="text-right leading-tight">
                             <div className={`tabular-nums ${phase.pnl === 0 ? '' : positive ? 'text-[#0ECB81]/90' : 'text-[#F6465D]/90'}`}>
                               {phaseContribution == null ? '—' : `${phaseContribution > 0 ? '+' : ''}${(phaseContribution * 100).toFixed(1)}%`}
@@ -542,6 +559,10 @@ export function CampaignLegsList({
                           <div className={`text-right tabular-nums ${phaseDelta == null ? '' : phaseDelta > 0 ? 'text-[#0ECB81]/90' : phaseDelta < 0 ? 'text-[#F6465D]/90' : ''}`}>
                             {phaseDelta == null ? '—' : `${phaseDelta > 0 ? '+' : ''}${phaseDelta.toFixed(2)}`}
                           </div>
+                          <div className="text-right tabular-nums">{fmtPrice(phase.startPrice)}</div>
+                          <div className="text-right tabular-nums">{fmtPrice(phase.endPrice)}</div>
+                          <div />
+                          <div />
                           <div />
                           <div />
                         </div>
@@ -561,17 +582,7 @@ export function CampaignLegsList({
             >
               <div />
               <div className="text-muted-foreground">合计</div>
-              <div />
               <div className="text-[10px] text-muted-foreground">{settlementBasisLabel(settlement.basis)}</div>
-              <div /><div /><div />
-              <div
-                data-testid="legs-total-fees"
-                title="本场全部成交记录的开仓费 + 平仓费（按记录去重：同一条记录挂在几条腿上只算一次）"
-                className="text-right text-[11px] font-normal tabular-nums leading-snug text-foreground/55"
-              >
-                {feeTotals == null ? '—' : feeTotals.totalUsd.toFixed(2)}
-                {feeTotals?.estimated && <span className="ml-1 text-[8px] tracking-wide text-foreground/30">估</span>}
-              </div>
               <div className={`text-right text-[12px] font-medium tabular-nums ${totalPnl == null ? 'text-foreground/50' : totalPnl > 0 ? 'text-[#0ECB81]/90' : totalPnl < 0 ? 'text-[#F6465D]/90' : ''}`}>
                 {totalPnl == null ? '—' : `${totalPnl > 0 ? '+' : ''}${totalPnl.toFixed(2)}`}
               </div>
@@ -582,6 +593,15 @@ export function CampaignLegsList({
                 >
                   {formatDeltaB(totalDeltaB)}
                 </span>
+              </div>
+              <div /><div /><div />
+              <div
+                data-testid="legs-total-fees"
+                title="本场全部成交记录的开仓费 + 平仓费（按记录去重：同一条记录挂在几条腿上只算一次）"
+                className="text-right text-[11px] font-normal tabular-nums leading-snug text-foreground/55"
+              >
+                {feeTotals == null ? '—' : feeTotals.totalUsd.toFixed(2)}
+                {feeTotals?.estimated && <span className="ml-1 text-[8px] tracking-wide text-foreground/30">估</span>}
               </div>
               <div /><div />
             </div>

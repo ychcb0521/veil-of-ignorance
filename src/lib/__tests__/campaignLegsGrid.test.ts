@@ -28,15 +28,27 @@ describe('Legs 表栅格', () => {
     const grid = /grid-cols-\[([^\]]+)\]/.exec(s)?.[1] ?? '';
     // 用下划线分隔，但 minmax(200px,1fr) 内部没有下划线，可安全按 _ 切
     const columnCount = grid.split('_').length;
-    expect(columnCount).toBe(12);
-    for (const title of ['#', '角色', '状态', '时间', '开仓价', '平仓价', '仓位 / 币量', '手续费', '贡献 / 盈亏', 'Δb', '委托', '操作']) {
+    expect(columnCount).toBe(11);
+    for (const title of ['#', '角色', '时间', '贡献 / 盈亏', 'Δb', '开仓价', '平仓价', '币量 / 仓位', '手续费', '委托', '操作']) {
       expect(s).toContain(`>${title}</div>`);
     }
   });
 
-  it('手续费列排在盈亏列之前——它是成本注脚，不该抢主列的位置', () => {
+  it('贡献 / 盈亏与 Δb 紧跟时间——扫视最先停留的那一段留给要读的结论', () => {
     const s = src();
-    expect(s.indexOf('>手续费</div>')).toBeLessThan(s.indexOf('>贡献 / 盈亏</div>'));
+    const at = (title: string) => s.indexOf(`>${title}</div>`);
+    expect(at('时间')).toBeLessThan(at('贡献 / 盈亏'));
+    expect(at('贡献 / 盈亏')).toBeLessThan(at('Δb'));
+    expect(at('Δb')).toBeLessThan(at('开仓价'));       // 结论在前，"怎么来的"在后
+    expect(at('手续费')).toBeLessThan(at('委托'));
+    expect(s).not.toContain('>状态</div>');             // 状态并进角色格，不单独占一列
+  });
+
+  it('回填标签靠右对齐、时间标签定宽——角色名与标签长短不一时才不会参差', () => {
+    const s = src();
+    expect(s).toContain('flex items-center justify-between gap-1.5');   // 角色格：标签推到右缘
+    expect(s).toContain("const TIME_LABEL = 'inline-block w-[30px]");   // 时间格：三行时间戳同起点
+    expect((s.match(/\{TIME_LABEL\}/g) ?? []).length).toBe(3);          // 开 / 平 / 操作 共用它
   });
 
   it('画出合计行——它按构造恒等于盈亏概览，是防止两套账再次分家的可视断言', () => {
@@ -59,10 +71,10 @@ describe('Legs 表栅格', () => {
   it('弹性列是「委托」而不是「时间」——时间内容定宽，让它吃富余会在表格中段留下空洞', () => {
     const grid = /grid-cols-\[([^\]]+)\]/.exec(src())?.[1] ?? '';
     const tracks = grid.split('_');
+    expect(tracks).toHaveLength(11);
     expect(tracks.filter(track => track.includes('fr'))).toHaveLength(1);
-    expect(tracks[10]).toContain('minmax(244px,1fr)');     // 委托：唯一越宽越有用的列
-    expect(tracks[3]).toBe('196px');                        // 时间：放得下「开 2025-09-19 22:42」
-    expect(tracks[2]).toBe('68px');                         // 状态：与角色相邻，不再劈开数值列
+    expect(tracks[9]).toContain('minmax(224px,1fr)');      // 委托：唯一越宽越有用的列
+    expect(tracks[2]).toBe('180px');                        // 时间：放得下「开 2025-09-19 22:42」
   });
 
   it('操作列是图标按钮，中文标签进 title 而不是渲染成文字', () => {

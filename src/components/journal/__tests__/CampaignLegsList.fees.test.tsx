@@ -69,8 +69,11 @@ describe('Legs 列表的手续费列', () => {
     const fees = screen.getByTestId('leg-fees-leg-1');
     const pnl = screen.getByTestId('leg-pnl-leg-1');
     const delta = screen.getByTestId('leg-delta-b-leg-1');
-    // DOM 顺序 = 栅格列序：手续费在盈亏之前
-    expect(fees.compareDocumentPosition(pnl) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // DOM 顺序 = 栅格列序：结论（贡献 / Δb）在前，成本注脚在后
+    expect(pnl.compareDocumentPosition(delta) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(delta.compareDocumentPosition(fees) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // 状态不再单独占一列：已平仓是常态，不必每行都写一遍
+    expect(screen.queryByText('已平仓')).toBeNull();
     // 主次由字号与字重定，不靠发灰
     expect(delta.className).toContain('text-[14px]');
     expect(delta.className).toContain('font-semibold');

@@ -79,9 +79,9 @@ function input(): CampaignBoardExportInput {
 }
 
 /** 「委托」列在 COLUMNS 里的下标。插新列时只需改这里，不必逐处改数字。 */
-const ORDER_COL = 10;
-/** 「手续费」列在 COLUMNS 里的下标（排在「盈亏 / 贡献」之前）。 */
-const FEE_COL = 7;
+const ORDER_COL = 9;
+/** 「手续费」列在 COLUMNS 里的下标。 */
+const FEE_COL = 8;
 
 describe('campaign PNG overview', () => {
   it('完整包含战役原数据和盈亏概览字段', () => {
@@ -172,8 +172,10 @@ describe('campaign PNG overview', () => {
     expect(rows).toHaveLength(14);
     expect(rows.at(-1)?.legId).toBe('leg-14');
     expect(rows.at(-1)?.cells[0][0].text).toBe('14');
-    expect(rows.at(-1)?.cells[4][0].text).toBe('113.0000');
-    expect(rows.at(-1)?.cells[6][0].text).toBe('1013.00');
+    expect(rows.at(-1)?.cells[5][0].text).toBe('113.0000');
+    // 币量在上、名义在下：1013 ÷ 113 = 8.96
+    expect(rows.at(-1)?.cells[7][0].text).toBe('8.96');
+    expect(rows.at(-1)?.cells[7][1].text).toBe('1013.00');
     expect(campaignLegsExportCanvasHeight({
       ...input(),
       legs: manyLegs,
@@ -215,7 +217,7 @@ describe('campaign PNG overview', () => {
       },
     });
 
-    expect(rows[0].cells[5].map(line => line.text)).toEqual([
+    expect(rows[0].cells[6].map(line => line.text)).toEqual([
       '0.200000',
       '原 0.500000',
       'K线 0.180000-0.220000',
