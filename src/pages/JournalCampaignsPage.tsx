@@ -664,15 +664,20 @@ function rowMirrorTpRank(row: CampaignDisplayData): number {
  * 战役的杠杆倍数：以主力开仓那一刻记下的初始杠杆为准。
  * 老战役没记这个字段时退回各腿里最大的那个——持仓期内提过杠杆的，按它真正承担过的风险排。
  */
-function campaignLeverage(row: CampaignDisplayData): number {
-  const initial = Number(row.campaign.initial_leverage);
+function campaignLeverage(campaign: TradeCampaign, legs: TradeJournal[]): number {
+  const initial = Number(campaign.initial_leverage);
   if (Number.isFinite(initial) && initial > 0) return initial;
   let max = 0;
-  for (const leg of row.legs) {
+  for (const leg of legs) {
     const value = Number(leg.leverage);
     if (Number.isFinite(value) && value > max) max = value;
   }
   return max;
+}
+
+/** 10 → 「10x」；7.5 → 「7.5x」。 */
+function formatLeverage(value: number): string {
+  return `${Number.isInteger(value) ? value : Number(value.toFixed(1))}x`;
 }
 
 function sortCampaignRows(rows: CampaignDisplayData[], sort: CampaignSortState): CampaignDisplayData[] {
@@ -701,7 +706,7 @@ function sortCampaignRows(rows: CampaignDisplayData[], sort: CampaignSortState):
       return row.usiContributionPct != null && Number.isFinite(row.usiContributionPct);
     }
     if (sort.mode === 'leverage') {
-      return campaignLeverage(row) > 0;
+      return campaignLeverage(row.campaign, row.legs) > 0;
     }
     return true;
   });
@@ -811,7 +816,11 @@ function sortCampaignRows(rows: CampaignDisplayData[], sort: CampaignSortState):
         || alphaAsc;
     }
     if (sort.mode === 'leverage') {
-      return compareNumber(campaignLeverage(a), campaignLeverage(b), sort.direction)
+      return compareNumber(
+        campaignLeverage(a.campaign, a.legs),
+        campaignLeverage(b.campaign, b.legs),
+        sort.direction,
+      )
         || importanceDesc
         || timeDesc
         || alphaAsc;
@@ -2634,6 +2643,7 @@ export default function JournalCampaignsPage() {
             arithmeticExpectancy,
             geometricExpectancy,
           }) => {
+            const cardLeverage = campaignLeverage(campaign, legs);
             const importance = importanceValue(campaign);
             const isOwnCampaign = campaign.user_id === user?.id;
             const operationTime = campaignOperationTime(legs, tradeRecords);
@@ -2697,6 +2707,18 @@ export default function JournalCampaignsPage() {
                         {campaign.direction === 'main_short' ? '主空' : '主多'}
                       </span>
                       <span className="rounded bg-muted px-1.5 py-0.5 text-[9px] font-medium text-muted-foreground">{campaign.symbol}</span>
+                      {/* 杠杆紧跟标的，与交易所的写法一致；取值与「杠杆倍数」排序同一个口径。 */}
+                      {cardLeverage > 0 && (
+                        <span
+                          data-testid="campaign-leverage"
+                          title={Number(campaign.initial_leverage) > 0
+                            ? '杠杆倍数：主力开仓那一刻记录的初始杠杆'
+                            : '杠杆倍数：这场战役没记初始杠杆，取各腿里最大的一档'}
+                          className="inline-flex items-center rounded border border-border/70 bg-background/45 px-1.5 py-0.5 font-mono text-[9px] tabular-nums text-muted-foreground/80"
+                        >
+                          {formatLeverage(cardLeverage)}
+                        </span>
+                      )}
                       <span className="text-[9px] text-muted-foreground/75">{STRATEGY_TEMPLATES[campaign.strategy_template].name}</span>
                       <span
                         className="inline-flex rounded border border-border/70 bg-background/45 px-1.5 py-0.5 font-mono text-[8px] text-muted-foreground/65"

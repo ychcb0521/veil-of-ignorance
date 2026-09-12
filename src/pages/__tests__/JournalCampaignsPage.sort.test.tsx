@@ -321,6 +321,26 @@ describe('JournalCampaignsPage sorting', () => {
     fireEvent.click(screen.getByTestId('campaign-sort-leverage'));
     await waitFor(() => expect(cardOrder()).toEqual(['High Importance', 'Best PnL', 'Newest Operation']));
     expect(screen.getByTestId('campaign-sort-leverage')).toHaveAttribute('data-sort-direction', 'asc');
+    // 封面上就能核对排序：每张卡片自己写着杠杆
+    expect(screen.getAllByTestId('campaign-leverage').map(node => node.textContent))
+      .toEqual(['3x', '10x', '20x']);
+  }, 15_000);
+
+  it('【用户要求】战役封面显示杠杆倍数；没有记录杠杆的战役不显示这枚标签', async () => {
+    render(
+      <MemoryRouter initialEntries={['/journal/campaigns']}>
+        <JournalCampaignsPage />
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => expect(screen.getAllByTestId('campaign-card')).toHaveLength(4));
+    // 默认按操作时间排：四张卡片里三张有杠杆，Late Close 没记、各腿也没有
+    expect(screen.getAllByTestId('campaign-leverage')).toHaveLength(3);
+    const card = screen.getAllByTestId('campaign-card')
+      .find(node => node.textContent?.includes('Newest Operation'))!;
+    expect(card.querySelector('[data-testid="campaign-leverage"]')?.textContent).toBe('20x');
+    expect(card.querySelector('[data-testid="campaign-leverage"]')?.getAttribute('title'))
+      .toContain('主力开仓那一刻记录的初始杠杆');
   }, 15_000);
 
   it('removes the legacy mutual scope while preserving sort parameters and detail navigation', async () => {
