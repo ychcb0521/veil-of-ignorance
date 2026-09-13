@@ -57,6 +57,11 @@ export interface MirrorTpSummary {
   notAchievedRatePct: number | null;
   /** 达成里的盈利率 = achievedWin / achieved。achieved=0 → null。 */
   achievedWinRatePct: number | null;
+  /** 未达成里最终盈利的场数——「没触发但照样赚了」和「没触发且亏了」是两回事。 */
+  notAchievedWin: number;
+  notAchievedLoss: number;
+  /** 未达成里持平（|b| ≤ 0.1）或尚未结束的场数。 */
+  notAchievedNeutral: number;
 }
 
 /** 判定一个战役是否达成镜像止盈：存在成交的 mirror_tp 腿。 */
@@ -70,20 +75,29 @@ export function campaignAchievedMirrorTp(legs: TradeJournal[], tradeRecords: Tra
 }
 
 /**
- * 镜像止盈排序权重：实现·盈利(3) > 实现·持平 / 进行中(2) > 实现·亏损(1) > 未实现(0)。
- * 降序把「镜像止盈生效且赚钱」的战役排在最前。盈亏三分见 mirrorTpOutcome（含 ±0.1 持平带）。
+ * 镜像止盈档位：六档，是「镜像止盈有没有成交」× 「这一场最后是赚是亏」的交叉表。
+ *
+ *   未实现·亏损(0) < 未实现·持平(1) < 未实现·盈利(2) < 已实现·亏损(3) < 已实现·持平(4) < 已实现·盈利(5)
+ *
+ * 先按成交与否分成两组，组内再按盈亏排：这套动作要考核的首先是「镜像止盈到底有没有生效」，
+ * 赚亏是在那之后的事。降序因此把「镜像止盈生效且赚钱」排在最前，与原来的读法一致。
+ * 未实现那一侧也拆开，是因为「没触发但最后照样赚了」与「没触发且亏了」完全是两回事。
+ * 盈亏三分见 mirrorTpOutcome（含 ±0.1 持平带）。
  */
 export function mirrorTpRank(
   achieved: boolean,
   payoffRatio: number | null | undefined,
   realizedPnl: number | null,
 ): number {
-  if (!achieved) return 0;
   const outcome = mirrorTpOutcome(payoffRatio, realizedPnl);
-  if (outcome === 'win') return 3;
-  if (outcome === 'loss') return 1;
-  return 2; // 实现·持平 / 进行中
+  // 组内位次：亏 0 / 平（含进行中）1 / 赚 2；已实现整组抬高 3。
+  const withinGroup = outcome === 'loss' ? 0 : outcome === 'win' ? 2 : 1;
+  return (achieved ? MIRROR_TP_ACHIEVED_OFFSET : 0) + withinGroup;
 }
+
+/** 已实现那一组的档位偏移：0..2 是未实现侧，3..5 是已实现侧。 */
+export const MIRROR_TP_ACHIEVED_OFFSET = 3;
+
 
 export function summarizeMirrorTp(campaigns: MirrorTpCampaignInput[]): MirrorTpSummary {
   const total = campaigns.length;
@@ -92,6 +106,11 @@ export function summarizeMirrorTp(campaigns: MirrorTpCampaignInput[]): MirrorTpS
   const outcomes = achievedList.map(c => mirrorTpOutcome(c.payoffRatio, c.realizedPnl));
   const achievedWin = outcomes.filter(outcome => outcome === 'win').length;
   const achievedLoss = outcomes.filter(outcome => outcome === 'loss').length;
+  const missedOutcomes = campaigns
+    .filter(campaign => !campaign.achieved)
+    .map(c => mirrorTpOutcome(c.payoffRatio, c.realizedPnl));
+  const notAchievedWin = missedOutcomes.filter(outcome => outcome === 'win').length;
+  const notAchievedLoss = missedOutcomes.filter(outcome => outcome === 'loss').length;
   return {
     total,
     achieved,
@@ -102,5 +121,8 @@ export function summarizeMirrorTp(campaigns: MirrorTpCampaignInput[]): MirrorTpS
     achievedRatePct: total > 0 ? (achieved / total) * 100 : null,
     notAchievedRatePct: total > 0 ? ((total - achieved) / total) * 100 : null,
     achievedWinRatePct: achieved > 0 ? (achievedWin / achieved) * 100 : null,
+    notAchievedWin,
+    notAchievedLoss,
+    notAchievedNeutral: missedOutcomes.length - notAchievedWin - notAchievedLoss,
   };
 }

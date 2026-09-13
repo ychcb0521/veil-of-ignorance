@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  MIRROR_TP_ACHIEVED_OFFSET,
   MIRROR_TP_FLAT_BAND,
   campaignAchievedMirrorTp,
   mirrorTpOutcome,
@@ -30,29 +31,40 @@ describe('campaignAchievedMirrorTp', () => {
   });
 });
 
-describe('mirrorTpRank（排序权重）', () => {
-  it('实现·盈利 > 实现·打平/进行中 > 实现·亏损 > 未实现', () => {
-    expect(mirrorTpRank(true, 1.5, 100)).toBe(3);   // 实现·盈利
-    expect(mirrorTpRank(true, 0, 0)).toBe(2);       // 实现·打平
-    expect(mirrorTpRank(true, null, null)).toBe(2); // 实现·进行中
-    expect(mirrorTpRank(true, -0.8, -50)).toBe(1);  // 实现·亏损
-    expect(mirrorTpRank(false, 9.9, 999)).toBe(0);  // 未实现（不管盈亏）
+describe('mirrorTpRank（六档：成交与否 × 盈亏）', () => {
+  it('【用户要求】未实现也按盈亏拆开，六档升序排布', () => {
+    expect(mirrorTpRank(false, -0.8, -50)).toBe(0);   // 未实现·亏损
+    expect(mirrorTpRank(false, 0, 0)).toBe(1);        // 未实现·持平
+    expect(mirrorTpRank(false, null, null)).toBe(1);  // 未实现·进行中
+    expect(mirrorTpRank(false, 1.5, 100)).toBe(2);    // 未实现·盈利
+    expect(mirrorTpRank(true, -0.8, -50)).toBe(3);    // 已实现·亏损
+    expect(mirrorTpRank(true, 0, 0)).toBe(4);         // 已实现·持平
+    expect(mirrorTpRank(true, null, null)).toBe(4);   // 已实现·进行中
+    expect(mirrorTpRank(true, 1.5, 100)).toBe(5);     // 已实现·盈利
+  });
+
+  it('成交与否是第一层：任何已实现都排在任何未实现之上', () => {
+    const missed = [-5, 0, 5].map(b => mirrorTpRank(false, b, b * 10));
+    const achieved = [-5, 0, 5].map(b => mirrorTpRank(true, b, b * 10));
+    expect(Math.max(...missed)).toBeLessThan(Math.min(...achieved));
+    expect(MIRROR_TP_ACHIEVED_OFFSET).toBe(3);
   });
 
   it('【用户要求】b 落在 −0.1 ~ 0.1 之间算持平，两端含在带内', () => {
-    expect(mirrorTpRank(true, 0.1, 5)).toBe(2);
-    expect(mirrorTpRank(true, -0.1, -5)).toBe(2);
-    expect(mirrorTpRank(true, 0.09, 4)).toBe(2);
-    expect(mirrorTpRank(true, -0.02, -1)).toBe(2);
+    expect(mirrorTpRank(true, 0.1, 5)).toBe(4);
+    expect(mirrorTpRank(true, -0.1, -5)).toBe(4);
+    expect(mirrorTpRank(false, 0.09, 4)).toBe(1);
+    expect(mirrorTpRank(false, -0.02, -1)).toBe(1);
     // 带外仍按 b 的正负分
-    expect(mirrorTpRank(true, 0.11, 5)).toBe(3);
-    expect(mirrorTpRank(true, -0.11, -5)).toBe(1);
+    expect(mirrorTpRank(true, 0.11, 5)).toBe(5);
+    expect(mirrorTpRank(true, -0.11, -5)).toBe(3);
   });
 
   it('没有有效 b 时退回按金额符号判，且不套持平带', () => {
-    expect(mirrorTpRank(true, null, 1)).toBe(3);
-    expect(mirrorTpRank(true, undefined, -1)).toBe(1);
-    expect(mirrorTpRank(true, null, 0)).toBe(2);
+    expect(mirrorTpRank(true, null, 1)).toBe(5);
+    expect(mirrorTpRank(true, undefined, -1)).toBe(3);
+    expect(mirrorTpRank(true, null, 0)).toBe(4);
+    expect(mirrorTpRank(false, null, 1)).toBe(2);
   });
 });
 
@@ -85,6 +97,10 @@ describe('summarizeMirrorTp', () => {
     expect(s.achievedWin).toBe(1);
     expect(s.achievedLoss).toBe(1);
     expect(s.achievedNeutral).toBe(2);
+    // 【用户要求】未实现那一侧也拆开
+    expect(s.notAchievedWin).toBe(1);       // 未达成的那一场 b = 0.4，最终盈利
+    expect(s.notAchievedLoss).toBe(0);
+    expect(s.notAchievedNeutral).toBe(0);
     expect(s.achievedRatePct).toBeCloseTo(80, 10);
     expect(s.notAchievedRatePct).toBeCloseTo(20, 10);
     expect(s.achievedWinRatePct).toBeCloseTo(25, 10);

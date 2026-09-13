@@ -36,7 +36,6 @@ export type CampaignMetricColorMode =
   | 'risk'
   | 'quality'
   | 'importance'
-  | 'mirrorTp'
   /**
    * 按战役盈亏着色，口径与镜像止盈的分类完全一致（|b| ≤ 0.1 记持平）。
    * 用在镜像止盈图上：档位已经由横轴（柱状）或纵轴（时序）表达了，
@@ -63,6 +62,8 @@ type CampaignMetricScatterPlotProps = {
   points: CampaignMetricPoint[];
   metricKey: string;
   metricLabel: string;
+  /** 轴上那个量的名字；缺省用 metricLabel。分布图的 metricLabel 是图名（「几何期望分布」），轴上该写「几何期望」。 */
+  axisLabel?: string;
   seriesLabel: string;
   guide: CampaignMetricScatterGuide;
   formatValue: (value: number) => string;
@@ -226,12 +227,13 @@ function createDiscreteMetricScale(metricKey: string): CampaignMetricScale | nul
   }
 
   if (metricKey === 'mirrorTp') {
+    // 六档：未实现·亏损 / 持平 / 盈利，已实现·亏损 / 持平 / 盈利（升序 0..5）。
     const min = -0.35;
-    const max = 3.35;
+    const max = 5.35;
     return {
       min,
       max,
-      ticks: [3, 2, 1, 0].map(value => ({
+      ticks: [5, 4, 3, 2, 1, 0].map(value => ({
         value,
         top: valuePosition(value, min, max),
       })),
@@ -318,9 +320,6 @@ function median(values: number[]) {
  * 因为图例和点位共用同一份数组——两边分开写就一定会漂移。
  */
 function seriesShapeAt(index: number, mode: CampaignMetricColorMode): ScatterMarkShape {
-  if (mode === 'mirrorTp') {
-    return (['circle', 'square', 'diamond', 'ring'] as const)[index] ?? 'circle';
-  }
   // risk 模式过去所有点都是圆：绿红在 deutan 下 ΔE 只有 7.9，属于「必须配次编码」的地板band，
   // 少了形状就是硬性不合规，因此和 signed 用同一套形状。
   if (mode === 'signed' || mode === 'risk' || mode === 'pnlBand') {
@@ -354,12 +353,6 @@ function metricSeriesIndex(
   if (mode === 'downside' || mode === 'upside' || mode === 'quality' || mode === 'importance') {
     return 0;
   }
-  if (mode === 'mirrorTp') {
-    if (value >= 3) return 0;
-    if (value >= 2) return 1;
-    if (value >= 1) return 2;
-    return 3;
-  }
   if (value > 0) return 0;
   if (value < 0) return 1;
   return 2;
@@ -369,6 +362,7 @@ export function CampaignMetricScatterPlot({
   points,
   metricKey,
   metricLabel,
+  axisLabel,
   seriesLabel,
   guide,
   formatValue,
@@ -544,11 +538,11 @@ export function CampaignMetricScatterPlot({
     mode: 'linear',
     min: dist.domain.min,
     max: dist.domain.max,
-    labels: dist.domain.ticks.map(value => ({
-      at: value,
-      text: oddsFamily ? formatIntegerOddsTick(value) : formatValue(value),
-    })),
-  } : null), [dist]);
+    // 步距细于格式化精度时会连着印出两个「1.00」；重复的直接丢掉，留第一个。
+    labels: dist.domain.ticks
+      .map(value => ({ at: value, text: oddsFamily ? formatIntegerOddsTick(value) : formatValue(value) }))
+      .filter((label, index, list) => index === 0 || label.text !== list[index - 1].text),
+  } : null), [dist, oddsFamily, formatValue]);
 
   const barsXAxis = useMemo<ScatterXAxis | null>(() => (barColumns ? {
     mode: 'category',
@@ -818,7 +812,7 @@ export function CampaignMetricScatterPlot({
         </div>
       )}
       directionHint={dist
-        ? `横轴 ${oddsFamily ? '盈亏比 b（R）' : metricLabel} · 纵轴 场数 · 不按时间排列`
+        ? `横轴 ${oddsFamily ? '盈亏比 b（R）' : axisLabel ?? metricLabel} · 纵轴 场数 · 不按时间排列`
         : bars
           ? `横轴 ${metricLabel}档位 · 纵轴 场数 · 不按时间排列`
           : '早 → 晚 · 横轴每格一场战役'}

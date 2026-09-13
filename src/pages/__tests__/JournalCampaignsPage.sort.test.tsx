@@ -597,12 +597,19 @@ describe('JournalCampaignsPage sorting', () => {
     // 切换写回地址栏：从散点图点进详情再返回时，落回的是同一张图
     expect(screen.getByTestId('location-probe-search')).toHaveTextContent('chart=mirrorTpBars');
 
-    // 四个结果档位都在轴上——一场都没有的档位留空柱，「持平 0 场」本身就是结论
+    // 【用户要求】六个档位都在轴上：成交与否 × 盈亏的交叉表，一场都没有的档位留空柱。
+    // 中间那档写「持平/进行中」——卡片上未结束的战役显示「已实现·进行中」，两处不能各说各的。
     const summary = screen.getByTestId('campaign-metric-summary-mirrorTpBars');
-    for (const label of ['未实现', '亏损', '持平', '盈利']) {
+    for (const label of [
+      '未实现·亏损', '未实现·持平/进行中', '未实现·盈利',
+      '已实现·亏损', '已实现·持平/进行中', '已实现·盈利',
+    ]) {
       expect(summary.textContent).toContain(label);
     }
-    expect(screen.getByTestId('campaign-metric-bar-count-mirrorTpBars-2')).toHaveTextContent('持平 0 场');
+    // 这批战役都没有成交的镜像止盈腿，所以已实现那三档全是空柱——「0 场」本身就是结论
+    for (const rank of [3, 4, 5]) {
+      expect(screen.getByTestId(`campaign-metric-bar-count-mirrorTpBars-${rank}`)).toHaveTextContent('0 场');
+    }
 
     // 同一档的点聚在自己那根柱里（档内允许蜂群展开，避免同一点位互相盖住），
     // 档与档之间沿横轴按结果等级递增排开
@@ -629,9 +636,9 @@ describe('JournalCampaignsPage sorting', () => {
     expect(screen.queryByTestId('campaign-metric-band-count')).not.toBeInTheDocument();
     expect(screen.queryByTestId('campaign-metric-density-curve-mirrorTpBars')).not.toBeInTheDocument();
 
-    // 【用户要求】四根柱的柱脚各写自己的场数——柱高只读得出大概，精确值要就地可读。
+    // 【用户要求】每根柱的柱脚各写自己的场数——柱高只读得出大概，精确值要就地可读。
     // 而且写的必须就是这一柱真正画出来的点数，不能是另算的一份。
-    for (const value of [0, 1, 2, 3]) {
+    for (const value of [0, 1, 2, 3, 4, 5]) {
       const drawn = buttons.filter(node => Number(node.dataset.metricValue) === value).length;
       expect(screen.getByTestId(`chart-category-count-${value}`).textContent).toBe(`${drawn} 场`);
     }
@@ -647,8 +654,9 @@ describe('JournalCampaignsPage sorting', () => {
       const token = node.dataset.seriesToken ?? '';
       tokensByColumn.set(value, (tokensByColumn.get(value) ?? new Set()).add(token));
     }
-    // 这批战役都没有成交的镜像止盈腿，所以全落在「未实现」那一柱——但盈亏不同，颜色就该不同
-    expect(tokensByColumn.get(0)).toEqual(new Set(['profit', 'loss']));
+    // 未实现那一侧现在按盈亏拆成三柱：亏损柱只有红点、盈利柱只有绿点
+    expect(tokensByColumn.get(0)).toEqual(new Set(['loss']));
+    expect(tokensByColumn.get(2)).toEqual(new Set(['profit']));
     const profitPoint = buttons.find(node => node.dataset.seriesToken === 'profit')!;
     expect(profitPoint.dataset.pnlSign).toBe('positive');
     const lossPoint = buttons.find(node => node.dataset.seriesToken === 'loss')!;

@@ -85,16 +85,28 @@ export function stackLayout(points: StackLayoutPoint[], options: StackLayoutOpti
   // 因为吸附到档中心而画到墙右边。整数窗口下每 1R 切 k 档（k = 每 R 像素 ÷ 步距取整）；
   // 窄到 1R 都放不下一个步距、或窗口不是整数时，退回「按像素等分」。
   const perUnit = Number.isInteger(xMin) && Number.isInteger(span) ? Math.floor(usable / span / MIN_PITCH) : 0;
-  const binCount = perUnit >= 1 ? span * perUnit : Math.max(1, Math.floor(usable / MIN_PITCH));
-  const binPx = usable / binCount;
+  const nominalBinCount = perUnit >= 1 ? span * perUnit : Math.max(1, Math.floor(usable / MIN_PITCH));
+  const binPx = usable / nominalBinCount;
   const binWidth = (binPx / usable) * span;
   const xPx = (value: number) => left + ((value - xMin) / span) * usable;
+
+  /**
+   * 档的网格锚在 **0** 上，而不是绘图区左缘。
+   *
+   * 否则「按像素等分」那一支会让某一档横跨 0：一场 +0.2% 的盈利吸附到档中心后，
+   * 可能被画到盈亏平衡线**左边**，读者看到的是「绿点在亏损区」。整数窗口下
+   * 0 本来就是档边界，这里只是把同一条规则推广到任意窗口——对整数窗口结果不变。
+   */
+  const zeroPx = xPx(0);
+  const firstBin = Math.floor((left - zeroPx) / binPx + 1e-9);
+  const lastBin = Math.ceil((right - zeroPx) / binPx - 1e-9) - 1;
+  const binCount = Math.max(1, lastBin - firstBin + 1);
 
   // 先分档：越出显示区间的点落到最边上的一档，并记下方向，之后画成三角。
   const entries = points.map(point => {
     const clamped: ClampDirection | null = point.x < xMin ? 'left' : point.x > xMax ? 'right' : null;
     const px = clamped === 'left' ? left : clamped === 'right' ? right : xPx(point.x);
-    const bin = Math.min(binCount - 1, Math.max(0, Math.floor((px - left) / binPx)));
+    const bin = Math.min(binCount - 1, Math.max(0, Math.floor((px - zeroPx) / binPx) - firstBin));
     return { id: point.id, x: point.x, bin, clamped };
   });
 
@@ -120,7 +132,7 @@ export function stackLayout(points: StackLayoutPoint[], options: StackLayoutOpti
   const baseline = top + plotHeight;
   const cyAt = (rank: number) => baseline - (rank + 0.5) * pitchY;
   const pctAt = (cy: number) => ((cy - top) / plotHeight) * 100;
-  const cxAt = (bin: number) => left + (bin + 0.5) * binPx;
+  const cxAt = (bin: number) => zeroPx + (firstBin + bin + 0.5) * binPx;
 
   const placed: StackPlacedPoint[] = [];
   const overflowByBin = new Map<number, StackOverflow>();

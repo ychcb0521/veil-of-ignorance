@@ -190,3 +190,30 @@ describe('【用户要求】通用分布窗口（盈亏比之外的指标）', (
     expect(buildOddsDistributionModel(points, { tailThreshold: 10 }).summary.tailCount).toBe(1);
   });
 });
+
+describe('【评审发现】通用窗口的两个退化情形', () => {
+  it('全是 0（时间段里全是进行中战役）不塌成一个点', () => {
+    const domain = metricDistributionDomain([0, 0, 0, 0, 0]);
+    expect(domain.max).toBeGreaterThan(domain.min);
+    expect(domain.ticks).toContain(0);
+    expect(domain.ticks.length).toBeGreaterThanOrEqual(3);
+    expect(metricDistributionDomain([0]).max).toBeGreaterThan(metricDistributionDomain([0]).min);
+  });
+
+  it('小样本里的极端值不把窗口撑成二十几倍：p98 切不动时用 Tukey 栅栏兜底', () => {
+    // 9 场贴着 0，1 场 11.6 —— 没有兜底的话窗口会一路开到 12，其余 9 场挤进第一档
+    const values = [-0.05, -0.02, 0, 0.01, 0.03, 0.05, 0.08, 0.12, 0.2, 11.6];
+    const domain = metricDistributionDomain(values);
+    expect(domain.max).toBeLessThan(6);
+    expect(domain.max).toBeGreaterThanOrEqual(0.2);   // 主群仍在窗口内
+    expect(domain.ticks).toContain(0);
+  });
+
+  it('样本够大时仍按 p98 走，不被栅栏提前收紧', () => {
+    // 200 场贴着 0 + 一条真实右尾：右尾要看得见，这正是分布图的用途
+    const bulk = Array.from({ length: 200 }, (_, i) => -0.1 + (i % 40) * 0.01);
+    const tail = [1.2, 1.6, 2.4, 3.1, 4.5];
+    const domain = metricDistributionDomain([...bulk, ...tail]);
+    expect(domain.max).toBeGreaterThanOrEqual(0.3);
+  });
+});

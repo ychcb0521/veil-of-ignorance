@@ -259,13 +259,29 @@ function formatGroupPayoffRatio(value: number | null): string {
   return `${value > 0 ? '+' : ''}${value.toFixed(2)}R`;
 }
 
+/**
+ * 镜像止盈四档的文案。右边三档一律带「已实现」前缀：它们与「未实现」不是并列的四种结果，
+ * 而是「镜像止盈有没有成交」这一层之下、成交之后的三种收场。
+ * 只写「亏损 / 持平 / 盈利」会被读成另一个维度。
+ */
+/**
+ * 六档的轴标签。中间那一档同时收「持平（|b| ≤ 0.1）」与「尚未结束」两种战役，
+ * 标签必须把「进行中」写出来——卡片上那一场显示的是「已实现·进行中」，
+ * 图上若只写「持平」，同一场战役在同一页上就有了两个说法。
+ */
+const MIRROR_TP_RANK_LABELS = [
+  '未实现·亏损',
+  '未实现·持平/进行中',
+  '未实现·盈利',
+  '已实现·亏损',
+  '已实现·持平/进行中',
+  '已实现·盈利',
+] as const;
+
 function formatMirrorTpMetric(value: number): string {
   const rounded = Math.round(value);
   if (Math.abs(value - rounded) > 0.001) return value.toFixed(1);
-  if (rounded >= 3) return '盈利';
-  if (rounded === 2) return '持平';
-  if (rounded === 1) return '亏损';
-  return '未实现';
+  return MIRROR_TP_RANK_LABELS[Math.min(MIRROR_TP_RANK_LABELS.length - 1, Math.max(0, rounded))];
 }
 
 const CAMPAIGN_METRIC_CHART_CONFIGS: readonly CampaignMetricChartConfig[] = [
@@ -449,7 +465,7 @@ const CAMPAIGN_METRIC_CHART_CONFIGS: readonly CampaignMetricChartConfig[] = [
     viewTestId: 'campaign-mirrorTp-view-time',
     seriesLabel: '镜像止盈结果时序',
     guide: {
-      yAxis: '镜像止盈结果采用离散等级：0 = 未实现，1 = 亏损，2 = 持平，3 = 盈利；盈亏按实际盈亏比 b 判，|b| ≤ 0.1 记持平。纵向高度表示结果等级，不是连续金额差。',
+      yAxis: '镜像止盈结果采用离散等级：0–2 = 未实现·亏损 / 持平 / 盈利，3–5 = 已实现·亏损 / 持平 / 盈利；盈亏按实际盈亏比 b 判，|b| ≤ 0.1 记持平。纵向高度表示结果等级，不是连续金额差。',
       point: '点越高，镜像止盈结果等级越好；同一水平线上的点属于同一种结果，点与点的垂直距离不代表实际盈亏差额。',
       colors: [
         { token: 'profit', label: '绿色圆点：该战役最终盈利（b > 0.1）。' },
@@ -473,8 +489,9 @@ const CAMPAIGN_METRIC_CHART_CONFIGS: readonly CampaignMetricChartConfig[] = [
     guide: {
       yAxis: '纵轴是场数：同一档的战役码成一根柱，柱越高这种结果出现得越多。场数多时一行会并排放几个点，'
         + '左侧刻度已按每行点数折算，照着刻度读柱高即可；每根柱的精确场数写在柱脚下，图例右侧另有一份含合计的汇总。',
-      point: '横轴是四个结果档位（未实现 / 亏损 / 持平 / 盈利；|b| ≤ 0.1 记持平），不按时间排列。柱由点组成，每个点仍是一场战役，'
-        + '颜色报的是该场最终盈亏而不是档位——档位横轴已经说过了，颜色因此拿去回答「这一柱里有多少场真的赚到了钱」。'
+      point: '横轴是四个结果档位（未实现与已实现各分亏损 / 持平 / 盈利，共六档；|b| ≤ 0.1 记持平），不按时间排列。柱由点组成，每个点仍是一场战役，'
+        + '颜色与所在柱说的是同一件事（绿=盈利、红=亏损、灰=持平或进行中），只是为了扫一眼就能分出左右两半；'
+        + '真正的新信息在横轴上：同一种盈亏结果，镜像止盈到底有没有生效。'
         + '悬停读数值与 b、点击进入对应战役。一场都没有的档位保留空柱——某一档 0 场本身就是结论。',
       colors: [
         { token: 'profit', label: '绿色圆点：该战役最终盈利（b > 0.1）。' },
@@ -761,10 +778,10 @@ function rowPayoffRatio(row: { profitCaptureRatio: number | null }): number | nu
 
 /** 卡片上的镜像止盈状态文案；与统计、排序共用 mirrorTpOutcome，三处不会各判各的。 */
 const MIRROR_TP_STATUS_LABEL: Record<MirrorTpOutcome, string> = {
-  win: '实现·盈利',
-  loss: '实现·亏损',
-  flat: '实现·持平',
-  open: '实现·进行中',
+  win: '已实现·盈利',
+  loss: '已实现·亏损',
+  flat: '已实现·持平',
+  open: '已实现·进行中',
 };
 
 /** 每场战役的镜像止盈排序权重（成交判定 + 盈亏比 → mirrorTpRank）。 */
@@ -2190,10 +2207,11 @@ export default function JournalCampaignsPage() {
                       <>
                         <div className="font-medium text-foreground">镜像止盈排序口径</div>
                         <div className="mt-2 rounded bg-muted/60 px-2 py-1.5 font-mono text-foreground">
-                          盈利实现 ＞ 持平实现 ＞ 亏损实现 ＞ 未实现
+                          已实现·盈利 ＞ 已实现·持平 ＞ 已实现·亏损 ＞ 未实现·盈利 ＞ 未实现·持平 ＞ 未实现·亏损
                         </div>
                         <div className="mt-2 space-y-1 text-muted-foreground">
-                          <div>先判断镜像止盈委托是否真正成交，再按战役实际盈亏比 b 区分结果：|b| ≤ 0.1 记持平。</div>
+                          <div>先判断镜像止盈委托是否真正成交，再按战役实际盈亏比 b 区分结果（|b| ≤ 0.1 记持平），共六档。</div>
+                          <div>成交与否是第一层：这套动作首先要考核的是「镜像止盈到底有没有生效」，赚亏是在那之后的事。</div>
                           <div>相同结果再按客观操作时间排序。</div>
                         </div>
                       </>
@@ -2398,9 +2416,15 @@ export default function JournalCampaignsPage() {
                   <div><span className="text-muted-foreground">未实现</span><strong className="ml-1 text-foreground">{mirrorTp.notAchieved}</strong><span className="ml-1 text-muted-foreground">（{mirrorTpNotAchievedRateLabel}）</span></div>
                 </div>
                 <div className="mt-1 grid grid-cols-3 gap-1 text-center">
-                  <div><span className="text-muted-foreground">实现·盈利</span><strong className="ml-1 text-[#0ECB81]">{mirrorTp.achievedWin}</strong></div>
-                  <div><span className="text-muted-foreground">实现·亏损</span><strong className="ml-1 text-[#F6465D]">{mirrorTp.achievedLoss}</strong></div>
+                  <div><span className="text-muted-foreground">已实现·盈利</span><strong className="ml-1 text-[#0ECB81]">{mirrorTp.achievedWin}</strong></div>
+                  <div><span className="text-muted-foreground">已实现·亏损</span><strong className="ml-1 text-[#F6465D]">{mirrorTp.achievedLoss}</strong></div>
                   <div><span className="text-muted-foreground">达成盈利率</span><strong className="ml-1 text-foreground">{mirrorTpWinRateLabel}</strong></div>
+                </div>
+                {/* 未达成那一侧也拆开：「没触发但照样赚了」与「没触发且亏了」是两件事，散点图按这六档分柱。 */}
+                <div className="mt-1 grid grid-cols-3 gap-1 text-center" data-testid="campaign-mirror-tp-missed">
+                  <div><span className="text-muted-foreground">未实现·盈利</span><strong className="ml-1 text-[#0ECB81]">{mirrorTp.notAchievedWin}</strong></div>
+                  <div><span className="text-muted-foreground">未实现·亏损</span><strong className="ml-1 text-[#F6465D]">{mirrorTp.notAchievedLoss}</strong></div>
+                  <div><span className="text-muted-foreground">未实现·持平/进行中</span><strong className="ml-1 text-foreground">{mirrorTp.notAchievedNeutral}</strong></div>
                 </div>
                 {mirrorTp.achievedNeutral > 0 ? (
                   <div className="mt-1 text-center text-muted-foreground">其中 {mirrorTp.achievedNeutral} 场持平（|b| ≤ 0.1）/ 进行中，未计入盈亏。</div>
@@ -2879,6 +2903,8 @@ export default function JournalCampaignsPage() {
                   points={selectedMetricSeries.points}
                   metricKey={selectedMetricConfig.key}
                   metricLabel={selectedMetricConfig.label}
+                  // 轴上写这一族的名字（「几何期望」），而不是这张图的名字（「几何期望分布」）
+                  axisLabel={familySourceLabel}
                   seriesLabel={selectedMetricConfig.seriesLabel}
                   guide={selectedMetricConfig.guide}
                   formatValue={selectedMetricConfig.formatValue}
@@ -3145,7 +3171,7 @@ export default function JournalCampaignsPage() {
                   </div>
                   <div className="inline-flex h-7 shrink-0 items-center gap-1.5 px-3" data-testid="campaign-mirror-tp-status">
                     <span className="text-[10px] text-muted-foreground/70">镜像止盈：</span>
-                    <span className={`whitespace-nowrap font-mono text-[10px] font-medium tabular-nums ${mirrorTpStatus === '实现·盈利' ? 'text-[#0ECB81]' : mirrorTpStatus === '实现·亏损' ? 'text-[#F6465D]' : 'text-foreground/85'}`}>{mirrorTpStatus}</span>
+                    <span className={`whitespace-nowrap font-mono text-[10px] font-medium tabular-nums ${mirrorTpStatus === MIRROR_TP_STATUS_LABEL.win ? 'text-[#0ECB81]' : mirrorTpStatus === MIRROR_TP_STATUS_LABEL.loss ? 'text-[#F6465D]' : 'text-foreground/85'}`}>{mirrorTpStatus}</span>
                   </div>
                 </div>
 

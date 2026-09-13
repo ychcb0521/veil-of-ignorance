@@ -84,12 +84,31 @@ export function metricDistributionDomain(values: number[]): OddsDistributionDoma
   const sorted = [...values].filter(Number.isFinite).sort((a, b) => a - b);
   if (sorted.length === 0) return { min: -1, max: 1, ticks: [-1, 0, 1] };
 
-  const low = Math.min(0, quantile(sorted, 0.02));
-  const high = Math.max(0, quantile(sorted, 0.98));
+  const smallest = sorted[0];
+  const largest = sorted[sorted.length - 1];
+  const p2 = quantile(sorted, 0.02);
+  const p98 = quantile(sorted, 0.98);
+  /**
+   * 样本小到分位数切不动尾巴时（n ≲ 26，p98 就等于最大值），换 Tukey 栅栏兜底。
+   * 否则一场 Gᵢ = 12 会把窗口撑成二十几倍，其余几十场全挤进最左边那一档——
+   * 盈亏比那一套靠 +10R 硬封顶避开了这件事，通用窗口没有天然的封顶可用。
+   */
+  const q1 = quantile(sorted, 0.25);
+  const q3 = quantile(sorted, 0.75);
+  const iqr = q3 - q1;
+  const lowRaw = p2 > smallest || iqr <= 0 ? p2 : Math.max(p2, q1 - 3 * iqr);
+  const highRaw = p98 < largest || iqr <= 0 ? p98 : Math.min(p98, q3 + 3 * iqr);
+  const low = Math.min(0, lowRaw);
+  const high = Math.max(0, highRaw);
   // 按 6 格切而不是 5：span 略大于 5 时，/5 会把步距从 1 顶成 2，窗口白白多出一倍空白。
   const step = niceStep((high - low || 1) / 6);
-  const min = Math.floor(low / step) * step;
-  const max = Math.ceil(high / step) * step;
+  let min = Math.floor(low / step) * step;
+  let max = Math.ceil(high / step) * step;
+  // 全是 0（例如时间段筛出来的全是进行中战役）时窗口会塌成一个点：左右各放一格。
+  if (max - min < step / 2) {
+    min -= step;
+    max += step;
+  }
   const ticks: number[] = [];
   for (let value = min; value <= max + step * 1e-9; value += step) {
     ticks.push(Number(value.toFixed(6)));

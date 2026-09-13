@@ -145,6 +145,36 @@ function colPts(counts: Record<number, number>) {
     Array.from({ length: n }, (_, index) => ({ id: `c${value}-${index}`, x: Number(value) })));
 }
 
+describe('【用户要求】档边界锚在 0 上', () => {
+  // 非整数窗口（几何期望的分布图就是这种）：0 仍然必须是档边界，
+  // 否则一场 +0.2% 的盈利会被吸附到跨越 0 的那一档中心，画到盈亏平衡线左边。
+  const FRACTIONAL = { xMin: -0.5, xMax: 2.5, left: 12, right: 840, top: 12, plotHeight: 492 };
+
+  it('刚过 0 的正值画在 0 右边，刚不到 0 的负值画在 0 左边', () => {
+    const result = stackLayout(pts([0.002, 0.004, -0.002, -0.004]), FRACTIONAL);
+    const zeroPx = FRACTIONAL.left
+      + ((0 - FRACTIONAL.xMin) / (FRACTIONAL.xMax - FRACTIONAL.xMin))
+      * (FRACTIONAL.right - FRACTIONAL.left);
+    const byId = new Map(result.placed.map(item => [item.id, item.cx]));
+    expect(byId.get('p0')!).toBeGreaterThan(zeroPx);
+    expect(byId.get('p1')!).toBeGreaterThan(zeroPx);
+    expect(byId.get('p2')!).toBeLessThan(zeroPx);
+    expect(byId.get('p3')!).toBeLessThan(zeroPx);
+  });
+
+  it('正负两侧不会落进同一档', () => {
+    const result = stackLayout(pts([0.001, -0.001]), FRACTIONAL);
+    const bins = new Set(result.placed.map(item => item.bin));
+    expect(bins.size).toBe(2);
+  });
+
+  it('整数窗口的结果不变：档宽仍恰好铺满，0 依旧是边界', () => {
+    const result = stackLayout(pts([-1, -1, 0.5, 3, 3]), OPTS);
+    expect(result.binCount * result.binPx).toBeCloseTo(OPTS.right - OPTS.left, 6);
+    expect(result.binPx).toBeGreaterThanOrEqual(MIN_PITCH);
+  });
+});
+
 describe('columnStackLayout 类目柱状堆叠', () => {
   it('【用户要求】每个档位堆成一根柱：柱数 = 类目数，点位一个不丢', () => {
     const result = columnStackLayout(colPts({ 0: 101, 1: 17, 2: 0, 3: 109 }), COLUMN_OPTS);
