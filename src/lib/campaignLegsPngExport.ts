@@ -39,6 +39,8 @@ export type CampaignBoardExportInput = ExportInput & {
     note?: string;
   };
   emotionDiary?: EmotionDiaryExportSummary | null;
+  /** 页面上情绪日记折叠着时为 true：导出图跟着只画标题栏，不画日记正文与量表。 */
+  emotionDiaryCollapsed?: boolean;
 };
 
 export type CampaignBoardPnlItem = {
@@ -699,6 +701,7 @@ export type CampaignBoardOverview = {
   pnlItems: CampaignBoardPnlItem[];
   pnlNote?: string;
   emotionDiary?: EmotionDiaryExportSummary | null;
+  emotionDiaryCollapsed: boolean;
 };
 
 /** 导出图顶部两块摘要的唯一数据源，避免页面字段演进时漏掉战役原数据或盈亏信息。 */
@@ -739,6 +742,7 @@ export function buildCampaignBoardOverview(input: CampaignBoardExportInput): Cam
     pnlItems: input.pnlOverview.items,
     pnlNote: input.pnlOverview.note,
     emotionDiary: input.emotionDiary,
+    emotionDiaryCollapsed: input.emotionDiaryCollapsed === true,
   };
 }
 
@@ -826,6 +830,21 @@ function overviewPanelHeight(items: OverviewItem[], note: string | undefined, wi
   return Math.max(BOARD_OVERVIEW_MIN_H, itemsBottom + 22 + noteLineCount * 14 + 12);
 }
 
+/** 折叠态只剩一条标题栏：与页面上折叠后的卡片同高同构，导出图才是「所见即所得」。 */
+export const EMOTION_DIARY_COLLAPSED_H = 44;
+
+/**
+ * 导出图里情绪日记面板的高度。折叠时固定为标题栏高度——
+ * 页面上用户把日记收起来了，往往就是不想让它出现在要分享出去的图里。
+ */
+export function campaignEmotionDiaryPanelHeight(
+  diary: EmotionDiaryExportSummary,
+  width: number,
+  collapsed = false,
+): number {
+  return collapsed ? EMOTION_DIARY_COLLAPSED_H : emotionDiaryPanelHeight(diary, width);
+}
+
 function emotionDiaryPanelHeight(
   diary: EmotionDiaryExportSummary,
   width: number,
@@ -854,20 +873,32 @@ function emotionDiaryPanelHeight(
   return 60 + eventLineCount * 18 + 58 + (dimensionLineCount > 0 ? 25 + dimensionLineCount * 14 : 0);
 }
 
-function drawEmotionDiaryPanel(
+export function drawEmotionDiaryPanel(
   ctx: CanvasRenderingContext2D,
   diary: EmotionDiaryExportSummary,
   x: number,
   y: number,
   width: number,
   height: number,
+  collapsed = false,
 ) {
   fillRoundedRect(ctx, x, y, width, height, 10, '#FFFFFF');
   strokeRoundedRect(ctx, x, y, width, height, 10, '#E5E7EB', 1);
 
   ctx.font = '700 14px ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
   ctx.fillStyle = '#334155';
-  ctx.fillText(`操作日情绪日记 · ${diary.date}`, x + 16, y + 25, width - 32);
+  ctx.fillText(`操作日情绪日记 · ${diary.date}`, x + 16, y + 27, width - 120);
+
+  if (collapsed) {
+    // 折叠：只留标题与一个「已折叠」标记。正文、量表一个字都不画——
+    // 画了再遮住没有意义，导出的 PNG 是可以被放大、被转发的。
+    ctx.font = '500 10px ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+    ctx.fillStyle = '#94A3B8';
+    ctx.textAlign = 'right';
+    ctx.fillText('已折叠', x + width - 16, y + 27);
+    ctx.textAlign = 'left';
+    return;
+  }
 
   ctx.font = '500 10px ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
   ctx.fillStyle = '#64748B';
@@ -956,7 +987,7 @@ export async function exportCampaignBoardPng(input: CampaignBoardExportInput): P
     overviewPanelHeight(overview.pnlItems, overview.pnlNote, overviewWidth),
   );
   const emotionDiaryHeight = overview.emotionDiary
-    ? emotionDiaryPanelHeight(overview.emotionDiary, contentWidth)
+    ? campaignEmotionDiaryPanelHeight(overview.emotionDiary, contentWidth, overview.emotionDiaryCollapsed)
     : 0;
   const height = BOARD_HEADER_H
     + overviewHeight
@@ -1003,6 +1034,7 @@ export async function exportCampaignBoardPng(input: CampaignBoardExportInput): P
       y,
       contentWidth,
       emotionDiaryHeight,
+      overview.emotionDiaryCollapsed,
     );
     y += emotionDiaryHeight + BOARD_SECTION_GAP;
   }

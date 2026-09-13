@@ -1,6 +1,6 @@
 import { type ReactNode, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, Download, Eye, EyeOff, FileText, Info, Layers, Sparkles, Trash2 } from 'lucide-react';
+import { ArrowLeft, ChevronDown, Download, Eye, EyeOff, FileText, Info, Layers, Sparkles, Trash2 } from 'lucide-react';
 import { toast } from '@/lib/notificationCenter';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -572,6 +572,9 @@ async function loadAccountCampaignPerformance(
   };
 }
 
+/** 情绪日记折叠态的本机存储键（跨战役共用一个偏好）。 */
+const EMOTION_DIARY_COLLAPSED_STORAGE_KEY = 'journal:campaign-emotion-diary-collapsed';
+
 export default function JournalCampaignDetailPage() {
   const { id } = useParams<{ id: string }>();
   const nav = useNavigate();
@@ -748,6 +751,30 @@ export default function JournalCampaignDetailPage() {
       cancelled = true;
     };
   }, [campaignOperationDate, isOwner, viewerUserId]);
+  /**
+   * 情绪日记折叠与否。折叠态会一并带进 PNG 导出：用户把它收起来，
+   * 多半就是不想让这段私人记录出现在要分享的图里。
+   * 记在本机浏览器（跨战役生效）：导出前刷新一次，不该把日记又自己摊开。
+   */
+  const [emotionDiaryCollapsed, setEmotionDiaryCollapsed] = useState<boolean>(() => {
+    try {
+      return window.localStorage.getItem(EMOTION_DIARY_COLLAPSED_STORAGE_KEY) === '1';
+    } catch {
+      return false;
+    }
+  });
+  const toggleEmotionDiaryCollapsed = () => {
+    setEmotionDiaryCollapsed(current => {
+      const next = !current;
+      try {
+        if (next) window.localStorage.setItem(EMOTION_DIARY_COLLAPSED_STORAGE_KEY, '1');
+        else window.localStorage.removeItem(EMOTION_DIARY_COLLAPSED_STORAGE_KEY);
+      } catch {
+        // 存储不可用时只在本次会话里生效
+      }
+      return next;
+    });
+  };
   const tradeRecordLookup = useMemo(
     () => buildTradeRecordLookup(tradeRecords),
     [tradeRecords],
@@ -1589,6 +1616,7 @@ export default function JournalCampaignDetailPage() {
           note: campaignPnlOverviewNote,
         },
         emotionDiary: campaignEmotionDiarySummary,
+        emotionDiaryCollapsed,
       });
       toast.success('交易战役完整图片已保存为 PNG', { description: fileName });
     } catch (error) {
@@ -1740,8 +1768,23 @@ export default function JournalCampaignDetailPage() {
         </section>
 
         {isOwner && campaignOperationDate && (
-          <section className="border border-border bg-card">
-            <div className="flex flex-wrap items-center gap-3 border-b border-border px-4 py-3">
+          <section className="border border-border bg-card" data-testid="campaign-emotion-diary">
+            <div className={`flex flex-wrap items-center gap-3 px-4 py-3 ${emotionDiaryCollapsed ? '' : 'border-b border-border'}`}>
+              <button
+                type="button"
+                data-testid="campaign-emotion-diary-toggle"
+                aria-expanded={!emotionDiaryCollapsed}
+                aria-controls="campaign-emotion-diary-body"
+                aria-label={emotionDiaryCollapsed ? '展开操作日情绪日记' : '折叠操作日情绪日记'}
+                title={emotionDiaryCollapsed ? '展开（导出图片也会显示内容）' : '折叠（导出图片也只保留标题）'}
+                onClick={toggleEmotionDiaryCollapsed}
+                className="-ml-1 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+              >
+                <ChevronDown
+                  aria-hidden="true"
+                  className={`h-3.5 w-3.5 transition-transform ${emotionDiaryCollapsed ? '-rotate-90' : ''}`}
+                />
+              </button>
               <div>
                 <div className="text-[12px] font-medium">
                   操作日情绪日记
@@ -1751,6 +1794,7 @@ export default function JournalCampaignDetailPage() {
                 </div>
                 <div className="mt-0.5 text-[10px] text-muted-foreground">
                   按客观操作时间关联，不使用 K 线模拟时间
+                  {emotionDiaryCollapsed ? ' · 已折叠，导出图片同样不显示内容' : ''}
                 </div>
               </div>
               <Button
@@ -1763,10 +1807,10 @@ export default function JournalCampaignDetailPage() {
                 {campaignEmotionDiary ? '查看 / 编辑' : '去记录'}
               </Button>
             </div>
-            {campaignEmotionDiaryLoading ? (
-              <div className="px-4 py-5 text-[11px] text-muted-foreground">正在读取操作日日记…</div>
+            {emotionDiaryCollapsed ? null : campaignEmotionDiaryLoading ? (
+              <div id="campaign-emotion-diary-body" className="px-4 py-5 text-[11px] text-muted-foreground">正在读取操作日日记…</div>
             ) : campaignEmotionDiarySummary ? (
-              <div className="grid gap-4 px-4 py-4 lg:grid-cols-[minmax(0,1fr)_420px]">
+              <div id="campaign-emotion-diary-body" className="grid gap-4 px-4 py-4 lg:grid-cols-[minmax(0,1fr)_420px]">
                 <div>
                   <div className="text-[10px] text-muted-foreground">最近起波澜的事情</div>
                   <div className="mt-1 whitespace-pre-wrap text-[12px] leading-6">
@@ -1812,7 +1856,7 @@ export default function JournalCampaignDetailPage() {
                 </div>
               </div>
             ) : (
-              <div className="px-4 py-5 text-[11px] text-muted-foreground">
+              <div id="campaign-emotion-diary-body" className="px-4 py-5 text-[11px] text-muted-foreground">
                 该操作日尚未记录情绪日记。记录后会自动出现在这里及战役导出文件中。
               </div>
             )}

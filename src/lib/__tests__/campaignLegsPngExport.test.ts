@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
+  EMOTION_DIARY_COLLAPSED_H,
   buildCampaignBoardOverview,
+  campaignEmotionDiaryPanelHeight,
+  drawEmotionDiaryPanel,
   buildCampaignLegsExportRows,
   campaignLegsExportCanvasHeight,
   formatCampaignChartInterval,
@@ -359,5 +362,68 @@ describe('campaign PNG overview', () => {
 
     expect(rows[0].cells[ORDER_COL].map(line => line.text)).toEqual(['—']);
     expect(rows[1].cells[ORDER_COL].map(line => line.text)).toContain('空 0.120000 · 已触发');
+  });
+});
+
+describe('【用户要求】情绪日记折叠后，导出图片也只保留标题', () => {
+  const diary = {
+    date: '2026-09-13',
+    eventText: '今天是生理期的第二天。情绪有波动，但是没有影响正常的进程。',
+    pomsTotal: '66（TMD）',
+    panasPositive: '46/50',
+    panasNegative: '11/50',
+    personalInitiativeTotal: '49/49',
+    personalInitiativeMean: '7.00/7',
+    anxiety: '0/21（正常范围，0–7）',
+    depression: '0/21（正常范围，0–7）',
+    pomsDimensions: '紧张 0 · 愤怒 1 · 疲劳 5 · 抑郁 0 · 精力 21 · 慌乱 0 · 自尊 19',
+  } as Parameters<typeof campaignEmotionDiaryPanelHeight>[0];
+
+  /** 只记录 fillText 的假画布：其余绘图调用一律吞掉。 */
+  function recordingContext() {
+    const texts: string[] = [];
+    const ctx = new Proxy({} as Record<string | symbol, unknown>, {
+      get(target, key) {
+        if (key === 'fillText') return (text: string) => { texts.push(String(text)); };
+        if (key === 'measureText') return (text: string) => ({ width: String(text).length * 8 });
+        if (key in target) return target[key];
+        return () => undefined;
+      },
+      set(target, key, value) { target[key] = value; return true; },
+    }) as unknown as CanvasRenderingContext2D;
+    return { ctx, texts };
+  }
+
+  it('默认（展开）不变；折叠后面板只有标题栏高', () => {
+    const expanded = campaignEmotionDiaryPanelHeight(diary, 1200);
+    const collapsed = campaignEmotionDiaryPanelHeight(diary, 1200, true);
+    expect(collapsed).toBe(EMOTION_DIARY_COLLAPSED_H);
+    expect(expanded).toBeGreaterThan(collapsed);
+  });
+
+  it('折叠时只画标题与「已折叠」，正文、量表一个字都不画', () => {
+    const { ctx, texts } = recordingContext();
+    drawEmotionDiaryPanel(ctx, diary, 0, 0, 1200, EMOTION_DIARY_COLLAPSED_H, true);
+    const all = texts.join('\n');
+    expect(all).toContain('操作日情绪日记 · 2026-09-13');
+    expect(all).toContain('已折叠');
+    expect(all).not.toContain('生理期');
+    expect(all).not.toContain('最近起波澜的事情');
+    expect(all).not.toContain('POMS');
+    expect(all).not.toContain('HADS');
+  });
+
+  it('展开时正文照常画出来', () => {
+    const { ctx, texts } = recordingContext();
+    drawEmotionDiaryPanel(ctx, diary, 0, 0, 1200, 400, false);
+    const all = texts.join('\n');
+    expect(all).toContain('最近起波澜的事情');
+    expect(all).toContain('POMS TMD');
+    expect(all).not.toContain('已折叠');
+  });
+
+  it('折叠态经由导出输入进到概览里', () => {
+    expect(buildCampaignBoardOverview({ ...input(), emotionDiaryCollapsed: true }).emotionDiaryCollapsed).toBe(true);
+    expect(buildCampaignBoardOverview(input()).emotionDiaryCollapsed).toBe(false);
   });
 });

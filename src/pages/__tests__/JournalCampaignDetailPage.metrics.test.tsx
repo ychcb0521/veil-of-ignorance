@@ -469,6 +469,59 @@ describe('JournalCampaignDetailPage metrics', () => {
     );
   }, 10_000);
 
+  it('【用户要求】情绪日记可以折叠，折叠后导出的 PNG 也只保留标题', async () => {
+    render(
+      <MemoryRouter initialEntries={['/journal/campaigns/winner']}>
+        <Routes>
+          <Route path="/journal/campaigns/:id" element={<JournalCampaignDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    const card = await screen.findByTestId('campaign-emotion-diary');
+    const toggle = screen.getByTestId('campaign-emotion-diary-toggle');
+    // 默认展开
+    expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    await waitFor(() => expect(card.querySelector('#campaign-emotion-diary-body')).not.toBeNull());
+
+    // 折叠：正文整块不渲染，标题还在，偏好记进本机
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    expect(card.querySelector('#campaign-emotion-diary-body')).toBeNull();
+    expect(card.textContent).toContain('操作日情绪日记');
+    expect(card.textContent).toContain('已折叠，导出图片同样不显示内容');
+    expect(window.localStorage.getItem('journal:campaign-emotion-diary-collapsed')).toBe('1');
+
+    // 折叠态带进 PNG 导出
+    fireEvent.click(screen.getByRole('button', { name: 'PNG' }));
+    await waitFor(() => expect(exportCampaignBoardPngMock).toHaveBeenCalledTimes(1));
+    expect(exportCampaignBoardPngMock.mock.calls[0][0].emotionDiaryCollapsed).toBe(true);
+
+    // 再点展开：正文回来，偏好清掉，导出也跟着展开
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    expect(card.querySelector('#campaign-emotion-diary-body')).not.toBeNull();
+    expect(window.localStorage.getItem('journal:campaign-emotion-diary-collapsed')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'PNG' }));
+    await waitFor(() => expect(exportCampaignBoardPngMock).toHaveBeenCalledTimes(2));
+    expect(exportCampaignBoardPngMock.mock.calls[1][0].emotionDiaryCollapsed).toBe(false);
+  });
+
+  it('折叠偏好跨刷新保留：导出前刷新一次，日记不会自己又摊开', async () => {
+    window.localStorage.setItem('journal:campaign-emotion-diary-collapsed', '1');
+    render(
+      <MemoryRouter initialEntries={['/journal/campaigns/winner']}>
+        <Routes>
+          <Route path="/journal/campaigns/:id" element={<JournalCampaignDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    const card = await screen.findByTestId('campaign-emotion-diary');
+    expect(screen.getByTestId('campaign-emotion-diary-toggle')).toHaveAttribute('aria-expanded', 'false');
+    expect(card.querySelector('#campaign-emotion-diary-body')).toBeNull();
+  });
+
   it('keeps verified expectancy values when another campaign fails to load', async () => {
     vi.mocked(getCampaignFullData).mockImplementation(async (id: string) => {
       if (id === 'loser') throw new Error('transient campaign load failure');
