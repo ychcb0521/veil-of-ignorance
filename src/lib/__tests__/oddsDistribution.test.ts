@@ -6,6 +6,7 @@ import {
   TAIL_THRESHOLD,
   buildOddsDistributionModel,
   kdeCountPath,
+  metricDistributionDomain,
   oddsDistributionDomain,
 } from '@/lib/oddsDistribution';
 
@@ -141,5 +142,51 @@ describe('kdeCountPath', () => {
 
   it('无样本给空路径', () => {
     expect(kdeCountPath([], { min: -2, max: 2 }, makeScale({ min: -2, max: 2 }))).toBe('');
+  });
+});
+
+describe('【用户要求】通用分布窗口（盈亏比之外的指标）', () => {
+  it('不再硬撑到 −2，也不套 +10R 封顶——几何期望永远 ≥ −1，左边那一半是空的', () => {
+    const values = [-0.36, -0.2, 0, 0.05, 0.1, 0.35, 0.6, 1.1, 2.3, 4.65];
+    const generic = metricDistributionDomain(values);
+    const odds = oddsDistributionDomain(values);
+    expect(odds.min).toBe(-2);                       // 盈亏比那一套的硬下界
+    expect(generic.min).toBeGreaterThan(-2);         // 通用窗口贴着数据走
+    expect(generic.min).toBeLessThanOrEqual(-0.36);
+    expect(generic.max).toBeGreaterThanOrEqual(2.3);
+  });
+
+  it('无论如何把 0 圈进窗口——它是盈亏分界，挤出视野就没有参照点了', () => {
+    const allPositive = metricDistributionDomain([1.2, 1.5, 2.0, 3.4]);
+    expect(allPositive.min).toBeLessThanOrEqual(0);
+    expect(allPositive.ticks).toContain(0);
+    const allNegative = metricDistributionDomain([-0.8, -0.5, -0.3]);
+    expect(allNegative.max).toBeGreaterThanOrEqual(0);
+    expect(allNegative.ticks).toContain(0);
+  });
+
+  it('刻度落在 1/2/5 × 10ⁿ 上，且不超过 ~6 格', () => {
+    const domain = metricDistributionDomain([-0.36, 0.1, 0.5, 1.2, 4.65]);
+    expect(domain.ticks.length).toBeLessThanOrEqual(8);
+    const step = Number((domain.ticks[1] - domain.ticks[0]).toFixed(6));
+    const base = step / 10 ** Math.floor(Math.log10(step));
+    expect([1, 2, 5]).toContain(Number(base.toFixed(6)));
+    // 浮点脏值不能漏到刻度上
+    for (const tick of domain.ticks) expect(String(tick)).not.toMatch(/\d{8,}/);
+  });
+
+  it('窄样本也给得出窗口，空样本不炸', () => {
+    const narrow = metricDistributionDomain([0.02, 0.03, 0.04]);
+    expect(narrow.max).toBeGreaterThan(narrow.min);
+    expect(narrow.ticks.length).toBeGreaterThanOrEqual(2);
+    expect(metricDistributionDomain([]).ticks).toEqual([-1, 0, 1]);
+  });
+
+  it('右尾阈值可以换：不传就是 +5R', () => {
+    const points = [1, 3, 6, 12].map((value, index) => ({
+      campaignId: `c${index}`, title: 't', symbol: 'S', value, operationTime: index, sequence: index + 1,
+    }));
+    expect(buildOddsDistributionModel(points).summary.tailCount).toBe(2);        // > 5
+    expect(buildOddsDistributionModel(points, { tailThreshold: 10 }).summary.tailCount).toBe(1);
   });
 });

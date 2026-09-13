@@ -163,6 +163,7 @@ type CampaignMetricChartKey =
   | 'opportunityQuality'
   | 'arithmeticExpectancy'
   | 'geometricExpectancy'
+  | 'geometricExpectancyDistribution'
   | 'importance'
   | 'mirrorTp'
   | 'mirrorTpBars'
@@ -378,17 +379,47 @@ const CAMPAIGN_METRIC_CHART_CONFIGS: readonly CampaignMetricChartConfig[] = [
     key: 'geometricExpectancy',
     label: '几何期望',
     chartLabel: '几何图',
+    viewLabel: '时序',
+    viewTestId: 'campaign-geometricExpectancy-view-time',
     seriesLabel: '几何期望时序',
     guide: {
       yAxis: '按固定 10% 的资金比例下这一注，本场把本金乘成了多少：Gᵢ = 1 + bᵢ×0.1，纵轴直接读 Gᵢ——1.00 是本金不增不减。',
       point: '点越高，本场按同一下注比例换算出的资本增长越大；低于 1.00 的是亏损场（bᵢ 为负）。'
         + '固定 x 之后 Gᵢ 是 bᵢ 的线性变换，所以它的形状与盈亏比图一致——差别只在单位。',
       colors: [
-        { token: 'profit', label: '绿色：几何期望 > 0。' },
-        { token: 'loss', label: '红色：几何期望 < 0。' },
-        { token: 'neutral', label: '灰色：几何期望 = 0。' },
+        { token: 'profit', label: '绿色：Gᵢ > 1.00，本场让本金变大。' },
+        { token: 'loss', label: '红色：Gᵢ < 1.00，本场让本金变小。' },
+        { token: 'neutral', label: '灰色：Gᵢ = 1.00，不增不减。' },
       ],
       referenceLines: ['灰色的 1.00 线：本金不增不减，线上为增长、线下为损耗。'],
+    },
+    missingValueLabel: '几何期望',
+    colorMode: 'signed',
+    formatValue: formatGeometricExpectancy,
+  },
+  {
+    key: 'geometricExpectancyDistribution',
+    sourceKey: 'geometricExpectancy',
+    view: 'distribution',
+    label: '几何期望分布',
+    chartLabel: '分布图',
+    viewLabel: '分布',
+    viewTestId: 'campaign-geometricExpectancy-view-distribution',
+    seriesLabel: '几何期望分布',
+    guide: {
+      yAxis: '落在该 Gᵢ 附近的战役数量：点从底线向上堆叠，堆得越高，这一档结果出现得越多。刻度随图高变化，读柱高时对照左侧场数刻度。',
+      point: '每个点仍是一场战役，横向位置就是它的 Gᵢ，不考虑时间先后。'
+        + '这张图要看的是形状：这套打法的资本增长是不是右偏——左边贴着 1.00 堆着一大群小亏小赚，'
+        + '右边拖出一条长尾，正是「亏损受控、盈利开放」该有的样子；若左尾反而更长，那就说明亏的时候没收住。',
+      colors: [
+        { token: 'profit', label: '绿色：Gᵢ > 1.00，本场让本金变大。' },
+        { token: 'loss', label: '红色：Gᵢ < 1.00，本场让本金变小。' },
+        { token: 'neutral', label: '灰色：Gᵢ = 1.00，不增不减。' },
+      ],
+      referenceLines: [
+        '灰色 1.00 竖线：盈亏分界，线右为增长、线左为损耗。',
+        '灰色曲线：核密度换算成「每档期望场数」，与柱共用同一条场数轴。',
+      ],
     },
     missingValueLabel: '几何期望',
     colorMode: 'signed',
@@ -421,14 +452,13 @@ const CAMPAIGN_METRIC_CHART_CONFIGS: readonly CampaignMetricChartConfig[] = [
       yAxis: '镜像止盈结果采用离散等级：0 = 未实现，1 = 亏损，2 = 持平，3 = 盈利；盈亏按实际盈亏比 b 判，|b| ≤ 0.1 记持平。纵向高度表示结果等级，不是连续金额差。',
       point: '点越高，镜像止盈结果等级越好；同一水平线上的点属于同一种结果，点与点的垂直距离不代表实际盈亏差额。',
       colors: [
-        { token: 'profit', label: '绿色圆点（3）：镜像止盈实现盈利。' },
-        { token: 'neutral', label: '灰色方块（2）：镜像止盈实现持平。' },
-        { token: 'loss', label: '红色菱形（1）：镜像止盈实现亏损。' },
-        { token: 'neutral', label: '灰色空心圈（0）：镜像止盈未实现。' },
+        { token: 'profit', label: '绿色圆点：该战役最终盈利（b > 0.1）。' },
+        { token: 'loss', label: '红色菱形：该战役最终亏损（b < −0.1）。' },
+        { token: 'neutral', label: '灰色空心圈：持平（|b| ≤ 0.1）或尚未结束。' },
       ],
     },
     missingValueLabel: '镜像止盈结果',
-    colorMode: 'mirrorTp',
+    colorMode: 'pnlBand',
     formatValue: formatMirrorTpMetric,
   },
   {
@@ -444,16 +474,16 @@ const CAMPAIGN_METRIC_CHART_CONFIGS: readonly CampaignMetricChartConfig[] = [
       yAxis: '纵轴是场数：同一档的战役码成一根柱，柱越高这种结果出现得越多。场数多时一行会并排放几个点，'
         + '左侧刻度已按每行点数折算，照着刻度读柱高即可；每根柱的精确场数写在柱脚下，图例右侧另有一份含合计的汇总。',
       point: '横轴是四个结果档位（未实现 / 亏损 / 持平 / 盈利；|b| ≤ 0.1 记持平），不按时间排列。柱由点组成，每个点仍是一场战役，'
-        + '悬停读数值、点击进入对应战役。一场都没有的档位保留空柱——某一档 0 场本身就是结论。',
+        + '颜色报的是该场最终盈亏而不是档位——档位横轴已经说过了，颜色因此拿去回答「这一柱里有多少场真的赚到了钱」。'
+        + '悬停读数值与 b、点击进入对应战役。一场都没有的档位保留空柱——某一档 0 场本身就是结论。',
       colors: [
-        { token: 'profit', label: '绿色圆点（3）：镜像止盈实现盈利。' },
-        { token: 'neutral', label: '灰色方块（2）：镜像止盈实现持平。' },
-        { token: 'loss', label: '红色菱形（1）：镜像止盈实现亏损。' },
-        { token: 'neutral', label: '灰色空心圈（0）：镜像止盈未实现。' },
+        { token: 'profit', label: '绿色圆点：该战役最终盈利（b > 0.1）。' },
+        { token: 'loss', label: '红色菱形：该战役最终亏损（b < −0.1）。' },
+        { token: 'neutral', label: '灰色空心圈：持平（|b| ≤ 0.1）或尚未结束。' },
       ],
     },
     missingValueLabel: '镜像止盈结果',
-    colorMode: 'mirrorTp',
+    colorMode: 'pnlBand',
     formatValue: formatMirrorTpMetric,
   },
   {
@@ -530,6 +560,8 @@ const DEFAULT_CHART_VIEW_BY_SOURCE: Partial<Record<CampaignMetricChartKey, Campa
   odds: 'oddsDistribution',
   // 镜像止盈同理：要问的是「四档各多少场」，时序把 200 个点摊成四条横线，什么也读不出来。
   mirrorTp: 'mirrorTpBars',
+  // 几何期望也一样：要判断的是这套打法的资本增长偏不偏、右尾够不够长——那是形状问题。
+  geometricExpectancy: 'geometricExpectancyDistribution',
 };
 
 export type CampaignMetricChartViewState = {
@@ -1348,6 +1380,7 @@ export default function JournalCampaignsPage() {
       row.profitCaptureRatio == null ? null : row.profitCaptureRatio / 100
     ));
     const mirrorTp = buildSeries(row => rowMirrorTpRank(row));
+    const geometric = buildSeries(row => row.geometricExpectancy);
     return {
       odds,
       oddsDistribution: odds,
@@ -1358,7 +1391,9 @@ export default function JournalCampaignsPage() {
       )),
       opportunityQuality: buildSeries(row => row.opportunityQuality),
       arithmeticExpectancy: buildSeries(row => row.arithmeticExpectancy),
-      geometricExpectancy: buildSeries(row => row.geometricExpectancy),
+      geometricExpectancy: geometric,
+      // 分布图与时序图是同一份序列的两种读法，只建一次、共用同一个对象。
+      geometricExpectancyDistribution: geometric,
       importance: buildSeries(row => importanceValue(row.campaign)),
       mirrorTp: mirrorTp,
       // 柱状图与时序图读的是同一份镜像止盈序列，只是横轴换成了结果档位。

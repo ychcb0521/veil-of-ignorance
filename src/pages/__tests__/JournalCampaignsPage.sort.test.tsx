@@ -639,6 +639,24 @@ describe('JournalCampaignsPage sorting', () => {
     // 【用户要求】点开一个点要读得到这一场的 b：档位只有四种，b 才说明赚亏了多少个 R
     const labelled = buttons.map(node => node.getAttribute('aria-label') ?? '');
     expect(labelled.some(label => /· b [+-]\d+\.\d{2}R/.test(label))).toBe(true);
+
+    // 【用户要求】颜色报盈亏而不是档位：同一根柱里盈利的绿、亏损的红
+    const tokensByColumn = new Map<number, Set<string>>();
+    for (const node of buttons) {
+      const value = Number(node.dataset.metricValue);
+      const token = node.dataset.seriesToken ?? '';
+      tokensByColumn.set(value, (tokensByColumn.get(value) ?? new Set()).add(token));
+    }
+    // 这批战役都没有成交的镜像止盈腿，所以全落在「未实现」那一柱——但盈亏不同，颜色就该不同
+    expect(tokensByColumn.get(0)).toEqual(new Set(['profit', 'loss']));
+    const profitPoint = buttons.find(node => node.dataset.seriesToken === 'profit')!;
+    expect(profitPoint.dataset.pnlSign).toBe('positive');
+    const lossPoint = buttons.find(node => node.dataset.seriesToken === 'loss')!;
+    expect(lossPoint.dataset.pnlSign).toBe('negative');
+    // 图例次序必须与 series 下标一一对应，否则绿红会整体错位（改色那天就栽在这上面）：
+    // 形状是跟着下标发的，所以「绿=圆、红=菱」同时成立才说明 token 与下标没有错位
+    expect(profitPoint.dataset.markerShape).toBe('circle');
+    expect(lossPoint.dataset.markerShape).toBe('diamond');
   }, 15_000);
 
   it('【用户要求】操作时间段：默认全选，框定范围后统计与卡片一起收窄', async () => {
@@ -698,6 +716,44 @@ describe('JournalCampaignsPage sorting', () => {
     // 不能说成「尚无战役」——整表是有的，只是被时间段挡住了
     expect(screen.queryByText('尚无战役')).toBeNull();
     expect(screen.getByText(/整表共 4 场/)).toBeInTheDocument();
+  }, 15_000);
+
+  it('【用户要求】几何期望多一种「分布」看法并设为默认：看形状偏不偏，且不套盈亏比的止损墙', async () => {
+    render(
+      <MemoryRouter initialEntries={['/journal/campaigns?sort=geometricExpectancy&direction=desc']}>
+        <Routes>
+          <Route path="/journal/campaigns" element={<><JournalCampaignsPage /><SearchProbe /></>} />
+          <Route path="/journal/campaigns/:id" element={<LocationProbe />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    fireEvent.contextMenu(await screen.findByTestId('campaign-sort-geometricExpectancy'));
+    fireEvent.click(await screen.findByTestId('campaign-geometricExpectancy-chart-toggle'));
+
+    // 默认落在分布视图
+    await waitFor(() => expect(screen.getByTestId('campaign-metric-scatter-plot'))
+      .toHaveAttribute('data-metric-key', 'geometricExpectancyDistribution'));
+    expect(screen.getByTestId('campaign-geometricExpectancy-view-distribution'))
+      .toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByTestId('campaign-geometricExpectancy-view-time'))
+      .toHaveAttribute('aria-pressed', 'false');
+    expect(screen.getByTestId('location-probe-search'))
+      .toHaveTextContent('chart=geometricExpectancyDistribution');
+
+    // 盈亏平衡线按本指标的读数写成 1.00，而盈亏比专属的 −1R 止损墙不该出现
+    expect(screen.getByTestId('campaign-metric-break-even-geometricExpectancyDistribution-label'))
+      .toHaveTextContent('1.00 盈亏平衡');
+    expect(screen.queryByTestId('campaign-metric-loss-wall-geometricExpectancyDistribution')).toBeNull();
+    // 右尾那一项按 +5R 计数，只有盈亏比读得出意思
+    expect(screen.queryByTestId('campaign-metric-tail-count-geometricExpectancyDistribution')).toBeNull();
+    // 密度曲线在，说明走的是同一套分布机制
+    expect(screen.getByTestId('campaign-metric-density-curve-geometricExpectancyDistribution')).toBeInTheDocument();
+
+    // 切回时序仍然可用
+    fireEvent.click(screen.getByTestId('campaign-geometricExpectancy-view-time'));
+    await waitFor(() => expect(screen.getByTestId('campaign-metric-scatter-plot'))
+      .toHaveAttribute('data-metric-key', 'geometricExpectancy'));
   }, 15_000);
 
   it('【用户要求】镜像止盈默认就开柱状视图，不必再手动切', async () => {

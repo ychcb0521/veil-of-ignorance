@@ -61,21 +61,68 @@ export function oddsDistributionDomain(values: number[]): OddsDistributionDomain
   return { min, max, ticks };
 }
 
+/** 1 / 2 / 5 × 10ⁿ 里取一个不小于 raw 的步距——刻度落在人能心算的数上。 */
+function niceStep(raw: number): number {
+  if (!Number.isFinite(raw) || raw <= 0) return 1;
+  const exponent = Math.floor(Math.log10(raw));
+  const base = raw / 10 ** exponent;
+  // 容差：base 在浮点里常是 1.0000000000000002，不留余地会一路顶到 2。
+  const multiplier = base <= 1 + 1e-9 ? 1 : base <= 2 + 1e-9 ? 2 : base <= 5 + 1e-9 ? 5 : 10;
+  return multiplier * 10 ** exponent;
+}
+
+/**
+ * 通用分布窗口：给盈亏比以外的指标用。
+ *
+ * 与 oddsDistributionDomain 的差别全在假设上——那一个把窗口硬撑到 [−2, …] 并封顶 +10，
+ * 因为 b 的语义里「−1R 止损墙」必须永远画得出来、右尾 +38R 必须被压住。
+ * 别的指标没有这两条，硬套过去只会在左边留出一大片空白（比如几何期望永远 ≥ −1）。
+ * 这里只做两件事：用 p2 / p98 抗离群，以及无论如何把 0 圈进窗口——0 是盈亏分界，
+ * 它一旦被挤出视野，读者就失去了唯一的参照点。
+ */
+export function metricDistributionDomain(values: number[]): OddsDistributionDomain {
+  const sorted = [...values].filter(Number.isFinite).sort((a, b) => a - b);
+  if (sorted.length === 0) return { min: -1, max: 1, ticks: [-1, 0, 1] };
+
+  const low = Math.min(0, quantile(sorted, 0.02));
+  const high = Math.max(0, quantile(sorted, 0.98));
+  // 按 6 格切而不是 5：span 略大于 5 时，/5 会把步距从 1 顶成 2，窗口白白多出一倍空白。
+  const step = niceStep((high - low || 1) / 6);
+  const min = Math.floor(low / step) * step;
+  const max = Math.ceil(high / step) * step;
+  const ticks: number[] = [];
+  for (let value = min; value <= max + step * 1e-9; value += step) {
+    ticks.push(Number(value.toFixed(6)));
+  }
+  return { min: Number(min.toFixed(6)), max: Number(max.toFixed(6)), ticks };
+}
+
 function median(sorted: number[]) {
   if (sorted.length === 0) return 0;
   const midpoint = Math.floor(sorted.length / 2);
   return sorted.length % 2 === 0 ? (sorted[midpoint - 1] + sorted[midpoint]) / 2 : sorted[midpoint];
 }
 
-export function buildOddsDistributionModel(points: CampaignMetricPoint[]): OddsDistributionModel {
+export type DistributionModelOptions = {
+  /** 窗口算法；缺省用盈亏比那一套（带 −1R 止损墙与 +10R 封顶）。 */
+  domain?: (values: number[]) => OddsDistributionDomain;
+  /** 右尾阈值；缺省 +5R。 */
+  tailThreshold?: number;
+};
+
+export function buildOddsDistributionModel(
+  points: CampaignMetricPoint[],
+  options: DistributionModelOptions = {},
+): OddsDistributionModel {
   const sortedPoints = [...points].sort((a, b) => (
     a.value - b.value || a.campaignId.localeCompare(b.campaignId)
   ));
   const values = sortedPoints.map(point => point.value);
   const n = values.length;
   const winCount = values.filter(value => value > 0).length;
+  const tailThreshold = options.tailThreshold ?? TAIL_THRESHOLD;
   return {
-    domain: oddsDistributionDomain(values),
+    domain: (options.domain ?? oddsDistributionDomain)(values),
     summary: {
       n,
       min: n ? values[0] : 0,
@@ -84,7 +131,7 @@ export function buildOddsDistributionModel(points: CampaignMetricPoint[]): OddsD
       mean: n ? values.reduce((sum, value) => sum + value, 0) / n : 0,
       winCount,
       winRate: n ? winCount / n : 0,
-      tailCount: values.filter(value => value > TAIL_THRESHOLD).length,
+      tailCount: values.filter(value => value > tailThreshold).length,
     },
     bandwidth: silvermanBandwidth(values),
     sortedPoints,

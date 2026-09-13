@@ -5,6 +5,7 @@ import {
   type CampaignMetricPoint,
 } from '@/lib/campaignMetricSeries';
 import { formatBeijingTime } from '@/lib/timeFormat';
+import { mirrorTpOutcome } from '@/lib/mirrorTpSummary';
 import {
   ScatterPlot,
   type ScatterCountAxis,
@@ -16,7 +17,12 @@ import {
   type ScatterYAxis,
 } from '@/components/charts/ScatterPlot';
 import { markShapePath, type ChartSeriesToken, type ScatterMarkShape } from '@/lib/chartTokens';
-import { buildOddsDistributionModel, kdeCountPath, TAIL_THRESHOLD } from '@/lib/oddsDistribution';
+import {
+  buildOddsDistributionModel,
+  kdeCountPath,
+  metricDistributionDomain,
+  TAIL_THRESHOLD,
+} from '@/lib/oddsDistribution';
 
 /**
  * 时序：横轴按操作时间排战役；
@@ -31,6 +37,12 @@ export type CampaignMetricColorMode =
   | 'quality'
   | 'importance'
   | 'mirrorTp'
+  /**
+   * 按战役盈亏着色，口径与镜像止盈的分类完全一致（|b| ≤ 0.1 记持平）。
+   * 用在镜像止盈图上：档位已经由横轴（柱状）或纵轴（时序）表达了，
+   * 颜色再重复一遍是浪费——改成报「这一场最后是赚是亏」，每根柱才看得出自己的输赢构成。
+   */
+  | 'pnlBand'
   /** DSI 贡献：样本天然全是亏损战役，统一红色。 */
   | 'downside'
   /** USI 贡献：样本天然全是盈利战役，统一绿色。 */
@@ -311,7 +323,7 @@ function seriesShapeAt(index: number, mode: CampaignMetricColorMode): ScatterMar
   }
   // risk 模式过去所有点都是圆：绿红在 deutan 下 ΔE 只有 7.9，属于「必须配次编码」的地板band，
   // 少了形状就是硬性不合规，因此和 signed 用同一套形状。
-  if (mode === 'signed' || mode === 'risk') {
+  if (mode === 'signed' || mode === 'risk' || mode === 'pnlBand') {
     return (['circle', 'diamond', 'ring'] as const)[index] ?? 'circle';
   }
   return 'circle';
@@ -322,7 +334,15 @@ function metricSeriesIndex(
   value: number,
   mode: CampaignMetricColorMode,
   pnl?: number | null,
+  payoffRatio?: number | null,
 ) {
+  if (mode === 'pnlBand') {
+    // 与柱子的分档共用同一个判定，免得出现「持平柱里站着一个绿点」。
+    const outcome = mirrorTpOutcome(payoffRatio, pnl ?? null);
+    if (outcome === 'win') return 0;
+    if (outcome === 'loss') return 1;
+    return 2;
+  }
   if (mode === 'risk') {
     // 预期回撤的纵轴只表达风险距离，方向由战役已实现盈亏决定。
     if (pnl != null && Number.isFinite(pnl)) {
@@ -402,9 +422,13 @@ export function CampaignMetricScatterPlot({
   const ticks = scale.ticks;
   const activePoint = chartPoints.find(point => point.campaignId === activeCampaignId) ?? null;
   // 分布视图的窗口、摘要、带宽都由同一份纯函数派生，和时序视图互不影响。
+  /** 盈亏比的分布窗口带着 −1R 止损墙与 +10R 封顶；别的指标没有这两条假设，走通用窗口。 */
+  const oddsFamily = metricKey.startsWith('odds');
   const dist = useMemo(
-    () => (distribution ? buildOddsDistributionModel(chartPoints) : null),
-    [chartPoints, distribution],
+    () => (distribution
+      ? buildOddsDistributionModel(chartPoints, oddsFamily ? {} : { domain: metricDistributionDomain })
+      : null),
+    [chartPoints, distribution, oddsFamily],
   );
   /**
    * 柱状视图的档位表。档位取自该指标的离散刻度（镜像止盈就是 未实现/亏损/持平/盈利 四档），
@@ -474,7 +498,7 @@ export function CampaignMetricScatterPlot({
       const pnlSign = point.pnl == null || !Number.isFinite(point.pnl)
         ? 'unknown'
         : point.pnl > 0 ? 'positive' : point.pnl < 0 ? 'negative' : 'zero';
-      const seriesIndex = metricSeriesIndex(point.value, colorMode, point.pnl);
+      const seriesIndex = metricSeriesIndex(point.value, colorMode, point.pnl, point.payoffRatio);
       const operationTime = formatBeijingTime(point.operationTime);
       // 盈亏比图的纵轴本身就是 b，再报一次是废话；其余指标才补。
       const payoffSuffix = showPayoffRatio && point.payoffRatio != null && Number.isFinite(point.payoffRatio)
@@ -520,7 +544,10 @@ export function CampaignMetricScatterPlot({
     mode: 'linear',
     min: dist.domain.min,
     max: dist.domain.max,
-    labels: dist.domain.ticks.map(value => ({ at: value, text: formatIntegerOddsTick(value) })),
+    labels: dist.domain.ticks.map(value => ({
+      at: value,
+      text: oddsFamily ? formatIntegerOddsTick(value) : formatValue(value),
+    })),
   } : null), [dist]);
 
   const barsXAxis = useMemo<ScatterXAxis | null>(() => (barColumns ? {
@@ -532,24 +559,30 @@ export function CampaignMetricScatterPlot({
     })),
   } : null), [barColumns]);
 
-  const distributionReferenceLines = useMemo<ScatterReferenceLine[]>(() => (dist ? [
-    {
-      axis: 'x',
-      value: -1,
-      kind: 'threshold',
-      label: '-1R 止损',
-      testId: `campaign-metric-loss-wall-${metricKey}`,
-      dataAttrs: { 'data-reference-value': -1 },
-    },
-    {
+  const distributionReferenceLines = useMemo<ScatterReferenceLine[]>(() => {
+    if (!dist) return [];
+    const breakEven: ScatterReferenceLine = {
       axis: 'x',
       value: 0,
       kind: 'zero',
-      label: '0 盈亏平衡',
+      // 0 在各指标上是同一件事（盈亏分界），但读数不同：盈亏比读 0，几何期望读 1.00。
+      label: `${oddsFamily ? '0' : formatValue(0)} 盈亏平衡`,
       testId: `campaign-metric-break-even-${metricKey}`,
       dataAttrs: { 'data-reference-value': 0 },
-    },
-  ] : []), [dist, metricKey]);
+    };
+    if (!oddsFamily) return [breakEven];
+    return [
+      {
+        axis: 'x',
+        value: -1,
+        kind: 'threshold',
+        label: '-1R 止损',
+        testId: `campaign-metric-loss-wall-${metricKey}`,
+        dataAttrs: { 'data-reference-value': -1 },
+      },
+      breakEven,
+    ];
+  }, [dist, metricKey, oddsFamily, formatValue]);
 
   const densityOverlay = useMemo(() => (dist ? (scale: ScatterStackScale) => (
     <path
@@ -673,7 +706,13 @@ export function CampaignMetricScatterPlot({
           {bars ? (
             <dd>{guide.point} 横向位置只表示所属档位，档内的左右位置不携带含义：一行放不下时点会并排铺开，柱因此有宽度。纵向位置是这一档里的堆叠序号，从底线往上数；左侧刻度已按每行点数折算成场数。</dd>
           ) : dist ? (
-            <dd>{guide.point} 横向位置吸附到所在档的中心：每 1R 等分成若干档、每档至少 14px 宽，−1R 与 0 恰好是档边界，越过止损墙的亏损永远画在墙左边；精确 b 看提示框。纵向位置是同一档里的堆叠序号，从底线往上数。图高放不下的档会撑高图盒，撑到上限仍放不下时顶端合成一个三角并在脚注报数。点击任一点进入对应战役。</dd>
+            <dd>
+              {guide.point} 横向位置吸附到所在档的中心（每档至少 14px 宽）
+              {oddsFamily
+                ? '：每 1R 等分成若干档，−1R 与 0 恰好是档边界，越过止损墙的亏损永远画在墙左边；精确 b 看提示框。'
+                : '；精确数值看提示框。'}
+              纵向位置是同一档里的堆叠序号，从底线往上数。图高放不下的档会撑高图盒，撑到上限仍放不下时顶端合成一个三角并在脚注报数。点击任一点进入对应战役。
+            </dd>
           ) : (
             <dd>{guide.point} 横向位置对应操作先后，纵向位置对应本指标数值；点击任一点进入对应战役。右侧 n= 是各纵轴区间的全域点数，可用来读出被长尾压扁的中段密度。</dd>
           )}
@@ -738,10 +777,15 @@ export function CampaignMetricScatterPlot({
           <span data-testid={`campaign-metric-win-rate-${metricKey}`}>
             胜率 {Math.round(dist.summary.winRate * 100)}% ({dist.summary.winCount}/{dist.summary.n})
           </span>
-          <span className="text-[color:var(--chart-axis)]">|</span>
-          <span data-testid={`campaign-metric-tail-count-${metricKey}`}>
-            右尾 &gt;+{TAIL_THRESHOLD}R {dist.summary.tailCount} 场
-          </span>
+          {/* 右尾按 +5R 计数，只有盈亏比读得出意思；别的指标连同分隔线一起省掉。 */}
+          {oddsFamily ? (
+            <>
+              <span className="text-[color:var(--chart-axis)]">|</span>
+              <span data-testid={`campaign-metric-tail-count-${metricKey}`}>
+                右尾 &gt;+{TAIL_THRESHOLD}R {dist.summary.tailCount} 场
+              </span>
+            </>
+          ) : null}
           <span className="text-[color:var(--chart-axis)]">|</span>
           <span className="inline-flex items-center gap-1.5">
             <svg aria-hidden="true" width="12" height="12" viewBox="0 0 12 12" className="shrink-0">
@@ -774,7 +818,7 @@ export function CampaignMetricScatterPlot({
         </div>
       )}
       directionHint={dist
-        ? '横轴 盈亏比 b（R）· 纵轴 场数 · 不按时间排列'
+        ? `横轴 ${oddsFamily ? '盈亏比 b（R）' : metricLabel} · 纵轴 场数 · 不按时间排列`
         : bars
           ? `横轴 ${metricLabel}档位 · 纵轴 场数 · 不按时间排列`
           : '早 → 晚 · 横轴每格一场战役'}
