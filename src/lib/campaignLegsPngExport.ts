@@ -562,8 +562,9 @@ export function buildCampaignLegsExportRows(input: ExportInput): CampaignLegsExp
   );
   const totalCells: CampaignLegsExportCellLine[][] = [
     [{ text: '' }],
-    [{ text: '合计', bold: true, color: '#5F6B7A' }],
-    [{ text: settlementBasisLabel(settlement.basis), color: '#848E9C', size: 11 }],
+    // 合计是整张表的结论，用正文最深的颜色、加粗、比腿的角色名大一号——导出图常被缩小看，淡灰小字会直接消失
+    [{ text: '合计', bold: true, color: '#111827', size: 14 }],
+    [{ text: settlementBasisLabel(settlement.basis), color: '#475569', size: 11 }],
     [{
       text: totalPnl == null ? '—' : `${totalPnl > 0 ? '+' : ''}${totalPnl.toFixed(2)}`,
       color: tone(totalPnl),
@@ -691,7 +692,7 @@ function drawLegsTable(ctx: CanvasRenderingContext2D, rows: CampaignLegsExportRo
   y += TABLE_HEADER_H;
   rows.forEach((row, rowIndex) => {
     x = MARGIN_X;
-    ctx.fillStyle = rowIndex % 2 === 0 ? '#FFFFFF' : '#FAFBFD';
+    ctx.fillStyle = row.kind === 'total' ? '#EEF2F7' : rowIndex % 2 === 0 ? '#FFFFFF' : '#FAFBFD';
     ctx.fillRect(MARGIN_X, y, TABLE_WIDTH, row.height);
     ctx.strokeStyle = '#E5E7EB';
     ctx.beginPath();
@@ -700,7 +701,7 @@ function drawLegsTable(ctx: CanvasRenderingContext2D, rows: CampaignLegsExportRo
     ctx.stroke();
     if (row.kind === 'total') {
       // 合计行与页面一样压一道加粗上框，和上面的腿分开
-      ctx.fillStyle = '#CBD5E1';
+      ctx.fillStyle = '#94A3B8';
       ctx.fillRect(MARGIN_X, y, TABLE_WIDTH, 2);
     }
 

@@ -445,6 +445,11 @@ describe('【用户要求】导出图要把 Legs 里的信息全部纳入', () =
     expect(total.cells[FEE_COL][0].text).toMatch(/^(\d+\.\d{2}( 估)?|—)$/);
     // 合计行只有一行，不会混进腿的计数
     expect(rows.filter(row => row.kind === 'total')).toHaveLength(1);
+    // 【用户要求】「合计」必须一眼看得见：加粗、深色、比腿的角色名大——导出图常被缩小看
+    const label = total.cells[1][0];
+    expect(label.bold).toBe(true);
+    expect(label.color).toBe('#111827');
+    expect(label.size ?? 13).toBeGreaterThan(13);
   });
 
   /** 断行处的空格会被吞掉，比较时忽略空白；其余字符必须一个不少。 */
