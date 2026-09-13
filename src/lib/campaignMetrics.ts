@@ -118,8 +118,16 @@ export function formatArithmeticExpectancy(value: number | null): string {
   return `${normalized >= 0 ? '+' : ''}${normalized.toFixed(2)}R`;
 }
 
+/**
+ * 单场几何期望按**增长因子 Gᵢ 本身**显示（1.20 = 这一场把本金乘上 1.20 倍），
+ * 而不是 Gᵢ − 1 的百分比。
+ *
+ * 入参仍然是 Gᵢ − 1：内部保留「以 0 为分界」的符号语义，散点图的零线、正负着色、
+ * 排序方向才不用各写一套；显示时 +1 还原成因子。于是纵轴刻度也自动读成 1.00 / 1.20，
+ * 零线恰好就是「本金不增不减」那条线。
+ */
 export function formatGeometricExpectancy(value: number | null): string {
   if (value == null || !Number.isFinite(value)) return '—';
   const normalized = Math.abs(value) < 0.0005 ? 0 : value;
-  return `${normalized >= 0 ? '+' : ''}${(normalized * 100).toFixed(1)}%/笔`;
+  return (1 + normalized).toFixed(2);
 }

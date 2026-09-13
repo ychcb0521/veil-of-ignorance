@@ -87,11 +87,15 @@ describe('campaign metrics shared by list and detail pages', () => {
   });
 
   it('【用户要求】Gᵢ = 1 + bᵢ·x，x 固定 0.1，bᵢ 用当场战役的 b', () => {
-    // b = +2 → G = 1.20 → 几何期望 +20%
+    // b = +2 → G = 1.20；【用户要求】列里直接显示 Gᵢ 本身，不显示 Gᵢ − 1
     expect(campaignGrowthFactor(2)).toBeCloseTo(1.2, 12);
     const result = computeCampaignExpectancies(200, 0.5);
-    expect(result.geometricExpectancy).toBeCloseTo(0.2, 12);
-    expect(formatGeometricExpectancy(result.geometricExpectancy)).toBe('+20.0%/笔');
+    expect(result.geometricExpectancy).toBeCloseTo(0.2, 12);   // 内部仍以 0 为分界保存
+    expect(formatGeometricExpectancy(result.geometricExpectancy)).toBe('1.20');
+    expect(formatGeometricExpectancy(computeCampaignExpectancies(-100, 0.5).geometricExpectancy)).toBe('0.90');
+    expect(formatGeometricExpectancy(computeCampaignExpectancies(0, 0.5).geometricExpectancy)).toBe('1.00');
+    expect(formatGeometricExpectancy(computeCampaignExpectancies(-1000, 0.5).geometricExpectancy)).toBe('0.00');
+    expect(formatGeometricExpectancy(null)).toBe('—');
     // 算术期望仍按账户胜率加权，两者是不同的量
     expect(result.arithmeticExpectancy).toBeCloseTo(0.5, 8);
     expect(formatArithmeticExpectancy(result.arithmeticExpectancy)).toBe('+0.50R');

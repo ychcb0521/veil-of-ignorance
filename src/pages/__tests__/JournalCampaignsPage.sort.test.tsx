@@ -641,6 +641,65 @@ describe('JournalCampaignsPage sorting', () => {
     expect(labelled.some(label => /· b [+-]\d+\.\d{2}R/.test(label))).toBe(true);
   }, 15_000);
 
+  it('【用户要求】操作时间段：默认全选，框定范围后统计与卡片一起收窄', async () => {
+    render(
+      <MemoryRouter initialEntries={['/journal/campaigns']}>
+        <Routes>
+          <Route path="/journal/campaigns" element={<><JournalCampaignsPage /><SearchProbe /></>} />
+          <Route path="/journal/campaigns/:id" element={<LocationProbe />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    // 默认全选：四场全在，徽标写「全部」，URL 里没有 from/to
+    const chip = await screen.findByTestId('campaign-operation-range');
+    expect(chip).toHaveTextContent('操作时间（全部）');
+    expect(chip).not.toHaveAttribute('data-range-active');
+    expect(screen.getAllByTestId('campaign-card')).toHaveLength(4);
+    expect(screen.getByTestId('campaign-valid-count')).toHaveTextContent('有效战役（3）');
+    expect(screen.getByTestId('location-probe-search')).not.toHaveTextContent('from=');
+
+    // 框到 2 月~3 月：只剩那一段的两场，统计跟着变，URL 记下范围
+    fireEvent.click(chip);
+    fireEvent.change(screen.getByLabelText('起始日期'), { target: { value: '2026-02-01' } });
+    fireEvent.change(screen.getByLabelText('结束日期'), { target: { value: '2026-03-31' } });
+
+    await waitFor(() => expect(screen.getAllByTestId('campaign-card')).toHaveLength(2));
+    expect(screen.getAllByTestId('campaign-operation-time').map(node => node.textContent)).toEqual([
+      '操作时间：2026-03-02 08:00',
+      '操作时间：2026-02-01 08:00',
+    ]);
+    expect(screen.getByTestId('campaign-operation-range')).toHaveTextContent('2026-02-01 ~ 2026-03-31');
+    expect(screen.getByTestId('campaign-operation-range')).toHaveAttribute('data-range-active', 'true');
+    expect(screen.getByTestId('campaign-valid-count')).toHaveTextContent('有效战役（2）');
+    expect(screen.getByTestId('location-probe-search')).toHaveTextContent('from=2026-02-01');
+    expect(screen.getByTestId('location-probe-search')).toHaveTextContent('to=2026-03-31');
+
+    // 「恢复全部」回到默认，URL 也清干净
+    fireEvent.click(screen.getByTestId('campaign-range-clear'));
+    await waitFor(() => expect(screen.getAllByTestId('campaign-card')).toHaveLength(4));
+    expect(screen.getByTestId('campaign-operation-range')).toHaveTextContent('操作时间（全部）');
+    expect(screen.getByTestId('location-probe-search')).not.toHaveTextContent('from=');
+  }, 15_000);
+
+  it('【用户要求】?from/?to 进来就按该范围渲染；范围内一场都没有时说清是时间段筛空的', async () => {
+    render(
+      <MemoryRouter initialEntries={['/journal/campaigns?from=2020-01-01&to=2020-12-31']}>
+        <Routes>
+          <Route path="/journal/campaigns" element={<JournalCampaignsPage />} />
+          <Route path="/journal/campaigns/:id" element={<LocationProbe />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    const empty = await screen.findByTestId('campaign-empty-range');
+    expect(empty).toHaveTextContent('2020-01-01 ~ 2020-12-31 内没有战役');
+    expect(screen.queryByTestId('campaign-card')).toBeNull();
+    // 不能说成「尚无战役」——整表是有的，只是被时间段挡住了
+    expect(screen.queryByText('尚无战役')).toBeNull();
+    expect(screen.getByText(/整表共 4 场/)).toBeInTheDocument();
+  }, 15_000);
+
   it('【用户要求】镜像止盈默认就开柱状视图，不必再手动切', async () => {
     render(
       <MemoryRouter initialEntries={['/journal/campaigns?sort=mirrorTp&direction=desc']}>
@@ -876,12 +935,12 @@ describe('JournalCampaignsPage sorting', () => {
       '算术期望：-0.87R',
       '算术期望：—',
     ]);
-    // 【用户要求】单场几何期望 = Gᵢ − 1 = bᵢ × 0.1；bᵢ 为负时它也为负
+    // 【用户要求】单场几何期望以 Gᵢ = 1 + bᵢ×0.1 呈现；1.00 是本金不增不减的分界
     expect(screen.getAllByTestId('campaign-geometric-expectancy').map(node => node.textContent)).toEqual([
-      '几何期望：+30.0%/笔',   // b = +3.00
-      '几何期望：+5.0%/笔',    // b = +0.50
-      '几何期望：-8.0%/笔',    // b = −0.80，负 b 给负值
-      '几何期望：—',           // 没有有效 bᵢ
+      '几何期望：1.30',   // b = +3.00
+      '几何期望：1.05',   // b = +0.50
+      '几何期望：0.92',   // b = −0.80，亏损场落在 1.00 以下
+      '几何期望：—',      // 没有有效 bᵢ
     ]);
     expect(screen.queryByText(/峰值浮盈/)).not.toBeInTheDocument();
     expect(screen.getByTestId('campaign-sort-time')).toHaveAttribute('aria-pressed', 'true');

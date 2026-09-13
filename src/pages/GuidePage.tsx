@@ -1552,7 +1552,7 @@ P 不再一把手填，而是拆成三个更可回答的问题：<strong>「这�
               <P>点击卡片右侧的小箭头，会在卡片内部展开战役时间、结构与时长、已实现盈亏和完整 Legs 标签；再次点击即收起。点击卡片其他区域会进入战役详情，详情始终从页面顶部打开；从详情左上角返回时，会恢复进入前的排序参数、方向和列表滚动位置——若你是从散点图点进去的，则回到那张散点图。</P>
 
               <SubTitle>统计概览与排序</SubTitle>
-              <P>「统计概览」与「排序方式」分成上下两行：概览汇总有效战役、镜像止盈、胜率、平均盈亏比、期望值、几何期望、机会质量与不对称风险；排序行只负责改变战役顺序，避免统计与操作混在一起。</P>
+              <P>「统计概览」最前面是<strong>操作时间段</strong>筛选，默认<strong>全部</strong>：它决定后面每一个数的取样范围，按<strong>客观操作时间</strong>切（不受时间机器的模拟时钟影响），起止两天都算在内；可用「近 7 / 30 / 90 天、今年」等预设，也可以自己填起止日期，所选范围写进地址栏，从详情页返回时会跟着回来。<strong>统计概览、战役卡片与散点图读的是同一批战役</strong>，所以会一起跟着收窄——不会出现「统计说 45 场、下面却躺着 230 张卡片」。一旦设了范围，缺少客观操作时间的战役无从安放，会被排除并在浮层里报出场数；批量结束进行中战役等写库操作不受筛选影响，仍然针对全部战役。概览本身汇总有效战役、镜像止盈、胜率、平均盈亏比、期望值、几何期望、机会质量与不对称风险；排序行只负责改变战役顺序，避免统计与操作混在一起。</P>
               <P>统计指标<strong>单击一次</strong>展开公式、有效样本和当前代入值，再单击一次关闭。排序按钮<strong>单击</strong>只执行排序；再次单击同一按钮，在升序与降序之间切换。需要查看排序指标公式时，使用<strong>双击或右键</strong>，不会因为查看说明而误改排序方向。</P>
               <P>默认按<strong>真实操作时间</strong>从新到旧排序；还可以按重要性、预期回撤、机会质量、盈亏比、算术期望、几何期望、镜像止盈、DSI 贡献、USI 贡献或字母顺序双向排序。这里的操作时间是客观发生时间，不是无知之幕时间机器里的模拟时间。</P>
 
@@ -1597,7 +1597,7 @@ P 不再一把手填，而是拆成三个更可回答的问题：<strong>「这�
                     <tr><td className="px-3 py-2 border-t border-border">预期回撤 dᵢ</td><td className="px-3 py-2 border-t border-border">max（|主力开仓价 − 初始对冲 A 价|，|主力开仓价 − 初始对冲 B 价|）÷ 主力开仓价 × 100%</td><td className="px-3 py-2 border-t border-border">至少存在一个有效初始对冲价格；支持列表双向排序，缺少价格的战役不参与排序</td></tr>
                     <tr><td className="px-3 py-2 border-t border-border">机会质量 Qᵢ / Q̄</td><td className="px-3 py-2 border-t border-border">bᵢ* = max（实际盈亏比 bᵢ, 1）；Qᵢ = bᵢ* ÷ 预期回撤百分点 dᵢ；Q̄ = ΣQᵢ ÷ N</td><td className="px-3 py-2 border-t border-border">实际盈亏比小于 1（包括等于 0 或为负数）时统一按 1 计算，不取绝对值。历史价格沿用初始最大预期亏损的同一解析口径</td></tr>
                     <tr><td className="px-3 py-2 border-t border-border">单场算术期望 Eᵢ</td><td className="px-3 py-2 border-t border-border">P(赢) × bᵢ −（1 − P(赢)）</td><td className="px-3 py-2 border-t border-border">使用实时有效战役胜率与该场带符号盈亏比</td></tr>
-                    <tr><td className="px-3 py-2 border-t border-border">单场几何期望 Gᵢ − 1</td><td className="px-3 py-2 border-t border-border">Gᵢ = 1 + bᵢ·x，x 每场统一取 10%，因此 Gᵢ − 1 = bᵢ × 0.1</td><td className="px-3 py-2 border-t border-border">bᵢ 可为负，Gᵢ − 1 随之为负（bᵢ = −1 → −10%）。不乘胜率：单场结果已经发生，bᵢ 就是它的全部。1+bᵢ·x ≤ 0（bᵢ ≤ −10）代表本金被打穿，按 −100% 记</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border">单场几何期望 Gᵢ</td><td className="px-3 py-2 border-t border-border">Gᵢ = 1 + bᵢ·x，x 每场统一取 10%；列里<strong>直接显示这个倍数</strong>（bᵢ = +2 → 1.20，bᵢ = −1 → 0.90）</td><td className="px-3 py-2 border-t border-border"><strong>1.00 是本金不增不减的分界</strong>，线下为亏损场。不乘胜率：单场结果已经发生，bᵢ 就是它的全部。1+bᵢ·x ≤ 0（bᵢ ≤ −10）代表本金被打穿，记 0.00</td></tr>
                     <tr><td className="px-3 py-2 border-t border-border">汇总几何期望 G</td><td className="px-3 py-2 border-t border-border">(1+b·x)^p × (1−x)^(1−p) − 1；x 统一取 10%，b 取盈利战役的平均实际盈亏比，p 取有效战役胜率</td><td className="px-3 py-2 border-t border-border">表示在历史总体参数、每笔固定投入 10% 资金比例下的理论每笔复利率；固定仓位后它的变化只反映 edge 本身，可以纵向比较</td></tr>
                     <tr><td className="px-3 py-2 border-t border-border">n 场累计因子 W（推演）</td><td className="px-3 py-2 border-t border-border">W = (1+b·x)^(n·p) × (1−x)^(n·(1−p)) = G^n，n 取有效战役数</td><td className="px-3 py-2 border-t border-border">把每笔复利率按有效战役场数复利到底的理论总倍数；它是模型推演，不是账户真实收益</td></tr>
                     <tr><td className="px-3 py-2 border-t border-border">实际复利结果 ∏（1+bᵢ·x）</td><td className="px-3 py-2 border-t border-border">把每一场的单场增长因子 1 + bᵢ×0.1 依次相乘</td><td className="px-3 py-2 border-t border-border">不用胜率、也不用平均值，照真实发生的 bᵢ 一场一场走：同样按 10% 的比例下注，本金实际变成几倍。任一场 bᵢ ≤ −10 会把整条路径归零</td></tr>
@@ -1685,7 +1685,7 @@ P 不再一把手填，而是拆成三个更可回答的问题：<strong>「这�
                     <tr><td className="px-3 py-2 border-t border-border">汇总几何期望 G</td><td className="px-3 py-2 border-t border-border">若每笔固定按 10% 的资金比例重复同类战役，理论资本每笔按什么速度复利</td><td className="px-3 py-2 border-t border-border">不是实际历史收益率，也不是对下一笔的保证</td></tr>
                     <tr><td className="px-3 py-2 border-t border-border">实际复利结果 ∏（1+bᵢ·x）</td><td className="px-3 py-2 border-t border-border">同样按 10% 下注，这批战役真实走下来把本金变成了几倍</td><td className="px-3 py-2 border-t border-border">它按的是固定 10% 的假设仓位，不等于账户的真实收益曲线</td></tr>
                     <tr><td className="px-3 py-2 border-t border-border">单场算术期望 Eᵢ</td><td className="px-3 py-2 border-t border-border">把该场事后实际 bᵢ 放回当前总体胜率后，得到怎样的 R 值</td><td className="px-3 py-2 border-t border-border">不是该场建仓时已经知道的事前期望</td></tr>
-                    <tr><td className="px-3 py-2 border-t border-border">单场几何期望 Gᵢ − 1</td><td className="px-3 py-2 border-t border-border">若按固定 10% 的资金比例下这一注，这一场把本金乘成了多少</td><td className="px-3 py-2 border-t border-border">不能仅凭一场结果判断策略未来必然盈利或亏损</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border">单场几何期望 Gᵢ</td><td className="px-3 py-2 border-t border-border">若按固定 10% 的资金比例下这一注，这一场把本金乘成了多少（1.00 = 不增不减）</td><td className="px-3 py-2 border-t border-border">不能仅凭一场结果判断策略未来必然盈利或亏损</td></tr>
                   </tbody>
                 </table>
               </div>
@@ -1698,10 +1698,10 @@ P 不再一把手填，而是拆成三个更可回答的问题：<strong>「这�
               <SubTitle>几何期望为负意味着什么</SubTitle>
               <P>几何期望小于 0，表示相应的复利增长因子小于 1：如果在相同胜率、盈亏结构和风险比例下反复执行，理论账户资产会随次数按复利方式缩水。例如几何期望为 −5%/笔，对应的理论路径约为「初始资产 × 0.95ⁿ」。</P>
               <ul className="list-disc pl-6 text-[14px] text-foreground/90 space-y-1">
-                <li><strong>单场 Gᵢ − 1 与 bᵢ 同号：</strong>固定 x 之后单场几何期望就是 bᵢ 的等比缩放（bᵢ × 0.1），赚的场为正、亏的场为负，不会出现「bᵢ 为正而 Gᵢ 为负」。会出现那种背离的是<strong>汇总</strong>几何期望——它要按胜率把赢腿与亏腿加权，波动拖累就体现在那里。</li>
+                <li><strong>单场 Gᵢ 与 bᵢ 同向：</strong>固定 x 之后 Gᵢ = 1 + bᵢ×0.1 是 bᵢ 的线性变换，赚的场在 1.00 以上、亏的场在 1.00 以下，不会出现「bᵢ 为正而 Gᵢ 低于 1」。也正因为是线性变换，<strong>按几何期望排序与按盈亏比排序的次序完全一致</strong>——它换的是单位（资本倍数），不是次序。会出现「正负背离」的是<strong>汇总</strong>几何期望：它要按胜率把赢腿与亏腿加权，波动拖累体现在那里。</li>
                 <li><strong>bᵢ 为负导致 Gᵢ 为负：</strong>主要描述这场历史结果确实侵蚀了资本；它不等于同类策略未来必然是负期望。</li>
                 <li><strong>算术期望为正但几何期望为负：</strong>表示方向上可能仍有平均优势，但下注过重，长期路径仍可能缩水甚至归零。</li>
-                <li><strong>1+bᵢ·x ≤ 0（即 bᵢ ≤ −10）：</strong>这一场亏掉了十倍于计划最大亏损的钱，按 10% 的下注比例足以打穿本金，增长因子记 0、单场几何期望按 −100% 处理。</li>
+                <li><strong>1+bᵢ·x ≤ 0（即 bᵢ ≤ −10）：</strong>这一场亏掉了十倍于计划最大亏损的钱，按 10% 的下注比例足以打穿本金，Gᵢ 记 0.00。</li>
               </ul>
               <RedHighlight>
                 几何期望为正不是“这场交易正确”的证明，几何期望为负也不是对未来的判决。它首先是一把检查赔率、胜率与仓位是否共同支持长期复利的尺子。

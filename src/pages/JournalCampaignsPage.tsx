@@ -5,6 +5,7 @@ import {
   ArchiveRestore,
   ArrowDown,
   ArrowUp,
+  CalendarRange,
   ChartScatter,
   ChevronDown,
   FolderPlus,
@@ -73,6 +74,18 @@ import {
   summarizeAsymmetricRiskMetrics,
 } from '@/lib/asymmetricRiskMetrics';
 import { selectValidCampaignPerformanceSamples, summarizeCampaignPerformance } from '@/lib/kellySizing';
+import {
+  ALL_CAMPAIGN_OPERATION_RANGE,
+  CAMPAIGN_RANGE_PRESETS,
+  beijingDayKey,
+  describeOperationRange,
+  isAllRange,
+  isValidDayKey,
+  isWithinOperationRange,
+  matchPreset,
+  presetOperationRange,
+  type CampaignOperationRange,
+} from '@/lib/campaignOperationRange';
 import {
   FIXED_DRAWDOWN_FRACTION,
   compoundGrowthFactor,
@@ -186,6 +199,7 @@ type CampaignFormulaPopover =
   | 'importanceSort'
   | 'mirrorTpSort'
   | 'validCampaigns'
+  | 'operationRange'
   | 'mirrorTp'
   | 'winRate'
   | 'averagePayoffRatio'
@@ -366,15 +380,15 @@ const CAMPAIGN_METRIC_CHART_CONFIGS: readonly CampaignMetricChartConfig[] = [
     chartLabel: '几何图',
     seriesLabel: '几何期望时序',
     guide: {
-      yAxis: '按固定 10% 的资金比例下这一注，本场把本金乘成了多少：Gᵢ = 1 + bᵢ×0.1，纵轴是 Gᵢ − 1，单位为每笔百分比。',
-      point: '点越高，本场按同一下注比例换算出的资本增长越大；低于零线的是亏损场，bᵢ 为负、Gᵢ − 1 随之为负。'
-        + '固定 x 之后这一列是 bᵢ 的等比缩放，所以它的形状与盈亏比图一致——差别只在单位。',
+      yAxis: '按固定 10% 的资金比例下这一注，本场把本金乘成了多少：Gᵢ = 1 + bᵢ×0.1，纵轴直接读 Gᵢ——1.00 是本金不增不减。',
+      point: '点越高，本场按同一下注比例换算出的资本增长越大；低于 1.00 的是亏损场（bᵢ 为负）。'
+        + '固定 x 之后 Gᵢ 是 bᵢ 的线性变换，所以它的形状与盈亏比图一致——差别只在单位。',
       colors: [
         { token: 'profit', label: '绿色：几何期望 > 0。' },
         { token: 'loss', label: '红色：几何期望 < 0。' },
         { token: 'neutral', label: '灰色：几何期望 = 0。' },
       ],
-      referenceLines: ['灰色零线：账户复合增长与复合损耗的分界。'],
+      referenceLines: ['灰色的 1.00 线：本金不增不减，线上为增长、线下为损耗。'],
     },
     missingValueLabel: '几何期望',
     colorMode: 'signed',
@@ -534,6 +548,20 @@ function parseCampaignChartParams(search: string): CampaignMetricChartViewState 
   return matched
     ? { open: true, key: matched.key }
     : { open: false, key: DEFAULT_CHART_VIEW_BY_SOURCE.odds ?? 'odds' };
+}
+
+/**
+ * 操作时间段也存进 URL：与排序、散点图同一套做法——从卡片点进详情再返回时
+ * 落回同一条 history 记录，筛选范围要跟着回来，否则统计会在眼皮底下跳回全部。
+ */
+function parseCampaignRangeParams(search: string): CampaignOperationRange {
+  const params = new URLSearchParams(search);
+  const from = params.get('from');
+  const to = params.get('to');
+  return {
+    from: isValidDayKey(from) ? from : null,
+    to: isValidDayKey(to) ? to : null,
+  };
 }
 
 function parseCampaignListParams(search: string): CampaignSortState {
@@ -928,6 +956,10 @@ export default function JournalCampaignsPage() {
   const [rows, setRows] = useState<CampaignCardData[]>([]);
   const [busyCampaignId, setBusyCampaignId] = useState<string | null>(null);
   const [sortState, setSortState] = useState<CampaignSortState>(initialSortState);
+  // 默认全选：进页面先看全部战役，要比较某一段日子再自己框。
+  const [operationRange, setOperationRange] = useState<CampaignOperationRange>(
+    () => parseCampaignRangeParams(location.search),
+  );
   const [formulaPopover, setFormulaPopover] = useState<CampaignFormulaPopover | null>(null);
   const initialChartState = useMemo(
     () => parseCampaignChartParams(location.search),
@@ -957,6 +989,10 @@ export default function JournalCampaignsPage() {
       current.mode === next.mode && current.direction === next.direction
         ? current
         : next
+    ));
+    const nextRange = parseCampaignRangeParams(location.search);
+    setOperationRange(current => (
+      current.from === nextRange.from && current.to === nextRange.to ? current : nextRange
     ));
     // 浏览器前进 / 后退（含详情页返回）时，让散点图跟随 URL 恢复。
     const nextChart = parseCampaignChartParams(location.search);
@@ -1128,6 +1164,25 @@ export default function JournalCampaignsPage() {
     return () => window.cancelAnimationFrame(frame);
   }, [loading, location.key]);
 
+  /**
+   * 所选操作时间段内的战役。统计、卡片、散点图全部读它，**只有**批量操作读原始 rows——
+   * 一次「结束全部进行中战役」若被日期筛选悄悄漏掉几场，那是会写进库的错。
+   *
+   * 全选时返回同一个数组引用，不产生新对象：默认路径下所有下游 memo 一次都不会白算。
+   */
+  const scopedRows = useMemo(() => {
+    if (isAllRange(operationRange)) return rows;
+    return rows.filter(row => isWithinOperationRange(
+      campaignOperationTime(row.legs, row.tradeRecords),
+      operationRange,
+    ));
+  }, [rows, operationRange]);
+  /** 因为没有客观操作时间而被时间段挡在外面的场数——不声不响地少几场是不能接受的。 */
+  const undatedExcludedCount = useMemo(() => {
+    if (isAllRange(operationRange)) return 0;
+    return rows.filter(row => campaignOperationTime(row.legs, row.tradeRecords) == null).length;
+  }, [rows, operationRange]);
+
   const activeCount = useMemo(
     () => rows.filter((row: CampaignCardData) => row.campaign.status === 'active').length,
     [rows],
@@ -1185,11 +1240,11 @@ export default function JournalCampaignsPage() {
   };
 
   const performanceSamples = useMemo(
-    () => rows.map(row => ({
+    () => scopedRows.map(row => ({
       campaign: row.campaign,
       payoffRatio: row.profitCaptureRatio == null ? null : row.profitCaptureRatio / 100,
     })),
-    [rows],
+    [scopedRows],
   );
   const performance = useMemo(
     () => summarizeCampaignPerformance(performanceSamples),
@@ -1222,18 +1277,18 @@ export default function JournalCampaignsPage() {
   );
   // 镜像止盈达成统计（战役维度，全表口径）。
   const mirrorTp = useMemo(
-    () => summarizeMirrorTp(rows.map(row => ({
+    () => summarizeMirrorTp(scopedRows.map(row => ({
       achieved: campaignAchievedMirrorTp(row.legs, row.tradeRecords),
       payoffRatio: rowPayoffRatio(row),
       realizedPnl: row.campaign.final_realized_pnl ?? null,
     }))),
-    [rows],
+    [scopedRows],
   );
   const mirrorTpRateLabel = mirrorTp.achievedRatePct == null ? '—' : `${mirrorTp.achievedRatePct.toFixed(0)}%`;
   const mirrorTpNotAchievedRateLabel = mirrorTp.notAchievedRatePct == null ? '—' : `${mirrorTp.notAchievedRatePct.toFixed(0)}%`;
   const mirrorTpWinRateLabel = mirrorTp.achievedWinRatePct == null ? '—' : `${mirrorTp.achievedWinRatePct.toFixed(0)}%`;
   const opportunityQualityStats = useMemo(() => {
-    const samples = rows.filter(row => (
+    const samples = scopedRows.filter(row => (
       row.opportunityQuality != null && Number.isFinite(row.opportunityQuality)
     ));
     const sum = samples.reduce((total, row) => total + (row.opportunityQuality ?? 0), 0);
@@ -1241,9 +1296,9 @@ export default function JournalCampaignsPage() {
       average: samples.length > 0 ? sum / samples.length : null,
       sampleCount: samples.length,
     };
-  }, [rows]);
+  }, [scopedRows]);
   const displayRows = useMemo<CampaignDisplayData[]>(
-    () => rows.map(row => {
+    () => scopedRows.map(row => {
       const initialRisk = resolveCampaignInitialRiskFraction(
         row.initialExpectedMaxLoss,
         row.legs,
@@ -1265,7 +1320,7 @@ export default function JournalCampaignsPage() {
         ),
       };
     }),
-    [rows, performance.expectedWinRate, currentAccountEquity, user?.id, asymmetricRisk],
+    [scopedRows, performance.expectedWinRate, currentAccountEquity, user?.id, asymmetricRisk],
   );
   const sortedRows = useMemo(
     () => sortCampaignRows(displayRows, sortState),
@@ -1394,6 +1449,22 @@ export default function JournalCampaignsPage() {
     params.set('direction', nextSort.direction);
     const search = params.toString();
     nav({ pathname: location.pathname, search: search ? `?${search}` : '' }, { replace: true });
+  };
+
+  /** 今天（UTC+8 自然日）：预设区间与日期选择器的上限都以它为准。 */
+  const today = beijingDayKey(Date.now());
+  const activePreset = matchPreset(operationRange, today);
+  const updateRangeParams = (nextRange: CampaignOperationRange) => {
+    const params = new URLSearchParams(location.search);
+    params.delete('scope');
+    if (nextRange.from) params.set('from', nextRange.from); else params.delete('from');
+    if (nextRange.to) params.set('to', nextRange.to); else params.delete('to');
+    const search = params.toString();
+    nav({ pathname: location.pathname, search: search ? `?${search}` : '' }, { replace: true });
+  };
+  const applyOperationRange = (nextRange: CampaignOperationRange) => {
+    setOperationRange(nextRange);
+    updateRangeParams(nextRange);
   };
 
   const handleSortChange = (mode: CampaignSortMode) => {
@@ -2017,7 +2088,7 @@ export default function JournalCampaignsPage() {
                       <>
                         <div className="font-medium text-foreground">单场几何期望计算公式</div>
                         <div className="mt-2 rounded bg-muted/60 px-2 py-1.5 font-mono text-foreground">
-                          Gᵢ = 1 + bᵢ·x，单场几何期望 = Gᵢ − 1 = bᵢ·x
+                          单场几何期望 = Gᵢ = 1 + bᵢ·x
                         </div>
                         <div className="mt-2 space-y-1 text-muted-foreground">
                           <div className="rounded border border-border/60 px-2 py-1.5 font-mono leading-relaxed text-foreground/85">
@@ -2025,7 +2096,9 @@ export default function JournalCampaignsPage() {
                           </div>
                           <div>
                             读法：按固定 {fixedFractionLabel} 的资金比例下这一注，赚 bᵢ 个 R 就等于本金乘上 1 + bᵢ×0.1 倍。
-                            例：bᵢ = +2 → Gᵢ = 1.20，本场几何期望 +20%。
+                            列里直接显示这个倍数：bᵢ = +2 → <span className="text-foreground">1.20</span>（本金 ×1.20）；
+                            bᵢ = −1 → <span className="text-foreground">0.90</span>。
+                            <span className="text-foreground">1.00</span> 是本金不增不减的分界。
                           </div>
                           <div>
                             这里不乘胜率：汇总那条 G 要按胜率把赢腿与亏腿加权，因为它推演的是重复下注的长期路径；
@@ -2035,7 +2108,7 @@ export default function JournalCampaignsPage() {
                             x 也不再按该场真实的「最大预期亏损 ÷ 开仓时账户资产」取值：那样会把「这场赔率结构好不好」
                             和「当时账户有多大」搅在一起——同样一场 +2R，早期小账户算出来像重仓豪赌、后期大账户算出来几乎没下注。
                           </div>
-                          <div>若 1+bᵢ·x ≤ 0（即 bᵢ ≤ −10），代表这一注把本金打穿，几何期望记为 −100%。</div>
+                          <div>若 1+bᵢ·x ≤ 0（即 bᵢ ≤ −10），代表这一注把本金打穿，Gᵢ 记为 0.00。</div>
                           <div>缺少有效初始最大预期亏损（因而没有 bᵢ）的战役不参与几何期望排序。</div>
                         </div>
                       </>
@@ -2130,6 +2203,103 @@ export default function JournalCampaignsPage() {
                 <Activity className="h-3.5 w-3.5" />
                 统计概览
               </span>
+            {/**
+              * 操作时间段：放在概览最前，因为它决定了后面每一个数的取样范围。
+              * 默认「全部」；一旦框了范围，卡片、散点图、导出也跟着一起收窄——
+              * 统计说 45 场而下面躺着 230 张卡片，那种页面自己跟自己打架。
+              */}
+            <Popover
+              open={formulaPopover === 'operationRange'}
+              onOpenChange={open => handleFormulaPopoverChange('operationRange', open)}
+            >
+              <PopoverTrigger asChild>
+                <button
+                  type="button"
+                  data-testid="campaign-operation-range"
+                  data-range-active={isAllRange(operationRange) ? undefined : 'true'}
+                  aria-label={`操作时间段 ${describeOperationRange(operationRange)}，当前 ${scopedRows.length} 场，点击选择时间段`}
+                  title="按客观操作时间筛选：统计、卡片与散点图一起收窄"
+                  onClick={event => toggleFormulaPopover(event, 'operationRange')}
+                  className={`inline-flex h-7 shrink-0 select-none items-center justify-center gap-1 whitespace-nowrap rounded border px-2 transition-colors hover:bg-background/70 hover:text-foreground ${
+                    isAllRange(operationRange)
+                      ? 'border-transparent text-foreground/65 hover:border-[#F0B90B]/15'
+                      : 'border-[#F0B90B]/40 bg-[#F0B90B]/10 text-[#9B7600]'
+                  }`}
+                >
+                  <CalendarRange aria-hidden="true" className="h-3 w-3 opacity-60" />
+                  操作时间（{describeOperationRange(operationRange)}）
+                </button>
+              </PopoverTrigger>
+              <PopoverContent align="start" className="w-72 border-border bg-card p-3 text-[11px]">
+                <div className="font-medium text-foreground">按操作时间段筛选</div>
+                <div className="mt-2 flex flex-wrap gap-1">
+                  {CAMPAIGN_RANGE_PRESETS.map(([key, label]) => (
+                    <button
+                      key={key}
+                      type="button"
+                      data-testid={`campaign-range-preset-${key}`}
+                      aria-pressed={activePreset === key}
+                      onClick={() => applyOperationRange(presetOperationRange(key, today))}
+                      className={`h-6 rounded border px-2 text-[10px] transition-colors ${
+                        activePreset === key
+                          ? 'border-[#F0B90B]/40 bg-[#F0B90B]/10 text-[#D89B00]'
+                          : 'border-border text-muted-foreground hover:bg-muted hover:text-foreground'
+                      }`}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+                <div className="mt-2 flex flex-wrap items-center gap-1 text-[10px] text-muted-foreground">
+                  <input
+                    type="date"
+                    aria-label="起始日期"
+                    max={today}
+                    value={operationRange.from ?? ''}
+                    onChange={event => applyOperationRange({
+                      ...operationRange,
+                      from: isValidDayKey(event.target.value) ? event.target.value : null,
+                    })}
+                    className="h-6 rounded border border-border bg-background px-1 font-mono text-[10px] outline-none"
+                  />
+                  <span>至</span>
+                  <input
+                    type="date"
+                    aria-label="结束日期"
+                    max={today}
+                    value={operationRange.to ?? ''}
+                    onChange={event => applyOperationRange({
+                      ...operationRange,
+                      to: isValidDayKey(event.target.value) ? event.target.value : null,
+                    })}
+                    className="h-6 rounded border border-border bg-background px-1 font-mono text-[10px] outline-none"
+                  />
+                </div>
+                <div className="mt-2 space-y-1 text-muted-foreground">
+                  <div>
+                    当前范围 <span className="text-foreground">{describeOperationRange(operationRange)}</span>，
+                    命中 <span className="text-foreground">{scopedRows.length}</span> 场（整表 {rows.length} 场）。
+                  </div>
+                  <div>按<span className="text-foreground">客观操作时间</span>筛选，不受时间机器的模拟时钟影响；起止两天都算在内。</div>
+                  <div>统计概览、战役卡片与散点图读的是同一批战役，所以会一起跟着收窄。</div>
+                  {undatedExcludedCount > 0 ? (
+                    <div data-testid="campaign-range-undated">
+                      另有 {undatedExcludedCount} 场缺少客观操作时间，无从安放，已排除在外。
+                    </div>
+                  ) : null}
+                </div>
+                {!isAllRange(operationRange) ? (
+                  <button
+                    type="button"
+                    data-testid="campaign-range-clear"
+                    onClick={() => applyOperationRange({ ...ALL_CAMPAIGN_OPERATION_RANGE })}
+                    className="mt-2 h-7 w-full rounded border border-border text-[11px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                  >
+                    恢复全部
+                  </button>
+                ) : null}
+              </PopoverContent>
+            </Popover>
             <Popover
               open={formulaPopover === 'validCampaigns'}
               onOpenChange={open => handleFormulaPopoverChange('validCampaigns', open)}
@@ -2699,16 +2869,30 @@ export default function JournalCampaignsPage() {
             <div className="mx-auto w-10 h-10 rounded-full bg-accent flex items-center justify-center">
               <Layers className="w-5 h-5 text-muted-foreground" />
             </div>
-            <div className="text-[13px] font-medium">
-              {SORT_EMPTY_HINTS[sortState.mode] && rows.length > 0
-                ? `暂无${SORT_EMPTY_HINTS[sortState.mode]!.noun}的战役`
-                : '尚无战役'}
-            </div>
-            <div className="text-[12px] text-muted-foreground">
-              {SORT_EMPTY_HINTS[sortState.mode] && rows.length > 0
-                ? SORT_EMPTY_HINTS[sortState.mode]!.hint
-                : '你下次开主力单时会自动创建第一个战役'}
-            </div>
+            {/* 空列表有三种原因，不能都说成「尚无战役」：时间段筛空了、当前排序口径筛空了、真的一场都没有。 */}
+            {!isAllRange(operationRange) && scopedRows.length === 0 ? (
+              <>
+                <div className="text-[13px] font-medium" data-testid="campaign-empty-range">
+                  {describeOperationRange(operationRange)} 内没有战役
+                </div>
+                <div className="text-[12px] text-muted-foreground">
+                  整表共 {rows.length} 场。换一个时间段，或点上方「操作时间」选回全部。
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="text-[13px] font-medium">
+                  {SORT_EMPTY_HINTS[sortState.mode] && scopedRows.length > 0
+                    ? `暂无${SORT_EMPTY_HINTS[sortState.mode]!.noun}的战役`
+                    : '尚无战役'}
+                </div>
+                <div className="text-[12px] text-muted-foreground">
+                  {SORT_EMPTY_HINTS[sortState.mode] && scopedRows.length > 0
+                    ? SORT_EMPTY_HINTS[sortState.mode]!.hint
+                    : '你下次开主力单时会自动创建第一个战役'}
+                </div>
+              </>
+            )}
           </div>
         ) : (
           sortedRows.map(({
