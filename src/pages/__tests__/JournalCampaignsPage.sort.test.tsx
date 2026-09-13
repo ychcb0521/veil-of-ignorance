@@ -597,6 +597,13 @@ describe('JournalCampaignsPage sorting', () => {
     // 切换写回地址栏：从散点图点进详情再返回时，落回的是同一张图
     expect(screen.getByTestId('location-probe-search')).toHaveTextContent('chart=mirrorTpBars');
 
+    // 【评审发现】柱状图的说明面板不能说「按客观操作时间从早到晚等距排列」——它按档位分柱
+    fireEvent.click(screen.getByTestId('campaign-metric-guide-toggle-mirrorTpBars'));
+    const barsGuide = await screen.findByTestId('campaign-metric-guide-mirrorTpBars');
+    expect(barsGuide.textContent).toContain('档位分柱');
+    expect(barsGuide.textContent).not.toContain('按客观操作时间从早到晚等距排列');
+    fireEvent.click(screen.getByTestId('campaign-metric-guide-toggle-mirrorTpBars'));
+
     // 【用户要求】六个档位都在轴上：成交与否 × 盈亏的交叉表，一场都没有的档位留空柱。
     // 中间那档写「持平/进行中」——卡片上未结束的战役显示「已实现·进行中」，两处不能各说各的。
     const summary = screen.getByTestId('campaign-metric-summary-mirrorTpBars');
@@ -777,6 +784,18 @@ describe('JournalCampaignsPage sorting', () => {
     expect(screen.queryByTestId('campaign-metric-tail-count-geometricExpectancyDistribution')).toBeNull();
     // 密度曲线在，说明走的是同一套分布机制
     expect(screen.getByTestId('campaign-metric-density-curve-geometricExpectancyDistribution')).toBeInTheDocument();
+
+    // 【评审发现】说明面板的「横轴」一行必须说这张图自己的事，
+    // 不能照抄盈亏比那套（单位 R、+10R 封顶、−1R 止损墙——这里一样都不成立）
+    fireEvent.click(screen.getByTestId('campaign-metric-guide-toggle-geometricExpectancyDistribution'));
+    const guide = await screen.findByTestId('campaign-metric-guide-geometricExpectancyDistribution');
+    expect(guide.textContent).toContain('横轴就是几何期望本身');
+    expect(guide.textContent).not.toContain('单位 R');
+    expect(guide.textContent).not.toContain('封顶在 +10R');       // 盈亏比才有的封顶
+    expect(guide.textContent).not.toContain('落在墙外');           // 这里根本不画止损墙
+    expect(guide.textContent).toContain('−1R 止损墙与 +10R 封顶在这里不适用');
+    expect(guide.textContent).not.toContain('按客观操作时间从早到晚等距排列');
+    fireEvent.click(screen.getByTestId('campaign-metric-guide-toggle-geometricExpectancyDistribution'));
 
     // 切回时序仍然可用
     fireEvent.click(screen.getByTestId('campaign-geometricExpectancy-view-time'));

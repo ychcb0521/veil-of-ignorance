@@ -687,8 +687,13 @@ export function CampaignMetricScatterPlot({
       <dl className="space-y-1.5">
         <div className="grid grid-cols-[34px_minmax(0,1fr)] gap-2">
           <dt className="font-medium text-[color:var(--chart-ink)]">横轴</dt>
-          {dist ? (
+          {/* 四种横轴各有各的读法，一条都不能串：串了就是在图旁边写一句与图相反的话。 */}
+          {bars ? (
+            <dd>按{metricLabel}的档位分柱，不考虑时间先后；一场都没有的档位也保留空柱，「某一档 0 场」本身就是结论。柱内的左右位置不携带含义——一行放不下时点会并排铺开。</dd>
+          ) : dist && oddsFamily ? (
             <dd>横轴就是盈亏比 b 本身，单位 R，线性刻度，不考虑时间先后。显示区间取 p2–p98 的稳健窗口并封顶在 +10R；超出右缘的极端盈利贴边画成三角并在脚注计数，−1R 左侧的亏损照常落在墙外。</dd>
+          ) : dist ? (
+            <dd>横轴就是{axisLabel ?? metricLabel}本身，线性刻度，不考虑时间先后。显示区间取 p2–p98 的稳健窗口（样本太小时改用四分位栅栏兜底），并且无论如何把盈亏分界圈在窗口内；超出边缘的极端值贴边画成三角并在脚注计数。盈亏比专属的 −1R 止损墙与 +10R 封顶在这里不适用，也不会画出来。</dd>
           ) : (
             <dd>按客观操作时间从早到晚等距排列，每一格代表一场战役；横向距离只表示先后顺序，不表示真实时间间隔。战役较多时图区可左右滚动，点位大小固定不缩小。</dd>
           )}
