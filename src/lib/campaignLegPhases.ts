@@ -126,3 +126,16 @@ export function legDeltaB(pnl: number | null, initialExpectedMaxLoss: number | n
   if (!isFiniteNumber(initialExpectedMaxLoss ?? null) || (initialExpectedMaxLoss as number) <= 0) return null;
   return pnl / (initialExpectedMaxLoss as number);
 }
+
+/** 两位小数下取不到半个刻度的值就是 0：否则会印出「−0.00」这种自相矛盾的读数。 */
+export function roundedDeltaB(delta: number): number {
+  const rounded = Number(delta.toFixed(2));
+  return rounded === 0 ? 0 : rounded;
+}
+
+/** 「+0.43」「-0.06」「0.00」。页面与 PNG 导出共用这一个，两边不许各印各的。 */
+export function formatDeltaB(delta: number | null): string {
+  if (delta == null) return '—';
+  const value = roundedDeltaB(delta);
+  return `${value > 0 ? '+' : ''}${value.toFixed(2)}`;
+}

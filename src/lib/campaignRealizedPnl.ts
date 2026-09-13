@@ -53,6 +53,16 @@ export type RealizedPnlBasis =
   | 'campaign_summary' // 什么都没有，退回落库缓存
   | 'none';
 
+/** 盈亏取自哪一层数据。写在合计行旁边，让用户知道这个数有多硬；页面与 PNG 导出共用。 */
+export function settlementBasisLabel(basis: RealizedPnlBasis): string {
+  if (basis === 'records') return '取自成交记录';
+  if (basis === 'mixed') return '成交记录 + 复盘快照';
+  if (basis === 'leg_snapshots') return '取自复盘快照';
+  if (basis === 'events') return '取自战役事件';
+  if (basis === 'campaign_summary') return '取自落库缓存';
+  return '未结算';
+}
+
 export interface CampaignRealizedPnl {
   /** 本场已实现盈亏（USDT）。无法确定时为 null——绝不用 0 冒充「打平」。 */
   total: number | null;

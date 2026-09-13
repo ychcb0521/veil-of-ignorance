@@ -10,12 +10,12 @@ import { computeInitialMainExposureNotional } from '@/lib/campaignAnalysis';
 import { formatCampaignLeverage, resolveCampaignMainLeverage } from '@/lib/campaignMetrics';
 import { formatCampaignDisplayCode } from '@/lib/campaignCode';
 import { buildCampaignReverseOrderLegMap } from '@/lib/campaignReverseOrderAttribution';
-import { formatFeeCoin, tradeRecordFees } from '@/lib/tradeFees';
+import { formatFeeCoin, sumTradeRecordFees, tradeRecordFees } from '@/lib/tradeFees';
 import { buildMainLegOrdinals } from '@/lib/campaignMainLegOrdinals';
 import { resolveMirrorTpOrderTiming } from '@/lib/campaignMirrorTpOrderTiming';
 import { computeLegPnlContributions } from '@/lib/campaignLegPnl';
-import { computeCampaignRealizedPnl } from '@/lib/campaignRealizedPnl';
-import { legDeltaB, splitMainLegPhases } from '@/lib/campaignLegPhases';
+import { computeCampaignRealizedPnl, settlementBasisLabel } from '@/lib/campaignRealizedPnl';
+import { formatDeltaB, legDeltaB, roundedDeltaB, splitMainLegPhases } from '@/lib/campaignLegPhases';
 import type { TradeCampaign, TradeJournal } from '@/types/journal';
 import type { EmotionDiaryExportSummary } from '@/types/emotionDiary';
 import type { CampaignReverseHedgeOrder, TradeRecord } from '@/types/trading';
@@ -60,7 +60,12 @@ export type CampaignLegsExportCellLine = {
 
 export type CampaignLegsExportRow = {
   legId: string;
+  /** 腿本身 / 主力阶段子行 / 表尾合计。合计行画一道加粗上框，与页面一致。 */
+  kind: 'leg' | 'phase' | 'total';
+  /** 逻辑行：每格「一条信息一行」，与页面同构；读数与测试都以它为准。 */
   cells: CampaignLegsExportCellLine[][];
+  /** 按列宽折好的实际绘制行。行高由它决定——放不下的字折到下一行，而不是被画布横向压扁。 */
+  wrapped: CampaignLegsExportCellLine[][];
   height: number;
 };
 
@@ -79,14 +84,16 @@ type LegsCanvasOptions = {
 const COLUMNS = [
   { title: '#', width: 52 },
   { title: '角色', width: 152 },
-  { title: '时间', width: 284 },
+  // 300：主力阶段子行的「2026-08-07 19:41 → 2026-08-08 13:00」要一行放下，别把时刻和日期拆开
+  { title: '时间', width: 300 },
   { title: '贡献 / 盈亏', width: 150 },
   { title: 'Δb', width: 104 },
   { title: '开仓价', width: 118 },
   { title: '平仓价', width: 118 },
-  { title: '币量 / 仓位', width: 140 },
+  // 150：十亿级币量带两位小数（1,171,163,720.54）要一行放下——拆成两截的数字比挤一点更难读
+  { title: '币量 / 仓位', width: 150 },
   { title: '手续费', width: 132 },
-  { title: '委托', width: 470 },
+  { title: '委托', width: 444 },
 ] as const;
 
 const TABLE_WIDTH = COLUMNS.reduce((sum, column) => sum + column.width, 0);
@@ -215,6 +222,100 @@ function statusForReverseOrder(order: CampaignReverseHedgeOrder): string {
   return '已撤';
 }
 
+/** 格内左右留白（px），绘制与折行共用，两边不许各算各的。 */
+const CELL_PAD_X = 10;
+
+function cellFont(line: CampaignLegsExportCellLine): string {
+  return `${line.bold ? 700 : 500} ${line.size ?? 13}px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace`;
+}
+
+let sharedMeasureContext: CanvasRenderingContext2D | null | undefined;
+function measureContext(): CanvasRenderingContext2D | null {
+  if (sharedMeasureContext !== undefined) return sharedMeasureContext;
+  try {
+    sharedMeasureContext = typeof document === 'undefined'
+      ? null
+      : document.createElement('canvas').getContext('2d') ?? null;
+  } catch {
+    sharedMeasureContext = null;
+  }
+  return sharedMeasureContext;
+}
+
+/** 与绘制同字体量宽；拿不到画布（测试环境）时按等宽字估：CJK 1em、其余 0.62em。 */
+function cellTextWidth(text: string, line: CampaignLegsExportCellLine): number {
+  const ctx = measureContext();
+  if (ctx) {
+    ctx.font = cellFont(line);
+    return ctx.measureText(text).width;
+  }
+  const size = line.size ?? 13;
+  let width = 0;
+  for (const character of text) width += /[\u3000-\u9fff\uff00-\uffef]/.test(character) ? size : size * 0.62;
+  return width;
+}
+
+/**
+ * 把一条放不下的格内文字折成几行，颜色字号原样保留；放得下就原样返回。
+ *
+ * **先按空格断，词内不拆**：「平 104,091」被拆成「平 104」「,091」时，读者会读出两个错的数，
+ * 这比整行被挤一点更糟。只有单个词本身就比格宽时，才退到逐字拆开。
+ * 断行处的空格随之吞掉，其余字符一个不丢。
+ */
+export function wrapCampaignLegsExportLine(
+  line: CampaignLegsExportCellLine,
+  maxWidth: number,
+): CampaignLegsExportCellLine[] {
+  if (!line.text || cellTextWidth(line.text, line) <= maxWidth) return [line];
+  const pieces: string[] = [];
+  let current = '';
+  const flush = () => {
+    const trimmed = current.trimEnd();
+    if (trimmed) pieces.push(trimmed);
+    current = '';
+  };
+  for (const token of line.text.split(/(\s+)/)) {
+    if (!token) continue;
+    if (/^\s+$/.test(token)) {
+      if (current) current += token;
+      continue;
+    }
+    if (cellTextWidth(`${current}${token}`, line) <= maxWidth) {
+      current += token;
+      continue;
+    }
+    flush();
+    if (cellTextWidth(token, line) <= maxWidth) {
+      current = token;
+      continue;
+    }
+    // 单个词比格宽：只有这时才逐字拆
+    let chunk = '';
+    for (const character of Array.from(token)) {
+      if (chunk && cellTextWidth(`${chunk}${character}`, line) > maxWidth) {
+        pieces.push(chunk);
+        chunk = character;
+      } else {
+        chunk += character;
+      }
+    }
+    current = chunk;
+  }
+  flush();
+  return pieces.length > 0 ? pieces.map(text => ({ ...line, text })) : [line];
+}
+
+function layoutExportRow(
+  cells: CampaignLegsExportCellLine[][],
+  minHeight: number,
+): Pick<CampaignLegsExportRow, 'wrapped' | 'height'> {
+  const wrapped = cells.map((cell, index) => (
+    cell.flatMap(line => wrapCampaignLegsExportLine(line, COLUMNS[index].width - CELL_PAD_X * 2))
+  ));
+  const maxLines = Math.max(1, ...wrapped.map(cell => cell.length));
+  return { wrapped, height: Math.max(minHeight, ROW_PAD_Y * 2 + maxLines * LINE_H) };
+}
+
 export function buildCampaignLegsExportRows(input: ExportInput): CampaignLegsExportRow[] {
   const recordMap = buildTradeRecordLookup(input.tradeRecords);
   const mainLegOrdinals = buildMainLegOrdinals(input.legs);
@@ -255,7 +356,7 @@ export function buildCampaignLegsExportRows(input: ExportInput): CampaignLegsExp
   const contributionDenominator = [...legPnlMap.values()]
     .reduce((sum, entry) => sum + (entry.pnl == null ? 0 : Math.abs(entry.pnl)), 0);
 
-  return input.legs.flatMap(leg => {
+  const legRows = input.legs.flatMap((leg): CampaignLegsExportRow[] => {
     const record = leg.trade_record_id ? recordMap.get(leg.trade_record_id) ?? null : null;
     const execution = resolveLegExecution(leg, record, input.legExitPriceCorrections);
     const status = statusForLeg(leg, record);
@@ -348,8 +449,8 @@ export function buildCampaignLegsExportRows(input: ExportInput): CampaignLegsExp
         if (delta == null) return [{ text: '—', color: '#848E9C' }];
         // Δb 是主角：导出图里也用最大字号把它顶出来
         return [{
-          text: `${delta > 0 ? '+' : ''}${delta.toFixed(2)}`,
-          color: delta === 0 ? '#5F6B7A' : delta > 0 ? '#0ECB81' : '#F6465D',
+          text: formatDeltaB(delta),
+          color: roundedDeltaB(delta) === 0 ? '#5F6B7A' : delta > 0 ? '#0ECB81' : '#F6465D',
           bold: true,
           size: 16,
         }];
@@ -391,12 +492,7 @@ export function buildCampaignLegsExportRows(input: ExportInput): CampaignLegsExp
       })(),
       reverseLines,
     ];
-    const maxLines = Math.max(...cells.map(cell => cell.length));
-    const mainRow = {
-      legId: leg.id,
-      cells,
-      height: Math.max(58, ROW_PAD_Y * 2 + maxLines * LINE_H),
-    };
+    const mainRow: CampaignLegsExportRow = { legId: leg.id, kind: 'leg', cells, ...layoutExportRow(cells, 58) };
 
     // 主力行后追加阶段子行（≥2 段才有意义）
     if (leg.leg_role !== 'main_open' && leg.leg_role !== 'reentry_main') return [mainRow];
@@ -415,12 +511,14 @@ export function buildCampaignLegsExportRows(input: ExportInput): CampaignLegsExp
     const phaseRows = phases.map(phase => {
       const delta = legDeltaB(phase.pnl, input.initialExpectedMaxLoss ?? null);
       const contribution = contributionDenominator > 0 ? phase.pnl / contributionDenominator : null;
-      return {
-        legId: `${leg.id}-phase-${phase.index}`,
-        cells: [
+      const phaseCells: CampaignLegsExportCellLine[][] = [
           [{ text: '' }],
           [{ text: `阶段 ${phase.index}${phase.boundaryLegId == null ? ' · 收尾' : ''}`, color: '#848E9C' }],
-          [{ text: `${fmtClock(phase.startTime)} → ${fmtClock(phase.endTime)}`, color: '#848E9C' }],
+          [
+            { text: `${fmtClock(phase.startTime)} → ${fmtClock(phase.endTime)}`, color: '#848E9C' },
+            // 与页面同源：由对冲结束切出来的阶段要标明，否则读不出这一段为什么在这里断开
+            ...(phase.boundaryLegId != null ? [{ text: '对冲结束切段', color: '#6D28D9', size: 10 }] : []),
+          ],
           [
             {
               text: contribution == null ? '—' : `${contribution > 0 ? '+' : ''}${(contribution * 100).toFixed(1)}%`,
@@ -432,20 +530,68 @@ export function buildCampaignLegsExportRows(input: ExportInput): CampaignLegsExp
             },
           ],
           [{
-            text: delta == null ? '—' : `${delta > 0 ? '+' : ''}${delta.toFixed(2)}`,
-            color: delta == null || delta === 0 ? '#5F6B7A' : delta > 0 ? '#0ECB81' : '#F6465D',
+            text: formatDeltaB(delta),
+            color: delta == null || roundedDeltaB(delta) === 0 ? '#5F6B7A' : delta > 0 ? '#0ECB81' : '#F6465D',
           }],
           [{ text: fmtPrice(phase.startPrice), color: '#848E9C' }],
           [{ text: fmtPrice(phase.endPrice), color: '#848E9C' }],
           [{ text: '' }],
           [{ text: '' }],
           [{ text: '' }],
-        ],
-        height: Math.max(44, ROW_PAD_Y * 2 + 2 * LINE_H),
+      ];
+      return {
+        legId: `${leg.id}-phase-${phase.index}`,
+        kind: 'phase' as const,
+        cells: phaseCells,
+        ...layoutExportRow(phaseCells, 44),
       };
     });
     return [mainRow, ...phaseRows];
   });
+
+  // 合计行：与页面 legs-total-row 同源——Σ盈亏按构造恒等于盈亏概览的已实现 P&L，
+  // 手续费按成交记录去重。页面上有、导出图上没有，就是图不完整。
+  const totalPnl = settlement.total ?? null;
+  const totalDeltaB = legDeltaB(totalPnl, input.initialExpectedMaxLoss ?? null);
+  const feeTotals = sumTradeRecordFees(input.legs.flatMap(leg => {
+    const rec = leg.trade_record_id ? recordMap.get(leg.trade_record_id) ?? null : null;
+    return rec ? [rec] : [];
+  }));
+  const tone = (value: number | null) => (
+    value == null || value === 0 ? '#5F6B7A' : value > 0 ? '#0ECB81' : '#F6465D'
+  );
+  const totalCells: CampaignLegsExportCellLine[][] = [
+    [{ text: '' }],
+    [{ text: '合计', bold: true, color: '#5F6B7A' }],
+    [{ text: settlementBasisLabel(settlement.basis), color: '#848E9C', size: 11 }],
+    [{
+      text: totalPnl == null ? '—' : `${totalPnl > 0 ? '+' : ''}${totalPnl.toFixed(2)}`,
+      color: tone(totalPnl),
+      bold: true,
+    }],
+    [{
+      text: formatDeltaB(totalDeltaB),
+      color: tone(totalDeltaB == null ? null : roundedDeltaB(totalDeltaB)),
+      bold: true,
+      size: 16,
+    }],
+    [{ text: '' }],
+    [{ text: '' }],
+    [{ text: '' }],
+    feeTotals == null
+      ? [{ text: '—', color: '#A3ABB8' }]
+      : [
+        { text: `${feeTotals.totalUsd.toFixed(2)}${feeTotals.estimated ? ' 估' : ''}`, color: '#5F6B7A', size: 11 },
+        ...(feeTotals.totalCoin != null
+          ? [{ text: `币计 ${formatFeeCoin(feeTotals.totalCoin, feeTotals.asset)}`, color: '#9AA4B2', size: 10 }]
+          : []),
+      ],
+    [{ text: '' }],
+  ];
+  return [
+    ...legRows,
+    { legId: 'legs-total', kind: 'total', cells: totalCells, ...layoutExportRow(totalCells, 44) },
+  ];
 }
 
 export function campaignLegsExportCanvasHeight(input: ExportInput, includeHeader = false): number {
@@ -513,17 +659,20 @@ function strokeRoundedRect(
   ctx.stroke();
 }
 
+/**
+ * 逐行画格内文字。行已按列宽折好，这里**不再**给 fillText 传 maxWidth——
+ * 传了，画布会把放不下的字横向压扁到糊成一团，那正是「导出图内容不完整」的来路。
+ */
 function drawLines(
   ctx: CanvasRenderingContext2D,
   lines: CampaignLegsExportCellLine[],
   x: number,
   y: number,
-  maxWidth: number,
 ) {
   lines.forEach((line, index) => {
-    ctx.font = `${line.bold ? 700 : 500} ${line.size ?? 13}px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace`;
+    ctx.font = cellFont(line);
     ctx.fillStyle = line.color ?? '#202630';
-    ctx.fillText(line.text, x, y + index * LINE_H, maxWidth);
+    ctx.fillText(line.text, x, y + index * LINE_H);
   });
 }
 
@@ -549,16 +698,22 @@ function drawLegsTable(ctx: CanvasRenderingContext2D, rows: CampaignLegsExportRo
     ctx.moveTo(MARGIN_X, y + row.height);
     ctx.lineTo(MARGIN_X + TABLE_WIDTH, y + row.height);
     ctx.stroke();
+    if (row.kind === 'total') {
+      // 合计行与页面一样压一道加粗上框，和上面的腿分开
+      ctx.fillStyle = '#CBD5E1';
+      ctx.fillRect(MARGIN_X, y, TABLE_WIDTH, 2);
+    }
 
-    row.cells.forEach((cell, cellIndex) => {
-      drawLines(ctx, cell, x + 10, y + ROW_PAD_Y + 12, COLUMNS[cellIndex].width - 20);
+    row.wrapped.forEach((cell, cellIndex) => {
+      drawLines(ctx, cell, x + CELL_PAD_X, y + ROW_PAD_Y + 12);
       x += COLUMNS[cellIndex].width;
     });
     y += row.height;
   });
 }
 
-function buildCampaignLegsListCanvas(input: ExportInput, options: LegsCanvasOptions = {}): RenderedCanvas {
+/** 画出 Legs 列表画布（不下载）。导出与本地目检共用，所见即所导。 */
+export function buildCampaignLegsListCanvas(input: ExportInput, options: LegsCanvasOptions = {}): RenderedCanvas {
   const rows = buildCampaignLegsExportRows(input);
   const includeHeader = options.includeHeader ?? true;
   const headerHeight = includeHeader ? HEADER_H : 0;

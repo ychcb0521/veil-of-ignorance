@@ -6,6 +6,7 @@ import {
   drawEmotionDiaryPanel,
   buildCampaignLegsExportRows,
   campaignLegsExportCanvasHeight,
+  wrapCampaignLegsExportLine,
   formatCampaignChartInterval,
   type CampaignBoardExportInput,
 } from '@/lib/campaignLegsPngExport';
@@ -172,13 +173,16 @@ describe('campaign PNG overview', () => {
       reverseHedgeOrders: [],
     });
 
-    expect(rows).toHaveLength(14);
-    expect(rows.at(-1)?.legId).toBe('leg-14');
-    expect(rows.at(-1)?.cells[0][0].text).toBe('14');
-    expect(rows.at(-1)?.cells[5][0].text).toBe('113.0000');
+    // 14 条腿 + 表尾合计行
+    const legRows = rows.filter(row => row.kind === 'leg');
+    expect(legRows).toHaveLength(14);
+    expect(rows.at(-1)?.kind).toBe('total');
+    expect(legRows.at(-1)?.legId).toBe('leg-14');
+    expect(legRows.at(-1)?.cells[0][0].text).toBe('14');
+    expect(legRows.at(-1)?.cells[5][0].text).toBe('113.0000');
     // 币量在上、名义在下：1013 ÷ 113 = 8.96
-    expect(rows.at(-1)?.cells[7][0].text).toBe('8.96');
-    expect(rows.at(-1)?.cells[7][1].text).toBe('1013.00');
+    expect(legRows.at(-1)?.cells[7][0].text).toBe('8.96');
+    expect(legRows.at(-1)?.cells[7][1].text).toBe('1013.00');
     expect(campaignLegsExportCanvasHeight({
       ...input(),
       legs: manyLegs,
@@ -425,5 +429,99 @@ describe('【用户要求】情绪日记折叠后，导出图片也只保留标�
   it('折叠态经由导出输入进到概览里', () => {
     expect(buildCampaignBoardOverview({ ...input(), emotionDiaryCollapsed: true }).emotionDiaryCollapsed).toBe(true);
     expect(buildCampaignBoardOverview(input()).emotionDiaryCollapsed).toBe(false);
+  });
+});
+
+describe('【用户要求】导出图要把 Legs 里的信息全部纳入', () => {
+  it('表尾有合计行：盈亏取数来源、Σ盈亏、Σ Δb、手续费合计——与页面合计行同源', () => {
+    const rows = buildCampaignLegsExportRows(input());
+    const total = rows.at(-1)!;
+    expect(total.kind).toBe('total');
+    expect(total.legId).toBe('legs-total');
+    expect(total.cells[1][0].text).toBe('合计');
+    expect(total.cells[2][0].text).toMatch(/^(取自成交记录|成交记录 \+ 复盘快照|取自复盘快照|取自战役事件|取自落库缓存|未结算)$/);
+    expect(total.cells[3][0].text).toMatch(/^([+-]?\d+\.\d{2}|—)$/);
+    expect(total.cells[4][0].text).toMatch(/^([+-]?\d+\.\d{2}|—)$/);
+    expect(total.cells[FEE_COL][0].text).toMatch(/^(\d+\.\d{2}( 估)?|—)$/);
+    // 合计行只有一行，不会混进腿的计数
+    expect(rows.filter(row => row.kind === 'total')).toHaveLength(1);
+  });
+
+  /** 断行处的空格会被吞掉，比较时忽略空白；其余字符必须一个不少。 */
+  const squash = (text: string) => text.replace(/\s+/g, '');
+
+  it('放不下的字折行而不是被压扁：一个字都不丢，只多出行', () => {
+    const line = { text: 'K线 0.0655170-0.0685660', color: '#848E9C' };
+    const narrow = wrapCampaignLegsExportLine(line, 98);
+    expect(narrow.length).toBeGreaterThan(1);
+    expect(squash(narrow.map(item => item.text).join(''))).toBe(squash(line.text));
+    expect(narrow.every(item => item.color === '#848E9C')).toBe(true);
+    // 放得下就原样返回
+    expect(wrapCampaignLegsExportLine({ text: '0.0677819' }, 98)).toEqual([{ text: '0.0677819' }]);
+  });
+
+  it('先按空格断，数字不会被拆成两截', () => {
+    const text = '开 468,465 · 平 104,091 1000PEPE';
+    const pieces = wrapCampaignLegsExportLine({ text, size: 10 }, 112).map(item => item.text);
+    expect(pieces.length).toBeGreaterThan(1);
+    const tokens = new Set(text.split(/\s+/));
+    // 折出来的每个词都是原文里完整的词——没有「104」「,091」这种半截
+    for (const word of pieces.flatMap(piece => piece.split(/\s+/))) {
+      expect(tokens.has(word)).toBe(true);
+    }
+  });
+
+  it('只有单个词比格宽时才逐字拆，拆完拼回去仍是原词', () => {
+    const word = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+    const pieces = wrapCampaignLegsExportLine({ text: word }, 40).map(item => item.text);
+    expect(pieces.length).toBeGreaterThan(1);
+    expect(pieces.join('')).toBe(word);
+  });
+
+  it('每一格折行后拼回去与原文完全一致，行高按折好的行数撑开', () => {
+    const rows = buildCampaignLegsExportRows(input());
+    for (const row of rows) {
+      row.cells.forEach((cell, index) => {
+        expect(squash(row.wrapped[index].map(line => line.text).join('')))
+          .toBe(squash(cell.map(line => line.text).join('')));
+        expect(row.wrapped[index].length).toBeGreaterThanOrEqual(cell.length);
+      });
+      const tallest = Math.max(...row.wrapped.map(cell => cell.length));
+      expect(row.height).toBeGreaterThanOrEqual(tallest * 17);
+    }
+  });
+});
+
+describe('【用户要求】主力阶段子行在导出图里也标明「对冲结束切段」', () => {
+  const T = (hhmm: string) => `2026-08-07T${hhmm}:00.000Z`;
+  const phaseLegs = [
+    {
+      id: 'main', leg_sequence: 1, leg_role: 'main_open', order_kind: 'main', direction: 'long',
+      source: 'retroactive_from_record',
+      pre_simulated_time: T('01:00'), pre_entry_price: 0.0336792, pre_position_size: 94300,
+      post_exit_price_snapshot: 0.0677819, post_simulated_close_time: T('09:00'), post_realized_pnl: 95439.77,
+    },
+    {
+      id: 'hedge-roll', leg_sequence: 2, leg_role: 'hedge_rolling', order_kind: 'hedge', direction: 'short',
+      source: 'retroactive_from_record',
+      pre_simulated_time: T('03:00'), pre_entry_price: 0.05, pre_position_size: 50000,
+      post_exit_price_snapshot: 0.052, post_simulated_close_time: T('05:00'), post_realized_pnl: -2000,
+    },
+  ] as unknown as TradeJournal[];
+
+  it('由对冲切出来的阶段带标签，收尾阶段不带；合计行照常在最后', () => {
+    const rows = buildCampaignLegsExportRows({ ...input(), legs: phaseLegs, initialExpectedMaxLoss: 20000 });
+    const phases = rows.filter(row => row.kind === 'phase');
+    expect(phases.length).toBeGreaterThanOrEqual(2);
+    const cut = phases.find(row => row.cells[1][0].text === '阶段 1')!;
+    const tail = phases.find(row => row.cells[1][0].text.includes('收尾'))!;
+    expect(cut.cells[2].map(line => line.text)).toContain('对冲结束切段');
+    expect(tail.cells[2].map(line => line.text)).not.toContain('对冲结束切段');
+    // 阶段子行的行高跟着多出来的这一行撑开
+    expect(cut.height).toBeGreaterThanOrEqual(cut.wrapped[2].length * 17);
+    const total = rows.at(-1)!;
+    expect(total.kind).toBe('total');
+    expect(total.cells[2][0].text).toBe('取自复盘快照');
+    expect(total.cells[3][0].text).toBe('+93439.77');
   });
 });

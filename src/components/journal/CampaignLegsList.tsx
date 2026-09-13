@@ -9,8 +9,8 @@ import { buildMainLegOrdinals } from '@/lib/campaignMainLegOrdinals';
 import { resolveMirrorTpOrderTiming } from '@/lib/campaignMirrorTpOrderTiming';
 import type { CampaignEvent, TradeJournal } from '@/types/journal';
 import { computeLegPnlContributions, sumLegPnl } from '@/lib/campaignLegPnl';
-import { computeCampaignRealizedPnl } from '@/lib/campaignRealizedPnl';
-import { legDeltaB, splitMainLegPhases, type MainLegPhase } from '@/lib/campaignLegPhases';
+import { computeCampaignRealizedPnl, settlementBasisLabel } from '@/lib/campaignRealizedPnl';
+import { formatDeltaB, legDeltaB, roundedDeltaB, splitMainLegPhases, type MainLegPhase } from '@/lib/campaignLegPhases';
 import { formatFeeCoin, sumTradeRecordFees, tradeRecordFees } from '@/lib/tradeFees';
 import type { CampaignReverseHedgeOrder, TradeRecord } from '@/types/trading';
 
@@ -26,16 +26,6 @@ interface Props {
   onDetach?: (leg: TradeJournal) => void;
   /** 战役的初始最大预期亏损 L（USDT）；Δb 列 = 各腿盈亏 ÷ L。缺失时 Δb 显示「—」。 */
   initialExpectedMaxLoss?: number | null;
-}
-
-/** 盈亏取自哪一层数据。写在合计行旁边，让用户知道这个数有多硬。 */
-function settlementBasisLabel(basis: string): string {
-  if (basis === 'records') return '取自成交记录';
-  if (basis === 'mixed') return '成交记录 + 复盘快照';
-  if (basis === 'leg_snapshots') return '取自复盘快照';
-  if (basis === 'events') return '取自战役事件';
-  if (basis === 'campaign_summary') return '取自落库缓存';
-  return '未结算';
 }
 
 /** closed 是常态：状态不再占一列，只有**不是**已平仓时才在角色旁标一枚小标签。 */
@@ -112,18 +102,6 @@ function deltaTone(delta: number | null): string {
     : 'bg-[#F6465D]/[0.12] text-[#F6465D]';
 }
 
-/** 两位小数下取不到半个刻度的值就是 0：否则会印出「−0.00」这种自相矛盾的读数。 */
-function roundedDeltaB(delta: number): number {
-  const rounded = Number(delta.toFixed(2));
-  return rounded === 0 ? 0 : rounded;
-}
-
-/** 「+0.43」「-0.06」「0.00」。 */
-function formatDeltaB(delta: number | null): string {
-  if (delta == null) return '—';
-  const value = roundedDeltaB(delta);
-  return `${value > 0 ? '+' : ''}${value.toFixed(2)}`;
-}
 
 /** 时间列里「开 / 平 / 操作」三个标签的定宽，保证三行时间戳起点对齐。 */
 const TIME_LABEL = 'inline-block w-[30px] text-muted-foreground';
