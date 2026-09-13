@@ -785,6 +785,12 @@ describe('JournalCampaignsPage sorting', () => {
     // 密度曲线在，说明走的是同一套分布机制
     expect(screen.getByTestId('campaign-metric-density-curve-geometricExpectancyDistribution')).toBeInTheDocument();
 
+    // 【用户要求】b 很重要：镜像止盈之外的散点图，悬停 / 聚焦也要报得出这一场的 b
+    const geoPoints = [...screen.getByTestId('campaign-metric-scatter-plot')
+      .querySelectorAll<HTMLElement>('button[data-campaign-id]')];
+    expect(geoPoints.length).toBeGreaterThan(0);
+    expect(geoPoints.some(node => /· b [+-]\d+\.\d{2}R/.test(node.getAttribute('aria-label') ?? ''))).toBe(true);
+
     // 【评审发现】说明面板的「横轴」一行必须说这张图自己的事，
     // 不能照抄盈亏比那套（单位 R、+10R 封顶、−1R 止损墙——这里一样都不成立）
     fireEvent.click(screen.getByTestId('campaign-metric-guide-toggle-geometricExpectancyDistribution'));

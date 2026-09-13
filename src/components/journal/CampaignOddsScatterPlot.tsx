@@ -386,9 +386,16 @@ export function CampaignMetricScatterPlot({
   // 柱状与分布都按横轴堆叠、纵轴读场数；区别只在横轴是离散档位还是连续数值。
   const bars = view === 'bars';
   const stacked = distribution || bars;
-  // 镜像止盈只有四个档位，点上读不出这一场赚亏了多少个 R，提示框里补一个 b 才判断得了。
-  // 盈亏比图不补：它的轴本身就是 b。其余指标暂不补，免得每张图的提示框都挂一串数。
-  const showPayoffRatio = metricKey.startsWith('mirrorTp');
+  /** 盈亏比那一族：轴本身就是 b。窗口也只有它带 −1R 止损墙与 +10R 封顶。 */
+  const oddsFamily = metricKey.startsWith('odds');
+  /**
+   * 提示框一律补上这一场的 b。
+   *
+   * 每张图的纵轴各说各的（档位、回撤、质量、重要度、贡献率……），但「这一场赚亏了多少个 R」
+   * 是所有这些数字共同的落脚点——看到一个点很靠上，下一句想问的总是「那它到底赚了多少」。
+   * 盈亏比那一族除外：它的轴本身就是 b，再报一遍是把同一个数写两次。
+   */
+  const showPayoffRatio = !oddsFamily;
   const lossBoundaryValue = metricKey === 'odds' ? -1 : null;
   const chartPoints = useMemo(
     () => points.map(point => ({
@@ -421,8 +428,6 @@ export function CampaignMetricScatterPlot({
   const ticks = scale.ticks;
   const activePoint = chartPoints.find(point => point.campaignId === activeCampaignId) ?? null;
   // 分布视图的窗口、摘要、带宽都由同一份纯函数派生，和时序视图互不影响。
-  /** 盈亏比的分布窗口带着 −1R 止损墙与 +10R 封顶；别的指标没有这两条假设，走通用窗口。 */
-  const oddsFamily = metricKey.startsWith('odds');
   const dist = useMemo(
     () => (distribution
       ? buildOddsDistributionModel(chartPoints, oddsFamily ? {} : { domain: metricDistributionDomain })
