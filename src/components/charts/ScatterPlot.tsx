@@ -972,15 +972,19 @@ export function ScatterPlot({
                       return (
                         <span
                           key={`xc-${category.value}`}
-                          className="absolute flex -translate-x-1/2 flex-col items-center whitespace-nowrap pt-1 leading-tight"
-                          style={{ left: `${PLOT_INSET.left + step * (index + 0.5)}px`, top: 0 }}
+                          // 宽度锁死成一列：类目名长起来（「未实现·持平/进行中」）时宁可截断，
+                          // 也不能让相邻两列的名字叠在一起——叠起来是一串读不出来的字。
+                          className={`absolute flex -translate-x-1/2 flex-col items-center pt-1 leading-tight ${
+                            xAxis.categories.length >= 5 ? 'text-[8px]' : ''
+                          }`}
+                          style={{ left: `${PLOT_INSET.left + step * (index + 0.5)}px`, top: 0, width: `${step}px` }}
                         >
-                          <span>{category.label}</span>
+                          <span className="max-w-full truncate" title={category.label}>{category.label}</span>
                           {/* 柱高只能读个大概，精确场数就写在柱脚下——不必回到图例上找。 */}
                           {category.sublabel ? (
                             <span
                               data-testid={`chart-category-count-${category.value}`}
-                              className="text-[color:var(--chart-ink-secondary)]"
+                              className="max-w-full truncate text-[color:var(--chart-ink-secondary)]"
                             >
                               {category.sublabel}
                             </span>

@@ -231,9 +231,10 @@ export function columnStackLayout(points: StackLayoutPoint[], options: ColumnSta
   };
 
   const buckets = Array.from({ length: slots }, () => [] as StackLayoutPoint[]);
+  // 列内**按调用方给的顺序**自底向上码放：谁在前谁在下。
+  // 这里不再自作主张按 id 排——排序键是有含义的（镜像止盈按 |b| 从小到大往上堆），
+  // 只有调用方知道那是什么。确定性因此也由调用方负责：给一个稳定的顺序进来。
   for (const point of points) buckets[indexOf(point.x)].push(point);
-  // 列内按 id 排，重复渲染永远得到同一张图。
-  for (const bucket of buckets) bucket.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
 
   const columnCounts = buckets.map(bucket => bucket.length);
   const tallest = columnCounts.reduce((max, count) => Math.max(max, count), 0);

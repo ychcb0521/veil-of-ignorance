@@ -244,11 +244,26 @@ describe('columnStackLayout 类目柱状堆叠', () => {
     expect(lastColumn).toHaveLength(2);
   });
 
-  it('同样的输入重复算出同一张图（点位可重复渲染）', () => {
-    const points = colPts({ 0: 9, 1: 4, 3: 7 });
-    const a = columnStackLayout(points, COLUMN_OPTS);
-    const b = columnStackLayout([...points].reverse(), COLUMN_OPTS);
-    const key = (list: typeof a.placed) => list.map(i => `${i.id}@${i.cx},${i.cy}`).sort().join('|');
-    expect(key(a.placed)).toBe(key(b.placed));
+  it('【用户要求】列内按调用方给的顺序自底向上码放：谁在前谁在下', () => {
+    // 同一档十个点，调用方按 |b| 从小到大喂进来
+    const points = Array.from({ length: 10 }, (_, i) => ({ id: `m${i}`, x: 0 }));
+    const result = columnStackLayout(points, COLUMN_OPTS);
+    const byId = new Map(result.placed.map(item => [item.id, item]));
+    // rank 递增 = 越往上；cy 越小越靠上
+    for (let i = 1; i < points.length; i += 1) {
+      expect(byId.get(`m${i}`)!.rank).toBeGreaterThan(byId.get(`m${i - 1}`)!.rank);
+    }
+    const rows = points.map(p => byId.get(p.id)!.cy);
+    expect(Math.min(...rows)).toBe(byId.get('m9')!.cy);   // 最后喂进来的在最上面那一行
+    expect(Math.max(...rows)).toBe(byId.get('m0')!.cy);   // 第一个喂进来的在最底下那一行
+  });
+
+  it('顺序变了，图跟着变——不再自作主张按 id 重排', () => {
+    const points = colPts({ 0: 6 });
+    const forward = columnStackLayout(points, COLUMN_OPTS);
+    const reversed = columnStackLayout([...points].reverse(), COLUMN_OPTS);
+    const rankOf = (r: typeof forward, id: string) => r.placed.find(i => i.id === id)!.rank;
+    expect(rankOf(forward, 'c0-0')).toBe(0);
+    expect(rankOf(reversed, 'c0-0')).toBe(5);
   });
 });

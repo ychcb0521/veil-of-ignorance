@@ -657,6 +657,26 @@ describe('JournalCampaignsPage sorting', () => {
     // 未实现那一侧现在按盈亏拆成三柱：亏损柱只有红点、盈利柱只有绿点
     expect(tokensByColumn.get(0)).toEqual(new Set(['loss']));
     expect(tokensByColumn.get(2)).toEqual(new Set(['profit']));
+
+    // 【用户要求】柱内自底向上按 |b| 从小到大：底下是小赚小亏，越往上越极端
+    const byColumnPoints = new Map<number, { top: number; magnitude: number }[]>();
+    for (const node of buttons) {
+      const value = Number(node.dataset.metricValue);
+      const match = /· b ([+-]\d+\.\d{2})R/.exec(node.getAttribute('aria-label') ?? '');
+      if (!match) continue;
+      byColumnPoints.set(value, [
+        ...(byColumnPoints.get(value) ?? []),
+        { top: Number.parseFloat(node.style.top), magnitude: Math.abs(Number(match[1])) },
+      ]);
+    }
+    for (const [, column] of byColumnPoints) {
+      if (column.length < 2) continue;
+      // top% 越小越靠上；按 top 降序（自底向上）读出来的 |b| 必须不减
+      const bottomUp = [...column].sort((a, b) => b.top - a.top);
+      for (let index = 1; index < bottomUp.length; index += 1) {
+        expect(bottomUp[index].magnitude).toBeGreaterThanOrEqual(bottomUp[index - 1].magnitude);
+      }
+    }
     const profitPoint = buttons.find(node => node.dataset.seriesToken === 'profit')!;
     expect(profitPoint.dataset.pnlSign).toBe('positive');
     const lossPoint = buttons.find(node => node.dataset.seriesToken === 'loss')!;

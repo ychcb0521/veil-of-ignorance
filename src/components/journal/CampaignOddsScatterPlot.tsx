@@ -107,6 +107,11 @@ function valuePosition(value: number, min: number, max: number) {
   return 100 - ((value - min) / (max - min)) * 100;
 }
 
+/** 柱内堆叠用的幅度键：|b|；没有有效 b 的排在最底下。 */
+function stackMagnitude(payoffRatio: number | null | undefined): number {
+  return payoffRatio != null && Number.isFinite(payoffRatio) ? Math.abs(payoffRatio) : -1;
+}
+
 function metricPlotValue(metricKey: string, value: number) {
   return metricKey === 'expectedDrawdownPct' ? -Math.abs(value) : value;
 }
@@ -482,7 +487,17 @@ export function CampaignMetricScatterPlot({
   const orderedPoints = dist
     ? dist.sortedPoints
     : bars
-      ? [...chartPoints].sort((a, b) => a.value - b.value || a.campaignId.localeCompare(b.campaignId))
+      /**
+       * 柱状图：先按档位分柱，柱内按 |b| 从小到大——**这就是自底向上的码放顺序**，
+       * 柱子于是自带一条幅度梯度：底下是勉强够格的小赚小亏，越往上这一档的战役越极端。
+       * 没有有效 b 的（进行中）沉到底：说不出幅度，就不占幅度的位次。
+       * 键盘左右键沿的也是这个顺序。
+       */
+      ? [...chartPoints].sort((a, b) => (
+        a.value - b.value
+        || stackMagnitude(a.payoffRatio) - stackMagnitude(b.payoffRatio)
+        || a.campaignId.localeCompare(b.campaignId)
+      ))
       : chartPoints;
   const scatterPoints = useMemo<ScatterPoint[]>(
     () => orderedPoints.map((point, index) => {
