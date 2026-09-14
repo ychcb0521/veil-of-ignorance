@@ -274,6 +274,21 @@ export interface HeldPositionSummary {
   legCount: number;
   /** 最早一条腿的开仓时间（模拟时钟），用于框定「本场」 */
   earliestOpenTime: number | null;
+  /**
+   * 最早一笔成交的**真实**开仓时刻（各仓位 openedRealAt 与各 fill openedRealAt 取最小）。
+   *
+   * 时光机里同一段历史可以重放很多遍，模拟时间在各次重放之间是撞车的——
+   * 只靠 earliestOpenTime 框「本场」，别的重放里模拟时刻更晚的止盈会被混进来。
+   * 真实时钟不会倒流，所以它才是「当前持仓从哪一刀开始」的可靠起点。
+   * 只要有一笔成交没有真实时刻（老仓位，或在老仓位上新加的一刀）就为 null——
+   * 缺的那笔恰恰可能是最早的，取剩下的最小值会把起点算晚。
+   */
+  earliestOpenedRealAt: number | null;
+}
+
+/** 真实时间戳：有限且为正；缺失 / 0 / NaN 一律视为「不知道」。 */
+function realTs(v: unknown): number | null {
+  return fin(v) && v > 0 ? v : null;
 }
 
 /** 把某标的某方向的所有未平仓位折成公式要的 (X₁, S̄)。 */
@@ -288,6 +303,11 @@ export function readHeldPosition(
   const rows: Array<{ coins: number; entryPrice: number }> = [];
   let notional = 0;
   let earliest: number | null = null;
+  let earliestReal: number | null = null;
+  // 真实起点只有**每一笔**成交都带真实时刻时才可知。9-07 之前开的老腿没有时间戳，
+  // 在它上面新加一刀时，只取有时间戳的最小值会落到那一刀——比真正的起点晚，
+  // 本场自己的止盈反被当成别的重放排除。所以缺一笔就整体记为不知道，退回模拟口径。
+  let realKnown = true;
   for (const p of legs) {
     const coins = legOpeningCoins(p, defaultFaceUsd);
     if (!(coins > 0)) continue;
@@ -296,6 +316,13 @@ export function readHeldPosition(
     if (fin(p.openTime) && (p.openTime as number) > 0) {
       earliest = earliest == null ? (p.openTime as number) : Math.min(earliest, p.openTime as number);
     }
+    // 合并仓位的每一笔成交各留各的真实开仓时刻，逐笔取最小
+    for (const f of legFills(p)) {
+      if (f.openedRealAt == null) { realKnown = false; continue; }
+      earliestReal = earliestReal == null ? f.openedRealAt : Math.min(earliestReal, f.openedRealAt);
+    }
+    const posReal = realTs(p.openedRealAt);
+    if (posReal != null) earliestReal = earliestReal == null ? posReal : Math.min(earliestReal, posReal);
   }
   const coins = rows.reduce((s, r) => s + r.coins, 0);
   if (!(coins > 0)) return null;
@@ -303,7 +330,28 @@ export function readHeldPosition(
     side, coins, notionalUsd: notional,
     avgEntry: weightedEntryByCoins(rows),
     legCount: legs.length, earliestOpenTime: earliest,
+    earliestOpenedRealAt: realKnown ? earliestReal : null,
   };
+}
+
+/**
+ * 把一条持仓腿逐笔拆开：合并仓位看 fills；老仓位没有 fills，把仓位本身当成一笔。
+ * fills[0] 就是仓位本身（id 相同），缺真实时刻时可借仓位级的；
+ * 加仓那几笔不借——借了会显得比落袋早，也会把起点算错。
+ */
+function legFills(p: BankedPositionLike): Array<{ openTime: number | null; openedRealAt: number | null }> {
+  const fills = p.fills && p.fills.length > 0
+    ? p.fills
+    : [{ id: p.id, openTime: p.openTime, openedRealAt: p.openedRealAt }];
+  const out: Array<{ openTime: number | null; openedRealAt: number | null }> = [];
+  for (const f of fills) {
+    if (!f) continue;
+    out.push({
+      openTime: fin(f.openTime) ? (f.openTime as number) : null,
+      openedRealAt: realTs(f.openedRealAt) ?? (f.id != null && f.id === p.id ? realTs(p.openedRealAt) : null),
+    });
+  }
+  return out;
 }
 
 /** 主仓打法先看多头；没有多头才退到空头；都没有返回 null。 */
@@ -318,25 +366,58 @@ export interface BankedMirrorProfit {
   /** 以币计的落袋合计（币本位 B 本账用它）：优先取成交记录的 pnlCoin，缺失时按平仓价折算 */
   coin: number;
   count: number;
-  /** 最后一笔落袋的时刻。G 是从这一刻起才存在的。 */
+  /** 最后一笔落袋的时刻（模拟时钟）。G 是从这一刻起才存在的。 */
   lastBankedAt: number | null;
+  /** 最后一笔落袋的**操作时间**（计入记录的 closedRealAt 取最大）；老记录没有时为 null。 */
+  lastBankedRealAt: number | null;
   /**
-   * 该笔落袋**之后**新开的同向仓位数。
+   * 该笔落袋**之后**新开的同向成交笔数（按 fill 数，不按仓位数）。
    *
    * 「这是第几次加仓」的可靠识别信号,而且是**因果相关**的那一个:
    * G 从落袋那一刻才存在,所以只有落袋之后开的仓位才可能花掉它。
    * 用「持仓条数」或「leg_sequence」都不行——主仓与镜像是同一刻开出的两条腿,
    * 数条数会把它们误判成加过仓;而 leg 要等日志写完才有,加仓当下还没有。
    *
+   * 必须数 fill:引擎把同标的同方向的成交合并成**一个**仓位,
+   * 落袋之后的加仓只会给它追加一笔 fill,仓位条数一条不多——按仓位数永远是 0。
+   *
    * > 0 就意味着这笔 G **可能已经被花掉了**,不能再原样填进 B 账本。
    */
   addsSinceBanked: number;
+  /**
+   * 同标的、同方向、止盈1、模拟时间也在本场之内，却因**操作时间早于当前持仓开仓**（或根本没有 closedRealAt）而没计入的笔数。
+   * 典型来源：同一段历史的另一次重放，模拟时刻与本场撞车。只为透明，不参与计算。
+   */
+  excludedByOperationTime: number;
+}
+
+/** 数「落袋之后又开了几笔」要读的持仓形状；Position 天然满足。 */
+export interface BankedPositionLike {
+  id?: string | null;
+  side?: AddSide | string | null;
+  openTime?: number | null;
+  openedRealAt?: number | null;
+  fills?: Array<{ id?: string | null; openTime?: number | null; openedRealAt?: number | null } | null | undefined> | null;
+}
+
+export interface BankedMirrorOptions {
+  /**
+   * 当前持仓最早一笔成交的真实开仓时刻（HeldPositionSummary.earliestOpenedRealAt）。
+   * 给了有效时间戳，止盈记录就必须**操作时间**（closedRealAt）不早于它才算本场；
+   * 不给 / 老仓位为 null 时，退回只按模拟时间框定，行为与旧版一字不差。
+   */
+  earliestOpenedRealAt?: number | null;
 }
 
 /**
  * 本场已落袋的镜像止盈：同标的、同方向、以「止盈1」平掉、且不早于当前最早一条持仓的开仓时间。
  * 没有持仓就没有「本场」可言，返回 0，不把历史上所有止盈都算进来。
  * 这是建议值——界面上要用户点一下才填进 G。
+ *
+ * 「不早于」要看两只钟：模拟时间（closeTime ≥ earliestOpenTime）照旧，
+ * 当前持仓有真实开仓时刻时，再要求操作时间 closedRealAt ≥ earliestOpenedRealAt。
+ * 否则同一段历史重放第二遍时，上一遍在同一模拟时刻落袋的止盈会被当成本场的 G 再填一次。
+ * 能拿到真实起点就说明持仓每一笔成交都带时间戳（9-07 之后），而没有 closedRealAt 的止盈只可能来自 6 月以前，一律不计。
  */
 export function detectBankedMirrorProfit(
   symbol: string,
@@ -344,19 +425,32 @@ export function detectBankedMirrorProfit(
   tradeHistory: TradeRecord[] | undefined,
   earliestOpenTime: number | null,
   /** 当前持仓——用来数「落袋之后又开了几笔」。不传则不做这项判断。 */
-  positions?: { side?: AddSide | string | null; openTime?: number | null }[] | null,
+  positions?: BankedPositionLike[] | null,
+  options?: BankedMirrorOptions,
 ): BankedMirrorProfit {
-  const empty = { usd: 0, coin: 0, count: 0, lastBankedAt: null, addsSinceBanked: 0 };
+  const empty = {
+    usd: 0, coin: 0, count: 0, lastBankedAt: null, lastBankedRealAt: null,
+    addsSinceBanked: 0, excludedByOperationTime: 0,
+  };
   if (earliestOpenTime == null) return empty;
+  const realStart = realTs(options?.earliestOpenedRealAt);
   let usd = 0;
   let coin = 0;
   let count = 0;
+  let excludedByOperationTime = 0;
   let lastBankedAt: number | null = null;
+  let lastBankedRealAt: number | null = null;
   for (const r of tradeHistory ?? []) {
     if (!r || r.symbol !== symbol || r.side !== side) continue;
     if (r.action !== 'CLOSE' || r.exit_method !== 'tp1') continue;
     if (!((r.closeTime ?? 0) >= earliestOpenTime)) continue;
     if (!fin(r.pnl)) continue;
+    const opAt = realTs(r.closedRealAt);
+    // 操作时间筛选：持仓有真实起点时，止盈必须在这之后才操作过；没有 closedRealAt 的一并排除。
+    if (realStart != null && !(opAt != null && opAt >= realStart)) {
+      excludedByOperationTime += 1;
+      continue;
+    }
     usd += r.pnl;
     coin += fin(r.pnlCoin)
       ? (r.pnlCoin as number)
@@ -364,19 +458,27 @@ export function detectBankedMirrorProfit(
     count += 1;
     const t = fin(r.closeTime) ? (r.closeTime as number) : null;
     if (t != null && (lastBankedAt == null || t > lastBankedAt)) lastBankedAt = t;
+    if (opAt != null && (lastBankedRealAt == null || opAt > lastBankedRealAt)) lastBankedRealAt = opAt;
   }
 
   let addsSinceBanked = 0;
-  if (lastBankedAt != null && positions) {
+  if ((lastBankedAt != null || lastBankedRealAt != null) && positions) {
     for (const p of positions) {
       if (!p || p.side !== side) continue;
-      const t = fin(p.openTime) ? (p.openTime as number) : null;
-      // 严格晚于落袋时刻才算——同刻开出的是同一批腿,不是加仓。
-      if (t != null && t > (lastBankedAt as number)) addsSinceBanked += 1;
+      // 合并仓位逐笔数 fill；老仓位没有 fills，把仓位本身当成一笔。
+      for (const f of legFills(p)) {
+        if (lastBankedRealAt != null && f.openedRealAt != null) {
+          // 两边都有操作时间就按真实时钟比：倒带之后模拟时间会骗人，真实时钟不会。
+          if (f.openedRealAt > lastBankedRealAt) addsSinceBanked += 1;
+          continue;
+        }
+        // 严格晚于落袋时刻才算——同刻开出的是同一批腿,不是加仓。
+        if (f.openTime != null && lastBankedAt != null && f.openTime > lastBankedAt) addsSinceBanked += 1;
+      }
     }
   }
 
-  return { usd, coin, count, lastBankedAt, addsSinceBanked };
+  return { usd, coin, count, lastBankedAt, lastBankedRealAt, addsSinceBanked, excludedByOperationTime };
 }
 
 /**

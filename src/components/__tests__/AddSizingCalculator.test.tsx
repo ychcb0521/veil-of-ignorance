@@ -23,6 +23,8 @@ const tradeHistory: TradeRecord[] = [
 /** 盘口挂单：模块级可变量，默认空——这样现有 13 条测试里 bookLine 恒为 null，
  *  「S₁ 留给人」那条契约原样成立；只有显式塞单子的测试才看得到盘口线。 */
 const book = vi.hoisted(() => ({ orders: {} as Record<string, unknown[]> }));
+/** 盘面覆写：默认 null 即沿用上面那套老持仓（没有真实开仓时刻）；只有重放那组测试会塞。 */
+const scene = vi.hoisted(() => ({ positions: null as unknown[] | null, tradeHistory: null as unknown[] | null }));
 
 vi.mock('@/contexts/TradingContext', async () => {
   const actual = await vi.importActual<typeof import('@/contexts/TradingContext')>('@/contexts/TradingContext');
@@ -31,11 +33,11 @@ vi.mock('@/contexts/TradingContext', async () => {
     useTradingContext: () => ({
       tradingMode: 'direct',
       setTradingMode: vi.fn(),
-      positionsMap: { RAVEUSDT: positions },
+      positionsMap: { RAVEUSDT: scene.positions ?? positions },
       ordersMap: book.orders,
       // 刻意放一个陈旧价：priceMap 是持久化的行情缓存，计算器不该再读它
       priceMap: { RAVEUSDT: 0.6273595 },
-      tradeHistory,
+      tradeHistory: scene.tradeHistory ?? tradeHistory,
       getSymbolSettlementMode: () => 'coin',
     }),
   };
@@ -263,6 +265,57 @@ describe('R0 复核 —— AIOTUSDT 学费单要求的那一块', () => {
   it('S₁ 未填时不出 R0 块——没有可复核的对象', () => {
     renderCalc();
     expect(screen.queryByTestId('add-sizing-r0')).toBeNull();
+  });
+});
+
+describe('B 本账建议值按操作时间框定本场', () => {
+  afterEach(() => { scene.positions = null; scene.tradeHistory = null; });
+
+  /**
+   * 同一段历史重放了两遍：上一遍在模拟时刻 3_000 落袋 +0.8 RAVE，这一遍同一模拟时刻落袋 +1.2 RAVE。
+   * 模拟时间完全撞车，只有真实时钟分得开——上一遍的止盈操作时间早于这一遍主力开仓。
+   */
+  const R0 = Date.parse('2026-09-10T08:00:00Z');
+  const stampedPositions: Position[] = positions.map((p, i) => ({ ...p, openedRealAt: R0 + i * 60_000 }));
+  const replayHistory: TradeRecord[] = [
+    { ...tradeHistory[0], closedRealAt: R0 + 10 * 60_000 },
+    { ...tradeHistory[0], id: 'other-replay', pnl: 100, pnlCoin: 0.8, closedRealAt: R0 - 86_400_000 },
+    tradeHistory[1],
+  ];
+
+  it('【回归】另一次重放的止盈不进一键填入，按钮旁小字注明排除了几笔', () => {
+    scene.positions = stampedPositions;
+    scene.tradeHistory = replayHistory;
+    renderCalc();
+    const fill = screen.getByTestId('add-sizing-fill-banked');
+    expect(fill).toHaveTextContent('+1.2');
+    expect(fill).toHaveTextContent('（1 笔）');
+    expect(screen.getByTestId('add-sizing-banked-excluded'))
+      .toHaveTextContent('1 笔止盈的操作时间早于当前持仓开仓（或缺失），未计入');
+    fireEvent.click(fill);
+    expect(num('add-sizing-g')).toBeCloseTo(1.2, 6);
+  });
+
+  it('老持仓没有真实开仓时刻：照旧只看模拟时间，不出排除小字', () => {
+    renderCalc();
+    expect(screen.getByTestId('add-sizing-fill-banked')).toHaveTextContent('1 笔');
+    expect(screen.queryByTestId('add-sizing-banked-excluded')).not.toBeInTheDocument();
+  });
+
+  it('【回归】老腿没有真实时刻、新加那腿有：起点未知，本场止盈照填、不误报排除，加仓提醒照出', () => {
+    // p1 是 9-07 之前开的老腿；止盈在 R0 前一小时落袋；p2 在 R0 加仓。
+    // 只取有时间戳的最小值会把起点定在 R0，本场这笔止盈反被当成别的重放排除。
+    scene.positions = [positions[0], { ...positions[1], openedRealAt: R0 }];
+    scene.tradeHistory = [{ ...tradeHistory[0], closedRealAt: R0 - 3_600_000 }, tradeHistory[1]];
+    renderCalc();
+    type('add-sizing-s1', '130');
+    const fill = screen.getByTestId('add-sizing-fill-banked');
+    expect(fill).toHaveTextContent('+1.2');
+    expect(fill).toHaveTextContent('（1 笔）');
+    expect(screen.queryByTestId('add-sizing-banked-excluded')).not.toBeInTheDocument();
+    fireEvent.click(fill);
+    expect(num('add-sizing-g')).toBeCloseTo(1.2, 6);
+    expect(screen.getByTestId('add-sizing-banked-spent')).toHaveTextContent('1');
   });
 });
 

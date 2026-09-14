@@ -115,14 +115,20 @@ export function AddSizingCalculator({ open, onClose, symbol, currentPrice = 0 }:
   );
   const note = cushionNote(cushion, side);
 
+  /**
+   * 「本场」要同时过两只钟：模拟时间之外，止盈的操作时间不得早于当前持仓的真实起点——
+   * 同一段历史重放多遍时，别的重放在同一模拟时刻落袋的止盈否则会被当成本场的 G。
+   */
   const banked = useMemo(
-    () => detectBankedMirrorProfit(symbol, side, ctx.tradeHistory, held?.earliestOpenTime ?? null, positions),
-    [symbol, side, ctx.tradeHistory, held?.earliestOpenTime, positions],
+    () => detectBankedMirrorProfit(symbol, side, ctx.tradeHistory, held?.earliestOpenTime ?? null, positions,
+      { earliestOpenedRealAt: held?.earliestOpenedRealAt ?? null }),
+    [symbol, side, ctx.tradeHistory, held?.earliestOpenTime, held?.earliestOpenedRealAt, positions],
   );
   /**
    * 这笔 G 是不是已经花过了。
    * 「第几次加仓」的可靠信号是**落袋之后又开了几笔仓**——G 从落袋那一刻才存在,
-   * 只有之后开的仓位才可能花掉它。数持仓条数不行:主仓与镜像是同一刻开出的两条腿。
+   * 只有之后开的仓位才可能花掉它。数持仓条数不行:主仓与镜像是同一刻开出的两条腿;
+   * 也不能数仓位:同向加仓合并进同一仓位，只多一笔 fill。
    */
   const bankedMaybeSpent = banked.addsSinceBanked > 0;
   /**
@@ -454,6 +460,13 @@ export function AddSizingCalculator({ open, onClose, symbol, currentPrice = 0 }:
                 </span>
               )}
             </div>
+            )}
+            {/* 按操作时间排除的止盈单独占一行：放进上面那排控件里会把定线 / 定仓挤到下一行。
+                排除的既有「操作时间早于当前持仓开仓」的，也有根本没有操作时间的（6 月以前的老记录）。 */}
+            {bankedOpen && banked.excludedByOperationTime > 0 && (
+              <div data-testid="add-sizing-banked-excluded" className="text-[10px] text-muted-foreground/60">
+                {banked.excludedByOperationTime} 笔止盈的操作时间早于当前持仓开仓（或缺失），未计入
+              </div>
             )}
             {/**
               * G 是**一次性**的一笔钱。落袋之后再开的每一笔仓都可能已经花掉它，
