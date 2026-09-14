@@ -72,7 +72,12 @@ import type {
 import { isHistoricalCampaign, ruleCooldownRemainingMs } from "@/types/journal";
 import { campaignStatusFromRealizedPnl, computeCampaignRealizedPnl } from "@/lib/campaignRealizedPnl";
 import { queueSimStatePush } from '@/lib/simStateSync';
-import { campaignRealTimeWindow, orderWithinRealWindow } from '@/lib/campaignOrderRealTime';
+import {
+  buildReplaySessionFilter,
+  campaignRealTimeWindow,
+  orderWithinRealWindow,
+  type ReplayEvent,
+} from '@/lib/campaignOrderRealTime';
 import type {
   PendingOrder,
   TradeRecord,
@@ -2419,7 +2424,44 @@ export async function getCampaignFullData(
     legs,
     campaignClosed: Boolean(campaign.closed_at),
   });
-  const inRealWindow = (t: number | null | undefined) => orderWithinRealWindow(t, realWindow);
+  /**
+   * 第三道归属：与本场成交的**操作时间**对齐到同一次回放（见 buildReplaySessionFilter）。
+   * realWindow 依赖 openedRealAt，回填腿 + 老成交只有 closedRealAt 时它是 null、整道过滤失效——
+   * 另一次回放同一段行情的委托因此成对混进盘面。这里只用每个事件自带的「真实时刻 + 模拟时刻」，
+   * 在模拟时间跳回去的地方切开回放，保留含本场已选成交操作的那几段。
+   */
+  const selectedRecordIds = new Set(tradeRecords.map(record => record.id));
+  const replayEvents: ReplayEvent[] = [];
+  const pushReplayEvent = (
+    realAt: number | null | undefined,
+    simAt: number | null | undefined,
+    anchor = false,
+  ) => {
+    if (typeof realAt === 'number' && typeof simAt === 'number') replayEvents.push({ realAt, simAt, anchor });
+  };
+  for (const record of tradeHistory) {
+    if (record.symbol !== campaign.symbol) continue;
+    const anchor = selectedRecordIds.has(record.id);
+    pushReplayEvent(record.openedRealAt, record.openTime, anchor);
+    pushReplayEvent(record.closedRealAt, record.closeTime, anchor);
+  }
+  for (const order of ordersMap[campaign.symbol] ?? []) {
+    pushReplayEvent(order.createdRealAt, order.createdAt);
+  }
+  for (const order of cancelledOrders) {
+    if (order.symbol !== campaign.symbol) continue;
+    pushReplayEvent(order.createdRealAt, order.createdAt);
+    pushReplayEvent(order.cancelledRealAt, order.cancelledAt);
+  }
+  for (const order of filledOrders) {
+    if (order.symbol !== campaign.symbol) continue;
+    pushReplayEvent(order.createdRealAt, order.createdAt);
+    pushReplayEvent(order.filledRealAt, order.filledAt);
+  }
+  const replaySession = buildReplaySessionFilter(replayEvents);
+  const inRealWindow = (t: number | null | undefined) => (
+    orderWithinRealWindow(t, realWindow) && (replaySession?.allows(t) ?? true)
+  );
   // 持仓面板 / 结束建议用的挂单也按挂单时间归属，避免同标的另一场战役的实时挂单混进本战役。
   const pendingOrders = Object.entries(ordersMap)
     .flatMap(([symbol, orders]) => symbol === campaign.symbol ? orders : [])

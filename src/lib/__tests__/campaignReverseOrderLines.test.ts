@@ -196,6 +196,26 @@ describe('buildCampaignReverseOrderPriceLines', () => {
     expect(lines.some(line => !line.dashed)).toBe(false);
   });
 
+  it('每条线带上它画的委托 id；完全重合去重成一条时 id 合并，两张都点得到', () => {
+    const createdAt = t('2026-01-01T10:00:00.000Z');
+    const triggeredAt = t('2026-01-01T10:05:00.000Z');
+    const fallbackEnd = t('2026-01-01T10:30:00.000Z');
+
+    const lines = buildCampaignReverseOrderPriceLines([
+      makeShortOrder({ id: 'pending-short-1', status: 'pending', createdAt }),
+      makeShortOrder({ id: 'pending-short-2', status: 'pending', createdAt }),
+      makeShortOrder({ id: 'triggered-short', status: 'triggered', price: 1.3, createdAt, triggeredAt, cancelledAt: null }),
+    ], [], fallbackEnd);
+
+    const pending = lines.filter(line => line.price !== 1.3);
+    expect(pending).toHaveLength(1);
+    expect(pending[0].orderIds).toEqual(['pending-short-1', 'pending-short-2']);
+    // 一张触发单画两段（委托空 + 触发空），两段都指回同一张委托
+    const triggered = lines.filter(line => line.price === 1.3);
+    expect(triggered.map(line => line.title).sort()).toEqual(['委托空', '触发空']);
+    for (const line of triggered) expect(line.orderIds).toEqual(['triggered-short']);
+  });
+
   it('does not trim the solid triggered segment when a later dashed order overlaps it', () => {
     const createdAt = t('2026-01-01T10:00:00.000Z');
     const triggeredAt = t('2026-01-01T10:05:00.000Z');

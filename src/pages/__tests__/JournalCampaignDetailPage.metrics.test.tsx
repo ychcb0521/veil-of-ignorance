@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CampaignBoardExportInput } from '@/lib/campaignLegsPngExport';
@@ -200,14 +200,23 @@ vi.mock('@/lib/emotionDiaryApi', () => ({
   getDecisionEmotionDiaryByDate: vi.fn(async () => null),
 }));
 
+type ReplayChartOrderLine = { title?: string; orderIds?: string[]; selectId?: string; selected?: boolean };
+const replayChartLatest = vi.hoisted(() => ({
+  lines: [] as Array<{ title?: string; orderIds?: string[]; selectId?: string; selected?: boolean }>,
+  onSelectTimeBoundPriceLine: undefined as ((id: string) => void) | undefined,
+}));
+
 vi.mock('@/components/journal/ReplayKlineChart', () => ({
   ReplayKlineChart: (props: {
     initialVisibleStartTime: number;
     initialVisibleEndTime: number;
     markers?: Array<{ label?: string }>;
-    timeBoundPriceLines?: Array<{ title?: string }>;
+    timeBoundPriceLines?: ReplayChartOrderLine[];
     verticalLines?: Array<{ color: string }>;
+    onSelectTimeBoundPriceLine?: (id: string) => void;
   }) => {
+    replayChartLatest.lines = props.timeBoundPriceLines ?? [];
+    replayChartLatest.onSelectTimeBoundPriceLine = props.onSelectTimeBoundPriceLine;
     replayVisibleRanges.push({
       start: props.initialVisibleStartTime,
       end: props.initialVisibleEndTime,
@@ -521,6 +530,53 @@ describe('JournalCampaignDetailPage metrics', () => {
     expect(screen.getByTestId('campaign-emotion-diary-toggle')).toHaveAttribute('aria-expanded', 'false');
     expect(card.querySelector('#campaign-emotion-diary-body')).toBeNull();
   });
+
+  it('【用户要求】盘面点中委托线，管理区对应的委托用色块同步高亮；点色块也反向高亮盘面线', async () => {
+    const at = (iso: string) => Date.parse(iso);
+    vi.mocked(getCampaignFullData).mockImplementation(async (id: string) => ({
+      ...detailsById[id],
+      reverseHedgeOrders: [
+        { id: 'order-a', tradeRecordId: null, side: 'SHORT', price: 95, fillPrice: null, createdAt: at('2026-01-01T00:05:00.000Z'), triggeredAt: null, cancelledAt: at('2026-01-01T00:30:00.000Z'), status: 'cancelled' },
+        { id: 'order-b', tradeRecordId: null, side: 'SHORT', price: 97, fillPrice: null, createdAt: at('2026-01-01T00:10:00.000Z'), triggeredAt: null, cancelledAt: null, status: 'pending' },
+      ],
+    }));
+    render(
+      <MemoryRouter initialEntries={['/journal/campaigns/winner']}>
+        <Routes>
+          <Route path="/journal/campaigns/:id" element={<JournalCampaignDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    const lineFor = (orderId: string) => replayChartLatest.lines.find(line => line.orderIds?.includes(orderId));
+    await waitFor(() => expect(lineFor('order-a')?.selectId).toBeTruthy());
+    // 管理区默认收起
+    expect(screen.queryAllByTestId('reverse-order-chip')).toHaveLength(0);
+
+    act(() => replayChartLatest.onSelectTimeBoundPriceLine?.(lineFor('order-a')!.selectId!));
+
+    const chips = await screen.findAllByTestId('reverse-order-chip');
+    expect(chips).toHaveLength(2);
+    const chipFor = (price: string) => screen.getAllByTestId('reverse-order-chip').find(chip => chip.textContent?.includes(price))!;
+    expect(chipFor('95')).toHaveAttribute('data-selected', 'true');
+    expect(chipFor('95')).toHaveAttribute('aria-pressed', 'true');
+    expect(chipFor('97')).toHaveAttribute('data-selected', 'false');
+    await waitFor(() => expect(lineFor('order-a')?.selected).toBe(true));
+    expect(lineFor('order-b')?.selected).toBe(false);
+
+    // 点另一张的色块：选中切过去，盘面线跟着切
+    fireEvent.click(chipFor('97'));
+    expect(chipFor('97')).toHaveAttribute('data-selected', 'true');
+    expect(chipFor('95')).toHaveAttribute('data-selected', 'false');
+    await waitFor(() => expect(lineFor('order-b')?.selected).toBe(true));
+    expect(lineFor('order-a')?.selected).toBe(false);
+
+    // 盘面上再点已选中的那条线：取消选中，两边一起熄灭
+    act(() => replayChartLatest.onSelectTimeBoundPriceLine?.(lineFor('order-b')!.selectId!));
+    await waitFor(() => expect(chipFor('97')).toHaveAttribute('data-selected', 'false'));
+    expect(chipFor('95')).toHaveAttribute('data-selected', 'false');
+    await waitFor(() => expect(lineFor('order-b')?.selected).toBe(false));
+  }, 30_000);
 
   it('keeps verified expectancy values when another campaign fails to load', async () => {
     vi.mocked(getCampaignFullData).mockImplementation(async (id: string) => {

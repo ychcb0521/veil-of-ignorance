@@ -39,6 +39,8 @@ interface Props {
   onDragVerticalLine?: (id: string, time: number) => void;
   /** 点击或拖动盘面竖线时，返回线 id。 */
   onSelectVerticalLine?: (id: string) => void;
+  /** 点击可点选的限时价格线（委托线）时，返回它的 selectId。 */
+  onSelectTimeBoundPriceLine?: (id: string) => void;
 }
 
 function inferReplayPricePrecision(
@@ -95,6 +97,7 @@ export function ReplayKlineChart({
   draggableVerticalLines,
   onDragVerticalLine,
   onSelectVerticalLine,
+  onSelectTimeBoundPriceLine,
 }: Props) {
   const normalizedKlines = useMemo(() => normalizeReplayKlines(klines), [klines]);
 
@@ -186,6 +189,7 @@ export function ReplayKlineChart({
       draggableVerticalLines={draggableVerticalLines}
       onDragVerticalLine={onDragVerticalLine}
       onSelectVerticalLine={onSelectVerticalLine}
+      onSelectTimeBoundPriceLine={onSelectTimeBoundPriceLine}
       timezone={timezone}
     />
   );

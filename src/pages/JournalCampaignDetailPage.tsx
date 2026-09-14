@@ -1309,6 +1309,8 @@ export default function JournalCampaignDetailPage() {
   const [showOrderInfo, setShowOrderInfo] = useState(true);
   const [showReverseOrderManager, setShowReverseOrderManager] = useState(false);
   const [hiddenReverseHedgeOrderIds, setHiddenReverseHedgeOrderIds] = useState<string[]>([]);
+  // 盘面点选的委托线 ⇄ 管理区色块：两边按同一组委托 id 同步高亮。
+  const [selectedReverseOrderIds, setSelectedReverseOrderIds] = useState<string[]>([]);
   const hiddenReverseOrderStorageKey = useMemo(
     () => (campaign ? `campaign:${campaign.id}:hidden-reverse-hedge-orders` : null),
     [campaign],
@@ -1404,6 +1406,42 @@ export default function JournalCampaignDetailPage() {
       ...buildManualHedgeShortPriceLines(manualHedgeShortLegs, displayableReverseHedgeOrders, tradeRecords, fallbackEnd),
     ];
   }, [campaign, visibleReverseHedgeOrders, displayableReverseHedgeOrders, manualHedgeShortLegs, tradeRecords, klines]);
+  // 隐藏的委托、关掉的委托层都不再算选中——免得管理区里看不见的单子还挂着高亮。
+  const activeSelectedReverseOrderSet = useMemo(() => {
+    if (!showOrderInfo) return new Set<string>();
+    const visibleIds = new Set(visibleReverseHedgeOrders.map(order => order.id));
+    return new Set(selectedReverseOrderIds.filter(id => visibleIds.has(id)));
+  }, [showOrderInfo, visibleReverseHedgeOrders, selectedReverseOrderIds]);
+  const orderLineIdsBySelectId = useMemo(() => {
+    const map = new Map<string, string[]>();
+    for (const line of orderInfoPriceLines) {
+      if (line.orderIds?.length) map.set(line.orderIds.join('|'), line.orderIds);
+    }
+    return map;
+  }, [orderInfoPriceLines]);
+  const selectableOrderInfoPriceLines = useMemo<TimeBoundPriceLine[]>(
+    () => orderInfoPriceLines.map(line => (line.orderIds?.length
+      ? {
+        ...line,
+        selectId: line.orderIds.join('|'),
+        selected: line.orderIds.some(id => activeSelectedReverseOrderSet.has(id)),
+      }
+      : line)),
+    [orderInfoPriceLines, activeSelectedReverseOrderSet],
+  );
+  const selectReverseOrderLine = useCallback((selectId: string) => {
+    const ids = orderLineIdsBySelectId.get(selectId);
+    if (!ids) return;
+    // 再点同一条线取消选中
+    setSelectedReverseOrderIds(prev => (
+      prev.length === ids.length && ids.every(id => prev.includes(id)) ? [] : ids
+    ));
+    // 管理区收着时展开，色块才看得见
+    setShowReverseOrderManager(true);
+  }, [orderLineIdsBySelectId]);
+  const toggleReverseOrderSelection = useCallback((orderId: string) => {
+    setSelectedReverseOrderIds(prev => (prev.length === 1 && prev[0] === orderId ? [] : [orderId]));
+  }, []);
   const displayMarkers = useMemo(
     () => [...chart.markers, ...(showSelectedCounterfactual ? counterfactualChart.markers : [])],
     [chart.markers, counterfactualChart.markers, showSelectedCounterfactual],
@@ -1412,9 +1450,9 @@ export default function JournalCampaignDetailPage() {
     () => [
       ...chart.timeBoundPriceLines,
       ...(showSelectedCounterfactual ? counterfactualChart.timeBoundPriceLines : []),
-      ...(showOrderInfo ? orderInfoPriceLines : []),
+      ...(showOrderInfo ? selectableOrderInfoPriceLines : []),
     ],
-    [chart.timeBoundPriceLines, counterfactualChart.timeBoundPriceLines, showSelectedCounterfactual, orderInfoPriceLines, showOrderInfo],
+    [chart.timeBoundPriceLines, counterfactualChart.timeBoundPriceLines, showSelectedCounterfactual, selectableOrderInfoPriceLines, showOrderInfo],
   );
   const displayVerticalLines = useMemo(
     () => [...chart.verticalLines, ...(showSelectedCounterfactual ? counterfactualChart.verticalLines : []), ...selectedLegVerticalLines],
@@ -1977,6 +2015,7 @@ export default function JournalCampaignDetailPage() {
                   markers={displayMarkers}
                   timeBoundPriceLines={displayPriceLines}
                   verticalLines={displayVerticalLines}
+                  onSelectTimeBoundPriceLine={selectReverseOrderLine}
                   fitAll
                   initialVisibleStartTime={campaignKlineVisibleRange.fromTime}
                   initialVisibleEndTime={campaignKlineVisibleRange.toTime}
@@ -2025,17 +2064,41 @@ export default function JournalCampaignDetailPage() {
                 </div>
                 {showReverseOrderManager && showOrderInfo && visibleReverseHedgeOrders.length > 0 && (
                   <div className="flex flex-wrap gap-1.5 pl-5">
-                    {visibleReverseHedgeOrders.map(order => (
+                    {visibleReverseHedgeOrders.map(order => {
+                      const selected = activeSelectedReverseOrderSet.has(order.id);
+                      return (
                       <div
                         key={order.id}
-                        className="group inline-flex items-center gap-1 rounded border border-border/40 bg-muted/20 px-2 py-1 text-[10px] text-muted-foreground"
+                        role="button"
+                        tabIndex={0}
+                        aria-pressed={selected}
+                        data-testid="reverse-order-chip"
+                        data-selected={selected ? 'true' : 'false'}
+                        onClick={() => toggleReverseOrderSelection(order.id)}
+                        onKeyDown={event => {
+                          if (event.key !== 'Enter' && event.key !== ' ') return;
+                          event.preventDefault();
+                          toggleReverseOrderSelection(order.id);
+                        }}
+                        className={`group inline-flex cursor-pointer items-center gap-1 rounded border px-2 py-1 text-[10px] transition-colors ${
+                          selected
+                            ? 'border-[#F0B90B] bg-[#F0B90B]/20 text-foreground shadow-[0_0_0_1px_rgba(240,185,11,0.45)]'
+                            : 'border-border/40 bg-muted/20 text-muted-foreground hover:border-[#F0B90B]/40'
+                        }`}
                       >
-                        <span className="text-[#F0B90B]/80">{reverseOrderStatusText(order)}</span>
+                        <span
+                          aria-hidden="true"
+                          className={`h-2.5 w-2.5 shrink-0 rounded-[2px] transition-colors ${selected ? 'bg-[#F0B90B]' : 'bg-[#F0B90B]/25'}`}
+                        />
+                        <span className={selected ? 'font-medium text-[#F0B90B]' : 'text-[#F0B90B]/80'}>{reverseOrderStatusText(order)}</span>
                         <span>{fmtReverseOrderChipTime(order.createdAt)}</span>
                         <span>@ {fmtReverseOrderChipPrice(order.price)}</span>
                         <button
                           type="button"
-                          onClick={() => hideReverseHedgeOrder(order.id)}
+                          onClick={event => {
+                            event.stopPropagation();
+                            hideReverseHedgeOrder(order.id);
+                          }}
                           title="从盘面隐藏这条委托空单"
                           aria-label="从盘面隐藏这条委托空单"
                           className="ml-0.5 inline-flex items-center text-muted-foreground/30 opacity-0 transition-opacity hover:text-[#F6465D] group-hover:opacity-100"
@@ -2043,7 +2106,8 @@ export default function JournalCampaignDetailPage() {
                           <EyeOff className="w-3 h-3" />
                         </button>
                       </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
               </div>

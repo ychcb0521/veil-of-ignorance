@@ -166,6 +166,10 @@ export interface AnalysisTimeBoundPriceLine extends AnalysisPriceLine {
   endTime: number;
   dashed?: boolean;
   endMarker?: "x" | null;
+  /** 设了才可点选：点中这条线时把 selectId 回传给 onSelectTimeBoundPriceLine。 */
+  selectId?: string;
+  /** 被选中：加粗并加一道同色光晕，与外部列表的高亮同步。 */
+  selected?: boolean;
 }
 
 export interface AnalysisVerticalLine {
@@ -256,6 +260,8 @@ interface Props {
   onDragVerticalLine?: (id: string, time: number) => void;
   /** Fired when a draggable vertical line is selected on the chart. */
   onSelectVerticalLine?: (id: string) => void;
+  /** 点击带 selectId 的限时价格线（委托线）时，返回它的 selectId。 */
+  onSelectTimeBoundPriceLine?: (id: string) => void;
   /** K 线时间轴的显示时区（IANA 名）。默认 Asia/Shanghai，与主交易页一致；战役页用 UTC。 */
   timezone?: string;
 }
@@ -484,6 +490,7 @@ function CandlestickChartComponent({
   draggableVerticalLines,
   onDragVerticalLine,
   onSelectVerticalLine,
+  onSelectTimeBoundPriceLine,
   timezone = "Asia/Shanghai",
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -507,6 +514,9 @@ function CandlestickChartComponent({
   onDragVerticalLineRef.current = onDragVerticalLine;
   const onSelectVerticalLineRef = useRef(onSelectVerticalLine);
   onSelectVerticalLineRef.current = onSelectVerticalLine;
+  // 走 ref：选中态变化不必因为回调身份变了而重建整层标注。
+  const onSelectTimeBoundPriceLineRef = useRef(onSelectTimeBoundPriceLine);
+  onSelectTimeBoundPriceLineRef.current = onSelectTimeBoundPriceLine;
   const analysisOverlayRunRef = useRef(0);
   const pointerInteractionRef = useRef<InteractionController | null>(null);
   const viewportReflowFrameRef = useRef<number | null>(null);
@@ -1656,23 +1666,52 @@ function CandlestickChartComponent({
       const startTime = bindTimeToCandle(line.startTime);
       const endTime = bindTimeToCandle(line.endTime);
       if (endTime <= startTime) continue;
-      const color = line.dim ? `${line.color}55` : line.color;
+      const color = line.dim && !line.selected ? `${line.color}55` : line.color;
+      const selectId = line.selectId;
+      // lock 只禁拖动，点击照常派发；klinecharts 线段的命中容差是 2px。
+      const selectHandlers = selectId
+        ? {
+          onClick: () => {
+            onSelectTimeBoundPriceLineRef.current?.(selectId);
+            return false;
+          },
+        }
+        : {};
+      const segmentPoints = [
+        { timestamp: startTime, value: line.price },
+        { timestamp: endTime, value: line.price },
+      ];
+
+      if (line.selected) {
+        // 光晕垫在线下面：选中的委托一眼能从一排黄线里认出来，也给了更宽的点击面。
+        createAnalysisOverlay("time-price-selected", {
+          name: "segment",
+          points: segmentPoints,
+          lock: true,
+          styles: {
+            line: {
+              style: LineType.Solid,
+              size: 7,
+              color: `${line.color}38`,
+            },
+          },
+          ...selectHandlers,
+        } as OverlayCreate);
+      }
 
       createAnalysisOverlay("time-price", {
         name: "segment",
-        points: [
-          { timestamp: startTime, value: line.price },
-          { timestamp: endTime, value: line.price },
-        ],
+        points: segmentPoints,
         lock: true,
         styles: {
           line: {
             style: line.dashed ? LineType.Dashed : LineType.Solid,
             dashedValue: [5, 4],
-            size: 1,
+            size: line.selected ? 2.5 : 1,
             color,
           },
         },
+        ...selectHandlers,
       } as OverlayCreate);
 
       if (line.title === "委托空") {

@@ -1158,6 +1158,51 @@ describe('CandlestickChart analysis annotations', () => {
     });
   });
 
+  it('【用户要求】点中委托线回传 selectId；选中的线加粗并垫一道光晕', async () => {
+    const handleSelect = vi.fn();
+    render(
+      <CandlestickChart
+        data={[candle(1000, 1), candle(2000, 1.2)]}
+        symbol="BTCUSDT"
+        rawSymbol="BTCUSDT"
+        analysisMode
+        onSelectTimeBoundPriceLine={handleSelect}
+        analysisAnnotations={{
+          timeBoundPriceLines: [
+            { startTime: 1000, endTime: 2000, price: 1.1, color: '#F0B90B', title: '委托空', dashed: true, selectId: 'order-a', selected: true },
+            { startTime: 1000, endTime: 2000, price: 1.05, color: '#F0B90B', title: '委托空', dashed: true, selectId: 'order-b' },
+            { startTime: 1000, endTime: 2000, price: 1.0, color: '#F0B90B', title: 'Ha' },
+          ],
+        }}
+      />,
+    );
+
+    await waitFor(() => expect(getBandOverlay()).toBeDefined());
+    const segments = mocks.chart.createOverlay.mock.calls
+      .map(([overlay]) => overlay)
+      .filter(overlay => overlay.name === 'segment');
+    const at = (price: number) => segments.filter(overlay => overlay.points?.[0]?.value === price);
+
+    // 选中的 A：光晕 + 加粗主线，两者都能点
+    const selectedSegments = at(1.1);
+    expect(selectedSegments).toHaveLength(2);
+    expect(selectedSegments.map(overlay => overlay.styles.line.size).sort()).toEqual([2.5, 7]);
+    for (const overlay of selectedSegments) {
+      overlay.onClick?.();
+      expect(handleSelect).toHaveBeenLastCalledWith('order-a');
+    }
+
+    // 未选中的 B：细线，点中回传 B
+    expect(at(1.05)).toHaveLength(1);
+    expect(at(1.05)[0].styles.line.size).toBe(1);
+    at(1.05)[0].onClick?.();
+    expect(handleSelect).toHaveBeenLastCalledWith('order-b');
+
+    // 没有 selectId 的线不可点选，也不带 onClick 键
+    expect(at(1.0)).toHaveLength(1);
+    expect(at(1.0)[0]).not.toHaveProperty('onClick');
+  });
+
   it('委托空撤单结束点显示 ×，并带对应撤单竖线', async () => {
     render(
       <CandlestickChart

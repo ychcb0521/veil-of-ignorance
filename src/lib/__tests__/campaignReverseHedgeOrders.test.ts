@@ -1028,8 +1028,10 @@ describe('getCampaignFullData reverse hedge order layer', () => {
       shortOpen('short-open-order', REPLAY_2 + 1 * MIN, 'short-position'),
       // 升级前的老委托：没有真实时刻 → 放行
       shortOpen('short-open-legacy', undefined, 'short-position-legacy', 1.21, t('2025-09-20T10:02:00.000Z')),
-      // 开主力前 2 分钟挂出的前置对冲：落在回看窗内 → 保留
-      shortOpen('short-prehedge-open', REPLAY_2 - 2 * MIN, 'short-position-pre', 1.22, t('2025-09-20T10:03:00.000Z')),
+      // 开主力前 2 分钟挂出的前置对冲：落在回看窗内 → 保留。
+      // 现实里比主单早 3 分钟挂出，模拟时刻也必须更早（同一次回放里两只钟同向走）；
+      // 原先写成 10:03（晚于主单的 10:01）是一条物理上不存在的时间线。
+      shortOpen('short-prehedge-open', REPLAY_2 - 2 * MIN, 'short-position-pre', 1.22, t('2025-09-20T09:59:00.000Z')),
     ];
     const cancelledOrders: CancelledOrderSnapshot[] = [
       {

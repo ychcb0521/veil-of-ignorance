@@ -26,6 +26,12 @@ export interface TimeBoundPriceLine extends PriceLine {
   endTime: number;
   dashed?: boolean;
   endMarker?: 'x' | null;
+  /** 这条线画的是哪几张委托（完全重合的线去重后多张合一）；盘面点选时据此同步管理区。 */
+  orderIds?: string[];
+  /** 可点选的线：点中时回传给图表的 onSelectTimeBoundPriceLine。 */
+  selectId?: string;
+  /** 被选中：加粗并加一道同色光晕。 */
+  selected?: boolean;
 }
 
 export interface VerticalLine {

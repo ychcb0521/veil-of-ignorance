@@ -39,7 +39,14 @@ function dedupeReverseOrderLines(lines: TimeBoundPriceLine[]) {
       line.endMarker ?? '',
       line.title ?? '',
     ].join(':');
-    if (!result.has(key)) result.set(key, line);
+    const existing = result.get(key);
+    if (!existing) {
+      result.set(key, line);
+    } else if (line.orderIds?.length) {
+      // 完全重合只画一条，但它代表的每张委托都要能被点选到
+      const orderIds = Array.from(new Set([...(existing.orderIds ?? []), ...line.orderIds]));
+      result.set(key, { ...existing, orderIds });
+    }
   }
   return Array.from(result.values()).sort((a, b) =>
     Number(Boolean(b.dashed)) - Number(Boolean(a.dashed))
@@ -72,6 +79,7 @@ export function buildCampaignReverseOrderPriceLines(
             dashed: true,
             endMarker: null,
             title: '委托空',
+            orderIds: [order.id],
           });
         }
         if (Number.isFinite(endTime) && endTime > triggeredAt) {
@@ -83,6 +91,7 @@ export function buildCampaignReverseOrderPriceLines(
             dashed: false,
             endMarker: null,
             title: '触发空',
+            orderIds: [order.id],
           });
         }
         return lines;
@@ -95,6 +104,7 @@ export function buildCampaignReverseOrderPriceLines(
         dashed: true,
         endMarker: order.status === 'cancelled' && order.cancelledAt ? ('x' as const) : null,
         title: '委托空',
+        orderIds: [order.id],
       };
     });
 
