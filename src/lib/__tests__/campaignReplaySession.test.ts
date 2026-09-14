@@ -308,13 +308,13 @@ describe('【复核】盖章时代按模拟先后判 / 活过倒回不被取代 
 
   it('orderClockStamp：成员资格看最佳真实时刻，盖章判断看挂单（及未盖章的结束），仍挂着活到 +Infinity', () => {
     expect(orderClockStamp({ createdAt: sim(1), createdRealAt: real(0, 1), cancelledAt: sim(5), cancelledRealAt: real(0, 5) }))
-      .toEqual({ realAt: real(0, 1), simAt: sim(1), preStampSimAt: null, endRealAt: real(0, 5) });
+      .toEqual({ realAt: real(0, 1), simAt: sim(1), preStampSimAt: null, endRealAt: real(0, 5), endSimAt: sim(5) });
     // 挂单没盖章、撤单盖了章（⏹ 停止撤掉的老委托）：成员资格看撤单时刻，盖章判断看挂单时刻
     expect(orderClockStamp({ createdAt: sim(1), cancelledAt: sim(5), cancelledRealAt: real(0, 5) }))
-      .toEqual({ realAt: real(0, 5), simAt: sim(1), preStampSimAt: sim(1), endRealAt: real(0, 5) });
+      .toEqual({ realAt: real(0, 5), simAt: sim(1), preStampSimAt: sim(1), endRealAt: real(0, 5), endSimAt: sim(5) });
     // 两头都没盖章：上线前就结束了，取更晚的撤单时刻作界
     expect(orderClockStamp({ createdAt: sim(1), cancelledAt: sim(5) }))
-      .toEqual({ realAt: null, simAt: sim(1), preStampSimAt: sim(5), endRealAt: null });
+      .toEqual({ realAt: null, simAt: sim(1), preStampSimAt: sim(5), endRealAt: null, endSimAt: null });
     // 挂单盖了章、成交没盖（减仓单成交快照至今不写 filledRealAt）：不据此判早于上线
     expect(orderClockStamp({ createdAt: sim(1), createdRealAt: real(0, 1), filledAt: sim(5) }).preStampSimAt).toBeNull();
     expect(orderClockStamp({ createdAt: sim(1), createdRealAt: real(0, 1) }, { live: true }).endRealAt)

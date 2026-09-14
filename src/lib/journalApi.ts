@@ -2465,6 +2465,25 @@ export async function getCampaignFullData(
    * 本地成交已带 closedRealAt 的腿不重复加——界面上它的操作时间就是那条成交的，锚点已经在上面了。
    * 实时腿的「记录决策」时刻同样是本场操作：进行中的战役还没有任何平仓锚点，靠它才建得起分段（见 legOpenReplayEvent）。
    */
+  /**
+   * 事件流补出来的平仓两只钟不成对，不作锚点。事件自己没有平仓模拟时刻（close_time 为空）时，它的 operation_time
+   * 对没有平仓的实时腿是「记录决策」时刻（journalOperationTime 退回开仓侧）；合并 / 还原腿时它被填进 post_real_close_time，
+   * post_simulated_close_time 却由平仓事件或战役结束时刻补上（synthesizeJournalFromEvent）——拼成「现实里记录决策、
+   * 模拟里战役结束」的假锚点，在它之后切出一段，同一分钟里先挂又撤的本场对冲就被当成重走过的时间线取代掉。
+   */
+  const legCloseFilledFromEvent = (leg: TradeJournal) => {
+    const closeMs = leg.post_real_close_time ? new Date(leg.post_real_close_time).getTime() : Number.NaN;
+    if (!Number.isFinite(closeMs)) return false;
+    return (campaign.actual_evolution ?? []).some(event =>
+      !event.close_time
+      && Boolean(event.operation_time)
+      && new Date(event.operation_time as string).getTime() === closeMs
+      && (
+        event.journal_id === leg.id
+        || (Boolean(event.trade_record_id) && event.trade_record_id === leg.trade_record_id)
+        || leg.id === `event-${event.id}`
+      ));
+  };
   for (const leg of legs) {
     const openEvent = legOpenReplayEvent(leg);
     if (openEvent) replayEvents.push(openEvent);
@@ -2472,6 +2491,7 @@ export async function getCampaignFullData(
       ? tradeRecords.find(item => item.id === leg.trade_record_id || item.positionId === leg.trade_record_id)
       : undefined;
     if (tradeRecordOperationTime(record) != null) continue;
+    if (legCloseFilledFromEvent(leg)) continue;
     const event = legCloseReplayEvent(leg);
     if (event) replayEvents.push(event);
   }

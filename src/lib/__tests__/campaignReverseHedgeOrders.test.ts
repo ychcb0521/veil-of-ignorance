@@ -2031,4 +2031,149 @@ describe('【用户要求】委托空单与本场操作时间对齐：TUTUSDT 20
     expect(pendingOrders.map(order => order.id)).toEqual(['pre-rewind-hedge-live', 'after-main']);
     expect(reverseHedgeOrders.map(order => order.id)).toEqual(['after-main', 'pre-rewind-hedge-live']);
   });
+
+  it('【复核四 F1】历史归类战役里没有平仓的实时决策腿：事件流补上的「开仓时刻 + 战役结束模拟时刻」不当平仓锚点，同一分钟里先挂又撤的本场对冲不被取代', async () => {
+    const SIM_DECISION = sim(600);
+    const REAL_DECISION = realMine(SIM_DECISION);
+    const decisionLeg = makeLeg({
+      id: 'tutu-live-hedge-decision',
+      symbol: 'TUTUSDT',
+      source: 'live',
+      // 条件对冲挂出后 placeOrder 返回的是委托 id，匹配不到任何成交记录
+      trade_record_id: 'dh-order',
+      leg_role: 'hedge_initial_a',
+      leg_sequence: 2,
+      direction: 'short',
+      pre_simulated_time: iso(SIM_DECISION),
+      pre_real_time: iso(REAL_DECISION),
+      pre_entry_price: 0.03005,
+    });
+    journals = [mainLeg(), decisionLeg];
+    const baseEvent = {
+      leg_role: null,
+      journal_id: null,
+      trade_record_id: null,
+      pending_order_id: null,
+      price: null,
+      size_usdt: null,
+      notes: null,
+      recorded_at: '2026-09-13T12:10:00.000Z',
+    };
+    campaign.actual_evolution = [
+      { ...baseEvent, id: 'evt-created', timestamp: iso(SIM0), event_type: 'historical_classification_created' },
+      {
+        ...baseEvent,
+        id: 'evt-main-attached',
+        timestamp: iso(SIM0),
+        event_type: 'historical_leg_attached',
+        leg_role: 'main_open',
+        journal_id: 'tutu-main-leg',
+        trade_record_id: 'tutu-main-record',
+        open_time: iso(SIM0),
+        close_time: iso(SIM_CLOSE),
+        operation_time: iso(realMine(SIM_CLOSE)),
+      },
+      // campaignEventFromJournal 的写法：没有平仓的实时腿，operation_time 取的是 pre_real_time，close_time 为空
+      {
+        ...baseEvent,
+        id: 'evt-decision-attached',
+        timestamp: iso(SIM_DECISION),
+        event_type: 'historical_leg_attached',
+        leg_role: 'hedge_initial_a',
+        journal_id: 'tutu-live-hedge-decision',
+        trade_record_id: 'dh-order',
+        open_time: iso(SIM_DECISION),
+        close_time: null,
+        operation_time: iso(REAL_DECISION),
+      },
+    ] as TradeCampaign['actual_evolution'];
+    store({
+      tradeHistory: [mainRecord({ openedRealAt: realMine(SIM0), closedRealAt: realMine(SIM_CLOSE) })],
+      cancelled: [
+        // 同一个暂停的模拟分钟里：先挂一张、撤掉，再记录决策、重新挂
+        hedge('first-try', SIM_DECISION, SIM_DECISION, {
+          createdRealAt: REAL_DECISION - 60_000,
+          cancelledRealAt: REAL_DECISION - 30_000,
+        }),
+        hedge('dh-order', SIM_DECISION, SIM_CLOSE, {
+          createdRealAt: REAL_DECISION + 1_000,
+          cancelledRealAt: realMine(SIM_CLOSE) + 1_000,
+        }),
+      ],
+    });
+
+    const { reverseHedgeOrders } = await getCampaignFullData(campaign.id, { heal: false });
+
+    expect(reverseHedgeOrders.map(order => order.id).sort()).toEqual(['dh-order', 'first-try']);
+  });
+
+  it('【复核四 F2】主力在 A 遍（09-11）开、B 遍（09-13 倒回）平：夹在中间 09-12 那次坐下来回放同一段挂的单（撤在 B 遍 / 至今挂着）不算本场', async () => {
+    const REAL_A = t('2026-09-11T10:00:00.000Z');
+    const REAL_DAY2 = t('2026-09-12T10:00:00.000Z');
+    const REAL_B = t('2026-09-13T11:33:00.000Z');
+    journals = [mainLeg()];
+    store({
+      tradeHistory: [mainRecord({ openedRealAt: REAL_A, closedRealAt: REAL_B + 6 * MIN })],
+      cancelled: [
+        hedge('A-hedge', sim(60), sim(600), { createdRealAt: REAL_A + MIN, cancelledRealAt: REAL_A + 5 * MIN }, 0.0301),
+        hedge('other-cancelled-in-B', sim(300), sim(270), {
+          createdRealAt: REAL_DAY2,
+          cancelledRealAt: REAL_B + 2 * MIN,
+        }, 0.0299),
+        hedge('B-hedge', sim(260), sim(900), { createdRealAt: REAL_B + MIN, cancelledRealAt: REAL_B + 3 * MIN }, 0.0298),
+      ],
+      pending: [shortPending('other-live', sim(320), REAL_DAY2 + MIN, 0.0297)],
+    });
+
+    const { reverseHedgeOrders, pendingOrders } = await getCampaignFullData(campaign.id, { heal: false });
+
+    expect(reverseHedgeOrders.map(order => order.id)).toEqual(['A-hedge', 'B-hedge']);
+    expect(pendingOrders).toEqual([]);
+  });
+
+  it('【复核四 F3】A 遍 19:42 挂的单在倒回之后、B 遍走回 19:42 之前才撤：它不在 B 遍的时间线里，不与 B 遍那张成对出现', async () => {
+    const REAL_PASS_A = t('2026-09-13T10:00:00.000Z');
+    const REAL_REWIND = t('2026-09-13T11:33:50.000Z');
+    journals = [mainLeg()];
+    store({
+      tradeHistory: [mainRecord({ openedRealAt: REAL_PASS_A, closedRealAt: realMine(SIM_CLOSE) })],
+      cancelled: [
+        hedge('passA-late', sim(120), sim(180), {
+          createdRealAt: REAL_PASS_A + 3 * MIN,
+          cancelledRealAt: REAL_PASS_A + 5 * MIN,
+        }, 0.0297),
+        // 跳回信号后看到旧单、撤掉：撤单的模拟时刻 19:40 是 B 遍的钟，早于它自己的挂单时刻
+        hedge('passA-0300500-1942', sim(1) + 20_000, sim(-1), {
+          createdRealAt: REAL_PASS_A + 30_000,
+          cancelledRealAt: REAL_REWIND,
+        }),
+        mineHedge('passB-0300500-1942', sim(1), sim(6 * 60)),
+      ],
+    });
+
+    const { reverseHedgeOrders } = await getCampaignFullData(campaign.id, { heal: false });
+
+    expect(reverseHedgeOrders.map(order => order.id)).toEqual(['passB-0300500-1942']);
+  });
+
+  it('【复核四 F4】进行中的战役隔天回来先撤掉前一天的旧单、再倒回另起一遍：那一遍不算本场，也不取代前一天本场的单', async () => {
+    const REAL_DAY1 = t('2026-09-11T10:00:00.000Z');
+    const REAL_DAY3 = t('2026-09-13T11:34:00.000Z');
+    campaign.closed_at = null;
+    campaign.status = 'active';
+    journals = [{ ...liveMainLeg(), pre_real_time: iso(REAL_DAY1) }];
+    store({
+      tradeHistory: [],
+      cancelled: [
+        hedge('day1-hedge', sim(5), sim(10), { createdRealAt: REAL_DAY1 + MIN, cancelledRealAt: REAL_DAY1 + 2 * MIN }, 0.0301),
+        hedge('day1-leftover', sim(60), sim(61), { createdRealAt: REAL_DAY1 + 3 * MIN, cancelledRealAt: REAL_DAY3 }, 0.0299),
+      ],
+      pending: [shortPending('day3-rewound-replay', sim(20), REAL_DAY3 + 3 * MIN, 0.0298)],
+    });
+
+    const { pendingOrders, reverseHedgeOrders } = await getCampaignFullData(campaign.id, { heal: false });
+
+    expect(pendingOrders).toEqual([]);
+    expect(reverseHedgeOrders.map(order => order.id)).toEqual(['day1-hedge', 'day1-leftover']);
+  });
 });

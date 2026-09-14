@@ -223,6 +223,12 @@ export interface OrderClockStamp {
    * 省略或 null：视为在它所属那一段里就结束了——之后的重走可以取代它。
    */
   endRealAt?: number | null;
+  /**
+   * 与 endRealAt 成对的结束模拟时刻（撤单 / 成交），仍挂着或未知为 null。
+   * 用来判它是否真的活进了之后那一遍：倒回之后、那一遍走回它的挂单模拟时刻之前就撤掉的，那一遍从没见过它。
+   * 省略或 null：只按 endRealAt 判。
+   */
+  endSimAt?: number | null;
 }
 
 export interface ReplaySessionFilter {
@@ -269,14 +275,25 @@ export function orderClockStamp(
       if (finitePositive(simAt) && !finitePositive(realAt)) preStampSimAt = Math.max(preStampSimAt, simAt);
     }
   }
-  const endRealAt = options.live
-    ? Number.POSITIVE_INFINITY
-    : [order.cancelledRealAt, order.filledRealAt].find(finitePositive) ?? null;
+  let endRealAt: number | null = options.live ? Number.POSITIVE_INFINITY : null;
+  let endSimAt: number | null = null;
+  if (!options.live) {
+    for (const [simAt, realAt] of [
+      [order.cancelledAt, order.cancelledRealAt],
+      [order.filledAt, order.filledRealAt],
+    ] as const) {
+      if (!finitePositive(realAt)) continue;
+      endRealAt = realAt;
+      endSimAt = finitePositive(simAt) ? simAt : null;
+      break;
+    }
+  }
   return {
     realAt: bestOrderRealStamp(order),
     simAt: order.createdAt,
     preStampSimAt,
     endRealAt,
+    endSimAt,
   };
 }
 
@@ -352,12 +369,14 @@ const CLOSE_SIDE_KINDS: ReadonlySet<ReplayEventKind | undefined> = new Set(['rec
  *    - 结尾：已结束的战役，最晚的锚点是平仓侧时战役就结束在它；之后隔着一次坐下来的事件不算。
  *    - 进行中的战役（campaignOpen）：仓位还开着、没有平仓锚点来收尾，时间机器倒回也不平仓不撤单，
  *      每个锚点之后的段哪怕不含锚点也是本场的延续（L4 带着仓位倒回之后挂的对冲；两次记录决策之间倒回出来的那一遍同理）——
- *      离开锚点所在段之后隔开一次坐下来为止。锚点所在段本身不修剪：隔天回来接着往后打（没有倒回）还是这场。
+ *      到隔开一次坐下来为止，不论坐下来后的第一件事是否还在锚点所在段里（隔天回来先撤掉前一天的旧单、再倒回另起一遍，
+ *      与一回来就倒回是同一件事）。锚点所在段本身因含锚点整段保留、不修剪：隔天回来接着往后打（没有倒回）还是这场。
  *    中间不修剪：战役途中停多久都还是这场。
  *
  * 1. 成员资格：委托的真实时刻（bestOrderRealStamp）必须落在保留的某一段里。
- *    或者挂在保留段之前（本场时间线同一次坐下来里、倒回之前那一遍），但活进了那一段（撤单 / 成交晚于段起点，或至今仍挂着）：
- *    倒回不撤单，它在那一段的时间线里真实存在。在倒回之前那一遍里就结束了的仍不算。
+ *    或者挂在保留段之前、与**那一段**同一次坐下来里（倒回之前那一遍），且活进了那一段（见 livesInto：撤单 / 成交晚于段起点、
+ *    且那一段已走回它的挂单模拟时刻，或活过了整段 / 至今仍挂着）：倒回不撤单，它在那一段的时间线里真实存在。
+ *    在倒回之前那一遍里就结束了的、倒回后没等走回它挂单的时刻就撤掉的，都不算。
  *    一个真实时刻都没有的委托不知道在哪一段，保留的每一段都是候选，任一段容得下即可。
  *
  * 2. 盖章时代（L1）：委托 / 开仓的真实时刻 2026-09-07 才开始记录。挂单没有 createdRealAt 的委托
@@ -378,8 +397,9 @@ const CLOSE_SIDE_KINDS: ReadonlySet<ReplayEventKind | undefined> = new Set(['rec
  *    A 的委托模拟时刻 ≥ replaySim − 容差才算被重走。容差与切段同一口径：两遍各自读的模拟时钟都可能落后，
  *    同一分钟里 A 那张比 B 那张早几秒还是晚几秒是随机的。不用 B 的起点：往前跳不切段，B 先绕去更早的历史、
  *    再一跳越过 A 的整段时，B 的起点远早于 A，却从没重走过 A 挂单的那几个小时。
- *    倒回点之前挂的单子没有被重走，保留；活过了倒回的委托（撤单 / 成交落在 B 开始之后，或至今仍挂着）
- *    在 B 的时间线里真实存在，同样保留。不保留的段既不算本场、也不取代别人。
+ *    倒回点之前挂的单子没有被重走，保留；活过了倒回的委托（撤单 / 成交落在 B 开始之后、且 B 已走回它的挂单模拟时刻，
+ *    或活过了整个 B / 至今仍挂着）在 B 的时间线里真实存在，同样保留。倒回后看见旧单、在 B 走回它之前就撤掉的
+ *    （撤单模拟时刻早于挂单）不算活进 B，照样被取代。不保留的段既不算本场、也不取代别人。
  *
  * 本场自己的锚点一个都没有 → 返回 null，调用方退回 campaignRealTimeWindow。
  */
@@ -430,13 +450,14 @@ export function buildReplaySessionFilter(
     while (to + 1 < points.length && !sittingBreakBefore(to + 1) && segmentOf[to + 1] === segmentOf[lastAnchor]) to += 1;
   }
   const anchoredSegments = new Set(anchorIndexes.map(index => segmentOf[index]));
-  // 进行中的战役：每个锚点之后的延续（含两个锚点之间倒回出来的那几遍）——离开锚点所在段之后，隔开一次坐下来就断
+  // 进行中的战役：每个锚点之后的延续（含两个锚点之间倒回出来的那几遍）——隔开一次坐下来就断。
+  // 断在锚点所在段里的事件上也一样：锚点所在段本身靠 anchoredSegments 整段保留，断的只是之后倒回出来的那几遍
   const continuesAnchor = points.map(() => false);
   if (campaignOpen) {
     let anchorSegment: number | null = null;
     for (let index = firstAnchor; index < points.length; index += 1) {
       if (points[index].anchor) anchorSegment = segmentOf[index];
-      else if (anchorSegment !== null && segmentOf[index] !== anchorSegment && sittingBreakBefore(index)) anchorSegment = null;
+      else if (anchorSegment !== null && sittingBreakBefore(index)) anchorSegment = null;
       continuesAnchor[index] = anchorSegment !== null;
     }
   }
@@ -444,6 +465,8 @@ export function buildReplaySessionFilter(
   interface Session {
     start: number;
     end: number;
+    /** 这一段第一个保留的事件在 points 里的下标：从它往前找这一段在现实里能回溯到哪。 */
+    firstIndex: number;
     /** 这一段走到过的最早模拟时刻：后面的段从它之后才算重走本段。 */
     minSim: number;
     /** 这一段每个事件的模拟时刻。 */
@@ -460,11 +483,9 @@ export function buildReplaySessionFilter(
   );
   // 一段内保留下来的点在下标上连续，所以每段至多一个 session；sessions 按现实时间先后生成
   const sessionsBySegment = new Map<number, Session>();
-  let firstKeptIndex = -1;
   for (let index = from; index <= to; index += 1) {
     const segment = segmentOf[index];
     if (!anchoredSegments.has(segment) && !continuesAnchor[index]) continue;
-    if (firstKeptIndex < 0) firstKeptIndex = index;
     const point = points[index];
     const current = sessionsBySegment.get(segment);
     const preRollout = point.realAt < STAMP_ROLLOUT_REAL_AT || Boolean(point.unstampedOpen);
@@ -478,6 +499,7 @@ export function buildReplaySessionFilter(
       sessionsBySegment.set(segment, {
         start: point.realAt,
         end: point.realAt,
+        firstIndex: index,
         minSim: point.simAt,
         sims: [point.simAt],
         firstStampSim: stampSimOf(point),
@@ -487,22 +509,40 @@ export function buildReplaySessionFilter(
   }
 
   const sessions = Array.from(sessionsBySegment.values());
-  const kept = sessions.map((session, index) => ({
-    ...session,
-    /** 之后每个保留的段：它现实里何时开始、有事件为证地重走到本段的最早模拟时刻（没重走到为 +Infinity）。 */
-    replayedBy: sessions.slice(index + 1).map(later => ({
-      start: later.start,
-      replaySim: later.sims.reduce((min, simAt) => (simAt >= session.minSim && simAt < min ? simAt : min), INF),
-    })),
-  }));
+  const kept = sessions.map((session, index) => {
+    // 这一段在现实里最早能回溯到哪：它第一个保留的事件往前、不隔开一次坐下来（倒回之前那一遍也算）。
+    // 每段各算各的：都从本场第一段算起时，夹在两段之间另一次坐下来挂的单会被当成后一段的候选
+    let reachIndex = session.firstIndex;
+    while (reachIndex > 0 && !sittingBreakBefore(reachIndex)) reachIndex -= 1;
+    return {
+      ...session,
+      reachRealAt: points[reachIndex].realAt,
+      /** 之后每个保留的段：它现实里的起止、有事件为证地重走到本段的最早模拟时刻（没重走到为 +Infinity）。 */
+      replayedBy: sessions.slice(index + 1).map(later => ({
+        start: later.start,
+        end: later.end,
+        replaySim: later.sims.reduce((min, simAt) => (simAt >= session.minSim && simAt < min ? simAt : min), INF),
+      })),
+    };
+  });
   const stampEra = kept.some(session => session.firstStampSim < INF);
-  // 本场时间线在现实里最早能回溯到哪：第一个保留的事件往前、不隔开一次坐下来（倒回之前那一遍也算）
-  let reachIndex = firstKeptIndex;
-  while (reachIndex > 0 && !sittingBreakBefore(reachIndex)) reachIndex -= 1;
-  const reachRealAt = points[reachIndex].realAt;
   const orderEndRealAt = (order: OrderClockStamp) => (
     typeof order.endRealAt === 'number' && order.endRealAt > 0 ? order.endRealAt : Number.NEGATIVE_INFINITY
   );
+  /**
+   * 委托活进了 span 那一段的时间线：结束晚于那一段起点，且活过了整段，或结束时那一段已走回（或越过）它的挂单模拟时刻。
+   * 倒回后看见旧单、没等走回它挂单的时刻就撤掉（撤单模拟时刻早于挂单），那一段从没见过它挂在那里——仍是被放弃的时间线。
+   * 结束的模拟时刻未知时只看真实时刻。
+   */
+  const livesInto = (span: { start: number; end: number }, order: OrderClockStamp) => {
+    const endRealAt = orderEndRealAt(order);
+    if (endRealAt < span.start) return false;
+    const { simAt, endSimAt } = order;
+    return endRealAt > span.end
+      || !finitePositive(endSimAt)
+      || !finitePositive(simAt)
+      || endSimAt >= simAt - toleranceMs;
+  };
 
   const fitsSession = (session: (typeof kept)[number], order: OrderClockStamp) => {
     // 盖章时代：上线之前经手过的委托，只能是跨上线那一遍里、早于这一段第一个上线后证据的
@@ -513,11 +553,10 @@ export function buildReplaySessionFilter(
       && !(session.preRollout && finitePositive(preStampSimAt) && preStampSimAt < session.firstStampSim)) {
       return false;
     }
-    // 取代：之后某一段开始时它已经结束，且那一段重走到了它挂单的模拟时刻 → 被放弃的时间线
-    const endRealAt = orderEndRealAt(order);
+    // 取代：它没有活进之后的某一段，且那一段重走到了它挂单的模拟时刻 → 被放弃的时间线
     const { simAt } = order;
     return session.replayedBy.every(later =>
-      later.start <= endRealAt
+      livesInto(later, order)
       || later.replaySim === INF
       || (finitePositive(simAt) && simAt < later.replaySim - toleranceMs));
   };
@@ -534,7 +573,7 @@ export function buildReplaySessionFilter(
       // 挂在保留段之外、却活进了某个保留段的委托（倒回之前挂的、倒回不撤）：在那一段的时间线里真实存在，按那一段判
       const candidates = finitePositive(realAt)
         ? kept.filter(session => (realAt >= session.start && realAt <= session.end)
-          || (realAt < session.start && realAt >= reachRealAt && orderEndRealAt(order) >= session.start))
+          || (realAt < session.start && realAt >= session.reachRealAt && livesInto(session, order)))
         : kept;
       return candidates.some(session => fitsSession(session, order));
     },
