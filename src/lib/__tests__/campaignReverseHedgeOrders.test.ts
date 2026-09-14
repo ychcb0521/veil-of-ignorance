@@ -2236,4 +2236,355 @@ describe('【用户要求】委托空单与本场操作时间对齐：TUTUSDT 20
 
     expect(reverseHedgeOrders.map(order => order.id).sort()).toEqual(['passA-cond-triggered-on-rewind', 'passB-hedge']);
   });
+
+  it('【复核六 F1】主力 09-11 开，09-12 另坐下来回放同一段，09-13 往前一跳回到本场接着打到平仓：09-12 的单不算本场，09-11 本场的单也不被它取代', async () => {
+    const REAL_A = t('2026-09-11T10:00:00.000Z');
+    const REAL_DAY2 = t('2026-09-12T10:00:00.000Z');
+    const REAL_B = t('2026-09-13T11:33:00.000Z');
+    journals = [mainLeg()];
+    store({
+      tradeHistory: [mainRecord({ openedRealAt: REAL_A, closedRealAt: REAL_B + 6 * MIN })],
+      cancelled: [
+        hedge('A-hedge', sim(60), sim(180), { createdRealAt: REAL_A + MIN, cancelledRealAt: REAL_A + 3 * MIN }, 0.0301),
+        hedge('A-hedge-late', sim(400), sim(600), { createdRealAt: REAL_A + 5 * MIN, cancelledRealAt: REAL_A + 7 * MIN }, 0.03),
+        hedge('day2-other-cancelled', sim(62), sim(100), {
+          createdRealAt: REAL_DAY2,
+          cancelledRealAt: REAL_DAY2 + 5 * MIN,
+        }, 0.0299),
+        // 09-13 从 09-12 停下的 sim+100m 往前一跳到 sim+620m：高于本场 09-11 停下的 sim+600m，是接着本场打
+        hedge('B-hedge', sim(620), sim(900), { createdRealAt: REAL_B + MIN, cancelledRealAt: REAL_B + 3 * MIN }, 0.0298),
+      ],
+      pending: [shortPending('day2-other-live', sim(90), REAL_DAY2 + 3 * MIN, 0.0297)],
+    });
+
+    const { reverseHedgeOrders, pendingOrders } = await getCampaignFullData(campaign.id, { heal: false });
+
+    expect(reverseHedgeOrders.map(order => order.id)).toEqual(['A-hedge', 'A-hedge-late', 'B-hedge']);
+    expect(pendingOrders).toEqual([]);
+  });
+
+  it('【复核六 F1】进行中的战役：09-12 另坐下来回放同一段，09-13 往前一跳回到本场记录加仓、挂对冲：持仓面板与委托层都不混进 09-12 的单，09-13 的对冲照在', async () => {
+    const REAL_A = t('2026-09-11T10:00:00.000Z');
+    const REAL_DAY2 = t('2026-09-12T10:00:00.000Z');
+    const REAL_B = t('2026-09-13T11:33:00.000Z');
+    campaign.closed_at = null;
+    campaign.status = 'active';
+    journals = [
+      { ...liveMainLeg(), pre_real_time: iso(REAL_A) },
+      {
+        ...liveMainLeg(),
+        id: 'tutu-live-add-leg',
+        leg_role: 'main_add_1',
+        leg_sequence: 2,
+        pre_simulated_time: iso(sim(610)),
+        pre_real_time: iso(REAL_B),
+      },
+    ];
+    store({
+      tradeHistory: [],
+      cancelled: [
+        hedge('A-hedge', sim(60), sim(180), { createdRealAt: REAL_A + MIN, cancelledRealAt: REAL_A + 3 * MIN }, 0.0301),
+        hedge('A-hedge-late', sim(400), sim(600), { createdRealAt: REAL_A + 5 * MIN, cancelledRealAt: REAL_A + 7 * MIN }, 0.03),
+        hedge('day2-other-cancelled', sim(62), sim(100), {
+          createdRealAt: REAL_DAY2,
+          cancelledRealAt: REAL_DAY2 + 5 * MIN,
+        }, 0.0299),
+      ],
+      pending: [
+        shortPending('A-live', sim(300), REAL_A + 4 * MIN, 0.0302),
+        shortPending('day2-other-live', sim(90), REAL_DAY2 + 3 * MIN, 0.0297),
+        shortPending('day3-hedge-live', sim(615), REAL_B + 2 * MIN, 0.0296),
+      ],
+    });
+
+    const { reverseHedgeOrders, pendingOrders } = await getCampaignFullData(campaign.id, { heal: false });
+
+    expect(pendingOrders.map(order => order.id)).toEqual(['A-live', 'day3-hedge-live']);
+    expect(reverseHedgeOrders.map(order => order.id)).toEqual(['A-hedge', 'A-live', 'A-hedge-late', 'day3-hedge-live']);
+  });
+
+  /** 对冲仓位的平仓记录：2026-08-31 起每条平仓都带 fillId（未合并时等于仓位 id）。 */
+  const hedgeCloseRecord = (
+    id: string,
+    positionId: string,
+    openTime: number,
+    closeTime: number,
+    realOf: (simAt: number) => number,
+  ): TradeRecord => ({
+    ...mainRecord({ openedRealAt: realOf(openTime), closedRealAt: realOf(closeTime) }),
+    id,
+    positionId,
+    fillId: positionId,
+    side: 'SHORT',
+    entryPrice: 0.0299,
+    exitPrice: 0.0295,
+    openTime,
+    closeTime,
+  } as TradeRecord);
+
+  it('【复核六 F2】两张对冲前后几分钟成交、只有一张平掉了：还开着的那张不借用另一张（fillId 不同）的平仓记录，也不因共用去重键被吞掉', async () => {
+    journals = [mainLeg()];
+    store({
+      tradeHistory: [
+        mainRecord({ openedRealAt: realMine(SIM0), closedRealAt: realMine(SIM_CLOSE) }),
+        hedgeCloseRecord('rec-hedge-a', 'pos-a', sim(360), sim(540), realMine),
+      ],
+      filled: [
+        shortFill('hedge-a', sim(350), sim(360), {
+          createdRealAt: realMine(sim(350)),
+          filledRealAt: realMine(sim(360)),
+        }, 'pos-a', 0.0299),
+        shortFill('hedge-b', sim(355), sim(363), {
+          createdRealAt: realMine(sim(355)),
+          filledRealAt: realMine(sim(363)),
+        }, 'pos-b', 0.03),
+      ],
+    });
+
+    const { reverseHedgeOrders } = await getCampaignFullData(campaign.id, { heal: false });
+
+    expect(reverseHedgeOrders.map(order => [order.id, order.tradeRecordId, order.cancelledAt])).toEqual([
+      ['hedge-a', 'rec-hedge-a', sim(540)],
+      ['hedge-b', null, null],
+    ]);
+  });
+
+  it('【复核六 F2】还开着的对冲不借用另一次回放同一段行情留下的平仓记录收尾', async () => {
+    journals = [mainLeg()];
+    store({
+      tradeHistory: [
+        mainRecord({ openedRealAt: realMine(SIM0), closedRealAt: realMine(SIM_CLOSE) }),
+        hedgeCloseRecord('rec-other-replay', 'pos-other-replay', sim(366), sim(540), realOther),
+      ],
+      filled: [
+        shortFill('hedge-mine', sim(350), sim(360), {
+          createdRealAt: realMine(sim(350)),
+          filledRealAt: realMine(sim(360)),
+        }, 'pos-mine', 0.0299),
+      ],
+    });
+
+    const { reverseHedgeOrders } = await getCampaignFullData(campaign.id, { heal: false });
+
+    expect(reverseHedgeOrders.map(order => [order.id, order.tradeRecordId, order.cancelledAt])).toEqual([
+      ['hedge-mine', null, null],
+    ]);
+  });
+
+  describe('【复核七】', () => {
+    const REAL_A = t('2026-09-11T10:00:00.000Z');
+    const REAL_DAY2 = t('2026-09-12T10:00:00.000Z');
+    const REAL_B = t('2026-09-13T11:33:00.000Z');
+    const aHedge = () => hedge('A-hedge', sim(60), sim(180), { createdRealAt: REAL_A + MIN, cancelledRealAt: REAL_A + 3 * MIN }, 0.0301);
+    const aHedgeLate = () => hedge('A-hedge-late', sim(400), sim(600), {
+      createdRealAt: REAL_A + 5 * MIN,
+      cancelledRealAt: REAL_A + 7 * MIN,
+    }, 0.03);
+    const day2OtherCancelled = () => hedge('day2-other-cancelled', sim(62), sim(100), {
+      createdRealAt: REAL_DAY2,
+      cancelledRealAt: REAL_DAY2 + 5 * MIN,
+    }, 0.0299);
+    const openCampaign = () => {
+      campaign.closed_at = null;
+      campaign.status = 'active';
+    };
+
+    it('【复核七 F1】09-12 一回来先在本场停下处撤掉本场的旧单、再倒回回放同一段，09-13 往前一跳回到本场打到平仓：09-12 那一遍不算本场，本场的单一张不少', async () => {
+      journals = [mainLeg()];
+      store({
+        tradeHistory: [mainRecord({ openedRealAt: REAL_A, closedRealAt: REAL_B + 6 * MIN })],
+        cancelled: [
+          aHedge(),
+          aHedgeLate(),
+          // 09-12 回来先撤掉它：钟还停在本场的 sim+600m，之后才倒回 sim+62m
+          hedge('A-leftover', sim(500), sim(600), { createdRealAt: REAL_A + 6 * MIN, cancelledRealAt: REAL_DAY2 - MIN }, 0.0303),
+          day2OtherCancelled(),
+          hedge('B-hedge', sim(620), sim(900), { createdRealAt: REAL_B + MIN, cancelledRealAt: REAL_B + 3 * MIN }, 0.0298),
+        ],
+        pending: [shortPending('day2-other-live', sim(90), REAL_DAY2 + 3 * MIN, 0.0297)],
+      });
+
+      const { reverseHedgeOrders, pendingOrders } = await getCampaignFullData(campaign.id, { heal: false });
+
+      expect(reverseHedgeOrders.map(order => order.id)).toEqual(['A-hedge', 'A-hedge-late', 'A-leftover', 'B-hedge']);
+      expect(pendingOrders).toEqual([]);
+    });
+
+    it('【复核七 F1】进行中的战役：09-12 一回来 ⏹ 停止撤掉本场挂着的单、再倒回回放同一段，09-13 往前一跳回到本场：持仓面板不混进 09-12 的单', async () => {
+      openCampaign();
+      journals = [
+        { ...liveMainLeg(), pre_real_time: iso(REAL_A) },
+        {
+          ...liveMainLeg(),
+          id: 'tutu-live-add-leg',
+          leg_role: 'main_add_1',
+          leg_sequence: 2,
+          pre_simulated_time: iso(sim(610)),
+          pre_real_time: iso(REAL_B),
+        },
+      ];
+      store({
+        tradeHistory: [],
+        cancelled: [
+          aHedge(),
+          aHedgeLate(),
+          hedge('A-live', sim(300), sim(600), { createdRealAt: REAL_A + 4 * MIN, cancelledRealAt: REAL_DAY2 - MIN }, 0.0302),
+          day2OtherCancelled(),
+        ],
+        pending: [
+          shortPending('day2-other-live', sim(90), REAL_DAY2 + 3 * MIN, 0.0297),
+          shortPending('day3-hedge-live', sim(615), REAL_B + 2 * MIN, 0.0296),
+        ],
+      });
+
+      const { reverseHedgeOrders, pendingOrders } = await getCampaignFullData(campaign.id, { heal: false });
+
+      expect(pendingOrders.map(order => order.id)).toEqual(['day3-hedge-live']);
+      expect(reverseHedgeOrders.map(order => order.id)).toEqual(['A-hedge', 'A-live', 'A-hedge-late', 'day3-hedge-live']);
+    });
+
+    it('【复核七 F2】09-13 一回来先撤掉 / 触发了 09-12 那次回放留下的旧单（钟还停在那次的 sim+100m），再往前一跳回到本场打到平仓：09-11 本场的单不被取代', async () => {
+      journals = [mainLeg()];
+      const leftoverVariants: { cancelled: CancelledOrderSnapshot[]; filled: FilledOrderSnapshot[] }[] = [
+        {
+          cancelled: [hedge('day2-other-leftover', sim(90), sim(100), {
+            createdRealAt: REAL_DAY2 + 3 * MIN,
+            cancelledRealAt: REAL_B - 30_000,
+          }, 0.0297)],
+          filled: [],
+        },
+        {
+          cancelled: [],
+          filled: [shortFill('day2-other-leftover', sim(90), sim(100) + 20_000, {
+            createdRealAt: REAL_DAY2 + 3 * MIN,
+            filledRealAt: REAL_B - MIN,
+          }, 'day2-other-position', 0.0297)],
+        },
+      ];
+      for (const leftover of leftoverVariants) {
+        store({
+          tradeHistory: [mainRecord({ openedRealAt: REAL_A, closedRealAt: REAL_B + 6 * MIN })],
+          cancelled: [
+            aHedge(),
+            aHedgeLate(),
+            day2OtherCancelled(),
+            hedge('B-hedge', sim(620), sim(900), { createdRealAt: REAL_B + MIN, cancelledRealAt: REAL_B + 3 * MIN }, 0.0298),
+            ...leftover.cancelled,
+          ],
+          filled: leftover.filled,
+        });
+
+        const { reverseHedgeOrders } = await getCampaignFullData(campaign.id, { heal: false });
+
+        expect(reverseHedgeOrders.map(order => order.id)).toEqual(['A-hedge', 'A-hedge-late', 'B-hedge']);
+      }
+    });
+
+    it('【复核七 F2】进行中的战役：09-13 一回来先撤掉 09-12 那次回放留下的旧单，再往前一跳回到本场挂对冲（没有记录新的决策）：这张对冲仍在持仓面板与委托层', async () => {
+      openCampaign();
+      journals = [{ ...liveMainLeg(), pre_real_time: iso(REAL_A) }];
+      store({
+        tradeHistory: [],
+        cancelled: [
+          aHedge(),
+          aHedgeLate(),
+          day2OtherCancelled(),
+          hedge('day2-other-leftover', sim(90), sim(100), { createdRealAt: REAL_DAY2 + 3 * MIN, cancelledRealAt: REAL_B - 30_000 }, 0.0297),
+        ],
+        pending: [
+          shortPending('A-live', sim(300), REAL_A + 4 * MIN, 0.0302),
+          shortPending('day3-hedge-live', sim(615), REAL_B + 2 * MIN, 0.0296),
+        ],
+      });
+
+      const { reverseHedgeOrders, pendingOrders } = await getCampaignFullData(campaign.id, { heal: false });
+
+      expect(pendingOrders.map(order => order.id)).toEqual(['A-live', 'day3-hedge-live']);
+      expect(reverseHedgeOrders.map(order => order.id)).toEqual(['A-hedge', 'A-live', 'A-hedge-late', 'day3-hedge-live']);
+    });
+
+    it('【复核七 F3】A 遍挂的单活过了倒回出来的 B 遍，又一次倒回后没等 C 遍走回它就撤掉：它仍是被放弃的时间线，不借道 B 遍留下', async () => {
+      openCampaign();
+      journals = [
+        { ...liveMainLeg(), pre_real_time: iso(REAL_A) },
+        {
+          ...liveMainLeg(),
+          id: 'tutu-live-add-leg',
+          leg_role: 'main_add_1',
+          leg_sequence: 2,
+          pre_simulated_time: iso(sim(620)),
+          pre_real_time: iso(REAL_A + 15 * MIN),
+        },
+      ];
+      store({
+        tradeHistory: [],
+        cancelled: [
+          hedge('passA-late', sim(900), sim(1000), { createdRealAt: REAL_A + 10 * MIN, cancelledRealAt: REAL_A + 12 * MIN }, 0.0301),
+          // 倒回到 sim+140m 之后、C 遍走回 sim+240m 之前就撤掉
+          hedge('passA-carried-abandoned', sim(240), sim(170), {
+            createdRealAt: REAL_A + 5 * MIN,
+            cancelledRealAt: REAL_A + 20 * MIN,
+          }, 0.03),
+        ],
+        pending: [shortPending('passC-hedge', sim(260), REAL_A + 22 * MIN, 0.0299)],
+      });
+
+      const { reverseHedgeOrders, pendingOrders } = await getCampaignFullData(campaign.id, { heal: false });
+
+      expect(reverseHedgeOrders.map(order => order.id)).toEqual(['passC-hedge']);
+      expect(pendingOrders.map(order => order.id)).toEqual(['passC-hedge']);
+    });
+
+    it('【复核七 F4】进行中的战役带着还开着的对冲仓位倒回：开出它的委托（含并进同一仓位的后一笔）仍在委托层；仓位已不在的照样被取代', async () => {
+      openCampaign();
+      journals = [
+        { ...liveMainLeg(), pre_real_time: iso(REAL_A) },
+        {
+          ...liveMainLeg(),
+          id: 'tutu-live-add-leg',
+          leg_role: 'main_add_1',
+          leg_sequence: 2,
+          pre_simulated_time: iso(sim(92)),
+          pre_real_time: iso(REAL_A + 20 * MIN),
+        },
+      ];
+      store({
+        tradeHistory: [],
+        filled: [
+          shortFill('hedge-open', sim(172), sim(228), { createdRealAt: REAL_A + 5 * MIN, filledRealAt: REAL_A + 8 * MIN }, 'pos-hedge', 0.03),
+          // 并进同一个空头仓位的后一笔：快照记的是它自己的成交 id，仓位 id 仍是最早那笔的
+          shortFill('hedge-merged', sim(180), sim(232), {
+            createdRealAt: REAL_A + 6 * MIN,
+            filledRealAt: REAL_A + 9 * MIN,
+          }, 'fill-merged', 0.0301),
+          // 仓位已经不在了（倒回之前就平掉）：被放弃的时间线
+          shortFill('hedge-gone', sim(175), sim(230), {
+            createdRealAt: REAL_A + 5 * MIN + 30_000,
+            filledRealAt: REAL_A + 8 * MIN + 30_000,
+          }, 'pos-gone', 0.0298),
+        ],
+        pending: [shortPending('passB-hedge', sim(260), REAL_A + 25 * MIN, 0.0299)],
+      });
+      localStorage.setItem('sim_user-1_positions_map', JSON.stringify({
+        TUTUSDT: [{
+          id: 'pos-hedge',
+          side: 'SHORT',
+          entryPrice: 0.03005,
+          quantity: 20_000,
+          leverage: 5,
+          marginMode: 'isolated',
+          margin: 120,
+          fills: [
+            { id: 'pos-hedge', openTime: sim(228), entryPrice: 0.03, units: 10_000 },
+            { id: 'fill-merged', openTime: sim(232), entryPrice: 0.0301, units: 10_000 },
+          ],
+        }],
+      }));
+
+      const { reverseHedgeOrders, pendingOrders } = await getCampaignFullData(campaign.id, { heal: false });
+
+      expect(reverseHedgeOrders.map(order => order.id)).toEqual(['hedge-open', 'hedge-merged', 'passB-hedge']);
+      expect(pendingOrders.map(order => order.id)).toEqual(['passB-hedge']);
+    });
+  });
 });

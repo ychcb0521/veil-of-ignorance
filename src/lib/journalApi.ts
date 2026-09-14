@@ -2195,6 +2195,14 @@ export interface UserLocalSnapshot {
   ordersMap: Record<string, PendingOrder[]>;
   cancelledOrders: CancelledOrderSnapshot[];
   filledOrders: FilledOrderSnapshot[];
+  /** 至今还开着的仓位（positions_map）。只用到仓位与每笔成交的 id；缺省视为没有开着的仓位。 */
+  positionsMap?: Record<string, OpenPositionIds[]>;
+}
+
+/** fills[0].id 恒等于 position.id；并进同一仓位的后几笔只在 fills 里留下自己的 id。 */
+interface OpenPositionIds {
+  id: string;
+  fills?: { id: string }[];
 }
 
 export function readUserLocalSnapshot(userId: string): UserLocalSnapshot {
@@ -2203,6 +2211,7 @@ export function readUserLocalSnapshot(userId: string): UserLocalSnapshot {
     ordersMap: readUserScopedStorage<Record<string, PendingOrder[]>>(userId, 'orders_map', {}),
     cancelledOrders: readUserScopedStorage<CancelledOrderSnapshot[]>(userId, 'cancelled_orders', []),
     filledOrders: readUserScopedStorage<FilledOrderSnapshot[]>(userId, 'filled_orders', []),
+    positionsMap: readUserScopedStorage<Record<string, OpenPositionIds[]>>(userId, 'positions_map', {}),
   };
 }
 
@@ -2614,8 +2623,17 @@ export async function getCampaignFullData(
       );
       if (byPositionId) return byPositionId;
     }
+    /**
+     * 下面两级按时间 / 价格兜底，只为接回没有仓位 id、或并进老合并仓位（记录只带存活仓位 id）的老数据。
+     * 带 fillId 的记录（2026-08-31 起每条平仓都写）自报了是哪一笔成交：fillId 与这张委托开出的仓位 id 不同，
+     * 就是别的成交的平仓——同一分钟另一张对冲的，或另一次回放同一段行情的。接上去会让这张至今未平的对冲
+     * 顶着别人的平仓时刻收尾，还会与那张共用 record 去重键被吞掉。
+     */
+    const mayCloseThisFill = (record: TradeRecord) =>
+      !order.positionId || !record.fillId || record.fillId === order.positionId;
     const candidates = campaignSymbolTradeRecords
       .filter(record =>
+        mayCloseThisFill(record) &&
         record.side === order.side &&
         Math.abs(record.openTime - order.filledAt) <= ORDER_RECORD_MATCH_MS &&
         closeEnough(record.entryPrice, order.price)
@@ -2633,7 +2651,7 @@ export async function getCampaignFullData(
 
     const legacyCandidates = campaignSymbolTradeRecords
       .filter(record => {
-        if (record.side !== order.side || record.closeTime <= order.filledAt) return false;
+        if (!mayCloseThisFill(record) || record.side !== order.side || record.closeTime <= order.filledAt) return false;
         const openDelta = Math.abs(record.openTime - order.filledAt);
         if (openDelta > LEGACY_ORDER_RECORD_MATCH_MS) return false;
         return closeEnoughLegacyPrice(record.entryPrice, order.price) ||
@@ -2657,12 +2675,28 @@ export async function getCampaignFullData(
   const selectedPositionIds = new Set(
     tradeRecords.flatMap(record => [record.positionId, record.fillId]).filter((id): id is string => Boolean(id)),
   );
+  /**
+   * 至今还开着的仓位里每一笔成交的 id。进行中的战役带着还没平的对冲仓位倒回时，它还没有平仓记录、上面的豁免够不着；
+   * 倒回不平仓，这笔成交开出的仓位活进了之后每一遍，与仍挂着的委托同理按 live 判，不被重走取代。
+   * 只放宽取代、不放宽成员资格：另一次回放的成交仍要落在本场的时间线上。不用「没有平仓记录」代替——
+   * 清除标的数据后每笔成交都没有平仓记录，被放弃时间线里早已平掉的对冲会借此成对回来。
+   */
+  const openPositionFillIds = new Set(
+    (local.positionsMap?.[campaign.symbol] ?? [])
+      .flatMap(position => [position.id, ...(position.fills ?? []).map(fill => fill.id)])
+      .filter((id): id is string => Boolean(id)),
+  );
+  const filledIntoOpenPosition = (order: FilledOrderSnapshot) =>
+    order.positionId != null && openPositionFillIds.has(order.positionId);
   const triggeredReverseOrders = filledOrders
     .filter(order =>
       order.symbol === campaign.symbol &&
       isOpeningShortOrder(order) &&
       inWindow(order.createdAt) &&
-      ((order.positionId != null && selectedPositionIds.has(order.positionId)) || belongsToCampaignTimeline(order))
+      (
+        (order.positionId != null && selectedPositionIds.has(order.positionId))
+        || belongsToCampaignTimeline(order, { live: filledIntoOpenPosition(order) })
+      )
     )
     .map(order => {
       const record = findRecordForFilledOrder(order);
@@ -2696,12 +2730,14 @@ export async function getCampaignFullData(
   for (const order of ordersMap[campaign.symbol] ?? []) {
     if (order.id) orderSnapshotsById.set(order.id, { order, live: isLivePendingOrder(order) });
   }
-  // 撤单 / 成交快照后写、覆盖同 id 的挂单：委托已经结束了
-  for (const order of [
-    ...cancelledOrders.filter(order => order.symbol === campaign.symbol),
-    ...filledOrders.filter(order => order.symbol === campaign.symbol),
-  ]) {
-    if (order.id) orderSnapshotsById.set(order.id, { order, live: false });
+  // 撤单 / 成交快照后写、覆盖同 id 的挂单：委托已经结束了（成交开出的仓位至今还开着的除外，与上面同一口径）
+  for (const order of cancelledOrders) {
+    if (order.symbol === campaign.symbol && order.id) orderSnapshotsById.set(order.id, { order, live: false });
+  }
+  for (const order of filledOrders) {
+    if (order.symbol === campaign.symbol && order.id) {
+      orderSnapshotsById.set(order.id, { order, live: filledIntoOpenPosition(order) });
+    }
   }
   const eventRecoveredReverseOrders = Array.from(eventOrderIds)
     .map((orderId): CampaignReverseHedgeOrder | null => {

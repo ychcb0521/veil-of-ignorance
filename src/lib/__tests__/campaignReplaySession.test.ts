@@ -617,3 +617,155 @@ describe('【复核五】倒回出来的那一遍隔天接着打 / 倒回那一�
     expect(filter.allowsOrder(orderClockStamp({ ...conditional, filledAt: sim(2, 10), filledRealAt: real(0, 4) }))).toBe(false);
   });
 });
+
+describe('【复核六】夹在本场两次坐下来之间的另一次回放：回到本场时只与本场那条时间线比', () => {
+  const DAY1 = real(-48);
+  const DAY2 = real(-24);
+  const DAY3 = real(0);
+  type Snapshot = Parameters<typeof orderClockStamp>[0] & { id: string; live?: boolean };
+  const eventsOf = (orders: Snapshot[]): ReplayEvent[] => orders.flatMap(o => [
+    { realAt: o.createdRealAt!, simAt: o.createdAt, kind: 'order-create' as const },
+    ...(o.cancelledRealAt ? [{ realAt: o.cancelledRealAt, simAt: o.cancelledAt!, kind: 'order-end' as const }] : []),
+  ]);
+  const surviving = (anchors: ReplayEvent[], orders: Snapshot[], campaignOpen = false) => {
+    const filter = buildReplaySessionFilter([...anchors, ...eventsOf(orders)], { campaignOpen })!;
+    return orders.filter(o => filter.allowsOrder(orderClockStamp(o, { live: o.live }))).map(o => o.id);
+  };
+
+  it('【已结束】隔天回放了同一段、第三天往前一跳回到本场接着打到平仓：那天的单不算本场，第一天本场的单也不被它取代', () => {
+    const anchors: ReplayEvent[] = [
+      { realAt: DAY1, simAt: sim(0), anchor: true, kind: 'record-open' },
+      { realAt: DAY3 + 30 * M, simAt: sim(50), anchor: true, kind: 'record-close' },
+    ];
+    const mine: Snapshot[] = [
+      { id: 'mine-day1', createdAt: sim(20), createdRealAt: DAY1 + 20 * M, cancelledAt: sim(25), cancelledRealAt: DAY1 + 25 * M },
+      { id: 'mine-day3', createdAt: sim(30), createdRealAt: DAY3, cancelledAt: sim(40), cancelledRealAt: DAY3 + 10 * M },
+    ];
+    const other: Snapshot[] = [
+      { id: 'other-day2', createdAt: sim(5), createdRealAt: DAY2 + 5 * M, cancelledAt: sim(6), cancelledRealAt: DAY2 + 6 * M },
+      { id: 'other-day2-live', createdAt: sim(8), createdRealAt: DAY2 + 10 * M, live: true },
+    ];
+    expect(surviving(anchors, mine)).toEqual(['mine-day1', 'mine-day3']);
+    expect(surviving(anchors, [...mine, ...other])).toEqual(['mine-day1', 'mine-day3']);
+  });
+
+  it('【进行中】隔天回放了同一段、第三天往前一跳回到本场挂的对冲：仍是本场', () => {
+    const anchors: ReplayEvent[] = [{ realAt: DAY1, simAt: sim(0), anchor: true, kind: 'leg-open' }];
+    const mine: Snapshot[] = [
+      { id: 'mine-day1-live', createdAt: sim(10), createdRealAt: DAY1 + 20 * M, live: true },
+      { id: 'mine-day1-cancelled', createdAt: sim(5), createdRealAt: DAY1 + 10 * M, cancelledAt: sim(9), cancelledRealAt: DAY1 + 15 * M },
+      { id: 'mine-day3-live', createdAt: sim(20), createdRealAt: DAY3, live: true },
+    ];
+    const other: Snapshot[] = [
+      { id: 'other-day2', createdAt: sim(2), createdRealAt: DAY2, cancelledAt: sim(3), cancelledRealAt: DAY2 + 5 * M },
+    ];
+    const all = ['mine-day1-live', 'mine-day1-cancelled', 'mine-day3-live'];
+    expect(surviving(anchors, mine, true)).toEqual(all);
+    expect(surviving(anchors, [...mine, ...other], true)).toEqual(all);
+  });
+
+  it('【已结束】当天倒回出来的 B 遍隔两天接着打到平仓，中间那天回放到比 B 遍更晚的行情：B 遍照样是本场、照样取代 A 遍', () => {
+    const anchors: ReplayEvent[] = [
+      { realAt: DAY1, simAt: sim(0), anchor: true, kind: 'record-open' },
+      { realAt: DAY3 + 30 * M, simAt: sim(20), anchor: true, kind: 'record-close' },
+    ];
+    const mine: Snapshot[] = [
+      { id: 'passA-late', createdAt: sim(8), createdRealAt: DAY1 + 5 * M, cancelledAt: sim(3), cancelledRealAt: DAY1 + 10 * M },
+      { id: 'passB', createdAt: sim(3, 6), createdRealAt: DAY1 + 12 * M, cancelledAt: sim(15), cancelledRealAt: DAY3 + 10 * M },
+    ];
+    const other: Snapshot[] = [
+      { id: 'other-early', createdAt: sim(2), createdRealAt: DAY2, cancelledAt: sim(10), cancelledRealAt: DAY2 + 5 * M },
+      { id: 'other-late', createdAt: sim(30), createdRealAt: DAY2 + 10 * M, cancelledAt: sim(40), cancelledRealAt: DAY2 + 15 * M },
+    ];
+    expect(surviving(anchors, mine)).toEqual(['passB']);
+    expect(surviving(anchors, [...mine, ...other])).toEqual(['passB']);
+  });
+
+  it('回到本场时低于本场停下处（倒回另起一遍）：仍按新的一遍切开，中间那次回放同样不算本场', () => {
+    const anchors: ReplayEvent[] = [
+      { realAt: DAY1, simAt: sim(0), anchor: true, kind: 'record-open' },
+      { realAt: DAY3 + 30 * M, simAt: sim(50), anchor: true, kind: 'record-close' },
+    ];
+    const orders: Snapshot[] = [
+      { id: 'passA-late', createdAt: sim(20), createdRealAt: DAY1 + 20 * M, cancelledAt: sim(25), cancelledRealAt: DAY1 + 25 * M },
+      { id: 'other-day2', createdAt: sim(5), createdRealAt: DAY2 + 5 * M, cancelledAt: sim(8), cancelledRealAt: DAY2 + 6 * M },
+      // 第三天回到 sim+15h：高于那次回放、低于本场停下的 sim+25h，是倒回重打本场
+      { id: 'passB', createdAt: sim(15), createdRealAt: DAY3, cancelledAt: sim(40), cancelledRealAt: DAY3 + 10 * M },
+    ];
+    expect(surviving(anchors, orders)).toEqual(['passB']);
+  });
+});
+
+describe('【复核七】坐下来开头只是收拾旧单 / 不含锚点的坐下来倒回出来的一遍 / 跨两次倒回的被放弃时间线', () => {
+  const DAY1 = real(-48);
+  const DAY2 = real(-24);
+  const DAY3 = real(0);
+  type Snapshot = Parameters<typeof orderClockStamp>[0] & { id: string; live?: boolean };
+  const eventsOf = (orders: Snapshot[]): ReplayEvent[] => orders.flatMap(o => [
+    { realAt: o.createdRealAt!, simAt: o.createdAt, kind: 'order-create' as const },
+    ...(o.cancelledRealAt ? [{ realAt: o.cancelledRealAt, simAt: o.cancelledAt!, kind: 'order-end' as const }] : []),
+    ...(o.filledRealAt ? [{ realAt: o.filledRealAt, simAt: o.filledAt!, kind: 'order-end' as const }] : []),
+  ]);
+  const surviving = (anchors: ReplayEvent[], orders: Snapshot[], campaignOpen = false) => {
+    const filter = buildReplaySessionFilter([...anchors, ...eventsOf(orders)], { campaignOpen })!;
+    return orders.filter(o => filter.allowsOrder(orderClockStamp(o, { live: o.live }))).map(o => o.id);
+  };
+  const closedAnchors: ReplayEvent[] = [
+    { realAt: DAY1, simAt: sim(0), anchor: true, kind: 'record-open' },
+    { realAt: DAY3 + 30 * M, simAt: sim(50), anchor: true, kind: 'record-close' },
+  ];
+
+  it('【已结束】隔天先在本场停下处撤掉本场的旧单、再倒回回放同一段，第三天往前一跳回到本场：那天倒回出来的一遍不算本场，本场的单也不被它取代', () => {
+    const orders: Snapshot[] = [
+      { id: 'day1-hedge', createdAt: sim(20), createdRealAt: DAY1 + 20 * M, cancelledAt: sim(25), cancelledRealAt: DAY1 + 25 * M },
+      // 第二天一回来先撤掉它：撤单的钟仍停在本场的 sim+25h
+      { id: 'day1-leftover', createdAt: sim(22), createdRealAt: DAY1 + 22 * M, cancelledAt: sim(25), cancelledRealAt: DAY2 - M },
+      { id: 'other-day2', createdAt: sim(5), createdRealAt: DAY2 + 5 * M, cancelledAt: sim(6), cancelledRealAt: DAY2 + 6 * M },
+      { id: 'other-day2-live', createdAt: sim(8), createdRealAt: DAY2 + 10 * M, live: true },
+      { id: 'mine-day3', createdAt: sim(30), createdRealAt: DAY3, cancelledAt: sim(40), cancelledRealAt: DAY3 + 10 * M },
+    ];
+    expect(surviving(closedAnchors, orders)).toEqual(['day1-hedge', 'day1-leftover', 'mine-day3']);
+  });
+
+  it('【已结束】第三天一回来先撤掉 / 触发了隔天那次回放留下的旧单（钟还停在那次），再往前一跳回到本场：本场第一天的单不被取代', () => {
+    const mine: Snapshot[] = [
+      { id: 'day1-late', createdAt: sim(20), createdRealAt: DAY1 + 20 * M, cancelledAt: sim(25), cancelledRealAt: DAY1 + 25 * M },
+      { id: 'mine-day3', createdAt: sim(30), createdRealAt: DAY3, cancelledAt: sim(40), cancelledRealAt: DAY3 + 10 * M },
+    ];
+    const otherDay2: Snapshot = {
+      id: 'other-day2', createdAt: sim(5), createdRealAt: DAY2 + 5 * M, cancelledAt: sim(6), cancelledRealAt: DAY2 + 6 * M,
+    };
+    const leftover = { id: 'other-day2-leftover', createdAt: sim(7), createdRealAt: DAY2 + 10 * M };
+    const cancelledOnDay3: Snapshot = { ...leftover, cancelledAt: sim(8), cancelledRealAt: DAY3 - M };
+    const filledOnDay3: Snapshot = { ...leftover, filledAt: sim(8) + 20_000, filledRealAt: DAY3 - M };
+    expect(surviving(closedAnchors, [...mine, otherDay2, cancelledOnDay3])).toEqual(['day1-late', 'mine-day3']);
+    expect(surviving(closedAnchors, [...mine, otherDay2, filledOnDay3])).toEqual(['day1-late', 'mine-day3']);
+  });
+
+  it('【进行中】第三天先撤掉隔天那次回放留下的旧单、再往前一跳回到本场挂对冲（没有记录新的决策）：这张对冲仍是本场', () => {
+    const anchors: ReplayEvent[] = [{ realAt: DAY1, simAt: sim(0), anchor: true, kind: 'leg-open' }];
+    const orders: Snapshot[] = [
+      { id: 'day1-live', createdAt: sim(10), createdRealAt: DAY1 + 20 * M, live: true },
+      { id: 'other-day2', createdAt: sim(2), createdRealAt: DAY2, cancelledAt: sim(3), cancelledRealAt: DAY2 + 5 * M },
+      { id: 'other-day2-leftover', createdAt: sim(4), createdRealAt: DAY2 + 10 * M, cancelledAt: sim(4), cancelledRealAt: DAY3 - M },
+      { id: 'day3-live', createdAt: sim(30), createdRealAt: DAY3, live: true },
+    ];
+    expect(surviving(anchors, orders, true)).toEqual(['day1-live', 'day3-live']);
+  });
+
+  it('【取代】A 遍挂的单活过倒回出来的 B 遍，又一次倒回后没等 C 遍走回它就撤掉：照样被取代，不借道 B 遍留下；至今挂着的保留', () => {
+    const anchors: ReplayEvent[] = [
+      { realAt: real(0, 0), simAt: sim(0), anchor: true, kind: 'leg-open' },
+      { realAt: real(0, 15), simAt: sim(10), anchor: true, kind: 'leg-open' },   // 倒回出来的 B 遍记录加仓
+    ];
+    const passALate: Snapshot = {
+      id: 'passA-late', createdAt: sim(15), createdRealAt: real(0, 10), cancelledAt: sim(16), cancelledRealAt: real(0, 12),
+    };
+    const passCHedge: Snapshot = { id: 'passC-hedge', createdAt: sim(4, 20), createdRealAt: real(0, 22), live: true };
+    const carried = { id: 'passA-carried', createdAt: sim(4), createdRealAt: real(0, 5) };
+    const abandonedInC: Snapshot = { ...carried, cancelledAt: sim(3), cancelledRealAt: real(0, 20) };
+    const stillLive: Snapshot = { ...carried, live: true };
+    expect(surviving(anchors, [passALate, abandonedInC, passCHedge], true)).toEqual(['passC-hedge']);
+    expect(surviving(anchors, [passALate, stillLive, passCHedge], true)).toEqual(['passA-carried', 'passC-hedge']);
+  });
+});
