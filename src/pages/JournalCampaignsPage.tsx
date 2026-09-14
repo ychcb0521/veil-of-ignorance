@@ -2063,8 +2063,12 @@ export default function JournalCampaignsPage() {
           </DialogContent>
         </Dialog>
 
-        <section className="mb-5 overflow-hidden border-y border-border/80 bg-card/40">
+        <section className="mb-5 overflow-visible border-y border-border/80 bg-card/40">
           <div className="flex w-full flex-col">
+            <div
+              data-testid="campaign-sticky-controls"
+              className="sticky top-[57px] z-10 order-1 flex w-full flex-col border-b border-border/70 bg-background/95 shadow-sm backdrop-blur-sm"
+            >
             <div
               data-testid="campaign-sort-controls"
               className="order-2 flex min-h-11 flex-wrap items-center gap-1 border-t border-border/70 bg-background/55 px-3 py-2 text-[10px] text-muted-foreground sm:px-4"
@@ -2914,6 +2918,7 @@ export default function JournalCampaignsPage() {
                 </div>
               </PopoverContent>
             </Popover>
+          </div>
           </div>
           {metricChartOpen ? (
             <div

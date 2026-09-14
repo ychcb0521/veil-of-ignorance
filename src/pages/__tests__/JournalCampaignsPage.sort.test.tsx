@@ -1089,6 +1089,10 @@ describe('JournalCampaignsPage sorting', () => {
     expect(screen.getByTestId('campaign-sort-time')).toHaveAttribute('aria-label', '操作时间，从大到小排序');
     const sortControls = screen.getByTestId('campaign-sort-controls');
     const metricsStrip = screen.getByTestId('campaign-metrics-strip');
+    expect(screen.getByTestId('campaign-sticky-controls')).toHaveClass('sticky');
+    expect(screen.getByTestId('campaign-sticky-controls')).toHaveClass('top-[57px]');
+    expect(screen.getByTestId('campaign-sticky-controls')).toContainElement(metricsStrip);
+    expect(screen.getByTestId('campaign-sticky-controls')).toContainElement(sortControls);
     expect(sortControls).not.toContainElement(screen.getByTestId('campaign-valid-count'));
     expect(metricsStrip).toContainElement(screen.getByTestId('campaign-valid-count'));
     expect(metricsStrip).toContainElement(screen.getByTestId('campaign-opportunity-quality'));
