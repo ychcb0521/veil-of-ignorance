@@ -1941,4 +1941,94 @@ describe('【用户要求】委托空单与本场操作时间对齐：TUTUSDT 20
 
     expect(reverseHedgeOrders.map(order => `${order.id}|${order.status}`)).toEqual(['june-hedge|cancelled']);
   });
+
+  it('【复核三 F1】持仓跨过资金费时段：资金费结算记录（没有 openedRealAt）不让本场被误判为跨上线，8 月回看窗里的无章委托照样排除', async () => {
+    const SIM_FUNDING = t('2026-08-07T16:00:30.000Z');
+    journals = [mainLeg()];
+    store({
+      tradeHistory: [
+        mainRecord({ openedRealAt: realMine(SIM0), closedRealAt: realMine(SIM_CLOSE) }),
+        {
+          id: 'funding-0807-16',
+          symbol: 'TUTUSDT',
+          side: 'LONG',
+          type: 'FUNDING',
+          action: 'FUNDING',
+          entryPrice: 0.0315,
+          exitPrice: 0,
+          quantity: 10_000,
+          leverage: 5,
+          pnl: -0.03,
+          fee: 0.03,
+          slippage: 0,
+          openTime: SIM_FUNDING,
+          closeTime: SIM_FUNDING,
+          closedRealAt: realMine(SIM_FUNDING),
+        } as TradeRecord,
+      ],
+      cancelled: [
+        mineHedge('mine-0300500-1942', sim(1), sim(6 * 60)),
+        hedge('aug-prehedge-1938', sim(-3), sim(-1), {}, 0.0301),
+        hedge('aug-carried-prehedge-stop', sim(-4), SIM_CLOSE, { cancelledRealAt: realMine(SIM_CLOSE) + 10_000 }, 0.0302),
+      ],
+      pending: [{ ...shortPending('aug-live-prehedge', sim(-2), 0, 0.0303), createdRealAt: undefined }],
+    });
+
+    const { reverseHedgeOrders, pendingOrders } = await getCampaignFullData(campaign.id);
+
+    expect(reverseHedgeOrders.map(order => order.id)).toEqual(['mine-0300500-1942']);
+    expect(pendingOrders).toEqual([]);
+  });
+
+  const liveMainLeg = () => makeLeg({
+    id: 'tutu-live-main-leg',
+    symbol: 'TUTUSDT',
+    source: 'live',
+    leg_role: 'main_open',
+    leg_sequence: 1,
+    direction: 'long',
+    pre_simulated_time: iso(SIM0),
+    pre_real_time: iso(REAL_MINE),
+    pre_entry_price: 0.0312,
+  });
+
+  it('【复核三 F2】进行中的战役隔天回来接着往后打（没有倒回）：第二天挂的对冲仍在持仓面板与委托层', async () => {
+    campaign.closed_at = null;
+    campaign.status = 'active';
+    journals = [liveMainLeg()];
+    store({
+      tradeHistory: [],
+      pending: [
+        shortPending('day1-after-main', sim(1), REAL_MINE + MIN),
+        shortPending('day2-continued-hedge', sim(180), REAL_MINE + 20 * 60 * MIN, 0.0299),
+      ],
+    });
+
+    const { pendingOrders, reverseHedgeOrders } = await getCampaignFullData(campaign.id);
+
+    expect(pendingOrders.map(order => order.id)).toEqual(['day1-after-main', 'day2-continued-hedge']);
+    expect(reverseHedgeOrders.map(order => order.id)).toEqual(['day1-after-main', 'day2-continued-hedge']);
+  });
+
+  it('【复核三 F4】挂好对冲后把时间机器倒回几分钟再开主力：至今挂着的那张仍在持仓面板；倒回前就撤掉的不算', async () => {
+    campaign.closed_at = null;
+    campaign.status = 'active';
+    journals = [liveMainLeg()];
+    store({
+      tradeHistory: [],
+      cancelled: [hedge('pre-rewind-cancelled', sim(6), sim(7), {
+        createdRealAt: REAL_MINE - 3 * MIN,
+        cancelledRealAt: REAL_MINE - 2.5 * MIN,
+      }, 0.0304)],
+      pending: [
+        shortPending('pre-rewind-hedge-live', sim(8), REAL_MINE - 2 * MIN, 0.0301),
+        shortPending('after-main', sim(3), REAL_MINE + MIN),
+      ],
+    });
+
+    const { pendingOrders, reverseHedgeOrders } = await getCampaignFullData(campaign.id);
+
+    expect(pendingOrders.map(order => order.id)).toEqual(['pre-rewind-hedge-live', 'after-main']);
+    expect(reverseHedgeOrders.map(order => order.id)).toEqual(['after-main', 'pre-rewind-hedge-live']);
+  });
 });

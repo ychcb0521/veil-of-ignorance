@@ -519,3 +519,62 @@ describe('【复核二】按坐下来修剪时间线 / 取代容差 / 上线时�
     expect(buildReplaySessionFilter([closeAnchor(june(0, 5), sim(30))])!.stampEra).toBe(false);
   });
 });
+
+describe('【复核三】进行中的战役按锚点延续 / 活进保留段的委托', () => {
+  const order = (realAt: number, simAt: number): ReplayEvent => ({ realAt, simAt, kind: 'order-create' });
+  const legOpen = (realAt: number, simAt: number): ReplayEvent => ({ realAt, simAt, anchor: true, kind: 'leg-open' });
+  const live = Number.POSITIVE_INFINITY;
+
+  it('【进行中】锚点所在段不按坐下来修剪：隔天回来接着往后打（没有倒回）的对冲算本场；隔天倒回另起一遍的不算', () => {
+    const filter = buildReplaySessionFilter([
+      legOpen(real(0, 0), sim(0)),
+      order(real(0, 1), sim(0, 1)),
+      order(real(14, 0), sim(0, 40)),                  // 第二天接着打同一遍
+      order(real(20, 0), sim(0, 10)),                  // 又隔了几小时，倒回去另起一遍
+    ], { campaignOpen: true })!;
+    expect(filter.allowsOrder({ realAt: real(14, 0), simAt: sim(0, 40), endRealAt: live })).toBe(true);
+    expect(filter.allowsOrder({ realAt: real(20, 0), simAt: sim(0, 10), endRealAt: live })).toBe(false);
+  });
+
+  it('【进行中】两次记录决策之间倒回出来的那一遍：同一次坐下来里照算（补记加仓不会让它消失），隔开一次坐下来的不算', () => {
+    const passB: ReplayEvent[] = [
+      legOpen(real(0, 0), sim(0)),
+      { realAt: real(0, 10), simAt: sim(1, 0), kind: 'order-end' },
+      order(real(0, 20), sim(0, 10)),                  // 倒回后给还开着的主力挂的对冲，至今挂着
+      { realAt: real(0, 30), simAt: sim(1, 30), kind: 'order-end' },
+    ];
+    const hedge = orderClockStamp({ createdAt: sim(0, 10), createdRealAt: real(0, 20) }, { live: true });
+    const cancelledInB = { realAt: real(0, 20), simAt: sim(0, 10), endRealAt: real(0, 25) };
+    const before = buildReplaySessionFilter(passB, { campaignOpen: true })!;
+    const after = buildReplaySessionFilter([...passB, legOpen(real(0, 40), sim(0, 20))], { campaignOpen: true })!;
+    expect(before.allowsOrder(hedge)).toBe(true);
+    expect(after.allowsOrder(hedge)).toBe(true);
+    expect(after.allowsOrder(cancelledInB)).toBe(true);
+
+    // 另一天倒回打的一遍夹在两次记录决策之间：不是本场的延续
+    const apart = buildReplaySessionFilter([
+      legOpen(real(0, 0), sim(0)),
+      { realAt: real(0, 10), simAt: sim(1, 0), kind: 'order-end' },
+      order(real(24, 0), sim(0, 10)),
+      { realAt: real(24, 10), simAt: sim(1, 30), kind: 'order-end' },
+      legOpen(real(48, 0), sim(0, 20)),
+    ], { campaignOpen: true })!;
+    expect(apart.allowsOrder({ realAt: real(24, 0), simAt: sim(0, 10), endRealAt: real(24, 5) })).toBe(false);
+  });
+
+  it('【成员资格】倒回之前挂的单活进了本场这一遍（至今挂着 / 这一遍里才撤）：算本场；倒回前就结束的、上一次坐下来挂的不算', () => {
+    const filter = buildReplaySessionFilter([
+      order(real(-72, 0), sim(0, 7)),                  // 三天前挂的，至今挂着
+      order(real(0, -2), sim(0, 8)),                   // 挂好对冲，再倒回 8 个模拟分钟开主力
+      { realAt: real(0, 0), simAt: sim(0), anchor: true, kind: 'record-open' },
+      order(real(0, 1), sim(0, 3)),
+      { realAt: real(0, 50), simAt: sim(2, 0), anchor: true, kind: 'record-close' },
+    ])!;
+    expect(filter.sessionCount).toBe(2);
+    const preRewind = { createdAt: sim(0, 8), createdRealAt: real(0, -2) };
+    expect(filter.allowsOrder(orderClockStamp(preRewind, { live: true }))).toBe(true);
+    expect(filter.allowsOrder(orderClockStamp({ ...preRewind, cancelledAt: sim(1), cancelledRealAt: real(0, 20) }))).toBe(true);
+    expect(filter.allowsOrder(orderClockStamp({ ...preRewind, cancelledAt: sim(0, 9), cancelledRealAt: real(0, -1) }))).toBe(false);
+    expect(filter.allowsOrder(orderClockStamp({ createdAt: sim(0, 7), createdRealAt: real(-72, 0) }, { live: true }))).toBe(false);
+  });
+});

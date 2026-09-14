@@ -2450,7 +2450,9 @@ export async function getCampaignFullData(
     }
   };
   for (const record of tradeHistory) {
-    if (record.symbol !== campaign.symbol) continue;
+    // 资金费结算不是开 / 平仓操作：它只有 closedRealAt、没有 openedRealAt，按下面的口径会被当成「上线之前开的仓」，
+    // 让持仓跨过任一资金费时段的战役都被误判为跨上线、盖章时代规则整个失效（与 campaignAnalysis 同一口径排除）
+    if (record.symbol !== campaign.symbol || record.action === 'FUNDING') continue;
     const anchor = selectedRecordIds.has(record.id);
     pushReplayEvent(record.openedRealAt, record.openTime, 'record-open', anchor);
     // 没有 openedRealAt 的成交是盖章上线之前开的仓：它的平仓所在那一段跨过了上线（盖章时代规则的放行条件）

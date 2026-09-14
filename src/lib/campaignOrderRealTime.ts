@@ -351,10 +351,13 @@ const CLOSE_SIDE_KINDS: ReadonlySet<ReplayEventKind | undefined> = new Set(['rec
  *      最早的锚点是平仓侧（本地成交被清掉、只剩腿的平仓时刻）时不知道战役从哪开始，不修剪。
  *    - 结尾：已结束的战役，最晚的锚点是平仓侧时战役就结束在它；之后隔着一次坐下来的事件不算。
  *    - 进行中的战役（campaignOpen）：仓位还开着、没有平仓锚点来收尾，时间机器倒回也不平仓不撤单，
- *      最晚锚点之后的段哪怕不含锚点也是本场的延续（L4 带着仓位倒回之后挂的对冲）——直到隔开一次坐下来为止。
+ *      每个锚点之后的段哪怕不含锚点也是本场的延续（L4 带着仓位倒回之后挂的对冲；两次记录决策之间倒回出来的那一遍同理）——
+ *      离开锚点所在段之后隔开一次坐下来为止。锚点所在段本身不修剪：隔天回来接着往后打（没有倒回）还是这场。
  *    中间不修剪：战役途中停多久都还是这场。
  *
  * 1. 成员资格：委托的真实时刻（bestOrderRealStamp）必须落在保留的某一段里。
+ *    或者挂在保留段之前（本场时间线同一次坐下来里、倒回之前那一遍），但活进了那一段（撤单 / 成交晚于段起点，或至今仍挂着）：
+ *    倒回不撤单，它在那一段的时间线里真实存在。在倒回之前那一遍里就结束了的仍不算。
  *    一个真实时刻都没有的委托不知道在哪一段，保留的每一段都是候选，任一段容得下即可。
  *
  * 2. 盖章时代（L1）：委托 / 开仓的真实时刻 2026-09-07 才开始记录。挂单没有 createdRealAt 的委托
@@ -422,15 +425,21 @@ export function buildReplaySessionFilter(
     while (from > 0 && segmentOf[from - 1] === segmentOf[firstAnchor] && !sittingBreakBefore(from)) from -= 1;
   }
   let to = points.length - 1;
-  if (campaignOpen || CLOSE_SIDE_KINDS.has(points[lastAnchor].kind)) {
+  if (!campaignOpen && CLOSE_SIDE_KINDS.has(points[lastAnchor].kind)) {
     to = lastAnchor;
-    while (
-      to + 1 < points.length
-      && !sittingBreakBefore(to + 1)
-      && (campaignOpen || segmentOf[to + 1] === segmentOf[lastAnchor])
-    ) to += 1;
+    while (to + 1 < points.length && !sittingBreakBefore(to + 1) && segmentOf[to + 1] === segmentOf[lastAnchor]) to += 1;
   }
   const anchoredSegments = new Set(anchorIndexes.map(index => segmentOf[index]));
+  // 进行中的战役：每个锚点之后的延续（含两个锚点之间倒回出来的那几遍）——离开锚点所在段之后，隔开一次坐下来就断
+  const continuesAnchor = points.map(() => false);
+  if (campaignOpen) {
+    let anchorSegment: number | null = null;
+    for (let index = firstAnchor; index < points.length; index += 1) {
+      if (points[index].anchor) anchorSegment = segmentOf[index];
+      else if (anchorSegment !== null && segmentOf[index] !== anchorSegment && sittingBreakBefore(index)) anchorSegment = null;
+      continuesAnchor[index] = anchorSegment !== null;
+    }
+  }
 
   interface Session {
     start: number;
@@ -451,9 +460,11 @@ export function buildReplaySessionFilter(
   );
   // 一段内保留下来的点在下标上连续，所以每段至多一个 session；sessions 按现实时间先后生成
   const sessionsBySegment = new Map<number, Session>();
+  let firstKeptIndex = -1;
   for (let index = from; index <= to; index += 1) {
     const segment = segmentOf[index];
-    if (!anchoredSegments.has(segment) && !(campaignOpen && index > lastAnchor)) continue;
+    if (!anchoredSegments.has(segment) && !continuesAnchor[index]) continue;
+    if (firstKeptIndex < 0) firstKeptIndex = index;
     const point = points[index];
     const current = sessionsBySegment.get(segment);
     const preRollout = point.realAt < STAMP_ROLLOUT_REAL_AT || Boolean(point.unstampedOpen);
@@ -485,6 +496,13 @@ export function buildReplaySessionFilter(
     })),
   }));
   const stampEra = kept.some(session => session.firstStampSim < INF);
+  // 本场时间线在现实里最早能回溯到哪：第一个保留的事件往前、不隔开一次坐下来（倒回之前那一遍也算）
+  let reachIndex = firstKeptIndex;
+  while (reachIndex > 0 && !sittingBreakBefore(reachIndex)) reachIndex -= 1;
+  const reachRealAt = points[reachIndex].realAt;
+  const orderEndRealAt = (order: OrderClockStamp) => (
+    typeof order.endRealAt === 'number' && order.endRealAt > 0 ? order.endRealAt : Number.NEGATIVE_INFINITY
+  );
 
   const fitsSession = (session: (typeof kept)[number], order: OrderClockStamp) => {
     // 盖章时代：上线之前经手过的委托，只能是跨上线那一遍里、早于这一段第一个上线后证据的
@@ -496,9 +514,7 @@ export function buildReplaySessionFilter(
       return false;
     }
     // 取代：之后某一段开始时它已经结束，且那一段重走到了它挂单的模拟时刻 → 被放弃的时间线
-    const endRealAt = typeof order.endRealAt === 'number' && order.endRealAt > 0
-      ? order.endRealAt
-      : Number.NEGATIVE_INFINITY;
+    const endRealAt = orderEndRealAt(order);
     const { simAt } = order;
     return session.replayedBy.every(later =>
       later.start <= endRealAt
@@ -515,8 +531,10 @@ export function buildReplaySessionFilter(
     },
     allowsOrder: order => {
       const { realAt } = order;
+      // 挂在保留段之外、却活进了某个保留段的委托（倒回之前挂的、倒回不撤）：在那一段的时间线里真实存在，按那一段判
       const candidates = finitePositive(realAt)
-        ? kept.filter(session => realAt >= session.start && realAt <= session.end)
+        ? kept.filter(session => (realAt >= session.start && realAt <= session.end)
+          || (realAt < session.start && realAt >= reachRealAt && orderEndRealAt(order) >= session.start))
         : kept;
       return candidates.some(session => fitsSession(session, order));
     },
