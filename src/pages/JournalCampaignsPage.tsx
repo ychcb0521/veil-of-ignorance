@@ -1,4 +1,4 @@
-import { startTransition, useEffect, useMemo, useState, type MouseEvent } from 'react';
+import { startTransition, useEffect, useMemo, useRef, useState, type MouseEvent } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
   Activity,
@@ -1024,6 +1024,7 @@ export default function JournalCampaignsPage() {
   );
   const [metricChartOpen, setMetricChartOpen] = useState(initialChartState.open);
   const [metricChartKey, setMetricChartKey] = useState<CampaignMetricChartKey>(initialChartState.key);
+  const metricChartPanelRef = useRef<HTMLDivElement | null>(null);
   const [deletedOpen, setDeletedOpen] = useState(false);
   const [deletedLoading, setDeletedLoading] = useState(false);
   const [deletedCampaigns, setDeletedCampaigns] = useState<TradeCampaign[]>([]);
@@ -1531,13 +1532,27 @@ export default function JournalCampaignsPage() {
     : formatGrowthFactor(realizedGrowth.factor);
   const opportunityQualityLabel = formatOpportunityQuality(opportunityQualityStats.average);
 
-  const updateListParams = (nextSort: CampaignSortState) => {
+  const updateListParams = (
+    nextSort: CampaignSortState,
+    nextChartKey: CampaignMetricChartKey | null | undefined = undefined,
+  ) => {
     const params = new URLSearchParams(location.search);
     params.delete('scope');
     params.set('sort', nextSort.mode);
     params.set('direction', nextSort.direction);
+    if (nextChartKey !== undefined) {
+      if (nextChartKey) params.set('chart', nextChartKey);
+      else params.delete('chart');
+    }
     const search = params.toString();
     nav({ pathname: location.pathname, search: search ? `?${search}` : '' }, { replace: true });
+  };
+
+  const scrollMetricChartIntoView = () => {
+    const schedule = window.requestAnimationFrame ?? ((callback: FrameRequestCallback) => window.setTimeout(callback, 0));
+    schedule(() => {
+      metricChartPanelRef.current?.scrollIntoView?.({ behavior: 'smooth', block: 'start' });
+    });
   };
 
   /** 今天（UTC+8 自然日）：预设区间与日期选择器的上限都以它为准。 */
@@ -1560,8 +1575,17 @@ export default function JournalCampaignsPage() {
     const nextSort: CampaignSortState = sortState.mode === mode
       ? { mode, direction: sortState.direction === 'desc' ? 'asc' : 'desc' }
       : { mode, direction: mode === 'alpha' ? 'asc' : 'desc' };
+    const sortChartKey = SORT_CHART_BY_MODE[mode] ?? null;
+    const nextChartKey = metricChartOpen && sortChartKey != null && metricSeriesByKey[sortChartKey].points.length > 0
+      ? DEFAULT_CHART_VIEW_BY_SOURCE[sortChartKey] ?? sortChartKey
+      : undefined;
     setSortState(nextSort);
-    updateListParams(nextSort);
+    if (nextChartKey) {
+      setMetricChartKey(nextChartKey);
+      setMetricChartOpen(true);
+      scrollMetricChartIntoView();
+    }
+    updateListParams(nextSort, nextChartKey);
   };
 
   const handleCampaignOpen = (campaignId: string) => {
@@ -2893,6 +2917,7 @@ export default function JournalCampaignsPage() {
           </div>
           {metricChartOpen ? (
             <div
+              ref={metricChartPanelRef}
               id="campaign-odds-scatter-panel"
               data-testid="campaign-odds-scatter-panel"
               className="order-3 border-t border-border/70 bg-background/35"

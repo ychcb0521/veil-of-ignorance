@@ -828,6 +828,38 @@ describe('JournalCampaignsPage sorting', () => {
     expect(screen.getByTestId('campaign-mirrorTp-view-time')).toHaveAttribute('aria-pressed', 'false');
   }, 15_000);
 
+  it('散点图模式下点击排序项会跳到对应指标图，并保留排序切换', async () => {
+    render(
+      <MemoryRouter initialEntries={['/journal/campaigns?sort=captureRate&direction=desc&chart=oddsDistribution']}>
+        <Routes>
+          <Route path="/journal/campaigns" element={<><JournalCampaignsPage /><SearchProbe /></>} />
+          <Route path="/journal/campaigns/:id" element={<LocationProbe />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => expect(screen.getByTestId('campaign-metric-scatter-plot'))
+      .toHaveAttribute('data-metric-key', 'oddsDistribution'));
+    expect(screen.getByTestId('campaign-sort-captureRate')).toHaveAttribute('data-sort-direction', 'desc');
+
+    fireEvent.click(screen.getByTestId('campaign-sort-geometricExpectancy'));
+
+    await waitFor(() => expect(screen.getByTestId('campaign-metric-scatter-plot'))
+      .toHaveAttribute('data-metric-key', 'geometricExpectancyDistribution'));
+    expect(screen.getByTestId('campaign-geometricExpectancy-view-distribution'))
+      .toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByTestId('campaign-sort-geometricExpectancy')).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByTestId('campaign-sort-geometricExpectancy')).toHaveAttribute('data-sort-direction', 'desc');
+    expect(screen.getByTestId('location-probe-search')).toHaveTextContent('sort=geometricExpectancy');
+    expect(screen.getByTestId('location-probe-search')).toHaveTextContent('chart=geometricExpectancyDistribution');
+
+    fireEvent.click(screen.getByTestId('campaign-sort-geometricExpectancy'));
+    expect(screen.getByTestId('campaign-sort-geometricExpectancy')).toHaveAttribute('data-sort-direction', 'asc');
+    expect(screen.getByTestId('campaign-metric-scatter-plot'))
+      .toHaveAttribute('data-metric-key', 'geometricExpectancyDistribution');
+    expect(screen.getByTestId('location-probe-search')).toHaveTextContent('direction=asc');
+  }, 15_000);
+
   it('?chart=oddsDistribution 恢复分布图，「时序 | 分布」互切并写回 URL，排序行按钮把它当作盈亏比图收起', async () => {
     render(
       <MemoryRouter initialEntries={['/journal/campaigns?sort=importance&direction=asc&chart=oddsDistribution']}>
