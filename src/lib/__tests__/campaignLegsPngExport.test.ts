@@ -83,9 +83,11 @@ function input(): CampaignBoardExportInput {
 }
 
 /** 「委托」列在 COLUMNS 里的下标。插新列时只需改这里，不必逐处改数字。 */
-const ORDER_COL = 9;
+const ORDER_COL = 10;
 /** 「手续费」列在 COLUMNS 里的下标。 */
-const FEE_COL = 8;
+const FEE_COL = 9;
+/** 「加仓校验」列在 COLUMNS 里的下标（紧跟「币量 / 仓位」）。 */
+const ADD_SIZING_COL = 8;
 
 describe('campaign PNG overview', () => {
   it('完整包含战役原数据和盈亏概览字段', () => {
@@ -497,6 +499,73 @@ describe('【用户要求】导出图要把 Legs 里的信息全部纳入', () =
   });
 });
 
+describe('【用户要求】导出图也带「加仓校验」列', () => {
+  // TUTUSDT 2026-08-08：主力 94,300 @0.0336792；镜像 00:36 落袋 15,117.55；加仓1 @0.0419705；S₁ 空单 0.034726
+  const addLegs = (addNotional: number) => [
+    {
+      id: 'main', leg_sequence: 1, leg_role: 'main_open', order_kind: 'main', direction: 'long',
+      pre_simulated_time: '2026-08-07T19:41:00+08:00', pre_entry_price: 0.0336792, pre_position_size: 94_300,
+      post_simulated_close_time: '2026-08-09T01:46:00+08:00', post_exit_price_snapshot: 0.0677819,
+    },
+    {
+      id: 'mirror', leg_sequence: 2, leg_role: 'mirror_tp', order_kind: 'tp', direction: 'long',
+      pre_simulated_time: '2026-08-07T19:41:00+08:00', pre_entry_price: 0.0336792, pre_position_size: 141_460,
+      post_simulated_close_time: '2026-08-08T00:36:00+08:00', post_realized_pnl: 15_117.55,
+    },
+    {
+      id: 'add1', leg_sequence: 3, leg_role: 'main_add_1', order_kind: 'main', direction: 'long',
+      pre_simulated_time: '2026-08-08T12:02:00+08:00', pre_entry_price: 0.0419705, pre_position_size: addNotional,
+    },
+  ] as unknown as TradeJournal[];
+  const stopOrder = {
+    id: 'stop', side: 'SHORT', price: 0.034726, status: 'cancelled',
+    createdAt: Date.parse('2026-08-08T12:01:00+08:00'), triggeredAt: null,
+    cancelledAt: Date.parse('2026-08-08T15:18:00+08:00'),
+  } as CampaignBoardExportInput['reverseHedgeOrders'][number];
+  const rowsFor = (addNotional: number) => buildCampaignLegsExportRows({
+    ...input(), legs: addLegs(addNotional), reverseHedgeOrders: [stopOrder],
+  });
+
+  it('仓位过大：红色、加粗、放大的 ✗，下面一行红字写缺口；行高跟着撑开', () => {
+    const rows = rowsFor(22_057_330);
+    const add = rows.find(row => row.legId === 'add1')!;
+    const [cross, gap] = add.cells[ADD_SIZING_COL];
+    expect(cross.text).toBe('✗');
+    expect(cross.color).toBe('#F6465D');
+    expect(cross.bold).toBe(true);
+    expect(cross.size ?? 13).toBeGreaterThan(16);
+    expect(gap.text).toMatch(/^缺 3,7\d\d,\d{3}$/);
+    expect(gap.color).toBe('#F6465D');
+    // 折行不会把「缺 3,789,250」拆开
+    expect(add.wrapped[ADD_SIZING_COL]).toHaveLength(2);
+    // 大字号那一行按字号撑开，不和下一行叠在一起
+    expect(add.height).toBeGreaterThanOrEqual(12 * 2 + (cross.size! + 4) + 17);
+    // 非加仓行、合计行留空；每一行格子数都与表头列数一致
+    expect(rows.find(row => row.legId === 'main')!.cells[ADD_SIZING_COL].map(line => line.text)).toEqual(['']);
+    expect(rows.at(-1)!.cells[ADD_SIZING_COL].map(line => line.text)).toEqual(['']);
+    const widths = new Set(rows.map(row => row.cells.length));
+    expect(widths).toEqual(new Set([11]));
+    // 列序：币量之后、手续费之前
+    expect(add.cells[ADD_SIZING_COL - 1][0].text).toMatch(/^525,54\d,\d{3}(\.\d+)?$/);
+  });
+
+  it('仓位合规：只是一枚淡灰小 ✓，不是红色', () => {
+    const add = rowsFor(2_000_000 * 0.0419705).find(row => row.legId === 'add1')!;
+    const [check] = add.cells[ADD_SIZING_COL];
+    expect(add.cells[ADD_SIZING_COL]).toHaveLength(1);
+    expect(check.text).toBe('✓');
+    expect(check.color).not.toBe('#F6465D');
+    expect(check.bold).toBeFalsy();
+    expect(check.size ?? 13).toBeLessThan(13);
+  });
+
+  it('读不到止损线：淡灰「—」', () => {
+    const rows = buildCampaignLegsExportRows({ ...input(), legs: addLegs(22_057_330), reverseHedgeOrders: [] });
+    const add = rows.find(row => row.legId === 'add1')!;
+    expect(add.cells[ADD_SIZING_COL]).toEqual([expect.objectContaining({ text: '—', color: '#C4CAD3' })]);
+  });
+});
+
 describe('【用户要求】主力阶段子行在导出图里也标明「对冲结束切段」', () => {
   const T = (hhmm: string) => `2026-08-07T${hhmm}:00.000Z`;
   const phaseLegs = [
@@ -528,5 +597,16 @@ describe('【用户要求】主力阶段子行在导出图里也标明「对冲�
     expect(total.kind).toBe('total');
     expect(total.cells[2][0].text).toBe('取自复盘快照');
     expect(total.cells[3][0].text).toBe('+93439.77');
+  });
+
+  it('阶段子行与表头同列数，「加仓校验」那一格留空——少一格就会让手续费 / 委托整体左移', () => {
+    const rows = buildCampaignLegsExportRows({ ...input(), legs: phaseLegs, initialExpectedMaxLoss: 20000 });
+    const phases = rows.filter(row => row.kind === 'phase');
+    expect(phases.length).toBeGreaterThanOrEqual(2);
+    for (const row of phases) {
+      expect(row.cells).toHaveLength(11);
+      expect(row.cells[ADD_SIZING_COL].map(line => line.text)).toEqual(['']);
+    }
+    expect(new Set(rows.map(row => row.cells.length))).toEqual(new Set([11]));
   });
 });

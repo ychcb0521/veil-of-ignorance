@@ -12,6 +12,7 @@ import { computeLegPnlContributions, sumLegPnl } from '@/lib/campaignLegPnl';
 import { computeCampaignRealizedPnl, settlementBasisLabel } from '@/lib/campaignRealizedPnl';
 import { formatDeltaB, legDeltaB, roundedDeltaB, splitMainLegPhases, type MainLegPhase } from '@/lib/campaignLegPhases';
 import { formatFeeCoin, sumTradeRecordFees, tradeRecordFees } from '@/lib/tradeFees';
+import { describeAddSizingVerdict, evaluateCampaignAddSizing, formatAddSizingShortfall } from '@/lib/campaignAddSizingCheck';
 import type { CampaignReverseHedgeOrder, TradeRecord } from '@/types/trading';
 
 interface Props {
@@ -112,10 +113,15 @@ const FEE_COLUMN_HINT = '币安口径：手续费 = 名义 × 费率，开仓、
   + '币本位：名义 = 张数 × 面值 ÷ 成交价，收的是币——折成美元后价格被约掉，所以开平两笔的美元数必然相同，币数才不同（价越高付的币越少），本列因此按币显示。'
   + '盈亏列已扣平仓费；开仓费在开仓当时从钱包扣除。旧记录未存开仓费，按当时 0.04% Taker 估算并标明。';
 
-const LEGS_GRID = 'grid-cols-[36px_128px_180px_116px_84px_88px_88px_116px_148px_minmax(216px,1fr)_64px]';
+const LEGS_GRID = 'grid-cols-[36px_128px_180px_116px_84px_88px_88px_116px_84px_148px_minmax(216px,1fr)_64px]';
 
 /** 各列合计的下限，与 LEGS_GRID 对应；不足时容器横向滚动而不是压扁列。 */
-const LEGS_MIN_WIDTH = 'min-w-[1388px]';
+const LEGS_MIN_WIDTH = 'min-w-[1482px]';
+
+/** 「加仓校验」列表头的说明：两本账合起来能否抹平新加仓退回止损线的亏损。 */
+const ADD_SIZING_COLUMN_HINT = '仅加仓行：旧仓浮盈垫 X₁(S₁ − S̄) + 已落袋 G ≥ 新加仓最大预期亏损 X₂(S₂ − S₁) 即为合规（主空符号翻转）。'
+  + 'X₁ 只算加仓那一刻还拿着的币；G 是本轮持仓加仓前逐刀落袋的净盈亏（镜像止盈为主，先前止损出局的加仓亏损从中扣掉）。'
+  + 'S₁ 取加仓那一刻挂着（或加仓后 5 分钟内补挂）、在亏损侧离加仓价最近的反向委托价；不计手续费，与加仓计算器同一口径。';
 
 export function CampaignLegsList({
   legs,
@@ -177,7 +183,7 @@ export function CampaignLegsList({
       if (phases.length >= 2) map.set(leg.id, phases);
     }
     return map;
-  }, [legs, recordMap, legExitPriceCorrections]);
+  }, [legs, recordMap, legExitPriceCorrections, settlement.byLeg]);
 
   const totalPnl = useMemo(() => (settlement.total ?? null), [settlement]);
   const totalDeltaB = useMemo(
@@ -214,6 +220,12 @@ export function CampaignLegsList({
     [legs, reverseHedgeOrders, recordMap, legExitPriceCorrections],
   );
 
+  // 加仓校验：浮盈垫 + 已落袋能否抹平新加仓退回 S₁ 的亏损。与导出 PNG 同一个函数、同一份输入。
+  const addSizingMap = useMemo(
+    () => evaluateCampaignAddSizing({ legs, tradeRecords, legExitPriceCorrections, reverseHedgeOrders }),
+    [legs, tradeRecords, legExitPriceCorrections, reverseHedgeOrders],
+  );
+
   return (
     <div className="bg-card border border-border rounded overflow-hidden">
       <div className="overflow-x-auto">
@@ -227,6 +239,7 @@ export function CampaignLegsList({
             <div className="text-right">开仓价</div>
             <div className="text-right">平仓价</div>
             <div className="text-right" title="上行：按开仓价折算的币量，即加仓公式里的 X；下行：名义仓位（USD）">币量 / 仓位</div>
+            <div className="text-center" title={ADD_SIZING_COLUMN_HINT}>加仓校验</div>
             <div className="text-right text-muted-foreground/60" title={FEE_COLUMN_HINT}>手续费</div>
             <div>委托</div>
             <div className="text-right">操作</div>
@@ -369,6 +382,54 @@ export function CampaignLegsList({
                       {leg.pre_position_size != null ? leg.pre_position_size.toFixed(2) : '—'}
                     </div>
                   </div>
+                  {(() => {
+                    /**
+                     * 加仓校验：合规是常态，对号几乎隐形，不抢视线；
+                     * 仓位过大才是要被看见的事——红色放大的叉，下面一行写缺口金额。
+                     * 不挂悬浮框（用户要求撤掉 Legs 单元格的提示框），明细只进 aria-label。
+                     * 普通 div 上的 aria-label 读屏会忽略（ARIA 不许给无角色元素命名），所以记号本身作 role="img"。
+                     */
+                    const verdict = addSizingMap.get(leg.id);
+                    if (!verdict) return <div />;
+                    const label = describeAddSizingVerdict(verdict);
+                    if (verdict.status === 'ok') {
+                      return (
+                        <div
+                          data-testid={`add-sizing-check-ok-${leg.id}`}
+                          role="img"
+                          aria-label={label}
+                          className="text-center text-[10px] leading-snug text-muted-foreground/30"
+                        >
+                          ✓
+                        </div>
+                      );
+                    }
+                    if (verdict.status === 'fail') {
+                      return (
+                        <div
+                          data-testid={`add-sizing-check-fail-${leg.id}`}
+                          role="img"
+                          aria-label={label}
+                          className="text-center leading-none text-[#F6465D]"
+                        >
+                          <div className="text-[18px] font-bold">✗</div>
+                          <div className="mt-0.5 whitespace-nowrap text-[9px] tabular-nums">
+                            缺 {formatAddSizingShortfall(verdict.shortfall ?? 0)}
+                          </div>
+                        </div>
+                      );
+                    }
+                    return (
+                      <div
+                        data-testid={`add-sizing-check-unknown-${leg.id}`}
+                        role="img"
+                        aria-label={label}
+                        className="text-center text-[10px] leading-snug text-muted-foreground/30"
+                      >
+                        —
+                      </div>
+                    );
+                  })()}
                   {(() => {
                     /**
                      * 三列的主次由**字号与字重**定，不靠发灰：
@@ -544,6 +605,7 @@ export function CampaignLegsList({
                           <div />
                           <div />
                           <div />
+                          <div />
                         </div>
                       );
                     })}
@@ -573,7 +635,8 @@ export function CampaignLegsList({
                   {formatDeltaB(totalDeltaB)}
                 </span>
               </div>
-              <div /><div /><div />
+              {/* 开仓价 / 平仓价 / 币量 / 加仓校验 */}
+              <div /><div /><div /><div />
               <div
                 data-testid="legs-total-fees"
                 title={feeTotals?.totalCoin != null

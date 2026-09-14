@@ -28,8 +28,8 @@ describe('Legs 表栅格', () => {
     const grid = /grid-cols-\[([^\]]+)\]/.exec(s)?.[1] ?? '';
     // 用下划线分隔，但 minmax(200px,1fr) 内部没有下划线，可安全按 _ 切
     const columnCount = grid.split('_').length;
-    expect(columnCount).toBe(11);
-    for (const title of ['#', '角色', '时间', '贡献 / 盈亏', 'Δb', '开仓价', '平仓价', '币量 / 仓位', '手续费', '委托', '操作']) {
+    expect(columnCount).toBe(12);
+    for (const title of ['#', '角色', '时间', '贡献 / 盈亏', 'Δb', '开仓价', '平仓价', '币量 / 仓位', '加仓校验', '手续费', '委托', '操作']) {
       expect(s).toContain(`>${title}</div>`);
     }
   });
@@ -40,6 +40,8 @@ describe('Legs 表栅格', () => {
     expect(at('时间')).toBeLessThan(at('贡献 / 盈亏'));
     expect(at('贡献 / 盈亏')).toBeLessThan(at('Δb'));
     expect(at('Δb')).toBeLessThan(at('开仓价'));       // 结论在前，"怎么来的"在后
+    expect(at('币量 / 仓位')).toBeLessThan(at('加仓校验'));   // 加仓校验紧跟币量——X 就是它要读的数
+    expect(at('加仓校验')).toBeLessThan(at('手续费'));
     expect(at('手续费')).toBeLessThan(at('委托'));
     expect(s).not.toContain('>状态</div>');             // 状态并进角色格，不单独占一列
   });
@@ -71,15 +73,15 @@ describe('Legs 表栅格', () => {
   it('弹性列是「委托」而不是「时间」——时间内容定宽，让它吃富余会在表格中段留下空洞', () => {
     const grid = /grid-cols-\[([^\]]+)\]/.exec(src())?.[1] ?? '';
     const tracks = grid.split('_');
-    expect(tracks).toHaveLength(11);
+    expect(tracks).toHaveLength(12);
     expect(tracks.filter(track => track.includes('fr'))).toHaveLength(1);
-    expect(tracks[9]).toMatch(/^minmax\(2\d\dpx,1fr\)$/);   // 委托：唯一越宽越有用的列
+    expect(tracks[10]).toMatch(/^minmax\(2\d\dpx,1fr\)$/);   // 委托：唯一越宽越有用的列
     expect(tracks[2]).toBe('180px');                        // 时间：放得下「开 2025-09-19 22:42」
   });
 
   it('【用户要求】手续费列放得下「开 82,328 · 平 104,091 ASTER」这类最长的拆分行', () => {
     const grid = /grid-cols-\[([^\]]+)\]/.exec(src())?.[1] ?? '';
-    const feeTrack = Number.parseInt(grid.split('_')[8], 10);
+    const feeTrack = Number.parseInt(grid.split('_')[9], 10);
     expect(feeTrack).toBeGreaterThanOrEqual(148);
     // 单元格必须带 min-w-0：网格项默认 min-width:auto，长子行会顶破定宽轨道、压到左边一列上
     const cell = /data-testid=\{`leg-fees-\$\{leg\.id\}`\}[\s\S]{0,400}?className="([^"]+)"/.exec(src())?.[1] ?? '';

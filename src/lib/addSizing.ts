@@ -1,7 +1,9 @@
 /**
- * 加仓计算器的数学层 —— 使用说明 3.4「加仓量：浮盈垫锁死」的可执行版本。
+ * 加仓计算器的数学层 —— 使用说明 3.4「Plan B：当前垫子 + 已落袋利润」的可执行版本。
  *
- * 刻意分成**两本账**，互不掺和：
+ * A / B 分开展示是为了看清垫子的来源；镜像止盈已经落袋后，真正的加仓上限统一用 Plan B：
+ * 当前仍持有旧仓在 S₁ 的净浮盈 Y₁ + 本轮已落袋 G，共同覆盖新腿退回 S₁ 的最大亏损。
+ * 每次加仓都用当前 X₁ / S̄ 重算 Y₁，因此更早加仓在新 S₁ 上的浮亏会自动扣回，不会重复花垫子。
  *
  * A 本账 · 浮盈垫（computeCushionAdd）
  *   平衡式 X₁ (S₁ − S̄) = X₂ (S₂ − S₁)：旧腿在止损线上的浮盈 = 新腿跌回止损线的亏损，
@@ -219,6 +221,65 @@ export function computeBankedAdd(input: BankedAddInput): BankedAddResult {
   };
 }
 
+// ===================== Plan B · 当前旧仓浮盈垫 + 本轮落袋 =====================
+
+export interface PlanBCoverageInput {
+  side: AddSide;
+  settlement: SettlementMode;
+  sBar: number;
+  s1: number;
+  s2: number;
+  x1: number;
+  /** U 本位为 USD，币本位为结算币数量。负数按 0。 */
+  g: number;
+}
+
+export interface PlanBCoverage {
+  /** 当前旧仓退回 S₁ 的净浮盈；与 g 同单位，可为负。 */
+  cushion: number;
+  banked: number;
+  /** cushion + banked；≤ 0 时没有加仓额度。 */
+  available: number;
+  riskDistance: number;
+  /** 旧仓垫换算的加仓币量，可为负；多轮加仓的既有浮亏借此扣回。 */
+  cushionAddCoins: number;
+  /** K_B = S₁ 时，落袋垫换算的加仓币量。 */
+  bankedAddCoins: number;
+  /** Plan B 在 S₁ 归零档的实际加仓上限，永不小于 0。 */
+  addCoinsMax: number;
+}
+
+/**
+ * Plan B 的统一覆盖式：Y₁ + G ≥ X_add × |S₂ − S₁|。
+ *
+ * 币本位下 Y₁ 与 G 都以结算币计：Y₁_coin = Y₁_usd ÷ S₁；
+ * 每币新仓退回 S₁ 的亏损同样除以 S₁，所以浮盈垫对应的币量与 U 本位相同，
+ * 落袋部分则是 G × S₁ ÷ 风险距离。
+ */
+export function computePlanBCoverageAtS1(input: PlanBCoverageInput): PlanBCoverage | null {
+  const { sBar, s1, s2, x1 } = input;
+  if (![sBar, s1, s2, x1].every(fin) || sBar <= 0 || s1 <= 0 || s2 <= 0 || x1 <= 0) return null;
+  const d = input.side === 'SHORT' ? -1 : 1;
+  const riskDistance = (s2 - s1) * d;
+  if (!(riskDistance > 0)) return null;
+  const banked = fin(input.g) && input.g > 0 ? input.g : 0;
+  const cushionUsd = x1 * (s1 - sBar) * d;
+  const cushion = input.settlement === 'coin' ? cushionUsd / s1 : cushionUsd;
+  const lossPerCoin = input.settlement === 'coin' ? riskDistance / s1 : riskDistance;
+  const cushionAddCoins = cushion / lossPerCoin;
+  const bankedAddCoins = banked / lossPerCoin;
+  const available = cushion + banked;
+  return {
+    cushion,
+    banked,
+    available,
+    riskDistance,
+    cushionAddCoins,
+    bankedAddCoins,
+    addCoinsMax: Math.max(0, available / lossPerCoin),
+  };
+}
+
 // ===================== 从盘面读默认值 =====================
 
 export interface OpeningCoinsSource {
@@ -361,10 +422,11 @@ export function pickHeldSide(symbol: string, positions: Position[] | undefined, 
 }
 
 export interface BankedMirrorProfit {
-  /** 以 USD 计的落袋合计（U 本位 B 本账用它） */
+  /** 以 USD 计的可用落袋净额：镜像止盈 / tp1 正利润 − 本轮后续已实现亏损 */
   usd: number;
-  /** 以币计的落袋合计（币本位 B 本账用它）：优先取成交记录的 pnlCoin，缺失时按平仓价折算 */
+  /** 以币计的可用落袋净额：优先取成交记录的 pnlCoin，缺失时按平仓价折算 */
   coin: number;
+  /** 计入的镜像止盈 / tp1 笔数；用于说明建议值来源，不含被扣除的亏损笔数。 */
   count: number;
   /** 最后一笔落袋的时刻（模拟时钟）。G 是从这一刻起才存在的。 */
   lastBankedAt: number | null;
@@ -410,7 +472,8 @@ export interface BankedMirrorOptions {
 }
 
 /**
- * 本场已落袋的镜像止盈：同标的、同方向、以「止盈1」平掉、且不早于当前最早一条持仓的开仓时间。
+ * 本场可用于 Plan B 的落袋净额：正向只认「止盈1」，本轮已经实现的亏损则一并扣除；
+ * 普通减仓 / 手动平仓的正利润不混入。所有记录都必须不早于当前最早一条持仓的开仓时间。
  * 没有持仓就没有「本场」可言，返回 0，不把历史上所有止盈都算进来。
  * 这是建议值——界面上要用户点一下才填进 G。
  *
@@ -442,23 +505,29 @@ export function detectBankedMirrorProfit(
   let lastBankedRealAt: number | null = null;
   for (const r of tradeHistory ?? []) {
     if (!r || r.symbol !== symbol || r.side !== side) continue;
-    if (r.action !== 'CLOSE' || r.exit_method !== 'tp1') continue;
+    if (r.action !== 'CLOSE') continue;
     if (!((r.closeTime ?? 0) >= earliestOpenTime)) continue;
     if (!fin(r.pnl)) continue;
+    const mirrorCredit = r.exit_method === 'tp1';
+    const realizedLoss = r.pnl < 0;
+    // Plan B 的正向来源只认镜像止盈；任何本轮已实现亏损都要把可用 G 扣回来。
+    if (!mirrorCredit && !realizedLoss) continue;
     const opAt = realTs(r.closedRealAt);
     // 操作时间筛选：持仓有真实起点时，止盈必须在这之后才操作过；没有 closedRealAt 的一并排除。
     if (realStart != null && !(opAt != null && opAt >= realStart)) {
-      excludedByOperationTime += 1;
+      if (mirrorCredit) excludedByOperationTime += 1;
       continue;
     }
     usd += r.pnl;
     coin += fin(r.pnlCoin)
       ? (r.pnlCoin as number)
       : (fin(r.exitPrice) && (r.exitPrice as number) > 0 ? r.pnl / (r.exitPrice as number) : 0);
-    count += 1;
-    const t = fin(r.closeTime) ? (r.closeTime as number) : null;
-    if (t != null && (lastBankedAt == null || t > lastBankedAt)) lastBankedAt = t;
-    if (opAt != null && (lastBankedRealAt == null || opAt > lastBankedRealAt)) lastBankedRealAt = opAt;
+    if (mirrorCredit) {
+      count += 1;
+      const t = fin(r.closeTime) ? (r.closeTime as number) : null;
+      if (t != null && (lastBankedAt == null || t > lastBankedAt)) lastBankedAt = t;
+      if (opAt != null && (lastBankedRealAt == null || opAt > lastBankedRealAt)) lastBankedRealAt = opAt;
+    }
   }
 
   let addsSinceBanked = 0;

@@ -140,14 +140,14 @@ describe('AddSizingCalculator', () => {
     expect(screen.getByTestId('add-sizing-total-hedge')).toHaveTextContent('72.27');
   });
 
-  it('B 账本一开，头条是要下的那一单的总量 X₂ + X_G，不是单独的 X_G', () => {
-    // X_G 单独看没有下单意义：真正提交的是 A + B 的合计。
+  it('镜像已落袋后，头条是 Plan B 的统一加仓上限，不是单独的 X_G', () => {
+    // X_G 单独看没有下单意义：真正提交的是当前旧仓垫与落袋垫的合计。
     renderCalc();
     type('add-sizing-s1', '130');
     type('add-sizing-g', '1.2');
 
     const total = screen.getByTestId('add-sizing-total-add');
-    expect(total).toHaveTextContent('合计加仓 X₂ + X_G');
+    expect(total).toHaveTextContent('Plan B 加仓上限');
     expect(total).toHaveTextContent('53.93');            // 38.33 + 15.6
     expect(total).toHaveTextContent('38.33');            // 拆解仍在，A
     expect(total).toHaveTextContent('15.6');             // 拆解仍在，B
@@ -158,33 +158,36 @@ describe('AddSizingCalculator', () => {
   });
 
   /**
-   * 【改写】这条原本钉的是「A 无解时退回以 X_G 为头条」——正是实盘事故的成因。
-   *
-   * SAGAUSDT 2026-05-12：第二次加仓时垫已经是 −21,955（第一次加仓把成本线推过了止损线），
-   * A 段只剩一行灰色小字「没有浮盈垫」，B 段照常给出 3,084 万币并附一键填入按钮，
-   * 用户照着下了 2,941 万。B 的立论是「在垫子上再叠一层」；
-   * 没有垫子时它不是加仓，是在亏损上加杠杆。所以 A 拒绝时 B 必须一起停。
+   * A 单独无解不等于 Plan B 必然无解：旧仓在 S₁ 的垫子可以为负，只要落袋 G 足以先补掉
+   * 这块缺口、再覆盖新腿即可。事故来自把 X_G 单独拿去下单，没有扣回旧仓负垫。
    */
-  it('【回归】A 账本无解时，B 段整段关闭，不给任何可下单的数', () => {
+  it('【回归】A 单独无解时，Plan B 先扣旧仓负垫；不足则阻断，足够才给量', () => {
     renderCalc();
-    // 先在 A 还成立时把 B 跑起来，再把 A 打掉——复刻实盘顺序：
-    // 第一次加仓时 B 是开着的，第二次加仓时垫已经没了。
-    type('add-sizing-s1', '130');   // A 成立
+    type('add-sizing-s1', '100');
     type('add-sizing-g', '1.2');
-    expect(screen.getByTestId('add-sizing-x2b-out')).toBeInTheDocument();
-    type('add-sizing-s1', '100');   // 没越过均价 → A 拒绝
-    expect(screen.getByTestId('add-sizing-banked-blocked')).toBeInTheDocument();
+    // 落袋垫 3 币，小于旧仓负垫折算的 4.17 币：Plan B 没额度，且不能把 3 币单独下掉。
+    expect(screen.getByTestId('add-sizing-banked-no-room')).toBeInTheDocument();
     expect(screen.queryByTestId('add-sizing-x2b-out')).not.toBeInTheDocument();
     expect(screen.queryByTestId('add-sizing-total-add')).not.toBeInTheDocument();
-    expect(screen.queryByTestId('add-sizing-g')).not.toBeInTheDocument();
-    expect(screen.queryByTestId('add-sizing-fill-banked')).not.toBeInTheDocument();
+    expect(screen.getByTestId('add-sizing-g')).toBeInTheDocument();
+    expect(screen.getByTestId('add-sizing-fill-banked')).toBeInTheDocument();
+
+    // G 增大后先补旧仓缺口，剩下的才成为本次可加量：25 − 4.17 = 20.83 币。
+    type('add-sizing-g', '10');
+    expect(screen.queryByTestId('add-sizing-banked-no-room')).not.toBeInTheDocument();
+    expect(screen.getByTestId('add-sizing-total-add')).toHaveTextContent('20.83');
+
+    // G 总额虽够，但把 K_B 拉得过远会让本次分配给 B 腿的量太小，仍不能绕过统一总量校验。
+    type('add-sizing-kb', '20');
+    expect(screen.getByTestId('add-sizing-banked-no-room')).toHaveTextContent('当前 K_B / 定仓值折出的 B 腿太小');
+    expect(screen.queryByTestId('add-sizing-total-add')).not.toBeInTheDocument();
   });
 
-  it('A 有解时 B 段照常工作——这次改动不该动到正常路径', () => {
+  it('旧仓垫为正时，Plan B 照常把两部分合并', () => {
     renderCalc();
     type('add-sizing-s1', '130');
     type('add-sizing-g', '1.2');
-    expect(screen.queryByTestId('add-sizing-banked-blocked')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('add-sizing-banked-no-room')).not.toBeInTheDocument();
     expect(screen.getByTestId('add-sizing-x2b-out')).toBeInTheDocument();
   });
 
@@ -218,9 +221,10 @@ describe('AddSizingCalculator', () => {
     expect(screen.queryByTestId('add-sizing-help-panel')).not.toBeInTheDocument();
     fireEvent.click(help);
     const panel = screen.getByTestId('add-sizing-help-panel');
-    expect(panel).toHaveTextContent('加仓量 = 垫 ÷ 险');
+    expect(panel).toHaveTextContent('Plan B 加仓上限 =（旧仓浮盈垫 Y₁ + 已落袋 G）÷ 险');
     expect(panel).toHaveTextContent('X₂ = Y₁ ÷ 险');
-    expect(panel).toHaveTextContent('X_G = Y_G ÷ 险');
+    expect(panel).toHaveTextContent('X_G = G ÷ 险');
+    expect(panel).toHaveTextContent('每次都按 X₂ + X_G，并用当前 X₁ / S̄ 重算');
     expect(within(panel).getByRole('link')).toHaveAttribute('href', '/guide#s3-1c');
   });
 });
@@ -231,7 +235,7 @@ describe('R0 复核 —— AIOTUSDT 学费单要求的那一块', () => {
    * 数学层没错;错在 evaluatePostAddCostLine 一直是死代码,界面从不喊「越界」。
    * 这里钉住:合规时给通过语,超量时给红色横幅 + 缺口金额。
    */
-  it('A+B 按上限走 → R0 通过,B 段由落袋垫付', () => {
+  it('Plan B 按上限走 → R0 通过', () => {
     renderCalc();
     type('add-sizing-s1', '130');
     type('add-sizing-g', '1.2');
@@ -259,7 +263,7 @@ describe('R0 复核 —— AIOTUSDT 学费单要求的那一块', () => {
     renderCalc();
     type('add-sizing-s1', '130');
     expect(screen.getByTestId('add-sizing-r0-pass')).toBeInTheDocument();
-    expect(screen.getByTestId('add-sizing-r0-pass')).toHaveTextContent('A 段打平');
+    expect(screen.getByTestId('add-sizing-r0-pass')).toHaveTextContent('旧仓浮盈垫覆盖本次加仓');
   });
 
   it('S₁ 未填时不出 R0 块——没有可复核的对象', () => {
@@ -289,7 +293,9 @@ describe('B 本账建议值按操作时间框定本场', () => {
     renderCalc();
     const fill = screen.getByTestId('add-sizing-fill-banked');
     expect(fill).toHaveTextContent('+1.2');
-    expect(fill).toHaveTextContent('（1 笔）');
+    expect(fill).toHaveTextContent('（1 笔止盈）');
+    // 操作时间完整且已确认属于当前持仓周期：打开即默认进入 Plan B，不再要求额外点一次。
+    expect(num('add-sizing-g')).toBeCloseTo(1.2, 6);
     expect(screen.getByTestId('add-sizing-banked-excluded'))
       .toHaveTextContent('1 笔止盈的操作时间早于当前持仓开仓（或缺失），未计入');
     fireEvent.click(fill);
@@ -299,6 +305,8 @@ describe('B 本账建议值按操作时间框定本场', () => {
   it('老持仓没有真实开仓时刻：照旧只看模拟时间，不出排除小字', () => {
     renderCalc();
     expect(screen.getByTestId('add-sizing-fill-banked')).toHaveTextContent('1 笔');
+    // 旧数据无法用操作时间消歧，只给建议，不自动代入。
+    expect(num('add-sizing-g')).toBe(0);
     expect(screen.queryByTestId('add-sizing-banked-excluded')).not.toBeInTheDocument();
   });
 
@@ -311,7 +319,7 @@ describe('B 本账建议值按操作时间框定本场', () => {
     type('add-sizing-s1', '130');
     const fill = screen.getByTestId('add-sizing-fill-banked');
     expect(fill).toHaveTextContent('+1.2');
-    expect(fill).toHaveTextContent('（1 笔）');
+    expect(fill).toHaveTextContent('（1 笔止盈）');
     expect(screen.queryByTestId('add-sizing-banked-excluded')).not.toBeInTheDocument();
     fireEvent.click(fill);
     expect(num('add-sizing-g')).toBeCloseTo(1.2, 6);

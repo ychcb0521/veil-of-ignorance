@@ -4,6 +4,7 @@ import {
   coinsToContracts,
   computeBankedAdd,
   computeCushionAdd,
+  computePlanBCoverageAtS1,
   legOpeningCoins,
   weightedEntryByCoins,
 } from '../addSizing';
@@ -144,6 +145,42 @@ describe('computeBankedAdd · B 本账（落袋镜像）', () => {
     expect(computeBankedAdd({ side: 'LONG', settlement: 'usdt', g: 10, s2: 120, s1: 110, knob: { kind: 'line', kB: NaN } }).problem).toBe('disabled');
     expect(computeBankedAdd({ side: 'LONG', settlement: 'usdt', g: 10, s2: 120, s1: 110, knob: { kind: 'line', kB: 125 } }).problem).toBe('kB_not_below_s2');
     expect(computeBankedAdd({ side: 'LONG', settlement: 'usdt', g: 10, s2: 120, s1: 110, knob: { kind: 'size', x2: -3 } }).problem).toBe('x2_not_positive');
+  });
+});
+
+describe('computePlanBCoverageAtS1 · 每次加仓统一重算 Plan B', () => {
+  it('旧仓浮盈 + 镜像落袋共同决定上限', () => {
+    const plan = computePlanBCoverageAtS1({
+      side: 'LONG', settlement: 'usdt', sBar: 100, s1: 110, s2: 120, x1: 10, g: 50,
+    })!;
+    expect(plan.cushion).toBe(100);
+    expect(plan.banked).toBe(50);
+    expect(plan.addCoinsMax).toBe(15);
+  });
+
+  it('多轮加仓把综合成本推过 S₁ 时，旧仓浮亏会从 G 中扣回；G 仍足够才可继续加', () => {
+    const enough = computePlanBCoverageAtS1({
+      side: 'LONG', settlement: 'usdt', sBar: 112, s1: 110, s2: 120, x1: 10, g: 50,
+    })!;
+    expect(enough.cushion).toBe(-20);
+    expect(enough.available).toBe(30);
+    expect(enough.addCoinsMax).toBe(3);
+
+    const exhausted = computePlanBCoverageAtS1({
+      side: 'LONG', settlement: 'usdt', sBar: 116, s1: 110, s2: 120, x1: 10, g: 50,
+    })!;
+    expect(exhausted.available).toBe(-10);
+    expect(exhausted.addCoinsMax).toBe(0);
+  });
+
+  it('币本位用 S₁ 把浮盈与新腿亏损换成同一结算币单位', () => {
+    const plan = computePlanBCoverageAtS1({
+      side: 'LONG', settlement: 'coin', sBar: 100, s1: 110, s2: 120, x1: 10, g: 1,
+    })!;
+    expect(plan.cushion).toBeCloseTo(100 / 110, 12);
+    expect(plan.cushionAddCoins).toBeCloseTo(10, 12);
+    expect(plan.bankedAddCoins).toBeCloseTo(11, 12);
+    expect(plan.addCoinsMax).toBeCloseTo(21, 12);
   });
 });
 

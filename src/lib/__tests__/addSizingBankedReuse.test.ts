@@ -56,6 +56,15 @@ describe('落袋是否已经被花掉', () => {
     expect(b.usd).toBeCloseTo(84_742.24, 2);
     expect(b.addsSinceBanked).toBe(0);
   });
+
+  it('本轮已实现亏损会从镜像止盈扣掉；普通手动平仓盈利不会混入 G', () => {
+    const loss = { ...tp('2026-05-13T00:10:00Z', -2_000), exit_method: 'sl' } as TradeRecord;
+    const unrelatedProfit = { ...tp('2026-05-13T00:20:00Z', 9_000), exit_method: 'manual' } as TradeRecord;
+    const b = detectBankedMirrorProfit('SAGAUSDT', 'LONG', [...HISTORY, loss, unrelatedProfit], MAIN_OPEN);
+    expect(b.usd).toBeCloseTo(82_742.24, 2);
+    expect(b.count).toBe(1);
+    expect(b.lastBankedAt).toBe(T('2026-05-12T23:19:00Z'));
+  });
 });
 
 describe('加仓后的综合成本线（R0 复核）', () => {

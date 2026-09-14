@@ -16,6 +16,7 @@ import { resolveMirrorTpOrderTiming } from '@/lib/campaignMirrorTpOrderTiming';
 import { computeLegPnlContributions } from '@/lib/campaignLegPnl';
 import { computeCampaignRealizedPnl, settlementBasisLabel } from '@/lib/campaignRealizedPnl';
 import { formatDeltaB, legDeltaB, roundedDeltaB, splitMainLegPhases } from '@/lib/campaignLegPhases';
+import { evaluateCampaignAddSizing, formatAddSizingShortfall } from '@/lib/campaignAddSizingCheck';
 import type { TradeCampaign, TradeJournal } from '@/types/journal';
 import type { EmotionDiaryExportSummary } from '@/types/emotionDiary';
 import type { CampaignReverseHedgeOrder, TradeRecord } from '@/types/trading';
@@ -54,7 +55,10 @@ export type CampaignLegsExportCellLine = {
   text: string;
   color?: string;
   bold?: boolean;
-  /** 字号（px）。缺省 13——三个数值列靠它拉开主次：Δb 16 / 盈亏 13 / 手续费 11。 */
+  /**
+   * 字号（px）。缺省 13——三个数值列靠它拉开主次：Δb 16 / 盈亏 13 / 手续费 11。
+   * 超过 16 的（加仓校验的红叉）行高跟着撑开，见 exportLineHeight。
+   */
   size?: number;
 };
 
@@ -92,6 +96,8 @@ const COLUMNS = [
   { title: '平仓价', width: 118 },
   // 150：十亿级币量带两位小数（1,171,163,720.54）要一行放下——拆成两截的数字比挤一点更难读
   { title: '币量 / 仓位', width: 150 },
+  // 110：红叉下面那行「缺 3,789,250」要一行放下
+  { title: '加仓校验', width: 110 },
   { title: '手续费', width: 132 },
   { title: '委托', width: 444 },
 ] as const;
@@ -305,6 +311,15 @@ export function wrapCampaignLegsExportLine(
   return pieces.length > 0 ? pieces.map(text => ({ ...line, text })) : [line];
 }
 
+/**
+ * 一条绘制行占多高。16px 及以下沿用固定行高——Δb 的 16px 本来就排得下，老表格的行高一格不变；
+ * 更大的字（加仓校验的红叉）按字号 + 4 撑开，否则会顶到下一行。
+ */
+function exportLineHeight(line: CampaignLegsExportCellLine): number {
+  const size = line.size ?? 13;
+  return size > 16 ? size + 4 : LINE_H;
+}
+
 function layoutExportRow(
   cells: CampaignLegsExportCellLine[][],
   minHeight: number,
@@ -312,8 +327,8 @@ function layoutExportRow(
   const wrapped = cells.map((cell, index) => (
     cell.flatMap(line => wrapCampaignLegsExportLine(line, COLUMNS[index].width - CELL_PAD_X * 2))
   ));
-  const maxLines = Math.max(1, ...wrapped.map(cell => cell.length));
-  return { wrapped, height: Math.max(minHeight, ROW_PAD_Y * 2 + maxLines * LINE_H) };
+  const tallest = Math.max(LINE_H, ...wrapped.map(cell => cell.reduce((sum, line) => sum + exportLineHeight(line), 0)));
+  return { wrapped, height: Math.max(minHeight, ROW_PAD_Y * 2 + tallest) };
 }
 
 export function buildCampaignLegsExportRows(input: ExportInput): CampaignLegsExportRow[] {
@@ -350,6 +365,13 @@ export function buildCampaignLegsExportRows(input: ExportInput): CampaignLegsExp
     });
   const contributionDenominator = [...legPnlMap.values()]
     .reduce((sum, entry) => sum + (entry.pnl == null ? 0 : Math.abs(entry.pnl)), 0);
+  // 加仓校验：与页面同一个函数、同一份输入（可见反向委托），导出图不另算一套
+  const addSizingMap = evaluateCampaignAddSizing({
+    legs: input.legs,
+    tradeRecords: input.tradeRecords,
+    legExitPriceCorrections: input.legExitPriceCorrections,
+    reverseHedgeOrders: input.reverseHedgeOrders,
+  });
 
   const legRows = input.legs.flatMap((leg): CampaignLegsExportRow[] => {
     const record = leg.trade_record_id ? recordMap.get(leg.trade_record_id) ?? null : null;
@@ -463,6 +485,19 @@ export function buildCampaignLegsExportRows(input: ExportInput): CampaignLegsExp
           { text: notionalText, color: '#848E9C' },
         ];
       })(),
+      // 加仓校验：与页面同构——合规只是一枚淡灰小对号，过大才是红色放大的叉 + 缺口金额；非加仓行留空
+      ((): CampaignLegsExportCellLine[] => {
+        const verdict = addSizingMap.get(leg.id);
+        if (!verdict) return [{ text: '' }];
+        if (verdict.status === 'ok') return [{ text: '✓', color: '#C4CAD3', size: 11 }];
+        if (verdict.status === 'fail') {
+          return [
+            { text: '✗', color: '#F6465D', bold: true, size: 20 },
+            { text: `缺 ${formatAddSizingShortfall(verdict.shortfall ?? 0)}`, color: '#F6465D', bold: true, size: 11 },
+          ];
+        }
+        return [{ text: '—', color: '#C4CAD3', size: 11 }];
+      })(),
       // 手续费：与页面同源，同样刻意做淡——合计在上、开/平拆分在下，明细在页面的 tooltip 里。
       (() => {
         const fees = execution.record ? tradeRecordFees(execution.record) : null;
@@ -533,6 +568,7 @@ export function buildCampaignLegsExportRows(input: ExportInput): CampaignLegsExp
           [{ text: '' }],
           [{ text: '' }],
           [{ text: '' }],
+          [{ text: '' }],
       ];
       return {
         legId: `${leg.id}-phase-${phase.index}`,
@@ -571,6 +607,7 @@ export function buildCampaignLegsExportRows(input: ExportInput): CampaignLegsExp
       bold: true,
       size: 16,
     }],
+    [{ text: '' }],
     [{ text: '' }],
     [{ text: '' }],
     [{ text: '' }],
@@ -665,10 +702,14 @@ function drawLines(
   x: number,
   y: number,
 ) {
-  lines.forEach((line, index) => {
+  let offset = 0;
+  lines.forEach(line => {
+    // 大字号行先把自己的基线往下推出多出来的那截，才不会压到上一行；之后按常规行距往下走
+    offset += exportLineHeight(line) - LINE_H;
     ctx.font = cellFont(line);
     ctx.fillStyle = line.color ?? '#202630';
-    ctx.fillText(line.text, x, y + index * LINE_H);
+    ctx.fillText(line.text, x, y + offset);
+    offset += LINE_H;
   });
 }
 
