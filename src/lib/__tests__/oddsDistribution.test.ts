@@ -133,11 +133,12 @@ describe('kdeCountPath', () => {
     expect(peakCount).toBeGreaterThan(1);
   });
 
-  it('远离主群的孤立鼓包会断成第二段子路径，空档上不留发丝线', () => {
+  it('远离主群的孤立鼓包仍保持一条连续曲线，不会被误读成只加载了一半', () => {
     const values = [...Array.from({ length: 60 }, (_, index) => -0.5 + index * 0.01), 7.5, 7.52, 7.48];
     const domain = { min: -2, max: 10 };
     const path = kdeCountPath(values, domain, makeScale(domain), 0.05);
-    expect((path.match(/M /g) ?? []).length).toBeGreaterThanOrEqual(2);
+    expect((path.match(/M /g) ?? []).length).toBe(1);
+    expect((path.match(/L /g) ?? []).length).toBeGreaterThan(100);
   });
 
   it('无样本给空路径', () => {

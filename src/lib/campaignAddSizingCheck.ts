@@ -77,6 +77,12 @@ export interface AddSizingVerdict {
   maxLoss: number | null;
   /** Plan B 可用垫子 = cushion + banked；合规 ⇔ required ≥ maxLoss */
   required: number | null;
+  /** 每加 1 币从 S₂ 退回 S₁ 的预期亏损（USDT / 币） */
+  riskPerCoin: number | null;
+  /** Plan B 允许的最大加仓币量；required ≤ 0 时为 0 */
+  maxAllowedCoins: number | null;
+  /** 最大加仓币量按 S₂ 折算的 U 本位名义仓位 */
+  maxAllowedNotional: number | null;
   /** fail 时差多少（USDT）= maxLoss − required；ok 为 0；unknown 为 null */
   shortfall: number | null;
 }
@@ -137,7 +143,8 @@ function orderEnd(order: CampaignReverseHedgeOrder): number | null {
 function unknown(reason: AddSizingUnknownReason, partial: Partial<AddSizingVerdict> = {}): AddSizingVerdict {
   return {
     s1: null, s2: null, x1Coins: null, x2Coins: null,
-    cushion: null, banked: null, consumedByHeld: null, maxLoss: null, required: null, shortfall: null,
+    cushion: null, banked: null, consumedByHeld: null, maxLoss: null, required: null,
+    riskPerCoin: null, maxAllowedCoins: null, maxAllowedNotional: null, shortfall: null,
     ...partial,
     status: 'unknown',
     reason,
@@ -437,14 +444,22 @@ export function evaluateCampaignAddSizing(input: CampaignAddSizingInput): Map<st
       consumedByHeld += Math.max(0, -pnlAtS1);
     }
 
-    const maxLoss = Math.max(0, x2Coins * (s2 - s1) * d);
+    const riskPerCoin = Math.max(0, (s2 - s1) * d);
+    const maxLoss = Math.max(0, x2Coins * riskPerCoin);
     const required = cushion + banked;
-    const partial = { s1, s2, x1Coins, x2Coins, cushion, banked, consumedByHeld, maxLoss, required };
+    // “正确加仓”不是一个新的拍脑袋目标，而是 Plan B 的数学上限：低于它都合规，超过它就会失去覆盖。
+    // X₂ 是币量；乘回 S₂ 才是交易面板里常见的 U 名义仓位。两种单位一起给，避免把币当 U 下单。
+    const maxAllowedCoins = riskPerCoin > 0 ? Math.max(0, required) / riskPerCoin : null;
+    const maxAllowedNotional = maxAllowedCoins == null ? null : maxAllowedCoins * s2;
+    const partial = {
+      s1, s2, x1Coins, x2Coins, cushion, banked, consumedByHeld, maxLoss, required,
+      riskPerCoin, maxAllowedCoins, maxAllowedNotional,
+    };
     if (incomplete) {
       result.set(add.id, unknown('old_leg_incomplete', partial));
       continue;
     }
-    if (![x1Coins, cushion, banked, consumedByHeld, maxLoss, required].every(Number.isFinite)) {
+    if (![x1Coins, cushion, banked, consumedByHeld, maxLoss, required, riskPerCoin, maxAllowedCoins, maxAllowedNotional].every(Number.isFinite)) {
       result.set(add.id, unknown('non_finite', partial));
       continue;
     }
@@ -467,6 +482,20 @@ export function formatAddSizingShortfall(value: number): string {
     : value.toFixed(2);
 }
 
+/** Plan B 公式里的 X 是币量：大币量留两位，小币量多留几位，避免显示成 0。 */
+export function formatAddSizingCoinQuantity(value: number | null): string {
+  if (value == null || !Number.isFinite(value)) return '—';
+  const absolute = Math.abs(value);
+  const maximumFractionDigits = absolute >= 1_000 ? 2 : absolute >= 1 ? 4 : 8;
+  return value.toLocaleString('en-US', { maximumFractionDigits });
+}
+
+/** 交易面板使用的 U 名义仓位统一保留两位。 */
+export function formatAddSizingNotional(value: number | null): string {
+  if (value == null || !Number.isFinite(value)) return '—';
+  return value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
 /** 读屏 / aria-label 用的完整说明。页面不挂悬浮框（用户要求撤掉 Legs 单元格的提示框）。 */
 export function describeAddSizingVerdict(verdict: AddSizingVerdict): string {
   const n = (value: number | null) => (value == null ? '—' : value.toFixed(2));
@@ -478,7 +507,7 @@ export function describeAddSizingVerdict(verdict: AddSizingVerdict): string {
         : '加仓价、名义或时刻缺失';
     return `加仓校验：无法判断——${reason}`;
   }
-  const detail = `退回 S₁ ${verdict.s1 ?? '—'} 时，旧仓浮盈垫 ${n(verdict.cushion)} + 已落袋 ${n(verdict.banked)} = 可用 ${n(verdict.required)}；新加仓最大亏损 ${n(verdict.maxLoss)}`;
+  const detail = `退回 S₁ ${verdict.s1 ?? '—'} 时，旧仓浮盈垫 ${n(verdict.cushion)} + 已落袋 ${n(verdict.banked)} = 可用 ${n(verdict.required)}；新加仓最大亏损 ${n(verdict.maxLoss)}；Plan B 加仓上限 ${formatAddSizingCoinQuantity(verdict.maxAllowedCoins)} 币（${formatAddSizingNotional(verdict.maxAllowedNotional)} U 名义仓位）`;
   return verdict.status === 'ok'
     ? `加仓校验：仓位合规。${detail}`
     : `加仓校验：仓位过大，缺 ${n(verdict.shortfall)}。${detail}`;

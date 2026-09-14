@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { describe, expect, it } from 'vitest';
 import { CampaignLegsList } from '@/components/journal/CampaignLegsList';
@@ -55,7 +55,7 @@ describe('Legs 列表的「加仓校验」列', () => {
     expect(header.getAttribute('title')).toContain('X₂(S₂ − S₁)');
   });
 
-  it('【回归】TUTUSDT 加仓1 仓位过大：红色放大的叉 + 缺口金额，不挂悬浮框', () => {
+  it('【回归】TUTUSDT 加仓1 仓位过大：红色放大的叉 + 正确币量上限 + U 折算额', () => {
     renderList(22_057_330);
     const mark = screen.getByTestId('add-sizing-check-fail-add1');
     expect(mark.className).toContain('text-[#F6465D]');
@@ -63,10 +63,28 @@ describe('Legs 列表的「加仓校验」列', () => {
     expect(cross.textContent).toBe('✗');
     expect(cross.className).toContain('text-[18px]');
     expect(cross.className).toContain('font-bold');
-    expect(mark.textContent).toMatch(/缺 3,7\d\d,\d{3}/);
+    expect(mark.textContent).toMatch(/上限 [\d,.]+ 币/);
+    expect(mark.textContent).toMatch(/≈ [\d,.]+ U/);
+    expect(mark.textContent).toContain('点击看计算');
     expect(mark.getAttribute('title')).toBeNull();
     expect(mark.getAttribute('aria-label')).toContain('仓位过大');
+    expect(mark.getAttribute('aria-label')).toContain('U 名义仓位');
     expect(screen.queryByTestId('add-sizing-check-ok-add1')).toBeNull();
+  });
+
+  it('点击红叉：弹窗说清正确数是币量，同时给出 U 名义仓位与完整 Plan B 过程', () => {
+    renderList(22_057_330);
+    fireEvent.click(screen.getByTestId('add-sizing-check-fail-add1'));
+
+    const dialog = screen.getByTestId('add-sizing-detail-dialog');
+    expect(dialog.textContent).toContain('“正确加仓”指 Plan B 允许的最大币量');
+    expect(screen.getByTestId('add-sizing-correct-coins').textContent).toMatch(/[\d,.]+ 币/);
+    expect(screen.getByTestId('add-sizing-correct-notional').textContent).toMatch(/[\d,.]+ U 名义仓位/);
+    expect(dialog.textContent).toContain('① 旧仓浮盈垫 Y₁');
+    expect(dialog.textContent).toContain('② 已落袋 G');
+    expect(dialog.textContent).toContain('④ 每币风险');
+    expect(dialog.textContent).toContain('⑤ 正确币量上限');
+    expect(dialog.textContent).toContain('实际新仓最大预期亏损');
   });
 
   it('仓位合规：几乎隐形的小对号，不带红色', () => {
@@ -105,12 +123,13 @@ describe('Legs 列表的「加仓校验」列', () => {
     expect(addRow.children.length).toBe(headerCells);
   });
 
-  it('读屏读得到明细：三种记号都是 role="img"，aria-label 才算数', () => {
+  it('读屏读得到明细：红叉是可操作按钮，aria-label 包含上限与口径', () => {
     renderList(22_057_330);
-    const fail = screen.getByRole('img', { name: /加仓校验：仓位过大/ });
+    const fail = screen.getByRole('button', { name: /加仓校验：仓位过大/ });
     expect(fail).toBe(screen.getByTestId('add-sizing-check-fail-add1'));
     expect(fail.getAttribute('aria-label')).toContain('浮盈垫');
     expect(fail.getAttribute('aria-label')).toContain('已落袋');
+    expect(fail.getAttribute('aria-label')).toContain('加仓上限');
   });
 
   it('合规与无法判断的记号同样带 role="img"', () => {

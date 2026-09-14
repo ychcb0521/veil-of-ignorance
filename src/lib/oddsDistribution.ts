@@ -158,13 +158,11 @@ export function buildOddsDistributionModel(
   };
 }
 
-/** 曲线低于这个场数（≈ 0.7px）就断开，空档上不留一根贴着底线的发丝线。 */
-const PATH_FLOOR = 0.05;
-
 /**
  * 把核密度换算成「每档期望场数」= f̂(x) · n · 档宽，与堆叠的柱高共用同一条场数轴——
  * 不是第二条坐标轴。只在 [数据最小值, 数据最大值] ∩ 显示窗口 内每 2px 采样一次；
- * 高斯核本身已经平滑，折线即可，不做贝塞尔拟合。
+ * 高斯核本身已经平滑，折线即可，不做贝塞尔拟合。整段只使用一个子路径：低密度长尾也
+ * 连续贴近底线，避免被误读为「曲线只加载了一半」或后台仍在补点。
  */
 export function kdeCountPath(
   values: number[],
@@ -183,18 +181,10 @@ export function kdeCountPath(
   for (let x = start; x < end; x += stepValue) samples.push(x);
   samples.push(end);
 
-  const segments: string[] = [];
-  let open = false;
-  for (const x of samples) {
+  return samples.map((x, index) => {
     const count = density(x) * finite.length * scale.binWidth;
-    if (count < PATH_FLOOR) {
-      open = false;
-      continue;
-    }
     const px = scale.x(x).toFixed(2);
     const py = scale.countY(count).toFixed(2);
-    segments.push(`${open ? 'L' : 'M'} ${px} ${py}`);
-    open = true;
-  }
-  return segments.join(' ');
+    return `${index === 0 ? 'M' : 'L'} ${px} ${py}`;
+  }).join(' ');
 }

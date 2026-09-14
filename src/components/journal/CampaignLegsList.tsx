@@ -1,6 +1,7 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { Crosshair, EyeOff, Unlink } from 'lucide-react';
 import { LegRoleChip } from '@/components/journal/LegRoleChip';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { resolveLegExecution, type LegExitPriceCorrections } from '@/lib/campaignLegExecution';
 import { HEDGE_TYPE_LABELS } from '@/lib/hedgeTypes';
 import { buildTradeRecordLookup, journalOperationTime } from '@/lib/objectiveOperationTime';
@@ -12,7 +13,14 @@ import { computeLegPnlContributions, sumLegPnl } from '@/lib/campaignLegPnl';
 import { computeCampaignRealizedPnl, settlementBasisLabel } from '@/lib/campaignRealizedPnl';
 import { formatDeltaB, legDeltaB, roundedDeltaB, splitMainLegPhases, type MainLegPhase } from '@/lib/campaignLegPhases';
 import { formatFeeCoin, sumTradeRecordFees, tradeRecordFees } from '@/lib/tradeFees';
-import { describeAddSizingVerdict, evaluateCampaignAddSizing, formatAddSizingShortfall } from '@/lib/campaignAddSizingCheck';
+import {
+  describeAddSizingVerdict,
+  evaluateCampaignAddSizing,
+  formatAddSizingCoinQuantity,
+  formatAddSizingNotional,
+  formatAddSizingShortfall,
+  type AddSizingVerdict,
+} from '@/lib/campaignAddSizingCheck';
 import type { CampaignReverseHedgeOrder, TradeRecord } from '@/types/trading';
 
 interface Props {
@@ -113,15 +121,121 @@ const FEE_COLUMN_HINT = '币安口径：手续费 = 名义 × 费率，开仓、
   + '币本位：名义 = 张数 × 面值 ÷ 成交价，收的是币——折成美元后价格被约掉，所以开平两笔的美元数必然相同，币数才不同（价越高付的币越少），本列因此按币显示。'
   + '盈亏列已扣平仓费；开仓费在开仓当时从钱包扣除。旧记录未存开仓费，按当时 0.04% Taker 估算并标明。';
 
-const LEGS_GRID = 'grid-cols-[36px_128px_180px_116px_84px_88px_88px_116px_84px_148px_minmax(216px,1fr)_64px]';
+const LEGS_GRID = 'grid-cols-[36px_128px_180px_116px_84px_88px_88px_116px_116px_148px_minmax(216px,1fr)_64px]';
 
 /** 各列合计的下限，与 LEGS_GRID 对应；不足时容器横向滚动而不是压扁列。 */
-const LEGS_MIN_WIDTH = 'min-w-[1482px]';
+const LEGS_MIN_WIDTH = 'min-w-[1514px]';
 
 /** 「加仓校验」列表头的说明：两本账合起来能否抹平新加仓退回止损线的亏损。 */
 const ADD_SIZING_COLUMN_HINT = '仅加仓行：旧仓浮盈垫 X₁(S₁ − S̄) + 已落袋 G ≥ 新加仓最大预期亏损 X₂(S₂ − S₁) 即为合规（主空符号翻转）。'
   + 'X₁ 只算加仓那一刻还拿着的币；G 是本轮持仓加仓前逐刀落袋的净盈亏（镜像止盈为主，先前止损出局的加仓亏损从中扣掉）。'
   + 'S₁ 取加仓那一刻挂着（或加仓后 5 分钟内补挂）、在亏损侧离加仓价最近的反向委托价；不计手续费，与加仓计算器同一口径。';
+
+function signedUsdt(value: number | null): string {
+  if (value == null || !Number.isFinite(value)) return '—';
+  return `${value > 0 ? '+' : ''}${formatAddSizingNotional(value)} U`;
+}
+
+function AddSizingDetailDialog({
+  leg,
+  verdict,
+  onClose,
+}: {
+  leg: TradeJournal;
+  verdict: AddSizingVerdict;
+  onClose: () => void;
+}) {
+  const actualCoins = verdict.x2Coins;
+  const actualNotional = actualCoins != null && verdict.s2 != null ? actualCoins * verdict.s2 : null;
+  const excessCoins = actualCoins != null && verdict.maxAllowedCoins != null
+    ? Math.max(0, actualCoins - verdict.maxAllowedCoins)
+    : null;
+  const excessNotional = excessCoins != null && verdict.s2 != null ? excessCoins * verdict.s2 : null;
+  const d = leg.direction === 'short' ? -1 : 1;
+  const addOrdinal = leg.leg_role?.match(/^main_add_(\d+)$/)?.[1] ?? leg.leg_sequence ?? '';
+  const averageEntry = verdict.x1Coins != null && verdict.x1Coins > 0
+    && verdict.s1 != null && verdict.cushion != null
+    ? verdict.s1 - verdict.cushion / (verdict.x1Coins * d)
+    : null;
+  const lossFormula = leg.direction === 'short' ? 'S₁ − S₂' : 'S₂ − S₁';
+  const lossPriceTerms = leg.direction === 'short'
+    ? `${fmtPrice(verdict.s1)} − ${fmtPrice(verdict.s2)}`
+    : `${fmtPrice(verdict.s2)} − ${fmtPrice(verdict.s1)}`;
+  const cushionFormula = leg.direction === 'short' ? 'X₁ × (S̄ − S₁)' : 'X₁ × (S₁ − S̄)';
+  const cushionPriceTerms = leg.direction === 'short'
+    ? `${fmtPrice(averageEntry)} − ${fmtPrice(verdict.s1)}`
+    : `${fmtPrice(verdict.s1)} − ${fmtPrice(averageEntry)}`;
+
+  return (
+    <Dialog open onOpenChange={open => { if (!open) onClose(); }}>
+      <DialogContent className="max-h-[88vh] overflow-y-auto sm:max-w-[600px]" data-testid="add-sizing-detail-dialog">
+        <DialogHeader>
+          <DialogTitle>加仓{addOrdinal} · Plan B 仓位校验</DialogTitle>
+          <DialogDescription>
+            “正确加仓”指 Plan B 允许的最大币量；U 是它按加仓价 S₂ 折算的名义仓位。两者是同一仓位，不是两个可相加的额度。
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="rounded-lg border border-[#F6465D]/30 bg-[#F6465D]/[0.07] p-4">
+          <div className="text-xs font-medium text-[#F6465D]">Plan B 加仓上限</div>
+          <div className="mt-1 text-2xl font-semibold tabular-nums text-[#F6465D]" data-testid="add-sizing-correct-coins">
+            {formatAddSizingCoinQuantity(verdict.maxAllowedCoins)} 币
+          </div>
+          <div className="mt-1 text-sm tabular-nums text-foreground/70" data-testid="add-sizing-correct-notional">
+            ≈ {formatAddSizingNotional(verdict.maxAllowedNotional)} U 名义仓位
+          </div>
+          <div className="mt-3 border-t border-[#F6465D]/20 pt-3 text-xs leading-relaxed text-foreground/65">
+            实际加仓 {formatAddSizingCoinQuantity(actualCoins)} 币（{formatAddSizingNotional(actualNotional)} U），
+            超出 {formatAddSizingCoinQuantity(excessCoins)} 币（{formatAddSizingNotional(excessNotional)} U）。
+          </div>
+        </div>
+
+        <div className="space-y-2 text-xs">
+          <div className="font-medium text-foreground">计算过程</div>
+          <div className="grid grid-cols-3 gap-3 rounded bg-muted/35 px-3 py-2">
+            <span className="text-muted-foreground">① 旧仓浮盈垫 Y₁</span>
+            <span className="col-span-2 text-right font-mono tabular-nums">
+              {cushionFormula} = {formatAddSizingCoinQuantity(verdict.x1Coins)} × ({cushionPriceTerms}) = {signedUsdt(verdict.cushion)}
+            </span>
+          </div>
+          <div className="grid grid-cols-3 gap-3 rounded bg-muted/35 px-3 py-2">
+            <span className="text-muted-foreground">② 已落袋 G</span>
+            <span className="col-span-2 text-right font-mono tabular-nums">{signedUsdt(verdict.banked)}</span>
+          </div>
+          <div className="grid grid-cols-3 gap-3 rounded bg-muted/35 px-3 py-2">
+            <span className="text-muted-foreground">③ 可用覆盖额</span>
+            <span className="col-span-2 text-right font-mono tabular-nums">
+              Y₁ + G = {signedUsdt(verdict.cushion)} + {signedUsdt(verdict.banked)} = {signedUsdt(verdict.required)}
+            </span>
+          </div>
+          <div className="grid grid-cols-3 gap-3 rounded bg-muted/35 px-3 py-2">
+            <span className="text-muted-foreground">④ 每币风险</span>
+            <span className="col-span-2 text-right font-mono tabular-nums">
+              |{lossFormula}| = |{lossPriceTerms}| = {fmtPrice(verdict.riskPerCoin)} U/币
+            </span>
+          </div>
+          <div className="grid grid-cols-3 gap-3 rounded bg-muted/35 px-3 py-2">
+            <span className="text-muted-foreground">⑤ 正确币量上限</span>
+            <span className="col-span-2 text-right font-mono tabular-nums">
+              max(0, Y₁ + G) ÷ 每币风险 = {formatAddSizingCoinQuantity(verdict.maxAllowedCoins)} 币
+            </span>
+          </div>
+          <div className="grid grid-cols-3 gap-3 rounded bg-muted/35 px-3 py-2">
+            <span className="text-muted-foreground">⑥ 折算 U 仓位</span>
+            <span className="col-span-2 text-right font-mono tabular-nums">
+              {formatAddSizingCoinQuantity(verdict.maxAllowedCoins)} × S₂ {fmtPrice(verdict.s2)} = {formatAddSizingNotional(verdict.maxAllowedNotional)} U
+            </span>
+          </div>
+        </div>
+
+        <div className="rounded border border-border px-3 py-2 text-xs leading-relaxed text-foreground/70">
+          实际新仓最大预期亏损 {formatAddSizingNotional(verdict.maxLoss)} U，可用覆盖额 {formatAddSizingNotional(verdict.required)} U，
+          尚缺 <span className="font-semibold text-[#F6465D]">{formatAddSizingShortfall(verdict.shortfall ?? 0)} U</span>。
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
 
 export function CampaignLegsList({
   legs,
@@ -135,6 +249,7 @@ export function CampaignLegsList({
   onDetach,
   initialExpectedMaxLoss = null,
 }: Props) {
+  const [addSizingDetailLegId, setAddSizingDetailLegId] = useState<string | null>(null);
   const recordMap = useMemo(() => buildTradeRecordLookup(tradeRecords), [tradeRecords]);
   const highlightedSet = useMemo(() => new Set(highlightedLegIds), [highlightedLegIds]);
   // 每条腿的已实现盈亏与对全场的贡献率。必须整体算——贡献率的分母依赖全部腿。
@@ -225,8 +340,15 @@ export function CampaignLegsList({
     () => evaluateCampaignAddSizing({ legs, tradeRecords, legExitPriceCorrections, reverseHedgeOrders }),
     [legs, tradeRecords, legExitPriceCorrections, reverseHedgeOrders],
   );
+  const selectedAddSizingLeg = addSizingDetailLegId == null
+    ? null
+    : legs.find(leg => leg.id === addSizingDetailLegId) ?? null;
+  const selectedAddSizingVerdict = addSizingDetailLegId == null
+    ? null
+    : addSizingMap.get(addSizingDetailLegId) ?? null;
 
   return (
+    <>
     <div className="bg-card border border-border rounded overflow-hidden">
       <div className="overflow-x-auto">
         <div className={LEGS_MIN_WIDTH}>
@@ -384,10 +506,8 @@ export function CampaignLegsList({
                   </div>
                   {(() => {
                     /**
-                     * 加仓校验：合规是常态，对号几乎隐形，不抢视线；
-                     * 仓位过大才是要被看见的事——红色放大的叉，下面一行写缺口金额。
-                     * 不挂悬浮框（用户要求撤掉 Legs 单元格的提示框），明细只进 aria-label。
-                     * 普通 div 上的 aria-label 读屏会忽略（ARIA 不许给无角色元素命名），所以记号本身作 role="img"。
+                     * 合规是常态，对号几乎隐形；过大则直接写出 Plan B 的币量上限与 U 名义仓位。
+                     * 红叉整格是按钮，不靠 hover；点击才打开完整计算过程。
                      */
                     const verdict = addSizingMap.get(leg.id);
                     if (!verdict) return <div />;
@@ -406,17 +526,22 @@ export function CampaignLegsList({
                     }
                     if (verdict.status === 'fail') {
                       return (
-                        <div
+                        <button
+                          type="button"
                           data-testid={`add-sizing-check-fail-${leg.id}`}
-                          role="img"
                           aria-label={label}
-                          className="text-center leading-none text-[#F6465D]"
+                          onClick={() => setAddSizingDetailLegId(leg.id)}
+                          className="w-full rounded px-0.5 text-center leading-none text-[#F6465D] transition-colors hover:bg-[#F6465D]/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#F6465D]/50"
                         >
                           <div className="text-[18px] font-bold">✗</div>
-                          <div className="mt-0.5 whitespace-nowrap text-[9px] tabular-nums">
-                            缺 {formatAddSizingShortfall(verdict.shortfall ?? 0)}
+                          <div className="mt-0.5 text-[9px] font-semibold leading-tight tabular-nums">
+                            上限 {formatAddSizingCoinQuantity(verdict.maxAllowedCoins)} 币
                           </div>
-                        </div>
+                          <div className="mt-0.5 text-[8px] leading-tight tabular-nums text-[#F6465D]/80">
+                            ≈ {formatAddSizingNotional(verdict.maxAllowedNotional)} U
+                          </div>
+                          <div className="mt-1 text-[8px] font-sans leading-tight text-[#F6465D]/70">点击看计算</div>
+                        </button>
                       );
                     }
                     return (
@@ -653,5 +778,13 @@ export function CampaignLegsList({
         </div>
       </div>
     </div>
+    {selectedAddSizingLeg && selectedAddSizingVerdict?.status === 'fail' && (
+      <AddSizingDetailDialog
+        leg={selectedAddSizingLeg}
+        verdict={selectedAddSizingVerdict}
+        onClose={() => setAddSizingDetailLegId(null)}
+      />
+    )}
+    </>
   );
 }

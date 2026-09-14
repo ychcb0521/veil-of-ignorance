@@ -16,7 +16,11 @@ import { resolveMirrorTpOrderTiming } from '@/lib/campaignMirrorTpOrderTiming';
 import { computeLegPnlContributions } from '@/lib/campaignLegPnl';
 import { computeCampaignRealizedPnl, settlementBasisLabel } from '@/lib/campaignRealizedPnl';
 import { formatDeltaB, legDeltaB, roundedDeltaB, splitMainLegPhases } from '@/lib/campaignLegPhases';
-import { evaluateCampaignAddSizing, formatAddSizingShortfall } from '@/lib/campaignAddSizingCheck';
+import {
+  evaluateCampaignAddSizing,
+  formatAddSizingCoinQuantity,
+  formatAddSizingNotional,
+} from '@/lib/campaignAddSizingCheck';
 import type { TradeCampaign, TradeJournal } from '@/types/journal';
 import type { EmotionDiaryExportSummary } from '@/types/emotionDiary';
 import type { CampaignReverseHedgeOrder, TradeRecord } from '@/types/trading';
@@ -96,8 +100,8 @@ const COLUMNS = [
   { title: '平仓价', width: 118 },
   // 150：十亿级币量带两位小数（1,171,163,720.54）要一行放下——拆成两截的数字比挤一点更难读
   { title: '币量 / 仓位', width: 150 },
-  // 110：红叉下面那行「缺 3,789,250」要一行放下
-  { title: '加仓校验', width: 110 },
+  // 170：红叉下面把 Plan B 正确上限的币量与 U 名义仓位都写清。
+  { title: '加仓校验', width: 170 },
   { title: '手续费', width: 132 },
   { title: '委托', width: 444 },
 ] as const;
@@ -485,7 +489,7 @@ export function buildCampaignLegsExportRows(input: ExportInput): CampaignLegsExp
           { text: notionalText, color: '#848E9C' },
         ];
       })(),
-      // 加仓校验：与页面同构——合规只是一枚淡灰小对号，过大才是红色放大的叉 + 缺口金额；非加仓行留空
+      // 加仓校验：与页面同构——合规只是一枚淡灰小对号，过大则写明正确币量上限及 U 名义仓位；非加仓行留空
       ((): CampaignLegsExportCellLine[] => {
         const verdict = addSizingMap.get(leg.id);
         if (!verdict) return [{ text: '' }];
@@ -493,7 +497,8 @@ export function buildCampaignLegsExportRows(input: ExportInput): CampaignLegsExp
         if (verdict.status === 'fail') {
           return [
             { text: '✗', color: '#F6465D', bold: true, size: 20 },
-            { text: `缺 ${formatAddSizingShortfall(verdict.shortfall ?? 0)}`, color: '#F6465D', bold: true, size: 11 },
+            { text: `上限 ${formatAddSizingCoinQuantity(verdict.maxAllowedCoins)} 币`, color: '#F6465D', bold: true, size: 11 },
+            { text: `≈ ${formatAddSizingNotional(verdict.maxAllowedNotional)} U`, color: '#F6465D', size: 10 },
           ];
         }
         return [{ text: '—', color: '#C4CAD3', size: 11 }];

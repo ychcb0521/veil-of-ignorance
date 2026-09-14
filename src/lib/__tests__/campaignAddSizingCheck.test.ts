@@ -90,6 +90,13 @@ describe('加仓校验：浮盈垫 + 落袋 ≥ 新腿退回 S₁ 的亏损', ()
     expect(v.maxLoss).toBeCloseTo(x2 * (0.0419705 - 0.034726), 2);
     expect(v.shortfall).toBeCloseTo(v.maxLoss! - v.cushion! - v.banked!, 2);
     expect(v.shortfall!).toBeGreaterThan(3_700_000);
+    const available = v.cushion! + v.banked!;
+    const expectedMaxCoins = available / (0.0419705 - 0.034726);
+    expect(v.riskPerCoin).toBeCloseTo(0.0419705 - 0.034726, 8);
+    expect(v.maxAllowedCoins).toBeCloseTo(expectedMaxCoins, 4);
+    expect(v.maxAllowedNotional).toBeCloseTo(expectedMaxCoins * 0.0419705, 2);
+    // “正确加仓”的主单位是币；U 只是按 S₂ 乘回去的名义仓位，不能把两者相加。
+    expect(v.maxAllowedNotional).toBeCloseTo(v.maxAllowedCoins! * v.s2!, 8);
   });
 
   it('取满计算器 x2Max 的加仓判 ok（浮点误差不许把它判成 fail）', () => {
@@ -135,7 +142,22 @@ describe('加仓校验：浮盈垫 + 落袋 ≥ 新腿退回 S₁ 的亏损', ()
       expect(v.maxLoss).toBeCloseTo(1_600, 6);
       expect(v.status).toBe('fail');
       expect(v.shortfall).toBeCloseTo(100, 6);
+      expect(v.maxAllowedCoins).toBeCloseTo(7_500, 6);
+      expect(v.maxAllowedNotional).toBeCloseTo(9_750, 6);
     });
+  });
+
+  it('可用覆盖额为负时，正确加仓上限是 0 币 / 0 U，不给出负仓位', () => {
+    const t = T0 + 60 * MIN;
+    const legs = [
+      mainLeg({ pre_entry_price: 1.2, pre_position_size: 12_000 }),
+      leg({ id: 'add', leg_role: 'main_add_1', pre_simulated_time: iso(t), pre_entry_price: 1.3, pre_position_size: 1_300 }),
+    ];
+    const v = evaluateCampaignAddSizing({ legs, tradeRecords: [], reverseHedgeOrders: [short(1.1, t - MIN, null)] }).get('add')!;
+    expect(v.status).toBe('fail');
+    expect(v.required).toBeLessThan(0);
+    expect(v.maxAllowedCoins).toBe(0);
+    expect(v.maxAllowedNotional).toBe(0);
   });
 
   it('第二次加仓：先前那笔加仓在新 S₁ 上是亏的，从浮盈垫里扣掉', () => {

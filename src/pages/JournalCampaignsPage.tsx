@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type MouseEvent } from 'react';
+import { startTransition, useEffect, useMemo, useState, type MouseEvent } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
   Activity,
@@ -1003,6 +1003,12 @@ export default function JournalCampaignsPage() {
   );
   const [loading, setLoading] = useState(true);
   const [rows, setRows] = useState<CampaignCardData[]>([]);
+  /**
+   * 卡片允许逐批出现，但散点图必须等基础明细全部尝试完再一次成图。
+   * 否则 181 场会让整张 SVG 和同等数量的命中按钮重建十几次，视觉上像「加载到一半停住」。
+   */
+  const [campaignRowsComplete, setCampaignRowsComplete] = useState(false);
+  const [campaignLoadProgress, setCampaignLoadProgress] = useState({ loaded: 0, total: 0 });
   const [busyCampaignId, setBusyCampaignId] = useState<string | null>(null);
   const [sortState, setSortState] = useState<CampaignSortState>(initialSortState);
   // 默认全选：进页面先看全部战役，要比较某一段日子再自己框。
@@ -1059,8 +1065,13 @@ export default function JournalCampaignsPage() {
     let cancelled = false;
     (async () => {
       setLoading(true);
+      setRows([]);
+      setCampaignRowsComplete(false);
+      setCampaignLoadProgress({ loaded: 0, total: 0 });
       try {
         const campaigns = await listAllCampaigns(user.id);
+        if (cancelled) return;
+        setCampaignLoadProgress({ loaded: 0, total: campaigns.length });
 
         /**
          * 单场战役的行数据。exitPriceCorrections 可选：
@@ -1142,48 +1153,74 @@ export default function JournalCampaignsPage() {
          *      列表是只读视图，heal: false。
          *
          *   c. **首屏等全部**。原来 Promise.all 等 147 场全部返回才画第一行。
-         *      改成分批：每批到达就画，用户看到的第一批在几百毫秒内出现。
-         *      批与批之间让出一帧，主线程不被独占，滚动始终跟手。
+         *      改成分批：卡片每批到达就画；散点图等全部批次完成后一次成图，
+         *      避免同一张大 SVG 在加载过程中被完整重建十几次。
+         *
+         *   d. **一场失败拖死后续全部批次**。Promise.all 中任何一场失败都会直接跳到
+         *      finally，表现就是列表 / 散点图永远只加载到某个整数批次。改用 allSettled，
+         *      单场异常只跳过该场，后面的战役继续加载。
          */
         const local = readUserLocalSnapshot(user.id);
         const BATCH = 12;
         const detailList: Awaited<ReturnType<typeof getCampaignFullData>>[] = [];
         for (let i = 0; i < campaigns.length; i += BATCH) {
           if (cancelled) return;
-          const batch = await Promise.all(
+          const settledBatch = await Promise.allSettled(
             campaigns.slice(i, i + BATCH).map(campaign =>
               getCampaignFullData(campaign.id, { local, heal: false })),
           );
           if (cancelled) return;
+          const batch = settledBatch.flatMap(result => (
+            result.status === 'fulfilled' ? [result.value] : []
+          ));
           detailList.push(...batch);
-          const painted = detailList.map(details => buildRow(details, {}));
-          setRows(painted);
+          // 只计算新到的这一批；旧实现每批重算之前的全部行，累计成本会退化成 O(n²)。
+          // 某一场的旧数据若不完整，计算失败也只跳过该场，不能再次中断后续批次。
+          const paintedBatch = batch.flatMap(details => {
+            try {
+              return [buildRow(details, {})];
+            } catch {
+              return [];
+            }
+          });
+          setRows(previous => [...previous, ...paintedBatch]);
+          setCampaignLoadProgress({
+            loaded: Math.min(i + BATCH, campaigns.length),
+            total: campaigns.length,
+          });
           setLoading(false);          // 第一批到达即撤掉「加载中」
           // 让出一帧：不让连续的批次把主线程连成一段长任务。
           await new Promise(resolve => setTimeout(resolve, 0));
         }
         if (cancelled) return;
         setLoading(false);
+        setCampaignRowsComplete(true);
 
-        // ② 后台补齐平仓价校正，逐场到达即静默替换该行——首屏已可用，
-        //    数字随后自行收敛到与详情页完全一致的口径，功能一点不少。
-        void Promise.all(detailList.map(async (details, index) => {
-          const corrections = await fetchLegExitPriceCorrections(
-            details.campaign.symbol,
-            details.legs,
-            details.tradeRecords,
-          ).catch(() => ({} as LegExitPriceCorrections));
-          if (cancelled || Object.keys(corrections).length === 0) return;
-          const corrected = buildRow(details, corrections);
-          setRows(prev => {
-            if (prev.length !== detailList.length) return prev;
-            const next = [...prev];
-            next[index] = corrected;
-            return next;
+        // ② 后台补齐平仓价校正。先并发读取、最后合并成一次更新；旧实现每场到达都
+        //    重排卡片并重画整张图，几十到上百次提交会让滚动和悬停明显掉帧。
+        void (async () => {
+          const correctedEntries = await Promise.all(detailList.map(async details => {
+            const corrections = await fetchLegExitPriceCorrections(
+              details.campaign.symbol,
+              details.legs,
+              details.tradeRecords,
+            ).catch(() => ({} as LegExitPriceCorrections));
+            if (Object.keys(corrections).length === 0) return null;
+            return [details.campaign.id, buildRow(details, corrections)] as const;
+          }));
+          if (cancelled) return;
+          const correctedById = new Map(correctedEntries.filter(entry => entry != null));
+          if (correctedById.size === 0) return;
+          startTransition(() => {
+            setRows(previous => previous.map(row => correctedById.get(row.campaign.id) ?? row));
           });
-        }));
+        })();
       } finally {
-        if (!cancelled) setLoading(false);
+        if (!cancelled) {
+          setLoading(false);
+          // 即使战役目录本身读取失败，也不能让 URL 直达的图表永远卡在骨架屏。
+          setCampaignRowsComplete(true);
+        }
       }
     })();
     return () => { cancelled = true; };
@@ -2898,25 +2935,51 @@ export default function JournalCampaignsPage() {
                     </div>
                   </div>
                 ) : null}
-                <CampaignMetricScatterPlot
-                  key={selectedMetricConfig.key}
-                  points={selectedMetricSeries.points}
-                  metricKey={selectedMetricConfig.key}
-                  metricLabel={selectedMetricConfig.label}
-                  // 轴上写这一族的名字（「几何期望」），而不是这张图的名字（「几何期望分布」）
-                  axisLabel={familySourceLabel}
-                  seriesLabel={selectedMetricConfig.seriesLabel}
-                  guide={selectedMetricConfig.guide}
-                  formatValue={selectedMetricConfig.formatValue}
-                  missingValueLabel={selectedMetricConfig.missingValueLabel}
-                  excludedMissingValueCount={selectedMetricSeries.excludedMissingValueCount}
-                  excludedMissingOperationTimeCount={selectedMetricSeries.excludedMissingOperationTimeCount}
-                  colorMode={selectedMetricConfig.colorMode}
-                  legacyOddsTestIds={selectedMetricConfig.key === 'odds'}
-                  view={selectedMetricConfig.view ?? 'time'}
-                  onBack={() => { setMetricChartOpen(false); updateChartParam(null); }}
-                  onSelectCampaign={handleCampaignOpen}
-                />
+                {campaignRowsComplete ? (
+                  <CampaignMetricScatterPlot
+                    key={selectedMetricConfig.key}
+                    points={selectedMetricSeries.points}
+                    metricKey={selectedMetricConfig.key}
+                    metricLabel={selectedMetricConfig.label}
+                    // 轴上写这一族的名字（「几何期望」），而不是这张图的名字（「几何期望分布」）
+                    axisLabel={familySourceLabel}
+                    seriesLabel={selectedMetricConfig.seriesLabel}
+                    guide={selectedMetricConfig.guide}
+                    formatValue={selectedMetricConfig.formatValue}
+                    missingValueLabel={selectedMetricConfig.missingValueLabel}
+                    excludedMissingValueCount={selectedMetricSeries.excludedMissingValueCount}
+                    excludedMissingOperationTimeCount={selectedMetricSeries.excludedMissingOperationTimeCount}
+                    colorMode={selectedMetricConfig.colorMode}
+                    legacyOddsTestIds={selectedMetricConfig.key === 'odds'}
+                    view={selectedMetricConfig.view ?? 'time'}
+                    onBack={() => { setMetricChartOpen(false); updateChartParam(null); }}
+                    onSelectCampaign={handleCampaignOpen}
+                  />
+                ) : (
+                  <div
+                    data-testid="campaign-metric-loading"
+                    className="mx-auto flex min-h-[22rem] w-full max-w-[58rem] flex-col items-center justify-center gap-3 px-6 text-center"
+                    role="status"
+                    aria-live="polite"
+                  >
+                    <div className="text-[12px] font-medium text-foreground">正在准备完整散点图…</div>
+                    <div className="h-1.5 w-full max-w-72 overflow-hidden rounded-full bg-muted">
+                      <div
+                        className="h-full rounded-full bg-primary transition-[width] duration-200 ease-out"
+                        style={{
+                          width: `${campaignLoadProgress.total > 0
+                            ? Math.round((campaignLoadProgress.loaded / campaignLoadProgress.total) * 100)
+                            : 0}%`,
+                        }}
+                      />
+                    </div>
+                    <div className="font-mono text-[10px] tabular-nums text-muted-foreground">
+                      {campaignLoadProgress.total > 0
+                        ? `${campaignLoadProgress.loaded} / ${campaignLoadProgress.total} 场`
+                        : '正在读取战役目录'}
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           ) : null}

@@ -526,20 +526,22 @@ describe('【用户要求】导出图也带「加仓校验」列', () => {
     ...input(), legs: addLegs(addNotional), reverseHedgeOrders: [stopOrder],
   });
 
-  it('仓位过大：红色、加粗、放大的 ✗，下面一行红字写缺口；行高跟着撑开', () => {
+  it('仓位过大：红色、加粗、放大的 ✗，下面写正确币量上限与 U 折算额；行高跟着撑开', () => {
     const rows = rowsFor(22_057_330);
     const add = rows.find(row => row.legId === 'add1')!;
-    const [cross, gap] = add.cells[ADD_SIZING_COL];
+    const [cross, coins, notional] = add.cells[ADD_SIZING_COL];
     expect(cross.text).toBe('✗');
     expect(cross.color).toBe('#F6465D');
     expect(cross.bold).toBe(true);
     expect(cross.size ?? 13).toBeGreaterThan(16);
-    expect(gap.text).toMatch(/^缺 3,7\d\d,\d{3}$/);
-    expect(gap.color).toBe('#F6465D');
-    // 折行不会把「缺 3,789,250」拆开
-    expect(add.wrapped[ADD_SIZING_COL]).toHaveLength(2);
+    expect(coins.text).toMatch(/^上限 [\d,.]+ 币$/);
+    expect(coins.color).toBe('#F6465D');
+    expect(notional.text).toMatch(/^≈ [\d,.]+ U$/);
+    expect(notional.color).toBe('#F6465D');
+    // 列宽足够，币量与 U 额各自保持完整一行
+    expect(add.wrapped[ADD_SIZING_COL]).toHaveLength(3);
     // 大字号那一行按字号撑开，不和下一行叠在一起
-    expect(add.height).toBeGreaterThanOrEqual(12 * 2 + (cross.size! + 4) + 17);
+    expect(add.height).toBeGreaterThanOrEqual(12 * 2 + (cross.size! + 4) + 17 * 2);
     // 非加仓行、合计行留空；每一行格子数都与表头列数一致
     expect(rows.find(row => row.legId === 'main')!.cells[ADD_SIZING_COL].map(line => line.text)).toEqual(['']);
     expect(rows.at(-1)!.cells[ADD_SIZING_COL].map(line => line.text)).toEqual(['']);
