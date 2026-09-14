@@ -229,6 +229,11 @@ export interface OrderClockStamp {
    * 省略或 null：只按 endRealAt 判。
    */
   endSimAt?: number | null;
+  /**
+   * endRealAt 是成交（不是撤单）。倒回不撤单，A 遍挂的条件单在倒回那一刻价格已满足就触发：
+   * 成交模拟时刻是之后那一遍的钟、早于挂单，但仓位真实开在那一遍里——不按 endSimAt 判它没活进去。
+   */
+  endedByFill?: boolean;
 }
 
 export interface ReplaySessionFilter {
@@ -277,14 +282,16 @@ export function orderClockStamp(
   }
   let endRealAt: number | null = options.live ? Number.POSITIVE_INFINITY : null;
   let endSimAt: number | null = null;
+  let endedByFill = false;
   if (!options.live) {
-    for (const [simAt, realAt] of [
-      [order.cancelledAt, order.cancelledRealAt],
-      [order.filledAt, order.filledRealAt],
+    for (const [simAt, realAt, fill] of [
+      [order.cancelledAt, order.cancelledRealAt, false],
+      [order.filledAt, order.filledRealAt, true],
     ] as const) {
       if (!finitePositive(realAt)) continue;
       endRealAt = realAt;
       endSimAt = finitePositive(simAt) ? simAt : null;
+      endedByFill = fill;
       break;
     }
   }
@@ -294,6 +301,7 @@ export function orderClockStamp(
     preStampSimAt,
     endRealAt,
     endSimAt,
+    endedByFill,
   };
 }
 
@@ -370,12 +378,13 @@ const CLOSE_SIDE_KINDS: ReadonlySet<ReplayEventKind | undefined> = new Set(['rec
  *    - 进行中的战役（campaignOpen）：仓位还开着、没有平仓锚点来收尾，时间机器倒回也不平仓不撤单，
  *      每个锚点之后的段哪怕不含锚点也是本场的延续（L4 带着仓位倒回之后挂的对冲；两次记录决策之间倒回出来的那一遍同理）——
  *      到隔开一次坐下来为止，不论坐下来后的第一件事是否还在锚点所在段里（隔天回来先撤掉前一天的旧单、再倒回另起一遍，
- *      与一回来就倒回是同一件事）。锚点所在段本身因含锚点整段保留、不修剪：隔天回来接着往后打（没有倒回）还是这场。
+ *      与一回来就倒回是同一件事）。锚点所在段本身因含锚点整段保留、不修剪：隔天回来接着往后打（没有倒回）还是这场；
+ *      坐下来之前已经在延续的那一遍同理，断的只是坐下来之后新倒回出来的段。
  *    中间不修剪：战役途中停多久都还是这场。
  *
  * 1. 成员资格：委托的真实时刻（bestOrderRealStamp）必须落在保留的某一段里。
  *    或者挂在保留段之前、与**那一段**同一次坐下来里（倒回之前那一遍），且活进了那一段（见 livesInto：撤单 / 成交晚于段起点、
- *    且那一段已走回它的挂单模拟时刻，或活过了整段 / 至今仍挂着）：倒回不撤单，它在那一段的时间线里真实存在。
+ *    且那一段已走回它的挂单模拟时刻，或是在那一段里成交的，或活过了整段 / 至今仍挂着）：倒回不撤单，它在那一段的时间线里真实存在。
  *    在倒回之前那一遍里就结束了的、倒回后没等走回它挂单的时刻就撤掉的，都不算。
  *    一个真实时刻都没有的委托不知道在哪一段，保留的每一段都是候选，任一段容得下即可。
  *
@@ -397,8 +406,8 @@ const CLOSE_SIDE_KINDS: ReadonlySet<ReplayEventKind | undefined> = new Set(['rec
  *    A 的委托模拟时刻 ≥ replaySim − 容差才算被重走。容差与切段同一口径：两遍各自读的模拟时钟都可能落后，
  *    同一分钟里 A 那张比 B 那张早几秒还是晚几秒是随机的。不用 B 的起点：往前跳不切段，B 先绕去更早的历史、
  *    再一跳越过 A 的整段时，B 的起点远早于 A，却从没重走过 A 挂单的那几个小时。
- *    倒回点之前挂的单子没有被重走，保留；活过了倒回的委托（撤单 / 成交落在 B 开始之后、且 B 已走回它的挂单模拟时刻，
- *    或活过了整个 B / 至今仍挂着）在 B 的时间线里真实存在，同样保留。倒回后看见旧单、在 B 走回它之前就撤掉的
+ *    倒回点之前挂的单子没有被重走，保留；活过了倒回的委托（撤单落在 B 开始之后、且 B 已走回它的挂单模拟时刻，
+ *    或在 B 里成交——倒回那一刻就触发的也算，或活过了整个 B / 至今仍挂着）在 B 的时间线里真实存在，同样保留。倒回后看见旧单、在 B 走回它之前就撤掉的
  *    （撤单模拟时刻早于挂单）不算活进 B，照样被取代。不保留的段既不算本场、也不取代别人。
  *
  * 本场自己的锚点一个都没有 → 返回 null，调用方退回 campaignRealTimeWindow。
@@ -452,13 +461,16 @@ export function buildReplaySessionFilter(
   const anchoredSegments = new Set(anchorIndexes.map(index => segmentOf[index]));
   // 进行中的战役：每个锚点之后的延续（含两个锚点之间倒回出来的那几遍）——隔开一次坐下来就断。
   // 断在锚点所在段里的事件上也一样：锚点所在段本身靠 anchoredSegments 整段保留，断的只是之后倒回出来的那几遍
+  // 已经在延续的那一遍隔天回来接着往后打（没有再倒回）不断：与锚点所在段同理，断的只是坐下来之后新倒回出来的段
   const continuesAnchor = points.map(() => false);
   if (campaignOpen) {
     let anchorSegment: number | null = null;
+    const continuedSegments = new Set<number>();
     for (let index = firstAnchor; index < points.length; index += 1) {
       if (points[index].anchor) anchorSegment = segmentOf[index];
       else if (anchorSegment !== null && sittingBreakBefore(index)) anchorSegment = null;
-      continuesAnchor[index] = anchorSegment !== null;
+      continuesAnchor[index] = anchorSegment !== null || continuedSegments.has(segmentOf[index]);
+      if (continuesAnchor[index]) continuedSegments.add(segmentOf[index]);
     }
   }
 
@@ -532,6 +544,7 @@ export function buildReplaySessionFilter(
   /**
    * 委托活进了 span 那一段的时间线：结束晚于那一段起点，且活过了整段，或结束时那一段已走回（或越过）它的挂单模拟时刻。
    * 倒回后看见旧单、没等走回它挂单的时刻就撤掉（撤单模拟时刻早于挂单），那一段从没见过它挂在那里——仍是被放弃的时间线。
+   * 成交不看模拟时刻：倒回那一刻就触发的条件单成交在那一段里、开出了真实仓位（见 endedByFill）。
    * 结束的模拟时刻未知时只看真实时刻。
    */
   const livesInto = (span: { start: number; end: number }, order: OrderClockStamp) => {
@@ -539,6 +552,7 @@ export function buildReplaySessionFilter(
     if (endRealAt < span.start) return false;
     const { simAt, endSimAt } = order;
     return endRealAt > span.end
+      || Boolean(order.endedByFill)
       || !finitePositive(endSimAt)
       || !finitePositive(simAt)
       || endSimAt >= simAt - toleranceMs;

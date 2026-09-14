@@ -308,13 +308,13 @@ describe('【复核】盖章时代按模拟先后判 / 活过倒回不被取代 
 
   it('orderClockStamp：成员资格看最佳真实时刻，盖章判断看挂单（及未盖章的结束），仍挂着活到 +Infinity', () => {
     expect(orderClockStamp({ createdAt: sim(1), createdRealAt: real(0, 1), cancelledAt: sim(5), cancelledRealAt: real(0, 5) }))
-      .toEqual({ realAt: real(0, 1), simAt: sim(1), preStampSimAt: null, endRealAt: real(0, 5), endSimAt: sim(5) });
+      .toEqual({ realAt: real(0, 1), simAt: sim(1), preStampSimAt: null, endRealAt: real(0, 5), endSimAt: sim(5), endedByFill: false });
     // 挂单没盖章、撤单盖了章（⏹ 停止撤掉的老委托）：成员资格看撤单时刻，盖章判断看挂单时刻
     expect(orderClockStamp({ createdAt: sim(1), cancelledAt: sim(5), cancelledRealAt: real(0, 5) }))
-      .toEqual({ realAt: real(0, 5), simAt: sim(1), preStampSimAt: sim(1), endRealAt: real(0, 5), endSimAt: sim(5) });
+      .toEqual({ realAt: real(0, 5), simAt: sim(1), preStampSimAt: sim(1), endRealAt: real(0, 5), endSimAt: sim(5), endedByFill: false });
     // 两头都没盖章：上线前就结束了，取更晚的撤单时刻作界
     expect(orderClockStamp({ createdAt: sim(1), cancelledAt: sim(5) }))
-      .toEqual({ realAt: null, simAt: sim(1), preStampSimAt: sim(5), endRealAt: null, endSimAt: null });
+      .toEqual({ realAt: null, simAt: sim(1), preStampSimAt: sim(5), endRealAt: null, endSimAt: null, endedByFill: false });
     // 挂单盖了章、成交没盖（减仓单成交快照至今不写 filledRealAt）：不据此判早于上线
     expect(orderClockStamp({ createdAt: sim(1), createdRealAt: real(0, 1), filledAt: sim(5) }).preStampSimAt).toBeNull();
     expect(orderClockStamp({ createdAt: sim(1), createdRealAt: real(0, 1) }, { live: true }).endRealAt)
@@ -576,5 +576,44 @@ describe('【复核三】进行中的战役按锚点延续 / 活进保留段的�
     expect(filter.allowsOrder(orderClockStamp({ ...preRewind, cancelledAt: sim(1), cancelledRealAt: real(0, 20) }))).toBe(true);
     expect(filter.allowsOrder(orderClockStamp({ ...preRewind, cancelledAt: sim(0, 9), cancelledRealAt: real(0, -1) }))).toBe(false);
     expect(filter.allowsOrder(orderClockStamp({ createdAt: sim(0, 7), createdRealAt: real(-72, 0) }, { live: true }))).toBe(false);
+  });
+});
+
+describe('【复核五】倒回出来的那一遍隔天接着打 / 倒回那一刻就触发的成交', () => {
+  const order = (realAt: number, simAt: number): ReplayEvent => ({ realAt, simAt, kind: 'order-create' });
+  const live = Number.POSITIVE_INFINITY;
+
+  it('【进行中】当天带着主力倒回出来的那一遍，隔天回来接着往后打（没有再倒回）：仍是本场；隔天再倒回另起的一遍不算', () => {
+    const filter = buildReplaySessionFilter([
+      { realAt: real(0, 0), simAt: sim(0), anchor: true, kind: 'leg-open' },
+      order(real(0, 1), sim(1, 0)),
+      { realAt: real(0, 2), simAt: sim(1, 10), kind: 'order-end' },
+      order(real(0, 11), sim(0, 15)),                  // 倒回，主力还开着：这一遍是本场的延续
+      order(real(23, 0), sim(0, 40)),                  // 第二天接着打这一遍
+      order(real(47, 0), sim(0, 50)),                  // 第三天还是这一遍
+      order(real(47, 5), sim(0, 20)),                  // 又倒回去另起一遍
+    ], { campaignOpen: true })!;
+    expect(filter.allowsOrder({ realAt: real(23, 0), simAt: sim(0, 40), endRealAt: live })).toBe(true);
+    expect(filter.allowsOrder({ realAt: real(47, 0), simAt: sim(0, 50), endRealAt: live })).toBe(true);
+    expect(filter.allowsOrder({ realAt: real(47, 5), simAt: sim(0, 20), endRealAt: live })).toBe(false);
+  });
+
+  it('【取代】A 遍挂的条件单在倒回那一刻就触发：成交在 B 遍里、模拟时刻早于挂单也算活进 B 遍；同样时刻撤掉的仍被取代', () => {
+    const filter = buildReplaySessionFilter([
+      { realAt: real(0, 0), simAt: sim(0), anchor: true, kind: 'record-open' },
+      order(real(0, 3), sim(2, 0)),
+      order(real(0, 4), sim(3, 20)),
+      { realAt: real(0, 5), simAt: sim(5, 0), kind: 'order-end' },
+      { realAt: real(0, 6) + 2_000, simAt: sim(0, 10), kind: 'order-end' },
+      order(real(0, 20), sim(2, 30)),
+      { realAt: real(0, 50), simAt: sim(8, 0), anchor: true, kind: 'record-close' },
+    ])!;
+    const conditional = { createdAt: sim(2, 0), createdRealAt: real(0, 3) };
+    const triggered = orderClockStamp({ ...conditional, filledAt: sim(0, 10), filledRealAt: real(0, 6) + 2_000 });
+    expect(triggered.endedByFill).toBe(true);
+    expect(filter.allowsOrder(triggered)).toBe(true);
+    expect(filter.allowsOrder(orderClockStamp({ ...conditional, cancelledAt: sim(0, 10), cancelledRealAt: real(0, 6) + 2_000 }))).toBe(false);
+    // A 遍里就成交的照样被取代
+    expect(filter.allowsOrder(orderClockStamp({ ...conditional, filledAt: sim(2, 10), filledRealAt: real(0, 4) }))).toBe(false);
   });
 });

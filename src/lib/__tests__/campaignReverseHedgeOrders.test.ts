@@ -2176,4 +2176,64 @@ describe('【用户要求】委托空单与本场操作时间对齐：TUTUSDT 20
     expect(pendingOrders).toEqual([]);
     expect(reverseHedgeOrders.map(order => order.id)).toEqual(['day1-hedge', 'day1-leftover']);
   });
+
+  it('【复核五 F1】进行中的战役当天带着主力倒回、第二天回来接着把那一遍往后打（没有再倒回）：第二天挂的对冲仍在持仓面板与委托层；第二天再倒回另起的一遍不算', async () => {
+    const REAL_DAY1 = t('2026-09-11T10:00:00.000Z');
+    const REAL_DAY2 = t('2026-09-12T09:00:00.000Z');
+    campaign.closed_at = null;
+    campaign.status = 'active';
+    journals = [{ ...liveMainLeg(), pre_real_time: iso(REAL_DAY1) }];
+    store({
+      tradeHistory: [],
+      cancelled: [
+        hedge('passA-hedge', sim(60), sim(70), { createdRealAt: REAL_DAY1 + MIN, cancelledRealAt: REAL_DAY1 + 2 * MIN }, 0.0301),
+        hedge('day2-passB-cancelled', sim(140), sim(150), {
+          createdRealAt: REAL_DAY2 + MIN,
+          cancelledRealAt: REAL_DAY2 + 2 * MIN,
+        }, 0.0298),
+        hedge('day2-rewound-replay', sim(20), sim(25), {
+          createdRealAt: REAL_DAY2 + 30 * MIN,
+          cancelledRealAt: REAL_DAY2 + 31 * MIN,
+        }, 0.0297),
+      ],
+      pending: [
+        // 当天倒回到 sim+15m，主力还开着：这一遍给它挂的对冲
+        shortPending('day1-passB-live', sim(15), REAL_DAY1 + 11 * MIN, 0.03),
+        // 第二天回来没有倒回，接着这一遍往后打
+        shortPending('day2-passB-live', sim(40), REAL_DAY2, 0.0299),
+      ],
+    });
+
+    const { pendingOrders, reverseHedgeOrders } = await getCampaignFullData(campaign.id, { heal: false });
+
+    expect(pendingOrders.map(order => order.id)).toEqual(['day1-passB-live', 'day2-passB-live']);
+    expect(reverseHedgeOrders.map(order => order.id).sort()).toEqual(['day1-passB-live', 'day2-passB-cancelled', 'day2-passB-live']);
+  });
+
+  it('【复核五 F2】A 遍挂的条件空单在倒回那一刻就触发（倒回点的价格已满足条件）：它在 B 遍开出了真实仓位，不因成交模拟时刻早于挂单被当成被放弃的时间线', async () => {
+    const REAL_PASS_A = t('2026-09-13T10:00:00.000Z');
+    const REAL_REWIND = t('2026-09-13T11:33:50.000Z');
+    journals = [mainLeg()];
+    store({
+      tradeHistory: [mainRecord({ openedRealAt: REAL_PASS_A, closedRealAt: realMine(SIM_CLOSE) })],
+      cancelled: [
+        hedge('passA-abandoned', sim(200), sim(300), {
+          createdRealAt: REAL_PASS_A + 4 * MIN,
+          cancelledRealAt: REAL_PASS_A + 5 * MIN,
+        }, 0.0297),
+        mineHedge('passB-hedge', sim(150), sim(6 * 60), 0.0298),
+      ],
+      filled: [
+        // 对冲仓位没有归类成腿：没有仓位 id 豁免，只能靠时间线判
+        shortFill('passA-cond-triggered-on-rewind', sim(120), sim(10), {
+          createdRealAt: REAL_PASS_A + 3 * MIN,
+          filledRealAt: REAL_REWIND + 2_000,
+        }, 'passA-cond-position', 0.0301),
+      ],
+    });
+
+    const { reverseHedgeOrders } = await getCampaignFullData(campaign.id, { heal: false });
+
+    expect(reverseHedgeOrders.map(order => order.id).sort()).toEqual(['passA-cond-triggered-on-rewind', 'passB-hedge']);
+  });
 });
