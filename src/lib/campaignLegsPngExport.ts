@@ -9,7 +9,7 @@ import { resolveLegExecution, type LegExitPriceCorrections } from '@/lib/campaig
 import { computeInitialMainExposureNotional } from '@/lib/campaignAnalysis';
 import { formatCampaignLeverage, resolveCampaignMainLeverage } from '@/lib/campaignMetrics';
 import { formatCampaignDisplayCode } from '@/lib/campaignCode';
-import { buildCampaignReverseOrderLegMap } from '@/lib/campaignReverseOrderAttribution';
+import { buildDisplayReverseOrderLegMap } from '@/lib/campaignReverseOrderAttribution';
 import { formatFeeCoin, sumTradeRecordFees, tradeRecordFees } from '@/lib/tradeFees';
 import { buildMainLegOrdinals } from '@/lib/campaignMainLegOrdinals';
 import { resolveMirrorTpOrderTiming } from '@/lib/campaignMirrorTpOrderTiming';
@@ -319,17 +319,12 @@ function layoutExportRow(
 export function buildCampaignLegsExportRows(input: ExportInput): CampaignLegsExportRow[] {
   const recordMap = buildTradeRecordLookup(input.tradeRecords);
   const mainLegOrdinals = buildMainLegOrdinals(input.legs);
-  const reverseOrderLegMap = buildCampaignReverseOrderLegMap(
+  // 与页面调同一个函数：导出图的归类必须和界面一致，否则 PNG 会成为第五套口径。
+  const reverseOrderLegMap = buildDisplayReverseOrderLegMap(
     input.legs,
     input.reverseHedgeOrders,
-    {
-      // 与页面完全同源：导出图的归类必须和界面一致，否则 PNG 会成为第五套口径。
-      legWindow: (leg) => {
-        const rec = leg.trade_record_id ? recordMap.get(leg.trade_record_id) ?? null : null;
-        const exec = resolveLegExecution(leg, rec, input.legExitPriceCorrections);
-        return { openMs: exec.openTime ?? null, closeMs: exec.closeTime ?? null };
-      },
-    },
+    recordMap,
+    input.legExitPriceCorrections,
   );
 
   // 与页面完全同源：导出图里的腿盈亏必须和界面上是同一个数，

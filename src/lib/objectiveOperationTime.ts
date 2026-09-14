@@ -78,8 +78,14 @@ export function tradeRecordsForJournals(journals: TradeJournal[], records: Trade
   return records.filter(record => refs.has(record.id) || Boolean(record.positionId && refs.has(record.positionId)));
 }
 
+/**
+ * 读平仓两只钟只需要这三个字段。收窄形参类型，让只拿到腿局部字段的纯函数
+ * （如 campaignOrderRealTime 的回放锚点）也能复用同一套有效性规则，不必另抄一份。
+ */
+type JournalCloseClockFields = Pick<TradeJournal, 'source' | 'post_real_close_time' | 'post_simulated_close_time'>;
+
 /** Simulated/time-machine close used by chart and replay paths. */
-export function journalSimulatedCloseTime(journal: TradeJournal): number | null {
+export function journalSimulatedCloseTime(journal: JournalCloseClockFields): number | null {
   return safeTimeMs(
     journal.post_simulated_close_time
       ?? (journal.source === 'retroactive_from_record' ? journal.post_real_close_time : null),
@@ -87,7 +93,7 @@ export function journalSimulatedCloseTime(journal: TradeJournal): number | null 
 }
 
 /** Real open-side action captured by a live pre-trade snapshot. */
-export function journalOpenOperationTime(journal: TradeJournal): number | null {
+export function journalOpenOperationTime(journal: Pick<TradeJournal, 'source' | 'pre_real_time'>): number | null {
   return journal.source === 'live' ? safeTimeMs(journal.pre_real_time) : null;
 }
 
@@ -100,7 +106,7 @@ export function journalOpenOperationTime(journal: TradeJournal): number | null {
  * authoritative.
  */
 export function journalCloseOperationTime(
-  journal: TradeJournal,
+  journal: JournalCloseClockFields,
   record?: TradeRecord | null,
 ): number | null {
   const recordTime = tradeRecordOperationTime(record);

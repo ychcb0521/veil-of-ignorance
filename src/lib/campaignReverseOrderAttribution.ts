@@ -1,6 +1,7 @@
 import type { TradeJournal } from '@/types/journal';
-import type { CampaignReverseHedgeOrder } from '@/types/trading';
+import type { CampaignReverseHedgeOrder, TradeRecord } from '@/types/trading';
 import { pickPrimaryMainLeg } from '@/lib/campaignPrimaryMainLeg';
+import { resolveLegExecution, type LegExitPriceCorrections } from '@/lib/campaignLegExecution';
 
 /**
  * 反向委托该挂在哪条腿名下。
@@ -33,8 +34,20 @@ export interface MainLegWindow {
  */
 export type MainLegTieBreak = 'size' | 'nearest-open';
 
+/**
+ * 委托最终落在哪一行。
+ *   main        —— 落在它保护的那笔主力上（风险口径用它：暴露、初始风险都以主力为锚）
+ *   latest-add  —— 仅供**展示**：加仓之后挂出的委托落在「当时最新的那次加仓」那一行，
+ *                  再加仓就接到更新的那一行后面。用户的原话是
+ *                  「加仓之后，委托单就放在加仓那一行的后面」。
+ *                  它只改变 Legs 表 / PNG 的行归属，**不得**被风险指标引用。
+ */
+export type ReverseOrderOwnerPolicy = 'main' | 'latest-add';
+
 export interface ReverseOrderAttributionOptions {
   tieBreak?: MainLegTieBreak;
+  /** 只被 buildCampaignReverseOrderLegMap 读取；createMainLegOwnerResolver 忽略它。 */
+  ownerPolicy?: ReverseOrderOwnerPolicy;
   /**
    * 取一条腿的持仓窗口。**必须与界面上那两行「开 / 平」同源**
    * （resolveLegExecution），否则会出现「委 01:00 挂在一行标着 平 23:53 的腿上」
@@ -192,12 +205,137 @@ export function createMainLegOwnerResolver(
   };
 }
 
+function isAddLeg(leg: TradeJournal): boolean {
+  return Boolean(leg.leg_role?.startsWith('main_add_'));
+}
+
+/**
+ * 委托在某一刻是否还挂着：撤单、触发都算结束；两者都没有就一直挂着。
+ * 已触发的委托**以触发时刻为准**：journalApi 给触发单写的 cancelledAt 是它开出那条对冲的平仓时刻
+ * （journalApi.ts:2606、2721），拿它当结束，会把「加仓前两分钟就已触发」的单子当成加仓时还挂着。
+ */
+function isLiveAt(order: CampaignReverseHedgeOrder, at: number): boolean {
+  const endedAt = order.status === 'triggered'
+    ? timeMs(order.triggeredAt) ?? timeMs(order.cancelledAt) ?? Number.POSITIVE_INFINITY
+    : timeMs(order.cancelledAt) ?? timeMs(order.triggeredAt) ?? Number.POSITIVE_INFINITY;
+  return endedAt > at;
+}
+
+/**
+ * 「最新加仓」展示口径的归属器。
+ *
+ * 先照旧求出主力归属 B0（时间定资格、金额定主次，一步不改），再把它**往后挪**：
+ * 加仓之后挂出的委托接到「这笔主力名下、当时还开着、开仓最晚」的那次加仓后面。
+ *
+ * 几条边界都来自实盘（TUTUSDT 2026-08-07）：
+ *   - 加仓 2 开于 18:34，委托 18:34 挂、18:35 撤——同一分钟，属于加仓 2；
+ *   - 委托 12:01 挂、15:18 撤，加仓 1 开于 12:02——为加仓预挂、加仓时还挂着，属于加仓 1；
+ *   - 委托 19:42 挂、12:01 撤——加仓 1 出生前一分钟已撤，仍属主力。
+ *
+ * 顺序按**开仓时刻**排，从不读 main_add_N 里的 N：回填、改角色之后 N 与时间并不同序。
+ */
+function createLatestAddOwnerResolver(
+  legs: TradeJournal[],
+  options: ReverseOrderAttributionOptions,
+  mainOwnerFor: (createdAtMs: number | null | undefined) => TradeJournal | null,
+): (order: CampaignReverseHedgeOrder) => TradeJournal | null {
+  const rawWindowFor = options.legWindow ?? defaultWindow;
+  // 窗口同样走 timeMs 的「> 0」规则：成交记录 `openTime: pos.openTime || 0` 会写出 0，
+  // resolveLegExecution 的 `??` 放它过去。不拦的话，这次加仓的窗口从 1970 开始，
+  // 主力开出之后的委托全被它吃掉——而这一行的「开」列只显示「—」。
+  const windowFor = (leg: TradeJournal): MainLegWindow => {
+    const w = rawWindowFor(leg);
+    return { openMs: timeMs(w.openMs), closeMs: timeMs(w.closeMs) };
+  };
+  const mainLegs = legs.filter(isMainLeg).sort((a, b) => sequence(a) - sequence(b));
+  const windows = new Map(mainLegs.map(leg => [leg.id, windowFor(leg)] as const));
+  const addLegs = mainLegs.filter(isAddLeg);
+  // 腿上没有「加在哪笔主力上」的字段：取加仓开出那一刻开着的主力（不含加仓本身）。
+  // 顺序开出的两笔主力各自的加仓因此互不串门。
+  const anchorOwnerFor = createMainLegOwnerResolver(
+    mainLegs.filter(leg => !isAddLeg(leg)),
+    { legWindow: windowFor, tieBreak: 'size' },
+  );
+  const parentOf = new Map(addLegs.map(leg => [leg.id, anchorOwnerFor(windows.get(leg.id)!.openMs)] as const));
+
+  const openOf = (leg: TradeJournal) => windows.get(leg.id)?.openMs ?? Number.NEGATIVE_INFINITY;
+  // 开仓最晚者优先；同一刻开出的按 leg_sequence 大者、再按 id，保证结果可复现。
+  const newestOpenFirst = (a: TradeJournal, b: TradeJournal) => {
+    if (openOf(a) !== openOf(b)) return openOf(b) - openOf(a);
+    const sa = a.leg_sequence ?? Number.NEGATIVE_INFINITY;
+    const sb = b.leg_sequence ?? Number.NEGATIVE_INFINITY;
+    if (sa !== sb) return sb > sa ? 1 : -1;
+    return b.id.localeCompare(a.id);
+  };
+  // 与 createMainLegOwnerResolver 的 C 支同一判据：此刻没有主力开着、之后也不再开，且至少有一笔已平。
+  const isAfterEverythingClosed = (t: number) => (
+    !mainLegs.some(leg => windowContains(windows.get(leg.id)!, t))
+    && !mainLegs.some(leg => {
+      const open = windows.get(leg.id)!.openMs;
+      return open != null && open > t;
+    })
+    && mainLegs.some(leg => {
+      const close = windows.get(leg.id)!.closeMs;
+      return close != null && close <= t;
+    })
+  );
+
+  /** 以 t 为挂出时刻求这张委托落在哪一行。t 必须是有效时间戳。 */
+  const resolveAt = (order: CampaignReverseHedgeOrder, t: number): TradeJournal | null => {
+    const base = mainOwnerFor(t);
+    if (base == null) return base;
+    const parent = isAddLeg(base) ? parentOf.get(base.id) ?? null : base;
+    if (parent == null) return base;
+
+    // 主力开出之前预挂的，仍归主力——那时还谈不上加仓。
+    const parentOpen = windows.get(parent.id)?.openMs ?? null;
+    if (parentOpen == null || t < parentOpen) return parent;
+
+    const candidates = addLegs.filter(add => {
+      const addParent = parentOf.get(add.id) ?? null;
+      const { openMs, closeMs } = windows.get(add.id)!;
+      if (openMs == null || addParent == null) return false;
+      if (addParent.id !== parent.id) {
+        // 加仓挂靠的那笔主力已经平了、加仓还开着：它仍是「最新加上去的那一行」，
+        // 接到此刻开着的主力名下——否则两笔主力并存时，大的一平，委托就从加仓行跳回小的那笔。
+        // 但只接比这笔主力**开得晚**的：先后两笔主力时，主力 1 的加仓不抢主力 2 的委托。
+        const addParentClose = windows.get(addParent.id)?.closeMs ?? null;
+        if (addParentClose == null || addParentClose > t || openMs < parentOpen) return false;
+      }
+      if (t < openMs - PRE_MAIN_LOOKBACK_MS) return false;
+      // 为这次加仓预挂的单子：必须在加仓开出那一刻还挂着，否则它从未与这次加仓共存。
+      if (t < openMs && !isLiveAt(order, openMs)) return false;
+      return closeMs == null || t < closeMs;
+    });
+    return candidates.sort(newestOpenFirst)[0] ?? parent;
+  };
+
+  return (order) => {
+    const t = timeMs(order.createdAt);
+    if (t == null) return mainOwnerFor(order.createdAt);
+
+    // 全部平完之后才挂出的：当作「最后收尾前一刻」挂出的来归。
+    // 主力与加仓常常同一刻一起平（TUTUSDT 四条腿都在 01:46），收尾前一分钟挂的落在哪一行，
+    // 收尾后挂的就接在同一行——不许因为收尾那一刻的并列靠 leg_sequence 裁决而跳到另一行。
+    if (isAfterEverythingClosed(t)) {
+      const closes = mainLegs
+        .map(leg => windows.get(leg.id)!.closeMs)
+        .filter((close): close is number => close != null && close <= t);
+      return resolveAt(order, Math.max(...closes) - 1);
+    }
+    return resolveAt(order, t);
+  };
+}
+
 export function buildCampaignReverseOrderLegMap(
   legs: TradeJournal[],
   reverseHedgeOrders: CampaignReverseHedgeOrder[],
   options: ReverseOrderAttributionOptions = {},
 ): Map<string, string> {
   const ownerFor = createMainLegOwnerResolver(legs, options);
+  const latestAddOwnerFor = options.ownerPolicy === 'latest-add'
+    ? createLatestAddOwnerResolver(legs, options, ownerFor)
+    : null;
   const hedgeLegs = legs.filter(isHedgeLeg).sort((a, b) => sequence(a) - sequence(b));
   const result = new Map<string, string>();
   const claimedHedgeLegs = new Set<string>();
@@ -222,9 +360,32 @@ export function buildCampaignReverseOrderLegMap(
       // 没有可行的对冲腿时，按它**挂出**时保护的那笔主力归类——
       // 而不是无条件塞给金额最大的那笔。
     }
-    const owner = ownerFor(order.createdAt);
+    const owner = latestAddOwnerFor ? latestAddOwnerFor(order) : ownerFor(order.createdAt);
     if (owner) result.set(order.id, owner.id);
   }
 
   return result;
+}
+
+/**
+ * Legs 表与导出 PNG 的委托归属——两处**只调这一个函数**。
+ *
+ * 此前两边各抄了一份 legWindow，逻辑再加一条「最新加仓」就得改两处，
+ * 改一处漏一处，导出图就成了又一套口径。收成一个函数后物理上不可能再分叉。
+ * 持仓窗口与这一行渲染的「开 / 平」严格同源（resolveLegExecution，含平仓价校正）。
+ */
+export function buildDisplayReverseOrderLegMap(
+  legs: TradeJournal[],
+  reverseHedgeOrders: CampaignReverseHedgeOrder[],
+  recordMap: Map<string, TradeRecord>,
+  legExitPriceCorrections: LegExitPriceCorrections = {},
+): Map<string, string> {
+  return buildCampaignReverseOrderLegMap(legs, reverseHedgeOrders, {
+    legWindow: (leg) => {
+      const rec = leg.trade_record_id ? recordMap.get(leg.trade_record_id) ?? null : null;
+      const exec = resolveLegExecution(leg, rec, legExitPriceCorrections);
+      return { openMs: exec.openTime ?? null, closeMs: exec.closeTime ?? null };
+    },
+    ownerPolicy: 'latest-add',
+  });
 }

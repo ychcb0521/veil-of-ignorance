@@ -1261,6 +1261,115 @@ describe('CandlestickChart analysis annotations', () => {
     });
   });
 
+  /**
+   * 盘面以 Legs 为准：5m 图上「委 18:34 撤 18:35」这种单子两端吸到同一根 K 线，
+   * 以前直接被跳过——Legs 与管理区列着它，盘面上找不到。
+   */
+  describe('【用户要求】同一根 K 线内挂撤的委托至少画一根 K 线宽', () => {
+    const renderLines = (data: KlineData[], lines: any[], onSelect?: (id: string) => void) => render(
+      <CandlestickChart
+        data={data}
+        symbol="BTCUSDT"
+        rawSymbol="BTCUSDT"
+        analysisMode
+        onSelectTimeBoundPriceLine={onSelect}
+        analysisAnnotations={{ timeBoundPriceLines: lines }}
+      />,
+    );
+    const segmentsAt = (price: number) => mocks.chart.createOverlay.mock.calls
+      .map(([overlay]) => overlay)
+      .filter(overlay => overlay.name === 'segment' && overlay.points?.[0]?.value === price);
+
+    it('两端吸到同一根：终点推到下一根，× 与撤单竖线落在画出的终点，仍可点选', async () => {
+      const handleSelect = vi.fn();
+      renderLines(
+        [candle(1000, 1), candle(2000, 1.2), candle(3000, 1.1)],
+        [{
+          startTime: 1100, endTime: 1200, price: 1.1, color: '#F0B90B', title: '委托空',
+          dashed: true, endMarker: 'x', orderIds: ['order-z'], selectId: 'order-z', selected: true,
+        }],
+        handleSelect,
+      );
+
+      await waitFor(() => expect(getBandOverlay()).toBeDefined());
+      const segments = segmentsAt(1.1);
+      // 光晕 + 主线
+      expect(segments).toHaveLength(2);
+      for (const overlay of segments) {
+        expect(overlay.points).toEqual([{ timestamp: 1000, value: 1.1 }, { timestamp: 2000, value: 1.1 }]);
+        overlay.onClick?.();
+        expect(handleSelect).toHaveBeenLastCalledWith('order-z');
+      }
+
+      const overlays = mocks.chart.createOverlay.mock.calls.map(([overlay]) => overlay);
+      expect(overlays.find(
+        overlay => overlay.name === 'verticalStraightLine'
+          && overlay.styles?.line?.color === '#F0B90B88'
+          && overlay.points?.[0]?.timestamp === 2000,
+      )).toBeDefined();
+      expect(getBandLabelTexts()).toContain('×');
+    });
+
+    it('起点已是最后一根：起点往前挪一根', async () => {
+      renderLines(
+        [candle(1000, 1), candle(2000, 1.2), candle(3000, 1.1)],
+        [{
+          startTime: 2990, endTime: 2995, price: 1.05, color: '#F0B90B', title: '委托空',
+          dashed: true, endMarker: 'x', orderIds: ['order-last'],
+        }],
+      );
+
+      await waitFor(() => expect(getBandOverlay()).toBeDefined());
+      expect(segmentsAt(1.05)).toHaveLength(1);
+      expect(segmentsAt(1.05)[0].points).toEqual([{ timestamp: 2000, value: 1.05 }, { timestamp: 3000, value: 1.05 }]);
+    });
+
+    it('只放宽委托线：已平对冲腿故意给的零长度线（endTime = openTime）、同一根 K 线里的非委托线，照旧不画也不出标题', async () => {
+      renderLines(
+        [candle(1000, 1), candle(2000, 1.2), candle(3000, 1.1), candle(4000, 1.15)],
+        [
+          // 页面 buildChartArtifacts：已平的对冲腿 endTime = openTime
+          { startTime: 2000, endTime: 2000, price: 1.15, color: '#5BA3FF', title: 'Hr1' },
+          // 反事实分支 placed_at === triggered_at
+          { startTime: 3000, endTime: 3000, price: 1.12, color: '#B080FF', title: 'CF-Hr', dashed: true },
+          // 正时长但吸到同一根的非委托线：沿用旧口径
+          { startTime: 1100, endTime: 1200, price: 1.08, color: '#5BA3FF', title: 'Ha' },
+          // 零长度的委托线同样不画（委托线由 campaignReverseOrderLines 保证至少 +1ms）
+          { startTime: 2000, endTime: 2000, price: 1.02, color: '#F0B90B', title: '委托空', orderIds: ['order-zero'] },
+          // 对照：同样吸到一根、带 orderIds 的委托线要画
+          { startTime: 1100, endTime: 1101, price: 1.04, color: '#F0B90B', title: '委托空', dashed: true, orderIds: ['order-ok'] },
+        ],
+      );
+
+      await waitFor(() => expect(getBandOverlay()).toBeDefined());
+      expect(segmentsAt(1.15)).toHaveLength(0);
+      expect(segmentsAt(1.12)).toHaveLength(0);
+      expect(segmentsAt(1.08)).toHaveLength(0);
+      expect(segmentsAt(1.02)).toHaveLength(0);
+      expect(segmentsAt(1.04)).toHaveLength(1);
+      const labels = getBandLabelTexts();
+      expect(labels).not.toContain('Hr1');
+      expect(labels).not.toContain('CF-Hr');
+      expect(labels).not.toContain('Ha');
+    });
+
+    it('整段落在 K 线范围之外的线仍不画，不会被钉到图的边缘', async () => {
+      renderLines(
+        [candle(1000, 1), candle(2000, 1.2), candle(3000, 1.1)],
+        [
+          { startTime: 1000, endTime: 3000, price: 1.0, color: '#F0B90B', title: '委托空', dashed: true },
+          { startTime: 100, endTime: 200, price: 0.9, color: '#F0B90B', title: '委托空', dashed: true, orderIds: ['before'] },
+          { startTime: 9000, endTime: 9500, price: 1.3, color: '#F0B90B', title: '委托空', dashed: true, orderIds: ['after'] },
+        ],
+      );
+
+      await waitFor(() => expect(getBandOverlay()).toBeDefined());
+      expect(segmentsAt(1.0)).toHaveLength(1);
+      expect(segmentsAt(0.9)).toHaveLength(0);
+      expect(segmentsAt(1.3)).toHaveLength(0);
+    });
+  });
+
   it('同一时间重复的委托空标注和竖线会合并为一个', async () => {
     render(
       <CandlestickChart

@@ -290,6 +290,56 @@ describe('buildCampaignReverseOrderPriceLines', () => {
 
     expect(lines).toEqual([]);
   });
+
+  /**
+   * 盘面以 Legs 为准：Legs 列出的每一张委托都得有一条线。
+   * 同一秒挂出又撤掉的委托以前在去重时被 `endTime <= startTime` 静默丢掉。
+   */
+  describe('【用户要求】同一秒挂撤的委托也要画出来', () => {
+    it('委托与撤单同一秒：仍产出一条带 × 的线，时长取最小正值', () => {
+      const createdAt = t('2026-08-08T10:34:00.000Z');
+      const lines = buildCampaignReverseOrderPriceLines([
+        makeShortOrder({ id: 'instant', status: 'cancelled', createdAt, cancelledAt: createdAt }),
+      ], [], t('2026-08-08T18:00:00.000Z'));
+
+      expect(lines).toEqual([expect.objectContaining({
+        title: '委托空',
+        startTime: createdAt,
+        endMarker: 'x',
+        dashed: true,
+        orderIds: ['instant'],
+      })]);
+      expect(lines[0].endTime).toBeGreaterThan(lines[0].startTime);
+    });
+
+    it('撤单时刻早于委托时刻的脏记录也不丢', () => {
+      const createdAt = t('2026-08-08T10:34:05.000Z');
+      const lines = buildCampaignReverseOrderPriceLines([
+        makeShortOrder({ id: 'dirty', status: 'cancelled', createdAt, cancelledAt: createdAt - 2_000 }),
+      ], [], t('2026-08-08T18:00:00.000Z'));
+      expect(lines).toHaveLength(1);
+      expect(lines[0].orderIds).toEqual(['dirty']);
+    });
+
+    it('同价同一秒的两张合并成一条，两张 id 都在', () => {
+      const createdAt = t('2026-08-08T10:34:00.000Z');
+      const lines = buildCampaignReverseOrderPriceLines([
+        makeShortOrder({ id: 'twin-1', status: 'cancelled', createdAt, cancelledAt: createdAt }),
+        makeShortOrder({ id: 'twin-2', status: 'cancelled', createdAt, cancelledAt: createdAt }),
+      ], [], t('2026-08-08T18:00:00.000Z'));
+      expect(lines).toHaveLength(1);
+      expect(lines[0].orderIds).toEqual(['twin-1', 'twin-2']);
+    });
+
+    it('在战役最后一刻挂出即触发的委托，也至少留一段「触发空」', () => {
+      const moment = t('2026-08-08T10:34:00.000Z');
+      const lines = buildCampaignReverseOrderPriceLines([
+        makeShortOrder({ id: 'last-moment', status: 'triggered', createdAt: moment, triggeredAt: moment, cancelledAt: moment }),
+      ], [], moment);
+      expect(lines).toEqual([expect.objectContaining({ title: '触发空', startTime: moment, orderIds: ['last-moment'] })]);
+      expect(lines[0].endTime).toBeGreaterThan(lines[0].startTime);
+    });
+  });
 });
 
 /**

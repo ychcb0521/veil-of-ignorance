@@ -73,10 +73,15 @@ import { isHistoricalCampaign, ruleCooldownRemainingMs } from "@/types/journal";
 import { campaignStatusFromRealizedPnl, computeCampaignRealizedPnl } from "@/lib/campaignRealizedPnl";
 import { queueSimStatePush } from '@/lib/simStateSync';
 import {
+  bestOrderRealStamp,
   buildReplaySessionFilter,
   campaignRealTimeWindow,
+  legCloseReplayEvent,
+  legOpenReplayEvent,
+  orderClockStamp,
   orderWithinRealWindow,
   type ReplayEvent,
+  type ReplayEventKind,
 } from '@/lib/campaignOrderRealTime';
 import type {
   PendingOrder,
@@ -2417,7 +2422,8 @@ export async function getCampaignFullData(
    * 这是时间机器——同一段历史行情能回放两次，两次的委托在模拟时间轴上完全重合，
    * 上面的 inWindow 会把两场的单子全部收进来（WLDUSDT 2026-05-26 的事故）。
    * 人一次只能做一件事，两次回放的现实时刻必然分开：委托的真实创建时刻
-   * 必须落在本场已选中成交的真实区间内。老数据没有真实时刻 → 放行，退回模拟窗口。
+   * 必须落在本场已选中成交的真实区间内。
+   * 现在只作兜底：下面的回放分段建得起来时以分段为准（见 belongsToCampaignTimeline）。
    */
   const realWindow = campaignRealTimeWindow({
     tradeRecords,
@@ -2425,49 +2431,85 @@ export async function getCampaignFullData(
     campaignClosed: Boolean(campaign.closed_at),
   });
   /**
-   * 第三道归属：与本场成交的**操作时间**对齐到同一次回放（见 buildReplaySessionFilter）。
+   * 第三道归属：与本场的**操作时间**对齐到同一次回放（见 buildReplaySessionFilter）。
    * realWindow 依赖 openedRealAt，回填腿 + 老成交只有 closedRealAt 时它是 null、整道过滤失效——
    * 另一次回放同一段行情的委托因此成对混进盘面。这里只用每个事件自带的「真实时刻 + 模拟时刻」，
-   * 在模拟时间跳回去的地方切开回放，保留含本场已选成交操作的那几段。
+   * 在模拟时间跳回去的地方切开回放，保留含本场操作的那几段，再按取代 / 盖章时代规则逐张判。
    */
   const selectedRecordIds = new Set(tradeRecords.map(record => record.id));
   const replayEvents: ReplayEvent[] = [];
   const pushReplayEvent = (
     realAt: number | null | undefined,
     simAt: number | null | undefined,
+    kind: ReplayEventKind,
     anchor = false,
+    unstampedOpen = false,
   ) => {
-    if (typeof realAt === 'number' && typeof simAt === 'number') replayEvents.push({ realAt, simAt, anchor });
+    if (typeof realAt === 'number' && typeof simAt === 'number') {
+      replayEvents.push({ realAt, simAt, anchor, kind, ...(unstampedOpen ? { unstampedOpen } : {}) });
+    }
   };
   for (const record of tradeHistory) {
     if (record.symbol !== campaign.symbol) continue;
     const anchor = selectedRecordIds.has(record.id);
-    pushReplayEvent(record.openedRealAt, record.openTime, anchor);
-    pushReplayEvent(record.closedRealAt, record.closeTime, anchor);
+    pushReplayEvent(record.openedRealAt, record.openTime, 'record-open', anchor);
+    // 没有 openedRealAt 的成交是盖章上线之前开的仓：它的平仓所在那一段跨过了上线（盖章时代规则的放行条件）
+    const unstampedOpen = !(typeof record.openedRealAt === 'number' && record.openedRealAt > 0);
+    pushReplayEvent(record.closedRealAt, record.closeTime, 'record-close', anchor, unstampedOpen);
+  }
+  /**
+   * 本场腿自己的平仓操作也是锚点：本地成交记录被清掉（清除标的数据只删 trade_history、不删委托快照）
+   * 或被云端水合覆盖时，没有它分段就建不起来、窗口里的委托全数放行，而 Legs 表照样显示这些「操作」时间。
+   * 本地成交已带 closedRealAt 的腿不重复加——界面上它的操作时间就是那条成交的，锚点已经在上面了。
+   * 实时腿的「记录决策」时刻同样是本场操作：进行中的战役还没有任何平仓锚点，靠它才建得起分段（见 legOpenReplayEvent）。
+   */
+  for (const leg of legs) {
+    const openEvent = legOpenReplayEvent(leg);
+    if (openEvent) replayEvents.push(openEvent);
+    const record = leg.trade_record_id
+      ? tradeRecords.find(item => item.id === leg.trade_record_id || item.positionId === leg.trade_record_id)
+      : undefined;
+    if (tradeRecordOperationTime(record) != null) continue;
+    const event = legCloseReplayEvent(leg);
+    if (event) replayEvents.push(event);
   }
   for (const order of ordersMap[campaign.symbol] ?? []) {
-    pushReplayEvent(order.createdRealAt, order.createdAt);
+    pushReplayEvent(order.createdRealAt, order.createdAt, 'order-create');
   }
   for (const order of cancelledOrders) {
     if (order.symbol !== campaign.symbol) continue;
-    pushReplayEvent(order.createdRealAt, order.createdAt);
-    pushReplayEvent(order.cancelledRealAt, order.cancelledAt);
+    pushReplayEvent(order.createdRealAt, order.createdAt, 'order-create');
+    pushReplayEvent(order.cancelledRealAt, order.cancelledAt, 'order-end');
   }
   for (const order of filledOrders) {
     if (order.symbol !== campaign.symbol) continue;
-    pushReplayEvent(order.createdRealAt, order.createdAt);
-    pushReplayEvent(order.filledRealAt, order.filledAt);
+    pushReplayEvent(order.createdRealAt, order.createdAt, 'order-create');
+    pushReplayEvent(order.filledRealAt, order.filledAt, 'order-end');
   }
-  const replaySession = buildReplaySessionFilter(replayEvents);
-  const inRealWindow = (t: number | null | undefined) => (
-    orderWithinRealWindow(t, realWindow) && (replaySession?.allows(t) ?? true)
+  // 进行中的战役：仓位还开着，倒回之后同一次坐下来挂的单子是本场的延续（见 buildReplaySessionFilter 规则 0）
+  const replaySession = buildReplaySessionFilter(replayEvents, { campaignOpen: !campaign.closed_at });
+  /**
+   * 能分段就只用分段（含取代与盖章时代规则），不再叠加 realWindow：后者的 5 分钟是**现实**回看，
+   * 挂好前置对冲后停下来想了 5 分钟以上才开主力，同一段回放里的合法对冲会被它踢掉。
+   * 分段建不起来（本场没有任何带真实时刻的操作）时才退回 realWindow。
+   * live：委托至今仍挂着——它活过了之后每一次倒回，不会被重走取代（见 orderClockStamp）。
+   */
+  const belongsToCampaignTimeline = (
+    order: Parameters<typeof orderClockStamp>[0],
+    options: { live?: boolean } = {},
+  ) => (
+    replaySession
+      ? replaySession.allowsOrder(orderClockStamp(order, options))
+      : orderWithinRealWindow(bestOrderRealStamp(order), realWindow)
   );
+  const isLivePendingOrder = (order: PendingOrder) =>
+    order.status === 'NEW' || order.status === 'PENDING' || order.status === 'ACTIVE';
   // 持仓面板 / 结束建议用的挂单也按挂单时间归属，避免同标的另一场战役的实时挂单混进本战役。
   const pendingOrders = Object.entries(ordersMap)
     .flatMap(([symbol, orders]) => symbol === campaign.symbol ? orders : [])
-    .filter(order => (order.status === 'NEW' || order.status === 'PENDING' || order.status === 'ACTIVE')
+    .filter(order => isLivePendingOrder(order)
       && inWindow(order.createdAt)
-      && inRealWindow(order.createdRealAt));
+      && belongsToCampaignTimeline(order, { live: true }));
 
   // 黄色委托层只记录「开仓性质的委托空单」；止盈/止损等平仓委托不进入这里。
   const isPositionClosingOrder = (order: Pick<PendingOrder | CancelledOrderSnapshot | FilledOrderSnapshot, 'side'> & {
@@ -2583,12 +2625,22 @@ export async function getCampaignFullData(
     // 老数据里 filled_orders 与 trade_history 的数量口径可能不同；时间+价格已经足够把触发快照接回真实平仓记录。
     return resolveFilledOrderCloseRecord(order, legacyCandidates);
   };
+  /**
+   * 成交开出的仓位就是本场选中的成交：这张委托就是本场的，不再过回放时间线。
+   * 仓位 id 每次开仓新生成，另一次回放的委托不可能撞上；而跨过倒回被带进下一遍的对冲仓位，
+   * 它的开仓委托成交在上一遍、模拟时刻又被下一遍重走过，按取代规则会被误判成被放弃的时间线。
+   * 成交快照记的是这笔成交自己开出的仓位 id；并进已有同向仓位时合并保留最早那笔的 id，
+   * 这笔的 id 只留在平仓记录的 fillId 上——两个都要认，否则两笔以上凑成的对冲仓位会丢掉后面几笔。
+   */
+  const selectedPositionIds = new Set(
+    tradeRecords.flatMap(record => [record.positionId, record.fillId]).filter((id): id is string => Boolean(id)),
+  );
   const triggeredReverseOrders = filledOrders
     .filter(order =>
       order.symbol === campaign.symbol &&
       isOpeningShortOrder(order) &&
       inWindow(order.createdAt) &&
-      inRealWindow(order.createdRealAt)
+      ((order.positionId != null && selectedPositionIds.has(order.positionId)) || belongsToCampaignTimeline(order))
     )
     .map(order => {
       const record = findRecordForFilledOrder(order);
@@ -2618,6 +2670,17 @@ export async function getCampaignFullData(
       .map(event => event.pending_order_id)
       .filter((id): id is string => Boolean(id)),
   );
+  const orderSnapshotsById = new Map<string, { order: Parameters<typeof belongsToCampaignTimeline>[0]; live: boolean }>();
+  for (const order of ordersMap[campaign.symbol] ?? []) {
+    if (order.id) orderSnapshotsById.set(order.id, { order, live: isLivePendingOrder(order) });
+  }
+  // 撤单 / 成交快照后写、覆盖同 id 的挂单：委托已经结束了
+  for (const order of [
+    ...cancelledOrders.filter(order => order.symbol === campaign.symbol),
+    ...filledOrders.filter(order => order.symbol === campaign.symbol),
+  ]) {
+    if (order.id) orderSnapshotsById.set(order.id, { order, live: false });
+  }
   const eventRecoveredReverseOrders = Array.from(eventOrderIds)
     .map((orderId): CampaignReverseHedgeOrder | null => {
       const events = campaign.actual_evolution
@@ -2641,6 +2704,11 @@ export async function getCampaignFullData(
       if (createdAt == null || !inWindow(createdAt) || price == null || !Number.isFinite(price) || price <= 0) {
         return null;
       }
+      // 本地还留着同 id 的委托快照：与快照来源的委托同一道归属，同一张单不能两条路径两种结论。
+      // 没有快照：这张单只记在本场自己的事件流里，本身就是本场的证据（与上面仓位 id 的豁免同理），
+      // 事件时刻只有模拟钟、判不了回放时间线，不能拿「无真实时刻」把它当成上线前的别场委托踢掉。
+      const snapshot = orderSnapshotsById.get(orderId);
+      if (snapshot && !belongsToCampaignTimeline(snapshot.order, { live: snapshot.live })) return null;
 
       const record = ownerLeg?.trade_record_id
         ? tradeRecords.find(item =>
@@ -2729,7 +2797,7 @@ export async function getCampaignFullData(
         order.symbol === campaign.symbol &&
         isOpeningShortOrder(order) &&
         inWindow(order.createdAt) &&
-        inRealWindow(order.createdRealAt)
+        belongsToCampaignTimeline(order)
       )
       .map(order => ({
         id: order.id,

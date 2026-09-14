@@ -4,7 +4,7 @@ import { LegRoleChip } from '@/components/journal/LegRoleChip';
 import { resolveLegExecution, type LegExitPriceCorrections } from '@/lib/campaignLegExecution';
 import { HEDGE_TYPE_LABELS } from '@/lib/hedgeTypes';
 import { buildTradeRecordLookup, journalOperationTime } from '@/lib/objectiveOperationTime';
-import { buildCampaignReverseOrderLegMap } from '@/lib/campaignReverseOrderAttribution';
+import { buildDisplayReverseOrderLegMap } from '@/lib/campaignReverseOrderAttribution';
 import { buildMainLegOrdinals } from '@/lib/campaignMainLegOrdinals';
 import { resolveMirrorTpOrderTiming } from '@/lib/campaignMirrorTpOrderTiming';
 import type { CampaignEvent, TradeJournal } from '@/types/journal';
@@ -207,16 +207,10 @@ export function CampaignLegsList({
     return sumTradeRecordFees(records);
   }, [legs, recordMap]);
 
+  // 加仓之后挂出的委托接在最新那次加仓的行后面；持仓窗口与这一行渲染的「开 / 平」严格同源。
+  // 与导出 PNG 调的是同一个函数，两处不可能再各算各的。
   const reverseOrderLegMap = useMemo(
-    () => buildCampaignReverseOrderLegMap(legs, reverseHedgeOrders, {
-      // 与这一行渲染的「开 / 平」严格同源。若归类用一套时间、显示用另一套，
-      // 就会出现「委 01:00 挂在一行标着 平 23:53 的腿上」——同一类错配换个位置再来一次。
-      legWindow: (leg) => {
-        const rec = leg.trade_record_id ? recordMap.get(leg.trade_record_id) ?? null : null;
-        const exec = resolveLegExecution(leg, rec, legExitPriceCorrections);
-        return { openMs: exec.openTime ?? null, closeMs: exec.closeTime ?? null };
-      },
-    }),
+    () => buildDisplayReverseOrderLegMap(legs, reverseHedgeOrders, recordMap, legExitPriceCorrections),
     [legs, reverseHedgeOrders, recordMap, legExitPriceCorrections],
   );
 
@@ -417,7 +411,7 @@ export function CampaignLegsList({
                   })()}
                   {/* 委托列：多条卡片会把行撑得很高。限高 + 内部滚动，
                       让各行高度趋于一致，同时一条委托都不丢。 */}
-                  <div className="max-h-[152px] max-w-[300px] space-y-1 overflow-y-auto pr-1 font-sans">
+                  <div data-testid={`leg-orders-${leg.id}`} className="max-h-[152px] max-w-[300px] space-y-1 overflow-y-auto pr-1 font-sans">
                     {mirrorTpTiming && (
                       <div
                         className="rounded border border-[#F0B90B]/25 bg-[#F0B90B]/5 px-2 py-1 leading-tight"
@@ -435,6 +429,7 @@ export function CampaignLegsList({
                       reverseOrdersForLeg.map(order => (
                         <div
                           key={order.id}
+                          data-order-id={order.id}
                           title={`委 ${fmtClock(order.createdAt)}${order.status === 'triggered' ? ` · 触 ${fmtClock(order.triggeredAt)}` : ''} · ${order.status === 'triggered' ? '平' : '撤'} ${order.cancelledAt ? fmtClock(order.cancelledAt) : '—'}`}
                           className="group rounded border border-border/50 bg-muted/30 px-2 py-1 leading-tight"
                         >

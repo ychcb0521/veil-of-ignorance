@@ -3,6 +3,17 @@ import type { CampaignReverseHedgeOrder, TradeRecord } from '@/types/trading';
 
 const REVERSE_ORDER_RECORD_MATCH_MS = 60_000;
 
+/**
+ * 同一秒里挂出又撤掉（或撤单时刻早于委托时刻的脏记录）的委托，给它一个最小的正时长。
+ * 以前这类线在去重时被 `endTime <= startTime` 静默丢掉：Legs 列着它，盘面上却没有。
+ * 1 毫秒足够让它成为一条合法的线段，盘面再按「至少一根 K 线宽」把它画出来。
+ */
+const MIN_ORDER_SEGMENT_MS = 1;
+
+function atLeastMinSegmentEnd(startTime: number, endTime: number): number {
+  return endTime > startTime ? endTime : startTime + MIN_ORDER_SEGMENT_MS;
+}
+
 export function isDisplayableReverseHedgeOrder(order: CampaignReverseHedgeOrder) {
   return order.side === 'SHORT' && Number.isFinite(order.price) && order.price > 0;
 }
@@ -69,6 +80,7 @@ export function buildCampaignReverseOrderPriceLines(
         const explicitEndTime = order.cancelledAt
           ?? (matchedRecord?.closeTime && matchedRecord.closeTime > triggeredAt ? matchedRecord.closeTime : null);
         const endTime = explicitEndTime != null && explicitEndTime > triggeredAt ? explicitEndTime : fallbackEnd;
+        const solidStart = Math.max(order.createdAt, triggeredAt);
         const lines: TimeBoundPriceLine[] = [];
         if (Number.isFinite(triggeredAt) && triggeredAt > order.createdAt) {
           lines.push({
@@ -82,12 +94,13 @@ export function buildCampaignReverseOrderPriceLines(
             orderIds: [order.id],
           });
         }
-        if (Number.isFinite(endTime) && endTime > triggeredAt) {
+        // 在战役最后一刻才触发（没有晚于触发的结束时刻可用）的，也至少留一段——不许整张委托从盘面上消失。
+        if (Number.isFinite(endTime) && Number.isFinite(solidStart)) {
           lines.push({
             price: order.price,
             color: '#F0B90B',
-            startTime: Math.max(order.createdAt, triggeredAt),
-            endTime,
+            startTime: solidStart,
+            endTime: atLeastMinSegmentEnd(solidStart, endTime),
             dashed: false,
             endMarker: null,
             title: '触发空',
@@ -100,7 +113,7 @@ export function buildCampaignReverseOrderPriceLines(
         price: order.price,
         color: '#F0B90B',
         startTime: order.createdAt,
-        endTime: order.cancelledAt ?? fallbackEnd,
+        endTime: atLeastMinSegmentEnd(order.createdAt, order.cancelledAt ?? fallbackEnd),
         dashed: true,
         endMarker: order.status === 'cancelled' && order.cancelledAt ? ('x' as const) : null,
         title: '委托空',

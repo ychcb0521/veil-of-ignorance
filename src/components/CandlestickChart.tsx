@@ -166,6 +166,8 @@ export interface AnalysisTimeBoundPriceLine extends AnalysisPriceLine {
   endTime: number;
   dashed?: boolean;
   endMarker?: "x" | null;
+  /** 这条线画的是哪几张委托。带了它，两端吸到同一根 K 线时仍至少画一根 K 线宽（盘面以 Legs 为准）。 */
+  orderIds?: string[];
   /** 设了才可点选：点中这条线时把 selectId 回传给 onSelectTimeBoundPriceLine。 */
   selectId?: string;
   /** 被选中：加粗并加一道同色光晕，与外部列表的高亮同步。 */
@@ -1590,7 +1592,7 @@ function CandlestickChartComponent({
     const lastValue = newest.close;
     const formatPrice = (value: number) => value.toFixed(pricePrecision);
     const clampTime = (time: number) => Math.min(Math.max(time, minTime), maxTime);
-    const bindTimeToCandle = (time: number) => {
+    const bindIndexToCandle = (time: number) => {
       const target = clampTime(time);
       let low = 0;
       let high = nativeData.length - 1;
@@ -1601,11 +1603,11 @@ function CandlestickChartComponent({
       }
       const rightIndex = low;
       const leftIndex = Math.max(0, rightIndex - 1);
-      const dataIndex = Math.abs(nativeData[leftIndex].timestamp - target) <= Math.abs(nativeData[rightIndex].timestamp - target)
+      return Math.abs(nativeData[leftIndex].timestamp - target) <= Math.abs(nativeData[rightIndex].timestamp - target)
         ? leftIndex
         : rightIndex;
-      return nativeData[dataIndex].timestamp;
     };
+    const bindTimeToCandle = (time: number) => nativeData[bindIndexToCandle(time)].timestamp;
     const visibleMarkerCandidates = (analysisAnnotations.markers ?? []).filter(
       (m) => Number.isFinite(m.price) && m.time >= minTime && m.time <= maxTime,
     ).map(marker => ({ ...marker, time: bindTimeToCandle(marker.time) }));
@@ -1663,9 +1665,28 @@ function CandlestickChartComponent({
 
     for (const line of analysisAnnotations.timeBoundPriceLines ?? []) {
       if (!Number.isFinite(line.price)) continue;
-      const startTime = bindTimeToCandle(line.startTime);
-      const endTime = bindTimeToCandle(line.endTime);
-      if (endTime <= startTime) continue;
+      // 原始时长 ≤ 0 的线照旧不画：已平的对冲腿故意给 endTime = openTime（只留竖线与标记，不要横线），
+      // 同时刻的反事实线也是如此。委托线在 campaignReverseOrderLines 里已保证至少 +1ms，不受影响。
+      if (!Number.isFinite(line.startTime) || !Number.isFinite(line.endTime) || line.endTime <= line.startTime) continue;
+      // 整段落在已提交的 K 线之外：不画。否则下面的「至少一根 K 线宽」会把它钉在图的边缘。
+      if (line.endTime < minTime || line.startTime > maxTime) continue;
+      let startIndex = bindIndexToCandle(line.startTime);
+      let endIndex = bindIndexToCandle(line.endTime);
+      if (endIndex <= startIndex) {
+        // 同一根 K 线里挂出又撤掉的委托（5m 图上 委 18:34 撤 18:35）两端吸到同一根上。
+        // 以前直接跳过——Legs 与管理区列着它、盘面上却找不到。盘面以 Legs 为准：
+        // 至少画一根 K 线宽，终点推到下一根；起点已是最后一根时改为起点往前挪一根。
+        // 只对委托线（带 orderIds）这样做：别的线沿用旧口径，免得凭空多出一截短线和重复的标题。
+        if (!line.orderIds?.length || nativeData.length < 2) continue;
+        if (startIndex < nativeData.length - 1) {
+          endIndex = startIndex + 1;
+        } else {
+          startIndex -= 1;
+          endIndex = startIndex + 1;
+        }
+      }
+      const startTime = nativeData[startIndex].timestamp;
+      const endTime = nativeData[endIndex].timestamp;
       const color = line.dim && !line.selected ? `${line.color}55` : line.color;
       const selectId = line.selectId;
       // lock 只禁拖动，点击照常派发；klinecharts 线段的命中容差是 2px。
