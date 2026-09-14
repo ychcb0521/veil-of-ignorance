@@ -242,7 +242,11 @@ function buildLedger(
     return {
       time: record.closeTime,
       operationTime: realTime(record.closedRealAt),
-      mirrorProfit: record.exit_method === 'tp1' || leg.leg_role === 'mirror_tp',
+      // 有成交记录就只认记录上的退出方式，与计算器 detectBankedMirrorProfit 同一判据。
+      // 不能再看 leg_role：引擎把同向成交合并成一个仓位，手动 / 止损减仓按成交占比拆到每一笔，
+      // 镜像腿因此会分到一片正利润——那不是镜像止盈，混进 G 会让 Legs 比计算器多放出上千币。
+      // leg_role 兜底只留给没有记录、只剩复盘快照的腿（见上方 records.length === 0 分支）。
+      mirrorProfit: record.exit_method === 'tp1',
       coins: finite(closedCoins),
       usd,
       coin,
@@ -497,17 +501,24 @@ export function formatAddSizingNotional(value: number | null): string {
 }
 
 /** 读屏 / aria-label 用的完整说明。页面不挂悬浮框（用户要求撤掉 Legs 单元格的提示框）。 */
+const UNKNOWN_REASON_TEXT: Record<AddSizingUnknownReason, string> = {
+  no_direction: '加仓腿没有多空方向',
+  no_open_time: '加仓价、名义或时刻缺失',
+  no_entry_price: '加仓价、名义或时刻缺失',
+  no_position_size: '加仓价、名义或时刻缺失',
+  no_stop_line: '加仓时没有挂在亏损侧的反向委托，读不到止损线 S₁',
+  old_leg_incomplete: '旧仓有腿缺开仓价或名义，浮盈垫算不准',
+  non_finite: '计算结果不是有限数',
+};
+
 export function describeAddSizingVerdict(verdict: AddSizingVerdict): string {
-  const n = (value: number | null) => (value == null ? '—' : value.toFixed(2));
+  const n = (value: number | null) => (value == null ? '—' : `${value.toFixed(2)} U`);
   if (verdict.status === 'unknown') {
-    const reason = verdict.reason === 'no_stop_line'
-      ? '加仓时没有挂在亏损侧的反向委托，读不到止损线 S₁'
-      : verdict.reason === 'old_leg_incomplete'
-        ? '旧仓有腿缺开仓价或名义，浮盈垫算不准'
-        : '加仓价、名义或时刻缺失';
+    const reason = verdict.reason ? UNKNOWN_REASON_TEXT[verdict.reason] : '加仓价、名义或时刻缺失';
     return `加仓校验：无法判断——${reason}`;
   }
-  const detail = `退回 S₁ ${verdict.s1 ?? '—'} 时，旧仓浮盈垫 ${n(verdict.cushion)} + 已落袋 ${n(verdict.banked)} = 可用 ${n(verdict.required)}；新加仓最大亏损 ${n(verdict.maxLoss)}；Plan B 加仓上限 ${formatAddSizingCoinQuantity(verdict.maxAllowedCoins)} 币（${formatAddSizingNotional(verdict.maxAllowedNotional)} U 名义仓位）`;
+  // 与点开红叉后的计算框同一套写法：可用额在 max(0,·) 处截断，金额带单位
+  const detail = `退回 S₁ ${verdict.s1 ?? '—'} 时，旧仓浮盈垫 Y₁ ${n(verdict.cushion)} + 已落袋 G ${n(verdict.banked)}，可用 max(0, Y₁ + G) = ${n(verdict.required == null ? null : Math.max(0, verdict.required))}；新加仓最大亏损 ${n(verdict.maxLoss)}；Plan B 加仓上限 ${formatAddSizingCoinQuantity(verdict.maxAllowedCoins)} 币（${formatAddSizingNotional(verdict.maxAllowedNotional)} U 名义仓位）`;
   return verdict.status === 'ok'
     ? `加仓校验：仓位合规。${detail}`
     : `加仓校验：仓位过大，缺 ${n(verdict.shortfall)}。${detail}`;

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { computeCushionAdd } from '@/lib/addSizing';
-import { evaluateCampaignAddSizing, formatAddSizingShortfall } from '@/lib/campaignAddSizingCheck';
+import { computeCushionAdd, computePlanBCoverageAtS1, detectBankedMirrorProfit } from '@/lib/addSizing';
+import { describeAddSizingVerdict, evaluateCampaignAddSizing, formatAddSizingShortfall } from '@/lib/campaignAddSizingCheck';
+import { pickBookLine } from '@/lib/hedgeLines';
 import { computeCampaignRealizedPnl } from '@/lib/campaignRealizedPnl';
 import { buildCloseRecords } from '@/lib/tradingSettlement';
 import type { TradeJournal } from '@/types/journal';
@@ -245,7 +246,7 @@ describe('加仓校验：浮盈垫 + 落袋 ≥ 新腿退回 S₁ 的亏损', ()
     const record = {
       id: 'mirror-rec', symbol: 'TUTUSD_PERP', side: 'LONG', type: 'MARKET', action: 'CLOSE',
       settlementMode: 'coin', entryPrice: 1, exitPrice: 1.2, quantity: 500, leverage: 10,
-      pnl: 500, pnlCoin: 450, fee: 0, slippage: 0,
+      pnl: 500, pnlCoin: 450, fee: 0, slippage: 0, exit_method: 'tp1',
       openTime: T0, closeTime: T0 + 60 * MIN,
     } as TradeRecord;
     const legs = [
@@ -310,19 +311,19 @@ describe('【复核】旧仓与落袋按成交记录逐刀读，不看腿的「�
       // 模拟开平时刻与本轮完全重合，但真实操作发生在本轮持仓之前：必须排除。
       record({
         id: 'old-mirror-rec', positionId: 'old-mirror-rec', fillId: 'old-mirror-rec', quantity: 5_000,
-        openTime: T0, closeTime: T0 + 60 * MIN, pnl: 900,
+        openTime: T0, closeTime: T0 + 60 * MIN, pnl: 900, exit_method: 'tp1',
         openedRealAt: holdingRealStart - 24 * 60 * MIN,
         closedRealAt: holdingRealStart - 23 * 60 * MIN,
       }),
       record({
         id: 'current-mirror-rec', positionId: 'current-mirror-rec', fillId: 'current-mirror-rec', quantity: 5_000,
-        openTime: T0, closeTime: T0 + 60 * MIN, pnl: 500,
+        openTime: T0, closeTime: T0 + 60 * MIN, pnl: 500, exit_method: 'tp1',
         openedRealAt: holdingRealStart, closedRealAt: currentTpReal,
       }),
       // 模拟时刻同样落在加仓之前，但真实操作发生在加仓之后：历史校验不能倒灌未来利润。
       record({
         id: 'future-mirror-rec', positionId: 'future-mirror-rec', fillId: 'future-mirror-rec', quantity: 5_000,
-        openTime: T0, closeTime: T0 + 60 * MIN, pnl: 700,
+        openTime: T0, closeTime: T0 + 60 * MIN, pnl: 700, exit_method: 'tp1',
         openedRealAt: holdingRealStart, closedRealAt: addReal + 10 * MIN,
       }),
       record({
@@ -514,7 +515,7 @@ describe('【复核】旧仓与落袋按成交记录逐刀读，不看腿的「�
   it('币本位落袋跟着平仓价校正走：与 Legs「盈亏」列同一个数', () => {
     const rec = record({
       id: 'mirror-rec', symbol: 'TUTUSD_PERP', settlementMode: 'coin', contracts: 500, contractSizeUsd: 10, quantity: 500,
-      entryPrice: 1, exitPrice: 1.2, pnl: 1_000, pnlCoin: 5_000 * (1 - 1 / 1.2), closeTime: T0 + 60 * MIN,
+      entryPrice: 1, exitPrice: 1.2, pnl: 1_000, pnlCoin: 5_000 * (1 - 1 / 1.2), closeTime: T0 + 60 * MIN, exit_method: 'tp1',
     });
     const legs = [
       mainLeg({ pre_settlement_mode: 'coin' }),
@@ -537,7 +538,7 @@ describe('【复核】旧仓与落袋按成交记录逐刀读，不看腿的「�
   it('事件还原的腿没写结算模式：按记录上的 settlementMode 认币本位，落袋 = pnlCoin × S₁', () => {
     const rec = record({
       id: 'mirror-rec', symbol: 'TUTUSD_PERP', settlementMode: 'coin', contracts: 500, contractSizeUsd: 10, quantity: 500,
-      entryPrice: 1, exitPrice: 2, pnl: 5_000, pnlCoin: 2_500, closeTime: T0 + 60 * MIN,
+      entryPrice: 1, exitPrice: 2, pnl: 5_000, pnlCoin: 2_500, closeTime: T0 + 60 * MIN, exit_method: 'tp1',
     });
     const legs = [
       mainLeg(),
@@ -551,5 +552,144 @@ describe('【复核】旧仓与落袋按成交记录逐刀读，不看腿的「�
     expect(v.banked).toBeCloseTo(2_500 * 1.1, 6);
     // 镜像 5,000 张面值 ÷ 1.0 = 5,000 币已在加仓前全部平掉，不再占浮盈垫
     expect(v.x1Coins).toBeCloseTo(10_000, 6);
+  });
+});
+
+/**
+ * 计算器（detectBankedMirrorProfit + computePlanBCoverageAtS1）与 Legs（evaluateCampaignAddSizing）
+ * 必须对同一笔加仓给出同一个 G、同一条 S₁、同一个上限——否则按计算器上限下的单会在 Legs 吃红叉，或反过来。
+ */
+describe('【复核】计算器与 Legs 同一个 G、同一条 S₁', () => {
+  const recordOf = (over: Partial<TradeRecord> & { id: string }): TradeRecord => ({
+    symbol: 'TUTUSDT', side: 'LONG', type: 'MARKET', action: 'CLOSE', settlementMode: 'usdt',
+    entryPrice: 1, exitPrice: 1, quantity: 0, leverage: 10, pnl: 0, fee: 0, slippage: 0,
+    openTime: T0, closeTime: T0, positionId: over.id, fillId: over.id,
+    ...over,
+  } as TradeRecord);
+
+  it('【回归】合并仓位的手动减仓按成交占比分给镜像腿的正利润，不进 G（V4）', () => {
+    // 主力 10,000 @1.0 与镜像 15,000 @1.0 合并；止盈1 平 15,000 @1.2；加仓1 5,000 @1.3 合并进来；
+    // 手动减仓 20% @1.25 拆成主力 +200、镜像 +300、加仓1 −50。加仓2 @1.4，S₁ = 1.2。
+    const position = (units: { main: number; mirror: number; add?: number }): Position => {
+      const fills = [
+        { id: 'P', openTime: T0, entryPrice: 1, units: units.main },
+        { id: 'M', openTime: T0, entryPrice: 1, units: units.mirror },
+        ...(units.add ? [{ id: 'A', openTime: T0 + 90 * MIN, entryPrice: 1.3, units: units.add }] : []),
+      ];
+      const quantity = fills.reduce((sum, f) => sum + f.units, 0);
+      return {
+        id: 'P', side: 'LONG', quantity,
+        entryPrice: fills.reduce((sum, f) => sum + f.units * f.entryPrice, 0) / quantity,
+        leverage: 10, marginMode: 'isolated', settlementMode: 'usdt', settlementAsset: 'USDT',
+        margin: 100, isolatedMargin: 100, openTime: T0, fills,
+      } as Position;
+    };
+    const tp = buildCloseRecords({
+      symbol: 'TUTUSDT', pos: position({ main: 10_000, mirror: 15_000 }), closeQty: 15_000, fillPrice: 1.2,
+      closeTime: T0 + 60 * MIN, exitMethod: 'tp1', totals: { netPnl: 3_000, feeUsd: 0, slippageUsd: 0, notionalUsd: 18_000 },
+    });
+    const reduce = buildCloseRecords({
+      symbol: 'TUTUSDT', pos: position({ main: 4_000, mirror: 6_000, add: 5_000 }), closeQty: 3_000, fillPrice: 1.25,
+      closeTime: T0 + 150 * MIN, exitMethod: 'manual', totals: { netPnl: 450, feeUsd: 0, slippageUsd: 0, notionalUsd: 3_750 },
+    });
+    expect(reduce.map(r => Number(r.pnl.toFixed(6)))).toEqual([200, 300, -50]);
+
+    const tAdd2 = T0 + 180 * MIN;
+    const legs = [
+      mainLeg({ trade_record_id: 'P' }),
+      leg({ id: 'mirror', leg_role: 'mirror_tp', trade_record_id: 'M', pre_simulated_time: iso(T0), pre_entry_price: 1, pre_position_size: 15_000 }),
+      leg({ id: 'add1', leg_role: 'main_add_1', trade_record_id: 'A', pre_simulated_time: iso(T0 + 90 * MIN), pre_entry_price: 1.3, pre_position_size: 6_500 }),
+      // 计算器上限 20,750 × 1.02 ≈ 21,165 币
+      leg({ id: 'add2', leg_role: 'main_add_2', pre_simulated_time: iso(tAdd2), pre_entry_price: 1.4, pre_position_size: 21_165 * 1.4 }),
+    ];
+    const tradeRecords = [...tp, ...reduce];
+    const v = evaluateCampaignAddSizing({ legs, tradeRecords, reverseHedgeOrders: [short(1.2, tAdd2 - MIN, null)] }).get('add2')!;
+    expect(v.x1Coins).toBeCloseTo(12_000, 6);
+    expect(v.cushion).toBeCloseTo(1_200, 6);
+    // G = 止盈1 +3,000 − 加仓1 那一片 −50；主力 +200、镜像 +300 是手动减仓，不算
+    expect(v.banked).toBeCloseTo(2_950, 6);
+
+    const calc = detectBankedMirrorProfit('TUTUSDT', 'LONG', tradeRecords, T0);
+    expect(calc.usd).toBeCloseTo(v.banked!, 6);
+    // 仍持有：主力 3,200 @1、镜像 4,800 @1、加仓1 4,000 @1.3 → S̄ = 1.1
+    const plan = computePlanBCoverageAtS1({ side: 'LONG', settlement: 'usdt', sBar: 1.1, s1: 1.2, s2: 1.4, x1: 12_000, g: calc.usd })!;
+    expect(plan.addCoinsMax).toBeCloseTo(20_750, 6);
+    expect(v.maxAllowedCoins).toBeCloseTo(plan.addCoinsMax, 6);
+    // 超出计算器上限 2% 的加仓，Legs 也必须是红叉
+    expect(v.status).toBe('fail');
+  });
+
+  it.each([['CLOSE', 'sl'], ['LIQUIDATION', 'liquidation']] as const)(
+    '【回归】本轮亏损多于止盈（%s）：两边都是 G = −700、上限 6,500 币（V5 / V6）',
+    (action, exitMethod) => {
+      const tAdd1 = T0 + 90 * MIN;
+      const tAdd2 = T0 + 180 * MIN;
+      const tradeRecords = [
+        recordOf({ id: 'main-rec', quantity: 10_000, exitPrice: 1.5, pnl: 5_000, closeTime: T0 + 600 * MIN, exit_method: 'manual' }),
+        recordOf({ id: 'mirror-rec', quantity: 15_000, exitPrice: 1.02, pnl: 300, closeTime: T0 + 60 * MIN, exit_method: 'tp1' }),
+        // 加仓1 是单独的 20x 仓位，在 1.1 止损 / 强平
+        recordOf({
+          id: 'add1-rec', entryPrice: 1.3, quantity: 5_000, exitPrice: 1.1, pnl: -1_000, leverage: 20,
+          openTime: tAdd1, closeTime: T0 + 120 * MIN, action, exit_method: exitMethod,
+        }),
+      ];
+      const legs = [
+        mainLeg({ trade_record_id: 'main-rec' }),
+        leg({ id: 'mirror', leg_role: 'mirror_tp', trade_record_id: 'mirror-rec', pre_simulated_time: iso(T0), pre_entry_price: 1, pre_position_size: 15_000 }),
+        leg({ id: 'add1', leg_role: 'main_add_1', trade_record_id: 'add1-rec', leverage: 20, pre_simulated_time: iso(tAdd1), pre_entry_price: 1.3, pre_position_size: 6_500 }),
+        // 按旧计算器（G 截成 0 / 漏掉强平）的上限下单
+        leg({ id: 'add2', leg_role: 'main_add_2', pre_simulated_time: iso(tAdd2), pre_entry_price: 1.4, pre_position_size: 10_000 * 1.4 }),
+      ];
+      const v = evaluateCampaignAddSizing({ legs, tradeRecords, reverseHedgeOrders: [short(1.2, tAdd2 - MIN, null)] }).get('add2')!;
+      expect(v.x1Coins).toBeCloseTo(10_000, 6);
+      expect(v.cushion).toBeCloseTo(2_000, 6);
+      expect(v.banked).toBeCloseTo(-700, 6);
+
+      const calc = detectBankedMirrorProfit('TUTUSDT', 'LONG', tradeRecords.filter(r => r.closeTime <= tAdd2), T0);
+      expect(calc.usd).toBeCloseTo(-700, 6);
+      const plan = computePlanBCoverageAtS1({ side: 'LONG', settlement: 'usdt', sBar: 1, s1: 1.2, s2: 1.4, x1: 10_000, g: calc.usd })!;
+      expect(plan.addCoinsMax).toBeCloseTo(6_500, 6);
+      expect(v.maxAllowedCoins).toBeCloseTo(plan.addCoinsMax, 6);
+      expect(v.status).toBe('fail');
+      expect(v.shortfall).toBeCloseTo(700, 6);
+    },
+  );
+
+  it('【回归】多张止损同时挂着：Legs 的 S₁ 与计算器 pickBookLine 选同一张（V7）', () => {
+    const t = T0 + 60 * MIN;
+    const legs = [
+      mainLeg(),
+      leg({ id: 'add', leg_role: 'main_add_1', pre_simulated_time: iso(t), pre_entry_price: 1.4, pre_position_size: 1_400 }),
+    ];
+    const orders = [short(1.15, t - 10 * MIN, null), short(1.2, t - 10 * MIN, null)];
+    const v = evaluateCampaignAddSizing({ legs, tradeRecords: [], reverseHedgeOrders: orders }).get('add')!;
+    const book = pickBookLine(orders.map(o => ({ id: o.id, price: o.price, coins: 1, createdAt: o.createdAt })), 'LONG', 1.4);
+    expect(v.s1).toBe(1.2);
+    expect(book?.price).toBe(v.s1);
+  });
+
+  it('读屏文字：no_direction / non_finite 各报各的原因；判定文字写明 max(0, Y₁ + G) 与 U', () => {
+    const t = T0 + 60 * MIN;
+    const noDirection = evaluateCampaignAddSizing({
+      legs: [mainLeg(), leg({
+        id: 'add', leg_role: 'main_add_1', direction: null as unknown as TradeJournal['direction'],
+        pre_simulated_time: iso(t), pre_entry_price: 1.3, pre_position_size: 1_300,
+      })],
+      tradeRecords: [],
+      reverseHedgeOrders: [short(1.1, t - MIN, null)],
+    }).get('add')!;
+    expect(noDirection.reason).toBe('no_direction');
+    expect(describeAddSizingVerdict(noDirection)).toBe('加仓校验：无法判断——加仓腿没有多空方向');
+    expect(describeAddSizingVerdict({ ...noDirection, reason: 'non_finite' })).toBe('加仓校验：无法判断——计算结果不是有限数');
+
+    const ok = evaluateCampaignAddSizing({
+      legs: [mainLeg(), leg({ id: 'add', leg_role: 'main_add_1', pre_simulated_time: iso(t), pre_entry_price: 1.3, pre_position_size: 1_300 })],
+      tradeRecords: [],
+      reverseHedgeOrders: [short(1.1, t - MIN, null)],
+    }).get('add')!;
+    const text = describeAddSizingVerdict(ok);
+    expect(text).toContain('加仓校验：仓位合规');
+    expect(text).toContain('可用 max(0, Y₁ + G) = 1000.00 U');
+    expect(text).toContain('新加仓最大亏损 200.00 U');
   });
 });

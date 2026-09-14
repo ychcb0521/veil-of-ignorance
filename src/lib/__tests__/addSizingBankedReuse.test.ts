@@ -65,6 +65,20 @@ describe('落袋是否已经被花掉', () => {
     expect(b.count).toBe(1);
     expect(b.lastBankedAt).toBe(T('2026-05-12T23:19:00Z'));
   });
+
+  it('【回归】强平也是已实现亏损：LIQUIDATION 记录同样从 G 扣掉（与 Legs 的 isSettlementRecord 同一判据）', () => {
+    const liquidated = { ...tp('2026-05-13T00:10:00Z', -90_000), action: 'LIQUIDATION', exit_method: 'liquidation' } as TradeRecord;
+    const b = detectBankedMirrorProfit('SAGAUSDT', 'LONG', [...HISTORY, liquidated], MAIN_OPEN);
+    expect(b.usd).toBeCloseTo(84_742.24 - 90_000, 2);
+    expect(b.usd).toBeLessThan(0);
+    expect(b.count).toBe(1);
+  });
+
+  it('亏损在止盈之前也扣——「本轮」不论先后', () => {
+    const earlierStop = { ...tp('2026-05-12T21:52:00Z', -300), exit_method: 'sl' } as TradeRecord;
+    const b = detectBankedMirrorProfit('SAGAUSDT', 'LONG', [earlierStop, ...HISTORY], MAIN_OPEN);
+    expect(b.usd).toBeCloseTo(84_742.24 - 300, 2);
+  });
 });
 
 describe('加仓后的综合成本线（R0 复核）', () => {

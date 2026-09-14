@@ -146,6 +146,8 @@ export interface BankedAddInput {
 
 export type BankedAddProblem =
   | 'disabled'           // 没有落袋，或旋钮没给数
+  | 'no_s1'              // S₁ 还没填——K_B 可以留空（默认取 S₁），缺的是 S₁ 本身
+  | 'no_s2'              // S₂ 还没填
   | 'kB_not_below_s2'    // 多头：K_B 在 S₂ 上方（盈利侧）
   | 'kB_not_above_s2'    // 空头：K_B 在 S₂ 下方（盈利侧）
   | 'x2_not_positive'
@@ -180,7 +182,10 @@ function bankedFail(problem: BankedAddProblem): BankedAddResult {
 
 export function computeBankedAdd(input: BankedAddInput): BankedAddResult {
   const { g, s1, s2, knob } = input;
-  if (!fin(g) || g <= 0 || !fin(s1) || !fin(s2) || s1 <= 0 || s2 <= 0) return bankedFail('disabled');
+  if (!fin(g) || g <= 0) return bankedFail('disabled');
+  // 先报缺价格，再报旋钮：K_B 留空默认取 S₁，「请填 K_B」会把人引向一个可选项
+  if (!fin(s1) || s1 <= 0) return bankedFail('no_s1');
+  if (!fin(s2) || s2 <= 0) return bankedFail('no_s2');
   const d = input.side === 'SHORT' ? -1 : 1;
   const coin = input.settlement === 'coin';
 
@@ -230,31 +235,42 @@ export interface PlanBCoverageInput {
   s1: number;
   s2: number;
   x1: number;
-  /** U 本位为 USD，币本位为结算币数量。负数按 0。 */
+  /**
+   * 本轮落袋净额 G：U 本位为 USD，币本位为结算币数量。
+   * **带符号**——镜像止盈 / tp1 正利润减去本轮已实现亏损，亏损多于止盈时为负，照样扣减。
+   * 与 Legs「加仓校验」的 banked 同一口径；只有 Y₁ + G 整体在 max(0,·) 处截断。
+   */
   g: number;
 }
 
 export interface PlanBCoverage {
   /** 当前旧仓退回 S₁ 的净浮盈；与 g 同单位，可为负。 */
   cushion: number;
+  /** 本轮落袋净额 G（带符号，与 g 同单位）；非有限数按 0。 */
   banked: number;
   /** cushion + banked；≤ 0 时没有加仓额度。 */
   available: number;
   riskDistance: number;
   /** 旧仓垫换算的加仓币量，可为负；多轮加仓的既有浮亏借此扣回。 */
   cushionAddCoins: number;
-  /** K_B = S₁ 时，落袋垫换算的加仓币量。 */
+  /** K_B = S₁ 时，落袋净额换算的加仓币量；G 为负时同样为负。 */
   bankedAddCoins: number;
+  /** 每加 1 币从 S₂ 退回 S₁ 的亏损，与 g 同单位（U 本位 = 险；币本位 = 险 ÷ S₁）。 */
+  lossPerCoin: number;
   /** Plan B 在 S₁ 归零档的实际加仓上限，永不小于 0。 */
   addCoinsMax: number;
 }
 
 /**
- * Plan B 的统一覆盖式：Y₁ + G ≥ X_add × |S₂ − S₁|。
+ * Plan B 的统一覆盖式：Y₁ + G ≥ X_add × |S₂ − S₁|，X_add,max = max(0, Y₁ + G) ÷ 每币风险。
  *
  * 币本位下 Y₁ 与 G 都以结算币计：Y₁_coin = Y₁_usd ÷ S₁；
  * 每币新仓退回 S₁ 的亏损同样除以 S₁，所以浮盈垫对应的币量与 U 本位相同，
  * 落袋部分则是 G × S₁ ÷ 风险距离。
+ *
+ * G 带符号进来：本轮亏损多于镜像止盈时是负数，必须照扣——
+ * 截成 0 会退回 Plan A，把已经实现的亏损当成没发生，与 Legs 校验给出相反的对错号。
+ * G = 0 时本式与 Plan A 同值。
  */
 export function computePlanBCoverageAtS1(input: PlanBCoverageInput): PlanBCoverage | null {
   const { sBar, s1, s2, x1 } = input;
@@ -262,7 +278,7 @@ export function computePlanBCoverageAtS1(input: PlanBCoverageInput): PlanBCovera
   const d = input.side === 'SHORT' ? -1 : 1;
   const riskDistance = (s2 - s1) * d;
   if (!(riskDistance > 0)) return null;
-  const banked = fin(input.g) && input.g > 0 ? input.g : 0;
+  const banked = fin(input.g) ? input.g : 0;
   const cushionUsd = x1 * (s1 - sBar) * d;
   const cushion = input.settlement === 'coin' ? cushionUsd / s1 : cushionUsd;
   const lossPerCoin = input.settlement === 'coin' ? riskDistance / s1 : riskDistance;
@@ -276,6 +292,7 @@ export function computePlanBCoverageAtS1(input: PlanBCoverageInput): PlanBCovera
     riskDistance,
     cushionAddCoins,
     bankedAddCoins,
+    lossPerCoin,
     addCoinsMax: Math.max(0, available / lossPerCoin),
   };
 }
@@ -422,7 +439,7 @@ export function pickHeldSide(symbol: string, positions: Position[] | undefined, 
 }
 
 export interface BankedMirrorProfit {
-  /** 以 USD 计的可用落袋净额：镜像止盈 / tp1 正利润 − 本轮后续已实现亏损 */
+  /** 以 USD 计的可用落袋净额：镜像止盈 / tp1 正利润 − 本轮（不论先后）已实现亏损（含强平）；可为负 */
   usd: number;
   /** 以币计的可用落袋净额：优先取成交记录的 pnlCoin，缺失时按平仓价折算 */
   coin: number;
@@ -472,8 +489,8 @@ export interface BankedMirrorOptions {
 }
 
 /**
- * 本场可用于 Plan B 的落袋净额：正向只认「止盈1」，本轮已经实现的亏损则一并扣除；
- * 普通减仓 / 手动平仓的正利润不混入。所有记录都必须不早于当前最早一条持仓的开仓时间。
+ * 本场可用于 Plan B 的落袋净额：正向只认「止盈1」，本轮已经实现的亏损（平仓或强平，不论在止盈之前还是之后）一并扣除，
+ * 净额可以是负数；普通减仓 / 手动平仓的正利润不混入。所有记录都必须不早于当前最早一条持仓的开仓时间。
  * 没有持仓就没有「本场」可言，返回 0，不把历史上所有止盈都算进来。
  * 这是建议值——界面上要用户点一下才填进 G。
  *
@@ -505,7 +522,9 @@ export function detectBankedMirrorProfit(
   let lastBankedRealAt: number | null = null;
   for (const r of tradeHistory ?? []) {
     if (!r || r.symbol !== symbol || r.side !== side) continue;
-    if (r.action !== 'CLOSE') continue;
+    // 与 campaignRealizedPnl.isSettlementRecord 同一判据：强平也是已实现亏损，必须从 G 扣掉，
+    // 否则计算器的 G 比 Legs 校验大一截，按计算器上限下的单在 Legs 里吃红叉。
+    if (r.action !== 'CLOSE' && r.action !== 'LIQUIDATION') continue;
     if (!((r.closeTime ?? 0) >= earliestOpenTime)) continue;
     if (!fin(r.pnl)) continue;
     const mirrorCredit = r.exit_method === 'tp1';

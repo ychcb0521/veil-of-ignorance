@@ -85,10 +85,9 @@ describe('AddSizingCalculator', () => {
     renderCalc();
     type('add-sizing-s1', '130');
     expect(screen.getByTestId('add-sizing-banked-off')).toBeInTheDocument();
-    // 只锁**数值**：B 一开，A 段的标签会加上「· 仅 A」限定词（那是刻意的——
-    // B 开着时 A 段这两个数都只是一半，不是该照着下的量），但数字必须一字不变。
-    const numsOf = (id: string) => (screen.getByTestId(id).textContent ?? '').match(/[\d,.]+/g);
-    const x2Before = numsOf('add-sizing-x2');
+    // 只锁 X₂ᴬ 这个**数值**：G 一开，A 段降为「仅 A」的中性芯片（不再给 USD / 张数的大字——
+    // 那不是该照着下的量），但 X₂ᴬ 本身必须一字不变。
+    expect(screen.getByTestId('add-sizing-x2')).toHaveTextContent('38.33');
 
     // 检测到本场落袋 1.2 RAVE（旧的 999 那笔在本场之前，不计）
     const fill = screen.getByTestId('add-sizing-fill-banked');
@@ -100,8 +99,10 @@ describe('AddSizingCalculator', () => {
     // 默认 K_B = S₁：币本位 X₂ᴮ = G·K_B ÷ (S₂−K_B) = 1.2×130/10 = 15.6；在 S₁ 恰好花光
     expect(screen.getByTestId('add-sizing-x2b-out')).toHaveTextContent('15.6');
     expect(screen.getByTestId('add-sizing-banked')).toHaveTextContent('敞口 100.0%');
-    // A 本账一字不变
-    expect(numsOf('add-sizing-x2')).toEqual(x2Before);
+    // A 本账一字不变，只是降级为拆解
+    expect(screen.getByTestId('add-sizing-x2')).toHaveTextContent('38.33');
+    expect(screen.getByTestId('add-sizing-x2')).toHaveTextContent('仅 A');
+    expect(screen.getByTestId('add-sizing-x2')).not.toHaveTextContent('张');
   });
 
   it('把 K_B 拖到 S₁ 之下：B 腿变小、只吃掉一部分落袋，界面标出「已越过 S₁」', () => {
@@ -132,8 +133,12 @@ describe('AddSizingCalculator', () => {
     type('add-sizing-s1', '130');
     expect(screen.getByTestId('add-sizing-cushion')).toHaveTextContent('383.33 USD ÷ 险 10.0000');
     type('add-sizing-g', '1.2');
-    // K_B 留空 = 取 S₁ = 零风险档，标题应这么说
-    expect(screen.getByTestId('add-sizing-x2b-out')).toHaveTextContent('零风险');
+    // K_B 留空 = 取 S₁：在 S₁ 恰好花完 G。X_G 只是拆解——不叫「零风险」、不给张数，免得被单独拿去下单
+    expect(screen.getByTestId('add-sizing-x2b-out')).toHaveTextContent('仅拆解');
+    expect(screen.getByTestId('add-sizing-x2b-out')).toHaveTextContent('不可单独下单');
+    expect(screen.getByTestId('add-sizing-x2b-out')).not.toHaveTextContent('零风险');
+    expect(screen.getByTestId('add-sizing-x2b-out')).not.toHaveTextContent('张');
+    expect(screen.getByTestId('add-sizing-kb-out')).toHaveTextContent('恰好花完 G');
     expect(screen.getByTestId('add-sizing-x2b-out')).toHaveTextContent('15.6');
     // 两本账相加，且此时对冲要一并扛起 B 腿
     expect(screen.getByTestId('add-sizing-total-add')).toHaveTextContent('53.93');
@@ -177,10 +182,27 @@ describe('AddSizingCalculator', () => {
     expect(screen.queryByTestId('add-sizing-banked-no-room')).not.toBeInTheDocument();
     expect(screen.getByTestId('add-sizing-total-add')).toHaveTextContent('20.83');
 
-    // G 总额虽够，但把 K_B 拉得过远会让本次分配给 B 腿的量太小，仍不能绕过统一总量校验。
+    // G 总额虽够，但把 K_B 拉得过远会让本次分配给 B 腿的量太小：计划加仓为 0。
+    // 上限只由规则决定，旋钮不改它——仍是 20.83。
     type('add-sizing-kb', '20');
-    expect(screen.getByTestId('add-sizing-banked-no-room')).toHaveTextContent('当前 K_B / 定仓值折出的 B 腿太小');
-    expect(screen.queryByTestId('add-sizing-total-add')).not.toBeInTheDocument();
+    expect(screen.getByTestId('add-sizing-planned-no-room')).toHaveTextContent('当前 K_B / 定仓值折出的 B 腿太小');
+    expect(screen.queryByTestId('add-sizing-banked-no-room')).not.toBeInTheDocument();
+    expect(screen.getByTestId('add-sizing-total-add')).toHaveTextContent('20.83');
+    expect(screen.queryByTestId('add-sizing-r0')).toBeNull();
+  });
+
+  /** 【复核】G > 0 时 Plan A 段不再报红：旧仓垫为负只是如实写成负数，由 Plan B 去扣。 */
+  it('【复核】S₁ 在成本线亏损侧、G 足够：Plan A 只显示带符号的 Y₁，不出红色违规与大字', () => {
+    renderCalc();
+    type('add-sizing-s1', '100');
+    type('add-sizing-g', '10');
+    expect(screen.queryByTestId('add-sizing-cushion-problem')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('add-sizing-hedge')).not.toBeInTheDocument();
+    // Y₁ = 18.3333 × (100 − 109.0909) ÷ 100 = −1.6667 RAVE（−166.67 USD），与 G 同单位
+    expect(screen.getByTestId('add-sizing-cushion-y1')).toHaveTextContent('−1.6667 RAVE');
+    expect(screen.getByTestId('add-sizing-cushion-y1')).toHaveTextContent('−166.67 USD');
+    expect(screen.getByTestId('add-sizing-x2')).toHaveTextContent('-4.17');
+    expect(screen.getByTestId('add-sizing-total-add')).toHaveTextContent('20.83');
   });
 
   it('旧仓垫为正时，Plan B 照常把两部分合并', () => {
@@ -191,14 +213,41 @@ describe('AddSizingCalculator', () => {
     expect(screen.getByTestId('add-sizing-x2b-out')).toBeInTheDocument();
   });
 
-  it('K_B 拖到 S₁ 之下则 B 腿自带敞口，合计对冲不再并入它', () => {
+  it('【回归】K_B 拖到 S₁ 之下：上限不变，旋钮推出的是「计划加仓」，对冲照常 = X₁ + 计划加仓', () => {
     renderCalc();
     type('add-sizing-s1', '130');
     type('add-sizing-g', '1.2');
     type('add-sizing-kb', '120');
-    expect(screen.getByTestId('add-sizing-x2b-out')).toHaveTextContent('带敞口');
-    // B 腿单独在 K_B 处对冲，A 线只管 X₁ + X₂
-    expect(screen.queryByTestId('add-sizing-total-hedge')).not.toBeInTheDocument();
+    // 规则上限 max(0, Y₁ + G) ÷ 每币风险 = 53.93，不随 K_B 变
+    expect(screen.getByTestId('add-sizing-total-add')).toHaveTextContent('53.93');
+    // 计划加仓 = 38.33 + 7.2 = 45.53
+    expect(screen.getByTestId('add-sizing-planned-add')).toHaveTextContent('45.53');
+    // 对冲必须扛起全部实际仓位：18.33 + 45.53 = 63.87，不能藏起来只剩 A 的 56.67
+    expect(screen.getByTestId('add-sizing-total-hedge-hero')).toHaveTextContent('63.87');
+    expect(screen.getByTestId('add-sizing-total-hedge')).toHaveTextContent('63.87');
+    expect(screen.getByTestId('add-sizing-r0-pass')).toHaveTextContent('仍剩 0.6462 RAVE');
+  });
+
+  it('【回归】K_B 落在 S₁ 与 S₂ 之间：在 S₁ 超支落袋，标签按敞口说「超支」，不说零风险', () => {
+    renderCalc();
+    type('add-sizing-s1', '130');
+    type('add-sizing-g', '1.2');
+    type('add-sizing-kb', '135');
+    expect(screen.getByTestId('add-sizing-kb-out')).toHaveTextContent('超支');
+    expect(screen.getByTestId('add-sizing-kb-out')).not.toHaveTextContent('不低于 S₁');
+    expect(screen.getByTestId('add-sizing-x2b-out')).not.toHaveTextContent('零风险');
+    // 上限照旧 53.93；计划加仓 38.33 + 1.2×135/5 = 70.73，红字标出超出
+    expect(screen.getByTestId('add-sizing-total-add')).toHaveTextContent('53.93');
+    expect(screen.getByTestId('add-sizing-planned-add')).toHaveTextContent('70.73');
+    expect(screen.getByTestId('add-sizing-planned-add')).toHaveTextContent('超出上限');
+    expect(screen.getByTestId('add-sizing-r0-violation')).toBeInTheDocument();
+  });
+
+  it('【回归】G 自动带入而 S₁ 还空着：提示缺 S₁，而不是让人去填可选的 K_B', () => {
+    renderCalc();
+    type('add-sizing-g', '1.2');
+    expect(screen.getByTestId('add-sizing-banked-problem')).toHaveTextContent('填入 S₁ 后计算');
+    expect(screen.getByTestId('add-sizing-banked-problem')).not.toHaveTextContent('K_B');
   });
 
   it('方向默认收成一个小字，点开才露出两个选项', () => {
@@ -221,10 +270,13 @@ describe('AddSizingCalculator', () => {
     expect(screen.queryByTestId('add-sizing-help-panel')).not.toBeInTheDocument();
     fireEvent.click(help);
     const panel = screen.getByTestId('add-sizing-help-panel');
-    expect(panel).toHaveTextContent('Plan B 加仓上限 =（旧仓浮盈垫 Y₁ + 已落袋 G）÷ 险');
-    expect(panel).toHaveTextContent('X₂ = Y₁ ÷ 险');
-    expect(panel).toHaveTextContent('X_G = G ÷ 险');
-    expect(panel).toHaveTextContent('每次都按 X₂ + X_G，并用当前 X₁ / S̄ 重算');
+    expect(panel).toHaveTextContent('Plan B 加仓上限 X_add,max = max(0, Y₁ + G) ÷ 每币风险');
+    expect(panel).toHaveTextContent('X₂ᴬ = Y₁ ÷ 险');
+    // 币本位不照抄 U 本位：G 以币计，按 S₁ 折算
+    expect(panel).toHaveTextContent('币本位 G·S₁ ÷ 险');
+    expect(panel).toHaveTextContent('每币风险 = 险 ÷ S₁');
+    expect(panel).toHaveTextContent('对冲 @ S₁ = X₁ + X_add');
+    expect(panel).not.toHaveTextContent('X₁ + X₂ + X_G');
     expect(within(panel).getByRole('link')).toHaveAttribute('href', '/guide#s3-1c');
   });
 });
@@ -255,8 +307,28 @@ describe('R0 复核 —— AIOTUSDT 学费单要求的那一块', () => {
     const banner = screen.getByTestId('add-sizing-r0-violation');
     expect(banner).toHaveTextContent('R0 非法');
     expect(banner).toHaveTextContent('由本金支付');
-    expect(banner).toHaveTextContent('300%');           // exposureAtS1 = 3×
+    // 预算是 Y₁ + G，不是 G 一家：亏损 85.13×10/130 = 6.5487 币 vs 可用 2.9487 + 1.2 = 4.1487 币
+    expect(banner).toHaveTextContent('旧仓净垫 Y₁ + 落袋 G');
+    expect(banner).toHaveTextContent('2.4 RAVE');       // 缺口 = 6.5487 − 4.1487
+    expect(banner).toHaveTextContent('158%');           // 亏损 ÷ 可用垫，而不是 B 腿敞口的 300%
+    expect(banner).toHaveTextContent('多 31.2 RAVE');   // 计划 85.13 − 上限 53.93
+    expect(banner).not.toHaveTextContent('300%');
+    // 表头不许一边说「由落袋覆盖」一边报非法
+    expect(screen.getByTestId('add-sizing-r0')).not.toHaveTextContent('覆盖');
+    // 头条「上限」不跟着定仓值跑
+    expect(screen.getByTestId('add-sizing-total-add')).toHaveTextContent('53.93');
+    expect(screen.getByTestId('add-sizing-planned-add')).toHaveTextContent('85.13');
+    // B 腿 X_G 46.8 不许再贴「零风险」和张数
+    expect(screen.getByTestId('add-sizing-x2b-out')).not.toHaveTextContent('零风险');
+    expect(screen.getByTestId('add-sizing-x2b-out')).not.toHaveTextContent('张');
     expect(screen.queryByTestId('add-sizing-r0-pass')).toBeNull();
+  });
+
+  it('【回归】G > 0 且 R0 通过时，成本线越过 S₁ 才注明「由已落袋 G 覆盖」', () => {
+    renderCalc();
+    type('add-sizing-s1', '130');
+    type('add-sizing-g', '1.2');
+    expect(screen.getByTestId('add-sizing-r0')).toHaveTextContent('由已落袋 G 覆盖');
   });
 
   it('B 关闭时(纯 A)恒为通过——A 的定义就是在 S₁ 打平', () => {
@@ -324,6 +396,40 @@ describe('B 本账建议值按操作时间框定本场', () => {
     fireEvent.click(fill);
     expect(num('add-sizing-g')).toBeCloseTo(1.2, 6);
     expect(screen.getByTestId('add-sizing-banked-spent')).toHaveTextContent('1');
+  });
+
+  it('【回归】本轮亏损多于止盈：负净额照样带入并照扣，不退回 Plan A（与 Legs 校验同值）', () => {
+    // 止盈 +1.2 RAVE 之后，同一轮又止损实现 −2.4 RAVE：G = −1.2
+    scene.positions = stampedPositions;
+    scene.tradeHistory = [
+      { ...tradeHistory[0], closedRealAt: R0 + 10 * 60_000 },
+      { ...tradeHistory[0], id: 'loss', exit_method: 'sl', pnl: -300, pnlCoin: -2.4, closeTime: 3_500, closedRealAt: R0 + 20 * 60_000 } as TradeRecord,
+    ];
+    renderCalc();
+    const fill = screen.getByTestId('add-sizing-fill-banked');
+    expect(fill).toHaveTextContent('−1.2');
+    expect(fill).toHaveTextContent('（1 笔止盈）');
+    expect(num('add-sizing-g')).toBeCloseTo(-1.2, 6);
+    type('add-sizing-s1', '130');
+    expect(screen.queryByTestId('add-sizing-banked-off')).not.toBeInTheDocument();
+    // (2.9487 − 1.2) × 130 ÷ 10 = 22.73，而不是 Plan A 的 38.33
+    expect(screen.getByTestId('add-sizing-total-add')).toHaveTextContent('22.73');
+    expect(screen.getByTestId('add-sizing-total-add')).toHaveTextContent('落袋垫 -15.6');
+    expect(screen.getByTestId('add-sizing-total-hedge-hero')).toHaveTextContent('41.07');   // 18.33 + 22.73
+    // Plan A 降为拆解，不再以 38.33 的大字当上限
+    expect(screen.getByTestId('add-sizing-x2')).toHaveTextContent('仅 A');
+    // 负 G 没有 B 腿可拧
+    expect(screen.queryByTestId('add-sizing-knob-line')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('add-sizing-x2b-out')).not.toBeInTheDocument();
+    expect(screen.getByTestId('add-sizing-r0-pass')).toBeInTheDocument();
+  });
+
+  it('【回归】只有亏损、还没有止盈：G 为负照样提示，手填同值结果一致', () => {
+    renderCalc();
+    type('add-sizing-s1', '130');
+    type('add-sizing-g', '-1.2');
+    expect(screen.getByTestId('add-sizing-total-add')).toHaveTextContent('22.73');
+    expect(screen.queryByTestId('add-sizing-banked-off')).not.toBeInTheDocument();
   });
 });
 
@@ -395,7 +501,7 @@ describe('盘口对冲线与 S₁ 偏差', () => {
     expect(screen.queryByTestId('add-sizing-s1-deviation')).not.toBeInTheDocument();
   });
 
-  it('B 开着时「合计对冲」升为 Hero，A 段那两个数标明「仅 A」', () => {
+  it('B 开着时「合计对冲」升为 Hero，A 段降为「仅 A」芯片、不再给第二个对冲数', () => {
     renderCalc();
     type('add-sizing-s1', '130');
     expect(screen.queryByTestId('add-sizing-total-hedge-hero')).not.toBeInTheDocument();
@@ -405,7 +511,33 @@ describe('盘口对冲线与 S₁ 偏差', () => {
     // 真正该挂的量必须和合计加仓一样醒目，而不是躺在底部小字里
     expect(screen.getByTestId('add-sizing-total-hedge-hero')).toHaveTextContent('72.27');
     expect(screen.getByTestId('add-sizing-x2')).toHaveTextContent('仅 A');
-    expect(screen.getByTestId('add-sizing-hedge')).toHaveTextContent('仅 A');
+    // 屏幕上只许有一个对冲量（带张数）——A 的 56.67 不再以大字出现
+    expect(screen.queryByTestId('add-sizing-hedge')).not.toBeInTheDocument();
+  });
+
+  it('【回归】多条盘口线：偏差按亏损侧离 S₂ 最近的那条比对——与 Legs 校验读 S₁ 同一规则', () => {
+    book.orders = { RAVEUSDT: [hedgeOrder({ id: 'far', stopPrice: 125 }), hedgeOrder({ id: 'near', stopPrice: 130 })] };
+    renderCalc();
+    // 候选芯片也按「先被打到」排：130 在前
+    expect(screen.getAllByTestId('add-sizing-book-line')[0]).toHaveTextContent('130');
+    type('add-sizing-s1', '130');
+    expect(screen.queryByTestId('add-sizing-s1-deviation')).not.toBeInTheDocument();
+    type('add-sizing-s1', '125');
+    expect(screen.getByTestId('add-sizing-s1-deviation')).toHaveTextContent('130');
+  });
+
+  it('【回归】盘口线上连 Y₁ + G 都 ≤ 0：「应 0」，并说明没有加仓额度，而不是「锁死本应是 0」', () => {
+    book.orders = { RAVEUSDT: [hedgeOrder({ stopPrice: 98 })] };
+    renderCalc();
+    type('add-sizing-s1', '130');
+    type('add-sizing-g', '1.2');
+    const warn = screen.getByTestId('add-sizing-s1-deviation');
+    expect(warn).toHaveTextContent('（应 0）');
+    expect(warn).toHaveTextContent('多下 53.93 RAVE');
+    expect(warn).toHaveTextContent('没有加仓额度');
+    expect(warn).toHaveTextContent('-85.73 USD');
+    expect(warn).not.toHaveTextContent('锁死本应是 0');
+    expect(warn).not.toHaveTextContent('应 -');
   });
 
   it('S₁ 还没填时不算「A 拒绝」——B 段照常在，别把「没填」和「填了但不成立」混为一谈', () => {

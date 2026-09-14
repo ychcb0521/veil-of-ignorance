@@ -17,7 +17,7 @@
 import type { PendingOrder, Position } from '@/types/trading';
 
 type OrdersBySymbol = Record<string, PendingOrder[]>;
-import { legOpeningCoins, type AddSide } from '@/lib/addSizing';
+import { computePlanBCoverageAtS1, legOpeningCoins, type AddSide } from '@/lib/addSizing';
 
 /** 委托归属本场的前置窗口。与 journalApi 归属委托时的口径同源——
  *  ordersMap 走 usePersistedState 持久化，跨回放、跨会话都活着，
@@ -125,9 +125,31 @@ export function readHedgeLines(
     filledHedgeCoins += legOpeningCoins(p, defaultFaceUsd);
   }
 
-  // 最保守的一条排前（主多取最低线、主空取最高线）；币量只作次级键。
-  candidates.sort((a, b) => (mainSide === 'LONG' ? a.price - b.price : b.price - a.price) || b.coins - a.coins);
+  // 离现价最近、回落时先被打到的一条排前（主多取最高线、主空取最低线）；币量只作次级键。
+  // 与 Legs「加仓校验」resolveStopLine 同一顺序——两处认定的 S₁ 不许打架。
+  candidates.sort((a, b) => (mainSide === 'LONG' ? b.price - a.price : a.price - b.price) || b.coins - a.coins);
   return { candidates, filledHedgeCoins, unlineable, staleCount };
+}
+
+/**
+ * 盘口上「生效的那条」对冲线：亏损侧（主多 < S₂、主空 > S₂）离 S₂ 最近的那张——价格回落时它先被打到。
+ * 与 Legs「加仓校验」读 S₁ 的规则（campaignAddSizingCheck.resolveStopLine）严格同一条，
+ * 否则同一笔加仓在计算器里报「与盘口线不一致」、在 Legs 里却是对号。
+ * S₂ 还没填时不做亏损侧过滤，直接取排在最前的那张。
+ */
+export function pickBookLine(
+  candidates: HedgeLineCandidate[],
+  mainSide: AddSide,
+  s2: number,
+): HedgeLineCandidate | null {
+  const d = mainSide === 'SHORT' ? -1 : 1;
+  const lossSide = Number.isFinite(s2) && s2 > 0
+    ? candidates.filter(c => (s2 - c.price) * d > 0)
+    : candidates;
+  return lossSide.reduce<HedgeLineCandidate | null>(
+    (best, c) => (best == null || (c.price - best.price) * d > 0 ? c : best),
+    null,
+  );
 }
 
 /** 两条线是不是同一条（相对误差，价格量级从 1e-5 到 1e5 都要能用）。 */
@@ -136,29 +158,22 @@ export function sameLine(a: number, b: number): boolean {
   return Math.abs(a - b) <= Math.max(1e-12, Math.max(Math.abs(a), Math.abs(b)) * 1e-6);
 }
 
-/**
- * B 账本那一块垫子换算成「加仓多少币」。**必须与 computeBankedAdd 同源分支**：
- *   U 本位：G 以 USDT 计 → X_G = G ÷ 险
- *   币本位：G 以**币**计 → X_G = G·K_B ÷ 险（亏损也以币计，要先按线价折回 USD）
- * 漏掉币本位这一支的后果不是差一点：本例 G=273,779 币 vs 32,299.75 USDT，
- * 两条公式给出的 X_G 差 3%，而在「险」很小的时候这点差再被 1/险 放大一次。
- */
-function bankedCoins(g: number, line: number, risk: number, coin: boolean): number {
-  if (!(g > 0) || !(risk > 0)) return 0;
-  return coin ? (g * line) / risk : g / risk;
-}
-
 export interface S1Deviation {
   bookPrice: number;
   typedS1: number;
-  /** 按盘口线本该下的加仓量 */
+  /** 按盘口线本该下的加仓量：Plan B 上限，max(0,·) 截断，永不为负 */
   shouldAdd: number;
-  /** 按填入的 S₁ 算出的加仓量 */
+  /** 按填入的 S₁ 算出的加仓量：同样是截断后的 Plan B 上限 */
   typedAdd: number;
-  /** 多下了多少币（负=少下） */
+  /** 多下了多少币（负=少下），由两个截断后的量相减 */
   excessCoins: number;
-  /** 走到盘口线那一刻的净值（设计意图是 0）。负数=已经亏了这么多。 */
+  /** 走到盘口线那一刻的净值（有额度时设计意图是 0）。负数=已经亏了这么多。 */
   netAtBookLine: number;
+  /**
+   * 盘口线上的旧仓净垫 Y₁ + G（USD）。≤ 0 表示按盘口线根本没有加仓额度——
+   * 此时「锁死本应是 0」不成立：一币不加，走到线上也已经是这个数。
+   */
+  bookAvailableUsd: number;
 }
 
 /**
@@ -167,10 +182,16 @@ export interface S1Deviation {
  *
  * 净值 = X₁(线 − S̄) + G − X_total(S₂ − 线)
  * 其中 X_total 是按**填入的 S₁** 算出来的加仓量（也就是他真的下出去的量）。
+ *
+ * 两个加仓量都走 computePlanBCoverageAtS1——与计算器头条同一个式子：
+ *   max(0, Y₁ + G) ÷ 每币风险；币本位 G 以**币**计、按各自的线价折算（X_G = G·线 ÷ 险）。
+ * 漏掉币本位这一支的后果不是差一点：本例 G=273,779 币 vs 32,299.75 USDT，
+ * 两条公式给出的 X_G 差 3%，而在「险」很小的时候这点差再被 1/险 放大一次。
+ * G 带符号：本轮亏损多于止盈时照扣。上限截断在 0——「应下 −2 币」不是一个能执行的数。
  */
 export function evaluateS1Deviation(args: {
   side: AddSide; sBar: number; s1: number; s2: number; x1: number; g: number; bookPrice: number;
-  /** 结算口径。币本位下 g 以**币**计，B 那一支的公式不同——见 bankedCoins。 */
+  /** 结算口径。币本位下 g 以**币**计，B 那一支按线价折算。 */
   settlement: 'coin' | 'usdt';
 }): S1Deviation | null {
   const { side, sBar, s1, s2, x1, g, bookPrice, settlement } = args;
@@ -178,21 +199,27 @@ export function evaluateS1Deviation(args: {
   const d = side === 'SHORT' ? -1 : 1;
   const fin = (v: number) => typeof v === 'number' && Number.isFinite(v) && v > 0;
   if (!fin(sBar) || !fin(s1) || !fin(s2) || !fin(x1) || !fin(bookPrice)) return null;
-  const riskTyped = (s2 - s1) * d;
   const riskBook = (s2 - bookPrice) * d;
-  if (!(riskTyped > 0) || !(riskBook > 0)) return null;
+  const signedG = Number.isFinite(g) ? g : 0;
+  const plan = (line: number) => computePlanBCoverageAtS1({
+    side, settlement: coin ? 'coin' : 'usdt', sBar, s1: line, s2, x1, g: signedG,
+  });
+  const typed = plan(s1);
+  const book = plan(bookPrice);
+  if (!typed || !book) return null;
 
-  // A 段两种口径同式：用「按开仓价折出的币量」表述时，USD 盈亏都是 X(P − 入场价)。
-  const typedAdd = (x1 * (s1 - sBar) * d) / riskTyped + bankedCoins(g, s1, riskTyped, coin);
-  const shouldAdd = (x1 * (bookPrice - sBar) * d) / riskBook + bankedCoins(g, bookPrice, riskBook, coin);
+  const typedAdd = typed.addCoinsMax;
+  const shouldAdd = book.addCoinsMax;
 
   // 走到盘口线那一刻的账面（USD）。币本位的 G 以币计，比较前要按线价折成 USD。
-  const gUsdAtLine = coin ? Math.max(0, g) * bookPrice : Math.max(0, g);
-  const netAtBookLine = x1 * (bookPrice - sBar) * d + gUsdAtLine - typedAdd * riskBook;
+  const gUsdAtLine = coin ? signedG * bookPrice : signedG;
+  const bookAvailableUsd = x1 * (bookPrice - sBar) * d + gUsdAtLine;
+  const netAtBookLine = bookAvailableUsd - typedAdd * riskBook;
 
   return {
     bookPrice, typedS1: s1, shouldAdd, typedAdd,
     excessCoins: typedAdd - shouldAdd,
     netAtBookLine,
+    bookAvailableUsd,
   };
 }

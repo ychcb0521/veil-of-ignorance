@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  evaluateS1Deviation, hedgeSideFor, readHedgeLines, sameLine, PRE_MAIN_LOOKBACK_MS,
+  evaluateS1Deviation, hedgeSideFor, pickBookLine, readHedgeLines, sameLine, PRE_MAIN_LOOKBACK_MS,
 } from '@/lib/hedgeLines';
 import type { PendingOrder, Position } from '@/types/trading';
 
@@ -72,6 +72,25 @@ describe('盘口对冲线', () => {
     expect(r.filledHedgeCoins).toBeCloseTo(4_113_437.29, 2);
   });
 
+  it('【回归】多条线时「盘口线」= 亏损侧离 S₂ 最近的那张（与 Legs resolveStopLine 同规则），盈利侧的不算', () => {
+    const r = readHedgeLines('SCRTUSDT', {
+      SCRTUSDT: [
+        order({ id: 'low', stopPrice: 1.15 }),
+        order({ id: 'high', stopPrice: 1.2 }),
+        order({ id: 'above', stopPrice: 1.5 }),   // 在 S₂ 上方，不是止损
+      ],
+    }, [], 'LONG', T0 - PRE_MAIN_LOOKBACK_MS, 'usdt', 10);
+    // 候选按「价格回落先被打到」排：主多最高的在前
+    expect(r.candidates.map(c => c.id)).toEqual(['above', 'high', 'low']);
+    expect(pickBookLine(r.candidates, 'LONG', 1.4)?.id).toBe('high');
+    // 主空镜像：亏损侧在 S₂ 上方，取最低的那张
+    const s = readHedgeLines('SCRTUSDT', {
+      SCRTUSDT: [order({ id: 'a', side: 'LONG', stopPrice: 1.3 }), order({ id: 'b', side: 'LONG', stopPrice: 1.25 }), order({ id: 'c', side: 'LONG', stopPrice: 1.0 })],
+    }, [], 'SHORT', T0 - PRE_MAIN_LOOKBACK_MS, 'usdt', 10);
+    expect(pickBookLine(s.candidates, 'SHORT', 1.1)?.id).toBe('b');
+    expect(pickBookLine([], 'LONG', 1.4)).toBeNull();
+  });
+
   it('同一条线的浮点尾差不算两条线', () => {
     expect(sameLine(BOOK, BOOK * (1 + 1e-9))).toBe(true);
     expect(sameLine(BOOK, TYPED)).toBe(false);
@@ -109,6 +128,26 @@ describe('S₁ 偏差定价 —— 把 0.149% 翻译成 USDT', () => {
     })!;
     expect(d).not.toBeNull();
     expect(Number.isFinite(d.netAtBookLine)).toBe(true);
+  });
+
+  it('【回归】盘口线上 Y₁ + G ≤ 0：应下量截在 0，超下量按截断值算，并交出盘口线上的可用垫', () => {
+    // RAVE 币本位：X₁ 18.3333 @109.0909，S₂ 140，填 S₁ 130，盘口线 98（低于成本线），G 1.2 币
+    const x1 = 1000 / 100 + 1000 / 120;
+    const sBar = 2000 / x1;
+    const d = evaluateS1Deviation({ side: 'LONG', sBar, s1: 130, s2: 140, x1, g: 1.2, bookPrice: 98, settlement: 'coin' })!;
+    expect(d.shouldAdd).toBe(0);
+    expect(d.typedAdd).toBeCloseTo(53.93, 2);
+    expect(d.excessCoins).toBeCloseTo(53.93, 2);
+    // 一币不加，走到 98 也已经是 −85.73 USD
+    expect(d.bookAvailableUsd).toBeCloseTo(x1 * (98 - sBar) + 1.2 * 98, 6);
+    expect(d.bookAvailableUsd).toBeCloseTo(-85.73, 2);
+    expect(d.netAtBookLine).toBeCloseTo(d.bookAvailableUsd - d.typedAdd * 42, 6);
+  });
+
+  it('【回归】G 为负照扣：与计算器头条、Legs 校验同一个带符号的 G', () => {
+    const d = evaluateS1Deviation({ side: 'LONG', sBar: 1, s1: 1.2, s2: 1.4, x1: 10_000, g: -700, bookPrice: 1.2, settlement: 'usdt' })!;
+    expect(d.typedAdd).toBeCloseTo(6_500, 6);
+    expect(d.netAtBookLine).toBeCloseTo(0, 6);
   });
 
   it('输入不成立时返回 null，不硬算出一个假数', () => {

@@ -5,6 +5,7 @@ import {
   computeBankedAdd,
   computeCushionAdd,
   computePlanBCoverageAtS1,
+  evaluatePostAddCostLine,
   legOpeningCoins,
   weightedEntryByCoins,
 } from '../addSizing';
@@ -146,6 +147,11 @@ describe('computeBankedAdd · B 本账（落袋镜像）', () => {
     expect(computeBankedAdd({ side: 'LONG', settlement: 'usdt', g: 10, s2: 120, s1: 110, knob: { kind: 'line', kB: 125 } }).problem).toBe('kB_not_below_s2');
     expect(computeBankedAdd({ side: 'LONG', settlement: 'usdt', g: 10, s2: 120, s1: 110, knob: { kind: 'size', x2: -3 } }).problem).toBe('x2_not_positive');
   });
+
+  it('【回归】缺 S₁ / S₂ 时报缺价格，而不是让人去填可选的 K_B', () => {
+    expect(computeBankedAdd({ side: 'LONG', settlement: 'coin', g: 1.2, s2: 140, s1: Number.NaN, knob: { kind: 'line', kB: Number.NaN } }).problem).toBe('no_s1');
+    expect(computeBankedAdd({ side: 'LONG', settlement: 'coin', g: 1.2, s2: Number.NaN, s1: 130, knob: { kind: 'line', kB: 130 } }).problem).toBe('no_s2');
+  });
 });
 
 describe('computePlanBCoverageAtS1 · 每次加仓统一重算 Plan B', () => {
@@ -181,6 +187,32 @@ describe('computePlanBCoverageAtS1 · 每次加仓统一重算 Plan B', () => {
     expect(plan.cushionAddCoins).toBeCloseTo(10, 12);
     expect(plan.bankedAddCoins).toBeCloseTo(11, 12);
     expect(plan.addCoinsMax).toBeCloseTo(21, 12);
+  });
+
+  it('【回归】G 为负（本轮亏损多于止盈）照扣，不截成 0 退回 Plan A', () => {
+    // RAVE 币本位：X₁ 18.3333 @109.0909，S₁ 130，S₂ 140，G = −1.2 币
+    const x1 = 1000 / 100 + 1000 / 120;
+    const sBar = 2000 / x1;
+    const plan = computePlanBCoverageAtS1({ side: 'LONG', settlement: 'coin', sBar, s1: 130, s2: 140, x1, g: -1.2 })!;
+    expect(plan.banked).toBe(-1.2);
+    expect(plan.lossPerCoin).toBeCloseTo(10 / 130, 12);
+    // (2.9487 − 1.2) × 130 ÷ 10 = 22.73，而不是 Plan A 的 38.33
+    expect(plan.addCoinsMax).toBeCloseTo(((x1 * (130 - sBar)) / 130 - 1.2) * 13, 9);
+    expect(plan.addCoinsMax).toBeCloseTo(22.73, 2);
+
+    // U 本位 V5：Y₁ 2,000 + G −700 = 1,300 → 6,500 币（Legs 同值）
+    const usdt = computePlanBCoverageAtS1({ side: 'LONG', settlement: 'usdt', sBar: 1, s1: 1.2, s2: 1.4, x1: 10_000, g: -700 })!;
+    expect(usdt.addCoinsMax).toBeCloseTo(6_500, 9);
+    // G = 0 时与 Plan A 同值
+    const zero = computePlanBCoverageAtS1({ side: 'LONG', settlement: 'usdt', sBar: 1, s1: 1.2, s2: 1.4, x1: 10_000, g: 0 })!;
+    expect(zero.addCoinsMax).toBeCloseTo(computeCushionAdd({ side: 'LONG', sBar: 1, s1: 1.2, s2: 1.4, x1: 10_000 }).x2Max, 9);
+  });
+
+  it('Plan B 取满上限时成本线越过 S₁ 恰好 G ÷ (X₁ + X₂)', () => {
+    const plan = computePlanBCoverageAtS1({ side: 'LONG', settlement: 'usdt', sBar: 1, s1: 1.1, s2: 1.3, x1: 10_000, g: 500 })!;
+    expect(plan.addCoinsMax).toBeCloseTo(7_500, 9);
+    const post = evaluatePostAddCostLine({ side: 'LONG', sBar: 1, s1: 1.1, s2: 1.3, x1: 10_000, addCoins: plan.addCoinsMax })!;
+    expect(post.blendedCost - 1.1).toBeCloseTo(500 / 17_500, 12);
   });
 });
 

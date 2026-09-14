@@ -7,6 +7,7 @@ import { getCoinMarginedContractSizeUsd, getSettlementAsset } from '@/lib/coinMa
 import {
   PRE_MAIN_LOOKBACK_MS,
   evaluateS1Deviation,
+  pickBookLine,
   readHedgeLines,
   sameLine,
 } from '@/lib/hedgeLines';
@@ -29,6 +30,9 @@ import {
  * 界面只放数字：X₂ 与对冲量是主角，中间量降成一行芯片，价格阶梯把 S̄ / S₁ / S₂ 的几何画出来。
  * 阶梯**不看有没有解**：三个价格齐了就画，方向反了的那一段标红——「S₁ 还在成本线亏损侧」
  * 因此一眼可见，不必读文字。解释性文字一律留在使用说明 3.4，右上角近乎隐形的「?」给公式速览。
+ *
+ * 口径与 Legs「加仓校验」严格同一条：加仓上限 = max(0, Y₁ + G) ÷ 每币风险，G 是带符号的本轮落袋净额。
+ * G = 0 时 Plan B 与 Plan A 同值，界面照旧以 Plan A 为主角；G ≠ 0（正负都算）时 Plan A 降为来源拆解。
  */
 
 interface Props {
@@ -51,6 +55,9 @@ const fmtPct = (v: number) => (Number.isFinite(v) ? `${(v * 100).toFixed(1)}%` :
 const toNum = (s: string) => { const n = parseFloat(s); return Number.isFinite(n) ? n : Number.NaN; };
 const tidyPx = (v: number) => (Number.isFinite(v) ? String(Number(v.toPrecision(8))) : '');
 const tidyCoins = (v: number) => (Number.isFinite(v) ? String(Number(v.toFixed(4))) : '');
+/** 带符号：正数前面加「+」，负数用「−」，零不带符号。 */
+const signed = (v: number, fmt: (abs: number) => string) =>
+  (!Number.isFinite(v) ? '—' : `${v > 0 ? '+' : v < 0 ? '−' : ''}${fmt(Math.abs(v))}`);
 
 /**
  * 无解分两档，不能混为一谈：
@@ -69,12 +76,22 @@ function cushionNote(r: CushionAddResult, side: AddSide): { text: string; violat
 }
 
 const BANKED_PROBLEM: Record<string, string> = {
-  disabled: '填入 K_B 或 X₂ᴮ 后计算',
+  no_s1: '填入 S₁ 后计算',
+  no_s2: '填入 S₂ 后计算',
   kB_not_below_s2: 'K_B 需低于 S₂',
   kB_not_above_s2: 'K_B 需高于 S₂',
   x2_not_positive: 'X₂ᴮ 需大于 0',
   x2_not_above_g: 'X₂ᴮ 需大于 G',
 };
+
+/** Plan B 算不出来时缺的是哪一项——先报价格，不报可选的旋钮。 */
+function planBMissingNote(side: AddSide, sBar: number, s1: number, s2: number, x1: number): string {
+  const ok = (v: number) => Number.isFinite(v) && v > 0;
+  if (!ok(s1)) return '填入 S₁ 后计算';
+  if (!ok(s2)) return '填入 S₂ 后计算';
+  if (!ok(sBar) || !ok(x1)) return '填入 S̄ · X₁ 后计算';
+  return `新腿没有风险距离 · ${side === 'LONG' ? '主多' : '主空'}需 S₂ ${side === 'LONG' ? '高于' : '低于'} S₁`;
+}
 
 export function AddSizingCalculator({ open, onClose, symbol, currentPrice = 0 }: Props) {
   const ctx = useTradingContext();
@@ -83,6 +100,7 @@ export function AddSizingCalculator({ open, onClose, symbol, currentPrice = 0 }:
   const isCoin = settlement === 'coin';
   const face = getCoinMarginedContractSizeUsd(symbol);
   const coinName = getSettlementAsset(symbol);
+  const gUnit = isCoin ? coinName : 'USD';
 
   const held = useMemo(() => pickHeldSide(symbol, positions, face), [symbol, positions, face]);
 
@@ -111,13 +129,19 @@ export function AddSizingCalculator({ open, onClose, symbol, currentPrice = 0 }:
     setS1(''); setG(''); setKnobKind('line'); setKB(''); setX2B(''); setHelpOpen(false); setSideOpen(false);
   }, [open]);
 
+  /** G 带符号；留空按 0。负数照扣——截成 0 会退回 Plan A，与 Legs 校验给出相反的对错号。 */
+  const gVal = Number.isFinite(toNum(g)) ? toNum(g) : 0;
+  const bankedOn = gVal !== 0;
+  const gPositive = gVal > 0;
+  const fmtG = (v: number) => (isCoin ? `${fmtCoins(v, 4)} ${coinName}` : `${fmtUsd(v)} USD`);
+
   const cushion = useMemo(
     () => computeCushionAdd({ side, sBar: toNum(sBar), s1: toNum(s1), s2: toNum(s2), x1: toNum(x1) }),
     [side, sBar, s1, s2, x1],
   );
   const note = cushionNote(cushion, side);
   /**
-   * 真正的 Plan B：当前旧仓在 S₁ 的净浮盈（可为负）+ 本轮已落袋 G。
+   * 真正的 Plan B：当前旧仓在 S₁ 的净浮盈（可为负）+ 本轮落袋净额 G（可为负）。
    * 这一步每次都读当前 X₁ / S̄，所以更早加仓在新 S₁ 上的浮亏会自动扣回来。
    */
   const planB = useMemo(
@@ -128,9 +152,9 @@ export function AddSizingCalculator({ open, onClose, symbol, currentPrice = 0 }:
       s1: toNum(s1),
       s2: toNum(s2),
       x1: toNum(x1),
-      g: Math.max(0, toNum(g)),
+      g: gVal,
     }),
-    [side, settlement, sBar, s1, s2, x1, g],
+    [side, settlement, sBar, s1, s2, x1, gVal],
   );
 
   /**
@@ -150,9 +174,12 @@ export function AddSizingCalculator({ open, onClose, symbol, currentPrice = 0 }:
    */
   const bankedMaybeSpent = banked.addsSinceBanked > 0;
   const bankedSuggest = isCoin ? banked.coin : banked.usd;
+  /** 有止盈、或者净额不为 0（只有亏损也算）——都要让人看见，负净额不能静默丢掉。 */
+  const hasBankedSignal = banked.count > 0 || (Number.isFinite(bankedSuggest) && bankedSuggest !== 0);
+  const tidyG = (v: number) => (isCoin ? tidyCoins(v) : String(Number(v.toFixed(2))));
 
   /**
-   * 真实操作时间完整时，「这笔 G 属于当前持仓周期」已经是可靠事实，直接默认进入 Plan B。
+   * 真实操作时间完整时，「这笔 G 属于当前持仓周期」已经是可靠事实，直接默认代入（正负都代入）。
    * 老仓位缺 openedRealAt 时仍保留为手动建议，避免模拟时间撞车时自动把别次回放的钱带进来。
    */
   useEffect(() => {
@@ -161,10 +188,10 @@ export function AddSizingCalculator({ open, onClose, symbol, currentPrice = 0 }:
       return;
     }
     if (bankedAutoSeededRef.current || !held || side !== held.side) return;
-    if (held.earliestOpenedRealAt == null || !(bankedSuggest > 0)) return;
+    if (held.earliestOpenedRealAt == null || !hasBankedSignal || !Number.isFinite(bankedSuggest)) return;
     bankedAutoSeededRef.current = true;
     setG(isCoin ? tidyCoins(bankedSuggest) : String(Number(bankedSuggest.toFixed(2))));
-  }, [open, held, side, bankedSuggest, isCoin]);
+  }, [open, held, side, bankedSuggest, hasBankedSignal, isCoin]);
 
   /**
    * 盘口上真实挂着的对冲线。整套「锁死」的前提是 S₁ 就是这条线——
@@ -180,28 +207,50 @@ export function AddSizingCalculator({ open, onClose, symbol, currentPrice = 0 }:
     isCoin ? 'coin' : 'usdt', face,
   ), [symbol, ctx.ordersMap, positions, side, held?.earliestOpenTime, isCoin, face]);
 
-  const bookLine = hedgeRead.candidates[0] ?? null;
+  // 偏差比对的「盘口线」与 Legs 加仓校验读 S₁ 同一规则：亏损侧离 S₂ 最近、价格回落先被打到的那张。
+  const bookLine = useMemo(() => pickBookLine(hedgeRead.candidates, side, toNum(s2)), [hedgeRead.candidates, side, s2]);
   const s1Deviation = useMemo(() => {
     if (!bookLine || !planB) return null;
     if (sameLine(bookLine.price, toNum(s1))) return null;
     const deviation = evaluateS1Deviation({
       side, sBar: toNum(sBar), s1: toNum(s1), s2: toNum(s2),
-      x1: toNum(x1), g: Math.max(0, toNum(g)), bookPrice: bookLine.price,
+      x1: toNum(x1), g: gVal, bookPrice: bookLine.price,
       settlement: isCoin ? 'coin' : 'usdt',
     });
     return deviation && (deviation.typedAdd > 0 || deviation.shouldAdd > 0) ? deviation : null;
-  }, [bookLine, planB, side, sBar, s1, s2, x1, g, isCoin]);
+  }, [bookLine, planB, side, sBar, s1, s2, x1, gVal, isCoin]);
 
   const effectiveKB = kB !== '' ? toNum(kB) : toNum(s1);
   const bankedRes = useMemo(() => {
     const knob: BankedKnob = knobKind === 'line' ? { kind: 'line', kB: effectiveKB } : { kind: 'size', x2: toNum(x2B) };
-    return computeBankedAdd({ side, settlement, g: toNum(g), s2: toNum(s2), s1: toNum(s1), knob });
-  }, [knobKind, effectiveKB, x2B, side, settlement, g, s2, s1]);
-  const bankedOn = toNum(g) > 0;
-  const contemplatedAddCoins = bankedOn && bankedRes.ok && planB
-    ? planB.cushionAddCoins + bankedRes.x2
-    : cushion.ok ? cushion.x2Max : 0;
-  const bankedPlanHasRoom = bankedOn && bankedRes.ok && planB != null && contemplatedAddCoins > 0;
+    return computeBankedAdd({ side, settlement, g: gVal, s2: toNum(s2), s1: toNum(s1), knob });
+  }, [knobKind, effectiveKB, x2B, side, settlement, gVal, s2, s1]);
+
+  /** 规则给出的上限：max(0, Y₁ + G) ÷ 每币风险。**只由规则决定**，旋钮拧到哪都不改它。 */
+  const limitCoins = planB?.addCoinsMax ?? 0;
+  /**
+   * 旋钮是否在用：只有 G > 0 才有 B 腿可拧；K_B 留空（= S₁）或定仓没填时，计划加仓就是上限本身。
+   */
+  const knobActive = gPositive && ((knobKind === 'line' && kB !== '') || (knobKind === 'size' && x2B !== ''));
+  /**
+   * 计划加仓：默认取上限；旋钮在用时 = 旧仓垫折算量 + B 腿 X₂ᴮ，交给 R0 与上限比对。
+   * 旋钮给了无效值时为 NaN——不拿一个猜的量去复核。
+   */
+  const plannedAddCoins = !planB
+    ? 0
+    : knobActive
+      ? (bankedRes.ok ? Math.max(0, planB.cushionAddCoins + bankedRes.x2) : Number.NaN)
+      : limitCoins;
+  const planBHasRoom = planB != null && planB.available > 0 && limitCoins > 0;
+  const hedgeCoinsAtS1 = toNum(x1) + (Number.isFinite(plannedAddCoins) ? plannedAddCoins : limitCoins);
+
+  const bankedProblem = bankedOn && !planB
+    ? planBMissingNote(side, toNum(sBar), toNum(s1), toNum(s2), toNum(x1))
+    : gPositive && planB && !bankedRes.ok
+      ? (bankedRes.problem === 'disabled'
+        ? (knobKind === 'size' ? '填入 X₂ᴮ 后计算' : '填入 K_B 后计算')
+        : BANKED_PROBLEM[bankedRes.problem ?? ''] ?? '无法计算')
+      : null;
 
   /**
    * R0 复核 —— A3-R 的门槛：加仓后重算综合成本线，越过止损线即当场非法。
@@ -212,20 +261,31 @@ export function AddSizingCalculator({ open, onClose, symbol, currentPrice = 0 }:
    * 折成钱是 20.6 万 USD 的本金缺口——那一场最终亏 25.4 万，几乎全部来自这里。
    * 而当时界面上没有任何一处会把「这单越界了」喊出来。
    *
-   * 判定用**扣除落袋后的**成本线：B 本账拿 G 买期权、成本线越过 S₁ 是它的定义，
-   * 不该报红；报红的判据是「跌到 S₁ 时的亏损连 G 都盖不住」——缺口由本金支付。
+   * 判据与 Legs 加仓校验同一个式子：计划加仓跌回 S₁ 的亏损 vs 旧仓净垫 Y₁ + 落袋 G。
+   * G > 0 时成本线越过 S₁ 是 Plan B 的定义（越过 G ÷ (X₁ + X₂)），不该报红；
+   * 报红的判据是「亏损超出 Y₁ + G」——缺口由本金支付。
    */
   const r0 = useMemo(() => {
-    if (!planB || !(contemplatedAddCoins > 0)) return null;
+    if (!planB || !(plannedAddCoins > 0)) return null;
     const post = evaluatePostAddCostLine({
       side, sBar: toNum(sBar), s1: toNum(s1), s2: toNum(s2),
-      x1: toNum(x1), addCoins: contemplatedAddCoins,
+      x1: toNum(x1), addCoins: plannedAddCoins,
     });
     if (!post) return null;
-    // 缺口（与 G 同单位）：B 在 S₁ 吃掉的超出 G 的部分。B 关着时恒为 0——A 的定义就是在 S₁ 打平。
-    const uncovered = bankedOn && bankedRes.ok ? Math.max(0, -bankedRes.residualAtS1) : 0;
-    return { ...post, uncovered };
-  }, [planB, contemplatedAddCoins, side, sBar, s1, s2, x1, bankedOn, bankedRes]);
+    // 亏损与可用垫同单位（U 本位 USD、币本位结算币）
+    const loss = plannedAddCoins * planB.lossPerCoin;
+    const gap = loss - planB.available;
+    // 取满上限时两边只差浮点误差，不许因此报红
+    const tolerance = 1e-9 * Math.max(1, Math.abs(loss), Math.abs(planB.available));
+    return {
+      ...post,
+      loss,
+      available: planB.available,
+      uncovered: gap > tolerance ? gap : 0,
+      residual: gap < -tolerance ? -gap : 0,
+      excessCoins: plannedAddCoins - limitCoins,
+    };
+  }, [planB, plannedAddCoins, limitCoins, side, sBar, s1, s2, x1]);
 
   const contracts = (coins: number, price: number) =>
     isCoin && Number.isFinite(coins) && price > 0 ? ` · ${coinsToContracts(coins, price, face).toLocaleString('en-US')} 张` : '';
@@ -253,11 +313,13 @@ export function AddSizingCalculator({ open, onClose, symbol, currentPrice = 0 }:
 
         {helpOpen && (
           <div data-testid="add-sizing-help-panel" className="border-b border-border bg-muted/30 px-4 py-2.5 font-mono text-[10px] leading-[1.7] text-muted-foreground">
-            <div className="text-foreground">Plan B 加仓上限 =（旧仓浮盈垫 Y₁ + 已落袋 G）÷ 险</div>
-            <div>A 仅作拆解：Y₁ = X₁(S₁−S̄) → X₂ = Y₁ ÷ 险 = X₁ ÷ b；b = 险 / (S₁−S̄)</div>
+            <div className="text-foreground">Plan B 加仓上限 X_add,max = max(0, Y₁ + G) ÷ 每币风险</div>
+            <div>Y₁ = X₁(S₁−S̄)，可为负；G = 本轮止盈1 − 本轮已实现亏损，可为负；险 = |S₂−S₁|</div>
+            <div>U 本位：每币风险 = 险。币本位：Y₁、G 以币计（Y₁ ÷ S₁），每币风险 = 险 ÷ S₁</div>
+            <div>拆解：X₂ᴬ = Y₁ ÷ 险 = X₁ ÷ b；X_G = G ÷ 险（币本位 G·S₁ ÷ 险），只作拆解、不单独下单</div>
+            <div>b = 险 / (S₁−S̄)</div>
             <div className="font-sans">此处的 b 往回看（成本线 → 止损线 → 现价），与盘面 P_gap 的 b（现价 → 目标）无关</div>
-            <div>B 落袋垫 X_G = G ÷ 险；镜像已落袋后，每次都按 X₂ + X_G，并用当前 X₁ / S̄ 重算</div>
-            <div>对冲 @ S₁ = X₁ + X₂ + X_G</div>
+            <div>对冲 @ S₁ = X₁ + X_add（实际加仓量）；每次都用当前 X₁ / S̄ 重算</div>
             <Link to="/guide#s3-1c" className="mt-1 inline-block font-sans text-primary hover:underline">完整说明 · 使用说明 3.4 →</Link>
           </div>
         )}
@@ -315,7 +377,7 @@ export function AddSizingCalculator({ open, onClose, symbol, currentPrice = 0 }:
 
           {/* 盘口上真实挂着的对冲线。只摆候选、不预填也不锁定 S₁——
               系统分不出「对冲单」与「试单 / 上一场遗留单」的意图。 */}
-          {(bookLine || hedgeRead.unlineable.length > 0) && (
+          {(hedgeRead.candidates.length > 0 || hedgeRead.unlineable.length > 0) && (
             <div data-testid="add-sizing-book-lines" className="flex flex-wrap items-center gap-1 text-[10px]">
               <span className="text-muted-foreground/70">盘口对冲线</span>
               {hedgeRead.candidates.map(c => (
@@ -335,7 +397,9 @@ export function AddSizingCalculator({ open, onClose, symbol, currentPrice = 0 }:
                 </button>
               ))}
               {hedgeRead.candidates.length > 1 && (
-                <span className="text-muted-foreground/60">{hedgeRead.candidates.length} 条线 · 系统不替你选</span>
+                <span className="text-muted-foreground/60">
+                  {hedgeRead.candidates.length} 条线 · 偏差按亏损侧离 S₂ 最近的那条计（与 Legs 校验同规则）
+                </span>
               )}
               {hedgeRead.unlineable.length > 0 && (
                 <span className="text-muted-foreground/60">
@@ -355,7 +419,10 @@ export function AddSizingCalculator({ open, onClose, symbol, currentPrice = 0 }:
               S₁ {fmtPx(s1Deviation.typedS1)} 与盘口对冲线 {fmtPx(s1Deviation.bookPrice)} 不是同一条线 ——
               加仓{s1Deviation.excessCoins > 0 ? '多' : '少'}下 {fmtCoins(Math.abs(s1Deviation.excessCoins))} {coinName}
               （应 {fmtCoins(s1Deviation.shouldAdd)}）；价格走到 {fmtPx(s1Deviation.bookPrice)} 时账面
-              <span className="font-medium"> {fmtUsd(s1Deviation.netAtBookLine)} USD</span>，锁死本应是 0。
+              <span className="font-medium"> {fmtUsd(s1Deviation.netAtBookLine)} USD</span>
+              {s1Deviation.bookAvailableUsd > 0
+                ? '，锁死本应是 0。'
+                : `——按盘口线没有加仓额度，一币不加走到线上也已是 ${fmtUsd(s1Deviation.bookAvailableUsd)} USD。`}
               <button type="button" data-testid="add-sizing-use-book-line"
                 onClick={() => setS1(tidyPx(s1Deviation.bookPrice))}
                 className="ml-1 underline hover:no-underline">按盘口重算</button>
@@ -364,12 +431,12 @@ export function AddSizingCalculator({ open, onClose, symbol, currentPrice = 0 }:
 
           <PriceLadder side={side} sBar={toNum(sBar)} s1={toNum(s1)} s2={toNum(s2)} />
 
-          {/* Plan A 只作来源拆解；镜像已经落袋时，下单看 Plan B 合计。 */}
+          {/* Plan A：G = 0 时它就是 Plan B 的上限（主角）；G ≠ 0 时只作来源拆解，不给可下单的大字。 */}
           <section data-testid="add-sizing-cushion" className="space-y-2">
             <div className="flex items-baseline gap-2">
               <h3 className="text-[11px] font-medium text-foreground">Plan A · 旧仓浮盈垫</h3>
-              <span className="text-[10px] text-muted-foreground">来源拆解</span>
-              {!cushion.ok && (
+              <span className="text-[10px] text-muted-foreground">{bankedOn ? '来源拆解 · 不单独下单' : 'G = 0 时即 Plan B 上限'}</span>
+              {!bankedOn && !cushion.ok && (
                 <span
                   data-testid="add-sizing-cushion-problem"
                   className={`ml-auto truncate rounded border px-1.5 py-0.5 text-[10px] ${
@@ -382,18 +449,15 @@ export function AddSizingCalculator({ open, onClose, symbol, currentPrice = 0 }:
                 </span>
               )}
             </div>
-            {cushion.ok && (
+            {!bankedOn && cushion.ok && (
               <>
                 <div className="grid grid-cols-2 gap-2">
-                  {/* B 账本一开，这两个数就都**只是 A 那一半**，不是该照着下的量。
-                      合计加仓 / 合计对冲在 B 段以 Hero 呈现；这里相应降级，
-                      免得屏幕上最醒目的两个数恰恰是不该用的那两个（本次事故的形状之一）。 */}
-                  <Hero testId="add-sizing-x2" label={bankedOn ? '加仓 X₂ · 仅 A' : '加仓上限 X₂'}
+                  <Hero testId="add-sizing-x2" label="加仓上限 X₂"
                     value={fmtCoins(cushion.x2Max)} unit={coinName}
                     sub={`${fmtUsd(cushion.x2MaxNotional)} USD${contracts(cushion.x2Max, toNum(s2))}`}
-                    tone={bankedOn ? undefined : 'primary'} />
+                    tone="primary" />
                   <Hero testId="add-sizing-hedge"
-                    label={`对冲 @ S₁ · ${side === 'LONG' ? '空' : '多'}${bankedOn ? ' · 仅 A' : ''}`}
+                    label={`对冲 @ S₁ · ${side === 'LONG' ? '空' : '多'}`}
                     value={fmtCoins(cushion.hedgeCoinsAtS1)} unit={coinName}
                     sub={`${fmtUsd(cushion.hedgeNotionalAtS1)} USD${contracts(cushion.hedgeCoinsAtS1, toNum(s1))}`} />
                 </div>
@@ -405,38 +469,48 @@ export function AddSizingCalculator({ open, onClose, symbol, currentPrice = 0 }:
                 ]} />
               </>
             )}
+            {/* G ≠ 0：中性芯片，带符号的 Y₁ 以结算单位写出（与 G 同单位才能相加），不标红、不给张数 */}
+            {bankedOn && planB && (
+              <Chips items={[
+                ['旧仓净垫 Y₁', `${signed(planB.cushion, v => fmtG(v))}${isCoin ? `（${signed(planB.cushion * toNum(s1), fmtUsd)} USD）` : ''}`, false, 'add-sizing-cushion-y1'],
+                ['X₂ᴬ = Y₁ ÷ 险 · 仅 A', `${fmtCoins(planB.cushionAddCoins)} ${coinName}`, false, 'add-sizing-x2'],
+                ...(cushion.ok ? [['b', cushion.b.toFixed(4)] as const] : []),
+              ] as Array<readonly [string, string, boolean?, string?]>} />
+            )}
           </section>
 
-          {/* Plan B：镜像落袋后真正用于下单的统一口径。 */}
+          {/* Plan B：G ≠ 0 时真正用于下单的统一口径。 */}
           <section data-testid="add-sizing-banked" className="space-y-2 border-t border-border pt-3">
             <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5">
-              <h3 className="text-[11px] font-medium text-foreground">Plan B · 浮盈垫 + 落袋镜像</h3>
-              <span className="text-[10px] text-muted-foreground">镜像已落袋后的标准方案</span>
+              <h3 className="text-[11px] font-medium text-foreground">Plan B · 浮盈垫 + 落袋净额</h3>
+              <span className="text-[10px] text-muted-foreground">上限 = max(0, Y₁ + G) ÷ 每币风险</span>
               {!bankedOn && (
-                <span data-testid="add-sizing-banked-off" className="ml-auto text-[10px] text-muted-foreground">未填 G，仅显示 Plan A</span>
+                <span data-testid="add-sizing-banked-off" className="ml-auto text-[10px] text-muted-foreground">G = 0：Plan B 与 Plan A 同值</span>
               )}
             </div>
 
             <div className="flex flex-wrap items-end gap-x-2 gap-y-1.5">
-              <div className="w-[116px]"><Field label={`G 已落袋 ${isCoin ? coinName : 'USD'}`} value={g} onChange={setG} testId="add-sizing-g" /></div>
-              {bankedSuggest > 0 && (
+              <div className="w-[116px]"><Field label={`G 落袋净额 ${gUnit}`} value={g} onChange={setG} testId="add-sizing-g" /></div>
+              {hasBankedSignal && Number.isFinite(bankedSuggest) && (
                 <button
                   type="button"
                   data-testid="add-sizing-fill-banked"
-                  onClick={() => setG(isCoin ? tidyCoins(bankedSuggest) : String(Number(bankedSuggest.toFixed(2))))}
+                  onClick={() => setG(tidyG(bankedSuggest))}
                   title={bankedMaybeSpent
                     ? `落袋后已有 ${banked.addsSinceBanked} 笔加仓：仍持有的浮亏已通过当前 X₁ / S̄ 重算，已实现亏损也已从建议 G 扣除。`
-                    : undefined}
+                    : '止盈1 利润 − 本轮已实现亏损（含强平）'}
                   className={`h-7 rounded border px-2 font-mono text-[10px] transition-colors ${
-                    bankedMaybeSpent
-                      ? 'border-amber-500/50 bg-amber-500/5 text-amber-600 hover:bg-amber-500/10 dark:text-amber-400'
-                      : 'border-border text-muted-foreground hover:bg-accent hover:text-foreground'
+                    bankedSuggest < 0
+                      ? 'border-trading-red/50 bg-trading-red/5 text-trading-red hover:bg-trading-red/10'
+                      : bankedMaybeSpent
+                        ? 'border-amber-500/50 bg-amber-500/5 text-amber-600 hover:bg-amber-500/10 dark:text-amber-400'
+                        : 'border-border text-muted-foreground hover:bg-accent hover:text-foreground'
                   }`}
                 >
-                  本场可用 G +{isCoin ? fmtCoins(bankedSuggest, 4) : fmtUsd(bankedSuggest)}（{banked.count} 笔止盈）
+                  本场可用 G {signed(bankedSuggest, v => (isCoin ? fmtCoins(v, 4) : fmtUsd(v)))}（{banked.count} 笔止盈）
                 </button>
               )}
-              {bankedOn && (
+              {gPositive && (
                 <>
                   <div className="flex h-7 items-center gap-0.5 rounded bg-secondary p-0.5">
                     {(['line', 'size'] as BankedKnob['kind'][]).map(k => (
@@ -458,9 +532,9 @@ export function AddSizingCalculator({ open, onClose, symbol, currentPrice = 0 }:
                   </div>
                 </>
               )}
-              {bankedOn && !bankedRes.ok && (
+              {bankedProblem && (
                 <span data-testid="add-sizing-banked-problem" className="mb-1 text-[10px] text-muted-foreground">
-                  {BANKED_PROBLEM[bankedRes.problem ?? 'disabled']}
+                  {bankedProblem}
                 </span>
               )}
             </div>
@@ -480,58 +554,79 @@ export function AddSizingCalculator({ open, onClose, symbol, currentPrice = 0 }:
                 它们在 S₁ 的浮盈或浮亏会随本次 Plan B <strong>重新计算</strong>；已经实现的亏损也已从上面的建议 G 扣除。
               </div>
             )}
-            {bankedOn && bankedRes.ok && planB && !bankedPlanHasRoom && (
+            {bankedOn && planB && !planBHasRoom && (
               <div
                 data-testid="add-sizing-banked-no-room"
                 className="rounded border border-trading-red/40 bg-trading-red/5 px-2 py-1.5 text-[10px] leading-4 text-trading-red"
               >
-                <strong>Plan B 没有加仓额度</strong>：旧仓退回 S₁ 的净浮盈为
-                {' '}{isCoin ? `${fmtCoins(planB.cushion, 4)} ${coinName}` : `${fmtUsd(planB.cushion)} USD`}。
-                {planB.available <= 0
-                  ? ' 加上全部可用落袋后仍不足以覆盖旧仓缺口。'
-                  : ' 可用落袋本来足够，但当前 K_B / 定仓值折出的 B 腿太小，尚未补完旧仓缺口。'}
+                <strong>Plan B 没有加仓额度</strong>：旧仓退回 S₁ 的净浮盈 Y₁ {signed(planB.cushion, fmtG)}
+                {' '}+ 落袋净额 G {signed(planB.banked, fmtG)} = {signed(planB.available, fmtG)} ≤ 0。
                 不要把 X_G 单独当作可下单量。
               </div>
             )}
-            {bankedPlanHasRoom && (
+            {bankedOn && planB && planBHasRoom && (
               <>
-                {/* 真正可下的是当前旧仓垫（可为负）与落袋垫合并后的 Plan B 总量。 */}
+                {/* 上限只由规则决定；旋钮推出的量另起一格叫「计划加仓」，由 R0 与上限比对。 */}
                 <div className="grid grid-cols-2 gap-2">
                   <Hero
                     testId="add-sizing-total-add"
                     label="Plan B 加仓上限"
-                    value={fmtCoins(contemplatedAddCoins)}
+                    value={fmtCoins(limitCoins)}
                     unit={coinName}
-                    sub={`旧仓垫 ${fmtCoins(planB.cushionAddCoins)} + 落袋垫 ${fmtCoins(bankedRes.x2)}${contracts(contemplatedAddCoins, toNum(s2))}`}
+                    sub={`旧仓垫 ${fmtCoins(planB.cushionAddCoins)} + 落袋垫 ${fmtCoins(planB.bankedAddCoins)}${contracts(limitCoins, toNum(s2))}`}
                     tone="primary"
                   />
-                  {!bankedRes.kBBeyondS1 && (
-                    <Hero
-                      testId="add-sizing-total-hedge-hero"
-                      label={`合计对冲 @ S₁ · ${side === 'LONG' ? '空' : '多'}`}
-                      value={fmtCoins(toNum(x1) + contemplatedAddCoins)}
-                      unit={coinName}
-                      sub={`X₁ + Plan B 加仓${hedgeRead.filledHedgeCoins > 0 || bookLine
-                        ? ` · 已挂 ${fmtCoins((bookLine?.coins ?? 0) + hedgeRead.filledHedgeCoins)}`
-                        : ''}`}
-                      tone="primary"
-                    />
-                  )}
+                  <Hero
+                    testId="add-sizing-total-hedge-hero"
+                    label={`合计对冲 @ S₁ · ${side === 'LONG' ? '空' : '多'}`}
+                    value={fmtCoins(hedgeCoinsAtS1)}
+                    unit={coinName}
+                    sub={`X₁ + ${knobActive ? '计划加仓' : 'Plan B 加仓'}${hedgeRead.filledHedgeCoins > 0 || bookLine
+                      ? ` · 已挂 ${fmtCoins((bookLine?.coins ?? 0) + hedgeRead.filledHedgeCoins)}`
+                      : ''}${contracts(hedgeCoinsAtS1, toNum(s1))}`}
+                    tone="primary"
+                  />
                 </div>
-                <div className="grid grid-cols-2 gap-2">
-                  <Hero testId="add-sizing-x2b-out" label={bankedRes.kBBeyondS1 ? 'B 腿 X_G · 带敞口' : 'B 腿 X_G · 零风险'} value={fmtCoins(bankedRes.x2)} unit={coinName}
-                    sub={`${fmtUsd(bankedRes.x2Notional)} USD${contracts(bankedRes.x2, toNum(s2))}`}
-                    tone={undefined} />
-                  <Hero testId="add-sizing-kb-out" label="K_B 零风险线" value={fmtPx(bankedRes.kB)}
-                    sub={bankedRes.kBBeyondS1 ? '已越过 S₁' : '不低于 S₁'} />
-                </div>
-                <Chips items={[
-                  ['S₁ 处吃掉', `${isCoin ? fmtCoins(bankedRes.consumedAtS1, 4) : fmtUsd(bankedRes.consumedAtS1)} · 敞口 ${fmtPct(bankedRes.exposureAtS1)}`, bankedRes.exposureAtS1 > 1],
-                  ['剩余', isCoin ? fmtCoins(bankedRes.residualAtS1, 4) : fmtUsd(bankedRes.residualAtS1)],
-                  ...(bankedRes.kBBeyondS1
-                    ? [] as const
-                    : [['合计对冲 @ S₁', `${fmtCoins(toNum(x1) + contemplatedAddCoins)} ${coinName} · X₁ + Plan B 加仓`, false, 'add-sizing-total-hedge'] as const]),
-                ] as Array<readonly [string, string, boolean?, string?]>} />
+                {knobActive && bankedRes.ok && plannedAddCoins > 0 && (
+                  <Hero
+                    testId="add-sizing-planned-add"
+                    label={`计划加仓 · ${knobKind === 'line' ? `K_B ${fmtPx(bankedRes.kB)}` : `X₂ᴮ ${fmtCoins(bankedRes.x2)}`} 推出`}
+                    value={fmtCoins(plannedAddCoins)}
+                    unit={coinName}
+                    sub={plannedAddCoins > limitCoins * (1 + 1e-9)
+                      ? `超出上限 ${fmtCoins(plannedAddCoins - limitCoins)} ${coinName}——见 R0`
+                      : `上限的 ${fmtPct(plannedAddCoins / limitCoins)}`}
+                    tone={plannedAddCoins > limitCoins * (1 + 1e-9) ? 'danger' : undefined}
+                  />
+                )}
+                {knobActive && bankedRes.ok && !(plannedAddCoins > 0) && (
+                  <div
+                    data-testid="add-sizing-planned-no-room"
+                    className="rounded border border-trading-red/40 bg-trading-red/5 px-2 py-1.5 text-[10px] leading-4 text-trading-red"
+                  >
+                    当前 K_B / 定仓值折出的 B 腿太小，尚未补完旧仓缺口：计划加仓为 0。上限仍是上面那个数。
+                  </div>
+                )}
+                {gPositive && bankedRes.ok && (
+                  <>
+                    <div className="grid grid-cols-2 gap-2">
+                      {/* X_G 只是拆解：它不含旧仓垫（可为负），单独照它下单会漏掉旧仓缺口。所以不给张数、不叫零风险。 */}
+                      <Hero testId="add-sizing-x2b-out" label="B 腿 X_G · 仅拆解" value={fmtCoins(bankedRes.x2)} unit={coinName}
+                        sub={`${fmtUsd(bankedRes.x2Notional)} USD · 不可单独下单`} />
+                      <Hero testId="add-sizing-kb-out" label="K_B 零风险线" value={fmtPx(bankedRes.kB)}
+                        sub={Math.abs(bankedRes.exposureAtS1 - 1) <= 1e-9
+                          ? '= S₁ · 在 S₁ 恰好花完 G'
+                          : bankedRes.exposureAtS1 > 1
+                            ? '未到 S₁ · 在 S₁ 超支落袋'
+                            : '已越过 S₁ · 在 S₁ 只花一部分 G'} />
+                    </div>
+                    <Chips items={[
+                      ['S₁ 处吃掉', `${isCoin ? fmtCoins(bankedRes.consumedAtS1, 4) : fmtUsd(bankedRes.consumedAtS1)} · 敞口 ${fmtPct(bankedRes.exposureAtS1)}`, bankedRes.exposureAtS1 > 1 + 1e-9],
+                      ['剩余', isCoin ? fmtCoins(bankedRes.residualAtS1, 4) : fmtUsd(bankedRes.residualAtS1)],
+                      ['合计对冲 @ S₁', `${fmtCoins(hedgeCoinsAtS1)} ${coinName} · X₁ + ${knobActive ? '计划加仓' : 'Plan B 加仓'}`, false, 'add-sizing-total-hedge'],
+                    ] as Array<readonly [string, string, boolean?, string?]>} />
+                  </>
+                )}
               </>
             )}
           </section>
@@ -553,22 +648,21 @@ export function AddSizingCalculator({ open, onClose, symbol, currentPrice = 0 }:
                 <span className="font-mono text-[11px] text-foreground">{fmtPx(r0.blendedCost)}</span>
                 <span className="text-[10px] text-muted-foreground">
                   {r0.pastStop && r0.overshootPct >= 0.01
-                    ? `越过 S₁ ${r0.overshootPct.toFixed(2)}%${bankedOn ? '（Plan B 由落袋垫覆盖）' : ''}`
+                    ? `越过 S₁ ${r0.overshootPct.toFixed(2)}%${gPositive && r0.uncovered === 0 ? '（由已落袋 G 覆盖）' : ''}`
                     : '落在 S₁ 安全侧'}
                 </span>
               </div>
               {r0.uncovered > 0 ? (
                 <div data-testid="add-sizing-r0-violation" className="text-[10px] leading-[1.7] text-trading-red">
-                  <strong>R0 非法：跌到 S₁ 的亏损超出落袋 {isCoin ? `${fmtCoins(r0.uncovered, 4)} ${coinName}` : `${fmtUsd(r0.uncovered)} USD`}，
-                  这个缺口由本金支付</strong>——超出 B 上限 {Number.isFinite(bankedRes.exposureAtS1) ? `${(bankedRes.exposureAtS1 * 100).toFixed(0)}%` : '—'}。
+                  <strong>R0 非法：跌到 S₁ 的亏损 {fmtG(r0.loss)} 超出旧仓净垫 Y₁ + 落袋 G（{signed(r0.available, fmtG)}）{fmtG(r0.uncovered)}，
+                  这个缺口由本金支付</strong>——计划加仓比 Plan B 上限多 {fmtCoins(r0.excessCoins)} {coinName}，
+                  亏损是可用垫的 {r0.available > 0 ? `${((r0.loss / r0.available) * 100).toFixed(0)}%` : '∞（可用垫 ≤ 0）'}。
                   同一笔已实现利润只能买一次期权；要么把量压回上限，要么接受这不再是「锁死」而是加风险。
                 </div>
               ) : (
                 <div data-testid="add-sizing-r0-pass" className="text-[10px] leading-[1.7] text-muted-foreground">
-                  {bankedOn && bankedRes.ok
-                    ? `跌到 S₁：旧仓净浮盈垫与已落袋共同覆盖 Plan B 加仓${bankedRes.residualAtS1 > 0
-                      ? `，落袋仍剩 ${isCoin ? `${fmtCoins(bankedRes.residualAtS1, 4)} ${coinName}` : `${fmtUsd(bankedRes.residualAtS1)} USD`}`
-                      : '，落袋恰好花光'}——通过。`
+                  {bankedOn
+                    ? `跌到 S₁：旧仓净垫 Y₁ + 落袋 G 覆盖本次加仓${r0.residual > 0 ? `，仍剩 ${fmtG(r0.residual)}` : '，恰好用完'}——通过。`
                     : '跌到 S₁：旧仓浮盈垫覆盖本次加仓——通过。'}
                 </div>
               )}
@@ -634,12 +728,14 @@ function PriceLadder({ side, sBar, s1, s2 }: { side: AddSide; sBar: number; s1: 
 }
 
 function Hero({ label, value, unit, sub, tone, testId }: {
-  label: string; value: string; unit?: string; sub?: string; tone?: 'primary'; testId: string;
+  label: string; value: string; unit?: string; sub?: string; tone?: 'primary' | 'danger'; testId: string;
 }) {
   return (
     <div data-testid={testId} className="rounded-md bg-muted/40 px-3 py-2">
       <div className="text-[10px] text-muted-foreground">{label}</div>
-      <div className={`mt-0.5 font-mono text-[18px] font-semibold leading-tight tabular-nums ${tone === 'primary' ? 'text-primary' : 'text-foreground'}`}>
+      <div className={`mt-0.5 font-mono text-[18px] font-semibold leading-tight tabular-nums ${
+        tone === 'primary' ? 'text-primary' : tone === 'danger' ? 'text-trading-red' : 'text-foreground'
+      }`}>
         {value}
         {unit && <span className="ml-1 text-[10px] font-normal text-muted-foreground">{unit}</span>}
       </div>
