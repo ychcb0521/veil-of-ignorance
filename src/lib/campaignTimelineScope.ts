@@ -112,7 +112,14 @@ export interface BuildCampaignTimelineScopeInput {
   symbol: string;
   anchors: CampaignTimelineAnchor[];
   /** 这个标的上所有盖了章的活动（不只本场的）：取代规则的「重走」证据、坐下来的链条都从它来。 */
-  activity: CampaignTimelineActivity[];
+  activity?: CampaignTimelineActivity[];
+  /**
+   * 同一份活动按标的预先建好的索引（indexCampaignTimelineActivity）。列表页同标的几十场共用一份：
+   * 不再每场把全标的的活动重新分桶、把全部现实时刻重新排序，每场只并入自己的锚点。
+   * 给了它就不看 activity。可以是函数：本场一个盖了章的锚点都没有时根本不建。
+   * 索引建时的登记表与 registry 不是同一份时，按索引带着的活动就地重建（结论只取决于 registry + 活动）。
+   */
+  activityIndex?: CampaignTimelineActivityIndex | (() => CampaignTimelineActivityIndex);
   /** 本场仓位与每笔成交的 id（含还开着的）。分叉时 carried 里有它们 = 那条时间线带着本场仓位。 */
   campaignPositionIds: Iterable<string>;
   /** 战役仍在进行（closed_at 为空）：同一次坐下来里的倒回是本场的延续。 */
@@ -163,6 +170,65 @@ export interface CampaignTimelineDiagnostics {
 const finite = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
 const finitePositive = (v: unknown): v is number => finite(v) && v > 0;
 
+/**
+ * 与本场无关、只取决于登记表与这个标的全部活动的那一半预处理。
+ * 结论与逐场从活动列表现建完全相同：模拟时刻只用来取最值与「某界以上 / 以下的最值」，现实时刻只用来二分，
+ * 排好序的数组与原来逐个塞进桶里再用的是同一个多重集。
+ */
+export interface CampaignTimelineActivityIndex {
+  registry: ReplayTimelineRegistry | null | undefined;
+  activity: CampaignTimelineActivity[];
+  childrenOf: Map<string, ReplayTimelineNode[]>;
+  /** 每条时间线上活动的有效模拟时刻，升序。 */
+  simsByNode: Map<string, number[]>;
+  /** 活动与登记表节点（开始 / 最近盖章 / 结束）的有效现实时刻，升序。 */
+  realTimes: number[];
+}
+
+export function indexCampaignTimelineActivity(
+  registry: ReplayTimelineRegistry | null | undefined,
+  activity: CampaignTimelineActivity[],
+): CampaignTimelineActivityIndex {
+  const nodes: Record<string, ReplayTimelineNode> = registry?.nodes ?? {};
+  const childrenOf = new Map<string, ReplayTimelineNode[]>();
+  for (const node of Object.values(nodes)) {
+    if (node.parentId && nodes[node.parentId]) {
+      const siblings = childrenOf.get(node.parentId) ?? [];
+      siblings.push(node);
+      childrenOf.set(node.parentId, siblings);
+    }
+  }
+  const simsByNode = new Map<string, number[]>();
+  const realTimes: number[] = [];
+  for (const item of activity) {
+    if (finitePositive(item.realAt)) realTimes.push(item.realAt);
+    if (!item.timelineId || !finitePositive(item.simAt)) continue;
+    const sims = simsByNode.get(item.timelineId);
+    if (sims) sims.push(item.simAt);
+    else simsByNode.set(item.timelineId, [item.simAt]);
+  }
+  for (const node of Object.values(nodes)) {
+    for (const t of [node.startedRealAt, node.lastRealAt, node.endedRealAt]) if (finitePositive(t)) realTimes.push(t);
+  }
+  const ascending = (a: number, b: number) => a - b;
+  for (const sims of simsByNode.values()) sims.sort(ascending);
+  realTimes.sort(ascending);
+  return { registry, activity, childrenOf, simsByNode, realTimes };
+}
+
+/** 两个升序数组归并成一个升序数组（不改动入参；b 为空时直接返回 a）。 */
+function mergeAscending(a: number[], b: number[]): number[] {
+  if (b.length === 0) return a;
+  const out = new Array<number>(a.length + b.length);
+  let i = 0;
+  let j = 0;
+  let k = 0;
+  while (i < a.length && j < b.length) out[k++] = a[i] <= b[j] ? a[i++] : b[j++];
+  while (i < a.length) out[k++] = a[i++];
+  while (j < b.length) out[k++] = b[j++];
+  return out;
+}
+
 /** 委托任何一个有效的现实时刻：挂单 → 撤单 → 成交。 */
 function bestRealAt(order: CampaignTimelineOrderLike): number | null {
   for (const stamp of [order.createdRealAt, order.cancelledRealAt, order.filledRealAt]) {
@@ -185,16 +251,13 @@ export function buildCampaignTimelineScope(input: BuildCampaignTimelineScopeInpu
   const missingAnchorNodes = anchorTimelineIds.filter(id => !nodes[id]);
   const mode: CampaignTimelineScopeMode = unstampedAnchors > 0 || missingAnchorNodes.length > 0 ? 'mixed' : 'exact';
   const campaignPositionIds = new Set(input.campaignPositionIds);
+  const providedIndex = typeof input.activityIndex === 'function' ? input.activityIndex() : input.activityIndex;
+  const activityIndex = providedIndex && (providedIndex.registry?.nodes ?? null) === (input.registry?.nodes ?? null)
+    ? providedIndex
+    : indexCampaignTimelineActivity(input.registry, providedIndex?.activity ?? input.activity ?? []);
 
   // ===== 树 =====
-  const childrenOf = new Map<string, ReplayTimelineNode[]>();
-  for (const node of Object.values(nodes)) {
-    if (node.parentId && nodes[node.parentId]) {
-      const siblings = childrenOf.get(node.parentId) ?? [];
-      siblings.push(node);
-      childrenOf.set(node.parentId, siblings);
-    }
-  }
+  const { childrenOf } = activityIndex;
   /** 沿 parentId 往上走；坏数据可能成环，走过的不再走。 */
   const ancestorsOf = (id: string): ReplayTimelineNode[] => {
     const out: ReplayTimelineNode[] = [];
@@ -220,22 +283,19 @@ export function buildCampaignTimelineScope(input: BuildCampaignTimelineScopeInpu
   };
 
   // ===== 活动证据（按节点）与现实时刻链条 =====
-  const activityByNode = new Map<string, { sims: number[]; reals: number[] }>();
-  const realTimes: number[] = [];
-  const addActivity = (timelineId: string | null | undefined, simAt: unknown, realAt: unknown) => {
-    if (finitePositive(realAt)) realTimes.push(realAt);
-    if (!timelineId) return;
-    const bucket = activityByNode.get(timelineId) ?? { sims: [], reals: [] };
-    if (finitePositive(simAt)) bucket.sims.push(simAt);
-    if (finitePositive(realAt)) bucket.reals.push(realAt);
-    activityByNode.set(timelineId, bucket);
-  };
-  for (const item of input.activity) addActivity(item.timelineId, item.simAt, item.realAt);
-  for (const anchor of input.anchors) addActivity(anchor.timelineId, anchor.simAt, anchor.realAt);
-  for (const node of Object.values(nodes)) {
-    for (const t of [node.startedRealAt, node.lastRealAt, node.endedRealAt]) if (finitePositive(t)) realTimes.push(t);
+  // 全标的的活动已按节点分好桶、现实时刻已排好序（activityIndex）；这里只叠上本场自己的锚点。
+  const anchorSimsByNode = new Map<string, number[]>();
+  for (const anchor of input.anchors) {
+    if (!anchor.timelineId || !finitePositive(anchor.simAt)) continue;
+    const sims = anchorSimsByNode.get(anchor.timelineId);
+    if (sims) sims.push(anchor.simAt);
+    else anchorSimsByNode.set(anchor.timelineId, [anchor.simAt]);
   }
-  realTimes.sort((a, b) => a - b);
+  const anchorRealTimes = input.anchors
+    .map(anchor => anchor.realAt)
+    .filter((t): t is number => finitePositive(t))
+    .sort((a, b) => a - b);
+  const realTimes = mergeAscending(activityIndex.realTimes, anchorRealTimes);
   /** 从 t 往前，每两件事之间现实间隔都不超过一次坐下来，能回溯到的最早时刻。 */
   const sittingStart = (t: number): number => {
     let lo = 0;
@@ -251,10 +311,6 @@ export function buildCampaignTimelineScope(input: BuildCampaignTimelineScopeInpu
     }
     return start;
   };
-  const anchorRealTimes = input.anchors
-    .map(anchor => anchor.realAt)
-    .filter((t): t is number => finitePositive(t))
-    .sort((a, b) => a - b);
   /** t 之前、与 t 同一次坐下来里有本场的锚点操作。 */
   const sameSittingAsAnchor = (t: number) => {
     const start = sittingStart(t);
@@ -288,7 +344,10 @@ export function buildCampaignTimelineScope(input: BuildCampaignTimelineScopeInpu
    * 后者只认之后那条线上的活动（见 rewalked），不拿它的分叉点或走到哪当证据。
    */
   const spanOf = (node: ReplayTimelineNode) => {
-    const sims = [node.forkSimTime, ...(activityByNode.get(node.id)?.sims ?? [])];
+    // 活动的模拟时刻已升序：参与取最值的只需首尾两个（与把整桶摊进来取最值同一个结果）
+    const sims = [node.forkSimTime, ...(anchorSimsByNode.get(node.id) ?? [])];
+    const base = activityIndex.simsByNode.get(node.id);
+    if (base && base.length > 0) sims.push(base[0], base[base.length - 1]);
     for (const t of [node.lastSimTime, node.endSimTime]) if (finite(t)) sims.push(t);
     return { lo: Math.min(...sims), hi: Math.max(...sims) };
   };
@@ -423,15 +482,33 @@ export function buildCampaignTimelineScope(input: BuildCampaignTimelineScopeInpu
   };
   /** 之后的那条线有章为证地重走到了挂单时刻：它在本线起点之后最早的活动 ≤ 挂单时刻 + 容差（倒放镜像）。 */
   const rewalked = (later: ReplayTimelineNode, home: ReplayTimelineNode, createdAt: number) => {
-    const sims = activityByNode.get(later.id)?.sims ?? [];
+    const base = activityIndex.simsByNode.get(later.id) ?? [];
+    const extra = anchorSimsByNode.get(later.id) ?? [];
     // 这张委托本身就是本线上的活动：它的挂单时刻一定在本线的范围里
     const homeSpan = spanOf(home);
     const span = { lo: Math.min(homeSpan.lo, createdAt), hi: Math.max(homeSpan.hi, createdAt) };
+    // base 升序：满足 s <= hi 的是一段前缀、满足 s >= lo 的是一段后缀，二分找边界（界为 NaN 时两个谓词恒假，找不到）
     if (later.direction === -1) {
-      const first = sims.reduce<number | null>((max, s) => (s <= span.hi && (max == null || s > max) ? s : max), null);
+      let lo = 0;
+      let hi = base.length;
+      while (lo < hi) {
+        const mid = (lo + hi) >> 1;
+        if (base[mid] <= span.hi) lo = mid + 1;
+        else hi = mid;
+      }
+      let first: number | null = lo > 0 ? base[lo - 1] : null;
+      for (const s of extra) if (s <= span.hi && (first == null || s > first)) first = s;
       return first != null && first >= createdAt - toleranceMs;
     }
-    const first = sims.reduce<number | null>((min, s) => (s >= span.lo && (min == null || s < min) ? s : min), null);
+    let lo = 0;
+    let hi = base.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (base[mid] >= span.lo) hi = mid;
+      else lo = mid + 1;
+    }
+    let first: number | null = lo < base.length ? base[lo] : null;
+    for (const s of extra) if (s >= span.lo && (first == null || s < first)) first = s;
     return first != null && first <= createdAt + toleranceMs;
   };
   /** 用户政策 a：它没有活进之后的某条本场时间线，而那条线有证据重走到了它挂单的时刻 → 被放弃的时间线。 */
@@ -527,6 +604,23 @@ export interface CampaignTimelineEvidenceInput {
   filledOrders: FilledOrderSnapshot[];
 }
 
+/** 只与本场有关的那一半证据的输入（锚点与仓位 id）。 */
+export interface CampaignTimelineAnchorInput {
+  symbol: string;
+  campaignEvents: CampaignEvent[];
+  legs: TradeJournal[];
+  selectedRecords: TradeRecord[];
+  openPositions: OpenPositionTimelineLike[];
+  /** 按腿引用的 id 查成交快照：不分标的，同 id 以后写的为准（与 new Map(filledOrders.map(...)) 同一口径）。 */
+  filledOrdersById: ReadonlyMap<string, FilledOrderSnapshot>;
+}
+
+/** 与本场无关、按标的共用的那一半证据的输入（活动）。 */
+export type CampaignTimelineActivityInput = Pick<
+  CampaignTimelineEvidenceInput,
+  'symbol' | 'tradeHistory' | 'pendingOrders' | 'cancelledOrders' | 'filledOrders'
+>;
+
 export interface CampaignTimelineEvidence {
   anchors: CampaignTimelineAnchor[];
   activity: CampaignTimelineActivity[];
@@ -547,8 +641,18 @@ const isoMs = (value: string | null | undefined): number | null => {
  * 成交被清掉时，看关联的战役事件有没有章（事件从成交上抄来的），没有才算没盖章。
  */
 export function collectCampaignTimelineEvidence(input: CampaignTimelineEvidenceInput): CampaignTimelineEvidence {
+  const { anchors, campaignPositionIds } = collectCampaignTimelineAnchors({
+    ...input,
+    filledOrdersById: new Map(input.filledOrders.map(order => [order.id, order] as const)),
+  });
+  return { anchors, activity: collectCampaignTimelineActivity(input), campaignPositionIds };
+}
+
+/** 本场的锚点与仓位 id（见 collectCampaignTimelineEvidence）。 */
+export function collectCampaignTimelineAnchors(
+  input: CampaignTimelineAnchorInput,
+): Pick<CampaignTimelineEvidence, 'anchors' | 'campaignPositionIds'> {
   const anchors: CampaignTimelineAnchor[] = [];
-  const activity: CampaignTimelineActivity[] = [];
   const campaignPositionIds = new Set<string>();
   const { symbol } = input;
 
@@ -565,7 +669,7 @@ export function collectCampaignTimelineEvidence(input: CampaignTimelineEvidenceI
     selectedById.set(record.id, record);
     if (record.positionId && !selectedById.has(record.positionId)) selectedById.set(record.positionId, record);
   }
-  const filledById = new Map(input.filledOrders.map(order => [order.id, order] as const));
+  const filledById = input.filledOrdersById;
   for (const leg of input.legs) {
     if (leg.trade_record_id) {
       campaignPositionIds.add(leg.trade_record_id);
@@ -626,6 +730,13 @@ export function collectCampaignTimelineEvidence(input: CampaignTimelineEvidenceI
     }
   }
 
+  return { anchors, campaignPositionIds };
+}
+
+/** 这个标的上所有盖了章的活动（见 collectCampaignTimelineEvidence）：与本场无关，同标的的战役可以共用一份。 */
+export function collectCampaignTimelineActivity(input: CampaignTimelineActivityInput): CampaignTimelineActivity[] {
+  const activity: CampaignTimelineActivity[] = [];
+  const { symbol } = input;
   const push = (timelineId: string | null | undefined, simAt: unknown, realAt: unknown) => {
     if (timelineId) activity.push({ timelineId, simAt: finite(simAt) ? simAt : null, realAt: finite(realAt) ? realAt : null });
   };
@@ -646,6 +757,5 @@ export function collectCampaignTimelineEvidence(input: CampaignTimelineEvidenceI
     push(record.openedTimelineId, record.openTime, record.openedRealAt);
     push(record.closedTimelineId, record.closeTime, record.closedRealAt);
   }
-
-  return { anchors, activity, campaignPositionIds };
+  return activity;
 }

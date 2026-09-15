@@ -53,6 +53,14 @@ vi.mock('@/lib/journalApi', async () => {
     closeCampaign: vi.fn(async () => undefined),
     deleteCampaign: vi.fn(),
     readUserLocalSnapshot: () => ({ tradeHistory: [], ordersMap: {}, cancelledOrders: [], filledOrders: [] }),
+    // 列表页走共用缓存：本地快照读取器 + 远端原始行 + 纯本地装配（与 sort / bulkClose 测试同一套替身）。
+    createUserLocalSnapshotReader: () => ({
+      read: () => ({ tradeHistory: [], ordersMap: {}, cancelledOrders: [], filledOrders: [], positionsMap: {} }),
+    }),
+    fetchCampaignSourceRows: vi.fn(async () => ({ campaigns: [campaign], journals: [] })),
+    assembleCampaignsWithLegs: (_userId: string, rows: { campaigns: typeof campaign[] }) => (
+      rows.campaigns.map(item => ({ campaign: item, legs: fixture.correctedLossLegs() }))
+    ),
     getCampaignFullData: vi.fn(async () => ({
       campaign,
       legs: fixture.correctedLossLegs(),

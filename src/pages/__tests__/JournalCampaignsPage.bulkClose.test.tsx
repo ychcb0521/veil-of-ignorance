@@ -10,28 +10,38 @@
  */
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { clearCampaignListCaches } from '@/lib/campaignListCache';
 import type { TradeCampaign, TradeJournal } from '@/types/journal';
 import type { TradeRecord } from '@/types/trading';
 import JournalCampaignsPage from '../JournalCampaignsPage';
+
+beforeEach(() => {
+  clearCampaignListCaches();
+  for (const id of Object.keys(writtenPatches)) delete writtenPatches[id];
+});
 
 vi.mock('@/lib/campaignLegExecution', async importOriginal => {
   const actual = await importOriginal<typeof import('@/lib/campaignLegExecution')>();
   return { ...actual, fetchLegExitPriceCorrections: vi.fn(async () => ({})) };
 });
 
-const { mockUser, mockCloseCampaign, mockAppendCampaignEvent } = vi.hoisted(() => ({
-  /**
-   * 必须是同一个对象引用。页面的取数 effect 依赖 [user]，
-   * 每次渲染都新建一个 user 会让它每帧重跑一次 setRows —— 页面看似正常，
-   * 实则永不停歇地重渲染，测试进程会一直挂着。真实的 AuthContext 给的是稳定引用。
-   */
-  mockUser: { id: 'user-1', email: 'desk@example.com' },
-  // closeCampaign 的返回值现在参与判定：handler 拿它回读 closed_at，
-  // 确认这次结束真的落库了。mock 必须像真的一样把写回的那一行还回来。
-  mockCloseCampaign: vi.fn(async (_id: string, patch: ClosePatch) => ({ closed_at: patch.closed_at } as unknown)),
-  mockAppendCampaignEvent: vi.fn(async (_id: string, _event: { event_type: string }) => undefined),
-}));
+const { mockUser, mockCloseCampaign, mockAppendCampaignEvent, writtenPatches } = vi.hoisted(() => {
+  /** 真正落库的补丁（被 mockRejectedValueOnce / mockResolvedValueOnce 截住的调用不算）：写完之后的远端核对要读得到它。 */
+  const writtenPatches: Record<string, ClosePatch> = {};
+  return {
+    mockUser: { id: 'user-1', email: 'desk@example.com' },
+    // closeCampaign 的返回值现在参与判定：handler 拿它回读 closed_at，
+    // 确认这次结束真的落库了。mock 必须像真的一样把写回的那一行还回来。
+    mockCloseCampaign: vi.fn(async (id: string, patch: ClosePatch) => {
+      writtenPatches[id] = patch;
+      return { closed_at: patch.closed_at } as unknown;
+    }),
+    mockAppendCampaignEvent: vi.fn(async (_id: string, _event: { event_type: string }) => undefined),
+    writtenPatches,
+  };
+});
+const mockPositionsMap = vi.hoisted(() => ({}));
 
 /** closeCampaign 的补丁形状，只列这条测试要断言的字段。 */
 interface ClosePatch {
@@ -110,7 +120,7 @@ vi.mock('@/contexts/AuthContext', () => ({
 vi.mock('@/contexts/TradingContext', () => ({
   useTradingContext: () => ({
     balance: 100_000,
-    positionsMap: {},
+    positionsMap: mockPositionsMap,
     priceMap: {},
     getEffectiveTime: () => CLOCK_MS,
   }),
@@ -121,9 +131,11 @@ vi.mock('@/lib/journalApi', () => ({
   closeCampaign: mockCloseCampaign,
   deleteCampaign: vi.fn(),
   // 列表页共用一份本地快照，避免 147 场各解析一遍（实测 2~6 秒主线程阻塞）。
-  readUserLocalSnapshot: () => ({ tradeHistory: [], ordersMap: {}, cancelledOrders: [], filledOrders: [] }),
+  createUserLocalSnapshotReader: () => ({
+    read: () => ({ tradeHistory: [], ordersMap: {}, cancelledOrders: [], filledOrders: [], positionsMap: {} }),
+  }),
   getCampaignFullData: vi.fn(async (id: string) => ({
-    campaign: campaigns.find(campaign => campaign.id === id),
+    campaign: withWrittenPatch(campaigns.find(campaign => campaign.id === id) as TradeCampaign),
     legs: legsByCampaign[id] ?? [],
     tradeRecords: (legsByCampaign[id] ?? [])
       .map(leg => leg.trade_record_id && records[leg.trade_record_id])
@@ -132,11 +144,21 @@ vi.mock('@/lib/journalApi', () => ({
     reverseHedgeOrders: [],
   })),
   listAllCampaigns: vi.fn(async () => campaigns),
+  // 写入结束后的远端核对读到的是已经落库的状态，像真的 Supabase 一样。
+  fetchCampaignSourceRows: vi.fn(async () => ({ campaigns: campaigns.map(withWrittenPatch), journals: [] })),
+  assembleCampaignsWithLegs: (_userId: string, rows: { campaigns: TradeCampaign[] }) => (
+    rows.campaigns.map(campaign => ({ campaign, legs: legsByCampaign[campaign.id] ?? [] }))
+  ),
   listDeletedCampaigns: vi.fn(async () => []),
   permanentlyDeleteCampaign: vi.fn(),
   restoreCampaign: vi.fn(),
   updateCampaignImportance: vi.fn(),
 }));
+
+function withWrittenPatch(campaign: TradeCampaign): TradeCampaign {
+  const patch = writtenPatches[campaign.id];
+  return patch ? { ...campaign, ...patch } as TradeCampaign : campaign;
+}
 
 async function openBulkCloseDialog() {
   render(<MemoryRouter initialEntries={['/journal/campaigns']}><JournalCampaignsPage /></MemoryRouter>);

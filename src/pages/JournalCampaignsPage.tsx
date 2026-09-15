@@ -1,4 +1,4 @@
-import { startTransition, useEffect, useMemo, useRef, useState, type MouseEvent } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
   Activity,
@@ -28,6 +28,8 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Popover, PopoverAnchor, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { useAuth } from '@/contexts/AuthContext';
 import { useTradingContext } from '@/contexts/TradingContext';
+import { useCampaignList } from '@/hooks/useCampaignList';
+import { buildCampaignCardData, type CampaignCardData } from '@/lib/campaignListCache';
 import { computeCurrentAccountEquity } from '@/lib/accountEquity';
 import { formatCampaignDisplayCode, resolveCampaignAccountName } from '@/lib/campaignCode';
 import {
@@ -35,28 +37,17 @@ import {
   closeCampaign,
   deleteCampaign,
   getCampaignFullData,
-  readUserLocalSnapshot,
-  listAllCampaigns,
   listDeletedCampaigns,
   permanentlyDeleteCampaign,
   restoreCampaign,
   updateCampaignImportance,
 } from '@/lib/journalApi';
 import {
-  computeCampaignPnlReconciliation,
-  computeInitialExpectedMaxDrawdownPct,
-  computeInitialExpectedMaxLoss,
-  computeProfitCaptureRatio,
   formatCampaignPayoffRatio,
   resolveCampaignInitialRiskFraction,
 } from '@/lib/campaignAnalysis';
-import { fetchLegExitPriceCorrections, type LegExitPriceCorrections } from '@/lib/campaignLegExecution';
+import { fetchLegExitPriceCorrections } from '@/lib/campaignLegExecution';
 import type { CampaignInitialRiskSource } from '@/lib/campaignAnalysis';
-import {
-  campaignStatusFromRealizedPnl,
-  computeCampaignRealizedPnl,
-  type CampaignRealizedPnl,
-} from '@/lib/campaignRealizedPnl';
 import {
   BULK_CLOSE_STATUS_LABELS,
   CLOSE_TIME_SOURCE_LABELS,
@@ -67,7 +58,6 @@ import {
   computeCampaignExpectancies,
   formatArithmeticExpectancy,
   formatGeometricExpectancy,
-  resolveCampaignOpportunityQuality,
 } from '@/lib/campaignMetrics';
 import {
   computeAsymmetricRiskContributionRates,
@@ -108,32 +98,20 @@ import {
 } from '@/lib/campaignMetricSeries';
 import { formatBeijingTime } from '@/lib/timeFormat';
 import type { CampaignStatus, LegRole, TradeCampaign, TradeJournal } from '@/types/journal';
-import type { TradeRecord } from '@/types/trading';
+const MemoCampaignMetricScatterPlot = memo(CampaignMetricScatterPlot);
 
-type CampaignCardData = {
-  campaign: TradeCampaign;
-  legs: TradeJournal[];
-  tradeRecords: TradeRecord[];
-  /**
-   * 本行显示的已实现盈亏口径，连同它的 settled / byLeg 一起留着。
-   * 一键结束直接用这一份，不重算——重算会丢掉后台补齐的平仓价校正，
-   * 于是确认框里读到的数和写进数据库的数会不一样。
-   */
-  settlement: CampaignRealizedPnl;
-  profitCaptureRatio: number | null;
-  initialExpectedMaxLoss: number;
-  initialExpectedMaxDrawdownPct: number;
-  opportunityQuality: number | null;
-};
-
-type CampaignDisplayData = CampaignCardData & {
-  initialRiskFraction: number | null;
-  initialRiskSource: CampaignInitialRiskSource | null;
-  riskAccountEquity: number | null;
+/** 列表行加上依赖全表统计的四个数（期望与不对称风险贡献）。 */
+type CampaignMetricData = CampaignCardData & {
   arithmeticExpectancy: number | null;
   geometricExpectancy: number | null;
   dsiContributionPct: number | null;
   usiContributionPct: number | null;
+};
+
+type CampaignDisplayData = CampaignMetricData & {
+  initialRiskFraction: number | null;
+  initialRiskSource: CampaignInitialRiskSource | null;
+  riskAccountEquity: number | null;
 };
 
 type CampaignSortMode =
@@ -785,7 +763,7 @@ const MIRROR_TP_STATUS_LABEL: Record<MirrorTpOutcome, string> = {
 };
 
 /** 每场战役的镜像止盈排序权重（成交判定 + 盈亏比 → mirrorTpRank）。 */
-function rowMirrorTpRank(row: CampaignDisplayData): number {
+function rowMirrorTpRank(row: CampaignCardData): number {
   return mirrorTpRank(
     campaignAchievedMirrorTp(row.legs, row.tradeRecords),
     rowPayoffRatio(row),
@@ -983,11 +961,309 @@ function durationLabel(openedAt: string, closedAt: string | null) {
   return `${days}d ${hours % 24}h`;
 }
 
+/** 几何期望统一按这个固定下注比例读，卡片与汇总区共用。 */
+const fixedFractionLabel = `${(FIXED_DRAWDOWN_FRACTION * 100).toFixed(0)}%`;
+
+type CampaignCardProps = {
+  row: CampaignDisplayData;
+  expanded: boolean;
+  busy: boolean;
+  isOwnCampaign: boolean;
+  campaignAccountName: string;
+  onOpen: (campaignId: string) => void;
+  onToggleDetails: (event: MouseEvent<HTMLButtonElement>, campaignId: string) => void;
+  onImportanceChange: (event: MouseEvent<HTMLButtonElement>, campaign: TradeCampaign, weight: number) => void;
+  onDelete: (event: MouseEvent<HTMLButtonElement>, campaign: TradeCampaign) => void;
+};
+
+/**
+ * 单张战役卡片。按引用 memo：行情每个 tick 都会让整页重渲染，
+ * 行对象与回调没变的卡片一张都不重画（237 张卡片就是每个 tick 上万个节点的对账）。
+ */
+const CampaignCard = memo(function CampaignCard({
+  row,
+  expanded,
+  busy,
+  isOwnCampaign,
+  campaignAccountName,
+  onOpen,
+  onToggleDetails,
+  onImportanceChange,
+  onDelete,
+}: CampaignCardProps) {
+  const {
+    campaign,
+    legs,
+    tradeRecords,
+    profitCaptureRatio,
+    initialExpectedMaxDrawdownPct,
+    opportunityQuality,
+    initialRiskFraction,
+    riskAccountEquity,
+    arithmeticExpectancy,
+    geometricExpectancy,
+  } = row;
+  const cardLeverage = campaignLeverage(campaign, legs);
+  const importance = importanceValue(campaign);
+  const operationTime = campaignOperationTime(legs, tradeRecords);
+  const campaignDisplayCode = formatCampaignDisplayCode(
+    campaign.campaign_code,
+    campaignAccountName,
+    campaign.id,
+  );
+  const mirrorTpStatus = !campaignAchievedMirrorTp(legs, tradeRecords)
+    ? '未实现'
+    : MIRROR_TP_STATUS_LABEL[mirrorTpOutcome(
+      profitCaptureRatio == null ? null : profitCaptureRatio / 100,
+      campaign.final_realized_pnl ?? null,
+    )];
+  const statusLabel = campaign.status === 'active'
+    ? '进行中'
+    : campaign.status === 'closed_profit'
+      ? '盈利结束'
+      : campaign.status === 'closed_loss'
+        ? '亏损结束'
+        : campaign.status === 'abandoned'
+          ? '已放弃'
+          : campaign.status;
+  const realizedPnl = campaign.final_realized_pnl;
+  const realizedPnlTone = realizedPnl == null || realizedPnl === 0
+    ? 'text-foreground/80'
+    : realizedPnl > 0 ? 'text-[#0ECB81]' : 'text-[#F6465D]';
+  const payoffRatioTone = profitCaptureRatio == null || profitCaptureRatio === 0
+    ? 'text-foreground/85'
+    : profitCaptureRatio > 0 ? 'text-[#0ECB81]' : 'text-[#F6465D]';
+  const arithmeticTone = arithmeticExpectancy == null || arithmeticExpectancy === 0
+    ? 'text-foreground/80'
+    : arithmeticExpectancy > 0 ? 'text-[#0ECB81]' : 'text-[#F6465D]';
+  // 下注比例吃掉全部账户权益：几何期望必然是 −100%/笔（G = 0）。
+  // 这是仓位大小的结论，不是本场盈亏，所以会和正的算术期望同时出现。
+  const ruinousSizing = initialRiskFraction != null && initialRiskFraction >= 1;
+  const geometricTone = geometricExpectancy == null || geometricExpectancy === 0
+    ? 'text-foreground/80'
+    : geometricExpectancy > 0 ? 'text-[#0ECB81]' : 'text-[#F6465D]';
+  const detailsExpanded = expanded;
+  return (
+    <div
+      data-testid="campaign-card"
+      onClick={() => onOpen(campaign.id)}
+      className="group relative mb-3.5 cursor-pointer overflow-hidden rounded-md border border-border bg-card shadow-[0_2px_7px_rgba(15,23,42,0.055)] transition-[border-color,box-shadow,background-color] last:mb-0 hover:border-foreground/20 hover:bg-accent/20 hover:shadow-[0_7px_22px_rgba(15,23,42,0.08)]"
+    >
+      <span
+        aria-hidden="true"
+        className={`absolute inset-y-0 left-0 w-[3px] opacity-65 ${STATUS_ACCENT_STYLES[campaign.status] || 'bg-muted-foreground'}`}
+      />
+      <div className="flex flex-col gap-2 px-4 py-2.5 sm:px-5 lg:flex-row lg:items-center lg:justify-between">
+        <div className="flex min-w-0 flex-1 items-center gap-2.5">
+          <span className={`inline-flex h-2 w-2 shrink-0 rounded-full ${STATUS_STYLES[campaign.status] || 'bg-muted'}`} />
+          <div className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1">
+            <h2 className="text-[13px] font-semibold text-foreground/90">{campaign.title}</h2>
+            <span className={`rounded px-1.5 py-0.5 text-[9px] font-medium ${DIRECTION_STYLES[campaign.direction] || 'bg-muted text-muted-foreground'}`}>
+              {campaign.direction === 'main_short' ? '主空' : '主多'}
+            </span>
+            <span className="rounded bg-muted px-1.5 py-0.5 text-[9px] font-medium text-muted-foreground">{campaign.symbol}</span>
+            {/* 杠杆紧跟标的，与交易所的写法一致；取值与「杠杆倍数」排序同一个口径。 */}
+            {cardLeverage > 0 && (
+              <span
+                data-testid="campaign-leverage"
+                title={Number(campaign.initial_leverage) > 0
+                  ? '杠杆倍数：主力开仓那一刻记录的初始杠杆'
+                  : '杠杆倍数：这场战役没记初始杠杆，取各腿里最大的一档'}
+                className="inline-flex items-center rounded border border-border/70 bg-background/45 px-1.5 py-0.5 font-mono text-[9px] tabular-nums text-muted-foreground/80"
+              >
+                {formatLeverage(cardLeverage)}
+              </span>
+            )}
+            <span
+              className="inline-flex rounded border border-border/70 bg-background/45 px-1.5 py-0.5 font-mono text-[8px] text-muted-foreground/65"
+              title={`战役编号 ${campaignDisplayCode}`}
+            >
+              {campaignDisplayCode}
+            </span>
+            <span
+              data-testid="campaign-operation-time"
+              className="inline-flex items-center gap-1 border-l border-border/70 pl-2 text-[9px] text-muted-foreground/60"
+            >
+              操作时间：
+              <span className="whitespace-nowrap font-mono text-[9px] tabular-nums text-foreground/70">
+                {fmtOperationTime(operationTime)}
+              </span>
+            </span>
+          </div>
+        </div>
+        <div className="flex shrink-0 flex-wrap items-center gap-1 self-end lg:self-auto" onClick={(event) => event.stopPropagation()}>
+          <button
+            type="button"
+            aria-expanded={detailsExpanded}
+            aria-label={detailsExpanded ? '收起战役详情' : '展开战役详情'}
+            title={detailsExpanded ? '收起战役详情' : '展开战役详情'}
+            onClick={(event) => onToggleDetails(event, campaign.id)}
+            className="inline-flex h-7 w-7 items-center justify-center rounded border border-transparent text-muted-foreground/50 transition-colors hover:border-border/80 hover:bg-background/65 hover:text-foreground"
+          >
+            <ChevronDown className={`h-3.5 w-3.5 transition-transform ${detailsExpanded ? 'rotate-180' : ''}`} />
+          </button>
+          {isOwnCampaign && (
+            <div className="flex h-7 items-center gap-0.5 rounded border border-border/80 bg-background/50 px-1.5">
+              <span className="mr-0.5 text-[8px] text-muted-foreground">重要性</span>
+              {[1, 2, 3, 4, 5].map(score => (
+                <button
+                  key={score}
+                  type="button"
+                  disabled={busy}
+                  title={`设为 ${score} 分`}
+                  onClick={(event) => onImportanceChange(event, campaign, score)}
+                  className="inline-flex h-5 w-5 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-[#F0B90B]/10 hover:text-[#F0B90B] disabled:opacity-50"
+                >
+                  <Star
+                    className={`h-3 w-3 ${score <= importance ? 'text-[#F0B90B]' : ''}`}
+                    fill={score <= importance ? 'currentColor' : 'none'}
+                  />
+                </button>
+              ))}
+            </div>
+          )}
+          {!isOwnCampaign && importance > 0 && (
+            <span className="rounded border border-border bg-background/60 px-2 py-1 text-[10px] text-muted-foreground">
+              重要性 {importance}/5
+            </span>
+          )}
+          {isOwnCampaign && (
+            <button
+              type="button"
+              disabled={busy}
+              title="删除战役"
+              onClick={(event) => onDelete(event, campaign)}
+              className="inline-flex h-7 w-7 items-center justify-center rounded border border-border/80 bg-background/50 text-muted-foreground transition-colors hover:border-[#F6465D]/40 hover:bg-[#F6465D]/10 hover:text-[#F6465D] disabled:opacity-50"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+            </button>
+          )}
+          <div className={`inline-flex h-7 items-center rounded px-2.5 text-[9px] font-medium ${STATUS_STYLES[campaign.status] || 'bg-muted text-muted-foreground'}`}>
+            {statusLabel}
+          </div>
+        </div>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-y-1 border-t border-border/65 bg-muted/[0.08] px-4 py-1.5 sm:px-5">
+        <div className="inline-flex h-7 shrink-0 items-center gap-1.5 border-r border-border/60 px-3 first:pl-0" data-testid="campaign-expected-drawdown-pct">
+          <span className="text-[10px] text-muted-foreground/70">预期回撤：</span>
+          <span className="whitespace-nowrap font-mono text-[10px] font-medium tabular-nums text-foreground/85">
+            {initialExpectedMaxDrawdownPct > 0 ? `${initialExpectedMaxDrawdownPct.toFixed(2)}%` : '—'}
+          </span>
+        </div>
+        <div
+          data-testid="campaign-opportunity-quality-value"
+          title={opportunityQuality == null
+            ? '需要已结束战役的实际盈亏比、主力开仓价和至少一个初始对冲 A/B 价格'
+            : `Q = 实际盈亏比 ${(profitCaptureRatio! / 100).toFixed(2)} ÷ 预期回撤 ${initialExpectedMaxDrawdownPct.toFixed(2)}%`}
+          className="inline-flex h-7 shrink-0 items-center gap-1.5 border-r border-border/60 px-3"
+        >
+          <span className="text-[10px] text-muted-foreground/70">机会质量：</span>
+          <span className="whitespace-nowrap font-mono text-[10px] font-medium tabular-nums text-foreground/85">{formatOpportunityQuality(opportunityQuality)}</span>
+        </div>
+        <div className="inline-flex h-7 shrink-0 items-center gap-1.5 border-r border-border/60 px-3" data-testid="campaign-payoff-ratio">
+          <span className="text-[10px] text-muted-foreground/70">盈亏比：</span>
+          <span
+            data-testid="campaign-payoff-ratio-value"
+            className={`whitespace-nowrap font-mono text-[10px] font-medium tabular-nums ${payoffRatioTone}`}
+          >
+            {profitCaptureRatio == null ? '—' : formatCampaignPayoffRatio(profitCaptureRatio, 2)}
+          </span>
+        </div>
+        <div
+          data-testid="campaign-arithmetic-expectancy"
+          title="Eᵢ = 当前有效战役胜率 × 该战役盈亏比 − 亏损概率"
+          className="inline-flex h-7 shrink-0 items-center gap-1.5 border-r border-border/60 px-3"
+        >
+          <span className="text-[10px] text-muted-foreground/70">算术期望：</span>
+          <span className={`whitespace-nowrap font-mono text-[10px] font-medium tabular-nums ${arithmeticTone}`}>{formatArithmeticExpectancy(arithmeticExpectancy)}</span>
+        </div>
+        <div
+          data-testid="campaign-geometric-expectancy"
+          data-ruinous-sizing={ruinousSizing ? 'true' : undefined}
+          title={`单场几何期望 = Gᵢ − 1，Gᵢ = 1 + bᵢ·x，x 每场统一取 ${fixedFractionLabel}`
+            + (initialRiskFraction == null
+              ? ''
+              : ruinousSizing
+                ? `。另：本场真实下注比例 = 最大预期亏损 ÷ 账户总资产 ${riskAccountEquity?.toFixed(2) ?? '—'} = ${(initialRiskFraction * 100).toFixed(2)}% ≥ 100%，`
+                  + '这一注押上了全部本金。它评判的是当时的仓位大小，不进上面这个公式，也与本场实际盈亏无关。'
+                  + `注意卡片左侧的「预期回撤 ${initialExpectedMaxDrawdownPct.toFixed(2)}%」是价格层面的口径（主力入场到对冲边界的距离），与账户层面的下注比例不是同一个量。`
+                : '')}
+          className="inline-flex h-7 shrink-0 items-center gap-1.5 border-r border-border/60 px-3"
+        >
+          <span className="text-[10px] text-muted-foreground/70">几何期望：</span>
+          <span className={`whitespace-nowrap font-mono text-[10px] font-medium tabular-nums ${geometricTone}`}>{formatGeometricExpectancy(geometricExpectancy)}</span>
+          {/* 这一注押上了全部本金。几何期望改用固定 x 之后它不再影响那个数，
+              但「当时仓位有多大」本身就是要盯的纪律信号，所以徽标留着。 */}
+          {ruinousSizing && (
+            <span className="rounded-sm bg-[#F6465D]/15 px-1 text-[9px] leading-4 text-[#F6465D]">
+              仓位击穿
+            </span>
+          )}
+        </div>
+        <div className="inline-flex h-7 shrink-0 items-center gap-1.5 px-3" data-testid="campaign-mirror-tp-status">
+          <span className="text-[10px] text-muted-foreground/70">镜像止盈：</span>
+          <span className={`whitespace-nowrap font-mono text-[10px] font-medium tabular-nums ${mirrorTpStatus === MIRROR_TP_STATUS_LABEL.win ? 'text-[#0ECB81]' : mirrorTpStatus === MIRROR_TP_STATUS_LABEL.loss ? 'text-[#F6465D]' : 'text-foreground/85'}`}>{mirrorTpStatus}</span>
+        </div>
+      </div>
+
+      {detailsExpanded && (
+        <dl
+          data-testid="campaign-card-details"
+          className="flex flex-wrap items-center gap-y-1 border-t border-border/60 bg-background/35 px-4 py-1.5 sm:px-5"
+        >
+          <div className="inline-flex h-7 shrink-0 items-center gap-1.5 border-r border-border/60 px-3 first:pl-0">
+            <dt className="text-[10px] text-muted-foreground/70">战役时间：</dt>
+            <dd className="whitespace-nowrap font-mono text-[10px] font-medium tabular-nums text-foreground/80">
+              {fmtTime(campaign.opened_at)} → {fmtTime(campaign.closed_at)}
+            </dd>
+          </div>
+          <div className="inline-flex h-7 shrink-0 items-center gap-1.5 border-r border-border/60 px-3">
+            <dt className="text-[10px] text-muted-foreground/70">结构与时长：</dt>
+            <dd className="whitespace-nowrap font-mono text-[10px] font-medium tabular-nums text-foreground/80">
+              {legs.length} legs · {durationLabel(campaign.opened_at, campaign.closed_at)}
+            </dd>
+          </div>
+          <div className="inline-flex h-7 shrink-0 items-center gap-1.5 border-r border-border/60 px-3">
+            <dt className="text-[10px] text-muted-foreground/70">已实现 P&amp;L：</dt>
+            <dd className={`whitespace-nowrap font-mono text-[10px] font-medium tabular-nums ${realizedPnlTone}`}>
+              {realizedPnl == null ? '—' : realizedPnl.toFixed(2)}
+            </dd>
+          </div>
+          <div className="flex min-h-7 min-w-0 items-center gap-1.5 px-3">
+            <dt className="inline-flex shrink-0 items-center gap-1 text-[10px] text-muted-foreground/70">
+              <Layers className="h-3 w-3" />
+              Legs：
+            </dt>
+            <dd className="flex min-h-5 flex-wrap items-center gap-1">
+              {legs.length === 0 ? (
+                <span className="text-[10px] text-muted-foreground">暂无 legs</span>
+              ) : (
+                legs.map((leg: TradeJournal) => (
+                  <span
+                    key={leg.id}
+                    title={leg.leg_role ? LEG_ROLE_LABELS[leg.leg_role] : '未归类'}
+                    className={`rounded px-1.5 py-0.5 text-[9px] ${leg.leg_role ? LEG_CHIP_CLASS[leg.leg_role] : 'bg-muted text-muted-foreground'}`}
+                  >
+                    {leg.leg_role ? LEG_ABBR[leg.leg_role] : '?'}
+                  </span>
+                ))
+              )}
+            </dd>
+          </div>
+        </dl>
+      )}
+    </div>
+  );
+});
+
 export default function JournalCampaignsPage() {
   const nav = useNavigate();
   const location = useLocation();
   const initialSortState = useMemo(() => parseCampaignListParams(location.search), [location.search]);
   const { user, profile } = useAuth();
+  // 只认 id：auth 每次刷新 token 都会换一个 user 对象，不能让它牵动取数与回调。
+  const userId = user?.id;
   const campaignAccountName = useMemo(
     () => resolveCampaignAccountName({
       displayName: profile?.display_name,
@@ -996,20 +1272,24 @@ export default function JournalCampaignsPage() {
     }),
     [profile?.display_name, user?.email, user?.id],
   );
-  const { balance, positionsMap, priceMap, getEffectiveTime } = useTradingContext();
+  const { balance, positionsMap, priceMap, getEffectiveTime, tradeHistory, ordersMap, filledOrders } = useTradingContext();
   const currentAccountEquity = useMemo(
     () => computeCurrentAccountEquity(balance, positionsMap, priceMap),
     [balance, positionsMap, priceMap],
   );
-  const [loading, setLoading] = useState(true);
-  const [rows, setRows] = useState<CampaignCardData[]>([]);
-  /**
-   * 卡片允许逐批出现，但散点图必须等基础明细全部尝试完再一次成图。
-   * 否则 181 场会让整张 SVG 和同等数量的命中按钮重建十几次，视觉上像「加载到一半停住」。
-   */
-  const [campaignRowsComplete, setCampaignRowsComplete] = useState(false);
-  const [campaignLoadProgress, setCampaignLoadProgress] = useState({ loaded: 0, total: 0 });
-  const [busyCampaignId, setBusyCampaignId] = useState<string | null>(null);
+  const {
+    rows, setRows, complete: campaignRowsComplete, refreshing, loaded, total,
+    error: campaignLoadError, failedCount, retry: retryCampaignLoad, beginMutation,
+  } = useCampaignList(user?.id, { tradeHistory, ordersMap, filledOrders, positionsMap });
+  const loading = !campaignRowsComplete && !campaignLoadError && rows.length === 0;
+  const campaignLoadProgress = { loaded, total };
+  const [busyCampaignId, setBusyCampaignIdState] = useState<string | null>(null);
+  // 回调只从 ref 读「正在忙的那一场」：不把它列进依赖，点一次星不会换掉 237 张卡片的回调引用
+  const busyCampaignIdRef = useRef<string | null>(null);
+  const setBusyCampaignId = useCallback((id: string | null) => {
+    busyCampaignIdRef.current = id;
+    setBusyCampaignIdState(id);
+  }, []);
   const [sortState, setSortState] = useState<CampaignSortState>(initialSortState);
   // 默认全选：进页面先看全部战役，要比较某一段日子再自己框。
   const [operationRange, setOperationRange] = useState<CampaignOperationRange>(
@@ -1061,176 +1341,11 @@ export default function JournalCampaignsPage() {
     nav({ pathname: location.pathname, search: search ? `?${search}` : '' }, { replace: true });
   }, [location.pathname, location.search, nav]);
 
-  useEffect(() => {
-    if (!user) return;
-    let cancelled = false;
-    (async () => {
-      setLoading(true);
-      setRows([]);
-      setCampaignRowsComplete(false);
-      setCampaignLoadProgress({ loaded: 0, total: 0 });
-      try {
-        const campaigns = await listAllCampaigns(user.id);
-        if (cancelled) return;
-        setCampaignLoadProgress({ loaded: 0, total: campaigns.length });
-
-        /**
-         * 单场战役的行数据。exitPriceCorrections 可选：
-         * 首屏用空校正（纯本地计算、零网络），后台补齐后再用真校正重算一次。
-         */
-        const buildRow = (
-          details: Awaited<ReturnType<typeof getCampaignFullData>>,
-          exitPriceCorrections: LegExitPriceCorrections,
-        ) => {
-          const reconciliation = computeCampaignPnlReconciliation(
-            details.campaign,
-            details.legs,
-            details.tradeRecords,
-            exitPriceCorrections,
-          );
-          // 无条件同源。此前只有「存在平仓价校正」时才切换到重算口径，
-          // 于是同一场战役在列表页显示落库值、在详情页显示重算值——两个页面两个数。
-          const settlement = computeCampaignRealizedPnl(
-            details.campaign, details.legs, details.tradeRecords, exitPriceCorrections,
-          );
-          const reconciledCampaign = {
-            ...details.campaign,
-            final_realized_pnl: settlement.total ?? details.campaign.final_realized_pnl,
-            status: settlement.settled
-              ? campaignStatusFromRealizedPnl(settlement, details.campaign.closed_at)
-              : details.campaign.status,
-          };
-          const initialExpectedMaxLoss = computeInitialExpectedMaxLoss(
-            details.campaign,
-            details.legs,
-            details.tradeRecords,
-            details.reverseHedgeOrders,
-          );
-          const initialExpectedMaxDrawdownPct = computeInitialExpectedMaxDrawdownPct(
-            details.campaign,
-            details.legs,
-            details.tradeRecords,
-            details.reverseHedgeOrders,
-          );
-          const profitCaptureRatio = Number.isFinite(initialExpectedMaxLoss) && initialExpectedMaxLoss > 0
-            ? computeProfitCaptureRatio(
-              details.campaign,
-              details.legs,
-              details.tradeRecords,
-              details.reverseHedgeOrders,
-              exitPriceCorrections,
-            )
-            : null;
-          const opportunityQuality = resolveCampaignOpportunityQuality(
-            reconciledCampaign,
-            profitCaptureRatio,
-            initialExpectedMaxDrawdownPct,
-          );
-          return {
-            campaign: reconciledCampaign,
-            legs: details.legs,
-            tradeRecords: details.tradeRecords,
-            settlement,
-            profitCaptureRatio,
-            initialExpectedMaxLoss,
-            initialExpectedMaxDrawdownPct,
-            opportunityQuality,
-          };
-        };
-
-        /**
-         * ① 首屏：取战役明细，平仓价校正一律用空值。
-         *
-         * 三件事此前把这一页拖到「加载中」散不掉，逐条去掉：
-         *
-         *   a. **本地存储被重复解析**。每场 getCampaignFullData 都会把
-         *      trade_history / orders_map / cancelled_orders / filled_orders 各解析一遍。
-         *      147 场 × 仅 trade_history 一项实测就是 0.5~1.6 秒**纯主线程阻塞**，
-         *      四项合计 2~6 秒——期间滚动、点击、动画全部停摆，不只是这一页慢。
-         *      改成读一次、全场共用。
-         *
-         *   b. **渲染触发写库**。默认路径末尾会回写腿快照与战役汇总；
-         *      刚改过口径之后几乎每条腿都判定为需要回写，于是打开列表变成写风暴。
-         *      列表是只读视图，heal: false。
-         *
-         *   c. **首屏等全部**。原来 Promise.all 等 147 场全部返回才画第一行。
-         *      改成分批：卡片每批到达就画；散点图等全部批次完成后一次成图，
-         *      避免同一张大 SVG 在加载过程中被完整重建十几次。
-         *
-         *   d. **一场失败拖死后续全部批次**。Promise.all 中任何一场失败都会直接跳到
-         *      finally，表现就是列表 / 散点图永远只加载到某个整数批次。改用 allSettled，
-         *      单场异常只跳过该场，后面的战役继续加载。
-         */
-        const local = readUserLocalSnapshot(user.id);
-        const BATCH = 12;
-        const detailList: Awaited<ReturnType<typeof getCampaignFullData>>[] = [];
-        for (let i = 0; i < campaigns.length; i += BATCH) {
-          if (cancelled) return;
-          const settledBatch = await Promise.allSettled(
-            campaigns.slice(i, i + BATCH).map(campaign =>
-              getCampaignFullData(campaign.id, { local, heal: false })),
-          );
-          if (cancelled) return;
-          const batch = settledBatch.flatMap(result => (
-            result.status === 'fulfilled' ? [result.value] : []
-          ));
-          detailList.push(...batch);
-          // 只计算新到的这一批；旧实现每批重算之前的全部行，累计成本会退化成 O(n²)。
-          // 某一场的旧数据若不完整，计算失败也只跳过该场，不能再次中断后续批次。
-          const paintedBatch = batch.flatMap(details => {
-            try {
-              return [buildRow(details, {})];
-            } catch {
-              return [];
-            }
-          });
-          setRows(previous => [...previous, ...paintedBatch]);
-          setCampaignLoadProgress({
-            loaded: Math.min(i + BATCH, campaigns.length),
-            total: campaigns.length,
-          });
-          setLoading(false);          // 第一批到达即撤掉「加载中」
-          // 让出一帧：不让连续的批次把主线程连成一段长任务。
-          await new Promise(resolve => setTimeout(resolve, 0));
-        }
-        if (cancelled) return;
-        setLoading(false);
-        setCampaignRowsComplete(true);
-
-        // ② 后台补齐平仓价校正。先并发读取、最后合并成一次更新；旧实现每场到达都
-        //    重排卡片并重画整张图，几十到上百次提交会让滚动和悬停明显掉帧。
-        void (async () => {
-          const correctedEntries = await Promise.all(detailList.map(async details => {
-            const corrections = await fetchLegExitPriceCorrections(
-              details.campaign.symbol,
-              details.legs,
-              details.tradeRecords,
-            ).catch(() => ({} as LegExitPriceCorrections));
-            if (Object.keys(corrections).length === 0) return null;
-            return [details.campaign.id, buildRow(details, corrections)] as const;
-          }));
-          if (cancelled) return;
-          const correctedById = new Map(correctedEntries.filter(entry => entry != null));
-          if (correctedById.size === 0) return;
-          startTransition(() => {
-            setRows(previous => previous.map(row => correctedById.get(row.campaign.id) ?? row));
-          });
-        })();
-      } finally {
-        if (!cancelled) {
-          setLoading(false);
-          // 即使战役目录本身读取失败，也不能让 URL 直达的图表永远卡在骨架屏。
-          setCampaignRowsComplete(true);
-        }
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [user]);
 
   useEffect(() => {
-    if (!user) return;
+    if (!userId) return;
     let cancelled = false;
-    listDeletedCampaigns(user.id)
+    listDeletedCampaigns(userId)
       .then(campaigns => {
         if (!cancelled) setDeletedCampaigns(campaigns);
       })
@@ -1238,7 +1353,7 @@ export default function JournalCampaignsPage() {
         if (!cancelled) setDeletedCampaigns([]);
       });
     return () => { cancelled = true; };
-  }, [user]);
+  }, [userId]);
 
   useEffect(() => {
     if (loading) return;
@@ -1298,33 +1413,38 @@ export default function JournalCampaignsPage() {
   );
   const bulkCloseTargets = includeUnsettled ? bulkClosePlan : settledPlan;
 
-  const handleImportanceChange = async (
+  // 卡片按引用 memo：回调不依赖 rows / 正在忙的那一场（都走函数式更新与 ref），整个会话里引用不换。
+  const handleImportanceChange = useCallback(async (
     event: MouseEvent<HTMLButtonElement>,
     campaign: TradeCampaign,
     weight: number,
   ) => {
     event.stopPropagation();
-    if (!user || campaign.user_id !== user.id || busyCampaignId === campaign.id) return;
+    if (!userId || campaign.user_id !== userId || busyCampaignIdRef.current === campaign.id) return;
 
-    const previousRows = rows;
-    const nextWeight = importanceValue(campaign) === weight ? 0 : weight;
-    setBusyCampaignId(campaign.id);
-    setRows(prev => prev.map(row => (
+    const previousWeight = importanceValue(campaign);
+    const nextWeight = previousWeight === weight ? 0 : weight;
+    const setWeight = (value: number) => setRows(prev => prev.map(row => (
       row.campaign.id === campaign.id
-        ? { ...row, campaign: { ...row.campaign, importance_weight: nextWeight } }
+        ? { ...row, campaign: { ...row.campaign, importance_weight: value } }
         : row
     )));
+    const finishMutation = beginMutation();
+    setBusyCampaignId(campaign.id);
+    setWeight(nextWeight);
 
     try {
       await updateCampaignImportance(campaign.id, nextWeight);
       toast.success(nextWeight > 0 ? `重要性已设为 ${nextWeight}` : '已清除重要性评分');
     } catch (error) {
-      setRows(previousRows);
+      // 只把这一场的评分退回去，不整表回滚：期间别的行可能已经被后台核对更新过
+      setWeight(previousWeight);
       toast.error(error instanceof Error ? error.message : String(error));
     } finally {
       setBusyCampaignId(null);
+      finishMutation();
     }
-  };
+  }, [userId, beginMutation, setRows, setBusyCampaignId]);
 
   const performanceSamples = useMemo(
     () => scopedRows.map(row => ({
@@ -1384,37 +1504,84 @@ export default function JournalCampaignsPage() {
       sampleCount: samples.length,
     };
   }, [scopedRows]);
-  const displayRows = useMemo<CampaignDisplayData[]>(
-    () => scopedRows.map(row => {
+  /**
+   * 期望与不对称风险贡献都依赖全表统计（胜率、DSI/USI 汇总），一场变了整表都要重算——
+   * 但重算出的四个数与上次相同的行沿用上一个对象（整表都没变就沿用同一个数组）：
+   * 卡片与散点图的 memo 按引用判，一场成交变化只重画那一张卡片、一次散点图。
+   */
+  const metricRowsRef = useRef<{ byRow: Map<CampaignCardData, CampaignMetricData>; rows: CampaignMetricData[] }>({
+    byRow: new Map(), rows: [],
+  });
+  const metricRows = useMemo<CampaignMetricData[]>(() => {
+    const previous = metricRowsRef.current;
+    const byRow = new Map<CampaignCardData, CampaignMetricData>();
+    const rows = scopedRows.map(row => {
+      const next: CampaignMetricData = {
+        ...row,
+        ...computeCampaignExpectancies(row.profitCaptureRatio, performance.expectedWinRate),
+        ...computeAsymmetricRiskContributionRates({
+          campaign: row.campaign,
+          payoffRatio: row.profitCaptureRatio == null ? null : row.profitCaptureRatio / 100,
+        }, asymmetricRisk),
+      };
+      const before = previous.byRow.get(row);
+      const kept = before
+        && Object.is(before.arithmeticExpectancy, next.arithmeticExpectancy)
+        && Object.is(before.geometricExpectancy, next.geometricExpectancy)
+        && Object.is(before.dsiContributionPct, next.dsiContributionPct)
+        && Object.is(before.usiContributionPct, next.usiContributionPct)
+        ? before
+        : next;
+      byRow.set(row, kept);
+      return kept;
+    });
+    const unchanged = rows.length === previous.rows.length && rows.every((row, index) => row === previous.rows[index]);
+    metricRowsRef.current = { byRow, rows: unchanged ? previous.rows : rows };
+    return metricRowsRef.current.rows;
+  }, [scopedRows, performance.expectedWinRate, asymmetricRisk]);
+  /**
+   * 账户权益随行情每个 tick 变，但只有没记开仓权益快照的场次才拿它兜底。
+   * 解析出的三个数与上次相同就沿用上一个行对象（整表都没变就沿用同一个数组）：
+   * 卡片按引用 memo，行情 tick 一张都不重画。
+   */
+  const displayRowsRef = useRef<{ byRow: Map<CampaignMetricData, CampaignDisplayData>; rows: CampaignDisplayData[] }>({
+    byRow: new Map(), rows: [],
+  });
+  const displayRows = useMemo<CampaignDisplayData[]>(() => {
+    const previous = displayRowsRef.current;
+    const byRow = new Map<CampaignMetricData, CampaignDisplayData>();
+    const rows = metricRows.map(row => {
       const initialRisk = resolveCampaignInitialRiskFraction(
         row.initialExpectedMaxLoss,
         row.legs,
-        row.campaign.user_id === user?.id ? currentAccountEquity : null,
+        row.campaign.user_id === userId ? currentAccountEquity : null,
       );
-      const initialRiskFraction = initialRisk?.drawdownFraction ?? null;
-      return {
+      const display: CampaignDisplayData = {
         ...row,
-        initialRiskFraction,
+        initialRiskFraction: initialRisk?.drawdownFraction ?? null,
         initialRiskSource: initialRisk?.source ?? null,
         riskAccountEquity: initialRisk?.accountEquityAtMainOpen ?? null,
-        ...computeCampaignExpectancies(row.profitCaptureRatio, performance.expectedWinRate),
-        ...computeAsymmetricRiskContributionRates(
-          {
-            campaign: row.campaign,
-            payoffRatio: row.profitCaptureRatio == null ? null : row.profitCaptureRatio / 100,
-          },
-          asymmetricRisk,
-        ),
       };
-    }),
-    [scopedRows, performance.expectedWinRate, currentAccountEquity, user?.id, asymmetricRisk],
-  );
+      const before = previous.byRow.get(row);
+      const kept = before
+        && Object.is(before.initialRiskFraction, display.initialRiskFraction)
+        && before.initialRiskSource === display.initialRiskSource
+        && Object.is(before.riskAccountEquity, display.riskAccountEquity)
+        ? before
+        : display;
+      byRow.set(row, kept);
+      return kept;
+    });
+    const unchanged = rows.length === previous.rows.length && rows.every((row, index) => row === previous.rows[index]);
+    displayRowsRef.current = { byRow, rows: unchanged ? previous.rows : rows };
+    return displayRowsRef.current.rows;
+  }, [metricRows, currentAccountEquity, userId]);
   const sortedRows = useMemo(
     () => sortCampaignRows(displayRows, sortState),
     [displayRows, sortState],
   );
   const metricSeriesByKey = useMemo<Record<CampaignMetricChartKey, CampaignMetricSeries>>(() => {
-    const samples = displayRows.map(row => ({
+    const samples = metricRows.map(row => ({
       row,
       campaignId: row.campaign.id,
       title: row.campaign.title,
@@ -1423,7 +1590,7 @@ export default function JournalCampaignsPage() {
       pnl: row.campaign.final_realized_pnl ?? null,
       payoffRatio: rowPayoffRatio(row),
     }));
-    const buildSeries = (valueForRow: (row: CampaignDisplayData) => number | null) => (
+    const buildSeries = (valueForRow: (row: typeof metricRows[number]) => number | null) => (
       buildCampaignMetricSeries(samples.map(({ row, ...sample }) => ({
         ...sample,
         value: valueForRow(row),
@@ -1456,7 +1623,7 @@ export default function JournalCampaignsPage() {
       dsiContribution: buildSeries(row => row.dsiContributionPct),
       usiContribution: buildSeries(row => row.usiContributionPct),
     };
-  }, [displayRows]);
+  }, [metricRows]);
   const selectedMetricConfig = CAMPAIGN_METRIC_CHART_CONFIGS.find(
     config => config.key === metricChartKey,
   ) ?? CAMPAIGN_METRIC_CHART_CONFIGS[0];
@@ -1472,14 +1639,18 @@ export default function JournalCampaignsPage() {
   );
   const familySourceLabel = CAMPAIGN_METRIC_CHART_CONFIGS
     .find(config => config.key === openSourceKey)?.label ?? selectedMetricConfig.label;
-  const updateChartParam = (nextKey: CampaignMetricChartKey | null) => {
+  const updateChartParam = useCallback((nextKey: CampaignMetricChartKey | null) => {
     const params = new URLSearchParams(location.search);
     params.delete('scope');
     if (nextKey) params.set('chart', nextKey);
     else params.delete('chart');
     const search = params.toString();
     nav({ pathname: location.pathname, search: search ? `?${search}` : '' }, { replace: true });
-  };
+  }, [location.pathname, location.search, nav]);
+  const handleChartBack = useCallback(() => {
+    setMetricChartOpen(false);
+    updateChartParam(null);
+  }, [updateChartParam]);
 
   const handleMetricChartToggle = (key: CampaignMetricChartKey) => {
     if (metricSeriesByKey[key].points.length === 0) return;
@@ -1515,7 +1686,6 @@ export default function JournalCampaignsPage() {
   const geometricEdgeLabel = geometric == null
     ? '—'
     : `${geometric.geometricEdge >= 0 ? '+' : ''}${(geometric.geometricEdge * 100).toFixed(1)}%`;
-  const fixedFractionLabel = `${(FIXED_DRAWDOWN_FRACTION * 100).toFixed(0)}%`;
   // 累计倍数：几百场复利动辄上亿倍，超过 4 位数就换科学计数，别让一串零占满一行。
   const formatGrowthFactor = (factor: number) => {
     if (factor === 0) return '×0（本金归零）';
@@ -1588,12 +1758,12 @@ export default function JournalCampaignsPage() {
     updateListParams(nextSort, nextChartKey);
   };
 
-  const handleCampaignOpen = (campaignId: string) => {
+  const handleCampaignOpen = useCallback((campaignId: string) => {
     const storageKey = `${CAMPAIGN_LIST_SCROLL_KEY_PREFIX}${location.key}`;
     sessionStorage.setItem(storageKey, String(window.scrollY));
     const state: CampaignListNavigationState = { fromCampaignList: true };
     nav(`/journal/campaigns/${campaignId}${location.search}`, { state });
-  };
+  }, [location.key, location.search, nav]);
 
   const openFormulaPopover = (
     event: MouseEvent<HTMLButtonElement>,
@@ -1633,6 +1803,7 @@ export default function JournalCampaignsPage() {
    */
   const handleBulkClose = async () => {
     if (bulkClosing || bulkCloseTargets.length === 0) return;
+    const finishMutation = beginMutation();
     setBulkClosing(true);
     setBulkFailures([]);
     setBulkWarnings([]);
@@ -1709,6 +1880,7 @@ export default function JournalCampaignsPage() {
       }));
     }
 
+    finishMutation();
     setBulkWarnings(warnings);
     if (failures.length === 0) {
       setBulkCloseOpen(false);
@@ -1725,18 +1897,25 @@ export default function JournalCampaignsPage() {
     setBulkFailures(failures);
   };
 
-  const handleDeleteCampaign = async (
+  const handleDeleteCampaign = useCallback(async (
     event: MouseEvent<HTMLButtonElement>,
     campaign: TradeCampaign,
   ) => {
     event.stopPropagation();
-    if (!user || campaign.user_id !== user.id || busyCampaignId === campaign.id) return;
+    if (!userId || campaign.user_id !== userId || busyCampaignIdRef.current === campaign.id) return;
     const confirmed = window.confirm(`删除战役「${campaign.title}」？\n\n战役会移到“已删除”，之后仍可恢复；已生成的交易记录不会被删除。`);
     if (!confirmed) return;
 
-    const previousRows = rows;
+    // 记下拿掉的那一行与它的位置：失败时只把它放回原处，不整表回滚
+    let removed: { row: CampaignCardData; index: number } | null = null;
+    const finishMutation = beginMutation();
     setBusyCampaignId(campaign.id);
-    setRows(prev => prev.filter(row => row.campaign.id !== campaign.id));
+    setRows(prev => {
+      const index = prev.findIndex(row => row.campaign.id === campaign.id);
+      if (index < 0) return prev;
+      removed = { row: prev[index], index };
+      return prev.filter(row => row.campaign.id !== campaign.id);
+    });
     try {
       await deleteCampaign(campaign.id);
       setDeletedCampaigns(current => [
@@ -1745,12 +1924,21 @@ export default function JournalCampaignsPage() {
       ]);
       toast.success('战役已移到已删除，可随时恢复');
     } catch (error) {
-      setRows(previousRows);
+      const restore = removed as { row: CampaignCardData; index: number } | null;
+      if (restore) {
+        setRows(prev => {
+          if (prev.some(row => row.campaign.id === campaign.id)) return prev;
+          const next = [...prev];
+          next.splice(Math.min(restore.index, next.length), 0, restore.row);
+          return next;
+        });
+      }
       toast.error(error instanceof Error ? error.message : String(error));
     } finally {
       setBusyCampaignId(null);
+      finishMutation();
     }
-  };
+  }, [userId, beginMutation, setRows, setBusyCampaignId]);
 
   const handleDeletedOpenChange = async (open: boolean) => {
     setDeletedOpen(open);
@@ -1765,7 +1953,7 @@ export default function JournalCampaignsPage() {
     }
   };
 
-  const handleCampaignDetailsToggle = (
+  const handleCampaignDetailsToggle = useCallback((
     event: MouseEvent<HTMLButtonElement>,
     campaignId: string,
   ) => {
@@ -1776,10 +1964,11 @@ export default function JournalCampaignsPage() {
       else next.add(campaignId);
       return next;
     });
-  };
+  }, []);
 
   const handleRestoreCampaign = async (campaign: TradeCampaign) => {
     if (!user || deletedBusyId) return;
+    const finishMutation = beginMutation();
     setDeletedBusyId(campaign.id);
     try {
       await restoreCampaign(campaign.id);
@@ -1790,66 +1979,14 @@ export default function JournalCampaignsPage() {
         details.legs,
         details.tradeRecords,
       );
-      const reconciliation = computeCampaignPnlReconciliation(
-        details.campaign,
-        details.legs,
-        details.tradeRecords,
-        exitPriceCorrections,
-      );
-      // 无条件同源。此前只有「存在平仓价校正」时才切换到重算口径，
-      // 于是同一场战役在列表页显示落库值、在详情页显示重算值——两个页面两个数。
-      const settlement = computeCampaignRealizedPnl(
-        details.campaign, details.legs, details.tradeRecords, exitPriceCorrections,
-      );
-      const reconciledCampaign = {
-        ...details.campaign,
-        final_realized_pnl: settlement.total ?? details.campaign.final_realized_pnl,
-        status: settlement.settled
-          ? campaignStatusFromRealizedPnl(settlement, details.campaign.closed_at)
-          : details.campaign.status,
-      };
-      const initialExpectedMaxLoss = computeInitialExpectedMaxLoss(
-        details.campaign,
-        details.legs,
-        details.tradeRecords,
-        details.reverseHedgeOrders,
-      );
-      const initialExpectedMaxDrawdownPct = computeInitialExpectedMaxDrawdownPct(
-        details.campaign,
-        details.legs,
-        details.tradeRecords,
-        details.reverseHedgeOrders,
-      );
-      const profitCaptureRatio = Number.isFinite(initialExpectedMaxLoss) && initialExpectedMaxLoss > 0
-        ? computeProfitCaptureRatio(
-          details.campaign,
-          details.legs,
-          details.tradeRecords,
-          details.reverseHedgeOrders,
-          exitPriceCorrections,
-        )
-        : null;
-      const opportunityQuality = resolveCampaignOpportunityQuality(
-        reconciledCampaign,
-        profitCaptureRatio,
-        initialExpectedMaxDrawdownPct,
-      );
-      const restoredRow: CampaignCardData = {
-        campaign: { ...reconciledCampaign, deleted_at: null },
-        legs: details.legs,
-        tradeRecords: details.tradeRecords,
-        settlement,
-        profitCaptureRatio,
-        initialExpectedMaxLoss,
-        initialExpectedMaxDrawdownPct,
-        opportunityQuality,
-      };
+      const restoredRow = buildCampaignCardData(details, exitPriceCorrections);
       setRows(current => [restoredRow, ...current.filter(item => item.campaign.id !== campaign.id)]);
       toast.success('战役已恢复');
     } catch (error) {
       toast.error(error instanceof Error ? error.message : String(error));
     } finally {
       setDeletedBusyId(null);
+      finishMutation();
     }
   };
 
@@ -2063,6 +2200,18 @@ export default function JournalCampaignsPage() {
           </DialogContent>
         </Dialog>
 
+        {(campaignLoadError || failedCount > 0) && (
+          <div role="status" className="mb-2 flex items-center gap-3 rounded border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-[12px] text-amber-700 dark:text-amber-400">
+            <span>
+              {campaignLoadError
+                ? `${campaignRowsComplete ? '更新失败，保留上次结果。' : '战役读取失败。'}${campaignLoadError}`
+                : `${failedCount} 场战役未能更新，统计可能不完整；已有结果已保留。`}
+            </span>
+            <button type="button" onClick={retryCampaignLoad} disabled={refreshing} className="shrink-0 underline disabled:opacity-50">
+              {refreshing ? '重试中…' : '重试'}
+            </button>
+          </div>
+        )}
         <section className="mb-5 overflow-visible border-y border-border/80 bg-card/40">
           <div className="flex w-full flex-col">
             <div
@@ -2928,6 +3077,9 @@ export default function JournalCampaignsPage() {
               className="order-3 border-t border-border/70 bg-background/35"
             >
               <div id="campaign-metric-scatter-view">
+                <div className="h-5 px-4 text-right text-[10px] text-muted-foreground" role="status">
+                  {campaignRowsComplete && refreshing ? '正在更新数据…' : ''}
+                </div>
                 {familyViewOptions.length > 1 ? (
                   // 视图切换键放在面板层而不是图表表头：空序列时元件只渲染空态、没有表头，
                   // 切换键仍要在。切换直接改键与 URL，不走 toggle（同键会关图）。
@@ -2966,7 +3118,7 @@ export default function JournalCampaignsPage() {
                   </div>
                 ) : null}
                 {campaignRowsComplete ? (
-                  <CampaignMetricScatterPlot
+                  <MemoCampaignMetricScatterPlot
                     key={selectedMetricConfig.key}
                     points={selectedMetricSeries.points}
                     metricKey={selectedMetricConfig.key}
@@ -2982,10 +3134,10 @@ export default function JournalCampaignsPage() {
                     colorMode={selectedMetricConfig.colorMode}
                     legacyOddsTestIds={selectedMetricConfig.key === 'odds'}
                     view={selectedMetricConfig.view ?? 'time'}
-                    onBack={() => { setMetricChartOpen(false); updateChartParam(null); }}
+                    onBack={handleChartBack}
                     onSelectCampaign={handleCampaignOpen}
                   />
-                ) : (
+                ) : campaignLoadError ? null : (
                   <div
                     data-testid="campaign-metric-loading"
                     className="mx-auto flex min-h-[22rem] w-full max-w-[58rem] flex-col items-center justify-center gap-3 px-6 text-center"
@@ -3049,274 +3201,20 @@ export default function JournalCampaignsPage() {
             )}
           </div>
         ) : (
-          sortedRows.map(({
-            campaign,
-            legs,
-            tradeRecords,
-            profitCaptureRatio,
-            initialExpectedMaxDrawdownPct,
-            opportunityQuality,
-            initialRiskFraction,
-            initialRiskSource,
-            riskAccountEquity,
-            arithmeticExpectancy,
-            geometricExpectancy,
-          }) => {
-            const cardLeverage = campaignLeverage(campaign, legs);
-            const importance = importanceValue(campaign);
-            const isOwnCampaign = campaign.user_id === user?.id;
-            const operationTime = campaignOperationTime(legs, tradeRecords);
-            const campaignDisplayCode = formatCampaignDisplayCode(
-              campaign.campaign_code,
-              campaignAccountName,
-              campaign.id,
-            );
-            const mirrorTpStatus = !campaignAchievedMirrorTp(legs, tradeRecords)
-              ? '未实现'
-              : MIRROR_TP_STATUS_LABEL[mirrorTpOutcome(
-                profitCaptureRatio == null ? null : profitCaptureRatio / 100,
-                campaign.final_realized_pnl ?? null,
-              )];
-            const statusLabel = campaign.status === 'active'
-              ? '进行中'
-              : campaign.status === 'closed_profit'
-                ? '盈利结束'
-                : campaign.status === 'closed_loss'
-                  ? '亏损结束'
-                  : campaign.status === 'abandoned'
-                    ? '已放弃'
-                    : campaign.status;
-            const realizedPnl = campaign.final_realized_pnl;
-            const realizedPnlTone = realizedPnl == null || realizedPnl === 0
-              ? 'text-foreground/80'
-              : realizedPnl > 0 ? 'text-[#0ECB81]' : 'text-[#F6465D]';
-            const payoffRatioTone = profitCaptureRatio == null || profitCaptureRatio === 0
-              ? 'text-foreground/85'
-              : profitCaptureRatio > 0 ? 'text-[#0ECB81]' : 'text-[#F6465D]';
-            const arithmeticTone = arithmeticExpectancy == null || arithmeticExpectancy === 0
-              ? 'text-foreground/80'
-              : arithmeticExpectancy > 0 ? 'text-[#0ECB81]' : 'text-[#F6465D]';
-            // 下注比例吃掉全部账户权益：几何期望必然是 −100%/笔（G = 0）。
-            // 这是仓位大小的结论，不是本场盈亏，所以会和正的算术期望同时出现。
-            const ruinousSizing = initialRiskFraction != null && initialRiskFraction >= 1;
-            const geometricTone = geometricExpectancy == null || geometricExpectancy === 0
-              ? 'text-foreground/80'
-              : geometricExpectancy > 0 ? 'text-[#0ECB81]' : 'text-[#F6465D]';
-            const detailsExpanded = expandedCampaignIds.has(campaign.id);
-            return (
-              <div
-                key={campaign.id}
-                data-testid="campaign-card"
-                onClick={() => handleCampaignOpen(campaign.id)}
-                className="group relative mb-3.5 cursor-pointer overflow-hidden rounded-md border border-border bg-card shadow-[0_2px_7px_rgba(15,23,42,0.055)] transition-[border-color,box-shadow,background-color] last:mb-0 hover:border-foreground/20 hover:bg-accent/20 hover:shadow-[0_7px_22px_rgba(15,23,42,0.08)]"
-              >
-                <span
-                  aria-hidden="true"
-                  className={`absolute inset-y-0 left-0 w-[3px] opacity-65 ${STATUS_ACCENT_STYLES[campaign.status] || 'bg-muted-foreground'}`}
-                />
-                <div className="flex flex-col gap-2 px-4 py-2.5 sm:px-5 lg:flex-row lg:items-center lg:justify-between">
-                  <div className="flex min-w-0 flex-1 items-center gap-2.5">
-                    <span className={`inline-flex h-2 w-2 shrink-0 rounded-full ${STATUS_STYLES[campaign.status] || 'bg-muted'}`} />
-                    <div className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1">
-                      <h2 className="text-[13px] font-semibold text-foreground/90">{campaign.title}</h2>
-                      <span className={`rounded px-1.5 py-0.5 text-[9px] font-medium ${DIRECTION_STYLES[campaign.direction] || 'bg-muted text-muted-foreground'}`}>
-                        {campaign.direction === 'main_short' ? '主空' : '主多'}
-                      </span>
-                      <span className="rounded bg-muted px-1.5 py-0.5 text-[9px] font-medium text-muted-foreground">{campaign.symbol}</span>
-                      {/* 杠杆紧跟标的，与交易所的写法一致；取值与「杠杆倍数」排序同一个口径。 */}
-                      {cardLeverage > 0 && (
-                        <span
-                          data-testid="campaign-leverage"
-                          title={Number(campaign.initial_leverage) > 0
-                            ? '杠杆倍数：主力开仓那一刻记录的初始杠杆'
-                            : '杠杆倍数：这场战役没记初始杠杆，取各腿里最大的一档'}
-                          className="inline-flex items-center rounded border border-border/70 bg-background/45 px-1.5 py-0.5 font-mono text-[9px] tabular-nums text-muted-foreground/80"
-                        >
-                          {formatLeverage(cardLeverage)}
-                        </span>
-                      )}
-                      <span
-                        className="inline-flex rounded border border-border/70 bg-background/45 px-1.5 py-0.5 font-mono text-[8px] text-muted-foreground/65"
-                        title={`战役编号 ${campaignDisplayCode}`}
-                      >
-                        {campaignDisplayCode}
-                      </span>
-                      <span
-                        data-testid="campaign-operation-time"
-                        className="inline-flex items-center gap-1 border-l border-border/70 pl-2 text-[9px] text-muted-foreground/60"
-                      >
-                        操作时间：
-                        <span className="whitespace-nowrap font-mono text-[9px] tabular-nums text-foreground/70">
-                          {fmtOperationTime(operationTime)}
-                        </span>
-                      </span>
-                    </div>
-                  </div>
-                  <div className="flex shrink-0 flex-wrap items-center gap-1 self-end lg:self-auto" onClick={(event) => event.stopPropagation()}>
-                    <button
-                      type="button"
-                      aria-expanded={detailsExpanded}
-                      aria-label={detailsExpanded ? '收起战役详情' : '展开战役详情'}
-                      title={detailsExpanded ? '收起战役详情' : '展开战役详情'}
-                      onClick={(event) => handleCampaignDetailsToggle(event, campaign.id)}
-                      className="inline-flex h-7 w-7 items-center justify-center rounded border border-transparent text-muted-foreground/50 transition-colors hover:border-border/80 hover:bg-background/65 hover:text-foreground"
-                    >
-                      <ChevronDown className={`h-3.5 w-3.5 transition-transform ${detailsExpanded ? 'rotate-180' : ''}`} />
-                    </button>
-                    {isOwnCampaign && (
-                      <div className="flex h-7 items-center gap-0.5 rounded border border-border/80 bg-background/50 px-1.5">
-                        <span className="mr-0.5 text-[8px] text-muted-foreground">重要性</span>
-                        {[1, 2, 3, 4, 5].map(score => (
-                          <button
-                            key={score}
-                            type="button"
-                            disabled={busyCampaignId === campaign.id}
-                            title={`设为 ${score} 分`}
-                            onClick={(event) => handleImportanceChange(event, campaign, score)}
-                            className="inline-flex h-5 w-5 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-[#F0B90B]/10 hover:text-[#F0B90B] disabled:opacity-50"
-                          >
-                            <Star
-                              className={`h-3 w-3 ${score <= importance ? 'text-[#F0B90B]' : ''}`}
-                              fill={score <= importance ? 'currentColor' : 'none'}
-                            />
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                    {!isOwnCampaign && importance > 0 && (
-                      <span className="rounded border border-border bg-background/60 px-2 py-1 text-[10px] text-muted-foreground">
-                        重要性 {importance}/5
-                      </span>
-                    )}
-                    {isOwnCampaign && (
-                      <button
-                        type="button"
-                        disabled={busyCampaignId === campaign.id}
-                        title="删除战役"
-                        onClick={(event) => handleDeleteCampaign(event, campaign)}
-                        className="inline-flex h-7 w-7 items-center justify-center rounded border border-border/80 bg-background/50 text-muted-foreground transition-colors hover:border-[#F6465D]/40 hover:bg-[#F6465D]/10 hover:text-[#F6465D] disabled:opacity-50"
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </button>
-                    )}
-                    <div className={`inline-flex h-7 items-center rounded px-2.5 text-[9px] font-medium ${STATUS_STYLES[campaign.status] || 'bg-muted text-muted-foreground'}`}>
-                      {statusLabel}
-                    </div>
-                  </div>
-                </div>
-
-                <div className="flex flex-wrap items-center gap-y-1 border-t border-border/65 bg-muted/[0.08] px-4 py-1.5 sm:px-5">
-                  <div className="inline-flex h-7 shrink-0 items-center gap-1.5 border-r border-border/60 px-3 first:pl-0" data-testid="campaign-expected-drawdown-pct">
-                    <span className="text-[10px] text-muted-foreground/70">预期回撤：</span>
-                    <span className="whitespace-nowrap font-mono text-[10px] font-medium tabular-nums text-foreground/85">
-                      {initialExpectedMaxDrawdownPct > 0 ? `${initialExpectedMaxDrawdownPct.toFixed(2)}%` : '—'}
-                    </span>
-                  </div>
-                  <div
-                    data-testid="campaign-opportunity-quality-value"
-                    title={opportunityQuality == null
-                      ? '需要已结束战役的实际盈亏比、主力开仓价和至少一个初始对冲 A/B 价格'
-                      : `Q = 实际盈亏比 ${(profitCaptureRatio! / 100).toFixed(2)} ÷ 预期回撤 ${initialExpectedMaxDrawdownPct.toFixed(2)}%`}
-                    className="inline-flex h-7 shrink-0 items-center gap-1.5 border-r border-border/60 px-3"
-                  >
-                    <span className="text-[10px] text-muted-foreground/70">机会质量：</span>
-                    <span className="whitespace-nowrap font-mono text-[10px] font-medium tabular-nums text-foreground/85">{formatOpportunityQuality(opportunityQuality)}</span>
-                  </div>
-                  <div className="inline-flex h-7 shrink-0 items-center gap-1.5 border-r border-border/60 px-3" data-testid="campaign-payoff-ratio">
-                    <span className="text-[10px] text-muted-foreground/70">盈亏比：</span>
-                    <span
-                      data-testid="campaign-payoff-ratio-value"
-                      className={`whitespace-nowrap font-mono text-[10px] font-medium tabular-nums ${payoffRatioTone}`}
-                    >
-                      {profitCaptureRatio == null ? '—' : formatCampaignPayoffRatio(profitCaptureRatio, 2)}
-                    </span>
-                  </div>
-                  <div
-                    data-testid="campaign-arithmetic-expectancy"
-                    title="Eᵢ = 当前有效战役胜率 × 该战役盈亏比 − 亏损概率"
-                    className="inline-flex h-7 shrink-0 items-center gap-1.5 border-r border-border/60 px-3"
-                  >
-                    <span className="text-[10px] text-muted-foreground/70">算术期望：</span>
-                    <span className={`whitespace-nowrap font-mono text-[10px] font-medium tabular-nums ${arithmeticTone}`}>{formatArithmeticExpectancy(arithmeticExpectancy)}</span>
-                  </div>
-                  <div
-                    data-testid="campaign-geometric-expectancy"
-                    data-ruinous-sizing={ruinousSizing ? 'true' : undefined}
-                    title={`单场几何期望 = Gᵢ − 1，Gᵢ = 1 + bᵢ·x，x 每场统一取 ${fixedFractionLabel}`
-                      + (initialRiskFraction == null
-                        ? ''
-                        : ruinousSizing
-                          ? `。另：本场真实下注比例 = 最大预期亏损 ÷ 账户总资产 ${riskAccountEquity?.toFixed(2) ?? '—'} = ${(initialRiskFraction * 100).toFixed(2)}% ≥ 100%，`
-                            + '这一注押上了全部本金。它评判的是当时的仓位大小，不进上面这个公式，也与本场实际盈亏无关。'
-                            + `注意卡片左侧的「预期回撤 ${initialExpectedMaxDrawdownPct.toFixed(2)}%」是价格层面的口径（主力入场到对冲边界的距离），与账户层面的下注比例不是同一个量。`
-                          : '')}
-                    className="inline-flex h-7 shrink-0 items-center gap-1.5 border-r border-border/60 px-3"
-                  >
-                    <span className="text-[10px] text-muted-foreground/70">几何期望：</span>
-                    <span className={`whitespace-nowrap font-mono text-[10px] font-medium tabular-nums ${geometricTone}`}>{formatGeometricExpectancy(geometricExpectancy)}</span>
-                    {/* 这一注押上了全部本金。几何期望改用固定 x 之后它不再影响那个数，
-                        但「当时仓位有多大」本身就是要盯的纪律信号，所以徽标留着。 */}
-                    {ruinousSizing && (
-                      <span className="rounded-sm bg-[#F6465D]/15 px-1 text-[9px] leading-4 text-[#F6465D]">
-                        仓位击穿
-                      </span>
-                    )}
-                  </div>
-                  <div className="inline-flex h-7 shrink-0 items-center gap-1.5 px-3" data-testid="campaign-mirror-tp-status">
-                    <span className="text-[10px] text-muted-foreground/70">镜像止盈：</span>
-                    <span className={`whitespace-nowrap font-mono text-[10px] font-medium tabular-nums ${mirrorTpStatus === MIRROR_TP_STATUS_LABEL.win ? 'text-[#0ECB81]' : mirrorTpStatus === MIRROR_TP_STATUS_LABEL.loss ? 'text-[#F6465D]' : 'text-foreground/85'}`}>{mirrorTpStatus}</span>
-                  </div>
-                </div>
-
-                {detailsExpanded && (
-                  <dl
-                    data-testid="campaign-card-details"
-                    className="flex flex-wrap items-center gap-y-1 border-t border-border/60 bg-background/35 px-4 py-1.5 sm:px-5"
-                  >
-                    <div className="inline-flex h-7 shrink-0 items-center gap-1.5 border-r border-border/60 px-3 first:pl-0">
-                      <dt className="text-[10px] text-muted-foreground/70">战役时间：</dt>
-                      <dd className="whitespace-nowrap font-mono text-[10px] font-medium tabular-nums text-foreground/80">
-                        {fmtTime(campaign.opened_at)} → {fmtTime(campaign.closed_at)}
-                      </dd>
-                    </div>
-                    <div className="inline-flex h-7 shrink-0 items-center gap-1.5 border-r border-border/60 px-3">
-                      <dt className="text-[10px] text-muted-foreground/70">结构与时长：</dt>
-                      <dd className="whitespace-nowrap font-mono text-[10px] font-medium tabular-nums text-foreground/80">
-                        {legs.length} legs · {durationLabel(campaign.opened_at, campaign.closed_at)}
-                      </dd>
-                    </div>
-                    <div className="inline-flex h-7 shrink-0 items-center gap-1.5 border-r border-border/60 px-3">
-                      <dt className="text-[10px] text-muted-foreground/70">已实现 P&amp;L：</dt>
-                      <dd className={`whitespace-nowrap font-mono text-[10px] font-medium tabular-nums ${realizedPnlTone}`}>
-                        {realizedPnl == null ? '—' : realizedPnl.toFixed(2)}
-                      </dd>
-                    </div>
-                    <div className="flex min-h-7 min-w-0 items-center gap-1.5 px-3">
-                      <dt className="inline-flex shrink-0 items-center gap-1 text-[10px] text-muted-foreground/70">
-                        <Layers className="h-3 w-3" />
-                        Legs：
-                      </dt>
-                      <dd className="flex min-h-5 flex-wrap items-center gap-1">
-                        {legs.length === 0 ? (
-                          <span className="text-[10px] text-muted-foreground">暂无 legs</span>
-                        ) : (
-                          legs.map((leg: TradeJournal) => (
-                            <span
-                              key={leg.id}
-                              title={leg.leg_role ? LEG_ROLE_LABELS[leg.leg_role] : '未归类'}
-                              className={`rounded px-1.5 py-0.5 text-[9px] ${leg.leg_role ? LEG_CHIP_CLASS[leg.leg_role] : 'bg-muted text-muted-foreground'}`}
-                            >
-                              {leg.leg_role ? LEG_ABBR[leg.leg_role] : '?'}
-                            </span>
-                          ))
-                        )}
-                      </dd>
-                    </div>
-                  </dl>
-                )}
-              </div>
-            );
-          })
+          sortedRows.map(row => (
+            <CampaignCard
+              key={row.campaign.id}
+              row={row}
+              expanded={expandedCampaignIds.has(row.campaign.id)}
+              busy={busyCampaignId === row.campaign.id}
+              isOwnCampaign={row.campaign.user_id === userId}
+              campaignAccountName={campaignAccountName}
+              onOpen={handleCampaignOpen}
+              onToggleDetails={handleCampaignDetailsToggle}
+              onImportanceChange={handleImportanceChange}
+              onDelete={handleDeleteCampaign}
+            />
+          ))
         )}
       </main>
       <Dialog open={deletedOpen} onOpenChange={open => void handleDeletedOpenChange(open)}>

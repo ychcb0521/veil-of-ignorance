@@ -1,9 +1,16 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
-import { describe, expect, it, vi } from 'vitest';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { MemoryRouter, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { clearCampaignListCaches } from '@/lib/campaignListCache';
+import { fetchCampaignSourceRows, getCampaignFullData } from '@/lib/journalApi';
 import type { TradeCampaign, TradeJournal } from '@/types/journal';
 import type { TradeRecord } from '@/types/trading';
 import JournalCampaignsPage from '../JournalCampaignsPage';
+
+beforeEach(() => {
+  clearCampaignListCaches();
+  restoredIds.clear();
+});
 
 vi.mock('@/lib/campaignLegExecution', async importOriginal => {
   const actual = await importOriginal<typeof import('@/lib/campaignLegExecution')>();
@@ -13,11 +20,20 @@ vi.mock('@/lib/campaignLegExecution', async importOriginal => {
   };
 });
 
-const { mockUser, mockListDeletedCampaigns, mockRestoreCampaign, mockPermanentlyDeleteCampaign } = vi.hoisted(() => ({
-  mockUser: { id: 'user-1', email: 'desk@example.com' },
-  mockListDeletedCampaigns: vi.fn(async () => []),
-  mockRestoreCampaign: vi.fn(async () => undefined),
-  mockPermanentlyDeleteCampaign: vi.fn(async () => undefined),
+const { mockUser, mockListDeletedCampaigns, mockRestoreCampaign, mockPermanentlyDeleteCampaign, restoredIds } = vi.hoisted(() => {
+  /** 已恢复的战役：恢复之后的远端核对要读得到它，像真的 Supabase 一样。 */
+  const restoredIds = new Set<string>();
+  return {
+    mockUser: { id: 'user-1', email: 'desk@example.com' },
+    mockListDeletedCampaigns: vi.fn(async () => []),
+    mockRestoreCampaign: vi.fn(async (id: string) => { restoredIds.add(id); }),
+    mockPermanentlyDeleteCampaign: vi.fn(async () => undefined),
+    restoredIds,
+  };
+});
+const mockTrading = vi.hoisted(() => ({
+  balance: 100_000, positionsMap: {}, priceMap: {},
+  getEffectiveTime: () => Date.parse('2026-08-23T12:00:00.000Z'),
 }));
 
 const campaigns: TradeCampaign[] = [
@@ -141,19 +157,13 @@ const tradeHistory: TradeRecord[] = [
 
 vi.mock('@/contexts/AuthContext', () => ({
   useAuth: () => ({
-    user: mockUser,
+    user: { ...mockUser },
     profile: { display_name: '主账户' },
   }),
 }));
 
 vi.mock('@/contexts/TradingContext', () => ({
-  useTradingContext: () => ({
-    balance: 100_000,
-    positionsMap: {},
-    priceMap: {},
-    // 一键结束用它当「没有成交也没有事件」时的兜底时间戳。
-    getEffectiveTime: () => Date.parse('2026-08-23T12:00:00.000Z'),
-  }),
+  useTradingContext: () => mockTrading,
 }));
 
 vi.mock('@/lib/journalApi', () => ({
@@ -161,7 +171,9 @@ vi.mock('@/lib/journalApi', () => ({
   closeCampaign: vi.fn(async () => undefined),
   deleteCampaign: vi.fn(),
   // 列表页共用一份本地快照，避免 147 场各解析一遍（实测 2~6 秒主线程阻塞）。
-  readUserLocalSnapshot: () => ({ tradeHistory: [], ordersMap: {}, cancelledOrders: [], filledOrders: [] }),
+  createUserLocalSnapshotReader: () => ({
+    read: () => ({ tradeHistory: [], ordersMap: {}, cancelledOrders: [], filledOrders: [], positionsMap: {} }),
+  }),
   getCampaignFullData: vi.fn(async (id: string) => ({
     campaign: [...campaigns, deletedCampaign].find(campaign => campaign.id === id),
     legs: legsByCampaign[id] ?? [],
@@ -170,6 +182,14 @@ vi.mock('@/lib/journalApi', () => ({
     reverseHedgeOrders: reverseOrdersByCampaign[id as keyof typeof reverseOrdersByCampaign] ?? [],
   })),
   listAllCampaigns: vi.fn(async () => campaigns),
+  // 远端只给原始行，装配是纯本地的一步；这里的装配只是把 fixture 的 legs 接回去。
+  fetchCampaignSourceRows: vi.fn(async () => ({
+    campaigns: [...campaigns, ...(restoredIds.has(deletedCampaign.id) ? [{ ...deletedCampaign, deleted_at: null }] : [])],
+    journals: [],
+  })),
+  assembleCampaignsWithLegs: (_userId: string, rows: { campaigns: TradeCampaign[] }) => (
+    rows.campaigns.map(campaign => ({ campaign, legs: legsByCampaign[campaign.id] ?? [] }))
+  ),
   listDeletedCampaigns: mockListDeletedCampaigns,
   permanentlyDeleteCampaign: mockPermanentlyDeleteCampaign,
   restoreCampaign: mockRestoreCampaign,
@@ -300,7 +320,42 @@ function SearchProbe() {
   return <div data-testid="location-probe-search">{location.search}</div>;
 }
 
+function DetailReturn() {
+  const navigate = useNavigate();
+  return <button onClick={() => navigate(-1)}>返回战役图</button>;
+}
+
 describe('JournalCampaignsPage sorting', () => {
+  it('详情返回立即复用散点图；后台核对期间不显示加载屏，且不重复计算未变的战役', async () => {
+    render(
+      <MemoryRouter initialEntries={['/journal/campaigns?chart=geometricExpectancyDistribution']}>
+        <Routes>
+          <Route path="/journal/campaigns" element={<JournalCampaignsPage />} />
+          <Route path="/journal/campaigns/:id" element={<DetailReturn />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    const summaryId = 'campaign-metric-summary-geometricExpectancyDistribution';
+    const summary = await screen.findByTestId(summaryId);
+    const text = summary.textContent;
+    const detailCalls = vi.mocked(getCampaignFullData).mock.calls.length;
+    const batchCalls = vi.mocked(fetchCampaignSourceRows).mock.calls.length;
+    fireEvent.click(screen.getAllByTestId('campaign-card')[0]);
+    let resolve!: (value: Awaited<ReturnType<typeof fetchCampaignSourceRows>>) => void;
+    vi.mocked(fetchCampaignSourceRows).mockReturnValueOnce(new Promise(res => { resolve = res; }));
+    fireEvent.click(screen.getByText('返回战役图'));
+    expect(screen.getByTestId(summaryId).textContent).toBe(text);
+    expect(screen.queryByTestId('campaign-metric-loading')).not.toBeInTheDocument();
+    const returnedSummary = screen.getByTestId(summaryId);
+    await act(async () => {
+      resolve({ campaigns, journals: [] });
+    });
+    await waitFor(() => expect(screen.queryByText('正在更新数据…')).not.toBeInTheDocument());
+    expect(screen.getByTestId(summaryId)).toBe(returnedSummary);
+    expect(vi.mocked(getCampaignFullData).mock.calls.length).toBe(detailCalls);
+    expect(vi.mocked(fetchCampaignSourceRows).mock.calls.length).toBe(batchCalls + 1);
+  });
+
   it('【用户要求】按杠杆倍数排序：默认从大到小，再点一次切到从小到大，没记杠杆的战役不进入这一档', async () => {
     render(
       <MemoryRouter initialEntries={['/journal/campaigns']}>

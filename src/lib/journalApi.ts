@@ -84,13 +84,21 @@ import { queueSimStatePush } from '@/lib/simStateSync';
 import { normalizeReplayTimelineRegistry, REPLAY_TIMELINES_STORAGE_KEY, type ReplayTimelineRegistry } from '@/lib/replayTimeline';
 import {
   buildCampaignTimelineScope,
-  collectCampaignTimelineEvidence,
+  collectCampaignTimelineActivity,
+  collectCampaignTimelineAnchors,
+  indexCampaignTimelineActivity,
+  type CampaignTimelineActivityIndex,
   type CampaignTimelineDiagnostics,
   type CampaignTimelineOrderDiagnostic,
   type CampaignTimelineOrderLike,
   type CampaignTimelineOrderOptions,
   type OpenPositionTimelineLike,
 } from '@/lib/campaignTimelineScope';
+import {
+  CAMPAIGN_LEGACY_ORDER_RECORD_MATCH_MS,
+  CAMPAIGN_ORDER_WINDOW_LOOKBACK_MS,
+  isCampaignOpeningShortOrder,
+} from '@/lib/campaignOrderAttribution';
 import {
   bestOrderRealStamp,
   buildReplaySessionFilter,
@@ -99,9 +107,13 @@ import {
   legOpenReplayEvent,
   orderClockStamp,
   orderWithinRealWindow,
+  REPLAY_CLOCK_LAG_BUDGET_MS,
+  REPLAY_SIM_DROP_TOLERANCE_MS,
+  REPLAY_SITTING_GAP_MS,
   type ReplayEvent,
   type ReplayEventKind,
 } from '@/lib/campaignOrderRealTime';
+import { MAX_SIMULATION_SPEED } from '@/lib/simulationSpeeds';
 import type {
   PendingOrder,
   TradeRecord,
@@ -1372,7 +1384,7 @@ function synthesizeJournalFromRecord(
   sequence: number,
 ): TradeJournal {
   const timestamp = toIso(tradeRecordTimeMs(record)) ?? event.timestamp;
-  const now = event.recorded_at || new Date().toISOString();
+  const now = event.recorded_at || campaign.created_at || '';
   return {
     id: event.journal_id ?? `record-${record.id}`,
     user_id: campaign.user_id,
@@ -1453,7 +1465,7 @@ function synthesizeJournalFromEvent(
   sequence: number,
   closeEvent: CampaignEvent | null,
 ): TradeJournal {
-  const now = event.recorded_at || new Date().toISOString();
+  const now = event.recorded_at || campaign.created_at || '';
   const role = event.leg_role ?? 'standalone';
   const direction = inferDirectionFromLegRole(campaign, role, event.direction);
   const closeTime = event.close_time ?? closeEvent?.timestamp ?? campaign.closed_at ?? null;
@@ -1512,8 +1524,10 @@ function synthesizeJournalFromEvent(
   } as TradeJournal;
 }
 
-function synthesizeCampaignLegsFromEvents(campaign: TradeCampaign): TradeJournal[] {
-  const tradeRecordMap = getTradeRecordMapForUser(campaign.user_id);
+function synthesizeCampaignLegsFromEvents(
+  campaign: TradeCampaign,
+  tradeRecordMap = getTradeRecordMapForUser(campaign.user_id),
+): TradeJournal[] {
   const seen = new Set<string>();
   const events = [...(campaign.actual_evolution ?? [])]
     .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
@@ -2264,7 +2278,7 @@ export async function listDeletedCampaigns(userId: string): Promise<TradeCampaig
 }
 
 /**
- * 战役腿的后处理：合成腿、本地镜像、评价兄弟记录、水合。
+ * 战役腿的后处理：合成腿与已落库的腿使用同一归类口径。
  *
  * 单场（getCampaignWithLegs）与批量（getCampaignsWithLegs）共用这一份。
  * 抽出来是因为列表页要批量取数：147 场各发 3 个查询 = 441 次往返，
@@ -2273,20 +2287,177 @@ export async function listDeletedCampaigns(userId: string): Promise<TradeCampaig
 function assembleCampaignLegs(
   campaign: TradeCampaign,
   dbLegs: TradeJournal[],
-  siblings: TradeJournal[],
+  syntheticLegs = synthesizeCampaignLegsFromEvents(campaign),
 ): TradeJournal[] {
-  const userId = campaign.user_id;
-  const syntheticLegs = synthesizeCampaignLegsFromEvents(campaign);
-  const resolvedLegs = appendUntriggeredMirrorTpLeg(
+  return appendUntriggeredMirrorTpLeg(
     campaign,
     isHistoricalCampaign(campaign)
       ? mergeHistoricalCampaignLegs(dbLegs, syntheticLegs)
       : (dbLegs.length > 0 ? dbLegs : syntheticLegs),
   );
-  const mirroredLegs = applyLocalMirror(userId, resolvedLegs);
-  const hydrated = hydrateJournalReviews([...mirroredLegs, ...applyLocalMirror(userId, siblings)]);
-  const legIds = new Set(mirroredLegs.map(leg => leg.id));
-  return hydrated.filter(leg => legIds.has(leg.id));
+}
+
+function hydrateCampaignLegs(
+  userId: string,
+  legs: TradeJournal[],
+  siblings: TradeJournal[],
+): TradeJournal[] {
+  // 一次读取镜像；批量路径也只解析一次 JSON，且保留每条腿自己的归类元数据。
+  return hydrateJournalReviews(applyLocalMirror(userId, [...legs, ...siblings])).slice(0, legs.length);
+}
+
+export interface CampaignWithLegs {
+  campaign: TradeCampaign;
+  legs: TradeJournal[];
+}
+
+const CAMPAIGN_SOURCE_PAGE_SIZE = 500;
+
+/** 增量读取一次最多按 id 点名这么多行：PostgREST 的 in 过滤走 URL，太长会被拒。 */
+const CAMPAIGN_SOURCE_ID_CHUNK = 100;
+
+async function readCampaignSourcePages(
+  table: 'trade_campaigns' | 'trade_journals',
+  userId: string,
+  options: { columns?: string; ids?: string[] } = {},
+) {
+  const rows: unknown[] = [];
+  for (let offset = 0; ; offset += CAMPAIGN_SOURCE_PAGE_SIZE) {
+    let query = supabase
+      .from(table as never)
+      .select(options.columns ?? '*')
+      .eq('user_id', userId);
+    if (options.ids) query = query.in('id', options.ids);
+    const { data, error } = await query
+      // 唯一键稳定排序，避免同时间记录在跨页时重复或漏读。
+      .order('id', { ascending: true })
+      .range(offset, offset + CAMPAIGN_SOURCE_PAGE_SIZE - 1);
+    if (error) return { data: [], error };
+    rows.push(...(data ?? []));
+    if ((data?.length ?? 0) < CAMPAIGN_SOURCE_PAGE_SIZE) return { data: rows, error: null };
+  }
+}
+
+type CampaignSourceVersion = { id: string; updated_at?: string | null };
+const sourceRowId = (row: unknown) => (row as { id?: string }).id;
+const sourceRowVersion = (row: unknown) => (row as { updated_at?: string | null }).updated_at;
+
+/**
+ * 只取变了的行：先按 id + updated_at 列一遍目录（两张表各不到 1000 行时只是几十 KB），
+ * 与上次的行比对，只把新增 / 改过的 id 点名读回来，删掉的按目录直接丢。
+ * 两张表的 updated_at 都由 BEFORE UPDATE 触发器维护（migrations），改一行必然换版本；
+ * 老行没有 updated_at 的每次都重读，多读几行不会漏。
+ * 一行都没变时返回上次的同一个数组：装配与逐场比较都按引用短路。
+ */
+async function readCampaignSourceDelta(
+  table: 'trade_campaigns' | 'trade_journals',
+  userId: string,
+  previous: unknown[],
+) {
+  const versions = await readCampaignSourcePages(table, userId, { columns: 'id, updated_at' });
+  if (versions.error) return versions;
+  const previousById = new Map(previous.map(row => [sourceRowId(row), row]));
+  const changedIds: string[] = [];
+  for (const version of versions.data as CampaignSourceVersion[]) {
+    const before = previousById.get(version.id);
+    if (!before || !version.updated_at || sourceRowVersion(before) !== version.updated_at) changedIds.push(version.id);
+  }
+  if (changedIds.length === 0 && versions.data.length === previous.length) return { data: previous, error: null };
+  const changedById = new Map<string | undefined, unknown>();
+  for (let offset = 0; offset < changedIds.length; offset += CAMPAIGN_SOURCE_ID_CHUNK) {
+    const page = await readCampaignSourcePages(table, userId, { ids: changedIds.slice(offset, offset + CAMPAIGN_SOURCE_ID_CHUNK) });
+    if (page.error) return page;
+    for (const row of page.data) changedById.set(sourceRowId(row), row);
+  }
+  // 两次请求之间刚被删掉的行既不在点名结果里、也没有旧行：这次先不算，下次目录里自然没有它
+  const data = (versions.data as CampaignSourceVersion[]).flatMap(version => {
+    const row = changedById.get(version.id) ?? previousById.get(version.id);
+    return row ? [row] : [];
+  });
+  return { data, error: null };
+}
+
+/** 两张表的原始行；装配（合成腿、镜像、评价水合）放在 assembleCampaignsWithLegs，本地成交变化时可以不重读远端。 */
+export interface CampaignSourceRows {
+  campaigns: unknown[];
+  journals: unknown[];
+}
+
+/**
+ * 列表共享一份完整数据源，替代逐场 campaign / legs / 评价兄弟记录查询。
+ * 必须读取用户的全部 journals（包括未归类行），否则后补的成交评价会丢失。
+ * 两张表都分页，避免 Supabase 默认的 1000 行上限静默截断图表。
+ */
+export interface FetchCampaignSourceRowsOptions {
+  /** 上次读到的行：给了就只读变了的（见 readCampaignSourceDelta），没变的行沿用同一引用。 */
+  previous?: CampaignSourceRows;
+}
+
+export async function fetchCampaignSourceRows(
+  userId: string,
+  options: FetchCampaignSourceRowsOptions = {},
+): Promise<CampaignSourceRows> {
+  const { previous } = options;
+  const [campaignResult, journalResult] = await Promise.all([
+    previous ? readCampaignSourceDelta('trade_campaigns', userId, previous.campaigns) : readCampaignSourcePages('trade_campaigns', userId),
+    previous ? readCampaignSourceDelta('trade_journals', userId, previous.journals) : readCampaignSourcePages('trade_journals', userId),
+  ]);
+  if (campaignResult.error && !isMissingTradeCampaignsTableError(campaignResult.error)) {
+    throw new Error(`加载战役列表失败：${campaignResult.error.message}`);
+  }
+  if (journalResult.error && !isMissingTradeJournalsFeatureError(journalResult.error)) {
+    throw new Error(`加载战役 legs 失败：${journalResult.error.message}`);
+  }
+  return { campaigns: campaignResult.data, journals: journalResult.data };
+}
+
+export interface AssembleCampaignsOptions {
+  /** 已在内存里的成交记录；不传则读本地存储（与单场路径同源）。 */
+  tradeHistory?: TradeRecord[];
+}
+
+/**
+ * 把远端原始行装配成列表用的战役与腿：合成腿、本地镜像、评价水合都只做一遍。
+ * 纯本地、同步：合成腿依赖本地成交记录，成交变了只需在同一份远端行上重新装配。
+ */
+export function assembleCampaignsWithLegs(
+  userId: string,
+  rows: CampaignSourceRows,
+  options: AssembleCampaignsOptions = {},
+): CampaignWithLegs[] {
+  const campaigns = withCampaignPreferences(userId, activeCampaignRows(mergeCampaigns(
+    rows.campaigns.map(toCampaign),
+    readLocalCampaigns(userId),
+  )));
+  const journals = rows.journals as TradeJournal[];
+  const legsByCampaign = new Map<string, TradeJournal[]>();
+  for (const leg of journals) {
+    if (!leg.campaign_id) continue;
+    const group = legsByCampaign.get(leg.campaign_id) ?? [];
+    group.push(leg);
+    legsByCampaign.set(leg.campaign_id, group);
+  }
+  const tradeRecordMap = options.tradeHistory
+    ? buildTradeRecordLookup(options.tradeHistory)
+    : getTradeRecordMapForUser(userId);
+  const sources = campaigns.map(campaign => {
+    const syntheticLegs = synthesizeCampaignLegsFromEvents(campaign, tradeRecordMap);
+    const dbLegs = (legsByCampaign.get(campaign.id) ?? []).sort((a, b) => (
+      (a.leg_sequence ?? Number.POSITIVE_INFINITY) - (b.leg_sequence ?? Number.POSITIVE_INFINITY)
+    ));
+    return { campaign, legs: assembleCampaignLegs(campaign, dbLegs, syntheticLegs) };
+  });
+  const hydrated = hydrateCampaignLegs(userId, sources.flatMap(source => source.legs), journals);
+  let offset = 0;
+  return sources.map(source => {
+    const legs = hydrated.slice(offset, offset + source.legs.length);
+    offset += source.legs.length;
+    return { campaign: source.campaign, legs };
+  });
+}
+
+export async function getCampaignsWithLegs(userId: string): Promise<CampaignWithLegs[]> {
+  return assembleCampaignsWithLegs(userId, await fetchCampaignSourceRows(userId));
 }
 
 /** 本地存储的一次性快照。147 场各读一遍会把同一份 JSON 解析 588 次（实测 2~6 秒纯阻塞）。 */
@@ -2315,6 +2486,73 @@ export function readUserLocalSnapshot(userId: string): UserLocalSnapshot {
     filledOrders: readUserScopedStorage<FilledOrderSnapshot[]>(userId, 'filled_orders', []),
     positionsMap: readUserScopedStorage<Record<string, OpenPositionTimelineLike[]>>(userId, 'positions_map', {}),
     replayTimelines: normalizeReplayTimelineRegistry(readUserScopedStorage<unknown>(userId, REPLAY_TIMELINES_STORAGE_KEY, null)),
+  };
+}
+
+export interface UserLocalSnapshotReader {
+  /**
+   * 五个键的原文都没变时返回上一次的同一个对象；变了的键才重新解析，其余键沿用上次的数组引用。
+   * 传了 overrides 的键直接用内存里的值（列表页从交易上下文拿到的同一批引用），不读、不解析本地存储。
+   */
+  read(overrides?: Partial<UserLocalSnapshot>): UserLocalSnapshot;
+}
+
+/**
+ * 列表页每次本地核对都要读这份快照。原文（localStorage 里的字符串）与上次逐字相同的键不再 JSON.parse，
+ * 且沿用同一引用：签名比较可以按引用短路，跨标的共用的预处理也能跟着复用。
+ * 与 readUserLocalSnapshot 同一把钥匙、同一套兜底，只多一层「原文没变就不解析」。
+ */
+export function createUserLocalSnapshotReader(userId: string): UserLocalSnapshotReader {
+  const entries = new Map<string, { raw: string | null; value: unknown }>();
+  let last: UserLocalSnapshot | null = null;
+  const read = <T>(key: string, fallback: T): T => {
+    let raw: string | null = null;
+    try {
+      raw = localStorage.getItem(`${getUserStoragePrefix(userId)}${key}`);
+    } catch {
+      raw = null;
+    }
+    const previous = entries.get(key);
+    if (previous && previous.raw === raw) return previous.value as T;
+    let value: T = fallback;
+    if (raw) {
+      try {
+        value = JSON.parse(raw) as T;
+      } catch {
+        value = fallback;
+      }
+    }
+    entries.set(key, { raw, value });
+    return value;
+  };
+  // 登记表与 readUserLocalSnapshot 同一口径（缺失 / 坏 JSON → 空登记表）；原文没变就沿用上次规整出的同一个对象。
+  let registrySource: unknown;
+  let registry: ReplayTimelineRegistry | null = null;
+  const readReplayTimelines = (): ReplayTimelineRegistry => {
+    const source = read<unknown>(REPLAY_TIMELINES_STORAGE_KEY, null);
+    if (registry && Object.is(source, registrySource)) return registry;
+    registrySource = source;
+    registry = normalizeReplayTimelineRegistry(source);
+    return registry;
+  };
+  return {
+    read(overrides = {}) {
+      const next: UserLocalSnapshot = {
+        tradeHistory: overrides.tradeHistory ?? read<TradeRecord[]>('trade_history', []),
+        ordersMap: overrides.ordersMap ?? read<Record<string, PendingOrder[]>>('orders_map', {}),
+        cancelledOrders: overrides.cancelledOrders ?? read<CancelledOrderSnapshot[]>('cancelled_orders', []),
+        filledOrders: overrides.filledOrders ?? read<FilledOrderSnapshot[]>('filled_orders', []),
+        positionsMap: overrides.positionsMap ?? read<Record<string, OpenPositionTimelineLike[]>>('positions_map', {}),
+        replayTimelines: overrides.replayTimelines ?? readReplayTimelines(),
+      };
+      if (last && last.tradeHistory === next.tradeHistory && last.ordersMap === next.ordersMap
+        && last.cancelledOrders === next.cancelledOrders && last.filledOrders === next.filledOrders
+        && last.positionsMap === next.positionsMap && last.replayTimelines === next.replayTimelines) {
+        return last;
+      }
+      last = next;
+      return next;
+    },
   };
 }
 
@@ -2355,12 +2593,7 @@ export async function getCampaignWithLegs(
     dbLegs = (legs ?? []) as unknown as TradeJournal[];
   }
   const syntheticLegs = synthesizeCampaignLegsFromEvents(resolvedCampaign);
-  const resolvedLegs = appendUntriggeredMirrorTpLeg(
-    resolvedCampaign,
-    isHistoricalCampaign(resolvedCampaign)
-      ? mergeHistoricalCampaignLegs(dbLegs, syntheticLegs)
-      : (dbLegs.length > 0 ? dbLegs : syntheticLegs),
-  );
+  const resolvedLegs = assembleCampaignLegs(resolvedCampaign, dbLegs, syntheticLegs);
   const mirroredLegs = applyLocalMirror(resolvedUserId, resolvedLegs);
   const tradeRecordIds = Array.from(new Set(
     mirroredLegs
@@ -2376,10 +2609,7 @@ export async function getCampaignWithLegs(
         .eq('user_id', resolvedUserId)
         .in('trade_record_id', tradeRecordIds);
       if (!siblingError) {
-        reviewSiblings = applyLocalMirror(
-          resolvedUserId,
-          (siblingRows ?? []) as unknown as TradeJournal[],
-        );
+        reviewSiblings = (siblingRows ?? []) as unknown as TradeJournal[];
       } else {
         console.warn('[journalApi] 读取战役评价兄弟记录失败:', siblingError);
       }
@@ -2388,13 +2618,12 @@ export async function getCampaignWithLegs(
       console.warn('[journalApi] 读取战役评价兄弟记录失败:', error);
     }
   }
-  const hydrated = hydrateJournalReviews([...mirroredLegs, ...reviewSiblings]);
   return {
     campaign: resolvedCampaign,
     // 平仓评价的扩展答案在远程 schema 尚未补齐时会落入本地镜像。
     // 战役详情、TXT/PNG 导出必须与日记列表使用同一份“远端 + 镜像”有效数据，
     // 否则只能读到 post_reviewed_at，却会把用户已经填写的答案导成“未填写”。
-    legs: hydrated.slice(0, mirroredLegs.length),
+    legs: hydrateCampaignLegs(resolvedUserId, mirroredLegs, reviewSiblings),
   };
 }
 
@@ -2474,6 +2703,331 @@ async function healCampaignLegSnapshots(legs: TradeJournal[], tradeRecords: Trad
   }
 }
 
+const isLivePendingOrder = (order: PendingOrder) =>
+  order.status === 'NEW' || order.status === 'PENDING' || order.status === 'ACTIVE';
+
+type OrderSnapshotLike = Parameters<typeof orderClockStamp>[0];
+
+/** 与 buildReplaySessionFilter 的取舍与排序口径逐字相同：两只钟都得是有限正数，先真实时刻、后模拟时刻。 */
+const finiteReplayClock = (value: unknown): value is number =>
+  typeof value === 'number' && Number.isFinite(value) && value > 0;
+const replayEventOrder = (a: ReplayEvent, b: ReplayEvent) => a.realAt - b.realAt || a.simAt - b.simAt;
+const replayEvent = (
+  realAt: number | null | undefined,
+  simAt: number | null | undefined,
+  kind: ReplayEventKind,
+  anchor = false,
+  unstampedOpen = false,
+): ReplayEvent | null => (
+  typeof realAt === 'number' && typeof simAt === 'number'
+    ? { realAt, simAt, anchor, kind, ...(unstampedOpen ? { unstampedOpen } : {}) }
+    : null
+);
+const sortedReplayEvents = (events: Array<ReplayEvent | null>) => (
+  events
+    .filter((event): event is ReplayEvent => event != null && finiteReplayClock(event.realAt) && finiteReplayClock(event.simAt))
+    .sort(replayEventOrder)
+);
+
+/** isReplayBreak 的逐字副本（campaignOrderRealTime 没有导出它）；与真函数的一致性由 journalApi.replayWindow 测试守着。 */
+const replayBreak = (simDropMs: number, realGapMs: number) => (
+  simDropMs > REPLAY_SIM_DROP_TOLERANCE_MS
+  && simDropMs > MAX_SIMULATION_SPEED * Math.max(0, REPLAY_CLOCK_LAG_BUDGET_MS - realGapMs)
+);
+/** buildReplaySessionFilter 的 CLOSE_SIDE_KINDS（未导出）。 */
+const closeSideReplayKind = (kind: ReplayEventKind | undefined) => kind === 'record-close' || kind === 'leg-close';
+
+/** 本标的的成交 + 委托回放事件，已按 成交 → 委托 的并列顺序稳定归并、未标锚点；recordIds 与之一一对应，委托为 null。 */
+export interface SymbolReplayLane {
+  events: ReplayEvent[];
+  recordIds: Array<string | null>;
+}
+
+/** 成交与委托两路各自已稳定排序的事件按标的归并一次（同一时刻成交在前），几十场同标的共用。 */
+function mergeSymbolReplayLane(
+  records: Array<{ event: ReplayEvent; recordId: string }>,
+  orders: ReplayEvent[],
+): SymbolReplayLane {
+  const events: ReplayEvent[] = [];
+  const recordIds: Array<string | null> = [];
+  let recordAt = 0;
+  let orderAt = 0;
+  while (recordAt < records.length || orderAt < orders.length) {
+    if (orderAt < orders.length && (recordAt >= records.length || replayEventOrder(orders[orderAt], records[recordAt].event) < 0)) {
+      events.push(orders[orderAt]);
+      recordIds.push(null);
+      orderAt += 1;
+    } else {
+      events.push(records[recordAt].event);
+      recordIds.push(records[recordAt].recordId);
+      recordAt += 1;
+    }
+  }
+  return { events, recordIds };
+}
+
+/**
+ * 把本场的几条腿事件并入按标的预归并好的成交 + 委托事件流。同一时刻按 成交 → 腿 → 委托 的顺序取，
+ * 结果与把三路按这个顺序拼起来再整体稳定排序完全一致——buildReplaySessionFilter 再排一次只是顺序检查。
+ * 本场选中的成交在取出时才复制成锚点，不另建一份两万条的数组。
+ *
+ * 同时裁掉对本场分段没有影响的前后事件，只把中间这一窗交给 buildReplaySessionFilter——
+ * 重仓标的两万条事件里，一场战役真正牵涉的只是它锚点所在的那几次坐下来：
+ *   · 前面：从最后一个「硬切点」起。硬切点 = 隔了一次坐下来（REPLAY_SITTING_GAP_MS）且模拟时刻回落（isReplayBreak）：
+ *     buildReplaySessionFilter 走到这里的状态与从头开始完全一样——新一次坐下来、新段、还没有本场的时间线可接
+ *     （第一个锚点之前它的切段只看两只钟，这里按同一条规则复算）。没回落的坐下来接着上一段走，不能从它切。
+ *   · 后面：已结束且末锚点是平仓侧的战役，本场时间线到末锚点所在段为止（规则 0），末锚点那次坐下来之后的事件
+ *     不会成为本场的段；进行中的、末锚点不是平仓侧的，之后的坐下来仍可能接上本场，全留。
+ *   · 一个锚点都没有：buildReplaySessionFilter 无论如何都拿不到证据（返回 null），直接给空。
+ * 裁与不裁，分段、取代、盖章时代的每个判断逐字相同（段 / 时间线只是编号不同，它们只比相等）。
+ */
+export function mergeCampaignReplayEvents(
+  lane: SymbolReplayLane,
+  anchorRecordIds: ReadonlySet<string>,
+  legs: ReplayEvent[],
+  options: { campaignOpen: boolean },
+): ReplayEvent[] {
+  const { events, recordIds } = lane;
+  const total = events.length + legs.length;
+  // 腿排在同一时刻的成交之后、委托之前（recordIds 为 null 的是委托）
+  const legFirst = (leg: ReplayEvent, at: number) => {
+    const event = events[at];
+    return leg.realAt < event.realAt
+      || (leg.realAt === event.realAt && (leg.simAt < event.simAt || (leg.simAt === event.simAt && recordIds[at] === null)));
+  };
+
+  // 第一遍：不分配，沿归并顺序走一遍定出窗口 [start, end)
+  let eventAt = 0;
+  let legAt = 0;
+  let start = 0;
+  let startEventAt = 0;
+  let startLegAt = 0;
+  let end: number | null = null;
+  let anchorSeen = false;
+  let lastAnchorClosing = false;
+  let previousRealAt = 0;
+  let segmentMaxSim = 0;
+  for (let position = 0; position < total; position += 1) {
+    const fromLeg = legAt < legs.length && (eventAt >= events.length || legFirst(legs[legAt], eventAt));
+    const event = fromLeg ? legs[legAt] : events[eventAt];
+    const recordId = fromLeg ? null : recordIds[eventAt];
+    const anchor = fromLeg ? Boolean(event.anchor) : recordId !== null && anchorRecordIds.has(recordId);
+    const realGap = position === 0 ? 0 : event.realAt - previousRealAt;
+    const sittingGap = position > 0 && realGap > REPLAY_SITTING_GAP_MS;
+    if (!anchorSeen) {
+      // 第一个锚点之前：与 buildReplaySessionFilter 同一条切段规则（与这一段走到的最远模拟时刻比）
+      if (position === 0) {
+        segmentMaxSim = event.simAt;
+      } else if (replayBreak(segmentMaxSim - event.simAt, realGap)) {
+        segmentMaxSim = event.simAt;
+        if (sittingGap) {
+          start = position;
+          startEventAt = eventAt;
+          startLegAt = legAt;
+        }
+      } else {
+        segmentMaxSim = Math.max(segmentMaxSim, event.simAt);
+      }
+    }
+    if (anchor) {
+      anchorSeen = true;
+      lastAnchorClosing = closeSideReplayKind(event.kind);
+      end = null;
+    } else if (anchorSeen && sittingGap && end === null) {
+      end = position;
+    }
+    previousRealAt = event.realAt;
+    if (fromLeg) legAt += 1;
+    else eventAt += 1;
+  }
+  if (!anchorSeen) return [];
+  if (end === null || options.campaignOpen || !lastAnchorClosing) end = total;
+
+  // 第二遍：只取窗口里的事件
+  eventAt = startEventAt;
+  legAt = startLegAt;
+  const merged: ReplayEvent[] = [];
+  for (let position = start; position < end; position += 1) {
+    if (legAt < legs.length && (eventAt >= events.length || legFirst(legs[legAt], eventAt))) {
+      merged.push(legs[legAt]);
+      legAt += 1;
+      continue;
+    }
+    const recordId = recordIds[eventAt];
+    const event = events[eventAt];
+    merged.push(recordId !== null && anchorRecordIds.has(recordId) ? { ...event, anchor: true } : event);
+    eventAt += 1;
+  }
+  return merged;
+}
+
+/**
+ * 同一份本地快照下按标的共用的预处理。
+ * 列表页 237 场共用一份 `local`，同一标的的几十场原来各自把全标的的成交 / 委托快照过滤一遍、
+ * 再把同一批回放事件（重仓标的两万条）排一遍序——实测这占首载七成。
+ * 这里按标的只做一次：事件预先排好序，每场只把自己选中的成交标成锚点、并入几条腿事件（三路归并，线性）。
+ * 以 `local` 对象为键懒建、随它一起回收；单场详情自己读的快照只用一次，成本与原来相同。
+ */
+interface SymbolLocalIndex {
+  /**
+   * 本标的成交记录（资金费除外）的开 / 平回放事件与委托（挂着的 → 撤掉的 → 成交的）的回放事件，
+   * 已按 成交 → 委托 的并列顺序稳定归并、未标锚点；每场只需并入自己的几条腿事件、标自己的锚点。
+   */
+  replay: SymbolReplayLane;
+  /** 本标的的全部成交记录，保持存储顺序（回放时间线影子比对的活动证据）。 */
+  trades: TradeRecord[];
+  /** 本标的的平仓类成交记录，保持存储顺序。 */
+  closeRecords: TradeRecord[];
+  orders: PendingOrder[];
+  cancelled: CancelledOrderSnapshot[];
+  filled: FilledOrderSnapshot[];
+  /** 至今还开着的仓位里每一笔成交的 id（见 getCampaignFullData 里的说明）。 */
+  openPositionFillIds: Set<string>;
+  /** 同 id 的委托快照以后写的为准：撤单 / 成交覆盖挂单。 */
+  orderSnapshotsById: Map<string, { order: OrderSnapshotLike; live: boolean }>;
+  /**
+   * 回放时间线影子比对与本场无关的那一半（见 symbolTimelineActivityIndex）：懒建，
+   * 同标的里第一场有盖了章的锚点的战役才建；登记表换了一份就重建。
+   */
+  timelineActivity: CampaignTimelineActivityIndex | null;
+}
+
+interface LocalSnapshotIndex {
+  bySymbol: Map<string, SymbolLocalIndex>;
+  tradesBySymbol: Map<string, TradeRecord[]>;
+  cancelledBySymbol: Map<string, CancelledOrderSnapshot[]>;
+  filledBySymbol: Map<string, FilledOrderSnapshot[]>;
+  /** 成交记录在 tradeHistory 里的下标，按 id 与按仓位 id；按下标取回就是原来 filter 的顺序。 */
+  recordIndexesById: Map<string, number[]>;
+  recordIndexesByPositionId: Map<string, number[]>;
+  /** 成交快照按 id，同 id 以后写的为准（与 new Map(filledOrders.map(...)) 同一口径，不分标的）。 */
+  lastFilledById: Map<string, FilledOrderSnapshot>;
+}
+
+const localSnapshotIndexes = new WeakMap<UserLocalSnapshot, LocalSnapshotIndex>();
+
+function groupBySymbol<T extends { symbol: string }>(items: T[]): Map<string, T[]> {
+  const groups = new Map<string, T[]>();
+  for (const item of items) {
+    const group = groups.get(item.symbol);
+    if (group) group.push(item);
+    else groups.set(item.symbol, [item]);
+  }
+  return groups;
+}
+
+function localSnapshotIndex(local: UserLocalSnapshot): LocalSnapshotIndex {
+  let index = localSnapshotIndexes.get(local);
+  if (index) return index;
+  const recordIndexesById = new Map<string, number[]>();
+  const recordIndexesByPositionId = new Map<string, number[]>();
+  local.tradeHistory.forEach((record, position) => {
+    const byId = recordIndexesById.get(record.id);
+    if (byId) byId.push(position);
+    else recordIndexesById.set(record.id, [position]);
+    if (!record.positionId) return;
+    const byPosition = recordIndexesByPositionId.get(record.positionId);
+    if (byPosition) byPosition.push(position);
+    else recordIndexesByPositionId.set(record.positionId, [position]);
+  });
+  index = {
+    bySymbol: new Map(),
+    tradesBySymbol: groupBySymbol(local.tradeHistory),
+    cancelledBySymbol: groupBySymbol(local.cancelledOrders),
+    filledBySymbol: groupBySymbol(local.filledOrders),
+    recordIndexesById,
+    recordIndexesByPositionId,
+    lastFilledById: new Map(local.filledOrders.map(order => [order.id, order] as const)),
+  };
+  localSnapshotIndexes.set(local, index);
+  return index;
+}
+
+function symbolLocalIndex(local: UserLocalSnapshot, symbol: string): SymbolLocalIndex {
+  const index = localSnapshotIndex(local);
+  let entry = index.bySymbol.get(symbol);
+  if (entry) return entry;
+  const trades = index.tradesBySymbol.get(symbol) ?? [];
+  const cancelled = index.cancelledBySymbol.get(symbol) ?? [];
+  const filled = index.filledBySymbol.get(symbol) ?? [];
+  const orders = local.ordersMap[symbol] ?? [];
+  const recordPairs: Array<{ event: ReplayEvent; recordId: string }> = [];
+  for (const record of trades) {
+    // 资金费结算不是开 / 平仓操作（口径见 getCampaignFullData）
+    if (record.action === 'FUNDING') continue;
+    const open = replayEvent(record.openedRealAt, record.openTime, 'record-open');
+    if (open) recordPairs.push({ event: open, recordId: record.id });
+    const unstampedOpen = !(typeof record.openedRealAt === 'number' && record.openedRealAt > 0);
+    const close = replayEvent(record.closedRealAt, record.closeTime, 'record-close', false, unstampedOpen);
+    if (close) recordPairs.push({ event: close, recordId: record.id });
+  }
+  const sortedPairs = recordPairs
+    .filter(pair => finiteReplayClock(pair.event.realAt) && finiteReplayClock(pair.event.simAt))
+    .sort((a, b) => replayEventOrder(a.event, b.event));
+  const orderEvents: Array<ReplayEvent | null> = [];
+  for (const order of orders) orderEvents.push(replayEvent(order.createdRealAt, order.createdAt, 'order-create'));
+  for (const order of cancelled) {
+    orderEvents.push(replayEvent(order.createdRealAt, order.createdAt, 'order-create'));
+    orderEvents.push(replayEvent(order.cancelledRealAt, order.cancelledAt, 'order-end'));
+  }
+  for (const order of filled) {
+    orderEvents.push(replayEvent(order.createdRealAt, order.createdAt, 'order-create'));
+    orderEvents.push(replayEvent(order.filledRealAt, order.filledAt, 'order-end'));
+  }
+  const openPositionFillIds = new Set(
+    (local.positionsMap?.[symbol] ?? [])
+      .flatMap(position => [position.id, ...(position.fills ?? []).map(fill => fill.id)])
+      .filter((id): id is string => Boolean(id)),
+  );
+  const filledIntoOpenPosition = (order: FilledOrderSnapshot) =>
+    order.positionId != null && openPositionFillIds.has(order.positionId);
+  const orderSnapshotsById = new Map<string, { order: OrderSnapshotLike; live: boolean }>();
+  for (const order of orders) {
+    if (order.id) orderSnapshotsById.set(order.id, { order, live: isLivePendingOrder(order) });
+  }
+  for (const order of cancelled) {
+    if (order.id) orderSnapshotsById.set(order.id, { order, live: false });
+  }
+  for (const order of filled) {
+    if (order.id) orderSnapshotsById.set(order.id, { order, live: filledIntoOpenPosition(order) });
+  }
+  entry = {
+    replay: mergeSymbolReplayLane(sortedPairs, sortedReplayEvents(orderEvents)),
+    trades,
+    closeRecords: trades.filter(record => record.action === 'CLOSE' || record.action === 'LIQUIDATION'),
+    orders,
+    cancelled,
+    filled,
+    openPositionFillIds,
+    orderSnapshotsById,
+    timelineActivity: null,
+  };
+  index.bySymbol.set(symbol, entry);
+  return entry;
+}
+
+/**
+ * 回放时间线影子比对里只取决于「登记表 + 这个标的全部活动」的预处理（活动分桶、现实时刻排序、登记表的树），
+ * 同一份快照下同标的的战役共用一份——列表页原来每场都把全标的的活动重新收集、分桶、排序一遍。
+ * 活动取自本标的的成交记录与挂着的 / 撤掉的 / 成交的委托快照，与按标的过滤全快照的取舍相同
+ * （collectCampaignTimelineActivity 本来就只收本标的的撤单 / 成交快照与成交记录）。
+ */
+function symbolTimelineActivityIndex(
+  entry: SymbolLocalIndex,
+  symbol: string,
+  registry: ReplayTimelineRegistry | null | undefined,
+): CampaignTimelineActivityIndex {
+  if (entry.timelineActivity && entry.timelineActivity.registry === registry) return entry.timelineActivity;
+  entry.timelineActivity = indexCampaignTimelineActivity(registry, collectCampaignTimelineActivity({
+    symbol,
+    tradeHistory: entry.trades,
+    pendingOrders: entry.orders,
+    cancelledOrders: entry.cancelled,
+    filledOrders: entry.filled,
+  }));
+  return entry.timelineActivity;
+}
+
 /**
  * 单场战役的完整数据。
  *
@@ -2486,6 +3040,8 @@ async function healCampaignLegSnapshots(legs: TradeJournal[], tradeRecords: Trad
  * 两件事对单场详情是对的，对列表是纯浪费。
  */
 export interface CampaignFullDataOptions {
+  /** 已批量读取并水合的战役和腿；避免列表页再逐场请求同一份远端数据。 */
+  source?: CampaignWithLegs;
   /** 共用的本地存储快照；不传则自行读取（单场路径的原行为）。 */
   local?: UserLocalSnapshot;
   /**
@@ -2514,11 +3070,24 @@ export async function getCampaignFullData(
   legExitPriceCorrections?: LegExitPriceCorrections;
   /** 回放时间线的影子比对（见 lib/campaignTimelineScope）。本期只记录，pendingOrders / reverseHedgeOrders 仍按启发式。 */
   timelineDiagnostics: CampaignTimelineDiagnostics;
+  /**
+   * 委托归属是否建起了回放分段（有本场自己带真实时刻的操作）；没有时只按真实窗口 / 模拟窗口判。
+   * 可选：只有列表页的本地增量核对读它，测试里的替身不必给（缺省按最保守的「无界」处理）。
+   */
+  replayAnchored?: boolean;
+  /** 本地增量核对的真实时刻界，见函数体内的说明；null = 无界。 */
+  replayEndRealAt?: number | null;
 }> {
-  const { campaign, legs } = await getCampaignWithLegs(campaignId);
+  if (options.source && options.source.campaign.id !== campaignId) {
+    throw new Error('加载战役失败：预加载数据的战役 ID 不匹配');
+  }
+  const { campaign, legs } = options.source ?? await getCampaignWithLegs(campaignId);
   const userId = campaign.user_id;
   const local = options.local ?? readUserLocalSnapshot(userId);
-  const { tradeHistory, ordersMap, cancelledOrders, filledOrders } = local;
+  const { tradeHistory } = local;
+  // 同一份快照下按标的共用的预处理（见 symbolLocalIndex）：列表页几十场同标的只做一次。
+  const symbolIndex = symbolLocalIndex(local, campaign.symbol);
+  const recordIndex = localSnapshotIndex(local);
   const legRecordIds = new Set(
     legs
       .map(leg => leg.trade_record_id)
@@ -2528,17 +3097,21 @@ export async function getCampaignFullData(
   const closedAtMs = campaign.closed_at ? new Date(campaign.closed_at).getTime() : Number.POSITIVE_INFINITY;
   // 委托 / 挂单按「挂单时间(委托时间)」归属到战役：委托时间须落在 [开主力-5min, 平仓] 内。
   // 前置 5 分钟缓冲覆盖开主力前提前挂好的对冲空单；用挂单时间(而非生命周期重叠)可避免上一场战役的委托泄漏进来。
-  const PRE_MAIN_LOOKBACK_MS = 5 * 60_000;
-  const orderWindowStartMs = openedAtMs - PRE_MAIN_LOOKBACK_MS;
+  const orderWindowStartMs = openedAtMs - CAMPAIGN_ORDER_WINDOW_LOOKBACK_MS;
   const orderWindowEndMs = closedAtMs;
   // 归属只看挂单时间：委托时间落在窗口内即属本战役。Number.isFinite 守卫兼顾 NaN 与开放战役(end=Infinity)。
   const inWindow = (t: number) => Number.isFinite(t) && t >= orderWindowStartMs && t <= orderWindowEndMs;
 
   // 战役详情只展示用户归类进来的 legs；同标的同时间窗口内未选中的交易不能混入盘面。
-  const tradeRecords = tradeHistory.filter(record => (
-    legRecordIds.has(record.id)
-    || Boolean(record.positionId && legRecordIds.has(record.positionId))
-  ));
+  // 按 id / 仓位 id 查下标再按下标排回去，与逐条 filter 的取舍和顺序完全相同，只是不再全表扫描。
+  const selectedRecordIndexes = new Set<number>();
+  for (const id of legRecordIds) {
+    for (const position of recordIndex.recordIndexesById.get(id) ?? []) selectedRecordIndexes.add(position);
+    for (const position of recordIndex.recordIndexesByPositionId.get(id) ?? []) selectedRecordIndexes.add(position);
+  }
+  const tradeRecords = Array.from(selectedRecordIndexes)
+    .sort((a, b) => a - b)
+    .map(position => tradeHistory[position]);
   /**
    * 第二道归属：**真实时间**一致性。
    * 这是时间机器——同一段历史行情能回放两次，两次的委托在模拟时间轴上完全重合，
@@ -2559,28 +3132,13 @@ export async function getCampaignFullData(
    * 在模拟时间跳回去的地方切开回放，保留含本场操作的那几段，再按取代 / 盖章时代规则逐张判。
    */
   const selectedRecordIds = new Set(tradeRecords.map(record => record.id));
-  const replayEvents: ReplayEvent[] = [];
-  const pushReplayEvent = (
-    realAt: number | null | undefined,
-    simAt: number | null | undefined,
-    kind: ReplayEventKind,
-    anchor = false,
-    unstampedOpen = false,
-  ) => {
-    if (typeof realAt === 'number' && typeof simAt === 'number') {
-      replayEvents.push({ realAt, simAt, anchor, kind, ...(unstampedOpen ? { unstampedOpen } : {}) });
-    }
-  };
-  for (const record of tradeHistory) {
-    // 资金费结算不是开 / 平仓操作：它只有 closedRealAt、没有 openedRealAt，按下面的口径会被当成「上线之前开的仓」，
-    // 让持仓跨过任一资金费时段的战役都被误判为跨上线、盖章时代规则整个失效（与 campaignAnalysis 同一口径排除）
-    if (record.symbol !== campaign.symbol || record.action === 'FUNDING') continue;
-    const anchor = selectedRecordIds.has(record.id);
-    pushReplayEvent(record.openedRealAt, record.openTime, 'record-open', anchor);
-    // 没有 openedRealAt 的成交是盖章上线之前开的仓：它的平仓所在那一段跨过了上线（盖章时代规则的放行条件）
-    const unstampedOpen = !(typeof record.openedRealAt === 'number' && record.openedRealAt > 0);
-    pushReplayEvent(record.closedRealAt, record.closeTime, 'record-close', anchor, unstampedOpen);
-  }
+  /**
+   * 本标的全部成交的开 / 平事件与委托事件按标的预先归并排好序（symbolLocalIndex）；这里只把本场选中的成交标成锚点。
+   * 资金费结算不是开 / 平仓操作：它只有 closedRealAt、没有 openedRealAt，按口径会被当成「上线之前开的仓」，
+   * 让持仓跨过任一资金费时段的战役都被误判为跨上线、盖章时代规则整个失效（与 campaignAnalysis 同一口径排除）；
+   * 没有 openedRealAt 的成交是盖章上线之前开的仓：它的平仓所在那一段跨过了上线（盖章时代规则的放行条件）。
+   */
+  const legReplayEvents: ReplayEvent[] = [];
   /**
    * 本场腿自己的平仓操作也是锚点：本地成交记录被清掉（清除标的数据只删 trade_history、不删委托快照）
    * 或被云端水合覆盖时，没有它分段就建不起来、窗口里的委托全数放行，而 Legs 表照样显示这些「操作」时间。
@@ -2608,30 +3166,39 @@ export async function getCampaignFullData(
   };
   for (const leg of legs) {
     const openEvent = legOpenReplayEvent(leg);
-    if (openEvent) replayEvents.push(openEvent);
+    if (openEvent) legReplayEvents.push(openEvent);
     const record = leg.trade_record_id
       ? tradeRecords.find(item => item.id === leg.trade_record_id || item.positionId === leg.trade_record_id)
       : undefined;
     if (tradeRecordOperationTime(record) != null) continue;
     if (legCloseFilledFromEvent(leg)) continue;
     const event = legCloseReplayEvent(leg);
-    if (event) replayEvents.push(event);
+    if (event) legReplayEvents.push(event);
   }
-  for (const order of ordersMap[campaign.symbol] ?? []) {
-    pushReplayEvent(order.createdRealAt, order.createdAt, 'order-create');
-  }
-  for (const order of cancelledOrders) {
-    if (order.symbol !== campaign.symbol) continue;
-    pushReplayEvent(order.createdRealAt, order.createdAt, 'order-create');
-    pushReplayEvent(order.cancelledRealAt, order.cancelledAt, 'order-end');
-  }
-  for (const order of filledOrders) {
-    if (order.symbol !== campaign.symbol) continue;
-    pushReplayEvent(order.createdRealAt, order.createdAt, 'order-create');
-    pushReplayEvent(order.filledRealAt, order.filledAt, 'order-end');
-  }
+  // 成交 → 腿 → 委托（挂着的 / 撤掉的 / 成交的）三路归并成一条已排好序的事件流；同一时刻仍按这个先后，
+  // 并只留本场牵涉的那几次坐下来（见 mergeCampaignReplayEvents）
+  const legEvents = sortedReplayEvents(legReplayEvents);
+  const replayEvents = mergeCampaignReplayEvents(
+    symbolIndex.replay, selectedRecordIds, legEvents, { campaignOpen: !campaign.closed_at },
+  );
   // 进行中的战役：仓位还开着，倒回之后同一次坐下来挂的单子是本场的延续（见 buildReplaySessionFilter 规则 0）
   const replaySession = buildReplaySessionFilter(replayEvents, { campaignOpen: !campaign.closed_at });
+  /**
+   * 给列表页的本地增量核对（campaignListCache）划一条真实时刻的界：同标的晚于它超过一次坐下来的新事件碰不到本场的归属。
+   *   · 有分段、且窗口在最后一个平仓侧锚点之后被一次坐下来截断（已结束的战役）：窗口最后一个事件的真实时刻——
+   *     之后隔着一次坐下来的事件不进本场的段（mergeCampaignReplayEvents 的裁窗与 buildReplaySessionFilter 规则 0 同一口径）；
+   *   · 没有锚点、只有真实窗口：窗口上界（没有平仓证据或进行中为 +∞ → 无界）；
+   *   · 其余（进行中、窗口没截断——坐下来之后接着往后打的段会并进来）：无界，任何同标的事件都可能接上本场。
+   */
+  const windowLastRealAt = replayEvents.length > 0 ? replayEvents[replayEvents.length - 1].realAt : null;
+  const laneEvents = symbolIndex.replay.events;
+  const laneLastRealAt = Math.max(
+    laneEvents.length > 0 ? laneEvents[laneEvents.length - 1].realAt : Number.NEGATIVE_INFINITY,
+    legEvents.length > 0 ? legEvents[legEvents.length - 1].realAt : Number.NEGATIVE_INFINITY,
+  );
+  const replayEndRealAt = replaySession
+    ? (windowLastRealAt !== null && laneLastRealAt > windowLastRealAt ? windowLastRealAt : null)
+    : (realWindow && Number.isFinite(realWindow.end) ? realWindow.end : null);
   /**
    * 能分段就只用分段（含取代与盖章时代规则），不再叠加 realWindow：后者的 5 分钟是**现实**回看，
    * 挂好前置对冲后停下来想了 5 分钟以上才开主力，同一段回放里的合法对冲会被它踢掉。
@@ -2650,22 +3217,22 @@ export async function getCampaignFullData(
    * 精确判定（影子）：按回放时间线登记表里的章判，与启发式并排算，**结论只进 timelineDiagnostics**。
    * 每一张委托仍按启发式的结论取舍——精确判定要等影子比对过一轮真实数据才会生效（Phase 2）。
    * 老数据没有章：本场一个盖了章的锚点都没有时 scope 为 null，什么都不算。
+   * 证据分两半：本场的锚点与仓位 id 逐场收集；全标的的活动与登记表的预处理按标的共用（symbolTimelineActivityIndex），
+   * 本场没有盖了章的锚点时不建。锚点按腿引用的 id 查成交快照时不分标的、同 id 以后写的为准（lastFilledById）。
    */
   const timelineScope = buildCampaignTimelineScope({
     registry: local.replayTimelines,
     symbol: campaign.symbol,
     campaignOpen: !campaign.closed_at,
-    ...collectCampaignTimelineEvidence({
+    ...collectCampaignTimelineAnchors({
       symbol: campaign.symbol,
       campaignEvents: campaign.actual_evolution ?? [],
       legs,
       selectedRecords: tradeRecords,
-      tradeHistory,
       openPositions: local.positionsMap?.[campaign.symbol] ?? [],
-      pendingOrders: ordersMap[campaign.symbol] ?? [],
-      cancelledOrders,
-      filledOrders,
+      filledOrdersById: recordIndex.lastFilledById,
     }),
+    activityIndex: () => symbolTimelineActivityIndex(symbolIndex, campaign.symbol, local.replayTimelines),
   });
   const timelineVerdicts: Record<string, CampaignTimelineOrderDiagnostic> = {};
   const timelineDisagreements: CampaignTimelineDiagnostics['disagreements'] = [];
@@ -2691,31 +3258,14 @@ export async function getCampaignFullData(
     recordTimelineVerdict(order, options, allowed);
     return allowed;
   };
-  const isLivePendingOrder = (order: PendingOrder) =>
-    order.status === 'NEW' || order.status === 'PENDING' || order.status === 'ACTIVE';
   // 持仓面板 / 结束建议用的挂单也按挂单时间归属，避免同标的另一场战役的实时挂单混进本战役。
-  const pendingOrders = Object.entries(ordersMap)
-    .flatMap(([symbol, orders]) => symbol === campaign.symbol ? orders : [])
+  const pendingOrders = symbolIndex.orders
     .filter(order => isLivePendingOrder(order)
       && inWindow(order.createdAt)
       && belongsToCampaignTimeline(order, { live: true }));
 
-  // 黄色委托层只记录「开仓性质的委托空单」；止盈/止损等平仓委托不进入这里。
-  const isPositionClosingOrder = (order: Pick<PendingOrder | CancelledOrderSnapshot | FilledOrderSnapshot, 'side'> & {
-    type?: PendingOrder['type'];
-    reduceOnly?: boolean;
-    reduceKind?: 'TP' | 'SL' | null;
-    linkedPositionId?: string | null;
-    reducePositionSide?: PendingOrder['reducePositionSide'] | null;
-  }) =>
-    order.reduceOnly === true ||
-    order.reduceKind != null ||
-    Boolean(order.linkedPositionId) ||
-    Boolean(order.reducePositionSide) ||
-    order.type === 'LIMIT_TP_SL' ||
-    order.type === 'MARKET_TP_SL';
-  const isOpeningShortOrder = (order: Parameters<typeof isPositionClosingOrder>[0]) =>
-    order.side === 'SHORT' && !isPositionClosingOrder(order);
+  // 黄色委托层只记录「开仓性质的委托空单」；止盈/止损等平仓委托不进入这里（见 isCampaignOpeningShortOrder）。
+  const isOpeningShortOrder = isCampaignOpeningShortOrder;
   const pendingOrderPrice = (order: PendingOrder) => (
     order.price > 0
       ? order.price
@@ -2726,12 +3276,8 @@ export async function getCampaignFullData(
   const closeEnough = (a: number, b: number, relativeBase = Math.max(Math.abs(a), Math.abs(b), 1)) =>
     Math.abs(a - b) <= Math.max(1e-8, relativeBase * 1e-6);
   const ORDER_RECORD_MATCH_MS = 60_000;
-  const LEGACY_ORDER_RECORD_MATCH_MS = 15 * 60_000;
-  const isCloseLikeTradeRecord = (record: TradeRecord) => record.action === 'CLOSE' || record.action === 'LIQUIDATION';
-  const campaignSymbolTradeRecords = tradeHistory.filter(record =>
-    record.symbol === campaign.symbol &&
-    isCloseLikeTradeRecord(record)
-  );
+  const LEGACY_ORDER_RECORD_MATCH_MS = CAMPAIGN_LEGACY_ORDER_RECORD_MATCH_MS;
+  const campaignSymbolTradeRecords = symbolIndex.closeRecords;
   const closeUnits = (record: TradeRecord) => (
     Number.isFinite(record.contracts) && record.contracts != null ? record.contracts : record.quantity
   );
@@ -2855,16 +3401,12 @@ export async function getCampaignFullData(
    * 只放宽取代、不放宽成员资格：另一次回放的成交仍要落在本场的时间线上。不用「没有平仓记录」代替——
    * 清除标的数据后每笔成交都没有平仓记录，被放弃时间线里早已平掉的对冲会借此成对回来。
    */
-  const openPositionFillIds = new Set(
-    (local.positionsMap?.[campaign.symbol] ?? [])
-      .flatMap(position => [position.id, ...(position.fills ?? []).map(fill => fill.id)])
-      .filter((id): id is string => Boolean(id)),
-  );
+  const { openPositionFillIds } = symbolIndex;
   const filledIntoOpenPosition = (order: FilledOrderSnapshot) =>
     order.positionId != null && openPositionFillIds.has(order.positionId);
-  const triggeredReverseOrders = filledOrders
+  const triggeredReverseOrders = symbolIndex.filled
     .filter(order => {
-      if (order.symbol !== campaign.symbol || !isOpeningShortOrder(order) || !inWindow(order.createdAt)) return false;
+      if (!isOpeningShortOrder(order) || !inWindow(order.createdAt)) return false;
       const live = filledIntoOpenPosition(order);
       if (order.positionId != null && selectedPositionIds.has(order.positionId)) {
         // 豁免的委托两边都不用判：影子比对里同样记成本场的
@@ -2901,19 +3443,8 @@ export async function getCampaignFullData(
       .map(event => event.pending_order_id)
       .filter((id): id is string => Boolean(id)),
   );
-  const orderSnapshotsById = new Map<string, { order: Parameters<typeof belongsToCampaignTimeline>[0]; live: boolean }>();
-  for (const order of ordersMap[campaign.symbol] ?? []) {
-    if (order.id) orderSnapshotsById.set(order.id, { order, live: isLivePendingOrder(order) });
-  }
   // 撤单 / 成交快照后写、覆盖同 id 的挂单：委托已经结束了（成交开出的仓位至今还开着的除外，与上面同一口径）
-  for (const order of cancelledOrders) {
-    if (order.symbol === campaign.symbol && order.id) orderSnapshotsById.set(order.id, { order, live: false });
-  }
-  for (const order of filledOrders) {
-    if (order.symbol === campaign.symbol && order.id) {
-      orderSnapshotsById.set(order.id, { order, live: filledIntoOpenPosition(order) });
-    }
-  }
+  const { orderSnapshotsById } = symbolIndex;
   const eventRecoveredReverseOrders = Array.from(eventOrderIds)
     .map((orderId): CampaignReverseHedgeOrder | null => {
       const events = campaign.actual_evolution
@@ -3025,9 +3556,8 @@ export async function getCampaignFullData(
     })
     .filter((order): order is CampaignReverseHedgeOrder => order != null);
   const rawReverseHedgeOrders: CampaignReverseHedgeOrder[] = [
-    ...cancelledOrders
+    ...symbolIndex.cancelled
       .filter(order =>
-        order.symbol === campaign.symbol &&
         isOpeningShortOrder(order) &&
         inWindow(order.createdAt) &&
         belongsToCampaignTimeline(order)
@@ -3111,7 +3641,7 @@ export async function getCampaignFullData(
     display: CampaignReverseHedgeOrder;
   }>();
   // 与 orderSnapshotsById 同一口径：撤单 / 成交快照后写、覆盖同 id 的挂单
-  for (const order of ordersMap[campaign.symbol] ?? []) {
+  for (const order of symbolIndex.orders) {
     if (!order.id || !isLivePendingOrder(order) || !isOpeningShortOrder(order)) continue;
     foreignCandidates.set(order.id, {
       order,
@@ -3130,8 +3660,8 @@ export async function getCampaignFullData(
       },
     });
   }
-  for (const order of cancelledOrders) {
-    if (order.symbol !== campaign.symbol || !order.id) continue;
+  for (const order of symbolIndex.cancelled) {
+    if (!order.id) continue;
     if (!isOpeningShortOrder(order)) {
       foreignCandidates.delete(order.id);
       continue;
@@ -3153,8 +3683,8 @@ export async function getCampaignFullData(
       },
     });
   }
-  for (const order of filledOrders) {
-    if (order.symbol !== campaign.symbol || !order.id) continue;
+  for (const order of symbolIndex.filled) {
+    if (!order.id) continue;
     // 开出的仓位是本场选中的成交：它就是本场的单（与 triggeredReverseOrders 的豁免同一口径）
     if (!isOpeningShortOrder(order) || (order.positionId != null && selectedPositionIds.has(order.positionId))) {
       foreignCandidates.delete(order.id);
@@ -3235,6 +3765,8 @@ export async function getCampaignFullData(
         verdicts: {},
         disagreements: [],
       },
+    replayAnchored: replaySession !== null,
+    replayEndRealAt,
   };
 }
 
