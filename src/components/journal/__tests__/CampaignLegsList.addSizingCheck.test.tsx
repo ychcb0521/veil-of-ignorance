@@ -130,7 +130,7 @@ describe('Legs 列表的「加仓校验」列', () => {
   it('每一行的格子数与表头一致：加列没有让合计行错位', () => {
     renderList(22_057_330);
     const headerCells = screen.getByText('加仓校验').parentElement!.children.length;
-    expect(headerCells).toBe(12);
+    expect(headerCells).toBe(13);
     expect(screen.getByTestId('legs-total-row').children.length).toBe(headerCells);
     const addRow = screen.getByTestId('add-sizing-check-fail-add1').parentElement!;
     expect(addRow.children.length).toBe(headerCells);

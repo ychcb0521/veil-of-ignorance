@@ -17,6 +17,11 @@ import { computeLegPnlContributions } from '@/lib/campaignLegPnl';
 import { computeCampaignRealizedPnl, settlementBasisLabel } from '@/lib/campaignRealizedPnl';
 import { formatDeltaB, legDeltaB, roundedDeltaB, splitMainLegPhases } from '@/lib/campaignLegPhases';
 import {
+  computeLegPriceChangePct,
+  formatLegPriceChangePct,
+  legPriceChangeDirection,
+} from '@/lib/legPriceChange';
+import {
   evaluateCampaignAddSizing,
   formatAddSizingCoinQuantity,
   formatAddSizingNotional,
@@ -104,6 +109,8 @@ const COLUMNS = [
   { title: 'Δb', width: 104 },
   { title: '开仓价', width: 118 },
   { title: '平仓价', width: 118 },
+  // 120：留 100px 文字宽，「+199900.00%」「+1234567.89%」这种千倍以上的涨跌幅也一行放下——拆成两截的百分数最难读
+  { title: '涨跌幅', width: 120 },
   // 150：十亿级币量带两位小数（1,171,163,720.54）要一行放下——拆成两截的数字比挤一点更难读
   { title: '币量 / 仓位', width: 150 },
   // 170：红叉下面把 Plan B 正确上限的币量与 U 名义仓位都写清。
@@ -233,6 +240,23 @@ function statusForLeg(
     return { label: '挂单中', color: '#D89B00', closed: false };
   }
   return { label: '进行中', color: '#848E9C', closed: false };
+}
+
+/**
+ * 涨跌幅格：与页面同一个 helper、同一对价（含平仓价校正）。绿涨红跌；取整为 0 用中性色，缺值淡灰。
+ * 不按方向翻转——空单为负才是赚，盈亏看「贡献 / 盈亏」列。
+ */
+function priceChangeCell(
+  entryPrice: number | null | undefined,
+  exitPrice: number | null | undefined,
+  neutralColor: string,
+): CampaignLegsExportCellLine[] {
+  const pct = computeLegPriceChangePct(entryPrice, exitPrice);
+  const direction = legPriceChangeDirection(pct);
+  return [{
+    text: formatLegPriceChangePct(pct),
+    color: direction === 'up' ? '#0ECB81' : direction === 'down' ? '#F6465D' : direction === 'flat' ? neutralColor : '#848E9C',
+  }];
 }
 
 function statusForReverseOrder(order: CampaignReverseHedgeOrder): string {
@@ -487,6 +511,8 @@ export function buildCampaignLegsExportRows(input: ExportInput): CampaignLegsExp
       })(),
       [{ text: fmtPrice(entryPriceValue) }],
       exitPriceLines,
+      // 涨跌幅：开仓价 → 平仓价的标的价格变化，与左边两格同一对价
+      priceChangeCell(entryPriceValue, exitPriceValue, '#5F6B7A'),
       // 与页面同源：币量在上、名义在下——加仓公式里的 X 是币量，名义只是它乘开仓价的结果
       (() => {
         const notionalText = leg.pre_position_size != null ? leg.pre_position_size.toFixed(2) : '—';
@@ -579,6 +605,8 @@ export function buildCampaignLegsExportRows(input: ExportInput): CampaignLegsExp
           }],
           [{ text: fmtPrice(phase.startPrice), color: '#848E9C' }],
           [{ text: fmtPrice(phase.endPrice), color: '#848E9C' }],
+          // 阶段自己的起止价各算各的（与页面同源）
+          priceChangeCell(phase.startPrice, phase.endPrice, '#848E9C'),
           [{ text: '' }],
           [{ text: '' }],
           [{ text: '' }],
@@ -621,6 +649,8 @@ export function buildCampaignLegsExportRows(input: ExportInput): CampaignLegsExp
       bold: true,
       size: 16,
     }],
+    // 开仓价 / 平仓价 / 涨跌幅 / 币量 / 加仓校验：涨跌幅跨腿没有意义，与页面一样留空
+    [{ text: '' }],
     [{ text: '' }],
     [{ text: '' }],
     [{ text: '' }],

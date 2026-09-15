@@ -7,7 +7,7 @@ import type { TradeCampaign, TradeJournal } from '@/types/journal';
 import type { CampaignReverseHedgeOrder, TradeRecord } from '@/types/trading';
 
 /** 「委托」列在导出 COLUMNS 里的下标（与 campaignLegsPngExport.test.ts 一致）。 */
-const ORDER_COL = 10;
+const ORDER_COL = 11;
 
 const at = (hhmm: string, day = '08') => Date.parse(`2026-08-${day}T${hhmm}:00+08:00`);
 

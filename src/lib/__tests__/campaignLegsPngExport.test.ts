@@ -1,6 +1,7 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   EMOTION_DIARY_COLLAPSED_H,
+  buildCampaignLegsListCanvas,
   buildCampaignBoardOverview,
   campaignEmotionDiaryPanelHeight,
   drawEmotionDiaryPanel,
@@ -85,11 +86,13 @@ function input(): CampaignBoardExportInput {
 }
 
 /** 「委托」列在 COLUMNS 里的下标。插新列时只需改这里，不必逐处改数字。 */
-const ORDER_COL = 10;
+const ORDER_COL = 11;
 /** 「手续费」列在 COLUMNS 里的下标。 */
-const FEE_COL = 9;
+const FEE_COL = 10;
 /** 「加仓校验」列在 COLUMNS 里的下标（紧跟「币量 / 仓位」）。 */
-const ADD_SIZING_COL = 8;
+const ADD_SIZING_COL = 9;
+/** 「涨跌幅」列在 COLUMNS 里的下标（紧跟「平仓价」）。 */
+const PRICE_CHANGE_COL = 7;
 
 describe('campaign PNG overview', () => {
   it('完整包含战役原数据和盈亏概览字段', () => {
@@ -200,8 +203,8 @@ describe('campaign PNG overview', () => {
     expect(legRows.at(-1)?.cells[0][0].text).toBe('14');
     expect(legRows.at(-1)?.cells[5][0].text).toBe('113.0000');
     // 币量在上、名义在下：1013 ÷ 113 = 8.96
-    expect(legRows.at(-1)?.cells[7][0].text).toBe('8.96');
-    expect(legRows.at(-1)?.cells[7][1].text).toBe('1013.00');
+    expect(legRows.at(-1)?.cells[8][0].text).toBe('8.96');
+    expect(legRows.at(-1)?.cells[8][1].text).toBe('1013.00');
     expect(campaignLegsExportCanvasHeight({
       ...input(),
       legs: manyLegs,
@@ -563,7 +566,7 @@ describe('【用户要求】导出图也带「加仓校验」列', () => {
     expect(rows.find(row => row.legId === 'main')!.cells[ADD_SIZING_COL].map(line => line.text)).toEqual(['']);
     expect(rows.at(-1)!.cells[ADD_SIZING_COL].map(line => line.text)).toEqual(['']);
     const widths = new Set(rows.map(row => row.cells.length));
-    expect(widths).toEqual(new Set([11]));
+    expect(widths).toEqual(new Set([12]));
     // 列序：币量之后、手续费之前
     expect(add.cells[ADD_SIZING_COL - 1][0].text).toMatch(/^525,54\d,\d{3}(\.\d+)?$/);
   });
@@ -623,10 +626,10 @@ describe('【用户要求】主力阶段子行在导出图里也标明「对冲�
     const phases = rows.filter(row => row.kind === 'phase');
     expect(phases.length).toBeGreaterThanOrEqual(2);
     for (const row of phases) {
-      expect(row.cells).toHaveLength(11);
+      expect(row.cells).toHaveLength(12);
       expect(row.cells[ADD_SIZING_COL].map(line => line.text)).toEqual(['']);
     }
-    expect(new Set(rows.map(row => row.cells.length))).toEqual(new Set([11]));
+    expect(new Set(rows.map(row => row.cells.length))).toEqual(new Set([12]));
   });
 });
 
@@ -658,5 +661,109 @@ describe('【用户决定】他场委托在导出图里只是表下一行淡注'
     const rows = buildCampaignLegsExportRows({ ...input(), foreignLiveOrders: [] });
     expect(rows.some(row => row.kind === 'note')).toBe(false);
     expect(rows.at(-1)!.kind).toBe('total');
+  });
+});
+
+describe('【用户要求】导出图也带「涨跌幅」列（平仓价右侧）', () => {
+  afterEach(() => { vi.restoreAllMocks(); });
+
+  const T = (hhmm: string) => `2026-08-07T${hhmm}:00.000Z`;
+  const leg = (over: Partial<TradeJournal> & { id: string }) => ({
+    leg_sequence: 1, leg_role: 'main_open', order_kind: 'main', direction: 'long',
+    pre_simulated_time: T('01:00'), ...over,
+  }) as TradeJournal;
+
+  it('表头真的把「涨跌幅」画在平仓价之后、币量 / 仓位之前；腿行那一格画出格式化后的值', () => {
+    const texts: string[] = [];
+    const ctx = new Proxy({} as Record<string | symbol, unknown>, {
+      get(target, key) {
+        if (key === 'fillText') return (text: string) => { texts.push(String(text)); };
+        if (key === 'measureText') return (text: string) => ({ width: String(text).length * 8 });
+        if (key in target) return target[key];
+        return () => undefined;
+      },
+      set(target, key, value) { target[key] = value; return true; },
+    }) as unknown as CanvasRenderingContext2D;
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(ctx as never);
+
+    const legs = [leg({ id: 'long', pre_entry_price: 2.8717, post_exit_price_snapshot: 6.5194, post_simulated_close_time: T('09:00') })];
+    buildCampaignLegsListCanvas({ ...input(), legs }, { includeHeader: false, scale: 1 });
+
+    const at = texts.indexOf('涨跌幅');
+    expect(at).toBeGreaterThan(0);
+    expect(texts.slice(at - 2, at + 2)).toEqual(['开仓价', '平仓价', '涨跌幅', '币量 / 仓位']);
+    expect(texts.slice(0, 12)).toEqual(['#', '角色', '时间', '贡献 / 盈亏', 'Δb', '开仓价', '平仓价', '涨跌幅', '币量 / 仓位', '加仓校验', '手续费', '委托']);
+    expect(texts).toContain('+127.02%');
+  });
+
+  it('与页面同一个 helper：多单涨绿、空单跌红、未平仓「—」、按校正后的平仓价算', () => {
+    const rows = buildCampaignLegsExportRows({
+      ...input(),
+      legs: [
+        leg({ id: 'long', pre_entry_price: 2.8717, post_exit_price_snapshot: 6.5194, post_simulated_close_time: T('09:00') }),
+        leg({ id: 'short', leg_sequence: 2, leg_role: 'hedge_initial_a', order_kind: 'hedge', direction: 'short', pre_entry_price: 10, post_exit_price_snapshot: 9.659, post_simulated_close_time: T('09:00') }),
+        leg({ id: 'open', leg_sequence: 3, leg_role: 'main_add_1', pre_entry_price: 2.8717 }),
+        leg({ id: 'corrected', leg_sequence: 4, leg_role: 'reentry_main', pre_entry_price: 0.1, post_exit_price_snapshot: 0.5, post_simulated_close_time: T('09:00') }),
+      ],
+      reverseHedgeOrders: [],
+      legExitPriceCorrections: {
+        corrected: { exitPrice: 0.2, originalExitPrice: 0.5, candleLow: 0.18, candleHigh: 0.22 },
+      },
+    });
+    const cell = (id: string) => rows.find(row => row.legId === id)!.cells[PRICE_CHANGE_COL];
+
+    expect(cell('long')).toEqual([{ text: '+127.02%', color: '#0ECB81' }]);
+    expect(cell('short')).toEqual([{ text: '-3.41%', color: '#F6465D' }]);
+    expect(cell('open')).toEqual([{ text: '—', color: '#848E9C' }]);
+    expect(cell('corrected')[0].text).toBe('+100.00%');
+    // 左边一格就是平仓价：同一对价
+    expect(rows.find(row => row.legId === 'corrected')!.cells[PRICE_CHANGE_COL - 1][0].text).toBe('0.200000');
+    expect(rows.find(row => row.legId === 'long')!.cells[PRICE_CHANGE_COL - 1][0].text).toBe('6.5194');
+    // 放得下，不折行
+    expect(rows.find(row => row.legId === 'long')!.wrapped[PRICE_CHANGE_COL]).toHaveLength(1);
+  });
+
+  it('阶段子行各算各的，合计行留空；每一行格子数都与表头列数一致', () => {
+    const rows = buildCampaignLegsExportRows({
+      ...input(),
+      legs: [
+        leg({
+          id: 'main', pre_entry_price: 0.0336792, pre_position_size: 94300, source: 'retroactive_from_record',
+          post_exit_price_snapshot: 0.0677819, post_simulated_close_time: T('09:00'), post_realized_pnl: 95439.77,
+        }),
+        leg({
+          id: 'hedge-roll', leg_sequence: 2, leg_role: 'hedge_rolling', order_kind: 'hedge', direction: 'short',
+          source: 'retroactive_from_record', pre_simulated_time: T('03:00'), pre_entry_price: 0.05, pre_position_size: 50000,
+          post_exit_price_snapshot: 0.052, post_simulated_close_time: T('05:00'), post_realized_pnl: -2000,
+        }),
+      ],
+      reverseHedgeOrders: [],
+      initialExpectedMaxLoss: 20000,
+    });
+    const phases = rows.filter(row => row.kind === 'phase');
+    expect(phases.map(row => row.cells[PRICE_CHANGE_COL])).toEqual([
+      [{ text: '+54.40%', color: '#0ECB81' }],
+      [{ text: '+30.35%', color: '#0ECB81' }],
+    ]);
+    expect(rows.find(row => row.legId === 'main')!.cells[PRICE_CHANGE_COL][0].text).toBe('+101.26%');
+    const total = rows.at(-1)!;
+    expect(total.kind).toBe('total');
+    expect(total.cells[PRICE_CHANGE_COL]).toEqual([{ text: '' }]);
+    expect(new Set(rows.map(row => row.cells.length))).toEqual(new Set([12]));
+  });
+
+  it('千倍以上的涨跌幅也一行放下：百分数不被拆成「+199900.00」与「%」两截', () => {
+    const rows = buildCampaignLegsExportRows({
+      ...input(),
+      legs: [
+        leg({ id: 'x2000', pre_entry_price: 0.0001, post_exit_price_snapshot: 0.2, post_simulated_close_time: T('09:00') }),
+        leg({ id: 'x12000', leg_sequence: 2, leg_role: 'main_add_1', pre_entry_price: 0.0001, post_exit_price_snapshot: 1.2345689, post_simulated_close_time: T('09:00') }),
+      ],
+      reverseHedgeOrders: [],
+    });
+    const wrapped = (id: string) => rows.find(row => row.legId === id)!.wrapped[PRICE_CHANGE_COL];
+    expect(wrapped('x2000')).toEqual([expect.objectContaining({ text: '+199900.00%' })]);
+    expect(wrapped('x12000')).toHaveLength(1);
+    expect(wrapped('x12000')[0].text).toBe('+1234468.90%');
   });
 });

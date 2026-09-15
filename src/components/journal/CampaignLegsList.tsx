@@ -13,6 +13,7 @@ import type { CampaignEvent, TradeJournal } from '@/types/journal';
 import { computeLegPnlContributions, sumLegPnl } from '@/lib/campaignLegPnl';
 import { computeCampaignRealizedPnl, settlementBasisLabel } from '@/lib/campaignRealizedPnl';
 import { formatDeltaB, legDeltaB, roundedDeltaB, splitMainLegPhases, type MainLegPhase } from '@/lib/campaignLegPhases';
+import { computeLegPriceChangePct, formatLegPriceChangePct, legPriceChangeDirection } from '@/lib/legPriceChange';
 import { formatFeeCoin, sumTradeRecordFees, tradeRecordFees } from '@/lib/tradeFees';
 import {
   describeAddSizingVerdict,
@@ -92,7 +93,7 @@ function fmtPrice(value: number | null | undefined): string {
  * 委托是唯一"越宽越有用"的列，多出来的宽度停在它和操作列之间，视觉上是留白而不是裂口。
  *
  * 列序按**阅读价值**排，不按录入顺序排：贡献 / 盈亏与 Δb 紧跟在时间之后，落在从左往右
- * 扫视最先停留的那一段；开平价、币量、手续费这些"怎么来的"排在后面；委托与操作收在右端。
+ * 扫视最先停留的那一段；开平价、涨跌幅、币量、手续费这些"怎么来的"排在后面；委托与操作收在右端。
  * 「状态」不单独占一列——已平仓是绝大多数，只在**没有**平仓时才在角色旁标一枚小标签。
 
  *
@@ -124,10 +125,25 @@ const FEE_COLUMN_HINT = '币安口径：手续费 = 名义 × 费率，开仓、
   + '币本位：名义 = 张数 × 面值 ÷ 成交价，收的是币——折成美元后价格被约掉，所以开平两笔的美元数必然相同，币数才不同（价越高付的币越少），本列因此按币显示。'
   + '盈亏列已扣平仓费；开仓费在开仓当时从钱包扣除。旧记录未存开仓费，按当时 0.04% Taker 估算并标明。';
 
-const LEGS_GRID = 'grid-cols-[36px_128px_180px_116px_84px_88px_88px_116px_116px_148px_minmax(216px,1fr)_64px]';
+const LEGS_GRID = 'grid-cols-[36px_128px_180px_116px_84px_88px_88px_84px_116px_116px_148px_minmax(216px,1fr)_64px]';
 
-/** 各列合计的下限，与 LEGS_GRID 对应；不足时容器横向滚动而不是压扁列。 */
-const LEGS_MIN_WIDTH = 'min-w-[1514px]';
+/**
+ * 各列合计的下限，与 LEGS_GRID 对应；不足时容器横向滚动而不是压扁列。
+ * = Σ轨道 + 列间距 gap-x-2.5 × (列数 − 1) + 左右 px-3。加一列要连同它带来的那一道 10px 间距一起加上。
+ */
+const LEGS_MIN_WIDTH = 'min-w-[1608px]';
+
+/** 「涨跌幅」列表头的说明：它是标的价格的变化，不是这条腿的盈亏。 */
+const PRICE_CHANGE_COLUMN_HINT = '涨跌幅 =（平仓价 − 开仓价）÷ 开仓价：开仓价到平仓价之间标的本身的价格变化，不按方向翻转，不是这条腿的盈亏。'
+  + '多单为正才赚，空单为负才是赚；盈亏看「贡献 / 盈亏」列。阶段子行按该阶段自己的起止价计算。';
+
+/** 涨跌幅的字色：绿涨红跌；取整为 0 与缺值都是中性淡色。alpha 用于阶段子行的 /90。 */
+function priceChangeTone(pct: number | null, muted = false): string {
+  const direction = legPriceChangeDirection(pct);
+  if (direction === 'up') return muted ? 'text-[#0ECB81]/90' : 'text-[#0ECB81]';
+  if (direction === 'down') return muted ? 'text-[#F6465D]/90' : 'text-[#F6465D]';
+  return muted ? '' : 'text-muted-foreground';
+}
 
 /** 「加仓校验」列表头的说明：两本账合起来能否抹平新加仓退回止损线的亏损。 */
 const ADD_SIZING_COLUMN_HINT = '仅加仓行：旧仓浮盈垫 X₁(S₁ − S̄) + 已落袋 G ≥ 新加仓最大预期亏损 X₂(S₂ − S₁) 即为合规（主空符号翻转）。'
@@ -366,6 +382,7 @@ export function CampaignLegsList({
             <div className="text-right font-semibold tracking-wide text-foreground/85" title="该腿盈亏 ÷ 初始最大预期亏损 L：这条腿把整场 b 推高 / 拉低了多少">Δb</div>
             <div className="text-right">开仓价</div>
             <div className="text-right">平仓价</div>
+            <div className="text-right" title={PRICE_CHANGE_COLUMN_HINT}>涨跌幅</div>
             <div className="text-right" title="上行：按开仓价折算的币量，即加仓公式里的 X；下行：名义仓位（USD）">币量 / 仓位</div>
             <div className="text-center" title={ADD_SIZING_COLUMN_HINT}>加仓校验</div>
             <div className="text-right text-muted-foreground/60" title={FEE_COLUMN_HINT}>手续费</div>
@@ -387,6 +404,8 @@ export function CampaignLegsList({
                 ? leg.pre_position_size / entryPriceValue
                 : null;
               const exitPriceValue = execution.exitPrice;
+              // 与左边两格同一对价（含 K 线平仓价校正）：三个数永远对得上
+              const priceChangePct = computeLegPriceChangePct(entryPriceValue, exitPriceValue);
               /**
                * 强平记录的价格不在平仓时刻那根 K 线里，说明引擎用了一个不属于那一刻的价去判强平
                * （旧版会拿比仓位还早的价）。这不是普通的价格误差：按 K 线改价只会把一次误判的强平
@@ -496,6 +515,14 @@ export function CampaignLegsList({
                     {liquidationAnomaly && (
                       <div data-testid="leg-liquidation-anomaly" className="text-[10px] text-[#F6465D]">强平异常</div>
                     )}
+                  </div>
+                  {/* 涨跌幅：标的从开仓价走到平仓价的百分比，不按方向翻转——空单为负才是赚。
+                      与开平价同字号，不抢 Δb 的主角位。 */}
+                  <div
+                    data-testid={`leg-price-change-${leg.id}`}
+                    className={`text-right tabular-nums ${priceChangeTone(priceChangePct)}`}
+                  >
+                    {formatLegPriceChangePct(priceChangePct)}
                   </div>
                   {/* 币量在上、名义在下：加仓公式里的 X 是币量，名义只是它乘开仓价的结果。
                       反向合约的面值锁在 USD 上，光看名义看不出这条腿到底拿着多少币。 */}
@@ -732,6 +759,18 @@ export function CampaignLegsList({
                           </div>
                           <div className="text-right tabular-nums">{fmtPrice(phase.startPrice)}</div>
                           <div className="text-right tabular-nums">{fmtPrice(phase.endPrice)}</div>
+                          {(() => {
+                            // 阶段自己的起止价各算各的：切段处的边界价就是对冲平仓那一刻的市价
+                            const phasePriceChangePct = computeLegPriceChangePct(phase.startPrice, phase.endPrice);
+                            return (
+                              <div
+                                data-testid={`leg-phase-price-change-${leg.id}-${phase.index}`}
+                                className={`text-right tabular-nums ${priceChangeTone(phasePriceChangePct, true)}`}
+                              >
+                                {formatLegPriceChangePct(phasePriceChangePct)}
+                              </div>
+                            );
+                          })()}
                           <div />
                           <div />
                           <div />
@@ -766,8 +805,9 @@ export function CampaignLegsList({
                   {formatDeltaB(totalDeltaB)}
                 </span>
               </div>
-              {/* 开仓价 / 平仓价 / 币量 / 加仓校验 */}
-              <div /><div /><div /><div />
+              {/* 开仓价 / 平仓价 / 涨跌幅 / 币量 / 加仓校验。
+                  涨跌幅留空：各腿开平价不同，跨腿拼一个「整场涨跌幅」没有意义。 */}
+              <div /><div /><div /><div /><div />
               <div
                 data-testid="legs-total-fees"
                 title={feeTotals?.totalCoin != null
