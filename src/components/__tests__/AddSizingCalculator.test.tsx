@@ -43,6 +43,25 @@ vi.mock('@/contexts/TradingContext', async () => {
   };
 });
 
+/** R0 自检注入口：垫子式与成本线式在数学上恒等，走正门造不出分歧；要测「对不上就不说通过」只能从外面把结论改坏。 */
+const r0Seam = vi.hoisted(() => ({ costLineMismatch: false }));
+vi.mock('@/lib/addSizing', async () => {
+  const actual = await vi.importActual<typeof import('@/lib/addSizing')>('@/lib/addSizing');
+  return {
+    ...actual,
+    crossCheckPostAddR0: (input: Parameters<typeof actual.crossCheckPostAddR0>[0]) => {
+      const check = actual.crossCheckPostAddR0(input);
+      if (!check || !r0Seam.costLineMismatch) return check;
+      return {
+        ...check,
+        verdict: 'mismatch' as const,
+        disagrees: [...check.disagrees, 'cost_line' as const],
+        costLine: { ...check.costLine, gap: check.costLine.gap + 1, shortfall: check.costLine.shortfall + 1 },
+      };
+    },
+  };
+});
+
 const num = (testId: string) => Number((screen.getByTestId(testId) as HTMLInputElement).value);
 const type = (testId: string, v: string) => fireEvent.change(screen.getByTestId(testId), { target: { value: v } });
 
@@ -552,5 +571,125 @@ describe('盘口对冲线与 S₁ 偏差', () => {
     renderCalc();
     expect(screen.queryByTestId('add-sizing-banked-blocked')).not.toBeInTheDocument();
     expect(screen.getByTestId('add-sizing-g')).toBeInTheDocument();
+  });
+});
+
+describe('R0 复核 · 两套算法对账', () => {
+  afterEach(() => { r0Seam.costLineMismatch = false; scene.positions = null; });
+
+  it('通过时并排给出三条路线的读数，并注明两种算法一致', () => {
+    renderCalc();
+    type('add-sizing-s1', '130');
+    type('add-sizing-g', '1.2');
+    const routes = screen.getByTestId('add-sizing-r0-routes');
+    expect(routes).toHaveTextContent('垫子式 缺口 0 RAVE');
+    expect(routes).toHaveTextContent('成本线式 缺口 0 RAVE');
+    // 逐笔重算：X₁′ 就是两腿相加的 18.3333，Y₁′ 与手填算得的 Y₁ 一致
+    expect(routes).toHaveTextContent('逐笔 X₁′ 18.3333');
+    expect(routes).toHaveTextContent('一致');
+    expect(routes).not.toHaveTextContent('不符');
+    expect(screen.getByTestId('add-sizing-r0-pass')).toHaveTextContent('两种算法一致');
+    expect(screen.queryByTestId('add-sizing-r0-mismatch')).toBeNull();
+  });
+
+  it('【回归】手填的 X₁ 不是当前这批腿的（SCRT 那类错误）：逐笔重算不符 → 自检不一致，绝不说通过', () => {
+    renderCalc();
+    type('add-sizing-s1', '130');
+    type('add-sizing-x1', '30');
+    const banner = screen.getByTestId('add-sizing-r0-mismatch');
+    expect(banner).toHaveTextContent('自检不一致');
+    expect(banner).toHaveTextContent('手填 X₁ 30');
+    expect(banner).toHaveTextContent('X₁′ 18.3333');
+    // X₁ 差了六成：像是取错了腿集，才把这个原因说出口
+    expect(banner).toHaveTextContent('与当前持仓逐笔重算不符');
+    expect(banner).toHaveTextContent('可能取自别的腿集');
+    expect(screen.getByTestId('add-sizing-r0-routes')).toHaveTextContent('不符');
+    expect(screen.queryByTestId('add-sizing-r0-pass')).toBeNull();
+    expect(screen.queryByTestId('add-sizing-r0-violation')).toBeNull();
+    expect(screen.getByTestId('add-sizing-r0')).not.toHaveTextContent('通过');
+    // 表头也不许说「由已落袋 G 覆盖」
+    expect(screen.getByTestId('add-sizing-r0')).not.toHaveTextContent('覆盖');
+  });
+
+  it('S̄ 只取了头仓那一笔的价：X₁ 对得上、Y₁ 对不上，同样是不一致', () => {
+    renderCalc();
+    type('add-sizing-s1', '130');
+    type('add-sizing-sbar', '100');
+    const banner = screen.getByTestId('add-sizing-r0-mismatch');
+    expect(banner).toHaveTextContent('Y₁′ +2.9487 RAVE');
+    expect(screen.queryByTestId('add-sizing-r0-pass')).toBeNull();
+  });
+
+  it('X₁ 只差千分之几（手误 18.334）：照样不一致、不说通过，但只说「不符」，不断言是别的腿集', () => {
+    renderCalc();
+    type('add-sizing-s1', '130');
+    type('add-sizing-x1', '18.334');
+    const banner = screen.getByTestId('add-sizing-r0-mismatch');
+    expect(banner).toHaveTextContent('与当前持仓逐笔重算不符');
+    expect(banner).not.toHaveTextContent('别的腿集');
+    expect(screen.queryByTestId('add-sizing-r0-pass')).toBeNull();
+    expect(screen.getByTestId('add-sizing-r0')).not.toHaveTextContent('通过');
+  });
+
+  it('【回归】主空战役带多头对冲腿：切到主空后逐笔式拿空头那批腿比，多头种下的 X₁ / S̄ 必须被抓出来', () => {
+    // 多头 100 张 @100（10 币）是对冲腿；空头 100 张 @150（6.6667 币）才是主空这一侧的持仓
+    scene.positions = [positions[0], { ...positions[0], id: 'p3', side: 'SHORT', entryPrice: 150, quantity: 6.67, openTime: 3_000 }];
+    renderCalc();
+    // 打开时 pickHeldSide 先看多头：X₁ = 10 / S̄ = 100 从对冲腿种下；切到主空后仍留在框里
+    fireEvent.click(screen.getByTestId('add-sizing-side-toggle'));
+    fireEvent.click(screen.getByTestId('add-sizing-side-SHORT'));
+    type('add-sizing-s1', '90');
+    type('add-sizing-s2', '80');
+    expect(num('add-sizing-x1')).toBe(10);
+    const routes = screen.getByTestId('add-sizing-r0-routes');
+    expect(routes).toHaveTextContent('X₁′ 6.6667');
+    expect(routes).toHaveTextContent('不符');
+    expect(screen.getByTestId('add-sizing-r0-mismatch')).toHaveTextContent('自检不一致');
+    expect(screen.queryByTestId('add-sizing-r0-pass')).toBeNull();
+    expect(screen.getByTestId('add-sizing-r0')).not.toHaveTextContent('通过');
+  });
+
+  it('切到没有持仓腿的那一侧：逐笔式没有对象，通过语明说未做逐笔核对', () => {
+    renderCalc();
+    fireEvent.click(screen.getByTestId('add-sizing-side-toggle'));
+    fireEvent.click(screen.getByTestId('add-sizing-side-SHORT'));
+    type('add-sizing-s1', '105');
+    type('add-sizing-s2', '95');
+    expect(screen.getByTestId('add-sizing-r0-routes')).toHaveTextContent('逐笔 —');
+    const pass = screen.getByTestId('add-sizing-r0-pass');
+    expect(pass).toHaveTextContent('两种算法一致');
+    expect(pass).toHaveTextContent('未做逐笔核对');
+    expect(screen.queryByTestId('add-sizing-r0-mismatch')).toBeNull();
+  });
+
+  it('两种算法对不上时同样只报不一致，把两个缺口都摆出来', () => {
+    r0Seam.costLineMismatch = true;
+    renderCalc();
+    type('add-sizing-s1', '130');
+    const banner = screen.getByTestId('add-sizing-r0-mismatch');
+    expect(banner).toHaveTextContent('垫子式缺口 0 RAVE 与成本线式缺口 1 RAVE 对不上');
+    expect(screen.queryByTestId('add-sizing-r0-pass')).toBeNull();
+    expect(screen.queryByTestId('add-sizing-r0-violation')).toBeNull();
+    expect(screen.getByTestId('add-sizing-r0')).not.toHaveTextContent('通过');
+  });
+
+  it('超量仍是红色「R0 非法」，两条路线各自算出同一个缺口，不会被自检替代', () => {
+    renderCalc();
+    type('add-sizing-s1', '130');
+    type('add-sizing-g', '1.2');
+    fireEvent.click(screen.getByTestId('add-sizing-knob-size'));
+    type('add-sizing-x2b', '46.8');
+    expect(screen.getByTestId('add-sizing-r0-violation')).toHaveTextContent('R0 非法');
+    expect(screen.queryByTestId('add-sizing-r0-mismatch')).toBeNull();
+    expect(screen.getByTestId('add-sizing-r0-routes')).toHaveTextContent('垫子式 缺口 2.4 RAVE · 成本线式 缺口 2.4 RAVE');
+  });
+
+  it('G 为负时同样对账：两条路都在 S₁ 安全侧扣掉负 G，通过', () => {
+    renderCalc();
+    type('add-sizing-s1', '130');
+    type('add-sizing-g', '-1.2');
+    expect(screen.getByTestId('add-sizing-r0-pass')).toHaveTextContent('两种算法一致');
+    expect(screen.getByTestId('add-sizing-r0-routes')).toHaveTextContent('成本线式 缺口 0 RAVE');
+    expect(screen.getByTestId('add-sizing-r0')).toHaveTextContent('落在 S₁ 安全侧');
   });
 });

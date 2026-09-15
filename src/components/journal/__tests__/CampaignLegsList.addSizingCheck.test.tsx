@@ -1,6 +1,6 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { CampaignLegsList } from '@/components/journal/CampaignLegsList';
 import type { TradeJournal } from '@/types/journal';
 import type { CampaignReverseHedgeOrder } from '@/types/trading';
@@ -9,6 +9,19 @@ import type { CampaignReverseHedgeOrder } from '@/types/trading';
  * 【用户要求】Legs 增加「加仓校验」列：合规用几乎隐形的对号，
  * 仓位过大用很明显的红色、放大的叉。
  */
+/** 成本线式复核的注入口：两条路在数学上恒等，只能把成本线算坏才能看到「对不上」时格子长什么样。 */
+const costLineSeam = vi.hoisted(() => ({ offset: 0 }));
+vi.mock('@/lib/addSizing', async () => {
+  const actual = await vi.importActual<typeof import('@/lib/addSizing')>('@/lib/addSizing');
+  return {
+    ...actual,
+    evaluatePostAddCostLine: (args: Parameters<typeof actual.evaluatePostAddCostLine>[0]) => {
+      const post = actual.evaluatePostAddCostLine(args);
+      return post && costLineSeam.offset ? { ...post, blendedCost: post.blendedCost + costLineSeam.offset } : post;
+    },
+  };
+});
+
 const legFor = (over: Partial<TradeJournal> & { id: string }): TradeJournal => ({
   user_id: 'u', trade_record_id: null, campaign_id: 'c', leg_role: 'main_open', leg_sequence: 1,
   source: 'retroactive_from_record', symbol: 'TUTUSDT', direction: 'long', leverage: 10, position_mode: 'isolated',
@@ -163,5 +176,22 @@ describe('Legs 列表的「加仓校验」列', () => {
     const phaseRows = Array.from(screen.getByTestId('leg-phases-main').children);
     expect(phaseRows.length).toBeGreaterThanOrEqual(2);
     for (const row of phaseRows) expect(row.children.length).toBe(headerCells);
+  });
+});
+
+describe('两套算法对不上时的「加仓校验」格', () => {
+  afterEach(() => { costLineSeam.offset = 0; });
+
+  it('【回归】不给 ✓ 也不给 ✗，只留淡灰「—」，读屏说明两种算法结果不一致', () => {
+    // 本来合规的两百万币；成本线抬高 0.001 → 近 480 万币 × 0.001 ≈ 4,800 U 的分歧
+    costLineSeam.offset = 0.001;
+    renderList(2_000_000 * 0.0419705);
+    expect(screen.queryByTestId('add-sizing-check-ok-add1')).toBeNull();
+    expect(screen.queryByTestId('add-sizing-check-fail-add1')).toBeNull();
+    const mark = screen.getByTestId('add-sizing-check-unknown-add1');
+    expect(mark.textContent).toBe('—');
+    expect(mark.getAttribute('aria-label')).toContain('两种算法结果不一致');
+    expect(mark.getAttribute('aria-label')).toContain('垫子式缺口');
+    expect(mark.getAttribute('aria-label')).toContain('成本线式缺口');
   });
 });

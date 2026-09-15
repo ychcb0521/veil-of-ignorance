@@ -18,10 +18,11 @@ import {
   computePlanBCoverageAtS1,
   detectBankedMirrorProfit,
   pickHeldSide,
+  readHeldPosition,
   type AddSide,
   type BankedKnob,
   type CushionAddResult,
-  evaluatePostAddCostLine,
+  crossCheckPostAddR0,
 } from '@/lib/addSizing';
 
 /**
@@ -264,28 +265,39 @@ export function AddSizingCalculator({ open, onClose, symbol, currentPrice = 0 }:
    * 判据与 Legs 加仓校验同一个式子：计划加仓跌回 S₁ 的亏损 vs 旧仓净垫 Y₁ + 落袋 G。
    * G > 0 时成本线越过 S₁ 是 Plan B 的定义（越过 G ÷ (X₁ + X₂)），不该报红；
    * 报红的判据是「亏损超出 Y₁ + G」——缺口由本金支付。
+   *
+   * 同一条判据由两套独立算法各算一遍再对账（crossCheckPostAddR0）：垫子式与成本线式守算术本身
+   * （两条路吃同一批手填数，分开只会是公式、单位折算或方向符号改坏了），
+   * 外加按当前持仓各腿开仓价逐笔重算 X₁′ / Y₁′ 去核对手填的 X₁ / S̄。
+   * S₁ 由上面「盘口对冲线偏差」单独核对；S₂ 与 G 没有第二来源，单位与符号仍靠人核对。
+   * 哪一条对不上，这里就只报「自检不一致」，绝不说「通过」。
    */
+  /**
+   * 逐笔式按**当前选中方向**的持仓腿比，而不是 pickHeldSide 挑的那一侧：
+   * 主空战役通常带着多头对冲腿，pickHeldSide 先看多头，held 就是那条对冲；切到主空后
+   * 若还拿 held.side 去卡，逐笔式整个关掉，框里留着从多头种下的 X₁ / S̄ 反倒印出「通过」——
+   * 正是逐笔式要抓的那类腿集错误。这一侧没有腿时才为 null。
+   */
+  const heldLegs = useMemo(() => readHeldPosition(symbol, positions, side, face)?.legs ?? null, [symbol, positions, side, face]);
   const r0 = useMemo(() => {
     if (!planB || !(plannedAddCoins > 0)) return null;
-    const post = evaluatePostAddCostLine({
-      side, sBar: toNum(sBar), s1: toNum(s1), s2: toNum(s2),
-      x1: toNum(x1), addCoins: plannedAddCoins,
+    const check = crossCheckPostAddR0({
+      side, settlement, sBar: toNum(sBar), s1: toNum(s1), s2: toNum(s2),
+      x1: toNum(x1), addCoins: plannedAddCoins, g: gVal, fills: heldLegs,
     });
-    if (!post) return null;
-    // 亏损与可用垫同单位（U 本位 USD、币本位结算币）
-    const loss = plannedAddCoins * planB.lossPerCoin;
-    const gap = loss - planB.available;
-    // 取满上限时两边只差浮点误差，不许因此报红
-    const tolerance = 1e-9 * Math.max(1, Math.abs(loss), Math.abs(planB.available));
+    if (!check) return null;
     return {
-      ...post,
-      loss,
-      available: planB.available,
-      uncovered: gap > tolerance ? gap : 0,
-      residual: gap < -tolerance ? -gap : 0,
+      ...check,
+      /** 跌到 S₁ 仍剩的垫子（垫子式负缺口取反）；取满上限时两边只差浮点误差，不算剩 */
+      residual: check.ledger.gap < -check.tolerance ? -check.ledger.gap : 0,
       excessCoins: plannedAddCoins - limitCoins,
+      /** 逐笔式偏差是否大到像取错了腿集（相对 1% 以上）；小于此只说「不符」，不断言原因——手误一位小数也会不符 */
+      fillsFarOff: !!check.fills && !check.fills.agrees && (
+        Math.abs(check.fills.x1Delta) > 0.01 * Math.max(check.fills.x1, toNum(x1))
+        || Math.abs(check.fills.cushionDelta) > 0.01 * Math.max(Math.abs(check.fills.cushion), Math.abs(check.ledger.cushion))
+      ),
     };
-  }, [planB, plannedAddCoins, limitCoins, side, sBar, s1, s2, x1]);
+  }, [planB, plannedAddCoins, limitCoins, side, settlement, sBar, s1, s2, x1, gVal, heldLegs]);
 
   const contracts = (coins: number, price: number) =>
     isCoin && Number.isFinite(coins) && price > 0 ? ` · ${coinsToContracts(coins, price, face).toLocaleString('en-US')} 张` : '';
@@ -643,32 +655,52 @@ export function AddSizingCalculator({ open, onClose, symbol, currentPrice = 0 }:
             )}
           </section>
 
-          {/* R0 复核 —— 不做硬拦截（B 的定义允许成本线越过 S₁），但缺口必须扎眼 */}
+          {/* R0 复核 —— 不做硬拦截（B 的定义允许成本线越过 S₁），但缺口必须扎眼；两套算法对不上时连结论都不给 */}
           {r0 && (
             <section
               data-testid="add-sizing-r0"
               className={`space-y-1 rounded border px-3 py-2 ${
-                r0.uncovered > 0
+                r0.verdict !== 'pass'
                   ? 'border-trading-red/50 bg-trading-red/10'
                   : 'border-border bg-muted/30'
               }`}
             >
               <div className="flex items-baseline gap-2">
-                <h3 className={`text-[11px] font-medium ${r0.uncovered > 0 ? 'text-trading-red' : 'text-foreground'}`}>
+                <h3 className={`text-[11px] font-medium ${r0.verdict !== 'pass' ? 'text-trading-red' : 'text-foreground'}`}>
                   R0 复核 · 加仓后成本线
                 </h3>
-                <span className="font-mono text-[11px] text-foreground">{fmtPx(r0.blendedCost)}</span>
+                <span className="font-mono text-[11px] text-foreground">{fmtPx(r0.costLine.blendedCost)}</span>
                 <span className="text-[10px] text-muted-foreground">
-                  {r0.pastStop && r0.overshootPct >= 0.01
-                    ? `越过 S₁ ${r0.overshootPct.toFixed(2)}%${gPositive && r0.uncovered === 0 ? '（由已落袋 G 覆盖）' : ''}`
+                  {r0.costLine.pastStop && r0.overshootPct >= 0.01
+                    ? `越过 S₁ ${r0.overshootPct.toFixed(2)}%${gPositive && r0.verdict === 'pass' ? '（由已落袋 G 覆盖）' : ''}`
                     : '落在 S₁ 安全侧'}
                 </span>
               </div>
-              {r0.uncovered > 0 ? (
+              {/* 三条路线的读数并排摆出：垫子式与成本线式各自的缺口，逐笔重算的 X₁′ / Y₁′——对得上才有资格说通过 */}
+              <div data-testid="add-sizing-r0-routes" className="font-mono text-[10px] text-muted-foreground">
+                垫子式 缺口 {fmtG(r0.ledger.shortfall)} · 成本线式 缺口 {fmtG(r0.costLine.shortfall)} · 逐笔{' '}
+                {r0.fills
+                  ? `X₁′ ${fmtCoins(r0.fills.x1, 4)} / Y₁′ ${signed(r0.fills.cushion, fmtG)}${r0.fills.agrees ? ' 一致' : ' 不符'}`
+                  : '—'}
+              </div>
+              {r0.verdict === 'mismatch' ? (
+                <div data-testid="add-sizing-r0-mismatch" className="text-[10px] leading-[1.7] text-trading-red">
+                  <strong>自检不一致：</strong>
+                  {r0.disagrees.includes('cost_line') && (
+                    <>垫子式缺口 {fmtG(r0.ledger.shortfall)} 与成本线式缺口 {fmtG(r0.costLine.shortfall)} 对不上（差 {fmtG(Math.abs(r0.ledger.gap - r0.costLine.gap))}）；</>
+                  )}
+                  {r0.disagrees.includes('fills') && r0.fills && (
+                    <>手填 X₁ {fmtCoins(toNum(x1), 4)} / S̄ {fmtPx(toNum(sBar))} 算得 Y₁ {signed(r0.ledger.cushion, fmtG)}，
+                    与当前持仓逐笔重算不符（X₁′ {fmtCoins(r0.fills.x1, 4)} / Y₁′ {signed(r0.fills.cushion, fmtG)}）
+                    {r0.fillsFarOff ? '——X₁ / S̄ 可能取自别的腿集' : ''}；</>
+                  )}
+                  本次复核不给结论。复位 X₁ / S̄、核对单位与方向后再看。
+                </div>
+              ) : r0.verdict === 'violation' ? (
                 <div data-testid="add-sizing-r0-violation" className="text-[10px] leading-[1.7] text-trading-red">
-                  <strong>R0 非法：跌到 S₁ 的亏损 {fmtG(r0.loss)} 超出旧仓净垫 Y₁ + 落袋 G（{signed(r0.available, fmtG)}）{fmtG(r0.uncovered)}，
+                  <strong>R0 非法：跌到 S₁ 的亏损 {fmtG(r0.ledger.loss)} 超出旧仓净垫 Y₁ + 落袋 G（{signed(r0.ledger.available, fmtG)}）{fmtG(r0.shortfall)}，
                   这个缺口由本金支付</strong>——计划加仓比 Plan B 上限多 {fmtCoins(r0.excessCoins)} {coinName}，
-                  亏损是可用垫的 {r0.available > 0 ? `${((r0.loss / r0.available) * 100).toFixed(0)}%` : '∞（可用垫 ≤ 0）'}。
+                  亏损是可用垫的 {r0.ledger.available > 0 ? `${((r0.ledger.loss / r0.ledger.available) * 100).toFixed(0)}%` : '∞（可用垫 ≤ 0）'}。
                   同一笔已实现利润只能买一次期权；要么把量压回上限，要么接受这不再是「锁死」而是加风险。
                 </div>
               ) : (
@@ -676,6 +708,7 @@ export function AddSizingCalculator({ open, onClose, symbol, currentPrice = 0 }:
                   {bankedOn
                     ? `跌到 S₁：旧仓净垫 Y₁ + 落袋 G 覆盖本次加仓${r0.residual > 0 ? `，仍剩 ${fmtG(r0.residual)}` : '，恰好用完'}——通过。`
                     : '跌到 S₁：旧仓浮盈垫覆盖本次加仓——通过。'}
+                  {r0.fills ? '两种算法一致，逐笔重算相符。' : '两种算法一致；这一侧没有持仓腿，未做逐笔核对。'}
                 </div>
               )}
             </section>

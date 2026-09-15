@@ -22,7 +22,13 @@
  * 腿上解析出来的平仓时刻只是**最后一刀**。按它判「加仓时还开着」，
  * 00:36 已经落袋的镜像会被当成整腿持有：利润进不了 G，已平掉的几百万币还留在浮盈垫里。
  * 所以：加仓时刻 t 持有的币量 = 开仓币量 − Σ(t 之前平掉的刀)，落袋 = Σ(t 之前那几刀的盈亏)。
+ *
+ * **同一条判据走两条路再对账。** 上面的垫子式之外，再按加仓后综合成本线算一遍：
+ * 成本线越过 S₁ 的那一段折成钱、减掉 G 就是缺口——展开即 X₂·险 − Y₁ − G，与垫子式恒等。
+ * 成本线由计算器那边的 evaluatePostAddCostLine 算，与这里的逐刀账本是两套代码；
+ * 两条路对不上（某个数错了单位 / 符号，或哪里改坏了）就既不给 ✓ 也不给 ✗，标成 unknown 把两个数都摆出来。
  */
+import { evaluatePostAddCostLine } from '@/lib/addSizing';
 import {
   buildTradeRecordPnlCorrection,
   resolveLegExecution,
@@ -48,7 +54,8 @@ export type AddSizingUnknownReason =
   | 'no_position_size'      // 加仓名义缺失或非正，推不出 X₂
   | 'no_stop_line'          // 加仓那一刻没有挂在亏损侧的反向委托，S₁ 无从读起
   | 'old_leg_incomplete'    // 旧仓里有腿缺开仓价 / 名义 / 时刻，浮盈垫算不准
-  | 'non_finite';           // 算出来的数不是有限数
+  | 'non_finite'            // 算出来的数不是有限数
+  | 'self_check_mismatch';  // 垫子式与成本线式两套算法对不上——不给对错号，只摆出两个数
 
 export interface AddSizingVerdict {
   status: AddSizingStatus;
@@ -83,8 +90,15 @@ export interface AddSizingVerdict {
   maxAllowedCoins: number | null;
   /** 最大加仓币量按 S₂ 折算的 U 本位名义仓位 */
   maxAllowedNotional: number | null;
-  /** fail 时差多少（USDT）= maxLoss − required；ok 为 0；unknown 为 null */
+  /** fail 时差多少（USDT）= maxLoss − required；ok 为 0；unknown 为 null（self_check_mismatch 时仍给垫子式的数，供对照） */
   shortfall: number | null;
+  /** 加仓后综合成本线 C = (Σ 旧腿币量 × 开仓价 + X₂S₂) ÷ (X₁ + X₂)——成本线式复核的中间量 */
+  blendedCost: number | null;
+  /**
+   * 成本线式算出的缺口 = max(0, (X₁ + X₂)(C − S₁)·d − G)。与 shortfall（垫子式）在代数上恒等；
+   * 两者对不上即 self_check_mismatch，两个数都留在这里供诊断。
+   */
+  costLineShortfall: number | null;
 }
 
 export interface CampaignAddSizingInput {
@@ -145,6 +159,7 @@ function unknown(reason: AddSizingUnknownReason, partial: Partial<AddSizingVerdi
     s1: null, s2: null, x1Coins: null, x2Coins: null,
     cushion: null, banked: null, consumedByHeld: null, maxLoss: null, required: null,
     riskPerCoin: null, maxAllowedCoins: null, maxAllowedNotional: null, shortfall: null,
+    blendedCost: null, costLineShortfall: null,
     ...partial,
     status: 'unknown',
     reason,
@@ -409,6 +424,8 @@ export function evaluateCampaignAddSizing(input: CampaignAddSizingInput): Map<st
 
     let x1Coins = 0;
     let cushion = 0;
+    /** Σ 旧腿剩余币量 × 开仓价：成本线式复核要的旧仓成本，与 cushion 分开累加、不互相借数 */
+    let costBasis = 0;
     let consumedByHeld = 0;
     let banked = 0;
     let incomplete = false;
@@ -443,6 +460,7 @@ export function evaluateCampaignAddSizing(input: CampaignAddSizingInput): Map<st
       const coins = Math.max(0, ledger.coins - closed);
       const pnlAtS1 = coins * (s1 - ledger.entry) * d;
       x1Coins += coins;
+      costBasis += coins * ledger.entry;
       cushion += pnlAtS1;
       // 不对称：在 S₁ 是浮盈的腿不抵扣任何东西，浮亏的腿按亏损占用落袋
       consumedByHeld += Math.max(0, -pnlAtS1);
@@ -455,24 +473,43 @@ export function evaluateCampaignAddSizing(input: CampaignAddSizingInput): Map<st
     // X₂ 是币量；乘回 S₂ 才是交易面板里常见的 U 名义仓位。两种单位一起给，避免把币当 U 下单。
     const maxAllowedCoins = riskPerCoin > 0 ? Math.max(0, required) / riskPerCoin : null;
     const maxAllowedNotional = maxAllowedCoins == null ? null : maxAllowedCoins * s2;
+
+    /**
+     * 成本线式：同一条判据换一条路。加仓后综合成本线越过 S₁ 的那一段折成钱，减掉 G 就是缺口。
+     * X₁ = 0（旧仓在加仓前已全部平掉、只剩落袋）时成本线就是 S₂，S̄ 不参与。
+     */
+    const post = evaluatePostAddCostLine({
+      side: d > 0 ? 'LONG' : 'SHORT',
+      sBar: x1Coins > 0 ? costBasis / x1Coins : Number.NaN,
+      s1, s2, x1: x1Coins, addCoins: x2Coins,
+    });
+    const blendedCost = post?.blendedCost ?? Number.NaN;
+    const costLineGap = post ? (x1Coins + x2Coins) * (post.blendedCost - s1) * d - banked : Number.NaN;
+    // 容差只吸收浮点误差：取满计算器 Plan B 上限的加仓应判 ok，而不是差 1e-9 被判 fail；两条路对账用同一条容差
+    const tolerance = Math.max(0.01, 1e-6 * Math.max(Math.abs(required), maxLoss));
+    const ledgerGap = maxLoss - required;
+    const costLineShortfall = costLineGap > tolerance ? costLineGap : 0;
     const partial = {
       s1, s2, x1Coins, x2Coins, cushion, banked, consumedByHeld, maxLoss, required,
-      riskPerCoin, maxAllowedCoins, maxAllowedNotional,
+      riskPerCoin, maxAllowedCoins, maxAllowedNotional, blendedCost, costLineShortfall,
     };
     if (incomplete) {
       result.set(add.id, unknown('old_leg_incomplete', partial));
       continue;
     }
-    if (![x1Coins, cushion, banked, consumedByHeld, maxLoss, required, riskPerCoin, maxAllowedCoins, maxAllowedNotional].every(Number.isFinite)) {
+    if (![x1Coins, cushion, banked, consumedByHeld, maxLoss, required, riskPerCoin, maxAllowedCoins, maxAllowedNotional, blendedCost, costLineGap].every(Number.isFinite)) {
       result.set(add.id, unknown('non_finite', partial));
       continue;
     }
-    // 容差只吸收浮点误差：取满计算器 Plan B 上限的加仓应判 ok，而不是差 1e-9 被判 fail
-    const tolerance = Math.max(0.01, 1e-6 * Math.max(Math.abs(required), maxLoss));
+    if (!(Math.abs(ledgerGap - costLineGap) <= tolerance)) {
+      // 两条路给出的数分开了：不猜哪条对，把垫子式的缺口也留下，读屏 / 诊断能看到两个数
+      result.set(add.id, unknown('self_check_mismatch', { ...partial, shortfall: ledgerGap > tolerance ? ledgerGap : 0 }));
+      continue;
+    }
     if (required >= maxLoss - tolerance) {
       result.set(add.id, { status: 'ok', ...partial, shortfall: 0 });
     } else {
-      result.set(add.id, { status: 'fail', ...partial, shortfall: maxLoss - required });
+      result.set(add.id, { status: 'fail', ...partial, shortfall: ledgerGap });
     }
   }
   return result;
@@ -509,13 +546,18 @@ const UNKNOWN_REASON_TEXT: Record<AddSizingUnknownReason, string> = {
   no_stop_line: '加仓时没有挂在亏损侧的反向委托，读不到止损线 S₁',
   old_leg_incomplete: '旧仓有腿缺开仓价或名义，浮盈垫算不准',
   non_finite: '计算结果不是有限数',
+  self_check_mismatch: '两种算法结果不一致',
 };
 
 export function describeAddSizingVerdict(verdict: AddSizingVerdict): string {
   const n = (value: number | null) => (value == null ? '—' : `${value.toFixed(2)} U`);
   if (verdict.status === 'unknown') {
     const reason = verdict.reason ? UNKNOWN_REASON_TEXT[verdict.reason] : '加仓价、名义或时刻缺失';
-    return `加仓校验：无法判断——${reason}`;
+    // 两套算法对不上时把两个缺口都念出来——它们本该是同一个数
+    const routes = verdict.reason === 'self_check_mismatch'
+      ? `（垫子式缺口 ${n(verdict.shortfall)}、成本线式缺口 ${n(verdict.costLineShortfall)}）`
+      : '';
+    return `加仓校验：无法判断——${reason}${routes}`;
   }
   // 与点开红叉后的计算框同一套写法：可用额在 max(0,·) 处截断，金额带单位
   const detail = `退回 S₁ ${verdict.s1 ?? '—'} 时，旧仓浮盈垫 Y₁ ${n(verdict.cushion)} + 已落袋 G ${n(verdict.banked)}，可用 max(0, Y₁ + G) = ${n(verdict.required == null ? null : Math.max(0, verdict.required))}；新加仓最大亏损 ${n(verdict.maxLoss)}；Plan B 加仓上限 ${formatAddSizingCoinQuantity(verdict.maxAllowedCoins)} 币（${formatAddSizingNotional(verdict.maxAllowedNotional)} U 名义仓位）`;

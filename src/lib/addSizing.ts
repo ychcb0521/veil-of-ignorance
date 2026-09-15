@@ -350,6 +350,11 @@ export interface HeldPositionSummary {
   /** S̄ = 名义 ÷ X₁（U 本位即数量加权均价，币本位即名义加权调和均价） */
   avgEntry: number;
   legCount: number;
+  /**
+   * 各腿的开仓币量与开仓价——coins / avgEntry 就是从这一份加总、加权出来的。
+   * R0 逐笔式复核拿它重算 X₁′ / Y₁′，核对手填的 X₁ / S̄ 是不是这批腿的。
+   */
+  legs: Array<{ coins: number; entryPrice: number }>;
   /** 最早一条腿的开仓时间（模拟时钟），用于框定「本场」 */
   earliestOpenTime: number | null;
   /**
@@ -407,6 +412,7 @@ export function readHeldPosition(
   return {
     side, coins, notionalUsd: notional,
     avgEntry: weightedEntryByCoins(rows),
+    legs: rows,
     legCount: legs.length, earliestOpenTime: earliest,
     earliestOpenedRealAt: realKnown ? earliestReal : null,
   };
@@ -600,10 +606,12 @@ export function evaluatePostAddCostLine(args: {
   addCoins: number;
 }): PostAddCostLine | null {
   const { side, sBar, s1, s2, x1, addCoins } = args;
-  if (![sBar, s1, s2, x1, addCoins].every(v => fin(v) && v > 0)) return null;
+  if (![s1, s2, addCoins].every(v => fin(v) && v > 0)) return null;
+  // 旧仓已全部平掉（X₁ = 0，Legs 校验里加仓前只剩落袋时会这样）成本线就是 S₂，S̄ 不参与；X₁ > 0 时 S̄ 必须有效
+  if (!fin(x1) || x1 < 0 || (x1 > 0 && !(fin(sBar) && sBar > 0))) return null;
   const total = x1 + addCoins;
   if (!(total > 0)) return null;
-  const blendedCost = (x1 * sBar + addCoins * s2) / total;
+  const blendedCost = ((x1 > 0 ? x1 * sBar : 0) + addCoins * s2) / total;
   const d = side === 'SHORT' ? -1 : 1;
   // 多单：成本线高于止损线即越过；空单相反。
   const overshoot = (blendedCost - s1) * d;
@@ -611,5 +619,169 @@ export function evaluatePostAddCostLine(args: {
     blendedCost,
     pastStop: overshoot > 0,
     overshootPct: overshoot > 0 ? (overshoot / s1) * 100 : 0,
+  };
+}
+
+// ===================== R0 复核 · 两套独立算法 =====================
+
+/**
+ * 「复核 · 加仓后成本线」的冗余算法。
+ *
+ * R0 的判据只有一条：跌回 S₁ 时新腿的亏损，必须由旧仓净垫 Y₁ + 已落袋 G 全额覆盖——
+ * 成本线可以越过 S₁，但越过的那一段只能由 G 买单，没有额外余量。
+ * 同一条判据这里走三条互不借数的路：
+ *   垫子式（ledger）    缺口₁ = max(0, X₂·|S₂ − S₁| − Y₁ − G)，Y₁ = X₁(S₁ − S̄)·d —— 计算器 / Legs 一直在用的那条；
+ *   成本线式（costLine）先算加仓后综合成本 C = (X₁S̄ + X₂S₂) ÷ (X₁ + X₂)，
+ *                       成本线越过 S₁ 的那一段折成钱 (X₁ + X₂)(C − S₁)·d，再减 G 得缺口₂；
+ *   逐笔式（fills）     按当前仍持有各腿的开仓价重算 X₁′ = Σ 币ᵢ、Y₁′ = Σ 币ᵢ(S₁ − 开仓价ᵢ)·d，
+ *                       核对手填的 X₁ / S̄ 是不是这批腿的——SCRT 那一场 S₁ 被喂错了 0.149%，
+ *                       同一类错误落在 X₁ / S̄ 上（拿别的腿集的名义配这一批的均价）就靠它抓。
+ * 前两条在代数上恒等（成本线式展开即 X₂·险 − Y₁ − G），吃的又是同一批手填数，
+ * 所以它们守的是算术本身——公式、单位折算、方向符号哪里改坏了，两个数才会分开；
+ * 逐笔式另有来源（持仓腿），守的是 X₁ / S̄。S₁ 由计算器里「盘口对冲线偏差」那一块单独核对；
+ * S₂ 与 G 没有第二来源，错了单位、错了符号两条路照样一致——那不是自检能抓的，仍靠人核对。
+ * 任一路对不上，verdict 是 mismatch，**既不给通过也不给非法**，只把两个数都摆出来。
+ * 币本位下三条路全部按 S₁ 折成结算币，与 computePlanBCoverageAtS1 同一口径。
+ */
+export type R0CrossCheckVerdict = 'pass' | 'violation' | 'mismatch';
+/** 与垫子式对不上的路线 */
+export type R0DisagreeingRoute = 'cost_line' | 'fills';
+
+export interface R0CrossCheckInput {
+  side: AddSide;
+  settlement: SettlementMode;
+  sBar: number;
+  s1: number;
+  s2: number;
+  x1: number;
+  /** X₂ 计划加仓币量 */
+  addCoins: number;
+  /** 本轮落袋净额 G，带符号；U 本位 USD、币本位结算币 */
+  g: number;
+  /** 当前仍持有各腿的开仓币量与开仓价（HeldPositionSummary.legs 那一份）；给了才做逐笔式 */
+  fills?: Array<{ entryPrice: number; coins: number }> | null;
+  /** 调用方自己算好的成本线；不给则由 evaluatePostAddCostLine 算 */
+  costLine?: PostAddCostLine | null;
+}
+
+export interface R0CrossCheck {
+  verdict: R0CrossCheckVerdict;
+  /** 垫子式；金额与 G 同单位 */
+  ledger: {
+    cushion: number;
+    banked: number;
+    /** X₂ 跌回 S₁ 的亏损 */
+    loss: number;
+    available: number;
+    /** loss − available，未截断，可为负（负数即仍剩的垫子） */
+    gap: number;
+    shortfall: number;
+  };
+  /** 成本线式；金额与 G 同单位 */
+  costLine: PostAddCostLine & {
+    /** (X₁ + X₂)(C − S₁)·d：成本线越过 S₁ 的那一段折成钱，安全侧为负 */
+    overshootLoss: number;
+    gap: number;
+    shortfall: number;
+  };
+  /** 逐笔式；没给持仓腿时为 null */
+  fills: {
+    x1: number;
+    cushion: number;
+    /** 逐笔 − 手填 */
+    x1Delta: number;
+    cushionDelta: number;
+    agrees: boolean;
+  } | null;
+  /**
+   * 缺口截断容差：一分钱（币本位按 S₁ 折成币）或亏损 / 可用垫较大者的百万分之一——
+   * 与 Legs 校验同一条式子，只吸收浮点误差，不是余量。|Y₁| 再大也不放宽：
+   * 旧仓深度浮亏被 G 补上时可用垫很小，缺两分钱就是缺两分钱。
+   */
+  tolerance: number;
+  /** 路线对账容差：截断容差之上再放进成本线越过额的百万分之一的浮点预算；只用来比两条路，不参与截断 */
+  routeTolerance: number;
+  /** 哪些路线与垫子式对不上；一致时为空 */
+  disagrees: R0DisagreeingRoute[];
+  /** 三线一致时的缺口（即垫子式的）；mismatch 时仍给垫子式的数，但不能当结论用 */
+  shortfall: number;
+  /** 成本线越过 S₁ 的相对幅度（%），未越过为 0 */
+  overshootPct: number;
+}
+
+/** 一分钱在结算单位里是多少：U 本位 0.01 USD，币本位按 S₁ 折成币。 */
+function centAt(settlement: SettlementMode, s1: number): number {
+  return settlement === 'coin' ? 0.01 / s1 : 0.01;
+}
+
+export function crossCheckPostAddR0(input: R0CrossCheckInput): R0CrossCheck | null {
+  const { side, settlement, sBar, s1, s2, x1, addCoins } = input;
+  if (![sBar, s1, s2, x1, addCoins].every(v => fin(v) && v > 0)) return null;
+  const d = side === 'SHORT' ? -1 : 1;
+  const riskDistance = (s2 - s1) * d;
+  if (!(riskDistance > 0)) return null;
+  const coin = settlement === 'coin';
+  /** USD → 与 G 同单位 */
+  const unit = (usd: number) => (coin ? usd / s1 : usd);
+  const banked = fin(input.g) ? input.g : 0;
+
+  // 路线一 · 垫子式
+  const cushion = unit(x1 * (s1 - sBar) * d);
+  const loss = addCoins * unit(riskDistance);
+  const available = cushion + banked;
+  const ledgerGap = loss - available;
+
+  // 路线二 · 成本线式
+  const post = input.costLine ?? evaluatePostAddCostLine({ side, sBar, s1, s2, x1, addCoins });
+  if (!post) return null;
+  const overshootLoss = unit((x1 + addCoins) * (post.blendedCost - s1) * d);
+  const costLineGap = overshootLoss - banked;
+
+  // 截断容差与 Legs 校验同一条式子：只看亏损与可用垫。成本线越过额不进来——它 ≈ 亏损 − Y₁，
+  // 旧仓深度浮亏被 G 补上时 |Y₁| 远大于可用垫，拿它定容差会把「通过」的窗口放宽到 1e-6·|Y₁|，那就成了余量。
+  const tolerance = Math.max(centAt(settlement, s1), 1e-6 * Math.max(Math.abs(loss), Math.abs(available)));
+  // 两条路对账时把成本线越过额的浮点预算也放进来；这条只用于比较，不参与截断
+  const routeTolerance = Math.max(tolerance, 1e-6 * Math.abs(overshootLoss));
+  const clip = (gap: number) => (gap > tolerance ? gap : 0);
+  const disagrees: R0DisagreeingRoute[] = [];
+  if (!(Math.abs(ledgerGap - costLineGap) <= routeTolerance)) disagrees.push('cost_line');
+
+  // 路线三 · 逐笔式
+  let fills: R0CrossCheck['fills'] = null;
+  const rows = (input.fills ?? []).filter(f => f && fin(f.coins) && fin(f.entryPrice) && f.coins > 0);
+  if (rows.length > 0) {
+    let x1Fills = 0;
+    let cushionUsd = 0;
+    for (const f of rows) {
+      x1Fills += f.coins;
+      cushionUsd += f.coins * (s1 - f.entryPrice) * d;
+    }
+    const cushionFills = unit(cushionUsd);
+    const x1Delta = x1Fills - x1;
+    const cushionDelta = cushionFills - cushion;
+    // 手填的 X₁ / S̄ 是显示值（X₁ 四位小数、S̄ 八位有效数字），逐笔求和与它们之间天然有这点舍入差；
+    // 容差按这个舍入预算传播到 Y₁ 上，而不是拿一分钱去卡——否则 BTC 这种高价币会被 0.00005 币的舍入误报「不符」。
+    const x1Tolerance = Math.max(1e-4, 1e-6 * Math.max(x1, x1Fills));
+    const cushionTolerance = Math.max(
+      routeTolerance,
+      1e-6 * Math.max(Math.abs(cushion), Math.abs(cushionFills)),
+      unit(x1Tolerance * Math.abs(s1 - sBar) + x1Fills * 1e-6 * sBar),
+    );
+    const agrees = Math.abs(x1Delta) <= x1Tolerance && Math.abs(cushionDelta) <= cushionTolerance;
+    fills = { x1: x1Fills, cushion: cushionFills, x1Delta, cushionDelta, agrees };
+    if (!agrees) disagrees.push('fills');
+  }
+
+  const shortfall = clip(ledgerGap);
+  return {
+    verdict: disagrees.length > 0 ? 'mismatch' : shortfall > 0 ? 'violation' : 'pass',
+    ledger: { cushion, banked, loss, available, gap: ledgerGap, shortfall },
+    costLine: { ...post, overshootLoss, gap: costLineGap, shortfall: clip(costLineGap) },
+    fills,
+    tolerance,
+    routeTolerance,
+    disagrees,
+    shortfall,
+    overshootPct: post.overshootPct,
   };
 }

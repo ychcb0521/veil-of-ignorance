@@ -1,11 +1,24 @@
-import { describe, expect, it } from 'vitest';
-import { computeCushionAdd, computePlanBCoverageAtS1, detectBankedMirrorProfit } from '@/lib/addSizing';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { computeCushionAdd, computePlanBCoverageAtS1, crossCheckPostAddR0, detectBankedMirrorProfit } from '@/lib/addSizing';
 import { describeAddSizingVerdict, evaluateCampaignAddSizing, formatAddSizingShortfall } from '@/lib/campaignAddSizingCheck';
 import { pickBookLine } from '@/lib/hedgeLines';
 import { computeCampaignRealizedPnl } from '@/lib/campaignRealizedPnl';
 import { buildCloseRecords } from '@/lib/tradingSettlement';
 import type { TradeJournal } from '@/types/journal';
 import type { CampaignReverseHedgeOrder, Position, TradeRecord } from '@/types/trading';
+
+/** 成本线式复核的注入口：两条路在数学上恒等，走正门造不出分歧；要测「对不上就不给对错号」只能把成本线算坏。 */
+const costLineSeam = vi.hoisted(() => ({ offset: 0 }));
+vi.mock('@/lib/addSizing', async () => {
+  const actual = await vi.importActual<typeof import('@/lib/addSizing')>('@/lib/addSizing');
+  return {
+    ...actual,
+    evaluatePostAddCostLine: (args: Parameters<typeof actual.evaluatePostAddCostLine>[0]) => {
+      const post = actual.evaluatePostAddCostLine(args);
+      return post && costLineSeam.offset ? { ...post, blendedCost: post.blendedCost + costLineSeam.offset } : post;
+    },
+  };
+});
 
 const T = (iso: string) => Date.parse(iso);
 const iso = (ms: number) => new Date(ms).toISOString();
@@ -691,5 +704,110 @@ describe('【复核】计算器与 Legs 同一个 G、同一条 S₁', () => {
     expect(text).toContain('加仓校验：仓位合规');
     expect(text).toContain('可用 max(0, Y₁ + G) = 1000.00 U');
     expect(text).toContain('新加仓最大亏损 200.00 U');
+  });
+});
+
+describe('【复核】Legs 校验也走两条路：垫子式与成本线式对不上就不给对错号', () => {
+  afterEach(() => { costLineSeam.offset = 0; });
+
+  // 浮盈垫 1,000 + 落袋 500；新腿每币退回 S₁ 亏 0.2
+  const t = T0 + 120 * MIN;
+  const legsWith = (addCoins: number) => [
+    mainLeg(),
+    leg({
+      id: 'mirror', leg_role: 'mirror_tp', pre_simulated_time: iso(T0), pre_entry_price: 1,
+      pre_position_size: 5_000, post_simulated_close_time: iso(T0 + 60 * MIN), post_realized_pnl: 500,
+    }),
+    leg({ id: 'add', leg_role: 'main_add_1', pre_simulated_time: iso(t), pre_entry_price: 1.3, pre_position_size: addCoins * 1.3 }),
+  ];
+  const orders = [short(1.1, t - MIN, null)];
+
+  it('合规与过大都带上成本线式的读数，与垫子式同一个缺口', () => {
+    const ok = evaluateCampaignAddSizing({ legs: legsWith(7_000), tradeRecords: [], reverseHedgeOrders: orders }).get('add')!;
+    expect(ok.status).toBe('ok');
+    // C = (10,000 × 1 + 7,000 × 1.3) ÷ 17,000；17,000 × (C − 1.1) = 400 < G 500
+    expect(ok.blendedCost).toBeCloseTo(19_100 / 17_000, 12);
+    expect(ok.costLineShortfall).toBe(0);
+
+    const fail = evaluateCampaignAddSizing({ legs: legsWith(8_000), tradeRecords: [], reverseHedgeOrders: orders }).get('add')!;
+    expect(fail.status).toBe('fail');
+    expect(fail.shortfall).toBeCloseTo(100, 6);
+    expect(fail.costLineShortfall).toBeCloseTo(100, 6);
+  });
+
+  it('【回归】TUTUSDT：成本线式算出的缺口与垫子式相差不到百万分之一', () => {
+    const { legs, orders: tut } = tutusdt();
+    const v = evaluateCampaignAddSizing({ legs, tradeRecords: [], reverseHedgeOrders: tut }).get('add1')!;
+    expect(v.status).toBe('fail');
+    expect(v.blendedCost).toBeGreaterThan(v.s1!);
+    expect(Math.abs(v.costLineShortfall! - v.shortfall!)).toBeLessThanOrEqual(1e-6 * v.shortfall!);
+  });
+
+  it('旧仓在加仓前已全部平掉：这是再入场，X₁ = 0、上一轮的 G 不跨轮；成本线就是 S₂，两条路给同一个缺口', () => {
+    const legs = [
+      // 主力在止盈之后以零盈亏整腿平掉：加仓那一刻没有任何旧仓还开着
+      mainLeg({ post_simulated_close_time: iso(T0 + 90 * MIN), post_realized_pnl: 0 }),
+      leg({
+        id: 'mirror', leg_role: 'mirror_tp', pre_simulated_time: iso(T0), pre_entry_price: 1,
+        pre_position_size: 5_000, post_simulated_close_time: iso(T0 + 60 * MIN), post_realized_pnl: 500,
+      }),
+      leg({ id: 'add', leg_role: 'main_add_1', pre_simulated_time: iso(t), pre_entry_price: 1.3, pre_position_size: 2_000 * 1.3 }),
+    ];
+    const v = evaluateCampaignAddSizing({ legs, tradeRecords: [], reverseHedgeOrders: orders }).get('add')!;
+    expect(v.x1Coins).toBe(0);
+    expect(v.cushion).toBe(0);
+    expect(v.banked).toBe(0);
+    expect(v.blendedCost).toBe(1.3);
+    // 没有垫子：亏损 2,000 × 0.2 = 400 全是缺口，垫子式与成本线式一致
+    expect(v.status).toBe('fail');
+    expect(v.shortfall).toBeCloseTo(400, 6);
+    expect(v.costLineShortfall).toBeCloseTo(400, 6);
+  });
+
+  it('【回归】旧仓深度浮亏被 G 补上（|Y₁| ≫ 可用垫）：缺两分钱 Legs 判 ✗，计算器的交叉复核用同一条截断容差也判非法', () => {
+    // 主力 100,000 币 @1.0，S₁ = 0.5 → Y₁ = −50,000；落袋 50,100 → 可用只有 100；加 500.1 币 @0.7 退回 S₁ 亏 100.02
+    const legs = [
+      mainLeg({ pre_position_size: 100_000 }),
+      leg({
+        id: 'mirror', leg_role: 'mirror_tp', pre_simulated_time: iso(T0), pre_entry_price: 1,
+        pre_position_size: 5_000, post_simulated_close_time: iso(T0 + 60 * MIN), post_realized_pnl: 50_100,
+      }),
+      leg({ id: 'add', leg_role: 'main_add_1', pre_simulated_time: iso(t), pre_entry_price: 0.7, pre_position_size: 500.1 * 0.7 }),
+    ];
+    const v = evaluateCampaignAddSizing({ legs, tradeRecords: [], reverseHedgeOrders: [short(0.5, t - MIN, null)] }).get('add')!;
+    expect(v.status).toBe('fail');
+    expect(v.cushion).toBeCloseTo(-50_000, 6);
+    expect(v.required).toBeCloseTo(100, 6);
+    expect(v.shortfall).toBeCloseTo(0.02, 6);
+    // 同一批数喂给计算器那条交叉复核：截断容差不许被 5 万的成本线越过额放宽到 0.05，两边同判
+    const r = crossCheckPostAddR0({
+      side: 'LONG', settlement: 'usdt', sBar: v.s1! - v.cushion! / v.x1Coins!, s1: v.s1!, s2: v.s2!,
+      x1: v.x1Coins!, addCoins: v.x2Coins!, g: v.banked!,
+    })!;
+    expect(r.tolerance).toBeCloseTo(0.01, 12);
+    expect(r.verdict).toBe('violation');
+    expect(r.shortfall).toBeCloseTo(v.shortfall!, 9);
+  });
+
+  it('【回归】成本线被算坏：不给 ✓ 也不给 ✗，标 unknown / self_check_mismatch，两个数都留着', () => {
+    // 成本线抬高 0.01 → 17,000 币 × 0.01 = 170 USD 的分歧，远超 0.01 的容差
+    costLineSeam.offset = 0.01;
+    const v = evaluateCampaignAddSizing({ legs: legsWith(7_000), tradeRecords: [], reverseHedgeOrders: orders }).get('add')!;
+    expect(v.status).toBe('unknown');
+    expect(v.reason).toBe('self_check_mismatch');
+    // 垫子式仍说没缺口，成本线式说缺 70：两个数都在
+    expect(v.shortfall).toBe(0);
+    expect(v.costLineShortfall).toBeCloseTo(70, 6);
+    expect(v.maxAllowedCoins).toBeCloseTo(7_500, 6);
+    const text = describeAddSizingVerdict(v);
+    expect(text).toContain('加仓校验：无法判断——两种算法结果不一致');
+    expect(text).toContain('垫子式缺口 0.00 U');
+    expect(text).toContain('成本线式缺口 70.00 U');
+  });
+
+  it('分歧小于容差不算不一致：抬高 1e-9 仍判 ok', () => {
+    costLineSeam.offset = 1e-9;
+    const v = evaluateCampaignAddSizing({ legs: legsWith(7_000), tradeRecords: [], reverseHedgeOrders: orders }).get('add')!;
+    expect(v.status).toBe('ok');
   });
 });
