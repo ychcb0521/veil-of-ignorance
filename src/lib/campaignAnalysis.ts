@@ -1416,6 +1416,19 @@ function normalizeEventSnapshotFromRecord(event: CampaignEvent, record: TradeRec
     next.size_usdt = tradeRecordNotionalUsd(record, record.entryPrice);
   }
 
+  // 事件自己没带时间线时从记录上抄：平仓类取平仓的章，对冲触发取开仓的章，其余开仓优先。
+  if (next.timeline_id == null) {
+    const isCloseEvent = event.event_type === 'main_partial_closed'
+      || event.event_type === 'main_fully_closed'
+      || event.event_type === 'mirror_tp_triggered';
+    const timelineId = isCloseEvent
+      ? record.closedTimelineId
+      : event.event_type === 'hedge_triggered'
+        ? record.openedTimelineId
+        : record.openedTimelineId ?? record.closedTimelineId;
+    if (timelineId) next.timeline_id = timelineId;
+  }
+
   return next;
 }
 
@@ -1461,6 +1474,7 @@ export function buildCampaignEventStream(
         size_usdt: tradeRecordNotionalUsd(tradeRecord, tradeRecord.exitPrice),
         notes: null,
         recorded_at: new Date(tradeRecord.closeTime).toISOString(),
+        ...(tradeRecord.closedTimelineId ? { timeline_id: tradeRecord.closedTimelineId } : {}),
       });
       continue;
     }
@@ -1478,6 +1492,7 @@ export function buildCampaignEventStream(
         size_usdt: tradeRecordNotionalUsd(tradeRecord, tradeRecord.entryPrice),
         notes: null,
         recorded_at: new Date(tradeRecord.openTime).toISOString(),
+        ...(tradeRecord.openedTimelineId ? { timeline_id: tradeRecord.openedTimelineId } : {}),
       });
       continue;
     }
@@ -1498,6 +1513,7 @@ export function buildCampaignEventStream(
         size_usdt: closedNotional,
         notes: null,
         recorded_at: new Date(tradeRecord.closeTime).toISOString(),
+        ...(tradeRecord.closedTimelineId ? { timeline_id: tradeRecord.closedTimelineId } : {}),
       });
     }
   }

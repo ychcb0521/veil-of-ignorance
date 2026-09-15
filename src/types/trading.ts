@@ -63,6 +63,12 @@ export interface PendingOrder {
    * 在真实时间轴上必然分开。老委托没有这个字段（undefined），归属时退回模拟窗口。
    */
   createdRealAt?: number;
+  /**
+   * 挂单时所在的回放时间线（lib/replayTimeline）。与 createdRealAt 是两件事：
+   * 真实时间只能事后猜哪几笔属于同一次回放，时间线 id 是写入那一刻就确定的答案。
+   * 老委托、时钟停着时挂的单没有（undefined / null），归属照旧走启发式。
+   */
+  createdTimelineId?: string | null;
   /** Trading mode captured at placement, so later fills keep the original incentive weight. */
   tradingMode?: "decision" | "direct";
 
@@ -145,6 +151,9 @@ export interface CancelledOrderSnapshot {
   /** 真实钱包时钟下的挂单 / 撤单时刻；老快照没有。 */
   createdRealAt?: number;
   cancelledRealAt?: number;
+  /** 挂单 / 撤单时所在的回放时间线；老快照没有。 */
+  createdTimelineId?: string | null;
+  cancelledTimelineId?: string | null;
 }
 
 /**
@@ -179,6 +188,9 @@ export interface FilledOrderSnapshot {
   /** 真实钱包时钟下的挂单 / 成交时刻；老快照没有。 */
   createdRealAt?: number;
   filledRealAt?: number;
+  /** 挂单 / 成交时所在的回放时间线；老快照没有。挂单之后倒回过，两者就不同。 */
+  createdTimelineId?: string | null;
+  filledTimelineId?: string | null;
   positionId?: string;
 }
 
@@ -235,6 +247,8 @@ export interface Position {
   openTime?: number;
   /** 真实钱包时钟下的开仓时刻（Date.now()）；老仓位没有。战役按真实时间归属委托单时的下界依据。 */
   openedRealAt?: number;
+  /** 开仓（第一笔成交）时所在的回放时间线；合并仓位里每笔成交各记在 fills[i].timelineId。老仓位没有。 */
+  openTimelineId?: string | null;
   /**
    * 开仓那一刻的杠杆，**永不重述**。
    *
@@ -269,6 +283,8 @@ export interface PositionFill {
   openTime: number;
   /** 这笔成交自己的真实开仓时刻；合并进仓位后各笔各留各的。 */
   openedRealAt?: number;
+  /** 这笔成交自己所在的回放时间线；加仓可能发生在倒回之后，不能借用主力的。 */
+  timelineId?: string | null;
   entryPrice: number;
   /** 该笔成交的计量单位数：币本位为张数，U 本位为币数。 */
   units: number;
@@ -329,6 +345,13 @@ export interface TradeRecord {
   closedRealAt?: number;
   /** 真实钱包时钟下的开仓时刻；与 closedRealAt 一起框出这笔交易在现实里的持有区间。老记录没有。 */
   openedRealAt?: number;
+  /**
+   * 这一片开仓 / 平仓时所在的回放时间线（lib/replayTimeline）。按每笔成交拆条时，
+   * openedTimelineId 取那一笔成交自己的。资金费记录可以带 closedTimelineId，但它不是归属锚点。
+   * 老记录没有。
+   */
+  openedTimelineId?: string | null;
+  closedTimelineId?: string | null;
   /** How the position was closed. Manual for user-initiated; sl/tp1-3 for triggered TP/SL; liquidation for forced close. */
   exit_method?: "manual" | "sl" | "tp1" | "tp2" | "tp3" | "liquidation";
   /**

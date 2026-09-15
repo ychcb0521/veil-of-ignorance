@@ -146,3 +146,13 @@ describe('止盈止损方向校验', () => {
     expect(buildTpSlOrders({ symbol: 'NOMUSD', position: coinPos(), levels: kept.levels, now: 0, newId })).toHaveLength(0);
   });
 });
+
+describe('止盈止损减仓单的回放时间线章', () => {
+  it('下达那一刻的时间线写进两张单；不传就不写这个字段', () => {
+    const levels = { tp: 0.015, sl: 0.009, percentage: 100 };
+    const stamped = buildTpSlOrders({ symbol: 'NOMUSD', position: coinPos(), levels, now: 1_000, newId, timelineId: 'tl-1' });
+    expect(stamped.map(o => o.createdTimelineId)).toEqual(['tl-1', 'tl-1']);
+    const bare = buildTpSlOrders({ symbol: 'NOMUSD', position: coinPos(), levels, now: 1_000, newId });
+    expect(bare.every(o => !('createdTimelineId' in o))).toBe(true);
+  });
+});

@@ -671,6 +671,19 @@ export default function JournalCampaignDetailPage() {
         setPendingOrders(full.pendingOrders);
         setReverseHedgeOrders(full.reverseHedgeOrders);
         setForeignLiveOrders(full.foreignLiveOrders ?? []);
+        // 回放时间线的影子比对（Phase 1）：精确判定与启发式不一致时只记一条日志，界面照旧按启发式显示
+        const diagnostics = full.timelineDiagnostics;
+        if (diagnostics && diagnostics.disagreements.length > 0) {
+          console.info('[JournalCampaignDetailPage] 回放时间线影子比对：精确判定与启发式不一致（本期不改显示）', {
+            campaignId: id,
+            mode: diagnostics.mode,
+            timelineIds: diagnostics.timelineIds,
+            anchorTimelineIds: diagnostics.anchorTimelineIds,
+            unstampedAnchors: diagnostics.unstampedAnchors,
+            missingAnchorNodes: diagnostics.missingAnchorNodes,
+            disagreements: diagnostics.disagreements,
+          });
+        }
         setCounterfactuals(savedCounterfactuals);
         setSelectedCounterfactualId(prev => prev ?? savedCounterfactuals[0]?.id ?? null);
       } catch (error) {

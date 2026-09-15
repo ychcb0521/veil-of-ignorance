@@ -48,6 +48,7 @@ import {
 } from "@/lib/streamingWindow";
 import { stepTrailingStop } from "@/lib/trailingStop";
 import { upsertOrderSnapshot } from "@/lib/orderSnapshotHistory";
+import { replayTimelineScope } from "@/lib/replayTimeline";
 import {
   diagnoseSignalJump,
   hasKlineCoveringSignalTime,
@@ -147,6 +148,9 @@ const Index = () => {
     setCoinTimelines,
     totalPositionCount,
     getEffectiveTime,
+    stampClock,
+    forkReplayTimeline,
+    endReplayTimeline,
     getCoinState,
     getEffectiveBalance,
     getEffectiveAvailable,
@@ -507,7 +511,8 @@ const Index = () => {
       const liveOrder = (ordersMapRef.current[symbol] || []).find((candidate) => candidate.id === order.id);
       if (!liveOrder) return false;
 
-      const { fee, margin, position } = executeSettlementFill(symbol, entryPrice, order, false, openTime, Date.now());
+      const filledTimelineId = stampClock(symbol);
+      const { fee, margin, position } = executeSettlementFill(symbol, entryPrice, order, false, openTime, Date.now(), filledTimelineId);
 
       // 付不起就当场撤单。**返回 true**:调用方把 false 读成「没执行」，
       // 会解掉触发锁并挂上 500ms 重试——那会变成每半秒一次的无限重试加提示。
@@ -541,6 +546,8 @@ const Index = () => {
           createdRealAt: order.createdRealAt,
           filledAt: openTime,
           filledRealAt: Date.now(),
+          createdTimelineId: order.createdTimelineId,
+          filledTimelineId,
           positionId: position.id,
         }));
       /**
@@ -583,7 +590,7 @@ const Index = () => {
       toast.success(`条件单已触发：${symbol} ${order.side} ${formatSettlementQuantity(position, symbol)} @ ${formatPrice(entryPrice, symbol)}`);
       return true;
     },
-    [applyAttachedTpSl, applyMergeSideEffects, executeReduceOnlyTrigger, settleFillDebit, setFilledOrders, setOrdersMap, setPositionsMap],
+    [applyAttachedTpSl, applyMergeSideEffects, executeReduceOnlyTrigger, settleFillDebit, setFilledOrders, setOrdersMap, setPositionsMap, stampClock],
   );
 
   const runConditionalMatchingForSymbol = useCallback(
@@ -1333,6 +1340,7 @@ const Index = () => {
 
             filledIds.push(matchedOrder.id);
             const simulatedTime = getEffectiveTime(activeSymbol);
+            const filledTimelineId = stampClock(activeSymbol);
             const { fee, margin, position } = executeSettlementFill(
               activeSymbol,
               fillPrice,
@@ -1342,6 +1350,7 @@ const Index = () => {
               // 第 6 位曾误传 K 线区间对象（函数从未消费它，只是个基线类型错误）；
               // 现在这一位是真实开仓时刻，供战役按真实时间归属委托单。
               Date.now(),
+              filledTimelineId,
             );
             const actualFillPrice = position.entryPrice;
             // 付不起 → 不 push 回 remaining（等于撤单）。id 在上面已经进了 filledIds，
@@ -1369,6 +1378,8 @@ const Index = () => {
                 createdRealAt: matchedOrder.createdRealAt,
                 filledAt: simulatedTime,
                 filledRealAt: Date.now(),
+                createdTimelineId: matchedOrder.createdTimelineId,
+                filledTimelineId,
                 positionId: position.id,
               }));
             // 同标的同方向并成一个仓位（币安单向持仓）。合并后必须改指减仓单，
@@ -1442,7 +1453,7 @@ const Index = () => {
         applyAttachedTpSl(activeSymbol, merged?.survivor ?? position, order);
       }
     }
-  }, [visibleData, iMs, timeDirection, activeSymbol, recordExecutionTrade, tradingMode, getEffectiveTime, setFilledOrders, applyAttachedTpSl, applyMergeSideEffects]);
+  }, [visibleData, iMs, timeDirection, activeSymbol, recordExecutionTrade, tradingMode, getEffectiveTime, setFilledOrders, applyAttachedTpSl, applyMergeSideEffects, stampClock]);
 
   // ===== TWAP ENGINE =====
   useEffect(() => {
@@ -1495,6 +1506,7 @@ const Index = () => {
                   false,
                   getEffectiveTime(symbol),
                   Date.now(),
+                  stampClock(symbol),
                 );
                 // 付不起就**停掉整张 TWAP**,而不是跳过一片继续跑:
                 // 后面每一片只会更贵(仓位在涨、可用在降)。
@@ -1536,7 +1548,7 @@ const Index = () => {
     }
 
     for (const { symbol, merged } of twapMerges) applyMergeSideEffects(symbol, merged);
-  }, [effectiveSimTime, activeCoinState.status, ordersMap, priceMap, getEffectiveTime, settleFillDebit, applyMergeSideEffects]);
+  }, [effectiveSimTime, activeCoinState.status, ordersMap, priceMap, getEffectiveTime, settleFillDebit, applyMergeSideEffects, stampClock]);
 
   // ===== ISOLATED-MODE HANDLERS =====
   const handlePause = useCallback(() => {
@@ -1696,6 +1708,9 @@ const Index = () => {
         // 倒叙播放下启动：起点吸附到 K 线开盘并记为本次倒放的镜面 cap。
         const startTs = timeDirection === -1 ? snapToBarStart(timestamp, iMs) : timestamp;
         if (timeDirection === -1) setReverseCapTime(startTs);
+        // 新的回放时间线：同一段行情从这里重新走，哪怕与上一次完全重合。
+        // 必须在改钟之前——在跑的钟上重新开始挂在当前时间线下面，从停着的钟起步另起一个根。
+        forkReplayTimeline(activeSymbol, "start", startTs, timeDirection);
 
         if (timeMode === "isolated") {
           const now = Date.now();
@@ -1727,7 +1742,7 @@ const Index = () => {
         toast.error("数据获取失败", { description: "请检查时间范围和交易对" });
       }
     },
-    [activeSymbol, interval, iMs, initLoad, sim, timeMode, timeDirection, setReverseCapTime, profile],
+    [activeSymbol, interval, iMs, initLoad, sim, timeMode, timeDirection, setReverseCapTime, profile, forkReplayTimeline],
   );
 
   // ===== Signal-library jump: switch symbol + start time machine atomically =====
@@ -1790,6 +1805,8 @@ const Index = () => {
       // 倒叙播放下跳转：同 handleStart，起点吸附并记镜面 cap。
       const startTs = timeDirection === -1 ? snapToBarStart(timeMs, iMs) : timeMs;
       if (timeDirection === -1) setReverseCapTime(startTs);
+      // 行情覆盖检查都过了才分叉（失败的跳转不留任何痕迹）。同步模式分全局那只钟，隔离模式只分这个币的。
+      forkReplayTimeline(normalized, "jump", startTs, timeDirection);
 
       if (timeMode === "isolated") {
         const now = Date.now();
@@ -1817,7 +1834,7 @@ const Index = () => {
     },
     [
       activeSymbol, interval, iMs, initLoad, sim, timeMode, timeDirection, setReverseCapTime,
-      setActiveSymbol, setPriceMap, setCoinTimelines, setSyncedOriginTime,
+      setActiveSymbol, setPriceMap, setCoinTimelines, setSyncedOriginTime, forkReplayTimeline,
     ],
   );
 
@@ -1842,12 +1859,25 @@ const Index = () => {
         if (hasRunningCoins) return;
       }
 
+      // 换模式换的是钟：旧模式下的时间线到此为止。
+      endReplayTimeline("all");
+      /**
+       * 离开同步模式时全局那只钟要真的停下。这里只拦持仓，不拦在播的钟：不停的话它在隔离模式下
+       * 继续在原地跑（没有任何界面能看见它），切回同步模式时登记表看见一只在跑、却没有时间线的钟，
+       * 会补一个 bootstrap 根——那是「上线前就开着的会话」的语义，会把仍挂着的旧单当成本场的。
+       * 与 handleStop 的同步分支同一套收尾（仓位已经为零，挂单留着，等各币自己的钟）。
+       */
+      if (newMode === "isolated" && sim.status !== "stopped") {
+        clearSimState();
+        setSyncedOriginTime(null);
+        sim.stopSimulation();
+      }
       setTimeMode(newMode);
       if (newMode === "synced") {
         setCoinTimelines({});
       }
     },
-    [timeMode, coinTimelines, totalPositionCount, setTimeMode, setCoinTimelines],
+    [timeMode, coinTimelines, totalPositionCount, setTimeMode, setCoinTimelines, endReplayTimeline, sim, setSyncedOriginTime],
   );
 
   // State for mode switch confirmation dialog
@@ -1880,6 +1910,8 @@ const Index = () => {
         handleCancelOrder(sym, order.id);
       }
     }
+    // 收尾的平仓 / 撤单还盖着旧时间线的章，之后才结束。
+    endReplayTimeline("all");
 
     // Full state cleanup — garbage collection
     reset();
@@ -1904,6 +1936,7 @@ const Index = () => {
     sim,
     setCoinTimelines,
     setTimeMode,
+    endReplayTimeline,
   ]);
 
   const handleStop = useCallback(() => {
@@ -1920,6 +1953,8 @@ const Index = () => {
       for (const order of orders) {
         handleCancelOrder(activeSymbol, order.id);
       }
+      // 收尾的平仓 / 撤单还盖着旧时间线的章，之后才结束这个币的时间线。
+      endReplayTimeline(replayTimelineScope("isolated", activeSymbol));
       setCoinTimelines((prev) => ({
         ...prev,
         [activeSymbol]: {
@@ -1953,6 +1988,8 @@ const Index = () => {
           handleCancelOrder(sym, order.id);
         }
       }
+      // 收尾的平仓 / 撤单还盖着旧时间线的章，之后才结束。
+      endReplayTimeline("synced");
       reset();
       matchCursorRef.current = null;
       clearSimState();
@@ -1971,6 +2008,7 @@ const Index = () => {
     timeMode,
     activeSymbol,
     coinTimelines,
+    endReplayTimeline,
   ]);
 
   // Wrapper for OrderPanel

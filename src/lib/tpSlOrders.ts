@@ -103,8 +103,10 @@ export function buildTpSlOrders(args: {
   levels: TpSlLevels;
   now: number;
   newId: () => string;
+  /** 下达这对保护单时所在的回放时间线（TradingContext.stampClock）。缺省不写。 */
+  timelineId?: string | null;
 }): PendingOrder[] {
-  const { symbol, position, levels, now, newId } = args;
+  const { symbol, position, levels, now, newId, timelineId } = args;
   const closeQty = tpSlCloseUnits(position, levels.percentage);
   if (!(closeQty > 0)) return [];
 
@@ -129,6 +131,7 @@ export function buildTpSlOrders(args: {
       operator, triggerDirection: operator === '>=' ? 'UP' : 'DOWN',
       reduceOnly: true, reduceSymbol: symbol, reducePositionSide: position.side,
       linkedPositionId: position.id, reduceKind: kind, reducePercentage: safePct,
+      ...(timelineId ? { createdTimelineId: timelineId } : {}),
     };
   };
 

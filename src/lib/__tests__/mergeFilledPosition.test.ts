@@ -154,3 +154,23 @@ describe('不该合并的情形', () => {
     expect(r.positions).toHaveLength(1);
   });
 });
+
+describe('合并不抹掉每笔成交所在的回放时间线', () => {
+  it('主力与被吞并那笔各留各的章；存活仓位的章仍是最早那笔的', () => {
+    const main = linear('main', 10, 100, { openTimelineId: 'tl-main' });
+    const add = linear('add', 5, 110, { openTimelineId: 'tl-add', openTime: 9_000 });
+    const { survivor } = mergeFilledPosition('BTCUSDT', [main], add);
+    expect(survivor.openTimelineId).toBe('tl-main');
+    expect(survivor.fills!.map(f => [f.id, f.timelineId])).toEqual([['main', 'tl-main'], ['add', 'tl-add']]);
+  });
+
+  it('没有合并、新开一个仓位：它自己的 fills[0] 同样带章', () => {
+    const r = mergeFilledPosition('BTCUSDT', [], linear('solo', 10, 100, { openTimelineId: 'tl-solo' }));
+    expect(r.positions[0].fills![0].timelineId).toBe('tl-solo');
+  });
+
+  it('没盖章的旧仓位合并后，fills 里不凭空多出 timelineId 字段', () => {
+    const { survivor } = mergeFilledPosition('BTCUSDT', [linear('old', 10, 100)], linear('new', 5, 110));
+    expect(survivor.fills!.every(f => !('timelineId' in f))).toBe(true);
+  });
+});

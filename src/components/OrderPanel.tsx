@@ -621,6 +621,7 @@ export function OrderPanel({
   const [snapshotSide, setSnapshotSide] = useState<OrderSide>('LONG');
   const [pendingOrderParams, setPendingOrderParams] = useState<PlaceOrderParams | null>(null);
   const [snapshotSimTime, setSnapshotSimTime] = useState<number>(Date.now());
+  const [snapshotTimelineId, setSnapshotTimelineId] = useState<string | null>(null);
   const [snapshotEntryPrice, setSnapshotEntryPrice] = useState<number | null>(null);
 
   const buildOrderParams = (rawSide: OrderSide): PlaceOrderParams | null => {
@@ -688,6 +689,8 @@ export function OrderPanel({
     setPendingOrderParams(params);
     setSnapshotSide(rawSide);
     setSnapshotSimTime(ctx.getEffectiveTime(symbol));
+    // 与锁定的模拟时间同一刻取时间线（弹窗随后会自动暂停，暂停不分叉）。
+    setSnapshotTimelineId(ctx.getTimelineId(symbol));
     setSnapshotEntryPrice(ctx.priceMap[symbol] ?? currentPrice ?? null);
     setSnapshotOpen(true);
   };
@@ -1400,6 +1403,7 @@ export function OrderPanel({
         symbol={symbol}
         direction={snapshotSide === 'LONG' ? 'long' : 'short'}
         simulatedTimeMs={snapshotSimTime}
+        timelineId={snapshotTimelineId}
         lockedEntryPrice={snapshotEntryPrice}
         leverage={leverage}
         marginMode={marginMode}

@@ -20,6 +20,7 @@ import {
 } from "@/lib/tradingSettlement";
 import type { PositionMergeResult } from "@/lib/tradingSettlement";
 import { upsertOrderSnapshot } from "@/lib/orderSnapshotHistory";
+import { isCoinTimelineClockActive } from "@/lib/replayTimeline";
 import { formatPrice } from "@/lib/formatters";
 import { toast } from '@/lib/notificationCenter';
 import { fetchCanonicalTimePriceAt, type CanonicalTimePrice } from "@/lib/canonicalTimePrice";
@@ -39,7 +40,10 @@ export function useBackgroundPrices() {
     setFilledOrders,
     settleFillDebit,
     tradingMode,
+    timeMode,
+    coinTimelines,
     getEffectiveTime,
+    stampClock,
     recordExecutionTrade,
     executeReduceOnlyTrigger,
     applyAttachedTpSl,
@@ -125,7 +129,11 @@ export function useBackgroundPrices() {
           // 与盘面撮合（Index.tsx）同一口径、也是币安的口径：挂在盘口成交的限价单是 Maker，
           // 触发后按市价成交的是 Taker。这里原来一律按 Taker 收，后台标的的限价单多付了一倍半。
           const isMaker = order.type === 'LIMIT' || order.type === 'POST_ONLY' || order.type === 'LIMIT_TP_SL';
-          const { fee, margin, position } = executeSettlementFill(symbol, fillPrice, order, isMaker, simulatedTime, Date.now());
+          // 后台标的用它**自己**的钟取章：隔离模式下它和盘面标的不在同一条时间线上。
+          const filledTimelineId = stampClock(symbol);
+          const { fee, margin, position } = executeSettlementFill(
+            symbol, fillPrice, order, isMaker, simulatedTime, Date.now(), filledTimelineId,
+          );
           const actualFillPrice = position.entryPrice;
 
           // 付不起就当场撤单留痕。id 已经进了 filledIds（上一行 push），
@@ -157,6 +165,8 @@ export function useBackgroundPrices() {
             createdRealAt: order.createdRealAt,
             filledAt: simulatedTime,
             filledRealAt: Date.now(),
+            createdTimelineId: order.createdTimelineId,
+            filledTimelineId,
             positionId: position.id,
           }));
           // 合并结果要带出来：合并后必须改指减仓单，否则挂在被吞并那笔上的止损
@@ -230,7 +240,7 @@ export function useBackgroundPrices() {
         }));
       }
     },
-    [setPositionsMap, setOrdersMap, setFilledOrders, settleFillDebit, executeReduceOnlyTrigger, applyAttachedTpSl, recordExecutionTrade, tradingMode, getEffectiveTime],
+    [setPositionsMap, setOrdersMap, setFilledOrders, settleFillDebit, executeReduceOnlyTrigger, applyAttachedTpSl, recordExecutionTrade, tradingMode, getEffectiveTime, stampClock],
   );
 
   const pollBackgroundSymbols = useCallback(async () => {
@@ -287,6 +297,13 @@ export function useBackgroundPrices() {
         if (!kline) continue;
         const orders = ordersMap[sym];
         if (!orders || orders.length === 0) continue;
+        /**
+         * 隔离模式一个币一只钟：没启动过（或已停）的币没有时间，它的委托不撮合。
+         * getEffectiveTime 对这样的币退回全局 sim 的时刻——那只钟在隔离模式下只是「有没有币在跑」的开关，
+         * 走到哪与这个币无关（同步模式切过来时它甚至还在原地跑）。拿它撮合出的成交没有回放时间线可盖，
+         * 委托的挂单章却指向已结束的同步时间线，读取侧只能判成「另一条线上的单」。
+         */
+        if (timeMode === "isolated" && !isCoinTimelineClockActive(coinTimelines[sym])) continue;
         matchBackgroundOrders(sym, kline, orders);
       }
     } finally {
@@ -294,6 +311,8 @@ export function useBackgroundPrices() {
     }
   }, [
     sim.isRunning,
+    timeMode,
+    coinTimelines,
     getEffectiveTime,
     activeSymbol,
     activeSymbols,

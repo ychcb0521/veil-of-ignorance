@@ -175,6 +175,8 @@ export function executeSettlementFill(
   openTime = 0,
   /** 真实钱包时钟下的开仓时刻。可选：纯函数保持可复现，调用方在成交那一刻传 Date.now()。 */
   openedRealAt?: number,
+  /** 成交那一刻所在的回放时间线（TradingContext.stampClock）。缺省不写这个字段。 */
+  openTimelineId?: string | null,
 ) {
   const normalized = normalizeSettlementOrder(symbol, order);
   const { fillPrice, slippageUsd } = applySettlementSlippage(symbol, rawPrice, normalized, isMaker);
@@ -204,6 +206,7 @@ export function executeSettlementFill(
     openIsMaker: isMaker,
     openFeeRate: feeRate,
     ...(Number.isFinite(openedRealAt) && (openedRealAt as number) > 0 ? { openedRealAt } : {}),
+    ...(openTimelineId ? { openTimelineId } : {}),
   };
 
   return { fee: feeUsd, feeCoin, margin: marginUsd, marginCoin, slippage: slippageUsd, position };
@@ -284,6 +287,8 @@ export function settlePositionClose(
   closeTime: number,
   exitMethod: NonNullable<TradeRecord["exit_method"]> = "manual",
   closedRealAt = Date.now(),
+  /** 平仓那一刻所在的回放时间线。 */
+  closedTimelineId?: string | null,
 ): SettledPositionClose | null {
   const totalUnits = getPositionUnits(pos);
   if (totalUnits <= POSITION_DUST_EPSILON) return null;
@@ -325,7 +330,7 @@ export function settlePositionClose(
     fillPrice,
     netPnl,
     records: buildCloseRecords({
-      symbol, pos, closeQty, fillPrice, closeTime, exitMethod, closedRealAt,
+      symbol, pos, closeQty, fillPrice, closeTime, exitMethod, closedRealAt, closedTimelineId,
       totals: { netPnl, pnlCoin, feeUsd, feeCoin, slippageUsd, notionalUsd, closeFeeRate: feeRate, closeIsMaker: false },
     }),
   };
@@ -343,6 +348,20 @@ export interface CloseRecordTotals {
   closeIsMaker?: boolean;
   /** 强平记录：feeUsd 里包含的强平清算费。 */
   liquidationFeeUsd?: number;
+}
+
+/**
+ * 按笔拆条时 openedTimelineId 取**这一笔成交自己的**时间线。
+ *
+ * 不能一律退回仓位级的 openTimelineId：那是第一笔成交的章。一笔上线前的加仓
+ * 并进了一个上线后才开的仓位时（反过来不可能——仓位 id 保留最早那笔），
+ * 它会顶着主力的章写进历史，而它其实没有章。只有仓位自己那笔（f.id === pos.id）才可以借用。
+ * base 已经按仓位写过 openedTimelineId，这一笔没有章就必须显式抹掉。
+ */
+function fillOpenedTimelineOverride(pos: Position, fill: PositionFill): Partial<TradeRecord> {
+  const own = fill.timelineId ?? (fill.id === pos.id ? pos.openTimelineId : null);
+  if (own) return { openedTimelineId: own };
+  return pos.openTimelineId ? { openedTimelineId: undefined } : {};
 }
 
 /** 按比例带走一部分金额；未知（旧数据）就仍是未知。 */
@@ -377,9 +396,11 @@ export function buildCloseRecords(input: {
   closeTime: number;
   exitMethod?: TradeRecord["exit_method"];
   closedRealAt?: number;
+  /** 平仓那一刻所在的回放时间线。缺省不写这个字段。 */
+  closedTimelineId?: string | null;
   totals: CloseRecordTotals;
 }): TradeRecord[] {
-  const { symbol, pos, closeQty, fillPrice, closeTime, exitMethod, closedRealAt, totals } = input;
+  const { symbol, pos, closeQty, fillPrice, closeTime, exitMethod, closedRealAt, closedTimelineId, totals } = input;
   const coin = isCoinSettled(pos);
   // 这一刀平掉了仓位的多大比例：开仓费按同一比例带进记录（部分平仓只带走那一部分）。
   const positionUnits = getPositionUnits(pos);
@@ -420,6 +441,9 @@ export function buildCloseRecords(input: {
     closeIsMaker: totals.closeIsMaker,
     closeFeeRate: totals.closeFeeRate,
     liquidationFeeUsd: totals.liquidationFeeUsd,
+    // 时间线章只在有的时候才写：没盖章的仓位 / 平仓产出的记录与改动前逐字节相同。
+    ...(pos.openTimelineId ? { openedTimelineId: pos.openTimelineId } : {}),
+    ...(closedTimelineId ? { closedTimelineId } : {}),
     ...over,
   } as TradeRecord);
 
@@ -524,6 +548,7 @@ export function buildCloseRecords(input: {
       openIsMaker: f.openIsMaker,
       openFeeRate: f.openFeeRate,
       liquidationFeeUsd: feePart(totals.liquidationFeeUsd, share),
+      ...fillOpenedTimelineOverride(pos, f),
     });
     if (i !== absorber) {
       acc.quantity += rec.quantity; acc.pnl += rec.pnl;
@@ -637,6 +662,8 @@ function fillsOf(p: Position, symbol: string): PositionFill[] {
     units: getPositionUnits(p),
     openLeverage: p.openLeverage ?? p.leverage,
     openedRealAt: p.openedRealAt,
+    // 每笔成交各留各的时间线：合并只改风控口径，不抹掉「这一笔是在哪次回放里成交的」。
+    ...(p.openTimelineId ? { timelineId: p.openTimelineId } : {}),
     openFeeUsd: p.openFeeUsd,
     openFeeCoin: p.openFeeCoin,
     openIsMaker: p.openIsMaker,

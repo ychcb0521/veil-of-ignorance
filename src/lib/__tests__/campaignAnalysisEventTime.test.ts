@@ -103,4 +103,39 @@ describe('buildCampaignEventStream canonical trade times', () => {
     expect(attachedEvent?.close_time).toBe(iso(correctedCloseMs));
     expect(attachedEvent?.exit_price).toBe(1.2);
   });
+
+  it('从成交记录合成的事件抄上回放时间线章：平仓类取平仓章、对冲触发取开仓章；没盖章就不写', () => {
+    const openMs = Date.parse('2026-09-15T00:00:00.000Z');
+    const closeMs = Date.parse('2026-09-15T01:00:00.000Z');
+    const campaign = {
+      id: 'campaign-2', user_id: 'user-1', campaign_code: 'C-2', symbol: 'TESTUSDT', direction: 'main_long',
+      status: 'closed_profit', strategy_template: 'main_dual_hedge_mirror_tp', title: 'stamped',
+      opened_at: iso(openMs), closed_at: null, initial_main_size_usdt: 1000, initial_leverage: 1,
+      final_realized_pnl: null, final_r_multiple: null, peak_unrealized_pnl: null, peak_drawdown: null,
+      importance_weight: 0, notes: null, actual_evolution: [], deviation_notes: {},
+      created_at: iso(openMs), updated_at: iso(openMs),
+    } satisfies TradeCampaign;
+    const leg = (id: string, recordId: string, legRole: TradeJournal['leg_role']) => ({
+      id, trade_record_id: recordId, leg_role: legRole, pre_simulated_time: iso(openMs),
+      pre_entry_price: 1, pre_position_size: 1000, direction: 'long',
+    } as TradeJournal);
+    const record = (id: string, over: Partial<TradeRecord> = {}): TradeRecord => ({
+      id, symbol: 'TESTUSDT', side: 'LONG', type: 'MARKET', action: 'CLOSE', entryPrice: 1, exitPrice: 1.2,
+      quantity: 1000, leverage: 1, pnl: 200, fee: 0, slippage: 0, openTime: openMs, closeTime: closeMs, ...over,
+    });
+
+    const events = buildCampaignEventStream(
+      campaign,
+      [leg('j-main', 'r-main', 'main_open'), leg('j-hedge', 'r-hedge', 'hedge_initial_a'), leg('j-old', 'r-old', 'main_add_1')],
+      [
+        record('r-main', { openedTimelineId: 'tl-open', closedTimelineId: 'tl-close' }),
+        record('r-hedge', { side: 'SHORT', openedTimelineId: 'tl-hedge-open', closedTimelineId: 'tl-hedge-close' }),
+        record('r-old'),
+      ],
+    );
+    const byRecord = (id: string) => events.find(event => event.trade_record_id === id)!;
+    expect(byRecord('r-main')).toMatchObject({ event_type: 'main_fully_closed', timeline_id: 'tl-close' });
+    expect(byRecord('r-hedge')).toMatchObject({ event_type: 'hedge_triggered', timeline_id: 'tl-hedge-open' });
+    expect('timeline_id' in byRecord('r-old')).toBe(false);
+  });
 });

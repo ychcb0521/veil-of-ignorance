@@ -16,9 +16,26 @@
  * 网络错误只记日志不打扰交易。同步永远不能成为下单路径上的故障点。
  */
 import { supabase } from '@/integrations/supabase/client';
+import { mergeReplayTimelineRegistries, pruneReplayTimelineRegistry, REPLAY_TIMELINES_STORAGE_KEY } from '@/lib/replayTimeline';
 
 /** 行情缓存等可重建数据：没有同步价值，白耗带宽。 */
 const EXCLUDED_KEYS = new Set(['price_map']);
+
+/**
+ * 水化时**按内容合并**、不按「谁更新谁覆盖」的键。
+ *
+ * 其余键描述的是「此刻的状态」，整键写者胜没有问题；回放时间线登记表描述的是**历史**——
+ * 两台设备各自分叉出来的时间线都真实发生过，整键覆盖会把一台设备上的节点整个抹掉，
+ * 那台设备上盖过章的委托从此指向一个不存在的节点。合并规则见 mergeReplayTimelineRegistries。
+ *
+ * 只在水化时合并：推送仍是整键 upsert，两台设备**同时**在跑时后推的那台会盖掉先推的节点，
+ * 直到先推的那台下一次水化再把自己的节点并回去。
+ */
+const UNION_MERGE_KEYS: Record<string, (local: unknown, remote: unknown) => unknown> = {
+  // 并集之后再修剪：本机修掉的老节点不能借远端的副本一次次长回来。
+  [REPLAY_TIMELINES_STORAGE_KEY]: (local, remote) =>
+    pruneReplayTimelineRegistry(mergeReplayTimelineRegistries(local, remote), { now: Date.now() }),
+};
 
 /**
  * 不走 `sim_<uid>_` 前缀的存储 → 实际 localStorage 键的映射。
@@ -42,7 +59,8 @@ function storageKeyFor(logicalKey: string, userId: string): string {
 }
 
 /** 时间线心跳类键每 500ms 就变一次，用长节流窗口，其余键短防抖即可。 */
-const SLOW_SYNC_KEYS = new Set(['synced_origin_time', 'coin_timelines_v2', 'reverse_cap_time_v1']);
+// 登记表每次盖章都会改（虽已节流），整键 upsert 一次就是整张表：走慢档，最多 20 秒一次。
+const SLOW_SYNC_KEYS = new Set(['synced_origin_time', 'coin_timelines_v2', 'reverse_cap_time_v1', REPLAY_TIMELINES_STORAGE_KEY]);
 const FAST_DEBOUNCE_MS = 1_500;
 const SLOW_DEBOUNCE_MS = 20_000;
 
@@ -284,7 +302,28 @@ export async function hydrateSimState(userId: string): Promise<HydrateResult> {
       const fullKey = storageKeyFor(row.key, userId);
       const remoteTs = new Date(row.updated_at).getTime();
       const localTs = readShadowTs(fullKey);
-      const hasLocal = localStorage.getItem(fullKey) != null;
+      const localRaw = localStorage.getItem(fullKey);
+      const hasLocal = localRaw != null;
+      const merge = UNION_MERGE_KEYS[row.key];
+      if (merge && hasLocal) {
+        // 并集合并与新旧无关：本地更新也不能丢远端独有的节点，远端更新也不能丢本地独有的。
+        try {
+          let localValue: unknown = null;
+          try { localValue = JSON.parse(localRaw); } catch { /* 坏的本地值按空登记表处理 */ }
+          const merged = merge(localValue, row.value);
+          const mergedJson = JSON.stringify(merged);
+          if (mergedJson !== localRaw) {
+            localStorage.setItem(fullKey, mergedJson);
+            applied += 1;
+          }
+          // 合并结果里有远端没有的东西 → 推回去；否则本地与远端已一致，对齐影子戳即可。
+          if (mergedJson !== JSON.stringify(row.value)) queueSimStatePush(userId, row.key, merged);
+          else writeShadowTs(fullKey, remoteTs);
+        } catch (e) {
+          console.warn(`[simStateSync] 合并 ${row.key} 失败：`, e);
+        }
+        continue;
+      }
       if (hasLocal && localTs >= remoteTs) continue; // 本地不比远端旧，保留本地
       try {
         localStorage.setItem(fullKey, JSON.stringify(row.value));

@@ -144,6 +144,15 @@ const { campaigns, detailsById } = vi.hoisted(() => {
       pendingOrders: [],
       reverseHedgeOrders: [],
       foreignLiveOrders: [],
+      timelineDiagnostics: {
+        mode: 'heuristic' as const,
+        timelineIds: [],
+        anchorTimelineIds: [],
+        unstampedAnchors: 0,
+        missingAnchorNodes: [],
+        verdicts: {},
+        disagreements: [],
+      },
     }])),
   };
 });

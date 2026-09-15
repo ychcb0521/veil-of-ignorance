@@ -81,6 +81,16 @@ import {
   type LegExitPriceCorrectionsResult,
 } from '@/lib/campaignLegExecution';
 import { queueSimStatePush } from '@/lib/simStateSync';
+import { normalizeReplayTimelineRegistry, REPLAY_TIMELINES_STORAGE_KEY, type ReplayTimelineRegistry } from '@/lib/replayTimeline';
+import {
+  buildCampaignTimelineScope,
+  collectCampaignTimelineEvidence,
+  type CampaignTimelineDiagnostics,
+  type CampaignTimelineOrderDiagnostic,
+  type CampaignTimelineOrderLike,
+  type CampaignTimelineOrderOptions,
+  type OpenPositionTimelineLike,
+} from '@/lib/campaignTimelineScope';
 import {
   bestOrderRealStamp,
   buildReplaySessionFilter,
@@ -533,7 +543,7 @@ function mergeFollows(primary: AccountFollow[], fallback: AccountFollow[]): Acco
  * 核心列（user_id/symbol/direction/pre_entry_reason/pre_mental_state/post_outcome…）
  * 不在此模式内，永不会被误判或误删。仅用 i 标志（无 g），test() 无状态、可安全复用。
  */
-const OPTIONAL_COLUMN_PATTERN = /trade_principles|pain_log_entries|campaign_id|leg_role|leg_sequence|order_kind|pre_settlement_mode|pre_settlement_asset|pre_contract_size_usd|pre_contracts|pre_thesis_why_right|pre_premortem_failure_reason|pre_falsification_signal|pre_confidence_basis|pre_odds_structure|pre_odds_structure_source|pre_odds_structure_premortem|pre_odds_structure_breakdown_signals|pre_account_equity_usdt|pre_opportunity_cost_worth|pre_cheap_opportunity|pre_edge_source|pre_market_regime|pre_entry_stage|pre_stop_quality|pre_chase_after_close|pre_mortem_text|pre_positive_expectancy|pre_invalidation_condition|pre_calibration_win_pct|pre_confidence_interval_|pre_calibration_reference_class|pre_calibration_competence_basis|pre_calibration_update_signal|pre_dataset_split|pre_lollapalooza_score|pre_bankruptcy_estimate|pre_info_|pre_opponent_statement|pre_pain_tags|pre_cognitive_bias_tags|pre_triggered_principle_ids|pre_triggered_rule_ids|pre_executor_self|pre_designer_self|pre_stop_doing_acknowledged_ids|pre_stop_doing_ad_hoc|journal_kind|no_trade_reason|no_trade_would_be_entry_price|no_trade_direction|exit_falsification_status|exit_falsification_note|post_result_summary|post_(?:entry|holding|exit)_decision_quality|post_exit_nature|post_decision_quality|post_struggle_level|post_small_position_drag|post_missed_high_odds_state|post_path_|post_trade_agency_score|post_positive_expectancy_review|post_premortem_review|post_invalidation_review|post_entry_|post_five_step|post_opponent_was_right|post_proximate_cause|post_root_cause|post_design_intervention|post_intervention_type|post_execution_monitor|post_real_close_time|post_simulated_close_time|post_emo_|evolution_level|principle_id|hedge_type|hedge_boundary_price|hedge_boundary_basis|hedge_boundary_stance|hedge_lock_profit_pct|hedge_resolution_up|hedge_resolution_down|hedge_down_if_chop|hedge_down_if_trend|hedge_down_if_rebound|hedge_necessity_pct|hedge_safety_strength|hedge_safety_regularity|hedge_risk_magnitude|hedge_conviction_pct|hedge_friction_cost|hedge_order_method|hedge_worth_it/i;
+const OPTIONAL_COLUMN_PATTERN = /trade_principles|pain_log_entries|campaign_id|leg_role|leg_sequence|order_kind|pre_timeline_id|pre_settlement_mode|pre_settlement_asset|pre_contract_size_usd|pre_contracts|pre_thesis_why_right|pre_premortem_failure_reason|pre_falsification_signal|pre_confidence_basis|pre_odds_structure|pre_odds_structure_source|pre_odds_structure_premortem|pre_odds_structure_breakdown_signals|pre_account_equity_usdt|pre_opportunity_cost_worth|pre_cheap_opportunity|pre_edge_source|pre_market_regime|pre_entry_stage|pre_stop_quality|pre_chase_after_close|pre_mortem_text|pre_positive_expectancy|pre_invalidation_condition|pre_calibration_win_pct|pre_confidence_interval_|pre_calibration_reference_class|pre_calibration_competence_basis|pre_calibration_update_signal|pre_dataset_split|pre_lollapalooza_score|pre_bankruptcy_estimate|pre_info_|pre_opponent_statement|pre_pain_tags|pre_cognitive_bias_tags|pre_triggered_principle_ids|pre_triggered_rule_ids|pre_executor_self|pre_designer_self|pre_stop_doing_acknowledged_ids|pre_stop_doing_ad_hoc|journal_kind|no_trade_reason|no_trade_would_be_entry_price|no_trade_direction|exit_falsification_status|exit_falsification_note|post_result_summary|post_(?:entry|holding|exit)_decision_quality|post_exit_nature|post_decision_quality|post_struggle_level|post_small_position_drag|post_missed_high_odds_state|post_path_|post_trade_agency_score|post_positive_expectancy_review|post_premortem_review|post_invalidation_review|post_entry_|post_five_step|post_opponent_was_right|post_proximate_cause|post_root_cause|post_design_intervention|post_intervention_type|post_execution_monitor|post_real_close_time|post_simulated_close_time|post_emo_|evolution_level|principle_id|hedge_type|hedge_boundary_price|hedge_boundary_basis|hedge_boundary_stance|hedge_lock_profit_pct|hedge_resolution_up|hedge_resolution_down|hedge_down_if_chop|hedge_down_if_trend|hedge_down_if_rebound|hedge_necessity_pct|hedge_safety_strength|hedge_safety_regularity|hedge_risk_magnitude|hedge_conviction_pct|hedge_friction_cost|hedge_order_method|hedge_worth_it/i;
 
 function isMissingDalioMetaLayerError(error: { code?: string; message?: string } | null): boolean {
   if (!error) return false;
@@ -1270,6 +1280,17 @@ function tradeRecordOutcome(record: Pick<TradeRecord, 'pnl'>): TradeOutcome {
   return 'breakeven';
 }
 
+/**
+ * 事件对应那次操作所在的回放时间线，从成交记录上抄。开仓的章优先——
+ * 回填事件的时间戳取的是开仓时刻（tradeRecordTimeMs）；没有再取平仓的。都没有就不写这个字段。
+ */
+function recordEventTimelineId(
+  record: Pick<TradeRecord, 'openedTimelineId' | 'closedTimelineId'> | null | undefined,
+): Pick<CampaignEvent, 'timeline_id'> {
+  const timelineId = record?.openedTimelineId ?? record?.closedTimelineId ?? null;
+  return timelineId ? { timeline_id: timelineId } : {};
+}
+
 function campaignEventFromTradeRecord(
   record: TradeRecord,
   legRole: LegRole,
@@ -1299,6 +1320,7 @@ function campaignEventFromTradeRecord(
     exit_price: record.exitPrice,
     realized_pnl: record.pnl,
     r_multiple: null,
+    ...recordEventTimelineId(record),
     ...overrides,
   };
 }
@@ -1338,6 +1360,8 @@ function campaignEventFromJournal(
     exit_price: record?.exitPrice ?? journal.post_exit_price_snapshot ?? null,
     realized_pnl: record?.pnl ?? journal.post_realized_pnl,
     r_multiple: journal.post_r_multiple,
+    // 实时腿的快照带着锁定时刻的时间线（本地镜像）；没有就从关联成交记录上抄。
+    ...(journal.pre_timeline_id ? { timeline_id: journal.pre_timeline_id } : recordEventTimelineId(record)),
   };
 }
 
@@ -2271,14 +2295,16 @@ export interface UserLocalSnapshot {
   ordersMap: Record<string, PendingOrder[]>;
   cancelledOrders: CancelledOrderSnapshot[];
   filledOrders: FilledOrderSnapshot[];
-  /** 至今还开着的仓位（positions_map）。只用到仓位与每笔成交的 id；缺省视为没有开着的仓位。 */
-  positionsMap?: Record<string, OpenPositionIds[]>;
-}
-
-/** fills[0].id 恒等于 position.id；并进同一仓位的后几笔只在 fills 里留下自己的 id。 */
-interface OpenPositionIds {
-  id: string;
-  fills?: { id: string }[];
+  /**
+   * 至今还开着的仓位（positions_map）。只用到仓位与每笔成交的 id（及它们的回放时间线章）；
+   * 缺省视为没有开着的仓位。fills[0].id 恒等于 position.id；并进同一仓位的后几笔只在 fills 里留下自己的 id。
+   */
+  positionsMap?: Record<string, OpenPositionTimelineLike[]>;
+  /**
+   * 回放时间线登记表（replay_timelines_v1，见 lib/replayTimeline）。只供影子比对读，缺省视为空登记表——
+   * 老数据没有章，登记表空不空都不影响启发式的结论。
+   */
+  replayTimelines?: ReplayTimelineRegistry | null;
 }
 
 export function readUserLocalSnapshot(userId: string): UserLocalSnapshot {
@@ -2287,7 +2313,8 @@ export function readUserLocalSnapshot(userId: string): UserLocalSnapshot {
     ordersMap: readUserScopedStorage<Record<string, PendingOrder[]>>(userId, 'orders_map', {}),
     cancelledOrders: readUserScopedStorage<CancelledOrderSnapshot[]>(userId, 'cancelled_orders', []),
     filledOrders: readUserScopedStorage<FilledOrderSnapshot[]>(userId, 'filled_orders', []),
-    positionsMap: readUserScopedStorage<Record<string, OpenPositionIds[]>>(userId, 'positions_map', {}),
+    positionsMap: readUserScopedStorage<Record<string, OpenPositionTimelineLike[]>>(userId, 'positions_map', {}),
+    replayTimelines: normalizeReplayTimelineRegistry(readUserScopedStorage<unknown>(userId, REPLAY_TIMELINES_STORAGE_KEY, null)),
   };
 }
 
@@ -2485,6 +2512,8 @@ export async function getCampaignFullData(
    * 列表页（heal: false）保持自己的后台拉取，这里为 undefined。
    */
   legExitPriceCorrections?: LegExitPriceCorrections;
+  /** 回放时间线的影子比对（见 lib/campaignTimelineScope）。本期只记录，pendingOrders / reverseHedgeOrders 仍按启发式。 */
+  timelineDiagnostics: CampaignTimelineDiagnostics;
 }> {
   const { campaign, legs } = await getCampaignWithLegs(campaignId);
   const userId = campaign.user_id;
@@ -2609,14 +2638,59 @@ export async function getCampaignFullData(
    * 分段建不起来（本场没有任何带真实时刻的操作）时才退回 realWindow。
    * live：委托至今仍挂着——它活过了之后每一次倒回，不会被重走取代（见 orderClockStamp）。
    */
-  const belongsToCampaignTimeline = (
-    order: Parameters<typeof orderClockStamp>[0],
-    options: { live?: boolean } = {},
+  const heuristicBelongsToCampaignTimeline = (
+    order: CampaignTimelineOrderLike,
+    options: CampaignTimelineOrderOptions = {},
   ) => (
     replaySession
       ? replaySession.allowsOrder(orderClockStamp(order, options))
       : orderWithinRealWindow(bestOrderRealStamp(order), realWindow)
   );
+  /**
+   * 精确判定（影子）：按回放时间线登记表里的章判，与启发式并排算，**结论只进 timelineDiagnostics**。
+   * 每一张委托仍按启发式的结论取舍——精确判定要等影子比对过一轮真实数据才会生效（Phase 2）。
+   * 老数据没有章：本场一个盖了章的锚点都没有时 scope 为 null，什么都不算。
+   */
+  const timelineScope = buildCampaignTimelineScope({
+    registry: local.replayTimelines,
+    symbol: campaign.symbol,
+    campaignOpen: !campaign.closed_at,
+    ...collectCampaignTimelineEvidence({
+      symbol: campaign.symbol,
+      campaignEvents: campaign.actual_evolution ?? [],
+      legs,
+      selectedRecords: tradeRecords,
+      tradeHistory,
+      openPositions: local.positionsMap?.[campaign.symbol] ?? [],
+      pendingOrders: ordersMap[campaign.symbol] ?? [],
+      cancelledOrders,
+      filledOrders,
+    }),
+  });
+  const timelineVerdicts: Record<string, CampaignTimelineOrderDiagnostic> = {};
+  const timelineDisagreements: CampaignTimelineDiagnostics['disagreements'] = [];
+  // 同一张单会被判两次（持仓面板与委托层 / 事件恢复时再核一次），两次的入参相同，记第一次即可
+  const recordTimelineVerdict = (
+    order: CampaignTimelineOrderLike,
+    options: CampaignTimelineOrderOptions,
+    heuristic: boolean,
+    exempt = false,
+  ) => {
+    if (!timelineScope || !order.id || timelineVerdicts[order.id]) return;
+    const exact = exempt ? 'in' : timelineScope.verdict(order, options);
+    timelineVerdicts[order.id] = exempt ? { heuristic, exact, exempt } : { heuristic, exact };
+    if (exact !== 'defer' && (exact === 'in') !== heuristic) {
+      timelineDisagreements.push({ orderId: order.id, heuristic, exact });
+    }
+  };
+  const belongsToCampaignTimeline = (
+    order: CampaignTimelineOrderLike,
+    options: CampaignTimelineOrderOptions = {},
+  ) => {
+    const allowed = heuristicBelongsToCampaignTimeline(order, options);
+    recordTimelineVerdict(order, options, allowed);
+    return allowed;
+  };
   const isLivePendingOrder = (order: PendingOrder) =>
     order.status === 'NEW' || order.status === 'PENDING' || order.status === 'ACTIVE';
   // 持仓面板 / 结束建议用的挂单也按挂单时间归属，避免同标的另一场战役的实时挂单混进本战役。
@@ -2697,6 +2771,22 @@ export async function getCampaignFullData(
     return finalCloseRecord ?? sorted[sorted.length - 1];
   };
   const findRecordForFilledOrder = (order: FilledOrderSnapshot) => {
+    /**
+     * 两边都盖了回放时间线章时先按精确联结：平仓记录的 fillId 就是这张委托成交开出的仓位 id（并进老仓位也一样），
+     * 开仓章与成交章出自同一次 stampClock。命中就不再走下面的时间 / 价格兜底——那两级的 60 秒窗口会被落后的界面时钟
+     * 错过。只对盖了章的数据生效：老数据两边都没有章，结果与从前完全一致。
+     */
+    if (order.positionId && order.filledTimelineId) {
+      const byTimeline = resolveFilledOrderCloseRecord(
+        order,
+        campaignSymbolTradeRecords.filter(record =>
+          record.fillId === order.positionId &&
+          record.openedTimelineId === order.filledTimelineId &&
+          record.side === order.side
+        ),
+      );
+      if (byTimeline) return byTimeline;
+    }
     if (order.positionId) {
       const byPositionId = resolveFilledOrderCloseRecord(
         order,
@@ -2773,15 +2863,16 @@ export async function getCampaignFullData(
   const filledIntoOpenPosition = (order: FilledOrderSnapshot) =>
     order.positionId != null && openPositionFillIds.has(order.positionId);
   const triggeredReverseOrders = filledOrders
-    .filter(order =>
-      order.symbol === campaign.symbol &&
-      isOpeningShortOrder(order) &&
-      inWindow(order.createdAt) &&
-      (
-        (order.positionId != null && selectedPositionIds.has(order.positionId))
-        || belongsToCampaignTimeline(order, { live: filledIntoOpenPosition(order) })
-      )
-    )
+    .filter(order => {
+      if (order.symbol !== campaign.symbol || !isOpeningShortOrder(order) || !inWindow(order.createdAt)) return false;
+      const live = filledIntoOpenPosition(order);
+      if (order.positionId != null && selectedPositionIds.has(order.positionId)) {
+        // 豁免的委托两边都不用判：影子比对里同样记成本场的
+        recordTimelineVerdict(order, { live }, true, true);
+        return true;
+      }
+      return belongsToCampaignTimeline(order, { live });
+    })
     .map(order => {
       const record = findRecordForFilledOrder(order);
       const originalTriggerPrice = Number.isFinite(order.triggerPrice) && order.triggerPrice > 0
@@ -3125,6 +3216,25 @@ export async function getCampaignFullData(
     reverseHedgeOrders,
     foreignLiveOrders,
     legExitPriceCorrections,
+    timelineDiagnostics: timelineScope
+      ? {
+        mode: timelineScope.mode,
+        timelineIds: timelineScope.timelineIds,
+        anchorTimelineIds: timelineScope.anchorTimelineIds,
+        unstampedAnchors: timelineScope.unstampedAnchors,
+        missingAnchorNodes: timelineScope.missingAnchorNodes,
+        verdicts: timelineVerdicts,
+        disagreements: timelineDisagreements,
+      }
+      : {
+        mode: 'heuristic',
+        timelineIds: [],
+        anchorTimelineIds: [],
+        unstampedAnchors: 0,
+        missingAnchorNodes: [],
+        verdicts: {},
+        disagreements: [],
+      },
   };
 }
 
@@ -3185,6 +3295,12 @@ export async function appendCampaignEvent(
   }
 }
 
+/** 快照锁定时刻的时间线 id 没有数据库列，只在本地镜像里（见 createJournalPreSnapshot）。 */
+function mirroredJournalTimelineId(journal: TradeJournal): Pick<CampaignEvent, 'timeline_id'> {
+  const timelineId = applyLocalMirror(journal.user_id, [journal])[0]?.pre_timeline_id ?? null;
+  return timelineId ? { timeline_id: timelineId } : {};
+}
+
 export async function attachJournalToCampaign(
   journalId: string,
   campaignId: string,
@@ -3236,6 +3352,8 @@ export async function attachJournalToCampaign(
     price: (journal as TradeJournal).pre_entry_price,
     size_usdt: (journal as TradeJournal).pre_position_size,
     notes: null,
+    // 直接从库里读的行不含本地镜像字段：时间线 id 只存在镜像里，这里合回来再抄。
+    ...mirroredJournalTimelineId(journal as TradeJournal),
   });
 
   if (legRole === 'main_open') {
@@ -4546,7 +4664,13 @@ export async function stampJournalCloseRealTime(
 }
 
 export async function createJournalPreSnapshot(input: CreateJournalPreInput): Promise<TradeJournal> {
-  const payload = { ...input, pre_real_time: new Date().toISOString(), source: 'live' as const };
+  /**
+   * 回放时间线 id **不进 insert**：库里没有这一列，带着它插入会先失败一次、剥列重试，
+   * 顺带触发 schemaDrift 提示与 pre_entry_reason 的旧库兜底改写——每一次快照都来一遍。
+   * 只写本地镜像（随账号上云），读 journal 时经 applyLocalMirror 合回来。
+   */
+  const { pre_timeline_id: timelineId, ...snapshotInput } = input;
+  const payload = { ...snapshotInput, pre_real_time: new Date().toISOString(), source: 'live' as const };
   const insertResult = await insertTradeJournalWithSchemaFallback(payload as Record<string, unknown>);
   const journal = wrap("创建交易日记事前快照", insertResult.error, insertResult.data as unknown as TradeJournal);
   if (insertResult.droppedColumns.length > 0) {
@@ -4557,6 +4681,9 @@ export async function createJournalPreSnapshot(input: CreateJournalPreInput): Pr
         detail: { droppedColumns: insertResult.droppedColumns, scope: 'snapshot' },
       }));
     }
+  }
+  if (timelineId) {
+    mirrorDroppedColumns(input.user_id, journal.id, { pre_timeline_id: timelineId }, ['pre_timeline_id']);
   }
   const painTags = input.pre_pain_tags ?? [];
   if (painTags.length > 0) {
@@ -4591,6 +4718,8 @@ export interface CreateNoTradeJournalInput {
   pre_market_regime?: TradeJournal['pre_market_regime'];
   pre_entry_stage?: TradeJournal['pre_entry_stage'];
   pre_stop_quality?: TradeJournal['pre_stop_quality'];
+  /** 与 pre_simulated_time 同一刻取的回放时间线；只进本地镜像（见 createJournalPreSnapshot）。 */
+  pre_timeline_id?: string | null;
 }
 
 export async function createNoTradeJournal(
@@ -4681,7 +4810,11 @@ export async function createNoTradeJournal(
   };
 
   const { data, error } = await insertTradeJournalWithSchemaFallback(payload as Record<string, unknown>);
-  return wrap('记录空仓观望决策', error, data as unknown as TradeJournal);
+  const journal = wrap('记录空仓观望决策', error, data as unknown as TradeJournal);
+  if (input.pre_timeline_id) {
+    mirrorDroppedColumns(input.user_id, journal.id, { pre_timeline_id: input.pre_timeline_id }, ['pre_timeline_id']);
+  }
+  return journal;
 }
 
 export interface UpdateJournalPostInput {

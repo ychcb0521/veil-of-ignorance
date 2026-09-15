@@ -111,3 +111,35 @@ describe('开仓费随仓位走', () => {
     expect(settled.records[0].closeFeeRate).toBe(TAKER_FEE);   // 平仓这一侧是这次真实收的
   });
 });
+
+/**
+ * 回放时间线章（lib/replayTimeline）与开仓费走同一条路：成交 → 合并 → 部分平仓 → 平仓记录。
+ * 加仓可能发生在倒回之后，所以每笔成交各留各的章，平仓记录按笔取自己的。
+ */
+describe('成交与平仓写入回放时间线章', () => {
+  it('成交：仓位带上开仓章；不传就不写这个字段', () => {
+    const { position } = executeSettlementFill('HPEUSDT', 62, order(), false, T0, T0, 'tl-1');
+    expect(position.openTimelineId).toBe('tl-1');
+    const { position: bare } = executeSettlementFill('HPEUSDT', 62, order(), false, T0, T0);
+    expect('openTimelineId' in bare).toBe(false);
+  });
+
+  it('合并、部分平仓、整笔平仓：每笔成交的章一路带到它自己那条平仓记录上', () => {
+    const { position: main } = executeSettlementFill('HPEUSDT', 62, order(), false, T0, T0, 'tl-1');
+    const { position: add } = executeSettlementFill('HPEUSDT', 63, order({ id: 'o2' }), false, T0 + MIN, T0 + MIN, 'tl-2');
+    const first = mergeFilledPosition('HPEUSDT', [], main);
+    const merged = mergeFilledPosition('HPEUSDT', first.positions, add);
+    expect(merged.absorbedFillId).toBe(add.id);
+    expect(merged.survivor.openTimelineId).toBe('tl-1');
+    expect(merged.survivor.fills!.map(f => f.timelineId)).toEqual(['tl-1', 'tl-2']);
+
+    const scaled = scaleSettlementPosition(merged.survivor, 1000);
+    expect(scaled.fills!.map(f => f.timelineId)).toEqual(['tl-1', 'tl-2']);
+
+    const settled = settlePositionClose('HPEUSDT', merged.survivor, 62.5, 2000, T0 + 2 * MIN, 'manual', T0 + 2 * MIN, 'tl-3')!;
+    expect(settled.records.map(r => [r.fillId, r.openedTimelineId, r.closedTimelineId])).toEqual([
+      [main.id, 'tl-1', 'tl-3'],
+      [add.id, 'tl-2', 'tl-3'],
+    ]);
+  });
+});

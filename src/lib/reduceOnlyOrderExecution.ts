@@ -51,6 +51,8 @@ interface PlanReduceOnlyTriggerParams {
   positions: Record<string, Position[]>;
   orders: Record<string, PendingOrder[]>;
   closedRealAt?: number;
+  /** 触发那一刻所在的回放时间线：写进平仓记录与成交快照。 */
+  closedTimelineId?: string | null;
 }
 
 /**
@@ -66,6 +68,7 @@ export function planReduceOnlyTrigger({
   positions,
   orders,
   closedRealAt = Date.now(),
+  closedTimelineId,
 }: PlanReduceOnlyTriggerParams): ReduceOnlyTriggerExecution {
   if (!order.reduceOnly || !order.linkedPositionId) {
     return { ok: false, reason: 'not_reduce_only' };
@@ -104,6 +107,7 @@ export function planReduceOnlyTrigger({
     closeTime,
     exitMethod,
     closedRealAt,
+    closedTimelineId,
   );
   if (!settled) {
     return { ok: false, reason: 'settlement_failed' };
@@ -168,6 +172,11 @@ export function planReduceOnlyTrigger({
       contractSizeUsd: liveOrder.contractSizeUsd,
       createdAt: liveOrder.createdAt,
       filledAt: closeTime,
+      // 真实时刻此前这里一处都不写（其余三个成交点都写），减仓单的成交快照因此在现实时间轴上没有终点。
+      createdRealAt: liveOrder.createdRealAt,
+      filledRealAt: closedRealAt,
+      ...(liveOrder.createdTimelineId ? { createdTimelineId: liveOrder.createdTimelineId } : {}),
+      ...(closedTimelineId ? { filledTimelineId: closedTimelineId } : {}),
       positionId: linkedPositionId,
     },
     returnedMargin: settled.returnedMargin,

@@ -280,3 +280,43 @@ describe('盈亏按每笔自己的开仓价拆，费用才按张数拆', () => {
     expect(recs[0].notionalUsd!).toBeCloseTo(1000, 9);
   });
 });
+
+describe('按笔拆条时的回放时间线章', () => {
+  const stampedFills = [
+    { id: 'main', openTime: 1_000, entryPrice: MAIN_ENTRY, units: 200, timelineId: 'tl-main' },
+    { id: 'add', openTime: 9_000, entryPrice: ADD_ENTRY, units: 100, timelineId: 'tl-rewind' },
+  ];
+  const stamped = (over: Partial<Position> = {}, closeQty = 300) => buildCloseRecords({
+    symbol: 'ENJUSDT', pos: pos({ openTimelineId: 'tl-main', fills: stampedFills, ...over }), closeQty,
+    fillPrice: 0.104860, closeTime: 20_000, exitMethod: 'manual', closedTimelineId: 'tl-close', totals: TOTALS,
+  });
+
+  it('每一片的开仓章取那一笔成交自己的（加仓发生在倒回之后），平仓章整次平仓同一枚', () => {
+    const recs = stamped();
+    expect(recs.map(r => r.openedTimelineId)).toEqual(['tl-main', 'tl-rewind']);
+    expect(recs.every(r => r.closedTimelineId === 'tl-close')).toBe(true);
+  });
+
+  it('【回归】一笔没有章的加仓并进盖了章的仓位：不借用主力的章', () => {
+    const recs = stamped({ fills: [stampedFills[0], { ...stampedFills[1], timelineId: undefined }] });
+    expect(recs[0].openedTimelineId).toBe('tl-main');
+    expect(recs[1].openedTimelineId).toBeUndefined();
+  });
+
+  it('仓位自己那笔成交没有逐笔章时，退回仓位级的章——那本来就是它的', () => {
+    const recs = stamped({ fills: [{ ...stampedFills[0], timelineId: undefined }, stampedFills[1]] });
+    expect(recs.map(r => r.openedTimelineId)).toEqual(['tl-main', 'tl-rewind']);
+  });
+
+  it('单笔仓位：仓位级的章直接写进那一条', () => {
+    const [rec] = stamped({ fills: undefined, quantity: 300 });
+    expect(rec).toMatchObject({ openedTimelineId: 'tl-main', closedTimelineId: 'tl-close' });
+  });
+
+  it('没盖章的仓位与平仓：记录里压根没有这两个字段（与改动前逐字节相同）', () => {
+    for (const r of [...build(pos()), ...build(pos({ fills: undefined }))]) {
+      expect('openedTimelineId' in r).toBe(false);
+      expect('closedTimelineId' in r).toBe(false);
+    }
+  });
+});

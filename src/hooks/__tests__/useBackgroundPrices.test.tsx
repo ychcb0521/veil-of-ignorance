@@ -167,6 +167,7 @@ describe('useBackgroundPrices', () => {
       marginMode: 'isolated',
       status: 'PENDING',
       createdAt: 100,
+      createdTimelineId: 'tl-placed',
       operator: '<=',
       triggerDirection: 'DOWN',
     } as PendingOrder);
@@ -176,6 +177,8 @@ describe('useBackgroundPrices', () => {
       const setPositionsMap = vi.fn();
       const setFilledOrders = vi.fn();
       const recordExecutionTrade = vi.fn();
+      // 每个标的各有自己的钟：返回值随标的不同，才能验出「用错了钟」。
+      const stampClock = vi.fn((symbol?: string) => (symbol === 'NOMUSD' ? 'tl-nom' : 'tl-active'));
       // 显式给出真实签名：vi.fn(() => bool) 会把入参推成空元组，
       // 于是 mock.calls[0] 取不到 margin/fee，断言反而变成空转。
       const settleFillDebit = vi.fn(
@@ -196,6 +199,7 @@ describe('useBackgroundPrices', () => {
         settleFillDebit,
         tradingMode: 'direct',
         getEffectiveTime: vi.fn(() => 1_000),
+        stampClock,
         recordExecutionTrade,
         executeReduceOnlyTrigger: vi.fn(),
         applyAttachedTpSl: vi.fn(),
@@ -203,8 +207,20 @@ describe('useBackgroundPrices', () => {
 
       render(<Harness />);
       await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
-      return { setBalance, setPositionsMap, setFilledOrders, recordExecutionTrade, settleFillDebit };
+      return { setBalance, setPositionsMap, setFilledOrders, recordExecutionTrade, settleFillDebit, stampClock };
     }
+
+    it('成交盖的是**后台标的自己那只钟**的时间线章：快照两枚、仓位与每笔成交各一枚', async () => {
+      const { setFilledOrders, setPositionsMap, stampClock } = await runFill();
+      expect(stampClock).toHaveBeenCalledWith('NOMUSD');
+      expect(stampClock).not.toHaveBeenCalledWith('ACTIVEUSDT');
+      const snap = setFilledOrders.mock.calls[0][0]([])[0];
+      expect(snap.createdTimelineId).toBe('tl-placed');
+      expect(snap.filledTimelineId).toBe('tl-nom');
+      const pos = setPositionsMap.mock.calls[0][0]({ NOMUSD: [] }).NOMUSD[0];
+      expect(pos.openTimelineId).toBe('tl-nom');
+      expect(pos.fills[0].timelineId).toBe('tl-nom');
+    });
 
     it('【回归】按 张 × 面值 收保证金,不是按 张 × 价', async () => {
       const { settleFillDebit } = await runFill();
@@ -257,6 +273,72 @@ describe('useBackgroundPrices', () => {
       expect(trade.contracts).toBe(CONTRACTS);
       // 旧式写的是 order.quantity × fillPrice ≈ 1.03
       expect(trade.notional).toBeGreaterThan(900);
+    });
+  });
+
+  /**
+   * 隔离模式一个币一只钟。没启动过的币（同步模式切过来时留下的挂单、从没点过开始的币）没有时间：
+   * getEffectiveTime 对它退回全局 sim 的时刻——那只钟在隔离模式下只是「有没有币在跑」的开关。
+   * 原来照样拿它撮合：成交没有回放时间线可盖（stampClock 看的是 coin:<symbol> 那只钟，停着 → null），
+   * 委托的挂单章却指向已结束的同步时间线，读取侧只能把这笔成交判成另一条线上的。
+   */
+  describe('隔离模式：没有自己的钟的币不撮合', () => {
+    const leftover = (): PendingOrder => ({
+      id: 'bbb-limit', side: 'LONG', type: 'LIMIT', price: 90, stopPrice: 0, quantity: 1, leverage: 5,
+      marginMode: 'isolated', status: 'NEW', createdAt: 100, createdTimelineId: 'tl-synced-ended',
+    } as PendingOrder);
+    const running = { status: 'playing', time: 1_000, speed: 1, historicalAnchorTime: 1_000, realStartTime: 1, originTime: 1_000 };
+
+    function mountIsolated(bbbClock: Record<string, unknown> | null) {
+      const setPositionsMap = vi.fn();
+      const setFilledOrders = vi.fn();
+      const stampClock = vi.fn(() => null);
+      vi.mocked(fetchCanonicalTimePriceAt).mockResolvedValue({ high: 100, low: 80, close: 90 });
+      vi.mocked(useTradingContext).mockReturnValue({
+        sim: { isRunning: true, currentSimulatedTime: 1_000 },
+        activeSymbol: 'AAAUSDT',
+        activeSymbols: ['AAAUSDT', 'BBBUSDT'],
+        setPriceMap: vi.fn(),
+        markPriceAsOf: vi.fn(),
+        ordersMap: { BBBUSDT: [leftover()] },
+        setOrdersMap: vi.fn(),
+        setPositionsMap,
+        setBalance: vi.fn(),
+        setFilledOrders,
+        settleFillDebit: vi.fn(() => true),
+        tradingMode: 'direct',
+        timeMode: 'isolated',
+        coinTimelines: { AAAUSDT: running, ...(bbbClock ? { BBBUSDT: bbbClock } : {}) },
+        getEffectiveTime: vi.fn(() => 1_000),
+        stampClock,
+        recordExecutionTrade: vi.fn(),
+        executeReduceOnlyTrigger: vi.fn(),
+        applyAttachedTpSl: vi.fn(),
+      } as unknown as ReturnType<typeof useTradingContext>);
+      render(<Harness />);
+      return { setPositionsMap, setFilledOrders, stampClock };
+    }
+
+    it('【回归】BBB 没有自己的钟：价照取，单不撮合，也不去取一枚空章', async () => {
+      const { setPositionsMap, setFilledOrders, stampClock } = mountIsolated(null);
+      await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+      expect(fetchCanonicalTimePriceAt).toHaveBeenCalledWith('BBBUSDT', 1_000);
+      expect(setPositionsMap).not.toHaveBeenCalled();
+      expect(setFilledOrders).not.toHaveBeenCalled();
+      expect(stampClock).not.toHaveBeenCalled();
+    });
+
+    it('调倍速造出的占位条目（没有锚点）同样不算在跑', async () => {
+      const { setPositionsMap } = mountIsolated({ status: 'paused', time: 0, speed: 60, historicalAnchorTime: null, realStartTime: null, originTime: null });
+      await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+      expect(setPositionsMap).not.toHaveBeenCalled();
+    });
+
+    it('BBB 的钟在跑（暂停也算）：照常撮合、照常盖章', async () => {
+      const { setPositionsMap, stampClock } = mountIsolated({ status: 'paused', time: 1_000, speed: 1, historicalAnchorTime: 1_000, realStartTime: null, originTime: 1_000 });
+      await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+      expect(setPositionsMap).toHaveBeenCalledTimes(1);
+      expect(stampClock).toHaveBeenCalledWith('BBBUSDT');
     });
   });
 

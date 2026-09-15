@@ -33,6 +33,8 @@ interface Props {
   symbol: string;
   direction: TradeDirection;
   simulatedTimeMs: number;
+  /** 与 simulatedTimeMs 同一刻取的回放时间线 id（打开弹窗那一下）；只进本地镜像，不进数据库。 */
+  timelineId?: string | null;
   lockedEntryPrice: number | null;
   leverage: number;
   marginMode: 'cross' | 'isolated';
@@ -47,7 +49,7 @@ interface Props {
 
 export function PreTradeSnapshotDialog({
   isOpen, onOpenChange, mode, symbol, direction,
-  simulatedTimeMs, lockedEntryPrice, leverage, marginMode, pricePrecision,
+  simulatedTimeMs, timelineId, lockedEntryPrice, leverage, marginMode, pricePrecision,
   orderParams, initialPositionSizeUsdt, onPlaceOrder, onAutoPause,
 }: Props) {
   const isMobile = useIsMobile();
@@ -59,6 +61,7 @@ export function PreTradeSnapshotDialog({
   // Lock time + entry price on open
   const [lockedTime, setLockedTime] = useState<Date>(() => new Date(simulatedTimeMs));
   const [lockedPrice, setLockedPrice] = useState<number | null>(lockedEntryPrice);
+  const [lockedTimelineId, setLockedTimelineId] = useState<string | null>(timelineId ?? null);
   const pausedRef = useRef(false);
   const [tooHardOpen, setTooHardOpen] = useState(false);
   const [tooHardReason, setTooHardReason] = useState('');
@@ -102,6 +105,7 @@ export function PreTradeSnapshotDialog({
     if (isOpen) {
       setLockedTime(new Date(simulatedTimeMs));
       setLockedPrice(lockedEntryPrice);
+      setLockedTimelineId(timelineId ?? null);
       setTooHardReason('');
       setTooHardOpen(false);
       setTooHardPlannedStopLoss(null);
@@ -182,6 +186,7 @@ export function PreTradeSnapshotDialog({
         leverage: mode === 'trade' ? currentLeverage : null,
         position_mode: mode === 'trade' ? (currentMarginMode as PositionMode) : null,
         pre_simulated_time: lockedTime.toISOString(),
+        pre_timeline_id: lockedTimelineId,
         pre_entry_price: lockedPrice,
         order_kind: payload.order_kind,
         pre_planned_stop_loss: payload.pre_planned_stop_loss,
@@ -296,6 +301,7 @@ export function PreTradeSnapshotDialog({
         symbol,
         direction,
         pre_simulated_time: lockedTime.toISOString(),
+        pre_timeline_id: lockedTimelineId,
         no_trade_would_be_entry_price: lockedPrice,
         no_trade_reason: tooHardReason,
         order_kind: tooHardOrderKind,

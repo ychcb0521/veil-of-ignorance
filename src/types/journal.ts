@@ -370,6 +370,11 @@ export interface CampaignEvent {
   exit_price?: number | null;
   realized_pnl?: number | null;
   r_multiple?: number | null;
+  /**
+   * 这个事件对应的那次操作所在的回放时间线（lib/replayTimeline），从关联成交记录上抄来。
+   * 只存在 actual_evolution 的 JSON 里，不是数据库列。老事件、没有盖章的成交没有。
+   */
+  timeline_id?: string | null;
 }
 
 /** 用户对某条 SOP 偏离行的「违规阶段 / 违规描述 / 修正后」手改覆盖（留空＝清空，不回退自动值）。 */
@@ -625,6 +630,11 @@ export interface TradeJournal {
   // pre-snapshot
   pre_simulated_time: string;
   pre_real_time: string;
+  /**
+   * 快照弹窗锁定模拟时间那一刻所在的回放时间线。**没有数据库列**：
+   * 只写本地镜像（journal_local_mirror_v1，随账号上云），读 journal 时经 applyLocalMirror 合回来。
+   */
+  pre_timeline_id?: string | null;
   pre_entry_price: number | null;
   /** @deprecated v2 snapshot no longer records stop-loss in this field. */
   pre_planned_stop_loss: number | null;

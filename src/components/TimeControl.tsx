@@ -61,6 +61,7 @@ export function TimeControl({
   const { user } = useAuth();
   const [noEntryOpen, setNoEntryOpen] = useState(false);
   const [noEntrySimTime, setNoEntrySimTime] = useState<number>(Date.now());
+  const [noEntryTimelineId, setNoEntryTimelineId] = useState<string | null>(null);
   // 按下即高亮的乐观镜像；外部倍速变化（刷新后读回持久化速度、全屏选择器改速）
   // 必须回灌，否则高亮停在旧档位，看起来像「我选的 3600x 被拒绝了」。
   const [visualSpeed, setVisualSpeed] = useState(speed);
@@ -70,6 +71,8 @@ export function TimeControl({
 
   const openNoEntry = () => {
     setNoEntrySimTime(ctx.getEffectiveTime(noEntrySymbol));
+    // 与锁定的模拟时间同一刻取时间线，赶在自动暂停之前。
+    setNoEntryTimelineId(ctx.getTimelineId(noEntrySymbol));
     if (status === 'playing') onPause();
     setNoEntryOpen(true);
   };
@@ -688,6 +691,7 @@ export function TimeControl({
         symbol={noEntrySymbol}
         direction="no_entry"
         simulatedTimeMs={noEntrySimTime}
+        timelineId={noEntryTimelineId}
         lockedEntryPrice={ctx.priceMap[noEntrySymbol] ?? null}
         leverage={1}
         marginMode="isolated"

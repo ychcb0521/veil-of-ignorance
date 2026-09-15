@@ -260,3 +260,110 @@ describe('账号切换后的云端归属', () => {
     expect(mocks.upsert).not.toHaveBeenCalled();
   });
 });
+
+/**
+ * 回放时间线登记表描述的是**历史**：两台设备各自分叉出来的时间线都真实发生过。
+ * 整键写者胜会把其中一台的节点整个抹掉，那台设备上盖过章的委托从此指向不存在的节点。
+ */
+describe('hydrateSimState · 回放时间线登记表按节点并集合并', () => {
+  const KEY = `sim_${UID}_replay_timelines_v1`;
+  const node = (id: string, scope = 'synced') => ({
+    id, scope, parentId: null, cause: 'start', direction: 1, forkSimTime: 1_000, startedRealAt: 100,
+    endSimTime: null, endedRealAt: null, carried: {}, lastSimTime: 1_000, lastRealAt: 100,
+  });
+  const pushedTimelines = () => mocks.upsert.mock.calls
+    .map(call => (call as unknown[])[0] as { key: string; value: { nodes: Record<string, unknown> } })
+    .filter(payload => payload.key === 'replay_timelines_v1');
+
+  it('本地比远端新也不整键保留：远端独有的节点照样并进来，合并结果推回云端', async () => {
+    localStorage.setItem(KEY, JSON.stringify({ v: 1, nodes: { a: node('a') }, current: { synced: 'a' } }));
+    localStorage.setItem(`${KEY}__syncts`, String(Date.parse('2026-09-20T00:00:00Z')));
+    mocks.eq.mockImplementation(async () => ({
+      data: [{
+        key: 'replay_timelines_v1',
+        value: { v: 1, nodes: { b: node('b', 'coin:ETHUSDT') }, current: { 'coin:ETHUSDT': 'b' } },
+        updated_at: '2026-09-01T00:00:00Z',
+      }],
+      error: null,
+    }));
+    await hydrateSimState(UID);
+    const merged = JSON.parse(localStorage.getItem(KEY)!);
+    expect(Object.keys(merged.nodes).sort()).toEqual(['a', 'b']);
+    expect(merged.current).toEqual({ synced: 'a', 'coin:ETHUSDT': 'b' });
+
+    // 登记表走慢档（20 秒）：快档的 1.5 秒过去还没推
+    await vi.advanceTimersByTimeAsync(1_600);
+    expect(pushedTimelines()).toHaveLength(0);
+    await vi.advanceTimersByTimeAsync(20_000);
+    const pushed = pushedTimelines();
+    expect(pushed).toHaveLength(1);
+    expect(Object.keys(pushed[0].value.nodes).sort()).toEqual(['a', 'b']);
+  });
+
+  it('并集之后再修剪：远端留着的、太老的已结束节点不会借水化长回来', async () => {
+    const stale = {
+      ...node('stale'), startedRealAt: Date.parse('2025-01-01T00:00:00Z'), lastRealAt: Date.parse('2025-01-01T01:00:00Z'),
+      endSimTime: 2_000, endedRealAt: Date.parse('2025-01-01T01:00:00Z'),
+    };
+    localStorage.setItem(KEY, JSON.stringify({ v: 1, nodes: { a: node('a') }, current: { synced: 'a' } }));
+    mocks.eq.mockImplementation(async () => ({
+      data: [{ key: 'replay_timelines_v1', value: { v: 1, nodes: { stale }, current: {} }, updated_at: '2026-09-01T00:00:00Z' }],
+      error: null,
+    }));
+    await hydrateSimState(UID);
+    const merged = JSON.parse(localStorage.getItem(KEY)!);
+    expect(Object.keys(merged.nodes)).toEqual(['a']);
+  });
+
+  it('远端比本地新也不整键覆盖：本地独有的节点不丢', async () => {
+    localStorage.setItem(KEY, JSON.stringify({ v: 1, nodes: { a: node('a') }, current: { synced: 'a' } }));
+    localStorage.setItem(`${KEY}__syncts`, String(Date.parse('2026-08-01T00:00:00Z')));
+    mocks.eq.mockImplementation(async () => ({
+      data: [{
+        key: 'replay_timelines_v1',
+        value: { v: 1, nodes: { b: node('b') }, current: { synced: 'b' } },
+        updated_at: '2026-09-01T00:00:00Z',
+      }],
+      error: null,
+    }));
+    await hydrateSimState(UID);
+    const merged = JSON.parse(localStorage.getItem(KEY)!);
+    expect(Object.keys(merged.nodes).sort()).toEqual(['a', 'b']);
+    // 同步时钟的指针优先本地
+    expect(merged.current.synced).toBe('a');
+  });
+
+  it('合并结果与远端一致：不推送', async () => {
+    const value = { v: 1, nodes: { a: node('a') }, current: { synced: 'a' } };
+    localStorage.setItem(KEY, JSON.stringify(value));
+    mocks.eq.mockImplementation(async () => ({
+      data: [{ key: 'replay_timelines_v1', value, updated_at: '2026-09-01T00:00:00Z' }],
+      error: null,
+    }));
+    await hydrateSimState(UID);
+    await vi.advanceTimersByTimeAsync(21_600);
+    expect(pushedTimelines()).toHaveLength(0);
+  });
+
+  it('本地没有这个键：照旧整键写回', async () => {
+    const value = { v: 1, nodes: { b: node('b') }, current: { synced: 'b' } };
+    mocks.eq.mockImplementation(async () => ({
+      data: [{ key: 'replay_timelines_v1', value, updated_at: '2026-09-01T00:00:00Z' }],
+      error: null,
+    }));
+    const result = await hydrateSimState(UID);
+    expect(result.applied).toBe(1);
+    expect(JSON.parse(localStorage.getItem(KEY)!)).toEqual(value);
+  });
+
+  it('其余键仍是写者胜：并集合并只作用于登记表', async () => {
+    localStorage.setItem(`sim_${UID}_orders_map`, JSON.stringify({ BTCUSDT: [{ id: 'local' }] }));
+    localStorage.setItem(`sim_${UID}_orders_map__syncts`, String(Date.parse('2026-09-20T00:00:00Z')));
+    mocks.eq.mockImplementation(async () => ({
+      data: [{ key: 'orders_map', value: { ETHUSDT: [{ id: 'remote' }] }, updated_at: '2026-09-01T00:00:00Z' }],
+      error: null,
+    }));
+    await hydrateSimState(UID);
+    expect(JSON.parse(localStorage.getItem(`sim_${UID}_orders_map`)!)).toEqual({ BTCUSDT: [{ id: 'local' }] });
+  });
+});

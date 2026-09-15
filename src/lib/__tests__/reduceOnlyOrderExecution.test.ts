@@ -169,4 +169,51 @@ describe('reduce-only take-profit execution', () => {
     });
     expect(second).toEqual({ ok: false, reason: 'order_missing' });
   });
+
+  it('成交快照补上真实时刻，并带上挂单 / 触发两枚时间线章；平仓记录同样盖章', () => {
+    // 其余三个成交点一直写 createdRealAt / filledRealAt，只有减仓单这一处不写。
+    const position = makePosition({ openTimelineId: 'tl-open' });
+    const order = makeTakeProfit(position, { createdRealAt: 1_600, createdTimelineId: 'tl-placed' });
+    const execution = planReduceOnlyTrigger({
+      symbol: 'TESTUSDT',
+      order,
+      triggerPrice: 120,
+      closeTime: 2_000,
+      closedRealAt: 3_000,
+      closedTimelineId: 'tl-fired',
+      positions: { TESTUSDT: [position] },
+      orders: { TESTUSDT: [order] },
+    });
+
+    expect(execution.ok).toBe(true);
+    if (!execution.ok) return;
+    expect(execution.filledOrder).toMatchObject({
+      createdRealAt: 1_600,
+      filledRealAt: 3_000,
+      createdTimelineId: 'tl-placed',
+      filledTimelineId: 'tl-fired',
+    });
+    expect(execution.records[0]).toMatchObject({ openedTimelineId: 'tl-open', closedTimelineId: 'tl-fired' });
+  });
+
+  it('没盖章的委托、仓位与触发，不凭空多出时间线字段', () => {
+    const position = makePosition();
+    const order = makeTakeProfit(position);
+    const execution = planReduceOnlyTrigger({
+      symbol: 'TESTUSDT',
+      order,
+      triggerPrice: 120,
+      closeTime: 2_000,
+      closedRealAt: 3_000,
+      positions: { TESTUSDT: [position] },
+      orders: { TESTUSDT: [order] },
+    });
+
+    expect(execution.ok).toBe(true);
+    if (!execution.ok) return;
+    expect('createdTimelineId' in execution.filledOrder).toBe(false);
+    expect('filledTimelineId' in execution.filledOrder).toBe(false);
+    expect('openedTimelineId' in execution.records[0]).toBe(false);
+    expect('closedTimelineId' in execution.records[0]).toBe(false);
+  });
 });

@@ -87,6 +87,25 @@ import {
   type ReduceOnlyTriggerExecution,
 } from '@/lib/reduceOnlyOrderExecution';
 import { upsertOrderSnapshot } from '@/lib/orderSnapshotHistory';
+import {
+  createReplayTimelineRegistry,
+  currentReplayTimeline,
+  endReplayTimeline as endReplayTimelineInRegistry,
+  forkReplayTimeline as forkReplayTimelineInRegistry,
+  isCoinTimelineClockActive,
+  isImplicitReplayFork,
+  normalizeReplayTimelineRegistry,
+  pruneReplayTimelineRegistry,
+  recordReplayTimelineStamp,
+  replayTimelineScope,
+  replayTimelineScopeSymbol,
+  snapshotReplayCarried,
+  REPLAY_STAMP_PERSIST_THROTTLE_MS,
+  REPLAY_TIMELINES_STORAGE_KEY,
+  type ReplayTimelineCause,
+  type ReplayTimelineRegistry,
+  type ReplayTimelineScope,
+} from '@/lib/replayTimeline';
 import { formatPrice, getPriceDecimals } from '@/lib/formatters';
 import { buildTpSlOrders, keepValidTpSlLegs, replaceTpSlOrders, validateTpSlLevels } from '@/lib/tpSlOrders';
 import { removableMarginUsd } from '@/lib/positionGroupRisk';
@@ -267,6 +286,26 @@ interface TradingState {
   totalPositionCount: number;
   getEffectiveTime: (symbol?: string) => number;
   getCoinState: (symbol: string) => CoinTimelineState | null;
+  /**
+   * 此刻这个标的所在的回放时间线 id（lib/replayTimeline）。同步读 ref、函数身份稳定，
+   * setState 回调与撮合循环里都能调；绝不读落后的 React state。钟没在跑 → null。
+   * 钟在跑却还没有时间线（上线前就开着的会话）时，当场补一个 bootstrap 根。
+   */
+  getTimelineId: (symbol?: string) => string | null;
+  /** 写入前取章：同 getTimelineId，外加「时钟逆着播放方向明显回落」的兜底分叉，并记下这次盖章的时钟。 */
+  stampClock: (symbol?: string) => string | null;
+  /**
+   * 显式分叉：开始、信号跳转、翻转方向。**必须在改钟之前调**——要看「分叉之前这只钟在不在跑」
+   * 决定新时间线挂在当前那条下面，还是另起一个根。同步模式分全局那只钟，隔离模式只分这个币的。
+   */
+  forkReplayTimeline: (
+    symbol: string,
+    cause: Exclude<ReplayTimelineCause, 'bootstrap' | 'implicit'>,
+    forkSimTime: number,
+    direction?: 1 | -1,
+  ) => string;
+  /** 结束时间线。**必须排在收尾的平仓 / 撤单之后**——那几笔还属于旧时间线，要盖旧的章。 */
+  endReplayTimeline: (scope: ReplayTimelineScope | 'all') => void;
   /** Get the global balance (always the single pool) */
   getEffectiveBalance: (symbol: string) => number;
   /** Get available balance (global balance minus all cross margins) */
@@ -572,6 +611,209 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
   // 同步模式下本次倒放的镜面时刻（持久化，刷新后镜像视图不越界泄露未来）。
   const [reverseCapTime, setReverseCapTime] = usePersistedState<number | null>('reverse_cap_time_v1', null);
 
+  // Get effective simulation time for a given symbol
+  const getEffectiveTime = useCallback((symbol?: string): number => {
+    const sym = symbol || activeSymbol;
+    if (timeMode === 'synced') return sim.currentSimulatedTime;
+    const ct = coinTimelines[sym];
+    return ct?.time ?? sim.currentSimulatedTime;
+  }, [timeMode, coinTimelines, activeSymbol, sim.currentSimulatedTime]);
+
+  /**
+   * 此刻的模拟时间，按撮合时钟（与 Index 的 RAF 同一个公式）现算。
+   * getEffectiveTime 读的是 React state，每 250 毫秒真实时间才刷新一次，3600 倍下落后可达 15 个模拟分钟。
+   * 手动开仓若取它，记录里的开仓时刻会早于真实成交，强平护栏据此放行成交之前的价；
+   * 手动平仓若取它，平仓时刻会早于撮合时钟记下的开仓时刻。成交时刻一律取这个。
+   * 输入放在 ref 里，函数身份稳定，调用方不必把它加进依赖。
+   */
+  const liveClockInputsRef = useRef({
+    timeMode, coinTimelines, activeSymbol, direction: sim.direction, getSimTime: sim.getSimTime, simStatus: sim.status,
+  });
+  liveClockInputsRef.current = {
+    timeMode, coinTimelines, activeSymbol, direction: sim.direction, getSimTime: sim.getSimTime, simStatus: sim.status,
+  };
+  const getLiveSimTime = useCallback((symbol?: string): number => {
+    const { timeMode: mode, coinTimelines: cts, activeSymbol: active, direction, getSimTime } = liveClockInputsRef.current;
+    if (mode === 'synced') return getSimTime();
+    const ct = cts[symbol || active];
+    if (ct && ct.status === 'playing' && ct.realStartTime && ct.historicalAnchorTime != null) {
+      return ct.historicalAnchorTime + (Date.now() - ct.realStartTime) * ct.speed * (direction === -1 ? -1 : 1);
+    }
+    return ct?.time ?? getSimTime();
+  }, []);
+
+  // ===== 回放时间线（lib/replayTimeline）=====
+  /**
+   * 登记表以 ref 为准：盖章发生在撮合循环与 setState 的回调里，读 React state 会拿到落后的版本，
+   * 同一帧里刚分叉出来的时间线看不见。落盘推迟到微任务里合并成一次——
+   * 在另一个 setState 的回调里同步调 setState 是 React 不允许的副作用。
+   */
+  const [persistedTimelines, setPersistedTimelines] = usePersistedState<ReplayTimelineRegistry>(
+    REPLAY_TIMELINES_STORAGE_KEY,
+    createReplayTimelineRegistry(),
+  );
+  // 读回来先修剪（见 pruneReplayTimelineRegistry）：老节点在这里就丢，不等下一次分叉。
+  const [initialTimelines] = useState(() =>
+    pruneReplayTimelineRegistry(normalizeReplayTimelineRegistry(persistedTimelines), { now: Date.now() }));
+  const timelineRegistryRef = useRef<ReplayTimelineRegistry>(initialTimelines);
+  const timelinePersistQueuedRef = useRef(false);
+  const timelineStampPersistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** 本次页面加载里盖过章、或刚分叉出来的时间线。第一次盖章的兜底判据要给恢复会话留余量。 */
+  const timelinesSeenThisLoadRef = useRef(new Set<string>());
+  const persistTimelineRegistry = useCallback(() => {
+    if (timelineStampPersistTimerRef.current != null) {
+      clearTimeout(timelineStampPersistTimerRef.current);
+      timelineStampPersistTimerRef.current = null;
+    }
+    setPersistedTimelines(timelineRegistryRef.current);
+  }, [setPersistedTimelines]);
+  /**
+   * 分叉 / 结束：微任务里立刻落盘。盖章（stamp: true）只改最近一次盖章的时钟，攒着，
+   * 最多每 REPLAY_STAMP_PERSIST_THROTTLE_MS 落一次——否则每一笔成交、撤单、资金费都把整张登记表
+   * 序列化一遍、再推一次云端。ref 始终是最新的，落盘的快慢不影响盖章本身。
+   */
+  const commitTimelineRegistry = useCallback((next: ReplayTimelineRegistry, options: { stamp?: boolean } = {}) => {
+    if (next === timelineRegistryRef.current) return;
+    timelineRegistryRef.current = next;
+    if (timelinePersistQueuedRef.current) return;
+    if (options.stamp) {
+      if (timelineStampPersistTimerRef.current != null) return;
+      timelineStampPersistTimerRef.current = setTimeout(() => {
+        timelineStampPersistTimerRef.current = null;
+        persistTimelineRegistry();
+      }, REPLAY_STAMP_PERSIST_THROTTLE_MS);
+      return;
+    }
+    timelinePersistQueuedRef.current = true;
+    void Promise.resolve().then(() => {
+      timelinePersistQueuedRef.current = false;
+      persistTimelineRegistry();
+    });
+  }, [persistTimelineRegistry]);
+
+  /** 这个标的此刻用的是哪只钟：同步模式全局一只，隔离模式一个币一只。 */
+  const timelineScopeOf = useCallback((symbol?: string): ReplayTimelineScope => {
+    const { timeMode: mode, activeSymbol: active } = liveClockInputsRef.current;
+    return replayTimelineScope(mode, symbol || active);
+  }, []);
+
+  /** 这只钟在不在跑（播放或暂停）。不属于当前模式的钟一律算停着。 */
+  const isTimelineScopeClockActive = useCallback((scope: ReplayTimelineScope): boolean => {
+    const { timeMode: mode, coinTimelines: cts, simStatus } = liveClockInputsRef.current;
+    const symbol = replayTimelineScopeSymbol(scope);
+    if (symbol == null) return mode === 'synced' && simStatus !== 'stopped';
+    return mode === 'isolated' && isCoinTimelineClockActive(cts[symbol]);
+  }, []);
+
+  const mintReplayTimeline = useCallback((
+    scope: ReplayTimelineScope,
+    cause: ReplayTimelineCause,
+    forkSimTime: number,
+    direction: 1 | -1,
+    continuing: boolean,
+  ): string => {
+    const symbol = replayTimelineScopeSymbol(scope);
+    const id = crypto.randomUUID();
+    const realAt = Date.now();
+    const forked = forkReplayTimelineInRegistry(timelineRegistryRef.current, {
+      id, scope, cause, direction, forkSimTime, realAt, continuing,
+      // 分叉那一刻已经开着的仓位与挂着的委托「活进」了新时间线——读 ref，同一帧里刚成交的也算。
+      carried: snapshotReplayCarried(positionsMapRef.current, ordersMapRef.current, symbol == null ? null : [symbol]),
+      // 显式分叉都在改钟之前调：此刻现算的撮合时钟就是父时间线走到的地方，给它盖上这一章。
+      // 兜底分叉时钟已经拨过去了，算出来的是新时刻，不能记到父线头上。
+      parentSimTime: continuing && cause !== 'implicit' ? getLiveSimTime(symbol ?? undefined) : null,
+    });
+    // 每次分叉顺手修剪：登记表只增不减，这里是唯一让它长的地方。
+    commitTimelineRegistry(pruneReplayTimelineRegistry(forked, { now: realAt }));
+    timelinesSeenThisLoadRef.current.add(id);
+    return id;
+  }, [commitTimelineRegistry, getLiveSimTime]);
+
+  const getTimelineId = useCallback((symbol?: string): string | null => {
+    const scope = timelineScopeOf(symbol);
+    if (!isTimelineScopeClockActive(scope)) return null;
+    const node = currentReplayTimeline(timelineRegistryRef.current, scope);
+    if (node) return node.id;
+    // 新代码第一次看见这只钟在跑、却没有时间线：补一个根，记下此刻已经开着的仓位与挂单。
+    const direction = liveClockInputsRef.current.direction === -1 ? -1 : 1;
+    return mintReplayTimeline(scope, 'bootstrap', getLiveSimTime(symbol), direction, false);
+  }, [timelineScopeOf, isTimelineScopeClockActive, mintReplayTimeline, getLiveSimTime]);
+
+  const stampClock = useCallback((symbol?: string): string | null => {
+    const id = getTimelineId(symbol);
+    if (!id) return null;
+    const node = timelineRegistryRef.current.nodes[id];
+    // 比较用撮合时钟现算，不用记录自己的模拟时刻：成交点里有读落后界面时钟的（最多落后 15 个模拟分钟），
+    // 拿它比会把同一次回放里的正常写入误判成倒回。
+    const simTime = getLiveSimTime(symbol);
+    const realAt = Date.now();
+    const seen = timelinesSeenThisLoadRef.current;
+    if (node && isImplicitReplayFork({
+      direction: node.direction,
+      lastSimTime: node.lastSimTime,
+      lastRealAt: node.lastRealAt,
+      simTime,
+      realAt,
+      restored: !seen.has(id),
+    })) {
+      console.warn('[replayTimeline] 时钟逆着播放方向回落却没有显式分叉，补一条 implicit 时间线', {
+        scope: node.scope, from: node.lastSimTime, to: simTime,
+      });
+      const direction = liveClockInputsRef.current.direction === -1 ? -1 : 1;
+      return mintReplayTimeline(node.scope, 'implicit', simTime, direction, true);
+    }
+    seen.add(id);
+    commitTimelineRegistry(recordReplayTimelineStamp(timelineRegistryRef.current, id, simTime, realAt), { stamp: true });
+    return id;
+  }, [getTimelineId, getLiveSimTime, mintReplayTimeline, commitTimelineRegistry]);
+
+  const forkReplayTimeline = useCallback((
+    symbol: string,
+    cause: Exclude<ReplayTimelineCause, 'bootstrap' | 'implicit'>,
+    forkSimTime: number,
+    direction?: 1 | -1,
+  ): string => {
+    const scope = timelineScopeOf(symbol);
+    const dir = (direction ?? liveClockInputsRef.current.direction) === -1 ? -1 : 1;
+    return mintReplayTimeline(scope, cause, forkSimTime, dir, isTimelineScopeClockActive(scope));
+  }, [timelineScopeOf, isTimelineScopeClockActive, mintReplayTimeline]);
+
+  const endReplayTimeline = useCallback((target: ReplayTimelineScope | 'all') => {
+    const realAt = Date.now();
+    let next = timelineRegistryRef.current;
+    const scopes = target === 'all' ? Object.keys(next.current) as ReplayTimelineScope[] : [target];
+    for (const scope of scopes) {
+      if (!currentReplayTimeline(next, scope)) continue;
+      // 钟还在跑就记此刻的撮合时钟；已经停了（或不属于当前模式）退回最近一次盖章的时刻。
+      const simTime = isTimelineScopeClockActive(scope)
+        ? getLiveSimTime(replayTimelineScopeSymbol(scope) ?? undefined)
+        : null;
+      next = endReplayTimelineInRegistry(next, scope, { simTime, realAt });
+    }
+    commitTimelineRegistry(next);
+  }, [isTimelineScopeClockActive, getLiveSimTime, commitTimelineRegistry]);
+
+  /**
+   * 新代码第一次看见在跑的钟就补 bootstrap 根——不等第一笔写入。
+   * 「上线之前就挂着的委托」要靠这一刻的快照认出来，晚一步快照里就混进了之后的东西。
+   * 显式分叉（开始 / 跳转）都在改钟之前同步完成，这里看到的必然已经有时间线，不会重复补。
+   */
+  const activeCoinClocksKey = useMemo(
+    () => Object.entries(coinTimelines)
+      .filter(([, ct]) => isCoinTimelineClockActive(ct))
+      .map(([sym]) => sym)
+      .sort()
+      .join('|'),
+    [coinTimelines],
+  );
+  useEffect(() => {
+    if (timeMode === 'synced') {
+      if (sim.status !== 'stopped') getTimelineId();
+      return;
+    }
+    for (const sym of activeCoinClocksKey ? activeCoinClocksKey.split('|') : []) getTimelineId(sym);
+  }, [timeMode, sim.status, activeCoinClocksKey, getTimelineId]);
+
   // 倒叙播放：翻转全局播放方向。隔离模式下所有非停止币种的时钟先按旧方向
   // 冻结到当前时刻并重新锚定，保证切换瞬间任何时钟都不跳变；进入倒放时把
   // 冻结时刻向下对齐到 K 线开盘并记为镜面 cap——正放里只揭示了一半的蜡烛
@@ -583,6 +825,25 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
     const now = Date.now();
     const iMs = intervalToMs(interval);
     const snap = (t: number) => (iMs > 0 ? Math.floor(t / iMs) * iMs : t);
+
+    /**
+     * 翻转方向 = 分出新时间线。倒放里照样撮合、照样下单（Index 的倒放推进逐根调撮合），
+     * 同一段行情被反着再走一遍，与倒回去重打是同一类事。每只在跑的钟各分一次，停着的钟不分；
+     * 分叉时刻与下面冻结 / 对齐后的时刻同一个算式。先分叉再改钟：分叉要看翻转之前钟在不在跑。
+     */
+    const { timeMode: modeNow, coinTimelines: clocksNow, activeSymbol: activeNow } = liveClockInputsRef.current;
+    if (modeNow === 'isolated') {
+      for (const [sym, ct] of Object.entries(clocksNow)) {
+        if (!isCoinTimelineClockActive(ct)) continue;
+        const live = ct.status === 'playing' && ct.realStartTime && ct.historicalAnchorTime != null
+          ? ct.historicalAnchorTime + (now - ct.realStartTime) * ct.speed * prevDirection
+          : ct.time;
+        forkReplayTimeline(sym, 'direction', direction === -1 ? snap(live) : live, direction);
+      }
+    } else if (sim.status !== 'stopped') {
+      const live = sim.status === 'playing' ? sim.getSimTime() : sim.currentTimeRef.current;
+      forkReplayTimeline(activeNow, 'direction', direction === -1 ? snap(live) : live, direction);
+    }
 
     setCoinTimelines(prev => {
       let changed = false;
@@ -612,34 +873,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
     } else {
       sim.setDirection(direction);
     }
-  }, [sim, interval, setCoinTimelines, setReverseCapTime]);
-
-  // Get effective simulation time for a given symbol
-  const getEffectiveTime = useCallback((symbol?: string): number => {
-    const sym = symbol || activeSymbol;
-    if (timeMode === 'synced') return sim.currentSimulatedTime;
-    const ct = coinTimelines[sym];
-    return ct?.time ?? sim.currentSimulatedTime;
-  }, [timeMode, coinTimelines, activeSymbol, sim.currentSimulatedTime]);
-
-  /**
-   * 此刻的模拟时间，按撮合时钟（与 Index 的 RAF 同一个公式）现算。
-   * getEffectiveTime 读的是 React state，每 250 毫秒真实时间才刷新一次，3600 倍下落后可达 15 个模拟分钟。
-   * 手动开仓若取它，记录里的开仓时刻会早于真实成交，强平护栏据此放行成交之前的价；
-   * 手动平仓若取它，平仓时刻会早于撮合时钟记下的开仓时刻。成交时刻一律取这个。
-   * 输入放在 ref 里，函数身份稳定，调用方不必把它加进依赖。
-   */
-  const liveClockInputsRef = useRef({ timeMode, coinTimelines, activeSymbol, direction: sim.direction, getSimTime: sim.getSimTime });
-  liveClockInputsRef.current = { timeMode, coinTimelines, activeSymbol, direction: sim.direction, getSimTime: sim.getSimTime };
-  const getLiveSimTime = useCallback((symbol?: string): number => {
-    const { timeMode: mode, coinTimelines: cts, activeSymbol: active, direction, getSimTime } = liveClockInputsRef.current;
-    if (mode === 'synced') return getSimTime();
-    const ct = cts[symbol || active];
-    if (ct && ct.status === 'playing' && ct.realStartTime && ct.historicalAnchorTime != null) {
-      return ct.historicalAnchorTime + (Date.now() - ct.realStartTime) * ct.speed * (direction === -1 ? -1 : 1);
-    }
-    return ct?.time ?? getSimTime();
-  }, []);
+  }, [sim, interval, setCoinTimelines, setReverseCapTime, forkReplayTimeline]);
 
   // Always return the single global balance
   const getEffectiveBalance = useCallback((_symbol: string): number => {
@@ -866,6 +1100,8 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
           contractSizeUsd: pos.contractSizeUsd,
           openTime: now, closeTime: now,
           closedRealAt: Date.now(),
+          // 资金费记录也带上时间线，但它不是归属锚点；各标的取自己那只钟。
+          closedTimelineId: stampClock(sym),
         });
       }
     }
@@ -906,6 +1142,8 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
         closeTime,
         exitMethod: 'liquidation',
         closedRealAt: Date.now(),
+        // 强平可能落在后台标的上：取这条记录自己标的的钟。
+        closedTimelineId: stampClock(sym),
         totals,
       }).map(r => ({ ...r, action: 'LIQUIDATION' as const, liquidationSettlement: 'bankruptcy' as const })));
       const marginLost = Math.max(0, Number(pos.isolatedMargin) || 0);
@@ -936,7 +1174,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
       return changed ? next : prev;
     });
     openLiquidationModal({ lostAmount: lost, liquidatedPositions: items.length, scope: 'isolated' });
-  }, [setTradeHistory, setPositionsMap, setOrdersMap, openLiquidationModal]);
+  }, [setTradeHistory, setPositionsMap, setOrdersMap, openLiquidationModal, stampClock]);
 
   /** 逐根判定：每个标的上一次判定看到的最后时刻，与每副仓位构成的风险下限（见 updateRiskFloors）。 */
   const candleLiqLastEndRef = useRef(new Map<string, number>());
@@ -1121,6 +1359,8 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
               closeTime: Number(pairedAsOf(sym, price)),
               exitMethod: 'liquidation',
               closedRealAt: Date.now(),
+              // 全仓强平一次跨所有标的：每条记录取自己标的的钟。
+              closedTimelineId: stampClock(sym),
               totals: {
                 netPnl: pnl - closeFee - liqFee,
                 feeUsd: closeFee + liqFee,
@@ -1250,6 +1490,8 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
       return true;
     }
 
+    // 章在回调外面取：setCancelledOrders 是 React 的 updater，可能被重跑。
+    const cancelledTimelineId = stampClock(symbol);
     setCancelledOrders(prev => upsertOrderSnapshot(prev, {
       id: order.id,
       symbol,
@@ -1269,12 +1511,14 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
       createdRealAt: order.createdRealAt,
       cancelledAt,
       cancelledRealAt: Date.now(),
+      createdTimelineId: order.createdTimelineId,
+      cancelledTimelineId,
     }));
     toast.error('保证金不足，委托已撤销', {
       description: `${symbol} 需要 ${verdict.requiredUsd.toFixed(2)} USDT，可用 ${verdict.availableUsd.toFixed(2)} USDT`,
     });
     return false;
-  }, [setBalance, setCancelledOrders]);
+  }, [setBalance, setCancelledOrders, stampClock]);
 
   /**
    * 随单下达的止盈止损：**成交那一刻**才变成减仓单。
@@ -1299,7 +1543,9 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
      */
     const { levels, dropped } = keepValidTpSlLegs(position.side, requested, position.entryPrice);
     const now = getEffectiveTime(symbol);
-    const newOrders = buildTpSlOrders({ symbol, position, levels, now, newId: () => crypto.randomUUID() });
+    const newOrders = buildTpSlOrders({
+      symbol, position, levels, now, newId: () => crypto.randomUUID(), timelineId: stampClock(symbol),
+    });
     if (dropped.length > 0) {
       toast.error('随单止盈/止损未能挂出', {
         description: `${dropped.map(d => d.message).join('；')}（成交价 ${formatPrice(position.entryPrice, symbol)}）`,
@@ -1310,7 +1556,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
       ...prev,
       [symbol]: replaceTpSlOrders(prev[symbol] || [], position.id, newOrders),
     }));
-  }, [getEffectiveTime, setOrdersMap]);
+  }, [getEffectiveTime, setOrdersMap, stampClock]);
 
   /**
    * 合并成交之后的收尾。**不做这一步，就是拿一个安静的 bug 换掉一个吵闹的 bug。**
@@ -1462,6 +1708,8 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
 
     // 成交时刻取撮合时钟（见 getLiveSimTime），不取落后的界面时钟。
     const now = getLiveSimTime(symbol);
+    // 这一单（成交或挂出）所在的回放时间线，与 now 同一只钟。
+    const timelineId = stampClock(symbol);
     const buildExecutionTradeSnapshot = (
       position: Position,
       orderType: string,
@@ -1508,7 +1756,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
 
     // BEST PRICE (taker)
     if (normalizedOrder.priceSelection === 'BEST') {
-      const { fee, margin, slippage, position } = executeSettlementFill(symbol, effectiveCurrentPrice, normalizedOrder, false, now, Date.now());
+      const { fee, margin, slippage, position } = executeSettlementFill(symbol, effectiveCurrentPrice, normalizedOrder, false, now, Date.now(), timelineId);
       const requiredMargin = margin + fee;
       if (requiredMargin > available) {
         toast.error('可用余额不足', {
@@ -1551,7 +1799,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
 
     // MARKET (taker with slippage)
     if (normalizedOrder.type === 'MARKET') {
-      const { fee, margin, slippage, position } = executeSettlementFill(symbol, effectiveCurrentPrice, normalizedOrder, false, now, Date.now());
+      const { fee, margin, slippage, position } = executeSettlementFill(symbol, effectiveCurrentPrice, normalizedOrder, false, now, Date.now(), timelineId);
       const requiredMargin = margin + fee;
       if (requiredMargin > available) {
         toast.error('可用余额不足', {
@@ -1636,7 +1884,8 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
         settlementAsset: normalizedOrder.settlementAsset,
         contractSizeUsd: normalizedOrder.contractSizeUsd,
         contracts: isCoinSettled(normalizedOrder) ? qtyPerStep : undefined,
-        status: 'NEW' as const, createdAt: now, createdRealAt: Date.now(), parentScaledId: parentId,
+        status: 'NEW' as const, createdAt: now, createdRealAt: Date.now(), createdTimelineId: timelineId,
+        parentScaledId: parentId,
         tradingMode: tradingModeRef.current,
       }));
       setOrdersMap(prev => ({ ...prev, [symbol]: [...(prev[symbol] || []), ...newOrders] }));
@@ -1678,7 +1927,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
         // 无激活价 = 挂出即激活；极值从首根 K 线开始积累
         trailingActivated: activation <= 0,
         peakPrice: undefined, troughPrice: undefined,
-        status: 'PENDING', createdAt: now, createdRealAt: Date.now(),
+        status: 'PENDING', createdAt: now, createdRealAt: Date.now(), createdTimelineId: timelineId,
         tradingMode: tradingModeRef.current,
       };
       setOrdersMap(prev => ({ ...prev, [symbol]: [...(prev[symbol] || []), trailingOrder] }));
@@ -1713,7 +1962,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
         settlementAsset: normalizedOrder.settlementAsset,
         contractSizeUsd: normalizedOrder.contractSizeUsd,
         contracts: normalizedOrder.contracts,
-        status: 'ACTIVE', createdAt: now, createdRealAt: Date.now(),
+        status: 'ACTIVE', createdAt: now, createdRealAt: Date.now(), createdTimelineId: timelineId,
         tradingMode: tradingModeRef.current,
         twapTotalQty: normalizedOrder.quantity, twapFilledQty: 0,
         twapInterval: intervalMs, twapNextExecTime: now,
@@ -1775,6 +2024,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
       contractSizeUsd: normalizedOrder.contractSizeUsd,
       contracts: normalizedOrder.contracts,
       status: normalizedOrder.type === 'CONDITIONAL' ? 'PENDING' : 'NEW', createdAt: now, createdRealAt: Date.now(),
+      createdTimelineId: timelineId,
       tradingMode: tradingModeRef.current,
       callbackRate: normalizedOrder.callbackRate, trailingExecType: normalizedOrder.trailingExecType,
       trailingLimitPrice: normalizedOrder.trailingLimitPrice, trailingActivated: false,
@@ -1785,7 +2035,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
     setOrdersMap(prev => ({ ...prev, [symbol]: [...(prev[symbol] || []), newOrder] }));
     toast.info('委托已挂出');
     return { id: newOrder.id };
-  }, [getEffectiveTime, getSymbolSettlementMode, recordExecutionTrade]);
+  }, [getEffectiveTime, getSymbolSettlementMode, recordExecutionTrade, stampClock]);
 
   // ===== Close Position — supports partial close via percentage (0-1] =====
   const handleClosePosition = useCallback((symbol: string, index: number, percentage: number = 1, method: 'manual' | 'sl' | 'tp1' | 'tp2' | 'tp3' | 'liquidation' = 'manual') => {
@@ -1883,6 +2133,8 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
       return changed ? { ...prev, [symbol]: next } : prev;
     });
 
+    // 章在回调外面取：setTradeHistory 是 React 的 updater，可能被重跑。
+    const closedTimelineId = stampClock(symbol);
     // 手动平仓也按每笔成交拆条。这里是与 settlePositionClose 并行的**第二份**实现,
     // 只把记录这一段接过去,不做整体归并——那是另一件事(见下方 TODO 立项)。
     setTradeHistory(prev => [...prev, ...buildCloseRecords({
@@ -1891,6 +2143,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
       closeTime: getLiveSimTime(symbol),
       exitMethod: method,
       closedRealAt: Date.now(),
+      closedTimelineId,
       totals: {
         netPnl: pnlUsd - feeUsd,
         pnlCoin, feeUsd, feeCoin,
@@ -1915,7 +2168,9 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
     if (invalid) { toast.error(invalid.message); return; }
 
     const now = getEffectiveTime(symbol);
-    const newOrders = buildTpSlOrders({ symbol, position: pos, levels, now, newId: () => crypto.randomUUID() });
+    const newOrders = buildTpSlOrders({
+      symbol, position: pos, levels, now, newId: () => crypto.randomUUID(), timelineId: stampClock(symbol),
+    });
     if (newOrders.length === 0) { toast.error('平仓数量无效'); return; }
 
     setOrdersMap(prev => ({
@@ -1935,14 +2190,27 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
     triggerPrice: number,
     closeTime = getEffectiveTime(order.reduceSymbol || symbol),
   ): ReduceOnlyTriggerExecution => {
-    const execution = planReduceOnlyTrigger({
+    const targetSymbol = order.reduceSymbol || symbol;
+    const plan = (closedTimelineId: string | null) => planReduceOnlyTrigger({
       symbol,
       order,
       triggerPrice,
       closeTime,
       positions: positionsMapRef.current,
       orders: ordersMapRef.current,
+      closedTimelineId,
     });
+    /**
+     * 先用不落盘的 getTimelineId 试算，真的要平仓了才 stampClock：
+     * 触发失败（仓位暂时找不到等）每帧都会重试，每帧盖章会让登记表每帧落一次盘、推一次云。
+     * 盖章时若恰好补出了兜底分叉，按新时间线重算一遍——plan 是纯函数，此刻还什么都没写。
+     */
+    const provisionalTimelineId = getTimelineId(targetSymbol);
+    let execution = plan(provisionalTimelineId);
+    if (execution.ok) {
+      const closedTimelineId = stampClock(targetSymbol);
+      if (closedTimelineId !== provisionalTimelineId) execution = plan(closedTimelineId);
+    }
 
     if (!execution.ok) {
       const previousReason = reduceOnlyDeferredReasonRef.current.get(order.id);
@@ -1976,7 +2244,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
       description: `${execution.netPnl >= 0 ? '+' : ''}${execution.netPnl.toFixed(2)} USDT`,
     });
     return execution;
-  }, [getEffectiveTime, setBalance, setFilledOrders, setOrdersMap, setPositionsMap, setTradeHistory]);
+  }, [getEffectiveTime, getTimelineId, stampClock, setBalance, setFilledOrders, setOrdersMap, setPositionsMap, setTradeHistory]);
 
   // ===== Cancel Order =====
   const handleCancelOrder = useCallback((symbol: string, orderId: string) => {
@@ -1984,6 +2252,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
     const order = (ordersMap[symbol] || []).find(o => o.id === orderId);
     if (order) {
       const cancelledAt = getEffectiveTime(symbol) || Date.now();
+      const cancelledTimelineId = stampClock(symbol);
       const orderPrice = order.price > 0
         ? order.price
         : (order.conditionalLimitPrice && order.conditionalLimitPrice > 0)
@@ -2008,6 +2277,8 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
           createdRealAt: order.createdRealAt,
           cancelledAt,
           cancelledRealAt: Date.now(),
+          createdTimelineId: order.createdTimelineId,
+          cancelledTimelineId,
         }));
     }
     setOrdersMap(prev => ({
@@ -2015,7 +2286,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
       [symbol]: (prev[symbol] || []).filter(o => o.id !== orderId),
     }));
     toast.info('委托已撤销');
-  }, [ordersMap, getEffectiveTime, setCancelledOrders]);
+  }, [ordersMap, getEffectiveTime, setCancelledOrders, stampClock]);
 
   // ===== Adjust Isolated Margin (add OR remove) =====
   // signedDelta > 0 = add (debit available, credit position margin)
@@ -2210,6 +2481,10 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
     totalPositionCount,
     getEffectiveTime,
     getCoinState,
+    getTimelineId,
+    stampClock,
+    forkReplayTimeline,
+    endReplayTimeline,
     getEffectiveBalance,
     getEffectiveAvailable,
   };
