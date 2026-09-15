@@ -469,12 +469,24 @@ export function AddSizingCalculator({ open, onClose, symbol, currentPrice = 0 }:
                 ]} />
               </>
             )}
-            {/* G ≠ 0：中性芯片，带符号的 Y₁ 以结算单位写出（与 G 同单位才能相加），不标红、不给张数 */}
+            {/* G ≠ 0：中性芯片，带符号的 Y₁ 以结算单位写出（与 G 同单位才能相加），不标红。
+                A 的合计对冲 X₁ + X₂ᴬ 仍要给出（含张数）——用户要拿它与 Plan B 的合计并排比较；
+                它只在 A 有解时才成立（Y₁ ≤ 0 时 X₂ᴬ 为负，X₁ + X₂ᴬ 不是一个对冲量）。 */}
             {bankedOn && planB && (
               <Chips items={[
                 ['旧仓净垫 Y₁', `${signed(planB.cushion, v => fmtG(v))}${isCoin ? `（${signed(planB.cushion * toNum(s1), fmtUsd)} USD）` : ''}`, false, 'add-sizing-cushion-y1'],
                 ['X₂ᴬ = Y₁ ÷ 险 · 仅 A', `${fmtCoins(planB.cushionAddCoins)} ${coinName}`, false, 'add-sizing-x2'],
-                ...(cushion.ok ? [['b', cushion.b.toFixed(4)] as const] : []),
+                ...(cushion.ok
+                  ? [
+                    ['b', cushion.b.toFixed(4)] as const,
+                    [
+                      `合计对冲 @ S₁ · ${side === 'LONG' ? '空' : '多'} · 仅 A`,
+                      `${fmtCoins(cushion.hedgeCoinsAtS1)} ${coinName} · X₁ + X₂ᴬ · ${fmtUsd(cushion.hedgeNotionalAtS1)} USD${contracts(cushion.hedgeCoinsAtS1, toNum(s1))}`,
+                      false,
+                      'add-sizing-hedge-a',
+                    ] as const,
+                  ]
+                  : []),
               ] as Array<readonly [string, string, boolean?, string?]>} />
             )}
           </section>

@@ -501,7 +501,7 @@ describe('盘口对冲线与 S₁ 偏差', () => {
     expect(screen.queryByTestId('add-sizing-s1-deviation')).not.toBeInTheDocument();
   });
 
-  it('B 开着时「合计对冲」升为 Hero，A 段降为「仅 A」芯片、不再给第二个对冲数', () => {
+  it('B 开着时「合计对冲」升为 Hero，A 段降为「仅 A」芯片，但仍以芯片给出 A 自己的合计对冲', () => {
     renderCalc();
     type('add-sizing-s1', '130');
     expect(screen.queryByTestId('add-sizing-total-hedge-hero')).not.toBeInTheDocument();
@@ -511,8 +511,14 @@ describe('盘口对冲线与 S₁ 偏差', () => {
     // 真正该挂的量必须和合计加仓一样醒目，而不是躺在底部小字里
     expect(screen.getByTestId('add-sizing-total-hedge-hero')).toHaveTextContent('72.27');
     expect(screen.getByTestId('add-sizing-x2')).toHaveTextContent('仅 A');
-    // 屏幕上只许有一个对冲量（带张数）——A 的 56.67 不再以大字出现
+    // 大字只许有一个对冲量——A 的 56.67 不再以 Hero 出现……
     expect(screen.queryByTestId('add-sizing-hedge')).not.toBeInTheDocument();
+    // ……但【用户要求】A 也要有合计：X₁ + X₂ᴬ = 18.33 + 38.33 = 56.67，带张数，标明「仅 A」，供与 Plan B 并排比较
+    const hedgeA = screen.getByTestId('add-sizing-hedge-a');
+    expect(hedgeA).toHaveTextContent('56.67');
+    expect(hedgeA).toHaveTextContent('仅 A');
+    expect(hedgeA).toHaveTextContent('X₁ + X₂ᴬ');
+    expect(hedgeA).toHaveTextContent('张');
   });
 
   it('【回归】多条盘口线：偏差按亏损侧离 S₂ 最近的那条比对——与 Legs 校验读 S₁ 同一规则', () => {
