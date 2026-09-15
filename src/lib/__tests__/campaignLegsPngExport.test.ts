@@ -612,3 +612,34 @@ describe('【用户要求】主力阶段子行在导出图里也标明「对冲�
     expect(new Set(rows.map(row => row.cells.length))).toEqual(new Set([11]));
   });
 });
+
+describe('【用户决定】他场委托在导出图里只是表下一行淡注', () => {
+  const foreignOrder = {
+    id: 'other-live', tradeRecordId: null, side: 'SHORT' as const, price: 0.03005,
+    createdAt: Date.parse('2026-08-07T19:42:15+08:00'), triggeredAt: null, cancelledAt: null,
+    status: 'pending' as const, foreignReplay: true,
+  };
+
+  it('合计行之后多一行 note：横跨整表的一格浅灰小字，腿与合计的行一字不变，画布跟着加高', () => {
+    const rows = buildCampaignLegsExportRows({ ...input(), foreignLiveOrders: [foreignOrder] });
+    const baseline = buildCampaignLegsExportRows(input());
+
+    expect(rows.slice(0, -1)).toEqual(baseline);
+    const note = rows.at(-1)!;
+    expect(note.kind).toBe('note');
+    expect(rows.at(-2)!.kind).toBe('total');
+    expect(note.cells).toHaveLength(1);
+    expect(note.cells[0][0].text).toBe('另有 1 张来自另一次回放的委托在本场期间挂在盘上：空 0.0300500 委 08-07 19:42 仍挂着（未计入本场）');
+    expect(note.cells[0][0].bold).toBeFalsy();
+    expect(note.cells[0][0].color).not.toBe('#111827');
+    expect(note.height).toBeGreaterThan(0);
+    expect(campaignLegsExportCanvasHeight({ ...input(), foreignLiveOrders: [foreignOrder] }))
+      .toBe(campaignLegsExportCanvasHeight(input()) + note.height);
+  });
+
+  it('没有他场委托：不多出任何行', () => {
+    const rows = buildCampaignLegsExportRows({ ...input(), foreignLiveOrders: [] });
+    expect(rows.some(row => row.kind === 'note')).toBe(false);
+    expect(rows.at(-1)!.kind).toBe('total');
+  });
+});

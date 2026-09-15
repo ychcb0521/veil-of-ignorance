@@ -2401,6 +2401,8 @@ export async function getCampaignFullData(
   tradeRecords: TradeRecord[];
   pendingOrders: PendingOrder[];
   reverseHedgeOrders: CampaignReverseHedgeOrder[];
+  /** 别的回放留下、在本场期间仍挂着的委托空单（foreignReplay: true），只供标注显示。 */
+  foreignLiveOrders: CampaignReverseHedgeOrder[];
 }> {
   const { campaign, legs } = await getCampaignWithLegs(campaignId);
   const userId = campaign.user_id;
@@ -2914,6 +2916,111 @@ export async function getCampaignFullData(
     return map;
   }, new Map<string, CampaignReverseHedgeOrder>()).values()).sort((a, b) => a.createdAt - b.createdAt);
 
+  /**
+   * 别的回放留下、在本场期间仍挂着的委托空单（用户决定：显示但标注，不再整张丢掉）。
+   * 回放时间线把它们判给了别的回放，但本场打的那段现实时间里它们确实挂在盘上、随时可能被触发。
+   * 只用真实时刻判：挂单（bestOrderRealStamp）→ 撤单 / 成交（仍挂着为 +∞）这段现实区间，与本场保留段的现实区间有交集。
+   *   - 模拟时刻先过 inWindow，与黄色层同一道：同标的另一段日期的回放留下的单子价位差着量级，标上去会把本场价轴拉飞；
+   *   - 一个真实时刻都没有的老委托放不进时间里，不标；只盖了结束时刻的照标——被本场撤掉 / 触发本身就证明它本场期间挂在盘上；
+   *   - 本场事件流记过的（actual_evolution 的 pending_order_id）是本场自己的单，时间线判不进也只能静静排除，不能反标成他场；
+   *   - 挂单时刻就落在本场保留段里、却被判出去的，是本场倒回前被取代的那一遍（L4），不是别的回放留下的，不标。
+   * 单独返回、带 foreignReplay，绝不并进 reverseHedgeOrders / pendingOrders：风险指标、Legs 合计、Δb 与结束建议都不受影响。
+   */
+  const campaignRealSpans = replaySession?.keptRealSpans ?? (realWindow ? [realWindow] : []);
+  const inCampaignRealSpan = (realAt: number) => campaignRealSpans.some(span => realAt >= span.start && realAt <= span.end);
+  const realStamp = (value: number | null | undefined) => (
+    typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : null
+  );
+  const foreignCandidates = new Map<string, {
+    order: Parameters<typeof belongsToCampaignTimeline>[0];
+    live: boolean;
+    endRealAt: number | null;
+    display: CampaignReverseHedgeOrder;
+  }>();
+  // 与 orderSnapshotsById 同一口径：撤单 / 成交快照后写、覆盖同 id 的挂单
+  for (const order of ordersMap[campaign.symbol] ?? []) {
+    if (!order.id || !isLivePendingOrder(order) || !isOpeningShortOrder(order)) continue;
+    foreignCandidates.set(order.id, {
+      order,
+      live: true,
+      endRealAt: Number.POSITIVE_INFINITY,
+      display: {
+        id: order.id,
+        tradeRecordId: null,
+        side: order.side,
+        price: pendingOrderPrice(order),
+        createdAt: order.createdAt,
+        triggeredAt: null,
+        cancelledAt: null,
+        status: 'pending',
+        foreignReplay: true,
+      },
+    });
+  }
+  for (const order of cancelledOrders) {
+    if (order.symbol !== campaign.symbol || !order.id) continue;
+    if (!isOpeningShortOrder(order)) {
+      foreignCandidates.delete(order.id);
+      continue;
+    }
+    foreignCandidates.set(order.id, {
+      order,
+      live: false,
+      endRealAt: realStamp(order.cancelledRealAt),
+      display: {
+        id: order.id,
+        tradeRecordId: null,
+        side: order.side,
+        price: order.price,
+        createdAt: order.createdAt,
+        triggeredAt: null,
+        cancelledAt: order.cancelledAt,
+        status: 'cancelled',
+        foreignReplay: true,
+      },
+    });
+  }
+  for (const order of filledOrders) {
+    if (order.symbol !== campaign.symbol || !order.id) continue;
+    // 开出的仓位是本场选中的成交：它就是本场的单（与 triggeredReverseOrders 的豁免同一口径）
+    if (!isOpeningShortOrder(order) || (order.positionId != null && selectedPositionIds.has(order.positionId))) {
+      foreignCandidates.delete(order.id);
+      continue;
+    }
+    foreignCandidates.set(order.id, {
+      order,
+      live: filledIntoOpenPosition(order),
+      endRealAt: realStamp(order.filledRealAt),
+      display: {
+        id: order.id,
+        tradeRecordId: null,
+        side: order.side,
+        price: Number.isFinite(order.triggerPrice) && order.triggerPrice > 0 ? order.triggerPrice : order.price,
+        fillPrice: order.price,
+        createdAt: order.createdAt,
+        triggeredAt: order.filledAt,
+        cancelledAt: null,
+        status: 'triggered',
+        foreignReplay: true,
+      },
+    });
+  }
+  const ownReverseOrderIds = new Set(reverseHedgeOrders.map(order => order.id));
+  const foreignLiveOrders = Array.from(foreignCandidates.values())
+    .filter(({ order, live, endRealAt, display }) => {
+      if (ownReverseOrderIds.has(display.id) || eventOrderIds.has(display.id)) return false;
+      if (!Number.isFinite(display.price) || display.price <= 0 || !inWindow(display.createdAt)) return false;
+      if (belongsToCampaignTimeline(order, { live })) return false;
+      const startRealAt = bestOrderRealStamp(order);
+      if (startRealAt == null) return false;
+      const createdRealAt = realStamp(order.createdRealAt);
+      if (createdRealAt != null && inCampaignRealSpan(createdRealAt)) return false;
+      const liveUntil = endRealAt ?? startRealAt;
+      return campaignRealSpans.some(span => startRealAt <= span.end && liveUntil >= span.start);
+    })
+    .map(({ display }) => display)
+    .sort((a, b) => a.createdAt - b.createdAt);
+
   // 本人视角（有成交记录）时，把平仓快照回写到腿上，使互关者也能读到一致的平仓信息。
   // 列表页显式关掉：渲染一个列表不该写库，147 场同时回写会把首屏拖到打不开。
   let healedCampaign = campaign;
@@ -2928,6 +3035,7 @@ export async function getCampaignFullData(
     tradeRecords,
     pendingOrders,
     reverseHedgeOrders,
+    foreignLiveOrders,
   };
 }
 

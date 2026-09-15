@@ -124,6 +124,89 @@ export function buildCampaignReverseOrderPriceLines(
   return dedupeReverseOrderLines(segments);
 }
 
+/** 「他场委托」线的颜色与标题：灰色，与黄色委托层一眼分开。 */
+export const FOREIGN_REPLAY_ORDER_LINE_COLOR = '#848E9C';
+export const FOREIGN_REPLAY_ORDER_LINE_TITLE = '他场委托';
+
+/**
+ * 别的回放留下、在本场期间仍挂着的委托（foreignLiveOrders）：灰色、虚线、调低不透明度（dim），标题「他场委托」。
+ * 不进黄色委托层——标题不是「委托空」，盘面不给它画挂单 / 撤单竖线与 ×；触发与否都只画一段虚线，
+ * 从委托时刻到触发 / 撤单时刻，仍挂着的延续到 fallbackEnd。带 orderIds，照样能被管理区隐藏、点选。
+ */
+export function buildForeignReplayOrderPriceLines(
+  orders: CampaignReverseHedgeOrder[],
+  fallbackEnd: number,
+): TimeBoundPriceLine[] {
+  const lines = orders
+    .filter(isDisplayableReverseHedgeOrder)
+    .map((order): TimeBoundPriceLine => {
+      const endTime = order.status === 'triggered'
+        ? order.triggeredAt ?? fallbackEnd
+        : order.cancelledAt ?? fallbackEnd;
+      return {
+        price: order.price,
+        color: FOREIGN_REPLAY_ORDER_LINE_COLOR,
+        startTime: order.createdAt,
+        endTime: atLeastMinSegmentEnd(order.createdAt, endTime),
+        dashed: true,
+        dim: true,
+        endMarker: null,
+        title: FOREIGN_REPLAY_ORDER_LINE_TITLE,
+        orderIds: [order.id],
+      };
+    });
+  return dedupeReverseOrderLines(lines);
+}
+
+/** 委托时刻的紧凑写法：MM-DD HH:mm（本地时区，与盘面一致）。 */
+function fmtForeignOrderTime(value: number): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '—';
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+function fmtForeignOrderPrice(value: number): string {
+  if (!Number.isFinite(value)) return '—';
+  if (Math.abs(value) >= 1) return value.toFixed(4);
+  return value.toPrecision(6);
+}
+
+/** 他场委托的状态字：淡注里每张各带一个，与管理区色块的 已撤 / 已触发 对得上。 */
+function foreignOrderStatusWord(order: CampaignReverseHedgeOrder): string {
+  return order.status === 'cancelled' ? '已撤' : order.status === 'triggered' ? '已触发' : '仍挂着';
+}
+
+/**
+ * Legs 表下方与导出 PNG 共用的一行淡注：别的回放留下、本场期间挂在盘上的委托，不放进任何腿的行。
+ * 例：「另有 1 张来自另一次回放的委托在本场期间挂在盘上：空 0.0300500 委 08-07 19:42 仍挂着（未计入本场）」。
+ * 总句只说「挂在盘上」、每张各带状态字：本场期间才撤掉 / 触发的也在列，一句「仍挂着 N」会把已了结的也数进去。
+ * 委托时刻是那次回放的模拟钟，与盘面横轴同一口径。没有这类委托返回 null。
+ */
+export function formatForeignReplayOrdersNote(orders: CampaignReverseHedgeOrder[]): string | null {
+  const displayable = orders.filter(isDisplayableReverseHedgeOrder);
+  if (displayable.length === 0) return null;
+  const items = displayable.map(order => (
+    `空 ${fmtForeignOrderPrice(order.price)} 委 ${fmtForeignOrderTime(order.createdAt)} ${foreignOrderStatusWord(order)}`
+  ));
+  return `另有 ${displayable.length} 张来自另一次回放的委托在本场期间挂在盘上：${items.join(' · ')}（未计入本场）`;
+}
+
+/**
+ * 管理区「他场」一组的标题。数字只数各自的状态，与后面每个色块的 已撤 / 已触发 一一对得上：
+ * 全部仍挂着 →「来自另一次回放 · 仍挂着 2」；混着 →「来自另一次回放 · 仍挂着 1 · 已了结 1」；
+ * 都了结了 →「来自另一次回放 · 2 张 · 本场期间已了结」。没有这类委托返回 null。
+ */
+export function formatForeignReplayOrdersHeading(orders: CampaignReverseHedgeOrder[]): string | null {
+  const displayable = orders.filter(isDisplayableReverseHedgeOrder);
+  if (displayable.length === 0) return null;
+  const pending = displayable.filter(order => order.status === 'pending').length;
+  const settled = displayable.length - pending;
+  if (settled === 0) return `来自另一次回放 · 仍挂着 ${pending}`;
+  if (pending === 0) return `来自另一次回放 · ${settled} 张 · 本场期间已了结`;
+  return `来自另一次回放 · 仍挂着 ${pending} · 已了结 ${settled}`;
+}
+
 /** 对冲空单腿：对冲类角色、方向为空。 */
 export function isHedgeShortLeg(leg: { leg_role?: string | null; direction?: string | null }): boolean {
   const role = leg.leg_role ?? '';

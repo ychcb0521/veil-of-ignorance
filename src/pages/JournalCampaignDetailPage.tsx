@@ -104,7 +104,9 @@ import {
 } from '@/lib/campaignSimulationEngine';
 import {
   buildCampaignReverseOrderPriceLines,
+  buildForeignReplayOrderPriceLines,
   buildManualHedgeShortPriceLines,
+  formatForeignReplayOrdersHeading,
   isDisplayableReverseHedgeOrder,
   isHedgeShortLeg,
   type HedgeShortLegExecution,
@@ -603,6 +605,8 @@ export default function JournalCampaignDetailPage() {
   const [legExitPriceCorrections, setLegExitPriceCorrections] = useState<LegExitPriceCorrections>({});
   const [pendingOrders, setPendingOrders] = useState<PendingOrder[]>([]);
   const [reverseHedgeOrders, setReverseHedgeOrders] = useState<CampaignReverseHedgeOrder[]>([]);
+  // 别的回放留下、本场期间仍挂着的委托：只标注显示，不进 reverseHedgeOrders / pendingOrders。
+  const [foreignLiveOrders, setForeignLiveOrders] = useState<CampaignReverseHedgeOrder[]>([]);
   const [interval, setInterval] = useState<Interval>('1m');
   const [intervalTouched, setIntervalTouched] = useState(false);
   const [chartRangeSelection, setChartRangeSelection] = useState<CampaignChartRangeSelection>(
@@ -665,6 +669,7 @@ export default function JournalCampaignDetailPage() {
         setTradeRecords(full.tradeRecords);
         setPendingOrders(full.pendingOrders);
         setReverseHedgeOrders(full.reverseHedgeOrders);
+        setForeignLiveOrders(full.foreignLiveOrders ?? []);
         setCounterfactuals(savedCounterfactuals);
         setSelectedCounterfactualId(prev => prev ?? savedCounterfactuals[0]?.id ?? null);
       } catch (error) {
@@ -806,9 +811,12 @@ export default function JournalCampaignDetailPage() {
     () => counterfactuals.find(branch => branch.id === selectedCounterfactualId) ?? null,
     [counterfactuals, selectedCounterfactualId],
   );
+  // 他场委托也进取景跨度：管理区与 Legs 淡注列出的每一张，盘面上都找得到（与本场委托同一条不变量）
   const chartContentTimeSpan = useMemo(
-    () => buildCampaignChartContentTimeSpan(campaign, legs, tradeRecords, reverseHedgeOrders, selectedCounterfactual),
-    [campaign, legs, tradeRecords, reverseHedgeOrders, selectedCounterfactual],
+    () => buildCampaignChartContentTimeSpan(
+      campaign, legs, tradeRecords, [...reverseHedgeOrders, ...foreignLiveOrders], selectedCounterfactual,
+    ),
+    [campaign, legs, tradeRecords, reverseHedgeOrders, foreignLiveOrders, selectedCounterfactual],
   );
   const campaignKlineSpanStartMs = chartContentTimeSpan.startMs ?? legTimeSpan.startMs;
   const campaignKlineSpanEndMs = chartContentTimeSpan.endMs ?? legTimeSpan.endMs;
@@ -1364,14 +1372,24 @@ export default function JournalCampaignDetailPage() {
     () => displayableReverseHedgeOrders.filter(order => !hiddenReverseOrderSet.has(order.id)),
     [displayableReverseHedgeOrders, hiddenReverseOrderSet],
   );
+  // 「他场委托」（灰色）：与本场委托共用眼睛开关与隐藏列表，但不进黄色层、不进任何指标。
+  const displayableForeignLiveOrders = useMemo(
+    () => foreignLiveOrders.filter(isDisplayableReverseHedgeOrder),
+    [foreignLiveOrders],
+  );
+  const visibleForeignLiveOrders = useMemo(
+    () => displayableForeignLiveOrders.filter(order => !hiddenReverseOrderSet.has(order.id)),
+    [displayableForeignLiveOrders, hiddenReverseOrderSet],
+  );
   // Legs 表 Δb 列的分母：战役初始最大预期亏损 L
   const legsInitialExpectedMaxLoss = useMemo(
     () => (campaign ? computeInitialExpectedMaxLoss(campaign, legs, tradeRecords, reverseHedgeOrders) : null),
     [campaign, legs, tradeRecords, reverseHedgeOrders],
   );
   const hiddenReverseOrderCount = useMemo(
-    () => displayableReverseHedgeOrders.filter(order => hiddenReverseOrderSet.has(order.id)).length,
-    [displayableReverseHedgeOrders, hiddenReverseOrderSet],
+    () => [...displayableReverseHedgeOrders, ...displayableForeignLiveOrders]
+      .filter(order => hiddenReverseOrderSet.has(order.id)).length,
+    [displayableReverseHedgeOrders, displayableForeignLiveOrders, hiddenReverseOrderSet],
   );
   // 手动开的对冲空单：与被触发的委托空单同一个目的，同在这一层、同样黄色（见 buildManualHedgeShortPriceLines）。
   const manualHedgeShortLegs = useMemo<HedgeShortLegExecution[]>(() => {
@@ -1395,6 +1413,18 @@ export default function JournalCampaignDetailPage() {
   }, [legs, tradeRecords, legExitPriceCorrections]);
   const hasReverseOrders = displayableReverseHedgeOrders.length > 0;
   const hasManualHedgeShorts = manualHedgeShortLegs.length > 0;
+  const hasForeignLiveOrders = displayableForeignLiveOrders.length > 0;
+  const hasYellowOrderLayer = hasReverseOrders || hasManualHedgeShorts;
+  // 眼睛开关的说明按盘上真有的层来写：只有他场委托时不能还说「委托/手动对冲空单（黄色）」
+  const orderLayerNames = [
+    hasReverseOrders && '委托',
+    hasManualHedgeShorts && '手动对冲空单',
+    hasForeignLiveOrders && '他场委托',
+  ].filter((name): name is string => Boolean(name));
+  const orderLayerColors = [hasYellowOrderLayer && '黄色', hasForeignLiveOrders && '灰色'].filter(Boolean).join('、');
+  const orderLayerToggleVerb = showOrderInfo ? '隐藏' : '显示';
+  const orderLayerToggleTitle = `${orderLayerToggleVerb}${orderLayerNames.join('/')}（${orderLayerColors}）`;
+  const orderLayerToggleLabel = `${orderLayerToggleVerb}${orderLayerNames.length > 2 ? orderLayerNames.join('、') : orderLayerNames.join('与')}`;
   const orderInfoPriceLines = useMemo<TimeBoundPriceLine[]>(() => {
     if (!campaign) return [];
     const fallbackEnd = campaign.closed_at
@@ -1404,14 +1434,16 @@ export default function JournalCampaignDetailPage() {
       ...buildCampaignReverseOrderPriceLines(visibleReverseHedgeOrders, tradeRecords, fallbackEnd),
       // 「是不是触发单开出的腿」按全部可显示的委托判，隐藏某张委托不会让它的腿冒充手动单。
       ...buildManualHedgeShortPriceLines(manualHedgeShortLegs, displayableReverseHedgeOrders, tradeRecords, fallbackEnd),
+      // 他场委托：灰色淡虚线，跟着同一个眼睛开关，但不是黄色层的一部分
+      ...buildForeignReplayOrderPriceLines(visibleForeignLiveOrders, fallbackEnd),
     ];
-  }, [campaign, visibleReverseHedgeOrders, displayableReverseHedgeOrders, manualHedgeShortLegs, tradeRecords, klines]);
+  }, [campaign, visibleReverseHedgeOrders, displayableReverseHedgeOrders, visibleForeignLiveOrders, manualHedgeShortLegs, tradeRecords, klines]);
   // 隐藏的委托、关掉的委托层都不再算选中——免得管理区里看不见的单子还挂着高亮。
   const activeSelectedReverseOrderSet = useMemo(() => {
     if (!showOrderInfo) return new Set<string>();
-    const visibleIds = new Set(visibleReverseHedgeOrders.map(order => order.id));
+    const visibleIds = new Set([...visibleReverseHedgeOrders, ...visibleForeignLiveOrders].map(order => order.id));
     return new Set(selectedReverseOrderIds.filter(id => visibleIds.has(id)));
-  }, [showOrderInfo, visibleReverseHedgeOrders, selectedReverseOrderIds]);
+  }, [showOrderInfo, visibleReverseHedgeOrders, visibleForeignLiveOrders, selectedReverseOrderIds]);
   const orderLineIdsBySelectId = useMemo(() => {
     const map = new Map<string, string[]>();
     for (const line of orderInfoPriceLines) {
@@ -1536,6 +1568,62 @@ export default function JournalCampaignDetailPage() {
     setTradeRecords(full.tradeRecords);
     setPendingOrders(full.pendingOrders);
     setReverseHedgeOrders(full.reverseHedgeOrders);
+    setForeignLiveOrders(full.foreignLiveOrders ?? []);
+  };
+
+  // 管理区色块：本场的委托与「他场」委托共用同一套点选 / 隐藏，他场的整体压灰并带「他场」标签。
+  const renderReverseOrderChip = (order: CampaignReverseHedgeOrder, foreign = false) => {
+    const selected = activeSelectedReverseOrderSet.has(order.id);
+    return (
+      <div
+        key={order.id}
+        role="button"
+        tabIndex={0}
+        aria-pressed={selected}
+        data-testid={foreign ? 'foreign-replay-order-chip' : 'reverse-order-chip'}
+        data-selected={selected ? 'true' : 'false'}
+        onClick={() => toggleReverseOrderSelection(order.id)}
+        onKeyDown={event => {
+          if (event.key !== 'Enter' && event.key !== ' ') return;
+          event.preventDefault();
+          toggleReverseOrderSelection(order.id);
+        }}
+        className={`group inline-flex cursor-pointer items-center gap-1 rounded border px-2 py-1 text-[10px] transition-colors ${
+          foreign
+            ? selected
+              ? 'border-[#848E9C] bg-[#848E9C]/15 text-foreground/80'
+              : 'border-border/30 bg-muted/10 text-muted-foreground/60 hover:border-[#848E9C]/40'
+            : selected
+              ? 'border-[#F0B90B] bg-[#F0B90B]/20 text-foreground shadow-[0_0_0_1px_rgba(240,185,11,0.45)]'
+              : 'border-border/40 bg-muted/20 text-muted-foreground hover:border-[#F0B90B]/40'
+        }`}
+      >
+        <span
+          aria-hidden="true"
+          className={`h-2.5 w-2.5 shrink-0 rounded-[2px] transition-colors ${
+            foreign
+              ? selected ? 'bg-[#848E9C]' : 'bg-[#848E9C]/25'
+              : selected ? 'bg-[#F0B90B]' : 'bg-[#F0B90B]/25'
+          }`}
+        />
+        {foreign && <span className="rounded-sm bg-muted/40 px-1 text-[9px] text-muted-foreground/70">他场</span>}
+        <span className={foreign ? '' : selected ? 'font-medium text-[#F0B90B]' : 'text-[#F0B90B]/80'}>{reverseOrderStatusText(order)}</span>
+        <span>{fmtReverseOrderChipTime(order.createdAt)}</span>
+        <span>@ {fmtReverseOrderChipPrice(order.price)}</span>
+        <button
+          type="button"
+          onClick={event => {
+            event.stopPropagation();
+            hideReverseHedgeOrder(order.id);
+          }}
+          title={foreign ? '从盘面隐藏这条他场委托' : '从盘面隐藏这条委托空单'}
+          aria-label={foreign ? '从盘面隐藏这条他场委托' : '从盘面隐藏这条委托空单'}
+          className="ml-0.5 inline-flex items-center text-muted-foreground/30 opacity-0 transition-opacity hover:text-[#F6465D] group-hover:opacity-100"
+        >
+          <EyeOff className="w-3 h-3" />
+        </button>
+      </div>
+    );
   };
 
   const reloadCounterfactuals = async (keepSelectionId?: string | null) => {
@@ -1641,6 +1729,7 @@ export default function JournalCampaignDetailPage() {
         legs,
         tradeRecords,
         reverseHedgeOrders: visibleReverseHedgeOrders,
+        foreignLiveOrders: visibleForeignLiveOrders,
         legExitPriceCorrections,
         chartElement: campaignChartExportRef.current,
         chartInterval: effectiveInterval,
@@ -2025,25 +2114,35 @@ export default function JournalCampaignDetailPage() {
                 />
               )}
             </div>
-            {(hasReverseOrders || hasManualHedgeShorts) && (
+            {(hasYellowOrderLayer || hasForeignLiveOrders) && (
               <div className="mt-2 px-1 space-y-1.5">
                 <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
                   <button
                     type="button"
                     onClick={() => setShowOrderInfo(v => !v)}
-                    title={showOrderInfo ? '隐藏委托/手动对冲空单（黄色）' : '显示委托/手动对冲空单（黄色）'}
-                    aria-label={showOrderInfo ? '隐藏委托与手动对冲空单' : '显示委托与手动对冲空单'}
-                    className="inline-flex items-center text-[#F0B90B]/60 hover:text-[#F0B90B] transition-colors"
+                    title={orderLayerToggleTitle}
+                    aria-label={orderLayerToggleLabel}
+                    className={`inline-flex items-center transition-colors ${
+                      hasYellowOrderLayer ? 'text-[#F0B90B]/60 hover:text-[#F0B90B]' : 'text-[#848E9C]/60 hover:text-[#848E9C]'
+                    }`}
                   >
                     {showOrderInfo ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
                   </button>
-                  <span>
-                    {[hasReverseOrders && '委托空单挂单', hasManualHedgeShorts && '手动对冲空单'].filter(Boolean).join(' · ')}
-                    （<span className="text-[#F0B90B]">黄色水平线</span>，
-                    {[hasReverseOrders && '委托按委托价', hasManualHedgeShorts && '手动按开仓价'].filter(Boolean).join('、')}
-                    {showOrderInfo ? '' : '·已隐藏'}）
-                  </span>
-                  {hasReverseOrders && (
+                  {hasYellowOrderLayer && (
+                    <span>
+                      {[hasReverseOrders && '委托空单挂单', hasManualHedgeShorts && '手动对冲空单'].filter(Boolean).join(' · ')}
+                      （<span className="text-[#F0B90B]">黄色水平线</span>，
+                      {[hasReverseOrders && '委托按委托价', hasManualHedgeShorts && '手动按开仓价'].filter(Boolean).join('、')}
+                      {showOrderInfo ? '' : '·已隐藏'}）
+                    </span>
+                  )}
+                  {hasForeignLiveOrders && (
+                    <span data-testid="foreign-replay-order-legend" className="text-muted-foreground/55">
+                      {hasYellowOrderLayer ? '· ' : ''}他场委托（<span className="text-[#848E9C]">灰色淡虚线</span>，另一次回放留下、未计入本场
+                      {showOrderInfo ? '' : '·已隐藏'}）
+                    </span>
+                  )}
+                  {(hasReverseOrders || hasForeignLiveOrders) && (
                     <button
                       type="button"
                       onClick={() => setShowReverseOrderManager(v => !v)}
@@ -2064,50 +2163,16 @@ export default function JournalCampaignDetailPage() {
                 </div>
                 {showReverseOrderManager && showOrderInfo && visibleReverseHedgeOrders.length > 0 && (
                   <div className="flex flex-wrap gap-1.5 pl-5">
-                    {visibleReverseHedgeOrders.map(order => {
-                      const selected = activeSelectedReverseOrderSet.has(order.id);
-                      return (
-                      <div
-                        key={order.id}
-                        role="button"
-                        tabIndex={0}
-                        aria-pressed={selected}
-                        data-testid="reverse-order-chip"
-                        data-selected={selected ? 'true' : 'false'}
-                        onClick={() => toggleReverseOrderSelection(order.id)}
-                        onKeyDown={event => {
-                          if (event.key !== 'Enter' && event.key !== ' ') return;
-                          event.preventDefault();
-                          toggleReverseOrderSelection(order.id);
-                        }}
-                        className={`group inline-flex cursor-pointer items-center gap-1 rounded border px-2 py-1 text-[10px] transition-colors ${
-                          selected
-                            ? 'border-[#F0B90B] bg-[#F0B90B]/20 text-foreground shadow-[0_0_0_1px_rgba(240,185,11,0.45)]'
-                            : 'border-border/40 bg-muted/20 text-muted-foreground hover:border-[#F0B90B]/40'
-                        }`}
-                      >
-                        <span
-                          aria-hidden="true"
-                          className={`h-2.5 w-2.5 shrink-0 rounded-[2px] transition-colors ${selected ? 'bg-[#F0B90B]' : 'bg-[#F0B90B]/25'}`}
-                        />
-                        <span className={selected ? 'font-medium text-[#F0B90B]' : 'text-[#F0B90B]/80'}>{reverseOrderStatusText(order)}</span>
-                        <span>{fmtReverseOrderChipTime(order.createdAt)}</span>
-                        <span>@ {fmtReverseOrderChipPrice(order.price)}</span>
-                        <button
-                          type="button"
-                          onClick={event => {
-                            event.stopPropagation();
-                            hideReverseHedgeOrder(order.id);
-                          }}
-                          title="从盘面隐藏这条委托空单"
-                          aria-label="从盘面隐藏这条委托空单"
-                          className="ml-0.5 inline-flex items-center text-muted-foreground/30 opacity-0 transition-opacity hover:text-[#F6465D] group-hover:opacity-100"
-                        >
-                          <EyeOff className="w-3 h-3" />
-                        </button>
-                      </div>
-                      );
-                    })}
+                    {visibleReverseHedgeOrders.map(order => renderReverseOrderChip(order))}
+                  </div>
+                )}
+                {/* 他场委托单独一组、整体压灰，排在本场的色块之后：一眼看出不是这场挂的。标题只数各自状态，与色块的 已撤 / 已触发 对得上 */}
+                {showReverseOrderManager && showOrderInfo && visibleForeignLiveOrders.length > 0 && (
+                  <div data-testid="foreign-replay-order-group" className="flex flex-wrap items-center gap-1.5 pl-5">
+                    <span className="text-[10px] text-muted-foreground/50">
+                      {formatForeignReplayOrdersHeading(visibleForeignLiveOrders)}
+                    </span>
+                    {visibleForeignLiveOrders.map(order => renderReverseOrderChip(order, true))}
                   </div>
                 )}
               </div>
@@ -2228,6 +2293,7 @@ export default function JournalCampaignDetailPage() {
             campaignEvents={campaign.actual_evolution}
             legExitPriceCorrections={legExitPriceCorrections}
             reverseHedgeOrders={visibleReverseHedgeOrders}
+            foreignLiveOrders={visibleForeignLiveOrders}
             highlightedLegIds={selectedLegMarkerIds}
             onToggleHighlight={(leg) => {
               setFocusTime(null);

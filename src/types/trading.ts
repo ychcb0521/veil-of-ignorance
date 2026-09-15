@@ -203,6 +203,11 @@ export interface CampaignReverseHedgeOrder {
   triggeredAt?: number | null;
   cancelledAt: number | null;
   status: 'cancelled' | 'pending' | 'triggered';
+  /**
+   * 别的回放留下、在本场期间仍挂着的委托（getCampaignFullData 的 foreignLiveOrders）。
+   * 只用于标注显示：不进 reverseHedgeOrders / pendingOrders，风险指标、Legs 合计与结束建议都不算它。
+   */
+  foreignReplay?: boolean;
 }
 
 interface TriggerRange {

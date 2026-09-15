@@ -2587,4 +2587,167 @@ describe('【用户要求】委托空单与本场操作时间对齐：TUTUSDT 20
       expect(pendingOrders.map(order => order.id)).toEqual(['passB-hedge']);
     });
   });
+
+  describe('【用户决定】别的回放留下、在本场期间仍挂着的委托空单：显示但标注（foreignLiveOrders）', () => {
+    const idsOf = (orders: Array<{ id: string }>) => orders.map(order => order.id);
+    /** 本场这遍（09-13）打到平仓，自带一张本场的委托；另一次回放（09-10）留下的单子按用例追加。 */
+    const storeWithMine = (data: { cancelled?: CancelledOrderSnapshot[]; filled?: FilledOrderSnapshot[]; pending?: PendingOrder[] }) => store({
+      ...data,
+      tradeHistory: [mainRecord({ openedRealAt: realMine(SIM0), closedRealAt: realMine(SIM_CLOSE) })],
+      cancelled: [mineHedge('mine-0300500-1942', sim(1), sim(6 * 60)), ...(data.cancelled ?? [])],
+    });
+
+    it('另一次回放挂出、至今仍挂着：进 foreignLiveOrders 并带 foreignReplay，委托层与持仓面板都没有它', async () => {
+      journals = [mainLeg(), mirrorLeg()];
+      storeWithMine({
+        pending: [shortPending('other-live-0300500', sim(1) + 15_000, realOther(sim(1) + 15_000), 0.03005)],
+      });
+
+      const { reverseHedgeOrders, pendingOrders, foreignLiveOrders } = await getCampaignFullData(campaign.id, { heal: false });
+
+      expect(idsOf(reverseHedgeOrders)).toEqual(['mine-0300500-1942']);
+      expect(reverseHedgeOrders.some(order => order.foreignReplay)).toBe(false);
+      expect(pendingOrders).toEqual([]);
+      expect(foreignLiveOrders).toEqual([expect.objectContaining({
+        id: 'other-live-0300500',
+        status: 'pending',
+        price: 0.03005,
+        createdAt: sim(1) + 15_000,
+        cancelledAt: null,
+        foreignReplay: true,
+      })]);
+    });
+
+    it('本场开始之前就撤掉的不标；挂到本场期间才撤掉 / 触发的标（带结束时刻）', async () => {
+      journals = [mainLeg(), mirrorLeg()];
+      storeWithMine({
+        cancelled: [
+          otherHedge('other-cancelled-before', sim(1) + 15_000, sim(6 * 60)),
+          // 09-10 挂出，一直挂到 09-13 本场这遍才撤掉
+          hedge('other-cancelled-during', sim(2), sim(6 * 60), {
+            createdRealAt: realOther(sim(2)),
+            cancelledRealAt: realMine(sim(6 * 60)),
+          }, 0.0299),
+        ],
+        filled: [
+          // 09-10 挂出，在本场这遍被触发（开出的仓位不是本场选中的成交）
+          shortFill('other-triggered-during', sim(3), sim(5 * 60), {
+            createdRealAt: realOther(sim(3)),
+            filledRealAt: realMine(sim(5 * 60)),
+          }, 'other-position', 0.0298),
+        ],
+      });
+
+      const { reverseHedgeOrders, pendingOrders, foreignLiveOrders } = await getCampaignFullData(campaign.id, { heal: false });
+
+      expect(idsOf(reverseHedgeOrders)).toEqual(['mine-0300500-1942']);
+      expect(pendingOrders).toEqual([]);
+      expect(foreignLiveOrders).toEqual([
+        expect.objectContaining({ id: 'other-cancelled-during', status: 'cancelled', cancelledAt: sim(6 * 60), foreignReplay: true }),
+        expect.objectContaining({ id: 'other-triggered-during', status: 'triggered', triggeredAt: sim(5 * 60), foreignReplay: true }),
+      ]);
+    });
+
+    it('一个真实时刻都没有的老委托放不进时间里，不标', async () => {
+      journals = [mainLeg(), mirrorLeg()];
+      storeWithMine({
+        cancelled: [hedge('aug-unstamped-cancelled', sim(1) + 15_000, sim(5 * 60))],
+        pending: [{ ...shortPending('aug-unstamped-live', sim(20 * 60), 0, 0.0288), createdRealAt: undefined }],
+      });
+
+      const { reverseHedgeOrders, pendingOrders, foreignLiveOrders } = await getCampaignFullData(campaign.id, { heal: false });
+
+      expect(idsOf(reverseHedgeOrders)).toEqual(['mine-0300500-1942']);
+      expect(pendingOrders).toEqual([]);
+      expect(foreignLiveOrders).toEqual([]);
+    });
+
+    it('本场倒回前被取代的那一遍（挂单时刻就在本场保留段里）不是别的回放留下的，不标', async () => {
+      const REAL_PASS_A = t('2026-09-13T10:00:00.000Z');
+      journals = [mainLeg()];
+      store({
+        tradeHistory: [mainRecord({ openedRealAt: REAL_PASS_A, closedRealAt: realMine(SIM_CLOSE) })],
+        cancelled: [
+          hedge('passA-0300500-1942', sim(1) + 20_000, sim(3 * 60), {
+            createdRealAt: REAL_PASS_A + 30_000,
+            cancelledRealAt: REAL_PASS_A + 6 * MIN,
+          }),
+          mineHedge('passB-0300500-1942', sim(1), sim(6 * 60)),
+        ],
+      });
+
+      const { reverseHedgeOrders, foreignLiveOrders } = await getCampaignFullData(campaign.id, { heal: false });
+
+      expect(idsOf(reverseHedgeOrders)).toEqual(['passB-0300500-1942']);
+      expect(foreignLiveOrders).toEqual([]);
+    });
+
+    it('【复核】同标的另一段日期的回放留下的挂单（模拟时刻在本场窗口之外）不标：它的价位会把本场盘面的价轴拉飞', async () => {
+      journals = [mainLeg(), mirrorLeg()];
+      storeWithMine({
+        pending: [
+          // 1 月那段行情的回放：09-10 挂出、至今仍挂着，价位 0.12 与本场 0.03 差了 4 倍
+          shortPending('jan-replay-live', t('2026-01-05T03:00:00.000Z'), REAL_OTHER, 0.12),
+          shortPending('other-live-0300500', sim(1) + 15_000, realOther(sim(1) + 15_000), 0.03005),
+        ],
+      });
+
+      const { reverseHedgeOrders, pendingOrders, foreignLiveOrders } = await getCampaignFullData(campaign.id, { heal: false });
+
+      expect(idsOf(reverseHedgeOrders)).toEqual(['mine-0300500-1942']);
+      expect(pendingOrders).toEqual([]);
+      expect(idsOf(foreignLiveOrders)).toEqual(['other-live-0300500']);
+    });
+
+    it('【复核】本场自己的事件流记过的委托（hedge_placed 带 pending_order_id），回放时间线判不进本场也不能反过来标成他场', async () => {
+      journals = [mainLeg(), mirrorLeg()];
+      campaign.actual_evolution = [{
+        id: 'evt-pre-hedge',
+        timestamp: iso(sim(-3)),
+        event_type: 'hedge_placed',
+        leg_role: 'hedge_initial_a',
+        journal_id: null,
+        trade_record_id: null,
+        pending_order_id: 'pre-hedge-early',
+        direction: 'short',
+        price: 0.0306,
+        size_usdt: null,
+        notes: null,
+        recorded_at: '2026-09-13T06:00:00.000Z',
+      }] as TradeCampaign['actual_evolution'];
+      storeWithMine({
+        // 同 id 的挂单快照：真实时刻比本场坐下来（11:34）早了 5 个多小时，回放分段把它切在本场之外
+        pending: [shortPending('pre-hedge-early', sim(-3), t('2026-09-13T06:00:00.000Z'), 0.0306)],
+      });
+
+      const { reverseHedgeOrders, pendingOrders, foreignLiveOrders } = await getCampaignFullData(campaign.id, { heal: false });
+
+      expect(idsOf(reverseHedgeOrders)).toEqual(['mine-0300500-1942']);
+      expect(pendingOrders).toEqual([]);
+      expect(foreignLiveOrders).toEqual([]);
+    });
+
+    it('挂单没盖章、只被本场这遍撤掉 / ⏹ 停止撤掉 / 触发而盖上结束时刻的 8 月老委托：结束时刻证明它本场期间挂在盘上，标', async () => {
+      journals = [mainLeg(), mirrorLeg()];
+      storeWithMine({
+        cancelled: [
+          // 8 月挂出、一直挂到这遍才被手动撤掉：只有撤单时刻
+          hedge('aug-carried-cancelled', sim(1) + 15_000, sim(5 * 60), { cancelledRealAt: realMine(sim(5 * 60)) }),
+          // 平仓后按 ⏹ 停止一键撤掉：撤单时刻盖在平仓之后 10 秒
+          hedge('aug-stop-cancelled', sim(2), SIM_CLOSE, { cancelledRealAt: realMine(SIM_CLOSE) + 10_000 }, 0.0301),
+        ],
+        filled: [shortFill('aug-carried-filled', sim(3), sim(4 * 60), { filledRealAt: realMine(sim(4 * 60)) }, 'aug-position', 0.0299)],
+      });
+
+      const { reverseHedgeOrders, pendingOrders, foreignLiveOrders } = await getCampaignFullData(campaign.id, { heal: false });
+
+      expect(idsOf(reverseHedgeOrders)).toEqual(['mine-0300500-1942']);
+      expect(pendingOrders).toEqual([]);
+      expect(foreignLiveOrders).toEqual([
+        expect.objectContaining({ id: 'aug-carried-cancelled', status: 'cancelled', cancelledAt: sim(5 * 60), foreignReplay: true }),
+        expect.objectContaining({ id: 'aug-stop-cancelled', status: 'cancelled', cancelledAt: SIM_CLOSE, foreignReplay: true }),
+        expect.objectContaining({ id: 'aug-carried-filled', status: 'triggered', triggeredAt: sim(4 * 60), foreignReplay: true }),
+      ]);
+    });
+  });
 });

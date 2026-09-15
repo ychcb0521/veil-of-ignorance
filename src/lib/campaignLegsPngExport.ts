@@ -23,6 +23,7 @@ import {
 } from '@/lib/campaignAddSizingCheck';
 import type { TradeCampaign, TradeJournal } from '@/types/journal';
 import type { EmotionDiaryExportSummary } from '@/types/emotionDiary';
+import { formatForeignReplayOrdersNote } from '@/lib/campaignReverseOrderLines';
 import type { CampaignReverseHedgeOrder, TradeRecord } from '@/types/trading';
 
 type ExportInput = {
@@ -33,6 +34,8 @@ type ExportInput = {
   legs: TradeJournal[];
   tradeRecords: TradeRecord[];
   reverseHedgeOrders: CampaignReverseHedgeOrder[];
+  /** 别的回放留下、本场期间仍挂着的委托：不进任何腿的行，表尾合计之后画一行淡注（与页面同源）。 */
+  foreignLiveOrders?: CampaignReverseHedgeOrder[];
   legExitPriceCorrections?: LegExitPriceCorrections;
 };
 
@@ -68,8 +71,11 @@ export type CampaignLegsExportCellLine = {
 
 export type CampaignLegsExportRow = {
   legId: string;
-  /** 腿本身 / 主力阶段子行 / 表尾合计。合计行画一道加粗上框，与页面一致。 */
-  kind: 'leg' | 'phase' | 'total';
+  /**
+   * 腿本身 / 主力阶段子行 / 表尾合计 / 表下淡注。合计行画一道加粗上框，与页面一致。
+   * note 行只有一格、横跨整张表宽（他场委托的说明），不按列排。
+   */
+  kind: 'leg' | 'phase' | 'total' | 'note';
   /** 逻辑行：每格「一条信息一行」，与页面同构；读数与测试都以它为准。 */
   cells: CampaignLegsExportCellLine[][];
   /** 按列宽折好的实际绘制行。行高由它决定——放不下的字折到下一行，而不是被画布横向压扁。 */
@@ -626,11 +632,29 @@ export function buildCampaignLegsExportRows(input: ExportInput): CampaignLegsExp
       ],
     [{ text: '' }],
   ];
+  // 他场委托的淡注：与页面 Legs 表下方那行同一个函数，不放进任何腿的行
+  const foreignNote = formatForeignReplayOrdersNote(input.foreignLiveOrders ?? []);
+  const noteRows: CampaignLegsExportRow[] = [];
+  if (foreignNote) {
+    const noteCells: CampaignLegsExportCellLine[][] = [[{ text: foreignNote, color: '#A3ABB8', size: 11 }]];
+    const wrapped = [noteCells[0].flatMap(line => wrapCampaignLegsExportLine(line, TABLE_WIDTH - CELL_PAD_X * 2))];
+    noteRows.push({
+      legId: 'legs-foreign-replay-orders-note',
+      kind: 'note',
+      cells: noteCells,
+      wrapped,
+      height: NOTE_ROW_PAD_Y * 2 + wrapped[0].reduce((sum, line) => sum + exportLineHeight(line), 0),
+    });
+  }
   return [
     ...legRows,
     { legId: 'legs-total', kind: 'total', cells: totalCells, ...layoutExportRow(totalCells, 44) },
+    ...noteRows,
   ];
 }
+
+/** 表下淡注行的上下留白：比腿行紧，读起来是表的脚注而不是又一行数据。 */
+const NOTE_ROW_PAD_Y = 8;
 
 export function campaignLegsExportCanvasHeight(input: ExportInput, includeHeader = false): number {
   const rows = buildCampaignLegsExportRows(input);
@@ -733,6 +757,14 @@ function drawLegsTable(ctx: CanvasRenderingContext2D, rows: CampaignLegsExportRo
   y += TABLE_HEADER_H;
   rows.forEach((row, rowIndex) => {
     x = MARGIN_X;
+    if (row.kind === 'note') {
+      // 淡注横跨整张表宽：不画斑马底、不画分隔线，只写一行（放不下就折）浅灰小字
+      ctx.fillStyle = '#FFFFFF';
+      ctx.fillRect(MARGIN_X, y, TABLE_WIDTH, row.height);
+      drawLines(ctx, row.wrapped[0] ?? [], MARGIN_X + CELL_PAD_X, y + NOTE_ROW_PAD_Y + 12);
+      y += row.height;
+      return;
+    }
     ctx.fillStyle = row.kind === 'total' ? '#EEF2F7' : rowIndex % 2 === 0 ? '#FFFFFF' : '#FAFBFD';
     ctx.fillRect(MARGIN_X, y, TABLE_WIDTH, row.height);
     ctx.strokeStyle = '#E5E7EB';

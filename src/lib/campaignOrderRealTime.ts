@@ -247,6 +247,11 @@ export interface ReplaySessionFilter {
   /** 识别出的回放段数（含不属于本场的），供排查。 */
   sessionCount: number;
   /**
+   * 保留下来的每一段在现实里的起止（首尾事件的真实时刻），按现实先后。
+   * 供「别的回放留下、本场期间仍挂着」的委托判断活没活进本场（见 getCampaignFullData 的 foreignLiveOrders）。
+   */
+  keptRealSpans: Array<{ start: number; end: number }>;
+  /**
    * 保留的段里有上线之后的证据（委托 createdRealAt、成交 openedRealAt，或晚于 STAMP_ROLLOUT_SETTLED_AT 的真实时刻），供排查。
    * 它本身不决定拒绝：跨上线的那一段里早于证据的无章委托仍放行（见盖章时代规则）。
    */
@@ -659,6 +664,7 @@ export function buildReplaySessionFilter(
   return {
     sessionCount: segmentCount,
     stampEra,
+    keptRealSpans: kept.map(({ start, end }) => ({ start, end })),
     allows: realAt => {
       if (!finitePositive(realAt)) return true;
       return kept.some(session => realAt >= session.start && realAt <= session.end);

@@ -1,10 +1,20 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { computeInitialExpectedMaxLoss } from '@/lib/campaignAnalysis';
 import type { CampaignBoardExportInput } from '@/lib/campaignLegsPngExport';
 import { getCampaignFullData } from '@/lib/journalApi';
 import type { CampaignCounterfactual, TradeCampaign, TradeJournal } from '@/types/journal';
 import JournalCampaignDetailPage from '../JournalCampaignDetailPage';
+
+// 只包一层 spy、照常计算：用来确认最大预期亏损的输入里没有他场委托
+vi.mock('@/lib/campaignAnalysis', async importOriginal => {
+  const actual = await importOriginal<typeof import('@/lib/campaignAnalysis')>();
+  return {
+    ...actual,
+    computeInitialExpectedMaxLoss: vi.fn(actual.computeInitialExpectedMaxLoss),
+  };
+});
 
 vi.mock('@/lib/campaignLegExecution', async importOriginal => {
   const actual = await importOriginal<typeof import('@/lib/campaignLegExecution')>();
@@ -133,6 +143,7 @@ const { campaigns, detailsById } = vi.hoisted(() => {
       tradeRecords: [],
       pendingOrders: [],
       reverseHedgeOrders: [],
+      foreignLiveOrders: [],
     }])),
   };
 });
@@ -153,20 +164,24 @@ vi.mock('@/contexts/TradingContext', () => ({
   }),
 }));
 
+// 取景窗口固定返回；包一层 spy 是为了看页面递进去的内容跨度（他场委托的时刻也得在里面）
+const klineWindowMock = vi.hoisted(() => ({
+  build: vi.fn((..._args: unknown[]) => ({
+    fromTime: Date.parse('2025-12-31T07:30:00.000Z'),
+    toTime: Date.parse('2026-01-01T17:30:00.000Z'),
+    defaultFromTime: Date.parse('2025-12-31T23:30:00.000Z'),
+    defaultToTime: Date.parse('2026-01-01T01:30:00.000Z'),
+    contentStartMs: Date.parse('2026-01-01T00:10:00.000Z'),
+    contentEndMs: Date.parse('2026-01-01T00:50:00.000Z'),
+    contextMs: 40 * 60_000,
+    availableContextMs: 1_000 * 60_000,
+  })),
+}));
 vi.mock('@/hooks/useCampaignKlines', async importOriginal => {
   const actual = await importOriginal<typeof import('@/hooks/useCampaignKlines')>();
   return {
     ...actual,
-    buildCampaignKlineTimeWindow: () => ({
-      fromTime: Date.parse('2025-12-31T07:30:00.000Z'),
-      toTime: Date.parse('2026-01-01T17:30:00.000Z'),
-      defaultFromTime: Date.parse('2025-12-31T23:30:00.000Z'),
-      defaultToTime: Date.parse('2026-01-01T01:30:00.000Z'),
-      contentStartMs: Date.parse('2026-01-01T00:10:00.000Z'),
-      contentEndMs: Date.parse('2026-01-01T00:50:00.000Z'),
-      contextMs: 40 * 60_000,
-      availableContextMs: 1_000 * 60_000,
-    }),
+    buildCampaignKlineTimeWindow: klineWindowMock.build,
     useCampaignKlines: () => ({
       klines: [{
         time: Date.parse('2026-01-01T00:00:00.000Z'),
@@ -229,7 +244,15 @@ vi.mock('@/components/journal/ReplayKlineChart', () => ({
     return <div data-testid="campaign-chart" />;
   },
 }));
-vi.mock('@/components/journal/CampaignLegsList', () => ({ CampaignLegsList: () => null }));
+const legsListLatest = vi.hoisted(() => ({
+  props: null as null | { reverseHedgeOrders?: Array<{ id: string }>; foreignLiveOrders?: Array<{ id: string }> },
+}));
+vi.mock('@/components/journal/CampaignLegsList', () => ({
+  CampaignLegsList: (props: { reverseHedgeOrders?: Array<{ id: string }>; foreignLiveOrders?: Array<{ id: string }> }) => {
+    legsListLatest.props = props;
+    return null;
+  },
+}));
 vi.mock('@/components/journal/CampaignWhatIfEditor', () => ({ CampaignWhatIfEditor: () => null }));
 vi.mock('@/components/journal/EndCampaignDialog', () => ({ EndCampaignDialog: () => null }));
 vi.mock('@/lib/campaignLegsPngExport', async importOriginal => {
@@ -576,6 +599,139 @@ describe('JournalCampaignDetailPage metrics', () => {
     await waitFor(() => expect(chipFor('97')).toHaveAttribute('data-selected', 'false'));
     expect(chipFor('95')).toHaveAttribute('data-selected', 'false');
     await waitFor(() => expect(lineFor('order-b')?.selected).toBe(false));
+  }, 30_000);
+
+  it('【用户决定】他场委托：盘面灰色淡虚线、管理区排在本场之后单独压灰一组且可隐藏；Legs 与最大预期亏损都不算它', async () => {
+    const at = (iso: string) => Date.parse(iso);
+    vi.mocked(computeInitialExpectedMaxLoss).mockClear();
+    legsListLatest.props = null;
+    vi.mocked(getCampaignFullData).mockImplementation(async (id: string) => ({
+      ...detailsById[id],
+      reverseHedgeOrders: [
+        { id: 'order-a', tradeRecordId: null, side: 'SHORT', price: 95, fillPrice: null, createdAt: at('2026-01-01T00:05:00.000Z'), triggeredAt: null, cancelledAt: at('2026-01-01T00:30:00.000Z'), status: 'cancelled' },
+      ],
+      foreignLiveOrders: [
+        { id: 'other-live', tradeRecordId: null, side: 'SHORT', price: 93, fillPrice: null, createdAt: at('2026-01-01T00:08:00.000Z'), triggeredAt: null, cancelledAt: null, status: 'pending', foreignReplay: true },
+      ],
+    }));
+    render(
+      <MemoryRouter initialEntries={['/journal/campaigns/winner']}>
+        <Routes>
+          <Route path="/journal/campaigns/:id" element={<JournalCampaignDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    const lineFor = (orderId: string) => replayChartLatest.lines.find(line => line.orderIds?.includes(orderId));
+    await waitFor(() => expect(lineFor('other-live')).toBeTruthy());
+    expect(lineFor('other-live')).toMatchObject({ title: '他场委托', color: '#848E9C', dashed: true, dim: true });
+    expect(lineFor('order-a')?.title).toBe('委托空');
+    expect(screen.getByTestId('foreign-replay-order-legend')).toHaveTextContent('他场委托');
+
+    // Legs 表拿到的是两份：本场委托里没有他场那张
+    expect(legsListLatest.props?.reverseHedgeOrders?.map(order => order.id)).toEqual(['order-a']);
+    expect(legsListLatest.props?.foreignLiveOrders?.map(order => order.id)).toEqual(['other-live']);
+    // 最大预期亏损（Δb 的分母）的输入只有本场委托
+    const orderInputs = vi.mocked(computeInitialExpectedMaxLoss).mock.calls
+      .flatMap(args => args.filter(Array.isArray) as Array<Array<{ id?: string }>>);
+    expect(orderInputs.some(orders => orders.some(order => order?.id === 'order-a'))).toBe(true);
+    expect(orderInputs.some(orders => orders.some(order => order?.id === 'other-live'))).toBe(false);
+
+    fireEvent.click(screen.getByRole('button', { name: '管理' }));
+    const ownChips = screen.getAllByTestId('reverse-order-chip');
+    expect(ownChips).toHaveLength(1);
+    const group = screen.getByTestId('foreign-replay-order-group');
+    expect(group).toHaveTextContent('来自另一次回放 · 仍挂着 1');
+    expect(ownChips[0].compareDocumentPosition(group) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    const foreignChips = within(group).getAllByTestId('foreign-replay-order-chip');
+    expect(foreignChips).toHaveLength(1);
+    expect(foreignChips[0]).toHaveTextContent('他场');
+    expect(within(group).queryAllByTestId('reverse-order-chip')).toHaveLength(0);
+
+    // 同一个隐藏按钮：盘面线与色块一起消失，「恢复」能找回来
+    fireEvent.click(within(foreignChips[0]).getByRole('button', { name: '从盘面隐藏这条他场委托' }));
+    await waitFor(() => expect(lineFor('other-live')).toBeUndefined());
+    expect(screen.queryByTestId('foreign-replay-order-group')).toBeNull();
+    expect(lineFor('order-a')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: '恢复 1' }));
+    await waitFor(() => expect(lineFor('other-live')).toBeTruthy());
+
+    // 眼睛开关同样管它：说明里也点名他场委托，关掉后灰色那句同样标已隐藏
+    const toggle = screen.getByRole('button', { name: /^隐藏.*他场委托$/ });
+    expect(toggle).toHaveAttribute('title', expect.stringMatching(/^隐藏.*他场委托（黄色、灰色）$/));
+    fireEvent.click(toggle);
+    await waitFor(() => expect(lineFor('other-live')).toBeUndefined());
+    expect(lineFor('order-a')).toBeUndefined();
+    expect(screen.getByTestId('foreign-replay-order-legend')).toHaveTextContent('已隐藏');
+  }, 30_000);
+
+  it('【复核】只有他场委托、且挂在开主力前 3 分钟：取景跨度盖住它，眼睛开关的说明只写他场委托（灰色），关掉后标已隐藏', async () => {
+    const preOpen = Date.parse('2025-12-31T23:57:00.000Z');
+    klineWindowMock.build.mockClear();
+    vi.mocked(getCampaignFullData).mockImplementation(async (id: string) => ({
+      ...detailsById[id],
+      // 只留主力腿：盘上没有任何黄色层
+      legs: detailsById[id].legs.filter(leg => leg.leg_role === 'main_open'),
+      reverseHedgeOrders: [],
+      foreignLiveOrders: [
+        { id: 'other-prehedge', tradeRecordId: null, side: 'SHORT', price: 93, fillPrice: null, createdAt: preOpen, triggeredAt: null, cancelledAt: null, status: 'pending', foreignReplay: true },
+      ],
+    }));
+    render(
+      <MemoryRouter initialEntries={['/journal/campaigns/winner']}>
+        <Routes>
+          <Route path="/journal/campaigns/:id" element={<JournalCampaignDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    const lineFor = (orderId: string) => replayChartLatest.lines.find(line => line.orderIds?.includes(orderId));
+    await waitFor(() => expect(lineFor('other-prehedge')).toBeTruthy());
+    // 内容跨度从它的委托时刻（开主力前 3 分钟）之前开始：灰线不会落在 K 线窗口之外
+    const lastSpanStart = () => klineWindowMock.build.mock.calls.at(-1)?.[2] as number | null | undefined;
+    await waitFor(() => expect(lastSpanStart()).toBeLessThanOrEqual(preOpen));
+
+    const toggle = screen.getByRole('button', { name: '隐藏他场委托' });
+    expect(toggle).toHaveAttribute('title', '隐藏他场委托（灰色）');
+    expect(screen.queryByText(/黄色水平线/)).toBeNull();
+    const legend = screen.getByTestId('foreign-replay-order-legend');
+    expect(legend).not.toHaveTextContent('已隐藏');
+
+    fireEvent.click(toggle);
+    await waitFor(() => expect(lineFor('other-prehedge')).toBeUndefined());
+    expect(legend).toHaveTextContent('已隐藏');
+    expect(screen.getByRole('button', { name: '显示他场委托' })).toHaveAttribute('title', '显示他场委托（灰色）');
+  }, 30_000);
+
+  it('【复核】他场一组的标题只数各自状态：本场期间撤掉 / 触发的不算「仍挂着」', async () => {
+    const at = (iso: string) => Date.parse(iso);
+    const foreign = (id: string, price: number, extra: Partial<{ triggeredAt: number | null; cancelledAt: number | null; status: 'pending' | 'cancelled' | 'triggered' }>) => ({
+      id, tradeRecordId: null, side: 'SHORT' as const, price, fillPrice: null,
+      createdAt: at('2026-01-01T00:08:00.000Z'), triggeredAt: null, cancelledAt: null, status: 'pending' as const, foreignReplay: true,
+      ...extra,
+    });
+    vi.mocked(getCampaignFullData).mockImplementation(async (id: string) => ({
+      ...detailsById[id],
+      foreignLiveOrders: [
+        foreign('other-live', 93, {}),
+        foreign('other-cancelled', 92, { cancelledAt: at('2026-01-01T00:20:00.000Z'), status: 'cancelled' }),
+        foreign('other-triggered', 91, { triggeredAt: at('2026-01-01T00:30:00.000Z'), status: 'triggered' }),
+      ],
+    }));
+    render(
+      <MemoryRouter initialEntries={['/journal/campaigns/winner']}>
+        <Routes>
+          <Route path="/journal/campaigns/:id" element={<JournalCampaignDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => expect(screen.getByTestId('foreign-replay-order-legend')).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: '管理' }));
+    const group = screen.getByTestId('foreign-replay-order-group');
+    expect(group).toHaveTextContent('来自另一次回放 · 仍挂着 1 · 已了结 2');
+    expect(group).not.toHaveTextContent('仍挂着 3');
+    expect(within(group).getAllByTestId('foreign-replay-order-chip')).toHaveLength(3);
   }, 30_000);
 
   it('keeps verified expectancy values when another campaign fails to load', async () => {

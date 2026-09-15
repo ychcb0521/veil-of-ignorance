@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
+  FOREIGN_REPLAY_ORDER_LINE_COLOR,
   buildCampaignReverseOrderPriceLines,
+  buildForeignReplayOrderPriceLines,
   buildManualHedgeShortPriceLines,
+  formatForeignReplayOrdersHeading,
+  formatForeignReplayOrdersNote,
   isHedgeShortLeg,
   type HedgeShortLegExecution,
 } from '../campaignReverseOrderLines';
@@ -407,6 +411,115 @@ describe('buildManualHedgeShortPriceLines', () => {
       manualHedge({ openTime: null }),
       manualHedge({ closeTime: imx('16:00') }),
     ], [], [], fallbackEnd)).toEqual([]);
+  });
+});
+
+describe('【用户决定】他场委托：灰色淡虚线，不进黄色委托层', () => {
+  const fallbackEnd = t('2026-01-01T12:00:00.000Z');
+  const foreign = (overrides: Partial<CampaignReverseHedgeOrder>): CampaignReverseHedgeOrder => ({
+    ...makeShortOrder(overrides),
+    foreignReplay: true,
+  });
+
+  it('灰色、虚线、调低不透明度，标题「他场委托」；仍挂着的延续到战役结束，撤掉 / 触发的止于结束时刻，触发后也不改实线', () => {
+    const lines = buildForeignReplayOrderPriceLines([
+      foreign({ id: 'other-live', price: 0.03005, createdAt: t('2026-01-01T10:00:00.000Z') }),
+      foreign({
+        id: 'other-cancelled',
+        price: 0.0299,
+        createdAt: t('2026-01-01T10:05:00.000Z'),
+        cancelledAt: t('2026-01-01T11:00:00.000Z'),
+        status: 'cancelled',
+      }),
+      foreign({
+        id: 'other-triggered',
+        price: 0.0298,
+        createdAt: t('2026-01-01T10:06:00.000Z'),
+        triggeredAt: t('2026-01-01T10:30:00.000Z'),
+        status: 'triggered',
+      }),
+    ], fallbackEnd);
+
+    expect(lines).toHaveLength(3);
+    for (const line of lines) {
+      expect(line).toMatchObject({
+        color: FOREIGN_REPLAY_ORDER_LINE_COLOR,
+        dashed: true,
+        dim: true,
+        endMarker: null,
+        title: '他场委托',
+      });
+    }
+    const lineOf = (id: string) => lines.find(line => line.orderIds?.includes(id));
+    expect(lineOf('other-live')).toMatchObject({ startTime: t('2026-01-01T10:00:00.000Z'), endTime: fallbackEnd });
+    expect(lineOf('other-cancelled')).toMatchObject({ endTime: t('2026-01-01T11:00:00.000Z') });
+    expect(lineOf('other-triggered')).toMatchObject({ endTime: t('2026-01-01T10:30:00.000Z') });
+  });
+
+  it('与黄色层互不混：本场委托层里没有「他场委托」，他场线里没有黄色「委托空」', () => {
+    const own = makeShortOrder({
+      id: 'own',
+      price: 0.03005,
+      createdAt: t('2026-01-01T10:00:00.000Z'),
+      cancelledAt: t('2026-01-01T11:00:00.000Z'),
+      status: 'cancelled',
+    });
+    const other = foreign({ id: 'other', price: 0.03005, createdAt: t('2026-01-01T10:00:00.000Z') });
+
+    const yellow = buildCampaignReverseOrderPriceLines([own], [], fallbackEnd);
+    const grey = buildForeignReplayOrderPriceLines([other], fallbackEnd);
+
+    expect(yellow.length).toBeGreaterThan(0);
+    expect(yellow.every(line => line.title === '委托空' && line.color === '#F0B90B')).toBe(true);
+    expect(yellow.flatMap(line => line.orderIds ?? [])).not.toContain('other');
+    expect(grey.map(line => line.title)).toEqual(['他场委托']);
+    expect(grey.some(line => line.color === '#F0B90B')).toBe(false);
+    expect(grey.flatMap(line => line.orderIds ?? [])).toEqual(['other']);
+  });
+});
+
+describe('formatForeignReplayOrdersNote', () => {
+  const at = (hhmm: string) => Date.parse(`2026-08-07T${hhmm}:00+08:00`);
+
+  it('一行列出每张：价位、委托时刻与各自的状态字（仍挂着 / 已撤 / 已触发）；总句只说「挂在盘上」，不把已了结的数成仍挂着', () => {
+    expect(formatForeignReplayOrdersNote([
+      makeShortOrder({ id: 'a', price: 0.03005, createdAt: at('19:42') }),
+      makeShortOrder({ id: 'b', price: 0.0299, createdAt: at('20:10'), cancelledAt: at('21:00'), status: 'cancelled' }),
+      makeShortOrder({ id: 'c', price: 1.25, createdAt: at('20:30'), triggeredAt: at('22:00'), status: 'triggered' }),
+    ])).toBe('另有 3 张来自另一次回放的委托在本场期间挂在盘上：'
+      + '空 0.0300500 委 08-07 19:42 仍挂着 · 空 0.0299000 委 08-07 20:10 已撤 · 空 1.2500 委 08-07 20:30 已触发（未计入本场）');
+  });
+
+  it('【复核】只有撤掉 / 触发的两张：总句不再说「仍挂着 2」', () => {
+    const note = formatForeignReplayOrdersNote([
+      makeShortOrder({ id: 'b', price: 0.03005, createdAt: at('19:42'), cancelledAt: at('21:00'), status: 'cancelled' }),
+      makeShortOrder({ id: 'c', price: 0.0298, createdAt: at('19:44'), triggeredAt: at('22:00'), status: 'triggered' }),
+    ]);
+    expect(note).toBe('另有 2 张来自另一次回放的委托在本场期间挂在盘上：空 0.0300500 委 08-07 19:42 已撤 · 空 0.0298000 委 08-07 19:44 已触发（未计入本场）');
+    expect(note).not.toContain('仍挂着');
+  });
+
+  it('没有可显示的他场委托返回 null', () => {
+    expect(formatForeignReplayOrdersNote([])).toBeNull();
+    expect(formatForeignReplayOrdersNote([makeShortOrder({ price: Number.NaN })])).toBeNull();
+  });
+});
+
+describe('formatForeignReplayOrdersHeading', () => {
+  const at = (hhmm: string) => Date.parse(`2026-08-07T${hhmm}:00+08:00`);
+  const live = (id: string) => makeShortOrder({ id, price: 0.03005, createdAt: at('19:42') });
+  const cancelled = (id: string) => makeShortOrder({ id, price: 0.0299, createdAt: at('20:10'), cancelledAt: at('21:00'), status: 'cancelled' });
+  const triggered = (id: string) => makeShortOrder({ id, price: 0.0298, createdAt: at('20:30'), triggeredAt: at('22:00'), status: 'triggered' });
+
+  it('数字只数各自的状态：全部仍挂着 / 混着 / 都了结了三种写法，与色块的状态字对得上', () => {
+    expect(formatForeignReplayOrdersHeading([live('a'), live('b')])).toBe('来自另一次回放 · 仍挂着 2');
+    expect(formatForeignReplayOrdersHeading([live('a'), cancelled('b'), triggered('c')])).toBe('来自另一次回放 · 仍挂着 1 · 已了结 2');
+    expect(formatForeignReplayOrdersHeading([cancelled('b'), triggered('c')])).toBe('来自另一次回放 · 2 张 · 本场期间已了结');
+  });
+
+  it('没有可显示的他场委托返回 null', () => {
+    expect(formatForeignReplayOrdersHeading([])).toBeNull();
+    expect(formatForeignReplayOrdersHeading([makeShortOrder({ price: Number.NaN })])).toBeNull();
   });
 });
 

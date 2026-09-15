@@ -6,6 +6,7 @@ import { resolveLegExecution, type LegExitPriceCorrections } from '@/lib/campaig
 import { HEDGE_TYPE_LABELS } from '@/lib/hedgeTypes';
 import { buildTradeRecordLookup, journalOperationTime } from '@/lib/objectiveOperationTime';
 import { buildDisplayReverseOrderLegMap } from '@/lib/campaignReverseOrderAttribution';
+import { formatForeignReplayOrdersNote } from '@/lib/campaignReverseOrderLines';
 import { buildMainLegOrdinals } from '@/lib/campaignMainLegOrdinals';
 import { resolveMirrorTpOrderTiming } from '@/lib/campaignMirrorTpOrderTiming';
 import type { CampaignEvent, TradeJournal } from '@/types/journal';
@@ -29,6 +30,8 @@ interface Props {
   campaignEvents?: CampaignEvent[];
   legExitPriceCorrections?: LegExitPriceCorrections;
   reverseHedgeOrders?: CampaignReverseHedgeOrder[];
+  /** 别的回放留下、本场期间仍挂着的委托：不放进任何腿的行，只在表下方写一行淡注。 */
+  foreignLiveOrders?: CampaignReverseHedgeOrder[];
   highlightedLegIds?: string[];
   onToggleHighlight?: (leg: TradeJournal) => void;
   onHideReverseHedgeOrder?: (order: CampaignReverseHedgeOrder) => void;
@@ -243,6 +246,7 @@ export function CampaignLegsList({
   campaignEvents = [],
   legExitPriceCorrections = {},
   reverseHedgeOrders = [],
+  foreignLiveOrders = [],
   highlightedLegIds = [],
   onToggleHighlight,
   onHideReverseHedgeOrder,
@@ -250,6 +254,8 @@ export function CampaignLegsList({
   initialExpectedMaxLoss = null,
 }: Props) {
   const [addSizingDetailLegId, setAddSizingDetailLegId] = useState<string | null>(null);
+  // 与导出 PNG 同一个函数：两处的淡注一字不差
+  const foreignLiveOrdersNote = useMemo(() => formatForeignReplayOrdersNote(foreignLiveOrders), [foreignLiveOrders]);
   const recordMap = useMemo(() => buildTradeRecordLookup(tradeRecords), [tradeRecords]);
   const highlightedSet = useMemo(() => new Set(highlightedLegIds), [highlightedLegIds]);
   // 每条腿的已实现盈亏与对全场的贡献率。必须整体算——贡献率的分母依赖全部腿。
@@ -778,6 +784,15 @@ export function CampaignLegsList({
         </div>
       </div>
     </div>
+    {/* 他场委托：别的回放留下、本场期间仍挂着。不进任何腿的行、不进合计，只在表下方淡淡交代一句 */}
+    {foreignLiveOrdersNote && (
+      <div
+        data-testid="legs-foreign-replay-orders-note"
+        className="mt-1.5 px-1 text-[10px] leading-relaxed text-muted-foreground/50"
+      >
+        {foreignLiveOrdersNote}
+      </div>
+    )}
     {selectedAddSizingLeg && selectedAddSizingVerdict?.status === 'fail' && (
       <AddSizingDetailDialog
         leg={selectedAddSizingLeg}
