@@ -21,6 +21,23 @@ export interface LegExitPriceCorrection {
 
 export type LegExitPriceCorrections = Record<string, LegExitPriceCorrection>;
 
+/**
+ * 平仓价校正的拉取结果，带**完整性**标记。
+ *
+ * 校正本身是一份纯函数的产物（腿 + 成交记录 + 不可变的历史 1 分钟 K 线），
+ * 但拉 K 线这一步会失败（限流、断网）。失败与「这一分钟没有 K 线 / 平仓价本就在区间内」
+ * 表面上都是「没有校正」，而只有前者是不可信的：拿它推出的状态与盈亏回写落库，
+ * 等于把一次网络抖动写进数据库。complete === false 时任何**写路径**都不得采信。
+ */
+export interface LegExitPriceCorrectionsResult {
+  corrections: LegExitPriceCorrections;
+  /**
+   * 每条挂着成交 id 的腿都**查到了记录、并成功拿到了 K 线结论**（有或没有校正都算）。
+   * 「校验不了」≠「校验过、无需校正」：本地查不到那条成交记录时同样是 false。
+   */
+  complete: boolean;
+}
+
 export interface ResolvedLegExecution {
   record: TradeRecord | null;
   openTime: number | null;
@@ -62,24 +79,36 @@ async function withCanonicalPriceRequestSlot<T>(task: () => Promise<T>): Promise
   }
 }
 
+/** 一次 K 线拉取的结论：拿到了（含「这一分钟没有 K 线」的 null），还是根本没拿到。 */
+interface CanonicalTimePriceOutcome {
+  price: CanonicalTimePrice | null;
+  failed: boolean;
+}
+
 function fetchCachedCanonicalTimePrice(
   symbol: string,
   currentTime: number,
   fetchPriceAt: CanonicalTimePriceFetcher,
-): Promise<CanonicalTimePrice | null> {
+): Promise<CanonicalTimePriceOutcome> {
+  const settle = (request: Promise<CanonicalTimePrice | null>): Promise<CanonicalTimePriceOutcome> =>
+    request.then(price => ({ price, failed: false }), () => ({ price: null, failed: true }));
+
   if (fetchPriceAt !== fetchCanonicalTimePriceAt) {
-    return fetchPriceAt(symbol, currentTime).catch(() => null);
+    return settle(fetchPriceAt(symbol, currentTime));
   }
 
   const key = `${symbol.trim().toUpperCase()}:${currentTime}`;
   const cached = canonicalPriceCache.get(key);
-  if (cached) return cached;
+  if (cached) return settle(cached);
 
-  const request = withCanonicalPriceRequestSlot(
-    () => fetchPriceAt(symbol, currentTime).catch(() => null),
-  );
+  const request = withCanonicalPriceRequestSlot(() => fetchPriceAt(symbol, currentTime));
   canonicalPriceCache.set(key, request);
-  return request;
+  // 失败不进缓存：以前把 null 缓存住，一次限流会让整个会话都以为「没有校正」，
+  // 详情页刷新多少次都拿不到真值。下一次调用重新拉。
+  request.catch(() => {
+    if (canonicalPriceCache.get(key) === request) canonicalPriceCache.delete(key);
+  });
+  return settle(request);
 }
 
 function safeTimeMs(value: number | string | null | undefined): number | null {
@@ -121,21 +150,37 @@ export function buildLegExitPriceCorrection(
  * Validate each closed leg against the objective 1-minute candle at its close
  * time. Results are cached by symbol/time so list and detail pages share the
  * same immutable historical check without flooding the market-data endpoint.
+ *
+ * 带完整性标记的版本：写路径（战役汇总自愈）只能在 complete 时采信，
+ * 见 LegExitPriceCorrectionsResult。只读的界面用下面的薄封装即可。
  */
-export async function fetchLegExitPriceCorrections(
+export async function fetchLegExitPriceCorrectionsResult(
   symbol: string,
   legs: TradeJournal[],
   tradeRecords: TradeRecord[],
   fetchPriceAt: CanonicalTimePriceFetcher = fetchCanonicalTimePriceAt,
-): Promise<LegExitPriceCorrections> {
-  if (!symbol || legs.length === 0 || tradeRecords.length === 0) return {};
+): Promise<LegExitPriceCorrectionsResult> {
+  /**
+   * 只有本来就不挂成交 id 的腿（纯复盘快照）可以在没有记录时算作完整。
+   * 挂着成交 id 而本地查不到那条记录（换了浏览器、云端水化没跑完、清过历史成交），
+   * 它的平仓价就没法对着 K 线核验——这时的「没有校正」是不可信的，与拉 K 线失败同等对待。
+   * 以前这里把 tradeRecords 为空直接当作 complete：自愈会拿腿快照算出的**未校正**合计
+   * 写回库，与上一次拿齐记录时写的校正值来回翻转（closed_loss 配 +469.96 的那种行）。
+   */
+  const linkedLegs = legs.filter(leg => leg.trade_record_id);
+  if (linkedLegs.length === 0) return { corrections: {}, complete: true };
+  if (!symbol || tradeRecords.length === 0) return { corrections: {}, complete: false };
 
   const recordLookup = buildTradeRecordLookup(tradeRecords);
   const legsByRecordId = new Map<string, TradeJournal[]>();
-  for (const leg of legs) {
-    if (!leg.trade_record_id) continue;
-    const record = recordLookup.get(leg.trade_record_id);
-    if (!record || !Number.isFinite(record.closeTime) || record.closeTime <= 0) continue;
+  let unresolved = false;
+  for (const leg of linkedLegs) {
+    const record = recordLookup.get(leg.trade_record_id as string);
+    if (!record) {
+      unresolved = true;   // 查不到 = 校验不了，不是无需校正
+      continue;
+    }
+    if (!Number.isFinite(record.closeTime) || record.closeTime <= 0) continue;
     /**
      * 破产价结算的逐仓强平不校正：它的平仓价是触发那根 K 线里的强平价，平仓时刻是那根的收线，
      * 1 分钟校验看的是收线之后那一分钟（大周期下离影线可达一小时），会把正确的强平判成异常；
@@ -150,20 +195,36 @@ export async function fetchLegExitPriceCorrections(
   const entries = await Promise.all(
     Array.from(legsByRecordId.entries()).map(async ([recordId, linkedLegs]) => {
       const record = recordLookup.get(recordId);
-      if (!record) return [];
-      const canonical = await fetchCachedCanonicalTimePrice(
+      if (!record) return { failed: false, pairs: [] as Array<readonly [string, LegExitPriceCorrection]> };
+      const outcome = await fetchCachedCanonicalTimePrice(
         symbol,
         record.closeTime,
         fetchPriceAt,
       );
-      const correction = buildLegExitPriceCorrection(record.exitPrice, canonical);
-      return correction
-        ? linkedLegs.map(leg => [leg.id, correction] as const)
-        : [];
+      const correction = buildLegExitPriceCorrection(record.exitPrice, outcome.price);
+      return {
+        failed: outcome.failed,
+        pairs: correction
+          ? linkedLegs.map(leg => [leg.id, correction] as const)
+          : [],
+      };
     }),
   );
 
-  return Object.fromEntries(entries.flat());
+  return {
+    corrections: Object.fromEntries(entries.flatMap(entry => entry.pairs)),
+    complete: !unresolved && !entries.some(entry => entry.failed),
+  };
+}
+
+/** 只读界面用的薄封装：拉不到的腿当作没有校正（与此前行为一致）。 */
+export async function fetchLegExitPriceCorrections(
+  symbol: string,
+  legs: TradeJournal[],
+  tradeRecords: TradeRecord[],
+  fetchPriceAt: CanonicalTimePriceFetcher = fetchCanonicalTimePriceAt,
+): Promise<LegExitPriceCorrections> {
+  return (await fetchLegExitPriceCorrectionsResult(symbol, legs, tradeRecords, fetchPriceAt)).corrections;
 }
 
 export function resolveLegExecution(

@@ -99,6 +99,12 @@ vi.mock('@/integrations/supabase/client', () => {
   };
 });
 
+// 解除后的重算会按每条腿的平仓时刻拉 1 分钟 K 线校验平仓价；测试不碰网络，一律当作「这一分钟没有 K 线」。
+vi.mock('@/lib/canonicalTimePrice', async importOriginal => ({
+  ...(await importOriginal<typeof import('@/lib/canonicalTimePrice')>()),
+  fetchCanonicalTimePriceAt: vi.fn(async () => null),
+}));
+
 import { detachCampaignLegFromCampaign } from '../journalApi';
 
 describe('detachCampaignLegFromCampaign', () => {

@@ -51,7 +51,10 @@ export async function fetchCanonicalTimePriceAt(
   });
 
   const res = await fetchFn(`https://fapi.binance.com/fapi/v1/klines?${qs}`);
-  if (!res.ok) return null;
+  // 非 2xx（限流 429 / 5xx）是**拉取失败**，不是「这一分钟没有 K 线」。
+  // 返回 null 会让两者混成一回事，平仓价校正据此判成「无需校正」并回写落库——
+  // 抛出去，让上层区分「没数据」与「没拿到」。已有调用方都自带 .catch(() => null)。
+  if (!res.ok) throw new Error(`klines ${symbol} HTTP ${res.status}`);
 
   const raw = await res.json();
   if (!Array.isArray(raw) || raw.length === 0 || !Array.isArray(raw[0])) return null;

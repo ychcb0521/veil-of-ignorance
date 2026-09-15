@@ -3,6 +3,7 @@ import {
   buildLegExitPriceCorrection,
   buildTradeRecordPnlCorrection,
   fetchLegExitPriceCorrections,
+  fetchLegExitPriceCorrectionsResult,
   resolveLegExecution,
 } from '@/lib/campaignLegExecution';
 import type { TradeJournal } from '@/types/journal';
@@ -112,6 +113,98 @@ describe('campaign leg execution price resolution', () => {
     expect(requestCount).toBe(1);
     expect(corrections['leg-a']?.exitPrice).toBe(0.0061265);
     expect(corrections['leg-b']?.exitPrice).toBe(0.0061265);
+  });
+
+  /**
+   * complete 是自愈回写的闸门：「校验不了」必须与「校验过、无需校正」分开，
+   * 否则换一台没有成交记录的浏览器读一次，落库值就会被未校正的快照合计翻回去。
+   */
+  describe('completeness flag', () => {
+    const closedRecord = (id: string): TradeRecord => ({
+      id,
+      symbol: 'TESTUSDT',
+      side: 'LONG',
+      type: 'MARKET',
+      action: 'CLOSE',
+      entryPrice: 1,
+      exitPrice: 1.05,
+      quantity: 100,
+      leverage: 1,
+      pnl: 5,
+      fee: 0,
+      slippage: 0,
+      openTime: 1_000,
+      closeTime: 2_000,
+    });
+    const inRange = async () => ({ low: 1, high: 1.1, close: 1.05 });
+
+    it('is complete when every linked leg resolves and every candle arrives, with or without a correction', async () => {
+      const result = await fetchLegExitPriceCorrectionsResult(
+        'TESTUSDT',
+        [{ id: 'leg-a', trade_record_id: 'rec-a' } as TradeJournal],
+        [closedRecord('rec-a')],
+        inRange,
+      );
+      expect(result).toEqual({ corrections: {}, complete: true });
+    });
+
+    it('is complete for legs that never carried a trade record (pure review snapshots)', async () => {
+      const legs = [{ id: 'leg-snapshot', trade_record_id: null } as TradeJournal];
+      expect(await fetchLegExitPriceCorrectionsResult('TESTUSDT', legs, [], inRange))
+        .toEqual({ corrections: {}, complete: true });
+      expect(await fetchLegExitPriceCorrectionsResult('TESTUSDT', legs, [closedRecord('rec-x')], inRange))
+        .toEqual({ corrections: {}, complete: true });
+    });
+
+    it('is incomplete when a linked leg has no local record at all (empty trade history)', async () => {
+      let requestCount = 0;
+      const result = await fetchLegExitPriceCorrectionsResult(
+        'TESTUSDT',
+        [{ id: 'leg-a', trade_record_id: 'rec-a' } as TradeJournal],
+        [],
+        async () => { requestCount += 1; return inRange(); },
+      );
+      expect(result).toEqual({ corrections: {}, complete: false });
+      expect(requestCount).toBe(0);
+    });
+
+    it('is incomplete when only one linked leg fails to resolve, while the resolved legs are still corrected', async () => {
+      const result = await fetchLegExitPriceCorrectionsResult(
+        'TESTUSDT',
+        [
+          { id: 'leg-a', trade_record_id: 'rec-a' } as TradeJournal,
+          { id: 'leg-missing', trade_record_id: 'rec-gone' } as TradeJournal,
+        ],
+        [{ ...closedRecord('rec-a'), exitPrice: 1.5 }],
+        inRange,
+      );
+      expect(result.complete).toBe(false);
+      expect(result.corrections['leg-a']?.exitPrice).toBe(1.05);
+      expect(result.corrections['leg-missing']).toBeUndefined();
+    });
+
+    it('is incomplete when a candle fetch rejects', async () => {
+      const result = await fetchLegExitPriceCorrectionsResult(
+        'TESTUSDT',
+        [{ id: 'leg-a', trade_record_id: 'rec-a' } as TradeJournal],
+        [closedRecord('rec-a')],
+        async () => { throw new Error('HTTP 429'); },
+      );
+      expect(result).toEqual({ corrections: {}, complete: false });
+    });
+
+    it('the read-only wrapper still returns whatever corrections were resolved', async () => {
+      const corrections = await fetchLegExitPriceCorrections(
+        'TESTUSDT',
+        [
+          { id: 'leg-a', trade_record_id: 'rec-a' } as TradeJournal,
+          { id: 'leg-missing', trade_record_id: 'rec-gone' } as TradeJournal,
+        ],
+        [{ ...closedRecord('rec-a'), exitPrice: 1.5 }],
+        inRange,
+      );
+      expect(Object.keys(corrections)).toEqual(['leg-a']);
+    });
   });
 
   it('applies leg-level exit price corrections consistently for charts and tables', () => {

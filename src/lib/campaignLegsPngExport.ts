@@ -186,11 +186,14 @@ function fmtCampaignDuration(start: string, end: string | null): string {
   return `${Math.floor(minutes / 60)} 小时 ${minutes % 60} 分钟`;
 }
 
-function campaignStatusLabel(status: TradeCampaign['status']): string {
+/** 状态的中文标签。详情页页眉与导出图的「方向 / 状态」共用，两处不能各写一套。 */
+export function campaignStatusLabel(status: TradeCampaign['status']): string {
   if (status === 'closed_profit') return '盈利结束';
   if (status === 'closed_loss') return '亏损结束';
   if (status === 'closed_breakeven') return '平盈结束';
   if (status === 'abandoned') return '已放弃';
+  // 页头状态标签也读这里：计划中的战役不能被写成「进行中」
+  if (status === 'planned') return '计划中';
   return '进行中';
 }
 

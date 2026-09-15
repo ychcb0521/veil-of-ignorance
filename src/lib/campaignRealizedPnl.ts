@@ -243,9 +243,47 @@ export function campaignStatusFromRealizedPnl(
   return 'closed_breakeven';
 }
 
+/**
+ * 两个金额是否**实质**不同：超过 1 分钱、或超过量级的百万分之一。
+ * 一边有数一边没有算不同；两边都没有算相同。
+ * 「显示差额」与「要不要回写落库」用的是同一把尺子——否则一次 DB 浮点往返
+ * 会让 heal 每次读取都判定「变了」而重写一遍。
+ */
+export function materiallyDifferentPnl(a: number | null, b: number | null): boolean {
+  if (a == null || b == null) return a !== b;
+  const scale = Math.max(Math.abs(a), Math.abs(b));
+  return Math.abs(a - b) > Math.max(0.01, scale * 1e-6);
+}
+
 /** 落库缓存与现算值是否已经偏离到需要提示用户的程度。 */
 export function hasMaterialDrift(settlement: CampaignRealizedPnl): boolean {
   if (settlement.drift == null) return false;
-  const scale = Math.max(Math.abs(settlement.stored ?? 0), Math.abs(settlement.total ?? 0));
-  return Math.abs(settlement.drift) > Math.max(0.01, scale * 1e-6);
+  return materiallyDifferentPnl(settlement.stored, settlement.total);
+}
+
+/**
+ * 把一份结算结果**套回**战役对象：状态、已实现盈亏、最终 R 三个字段从此只由结算推出。
+ *
+ * 这是详情页页眉、列表卡片、账户级样本池共用的那一条规则：
+ *   · 已结算 → 状态 = campaignStatusFromRealizedPnl，金额 = settlement.total，
+ *     R = total ÷ Σ 各腿计划最大亏损（分母为 0 时保留落库值）；
+ *   · 未结算（进行中 / 腿没平完）→ 三个字段原样保留，不用半场数据定性。
+ * 传进来的 settlement 必须已经叠过平仓价校正——否则页眉与 Legs 表合计又会分家。
+ */
+export function reconcileCampaignWithSettlement(
+  campaign: TradeCampaign,
+  legs: Array<Pick<TradeJournal, 'pre_max_loss_usdt'>>,
+  settlement: Pick<CampaignRealizedPnl, 'total' | 'settled'>,
+): TradeCampaign {
+  if (!settlement.settled) return campaign;
+  const plannedMaxLoss = legs.reduce((sum, leg) => sum + (leg.pre_max_loss_usdt ?? 0), 0);
+  const total = settlement.total;
+  return {
+    ...campaign,
+    status: campaignStatusFromRealizedPnl(settlement, campaign.closed_at),
+    final_realized_pnl: total ?? campaign.final_realized_pnl,
+    final_r_multiple: total != null && plannedMaxLoss > 0
+      ? total / plannedMaxLoss
+      : campaign.final_r_multiple,
+  };
 }

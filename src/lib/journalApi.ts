@@ -70,7 +70,16 @@ import type {
   CounterfactualBranchResult,
 } from "@/types/journal";
 import { isHistoricalCampaign, ruleCooldownRemainingMs } from "@/types/journal";
-import { campaignStatusFromRealizedPnl, computeCampaignRealizedPnl } from "@/lib/campaignRealizedPnl";
+import {
+  campaignStatusFromRealizedPnl,
+  computeCampaignRealizedPnl,
+  materiallyDifferentPnl,
+} from "@/lib/campaignRealizedPnl";
+import {
+  fetchLegExitPriceCorrectionsResult,
+  type LegExitPriceCorrections,
+  type LegExitPriceCorrectionsResult,
+} from '@/lib/campaignLegExecution';
 import { queueSimStatePush } from '@/lib/simStateSync';
 import {
   bestOrderRealStamp,
@@ -1609,6 +1618,12 @@ export function deriveCampaignPatchFromLegs(
   currentCampaign: TradeCampaign,
   legs: TradeJournal[],
   tradeRecords: TradeRecord[],
+  /**
+   * 平仓价校正（按平仓时刻的客观 1 分钟 K 线校验）。详情页的已实现 P&L、Legs 表合计、
+   * 导出 PNG 全部叠着它算；这里不叠，落库的状态与金额就会与界面反号——
+   * TUTUSDT 2026-08-09：库里 closed_profit / +469.96，界面 −1756.65。
+   */
+  exitPriceCorrections: LegExitPriceCorrections = {},
 ): MutableCampaignPatch {
   // 收数组而不是收折叠后的 map：一个仓位分几刀平掉时，map 只留最后一刀，
   // 落库的 final_realized_pnl 会因此少计前面几刀，与界面对不上。
@@ -1631,7 +1646,7 @@ export function deriveCampaignPatchFromLegs(
   const allHaveTradeRecord = ordered.every(leg => leg.trade_record_id != null);
   // 与盈亏概览、Legs 表同源。此前这里是 post_realized_pnl 优先、record 兜底，
   // 而 Legs 表恰好相反，两处对同一条腿可能取到不同的数。
-  const settlement = computeCampaignRealizedPnl(currentCampaign, ordered, tradeRecords);
+  const settlement = computeCampaignRealizedPnl(currentCampaign, ordered, tradeRecords, exitPriceCorrections);
   const totalPnl = settlement.total ?? 0;
   const totalPlannedMaxLoss = ordered.reduce((sum, leg) => sum + (leg.pre_max_loss_usdt ?? 0), 0);
   const closeTimes = ordered
@@ -1702,9 +1717,54 @@ async function normalizeCampaignLegSequences(campaignId: string): Promise<void> 
   }
 }
 
+/**
+ * 拉平仓价校正的等待上限。
+ *
+ * K 线接口自身没有超时：连接卡死（不是拒绝、不是 429，是一直不回）时 fetch 会挂到浏览器
+ * 自己的超时（分钟级）。详情页首屏在等 getCampaignFullData——以前它先画落库值、校正异步到达，
+ * 现在自愈要先拿校正，不能因此把首屏挂死。到点就当作「没拉齐」：不回写、返回空校正；
+ * 底层请求仍在缓存里继续跑，页面自己的那次拉取命中同一个 promise，校正到了照常刷新界面，
+ * 下一次打开详情再收敛落库值。
+ */
+export const CAMPAIGN_CORRECTIONS_FETCH_TIMEOUT_MS = 5_000;
+
+// 每次新建：这个对象会原样进详情页的 React state，不能几次调用共用一份。
+const incompleteCorrections = (): LegExitPriceCorrectionsResult => ({ corrections: {}, complete: false });
+
+/** 有界等待：超时、抛错一律按「不完整」处理，绝不让调用方悬着。 */
+function fetchCorrectionsWithin(
+  campaign: TradeCampaign,
+  legs: TradeJournal[],
+  tradeRecords: TradeRecord[],
+  timeoutMs = CAMPAIGN_CORRECTIONS_FETCH_TIMEOUT_MS,
+): Promise<LegExitPriceCorrectionsResult> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<LegExitPriceCorrectionsResult>(resolve => {
+    timer = setTimeout(() => resolve(incompleteCorrections()), timeoutMs);
+  });
+  const request = fetchLegExitPriceCorrectionsResult(campaign.symbol, legs, tradeRecords)
+    .catch(incompleteCorrections);
+  return Promise.race([request, deadline]).finally(() => clearTimeout(timer));
+}
+
+/**
+ * 变更路径（挂接 / 解除腿、修正成交记录）用的校正拉取。
+ * 这些路径**必须**写一笔——腿变了，落库值不能停在旧腿上——所以拿到什么用什么，
+ * 拉不完整也照写；下一次打开详情（只在校正完整时回写）会把它收敛到校正后的值。
+ */
+async function fetchCorrectionsForMutation(
+  campaign: TradeCampaign,
+  legs: TradeJournal[],
+  tradeRecords: TradeRecord[],
+): Promise<LegExitPriceCorrections> {
+  return (await fetchCorrectionsWithin(campaign, legs, tradeRecords)).corrections;
+}
+
 async function recomputeCampaignDerivedFields(campaignId: string): Promise<TradeCampaign> {
   const { campaign, legs } = await getCampaignWithLegs(campaignId);
-  const patch = deriveCampaignPatchFromLegs(campaign, legs, getTradeRecordsForUser(campaign.user_id));
+  const tradeRecords = getTradeRecordsForUser(campaign.user_id);
+  const corrections = await fetchCorrectionsForMutation(campaign, legs, tradeRecords);
+  const patch = deriveCampaignPatchFromLegs(campaign, legs, tradeRecords, corrections);
   const { data, error } = await supabase
     .from('trade_campaigns' as never)
     .update(patch as never)
@@ -1768,7 +1828,8 @@ async function syncTradeRecordCorrectionToCampaigns(record: TradeRecord, journal
     const userRecords = getTradeRecordsForUser(campaign.user_id)
       .map(item => (item.id === record.id ? record : item));
     if (!userRecords.some(item => item.id === record.id)) userRecords.push(record);
-    const derived = deriveCampaignPatchFromLegs(campaign, legs, userRecords);
+    const corrections = await fetchCorrectionsForMutation(campaign, legs, userRecords);
+    const derived = deriveCampaignPatchFromLegs(campaign, legs, userRecords, corrections);
     const actual_evolution = (campaign.actual_evolution ?? []).map(event => (
       campaignEventMatchesTradeRecord(event, record, journalIds)
         ? normalizeCampaignEventForTradeRecord(event, record)
@@ -1797,30 +1858,45 @@ async function syncTradeRecordCorrectionToCampaigns(record: TradeRecord, journal
 }
 
 function campaignPatchChanged(campaign: TradeCampaign, patch: MutableCampaignPatch): boolean {
-  const fields: Array<keyof MutableCampaignPatch> = [
+  const textFields: Array<'opened_at' | 'closed_at' | 'direction' | 'status'> = [
     'opened_at',
     'closed_at',
     'direction',
     'status',
+  ];
+  // 金额字段按容差比：严格 !== 会把一次 DB 浮点往返也判成「变了」，每次读取都重写一遍。
+  const numberFields: Array<'initial_main_size_usdt' | 'initial_leverage' | 'final_realized_pnl' | 'final_r_multiple'> = [
     'initial_main_size_usdt',
     'initial_leverage',
     'final_realized_pnl',
     'final_r_multiple',
   ];
-  return fields.some(field => patch[field] !== undefined && campaign[field] !== patch[field]);
+  return textFields.some(field => patch[field] !== undefined && campaign[field] !== patch[field])
+    || numberFields.some(field => patch[field] !== undefined
+      && materiallyDifferentPnl(campaign[field] ?? null, patch[field] ?? null));
 }
 
 async function healCampaignSummarySnapshots(
   campaign: TradeCampaign,
   legs: TradeJournal[],
   tradeRecords: TradeRecord[],
+  corrections: LegExitPriceCorrectionsResult,
 ): Promise<TradeCampaign> {
+  /**
+   * 只在校正**完整**时回写。这是「不来回翻转」的全部依据：
+   * 这里是唯一一条读路径上的写，它写的东西是腿、成交记录与不可变历史 K 线的纯函数，
+   * 任何一次拿齐校正的读都会推出同一份补丁，于是 campaignPatchChanged 为 false、不再写。
+   * 拉不齐就什么都不写——限流 / 断网 / 超时，以及本地查不到某条腿的成交记录都算拉不齐：
+   * 否则一次网络抖动、或换一台没有成交记录的浏览器，会把未校正的 +469.96 / 盈利
+   * 写回库，下一次拿齐时又改成 −1756.65 / 亏损，状态在两个值之间来回跳。
+   */
+  if (!corrections.complete) return campaign;
   // 门槛改用「每条腿都结算完毕」而不是「每条腿都能在 lookup 里查到成交记录」：
   // 后者把「只有复盘快照、本地没有成交记录」的历史战役永久挡在自愈之外，
   // 于是存量数据永远收敛不到新口径。落库值是缓存，能重算出来就该让它收敛。
-  const settlement = computeCampaignRealizedPnl(campaign, legs, tradeRecords);
+  const settlement = computeCampaignRealizedPnl(campaign, legs, tradeRecords, corrections.corrections);
   if (!settlement.settled) return campaign;
-  const patch = deriveCampaignPatchFromLegs(campaign, legs, tradeRecords);
+  const patch = deriveCampaignPatchFromLegs(campaign, legs, tradeRecords, corrections.corrections);
 
   /**
    * 纵深防御。这是一次**写在读路径上**的自愈：每打开一次战役列表，每一场都会走到这里。
@@ -2403,6 +2479,12 @@ export async function getCampaignFullData(
   reverseHedgeOrders: CampaignReverseHedgeOrder[];
   /** 别的回放留下、在本场期间仍挂着的委托空单（foreignReplay: true），只供标注显示。 */
   foreignLiveOrders: CampaignReverseHedgeOrder[];
+  /**
+   * 自愈路径拉到的平仓价校正（只有 heal !== false 时才有）。
+   * 详情页首屏直接用它，页眉状态与已实现 P&L 从第一帧起就是同一份校正后的数；
+   * 列表页（heal: false）保持自己的后台拉取，这里为 undefined。
+   */
+  legExitPriceCorrections?: LegExitPriceCorrections;
 }> {
   const { campaign, legs } = await getCampaignWithLegs(campaignId);
   const userId = campaign.user_id;
@@ -3024,9 +3106,15 @@ export async function getCampaignFullData(
   // 本人视角（有成交记录）时，把平仓快照回写到腿上，使互关者也能读到一致的平仓信息。
   // 列表页显式关掉：渲染一个列表不该写库，147 场同时回写会把首屏拖到打不开。
   let healedCampaign = campaign;
+  let legExitPriceCorrections: LegExitPriceCorrections | undefined;
   if (options.heal !== false) {
+    // 先拿平仓价校正再回写汇总：落库的状态 / 金额必须与界面显示的校正后口径同源。
+    // 拉取按 symbol + 平仓时刻缓存，详情页自己的那次拉取随后命中缓存，不多打一次接口。
+    // 有界等待：接口挂起时到点放行，首屏照常画落库值，本次不回写。
+    const corrections = await fetchCorrectionsWithin(campaign, legs, tradeRecords);
+    legExitPriceCorrections = corrections.corrections;
     await healCampaignLegSnapshots(legs, tradeRecords);
-    healedCampaign = await healCampaignSummarySnapshots(campaign, legs, tradeRecords);
+    healedCampaign = await healCampaignSummarySnapshots(campaign, legs, tradeRecords, corrections);
   }
 
   return {
@@ -3036,6 +3124,7 @@ export async function getCampaignFullData(
     pendingOrders,
     reverseHedgeOrders,
     foreignLiveOrders,
+    legExitPriceCorrections,
   };
 }
 

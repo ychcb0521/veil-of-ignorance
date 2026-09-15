@@ -45,7 +45,11 @@ import {
   resolveCampaignInitialRiskFraction,
   shouldSuggestCampaignEnd,
 } from '@/lib/campaignAnalysis';
-import { campaignStatusFromRealizedPnl, computeCampaignRealizedPnl, hasMaterialDrift } from '@/lib/campaignRealizedPnl';
+import {
+  computeCampaignRealizedPnl,
+  hasMaterialDrift,
+  reconcileCampaignWithSettlement,
+} from '@/lib/campaignRealizedPnl';
 import {
   computeCampaignExpectancies,
   formatArithmeticExpectancy,
@@ -66,7 +70,11 @@ import {
   type LegExitPriceCorrections,
 } from '@/lib/campaignLegExecution';
 import { buildSelectedLegVerticalLines, legRoleMarkerLabel } from '@/lib/campaignLegMarkers';
-import { exportCampaignBoardPng, type CampaignBoardPnlItem } from '@/lib/campaignLegsPngExport';
+import {
+  campaignStatusLabel,
+  exportCampaignBoardPng,
+  type CampaignBoardPnlItem,
+} from '@/lib/campaignLegsPngExport';
 import { buildEmotionDiaryExportSummary } from '@/lib/emotionDiary';
 import { getDecisionEmotionDiaryByDate } from '@/lib/emotionDiaryApi';
 import { exportCampaignEmotionDiaryTxt } from '@/lib/emotionDiaryTxtExport';
@@ -523,30 +531,20 @@ async function loadAccountCampaignPerformance(
     ? await listAllCampaigns(ownerUserId)
     : (await listVisibleCampaigns(viewerUserId)).filter(item => item.user_id === ownerUserId);
   const settledSamples = await Promise.allSettled(campaigns.map(async item => {
-    const details = await getCampaignFullData(item.id);
+    // 账户级样本只是读：这里自己算校正后的口径，不需要（也不该）让每一场都走一遍回写。
+    // 此前默认 heal 让打开一个详情页对全部 ~147 场各写一次库，还与本场的回写抢同一行。
+    const details = await getCampaignFullData(item.id, { heal: false });
     const exitPriceCorrections = await fetchLegExitPriceCorrections(
       details.campaign.symbol,
       details.legs,
       details.tradeRecords,
-    );
-    const reconciliation = computeCampaignPnlReconciliation(
-      details.campaign,
-      details.legs,
-      details.tradeRecords,
-      exitPriceCorrections,
     );
     // 无条件同源。此前只有「存在平仓价校正」时才切换到重算口径，
     // 于是同一场战役在列表页显示落库值、在详情页显示重算值——两个页面两个数。
     const settlement = computeCampaignRealizedPnl(
       details.campaign, details.legs, details.tradeRecords, exitPriceCorrections,
     );
-    const reconciledCampaign = {
-      ...details.campaign,
-      final_realized_pnl: settlement.total ?? details.campaign.final_realized_pnl,
-      status: settlement.settled
-        ? campaignStatusFromRealizedPnl(settlement, details.campaign.closed_at)
-        : details.campaign.status,
-    };
+    const reconciledCampaign = reconcileCampaignWithSettlement(details.campaign, details.legs, settlement);
     const initialExpectedMaxLoss = computeInitialExpectedMaxLoss(
       details.campaign,
       details.legs,
@@ -667,6 +665,9 @@ export default function JournalCampaignDetailPage() {
         setCampaign(full.campaign);
         setLegs(full.legs);
         setTradeRecords(full.tradeRecords);
+        // 自愈路径已经拉过校正：首屏就用它，页眉状态与已实现 P&L 从第一帧起同源，
+        // 不再出现「先画盈利、校正到了再翻成亏损」。下面的 effect 随后命中缓存、结果相同。
+        setLegExitPriceCorrections(full.legExitPriceCorrections ?? {});
         setPendingOrders(full.pendingOrders);
         setReverseHedgeOrders(full.reverseHedgeOrders);
         setForeignLiveOrders(full.foreignLiveOrders ?? []);
@@ -942,12 +943,27 @@ export default function JournalCampaignDetailPage() {
       : null),
     [campaign, legs, tradeRecords, legExitPriceCorrections],
   );
+  /**
+   * 本页**唯一**的一份结算：叠着平仓价校正算。已实现 P&L、页眉状态、导出 PNG 的
+   * 「方向 / 状态」与标题 slug、结束对话框推出的状态，全部从它派生。
+   * 此前页眉读的是落库的 campaign.status（未校正），盈亏概览读的是校正后的现算值，
+   * 于是同一页上「盈利结束」旁边挂着 −1756.64 USDT。
+   */
+  const settlement = useMemo(
+    () => (campaign ? computeCampaignRealizedPnl(campaign, legs, tradeRecords, legExitPriceCorrections) : null),
+    [campaign, legs, tradeRecords, legExitPriceCorrections],
+  );
+  /** 落库行套上结算结果：已结算 → 状态 / 金额 / R 由结算推出；未结算 → 原样保留落库状态。 */
+  const displayCampaign = useMemo(
+    () => (campaign && settlement ? reconcileCampaignWithSettlement(campaign, legs, settlement) : campaign),
+    [campaign, legs, settlement],
+  );
   const currentAccountEquity = useMemo(
     () => computeCurrentAccountEquity(balance, positionsMap, priceMap),
     [balance, positionsMap, priceMap],
   );
   const campaignMetricValues = useMemo(() => {
-    if (!campaign || !accuracy) return null;
+    if (!campaign || !displayCampaign || !accuracy) return null;
     const profitCaptureRatio = accuracy.initial_expected_max_loss > 0
       ? accuracy.profit_capture_ratio
       : null;
@@ -957,8 +973,9 @@ export default function JournalCampaignDetailPage() {
       tradeRecords,
       reverseHedgeOrders,
     );
+    // 机会质量的「已结束」门槛读派生状态，与列表页传 reconciledCampaign 同一口径。
     const opportunityQuality = resolveCampaignOpportunityQuality(
-      campaign,
+      displayCampaign,
       profitCaptureRatio,
       initialExpectedMaxDrawdownPct,
     );
@@ -982,6 +999,7 @@ export default function JournalCampaignDetailPage() {
   }, [
     accuracy,
     campaign,
+    displayCampaign,
     campaignPerformance?.expectedWinRate,
     currentAccountEquity,
     isOwner,
@@ -998,7 +1016,7 @@ export default function JournalCampaignDetailPage() {
   const campaignPnlOverviewItems = useMemo<CampaignPnlOverviewItem[]>(() => {
     if (!campaign || !accuracy) return [];
     const realizedPnl = pnlReconciliation?.correctedPnl ?? campaign.final_realized_pnl;
-    const pnlSettlement = campaign ? computeCampaignRealizedPnl(campaign, legs, tradeRecords, legExitPriceCorrections) : null;
+    const pnlSettlement = settlement;
     // 系统一直算得出这个差额，却从来不显示——分歧被静默吞掉正是「两页两个数」能长期存在的原因。
     const pnlDrift = pnlSettlement && hasMaterialDrift(pnlSettlement) ? pnlSettlement.drift : null;
     const payoffRatio = campaignMetricValues?.profitCaptureRatio ?? null;
@@ -1226,6 +1244,7 @@ export default function JournalCampaignDetailPage() {
     isOwner,
     legs,
     pnlReconciliation,
+    settlement,
     tradeRecords,
   ]);
   const campaignPnlOverviewNote = useMemo(() => {
@@ -1555,7 +1574,13 @@ export default function JournalCampaignDetailPage() {
   const hedgeCount = legs.filter((leg: TradeJournal) => leg.leg_role?.startsWith('hedge_')).length;
   const tpCount = legs.filter((leg: TradeJournal) => leg.leg_role === 'mirror_tp').length;
   const otherCount = Math.max(0, legs.length - mainCount - hedgeCount - tpCount);
-  const actualPnl = campaign.final_realized_pnl ?? 0;
+  /**
+   * 页眉、结束按钮、导出文件名读的状态：已结算 → 由校正后的结算推出；
+   * 未结算（进行中）→ 落库状态原样。与已实现 P&L 同一份 settlement。
+   */
+  const displayStatus = (displayCampaign ?? campaign).status;
+  // 反事实的「偏离代价」要和界面上的已实现 P&L 比，不能拿未校正的落库值当基线。
+  const actualPnl = (displayCampaign ?? campaign).final_realized_pnl ?? 0;
   const totalDeviationCost = deviationLegCosts.reduce((sum, item) => sum + item.cost_usdt, 0);
   const selectedCounterfactualDelta = selectedCounterfactual
     ? selectedCounterfactual.result.final_realized_pnl - actualPnl
@@ -1566,6 +1591,7 @@ export default function JournalCampaignDetailPage() {
     setCampaign(full.campaign);
     setLegs(full.legs);
     setTradeRecords(full.tradeRecords);
+    setLegExitPriceCorrections(full.legExitPriceCorrections ?? {});
     setPendingOrders(full.pendingOrders);
     setReverseHedgeOrders(full.reverseHedgeOrders);
     setForeignLiveOrders(full.foreignLiveOrders ?? []);
@@ -1723,7 +1749,9 @@ export default function JournalCampaignDetailPage() {
     try {
       setLegsExporting(true);
       const fileName = await exportCampaignBoardPng({
-        campaign,
+        // 标题 slug（profit / loss）、文件名、「方向 / 状态」、「最终 R」全部读派生后的行，
+        // 与图中 Legs 合计、盈亏概览同一份校正。
+        campaign: displayCampaign ?? campaign,
         initialExpectedMaxLoss: legsInitialExpectedMaxLoss,
         accountName: campaignAccountName,
         legs,
@@ -1756,7 +1784,8 @@ export default function JournalCampaignDetailPage() {
   const handleExportCampaignReviewsTxt = () => {
     if (!campaign || reviewedLegs.length === 0) return;
     try {
-      const fileName = exportCampaignPostReviewsTxt(campaign, legs, campaignAccountName, tradeRecords);
+      // 三个 TXT 的文件名 slug 同样来自状态：一律用派生后的行。
+      const fileName = exportCampaignPostReviewsTxt(displayCampaign ?? campaign, legs, campaignAccountName, tradeRecords);
       toast.success('平仓评价已保存为 TXT', { description: fileName });
     } catch (error) {
       toast.error(error instanceof Error ? error.message : String(error));
@@ -1767,7 +1796,7 @@ export default function JournalCampaignDetailPage() {
     if (!campaign || openingSnapshotLegs.length === 0) return;
     try {
       const fileName = exportCampaignOpeningSnapshotsTxt(
-        campaign,
+        displayCampaign ?? campaign,
         openingSnapshotLegs,
         campaignAccountName,
       );
@@ -1781,7 +1810,7 @@ export default function JournalCampaignDetailPage() {
     if (!campaign || !campaignEmotionDiary) return;
     try {
       const fileName = exportCampaignEmotionDiaryTxt(
-        campaign,
+        displayCampaign ?? campaign,
         campaignEmotionDiary,
         campaignAccountName,
       );
@@ -1827,11 +1856,18 @@ export default function JournalCampaignDetailPage() {
                 <span className={`px-2 py-0.5 rounded ${campaign.direction === 'main_long' ? 'bg-[#0ECB81]/10 text-[#0ECB81]' : 'bg-[#F6465D]/10 text-[#F6465D]'}`}>
                   {campaign.direction === 'main_long' ? '主多' : '主空'}
                 </span>
-                <span className={`px-2 py-0.5 rounded ${chipForStatus(campaign.status)}`}>{campaign.status}</span>
+                {/* 状态读派生值：与下方已实现 P&L、Legs 合计、导出图同一份校正后的结算。 */}
+                <span
+                  data-testid="campaign-status-chip"
+                  className={`px-2 py-0.5 rounded ${chipForStatus(displayStatus)}`}
+                  title={displayStatus}
+                >
+                  {campaignStatusLabel(displayStatus)}
+                </span>
               </div>
             </div>
           </div>
-          {campaign.status === 'active' && (
+          {displayStatus === 'active' && (
             <Button className="bg-[#F0B90B] text-black hover:bg-[#F0B90B]/90 h-8" onClick={() => setEndOpen(true)}>
               结束战役
             </Button>
@@ -2590,6 +2626,7 @@ export default function JournalCampaignDetailPage() {
           campaign={campaign}
           legs={legs}
           tradeRecords={tradeRecords}
+          settlement={settlement}
           accuracy={accuracy}
           currentSimulatedTime={getEffectiveTime(campaign.symbol)}
           onClosed={async () => {

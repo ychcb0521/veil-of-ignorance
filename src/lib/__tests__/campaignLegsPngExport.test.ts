@@ -8,6 +8,8 @@ import {
   campaignLegsExportCanvasHeight,
   wrapCampaignLegsExportLine,
   formatCampaignChartInterval,
+  campaignKlineTitleName,
+  campaignStatusLabel,
   type CampaignBoardExportInput,
 } from '@/lib/campaignLegsPngExport';
 import type { TradeCampaign, TradeJournal } from '@/types/journal';
@@ -127,6 +129,21 @@ describe('campaign PNG overview', () => {
     expect(formatCampaignChartInterval('15m')).toBe('15分钟线');
     expect(formatCampaignChartInterval('1h')).toBe('1小时线');
     expect(formatCampaignChartInterval('1d')).toBe('日线');
+  });
+
+  it('亏损结束的战役：标题 slug 为 loss，「方向 / 状态」与「最终 R」跟着传入的行走', () => {
+    // 详情页传的是派生后的行（状态与 R 已由校正后的结算推出），导出层不得再去读别的来源。
+    const lossInput = {
+      ...input(),
+      campaign: { ...campaign, status: 'closed_loss', final_r_multiple: -0.18 } as TradeCampaign,
+    };
+    expect(campaignKlineTitleName(lossInput.campaign)).toBe('BTCUSDT 2026-07-14 loss');
+    expect(campaignStatusLabel('closed_loss')).toBe('亏损结束');
+    const metadata = Object.fromEntries(
+      buildCampaignBoardOverview(lossInput).metadataItems.map(item => [item.label, item.value]),
+    );
+    expect(metadata['方向 / 状态']).toBe('主多 / 亏损结束');
+    expect(metadata['最终 R']).toBe('-0.18');
   });
 
   it('亏损战役的盈亏比保留负号', () => {
